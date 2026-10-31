@@ -1,7 +1,7 @@
 # FloFi engineering specialists in Claude Code
 
 The 19 Claude Code specialists in `.claude/agents/` are read-only reviewers for
-repository changes. They are development infrastructure, not end-user or runtime
+repository changes, with no shell: their only tool is Read. They are development infrastructure, not end-user or runtime
 transaction agents. They are generated twins of the Codex roles in
 `.codex/agents/` and share one source of truth:
 
@@ -12,26 +12,30 @@ transaction agents. They are generated twins of the Codex roles in
 | Shared instructions and financial invariants | The identical preamble of every Codex role | Copied verbatim into each Claude twin |
 | Domain specialty and description | The Codex role | Copied verbatim into its Claude twin |
 
-No Claude file lists owned paths. A specialist loads its live contract with
-`python3 scripts/agent_guard.py domain <name> --base origin/main`.
+No Claude file lists owned paths. The main session runs
+`python3 scripts/agent_guard.py domain <name> --base origin/main` and hands the live
+contract to the specialist, which can also Read `docs/engineering/coverage.json`.
 
 ## Codex and Claude differences
 
 | Concern | Codex (`.codex/`) | Claude Code (`.claude/`) |
 | --- | --- | --- |
 | Definition | TOML role, parent model/tools/permissions | Markdown + YAML frontmatter, `model: inherit` |
-| Read-only review | Instruction; edits allowed when main assigns disjoint files | Enforced: `tools: Read, Grep, Glob, Bash`, `disallowedTools` removes Agent, Edit, Write, NotebookEdit, web and MCP tools, and the PreToolUse guard bounds Bash/Read; main owns all edits |
+| Read-only review | Instruction; edits allowed when main assigns disjoint files | Enforced: `tools: Read`; `disallowedTools` removes Agent, Bash, Edit, Write, NotebookEdit, Grep, Glob, web and MCP tools; the PreToolUse guard denies every other tool and applies a path rule to Read; main runs every command, search and test and owns all edits |
 | Concurrency (max 3) | Enforced by `.codex/config.toml` | Claude Code has no project setting; CLAUDE.md instructs it and `review` reports the observed peak |
 | No grandchildren | Instruction | Enforced: no Agent tool in specialists |
 | Discovery probe | `verify_codex_agents.py` (spawn-tool schema, rejecting endpoint) | `verify_claude_agents.py` (scripted loopback model, full spawn) |
 | Observed invocation | Not recorded | Hook ledger (SubagentStart/SubagentStop) |
 
-Grep and Glob are absent from some Claude Code builds (including 2.1.314); there the
-specialists resolve to Read and Bash, so code search goes through the guarded Bash.
+Specialists cannot search, list directories, diff or run tests. That is deliberate:
+iterative hardening of a shell-command allowlist kept surfacing bypasses (abbreviated
+options, ugrep/bfs extensions, quoting, implicit `git diff --no-index`), so command
+execution moved entirely to the main session. Grep and Glob (absent from 2.1.314 and
+2.1.316 anyway) are excluded too: their filters can override `.gitignore`.
 
 ## Setup
 
-- Claude Code 2.1.295 or later (`onFailure` hook field). Verified with 2.1.314.
+- Claude Code 2.1.295 or later (`onFailure` hook field). Verified with 2.1.314 and 2.1.316.
 - Accept the workspace trust dialog; interactive sessions hold back project hooks
   until then. `-p`/SDK sessions treat the folder as trusted and run them.
 - Claude Code watches `.claude/agents/` only when the directory existed at session
@@ -55,9 +59,11 @@ python3 scripts/agent_guard.py impact --base origin/main
 Ask the main session, for example: "Review this branch against origin/main with
 the specialists selected by the impact report. Include flofi-workflow for shared
 core and flofi-security for authorization, wallet or identity boundaries; keep at
-most three running; give each the base, changed paths and concerns." Run the
-focused tests and normal gates in the main session (`pnpm check`, the governance
-suites, applicable PostgreSQL/fork/browser runners), then:
+most three running. Give each the base, the changed paths, the relevant diff and the
+output of `agent_guard.py domain <name> --base origin/main`." Specialists Read the
+files they need and return any search, diff or test they want as a request. The main
+session runs those, the focused tests and the normal gates (`pnpm check`, the
+governance suites, applicable PostgreSQL/fork/browser runners), then:
 
 ```sh
 python3 scripts/agent_guard.py review --base origin/main \
@@ -91,7 +97,7 @@ holds the whole conversation, so keep it private and delete it after summarizing
 stream="$(umask 077 && mktemp "${TMPDIR:-/tmp}/flofi-review.XXXXXX")"
 claude -p --output-format stream-json --verbose \
   --allowedTools="Agent,Read,Bash(git diff:*),Bash(git log:*),Bash(git show:*),Bash(git status:*),Bash(git grep:*),Bash(rg:*),Bash(grep:*),Bash(find:*),Bash(ls:*),Bash(cat:*),Bash(head:*),Bash(tail:*),Bash(wc:*),Bash(sed -n:*),Bash(python3 scripts/agent_guard.py:*)" \
-  "Read-only pre-PR review of this branch against origin/main using the flofi-swap, flofi-mcp and flofi-workflow subagents in parallel. Do not edit files. Summarize each specialist's findings and FLOFI_REVIEW_RESULT line." \
+  "Read-only pre-PR review of this branch against origin/main using the flofi-swap, flofi-mcp and flofi-workflow subagents in parallel. Do not edit files. Run git diff and agent_guard.py impact/domain yourself and give each specialist the changed paths, relevant diff and its domain report; they can only Read. Summarize each specialist's findings and FLOFI_REVIEW_RESULT line." \
   > "$stream"
 python3 scripts/agent_guard.py review --base origin/main --stream-json "$stream"
 rm -f "$stream"
@@ -101,46 +107,19 @@ rm -f "$stream"
 
 `.claude/hooks/flofi_agent_hooks.py guard` runs on every PreToolUse (`python3 -I`,
 `onFailure: block`). It ignores the main session and non-FloFi agents. For any agent
-named `flofi-*` it allows Read/Grep/Glob and Bash single pipelines built only from:
+named `flofi-*` it denies every tool except Read, and allows a Read only when the
+path:
 
-- `git` read subcommands (diff, log, show, diff-tree, status, ls-files, grep,
-  rev-parse, merge-base, blame, ls-tree, rev-list, shortlog, describe, name-rev),
-  with no global options except `--no-pager` and `--no-optional-locks`;
-- `rg`, `grep`, `cat`, `head`, `tail`, `wc`, `ls`, `cut`, `tr`, `sort`, `stat`,
-  `basename`, `dirname`, `realpath`, `pwd`, `find` (name/type/path predicates only),
-  `sed -n 'N,Mp'` and `python3 scripts/agent_guard.py check|impact|report|domain`.
+- is a non-empty file path without `~` or a `..` component as written;
+- resolves (following symlinks) inside the repository;
+- is not inside `.git` (any case), not Git-ignored (`git check-ignore`; an error
+  also refuses) and has no secret-like component in the written or resolved path
+  (`.env*` except `.env.example`, `*.pem`, `*.key`, `id_rsa`, credentials files,
+  `.mode-a`, `.public-testnet`, the agent ledger).
 
-Every option of every command and git subcommand must be on an explicit allowlist.
-Denylists were not enough: GNU tools and git accept abbreviated long options
-(`git grep --open=` runs a pager program, `sort --out=` writes), Claude Code's
-`grep` is ugrep (pager, filter and config options; recurses into directory operands)
-and its `find` is bfs. So `rg -g`/`--hidden` (they override `.gitignore` or reach
-`.git`), `grep -r`/`-f`, `git grep -O`/`--no-index`/`--untracked` exclusions,
-`--output`, `--ext-diff`, `--textconv`, `--show-signature` and signature format
-placeholders (`%G…`, including `%+G`), `git cat-file`, untracked listings
-(`ls-files -o`, `status --ignored`), stash references and `--all` (both reach
-`refs/stash`, which can hold untracked or ignored files) and every unknown or
-abbreviated option are refused. File-reading commands take files, not
-directories. Context and count options take numbers, never a path. The guard splits
-commands with its own Bash-compatible tokenizer (a differential test compares it
-with Bash): only an unquoted `|` separates stages, so a quoted or escaped `|` stays an
-argument as it does in Bash. Unquoted `#`, `*`, `?`, `[`, word-initial `~`, chaining,
-redirection (other than `2>/dev/null`/`2>&1`), expansion, subshells, background jobs
-and environment assignments are refused; quote patterns instead. Redirect words must
-be entirely unquoted (`2>'&1'` would write a file). Every operand is path-checked,
-including a would-be pattern (ugrep's context options take an optional argument);
-pass patterns with `-e` to exempt them. A `REV:path` operand checks its path. No
-operand may contain a `..` component as written (`git diff ../repo ../repo/x` would
-silently switch to no-index mode and ignore `.gitignore`), and git operands must be
-repository-relative. Paths (operands and option values) must be
-inside the repository, outside `.git` (any case), not Git-ignored (except
-`node_modules` outside its dot directories and outside ignored directories) and not
-named like a secret. Names (not
-contents) of ignored files can still appear through `find` and `ls`; recursive `rg`
-can read untracked, non-ignored files with secret-looking names, so keep such files
-ignored. Allowed `git status`/`git diff` may refresh the index. The working directory must be such a
-location too. Read may also open long output that Claude Code saved in this
-session's own `tool-results/` directory. The Grep tool's `glob` filter is refused.
+There is no command parser and no search: a specialist cannot run anything. Claude
+Code normalizes Read paths before PreToolUse, so the rule applies to the canonical
+path; a `..` that stays inside the repository is an ordinary repository Read.
 
 Any internal guard error or unreadable hook input is an explicit deny. On 2.1.314,
 `onFailure: block` was also verified to block a guard that is missing, exits 1 or
@@ -149,12 +128,12 @@ session's; restore the file from Git, or set `"disableAllHooks": true` in the
 ignored `.claude/settings.local.json` while repairing.
 
 Limits: hooks are skipped with `--bare`, `disableAllHooks` or an untrusted
-interactive folder. The frontmatter allowlist and denylist still remove write,
-agent, web and MCP tools; Bash then falls back to the session's permission mode.
+interactive folder; the frontmatter `tools: Read` and `disallowedTools` still leave
+specialists without Bash, write, search, agent, web and MCP tools, but Read is then
+unguarded. Untracked, non-ignored files are readable, so keep local secrets ignored.
 `python3` and `git` come from `PATH`; the hook runs from the checked-out branch and
-its content is protected by review, not pinned. Allowed `git` commands can still run
-programs configured in the user's own Git config (for example `core.fsmonitor`).
-The guard is a review boundary, not a sandbox for hostile code.
+its content is protected by review, not pinned. The guard is a review boundary, not
+a sandbox for hostile code.
 
 ## Lifecycle ledger
 
@@ -205,17 +184,18 @@ python3 scripts/verify_claude_agents.py   # optional, needs the claude CLI
 ```
 
 The probe starts the installed CLI with a disposable config directory and a scripted
-loopback Messages API: the main session spawns each of the 19 specialists, each
-runs one allowed command and attempts a forbidden command and an outside read, and
-the probe checks discovery, exact descriptions, resolved tools, system prompts,
-guard denials and the ledger. No real model, credentials or external AI service is
+loopback Messages API: the main session spawns each of the 19 specialists; each Reads
+a repository file and attempts Bash and Reads outside the repository, escaping
+through `..` and of a secret-named file. The probe checks discovery, exact
+descriptions, that the resolved tool set is exactly Read, system prompts, that Bash
+never runs, guard denials and the ledger. No real model, credentials or external AI service is
 used, so it proves harness wiring, not model judgment or automatic delegation.
 
 ## Evidence levels
 
 | Level | Mechanism | Establishes |
 | --- | --- | --- |
-| Automatic CI | `agent_guard.py check`, governance suites (existing jobs) | Definitions, parity, settings, guard and ledger contracts |
+| Automatic CI | `agent_guard.py check`, governance suites (existing jobs) | Definitions (Read-only), parity, settings, guard path rule and ledger contracts |
 | Model-driven delegation | CLAUDE.md, agent descriptions | A request, not a guarantee, that Claude delegates |
 | Observed delegation | Hook ledger, `agent_guard.py review` | What actually started, completed and returned |
 | Manual acceptance | `verify_claude_agents.py`, real-model sessions, owner review | Installed-harness behavior and advisory findings |

@@ -1,4 +1,4 @@
-"""Claude Code hook contracts: read-only reviewer guard and non-sensitive lifecycle ledger.
+"""Claude Code hook contracts: Read-only reviewer guard and non-sensitive lifecycle ledger.
 
 Runs in every existing governance job; uses a disposable Git repository and never
 starts Claude Code, a model, the network or a financial operation.
@@ -47,168 +47,47 @@ class Repository(unittest.TestCase):
 
 
 class ReadOnlyGuard(Repository):
+    """Specialists have no shell: only Read, under a fail-closed path rule."""
+
+    def read(self, path, agent="flofi-swap"):
+        return self.guard("Read", agent=agent, file_path=path)
+
     def test_main_session_and_other_agents_are_never_restricted(self):
         for agent in [None, "", "Explore", "general-purpose", "security-reviewer"]:
             with self.subTest(agent=agent):
                 self.assertIsNone(self.guard(agent=agent, command="git push origin HEAD"))
                 self.assertIsNone(self.guard("Edit", agent=agent, file_path="src/a.ts"))
 
-    def test_reviewers_cannot_use_write_network_agent_or_mcp_tools(self):
-        for tool in ["Edit", "Write", "NotebookEdit", "Agent", "Task", "WebFetch", "WebSearch", "SendMessage",
-                     "EnterWorktree", "mcp__github__create_pull_request", "mcp__claude_ai_Flofi__authenticate"]:
+    def test_every_tool_except_read_is_denied_to_specialists(self):
+        for tool in ["Bash", "Grep", "Glob", "Edit", "Write", "NotebookEdit", "Agent", "Task", "WebFetch", "WebSearch",
+                     "SendMessage", "EnterWorktree", "Monitor", "ToolSearch", "Skill", "mcp__github__create_pull_request",
+                     "mcp__claude_ai_Flofi__authenticate", None, ""]:
             with self.subTest(tool=tool):
-                self.assertIn("not available to read-only FloFi reviewers", self.guard(tool, file_path="src/a.ts"))
+                self.assertIn("not available to FloFi reviewers", self.guard(tool, command="git status", file_path="src/a.ts"))
 
-    def test_read_grep_and_glob_stay_inside_tracked_repository_content(self):
-        self.assertIsNone(self.guard("Read", file_path=str(self.root / "src/a.ts")))
-        self.assertIsNone(self.guard("Read", file_path="src/a.ts"))
-        self.assertIsNone(self.guard("Read", file_path=".env.example"))
-        self.assertIsNone(self.guard("Read", file_path="node_modules/pkg/index.js"))
-        self.assertIsNone(self.guard("Grep", pattern="a", path="src"))
-        self.assertIsNone(self.guard("Glob", pattern="**/*.ts"))
-        for path in ["/etc/hostname", str(self.outside / "secret.txt"), "../outside/secret.txt", "~/.ssh/id_rsa",
-                     ".env.local", ".git/config", ".mode-a/journal", "local-state/notes", "src/link.ts",
-                     "deploy/key.pem", ".claude/flofi-agent-runs/s.jsonl", "", None]:
+    def test_read_is_allowed_for_repository_files(self):
+        for path in [str(self.root / "src/a.ts"), "src/a.ts", "CLAUDE.md", ".env.example", str(self.root / "src"),
+                     str(self.root / "src" / "." / "a.ts")]:
             with self.subTest(path=path):
-                self.assertIsNotNone(self.guard("Read", file_path=path))
-        self.assertIsNotNone(self.guard("Grep", pattern="a", path="/etc"))
-        self.assertIsNotNone(self.guard("Glob", pattern="../**/*.ts"))
-        self.assertIsNotNone(self.guard("Glob", pattern="/etc/*"))
+                self.assertIsNone(self.read(path))
 
-    def test_repository_scoped_inspection_commands_are_allowed(self):
-        for command in ["git diff --stat origin/main...HEAD", "git diff -- src", "git log --oneline -5 | head -3",
-                        "git show HEAD:CLAUDE.md", "git status --short", "git grep -n export -- src",
-                        "git --no-pager log -1", "git merge-base HEAD origin/main", "git blame src/a.ts",
-                        "rg -n 'export' src 2>/dev/null", "rg -t ts export", "grep -n export src/a.ts",
-                        "rg 'a*b' src", "git log HEAD~1 -1", "git log --format='%h #%s' -3", "find src -name '*.ts'",
-                        "git log --oneline --since='2 days' -- src", "grep -c -e export src/a.ts",
-                        "git grep -e '/home/' -- src/a.ts", "rg 'a|b' src", "grep -e 'x|y' src/a.ts",
-                        "grep -n 'export|import' src/a.ts", "git --no-optional-locks status --short",
-                        "grep -A 2 -e export src/a.ts", "tail -n +2 src/a.ts",
-                        "cat CLAUDE.md '|' sort",  # Bash passes '|' and sort to cat as literal operands
-                        "sed -n '1,40p' src/a.ts", "find src -name '*.ts' | wc -l", "cat CLAUDE.md", "ls -la src",
-                        "head -n 5 src/a.ts", "tail -n 5 src/a.ts", "sort -n src/a.ts | head",
-                        "git diff origin/main...HEAD | sed -n '1,200p'", "git log -1 | tail -1",
-                        "python3 scripts/agent_guard.py impact --base origin/main",
-                        "python3 scripts/agent_guard.py domain flofi-swap --base origin/main", "pwd"]:
-            with self.subTest(command=command):
-                self.assertIsNone(self.guard(command=command))
-
-    def test_mutation_execution_network_and_escape_commands_are_denied(self):
-        for command in [
-            "git commit -m x", "git push origin HEAD", "git checkout main", "git reset --hard", "git stash",
-            "git branch -D main", "git add .", "git tag v1", "git apply x.patch", "git -C /tmp log",
-            "git -c core.pager=sh log", "git diff --output=x", "git diff --ext-diff", "git diff --no-index /etc/passwd x",
-            "git grep -Ovi x", "git grep --no-exclude-standard --untracked KEY", "git show HEAD -- ../outside",
-            "git blame --contents=.env.local src/a.ts", "git blame --contents .mode-a/journal src/a.ts",
-            "git grep -f .env.local -- src", "git diff HEAD -- local-state/notes", "git log -- src/link.ts",
-            "rm -rf src", "mv src x", "cp src/a.ts x", "touch x", "mkdir x", "chmod +x x", "tee x", "dd if=x of=y",
-            "cat src/a.ts > x", "cat src/a.ts >> x", "cat < src/a.ts", "echo $HOME", "cat ${HOME}/x", "cat $(echo x)",
-            "cat `echo x`", 'cat "$HOME/x"', "ls; rm x", "ls && rm x", "ls || true", "ls & rm x", "(ls)", "{ ls; }",
-            "ls\nrm x", "ls \\\nsrc", "cat 'unterminated", "FOO=1 git status", "env git status", "sudo ls",
-            "bash -c ls", "sh -c ls", "xargs rm", "awk '{print}' src/a.ts", "node -e 1", "python3 -c 'print(1)'",
-            "python3 scripts/agent_guard.py claude-agents --write", "python3 scripts/agent_guard.py review --base x",
-            "python3 scripts/other.py", "pnpm test", "pnpm exec vitest run src/b.test.ts", "npx vitest", "make",
-            "curl https://example.com", "wget https://example.com", "gh pr view 1", "ssh host", "cast send 0x0",
-            "cat .env.local", "cat src/../.env.local", "grep -n LOCAL .env*", "cat .mode-a/journal",
-            "cat local-state/notes", "cat src/link.ts", "cat /etc/passwd", "cat ../outside/secret.txt",
-            "cat ~/.ssh/id_rsa", "cat .git/config", "head -c 99 /proc/self/environ", "ls ..", "find / -name x",
-            "find . -delete", "find . -exec cat {} +", "find -L . -name x", "grep -rn KEY .", "grep -R KEY src",
-            "grep --recursive KEY src", "rg --no-ignore KEY", "rg -uu KEY", "rg -u KEY", "rg --pre cat KEY",
-            "rg -L KEY", "rg -z KEY", "rg KEY .env.local", "sed -i 's/a/b/' src/a.ts", "sed -n '1w out' src/a.ts",
-            "sed -n '1,2p' src/a.ts -i", "sed 'e ls' src/a.ts", "tail -f src/a.ts", "sort -o out src/a.ts",
-            "sort --compress-program=sh src/a.ts", "cd /tmp", "", "jq -n '$ENV'", "jq -n env",
-            "diff -r src local-state", "rg --hostname-bin=sh KEY", "git grep -nOvi KEY", "git -C . status --short",
-            # BUILD-FLOFI-CLAUDE-AGENTS-001 batch 3 flofi-security findings, each verified against real tools:
-            "git grep --open=true x", "git grep --open-files-in-pager=true x", "git grep --no-ind KEY",
-            "git grep --no-exc --untracked KEY", "git diff --ext origin/main", "git diff --out=x", "sort --out=x CLAUDE.md",
-            "grep --rec KEY src/a.ts", "grep --dir=recurse KEY src/a.ts", "tail --fol CLAUDE.md",
-            "ls CLAUDE.md#x | sh -c id", "cat CLAUDE.md#x .env.local", "cat .en[^x]", "cat .gi[^x]/config", "ls src/*",
-            "cat src/?.ts", "rg -g.env DUMMY", "rg -g '{.env,x}' DUMMY", "rg --glob=.env DUMMY", "rg --hidden KEY",
-            "rg -. KEY", "grep -f.env.local CLAUDE.md", "grep -nf.env.local CLAUDE.md", "git cat-file -p HEAD",
-            "git cat-file --batch-all-objects --batch-check", "cat .GIT/config", "git log --show-signature",
-            "git log -L1,5:CLAUDE.md", "git log --textconv -p", "find . -name x -fprint out", "find . -fls out",
-            "find . -printf x", "cat --x=~/y", "ls ~", "ls :~",
-            # batch 5 flofi-security: quoted or escaped | is an argument to Bash, not a pipe.
-            "cat -- '|' find -name .env.local", 'cat -- "|" find -name .env.local', "cat -- \\| find -name .env.local",
-            "ls 'x'|'y'",
-            # combined -ie still supplies the pattern; context options take counts, not directories.
-            "grep -ie FAKE src", "grep -e X -C src", "grep -C src x", "grep --context=src x src/a.ts", "rg -A src x",
-            "git status --ignored", "git ls-files -i --exclude-standard -o", "git log -n x",
-            # batch 6: quoted redirects write files; operands are checked even without -e; REV:path; %G.
-            "ls src 2>'&1'", 'ls src 2>"&1"', "ls src 2>\\&1", "ls src 2\\>&1", "cat '2'>&1", "grep -C 5 src",
-            "grep -C 5 .env.local", "grep src src/a.ts", "rg x .env.local", "git show stash^3:.env.local",
-            "git show HEAD:local-state/notes", "git log --format='%G?' -1", "git log --pretty=format:%GG -1",
-            "git ls-files -o", "git ls-files --others --directory",
-            # batch 7: a written ../ makes git diff compare outside the tree (implicit --no-index); stash; %+G.
-            "git diff ../repo ../repo/src", "cat ../repo/CLAUDE.md", "ls ../repo", "git diff " + "/x/repo/src",
-            "git show stash^3", "git show 'stash^{/:}^3:.env.local'", "git log --all -p", "git rev-list --all",
-            "git describe --all", "git log --format='%+G?' -1", "git log --format='%-GG' -1", "git log --pretty='% GS' -1",
-            # ugrep (Claude Code's grep) recurses into directory operands, reading ignored files:
-            "grep -n LOCAL src", "grep -n LOCAL .", "cat src", "head src", "sed -n '1,2p' src",
-        ]:
-            with self.subTest(command=command):
-                self.assertIsNotNone(self.guard(command=command))
-
-    def test_reviewers_may_read_only_this_sessions_saved_tool_output(self):
-        projects = Path(self.outside, "projects/slug")
-        saved = projects / SESSION / "tool-results"
-        saved.mkdir(parents=True)
-        (saved / "b1el7won7.txt").write_text("long output\n")
-        (projects / SESSION / "secret.txt").write_text("not tool output\n")
-        other = projects / "11111111-1111-1111-1111-111111111111/tool-results"
-        other.mkdir(parents=True)
-        (other / "x.txt").write_text("another session\n")
-
-        def read(path, transcript=str(projects / f"{SESSION}.jsonl"), session=SESSION):
-            return hooks.guard_reason({"agent_type": "flofi-swap", "tool_name": "Read", "tool_input": {"file_path": path},
-                                       "cwd": str(self.root), "session_id": session, "transcript_path": transcript}, self.root)
-        self.assertIsNone(read(str(saved / "b1el7won7.txt")))
-        for path in [str(projects / SESSION / "secret.txt"), str(other / "x.txt"), str(saved / "missing.txt"),
-                     str(saved / ".." / "secret.txt")]:
+    def test_read_outside_scope_is_denied(self):
+        (self.root / "src/inner-link.ts").symlink_to(self.root / ".env.local")
+        (self.root / "docs").mkdir()
+        (self.root / "docs/.GIT").mkdir()
+        for path in ["/etc/hostname", str(self.outside / "secret.txt"), "../outside/secret.txt",
+                     str(self.root / ".." / "outside" / "secret.txt"), str(self.root / "src/../.env.local"),
+                     "~/.ssh/id_rsa", "~", ".env.local", str(self.root / ".env.local"), ".git/config", ".GIT/config",
+                     "docs/.GIT/x", ".mode-a/journal", "local-state/notes", "node_modules/pkg/index.js", "src/link.ts",
+                     "src/inner-link.ts", "deploy/key.pem", "keys/id_ed25519", ".claude/flofi-agent-runs/s.jsonl",
+                     "", None, 5, "a\0b"]:
             with self.subTest(path=path):
-                self.assertIsNotNone(read(path))
-        self.assertIsNotNone(read(str(saved / "b1el7won7.txt"), transcript=str(projects / "other.jsonl")))
-        self.assertIsNotNone(read(str(saved / "b1el7won7.txt"), session="../x"))
-        (saved / "link.txt").symlink_to(self.outside / "secret.txt")
-        self.assertIsNotNone(read(str(saved / "link.txt")))
+                self.assertIsNotNone(self.read(path))
 
-    def test_tokenizer_matches_bash_word_splitting(self):
-        for words in ["a 'b|c' \"d|e\" f\\|g", "\"x y\" 'z'", 'a"b"c', "'a'\"b\"", "-e 'x && y'", "a\\ b",
-                      '"a\\"b"', "'a\\b'", '"a\\\\b"', '"a\\b"', "x 2>/dev/null y", "x 2>&1", "'2>/dev/null' z",
-                      "ü\u00a0x", "'#' '*' '[' '~'", "a~b HEAD~1", "'2>/dev/null' \"2>&1\""]:
-            with self.subTest(words=words):
-                bash = subprocess.run(["bash", "-c", f"set -- {words}; printf '%s\\0' \"$@\""], capture_output=True,
-                                      text=True, check=True).stdout.split("\0")[:-1]
-                self.assertEqual(hooks.pipeline_words(words), [bash])
-        self.assertEqual(hooks.pipeline_words("a | b c|d"), [["a"], ["b", "c"], ["d"]])
-        for refused in ["a ; b", "a && b", "a & b", "a > b", "a $x", "a `b`", "a #c", "a *", "~/x", "x=~/y", "a\\\nb", "'open",
-                        "a 2>'&1'", 'a 2>"&1"', "a 2>\\&1", "a 2\\>&1", "a '2'>&1", "a 2>/dev/'null'"]:
-            with self.subTest(refused=refused):
-                with self.assertRaises(ValueError):
-                    hooks.pipeline_words(refused)
-
-    def test_ignored_dot_directories_under_node_modules_stay_unreadable(self):
-        (self.root / "node_modules/.cache").mkdir(parents=True)
-        (self.root / "node_modules/.cache/token").write_text("cached\n")
-        self.assertIsNotNone(self.guard("Read", file_path="node_modules/.cache/token"))
-        (self.root / "local-state/node_modules").mkdir(parents=True)
-        (self.root / "local-state/node_modules/x.js").write_text("ignored\n")
-        self.assertIsNotNone(self.guard("Read", file_path="local-state/node_modules/x.js"))
-        self.assertIsNone(self.guard("Read", file_path="node_modules/pkg/index.js"))
-
-    def test_working_directory_must_be_a_readable_repository_location(self):
-        for cwd in ["/tmp", str(self.outside), str(self.root / "local-state"), str(self.root / ".git"), None]:
-            with self.subTest(cwd=cwd):
-                self.assertIn("working directory", hooks.guard_reason({
-                    "agent_type": "flofi-swap", "tool_name": "Bash", "tool_input": {"command": "cat CLAUDE.md"},
-                    "cwd": cwd}, self.root))
-        self.assertIsNone(hooks.guard_reason({"agent_type": "flofi-swap", "tool_name": "Bash",
-                                              "tool_input": {"command": "cat a.ts"}, "cwd": str(self.root / "src")}, self.root))
-
-    def test_grep_tool_glob_overrides_are_refused(self):
-        self.assertIsNotNone(self.guard("Grep", pattern="KEY", glob=".env*"))
-        self.assertIsNone(self.guard("Grep", pattern="KEY", type="ts"))
+    def test_overlong_or_odd_paths_are_decided_without_crashing(self):
+        for path in ["a" * 300, "/".join(["b" * 255] * 20), str(self.root) + "/" + "c" * 5000]:
+            with self.subTest(length=len(path)):
+                self.read(path)
 
     def test_internal_errors_and_unreadable_input_deny_without_relying_on_onfailure(self):
         original = hooks.guard_reason
@@ -217,29 +96,17 @@ class ReadOnlyGuard(Repository):
         def broken(*_args):
             raise OSError("simulated")
         hooks.guard_reason = broken
-        decision = hooks.guard({"agent_type": "flofi-swap", "tool_name": "Bash", "tool_input": {"command": "ls"}}, self.root)
+        decision = hooks.guard({"agent_type": "flofi-swap", "tool_name": "Read", "tool_input": {"file_path": "x"}}, self.root)
         self.assertEqual(decision["hookSpecificOutput"]["permissionDecision"], "deny")
         hooks.guard_reason = original
         for event in [None, [], "text"]:
             self.assertEqual(hooks.guard(event, self.root)["hookSpecificOutput"]["permissionDecision"], "deny")
 
-    def test_overlong_names_are_decided_without_crashing(self):
-        # Python 3.12's Path.exists() raises ENAMETOOLONG; the guard must still decide.
-        for command in ["cat " + "a" * 300, "cat " + "/".join(["b" * 255] * 20), "rg x " + "c" * 5000]:
-            with self.subTest(length=len(command)):
-                hooks.guard_reason({"agent_type": "flofi-swap", "tool_name": "Bash",
-                                    "tool_input": {"command": command}, "cwd": str(self.root)}, self.root)
-        self.assertTrue(hooks.looks_like_path("d" * 300, str(self.root)) in {True, False})
-
-    def test_background_and_oversized_commands_are_denied(self):
-        self.assertIsNotNone(self.guard(command="git status", run_in_background=True))
-        self.assertIsNotNone(self.guard(command="ls " + "src " * 2000))
-
     def test_cli_returns_a_deny_decision_only_for_flofi_reviewers(self):
         def run(event):
-            return subprocess.run([sys.executable, str(HOOK), "guard"], input=json.dumps(event), text=True,
+            return subprocess.run([sys.executable, "-I", str(HOOK), "guard"], input=json.dumps(event), text=True,
                                   capture_output=True, timeout=15)
-        denied = run({"agent_type": "flofi-security", "tool_name": "Bash", "tool_input": {"command": "git push"}})
+        denied = run({"agent_type": "flofi-security", "tool_name": "Bash", "tool_input": {"command": "git status"}})
         self.assertEqual(denied.returncode, 0)
         decision = json.loads(denied.stdout)["hookSpecificOutput"]
         self.assertEqual((decision["hookEventName"], decision["permissionDecision"]), ("PreToolUse", "deny"))
@@ -254,6 +121,10 @@ class ReadOnlyGuard(Repository):
                                         capture_output=True, timeout=15)
                 self.assertEqual(result.returncode, 0, result.stderr)
                 self.assertEqual(json.loads(result.stdout)["hookSpecificOutput"]["permissionDecision"], "deny")
+
+    def test_the_command_parsing_layer_is_gone(self):
+        for name in ["pipeline_words", "parse_options", "segment_reason", "bash_reason", "COMMANDS", "GIT"]:
+            self.assertFalse(hasattr(hooks, name), name)
 
 
 class LifecycleLedger(Repository):
@@ -484,12 +355,15 @@ class LifecycleLedger(Repository):
 
     def test_guard_denials_record_only_agent_identity_and_tool(self):
         decision = hooks.guard({"session_id": SESSION, "agent_type": "flofi-security", "agent_id": "a1",
-                                "tool_name": "Bash", "tool_input": {"command": "cat .env.local # SECRET=abc"},
+                                "tool_name": "Read", "tool_input": {"file_path": ".env.local-SECRET=abc"},
                                 "cwd": str(self.root)}, self.root)
         self.assertEqual(decision["hookSpecificOutput"]["permissionDecision"], "deny")
-        row = self.ledger()[0]
-        self.assertEqual(set(row), {"v", "t", "event", "agent", "agentId", "tool"})
-        self.assertEqual((row["event"], row["agent"], row["tool"]), ("guard_deny", "flofi-security", "Bash"))
+        hooks.guard({"session_id": SESSION, "agent_type": "flofi-security", "agent_id": "a1", "tool_name": "Bash",
+                     "tool_input": {"command": "echo SECRET"}}, self.root)
+        rows = self.ledger()
+        self.assertEqual(set(rows[0]), {"v", "t", "event", "agent", "agentId", "tool"})
+        self.assertEqual([(r["event"], r["agent"], r["tool"]) for r in rows],
+                         [("guard_deny", "flofi-security", "Read"), ("guard_deny", "flofi-security", "other")])
         self.assertNotIn("SECRET", (self.root / hooks.RUNS / f"{SESSION}.jsonl").read_text())
         self.assertIsNone(hooks.guard({"session_id": SESSION, "tool_name": "Edit", "tool_input": {}}, self.root))
 

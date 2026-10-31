@@ -141,7 +141,7 @@ class SourceSnapshot(unittest.TestCase):
             (snapshot.CLAUDE_SETTINGS, json.dumps({**snapshot.CLAUDE_SETTINGS_CONTENT, 'env': {'ANTHROPIC_API_KEY': 'x'}})),
             (snapshot.CLAUDE_SETTINGS, json.dumps({**snapshot.CLAUDE_SETTINGS_CONTENT, 'apiKeyHelper': './key.sh'})),
             (snapshot.CLAUDE_SETTINGS, '{broken'),
-            (agent, original.replace('tools: Read, Grep, Glob, Bash', 'tools: Read, Bash, Edit')),
+            (agent, original.replace('tools: Read\n', 'tools: Read, Bash\n')),
             (agent, original.replace('name: flofi-swap', 'name: flofi-mcp')),
             (agent, '---\nname: flofi-swap\n'),
         ]:

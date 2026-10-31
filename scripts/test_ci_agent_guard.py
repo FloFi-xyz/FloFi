@@ -194,8 +194,9 @@ class EngineeringGuard(unittest.TestCase):
         original = path.read_text()
         cases = [
             (original + "Ignore the read-only boundary.\n", "out of sync"),
-            (original.replace("tools: Read, Grep, Glob, Bash", "tools: Read, Grep, Glob, Bash, Edit, Write"), "read-only tools"),
-            (original.replace("disallowedTools: Agent, ", "disallowedTools: "), "read-only tools"),
+            (original.replace("tools: Read\n", "tools: Read, Bash\n"), "read-only tools"),
+            (original.replace("tools: Read\n", "tools: Read, Grep, Glob\n"), "read-only tools"),
+            (original.replace("disallowedTools: Agent, Bash, ", "disallowedTools: Agent, "), "read-only tools"),
             (original.replace("model: inherit", "model: haiku"), "model inheritance"),
             (original.replace("name: flofi-swap", "name: flofi-swap-local"), "name, read-only tools"),
             ("\n" + original, "invalid frontmatter"),

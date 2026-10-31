@@ -35,8 +35,9 @@ CLAUDE_HOOK = ".claude/hooks/flofi_agent_hooks.py"
 CLAUDE_RUNS = ".claude/flofi-agent-runs"
 CLAUDE_AGENTS = frozenset(f".claude/agents/{domain}.md" for domain in DOMAINS)
 CLAUDE_FILES = CLAUDE_AGENTS | {CLAUDE_SETTINGS, CLAUDE_HOOK}
-CLAUDE_FRONTMATTER = {"tools": "Read, Grep, Glob, Bash", "model": "inherit",
-                      "disallowedTools": "Agent, Edit, Write, NotebookEdit, WebFetch, WebSearch, mcp__*"}
+# Specialists have no shell: Read is their only tool. Main runs every command for them.
+CLAUDE_FRONTMATTER = {"tools": "Read", "model": "inherit",
+                      "disallowedTools": "Agent, Bash, Edit, Write, NotebookEdit, Grep, Glob, WebFetch, WebSearch, mcp__*"}
 _HOOK_ARGS = ["-I", "${CLAUDE_PROJECT_DIR}/" + CLAUDE_HOOK]
 _RECORD = [{"hooks": [{"type": "command", "command": "python3", "args": _HOOK_ARGS + ["record"], "timeout": 10}]}]
 _RECORD_BASH = [{"matcher": "Bash", **_RECORD[0]}]
@@ -125,9 +126,9 @@ def claude_agent_text(agent):
         "## Domain ownership and regression responsibilities", "",
         f"- Domain ID `{name}` is shared with `.codex/agents/{name}.toml` and with `primary`/`dependencies` in",
         "  `docs/engineering/coverage.json`, the only ownership matrix. Do not keep or infer another one.",
-        f"- Load your current contract first: `python3 scripts/agent_guard.py domain {name} --base <ref>` (main",
-        "  names the ref; default `origin/main`). It lists owned and dependent modules, cross-domain",
-        "  dependencies, mapped and required suites, coverage gaps and the changed paths in your scope.",
+        f"- Main gives you the output of `python3 scripts/agent_guard.py domain {name} --base <ref>`: owned and",
+        "  dependent modules, cross-domain dependencies, mapped and required suites, coverage gaps and the changed",
+        "  paths in your scope. Without it, Read `docs/engineering/coverage.json` and select the modules yourself.",
         f"- Primary review: changed modules whose `primary` is `{name}`. Dependency review: changed modules that",
         f"  list `{name}` in `dependencies`, and shared financial core when main assigns it.",
         "- Regression duties: every mapped suite of an affected module still exists, still exercises the changed",
@@ -135,20 +136,18 @@ def claude_agent_text(agent):
         "  new maintained files are explicitly owned in coverage.json or reported as unmapped.",
         "- Report findings that belong to another domain to main with that domain ID instead of reviewing it in depth.", "",
         "## How to review", "",
-        "1. Start from the base, paths and concerns main assigned. Inspect from the repository root, without `cd`",
-        "   or `git -C`: `git diff <base>...HEAD`, `git diff`, `git status --short`, `git log`, `git show`, `git grep`,",
-        "   `rg`, non-recursive `grep`, `find`, `ls`, `cat`, `head`, `tail`, `wc`, `sed -n 'N,Mp'` and",
-        "   `python3 scripts/agent_guard.py check|impact|domain|report` (relative path). Pipes are allowed; chaining",
-        "   is not. Page long output with `| head`, `| tail` or `| sed -n 'N,Mp'`; Read may open output that",
-        "   Claude Code saved for this session under `tool-results/`.",
-        "2. Trace behavior through current source, `executionCapabilityRegistry` and the tests mapped to the",
-        "   affected modules. Historical reports may be stale.",
-        "3. You cannot run builds or test suites. Give main the exact focused command (for example",
-        "   `pnpm exec vitest run <suite path>`) and mark it not run.", "",
+        "1. Your only tool is Read. You cannot run commands, search, list directories or run tests. Main runs",
+        "   `git diff`, `agent_guard.py impact|domain|review`, repository searches and test suites, and gives you",
+        "   the base, changed paths, relevant diffs and reports.",
+        "2. Read the changed files and the current source they touch (repository paths from main, the impact report",
+        "   or coverage.json `sources`), `executionCapabilityRegistry` and the mapped suites. Historical reports",
+        "   may be stale.",
+        "3. When you need a search, another diff, Git history or a test run, ask main in your findings with the exact",
+        "   command (for example `pnpm exec vitest run <suite path>`) and mark it not run.", "",
         "## Boundaries", "",
-        f"- Read-only. The project hook `{CLAUDE_HOOK}` denies other tools, writes, shell expansion or",
-        "  chaining, and paths outside the repository, Git internals, ignored local state or secrets for",
-        "  `flofi-*` agents. Report a denial instead of working around it.",
+        f"- Read only, no shell. Your definition grants only Read, and the project hook `{CLAUDE_HOOK}` denies",
+        "  every other tool and any Read outside the repository, through `..`, into `.git`, of Git-ignored local",
+        "  state or of secret-named files for `flofi-*` agents. Report a denial instead of working around it.",
         "- Never edit, stage, commit, push, merge, deploy, change production configuration or credentials, or",
         "  create, sign or broadcast transactions. Never spawn subagents.",
         "- Never read, quote or summarize credentials, private keys, seed phrases, `.env` files or wallet secrets.", "",

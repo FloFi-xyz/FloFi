@@ -3,8 +3,10 @@
 
 Optional developer acceptance check; CI needs no Claude binary or AI account.
 A local HTTP server plays the Messages API: it makes the main session spawn each
-of the 19 flofi-* agents in turn and makes each one try an allowed read-only
-command, a forbidden command and an out-of-repository read. No real model,
+of the 19 flofi-* agents in turn and makes each one try a repository Read, a Bash
+command, and Reads outside the repository, through .. and of a secret-named file.
+Specialists must resolve to Read only, Bash must never run, and only the
+repository Read may succeed. No real model,
 credentials, external AI service, repository change or financial operation is
 used. The run proves harness discovery, resolved tool restriction, the live
 read-only guard and lifecycle hooks; it does not measure model judgment.
@@ -25,9 +27,13 @@ from agent_guard import CLAUDE_FRONTMATTER, CLAUDE_RUNS, DOMAINS, ROOT, parse_cl
 
 MARKER = re.compile(r"# (flofi-[a-z-]+) — FloFi engineering review specialist")
 LISTING = re.compile(r"(?m)^- (flofi-[a-z-]+): (.*) \(Tools: ([^)]*)\)$")
-ALLOWED = "git rev-parse --is-inside-work-tree"
 FORBIDDEN = "echo flofi-guard-probe"
 OUTSIDE = "/etc/hostname"
+INSIDE = str(ROOT / "CLAUDE.md")
+# Claude Code normalizes Read paths before PreToolUse, so the guard sees the canonical
+# path: a .. that stays inside the repository is an ordinary repository Read.
+TRAVERSAL = str(ROOT / ".." / "flofi-probe-outside" / "CLAUDE.md")
+SECRET = str(ROOT / ".env.local")
 GUARD = "FloFi read-only review guard"
 
 
@@ -72,9 +78,10 @@ def main():
                 domain = marker[1]
                 captured["agents"].setdefault(domain, {"tools": tools, "system": system, "results": {}})
                 if not results:
-                    reply = ([{"type": "tool_use", "id": "toolu_probe_allowed", "name": "Bash", "input": {"command": ALLOWED, "description": "probe"}},
-                              {"type": "tool_use", "id": "toolu_probe_forbidden", "name": "Bash", "input": {"command": FORBIDDEN, "description": "probe"}},
-                              {"type": "tool_use", "id": "toolu_probe_outside", "name": "Read", "input": {"file_path": OUTSIDE}}], "tool_use")
+                    reply = ([{"type": "tool_use", "id": "toolu_probe_inside", "name": "Read", "input": {"file_path": INSIDE}},
+                              {"type": "tool_use", "id": "toolu_probe_bash", "name": "Bash", "input": {"command": FORBIDDEN, "description": "probe"}},
+                              *({"type": "tool_use", "id": f"toolu_probe_{key}", "name": "Read", "input": {"file_path": path}}
+                                for key, path in (("outside", OUTSIDE), ("traversal", TRAVERSAL), ("secret", SECRET)))], "tool_use")
                 else:
                     captured["agents"][domain]["results"] = {key: {"error": bool(item.get("is_error")), "text": text_of(item.get("content", ""))}
                                                              for key, item in results.items()}
@@ -112,7 +119,7 @@ def main():
                        "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1", "DISABLE_AUTOUPDATER": "1", "DISABLE_TELEMETRY": "1"}
                 version = subprocess.check_output(["claude", "--version"], env=env, text=True, stderr=subprocess.DEVNULL).strip()
                 run = subprocess.run(["claude", "-p", "--output-format", "stream-json", "--verbose", "--session-id", session_id,
-                                      f"--allowedTools=Bash({ALLOWED})", "Offline FloFi agent probe."],
+                                      "Offline FloFi agent probe."],
                                      cwd=ROOT, env=env, stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=600)
         finally:
             server.shutdown()
@@ -136,17 +143,20 @@ def main():
         if not agent:
             errors.append(f"{domain}: subagent never started")
             continue
-        if not {"Read", "Bash"} <= set(agent["tools"]) <= {"Read", "Grep", "Glob", "Bash"}:
-            errors.append(f"{domain}: resolved subagent tools {agent['tools']} are not the read-only set")
+        if agent["tools"] != ["Read"]:
+            errors.append(f"{domain}: resolved subagent tools {agent['tools']} are not exactly Read")
         if body.strip()[:400] not in agent["system"]:
             errors.append(f"{domain}: subagent system prompt is not the project definition")
         results = agent["results"]
-        allowed, forbidden, outside = (results.get(f"toolu_probe_{key}", {}) for key in ("allowed", "forbidden", "outside"))
-        if allowed.get("error") is not False or allowed.get("text", "").strip() != "true":
-            errors.append(f"{domain}: allowed read-only command did not run ({allowed.get('text', 'no result')[:200]})")
-        for label, result in (("forbidden command", forbidden), ("outside read", outside)):
+        inside, bash = results.get("toolu_probe_inside", {}), results.get("toolu_probe_bash", {})
+        if inside.get("error") is not False or "# Working in Flofi" not in inside.get("text", ""):
+            errors.append(f"{domain}: repository Read did not return the file ({inside.get('text', 'no result')[:200]})")
+        if not bash.get("error") or "flofi-guard-probe" in bash.get("text", "").replace(FORBIDDEN, ""):
+            errors.append(f"{domain}: Bash was not refused ({bash.get('text', 'no result')[:200]})")
+        for key in ("outside", "traversal", "secret"):
+            result = results.get(f"toolu_probe_{key}", {})
             if not result.get("error") or GUARD not in result.get("text", ""):
-                errors.append(f"{domain}: {label} was not denied by the read-only guard")
+                errors.append(f"{domain}: {key} Read was not denied by the read-only guard")
     starts ={row["agent"] for row in rows if row["event"] == "subagent_start"}
     stops = {row["agent"] for row in rows if row["event"] == "subagent_stop"
              and row.get("review") == {"result": "no-findings", "findings": 0, "highest": "none"}}
@@ -155,15 +165,16 @@ def main():
     if not session or set(session[0]["definitions"]) != set(DOMAINS):
         errors.append("SessionStart hook did not record the 19 definitions")
     for domain in DOMAINS:
-        if domain not in starts or domain not in stops or denials[domain] != 2:
-            errors.append(f"{domain}: hook ledger lacks start, structured completion or both guard denials")
+        if domain not in starts or domain not in stops or denials[domain] < 3:
+            errors.append(f"{domain}: hook ledger lacks start, structured completion or the three Read denials")
     if not any(row["event"] == "session_end" for row in rows):
         errors.append("SessionEnd hook was not recorded")
     if errors:
         raise RuntimeError("Claude agent probe failed:\n" + "\n".join(errors))
-    print(f"Claude agents: PASS ({version}; 19 discovered with exact descriptions; each resolved to read-only tools, "
-          "ran an allowed command, had a forbidden command and an outside read denied, and was recorded by "
-          f"SubagentStart/SubagentStop; scripted loopback model, {captured['other']} auxiliary requests, zero real model responses)")
+    print(f"Claude agents: PASS ({version}; 19 discovered with exact descriptions; each resolved to Read only, "
+          "read a repository file, had Bash refused and outside, escaping .. and secret Reads denied, and was "
+          f"recorded by SubagentStart/SubagentStop; scripted loopback model, {captured['other']} auxiliary requests, "
+          "zero real model responses)")
 
 
 if __name__ == "__main__":

@@ -31,17 +31,19 @@ useful design context. Historical exact-path lists do not authorize future work.
 
 ## Engineering review specialists
 
-`.claude/agents/flofi-*.md` are 19 read-only reviewers generated from the Codex
+`.claude/agents/flofi-*.md` are 19 Read-only reviewers (no shell) generated from the Codex
 roles in `.codex/agents/`; ownership, dependencies, suites and gaps come only from
 `docs/engineering/coverage.json` ([guide](docs/engineering/CLAUDE-CODE.md)). For
 relevant development work, the main session:
 
 1. Inspects `git status`, the diff and its base, then runs
    `python3 scripts/agent_guard.py check` and `... impact --base origin/main`.
-2. Delegates independent reviews to the selected specialists with the base, paths
-   and concerns: flofi-workflow for shared financial core, flofi-security for
-   authorization, wallet or identity, and flofi-mcp, flofi-channels and
-   flofi-developers when shared contracts reach those entry points.
+2. Delegates independent reviews to the selected specialists. They can only Read,
+   so main gives each the base, changed paths, relevant diff and its
+   `agent_guard.py domain` report, and runs any search or test they request:
+   flofi-workflow for shared financial core, flofi-security for authorization,
+   wallet or identity, and flofi-mcp, flofi-channels and flofi-developers when
+   shared contracts reach those entry points.
 3. Runs at most three specialists at once and batches the rest; specialists never
    spawn agents. Minor changes do not need all 19; documentation-only work may
    skip review with a stated reason.

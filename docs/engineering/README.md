@@ -3,8 +3,8 @@
 This is repository engineering infrastructure. The 19 custom Codex agents review
 changes; they do not participate in end-user transactions. Deterministic tests
 remain the product evidence, and CircleCI remains the certification authority.
-Claude Code uses 19 generated read-only twins of the same roles and contracts;
-see [the Claude Code guide](CLAUDE-CODE.md).
+Claude Code uses 19 generated Read-only twins (no shell) of the same roles and
+contracts; see [the Claude Code guide](CLAUDE-CODE.md).
 
 The inventory was audited against main `9e95b5c55d3e51ccfa5929819d3f15039db09f59`.
 Current source and capability registries take precedence over old build reports.
