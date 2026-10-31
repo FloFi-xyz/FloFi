@@ -5,7 +5,7 @@
  * evidence only: this proves FloFi's own verification, isolation and authorization rules, not the live providers.
  */
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import { createSign, generateKeyPairSync } from 'node:crypto';
+import { createSign, generateKeyPairSync, randomUUID } from 'node:crypto';
 import { createTestDatabase, type TestDatabase } from '../../../../packages/cloud-runtime/test/pg-harness';
 import { createAccountStore } from './account-store';
 import { createAccountService } from './account-service';
@@ -19,7 +19,7 @@ const env = { FLOFI_PUBLIC_ORIGIN: 'https://flofi.xyz', FLOFI_APPLE_CLIENT_ID: '
 const apple = oidcConfig('apple', env)!;
 const b64 = (value: object) => Buffer.from(JSON.stringify(value)).toString('base64url');
 function idToken(sub: string, nonce: string, at: number) {
-  const input = `${b64({ alg: 'RS256', kid: 'k1' })}.${b64({ iss: 'https://appleid.apple.com', aud: apple.clientId, sub, nonce, iat: at, exp: at + 600, email: `${sub}@example.com`, email_verified: 'true' })}`;
+  const input = `${b64({ alg: 'RS256', kid: 'k1' })}.${b64({ iss: 'https://appleid.apple.com', aud: apple.clientId, sub, nonce, iat: at, exp: at + 600, email: `${sub}@example.com`, email_verified: 'true', jti: randomUUID() })}`;
   return `${input}.${createSign('RSA-SHA256').update(input).sign(privateKey).toString('base64url')}`;
 }
 const KEY = '02' + 'd'.repeat(64), EVM = '0x' + 'e'.repeat(40), OTHER = '0x' + 'f'.repeat(40), SOL = 'So11111111111111111111111111111111111111112';
@@ -53,7 +53,7 @@ async function appleSignIn(sub: string, current: AccountSessionToken | null = nu
 }
 beforeAll(async () => { t = await createTestDatabase(); });
 afterAll(async () => t?.drop());
-beforeEach(async () => { await t.db.query('TRUNCATE flofi_accounts CASCADE'); provider = fakeTurnkey(); clock = new Date(); clearJwksCache(); });
+beforeEach(async () => { await t.db.query('TRUNCATE flofi_accounts, flofi_account_email_challenges, flofi_account_used_proofs CASCADE'); provider = fakeTurnkey(); clock = new Date(); clearJwksCache(); });
 
 describe('account service', () => {
   it('signs a new Apple user in, creates their own provider organization and opens a session for this browser key only', async () => {
@@ -69,11 +69,46 @@ describe('account service', () => {
     await expect(service().completeOidc(apple, flow, { idToken: idToken('ana', other.nonce, Math.floor(clock.getTime() / 1000)) }, null)).rejects.toThrow('OIDC_NONCE_MISMATCH');
   });
   it('verifies email codes with the provider and never signs in on a rejected code', async () => {
-    const flow = { otpId: 'otp-00000001', email: 'bruno@example.com', sessionKey: KEY, intent: 'sign-in' as const, returnTo: '/app' };
+    const started = await service().startEmail(' Bruno@Example.com ', KEY);
+    const flow = { challengeId: started.challengeId, intent: 'sign-in' as const, returnTo: '/app' };
+    expect(started.email).toBe('bruno@example.com');
     await expect(service().completeEmail(flow, '000000', null)).rejects.toThrow('EMAIL_CODE_REJECTED');
     await expect(service().completeEmail(flow, '12ab56', null)).rejects.toThrow('EMAIL_CODE_INVALID');
     expect((await t.db.query('SELECT count(*)::int AS n FROM flofi_accounts')).rows).toEqual([{ n: 0 }]);
     expect(await service().completeEmail(flow, '123456', null)).toMatchObject({ created: true, managed: { sessionKey: KEY } });
+    // Single use: the same challenge cannot sign in again.
+    await expect(service().completeEmail(flow, '123456', null)).rejects.toThrow('EMAIL_CHALLENGE_EXPIRED');
+    // The table never holds the code.
+    expect(JSON.stringify((await t.db.query('SELECT * FROM flofi_account_email_challenges')).rows)).not.toContain('123456');
+  });
+  it('limits code guesses per challenge and code requests per address', async () => {
+    const started = await service().startEmail('carla@example.com', KEY), flow = { challengeId: started.challengeId, intent: 'sign-in' as const, returnTo: '/app' };
+    for (let attempt = 0; attempt < 5; attempt++) await expect(service().completeEmail(flow, '000000', null)).rejects.toThrow('EMAIL_CODE_REJECTED');
+    // The sixth try is refused before reaching the provider, even with the right code.
+    await expect(service().completeEmail(flow, '123456', null)).rejects.toThrow('EMAIL_CHALLENGE_EXPIRED');
+    for (let request = 0; request < 4; request++) await service().startEmail('carla@example.com', KEY);
+    await expect(service().startEmail('carla@example.com', KEY)).rejects.toThrow('EMAIL_RATE_LIMITED');
+    await expect(service().startEmail('dora@example.com', KEY)).resolves.toMatchObject({ email: 'dora@example.com' });
+    clock = new Date(clock.getTime() + 61 * 60_000);
+    await expect(service().startEmail('carla@example.com', KEY)).resolves.toMatchObject({ email: 'carla@example.com' });
+  });
+  it('accepts each ID token once', async () => {
+    const flow = newOidcFlow('apple', KEY, 'sign-in', '/app'), token = idToken('ana', flow.nonce, Math.floor(clock.getTime() / 1000));
+    await service().completeOidc(apple, flow, { idToken: token }, null);
+    await expect(service().completeOidc(apple, flow, { idToken: token }, null)).rejects.toThrow('OIDC_TOKEN_REPLAYED');
+  });
+  it('deletes an account and its data only after a recent sign-in', async () => {
+    const ana = await appleSignIn('ana');
+    provider.orgs.get('org-0000-0001')!.accounts.push({ walletId: 'wallet-0000-0001', address: SOL, format: 'ADDRESS_FORMAT_SOLANA' });
+    await service().saveManagedWallets(ana.session, [`solana:${SOL}`]);
+    clock = new Date(clock.getTime() + 11 * 60_000);
+    await expect(service().deleteAccount(ana.session)).rejects.toThrow('ACCOUNT_REAUTHENTICATION_REQUIRED');
+    const fresh = await appleSignIn('ana');
+    await service().deleteAccount(fresh.session);
+    for (const table of ['flofi_accounts', 'flofi_account_identities', 'flofi_account_sessions', 'flofi_account_wallets'])
+      expect((await t.db.query(`SELECT count(*)::int AS n FROM ${table}`)).rows, table).toEqual([{ n: 0 }]);
+    // Signing in again later starts a new, empty account.
+    expect(await appleSignIn('ana')).toMatchObject({ created: true });
   });
   it('signs a Web3 wallet in as its own account, recorded as a non-exportable external wallet', async () => {
     const outcome = await service().completeWallet({ namespace: 'eip155', address: EVM.toUpperCase().replace('0X', '0x') }, { key: 'io.metamask', name: 'MetaMask' }, 'sign-in', null);
@@ -113,7 +148,9 @@ describe('account service', () => {
   });
   it('links identities only with a fresh session and never moves one from another account', async () => {
     const ana = await appleSignIn('ana'), wallet = await service().completeWallet({ namespace: 'solana', address: SOL }, { key: 'Phantom', name: 'Phantom' }, 'sign-in', null);
-    await expect(service().linkExternalWallet(ana.session, { namespace: 'solana', address: SOL }, { key: 'Phantom', name: 'Phantom' })).rejects.toThrow('ACCOUNT_IDENTITY_LINKED_ELSEWHERE');
+    // A wallet record held by another account is refused before anything is linked.
+    await expect(service().linkExternalWallet(ana.session, { namespace: 'solana', address: SOL }, { key: 'Phantom', name: 'Phantom' })).rejects.toThrow('ACCOUNT_WALLET_LINKED_ELSEWHERE');
+    expect((await service().view(ana.session))?.identities.map(identity => identity.kind)).toEqual(['apple']);
     expect(await service().linkExternalWallet(ana.session, { namespace: 'eip155', address: EVM }, { key: 'io.metamask', name: 'MetaMask' })).toMatchObject({ origin: 'external' });
     await expect(service().linkExternalWallet(ana.session, null, { key: 'x', name: 'x' })).rejects.toThrow('WALLET_SESSION_REQUIRED');
     await expect(appleSignIn('carla', wallet.session, 'link')).resolves.toMatchObject({ session: { accountId: wallet.session.accountId } });
@@ -125,6 +162,6 @@ describe('account service', () => {
     const flow = newOidcFlow('apple', KEY, 'sign-in', '/app');
     expect(await plain.completeOidc(apple, flow, { idToken: idToken('ana', flow.nonce, Math.floor(clock.getTime() / 1000)) }, null))
       .toMatchObject({ created: true, managed: null, managedError: 'MANAGED_WALLETS_NOT_CONFIGURED' });
-    await expect(plain.startEmail('ana@example.com')).rejects.toThrow('EMAIL_SIGN_IN_NOT_CONFIGURED');
+    await expect(plain.startEmail('ana@example.com', KEY)).rejects.toThrow('EMAIL_SIGN_IN_NOT_CONFIGURED');
   });
 });

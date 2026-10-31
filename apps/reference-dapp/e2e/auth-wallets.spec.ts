@@ -56,6 +56,10 @@ test('the landing opens sign-in with exactly Apple, Google, Email and Web3 Walle
   await page.locator('header').getByRole('link', { name: 'Launch Beta FloFi', exact: true }).click();
   await expect(page).toHaveURL('/login');
   await expect(page.getByRole('heading', { level: 1 })).toHaveText('Sign inyour way');
+  // Never framed by another site (clickjacking), never referred.
+  const headers = (await page.request.get('/login')).headers();
+  expect(headers['x-frame-options']).toBe('DENY');
+  expect(headers['content-security-policy']).toContain("frame-ancestors 'none'");
   const methods = page.getByRole('group', { name: 'Sign-in methods' }).getByRole('button');
   expect(await methods.allInnerTexts()).toEqual(['Apple', 'Google', 'Email', 'Web3 Wallet']);
   await expect(page.getByText(/Telegram|Passkey|TON/)).toHaveCount(0);
@@ -177,7 +181,7 @@ test('export: only managed wallets, explicit confirmation, provider frame only, 
   await shot(page, '07-export-wallet-modal-light');
 });
 
-test('skip for now reaches Build 0 and is remembered; another account sees none of the first account’s wallets', async ({ page, context }) => {
+test('skip for now reaches Build 0 and is remembered; another account sees none of the first account’s wallets; deletion', async ({ page, context }) => {
   await setup(page);
   await googleSignIn(page, 'e2e-google-bruno');
   await expect(page).toHaveURL('/onboarding');
@@ -186,8 +190,16 @@ test('skip for now reaches Build 0 and is remembered; another account sees none 
   await page.goto('/login'); await expect(page).toHaveURL('/app');
   await page.goto('/app/credentials');
   await expect(page.getByRole('region', { name: 'My wallets' }).getByText('No wallets in your account yet')).toBeVisible();
-  // A tampered session cookie is rejected by the server: the person is signed out, never switched to another account.
+  // Deleting the account (recent sign-in) removes it and signs out; the wallets themselves are untouched.
+  const mine = page.getByRole('region', { name: 'My wallets' });
+  await mine.getByRole('button', { name: 'Delete FloFi account' }).click();
+  await expect(mine.getByText(/Your wallets and their funds are not affected/)).toBeVisible();
   const cookie = (await accountCookie(context))!;
+  await mine.getByRole('button', { name: 'Delete account', exact: true }).click();
+  await expect(page).toHaveURL('/login');
+  // The deleted session's cookie (replayed, or tampered) is rejected by the server: nobody is signed in.
+  await context.addCookies([cookie]);
+  await page.goto('/onboarding'); await expect(page).toHaveURL(/\/login/);
   await context.addCookies([{ ...cookie, value: cookie.value.replace(/.$/, c => c === 'A' ? 'B' : 'A') }]);
   await page.goto('/onboarding'); await expect(page).toHaveURL(/\/login/);
 });

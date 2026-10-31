@@ -37,6 +37,9 @@ export async function relayDecision(input: { readonly path: string; readonly bod
   let body: Record<string, unknown>;
   try { body = JSON.parse(input.body) as Record<string, unknown>; } catch { return deny(400, 'PROVIDER_REQUEST_INVALID'); }
   if (!body || typeof body !== 'object' || Array.isArray(body)) return deny(400, 'PROVIDER_REQUEST_INVALID');
+  // Only the exact serialization the browser stamped: duplicate keys or any other re-encoding could make FloFi's checks and the provider's
+  // parser read different values.
+  if (JSON.stringify(body) !== input.body) return deny(400, 'PROVIDER_REQUEST_NOT_CANONICAL');
   // The browser may act only in the signed-in account's own provider organization, with the expected activity type.
   if (body.organizationId !== input.organization.organizationId) return deny(403, 'PROVIDER_ORGANIZATION_MISMATCH');
   const type = ALLOWED.get(input.path);

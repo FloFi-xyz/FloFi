@@ -57,10 +57,14 @@ function ImportDialog({ state, ecosystem, onClose, onImported }: { state: Accoun
     if (element && !element.open) element.showModal();
     let current = true;
     void import('../../accounts/turnkey-browser').then(module => module.openImportFrame(state.provider!, state.managed!, ecosystem, container.current!))
-      .then(opened => { if (current) { controller.current = opened; setPhase('ready'); } else opened.close(); },
+      .then(opened => {
+        if (!current) { opened.close(); return; }
+        container.current?.querySelector('iframe')?.setAttribute('title', t('Turnkey secure key field'));
+        controller.current = opened; setPhase('ready');
+      },
         cause => { if (current) { setPhase('failed'); setError(cause instanceof Error ? cause.message : 'MANAGED_IMPORT_UNAVAILABLE'); } });
     return () => { current = false; controller.current?.close(); controller.current = null; if (element?.open) element.close(); if (previous?.isConnected) previous.focus({ preventScroll: true }); };
-  }, [state, ecosystem]);
+  }, [state, ecosystem, t]);
   async function submit() {
     if (!controller.current) return;
     setPhase('importing'); setError(null);
@@ -77,7 +81,7 @@ function ImportDialog({ state, ecosystem, onClose, onImported }: { state: Accoun
       <h2 id="import-title">{t('Import {0} key', name)}</h2>
       <p>{t(ecosystem === 'evm' ? 'Paste the private key (64 hexadecimal characters) of the wallet you want to bring.' : 'Paste the private key (base58) of the Solana wallet you want to bring.')}</p>
       <div className={styles.warning}><AccountIcon name="warning" size={18}/><span>{t('Type or paste it only into the secure field below. It belongs to Turnkey, on its own domain: FloFi cannot read it, and it is encrypted before it leaves this field.')}</span></div>
-      <div ref={container} className={styles.frame} aria-label={t('Turnkey secure key field')} aria-busy={phase === 'loading'}/>
+      <div ref={container} className={styles.frame} role="group" aria-label={t('Turnkey secure key field')} aria-busy={phase === 'loading'}/>
       {phase === 'loading' && <p className={styles.status} role="status">{t('Opening the secure field…')}</p>}
       {error && <p className={styles.error} role="alert">{t(accountMessage(error))}</p>}
       <button type="button" className={styles.primary} disabled={phase !== 'ready'} onClick={() => void submit()}>{t(phase === 'importing' ? 'Importing…' : 'Import wallet')}</button>
@@ -122,7 +126,8 @@ export function AddWallets({ state }: { state: AccountState }) {
   const tile = (ecosystem: WalletEcosystem, kind: 'create' | 'import') => {
     const done = pending.filter(wallet => wallet.ecosystem === ecosystem && wallet.origin === (kind === 'create' ? 'generated' : 'imported'));
     return <button type="button" className={`${styles.tile}${done.length ? ` ${styles.tileDone}` : ''}`} disabled={!ready || busy !== null}
-      aria-label={t(kind === 'create' ? 'Create {0} wallet' : 'Import {0} key', ecosystem === 'evm' ? 'EVM' : 'Solana')}
+      aria-label={`${t(kind === 'create' ? 'Create {0} wallet' : 'Import {0} key', ecosystem === 'evm' ? 'EVM' : 'Solana')}${done.length
+        ? ` — ${t(kind === 'create' ? 'created: {0}' : 'imported: {0}', done.map(wallet => shortAddress(wallet.address)).join(', '))}` : ''}`}
       onClick={() => kind === 'create' ? void create(ecosystem) : setImporting(ecosystem)}>
       <strong><AccountIcon name={done.length ? 'check' : kind === 'create' ? 'plus' : 'import'} size={16}/>{t(kind === 'create' ? 'Create wallet' : 'Import key')}</strong>
       {done.length ? <code>{done.map(wallet => shortAddress(wallet.address)).join(', ')}</code>
@@ -151,14 +156,15 @@ export function AddWallets({ state }: { state: AccountState }) {
     </section>
     {pending.length > 0 && <ul className={styles.pending} aria-label={t('Wallets ready to save')}>{pending.map(wallet => <li key={`${wallet.ecosystem}:${wallet.address}`}>
       <span>{wallet.ecosystem === 'evm' ? 'EVM' : 'Solana'} · <code title={wallet.address}>{shortAddress(wallet.address)}</code></span>
-      <span className={`${styles.badge} ${styles.badgeGreen}`}>{t(wallet.origin === 'generated' ? 'Created' : 'Imported')}</span></li>)}</ul>}
+      <span className={`${styles.badge} ${styles.badgeGreen}`}>{t(wallet.origin === 'generated' ? 'Newly created' : 'Newly imported')}</span></li>)}</ul>}
     <p className={styles.status} role="status">{status}</p>
     {error && <p className={styles.error} role="alert">{t(accountMessage(error))}</p>}
     <div className={styles.saveRow}>
       <button type="button" className={styles.outline} disabled={pending.length === 0 || busy !== null} onClick={() => void save()}>{t(busy === 'save' ? 'Saving…' : 'Save wallets')}</button>
       <div className={styles.row} style={{ justifyContent: 'center', gap: 22 }}>
         <a className={styles.textLink} href="/app/credentials">{t('Connect an existing wallet instead')}</a>
-        <button type="button" className={styles.textLink} disabled={busy !== null} onClick={() => void setAccountOnboarding('dismissed').finally(() => window.location.assign('/app'))}>{t('Skip for now')}</button>
+        <button type="button" className={styles.textLink} disabled={busy !== null} onClick={() => void setAccountOnboarding('dismissed').finally(() => window.location.assign('/app'))}>
+          {t(pending.length ? 'Skip without saving these wallets' : 'Skip for now')}</button>
       </div>
       <p className={styles.small}>{t('Adding a wallet authorizes nothing. Every transaction is still simulated, reviewed and signed by you.')}</p>
     </div>

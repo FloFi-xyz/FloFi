@@ -26,7 +26,8 @@ beforeEach(() => { clearJwksCache(); fetched = 0; });
 
 describe('OIDC ID token verification', () => {
   it('accepts a genuine Google token and normalises the verified email', async () => {
-    expect(await verifyIdToken(google, sign(claims()), flow, { now, transport })).toEqual({ provider: 'google', subject: '1089', email: 'ana@example.com', emailVerified: true });
+    expect(await verifyIdToken(google, sign(claims()), flow, { now, transport })).toEqual({ provider: 'google', subject: '1089', email: 'ana@example.com', emailVerified: true,
+      expiresAt: new Date((at + 3600) * 1000) });
     expect(fetched).toBe(1);
     await verifyIdToken(google, sign(claims()), flow, { now, transport });
     expect(fetched).toBe(1);

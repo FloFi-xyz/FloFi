@@ -7,8 +7,8 @@
  * None of these actions signs, submits or authorizes a transaction.
  */
 import { cookies } from 'next/headers';
-import { accountAvailability, accountHost, clearAccountCookie, currentAccountSession, flowCookieOptions, managedHint, nextPath, setAccountCookie,
-  type AccountAvailability, type AccountHost } from '../accounts/account-host';
+import { accountAvailability, accountCookieOptions, accountHost, clearAccountCookie, currentAccountSession, flowCookieOptions, managedHint, nextPath, setAccountCookie,
+  supersede, type AccountAvailability, type AccountHost } from '../accounts/account-host';
 import { ACCOUNT_EMAIL_COOKIE, ACCOUNT_FLOW_TTL_SECONDS, ACCOUNT_OIDC_COOKIE, newOidcFlow, readEmailFlow, safeReturnPath, sealEmailFlow, sealOidcFlow,
   type AccountIntent, type AccountSessionToken } from '../accounts/account-session';
 import { parseAccountWalletId, type AccountView, type AccountWallet } from '../accounts/account-model';
@@ -55,14 +55,15 @@ export async function accountState(): Promise<AccountState> {
 /** Starts Google or Apple sign-in: returns the provider URL and seals state, nonce and PKCE verifier in an HttpOnly flow cookie. */
 export async function startSocialSignIn(provider: 'google' | 'apple', sessionKey: string | null, intent: AccountIntent = 'sign-in', returnTo = '/app'): Promise<Result<{ url: string }>> {
   try {
-    await host();
+    const h = await host();
     if (provider !== 'google' && provider !== 'apple') fail('OIDC_PROVIDER_INVALID');
     if (intent !== 'sign-in' && intent !== 'link') fail('ACCOUNT_INTENT_INVALID');
+    const current = intent === 'link' ? await currentAccountSession(h) ?? fail('ACCOUNT_SESSION_REQUIRED') : null;
     const config = oidcConfig(provider, process.env) ?? fail('OIDC_PROVIDER_NOT_CONFIGURED');
     const origin = await requestOrigin();
     // The provider returns to FLOFI_PUBLIC_ORIGIN; a flow started on any other host would lose its cookie, so it is refused up front.
     if (!config.redirectUri.startsWith(`${origin.uri}/`)) fail('OIDC_ORIGIN_MISMATCH');
-    const flow = newOidcFlow(provider, sessionKey, intent, returnTo);
+    const flow = newOidcFlow(provider, sessionKey, intent, returnTo, current);
     (await cookies()).set(ACCOUNT_OIDC_COOKIE, sealOidcFlow(process.env, flow, origin.domain, new Date()), flowCookieOptions(origin.secure, ACCOUNT_FLOW_TTL_SECONDS));
     return { ok: true, value: { url: authorizationUrl(config, flow) } };
   } catch (cause) { return failure(cause); }
@@ -74,9 +75,11 @@ export async function startEmailSignIn(email: string, sessionKey: string, intent
     const h = await host();
     if (!h.service.validSessionKey(sessionKey)) fail('ACCOUNT_SESSION_KEY_INVALID');
     if (intent !== 'sign-in' && intent !== 'link') fail('ACCOUNT_INTENT_INVALID');
-    const started = await h.service.startEmail(email), origin = await requestOrigin();
-    (await cookies()).set(ACCOUNT_EMAIL_COOKIE, sealEmailFlow(process.env, { otpId: started.otpId, email: started.email, sessionKey, intent, returnTo: safeReturnPath(returnTo) },
-      origin.domain, new Date()), flowCookieOptions(origin.secure, ACCOUNT_FLOW_TTL_SECONDS));
+    if (intent === 'link' && !await currentAccountSession(h)) fail('ACCOUNT_SESSION_REQUIRED');
+    const started = await h.service.startEmail(email, sessionKey), origin = await requestOrigin();
+    // Same-site only (the code is typed on this page), so the challenge cookie stays Lax.
+    (await cookies()).set(ACCOUNT_EMAIL_COOKIE, sealEmailFlow(process.env, { challengeId: started.challengeId, intent, returnTo: safeReturnPath(returnTo) },
+      origin.domain, new Date()), accountCookieOptions(origin.secure, ACCOUNT_FLOW_TTL_SECONDS));
     return { ok: true, value: { email: started.email } };
   } catch (cause) { return failure(cause, 'EMAIL_SIGN_IN_FAILED'); }
 }
@@ -84,9 +87,17 @@ export async function completeEmailSignIn(code: string): Promise<Result<{ next: 
   try {
     const h = await host(), origin = await requestOrigin(), jar = await cookies();
     const flow = readEmailFlow(process.env, jar.get(ACCOUNT_EMAIL_COOKIE)?.value, new Date(), origin.domain) ?? fail('EMAIL_CHALLENGE_EXPIRED');
-    const outcome = await h.service.completeEmail(flow, code, await currentAccountSession(h));
+    const previous = await currentAccountSession(h);
+    let outcome;
+    try { outcome = await h.service.completeEmail(flow, code, previous); }
+    catch (error) {
+      // An expired or exhausted challenge cannot be retried: the person requests a new code.
+      if (error instanceof Error && error.message === 'EMAIL_CHALLENGE_EXPIRED') jar.set(ACCOUNT_EMAIL_COOKIE, '', accountCookieOptions(origin.secure, 0));
+      throw error;
+    }
     // The challenge is single-use once the provider accepted the code.
-    jar.set(ACCOUNT_EMAIL_COOKIE, '', flowCookieOptions(origin.secure, 0));
+    jar.set(ACCOUNT_EMAIL_COOKIE, '', accountCookieOptions(origin.secure, 0));
+    await supersede(h, previous, outcome.session);
     await setAccountCookie(managedHint(outcome));
     return { ok: true, value: { next: nextPath(outcome, flow.intent, flow.returnTo), managed: outcome.managed, managedError: outcome.managedError } };
   } catch (cause) { return failure(cause, 'EMAIL_SIGN_IN_FAILED'); }
@@ -100,6 +111,7 @@ export async function walletAccountSignIn(namespace: 'eip155' | 'solana', provid
   try {
     const h = await host(), proof = await freshWalletProof(namespace) ?? fail('WALLET_SESSION_REQUIRED');
     const outcome = await h.service.completeWallet(proof, { key: providerKey, name: providerName }, 'sign-in', null);
+    await supersede(h, await currentAccountSession(h), outcome.session);
     await setAccountCookie(outcome.session);
     return { ok: true, value: { next: nextPath(outcome, 'sign-in', returnTo) } };
   } catch (cause) { return failure(cause, 'WALLET_SIGN_IN_FAILED'); }
@@ -144,6 +156,18 @@ export async function removeAccountWallet(id: string): Promise<Result<null>> {
   try {
     const { host: h, session } = await signedIn(), wallet = parseAccountWalletId(id) ?? fail('ACCOUNT_WALLET_INVALID');
     await h.store.removeWallet(session.accountId, wallet!.ecosystem, wallet!.address);
+    return { ok: true, value: null };
+  } catch (cause) { return failure(cause); }
+}
+/**
+ * Deletes the signed-in FloFi account (recent sign-in required): identities, sessions and saved wallet metadata. Wallets kept by the
+ * provider and on-chain assets are not deleted or moved; export a managed wallet first to keep using it elsewhere.
+ */
+export async function deleteFloFiAccount(): Promise<Result<null>> {
+  try {
+    const { host: h, session } = await signedIn();
+    await h.service.deleteAccount(session);
+    await clearAccountCookie();
     return { ok: true, value: null };
   } catch (cause) { return failure(cause); }
 }

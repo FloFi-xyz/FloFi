@@ -45,7 +45,7 @@ export const SHIPPED_MIGRATIONS: readonly MigrationIdentity[] = Object.freeze([
   { version: 15, name: 'workflow_runs', sha256: '5dfefcf7465d874da5880ae5a082f7f47e28ede51adfdef46dbbe3e3f7ba945f' },
   { version: 16, name: 'owner_history_purge', sha256: 'a3c258cadd9d7865ad9d36d63ec0921fc47455bb3651c201074f3b0486b4be6f' },
   { version: 17, name: 'copilot_metrics', sha256: 'c20a07de7bb504cbb8d95776796a0e6b412a1130c0539aee3449ceb6f89c45bf' },
-  { version: 18, name: 'flofi_accounts', sha256: '22179ac09558d98a2046a70d713069f0873bde322722ed7ee8b88f628e6820d4' },
+  { version: 18, name: 'flofi_accounts', sha256: '0919a57a5af80a1376ada213bb00ac5db79c434ab7a9ff0ebea50e6a9664ae75' },
 ].map(migration => Object.freeze(migration)));
 
 /**
@@ -64,8 +64,8 @@ export type ForwardCompatibilityCertificate = {
 export const CERTIFIED_FORWARD_MIGRATIONS: readonly ForwardCompatibilityCertificate[] = Object.freeze([
   {
     base: { version: 17, name: 'copilot_metrics', sha256: 'c20a07de7bb504cbb8d95776796a0e6b412a1130c0539aee3449ceb6f89c45bf' },
-    // BUILD-FLOFI-AUTH-WALLETS-001: four new flofi_account* tables; nothing on any pre-existing relation, function, trigger or index.
-    migrations: [{ version: 18, name: 'flofi_accounts', sha256: '22179ac09558d98a2046a70d713069f0873bde322722ed7ee8b88f628e6820d4' }],
+    // BUILD-FLOFI-AUTH-WALLETS-001: six new flofi_account* tables; nothing on any pre-existing relation, function, trigger or index.
+    migrations: [{ version: 18, name: 'flofi_accounts', sha256: '0919a57a5af80a1376ada213bb00ac5db79c434ab7a9ff0ebea50e6a9664ae75' }],
     assessment: 'docs/deploy/SCHEMA-COMPATIBILITY.md#12-certificate-0018_flofi_accounts',
   },
   {

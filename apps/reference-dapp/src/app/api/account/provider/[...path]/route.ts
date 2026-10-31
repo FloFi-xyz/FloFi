@@ -7,6 +7,9 @@ export const dynamic = 'force-dynamic';
 const json = (status: number, value: unknown) => new Response(JSON.stringify(value), { status, headers: { 'content-type': 'application/json', 'cache-control': 'no-store' } });
 
 export async function POST(request: Request, context: { params: Promise<{ path: string[] }> }) {
+  // Same-origin fetches only (defence in depth: the Lax account cookie and the browser's stamp already rule out cross-site use).
+  const site = request.headers.get('sec-fetch-site');
+  if (site !== null && site !== 'same-origin') return json(403, { code: 'PROVIDER_RELAY_CROSS_SITE' });
   let host;
   try { host = await accountHost(); } catch { return json(503, { code: 'ACCOUNTS_UNAVAILABLE' }); }
   if (!host) return json(503, { code: 'ACCOUNTS_NOT_CONFIGURED' });

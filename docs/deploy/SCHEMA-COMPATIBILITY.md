@@ -620,10 +620,11 @@ do not drop the telemetry table or loosen schema validation to accommodate an ol
 
 | Base | Certified forward migration | SHA-256 |
 | --- | --- | --- |
-| 0017 `copilot_metrics` | 0018 `flofi_accounts` | `22179ac09558d98a2046a70d713069f0873bde322722ed7ee8b88f628e6820d4` |
+| 0017 `copilot_metrics` | 0018 `flofi_accounts` | `0919a57a5af80a1376ada213bb00ac5db79c434ab7a9ff0ebea50e6a9664ae75` |
 
-Migration 0018 (BUILD-FLOFI-AUTH-WALLETS-001) adds four tenant-scoped tables: `flofi_accounts`, `flofi_account_identities`,
-`flofi_account_sessions` and `flofi_account_wallets`. It changes no execution, approval, owner-history, wallet-session, delegation,
+Migration 0018 (BUILD-FLOFI-AUTH-WALLETS-001) adds six tenant-scoped tables: `flofi_accounts`, `flofi_account_identities`,
+`flofi_account_sessions`, `flofi_account_wallets`, `flofi_account_email_challenges` (attempt counting and throttling; never the code)
+and `flofi_account_used_proofs` (SHA-256 digests of accepted ID tokens, for single use). It changes no execution, approval, owner-history, wallet-session, delegation,
 automation, saved-workflow or telemetry relation, and defines no function or trigger. The tables hold account identifiers, sign-in
 identity subjects (OIDC `sub`, a verified email address or a proven wallet address), revocable session records and public wallet
 metadata. CHECK constraints admit no secret: wallet rows hold an address, a provider name, the provider's non-secret resource id and

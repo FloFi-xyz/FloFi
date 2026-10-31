@@ -21,7 +21,10 @@ const MESSAGES: Readonly<Record<string, string>> = {
   EMAIL_SIGN_IN_NOT_CONFIGURED: 'Email sign-in is not available on this deployment yet.',
   EMAIL_CODE_INVALID: 'Enter the 6-digit code from the email.',
   EMAIL_CODE_REJECTED: 'That code is not valid or has expired. Request a new one.',
-  EMAIL_CHALLENGE_EXPIRED: 'That code expired. Request a new one.',
+  EMAIL_CHALLENGE_EXPIRED: 'That code expired or was tried too many times. Request a new one.',
+  EMAIL_RATE_LIMITED: 'Too many codes were requested for this address. Wait a while, then try again.',
+  OIDC_TOKEN_REPLAYED: 'That sign-in was already used. Start again.',
+  ACCOUNT_NOT_FOUND: 'This FloFi account no longer exists.',
   EMAIL_SIGN_IN_FAILED: 'Email sign-in did not complete. Try again.',
   MANAGED_SESSION_KEY_UNAVAILABLE: 'This browser could not create a secure session key. Allow site storage and try again.',
   WALLET_SESSION_REQUIRED: 'Your wallet did not sign the sign-in message. Nothing was signed in.',
@@ -44,5 +47,6 @@ export function accountMessage(code: string): string {
   if (/^MANAGED_WALLETS_NEED_(GOOGLE|APPLE|EMAIL)_SIGN_IN$/.test(code)) return 'Your FloFi wallets are unlocked with the method you first used for them. Sign in with it to manage them.';
   if (code.startsWith('OIDC_')) return 'FloFi could not verify that sign-in. Nothing was signed in.';
   if (code.startsWith('MANAGED_') || code.startsWith('TURNKEY_')) return 'The wallet provider did not complete the request. Nothing changed.';
-  return / /.test(code) ? code : 'Something went wrong. Nothing changed. Try again.';
+  // Only catalogued messages are shown: an unexpected browser or provider error text never reaches the interface.
+  return 'Something went wrong. Nothing changed. Try again.';
 }

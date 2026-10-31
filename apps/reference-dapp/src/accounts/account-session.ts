@@ -30,8 +30,11 @@ export type AccountSessionToken = { readonly accountId: string; readonly session
 export type OidcProvider = 'google' | 'apple';
 export type AccountIntent = 'sign-in' | 'link';
 export type OidcFlow = { readonly provider: OidcProvider; readonly state: string; readonly nonce: string; readonly verifier: string;
-  readonly sessionKey: string | null; readonly intent: AccountIntent; readonly returnTo: string };
-export type EmailFlow = { readonly otpId: string; readonly email: string; readonly sessionKey: string; readonly intent: AccountIntent; readonly returnTo: string };
+  readonly sessionKey: string | null; readonly intent: AccountIntent; readonly returnTo: string;
+  /** Link intent only: the signed-in session that started the flow (Apple's cross-site return carries no Lax cookie). Re-verified on return. */
+  readonly linkSession?: AccountSessionToken | null };
+/** The email challenge cookie names only FloFi's challenge record: no address, provider id or code. */
+export type EmailFlow = { readonly challengeId: string; readonly intent: AccountIntent; readonly returnTo: string };
 
 type Kind = 'a1' | 'o1' | 'm1';
 const seconds = (now: Date) => Math.floor(now.getTime() / 1000);
@@ -39,7 +42,7 @@ const METHODS: readonly IdentityKind[] = ['google', 'apple', 'email', 'eip155', 
 const HEX32 = /^[0-9a-f]{32}$/, B64URL = /^[A-Za-z0-9_-]{43,128}$/;
 /** A compressed P-256 public key (hex): the browser's provider session key. */
 export const SESSION_PUBLIC_KEY = /^0[23][0-9a-f]{64}$/;
-const OTP_ID = /^[A-Za-z0-9-]{8,128}$/;
+
 
 function accountKey(env: Env): Buffer {
   return Buffer.from(hkdfSync('sha256', walletSessionKey(env), 'flofi', 'flofi/account-session/v1', 32));
@@ -91,32 +94,37 @@ export function safeReturnPath(value: unknown): string {
   return /^\/(?:app|onboarding)(?:[/?]|$)/.test(value) ? value : '/app';
 }
 
-export function newOidcFlow(provider: OidcProvider, sessionKey: string | null, intent: AccountIntent, returnTo: string): OidcFlow {
+export function newOidcFlow(provider: OidcProvider, sessionKey: string | null, intent: AccountIntent, returnTo: string, linkSession: AccountSessionToken | null = null): OidcFlow {
   if (sessionKey !== null && !SESSION_PUBLIC_KEY.test(sessionKey)) throw new Error('ACCOUNT_SESSION_KEY_INVALID');
   // With a provider session key the nonce commits the ID token to that browser key (sha256 of the compressed key, hex), so the token
   // can open a provider session for this browser only; otherwise it is a random single-use value.
   const nonce = sessionKey ? createHash('sha256').update(sessionKey).digest('hex') : randomBytes(32).toString('base64url');
   return { provider, state: randomBytes(32).toString('base64url'), nonce, verifier: randomBytes(48).toString('base64url'),
-    sessionKey, intent, returnTo: safeReturnPath(returnTo) };
+    sessionKey, intent, returnTo: safeReturnPath(returnTo), linkSession: intent === 'link' ? linkSession : null };
 }
 export function sealOidcFlow(env: Env, flow: OidcFlow, domain: string, now: Date): string {
+  const link = flow.intent === 'link' && flow.linkSession ? { l: [flow.linkSession.accountId, flow.linkSession.sessionId, flow.linkSession.method,
+    flow.linkSession.authenticatedAt, flow.linkSession.expiresAt] } : {};
   return seal('o1', { p: flow.provider, s: flow.state, n: flow.nonce, v: flow.verifier, k: flow.sessionKey, r: flow.intent, u: flow.returnTo,
-    e: seconds(now) + ACCOUNT_FLOW_TTL_SECONDS, d: domain }, accountKey(env));
+    e: seconds(now) + ACCOUNT_FLOW_TTL_SECONDS, d: domain, ...link }, accountKey(env));
 }
 export function readOidcFlow(env: Env, token: string | undefined, now: Date, domain: string): OidcFlow | null {
   const key = keyOrNull(env), v = key && unseal('o1', token, key, now, domain);
   if (!v || (v.p !== 'google' && v.p !== 'apple') || typeof v.s !== 'string' || !B64URL.test(v.s) || typeof v.n !== 'string' || !B64URL.test(v.n)
     || typeof v.v !== 'string' || !B64URL.test(v.v) || (v.k !== null && (typeof v.k !== 'string' || !SESSION_PUBLIC_KEY.test(v.k)))
     || (v.r !== 'sign-in' && v.r !== 'link')) return null;
-  return { provider: v.p, state: v.s, nonce: v.n, verifier: v.v, sessionKey: v.k as string | null, intent: v.r, returnTo: safeReturnPath(v.u) };
+  const l = Array.isArray(v.l) ? v.l : null;
+  const linkSession = v.r === 'link' && l && l.length === 5 && typeof l[0] === 'string' && ACCOUNT_ID.test(l[0]) && typeof l[1] === 'string' && HEX32.test(l[1])
+    && METHODS.includes(l[2] as IdentityKind) && Number.isSafeInteger(l[3]) && Number.isSafeInteger(l[4])
+    ? { accountId: l[0], sessionId: l[1], method: l[2] as IdentityKind, authenticatedAt: l[3] as number, expiresAt: l[4] as number } : null;
+  return { provider: v.p, state: v.s, nonce: v.n, verifier: v.v, sessionKey: v.k as string | null, intent: v.r, returnTo: safeReturnPath(v.u), linkSession };
 }
 export function sealEmailFlow(env: Env, flow: EmailFlow, domain: string, now: Date): string {
-  return seal('m1', { o: flow.otpId, m: flow.email, k: flow.sessionKey, r: flow.intent, u: flow.returnTo, e: seconds(now) + ACCOUNT_FLOW_TTL_SECONDS, d: domain },
-    accountKey(env));
+  if (!HEX32.test(flow.challengeId)) throw new Error('EMAIL_CHALLENGE_INVALID');
+  return seal('m1', { c: flow.challengeId, r: flow.intent, u: flow.returnTo, e: seconds(now) + ACCOUNT_FLOW_TTL_SECONDS, d: domain }, accountKey(env));
 }
 export function readEmailFlow(env: Env, token: string | undefined, now: Date, domain: string): EmailFlow | null {
   const key = keyOrNull(env), v = key && unseal('m1', token, key, now, domain);
-  if (!v || typeof v.o !== 'string' || !OTP_ID.test(v.o) || typeof v.m !== 'string' || v.m.length > 254 || typeof v.k !== 'string'
-    || !SESSION_PUBLIC_KEY.test(v.k) || (v.r !== 'sign-in' && v.r !== 'link')) return null;
-  return { otpId: v.o, email: v.m, sessionKey: v.k, intent: v.r, returnTo: safeReturnPath(v.u) };
+  if (!v || typeof v.c !== 'string' || !HEX32.test(v.c) || (v.r !== 'sign-in' && v.r !== 'link')) return null;
+  return { challengeId: v.c, intent: v.r, returnTo: safeReturnPath(v.u) };
 }

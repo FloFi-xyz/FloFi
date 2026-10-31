@@ -38,6 +38,7 @@ describe('sign-in flow cookies', () => {
   it('binds the OIDC nonce to the browser session key, or to a random value', () => {
     const bound = newOidcFlow('google', key, 'sign-in', '/app');
     expect(bound.nonce).toBe(createHash('sha256').update(key).digest('hex'));
+    expect(bound.linkSession).toBeNull();
     const plain = newOidcFlow('apple', null, 'sign-in', '/app');
     expect(plain.nonce).not.toBe(newOidcFlow('apple', null, 'sign-in', '/app').nonce);
     expect(() => newOidcFlow('google', 'not-a-key', 'sign-in', '/app')).toThrow('ACCOUNT_SESSION_KEY_INVALID');
@@ -48,10 +49,16 @@ describe('sign-in flow cookies', () => {
     expect(readAccountSession(env, token, now, 'flofi.xyz')).toBeNull();
     expect(readOidcFlow(env, sealAccountSession(env, session, 'flofi.xyz', now), now, 'flofi.xyz')).toBeNull();
   });
-  it('keeps no OTP code in the email challenge', () => {
-    const token = sealEmailFlow(env, { otpId: 'otp-12345678', email: 'ana@example.com', sessionKey: key, intent: 'sign-in', returnTo: '/app' }, 'flofi.xyz', now);
-    expect(readEmailFlow(env, token, now, 'flofi.xyz')).toEqual({ otpId: 'otp-12345678', email: 'ana@example.com', sessionKey: key, intent: 'sign-in', returnTo: '/app' });
-    expect(Object.keys(JSON.parse(Buffer.from(token.split('.')[1]!, 'base64url').toString())).sort()).toEqual(['d', 'e', 'k', 'm', 'o', 'r', 'u']);
+  it('keeps only the challenge id in the email cookie: no address, provider id or code', () => {
+    const token = sealEmailFlow(env, { challengeId: 'c'.repeat(32), intent: 'sign-in', returnTo: '/app' }, 'flofi.xyz', now);
+    expect(readEmailFlow(env, token, now, 'flofi.xyz')).toEqual({ challengeId: 'c'.repeat(32), intent: 'sign-in', returnTo: '/app' });
+    expect(Object.keys(JSON.parse(Buffer.from(token.split('.')[1]!, 'base64url').toString())).sort()).toEqual(['c', 'd', 'e', 'r', 'u']);
+    expect(() => sealEmailFlow(env, { challengeId: 'x', intent: 'sign-in', returnTo: '/app' }, 'flofi.xyz', now)).toThrow('EMAIL_CHALLENGE_INVALID');
+  });
+  it('carries a link session only for link flows', () => {
+    const linked = newOidcFlow('apple', key, 'link', '/app/credentials', session), plain = newOidcFlow('apple', key, 'sign-in', '/app', session);
+    expect(readOidcFlow(env, sealOidcFlow(env, linked, 'flofi.xyz', now), now, 'flofi.xyz')?.linkSession).toEqual(session);
+    expect(readOidcFlow(env, sealOidcFlow(env, plain, 'flofi.xyz', now), now, 'flofi.xyz')?.linkSession).toBeNull();
   });
   it('only returns to FloFi app paths (no open redirect)', () => {
     expect(['/app', '/app/credentials', '/onboarding/wallets', '/app?x=1'].map(safeReturnPath)).toEqual(['/app', '/app/credentials', '/onboarding/wallets', '/app?x=1']);

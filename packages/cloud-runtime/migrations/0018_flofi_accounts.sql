@@ -59,6 +59,34 @@ CREATE TABLE flofi_account_sessions (
   CHECK (expires_at > authenticated_at)
 );
 CREATE INDEX flofi_account_sessions_account ON flofi_account_sessions (tenant_id, account_id, expires_at);
+CREATE INDEX flofi_account_sessions_expiry ON flofi_account_sessions (tenant_id, expires_at);
+
+-- Email one-time-code challenges, for attempt counting and per-address throttling. The code itself is never stored; the provider
+-- verifies it. `browser_binding` is the browser's compressed public session point (public, not a secret).
+CREATE TABLE flofi_account_email_challenges (
+  tenant_id text NOT NULL REFERENCES tenants(tenant_id),
+  challenge_id text NOT NULL CHECK (challenge_id ~ '^[0-9a-f]{32}$'),
+  email text NOT NULL CHECK (length(email) <= 254 AND email = lower(email)),
+  provider_challenge text NOT NULL CHECK (provider_challenge ~ '^[A-Za-z0-9-]{8,128}$'),
+  browser_binding text NOT NULL CHECK (browser_binding ~ '^0[23][0-9a-f]{64}$'),
+  attempts integer NOT NULL DEFAULT 0 CHECK (attempts BETWEEN 0 AND 10),
+  created_at timestamptz NOT NULL DEFAULT now(),
+  expires_at timestamptz NOT NULL,
+  consumed_at timestamptz,
+  PRIMARY KEY (tenant_id, challenge_id),
+  CHECK (expires_at > created_at)
+);
+CREATE INDEX flofi_account_email_challenges_email ON flofi_account_email_challenges (tenant_id, email, created_at DESC);
+CREATE INDEX flofi_account_email_challenges_recent ON flofi_account_email_challenges (tenant_id, created_at DESC);
+
+-- Single-use sign-in proofs: the SHA-256 digest of each accepted OIDC ID token, kept until that token expires.
+CREATE TABLE flofi_account_used_proofs (
+  tenant_id text NOT NULL REFERENCES tenants(tenant_id),
+  digest text NOT NULL CHECK (digest ~ '^[0-9a-f]{64}$'),
+  expires_at timestamptz NOT NULL,
+  PRIMARY KEY (tenant_id, digest)
+);
+CREATE INDEX flofi_account_used_proofs_expiry ON flofi_account_used_proofs (tenant_id, expires_at);
 
 -- Public wallet metadata. A wallet address appears under at most one account of a tenant. Removing a row removes FloFi's
 -- association only: it never destroys an on-chain wallet, revokes a provider key or moves assets.

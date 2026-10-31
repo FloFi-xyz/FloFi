@@ -26,6 +26,8 @@ import { activeNetworkScope } from '../domain/network-scope';
 import { solanaWalletErrorMessage } from '../wallet/wallet-errors';
 
 export type Namespace = 'eip155' | 'solana';
+/** One proof attempt: the account the server verified (null when cancelled or failed), the error code, and the wallet chosen. */
+export type ProofOutcome = { readonly account: string | null; readonly error: string | null; readonly wallet: { readonly key: string; readonly name: string } | null };
 /** BUILD-CHAT-LEARNING-002: dispatched on `window` when the proven wallet or a Privacy & memory choice changed. */
 export const LEARNING_CHANGED = 'flofi:learning-changed';
 /**
@@ -56,7 +58,9 @@ export function useWalletProof(namespace: Namespace | null, chain: SolanaWalletC
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   /** BUILD-FLOFI-AUTH-WALLETS-001: the wallet the owner chose for the last proof (display metadata only, never an identity). */
-  const [wallet, setWallet] = useState<{ readonly key: string; readonly name: string } | null>(null);
+  const [wallet, setWalletState] = useState<{ readonly key: string; readonly name: string } | null>(null);
+  const walletRef = useRef<{ readonly key: string; readonly name: string } | null>(null);
+  const setWallet = (value: { readonly key: string; readonly name: string }) => { walletRef.current = value; setWalletState(value); };
   const requestLock = useRef(false), namespaceRef = useRef(namespace); namespaceRef.current = namespace;
   const origin = useRef<object>({});
   const embedded = typeof window !== 'undefined' && window.location?.pathname === '/mcp/approve';
@@ -75,9 +79,14 @@ export function useWalletProof(namespace: Namespace | null, chain: SolanaWalletC
     window.addEventListener(WALLET_PROOF_CHANGED, changed);
     return () => window.removeEventListener(WALLET_PROOF_CHANGED, changed);
   }, [namespace, refresh]);
-  async function run(action: () => Promise<string | null>) {
-    if (requestLock.current) return; requestLock.current = true; setBusy(true); setError(null);
+  /**
+   * BUILD-FLOFI-AUTH-WALLETS-001: resolves with this attempt's outcome (the proven account, or the error / null when the owner closed the
+   * chooser), so a caller acts on exactly this proof and never on an earlier session. Existing callers ignore the value.
+   */
+  async function run(action: () => Promise<string | null>): Promise<ProofOutcome> {
+    if (requestLock.current) return { account: null, error: null, wallet: null }; requestLock.current = true; setBusy(true); setError(null);
     const requestedNamespace = namespace;
+    walletRef.current = null;
     try {
       const account = await action();
       // BUILD-CHAT-LEARNING-002: a newly proven wallet changes whose Copilot memory applies; the Copilot reloads its learning context.
@@ -85,7 +94,12 @@ export function useWalletProof(namespace: Namespace | null, chain: SolanaWalletC
         setProven(account); window.dispatchEvent(new Event(LEARNING_CHANGED));
         window.dispatchEvent(new CustomEvent(WALLET_PROOF_CHANGED, { detail: { namespace: requestedNamespace, origin: origin.current } }));
       }
-    } catch (cause) { if (namespaceRef.current === requestedNamespace) setError(codeOf(cause)); } finally { requestLock.current = false; setBusy(false); }
+      return { account, error: null, wallet: account ? walletRef.current : null };
+    } catch (cause) {
+      const code = codeOf(cause);
+      if (namespaceRef.current === requestedNamespace) setError(code);
+      return { account: null, error: code, wallet: null };
+    } finally { requestLock.current = false; setBusy(false); }
   }
   /** `another`: the owner asked to prove a different wallet, so the selector opens even when one is connected. */
   const proveEvm = (another = false) => run(async () => {

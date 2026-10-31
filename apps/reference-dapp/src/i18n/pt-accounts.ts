@@ -3,10 +3,8 @@
 export const portugueseAccounts: Readonly<Record<string, string>> = {
   // Shell and showcase
   'FloFi home': 'Início do FloFi', 'Dark theme': 'Tema escuro', 'About FloFi accounts': 'Sobre as contas FloFi',
-  'Your account': 'Sua conta', 'One sign-in for all': 'Um login para tudo', 'Highlights': 'Destaques', 'Highlight {0} of {1}': 'Destaque {0} de {1}',
+  'Your account': 'Sua conta', 'One account for FloFi': 'Uma conta para o FloFi', 'Highlights': 'Destaques', 'Highlight {0} of {1}': 'Destaque {0} de {1}',
   'One account. Every workflow.': 'Uma conta. Todos os workflows.',
-  'Build, simulate and execute on EVM and Solana with one sign-in — in the app, with the Copilot or through your AI agents.':
-    'Construa, simule e execute em EVM e Solana com um só login — no app, com o Copilot ou pelos seus agentes de IA.',
   'Your wallets, your keys.': 'Suas carteiras, suas chaves.',
   'Create or import wallets with our wallet provider, or keep using MetaMask, Phantom and Solflare. FloFi never holds a key.':
     'Crie ou importe carteiras com nosso provedor de carteiras, ou continue usando MetaMask, Phantom e Solflare. O FloFi nunca guarda uma chave.',
@@ -15,7 +13,6 @@ export const portugueseAccounts: Readonly<Record<string, string>> = {
     'Entrar nunca aprova uma transação. Cada uma é simulada, revisada e assinada pela sua própria carteira.',
   'AI agents (MCP)': 'Agentes de IA (MCP)', 'Dashboard': 'Painel',
   'FloFi wallet · Generated': 'Carteira FloFi · Gerada', 'Phantom · Connected': 'Phantom · Conectada', 'PROTECTED BY TURNKEY': 'PROTEGIDO PELA TURNKEY',
-  'Keys are created and stored in secure enclaves. Export is yours alone.': 'As chaves são criadas e guardadas em enclaves seguros. Só você pode exportá-las.',
   'YOUR WORKFLOW': 'SEU WORKFLOW', 'Swap 500 USDC → ETH on Base': 'Trocar 500 USDC → ETH na Base', 'STRATEGY MANIFEST': 'STRATEGY MANIFEST',
   'Review fees, route and limits — then your wallet signs.': 'Revise taxas, rota e limites — depois sua carteira assina.',
   // Sign in
@@ -130,7 +127,6 @@ export const portugueseAccounts: Readonly<Record<string, string>> = {
   'Email sign-in is not available on this deployment yet.': 'O login por email ainda não está disponível nesta implantação.',
   'Enter the 6-digit code from the email.': 'Digite o código de 6 dígitos do email.',
   'That code is not valid or has expired. Request a new one.': 'Esse código é inválido ou expirou. Peça um novo.',
-  'That code expired. Request a new one.': 'Esse código expirou. Peça um novo.',
   'Email sign-in did not complete. Try again.': 'O login por email não foi concluído. Tente novamente.',
   'This browser could not create a secure session key. Allow site storage and try again.': 'Este navegador não conseguiu criar uma chave de sessão segura. Permita o armazenamento do site e tente novamente.',
   'Your wallet did not sign the sign-in message. Nothing was signed in.': 'Sua carteira não assinou a mensagem de login. Ninguém foi conectado.',
@@ -149,4 +145,30 @@ export const portugueseAccounts: Readonly<Record<string, string>> = {
   'Your FloFi wallets are unlocked with the method you first used for them. Sign in with it to manage them.':
     'Suas carteiras FloFi são desbloqueadas com o método que você usou primeiro para elas. Entre com ele para gerenciá-las.',
   'Something went wrong. Nothing changed. Try again.': 'Algo deu errado. Nada mudou. Tente novamente.',
+  // Review follow-ups: honesty, deletion, throttling, accessibility
+  'Keep your workflows and wallets with one FloFi account. Your wallet still reviews and signs every transaction.':
+    'Guarde seus workflows e carteiras em uma conta FloFi. Sua carteira continua revisando e assinando cada transação.',
+  'Keys are created and kept by Turnkey, not by FloFi.': 'As chaves são criadas e guardadas pela Turnkey, não pelo FloFi.',
+  'Play highlights': 'Reproduzir destaques', 'Pause highlights': 'Pausar destaques',
+  'The secret is shown only inside Turnkey’s secure frame below, for you to copy there. FloFi never reads it or writes your clipboard.':
+    'O segredo aparece só dentro do quadro seguro da Turnkey abaixo, para você copiar ali. O FloFi nunca o lê nem escreve na sua área de transferência.',
+  'You will no longer be able to sign in with this wallet, unless it is your only way to sign in.':
+    'Você não poderá mais entrar com esta carteira, a menos que seja sua única forma de entrar.',
+  '{0} linked to your FloFi account. It is also your active wallet in FloFi now.': '{0} vinculada à sua conta FloFi. Agora ela também é sua carteira ativa no FloFi.',
+  'Delete FloFi account': 'Excluir conta FloFi', 'Delete account': 'Excluir conta',
+  'Delete your FloFi account? Your sign-in identities, sessions and saved wallet addresses are deleted from FloFi.':
+    'Excluir sua conta FloFi? Suas identidades de login, sessões e endereços de carteira salvos são excluídos do FloFi.',
+  'Wallets created or imported with Turnkey are not deleted and FloFi can no longer show or export them: export them first if you want to keep using them.':
+    'As carteiras criadas ou importadas com a Turnkey não são excluídas e o FloFi não poderá mais mostrá-las nem exportá-las: exporte-as antes se quiser continuar a usá-las.',
+  'Your wallets and their funds are not affected.': 'Suas carteiras e os fundos não são afetados.',
+  'created: {0}': 'criada: {0}', 'imported: {0}': 'importada: {0}', 'Newly created': 'Recém-criada', 'Newly imported': 'Recém-importada',
+  'Skip without saving these wallets': 'Pular sem salvar estas carteiras', 'Continue to FloFi': 'Continuar para o FloFi',
+  'FloFi stores your sign-in identity (email address or provider ID) and the public addresses of wallets you save, never a key. You can delete your account in Credentials.':
+    'O FloFi guarda sua identidade de login (email ou ID do provedor) e os endereços públicos das carteiras que você salvar, nunca uma chave. Você pode excluir sua conta em Credenciais.',
+  'FloFi account': 'Conta FloFi', 'Use 1–40 characters.': 'Use de 1 a 40 caracteres.',
+  'That code expired or was tried too many times. Request a new one.': 'Esse código expirou ou teve tentativas demais. Peça um novo.',
+  'Too many codes were requested for this address. Wait a while, then try again.': 'Foram pedidos códigos demais para este endereço. Aguarde um pouco e tente novamente.',
+  'That sign-in was already used. Start again.': 'Esse login já foi usado. Comece de novo.',
+  'This FloFi account no longer exists.': 'Esta conta FloFi não existe mais.',
+  'Link a wallet from Credentials → My wallets': 'Vincule uma carteira em Credenciais → Minhas carteiras',
 };

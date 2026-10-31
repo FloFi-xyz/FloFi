@@ -20,7 +20,7 @@ export async function signOutThisBrowser(): Promise<void> {
 export function accountDisplay(account: NonNullable<AccountState['account']>): { name: string; method: string } {
   const own = account.identities.find(identity => identity.kind === account.method) ?? account.identities[0];
   const label = own?.label ?? '';
-  return { name: own?.kind === 'eip155' || own?.kind === 'solana' ? shortAddress(label) : label || 'FloFi account', method: IDENTITY_LABEL[account.method] };
+  return { name: own?.kind === 'eip155' || own?.kind === 'solana' ? shortAddress(label) : label, method: IDENTITY_LABEL[account.method] };
 }
 
 export function WalletIntro({ state }: { state: AccountState }) {
@@ -37,7 +37,7 @@ export function WalletIntro({ state }: { state: AccountState }) {
   return <AccountShell showcase="wallets">
     <section className={styles.account} aria-label={t('Signed-in account')}>
       <span className={styles.avatar}><img src="/brand/flofi-droplet-wave-dark.svg" alt=""/></span>
-      <p className={styles.accountName}>{display.name}</p>
+      <p className={styles.accountName}>{display.name || t('FloFi account')}</p>
       <span className={styles.accountMeta}><AccountIcon name={account.method === 'google' ? 'google' : account.method === 'apple' ? 'apple' : account.method === 'email' ? 'email' : 'wallet'} size={14}/>{t(display.method)}</span>
       <code className={styles.accountId} title={account.accountId}>{account.accountId.slice(0, 12)}…{account.accountId.slice(-4)}</code>
       <button type="button" className={styles.quiet} disabled={busy} onClick={() => void signOutThisBrowser().then(() => window.location.assign('/login'))}>{t('Sign out')}</button>

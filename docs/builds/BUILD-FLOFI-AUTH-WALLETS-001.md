@@ -114,17 +114,19 @@ deployments with accounts); landing and docs "Launch" links go to `/login`.
   (account, method and sign-in time). Sign-out revokes the row; "sign out everywhere" exists in the store. A tampered, expired,
   revoked, foreign-host or foreign-tenant cookie is rejected (unit, PostgreSQL and browser tests).
 - Sensitive actions (export, linking) require a sign-in from the last 10 minutes; the UI offers "Sign in again".
-- Flow cookies (OIDC state/nonce/PKCE verifier; email OTP id) are sealed, single-use and expire in 10 minutes. They never hold an
-  OTP code, OIDC token or key. The Apple flow cookie is `SameSite=None; Secure` because Apple returns with a cross-site form POST.
+- Flow cookies are sealed, single-use and expire in 10 minutes. The OIDC cookie holds state, nonce and PKCE verifier (and, for a link
+  flow, the signed-in session that started it); it is `SameSite=None; Secure` on HTTPS because Apple returns with a cross-site form POST.
+  The email cookie holds only FloFi's challenge id (`SameSite=Lax`). Neither holds an OTP code, an OIDC token, an email address or a key.
+- A new sign-in in a browser revokes the session it replaces; deleting the account removes every session.
 - The existing wallet sessions keep their own cookies, lifetimes and meaning.
 
 ## 6. Sign-in methods
 
 | Method | Mechanism | Server-side verification |
 | --- | --- | --- |
-| Google | authorization code + PKCE (S256), `prompt=select_account` | code exchanged server-to-server with the client secret; ID token RS256 against Google JWKS; `iss`, `aud`, `azp`, `exp`, `iat` (≤ 15 min, ±2 min skew), `nonce` |
-| Apple | `code id_token`, `response_mode=form_post`, scope `email` | ID token RS256 against Apple JWKS; same claim checks; the code is not exchanged (no Apple signing key needed) |
-| Email | Turnkey email OTP (`INIT_OTP_V2`, `VERIFY_OTP`, then `OTP_LOGIN`) | FloFi's authenticated call to Turnkey verifies the code; the verification token is bound to the browser's session key |
+| Google | authorization code + PKCE (S256), `prompt=select_account` | code exchanged server-to-server with the client secret; ID token RS256 against Google JWKS; `iss`, `aud`, `azp`, `exp`, `iat` (≤ 15 min, ±2 min skew), `nonce`; **each ID token is accepted once** (SHA-256 digest recorded until it expires) |
+| Apple | `code id_token`, `response_mode=form_post`, scope `email` | ID token RS256 against Apple JWKS; same claim checks and single use; the code is not exchanged (no Apple signing key needed) |
+| Email | Turnkey email OTP (`INIT_OTP_V2`, `VERIFY_OTP`, then `OTP_LOGIN`) | FloFi's authenticated call to Turnkey verifies the code; the verification token is bound to the browser's session key. FloFi enforces **5 attempts per code**, **5 codes per address per hour** and a deployment-wide ceiling (300 per 10 min), independent of the provider's own limits; the code is never stored |
 | Web3 Wallet | existing EIP-4361 (`personal_sign`) / Sign-In With Solana | existing signature verification; FloFi additionally requires the wallet session to be **≤ 10 minutes** old |
 
 When a method is not configured the button is disabled and says so; nothing is simulated. Without `DATABASE_URL` the whole sign-in
@@ -148,8 +150,9 @@ screen states that accounts are unavailable and offers the builder without an ac
   the provider's non-secret resource id, export capability, label.
 - **Same-origin relay**: FloFi keeps `connect-src 'self'`. The browser's stamped requests go to `/api/account/provider/*`, which
   requires the account session, allowlists exactly create/import/export/get-activity, pins the organization (and user for import),
-  and for any export re-checks the 10-minute sign-in and wallet ownership. It forwards bytes verbatim (a changed byte breaks the
-  stamp) and logs nothing. Signing, policy, delegation and session-signer activities are **not** relayed.
+  and for any export re-checks the 10-minute sign-in and wallet ownership. It accepts only the exact canonical JSON the browser
+  stamped (no duplicate keys), only same-origin fetches (`Sec-Fetch-Site`), forwards bytes verbatim (a changed byte breaks the stamp)
+  and logs nothing. Signing, policy, delegation and session-signer activities are **not** relayed.
 - **Export**: only for managed wallets. Generated HD wallets: *Copy private key* (`EXPORT_WALLET_ACCOUNT`) and *Copy recovery phrase*
   (`EXPORT_WALLET`); imported keys: *Copy private key* only — no phrase is ever derived. Explicit confirmation checkbox, recent sign-in,
   then the provider decrypts and shows the secret inside its own frame; FloFi never reads it, never writes the clipboard, and stores
@@ -158,6 +161,11 @@ screen states that accounts are unavailable and offers the builder without an ac
 - **Not in this build**: using a managed wallet to sign FloFi transactions. No managed-wallet signing adapter was added; Build,
   Simulate and Execute continue to use the connected browser wallet with the same review, Strategy Manifest and wallet signature.
   Managed wallets can be exported to a wallet app today. A signing adapter is a separate, security-reviewed build.
+
+**Account deletion**: Credentials → My wallets → *Delete FloFi account* (explicit confirmation, sign-in from the last 10 minutes) deletes
+the account, its identities, sessions and saved wallet metadata. Wallets kept by the provider and on-chain assets are not deleted; the
+copy tells the person to export managed wallets first. Expired sessions are pruned tenant-wide (30-day grace), email challenges after
+a day and used ID-token digests when they expire.
 
 **Recovery model**: the FloFi account is recovered by signing in again with the same Google, Apple or email identity (the wallet list
 is server-side and restores on any device). Managed wallets are unlocked by the identity that created their provider organization;
@@ -181,6 +189,11 @@ recovery phrase is the person's independent backup. FloFi cannot recover keys.
 7. Open-redirect protection: post-sign-in destinations are limited to `/app…` and `/onboarding…`.
 
 Residual risks for owner review:
+- The browser's provider session key is a root-user credential of the person's sub-organization for its lifetime (1 hour). FloFi's
+  guarantees that it is used only for create/import/export — and that export output is decrypted only in the provider's frame — rest on
+  FloFi's code and on the FloFi origin being free of XSS, not on a Turnkey policy. The relay cannot check that `targetPublicKey` belongs to
+  the export frame. A page-specific CSP (`script-src`) for the account pages is the strongest follow-up.
+- Sign-in, onboarding and Credentials now send `X-Frame-Options: DENY` and `frame-ancestors 'none'`.
 - FloFi's server sees the Google/Apple ID token and (with `VERIFY_OTP` v1) the six-digit code. Both are bound to the browser's session
   key for provider use. Turnkey's newer `INIT_OTP_V3`/`VERIFY_OTP_V2` encrypt the code to the enclave in the browser; adopting them
   needs `@turnkey/crypto` (HPKE) and is a recommended follow-up once live behaviour can be verified.
@@ -238,10 +251,47 @@ run.
 
 ## 13. Test evidence
 
-See the PR description for the exact commands and results of this build's runs (unit, PostgreSQL, browser, typecheck, lint, build,
-governance, agent guard, dependency verification). Browser screenshots are produced by `e2e/auth-wallets.spec.ts`
-(`playwright.auth-wallets.config.ts`) into the Playwright output directory: sign-in desktop (dark/light), sign-in mobile (EN/PT),
-wallet introduction, create/import, Credentials → My wallets, export modal (no secret; MOCKED provider frame) in dark and light.
+Run in this session with the pinned Node 24.21.0 / pnpm 11.22.0 and a disposable loopback PostgreSQL 16:
+
+| Gate | Result |
+| --- | --- |
+| `pnpm typecheck` (app `next typegen && tsc`) | pass |
+| `pnpm lint` (+ the new Playwright config) | pass |
+| `pnpm build` | pass |
+| `pnpm schemas:check` | pass (11 schema exports) |
+| `pnpm check` (typecheck, lint, build, schemas, full unit suite) | pass — 465 files, 5,855 tests, 2 skipped (pre-existing skips) |
+| Account unit suites (`src/accounts/*.test.ts`) and i18n catalog | pass |
+| PostgreSQL: account suites, all `packages/cloud-runtime/test`, platform/approvals/handoff/state-host, admin rollout, preview migration, schema compatibility | 190 pass, 3 skipped; 1 pre-existing failure (below) |
+| Browser: `playwright.auth-wallets.config.ts` (8 journeys, MOCKED loopback providers) | 8/8 pass |
+| Existing browser specs touched by the change (landing, docs, beta, earth footer, brand motion, credentials, header, shell, Build entry) under a local app-only config | 77 pass; 14 fail **identically on untouched `origin/main`** under that config (they need the full `playwright.config.ts` harness, e.g. the canonical-workflow probe, which needs Foundry Anvil not present here) |
+| `python3 scripts/governance_lite.py` + `test_governance_lite.py` + `test_ci_*.py` | pass |
+| `python3 scripts/agent_guard.py check` | pass (163 modules) |
+| `python3 scripts/bootstrap-ci.py --verify-dependencies` | pass (271 entries) |
+| `pnpm audit --audit-level low` | fails with the **pre-existing** `minimatch` advisory (also on `main`); no new advisory |
+| `packages/cloud-runtime/test/forward-compatibility.pg.test.ts` | one pre-existing failure on PostgreSQL 16 (the test encodes PostgreSQL 18 catalog behaviour); same on `main` |
+| CircleCI certification, full `playwright.config.ts`, fork suites | **not run** here (no Anvil, no CI) |
+
+Screenshots: [`BUILD-FLOFI-AUTH-WALLETS-001-EVIDENCE/`](BUILD-FLOFI-AUTH-WALLETS-001-EVIDENCE/README.md) (MOCKED provenance).
+
+## 13a. Read-only review summary (advisory)
+
+Three read-only reviewers (security; wallet-execution/workflow integration; data-privacy/frontend) reviewed the first complete
+version. Resolved in this build:
+
+- Unlimited email-code guessing and unthrottled code emails → per-challenge attempt budget, per-address and deployment throttles.
+- Apple ID-token replay within its lifetime → single-use ID tokens.
+- Clickjacking of sign-in/onboarding/Credentials → `X-Frame-Options: DENY` + `frame-ancestors 'none'`.
+- Apple *link* flow failing (no Lax cookie on the cross-site POST) → sealed link session re-verified server-side.
+- Half-saved state when a wallet belongs to another account → checked before linking; sign-in never moves a wallet record.
+- Cancelling the wallet chooser still completing a sign-in/link with an older proof → callers act only on the exact proof outcome.
+- Credentials unit tests failing without a wallet selector → proof hooks mount only for a signed-in account.
+- Relay hardening: canonical JSON only, same-origin only. Superseded sessions are revoked. Account items hidden in embedded MCP approval.
+- Privacy: account deletion, session pruning, a data notice on the sign-in screen, the email address no longer in any cookie.
+- Copy/accessibility: no overclaims on the showcase, export buttons explain that the secret is shown in Turnkey's frame for the owner to copy,
+  named provider frames, stateful tile labels, a pause control and 24 px targets for the highlights, no raw error text, PT strings added.
+
+Open for owner decision: privacy-policy text for the new data (not edited here — a legal document), pt-BR vs the product's mixed
+pt-PT/pt-BR catalog, `__Host-` cookie prefixes (incompatible with loopback HTTP tests), and the follow-ups in §14.
 
 ## 14. Follow-ups
 
@@ -249,4 +299,5 @@ wallet introduction, create/import, Credentials → My wallets, export modal (no
 - `INIT_OTP_V3` / `VERIFY_OTP_V2` with browser-side HPKE.
 - A reviewed managed-wallet signing adapter that keeps FloFi's explicit Review → Manifest → wallet confirmation path.
 - Account-level "sign out everywhere" and identity management UI; discovery of provider wallets created but not saved.
+- Privacy-policy section for accounts (email, OIDC subject, wallet addresses, Turnkey as processor) — owner/legal.
 - A page-specific CSP for `/login` and `/onboarding/*` (`frame-src` limited to the provider frame origins).

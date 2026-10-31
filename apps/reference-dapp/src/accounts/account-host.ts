@@ -63,6 +63,10 @@ export function nextPath(outcome: Pick<SignInOutcome, 'onboarding' | 'session'>,
   const social = outcome.session.method === 'google' || outcome.session.method === 'apple' || outcome.session.method === 'email';
   return social && outcome.onboarding === 'pending' ? '/onboarding' : safeReturnPath(returnTo);
 }
+/** A new sign-in in this browser supersedes the previous one: its server-side record is revoked (linking keeps the same session). */
+export async function supersede(host: AccountHost, previous: AccountSessionToken | null, next: AccountSessionToken): Promise<void> {
+  if (previous && previous.sessionId !== next.sessionId) await host.store.revokeSession(previous).catch(() => undefined);
+}
 /** The account session to seal, with the provider-session hint for the browser key that sign-in opened (if any). */
 export const managedHint = (outcome: SignInOutcome): AccountSessionToken => ({ ...outcome.session, managedKey: outcome.managed?.sessionKey ?? null,
   managedUntil: outcome.managed ? Math.floor(Date.parse(outcome.managed.expiresAt) / 1000) : null });

@@ -20,7 +20,8 @@ type Env = Readonly<Record<string, string | undefined>>;
 type Endpoints = { readonly issuers: readonly string[]; readonly authorize: string; readonly token: string | null; readonly jwks: string };
 export type OidcConfig = { readonly provider: OidcProvider; readonly clientId: string; readonly clientSecret: string | null;
   readonly redirectUri: string; readonly endpoints: Endpoints };
-export type VerifiedIdentity = { readonly provider: OidcProvider; readonly subject: string; readonly email: string | null; readonly emailVerified: boolean };
+export type VerifiedIdentity = { readonly provider: OidcProvider; readonly subject: string; readonly email: string | null; readonly emailVerified: boolean;
+  readonly expiresAt: Date };
 
 const PUBLIC_ENDPOINTS: Readonly<Record<OidcProvider, Endpoints>> = Object.freeze({
   google: { issuers: ['https://accounts.google.com', 'accounts.google.com'], authorize: 'https://accounts.google.com/o/oauth2/v2/auth',
@@ -136,5 +137,5 @@ export async function verifyIdToken(config: OidcConfig, token: unknown, flow: Pi
   if (typeof claims.nonce !== 'string' || !sameText(claims.nonce, flow.nonce)) fail('OIDC_NONCE_MISMATCH');
   if (typeof claims.sub !== 'string' || !SUBJECT.test(claims.sub)) fail('OIDC_SUBJECT_INVALID');
   const emailVerified = claims.email_verified === true || claims.email_verified === 'true';
-  return { provider: config.provider, subject: claims.sub as string, email: normalizeEmail(claims.email), emailVerified };
+  return { provider: config.provider, subject: claims.sub as string, email: normalizeEmail(claims.email), emailVerified, expiresAt: new Date((claims.exp as number) * 1000) };
 }

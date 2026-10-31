@@ -5,13 +5,14 @@ import { describe, expect, it } from 'vitest';
 import { assertSchemaCompatible, assertSchemaCurrent, CERTIFIED_FORWARD_MIGRATIONS, loadMigrations, migrate, SHIPPED_MIGRATIONS } from '../src/index.js';
 import { createTestDatabase } from './pg-harness';
 
-const ACCOUNT_TABLES = ['flofi_account_identities', 'flofi_account_sessions', 'flofi_account_wallets', 'flofi_accounts'];
+const ACCOUNT_TABLES = ['flofi_account_email_challenges', 'flofi_account_identities', 'flofi_account_sessions', 'flofi_account_used_proofs', 'flofi_account_wallets', 'flofi_accounts'];
 
 describe('FloFi accounts additive migration', () => {
   it('cold starts under the exact v17 certificate and keeps every pre-existing relation unchanged', async () => {
     const t = await createTestDatabase({ migrated: false });
     try {
-      const all = await loadMigrations(), base = all.slice(0, 17);
+      // Pinned to schema 18 so later migrations do not change this test.
+      const all = (await loadMigrations()).slice(0, 18), base = all.slice(0, 17);
       expect(all[17]).toMatchObject({ version: 18, name: 'flofi_accounts', sha256: SHIPPED_MIGRATIONS[17]!.sha256 });
       await migrate(t.db, base);
       const shape = async () => (await t.db.query(`SELECT table_name, column_name, data_type, is_nullable, column_default FROM information_schema.columns
@@ -21,7 +22,7 @@ describe('FloFi accounts additive migration', () => {
       expect(await shape()).toEqual(before);
       expect((await t.db.query(`SELECT table_name FROM information_schema.tables WHERE table_schema='public' AND table_name = ANY($1) ORDER BY table_name`,
         [ACCOUNT_TABLES])).rows.map(row => row.table_name)).toEqual(ACCOUNT_TABLES);
-      expect(await assertSchemaCurrent(t.db, SHIPPED_MIGRATIONS)).toBe(18);
+      expect(await assertSchemaCurrent(t.db, SHIPPED_MIGRATIONS.slice(0, 18))).toBe(18);
       expect(await migrate(t.db, all)).toEqual([]);
       expect(await assertSchemaCompatible(t.open(1), SHIPPED_MIGRATIONS.slice(0, 17))).toMatchObject({ version: 18, application: 17, forward: [SHIPPED_MIGRATIONS[17]] });
       await expect(assertSchemaCompatible(t.db, SHIPPED_MIGRATIONS.slice(0, 17), CERTIFIED_FORWARD_MIGRATIONS.filter(c => c.base.version !== 17))).rejects.toThrow('MIGRATION_HISTORY_MISMATCH');

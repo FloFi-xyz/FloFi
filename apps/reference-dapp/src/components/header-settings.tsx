@@ -25,7 +25,8 @@ export function HeaderSettings({ onDisconnect, disconnectDisabled, onSupport }: 
     if (!open || checked.current) return;
     checked.current = true;
     void learningAvailability().then(tier => setPrivacy(tier === 'ENABLED'), () => undefined);
-    void accountState().then(setAccount, () => undefined);
+    // Not inside the embedded MCP approval: signing in there would navigate away from the approval.
+    if (window.location.pathname !== '/mcp/approve') void accountState().then(setAccount, () => undefined);
   }, [open]);
   async function signOut() {
     await accountSignOut().catch(() => undefined);

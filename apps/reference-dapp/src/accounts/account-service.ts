@@ -13,6 +13,7 @@ import { accountWalletId, canonicalAddress, exportActions, isManagedLogin, MANAG
   walletLabel, type AccountView, type AccountWallet, type IdentityKind, type ManagedLogin } from './account-model.ts';
 import { freshlyAuthenticated, SESSION_PUBLIC_KEY, type AccountSessionToken, type EmailFlow, type OidcFlow } from './account-session.ts';
 import type { AccountStore, IdentityClaim } from './account-store.ts';
+import { createHash } from 'node:crypto';
 import { exchangeGoogleCode, verifyIdToken, type OidcConfig } from './oidc.ts';
 import type { TurnkeyServer } from './turnkey-server.ts';
 import type { WalletEcosystem } from '../wallet/wallet-registry';
@@ -79,6 +80,8 @@ export function createAccountService(input: { readonly store: AccountStore; read
     async completeOidc(config: OidcConfig, flow: OidcFlow, response: { readonly code?: unknown; readonly idToken?: unknown }, current: AccountSessionToken | null): Promise<SignInOutcome> {
       const idToken = config.provider === 'google' ? await exchangeGoogleCode(config, response.code, flow.verifier, transport) : response.idToken;
       const identity = await verifyIdToken(config, idToken, flow, { now: now(), transport });
+      // Each ID token signs in once: a replayed token (even with the same browser key) is refused.
+      if (!await store.consumeProof(createHash('sha256').update(idToken as string).digest('hex'), identity.expiresAt, now())) fail('OIDC_TOKEN_REPLAYED');
       const email = identity.emailVerified ? identity.email : null;
       const { session, created } = await establish({ kind: config.provider, subject: identity.subject, label: email }, flow.intent, current);
       const provider = PROVIDER_LABEL[config.provider], token = idToken as string;
@@ -86,26 +89,32 @@ export function createAccountService(input: { readonly store: AccountStore; read
         () => turnkey!.findOrganization({ oidcToken: token }), () => turnkey!.createOrganization(`flofi-${session.accountId}`, { provider, oidcToken: token, email }));
       return { session, created, onboarding: await onboardingOf(session.accountId), ...managed };
     },
-    /** Sends an email one-time code through the provider. */
-    async startEmail(email: unknown): Promise<{ otpId: string; email: string }> {
+    /** Sends an email one-time code through the provider, at most 5 per address per hour (and a deployment-wide ceiling). */
+    async startEmail(email: unknown, sessionKey: string): Promise<{ challengeId: string; email: string }> {
       if (!turnkey) fail('EMAIL_SIGN_IN_NOT_CONFIGURED');
       const address = normalizeEmail(email) ?? fail('EMAIL_INVALID');
-      return { otpId: await turnkey!.initEmailOtp(address), email: address };
+      if (!await store.emailChallengeAllowed(address, now())) fail('EMAIL_RATE_LIMITED');
+      const providerChallenge = await turnkey!.initEmailOtp(address);
+      return { challengeId: await store.startEmailChallenge({ email: address, providerChallenge, browserBinding: sessionKey }, now()), email: address };
     },
     /** Verifies the code with the provider (bound to this browser's key), then signs in or links the verified email. */
     async completeEmail(flow: EmailFlow, code: unknown, current: AccountSessionToken | null): Promise<SignInOutcome> {
       if (!turnkey) fail('EMAIL_SIGN_IN_NOT_CONFIGURED');
       if (typeof code !== 'string' || !/^[0-9]{6}$/.test(code.trim())) fail('EMAIL_CODE_INVALID');
+      // Server-side attempt budget: at most 5 tries per challenge, whatever the provider allows; then a new code is required.
+      const challenge = await store.attemptEmailChallenge(flow.challengeId, now()) ?? fail('EMAIL_CHALLENGE_EXPIRED');
+      const { email, providerChallenge, browserBinding: sessionKey } = challenge!;
       let verificationToken: string;
-      try { verificationToken = await turnkey!.verifyEmailOtp(flow.otpId, (code as string).trim(), flow.sessionKey); }
+      try { verificationToken = await turnkey!.verifyEmailOtp(providerChallenge, (code as string).trim(), sessionKey); }
       catch (error) {
         // A wrong or expired code is a completed-but-failed provider activity; transport and configuration failures keep their own code.
         const code = classified(error, 'EMAIL_CODE_REJECTED');
         throw new Error(code === 'TURNKEY_ACTIVITY_NOT_COMPLETED' || code === 'TURNKEY_REQUEST_FAILED' ? 'EMAIL_CODE_REJECTED' : code, { cause: error });
       }
-      const { session, created } = await establish({ kind: 'email', subject: flow.email, label: flow.email }, flow.intent, current);
-      const managed = await managedSession(session.accountId, 'email', flow.sessionKey, organization => turnkey!.emailLogin(organization, verificationToken, flow.sessionKey),
-        () => turnkey!.findOrganization({ email: flow.email }), () => turnkey!.createOrganization(`flofi-${session.accountId}`, { email: flow.email, verificationToken }));
+      await store.consumeEmailChallenge(flow.challengeId, now());
+      const { session, created } = await establish({ kind: 'email', subject: email, label: email }, flow.intent, current);
+      const managed = await managedSession(session.accountId, 'email', sessionKey, organization => turnkey!.emailLogin(organization, verificationToken, sessionKey),
+        () => turnkey!.findOrganization({ email }), () => turnkey!.createOrganization(`flofi-${session.accountId}`, { email, verificationToken }));
       return { session, created, onboarding: await onboardingOf(session.accountId), ...managed };
     },
     /**
@@ -115,10 +124,14 @@ export function createAccountService(input: { readonly store: AccountStore; read
     async completeWallet(proof: { readonly namespace: 'eip155' | 'solana'; readonly address: string }, provider: { readonly key: unknown; readonly name: unknown },
       intent: 'sign-in' | 'link', current: AccountSessionToken | null): Promise<SignInOutcome> {
       const ecosystem: WalletEcosystem = proof.namespace === 'eip155' ? 'evm' : 'solana', address = canonicalAddress(ecosystem, proof.address) ?? fail('WALLET_ADDRESS_INVALID');
+      // Linking checks the wallet record first, so a wallet held by another account never leaves a half-linked identity behind.
+      const holder = await store.walletHolder(ecosystem, address);
+      if (intent === 'link' && holder && holder !== current?.accountId) fail('ACCOUNT_WALLET_LINKED_ELSEWHERE');
       const { session, created } = await establish({ kind: proof.namespace, subject: address, label: null }, intent, current);
       const key = validProvider(provider.key) ? provider.key : 'injected', name = walletLabel(provider.name) ?? (ecosystem === 'evm' ? 'EVM wallet' : 'Solana wallet');
-      const existing = (await store.wallets(session.accountId)).some(wallet => wallet.id === accountWalletId(ecosystem, address));
-      if (!existing) await store.saveWallet(session.accountId, { ecosystem, address, origin: 'external', provider: key, providerName: name, providerResource: null, label: name }, now());
+      // A wallet whose record belongs to another account (for example an exported managed wallet) still signs in to its own identity's
+      // account; its record is never moved.
+      if (!holder) await store.saveWallet(session.accountId, { ecosystem, address, origin: 'external', provider: key, providerName: name, providerResource: null, label: name }, now());
       return { session, created, onboarding: await onboardingOf(session.accountId), managed: null, managedError: 'MANAGED_WALLETS_NEED_SOCIAL_SIGN_IN' };
     },
     async view(session: AccountSessionToken): Promise<AccountView | null> {
@@ -180,6 +193,11 @@ export function createAccountService(input: { readonly store: AccountStore; read
       const source = kind === 'recovery-phrase' ? 'wallet' : resource!.origin === 'imported' ? 'private-key' : 'wallet-account';
       return { organizationId: context!.organizationId, kind: kind as ExportGrant['kind'], resource: source === 'wallet-account' ? wallet!.address : resource!.resource,
         address: wallet!.address, keyFormat, source };
+    },
+    /** Deletes the signed-in account (recent sign-in required). Provider wallets and on-chain assets are untouched. */
+    async deleteAccount(session: AccountSessionToken): Promise<void> {
+      if (!freshlyAuthenticated(session, now())) fail('ACCOUNT_REAUTHENTICATION_REQUIRED');
+      await store.deleteAccount(session.accountId);
     },
     validSessionKey: (value: unknown): value is string => typeof value === 'string' && SESSION_PUBLIC_KEY.test(value),
     identityKinds: (account: AccountView): readonly IdentityKind[] => account.identities.map(identity => identity.kind),

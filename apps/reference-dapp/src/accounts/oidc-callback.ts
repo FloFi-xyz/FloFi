@@ -8,7 +8,7 @@ import { timingSafeEqual } from 'node:crypto';
 import { cookies } from 'next/headers';
 import { NextResponse } from 'next/server';
 import { requestOrigin } from '../server/session-principal.ts';
-import { accountHost, currentAccountSession, flowCookieOptions, managedHint, nextPath, setAccountCookie } from './account-host.ts';
+import { accountHost, currentAccountSession, flowCookieOptions, managedHint, nextPath, setAccountCookie, supersede } from './account-host.ts';
 import { ACCOUNT_OIDC_COOKIE, readOidcFlow, safeReturnPath, type OidcProvider } from './account-session.ts';
 import { oidcConfig } from './oidc.ts';
 
@@ -35,7 +35,12 @@ export async function oidcCallback(provider: OidcProvider, params: Params): Prom
     if (text('error')) return back('OIDC_CANCELLED');
     const config = oidcConfig(provider, process.env);
     if (!config) return back('OIDC_PROVIDER_NOT_CONFIGURED');
-    const outcome = await host.service.completeOidc(config, flow, { code: text('code'), idToken: text('id_token') }, await currentAccountSession(host));
+    // Apple returns with a cross-site POST that carries no Lax account cookie: a link flow uses the session it sealed at its start,
+    // re-verified against the server-side record (unrevoked, unexpired, same account).
+    const cookieSession = await currentAccountSession(host);
+    const current = cookieSession ?? (flow.intent === 'link' && flow.linkSession && await host.store.verifySession(flow.linkSession).catch(() => false) ? flow.linkSession : null);
+    const outcome = await host.service.completeOidc(config, flow, { code: text('code'), idToken: text('id_token') }, current);
+    await supersede(host, cookieSession, outcome.session);
     await setAccountCookie(managedHint(outcome));
     return NextResponse.redirect(new URL(nextPath(outcome, flow.intent, flow.returnTo), origin.uri), 303);
   } catch (error) {

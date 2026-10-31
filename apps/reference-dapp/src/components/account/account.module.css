@@ -166,9 +166,12 @@
 .showcaseText{position:relative;text-align:center;max-width:520px;margin-top:28px}
 .showcaseText h2{font-size:clamp(26px,2.6vw,34px);font-weight:500;letter-spacing:-.02em;margin:0 0 12px;color:#F4F5F7}
 .showcaseText p{color:#A4ABB8;margin:0;font-size:16px}
-.dots{display:flex;gap:10px;justify-content:center;margin-top:40px}
-.dots button{width:10px;height:10px;border-radius:50%;border:0;padding:0;background:rgb(164 171 184 / .35)}
-.dots button[aria-current="true"]{background:#F4F5F7}
+.dots{display:flex;gap:4px;align-items:center;justify-content:center;margin-top:40px}
+/* 24px hit target around a 10px dot. */
+.dots button:not(.pause){width:24px;height:24px;border:0;padding:7px;border-radius:50%;background:transparent}
+.dots button:not(.pause)::before{content:"";display:block;width:10px;height:10px;border-radius:50%;background:rgb(164 171 184 / .35)}
+.dots button[aria-current="true"]::before{background:#F4F5F7}
+.pause{margin-left:10px;border:1px solid rgb(164 171 184 / .35);background:transparent;color:#A4ABB8;border-radius:999px;font-size:12px;padding:4px 10px;min-height:24px}
 .preview{position:relative;display:grid;gap:12px;width:min(420px,100%)}
 .previewCard{border:1px solid rgb(164 171 184 / .22);background:rgb(21 24 31 / .78);border-radius:18px;padding:16px 18px;box-shadow:0 24px 60px rgb(0 0 0 / .4)}
 .previewCard small{font:500 11px var(--font-ibm-plex-mono),monospace;letter-spacing:.12em;color:#93A6FF}
@@ -192,7 +195,7 @@
   .mobileBrand{display:block;margin:14px -16px 0;padding:22px 20px 26px;color:#F4F5F7;border-radius:0 0 24px 24px;
     background:radial-gradient(80% 90% at 90% 0%,rgb(35 67 217 / .55),transparent 70%),linear-gradient(160deg,#0E1426,#070A14)}
   .mobileBrand strong{display:block;font-size:19px;font-weight:600;letter-spacing:-.01em}
-  .mobileBrand span{display:block;color:#A4ABB8;font-size:13px;margin-top:4px}
+  .mobileBrand > span{display:block;color:#A4ABB8;font-size:13px;margin-top:4px}
   .mobileChips{display:flex;gap:6px;flex-wrap:wrap;margin-top:12px}
   .mobileChips .chip{position:static;animation:none;font-size:12px;padding:4px 10px}
   .content{justify-content:flex-start;padding:24px 0 12px;max-width:none}

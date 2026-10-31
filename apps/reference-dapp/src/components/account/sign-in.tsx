@@ -5,7 +5,7 @@
  * and Web3 Wallet. Each one is verified by FloFi's server; the browser never decides who is signed in. A method this deployment
  * cannot run is shown disabled with the reason, never simulated. Signing in approves nothing and moves no funds.
  */
-import { useEffect, useId, useRef, useState } from 'react';
+import { useId, useState } from 'react';
 import { useLocale } from '../../i18n/locale';
 import { completeEmailSignIn, startEmailSignIn, startSocialSignIn, walletAccountSignIn, type AccountState } from '../../app/account-action';
 import { useWalletProof, walletProofMessage, type Namespace } from '../wallet-proof';
@@ -27,10 +27,10 @@ function SignInContent({ state, initialError, returnTo, intent, initialMethod }:
   const [open, setOpen] = useState<Method | null>(initialMethod === 'email' || initialMethod === 'wallet' ? initialMethod : null);
   const [busy, setBusy] = useState<Method | null>(null);
   const [error, setError] = useState<string | null>(initialError);
+  /** A wallet proof's owner-facing message (already human text from walletProofMessage); never a raw provider or browser error. */
+  const [proofError, setProofError] = useState<string | null>(null);
   const [email, setEmail] = useState(''), [code, setCode] = useState(''), [sent, setSent] = useState<string | null>(null), [notice, setNotice] = useState('');
-  const [namespace, setNamespace] = useState<Namespace | null>(null);
   const evm = useWalletProof('eip155'), solana = useWalletProof('solana');
-  const pending = useRef<Namespace | null>(null);
   const emailId = useId(), codeId = useId(), statusId = useId();
   const available = state.availability;
   const go = (path: string) => { window.location.assign(path); };
@@ -57,27 +57,22 @@ function SignInContent({ state, initialError, returnTo, intent, initialMethod }:
     if (done.ok) { go(done.value.next); return; }
     setBusy(null); setError(done.code);
   }
-  function proveWith(value: Namespace) {
-    setError(null); setNamespace(value); setBusy('wallet'); pending.current = value;
-    void (value === 'eip155' ? evm.proveEvm(true) : solana.proveSolana(true));
+  /** Signs in with exactly this proof (a new EIP-4361 / Sign-In With Solana signature verified by the server). A closed chooser cancels. */
+  async function proveWith(value: Namespace) {
+    setError(null); setProofError(null); setBusy('wallet');
+    const outcome = await (value === 'eip155' ? evm.proveEvm(true) : solana.proveSolana(true));
+    if (!outcome.account) { setBusy(null); if (outcome.error) setProofError(walletProofMessage(outcome.error, value)); return; }
+    const result = await walletAccountSignIn(value, outcome.wallet?.key ?? 'injected', outcome.wallet?.name ?? (value === 'eip155' ? 'EVM wallet' : 'Solana wallet'), returnTo)
+      .catch(() => ({ ok: false as const, code: 'WALLET_SIGN_IN_FAILED' }));
+    if (result.ok) { go(result.value.next); return; }
+    setBusy(null); setError(result.code);
   }
-  // When the wallet proof (a new EIP-4361 / Sign-In With Solana signature verified by the server) settles, sign in with it.
-  const proof = namespace === 'solana' ? solana : evm;
-  useEffect(() => {
-    const value = pending.current;
-    if (!value || proof.busy) return;
-    pending.current = null;
-    if (proof.error) { setBusy(null); setError(walletProofMessage(proof.error, value)); return; }
-    void walletAccountSignIn(value, proof.wallet?.key ?? 'injected', proof.wallet?.name ?? (value === 'eip155' ? 'EVM wallet' : 'Solana wallet'), returnTo)
-      .then(result => { if (result.ok) go(result.value.next); else { setBusy(null); setError(result.code); } })
-      .catch(() => { setBusy(null); setError('WALLET_SIGN_IN_FAILED'); });
-  }, [proof.busy, proof.error, proof.wallet, returnTo]);
 
   const unavailable = (method: Exclude<Method, 'wallet'>) => !available[method];
-  const methodButton = (method: Method, label: string, icon: 'apple' | 'google' | 'email' | 'wallet', onClick: () => void, disabled: boolean) =>
+  const methodButton = (method: Method, label: string, icon: 'apple' | 'google' | 'email' | 'wallet', onClick: () => void, disabled: boolean, reason = 'Not available on this deployment yet') =>
     <button type="button" className={styles.method} onClick={onClick} disabled={disabled || busy !== null && busy !== method}
       aria-expanded={method === 'email' || method === 'wallet' ? open === method : undefined} aria-describedby={disabled ? statusId : undefined}
-      title={disabled ? t('Not available on this deployment yet') : undefined}>
+      title={disabled ? t(reason) : undefined}>
       <AccountIcon name={icon}/><span>{t(label)}{busy === method ? <small>{t('Opening…')}</small> : null}</span></button>;
 
   return <AccountShell showcase="account">
@@ -85,12 +80,14 @@ function SignInContent({ state, initialError, returnTo, intent, initialMethod }:
     <p className={styles.lead}>{t(intent === 'link' ? 'Add another way to sign in to this FloFi account. It must be yours and not used by another account.'
       : 'Sign in to your FloFi account or create one with any method you like.')}</p>
     {!available.accounts && <div className={styles.banner} role="status"><strong>{t("Accounts aren't available on this deployment yet.")}</strong>
-      <p>{t('You can still build workflows and use your own wallet in FloFi without an account.')}</p></div>}
+      <p>{t('You can still build workflows and use your own wallet in FloFi without an account.')}</p>
+      <a className={styles.primary} href="/app">{t('Continue to FloFi')}</a></div>}
     <div className={styles.methods} role="group" aria-label={t('Sign-in methods')}>
       {methodButton('apple', 'Apple', 'apple', () => void social('apple'), unavailable('apple'))}
       {methodButton('google', 'Google', 'google', () => void social('google'), unavailable('google'))}
       {methodButton('email', 'Email', 'email', () => { setError(null); setOpen(open === 'email' ? null : 'email'); }, unavailable('email'))}
-      {methodButton('wallet', 'Web3 Wallet', 'wallet', () => { setError(null); setOpen(open === 'wallet' ? null : 'wallet'); }, !available.wallet || intent === 'link')}
+      {methodButton('wallet', 'Web3 Wallet', 'wallet', () => { setError(null); setOpen(open === 'wallet' ? null : 'wallet'); }, !available.wallet || intent === 'link',
+        intent === 'link' ? 'Link a wallet from Credentials → My wallets' : undefined)}
     </div>
     {open === 'email' && available.email && (sent === null ? <form className={styles.form} onSubmit={event => void sendCode(event)} aria-label={t('Email sign-in')}>
       <label htmlFor={emailId}>{t('Email address')}</label>
@@ -108,13 +105,14 @@ function SignInContent({ state, initialError, returnTo, intent, initialMethod }:
     {open === 'wallet' && <div className={styles.form} role="group" aria-label={t('Web3 Wallet sign-in')}>
       <p style={{ margin: 0, color: 'var(--acc-muted)', fontSize: 14 }}>{t('Your wallet signs a sign-in message that FloFi verifies. It approves no transaction and moves no funds.')}</p>
       <div className={styles.methods}>
-        <button type="button" className={styles.method} disabled={busy !== null} onClick={() => proveWith('eip155')}><img src="/brand/crypto/ethereum.svg" width="20" height="20" alt=""/>{t('EVM wallet')}</button>
-        <button type="button" className={styles.method} disabled={busy !== null} onClick={() => proveWith('solana')}><img src="/brand/crypto/solana.svg" width="20" height="20" alt=""/>{t('Solana wallet')}</button>
+        <button type="button" className={styles.method} disabled={busy !== null} onClick={() => void proveWith('eip155')}><img src="/brand/crypto/ethereum.svg" width="20" height="20" alt=""/>{t('EVM wallet')}</button>
+        <button type="button" className={styles.method} disabled={busy !== null} onClick={() => void proveWith('solana')}><img src="/brand/crypto/solana.svg" width="20" height="20" alt=""/>{t('Solana wallet')}</button>
       </div>
     </div>}
     <p id={statusId} className={styles.status} role="status">{notice || (!available.google || !available.apple || !available.email
       ? t('Methods shown as unavailable are not configured on this deployment yet.') : '')}</p>
-    {error && <p className={styles.error} role="alert">{t(accountMessage(error))}</p>}
+    {(proofError || error) && <p className={styles.error} role="alert">{t(proofError ?? accountMessage(error!))}</p>}
+    {available.accounts && <p className={styles.small} style={{ textAlign: 'left' }}>{t('FloFi stores your sign-in identity (email address or provider ID) and the public addresses of wallets you save, never a key. You can delete your account in Credentials.')} <a href="/privacy">{t('Privacy')}</a></p>}
     <div className={styles.notice}><span className={styles.noticeIcon}><AccountIcon name="shield" size={18}/></span><div>
       <strong>{t('Nothing executes without your review')}</strong>
       <p>{t('Your account is how you sign in. Transactions are always simulated, reviewed and signed by your own wallet.')}</p></div></div>
