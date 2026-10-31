@@ -37,9 +37,11 @@ tables, no change to any existing relation, no function or trigger) and atomic.
    ORDER BY version`, read-only). If production is still at 16, release 0017 first under its own certificate (§11) and do not continue.
 2. All CircleCI contexts green on the exact final commit of #143, including the dependency audit (see the build report for the
    `minimatch` release-age gate) and both browser jobs.
-3. Live provider verification on a non-production deployment with a dedicated empty database (build report §11): Google, Apple, email
-   and Web3 Wallet sign-in, create/import/export with a Turnkey **test** organization and disposable identities. The email flow must be
-   migrated to Turnkey's encrypted OTP activities first (build report, blockers).
+3. Live provider verification on a non-production deployment with a dedicated empty database, following
+   [LIVE-VERIFICATION-AUTH-WALLETS.md](./LIVE-VERIFICATION-AUTH-WALLETS.md):
+   - Google, Apple, email and Web3 Wallet sign-in;
+   - FloFi Wallet unlock, create, import, export and signing on testnets, with a Turnkey **test** organization and disposable identities.
+   The email flow already uses Turnkey's encrypted OTP activities (`INIT_OTP_V3` / `VERIFY_OTP_V2` / `OTP_LOGIN_V2`).
 
 ## Release A: certificate only (no migration)
 
@@ -69,9 +71,15 @@ on schema 17. Check `/readyz`, logs (`migrate.applied versions=none schema_versi
 2. **Worker and other backends** next, then **Vercel Production** last.
 3. What goes live: accounts exist wherever `DATABASE_URL` is set, so **Web3 Wallet sign-in (EIP-4361 / Sign-In With Solana, verified
    by FloFi's server) is available as soon as Release B serves `/login`**; it needs only the database and the existing wallet-session
-   secret. Google, Apple, email and managed wallets stay disabled and are shown as unavailable until their settings exist. `/app` keeps
-   working without an account. Configure Google, Apple and Turnkey (build report §12) only after the live verification above, then
-   check each method once with an owner-controlled identity.
+   secret. `/app` keeps working without an account.
+4. Everything else stays disabled, and is shown as unavailable, until its settings exist:
+   - Google, Apple and email sign-in.
+   - FloFi Wallet (managed wallets). It needs the Turnkey settings **and** its own origin: `FLOFI_WALLET_ORIGIN`, pinned to
+     `https://wallet.flofi.xyz` in production. That host must be added to the same Vercel deployment (DNS + domain). FloFi Wallet also
+     uses its own Google client (`FLOFI_WALLET_GOOGLE_CLIENT_ID` / `_SECRET`) and Apple Services ID (`FLOFI_WALLET_APPLE_CLIENT_ID`),
+     whose only redirect URIs are `https://wallet.flofi.xyz/wallet/callback/{google,apple}`.
+   Configure each only after the live verification above, then check each method once with an owner-controlled identity.
+   None of these settings changes the database: migration 0018 is the same in this round.
 
 ## Rollback
 
@@ -82,4 +90,6 @@ on schema 17. Check `/readyz`, logs (`migrate.applied versions=none schema_versi
 | Release B misbehaves, schema 18 | Restore Release A (certified for 18). Account tables stay; Release A never reads them. Sign-in is unavailable until B returns. |
 | After real accounts exist | Same as above. Do not drop or truncate account tables, and do not run a downmigration: people's account ↔ wallet links (and Turnkey sub-organization ids) live there. |
 
-No rollback touches funds: accounts and saved wallets authorize nothing, and managed wallets cannot sign FloFi transactions in this release.
+No rollback touches funds: accounts and saved wallets authorize nothing. A managed wallet signs only in FloFi Wallet, after the person
+unlocks it and confirms a request that matches a reviewed FloFi attempt, and FloFi broadcasts only what was signed. A rollback leaves
+the keys at Turnkey, and the person can still export them from FloFi Wallet once it is restored.

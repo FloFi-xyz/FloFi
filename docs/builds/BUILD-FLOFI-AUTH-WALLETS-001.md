@@ -3,8 +3,8 @@
 Status: implemented on a review branch, **not merged, not deployed**. Live Google, Apple and Turnkey integrations are
 **unverified** in this build (no vendor credentials or network access to those services were available); every flow is
 implemented against the providers' published interfaces and exercised end to end against MOCKED loopback stand-ins only.
-**Release readiness: NO-GO** — see §15 (CI, security review, vendor evidence, production configuration, migration release plan and
-merge blockers).
+**Release readiness: NO-GO** — see §16 (third round: dependency policy, encrypted email codes, FloFi Wallet on its own origin, managed
+signing, export boundary, CI and blockers) and §15 (second round).
 
 Journey delivered: **Landing → Sign in → Wallet onboarding → Build 0 (`/app`)**, plus **Credentials → My wallets** and a
 protected **Export wallet** flow.
@@ -428,3 +428,95 @@ or review them on an owner machine.
 
 **Assessment: NO-GO** for merge and release until 1–7 are closed. Nothing in this build was merged, deployed, configured in
 production, or executed with real funds or real identities.
+
+## 16. Third round (2026-10-31): owner overrides, encrypted email codes, FloFi Wallet, managed signing
+
+Owner direction for this round:
+- a working end-user product, with no production mocks, owner-only flows or artificial restrictions;
+- no waiting for the 7-day dependency age: resolve it with narrow, documented exceptions;
+- implement encrypted email OTP;
+- implement managed-wallet signing for EVM and Solana, with explicit review and confirmation;
+- resolve the export security boundary without weakening the site-wide CSP;
+- arrange live verification;
+- respect the 0018 release order;
+- do not merge, deploy or change production configuration.
+
+### 16.1 Dependency release age (owner override)
+- **Exact owner-approved waivers.** `minimatch@11.0.3` and `@isaacs/nonrecursive-glob-match@1.0.3`, for GHSA-g3hv-75wg-m249.
+  - `fast-uri@3.1.9` and `source-map-js@1.2.2` are kept unchanged.
+  - `minimumReleaseAge` stays 10080 and is enforced by pnpm and by `--verify-dependencies`.
+- **Policy:** [`docs/security/DEPENDENCY-AGE-POLICY.md`](../security/DEPENDENCY-AGE-POLICY.md).
+  - Two categories are allowed: `security-fix` and `reviewed-dependency`.
+  - Each waiver has a mandatory schema: GHSA ids, the tarball integrity, the registry publication time, `eligible_at` exactly 7 days
+    later, the owner approval and a review document.
+  - `--verify-dependencies` binds each waiver to the lockfile integrity and the registry publication time, and reports waivers that are
+    past eligibility.
+  - `governance_lite` refuses ranges, globs, scoped globs and missing fields.
+- **Supply-chain review.** Both tarballs are published by `isaacs`, carry the npm registry signature and have no install scripts. Neither
+  does network, filesystem or `eval` access. Their SHA-512 equals the lockfile.
+- **`@turnkey/crypto@2.13.3`** for encrypted OTP (+23 registry packages, 272 → 295).
+  - All 23 are older than 7 days, so no age waiver was needed. `pnpm audit` finds no advisories.
+  - None of the 23 has install scripts or uses `eval`/`new Function`, so it runs under the wallet page's no-eval CSP.
+  - The single licence exception is `tslib@1.14.1`, under 0BSD (OSI-approved, public-domain-equivalent). It is an exact identity
+    reached only through `tsyringe` → `@peculiar/x509` → `@turnkey/crypto`.
+  - The existing `tslib@2.8.1` exception is unchanged, and the allowlist is not widened.
+  - Re-implementing Turnkey's HPKE with the already-locked `@noble` packages was rejected because it would be custom cryptography.
+
+### 16.2 Encrypted email codes (Turnkey INIT_OTP_V3 / VERIFY_OTP_V2 / OTP_LOGIN_V2 / CREATE_SUB_ORGANIZATION_V8)
+- **The code never reaches FloFi's server.** The browser verifies the enclave signature on the target (`@turnkey/crypto`, pinned
+  production key), then HPKE-encrypts `{code, public_key}`.
+- **FloFi checks the provider-signed token.** `verifyOtpVerificationToken` (ES256) runs, then the token must name this address and this
+  browser key, must not have expired and is used once (`flofi_account_used_proofs`).
+- **The deprecated flow is removed.** INIT_OTP_V2, VERIFY_OTP with a plaintext code and OTP_LOGIN v1 no longer exist.
+- **Client signatures** are built exactly as `@turnkey/core` 2.13 builds them (login and signup messages, raw P-256), always by the key
+  bound in the token. The server verifies the signature before any provider call.
+- **Sign-in vs unlock.**
+  - Sign-in on `/login` uses a per-attempt, in-memory, non-extractable key, and opens **no** provider session.
+  - FloFi Wallet unlock codes are separate challenges (`wallet-unlock:` key) with their own budget of 5 per hour and a distinct shape
+    (appName "FloFi Wallet", 8 letters and digits). A sign-in code can never unlock FloFi Wallet, and an unlock code never signs anyone in.
+
+### 16.3 Export and signing boundary: FloFi Wallet on its own origin
+**The vulnerability.** Until this round, sign-in opened a Turnkey session (sole root user of the person's sub-organization) for a P-256
+key held in the **product origin's** IndexedDB.
+- `/app` has no `script-src`, so any script injected there could use that key to stamp `EXPORT_WALLET` with its own target or
+  `SIGN_TRANSACTION`.
+- It could exfiltrate the stamp through an image URL and replay it at `api.turnkey.com`, bypassing every FloFi check.
+- Root users bypass Turnkey policies.
+
+**Design and reviews.** Design and two adversarial reviews (security, feasibility):
+- design: `scratchpad/design/wso-design.md`;
+- reviews: `review-security.md` and `review-feasibility.md`, both "sound with changes";
+- every finding is either applied or listed in §16.6.
+
+**What changed:**
+- **No provider session ever exists on the product origin.**
+  - `/login` encrypts codes with a throwaway key and opens no session.
+  - The product-origin relay (`/api/account/provider/*`) and `turnkey-browser.ts` are deleted.
+  - Account pages now frame nothing (`frame-src 'none'`).
+- **FloFi Wallet (`FLOFI_WALLET_ORIGIN`; production pinned to `https://wallet.flofi.xyz`)** is the same deployment on another host.
+  - `src/proxy.ts` serves there only `/wallet*`, `/api/wallet/*` and static assets, and refuses every server action.
+  - Wallet paths are 404 on the product host.
+  - Wallet pages get a per-request nonce CSP **without `'unsafe-eval'`**, `connect-src 'self'`, frames limited to Turnkey's
+    import/export iframes, `frame-ancestors 'none'`, and `nosniff` everywhere.
+  - An import-closure test keeps the workflow engine (Ajv) out of the wallet bundle.
+- **Account binding.**
+  - The product page opens the popup inside the click and sends a single-use, 120 s, sealed handoff by `postMessage` (never in the URL).
+    The wallet page accepts it only from its opener's exact origin.
+  - The wallet session cookie is HttpOnly, `__Host-` on https, Lax and bound to the account session; signing out ends it.
+  - Every wallet route requires the Host, `Sec-Fetch-Site: same-origin` and the exact Origin. A request carrying two wallet cookies is
+    refused (cookie tossing from the sibling host).
+- **Unlock** is always performed by the person, for a key only the wallet origin holds:
+  - email code to the account's own address;
+  - or Google/Apple through **FloFi Wallet's own OIDC clients**, whose audience separates them from sign-in tokens, for the same identity
+    linked to the account.
+  - The first unlock creates the sub-organization only from the account's **primary** identity.
+  - `invalidateExisting` ends previous provider sessions, and the provider session lasts 30 minutes.
+- **Export** happens only in FloFi Wallet: an unlock in the last 5 minutes, explicit confirmation there, and the secret shown only in
+  Turnkey's frame.
+- **Wallet relay** (`src/accounts/wallet-relay.ts`, defence in depth behind the person's confirmation):
+  - The stamp key must equal the unlocked key, with canonical JSON and the account's organization.
+  - Allowlist: create, import, export (fresh unlock + owned resource), `SIGN_TRANSACTION_V2` (EVM type 2 only, a managed signer of this
+    account) and `SIGN_RAW_PAYLOAD_V2`.
+  - Raw payloads are limited to FloFi's own SIWE/SIWS messages for the product host (EVM: EIP-191 bytes hashed by Turnkey with
+    keccak256, never a pre-hashed digest) or a Solana v0 message whose fee payer is the managed wallet.
+  - Never relayed: `eth_send_*`/`sol_send_*`, policies, users or API keys.
