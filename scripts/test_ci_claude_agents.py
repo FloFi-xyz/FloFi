@@ -370,6 +370,16 @@ class LifecycleLedger(Repository):
         self.record(hook_event_name="SessionStart", source="startup")
         self.assertEqual(self.ledger()[0]["head"], head)
 
+    def test_specialist_rows_record_the_reviewed_commit_and_uncommitted_state(self):
+        subprocess.run(["git", "add", "CLAUDE.md"], cwd=self.root, check=True)
+        subprocess.run(["git", "-c", "user.email=f@example.invalid", "-c", "user.name=f", "commit", "-qm", "fixture"],
+                       cwd=self.root, check=True)
+        head = subprocess.run(["git", "rev-parse", "HEAD"], cwd=self.root, capture_output=True, text=True).stdout.strip()
+        self.record(hook_event_name="SubagentStart", agent_type="flofi-swap", agent_id="a1")
+        self.record(hook_event_name="SubagentStop", agent_type="flofi-swap", agent_id="a1", last_assistant_message="")
+        start, stop = self.ledger()
+        self.assertEqual((start["head"], stop["head"], stop["dirty"]), (head, head, True))  # fixture has untracked files
+
     def test_symlinked_claude_directory_writes_nothing(self):
         moved = Path(self.outside, "claude")
         (self.root / ".claude").rename(moved)

@@ -76,8 +76,11 @@ denials, recorded gates, coverage gaps, skips, problems and warnings.
 incomplete, blocked or completed without a valid result line (unless skipped with a
 reason), a recorded gate that failed, more than three reviewers at once, invalid
 ledger rows, an unmapped maintained file or a failing required-suite report.
-Reviews of an earlier commit and agent definitions changed since a session are
-listed as warnings: decide explicitly whether they still cover the change.
+A specialist also counts as a problem when none of its valid reviews ran on the
+current HEAD with a clean worktree, unless accepted with
+`--accept-stale DOMAIN=REASON`. Agent definitions changed since a session, earlier
+gate failures that later passed and accepted stale reviews are listed as warnings.
+A ledger that reached its 1 MiB size limit is a problem.
 
 A repeatable headless variant (uses your Claude account; never in CI). The stream
 holds the whole conversation, so keep it private and delete it after summarizing:
@@ -145,8 +148,8 @@ and refuses a symlinked ledger directory:
 
 | Event | Stored fields |
 | --- | --- |
-| `session_start` | source; Git HEAD (the reviewed commit); SHA-256 prefix of each `flofi-*.md` present (defined) |
-| `subagent_start` / `subagent_stop` | agent name, agent ID; validated `FLOFI_REVIEW_RESULT` (result, count, highest severity) or null |
+| `session_start` | source; Git HEAD; SHA-256 prefix of each `flofi-*.md` present (defined) |
+| `subagent_start` / `subagent_stop` | agent name, agent ID, Git HEAD and whether the worktree had uncommitted changes (the reviewed state); validated `FLOFI_REVIEW_RESULT` (result, count, highest severity) or null |
 | `guard_deny` | agent name, agent ID, tool name |
 | `test` | gate IDs from a fixed list, pass/fail/unknown (unknown unless every separator is `&&`), exit code, pipeline flag, repository-relative test file paths |
 | `session_end` | reason |
@@ -157,8 +160,11 @@ specialist failed, was interrupted or is still running; hooks cannot tell which,
 a headless stream can (for example `rate_limit` when the account's usage limit ends a
 specialist). A result trailer must be self-consistent (`no-findings` is 0/`none`). Delete the directory at any
 time; set `FLOFI_AGENT_TELEMETRY=off` to stop recording. A gate's status is the
-shell exit status (a pipeline reports its last command); only `verify-results` on a
-fresh report checks required suites, and only CircleCI certifies a release.
+shell exit status, recorded only when the line is a single command or an all-`&&`
+chain that succeeded; pipelines, `;`, `||` and `&` record "not observed", and a failure
+of a multi-command line is not attributed to any gate. `--strict` counts each gate by
+its latest known result. Only `verify-results` on a fresh report checks required
+suites, and only CircleCI certifies a release.
 
 ## Maintenance and verification
 

@@ -79,7 +79,7 @@ GIT = {
     "status": options("sb", "", "--short --branch --porcelain --long --ignored"),
     "ls-files": options("comdizst", "", "--cached --others --modified --deleted --ignored --exclude-standard "
                         "--full-name --stage --directory --error-unmatch"),
-    "grep": options("nilLcwvEFPhHpoq", "eABCm", "--line-number --ignore-case --files-with-matches "
+    "grep": options("nilLcwvEFPhHpoqI", "eABCm", "--line-number --ignore-case --files-with-matches "
                     "--files-without-match --count --word-regexp --invert-match --extended-regexp --fixed-strings "
                     "--perl-regexp --cached --untracked --heading --break --show-function --name-only --only-matching "
                     "--quiet --all-match --and --or --not",
@@ -452,14 +452,12 @@ def gate_record(event, root=ROOT):
     # Only an all-&& chain lets one exit status speak for each gate in it.
     certain = all(separator == "&&" for separator in re.findall(r"&&|\|\||[;&|\n]", command))
     segments = re.split(r"&&|\|\||;|\n", command)
-    last_gate = False
-    for number, segment in enumerate(segments):
+    for segment in segments:
         stages = segment.split("|")
         head = re.sub(r"^\s*(?:cd \S+\s*$|(?:[A-Za-z_][A-Za-z0-9_]*=\S*\s+)*(?:timeout \d+[smh]? )?)", "", stages[0]).strip()
         for gate, pattern in GATES:
             if re.fullmatch(pattern, head):
                 gates.append(gate)
-                last_gate = number == len(segments) - 1
                 piped = piped or len(stages) > 1
                 suites += [path for path in (suite_path(token, root) for token in head.split()) if path]
     if not gates:
@@ -470,13 +468,23 @@ def gate_record(event, root=ROOT):
         return {**record, "ok": None, "exit": None}
     if event.get("hook_event_name") == "PostToolUseFailure":
         code = re.match(r"Exit code (\d+)", str(event.get("error", "")))
-        if certain and last_gate:
+        if len(segments) == 1 and not piped:
             return {**record, "ok": False, "exit": int(code[1]) if code else None}
-        return {**record, "ok": None, "exit": None}  # another command may have failed
+        return {**record, "ok": None, "exit": None}  # another command may have failed or stopped the gate
     response = event.get("tool_response") if isinstance(event.get("tool_response"), dict) else {}
     if response.get("interrupted"):
         return {**record, "ok": False, "exit": None}
     return {**record, "ok": True, "exit": 0} if certain else {**record, "ok": None, "exit": None}
+
+
+def worktree_state(root=ROOT):
+    """The commit a specialist reviewed, and whether uncommitted changes were also present."""
+    def git(*args):
+        return subprocess.run(["git", *args], cwd=root, stdin=subprocess.DEVNULL, capture_output=True,
+                              text=True, timeout=5).stdout
+    head = git("rev-parse", "HEAD").strip()
+    return {"head": head if re.fullmatch(r"[0-9a-f]{40}", head) else None,
+            "dirty": bool(git("status", "--porcelain").strip())}
 
 
 def record(event, root=ROOT):
@@ -493,10 +501,10 @@ def record(event, root=ROOT):
                          "head": head if re.fullmatch(r"[0-9a-f]{40}", head) else None,
                          "source": source if source in {"startup", "resume", "clear", "compact", "fork"} else "other"}, root)
     elif name == "SubagentStart" and event.get("agent_type"):
-        append(session, {"event": "subagent_start", **agent_fields(event)}, root)
+        append(session, {"event": "subagent_start", **agent_fields(event), **worktree_state(root)}, root)
     elif name == "SubagentStop" and event.get("agent_type"):
         fields = agent_fields(event)
-        append(session, {"event": "subagent_stop", **fields,
+        append(session, {"event": "subagent_stop", **fields, **worktree_state(root),
                          "review": review_result(fields["agent"], event.get("last_assistant_message"))}, root)
     elif name == "SessionEnd":
         reason = event.get("reason")

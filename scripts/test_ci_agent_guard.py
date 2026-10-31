@@ -280,7 +280,7 @@ class EngineeringGuard(unittest.TestCase):
             guard.domain_contract(self.data, "flofi-invented")
 
     def runs(self, *events, session="11111111-2222-3333-4444-555555555555"):
-        return {"session": session, "found": True, "events": list(events), "malformed": 0}
+        return {"session": session, "found": True, "events": list(events), "malformed": 0, "full": False}
 
     def test_review_summary_distinguishes_defined_completed_failed_skipped_and_missing_reviews(self):
         plan = {**guard.impact(self.data, self.data["modules"][1]["sources"]), "base": "origin/main"}
@@ -381,10 +381,67 @@ class EngineeringGuard(unittest.TestCase):
         run["malformed"] = 2
         summary = guard.review_summary(self.data, plan, [run], root=self.root)
         self.assertIn(f"Ledger {run['session']}: 2 rows failed validation", summary["problems"])
-        self.assertTrue(any(w.startswith("flofi-swap: reviewed aaaaaaaaaaaa, not the current HEAD")
-                            for w in summary["warnings"]), summary["warnings"])
+        self.assertTrue(any(p.startswith("flofi-swap: reviewed aaaaaaaaaaaa, not the current clean HEAD")
+                            for p in summary["problems"]), summary["problems"])
         self.assertEqual(next(r for r in summary["specialists"] if r["domain"] == "flofi-swap")["reviewedCommits"], ["a" * 40])
-        self.assertIn("## Warnings (not counted by --strict)", guard.review_markdown(summary))
+        accepted = guard.review_summary(self.data, plan, [run], root=self.root,
+                                        accepted={"flofi-swap": "Only documentation changed since"})
+        self.assertFalse(any(p.startswith("flofi-swap: reviewed") for p in accepted["problems"]))
+        self.assertTrue(any("accepted: Only documentation changed since" in w for w in accepted["warnings"]))
+        self.assertIn("## Warnings (not counted by --strict)", guard.review_markdown(accepted))
+
+    def commit_fixture(self):
+        subprocess.run(["git", "init", "-q"], cwd=self.root, check=True)
+        subprocess.run(["git", "add", "-A"], cwd=self.root, check=True)
+        subprocess.run(["git", "-c", "user.email=f@example.invalid", "-c", "user.name=f", "commit", "-qm", "x"],
+                       cwd=self.root, check=True)
+        return subprocess.run(["git", "rev-parse", "HEAD"], cwd=self.root, capture_output=True, text=True).stdout.strip()
+
+    def test_each_review_is_bound_to_the_commit_it_completed_on(self):
+        head = self.commit_fixture()
+        plan = {**guard.impact(self.data, self.data["modules"][0]["sources"][:1]), "base": "origin/main"}
+        done = {"result": "no-findings", "findings": 0, "highest": "none"}
+        # A commit made in the same session after SessionStart: the stop row's HEAD wins.
+        fresh = self.runs({"event": "session_start", "definitions": {}, "head": "a" * 40},
+                          {"event": "subagent_start", "agent": "flofi-swap", "agentId": "s1", "head": "a" * 40},
+                          {"event": "subagent_stop", "agent": "flofi-swap", "agentId": "s1", "head": head,
+                           "dirty": False, "review": done})
+        summary = guard.review_summary(self.data, plan, [fresh], root=self.root)
+        self.assertFalse(any(p.startswith("flofi-swap: reviewed") for p in summary["problems"]), summary["problems"])
+        # Legacy rows without a HEAD use the SessionStart that preceded them, not a later compaction's.
+        legacy = self.runs({"event": "session_start", "definitions": {}, "head": "b" * 40},
+                           {"event": "subagent_start", "agent": "flofi-swap", "agentId": "s2"},
+                           {"event": "subagent_stop", "agent": "flofi-swap", "agentId": "s2", "review": done},
+                           {"event": "session_start", "definitions": {}, "head": head, "source": "compact"})
+        summary = guard.review_summary(self.data, plan, [legacy], root=self.root)
+        swap = next(r for r in summary["specialists"] if r["domain"] == "flofi-swap")
+        self.assertEqual(swap["reviewedCommits"], ["b" * 40])
+        self.assertTrue(any(p.startswith("flofi-swap: reviewed bbbbbbbbbbbb") for p in summary["problems"]))
+        # Uncommitted changes at review time do not count as a review of HEAD.
+        dirty = self.runs({"event": "subagent_start", "agent": "flofi-swap", "agentId": "s3", "head": head},
+                          {"event": "subagent_stop", "agent": "flofi-swap", "agentId": "s3", "head": head,
+                           "dirty": True, "review": done})
+        summary = guard.review_summary(self.data, plan, [dirty], root=self.root)
+        self.assertTrue(any("+uncommitted" in p for p in summary["problems"]), summary["problems"])
+
+    def test_gates_count_by_their_latest_known_result(self):
+        plan = {**guard.impact(self.data, ["docs/notes.md"]), "base": "origin/main"}
+        gate = lambda ok: {"event": "test", "gates": ["pnpm-check"], "ok": ok, "exit": None, "piped": False,
+                           "suites": [], "agent": "main"}
+        fixed = guard.review_summary(self.data, plan, [self.runs(gate(False), gate(True))], root=self.root)
+        self.assertEqual(fixed["problems"], [])
+        self.assertIn("Earlier gate failures later passed: pnpm-check", fixed["warnings"])
+        for events in [(gate(False), gate(None)), (gate(True), gate(False))]:
+            summary = guard.review_summary(self.data, plan, [self.runs(*events)], root=self.root)
+            self.assertEqual(summary["problems"], ["Recorded gate failed: pnpm-check"])
+
+    def test_a_full_ledger_is_a_problem(self):
+        self.write(f"{guard.CLAUDE_RUNS}/full.jsonl", '{"event":"session_end"}\n' + " " * guard.LEDGER_LIMIT)
+        run = guard.read_runs("full", self.root)
+        self.assertTrue(run["full"])
+        plan = {**guard.impact(self.data, ["docs/notes.md"]), "base": "origin/main"}
+        self.assertIn("Ledger full reached its size limit; later events may be missing",
+                      guard.review_summary(self.data, plan, [run], root=self.root)["problems"])
 
     def test_documentation_only_change_needs_no_specialist_and_no_evidence_is_invented(self):
         plan = {**guard.impact(self.data, ["docs/notes.md"]), "base": "origin/main"}

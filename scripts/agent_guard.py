@@ -51,6 +51,7 @@ SHARED_CORE_DOMAINS = frozenset({
     "flofi-frontend-ux", "flofi-data-privacy", "flofi-channels", "flofi-automations",
 })
 MAX_CONCURRENT_REVIEWS = 3
+LEDGER_LIMIT = 1 << 20  # the hook stops appending at this size
 
 
 def git_paths(root=ROOT):
@@ -423,10 +424,14 @@ def ledger_row(row):
     event = row.get("event")
     name = (lambda value: value if isinstance(value, str) and re.fullmatch(r"[A-Za-z0-9_.:-]{1,64}", value) else "other")
     clean = {"event": event}
+    head = row.get("head")
+    head = head if isinstance(head, str) and re.fullmatch(r"[0-9a-f]{40}", head) else None
     if event in {"subagent_start", "subagent_stop", "guard_deny"}:
         agent_id = row.get("agentId")
         clean.update(agent=name(row.get("agent")), agentId=agent_id if isinstance(agent_id, str)
                      and re.fullmatch(r"[A-Za-z0-9_-]{1,128}", agent_id) else None)
+    if event in {"subagent_start", "subagent_stop"}:
+        clean.update(head=head, dirty=row.get("dirty") is True)
     if event == "subagent_stop":
         clean["review"] = review_fields(row.get("review"))
     elif event == "guard_deny":
@@ -435,8 +440,9 @@ def ledger_row(row):
         definitions = row.get("definitions") if isinstance(row.get("definitions"), dict) else {}
         clean["definitions"] = {key: value for key, value in definitions.items() if key in DOMAINS
                                 and isinstance(value, str) and re.fullmatch(r"[0-9a-f]{16}", value)}
-        head = row.get("head")
-        clean["head"] = head if isinstance(head, str) and re.fullmatch(r"[0-9a-f]{40}", head) else None
+        clean["head"] = head
+        clean["source"] = row.get("source") if row.get("source") in {
+            "startup", "resume", "clear", "compact", "fork"} else "other"
     elif event == "test":
         gates, suites = row.get("gates"), row.get("suites")
         if not isinstance(gates, list) or not gates or not all(
@@ -459,6 +465,7 @@ def read_runs(session, root=ROOT):
     path = runs / f"{session}.jsonl"
     events, malformed = [], 0
     found = (not runs.parent.is_symlink() and not runs.is_symlink() and path.is_file() and not path.is_symlink())
+    full = found and path.stat().st_size >= LEDGER_LIMIT
     for line in path.read_text().splitlines() if found else []:
         try:
             row = ledger_row(json.loads(line))
@@ -468,7 +475,7 @@ def read_runs(session, root=ROOT):
             events.append(row)
         else:
             malformed += 1
-    return {"session": session, "found": found, "events": events, "malformed": malformed}
+    return {"session": session, "found": found, "events": events, "malformed": malformed, "full": full}
 
 
 def stream_sessions(stream_text):
@@ -495,23 +502,24 @@ def stream_sessions(stream_text):
     return {key: value for key, value in sessions.items() if value["agents"] or value["failed"]}
 
 
-def review_summary(data, plan, runs, skips=None, reports=(), root=ROOT, streams=None):
+def review_summary(data, plan, runs, skips=None, reports=(), root=ROOT, streams=None, accepted=None):
     """Combine expected specialists with what hooks actually observed. Advisory only."""
-    skips, streams = skips or {}, streams or {}
-    agents, tests, denials, definitions, heads, peak = {}, [], Counter(), [], {}, 0
+    skips, streams, accepted = skips or {}, streams or {}, accepted or {}
+    agents, tests, denials, definitions, peak = {}, [], Counter(), [], 0
     for run in runs:
-        running = set()
+        running, session_head = set(), None
         for number, row in enumerate(run["events"]):
             agent_id = row.get("agentId")
             key = f"{run['session']}/{agent_id}" if agent_id else None
             if row["event"] == "session_start" and isinstance(row.get("definitions"), dict):
                 definitions.append((run["session"], row["definitions"]))
-                heads[run["session"]] = row.get("head")
+                session_head = row.get("head")
             elif row["event"] == "subagent_start":
                 key = key or f"{run['session']}/#{number}"
                 failure = streams.get(run["session"], {}).get("failed", {}).get(agent_id)
                 agents[key] = {"agent": row.get("agent"), "status": "failed" if failure else "started",
-                               "review": None, "error": failure, "session": run["session"]}
+                               "review": None, "error": failure, "session": run["session"],
+                               "head": row.get("head") or session_head, "dirty": row.get("dirty")}
                 if str(row.get("agent")).startswith("flofi-"):
                     running.add(key)
                     peak = max(peak, len(running))
@@ -523,7 +531,9 @@ def review_summary(data, plan, runs, skips=None, reports=(), root=ROOT, streams=
                 entry = agents.setdefault(key, {"agent": row.get("agent"), "status": "started", "review": None,
                                                 "error": None, "session": run["session"]})
                 if entry["status"] != "failed":  # a reported termination is never upgraded
-                    entry.update(status="completed", review=row.get("review"))
+                    # The commit at completion is what was reviewed, not the session's first HEAD.
+                    entry.update(status="completed", review=row.get("review"),
+                                 head=row.get("head") or entry.get("head"), dirty=bool(row.get("dirty") or entry.get("dirty")))
                 running.discard(key)
             elif row["event"] == "test":
                 tests.append(row)
@@ -547,7 +557,10 @@ def review_summary(data, plan, runs, skips=None, reports=(), root=ROOT, streams=
         reviews = [a["review"] for a in done if isinstance(a["review"], dict)]
         status = ("completed" if done else "failed" if failed else "incomplete" if seen
                   else "skipped" if domain in skips else "not-invoked")
-        reviewed = sorted({heads.get(a["session"]) or "unrecorded" for a in done})
+        reviewed = sorted({(a.get("head") or "unrecorded")
+                           + ("+uncommitted" if a.get("dirty") else "") for a in done})
+        current_review = any(a.get("head") == head_now and not a.get("dirty") and isinstance(a["review"], dict)
+                             for a in done)
         rows.append({"domain": domain, "selectedBecause": plan.get("reasons", {}).get(domain, []),
                      "reviewedCommits": reviewed,
                      "defined": current.get(domain) is not None,
@@ -566,23 +579,39 @@ def review_summary(data, plan, runs, skips=None, reports=(), root=ROOT, streams=
             problems.append(f"{domain}: completed without a valid FLOFI_REVIEW_RESULT")
         if any(review.get("result") == "blocked" for review in reviews):
             problems.append(f"{domain}: specialist reported its review as blocked")
-        if done and head_now and head_now not in reviewed:
-            warnings.append(f"{domain}: reviewed {', '.join(c[:12] for c in reviewed)}, not the current HEAD {head_now[:12]}")
-    for test in tests:
-        if test.get("ok") is False:
-            problems.append(f"Recorded gate failed: {', '.join(test.get('gates', []))}")
+        if done and head_now and not current_review:
+            stale = f"{domain}: reviewed {', '.join(c[:12] + ('+uncommitted' if c.endswith('+uncommitted') else '') for c in reviewed)}, not the current clean HEAD {head_now[:12]}"
+            if domain in accepted:
+                warnings.append(f"{stale}; accepted: {accepted[domain]}")
+            else:
+                problems.append(stale)
+    latest = {}
+    for test in tests:  # a failed gate counts until a later run passes; an unknown result never clears it
+        for gate in test.get("gates", []):
+            if test.get("ok") is not None or gate not in latest:
+                latest[gate] = test.get("ok")
+    superseded = sorted({gate for test in tests if test.get("ok") is False for gate in test.get("gates", [])
+                         if latest.get(gate) is True})
+    if superseded:
+        warnings.append(f"Earlier gate failures later passed: {', '.join(superseded)}")
+    problems.extend(f"Recorded gate failed: {gate}" for gate, ok in sorted(latest.items()) if ok is False)
     if peak > MAX_CONCURRENT_REVIEWS:
         problems.append(f"Observed {peak} concurrent flofi-* reviewers; the limit is {MAX_CONCURRENT_REVIEWS}")
     problems.extend(f"Unmapped maintained source: {path}" for path in plan["unmapped"])
     problems.extend(f"Ledger {run['session']}: {run['malformed']} rows failed validation"
                     for run in runs if run["malformed"])
+    problems.extend(f"Ledger {run['session']} reached its size limit; later events may be missing"
+                    for run in runs if run.get("full"))
     verified = []
     for stage, path in reports:
         errors = verify_results(data, json.loads(Path(path).read_text()), root, stage)
         verified.append({"stage": stage, "report": str(path), "errors": errors})
         problems.extend(errors)
-    changed_definitions = {session: sorted(name for name, digest in recorded.items() if current.get(name) != digest)
-                           for session, recorded in definitions}
+    changed_definitions = {}
+    for session, recorded in definitions:  # every SessionStart (startup, compact, resume) is a baseline
+        changed_definitions.setdefault(session, set()).update(
+            name for name, digest in recorded.items() if current.get(name) != digest)
+    changed_definitions = {session: sorted(names) for session, names in changed_definitions.items()}
     warnings.extend(f"{len(names)} agent definitions changed since session {session}"
                     for session, names in changed_definitions.items() if names)
     return {
@@ -591,7 +620,7 @@ def review_summary(data, plan, runs, skips=None, reports=(), root=ROOT, streams=
         "documentationOnly": not plan["domains"] and not plan["modules"] and not plan["unmapped"],
         "specialists": rows, "discoveryObserved": sorted(s for s, v in streams.items() if v["agents"]),
         "unexpectedAgents": sorted({str(a["agent"]) for a in agents.values()} - set(plan["domains"])),
-        "definitionsAtSessionStart": {session: len(recorded) for session, recorded in definitions},
+        "definitionsAtSessionStart": {session: len(recorded) for session, recorded in reversed(definitions)},
         "definitionsChangedSince": {session: names for session, names in changed_definitions.items() if names},
         "peakConcurrentReviewers": peak, "tests": tests, "reports": verified,
         "gaps": plan["gaps"], "problems": problems, "warnings": warnings, "head": head_now,
@@ -634,7 +663,7 @@ def review_markdown(summary):
               + ".", "", "## Tests recorded by hooks", ""]
     for test in summary["tests"]:
         state = {True: "passed", False: "failed", None: "result not observed"}[test.get("ok")]
-        notes = (" (pipeline: status of the last command)" if test.get("piped") else "") + (
+        notes = (" (pipeline)" if test.get("piped") else "") + (
             f"; suites: {', '.join(test['suites'])}" if test.get("suites") else "")
         lines.append(f"- {', '.join(test.get('gates', []))} by {test.get('agent', 'main')}: {state}"
                      + (f", exit {test['exit']}" if test.get("exit") is not None else "") + notes)
@@ -742,6 +771,8 @@ def main():
     parser.add_argument("--unit-report", help="review: fresh Vitest JSON report to verify for required unit suites")
     parser.add_argument("--postgres-report", help="review: fresh Vitest JSON report for required PostgreSQL suites")
     parser.add_argument("--stream-json", action="append", default=[], help="review: claude -p stream-json output (discovery and session ID)")
+    parser.add_argument("--accept-stale", action="append", default=[], metavar="DOMAIN=REASON",
+                        help="review: accept a specialist's review of an earlier commit, with a reason")
     parser.add_argument("--json", action="store_true", help="review: print JSON instead of Markdown")
     parser.add_argument("--strict", action="store_true", help="review: exit 1 on unresolved reviews or failures")
     parser.add_argument("--write", action="store_true", help="claude-agents: create missing generated agents")
@@ -780,9 +811,13 @@ def main():
         skips = dict(item.split("=", 1) for item in args.skip if "=" in item and item.split("=", 1)[1].strip())
         if len(skips) != len(args.skip) or set(skips) - set(DOMAINS):
             parser.error("--skip takes DOMAIN=REASON with a known domain and a non-empty reason")
+        accepted = dict(item.split("=", 1) for item in args.accept_stale if "=" in item and item.split("=", 1)[1].strip())
+        if len(accepted) != len(args.accept_stale) or set(accepted) - set(DOMAINS):
+            parser.error("--accept-stale takes DOMAIN=REASON with a known domain and a non-empty reason")
         reports = [(stage, path) for stage, path in (("unit", args.unit_report), ("postgres", args.postgres_report)) if path]
         summary = review_summary(data, {**result, "base": f"{args.base} ({merge_base[:12]})"},
-                                 [read_runs(session) for session in sessions], skips, reports, streams=streams)
+                                 [read_runs(session) for session in sessions], skips, reports, streams=streams,
+                                 accepted=accepted)
         print(json.dumps(summary, indent=2) if args.json else review_markdown(summary), end="\n" if args.json else "")
         return int(args.strict and bool(summary["problems"]))
     elif args.command == "report":
