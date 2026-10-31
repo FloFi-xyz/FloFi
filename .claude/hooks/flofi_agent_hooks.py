@@ -11,7 +11,6 @@ record (lifecycle and Bash results): appends minimal metadata to the Git-ignored
 Standard library only, no network. Set FLOFI_AGENT_TELEMETRY=off to disable record.
 """
 
-import glob
 import hashlib
 import json
 import os
@@ -28,18 +27,6 @@ RUNS = ".claude/flofi-agent-runs"
 SAFE_ID = re.compile(r"[A-Za-z0-9_-]{1,128}")
 SAFE_AGENT = re.compile(r"[A-Za-z0-9_.:-]{1,64}")
 READ_ONLY_TOOLS = {"Read", "Grep", "Glob", "Bash"}
-GIT_READ = {"diff", "log", "show", "status", "ls-files", "grep", "rev-parse", "merge-base", "blame",
-            "cat-file", "ls-tree", "diff-tree", "rev-list", "shortlog", "describe", "name-rev"}
-GIT_DENY = ("--output", "--ext-diff", "--no-index", "-O", "--open-files-in-pager", "--no-exclude-standard")
-# jq ($ENV/env) and diff (-r over ignored files) are deliberately absent.
-COMMANDS = {"cat", "head", "tail", "wc", "ls", "cut", "tr", "nl", "sort", "stat", "basename",
-            "dirname", "realpath", "pwd", "rg", "grep", "find", "sed", "git", "python3"}
-# Long options are matched by prefix; letters are refused inside short-option bundles.
-DENY_LONG = {"rg": ("--pre", "--follow", "--unrestricted", "--no-ignore", "--search-zip", "--hostname-bin"),
-             "grep": ("--recursive", "--dereference-recursive", "--directories", "--devices"),
-             "tail": ("--follow", "--retry"), "sort": ("--output", "--compress-program", "--temporary-directory")}
-DENY_SHORT = {"rg": "uLz", "grep": "rRdD", "tail": "fF", "sort": "oT", "git": "O"}
-FIND_DENY = {"-exec", "-execdir", "-ok", "-okdir", "-delete", "-fprint", "-fprint0", "-fprintf", "-fls", "-L", "-follow"}
 GUARD_SCRIPTS = {"check", "impact", "report", "domain"}
 SENSITIVE_NAMES = {"id_rsa", "id_ed25519", "id_ecdsa", "credentials", "credentials.json", ".credentials.json",
                    "credentials.db", "application_default_credentials.json", ".netrc", "disposable-phrase",
@@ -47,6 +34,71 @@ SENSITIVE_NAMES = {"id_rsa", "id_ed25519", "id_ecdsa", "credentials", "credentia
 SENSITIVE_SUFFIXES = (".pem", ".key", ".p12", ".pfx", ".jks", ".keystore")
 REDIRECTS = re.compile(r"(?<!\S)2>(?:/dev/null|&1)(?!\S)")
 RESULT = re.compile(r'FLOFI_REVIEW_RESULT (\{.*\})')
+LEDGER_LIMIT = 1 << 20
+
+
+def options(flags="", valued="", longs="", long_valued="", numeric=False):
+    """An explicit option allowlist. Anything else, abbreviations included, is refused:
+    GNU tools and git accept unambiguous prefixes, and Claude Code's grep (ugrep) and
+    find (bfs) add pager, filter and exec options of their own."""
+    return {"flags": set(flags), "valued": set(valued), "longs": set(longs.split()),
+            "long_valued": set(long_valued.split()), "numeric": numeric}
+
+
+COMMANDS = {
+    "cat": options("nAbeEsStTuv"), "wc": options("lwcmL"), "ls": options("laA1RhdFStrpi"),
+    "head": options("qv", "nc", "", "--lines --bytes", numeric=True),
+    "tail": options("qv", "nc", "", "--lines --bytes", numeric=True),
+    "cut": options("s", "dfcb", "", "--delimiter --fields --characters --bytes"), "tr": options("dsc"),
+    "sort": options("nrufbhVMg", "kt", "", "--key --field-separator"), "stat": options("L", "c", "", "--format"),
+    "basename": options(), "dirname": options(), "realpath": options("e"), "pwd": options(),
+    "grep": options("nilLcwxvohHEFsq", "eABCm", "--line-number --ignore-case --files-with-matches --count "
+                    "--word-regexp --line-regexp --invert-match --only-matching --extended-regexp --fixed-strings "
+                    "--no-filename --with-filename", "--regexp --after-context --before-context --context --max-count"),
+    # No -g/--glob (overrides .gitignore), --hidden (.git), -u, --pre, -L or -z.
+    "rg": options("nNiSslcwxvoFUHIq", "eABCmtTM", "--line-number --no-line-number --ignore-case --smart-case "
+                  "--case-sensitive --files --files-with-matches --files-without-match --count --count-matches "
+                  "--word-regexp --line-regexp --invert-match --only-matching --fixed-strings --multiline --heading "
+                  "--no-heading --with-filename --no-filename --column --vimgrep --json --stats --trim --quiet",
+                  "--regexp --after-context --before-context --context --max-count --type --type-not --sort --sortr "
+                  "--max-columns --max-depth --max-filesize"),
+}
+FILE_COMMANDS = {"cat", "head", "tail", "wc", "cut", "sort", "grep", "sed"}  # files only: ugrep recurses directories
+_DIFF = ("--stat --shortstat --numstat --name-only --name-status --summary --patch --no-patch --no-color "
+         "--no-renames --cached --staged --merge-base --ignore-all-space --ignore-space-change --word-diff --raw "
+         "--minimal --patience --histogram --find-renames --check --no-ext-diff --no-textconv --full-index --color ")
+_DIFF_VALUED = "--diff-filter --unified --color --word-diff --stat "
+_LOG = ("--oneline --graph --decorate --no-decorate --first-parent --no-merges --merges --follow --reverse "
+        "--abbrev-commit --all --topo-order --date-order ")
+_LOG_VALUED = "--max-count --skip --since --until --after --before --author --committer --grep --format --pretty --date --abbrev "
+GIT = {
+    "diff": options("pswbRM", "U", _DIFF, _DIFF_VALUED),
+    "log": options("pswbM", "nSGU", _DIFF + _LOG, _DIFF_VALUED + _LOG_VALUED, numeric=True),
+    "show": options("pswbM", "U", _DIFF + "--oneline --abbrev-commit", _DIFF_VALUED + "--format --pretty --date --abbrev"),
+    "diff-tree": options("rpsM", "U", _DIFF + "--no-commit-id --root", _DIFF_VALUED),
+    "status": options("sb", "", "--short --branch --porcelain --long --ignored"),
+    "ls-files": options("comdizst", "", "--cached --others --modified --deleted --ignored --exclude-standard "
+                        "--full-name --stage --directory --error-unmatch"),
+    "grep": options("nilLcwvEFPhHpoq", "eABCm", "--line-number --ignore-case --files-with-matches "
+                    "--files-without-match --count --word-regexp --invert-match --extended-regexp --fixed-strings "
+                    "--perl-regexp --cached --untracked --heading --break --show-function --name-only --only-matching "
+                    "--quiet --all-match --and --or --not",
+                    "--regexp --after-context --before-context --context --max-count --max-depth"),
+    "rev-parse": options("q", "", "--abbrev-ref --short --show-toplevel --verify --is-inside-work-tree "
+                         "--symbolic-full-name --quiet"),
+    "merge-base": options("a", "", "--is-ancestor --all --fork-point --octopus"),
+    "blame": options("wsecltfnMC", "L", "--porcelain --line-porcelain --show-name --show-number"),
+    "ls-tree": options("rdtlz", "", "--long --name-only --name-status --full-name --full-tree", "--abbrev"),
+    "rev-list": options("n", "", "--count --all --first-parent --merges --no-merges --reverse --left-right",
+                        "--max-count --since --until"),
+    "shortlog": options("sne", "", "--summary --numbered --email"),
+    "describe": options("", "", "--tags --always --long --contains --all", "--abbrev --match"),
+    "name-rev": options("", "", "--name-only --tags --always"),
+}
+FIND_UNARY = {"-print", "-print0", "-prune", "-o", "-or", "-a", "-and", "-not", "!", "(", ")", "-empty", "-true",
+              "-false", "-depth", "-xdev", "-mount", "-daystart"}
+FIND_BINARY = {"-name", "-iname", "-path", "-ipath", "-wholename", "-iwholename", "-regex", "-iregex", "-type",
+               "-maxdepth", "-mindepth", "-size", "-mtime", "-mmin", "-newer", "-perm", "-links"}
 GATES = (
     ("pnpm-check", r"pnpm check"), ("pnpm-typecheck", r"pnpm typecheck"), ("pnpm-lint", r"pnpm lint"),
     ("pnpm-build", r"pnpm build"), ("pnpm-schemas-check", r"pnpm schemas:check"),
@@ -80,7 +132,7 @@ def path_reason(value, cwd, root=ROOT):
         relative = resolved.relative_to(root.resolve())
     except (OSError, RuntimeError, ValueError):
         return "paths outside the repository are not readable"
-    if ".git" in relative.parts:
+    if any(part.lower() == ".git" for part in relative.parts):
         return "Git internals are not readable"
     if any(sensitive(part) for part in relative.parts):
         return "secret or local-state paths are not readable"
@@ -92,20 +144,18 @@ def path_reason(value, cwd, root=ROOT):
     return None
 
 
-def candidate_paths(token, cwd):
-    """Tokens that the shell or the tool may treat as files, including glob expansions."""
-    values = [token.split("=", 1)[1]] if token.startswith("-") and "=" in token else [token]
-    found = []
-    for value in values:
-        if any(char in value for char in "*?["):
-            found += [match for match in glob.glob(value, root_dir=cwd, include_hidden=True)]
-        if (value.startswith(("/", "~", ".")) or "/" in value or (Path(cwd) / value).exists()):
-            found.append(value)
-    return found
+def looks_like_path(value, cwd):
+    if value.startswith(("/", "~", ".")) or "/" in value:
+        return True
+    try:
+        return (Path(cwd) / value).exists()
+    except (OSError, ValueError):
+        return True  # e.g. ENAMETOOLONG: let path_reason refuse it
 
 
 def unquoted_reason(command):
-    quote, index = None, 0
+    """Refuse every construct whose meaning differs between Bash and shlex."""
+    quote, index, previous = None, 0, " "
     while index < len(command):
         char = command[index]
         if quote == "'":
@@ -124,50 +174,117 @@ def unquoted_reason(command):
             quote = char
         elif char in ";&<>(){}\n\r":
             return "command chaining, redirection, subshells and background jobs are not allowed"
+        elif char in "#*?[":
+            return "unquoted comments and glob patterns are not allowed; quote patterns"
+        elif char == "~" and (previous.isspace() or previous in "=:"):
+            return "home-directory expansion is not allowed"
+        previous = char
         index += 1
     return "unterminated quote" if quote else None
 
 
-def option_reason(name, args):
-    for arg in args:
-        if arg.startswith("--") and arg.startswith(DENY_LONG.get(name, ())):
-            return f"{name} {arg.split('=', 1)[0]} is not allowed"
-        if arg.startswith("-") and not arg.startswith("--") and set(arg[1:]) & set(DENY_SHORT.get(name, "")):
-            return f"{name} {arg} is not allowed"
+def parse_options(name, args, spec):
+    """Positionals and option values, or a denial reason, under an explicit allowlist."""
+    positionals, values, index, ended = [], [], 0, False
+    while index < len(args):
+        arg = args[index]
+        index += 1
+        if ended or arg == "-" or not arg.startswith("-"):
+            positionals.append(arg)
+        elif arg == "--":
+            ended = True
+        elif arg.startswith("--"):
+            option, has_value, value = arg.partition("=")
+            if has_value and option in spec["long_valued"]:
+                values.append(value)
+            elif not has_value and option in spec["longs"]:
+                pass
+            elif not has_value and option in spec["long_valued"] and index < len(args):
+                values.append(args[index])
+                index += 1
+            else:
+                return f"{name} {option} is not an allowed option"
+        elif spec["numeric"] and arg[1:].isdigit():
+            pass
+        else:
+            for position, letter in enumerate(arg[1:], 1):
+                if letter in spec["flags"]:
+                    continue
+                if letter in spec["valued"]:
+                    value = arg[position + 1:]
+                    if not value:
+                        if index >= len(args):
+                            return f"{name} -{letter} needs a value"
+                        value = args[index]
+                        index += 1
+                    values.append(value)
+                    break
+                return f"{name} -{letter} is not an allowed option"
+    return positionals, values
+
+
+def find_reason(args, cwd, root):
+    index = 0
+    while index < len(args) and not args[index].startswith("-") and args[index] not in {"!", "(", ")"}:
+        reason = path_reason(args[index], cwd, root)
+        if reason:
+            return reason
+        index += 1
+    while index < len(args):
+        token = args[index]
+        if token in FIND_BINARY and index + 1 < len(args):
+            if token == "-newer":
+                reason = path_reason(args[index + 1], cwd, root)
+                if reason:
+                    return reason
+            index += 2
+        elif token in FIND_UNARY:
+            index += 1
+        else:
+            return f"find {token} is not an allowed predicate"
     return None
 
 
 def segment_reason(argv, cwd, root=ROOT):
     name, args = argv[0], argv[1:]
-    if name not in COMMANDS:
-        return f"{name} is not an allowed read-only inspection command"
-    if name == "git":
-        while args and args[0] == "--no-pager":
-            args = args[1:]
-        if not args or args[0] not in GIT_READ:
-            return "only read-only git subcommands without global options are allowed"
-        if any(arg.startswith(GIT_DENY) for arg in args[1:]):
-            return "git output files, external diff, no-index and pager options are not allowed"
-        # Options such as --contents=FILE or -f FILE read the working tree too.
-        args = args[1:]
+    if name == "find":
+        return find_reason(args, cwd, root)
+    if name == "sed":
+        if len(args) < 2 or args[0] != "-n" or not re.fullmatch(r"(?:\d+|\$)(?:,(?:\d+|\$))?p", args[1]) or any(
+                arg.startswith("-") for arg in args[2:]):
+            return "sed is limited to sed -n 'N,Mp' [FILE...]"
+        positionals, values = args[2:], []
     elif name == "python3":
         script = (Path(cwd) / args[0]).resolve() if args else None
         if (script != root.resolve() / "scripts/agent_guard.py" or len(args) < 2 or args[1] not in GUARD_SCRIPTS
                 or any(not re.fullmatch(r"[A-Za-z0-9_./@^~:=-]+", arg) for arg in args[2:])):
             return "python3 may only run scripts/agent_guard.py check, impact, report or domain"
-    if name == "find" and FIND_DENY & set(args):
-        return "find actions that execute, delete, write or follow links are not allowed"
-    if name == "sed" and (len(args) < 2 or args[0] != "-n" or not re.fullmatch(r"(?:\d+|\$)(?:,(?:\d+|\$))?p", args[1])
-                          or any(arg.startswith("-") for arg in args[2:])):
-        return "sed is limited to sed -n 'N,Mp' [FILE...]"
-    reason = option_reason(name, args)
-    if reason:
-        return reason
-    for arg in args[1:] if name == "python3" else args:
-        for value in candidate_paths(arg, cwd):
+        positionals, values = args[2:], []
+    elif name == "git":
+        while args and args[0] == "--no-pager":
+            args = args[1:]
+        if not args or args[0] not in GIT:
+            return "only read-only git subcommands without global options are allowed"
+        parsed = parse_options("git " + args[0], args[1:], GIT[args[0]])
+        if isinstance(parsed, str):
+            return parsed
+        positionals, values = parsed
+    elif name in COMMANDS:
+        parsed = parse_options(name, args, COMMANDS[name])
+        if isinstance(parsed, str):
+            return parsed
+        positionals, values = parsed
+    else:
+        return f"{name} is not an allowed read-only inspection command"
+    pattern_first = name in {"grep", "rg"} and not any(a.startswith(("-e", "--regexp")) for a in args)
+    for position, value in enumerate(positionals + values):
+        if looks_like_path(value, cwd):
             reason = path_reason(value, cwd, root)
             if reason:
                 return reason
+        is_file_operand = position < len(positionals) and not (pattern_first and position == 0)
+        if name in FILE_COMMANDS and is_file_operand and (Path(cwd) / value).is_dir():
+            return f"{name} takes files, not directories (it could recurse into ignored files)"
     return None
 
 
@@ -184,6 +301,7 @@ def bash_reason(tool_input, cwd, root=ROOT):
     try:
         lexer = shlex.shlex(command, posix=True, punctuation_chars="|")
         lexer.whitespace_split = True
+        lexer.commenters = ""
         tokens = list(lexer)
     except ValueError:
         return "unparseable command"
@@ -221,18 +339,19 @@ def guard_reason(event, root=ROOT):
     agent = event.get("agent_type") or ""
     if not isinstance(agent, str) or not agent.startswith("flofi-"):
         return None
-    tool, tool_input = event.get("tool_name"), event.get("tool_input") or {}
-    cwd = event.get("cwd") if isinstance(event.get("cwd"), str) else str(root)
-    if path_reason(cwd, root, root):
-        cwd = str(root)
+    tool, tool_input, cwd = event.get("tool_name"), event.get("tool_input") or {}, event.get("cwd")
     if tool not in READ_ONLY_TOOLS or not isinstance(tool_input, dict):
         return f"{tool} is not available to read-only FloFi reviewers"
+    if not isinstance(cwd, str) or path_reason(cwd, root, root):
+        return "the working directory must be a readable location inside the repository"
     if tool == "Bash":
         return bash_reason(tool_input, cwd, root)
     if tool == "Read":
         if saved_output(event, tool_input.get("file_path")):
             return None
         return path_reason(tool_input.get("file_path"), cwd, root)
+    if tool == "Grep" and tool_input.get("glob") is not None:
+        return "Grep glob filters override .gitignore; use type or path instead"
     pattern = tool_input.get("pattern") if tool == "Glob" else None
     if isinstance(pattern, str) and (pattern.startswith(("/", "~")) or ".." in pattern.split("/")):
         return "glob patterns must stay inside the repository"
@@ -256,11 +375,16 @@ def append(session, record, root=ROOT):
         if os.fstat(directory).st_uid != os.geteuid():
             return
         os.fchmod(directory, 0o700)
-        descriptor = os.open(f"{session}.jsonl", os.O_WRONLY | os.O_APPEND | os.O_CREAT | os.O_NOFOLLOW, 0o600,
-                             dir_fd=directory)
+        # O_NONBLOCK: a FIFO planted at the ledger path fails instead of hanging the hook.
+        try:
+            descriptor = os.open(f"{session}.jsonl", os.O_WRONLY | os.O_APPEND | os.O_CREAT | os.O_NOFOLLOW
+                                 | os.O_NONBLOCK, 0o600, dir_fd=directory)
+        except OSError:  # symlink, FIFO without reader or other refusal
+            return
         try:
             info = os.fstat(descriptor)
-            if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1 or info.st_uid != os.geteuid():
+            if (not stat.S_ISREG(info.st_mode) or info.st_nlink != 1 or info.st_uid != os.geteuid()
+                    or info.st_size > LEDGER_LIMIT):
                 return
             os.fchmod(descriptor, 0o600)
             os.write(descriptor, (json.dumps(record, sort_keys=True, separators=(",", ":")) + "\n").encode())
@@ -324,13 +448,18 @@ def gate_record(event, root=ROOT):
     if not isinstance(command, str):
         return None
     gates, suites, piped = [], [], False
-    for segment in re.split(r"&&|\|\||;|\n", command):
+    command = REDIRECTS.sub(" ", command)
+    # Only an all-&& chain lets one exit status speak for each gate in it.
+    certain = all(separator == "&&" for separator in re.findall(r"&&|\|\||[;&|\n]", command))
+    segments = re.split(r"&&|\|\||;|\n", command)
+    last_gate = False
+    for number, segment in enumerate(segments):
         stages = segment.split("|")
         head = re.sub(r"^\s*(?:cd \S+\s*$|(?:[A-Za-z_][A-Za-z0-9_]*=\S*\s+)*(?:timeout \d+[smh]? )?)", "", stages[0]).strip()
-        head = REDIRECTS.sub(" ", head).strip()
         for gate, pattern in GATES:
             if re.fullmatch(pattern, head):
                 gates.append(gate)
+                last_gate = number == len(segments) - 1
                 piped = piped or len(stages) > 1
                 suites += [path for path in (suite_path(token, root) for token in head.split()) if path]
     if not gates:
@@ -341,9 +470,13 @@ def gate_record(event, root=ROOT):
         return {**record, "ok": None, "exit": None}
     if event.get("hook_event_name") == "PostToolUseFailure":
         code = re.match(r"Exit code (\d+)", str(event.get("error", "")))
-        return {**record, "ok": False, "exit": int(code[1]) if code else None}
+        if certain and last_gate:
+            return {**record, "ok": False, "exit": int(code[1]) if code else None}
+        return {**record, "ok": None, "exit": None}  # another command may have failed
     response = event.get("tool_response") if isinstance(event.get("tool_response"), dict) else {}
-    return {**record, "ok": not response.get("interrupted"), "exit": None if response.get("interrupted") else 0}
+    if response.get("interrupted"):
+        return {**record, "ok": False, "exit": None}
+    return {**record, "ok": True, "exit": 0} if certain else {**record, "ok": None, "exit": None}
 
 
 def record(event, root=ROOT):
@@ -354,7 +487,10 @@ def record(event, root=ROOT):
             if path.is_file() and not path.is_symlink():
                 definitions[path.stem] = hashlib.sha256(path.read_bytes()).hexdigest()[:16]
         source = event.get("source")
+        head = subprocess.run(["git", "rev-parse", "HEAD"], cwd=root, stdin=subprocess.DEVNULL,
+                              capture_output=True, text=True, timeout=5).stdout.strip()
         append(session, {"event": "session_start", "definitions": definitions,
+                         "head": head if re.fullmatch(r"[0-9a-f]{40}", head) else None,
                          "source": source if source in {"startup", "resume", "clear", "compact", "fork"} else "other"}, root)
     elif name == "SubagentStart" and event.get("agent_type"):
         append(session, {"event": "subagent_start", **agent_fields(event)}, root)
@@ -382,14 +518,22 @@ def main():
         return 0
     if mode != "guard":
         return 1
-    decision = guard(json.load(sys.stdin))  # Malformed input fails closed through onFailure=block.
+    try:
+        event = json.load(sys.stdin)
+    except ValueError:
+        event = None
+    decision = guard(event)
     if decision:
         print(json.dumps(decision))
     return 0
 
 
 def guard(event, root=ROOT):
-    reason = guard_reason(event, root)
+    """Deny explicitly on any internal error, independent of the hook's onFailure setting."""
+    try:
+        reason = guard_reason(event, root) if isinstance(event, dict) else "unreadable hook input"
+    except Exception:
+        reason = "the guard could not evaluate this call"
     if not reason:
         return None
     try:

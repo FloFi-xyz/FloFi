@@ -12,3 +12,5 @@
 **/*.key
 docs/assets
 apps/reference-dapp/e2e/**/*-snapshots
+# Claude Code engineering agents, hooks and local ledger are development-only.
+**/.claude

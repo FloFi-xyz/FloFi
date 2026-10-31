@@ -78,7 +78,9 @@ class ReadOnlyGuard(Repository):
         for command in ["git diff --stat origin/main...HEAD", "git diff -- src", "git log --oneline -5 | head -3",
                         "git show HEAD:CLAUDE.md", "git status --short", "git grep -n export -- src",
                         "git --no-pager log -1", "git merge-base HEAD origin/main", "git blame src/a.ts",
-                        "rg -n 'export' src 2>/dev/null", "rg -g '*.ts' export", "grep -n export src/a.ts",
+                        "rg -n 'export' src 2>/dev/null", "rg -t ts export", "grep -n export src/a.ts",
+                        "rg 'a*b' src", "git log HEAD~1 -1", "git log --format='%h #%s' -3", "find src -name '*.ts'",
+                        "git log --oneline --since='2 days' -- src", "grep -c -e export src/a.ts",
                         "sed -n '1,40p' src/a.ts", "find src -name '*.ts' | wc -l", "cat CLAUDE.md", "ls -la src",
                         "head -n 5 src/a.ts", "tail -n 5 src/a.ts", "sort -n src/a.ts | head",
                         "git diff origin/main...HEAD | sed -n '1,200p'", "git log -1 | tail -1",
@@ -112,6 +114,18 @@ class ReadOnlyGuard(Repository):
             "sed -n '1,2p' src/a.ts -i", "sed 'e ls' src/a.ts", "tail -f src/a.ts", "sort -o out src/a.ts",
             "sort --compress-program=sh src/a.ts", "cd /tmp", "", "jq -n '$ENV'", "jq -n env",
             "diff -r src local-state", "rg --hostname-bin=sh KEY", "git grep -nOvi KEY", "git -C . status --short",
+            # BUILD-FLOFI-CLAUDE-AGENTS-001 batch 3 flofi-security findings, each verified against real tools:
+            "git grep --open=true x", "git grep --open-files-in-pager=true x", "git grep --no-ind KEY",
+            "git grep --no-exc --untracked KEY", "git diff --ext origin/main", "git diff --out=x", "sort --out=x CLAUDE.md",
+            "grep --rec KEY src/a.ts", "grep --dir=recurse KEY src/a.ts", "tail --fol CLAUDE.md",
+            "ls CLAUDE.md#x | sh -c id", "cat CLAUDE.md#x .env.local", "cat .en[^x]", "cat .gi[^x]/config", "ls src/*",
+            "cat src/?.ts", "rg -g.env DUMMY", "rg -g '{.env,x}' DUMMY", "rg --glob=.env DUMMY", "rg --hidden KEY",
+            "rg -. KEY", "grep -f.env.local CLAUDE.md", "grep -nf.env.local CLAUDE.md", "git cat-file -p HEAD",
+            "git cat-file --batch-all-objects --batch-check", "cat .GIT/config", "git log --show-signature",
+            "git log -L1,5:CLAUDE.md", "git log --textconv -p", "find . -name x -fprint out", "find . -fls out",
+            "find . -printf x", "cat --x=~/y", "ls ~", "ls :~",
+            # ugrep (Claude Code's grep) recurses into directory operands, reading ignored files:
+            "grep -n LOCAL src", "grep -n LOCAL .", "cat src", "head src", "sed -n '1,2p' src",
         ]:
             with self.subTest(command=command):
                 self.assertIsNotNone(self.guard(command=command))
@@ -139,6 +153,40 @@ class ReadOnlyGuard(Repository):
         (saved / "link.txt").symlink_to(self.outside / "secret.txt")
         self.assertIsNotNone(read(str(saved / "link.txt")))
 
+    def test_working_directory_must_be_a_readable_repository_location(self):
+        for cwd in ["/tmp", str(self.outside), str(self.root / "local-state"), str(self.root / ".git"), None]:
+            with self.subTest(cwd=cwd):
+                self.assertIn("working directory", hooks.guard_reason({
+                    "agent_type": "flofi-swap", "tool_name": "Bash", "tool_input": {"command": "cat CLAUDE.md"},
+                    "cwd": cwd}, self.root))
+        self.assertIsNone(hooks.guard_reason({"agent_type": "flofi-swap", "tool_name": "Bash",
+                                              "tool_input": {"command": "cat a.ts"}, "cwd": str(self.root / "src")}, self.root))
+
+    def test_grep_tool_glob_overrides_are_refused(self):
+        self.assertIsNotNone(self.guard("Grep", pattern="KEY", glob=".env*"))
+        self.assertIsNone(self.guard("Grep", pattern="KEY", type="ts"))
+
+    def test_internal_errors_and_unreadable_input_deny_without_relying_on_onfailure(self):
+        original = hooks.guard_reason
+        self.addCleanup(setattr, hooks, "guard_reason", original)
+
+        def broken(*_args):
+            raise OSError("simulated")
+        hooks.guard_reason = broken
+        decision = hooks.guard({"agent_type": "flofi-swap", "tool_name": "Bash", "tool_input": {"command": "ls"}}, self.root)
+        self.assertEqual(decision["hookSpecificOutput"]["permissionDecision"], "deny")
+        hooks.guard_reason = original
+        for event in [None, [], "text"]:
+            self.assertEqual(hooks.guard(event, self.root)["hookSpecificOutput"]["permissionDecision"], "deny")
+
+    def test_overlong_names_are_decided_without_crashing(self):
+        # Python 3.12's Path.exists() raises ENAMETOOLONG; the guard must still decide.
+        for command in ["cat " + "a" * 300, "cat " + "/".join(["b" * 255] * 20), "rg x " + "c" * 5000]:
+            with self.subTest(length=len(command)):
+                hooks.guard_reason({"agent_type": "flofi-swap", "tool_name": "Bash",
+                                    "tool_input": {"command": command}, "cwd": str(self.root)}, self.root)
+        self.assertTrue(hooks.looks_like_path("d" * 300, str(self.root)) in {True, False})
+
     def test_background_and_oversized_commands_are_denied(self):
         self.assertIsNotNone(self.guard(command="git status", run_in_background=True))
         self.assertIsNotNone(self.guard(command="ls " + "src " * 2000))
@@ -155,13 +203,13 @@ class ReadOnlyGuard(Repository):
         allowed = run({"tool_name": "Bash", "tool_input": {"command": "git push"}})
         self.assertEqual((allowed.returncode, allowed.stdout), (0, ""))
 
-    def test_cli_fails_closed_on_malformed_input_so_onfailure_blocks(self):
+    def test_cli_denies_malformed_input_explicitly(self):
         for body in ["", "{broken", "[]"]:
             with self.subTest(body=body):
-                result = subprocess.run([sys.executable, str(HOOK), "guard"], input=body, text=True,
+                result = subprocess.run([sys.executable, "-I", str(HOOK), "guard"], input=body, text=True,
                                         capture_output=True, timeout=15)
-                self.assertNotEqual(result.returncode, 0)
-                self.assertNotIn("allow", result.stdout)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(json.loads(result.stdout)["hookSpecificOutput"]["permissionDecision"], "deny")
 
 
 class LifecycleLedger(Repository):
@@ -223,23 +271,30 @@ class LifecycleLedger(Repository):
 
     def test_test_gates_are_classified_without_storing_commands(self):
         cases = [
-            ("pnpm check", ["pnpm-check"], False),
-            ("cd /repo && pnpm check 2>&1 | tail -20", ["pnpm-check"], True),
-            ("DATABASE_URL=postgres://owner:hunter2@db.invalid/flofi pnpm test:postgres", ["pnpm-test-postgres"], False),
-            ("pnpm test --reporter=default --reporter=json --outputFile=/tmp/u.json", ["pnpm-test"], False),
-            ("pnpm exec vitest run packages/a/test/x.test.ts apps/b/src/y.test.tsx", ["vitest-focused"], False),
-            ("python3 scripts/agent_guard.py check && python3 scripts/governance_lite.py", ["agent-guard-check", "governance-lite"], False),
-            ("python3 -m unittest discover -s scripts -p 'test_ci_*.py'", ["governance-unittests"], False),
-            ("node scripts/guarded-release-browser.mjs critical", ["guarded-browser"], False),
+            ("pnpm check", ["pnpm-check"], False, True),
+            ("cd /repo && pnpm check 2>&1", ["pnpm-check"], False, True),
+            # A pipeline, ||, ; or & hides the gate's own status (flofi-infrastructure-ci finding 2).
+            ("cd /repo && pnpm check 2>&1 | tail -20", ["pnpm-check"], True, None),
+            ("pnpm test || true", ["pnpm-test"], False, None),
+            ("pnpm test; echo done", ["pnpm-test"], False, None),
+            ("pnpm test & wait", ["pnpm-test"], False, None),
+            ("DATABASE_URL=postgres://owner:hunter2@db.invalid/flofi pnpm test:postgres", ["pnpm-test-postgres"], False, True),
+            ("pnpm test --reporter=default --reporter=json --outputFile=/tmp/u.json", ["pnpm-test"], False, True),
+            ("pnpm exec vitest run packages/a/test/x.test.ts apps/b/src/y.test.tsx", ["vitest-focused"], False, True),
+            ("python3 scripts/agent_guard.py check && python3 scripts/governance_lite.py", ["agent-guard-check", "governance-lite"], False, True),
+            ("python3 -m unittest discover -s scripts -p 'test_ci_*.py'", ["governance-unittests"], False, True),
+            ("node scripts/guarded-release-browser.mjs critical", ["guarded-browser"], False, True),
         ]
-        for command, gates, piped in cases:
+        for command, gates, piped, ok in cases:
             with self.subTest(command=command):
                 entry = hooks.gate_record({"hook_event_name": "PostToolUse", "tool_name": "Bash",
                                            "tool_input": {"command": command}, "tool_response": {"stdout": "ok", "interrupted": False}})
-                self.assertEqual((entry["gates"], entry["piped"], entry["ok"], entry["exit"]), (gates, piped, True, 0))
+                self.assertEqual((entry["gates"], entry["piped"], entry["ok"], entry["exit"]),
+                                 (gates, piped, ok, 0 if ok else None))
                 self.assertNotIn("command", entry)
                 self.assertNotIn("hunter2", json.dumps(entry))
-        entry = hooks.gate_record({"hook_event_name": "PostToolUse", "tool_input": {"command": cases[4][0]}, "tool_response": {}})
+        vitest = "pnpm exec vitest run packages/a/test/x.test.ts apps/b/src/y.test.tsx"
+        entry = hooks.gate_record({"hook_event_name": "PostToolUse", "tool_input": {"command": vitest}, "tool_response": {}})
         self.assertEqual(entry["suites"], ["apps/b/src/y.test.tsx", "packages/a/test/x.test.ts"])
         command = (f"pnpm exec vitest run {self.root}/src/b.test.ts /home/someone/other/x.test.ts "
                    f"../escape/y.test.ts {'a' * 300}.test.ts")
@@ -253,6 +308,10 @@ class LifecycleLedger(Repository):
         failed = hooks.gate_record({"hook_event_name": "PostToolUseFailure", "tool_input": {"command": "pnpm test"},
                                     "error": "Exit code 1\nFAIL packages/a/test/x.test.ts"})
         self.assertEqual((failed["ok"], failed["exit"]), (False, 1))
+        for command in ["pnpm test | tail", "pnpm test && echo after", "pnpm test; true"]:
+            unknown = hooks.gate_record({"hook_event_name": "PostToolUseFailure", "tool_input": {"command": command},
+                                         "error": "Exit code 1"})
+            self.assertEqual((unknown["ok"], unknown["exit"]), (None, None), command)
         interrupted = hooks.gate_record({"hook_event_name": "PostToolUse", "tool_input": {"command": "pnpm test"},
                                          "tool_response": {"interrupted": True}})
         self.assertEqual((interrupted["ok"], interrupted["exit"]), (False, None))
@@ -293,6 +352,24 @@ class LifecycleLedger(Repository):
                     pass
         self.assertEqual((self.outside / "secret.txt").read_text(), "outside\n")
 
+    def test_fifo_and_oversized_ledgers_neither_hang_nor_grow(self):
+        runs = self.root / hooks.RUNS
+        runs.mkdir(mode=0o700)
+        os.mkfifo(runs / "fifo.jsonl")
+        hooks.record({"session_id": "fifo", "hook_event_name": "SessionStart"}, self.root)  # must return, not block
+        (runs / f"{SESSION}.jsonl").write_bytes(b"x" * (hooks.LEDGER_LIMIT + 1))
+        os.chmod(runs / f"{SESSION}.jsonl", 0o600)
+        self.record(hook_event_name="SessionEnd", reason="other")
+        self.assertEqual((runs / f"{SESSION}.jsonl").stat().st_size, hooks.LEDGER_LIMIT + 1)
+
+    def test_session_start_binds_the_ledger_to_the_reviewed_commit(self):
+        subprocess.run(["git", "add", "CLAUDE.md"], cwd=self.root, check=True)
+        subprocess.run(["git", "-c", "user.email=f@example.invalid", "-c", "user.name=f", "commit", "-qm", "fixture"],
+                       cwd=self.root, check=True)
+        head = subprocess.run(["git", "rev-parse", "HEAD"], cwd=self.root, capture_output=True, text=True).stdout.strip()
+        self.record(hook_event_name="SessionStart", source="startup")
+        self.assertEqual(self.ledger()[0]["head"], head)
+
     def test_symlinked_claude_directory_writes_nothing(self):
         moved = Path(self.outside, "claude")
         (self.root / ".claude").rename(moved)
@@ -321,14 +398,18 @@ class LifecycleLedger(Repository):
 
 
 class ProjectWiring(unittest.TestCase):
+    def test_docker_build_context_excludes_claude_development_state(self):
+        rules = (HOOK.parents[2] / ".dockerignore").read_text().splitlines()
+        self.assertIn("**/.claude", rules)
+
     def test_settings_route_every_hook_to_an_implemented_mode(self):
         settings = json.loads((HOOK.parents[1] / "settings.json").read_text())
         for event, groups in settings["hooks"].items():
             for group in groups:
                 for hook in group["hooks"]:
                     self.assertEqual((hook["type"], hook["command"]), ("command", "python3"))
-                    self.assertEqual(hook["args"][0], "${CLAUDE_PROJECT_DIR}/.claude/hooks/flofi_agent_hooks.py")
-                    self.assertEqual(hook["args"][1], "guard" if event == "PreToolUse" else "record")
+                    self.assertEqual(hook["args"], ["-I", "${CLAUDE_PROJECT_DIR}/.claude/hooks/flofi_agent_hooks.py",
+                                                    "guard" if event == "PreToolUse" else "record"])
         guard = settings["hooks"]["PreToolUse"][0]
         self.assertEqual((guard["matcher"], guard["hooks"][0]["onFailure"]), ("*", "block"))
 

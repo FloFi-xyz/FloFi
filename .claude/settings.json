@@ -7,6 +7,7 @@
             "type": "command",
             "command": "python3",
             "args": [
+              "-I",
               "${CLAUDE_PROJECT_DIR}/.claude/hooks/flofi_agent_hooks.py",
               "record"
             ],
@@ -22,6 +23,7 @@
             "type": "command",
             "command": "python3",
             "args": [
+              "-I",
               "${CLAUDE_PROJECT_DIR}/.claude/hooks/flofi_agent_hooks.py",
               "record"
             ],
@@ -37,6 +39,7 @@
             "type": "command",
             "command": "python3",
             "args": [
+              "-I",
               "${CLAUDE_PROJECT_DIR}/.claude/hooks/flofi_agent_hooks.py",
               "record"
             ],
@@ -52,6 +55,7 @@
             "type": "command",
             "command": "python3",
             "args": [
+              "-I",
               "${CLAUDE_PROJECT_DIR}/.claude/hooks/flofi_agent_hooks.py",
               "record"
             ],
@@ -68,6 +72,7 @@
             "type": "command",
             "command": "python3",
             "args": [
+              "-I",
               "${CLAUDE_PROJECT_DIR}/.claude/hooks/flofi_agent_hooks.py",
               "guard"
             ],
@@ -85,6 +90,7 @@
             "type": "command",
             "command": "python3",
             "args": [
+              "-I",
               "${CLAUDE_PROJECT_DIR}/.claude/hooks/flofi_agent_hooks.py",
               "record"
             ],
@@ -101,6 +107,7 @@
             "type": "command",
             "command": "python3",
             "args": [
+              "-I",
               "${CLAUDE_PROJECT_DIR}/.claude/hooks/flofi_agent_hooks.py",
               "record"
             ],

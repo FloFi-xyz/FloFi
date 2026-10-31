@@ -344,6 +344,48 @@ class EngineeringGuard(unittest.TestCase):
         self.assertIsNone(unobserved["specialists"][0]["discovered"])
         self.assertIn("not observed", guard.review_markdown(unobserved))
 
+    def test_strict_review_needs_valid_results_and_never_upgrades_a_reported_failure(self):
+        plan = {**guard.impact(self.data, self.data["modules"][0]["sources"][:1]), "base": "origin/main"}
+        session = "33333333-4444-5555-6666-777777777777"
+        run = self.runs({"event": "subagent_start", "agent": "flofi-swap", "agentId": "s1"},
+                        {"event": "subagent_stop", "agent": "flofi-swap", "agentId": "s1", "review": None},
+                        {"event": "subagent_start", "agent": "flofi-bridge", "agentId": "b1"},
+                        {"event": "subagent_stop", "agent": "flofi-bridge", "agentId": "b1",
+                         "review": {"result": "no-findings", "findings": 0, "highest": "none"}}, session=session)
+        streams = {session: {"agents": [], "failed": {"b1": "rate_limit"}}}
+        summary = guard.review_summary(self.data, plan, [run], root=self.root, streams=streams)
+        rows = {r["domain"]: r for r in summary["specialists"]}
+        self.assertEqual(rows["flofi-bridge"]["status"], "failed")
+        self.assertIn("flofi-swap: completed without a valid FLOFI_REVIEW_RESULT", summary["problems"])
+        self.assertIn("flofi-bridge: specialist failed (rate_limit) without a review result", summary["problems"])
+
+    def test_reviews_without_agent_ids_do_not_collide(self):
+        plan = {**guard.impact(self.data, self.data["modules"][0]["sources"][:1]), "base": "origin/main"}
+        done = {"result": "no-findings", "findings": 0, "highest": "none"}
+        run = self.runs(*[{"event": "subagent_start", "agent": "flofi-swap", "agentId": None}] * 2,
+                        *[{"event": "subagent_stop", "agent": "flofi-swap", "agentId": None, "review": done}] * 2)
+        row = guard.review_summary(self.data, plan, [run], root=self.root)["specialists"]
+        swap = next(r for r in row if r["domain"] == "flofi-swap")
+        self.assertEqual((swap["invocations"], swap["completed"], swap["status"]), (2, 2, "completed"))
+
+    def test_invalid_ledger_rows_are_problems_and_stale_reviews_are_warnings(self):
+        subprocess.run(["git", "init", "-q"], cwd=self.root, check=True)
+        subprocess.run(["git", "add", "packages"], cwd=self.root, check=True)
+        subprocess.run(["git", "-c", "user.email=f@example.invalid", "-c", "user.name=f", "commit", "-qm", "x"],
+                       cwd=self.root, check=True)
+        plan = {**guard.impact(self.data, self.data["modules"][0]["sources"][:1]), "base": "origin/main"}
+        run = self.runs({"event": "session_start", "definitions": {}, "head": "a" * 40},
+                        {"event": "subagent_start", "agent": "flofi-swap", "agentId": "s1"},
+                        {"event": "subagent_stop", "agent": "flofi-swap", "agentId": "s1",
+                         "review": {"result": "no-findings", "findings": 0, "highest": "none"}})
+        run["malformed"] = 2
+        summary = guard.review_summary(self.data, plan, [run], root=self.root)
+        self.assertIn(f"Ledger {run['session']}: 2 rows failed validation", summary["problems"])
+        self.assertTrue(any(w.startswith("flofi-swap: reviewed aaaaaaaaaaaa, not the current HEAD")
+                            for w in summary["warnings"]), summary["warnings"])
+        self.assertEqual(next(r for r in summary["specialists"] if r["domain"] == "flofi-swap")["reviewedCommits"], ["a" * 40])
+        self.assertIn("## Warnings (not counted by --strict)", guard.review_markdown(summary))
+
     def test_documentation_only_change_needs_no_specialist_and_no_evidence_is_invented(self):
         plan = {**guard.impact(self.data, ["docs/notes.md"]), "base": "origin/main"}
         summary = guard.review_summary(self.data, plan, [self.runs()], root=self.root)

@@ -66,12 +66,18 @@ python3 scripts/agent_guard.py review --base origin/main \
 
 `review` defaults to `$CLAUDE_CODE_SESSION_ID`; pass `--session <id>` (repeatable)
 for other sessions, `--stream-json <file>` to take headless sessions, their
-discovered agents (`init`) and failed specialists with the API error type, `--unit-report`/`--postgres-report` to verify fresh Vitest JSON
-reports, `--json` for machine output and `--strict` to exit 1 when an expected
-specialist is missing, incomplete or blocked without justification, a recorded gate
-failed, more than three ran at once, or a maintained file is unmapped. It prints
-changed domains and why, expected versus actually invoked specialists, completion
-and structured results, guard denials, recorded gates, coverage gaps and skips.
+discovered agents (`init`) and failed specialists with the API error type,
+`--unit-report`/`--postgres-report` to verify fresh Vitest JSON reports and `--json`
+for machine output. It prints changed domains and why, expected versus actually
+invoked specialists, completion, structured results and the reviewed commit, guard
+denials, recorded gates, coverage gaps, skips, problems and warnings.
+
+`--strict` exits 1 on any problem: an expected specialist missing, failed,
+incomplete, blocked or completed without a valid result line (unless skipped with a
+reason), a recorded gate that failed, more than three reviewers at once, invalid
+ledger rows, an unmapped maintained file or a failing required-suite report.
+Reviews of an earlier commit and agent definitions changed since a session are
+listed as warnings: decide explicitly whether they still cover the change.
 
 A repeatable headless variant (uses your Claude account; never in CI). The stream
 holds the whole conversation, so keep it private and delete it after summarizing:
@@ -88,28 +94,46 @@ rm -f "$stream"
 
 ## Read-only guard
 
-`.claude/hooks/flofi_agent_hooks.py guard` runs on every PreToolUse with
-`onFailure: block`. It ignores the main session and non-FloFi agents. For any agent
-named `flofi-*` it denies tools other than Read/Grep/Glob/Bash and allows Bash only
-for single pipelines of `git` read subcommands (no global options, output files,
-external diff, `--no-index` or pager), `rg`/`grep` without ignore bypass or
-recursion, `find` without actions, `sed -n 'N,Mp'` (also as a pipe stage), common
-read-only utilities (not `jq`, which exposes the environment, or `diff`, which
-recurses into ignored files) and `python3 scripts/agent_guard.py
-check|impact|report|domain` by relative path. Read may also open long output that
-Claude Code saved in this session's own `tool-results/` directory. It denies chaining,
-redirection (other than `2>/dev/null`/`2>&1`), expansion, subshells, background
-jobs, environment assignments and any path outside the repository, inside `.git`,
-Git-ignored (except `node_modules`) or named like a secret, including glob matches.
+`.claude/hooks/flofi_agent_hooks.py guard` runs on every PreToolUse (`python3 -I`,
+`onFailure: block`). It ignores the main session and non-FloFi agents. For any agent
+named `flofi-*` it allows Read/Grep/Glob and Bash single pipelines built only from:
 
-`onFailure: block` was verified on 2.1.314: with the guard script missing, an
-explicitly allowed Bash call was blocked. A broken guard therefore blocks every tool
-call, including the main session's; restore the file from Git, or set
-`"disableAllHooks": true` in the ignored `.claude/settings.local.json` while repairing.
+- `git` read subcommands (diff, log, show, diff-tree, status, ls-files, grep,
+  rev-parse, merge-base, blame, ls-tree, rev-list, shortlog, describe, name-rev),
+  with no global options except `--no-pager`;
+- `rg`, `grep`, `cat`, `head`, `tail`, `wc`, `ls`, `cut`, `tr`, `sort`, `stat`,
+  `basename`, `dirname`, `realpath`, `pwd`, `find` (name/type/path predicates only),
+  `sed -n 'N,Mp'` and `python3 scripts/agent_guard.py check|impact|report|domain`.
+
+Every option of every command and git subcommand must be on an explicit allowlist.
+Denylists were not enough: GNU tools and git accept abbreviated long options
+(`git grep --open=` runs a pager program, `sort --out=` writes), Claude Code's
+`grep` is ugrep (pager, filter and config options; recurses into directory operands)
+and its `find` is bfs. So `rg -g`/`--hidden` (they override `.gitignore` or reach
+`.git`), `grep -r`/`-f`, `git grep -O`/`--no-index`/`--untracked` exclusions,
+`--output`, `--ext-diff`, `--textconv`, `--show-signature`, `git cat-file` and every
+unknown or abbreviated option are refused. File-reading commands take files, not
+directories. Unquoted `#`, `*`, `?`, `[`, word-initial `~`, chaining, redirection
+(other than `2>/dev/null`/`2>&1`), expansion, subshells, background jobs and
+environment assignments are refused, so Bash and the guard never parse a command
+differently; quote patterns instead. Paths (operands and option values) must be
+inside the repository, outside `.git` (any case), not Git-ignored (except
+`node_modules`) and not named like a secret. The working directory must be such a
+location too. Read may also open long output that Claude Code saved in this
+session's own `tool-results/` directory. The Grep tool's `glob` filter is refused.
+
+Any internal guard error or unreadable hook input is an explicit deny. On 2.1.314,
+`onFailure: block` was also verified to block a guard that is missing, exits 1 or
+times out. A broken guard therefore blocks every tool call, including the main
+session's; restore the file from Git, or set `"disableAllHooks": true` in the
+ignored `.claude/settings.local.json` while repairing.
 
 Limits: hooks are skipped with `--bare`, `disableAllHooks` or an untrusted
 interactive folder. The frontmatter allowlist and denylist still remove write,
 agent, web and MCP tools; Bash then falls back to the session's permission mode.
+`python3` and `git` come from `PATH`; the hook runs from the checked-out branch and
+its content is protected by review, not pinned. Allowed `git` commands can still run
+programs configured in the user's own Git config (for example `core.fsmonitor`).
 The guard is a review boundary, not a sandbox for hostile code.
 
 ## Lifecycle ledger
@@ -121,10 +145,10 @@ and refuses a symlinked ledger directory:
 
 | Event | Stored fields |
 | --- | --- |
-| `session_start` | source; SHA-256 prefix of each `flofi-*.md` present (defined) |
+| `session_start` | source; Git HEAD (the reviewed commit); SHA-256 prefix of each `flofi-*.md` present (defined) |
 | `subagent_start` / `subagent_stop` | agent name, agent ID; validated `FLOFI_REVIEW_RESULT` (result, count, highest severity) or null |
 | `guard_deny` | agent name, agent ID, tool name |
-| `test` | gate IDs from a fixed list, pass/fail/unknown, exit code, pipeline flag, repository-relative test file paths |
+| `test` | gate IDs from a fixed list, pass/fail/unknown (unknown unless every separator is `&&`), exit code, pipeline flag, repository-relative test file paths |
 | `session_end` | reason |
 
 Prompts, commands, tool output, transcripts, findings text, environment values,
