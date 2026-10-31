@@ -105,7 +105,7 @@ Toolchain: Node 24.21.0, pnpm 11.22.0.
 
 | Check | Result |
 | --- | --- |
-| `pnpm check` | see the PR description (run on the final commit) |
+| `pnpm check` | pass — typecheck 16/16, lint, build 9/9, 11 schema exports, 465 test files · 5,855 tests passed · 2 pre-existing skips |
 | `python3 scripts/governance_lite.py` | pass |
 | `python3 scripts/test_governance_lite.py` | pass (19 tests) |
 | README relative links and images | all resolve |
