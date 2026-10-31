@@ -23,7 +23,7 @@ import { accountWalletId, canonicalAddress, MANAGED_PROVIDER, type AccountWallet
 import { SOLANA_SIGN_IN_STATEMENT, WALLET_SIGN_IN_STATEMENT } from '../server/wallet-session.ts';
 import { unlockedFor, WALLET_EXPORT_UNLOCK_SECONDS, type WalletSession } from './wallet-session.ts';
 import { decodeUnsignedEip1559, type ManagedSigningRequest } from '../server/managed-signing.ts';
-import { parseSigningHeader, type SigningContext } from '../wallet/flofi-signing.ts';
+import { FLOFI_WALLET_EVM_CHAIN_IDS, parseSigningHeader, type SigningContext } from '../wallet/flofi-signing.ts';
 
 const ALLOWED = new Map<string, string | null>([
   ['submit/create_wallet', 'ACTIVITY_TYPE_CREATE_WALLET'], ['submit/init_import_private_key', 'ACTIVITY_TYPE_INIT_IMPORT_PRIVATE_KEY'],
@@ -57,6 +57,9 @@ export function floFiSignInMessage(message: string, ecosystem: 'evm' | 'solana',
   if (!SIGN_IN_MESSAGE.test(message)) return false;
   const lines = message.split('\n'), chain = ecosystem === 'evm' ? 'Ethereum' : 'Solana';
   const statement = ecosystem === 'evm' ? WALLET_SIGN_IN_STATEMENT : SOLANA_SIGN_IN_STATEMENT;
+  // EVM: the message's chain must be one of FloFi Wallet's mainnets (Solana sign-in messages name no cluster).
+  const evmChain = ecosystem === 'evm' ? /^Chain ID: ([1-9][0-9]{0,15})$/.exec(lines[7] ?? '') : null;
+  if (ecosystem === 'evm' && (!evmChain || !FLOFI_WALLET_EVM_CHAIN_IDS.has(Number(evmChain[1])))) return false;
   return lines[0] === `${app.host} wants you to sign in with your ${chain} account:` && canonicalAddress(ecosystem, lines[1] ?? '') === address
     && lines[2] === '' && lines[3] === statement && lines[4] === '' && lines[5] === `URI: ${app.origin}` && lines[6] === 'Version: 1';
 }
@@ -124,6 +127,8 @@ export async function walletRelayDecision(input: { readonly path: string; readon
       || 'externalSignerPubkey' in parameters) return deny(400, 'SIGN_REQUEST_INVALID');
     const unsigned = decodeUnsignedEip1559(parameters.unsignedTransaction);
     if (!unsigned) return deny(400, 'SIGN_REQUEST_INVALID');
+    // Mainnet only: any other chain id (a testnet, an unknown chain) is refused here, before the reviewed attempt is even looked up.
+    if (unsigned.chainId > BigInt(Number.MAX_SAFE_INTEGER) || !FLOFI_WALLET_EVM_CHAIN_IDS.has(Number(unsigned.chainId))) return deny(403, 'FLOFI_WALLET_NETWORK_UNSUPPORTED');
     const refused = await bound({ ecosystem: 'evm', tx: { ...unsigned, from: wallet.address } });
     if (refused) return refused;
   }

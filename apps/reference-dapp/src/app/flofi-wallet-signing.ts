@@ -18,7 +18,6 @@ import { createManagedWalletEvm, type ManagedEvmBroadcast, type ManagedEvmExpect
 import { resolveManagedSigning, type ManagedSigningDeps, type ManagedSigningRequest, type ManagedSigningResult } from '../server/managed-signing';
 import type { SigningContext, SigningFlow } from '../wallet/flofi-signing';
 import { jupiterStatus } from './jupiter-action';
-import { solanaDevnetStatus } from './solana-devnet-action';
 import { solanaTransferStatus } from './solana-transfer-action';
 import { transferStatus } from './robinhood-transfer-action';
 import { publicStatus } from './public-testnet-action';
@@ -31,9 +30,7 @@ const unwrap = <T,>(result: Result<T>): T => { if (!result.ok) throw new Error(r
 export async function loadSigningRun(flow: SigningFlow, runId: string): Promise<unknown> {
   switch (flow) {
     case 'jupiter-swap': return unwrap(await jupiterStatus(runId));
-    case 'solana-devnet-swap': return unwrap(await solanaDevnetStatus(runId));
     case 'solana-transfer': return unwrap(await solanaTransferStatus('mainnet', runId));
-    case 'solana-devnet-transfer': return unwrap(await solanaTransferStatus('devnet', runId));
     case 'robinhood-mainnet-transfer': case 'base-mainnet-transfer': case 'arbitrum-mainnet-transfer': case 'ethereum-mainnet-transfer':
       return unwrap(await transferStatus(runId));
     case 'robinhood-swap': case 'base-swap': case 'arbitrum-swap': case 'ethereum-swap': return unwrap(await publicStatus(runId));

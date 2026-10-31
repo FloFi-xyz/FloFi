@@ -3,7 +3,7 @@
 // managed wallet of the account; everything else is refused by name or as "no matching review".
 import { describe, expect, it } from 'vitest';
 import { erc7710 } from '@defi-workflow-engine/reference-compiler';
-import { JUPITER_SOLANA_MAINNET, ORCA_WHIRLPOOLS_DEVNET, SOLANA_DEVNET_TRANSFER } from '@defi-workflow-engine/action-registry';
+import { JUPITER_SOLANA_MAINNET, ORCA_WHIRLPOOLS_DEVNET, SOLANA_DEVNET_TRANSFER, SOLANA_MAINNET_TRANSFER } from '@defi-workflow-engine/action-registry';
 import { decodeUnsignedEip1559, FILLED_FEE_BOUND, parseSigningRequest, resolveManagedSigning, unsignedSolanaMessage, units, type ManagedEvmTransaction,
   type ManagedSigningDeps, type ManagedSigningRequest } from './managed-signing';
 
@@ -38,18 +38,18 @@ const swapRun = (quote: Record<string, unknown> = {}, attempt: Record<string, un
 const signedSwap: ManagedEvmTransaction = { from: OWNER, to: ROUTER, value: 0n, data: '0x04e45aaf' + '0'.repeat(64), chainId: 4663n, nonce: 7n, gas: 200_000n,
   maxFeePerGas: 2_000_000_000n, maxPriorityFeePerGas: 1_000_000n };
 
-// ── Solana (Jupiter mainnet `jupiter-` run and Devnet transfer `soltd-` run, attempt PREPARED) ────────────────────────────────────
+// ── Solana mainnet (Jupiter `jupiter-` run and transfer `soltx-` run, attempt PREPARED) ────────────────────────────────────
 const MESSAGE = Uint8Array.from([0x80, 1, 0, 1, 2, ...new Array(64).fill(9)]);
 const b64 = (bytes: Uint8Array) => Buffer.from(bytes).toString('base64');
-const JUPITER_ID = 'jupiter-' + 'c'.repeat(32), SOLTD_ID = 'soltd-' + 'd'.repeat(32);
+const JUPITER_ID = 'jupiter-' + 'c'.repeat(32), SOLTX_ID = 'soltx-' + 'd'.repeat(32), SOLTD_ID = 'soltd-' + 'd'.repeat(32), ORCA_ID = 'orca-' + 'e'.repeat(32);
 const jupiterRecord = (attempt: Record<string, unknown> = {}, review: Record<string, unknown> = {}) => ({ id: JUPITER_ID, verdict: 'PENDING', authorization: '0xr',
   review: { format: 'gryloo.jupiter-review.v1', chain: JUPITER_SOLANA_MAINNET.chain, cluster: 'mainnet-beta', owner: SOL_OWNER, message: b64(MESSAGE), messageHash: '0xh',
     amount: '1500000', input: { symbol: 'USDC', decimals: 6 }, output: { symbol: 'SOL', decimals: 9 }, quote: { outAmount: '10000000', otherAmountThreshold: '9950000' },
     slippageBps: 50, estimatedFeeLamports: '5000', expiresAt: LATER, commitment: '0xr', ...review },
   attempt: { state: 'PREPARED', messageHash: '0xh', signature: null, transaction: null, ...attempt } });
-const solanaTransferRecord = () => ({ id: SOLTD_ID, verdict: 'PENDING', authorization: '0xs',
-  review: { format: 'gryloo.solana-transfer-review.v1', chain: SOLANA_DEVNET_TRANSFER.chain, cluster: 'devnet', owner: SOL_OWNER, recipient: SOL_RECIPIENT, amount: '250000000',
-    asset: { symbol: 'SOL', mint: null, decimals: 9 }, maximumNetworkCostLamports: '2044280', message: b64(MESSAGE), messageHash: '0xh', expiresAt: LATER, commitment: '0xs' },
+const solanaTransferRecord = (review: Record<string, unknown> = {}, id = SOLTX_ID) => ({ id, verdict: 'PENDING', authorization: '0xs',
+  review: { format: 'gryloo.solana-transfer-review.v1', chain: SOLANA_MAINNET_TRANSFER.chain, cluster: SOLANA_MAINNET_TRANSFER.cluster, owner: SOL_OWNER, recipient: SOL_RECIPIENT, amount: '250000000',
+    asset: { symbol: 'SOL', mint: null, decimals: 9 }, maximumNetworkCostLamports: '2044280', message: b64(MESSAGE), messageHash: '0xh', expiresAt: LATER, commitment: '0xs', ...review },
   attempt: { state: 'PREPARED', messageHash: '0xh', signature: null, transaction: null } });
 
 describe('the signing binding refuses what it cannot bind', () => {
@@ -152,7 +152,7 @@ describe('Solana attempts', () => {
         { label: 'Provider', value: 'Jupiter' }] } });
   });
   it.each([
-    ['another message', { message: Uint8Array.from([...MESSAGE.slice(0, -1), 1]) }, {}, {}], ['the Devnet cluster', { chain: 'solana:devnet' }, {}, {}],
+    ['another message', { message: Uint8Array.from([...MESSAGE.slice(0, -1), 1]) }, {}, {}],
     ['another signer', { address: SOL_RECIPIENT }, {}, {}], ['a signed attempt', {}, { signature: 'sig' }, {}], ['a submitted attempt', {}, { state: 'SUBMITTING' }, {}],
     ['a Devnet review', {}, {}, { chain: ORCA_WHIRLPOOLS_DEVNET.chain, cluster: 'devnet' }],
   ] as const)('refuses %s', async (_name, request, attempt, review) => {
@@ -160,10 +160,10 @@ describe('Solana attempts', () => {
     expect(await resolveManagedSigning({ flow: 'jupiter-swap', runId: JUPITER_ID }, { ...base, ...request }, deps(jupiterRecord(attempt, review))))
       .toEqual({ ok: false, code: 'FLOFI_WALLET_NO_MATCHING_REVIEW' });
   });
-  it('matches a Devnet transfer and names test funds', async () => {
-    const result = await resolveManagedSigning({ flow: 'solana-devnet-transfer', runId: SOLTD_ID }, { ecosystem: 'solana', chain: 'solana:devnet', message: MESSAGE },
+  it('matches a Solana mainnet transfer with real funds', async () => {
+    const result = await resolveManagedSigning({ flow: 'solana-transfer', runId: SOLTX_ID }, { ecosystem: 'solana', chain: 'solana:mainnet', message: MESSAGE },
       deps(solanaTransferRecord()));
-    expect(result.ok && result.value.summary).toMatchObject({ network: 'Solana Devnet', realFunds: false, action: 'Transfer', lines: [{ label: 'You send', value: '0.25 SOL' },
+    expect(result.ok && result.value.summary).toMatchObject({ network: 'Solana', chain: 'solana:mainnet', realFunds: true, action: 'Transfer', lines: [{ label: 'You send', value: '0.25 SOL' },
       { label: 'Recipient', value: SOL_RECIPIENT }, { label: 'Max network cost', value: '0.00204428 SOL' }] });
   });
 });
@@ -199,5 +199,24 @@ describe('request decoding', () => {
     expect(units('1', 18, 'ETH')).toBe('0.000000000000000001 ETH');
     expect(units('123456789000', 6, 'USDC')).toBe('123456.789 USDC');
     expect(units('-1', 6, 'USDC')).toBeNull();
+  });
+});
+
+describe('mainnet only (owner requirement): Devnet and testnets are refused at the signing boundary', () => {
+  it('refuses the former Devnet flows by name, and Devnet records under mainnet flows', async () => {
+    const request = { ecosystem: 'solana' as const, chain: 'solana:mainnet' as const, address: SOL_OWNER, message: MESSAGE };
+    for (const [flow, runId] of [['solana-devnet-swap', ORCA_ID], ['solana-devnet-transfer', SOLTD_ID]] as const)
+      expect(await resolveManagedSigning({ flow, runId }, request, deps(solanaTransferRecord()))).toEqual({ ok: false, code: 'FLOFI_WALLET_FLOW_NOT_SUPPORTED' });
+    // A Devnet record (chain/cluster) never matches, even behind a mainnet flow name and a mainnet-shaped run id.
+    expect(await resolveManagedSigning({ flow: 'solana-transfer', runId: SOLTX_ID }, request,
+      deps(solanaTransferRecord({ chain: SOLANA_DEVNET_TRANSFER.chain, cluster: SOLANA_DEVNET_TRANSFER.cluster })))).toEqual({ ok: false, code: 'FLOFI_WALLET_NO_MATCHING_REVIEW' });
+    expect(await resolveManagedSigning({ flow: 'jupiter-swap', runId: JUPITER_ID }, request,
+      deps(jupiterRecord({}, { chain: ORCA_WHIRLPOOLS_DEVNET.chain, cluster: 'devnet', format: 'gryloo.orca-devnet-review.v1' })))).toEqual({ ok: false, code: 'FLOFI_WALLET_NO_MATCHING_REVIEW' });
+  });
+  it('parses no Devnet or Testnet Solana request', () => {
+    const wire = Buffer.concat([Buffer.from([1]), Buffer.alloc(64), Buffer.from(MESSAGE)]).toString('base64');
+    for (const chain of ['solana:devnet', 'solana:testnet'])
+      expect(parseSigningRequest({ flow: 'jupiter-swap', runId: JUPITER_ID, op: 'solana_sign_transaction', address: SOL_OWNER, chain, transaction: wire })).toBeNull();
+    expect(parseSigningRequest({ flow: 'jupiter-swap', runId: JUPITER_ID, op: 'solana_sign_transaction', address: SOL_OWNER, chain: 'solana:mainnet', transaction: wire })).not.toBeNull();
   });
 });

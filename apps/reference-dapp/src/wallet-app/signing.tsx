@@ -309,7 +309,7 @@ export function SolanaTransactionRequest({ env, address, chain, transaction, sig
     finally { setBusy(false); }
   }
   return <section className={`${styles.card} ${styles.cardGlow}`} aria-labelledby="request-title">
-    <RequestHeading eyebrow={t('Transaction')} title={t(chain === 'solana:devnet' ? 'Sign a Solana Devnet transaction' : 'Sign a Solana transaction')} from={env.appHost}/>
+    <RequestHeading eyebrow={t('Transaction')} title={t('Sign a Solana transaction')} from={env.appHost}/>
     <ReviewGate binding={signing} summary={summary} failure={failure} retry={retry}>
       {summary && <SummaryCard summary={summary}/>}
       <SolanaDetails review={review} hash={hash}/>

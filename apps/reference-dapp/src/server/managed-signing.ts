@@ -16,7 +16,7 @@
  * The summary is built from the server's Review only (amounts, minimum received, recipients, fees, expiry), never from request fields.
  * Nothing here signs, broadcasts or writes; claims (one signature and one broadcast per attempt) are the caller's.
  */
-import { JUPITER_SOLANA_MAINNET, ORCA_WHIRLPOOLS_DEVNET, SOLANA_DEVNET_TRANSFER, SOLANA_MAINNET_TRANSFER } from '@defi-workflow-engine/action-registry';
+import { JUPITER_SOLANA_MAINNET, SOLANA_MAINNET_TRANSFER } from '@defi-workflow-engine/action-registry';
 import { erc7710, parseRlpInteger, rlpBytes, rlpDecode, rlpList } from '@defi-workflow-engine/reference-compiler';
 import { isSigningFlow, SIGNING_FLOWS, type SigningContext, type SigningFlow, type SigningSummary } from '../wallet/flofi-signing.ts';
 import type { WalletEcosystem } from '../wallet/wallet-registry.ts';
@@ -29,7 +29,7 @@ import type { PublicAttempt, PublicRun } from './public-testnet-service.ts';
 export type ManagedEvmTransaction = { readonly from: string; readonly to: string; readonly value: bigint; readonly data: string; readonly chainId: bigint;
   readonly nonce: bigint; readonly gas: bigint; readonly maxFeePerGas: bigint; readonly maxPriorityFeePerGas: bigint };
 export type ManagedSigningRequest = { readonly ecosystem: 'evm'; readonly tx: ManagedEvmTransaction }
-  | { readonly ecosystem: 'solana'; readonly message: Uint8Array; readonly chain?: 'solana:mainnet' | 'solana:devnet'; readonly address?: string };
+  | { readonly ecosystem: 'solana'; readonly message: Uint8Array; readonly chain?: 'solana:mainnet'; readonly address?: string };
 export type ManagedSigningDeps = {
   /** The run as its own service's `status` returns it; throws (any error) when it cannot be read. */
   readonly load: (flow: SigningFlow, runId: string) => Promise<unknown>;
@@ -120,38 +120,38 @@ export function decodeSignedEip1559(raw: string): { readonly tx: ManagedEvmTrans
   } catch { return null; }
 }
 
-async function solanaSwap(flow: 'jupiter-swap' | 'solana-devnet-swap', runId: string, run: JupiterRecord, request: ManagedSigningRequest, deps: ManagedSigningDeps, now: number): Promise<ManagedSigningResult> {
-  const review = run.review, mainnet = flow === 'jupiter-swap';
-  const format = mainnet ? 'gryloo.jupiter-review.v1' : 'gryloo.orca-devnet-review.v1';
-  if (run.id !== runId || review?.format !== format || review.chain !== (mainnet ? JUPITER_SOLANA_MAINNET.chain : ORCA_WHIRLPOOLS_DEVNET.chain)
-    || review.cluster !== (mainnet ? 'mainnet-beta' : 'devnet')) return refuse(NO_MATCH);
+async function solanaSwap(flow: 'jupiter-swap', runId: string, run: JupiterRecord, request: ManagedSigningRequest, deps: ManagedSigningDeps, now: number): Promise<ManagedSigningResult> {
+  const review = run.review;
+  // Mainnet only: a Devnet swap record (another format, chain or cluster) never matches, whatever its run id.
+  if (run.id !== runId || review?.format !== 'gryloo.jupiter-review.v1' || review.chain !== JUPITER_SOLANA_MAINNET.chain || review.cluster !== 'mainnet-beta') return refuse(NO_MATCH);
   const attempt = run.attempt;
   if (run.verdict !== 'PENDING' || run.notSubmitted || run.authorization !== review.commitment || attempt?.state !== 'PREPARED' || attempt.signature
     || attempt.transaction || attempt.messageHash !== review.messageHash) return refuse(NO_MATCH);
-  return solanaMatch(flow, runId, review.owner, review.message, review.expiresAt, `${flow}:${runId}:${review.messageHash}`, request, deps, now, mainnet, () => lines(
+  return solanaMatch(flow, runId, review.owner, review.message, review.expiresAt, `${flow}:${runId}:${review.messageHash}`, request, deps, now, () => lines(
     ['You pay', units(review.amount, review.input.decimals, review.input.symbol)],
     ['Expected to receive', units(review.quote.outAmount, review.output.decimals, review.output.symbol)],
     ['Minimum received', units(review.quote.otherAmountThreshold, review.output.decimals, review.output.symbol)],
     ['Max slippage', percent(review.slippageBps)],
     ['Network fee (estimate)', units(review.estimatedFeeLamports, 9, 'SOL')],
-    ['Provider', mainnet ? 'Jupiter' : 'Orca Whirlpools']), 'Swap');
+    ['Provider', 'Jupiter']), 'Swap');
 }
-async function solanaTransfer(flow: 'solana-transfer' | 'solana-devnet-transfer', runId: string, run: SolanaTransferRecord, request: ManagedSigningRequest, deps: ManagedSigningDeps, now: number): Promise<ManagedSigningResult> {
-  const review = run.review, mainnet = flow === 'solana-transfer', profile = mainnet ? SOLANA_MAINNET_TRANSFER : SOLANA_DEVNET_TRANSFER;
-  if (run.id !== runId || review?.format !== 'gryloo.solana-transfer-review.v1' || review.chain !== profile.chain || review.cluster !== profile.cluster) return refuse(NO_MATCH);
+async function solanaTransfer(flow: 'solana-transfer', runId: string, run: SolanaTransferRecord, request: ManagedSigningRequest, deps: ManagedSigningDeps, now: number): Promise<ManagedSigningResult> {
+  const review = run.review;
+  if (run.id !== runId || review?.format !== 'gryloo.solana-transfer-review.v1' || review.chain !== SOLANA_MAINNET_TRANSFER.chain
+    || review.cluster !== SOLANA_MAINNET_TRANSFER.cluster) return refuse(NO_MATCH);
   const attempt = run.attempt;
   if (run.verdict !== 'PENDING' || run.notSubmitted || run.authorization !== review.commitment || attempt?.state !== 'PREPARED' || attempt.signature
     || attempt.transaction || attempt.messageHash !== review.messageHash) return refuse(NO_MATCH);
   const symbol = review.asset.symbol === 'SPL token' && review.asset.mint ? short(review.asset.mint) : review.asset.symbol;
-  return solanaMatch(flow, runId, review.owner, review.message, review.expiresAt, `${flow}:${runId}:${review.messageHash}`, request, deps, now, mainnet, () => lines(
+  return solanaMatch(flow, runId, review.owner, review.message, review.expiresAt, `${flow}:${runId}:${review.messageHash}`, request, deps, now, () => lines(
     ['You send', units(review.amount, review.asset.decimals, symbol)],
     ['Recipient', review.recipient],
     ['Token mint', review.asset.mint ?? undefined],
     ['Max network cost', units(review.maximumNetworkCostLamports, 9, 'SOL')]), 'Transfer');
 }
 async function solanaMatch(flow: SigningFlow, runId: string, owner: string, message: string, expiresAt: string, attempt: string, request: ManagedSigningRequest,
-  deps: ManagedSigningDeps, now: number, mainnet: boolean, build: () => Line[] | null, action: string): Promise<ManagedSigningResult> {
-  if (request.ecosystem !== 'solana' || request.chain && request.chain !== (mainnet ? 'solana:mainnet' : 'solana:devnet')
+  deps: ManagedSigningDeps, now: number, build: () => Line[] | null, action: string): Promise<ManagedSigningResult> {
+  if (request.ecosystem !== 'solana' || request.chain && request.chain !== 'solana:mainnet'
     || request.address !== undefined && request.address !== owner) return refuse(NO_MATCH);
   const reviewed = fromBase64(message);
   if (!reviewed || !same(reviewed, request.message)) return refuse(NO_MATCH);
@@ -160,8 +160,8 @@ async function solanaMatch(flow: SigningFlow, runId: string, owner: string, mess
   if (!Number.isFinite(expires) || expires <= now) return refuse('FLOFI_WALLET_REVIEW_EXPIRED');
   const summaryLines = build();
   if (!summaryLines) return refuse(NO_MATCH);
-  return { ok: true, value: { attempt, owner, expiresAtMs: expires, summary: { flow: flow as SigningSummary['flow'], runId, network: mainnet ? 'Solana' : 'Solana Devnet',
-    chain: mainnet ? 'solana:mainnet' : 'solana:devnet', realFunds: mainnet, action, owner, lines: summaryLines, expiresAt: new Date(expires).toISOString() } } };
+  return { ok: true, value: { attempt, owner, expiresAtMs: expires, summary: { flow: flow as SigningSummary['flow'], runId, network: 'Solana',
+    chain: 'solana:mainnet', realFunds: true, action, owner, lines: summaryLines, expiresAt: new Date(expires).toISOString() } } };
 }
 
 /** The request's fields against the attempt's: every bound field equal; provider-filled nonce and fees checked against the chain now. */
@@ -267,8 +267,8 @@ export async function resolveManagedSigning(context: SigningContext, request: Ma
   const run = record(loaded), now = (deps.now ?? Date.now)();
   if (!run) return refuse(NO_MATCH);
   try {
-    if (flow === 'jupiter-swap' || flow === 'solana-devnet-swap') return await solanaSwap(flow, runId, run as unknown as JupiterRecord, request, deps, now);
-    if (flow === 'solana-transfer' || flow === 'solana-devnet-transfer') return await solanaTransfer(flow, runId, run as unknown as SolanaTransferRecord, request, deps, now);
+    if (flow === 'jupiter-swap') return await solanaSwap(flow, runId, run as unknown as JupiterRecord, request, deps, now);
+    if (flow === 'solana-transfer') return await solanaTransfer(flow, runId, run as unknown as SolanaTransferRecord, request, deps, now);
     if (flow.endsWith('-mainnet-transfer')) return await evmTransfer(flow, runId, run as unknown as TransferRecord, request, deps, now);
     return await evmSwap(flow, runId, run as unknown as PublicRun, request, deps, now);
   } catch {
@@ -303,7 +303,7 @@ export function parseSigningRequest(value: unknown): { readonly context: Signing
     if (Object.values(fields).some(field => field === null)) return null;
     return { context, request: { ecosystem: 'evm', tx: { from: lower.from!, to: lower.to!, data: lower.data!, ...fields as { [K in keyof typeof fields]: bigint } } } };
   }
-  if (r.op === 'solana_sign_transaction' && Object.keys(r).length === 6 && (r.chain === 'solana:mainnet' || r.chain === 'solana:devnet')
+  if (r.op === 'solana_sign_transaction' && Object.keys(r).length === 6 && r.chain === 'solana:mainnet'
     && typeof r.address === 'string' && /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(r.address)) {
     const wire = fromBase64(r.transaction), message = wire && unsignedSolanaMessage(wire);
     return message ? { context, request: { ecosystem: 'solana', chain: r.chain, address: r.address, message } } : null;

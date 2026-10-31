@@ -2,20 +2,23 @@
 // BUILD-FLOFI-AUTH-WALLETS-001: the shared signing contract: strict bindings and summaries, and failure classes that never call a possible
 // signature a refusal.
 import { describe, expect, it } from 'vitest';
-import { classifySigningFailure, floFiWalletMessage, FLOFI_WALLET_MESSAGES, isSigningFlow, parseSigningContext, parseSigningHeader, parseSigningSummary,
-  PRE_SIGNATURE_CODES, signingContextOf, signingHeaderValue, SIGNING_FLOWS } from './flofi-signing';
+import { classifySigningFailure, floFiWalletMessage, FLOFI_WALLET_MESSAGES, isSigningFlow, parseSigningContext, parseSigningHeader, parseSigningSummary, PRE_SIGNATURE_CODES, signingContextOf, signingHeaderValue, SIGNING_FLOWS, FLOFI_WALLET_EVM_CHAIN_IDS, FLOFI_WALLET_SOLANA_CHAIN } from './flofi-signing';
 
 const RUN = 'bas-' + 'a'.repeat(24);
 describe('signing binding', () => {
   it('lists exactly the flows FloFi Wallet can bind, by run namespace', () => {
     expect(Object.keys(SIGNING_FLOWS).sort()).toEqual(['arbitrum-mainnet-transfer', 'arbitrum-swap', 'base-mainnet-transfer', 'base-swap', 'ethereum-mainnet-transfer',
-      'ethereum-swap', 'jupiter-swap', 'robinhood-mainnet-transfer', 'robinhood-swap', 'solana-devnet-swap', 'solana-devnet-transfer', 'solana-transfer']);
+      'ethereum-swap', 'jupiter-swap', 'robinhood-mainnet-transfer', 'robinhood-swap', 'solana-transfer']);
+    // Mainnet only: the Devnet flows are not FloFi Wallet flows (their runs fall back to their own name, which is refused).
+    for (const flow of ['solana-devnet-swap', 'solana-devnet-transfer', 'base-sepolia-swap', 'robinhood-transfer']) expect(isSigningFlow(flow)).toBe(false);
+    expect([...FLOFI_WALLET_EVM_CHAIN_IDS].sort((a, b) => a - b)).toEqual([1, 4663, 8453, 42161]);
+    expect(FLOFI_WALLET_SOLANA_CHAIN).toBe('solana:mainnet');
     expect(isSigningFlow('robinhood-transfer')).toBe(false);
     expect(signingContextOf(RUN, 'base-sepolia-swap')).toEqual({ flow: 'base-swap', runId: RUN });
     expect(signingContextOf('pub-' + 'a'.repeat(24), 'base-sepolia-swap')).toEqual({ flow: 'base-sepolia-swap', runId: 'pub-' + 'a'.repeat(24) });
     expect(signingContextOf('rhx-' + 'a'.repeat(32), 'robinhood-transfer').flow).toBe('robinhood-transfer');
     expect(signingContextOf('jupiter-' + 'a'.repeat(32), 'jupiter-swap').flow).toBe('jupiter-swap');
-    expect(signingContextOf('orca-' + 'a'.repeat(32), 'jupiter-swap').flow).toBe('solana-devnet-swap');
+    expect(signingContextOf('orca-' + 'a'.repeat(32), 'solana-devnet-swap').flow).toBe('solana-devnet-swap');
   });
   it('parses bindings strictly and round-trips the relay header', () => {
     expect(parseSigningContext({ flow: 'base-swap', runId: RUN })).toEqual({ flow: 'base-swap', runId: RUN });

@@ -65,6 +65,18 @@ describe('wallet relay: EVM transaction signatures are bound to a reviewed attem
     expect(gate).toHaveBeenCalledWith({ flow: 'base-swap', runId: `bas-${'a'.repeat(24)}` }, { ecosystem: 'evm', tx: { from: EVM, to: '0x' + '2'.repeat(40), value: 5n,
       data: '0x', chainId: 8453n, nonce: 7n, gas: 21_000n, maxFeePerGas: 2n, maxPriorityFeePerGas: 1n } });
   });
+  it('refuses every chain but FloFi Wallet’s four EVM mainnets before the attempt is looked up', async () => {
+    for (const chainId of [1n, 42161n, 4663n]) {
+      const gate = allow();
+      expect(await decide('submit/sign_transaction', params({ unsignedTransaction: unsigned({ chainId }) }), { signing: `base-swap:bas-${'a'.repeat(24)}`, attempt: gate })).toEqual(OK);
+    }
+    for (const chainId of [84532n, 11155111n, 46630n, 421614n, 31337n]) {
+      const gate = allow();
+      expect(await decide('submit/sign_transaction', params({ unsignedTransaction: unsigned({ chainId }) }), { signing: `base-swap:bas-${'a'.repeat(24)}`, attempt: gate }))
+        .toEqual({ ok: false, status: 403, code: 'FLOFI_WALLET_NETWORK_UNSUPPORTED' });
+      expect(gate).not.toHaveBeenCalled();
+    }
+  });
   it('refuses without a binding or a gate, and passes on the gate’s refusal', async () => {
     expect(await decide('submit/sign_transaction', params())).toEqual({ ok: false, status: 403, code: 'FLOFI_WALLET_SIGNING_CONTEXT_REQUIRED' });
     expect(await decide('submit/sign_transaction', params(), { signing: 'base-swap:bas-' + 'a'.repeat(24) })).toEqual({ ok: false, status: 403, code: 'FLOFI_WALLET_SIGNING_CONTEXT_REQUIRED' });
@@ -104,7 +116,9 @@ describe('wallet relay: Solana signatures', () => {
     expect(gate).not.toHaveBeenCalled();
     const foreign = siws.replace(APP.host, 'evil.example');
     expect(await decide('submit/sign_raw_payload', params(Buffer.from(foreign).toString('hex')), { message: foreign })).toEqual({ ok: false, status: 400, code: 'SIGN_REQUEST_INVALID' });
-    const siwe = `${APP.host} wants you to sign in with your Ethereum account:\n${EVM}\n\n${WALLET_SIGN_IN_STATEMENT}\n\nURI: ${APP.origin}\nVersion: 1`;
-    expect(floFiSignInMessage(siwe, 'evm', EVM, APP)).toBe(true);
+    const siwe = (chain: number) => `${APP.host} wants you to sign in with your Ethereum account:\n${EVM}\n\n${WALLET_SIGN_IN_STATEMENT}\n\nURI: ${APP.origin}\nVersion: 1\nChain ID: ${chain}`;
+    // EVM sign-in on FloFi Wallet's four mainnets only; a testnet chain (Base Sepolia, Sepolia, Robinhood Chain Testnet) is refused.
+    for (const chain of [1, 8453, 42161, 4663]) expect(floFiSignInMessage(siwe(chain), 'evm', EVM, APP)).toBe(true);
+    for (const chain of [84532, 11155111, 46630, 421614]) expect(floFiSignInMessage(siwe(chain), 'evm', EVM, APP)).toBe(false);
   });
 });

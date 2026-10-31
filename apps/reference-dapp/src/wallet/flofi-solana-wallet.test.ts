@@ -22,10 +22,11 @@ async function setup(request: (input: unknown) => Promise<unknown> = async () =>
 afterEach(() => { vi.unstubAllGlobals(); vi.resetModules(); });
 
 describe('FloFi Wallet as a Wallet Standard wallet', () => {
-  it('is offered on mainnet and Devnet and connects (silently too) to the account’s own address', async () => {
+  it('is offered on Solana mainnet only and connects (silently too) to the account’s own address', async () => {
     const { solana, deps } = await setup();
     expect(solana.solanaWalletChoices('solana:mainnet').map(choice => choice.name)).toEqual(['FloFi Wallet']);
-    expect(solana.solanaWalletNames('solana:devnet')).toEqual(['FloFi Wallet']);
+    // Never advertised for Devnet or Testnet.
+    expect(solana.solanaWalletNames('solana:devnet')).toEqual([]);
     const session = await solana.connectSolanaWallet('FloFi Wallet', 'solana:mainnet', 'JUPITER', { silent: true });
     expect(session.account.address).toBe(OWNER);
     expect(deps.connected).toHaveBeenCalledWith(OWNER, true);
@@ -44,6 +45,16 @@ describe('FloFi Wallet as a Wallet Standard wallet', () => {
     expect(await solana.signWithSolanaWallet(session, b64(unsigned))).toBe(b64(signedWire()));
     expect(deps.request).toHaveBeenCalledWith({ op: 'solana_sign_transaction', address: OWNER, chain: 'solana:mainnet', transaction: b64(unsigned), signing: SIGNING });
     expect(session.wallet).toBe(wallet);
+  });
+  it('refuses a Devnet or Testnet transaction before asking FloFi Wallet, even with a bound run', async () => {
+    const { solana, wallet, channel, deps } = await setup();
+    const account = (await solana.connectSolanaWallet('FloFi Wallet')).account;
+    const sign = (wallet.features['solana:signTransaction'] as { signTransaction: (...inputs: unknown[]) => Promise<unknown> }).signTransaction;
+    for (const chain of ['solana:devnet', 'solana:testnet']) {
+      channel.bindFloFiSigning(wallet, SIGNING);
+      await expect(sign({ account, transaction: unsigned, chain })).rejects.toThrow('FLOFI_WALLET_NETWORK_UNSUPPORTED');
+    }
+    expect(deps.request).not.toHaveBeenCalled();
   });
   it('refuses a signature with no bound run before asking FloFi Wallet', async () => {
     const { solana, deps } = await setup();

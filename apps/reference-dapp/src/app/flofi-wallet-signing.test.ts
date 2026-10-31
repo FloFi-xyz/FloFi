@@ -23,9 +23,10 @@ describe('runs and wallets', () => {
     status.solanaTransfer.mockResolvedValue({ ok: true, value: 's' }); status.transfer.mockResolvedValue({ ok: true, value: 't' });
     status.swap.mockResolvedValue({ ok: false, code: 'BASE_MAINNET_NOT_ENABLED' });
     expect(await loadSigningRun('jupiter-swap', 'jupiter-1')).toBe('j');
-    expect(await loadSigningRun('solana-devnet-swap', 'orca-1')).toBe('d');
-    expect(await loadSigningRun('solana-devnet-transfer', 'soltd-1')).toBe('s');
-    expect(status.solanaTransfer).toHaveBeenCalledWith('devnet', 'soltd-1');
+    expect(await loadSigningRun('solana-transfer', 'soltx-1')).toBe('s');
+    expect(status.solanaTransfer).toHaveBeenCalledWith('mainnet', 'soltx-1');
+    // FloFi Wallet is mainnet only: no Devnet status is ever read.
+    expect(status.devnet).not.toHaveBeenCalled();
     expect(await loadSigningRun('base-mainnet-transfer', 'bat-1')).toBe('t');
     await expect(loadSigningRun('base-swap', 'bas-1')).rejects.toThrow('BASE_MAINNET_NOT_ENABLED');
   });

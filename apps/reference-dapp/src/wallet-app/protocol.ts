@@ -13,7 +13,8 @@ import type { WalletEcosystem } from '../wallet/wallet-registry';
 import { parseSigningContext, signingHeaderValue, type SigningContext } from '../wallet/flofi-signing';
 
 export const WALLET_PROTOCOL = 'flofi-wallet/1';
-export type SolanaWalletChain = 'solana:mainnet' | 'solana:devnet';
+/** Solana mainnet only: a Devnet or Testnet request is not a FloFi Wallet request at all. */
+export type SolanaWalletChain = 'solana:mainnet';
 /** A fully populated EIP-1559 transaction, as hex quantities (FloFi Wallet signs exactly these fields). */
 export type EvmTransaction = { readonly from: string; readonly to: string; readonly value: string; readonly data: string; readonly chainId: string;
   readonly nonce: string; readonly gas: string; readonly maxFeePerGas: string; readonly maxPriorityFeePerGas: string };
@@ -100,7 +101,7 @@ function parseOperation(value: unknown): WalletOperation | null {
     case 'solana_sign_transaction': {
       const keys = withBinding(r, ['op', 'address', 'chain', 'transaction']);
       return keys.ok && typeof r.address === 'string' && SOLANA_ADDRESS.test(r.address)
-        && (r.chain === 'solana:mainnet' || r.chain === 'solana:devnet') && typeof r.transaction === 'string' && BASE64.test(r.transaction)
+        && r.chain === 'solana:mainnet' && typeof r.transaction === 'string' && BASE64.test(r.transaction)
         ? { op: r.op, address: r.address, chain: r.chain, transaction: r.transaction, ...keys.signing ? { signing: keys.signing } : {} } : null;
     }
     case 'solana_sign_message':

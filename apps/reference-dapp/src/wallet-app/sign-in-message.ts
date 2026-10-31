@@ -9,6 +9,7 @@
  * An expired message is refused. The statements are copied here because the wallet bundle may not import `src/server`; the unit test
  * checks they are byte-identical to the server's and that every message the server builds is accepted.
  */
+import { FLOFI_WALLET_EVM_CHAIN_IDS } from '../wallet/flofi-signing';
 
 export const EVM_SIGN_IN_STATEMENT = 'Sign in to Flofi to operate your own workflow runs. This signature authorizes no transaction and moves no funds.';
 export const SOLANA_SIGN_IN_STATEMENT = 'Sign in to Flofi to prove you control this Solana wallet. This signature authorizes no transaction and moves no funds.';
@@ -33,7 +34,8 @@ export function parseFloFiSignIn(message: string, ecosystem: 'evm' | 'solana', a
   let chainId: number | null = null;
   if (evm) {
     const chain = /^Chain ID: ([1-9][0-9]{0,15})$/.exec(rest.shift() ?? '');
-    if (!chain || !Number.isSafeInteger(Number(chain[1]))) return null;
+    // FloFi Wallet signs for its four EVM mainnets only: a testnet or unknown chain id is not a FloFi sign-in it will sign.
+    if (!chain || !Number.isSafeInteger(Number(chain[1])) || !FLOFI_WALLET_EVM_CHAIN_IDS.has(Number(chain[1]))) return null;
     chainId = Number(chain[1]);
   }
   const [nonceLine = '', issuedLine = '', expiresLine = ''] = rest;

@@ -12,7 +12,7 @@
  * - `solana:signMessage`: FloFi's own Sign-In With Solana text only (FloFi Wallet and its relay refuse anything else).
  * - Errors: a cancel before Sign carries code 4001; a failure once FloFi Wallet may have signed never reads as a rejection.
  */
-import { classifySigningFailure } from './flofi-signing';
+import { classifySigningFailure, FLOFI_WALLET_SOLANA_CHAIN } from './flofi-signing';
 import { registerFloFiSigningTarget, takeFloFiSigning, type FloFiWalletRequest } from './flofi-wallet-channel';
 import type { SolanaWalletAccount, SolanaWalletChain, StandardWallet } from './solana-wallet';
 import type { WalletResult } from '../wallet-app/protocol';
@@ -20,7 +20,8 @@ import type { WalletResult } from '../wallet-app/protocol';
 export type FloFiSolanaDeps = { readonly request: (request: FloFiWalletRequest) => Promise<WalletResult>;
   readonly connected?: (address: string, connected: boolean) => void };
 export type FloFiSolanaWallet = StandardWallet & { readonly version: '1.0.0'; readonly isFloFiWallet: true; readonly address: string };
-export const FLOFI_SOLANA_CHAINS: readonly SolanaWalletChain[] = Object.freeze(['solana:mainnet', 'solana:devnet']);
+/** Solana mainnet only: FloFi Wallet never advertises or signs for Devnet or Testnet (refused as FLOFI_WALLET_NETWORK_UNSUPPORTED). */
+export const FLOFI_SOLANA_CHAINS: readonly SolanaWalletChain[] = Object.freeze(['solana:mainnet']);
 export const FLOFI_WALLET_NAME = 'FloFi Wallet';
 const SOLANA_ADDRESS = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
 const FEATURES = ['solana:signTransaction', 'solana:signMessage'] as const;
@@ -90,11 +91,12 @@ export function createFloFiSolanaWallet(address: string, name: string, deps: Flo
           const input = inputs[0]!;
           assertAccount(input.account);
           const chain = input.chain ?? 'solana:mainnet', unsigned = copy(input.transaction);
-          if (!FLOFI_SOLANA_CHAINS.includes(chain as SolanaWalletChain)) throw new FloFiWalletStandardError('FLOFI_WALLET_NETWORK_UNSUPPORTED');
+          // Solana mainnet only: a Devnet or Testnet transaction is refused before FloFi Wallet is asked anything.
+          if (chain !== FLOFI_WALLET_SOLANA_CHAIN) throw new FloFiWalletStandardError('FLOFI_WALLET_NETWORK_UNSUPPORTED');
           if (!unsigned || unsigned.length > 1_232 || slots(unsigned) === null) throw new FloFiWalletStandardError('FLOFI_WALLET_REQUEST_INVALID');
           let result: { signedTransaction?: unknown };
           try {
-            result = await deps.request({ op: 'solana_sign_transaction', address, chain: chain as SolanaWalletChain, transaction: toBase64(unsigned), signing }) as typeof result;
+            result = await deps.request({ op: 'solana_sign_transaction', address, chain: FLOFI_WALLET_SOLANA_CHAIN, transaction: toBase64(unsigned), signing }) as typeof result;
           } catch (cause) { throw failure(cause); }
           const signed = fromBase64(result.signedTransaction);
           // Anything but the same transaction with the owner's signature is dropped (FloFi's submit would refuse it anyway).

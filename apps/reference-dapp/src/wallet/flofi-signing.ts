@@ -14,12 +14,16 @@
  */
 import type { WalletEcosystem } from './wallet-registry';
 
-/** The flows FloFi Wallet can bind a signature to (spec §3), with their run namespaces. Every other flow is refused by name. */
+/**
+ * FloFi Wallet is a mainnet wallet only (owner requirement for PR #143): Ethereum, Base, Arbitrum One and Robinhood Chain mainnet, and Solana
+ * mainnet. Every Devnet/testnet chain or cluster is refused at the signing boundary (product providers, FloFi Wallet's page, its relay).
+ */
+export const FLOFI_WALLET_EVM_CHAIN_IDS: ReadonlySet<number> = new Set([1, 8453, 42161, 4663]);
+export const FLOFI_WALLET_SOLANA_CHAIN = 'solana:mainnet' as const;
+/** The flows FloFi Wallet can bind a signature to (spec §3), with their run namespaces: mainnet flows only. Every other flow is refused by name. */
 export const SIGNING_FLOWS = Object.freeze({
   'jupiter-swap': { ecosystem: 'solana', run: /^jupiter-[a-f0-9]{32}$/ },
-  'solana-devnet-swap': { ecosystem: 'solana', run: /^orca-[a-f0-9]{32}$/ },
   'solana-transfer': { ecosystem: 'solana', run: /^soltx-[a-f0-9]{32}$/ },
-  'solana-devnet-transfer': { ecosystem: 'solana', run: /^soltd-[a-f0-9]{32}$/ },
   'robinhood-mainnet-transfer': { ecosystem: 'evm', run: /^rht-[a-f0-9]{32}$/ },
   'base-mainnet-transfer': { ecosystem: 'evm', run: /^bat-[a-f0-9]{32}$/ },
   'arbitrum-mainnet-transfer': { ecosystem: 'evm', run: /^art-[a-f0-9]{32}$/ },

@@ -17,7 +17,9 @@ describe('run binding on transaction requests', () => {
   });
   it('keeps requests without a binding exactly as before', () => {
     expect(request({ op: 'evm_sign_transaction', address: EVM, tx })?.request).toEqual({ op: 'evm_sign_transaction', address: EVM, tx });
-    expect(request({ op: 'solana_sign_transaction', address: SOL, chain: 'solana:devnet', transaction: 'AQID' })?.request).not.toHaveProperty('signing');
+    expect(request({ op: 'solana_sign_transaction', address: SOL, chain: 'solana:mainnet', transaction: 'AQID' })?.request).not.toHaveProperty('signing');
+    // Solana mainnet only: a Devnet or Testnet request is not a FloFi Wallet request at all.
+    for (const chain of ['solana:devnet', 'solana:testnet']) expect(request({ op: 'solana_sign_transaction', address: SOL, chain, transaction: 'AQID' })).toBeNull();
   });
   it('refuses a malformed binding, extra keys, and a binding on operations that take none', () => {
     for (const bad of [{ flow: 'base-swap' }, { flow: 'Base-Swap', runId: signing.runId }, { flow: 'base-swap', runId: 'run:1' }, { ...signing, extra: 1 }, 'base-swap:bas-1', null])
