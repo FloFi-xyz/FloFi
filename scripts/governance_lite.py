@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Local safety checks. The human owner authorizes repository changes by PR review."""
 
+import datetime
 import json
 import os
 from pathlib import Path
@@ -27,8 +28,11 @@ AUTO_MERGE = re.compile(
 GOVERNANCE = ".github/workflows/governance.yml"
 CONTRACTS = ".github/workflows/contracts.yml"
 AGE_WAIVER = "docs/security/COLOSSEUM-DEPENDENCY-AGE-WAIVER.json"
-# Exact owner-approved temporary release-age exceptions only. Adding a package requires an exact
-# identity here, matching metadata, and an owner-approved temporary entry — never ranges or globs.
+AGE_POLICY = "docs/security/DEPENDENCY-AGE-POLICY.md"
+# Exact owner-approved temporary release-age exceptions only (policy: docs/security/DEPENDENCY-AGE-POLICY.md). Adding a package
+# requires an exact identity here, the same identity in pnpm-workspace.yaml minimumReleaseAgeExclude (same order) and matching
+# metadata — never ranges, globs or a lower minimumReleaseAge. Entries after the two legacy ones also carry a category, the reviewed
+# tarball's integrity and its registry publication time; --verify-dependencies binds both to the lockfile and the registry.
 APPROVED_AGE_WAIVERS = (
     {
         "package": "source-map-js", "version": "1.2.2", "advisories": ["GHSA-68fv-2mgg-jv7q"],
@@ -47,8 +51,83 @@ APPROVED_AGE_WAIVERS = (
         "integrity": "sha512-hS/0Wt3Ya043oKXs0sIxrMpKQITXhMLIrVAKKXi4gozGC9v7YRWVnXIZzjNPTO02M9BdxLCWqK1yRXgNziVyJQ==",
         "removal_condition": "Remove fast-uri@3.1.9 from minimumReleaseAgeExclude and from this waiver list after 2026-10-26T23:05:26Z when the package reaches normal minimumReleaseAge eligibility",
     },
+    {
+        "package": "minimatch", "version": "11.0.3", "category": "security-fix", "advisories": ["GHSA-g3hv-75wg-m249"],
+        "reason": "Official fix for GHSA-g3hv-75wg-m249 (minimatch < 11.0.1, moderate), which fails the Dependency audit on main; ESLint's three consumers move to it by exact override",
+        "approved_by": "Owner", "temporary": True, "approved_at": "2026-10-31",
+        "approval": "Owner override on PR #143 (2026-10-31): resolve the release-age gate for minimatch@11.0.3 and @isaacs/nonrecursive-glob-match@1.0.3",
+        "published_at": "2026-10-28T20:00:34.713Z", "eligible_at": "2026-11-04T20:00:34.713Z",
+        "integrity": "sha512-iny/40PEGkNJQ5/Pv6z3nm6FbRAby32GeZRjCUJk2WnNDbgPSTcdI+DDvLqsgBdD4cD5sMtMheqPPnehCCa8Nw==",
+        "review": "docs/security/DEPENDENCY-AGE-POLICY.md",
+        "removal_condition": "Remove from minimumReleaseAgeExclude and from this waiver list once eligible (2026-11-04T20:00:34.713Z)",
+    },
+    {
+        "package": "@isaacs/nonrecursive-glob-match", "version": "1.0.3", "category": "security-fix", "advisories": ["GHSA-g3hv-75wg-m249"],
+        "required_by": "minimatch@11.0.3",
+        "reason": "Runtime dependency of the minimatch@11.0.3 security fix (same author and license); no install scripts, no I/O",
+        "approved_by": "Owner", "temporary": True, "approved_at": "2026-10-31",
+        "approval": "Owner override on PR #143 (2026-10-31): resolve the release-age gate for minimatch@11.0.3 and @isaacs/nonrecursive-glob-match@1.0.3",
+        "published_at": "2026-10-28T19:50:48.349Z", "eligible_at": "2026-11-04T19:50:48.349Z",
+        "integrity": "sha512-SI7kyKHq4XXDRozw+r9GlRZkia1ZkFrpLW98r2IC2Bpr8YkFGE3fvjzmxCG0x78A++69HmDNrDvSMYBZmHGpKA==",
+        "review": "docs/security/DEPENDENCY-AGE-POLICY.md",
+        "removal_condition": "Remove from minimumReleaseAgeExclude and from this waiver list once eligible (2026-11-04T19:50:48.349Z)",
+    },
 )
-_EXACT_IDENTITY = re.compile(r"^[a-z0-9][a-z0-9._/-]*@[0-9]+\.[0-9]+\.[0-9]+$")
+# Waivers that predate the category/integrity schema; they stay exactly as approved.
+LEGACY_AGE_WAIVERS = frozenset({"source-map-js@1.2.2", "fast-uri@3.1.9"})
+AGE_WAIVER_CATEGORIES = ("security-fix", "reviewed-dependency")
+_AGE_WAIVER_FIELDS = frozenset({"package", "version", "category", "reason", "approved_by", "temporary", "approved_at", "approval",
+                                "published_at", "eligible_at", "integrity", "review", "removal_condition"})
+_AGE_WAIVER_OPTIONAL = frozenset({"advisories", "required_by"})
+_EXACT_IDENTITY = re.compile(r"^(?:@[a-z0-9][a-z0-9._-]*/)?[a-z0-9][a-z0-9._-]*@[0-9]+\.[0-9]+\.[0-9]+$")
+_GHSA = re.compile(r"^GHSA(?:-[23456789cfghjmpqrvwx]{4}){3}$")
+_SRI = re.compile(r"^sha512-[A-Za-z0-9+/]{86}==$")
+_RELEASE_AGE = datetime.timedelta(minutes=10080)
+
+
+def _instant(value):
+    if not isinstance(value, str) or not re.fullmatch(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?Z", value):
+        return None
+    try:
+        return datetime.datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+
+
+def age_waiver_entry_errors(entry, files):
+    """Schema of one non-legacy waiver: exact, categorized, evidenced, integrity-bound, owner-approved and temporary."""
+    identity = f"{entry.get('package')}@{entry.get('version')}"
+    if identity in LEGACY_AGE_WAIVERS:
+        return []
+    keys = set(entry)
+    if not _AGE_WAIVER_FIELDS <= keys or not keys <= _AGE_WAIVER_FIELDS | _AGE_WAIVER_OPTIONAL:
+        return [f"Dependency age waiver fields incomplete or unknown: {identity}"]
+    errors = []
+    if not _EXACT_IDENTITY.fullmatch(identity):
+        errors.append(f"Dependency age waiver is not an exact identity: {identity}")
+    if entry["category"] not in AGE_WAIVER_CATEGORIES:
+        errors.append(f"Dependency age waiver category invalid: {identity}")
+    advisories = entry.get("advisories", [])
+    if not isinstance(advisories, list) or not all(isinstance(item, str) and _GHSA.fullmatch(item) for item in advisories):
+        errors.append(f"Dependency age waiver advisories invalid: {identity}")
+    elif entry["category"] == "security-fix" and not advisories:
+        errors.append(f"Security-fix age waiver names no advisory: {identity}")
+    if "required_by" in entry and not (isinstance(entry["required_by"], str) and _EXACT_IDENTITY.fullmatch(entry["required_by"])):
+        errors.append(f"Dependency age waiver required_by invalid: {identity}")
+    if not isinstance(entry["integrity"], str) or not _SRI.fullmatch(entry["integrity"]):
+        errors.append(f"Dependency age waiver integrity invalid: {identity}")
+    published, eligible = _instant(entry["published_at"]), _instant(entry["eligible_at"])
+    if published is None or eligible is None or eligible - published != _RELEASE_AGE:
+        errors.append(f"Dependency age waiver publication/eligibility times invalid: {identity}")
+    if not isinstance(entry["approved_at"], str) or not re.fullmatch(r"\d{4}-\d{2}-\d{2}(?:T\d{2}:\d{2}:\d{2}Z)?", entry["approved_at"]):
+        errors.append(f"Dependency age waiver approval date invalid: {identity}")
+    review = entry["review"].split("#", 1)[0] if isinstance(entry["review"], str) else ""
+    if not review or not files.get(review):
+        errors.append(f"Dependency age waiver review document missing: {identity}")
+    for field in ("reason", "approval", "removal_condition"):
+        if not isinstance(entry[field], str) or len(entry[field].strip()) < 20:
+            errors.append(f"Dependency age waiver {field} missing: {identity}")
+    return errors
 
 
 def dependency_age_waivers(files):
@@ -59,7 +138,9 @@ def dependency_age_waivers(files):
         return set(), []
     if len(blocks) != 1:
         return set(), ["Dependency age waiver must appear once as an exact identity list"]
-    listed = re.findall(r"(?m)^[ \t]+- (.+)$", blocks[0])
+    # A scoped identity is quoted in YAML ('@scope/name@1.2.3'); the quotes are syntax, not part of the identity.
+    listed = [re.sub(r"^'(.*)'$|^\"(.*)\"$", lambda m: m.group(1) or m.group(2), item.strip())
+              for item in re.findall(r"(?m)^[ \t]+- (.+)$", blocks[0])]
     expected_idents = [f"{w['package']}@{w['version']}" for w in APPROVED_AGE_WAIVERS]
     if listed != expected_idents or any(not _EXACT_IDENTITY.fullmatch(item) for item in listed):
         return set(), ["Dependency age waiver must list only the exact owner-approved identities in order"]
@@ -72,6 +153,9 @@ def dependency_age_waivers(files):
         return set(), ["Dependency age waiver metadata differs from exact temporary owner approval"]
     if any(entry.get("temporary") is not True or entry.get("approved_by") != "Owner" for entry in waivers):
         return set(), ["Dependency age waiver metadata differs from exact temporary owner approval"]
+    schema = [error for entry in waivers for error in age_waiver_entry_errors(entry, files)]
+    if schema:
+        return set(), schema
     return {(entry["package"], entry["version"]) for entry in APPROVED_AGE_WAIVERS}, []
 
 
