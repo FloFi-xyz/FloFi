@@ -3,7 +3,8 @@
  * BUILD-FLOFI-AUTH-WALLETS-001 browser suite: sign-in, wallet onboarding, My wallets and export on normal routes, against the MOCKED
  * loopback identity provider and wallet provider (e2e/account-harness.ts) and a disposable LOOPBACK PostgreSQL database. Every key and
  * secret below is generated for this run in memory and never written; no public provider is contacted and no real identity is used.
- * FloFi Wallet's signing journeys add the MOCKED loopback Solana Devnet/Orca harness (e2e/solana-devnet-harness.mjs): MOCKED evidence only.
+ * FloFi Wallet's signing journeys add two MOCKED loopback mainnet harnesses: Solana mainnet with Jupiter (e2e/jupiter-harness.mjs, 8551) and
+ * Base mainnet (e2e/base-mainnet-serve.ts, 8562). Mainnet-shaped transactions only, MOCKED evidence only: nothing reaches a public network.
  */
 import { defineConfig } from '@playwright/test';
 import { createECDH, randomBytes, randomUUID } from 'node:crypto';
@@ -35,14 +36,20 @@ const parentOrg = randomUUID(), googleClient = 'flofi-e2e.apps.loopback', google
 export const WALLET_ORIGIN = `http://localhost:${E2E_APP_PORT}`;
 process.env.FLOFI_E2E_WALLET_ORIGIN = WALLET_ORIGIN;
 const walletGoogleClient = 'flofi-wallet-e2e.apps.loopback', walletGoogleSecret = randomBytes(24).toString('hex'), walletAppleClient = 'xyz.flofi.wallet.e2e';
-// FloFi Wallet signing journeys: a reviewed Solana Devnet swap on the MOCKED loopback Devnet/Orca harness (127.0.0.1:8552, e2e/solana-devnet-harness.mjs)
-// only; never public Devnet, never a public broadcast, MOCKED evidence only. The app's run journal is a fresh directory under the OS temp directory
-// (workers inherit the runner's value, so fixtures and the server share it).
-if (process.env.GRYLOO_SOLANA_DEVNET_E2E !== undefined && process.env.GRYLOO_SOLANA_DEVNET_E2E !== 'MOCKED_LOOPBACK_ONLY') throw Error('SOLANA_DEVNET_E2E_PERMITS_ONLY_MOCKED_LOOPBACK');
-process.env.GRYLOO_SOLANA_DEVNET_E2E = 'MOCKED_LOOPBACK_ONLY';
-process.env.GRYLOO_SOLANA_DEVNET_JOURNAL ??= join(tmpdir(), `gryloo-demo001-auth-wallets-${Date.now()}-${process.pid}`);
-const devnetJournal = process.env.GRYLOO_SOLANA_DEVNET_JOURNAL;
-if (!devnetJournal.startsWith(join(tmpdir(), 'gryloo-demo001-'))) throw Error('SOLANA_DEVNET_JOURNAL_MUST_BE_A_TEMPORARY_DIRECTORY');
+// FloFi Wallet signing journeys (FloFi Wallet is mainnet-only): a reviewed Jupiter swap on the MOCKED loopback Solana mainnet harness
+// (127.0.0.1:8551, e2e/jupiter-harness.mjs) and a reviewed Base mainnet transfer on the MOCKED loopback Base mainnet chain (127.0.0.1:8562,
+// e2e/base-mainnet-serve.ts). Never a public network or provider, never a real key or real funds, MOCKED evidence only. Each flow's run journal
+// is a fresh directory under the OS temp directory (workers inherit the runner's values, so the spec's in-process services and the server share
+// them).
+for (const name of ['GRYLOO_JUPITER_E2E', 'GRYLOO_BASE_MAINNET_E2E'])
+  if (process.env[name] !== undefined && process.env[name] !== 'MOCKED_LOOPBACK_ONLY') throw Error(`${name}_PERMITS_ONLY_MOCKED_LOOPBACK`);
+process.env.GRYLOO_JUPITER_E2E = 'MOCKED_LOOPBACK_ONLY';
+process.env.GRYLOO_BASE_MAINNET_E2E = 'MOCKED_LOOPBACK_ONLY';
+process.env.GRYLOO_JUPITER_JOURNAL ??= join(tmpdir(), `gryloo-build014-auth-wallets-${Date.now()}-${process.pid}`);
+process.env.GRYLOO_BASE_JOURNAL ??= join(tmpdir(), `gryloo-base-001-auth-wallets-${Date.now()}-${process.pid}`);
+const jupiterJournal = process.env.GRYLOO_JUPITER_JOURNAL, baseJournal = process.env.GRYLOO_BASE_JOURNAL;
+if (!jupiterJournal.startsWith(join(tmpdir(), 'gryloo-build014-')) || !baseJournal.startsWith(join(tmpdir(), 'gryloo-base-001-')))
+  throw Error('MAINNET_E2E_JOURNALS_MUST_BE_TEMPORARY_DIRECTORIES');
 
 export default defineConfig({
   testDir: './e2e', testMatch: 'auth-wallets.spec.ts', workers: 1, fullyParallel: false, retries: 0,
@@ -57,11 +64,14 @@ export default defineConfig({
         FLOFI_ACCOUNT_HARNESS_OTP_SIGNER_PRIVATE_KEY: otpSigner.getPrivateKey('hex').padStart(64, '0'), FLOFI_ACCOUNT_HARNESS_WALLET_ORIGIN: WALLET_ORIGIN,
         FLOFI_ACCOUNT_HARNESS_WALLET_GOOGLE_CLIENT: walletGoogleClient, FLOFI_ACCOUNT_HARNESS_WALLET_GOOGLE_SECRET: walletGoogleSecret,
         FLOFI_ACCOUNT_HARNESS_WALLET_APPLE_CLIENT: walletAppleClient } },
-    { command: 'node e2e/solana-devnet-harness.mjs --serve', url: 'http://127.0.0.1:8552', reuseExistingServer: false, timeout: 30_000 },
+    { command: 'node e2e/jupiter-harness.mjs --serve', url: 'http://127.0.0.1:8551', reuseExistingServer: false, timeout: 30_000 },
+    { command: 'node e2e/base-mainnet-serve.ts', url: 'http://127.0.0.1:8562', reuseExistingServer: false, timeout: 30_000 },
     { command: 'pnpm --filter @defi-workflow-engine/reference-dapp start', url: E2E_APP_ORIGIN, reuseExistingServer: false, timeout: 90_000,
       env: { PORT: String(E2E_APP_PORT), ...e2eNetworkScopeEnv(), FLOFI_COPILOT: 'replay', NEXT_TELEMETRY_DISABLED: '1', PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1',
-        // The Devnet swap is authored through the loopback-only engineering form (/__engineering) and runs only on the MOCKED harness above.
-        FLOFI_ENGINEERING_UI: 'LOOPBACK_ONLY', GRYLOO_SOLANA_DEVNET_HARNESS: 'MOCKED_LOOPBACK_ONLY', GRYLOO_SOLANA_DEVNET_JOURNAL: devnetJournal,
+        // The Jupiter swap is authored through the loopback-only engineering form (/__engineering); both signing flows run only on the MOCKED
+        // loopback mainnet harnesses above (each `*_HARNESS` mode always wins over a live configuration and never reads a public network).
+        FLOFI_ENGINEERING_UI: 'LOOPBACK_ONLY', GRYLOO_JUPITER_HARNESS: 'MOCKED_LOOPBACK_ONLY', GRYLOO_JUPITER_JOURNAL: jupiterJournal,
+        GRYLOO_BASE_MAINNET_HARNESS: 'MOCKED_LOOPBACK_ONLY', GRYLOO_BASE_JOURNAL: baseJournal,
         FLOFI_PUBLIC_ORIGIN: E2E_APP_ORIGIN, DATABASE_URL: process.env.FLOFI_E2E_DATABASE_URL!, FLOFI_SESSION_SECRET: randomBytes(32).toString('hex'),
         FLOFI_GOOGLE_CLIENT_ID: googleClient, FLOFI_GOOGLE_CLIENT_SECRET: googleSecret, FLOFI_APPLE_CLIENT_ID: appleClient,
         FLOFI_AUTH_E2E_IDP: 'MOCKED_LOOPBACK_ONLY', FLOFI_AUTH_E2E_IDP_ORIGIN: ACCOUNT_HARNESS_ORIGIN,

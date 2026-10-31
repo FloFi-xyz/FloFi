@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 /**
  * BUILD-FLOFI-AUTH-WALLETS-001: landing → sign-in → wallet onboarding → Build 0, My wallets and export, on normal routes; FloFi Wallet
- * signing a reviewed Solana Devnet swap and refusing what matches no reviewed attempt (MOCKED loopback Devnet harness).
+ * (mainnet-only) signing a reviewed Solana mainnet swap (Jupiter) and a reviewed Base mainnet transfer, and refusing what matches no reviewed
+ * attempt or names a test network (MOCKED loopback Solana mainnet/Jupiter and Base mainnet harnesses: mainnet-shaped, MOCKED evidence only).
  * MOCKED loopback providers only (playwright.auth-wallets.config.ts): this proves FloFi's own flows, verification and isolation,
  * never the live Google, Apple or Turnkey services. Screenshots go to the test output directory.
  */
@@ -9,16 +10,25 @@ import { test as base, expect, type BrowserContext, type Locator, type Page } fr
 import { rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { JUPITER_SOLANA_MAINNET } from '@defi-workflow-engine/action-registry';
 import { createDatabase } from '@defi-workflow-engine/cloud-runtime';
 import { base58Encode } from '@defi-workflow-engine/reference-compiler';
+import { createNativeTransferNode, type SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
 import { createTestWallet } from '../../../packages/reference-reconciler/test/test-wallet.ts';
 import { E2E_APP_ORIGIN } from './app-origin';
 import { chooseWallet, openSimulationDetails } from './fixtures';
 import { installJourneyWallet } from './journey-fixtures';
-import { chooseSolanaWallet } from './jupiter-fixtures';
-import { authorDevnetSwap, devnetControl, devnetPanel } from './solana-devnet-fixtures';
-import { createSolanaDevnetService } from '../src/server/jupiter-service';
+import { authorSolanaSwap, chooseSolanaWallet, jupiterControl } from './jupiter-fixtures';
+import { createAccountStore } from '../src/accounts/account-store';
+import { claimAttempt, signingDeps } from '../src/app/flofi-wallet-signing';
+import { CATALOG_NETWORKS, localCatalogNetworkMode } from '../src/server/catalog-networks';
+import { createJupiterService } from '../src/server/jupiter-service';
+import { createJupiterHttp } from '../src/server/jupiter-http';
+import { decodeSignedEip1559, resolveManagedSigning } from '../src/server/managed-signing';
+import { createManagedWalletEvm, expectedBroadcast } from '../src/server/managed-wallet-evm';
+import { createRobinhoodTransferService } from '../src/server/robinhood-transfer-service';
 import { createSolanaRpc } from '../src/server/solana-rpc';
+import { parseSigningContext } from '../src/wallet/flofi-signing';
 
 const harness = process.env.FLOFI_ACCOUNT_HARNESS_ORIGIN ?? '';
 /** FloFi Wallet: the same loopback server under another host name, i.e. another origin (playwright.auth-wallets.config.ts). */
@@ -401,26 +411,50 @@ test('Web3 Wallet sign-in proves ownership with a signature, skips onboarding an
   await expect(page.getByText('Creating or importing wallets needs')).toHaveCount(0);
 });
 
-// ── FloFi Wallet signs a reviewed FloFi strategy: a Solana Devnet swap on the MOCKED loopback Devnet/Orca harness (MOCKED evidence only) ──
-// MOCKED results never authorize FloFi's own UI (release-financial-provenance.spec.ts): the canvas keeps "Authorize in wallet" disabled for
-// them. So the browser runs everything the UI allows (authoring, simulation, the FloFi Wallet entry, FloFi Wallet itself), and FloFi's own
-// Devnet swap service, composed exactly as src/app/solana-devnet-action.ts composes it for this harness (the app's journal, the MOCKED loopback
-// RPC), performs the two steps the UI may not perform for a MOCKED result: the owner's Review acceptance and Execute's durable attempt. The
-// signing request then reaches FloFi Wallet from the window that opened it, in the form FloFi's channel posts it (flofi-wallet-channel.ts).
-const SOLANA_ADDRESS = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/, ORCA_RUN = /^orca-[a-f0-9]{32}$/;
+// ── FloFi Wallet signs reviewed FloFi strategies on mainnet, on MOCKED loopback harnesses (MOCKED evidence only) ──
+// FloFi Wallet is a mainnet wallet (Ethereum, Base, Arbitrum One and Robinhood Chain; Solana mainnet), so its journeys sign mainnet-shaped
+// transactions: a Jupiter swap on the MOCKED loopback Solana mainnet harness (127.0.0.1:8551) and a Base mainnet transfer on the MOCKED loopback
+// Base chain (127.0.0.1:8562). Never a public network or provider, never a real key or real funds. MOCKED results never authorize FloFi's own
+// UI (release-financial-provenance.spec.ts): the canvas keeps "Authorize in wallet" disabled for them. So the browser runs everything the UI
+// allows (authoring, simulation, the FloFi Wallet entry, FloFi Wallet itself), and FloFi's own flow services, composed in this process exactly as
+// their server actions compose them for these harnesses (the app's journals, the MOCKED loopback RPCs), perform the steps the UI may not perform
+// for a MOCKED result: the owner's Review acceptance and Execute's durable attempt (and, for EVM, FloFi's broadcast of the owner-signed bytes).
+// The signing request then reaches FloFi Wallet from the window that opened it, in the form FloFi's channel posts it (flofi-wallet-channel.ts).
+const SOLANA_ADDRESS = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/, JUPITER_RUN = /^jupiter-[a-f0-9]{32}$/, BASE_TRANSFER_RUN = /^bat-[a-f0-9]{32}$/;
 type SigningActivity = { sign_raw_payload: number; sign_transaction: number };
 type WalletAnswer = { ok: boolean; code?: string; result?: { signedTransaction?: string } };
 /** Signing activities that reached the MOCKED provider stand-in so far, whatever their outcome (e2e/account-harness.ts). */
 const providerSigningActivity = async () => await (await fetch(`${harness}/__e2e/signing-activity`)).json() as SigningActivity;
-/** The app's run journal for the MOCKED loopback Devnet (playwright.auth-wallets.config.ts); anything else is refused. */
-function devnetJournal(): string {
-  const journal = process.env.GRYLOO_SOLANA_DEVNET_JOURNAL;
-  if (process.env.GRYLOO_SOLANA_DEVNET_E2E !== 'MOCKED_LOOPBACK_ONLY' || !journal?.startsWith(join(tmpdir(), 'gryloo-demo001-'))) throw Error('MOCK_DEVNET_DENIED');
+/** The app's run journal of a MOCKED loopback mainnet flow (playwright.auth-wallets.config.ts); anything else is refused. */
+function mockedJournal(flow: 'jupiter' | 'base'): string {
+  const [gate, journal, prefix] = flow === 'jupiter' ? [process.env.GRYLOO_JUPITER_E2E, process.env.GRYLOO_JUPITER_JOURNAL, 'gryloo-build014-']
+    : [process.env.GRYLOO_BASE_MAINNET_E2E, process.env.GRYLOO_BASE_JOURNAL, 'gryloo-base-001-'];
+  if (gate !== 'MOCKED_LOOPBACK_ONLY' || !journal?.startsWith(join(tmpdir(), prefix))) throw Error('MOCK_MAINNET_DENIED');
   return journal;
 }
-/** FloFi's Orca Devnet swap service on the app's journal and the MOCKED loopback harness (the composition of src/app/solana-devnet-action.ts). */
-const devnetSwapService = () => createSolanaDevnetService({ journalDir: devnetJournal(), provenance: 'MOCKED', executionEnabled: true,
-  rpc: createSolanaRpc('http://127.0.0.1:8552/rpc', true) });
+const JUPITER_HARNESS = 'http://127.0.0.1:8551';
+/** FloFi's Jupiter swap service on the app's journal and the MOCKED loopback Solana mainnet harness (the composition of src/app/jupiter-action.ts). */
+const jupiterSwapService = () => createJupiterService({ journalDir: mockedJournal('jupiter'), provenance: 'MOCKED', executionEnabled: true,
+  rpc: createSolanaRpc(`${JUPITER_HARNESS}/rpc`, true), http: createJupiterHttp(`${JUPITER_HARNESS}/swap/v2/build`, undefined) });
+/** The app's MOCKED Base mainnet mode (playwright.auth-wallets.config.ts): the loopback harness, which never reads or sends to a public network. */
+const BASE_HARNESS_ENV = Object.freeze({ GRYLOO_BASE_MAINNET_HARNESS: 'MOCKED_LOOPBACK_ONLY' });
+/** FloFi's Base mainnet transfer service on the app's journal and the MOCKED loopback Base chain (the composition of src/app/robinhood-transfer-action.ts). */
+function baseTransferService() {
+  const base = CATALOG_NETWORKS.base;
+  expect(localCatalogNetworkMode(base, BASE_HARNESS_ENV)).toBe('harness');
+  return createRobinhoodTransferService({ journalDir: join(mockedJournal('base'), 'mainnet-transfer'), idPrefix: base.prefixes.transfer, provenance: 'MOCKED',
+    rpcs: { [base.chain]: base.rpc('harness', BASE_HARNESS_ENV) }, catalogFor: base.catalogFor('harness'), executionEnabled: base.ownerExecutionEnabled('harness', BASE_HARNESS_ENV) });
+}
+/** FloFi's managed EVM network side on the same MOCKED harness (the local composition of src/app/flofi-wallet-signing.ts). */
+const managedEvm = () => createManagedWalletEvm({ env: BASE_HARNESS_ENV, mode: network => localCatalogNetworkMode(network, BASE_HARNESS_ENV) });
+/** The MOCKED Base chain's test control (e2e/base-mainnet-serve.ts): reset and fund one address, mine confirmations, count accepted sends. */
+const baseChain = async (body: Record<string, unknown>) => (await (await fetch('http://127.0.0.1:8562/__harness/chain', { method: 'POST',
+  headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })).json() as { result: unknown }).result;
+/** Base units as an exact decimal (trailing zeros removed, never rounded), as FloFi Wallet prints amounts below one unit. */
+const decimal = (value: bigint, decimals: number) => {
+  const digits = value.toString().padStart(decimals + 1, '0'), fraction = digits.slice(-decimals).replace(/0+$/, '');
+  return `${digits.slice(0, -decimals)}${fraction ? `.${fraction}` : ''}`;
+};
 /** A labelled value of a definition list (`<dt>label</dt><dd>value</dd>`). */
 const definition = (scope: Locator, label: string) => scope.getByRole('term').filter({ hasText: new RegExp(`^${label.replace(/[()]/g, '\\$&')}$`) })
   .locator('xpath=following-sibling::dd[1]');
@@ -450,29 +484,40 @@ function recordWalletCalls(context: BrowserContext) {
   });
   return calls;
 }
+/** FloFi Wallet records the first signable state of a request as it renders (Sign and its hint): Sign is still disabled then. */
+const firstSignableState = (popup: Page) => popup.waitForFunction(() => {
+  const button = [...document.querySelectorAll('button')].find(element => element.textContent === 'Sign');
+  const hint = button && document.getElementById(button.getAttribute('aria-describedby') ?? '');
+  return hint?.textContent ? { disabled: button!.disabled, hint: hint.textContent } : null;
+}, undefined, { polling: 50 });
+const ARMING_HINT = /^(Sign becomes available in a moment\.|Click this window to continue\.)$/;
+const jupiterPanel = (page: Page) => page.getByRole('region', { name: 'Jupiter swap', exact: true });
 /**
- * In FloFi: author the canonical Orca Devnet swap (0.1 test SOL → devUSDC), connect the "FloFi Wallet" Solana entry (Wallet Standard connect:
- * the account's public address only, nothing is signed), fund only that address on the MOCKED Devnet, and simulate. Returns the managed
- * address, the run FloFi simulated and the Review's amounts as FloFi shows them (devUSDC labelled "(test)" and fees in "Devnet SOL" there).
+ * In FloFi: author the canonical Solana mainnet swap (10 USDC → SOL through Jupiter), connect the "FloFi Wallet" Solana entry (Wallet Standard
+ * connect on solana:mainnet: the account's public address only, nothing is signed), fund only that address on the MOCKED Solana mainnet harness,
+ * and simulate. Returns the managed address, the run FloFi simulated and the Review's amounts as FloFi shows them.
  */
-async function simulateDevnetSwapWithFloFiWallet(page: Page) {
-  await rm(devnetJournal(), { recursive: true, force: true });
-  await authorDevnetSwap(page);
+async function simulateJupiterSwapWithFloFiWallet(page: Page) {
+  await rm(mockedJournal('jupiter'), { recursive: true, force: true });
+  await authorSolanaSwap(page);
   await page.getByRole('button', { name: 'Simulate workflow' }).click();
   await openSimulationDetails(page);
-  await chooseSolanaWallet(devnetPanel(page), 'FloFi Wallet');
-  const connected = devnetPanel(page).locator('p', { hasText: 'Wallet connected · Solana Devnet:' }).locator('span');
+  await chooseSolanaWallet(jupiterPanel(page), 'FloFi Wallet');
+  const connected = jupiterPanel(page).locator('p', { hasText: 'Wallet connected:' }).locator('span');
   await expect(connected).toHaveText(SOLANA_ADDRESS);
   const owner = (await connected.textContent())!;
-  await devnetControl({ action: 'reset', owner });
-  await devnetPanel(page).getByRole('button', { name: 'Simulate swap' }).click();
-  await expect(devnetPanel(page).getByRole('definition').filter({ hasText: '→ expected' })).toContainText('0.1 Devnet SOL → expected');
+  // MOCKED balances on the loopback harness only (3 SOL, 100 USDC): nothing exists or moves on a public network.
+  await jupiterControl({ action: 'reset', owner });
+  await jupiterPanel(page).getByRole('button', { name: 'Simulate swap' }).click();
+  await expect(jupiterPanel(page).getByRole('definition').filter({ hasText: '→ expected' })).toContainText('10 USDC → expected');
+  await expect(definition(jupiterPanel(page), 'Network')).toHaveText('Solana');
+  await expect(definition(jupiterPanel(page), 'Provider')).toHaveText('Jupiter');
   // MOCKED: the product's own Review stays closed to authorization.
   await expect(page.locator('.canvas-primary-action').getByRole('button', { name: 'Authorize in wallet', exact: true })).toBeDisabled();
-  const reviewed = Object.fromEntries(await Promise.all(['Expected output', 'Minimum received', 'Slippage', 'Estimated network fee'].map(async label =>
-    [label, (await definition(devnetPanel(page), label).textContent())!.replace(/ \(test\)$/, '').replace(/ Devnet SOL$/, ' SOL')] as const)));
+  const reviewed = Object.fromEntries(await Promise.all(['Quoted output', 'Minimum received', 'Slippage', 'Estimated network fee'].map(async label =>
+    [label, (await definition(jupiterPanel(page), label).textContent())!] as const)));
   const runId = await page.evaluate(() => (JSON.parse(localStorage.getItem('gryloo:build014:jupiter') ?? 'null') as { id?: string } | null)?.id ?? '');
-  expect(runId).toMatch(ORCA_RUN);
+  expect(runId).toMatch(JUPITER_RUN);
   return { owner, runId, reviewed };
 }
 /**
@@ -489,13 +534,14 @@ async function openFloFiWallet(page: Page): Promise<Page> {
   await unlockWithGoogle(popup, 'e2e-google-ana');
   return popup;
 }
-/** The owner's Review acceptance and Execute's durable attempt, by FloFi's own Devnet swap service (the UI does not authorize MOCKED results). */
-async function prepareReviewedAttempt(runId: string, owner: string) {
-  const service = devnetSwapService(), run = await service.load(runId);
-  expect(run).toMatchObject({ provenance: 'MOCKED', verdict: 'PENDING', authorization: null, review: { owner, cluster: 'devnet', format: 'gryloo.orca-devnet-review.v1' } });
+/** The owner's Review acceptance and Execute's durable attempt, by FloFi's own Jupiter service (the UI does not authorize MOCKED results). */
+async function prepareReviewedSwap(runId: string, owner: string) {
+  const service = jupiterSwapService(), run = await service.load(runId);
+  expect(run).toMatchObject({ provenance: 'MOCKED', verdict: 'PENDING', authorization: null,
+    review: { owner, chain: JUPITER_SOLANA_MAINNET.chain, cluster: 'mainnet-beta', format: 'gryloo.jupiter-review.v1' } });
   await service.review(runId, run.review.commitment, run.review.workflow);
   const begun = await service.begin(runId, owner, run.review.workflow);
-  expect(begun.record.attempt).toMatchObject({ state: 'PREPARED' });
+  expect(begun).toMatchObject({ walletChain: 'solana:mainnet', record: { attempt: { state: 'PREPARED' } } });
   return { service, unsignedTransaction: begun.unsignedTransaction };
 }
 /** The same unsigned v0 transaction with one byte of its recent blockhash changed. */
@@ -506,45 +552,42 @@ function otherBlockhash(unsigned: string): string {
   return wire.toString('base64');
 }
 
-test('FloFi Wallet signs a reviewed Solana Devnet swap: it names the run, shows FloFi’s own Review, arms Sign, and FloFi submits and reconciles it', async ({ page, context }) => {
+test('FloFi Wallet signs a reviewed Solana mainnet swap (Jupiter): it names the run, shows FloFi’s own Review, arms Sign, and FloFi submits and reconciles it', async ({ page, context }) => {
   await setup(page);
   await keepOpenedWindows(page);
   const before = await providerSigningActivity();
   const wallet = recordWalletCalls(context);
   await googleSignIn(page, 'e2e-google-ana');
   await expect(page).toHaveURL('/app');
-  const { owner, runId, reviewed } = await simulateDevnetSwapWithFloFiWallet(page);
+  const { owner, runId, reviewed } = await simulateJupiterSwapWithFloFiWallet(page);
   const popup = await openFloFiWallet(page);
-  const { service, unsignedTransaction } = await prepareReviewedAttempt(runId, owner);
-  expect(await devnetControl({ action: 'sent' })).toBe(0);
+  const { service, unsignedTransaction } = await prepareReviewedSwap(runId, owner);
+  expect(await jupiterControl({ action: 'sent' })).toBe(0);
 
   // The request names its run. FloFi Wallet records the first signable state as it renders: Sign is still disabled then.
-  const firstSignable = popup.waitForFunction(() => {
-    const button = [...document.querySelectorAll('button')].find(element => element.textContent === 'Sign');
-    const hint = button && document.getElementById(button.getAttribute('aria-describedby') ?? '');
-    return hint?.textContent ? { disabled: button!.disabled, hint: hint.textContent } : null;
-  }, undefined, { polling: 50 });
-  const answered = askFloFiWallet(page, { op: 'solana_sign_transaction', address: owner, chain: 'solana:devnet', transaction: unsignedTransaction,
-    signing: { flow: 'solana-devnet-swap', runId } });
-  const card = popup.getByRole('region', { name: 'Sign a Solana Devnet transaction' });
+  const firstSignable = firstSignableState(popup);
+  const answered = askFloFiWallet(page, { op: 'solana_sign_transaction', address: owner, chain: 'solana:mainnet', transaction: unsignedTransaction,
+    signing: { flow: 'jupiter-swap', runId } });
+  const card = popup.getByRole('region', { name: 'Sign a Solana transaction' });
   await expect(card).toContainText(`Requested by ${new URL(E2E_APP_ORIGIN).host}`);
-  // What FloFi Wallet shows next to Sign is its own server's Review of that run, with the amounts FloFi showed when it simulated.
+  // What FloFi Wallet shows next to Sign is its own server's Review of that run, with the amounts FloFi showed when it simulated. FloFi Wallet
+  // marks every mainnet flow as real funds; this run's funds and evidence are MOCKED (asserted below).
   const summary = card.getByRole('group', { name: 'Prepared by FloFi' });
   await expect(summary).toContainText('Exactly the transaction FloFi prepared for this strategy');
   await expect(summary).toContainText('Swap');
-  await expect(definition(summary, 'Network')).toHaveText('Solana Devnet');
-  await expect(definition(summary, 'You pay')).toHaveText('0.1 SOL');
-  await expect(definition(summary, 'Expected to receive')).toHaveText(reviewed['Expected output']!);
+  await expect(definition(summary, 'Network')).toHaveText('Solana Real funds');
+  await expect(definition(summary, 'You pay')).toHaveText('10 USDC');
+  await expect(definition(summary, 'Expected to receive')).toHaveText(reviewed['Quoted output']!);
   await expect(definition(summary, 'Minimum received')).toHaveText(reviewed['Minimum received']!);
   await expect(definition(summary, 'Max slippage')).toHaveText(reviewed.Slippage!);
   await expect(definition(summary, 'Network fee (estimate)')).toHaveText(reviewed['Estimated network fee']!);
-  await expect(definition(summary, 'Provider')).toHaveText('Orca Whirlpools');
+  await expect(definition(summary, 'Provider')).toHaveText('Jupiter');
   await expect(definition(card, 'Fee payer')).toHaveText(owner);
   const asked = wallet.filter(call => call.path === '/api/wallet/sign-context');
-  expect(asked.map(call => JSON.parse(call.body) as unknown)).toEqual([{ flow: 'solana-devnet-swap', runId, address: owner, op: 'solana_sign_transaction',
-    chain: 'solana:devnet', transaction: unsignedTransaction }]);
+  expect(asked.map(call => JSON.parse(call.body) as unknown)).toEqual([{ flow: 'jupiter-swap', runId, address: owner, op: 'solana_sign_transaction',
+    chain: 'solana:mainnet', transaction: unsignedTransaction }]);
   expect(await asked[0]!.status).toBe(200);
-  expect(await (await firstSignable).jsonValue()).toEqual({ disabled: true, hint: expect.stringMatching(/^(Sign becomes available in a moment\.|Click this window to continue\.)$/) });
+  expect(await (await firstSignable).jsonValue()).toEqual({ disabled: true, hint: expect.stringMatching(ARMING_HINT) });
   await popup.bringToFront();
   const sign = card.getByRole('button', { name: 'Sign', exact: true });
   await expect(sign).toBeEnabled();
@@ -559,32 +602,34 @@ test('FloFi Wallet signs a reviewed Solana Devnet swap: it names the run, shows 
   expect(signed.length).toBe(unsigned.length);
   expect(signed.subarray(65).equals(unsigned.subarray(65))).toBe(true);
   expect(signed.subarray(1, 65).some(byte => byte !== 0)).toBe(true);
-  expect(await devnetControl({ action: 'sent' })).toBe(0);
+  expect(await jupiterControl({ action: 'sent' })).toBe(0);
   // Exactly one signing activity reached the provider, relayed with the same run binding.
   const relayed = wallet.filter(call => call.path.startsWith('/api/wallet/provider/submit/sign'));
-  expect(relayed.map(call => [call.path, call.signing])).toEqual([['/api/wallet/provider/submit/sign_raw_payload', `solana-devnet-swap:${runId}`]]);
+  expect(relayed.map(call => [call.path, call.signing])).toEqual([['/api/wallet/provider/submit/sign_raw_payload', `jupiter-swap:${runId}`]]);
   expect(await relayed[0]!.status).toBe(200);
   expect(await providerSigningActivity()).toEqual({ ...before, sign_raw_payload: before.sign_raw_payload + 1 });
 
-  // FloFi's submit verifies the signed bytes against the Review and broadcasts them once (MOCKED Devnet), then reconciles the swap independently.
-  // (The product UI cannot show a MOCKED run it could not authorize, and the Dashboard reads only the cloud API: FloFi's record is checked.)
+  // FloFi's submit verifies the signed bytes against the Review and broadcasts them once (MOCKED Solana mainnet), then reconciles the swap
+  // independently. (The product UI cannot show a MOCKED run it could not authorize, and the Dashboard reads only the cloud API: FloFi's record is
+  // checked.)
   let record = await service.submit(runId, answer.result!.signedTransaction!);
   expect(record.attempt).toMatchObject({ state: 'PENDING', signature: base58Encode(signed.subarray(1, 65)) });
-  expect(await devnetControl({ action: 'sent' })).toBe(1);
+  expect(await jupiterControl({ action: 'sent' })).toBe(1);
   for (let poll = 0; poll < 10 && !record.evidence; poll++) record = await service.observe(runId);
-  expect(record).toMatchObject({ verdict: 'RECONCILED', evidenceClass: 'MOCKED', attempt: { state: 'CONFIRMED' } });
+  expect(record).toMatchObject({ verdict: 'RECONCILED', provenance: 'MOCKED', evidenceClass: 'MOCKED', attempt: { state: 'CONFIRMED' } });
   const observation = record.observations.at(-1)!;
   expect(observation.signature).toBe(base58Encode(signed.subarray(1, 65)));
-  expect(observation.explorer).toMatch(/^https:\/\/explorer\.solana\.com\/tx\/[1-9A-HJ-NP-Za-km-z]{64,88}\?cluster=devnet$/);
+  expect(observation.explorer).toMatch(/^https:\/\/solscan\.io\/tx\/[1-9A-HJ-NP-Za-km-z]{64,88}$/);
   expect(observation.inputSpent).toBe(record.review.amount);
   expect(BigInt(observation.outputReceived!)).toBeGreaterThanOrEqual(BigInt(record.review.quote.otherAmountThreshold));
   expect(record.evidence).toMatchObject({ bundle: { environment: 'MOCKED', outcome: 'RECONCILED' }, evidenceClass: 'MOCKED',
-    publicExecution: { cluster: 'devnet', provider: 'Orca Whirlpools swap_v2 (Solana Devnet)' } });
-  expect(await devnetControl({ action: 'sent' })).toBe(1);
+    publicExecution: { environment: 'MOCKED', cluster: 'mainnet-beta', chain: JUPITER_SOLANA_MAINNET.chain, provider: 'Jupiter Swap API V2 /build (Metis)',
+      provenance: 'MOCKED', realFunds: false } });
+  expect(await jupiterControl({ action: 'sent' })).toBe(1);
   expect(await providerSigningActivity()).toEqual({ ...before, sign_raw_payload: before.sign_raw_payload + 1 });
 });
 
-test('FloFi Wallet refuses what matches no reviewed attempt (other bytes, no FloFi binding) and nothing reaches the provider', async ({ page, context }) => {
+test('FloFi Wallet refuses what matches no reviewed attempt (other bytes, no FloFi binding, Solana Devnet) and nothing reaches the provider', async ({ page, context }) => {
   await setup(page);
   // Any script on the product origin (its /app pages run without a script-src policy) can keep the handle of FloFi Wallet's window and post
   // to it from the window that opened it: the threat FloFi Wallet's run binding exists for.
@@ -592,11 +637,12 @@ test('FloFi Wallet refuses what matches no reviewed attempt (other bytes, no Flo
   const wallet = recordWalletCalls(context);
   await googleSignIn(page, 'e2e-google-ana');
   await expect(page).toHaveURL('/app');
-  const { owner, runId } = await simulateDevnetSwapWithFloFiWallet(page);
+  const { owner, runId } = await simulateJupiterSwapWithFloFiWallet(page);
   const popup = await openFloFiWallet(page);
-  const { service, unsignedTransaction } = await prepareReviewedAttempt(runId, owner);
+  const { service, unsignedTransaction } = await prepareReviewedSwap(runId, owner);
   const before = await providerSigningActivity();
-  const request = { op: 'solana_sign_transaction', address: owner, chain: 'solana:devnet' };
+  const request = { op: 'solana_sign_transaction', address: owner, chain: 'solana:mainnet' };
+  const binding = { flow: 'jupiter-swap', runId };
   const refused = (code: string) => popup.getByRole('alert').filter({ hasText: code === 'FLOFI_WALLET_NO_MATCHING_REVIEW'
     ? 'FloFi found no reviewed strategy that matches this request, so FloFi Wallet signed nothing.'
     : 'FloFi Wallet signs only actions you reviewed and authorized in FloFi. Nothing was signed.' });
@@ -604,8 +650,7 @@ test('FloFi Wallet refuses what matches no reviewed attempt (other bytes, no Flo
   // 1. The reviewed run's own binding, its prepared attempt, the account's managed signer, an unlocked FloFi Wallet: only one byte of the
   // transaction differs from the Review (its recent blockhash). FloFi Wallet's server finds no match; FloFi Wallet never offers Sign.
   const tampered = otherBlockhash(unsignedTransaction);
-  expect(await askFloFiWallet(page, { ...request, transaction: tampered, signing: { flow: 'solana-devnet-swap', runId } }))
-    .toMatchObject({ ok: false, code: 'FLOFI_WALLET_NO_MATCHING_REVIEW' });
+  expect(await askFloFiWallet(page, { ...request, transaction: tampered, signing: binding })).toMatchObject({ ok: false, code: 'FLOFI_WALLET_NO_MATCHING_REVIEW' });
   await expect(refused('FLOFI_WALLET_NO_MATCHING_REVIEW')).toBeVisible();
   const asked = wallet.filter(call => call.path === '/api/wallet/sign-context');
   expect(asked.map(call => JSON.parse(call.body) as unknown)).toEqual([expect.objectContaining({ runId, transaction: tampered })]);
@@ -614,9 +659,15 @@ test('FloFi Wallet refuses what matches no reviewed attempt (other bytes, no Flo
   expect(await askFloFiWallet(page, { ...request, transaction: unsignedTransaction })).toMatchObject({ ok: false, code: 'FLOFI_WALLET_SIGNING_CONTEXT_REQUIRED' });
   await expect(refused('FLOFI_WALLET_SIGNING_CONTEXT_REQUIRED')).toBeVisible();
   expect(wallet.filter(call => call.path === '/api/wallet/sign-context')).toHaveLength(1);
-  // 3. Control: the same request with the reviewed bytes matches the Review; the person cancels it in FloFi Wallet.
-  const control = askFloFiWallet(page, { ...request, transaction: unsignedTransaction, signing: { flow: 'solana-devnet-swap', runId } });
-  const card = popup.getByRole('region', { name: 'Sign a Solana Devnet transaction' });
+  // 3. The exact reviewed bytes and binding on Solana Devnet: FloFi Wallet is mainnet-only, so its protocol does not accept the request at all
+  // (FLOFI_WALLET_REQUEST_INVALID); nothing is shown as signable and its server is not asked.
+  expect(await askFloFiWallet(page, { ...request, chain: 'solana:devnet', transaction: unsignedTransaction, signing: binding }))
+    .toMatchObject({ ok: false, code: 'FLOFI_WALLET_REQUEST_INVALID' });
+  await expect(popup.getByRole('button', { name: 'Sign', exact: true })).toHaveCount(0);
+  expect(wallet.filter(call => call.path === '/api/wallet/sign-context')).toHaveLength(1);
+  // 4. Control: the same request with the reviewed bytes on mainnet matches the Review; the person cancels it in FloFi Wallet.
+  const control = askFloFiWallet(page, { ...request, transaction: unsignedTransaction, signing: binding });
+  const card = popup.getByRole('region', { name: 'Sign a Solana transaction' });
   await expect(card.getByRole('group', { name: 'Prepared by FloFi' })).toContainText('Exactly the transaction FloFi prepared for this strategy');
   await card.getByRole('button', { name: 'Cancel', exact: true }).click();
   expect(await control).toMatchObject({ ok: false, code: 'FLOFI_WALLET_REJECTED' });
@@ -624,8 +675,144 @@ test('FloFi Wallet refuses what matches no reviewed attempt (other bytes, no Flo
   // No signing activity was relayed or reached the provider; nothing was sent; the reviewed attempt is still unsigned.
   expect(wallet.filter(call => call.path.startsWith('/api/wallet/provider/submit/sign'))).toEqual([]);
   expect(await providerSigningActivity()).toEqual(before);
-  expect(await devnetControl({ action: 'sent' })).toBe(0);
+  expect(await jupiterControl({ action: 'sent' })).toBe(0);
   expect((await service.load(runId)).attempt).toMatchObject({ state: 'PREPARED', signature: null });
+});
+
+/** A MOCKED externally owned recipient on the MOCKED Base chain (no code there). */
+const BASE_RECIPIENT = '0x3333333333333333333333333333333333333333';
+/** The canonical Base mainnet native transfer as FloFi authors it: 0.001 ETH to an explicit recipient. */
+const baseTransferWorkflow = (): SemanticWorkflow => ({ schemaVersion: '1.0.0', workflowId: 'workflow-local', revision: 1, resourceEdges: [],
+  nodes: [createNativeTransferNode('node-002', { chain: 'eip155:8453', amount: '1000000000000000', recipient: BASE_RECIPIENT })] });
+/** The public address of the account's generated EVM wallet, as My wallets shows it. */
+async function managedEvmAddress(page: Page): Promise<string> {
+  await page.goto('/app/credentials');
+  const card = page.getByRole('region', { name: 'My wallets' }).locator('[data-origin="generated"]').filter({ hasText: 'FloFi wallet · Ethereum · Generated' });
+  const address = await card.locator('code').getAttribute('title');
+  expect(address).toMatch(/^0x[0-9a-f]{40}$/);
+  return address!;
+}
+
+test('FloFi Wallet signs a reviewed Base mainnet transfer: FloFi’s Review next to its own decoding, Sign armed, a testnet refused, FloFi broadcasts and reconciles', async ({ page, context }) => {
+  await setup(page);
+  await keepOpenedWindows(page);
+  const before = await providerSigningActivity();
+  const wallet = recordWalletCalls(context);
+  await googleSignIn(page, 'e2e-google-ana');
+  await expect(page).toHaveURL('/app');
+  const owner = await managedEvmAddress(page);
+  // 0.01 MOCKED ETH for the managed address on the MOCKED loopback Base chain only.
+  await baseChain({ action: 'reset', owner, wei: (10n ** 16n).toString() });
+  const popup = await openFloFiWallet(page);
+
+  // FloFi's Simulate, the owner's Review acceptance, Execute's durable attempt and its handoff (SUBMITTING before any wallet request, as FloFi's
+  // transfer store does), by FloFi's own Base mainnet transfer service.
+  const service = baseTransferService(), workflow = baseTransferWorkflow();
+  const simulated = await service.simulate(workflow, owner), runId = simulated.id;
+  expect(runId).toMatch(BASE_TRANSFER_RUN);
+  expect(simulated).toMatchObject({ provenance: 'MOCKED', verdict: 'PENDING', authorization: null, review: { format: 'gryloo.native-transfer-review.v1',
+    chain: 'eip155:8453', chainId: 8453, account: owner, recipient: BASE_RECIPIENT, value: '1000000000000000', nonce: '0' } });
+  await service.review(runId, simulated.review.commitment, workflow);
+  const { record: prepared, transaction } = await service.begin(runId, owner, workflow);
+  expect(prepared.attempt).toMatchObject({ state: 'PREPARED', nonce: '0', transactionHash: null });
+  expect((await service.handoff(runId)).attempt).toMatchObject({ state: 'SUBMITTING' });
+  // The request FloFi's EVM provider posts for this attempt: every EIP-1559 field as a 0x quantity, the attempt's own nonce.
+  const tx = { from: owner, to: transaction.to, value: transaction.value, data: transaction.data, chainId: transaction.chainId,
+    nonce: `0x${BigInt(prepared.attempt!.nonce).toString(16)}`, gas: transaction.gas,
+    maxFeePerGas: transaction.maxFeePerGas, maxPriorityFeePerGas: transaction.maxPriorityFeePerGas };
+  expect(tx).toMatchObject({ to: BASE_RECIPIENT, value: '0x38d7ea4c68000', data: '0x', chainId: '0x2105' });
+  const signing = { flow: 'base-mainnet-transfer', runId };
+  expect(await baseChain({ action: 'sent' })).toBe(0);
+
+  // A test network is refused before anything reaches FloFi Wallet's server or the provider: the same transaction on Base Sepolia (84532).
+  expect(await askFloFiWallet(page, { op: 'evm_sign_transaction', address: owner, tx: { ...tx, chainId: '0x14a34' }, signing }))
+    .toMatchObject({ ok: false, code: 'FLOFI_WALLET_NETWORK_UNSUPPORTED' });
+  await expect(popup.getByRole('alert').filter({ hasText: 'FloFi Wallet signs only on Ethereum, Base, Arbitrum and Robinhood Chain. Nothing was signed.' })).toBeVisible();
+  expect(wallet.filter(call => call.path === '/api/wallet/sign-context' || call.path.startsWith('/api/wallet/provider/submit/sign'))).toEqual([]);
+  expect(await providerSigningActivity()).toEqual(before);
+
+  // The request names its run. FloFi Wallet records the first signable state as it renders: Sign is still disabled then.
+  const firstSignable = firstSignableState(popup);
+  const answered = askFloFiWallet(page, { op: 'evm_sign_transaction', address: owner, tx, signing });
+  const card = popup.getByRole('region', { name: 'Sign a transaction on Base' });
+  await expect(card).toContainText(`Requested by ${new URL(E2E_APP_ORIGIN).host}`);
+  // FloFi's server Review of that run (amount, recipient, fee budget, nonce) …
+  const summary = card.getByRole('group', { name: 'Prepared by FloFi' });
+  await expect(summary).toContainText('Exactly the transaction FloFi prepared for this strategy');
+  await expect(summary).toContainText('Transfer');
+  await expect(definition(summary, 'Network')).toHaveText('Base Real funds');
+  await expect(definition(summary, 'You send')).toHaveText('0.001 ETH');
+  await expect(definition(summary, 'Recipient')).toHaveText(BASE_RECIPIENT);
+  await expect(definition(summary, 'Max network cost')).toHaveText(`${decimal(BigInt(prepared.review.feeBudget), 18)} ETH`);
+  await expect(definition(summary, 'Nonce')).toHaveText('0');
+  // … next to FloFi Wallet's own decoding of the exact bytes it signs.
+  const details = card.getByText('What you are signing', { exact: true }).locator('xpath=following-sibling::dl[1]');
+  await expect(definition(details, 'Network')).toHaveText('Base (8453)');
+  await expect(definition(details, 'From')).toHaveText(owner);
+  await expect(definition(details, 'To')).toHaveText(BASE_RECIPIENT);
+  await expect(definition(details, 'Sends')).toHaveText('0.001 ETH');
+  await expect(definition(details, 'Action')).toHaveText('Plain transfer, no contract call');
+  await expect(definition(details, 'Nonce')).toHaveText('0');
+  await expect(definition(details, 'Gas limit')).toHaveText(BigInt(tx.gas).toString());
+  await expect(definition(details, 'Max fee per gas')).toHaveText(`${decimal(BigInt(tx.maxFeePerGas), 9)} gwei`);
+  await expect(definition(details, 'Max priority fee')).toHaveText(`${decimal(BigInt(tx.maxPriorityFeePerGas), 9)} gwei`);
+  await expect(definition(details, 'Maximum cost before the L1 data fee')).toHaveText(`${decimal(BigInt(tx.value) + BigInt(tx.gas) * BigInt(tx.maxFeePerGas), 18)} ETH`);
+  const asked = wallet.filter(call => call.path === '/api/wallet/sign-context');
+  expect(asked.map(call => JSON.parse(call.body) as unknown)).toEqual([{ flow: 'base-mainnet-transfer', runId, address: owner, op: 'evm_sign_transaction', tx }]);
+  expect(await asked[0]!.status).toBe(200);
+  expect(await (await firstSignable).jsonValue()).toEqual({ disabled: true, hint: expect.stringMatching(ARMING_HINT) });
+  await popup.bringToFront();
+  const sign = card.getByRole('button', { name: 'Sign', exact: true });
+  await expect(sign).toBeEnabled();
+  await shot(popup, '12-flofi-wallet-evm-signing-review');
+  await sign.click();
+  await expect(popup.getByRole('status').filter({ hasText: 'Signed. FloFi sends the transaction and records the result.' })).toBeVisible();
+
+  // FloFi Wallet answers with the owner-signed EIP-1559 transaction of exactly these fields, sent by the managed address; it broadcasts nothing.
+  const answer = await answered;
+  expect(answer.ok).toBe(true);
+  const raw = answer.result!.signedTransaction!, decoded = decodeSignedEip1559(raw)!;
+  expect(decoded.tx).toEqual({ from: owner, to: BASE_RECIPIENT, value: 10n ** 15n, data: '0x', chainId: 8453n, nonce: 0n, gas: BigInt(tx.gas),
+    maxFeePerGas: BigInt(tx.maxFeePerGas), maxPriorityFeePerGas: BigInt(tx.maxPriorityFeePerGas) });
+  expect(await baseChain({ action: 'sent' })).toBe(0);
+  // Exactly one signing activity reached the provider, relayed with the same run binding.
+  const relayed = wallet.filter(call => call.path.startsWith('/api/wallet/provider/submit/sign'));
+  expect(relayed.map(call => [call.path, call.signing])).toEqual([['/api/wallet/provider/submit/sign_transaction', `base-mainnet-transfer:${runId}`]]);
+  expect(await relayed[0]!.status).toBe(200);
+  expect(await providerSigningActivity()).toEqual({ ...before, sign_transaction: before.sign_transaction + 1 });
+
+  // FloFi broadcasts the owner-signed bytes once, exactly as floFiEvmBroadcast (src/app/flofi-wallet-action.ts) does after its account session
+  // check: the same resolution on the signed bytes and their recovered sender (nonce and fees bounded at signing), the attempt's single
+  // broadcast claim in the account store, and FloFi's managed EVM broadcast, here on the MOCKED loopback Base chain.
+  const db = createDatabase({ connectionString: process.env.FLOFI_E2E_DATABASE_URL!, maxConnections: 1 });
+  try {
+    const store = createAccountStore(db, 'default'), accountId = await store.walletHolder('evm', owner);
+    expect(accountId).toMatch(/^acct_[0-9a-f]{32}$/);
+    const resolved = await resolveManagedSigning(parseSigningContext(signing)!, { ecosystem: 'evm', tx: decoded.tx },
+      { ...signingDeps(await store.wallets(accountId!)), load: async () => await service.load(runId), filledBoundedAtSigning: true });
+    expect(resolved).toMatchObject({ ok: true, value: { owner, attempt: `base-mainnet-transfer:${runId}:TRANSFER:0`, evm: { chainId: 8453 } } });
+    const match = (resolved as Extract<typeof resolved, { ok: true }>).value;
+    expect(await claimAttempt(store, 'broadcast', match.attempt, match.expiresAtMs)).toBe(true);
+    expect(await managedEvm().broadcast(`0x${match.evm!.chainId.toString(16)}`, raw.toLowerCase(), expectedBroadcast(decoded.tx, decoded.hash)))
+      .toEqual({ kind: 'HASH', hash: decoded.hash });
+    // One broadcast per reviewed attempt: the claim is spent.
+    expect(await claimAttempt(store, 'broadcast', match.attempt, match.expiresAtMs)).toBe(false);
+  } finally { await db.close(); }
+  expect(await baseChain({ action: 'sent' })).toBe(1);
+
+  // FloFi records the hash and reconciles the transfer independently from the chain: after two confirmations, value + fee + L1 fee exactly.
+  let record = await service.report(runId, { kind: 'HASH', hash: decoded.hash });
+  expect(record.attempt).toMatchObject({ state: 'PENDING', transactionHash: decoded.hash });
+  record = await service.observe(runId);
+  expect(record).toMatchObject({ verdict: 'PENDING', error: 'AWAITING_CONFIRMATIONS', evidence: null });
+  await baseChain({ action: 'mine', blocks: 2 });
+  record = await service.observe(runId);
+  expect(record).toMatchObject({ verdict: 'RECONCILED', provenance: 'MOCKED', error: null, attempt: { state: 'CONFIRMED', reconciled: true, transactionHash: decoded.hash } });
+  expect(record.observations.at(-1)).toMatchObject({ verdict: 'RECONCILED', reason: 'NATIVE_TRANSFER_VERIFIED', facts: { nonceBefore: '0', nonceAfter: '1' } });
+  expect(record.evidence).toMatchObject({ bundle: { environment: 'MOCKED', outcome: 'RECONCILED' },
+    publicExecution: { network: 'Base', chainId: 8453, transactionHash: decoded.hash, provenance: 'MOCKED', submissions: 1, verdict: 'RECONCILED' } });
+  expect(await baseChain({ action: 'sent' })).toBe(1);
+  expect(await providerSigningActivity()).toEqual({ ...before, sign_transaction: before.sign_transaction + 1 });
 });
 
 test('the database holds no secret-shaped value for any account', async () => {
