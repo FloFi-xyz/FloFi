@@ -135,7 +135,7 @@ SCHEMA-COMPATIBILITY.md §13, `privy-accounts-migration.pg.test.ts` (3). Release
 | `pnpm test` (unit) | 497 files, 6075 tests pass (2 files skipped by their own environment conditions, unchanged by this build) |
 | Accounts + migrations on PostgreSQL 16 (`src/accounts`, 0018/0019 migration tests) | 15 files, 114 tests pass |
 | Browser `auth-wallets` (guarded runner, loopback Privy stand-in) | 13 / 13 |
-| Critical browser tier | see PR |
+| Critical browser tier (guarded runner, 6 profiles incl. review-execute-recovery-components 39 tests) | pass |
 | Dependency verification, audit, SBOM, governance-lite, CI unit tests | pass |
 
 The browser suite's Privy stand-in (e2e/privy-emulator.ts, e2e/privy-emulator-client.js) issues real ES256 tokens that FloFi's server
