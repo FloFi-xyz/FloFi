@@ -139,6 +139,10 @@ export function AddWallets({ state }: { state: AccountState }) {
     <p className={styles.crumbs}><a href="/onboarding">{t('Account')}</a> / <span aria-current="page">{t('Add wallets')}</span></p>
     <h1 className={styles.heading} style={{ marginTop: 28 }}>{t('Add your wallets')}</h1>
     <p className={`${styles.lead} ${styles.center}`} style={{ textAlign: 'center' }}>{t('Create a new wallet or import one you already have. Keys are created and kept by our wallet provider, Turnkey — FloFi never sees or stores them.')}</p>
+    {/* The provider signing adapter is not part of this release: say so before anyone creates or imports a wallet for FloFi. */}
+    <div className={styles.notice} role="note" data-managed-signing="unavailable"><span className={styles.noticeIcon}><AccountIcon name="shield" size={18}/></span><div>
+      <strong>{t('FloFi can’t sign workflows with these wallets yet')}</strong>
+      <p>{t('Wallets you create or import here are held by Turnkey and kept with your account, and you can export them. To review and sign transactions in FloFi today, connect MetaMask, Phantom or Solflare in Credentials.')}</p></div></div>
     {readiness === 'not-configured' && <div className={styles.banner} role="status"><strong>{t("Creating and importing wallets isn't available on this deployment yet.")}</strong>
       <p>{t('You can still connect MetaMask, Phantom or Solflare in Credentials and use them with FloFi.')}</p></div>}
     {readiness === 'needs-social' && <div className={styles.banner} role="status"><strong>{t('You signed in with a wallet.')}</strong>

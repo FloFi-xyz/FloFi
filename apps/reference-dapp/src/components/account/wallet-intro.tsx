@@ -45,8 +45,8 @@ export function WalletIntro({ state }: { state: AccountState }) {
     <h1 className={styles.heading}>{t('Your wallets. One FloFi account.')}</h1>
     <p className={`${styles.lead} ${styles.center}`} style={{ textAlign: 'center' }}>{t('Your account is how you sign in. A wallet is what signs transactions — and only after you review them.')}</p>
     <ul className={styles.explain}>
-      <li><AccountIcon name="plus"/><span><strong>{t('Create a new wallet.')}</strong> {t('Generated in seconds by our wallet provider, Turnkey. FloFi never sees the key.')}</span></li>
-      <li><AccountIcon name="import"/><span><strong>{t('Import one you have.')}</strong> {t('Your key is typed into Turnkey’s isolated secure field, never into FloFi.')}</span></li>
+      <li><AccountIcon name="plus"/><span><strong>{t('Create a new wallet.')}</strong> {t('Generated in seconds by our wallet provider, Turnkey. FloFi never sees the key.')} {t('Signing FloFi workflows with it isn’t available yet.')}</span></li>
+      <li><AccountIcon name="import"/><span><strong>{t('Import one you have.')}</strong> {t('Your key is typed into Turnkey’s isolated secure field, never into FloFi.')} {t('Signing FloFi workflows with it isn’t available yet.')}</span></li>
       <li><AccountIcon name="wallet"/><span><strong>{t('Connect the wallet you use.')}</strong> {t('Keep MetaMask, Phantom or Solflare. Your keys stay in your wallet.')}</span></li>
     </ul>
     <a className={styles.primary} href="/onboarding/wallets" aria-disabled={busy || undefined}>{t('Add wallets')}</a>

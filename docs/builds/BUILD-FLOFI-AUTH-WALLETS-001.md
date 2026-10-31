@@ -3,6 +3,8 @@
 Status: implemented on a review branch, **not merged, not deployed**. Live Google, Apple and Turnkey integrations are
 **unverified** in this build (no vendor credentials or network access to those services were available); every flow is
 implemented against the providers' published interfaces and exercised end to end against MOCKED loopback stand-ins only.
+**Release readiness: NO-GO** — see §15 (CI, security review, vendor evidence, production configuration, migration release plan and
+merge blockers).
 
 Journey delivered: **Landing → Sign in → Wallet onboarding → Build 0 (`/app`)**, plus **Credentials → My wallets** and a
 protected **Export wallet** flow.
@@ -158,9 +160,12 @@ screen states that accounts are unavailable and offers the builder without an ac
   then the provider decrypts and shows the secret inside its own frame; FloFi never reads it, never writes the clipboard, and stores
   nothing. External wallets (MetaMask, Phantom, Solflare…) never show Export.
 - **Removal** removes FloFi's association only; the copy says the wallet still exists at Turnkey and funds are unchanged.
-- **Not in this build**: using a managed wallet to sign FloFi transactions. No managed-wallet signing adapter was added; Build,
-  Simulate and Execute continue to use the connected browser wallet with the same review, Strategy Manifest and wallet signature.
-  Managed wallets can be exported to a wallet app today. A signing adapter is a separate, security-reviewed build.
+- **Not in this build — a blocking dependency for production**: using a managed wallet to sign FloFi transactions. No
+  managed-wallet signing adapter was added; Build, Simulate and Execute continue to use the connected browser wallet with the same
+  review, Strategy Manifest and wallet signature. The product says so where managed wallets appear: a note on *Add your wallets*
+  ("FloFi can't sign workflows with these wallets yet"), on the wallet introduction's create/import items, and on every managed wallet
+  card in My wallets ("Can't sign FloFi workflows yet. Connect MetaMask, Phantom or Solflare to sign."); external wallets carry no such
+  note. The browser suite asserts all three. Managed wallets can be exported to a wallet app today. The adapter is §15.7's blocker 2.
 
 **Account deletion**: Credentials → My wallets → *Delete FloFi account* (explicit confirmation, sign-in from the last 10 minutes) deletes
 the account, its identities, sessions and saved wallet metadata. Wallets kept by the provider and on-chain assets are not deleted; the
@@ -189,14 +194,15 @@ recovery phrase is the person's independent backup. FloFi cannot recover keys.
 7. Open-redirect protection: post-sign-in destinations are limited to `/app…` and `/onboarding…`.
 
 Residual risks for owner review:
-- The browser's provider session key is a root-user credential of the person's sub-organization for its lifetime (1 hour). FloFi's
-  guarantees that it is used only for create/import/export — and that export output is decrypted only in the provider's frame — rest on
-  FloFi's code and on the FloFi origin being free of XSS, not on a Turnkey policy. The relay cannot check that `targetPublicKey` belongs to
-  the export frame. A page-specific CSP (`script-src`) for the account pages is the strongest follow-up.
-- Sign-in, onboarding and Credentials now send `X-Frame-Options: DENY` and `frame-ancestors 'none'`.
+- The browser's provider session key is a root-user credential of the person's sub-organization for its lifetime (now 15 minutes,
+  `MANAGED_SESSION_SECONDS`). FloFi's guarantees that it is used only for create/import/export — and that export output is decrypted
+  only in the provider's frame — rest on FloFi's code and on the FloFi origin being free of XSS, not on a Turnkey policy. The relay cannot
+  check that `targetPublicKey` belongs to the export frame. `/login` and `/onboarding*` now run under a per-request nonce CSP (§15.3);
+  `/app` (where Export opens) does not — §15.7, blocker 4.
+- Sign-in, onboarding and Credentials send `X-Frame-Options: DENY` and `frame-ancestors 'none'`.
 - FloFi's server sees the Google/Apple ID token and (with `VERIFY_OTP` v1) the six-digit code. Both are bound to the browser's session
-  key for provider use. Turnkey's newer `INIT_OTP_V3`/`VERIFY_OTP_V2` encrypt the code to the enclave in the browser; adopting them
-  needs `@turnkey/crypto` (HPKE) and is a recommended follow-up once live behaviour can be verified.
+  key for provider use. **The legacy OTP activities are deprecated and, per Turnkey's migration guide, `CREATE_SUB_ORGANIZATION_V8`
+  does not accept their verification tokens: new email accounts cannot be created live as implemented** (§15.4, blocker 3).
 - The parent API private key is a high-value deployment secret (it can create organizations and initiate email OTPs to users). Store it
   only in the deployment secret manager; rotate on exposure.
 - Activity versions (`INIT_OTP_V2`, `VERIFY_OTP`, `OTP_LOGIN`, `OAUTH_LOGIN`, `CREATE_SUB_ORGANIZATION_V8`) and result field names were
@@ -204,10 +210,11 @@ Residual risks for owner review:
 
 ## 9. Database and migration impact
 
-Migration `0018_flofi_accounts` (four new tables, nothing else). A forward-compatibility certificate (base 0017 → 0018) and its
-assessment (`docs/deploy/SCHEMA-COMPATIBILITY.md#12-certificate-0018_flofi_accounts`) are included. Release order remains
-certificate first: a reviewed certificate-bearing version-17 release, then the migration-bearing release. No production migration was
-run.
+Migration `0018_flofi_accounts` (six new tables, nothing else; no function or trigger). A forward-compatibility certificate (base
+0017 → 0018) and its assessment (`docs/deploy/SCHEMA-COMPATIBILITY.md#12-certificate-0018_flofi_accounts`) are included. Release order
+remains certificate first: a reviewed certificate-bearing version-17 release, then the migration-bearing release. The exact sequence,
+the one production path that applies migrations (the Railway API pre-deploy) and rollback are in
+[`docs/deploy/RELEASE-AUTH-WALLETS-0018.md`](../deploy/RELEASE-AUTH-WALLETS-0018.md). No production migration was run.
 
 ## 10. Dependency and gate changes (owner review required)
 
@@ -216,8 +223,11 @@ run.
 - `scripts/bootstrap-ci.py`: new exact direct pins (`BUILDAUTHWALLETS001_DIRECT_VERSIONS`), lock-importer check, registry count
   263 → 271 and the new lockfile baseline hash. `scripts/test_ci_optimization.py` and `.circleci/scripts/ci-sbom.sh` follow the count.
   `python3 scripts/bootstrap-ci.py --verify-dependencies` passes (271 entries, integrity, licenses, release age).
-- Pre-existing, unrelated: `pnpm audit --audit-level low` already fails on `main` with one moderate advisory (GHSA-g3hv-75wg-m249,
-  `minimatch` via `eslint`). This build adds no advisory and does not mask that one.
+- `minimatch` (GHSA-g3hv-75wg-m249, pre-existing on `main`, the CircleCI `certification-checks` failure): exact overrides move ESLint's
+  three consumers to `minimatch@11.0.3` (+ `@isaacs/nonrecursive-glob-match@1.0.3`); `minimatch@10.2.6` leaves the lockfile. Registry
+  count 271 → 272, new baseline hash, both SBOM copies and the CI test follow. The exact BlueOak-1.0.0 identity exception moves from
+  `minimatch@10.2.6` to the two new identities (same author and licence). **The 7-day release-age gate is unchanged and not waived**:
+  both packages are younger than 7 days until 2026-11-04T20:00:34Z (§15.2).
 
 ## 11. External setup checklist (nothing below was configured by this build)
 
@@ -248,8 +258,11 @@ run.
 | Live Google sign-in, live Apple sign-in | **Unverified** — needs client registration and a real browser round trip |
 | Live Turnkey email OTP, sub-organization creation, OAuth/OTP login, create, import iframe, export iframe | **Unverified** — needs a Turnkey test organization; shapes from `@turnkey/http@6.7.0` declarations |
 | Turnkey security properties (parent key cannot sign/export; session binding) | **Unverified** in this build — vendor model as documented in its SDK; must be confirmed with Turnkey |
+| Live email sign-up | **Blocked** — legacy OTP activities vs `CREATE_SUB_ORGANIZATION_V8` (§15.4) |
+| Managed-wallet signing of FloFi workflows | **Not implemented** — blocking dependency, disclosed in the product (§7) |
+| Account-page CSP (nonce, provider frames only) | **Verified** in the browser on loopback, including a blocked injected handler |
 
-## 13. Test evidence
+## 13. Test evidence (first round, `a5fa5c8`; the continuation is §15.6)
 
 Run in this session with the pinned Node 24.21.0 / pnpm 11.22.0 and a disposable loopback PostgreSQL 16:
 
@@ -295,9 +308,114 @@ pt-PT/pt-BR catalog, `__Host-` cookie prefixes (incompatible with loopback HTTP 
 
 ## 14. Follow-ups
 
-- Live verification on a Turnkey test organization and real Google/Apple clients (§11.6).
-- `INIT_OTP_V3` / `VERIFY_OTP_V2` with browser-side HPKE.
-- A reviewed managed-wallet signing adapter that keeps FloFi's explicit Review → Manifest → wallet confirmation path.
+Blocking items are in §15.7. Other follow-ups:
+
 - Account-level "sign out everywhere" and identity management UI; discovery of provider wallets created but not saved.
-- Privacy-policy section for accounts (email, OIDC subject, wallet addresses, Turnkey as processor) — owner/legal.
-- A page-specific CSP for `/login` and `/onboarding/*` (`frame-src` limited to the provider frame origins).
+- Remove `'unsafe-eval'` from the account-page CSP: precompile the Ajv validators (`action-registry`, `workflow-contracts`,
+  `reference-linter`) or split wallet proof from the workflow engine — which also shrinks the sign-in bundle.
+- `__Host-` cookie prefixes once the browser suites run over HTTPS.
+
+## 15. Release-readiness review (continuation on PR #143)
+
+Owner requirement for this review: FloFi is a production application for real end users. Nothing below is presented as live
+certification; MOCKED loopback results prove FloFi's own code paths only.
+
+### 15.1 CircleCI on `a5fa5c8` (workflow `2d20e7ad`)
+
+| Job | Result | Cause | New or pre-existing |
+| --- | --- | --- | --- |
+| `governance` | ✅ | — | — |
+| `certification-checks` | ❌ step 108 *Dependency audit* | `pnpm audit --audit-level low`: GHSA-g3hv-75wg-m249 (moderate), `minimatch@10.2.6` < 11.0.1 via `eslint`, `@eslint/config-array`, `@typescript-eslint/typescript-estree` | **Pre-existing**: the same `minimatch@10.2.6` entries are in `main`'s lockfile; the advisory is newer than `main`'s last green run. The job stops at step 108, so its typecheck, lint, schema drift, unit, PostgreSQL and fork steps **did not run in CircleCI** (on this branch or on `main`) |
+| `certification-browser-1` | ❌ shard 1, profile `default-product` | 7 × `brand-ux-001.spec.ts` *landing, keyboard navigation and product entry* (320–1440 px): expected `/app` after *Launch Beta FloFi*, received `/login`. Critical tier passed first | **New, caused by this PR** (the landing now opens sign-in). Fail-fast left the rest of shard 1 unrun |
+| `certification-browser-2` | ✅ | cloud and journey provenance, execution continuity, workflow/swap acceptance, automations, delegated execution, admin console, CoW, card provider, MCP routes, developer journey, MCP in chat, MCP embedded signing, channel signing, channel approve, approve/authorize journeys, approve workflow run, universal bridge, owner history | MCP, channels, approval and execution unaffected |
+| `certification` | not run | depends on the jobs above | — |
+
+### 15.2 CI fixes
+
+1. **`brand-ux-001`** follows the new journey: *Launch Beta FloFi* → `/login` (language kept, no horizontal overflow at every width) →
+   *Explore the builder without an account* → `/app`; its other assertions are unchanged. Locally, under the CI profile with the pinned
+   Anvil, all seven widths pass.
+2. **`minimatch`**: exact overrides in `pnpm-workspace.yaml` move the three ESLint consumers to `minimatch@11.0.3`;
+   `minimatch@10.2.6` leaves the lockfile; `pnpm audit --audit-level low` → *No known vulnerabilities found*. The dependency gate follows
+   (§10). `--verify-dependencies` now reports exactly two violations — **`Minimum release age failed`** for `minimatch@11.0.3`
+   (published 2026-10-28T20:00:34Z) and `@isaacs/nonrecursive-glob-match@1.0.3` (2026-10-28T19:50:48Z). No fixed version is older than
+   seven days (11.0.1: 2026-10-27T22:26Z). **No waiver was added.** pnpm 11 enforces the same policy on the lockfile at install time
+   (`ERR_PNPM_MINIMUM_RELEASE_AGE_VIOLATION: 2 lockfile entries failed verification`, reproduced locally), so with this change every
+   CircleCI job stops at *Frozen install* until the packages are seven days old. It is therefore the **last** commit on the branch,
+   pushed after the browser jobs certified the commit before it. Either a CI rerun after **2026-11-04T20:01Z** passes with no new
+   commit, or the owner approves an exact temporary waiver like the `fast-uri@3.1.9` precedent (`APPROVED_AGE_WAIVERS` in
+   `scripts/governance_lite.py`, `minimumReleaseAgeExclude`, the waiver metadata JSON).
+
+### 15.3 Security review: findings and dispositions
+
+| Area | Finding | Disposition |
+| --- | --- | --- |
+| Turnkey browser session | The IndexedDB P-256 key (non-extractable) is a root-user API key of the person's sub-organization while its session lasts. It can stamp any activity; the relay forwards only create/import/export/get-activity, but a script running on the FloFi origin could obtain stamps and replay them to Turnkey directly. | Session lifetime 3600 s → **900 s** (`MANAGED_SESSION_SECONDS`, unit-tested); strict CSP on the account pages (below). Residual on `/app` → blocker 4 |
+| CSP / XSS on account pages | No `script-src` anywhere in the product. | **Implemented**: `/login`, `/onboarding`, `/onboarding/*` get a per-request nonce policy from `src/proxy.ts` (`src/accounts/account-csp.ts`): `script-src 'self' 'nonce-…' 'strict-dynamic' 'unsafe-eval'`, `connect-src 'self'`, `frame-src` = only the validated Turnkey iframe origins (`'none'` without a provider), `object-src 'none'`, `base-uri 'none'`, `form-action 'self'`, `frame-ancestors 'none'`. The global policy is unchanged. Settings → *Sign in* and the docs *Launch* link are now full page loads, so sign-in never inherits another page's policy. Browser-tested: fresh nonce per request, an injected `onerror` handler is blocked (`script-src-attr` violation), all 8 journeys including both provider iframes pass. `'unsafe-eval'` remains because the shared wallet-proof module loads Ajv validators that compile with `new Function` (follow-up, §14) |
+| CSP on Export (`/app/credentials`) | Credentials is a client route of the persistent `/app` document; a header on that path would not apply after in-app navigation. | Not changed (would have been misleading). Blocker 4 |
+| Google / Apple OIDC | RS256 + JWKS (`kid`, `alg`, `use`), `iss` (Google: both documented forms), `aud`, `azp`, `exp`/`iat` with 120 s skew and 15 min max age, nonce = sha256(browser session key) from a sealed one-time flow cookie, `state`, PKCE S256 (Google), `form_post` (Apple), single-use ID tokens (digest table). Linking needs a live session, never merges or moves an identity. | Matches Google's live discovery (§15.4). Apple unverified live |
+| Email OTP abuse | 5 attempts per code, 5 codes per address per hour, 300 per 10 min per deployment; code never stored by FloFi. | Unchanged. **Live sign-up blocked** by the legacy activity versions (§15.4, blocker 3) |
+| Recovery and revocation | Server-side session rows checked on every request; sign-out revokes; a new sign-in supersedes; deletion revokes all; 12 h lifetime; 10 min re-auth for export/deletion. | No "sign out everywhere" list yet: a stolen cookie lives ≤ 12 h unless that device signs out or the account is deleted (follow-up) |
+| Import / export isolation | Key entry and secret display only in Turnkey's frames on other origins; no FloFi key field; export needs confirmation, a sign-in from the last 10 minutes and wallet ownership; no clipboard or storage writes (browser-tested). | Unchanged; frames now also limited by `frame-src` on onboarding |
+| Tenant / cross-account | Every statement tenant- and account-scoped; PostgreSQL and browser cross-account tests. | Unchanged |
+| Migration 0018 | Additive and atomic; the Railway API pre-deploy is the only production path that applies it. | Release plan: [`RELEASE-AUTH-WALLETS-0018.md`](../deploy/RELEASE-AUTH-WALLETS-0018.md); blocker 6 |
+| Product honesty | Managed wallets could read as ready for FloFi execution. | Notices on onboarding, the introduction and every managed card (§7), browser-asserted |
+| Fail closed when unconfigured | Server: `oidcConfig`/`turnkeyConfig` return null on any missing or malformed setting; test seams refused on hosted deployments. UI: new `sign-in.test.tsx` renders each combination — every unavailable method disabled with its reason, *Continue to FloFi* and *Explore the builder* kept, no data notice without accounts. | Covered by unit tests |
+
+### 15.4 Vendor documentation evidence
+
+| Vendor | Source available here | Result |
+| --- | --- | --- |
+| Google | `https://accounts.google.com/.well-known/openid-configuration`, fetched 2026-10-31: issuer `https://accounts.google.com`, authorize `/o/oauth2/v2/auth`, token `https://oauth2.googleapis.com/token`, JWKS `https://www.googleapis.com/oauth2/v3/certs`, `RS256`, PKCE `S256`, response modes `query`/`form_post`, claims include `email_verified` | **Matches** `src/accounts/oidc.ts` |
+| Apple | `appleid.apple.com` and Apple's developer docs are refused by this session's egress policy | Endpoints (`/auth/authorize`, `/auth/keys`), issuer `https://appleid.apple.com`, `form_post` and a string-valued `email_verified` were taken from search results quoting Apple's documentation; Apple's own pages could not be loaded — **unverified** |
+| Turnkey | `docs.turnkey.com` does not resolve in this session. Evidence: the published npm sources (`@turnkey/http@6.7.0` activity declarations; `@turnkey/core` and `@turnkey/crypto` for the encrypted OTP flow and client-signature messages) and the *Migrate to encrypted OTP flows* guide as indexed by search | **Discrepancy**: the guide marks `INIT_OTP`/`VERIFY_OTP`/`OTP_LOGIN` as deprecated, says **version 8 and later activities do not accept legacy OTP verification tokens**, and forbids mixing flows. FloFi passes a `VERIFY_OTP` token to `CREATE_SUB_ORGANIZATION_V8`, so first-time email sign-up will be refused live (fail closed, no false success). Fix: `INIT_OTP_V3` → browser-side `encryptOtpCodeToBundle` (HPKE to the enclave target, signature checked against Turnkey's production signer) → `VERIFY_OTP_V2` → client-signed `CREATE_SUB_ORGANIZATION_V8` (`USAGE_TYPE_SIGNUP`) / `OTP_LOGIN_V2` (`USAGE_TYPE_LOGIN`) signed by the IndexedDB key. It needs `@turnkey/crypto` (+25 lockfile packages, including `tslib@1.14.1` under 0BSD, outside the licence allowlist) — an owner dependency/licence decision, not taken here |
+
+To confirm the unverified rows, allow `docs.turnkey.com`, `appleid.apple.com` and `developer.apple.com` in the session's network settings
+or review them on an owner machine.
+
+### 15.5 Exact production configuration (names only; values belong in the deployment secret manager)
+
+| Setting | Where | Purpose |
+| --- | --- | --- |
+| `DATABASE_URL` | Vercel + Railway (exists) | Accounts exist wherever it is set; with it, Web3 Wallet sign-in is live |
+| `FLOFI_PUBLIC_ORIGIN` = `https://flofi.xyz` | Vercel | OIDC redirect URIs `https://flofi.xyz/auth/callback/google` and `/apple`; session cookie domain |
+| `FLOFI_SESSION_SECRET` (≥ 32 random bytes; else `API_AUTH_TOKEN`) | Vercel | Seals account and flow cookies (HKDF) |
+| `FLOFI_GOOGLE_CLIENT_ID`, `FLOFI_GOOGLE_CLIENT_SECRET` | Vercel (secret) | Google OAuth Web client; redirect URI above; scopes `openid email` |
+| `FLOFI_APPLE_CLIENT_ID` (Services ID) | Vercel | Sign in with Apple, domain `flofi.xyz` verified, return URL above; no Apple private key |
+| `FLOFI_TURNKEY_ORGANIZATION_ID`, `FLOFI_TURNKEY_API_PUBLIC_KEY`, `FLOFI_TURNKEY_API_PRIVATE_KEY` | Vercel (secret) | Parent organization and a least-privilege P-256 API key; email OTP enabled and branded; Google/Apple issuers accepted for OAuth login |
+| `FLOFI_TURNKEY_API_BASE_URL`, `FLOFI_TURNKEY_EXPORT_IFRAME_URL`, `FLOFI_TURNKEY_IMPORT_IFRAME_URL` | optional | Must stay on `https://*.turnkey.com` (anything else disables the provider) |
+| `FLOFI_AUTH_E2E_IDP`, `FLOFI_AUTH_E2E_IDP_ORIGIN`, `FLOFI_TURNKEY_E2E` | **never in production** | Test seams; refused on hosted deployments regardless |
+
+### 15.6 Test evidence for this continuation (pinned Node 24.21.0, pnpm 11.22.0)
+
+| Gate | Result |
+| --- | --- |
+| `pnpm check` (typecheck, lint, build, 11 schema exports, full unit suite) | pass — 467 files, 5,863 tests, 2 pre-existing skips |
+| New/changed unit suites: `account-csp.test.ts` (policy, nonce, frames, scope, proxy matcher), `sign-in.test.tsx` (every availability combination), `turnkey-server.test.ts` (900 s session) | pass |
+| PostgreSQL 16 loopback: accounts, all `packages/cloud-runtime/test`, platform, admin rollout, preview migration, schema compatibility | 194 pass, 3 skipped; 1 **pre-existing** failure: `forward-compatibility.pg.test.ts` encodes PostgreSQL 18 catalog behaviour (CI runs 18.6); it fails the same way on `main` here |
+| Browser `playwright.auth-wallets.config.ts` with the account CSP active | 8/8 pass; new assertions: per-request nonce, an injected inline handler blocked (`script-src-attr`), `frame-src` = the provider frame origins, the managed-wallet signing notices (and none on an external wallet) |
+| CI profile `default-product` run locally (`guarded-release-browser.mjs profile default-product`, pinned Anvil 1.8.3 verified by its bootstrap; the pre-installed headless shell 1243, **not** hash-verified here) | 112 pass, including `brand-ux-001` at all seven widths and `credentials`, `beta-ui`, `ux-ui-002-landing`, `build-entry`; **9 fail identically on untouched `origin/main` in this container** (7 screenshot baselines in `visual-shell`/`base-observation`/`mock-artifact-chain`/`swap-authoring`, 2 `build009` region lookups). All 9 passed in CircleCI on `a5fa5c8`: local environment, not this change |
+| `governance_lite.py`, `test_governance_lite.py` (19), `test_ci_*.py` (108), `agent_guard.py check` (163 modules) | pass |
+| Dependency gate with the `minimatch` change (§15.2) | `pnpm audit --audit-level low`: no known vulnerabilities; `--verify-dependencies`: exactly 2 violations, both *Minimum release age failed*; frozen install: `ERR_PNPM_MINIMUM_RELEASE_AGE_VIOLATION` (same two entries) |
+| Live Google, Apple, Turnkey | **not run** — no credentials; `docs.turnkey.com` and `appleid.apple.com` are outside this session's network |
+
+### 15.7 Merge and release blockers
+
+1. **CI green on the final commit**: `certification-checks` passes only after 2026-11-04T20:01Z (release age) or an owner-approved
+   waiver; its later steps (typecheck, lint, unit, PostgreSQL, fork) have not yet run in CircleCI. Browser jobs must pass in full.
+2. **Managed-wallet signing adapter** (owner requirement 6): managed wallets cannot sign FloFi workflows. A reviewed adapter must keep
+   Review → Strategy Manifest → explicit confirmation, with a Turnkey policy that limits the browser session to signing what was reviewed.
+   Until then managed wallets are disclosed as unable to sign; onboarding is **not** production-ready for that capability.
+3. **Email sign-up**: migrate to the encrypted OTP flow (§15.4); needs the owner's dependency/licence decision on `@turnkey/crypto`.
+4. **Export under XSS**: give `/app` a strict nonce `script-src` (product-wide browser certification), or move the provider session key,
+   create/import/export to a dedicated wallet origin; consider a Turnkey policy that requires FloFi's co-approval for export activities.
+5. **Live provider verification** on a non-production deployment with a dedicated database and a Turnkey **test** organization:
+   Google, Apple, email, Web3 Wallet; create/import/export EVM and Solana with disposable identities; session expiry; the parent key
+   cannot sign or export (§11.6).
+6. **Migration release order**: Release A (certificate only) on every version-17 database consumer before #143 reaches any branch that
+   deploys production; then the Railway API (migration), workers, Vercel last
+   ([`RELEASE-AUTH-WALLETS-0018.md`](../deploy/RELEASE-AUTH-WALLETS-0018.md)).
+7. **Privacy policy** text for email addresses, OIDC subjects, wallet addresses and Turnkey as processor (owner/legal).
+
+**Assessment: NO-GO** for merge and release until 1–7 are closed. Nothing in this build was merged, deployed, configured in
+production, or executed with real funds or real identities.

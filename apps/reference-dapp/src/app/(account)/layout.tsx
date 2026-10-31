@@ -4,7 +4,7 @@
  * workspace: no workflow, wallet-execution or Copilot state is mounted here.
  */
 import type { ReactNode } from 'react';
-import { cookies } from 'next/headers';
+import { cookies, headers } from 'next/headers';
 import { connection } from 'next/server';
 import { LocaleProvider } from '../../i18n/locale';
 import { LANGUAGE_COOKIE, parseLanguage } from '../../i18n/language';
@@ -14,8 +14,10 @@ import '../globals.css';
 export default async function AccountLayout({ children }: { children: ReactNode }) {
   await connection();
   const jar = await cookies();
+  // The proxy's per-request nonce (src/accounts/account-csp.ts): the only inline script these pages run besides Next.js's own.
+  const nonce = (await headers()).get('x-nonce') ?? undefined;
   return <LocaleProvider initialLanguage={parseLanguage(jar.get(LANGUAGE_COOKIE)?.value) ?? 'EN'}>
-    <script dangerouslySetInnerHTML={{ __html: THEME_BOOTSTRAP }}/>
+    <script nonce={nonce} dangerouslySetInnerHTML={{ __html: THEME_BOOTSTRAP }}/>
     {children}
   </LocaleProvider>;
 }

@@ -60,6 +60,21 @@ test('the landing opens sign-in with exactly Apple, Google, Email and Web3 Walle
   const headers = (await page.request.get('/login')).headers();
   expect(headers['x-frame-options']).toBe('DENY');
   expect(headers['content-security-policy']).toContain("frame-ancestors 'none'");
+  // A per-request nonce policy: only Next.js's own scripts and what they load run; an injected inline handler does not.
+  const policy = headers['content-security-policy']!, nonce = /'nonce-([^']+)'/.exec(policy)?.[1];
+  expect(policy).toMatch(/script-src 'self' 'nonce-[A-Za-z0-9+/]{22}==' 'strict-dynamic'/);
+  expect(policy).toContain("connect-src 'self'");
+  expect(/'nonce-([^']+)'/.exec((await page.request.get('/login')).headers()['content-security-policy']!)?.[1]).not.toBe(nonce);
+  const violations = await page.evaluate(() => new Promise<{ ran: boolean; blocked: string[] }>(resolve => {
+    const blocked: string[] = [];
+    document.addEventListener('securitypolicyviolation', event => blocked.push(event.effectiveDirective));
+    const holder = document.createElement('div');
+    holder.innerHTML = '<img alt="" src="data:," onerror="window.__flofiInjected = true">';
+    document.body.append(holder);
+    setTimeout(() => { holder.remove(); resolve({ ran: (window as unknown as { __flofiInjected?: boolean }).__flofiInjected === true, blocked }); }, 500);
+  }));
+  expect(violations.ran).toBe(false);
+  expect(violations.blocked).toContain('script-src-attr');
   const methods = page.getByRole('group', { name: 'Sign-in methods' }).getByRole('button');
   expect(await methods.allInnerTexts()).toEqual(['Apple', 'Google', 'Email', 'Web3 Wallet']);
   await expect(page.getByText(/Telegram|Passkey|TON/)).toHaveCount(0);
@@ -109,6 +124,11 @@ test('first Google sign-in: verified server session, wallet introduction, create
 
   await page.getByRole('link', { name: 'Add wallets' }).click();
   await expect(page).toHaveURL('/onboarding/wallets');
+  // Onboarding runs under the same policy, framing only the configured provider iframe origins.
+  expect((await page.request.get('/onboarding/wallets')).headers()['content-security-policy'])
+    .toMatch(/script-src 'self' 'nonce-[^']+' 'strict-dynamic'.*frame-src http:\/\/127\.0\.0\.1:\d+ http:\/\/127\.0\.0\.1:\d+;/);
+  // Managed wallets cannot sign FloFi workflows in this release, and the page says so before anything is created.
+  await expect(page.getByRole('note').filter({ hasText: 'FloFi can’t sign workflows with these wallets yet' })).toBeVisible();
   const save = page.getByRole('button', { name: 'Save wallets' });
   await expect(save).toBeDisabled();
   await page.getByRole('button', { name: 'Create EVM wallet' }).click();
@@ -142,6 +162,8 @@ test('first Google sign-in: verified server session, wallet introduction, create
   await expect(mine.locator('[data-origin="generated"]')).toHaveCount(2);
   await expect(mine.locator('[data-origin="imported"]')).toHaveCount(1);
   await expect(mine.getByText('FloFi wallet · Ethereum · Generated')).toBeVisible();
+  await expect(mine.locator('[data-managed-signing="unavailable"]')).toHaveCount(3);
+  await expect(mine.locator('[data-origin="generated"]').first()).toContainText('Can’t sign FloFi workflows yet.');
   await page.reload();
   await expect(page.getByRole('region', { name: 'My wallets' }).locator('.workspace-wallet-card')).toHaveCount(3);
   await shot(page, '05-credentials-my-wallets');
@@ -254,6 +276,8 @@ test('Web3 Wallet sign-in proves ownership with a signature, skips onboarding an
   await expect(card).toHaveCount(1);
   await expect(card.locator('code')).toHaveAttribute('title', wallet.address.toLowerCase());
   await expect(card.getByRole('button', { name: /^Export / })).toHaveCount(0);
+  // The person's own wallet signs FloFi workflows as before: no managed-wallet signing notice on it.
+  await expect(card.locator('[data-managed-signing]')).toHaveCount(0);
   await expect(page.getByText('Creating or importing wallets needs')).toHaveCount(0);
 });
 

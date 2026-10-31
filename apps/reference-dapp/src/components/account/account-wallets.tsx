@@ -118,6 +118,7 @@ function AccountWalletCard({ wallet, active, state, signIn, onChanged, onStatus 
       <div><h3>{wallet.label}</h3><p>{wallet.providerName} · {ECOSYSTEM_LABEL[wallet.ecosystem]} · {t(ORIGIN_LABEL[wallet.origin])}</p></div>
       <span className={`workspace-wallet-status${active ? ' workspace-wallet-status-active' : ''}`}>{state_}</span>
     </div>
+    {managed && <p className="workspace-wallet-signing" data-managed-signing="unavailable">{t('Can’t sign FloFi workflows yet. Connect MetaMask, Phantom or Solflare to sign.')}</p>}
     <div className="workspace-wallet-address"><code title={wallet.address}>{shortAddress(wallet.address)}</code>
       <button type="button" className="workspace-copy" aria-label={t('Copy {0} address', wallet.label)} title={t('Copy address')}
         onClick={() => void navigator.clipboard.writeText(wallet.address).then(() => onStatus(t('Address copied.')), () => onStatus(t('Address could not be copied.')))}>

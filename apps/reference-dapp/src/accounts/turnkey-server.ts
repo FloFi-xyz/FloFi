@@ -29,6 +29,11 @@ export type ManagedWallet = { readonly walletId: string; readonly imported: bool
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i, RESOURCE = /^[A-Za-z0-9-]{8,64}$/;
 const COMPRESSED = /^0[23][0-9a-f]{64}$/, SCALAR = /^[0-9a-f]{64}$/;
 const fail = (code: string): never => { throw new Error(code); };
+/**
+ * Lifetime of the browser's provider session key. It can stamp create, import and export requests for the person's sub-organization
+ * (behind the relay's allowlist and a recent FloFi sign-in for export), so it is kept short; an expired one asks for a new sign-in.
+ */
+export const MANAGED_SESSION_SECONDS = 900;
 
 function providerUrl(raw: string | undefined, fallback: string, e2e: boolean): string {
   const value = raw || fallback;
@@ -140,12 +145,12 @@ export function createTurnkeyServer(config: TurnkeyServerConfig, transport: type
     },
     /** Opens a provider session for the browser's own public key (email). Returns the provider's session JWT (not a signing key). */
     async emailLogin(organization: string, verificationToken: string, sessionKey: string): Promise<string> {
-      const done = await activity('otp_login', 'ACTIVITY_TYPE_OTP_LOGIN', organization, { verificationToken, publicKey: sessionKey, expirationSeconds: '3600' });
+      const done = await activity('otp_login', 'ACTIVITY_TYPE_OTP_LOGIN', organization, { verificationToken, publicKey: sessionKey, expirationSeconds: String(MANAGED_SESSION_SECONDS) });
       return text(resultOf(done, 'otpLoginResult').session, /^[A-Za-z0-9._-]{16,8192}$/);
     },
     /** Opens a provider session for the browser's own public key (Google/Apple). The token's nonce already commits to that key. */
     async oidcLogin(organization: string, oidcToken: string, sessionKey: string): Promise<string> {
-      const done = await activity('oauth_login', 'ACTIVITY_TYPE_OAUTH_LOGIN', organization, { oidcToken, publicKey: sessionKey, expirationSeconds: '3600' });
+      const done = await activity('oauth_login', 'ACTIVITY_TYPE_OAUTH_LOGIN', organization, { oidcToken, publicKey: sessionKey, expirationSeconds: String(MANAGED_SESSION_SECONDS) });
       return text(resultOf(done, 'oauthLoginResult').session, /^[A-Za-z0-9._-]{16,8192}$/);
     },
     /** Public HD-wallet accounts of the person's organization (addresses only). */

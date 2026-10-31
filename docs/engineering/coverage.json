@@ -14,6 +14,10 @@
       "path": "packages/action-registry/test/execution-capabilities.test.ts",
       "stage": "unit"
     },
+    "app.accounts.account-csp": {
+      "path": "apps/reference-dapp/src/accounts/account-csp.test.ts",
+      "stage": "unit"
+    },
     "app.accounts.account-model": {
       "path": "apps/reference-dapp/src/accounts/account-model.test.ts",
       "stage": "unit"
@@ -121,6 +125,10 @@
     "app.channels.whatsapp.learning.pg": {
       "path": "apps/reference-dapp/src/channels/whatsapp/learning.pg.test.ts",
       "stage": "postgres"
+    },
+    "app.components.account.sign-in": {
+      "path": "apps/reference-dapp/src/components/account/sign-in.test.tsx",
+      "stage": "unit"
     },
     "app.config.product": {
       "path": "apps/reference-dapp/src/config/product.test.ts",
@@ -6005,6 +6013,7 @@
       "sharedFinancialCore": false,
       "sources": [
         "apps/reference-dapp/playwright.auth-wallets.config.ts",
+        "apps/reference-dapp/src/accounts/account-csp.ts",
         "apps/reference-dapp/src/accounts/account-host.ts",
         "apps/reference-dapp/src/accounts/account-model.ts",
         "apps/reference-dapp/src/accounts/account-service.ts",
@@ -6036,6 +6045,7 @@
         "packages/cloud-runtime/migrations/0018_flofi_accounts.sql"
       ],
       "suites": [
+        "app.accounts.account-csp",
         "app.accounts.account-model",
         "app.accounts.account-service.pg",
         "app.accounts.account-session",
@@ -6043,13 +6053,15 @@
         "app.accounts.oidc",
         "app.accounts.provider-relay",
         "app.accounts.turnkey-server",
+        "app.components.account.sign-in",
         "app.e2e.auth-wallets",
         "cloud-runtime.flofi-accounts-migration.pg"
       ],
       "gaps": [
         "Live Google, Apple and Turnkey integrations are unverified: suites use test RSA keys, an in-process provider stand-in and the MOCKED loopback harness (e2e/account-harness.ts). They certify FloFi's verification, isolation and authorization rules, not the providers.",
         "Turnkey activity versions and result shapes come from @turnkey/http 6.7.0 declarations; confirm on a Turnkey test organization before enabling production.",
-        "Managed wallets cannot sign FloFi transactions in this build (no signing adapter); Build/Simulate/Execute regressions are covered by the existing suites, not by this module."
+        "Managed wallets cannot sign FloFi transactions in this build (no signing adapter; disclosed in the product and a release blocker); Build/Simulate/Execute regressions are covered by the existing suites, not by this module.",
+        "Email sign-up uses Turnkey's legacy OTP activities, which CREATE_SUB_ORGANIZATION_V8 does not accept per Turnkey's migration guide; the encrypted OTP flow (@turnkey/crypto) is a release blocker pending an owner dependency decision."
       ]
     }
   ],

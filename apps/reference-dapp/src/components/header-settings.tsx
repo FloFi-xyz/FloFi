@@ -107,9 +107,9 @@ export function HeaderSettings({ onDisconnect, disconnectDisabled, onSupport }: 
         </Link>
         <button type="button" className="header-settings-action" onClick={() => void signOut()}>
           <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M14 4h5a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-5M10 12H3m4-4-4 4 4 4"/></svg><span>{tr("Sign out")}</span>
-        </button></> : <Link href="/login" className="header-settings-action" onClick={() => setOpen(false)}>
+        </button></> : /* A full page load: sign-in runs under its own nonce policy (src/accounts/account-csp.ts), never this page's. */ <a href="/login" className="header-settings-action" onClick={() => setOpen(false)}>
           <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></svg><span>{tr("Sign in")}</span>
-        </Link>)}
+        </a>)}
       {privacy && <Link href="/app/privacy" className="header-settings-action" onClick={() => setOpen(false)}>
         <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M12 3 5 6v5c0 4.5 3 8.3 7 10 4-1.7 7-5.5 7-10V6Z"/><path d="m9 12 2 2 4-4"/></svg><span>{tr("Privacy & memory")}</span>
       </Link>}

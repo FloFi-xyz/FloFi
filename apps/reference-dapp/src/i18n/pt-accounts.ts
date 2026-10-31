@@ -171,4 +171,9 @@ export const portugueseAccounts: Readonly<Record<string, string>> = {
   'That sign-in was already used. Start again.': 'Esse login já foi usado. Comece de novo.',
   'This FloFi account no longer exists.': 'Esta conta FloFi não existe mais.',
   'Link a wallet from Credentials → My wallets': 'Vincule uma carteira em Credenciais → Minhas carteiras',
+  'FloFi can’t sign workflows with these wallets yet': 'O FloFi ainda não assina fluxos com estas carteiras',
+  'Wallets you create or import here are held by Turnkey and kept with your account, and you can export them. To review and sign transactions in FloFi today, connect MetaMask, Phantom or Solflare in Credentials.':
+    'As carteiras criadas ou importadas aqui ficam com a Turnkey e na sua conta, e você pode exportá-las. Para revisar e assinar transações no FloFi hoje, conecte MetaMask, Phantom ou Solflare em Credenciais.',
+  'Signing FloFi workflows with it isn’t available yet.': 'Assinar fluxos do FloFi com ela ainda não está disponível.',
+  'Can’t sign FloFi workflows yet. Connect MetaMask, Phantom or Solflare to sign.': 'Ainda não assina fluxos do FloFi. Conecte MetaMask, Phantom ou Solflare para assinar.',
 };

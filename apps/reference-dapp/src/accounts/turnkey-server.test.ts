@@ -65,6 +65,8 @@ describe('Turnkey activities', () => {
     const transport = provider(call => call.path.endsWith('get_activity') ? (++polls < 2 ? { activity: { id: 'activity-0001', status: 'ACTIVITY_STATUS_PENDING' } }
       : completed({ oauthLoginResult: { session: 'session.jwt.value' } })) : { activity: { id: 'activity-0001', status: 'ACTIVITY_STATUS_CREATED' } });
     expect(await createTurnkeyServer(config, transport, async () => undefined).oidcLogin('org-0000-0001', 'h.p.s', '02' + 'a'.repeat(64))).toBe('session.jwt.value');
+    // The browser's provider session key lives 15 minutes, for the browser's own key only.
+    expect(transport.calls[0]!.body.parameters).toEqual({ oidcToken: 'h.p.s', publicKey: '02' + 'a'.repeat(64), expirationSeconds: '900' });
     for (const status of ['ACTIVITY_STATUS_CONSENSUS_NEEDED', 'ACTIVITY_STATUS_REJECTED', 'ACTIVITY_STATUS_FAILED']) {
       const stuck = provider(() => ({ activity: { id: 'activity-0001', status, result: { oauthLoginResult: { session: 'session.jwt.value' } } } }));
       await expect(createTurnkeyServer(config, stuck, async () => undefined).oidcLogin('org-0000-0001', 'h.p.s', '02' + 'a'.repeat(64))).rejects.toThrow('TURNKEY_ACTIVITY_NOT_COMPLETED');
