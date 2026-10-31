@@ -68,11 +68,12 @@ export function SignInScreen({ state, initialError, returnTo }: { state: Account
   async function sendCode(event?: { preventDefault(): void }) {
     event?.preventDefault();
     if (!privy) return;
-    setError(null); setNotice(''); setBusy('email');
+    // The old code is cleared when the new one is requested, never after: a code typed while the request runs is kept.
+    setError(null); setNotice(''); setCode(''); setBusy('email');
     try {
       await privy.sendEmailCode(email.trim());
       if (sent) setNotice(t('A new code was sent to {0}.', email.trim()));
-      setSent(email.trim()); setCode('');
+      setSent(email.trim());
     } catch (cause) { setError(cause instanceof Error ? cause.message : 'PRIVY_EMAIL_CODE_FAILED'); }
     setBusy(null);
   }

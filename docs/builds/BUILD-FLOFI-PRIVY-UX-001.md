@@ -143,9 +143,9 @@ SCHEMA-COMPATIBILITY.md §13, `privy-accounts-migration.pg.test.ts` (3). Release
 | Gate | Result |
 | --- | --- |
 | `pnpm typecheck`, `pnpm lint`, `pnpm schemas:check` | pass |
-| `pnpm test` (unit) | 497 files, 6075 tests pass (2 files skipped by their own environment conditions, unchanged by this build) |
-| Accounts + migrations on PostgreSQL 16 (`src/accounts`, 0018/0019 migration tests) | 15 files, 114 tests pass |
-| Browser `auth-wallets` (guarded runner, loopback Privy stand-in) | 13 / 13 |
+| `pnpm test` (unit) | 498 files, 6079 tests pass (2 files skipped by their own environment conditions, unchanged by this build) |
+| Accounts + migrations on PostgreSQL 16 (`src/accounts`, 0018/0019 migration tests) | 16 files, 119 tests pass |
+| Browser `auth-wallets` (guarded runner, loopback Privy stand-in) | 13 / 13, twice in a row after the review fixes |
 | Critical browser tier (guarded runner, 6 profiles incl. review-execute-recovery-components 39 tests) | pass |
 | Dependency verification, audit, SBOM, governance-lite, CI unit tests | pass |
 
@@ -198,6 +198,11 @@ after this session started). Findings and disposition:
 | Preview origins on the production Privy app (doc) | ENVIRONMENT.md: production app allows `https://flofi.xyz` only |
 | Password managers may offer to save the key (unverified) | Live runbook step 5 records it per browser |
 | "Sign in again" loop (pre-existing on main) | §11.10 |
+| Browser run: a new email code typed while the request ran was erased (found by `auth-wallets`, intermittent) | Fixed: the old code is cleared when the new one is requested |
+
+`agent_guard.py review --base origin/main` reports all 19 domains as selected (the dependency, lockfile and CI changes select every
+domain) and every `flofi-*` specialist as not invoked: the hook ledger saw the three reviews above as `general-purpose` agents. The other 16
+domains had no specialist review in this session; their regression suites ran in the unit, critical browser and CircleCI gates.
 
 ## 12. GO / NO-GO
 
