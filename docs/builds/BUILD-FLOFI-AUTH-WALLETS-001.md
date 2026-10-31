@@ -673,8 +673,8 @@ The 12 `auth-wallets` journeys cover:
   - The browser journey therefore accepts the Review through FloFi's own service. It then exercises FloFi Wallet, its server binding, the
     relay, the provider signature, submission and reconciliation.
   - The product side is covered by unit tests: the providers, the channel, the stores' binding and the error classes.
-- **EVM signing.** FloFi Wallet signs EVM only on the four catalog mainnets. A live EVM check would move real funds, so it needs the owner's
-  explicit decision.
+- **Live signing (EVM and Solana).** FloFi Wallet signs on mainnet only (§16.11). A live check in either ecosystem would move real funds,
+  so it needs the owner's explicit decision.
 - **Owner provisioning.** None of the following is done by this PR:
   - Production: `wallet.flofi.xyz` added to the same Vercel project (DNS and domain), and FloFi Wallet's own Google client and Apple
     Services ID.
@@ -686,17 +686,53 @@ The 12 `auth-wallets` journeys cover:
 - **Code: ready for owner review.** It implements the requested scope:
   - encrypted email OTP compatible with `CREATE_SUB_ORGANIZATION_V8`;
   - FloFi Wallet on its own origin, with create, import and export;
-  - EVM and Solana signing bound to reviewed FloFi attempts, with the person's confirmation in FloFi Wallet;
+  - EVM and Solana signing on mainnet only, bound to reviewed FloFi attempts, with the person's confirmation in FloFi Wallet;
   - accurate account UI, a fixed CI root cause, and the dependency policy.
 - **Merge or production: NO-GO** until all of the following hold:
   1. Release A is deployed and verified, then 0018 is applied in order.
   2. The live verification runbook passes on an isolated Preview with disposable identities. At minimum:
      - Google, Apple and email sign-in;
-     - FloFi Wallet unlock, create, import and export;
-     - one Solana Devnet signature.
+     - FloFi Wallet unlock, create, import and export.
 
-     Its unverified Turnkey facts must be recorded.
+     Its unverified Turnkey facts must be recorded. FloFi Wallet signs on mainnet only (§16.11), so any live signature moves real
+     funds. It is a trivial-amount check per ecosystem, run only on the owner's explicit decision. Until then, it is recorded as
+     **not verified live**.
   3. The owner provisions the wallet domain and FloFi Wallet's OIDC clients.
   4. CI is green on the final head.
 
   Until then, managed wallets stay off wherever `FLOFI_WALLET_ORIGIN` or the Turnkey settings are absent, and the product says so.
+
+### 16.11 Final owner requirement: FloFi Wallet is mainnet only (EVM and Solana)
+FloFi is a mainnet product. FloFi Wallet now signs only on **Ethereum (1), Base (8453), Arbitrum One (42161) and Robinhood Chain
+mainnet (4663)**, and on **Solana mainnet**. `FLOFI_WALLET_EVM_CHAIN_IDS` and `FLOFI_WALLET_SOLANA_CHAIN` (`wallet/flofi-signing.ts`) are
+the single source of truth. Every other wallet (MetaMask, Phantom, Solflare) and every mainnet workflow, token, bridge and swap is
+unchanged.
+- **Removed from FloFi Wallet.**
+  - The `solana-devnet-swap` and `solana-devnet-transfer` signing flows. They are now refused by name (`FLOFI_WALLET_FLOW_NOT_SUPPORTED`).
+  - Their run loaders on the sign-context server.
+  - `solana:devnet` from the chains the product's FloFi Wallet entry advertises.
+  - Devnet wording in FloFi Wallet's window.
+- **Refused at every signing boundary** with `FLOFI_WALLET_NETWORK_UNSUPPORTED`, before anything reaches the provider:
+  - **Product page, Solana.** The FloFi Wallet entry refuses `solana:devnet` and `solana:testnet` before it asks FloFi Wallet anything.
+  - **Product page, EVM.** The provider exposes only the four mainnets. Switching to any other chain returns `4902`, and
+    `wallet_addEthereumChain` is refused.
+  - **FloFi Wallet's window.** Its protocol parses Solana requests for `solana:mainnet` only. An EVM sign-in message must name one of the
+    four mainnet chain ids.
+  - **Sign-context server.**
+    - Jupiter swaps: the resolver binds only the mainnet review format (`gryloo.jupiter-review.v1`, cluster `mainnet-beta`).
+    - Solana transfers: it binds only mainnet transfers.
+    - A Devnet record never matches, even behind a mainnet flow name.
+    - The request parser accepts `solana:mainnet` only.
+  - **Relay.**
+    - An EVM transaction on any other chain id gets `403`. That happens before the reviewed attempt is looked up, so no signature claim is
+      consumed.
+    - An EVM sign-in message on a testnet chain is refused.
+  - **EVM reads and broadcast** (`managed-wallet-evm`): these resolve only the four catalog mainnets.
+- **Tests stay offline and deterministic.**
+  - The unit tests use mainnet-shaped transactions with mocked providers. They assert the refusals at every layer above: resolver, relay,
+    product wallet, protocol, catalogue and run loader.
+  - The browser signing journeys run against MOCKED loopback mainnet harnesses (§16.8).
+  - None of this is reachable by an end user: the harnesses and the emulator exist only under the `*_E2E=MOCKED_LOOPBACK_ONLY` gates,
+    which hosted deployments refuse.
+- **Consequence for live verification.** Any live FloFi Wallet signature now moves real funds. The runbook keeps live signing as a
+  trivial-amount check that runs only on the owner's explicit decision. It is never autonomous.
