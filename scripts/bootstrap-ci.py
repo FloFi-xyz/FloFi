@@ -20,7 +20,8 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
-from governance_lite import AGE_WAIVER, dependency_age_waivers, dependency_release_age_allowed
+from governance_lite import (AGE_WAIVER, APPROVED_AGE_WAIVERS, LEGACY_AGE_WAIVERS,
+                             dependency_age_waivers, dependency_release_age_allowed)
 from ci_archive_cache import verified_archive
 
 NODE_VERSION = "24.21.0"
@@ -391,7 +392,7 @@ BUILDMCP001_DIRECT_VERSIONS = {
 # GHSA-mrhx-c7xc-m3w5: the MCP SDK's zod moves 4.6.5 → 4.6.6 by exact override (MIT, no dependencies); the count is unchanged.
 # GHSA-w74x-v6f9-j3xg, GHSA-wjr9-j795-jxcr, GHSA-xhq7-xmqj-769h, GHSA-333x-w4r6-6crp: ajv's fast-uri moves 3.1.8 → 3.1.9 by exact
 # override (BSD-3-Clause, no dependencies); the count is unchanged.
-REGISTRY_PACKAGE_COUNT = 263
+REGISTRY_PACKAGE_COUNT = 264
 
 # The pre-existing BUILD-001 MPL tooling exception is exact-name scoped too.
 BUILD001_LIGHTNINGCSS_NAMES = {
@@ -425,6 +426,10 @@ def verify_dependencies():
     waiver_files = {"pnpm-workspace.yaml": Path("pnpm-workspace.yaml").read_text()}
     if Path(AGE_WAIVER).is_file():
         waiver_files[AGE_WAIVER] = Path(AGE_WAIVER).read_text()
+    for entry in APPROVED_AGE_WAIVERS:
+        review = str(entry.get("review", "")).split("#", 1)[0]
+        if review and Path(review).is_file():
+            waiver_files[review] = Path(review).read_text()
     age_waivers, waiver_errors = dependency_age_waivers(waiver_files)
     errors.extend(waiver_errors)
     plan = Path("docs/builds/BUILD-001-PLAN.md").read_text()
@@ -439,7 +444,7 @@ def verify_dependencies():
     if lock.count("\npackages:\n") != 1 or lock.count("\nsnapshots:\n") != 1:
         raise RuntimeError("Unrecognized lockfile sections")
     resolved_sections = "packages:\n" + lock.split("\npackages:\n", 1)[1]
-    if hashlib.sha256(resolved_sections.encode()).hexdigest() != "829b227b583d1010a75aeb0b969609807ad1b4e03aaa4816183b95681e911d8a":
+    if hashlib.sha256(resolved_sections.encode()).hexdigest() != "da68e8dfb28b5b3cd95bbe638af3b81083bd8a56d3df02b51a3711e78d8fd261":
         errors.append("Baseline registry packages/snapshots or peer resolutions changed")
     packages_text = lock.split("\npackages:\n", 1)[1].split("\nsnapshots:\n", 1)[0]
     snapshots_text = lock.split("\nsnapshots:\n", 1)[1]
@@ -707,7 +712,7 @@ def verify_dependencies():
         legacy_mpl = (license_id == "MPL-2.0" and version == "1.33.0" and
                       name in BUILD001_LIGHTNINGCSS_NAMES)
         legacy_blueoak = (license_id == "BlueOak-1.0.0" and
-                          identity == "minimatch@10.2.6")
+                          identity in {"minimatch@11.0.3", "@isaacs/nonrecursive-glob-match@1.0.3"})
         rejected = license_id not in allowed_licenses and not legacy_mpl and not legacy_blueoak
         approved = BUILD002_REVIEWED_LICENSE_EXCEPTIONS.get(identity)
         if approved:
@@ -728,6 +733,33 @@ def verify_dependencies():
                   "optional": bool(re.search(r"(?m)^    optional: true$",
                                               snapshot_blocks.get(identity, "")))}
         return record, issues, rejected
+
+    # Each waiver is bound to the exact reviewed tarball and publication: the identity must be locked with the recorded integrity,
+    # and the registry must report the recorded publication time. Waivers past normal eligibility are reported for removal.
+    removable_waivers = []
+    for entry in APPROVED_AGE_WAIVERS:
+        identity = f"{entry['package']}@{entry['version']}"
+        if identity not in locked:
+            errors.append(f"Release-age waiver for an unlocked identity: {identity}")
+            continue
+        if "integrity" in entry and locked[identity] != entry["integrity"]:
+            errors.append(f"Release-age waiver integrity differs from the lockfile: {identity}")
+        published = metadata_records[identity][1]
+        if "published_at" in entry and isinstance(published, str):
+            try:
+                registry_time = datetime.datetime.fromisoformat(published.replace("Z", "+00:00"))
+                if identity in LEGACY_AGE_WAIVERS:  # recorded to the second before this binding existed
+                    registry_time = registry_time.replace(microsecond=0)
+                same = registry_time == datetime.datetime.fromisoformat(entry["published_at"].replace("Z", "+00:00"))
+            except ValueError:
+                same = False
+            if not same:
+                errors.append(f"Release-age waiver publication time differs from the registry: {identity}")
+        try:
+            if datetime.datetime.fromisoformat(str(published).replace("Z", "+00:00")) <= cutoff:
+                removable_waivers.append(identity)
+        except ValueError:
+            pass
 
     records = []
     rejected_identities = set()
@@ -753,6 +785,7 @@ def verify_dependencies():
     destination.write_text(json.dumps(records, indent=2, sort_keys=True) + "\n")
     print("Registry entries/integrities/release ages verified:", len(records), flush=True)
     print("Exact temporary owner-approved release-age waivers:", sorted(age_waivers), flush=True)
+    print("Release-age waivers past normal eligibility (remove in a follow-up change):", sorted(removable_waivers), flush=True)
     print("Exact reviewed license exception set:", len(rejected_identities), flush=True)
     print("License inventory:",
           dict(sorted(collections.Counter(r["license"] for r in records).items())), flush=True)
