@@ -7,12 +7,11 @@
  * None of these actions signs, submits or authorizes a transaction.
  */
 import { cookies } from 'next/headers';
-import { accountAvailability, accountCookieOptions, accountHost, clearAccountCookie, currentAccountSession, flowCookieOptions, managedHint, nextPath, setAccountCookie,
+import { accountAvailability, accountCookieOptions, accountHost, clearAccountCookie, currentAccountSession, flowCookieOptions, nextPath, setAccountCookie,
   supersede, type AccountAvailability, type AccountHost } from '../accounts/account-host';
 import { ACCOUNT_EMAIL_COOKIE, ACCOUNT_FLOW_TTL_SECONDS, ACCOUNT_OIDC_COOKIE, newOidcFlow, readEmailFlow, safeReturnPath, sealEmailFlow, sealOidcFlow,
   type AccountIntent, type AccountSessionToken } from '../accounts/account-session';
 import { parseAccountWalletId, type AccountView, type AccountWallet } from '../accounts/account-model';
-import type { ExportGrant, ManagedSession } from '../accounts/account-service';
 import { authorizationUrl, oidcConfig } from '../accounts/oidc';
 import type { TurnkeyBrowserConfig } from '../accounts/turnkey-server';
 import { currentSolanaSession, currentWalletSession, requestOrigin } from '../server/session-principal';
@@ -38,18 +37,17 @@ async function signedIn(): Promise<{ host: AccountHost; session: AccountSessionT
   const h = await host(), session = await currentAccountSession(h);
   return session ? { host: h, session } : fail('ACCOUNT_SESSION_REQUIRED');
 }
-export type AccountState = { readonly availability: AccountAvailability; readonly account: AccountView | null;
-  /** The provider session this browser's key received at sign-in, while it lasts (hint for the browser; the provider enforces it). */
-  readonly managed: ManagedSession | null; readonly provider: TurnkeyBrowserConfig | null };
+/**
+ * What the product pages may know: availability, the signed-in account (public data), and the provider's non-secret settings the sign-in
+ * page needs to encrypt an email code. No provider session ever exists for this origin; managed wallets live in FloFi Wallet.
+ */
+export type AccountState = { readonly availability: AccountAvailability; readonly account: AccountView | null; readonly provider: TurnkeyBrowserConfig | null };
 export async function accountState(): Promise<AccountState> {
   let h: AccountHost | null;
   try { h = await accountHost(); } catch { h = null; }
   const availability = accountAvailability(process.env, h), session = await currentAccountSession(h);
-  if (!h || !session) return { availability, account: null, managed: null, provider: h?.turnkey ?? null };
-  const [account, context] = await Promise.all([h.service.view(session).catch(() => null), h.service.managedContext(session).catch(() => null)]);
-  const managed = context && session.managedKey && session.managedUntil
-    ? { organizationId: context.organizationId, userId: context.userId, sessionKey: session.managedKey, expiresAt: new Date(session.managedUntil * 1000).toISOString() } : null;
-  return { availability, account, managed, provider: h.turnkey };
+  if (!h || !session) return { availability, account: null, provider: h?.turnkey ?? null };
+  return { availability, account: await h.service.view(session).catch(() => null), provider: h.turnkey };
 }
 
 /** Starts Google or Apple sign-in: returns the provider URL and seals state, nonce and PKCE verifier in an HttpOnly flow cookie. */
@@ -69,27 +67,31 @@ export async function startSocialSignIn(provider: 'google' | 'apple', sessionKey
   } catch (cause) { return failure(cause); }
 }
 
-/** Sends a one-time code (through the wallet provider) and seals the challenge for this browser's key. */
-export async function startEmailSignIn(email: string, sessionKey: string, intent: AccountIntent = 'sign-in', returnTo = '/app'): Promise<Result<{ email: string }>> {
+/**
+ * Sends a one-time code (the wallet provider delivers it) and seals the challenge for this attempt's browser key. Returns the
+ * provider's enclave-signed encryption target: the browser encrypts the code to it, so FloFi's server never receives the code.
+ */
+export async function startEmailSignIn(email: string, browserKey: string, intent: AccountIntent = 'sign-in', returnTo = '/app'): Promise<Result<{ email: string; targetBundle: string }>> {
   try {
     const h = await host();
-    if (!h.service.validSessionKey(sessionKey)) fail('ACCOUNT_SESSION_KEY_INVALID');
+    if (!h.service.validSessionKey(browserKey)) fail('ACCOUNT_SESSION_KEY_INVALID');
     if (intent !== 'sign-in' && intent !== 'link') fail('ACCOUNT_INTENT_INVALID');
     if (intent === 'link' && !await currentAccountSession(h)) fail('ACCOUNT_SESSION_REQUIRED');
-    const started = await h.service.startEmail(email, sessionKey), origin = await requestOrigin();
+    const started = await h.service.startEmail(email, browserKey), origin = await requestOrigin();
     // Same-site only (the code is typed on this page), so the challenge cookie stays Lax.
     (await cookies()).set(ACCOUNT_EMAIL_COOKIE, sealEmailFlow(process.env, { challengeId: started.challengeId, intent, returnTo: safeReturnPath(returnTo) },
       origin.domain, new Date()), accountCookieOptions(origin.secure, ACCOUNT_FLOW_TTL_SECONDS));
-    return { ok: true, value: { email: started.email } };
+    return { ok: true, value: { email: started.email, targetBundle: started.targetBundle } };
   } catch (cause) { return failure(cause, 'EMAIL_SIGN_IN_FAILED'); }
 }
-export async function completeEmailSignIn(code: string): Promise<Result<{ next: string; managed: ManagedSession | null; managedError: string | null }>> {
+/** Completes email sign-in with the code encrypted in the browser (`@turnkey/crypto` `encryptOtpCodeToBundle`). */
+export async function completeEmailSignIn(encryptedOtpBundle: string): Promise<Result<{ next: string }>> {
   try {
     const h = await host(), origin = await requestOrigin(), jar = await cookies();
     const flow = readEmailFlow(process.env, jar.get(ACCOUNT_EMAIL_COOKIE)?.value, new Date(), origin.domain) ?? fail('EMAIL_CHALLENGE_EXPIRED');
     const previous = await currentAccountSession(h);
     let outcome;
-    try { outcome = await h.service.completeEmail(flow, code, previous); }
+    try { outcome = await h.service.completeEmail(flow, encryptedOtpBundle, previous); }
     catch (error) {
       // An expired or exhausted challenge cannot be retried: the person requests a new code.
       if (error instanceof Error && error.message === 'EMAIL_CHALLENGE_EXPIRED') jar.set(ACCOUNT_EMAIL_COOKIE, '', accountCookieOptions(origin.secure, 0));
@@ -98,8 +100,8 @@ export async function completeEmailSignIn(code: string): Promise<Result<{ next: 
     // The challenge is single-use once the provider accepted the code.
     jar.set(ACCOUNT_EMAIL_COOKIE, '', accountCookieOptions(origin.secure, 0));
     await supersede(h, previous, outcome.session);
-    await setAccountCookie(managedHint(outcome));
-    return { ok: true, value: { next: nextPath(outcome, flow.intent, flow.returnTo), managed: outcome.managed, managedError: outcome.managedError } };
+    await setAccountCookie(outcome.session);
+    return { ok: true, value: { next: nextPath(outcome, flow.intent, flow.returnTo) } };
   } catch (cause) { return failure(cause, 'EMAIL_SIGN_IN_FAILED'); }
 }
 
@@ -132,10 +134,6 @@ export async function setAccountOnboarding(value: 'completed' | 'dismissed'): Pr
     await h.store.setOnboarding(session.accountId, value);
     return { ok: true, value: null };
   } catch (cause) { return failure(cause); }
-}
-export async function saveManagedWallets(ids: string[]): Promise<Result<AccountWallet[]>> {
-  try { const { host: h, session } = await signedIn(); return { ok: true, value: await h.service.saveManagedWallets(session, ids) }; }
-  catch (cause) { return failure(cause, 'ACCOUNT_WALLET_SAVE_FAILED'); }
 }
 /** Links the external wallet proven in this browser (fresh EIP-4361 / SIWS session) to the signed-in account. */
 export async function linkAccountWallet(namespace: 'eip155' | 'solana', providerKey: string, providerName: string): Promise<Result<AccountWallet>> {
@@ -170,9 +168,4 @@ export async function deleteFloFiAccount(): Promise<Result<null>> {
     await clearAccountCookie();
     return { ok: true, value: null };
   } catch (cause) { return failure(cause); }
-}
-/** Authorizes one export of a managed wallet; the browser then asks the provider to encrypt it to the export iframe's key. */
-export async function authorizeWalletExport(id: string, kind: 'private-key' | 'recovery-phrase'): Promise<Result<ExportGrant>> {
-  try { const { host: h, session } = await signedIn(); return { ok: true, value: await h.service.authorizeExport(session, id, kind) }; }
-  catch (cause) { return failure(cause, 'EXPORT_NOT_AUTHORIZED'); }
 }

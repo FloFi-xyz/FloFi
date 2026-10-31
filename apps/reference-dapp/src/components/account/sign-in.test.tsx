@@ -8,7 +8,7 @@ import { SignInScreen } from './sign-in';
 vi.mock('../../app/account-action', () => ({ completeEmailSignIn: vi.fn(), startEmailSignIn: vi.fn(), startSocialSignIn: vi.fn(), walletAccountSignIn: vi.fn() }));
 
 const none = { accounts: false, google: false, apple: false, email: false, wallet: false, managedWallets: false };
-const state = (availability: Partial<typeof none>): AccountState => ({ availability: { ...none, ...availability }, account: null, managed: null, provider: null }) as AccountState;
+const state = (availability: Partial<typeof none>): AccountState => ({ availability: { ...none, ...availability }, account: null, provider: null }) as AccountState;
 const render = (value: AccountState, intent: 'sign-in' | 'link' = 'sign-in') =>
   renderToStaticMarkup(<SignInScreen state={value} initialError={null} returnTo="/app" intent={intent} initialMethod={null}/>);
 /** Each method button's label and whether it is disabled, with its title. */

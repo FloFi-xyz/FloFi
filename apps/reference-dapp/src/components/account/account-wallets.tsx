@@ -6,58 +6,50 @@
  *
  * Each wallet shows its name, ecosystem, public address, provider and type (generated, imported or external) and, for external
  * wallets, whether it is connected in this browser. Removing a wallet removes FloFi's association only. Export is offered only for
- * FloFi-managed wallets whose provider supports it, after explicit confirmation and a recent sign-in; the secret is revealed only
- * inside the provider's own frame. MetaMask, Phantom and other external wallets never offer key export: FloFi never held their keys.
+ * FloFi-managed wallets whose provider supports it, and happens entirely in FloFi Wallet (its own origin): a fresh unlock there, an
+ * explicit confirmation there, and the secret shown only inside the provider's frame there. This page never holds a wallet key.
+ * MetaMask, Phantom and other external wallets never offer key export: FloFi never held their keys.
  */
 import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import { useLocale } from '../../i18n/locale';
-import { accountState, authorizeWalletExport, deleteFloFiAccount, linkAccountWallet, removeAccountWallet, renameAccountWallet, type AccountState } from '../../app/account-action';
+import { accountState, deleteFloFiAccount, linkAccountWallet, removeAccountWallet, renameAccountWallet, type AccountState } from '../../app/account-action';
+import { openFloFiWallet, requestFloFiWallet } from '../../wallet/flofi-wallet-channel';
 import { exportActions, shortAddress, WALLET_LABEL_MAX, type AccountWallet } from '../../accounts/account-model';
 import { ECOSYSTEM_LABEL } from '../../wallet/wallet-registry';
 import { useWalletProof, walletProofMessage, type Namespace } from '../wallet-proof';
 import { AccountIcon } from './account-icons';
 import { accountMessage } from './account-messages';
-import { unlockManagedWallets, useManagedReadiness } from './add-wallets';
+import { managedReadiness, useFloFiWalletReady } from './add-wallets';
 import styles from './account.module.css';
 
 export type ActiveWallet = { readonly ecosystem: 'evm' | 'solana'; readonly address: string };
 const ORIGIN_LABEL = { generated: 'Generated', imported: 'Imported', external: 'External' } as const;
 
-/** The protected export flow. Nothing secret is rendered by FloFi: the provider's frame decrypts and shows it to the owner. */
+/**
+ * The export entry point on the product page. It shows no secret and asks for no confirmation of its own: export happens in FloFi Wallet
+ * (another origin), which asks for a fresh unlock and the explicit confirmation, then shows the secret only inside Turnkey's frame.
+ */
 export function ExportWalletDialog({ wallet, state, onClose }: { wallet: AccountWallet; state: AccountState; onClose(): void }) {
   const { t } = useLocale();
-  const dialog = useRef<HTMLDialogElement>(null), container = useRef<HTMLDivElement>(null), frame = useRef<{ close(): void } | null>(null);
-  const confirmId = useId(), titleId = useId();
-  const readiness = useManagedReadiness(state);
-  const [confirmed, setConfirmed] = useState(false);
-  const [shown, setShown] = useState<'private-key' | 'recovery-phrase' | null>(null);
+  const dialog = useRef<HTMLDialogElement>(null), titleId = useId();
+  const readiness = managedReadiness(state), ready = useFloFiWalletReady(readiness);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [copied, setCopied] = useState(false);
+  const [done, setDone] = useState(false);
   const actions = exportActions(wallet);
   useEffect(() => {
     const element = dialog.current, previous = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     if (element && !element.open) element.showModal();
-    return () => { frame.current?.close(); frame.current = null; if (element?.open) element.close(); if (previous?.isConnected) previous.focus({ preventScroll: true }); };
+    return () => { if (element?.open) element.close(); if (previous?.isConnected) previous.focus({ preventScroll: true }); };
   }, []);
-  async function reveal(kind: 'private-key' | 'recovery-phrase') {
-    if (!confirmed || busy) return;
-    setBusy(true); setError(null);
-    frame.current?.close(); frame.current = null; setShown(null);
-    const grant = await authorizeWalletExport(wallet.id, kind).catch(() => ({ ok: false as const, code: 'EXPORT_NOT_AUTHORIZED' }));
-    if (!grant.ok) { setBusy(false); setError(grant.code); return; }
-    try {
-      const module = await import('../../accounts/turnkey-browser');
-      frame.current = await module.openExportFrame(state.provider!, grant.value, container.current!);
-      container.current?.querySelector('iframe')?.setAttribute('title', t('Turnkey secure export frame'));
-      setShown(kind);
-    } catch (cause) { setError(cause instanceof Error ? cause.message : 'MANAGED_EXPORT_UNAVAILABLE'); }
-    finally { setBusy(false); }
+  /** Opens FloFi Wallet in this click (popups need the gesture), then asks it to export there. */
+  function open(kind: 'private-key' | 'recovery-phrase') {
+    if (busy) return;
+    setBusy(true); setError(null); setDone(false);
+    try { openFloFiWallet(); } catch (cause) { setBusy(false); setError(cause instanceof Error ? cause.message : 'FLOFI_WALLET_NOT_OPEN'); return; }
+    void requestFloFiWallet({ op: 'export', walletId: wallet.id, kind }).then(() => setDone(true),
+      cause => setError(cause instanceof Error ? cause.message : 'MANAGED_EXPORT_UNAVAILABLE')).finally(() => setBusy(false));
   }
-  async function copyAddress() {
-    try { await navigator.clipboard.writeText(wallet.address); setCopied(true); setTimeout(() => setCopied(false), 1600); } catch { /* address stays visible */ }
-  }
-  const reauth = error === 'ACCOUNT_REAUTHENTICATION_REQUIRED' || readiness === 'locked';
   return <dialog ref={dialog} className={styles.frameDialog} aria-labelledby={titleId} onCancel={event => { event.preventDefault(); onClose(); }}>
     <div className={styles.frameBody}>
       <button type="button" className={styles.close} aria-label={t('Close')} onClick={onClose}><AccountIcon name="close" size={16}/></button>
@@ -65,27 +57,19 @@ export function ExportWalletDialog({ wallet, state, onClose }: { wallet: Account
       <p>{t(actions.includes('recovery-phrase') ? 'Copy either your private key or recovery phrase to use this wallet in another app.' : 'Copy your private key to use this wallet in another app.')}</p>
       <div className={styles.warning} role="note"><AccountIcon name="warning" size={18}/><span>{t('Never share your private key or recovery phrase with anyone. Whoever has it controls this wallet and its funds. FloFi will never ask for it.')}</span></div>
       <div className={styles.walletBox}><span>{t('Your wallet')}</span>
-        <div className={styles.walletLine}><span><strong>{wallet.label}</strong><br/><code title={wallet.address}>{shortAddress(wallet.address)}</code></span>
-          <button type="button" className={styles.quiet} onClick={() => void copyAddress()} aria-label={t('Copy {0} address', wallet.label)}><AccountIcon name="copy" size={15}/>{t(copied ? 'Copied' : 'Copy')}</button></div></div>
-      <label className={styles.confirm} htmlFor={confirmId}><input id={confirmId} type="checkbox" checked={confirmed} onChange={event => setConfirmed(event.currentTarget.checked)}/>
-        <span>{t('I understand that anyone with this secret can take everything in this wallet, and I am in a private place.')}</span></label>
-      {reauth && <div className={styles.banner} role="status"><strong>{t('Confirm it’s you')}</strong>
-        <p>{t('Exporting needs a sign-in from the last 10 minutes in this browser. Sign in again, then return to export.')}</p>
-        <button type="button" className={styles.quiet} onClick={() => void unlockManagedWallets(state, '/app/credentials').then(code => code && setError(code))}>
-          <AccountIcon name="lock" size={16}/>{t('Sign in again')}</button></div>}
-      <p className={styles.small}>{t('The secret is shown only inside Turnkey’s secure frame below, for you to copy there. FloFi never reads it or writes your clipboard.')}</p>
-      {(readiness === 'needs-social' || readiness === 'not-configured') && <p className={styles.small} role="status">
-        {t(accountMessage(readiness === 'needs-social' ? 'MANAGED_WALLETS_NEED_SOCIAL_SIGN_IN' : 'MANAGED_WALLETS_NOT_CONFIGURED'))}</p>}
+        <div className={styles.walletLine}><span><strong>{wallet.label}</strong><br/><code title={wallet.address}>{shortAddress(wallet.address)}</code></span></div></div>
+      <p className={styles.small}>{t('Export happens in FloFi Wallet, a separate secure window: you unlock it again there, confirm, and the secret is shown only inside Turnkey’s secure frame. This page never sees it.')}</p>
+      {readiness !== 'ready' && <p className={styles.small} role="status">
+        {t(accountMessage(readiness === 'needs-identity' ? 'MANAGED_WALLETS_NEED_SOCIAL_SIGN_IN' : 'MANAGED_WALLETS_NOT_CONFIGURED'))}</p>}
       <div className={styles.exportActions}>
-        {actions.includes('private-key') && <button type="button" className={styles.primary} disabled={!confirmed || busy || readiness !== 'ready'} onClick={() => void reveal('private-key')}>
-          <AccountIcon name="key" size={18}/>{t('Copy private key')}</button>}
-        {actions.includes('recovery-phrase') && <button type="button" className={styles.primary} disabled={!confirmed || busy || readiness !== 'ready'} onClick={() => void reveal('recovery-phrase')}>
-          <AccountIcon name="phrase" size={18}/>{t('Copy recovery phrase')}</button>}
+        {actions.includes('private-key') && <button type="button" className={styles.primary} disabled={busy || !ready} onClick={() => open('private-key')}>
+          <AccountIcon name="key" size={18}/>{t('Export private key in FloFi Wallet')}</button>}
+        {actions.includes('recovery-phrase') && <button type="button" className={styles.primary} disabled={busy || !ready} onClick={() => open('recovery-phrase')}>
+          <AccountIcon name="phrase" size={18}/>{t('Export recovery phrase in FloFi Wallet')}</button>}
       </div>
-      <div ref={container} className={styles.frame} role="group" aria-label={t('Turnkey secure export frame')} aria-busy={busy}/>
-      {shown && <p className={styles.status} role="status">{t(shown === 'private-key' ? 'Your private key is shown in Turnkey’s secure frame above. Select it there to copy it — FloFi cannot read it.'
-        : 'Your recovery phrase is shown in Turnkey’s secure frame above. Select it there to copy it — FloFi cannot read it.')}</p>}
-      {error && error !== 'ACCOUNT_REAUTHENTICATION_REQUIRED' && <p className={styles.error} role="alert">{t(accountMessage(error))}</p>}
+      {busy && <p className={styles.status} role="status">{t('Continue in FloFi Wallet…')}</p>}
+      {done && <p className={styles.status} role="status">{t('Export finished in FloFi Wallet.')}</p>}
+      {error && <p className={styles.error} role="alert">{t(accountMessage(error))}</p>}
       <p className={styles.protected}><AccountIcon name="lock" size={14}/>{t('Protected by')} <strong>Turnkey</strong></p>
     </div>
   </dialog>;
@@ -118,7 +102,7 @@ function AccountWalletCard({ wallet, active, state, signIn, onChanged, onStatus 
       <div><h3>{wallet.label}</h3><p>{wallet.providerName} · {ECOSYSTEM_LABEL[wallet.ecosystem]} · {t(ORIGIN_LABEL[wallet.origin])}</p></div>
       <span className={`workspace-wallet-status${active ? ' workspace-wallet-status-active' : ''}`}>{state_}</span>
     </div>
-    {managed && <p className="workspace-wallet-signing" data-managed-signing="unavailable">{t('Can’t sign FloFi workflows yet. Connect MetaMask, Phantom or Solflare to sign.')}</p>}
+    {managed && <p className="workspace-wallet-signing" data-managed-signing="flofi-wallet">{t('Signs in FloFi Wallet, after you review the transaction in FloFi.')}</p>}
     <div className="workspace-wallet-address"><code title={wallet.address}>{shortAddress(wallet.address)}</code>
       <button type="button" className="workspace-copy" aria-label={t('Copy {0} address', wallet.label)} title={t('Copy address')}
         onClick={() => void navigator.clipboard.writeText(wallet.address).then(() => onStatus(t('Address copied.')), () => onStatus(t('Address could not be copied.')))}>
@@ -176,7 +160,6 @@ function DeleteAccount({ state }: { state: AccountState }) {
   async function remove() {
     const result = await deleteFloFiAccount().catch(() => ({ ok: false as const, code: 'ACCOUNTS_UNAVAILABLE' }));
     if (!result.ok) { setError(result.code); return; }
-    try { await (await import('../../accounts/turnkey-browser')).clearSessionKey(); } catch { /* no provider key here */ }
     window.location.assign('/login');
   }
   return <div className="workspace-inline-form" role="group" aria-label={t('Delete FloFi account')}>
@@ -187,7 +170,7 @@ function DeleteAccount({ state }: { state: AccountState }) {
       <div className="workspace-wallet-actions"><button type="button" className="workspace-action workspace-action-danger" onClick={() => void remove()}>{t('Delete account')}</button>
         <button type="button" className="workspace-action" onClick={() => { setConfirming(false); setError(null); }}>{t('Cancel')}</button></div>
       {error === 'ACCOUNT_REAUTHENTICATION_REQUIRED' ? <p className="workspace-inline-error" role="alert">{t(accountMessage(error))}{' '}
-        <button type="button" className="workspace-action" onClick={() => void unlockManagedWallets(state, '/app/credentials').then(code => code && setError(code))}>{t('Sign in again')}</button></p>
+        <a className="workspace-action" style={{ textDecoration: 'none' }} href="/login?returnTo=%2Fapp%2Fcredentials">{t('Sign in again')}</a></p>
         : error && <p className="workspace-inline-error" role="alert">{t(accountMessage(error))}</p>}
     </> : <div className="workspace-wallet-actions"><button type="button" className="workspace-action workspace-action-danger" onClick={() => setConfirming(true)}>{t('Delete FloFi account')}</button></div>}
   </div>;

@@ -7,8 +7,9 @@
  * server only). A sealed cookie is necessary but not sufficient: the account store must also hold an unrevoked, unexpired record
  * for its session id (`account-store.ts`), so sign-out and "sign out everywhere" take effect server-side.
  *
- * The short-lived flow cookies (OIDC state, email challenge) carry only nonces, PKCE verifiers, the provider's OTP id and the
- * browser's public session key: never an OTP code, an OIDC token or any wallet key.
+ * The short-lived flow cookies (OIDC state, email challenge) carry only nonces, PKCE verifiers and FloFi's challenge id: never an OTP
+ * code, an OIDC token or any wallet key. FloFi Wallet's own tokens (handoff, wallet session, unlock flows) use the same seal with their
+ * own kinds and are bound to the wallet host (wallet-session.ts).
  */
 import { createHash, createHmac, hkdfSync, randomBytes, timingSafeEqual } from 'node:crypto';
 import { walletSessionKey } from '../server/wallet-session.ts';
@@ -24,9 +25,7 @@ export const ACCOUNT_FLOW_TTL_SECONDS = 600;
 export const ACCOUNT_REAUTH_SECONDS = 10 * 60;
 
 export type AccountSessionToken = { readonly accountId: string; readonly sessionId: string; readonly method: IdentityKind;
-  readonly authenticatedAt: number; readonly expiresAt: number;
-  /** Hint only (never authority): the browser key that the wallet provider opened a session for at sign-in, and until when. */
-  readonly managedKey?: string | null; readonly managedUntil?: number | null };
+  readonly authenticatedAt: number; readonly expiresAt: number };
 export type OidcProvider = 'google' | 'apple';
 export type AccountIntent = 'sign-in' | 'link';
 export type OidcFlow = { readonly provider: OidcProvider; readonly state: string; readonly nonce: string; readonly verifier: string;
@@ -36,7 +35,8 @@ export type OidcFlow = { readonly provider: OidcProvider; readonly state: string
 /** The email challenge cookie names only FloFi's challenge record: no address, provider id or code. */
 export type EmailFlow = { readonly challengeId: string; readonly intent: AccountIntent; readonly returnTo: string };
 
-type Kind = 'a1' | 'o1' | 'm1';
+/** a1 account session, o1 OIDC flow, m1 email flow, h1 FloFi Wallet handoff, w1 FloFi Wallet session, f1 FloFi Wallet unlock flow. */
+type Kind = 'a1' | 'o1' | 'm1' | 'h1' | 'w1' | 'f1';
 const seconds = (now: Date) => Math.floor(now.getTime() / 1000);
 const METHODS: readonly IdentityKind[] = ['google', 'apple', 'email', 'eip155', 'solana'];
 const HEX32 = /^[0-9a-f]{32}$/, B64URL = /^[A-Za-z0-9_-]{43,128}$/;
@@ -64,25 +64,30 @@ function unseal(kind: Kind, token: unknown, key: Buffer, now: Date, domain: stri
   return Number.isSafeInteger(v.e) && (v.e as number) > seconds(now) && v.d === domain ? v : null;
 }
 const keyOrNull = (env: Env) => { try { return accountKey(env); } catch { return null; } };
+/** Seals FloFi Wallet tokens (kinds h1, w1, f1) with the account key; `payload.e` (expiry, seconds) and `payload.d` (host) are required. */
+export function sealWalletToken(env: Env, kind: 'h1' | 'w1' | 'f1', payload: Record<string, unknown> & { e: number; d: string }): string {
+  return seal(kind, payload, accountKey(env));
+}
+/** The verified payload of a FloFi Wallet token for this host, or null (absent, tampered, expired, another kind, key or host). */
+export function unsealWalletToken(env: Env, kind: 'h1' | 'w1' | 'f1', token: unknown, now: Date, domain: string): Record<string, unknown> | null {
+  const key = keyOrNull(env);
+  return key ? unseal(kind, token, key, now, domain) : null;
+}
 
 export function newSessionId(): string { return randomBytes(16).toString('hex'); }
 export function newAccountId(): string { return `acct_${randomBytes(16).toString('hex')}`; }
 
 export function sealAccountSession(env: Env, session: AccountSessionToken, domain: string, now: Date): string {
   if (!ACCOUNT_ID.test(session.accountId) || !HEX32.test(session.sessionId) || !METHODS.includes(session.method)) throw new Error('ACCOUNT_SESSION_INVALID');
-  const managed = typeof session.managedKey === 'string' && SESSION_PUBLIC_KEY.test(session.managedKey) && Number.isSafeInteger(session.managedUntil)
-    ? { k: session.managedKey, x: session.managedUntil } : {};
-  return seal('a1', { a: session.accountId, s: session.sessionId, m: session.method, t: session.authenticatedAt, i: seconds(now), e: session.expiresAt, d: domain,
-    ...managed }, accountKey(env));
+  return seal('a1', { a: session.accountId, s: session.sessionId, m: session.method, t: session.authenticatedAt, i: seconds(now), e: session.expiresAt, d: domain },
+    accountKey(env));
 }
 /** The sealed claims of an account cookie, or null (absent, tampered, expired, another key or host). The store still decides. */
 export function readAccountSession(env: Env, token: string | undefined, now: Date, domain: string): AccountSessionToken | null {
   const key = keyOrNull(env), v = key && unseal('a1', token, key, now, domain);
   if (!v || typeof v.a !== 'string' || !ACCOUNT_ID.test(v.a) || typeof v.s !== 'string' || !HEX32.test(v.s)
     || !METHODS.includes(v.m as IdentityKind) || !Number.isSafeInteger(v.t) || (v.t as number) > seconds(now) + 60) return null;
-  const managed = typeof v.k === 'string' && SESSION_PUBLIC_KEY.test(v.k) && Number.isSafeInteger(v.x) && (v.x as number) > seconds(now);
-  return { accountId: v.a, sessionId: v.s, method: v.m as IdentityKind, authenticatedAt: v.t as number, expiresAt: v.e as number,
-    managedKey: managed ? v.k as string : null, managedUntil: managed ? v.x as number : null };
+  return { accountId: v.a, sessionId: v.s, method: v.m as IdentityKind, authenticatedAt: v.t as number, expiresAt: v.e as number };
 }
 /** Whether a session signed in recently enough for a sensitive action. */
 export const freshlyAuthenticated = (session: Pick<AccountSessionToken, 'authenticatedAt'>, now: Date) =>

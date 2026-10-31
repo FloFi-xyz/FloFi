@@ -15,6 +15,7 @@ import { createAccountStore, type AccountStore } from './account-store.ts';
 import { createAccountService, type AccountService, type SignInOutcome } from './account-service.ts';
 import { oidcConfig } from './oidc.ts';
 import { createTurnkeyServer, turnkeyConfig, type TurnkeyBrowserConfig } from './turnkey-server.ts';
+import { walletOrigin } from './wallet-origin.ts';
 
 type Env = Readonly<Record<string, string | undefined>>;
 export type AccountHost = { readonly store: AccountStore; readonly service: AccountService; readonly turnkey: TurnkeyBrowserConfig | null };
@@ -32,7 +33,8 @@ export async function accountHost(env: Env = process.env): Promise<AccountHost |
 export function accountAvailability(env: Env, host: AccountHost | null): AccountAvailability {
   const accounts = host !== null;
   return { accounts, google: accounts && oidcConfig('google', env) !== null, apple: accounts && oidcConfig('apple', env) !== null,
-    email: accounts && host.turnkey !== null, wallet: accounts, managedWallets: accounts && host.turnkey !== null };
+    // Managed wallets need the provider AND FloFi Wallet's own origin: no provider session may exist on the product origin.
+    email: accounts && host.turnkey !== null, wallet: accounts, managedWallets: accounts && host.turnkey !== null && walletOrigin(env) !== null };
 }
 
 /** HttpOnly, host-only. Lax so the top-level redirect back from Google/Apple lands signed in; server actions also check Origin. */
@@ -67,6 +69,3 @@ export function nextPath(outcome: Pick<SignInOutcome, 'onboarding' | 'session'>,
 export async function supersede(host: AccountHost, previous: AccountSessionToken | null, next: AccountSessionToken): Promise<void> {
   if (previous && previous.sessionId !== next.sessionId) await host.store.revokeSession(previous).catch(() => undefined);
 }
-/** The account session to seal, with the provider-session hint for the browser key that sign-in opened (if any). */
-export const managedHint = (outcome: SignInOutcome): AccountSessionToken => ({ ...outcome.session, managedKey: outcome.managed?.sessionKey ?? null,
-  managedUntil: outcome.managed ? Math.floor(Date.parse(outcome.managed.expiresAt) / 1000) : null });

@@ -9,6 +9,8 @@ import { swapWalletRequestMatches, ownerBoundSwapReview, swapProfile } from '../
 import { injected, useBuild009Wallet } from './build009-wallet-store';
 import { useWorkflow } from './workflow-store';
 import { watchWalletResponse } from './wallet-request-lifecycle';
+import { bindFloFiSigning } from '../wallet/flofi-wallet-channel';
+import { signingContextOf } from '../wallet/flofi-signing';
 
 const KEY = 'gryloo:public-testnet-execution-id';
 /**
@@ -208,6 +210,8 @@ export function PublicTestnetProvider({ children }: { children: ReactNode }) {
     let hash: unknown;
     busyRef.current = false; setBusy(null);
     setSigningAttempt(attempt.attemptId);
+    // BUILD-FLOFI-AUTH-WALLETS-001: FloFi Wallet signs only for the reviewed run it is told about (no effect on any other wallet).
+    bindFloFiSigning(provider, signingContextOf(run.quote.executionId, 'base-sepolia-swap'));
     try { hash = await watchWalletResponse(provider, () => provider.request({ method: 'eth_sendTransaction', params: [tx] }), () => {
       clearSigning();
       void publicReport(run.quote.executionId, attempt.attemptId, { kind: 'UNKNOWN' }).then(result => { if (result.ok) acceptCurrent(result.value); }).catch(() => undefined);

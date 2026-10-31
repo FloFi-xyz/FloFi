@@ -26,7 +26,13 @@ export const ACCOUNT_HARNESS_PORT = 8571, ACCOUNT_HARNESS_ORIGIN = `http://127.0
 process.env.FLOFI_ACCOUNT_HARNESS_ORIGIN = ACCOUNT_HARNESS_ORIGIN;
 process.env.FLOFI_AUTH_WALLETS_E2E = 'MOCKED_LOOPBACK_ONLY';
 const parent = createECDH('prime256v1'); parent.generateKeys();
+// The MOCKED provider's OTP signing key (encryption targets and verification tokens): private half to the harness, public half to the app.
+const otpSigner = createECDH('prime256v1'); otpSigner.generateKeys();
 const parentOrg = randomUUID(), googleClient = 'flofi-e2e.apps.loopback', googleSecret = randomBytes(24).toString('hex'), appleClient = 'xyz.flofi.e2e';
+// FloFi Wallet runs on its own origin: the same loopback server under another host name (localhost vs 127.0.0.1), with its own OIDC clients.
+export const WALLET_ORIGIN = `http://localhost:${E2E_APP_PORT}`;
+process.env.FLOFI_E2E_WALLET_ORIGIN = WALLET_ORIGIN;
+const walletGoogleClient = 'flofi-wallet-e2e.apps.loopback', walletGoogleSecret = randomBytes(24).toString('hex'), walletAppleClient = 'xyz.flofi.wallet.e2e';
 
 export default defineConfig({
   testDir: './e2e', testMatch: 'auth-wallets.spec.ts', workers: 1, fullyParallel: false, retries: 0,
@@ -37,7 +43,10 @@ export default defineConfig({
     { command: 'node e2e/account-harness.ts', url: `${ACCOUNT_HARNESS_ORIGIN}/health`, reuseExistingServer: false, timeout: 30_000,
       env: { FLOFI_ACCOUNT_HARNESS_PORT: String(ACCOUNT_HARNESS_PORT), FLOFI_ACCOUNT_HARNESS_APP_ORIGIN: E2E_APP_ORIGIN,
         FLOFI_ACCOUNT_HARNESS_PARENT_PUBLIC_KEY: parent.getPublicKey('hex', 'compressed'), FLOFI_ACCOUNT_HARNESS_PARENT_ORG: parentOrg,
-        FLOFI_ACCOUNT_HARNESS_GOOGLE_CLIENT: googleClient, FLOFI_ACCOUNT_HARNESS_GOOGLE_SECRET: googleSecret, FLOFI_ACCOUNT_HARNESS_APPLE_CLIENT: appleClient } },
+        FLOFI_ACCOUNT_HARNESS_GOOGLE_CLIENT: googleClient, FLOFI_ACCOUNT_HARNESS_GOOGLE_SECRET: googleSecret, FLOFI_ACCOUNT_HARNESS_APPLE_CLIENT: appleClient,
+        FLOFI_ACCOUNT_HARNESS_OTP_SIGNER_PRIVATE_KEY: otpSigner.getPrivateKey('hex').padStart(64, '0'), FLOFI_ACCOUNT_HARNESS_WALLET_ORIGIN: WALLET_ORIGIN,
+        FLOFI_ACCOUNT_HARNESS_WALLET_GOOGLE_CLIENT: walletGoogleClient, FLOFI_ACCOUNT_HARNESS_WALLET_GOOGLE_SECRET: walletGoogleSecret,
+        FLOFI_ACCOUNT_HARNESS_WALLET_APPLE_CLIENT: walletAppleClient } },
     { command: 'pnpm --filter @defi-workflow-engine/reference-dapp start', url: E2E_APP_ORIGIN, reuseExistingServer: false, timeout: 90_000,
       env: { PORT: String(E2E_APP_PORT), ...e2eNetworkScopeEnv(), FLOFI_COPILOT: 'replay', NEXT_TELEMETRY_DISABLED: '1', PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1',
         FLOFI_PUBLIC_ORIGIN: E2E_APP_ORIGIN, DATABASE_URL: process.env.FLOFI_E2E_DATABASE_URL!, FLOFI_SESSION_SECRET: randomBytes(32).toString('hex'),
@@ -45,6 +54,8 @@ export default defineConfig({
         FLOFI_AUTH_E2E_IDP: 'MOCKED_LOOPBACK_ONLY', FLOFI_AUTH_E2E_IDP_ORIGIN: ACCOUNT_HARNESS_ORIGIN,
         FLOFI_TURNKEY_E2E: 'MOCKED_LOOPBACK_ONLY', FLOFI_TURNKEY_ORGANIZATION_ID: parentOrg, FLOFI_TURNKEY_API_PUBLIC_KEY: parent.getPublicKey('hex', 'compressed'),
         FLOFI_TURNKEY_API_PRIVATE_KEY: parent.getPrivateKey('hex').padStart(64, '0'), FLOFI_TURNKEY_API_BASE_URL: ACCOUNT_HARNESS_ORIGIN,
+        FLOFI_TURNKEY_OTP_SIGNER_PUBLIC_KEY: otpSigner.getPublicKey('hex', 'uncompressed'), FLOFI_WALLET_ORIGIN: WALLET_ORIGIN,
+        FLOFI_WALLET_GOOGLE_CLIENT_ID: walletGoogleClient, FLOFI_WALLET_GOOGLE_CLIENT_SECRET: walletGoogleSecret, FLOFI_WALLET_APPLE_CLIENT_ID: walletAppleClient,
         FLOFI_TURNKEY_EXPORT_IFRAME_URL: `http://127.0.0.1:${ACCOUNT_HARNESS_PORT + 1}`, FLOFI_TURNKEY_IMPORT_IFRAME_URL: `http://127.0.0.1:${ACCOUNT_HARNESS_PORT + 2}` } },
   ],
 });

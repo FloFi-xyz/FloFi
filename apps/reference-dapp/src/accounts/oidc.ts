@@ -45,15 +45,26 @@ function endpoints(provider: OidcProvider, env: Env): Endpoints {
   return { issuers: [`${loopback}/${provider}`], authorize: `${loopback}/${provider}/authorize`, token: provider === 'google' ? `${loopback}/google/token` : null,
     jwks: `${loopback}/${provider}/jwks` };
 }
-/** The provider's configuration on this deployment, or null when it is not configured (the sign-in button says so). */
-export function oidcConfig(provider: OidcProvider, env: Env): OidcConfig | null {
-  const origin = publicOrigin(env);
-  const clientId = provider === 'google' ? env.FLOFI_GOOGLE_CLIENT_ID : env.FLOFI_APPLE_CLIENT_ID;
-  const clientSecret = provider === 'google' ? env.FLOFI_GOOGLE_CLIENT_SECRET ?? '' : null;
+/**
+ * The provider's configuration on this deployment, or null when it is not configured (the sign-in button says so).
+ *
+ * `returnOrigin` is FloFi Wallet's origin for an unlock. An unlock uses its OWN clients (`FLOFI_WALLET_GOOGLE_CLIENT_ID` /
+ * `_SECRET`, `FLOFI_WALLET_APPLE_CLIENT_ID`) whose only redirect URIs are on the wallet host: the token audience then separates
+ * product sign-in tokens from wallet-unlock tokens, so a sign-in ID token can never unlock FloFi Wallet (and an Apple ID token delivered
+ * anywhere else is refused by audience). Sign-in returns to the product with the product clients.
+ */
+export function oidcConfig(provider: OidcProvider, env: Env, returnOrigin: string | null = null): OidcConfig | null {
+  const origin = publicOrigin(env), wallet = returnOrigin !== null;
+  const clientId = provider === 'google' ? (wallet ? env.FLOFI_WALLET_GOOGLE_CLIENT_ID : env.FLOFI_GOOGLE_CLIENT_ID)
+    : (wallet ? env.FLOFI_WALLET_APPLE_CLIENT_ID : env.FLOFI_APPLE_CLIENT_ID);
+  const clientSecret = provider === 'google' ? (wallet ? env.FLOFI_WALLET_GOOGLE_CLIENT_SECRET : env.FLOFI_GOOGLE_CLIENT_SECRET) ?? '' : null;
+  // The wallet clients must differ from the product clients, or the audience would not separate the two.
+  if (wallet && clientId && clientId === (provider === 'google' ? env.FLOFI_GOOGLE_CLIENT_ID : env.FLOFI_APPLE_CLIENT_ID)) return null;
   if (!origin || !clientId || !CLIENT_ID.test(clientId) || (provider === 'google' && (!clientSecret || clientSecret.length < 8))) return null;
   let resolved: Endpoints;
   try { resolved = endpoints(provider, env); } catch { return null; }
-  return { provider, clientId, clientSecret, redirectUri: `${origin}/auth/callback/${provider}`, endpoints: resolved };
+  const redirectUri = returnOrigin ? `${returnOrigin}/wallet/callback/${provider}` : `${origin}/auth/callback/${provider}`;
+  return { provider, clientId, clientSecret, redirectUri, endpoints: resolved };
 }
 
 const b64url = (bytes: Buffer) => bytes.toString('base64url');

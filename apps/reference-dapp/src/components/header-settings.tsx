@@ -30,7 +30,6 @@ export function HeaderSettings({ onDisconnect, disconnectDisabled, onSupport }: 
   }, [open]);
   async function signOut() {
     await accountSignOut().catch(() => undefined);
-    try { await (await import('../accounts/turnkey-browser')).clearSessionKey(); } catch { /* no provider key in this browser */ }
     window.location.assign('/login');
   }
   const languageDescriptionId = useId(), themeDescriptionId = useId();
