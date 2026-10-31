@@ -11,7 +11,7 @@
  * before Privy was asked is that refusal's code (4100); anything after Privy was asked is unknown and is reconciled, never retried blindly.
  */
 import { floFiMessageGate, floFiSigningGate } from '../app/flofi-wallet-action';
-import { currentFloFiPrivy, privyErrorCode, type PrivyReview } from '../accounts/privy-client';
+import { currentFloFiPrivy, privyErrorCode, type PrivyReview } from '../accounts/privy-context';
 import type { SigningSummary } from './flofi-signing';
 import type { FloFiWalletRequest } from './flofi-wallet-channel';
 import type { WalletResult } from '../wallet-app/protocol';

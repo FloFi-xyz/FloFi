@@ -7,7 +7,7 @@ import Link from 'next/link';
 import { learningAvailability } from '../app/learning-action';
 import { accountState, type AccountState } from '../app/account-action';
 import { disconnectToLogin } from '../accounts/disconnect';
-import { useFloFiPrivy } from '../accounts/privy-client';
+import { useFloFiPrivy } from '../accounts/privy-context';
 
 export function HeaderSettings({ onDisconnect, disconnectDisabled, onSupport }: { onDisconnect: () => void; disconnectDisabled: boolean; onSupport?: () => void }) {
   const { t: tr } = useLocale();

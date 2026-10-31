@@ -24,6 +24,9 @@ describe('provider credentials never reach the browser', () => {
     const named = source.filter(file => /MERCADO_PAGO_ACCESS_TOKEN|WOOVI_APP_ID/.test(file.text)).map(file => file.path).sort();
     // The Woovi fake names the variable for isolated server tests; it is never a browser module (checked below).
     expect(named).toEqual(['server/card-provider.ts', 'server/mercado-pago-card-provider.ts', 'server/woovi-pix-adapter.ts', 'test-utils/woovi-fake.ts']);
-    expect(browser.filter(file => /accessToken|appId|api\.woovi|api\.mercadopago\.com\/v1/.test(file.text)).map(file => file.path)).toEqual([]);
+    // BUILD-FLOFI-PRIVY-UX-001: Privy's app id is public (NEXT_PUBLIC_PRIVY_APP_ID, handed to its React provider); its server secret never is.
+    expect(browser.filter(file => /accessToken|appId|api\.woovi|api\.mercadopago\.com\/v1/.test(file.text) && file.path !== 'accounts/privy-client.tsx').map(file => file.path)).toEqual([]);
+    expect(source.filter(file => /PRIVY_APP_SECRET/.test(file.text)).map(file => file.path)).toEqual(['accounts/privy-server.ts']);
+    expect(browser.filter(file => /appSecret|PRIVY_APP_SECRET|PRIVY_VERIFICATION_KEY/.test(file.text)).map(file => file.path)).toEqual([]);
   });
 });

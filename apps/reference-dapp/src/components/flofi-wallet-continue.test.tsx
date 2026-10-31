@@ -35,11 +35,11 @@ describe('Continue in FloFi Wallet', () => {
 });
 
 describe('FloFi Wallet hint next to Authorize', () => {
-  it('speaks only for FloFi Wallet addresses, says Authorize opens it, and shows a recorded issue', async () => {
+  it('speaks only for FloFi wallet addresses, says Authorize opens it (Privy’s confirmation), and shows a recorded issue', async () => {
     const { channel, FloFiWalletLockHint } = await load();
     expect(renderToStaticMarkup(createElement(FloFiWalletLockHint, { account: ADDRESS }))).toBe('');
     channel.markFloFiAccount(ADDRESS, true);
-    expect(renderToStaticMarkup(createElement(FloFiWalletLockHint, { account: ADDRESS }))).toContain('Authorize opens FloFi Wallet, where you confirm the exact transaction.');
+    expect(renderToStaticMarkup(createElement(FloFiWalletLockHint, { account: ADDRESS }))).toContain('Authorize opens your FloFi wallet, where you confirm the exact transaction.');
     const locked = renderToStaticMarkup(createElement(FloFiWalletLockHint, { account: ADDRESS, issue: 'FLOFI_WALLET_LOCKED' }));
     expect(locked).toContain('role="status"');
     expect(locked).toContain('Unlock FloFi Wallet first, then authorize again.');

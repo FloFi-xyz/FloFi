@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 'use client';
 import { disconnectToLogin } from '../accounts/disconnect';
-import { useAccountsOffered, useFloFiPrivy } from '../accounts/privy-client';
+import { useAccountsOffered, useFloFiPrivy } from '../accounts/privy-context';
 import { useLocale } from '../i18n/locale';
 
 import { product } from '../config/product';

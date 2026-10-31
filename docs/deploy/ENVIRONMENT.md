@@ -311,6 +311,30 @@ shell). No Railway variable is needed.
 
 Vercel only (the web chat, Channel Core and the console run there); nothing on Railway. Any misconfiguration turns learning off — never on.
 
+## 5j. FloFi accounts and wallets — Privy (BUILD-FLOFI-PRIVY-UX-001, `/login`, `/onboarding/wallets`, Credentials → My wallets)
+
+Privy is FloFi's authentication and embedded-wallet provider (Google, email code and Web3 wallet sign-in; one-click EVM/Solana wallets;
+private-key import; signing). Accounts also need `DATABASE_URL` (migrations 0018 and 0019). Without the two Privy variables, `/login` says
+sign-in is not configured and nothing is simulated.
+
+| Variable | Purpose | Secret | Preview | Prod | Default |
+| --- | --- | --- | --- | --- | --- |
+| `NEXT_PUBLIC_PRIVY_APP_ID` | the Privy app id (public: FloFi's server hands it to the browser at runtime). Use a separate Privy app for previews | no | for account previews | **yes** | — (no sign-in) |
+| `PRIVY_APP_SECRET` | the Privy app secret: FloFi's server reads users from Privy's API with it (Basic auth). Never sent to a browser, logged or stored | **yes** | with the app id | **yes** | — (no sign-in) |
+| `PRIVY_VERIFICATION_KEY` | optional: the app's access-token verification key (Privy dashboard, PEM; `\n` escapes accepted). Without it the official SDK fetches the app's JWKS from `api.privy.io` | no | optional | recommended | JWKS |
+| `FLOFI_PRIVY_APPLE_LOGIN` | `enabled` shows Apple sign-in, only after Apple is configured in Privy with FloFi's own Apple Services ID (so existing Apple accounts keep their subject) | no | optional | after Apple setup | off |
+
+Privy dashboard (owner): allowed origins `https://flofi.xyz` (plus each preview origin that should sign in); login methods Google, email and
+external wallets (Apple only when configured); embedded wallets for Ethereum and Solana with **no automatic creation** (FloFi creates on
+click), no session signers / delegated actions; Google client configured in Privy (the same Google account keeps the same `sub`, so existing
+Google accounts are found). The CSP already allows `auth.privy.io`, `*.rpc.privy.systems` and Privy's bot-check frames (src/accounts/privy-hosts.ts).
+
+Legacy FloFi Wallet (Turnkey, export of wallets created before Privy only): `FLOFI_TURNKEY_ORGANIZATION_ID`, `FLOFI_TURNKEY_API_PUBLIC_KEY`,
+`FLOFI_TURNKEY_API_PRIVATE_KEY` (**secret**), `FLOFI_WALLET_ORIGIN` and FloFi Wallet's own `FLOFI_WALLET_GOOGLE_CLIENT_ID` /
+`_SECRET` / `FLOFI_WALLET_APPLE_CLIENT_ID`, unchanged from BUILD-FLOFI-AUTH-WALLETS-001. Keep them only while
+[RELEASE-PRIVY-0019.md](RELEASE-PRIVY-0019.md) §Legacy finds Turnkey wallets in production. The product's own `FLOFI_GOOGLE_CLIENT_*` /
+`FLOFI_APPLE_CLIENT_ID` are no longer used for sign-in (Privy replaced them).
+
 ## 6. Platform-provided (read, never set by hand)
 
 `VERCEL` (`1`: hosted), `VERCEL_ENV` (`production`/`preview`/`development`), `VERCEL_GIT_COMMIT_REF` (Preview tenant derivation),
@@ -322,7 +346,8 @@ Vercel only (the web chat, Channel Core and the console run there); nothing on R
 These select local journals, loopback MOCKED harnesses or local forks. On a hosted deployment they are refused: journals and
 `/tmp` state are never used, harness gates leave the flow `off`, and fork/demo actions report themselves unavailable.
 
-`GRYLOO_*_HARNESS=MOCKED_LOOPBACK_ONLY` (supply, lending, Jupiter, Solana Devnet, Robinhood, Robinhood mainnet — `GRYLOO_ROBINHOOD_MAINNET_HARNESS`, its registry read from 127.0.0.1:8561 — Base mainnet — `GRYLOO_BASE_MAINNET_HARNESS`, its token list and RPC on 127.0.0.1:8562; it always wins over `live` — Uniswap liquidity, Router, Router testnet, card
+`FLOFI_PRIVY_E2E=MOCKED_LOOPBACK_ONLY` with `PRIVY_API_URL` (a loopback http origin: the browser suite's Privy stand-in, e2e/privy-emulator.ts;
+refused on a hosted deployment, where it disables Privy), `GRYLOO_*_HARNESS=MOCKED_LOOPBACK_ONLY` (supply, lending, Jupiter, Solana Devnet, Robinhood, Robinhood mainnet — `GRYLOO_ROBINHOOD_MAINNET_HARNESS`, its registry read from 127.0.0.1:8561 — Base mainnet — `GRYLOO_BASE_MAINNET_HARNESS`, its token list and RPC on 127.0.0.1:8562; it always wins over `live` — Uniswap liquidity, Router, Router testnet, card
 provider — `GRYLOO_CARD_HARNESS` points Add card at the loopback Mercado Pago stand-in on 127.0.0.1:8555),
 `GRYLOO_*_JOURNAL` (supply, public testnet, Robinhood, Base — `GRYLOO_BASE_JOURNAL`, with one subdirectory per capability — Jupiter, Solana Devnet, Uniswap liquidity, Router, Router testnet, liquidity,
 Mode A, bridge), `GRYLOO_PUBLIC_TESTNET_READ`, `GRYLOO_BASE_OBSERVATION=live`, `GRYLOO_MODE_A`/`_PROFILE`, `GRYLOO_MODE_B`/`_PROFILE`/

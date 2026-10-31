@@ -4,11 +4,12 @@
  * signed with a key generated for this test (Privy's format: issuer `privy.io`, audience the app id, subject the user DID, `sid`); the SDK
  * verifies them against that key's PEM (`PRIVY_VERIFICATION_KEY`) and reads users through an injected transport. No network is used.
  */
-import { createSign, generateKeyPairSync } from 'node:crypto';
+import { createSign, generateKeyPairSync, randomBytes } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import { createPrivyServer, officialPrivyApi, privyBrowserConfig, privyConfig, readPrivyUser, type PrivyServerConfig } from './privy-server';
 
-const APP_ID = 'cmflofitestapp0000000001', SECRET = 'privy_app_secret_test_only_0123456789abcdef';
+// A disposable app secret generated for this run (never a real Privy secret).
+const APP_ID = 'cmflofitestapp0000000001', SECRET = randomBytes(24).toString('hex');
 const USER = 'did:privy:cmuser000000000000000000001';
 const keys = generateKeyPairSync('ec', { namedCurve: 'P-256' }), other = generateKeyPairSync('ec', { namedCurve: 'P-256' });
 const PEM = keys.publicKey.export({ type: 'spki', format: 'pem' }).toString();

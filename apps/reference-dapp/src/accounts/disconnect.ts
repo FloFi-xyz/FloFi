@@ -10,7 +10,7 @@
  */
 import { accountSignOut } from '../app/account-action';
 import { updateWalletPreference } from '../wallet/wallet-registry';
-import type { FloFiPrivy } from './privy-client';
+import type { FloFiPrivy } from './privy-context';
 
 let leaving = false;
 export async function disconnectToLogin(privy: Pick<FloFiPrivy, 'logout'> | null, closeWallet?: () => unknown): Promise<void> {

@@ -11,7 +11,7 @@ const gate = vi.fn(), messageGate = vi.fn();
 vi.mock('../app/flofi-wallet-action', () => ({ floFiSigningGate: (...args: unknown[]) => gate(...args), floFiMessageGate: (...args: unknown[]) => messageGate(...args) }));
 const privy = { ready: true, authenticated: true, signEvmTransaction: vi.fn(), signEvmMessage: vi.fn(), signSolanaTransaction: vi.fn(), signSolanaMessage: vi.fn() };
 let current: typeof privy | null = privy;
-vi.mock('../accounts/privy-client', async importOriginal => ({ ...await importOriginal<object>(), currentFloFiPrivy: () => current }));
+vi.mock('../accounts/privy-context', async importOriginal => ({ ...await importOriginal<object>(), currentFloFiPrivy: () => current }));
 const { requestThroughPrivy } = await import('./flofi-privy-signer');
 
 const OWNER = '0x' + '1'.repeat(40);

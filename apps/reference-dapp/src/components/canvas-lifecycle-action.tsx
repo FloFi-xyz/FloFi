@@ -6,7 +6,7 @@ import type { ExecutionControls, ExecutionControlsState } from '../state/executi
 import { useLocale } from '../i18n/locale';
 import { WalletPendingNotice } from './wallet-pending-notice';
 import { usesFloFiWallet } from '../wallet/flofi-wallet-channel';
-import { useFloFiPrivy } from '../accounts/privy-client';
+import { useFloFiPrivy } from '../accounts/privy-context';
 import { FloFiWalletLockHint } from './flofi-wallet-continue';
 
 export function CanvasLifecycleAction(props: ExecutionControlsState & {

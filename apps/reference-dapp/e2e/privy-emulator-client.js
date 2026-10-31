@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
+/* global window, document, location, localStorage, fetch, btoa, atob, TextDecoder */
 /**
  * BUILD-FLOFI-PRIVY-UX-001 — MOCKED, LOOPBACK ONLY: the browser half of the Privy stand-in (e2e/privy-emulator.ts), injected by the browser
  * suite into the page (`addInitScript`). It implements FloFi's `PrivyDriver` (src/accounts/privy-client.tsx), which FloFi uses only when its
