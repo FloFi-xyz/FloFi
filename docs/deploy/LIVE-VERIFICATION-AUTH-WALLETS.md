@@ -20,7 +20,7 @@ the production Turnkey organization, a real user's identity or funds, or any sec
 | Google | **Two** OAuth web clients in a test project. Product client: `FLOFI_GOOGLE_CLIENT_ID`/`_SECRET`, redirect `<product origin>/auth/callback/google`. FloFi Wallet client: `FLOFI_WALLET_GOOGLE_CLIENT_ID`/`_SECRET`, redirect **only** `<wallet origin>/wallet/callback/google`. |
 | Apple | **Two** Services IDs. Product: `FLOFI_APPLE_CLIENT_ID`, return URL `<product origin>/auth/callback/apple`. FloFi Wallet: `FLOFI_WALLET_APPLE_CLIENT_ID`, return URL **only** `<wallet origin>/wallet/callback/apple`. Domain verification for both hosts. |
 | Identities | Disposable test accounts only: a Google test user, an Apple test Apple ID and a test mailbox. None is a real person's. |
-| Chains | Solana **Devnet** for the signing checks (faucet funds only). FloFi Wallet's EVM signing covers only the four catalog **mainnets** (Base, Arbitrum, Ethereum, Robinhood Chain). An EVM signing check therefore needs a mainnet transaction of a trivial amount, which only the owner may decide to run, through the normal Review → Authorize flow. This runbook never runs one by itself. |
+| Chains | **Mainnet only.** FloFi Wallet signs only on Ethereum, Base, Arbitrum One and Robinhood Chain mainnet and on Solana mainnet; it refuses every Devnet/testnet chain or cluster. A signing check therefore moves real funds: one trivial amount per ecosystem, only on the owner's explicit decision, through the normal Review → Authorize flow. This runbook never runs one by itself. |
 
 Never set `FLOFI_TURNKEY_E2E`, `FLOFI_AUTH_E2E_IDP` or `FLOFI_TURNKEY_OTP_SIGNER_PUBLIC_KEY` here. Hosted deployments refuse them.
 
@@ -52,13 +52,15 @@ Never set `FLOFI_TURNKEY_E2E`, `FLOFI_AUTH_E2E_IDP` or `FLOFI_TURNKEY_OTP_SIGNER
     previous Turnkey session (`invalidateExisting`).
 
 ### Signing
-11. **Solana Devnet transfer** to a second test address with FloFi Wallet as the wallet. Check, in order:
+11. **Solana mainnet** (owner decision; real funds): one transfer of a trivial amount to a second owner-controlled address with FloFi Wallet as
+    the wallet. Check, in order:
     - Simulate, then Review and the Strategy Manifest;
     - Authorize;
     - FloFi Wallet shows "Exactly the transaction FloFi prepared for this strategy" with the same recipient, amount and fee;
     - Sign;
     - FloFi broadcasts, the run reconciles, and the evidence is recorded.
-    Also confirm that a request not matching a reviewed attempt is refused.
+    Also confirm that a request not matching a reviewed attempt is refused, and that FloFi Wallet is not offered for a Devnet workflow.
+    Without the owner's explicit go-ahead, record Solana signing as **not verified live**.
 12. **EVM** (owner decision; real funds): one transfer of a trivial amount on a catalog mainnet, with the same checks. Without the owner's
     explicit go-ahead, record EVM signing as **not verified live**.
 13. Confirm Turnkey accepts FloFi's encodings:

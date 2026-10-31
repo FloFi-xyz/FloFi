@@ -546,7 +546,7 @@ A product page can be compromised (no `script-src` on `/app`), so FloFi Wallet n
   - The fee cap must stay within 4× the network's current fees (`FILLED_FEE_BOUND`).
   - So two different signatures for one attempt cannot both be valid.
 - **Scope.**
-  - **Supported:** `jupiter-swap`, `solana-devnet-swap`, `solana-transfer`, `solana-devnet-transfer`, `robinhood-`/`base-`/
+  - **Supported (mainnet only, see §16.11):** `jupiter-swap`, `solana-transfer`, `robinhood-`/`base-`/
     `arbitrum-`/`ethereum-mainnet-transfer`, and `robinhood-`/`base-`/`arbitrum-`/`ethereum-swap`.
   - **Refused by name** (`FLOFI_WALLET_FLOW_NOT_SUPPORTED`, which tells the person to use MetaMask, Phantom or Solflare): every other flow,
     including the EVM testnet flows. FloFi Wallet's EVM provider exposes only the four catalog mainnets.

@@ -40,7 +40,8 @@ tables, no change to any existing relation, no function or trigger) and atomic.
 3. Live provider verification on a non-production deployment with a dedicated empty database, following
    [LIVE-VERIFICATION-AUTH-WALLETS.md](./LIVE-VERIFICATION-AUTH-WALLETS.md):
    - Google, Apple, email and Web3 Wallet sign-in;
-   - FloFi Wallet unlock, create, import, export and signing on testnets, with a Turnkey **test** organization and disposable identities.
+   - FloFi Wallet unlock, create, import and export with a Turnkey **test** organization and disposable identities. FloFi Wallet signs on
+     mainnet only (EVM and Solana), so a live signing check moves real funds: a trivial amount, on the owner's explicit decision only.
    The email flow already uses Turnkey's encrypted OTP activities (`INIT_OTP_V3` / `VERIFY_OTP_V2` / `OTP_LOGIN_V2`).
 
 ## Release A: certificate only (no migration)
