@@ -20,7 +20,8 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
-from governance_lite import AGE_WAIVER, dependency_age_waivers, dependency_release_age_allowed
+from governance_lite import (AGE_WAIVER, APPROVED_AGE_WAIVERS, LEGACY_AGE_WAIVERS, dependency_age_waivers,
+                             dependency_release_age_allowed)
 from ci_archive_cache import verified_archive
 
 NODE_VERSION = "24.21.0"
@@ -433,6 +434,10 @@ def verify_dependencies():
     waiver_files = {"pnpm-workspace.yaml": Path("pnpm-workspace.yaml").read_text()}
     if Path(AGE_WAIVER).is_file():
         waiver_files[AGE_WAIVER] = Path(AGE_WAIVER).read_text()
+    for entry in APPROVED_AGE_WAIVERS:
+        review = str(entry.get("review", "")).split("#", 1)[0]
+        if review and Path(review).is_file():
+            waiver_files[review] = Path(review).read_text()
     age_waivers, waiver_errors = dependency_age_waivers(waiver_files)
     errors.extend(waiver_errors)
     plan = Path("docs/builds/BUILD-001-PLAN.md").read_text()
@@ -746,6 +751,33 @@ def verify_dependencies():
                                               snapshot_blocks.get(identity, "")))}
         return record, issues, rejected
 
+    # Each waiver is bound to the exact reviewed tarball and publication: the identity must be locked with the recorded integrity,
+    # and the registry must report the recorded publication time. Waivers past normal eligibility are reported for removal.
+    removable_waivers = []
+    for entry in APPROVED_AGE_WAIVERS:
+        identity = f"{entry['package']}@{entry['version']}"
+        if identity not in locked:
+            errors.append(f"Release-age waiver for an unlocked identity: {identity}")
+            continue
+        if "integrity" in entry and locked[identity] != entry["integrity"]:
+            errors.append(f"Release-age waiver integrity differs from the lockfile: {identity}")
+        published = metadata_records[identity][1]
+        if "published_at" in entry and isinstance(published, str):
+            try:
+                registry_time = datetime.datetime.fromisoformat(published.replace("Z", "+00:00"))
+                if identity in LEGACY_AGE_WAIVERS:  # recorded to the second before this binding existed
+                    registry_time = registry_time.replace(microsecond=0)
+                same = registry_time == datetime.datetime.fromisoformat(entry["published_at"].replace("Z", "+00:00"))
+            except ValueError:
+                same = False
+            if not same:
+                errors.append(f"Release-age waiver publication time differs from the registry: {identity}")
+        try:
+            if datetime.datetime.fromisoformat(str(published).replace("Z", "+00:00")) <= cutoff:
+                removable_waivers.append(identity)
+        except ValueError:
+            pass
+
     records = []
     rejected_identities = set()
     for (identity, _), (record, issues, rejected) in zip(
@@ -770,6 +802,7 @@ def verify_dependencies():
     destination.write_text(json.dumps(records, indent=2, sort_keys=True) + "\n")
     print("Registry entries/integrities/release ages verified:", len(records), flush=True)
     print("Exact temporary owner-approved release-age waivers:", sorted(age_waivers), flush=True)
+    print("Release-age waivers past normal eligibility (remove in a follow-up change):", sorted(removable_waivers), flush=True)
     print("Exact reviewed license exception set:", len(rejected_identities), flush=True)
     print("License inventory:",
           dict(sorted(collections.Counter(r["license"] for r in records).items())), flush=True)

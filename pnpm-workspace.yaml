@@ -2,11 +2,13 @@ packages:
   - packages/*
   - apps/reference-dapp
 minimumReleaseAge: 10080
-# Exact temporary owner-approved release-age exceptions only (no ranges/globs).
+# Exact temporary owner-approved release-age exceptions only (no ranges/globs). Policy: docs/security/DEPENDENCY-AGE-POLICY.md
 # Metadata: docs/security/COLOSSEUM-DEPENDENCY-AGE-WAIVER.json
 minimumReleaseAgeExclude:
   - source-map-js@1.2.2
   - fast-uri@3.1.9
+  - minimatch@11.0.3
+  - '@isaacs/nonrecursive-glob-match@1.0.3'
 pmOnFail: error
 strictPeerDependencies: true
 autoInstallPeers: false

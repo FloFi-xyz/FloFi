@@ -355,6 +355,10 @@ class FullDependencyGate(unittest.TestCase):
             document = self.registry.setdefault(name, {'versions': {}, 'time': {}})
             document['versions'][version] = package
             document['time'][version] = '2020-01-01T00:00:00Z'
+        # Owner-approved release-age waivers are bound to their recorded registry publication time.
+        for entry in bootstrap.APPROVED_AGE_WAIVERS:
+            if 'published_at' in entry:
+                self.registry[entry['package']]['time'][entry['version']] = entry['published_at']
         self.scratch = tempfile.TemporaryDirectory()
         self.addCleanup(self.scratch.cleanup)
 
@@ -368,6 +372,26 @@ class FullDependencyGate(unittest.TestCase):
         self.verify()
         evidence = json.loads((Path(self.scratch.name) / 'build-002-dependencies.json').read_text())
         self.assertEqual(len(evidence), 272)
+
+    def test_release_age_waivers_bind_exact_integrity_and_publication(self):
+        young = '2999-01-01T00:00:00.000Z'
+        for name, version in (('minimatch', '11.0.3'), ('@isaacs/nonrecursive-glob-match', '1.0.3')):
+            with self.subTest(identity=name + '@' + version):
+                saved = json.loads(json.dumps(self.registry))
+                self.registry[name]['time'][version] = young  # a republication-time change is not the reviewed release
+                with self.assertRaises(RuntimeError):
+                    self.verify()
+                self.assertFalse((Path(self.scratch.name) / 'build-002-dependencies.json').exists())
+                self.registry = saved
+        waivers = [dict(entry) for entry in bootstrap.APPROVED_AGE_WAIVERS]
+        waivers[2]['integrity'] = 'sha512-' + 'A' * 86 + '=='
+        with patch.object(bootstrap, 'APPROVED_AGE_WAIVERS', tuple(waivers)), self.assertRaises(RuntimeError):
+            self.verify()
+        waivers = [dict(entry) for entry in bootstrap.APPROVED_AGE_WAIVERS] + [{'package': 'left-pad', 'version': '1.3.0'}]
+        with patch.object(bootstrap, 'APPROVED_AGE_WAIVERS', tuple(waivers)), self.assertRaises(RuntimeError):
+            self.verify()
+        # A waived identity younger than seven days passes only through its exact waiver.
+        self.verify()
 
     def test_integrity_license_age_platform_and_missing_entry_fail_without_evidence(self):
         mutations = ['integrity', 'license', 'age', 'platform', 'missing']
