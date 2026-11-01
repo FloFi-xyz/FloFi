@@ -310,8 +310,16 @@
       "path": "apps/reference-dapp/src/platform/parity.test.ts",
       "stage": "unit"
     },
+    "app.server.arbitrum-runtime": {
+      "path": "apps/reference-dapp/src/server/arbitrum-runtime.test.ts",
+      "stage": "unit"
+    },
     "app.server.base-swap": {
       "path": "apps/reference-dapp/src/server/base-swap.test.ts",
+      "stage": "unit"
+    },
+    "app.server.build-estimate-production": {
+      "path": "apps/reference-dapp/src/server/build-estimate-production.test.ts",
       "stage": "unit"
     },
     "app.server.card-origin": {
@@ -5583,6 +5591,8 @@
         "action-registry.engineering-regression",
         "app.platform.engineering-continuity",
         "app.platform.parity",
+        "app.server.arbitrum-runtime",
+        "app.server.build-estimate-production",
         "reference-compiler.review",
         "reference-compiler.simulation",
         "reference-executor.composition.fork",
