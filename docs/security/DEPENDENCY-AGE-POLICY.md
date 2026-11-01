@@ -1,4 +1,18 @@
-# Dependency release-age policy
+# Dependency release-age policy — RETIRED
+
+**Retired on 2026-11-01 by owner decision DEC-0057 (BUILD-FLOFI-CI-ARCHITECTURE-001).** There is no release-age gate and
+no waiver mechanism: `pnpm-workspace.yaml` sets `minimumReleaseAge: 0`, `minimumReleaseAgeExclude` and
+`APPROVED_AGE_WAIVERS` were removed, and `docs/security/COLOSSEUM-DEPENDENCY-AGE-WAIVER.json` was deleted (it remains in
+Git history). Dependency security is now automatic and risk-based: see [DEPENDENCY-SECURITY.md](DEPENDENCY-SECURITY.md).
+
+The text below is the historical record of the retired policy and of the four owner-approved waivers it carried
+(`source-map-js@1.2.2` GHSA-68fv-2mgg-jv7q, `fast-uri@3.1.9` GHSA-w74x-v6f9-j3xg / GHSA-wjr9-j795-jxcr /
+GHSA-xhq7-xmqj-769h / GHSA-333x-w4r6-6crp, `minimatch@11.0.3` and `@isaacs/nonrecursive-glob-match@1.0.3`
+GHSA-g3hv-75wg-m249). Nothing reads it; it is not a gate.
+
+---
+
+## Historical text (no longer in force)
 
 Owner decision, 2026-10-31 (PR #143): the seven-day minimum release age must not, on its own, block a reviewed security fix or a
 reviewed dependency of an owner-requested product capability. It stays a supply-chain control for everything else.

@@ -2,11 +2,13 @@
 # Mirror source: .github/workflows/governance.yml and contracts.yml, which run the same commands in one sequential job.
 # scripts/test_ci_optimization.py keeps both at equal coverage; refresh this file when the Actions contracts workflow changes.
 #
-# After governance, certification fans out into three jobs of about equal duration, each in its own container with its own
-# loopback ports, disposable PostgreSQL and build: static and unit checks with the PostgreSQL and fork suites, and two browser
-# jobs (critical regressions first). It fans in at `certification`, which runs only when all three passed and then verifies the
-# ledger: every required stage and every planned browser profile (each exactly once) succeeded. When any job fails,
-# `certification` never runs, so its required status is not reported and a merge stays blocked.
+# After governance, certification fans out into three jobs of about equal duration (BUILD-FLOFI-CI-ARCHITECTURE-001 balanced
+# them on measured stage and profile seconds), each in its own container with its own loopback ports, disposable PostgreSQL
+# and build: static, dependency-security and unit checks with the PostgreSQL and fork suites, then browser shard 3; browser job
+# 1 (critical regressions first, then shard 1); browser job 2 (shard 2, then composition). It fans in at `certification`,
+# which runs only when all three passed and then verifies the ledger: every required stage and every planned browser profile
+# (each exactly once) succeeded for this revision. When any job fails, `certification` never runs, so its required status is
+# not reported and a merge stays blocked.
 version: 2.1
 executors:
   certification:
@@ -49,9 +51,12 @@ commands:
               sleep 1
             done
             (echo >/dev/tcp/127.0.0.1/5432) >/dev/null 2>&1 || { echo 'PostgreSQL unavailable' >&2; exit 1; }
+      # Raw tool archives only (Node, pnpm, anvil, headless shell). Every archive is digest-verified before use
+      # (scripts/ci_archive_cache.py), so the prefix fallback can only save a download, never supply unverified bytes.
       - restore_cache:
           keys:
-            - flofi-circleci-archives-v1-{{ checksum "scripts/bootstrap-ci.py" }}
+            - flofi-circleci-archives-v2-{{ arch }}-{{ checksum "scripts/bootstrap-ci.py" }}-{{ checksum "scripts/bootstrap-anvil.py" }}-{{ checksum "scripts/bootstrap-playwright.py" }}-{{ checksum "scripts/ci_archive_cache.py" }}
+            - flofi-circleci-archives-v2-{{ arch }}-
       - run:
           name: "Bootstrap exact approved Node and pnpm"
           command: |
@@ -84,8 +89,8 @@ commands:
             set -euo pipefail
             source scripts/ci-observe.sh 'Frozen dependency install'
             pnpm install --frozen-lockfile --ignore-scripts
-  prepare-browser:
-    description: "Production build and the exact approved anvil and headless shell"
+  production-build:
+    description: "Production build of this revision in this container (not shared between jobs; see the build report)"
     steps:
       - run:
           name: "Production build"
@@ -93,12 +98,18 @@ commands:
             set -euo pipefail
             source scripts/ci-observe.sh 'Production build'
             pnpm build
+  bootstrap-anvil:
+    description: "The exact approved anvil"
+    steps:
       - run:
           name: "Bootstrap exact approved anvil"
           command: |
             set -euo pipefail
             source scripts/ci-observe.sh 'Anvil bootstrap'
             python3 scripts/bootstrap-anvil.py "$RUNNER_TEMP/gryloo-anvil/foundry-v1.8.3"
+  bootstrap-browser:
+    description: "The exact approved headless shell"
+    steps:
       - run:
           name: "Bootstrap exact approved headless shell"
           command: |
@@ -106,6 +117,12 @@ commands:
             source scripts/ci-observe.sh 'Browser bootstrap'
             export BUILD002_BROWSER_CACHE="$RUNNER_TEMP/gryloo-playwright/chromium_headless_shell-1243"
             python3 scripts/bootstrap-playwright.py "$BUILD002_BROWSER_CACHE"
+  prepare-browser:
+    description: "Production build and the exact approved anvil and headless shell"
+    steps:
+      - production-build
+      - bootstrap-anvil
+      - bootstrap-browser
   browser-results:
     description: "Per-test JUnit results, failure artifacts (screenshots, error context, diagnostic traces) and browser timings"
     steps:
@@ -164,11 +181,15 @@ jobs:
     steps:
       - prepare-certification
       - run:
-          name: "Verify every registry integrity, license and release age"
+          name: "Dependency security policy (integrity, registry signatures, advisories, licenses, supply-chain risk)"
           command: |
             set -euo pipefail
-            source scripts/ci-observe.sh 'Dependency integrity license and age'
-            python3 scripts/bootstrap-ci.py --verify-dependencies
+            source scripts/ci-observe.sh 'Dependency security policy'
+            # Automatic PASS / REVIEW_REQUIRED / BLOCK per locked package (docs/security/dependency-policy.json); no release-age gate.
+            python3 scripts/dependency_security.py verify
+      - store_artifacts:
+          path: /tmp/flofi-ci/flofi-dependency-evidence.json
+          destination: dependency-security/flofi-dependency-evidence.json
       - run:
           name: "Dependency audit"
           command: |
@@ -177,7 +198,10 @@ jobs:
             pnpm audit --audit-level low
       - run:
           name: "Validate and remove ephemeral CycloneDX 1.6 SBOM"
-          command: bash .circleci/scripts/ci-sbom.sh
+          command: |
+            set -euo pipefail
+            # The canonical gate shared with GitHub Actions and Cloud Build (scripts/sbom_verify.py).
+            bash scripts/ci-sbom.sh
       - run:
           name: "Typecheck"
           command: |
@@ -218,15 +242,25 @@ jobs:
             export TEST_DATABASE_URL="postgres://flofi@127.0.0.1:5432/postgres"
             pnpm test:postgres --reporter=default --reporter=json --outputFile="$RUNNER_TEMP/flofi-agent-postgres.json"
             python3 scripts/agent_guard.py verify-results --stage postgres "$RUNNER_TEMP/flofi-agent-postgres.json"
-      - run:
-          name: "Bootstrap exact approved anvil"
-          command: |
-            set -euo pipefail
-            source scripts/ci-observe.sh 'Anvil bootstrap'
-            python3 scripts/bootstrap-anvil.py "$RUNNER_TEMP/gryloo-anvil/foundry-v1.8.3"
+      - bootstrap-anvil
       - run:
           name: "Offline compatibility gate and fork suite"
           command: bash .circleci/scripts/ci-fork.sh
+      # Browser shard 3 closes this job (its other work is ~15 min, the browser jobs ~22): no extra runner is added.
+      - production-build
+      - bootstrap-browser
+      - run:
+          name: "Run guarded browser suite, part 3 of 3"
+          no_output_timeout: 30m
+          command: |
+            set -euo pipefail
+            source scripts/ci-observe.sh 'Guarded browser suites'
+            export BUILD002_BROWSER_CACHE="$RUNNER_TEMP/gryloo-playwright/chromium_headless_shell-1243"
+            export GRYLOO_ANVIL_BIN="$RUNNER_TEMP/gryloo-anvil/foundry-v1.8.3/anvil"
+            export GRYLOO_MODE_A_RUNTIME="$RUNNER_TEMP/gryloo-mode-a-e2e"
+            export GRYLOO_COW_RUNTIME="$RUNNER_TEMP/gryloo-cow-e2e"
+            node scripts/guarded-release-browser.mjs extended --shard 3/3
+      - browser-results
       - record-certification
   certification-browser-1:
     executor: certification
@@ -245,7 +279,7 @@ jobs:
             export GRYLOO_COW_RUNTIME="$RUNNER_TEMP/gryloo-cow-e2e"
             node scripts/guarded-release-browser.mjs critical
       - run:
-          name: "Run guarded browser suite, part 1 of 2"
+          name: "Run guarded browser suite, part 1 of 3"
           no_output_timeout: 30m
           command: |
             set -euo pipefail
@@ -254,11 +288,11 @@ jobs:
             export GRYLOO_ANVIL_BIN="$RUNNER_TEMP/gryloo-anvil/foundry-v1.8.3/anvil"
             export GRYLOO_MODE_A_RUNTIME="$RUNNER_TEMP/gryloo-mode-a-e2e"
             export GRYLOO_COW_RUNTIME="$RUNNER_TEMP/gryloo-cow-e2e"
-            node scripts/guarded-release-browser.mjs extended --shard 1/2
+            node scripts/guarded-release-browser.mjs extended --shard 1/3
       - browser-results
       - record-certification
       - save_cache:
-          key: flofi-circleci-archives-v1-{{ checksum "scripts/bootstrap-ci.py" }}
+          key: flofi-circleci-archives-v2-{{ arch }}-{{ checksum "scripts/bootstrap-ci.py" }}-{{ checksum "scripts/bootstrap-anvil.py" }}-{{ checksum "scripts/bootstrap-playwright.py" }}-{{ checksum "scripts/ci_archive_cache.py" }}
           paths:
             - /tmp/flofi-ci/archives
   certification-browser-2:
@@ -267,7 +301,7 @@ jobs:
       - prepare-certification
       - prepare-browser
       - run:
-          name: "Run guarded browser suite, part 2 of 2"
+          name: "Run guarded browser suite, part 2 of 3"
           no_output_timeout: 30m
           command: |
             set -euo pipefail
@@ -276,7 +310,7 @@ jobs:
             export GRYLOO_ANVIL_BIN="$RUNNER_TEMP/gryloo-anvil/foundry-v1.8.3/anvil"
             export GRYLOO_MODE_A_RUNTIME="$RUNNER_TEMP/gryloo-mode-a-e2e"
             export GRYLOO_COW_RUNTIME="$RUNNER_TEMP/gryloo-cow-e2e"
-            node scripts/guarded-release-browser.mjs extended --shard 2/2
+            node scripts/guarded-release-browser.mjs extended --shard 2/3
       - run:
           name: "Composition fork and browser suites"
           no_output_timeout: 30m
@@ -284,7 +318,7 @@ jobs:
       - browser-results
       - record-certification
       - save_cache:
-          key: flofi-circleci-archives-v1-{{ checksum "scripts/bootstrap-ci.py" }}
+          key: flofi-circleci-archives-v2-{{ arch }}-{{ checksum "scripts/bootstrap-ci.py" }}-{{ checksum "scripts/bootstrap-anvil.py" }}-{{ checksum "scripts/bootstrap-playwright.py" }}-{{ checksum "scripts/ci_archive_cache.py" }}
           paths:
             - /tmp/flofi-ci/archives
   certification:

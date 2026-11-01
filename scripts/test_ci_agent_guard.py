@@ -647,7 +647,9 @@ class EngineeringGuard(unittest.TestCase):
             "packages/workflow-contracts/src/semantic-workflow.ts": ["flofi-chat", "flofi-workflow", "flofi-mcp", "flofi-frontend-ux"],
             "apps/reference-dapp/src/channels/learning-runtime.ts": ["flofi-data-privacy", "flofi-channels"],
             "docs/developer/openapi.json": ["flofi-developers"],
-            "docs/security/COLOSSEUM-DEPENDENCY-AGE-WAIVER.json": ["flofi-security", "flofi-infrastructure-ci"],
+            # BUILD-FLOFI-CI-ARCHITECTURE-001: the dependency security policy and its engine replaced the retired age waiver.
+            "docs/security/dependency-policy.json": ["flofi-security", "flofi-infrastructure-ci"],
+            "scripts/dependency_security.py": ["flofi-security", "flofi-infrastructure-ci"],
         }
         for path, expected in boundaries.items():
             with self.subTest(path=path):

@@ -37,7 +37,10 @@ digits. Raw response, payload, and intent fixtures hash exact bytes under their
 own domains. See [the profile](../contracts/CANONICALIZATION_V1.md).
 
 Use approved exact pins, an integrity-bearing lockfile, strict peers, seven-day
-minimum release age, and disabled lifecycle scripts. CI uses runner Git, Bash,
+minimum release age, and disabled lifecycle scripts. (Superseded in part by
+DEC-0057, BUILD-FLOFI-CI-ARCHITECTURE-001: no release-age restriction; exact
+direct pins and every other control above are enforced by the automatic
+dependency security policy instead of per-build approvals.) CI uses runner Git, Bash,
 and Python without third-party Actions. Python verifies official Node.js
 `24.21.0` and pnpm `11.22.0` archives before extraction. Corepack and automatic
 toolchain substitution are disabled. Any approved-pin, integrity, peer, license,
