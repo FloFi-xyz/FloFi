@@ -32,11 +32,13 @@ export function HeaderSettings({ onDisconnect, disconnectDisabled, onSupport }: 
     if (window.location.pathname !== '/mcp/approve') void accountState().then(setAccount, () => undefined);
   }, [open]);
   /**
-   * Sign out is Disconnect (shown only with an account, i.e. where `onDisconnect` is the full flow of src/accounts/disconnect.ts): the
-   * wallet connection, Privy and the FloFi session end, then the sign-in page. Without a page-level Disconnect it still signs out.
+   * BUILD-FLOFI-WALLET-UX-EXECUTION-FIX-001 (P1-04): one Disconnect replaces "Sign out" + "Disconnect". Signed in, it is the full flow of
+   * src/accounts/disconnect.ts (wallet connection closed, FloFi session revoked, Privy logged out, sign-in page) — through the page's own
+   * Disconnect when it has one, else directly. Without an account it closes the wallet connection only, as before. Nothing is deleted.
    */
-  async function signOut() { if (disconnectDisabled) await disconnectToLogin(privy); else onDisconnect(); }
-  const languageDescriptionId = useId(), themeDescriptionId = useId();
+  const signedIn = Boolean(account?.availability.accounts && account.account);
+  async function disconnect() { if (signedIn && disconnectDisabled) await disconnectToLogin(privy); else onDisconnect(); }
+  const languageDescriptionId = useId(), themeDescriptionId = useId(), disconnectDescriptionId = useId();
   useEffect(() => {
     let saved: 'light' | 'dark' = 'light';
     try { if (localStorage.getItem('flofi.theme') === 'dark') saved = 'dark'; } catch { /* Preferences are optional when storage is unavailable. */ }
@@ -107,10 +109,7 @@ export function HeaderSettings({ onDisconnect, disconnectDisabled, onSupport }: 
       {account?.availability.accounts && (account.account ? <>
         <Link href="/app/credentials" className="header-settings-action" onClick={() => setOpen(false)}>
           <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></svg><span>{tr("My account")}</span>
-        </Link>
-        <button type="button" className="header-settings-action" onClick={() => void signOut()}>
-          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M14 4h5a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-5M10 12H3m4-4-4 4 4 4"/></svg><span>{tr("Sign out")}</span>
-        </button></> : /* A full page load: sign-in runs under its own nonce policy (src/accounts/account-csp.ts), never this page's. */ <a href="/login" className="header-settings-action" onClick={() => setOpen(false)}>
+        </Link></> : /* A full page load: sign-in runs under its own nonce policy (src/accounts/account-csp.ts), never this page's. */ <a href="/login" className="header-settings-action" onClick={() => setOpen(false)}>
           <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></svg><span>{tr("Sign in")}</span>
         </a>)}
       {privacy && <Link href="/app/privacy" className="header-settings-action" onClick={() => setOpen(false)}>
@@ -119,9 +118,12 @@ export function HeaderSettings({ onDisconnect, disconnectDisabled, onSupport }: 
       <button type="button" className="header-settings-action" onClick={() => { onSupport?.(); setOpen(false); toggle.current?.focus(); }}>
         <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="4"/><path d="m5.6 5.6 3.6 3.6m5.6 5.6 3.6 3.6M5.6 18.4l3.6-3.6m5.6-5.6 3.6-3.6"/></svg><span>{tr("Support")}</span>
       </button>
-      <button type="button" className="header-settings-action header-disconnect" disabled={disconnectDisabled}
-        title={tr("Clear this app’s wallet connection. Wallet permissions are managed in your wallet.")}
-        onClick={() => { onDisconnect(); setOpen(false); toggle.current?.focus(); }}>
+      <span id={disconnectDescriptionId} className="sr-only">{tr(signedIn ? 'End your FloFi session on this device and disconnect your wallet. Your account, wallets and history are kept.'
+        : 'Clear this app’s wallet connection. Wallet permissions are managed in your wallet.')}</span>
+      <button type="button" className="header-settings-action header-disconnect" disabled={disconnectDisabled && !signedIn} aria-describedby={disconnectDescriptionId}
+        title={tr(signedIn ? 'End your FloFi session on this device and disconnect your wallet. Your account, wallets and history are kept.'
+          : 'Clear this app’s wallet connection. Wallet permissions are managed in your wallet.')}
+        onClick={() => { void disconnect(); setOpen(false); toggle.current?.focus(); }}>
         <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M10 4H5a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h5M10 12h11m-4-4 4 4-4 4"/></svg><span>{tr("Disconnect")}</span>
       </button>
     </div>}

@@ -46,6 +46,19 @@ describe('Add your wallets', () => {
     expect(solanaCard).toContain('Imported');
     expect(html).toMatch(/<button type="button" class="[^"]*">Continue<\/button>/);
   });
+  it('BUILD-FLOFI-WALLET-UX-EXECUTION-FIX-001 (P1-01, T10): one shortened address per wallet with a copy button, no row above the cards', () => {
+    const html = render({ availability, account: account([wallet('evm', EVM, 'generated'), wallet('solana', SOL, 'generated')]), privy: null });
+    for (const [ecosystem, address] of [['evm', EVM], ['solana', SOL]] as const) {
+      const start = html.indexOf(`data-ecosystem="${ecosystem}"`), card = html.slice(start, html.indexOf('</section>', start));
+      // The full address appears only as data/title (what Copy copies), never as visible text; the short form is shown once.
+      expect(card.split(`>${address}<`)).toHaveLength(1);
+      expect(card.match(/<code /g)).toHaveLength(1);
+      expect(card).toContain(`>${address.slice(0, 6)}…${address.slice(-4)}</code>`);
+      expect(card).toMatch(/<button type="button" class="[^"]*" aria-label="Copy EVM wallet address" title="Copy address">/);
+      expect(card).not.toContain('<ul');
+    }
+    expect(html).not.toContain('wallet created: ');
+  });
   it('says honestly why creating is not possible, instead of spinning', () => {
     expect(walletReadiness({ availability: { ...availability, managedWallets: false }, account: account([]), privy: null }, ready)).toBe('not-configured');
     expect(walletReadiness({ availability, account: account([]), privy: null }, null)).toBe('not-configured');

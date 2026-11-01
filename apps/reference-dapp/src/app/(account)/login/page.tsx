@@ -7,6 +7,7 @@ import type { Metadata } from 'next';
 import { redirect } from 'next/navigation';
 import { accountState } from '../../account-action';
 import { safeReturnPath } from '../../../accounts/account-session';
+import { needsWalletOnboarding } from '../../../accounts/account-model';
 import { SignInScreen } from '../../../components/account/sign-in';
 
 export const dynamic = 'force-dynamic';
@@ -19,6 +20,6 @@ export default async function LoginPage({ searchParams }: { searchParams: Search
   const returnTo = safeReturnPath(one(params.returnTo) ?? '/app');
   const error = one(params.error), code = error && /^[A-Z][A-Z0-9_]{2,80}$/.test(error) ? error : null;
   // A returning, still-valid session goes straight on, unless the page shows an error.
-  if (state.account && !code) redirect(state.account.onboarding === 'pending' ? '/onboarding/wallets' : returnTo);
+  if (state.account && !code) redirect(needsWalletOnboarding(state.account) ? '/onboarding/wallets' : returnTo);
   return <SignInScreen state={state} initialError={code} returnTo={returnTo}/>;
 }

@@ -9,7 +9,7 @@ import { ARBITRUM_ONE, ARBITRUM_ONE_TRANSFER, ARBITRUM_TOKEN_LIST, catalogAsset,
 import { createCatalogSwapNode, createNativeTransferNode, createTokenTransferNode, type CatalogAssetRef, type SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
 import { decodeNativeSwap, fromHex } from '@defi-workflow-engine/reference-compiler';
 import { createFileExecutionStorage } from '@defi-workflow-engine/reference-executor';
-import { createPublicTestnetService, createDurablePublicTestnetService, NATIVE_ETH, reviewPublicRun, validatePublicRunLog } from './public-testnet-service';
+import { createPublicTestnetService, createDurablePublicTestnetService, NATIVE_ETH, relayedNonceRelease, reviewPublicRun, validatePublicRunLog, type PublicRun } from './public-testnet-service';
 import { createRobinhoodTransferService } from './robinhood-transfer-service';
 import { createRobinhoodMockChain, mockCatalogRuntime } from './robinhood-mainnet.test-harness';
 import { arbitrumMainnetMode, arbitrumOwnerExecutionEnabled, arbitrumMainnetRpc, arbitrumRpcUrl, createArbitrumCatalogLoader } from './arbitrum-mainnet';
@@ -417,5 +417,274 @@ describe('BUILD-FLOFI-BRIDGE-LIVE-FIX-003 native ETH on Arbitrum One (owner-boun
     const out = await s.begin(uid, owner);
     s.report(uid, out.attempt.attemptId, { kind: 'HASH', txHash: chain.apply(out.tx) });
     expect((await s.observe(uid)).outcome).toMatchObject({ outputReceived: '5000000000000000' });
+  });
+});
+
+describe('BUILD-FLOFI-WALLET-UX-EXECUTION-FIX-001 owner account types on the owner-bound swap (T16/T18)', () => {
+  const metaMaskDeleGator = '0x63c0c19a282a1b52b07dd5a65b58948a07dae32b';
+  const ETH = { chain: chainId, address: null, decimals: 18, officialId: null } as const;
+  const ref = (symbol: string) => ({ chain: chainId, address: asset(symbol).address!, decimals: asset(symbol).decimals, officialId: null });
+  const usdcToEth = () => flow(createCatalogSwapNode('node-002', { chain: chainId, amount: '10000000', slippageBps: 100, input: ref('USDC'), output: ETH }));
+  it('a standard EOA keeps its exact Review (no delegation field)', async () => {
+    const run = await swapService().prepare(usdcToEth(), owner);
+    expect(run.quote.ownerReview).toBeDefined();
+    expect(run.quote.ownerReview).not.toHaveProperty('delegation');
+  });
+  it('a MetaMask Smart Account (EIP-7702 delegated EOA) is simulated, reviewed, executed and reconciled — never refused as a contract', async () => {
+    chain.state.codeOverride.set(owner, '0xef0100' + metaMaskDeleGator.slice(2));
+    const s = swapService(), first = await s.prepare(usdcToEth(), owner), id = first.quote.executionId;
+    expect(first.quote.ownerReview).toMatchObject({ account: owner, step: 'approval', delegation: metaMaskDeleGator });
+    s.review(id, first.quote.manifestHash);
+    const approve = await s.begin(id, owner);
+    s.report(id, approve.attempt.attemptId, { kind: 'HASH', txHash: chain.apply(approve.tx) }); await s.observe(id);
+    const next = await s.refresh(id); s.review(id, next.quote.manifestHash);
+    expect(next.quote.ownerReview).toMatchObject({ step: 'swap', delegation: metaMaskDeleGator });
+    const begun = await s.begin(id, owner);
+    s.report(id, begun.attempt.attemptId, { kind: 'HASH', txHash: chain.apply(begun.tx) });
+    const done = await s.observe(id);
+    expect(done.divergence ?? null).toBeNull();
+    expect(BigInt(done.outcome!.outputReceived)).toBeGreaterThanOrEqual(BigInt(next.quote.minimumOut));
+    // A delegated owner's balances can also move through relays (no nonce change): its own receipts are the proof; it paid both fees itself.
+    expect(done.outcome!.evidence.reconciliation.limitations).toContain('OWNER_DELEGATED_ACCOUNT_RECEIPT_RECONCILED');
+    expect(done.outcome!.evidence.reconciliation.limitations).not.toContain('OWNER_SUBMISSION_RELAYED_FEE_PAID_BY_RELAYER');
+    expect(BigInt(done.outcome!.gasCostWei)).toBe(done.attempts.reduce((sum, a) => sum + BigInt(a.receipt!.gasCostWei), 0n));
+  });
+  it('refuses a delegation to an unreviewed implementation with its own code (a sweeper delegate never receives swap output)', async () => {
+    chain.state.codeOverride.set(owner, '0xef0100' + '9'.repeat(40));
+    await expect(swapService().prepare(usdcToEth(), owner)).rejects.toThrow('OWNER_DELEGATION_UNVERIFIED');
+  });
+  it('still refuses a smart contract wallet that cannot originate the transaction', async () => {
+    chain.state.codeOverride.set(owner, '0x6080604052');
+    await expect(swapService().prepare(usdcToEth(), owner)).rejects.toThrow('OWNER_NOT_EOA');
+  });
+  it('never reconciles a swap whose owner account carries contract code or an unreviewed delegate where it landed', async () => {
+    const s = swapService(), first = await s.prepare(usdcToEth(), owner), id = first.quote.executionId;
+    s.review(id, first.quote.manifestHash);
+    const approve = await s.begin(id, owner);
+    s.report(id, approve.attempt.attemptId, { kind: 'HASH', txHash: chain.apply(approve.tx) }); await s.observe(id);
+    const next = await s.refresh(id); s.review(id, next.quote.manifestHash);
+    const begun = await s.begin(id, owner);
+    s.report(id, begun.attempt.attemptId, { kind: 'HASH', txHash: chain.apply(begun.tx) });
+    chain.state.codeOverride.set(owner, '0xef0100' + '9'.repeat(40));
+    const done = await s.observe(id);
+    expect(done).toMatchObject({ divergence: 'OWNER_ACCOUNT_CODE_MISMATCH', outcome: null });
+  });
+  it('a delegation added after Review needs a new Review before any wallet request (T19)', async () => {
+    const s = swapService(), run = await s.prepare(swap(), owner), id = run.quote.executionId;
+    s.review(id, run.quote.manifestHash);
+    chain.state.codeOverride.set(owner, '0xef0100' + metaMaskDeleGator.slice(2));
+    await expect(s.begin(id, owner)).rejects.toThrow('OWNER_STATE_CHANGED_REVIEW_REQUIRED');
+    expect(s.load(id).attempts).toHaveLength(0);
+    expect(s.load(id).reviewedManifestHash).toBeNull();
+  });
+});
+
+describe('BUILD-FLOFI-WALLET-UX-EXECUTION-FIX-001 relayed MetaMask Smart Account submissions (Delegation Manager redemptions)', () => {
+  // MOCKED loopback only: the relay is played by the in-memory chain in the shape of the real MetaMask relay recorded in
+  // testdata/metamask-delegated-depth1-approval.base-sepolia.json. This is not evidence of a live mainnet relay.
+  const metaMaskDeleGator = '0x63c0c19a282a1b52b07dd5a65b58948a07dae32b', relayer = '0xc066ac5d385419b1a8c43a0e146fa439837a8b8c';
+  const ETH = { chain: chainId, address: null, decimals: 18, officialId: null } as const;
+  const ref = (symbol: string) => ({ chain: chainId, address: asset(symbol).address!, decimals: asset(symbol).decimals, officialId: null });
+  const usdcToEth = () => flow(createCatalogSwapNode('node-002', { chain: chainId, amount: '10000000', slippageBps: 100, input: ref('USDC'), output: ETH }));
+  const intents = (path: string, nonce = 0) => readFileSync(join(path, `swap-42161-${owner}-${nonce}.intent`), 'utf8').trimEnd().split('\n').map(line => JSON.parse(line) as Record<string, unknown>);
+  beforeEach(() => { chain.state.codeOverride.set(owner, '0xef0100' + metaMaskDeleGator.slice(2)); chain.fundNative(relayer, 10n ** 18n); });
+  /** Reviews and begins the run's next step; the wallet result is left to the test. */
+  async function step(s: ReturnType<typeof swapService>, id: string, refresh = false) {
+    const run = refresh ? await s.refresh(id) : s.load(id); s.review(id, run.quote.manifestHash);
+    return s.begin(id, owner);
+  }
+
+  it('T16/T18: USDC → native ETH relayed approval and swap reconcile from their receipts; the owner pays no fee and keeps its nonce', async () => {
+    const path = dir(), s = swapService({ path }), id = (await s.prepare(usdcToEth(), owner)).quote.executionId, nativeBefore = chain.state.native.get(owner)!;
+    const approve = await step(s, id);
+    expect(approve.tx.nonce).toBe('0x0');
+    s.report(id, approve.attempt.attemptId, { kind: 'HASH', txHash: chain.relay(approve.tx, { relayer }) });
+    const observed = await s.observe(id); expect(observed.divergence ?? null).toBeNull();
+    expect(observed.attempts[0]).toMatchObject({ state: 'CONFIRMED', receipt: { submissionKind: 'DELEGATED_SINGLE', gasPayer: relayer, delegationDepth: 1 } });
+    // The relayed approval never used owner nonce 0: the swap is reviewed at nonce 0 again and takes the reservation over with that evidence.
+    const swap = await step(s, id, true);
+    expect(swap.tx.nonce).toBe('0x0');
+    s.report(id, swap.attempt.attemptId, { kind: 'HASH', txHash: chain.relay(swap.tx, { relayer }) });
+    const done = await s.observe(id);
+    expect(done.divergence ?? null).toBeNull();
+    expect(done.outcome).toMatchObject({ inputSpent: '10000000', gasCostWei: '0', evidence: { environment: 'MOCKED', outcome: 'RECONCILED' } });
+    expect(BigInt(done.outcome!.outputReceived)).toBeGreaterThanOrEqual(BigInt(done.quote.minimumOut));
+    expect(chain.state.native.get(owner)! - nativeBefore).toBe(BigInt(done.outcome!.outputReceived));
+    expect(chain.state.nonces.get(owner) ?? 0).toBe(0);
+    expect(done.outcome!.evidence.reconciliation.limitations).toEqual(expect.arrayContaining(['OWNER_SUBMISSION_RELAYED_FEE_PAID_BY_RELAYER', 'OWNER_DELEGATED_ACCOUNT_RECEIPT_RECONCILED', 'NATIVE_ETH_RECEIPT_RECONCILED']));
+    expect(intents(path)).toEqual([{ id, transaction: approve.tx },
+      { id, transaction: swap.tx, supersedes: id, release: { attemptId: approve.attempt.attemptId, txHash: done.attempts[0]!.txHash } }]);
+  });
+
+  it('a completed relayed swap does not block the next one: the next run takes nonce 0 over and executes directly', async () => {
+    const path = dir(), s = swapService({ path }), a = (await s.prepare(swap(), owner)).quote.executionId;
+    const approve = await step(s, a); s.report(a, approve.attempt.attemptId, { kind: 'HASH', txHash: chain.relay(approve.tx, { relayer }) }); await s.observe(a);
+    const swapA = await step(s, a, true); s.report(a, swapA.attempt.attemptId, { kind: 'HASH', txHash: chain.relay(swapA.tx, { relayer }) });
+    expect((await s.observe(a)).outcome?.evidence.outcome).toBe('RECONCILED');
+    const b = (await s.prepare(swap(), owner)).quote.executionId;
+    const approveB = await step(s, b);
+    expect(approveB.tx.nonce).toBe('0x0');
+    s.report(b, approveB.attempt.attemptId, { kind: 'HASH', txHash: chain.apply(approveB.tx) }); await s.observe(b);
+    const swapB = await step(s, b, true);
+    expect(swapB.tx.nonce).toBe('0x1');
+    s.report(b, swapB.attempt.attemptId, { kind: 'HASH', txHash: chain.apply(swapB.tx) });
+    const done = await s.observe(b);
+    expect(done.outcome?.evidence.outcome).toBe('RECONCILED');
+    expect(BigInt(done.outcome!.gasCostWei)).toBeGreaterThan(0n);
+    expect(intents(path).at(-1)).toMatchObject({ id: b, supersedes: a, release: { attemptId: swapA.attempt.attemptId } });
+  });
+
+  it('never releases a reservation because a relay was merely observed: not before verification and reconciliation, never after a divergence', async () => {
+    const s = swapService(), a = (await s.prepare(swap(), owner)).quote.executionId;
+    const approve = await step(s, a);
+    const early = (await s.prepare(swap(), owner)).quote.executionId;
+    await expect(step(s, early)).rejects.toThrow('SWAP_NONCE_ALREADY_RESERVED'); // the holder's attempt is only PREPARED
+    const hash = chain.relay(approve.tx, { relayer, extraLogs: [{ address: asset('ARB').address!, topics: ['0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef',
+      '0x' + owner.slice(2).padStart(64, '0'), '0x' + relayer.slice(2).padStart(64, '0')], data: '0x' + (1n).toString(16).padStart(64, '0') }] });
+    s.report(a, approve.attempt.attemptId, { kind: 'HASH', txHash: hash });
+    // A Review made after the relay landed (the allowance now exists: a swap at owner nonce 0, which the relay did not use).
+    const b = (await s.prepare(swap(), owner)).quote.executionId;
+    expect(s.load(b).quote.ownerReview).toMatchObject({ step: 'swap', nonce: '0' });
+    await expect(step(s, b)).rejects.toThrow('SWAP_NONCE_ALREADY_RESERVED'); // relayed, not yet verified
+    // The redemption also moved another token of the owner: not the reviewed effect, so it is never reconciled and never releases the nonce.
+    expect(await s.observe(a)).toMatchObject({ divergence: 'TRANSACTION_MISMATCH', outcome: null });
+    await expect(s.begin(b, owner)).rejects.toThrow('SWAP_NONCE_ALREADY_RESERVED');
+    expect(s.load(b).attempts).toHaveLength(0);
+  });
+
+  it('discovers a relayed submission whose wallet result was lost, without another wallet request', async () => {
+    const s = swapService(), id = (await s.prepare(swap(), owner)).quote.executionId;
+    const approve = await step(s, id); s.report(id, approve.attempt.attemptId, { kind: 'UNKNOWN' });
+    expect((await s.observe(id)).attempts[0]?.state).toBe('UNKNOWN');
+    const hash = chain.relay(approve.tx, { relayer });
+    const found = await s.observe(id);
+    expect(found.divergence ?? null).toBeNull();
+    expect(found.attempts).toHaveLength(1);
+    expect(found.attempts[0]).toMatchObject({ state: 'CONFIRMED', txHash: hash, receipt: { gasPayer: relayer, submissionKind: 'DELEGATED_SINGLE' } });
+  });
+
+  it.each(['two relayed executions', 'a relayed and a direct execution'] as const)('records %s of one reviewed call as a duplicate (divergent, reservation kept)', async kind => {
+    const s = swapService(), id = (await s.prepare(swap(), owner)).quote.executionId;
+    const approve = await step(s, id); s.report(id, approve.attempt.attemptId, { kind: 'UNKNOWN' });
+    chain.relay(approve.tx, { relayer });
+    if (kind === 'two relayed executions') chain.relay(approve.tx, { relayer }); else chain.apply(approve.tx);
+    expect(await s.observe(id)).toMatchObject({ divergence: 'RELAYED_DUPLICATE_EXECUTION', outcome: null });
+    const next = await s.prepare(swap(), owner);
+    s.review(next.quote.executionId, next.quote.manifestHash);
+    if (kind === 'two relayed executions') await expect(s.begin(next.quote.executionId, owner)).rejects.toThrow('SWAP_NONCE_ALREADY_RESERVED');
+  });
+
+  it('credits one relayed transaction to one attempt only (no replay of its evidence by another run)', async () => {
+    const path = dir(), s = swapService({ path }), a = (await s.prepare(swap(), owner)).quote.executionId;
+    const approveA = await step(s, a);
+    chain.apply({ from: owner, to: recipient, data: '0x', value: '0x1' }); // the owner's own transaction takes nonce 0 meanwhile
+    const b = (await s.prepare(swap(), owner)).quote.executionId, approveB = await step(s, b);
+    expect([approveA.tx.nonce, approveB.tx.nonce, approveA.tx.data === approveB.tx.data]).toEqual(['0x0', '0x1', true]);
+    const hash = chain.relay(approveA.tx, { relayer });
+    s.report(a, approveA.attempt.attemptId, { kind: 'HASH', txHash: hash }); s.report(b, approveB.attempt.attemptId, { kind: 'HASH', txHash: hash });
+    expect((await s.observe(a)).attempts[0]?.state).toBe('CONFIRMED');
+    expect(await s.observe(b)).toMatchObject({ divergence: 'RELAYED_TRANSACTION_ALREADY_CLAIMED', outcome: null });
+    expect(JSON.parse(readFileSync(join(path, `claim-42161-${hash}.tx`), 'utf8'))).toEqual({ id: a, attemptId: approveA.attempt.attemptId });
+  });
+
+  it('relayedNonceRelease accepts only the reserved transaction verified as relayed, reconciled, with no pending, direct or divergent attempt', async () => {
+    const s = swapService(), id = (await s.prepare(swap(), owner)).quote.executionId;
+    const approve = await step(s, id); s.report(id, approve.attempt.attemptId, { kind: 'HASH', txHash: chain.relay(approve.tx, { relayer }) });
+    const run: PublicRun = await s.observe(id), [attempt] = run.attempts;
+    expect(relayedNonceRelease(run, '0', approve.tx)).toEqual({ attemptId: attempt!.attemptId, txHash: attempt!.txHash });
+    expect(relayedNonceRelease(run, '0', { ...approve.tx, data: '0x' })).toBeNull(); // not the reserved transaction
+    expect(relayedNonceRelease({ ...run, divergence: 'RECONCILIATION_MISMATCH' }, '0', approve.tx)).toBeNull();
+    expect(relayedNonceRelease({ ...run, attempts: [{ ...attempt!, nativeAfter: null }] }, '0', approve.tx)).toBeNull(); // not reconciled
+    expect(relayedNonceRelease({ ...run, attempts: [{ ...attempt!, receipt: { ...attempt!.receipt!, gasPayer: owner, from: owner, submissionKind: 'DIRECT' } }] }, '0', approve.tx)).toBeNull();
+    expect(relayedNonceRelease({ ...run, attempts: [attempt!, { ...attempt!, attemptId: 'x', state: 'PENDING' }] }, '0', approve.tx)).toBeNull();
+    expect(relayedNonceRelease({ ...run, attempts: [{ ...attempt!, state: 'REJECTED', txHash: null, receipt: null }] }, '0', approve.tx)).toBeNull();
+    expect(relayedNonceRelease({ ...run, attempts: [{ ...attempt!, state: 'REVERTED', nativeAfter: null, receipt: { ...attempt!.receipt!, status: 0 } }] }, '0', approve.tx)).toBeNull();
+  });
+
+  it.each(['relayed twice', 'relayed and sent directly'] as const)('records a reviewed call %s as a duplicate even when the wallet reported a hash', async kind => {
+    const s = swapService(), id = (await s.prepare(swap(), owner)).quote.executionId, approve = await step(s, id);
+    if (kind === 'relayed twice') chain.relay(approve.tx, { relayer }); else chain.apply(approve.tx); // the earlier execution the wallet never reported
+    s.report(id, approve.attempt.attemptId, { kind: 'HASH', txHash: chain.relay(approve.tx, { relayer }) });
+    expect(await s.observe(id)).toMatchObject({ divergence: 'RELAYED_DUPLICATE_EXECUTION', outcome: null });
+  });
+
+  it('a wallet refusal that was in fact relayed is found before any new attempt (no second authorization of the same call)', async () => {
+    const s = swapService(), id = (await s.prepare(swap(), owner)).quote.executionId, approve = await step(s, id);
+    s.report(id, approve.attempt.attemptId, { kind: 'REJECTED' });
+    chain.relay(approve.tx, { relayer });
+    // The allowance now exists, so the next step needs a new Review first; that Review's attempt is then refused before any wallet request.
+    await expect(s.begin(id, owner)).rejects.toThrow('OWNER_STATE_CHANGED_REVIEW_REQUIRED');
+    s.review(id, s.load(id).quote.manifestHash);
+    await expect(s.begin(id, owner)).rejects.toThrow('RECONCILIATION_MISMATCH');
+    expect(s.load(id)).toMatchObject({ divergence: 'REJECTED_ATTEMPT_EXECUTED', reviewedManifestHash: null });
+    expect(s.load(id).attempts).toHaveLength(1);
+  });
+
+  it('a refused or lost attempt that the relay executed in another shape (batch) is recorded, never ignored and never reconciled', async () => {
+    const s = swapService(), id = (await s.prepare(swap(), owner)).quote.executionId, approve = await step(s, id);
+    s.report(id, approve.attempt.attemptId, { kind: 'REJECTED' });
+    chain.relay(approve.tx, { relayer, batch: true });
+    await expect(s.begin(id, owner)).rejects.toThrow('OWNER_STATE_CHANGED_REVIEW_REQUIRED');
+    s.review(id, s.load(id).quote.manifestHash);
+    await expect(s.begin(id, owner)).rejects.toThrow('RECONCILIATION_MISMATCH');
+    expect(s.load(id).divergence).toBe('REJECTED_ATTEMPT_EXECUTED');
+    chain.state.allowances.clear();
+    const r = swapService(), lost = (await r.prepare(swap(), owner)).quote.executionId, approveLost = await step(r, lost);
+    r.report(lost, approveLost.attempt.attemptId, { kind: 'UNKNOWN' });
+    chain.relay(approveLost.tx, { relayer, batch: true });
+    expect(await r.observe(lost)).toMatchObject({ divergence: 'RELAYED_EXECUTION_UNSUPPORTED_SHAPE', outcome: null });
+  });
+
+  it('keeps a relayed receipt pending when the duplicate check cannot cover the whole window (never reconciled on a partial scan)', async () => {
+    const s = swapService(), id = (await s.prepare(swap(), owner)).quote.executionId, approve = await step(s, id);
+    s.report(id, approve.attempt.attemptId, { kind: 'HASH', txHash: chain.relay(approve.tx, { relayer }) });
+    chain.mine(1); chain.state.head += 2_100_000; // observed far later than the bounded scan reaches
+    const pending = await s.observe(id);
+    expect(pending.divergence ?? null).toBeNull();
+    expect(pending.attempts[0]).toMatchObject({ state: 'PENDING', receipt: null });
+  });
+
+  it('never accepts a relayed authorization that could be redeemed again, or a reverted relay, and keeps the nonce reservation', async () => {
+    const s = swapService(), a = (await s.prepare(swap(), owner)).quote.executionId, approve = await step(s, a);
+    s.report(a, approve.attempt.attemptId, { kind: 'HASH', txHash: chain.relay(approve.tx, { relayer, singleUse: false }) });
+    expect(await s.observe(a)).toMatchObject({ divergence: 'RELAYED_DELEGATION_NOT_SINGLE_USE', outcome: null });
+    chain.state.allowances.clear(); // a fresh owner state for the second case
+    const r = swapService(), b = (await r.prepare(swap(), owner)).quote.executionId, approveB = await step(r, b);
+    r.report(b, approveB.attempt.attemptId, { kind: 'HASH', txHash: chain.relay(approveB.tx, { relayer, reverted: true }) });
+    expect(await r.observe(b)).toMatchObject({ divergence: 'RELAYED_SUBMISSION_REVERTED', outcome: null });
+    const c = (await r.prepare(swap(), owner)).quote.executionId;
+    await expect(step(r, c)).rejects.toThrow('SWAP_NONCE_ALREADY_RESERVED');
+  });
+
+  it.each(['direct', 'relayed'] as const)('reconciles a %s WETH → USDC swap whose aeWETH transferFrom also logs the spent allowance (OpenZeppelin ERC20)', async kind => {
+    chain.state.transferFromApproval.add(UNI.weth);
+    const s = swapService(), id = (await s.prepare(swap('WETH', 'USDC', '10000000000000000'), owner)).quote.executionId;
+    const approve = await step(s, id);
+    s.report(id, approve.attempt.attemptId, { kind: 'HASH', txHash: kind === 'direct' ? chain.apply(approve.tx) : chain.relay(approve.tx, { relayer }) }); await s.observe(id);
+    const begun = await step(s, id, true);
+    const hash = kind === 'direct' ? chain.apply(begun.tx) : chain.relay(begun.tx, { relayer });
+    expect((chain.state.receipts.get(hash)!.logs as { topics: string[] }[]).some(log => log.topics[0] === '0x8c5be1e5ebec7d5bd14f71427d1e84f3dd0314c0f7b2291e5b200ac8c7c3b925')).toBe(true);
+    s.report(id, begun.attempt.attemptId, { kind: 'HASH', txHash: hash });
+    const done = await s.observe(id);
+    expect(done.divergence ?? null).toBeNull();
+    expect(done.outcome).toMatchObject({ inputSpent: '10000000000000000', evidence: { outcome: 'RECONCILED' } });
+  });
+
+  it('proves a delegated owner\'s direct swap from its receipt: an extra movement of the owner\'s input token is never reconciled', async () => {
+    const s = swapService(), id = (await s.prepare(swap(), owner)).quote.executionId, approve = await step(s, id);
+    s.report(id, approve.attempt.attemptId, { kind: 'HASH', txHash: chain.apply(approve.tx) }); await s.observe(id);
+    const begun = await step(s, id, true);
+    const extra = { address: UNI.usdc, topics: ['0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef', '0x' + owner.slice(2).padStart(64, '0'),
+      '0x' + recipient.slice(2).padStart(64, '0')], data: '0x' + (1n).toString(16).padStart(64, '0') };
+    s.report(id, begun.attempt.attemptId, { kind: 'HASH', txHash: chain.apply(begun.tx, { extraLogs: [extra] }) });
+    expect(await s.observe(id)).toMatchObject({ divergence: 'TRANSACTION_MISMATCH', outcome: null });
+  });
+
+  it('an owner reviewed as a standard account is never reconciled from a relayed redemption', async () => {
+    chain.state.codeOverride.delete(owner);
+    const s = swapService(), id = (await s.prepare(swap(), owner)).quote.executionId, approve = await step(s, id);
+    chain.state.codeOverride.set(owner, '0xef0100' + metaMaskDeleGator.slice(2));
+    s.report(id, approve.attempt.attemptId, { kind: 'HASH', txHash: chain.relay(approve.tx, { relayer }) });
+    expect(await s.observe(id)).toMatchObject({ divergence: expect.stringMatching(/^(TRANSACTION_MISMATCH|OWNER_SUBMISSION_UNSUPPORTED)$/), outcome: null });
   });
 });

@@ -133,6 +133,18 @@ export function exportOf(origin: WalletOrigin, provider: string): WalletExport {
 export const isPrivyWallet = (wallet: Pick<AccountWallet, 'origin' | 'provider'>) => wallet.origin !== 'external' && wallet.provider === MANAGED_PROVIDER;
 /** Whether a wallet record is a legacy FloFi Wallet (Turnkey) wallet: listed and exportable, never signed with. */
 export const isLegacyWallet = (wallet: Pick<AccountWallet, 'origin' | 'provider'>) => wallet.origin !== 'external' && wallet.provider === LEGACY_MANAGED_PROVIDER;
+/**
+ * BUILD-FLOFI-WALLET-UX-EXECUTION-FIX-001 (P1-05): whether a signed-in account still needs "Add your wallets". An account that signed in with
+ * (or linked) a wallet proven by signature — MetaMask, Phantom, … — or that already holds a FloFi (Privy) or external wallet goes straight to
+ * the app: it is never asked to create an embedded wallet it does not need. A legacy export-only wallet alone does not count (it cannot sign).
+ * Presentation routing only: it grants nothing and changes no stored onboarding choice.
+ */
+export function needsWalletOnboarding(account: { readonly onboarding: Onboarding; readonly identities: readonly Pick<AccountIdentity, 'kind'>[];
+  readonly wallets: readonly Pick<AccountWallet, 'origin' | 'provider'>[] }): boolean {
+  if (account.onboarding !== 'pending') return false;
+  const signedWallet = account.identities.some(identity => identity.kind === 'eip155' || identity.kind === 'solana');
+  return !signedWallet && !account.wallets.some(wallet => wallet.origin === 'external' || isPrivyWallet(wallet));
+}
 
 export function readAccountWallet(value: unknown): AccountWallet | null {
   if (!value || typeof value !== 'object' || !exactKeys(value, WALLET_KEYS)) return null;

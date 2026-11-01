@@ -9,7 +9,7 @@
  * the account only after Privy's API confirms that this account's own Privy user holds it; creating or importing a wallet authorizes
  * nothing. Wallets created in FloFi Wallet (Turnkey) before Privy keep their records unchanged (legacy, export only).
  */
-import { accountWalletId, canonicalAddress, isPrivyWallet, LEGACY_MANAGED_PROVIDER, MANAGED_PROVIDER, MANAGED_PROVIDER_NAME, validProvider, walletLabel, writableWalletLabel, type AccountView,
+import { accountWalletId, canonicalAddress, isPrivyWallet, LEGACY_MANAGED_PROVIDER, needsWalletOnboarding, MANAGED_PROVIDER, MANAGED_PROVIDER_NAME, validProvider, walletLabel, writableWalletLabel, type AccountView,
   type AccountWallet, type IdentityKind } from './account-model.ts';
 import { createHash } from 'node:crypto';
 import { freshlyAuthenticated, SESSION_PUBLIC_KEY, type AccountSessionToken } from './account-session.ts';
@@ -18,7 +18,9 @@ import type { PrivyEmbeddedWallet, PrivyServer, PrivyUser } from './privy-server
 import type { WalletEcosystem } from '../wallet/wallet-registry';
 
 /** The outcome of a verified sign-in. */
-export type SignInOutcome = { readonly session: AccountSessionToken; readonly created: boolean; readonly onboarding: AccountView['onboarding'] };
+export type SignInOutcome = { readonly session: AccountSessionToken; readonly created: boolean; readonly onboarding: AccountView['onboarding'];
+  /** BUILD-FLOFI-WALLET-UX-EXECUTION-FIX-001: whether "Add your wallets" is still needed (`needsWalletOnboarding`). Absent: decided by `onboarding`. */
+  readonly walletOnboarding?: boolean };
 /** The result of saving the person's Privy wallets: what is saved now, and how many Privy wallets another FloFi account already holds. */
 export type PrivyWalletSync = { readonly wallets: readonly AccountWallet[]; readonly heldElsewhere: number };
 
@@ -30,7 +32,6 @@ export function createAccountService(input: { readonly store: AccountStore; read
   const { store, privy } = input, now = input.now ?? (() => new Date());
   const provider = () => privy ?? fail('PRIVY_NOT_CONFIGURED');
 
-  async function onboardingOf(accountId: string) { return (await store.account(accountId))?.onboarding ?? 'pending'; }
   /** The Privy user behind `token`, required to be the one linked to this signed-in account. */
   async function ownPrivyUser(session: AccountSessionToken, token: unknown): Promise<PrivyUser> {
     const verified = await provider().verify(token);
@@ -96,7 +97,10 @@ export function createAccountService(input: { readonly store: AccountStore; read
         authenticatedAt: signed.authenticatedAt, expiresAt: signed.expiresAt };
       // A wallet whose save never finished (a closed tab, a timeout) is saved now; a failure here never blocks signing in.
       await syncEmbedded(session, user).catch(() => undefined);
-      return { session, created: signed.created, onboarding: await onboardingOf(session.accountId) };
+      // BUILD-FLOFI-WALLET-UX-EXECUTION-FIX-001 (P1-05): a person who signed in with MetaMask (or already holds a usable wallet) enters the app.
+      const account = await store.account(session.accountId);
+      return { session, created: signed.created, onboarding: account?.onboarding ?? 'pending',
+        walletOnboarding: account ? needsWalletOnboarding(account) : true };
     },
     /**
      * Saves one wallet just created or imported in the person's Privy embedded wallet. The address must be one of the embedded wallets

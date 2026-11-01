@@ -24,7 +24,8 @@ export const portugueseWallets: Readonly<Record<string, string>> = {
   'No wallets yet': 'Ainda sem carteiras', 'Add a wallet to save its public address here. FloFi never holds your keys.':
     'Adicione uma carteira para guardar aqui o seu endereço público. O FloFi nunca guarda as suas chaves.',
   'Active': 'Ativa', 'Connected · not saved': 'Ligada · não guardada', 'Saved': 'Guardada',
-  'Copy {0} address': 'Copiar endereço de {0}', 'Address copied.': 'Endereço copiado.', 'Address could not be copied.': 'Não foi possível copiar o endereço.',
+  'Copy {0} address': 'Copiar endereço de {0}', 'Remove from this device': 'Remover deste dispositivo', 'Remove {0} from this device': 'Remover {0} deste dispositivo',
+  'Removed from this device. The wallet stays in your FloFi account.': 'Removido deste dispositivo. A carteira continua na sua conta FloFi.', 'Address copied.': 'Endereço copiado.', 'Address could not be copied.': 'Não foi possível copiar o endereço.',
   'Wallet name': 'Nome da carteira', 'Save name': 'Guardar nome', 'Wallet renamed.': 'Carteira renomeada.', 'Use 1–{0} characters.': 'Use 1–{0} caracteres.',
   'Rename': 'Renomear', 'Rename {0}': 'Renomear {0}', 'Save {0}': 'Guardar {0}', 'Disconnect': 'Desligar', 'Disconnect {0}': 'Desligar {0}',
   'Connect': 'Ligar', 'Connect {0}': 'Ligar {0}', 'Remove': 'Remover', 'Remove {0}': 'Remover {0}', 'Remove {0} from FloFi?': 'Remover {0} do FloFi?',

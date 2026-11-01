@@ -173,8 +173,12 @@ test('Google sign-in, then one click per ecosystem creates a real Privy wallet, 
   await card(page, 'evm').getByRole('button', { name: /Create wallet/ }).click();
   await expect(card(page, 'evm').locator('[data-wallet-address]')).toHaveAttribute('data-wallet-address', /^0x[0-9a-f]{40}$/);
   const evm = (await card(page, 'evm').locator('[data-wallet-address]').getAttribute('data-wallet-address'))!;
-  // Done once: the button now says so and cannot create a duplicate.
-  await expect(card(page, 'evm').getByRole('button', { name: /Wallet created/ })).toBeDisabled();
+  // Done once: the card says so and offers no second Create (BUILD-FLOFI-WALLET-UX-EXECUTION-FIX-001 P1-01: the address shows once, shortened,
+  // with a copy button; the full address is never repeated in a row above the card).
+  await expect(card(page, 'evm').getByRole('group', { name: /Wallet created/ })).toBeVisible();
+  await expect(card(page, 'evm').getByRole('button', { name: /Create wallet/ })).toHaveCount(0);
+  await expect(card(page, 'evm').getByText(evm, { exact: true })).toHaveCount(0);
+  await expect(card(page, 'evm').getByRole('button', { name: /^Copy .* address$/ })).toHaveCount(1);
   await card(page, 'solana').getByRole('button', { name: /Create wallet/ }).click();
   await expect(card(page, 'solana').locator('[data-wallet-address]')).toHaveAttribute('data-wallet-address', /^[1-9A-HJ-NP-Za-km-z]{32,44}$/);
   const solana = (await card(page, 'solana').locator('[data-wallet-address]').getAttribute('data-wallet-address'))!;
@@ -229,7 +233,8 @@ test('Import key: a dedicated FloFi screen per ecosystem; the key goes only to P
   await form.getByLabel('Private key').fill(evmKey);
   await form.getByRole('button', { name: 'Import wallet' }).click();
   await expect(page).toHaveURL('/onboarding/wallets');
-  const imported = card(page, 'evm').locator('li', { hasText: 'My Rabby key' });
+  // BUILD-FLOFI-WALLET-UX-EXECUTION-FIX-001 (P1-01): the imported wallet is its card's tile (name, short address, copy), not a row above it.
+  const imported = card(page, 'evm').locator('[data-wallet-address]', { hasText: 'My Rabby key' });
   await expect(imported).toContainText('Imported');
 
   // Solana: a 64-byte base58 secret key, as Phantom exports it.
@@ -260,7 +265,8 @@ test('a wallet whose save never finished is recovered on the next visit, and Cre
   const { address } = await (await fetch(`${PRIVY}/__e2e/wallet`, { method: 'POST', body: JSON.stringify({ user: user!.id, ecosystem: 'evm' }) })).json() as { address: string };
   await page.reload();
   await expect(card(page, 'evm').locator(`[data-wallet-address="${address}"]`)).toBeVisible();
-  await expect(card(page, 'evm').getByRole('button', { name: /Wallet created/ })).toBeDisabled();
+  await expect(card(page, 'evm').getByRole('group', { name: /Wallet created/ })).toBeVisible();
+  await expect(card(page, 'evm').getByRole('button', { name: /Create wallet/ })).toHaveCount(0);
   expect((await privyUser({ google: 'e2e-bruno' }))!.wallets).toEqual([address]);
 });
 
@@ -291,12 +297,13 @@ test('email code sign-in through Privy reaches the existing FloFi account of tha
   expect(await query('SELECT method FROM flofi_account_sessions WHERE account_id=$1 AND revoked_at IS NULL', [accountId])).toEqual([{ method: 'EMAIL' }]);
 });
 
-test('Web3 Wallet sign-in through Privy: the proven wallet is the account’s sign-in identity, never a FloFi-managed wallet', async ({ page }) => {
+test('Web3 Wallet sign-in through Privy: the proven wallet is the account’s sign-in identity, never a FloFi-managed wallet; FloFi opens directly (T05)', async ({ page }) => {
   const address = `0x${randomBytes(20).toString('hex')}`;
   await setup(page, { wallet: { address } });
   await page.goto('/login');
   await page.getByRole('button', { name: 'Web3 Wallet', exact: true }).click();
-  await expect(page).toHaveURL('/onboarding/wallets');
+  // BUILD-FLOFI-WALLET-UX-EXECUTION-FIX-001 (P1-05): a wallet sign-in needs no "Add your wallets"; no embedded wallet is created for it.
+  await expect(page).toHaveURL('/app');
   const [row] = await query<{ account_id: string }>("SELECT account_id FROM flofi_account_identities WHERE kind='EIP155' AND subject=$1", [address]);
   expect(row).toBeTruthy();
   expect(await query("SELECT 1 FROM flofi_account_wallets WHERE address=$1 AND provider='privy'", [address])).toEqual([]);
@@ -313,8 +320,11 @@ test('Disconnect revokes the session, logs out of Privy and lands on /login; Bac
   const wallets = async () => (await query<{ n: number }>(`SELECT count(*)::int AS n FROM flofi_account_wallets WHERE ${ANA}`))[0]!.n;
   const [liveBefore, walletsBefore] = [await live(), await wallets()];
   await page.goto('/app/credentials');
-  await expect(page.getByRole('region', { name: 'My wallets' })).toBeVisible();
+  await expect(page.getByRole('region', { name: 'Wallets', exact: true })).toBeVisible();
+  await expect(page.getByRole('region', { name: 'My wallets' })).toHaveCount(0);
   await page.getByRole('button', { name: 'Settings' }).click();
+  // BUILD-FLOFI-WALLET-UX-EXECUTION-FIX-001 (P1-04): one Disconnect, no separate Sign out.
+  await expect(page.getByRole('button', { name: 'Sign out', exact: true })).toHaveCount(0);
   await page.getByRole('button', { name: 'Disconnect', exact: true }).click();
   await expect(page).toHaveURL('/login');
   expect(await accountCookie(context)).toBeUndefined();
@@ -329,7 +339,7 @@ test('Disconnect revokes the session, logs out of Privy and lands on /login; Bac
   await context.clearCookies({ name: 'flofi_account_session' });
   // Back never shows the signed-in pages again, and /login stays a sign-in page.
   await page.goBack();
-  await expect(page.getByRole('region', { name: 'My wallets' }).getByText('Sign in to save wallet addresses')).toBeVisible({ timeout: 15_000 }).catch(async () => {
+  await expect(page.getByRole('region', { name: 'Wallets', exact: true }).getByText('Sign in to save wallet addresses')).toBeVisible({ timeout: 15_000 }).catch(async () => {
     await expect(page).toHaveURL(/\/login/);
   });
   await page.goto('/login');
@@ -413,7 +423,7 @@ async function signedInWithWallets(page: Page, google: string) {
   await expect(page).toHaveURL(/\/(app|onboarding\/wallets)$/);
   await page.goto('/onboarding/wallets');
   for (const ecosystem of ['evm', 'solana'] as const) {
-    const create = card(page, ecosystem).getByRole('button', { name: /Create wallet/ }), done = card(page, ecosystem).getByRole('button', { name: /Wallet created/ });
+    const create = card(page, ecosystem).getByRole('button', { name: /Create wallet/ }), done = card(page, ecosystem).getByRole('group', { name: /Wallet created/ });
     // Wait until Privy is ready here (Create enabled) or the wallet already exists, then create it once.
     await expect.poll(async () => await done.count() > 0 || await create.isEnabled()).toBe(true);
     if (await done.count() === 0) await create.click();
@@ -577,7 +587,7 @@ test('a legacy FloFi Wallet (Turnkey) wallet stays listed with its address, expo
   await googleSignIn(page);
   await expect(page).toHaveURL('/app');
   await page.goto('/app/credentials');
-  const legacy = page.getByRole('region', { name: 'My wallets' }).locator('article', { hasText: address.slice(0, 6) });
+  const legacy = page.getByRole('region', { name: 'Wallets', exact: true }).locator('article', { hasText: address.slice(0, 6) });
   await expect(legacy).toContainText('Legacy FloFi Wallet');
   await expect(legacy).toContainText('Wallets created in the earlier FloFi Wallet can be exported, not used to sign.');
   await page.goto('/onboarding/wallets');

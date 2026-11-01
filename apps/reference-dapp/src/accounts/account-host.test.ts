@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { clearAccountCookie, currentAccountSession, setAccountCookie, type AccountHost } from './account-host';
+import { clearAccountCookie, currentAccountSession, nextPath, setAccountCookie, type AccountHost } from './account-host';
 import { ACCOUNT_SESSION_COOKIE, sealAccountSession, type AccountSessionToken } from './account-session';
 
 const state = vi.hoisted(() => ({ values: new Map<string, string>(), writes: [] as { name: string; options: Record<string, unknown> }[], host: 'flofi.xyz' }));
@@ -39,5 +39,17 @@ describe('account cookie host isolation', () => {
     expect(state.writes[0]).toMatchObject({ name: ACCOUNT_SESSION_COOKIE, options: { secure: false, path: '/' } });
     expect(await currentAccountSession(host, env)).toEqual(session);
     state.host = 'localhost:3148'; expect(await currentAccountSession(host, env)).toBeNull();
+  });
+});
+
+describe('BUILD-FLOFI-WALLET-UX-EXECUTION-FIX-001 where a completed sign-in continues (P1-05, T05)', () => {
+  it('a wallet sign-in with a pending onboarding enters the app directly; an account without a wallet adds wallets first', () => {
+    expect(nextPath({ session, onboarding: 'pending', walletOnboarding: false }, 'sign-in', '/app')).toBe('/app');
+    expect(nextPath({ session, onboarding: 'pending', walletOnboarding: true }, 'sign-in', '/app')).toBe('/onboarding/wallets');
+  });
+  it('keeps the earlier rule when the outcome carries no wallet decision, and never redirects a link', () => {
+    expect(nextPath({ session, onboarding: 'pending' }, 'sign-in', '/app')).toBe('/onboarding/wallets');
+    expect(nextPath({ session, onboarding: 'completed' }, 'sign-in', '/app/credentials')).toBe('/app/credentials');
+    expect(nextPath({ session, onboarding: 'pending', walletOnboarding: true }, 'link', '/app/credentials')).toBe('/app/credentials');
   });
 });

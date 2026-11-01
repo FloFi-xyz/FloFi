@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { describe, expect, it } from 'vitest';
-import { canonicalAddress, exportActions, normalizeEmail, parseAccountWalletId, readAccountWallet, type AccountWallet } from './account-model';
+import { canonicalAddress, exportActions, needsWalletOnboarding, normalizeEmail, parseAccountWalletId, readAccountWallet, type AccountWallet } from './account-model';
 
 const managed: AccountWallet = { id: 'evm:0x' + 'a'.repeat(40), ecosystem: 'evm', address: '0x' + 'a'.repeat(40), origin: 'generated', provider: 'turnkey',
   providerName: 'FloFi wallet', export: 'recovery-phrase', label: 'EVM wallet', addedAt: '2026-10-31T12:00:00.000Z' };
@@ -35,5 +35,26 @@ describe('account wallet records', () => {
     expect(normalizeEmail('wallet-unlock:ana@example.com')).toBeNull();
     expect(normalizeEmail('ana@exa:mple.com')).toBeNull();
     expect(normalizeEmail('a\nb@example.com')).toBeNull();
+  });
+});
+
+describe('BUILD-FLOFI-WALLET-UX-EXECUTION-FIX-001 wallet onboarding is only for accounts without a usable wallet (P1-05, T05)', () => {
+  const privy: AccountWallet = { ...managed, provider: 'privy', export: 'private-key' };
+  const base = { onboarding: 'pending' as const, identities: [{ kind: 'google' as const }], wallets: [] as AccountWallet[] };
+  it('a MetaMask or Phantom sign-in (a wallet proven by signature) goes straight to the app', () => {
+    expect(needsWalletOnboarding({ ...base, identities: [{ kind: 'eip155' }] })).toBe(false);
+    expect(needsWalletOnboarding({ ...base, identities: [{ kind: 'solana' }] })).toBe(false);
+  });
+  it('an account holding a FloFi (Privy) or linked external wallet goes straight to the app', () => {
+    expect(needsWalletOnboarding({ ...base, wallets: [privy] })).toBe(false);
+    expect(needsWalletOnboarding({ ...base, wallets: [external] })).toBe(false);
+  });
+  it('a new Google/email account with no wallet, or only an export-only legacy wallet, still adds wallets', () => {
+    expect(needsWalletOnboarding(base)).toBe(true);
+    expect(needsWalletOnboarding({ ...base, wallets: [managed] })).toBe(true);
+  });
+  it('a completed or dismissed onboarding is never shown again', () => {
+    expect(needsWalletOnboarding({ ...base, onboarding: 'completed' })).toBe(false);
+    expect(needsWalletOnboarding({ ...base, onboarding: 'dismissed' })).toBe(false);
   });
 });

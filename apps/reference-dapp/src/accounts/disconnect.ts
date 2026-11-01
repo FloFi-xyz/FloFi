@@ -11,7 +11,9 @@
  * before leaving. A stalled server request can delay Disconnect, so leaving the page is never claimed as proof of server revocation.
  */
 import { accountSignOut } from '../app/account-action';
-import { updateWalletPreference } from '../wallet/wallet-registry';
+import { updateWalletPreference, walletPreference } from '../wallet/wallet-registry';
+import { isFloFiWalletKey } from '../wallet/evm-discovery';
+import { forgetAccountWalletReconnect } from '../wallet/sign-in-wallet';
 import type { FloFiPrivy } from './privy-context';
 
 /** How long Disconnect waits for each browser-side step (wallet close, Privy logout) before moving on. */
@@ -24,7 +26,12 @@ export async function disconnectToLogin(privy: Pick<FloFiPrivy, 'logout'> | null
   if (leaving) return;
   leaving = true;
   await bounded(() => closeWallet?.());
-  updateWalletPreference({ evmDisconnected: true, solanaDisconnected: true });
+  // BUILD-FLOFI-WALLET-UX-EXECUTION-FIX-001: a remembered FloFi wallet (this account's) is forgotten too, so the next person never inherits it.
+  const remembered = walletPreference();
+  updateWalletPreference({ evmDisconnected: true, solanaDisconnected: true, ...isFloFiWalletKey(remembered.evm) ? { evm: null } : {},
+    ...remembered.solana?.startsWith('FloFi Wallet') ? { solana: null } : {} });
+  // BUILD-FLOFI-WALLET-UX-EXECUTION-FIX-001: not even the account's own FloFi wallets reconnect until the next sign-in.
+  forgetAccountWalletReconnect('evm', 'solana');
   const next = await accountSignOut().then(result => result.next, () => '/login');
   await bounded(() => privy?.logout());
   window.location.replace(next);

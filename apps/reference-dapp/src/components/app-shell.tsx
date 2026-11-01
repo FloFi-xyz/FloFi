@@ -17,7 +17,7 @@ import { RobinhoodTransferPanel } from './robinhood-transfer-panel';
 import { SolanaTransferPanel } from './solana-transfer-panel';
 import { useSolanaTransfer } from '../state/solana-transfer-store';
 import { useRobinhoodTransfer } from '../state/robinhood-transfer-store';
-import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import type { ToolboxMode } from '../domain/canvas-layout';
 import { CowPanel } from './cow-panel';
 import { useCow } from '../state/cow-store';
@@ -78,6 +78,7 @@ import { useSupply } from '../state/supply-store';
 import { RepayPanel } from './repay-panel';
 import { BorrowPanel } from './borrow-panel';
 import { SupplyPanel } from './supply-panel';
+import { EstimateOwnersContext } from '../state/estimate-owners';
 import { useJupiter } from '../state/jupiter-store';
 import { JupiterPanel } from './jupiter-panel';
 import { SolanaLiquidityPanel } from './solana-liquidity-panel';
@@ -157,6 +158,8 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
   const connectedWallet = useBuild009Wallet();
   const walletIdentity = useExecutionEnvironment();
   const solanaSession = useJupiter().session;
+  // BUILD-FLOFI-WALLET-UX-EXECUTION-FIX-001: the Simulate canvas quotes with the connected addresses (display only).
+  const estimateOwners = useMemo(() => ({ evm: connectedWallet.account, solana: solanaSession?.account.address ?? null }), [connectedWallet.account, solanaSession]);
   const owner = walletIdentity.walletKind === 'solana'
     ? solanaSession ? { namespace: 'solana' as const, address: solanaSession.account.address } : null
     : connectedWallet.account ? { namespace: 'eip155' as const, address: connectedWallet.account } : null;
@@ -474,7 +477,7 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
           <><ExecutionPanel/><ModeBPanel view="execute"/><CompositionPanel view="execute"/><CowPanel view="execute"/><LiquidityPanel view="execute"/></>
         : null;
   const wrapStage = (stage: ReactNode) => tab === 'Build' ? stage : <div className="stage-with-chat">{stage}{chat}</div>;
-  return <div className="app-shell" inert={!interactive}><a className="skip-link" href="#workspace">{tr("Skip to workspace")}</a><TopBar tab={tab} setTab={setTab} pathname={pathname ?? null} engineering={engineering} entry={entry}/>{betaNotice}
+  return <EstimateOwnersContext.Provider value={estimateOwners}><div className="app-shell" inert={!interactive}><a className="skip-link" href="#workspace">{tr("Skip to workspace")}</a><TopBar tab={tab} setTab={setTab} pathname={pathname ?? null} engineering={engineering} entry={entry}/>{betaNotice}
     {approvalSlot && <div className="approval-notice-slot" ref={approvalSlot}/>}
     <AutomationInbox owner={owner} proven={Boolean(owner && proof.proven === owner.address)} open={() => navigate?.('/app/automations')}/>
     {/* BUILD-FLOFI-CONVERSATIONAL-001: on Simulate and Execute the same conversation continues beside the stage (complementary to main). */}
@@ -487,5 +490,5 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
       <MobileBuildNavigation stage={tab === 'Build' ? 'Build' : tab === 'Simulate' ? 'Simulate' : 'Execute'}/>
       {state.error && <div className="error-banner" role="alert"><strong>{tr("Edit not applied")}</strong><span>{tr(tab !== 'Build' ? 'Review the workflow configuration in Build before simulating again.' : state.error)}</span></div>}
     </main>)}{tab !== 'Execute' && <SummaryBar tab={tab} setTab={setTab} canvasOwnsAction/>}
-  </div>;
+  </div></EstimateOwnersContext.Provider>;
 }

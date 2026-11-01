@@ -37,7 +37,7 @@ export const portugueseAccounts: Readonly<Record<string, string>> = {
     'Sua conta é como você entra. As transações são sempre simuladas, revisadas e assinadas pela sua própria carteira.',
   'Explore the builder without an account': 'Explorar o construtor sem conta', 'Privacy': 'Privacidade',
   // Wallet introduction
-  'Signed-in account': 'Conta conectada', 'Sign out': 'Sair', 'My account': 'Minha conta',
+  'Signed-in account': 'Conta conectada', 'End your FloFi session on this device and disconnect your wallet. Your account, wallets and history are kept.': 'Encerra sua sessão FloFi neste dispositivo e desconecta sua carteira. Sua conta, suas carteiras e seu histórico são mantidos.', 'Sign out': 'Sair', 'My account': 'Minha conta',
   'Your wallets. One FloFi account.': 'Suas carteiras. Uma conta FloFi.',
   'Your account is how you sign in. A wallet is what signs transactions — and only after you review them.':
     'Sua conta é como você entra. Uma carteira é o que assina transações — e só depois que você as revisa.',

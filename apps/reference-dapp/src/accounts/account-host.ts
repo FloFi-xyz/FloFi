@@ -67,9 +67,10 @@ export async function currentAccountSession(host: AccountHost | null, env: Env =
 }
 
 /** Where a successful sign-in continues: an account that has not finished onboarding adds its wallets first; everyone else returns. */
-export function nextPath(outcome: Pick<SignInOutcome, 'onboarding' | 'session'>, intent: AccountIntent, returnTo: string): string {
+export function nextPath(outcome: Pick<SignInOutcome, 'onboarding' | 'session' | 'walletOnboarding'>, intent: AccountIntent, returnTo: string): string {
   if (intent === 'link') return safeReturnPath(returnTo);
-  return outcome.onboarding === 'pending' ? '/onboarding/wallets' : safeReturnPath(returnTo);
+  // BUILD-FLOFI-WALLET-UX-EXECUTION-FIX-001 (P1-05): onboarding only when the account has no usable wallet yet.
+  return (outcome.walletOnboarding ?? outcome.onboarding === 'pending') ? '/onboarding/wallets' : safeReturnPath(returnTo);
 }
 /** A new sign-in in this browser supersedes the previous one: its server-side record is revoked (linking keeps the same session). */
 export async function supersede(host: AccountHost, previous: AccountSessionToken | null, next: AccountSessionToken): Promise<void> {

@@ -9,6 +9,7 @@ import { connectSolanaWallet, disconnectSolanaWallet, signWithSolanaWallet, subs
   type SolanaWalletChain } from '../wallet/solana-wallet';
 import { activeNetworkScope } from '../domain/network-scope';
 import { updateWalletPreference, walletPreference } from '../wallet/wallet-registry';
+import { forgetAccountWalletReconnect } from '../wallet/sign-in-wallet';
 import { useWalletSelector } from '../components/wallet-selector';
 import { jupiterBegin, jupiterInfo, jupiterInvalidate, jupiterObserve, jupiterReview, jupiterSimulate, jupiterStatus, jupiterSubmit, jupiterWalletFailure } from '../app/jupiter-action';
 import { solanaDevnetBegin, solanaDevnetInfo, solanaDevnetInvalidate, solanaDevnetObserve, solanaDevnetReview, solanaDevnetSimulate, solanaDevnetStatus,
@@ -248,7 +249,7 @@ export function JupiterProvider({ children }: { children: ReactNode }) {
     latestSession.current = null;
     setSession(null); setError(null);
     // No silent reconnect until the owner picks a Solana wallet again (the EVM store's rule).
-    updateWalletPreference({ solanaDisconnected: true }); rememberWalletHint('solana', false); setRestoring(false);
+    updateWalletPreference({ solanaDisconnected: true }); forgetAccountWalletReconnect('solana'); rememberWalletHint('solana', false); setRestoring(false);
     if (current) await disconnectSolanaWallet(current);
   }
   async function poll(id: string, seen?: (value: JupiterRecord) => void) {
