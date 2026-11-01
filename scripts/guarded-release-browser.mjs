@@ -124,16 +124,21 @@ const composition = [['composition-provenance', ['release-composition-provenance
 // PostgreSQL and fork suites; CircleCI: at the head of browser job 1): Copilot learning and wallet isolation, Canvas basics, the P0
 // wallet refusal and the financial Review/Execute boundaries.
 const critical = ['copilot-learning', 'canvas-corrections', 'solana-wallet-refusal', 'supply-provenance', 'review-execute-recovery-components', 'solana-transfer-ux'];
-// The other product profiles, as CircleCI's parallel browser jobs (each its own container, loopback ports and PostgreSQL; ~13 min each
-// with critical in job 1, from CircleCI jobs 53/55 profile seconds). Each list runs in order: fast financial boundaries before long suites.
+// The other product profiles in three shards, balanced on measured profile seconds (CircleCI PR #150 final head, the
+// BUILD-FLOFI-CI-ARCHITECTURE-001 baseline): shard 1 follows critical (~283s) in browser job 1 (~863s), shard 2 precedes
+// composition in browser job 2 (~1124s, execution-continuity alone ~551s), shard 3 closes certification-checks after its
+// unit, PostgreSQL and fork suites (~328s). Each container has its own loopback ports and PostgreSQL. Each list runs in
+// order: fast financial boundaries first, longer suites after. GitHub Actions and Cloud Build run all three in one place.
 const shards = [
-  ['default-product', 'lending-provenance', 'jupiter-provenance', 'devnet-provenance', 'orca-liquidity-provenance', 'solana-composition-provenance',
-    'transfer-provenance', 'uniswap-provenance', 'router-provenance', 'unsafe-lending-simulations', 'copilot', 'copilot-solana', 'solana-mainnet-network',
-    'robinhood-mainnet-authoring', 'base-mainnet-authoring', 'arbitrum-authoring-certification', 'ethereum-authoring-certification', 'workflow-ux-authoring', 'canvas-workflow-ux'],
-  ['cloud-provenance', 'journey-provenance', 'synthetic-fork-provenance', 'execution-continuity', 'workflow-acceptance', 'swap-read-acceptance',
-    'automations', 'chat-automations', 'delegated-execution', 'canvas-automation-ux', 'admin-console', 'cow-loopback', 'card-provider-loopback',
-    'mcp-routes-oauth-disabled', 'developer-journey', 'mcp-in-chat', 'mcp-embedded-signing', 'channel-signing', 'channel-approve', 'approve-authorize-journeys',
-    'approve-workflow-run', 'universal-bridge', 'owner-history', 'auth-wallets'],
+  ['lending-provenance', 'jupiter-provenance', 'devnet-provenance', 'orca-liquidity-provenance', 'solana-composition-provenance',
+    'transfer-provenance', 'uniswap-provenance', 'router-provenance', 'journey-provenance', 'unsafe-lending-simulations', 'default-product',
+    'copilot', 'copilot-solana', 'solana-mainnet-network', 'robinhood-mainnet-authoring', 'base-mainnet-authoring',
+    'arbitrum-authoring-certification', 'ethereum-authoring-certification', 'workflow-ux-authoring', 'canvas-workflow-ux', 'cow-loopback',
+    'card-provider-loopback', 'swap-read-acceptance'],
+  ['admin-console', 'mcp-embedded-signing', 'canvas-automation-ux', 'owner-history', 'universal-bridge', 'auth-wallets',
+    'approve-workflow-run', 'mcp-in-chat', 'approve-authorize-journeys', 'execution-continuity'],
+  ['cloud-provenance', 'synthetic-fork-provenance', 'developer-journey', 'mcp-routes-oauth-disabled', 'automations', 'channel-signing',
+    'delegated-execution', 'workflow-acceptance', 'channel-approve', 'chat-automations'],
 ];
 // Fail closed on any plan drift: every product profile runs in exactly one place, and every name in the plan exists.
 const names = definitions.map(([name]) => name), planned = [...critical, ...shards.flat()];
@@ -164,7 +169,10 @@ const label = shard ? `${phase}-shard-${shard.replace('/', '-of-')}` : phase ===
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const results = join(root, 'apps/reference-dapp/test-results');
-const report = { kind: 'guarded-browser', phase, shard, label, status: 'RUNNING',
+// The ledger accepts only reports of the revision it certifies (scripts/ci-observe.py verify).
+const revision = [process.env.FLOFI_CI_REVISION, process.env.CIRCLE_SHA1, process.env.GITHUB_SHA].find(value => /^[0-9a-f]{40}$/.test(value ?? ''))
+  ?? (spawnSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).stdout ?? '').trim();
+const report = { kind: 'guarded-browser', phase, shard, label, revision: /^[0-9a-f]{40}$/.test(revision) ? revision : 'UNKNOWN', status: 'RUNNING',
   profiles: selection.map(name => ({ name, specs: byName.get(name)[1], status: 'NOT_RUN', seconds: null, exitCode: null })) };
 const reportFiles = [join(results, `guarded-${label}.json`), ...(process.env.RUNNER_TEMP ? [join(process.env.RUNNER_TEMP, 'flofi-ci-metrics', 'browser', `${label}.json`)] : [])];
 function writeReport() {

@@ -138,7 +138,8 @@ Outfit (Copyright 2021 The Outfit Project Authors) and IBM Plex Mono (Copyright 
 The Privy account and embedded-wallet integration adds six exact direct dependencies of the private
 reference application and 204 transitive registry packages (295 to 505). All are unmodified, SRI-pinned
 in `pnpm-lock.yaml`, keep their upstream licenses and are classified one by one by
-`python3 scripts/bootstrap-ci.py --verify-dependencies`; nothing is vendored or relicensed. Each archive
+`python3 scripts/bootstrap-ci.py --verify-dependencies` (since BUILD-FLOFI-CI-ARCHITECTURE-001:
+`python3 scripts/dependency_security.py verify` under `docs/security/dependency-policy.json`); nothing is vendored or relicensed. Each archive
 below was downloaded from registry.npmjs.org and matched its lockfile SRI before its legal text was hashed.
 
 | Package | Registry SPDX expression | npm archive | Legal text in the archive | SHA-256 |

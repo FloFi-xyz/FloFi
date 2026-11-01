@@ -26,7 +26,7 @@ class CloudOrchestration(unittest.TestCase):
         pnpm.chmod(0o755)
         self.log = self.root / 'calls.log'
         self.env = {**os.environ, 'PATH': f'{self.root / "bin"}:{os.environ["PATH"]}',
-                    'RUNNER_TEMP': str(self.root / 'runner'), 'FAKE_LOG': str(self.log)}
+                    'RUNNER_TEMP': str(self.root / 'runner'), 'FAKE_LOG': str(self.log), 'FLOFI_CI_REVISION': 'c' * 40}
 
         # Stub only external setup/fork work, not collection, reporting, the
         # browser runner or the ledger. All 50 profiles execute the fake pnpm.
@@ -59,7 +59,7 @@ class CloudOrchestration(unittest.TestCase):
         for index, name in enumerate(required):
             if name not in remaining:
                 (self.metrics / f'{index:032x}.json').write_text(json.dumps(
-                    {'name': name, 'job': 'setup', 'start': index, 'outcome': 'success', 'duration': 1.0}))
+                    {'name': name, 'job': 'setup', 'revision': 'c' * 40, 'start': index, 'outcome': 'success', 'duration': 1.0}))
 
     def run_cloud(self, **env):
         return subprocess.run(['bash', 'scripts/gcp-ci-certify.sh'], cwd=self.root,
@@ -180,7 +180,7 @@ class CloudOrchestration(unittest.TestCase):
 
     def test_early_critical_order_keeps_setup_resource_and_coverage_constraints(self):
         full = (ROOT / 'scripts/gcp-ci-full.sh').read_text()
-        commands = ['gcp-source-snapshot.py verify --initialize-git', 'bootstrap-ci.py --verify-dependencies',
+        commands = ['gcp-source-snapshot.py verify --initialize-git', 'dependency_security.py verify',
                     'pnpm audit --audit-level low', 'ci-sbom.sh', 'pnpm build', 'bootstrap-anvil.py',
                     'bootstrap-playwright.py', 'bash scripts/gcp-ci-certify.sh']
         offsets = [full.index(command) for command in commands]

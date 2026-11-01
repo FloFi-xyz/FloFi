@@ -23,6 +23,7 @@ import zipfile
 from ci_archive_cache import verified_archive
 
 ROOT = Path(__file__).resolve().parents[1]
+REVISION, OTHER_REVISION = 'c' * 40, 'd' * 40
 
 
 def load_script(name):
@@ -33,8 +34,7 @@ def load_script(name):
 
 
 bootstrap = load_script('bootstrap-ci')
-# BUILD-FLOFI-PRIVY-UX-001 exact-identity license exceptions, as the live registry reports them (@privy-io/api-base has no license).
-PRIVY_LICENSE_EXCEPTIONS = {'@privy-io/api-base@1.12.0': None, 'fast-sha256@1.3.0': 'Unlicense', 'lru-cache@11.5.3': 'BlueOak-1.0.0'}
+import dependency_security  # noqa: E402 - the registry document handling moved here (BUILD-FLOFI-CI-ARCHITECTURE-001)
 
 
 class ArchiveCache(unittest.TestCase):
@@ -261,27 +261,42 @@ class RegistryTransport(unittest.TestCase):
             archive.assert_not_called()
             extract.assert_not_called()
 
-    def test_multiple_versions_share_one_fresh_response_without_losing_fields(self):
-        packages = {'1.0.0': {'license': 'MIT', 'dist': {'integrity': 'sha512-one'}},
-                    '2.0.0': {'license': 'GPL-3.0-only', 'dist': {'integrity': 'sha512-two'}, 'cpu': ['arm64']}}
-        metadata = {'versions': packages, 'time': {'1.0.0': '2020-01-01T00:00:00Z', '2.0.0': '2026-10-09T00:00:00Z'}}
-        with patch.object(bootstrap, 'fetch', return_value=json.dumps(metadata).encode()) as fetch:
-            locked = {'@scope/name@1.0.0': 'sha512-one', '@scope/name@2.0.0': 'sha512-two'}
-            for _ in range(2):
-                records = bootstrap.registry_metadata(locked)
-                for version in packages:
-                    self.assertEqual(records['@scope/name@' + version], (packages[version], metadata['time'][version], None))
-            self.assertEqual(fetch.call_count, 2)  # no persistent or second-call metadata cache
-            self.assertEqual(fetch.call_args.args[0], 'https://registry.npmjs.org/@scope%2fname')
-            self.assertTrue(fetch.call_args.kwargs['compressed'])
+    def test_multiple_versions_share_one_fresh_response_reduced_to_what_evaluation_needs(self):
+        packages = {'0.9.0': {'license': 'MIT', 'dist': {'integrity': 'sha512-zero'}},
+                    '1.0.0': {'license': 'MIT', 'dist': {'integrity': 'sha512-one'}},
+                    '2.0.0': {'license': 'GPL-3.0-only', 'dist': {'integrity': 'sha512-two'}, 'cpu': ['arm64']},
+                    '3.0.0': {'license': 'MIT', 'dist': {'integrity': 'sha512-unlocked'}}}
+        metadata = {'name': '@scope/name', 'versions': packages, 'time': {'created': '2019-01-01T00:00:00Z', '0.9.0': '2019-06-01T00:00:00Z',
+                                                                          '1.0.0': '2020-01-01T00:00:00Z', '2.0.0': '2026-10-09T00:00:00Z',
+                                                                          '3.0.0': '2026-10-30T00:00:00Z'}}
+        fetch = unittest.mock.Mock(return_value=json.dumps(metadata).encode())
+        for _ in range(2):
+            records = dependency_security.registry_metadata(['@scope/name@1.0.0', '@scope/name@2.0.0'], fetch=fetch)
+            reduced = records['@scope/name']
+            self.assertEqual(set(reduced['versions']), {'0.9.0', '1.0.0', '2.0.0'})  # locked releases and their prior releases only
+            self.assertEqual(reduced['prior'], {'1.0.0': '0.9.0', '2.0.0': '1.0.0'})
+            self.assertEqual(reduced['versions']['2.0.0'], packages['2.0.0'])
+            self.assertEqual(reduced['version_count'], 4)
+        self.assertEqual(fetch.call_count, 2)  # no persistent or second-call metadata cache
+        self.assertEqual(fetch.call_args.args[0], 'https://registry.npmjs.org/@scope%2fname')
+        self.assertTrue(fetch.call_args.kwargs['compressed'])
 
-    def test_unavailable_missing_version_missing_time_and_malformed_metadata_fail(self):
-        for response in [b'not-json', b'{}', b'{"versions":{"1":{}},"time":{}}']:
-            with patch.object(bootstrap, 'fetch', return_value=response):
-                records = bootstrap.registry_metadata({'example@1': 'sha512-x'})
-                self.assertIsNotNone(records['example@1'][2])
-        with patch.object(bootstrap, 'fetch', side_effect=OSError('offline')):
-            self.assertIsNotNone(bootstrap.registry_metadata({'example@1': 'sha512-x'})['example@1'][2])
+    def test_unavailable_and_malformed_metadata_are_recorded_as_errors(self):
+        for response in [b'not-json', b'[]']:
+            fetch = unittest.mock.Mock(return_value=response)
+            self.assertIn('error', dependency_security.registry_metadata(['example@1.0.0'], fetch=fetch)['example'])
+        for failure, status in [(OSError('offline'), None), (RuntimeError('host=x attempt=1: HTTP 404; not retryable'), 404)]:
+            record = dependency_security.registry_metadata(['example@1.0.0'], fetch=unittest.mock.Mock(side_effect=failure))['example']
+            self.assertEqual(record['status'], status)
+
+    def test_quiet_registry_fetch_logs_only_retries(self):
+        unavailable = bootstrap.urllib.error.HTTPError(bootstrap.NODE_URL, 503, 'private detail', {}, None)
+        with patch.object(bootstrap.urllib.request, 'urlopen', side_effect=[unavailable, self.response(b'ok')]), \
+                patch.object(bootstrap.time, 'sleep'), redirect_stdout(io.StringIO()) as logs:
+            self.assertEqual(bootstrap.fetch('https://registry.npmjs.org/x', quiet=True), b'ok')
+        self.assertNotIn('attempt=1/3\n', logs.getvalue())
+        self.assertIn('attempt=1/3 failed=HTTP 503', logs.getvalue())
+        self.assertIn('attempt=2/3', logs.getvalue())
 
 
 class BootstrapIntegration(unittest.TestCase):
@@ -340,157 +355,6 @@ class BootstrapIntegration(unittest.TestCase):
                     self.assertFalse((parent / 'bad' / destination).exists())
 
 
-class FullDependencyGate(unittest.TestCase):
-    """The whole existing gate runs on a synthetic registry; corruptions must fail."""
-    def setUp(self):
-        lock = (ROOT / 'pnpm-lock.yaml').read_text().split('\npackages:\n')[1].split('\nsnapshots:\n')[0]
-        blocks = re.split(r'(?m)^  (\S[^\n]*):\n', lock)
-        self.registry = {}
-        for identity, body in zip(blocks[1::2], blocks[2::2]):
-            identity = identity.strip("'")
-            integrity = re.search(r'integrity: (sha512-[A-Za-z0-9+/=]+)', body).group(1)
-            name, version = identity.rsplit('@', 1)
-            package = {'license': 'MIT', 'dist': {'integrity': integrity}}
-            if identity in bootstrap.BUILD002_REVIEWED_LICENSE_EXCEPTIONS:
-                approved = bootstrap.BUILD002_REVIEWED_LICENSE_EXCEPTIONS[identity]
-                package.update({key: approved[key] for key in ['license', 'os', 'cpu', 'libc']})
-            document = self.registry.setdefault(name, {'versions': {}, 'time': {}})
-            document['versions'][version] = package
-            document['time'][version] = '2020-01-01T00:00:00Z'
-        # Owner-approved release-age waivers are bound to their recorded registry publication time.
-        for entry in bootstrap.APPROVED_AGE_WAIVERS:
-            if 'published_at' in entry:
-                self.registry[entry['package']]['time'][entry['version']] = entry['published_at']
-        for identity, license_id in PRIVY_LICENSE_EXCEPTIONS.items():
-            self.set_license(identity, license_id)
-        self.scratch = tempfile.TemporaryDirectory()
-        self.addCleanup(self.scratch.cleanup)
-
-    def set_license(self, identity, license_id):
-        name, version = identity.rsplit('@', 1)
-        package = self.registry[name]['versions'][version]
-        package.pop('license', None)
-        if license_id is not None:  # the live registry omits the field rather than sending null
-            package['license'] = license_id
-
-    def verify(self):
-        def fetch(url, **_):
-            return json.dumps(self.registry[url.removeprefix('https://registry.npmjs.org/').replace('%2f', '/')]).encode()
-        with patch.dict(os.environ, {'RUNNER_TEMP': self.scratch.name}), patch.object(bootstrap, 'fetch', side_effect=fetch), redirect_stdout(io.StringIO()):
-            bootstrap.verify_dependencies()
-
-    def test_full_inventory_and_existing_exceptions_pass(self):
-        self.verify()
-        evidence = json.loads((Path(self.scratch.name) / 'build-002-dependencies.json').read_text())
-        self.assertEqual(len(evidence), 505)
-        licenses = {row['name'] + '@' + row['version']: row['license'] for row in evidence}
-        self.assertEqual({identity: licenses[identity] for identity in PRIVY_LICENSE_EXCEPTIONS}, PRIVY_LICENSE_EXCEPTIONS)
-
-    def test_privy_license_exceptions_bind_exact_identity_and_license(self):
-        # The same license on another identity, or another license on an excepted identity, is still rejected.
-        for identity, license_id in (('@privy-io/api-types@0.24.0', None), ('zod@4.6.6', 'Unlicense'),
-                                     ('viem@2.57.8', 'BlueOak-1.0.0'), ('@privy-io/api-base@1.12.0', 'LicenseRef-Proprietary'),
-                                     ('fast-sha256@1.3.0', 'GPL-3.0-only'), ('lru-cache@11.5.3', None)):
-            with self.subTest(identity=identity, license=license_id):
-                saved = json.loads(json.dumps(self.registry))
-                self.set_license(identity, license_id)
-                with self.assertRaises(RuntimeError):
-                    self.verify()
-                self.assertFalse((Path(self.scratch.name) / 'build-002-dependencies.json').exists())
-                self.registry = saved
-
-    def test_release_age_waivers_bind_exact_integrity_and_publication(self):
-        young = '2999-01-01T00:00:00.000Z'
-        for name, version in (('minimatch', '11.0.3'), ('@isaacs/nonrecursive-glob-match', '1.0.3')):
-            with self.subTest(identity=name + '@' + version):
-                saved = json.loads(json.dumps(self.registry))
-                self.registry[name]['time'][version] = young  # a republication-time change is not the reviewed release
-                with self.assertRaises(RuntimeError):
-                    self.verify()
-                self.assertFalse((Path(self.scratch.name) / 'build-002-dependencies.json').exists())
-                self.registry = saved
-        waivers = [dict(entry) for entry in bootstrap.APPROVED_AGE_WAIVERS]
-        waivers[2]['integrity'] = 'sha512-' + 'A' * 86 + '=='
-        with patch.object(bootstrap, 'APPROVED_AGE_WAIVERS', tuple(waivers)), self.assertRaises(RuntimeError):
-            self.verify()
-        waivers = [dict(entry) for entry in bootstrap.APPROVED_AGE_WAIVERS] + [{'package': 'left-pad', 'version': '1.3.0'}]
-        with patch.object(bootstrap, 'APPROVED_AGE_WAIVERS', tuple(waivers)), self.assertRaises(RuntimeError):
-            self.verify()
-        # A waived identity younger than seven days passes only through its exact waiver.
-        self.verify()
-
-    def test_integrity_license_age_platform_and_missing_entry_fail_without_evidence(self):
-        mutations = ['integrity', 'license', 'age', 'platform', 'missing']
-        for mutation in mutations:
-            with self.subTest(mutation=mutation):
-                saved = json.loads(json.dumps(self.registry))
-                document = self.registry['@img/sharp-win32-x64']
-                package = document['versions']['0.35.5']
-                if mutation == 'integrity': package['dist']['integrity'] = 'sha512-poison'
-                elif mutation == 'license': package['license'] = 'MIT'
-                elif mutation == 'age': document['time']['0.35.5'] = '2999-01-01T00:00:00Z'
-                elif mutation == 'platform': package['cpu'] = ['arm64']
-                else: document['versions'].clear()
-                with self.assertRaises(RuntimeError):
-                    self.verify()
-                self.assertFalse((Path(self.scratch.name) / 'build-002-dependencies.json').exists())
-                self.registry = saved
-
-
-class SbomValidation(unittest.TestCase):
-    """Run the actual SBOM validator against complete and corrupted inventories."""
-    def setUp(self):
-        self.scratch = tempfile.TemporaryDirectory()
-        self.addCleanup(self.scratch.cleanup)
-        self.directory = Path(self.scratch.name)
-        script = (ROOT / '.circleci/scripts/ci-sbom.sh').read_text()
-        self.validator = script.split("python3 - <<'PYCODE'\n", 1)[1].rsplit('\nPYCODE', 1)[0]
-        lock = (ROOT / 'pnpm-lock.yaml').read_text().split('\npackages:\n')[1].split('\nsnapshots:\n')[0]
-        identities = [identity.strip("'").rsplit('@', 1) for identity in re.findall(r'(?m)^  (\S[^\n]*):$', lock)]
-        # As the dependency gate records them: reviewed exceptions keep their registry license, including one without any (null).
-        self.evidence = [
-            {'name': name, 'version': version, 'license': PRIVY_LICENSE_EXCEPTIONS[name + '@' + version]
-             if name + '@' + version in PRIVY_LICENSE_EXCEPTIONS else bootstrap.BUILD002_REVIEWED_LICENSE_EXCEPTIONS.get(
-                name + '@' + version, {}).get('license', 'MIT')}
-            for name, version in identities
-        ]
-        components = [{'name': row['name'], 'version': row['version'],
-                       'bom-ref': row['name'] + '@' + row['version']} for row in self.evidence]
-        self.document = {
-            'bomFormat': 'CycloneDX', 'specVersion': '1.6', 'components': components,
-            'metadata': {'component': {'name': 'defi-workflow-engine', 'version': '0.1.0',
-                                      'bom-ref': 'root', 'licenses': [{'license': {'id': 'Apache-2.0'}}]}},
-            'dependencies': [{'ref': component['bom-ref'], 'dependsOn': []} for component in components]
-                            + [{'ref': 'root', 'dependsOn': []}],
-        }
-
-    def validate(self):
-        sbom = self.directory / 'build-003a.cdx.json'
-        sbom.write_text(json.dumps(self.document))
-        (self.directory / 'build-002-dependencies.json').write_text(json.dumps(self.evidence))
-        result = subprocess.run([sys.executable, '-c', self.validator], cwd=ROOT, capture_output=True, text=True,
-                                env={**os.environ, 'RUNNER_TEMP': str(self.directory),
-                                     'GITHUB_STEP_SUMMARY': str(self.directory / 'summary.md')}, timeout=10)
-        self.assertFalse(sbom.exists(), 'The SBOM must be removed after success or failure')
-        return result
-
-    def test_complete_reviewed_inventory_passes(self):
-        result = self.validate()
-        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        self.assertIn('505 exact registry components', result.stdout)
-
-    def test_missing_duplicate_unreviewed_and_dangling_components_fail(self):
-        saved = json.dumps(self.document)
-        for corruption in ['missing', 'duplicate', 'unreviewed', 'dangling']:
-            with self.subTest(corruption=corruption):
-                self.document = json.loads(saved)
-                if corruption == 'missing': self.document['components'].pop()
-                elif corruption == 'duplicate': self.document['components'].append(self.document['components'][0])
-                elif corruption == 'unreviewed': self.document['components'][0]['version'] = '0.0.0-unreviewed'
-                else: self.document['dependencies'][0]['dependsOn'] = ['unreviewed-ref']
-                self.assertNotEqual(self.validate().returncode, 0)
-
-
 class WorkflowInvariants(unittest.TestCase):
     def test_runner_paths_are_initialized_after_job_dispatch(self):
         body = (ROOT / '.github/workflows/contracts.yml').read_text()
@@ -521,7 +385,8 @@ class WorkflowInvariants(unittest.TestCase):
         self.assertNotIn('restore-keys:', body)
         self.assertNotIn('save-always:', body)
         self.assertIn('actions/cache@caa296126883cff596d87d8935842f9db880ef25', body)
-        self.assertIn("'scripts/bootstrap-*.py', 'scripts/ci_archive_cache.py', 'pnpm-lock.yaml', '.npmrc', 'pnpm-workspace.yaml'", body)
+        # Raw tool archives are defined by the bootstrap pins only; the dependency lockfile does not evict them.
+        self.assertIn("hashFiles('scripts/bootstrap-*.py', 'scripts/ci_archive_cache.py')", body)
         paths = body.split('          path: |\n')[1].split('          #')[0]
         self.assertEqual(len(paths.splitlines()), 4)
         self.assertNotRegex(paths, r'node_modules|\.next|\.turbo|journal|runtime|keys')
@@ -531,8 +396,8 @@ class WorkflowInvariants(unittest.TestCase):
     def test_all_extra_mandatory_suites_and_security_steps_are_unconditional(self):
         body = (ROOT / '.github/workflows/contracts.yml').read_text()
         # The MCP, developer and channel browser suites are guarded-runner profiles now (BrowserPlan checks them).
-        for command in ['pnpm test:postgres', 'pnpm exec eslint scripts/guarded-release-browser.mjs',
-                        'pnpm sbom --sbom-format cyclonedx', 'pnpm exec vitest run packages/reference-compiler/test/composition.fork.test.ts',
+        for command in ['pnpm test:postgres', 'pnpm exec eslint scripts/guarded-release-browser.mjs', 'python3 scripts/dependency_security.py verify',
+                        'bash scripts/ci-sbom.sh', 'pnpm exec vitest run packages/reference-compiler/test/composition.fork.test.ts',
                         'node scripts/guarded-release-browser.mjs critical', 'node scripts/guarded-release-browser.mjs extended',
                         'node scripts/guarded-release-browser.mjs composition']:
             steps = [step for step in re.split(r'(?m)^      - name:', body) if command in step]
@@ -722,7 +587,7 @@ class BrowserPlan(unittest.TestCase):
 
 class CiParity(unittest.TestCase):
     # Gates both CI systems run unconditionally (GitHub Actions in one job, CircleCI across the certification jobs).
-    MANDATORY = ['python3 scripts/bootstrap-ci.py', 'pnpm install --frozen-lockfile --ignore-scripts', 'python3 scripts/bootstrap-ci.py --verify-dependencies',
+    MANDATORY = ['python3 scripts/bootstrap-ci.py', 'pnpm install --frozen-lockfile --ignore-scripts', 'python3 scripts/dependency_security.py verify',
                  'pnpm audit --audit-level low', 'pnpm typecheck', 'pnpm lint', 'pnpm exec eslint scripts/guarded-release-browser.mjs', 'pnpm build',
                  'pnpm schemas:check', 'python3 scripts/agent_guard.py check',
                  'pnpm test --reporter=default --reporter=json --outputFile="$RUNNER_TEMP/flofi-agent-unit.json"',
@@ -734,7 +599,7 @@ class CiParity(unittest.TestCase):
                  'node apps/reference-dapp/e2e/fork/offline-rehearsal.mjs > "$RUNNER_TEMP/build-003f-f1.json"',
                  'python3 scripts/bootstrap-playwright.py "$BUILD002_BROWSER_CACHE"', 'node scripts/guarded-release-browser.mjs critical',
                  'node scripts/guarded-release-browser.mjs composition', 'node apps/reference-dapp/e2e/fork/composition-harness.mjs serve > "$RUNNER_TEMP/gryloo-b007-harness.log" 2>&1 &',
-                 'pnpm sbom --sbom-format cyclonedx --sbom-spec-version 1.6 --lockfile-only --out "$RUNNER_TEMP/build-003a.cdx.json"']
+                 'bash scripts/ci-sbom.sh']
     CONDITIONAL = {'Summarize screenshot differences after a browser failure', 'CI timing summary after failure', 'CI timing summary after success'}
 
     @classmethod
@@ -771,8 +636,7 @@ class CiParity(unittest.TestCase):
 
     def test_circleci_scripts_are_exact_copies_of_the_actions_steps(self):
         steps = dict(self.actions)
-        for script, name in [('ci-fork.sh', 'Offline compatibility gate and fork suite'), ('ci-sbom.sh', 'Validate and remove ephemeral CycloneDX 1.6 SBOM'),
-                             ('ci-composition.sh', 'Composition fork and browser suites')]:
+        for script, name in [('ci-fork.sh', 'Offline compatibility gate and fork suite'), ('ci-composition.sh', 'Composition fork and browser suites')]:
             lines = (ROOT / '.circleci/scripts' / script).read_text().rstrip('\n').split('\n')
             self.assertEqual(lines[:4], ['#!/usr/bin/env bash', '# Exact CircleCI backup copy of the approved GitHub Actions certification command.',
                                          '# Keep aligned with .github/workflows/contracts.yml; fail closed on any error.', 'set -euo pipefail'])
@@ -798,6 +662,42 @@ class CiParity(unittest.TestCase):
                 if 'when:' in step:
                     self.assertIn(name, self.CONDITIONAL, job)
 
+    def test_m_one_canonical_sbom_validator_in_every_ci_provider(self):
+        callers = {'.github/workflows/contracts.yml': (ROOT / '.github/workflows/contracts.yml').read_text(),
+                   '.circleci/config.yml': self.circle, 'scripts/gcp-ci-full.sh': (ROOT / 'scripts/gcp-ci-full.sh').read_text()}
+        for path, body in callers.items():
+            with self.subTest(provider=path):
+                self.assertEqual(body.count('bash scripts/ci-sbom.sh'), 1, path)
+                # No provider keeps its own copy of the CycloneDX checks or a fixed component count.
+                self.assertNotIn('bomFormat', body)
+                self.assertNotIn('pnpm sbom', body)
+                self.assertNotRegex(body, r'\b505\b|\b263\b')
+        self.assertFalse((ROOT / '.circleci/scripts/ci-sbom.sh').exists())
+        script = (ROOT / 'scripts/ci-sbom.sh').read_text().splitlines()
+        self.assertEqual(script[3], 'set -euo pipefail')
+        self.assertIn('pnpm sbom --sbom-format cyclonedx --sbom-spec-version 1.6 --lockfile-only --out "$flofi_sbom"', script)
+        self.assertIn('python3 scripts/sbom_verify.py "$flofi_sbom" "$RUNNER_TEMP/flofi-dependency-evidence.json"', script)
+        actions = [name for name, step in self.actions]
+        self.assertLess(actions.index('Dependency security policy (integrity, registry signatures, advisories, licenses, supply-chain risk)'),
+                        actions.index('Validate and remove ephemeral CycloneDX 1.6 SBOM'))
+        checks = [name for name, _, _ in self.jobs['certification-checks']]
+        self.assertLess(checks.index('Dependency security policy (integrity, registry signatures, advisories, licenses, supply-chain risk)'),
+                        checks.index('Validate and remove ephemeral CycloneDX 1.6 SBOM'))
+        for source in ('scripts/bootstrap-ci.py', 'scripts/sbom_verify.py', 'scripts/dependency_security.py'):
+            self.assertNotRegex((ROOT / source).read_text(), r'(?m)^[A-Z_]*COUNT\s*=\s*\d{3}|hexdigest\(\) != "[0-9a-f]{64}"', source)
+
+    def test_p_caches_hold_only_digest_verified_raw_archives(self):
+        saves = re.findall(r'(?m)^      - save_cache:\n          key: (.+)\n          paths:\n((?:            - .+\n)+)', self.circle)
+        self.assertEqual(len(saves), 2)
+        for key, paths in saves:
+            self.assertEqual(paths.strip().splitlines(), ['- /tmp/flofi-ci/archives'])
+            self.assertIn('{{ arch }}', key)
+        for script in ('bootstrap-ci.py', 'bootstrap-anvil.py', 'bootstrap-playwright.py'):
+            self.assertIn('verified_archive(', (ROOT / 'scripts' / script).read_text(), script)
+        restore = re.search(r'(?m)^      - restore_cache:\n          keys:\n((?:            - .+\n)+)', self.circle).group(1)
+        self.assertEqual([line.strip()[2:] for line in restore.splitlines()], [saves[0][0], 'flofi-circleci-archives-v2-{{ arch }}-'])
+        self.assertNotRegex(self.circle, r'node_modules|\.next/cache|\.turbo|pnpm-store|persist_to_workspace:\n          root: /tmp/flofi-ci\n          paths:\n            - (?!flofi-ci-metrics)')
+
     def test_critical_browser_regressions_run_before_the_slow_suites(self):
         def position(command):
             return next(index for index, (_, step) in enumerate(self.actions) if command in run_body(step, 10))
@@ -808,10 +708,15 @@ class CiParity(unittest.TestCase):
             self.assertLess(position('node scripts/guarded-release-browser.mjs critical'), position(later), later)
         browser = [lines for _, _, lines in self.jobs['certification-browser-1'] if any(line.startswith('node scripts/guarded-release-browser.mjs') for line in lines)]
         self.assertEqual([line for lines in browser for line in lines if line.startswith('node scripts/')],
-                         ['node scripts/guarded-release-browser.mjs critical', 'node scripts/guarded-release-browser.mjs extended --shard 1/2'])
+                         ['node scripts/guarded-release-browser.mjs critical', 'node scripts/guarded-release-browser.mjs extended --shard 1/3'])
+        # Shard 3 closes certification-checks, after its unit, PostgreSQL and fork suites (no extra runner).
+        checks = [line for _, _, lines in self.jobs['certification-checks'] for line in lines]
+        self.assertEqual([line for line in checks if line.startswith('node scripts/guarded-release-browser.mjs')],
+                         ['node scripts/guarded-release-browser.mjs extended --shard 3/3'])
+        self.assertLess(checks.index('pnpm test:fork --testTimeout=30000'), checks.index('node scripts/guarded-release-browser.mjs extended --shard 3/3'))
 
     def test_failure_artifacts_test_reports_and_timings_are_kept(self):
-        for job in ['certification-browser-1', 'certification-browser-2']:
+        for job in ['certification-checks', 'certification-browser-1', 'certification-browser-2']:
             names = [name for name, _, _ in self.jobs[job]]
             self.assertIn('store_test_results', names)
             self.assertIn('store_artifacts', names)
@@ -958,14 +863,15 @@ class GuardedRunner(unittest.TestCase):
         result = self.run_phase('critical', PATH='/nonexistent')
         self.assertNotEqual(result.returncode, 0)
         self.assertEqual(self.report('critical')['status'], 'FAIL')
-        for args in [[], ['product', 'extra'], ['extended', '--shard', '3/2'], ['extended', '--shard', '1/3'], ['profile', 'unknown'], ['all']]:
+        for args in [[], ['product', 'extra'], ['extended', '--shard', '4/3'], ['extended', '--shard', '1/2'], ['extended', '--shard', '0/3'],
+                     ['profile', 'unknown'], ['all']]:
             with self.subTest(args=args):
                 self.assertNotEqual(self.run_phase(*args).returncode, 0)
         self.assertFalse(self.calls())
 
     def test_a_plan_that_drops_or_repeats_a_profile_refuses_to_run(self):
         source = (self.root / RUNNER).read_text()
-        for broken in [source.replace("'canvas-workflow-ux'],", "],", 1), source.replace('const critical = [', "const critical = ['copilot', ", 1)]:
+        for broken in [source.replace(", 'chat-automations'],", "],", 1), source.replace('const critical = [', "const critical = ['copilot', ", 1)]:
             with self.subTest():
                 self.assertNotEqual(broken, source)
                 (self.root / RUNNER).write_text(broken)
@@ -983,11 +889,12 @@ class CertificationLedger(unittest.TestCase):
         self.addCleanup(scratch.cleanup)
         self.metrics = Path(scratch.name) / 'flofi-ci-metrics'
         (self.metrics / 'browser').mkdir(parents=True)
-        self.env = patch.dict(os.environ, {'RUNNER_TEMP': scratch.name})
+        self.env = patch.dict(os.environ, {'RUNNER_TEMP': scratch.name, 'FLOFI_CI_REVISION': REVISION})
         self.env.start()
         self.addCleanup(self.env.stop)
         for index, name in enumerate(self.observe.REQUIRED_STAGES):
-            self.write(f'{index:032x}.json', {'name': name, 'job': 'certification-checks', 'start': index, 'outcome': 'success', 'duration': 1.0})
+            self.write(f'{index:032x}.json', {'name': name, 'job': 'certification-checks', 'revision': REVISION, 'start': index,
+                                              'outcome': 'success', 'duration': 1.0})
         plan = browser_plan()
         shards = [('critical', None, plan['critical']), *[('extended', f'{i}/{len(plan["shards"])}', names) for i, names in enumerate(plan['shards'], 1)],
                   ('composition', None, plan['composition'])]
@@ -997,10 +904,10 @@ class CertificationLedger(unittest.TestCase):
     def write(self, name, record):
         (self.metrics / name).write_text(json.dumps(record))
 
-    def write_report(self, label, phase, shard, names, status='PASS'):
+    def write_report(self, label, phase, shard, names, status='PASS', revision=None):
         rows = [{'name': name, 'specs': [], 'status': status, 'seconds': 1.0, 'exitCode': 0} for name in names]
         (self.metrics / 'browser' / (label + '.json')).write_text(json.dumps({'kind': 'guarded-browser', 'phase': phase, 'shard': shard, 'label': label,
-                                                                               'status': status, 'profiles': rows}))
+                                                                               'revision': revision or REVISION, 'status': status, 'profiles': rows}))
 
     def verify(self):
         with redirect_stdout(io.StringIO()) as output:
@@ -1027,6 +934,36 @@ class CertificationLedger(unittest.TestCase):
                 self.assertEqual(status, 1)
                 self.assertIn(record['name'], output)
                 path.write_text(saved)
+
+    def test_q_records_of_another_revision_never_certify_this_one(self):
+        # A stage that passed for another commit (stale workspace, cached artifact) cannot stand in for this commit's run.
+        path = self.metrics / f'{3:032x}.json'
+        path.write_text(json.dumps({**json.loads(path.read_text()), 'revision': OTHER_REVISION}))
+        status, output = self.verify()
+        self.assertEqual(status, 1)
+        self.assertIn('belongs to revision', output)
+        self.assertIn('required stage never ran: ' + self.observe.REQUIRED_STAGES[3], output)
+
+    def test_q_browser_report_of_another_revision_is_rejected(self):
+        plan = browser_plan()
+        self.write_report('extended-1-3', 'extended', '1/3', plan['shards'][0], revision=OTHER_REVISION)
+        status, output = self.verify()
+        self.assertEqual(status, 1)
+        self.assertIn('extended browser profiles never ran', output)
+        self.write_report('extended-1-3', 'extended', '1/3', plan['shards'][0])
+        self.assertEqual(self.verify()[0], 0)
+        with patch.object(self.observe, 'revision', return_value='UNKNOWN'):
+            status, output = self.verify()
+        self.assertEqual(status, 1)  # an unknown revision never certifies
+        self.assertIn('the certified revision is unknown', output)
+
+    def test_stage_records_carry_the_revision(self):
+        with tempfile.TemporaryDirectory() as scratch:
+            env = {**os.environ, 'RUNNER_TEMP': scratch, 'FLOFI_CI_REVISION': OTHER_REVISION}
+            subprocess.run(['bash', '-c', "set -euo pipefail\nsource scripts/ci-observe.sh 'stage'\ntrue"], cwd=ROOT, env=env, check=True,
+                           capture_output=True)
+            row = json.loads(next((Path(scratch) / 'flofi-ci-metrics').glob('*.json')).read_text())
+            self.assertEqual(row['revision'], OTHER_REVISION)
 
     def test_missing_repeated_failed_or_unplanned_profiles_fail(self):
         plan = browser_plan()

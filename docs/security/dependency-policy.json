@@ -1,0 +1,147 @@
+{
+  "policy": "flofi-dependency-security",
+  "version": "1.0.0",
+  "effective": "2026-11-01",
+  "decision_record": "docs/builds/BUILD-FLOFI-CI-ARCHITECTURE-001.md",
+  "summary": "pnpm-lock.yaml is the resolved graph. scripts/dependency_security.py verify evaluates every locked registry package against this policy and decides PASS, REVIEW_REQUIRED or BLOCK. Routine dependency changes that pass need no edit here. Only a real license or supply-chain exception is recorded below, once. Mandatory controls (integrity, registry signatures, advisories, prohibited licenses, sources) cannot be excepted.",
+  "registry": {
+    "url": "https://registry.npmjs.org/",
+    "tarball_host": "registry.npmjs.org",
+    "integrity_algorithm": "sha512"
+  },
+  "release_age": {
+    "minimum_minutes": 0,
+    "note": "Owner decision (BUILD-FLOFI-CI-ARCHITECTURE-001): no time-based installation restriction. pnpm 11 defaults minimumReleaseAge to 1440 minutes when unset, so pnpm-workspace.yaml sets it to 0 explicitly. Publication time is a risk signal only."
+  },
+  "registry_signatures": {
+    "required": true,
+    "note": "npm registry ECDSA P-256 signatures over name@version:integrity, verified against these pinned public keys (https://registry.npmjs.org/-/npm/v1/keys). A signature by a key past its expiry is invalid for releases published after that expiry.",
+    "keys": [
+      {
+        "keyid": "SHA256:jl3bwswu80PjjokCgh0o2w5c2U4LhQAE57gj9cz1kzA",
+        "key": "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAE1Olb3zMAFFxXKHiIkQO5cJ3Yhl5i6UPp+IhuteBJbuHcA5UogKo0EWtlWwW6KSaKoTNEYL7JlCQiVnkhBktUgg==",
+        "expires": "2025-01-29T00:00:00.000Z"
+      },
+      {
+        "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+        "key": "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEY6Ya7W++7aUPzvMTrezH6Ycx3c+HOKYCcNGybJZSCJq/fd7Qa8uuAKtdIkUQtQiEKERhAmE5lMMJhP8OkDOa2g==",
+        "expires": null
+      }
+    ]
+  },
+  "vulnerabilities": {
+    "source": "pnpm audit --json",
+    "block_at_or_above": "low"
+  },
+  "licenses": {
+    "allowed": ["0BSD", "Apache-2.0", "BlueOak-1.0.0", "BSD-2-Clause", "BSD-3-Clause", "CC0-1.0", "ISC", "MIT", "MIT-0", "Unlicense", "Zlib"],
+    "review": ["CC-BY-3.0", "CC-BY-4.0", "EPL-2.0", "LGPL-2.1-only", "LGPL-2.1-or-later", "LGPL-3.0-only", "LGPL-3.0-or-later", "MPL-2.0", "Python-2.0"],
+    "prohibited": ["AGPL-1.0-only", "AGPL-1.0-or-later", "AGPL-3.0-only", "AGPL-3.0-or-later", "BUSL-1.1", "Elastic-2.0", "GPL-2.0-only", "GPL-2.0-or-later", "GPL-3.0-only", "GPL-3.0-or-later", "SSPL-1.0", "UNLICENSED"],
+    "prohibited_prefixes": ["AGPL-", "BUSL-", "CC-BY-NC", "Commons-Clause", "GPL-", "SSPL-"],
+    "note": "An identifier in none of these lists, a non-SPDX value, a custom LICENSE reference and a missing license are REVIEW_REQUIRED. OR takes the most permissive branch, AND the most restrictive."
+  },
+  "supply_chain": {
+    "install_script_hooks": ["preinstall", "install", "postinstall"],
+    "recent_publication_hours": 72,
+    "reserved_scopes": ["@defi-workflow-engine/"],
+    "typosquat": {
+      "max_distance": 1,
+      "min_name_length": 4,
+      "established_min_age_days": 365,
+      "established_min_versions": 10,
+      "protected_names": ["@noble/curves", "@noble/hashes", "@privy-io/node", "@privy-io/react-auth", "@solana/kit", "@solana/web3.js", "@turnkey/crypto", "ethers", "next", "pg", "react", "react-dom", "viem", "zod"]
+    },
+    "capability_scan": {
+      "extensions": [".cjs", ".js", ".mjs"],
+      "max_file_bytes": 4194304,
+      "max_package_bytes": 33554432
+    }
+  },
+  "direct_dependencies": {
+    "exact_versions": true,
+    "note": "Registry dependencies in every workspace manifest use an exact version; workspace packages use workspace: links. pnpm-lock.yaml then fixes the full graph."
+  },
+  "workspace": {
+    "licenses": ["AGPL-3.0-only", "Apache-2.0"],
+    "constraints": [
+      {
+        "importer": "packages/developer-sdk",
+        "max_registry_dependencies": 0,
+        "reason": "BUILD-DEVELOPER-001: the Developer API client is a zero-dependency package."
+      }
+    ]
+  },
+  "exceptions": [
+    {
+      "id": "sharp-libvips-lgpl",
+      "resolves": ["license-review"],
+      "packages": ["@img/sharp-libvips-darwin-arm64", "@img/sharp-libvips-darwin-x64", "@img/sharp-libvips-linux-arm", "@img/sharp-libvips-linux-arm64", "@img/sharp-libvips-linux-ppc64", "@img/sharp-libvips-linux-riscv64", "@img/sharp-libvips-linux-s390x", "@img/sharp-libvips-linux-x64", "@img/sharp-libvips-linuxmusl-arm64", "@img/sharp-libvips-linuxmusl-x64"],
+      "license": "LGPL-3.0-or-later",
+      "parents": ["sharp", "@img/sharp-darwin-arm64", "@img/sharp-darwin-x64", "@img/sharp-linux-arm", "@img/sharp-linux-arm64", "@img/sharp-linux-ppc64", "@img/sharp-linux-riscv64", "@img/sharp-linux-s390x", "@img/sharp-linux-x64", "@img/sharp-linuxmusl-arm64", "@img/sharp-linuxmusl-x64"],
+      "optional": true,
+      "platform_restricted": true,
+      "reason": "Unmodified, dynamically loaded libvips binaries of Next.js's optional image optimizer (sharp), one per platform; LGPL obligations are recorded in THIRD_PARTY_NOTICES.md.",
+      "approved_by": "Owner",
+      "approved_at": "2026-10-15",
+      "record": "docs/builds/BUILD-002-REPORT.md"
+    },
+    {
+      "id": "sharp-win32-lgpl",
+      "resolves": ["license-review"],
+      "packages": ["@img/sharp-win32-arm64", "@img/sharp-win32-ia32", "@img/sharp-win32-x64"],
+      "license": "Apache-2.0 AND LGPL-3.0-or-later",
+      "parents": ["sharp"],
+      "optional": true,
+      "platform_restricted": true,
+      "reason": "Windows sharp binaries bundling the same unmodified libvips (LGPL) as the platform packages above.",
+      "approved_by": "Owner",
+      "approved_at": "2026-10-15",
+      "record": "docs/builds/BUILD-002-REPORT.md"
+    },
+    {
+      "id": "sharp-wasm32-lgpl",
+      "resolves": ["license-review"],
+      "packages": ["@img/sharp-wasm32"],
+      "license": "Apache-2.0 AND LGPL-3.0-or-later AND MIT",
+      "parents": ["@img/sharp-freebsd-wasm32", "@img/sharp-webcontainers-wasm32"],
+      "optional": true,
+      "reason": "WebAssembly build of sharp with libvips (LGPL), reachable only through sharp's optional FreeBSD and WebContainers packages.",
+      "approved_by": "Owner",
+      "approved_at": "2026-10-15",
+      "record": "docs/builds/BUILD-002-REPORT.md"
+    },
+    {
+      "id": "caniuse-lite-cc-by",
+      "resolves": ["license-review"],
+      "packages": ["caniuse-lite"],
+      "license": "CC-BY-4.0",
+      "parents": ["next"],
+      "reason": "Browser-support data used by Next.js; CC-BY-4.0 attribution is recorded in THIRD_PARTY_NOTICES.md.",
+      "approved_by": "Owner",
+      "approved_at": "2026-10-15",
+      "record": "docs/builds/BUILD-002-REPORT.md"
+    },
+    {
+      "id": "lightningcss-mpl",
+      "resolves": ["license-review"],
+      "packages": ["lightningcss", "lightningcss-android-arm64", "lightningcss-darwin-arm64", "lightningcss-darwin-x64", "lightningcss-freebsd-x64", "lightningcss-linux-arm-gnueabihf", "lightningcss-linux-arm64-gnu", "lightningcss-linux-arm64-musl", "lightningcss-linux-x64-gnu", "lightningcss-linux-x64-musl", "lightningcss-win32-arm64-msvc", "lightningcss-win32-x64-msvc"],
+      "license": "MPL-2.0",
+      "parents": ["lightningcss", "vite"],
+      "reason": "Unmodified MPL-2.0 CSS tooling reached only through the Vite/Vitest development toolchain; never shipped in the application bundle.",
+      "approved_by": "Owner",
+      "approved_at": "2026-10-15",
+      "record": "docs/builds/BUILD-001-REPORT.md"
+    },
+    {
+      "id": "privy-api-base-undeclared",
+      "resolves": ["license-missing"],
+      "identity": "@privy-io/api-base@1.12.0",
+      "integrity": "sha512-XXBvYE4WNpWDmUrNEm6sfCG2znnA0YkEDW/Zz+eVn8Ikk+eFIZShShWLO2WC5NWT4pRA46g81dC0TylojJ8fMA==",
+      "parents": ["@privy-io/js-sdk-core", "@privy-io/react-auth"],
+      "reason": "Registry metadata declares no license, but the integrity-pinned archive ships the Apache License 2.0 as package/LICENSE (byte-identical to @privy-io/react-auth@3.51.0's).",
+      "approved_by": "Owner",
+      "approved_at": "2026-10-31",
+      "record": "docs/builds/BUILD-FLOFI-PRIVY-UX-001.md"
+    }
+  ]
+}

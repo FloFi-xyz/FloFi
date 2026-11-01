@@ -757,6 +757,10 @@
     "app.server.universal-router.discovery": {
       "path": "apps/reference-dapp/src/server/universal-router/discovery.test.ts",
       "stage": "unit"
+    },
+    "scripts.test_ci_dependency_security": {
+      "path": "scripts/test_ci_dependency_security.py",
+      "stage": "governance"
     }
   },
   "requiredUnitSuites": [
@@ -2800,7 +2804,9 @@
       ],
       "sharedFinancialCore": false,
       "sources": [
-        "docs/security/COLOSSEUM-DEPENDENCY-AGE-WAIVER.json"
+        "docs/security/dependency-policy.json",
+        "scripts/dependency_security.py",
+        "scripts/sbom_verify.py"
       ],
       "suites": [
         "action-registry.engineering-regression",
@@ -2808,10 +2814,13 @@
         "app.mcp.oauth.foundation",
         "app.state.review-authorization",
         "cloud-runtime.tenancy.pg",
+        "scripts.test_ci_dependency_security",
+        "scripts.test_ci_optimization",
         "scripts.test_governance_lite"
       ],
       "gaps": [
-        "Adversarial fixtures and isolation tests are not a penetration test or proof against all attacks."
+        "Adversarial fixtures and isolation tests are not a penetration test or proof against all attacks.",
+        "Registry signatures and integrity prove the archive is what npm published, not that its code is benign; the bounded capability scan describes risk signals and does not prove safety. npm provenance attestations are recorded, not cryptographically verified (no Sigstore verifier in CI)."
       ]
     },
     {
@@ -3732,7 +3741,6 @@
         ".circleci/config.yml",
         ".circleci/scripts/ci-composition.sh",
         ".circleci/scripts/ci-fork.sh",
-        ".circleci/scripts/ci-sbom.sh",
         ".claude/hooks/flofi_agent_hooks.py",
         ".claude/settings.json",
         ".codex/config.toml",
@@ -3776,6 +3784,7 @@
         "scripts/bootstrap-playwright.py",
         "scripts/ci-observe.py",
         "scripts/ci-observe.sh",
+        "scripts/ci-sbom.sh",
         "scripts/ci_archive_cache.py",
         "scripts/export-schemas.mjs",
         "scripts/gcp-ci-certify.sh",
@@ -3795,6 +3804,7 @@
       "suites": [
         "scripts.test_ci_agent_guard",
         "scripts.test_ci_claude_agents",
+        "scripts.test_ci_dependency_security",
         "scripts.test_ci_gcp_orchestration",
         "scripts.test_ci_optimization",
         "scripts.test_ci_source_snapshot",

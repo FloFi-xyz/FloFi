@@ -1,14 +1,9 @@
 packages:
   - packages/*
   - apps/reference-dapp
-minimumReleaseAge: 10080
-# Exact temporary owner-approved release-age exceptions only (no ranges/globs). Policy: docs/security/DEPENDENCY-AGE-POLICY.md
-# Metadata: docs/security/COLOSSEUM-DEPENDENCY-AGE-WAIVER.json
-minimumReleaseAgeExclude:
-  - source-map-js@1.2.2
-  - fast-uri@3.1.9
-  - minimatch@11.0.3
-  - '@isaacs/nonrecursive-glob-match@1.0.3'
+# BUILD-FLOFI-CI-ARCHITECTURE-001 (owner decision): no release-age restriction. pnpm 11 waits 1440 minutes when this is unset,
+# so it is 0 explicitly. Dependency security is automatic and risk-based: docs/security/dependency-policy.json.
+minimumReleaseAge: 0
 pmOnFail: error
 strictPeerDependencies: true
 autoInstallPeers: false

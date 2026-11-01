@@ -28,8 +28,9 @@ node scripts/guarded-release-browser.mjs critical --collect-failures
 STAGE
 run_stage 'Guarded browser suites' <<'STAGE'
 browser_status=0
-node scripts/guarded-release-browser.mjs extended --shard 1/2 --collect-failures || browser_status=$?
-node scripts/guarded-release-browser.mjs extended --shard 2/2 --collect-failures || browser_status=$?
+node scripts/guarded-release-browser.mjs extended --shard 1/3 --collect-failures || browser_status=$?
+node scripts/guarded-release-browser.mjs extended --shard 2/3 --collect-failures || browser_status=$?
+node scripts/guarded-release-browser.mjs extended --shard 3/3 --collect-failures || browser_status=$?
 exit "$browser_status"
 STAGE
 
