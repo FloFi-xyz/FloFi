@@ -7,7 +7,8 @@
  *    FloFi session ends even if a later step hangs;
  * 3. this browser logs out of Privy, waiting at most a few seconds (the sign-in page also ends any Privy session left behind);
  * 4. the page is replaced by `/login` (`location.replace`: the signed-in page leaves the history, and Back cannot restore it).
- * Nothing about the account, its wallets, keys, assets or history is deleted. Every step runs even if an earlier one fails or stalls.
+ * Nothing about the account, its wallets, keys, assets or history is deleted. Browser steps are bounded; server revocation is awaited
+ * before leaving. A stalled server request can delay Disconnect, so leaving the page is never claimed as proof of server revocation.
  */
 import { accountSignOut } from '../app/account-action';
 import { updateWalletPreference } from '../wallet/wallet-registry';

@@ -18,6 +18,10 @@
       "path": "apps/reference-dapp/src/accounts/account-csp.test.ts",
       "stage": "unit"
     },
+    "app.accounts.account-host": {
+      "path": "apps/reference-dapp/src/accounts/account-host.test.ts",
+      "stage": "unit"
+    },
     "app.accounts.account-model": {
       "path": "apps/reference-dapp/src/accounts/account-model.test.ts",
       "stage": "unit"
@@ -697,6 +701,10 @@
     "app.components.canvas-panel-reveal": {
       "path": "apps/reference-dapp/src/components/canvas-panel-reveal.test.ts",
       "stage": "unit"
+    },
+    "app.accounts.account-store-schema19.pg": {
+      "path": "apps/reference-dapp/src/accounts/account-store-schema19.pg.test.ts",
+      "stage": "postgres"
     }
   },
   "requiredUnitSuites": [
@@ -732,7 +740,13 @@
     "reference-compiler.solana-transfer",
     "reference-executor.bound-composition",
     "reference-executor.cross-chain-liquidity-recovery",
-    "reference-reconciler.evidence"
+    "reference-reconciler.evidence",
+    "app.accounts.privy-server",
+    "app.accounts.privy-client",
+    "app.accounts.account-csp",
+    "app.accounts.wallet-relay",
+    "app.app.wallet-session-action",
+    "app.accounts.account-host"
   ],
   "modules": [
     {
@@ -6278,10 +6292,12 @@
         "apps/reference-dapp/src/wallet/flofi-wallet-channel.ts",
         "apps/reference-dapp/src/wallet/flofi-wallet-sync.ts",
         "packages/cloud-runtime/migrations/0018_flofi_accounts.sql",
-        "packages/cloud-runtime/migrations/0019_privy_accounts.sql"
+        "packages/cloud-runtime/migrations/0019_privy_accounts.sql",
+        "apps/reference-dapp/src/server/session-cookie.ts"
       ],
       "suites": [
         "app.accounts.account-csp",
+        "app.accounts.account-host",
         "app.accounts.account-model",
         "app.accounts.account-service.pg",
         "app.accounts.account-session",
@@ -6324,11 +6340,12 @@
         "app.wallet.flofi-wallet-channel",
         "app.wallet.flofi-wallet-sync",
         "cloud-runtime.flofi-accounts-migration.pg",
-        "cloud-runtime.privy-accounts-migration.pg"
+        "cloud-runtime.privy-accounts-migration.pg",
+        "app.accounts.account-store-schema19.pg"
       ],
       "gaps": [
         "Live Privy is unverified: the suites verify real ES256 access tokens with the official @privy-io/node SDK against a local key, and the browser suite uses the MOCKED loopback Privy stand-in (e2e/privy-emulator.ts). They certify FloFi's verification, linking, isolation and signing-gate rules, not Privy itself; docs/deploy/LIVE-VERIFICATION-PRIVY.md is the owner's live check.",
-        "Privy's embedded wallet trusts the whole product origin. Signer pages (/login, /onboarding*, /app*, /approve, /connections, /mcp/approve, /__engineering) carry a nonce script-src policy and the signer mounts only in documents loaded on them, but other same-origin HTML (/, /docs, /privacy, /admin, error pages) has no script-src policy; a script running there could open a signer page and drive Privy outside FloFi's reviewed-attempt gate (Privy's confirmation screen still shows). Follow-up: a default-deny nonce policy for all HTML on the product host. Browser extensions with page access are outside what CSP covers.",
+        "Privy's embedded wallet trusts the whole product origin. All product-origin HTML, including public, admin and error pages, carries a nonce script policy; the signer additionally mounts only in a document loaded with its route's policy class. This mitigates injected script but is not a cryptographic restriction on trusted page code or browser extensions. Live Privy and owner device acceptance remain separate.",
         "Legacy FloFi Wallet (Turnkey) is export-only; its unlock and export remain covered by the wallet-app and wallet-relay suites with the in-process provider stand-in. The owner's read-only production check (docs/deploy/RELEASE-PRIVY-0019.md, 2026-11-01) found 0 Turnkey wallets and 0 Turnkey organizations, so no live account depends on this path."
       ]
     }
@@ -6361,6 +6378,7 @@
     "cloud-runtime.dispatch.pg",
     "cloud-runtime.forward-compatibility.pg",
     "cloud-runtime.storage.pg",
-    "cloud-runtime.tenancy.pg"
+    "cloud-runtime.tenancy.pg",
+    "app.accounts.account-store-schema19.pg"
   ]
 }

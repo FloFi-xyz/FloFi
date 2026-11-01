@@ -98,6 +98,34 @@ const privyDialog = (page: Page) => page.getByRole('dialog', { name: 'Privy conf
 const privyToken = (page: Page) => page.evaluate(() => localStorage.getItem('flofi-e2e-privy-token'));
 const privyAccepts = async (token: string | null) => (await fetch(`${PRIVY}/client/user`, { method: 'POST', body: JSON.stringify({ token }) })).ok;
 
+test('every product-origin document carries a fresh nonce, including public and error pages, and blocks injected inline script', async ({ page }) => {
+  await setup(page, {});
+  const nonces = new Set<string>();
+  for (const path of ['/', '/docs', '/privacy', '/unknown-privy-security-test', '/login']) {
+    const response = await page.goto(path);
+    expect(response!.status()).toBe(path.startsWith('/unknown') ? 404 : 200);
+    const policy = response!.headers()['content-security-policy']!;
+    const nonce = /script-src 'self' 'nonce-([A-Za-z0-9+/]{22}==)'/.exec(policy)?.[1];
+    expect(nonce, path).toBeTruthy();
+    expect(nonces.has(nonce!), path).toBe(false);
+    nonces.add(nonce!);
+    expect(policy, path).toContain("script-src-attr 'none'");
+    expect(policy, path).not.toMatch(/strict-dynamic|script-src[^;]*unsafe-inline/);
+    // Inspect the nonce property: browsers deliberately hide the attribute value from getAttribute.
+    const inline = await page.locator('script:not([src])').evaluateAll(scripts => scripts.map(script => (script as HTMLScriptElement).nonce));
+    expect(inline.length, path).toBeGreaterThan(0);
+    expect(inline.every(value => value === nonce), path).toBe(true);
+    const ran = await page.evaluate(() => {
+      const script = document.createElement('script');
+      script.textContent = 'window.__flofiInjectedScriptRan = true';
+      document.body.append(script);
+      return (window as { __flofiInjectedScriptRan?: boolean }).__flofiInjectedScriptRan;
+    });
+    expect(ran, path).toBeUndefined();
+  }
+  await expect(page.getByRole('button', { name: 'Google', exact: true })).toBeEnabled();
+});
+
 test('the landing opens sign-in with exactly Google, Email and Web3 Wallet through Privy (desktop, mobile, PT/EN, light/dark)', async ({ page, request }) => {
   await setup(page, {});
   await page.goto('/');

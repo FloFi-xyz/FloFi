@@ -29,12 +29,12 @@ const EVM_1 = '0x' + '1'.repeat(40), EVM_2 = '0x' + '2'.repeat(40), EVM_X = '0x'
 let t: TestDatabase, clock: Date;
 const users = new Map<string, Linked[]>();
 /**
- * Privy's two answers: a token is `h.<base64url DID>.s<n>` issued now (each one unique, as Privy's are), or `h.<DID>.t<seconds>` issued at
- * that time; unknown or malformed ones are refused like a bad signature.
+ * Privy's two answers: a token is `h.<base64url {user, serial}>.s<n>` issued now (each payload unique, as Privy's are), or has a
+ * `.t<seconds>` signature for an issuance at that time; unknown or malformed ones are refused like a bad signature.
  */
 const api: PrivyApi = {
   verifyAccessToken: async token => {
-    const [head, body = '', tail = ''] = token.split('.'), user = head === 'h' ? Buffer.from(body, 'base64url').toString() : '';
+    const [head, body = '', tail = ''] = token.split('.'), user = head === 'h' ? (JSON.parse(Buffer.from(body, 'base64url').toString()) as { user: string }).user : '';
     if (!users.has(user)) throw new Error('Authentication token is invalid');
     const issuedAt = tail.startsWith('t') ? Number(tail.slice(1)) : Math.floor(clock.getTime() / 1000);
     return { app_id: APP, user_id: user, session_id: 'sid', issued_at: issuedAt, expiration: Math.floor(Date.now() / 1000) + 3600 };
@@ -42,7 +42,7 @@ const api: PrivyApi = {
   getUser: async id => ({ id, linked_accounts: users.get(id) ?? [] }),
 };
 let issued = 0;
-const tokenOf = (id: string, issuedAtSeconds?: number) => `h.${Buffer.from(id).toString('base64url')}.${issuedAtSeconds === undefined ? `s${++issued}` : `t${issuedAtSeconds}`}`;
+const tokenOf = (id: string, issuedAtSeconds?: number) => `h.${Buffer.from(JSON.stringify({ user: id, serial: ++issued })).toString('base64url')}.${issuedAtSeconds === undefined ? `s${issued}` : `t${issuedAtSeconds}`}`;
 const store = () => createAccountStore(t.db, 'default');
 const service = () => createAccountService({ store: store(), privy: createPrivyServer(config, api), now: () => clock });
 const signIn = (id: string) => service().completePrivy(tokenOf(id));
@@ -131,6 +131,8 @@ describe('Privy sign-in reaches exactly one FloFi account', () => {
     const token = tokenOf(did(14));
     const first = await service().completePrivy(token);
     await expect(service().completePrivy(token)).rejects.toThrow('PRIVY_SIGN_IN_STALE');
+    // The stand-in accepts another signature for these same signed claims; it is still the same single-use proof.
+    await expect(service().completePrivy(token.replace(/\.[^.]+$/, '.anotherSignature'))).rejects.toThrow('PRIVY_SIGN_IN_STALE');
     const old = Math.floor(clock.getTime() / 1000) - 11 * 60;
     await expect(service().completePrivy(tokenOf(did(14), old))).rejects.toThrow('PRIVY_SIGN_IN_STALE');
     expect((await service().completePrivy(tokenOf(did(14)))).session.accountId).toBe(first.session.accountId);

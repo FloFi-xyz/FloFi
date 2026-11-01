@@ -4,6 +4,8 @@
 import { describe, expect, it } from 'vitest';
 import { ACCOUNT_PAGE_PATHS, accountPagePolicy, cspNonce, isAccountPage, isProductPage, productPagePolicy } from './account-csp';
 import { config } from '../proxy';
+import { proxy } from '../proxy';
+import { NextRequest } from 'next/server';
 
 const directives = (policy: string) => new Map(policy.split('; ').map(entry => { const [name, ...values] = entry.split(' '); return [name, values.join(' ')]; }));
 
@@ -48,6 +50,18 @@ describe('account page Content Security Policy', () => {
 });
 
 describe('product page Content Security Policy (BUILD-FLOFI-PRIVY-UX-001: every product page hosts the Privy signer)', () => {
+  it('protects the whole product origin, including public, admin and unknown/error paths', () => {
+    for (const path of ['/', '/docs', '/privacy', '/admin', '/admin/login', '/admin/access', '/unknown-page', '/favicon.ico']) {
+      const response = proxy(new NextRequest(`https://flofi.xyz${path}`, { headers: { host: 'flofi.xyz', 'x-flofi-pathname': '/mcp/approve' } }));
+      const policy = directives(response.headers.get('content-security-policy')!);
+      expect(policy.get('script-src'), path).toMatch(/^'self' 'nonce-[A-Za-z0-9+/]{22}==' 'unsafe-eval'$/);
+      expect(policy.get('script-src-attr'), path).toBe("'none'");
+      expect(policy.get('base-uri'), path).toBe("'none'");
+      expect(policy.get('frame-ancestors'), path).toBe("'none'");
+      expect(response.headers.get('x-middleware-request-content-security-policy'), path).toBe(response.headers.get('content-security-policy'));
+      expect(response.headers.get('x-middleware-request-x-flofi-pathname'), path).toBe(path);
+    }
+  });
   it('runs only FloFi’s own scripts, talks only to FloFi and Privy, and keeps each page’s framing rule', () => {
     const nonce = cspNonce(), workspace = directives(productPagePolicy(nonce, { frameAncestors: null }, {}));
     expect(workspace.get('script-src')).toBe(`'self' 'nonce-${nonce}' 'unsafe-eval'`);

@@ -11,7 +11,7 @@
  * users and API keys never were. These checks are defence in depth; the person's confirmation in the wallet page comes first.
  */
 import { accountWalletId, canonicalAddress, isLegacyWallet, type AccountWallet } from './account-model.ts';
-import { SOLANA_SIGN_IN_STATEMENT, WALLET_SIGN_IN_STATEMENT } from '../server/wallet-session.ts';
+import { SOLANA_SIGN_IN_STATEMENT, WALLET_CHALLENGE_TTL_SECONDS, WALLET_SIGN_IN_STATEMENT } from '../server/wallet-session.ts';
 import { unlockedFor, WALLET_EXPORT_UNLOCK_SECONDS, type WalletSession } from './wallet-session.ts';
 import { FLOFI_WALLET_EVM_CHAIN_IDS } from '../wallet/flofi-signing.ts';
 
@@ -35,10 +35,12 @@ export function stampPublicKey(stamp: string): string | null {
 }
 
 /**
- * Whether `message` is exactly a FloFi sign-in message for the product host, as FloFi's server writes it (server/wallet-session.ts
+ * Whether `message` has the FloFi sign-in format for the product host, as FloFi's server writes it (server/wallet-session.ts
  * `walletSignInMessage` / `solanaSignInMessage`): `<appHost> wants you to sign in with your <chain> account:`, the signing address, FloFi's
  * own statement, `URI: <appOrigin>`, version 1, the chain (EVM: one of FloFi's mainnets), a server nonce, the issue and expiry times, and
- * nothing else; unexpired at `now`. Another dapp's domain or statement, extra lines or an expired message are never signed.
+ * nothing else; already issued, unexpired at `now` and within the server's challenge lifetime. Another dapp's domain or statement,
+ * extra lines, a future-issued message or an overlong lifetime are never signed. The sign-in verifier separately checks the nonce
+ * against the sealed challenge cookie before it accepts the resulting signature.
  */
 const SIGN_IN_ISO = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/, SIGN_IN_NONCE = /^[0-9a-f]{32}$/;
 export function floFiSignInMessage(message: string, ecosystem: 'evm' | 'solana', address: string, app: { readonly host: string; readonly origin: string },
@@ -55,7 +57,8 @@ export function floFiSignInMessage(message: string, ecosystem: 'evm' | 'solana',
   const expiresAt = expiresLine.startsWith('Expiration Time: ') ? expiresLine.slice(17) : '';
   if (!SIGN_IN_NONCE.test(nonce) || !SIGN_IN_ISO.test(issuedAt) || !SIGN_IN_ISO.test(expiresAt)) return false;
   const issued = Date.parse(issuedAt), expires = Date.parse(expiresAt);
-  if (!Number.isFinite(issued) || !Number.isFinite(expires) || expires <= issued || expires <= now) return false;
+  if (!Number.isFinite(issued) || !Number.isFinite(expires) || issued > now || expires <= issued || expires <= now
+    || expires - issued > WALLET_CHALLENGE_TTL_SECONDS * 1000) return false;
   return lines[0] === `${app.host} wants you to sign in with your ${chain} account:` && canonicalAddress(ecosystem, lines[1] ?? '') === address
     && lines[2] === '' && lines[3] === statement && lines[4] === '' && lines[5] === `URI: ${app.origin}` && lines[6] === 'Version: 1';
 }

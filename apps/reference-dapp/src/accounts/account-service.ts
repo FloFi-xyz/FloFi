@@ -80,7 +80,10 @@ export function createAccountService(input: { readonly store: AccountStore; read
       // A sign-in uses a token Privy just issued for this login, once: a copied or replayed token never opens another FloFi session.
       const at = now().getTime();
       if (verified.issuedAt * 1000 < at - PRIVY_SIGN_IN_MAX_AGE_MS || verified.issuedAt * 1000 > at + 60_000) fail('PRIVY_SIGN_IN_STALE');
-      if (!await store.consumeProof(createHash('sha256').update(`flofi-privy-sign-in:${token as string}`).digest('hex'), new Date(verified.expiresAt * 1000), now()))
+      // Key the proof on the verified signing input, not its signature: base64url aliases and ECDSA (r, n-s) both verify as the same
+      // token. The header and payload bytes are signed, so changing either cannot consume a proof without a valid Privy signature.
+      const signedInput = (token as string).slice(0, (token as string).lastIndexOf('.'));
+      if (!await store.consumeProof(createHash('sha256').update(`flofi-privy-sign-in:${signedInput}`).digest('hex'), new Date(verified.expiresAt * 1000), now()))
         fail('PRIVY_SIGN_IN_STALE');
       const user = await provider().user(verified.userId);
       if (!user.method) fail('PRIVY_LOGIN_METHOD_UNSUPPORTED');

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { createHash } from 'node:crypto';
 import { publicOrigin } from './deployment';
+import { sessionCookieName } from './session-cookie';
 
 /** Ordinary /approve stays unframeable. Only the separate signing route accepts MCP Apps ancestors. */
 export const EMBEDDED_APPROVAL_PATH = '/mcp/approve';
@@ -14,11 +15,11 @@ export function approvalFrameAncestors(env: Readonly<Record<string, string | und
   return hosts.join(' ');
 }
 
-/** Separate cookies preserve the existing Strict first-party sessions. No token is returned to the component. */
-export const embeddedWalletCookie = (name: string) => `embedded_${name}`;
+/** Separate host-prefixed cookies preserve Strict first-party sessions. Reads are scoped to the trusted MCP pathname by session-principal. */
+export const embeddedWalletCookie = (name: string) => sessionCookieName(`embedded_${name}`, true);
 export function walletCookieOptions(secure: boolean, maxAge: number, embedded = false) {
   if (typeof embedded !== 'boolean') throw new Error('WALLET_SESSION_CONTEXT_INVALID');
   if (embedded && !secure) throw new Error('EMBEDDED_WALLET_REQUIRES_HTTPS');
   return { httpOnly: true, sameSite: embedded ? 'none' as const : 'strict' as const, secure,
-    path: embedded ? EMBEDDED_APPROVAL_PATH : '/', maxAge, ...embedded ? { partitioned: true } : {} };
+    path: '/', maxAge, ...embedded ? { partitioned: true } : {} };
 }

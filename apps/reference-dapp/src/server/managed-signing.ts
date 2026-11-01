@@ -2,8 +2,8 @@
 /**
  * BUILD-FLOFI-AUTH-WALLETS-001: resolves a FloFi Wallet signing request to the one reviewed FloFi attempt it may sign (spec §2, §3).
  *
- * The product origin is untrusted (no `script-src`), so FloFi Wallet must not sign bytes on its word, and it cannot judge router or
- * program calldata by decoding it. Instead the request names its run (`{flow, runId}`) and this resolver, given that run as the run's own
+ * The product origin carries a nonce script policy, and Privy trusts its page code. The server gate must still verify every requested
+ * byte rather than trusting the page's interpretation of router or program calldata. The request names its run (`{flow, runId}`) and this resolver, given that run as the run's own
  * service loaded it, accepts the bytes only when ALL of these hold:
  *  - the flow is one FloFi can bind (`SIGNING_FLOWS`), else `FLOFI_WALLET_FLOW_NOT_SUPPORTED`;
  *  - the run is pending and authorized for its current Review, and its attempt is the pre-wallet one (PREPARED, or SUBMITTING after the

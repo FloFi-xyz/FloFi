@@ -5,18 +5,23 @@
  */
 import { cookies, headers } from 'next/headers';
 import { readSolanaSession, readWalletSession, SOLANA_SESSION_COOKIE, WALLET_SESSION_COOKIE, type SolanaWalletSession, type WalletSession } from './wallet-session.ts';
-import { embeddedWalletCookie } from './embedded-approval';
+import { EMBEDDED_APPROVAL_PATH, embeddedWalletCookie } from './embedded-approval';
+import { sessionCookieName } from './session-cookie';
 
 export async function currentWalletSession(): Promise<WalletSession | null> {
-  const jar = await cookies(), domain = (await requestOrigin()).domain, now = new Date();
-  return readWalletSession(process.env, jar.get(embeddedWalletCookie(WALLET_SESSION_COOKIE))?.value, now, domain)
-    ?? readWalletSession(process.env, jar.get(WALLET_SESSION_COOKIE)?.value, now, domain);
+  const jar = await cookies(), h = await headers(), { domain, secure } = originFromHeaders(h), now = new Date();
+  // __Host- cookies require Path=/. Preserve the embedded session's route isolation with the pathname the proxy overwrites; never
+  // trust a browser-supplied next-url or Referer for this boundary. Missing pathname means no embedded authority.
+  const embedded = h.get('x-flofi-pathname') === EMBEDDED_APPROVAL_PATH
+    ? readWalletSession(process.env, jar.get(embeddedWalletCookie(WALLET_SESSION_COOKIE))?.value, now, domain) : null;
+  return embedded ?? readWalletSession(process.env, jar.get(sessionCookieName(WALLET_SESSION_COOKIE, secure))?.value, now, domain);
 }
 /** BUILD-MCP-002: the verified Sign-In With Solana session of this request, or null. */
 export async function currentSolanaSession(): Promise<SolanaWalletSession | null> {
-  const jar = await cookies(), domain = (await requestOrigin()).domain, now = new Date();
-  return readSolanaSession(process.env, jar.get(embeddedWalletCookie(SOLANA_SESSION_COOKIE))?.value, now, domain)
-    ?? readSolanaSession(process.env, jar.get(SOLANA_SESSION_COOKIE)?.value, now, domain);
+  const jar = await cookies(), h = await headers(), { domain, secure } = originFromHeaders(h), now = new Date();
+  const embedded = h.get('x-flofi-pathname') === EMBEDDED_APPROVAL_PATH
+    ? readSolanaSession(process.env, jar.get(embeddedWalletCookie(SOLANA_SESSION_COOKIE))?.value, now, domain) : null;
+  return embedded ?? readSolanaSession(process.env, jar.get(sessionCookieName(SOLANA_SESSION_COOKIE, secure))?.value, now, domain);
 }
 /** BUILD-MCP-002: a wallet proven in this browser, namespace-neutral. */
 export type WalletPrincipal = { readonly namespace: 'eip155' | 'solana'; readonly address: string };

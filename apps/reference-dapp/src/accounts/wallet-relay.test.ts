@@ -7,7 +7,7 @@ import { erc7710 } from '@defi-workflow-engine/reference-compiler';
 import { floFiSignInMessage, stampPublicKey, walletRelayDecision } from './wallet-relay';
 import { exportOf, isLegacyWallet, type AccountWallet } from './account-model';
 import type { WalletSession } from './wallet-session';
-import { SOLANA_SIGN_IN_STATEMENT, solanaSignInMessage, WALLET_SIGN_IN_STATEMENT, walletSignInMessage } from '../server/wallet-session';
+import { SOLANA_SIGN_IN_STATEMENT, solanaSignInMessage, WALLET_CHALLENGE_TTL_SECONDS, WALLET_SIGN_IN_STATEMENT, walletSignInMessage } from '../server/wallet-session';
 
 const NOW = new Date('2026-10-31T12:00:00.000Z'), T = Math.floor(NOW.getTime() / 1000);
 const KEY = '02' + 'a'.repeat(64), OTHER_KEY = '03' + 'b'.repeat(64);
@@ -150,5 +150,18 @@ describe('FloFi sign-in messages', () => {
     ] as const) expect(floFiSignInMessage(message, ecosystem, address, APP, NOW), message).toBe(false);
     expect(floFiSignInMessage(siws, 'solana', SOLANA, APP, Date.parse(times.expirationTime))).toBe(false);
     expect(floFiSignInMessage(siwe(8453), 'evm', EVM, APP, Date.parse(times.expirationTime) + 1)).toBe(false);
+  });
+  it.each(['evm', 'solana'] as const)('refuses future-issued or overlong %s sign-in messages before requesting a signature', ecosystem => {
+    const address = ecosystem === 'evm' ? EVM : SOLANA, ttl = WALLET_CHALLENGE_TTL_SECONDS * 1000;
+    const message = (issued: number, expires: number) => {
+      const fields = { domain: APP.host, uri: APP.origin, address, nonce, issuedAt: new Date(issued).toISOString(), expirationTime: new Date(expires).toISOString() };
+      return ecosystem === 'evm' ? walletSignInMessage({ ...fields, chainId: 1 }) : solanaSignInMessage(fields);
+    };
+    expect(floFiSignInMessage(message(NOW, NOW + ttl), ecosystem, address, APP, NOW)).toBe(true);
+    expect(floFiSignInMessage(message(NOW + 1, NOW + ttl + 1), ecosystem, address, APP, NOW)).toBe(false);
+    expect(floFiSignInMessage(message(NOW, NOW + ttl + 1), ecosystem, address, APP, NOW)).toBe(false);
+    expect(floFiSignInMessage(message(NOW - ttl - 1, NOW + 1), ecosystem, address, APP, NOW)).toBe(false);
+    expect(floFiSignInMessage(message(NOW, NOW), ecosystem, address, APP, NOW)).toBe(false);
+    expect(floFiSignInMessage(message(NOW, NOW + ttl), ecosystem, address, APP, NOW + ttl)).toBe(false);
   });
 });

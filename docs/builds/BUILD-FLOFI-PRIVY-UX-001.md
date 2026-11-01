@@ -270,6 +270,11 @@ to reviewers (recorded as guard denials), which the ledger counts while still re
 | 3 | flofi-security | 7, medium | Key field first rendered as a password field (medium): masked text from the server render. Provider remounted every signer page (medium): stable tree, policy classes. Returning-login dependency on Privy (medium, verification gap): runbook step 7a NO-GO. Policy classes: implemented. Same-site card origin: §11.11. Masked-field trade-offs: §3.3, runbook. Stale comment: fixed |
 | 3 | flofi-mcp | 2, medium | Remount could drop the in-chat handoff capability (medium): fixed by the stable tree (no remount). Privy mounted in MCP host frames: §11.13. No MCP schema, OAuth, handoff or approval contract changed; `/mcp/approve` headers now pinned by test |
 | 3 | flofi-frontend-ux | 10, medium | Remount and false "not configured" flash (medium) and key field (medium): fixed as above, browser test for the login page. Card frame `lang`, loading status, focus to Close, PT wording, default wallet name in PT: fixed. Escape inside Mercado Pago's fields and fixed frame height: §11.14. Privy texts not localized: §11.15 |
+| 4 | flofi-security | 0 | Session/proof cookies are `__Host-` on HTTPS with no unprefixed auth fallback; embedded MCP proofs are gated by the proxy's `x-flofi-pathname`; every product-origin HTML page carries a nonce script policy; Privy sign-in proofs are keyed on the signed JWT input (not malleable signature bytes); Admin Sign out waits for hydration (CircleCI `admin-console` on `bd897457`). Release B keeps the schema-19 reader suite with frozen v18 fixtures |
+| 4 | flofi-wallet-execution | 0 | Host-prefixed wallet/Solana proofs, embedded path isolation and the pre-sign future/overlong message gate match the mapped unit suites; signing-gate comments only |
+| 4 | flofi-mcp | 0 | Moving embedded wallet cookies to `Path=/` does not change MCP OAuth, handoff or `/mcp/approve` frame-ancestors; authority stays on the proxy-verified pathname |
+
+CircleCI on `bd897457`: governance, certification-checks and certification-browser-1 passed; certification-browser-2 failed only on `admin-console` Sign out (click before the client handler was ready). Fixed by disabling the button until hydration.
 
 ## 12. GO / NO-GO
 

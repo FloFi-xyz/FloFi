@@ -11,6 +11,8 @@ function withNonce(request: NextRequest, policy: (nonce: string) => string, extr
   const nonce = cspNonce(), value = policy(nonce);
   const headers = new Headers(request.headers);
   headers.set('x-nonce', nonce);
+  // Authoritative route context for the host-only embedded wallet proof cookie. Never trust a caller-supplied pathname header.
+  headers.set('x-flofi-pathname', request.nextUrl.pathname);
   headers.set('Content-Security-Policy', value);
   const response = NextResponse.next({ request: { headers } });
   response.headers.set('Content-Security-Policy', value);
@@ -62,7 +64,10 @@ export function proxy(request: NextRequest) {
     // The workspace may be framed only by FloFi itself: never by another site, nor by the same-site card origin (which runs Mercado Pago).
     return withNonce(request, nonce => productPagePolicy(nonce, { frameAncestors: NEVER_FRAMED.has(pathname) ? "'none'" : "'self'" }));
   }
-  return NextResponse.next();
+  // Privy's trust boundary is the entire product origin. Public pages, admin pages and even error documents must carry the same
+  // script restrictions: a script injected there could otherwise open a signer page and drive its same-origin wallet frame.
+  // Route handlers that return their own stricter policy (e.g. script-free OAuth consent) keep that response policy.
+  return withNonce(request, nonce => productPagePolicy(nonce, { frameAncestors: "'none'" }));
 }
 /** Product pages that hold a handoff secret, account choices or wallet credentials: never framed (as in next.config.ts). */
 const NEVER_FRAMED: ReadonlySet<string> = new Set(['/approve', '/connections', '/app/credentials']);
