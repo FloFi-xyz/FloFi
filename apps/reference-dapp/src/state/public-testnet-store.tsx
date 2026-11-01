@@ -113,6 +113,8 @@ export function PublicTestnetProvider({ children }: { children: ReactNode }) {
   const busyRef = useRef(false), operationEpoch = useRef(0);
   // BUILD-FLOFI-EXECUTION-PERFORMANCE-001: the content-free timing of the current Simulate → Review → Authorize → wallet → outcome journey.
   const journeyRef = useRef<Journey | null>(null);
+  const mountedRef = useRef(true);
+  useEffect(() => { mountedRef.current = true; return () => { mountedRef.current = false; }; }, []);
   // BUILD-FLOFI-CHAT-E2E-FIX-002: the swap this runtime serves is the runtime workflow (the canonical workflow, or the sequence's current step).
   const workflowRef = useRef(runtimeWorkflow);
   workflowRef.current = runtimeWorkflow;
@@ -159,8 +161,14 @@ export function PublicTestnetProvider({ children }: { children: ReactNode }) {
         // BUILD-FLOFI-EXECUTION-PERFORMANCE-001: a run that came back with a submitted transaction keeps being followed (read-only observe; nothing
         // is signed, submitted or retried), instead of waiting for "Check result" or the worker's backoff.
         if (['HASH', 'PENDING'].includes(recovered.attempts.at(-1)?.state ?? '')) {
-          void observeUntilSettled(async () => { const observed = unwrap(await publicObserve(id)); if (!cancelled) setRun(observed); return observed; },
-            observed => observed.attempts.at(-1)?.state !== 'PENDING' && observed.attempts.at(-1)?.state !== 'HASH', { active: () => !cancelled }).catch(() => undefined);
+          // Applied only while that run is still the page's run: a newer simulation is never replaced by an older run's observation.
+          const sameRun = (current: PublicRun | null) => current?.quote.executionId === id;
+          let following = true;
+          void observeUntilSettled(async () => {
+            const observed = unwrap(await publicObserve(id));
+            if (!cancelled) setRun(current => { following = sameRun(current); return following ? observed : current; });
+            return observed;
+          }, observed => observed.attempts.at(-1)?.state !== 'PENDING' && observed.attempts.at(-1)?.state !== 'HASH', { active: () => !cancelled && following }).catch(() => undefined);
         }
       }
     }).catch(() => undefined);
@@ -280,7 +288,7 @@ export function PublicTestnetProvider({ children }: { children: ReactNode }) {
         if (state === 'CONFIRMED' || state === 'REVERTED') journey.mark('confirmation');
         if (observed.outcome) journey.mark('reconciliation');
         return observed;
-      }, observed => observed.attempts.at(-1)?.state !== 'PENDING');
+      }, observed => observed.attempts.at(-1)?.state !== 'PENDING', { active: () => mountedRef.current });
       const state = followed.value?.attempts.at(-1)?.state;
       finish(state === 'REVERTED' ? 'failed' : state === 'UNKNOWN' ? 'inconclusive' : followed.value?.outcome ? 'reconciled' : 'in_progress');
     } catch (cause) { finish('in_progress'); throw cause; }

@@ -12,8 +12,12 @@ import type { FlowResult } from './cloud-api-client.ts';
 export async function readBridgeDiscovery(request: unknown, env: Readonly<Record<string, string | undefined>> = process.env,
   correlationId?: string, window: 'STANDARD' | 'CONVERSATIONAL' = 'STANDARD'): Promise<FlowResult<DiscoveryResult>> {
   const parsed = parseDiscoveryRequest(request);
-  const cloud = await cloudFlow<DiscoveryResult>('crosschain-universal', 'discover', window === 'CONVERSATIONAL' ? [request, window] : [request], { env, principal: null,
-    timeoutMs: 30_000, maxAttempts: 1, ...correlationId ? { correlationId } : {} });
+  const options = { env, principal: null, timeoutMs: 30_000, maxAttempts: 1, ...correlationId ? { correlationId } : {} };
+  let cloud = await cloudFlow<DiscoveryResult>('crosschain-universal', 'discover', window === 'CONVERSATIONAL' ? [request, window] : [request], options);
+  // Deploy skew: an API from before the discovery window accepts the request alone. It answers with its own (standard) window, so a slow provider may
+  // still reach the tool's limit, but route discovery keeps working while the web build is ahead of the API.
+  if (cloud && !cloud.ok && cloud.code === 'ARGUMENTS_INVALID' && window === 'CONVERSATIONAL')
+    cloud = await cloudFlow<DiscoveryResult>('crosschain-universal', 'discover', [request], options);
   if (cloud) return cloud;
   const mode = universalRouterMode(env);
   if (mode === 'off') return { ok: false, code: 'UNIVERSAL_ROUTER_NOT_ENABLED' };

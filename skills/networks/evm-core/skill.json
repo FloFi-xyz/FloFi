@@ -105,7 +105,7 @@
     }
   ],
   "guidance": "SKILL.md",
-  "guidanceDigest": "sha256:3e2f59afe6064d874d7ee7b2b04bacb7f80b8ad0c80b36bc94e5cf11b2210d7a",
+  "guidanceDigest": "sha256:81d1b4bc72b7fd47aba1ec39fd9c48fa3e4d9d10fdef68d3d5e7ff695b3a59af",
   "reviewIntervalDays": 90,
   "authority": "ENGINEERING_REFERENCE_ONLY",
   "performance": [

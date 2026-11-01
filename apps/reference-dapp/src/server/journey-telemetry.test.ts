@@ -17,8 +17,9 @@ describe('BUILD-FLOFI-EXECUTION-PERFORMANCE-001 journey receiver', () => {
     const logged: Record<string, unknown>[] = [];
     const receive = createJourneyReceiver({ env: {}, log: fields => logged.push(fields) });
     expect((await receive(post(JSON.stringify(event())))).status).toBe(204);
-    expect(Object.keys(logged[0]!).sort()).toEqual(['intent_to_first_quote_ms', 'journey_id', 'network', 'operation', 'outcome', 'provider', 'system_ms', 'user_ms',
+    expect(Object.keys(logged[0]!).sort()).toEqual(['evidence', 'intent_to_first_quote_ms', 'journey_id', 'network', 'operation', 'outcome', 'provider', 'system_ms', 'user_ms',
       'wallet', 'wallet_open_to_user_decision_ms']);
+    expect(logged[0]!.evidence).toBe('CLIENT_REPORTED');
     expect(logged[0]).toMatchObject({ user_ms: 250, system_ms: 250, operation: 'swap', provider: 'Jupiter' });
   });
   it('refuses cross-site posts, oversized or malformed bodies and anything outside the schema; can be turned off; is rate-bounded', async () => {
@@ -27,6 +28,9 @@ describe('BUILD-FLOFI-EXECUTION-PERFORMANCE-001 journey receiver', () => {
     expect((await receive(post(JSON.stringify(event()), { origin: 'https://evil.example' }))).status).toBe(403);
     expect((await receive(post(JSON.stringify(event()), { origin: 'https://flofi.xyz' }))).status).toBe(204);
     expect((await receive(post('x'.repeat(5_000)))).status).toBe(413);
+    const chunked = new Request('https://flofi.xyz/api/flofi/journey', { method: 'POST', headers: { 'sec-fetch-site': 'same-origin' }, duplex: 'half',
+      body: new ReadableStream({ start(controller) { for (let i = 0; i < 10; i++) controller.enqueue(new TextEncoder().encode('x'.repeat(1_000))); controller.close(); } }) } as RequestInit);
+    expect((await receive(chunked)).status).toBe(413);
     expect((await receive(post('{not json'))).status).toBe(400);
     expect((await receive(post(JSON.stringify({ ...event(), chat: 'swap my savings' })))).status).toBe(400);
     expect(logged).toHaveLength(1);

@@ -713,6 +713,10 @@
     "app.domain.observation-schedule": {
       "path": "apps/reference-dapp/src/domain/observation-schedule.test.ts",
       "stage": "unit"
+    },
+    "app.server.universal-router.discovery": {
+      "path": "apps/reference-dapp/src/server/universal-router/discovery.test.ts",
+      "stage": "unit"
     }
   },
   "requiredUnitSuites": [
@@ -5144,7 +5148,8 @@
         "app.server.universal-router.service",
         "reference-compiler.bridge",
         "reference-executor.bridge",
-        "reference-reconciler.bridge"
+        "reference-reconciler.bridge",
+        "app.server.universal-router.discovery"
       ],
       "gaps": [
         "Provider settlement and arbitrary public cross-domain compositions are not certified by offline route fixtures."

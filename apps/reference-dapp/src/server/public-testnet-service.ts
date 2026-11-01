@@ -623,7 +623,7 @@ export function catalogTokenPolicy(P: CatalogSwapProfile, codePins: Partial<Reco
  */
 export async function verifyCatalogToken(rpc: Rpc, policy: CatalogTokenPolicy, asset: CanonicalAsset, side: StockQuoteState['side'],
   block: string, headTime: number, reviewTtlSeconds: number, now: () => Date,
-  facts: { readonly cache: DeploymentFactCache; readonly chainId: number } | null = null): Promise<StockQuoteState | null> {
+  facts: { readonly cache: DeploymentFactCache; readonly chainId: number; readonly learn: (key: string) => void } | null = null): Promise<StockQuoteState | null> {
   const call = async (to: string, data: string) => hex(await rpc('eth_call', [{ to, data }, block]));
   const word0 = (value: string) => value.length >= 66 ? BigInt(value.slice(0, 66)) : fail('RPC_RESPONSE_INVALID');
   const addressOf = (value: string) => address('0x' + value.slice(-40));
@@ -639,7 +639,7 @@ export async function verifyCatalogToken(rpc: Rpc, policy: CatalogTokenPolicy, a
   if (BigInt(await call(asset.address!, '0x313ce567')) !== BigInt(asset.decimals)) fail('TOKEN_METADATA_MISMATCH');
   if (!asset.stock) {
     if (!known && (pin !== undefined ? tokenCode !== pin : policy.listedTokens !== 'CODE_AND_DECIMALS')) fail('TOKEN_DEPLOYMENT_MISMATCH');
-    if (factKey !== null && !known) facts!.cache.add(factKey, now().getTime());
+    if (factKey !== null && !known) facts!.learn(factKey);
     return null;
   }
   // Every official Stock Token is the same beacon proxy on the official beacon, and reports the registry's uid.
@@ -719,9 +719,10 @@ async function catalogQuote(workflow: SemanticWorkflow, executionId: string, P: 
     return typeof value === 'string' && /^0x(?:[0-9a-fA-F]{2})*$/.test(value) ? value.toLowerCase() : fail('RPC_RESPONSE_INVALID'); };
   const code = async (target: string) => { const value = await codeAt(target); return value === '0x' ? fail('CONTRACT_CODE_MISSING') : value; };
   // BUILD-FLOFI-EXECUTION-PERFORMANCE-001: immutable deployment facts verified earlier in this process are not re-read (see DeploymentFactCache).
-  const facts = deploymentFactsOf(runtime), factKey = (key: string) => `${P.chainId}:${key}`;
+  // Facts verified by this quote are remembered only once its final same-block check passed (a reorged-out deployment is never remembered).
+  const facts = deploymentFactsOf(runtime), factKey = (key: string) => `${P.chainId}:${key}`, verified: string[] = [];
   const known = (key: string) => facts !== null && facts.has(factKey(key), now().getTime());
-  const learn = (key: string) => facts?.add(factKey(key), now().getTime());
+  const learn = (key: string) => { if (facts) verified.push(factKey(key)); };
   for (const [name, target] of [['factory', P.factory], ['router', P.router], ['quoter', P.quoter]] as const) {
     const key = `protocol-code:${name}:${target}:${pins[name]}`;
     if (known(key)) continue;
@@ -738,7 +739,8 @@ async function catalogQuote(workflow: SemanticWorkflow, executionId: string, P: 
   const stocks: StockQuoteState[] = [];
   for (const [side, asset] of [['input', input], ['output', output]] as const) {
     if (asset.kind === 'NATIVE') continue;
-    const stock = await verifyCatalogToken(rpc, policy, asset, side, block, headTime, P.reviewTtlSeconds, now, facts ? { cache: facts, chainId: P.chainId } : null);
+    const stock = await verifyCatalogToken(rpc, policy, asset, side, block, headTime, P.reviewTtlSeconds, now,
+      facts ? { cache: facts, chainId: P.chainId, learn: key => verified.push(key) } : null);
     if (stock) stocks.push(stock);
   }
   // Native ETH travels through the router's WETH9 (the router's own `WETH9()`, checked above): it must carry its pinned code.
@@ -776,6 +778,7 @@ async function catalogQuote(workflow: SemanticWorkflow, executionId: string, P: 
   if (minimumOut <= 0n) fail('QUOTE_INVALID');
   const sameBlock = await rpc('eth_getBlockByNumber', [block, false]);
   if (!isObject(sameBlock) || sameBlock.hash !== blockHash) fail('QUOTE_BLOCK_REORG');
+  for (const key of verified) facts?.add(key, now().getTime());
   const observedAt = now().toISOString();
   const quoteFields = { executionId, revision: workflow.revision, nodeId: node.nodeId,
     workflowHash: hashArtifactBytes('semantic-workflow', new TextEncoder().encode(JSON.stringify(workflow))), chainId: P.chainId,

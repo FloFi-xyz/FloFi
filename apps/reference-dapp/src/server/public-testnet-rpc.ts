@@ -144,8 +144,9 @@ function concurrentPacedRpc(rpc: Rpc, minIntervalMs: number, retries: number, sl
 }
 /**
  * BUILD-FLOFI-EXECUTION-PERFORMANCE-001: read pacing for an operator-configured RPC endpoint. The public endpoints keep the measured
- * one-at-a-time, 250 ms pacing. `GRYLOO_RPC_READ_PROFILE=dedicated` declares that the configured `GRYLOO_<NETWORK>_RPC_URL` endpoints are keyed
- * providers with capacity for parallel reads (25 ms between starts, at most 6 in flight); it never applies to a public default URL.
+ * one-at-a-time, 250 ms pacing. `GRYLOO_RPC_READ_PROFILE=dedicated` declares that the operator's endpoints — a configured
+ * `GRYLOO_<NETWORK>_RPC_URL`, the router's fallback URLs and its keyed Alchemy URL — are providers with capacity for parallel reads
+ * (25 ms between starts, at most 6 in flight); it never applies to a public default URL.
  */
 export function readPacingFor(env: Readonly<Record<string, string | undefined>>, operatorEndpoint: boolean): { minIntervalMs?: number; maxInFlight?: number } {
   return operatorEndpoint && env.GRYLOO_RPC_READ_PROFILE === 'dedicated' ? { minIntervalMs: 25, maxInFlight: 6 } : {};

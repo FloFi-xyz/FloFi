@@ -120,6 +120,8 @@ class SkillRegistry(unittest.TestCase):
         self.assertTrue(all(len(batch) <= 3 for batch in plan["reviewBatches"]))
         self.assertTrue(set(plan["reviewers"]) <= set(guard.DOMAINS))
         self.assertEqual(ids(paths=["README.md"]), [])
+        self.assertIn("protocols/uniswap", ids(task="Speed up the quote via Uniswap."))
+        self.assertIn("protocols/jupiter", ids(task="Is mode-fast safe for Jupiter?"))
 
     def test_agent_guard_hands_skills_to_existing_specialists(self):
         selection = guard.skill_selection(["packages/reference-compiler/src/jupiter.ts"], "flofi-swap", root=ROOT)

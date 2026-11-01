@@ -97,6 +97,10 @@ export function JupiterProvider({ children }: { children: ReactNode }) {
   const latestSession = useRef(session); latestSession.current = session;
   const busyRef = useRef(false), operationEpoch = useRef(0);
   const journeyRef = useRef<Journey | null>(null);
+  // BUILD-FLOFI-EXECUTION-PERFORMANCE-001: the run the page follows by itself (after a refresh or an Execute). A newer simulation or record replaces
+  // it, so an older run's observation never overwrites the newer one on the page or in the recovery pointer.
+  const followed = useRef<string | null>(null), mountedRef = useRef(true);
+  useEffect(() => { mountedRef.current = true; return () => { mountedRef.current = false; followed.current = null; }; }, []);
   const authored = workflow.nodes.map(node => solanaSwapDetails(node)).find(Boolean) ?? null;
   // A Solana liquidity position uses the same wallet session as the swap on its own cluster (Devnet or, BUILD-SOLANA-MAINNET-001, mainnet-beta).
   // BUILD-SOLANA-TRANSFER-UX-001: a Solana transfer signs with the same session, on its own cluster.
@@ -105,7 +109,12 @@ export function JupiterProvider({ children }: { children: ReactNode }) {
   const runtime = runtimes[network];
   const pristineRecovery = recovered && isPristineDraft(workflow);
   const retired = Boolean(record && JSON.stringify(record.review.workflow) !== JSON.stringify(workflow) && !pristineRecovery);
-  function accept(value: JupiterRecord) { setRecord(value); try { window.localStorage.setItem(key, JSON.stringify({ id: value.id })); } catch { /* server journal remains authoritative */ } }
+  function accept(value: JupiterRecord) {
+    if (followed.current !== null && followed.current !== value.id) followed.current = null;
+    setRecord(value); try { window.localStorage.setItem(key, JSON.stringify({ id: value.id })); } catch { /* server journal remains authoritative */ }
+  }
+  /** An observation of the followed run: applied only while that run is still the page's run. */
+  function acceptFollowed(value: JupiterRecord) { if (followed.current === value.id) accept(value); }
   useEffect(() => {
     let mounted = true;
     for (const name of ['Solana', 'Solana Devnet'] as const)
@@ -118,7 +127,7 @@ export function JupiterProvider({ children }: { children: ReactNode }) {
           if (!mounted || !result.ok) return;
           setRecord(result.value); setRecovered(true);
           // BUILD-FLOFI-EXECUTION-PERFORMANCE-001: a run that came back with a transaction in flight keeps being followed (read-only), without a click.
-          if (unresolved(result.value)) void poll(result.value.id, () => mounted).catch(() => undefined);
+          if (unresolved(result.value)) { followed.current = result.value.id; void poll(result.value.id).catch(() => undefined); }
         }).catch(() => undefined);
     } catch { setError('JUPITER_RECOVERY_POINTER_INVALID'); }
     return () => { mounted = false; };
@@ -240,12 +249,15 @@ export function JupiterProvider({ children }: { children: ReactNode }) {
     updateWalletPreference({ solanaDisconnected: true }); rememberWalletHint('solana', false); setRestoring(false);
     if (current) await disconnectSolanaWallet(current);
   }
-  async function poll(id: string, active: () => boolean = () => true, seen?: (value: JupiterRecord) => void) {
+  async function poll(id: string, seen?: (value: JupiterRecord) => void) {
     const api = runtimes[networkOfId(id) ?? network];
-    // BUILD-FLOFI-EXECUTION-PERFORMANCE-001: the shared schedule (2 s, then backing off for a few minutes); observe is read-only.
+    followed.current = id;
+    // BUILD-FLOFI-EXECUTION-PERFORMANCE-001: the shared schedule (2 s, then backing off for a few minutes); observe is read-only. It stops when the page
+    // unmounts or another run becomes the page's run.
+    const active = () => mountedRef.current && followed.current === id;
     await observeUntilSettled(async () => {
       const observed = await api.observe(id); if (!observed.ok) throw new Error(observed.code);
-      if (active()) accept(observed.value); seen?.(observed.value); return observed.value;
+      acceptFollowed(observed.value); seen?.(observed.value); return observed.value;
     }, value => !unresolved(value), { active });
   }
   async function simulate() { await operation(async () => {
@@ -305,13 +317,14 @@ export function JupiterProvider({ children }: { children: ReactNode }) {
     accept(submitted.value); journey.mark('submission');
     if (submitted.value.attempt?.signature) {
       journey.mark('hash');
-      try {
-        await poll(record.id, () => true, value => {
-          if (value.attempt && ['CONFIRMED', 'REVERTED'].includes(value.attempt.state)) journey.mark('confirmation');
-          if (value.verdict !== 'PENDING') journey.mark('reconciliation');
-          if (value.verdict !== 'PENDING') finish(value.verdict === 'RECONCILED' ? 'reconciled' : value.attempt?.state === 'REVERTED' ? 'failed' : 'inconclusive');
-        });
-      } finally { if (!journey.has('reconciliation')) finish('in_progress'); }
+      // BUILD-FLOFI-EXECUTION-PERFORMANCE-001: followed in the background (read-only), so the page stays usable — a new, separate simulation is
+      // allowed while this one settles — instead of holding the operation lock for the whole observation schedule.
+      void poll(record.id, value => {
+        if (value.attempt && ['CONFIRMED', 'REVERTED'].includes(value.attempt.state)) journey.mark('confirmation');
+        if (value.verdict !== 'PENDING') journey.mark('reconciliation');
+        if (value.verdict !== 'PENDING') finish(value.verdict === 'RECONCILED' ? 'reconciled' : value.attempt?.state === 'REVERTED' ? 'failed' : 'inconclusive');
+      }).catch(cause => { if (mountedRef.current && followed.current === record.id) setError(cause instanceof Error ? cause.message : `${api.prefix}_OPERATION_FAILED`); })
+        .finally(() => { if (!journey.has('reconciliation')) finish('in_progress'); });
     } else finish('inconclusive');
   }); }
   async function observe() { await operation(async () => { if (!record) throw new Error(`${runtime.prefix}_RUN_MISSING`); await poll(record.id); }); }

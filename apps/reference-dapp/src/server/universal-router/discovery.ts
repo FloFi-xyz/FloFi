@@ -197,7 +197,7 @@ export type DiscoveryWindow = { readonly deadlineMs: number; readonly compareMs:
 /** UI and estimates: under the cloud flow's 30 s and the estimate's 45 s limits. */
 export const DISCOVERY_WINDOW: DiscoveryWindow = Object.freeze({ deadlineMs: 12_000, compareMs: 1_500 });
 /** Conversational tools (web chat, channels): under the tool's 8 s limit, so a partial answer arrives instead of a timeout. */
-export const CONVERSATIONAL_DISCOVERY_WINDOW: DiscoveryWindow = Object.freeze({ deadlineMs: 6_500, compareMs: 1_000 });
+export const CONVERSATIONAL_DISCOVERY_WINDOW: DiscoveryWindow = Object.freeze({ deadlineMs: 5_500, compareMs: 1_000 });
 const PROVIDER_CODE: Readonly<Record<UniversalRoutingProvider, string>> = { relay: 'RELAY', lifi: 'LIFI', mayan: 'MAYAN', across: 'ACROSS' };
 export type DiscoveryTiming = { readonly provider: UniversalRoutingProvider; readonly durationMs: number | null; readonly settled: boolean };
 
@@ -219,12 +219,15 @@ export function createUniversalDiscovery(config: { readonly http: UniversalHttp;
         inputTokenProgram: r.inputTokenProgram ?? (r.source.ecosystem === 'SOLANA' && r.inputToken.kind === 'TOKEN' ? 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA' : null) };
       const relayHeaders = config.keys?.relay ? { 'x-api-key': config.keys.relay } : undefined, lifiHeaders = config.keys?.lifi ? { 'x-lifi-api-key': config.keys.lifi } : undefined;
       // One controller per discovery: the window closing (or the caller cancelling) aborts every request still in flight.
+      if (options.signal?.aborted) throw new Error('UNIVERSAL_DISCOVERY_CANCELLED');
       const controller = new AbortController(), o: UniversalHttpOptions = { signal: controller.signal };
-      const cancel = () => controller.abort();
+      let settleOnAbort: () => void = () => undefined;
+      const cancel = () => { controller.abort(); settleOnAbort(); };
       options.signal?.addEventListener('abort', cancel, { once: true });
       const started = clock(), answers = new Map<UniversalRoutingProvider, DiscoveryCandidate[]>(), durations = new Map<UniversalRoutingProvider, number>();
       let firstExecutableMs: number | null = null, settle: () => void = () => undefined, compareTimer: ReturnType<typeof setTimeout> | undefined;
       const closed = new Promise<void>(resolve => { settle = resolve; });
+      settleOnAbort = () => settle();
       const deadline = setTimeout(() => settle(), window.deadlineMs);
       const ask = (p: UniversalRoutingProvider): Promise<DiscoveryCandidate[]> => p === 'relay' ? discoverRelay(config.http, apis.relay, relayRequest, relayHeaders, o).then(c => [c])
         : p === 'lifi' ? discoverLifi(config.http, apis.lifi, r, owner, recipient, lifiHeaders, o) : p === 'mayan' ? discoverMayan(config.http, apis.mayan, r, P.mayan.sdkVersion, o)
@@ -239,14 +242,12 @@ export function createUniversalDiscovery(config: { readonly http: UniversalHttp;
         }
         if (answers.size === providers.length) settle();
       }));
-      if (options.signal?.aborted) settle();
-      else options.signal?.addEventListener('abort', () => settle(), { once: true });
       await Promise.race([closed, Promise.all(tasks)]);
       open = false;
       clearTimeout(deadline); clearTimeout(compareTimer);
       options.signal?.removeEventListener('abort', cancel);
       const pending = providers.filter(p => !answers.has(p));
-      if (pending.length) cancel();
+      if (pending.length) controller.abort();
       if (options.signal?.aborted) throw new Error('UNIVERSAL_DISCOVERY_CANCELLED');
       // Ordered by the caller's provider order before ranking, so equal ranks keep the deterministic provider order.
       const candidates = rank(providers.flatMap(p => answers.get(p) ?? [candidate(p, p, 'TEMPORARILY_UNAVAILABLE', { reason: `${PROVIDER_CODE[p]}_DISCOVERY_WINDOW_ELAPSED` })]));

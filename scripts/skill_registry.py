@@ -345,7 +345,8 @@ def warnings(root=ROOT, today=None):
 # --- Selection -------------------------------------------------------------------------------------------------
 
 def _tokens(text):
-    return set(re.findall(r"[a-z0-9][a-z0-9.+_-]*", text.lower()))
+    # Sentence punctuation is not part of a keyword ("…via Uniswap." names `uniswap`).
+    return {token.rstrip(".+_-") for token in re.findall(r"[a-z0-9][a-z0-9.+_-]*", text.lower())} - {""}
 
 
 def select(root=ROOT, paths=(), task="", networks=(), protocols=(), operations=(), domains_filter=None):

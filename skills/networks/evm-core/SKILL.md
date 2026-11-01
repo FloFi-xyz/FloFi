@@ -8,8 +8,9 @@ capability registry and deterministic tests remain the evidence.
   are bound by the Review or bounded at signing (`server/managed-signing.ts`). A legacy-gas request is refused.
 - The nonce a reviewed transaction carries is the account's next *pending* nonce. Each run reserves its nonce; a
   second signature for the same attempt must never be valid alongside the first.
-- Gas: `eth_estimateGas` at the pinned block plus the profile's margin; Nitro (Arbitrum) estimates include posting
-  gas; OP Stack chains (Base) add an L1 data fee read from the GasPriceOracle predeploy.
+- Gas: owner-bound Reviews estimate at the quote's pinned block; `begin` estimates again at the latest block just before
+  the wallet request and refuses an estimate above the reviewed limit. Nitro (Arbitrum) estimates include posting gas;
+  OP Stack chains (Base) add an L1 data fee read from the GasPriceOracle predeploy.
 
 ## Reads
 - Every quote and Review read is pinned to one block (`eth_getBlockByNumber` → number/hash), and the block hash is

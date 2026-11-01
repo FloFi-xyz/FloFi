@@ -62,7 +62,9 @@ export function createRobinhoodCatalogLoader(options: { readonly mode: 'live' | 
 }
 /** The catalog swap runtime of the shared Uniswap swap service on Robinhood Chain. */
 export function robinhoodSwapRuntime(mode: 'live' | 'harness', env: Env, catalogFor: (chain: string) => Promise<AssetCatalog>): CatalogSwapRuntime {
-  return { catalogFor, provenance: mode === 'harness' ? 'MOCKED' : 'PUBLIC_MAINNET', executionEnabled: robinhoodOwnerExecutionEnabled(mode, env) };
+  return { catalogFor, provenance: mode === 'harness' ? 'MOCKED' : 'PUBLIC_MAINNET', executionEnabled: robinhoodOwnerExecutionEnabled(mode, env),
+    // BUILD-FLOFI-EXECUTION-PERFORMANCE-001: the same deployment-fact switch as the other catalog networks.
+    ...env.GRYLOO_DEPLOYMENT_FACT_CACHE === 'off' ? { deploymentFacts: null } : {} };
 }
 const loaders = new Map<'live' | 'harness', (chain: string) => Promise<AssetCatalog>>();
 /** The process-wide catalog loader of a mode, shared by the swap, transfer and liquidity services and the authoring catalog. */

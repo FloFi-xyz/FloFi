@@ -222,7 +222,10 @@ export async function runCopilotTool(name: string, rawArguments: string, ctx: Co
         if (known === 'find_routes') return done({ ok: true, ...view, certifiedRouteAssets: certified });
         const recommended = view.candidates.find(candidate => candidate.recommended);
         return done(recommended ? { ok: true, provenance: view.provenance, observedAt: view.observedAt, freshness: view.freshness, receive: view.receive, quote: recommended }
-          : { ok: false, code: view.status === 'EXECUTABLE' ? 'NO_RECOMMENDED_ROUTE' : view.status, observedAt: view.observedAt });
+          // BUILD-FLOFI-EXECUTION-PERFORMANCE-001: a PROVISIONAL comparison names the providers that did not answer in time (e.g. Relay), so "no
+          // executable route" is never confused with "the executable provider was still answering".
+          : { ok: false, code: view.status === 'EXECUTABLE' ? 'NO_RECOMMENDED_ROUTE' : view.status, observedAt: view.observedAt, comparison: view.comparison,
+            notCompared: view.notCompared });
       }
       case 'get_workflow_context': {
         exactArgs(rawArguments, []);

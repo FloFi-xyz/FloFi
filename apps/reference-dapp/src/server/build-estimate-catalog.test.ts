@@ -12,6 +12,9 @@ import { asset as rhAsset, createRobinhoodMockChain, mockCatalogRuntime, officia
 import { baseAsset, baseCatalog } from './base-mainnet.test-harness';
 import type { PriceResult, PriceSource } from '../automations/price-source';
 import { createDeploymentFactCache } from './public-testnet-service';
+import { robinhoodSwapRuntime } from './robinhood-mainnet';
+import { baseSwapRuntime } from './base-mainnet';
+import { arbitrumSwapRuntime } from './arbitrum-mainnet';
 
 type Case = { name: string; chain: string; env: Record<string, string>; catalog: () => AssetCatalog; network?: 'base';
   pair: (catalog: AssetCatalog) => [CanonicalAsset, CanonicalAsset]; rate: (input: string, output: string) => Record<string, bigint>; amount: string; expected: string };
@@ -75,7 +78,9 @@ describe('UX-007 shared catalog-network live quote', () => {
     expect(first).toEqual(second);
     expect(warm.length).toBeLessThan(cold.length);
     // Fresh every time: chain identity, head, the reorg check, decimals, liquidity, slot0 and the quoter's output.
-    for (const read of ['eth_chainId', 'eth_getBlockByNumber', 'eth_call:0x313ce567', 'eth_call:0x1a686502', 'eth_call:0x3850c7bd', 'eth_call:0xc6a5026a'])
+    // Stock Token state (Robinhood Chain): beacon slot, uid, multiplier, scheduled multiplier and effective time are always fresh too.
+    for (const read of ['eth_chainId', 'eth_getBlockByNumber', 'eth_call:0x313ce567', 'eth_call:0x1a686502', 'eth_call:0x3850c7bd', 'eth_call:0xc6a5026a',
+      'eth_getStorageAt', 'eth_call:0xf514ce36', 'eth_call:0xa60bf13d', 'eth_call:0xdc767007', 'eth_call:0x97a4064f'])
       expect(warm.filter(m => m === read).length, read).toBe(cold.filter(m => m === read).length);
     // Not re-read once verified: the protocol contracts' code and immutables, the pool's immutables.
     for (const read of ['eth_call:0xc45a0155', 'eth_call:0x0dfe1681', 'eth_call:0xd21220a7', 'eth_call:0xddca3f43']) expect(warm, read).not.toContain(read);
@@ -95,6 +100,32 @@ describe('UX-007 shared catalog-network live quote', () => {
     // Verified facts stay verified within their window, but a fresh cache (or expiry) verifies again and refuses the tampered code.
     expect(await readBuildEstimate({ workflow, nodeId: 'node-002' }, c.env, { ...seams, rpc, catalog: { ...seams.catalog, deploymentFacts: createDeploymentFactCache() } }))
       .toMatchObject({ ok: false, code: 'PROTOCOL_DEPLOYMENT_MISMATCH' });
+  });
+  it('BUILD-FLOFI-EXECUTION-PERFORMANCE-001: facts seen by a quote that failed its reorg check are not remembered', async () => {
+    const c = CASES[0]!, { workflow, seams } = setup(c), cache = createDeploymentFactCache(), calls: string[] = [];
+    let reorg = true;
+    const rpc: typeof seams.rpc = async (method, params) => {
+      calls.push(method);
+      const value = await seams.rpc(method, params);
+      return reorg && method === 'eth_getBlockByNumber' && params[0] !== 'latest' ? { ...(value as object), hash: '0x' + 'ab'.repeat(32) } : value;
+    };
+    const catalog = { ...seams.catalog, deploymentFacts: cache };
+    expect(await readBuildEstimate({ workflow, nodeId: 'node-002' }, c.env, { ...seams, rpc, catalog })).toMatchObject({ ok: false, code: 'QUOTE_BLOCK_REORG' });
+    const afterReorg = calls.splice(0).length;
+    reorg = false;
+    expect((await readBuildEstimate({ workflow, nodeId: 'node-002' }, c.env, { ...seams, rpc, catalog })).ok).toBe(true);
+    expect(calls.splice(0).length).toBe(afterReorg);
+    expect((await readBuildEstimate({ workflow, nodeId: 'node-002' }, c.env, { ...seams, rpc, catalog })).ok).toBe(true);
+    expect(calls.splice(0).length).toBeLessThan(afterReorg);
+  });
+  it('BUILD-FLOFI-EXECUTION-PERFORMANCE-001: GRYLOO_DEPLOYMENT_FACT_CACHE=off turns the cache off on every catalog network', () => {
+    const off = { GRYLOO_DEPLOYMENT_FACT_CACHE: 'off' };
+    expect(robinhoodSwapRuntime('live', off, async () => { throw new Error('unused'); }).deploymentFacts).toBeNull();
+    expect('deploymentFacts' in robinhoodSwapRuntime('live', {}, async () => { throw new Error('unused'); })).toBe(false);
+    for (const swapRuntime of [baseSwapRuntime, arbitrumSwapRuntime]) {
+      expect(swapRuntime('live', off, async () => { throw new Error('unused'); }).deploymentFacts).toBeNull();
+      expect('deploymentFacts' in swapRuntime('live', {}, async () => { throw new Error('unused'); })).toBe(false);
+    }
   });
   it('BUILD-FLOFI-EXECUTION-PERFORMANCE-001: the fact cache expires and is bounded', () => {
     const cache = createDeploymentFactCache(1_000, 2);

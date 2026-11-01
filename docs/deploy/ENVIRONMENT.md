@@ -337,6 +337,20 @@ Legacy FloFi Wallet (Turnkey, export of wallets created before Privy only): `FLO
 [RELEASE-PRIVY-0019.md](RELEASE-PRIVY-0019.md) §Legacy finds Turnkey wallets in production. The product's own `FLOFI_GOOGLE_CLIENT_*` /
 `FLOFI_APPLE_CLIENT_ID` are no longer used for sign-in (Privy replaced them).
 
+## 5k. Execution performance (BUILD-FLOFI-EXECUTION-PERFORMANCE-001)
+
+All optional; leaving them unset keeps the conservative defaults.
+
+| Variable | Where | Default | Effect |
+| --- | --- | --- | --- |
+| `GRYLOO_RPC_READ_PROFILE` | web + API | unset (paced: one read at a time, 250 ms apart) | `dedicated`: operator-configured RPC endpoints (`GRYLOO_<NETWORK>_RPC_URL`, router fallback URLs, the keyed Alchemy URL) run up to 6 reads at once, 25 ms apart. Never applies to a public default endpoint. Set it only when those endpoints are keyed providers with capacity for parallel reads. |
+| `GRYLOO_DEPLOYMENT_FACT_CACHE` | web + API | on for live mainnets | `off`: re-verify every immutable deployment fact (pinned contract code, router/quoter immutables, pool immutables) on every Uniswap catalog quote. Economic state is always read fresh either way. |
+| `FLOFI_JOURNEY_TELEMETRY` | web | on | `off`: `/api/flofi/journey` accepts and drops content-free journey timings instead of logging them. |
+
+Release order for this build: deploy the API (Railway) before the web (Vercel). A newer web against an older API still
+works (chat route discovery falls back to the old call shape), but only the newer API applies the conversational
+discovery window. No migration, schema certificate or credential change is required.
+
 ## 6. Platform-provided (read, never set by hand)
 
 `VERCEL` (`1`: hosted), `VERCEL_ENV` (`production`/`preview`/`development`), `VERCEL_GIT_COMMIT_REF` (Preview tenant derivation),

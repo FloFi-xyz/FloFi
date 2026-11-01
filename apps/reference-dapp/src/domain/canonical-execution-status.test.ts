@@ -8,7 +8,8 @@ const run = (status: string, patch: Partial<DashboardRun> = {}): DashboardRun =>
   ownerAccount: '0x1111111111111111111111111111111111111111', errorCode: null, needsObservation: false, attentionRequired: false, hasEvidence: false,
   createdAt: null, updatedAt: null, ...patch });
 const STATUSES = ['QUOTED', 'SIMULATED', 'REVIEWED', 'AUTHORIZED', 'PREPARED', 'RESERVED', 'SUBMITTING', 'SIGNED', 'HASH', 'PENDING', 'CONFIRMED', 'SOURCE_CONFIRMED',
-  'IN_FLIGHT', 'DESTINATION_OBSERVED', 'SETTLING', 'RECONCILED', 'PARTIAL', 'PARTIALLY_COMPLETED', 'REVERTED', 'FAILED', 'CANCELLED', 'REJECTED', 'UNKNOWN', 'SOMETHING_NEW'];
+  'IN_FLIGHT', 'DESTINATION_OBSERVED', 'SETTLING', 'RECONCILED', 'PARTIAL', 'PARTIALLY_COMPLETED', 'REVERTED', 'FAILED', 'CANCELLED', 'REJECTED', 'UNKNOWN',
+  'SUBMISSION_RESULT_UNKNOWN', 'SOURCE_SUBMITTED', 'REFUNDED', 'NOT_SUBMITTED', 'RECONCILIATION_REQUIRED', 'SOMETHING_NEW'];
 
 describe('BUILD-FLOFI-EXECUTION-PERFORMANCE-001 canonical execution status', () => {
   it('only a reconciled outcome is completed; a hash, a confirmation or an origin-side bridge record never is', () => {
@@ -22,15 +23,22 @@ describe('BUILD-FLOFI-EXECUTION-PERFORMANCE-001 canonical execution status', () 
     expect(canonicalRunLifecycle(run('CONFIRMED')).status).toBe('CONFIRMED_ONCHAIN');
     expect(canonicalRunLifecycle(run('SOURCE_CONFIRMED')).status).toBe('SETTLEMENT_PENDING');
     expect(canonicalRunLifecycle(run('SOMETHING_NEW')).status).toBe('INTERVENTION_REQUIRED');
+    expect(canonicalRunLifecycle(run('SUBMISSION_RESULT_UNKNOWN'))).toMatchObject({ status: 'INCONCLUSIVE', final: false });
+    expect(canonicalRunLifecycle(run('SOURCE_SUBMITTED')).status).toBe('SUBMITTED');
+    expect(canonicalRunLifecycle(run('REFUNDED'))).toMatchObject({ status: 'FAILED', final: true, completed: false });
+    expect(canonicalRunLifecycle(run('NOT_SUBMITTED')).status).toBe('REJECTED');
+    expect(canonicalRunLifecycle(run('PARTIAL', { needsObservation: true }))).toMatchObject({ status: 'PARTIALLY_COMPLETED', final: false });
   });
   it('agrees with the Dashboard on completion, refusal, failure and uncertainty (the same durable summary, one meaning)', () => {
     for (const status of STATUSES) for (const needsObservation of [false, true]) for (const attentionRequired of [false, true]) {
       const summary = run(status, { needsObservation, attentionRequired }), lifecycle = canonicalRunLifecycle(summary), dashboard = projectDashboardRun(summary).status;
       expect(['Completed', 'Completed with attention'].includes(dashboard), `${status} ${needsObservation}`).toBe(lifecycle.completed);
-      if (lifecycle.status === 'REJECTED') expect(dashboard).toBe('Transaction not submitted');
+      if (lifecycle.status === 'REJECTED') expect(status === 'NOT_SUBMITTED' ? ['Unresolved'] : ['Transaction not submitted']).toContain(dashboard);
       if (lifecycle.status === 'RECONCILED_WITH_ATTENTION') expect(dashboard).toBe('Completed with attention');
       if (lifecycle.status === 'PARTIALLY_COMPLETED') expect(dashboard).toBe('Partially completed');
-      if (['HASH_KNOWN', 'SETTLEMENT_PENDING', 'SUBMITTED'].includes(lifecycle.status)) expect(dashboard).toBe('In progress');
+      if (['HASH_KNOWN', 'SETTLEMENT_PENDING'].includes(lifecycle.status)) expect(dashboard).toBe('In progress');
+      // The Dashboard's summary mapping does not list SOURCE_SUBMITTED and shows it as "Unresolved"; both mean not finished.
+      if (lifecycle.status === 'SUBMITTED') expect(['In progress', 'Unresolved']).toContain(dashboard);
       if (lifecycle.status === 'INCONCLUSIVE') expect(['Unresolved', 'Needs attention']).toContain(dashboard);
     }
   });
