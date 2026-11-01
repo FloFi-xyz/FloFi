@@ -8,8 +8,7 @@ import { isLendingComposition } from '@defi-workflow-engine/workflow-contracts';
 import { composerActions, composerConnections, composerSummary } from '../domain/composer-presentation';
 import { canvasPosition } from '../domain/canvas-layout';
 import { useWorkflow } from '../state/workflow-store';
-import { useOptionalBuild009Wallet } from '../state/build009-wallet-store';
-import { useOptionalJupiter } from '../state/jupiter-store';
+import { useEstimateOwners } from '../state/estimate-owners';
 import { ComposerCard, type ComposerCardData } from './composer-card';
 import { DarkSpotlight } from './dark-spotlight';
 import { CANVAS_GESTURES, CanvasNavigator } from './canvas-navigator';
@@ -59,7 +58,7 @@ export function SimulateWorkflowCanvas({ workflowName, primaryAction, stage = 's
   const incomplete = Boolean(reviewError);
   const lending = isLendingComposition(workflow);
   // BUILD-FLOFI-WALLET-UX-EXECUTION-FIX-001 (P0-07): swap and bridge steps show the same shared live quote as Build (display only).
-  const evmAccount = useOptionalBuild009Wallet()?.account ?? null, solanaAccount = useOptionalJupiter()?.session?.account.address ?? null;
+  const { evm: evmAccount, solana: solanaAccount } = useEstimateOwners();
   const nodes = useMemo<Node[]>(() => incomplete ? [] : composerActions(workflow).map((node, index) => ({
     id: node.nodeId, type: 'workflow', ariaLabel: `Step ${index + 1}: ${composerSummary(workflow, node, context).action}`,
     position: canvasLayout?.[node.nodeId] ? canvasPosition(canvasLayout, node, index) :

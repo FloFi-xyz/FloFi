@@ -5852,6 +5852,7 @@
         "apps/reference-dapp/src/state/capability-store.tsx",
         "apps/reference-dapp/src/state/composition-store.tsx",
         "apps/reference-dapp/src/state/credentials-store.ts",
+        "apps/reference-dapp/src/state/estimate-owners.tsx",
         "apps/reference-dapp/src/state/execution-controls.ts",
         "apps/reference-dapp/src/state/execution-lifecycle.ts",
         "apps/reference-dapp/src/state/execution-start.ts",
