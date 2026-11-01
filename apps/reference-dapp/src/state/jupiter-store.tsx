@@ -99,7 +99,7 @@ export function JupiterProvider({ children }: { children: ReactNode }) {
   const journeyRef = useRef<Journey | null>(null);
   // BUILD-FLOFI-EXECUTION-PERFORMANCE-001: the run the page follows by itself (after a refresh or an Execute). A newer simulation or record replaces
   // it, so an older run's observation never overwrites the newer one on the page or in the recovery pointer.
-  const followed = useRef<string | null>(null), mountedRef = useRef(true);
+  const followed = useRef<string | null>(null), mountedRef = useRef(true), followToken = useRef(0), acceptedSinceMount = useRef(false);
   useEffect(() => { mountedRef.current = true; return () => { mountedRef.current = false; followed.current = null; }; }, []);
   const authored = workflow.nodes.map(node => solanaSwapDetails(node)).find(Boolean) ?? null;
   // A Solana liquidity position uses the same wallet session as the swap on its own cluster (Devnet or, BUILD-SOLANA-MAINNET-001, mainnet-beta).
@@ -110,6 +110,7 @@ export function JupiterProvider({ children }: { children: ReactNode }) {
   const pristineRecovery = recovered && isPristineDraft(workflow);
   const retired = Boolean(record && JSON.stringify(record.review.workflow) !== JSON.stringify(workflow) && !pristineRecovery);
   function accept(value: JupiterRecord) {
+    acceptedSinceMount.current = true;
     if (followed.current !== null && followed.current !== value.id) followed.current = null;
     setRecord(value); try { window.localStorage.setItem(key, JSON.stringify({ id: value.id })); } catch { /* server journal remains authoritative */ }
   }
@@ -124,7 +125,8 @@ export function JupiterProvider({ children }: { children: ReactNode }) {
       const recoveredNetwork = pointer && typeof pointer.id === 'string' ? networkOfId(pointer.id) : null;
       if (recoveredNetwork && typeof pointer?.id === 'string')
         runtimes[recoveredNetwork].status(pointer.id).then(result => {
-          if (!mounted || !result.ok) return;
+          // A record this page already accepted (a new simulation while the status read was in flight) is never replaced by the recovered one.
+          if (!mounted || !result.ok || acceptedSinceMount.current) return;
           setRecord(result.value); setRecovered(true);
           // BUILD-FLOFI-EXECUTION-PERFORMANCE-001: a run that came back with a transaction in flight keeps being followed (read-only), without a click.
           if (unresolved(result.value)) { followed.current = result.value.id; void poll(result.value.id).catch(() => undefined); }
@@ -251,10 +253,12 @@ export function JupiterProvider({ children }: { children: ReactNode }) {
   }
   async function poll(id: string, seen?: (value: JupiterRecord) => void) {
     const api = runtimes[networkOfId(id) ?? network];
+    // One loop at a time: a newer one (another Check result, an Execute) supersedes this one at its next step.
+    const token = ++followToken.current;
     followed.current = id;
     // BUILD-FLOFI-EXECUTION-PERFORMANCE-001: the shared schedule (2 s, then backing off for a few minutes); observe is read-only. It stops when the page
-    // unmounts or another run becomes the page's run.
-    const active = () => mountedRef.current && followed.current === id;
+    // unmounts, another run becomes the page's run, or a newer loop takes over.
+    const active = () => mountedRef.current && followed.current === id && followToken.current === token;
     await observeUntilSettled(async () => {
       const observed = await api.observe(id); if (!observed.ok) throw new Error(observed.code);
       acceptFollowed(observed.value); seen?.(observed.value); return observed.value;
@@ -327,7 +331,14 @@ export function JupiterProvider({ children }: { children: ReactNode }) {
         .finally(() => { if (!journey.has('reconciliation')) finish('in_progress'); });
     } else finish('inconclusive');
   }); }
-  async function observe() { await operation(async () => { if (!record) throw new Error(`${runtime.prefix}_RUN_MISSING`); await poll(record.id); }); }
+  // "Check result" observes once under the operation lock, then keeps following in the background (read-only) so the page stays usable.
+  async function observe() { await operation(async () => {
+    if (!record) throw new Error(`${runtime.prefix}_RUN_MISSING`);
+    const id = record.id, api = runtimes[networkOfRecord(record)];
+    const observed = await api.observe(id); if (!observed.ok) throw new Error(observed.code);
+    accept(observed.value);
+    if (unresolved(observed.value)) void poll(id).catch(cause => { if (mountedRef.current && followed.current === id) setError(cause instanceof Error ? cause.message : `${api.prefix}_OPERATION_FAILED`); });
+  }); }
   return <Context.Provider value={{ record, owner: session && session.chain === runtime.walletChain ? session.account.address : null, network, session, codePrefix: runtime.prefix,
     busy, error, retired, recovered, revision, restoring, executionEnabled: enabled[network], walletChain: runtime.walletChain, connect, connectWith, connectWithResult, disconnect, switchCluster, switchClusterTo,
     simulate, review, execute, observe }}>

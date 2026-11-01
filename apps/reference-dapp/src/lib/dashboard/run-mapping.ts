@@ -42,19 +42,20 @@ export function projectDashboardRun(run: DashboardRun, progress: ExecutionLifecy
   } else if (run.status === 'RECONCILED' && !run.needsObservation) {
     status = run.attentionRequired || run.errorCode ? 'Completed with attention' : 'Completed';
     message = 'The run records a reconciled outcome.';
-  } else if (['CANCELLED', 'REJECTED'].includes(run.status) && !run.needsObservation) {
+  // BUILD-FLOFI-EXECUTION-PERFORMANCE-001: the same groups as the canonical lifecycle (domain/canonical-execution-status.ts) for statuses flows emit.
+  } else if (['CANCELLED', 'REJECTED', 'NOT_SUBMITTED', 'NOT_EXECUTED', 'EXPIRED'].includes(run.status) && !run.needsObservation) {
     status = 'Transaction not submitted'; message = 'This request was recorded as not submitted. Earlier confirmed actions and costs remain recorded.';
   } else if (run.status === 'SUBMITTING') {
     status = 'Unresolved'; message = 'A recorded request still needs verification. No transaction is repeated.';
   } else if (['PARTIAL', 'PARTIALLY_COMPLETED'].includes(run.status)) {
     status = 'Partially completed'; message = 'Earlier completed actions remain recorded.';
-  } else if (['FAILED', 'REVERTED'].includes(run.status) && !run.needsObservation) {
+  } else if (['FAILED', 'REVERTED', 'REFUNDED'].includes(run.status) && !run.needsObservation) {
     // A summary alone cannot establish whether earlier actions completed.
     status = 'Needs attention'; message = 'A failed action is recorded. Open the run to review any earlier completed actions.';
   } else if (['PREPARED', 'SIMULATED', 'AUTHORIZED', 'REVIEWED', 'QUOTED'].includes(run.status)) {
     status = run.needsObservation || unproven ? 'Unresolved' : 'Not started';
     message = run.needsObservation || unproven ? 'A recorded request still needs verification. No transaction is repeated.' : 'Simulated or reviewed only: no wallet request was made, so nothing was sent.';
-  } else if (['RESERVED', 'SUBMITTING', 'PENDING', 'HASH', 'SOURCE_CONFIRMED', 'IN_FLIGHT', 'DESTINATION_OBSERVED', 'SIGNED', 'POSTING', 'POSTED', 'OPEN', 'SETTLING', 'FULFILLED', 'PARTIALLY_FILLED'].includes(run.status)) {
+  } else if (['RESERVED', 'SUBMITTING', 'PENDING', 'HASH', 'SOURCE_SUBMITTED', 'SOURCE_CONFIRMED', 'IN_FLIGHT', 'DESTINATION_OBSERVED', 'SIGNED', 'POSTING', 'POSTED', 'OPEN', 'SETTLING', 'FULFILLED', 'PARTIALLY_FILLED'].includes(run.status)) {
     status = 'In progress'; message = 'The recorded execution is still awaiting its final outcome.';
   } else if (run.status === 'CONFIRMED') {
     status = 'Needs attention'; message = 'A transaction is confirmed. Full workflow completion has not been established by this summary.';

@@ -81,6 +81,9 @@ describe('BUILD-FLOFI-EXECUTION-PERFORMANCE-001 journey receiver abuse bounds', 
     const accountId = 'acct_' + 'b'.repeat(32);
     expect((await receive(signedIn(cookieFor(accountId)))).status).toBe(204);
     expect((await receive(signedIn(null))).status).toBe(401);
+    const malformed = post(JSON.stringify(event()), { 'sec-fetch-site': 'same-origin', host: 'flofi.xyz', 'x-forwarded-proto': 'https',
+      cookie: '__Host-flofi_account_session=%E0%A4%A' });
+    expect((await receive(malformed)).status).toBe(401);
     expect((await receive(signedIn(cookieFor(accountId).slice(0, -2) + 'xx'))).status).toBe(401);
     expect((await receive(signedIn(cookieFor(accountId, T0 - 7_200_000)))).status).toBe(401);
     expect(logged).toHaveLength(1);

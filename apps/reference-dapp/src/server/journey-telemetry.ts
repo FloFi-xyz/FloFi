@@ -36,19 +36,26 @@ async function boundedText(request: Request, limit: number): Promise<string | nu
   }
   return new TextDecoder().decode(Buffer.concat(chunks));
 }
-/** The signed-in account of this request from its sealed session cookie (MAC and expiry only; no database read), or null. */
-export function journeyAccount(request: Request, env: Env, now: Date): string | null {
-  const origin = originFromHeaders(request.headers), name = sessionCookieName(ACCOUNT_SESSION_COOKIE, origin.secure);
-  const cookie = (request.headers.get('cookie') ?? '').split(';').map(part => part.trim()).find(part => part.startsWith(name + '='));
-  const token = cookie ? readAccountSession(env, decodeURIComponent(cookie.slice(name.length + 1)), now, origin.domain) : null;
-  return token && token.expiresAt * 1000 > now.getTime() ? token.accountId : null;
+/**
+ * The signed-in account of this request from its sealed session cookie (MAC, host and expiry only), or null — for this content-free telemetry
+ * rate key ONLY. It deliberately skips the account store's revocation check (`verifySession`) to keep a database read off every beacon, so a
+ * revoked session can still send rate-bounded timings until its cookie expires. Never reuse it to authenticate anything: use
+ * `currentAccountSession`, which consults the store. Module-private for that reason; a malformed cookie is simply no session.
+ */
+function telemetryRateKeyAccount(request: Request, env: Env, now: Date): string | null {
+  try {
+    const origin = originFromHeaders(request.headers), name = sessionCookieName(ACCOUNT_SESSION_COOKIE, origin.secure);
+    const cookie = (request.headers.get('cookie') ?? '').split(';').map(part => part.trim()).find(part => part.startsWith(name + '='));
+    const token = cookie ? readAccountSession(env, decodeURIComponent(cookie.slice(name.length + 1)), now, origin.domain) : null;
+    return token && token.expiresAt * 1000 > now.getTime() ? token.accountId : null;
+  } catch { return null; }
 }
 
 export function createJourneyReceiver(options: { readonly env?: Env; readonly now?: () => number; readonly log?: (fields: Fields) => void;
   readonly account?: (request: Request) => string | null } = {}) {
   const env = options.env ?? process.env, now = options.now ?? Date.now;
   const log = options.log ?? (fields => createLogger({ service: 'flofi-journey' }).info('journey.timing', fields));
-  const account = options.account ?? (request => journeyAccount(request, env, new Date(now())));
+  const account = options.account ?? (request => telemetryRateKeyAccount(request, env, new Date(now())));
   let windowStart = 0, accepted = 0;
   // Per-account windows, keyed by a hash (the account id never sits in memory as such), bounded in size (oldest first).
   const perAccount = new Map<string, { start: number; count: number }>();
@@ -63,6 +70,10 @@ export function createJourneyReceiver(options: { readonly env?: Env; readonly no
     return ++entry.count <= LIMIT_PER_ACCOUNT;
   };
   return async function receive(request: Request): Promise<Response> {
+    // Any unexpected failure is a refusal, never a 500 with a stack trace in the logs.
+    try { return await handle(request); } catch { return new Response(null, { status: 400, headers }); }
+  };
+  async function handle(request: Request): Promise<Response> {
     const site = request.headers.get('sec-fetch-site'), origin = request.headers.get('origin');
     let sameOrigin: boolean;
     try { sameOrigin = site ? site === 'same-origin' : origin !== null && origin === new URL(request.url).origin; } catch { sameOrigin = false; }
@@ -84,5 +95,5 @@ export function createJourneyReceiver(options: { readonly env?: Env; readonly no
     log({ evidence: 'CLIENT_REPORTED', journey_id: event.journeyId, operation: event.operation, network: event.network, provider: event.provider, wallet: event.wallet,
       outcome: event.outcome, user_ms: event.userMs, system_ms: event.systemMs, ...event.metrics });
     return new Response(null, { status: 204, headers });
-  };
+  }
 }

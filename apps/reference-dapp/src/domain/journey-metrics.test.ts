@@ -27,6 +27,11 @@ describe('BUILD-FLOFI-EXECUTION-PERFORMANCE-001 journey metrics', () => {
     expect(parseJourneyEvent(valid)).toEqual(valid);
     expect(parseJourneyEvent({ ...valid, network: '0x1111111111111111111111111111111111111111' })).toBeNull();
     expect(parseJourneyEvent({ ...valid, provider: 'see https://evil.example' })).toBeNull();
+    // Closed vocabularies: an address in the network or provider field is refused, even when shaped like a valid reference.
+    expect(parseJourneyEvent({ ...valid, network: 'solana:7EcDhSYGxXyscszYEp35KHN8vvw3svAuLKTzXwCFLtV' })).toBeNull();
+    expect(parseJourneyEvent({ ...valid, network: 'eip155:31337' })).toBeNull();
+    expect(parseJourneyEvent({ ...valid, provider: '0x1111111111111111111111111111' })).toBeNull();
+    expect(parseJourneyEvent({ ...valid, provider: 'Jupiter' })).not.toBeNull();
     expect(parseJourneyEvent({ ...valid, owner: '0x11' })).toBeNull();
     expect(parseJourneyEvent({ ...valid, metrics: { prompt_length_ms: 1 } })).toBeNull();
     expect(parseJourneyEvent({ ...valid, metrics: { intent_to_first_quote_ms: -1 } })).toBeNull();

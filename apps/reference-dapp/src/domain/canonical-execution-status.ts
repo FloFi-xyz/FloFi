@@ -4,7 +4,7 @@
  * name the same moment the same way. It is derived only from the run's recorded facts (status, latest attempt, observation and attention
  * flags), never from a provider answer, and it never upgrades evidence:
  *
- *   NOT_STARTED                simulated or reviewed only; no wallet request was made
+ *   NOT_STARTED                simulated or reviewed only; no wallet request was made and no earlier step is confirmed
  *   AUTHORIZATION_PENDING      an attempt is prepared; the owner's wallet decision is pending
  *   REJECTED                   the latest request was declined, cancelled or never submitted (earlier confirmed steps, if any, stay recorded)
  *   SUBMITTED                  a submission is recorded; its transaction hash is not yet known
@@ -16,7 +16,7 @@
  *   PARTIALLY_COMPLETED        earlier actions completed; a later one did not
  *   REVERTED / FAILED          the transaction reverted / the action failed (final)
  *   INCONCLUSIVE               a recorded request still needs verification (FloFi never repeats it)
- *   INTERVENTION_REQUIRED      a recorded state FloFi cannot classify safely; the person should open the run
+ *   INTERVENTION_REQUIRED      a recorded divergence or required recovery, or a state FloFi cannot classify safely; the person should open the run
  *
  * `final` means nothing changes without a new owner action (a declined run may still be authorized again by its owner).
  * Origin confirmation is never settlement, and a hash or a provider's "success" is never completion.
@@ -29,43 +29,53 @@ export type RunSummaryFacts = { readonly status: string; readonly needsObservati
   readonly attempts?: readonly unknown[] };
 
 const FINAL: ReadonlySet<CanonicalExecutionStatus> = new Set(['REJECTED', 'RECONCILED', 'RECONCILED_WITH_ATTENTION', 'PARTIALLY_COMPLETED', 'REVERTED', 'FAILED']);
-const NOT_STARTED = new Set(['PREPARED', 'SIMULATED', 'AUTHORIZED', 'REVIEWED', 'QUOTED']);
+// Recorded statuses, grouped as FloFi's flows emit them (run verdicts, flow phases and attempt states; domain/financial-run-status.ts).
+const NOT_STARTED = new Set(['PREPARED', 'SIMULATED', 'AUTHORIZED', 'REVIEWED', 'QUOTED', 'PAUSED']);
+const DECLINED = new Set(['CANCELLED', 'REJECTED', 'NOT_SUBMITTED', 'NOT_EXECUTED', 'EXPIRED']);
 const SETTLING = new Set(['SOURCE_CONFIRMED', 'IN_FLIGHT', 'DESTINATION_OBSERVED', 'SETTLING']);
 const SUBMITTED = new Set(['RESERVED', 'SIGNED', 'POSTING', 'POSTED', 'OPEN', 'FULFILLED', 'PARTIALLY_FILLED', 'SOURCE_SUBMITTED']);
-const INCONCLUSIVE = new Set(['SUBMITTING', 'UNKNOWN', 'SUBMISSION_RESULT_UNKNOWN', 'RECONCILIATION_REQUIRED']);
+const INCONCLUSIVE = new Set(['SUBMITTING', 'UNKNOWN', 'SUBMISSION_RESULT_UNKNOWN', 'RECONCILIATION_REQUIRED', 'INCONCLUSIVE', 'NOT_FOUND']);
+const INTERVENTION = new Set(['DIVERGENT', 'RECOVERY_REQUIRED']);
+// A step that reached the chain but whose workflow is not reconciled yet (a flow phase, never a verdict).
+const CONFIRMED_STEP = new Set(['CONFIRMED', 'COMPLETED', 'SETTLED']);
 
 const of = (status: CanonicalExecutionStatus): CanonicalLifecycle =>
   ({ status, final: FINAL.has(status), completed: status === 'RECONCILED' || status === 'RECONCILED_WITH_ATTENTION' });
 
+const attemptsOf = (run: RunSummaryFacts) => (Array.isArray(run.attempts) ? run.attempts : [])
+  .filter((a): a is { state?: unknown; transactionHash?: unknown; reconciled?: unknown } => !!a && typeof a === 'object');
 /** The latest attempt's recorded state, when the summary carries attempts. */
 function latestAttempt(run: RunSummaryFacts): { state: string; hash: boolean } | null {
-  const last = Array.isArray(run.attempts) ? run.attempts.at(-1) : undefined;
-  if (!last || typeof last !== 'object') return null;
-  const value = last as { state?: unknown; transactionHash?: unknown };
-  return typeof value.state === 'string' ? { state: value.state, hash: typeof value.transactionHash === 'string' && value.transactionHash.length > 0 } : null;
+  const last = attemptsOf(run).at(-1);
+  return last && typeof last.state === 'string' ? { state: last.state, hash: typeof last.transactionHash === 'string' && last.transactionHash.length > 0 } : null;
 }
+/** Whether an earlier step of this run is already confirmed onchain (e.g. an approval before the swap, the first leg of a composition). */
+const earlierConfirmed = (run: RunSummaryFacts) => attemptsOf(run).some(a => a.state === 'CONFIRMED' || a.reconciled === true);
 
 export function canonicalRunLifecycle(run: RunSummaryFacts): CanonicalLifecycle {
   const observing = run.needsObservation === true, attention = run.attentionRequired === true || (typeof run.errorCode === 'string' && run.errorCode.length > 0);
-  const status = run.status;
+  const status = run.status, confirmed = earlierConfirmed(run);
   if (status === 'RECONCILED' && !observing) return of(attention ? 'RECONCILED_WITH_ATTENTION' : 'RECONCILED');
-  if ((status === 'CANCELLED' || status === 'REJECTED' || status === 'NOT_SUBMITTED') && !observing) return of('REJECTED');
+  // The latest request was declined, cancelled, expired or never submitted. With an earlier step confirmed, the run is partially completed.
+  if (DECLINED.has(status) && !observing) return of(confirmed ? 'PARTIALLY_COMPLETED' : 'REJECTED');
   // Earlier steps completed (the Dashboard's "Partially completed"); while an observation is still pending the outcome can still change.
   if (status === 'PARTIAL' || status === 'PARTIALLY_COMPLETED') return { ...of('PARTIALLY_COMPLETED'), final: !observing };
   if (status === 'REVERTED' && !observing) return of('REVERTED');
   // A bridge refunded on its origin chain: the transfer did not settle; the funds came back (final, never completion).
   if ((status === 'FAILED' || status === 'REFUNDED') && !observing) return of('FAILED');
   if (INCONCLUSIVE.has(status)) return of('INCONCLUSIVE');
+  if (INTERVENTION.has(status)) return of('INTERVENTION_REQUIRED');
   if (SETTLING.has(status)) return of('SETTLEMENT_PENDING');
   const attempt = latestAttempt(run);
   if (NOT_STARTED.has(status)) {
     if (/SUBMISSION_EXPIRED_NOT_EXECUTED$/.test(typeof run.errorCode === 'string' ? run.errorCode : '') || observing) return of('INCONCLUSIVE');
-    return of(attempt?.state === 'PREPARED' ? 'AUTHORIZATION_PENDING' : 'NOT_STARTED');
+    if (attempt?.state === 'PREPARED') return of('AUTHORIZATION_PENDING');
+    // Never "nothing was sent" when an earlier step (an approval, a first leg) is confirmed onchain.
+    return of(confirmed ? 'CONFIRMED_ONCHAIN' : 'NOT_STARTED');
   }
   if (status === 'HASH' || status === 'PENDING') return of(attempt?.hash === false && status === 'PENDING' ? 'SUBMITTED' : 'HASH_KNOWN');
   if (SUBMITTED.has(status)) return of('SUBMITTED');
-  if (status === 'CONFIRMED') return of('CONFIRMED_ONCHAIN');
-  if (observing && ['RECONCILED', 'REVERTED', 'FAILED', 'REFUNDED', 'CANCELLED', 'REJECTED', 'NOT_SUBMITTED'].includes(status))
-    return of('INCONCLUSIVE');
+  if (CONFIRMED_STEP.has(status)) return of('CONFIRMED_ONCHAIN');
+  if (observing && (DECLINED.has(status) || ['RECONCILED', 'REVERTED', 'FAILED', 'REFUNDED'].includes(status))) return of('INCONCLUSIVE');
   return of('INTERVENTION_REQUIRED');
 }

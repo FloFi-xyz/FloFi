@@ -49,6 +49,7 @@ function message(error: unknown): string {
     WALLET_AUTHORIZATION_REJECTED: 'You declined the request in your wallet. Nothing was signed or sent.',
     WRONG_WALLET_CHAIN: 'Your wallet is on another network. Switch it to the network of this swap, then authorize again. Nothing was sent.',
     SUBMISSION_RESULT_UNKNOWN: 'Your wallet did not confirm whether it sent the transaction. FloFi keeps checking the network; do not send it again.',
+    TRANSACTION_ARTIFACT_CHANGED: 'The reviewed transaction changed before your wallet was asked, so nothing was sent. Simulate again to review it.',
     PUBLIC_RECORDING_OFF: 'Public testnet recording is not enabled on this app instance.',
     ROBINHOOD_MAINNET_NOT_ENABLED: 'Robinhood Chain is not enabled on this app instance.',
     BASE_MAINNET_NOT_ENABLED: 'Base mainnet is not enabled on this app instance.', BASE_STORAGE_NOT_CONFIGURED: 'Base mainnet is not enabled on this app instance.',
@@ -168,7 +169,8 @@ export function PublicTestnetProvider({ children }: { children: ReactNode }) {
             const observed = unwrap(await publicObserve(id));
             if (!cancelled) setRun(current => { following = sameRun(current); return following ? observed : current; });
             return observed;
-          }, observed => observed.attempts.at(-1)?.state !== 'PENDING' && observed.attempts.at(-1)?.state !== 'HASH', { active: () => !cancelled && following }).catch(() => undefined);
+          }, observed => Boolean(observed.divergence || observed.outcome) || (observed.attempts.at(-1)?.state !== 'PENDING' && observed.attempts.at(-1)?.state !== 'HASH'),
+          { active: () => !cancelled && following }).catch(() => undefined);
         }
       }
     }).catch(() => undefined);
@@ -237,8 +239,13 @@ export function PublicTestnetProvider({ children }: { children: ReactNode }) {
     const clearSigning = () => setSigningAttempt(current => current === attempt.attemptId ? null : current);
     // BUILD-FLOFI-EXECUTION-PERFORMANCE-001: `begin` saved exactly this run plus its new attempt, so the page shows it at once instead of a
     // status round trip (server actions run one at a time) before the wallet request. The next report returns the durable record.
-    if (attempt.executionId === run.quote.executionId && attempt.manifestHash === run.quote.manifestHash) acceptCurrent({ ...run, attempts: [...run.attempts, attempt] });
-    else setRun(unwrap(await publicStatus(run.quote.executionId)));
+    // A begun attempt bound to a manifest this page did not show (the run was re-reviewed elsewhere) is never sent: fail closed, as the
+    // artifact check below does, and show the durable record.
+    if (attempt.executionId !== run.quote.executionId || attempt.manifestHash !== run.quote.manifestHash) {
+      acceptCurrent(unwrap(await publicReport(run.quote.executionId, attempt.attemptId, { kind: 'UNKNOWN' })));
+      throw new Error('TRANSACTION_ARTIFACT_CHANGED');
+    }
+    acceptCurrent({ ...run, attempts: [...run.attempts, attempt] });
     // BUILD-FLOFI-BRIDGE-LIVE-FIX-003: the wallet request carries exactly the reviewed native value to the reviewed target (see swapWalletRequestMatches).
     if (!swapWalletRequestMatches(run.quote, attempt.step, tx, profile, session.account) || await calldataDigest(tx.data) !== attempt.calldataDigest) {
       unwrap(await publicReport(run.quote.executionId, attempt.attemptId, { kind: 'UNKNOWN' }));
@@ -288,7 +295,7 @@ export function PublicTestnetProvider({ children }: { children: ReactNode }) {
         if (state === 'CONFIRMED' || state === 'REVERTED') journey.mark('confirmation');
         if (observed.outcome) journey.mark('reconciliation');
         return observed;
-      }, observed => observed.attempts.at(-1)?.state !== 'PENDING', { active: () => mountedRef.current });
+      }, observed => Boolean(observed.divergence || observed.outcome) || observed.attempts.at(-1)?.state !== 'PENDING', { active: () => mountedRef.current });
       const state = followed.value?.attempts.at(-1)?.state;
       finish(state === 'REVERTED' ? 'failed' : state === 'UNKNOWN' ? 'inconclusive' : followed.value?.outcome ? 'reconciled' : 'in_progress');
     } catch (cause) { finish('in_progress'); throw cause; }

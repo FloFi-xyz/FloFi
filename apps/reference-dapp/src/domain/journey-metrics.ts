@@ -7,6 +7,7 @@
  * (`wallet_open_to_user_decision_ms`) is reported separately and is never part of a system-latency figure. Percentiles are computed only from
  * a genuine sample (`summarizeLatency`), never extrapolated.
  */
+import { NETWORKS } from './network-registry';
 export const JOURNEY_MARKS = Object.freeze(['intent', 'first_quote', 'best_quote', 'review_requested', 'review_ready', 'authorize_clicked', 'wallet_open',
   'user_decision', 'submission', 'hash', 'confirmation', 'reconciliation'] as const);
 export type JourneyMark = typeof JOURNEY_MARKS[number];
@@ -39,8 +40,11 @@ export type JourneyEvent = { readonly format: 'flofi.journey-timing.v1'; readonl
   readonly metrics: Partial<Record<JourneyMetric, number>>; readonly userMs: number; readonly systemMs: number };
 
 const ID = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/;
-const NETWORK = /^(eip155:[1-9][0-9]{0,9}|solana:[1-9A-HJ-NP-Za-km-z]{32,44})$/;
-const PROVIDER = /^[A-Za-z0-9][A-Za-z0-9 .+-]{0,31}$/;
+// Closed vocabularies (no free text): a journey names only one of FloFi's registered networks and a known provider label, so neither field can
+// carry an address or any other identifier.
+const knownNetwork = (value: unknown) => typeof value === 'string' && NETWORKS.some(network => network.chain === value);
+export const JOURNEY_PROVIDERS = Object.freeze(['Uniswap V3', 'Jupiter', 'Orca Whirlpools', 'Bridge', 'Relay', 'LI.FI', 'Mayan', 'Across'] as const);
+const knownProvider = (value: unknown) => typeof value === 'string' && (JOURNEY_PROVIDERS as readonly string[]).includes(value);
 const MAX_MS = 24 * 3_600_000;
 
 /** One journey's marks (first time wins: a repeated mark never moves a measured boundary). */
@@ -70,7 +74,7 @@ export function createJourney(input: { readonly operation: JourneyEvent['operati
       }
       if (!Object.keys(metrics).length) return null;
       return parseJourneyEvent({ format: 'flofi.journey-timing.v1', journeyId, operation: input.operation, network: input.network,
-        provider: provider && PROVIDER.test(provider) ? provider : null, wallet, outcome, metrics, userMs, systemMs });
+        provider: knownProvider(provider) ? provider : null, wallet, outcome, metrics, userMs, systemMs });
     },
   };
 }
@@ -85,8 +89,8 @@ export function parseJourneyEvent(value: unknown): JourneyEvent | null {
   if (v.format !== 'flofi.journey-timing.v1' || typeof v.journeyId !== 'string' || !ID.test(v.journeyId)) return null;
   if (!(JOURNEY_OPERATIONS as readonly unknown[]).includes(v.operation) || !(JOURNEY_WALLETS as readonly unknown[]).includes(v.wallet)
     || !(JOURNEY_OUTCOMES as readonly unknown[]).includes(v.outcome)) return null;
-  if (typeof v.network !== 'string' || !NETWORK.test(v.network)) return null;
-  if (v.provider !== null && (typeof v.provider !== 'string' || !PROVIDER.test(v.provider))) return null;
+  if (!knownNetwork(v.network)) return null;
+  if (v.provider !== null && !knownProvider(v.provider)) return null;
   const ms = (n: unknown) => typeof n === 'number' && Number.isSafeInteger(n) && n >= 0 && n <= MAX_MS;
   if (!ms(v.userMs) || !ms(v.systemMs) || !v.metrics || typeof v.metrics !== 'object' || Array.isArray(v.metrics)) return null;
   const names = new Set<string>(JOURNEY_METRICS.map(([metric]) => metric)), metrics = v.metrics as Record<string, unknown>;

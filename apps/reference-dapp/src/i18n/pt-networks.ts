@@ -23,6 +23,8 @@ export const portugueseNetworks: Readonly<Record<string, string>> = {
     'A sua carteira está noutra rede. Mude-a para a rede desta troca e autorize de novo. Nada foi enviado.',
   'Your wallet did not confirm whether it sent the transaction. FloFi keeps checking the network; do not send it again.':
     'A sua carteira não confirmou se enviou a transação. O FloFi continua a verificar a rede; não a envie de novo.',
+  'The reviewed transaction changed before your wallet was asked, so nothing was sent. Simulate again to review it.':
+    'A transação revista mudou antes de a carteira ser consultada, por isso nada foi enviado. Simule de novo para a rever.',
   'Public testnet recording is not enabled on this app instance.': 'O registo na rede de teste pública não está ativo nesta instância.', 'Live swap quote': 'Cotação atual da troca',
   'Current quote': 'Cotação atual', 'You pay': 'Paga', 'Quote expired. Simulate again.': 'A cotação expirou. Simule novamente.',
   'The swap changed. Simulate again to review the new amount.': 'A troca mudou. Simule novamente para rever o novo montante.', 'Simulate your swap first': 'Simule primeiro a troca',
