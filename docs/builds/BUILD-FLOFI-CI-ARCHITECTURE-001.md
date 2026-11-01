@@ -166,9 +166,35 @@ in every stage record and `scripts/guarded-release-browser.mjs` in every browser
 another revision and fails when the revision is unknown. The dependency stage is `Dependency security policy` in
 `REQUIRED_STAGES`.
 
-## 9. Before / after performance
+## 9. Before / after performance (measured, CircleCI)
 
-See §16 for the measured after values.
+Before: main `3769eff` (this PR's base), workflow `0a2b9073`; also main `b8126a6` (`79cb79d6`) and PR #150's final head
+(`9c6537e0`). After: this PR at `721ca03`, workflow `01ec952f` (all jobs green). Seconds are CircleCI job/step times;
+the stage values come from each job's `ci-observe.py summary`.
+
+| Metric | Before (base 3769eff) | After (721ca03) | Improvement |
+|---|---:|---:|---:|
+| Full certification (workflow wall clock) | 1830.9 s | 1387.3 s | **−24.2%** (−24.3% vs the 3-run mean 1832.7 s) |
+| Dependency installation (frozen install, mean per job) | 13.4 s (12.3 / 15.2 / 12.8) | 9.4 s (9.0 / 10.3 / 9.0) | −30% — runner variance: the install command is unchanged |
+| Dependency security verification (policy + audit + SBOM) | 15.5 s (13.4 + 1.1 + 1.1) | 19.5 s (17.5 + 1.0 + 1.1) | **+26%** (+4 s: registry signatures, advisory evidence, risk checks) |
+| Production build overhead (sum over jobs) | 280.2 s (2 builds) | 373.0 s (3 builds: 123.4 / 139.4 / 110.2) | +33% compute, off the critical path |
+| Browser certification (longest browser job) | 1764.0 s (browser-2) | 1319.1 s (browser-2) | **−25.2%** |
+| Browser stage seconds (sum) | 2773.6 s | 2554.4 s | −7.9% (run variance; same 50 profiles) |
+| Total runner compute (sum of job times) | 4116.1 s | 3869.1 s | **−6.0%** (−2.9% vs the 3-run mean 3986.2 s) |
+
+| Job | Before (base) | After |
+|---|---:|---:|
+| governance | 48.4 s | 48.5 s |
+| certification-checks | 904.4 s | 1240.9 s (now includes build 110 s + browser shard 3: 345 s) |
+| certification-browser-1 | 1389.1 s | 1249.1 s (critical 260 s, shard 1: 812 s) |
+| certification-browser-2 | 1764.0 s | 1319.1 s (shard 2: 1118 s, composition 20 s) |
+| certification (ledger) | 10.2 s | 11.5 s |
+
+The three certification jobs finished within 78 s of each other (1241–1319 s), against a projection of ~1352 s each.
+The new tool-archive cache key was cold on this run (every archive `MISS/REJECTED` → `DOWNLOAD`, then digest-verified),
+so none of the gain comes from caching. One after-run is a single sample; profile times vary ~10% between runs.
+GitHub Actions has no timing data: the repository's Actions workflows have not run since 2026-10-14 (CircleCI is the
+certification of record), so Actions parity is established by the static parity tests only.
 
 ## 10. Security regression results (Tests A–R)
 
@@ -235,9 +261,51 @@ Also verified against the live npm registry (disposable worktrees, nothing pushe
 
 See §17.
 
-## 14–16. CI evidence and measured results
+## 14. Local validation (pinned Node 24.21.0, pnpm 11.22.0)
 
-Filled in from the PR's CI runs below.
+| Gate | Result |
+| --- | --- |
+| `python3 -m unittest discover -s scripts -p 'test_governance_lite.py'` | 21 tests OK |
+| `python3 -m unittest discover -s scripts -p 'test_ci_*.py'` | 206 tests OK (27 new in `test_ci_dependency_security.py`) |
+| `python3 scripts/governance_lite.py`, `git diff --check` | PASS |
+| `python3 scripts/agent_guard.py check` | PASS (new sources and suite registered in `coverage.json`) |
+| `pnpm check` (typecheck, lint, build, schema drift, unit) | PASS — unit 511 files, 6241 tests passed, 2 skipped (pre-existing env-gated `it.skipIf` in `composition-service.test.ts` and `mode-b-service.test.ts`), 423 s |
+| `pnpm exec eslint scripts/guarded-release-browser.mjs` | PASS |
+| `dependency_security.py verify` + `ci-sbom.sh` on the real graph (live registry) | PASS, 505/505, 21 s |
+
+PostgreSQL, Anvil/fork and browser suites need the CI services; they ran only in CircleCI (§15). Local results are not
+certification.
+
+## 15. CI evidence (PR head `721ca0310824555f61ab69ea839002497812b493`)
+
+CircleCI workflow `01ec952f-5379-4632-a131-837b6cbd598a`, all green:
+
+| Status context | Result |
+| --- | --- |
+| `ci/circleci: governance` | success (48.5 s) |
+| `ci/circleci: certification-checks` | success — dependency security PASS (505 packages, 505/505 signatures, 0 advisories, 6 exceptions used), audit, SBOM (505 computed components), typecheck, lint, schema drift, unit (346 s), PostgreSQL (208 s), fork suites, build, browser shard 3 (11 profiles) |
+| `ci/circleci: certification-browser-1` | success — critical (6 profiles) then shard 1 (16 profiles) |
+| `ci/circleci: certification-browser-2` | success — shard 2 (16 profiles) then composition |
+| `ci/circleci: certification` | success — `Certification ledger: PASS (18 required stages over 3 job(s), 50 browser profiles each exactly once, all for revision 721ca0310824555f61ab69ea839002497812b493)` |
+| `Vercel` | success (the repository's automatic preview integration; no production deployment) |
+
+GitHub Actions (`Governance`, `Repository contracts and reference app`) produced no run: no Actions workflow has run
+on this repository since 2026-10-14.
+
+## 16. Acceptance checklist
+
+| Criterion | Status |
+| --- | --- |
+| Seven-day restriction removed; no hidden time-based restriction (pnpm default neutralized, governance refuses it) | Done |
+| No routine manual approval, count or graph-hash sync, or manifest maintenance for ordinary updates | Done (live `ox@1.8.12` demo: zero governance edits) |
+| Safe recent dependencies and security fixes pass immediately | Done (Tests A, C, R; live demo) |
+| Exceptions centralized, reserved for real exceptions | Done (6 migrated records, one file) |
+| Audit, integrity, licenses mandatory; corrupted archives rejected; bypasses fail; evidence traceable | Done (Tests F–L, P; live tamper demo) |
+| One canonical SBOM validator; provider parity | Done (Test M); Actions verified statically only (no Actions runs) |
+| Full test coverage and financial regressions preserved; ledger authoritative | Done (50 profiles exactly once, ledger PASS) |
+| No uncontrolled cache reuse; no new production dependencies | Done (raw archives only; no dependency added) |
+| Real baseline, critical path, before/after, no fabricated claims | Done (§1, §9) |
+| Isolated branch; tests run; PR open; nothing merged or deployed | Done (designated branch `claude/sleepy-noether-9g1cxy`; PR #151) |
 
 ## 17. Review, owner decisions
 
