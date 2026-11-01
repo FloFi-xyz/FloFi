@@ -13,6 +13,7 @@
 import { floFiMessageGate, floFiSigningGate } from '../app/flofi-wallet-action';
 import { currentFloFiPrivy, floFiPrivyWalletIssue, privyErrorCode, type PrivyReview } from '../accounts/privy-context';
 import type { SigningSummary } from './flofi-signing';
+import { verifySignedEip1559 } from './evm-signed-transaction';
 import type { FloFiWalletRequest } from './flofi-wallet-channel';
 import type { WalletResult } from '../wallet-app/protocol';
 
@@ -41,10 +42,14 @@ export async function requestThroughPrivy(request: FloFiWalletRequest): Promise<
       if (!gate.ok) throw new Error(gate.code);
       if (request.op === 'evm_sign_transaction') {
         const tx = request.tx;
+        let signed: string;
         try {
-          return { signedTransaction: await privy.signEvmTransaction(request.address, { to: tx.to, value: tx.value, data: tx.data, chainId: Number(BigInt(tx.chainId)),
-            nonce: tx.nonce, gas: tx.gas, maxFeePerGas: tx.maxFeePerGas, maxPriorityFeePerGas: tx.maxPriorityFeePerGas }, privyReview(gate.value)) };
+          signed = await privy.signEvmTransaction(request.address, { to: tx.to, value: tx.value, data: tx.data, chainId: Number(BigInt(tx.chainId)),
+            nonce: tx.nonce, gas: tx.gas, maxFeePerGas: tx.maxFeePerGas, maxPriorityFeePerGas: tx.maxPriorityFeePerGas }, privyReview(gate.value));
         } catch (cause) { throw afterPrivy(cause, 'FLOFI_WALLET_SUBMISSION_UNKNOWN'); }
+        // Only the exact approved nine fields leave this function: bytes Privy signed differently are dropped, never broadcast (the attempt's
+        // single signature is spent, so the outcome is unknown and reconciled, but nothing was submitted).
+        try { return { signedTransaction: verifySignedEip1559(tx, signed) }; } catch { throw new Error('FLOFI_WALLET_SIGNATURE_UNKNOWN'); }
       }
       try { return { signedTransaction: toBase64(await privy.signSolanaTransaction(request.address, fromBase64(request.transaction), privyReview(gate.value))) }; }
       catch (cause) { throw afterPrivy(cause, 'FLOFI_WALLET_SIGNATURE_UNKNOWN'); }

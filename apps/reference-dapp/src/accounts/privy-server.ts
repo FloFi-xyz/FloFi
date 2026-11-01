@@ -35,6 +35,11 @@ export type PrivyUser = { readonly id: string;
   readonly identities: readonly IdentityClaim[];
   /** The most recently verified sign-in method, or null when the user has none FloFi accepts (for example SMS only). */
   readonly method: SessionMethod | null;
+  /**
+   * When Privy last verified one of those identities (Unix seconds), or null. A FloFi session is "recently authenticated" from this time,
+   * not from the access token's: Privy refreshes access tokens silently, so a fresh token alone proves no new sign-in by the person.
+   */
+  readonly verifiedAt: number | null;
   readonly wallets: readonly PrivyEmbeddedWallet[] };
 /** The two calls FloFi makes to Privy (the official SDK by default; a test double in unit tests). */
 export type PrivyApi = {
@@ -91,7 +96,7 @@ const seconds = (value: unknown) => typeof value === 'number' && Number.isFinite
 const METHOD_ORDER: readonly SessionMethod[] = ['google', 'email', 'apple', 'eip155', 'solana'];
 
 /** The verified identities and embedded wallets of a Privy user object (strict: anything unexpected is ignored, never repaired). */
-export function readPrivyUser(value: unknown, userId: string): PrivyUser {
+export function readPrivyUser(value: unknown, userId: string, options: { readonly apple?: boolean } = {}): PrivyUser {
   const user = record(value);
   if (user.id !== userId || !PRIVY_USER_ID.test(userId) || !Array.isArray(user.linked_accounts)) return fail('PRIVY_RESPONSE_INVALID');
   const identities: IdentityClaim[] = [], wallets: PrivyEmbeddedWallet[] = [];
@@ -105,7 +110,9 @@ export function readPrivyUser(value: unknown, userId: string): PrivyUser {
     if (account.type === 'email') {
       const email = normalizeEmail(account.address);
       if (email) { identities.push({ kind: 'email', subject: email, label: email }); seen('email', at); }
-    } else if (account.type === 'google_oauth' || account.type === 'apple_oauth') {
+    } else if (account.type === 'google_oauth' || (account.type === 'apple_oauth' && options.apple === true)) {
+      // Apple counts only once this deployment enabled it (FloFi's own Apple Services ID in Privy): otherwise an Apple login enabled in the
+      // Privy dashboard alone would create a second account for a person whose earlier Apple sign-in has another subject.
       const kind = account.type === 'google_oauth' ? 'google' : 'apple';
       if (typeof account.subject === 'string' && SUBJECT.test(account.subject)) {
         identities.push({ kind, subject: account.subject, label: normalizeEmail(account.email) });
@@ -125,7 +132,7 @@ export function readPrivyUser(value: unknown, userId: string): PrivyUser {
       }
     }
   }
-  return { id: userId, identities, method, wallets };
+  return { id: userId, identities, method, wallets, verifiedAt: method === null || latest <= 0 ? null : latest };
 }
 
 export function createPrivyServer(config: PrivyServerConfig, api: PrivyApi = officialPrivyApi(config), now = () => Date.now()) {
@@ -155,7 +162,7 @@ export function createPrivyServer(config: PrivyServerConfig, api: PrivyApi = off
         const status = record(error).status;
         throw new Error(status === 404 ? 'PRIVY_USER_NOT_FOUND' : status === 401 || status === 403 ? 'PRIVY_NOT_AUTHORIZED' : 'PRIVY_UNAVAILABLE', { cause: error });
       }
-      return readPrivyUser(value, userId);
+      return readPrivyUser(value, userId, { apple: config.apple });
     },
   };
 }

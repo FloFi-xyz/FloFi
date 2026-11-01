@@ -94,8 +94,9 @@ describe('proxy routing by host', () => {
     for (const path of ['/wallet', '/wallet/callback/google', '/api/wallet/session']) expect((await route(`https://app.flofi.example${path}`)).status, path).toBe(404);
     const login = await route('https://app.flofi.example/login');
     expect(login.headers.get('content-security-policy')).toMatch(/'unsafe-eval'/);
+    // BUILD-FLOFI-PRIVY-UX-001: product pages host the Privy signer, so they run only FloFi's own scripts (account-csp.ts productPagePolicy).
     const app = await route('https://app.flofi.example/app');
-    expect(app.headers.get('content-security-policy')).toBeNull();
-    expect((await route('https://app.flofi.example/mcp/approve')).headers.get('content-security-policy')).toMatch(/^connect-src 'self'; frame-ancestors /);
+    expect(app.headers.get('content-security-policy')).toMatch(/^script-src 'self' 'nonce-[A-Za-z0-9+/]{22}==' 'unsafe-eval'; /);
+    expect((await route('https://app.flofi.example/mcp/approve')).headers.get('content-security-policy')).toMatch(/^script-src 'self' 'nonce-.*; frame-ancestors /);
   });
 });

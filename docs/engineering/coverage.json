@@ -306,6 +306,10 @@
       "path": "apps/reference-dapp/src/server/base-swap.test.ts",
       "stage": "unit"
     },
+    "app.server.card-origin": {
+      "path": "apps/reference-dapp/src/server/card-origin.test.ts",
+      "stage": "unit"
+    },
     "app.server.channel-copilot-toolkit": {
       "path": "apps/reference-dapp/src/server/channel-copilot-toolkit.test.ts",
       "stage": "unit"
@@ -384,6 +388,10 @@
     },
     "app.wallet.eip1193": {
       "path": "apps/reference-dapp/src/wallet/eip1193.test.ts",
+      "stage": "unit"
+    },
+    "app.wallet.evm-signed-transaction": {
+      "path": "apps/reference-dapp/src/wallet/evm-signed-transaction.test.ts",
       "stage": "unit"
     },
     "app.wallet.solana-wallet": {
@@ -2489,6 +2497,9 @@
       ],
       "sharedFinancialCore": false,
       "sources": [
+        "apps/reference-dapp/src/app/(card)/card-entry/page.tsx",
+        "apps/reference-dapp/src/components/card-entry-frame.tsx",
+        "apps/reference-dapp/src/components/card-frame-protocol.ts",
         "apps/reference-dapp/src/components/card-secure-fields.ts",
         "apps/reference-dapp/src/components/delegation-browser.ts",
         "apps/reference-dapp/src/components/delegation-credentials.tsx"
@@ -2497,6 +2508,7 @@
         "action-registry.engineering-regression",
         "app.delegation.adversarial.pg",
         "app.mcp.oauth.foundation",
+        "app.server.card-origin",
         "app.state.review-authorization",
         "cloud-runtime.tenancy.pg"
       ],
@@ -5270,6 +5282,7 @@
       ],
       "sharedFinancialCore": false,
       "sources": [
+        "apps/reference-dapp/src/server/card-origin.ts",
         "apps/reference-dapp/src/server/card-provider.ts",
         "apps/reference-dapp/src/server/mercado-pago-card-provider.ts",
         "apps/reference-dapp/src/server/payment-adapter.ts",
@@ -5283,6 +5296,7 @@
       ],
       "suites": [
         "app.backend.pix-payment-cloud.pg",
+        "app.server.card-origin",
         "app.server.mercado-pago-card-provider",
         "app.server.payment-webhook",
         "app.server.universal-router.fee-obligation",
@@ -6187,6 +6201,7 @@
       "sources": [
         "apps/reference-dapp/playwright.auth-wallets.config.ts",
         "apps/reference-dapp/src/accounts/account-csp.ts",
+        "apps/reference-dapp/src/accounts/signer-pages.ts",
         "apps/reference-dapp/src/accounts/account-host.ts",
         "apps/reference-dapp/src/accounts/account-model.ts",
         "apps/reference-dapp/src/accounts/account-service.ts",
@@ -6255,6 +6270,7 @@
         "apps/reference-dapp/src/wallet-app/wallet-messages.ts",
         "apps/reference-dapp/src/wallet-app/wallet-shell.tsx",
         "apps/reference-dapp/src/wallet-app/wallet.module.css",
+        "apps/reference-dapp/src/wallet/evm-signed-transaction.ts",
         "apps/reference-dapp/src/wallet/flofi-evm-provider.ts",
         "apps/reference-dapp/src/wallet/flofi-privy-signer.ts",
         "apps/reference-dapp/src/wallet/flofi-signing.ts",
@@ -6299,6 +6315,7 @@
         "app.wallet-app.wallet-app",
         "app.wallet-app.wallet-i18n",
         "app.wallet-app.wallet-render",
+        "app.wallet.evm-signed-transaction",
         "app.wallet.flofi-discovery",
         "app.wallet.flofi-evm-provider",
         "app.wallet.flofi-privy-signer",
@@ -6311,8 +6328,8 @@
       ],
       "gaps": [
         "Live Privy is unverified: the suites verify real ES256 access tokens with the official @privy-io/node SDK against a local key, and the browser suite uses the MOCKED loopback Privy stand-in (e2e/privy-emulator.ts). They certify FloFi's verification, linking, isolation and signing-gate rules, not Privy itself; docs/deploy/LIVE-VERIFICATION-PRIVY.md is the owner's live check.",
-        "Privy's embedded wallet runs on the product origin: /app has no script-src policy, so injected script could ask Privy to sign outside FloFi's reviewed-attempt gate (Privy's confirmation screen still shows). Recommended follow-up: a nonce script-src policy for /app.",
-        "Legacy FloFi Wallet (Turnkey) is export-only; its unlock and export remain covered by the wallet-app and wallet-relay suites with the in-process provider stand-in. Whether production holds Turnkey wallets is unknown until the read-only check in docs/deploy/RELEASE-PRIVY-0019.md runs."
+        "Privy's embedded wallet trusts the whole product origin. Signer pages (/login, /onboarding*, /app*, /approve, /connections, /mcp/approve, /__engineering) carry a nonce script-src policy and the signer mounts only in documents loaded on them, but other same-origin HTML (/, /docs, /privacy, /admin, error pages) has no script-src policy; a script running there could open a signer page and drive Privy outside FloFi's reviewed-attempt gate (Privy's confirmation screen still shows). Follow-up: a default-deny nonce policy for all HTML on the product host. Browser extensions with page access are outside what CSP covers.",
+        "Legacy FloFi Wallet (Turnkey) is export-only; its unlock and export remain covered by the wallet-app and wallet-relay suites with the in-process provider stand-in. The owner's read-only production check (docs/deploy/RELEASE-PRIVY-0019.md, 2026-11-01) found 0 Turnkey wallets and 0 Turnkey organizations, so no live account depends on this path."
       ]
     }
   ],

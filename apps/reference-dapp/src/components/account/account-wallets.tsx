@@ -181,7 +181,8 @@ function DeleteAccount({ state }: { state: AccountState }) {
     {confirming ? <>
       <p>{t('Delete your FloFi account? Your sign-in identities, sessions and saved wallet addresses are deleted from FloFi.')}{' '}
         {t(managed ? 'Wallets created or imported in FloFi are not deleted: they stay with their provider and their funds are unchanged. Export them first if you want to keep using them elsewhere.'
-          : 'Your wallets and their funds are not affected.')}</p>
+          : 'Your wallets and their funds are not affected.')}{' '}
+        {state.account?.privy ? t('Your sign-in and wallets at our wallet provider, Privy, are not deleted by this. To have Privy delete them too, export your wallets first, then ask FloFi (see Privacy).') : null}</p>
       <div className="workspace-wallet-actions"><button type="button" className="workspace-action workspace-action-danger" onClick={() => void remove()}>{t('Delete account')}</button>
         <button type="button" className="workspace-action" onClick={() => { setConfirming(false); setError(null); }}>{t('Cancel')}</button></div>
       {error === 'ACCOUNT_REAUTHENTICATION_REQUIRED' ? <p className="workspace-inline-error" role="alert">{t(accountMessage(error))}{' '}

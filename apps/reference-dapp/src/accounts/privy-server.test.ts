@@ -93,12 +93,19 @@ describe('Privy users (read with the app secret, never from the browser)', () =>
       { kind: 'email', subject: 'ana@example.com', label: 'ana@example.com' },
       { kind: 'eip155', subject: '0xabcdef0123456789abcdef0123456789abcdef01', label: null },
     ]);
-    // The most recently verified sign-in method (the email code, latest_verified_at 30).
+    // The most recently verified sign-in method (the email code, latest_verified_at 30), and when Privy verified it.
     expect(result.method).toBe('email');
+    expect(result.verifiedAt).toBe(30);
     expect(result.wallets).toEqual([
       { ecosystem: 'evm', address: '0x1111111111111111111111111111111111111111', imported: false, delegated: false, walletId: 'privywalletevm0000000001' },
       { ecosystem: 'solana', address: '7EcDhSYGxXyscszYEp35KHN8vvw3svAuLKTzXwCFLtV', imported: true, delegated: false, walletId: 'privywalletsol0000000001' },
     ]);
+  });
+  it('counts an Apple identity only once this deployment enabled Apple (FloFi’s own Apple Services ID in Privy)', () => {
+    const apple = { type: 'apple_oauth', subject: '001234.abcdef.0123', email: 'ana@privaterelay.appleid.com', verified_at: 40, latest_verified_at: 40 };
+    expect(readPrivyUser(user([apple, google]), USER)).toMatchObject({ identities: [{ kind: 'google' }], method: 'google', verifiedAt: 20 });
+    expect(readPrivyUser(user([apple, google]), USER, { apple: true })).toMatchObject({ identities: [{ kind: 'apple' }, { kind: 'google' }], method: 'apple', verifiedAt: 40 });
+    expect(readPrivyUser(user([apple]), USER)).toEqual({ id: USER, identities: [], method: null, wallets: [], verifiedAt: null });
   });
   it('maps provider failures to stable codes', async () => {
     await expect(server(() => json({ error: 'nope' }, 404)).privy.user(USER)).rejects.toThrow('PRIVY_USER_NOT_FOUND');
@@ -117,6 +124,6 @@ describe('Privy users (read with the app secret, never from the browser)', () =>
       { type: 'phone', number: '+15555550123', verified_at: 99, latest_verified_at: 99 },
       { ...embeddedEvm, chain_type: 'bitcoin-segwit' },
     ]), USER);
-    expect(parsed).toEqual({ id: USER, identities: [], method: null, wallets: [] });
+    expect(parsed).toEqual({ id: USER, identities: [], method: null, wallets: [], verifiedAt: null });
   });
 });

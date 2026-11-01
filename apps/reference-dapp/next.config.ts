@@ -26,20 +26,23 @@ const config: NextConfig = {
     '/approve': ['./e2e/copilot/replay.json', './e2e/copilot/replay-v2.json', './e2e/observations/base-recorded-observations.json'],
     '/mcp/approve': ['./e2e/copilot/replay.json', './e2e/copilot/replay-v2.json', './e2e/observations/base-recorded-observations.json'],
   },
-  // The browser may connect only to its own origin (read-only Base reads run on the local server) and, for Credentials → Add card,
-  // to the three Mercado Pago origins its official Secure Fields SDK needs: its API, its static secure-fields host and the
-  // secure-fields iframe origin. Card data is typed only inside those cross-origin iframes.
+  // The browser may connect only to its own origin (read-only Base reads run on the local server) and Privy. Credentials → Add card frames
+  // the card origin, where Mercado Pago's Secure Fields SDK talks to Mercado Pago (src/server/card-origin.ts); card data is typed only
+  // inside the provider's own cross-origin iframes there.
   async headers() {
     // BUILD-MCP-002: the approval and connections pages hold a handoff secret or account choices: never framed, cached, indexed or referred.
     const sensitive = [{ key: 'X-Frame-Options', value: 'DENY' }, { key: 'Content-Security-Policy', value: "connect-src 'self'; frame-ancestors 'none'" },
       { key: 'Referrer-Policy', value: 'no-referrer' }, { key: 'X-Robots-Tag', value: 'noindex, nofollow' }, { key: 'Cache-Control', value: 'no-store' }];
-    // BUILD-FLOFI-PRIVY-UX-001: plus Privy's API, wallet-frame and RPC origins (src/accounts/privy-hosts.ts), for sign-in and signing.
-    const cardProvider = `https://api.mercadopago.com https://api-static.mercadopago.com https://secure-fields.mercadopago.com ${PRIVY_CONNECT_SOURCES.join(' ')}`;
-    return [{ source: '/:path*', headers: [{ key: 'Content-Security-Policy', value: `connect-src 'self' ${cardProvider}` }] },
+    // BUILD-FLOFI-PRIVY-UX-001: Privy's API, wallet-frame and RPC origins (src/accounts/privy-hosts.ts), for sign-in and signing. Mercado Pago
+    // is gone from this origin: card entry runs only on the card origin (src/server/card-origin.ts). Pages hosting the Privy signer get the
+    // proxy's complete nonce policy instead (src/accounts/account-csp.ts), which replaces this one. `nosniff` everywhere: with a
+    // `script-src 'self'` policy no same-origin response that is not JavaScript can ever run as a script.
+    const privyConnect = PRIVY_CONNECT_SOURCES.join(' ');
+    return [{ source: '/:path*', headers: [{ key: 'Content-Security-Policy', value: `connect-src 'self' ${privyConnect}` }, { key: 'X-Content-Type-Options', value: 'nosniff' }] },
       { source: '/approve', headers: sensitive }, { source: '/connections', headers: sensitive },
       // BUILD-FLOFI-AUTH-WALLETS-001: sign-in, wallet onboarding and Credentials (wallet import/export) are never framed by another site.
       ...['/login', '/onboarding', '/onboarding/:path*', '/app/credentials'].map(source => ({ source, headers: [{ key: 'X-Frame-Options', value: 'DENY' },
-        { key: 'Content-Security-Policy', value: `connect-src 'self' ${cardProvider}; frame-ancestors 'none'` }, { key: 'Referrer-Policy', value: 'no-referrer' },
+        { key: 'Content-Security-Policy', value: `connect-src 'self' ${privyConnect}; frame-ancestors 'none'` }, { key: 'Referrer-Policy', value: 'no-referrer' },
         // BUILD-FLOFI-PRIVY-UX-001: never kept in a cache, so Back after Disconnect cannot show a signed-in page again.
         { key: 'Cache-Control', value: 'no-store' }] })),
       // BUILD-ADMIN-001: the private console and its APIs are never framed, cached, indexed or referred either.

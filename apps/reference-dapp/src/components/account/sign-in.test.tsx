@@ -32,7 +32,7 @@ describe('sign-in availability', () => {
     expect(html).toContain('Accounts aren&#x27;t available on this deployment yet.');
     expect(html).toMatch(/href="\/app">Continue to FloFi<\/a>/);
     expect(html).toMatch(/href="\/app">Explore the builder without an account<\/a>/);
-    expect(html).not.toContain('FloFi stores your sign-in identity');
+    expect(html).not.toContain('FloFi stores your sign-in identities');
   });
 
   it('with accounts but without Privy, sign-in says it is not configured and disables every method', () => {
@@ -46,7 +46,7 @@ describe('sign-in availability', () => {
     const html = render(state(all));
     expect(methods(html)).toEqual({ Google: { disabled: false, title: null }, Email: { disabled: false, title: null }, 'Web3 Wallet': { disabled: false, title: null } });
     expect(html).not.toContain('not configured on this deployment');
-    expect(html).toContain('FloFi stores your sign-in identity');
+    expect(html).toContain('FloFi stores your sign-in identities');
     expect(methods(render(state({ ...all, apple: true }))).Apple).toEqual({ disabled: false, title: null });
   });
 

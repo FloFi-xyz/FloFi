@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-/* global window, document, location, localStorage, fetch, btoa, atob, TextDecoder */
+/* global window, document, location, localStorage, fetch, btoa, atob, TextDecoder, setTimeout */
 /**
  * BUILD-FLOFI-PRIVY-UX-001 — MOCKED, LOOPBACK ONLY: the browser half of the Privy stand-in (e2e/privy-emulator.ts), injected by the browser
  * suite into the page (`addInitScript`). It implements FloFi's `PrivyDriver` (src/accounts/privy-client.tsx), which FloFi uses only when its
@@ -13,6 +13,9 @@
   const state = { ready: false, authenticated: false, userId: null, embedded: [] };
   let snapshot = Object.freeze({ ...state, embedded: Object.freeze([]) });
   const listeners = new Set(), logins = new Set(), errors = new Set();
+  // Like FloFi's bridge, a login event with no listener yet is kept for the first one (Privy reports it while it initializes).
+  let pendingLogin = null;
+  const emitLogin = event => { if (!logins.size) { pendingLogin = event; return; } for (const listener of [...logins]) listener(event); };
   let flofi = null;
   const token = () => { try { return localStorage.getItem(KEY); } catch { return null; } };
   const publish = () => { snapshot = Object.freeze({ ...state, embedded: Object.freeze(state.embedded.map(wallet => Object.freeze({ ...wallet }))) }); for (const listener of [...listeners]) listener(); };
@@ -28,7 +31,7 @@
     try {
       const { token: value, user } = await call('login', input);
       localStorage.setItem(KEY, value); signedIn(user);
-      for (const listener of [...logins]) listener({ wasAlreadyAuthenticated: false });
+      emitLogin({ wasAlreadyAuthenticated: false });
     } catch (error) { for (const listener of [...errors]) listener('PRIVY_SIGN_IN_FAILED'); throw error; }
   }
   const identity = () => window.__FLOFI_PRIVY_E2E_IDENTITY__ || {};
@@ -58,7 +61,11 @@
     attachFloFi(value) { flofi = value; },
     get flofi() { return flofi; },
     getAccessToken: async () => token(),
-    onLogin(listener) { logins.add(listener); return () => logins.delete(listener); },
+    onLogin(listener) {
+      logins.add(listener);
+      if (pendingLogin) { const event = pendingLogin; pendingLogin = null; setTimeout(() => { if (logins.has(listener)) listener(event); }, 0); }
+      return () => logins.delete(listener);
+    },
     onLoginError(listener) { errors.add(listener); return () => errors.delete(listener); },
     async loginWithOAuth(provider) {
       if (provider !== 'google' || !identity().google) throw new Error('OAuth sign-in failed');
@@ -100,5 +107,9 @@
     },
   };
   // Like Privy's SDK, the session left in this browser is restored on load; FloFi decides whether to use it.
-  void refresh().catch(() => { try { localStorage.removeItem(KEY); } catch { /* ignore */ } }).finally(() => { state.ready = true; publish(); });
+  // Like Privy's login `onComplete`, a session that already existed when the page loaded is reported once, as `wasAlreadyAuthenticated`.
+  void refresh().catch(() => { try { localStorage.removeItem(KEY); } catch { /* ignore */ } }).finally(() => {
+    state.ready = true; publish();
+    if (state.authenticated) setTimeout(() => emitLogin({ wasAlreadyAuthenticated: true }), 0);
+  });
 })();

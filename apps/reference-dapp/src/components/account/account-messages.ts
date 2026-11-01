@@ -14,6 +14,7 @@ const MESSAGES: Readonly<Record<string, string>> = {
   ACCOUNT_WALLET_IS_FLOFI_WALLET: 'This address is already one of your FloFi wallets, so it is not added again as an external wallet.',
   ACCOUNT_WALLET_MANAGED_KEPT: 'Wallets FloFi keeps for you stay in your account. Export one if you want to use it elsewhere.',
   ACCOUNT_WALLET_LABEL_INVALID: 'Use 1–40 characters.',
+  ACCOUNT_WALLET_LABEL_KEY_SHAPED: 'That name looks like part of a key. Choose a different name; nothing was saved.',
   ACCOUNT_WALLET_SAVE_FAILED: 'FloFi could not save that wallet to your account yet. Your wallet is safe with the provider; choose Check again.',
   ACCOUNT_IDENTITY_CONFLICT: 'This sign-in matches more than one FloFi account, so FloFi did not sign you in. Sign in with the method you used before.',
   ACCOUNT_PRIVY_USER_MISMATCH: 'This FloFi account belongs to another wallet-provider user. Nothing was signed in or changed.',

@@ -2,7 +2,7 @@
 // The Add card server action is the only FloFi server boundary card entry crosses: it takes the provider's one-time token and
 // the email, and nothing else. Fake provider endpoint and published test-card digits only: no network, no card, no charge.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { addProviderCard } from './card-action';
+import { addProviderCard, cardProviderStatus } from './card-action';
 
 const PAN = '4235647728025682', TOKEN = 'ff8080814c11e237014c1ff593b57b4d', EMAIL = 'test_payer_12345@testuser.com';
 let calls: { url: string; body: unknown; authorization: string | null }[];
@@ -40,6 +40,21 @@ describe('Add card server action', () => {
   it('fails clearly without a configured provider', async () => {
     vi.stubEnv('MERCADO_PAGO_ENVIRONMENT', undefined); vi.stubEnv('MERCADO_PAGO_PUBLIC_KEY', undefined); vi.stubEnv('MERCADO_PAGO_ACCESS_TOKEN', undefined);
     expect(await addProviderCard({ token: TOKEN, email: EMAIL })).toEqual({ ok: false, code: 'CARD_TOKENIZATION_PROVIDER_REQUIRED' });
+    expect(calls).toEqual([]);
+  });
+});
+
+describe('where card entry runs (BUILD-FLOFI-PRIVY-UX-001)', () => {
+  it('offers card entry only on a configured card origin, and never hands the product the provider’s client configuration', async () => {
+    vi.stubEnv('FLOFI_PUBLIC_ORIGIN', 'https://app.flofi.example');
+    vi.stubEnv('FLOFI_CARD_ORIGIN', '');
+    expect(await cardProviderStatus()).toMatchObject({ available: false, code: 'CARD_ORIGIN_REQUIRED' });
+    vi.stubEnv('FLOFI_CARD_ORIGIN', 'https://cards.flofi.example');
+    const status = await cardProviderStatus();
+    expect(status).toEqual({ available: true, provider: { id: 'mercado_pago', name: 'Mercado Pago' }, entry: 'https://cards.flofi.example/card-entry' });
+    expect(JSON.stringify(status)).not.toContain('TEST-public-0123456789');
+    vi.stubEnv('FLOFI_CARD_ORIGIN', 'https://app.flofi.example');
+    expect(await cardProviderStatus()).toMatchObject({ available: false, code: 'CARD_ORIGIN_REQUIRED' });
     expect(calls).toEqual([]);
   });
 });

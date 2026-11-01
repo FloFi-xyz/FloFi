@@ -109,7 +109,9 @@ test('the landing opens sign-in with exactly Google, Email and Web3 Wallet throu
   await shot(page, '01-login-desktop-dark');
   // The account pages' nonce policy allows Privy's API and wallet frame, and nothing else outside FloFi.
   const csp = (await request.get('/login')).headers()['content-security-policy']!;
-  expect(csp).toMatch(/script-src 'self' 'nonce-[A-Za-z0-9+/]{22}==' 'strict-dynamic'/);
+  // Only FloFi's own scripts (BUILD-FLOFI-PRIVY-UX-001): a nonce and 'self', no 'strict-dynamic', no other host (no bot check declared here).
+  expect(csp).toMatch(/script-src 'self' 'nonce-[A-Za-z0-9+/]{22}==' 'unsafe-eval'; /);
+  expect(csp).not.toContain('strict-dynamic');
   expect(csp).toContain("connect-src 'self' https://auth.privy.io https://*.rpc.privy.systems wss://*.rpc.privy.systems");
   expect(csp).toContain('frame-src https://auth.privy.io');
   expect(csp).not.toMatch(/walletconnect|turnkey/i);
@@ -182,7 +184,12 @@ test('Import key: a dedicated FloFi screen per ecosystem; the key goes only to P
   await expect(page.getByRole('heading', { name: 'Import your EVM wallet' })).toBeVisible();
   const form = page.getByRole('form', { name: 'Import EVM wallet' });
   await expect(form.getByLabel('Wallet name')).toHaveValue('Imported EVM wallet');
-  await expect(form.getByLabel('Private key')).toHaveAttribute('type', 'password');
+  // A masked text field (never a password field a browser offers to save), with autocomplete off and nothing that names it for a form.
+  const keyField = form.getByLabel('Private key');
+  await expect(keyField).toHaveAttribute('type', 'text');
+  await expect(keyField).toHaveAttribute('autocomplete', 'off');
+  await expect(keyField).not.toHaveAttribute('name');
+  expect(await keyField.evaluate(element => getComputedStyle(element).getPropertyValue('-webkit-text-security'))).toBe('disc');
   await shot(page, '06-import-evm');
   // A malformed key is refused before Privy is asked.
   await form.getByLabel('Private key').fill('not a key');
@@ -317,6 +324,15 @@ test('a Privy session left in the browser is never reused by /login on its own',
   await expect(page.getByRole('group', { name: 'Sign-in methods' })).toBeVisible();
   await expect.poll(async () => privyAccepts(token)).toBe(false);
   expect(await accountCookie(context)).toBeUndefined();
+  // Not even through a URL that looks like Privy's OAuth return: a session that already existed is ended, never signed in.
+  await googleSignIn(page);
+  await expect(page).toHaveURL(/\/(app|onboarding\/wallets)$/);
+  const second = await privyToken(page);
+  await context.clearCookies({ name: 'flofi_account_session' });
+  await page.goto('/login?privy_oauth_code=e2e-crafted&privy_oauth_state=e2e-crafted');
+  await expect.poll(async () => privyAccepts(second)).toBe(false);
+  await expect(page.getByRole('group', { name: 'Sign-in methods' })).toBeVisible();
+  expect(await accountCookie(context)).toBeUndefined();
 });
 
 // --- Privy-backed signing behind FloFi's reviewed-attempt gate (MOCKED loopback mainnet harnesses) ---
@@ -390,6 +406,18 @@ test('a reviewed Solana mainnet swap (Jupiter) is signed by the person’s Privy
   const { unsignedTransaction } = await service.begin(runId, owner, run.review.workflow);
   const before = await privyStats();
 
+  // Refused before Privy is asked (nothing claimed, nothing signed): one changed byte, the exact bytes without FloFi's binding, Devnet.
+  const tampered = Buffer.from(unsignedTransaction, 'base64');
+  tampered[tampered.length - 1] = tampered[tampered.length - 1]! ^ 0x01;
+  for (const [request, code] of [
+    [{ op: 'solana_sign_transaction', address: owner, chain: 'solana:mainnet', transaction: tampered.toString('base64'), signing: { flow: 'jupiter-swap', runId } }, /^FLOFI_WALLET_NO_MATCHING_REVIEW$/],
+    [{ op: 'solana_sign_transaction', address: owner, chain: 'solana:mainnet', transaction: unsignedTransaction }, /^FLOFI_WALLET_REQUEST_INVALID$/],
+    [{ op: 'solana_sign_transaction', address: owner, chain: 'solana:devnet', transaction: unsignedTransaction, signing: { flow: 'jupiter-swap', runId } },
+      /^FLOFI_WALLET_(REQUEST_INVALID|NETWORK_UNSUPPORTED|NO_MATCHING_REVIEW)$/],
+  ] as const) expect((await requestThroughFloFi(page, request)).code, JSON.stringify(request.chain)).toMatch(code);
+  await expect(privyDialog(page)).toHaveCount(0);
+  expect((await privyStats()).signatures).toBe(before.signatures);
+
   const answered = requestThroughFloFi(page, { op: 'solana_sign_transaction', address: owner, chain: 'solana:mainnet', transaction: unsignedTransaction,
     signing: { flow: 'jupiter-swap', runId } });
   // Privy's confirmation shows FloFi's server summary of the reviewed attempt (built from its own Review), and signs only on Approve.
@@ -404,6 +432,7 @@ test('a reviewed Solana mainnet swap (Jupiter) is signed by the person’s Privy
   const answer = await answered;
   expect(answer.ok).toBe(true);
   const signed = Buffer.from(answer.result!.signedTransaction!, 'base64'), unsigned = Buffer.from(unsignedTransaction, 'base64');
+  expect(signed.length).toBe(unsigned.length);
   expect(signed.subarray(65).equals(unsigned.subarray(65))).toBe(true);
   expect(signed.subarray(1, 65).some(byte => byte !== 0)).toBe(true);
   expect(await jupiterControl({ action: 'sent' })).toBe(0);
@@ -471,7 +500,9 @@ test('a reviewed Base mainnet transfer: a test network or other bytes are refuse
   const answer = await answered;
   expect(answer.ok).toBe(true);
   const raw = answer.result!.signedTransaction!, decoded = decodeSignedEip1559(raw)!;
-  expect(decoded.tx).toMatchObject({ from: owner, chainId: 8453n, value: 10n ** 15n });
+  // Exactly the nine fields FloFi's gate approved (the signer drops anything else before it returns), signed by the owner.
+  expect(decoded.tx).toEqual({ from: owner, to: tx2.to.toLowerCase(), value: BigInt(tx2.value), data: tx2.data.toLowerCase(), chainId: 8453n, nonce: BigInt(tx2.nonce),
+    gas: BigInt(tx2.gas), maxFeePerGas: BigInt(tx2.maxFeePerGas), maxPriorityFeePerGas: BigInt(tx2.maxPriorityFeePerGas) });
   const database = db();
   try {
     const store = createAccountStore(database, 'default'), accountId = (await store.walletHolder('evm', owner))!;
@@ -480,6 +511,8 @@ test('a reviewed Base mainnet transfer: a test network or other bytes are refuse
     expect(resolved).toMatchObject({ ok: true, value: { owner, evm: { chainId: 8453 } } });
     const match = (resolved as Extract<typeof resolved, { ok: true }>).value;
     expect(await claimAttempt(store, 'broadcast', match.attempt, match.expiresAtMs)).toBe(true);
+    // One broadcast per reviewed attempt.
+    expect(await claimAttempt(store, 'broadcast', match.attempt, match.expiresAtMs)).toBe(false);
     expect(await managedEvm().broadcast('0x2105', raw.toLowerCase(), expectedBroadcast(decoded.tx, decoded.hash))).toEqual({ kind: 'HASH', hash: decoded.hash });
   } finally { await database.close(); }
   await service.report(next, { kind: 'HASH', hash: decoded.hash });

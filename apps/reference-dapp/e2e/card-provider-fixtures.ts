@@ -62,7 +62,8 @@ export async function installMercadoPagoSdkStandIn(page: Page): Promise<string[]
 export type HarnessRequest = { readonly method: string; readonly path: string; readonly authorization: string; readonly body: string };
 export async function resetCardHarness(): Promise<void> { await fetch(`${CARD_HARNESS}/__harness/reset`, { method: 'POST' }); }
 export async function cardHarnessRequests(): Promise<HarnessRequest[]> { return (await fetch(`${CARD_HARNESS}/__harness/requests`)).json() as Promise<HarnessRequest[]>; }
-/** Types a value into one of the stand-in's secure-field iframes (the real ones are cross-origin and reachable only by the user). */
+/** Types a value into one of the stand-in's secure-field iframes (the real ones are cross-origin and reachable only by the user), inside
+ * the card origin's entry frame (BUILD-FLOFI-PRIVY-UX-001). */
 export async function fillSecureField(page: Page, type: 'cardNumber' | 'expirationDate' | 'securityCode', value: string): Promise<void> {
-  await page.frameLocator(`iframe[data-mp-field="${type}"]`).locator('input').fill(value);
+  await page.frameLocator('iframe.card-entry-frame').frameLocator(`iframe[data-mp-field="${type}"]`).locator('input').fill(value);
 }

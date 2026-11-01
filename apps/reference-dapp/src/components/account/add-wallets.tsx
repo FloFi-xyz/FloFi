@@ -131,7 +131,7 @@ export function AddWallets({ state }: { state: AccountState }) {
   return <AccountShell showcase="wallets" start>
     <p className={styles.crumbs}><a href="/app/credentials">{t('Account')}</a> / <span aria-current="page">{t('Add wallets')}</span></p>
     <h1 className={styles.heading} style={{ marginTop: 28 }}>{t('Add your wallets')}</h1>
-    <p className={`${styles.lead} ${styles.center}`} style={{ textAlign: 'center' }}>{t('Create a new wallet or import one you already have. Keys are created and kept by our wallet provider, Privy — FloFi never sees or stores them.')}</p>
+    <p className={`${styles.lead} ${styles.center}`} style={{ textAlign: 'center' }}>{t('Create a new wallet or import one you already have. Keys are created and kept by our wallet provider, Privy — FloFi’s servers never receive or store them.')}</p>
     {readiness === 'not-configured' && <div className={styles.banner} role="status"><strong>{t("Creating and importing wallets isn't available on this deployment yet.")}</strong>
       <p>{t('You can still connect MetaMask, Phantom or Solflare in Credentials and use them with FloFi.')}</p></div>}
     {readiness === 'connecting' && <p className={styles.status} role="status">{t('Connecting to your wallet provider…')}</p>}

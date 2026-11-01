@@ -163,8 +163,8 @@ export const portugueseAccounts: Readonly<Record<string, string>> = {
   'Your wallets and their funds are not affected.': 'Suas carteiras e os fundos não são afetados.',
   'created: {0}': 'criada: {0}', 'imported: {0}': 'importada: {0}', 'Newly created': 'Recém-criada', 'Newly imported': 'Recém-importada',
   'Skip without saving these wallets': 'Pular sem salvar estas carteiras', 'Continue to FloFi': 'Continuar para o FloFi',
-  'FloFi stores your sign-in identity (email address or provider ID) and the public addresses of wallets you save, never a key. You can delete your account in Credentials.':
-    'O FloFi guarda sua identidade de login (email ou ID do provedor) e os endereços públicos das carteiras que você salvar, nunca uma chave. Você pode excluir sua conta em Credenciais.',
+  'FloFi stores your sign-in identities (email address or provider ID, as verified by Privy) and the public addresses of your FloFi wallets and of wallets you link, never a key. You can delete your account in Credentials.':
+    'O FloFi guarda suas identidades de login (email ou ID do provedor, verificados pela Privy) e os endereços públicos das suas carteiras FloFi e das carteiras que você vincular, nunca uma chave. Você pode excluir sua conta em Credenciais.',
   'FloFi account': 'Conta FloFi', 'Use 1–40 characters.': 'Use de 1 a 40 caracteres.',
   'That code expired or was tried too many times. Request a new one.': 'Esse código expirou ou teve tentativas demais. Peça um novo.',
   'Too many codes were requested for this address. Wait a while, then try again.': 'Foram pedidos códigos demais para este endereço. Aguarde um pouco e tente novamente.',

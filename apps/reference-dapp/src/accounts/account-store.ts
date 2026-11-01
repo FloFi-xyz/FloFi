@@ -9,7 +9,7 @@
  */
 import type { Database, Queryable } from '@defi-workflow-engine/cloud-runtime';
 import { accountWalletId, ACCOUNT_ID, canonicalAddress, exportOf, isManagedProvider, LEGACY_MANAGED_PROVIDER, MANAGED_PROVIDER, MANAGED_PROVIDER_NAME, PRIVY_USER_ID,
-  readAccountWallet, validProvider,
+  readAccountWallet, validProvider, writableWalletLabel,
   walletLabel, type AccountIdentity, type AccountWallet, type IdentityKind, type ManagedLogin, type Onboarding, type SessionMethod, type WalletExport,
   type WalletOrigin } from './account-model.ts';
 import { ACCOUNT_SESSION_TTL_SECONDS, newAccountId, newSessionId, type AccountSessionToken } from './account-session.ts';
@@ -50,15 +50,21 @@ function walletOf(row: WalletRow): AccountWallet | null {
     providerName: row.provider_name, export: EXPORT_FROM_SQL[row.export] ?? 'invalid', label: row.label, addedAt: iso(row.created_at) });
 }
 /** What a verified Privy sign-in claims: the Privy user, plus the Google/Apple/email/external-wallet identities Privy verified for it. */
-export type PrivySignIn = { readonly privyUser: string; readonly identities: readonly IdentityClaim[]; readonly method: SessionMethod };
+export type PrivySignIn = { readonly privyUser: string; readonly identities: readonly IdentityClaim[]; readonly method: SessionMethod;
+  /** When the person last verified an identity at Privy (Unix seconds); the session's authentication time, never later than now. */
+  readonly verifiedAt?: number | null };
 
 export function createAccountStore(db: Database, tenantId: string) {
-  async function sessionRow(tx: Queryable, accountId: string, method: SessionMethod, now: Date): Promise<AccountSessionToken> {
-    const sessionId = newSessionId(), authenticatedAt = Math.floor(now.getTime() / 1000), expiresAt = authenticatedAt + ACCOUNT_SESSION_TTL_SECONDS;
+  async function sessionRow(tx: Queryable, accountId: string, method: SessionMethod, now: Date, verifiedAt?: number | null): Promise<AccountSessionToken> {
+    const issued = Math.floor(now.getTime() / 1000), sessionId = newSessionId(), expiresAt = issued + ACCOUNT_SESSION_TTL_SECONDS;
+    const authenticatedAt = typeof verifiedAt === 'number' && Number.isSafeInteger(verifiedAt) && verifiedAt > 0 ? Math.min(verifiedAt, issued) : issued;
     // Expired records are pruned on each sign-in (this account's at once; any account's after a 30-day grace), so dormant sessions
     // do not accumulate. Revoked ones remain until they expire.
     await tx.query('DELETE FROM flofi_account_sessions WHERE tenant_id=$1 AND account_id=$2 AND expires_at <= $3', [tenantId, accountId, now]);
     await tx.query("DELETE FROM flofi_account_sessions WHERE tenant_id=$1 AND expires_at <= $2::timestamptz - interval '30 days'", [tenantId, now]);
+    // BUILD-FLOFI-PRIVY-UX-001: email-code challenges (a plaintext email each) older than a day go too; Privy sign-ins no longer create
+    // them, so this keeps the one cleanup the removed FloFi email sign-in used to run.
+    await tx.query("DELETE FROM flofi_account_email_challenges WHERE tenant_id=$1 AND created_at < $2::timestamptz - interval '1 day'", [tenantId, now]);
     await tx.query(`INSERT INTO flofi_account_sessions (tenant_id, session_id, account_id, method, authenticated_at, expires_at)
       VALUES ($1,$2,$3,$4,to_timestamp($5),to_timestamp($6))`, [tenantId, sessionId, accountId, KIND_SQL[method], authenticatedAt, expiresAt]);
     return { accountId, sessionId, method, authenticatedAt, expiresAt };
@@ -138,7 +144,7 @@ export function createAccountStore(db: Database, tenantId: string) {
           if (!row) skipped++;
         }
         await tx.query("UPDATE flofi_account_identities SET last_used_at=$3 WHERE tenant_id=$1 AND kind='PRIVY' AND subject=$2", [tenantId, input.privyUser, now]);
-        return { ...await sessionRow(tx, accountId!, input.method, now), created, skipped };
+        return { ...await sessionRow(tx, accountId!, input.method, now, input.verifiedAt), created, skipped };
       }).catch(async (error: unknown) => {
         if (error instanceof Error && error.message === 'ACCOUNT_SIGN_IN_RACE') return store.signInPrivy(input, now);
         throw error;
@@ -277,7 +283,7 @@ export function createAccountStore(db: Database, tenantId: string) {
      * The same wallet saved again by the same account is idempotent; a wallet held by another account fails closed.
      */
     async saveWallet(accountId: string, wallet: NewWallet, now = new Date()): Promise<AccountWallet> {
-      const address = canonicalAddress(wallet.ecosystem, wallet.address), label = walletLabel(wallet.label), providerName = walletLabel(wallet.providerName);
+      const address = canonicalAddress(wallet.ecosystem, wallet.address), label = writableWalletLabel(wallet.label), providerName = walletLabel(wallet.providerName);
       if (!address || !label || !providerName || !validProvider(wallet.provider)) fail('ACCOUNT_WALLET_INVALID');
       const managed = wallet.origin !== 'external';
       // External wallets carry no resource; a legacy Turnkey wallet always has one; a Privy wallet id is optional public metadata.
@@ -308,8 +314,8 @@ export function createAccountStore(db: Database, tenantId: string) {
       return row ? walletOf(row) : null;
     },
     async renameWallet(accountId: string, ecosystem: WalletEcosystem, address: string, label: unknown, now = new Date()): Promise<void> {
-      const next = walletLabel(label);
-      if (!next) fail('ACCOUNT_WALLET_LABEL_INVALID');
+      const next = writableWalletLabel(label);
+      if (!next) fail(walletLabel(label) ? 'ACCOUNT_WALLET_LABEL_KEY_SHAPED' : 'ACCOUNT_WALLET_LABEL_INVALID');
       const updated = await db.query(`UPDATE flofi_account_wallets SET label=$5, updated_at=$6 WHERE tenant_id=$1 AND account_id=$2 AND ecosystem=$3 AND address=$4`,
         [tenantId, accountId, ecosystem === 'evm' ? 'EVM' : 'SOLANA', address, next, now]);
       if (!updated.rowCount) fail('ACCOUNT_WALLET_NOT_FOUND');

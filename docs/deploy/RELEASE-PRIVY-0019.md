@@ -8,7 +8,7 @@ The owner separately authorizes every deployment, migration and configuration ch
 | | Version | Name | SHA-256 |
 | --- | --- | --- | --- |
 | Base (current `main`) | 18 | `flofi_accounts` | `0919a57a5af80a1376ada213bb00ac5db79c434ab7a9ff0ebea50e6a9664ae75` |
-| This PR | 19 | `privy_accounts` | `f73a0944731486ce0853ec69d349f65bdf37b8ff81ec73b02e0221542eb01145` |
+| This PR | 19 | `privy_accounts` | `aea36e602ba918a195d4bd110fda3b29459816fb76c25e0ddfdd29099847cab6` |
 
 Assessment: [SCHEMA-COMPATIBILITY.md §13](./SCHEMA-COMPATIBILITY.md#13-certificate-0019_privy_accounts). 0019 only widens four CHECK
 constraints of two 0018 tables (no table, column, row, function or trigger changes) and is atomic.
@@ -28,16 +28,35 @@ constraints of two 0018 tables (no table, column, row, function or trigger chang
      `FLOFI_WALLET_ORIGIN`), and a later change may delete the legacy code and the `@turnkey/*` dependencies.
    - Otherwise: keep the Turnkey settings and `wallet.flofi.xyz` configured until every listed owner has exported (My wallets shows those
      wallets as "Legacy FloFi Wallet", export-only, and their addresses never change). FloFi never moves their funds or exports their keys
-     server-side; owners export in FloFi Wallet and may import the key into Privy (Add wallets → Import key).
+     server-side; owners export in FloFi Wallet and may import the key into Privy (Add wallets → Import key), which turns that same record
+     into their Privy wallet.
+
+   **Recorded (owner-verified on the production database, 2026-11-01):**
+
+   | Check | Result |
+   | --- | --- |
+   | Current schema | **18** |
+   | Turnkey wallets (`flofi_account_wallets.provider = 'turnkey'`) | **0** |
+   | Turnkey organizations (`flofi_accounts.wallet_provider = 'turnkey'`) | **0** |
+
+   So no person holds a FloFi Wallet (Turnkey) wallet: the legacy export path is not needed in production and its settings
+   (`FLOFI_TURNKEY_*`, `FLOFI_WALLET_ORIGIN`) can stay unconfigured; removing the legacy code and the `@turnkey/*` dependencies is a later,
+   separate change. The counts were run by the owner, not from this engineering session, which never had production database access.
 3. All CircleCI contexts green on the exact final commit, including the dependency audit and both browser jobs.
-4. Privy app provisioned by the owner (production and a separate preview app): allowed origins, login methods, embedded wallets without
-   automatic creation, Google configured; `NEXT_PUBLIC_PRIVY_APP_ID`, `PRIVY_APP_SECRET` (secret) and optionally `PRIVY_VERIFICATION_KEY`
-   set on Vercel (Preview first). See [ENVIRONMENT.md §5j](./ENVIRONMENT.md#5j-flofi-accounts-and-wallets--privy-build-flofi-privy-ux-001-login-onboardingwallets-credentials--my-wallets).
+4. Privy app provisioned by the owner (production and a separate preview app): allowed origins (production: `https://flofi.xyz` only),
+   login methods, embedded wallets without automatic creation, Google configured, MFA or re-authentication for export recommended;
+   `NEXT_PUBLIC_PRIVY_APP_ID`, `PRIVY_APP_SECRET` (secret) and optionally `PRIVY_VERIFICATION_KEY` set on Vercel (Preview first). If Privy's
+   bot protection is on, `FLOFI_PRIVY_BOT_PROTECTION` names it (`turnstile` or `hcaptcha`), otherwise its loader is blocked by the CSP.
+   Card entry: the card origin `https://cards.flofi.xyz` added to the Vercel project (DNS + domain) and `FLOFI_CARD_ORIGIN` set; without it
+   Add card stays unavailable (Mercado Pago's SDK never runs on `flofi.xyz`, which hosts the Privy signer). See [ENVIRONMENT.md §5j](./ENVIRONMENT.md#5j-flofi-accounts-and-wallets--privy-build-flofi-privy-ux-001-login-onboardingwallets-credentials--my-wallets).
 5. Live verification on a Preview with its own Privy app and a dedicated empty database, following
    [LIVE-VERIFICATION-PRIVY.md](./LIVE-VERIFICATION-PRIVY.md). Signing on mainnet moves real funds: a trivial amount, on the owner's explicit
    decision only.
 
 ## Release A: certificate only (no migration)
+
+Prepared as FloFi-xyz/FloFi#147 (`release/schema-0019-compat`, from `main`), exactly the three items below plus a PostgreSQL test of the
+version-18 account store on schema 19.
 
 Build from the commit production runs today (version 18), adding only:
 
@@ -45,7 +64,7 @@ Build from the commit production runs today (version 18), adding only:
 
    ```ts
    { base: { version: 18, name: 'flofi_accounts', sha256: '0919a57a5af80a1376ada213bb00ac5db79c434ab7a9ff0ebea50e6a9664ae75' },
-     migrations: [{ version: 19, name: 'privy_accounts', sha256: 'f73a0944731486ce0853ec69d349f65bdf37b8ff81ec73b02e0221542eb01145' }],
+     migrations: [{ version: 19, name: 'privy_accounts', sha256: 'aea36e602ba918a195d4bd110fda3b29459816fb76c25e0ddfdd29099847cab6' }],
      assessment: 'docs/deploy/SCHEMA-COMPATIBILITY.md#13-certificate-0019_privy_accounts' },
    ```
 
@@ -70,4 +89,11 @@ backend/operator process, the Vercel Production artifact). Its `migrate` pre-dep
 ## Rollback
 
 A version-18 build carrying the Release A certificate runs on schema 19, including rows written by version 19 (SCHEMA-COMPATIBILITY.md §13):
-Privy wallets are not shown or signed with by an old build, and nothing is lost. Do not reverse 0019 by dropping constraints or rows.
+nothing is lost, but while it runs:
+- Privy wallets are hidden (an old build lists, signs with and exports only Turnkey and external wallets): owners cannot see, use or export
+  them in FloFi until version 19 is back (the keys stay with Privy; nothing on-chain changes);
+- sign-in works only through version 18's own methods, so keep `FLOFI_GOOGLE_CLIENT_*`, `FLOFI_APPLE_CLIENT_ID` and the Turnkey email
+  settings it uses configured until the rollback window closes (ENVIRONMENT.md §5j);
+- a tab still open from version 19 that signed with Privy is refused at broadcast by version 18 and stays UNKNOWN until reconciled
+  (fail closed; nothing is sent).
+Do not reverse 0019 by dropping constraints or rows.

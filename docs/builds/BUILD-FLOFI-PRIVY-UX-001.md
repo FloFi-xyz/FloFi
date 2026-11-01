@@ -10,7 +10,7 @@ end users. Base: `main` at `d37b6168` (PRs #142, #143 and #144 merged). One bran
 | --- | --- |
 | FloFi-run Google/Apple OIDC and Turnkey email codes on `/login`; Web3 sign-in through FloFi's own SIWE | Google, email code and Web3 wallet, all through Privy (Apple once configured) |
 | Wallets created or imported in "FloFi Wallet", a separate window on `wallet.flofi.xyz` that had to be unlocked again (email code or a second Google sign-in) | **Create wallet** creates a Privy embedded wallet in one click, in the session the person just signed in with; no second Google sign-in, no unlock screen, no pop-up |
-| Import inside Turnkey's frame in FloFi Wallet | **Import key** opens a dedicated FloFi screen (Wallet name, Private key, Import wallet); the key goes to Privy's isolated frame and never to FloFi |
+| Import inside Turnkey's frame in FloFi Wallet | **Import key** opens a dedicated FloFi screen (Wallet name, Private key, Import wallet); the key passes through that page's code to Privy's frame and never reaches FloFi's servers (3.) |
 | An informational "Your wallets open in FloFi Wallet" card on Add your wallets | Removed. EVM and Solana cards, each with Create wallet and Import key, addresses shown in their card, Continue once a wallet exists |
 | Disconnect cleared the wallet connection only | Disconnect revokes the FloFi session, logs out of Privy, closes wallet connections and lands on `/login` (`https://flofi.xyz/login` in production); Back cannot restore signed-in pages |
 | Signing in the FloFi Wallet pop-up | Signing with Privy's own confirmation screen, which now states FloFi's server summary of the reviewed attempt |
@@ -43,13 +43,24 @@ Browser (flofi.xyz)                                   FloFi server              
 
 1. **Server-verified identity only.** Every sign-in and wallet save re-verifies a Privy access token server-side and reads the user from
    Privy's API; nothing the browser claims (address, method, identity) is trusted. Tokens are never stored or logged. A sign-in uses a token
-   issued in the last 10 minutes, once (its digest is consumed): a copied or replayed token never opens another FloFi session.
+   issued in the last 10 minutes, once (its digest is consumed): a copied or replayed token never opens another FloFi session. It must also
+   come from a login the person completed at Privy in those 10 minutes (Privy's last verification of a sign-in method): a silently
+   refreshed token of an older Privy session opens nothing (`PRIVY_SIGN_IN_STALE`), and a session's recent-sign-in time is that verification.
 2. **No custody, no server signing.** FloFi's server holds the Privy app secret (API reads) and no authorization key, session signer or
    wallet key. Creating or importing a wallet authorizes nothing and delegates nothing.
-3. **Private keys never reach FloFi.** The import screen reads the key once from an uncontrolled password field, clears it, and hands it to
-   Privy's `importWallet` (Privy encrypts it into its frame on `auth.privy.io`). No server action, form submission, URL, log, analytics event
-   or storage carries it; the browser suite proves no request to FloFi's origin, no browser storage and no database row contains it. The
-   import screen is an account page: strict nonce CSP, no workflow/Copilot/MCP code mounted.
+3. **Private keys never reach FloFi's servers** — but an imported key does pass through FloFi's page. Privy's React SDK (3.51.0) offers
+   no provider-hosted import input: `useImportWallet().importWallet({ privateKey })` takes the key as a string from the page, and the SDK
+   posts it to Privy's frame on `auth.privy.io`. So the key is typed into FloFi's own import screen; the screen reads it once from an
+   uncontrolled field (no React state, no `name`, no form action), clears the field and hands it straight to that call. Where the browser
+   can mask a text field (`-webkit-text-security`) the field is a masked text field, not a password field, so the browser's password
+   manager is not offered the key; elsewhere it stays a password field with autocomplete off (live runbook step 5). No server
+   action, form submission, URL, log, analytics event or storage carries it; the browser suite proves no request to FloFi's origin, no
+   browser storage and no database row contains it. Its exposure is FloFi's own page code only: the import screen is an account page under
+   the signer pages' script policy (6.), with no workflow/Copilot/MCP code and no third-party script (not even the bot-check loader, which
+   only `/login` may load); browser extensions with page access can still read it, as they can any page field. A key pasted into the Wallet name field
+   is refused before anything is sent (`ACCOUNT_WALLET_LABEL_KEY_SHAPED`, also enforced by the server for every wallet name it writes). The
+   UI says exactly this ("passes briefly through this page's code … never sent to FloFi's servers"). A provider-isolated input is the
+   follow-up as soon as Privy offers one.
 4. **Reviewed-attempt binding preserved.** A transaction reaches Privy only after `floFiSigningGate` resolved its `{flow, runId}` to the
    PREPARED/SUBMITTING attempt of one of the account's Privy wallets, carrying exactly these bytes, on a mainnet, and claimed its single
    signature. Privy then shows its confirmation; FloFi alone broadcasts after re-checking the signed bytes (`floFiEvmBroadcast`; Solana: the
@@ -59,8 +70,22 @@ Browser (flofi.xyz)                                   FloFi server              
    for Solana, loaded); otherwise the request is refused before any claim (`FLOFI_WALLET_ACCOUNT_MISMATCH` / `FLOFI_WALLET_NOT_READY`). An
    EVM attempt is claimed only while its Review has at least 20 s left (`FLOFI_WALLET_REVIEW_EXPIRING`), the time to confirm in Privy.
 5. **No merges, no takeovers** (§4), **no automatic reconnection** (§6).
-6. **CSP.** Account pages allow only Privy's API/frame/RPC origins and its bot-check frames (src/accounts/privy-hosts.ts); WalletConnect
-   relays are absent; the product's global `connect-src` adds the same Privy origins.
+6. **No untrusted script where the signer lives.** Privy's session and wallet frame trust the whole product origin and Privy's
+   confirmation is drawn by the page, so any script running there could ask Privy to sign without FloFi's gate. The signer mounts only in
+   a document that was loaded on a signer page — account pages (`/login`, `/onboarding*`) and product pages (`/app*`, `/approve`,
+   `/connections`, `/mcp/approve`, `/__engineering`) — and each is served by the proxy with a per-request nonce policy
+   (src/accounts/account-csp.ts): `script-src 'self' 'nonce-…' 'unsafe-eval'` and no other host, no `'strict-dynamic'` (a script inserted
+   at runtime must still come from FloFi), `script-src-attr 'none'`, `object-src`/`base-uri 'none'`, network only to FloFi and Privy.
+   Privy's bot-check loader (`FLOFI_PRIVY_BOT_PROTECTION`) is allowed on `/login` only, never on the import screen or the product. A
+   client-side navigation from a page without that policy (`/`, `/docs`, `/privacy`) into a signer page reloads it, so the signer never
+   runs under another page's policy (`FloFiPrivyProvider`'s document check, src/accounts/signer-pages.ts). No nonce is handed to Privy:
+   Privy 3.51.0 has no such option, so what it loads must match the policy's hosts. Framing: `/approve`, `/connections` and
+   `/app/credentials` are never framed; `/mcp/approve` keeps its MCP host allowlist; every other product page may be framed only by FloFi
+   itself (`frame-ancestors 'self'`). `nosniff` everywhere, so no same-origin non-JavaScript response runs as a script. Third-party payment
+   code never runs on the product origin: Mercado Pago's Secure Fields SDK moved to the card origin (`FLOFI_CARD_ORIGIN`,
+   src/server/card-origin.ts), whose page refuses any other host and loads the SDK only when framed. Add card frames it sandboxed (scripts,
+   own origin, forms and the provider's popups; no top navigation) and receives only the one-time token and the email by checked
+   `postMessage`. `'unsafe-eval'` stays for the Ajv validators (it lets running FloFi code evaluate strings, loads nothing new).
 
 ## 4. Accounts: preserved, never merged
 
@@ -93,8 +118,9 @@ method), so a version-18 build never sees a `PRIVY` session. Tests: `account-ser
 ## 6. Disconnect and sign-out
 
 `src/accounts/disconnect.ts` (Disconnect, Sign out, the drawer's Logout, wherever accounts exist): close the page's wallet connection and mark
-it disconnected (no silent reconnect), Privy `logout()`, `accountSignOut` (server revokes this browser's session record, clears the account
-cookie and the EIP-4361/SIWS wallet-session cookies), then `location.replace(<FLOFI_PUBLIC_ORIGIN>/login)`. Account pages and Credentials send
+it disconnected (no silent reconnect), `accountSignOut` first (server revokes this browser's session record, clears the account cookie and
+the EIP-4361/SIWS wallet-session cookies), then Privy `logout()` (each browser step bounded to 4 s, so a stuck step never keeps the FloFi
+session alive), then `location.replace(<FLOFI_PUBLIC_ORIGIN>/login)`. Account pages and Credentials send
 `Cache-Control: no-store`, and a page restored from the back/forward cache reloads (`SessionGuard`). `/login` ends any Privy session it did
 not just complete itself. Nothing about the account, wallets, keys, assets or history is deleted. On a deployment without accounts,
 Disconnect keeps its wallet-only behaviour (there is no sign-in to return to).
@@ -157,10 +183,15 @@ verifies with the official SDK, serves Privy's user API, and signs with disposab
 
 1. **Live Privy is not proven here.** No Privy app id exists for this session and `docs.privy.io` / `auth.privy.io` are outside its network;
    the official SDK's verification ran against a local key. [LIVE-VERIFICATION-PRIVY.md](../deploy/LIVE-VERIFICATION-PRIVY.md) is the owner's check.
-2. **Privy's wallet trusts the product origin.** Keys stay in Privy's frame, but Privy's SDK lets the page request signatures, and a
-   per-call option can hide Privy's confirmation. FloFi always requests it, but script injected into `/app` (which has no `script-src`
-   policy) could ask Privy directly, bypassing FloFi's gate. The Turnkey design avoided this with a separate origin; the owner's one-session
-   UX requirement moves wallets onto the product origin. Recommended follow-up: a nonce `script-src` policy for `/app` as account pages have.
+2. **Privy's wallet trusts the product origin.** Keys stay in Privy's frame, but any script running on the origin can drive Privy (its
+   confirmation is drawn by the page). Mitigated in this build (§3.6): the signer runs only in documents loaded on signer pages, each of
+   which runs only FloFi's own scripts, and no third-party script runs on the product origin (card entry moved to the card origin). The
+   boundary is still the origin, not the path: other same-origin HTML (`/`, `/docs`, `/privacy`, `/admin`, error pages) keeps the policy
+   without `script-src`. Those pages render no user content and load no third-party script, but a script that did run there could open or
+   frame a signer page (same origin) and drive it, so they are inside the boundary too. A default-deny nonce policy for all HTML on the
+   product host is the follow-up. Code FloFi itself ships (reviewed, in the bundle) and browser extensions with page access are inside the
+   boundary. A cryptographic gate (Privy wallet policies or a FloFi co-signer key quorum) would remove the reliance on page integrity; it was
+   not adopted because it cannot be verified offline and adds a FloFi-held authorization key.
 3. EVM import: Privy allows one imported EVM key per user (its SDK refuses a second). FloFi offers one generated wallet per ecosystem.
 4. Privy exports a private key, not a recovery phrase, for its wallets.
 5. Apple: Privy's default Apple client gives a different `sub` than FloFi's earlier Apple sign-in; Apple stays off until Privy uses FloFi's

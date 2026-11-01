@@ -6,6 +6,7 @@ import { spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { createHash, randomBytes } from 'node:crypto';
 import { E2E_APP_ORIGIN, E2E_APP_PORT, e2eNetworkScopeEnv } from './e2e/app-origin';
+import { E2E_CARD_ORIGIN } from './e2e/app-origin';
 import { MCP_E2E_INVITE } from './e2e/mcp-constants';
 import { SERVER_ONLY_WOOVI_APP_ID } from './e2e/card-provider-fixtures';
 import { E2E_PORTS } from './e2e/fork/ports';
@@ -310,7 +311,9 @@ export default defineConfig({
       ...(universalHarness ? { GRYLOO_UNIVERSAL_ROUTER_HARNESS: 'MOCKED_LOOPBACK_ONLY', GRYLOO_UNIVERSAL_ROUTER_JOURNAL: universalJournal } : {}),
       ...(copilot === 'replay' ? { FLOFI_COPILOT: 'replay' } : {}),
       // The payment provider's server-only App ID is present (payments stay off) so the card spec can prove it is never served.
-      ...(cardHarness ? { GRYLOO_CARD_HARNESS: 'MOCKED_LOOPBACK_ONLY', WOOVI_APP_ID: SERVER_ONLY_WOOVI_APP_ID, WOOVI_ENVIRONMENT: 'sandbox' } : {}),
+      // BUILD-FLOFI-PRIVY-UX-001: card entry runs on the card origin (the same server under `localhost`), never on the product origin.
+      ...(cardHarness ? { GRYLOO_CARD_HARNESS: 'MOCKED_LOOPBACK_ONLY', WOOVI_APP_ID: SERVER_ONLY_WOOVI_APP_ID, WOOVI_ENVIRONMENT: 'sandbox',
+        FLOFI_PUBLIC_ORIGIN: E2E_APP_ORIGIN, FLOFI_CARD_ORIGIN: E2E_CARD_ORIGIN } : {}),
       ...(cloudRuntime ? { FLOFI_RUNTIME: 'embedded', DATABASE_URL: process.env.FLOFI_E2E_DATABASE_URL!, GRYLOO_ROBINHOOD_HARNESS: 'MOCKED_LOOPBACK_ONLY' } : {}),
       ...(adminHarness ? { DATABASE_URL: process.env.FLOFI_E2E_DATABASE_URL!, FLOFI_ADMIN: 'enabled', FLOFI_ADMIN_SESSION_SECRET: randomBytes(32).toString('hex') } : {}),
       // BUILD-CHAT-LEARNING-002: persistent automatic learning under the consent basis (the spec opts in through Privacy & memory).

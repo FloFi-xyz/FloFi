@@ -170,7 +170,7 @@ provider (`*_ENVIRONMENT_MISMATCH`) instead of crossing over.
 | Variable | Purpose | Secret | Dev | CI | Preview | Prod | When missing |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | `MERCADO_PAGO_ENVIRONMENT` | `test` or `production` (explicit) | no | `test` | — | `test` | `production` | Add card states `CARD_TOKENIZATION_PROVIDER_REQUIRED` |
-| `MERCADO_PAGO_PUBLIC_KEY` | Public key for Secure Fields; sent to the browser by a server action, never inlined | no | test key | — | test key | production key | same |
+| `MERCADO_PAGO_PUBLIC_KEY` | Public key for Secure Fields; rendered only into the card origin's `/card-entry` page (BUILD-FLOFI-PRIVY-UX-001: `FLOFI_CARD_ORIGIN`, §5j), never on the product origin | no | test key | — | test key | production key | same |
 | `MERCADO_PAGO_ACCESS_TOKEN` | Server-only token for the Customers/Cards API | **yes** | test token | — | test token | production token | same |
 | `WOOVI_ENVIRONMENT` | `sandbox` or `production` (explicit) | no | `sandbox` | — | `sandbox` | `production` | Woovi adapter absent: `PAYMENT_PROVIDER_NOT_CONFIGURED` |
 | `WOOVI_APP_ID` | Server-only Woovi App ID (`Authorization` header) | **yes** | sandbox App ID | — | sandbox App ID | production App ID | same |
@@ -323,6 +323,8 @@ sign-in is not configured and nothing is simulated.
 | `PRIVY_APP_SECRET` | the Privy app secret: FloFi's server reads users from Privy's API with it (Basic auth). Never sent to a browser, logged or stored | **yes** | with the app id | **yes** | — (no sign-in) |
 | `PRIVY_VERIFICATION_KEY` | optional: the app's access-token verification key (Privy dashboard, PEM; `\n` escapes accepted). Without it the official SDK fetches the app's JWKS from `api.privy.io` | no | optional | recommended | JWKS |
 | `FLOFI_PRIVY_APPLE_LOGIN` | `enabled` shows Apple sign-in, only after Apple is configured in Privy with FloFi's own Apple Services ID (so existing Apple accounts keep their subject) | no | optional | after Apple setup | off |
+| `FLOFI_PRIVY_BOT_PROTECTION` | `turnstile` or `hcaptcha` when Privy's bot protection is on in its dashboard: only then may that loader script run, and only on `/login` (src/accounts/account-csp.ts); never on the import screen or product pages. Unset: no third-party script runs on any page hosting the Privy signer, and a bot check enabled at Privy alone is blocked (sign-in fails visibly) | no | if enabled at Privy | if enabled at Privy | none |
+| `FLOFI_CARD_ORIGIN` | the card origin (`https://cards.flofi.xyz` in production; a preview may name its own https host): the only place Mercado Pago's Secure Fields SDK runs, so third-party payment code never runs where the Privy signer lives (src/server/card-origin.ts). Served by this same deployment (add the domain to the Vercel project); it serves only `/card-entry`, and only the product origin (`FLOFI_PUBLIC_ORIGIN`, exactly the URL people open: a per-deployment preview URL is a different origin) may frame it. Exact origin, no path or trailing slash. Unset or invalid: Add card is unavailable | no | for card previews | **yes** for cards | — (no Add card) |
 
 Privy dashboard (owner), production app: allowed origin `https://flofi.xyz` only — never a preview origin, since preview code must not obtain
 tokens that production accepts; previews use their own Privy app (its allowed origins are the preview origins). Login methods Google, email
@@ -334,8 +336,10 @@ existing Google accounts are found). The CSP already allows `auth.privy.io`, `*.
 Legacy FloFi Wallet (Turnkey, export of wallets created before Privy only): `FLOFI_TURNKEY_ORGANIZATION_ID`, `FLOFI_TURNKEY_API_PUBLIC_KEY`,
 `FLOFI_TURNKEY_API_PRIVATE_KEY` (**secret**), `FLOFI_WALLET_ORIGIN` and FloFi Wallet's own `FLOFI_WALLET_GOOGLE_CLIENT_ID` /
 `_SECRET` / `FLOFI_WALLET_APPLE_CLIENT_ID`, unchanged from BUILD-FLOFI-AUTH-WALLETS-001. Keep them only while
-[RELEASE-PRIVY-0019.md](RELEASE-PRIVY-0019.md) §Legacy finds Turnkey wallets in production. The product's own `FLOFI_GOOGLE_CLIENT_*` /
-`FLOFI_APPLE_CLIENT_ID` are no longer used for sign-in (Privy replaced them).
+[RELEASE-PRIVY-0019.md](RELEASE-PRIVY-0019.md) §Legacy finds Turnkey wallets in production (owner-verified 2026-11-01: 0 wallets, 0 organizations,
+so production needs none of them). The product's own `FLOFI_GOOGLE_CLIENT_*` / `FLOFI_APPLE_CLIENT_ID` are no longer used for sign-in by
+this build (Privy replaced them), but a rollback to a version-18 build signs in with them: keep them configured until the rollback window
+closes.
 
 ## 6. Platform-provided (read, never set by hand)
 
