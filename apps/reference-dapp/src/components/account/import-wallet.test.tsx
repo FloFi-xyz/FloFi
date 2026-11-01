@@ -1,13 +1,13 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 /**
  * BUILD-FLOFI-PRIVY-UX-001: the dedicated import screen — Wallet name, Private key, Import wallet — whose key field never posts anywhere:
- * no form action or method, a password field with autocomplete and spell-check off, and a server action that has no parameter for a key.
+ * no form action or method, a masked key field with autocomplete and spell-check off, and a server action that has no parameter for a key.
  */
 import { describe, expect, it, vi } from 'vitest';
 import { renderToStaticMarkup } from 'react-dom/server';
 import type { AccountState } from '../../app/account-action';
 import { FloFiPrivyContext, type FloFiPrivy } from '../../accounts/privy-client';
-import { ImportWallet, privateKeyShapeValid } from './import-wallet';
+import { ImportWallet, maskedTextSupported, privateKeyShapeValid } from './import-wallet';
 
 vi.mock('../../app/account-action', () => ({ savePrivyWallet: vi.fn() }));
 const availability = { accounts: true, google: true, apple: false, email: true, wallet: true, managedWallets: true, legacyWallets: false };
@@ -27,17 +27,28 @@ describe('Import key screen', () => {
     const form = /<form[^>]*>/.exec(html)![0];
     expect(form).not.toMatch(/\saction=|\smethod=/);
     expect(form).toMatch(/autocomplete="off"/i);
-    const key = /<input[^>]*type="password"[^>]*>/.exec(html)![0];
+    // A masked text field from the server render on (never first a password field a browser would offer to save).
+    const key = /<input[^>]*data-bwignore="true"[^>]*>/.exec(html)![0];
+    expect(key).toMatch(/type="text"/);
+    expect(key).toMatch(/data-gramm="false"/);
     expect(key).toMatch(/autocomplete="off"/i);
     expect(key).toMatch(/spellcheck="false"/i);
     expect(key).not.toMatch(/\sname=|\svalue=/);
-    expect(html).toContain('FloFi never receives, stores or logs it.');
+    // Truthful about the boundary: the key passes through this page’s code in the browser, and never reaches FloFi’s servers.
+    expect(html).toContain('It passes briefly through this page’s code on the way and is never sent to FloFi’s servers, stored or logged.');
+    expect(html).not.toContain('FloFi never receives');
     expect(render('solana')).toContain('Import your Solana wallet');
   });
   it('is unavailable (and says so) without a ready Privy session', () => {
     const html = render('evm', null);
     expect(html).toContain('Importing isn’t available right now.');
-    expect(/<input[^>]*type="password"[^>]*>/.exec(html)![0]).toContain('disabled=""');
+    expect(/<input[^>]*data-bwignore="true"[^>]*>/.exec(html)![0]).toContain('disabled=""');
+  });
+  it('masks the key as a text field where the browser can (never a saved password), and stays a password field elsewhere', () => {
+    expect(maskedTextSupported({ supports: (property, value) => property === '-webkit-text-security' && value === 'disc' })).toBe(true);
+    expect(maskedTextSupported({ supports: () => false })).toBe(false);
+    expect(maskedTextSupported({ supports: () => { throw new Error('no'); } })).toBe(false);
+    expect(maskedTextSupported(undefined)).toBe(false);
   });
   it('accepts only a key of the right shape before Privy is asked', () => {
     expect(privateKeyShapeValid('evm', `0x${'ab'.repeat(32)}`)).toBe(true);

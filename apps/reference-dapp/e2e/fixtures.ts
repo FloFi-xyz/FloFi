@@ -1,11 +1,13 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { test as base, expect, type BrowserContext, type Locator, type Page } from '@playwright/test';
-import { E2E_APP_ORIGIN as APP_ORIGIN } from './app-origin';
+import { E2E_APP_ORIGIN as APP_ORIGIN, E2E_CARD_ORIGIN } from './app-origin';
 
 export const SYNTHETIC_GUARD_URL = 'https://example.invalid/gryloo-guard-self-test';
 
 type Guard = { readonly unexpected: readonly string[]; assertClean(): void };
 const guards = new WeakMap<BrowserContext, Guard>();
+/** The app origin, plus the card origin only in the MOCKED card suite (BUILD-FLOFI-PRIVY-UX-001: card entry runs there, never on the app). */
+const ALLOWED_ORIGINS: ReadonlySet<string> = new Set([APP_ORIGIN, ...process.env.GRYLOO_CARD_E2E === 'MOCKED_LOOPBACK_ONLY' ? [E2E_CARD_ORIGIN] : []]);
 
 function guardedTest(negativeSelfTest: boolean) {
   return base.extend<{ context: BrowserContext; page: Page; networkGuard: Guard }>({
@@ -29,7 +31,7 @@ function guardedTest(negativeSelfTest: boolean) {
       await context.route('**/*', async (route) => {
         const url = route.request().url();
         let allowed = false;
-        try { allowed = new URL(url).origin === APP_ORIGIN; } catch { /* Invalid URL is forbidden. */ }
+        try { allowed = ALLOWED_ORIGINS.has(new URL(url).origin); } catch { /* Invalid URL is forbidden. */ }
         if (allowed) await route.continue();
         else { unexpected.push(url); await route.abort('blockedbyclient'); }
       });

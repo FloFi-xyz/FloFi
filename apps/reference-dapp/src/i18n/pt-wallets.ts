@@ -51,9 +51,12 @@ export const portugueseWallets: Readonly<Record<string, string>> = {
   'The card could not be added. Nothing was saved.': 'Não foi possível adicionar o cartão. Nada foi guardado.',
   'Enter a valid email address.': 'Introduza um endereço de email válido.', 'This email already has the maximum number of saved cards.': 'Este email já tem o número máximo de cartões guardados.',
   'The card could not be saved. Check the details and try again.': 'Não foi possível guardar o cartão. Verifique os dados e tente novamente.',
+  "FloFi never asks for your card number or security code in its own forms. Cards are added only through the card provider's secure entry, on FloFi's separate card page, which isn't set up on this deployment yet.": "O FloFi nunca pede o número do cartão ou o código de segurança nos seus próprios formulários. Os cartões só são adicionados através da entrada segura do fornecedor de cartões, na página de cartões separada do FloFi, que ainda não foi configurada nesta instalação.",
+  'Open Add card from Credentials in FloFi.': 'Abra Adicionar cartão em Credenciais no FloFi.',
+  '{0} secure card entry': 'Entrada segura de cartão de {0}',
   'Secure card entry could not be loaded. Nothing was collected. Try again later.': 'Não foi possível carregar a entrada segura do cartão. Nada foi recolhido. Tente mais tarde.',
   'Card entry status could not be checked. Nothing was collected. Try again later.': 'Não foi possível verificar o estado da entrada de cartões. Nada foi recolhido. Tente mais tarde.',
-  'Checking secure card entry…': 'A verificar a entrada segura de cartões…', "Secure card entry isn't available yet.": 'A entrada segura de cartões ainda não está disponível.',
+  'Checking secure card entry…': 'A verificar a entrada segura de cartões…', 'Loading secure card entry…': 'A carregar a entrada segura de cartões…', "Secure card entry isn't available yet.": 'A entrada segura de cartões ainda não está disponível.',
   "FloFi never asks for your card number or security code in its own forms. Cards are added only through a certified card provider's secure entry, and no card provider is connected to FloFi yet.":
     'O FloFi nunca pede o número do cartão ou o código de segurança nos seus próprios formulários. Os cartões só são adicionados através da entrada segura de um fornecedor certificado, e ainda não há nenhum fornecedor de cartões ligado ao FloFi.',
 };

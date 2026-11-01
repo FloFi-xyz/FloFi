@@ -2,12 +2,12 @@
 /**
  * BUILD-FLOFI-AUTH-WALLETS-001: the contract that binds every FloFi Wallet signature to one reviewed FloFi attempt.
  *
- * Why: the product origin runs without `script-src`, so a request that reaches FloFi Wallet may have been written by injected script.
- * FloFi Wallet therefore never signs bytes on the word of the product page. Each signing request names the run it belongs to
- * (`{flow, runId}`); FloFi Wallet's own server loads that run through the run's own service, requires its PREPARED or SUBMITTING attempt
+ * Privy signing runs on the product origin under a nonce script policy; its wallet trusts that origin. The server gate still never
+ * authorizes bytes on the word of the page. Each signing request names the run it belongs to
+ * (`{flow, runId}`); the server loads that run through the run's own service, requires its PREPARED or SUBMITTING attempt
  * to belong to a managed wallet saved to the account and to carry exactly these bytes, and returns a summary built from the server's
  * Review. Requests that match nothing are refused (`FLOFI_WALLET_NO_MATCHING_REVIEW`); flows FloFi cannot bind yet are refused by name
- * (`FLOFI_WALLET_FLOW_NOT_SUPPORTED`). The relay requires the same binding (`x-flofi-signing`) before it forwards a signing activity.
+ * (`FLOFI_WALLET_FLOW_NOT_SUPPORTED`). The legacy FloFi Wallet relay is export-only and forwards no signing activity.
  *
  * Shared by the product page, FloFi Wallet's pages and the server: no engine, Ajv or server import may ever be added here (the wallet
  * origin's bundle runs under a policy without `'unsafe-eval'`).

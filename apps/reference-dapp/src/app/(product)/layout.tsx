@@ -28,7 +28,8 @@ export default async function ProductLayout({ children }: { children: ReactNode 
   const jar = await cookies();
   const configured = copilotConfig(process.env).mode;
   const bootstrap = { walletHint: parseWalletHint(jar.get(WALLET_HINT_COOKIE)?.value), copilotMode: configured };
-  // BUILD-FLOFI-PRIVY-UX-001: the person's Privy wallets sign here (with Privy's own confirmation), and Disconnect logs out of Privy.
+  // BUILD-FLOFI-PRIVY-UX-001: the person's Privy wallets sign here (with Privy's own confirmation), and Disconnect logs out of Privy. The page
+  // runs under the proxy's nonce policy (account-csp.ts productPagePolicy): Next.js puts the nonce on its own scripts.
   return <LocaleProvider initialLanguage={parseLanguage(jar.get(LANGUAGE_COOKIE)?.value) ?? 'EN'}>
     <FloFiPrivyProvider config={privyBrowserConfig(process.env)} accounts={Boolean(process.env.DATABASE_URL)}><SessionGuard/>
       <ProductWorkspace initialWorkflowId={initialWorkflowId} engineeringEnabled={await engineeringUiAllowed()} networkScope={networkScope()} bootstrap={bootstrap}/>{children}

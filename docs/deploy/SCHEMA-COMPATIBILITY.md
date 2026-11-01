@@ -646,7 +646,7 @@ accommodate an older binary. The exact Release A contents, deployment order and 
 
 | Base | Certified forward migration | SHA-256 |
 | --- | --- | --- |
-| 0018 `flofi_accounts` | 0019 `privy_accounts` | `f73a0944731486ce0853ec69d349f65bdf37b8ff81ec73b02e0221542eb01145` |
+| 0018 `flofi_accounts` | 0019 `privy_accounts` | `aea36e602ba918a195d4bd110fda3b29459816fb76c25e0ddfdd29099847cab6` |
 
 Migration 0019 (BUILD-FLOFI-PRIVY-UX-001) widens four CHECK constraints of two 0018 tables and does nothing else: no table, column,
 index, function, trigger or row is added, changed or removed.

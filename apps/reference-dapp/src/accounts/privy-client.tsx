@@ -22,7 +22,9 @@ import { defaultSolanaRpcsPlugin, toSolanaWalletConnectors, useCreateWallet as u
   useImportWallet as useImportSolanaWallet, useSignMessage as useSignSolanaMessage, useSignTransaction as useSignSolanaTransaction,
   useWallets as useSolanaWallets } from '@privy-io/react-auth/solana';
 import type { PrivyBrowserConfig } from './privy-server';
-import { FloFiAccountsContext as AccountsContext, FloFiPrivyContext as Context, privyErrorCode, Registrar, useFloFiPrivy, type FloFiPrivy, type PrivyEmbedded, type PrivyLoginEvent,
+import { signerPolicy } from './signer-pages';
+import { usePathname } from 'next/navigation';
+import { createLoginChannel, FloFiAccountsContext as AccountsContext, FloFiPrivyContext as Context, privyErrorCode, Registrar, useFloFiPrivy, type FloFiPrivy, type PrivyEmbedded, type PrivyLoginEvent,
   type PrivyReview } from './privy-context';
 export { currentFloFiPrivy, FloFiPrivyContext, privyErrorCode, useAccountsOffered, useFloFiPrivy, type FloFiPrivy, type PrivyEmbedded, type PrivyEvmTransaction,
   type PrivyLoginEvent, type PrivyReview } from './privy-context';
@@ -40,7 +42,7 @@ const chains = PRIVY_EVM_CHAINS.map(chain => ({ id: chain.id, name: chain.name, 
   rpcUrls: { default: { http: [chain.rpc] } } }) as unknown as Chain);
 
 /** Privy's configuration for FloFi. Exported for its unit test: these choices are security properties, not styling. */
-export function floFiPrivyConfig(config: Pick<PrivyBrowserConfig, 'apple'>, nonce?: string): PrivyClientConfig {
+export function floFiPrivyConfig(config: Pick<PrivyBrowserConfig, 'apple'>): PrivyClientConfig {
   return {
     loginMethods: config.apple ? ['google', 'apple', 'email', 'wallet'] : ['google', 'email', 'wallet'],
     appearance: { theme: 'dark', accentColor: '#2343D9', logo: '/brand/flofi-wordmark-dark.png', landingHeader: 'Sign in to FloFi',
@@ -52,7 +54,6 @@ export function floFiPrivyConfig(config: Pick<PrivyBrowserConfig, 'apple'>, nonc
     supportedChains: chains, defaultChain: chains[0]!,
     plugins: [defaultSolanaRpcsPlugin()],
     legal: { privacyPolicyUrl: '/privacy' },
-    ...nonce ? { scriptNonce: nonce } : {},
   };
 }
 
@@ -71,10 +72,18 @@ export function embeddedWallets(user: User | null): PrivyEmbedded[] {
   });
 }
 
+/**
+ * Privy's own embedded Solana wallets among the connected ones: their Wallet Standard wallet carries `isPrivyWallet` (Privy's SDK uses the
+ * same flag). An external wallet connected through Privy (Phantom, …) never counts, even when it holds the same imported key.
+ */
+export function privyOwnSolanaWallets<T extends { readonly standardWallet?: unknown }>(wallets: readonly T[]): T[] {
+  return wallets.filter(wallet => (wallet.standardWallet as { readonly isPrivyWallet?: unknown } | undefined)?.isPrivyWallet === true);
+}
+
 function PrivyBridge({ children }: { children: ReactNode }) {
   const privy = usePrivy();
-  const loginListeners = useRef(new Set<(event: PrivyLoginEvent) => void>()), errorListeners = useRef(new Set<(code: string) => void>());
-  const emit = useCallback((event: PrivyLoginEvent) => { for (const listener of [...loginListeners.current]) listener(event); }, []);
+  const logins = useRef(createLoginChannel()), errorListeners = useRef(new Set<(code: string) => void>());
+  const emit = useCallback((event: PrivyLoginEvent) => logins.current.emit(event), []);
   const emitError = useCallback((cause: unknown) => { const code = privyErrorCode(cause, 'PRIVY_SIGN_IN_FAILED'); for (const listener of [...errorListeners.current]) listener(code); }, []);
   const callbacks = useMemo(() => ({ onComplete: (params: { wasAlreadyAuthenticated: boolean }) => emit({ wasAlreadyAuthenticated: params.wasAlreadyAuthenticated }),
     onError: (cause: unknown) => emitError(cause) }), [emit, emitError]);
@@ -92,7 +101,10 @@ function PrivyBridge({ children }: { children: ReactNode }) {
   const { signMessage: signEvmText } = useSignMessage();
   const { signTransaction: signSolana } = useSignSolanaTransaction();
   const { signMessage: signSolanaText } = useSignSolanaMessage();
-  const { wallets: solanaWallets, ready: solanaReady } = useSolanaWallets();
+  const { wallets: connectedSolana, ready: solanaReady } = useSolanaWallets();
+  // Only Privy's own embedded Solana wallet (its standard wallet carries `isPrivyWallet`, as Privy's SDK checks): never an external wallet
+  // (Phantom, …) connected through Privy, even one holding the same imported key.
+  const solanaWallets = useMemo(() => privyOwnSolanaWallets(connectedSolana), [connectedSolana]);
   const solanaWallet = useCallback((address: string) => solanaWallets.find(wallet => wallet.address === address)
     ?? fail('FLOFI_WALLET_ACCOUNT_MISMATCH'), [solanaWallets]);
 
@@ -108,7 +120,7 @@ function PrivyBridge({ children }: { children: ReactNode }) {
     return {
       ready: privy.ready, authenticated: privy.ready && privy.authenticated, userId: privy.user?.id ?? null, embedded, canSign,
       getAccessToken: () => privy.getAccessToken().catch(() => null),
-      onLogin: listener => { loginListeners.current.add(listener); return () => { loginListeners.current.delete(listener); }; },
+      onLogin: listener => logins.current.subscribe(listener),
       onLoginError: listener => { errorListeners.current.add(listener); return () => { errorListeners.current.delete(listener); }; },
       loginWithOAuth: provider => wrap(() => oauth.initOAuth({ provider }), 'PRIVY_SIGN_IN_FAILED'),
       sendEmailCode: address => wrap(() => email.sendCode({ email: address }), 'PRIVY_EMAIL_CODE_FAILED'),
@@ -162,22 +174,45 @@ function loopbackDriver(): PrivyDriver | null {
   return driver && typeof driver.snapshot === 'function' && typeof driver.subscribe === 'function' ? driver : null;
 }
 const NO_DRIVER = Object.freeze({ ready: false, authenticated: false, userId: null, embedded: Object.freeze([]) as readonly PrivyEmbedded[] });
+/** Stub FloFiPrivy while the loopback driver has not attached yet (SSR and the first client paint). Non-null so sign-in SSR matches
+ * PrivyBridge: methods unavailable-but-configured, never the false "not configured on this deployment" status. */
+const PENDING: FloFiPrivy = Object.freeze({
+  ...NO_DRIVER,
+  canSign: () => false,
+  getAccessToken: async () => null,
+  onLogin: () => () => undefined,
+  onLoginError: () => () => undefined,
+  loginWithOAuth: async () => fail('PRIVY_UNAVAILABLE'),
+  sendEmailCode: async () => fail('PRIVY_UNAVAILABLE'),
+  loginWithEmailCode: async () => fail('PRIVY_UNAVAILABLE'),
+  loginWithWallet: () => fail('PRIVY_UNAVAILABLE'),
+  createWallet: async () => fail('PRIVY_UNAVAILABLE'),
+  importWallet: async () => fail('PRIVY_UNAVAILABLE'),
+  exportWallet: async () => fail('PRIVY_UNAVAILABLE'),
+  signEvmTransaction: async () => fail('PRIVY_UNAVAILABLE'),
+  signEvmMessage: async () => fail('PRIVY_UNAVAILABLE'),
+  signSolanaTransaction: async () => fail('PRIVY_UNAVAILABLE'),
+  signSolanaMessage: async () => fail('PRIVY_UNAVAILABLE'),
+  logout: async () => undefined,
+});
 function EmulatedPrivy({ children }: { children: ReactNode }) {
   const [driver, setDriver] = useState<PrivyDriver | null>(null);
+  const logins = useRef(createLoginChannel());
   useEffect(() => { setDriver(loopbackDriver()); }, []);
+  useEffect(() => driver?.onLogin(event => logins.current.emit(event)), [driver]);
   // The suite drives FloFi's own signing path (gate → Privy → result) the way a wallet store does, through FloFi's real function.
   useEffect(() => { if (driver?.attachFloFi) void import('../wallet/flofi-privy-signer').then(module => driver.attachFloFi!({ request: module.requestThroughPrivy })); }, [driver]);
   const subscribe = useCallback((listener: () => void) => driver?.subscribe(listener) ?? (() => undefined), [driver]);
   const snapshot = useSyncExternalStore(subscribe, () => driver?.snapshot() ?? NO_DRIVER, () => NO_DRIVER);
-  const value = useMemo<FloFiPrivy | null>(() => {
-    if (!driver) return null;
+  const value = useMemo<FloFiPrivy>(() => {
+    if (!driver) return PENDING;
     // The stand-in's errors go through the same mapping as Privy's (PrivyBridge): FloFi only ever sees its own codes.
     const wrap = <A extends unknown[], R>(run: (...args: A) => Promise<R>, fallback: string) => async (...args: A): Promise<R> => {
       try { return await run(...args); } catch (cause) { throw new Error(privyErrorCode(cause, fallback), { cause }); }
     };
     const canSign = (ecosystem: WalletEcosystem, address: string) => snapshot.ready && snapshot.authenticated && snapshot.embedded.some(wallet =>
       wallet.ecosystem === ecosystem && wallet.address === (ecosystem === 'evm' ? address.toLowerCase() : address));
-    return { ...snapshot, canSign, getAccessToken: driver.getAccessToken, onLogin: driver.onLogin, onLoginError: driver.onLoginError, loginWithWallet: driver.loginWithWallet,
+    return { ...snapshot, canSign, getAccessToken: driver.getAccessToken, onLogin: listener => logins.current.subscribe(listener), onLoginError: driver.onLoginError, loginWithWallet: driver.loginWithWallet,
       logout: driver.logout, loginWithOAuth: wrap(driver.loginWithOAuth, 'PRIVY_SIGN_IN_FAILED'), sendEmailCode: wrap(driver.sendEmailCode, 'PRIVY_EMAIL_CODE_FAILED'),
       loginWithEmailCode: wrap(driver.loginWithEmailCode, 'PRIVY_EMAIL_CODE_INVALID'), createWallet: wrap(driver.createWallet, 'PRIVY_WALLET_CREATE_FAILED'),
       importWallet: wrap(driver.importWallet, 'PRIVY_WALLET_IMPORT_FAILED'), exportWallet: wrap(driver.exportWallet, 'PRIVY_WALLET_EXPORT_FAILED'),
@@ -187,17 +222,49 @@ function EmulatedPrivy({ children }: { children: ReactNode }) {
   return <Context.Provider value={value}><Registrar/>{children}</Context.Provider>;
 }
 
+const NO_CHANGES = () => () => undefined;
+/** The path this document was loaded at (Navigation Timing), or null when the browser does not say. */
+export function loadedDocumentPath(): string | null {
+  try {
+    const entry = performance.getEntriesByType('navigation')[0];
+    return entry?.name ? new URL(entry.name).pathname : null;
+  } catch { return null; }
+}
+/**
+ * Whether Privy may mount for the page at `pathname` in a document loaded at `loaded`, and whether the document must be reloaded first.
+ * Privy mounts only when the document was served the same class of signer policy as the page needs (src/accounts/signer-pages.ts); a
+ * document that was not (one reached by a client-side navigation) is reloaded once, so it is served that page's own policy. When the
+ * browser does not say where the document was loaded, Privy stays unmounted (fails closed, never a reload loop).
+ */
+export function signerDocument(pathname: string, loaded: string | null): { readonly mount: boolean; readonly reload: boolean } {
+  const policy = signerPolicy(pathname);
+  if (policy === null || loaded === null) return { mount: false, reload: false };
+  const same = signerPolicy(loaded) === policy;
+  return { mount: same, reload: !same };
+}
+
 /**
  * Wraps a page in FloFi's Privy context. `config` comes from the server (`accountState().privy`): null means Privy is not configured here.
- * `nonce` is the page's CSP nonce (account pages), passed to Privy for the scripts it adds.
+ *
+ * Privy is mounted only in a document that was loaded as a page hosting the signer with that page's class of policy (signerDocument).
+ * On the server and while hydrating, the document is the page being rendered (the proxy served it its own policy), so a page loaded
+ * directly renders Privy from the start and is never remounted; a page reached by a client-side navigation from another class of page is
+ * reloaded instead, and renders nothing until then.
  */
-export function FloFiPrivyProvider({ config, accounts = false, nonce, children }: { config: PrivyBrowserConfig | null; accounts?: boolean; nonce?: string;
-  children: ReactNode }) {
+export function FloFiPrivyProvider({ config, accounts = false, children }: { config: PrivyBrowserConfig | null; accounts?: boolean; children: ReactNode }) {
   // BUILD-FLOFI-EXECUTION-PERFORMANCE-001: keyed on the configuration's content, not its object identity. A server action that sets a cookie
   // re-renders the layout with an equal but new `config` object; Privy must not receive new settings (and possibly re-initialise) for it.
   const configKey = config ? JSON.stringify(config) : null;
-  const settings = useMemo(() => configKey ? floFiPrivyConfig(JSON.parse(configKey) as PrivyBrowserConfig, nonce) : null, [configKey, nonce]);
-  const inner = !config || !settings ? <Context.Provider value={null}>{children}</Context.Provider>
+  const settings = useMemo(() => configKey ? floFiPrivyConfig(JSON.parse(configKey) as PrivyBrowserConfig) : null, [configKey]);
+  const pathname = usePathname();
+  // getServerSnapshot is this page's path (the proxy just served its policy). If the server path still evaluates the
+  // client snapshot, Navigation Timing is empty and would leave Privy unmounted in the SSR HTML ("not configured").
+  // Fall back to pathname only on the server; keep null on the client so a missing Timing entry stays fail-closed.
+  const timed = useSyncExternalStore(NO_CHANGES, loadedDocumentPath, () => pathname);
+  const loaded = timed ?? (typeof window === 'undefined' ? pathname : null);
+  const { mount, reload } = signerDocument(pathname, loaded);
+  useEffect(() => { if (reload) location.reload(); }, [reload]);
+  const inner = reload ? null : !config || !settings || !mount ? <Context.Provider value={null}>{children}</Context.Provider>
     : config.e2e ? <EmulatedPrivy>{children}</EmulatedPrivy>
       : <PrivyProvider appId={config.appId} config={settings}><PrivyBridge>{children}</PrivyBridge></PrivyProvider>;
   return <AccountsContext.Provider value={accounts}>{inner}</AccountsContext.Provider>;

@@ -24,4 +24,5 @@ ALTER TABLE flofi_account_wallets
   DROP CONSTRAINT flofi_account_wallets_check2,
   ADD CONSTRAINT flofi_account_wallets_check2 CHECK (origin = 'EXTERNAL' OR (provider = 'turnkey' AND provider_resource IS NOT NULL) OR provider = 'privy'),
   DROP CONSTRAINT flofi_account_wallets_check3,
-  ADD CONSTRAINT flofi_account_wallets_check3 CHECK (origin <> 'GENERATED' OR export = 'RECOVERY_PHRASE' OR (provider = 'privy' AND export = 'PRIVATE_KEY'));
+  ADD CONSTRAINT flofi_account_wallets_check3 CHECK (origin <> 'GENERATED' OR (provider = 'turnkey' AND export = 'RECOVERY_PHRASE')
+    OR (provider = 'privy' AND export = 'PRIVATE_KEY'));

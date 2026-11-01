@@ -17,9 +17,8 @@ import { evmWalletEntries } from '../wallet/evm-discovery';
 import { solanaWalletChoices } from '../wallet/solana-wallet';
 import { EVM_WALLET_NETWORKS } from '../wallet/evm-networks';
 import { ECOSYSTEM_LABEL, type WalletEcosystem } from '../wallet/wallet-registry';
-import { addProviderCard, cardProviderStatus, removeProviderCard } from '../app/card-action';
-import type { CardProviderClient, CardProviderStatus } from '../server/card-provider';
-import { loadMercadoPago, type MercadoPagoInstance, type MercadoPagoSecureField, type SecureFieldType } from './card-secure-fields';
+import { addProviderCard, cardProviderStatus, removeProviderCard, type CardEntryStatus } from '../app/card-action';
+import { parseCardFrameMessage, type CardParentMessage } from './card-frame-protocol';
 import { AccountWalletsSection } from './account/account-wallets';
 
 type IconName = 'wallet' | 'agent' | 'key' | 'plus' | 'copy' | 'card' | 'secret';
@@ -145,82 +144,65 @@ function CardCredential({ card, onStatus }: { card: SavedCard; onStatus(message:
   </article>;
 }
 
-const CARD_FIELDS: readonly { readonly type: SecureFieldType; readonly label: string; readonly placeholder: string }[] = [
-  { type: 'cardNumber', label: 'Card number', placeholder: '1234 1234 1234 1234' },
-  { type: 'expirationDate', label: 'Expiry', placeholder: 'MM/YY' },
-  { type: 'securityCode', label: 'Security code', placeholder: 'CVC' },
-];
 const CARD_ERRORS: Readonly<Record<string, string>> = {
   CARD_EMAIL_INVALID: 'Enter a valid email address.',
   CARD_LIMIT_REACHED: 'This email already has the maximum number of saved cards.',
   CARD_REJECTED_BY_PROVIDER: 'The card could not be saved. Check the details and try again.',
   CARD_TOKEN_INVALID: 'The card could not be saved. Check the details and try again.',
 };
+/** How long Add card waits for the card page to report ready or unavailable. */
+const CARD_FRAME_TIMEOUT_MS = 20_000;
 /**
- * The provider's own secure fields inside the Add card dialog. The card number, expiry and security code are typed into the
- * provider's iframes; FloFi sends its server only the provider's one-time token and the email the provider saves the card
- * under. Adding a card never charges it.
+ * The provider's secure entry, framed from the card origin (src/server/card-origin.ts): Mercado Pago's SDK never runs on this origin,
+ * which hosts the FloFi wallet signer. The card number, expiry and security code are typed into the provider's own iframes there; this
+ * page receives only the provider's one-time token and the email (only from that origin and that frame) and saves the card with its own
+ * server action. Adding a card never charges it.
  */
-function SecureCardForm({ client, providerName, titleId, onClose, onAdded }: {
-  client: CardProviderClient; providerName: string; titleId: string; onClose(): void; onAdded(label: string): void;
-}) {
-  const { t: tr } = useLocale();
-  const baseId = useId().replace(/[^A-Za-z0-9_-]/g, '');
-  const sdk = useRef<MercadoPagoInstance | null>(null);
-  const [phase, setPhase] = useState<'loading' | 'ready' | 'saving' | 'unavailable'>('loading');
-  const [documents, setDocuments] = useState<readonly string[]>([]);
-  const [error, setError] = useState('');
+function SecureCardFrame({ entry, providerName, onClose, onAdded }: { entry: string; providerName: string; onClose(): void; onAdded(label: string): void }) {
+  const { t: tr, language } = useLocale();
+  const frame = useRef<HTMLIFrameElement>(null);
+  const [phase, setPhase] = useState<'loading' | 'ready' | 'unavailable'>('loading');
+  const origin = new URL(entry).origin;
+  const theme = typeof document !== 'undefined' && document.documentElement.dataset.theme === 'dark' ? 'dark' : 'light';
+  const src = `${entry}?lang=${language}&theme=${theme}`;
+  const close = useRef(onClose), added = useRef(onAdded), closeButton = useRef<HTMLButtonElement>(null);
+  close.current = onClose; added.current = onAdded;
   useEffect(() => {
-    let current = true;
-    const mounted: MercadoPagoSecureField[] = [];
-    void (async () => {
+    let saving = false;
+    const reply = (message: CardParentMessage) => frame.current?.contentWindow?.postMessage(message, origin);
+    async function save(token: string, email: string) {
+      if (saving) return;
+      saving = true;
+      const result = await addProviderCard({ token, email }).catch(() => ({ ok: false as const, code: 'CARD_PROVIDER_UNREACHABLE' }));
+      saving = false;
+      if (!result.ok) { reply({ type: 'flofi-card-result', ok: false, error: CARD_ERRORS[result.code] ?? 'The card could not be added. Nothing was saved.' }); return; }
       try {
-        const MercadoPago = await loadMercadoPago(client.sdkUrl);
-        if (!current) return;
-        const instance = new MercadoPago(client.publicKey, { locale: client.locale });
-        const tokens = getComputedStyle(document.documentElement);
-        const style = { fontSize: '14px', color: tokens.getPropertyValue('--ink').trim() || '#10233f', placeholderColor: tokens.getPropertyValue('--muted').trim() || '#6b778c' };
-        for (const field of CARD_FIELDS) mounted.push(instance.fields.create(field.type, { placeholder: field.placeholder, style }).mount(`${baseId}-${field.type}`));
-        const types = (await instance.getIdentificationTypes()).map(type => type.id).filter((id): id is string => typeof id === 'string' && /^[A-Z]{2,10}$/.test(id));
-        if (!current) return;
-        if (!types.length) throw new Error('CARD_SDK_UNAVAILABLE');
-        sdk.current = instance; setDocuments(types); setPhase('ready');
-      } catch { if (current) setPhase('unavailable'); }
-    })();
-    return () => { current = false; sdk.current = null; for (const field of mounted) try { field.unmount(); } catch { /* already gone */ } };
-  }, [baseId, client]);
-  async function submit(form: HTMLFormElement) {
-    const data = new FormData(form), text = (name: string) => String(data.get(name) ?? '').trim();
-    const holder = text('cardholderName'), documentType = text('identificationType'), documentNumber = text('identificationNumber').replace(/\D/g, ''), email = text('email');
-    if (!sdk.current || phase !== 'ready') return;
-    if (!holder || !documentType || !documentNumber || !email) { setError('Fill in every field.'); return; }
-    setError(''); setPhase('saving');
-    let token: unknown;
-    try { token = (await sdk.current.fields.createCardToken({ cardholderName: holder, identificationType: documentType, identificationNumber: documentNumber })).id; }
-    catch { setPhase('ready'); setError('Check the card details and try again.'); return; }
-    if (typeof token !== 'string') { setPhase('ready'); setError('Check the card details and try again.'); return; }
-    const added = await addProviderCard({ token, email }).catch(() => ({ ok: false as const, code: 'CARD_PROVIDER_UNREACHABLE' }));
-    if (!added.ok) { setPhase('ready'); setError(CARD_ERRORS[added.code] ?? 'The card could not be added. Nothing was saved.'); return; }
-    try {
-      const saved = saveCardReference(added.value).cards.find(card => card.providerCardId === added.value.providerCardId && card.provider === added.value.provider);
-      onAdded(saved?.label ?? 'Card');
-    } catch { setPhase('ready'); setError('The card could not be added. Nothing was saved.'); }
-  }
+        const saved = saveCardReference(result.value).cards.find(card => card.providerCardId === result.value.providerCardId && card.provider === result.value.provider);
+        reply({ type: 'flofi-card-result', ok: true }); added.current(saved?.label ?? 'Card');
+      } catch { reply({ type: 'flofi-card-result', ok: false, error: 'The card could not be added. Nothing was saved.' }); }
+    }
+    function onMessage(event: MessageEvent) {
+      if (event.origin !== origin || !frame.current || event.source !== frame.current.contentWindow) return;
+      const message = parseCardFrameMessage(event.data);
+      if (!message) return;
+      if (message.type === 'flofi-card-ready') setPhase('ready');
+      else if (message.type === 'flofi-card-unavailable') setPhase('unavailable');
+      else if (message.type === 'flofi-card-cancel') close.current();
+      else void save(message.token, message.email);
+    }
+    window.addEventListener('message', onMessage);
+    // A frame that never answers (card origin not reachable, framing refused) ends as unavailable instead of a blank, busy dialog.
+    const timeout = setTimeout(() => setPhase(current => current === 'loading' ? 'unavailable' : current), CARD_FRAME_TIMEOUT_MS);
+    return () => { window.removeEventListener('message', onMessage); clearTimeout(timeout); };
+  }, [origin]);
+  // The frame (and any focus inside it) is gone once entry is unavailable: focus moves to Close.
+  useEffect(() => { if (phase === 'unavailable') closeButton.current?.focus(); }, [phase]);
   if (phase === 'unavailable') return <><div role="status" className="card-entry-body"><p>{tr("Secure card entry could not be loaded. Nothing was collected. Try again later.")}</p></div>
-    <div className="wallet-selector-footer"><button type="button" className="workspace-action" onClick={onClose}>{tr("Close")}</button></div></>;
-  return <form className="card-entry-form" aria-labelledby={titleId} aria-busy={phase !== 'ready'} noValidate onSubmit={event => { event.preventDefault(); void submit(event.currentTarget); }}>
-    <p className="card-entry-note">{tr("Card details are entered in {0}'s secure fields. FloFi receives only a token, the brand, the last four digits and the expiry date.", providerName)}</p>
-    {CARD_FIELDS.map(field => <div key={field.type} className={`card-entry-field card-entry-${field.type}`} role="group" aria-labelledby={`${baseId}-${field.type}-label`}>
-      <span id={`${baseId}-${field.type}-label`}>{tr(field.label)}</span><div id={`${baseId}-${field.type}`} className="card-entry-secure" data-secure-field={field.type}/>
-    </div>)}
-    <label className="card-entry-field card-entry-holder">{tr("Name on card")}<input name="cardholderName" autoComplete="cc-name" maxLength={60} required/></label>
-    <label className="card-entry-field card-entry-document-type">{tr("Document")}<select name="identificationType" required>{documents.map(type => <option key={type} value={type}>{type}</option>)}</select></label>
-    <label className="card-entry-field card-entry-document">{tr("Number")}<input name="identificationNumber" inputMode="numeric" autoComplete="off" maxLength={18} required/></label>
-    <label className="card-entry-field card-entry-email">{tr("Email")}<input name="email" type="email" autoComplete="email" maxLength={254} required/></label>
-    {error && <p className="workspace-inline-error card-entry-error" role="alert">{tr(error)}</p>}
-    <div className="wallet-selector-footer card-entry-actions"><button type="button" className="workspace-action" onClick={onClose}>{tr("Cancel")}</button>
-      <button type="submit" className="workspace-action" disabled={phase !== 'ready'}>{tr(phase === 'saving' ? 'Adding…' : 'Add card')}</button></div>
-  </form>;
+    <div className="wallet-selector-footer"><button ref={closeButton} type="button" className="workspace-action" onClick={onClose}>{tr("Close")}</button></div></>;
+  // Sandboxed (it keeps its own origin for the provider) so the card page can never navigate this page; no Payment Request permission.
+  return <>{phase === 'loading' && <p role="status" className="card-entry-loading">{tr('Loading secure card entry…')}</p>}
+    <iframe ref={frame} className="card-entry-frame" src={src} title={tr('{0} secure card entry', providerName)} referrerPolicy="no-referrer"
+      sandbox="allow-scripts allow-same-origin allow-forms allow-popups" aria-busy={phase !== 'ready'}/></>;
 }
 
 /**
@@ -231,7 +213,7 @@ function CardEntryDialog({ onClose, onAdded }: { onClose(): void; onAdded(label:
   const dialog = useRef<HTMLDialogElement>(null);
   const { t: tr } = useLocale();
   const titleId = useId(), bodyId = useId();
-  const [status, setStatus] = useState<CardProviderStatus | null>(null);
+  const [status, setStatus] = useState<CardEntryStatus | null>(null);
   const [failed, setFailed] = useState(false);
   useEffect(() => {
     const element = dialog.current, previous = document.activeElement instanceof HTMLElement ? document.activeElement : null;
@@ -240,7 +222,7 @@ function CardEntryDialog({ onClose, onAdded }: { onClose(): void; onAdded(label:
     void cardProviderStatus().then(value => { if (current) setStatus(value); }).catch(() => { if (current) setFailed(true); });
     return () => { current = false; if (element?.open) element.close(); if (previous?.isConnected) previous.focus({ preventScroll: true }); };
   }, []);
-  const secure = status?.available && status.client.kind === 'mercado_pago_secure_fields' ? status : null;
+  const secure = status?.available ? status : null;
   return <dialog ref={dialog} className="wallet-selector card-entry" aria-labelledby={titleId} aria-describedby={secure ? undefined : bodyId}
     onCancel={event => { event.preventDefault(); onClose(); }} onClick={event => { if (event.target === event.currentTarget) onClose(); }}>
     <div className="wallet-selector-panel">
@@ -248,12 +230,14 @@ function CardEntryDialog({ onClose, onAdded }: { onClose(): void; onAdded(label:
         <button type="button" className="wallet-selector-close" aria-label={tr("Close")} autoFocus onClick={onClose}>
           <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg>
         </button></div>
-      {secure ? <SecureCardForm client={secure.client} providerName={secure.provider.name} titleId={titleId} onClose={onClose} onAdded={onAdded}/> : <>
+      {secure ? <SecureCardFrame entry={secure.entry} providerName={secure.provider.name} onClose={onClose} onAdded={onAdded}/> : <>
         <div id={bodyId} role="status" className="card-entry-body">
           {failed ? <p>{tr("Card entry status could not be checked. Nothing was collected. Try again later.")}</p>
             : !status ? <p>{tr("Checking secure card entry…")}</p>
               : <><p><strong>{tr("Secure card entry isn't available yet.")}</strong></p>
-                <p>{tr("FloFi never asks for your card number or security code in its own forms. Cards are added only through a certified card provider's secure entry, and no card provider is connected to FloFi yet.")}</p></>}
+                <p>{tr(!status.available && status.code === 'CARD_ORIGIN_REQUIRED'
+                  ? "FloFi never asks for your card number or security code in its own forms. Cards are added only through the card provider's secure entry, on FloFi's separate card page, which isn't set up on this deployment yet."
+                  : "FloFi never asks for your card number or security code in its own forms. Cards are added only through a certified card provider's secure entry, and no card provider is connected to FloFi yet.")}</p></>}
         </div>
         <div className="wallet-selector-footer"><button type="button" className="workspace-action" onClick={onClose}>{tr("Close")}</button></div></>}
     </div>

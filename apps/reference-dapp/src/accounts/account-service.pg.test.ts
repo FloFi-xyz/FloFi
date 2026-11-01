@@ -15,10 +15,12 @@ const APP = 'cmflofitestapp0000000001';
 const config: PrivyServerConfig = { appId: APP, appSecret: 'x'.repeat(32), apiUrl: 'https://api.privy.io', verificationKey: null, apple: false, e2e: false };
 type Linked = Record<string, unknown>;
 const did = (n: number) => `did:privy:cmuser${String(n).padStart(19, '0')}`;
-const google = (subject: string, at = 10): Linked => ({ type: 'google_oauth', subject, email: `${subject}@gmail.com`, latest_verified_at: at, verified_at: at });
-const email = (address: string, at = 10): Linked => ({ type: 'email', address, latest_verified_at: at, verified_at: at });
+/** Privy's verification time of an identity: `at` seconds after a moment shortly before the test clock (orders methods; stays recent). */
+const verified = (at: number) => Math.floor(clock.getTime() / 1000) - 100 + at;
+const google = (subject: string, at = 10): Linked => ({ type: 'google_oauth', subject, email: `${subject}@gmail.com`, latest_verified_at: verified(at), verified_at: verified(at) });
+const email = (address: string, at = 10): Linked => ({ type: 'email', address, latest_verified_at: verified(at), verified_at: verified(at) });
 const external = (address: string, at = 10): Linked => ({ type: 'wallet', chain_type: 'ethereum', address, wallet_client_type: 'metamask', connector_type: 'injected',
-  latest_verified_at: at, verified_at: at });
+  latest_verified_at: verified(at), verified_at: verified(at) });
 const embedded = (address: string, options: { solana?: boolean; imported?: boolean; id?: string } = {}): Linked => ({ type: 'wallet', id: options.id ?? `w${address.slice(-23)}`,
   chain_type: options.solana ? 'solana' : 'ethereum', address, wallet_client_type: 'privy', connector_type: 'embedded', imported: options.imported === true, delegated: false,
   verified_at: 1, latest_verified_at: 1 });
@@ -27,12 +29,12 @@ const EVM_1 = '0x' + '1'.repeat(40), EVM_2 = '0x' + '2'.repeat(40), EVM_X = '0x'
 let t: TestDatabase, clock: Date;
 const users = new Map<string, Linked[]>();
 /**
- * Privy's two answers: a token is `h.<base64url DID>.s<n>` issued now (each one unique, as Privy's are), or `h.<DID>.t<seconds>` issued at
- * that time; unknown or malformed ones are refused like a bad signature.
+ * Privy's two answers: a token is `h.<base64url {user, serial}>.s<n>` issued now (each payload unique, as Privy's are), or has a
+ * `.t<seconds>` signature for an issuance at that time; unknown or malformed ones are refused like a bad signature.
  */
 const api: PrivyApi = {
   verifyAccessToken: async token => {
-    const [head, body = '', tail = ''] = token.split('.'), user = head === 'h' ? Buffer.from(body, 'base64url').toString() : '';
+    const [head, body = '', tail = ''] = token.split('.'), user = head === 'h' ? (JSON.parse(Buffer.from(body, 'base64url').toString()) as { user: string }).user : '';
     if (!users.has(user)) throw new Error('Authentication token is invalid');
     const issuedAt = tail.startsWith('t') ? Number(tail.slice(1)) : Math.floor(clock.getTime() / 1000);
     return { app_id: APP, user_id: user, session_id: 'sid', issued_at: issuedAt, expiration: Math.floor(Date.now() / 1000) + 3600 };
@@ -40,7 +42,7 @@ const api: PrivyApi = {
   getUser: async id => ({ id, linked_accounts: users.get(id) ?? [] }),
 };
 let issued = 0;
-const tokenOf = (id: string, issuedAtSeconds?: number) => `h.${Buffer.from(id).toString('base64url')}.${issuedAtSeconds === undefined ? `s${++issued}` : `t${issuedAtSeconds}`}`;
+const tokenOf = (id: string, issuedAtSeconds?: number) => `h.${Buffer.from(JSON.stringify({ user: id, serial: ++issued })).toString('base64url')}.${issuedAtSeconds === undefined ? `s${issued}` : `t${issuedAtSeconds}`}`;
 const store = () => createAccountStore(t.db, 'default');
 const service = () => createAccountService({ store: store(), privy: createPrivyServer(config, api), now: () => clock });
 const signIn = (id: string) => service().completePrivy(tokenOf(id));
@@ -129,10 +131,39 @@ describe('Privy sign-in reaches exactly one FloFi account', () => {
     const token = tokenOf(did(14));
     const first = await service().completePrivy(token);
     await expect(service().completePrivy(token)).rejects.toThrow('PRIVY_SIGN_IN_STALE');
+    // The stand-in accepts another signature for these same signed claims; it is still the same single-use proof.
+    await expect(service().completePrivy(token.replace(/\.[^.]+$/, '.anotherSignature'))).rejects.toThrow('PRIVY_SIGN_IN_STALE');
     const old = Math.floor(clock.getTime() / 1000) - 11 * 60;
     await expect(service().completePrivy(tokenOf(did(14), old))).rejects.toThrow('PRIVY_SIGN_IN_STALE');
     expect((await service().completePrivy(tokenOf(did(14)))).session.accountId).toBe(first.session.accountId);
     expect((await t.db.query("SELECT count(*)::int AS n FROM flofi_account_sessions WHERE revoked_at IS NULL")).rows).toEqual([{ n: 2 }]);
+  });
+
+  it('opens no session from a silently refreshed token of an old Privy login, and dates a session from Privy’s last verification', async () => {
+    // An hour-old Privy login whose access token was just refreshed: nothing is opened (the token is new, the login is not).
+    users.set(did(15), [google('g-15', -3600)]);
+    await expect(signIn(did(15))).rejects.toThrow('PRIVY_SIGN_IN_STALE');
+    // A verification time from the future, or none at all, counts as old too.
+    users.set(did(15), [google('g-15', 400)]);
+    await expect(signIn(did(15))).rejects.toThrow('PRIVY_SIGN_IN_STALE');
+    users.set(did(15), [{ type: 'google_oauth', subject: 'g-15', email: 'g-15@gmail.com' }]);
+    await expect(signIn(did(15))).rejects.toThrow('PRIVY_SIGN_IN_STALE');
+    expect((await t.db.query('SELECT count(*)::int AS n FROM flofi_account_sessions')).rows).toEqual([{ n: 0 }]);
+    // A real sign-in at Privy (a new verification) opens a session that counts as recent, from that verification.
+    users.set(did(15), [google('g-15')]);
+    const fresh = await signIn(did(15));
+    expect(fresh.session.authenticatedAt).toBe(verified(10));
+    await service().deleteAccount(fresh.session);
+  });
+
+  it('removes email-code challenges older than a day at every sign-in (they hold a plaintext email)', async () => {
+    await t.db.query(`INSERT INTO flofi_account_email_challenges (tenant_id, challenge_id, email, provider_challenge, browser_binding, created_at, expires_at)
+      VALUES ('default', $1, 'old@example.com', 'otp-12345678', $2, $3::timestamptz - interval '2 days', $3::timestamptz - interval '2 days' + interval '10 minutes'),
+             ('default', $4, 'new@example.com', 'otp-87654321', $2, $3, $3::timestamptz + interval '10 minutes')`,
+    ['a'.repeat(32), '02' + 'b'.repeat(64), clock, 'c'.repeat(32)]);
+    users.set(did(16), [google('g-16')]);
+    await signIn(did(16));
+    expect((await t.db.query('SELECT email FROM flofi_account_email_challenges ORDER BY email')).rows).toEqual([{ email: 'new@example.com' }]);
   });
 
   it('refuses an unverifiable token and writes nothing', async () => {
@@ -241,6 +272,17 @@ describe('Privy wallets are saved only for the account’s own Privy user', () =
     expect(adopted).toMatchObject({ address: EVM_X, label: 'EVM wallet', provider: 'privy', origin: 'imported', export: 'private-key' });
     expect((await service().privyWallets(outcome.session)).map(wallet => wallet.address).sort()).toEqual([EVM_1, EVM_X].sort());
     expect((await store().account(legacy.accountId))?.organization).toMatchObject({ provider: 'turnkey', organization: 'org-12345678' });
+  });
+
+  it('refuses a wallet name that looks like part of a key, so no key fragment reaches the database', async () => {
+    users.set(did(28), [google('g-28'), embedded(EVM_1)]);
+    const { session } = await signIn(did(28));
+    for (const label of ['a'.repeat(40), '0x' + 'ab'.repeat(19), '4NdmBQtrMJVYVfKf2PJy9NZUZdT', 'Main ' + 'f'.repeat(24)])
+      await expect(service().savePrivyWallet(session, tokenOf(did(28)), { ecosystem: 'evm', address: EVM_1, label })).rejects.toThrow('ACCOUNT_WALLET_LABEL_KEY_SHAPED');
+    await expect(store().renameWallet(session.accountId, 'evm', EVM_1, '0x' + 'cd'.repeat(19))).rejects.toThrow('ACCOUNT_WALLET_LABEL_KEY_SHAPED');
+    expect((await t.db.query("SELECT count(*)::int AS n FROM flofi_account_wallets WHERE label ~ '[0-9a-fA-F]{20}|[1-9A-HJ-NP-Za-km-z]{24}'")).rows).toEqual([{ n: 0 }]);
+    expect(await service().savePrivyWallet(session, tokenOf(did(28)), { ecosystem: 'evm', address: EVM_1, label: 'Trading 2026' })).toMatchObject({ address: EVM_1 });
+    await store().renameWallet(session.accountId, 'evm', EVM_1, 'Trading 2026');
   });
 
   it('never links one of the account’s own FloFi (Privy) wallets as an external wallet or a sign-in identity', async () => {

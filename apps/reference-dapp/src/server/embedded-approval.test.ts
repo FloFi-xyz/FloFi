@@ -20,11 +20,11 @@ describe('MCP signing frame isolation', () => {
     expect(approvalFrameAncestors({ FLOFI_PUBLIC_ORIGIN: 'http://127.0.0.1:3148' }).split(' ')).toContain('http://127.0.0.1:3148');
     expect(approvalFrameAncestors({ FLOFI_PUBLIC_ORIGIN: 'http://127.0.0.1:3148', VERCEL: '1' })).toBe("'none'");
   });
-  it('keeps first-party cookies Strict and partitions embedded HttpOnly Secure cookies on the signing path', () => {
+  it('keeps first-party cookies Strict and partitions host-prefixed embedded HttpOnly Secure cookies', () => {
     expect(walletCookieOptions(true, 300)).toEqual({ httpOnly: true, sameSite: 'strict', secure: true, path: '/', maxAge: 300 });
-    expect(walletCookieOptions(true, 300, true)).toEqual({ httpOnly: true, sameSite: 'none', secure: true, partitioned: true, path: '/mcp/approve', maxAge: 300 });
-    expect(walletCookieOptions(true, 0, true)).toMatchObject({ maxAge: 0, partitioned: true, path: '/mcp/approve' });
+    expect(walletCookieOptions(true, 300, true)).toEqual({ httpOnly: true, sameSite: 'none', secure: true, partitioned: true, path: '/', maxAge: 300 });
+    expect(walletCookieOptions(true, 0, true)).toMatchObject({ maxAge: 0, partitioned: true, path: '/' });
     expect(() => walletCookieOptions(false, 300, true)).toThrow('EMBEDDED_WALLET_REQUIRES_HTTPS');
-    expect(embeddedWalletCookie('flofi_wallet_session')).toBe('embedded_flofi_wallet_session');
+    expect(embeddedWalletCookie('flofi_wallet_session')).toBe('__Host-embedded_flofi_wallet_session');
   });
 });

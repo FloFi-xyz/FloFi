@@ -68,6 +68,27 @@ export function floFiPrivyWalletIssue(privy: FloFiPrivy | null, ecosystem: Walle
   return listed ? 'FLOFI_WALLET_NOT_READY' : 'FLOFI_WALLET_ACCOUNT_MISMATCH';
 }
 
+/**
+ * Privy's login events, kept for the first subscriber when one comes before anyone listens: Privy reports a login it just completed (an
+ * OAuth return) or a session that already existed while it initializes, which can be before the page subscribes. A lost "already
+ * authenticated" event would leave a leftover session neither used nor ended; a lost completion would leave sign-in waiting.
+ */
+export function createLoginChannel() {
+  const listeners = new Set<(event: PrivyLoginEvent) => void>();
+  let pending: PrivyLoginEvent | null = null;
+  return {
+    emit(event: PrivyLoginEvent) {
+      if (!listeners.size) { pending = event; return; }
+      for (const listener of [...listeners]) listener(event);
+    },
+    subscribe(listener: (event: PrivyLoginEvent) => void): () => void {
+      listeners.add(listener);
+      if (pending) { const event = pending; pending = null; queueMicrotask(() => { if (listeners.has(listener)) listener(event); }); }
+      return () => { listeners.delete(listener); };
+    },
+  };
+}
+
 const PRIVY_CODES: readonly [RegExp, string][] = [
   [/exited|closed|cancel|rejected|denied|user_exited/i, 'PRIVY_USER_CANCELLED'],
   [/already has (an )?(embedded|imported)/i, 'PRIVY_WALLET_LIMIT'],

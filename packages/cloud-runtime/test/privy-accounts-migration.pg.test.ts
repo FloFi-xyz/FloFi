@@ -67,6 +67,7 @@ describe('Privy accounts additive migration (0019)', () => {
       await wallet("'SOLANA', '7EcDhSYGxXyscszYEp35KHN8vvw3svAuLKTzXwCFLtV', 'IMPORTED', 'privy', 'FloFi wallet', NULL, 'PRIVATE_KEY', 'Imported'");
       // A Privy wallet never claims a recovery phrase; a Turnkey generated wallet still must; a Turnkey wallet still needs its resource.
       await expect(wallet("'EVM', '0x' || repeat('6', 40), 'IMPORTED', 'privy', 'FloFi wallet', NULL, 'RECOVERY_PHRASE', 'Imported'")).rejects.toThrow();
+      await expect(wallet("'EVM', '0x' || repeat('b', 40), 'GENERATED', 'privy', 'FloFi wallet', NULL, 'RECOVERY_PHRASE', 'EVM wallet'")).rejects.toThrow();
       await expect(wallet("'EVM', '0x' || repeat('7', 40), 'GENERATED', 'turnkey', 'FloFi wallet', 'wallet-12345678', 'PRIVATE_KEY', 'EVM wallet'")).rejects.toThrow();
       await expect(wallet("'EVM', '0x' || repeat('8', 40), 'GENERATED', 'turnkey', 'FloFi wallet', NULL, 'RECOVERY_PHRASE', 'EVM wallet'")).rejects.toThrow();
       // Any other managed provider is refused, and external wallets are still never exportable.

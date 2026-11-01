@@ -41,7 +41,7 @@ const sectionsPT: readonly Paragraphs[] = [
   ] },
   { title: 'Terceiros e transferências de dados', paragraphs: [
     'O funcionamento pode envolver o Telegram (mensagens), Vercel (site e funções), Railway (API), infraestrutura PostgreSQL/Neon (dados da aplicação) e prestadores de serviços blockchain. Apenas se a interpretação de mensagens por IA estiver ativada, poderá ser utilizado um fornecedor de modelos como a OpenAI. O Telegram trata as mensagens de acordo com as suas próprias políticas.',
-    'As contas FloFi usam a Privy para o início de sessão e as carteiras incorporadas: a Privy trata os identificadores de início de sessão (email, conta Google, endereço de carteira externa) e guarda as chaves das carteiras incorporadas no seu próprio ambiente seguro, incluindo uma chave privada que importe. A FloFi nunca recebe essas chaves; a Privy trata estes dados de acordo com as suas próprias políticas.',
+    'As contas FloFi usam a Privy como fornecedora do início de sessão e das carteiras incorporadas, ao serviço da FloFi: a Privy trata os identificadores de início de sessão (email, conta Google, endereço de carteira externa) e guarda as chaves das carteiras incorporadas no seu próprio ambiente seguro. Uma chave privada que importe é escrita na página da FloFi e entregue, no seu navegador, diretamente à Privy; nunca é enviada aos servidores da FloFi, guardada nem registada. A FloFi guarda o identificador público do seu utilizador na Privy, os identificadores que a Privy verificou, os endereços públicos e identificadores das suas carteiras na Privy, e as sessões. Eliminar a conta FloFi apaga esses dados na FloFi, mas não o seu utilizador nem as suas carteiras na Privy: para os apagar também, exporte primeiro as carteiras que quiser manter e peça-o através do contacto desta página.',
     'Dependendo dos fornecedores e regiões de alojamento, podem existir transferências internacionais de dados, sujeitas às garantias legais aplicáveis.'
   ] },
   { title: 'Os seus direitos', paragraphs: [
@@ -58,7 +58,7 @@ const sectionsPT: readonly Paragraphs[] = [
     'O bot apenas prepara propostas. Uma operação exige que o utilizador aceda à FloFi, comprove o controlo da carteira, obtenha uma simulação atualizada, reveja o Strategy Manifest e assine explicitamente na própria carteira. Nenhuma mensagem de Telegram autoriza movimentação de fundos. A partilha do estado de execução de volta ao chat é opcional.'
   ] },
   { title: 'Atualizações', paragraphs: [
-    'Esta informação poderá ser atualizada quando mudarem de forma relevante as funcionalidades ou os tratamentos. Revisão: 15 de outubro de 2026.'
+    'Esta informação poderá ser atualizada quando mudarem de forma relevante as funcionalidades ou os tratamentos. Revisão: 1 de novembro de 2026.'
   ] },
 ];
 const sectionsEN: readonly Paragraphs[] = [
@@ -77,7 +77,7 @@ const sectionsEN: readonly Paragraphs[] = [
   ] },
   { title: 'Service providers and transfers', paragraphs: [
     'Services may involve Telegram (messages), Vercel (website/functions), Railway (API), PostgreSQL/Neon (application data) and blockchain providers. Only if AI message interpretation is enabled may a model provider such as OpenAI be used. Telegram processes messages under its own policies.',
-    'FloFi accounts use Privy for sign-in and embedded wallets: Privy processes your sign-in identifiers (email, Google account, external wallet address) and keeps your embedded wallets’ keys in its own secure environment, including a private key you import. FloFi never receives those keys; Privy processes this data under its own policies.',
+    'FloFi accounts use Privy as FloFi’s provider for sign-in and embedded wallets: Privy processes your sign-in identifiers (email, Google account, external wallet address) and keeps your embedded wallets’ keys in its own secure environment. A private key you import is typed into FloFi’s page and handed, in your browser, directly to Privy; it is never sent to FloFi’s servers, stored or logged. FloFi stores your Privy user’s public identifier, the identifiers Privy verified, the public addresses and Privy identifiers of your wallets, and your sessions. Deleting your FloFi account erases those at FloFi but not your Privy user or wallets: to have those erased too, first export any wallet you want to keep, then ask through the contact on this page.',
     'Depending on providers and hosting regions, international data transfers may take place, subject to applicable legal safeguards.'
   ] },
   { title: 'Your rights', paragraphs: [
@@ -94,7 +94,7 @@ const sectionsEN: readonly Paragraphs[] = [
     'The bot only prepares proposals. Any operation requires the user to open FloFi, prove wallet control, obtain a fresh simulation, review the Strategy Manifest and explicitly sign using their own wallet. No Telegram message can authorize a transfer. Sharing execution status with the chat is optional.'
   ] },
   { title: 'Updates', paragraphs: [
-    'This notice may be updated when features or processing change materially. Reviewed 15 October 2026.'
+    'This notice may be updated when features or processing change materially. Reviewed 1 November 2026.'
   ] },
 ];
 function Policy({ lang, heading, sections }: { lang: 'pt' | 'en'; heading: string; sections: readonly Paragraphs[] }) {
@@ -123,7 +123,7 @@ export default function PrivacyPage() {
         <span className={styles.kicker}>FLOFI / PRIVACY & TRUST</span>
         <h1>Privacidade, com clareza.<span>Privacy, made clear.</span></h1>
         <p>Informações sobre o site, o Telegram e os workflows da FloFi. Privacy information for the website, Telegram bot and wallet-controlled workflows.</p>
-        <span className={styles.date}>Atualização / Updated · 15 October 2026</span>
+        <span className={styles.date}>Atualização / Updated · 1 November 2026</span>
       </div>
       <aside className={styles.notice} aria-label="Financial authorization">
         <strong>O Telegram não pode movimentar os seus fundos. / Telegram cannot move your funds.</strong>

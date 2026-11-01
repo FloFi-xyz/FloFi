@@ -24,6 +24,6 @@ export default async function AccountLayout({ children }: { children: ReactNode 
     <script nonce={nonce} dangerouslySetInnerHTML={{ __html: THEME_BOOTSTRAP }}/>
     <SessionGuard/>
     {/* BUILD-FLOFI-PRIVY-UX-001: sign-in, wallet creation and import run through Privy (public app settings only; never a secret). */}
-    <FloFiPrivyProvider config={privyBrowserConfig(process.env)} accounts={Boolean(process.env.DATABASE_URL)} {...nonce ? { nonce } : {}}>{children}</FloFiPrivyProvider>
+    <FloFiPrivyProvider config={privyBrowserConfig(process.env)} accounts={Boolean(process.env.DATABASE_URL)}>{children}</FloFiPrivyProvider>
   </LocaleProvider>;
 }

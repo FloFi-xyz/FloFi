@@ -7,6 +7,8 @@
 import { createSign, generateKeyPairSync, randomBytes } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import { createPrivyServer, officialPrivyApi, privyBrowserConfig, privyConfig, readPrivyUser, type PrivyServerConfig } from './privy-server';
+import { createAccountService } from './account-service';
+import type { AccountStore } from './account-store';
 
 // A disposable app secret generated for this run (never a real Privy secret).
 const APP_ID = 'cmflofitestapp0000000001', SECRET = randomBytes(24).toString('hex');
@@ -80,6 +82,38 @@ describe('Privy access tokens (verified by @privy-io/node)', () => {
       await expect(privy.verify(bad)).rejects.toThrow('PRIVY_TOKEN_INVALID');
     }
   });
+  it('spends one sign-in proof for all valid signature representations of the same signed token', async () => {
+    const now = Math.floor(Date.now() / 1000);
+    const { privy } = server(() => json(user([{ ...email, latest_verified_at: now }])));
+    const original = token({}), [header, payload, signature] = original.split('.') as [string, string, string];
+    // A 64-byte ES256 signature has four unused bits in its last base64url character. The verifier accepts aliases with those bits set.
+    const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_', index = alphabet.indexOf(signature.at(-1)!);
+    const alias = `${header}.${payload}.${signature.slice(0, -1)}${alphabet[(index & 48) | 1]}`;
+    // ECDSA also permits (r, n - s): a different signature with the same signed content, generated without the signing key.
+    const bytes = Buffer.from(signature, 'base64url'), order = BigInt('0xffffffff00000000ffffffffffffffffbce6faada7179e84f3b9cac2fc632551');
+    const s = BigInt(`0x${bytes.subarray(32).toString('hex')}`);
+    const flipped = Buffer.concat([bytes.subarray(0, 32), Buffer.from((order - s).toString(16).padStart(64, '0'), 'hex')]);
+    const malleated = `${header}.${payload}.${flipped.toString('base64url')}`;
+    expect(new Set([original, alias, malleated]).size).toBe(3);
+    for (const valid of [original, alias, malleated]) await expect(privy.verify(valid)).resolves.toMatchObject({ userId: USER });
+    // The proof store double models PostgreSQL's unique digest; no SDK verification is mocked.
+    const proofs = new Set<string>();
+    let sessions = 0;
+    const store = {
+      consumeProof: async (digest: string) => { if (proofs.has(digest)) return false; proofs.add(digest); return true; },
+      signInPrivy: async () => { sessions++; return { accountId: `acct_${'a'.repeat(32)}`, sessionId: 'b'.repeat(32), method: 'email' as const,
+        authenticatedAt: now, expiresAt: now + 3600, created: true, skipped: 0 }; },
+      wallets: async () => [], account: async () => null,
+    } satisfies Pick<AccountStore, 'consumeProof' | 'signInPrivy' | 'wallets' | 'account'>;
+    const service = createAccountService({ store: store as unknown as AccountStore, privy });
+    // An invalid signature cannot consume the valid token's proof.
+    await expect(service.completePrivy(token({}, other.privateKey))).rejects.toThrow('PRIVY_TOKEN_INVALID');
+    expect(proofs.size).toBe(0);
+    await expect(service.completePrivy(original)).resolves.toMatchObject({ session: { method: 'email' } });
+    for (const replay of [original, alias, malleated]) await expect(service.completePrivy(replay)).rejects.toThrow('PRIVY_SIGN_IN_STALE');
+    expect(proofs.size).toBe(1);
+    expect(sessions).toBe(1);
+  });
 });
 
 describe('Privy users (read with the app secret, never from the browser)', () => {
@@ -93,12 +127,19 @@ describe('Privy users (read with the app secret, never from the browser)', () =>
       { kind: 'email', subject: 'ana@example.com', label: 'ana@example.com' },
       { kind: 'eip155', subject: '0xabcdef0123456789abcdef0123456789abcdef01', label: null },
     ]);
-    // The most recently verified sign-in method (the email code, latest_verified_at 30).
+    // The most recently verified sign-in method (the email code, latest_verified_at 30), and when Privy verified it.
     expect(result.method).toBe('email');
+    expect(result.verifiedAt).toBe(30);
     expect(result.wallets).toEqual([
       { ecosystem: 'evm', address: '0x1111111111111111111111111111111111111111', imported: false, delegated: false, walletId: 'privywalletevm0000000001' },
       { ecosystem: 'solana', address: '7EcDhSYGxXyscszYEp35KHN8vvw3svAuLKTzXwCFLtV', imported: true, delegated: false, walletId: 'privywalletsol0000000001' },
     ]);
+  });
+  it('counts an Apple identity only once this deployment enabled Apple (FloFi’s own Apple Services ID in Privy)', () => {
+    const apple = { type: 'apple_oauth', subject: '001234.abcdef.0123', email: 'ana@privaterelay.appleid.com', verified_at: 40, latest_verified_at: 40 };
+    expect(readPrivyUser(user([apple, google]), USER)).toMatchObject({ identities: [{ kind: 'google' }], method: 'google', verifiedAt: 20 });
+    expect(readPrivyUser(user([apple, google]), USER, { apple: true })).toMatchObject({ identities: [{ kind: 'apple' }, { kind: 'google' }], method: 'apple', verifiedAt: 40 });
+    expect(readPrivyUser(user([apple]), USER)).toEqual({ id: USER, identities: [], method: null, wallets: [], verifiedAt: null });
   });
   it('maps provider failures to stable codes', async () => {
     await expect(server(() => json({ error: 'nope' }, 404)).privy.user(USER)).rejects.toThrow('PRIVY_USER_NOT_FOUND');
@@ -117,6 +158,6 @@ describe('Privy users (read with the app secret, never from the browser)', () =>
       { type: 'phone', number: '+15555550123', verified_at: 99, latest_verified_at: 99 },
       { ...embeddedEvm, chain_type: 'bitcoin-segwit' },
     ]), USER);
-    expect(parsed).toEqual({ id: USER, identities: [], method: null, wallets: [] });
+    expect(parsed).toEqual({ id: USER, identities: [], method: null, wallets: [], verifiedAt: null });
   });
 });

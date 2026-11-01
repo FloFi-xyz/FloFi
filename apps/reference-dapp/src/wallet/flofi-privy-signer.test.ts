@@ -5,6 +5,7 @@
  * rejection (nothing signed); anything else after Privy was asked is unknown.
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { erc7710 } from '@defi-workflow-engine/reference-compiler';
 import { classifySigningFailure } from './flofi-signing';
 
 const gate = vi.fn(), messageGate = vi.fn();
@@ -22,6 +23,9 @@ const solana = { op: 'solana_sign_transaction' as const, address: '7EcDhSYGxXysc
   transaction: btoa(String.fromCharCode(1, ...new Array(64).fill(0), 0x80, 1, 0, 0)), signing: { flow: 'jupiter-swap', runId: `jupiter-${'b'.repeat(32)}` } };
 const SUMMARY = { flow: 'base-mainnet-transfer', runId: evm.signing.runId, network: 'Base', chain: 'eip155:8453', realFunds: true, action: 'Send', owner: OWNER,
   lines: [{ label: 'You send', value: '0.000000000000000001 ETH' }], expiresAt: null };
+/** Privy's answer: the request's exact EIP-1559 fields (or a patched copy) with a well-formed signature. */
+const signedEvm = (patch: Partial<erc7710.Eip1559> = {}) => erc7710.signedEip1559({ chainId: 8453n, nonce: 0n, maxPriorityFeePerGas: 1n, maxFeePerGas: 2n, gasLimit: 21_000n,
+  to: evm.tx.to, value: 1n, data: '0x', ...patch }, 1, 0x1234n, 0x5678n).raw;
 const code = async (run: Promise<unknown>) => run.then(() => 'OK', (error: Error) => error.message);
 
 beforeEach(() => { vi.clearAllMocks(); current = privy; privy.ready = true; privy.authenticated = true; privy.embedded = []; privy.canSign.mockImplementation(() => true); });
@@ -29,14 +33,24 @@ beforeEach(() => { vi.clearAllMocks(); current = privy; privy.ready = true; priv
 describe('Privy signing behind the reviewed-attempt gate', () => {
   it('asks the server first and hands Privy exactly the reviewed EIP-1559 fields on the attempt’s chain', async () => {
     gate.mockResolvedValue({ ok: true, value: SUMMARY });
-    privy.signEvmTransaction.mockResolvedValue('0x02abcdef');
-    await expect(requestThroughPrivy(evm)).resolves.toEqual({ signedTransaction: '0x02abcdef' });
+    privy.signEvmTransaction.mockResolvedValue(signedEvm());
+    await expect(requestThroughPrivy(evm)).resolves.toEqual({ signedTransaction: signedEvm() });
     expect(gate).toHaveBeenCalledWith(evm);
     // Privy's confirmation screen states FloFi's own server summary of the reviewed attempt.
     expect(privy.signEvmTransaction).toHaveBeenCalledWith(OWNER, { to: evm.tx.to, value: '0x1', data: '0x', chainId: 8453, nonce: '0x0', gas: '0x5208',
       maxFeePerGas: '0x2', maxPriorityFeePerGas: '0x1' }, { title: 'FloFi reviewed strategy', action: 'Send',
       description: `Base (real funds) · You send: 0.000000000000000001 ETH · FloFi run ${evm.signing.runId}` });
     expect(gate.mock.invocationCallOrder[0]!).toBeLessThan(privy.signEvmTransaction.mock.invocationCallOrder[0]!);
+  });
+  it('drops bytes Privy signed with any field other than the approved one (never broadcast; the outcome is unknown)', async () => {
+    gate.mockResolvedValue({ ok: true, value: SUMMARY });
+    for (const patch of [{ nonce: 1n }, { maxFeePerGas: 20n }, { maxPriorityFeePerGas: 2n }, { gasLimit: 21_001n }, { chainId: 1n }, { value: 2n }, { to: '0x' + '3'.repeat(40) }]) {
+      privy.signEvmTransaction.mockResolvedValueOnce(signedEvm(patch));
+      expect(await code(requestThroughPrivy(evm))).toBe('FLOFI_WALLET_SIGNATURE_UNKNOWN');
+    }
+    privy.signEvmTransaction.mockResolvedValueOnce('0x02abcdef');
+    expect(await code(requestThroughPrivy(evm))).toBe('FLOFI_WALLET_SIGNATURE_UNKNOWN');
+    expect(classifySigningFailure('FLOFI_WALLET_SIGNATURE_UNKNOWN')).toBe('unknown');
   });
   it('never asks Privy when the server finds no matching Review, and reports that as a refusal before any signature', async () => {
     gate.mockResolvedValue({ ok: false, code: 'FLOFI_WALLET_NO_MATCHING_REVIEW' });

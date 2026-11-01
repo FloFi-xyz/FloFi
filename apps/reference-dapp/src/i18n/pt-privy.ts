@@ -8,8 +8,8 @@ export const portuguesePrivy: Readonly<Record<string, string>> = {
   // Showcase
   'PROTECTED BY PRIVY': 'PROTEGIDO PELA PRIVY', 'Keys are created and kept by Privy, not by FloFi.': 'As chaves são criadas e guardadas pela Privy, não pelo FloFi.',
   // Add your wallets
-  'Create a new wallet or import one you already have. Keys are created and kept by our wallet provider, Privy — FloFi never sees or stores them.':
-    'Crie uma carteira nova ou importe uma que você já tem. As chaves são criadas e guardadas pelo nosso provedor de carteiras, a Privy — o FloFi nunca as vê nem armazena.',
+  'Create a new wallet or import one you already have. Keys are created and kept by our wallet provider, Privy — FloFi’s servers never receive or store them.':
+    'Crie uma nova carteira ou importe uma que você já tem. As chaves são criadas e guardadas pelo nosso provedor de carteiras, a Privy — os servidores do FloFi nunca as recebem nem armazenam.',
   'Creating your {0} wallet…': 'Criando sua carteira {0}…', '{0} wallets': 'Carteiras {0}', 'Wallet created': 'Carteira criada', 'Creating…': 'Criando…',
   'A new {0} wallet, ready right away': 'Uma carteira {0} nova, pronta na hora', 'Bring an existing {0} wallet with its private key': 'Traga uma carteira {0} existente com a chave privada',
   'Connecting to your wallet provider…': 'Conectando ao seu provedor de carteiras…', "Your wallet provider isn't responding.": 'Seu provedor de carteiras não está respondendo.',
@@ -17,11 +17,11 @@ export const portuguesePrivy: Readonly<Record<string, string>> = {
   'Sign in again to add wallets.': 'Entre de novo para adicionar carteiras.',
   'Your wallet provider session has ended in this browser. Your account and wallets are unchanged.':
     'Sua sessão no provedor de carteiras terminou neste navegador. Sua conta e suas carteiras não mudaram.',
-  'Check again': 'Verificar de novo', 'Created': 'Criada', 'Imported': 'Importada', 'Legacy FloFi Wallet': 'FloFi Wallet antiga', 'Continue': 'Continuar',
+  'Check again': 'Verificar de novo', 'Created': 'Criada', 'Imported': 'Importada', 'Imported {0} wallet': 'Carteira {0} importada', 'Legacy FloFi Wallet': 'FloFi Wallet antiga', 'Continue': 'Continuar',
   // Import screen
   'Import {0} wallet': 'Importar carteira {0}', 'Import your {0} wallet': 'Importe sua carteira {0}',
-  'Your private key goes straight to our wallet provider, Privy, in its own secure frame. FloFi never receives, stores or logs it.':
-    'Sua chave privada vai direto para o nosso provedor de carteiras, a Privy, no quadro seguro dela. O FloFi nunca a recebe, armazena ou registra.',
+  'Your private key is handed, in this browser, straight to our wallet provider Privy, which takes it into its own secure frame. It passes briefly through this page’s code on the way and is never sent to FloFi’s servers, stored or logged.':
+    'Sua chave privada é entregue, neste navegador, diretamente ao nosso provedor de carteiras, a Privy, que a leva para o próprio quadro seguro. Ela passa rapidamente pelo código desta página no caminho e nunca é enviada aos servidores do FloFi, armazenada ou registrada.',
   'Importing isn’t available right now.': 'A importação não está disponível agora.', 'Go back to Add wallets and sign in again if it asks you to.':
     'Volte para Adicionar carteiras e entre de novo se for pedido.', 'Back to Add wallets': 'Voltar para Adicionar carteiras', 'Private key': 'Chave privada',
   'Base58 private key': 'Chave privada em base58', 'Paste the 64-character hexadecimal private key of the EVM wallet.': 'Cole a chave privada hexadecimal de 64 caracteres da carteira EVM.',
@@ -40,6 +40,8 @@ export const portuguesePrivy: Readonly<Record<string, string>> = {
   'Authorize opens your FloFi wallet, where you confirm the exact transaction.': 'Autorizar abre sua carteira FloFi, onde você confirma a transação exata.',
   // Messages (account-messages.ts, flofi-signing.ts, wallet-messages.ts)
   'This address is already one of your FloFi wallets, so it is not added again as an external wallet.': 'Este endereço já é uma das suas carteiras FloFi, por isso não é adicionado de novo como carteira externa.',
+  'That name looks like part of a key. Choose a different name; nothing was saved.': 'Esse nome parece parte de uma chave. Escolha outro nome; nada foi salvo.',
+  'Your sign-in and wallets at our wallet provider, Privy, are not deleted by this. To have Privy delete them too, export your wallets first, then ask FloFi (see Privacy).': 'Isto não apaga o seu acesso nem as suas carteiras no nosso provedor de carteiras, a Privy. Para que a Privy também os apague, exporte primeiro as suas carteiras e depois peça ao FloFi (veja Privacidade).',
   'Wallets FloFi keeps for you stay in your account. Export one if you want to use it elsewhere.': 'As carteiras que o FloFi guarda para você continuam na sua conta. Exporte uma se quiser usá-la em outro lugar.',
   'FloFi could not save that wallet to your account yet. Your wallet is safe with the provider; choose Check again.':
     'O FloFi ainda não conseguiu salvar essa carteira na sua conta. Sua carteira está segura no provedor; escolha Verificar de novo.',

@@ -48,7 +48,13 @@ export function SignInScreen({ state, initialError, returnTo }: { state: Account
   }
   useEffect(() => {
     if (!privy) return;
-    const offLogin = privy.onLogin(() => { if (started.current) void finish(); });
+    // Only a login this page just completed signs in. A session that already existed (Privy reports `wasAlreadyAuthenticated`) is never
+    // turned into a FloFi sign-in, even when the URL looks like an OAuth return: it is ended instead.
+    const offLogin = privy.onLogin(event => {
+      if (!event.wasAlreadyAuthenticated) { if (started.current) void finish(); return; }
+      if (finishing.current) return;
+      started.current = false; setBusy(null); void privy.logout();
+    });
     const offError = privy.onLoginError(failure => { started.current = false; setBusy(null); setError(failure); });
     return () => { offLogin(); offError(); };
   }); // re-subscribes with the latest `privy` on every render
@@ -127,7 +133,7 @@ export function SignInScreen({ state, initialError, returnTo }: { state: Account
     </>}
     <p id={statusId} className={styles.status} role="status">{notice || (available.accounts && !configured ? t('Methods shown as unavailable are not configured on this deployment yet.') : '')}</p>
     {error && <p className={styles.error} role="alert">{t(accountMessage(error))}</p>}
-    {available.accounts && <p className={styles.small} style={{ textAlign: 'left' }}>{t('FloFi stores your sign-in identity (email address or provider ID) and the public addresses of wallets you save, never a key. You can delete your account in Credentials.')} <a href="/privacy">{t('Privacy')}</a></p>}
+    {available.accounts && <p className={styles.small} style={{ textAlign: 'left' }}>{t('FloFi stores your sign-in identities (email address or provider ID, as verified by Privy) and the public addresses of your FloFi wallets and of wallets you link, never a key. You can delete your account in Credentials.')} <a href="/privacy">{t('Privacy')}</a></p>}
     <div className={styles.notice}><span className={styles.noticeIcon}><AccountIcon name="shield" size={18}/></span><div>
       <strong>{t('Nothing executes without your review')}</strong>
       <p>{t('Your account is how you sign in. Transactions are always simulated, reviewed and signed by your own wallet.')}</p></div></div>

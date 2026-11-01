@@ -9,7 +9,7 @@
  * the account only after Privy's API confirms that this account's own Privy user holds it; creating or importing a wallet authorizes
  * nothing. Wallets created in FloFi Wallet (Turnkey) before Privy keep their records unchanged (legacy, export only).
  */
-import { accountWalletId, canonicalAddress, isPrivyWallet, LEGACY_MANAGED_PROVIDER, MANAGED_PROVIDER, MANAGED_PROVIDER_NAME, validProvider, walletLabel, type AccountView,
+import { accountWalletId, canonicalAddress, isPrivyWallet, LEGACY_MANAGED_PROVIDER, MANAGED_PROVIDER, MANAGED_PROVIDER_NAME, validProvider, walletLabel, writableWalletLabel, type AccountView,
   type AccountWallet, type IdentityKind } from './account-model.ts';
 import { createHash } from 'node:crypto';
 import { freshlyAuthenticated, SESSION_PUBLIC_KEY, type AccountSessionToken } from './account-session.ts';
@@ -80,11 +80,18 @@ export function createAccountService(input: { readonly store: AccountStore; read
       // A sign-in uses a token Privy just issued for this login, once: a copied or replayed token never opens another FloFi session.
       const at = now().getTime();
       if (verified.issuedAt * 1000 < at - PRIVY_SIGN_IN_MAX_AGE_MS || verified.issuedAt * 1000 > at + 60_000) fail('PRIVY_SIGN_IN_STALE');
-      if (!await store.consumeProof(createHash('sha256').update(`flofi-privy-sign-in:${token as string}`).digest('hex'), new Date(verified.expiresAt * 1000), now()))
+      // Key the proof on the verified signing input, not its signature: base64url aliases and ECDSA (r, n-s) both verify as the same
+      // token. The header and payload bytes are signed, so changing either cannot consume a proof without a valid Privy signature.
+      const signedInput = (token as string).slice(0, (token as string).lastIndexOf('.'));
+      if (!await store.consumeProof(createHash('sha256').update(`flofi-privy-sign-in:${signedInput}`).digest('hex'), new Date(verified.expiresAt * 1000), now()))
         fail('PRIVY_SIGN_IN_STALE');
       const user = await provider().user(verified.userId);
       if (!user.method) fail('PRIVY_LOGIN_METHOD_UNSUPPORTED');
-      const signed = await store.signInPrivy({ privyUser: user.id, identities: user.identities, method: user.method! }, now());
+      // …and only for a login the person just completed at Privy (its last verification of a sign-in method), never for an old Privy
+      // session whose token was silently refreshed: a missing or unusable time is treated as old (sign-in.tsx asks the same in the browser).
+      if (user.verifiedAt === null || user.verifiedAt * 1000 < at - PRIVY_SIGN_IN_MAX_AGE_MS || user.verifiedAt * 1000 > at + 60_000)
+        fail('PRIVY_SIGN_IN_STALE');
+      const signed = await store.signInPrivy({ privyUser: user.id, identities: user.identities, method: user.method!, verifiedAt: user.verifiedAt }, now());
       const session: AccountSessionToken = { accountId: signed.accountId, sessionId: signed.sessionId, method: signed.method,
         authenticatedAt: signed.authenticatedAt, expiresAt: signed.expiresAt };
       // A wallet whose save never finished (a closed tab, a timeout) is saved now; a failure here never blocks signing in.
@@ -99,7 +106,8 @@ export function createAccountService(input: { readonly store: AccountStore; read
     async savePrivyWallet(session: AccountSessionToken, token: unknown, request: { readonly ecosystem: unknown; readonly address: unknown; readonly label?: unknown }): Promise<AccountWallet> {
       if (request.ecosystem !== 'evm' && request.ecosystem !== 'solana') fail('ACCOUNT_WALLET_INVALID');
       const ecosystem = request.ecosystem as WalletEcosystem, address = canonicalAddress(ecosystem, request.address) ?? fail('ACCOUNT_WALLET_INVALID');
-      const label = request.label === undefined || request.label === null || request.label === '' ? null : walletLabel(request.label) ?? fail('ACCOUNT_WALLET_LABEL_INVALID');
+      const label = request.label === undefined || request.label === null || request.label === '' ? null
+        : writableWalletLabel(request.label) ?? fail(walletLabel(request.label) ? 'ACCOUNT_WALLET_LABEL_KEY_SHAPED' : 'ACCOUNT_WALLET_LABEL_INVALID');
       const user = await ownPrivyUser(session, token);
       const wallet = user.wallets.find(entry => entry.ecosystem === ecosystem && entry.address === address) ?? fail('ACCOUNT_WALLET_NOT_OWNED');
       return saveEmbedded(session, wallet!, label, true);
@@ -126,7 +134,8 @@ export function createAccountService(input: { readonly store: AccountStore; read
       await store.linkIdentity(session.accountId, { kind: proof!.namespace, subject: address!, label: null }, now());
       // An external wallet's provider key can never pose as a managed provider.
       const key = validProvider(provider.key) && provider.key !== MANAGED_PROVIDER && provider.key !== 'turnkey' ? provider.key : 'injected';
-      const name = walletLabel(provider.name) ?? ECOSYSTEM_LABEL[ecosystem];
+      // Checked before anything is written, so a key-shaped name never half-links the wallet (it falls back to the ecosystem's name).
+      const name = writableWalletLabel(provider.name) ?? ECOSYSTEM_LABEL[ecosystem];
       if (!holder) await store.saveWallet(session.accountId, { ecosystem, address: address!, origin: 'external', provider: key, providerName: name, providerResource: null, label: name }, now());
       return (await store.wallets(session.accountId)).find(wallet => wallet.id === accountWalletId(ecosystem, address!)) ?? fail('ACCOUNT_WALLET_NOT_FOUND');
     },

@@ -95,6 +95,17 @@ export function walletLabel(value: unknown): string | null {
   const label = withoutControlCharacters(value).replace(/\s+/g, ' ').trim();
   return label && label.length <= WALLET_LABEL_MAX ? label : null;
 }
+/**
+ * Whether text looks like part of a private key or seed (a long unbroken run of hex or base58), for example a key pasted into the
+ * Wallet name field by mistake. Such a name is refused whenever a name is written, so no fragment of a key reaches FloFi's database
+ * (BUILD-FLOFI-PRIVY-UX-001); names already stored are still shown.
+ */
+export const keyShapedText = (value: string): boolean => /[0-9a-fA-F]{20,}/.test(value) || /[1-9A-HJ-NP-Za-km-z]{24,}/.test(value);
+/** A wallet name as it may be written: a valid label that does not look like key material. */
+export function writableWalletLabel(value: unknown): string | null {
+  const label = walletLabel(value);
+  return label && !keyShapedText(label) ? label : null;
+}
 export const validProvider = (value: unknown): value is string => typeof value === 'string' && PROVIDER.test(value);
 /** A verified email address, normalised to lower case. Only the shape is checked here; verification belongs to the provider. */
 export function normalizeEmail(value: unknown): string | null {

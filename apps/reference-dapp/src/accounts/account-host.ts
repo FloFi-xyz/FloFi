@@ -9,6 +9,7 @@
 import { cookies } from 'next/headers';
 import { platformStateHost } from '../server/platform-state-host.ts';
 import { requestOrigin } from '../server/session-principal.ts';
+import { sessionCookieName } from '../server/session-cookie.ts';
 import { ACCOUNT_SESSION_COOKIE, ACCOUNT_SESSION_TTL_SECONDS, readAccountSession, safeReturnPath, sealAccountSession, type AccountIntent,
   type AccountSessionToken } from './account-session.ts';
 import { createAccountStore, type AccountStore } from './account-store.ts';
@@ -40,24 +41,27 @@ export function accountAvailability(env: Env, host: AccountHost | null): Account
     legacyWallets: accounts && turnkeyConfig(env) !== null && walletOrigin(env) !== null };
 }
 
-/** HttpOnly, host-only. Lax so the top-level redirect back from Google/Apple lands signed in; server actions also check Origin. */
+/** HttpOnly, host-only, Path=/ for the HTTPS __Host- name. Lax for provider redirects; server actions also check Origin. */
 export const accountCookieOptions = (secure: boolean, maxAge: number) => ({ httpOnly: true, sameSite: 'lax' as const, secure, path: '/', maxAge });
 /** Apple returns with a cross-site form POST, which only carries a `SameSite=None; Secure` cookie (Lax on a loopback test server). */
 export const flowCookieOptions = (secure: boolean, maxAge: number) => ({ httpOnly: true, sameSite: secure ? 'none' as const : 'lax' as const, secure, path: '/', maxAge });
 
 export async function setAccountCookie(session: AccountSessionToken, env: Env = process.env): Promise<void> {
   const origin = await requestOrigin();
-  (await cookies()).set(ACCOUNT_SESSION_COOKIE, sealAccountSession(env, session, origin.domain, new Date()),
+  (await cookies()).set(sessionCookieName(ACCOUNT_SESSION_COOKIE, origin.secure), sealAccountSession(env, session, origin.domain, new Date()),
     accountCookieOptions(origin.secure, Math.max(0, Math.min(ACCOUNT_SESSION_TTL_SECONDS, session.expiresAt - Math.floor(Date.now() / 1000)))));
 }
 export async function clearAccountCookie(): Promise<void> {
-  const origin = await requestOrigin();
-  (await cookies()).set(ACCOUNT_SESSION_COOKIE, '', accountCookieOptions(origin.secure, 0));
+  const origin = await requestOrigin(), jar = await cookies(), name = sessionCookieName(ACCOUNT_SESSION_COOKIE, origin.secure);
+  jar.set(name, '', accountCookieOptions(origin.secure, 0));
+  // Cleanup only: an HTTPS request never authenticates with the legacy name, including before it has a new cookie.
+  if (name !== ACCOUNT_SESSION_COOKIE) jar.set(ACCOUNT_SESSION_COOKIE, '', accountCookieOptions(origin.secure, 0));
 }
 /** The verified account session of this request, or null (no cookie, tampered, expired, revoked, another host or no database). */
 export async function currentAccountSession(host: AccountHost | null, env: Env = process.env): Promise<AccountSessionToken | null> {
   if (!host) return null;
-  const origin = await requestOrigin(), token = readAccountSession(env, (await cookies()).get(ACCOUNT_SESSION_COOKIE)?.value, new Date(), origin.domain);
+  const origin = await requestOrigin(), token = readAccountSession(env,
+    (await cookies()).get(sessionCookieName(ACCOUNT_SESSION_COOKIE, origin.secure))?.value, new Date(), origin.domain);
   if (!token) return null;
   try { return await host.store.verifySession(token) ? token : null; } catch { return null; }
 }
