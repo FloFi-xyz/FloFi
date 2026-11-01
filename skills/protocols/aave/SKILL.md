@@ -1,6 +1,7 @@
 # Aave V3 (FloFi engineering skill)
 
-- FloFi supports supply, borrow, repay and withdraw on Aave V3 (Ethereum, Base, Arbitrum One) through the Pool.
+- Aave V3 supply, borrow, repay and withdraw are registered for Ethereum, Base and Arbitrum One through the Pool,
+  deployment-gated (no mainnet execution evidence is recorded in the registry); check `executionCapabilityRegistry`.
 - Health factor and amounts are economic state: read fresh at the pinned block for every Review; a change requires a
   new Review. Variable-rate debt grows every block; "repay all" must use the protocol's own max semantics, never a
   stale balance.

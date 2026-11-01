@@ -22,15 +22,19 @@ export function createBaseSepoliaReadRpc(url: string, methods: readonly string[]
       const text = await response.text();
       if (text.length > 1_048_576) throw new Error('PUBLIC_RPC_RESPONSE_TOO_LARGE');
       const result: unknown = JSON.parse(text);
-      if (result && typeof result === 'object' && 'error' in result && result.error && typeof result.error === 'object' &&
-          'message' in result.error && typeof result.error.message === 'string' &&
-          /missing trie node|historical state (?:is )?(?:unavailable|not available)|state .* is not available/i.test(result.error.message))
-        throw new Error('PUBLIC_RPC_HISTORY_UNAVAILABLE');
-      // BUILD-FLOFI-EXECUTION-PERFORMANCE-001: the node's own JSON-RPC code rides along (`rpcErrorCode`) so a caller can tell "the node answered with an
-      // error" from "no answer at all"; the message every caller matches on is unchanged.
-      if (result && typeof result === 'object' && 'error' in result && result.error && typeof result.error === 'object' &&
-          'code' in result.error && [-32005, -32011, -32016, -32603].includes(Number(result.error.code)))
-        throw Object.assign(new Error('PUBLIC_RPC_UNAVAILABLE'), { rpcErrorCode: Number(result.error.code) });
+      const error = result && typeof result === 'object' && 'error' in result && result.error && typeof result.error === 'object'
+        ? result.error as { code?: unknown; message?: unknown } : null;
+      const code = error && 'code' in error ? Number(error.code) : undefined, message = error && typeof error.message === 'string' ? error.message : '';
+      // BUILD-FLOFI-EXECUTION-PERFORMANCE-001: an error carries the node's JSON-RPC code (`rpcErrorCode`) so a caller can tell an answer about the call
+      // from no usable answer; the provider's text never leaves this client. A lagging backend (no such block yet) is missing history, an
+      // explicit revert is an answer (never retried as an outage, whatever code the provider uses for it), and a rate limit reported in the body
+      // is an outage like an HTTP 429.
+      if (error && (/missing trie node|historical state (?:is )?(?:unavailable|not available)|state .* is not available|header not found|unknown block|block not found/i.test(message)))
+        throw Object.assign(new Error('PUBLIC_RPC_HISTORY_UNAVAILABLE'), { rpcErrorCode: code });
+      if (error && (code === 3 || /revert/i.test(message))) throw Object.assign(new Error('PUBLIC_RPC_RESPONSE_INVALID'), { rpcErrorCode: code, rpcReverted: true });
+      if (error && (code === -32005 || code === -32011 || code === -32016 || code === -32603 || code === 429 || /rate limit|too many requests/i.test(message)))
+        throw Object.assign(new Error('PUBLIC_RPC_UNAVAILABLE'), { rpcErrorCode: code });
+      if (error) throw Object.assign(new Error('PUBLIC_RPC_RESPONSE_INVALID'), { rpcErrorCode: code });
       if (!result || typeof result !== 'object' || !('result' in result) || 'error' in result) throw new Error('PUBLIC_RPC_RESPONSE_INVALID');
       return result.result;
     } catch (cause) {
@@ -88,15 +92,11 @@ export function baseSepoliaRpcUrl(override: string | undefined): string {
 }
 /**
  * BUILD-FLOFI-EXECUTION-PERFORMANCE-001: a read that got no usable answer from the node — the transport failed (HTTP error, timeout, refused
- * connection), the node reported a rate or capacity limit, or it lacks the pinned block's state. Distinct from an error the node answered
- * about the call itself (a revert: PUBLIC_RPC_RESPONSE_INVALID, or JSON-RPC -32603, which some providers use for reverts).
+ * connection), the node reported a rate, capacity or internal limit, or it does not have the pinned block yet (missing history, a lagging
+ * backend). Distinct from an answer about the call itself (a revert, or another error the node returned for the call: PUBLIC_RPC_RESPONSE_INVALID).
  */
 export function readNotAnswered(cause: unknown): boolean {
-  if (!(cause instanceof Error)) return false;
-  if (cause.message === 'PUBLIC_RPC_HISTORY_UNAVAILABLE') return true;
-  if (cause.message !== 'PUBLIC_RPC_UNAVAILABLE') return false;
-  const code = (cause as { rpcErrorCode?: unknown }).rpcErrorCode;
-  return code === undefined || code === -32005 || code === -32011 || code === -32016;
+  return cause instanceof Error && (cause.message === 'PUBLIC_RPC_HISTORY_UNAVAILABLE' || cause.message === 'PUBLIC_RPC_UNAVAILABLE');
 }
 /**
  * Public endpoints rate-limit bursts (public Base answered HTTP 429 "over rate limit" to the router's parallel Review reads

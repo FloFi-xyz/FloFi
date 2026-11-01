@@ -75,6 +75,10 @@ class SkillRegistry(unittest.TestCase):
         insecure = self.manifest("protocols/relay")
         insecure["sources"][0]["url"] = "http://raw.githubusercontent.com/relayprotocol/relay-kit/x/README.md"
         cases.append(("protocols/relay", insecure, "plain https URL"))
+        for escape in ("../../someone-else/docs/x/swap.md", "%2e%2e/someone-else/x.md", ".%2E/x.md", "%252e%252e/x.md", "a%2f..%2fb.md", "a\\b.md", "./x.md"):
+            traversal = self.manifest("protocols/jupiter")
+            traversal["sources"][0]["url"] = traversal["sources"][0]["url"].rsplit("/", 1)[0] + "/" + escape
+            cases.append(("protocols/jupiter", traversal, "dot segments"))
         authority = self.manifest("operations/execution")
         authority["authority"] = "MAY_SIGN"
         cases.append(("operations/execution", authority, "authority must be ENGINEERING_REFERENCE_ONLY"))

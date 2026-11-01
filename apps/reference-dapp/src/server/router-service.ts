@@ -411,7 +411,8 @@ export function createRouterService(input: { readonly storage: ExecutionStorage;
     // slowest provider instead of the sum. The destination observation (another chain's transport) overlaps them; its failure keeps its order below.
     const request = routeRequest(owner, recipient, f.amount, f.slippageBps, probe.depositQuoteTimeBuffer);
     const destinationRead = readDestination(recipient).then(value => ({ ok: true as const, value }), (cause: unknown) => ({ ok: false as const, cause }));
-    const answers = await Promise.allSettled(f.providers.map(id => providers[id].quote(request)));
+    // `async` so a provider that throws synchronously is still one settled refusal in `considered`, never the whole Review's failure.
+    const answers = await Promise.allSettled(f.providers.map(async id => providers[id].quote(request)));
     for (const [index, id] of f.providers.entries()) {
       const answer = answers[index]!;
       try {

@@ -128,6 +128,24 @@ describe('BUILD-ROUTER-001 Quote → Simulation → Review → route-bound Manif
     expect(r.artifacts.manifest.providers).toEqual({ kind: 'FIXED', providerId: 'lifi:across' });
     expect(r.artifacts.manifest.artifactSetHash).toBe(r.artifacts.hashes.artifactSet);
   });
+  it('BUILD-FLOFI-EXECUTION-PERFORMANCE-001: a provider that throws synchronously is one refusal, and Across is still selected', async () => {
+    const h = createRouterHarness();
+    const broken = { ...h.providers.lifi, quote: () => { throw new Error('LIFI_HTTP_503'); } } as unknown as typeof h.providers.lifi;
+    const { service } = await setup({}, { h: { ...h, providers: { ...h.providers, lifi: broken } } });
+    const run = await service.simulate(workflow(), ROUTER_OWNER);
+    expect(run.review.selection.considered.map(c => [c.provider, c.outcome, c.code])).toEqual([['lifi', 'UNAVAILABLE', 'LIFI_HTTP_503'], ['across', 'SELECTED', null]]);
+  });
+  it('BUILD-FLOFI-EXECUTION-PERFORMANCE-001: with the destination read overlapping the quotes, failures keep their order', async () => {
+    const h = createRouterHarness();
+    const destinationDown: typeof h.arbitrumRpc = async (method, params) => method === 'eth_chainId' ? h.arbitrumRpc(method, params) : (() => { throw new Error('PUBLIC_RPC_UNAVAILABLE'); })();
+    const refuse = (id: 'lifi' | 'across') => ({ ...h.providers[id], quote: async () => { throw new Error(`${id.toUpperCase()}_NO_ROUTE`); } });
+    const noRoute = await setup({}, { h: { ...h, arbitrumRpc: destinationDown, providers: { ...h.providers, lifi: refuse('lifi'), across: refuse('across') } } });
+    // No provider route: the route refusal wins over the destination outage (as when the destination was read after selection).
+    await expect(noRoute.service.simulate(workflow(), ROUTER_OWNER)).rejects.toThrow('ROUTER_NO_EXECUTABLE_ROUTE');
+    const routed = await setup({}, { h: { ...h, arbitrumRpc: destinationDown } });
+    // A route was selected: the destination outage surfaces (after the allowance read), and nothing is reviewed.
+    await expect(routed.service.simulate(workflow(), ROUTER_OWNER)).rejects.toThrow('PUBLIC_RPC_UNAVAILABLE');
+  });
   it('BUILD-FLOFI-EXECUTION-PERFORMANCE-001: providers are asked at once and folded in preference order, whichever answers first', async () => {
     const h = createRouterHarness();
     const order: string[] = [], inFlight = { now: 0, peak: 0 };

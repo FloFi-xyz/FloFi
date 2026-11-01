@@ -57,9 +57,9 @@ export function summarize(lines, { environment, minimum = 20 }) {
   }
   const rows = [...groups.values()].sort((a, b) => a.metric.localeCompare(b.metric) || a.dimension.localeCompare(b.dimension) || a.value.localeCompare(b.value))
     .map(group => ({ metric: group.metric, dimension: group.dimension, value: group.value, ...percentiles(group.samples, minimum) }));
-  // journey.timing events are client-reported (unauthenticated beacons); quote events are server-measured.
+  // journey.timing events are client-reported by a signed-in session (the timings themselves are not verified); quote events are server-measured.
   return { format: 'flofi.journey-latency-report.v1', environment, provenance: 'STRUCTURED_LOGS_AS_SUPPLIED',
-    evidence: { journeyTimings: 'CLIENT_REPORTED_UNAUTHENTICATED', quoteDiscovery: 'SERVER_MEASURED' }, minimumSample: minimum,
+    evidence: { journeyTimings: 'CLIENT_REPORTED', quoteDiscovery: 'SERVER_MEASURED' }, minimumSample: minimum,
     inputs: { journeys, providerResults, discoveryWindows: windows }, rows };
 }
 

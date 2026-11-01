@@ -102,15 +102,21 @@ async function readBuildEstimateValue(input: unknown, env: Env = process.env,
         slippageBps: q.slippageBps, expiresAt: q.expiresAt } };
     }
     const catalogNetwork = uniswap ? catalogNetworkOfChain(node.chainId) : null;
-    // USD is optional, including failure while constructing the configured price source. Its observations start now, alongside the quote.
+    // USD is optional, including failure while constructing the configured price source. BUILD-FLOFI-EXECUTION-PERFORMANCE-001: its observations run
+    // alongside the quote, and start only on a path that quotes a mainnet asset (after its network gates), right before that quote: never on a refused
+    // or unsupported path, and never ahead of the gate that would refuse it.
     const observedAt = now();
     let observer: Observe | null = null;
-    try { const selection = cryptoSelectionOf(node); observer = priceObserver(prices(), observedAt, [selection?.from, selection?.to]); } catch { observer = null; }
+    const startUsd = () => {
+      if (observer) return;
+      try { const selection = cryptoSelectionOf(node); observer = priceObserver(prices(), observedAt, [selection?.from, selection?.to]); } catch { observer = null; }
+    };
     const quoteUsd = async (sides: readonly [QuoteSide, QuoteSide]) => { try { return await usdOf(prices(), observedAt, sides, observer); } catch { return null; } };
     const solanaMainnet = node.chainId === JUPITER_SOLANA_MAINNET.chain && node.adapterConstraints.protocols.includes('jupiter');
     if ((catalogNetwork || solanaMainnet) && (seams.preview || !seams.rpc && !seams.http)) {
       const flow = catalogNetwork ? catalogNetwork.flows.swap : 'jupiter-swap';
       const subject = typeof owner === 'string' ? owner : UNIVERSAL_QUOTE_SUBJECTS.SOLANA;
+      startUsd();
       const preview = await (seams.preview ?? cloudPreview)(flow, catalogNetwork ? [workflow] : [workflow, subject],
         { env, timeoutMs: 30_000, maxAttempts: 1, ...solanaMainnet ? { purpose: 'QUOTE' as const } : {} });
       // A configured hosted runtime never falls back to development transports, even after a failed quote.
@@ -149,6 +155,7 @@ async function readBuildEstimateValue(input: unknown, env: Env = process.env,
       const build = () => createPublicSwapQuoteReader(() => seams.rpc ?? catalogNetwork.rpc(mode, env), now,
         seams.catalog ?? catalogNetwork.swapRuntime(mode, env, catalogNetwork.catalogFor(mode)));
       const reader = env === process.env && !seams.rpc && !seams.catalog ? catalogReader(catalogNetwork.id, mode, build) : build();
+      startUsd();
       const q = await reader(workflow, 'read-only');
       if (q.outputDecimals === undefined) return { ok: false, code: 'ESTIMATE_UNAVAILABLE' };
       const usd = q.environment === 'MAINNET' && q.inputDecimals !== undefined ? await quoteUsd( [{ symbol: q.inputSymbol, units: q.amountIn, decimals: q.inputDecimals },
@@ -163,6 +170,7 @@ async function readBuildEstimateValue(input: unknown, env: Env = process.env,
     if (node.chainId === JUPITER_SOLANA_MAINNET.chain && typeof owner === 'string') {
       // The taker is an untrusted quote parameter only; this read never binds ownership or grants authority.
       const intent = jupiterIntent(workflow, owner), http = seams.http ?? createJupiterHttp(JUPITER_SOLANA_MAINNET.api + JUPITER_SOLANA_MAINNET.endpoint, env.JUPITER_API_KEY);
+      startUsd();
       const q = parseJupiterBuild(await http(jupiterBuildQuery(intent)), intent, now().toISOString()).quote;
       const usd = await quoteUsd( [{ symbol: intent.input.symbol, units: intent.amount, decimals: intent.input.decimals },
         { symbol: intent.output.symbol, units: q.outAmount, decimals: intent.output.decimals }]);

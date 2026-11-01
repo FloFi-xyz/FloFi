@@ -192,6 +192,27 @@ describe('BUILD-FLOFI-EXECUTION-PERFORMANCE-001 discovery window', () => {
     } finally { vi.useRealTimers(); }
   });
 
+  it('a provider that ignores cancellation and answers late, even with an executable route, is never merged or logged twice', async () => {
+    vi.useFakeTimers({ now: now() });
+    try {
+      let lateResolved = false;
+      // This transport ignores the abort signal entirely and resolves Relay's executable route long after the window closed.
+      const stubborn: UniversalHttp = {
+        get: async () => { throw new Error('UNIVERSAL_PROVIDER_UNAVAILABLE'); },
+        post: url => new Promise(resolve => setTimeout(() => { lateResolved = true; resolve(url.includes('relay') ? relay.response : lifi); }, url.includes('relay') ? 9_000 : 100)),
+      };
+      const discovery = createUniversalDiscovery({ now, clock: clockOf(), window: { deadlineMs: 6_500, compareMs: 1_000 }, http: stubborn });
+      const pending = discovery.discover(request, ['relay', 'lifi']);
+      await vi.advanceTimersByTimeAsync(6_500);
+      const result = await pending, snapshot = JSON.stringify(result);
+      expect(result.recommended).toBeNull();
+      expect(result.pendingProviders).toEqual(['relay']);
+      await vi.advanceTimersByTimeAsync(5_000);
+      expect(lateResolved).toBe(true);
+      expect(JSON.stringify(result)).toBe(snapshot);
+      expect(vi.getTimerCount()).toBe(0);
+    } finally { vi.useRealTimers(); }
+  });
   it('the caller cancelling aborts every provider request and returns no result', async () => {
     const signals: Record<string, AbortSignal | undefined> = {}, caller = new AbortController();
     const discovery = createUniversalDiscovery({ now, http: timedHttp({ 'api.relay.link/quote': { after: 0, hang: true }, 'li.quest': { after: 0, hang: true } }, signals) });

@@ -6423,7 +6423,7 @@
         "app.platform.engineering-skills"
       ],
       "gaps": [
-        "Twelve official documentation sites (and the third-party Arbitrum guide) were unreachable from the build session: they stay PENDING_VERIFICATION until fetched, reviewed, licensed and pinned. Jupiter and Arbitrum documentation repositories state no licence, so their pinned files are PENDING_VERIFICATION (change detection active).",
+        "Eleven official documentation sites (and the third-party Arbitrum guide) were unreachable from the build session: they stay PENDING_VERIFICATION until fetched, reviewed, licensed and pinned. Jupiter and Arbitrum documentation repositories state no licence, so their pinned files are PENDING_VERIFICATION (change detection active).",
         "Upstream checks run on demand (`skill_registry.py check-upstream --fetch`); no scheduled job runs them."
       ]
     },

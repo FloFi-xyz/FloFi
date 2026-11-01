@@ -134,13 +134,15 @@ describe('UX-007 shared catalog-network live quote', () => {
       return seams.rpc(method, params);
     };
     const quote = (rpc: typeof seams.rpc) => readBuildEstimate({ workflow, nodeId: 'node-002' }, c.env, { ...seams, rpc, catalog: { ...seams.catalog, deploymentFacts: null } });
-    // No answer from the node (transport, rate limit, missing history): the tier's price is unknown, so no quote is bound.
+    // No usable answer from the node (transport, rate limit, internal error, a lagging backend or missing history): the tier's price is
+    // unknown, so no quote is bound.
     for (const error of [() => new Error('PUBLIC_RPC_UNAVAILABLE'), () => Object.assign(new Error('PUBLIC_RPC_UNAVAILABLE'), { rpcErrorCode: -32005 }),
-      () => new Error('PUBLIC_RPC_HISTORY_UNAVAILABLE')])
+      () => Object.assign(new Error('PUBLIC_RPC_UNAVAILABLE'), { rpcErrorCode: -32603 }), () => Object.assign(new Error('PUBLIC_RPC_HISTORY_UNAVAILABLE'), { rpcErrorCode: -32000 })])
       expect(await quote(failQuoter(error))).toMatchObject({ ok: false, code: error().message });
-    // The node answered with an error about the call (a revert; -32603 is how some providers report one): this tier is simply not a candidate
-    // (the fixture's only pool, so no usable pool remains).
-    for (const error of [() => new Error('PUBLIC_RPC_RESPONSE_INVALID'), () => Object.assign(new Error('PUBLIC_RPC_UNAVAILABLE'), { rpcErrorCode: -32603 })])
+    // The node answered about the call (an explicit revert, whatever code the provider uses; or another error for the call): this tier is simply
+    // not a candidate (the fixture's only pool, so no usable pool remains).
+    for (const error of [() => Object.assign(new Error('PUBLIC_RPC_RESPONSE_INVALID'), { rpcErrorCode: -32603, rpcReverted: true }),
+      () => Object.assign(new Error('PUBLIC_RPC_RESPONSE_INVALID'), { rpcErrorCode: 3, rpcReverted: true }), () => new Error('execution reverted')])
       expect(await quote(failQuoter(error))).toMatchObject({ ok: false, code: 'POOL_UNUSABLE' });
   });
   it('BUILD-FLOFI-EXECUTION-PERFORMANCE-001: the fact cache expires and is bounded', () => {
@@ -174,6 +176,12 @@ describe('UX-007 shared catalog-network live quote', () => {
     expect(result.ok && result.estimate.usd?.source).toBe('CHAINLINK');
     expect(events.indexOf('price:ETH')).toBeLessThan(events.indexOf('rpc:first'));
     expect(events.filter(e => e === 'price:ETH')).toHaveLength(1);
+  });
+  it('BUILD-FLOFI-EXECUTION-PERFORMANCE-001: a path the network gate refuses starts no price observation', async () => {
+    const { workflow, seams } = setup(arbitrum), observed: string[] = [];
+    const prices: PriceSource = { id: 'chainlink', maxAgeMs: 3_600_000, assets: ['ETH', 'BTC', 'SOL'], observe: async asset => { observed.push(asset); return ethAt('2500.5'); } };
+    expect(await readBuildEstimate({ workflow, nodeId: 'node-002' }, {}, { ...seams, prices })).toMatchObject({ ok: false, code: 'ESTIMATE_NETWORK_NOT_ENABLED' });
+    expect(observed).toEqual([]);
   });
   it.each([{ ok: false, code: 'PRICE_STALE' }, { ok: false, code: 'PRICE_SOURCE_TIMEOUT' }] as const)('a $code observation gives no USD figure, and the token estimate is unchanged', async failure => {
     const { workflow, seams } = setup(arbitrum);

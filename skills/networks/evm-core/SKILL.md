@@ -16,9 +16,10 @@ capability registry and deterministic tests remain the evidence.
 - Every quote and Review read is pinned to one block (`eth_getBlockByNumber` → number/hash), and the block hash is
   re-read at the end: a different hash is a reorg (`QUOTE_BLOCK_REORG`), never "probably fine".
 - `eth_chainId` binds a client to its chain (`chainBoundRpc`); a wrong chain is refused, never followed.
-- Contract code at an address cannot change once deployed (EIP-6780 limits SELFDESTRUCT to the creating
-  transaction; CREATE2 redeploys need it). Pinned code hashes and constructor immutables are therefore stable facts
-  (`DeploymentFactCache`); balances, allowances, liquidity, prices, nonces and fees are not and are always read fresh.
+- A contract created by CREATE/CREATE2 keeps its code (EIP-6780 limits SELFDESTRUCT to the creating transaction;
+  CREATE2 redeploys need it), so pinned code hashes and constructor immutables are stable facts (`DeploymentFactCache`).
+  An EIP-7702 delegation designator (`0xef0100…`) on an account can be changed or cleared, so it is never cached.
+  Balances, allowances, liquidity, prices, nonces and fees are never cached and are always read fresh.
 
 ## Latency
 - Public endpoints rate-limit bursts: reads go through `pacedReadRpc` (one at a time, 250 ms). Only an operator

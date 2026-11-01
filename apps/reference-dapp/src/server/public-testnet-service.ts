@@ -568,7 +568,8 @@ export type CatalogSwapRuntime = { readonly catalogFor: (chain: string) => Promi
 /**
  * BUILD-FLOFI-EXECUTION-PERFORMANCE-001: positive verifications of IMMUTABLE deployment facts, remembered per process for a bounded time so a
  * quote does not re-read them through the paced transport on every keystroke and every Review. Only facts the EVM cannot change once true are
- * kept: a pinned contract's runtime code (no SELFDESTRUCT removal since EIP-6780, no CREATE2 redeploy), the immutables compiled into that code
+ * kept: a pinned contract's runtime code (a contract created by CREATE/CREATE2 keeps its code: no SELFDESTRUCT removal since EIP-6780, no
+ * CREATE2 redeploy; an EIP-7702 delegation designator on an account CAN change, so it is never remembered), the immutables compiled into that code
  * (a router's/quoter's factory and WETH9, a pool's factory/token0/token1/fee), a listed token having code, and a CREATE2 pool having code.
  * Failures are never remembered. Liquidity, slot0, the quoter's output, token decimals, Stock Token state, the head, balances, nonces, gas and
  * the reorg check are always read fresh at the quote's pinned block. Keys carry the chain and the expected pin.
@@ -640,7 +641,8 @@ export async function verifyCatalogToken(rpc: Rpc, policy: CatalogTokenPolicy, a
   if (BigInt(await call(asset.address!, '0x313ce567')) !== BigInt(asset.decimals)) fail('TOKEN_METADATA_MISMATCH');
   if (!asset.stock) {
     if (!known && (pin !== undefined ? tokenCode !== pin : policy.listedTokens !== 'CODE_AND_DECIMALS')) fail('TOKEN_DEPLOYMENT_MISMATCH');
-    if (factKey !== null && !known) facts!.learn(factKey);
+    // An EIP-7702 delegation designator (`0xef0100‖delegate`) is code an account can later change or clear: never remembered as a fact.
+    if (factKey !== null && !known && !(code as string).toLowerCase().startsWith('0xef0100')) facts!.learn(factKey);
     return null;
   }
   // Every official Stock Token is the same beacon proxy on the official beacon, and reports the registry's uid.

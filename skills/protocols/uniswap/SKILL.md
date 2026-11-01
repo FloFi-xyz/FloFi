@@ -4,7 +4,10 @@
 - FloFi quotes Uniswap V3 on-chain: each standard fee tier's pool address is derived locally (CREATE2), verified
   (factory, token0, token1, fee), checked for liquidity and slot0, then quoted with QuoterV2
   `quoteExactInputSingle` at one pinned block. The best `expectedOut` wins; ties go to the lower fee.
-- QuoterV2 is not a view: it simulates the swap and reverts with the result. Call it with `eth_call` only.
+- QuoterV2 is not a view: it simulates the swap, its own swap callback reverts with the amounts, and it catches that
+  revert and returns them normally (amountOut, sqrtPriceX96After, ticksCrossed, gasEstimate). Call it with `eth_call`
+  only. A real revert of the outer call (no usable liquidity for the size) means that tier is not a candidate; a read
+  the node never answered (outage, rate limit, lagging backend) fails the quote instead.
 - Pool immutables and the protocol contracts' code are stable deployment facts; liquidity, slot0 and quotes are
   read fresh for every quote and Review.
 

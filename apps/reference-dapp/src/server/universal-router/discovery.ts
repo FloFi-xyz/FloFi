@@ -189,8 +189,10 @@ const rank = (candidates: readonly DiscoveryCandidate[]) => [...candidates].sort
  *  - an executable route FloFi verified (the universal router's Relay route) arrived and `compareMs` passed for the others to compare (PARTIAL);
  *  - `deadlineMs` passed (PARTIAL).
  * A provider still pending then is aborted (request-scoped cancellation) and reported TEMPORARILY_UNAVAILABLE with `<PROVIDER>_DISCOVERY_WINDOW_ELAPSED`,
- * so one hanging provider never hides an executable route or holds a chat tool past its limit. Only Relay can be EXECUTABLE here, so the window never
- * changes which route is recommended: the others are informational quotes. A provider answer that lands after the window is discarded, never merged.
+ * so one hanging provider never hides an executable route or holds a chat tool past its limit. Only the universal router's verified route (Relay)
+ * starts the compare window and can be recommended, so closing the window after it never changes the recommendation; if the deadline closes the
+ * window while Relay is still pending there is no recommendation and the result is PARTIAL (shown as a provisional comparison). A provider answer
+ * that lands after the window is discarded, never merged.
  * Discovery stays read-only; Review re-quotes and re-verifies everything for the owner.
  */
 export type DiscoveryWindow = { readonly deadlineMs: number; readonly compareMs: number };
@@ -236,7 +238,8 @@ export function createUniversalDiscovery(config: { readonly http: UniversalHttp;
       const tasks = providers.map(p => ask(p).catch(cause => [failed(p, p, cause)]).then(found => {
         if (!open) return; // late: the window already closed; never merged into a delivered result
         answers.set(p, found); durations.set(p, Math.round(clock() - started));
-        if (firstExecutableMs === null && found.some(c => c.status === 'EXECUTABLE')) {
+        // Only a route the universal router verified (the one `recommended` can name) starts the compare window.
+        if (firstExecutableMs === null && found.some(c => c.status === 'EXECUTABLE' && c.executableBy === 'UNIVERSAL_ROUTER')) {
           firstExecutableMs = Math.round(clock() - started);
           compareTimer = setTimeout(() => settle(), window.compareMs);
         }

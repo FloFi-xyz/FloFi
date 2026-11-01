@@ -31,9 +31,11 @@ describe('BUILD-FLOFI-EXECUTION-PERFORMANCE-001 engineering skills and the capab
     expect(skills.length).toBeGreaterThanOrEqual(17);
     for (const skill of skills) {
       expect(skill.authority).toBe('ENGINEERING_REFERENCE_ONLY');
+      // A MOCK or LOCAL_FORK row is not enough: the skill must describe a path the public product registers for MAINNET execution. The
+      // registry's evidenceMaturity for that row is untouched here: a skill never claims execution evidence.
       for (const c of skill.capabilities)
-        expect(executionCapabilityRegistry.some(row => row.actionType === c.actionType && row.adapterId === c.adapterId && row.chainId === c.chainId),
-          `${skill.id}: ${c.actionType} ${c.adapterId} ${c.chainId}`).toBe(true);
+        expect(executionCapabilityRegistry.some(row => row.actionType === c.actionType && row.adapterId === c.adapterId && row.chainId === c.chainId
+          && row.environment === 'MAINNET' && row.capabilities.EXECUTE), `${skill.id}: ${c.actionType} ${c.adapterId} ${c.chainId}`).toBe(true);
     }
   });
   it('the networks those capabilities run on stay discoverable through the existing Capability API (no second registry)', () => {

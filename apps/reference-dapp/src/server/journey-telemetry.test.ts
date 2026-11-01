@@ -53,7 +53,7 @@ describe('BUILD-FLOFI-EXECUTION-PERFORMANCE-001 latency report over the existing
   it('turns logged journeys into labelled p50/p95, and says INSUFFICIENT_SAMPLE instead of inventing percentiles', async () => {
     // @ts-expect-error -- plain ESM operations script without type declarations
     const { summarize } = await import('../../../../scripts/journey-latency-report.mjs') as { summarize: (lines: string[], o: { environment: string; minimum?: number }) => {
-      environment: string; rows: { metric: string; dimension: string; value: string; count: number; p50?: number; p95?: number; result?: string }[] } };
+      environment: string; evidence: Record<string, string>; rows: { metric: string; dimension: string; value: string; count: number; p50?: number; p95?: number; result?: string }[] } };
     const { createLogger } = await import('@defi-workflow-engine/cloud-runtime');
     const lines: string[] = [];
     const receive = createJourneyReceiver({ env: {}, account: () => 'acct-1', log: fields => createLogger({ service: 'flofi-journey', sink: line => lines.push(line) }).info('journey.timing', fields) });
@@ -61,6 +61,8 @@ describe('BUILD-FLOFI-EXECUTION-PERFORMANCE-001 latency report over the existing
     lines.push('not json', JSON.stringify({ event: 'quote.provider_result', provider: 'relay', status: 'EXECUTABLE', duration_ms: 400 }));
     const report = summarize(lines, { environment: 'MOCKED' });
     expect(report.environment).toBe('MOCKED');
+    // Signed-in senders, but the timings are still the client's word: never upgraded to server-measured evidence.
+    expect(report.evidence).toEqual({ journeyTimings: 'CLIENT_REPORTED', quoteDiscovery: 'SERVER_MEASURED' });
     expect(report.rows.find(r => r.metric === 'wallet_open_to_user_decision_ms' && r.dimension === 'all')).toMatchObject({ count: 25, p50: 250, p95: 250 });
     expect(report.rows.find(r => r.metric === 'provider_answer_ms')).toMatchObject({ count: 1, result: 'INSUFFICIENT_SAMPLE' });
     expect(() => summarize(lines, { environment: 'GUESSED' })).toThrow('--environment');

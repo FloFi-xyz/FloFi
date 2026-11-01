@@ -145,8 +145,21 @@ def _prefix_valid(prefix):
                 and ".." not in parsed.path.split("/"))
 
 
+def _escapes_path(path):
+    """True when a URL path could leave the location a prefix check approved: a '.' or '..' segment, literal or percent-encoded (decoded
+    repeatedly, so '%252e' counts too), or an encoded or backslash separator a server may treat as '/'."""
+    for _ in range(4):
+        if "\\" in path or re.search(r"%(2f|5c)", path, re.I) or any(segment in (".", "..") for segment in path.split("/")):
+            return True
+        decoded = urllib.parse.unquote(path)
+        if decoded == path:
+            return False
+        path = decoded
+    return True
+
+
 def _official(url, prefixes):
-    return any(url.startswith(prefix) for prefix in prefixes)
+    return not _escapes_path(urllib.parse.urlsplit(url).path) and any(url.startswith(prefix) for prefix in prefixes)
 
 
 def validate(root=ROOT, domains=None, today=None):
@@ -262,8 +275,8 @@ def _validate_source(where, source, hosts, verified_official):
     url = source.get("url")
     parsed = urllib.parse.urlsplit(url) if isinstance(url, str) else None
     if not parsed or parsed.scheme != "https" or not parsed.hostname or parsed.username or parsed.password \
-            or parsed.port or parsed.query or parsed.fragment:
-        return errors + [f"{where}: url must be a plain https URL without credentials, port, query or fragment"]
+            or parsed.port or parsed.query or parsed.fragment or _escapes_path(parsed.path):
+        return errors + [f"{where}: url must be a plain https URL without credentials, port, query, fragment or dot segments"]
     kind, status, publisher = source.get("kind"), source.get("status"), source.get("publisher")
     if kind not in SOURCE_KINDS or status not in SOURCE_STATUSES:
         errors.append(f"{where}: unknown kind or status")

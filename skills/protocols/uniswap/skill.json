@@ -92,7 +92,7 @@
       "reviewedDigest": "sha256:7c0a974a98e224b1ec63158bad6c13c73a659dec669dead1fd99a0b0d85418a6",
       "reviewedAt": "2026-11-01",
       "crossCheckedAgainst": [],
-      "notes": "QuoterV2 quoteExactInputSingle simulates and reverts with the quote."
+      "notes": "QuoterV2 quoteExactInputSingle: simulates the swap, catches its own callback revert and returns the amounts."
     },
     {
       "url": "https://developers.uniswap.org/docs/trading/swapping-api/concepts/swap-routing",
@@ -108,7 +108,7 @@
     }
   ],
   "guidance": "SKILL.md",
-  "guidanceDigest": "sha256:fff9504ecf6f64a614c9787425ac9c2fad456854e1127ed6b3a9d6f8e9835f3a",
+  "guidanceDigest": "sha256:84636691f071a9f54440884c2276732863dd63eb03f71e2a803f343fe4c360db",
   "reviewIntervalDays": 90,
   "authority": "ENGINEERING_REFERENCE_ONLY",
   "performance": [

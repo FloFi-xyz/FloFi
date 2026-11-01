@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { describe, expect, it, vi } from 'vitest';
 import { pacedReadRpc, routerMode, routerRpcUrl, routerRuntime, ROUTER_ARBITRUM_RPC_METHODS, ROUTER_BASE_RPC_METHODS } from './router-runtime';
-import { createBaseSepoliaReadRpc, readNotAnswered, readPacingFor } from './public-testnet-rpc';
+import { chainBoundRpc, createBaseSepoliaReadRpc, readNotAnswered, readPacingFor } from './public-testnet-rpc';
 
 describe('BUILD-ROUTER-001 router runtime', () => {
   it('is off unless explicitly enabled; the MOCKED harness always wins; owner execution is a separate opt-in', () => {
@@ -82,20 +82,38 @@ describe('BUILD-FLOFI-EXECUTION-PERFORMANCE-001 dedicated read pacing', () => {
 });
 
 describe('BUILD-FLOFI-EXECUTION-PERFORMANCE-001 read failure classification', () => {
-  it('keeps every caller\'s code and adds the node\'s JSON-RPC code, so "answered with an error" differs from "no answer"', async () => {
-    const answers: (() => Response)[] = [
-      () => new Response(JSON.stringify({ jsonrpc: '2.0', id: 1, error: { code: -32603, message: 'execution reverted' } })),
-      () => new Response('busy', { status: 503 }),
-      () => new Response(JSON.stringify({ jsonrpc: '2.0', id: 1, error: { code: 3, message: 'execution reverted' } })),
+  const json = (error: { code: number; message: string }) => () => new Response(JSON.stringify({ jsonrpc: '2.0', id: 1, error }));
+  it('classifies by evidence: an explicit revert is an answer; a lagging node, a rate limit or an outage is no answer', async () => {
+    const cases: [() => Response, string, boolean][] = [
+      [json({ code: 3, message: 'execution reverted' }), 'PUBLIC_RPC_RESPONSE_INVALID', false],
+      [json({ code: -32603, message: 'execution reverted: SPL' }), 'PUBLIC_RPC_RESPONSE_INVALID', false],
+      [json({ code: -32000, message: 'out of gas' }), 'PUBLIC_RPC_RESPONSE_INVALID', false],
+      [json({ code: -32603, message: 'internal error' }), 'PUBLIC_RPC_UNAVAILABLE', true],
+      [json({ code: -32016, message: 'over rate limit' }), 'PUBLIC_RPC_UNAVAILABLE', true],
+      [json({ code: -32000, message: 'Too Many Requests' }), 'PUBLIC_RPC_UNAVAILABLE', true],
+      [json({ code: -32000, message: 'header not found' }), 'PUBLIC_RPC_HISTORY_UNAVAILABLE', true],
+      [json({ code: -32000, message: 'missing trie node abc' }), 'PUBLIC_RPC_HISTORY_UNAVAILABLE', true],
+      [() => new Response('busy', { status: 503 }), 'PUBLIC_RPC_UNAVAILABLE', true],
     ];
+    const answers = cases.map(([answer]) => answer);
     vi.stubGlobal('fetch', async () => answers.shift()!());
     try {
       const rpc = createBaseSepoliaReadRpc('https://rpc.example.org', ['eth_call']);
-      const caught = async () => rpc('eth_call', []).then(() => null, (error: Error) => error);
-      const reverted = await caught(), down = await caught(), revert3 = await caught();
-      expect([reverted?.message, down?.message, revert3?.message]).toEqual(['PUBLIC_RPC_UNAVAILABLE', 'PUBLIC_RPC_UNAVAILABLE', 'PUBLIC_RPC_RESPONSE_INVALID']);
-      expect([readNotAnswered(reverted), readNotAnswered(down), readNotAnswered(revert3), readNotAnswered(new Error('PUBLIC_RPC_HISTORY_UNAVAILABLE'))])
-        .toEqual([false, true, false, true]);
+      for (const [, message, notAnswered] of cases) {
+        const error = await rpc('eth_call', []).then(() => null, (cause: Error) => cause);
+        expect([error?.message, readNotAnswered(error)]).toEqual([message, notAnswered]);
+        expect(JSON.stringify(error)).not.toMatch(/execution reverted|trie node|over rate limit|Too Many Requests|header not found|out of gas|internal error/i);
+      }
+    } finally { vi.unstubAllGlobals(); }
+  });
+  it('the classification survives the paced and chain-bound transports, and an explicit revert is never retried as an outage', async () => {
+    let calls = 0;
+    vi.stubGlobal('fetch', async () => { calls++; return json({ code: -32603, message: 'execution reverted' })(); });
+    try {
+      const rpc = chainBoundRpc(pacedReadRpc(createBaseSepoliaReadRpc('https://rpc.example.org', ['eth_call']), { sleep: async () => undefined }), 8453);
+      const error = await rpc('eth_call', []).then(() => null, (cause: Error) => cause);
+      expect(error).toMatchObject({ message: 'PUBLIC_RPC_RESPONSE_INVALID', rpcErrorCode: -32603, rpcReverted: true });
+      expect(calls).toBe(1);
     } finally { vi.unstubAllGlobals(); }
   });
 });
