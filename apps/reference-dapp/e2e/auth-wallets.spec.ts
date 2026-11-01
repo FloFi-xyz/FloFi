@@ -606,5 +606,6 @@ test('the database holds no secret-shaped value for any account', async () => {
     SELECT to_jsonb(t)::text FROM (SELECT * FROM flofi_account_identities) t UNION ALL SELECT to_jsonb(t)::text FROM (SELECT * FROM flofi_accounts) t
     UNION ALL SELECT to_jsonb(t)::text FROM (SELECT * FROM flofi_account_sessions) t`);
   expect(rows.length).toBeGreaterThan(5);
-  for (const { row } of rows) expect(String(row)).not.toMatch(/eyJ|mnemonic|private.?key|seed|secret|0x[0-9a-f]{64}/i);
+  // JWT shape (header.payload), not a bare `eyJ` substring — base58 Solana addresses can contain `eYj`.
+  for (const { row } of rows) expect(String(row)).not.toMatch(/eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+|mnemonic|private.?key|\bseed\b|secret|0x[0-9a-f]{64}/i);
 });
