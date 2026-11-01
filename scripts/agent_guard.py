@@ -10,6 +10,7 @@ import argparse
 from collections import Counter
 import difflib
 import hashlib
+import importlib.util
 import json
 import os
 from pathlib import Path, PurePosixPath
@@ -777,6 +778,26 @@ def claude_sync(root=ROOT, write=False, overwrite=False):
     return drift, messages
 
 
+def skill_registry(root=ROOT):
+    """BUILD-FLOFI-EXECUTION-PERFORMANCE-001: the multichain engineering skills registry (scripts/skill_registry.py), or None when absent."""
+    if not (root / "skills/registry.json").is_file():
+        return None
+    spec = importlib.util.spec_from_file_location("flofi_skill_registry", Path(__file__).with_name("skill_registry.py"))
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def skill_selection(changed, domain=None, root=ROOT):
+    """Skills the specialists should Read for these changed paths (reference knowledge only; never authority or a test filter)."""
+    registry = skill_registry(root)
+    if registry is None:
+        return None
+    selected = registry.select(root, paths=changed, domains_filter=[domain] if domain else None)
+    return {"skills": [{key: row[key] for key in ("id", "guidance", "verified", "reasons")} for row in selected["skills"]],
+            "reviewers": selected["reviewers"], "note": selected["note"]}
+
+
 def changed_paths(base, root=ROOT):
     merge_base = subprocess.check_output(["git", "merge-base", "HEAD", base], cwd=root, text=True).strip()
     changed = subprocess.check_output(["git", "diff", "--name-only", "-z", merge_base], cwd=root).decode().split("\0")
@@ -860,11 +881,14 @@ def main():
             parser.error("domain requires a FloFi domain ID")
         merge_base, changed = changed_paths(args.base) if args.base else (None, None)
         if args.command == "domain":
-            print(json.dumps(domain_contract(data, args.result_file, changed), indent=2))
+            contract = domain_contract(data, args.result_file, changed)
+            skills = skill_selection(changed or [], args.result_file)
+            print(json.dumps({**contract, **({"skills": skills} if skills is not None else {})}, indent=2))
             return 0
         result = impact(data, changed)
         if args.command == "impact":
-            print(json.dumps(result, indent=2))
+            skills = skill_selection(changed)
+            print(json.dumps({**result, **({"skills": skills} if skills is not None else {})}, indent=2))
             return int(bool(result["unmapped"]))
         streams = {}
         for path in args.stream_json:
@@ -889,6 +913,9 @@ def main():
         return 0
     else:
         errors = validate(data, git_paths())
+        registry = skill_registry()
+        if registry is not None:
+            errors.extend(registry.validate(ROOT, domains=DOMAINS))
         report = ROOT / "docs/engineering/COVERAGE.md"
         if not report.is_file() or report.read_text() != coverage_report(data):
             errors.append("Stale coverage report: python3 scripts/agent_guard.py report > docs/engineering/COVERAGE.md")

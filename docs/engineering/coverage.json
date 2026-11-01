@@ -689,6 +689,30 @@
     "app.components.canvas-panel-reveal": {
       "path": "apps/reference-dapp/src/components/canvas-panel-reveal.test.ts",
       "stage": "unit"
+    },
+    "scripts.test_ci_skill_registry": {
+      "path": "scripts/test_ci_skill_registry.py",
+      "stage": "governance"
+    },
+    "app.platform.engineering-skills": {
+      "path": "apps/reference-dapp/src/platform/engineering-skills.test.ts",
+      "stage": "unit"
+    },
+    "app.domain.journey-metrics": {
+      "path": "apps/reference-dapp/src/domain/journey-metrics.test.ts",
+      "stage": "unit"
+    },
+    "app.server.journey-telemetry": {
+      "path": "apps/reference-dapp/src/server/journey-telemetry.test.ts",
+      "stage": "unit"
+    },
+    "app.domain.canonical-execution-status": {
+      "path": "apps/reference-dapp/src/domain/canonical-execution-status.test.ts",
+      "stage": "unit"
+    },
+    "app.domain.observation-schedule": {
+      "path": "apps/reference-dapp/src/domain/observation-schedule.test.ts",
+      "stage": "unit"
     }
   },
   "requiredUnitSuites": [
@@ -724,7 +748,9 @@
     "reference-compiler.solana-transfer",
     "reference-executor.bound-composition",
     "reference-executor.cross-chain-liquidity-recovery",
-    "reference-reconciler.evidence"
+    "reference-reconciler.evidence",
+    "app.platform.engineering-skills",
+    "app.domain.canonical-execution-status"
   ],
   "modules": [
     {
@@ -3196,7 +3222,9 @@
         "apps/reference-dapp/src/domain/usd-estimate.ts",
         "apps/reference-dapp/src/domain/workflow-edits.ts",
         "apps/reference-dapp/src/domain/workflow-sequence.ts",
-        "apps/reference-dapp/src/domain/workflow-steps.ts"
+        "apps/reference-dapp/src/domain/workflow-steps.ts",
+        "apps/reference-dapp/src/domain/canonical-execution-status.ts",
+        "apps/reference-dapp/src/domain/observation-schedule.ts"
       ],
       "suites": [
         "action-registry.engineering-regression",
@@ -3207,7 +3235,9 @@
         "reference-executor.composition.fork",
         "reference-linter.composition",
         "reference-reconciler.evidence",
-        "workflow-contracts.revision-state"
+        "workflow-contracts.revision-state",
+        "app.domain.canonical-execution-status",
+        "app.domain.observation-schedule"
       ],
       "gaps": [
         "Mapped suites are representative boundary tests, not exhaustive path or public execution coverage.",
@@ -6313,6 +6343,73 @@
         "Live Privy is unverified: the suites verify real ES256 access tokens with the official @privy-io/node SDK against a local key, and the browser suite uses the MOCKED loopback Privy stand-in (e2e/privy-emulator.ts). They certify FloFi's verification, linking, isolation and signing-gate rules, not Privy itself; docs/deploy/LIVE-VERIFICATION-PRIVY.md is the owner's live check.",
         "Privy's embedded wallet runs on the product origin: /app has no script-src policy, so injected script could ask Privy to sign outside FloFi's reviewed-attempt gate (Privy's confirmation screen still shows). Recommended follow-up: a nonce script-src policy for /app.",
         "Legacy FloFi Wallet (Turnkey) is export-only; its unlock and export remain covered by the wallet-app and wallet-relay suites with the in-process provider stand-in. Whether production holds Turnkey wallets is unknown until the read-only check in docs/deploy/RELEASE-PRIVY-0019.md runs."
+      ]
+    },
+    {
+      "id": "skills--protocol-integrations",
+      "primary": "flofi-protocol-integrations",
+      "dependencies": [
+        "flofi-bridge",
+        "flofi-infrastructure-ci",
+        "flofi-lending",
+        "flofi-liquidity",
+        "flofi-security",
+        "flofi-swap",
+        "flofi-wallet-execution",
+        "flofi-workflow"
+      ],
+      "sources": [
+        "skills/networks/arbitrum/skill.json",
+        "skills/networks/base/skill.json",
+        "skills/networks/ethereum/skill.json",
+        "skills/networks/evm-core/skill.json",
+        "skills/networks/solana/skill.json",
+        "skills/operations/bridge/skill.json",
+        "skills/operations/execution/skill.json",
+        "skills/operations/lending/skill.json",
+        "skills/operations/liquidity/skill.json",
+        "skills/operations/swap/skill.json",
+        "skills/protocols/aave/skill.json",
+        "skills/protocols/across/skill.json",
+        "skills/protocols/jupiter/skill.json",
+        "skills/protocols/lifi/skill.json",
+        "skills/protocols/orca/skill.json",
+        "skills/protocols/relay/skill.json",
+        "skills/protocols/uniswap/skill.json",
+        "skills/registry.json",
+        "scripts/skill_registry.py"
+      ],
+      "suites": [
+        "scripts.test_ci_skill_registry",
+        "app.platform.engineering-skills"
+      ],
+      "gaps": [
+        "Twelve official documentation sites (and the third-party Arbitrum guide) were unreachable from the build session: they stay PENDING_VERIFICATION until fetched, reviewed, licensed and pinned. Jupiter and Arbitrum documentation repositories state no licence, so their pinned files are PENDING_VERIFICATION (change detection active).",
+        "Upstream checks run on demand (`skill_registry.py check-upstream --fetch`); no scheduled job runs them."
+      ]
+    },
+    {
+      "id": "journey--admin-analytics",
+      "primary": "flofi-admin-analytics",
+      "dependencies": [
+        "flofi-data-privacy",
+        "flofi-frontend-ux",
+        "flofi-security",
+        "flofi-swap",
+        "flofi-wallet-execution"
+      ],
+      "sources": [
+        "apps/reference-dapp/src/domain/journey-metrics.ts",
+        "apps/reference-dapp/src/server/journey-telemetry.ts",
+        "apps/reference-dapp/src/app/api/flofi/journey/route.ts",
+        "scripts/journey-latency-report.mjs"
+      ],
+      "suites": [
+        "app.domain.journey-metrics",
+        "app.server.journey-telemetry"
+      ],
+      "gaps": [
+        "No live production sample exists yet: p50/p95 need real journeys in the deployment logs; the report refuses to label MOCKED or LOCAL evidence otherwise."
       ]
     }
   ],

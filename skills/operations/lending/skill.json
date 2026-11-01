@@ -1,0 +1,55 @@
+{
+  "format": "flofi.engineering-skill.v1",
+  "id": "operations/lending",
+  "title": "Lending operations",
+  "version": "1.0.0",
+  "networks": [],
+  "protocols": [],
+  "operations": [
+    "lending"
+  ],
+  "domains": [
+    "flofi-lending",
+    "flofi-workflow"
+  ],
+  "dependsOn": [],
+  "appliesTo": {
+    "paths": [
+      "apps/reference-dapp/src/server/lending-*",
+      "apps/reference-dapp/src/server/*aave*"
+    ],
+    "keywords": [
+      "lending",
+      "collateral",
+      "debt"
+    ]
+  },
+  "capabilities": [
+    {
+      "actionType": "borrow",
+      "adapterId": "aave-v3",
+      "chainId": "eip155:42161"
+    }
+  ],
+  "sources": [
+    {
+      "url": "https://raw.githubusercontent.com/aave/aave-v3-core/782f51917056a53a2c228701058a6c3fb233684a/contracts/protocol/pool/Pool.sol",
+      "publisher": "Aave",
+      "kind": "OFFICIAL_SDK",
+      "license": "BUSL-1.1",
+      "status": "VERIFIED",
+      "reviewedRevision": "782f51917056a53a2c228701058a6c3fb233684a",
+      "reviewedDigest": "sha256:7cc29ed1b555fdc9be5574e9967d1637b5b2d5e206def934a742f148d05cfa34",
+      "reviewedAt": "2026-11-01",
+      "crossCheckedAgainst": [],
+      "notes": "Pool operations and health factor checks."
+    }
+  ],
+  "guidance": "SKILL.md",
+  "guidanceDigest": "sha256:b2941a8a5bb7db13e0f6ec95be6c0f451a138257a78869d00ff101e23ddef848",
+  "reviewIntervalDays": 90,
+  "authority": "ENGINEERING_REFERENCE_ONLY",
+  "performance": [
+    "Sequential compositions: each Review uses the reconciled result of the previous step."
+  ]
+}

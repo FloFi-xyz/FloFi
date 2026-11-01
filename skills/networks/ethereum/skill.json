@@ -1,0 +1,75 @@
+{
+  "format": "flofi.engineering-skill.v1",
+  "id": "networks/ethereum",
+  "title": "Ethereum mainnet",
+  "version": "1.0.0",
+  "networks": [
+    "ethereum"
+  ],
+  "protocols": [],
+  "operations": [],
+  "domains": [
+    "flofi-protocol-integrations",
+    "flofi-wallet-execution"
+  ],
+  "dependsOn": [
+    "networks/evm-core"
+  ],
+  "appliesTo": {
+    "paths": [
+      "apps/reference-dapp/src/server/*ethereum*",
+      "packages/action-registry/src/*ethereum*"
+    ],
+    "keywords": [
+      "ethereum",
+      "mainnet",
+      "finality",
+      "proof-of-stake"
+    ]
+  },
+  "capabilities": [
+    {
+      "actionType": "asset.swap.exact-input",
+      "adapterId": "uniswap.v3",
+      "chainId": "eip155:1"
+    },
+    {
+      "actionType": "supply",
+      "adapterId": "aave-v3",
+      "chainId": "eip155:1"
+    }
+  ],
+  "sources": [
+    {
+      "url": "https://raw.githubusercontent.com/ethereum/ethereum-org-website/e2b63f9e8a77744a7144a190e1390aeb03def9c8/public/content/developers/docs/consensus-mechanisms/pos/index.md",
+      "publisher": "ethereum.org",
+      "kind": "OFFICIAL_DOCS",
+      "license": "MIT",
+      "status": "VERIFIED",
+      "reviewedRevision": "e2b63f9e8a77744a7144a190e1390aeb03def9c8",
+      "reviewedDigest": "sha256:842d47499d41ca5f174824cbbe1bf00821dfd40f43322000036c10c5f3a209a5",
+      "reviewedAt": "2026-11-01",
+      "crossCheckedAgainst": [],
+      "notes": "Proof-of-stake slots, epochs and finality."
+    },
+    {
+      "url": "https://raw.githubusercontent.com/ethereum/ethereum-org-website/e2b63f9e8a77744a7144a190e1390aeb03def9c8/public/content/developers/docs/blocks/index.md",
+      "publisher": "ethereum.org",
+      "kind": "OFFICIAL_DOCS",
+      "license": "MIT",
+      "status": "VERIFIED",
+      "reviewedRevision": "e2b63f9e8a77744a7144a190e1390aeb03def9c8",
+      "reviewedDigest": "sha256:436eb57d026c25b18d64194f7f499b2ec3020cf57af65afe81464502e6cc7942",
+      "reviewedAt": "2026-11-01",
+      "crossCheckedAgainst": [],
+      "notes": "Block production on mainnet."
+    }
+  ],
+  "guidance": "SKILL.md",
+  "guidanceDigest": "sha256:4b011c53fd79aa5c015be7f14f2b64663fbc2139668aa6fa5b0b587730be1fd3",
+  "reviewIntervalDays": 90,
+  "authority": "ENGINEERING_REFERENCE_ONLY",
+  "performance": [
+    "A receipt is CONFIRMED_ONCHAIN; only reconciliation completes a workflow."
+  ]
+}

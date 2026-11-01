@@ -1,0 +1,115 @@
+{
+  "format": "flofi.engineering-skill.v1",
+  "id": "networks/evm-core",
+  "title": "EVM transactions, fees, pinned reads and RPC pacing",
+  "version": "1.0.0",
+  "networks": [
+    "evm"
+  ],
+  "protocols": [],
+  "operations": [
+    "execution"
+  ],
+  "domains": [
+    "flofi-wallet-execution",
+    "flofi-protocol-integrations",
+    "flofi-security"
+  ],
+  "dependsOn": [],
+  "appliesTo": {
+    "paths": [
+      "apps/reference-dapp/src/server/public-testnet-rpc.ts",
+      "apps/reference-dapp/src/server/bridge-read-rpc.ts",
+      "apps/reference-dapp/src/server/managed-wallet-evm.ts",
+      "apps/reference-dapp/src/server/managed-signing.ts",
+      "apps/reference-dapp/src/wallet/flofi-evm-provider.ts",
+      "apps/reference-dapp/src/server/evm-catalog-runtime.ts",
+      "apps/reference-dapp/src/server/public-testnet-service.ts"
+    ],
+    "keywords": [
+      "evm",
+      "eip-1559",
+      "nonce",
+      "gas",
+      "eth_call",
+      "eth_estimategas",
+      "reorg",
+      "rpc"
+    ]
+  },
+  "capabilities": [
+    {
+      "actionType": "asset.transfer",
+      "adapterId": "evm.native-transfer",
+      "chainId": "eip155:1"
+    },
+    {
+      "actionType": "asset.transfer",
+      "adapterId": "evm.native-transfer",
+      "chainId": "eip155:8453"
+    },
+    {
+      "actionType": "asset.transfer",
+      "adapterId": "evm.native-transfer",
+      "chainId": "eip155:42161"
+    }
+  ],
+  "sources": [
+    {
+      "url": "https://raw.githubusercontent.com/ethereum/ethereum-org-website/e2b63f9e8a77744a7144a190e1390aeb03def9c8/public/content/developers/docs/transactions/index.md",
+      "publisher": "ethereum.org",
+      "kind": "OFFICIAL_DOCS",
+      "license": "MIT",
+      "status": "VERIFIED",
+      "reviewedRevision": "e2b63f9e8a77744a7144a190e1390aeb03def9c8",
+      "reviewedDigest": "sha256:e3d278593bbec030c72c4f4fc8993475633c6f5e6e799118705d42920d48b574",
+      "reviewedAt": "2026-11-01",
+      "crossCheckedAgainst": [],
+      "notes": "Transactions, EIP-1559 fields and nonces."
+    },
+    {
+      "url": "https://raw.githubusercontent.com/ethereum/ethereum-org-website/e2b63f9e8a77744a7144a190e1390aeb03def9c8/public/content/developers/docs/gas/index.md",
+      "publisher": "ethereum.org",
+      "kind": "OFFICIAL_DOCS",
+      "license": "MIT",
+      "status": "VERIFIED",
+      "reviewedRevision": "e2b63f9e8a77744a7144a190e1390aeb03def9c8",
+      "reviewedDigest": "sha256:f7e324326c64b8743f5b29b1ef38e2205c8f67a1ede998b0807d6caa53b796e9",
+      "reviewedAt": "2026-11-01",
+      "crossCheckedAgainst": [],
+      "notes": "Base fee, priority fee and gas limits."
+    },
+    {
+      "url": "https://raw.githubusercontent.com/ethereum/ethereum-org-website/e2b63f9e8a77744a7144a190e1390aeb03def9c8/public/content/developers/docs/blocks/index.md",
+      "publisher": "ethereum.org",
+      "kind": "OFFICIAL_DOCS",
+      "license": "MIT",
+      "status": "VERIFIED",
+      "reviewedRevision": "e2b63f9e8a77744a7144a190e1390aeb03def9c8",
+      "reviewedDigest": "sha256:436eb57d026c25b18d64194f7f499b2ec3020cf57af65afe81464502e6cc7942",
+      "reviewedAt": "2026-11-01",
+      "crossCheckedAgainst": [],
+      "notes": "Blocks, slots and block hashes."
+    },
+    {
+      "url": "https://ethereum.org/developers/tools/ethskills/",
+      "publisher": "ethereum.org",
+      "kind": "OFFICIAL_SKILL",
+      "license": null,
+      "status": "PENDING_VERIFICATION",
+      "reviewedRevision": null,
+      "reviewedDigest": null,
+      "reviewedAt": null,
+      "crossCheckedAgainst": [],
+      "notes": "Official Ethereum developer skills index named by the owner; not reachable from the build session. Verify and pin before relying on it."
+    }
+  ],
+  "guidance": "SKILL.md",
+  "guidanceDigest": "sha256:3e2f59afe6064d874d7ee7b2b04bacb7f80b8ad0c80b36bc94e5cf11b2210d7a",
+  "reviewIntervalDays": 90,
+  "authority": "ENGINEERING_REFERENCE_ONLY",
+  "performance": [
+    "Pinned-block reads with a final block-hash recheck; immutable code facts may be cached, economic state never.",
+    "Public RPC endpoints stay paced; only an operator endpoint declared dedicated runs bounded parallel reads."
+  ]
+}

@@ -1,0 +1,91 @@
+{
+  "format": "flofi.engineering-skill.v1",
+  "id": "protocols/relay",
+  "title": "Relay Depository (universal router)",
+  "version": "1.0.0",
+  "networks": [
+    "evm",
+    "solana",
+    "ethereum",
+    "base",
+    "arbitrum-one"
+  ],
+  "protocols": [
+    "relay"
+  ],
+  "operations": [
+    "bridge"
+  ],
+  "domains": [
+    "flofi-bridge",
+    "flofi-protocol-integrations"
+  ],
+  "dependsOn": [
+    "operations/bridge"
+  ],
+  "appliesTo": {
+    "paths": [
+      "apps/reference-dapp/src/server/universal-router/*"
+    ],
+    "keywords": [
+      "relay",
+      "depository",
+      "universal-router"
+    ]
+  },
+  "capabilities": [
+    {
+      "actionType": "asset.bridge",
+      "adapterId": "flofi.router.universal",
+      "chainId": "eip155:1"
+    },
+    {
+      "actionType": "asset.bridge",
+      "adapterId": "flofi.router.universal",
+      "chainId": "eip155:8453"
+    },
+    {
+      "actionType": "asset.bridge",
+      "adapterId": "flofi.router.universal",
+      "chainId": "eip155:42161"
+    },
+    {
+      "actionType": "asset.bridge",
+      "adapterId": "flofi.router.universal",
+      "chainId": "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp"
+    }
+  ],
+  "sources": [
+    {
+      "url": "https://raw.githubusercontent.com/relayprotocol/relay-kit/f66fb04e940e938482836822c5a6061f06663419/README.md",
+      "publisher": "Relay",
+      "kind": "OFFICIAL_SDK",
+      "license": "MIT",
+      "status": "VERIFIED",
+      "reviewedRevision": "f66fb04e940e938482836822c5a6061f06663419",
+      "reviewedDigest": "sha256:4a6bee252043e515f5aa1bd440630fb057de6d04cd65e8277d87cad7e92b3b62",
+      "reviewedAt": "2026-11-01",
+      "crossCheckedAgainst": [],
+      "notes": "Official Relay SDK."
+    },
+    {
+      "url": "https://docs.relay.link/",
+      "publisher": "Relay",
+      "kind": "OFFICIAL_DOCS",
+      "license": null,
+      "status": "PENDING_VERIFICATION",
+      "reviewedRevision": null,
+      "reviewedDigest": null,
+      "reviewedAt": null,
+      "crossCheckedAgainst": [],
+      "notes": "Official site; not reachable from the build session network. Verify, pin and record before relying on it."
+    }
+  ],
+  "guidance": "SKILL.md",
+  "guidanceDigest": "sha256:a9b0ae7f07ef1814fe30b648a82707831a700b5c55eda4e29dc623a173dc6777",
+  "reviewIntervalDays": 90,
+  "authority": "ENGINEERING_REFERENCE_ONLY",
+  "performance": [
+    "Only Relay yields EXECUTABLE discovery candidates: the discovery window can answer at its verified route plus the compare window."
+  ]
+}

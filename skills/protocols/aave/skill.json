@@ -1,0 +1,98 @@
+{
+  "format": "flofi.engineering-skill.v1",
+  "id": "protocols/aave",
+  "title": "Aave V3 lending",
+  "version": "1.0.0",
+  "networks": [
+    "evm",
+    "ethereum",
+    "base",
+    "arbitrum-one"
+  ],
+  "protocols": [
+    "aave"
+  ],
+  "operations": [
+    "lending"
+  ],
+  "domains": [
+    "flofi-lending",
+    "flofi-protocol-integrations"
+  ],
+  "dependsOn": [
+    "networks/evm-core",
+    "operations/lending"
+  ],
+  "appliesTo": {
+    "paths": [
+      "apps/reference-dapp/src/server/*aave*",
+      "apps/reference-dapp/src/server/lending-*",
+      "apps/reference-dapp/src/server/supply-*",
+      "packages/action-registry/src/aave-*",
+      "packages/reference-compiler/src/*aave*"
+    ],
+    "keywords": [
+      "aave",
+      "health-factor",
+      "supply",
+      "borrow",
+      "repay",
+      "withdraw"
+    ]
+  },
+  "capabilities": [
+    {
+      "actionType": "supply",
+      "adapterId": "aave-v3",
+      "chainId": "eip155:8453"
+    },
+    {
+      "actionType": "borrow",
+      "adapterId": "aave-v3",
+      "chainId": "eip155:8453"
+    },
+    {
+      "actionType": "repay",
+      "adapterId": "aave-v3",
+      "chainId": "eip155:8453"
+    },
+    {
+      "actionType": "withdraw",
+      "adapterId": "aave-v3",
+      "chainId": "eip155:8453"
+    }
+  ],
+  "sources": [
+    {
+      "url": "https://raw.githubusercontent.com/aave/aave-v3-core/782f51917056a53a2c228701058a6c3fb233684a/contracts/protocol/pool/Pool.sol",
+      "publisher": "Aave",
+      "kind": "OFFICIAL_SDK",
+      "license": "BUSL-1.1",
+      "status": "VERIFIED",
+      "reviewedRevision": "782f51917056a53a2c228701058a6c3fb233684a",
+      "reviewedDigest": "sha256:7cc29ed1b555fdc9be5574e9967d1637b5b2d5e206def934a742f148d05cfa34",
+      "reviewedAt": "2026-11-01",
+      "crossCheckedAgainst": [],
+      "notes": "Aave V3 Pool entry points (supply, borrow, repay, withdraw)."
+    },
+    {
+      "url": "https://aave.com/docs",
+      "publisher": "Aave",
+      "kind": "OFFICIAL_DOCS",
+      "license": null,
+      "status": "PENDING_VERIFICATION",
+      "reviewedRevision": null,
+      "reviewedDigest": null,
+      "reviewedAt": null,
+      "crossCheckedAgainst": [],
+      "notes": "Official site; not reachable from the build session network. Verify, pin and record before relying on it."
+    }
+  ],
+  "guidance": "SKILL.md",
+  "guidanceDigest": "sha256:4112d7b94dfbca3835982f3a50c1160c88a1f791e456f77a183c17843b5c74f1",
+  "reviewIntervalDays": 90,
+  "authority": "ENGINEERING_REFERENCE_ONLY",
+  "performance": [
+    "Health factor and debt are economic state: always fresh at Review."
+  ]
+}
