@@ -254,7 +254,7 @@ preview logs with at least 20 journeys per group are supplied, and it labels jou
 | 3 | Base → Arbitrum bridge | Router suite (31), including concurrent providers with an unchanged selection |
 | 4 | Cross-chain involving Solana | Discovery suite on recorded Solana → Base answers |
 | 5 | Multi-step chat | `flofi-conversation` suite (20) |
-| 6 | Privy embedded EVM wallet | `flofi-privy-signer` suite (8), wallet suites; PR #146 browser `auth-wallets` not re-run here |
+| 6 | Privy embedded EVM wallet | `flofi-privy-signer` suite (9, including the local-clock Review deadline), wallet suites; browser `auth-wallets` profile passes on the merged head |
 | 7 | Privy embedded Solana wallet | `flofi-privy-signer` suite |
 | 8 | Authenticated user, no second Google login | Unchanged PR #146 session; chat now checks readiness before Review |
 | 9 | External wallet | Unchanged path; journeys tag `external` |
@@ -262,48 +262,85 @@ preview logs with at least 20 journeys per group are supplied, and it labels jou
 | 11 | Rate-limited provider with another valid one | Discovery 429 test |
 | 12 | Expired quote requiring new Review | Existing `QUOTE_EXPIRED_REVIEW_REQUIRED` paths unchanged and passing |
 | 13 | Wallet rejection | Signer suite; new swap-store messages |
-| 14 | Refresh after submission | Store recovery code with run guards. **Gap:** no store-level unit test; covered by the critical browser tier only where its specs reach it |
+| 14 | Refresh after submission | Store recovery code with run guards and token-superseded loops; the follow after Execute and after a reload use the same stopping rule. **Gap:** no store-level unit test; covered by the critical and execution-continuity browser profiles where their specs reach it |
 | 15 | Lost wallet response after possible submission | Existing UNKNOWN reconciliation unchanged |
 | 16 | Double click / concurrent request | Existing locks unchanged; the chat path adds a refusal only |
-| 17 | Genuine failure vs inconclusive | Canonical status tests (14 statuses × flags, Dashboard agreement) |
+| 17 | Genuine failure vs inconclusive | Canonical status tests (46 recorded statuses × observation, attention, evidence and unknown-result variants, Dashboard agreement; Pix, lending and composition cases; Pix records through the real projector) |
 | 18 | Disconnect → `/login` | Unchanged from PR #146 (not modified) |
-| 19 | Chat / MCP / channel continuity | Copilot tool, channel and MCP suites; MCP lifecycle field |
+| 19 | Chat / MCP / channel continuity | Copilot tool suite (provisional comparisons), channel toolkit (conversational window with a hanging provider), MCP `lifecycle` asserted end to end; the chat's wallet check also guards a continuation (no dedicated unit test for that path) |
 | 20 | Multiple users without leakage | Fact cache holds no user data; PostgreSQL tenancy suites pass |
 
-## 6. Gates (this session)
+## 6. Gates (final head)
+
+Final code head `6b65a26d` (the build-record commits after it change documentation only). Toolchain: Node 24.21.0 (official binary), pnpm
+11.22.0, PostgreSQL **18.6** from CI's exact image digest (`postgres:18.6-bookworm@sha256:3725f4e2…`), headless shell revision 1243.
 
 | Gate | Result |
 | --- | --- |
-| `pnpm typecheck`, `pnpm lint`, `pnpm build` | pass |
-| `pnpm schemas:check` (Node 24.21.0) | pass (11 exports) |
-| `pnpm test` | **503 files, 6116 tests pass**, 2 pre-existing conditional skips; `verify-results`: 35 required suites pass |
-| `pnpm test:postgres` (PostgreSQL 16 loopback) | 567 pass, 3 skipped; **1 fails because of the environment**: `forward-compatibility.pg.test.ts` asserts PostgreSQL 18 behaviour (named NOT NULL constraints). CI pins `postgres:18.6`; only 16 was available here, and this build touches no migration or cloud-runtime code |
-| `agent_guard.py check`, `governance_lite.py`, `test_ci_*` (179, including 9 new skills-registry tests) and `test_governance_lite` (21) | pass |
-| `skill_registry.py verify` | pass |
-| `skill_registry.py check-upstream --fetch` | 32 pinned sources UNCHANGED over live HTTPS; 12 doc sites UNREACHABLE from this network |
-| Critical browser tier (`guarded-release-browser.mjs critical`) | **6/6 profiles pass**: copilot-learning, canvas-corrections, solana-wallet-refusal, supply-provenance, review-execute-recovery-components, solana-transfer-ux |
-| Extended profiles relevant to this build | **pass**: auth-wallets (13 tests, Privy loopback stand-in), jupiter-provenance, router-provenance, execution-continuity (34 tests) |
-| Remaining extended shards | not run locally; CircleCI runs the complete suites |
+| `pnpm typecheck`, `pnpm lint` (now including `scripts/journey-latency-report.mjs`), `pnpm build` | pass |
+| `pnpm schemas:check` | pass (11 exports) |
+| `pnpm test` + `agent_guard.py verify-results --stage unit` | **507 files, 6173 tests pass**, 2 existing conditional skips; **43 required suites** pass (two journey suites newly required) |
+| `pnpm test:postgres` (PostgreSQL 18.6) + `verify-results --stage postgres` | **89 files, 575 tests pass**, 3 existing conditional skips; **29 required suites** pass (the version-16 environment failure is gone) |
+| `governance_lite.py`, `test_ci_*` (179) and `test_governance_lite` (21), `agent_guard.py check`, `skill_registry.py verify` | pass |
+| `skill_registry.py check-upstream --fetch` (first session) | 32 pinned sources UNCHANGED; 12 UNPINNED sites (11 official + the third-party Arbitrum guide) unreachable from this network |
+| Browser at `143561ce` | **pass**: critical tier 6/6 (copilot-learning, canvas-corrections, solana-wallet-refusal, supply-provenance, review-execute-recovery-components, solana-transfer-ux), auth-wallets, jupiter-provenance, router-provenance, execution-continuity (34 tests) |
+| Browser at `6b65a26d` (after the last UI fixes) | running when this record was written (critical, execution-continuity, universal-bridge, owner-history, auth-wallets); the result is reported on the PR |
+| Remaining extended shards | not run locally; CircleCI runs every profile (browser-1/2) |
+| CircleCI / Vercel Preview on the final head | reported on the PR: CircleCI is the certification authority, and a record cannot certify the commit that contains it |
 
-## 7. Specialist review (existing agents, read-only, at most 3 at once)
+## 7. Specialist review (the existing 19 agents, read-only, at most 3 at once)
 
-flofi-wallet-execution with flofi-security, flofi-swap with flofi-protocol-integrations, and flofi-bridge with
-flofi-workflow reviewed the diff. They ran as general agents following `.claude/agents/*.md` plus their
-`agent_guard.py domain` contracts and selected skills; the flofi-* agent types were not exposed in this session.
+The `flofi-*` agent types ran as themselves (Read-only, no shell), three at a time, each given the base, the changed paths, the relevant diff
+and its `agent_guard.py domain` report; the main session ran every search and test they asked for. **18 of the 19** reviewed this PR in six
+batches; flofi-payments-billing (selected only because `coverage.json` changed) was not run. No reviewer edited, committed or signed anything.
+
+**Integration finding (reported, not changed):** the repository hook `.claude/hooks/flofi_agent_hooks.py` denies `SubagentHandback` to the
+flofi-* reviewers (and refuses reads outside the repository or of gitignored files), so each report was taken from the reviewer's final
+message, and later batches were given their context in the prompt. The reviewers' restrictions were not relaxed; the owner may want the hook to
+allow the handback tool. `agent_guard.py review` records each reviewer's result and the denials.
+
+| Batch | Reviewers | Findings (highest) |
+| --- | --- | --- |
+| 1 | flofi-security, flofi-wallet-execution, flofi-workflow | 3 low; 5 (low); 5 (medium) |
+| 2 | flofi-swap, flofi-bridge, flofi-protocol-integrations | 3 low; 3 low; 8 low |
+| 3 | flofi-admin-analytics, flofi-data-privacy, flofi-infrastructure-ci | 10 (medium); 5 (low); 5 (medium) |
+| 4 | flofi-mcp, flofi-channels, flofi-chat | 5 (medium); 3 low; 3 (medium) |
+| 5 | flofi-transfer-payments, flofi-frontend-ux, flofi-lending | 4 (**high**); 10 (medium); 7 (medium) |
+| 6 | flofi-liquidity, flofi-automations, flofi-developers | running when this record was written; reported on the PR |
+
+Verified findings and their resolution (each fixed with a test unless stated):
 
 | Severity | Finding | Resolution |
 | --- | --- | --- |
-| Medium | Jupiter recovery poll could overwrite a newer simulation and its recovery pointer | Fixed: followed-run guard, unmount stop, background observation |
-| Medium | Deploy skew: new web + old API rejected the extra `discover` argument | Fixed: fallback to the one-argument call; API-first release order documented |
-| Low | Public-testnet recovery write lacked a run check | Fixed |
-| Low | Execute loops ignored unmount; Jupiter held its lock for the longer schedule | Fixed |
-| Low | Facts cached before the reorg check | Fixed: committed after the same-block check (test) |
-| Low | Kill switch ignored on Robinhood Chain | Fixed (test) |
-| Low | Telemetry body read unbounded without Content-Length; events forgeable | Byte-capped read (test); events labelled `CLIENT_REPORTED` and the report labels its evidence |
-| Low | Canonical status gaps (`SUBMISSION_RESULT_UNKNOWN`, `REFUNDED`, …) | Mapped (tests) |
-| Low | `get_quote` hid provisional comparisons; caller-signal listener leak; 6.5 s window close to the 8 s limit | Fixed; chat window now 5.5 s |
-| Low | Skill text over-generalised Jupiter `begin` and estimate block; tokenizer kept trailing punctuation | Fixed (test) |
-| Low (existing) | Quoter catch treats a transport error as "tier unavailable" | **Not changed**: some nodes report reverts with codes FloFi maps to transport errors. Narrowing it without live measurement could fail healthy quotes. Recorded for follow-up |
+| High | A Pix payment stays AUTHORIZED while its attempt is submitting or its wallet result is unknown; the Dashboard list (no attempts) said "nothing was sent" | The Pix projector publishes the attempt state while AUTHORIZED, as transfers do; projector → lifecycle → Dashboard test |
+| Medium | `lifecycle` said NOT_STARTED after a wallet request | Attempt-based classification; `*_RESULT_UNKNOWN` errors are INCONCLUSIVE (shared with the Dashboard) |
+| Medium | Pix/composition states mis-mapped (PAYMENT_SETTLED, PAYMENT_PENDING, COMPLETED, working phases) | Mapped as recorded; settled labels complete only with evidence |
+| Medium | Lending: a landed-but-unreconciled borrow read FAILED (final); revert after a confirmed supply read FAILED | INTERVENTION_REQUIRED / PARTIALLY_COMPLETED; between steps not final; routine recovery follows the attempt |
+| Medium | Journey metric `authorization_to_submission_ms` always `[REDACTED]` by the logger | Renamed; tested through the real logger |
+| Medium | `user_ms`/`system_ms` logged 0 when unmeasured; client could set them | Server recomputes; `null` when unmeasured |
+| Medium | Provider answer times counted per route; timeouts dropped; 20-sample floor met by duplicates | One sample per provider per discovery; timeouts counted; journeys deduplicated; floor never lowered |
+| Medium | Governance test would fail on 2027-01-31; pacing test's shared-pause check vacuous | Dated explicitly; failure ordered first (mutation fails it) |
+| Medium | Chat could call a provisional route "cheapest" or slow providers "unavailable" | Tool rule 15, `NOT_COMPARED_IN_TIME`, `ROUTE_COMPARISON_INCOMPLETE`, marker on success |
+| Medium | Swap refusal asked for a Simulate the page cannot offer; Dashboard called expired/refused requests "declined" | Copy names what happened; status-specific chips (EN/PT) |
+| Medium | Base L1-fee call misnamed in the skill | `getL1FeeUpperBound(uint256)`, selector verified |
+| Medium (earlier) | Jupiter recovery could overwrite a newer run; deploy skew | Run guard and token-superseded loops; fallback (as before) |
+| Low | Quoter catch dropped a tier on an outage | Classified by evidence (an explicit revert drops the tier; an unanswered read fails the quote) |
+| Low | Journey id reused the quote correlation id; off switch failed open; unkeyed rate hash | Fresh UUID; fails closed; HMAC with per-process key, windows purged |
+| Low | Discovery compare window could start on a route FloFi cannot execute; late answer test missing | Only a Universal-Router route starts it; stubborn-transport test |
+| Low | USD observation started before network gates; EIP-7702 designator could be cached | Started after the gates; never cached |
+| Low | Channel window untested; misleading wiring comments; chat continuation skipped the wallet check | Hanging-provider test (mutation fails it); comments fixed; check added |
+| Low | Privy deadline in UTC only; provisional note not announced; European Portuguese strings | Local clock with offset; one live region; Brazilian Portuguese |
+| Low | Report script unlinted / metric list drift; source URLs with dot segments; MAINNET rows | Linted and drift-tested; refused; MAINNET `EXECUTE` required |
+
+Not changed here (recorded for the owner): the Dashboard list has no attempts, so an Aave or lending run between steps can still read
+"Not started" there while MCP is precise (needs the run summary to carry an earlier-confirmed flag); channel discovery does not apply the
+web path's `GRYLOO_UNIVERSAL_ROUTER` gate (pre-existing); `get_approval_status` never lists Pix runs and requires `errorCode === null` for
+`reconciled`, which differs from the lifecycle's RECONCILED_WITH_ATTENTION (pre-existing; owner decision); lending/Aave "proven not
+submitted" attempts read INCONCLUSIVE until a new attempt (overstates, never understates); the developer API has no `lifecycle` field.
+
+**Intelligence Engine and Capability API.** No new runtime AI or authority. The Copilot's read-only tools (`platform/copilot-tools.ts`) carry the
+provisional-comparison facts and rule 15 tells the model how to state them; the skills test asserts the Capability API
+(`domain/intelligence/capability-api.ts`) still profiles every network a skill names and that no runtime code reads `skills/`.
 
 ## 8. Multichain engineering skills registry
 
