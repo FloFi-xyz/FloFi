@@ -26,8 +26,11 @@ export function createBaseSepoliaReadRpc(url: string, methods: readonly string[]
           'message' in result.error && typeof result.error.message === 'string' &&
           /missing trie node|historical state (?:is )?(?:unavailable|not available)|state .* is not available/i.test(result.error.message))
         throw new Error('PUBLIC_RPC_HISTORY_UNAVAILABLE');
+      // BUILD-FLOFI-EXECUTION-PERFORMANCE-001: the node's own JSON-RPC code rides along (`rpcErrorCode`) so a caller can tell "the node answered with an
+      // error" from "no answer at all"; the message every caller matches on is unchanged.
       if (result && typeof result === 'object' && 'error' in result && result.error && typeof result.error === 'object' &&
-          'code' in result.error && [-32005, -32011, -32016, -32603].includes(Number(result.error.code))) throw new Error('PUBLIC_RPC_UNAVAILABLE');
+          'code' in result.error && [-32005, -32011, -32016, -32603].includes(Number(result.error.code)))
+        throw Object.assign(new Error('PUBLIC_RPC_UNAVAILABLE'), { rpcErrorCode: Number(result.error.code) });
       if (!result || typeof result !== 'object' || !('result' in result) || 'error' in result) throw new Error('PUBLIC_RPC_RESPONSE_INVALID');
       return result.result;
     } catch (cause) {
@@ -82,6 +85,18 @@ export function baseSepoliaRpcUrl(override: string | undefined): string {
   try { url = new URL(override); } catch { throw new Error('UNISWAP_LIQUIDITY_RPC_CONFIGURATION_INVALID'); }
   if (url.protocol !== 'https:' || url.username || url.password || url.hash) throw new Error('UNISWAP_LIQUIDITY_RPC_CONFIGURATION_INVALID');
   return url.href;
+}
+/**
+ * BUILD-FLOFI-EXECUTION-PERFORMANCE-001: a read that got no usable answer from the node — the transport failed (HTTP error, timeout, refused
+ * connection), the node reported a rate or capacity limit, or it lacks the pinned block's state. Distinct from an error the node answered
+ * about the call itself (a revert: PUBLIC_RPC_RESPONSE_INVALID, or JSON-RPC -32603, which some providers use for reverts).
+ */
+export function readNotAnswered(cause: unknown): boolean {
+  if (!(cause instanceof Error)) return false;
+  if (cause.message === 'PUBLIC_RPC_HISTORY_UNAVAILABLE') return true;
+  if (cause.message !== 'PUBLIC_RPC_UNAVAILABLE') return false;
+  const code = (cause as { rpcErrorCode?: unknown }).rpcErrorCode;
+  return code === undefined || code === -32005 || code === -32011 || code === -32016;
 }
 /**
  * Public endpoints rate-limit bursts (public Base answered HTTP 429 "over rate limit" to the router's parallel Review reads

@@ -127,6 +127,22 @@ describe('UX-007 shared catalog-network live quote', () => {
       expect('deploymentFacts' in swapRuntime('live', {}, async () => { throw new Error('unused'); })).toBe(false);
     }
   });
+  it('BUILD-FLOFI-EXECUTION-PERFORMANCE-001: an unanswered quoter read fails the quote; an answered revert only removes that tier', async () => {
+    const c = CASES[0]!, { workflow, seams } = setup(c);
+    const failQuoter = (error: () => Error): typeof seams.rpc => async (method, params) => {
+      if (method === 'eth_call' && String((params[0] as { data: string }).data).startsWith('0xc6a5026a')) throw error();
+      return seams.rpc(method, params);
+    };
+    const quote = (rpc: typeof seams.rpc) => readBuildEstimate({ workflow, nodeId: 'node-002' }, c.env, { ...seams, rpc, catalog: { ...seams.catalog, deploymentFacts: null } });
+    // No answer from the node (transport, rate limit, missing history): the tier's price is unknown, so no quote is bound.
+    for (const error of [() => new Error('PUBLIC_RPC_UNAVAILABLE'), () => Object.assign(new Error('PUBLIC_RPC_UNAVAILABLE'), { rpcErrorCode: -32005 }),
+      () => new Error('PUBLIC_RPC_HISTORY_UNAVAILABLE')])
+      expect(await quote(failQuoter(error))).toMatchObject({ ok: false, code: error().message });
+    // The node answered with an error about the call (a revert; -32603 is how some providers report one): this tier is simply not a candidate
+    // (the fixture's only pool, so no usable pool remains).
+    for (const error of [() => new Error('PUBLIC_RPC_RESPONSE_INVALID'), () => Object.assign(new Error('PUBLIC_RPC_UNAVAILABLE'), { rpcErrorCode: -32603 })])
+      expect(await quote(failQuoter(error))).toMatchObject({ ok: false, code: 'POOL_UNUSABLE' });
+  });
   it('BUILD-FLOFI-EXECUTION-PERFORMANCE-001: the fact cache expires and is bounded', () => {
     const cache = createDeploymentFactCache(1_000, 2);
     cache.add('a', 0); expect(cache.has('a', 999)).toBe(true); expect(cache.has('a', 1_000)).toBe(false); expect(cache.has('a', 10)).toBe(false);

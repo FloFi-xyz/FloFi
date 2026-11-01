@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { describe, expect, it, vi } from 'vitest';
 import { pacedReadRpc, routerMode, routerRpcUrl, routerRuntime, ROUTER_ARBITRUM_RPC_METHODS, ROUTER_BASE_RPC_METHODS } from './router-runtime';
-import { readPacingFor } from './public-testnet-rpc';
+import { createBaseSepoliaReadRpc, readNotAnswered, readPacingFor } from './public-testnet-rpc';
 
 describe('BUILD-ROUTER-001 router runtime', () => {
   it('is off unless explicitly enabled; the MOCKED harness always wins; owner execution is a separate opt-in', () => {
@@ -78,5 +78,24 @@ describe('BUILD-FLOFI-EXECUTION-PERFORMANCE-001 dedicated read pacing', () => {
       expect(await outcome).toBe('RPC_ERROR');
       expect(starts.length - before).toBe(1);
     } finally { vi.useRealTimers(); }
+  });
+});
+
+describe('BUILD-FLOFI-EXECUTION-PERFORMANCE-001 read failure classification', () => {
+  it('keeps every caller\'s code and adds the node\'s JSON-RPC code, so "answered with an error" differs from "no answer"', async () => {
+    const answers: (() => Response)[] = [
+      () => new Response(JSON.stringify({ jsonrpc: '2.0', id: 1, error: { code: -32603, message: 'execution reverted' } })),
+      () => new Response('busy', { status: 503 }),
+      () => new Response(JSON.stringify({ jsonrpc: '2.0', id: 1, error: { code: 3, message: 'execution reverted' } })),
+    ];
+    vi.stubGlobal('fetch', async () => answers.shift()!());
+    try {
+      const rpc = createBaseSepoliaReadRpc('https://rpc.example.org', ['eth_call']);
+      const caught = async () => rpc('eth_call', []).then(() => null, (error: Error) => error);
+      const reverted = await caught(), down = await caught(), revert3 = await caught();
+      expect([reverted?.message, down?.message, revert3?.message]).toEqual(['PUBLIC_RPC_UNAVAILABLE', 'PUBLIC_RPC_UNAVAILABLE', 'PUBLIC_RPC_RESPONSE_INVALID']);
+      expect([readNotAnswered(reverted), readNotAnswered(down), readNotAnswered(revert3), readNotAnswered(new Error('PUBLIC_RPC_HISTORY_UNAVAILABLE'))])
+        .toEqual([false, true, false, true]);
+    } finally { vi.unstubAllGlobals(); }
   });
 });

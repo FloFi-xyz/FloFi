@@ -8,6 +8,7 @@
  * selects the profile and its own read client; no chain falls back to another. This service never signs or sends.
  */
 import { nitroGasLimit, nitroMaxFeePerGas } from './arbitrum-fees.ts';
+import { readNotAnswered } from './public-testnet-rpc.ts';
 import { createHash, randomBytes } from 'node:crypto';
 import { closeSync, existsSync, fsyncSync, mkdirSync, openSync, readFileSync, readdirSync, renameSync, unlinkSync, writeFileSync } from 'node:fs';
 import { isAbsolute, join } from 'node:path';
@@ -763,9 +764,12 @@ async function catalogQuote(workflow: SemanticWorkflow, executionId: string, P: 
       learn(poolKey);
     }
     if (BigInt(await call(pool, '0x1a686502', block)) === 0n || word0(await call(pool, '0x3850c7bd', block)) === 0n) return { fee: tier.fee, pool, expectedOut: null };
-    // A tier whose quote reverts (no usable liquidity for this size) is simply not a candidate.
+    // A tier whose quote reverts (no usable liquidity for this size) is simply not a candidate. BUILD-FLOFI-EXECUTION-PERFORMANCE-001: a read the
+    // node never answered (after the transport's own retries) is not a revert — the tier's price is unknown, so the quote fails closed instead of
+    // silently binding another tier. An answered error (a revert, including JSON-RPC -32603) still only removes this tier.
     let out: bigint | null;
-    try { out = word0(await call(P.quoter, quoteData(inRoute, outRoute, amountIn, tier.fee), block)); } catch { out = null; }
+    try { out = word0(await call(P.quoter, quoteData(inRoute, outRoute, amountIn, tier.fee), block)); }
+    catch (cause) { if (readNotAnswered(cause)) throw cause; out = null; }
     return { fee: tier.fee, pool, expectedOut: out && out > 0n ? out.toString() : null };
   };
   const settled = await Promise.allSettled((kind === 'SWAP' ? P.feeTiers : []).map(quoteTier));
