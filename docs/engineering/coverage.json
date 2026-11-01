@@ -776,7 +776,9 @@
     "app.app.wallet-session-action",
     "app.accounts.account-host",
     "app.platform.engineering-skills",
-    "app.domain.canonical-execution-status"
+    "app.domain.canonical-execution-status",
+"app.domain.journey-metrics",
+"app.server.journey-telemetry"
   ],
   "modules": [
     {

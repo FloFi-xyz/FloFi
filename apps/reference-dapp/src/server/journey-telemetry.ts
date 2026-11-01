@@ -5,20 +5,24 @@
  * no cookie, account, address, amount, hash, signature or chat text: the closed schema admits none, and anything else is refused.
  * Abuse and cost bounds: same-origin only; a body of at most 4 KiB (also without Content-Length); a signed-in FloFi session is required — its
  * sealed, host-bound cookie is checked cryptographically (no database read), so a forger needs a real account; at most 60 events per account per
- * 10 minutes and 600 per process per minute, so one sender cannot flood the logs or crowd out everyone else (one log line, about 0.5 KB, per
- * accepted event). The account is used only as an in-memory, hashed rate-limit key: it is never logged or stored. `FLOFI_JOURNEY_TELEMETRY=off`
- * accepts and drops every event. The timings are still client-reported, so the report labels them CLIENT_REPORTED: operational signals,
- * never certification or financial evidence.
+ * 10 minutes and 600 per minute, both per server instance (counters live in memory, so N instances admit up to N times as many); a journey id is
+ * logged once. One log line (at most about 0.8 KB) per accepted event. The account is used only as an in-memory rate-limit key, an HMAC under a
+ * per-process random key: it is never logged or stored, and its window is dropped once it ends. `FLOFI_JOURNEY_TELEMETRY` other than unset or
+ * `on` (for example `off` or `disabled`) accepts and drops every event: a misconfigured switch turns logging off, never on. The timings are
+ * still client-reported, so every line and the report say CLIENT_REPORTED: operational signals, never certification or financial evidence.
+ * Each line names the deployment that wrote it and the network's registry environment, so a report can refuse mixed or mislabelled logs.
  */
-import { createHash } from 'node:crypto';
+import { createHmac, randomBytes } from 'node:crypto';
 import { createLogger } from '@defi-workflow-engine/cloud-runtime';
-import { parseJourneyEvent } from '../domain/journey-metrics.ts';
+import { journeyNetworkEnvironment, journeyTotals, parseJourneyEvent } from '../domain/journey-metrics.ts';
+import { deploymentEnvironment } from './deployment.ts';
 import { ACCOUNT_SESSION_COOKIE, readAccountSession } from '../accounts/account-session.ts';
 import { sessionCookieName } from './session-cookie.ts';
 import { originFromHeaders } from './session-principal.ts';
 
 type Env = Readonly<Record<string, string | undefined>>;
-const MAX_BYTES = 4_096, WINDOW_MS = 60_000, LIMIT_PER_WINDOW = 600, ACCOUNT_WINDOW_MS = 600_000, LIMIT_PER_ACCOUNT = 60, ACCOUNTS_TRACKED = 5_000;
+const MAX_BYTES = 4_096, WINDOW_MS = 60_000, LIMIT_PER_WINDOW = 600, ACCOUNT_WINDOW_MS = 600_000, LIMIT_PER_ACCOUNT = 60, ACCOUNTS_TRACKED = 5_000,
+  JOURNEYS_REMEMBERED = 10_000;
 const headers = { 'cache-control': 'no-store', 'x-content-type-options': 'nosniff' };
 
 type Fields = Readonly<Record<string, string | number | null>>;
@@ -54,21 +58,29 @@ function telemetryRateKeyAccount(request: Request, env: Env, now: Date): string 
 export function createJourneyReceiver(options: { readonly env?: Env; readonly now?: () => number; readonly log?: (fields: Fields) => void;
   readonly account?: (request: Request) => string | null } = {}) {
   const env = options.env ?? process.env, now = options.now ?? Date.now;
+  const setting = env.FLOFI_JOURNEY_TELEMETRY?.trim().toLowerCase(), enabled = !setting || setting === 'on';
+  const deployment = deploymentEnvironment(env);
   const log = options.log ?? (fields => createLogger({ service: 'flofi-journey' }).info('journey.timing', fields));
   const account = options.account ?? (request => telemetryRateKeyAccount(request, env, new Date(now())));
   let windowStart = 0, accepted = 0;
-  // Per-account windows, keyed by a hash (the account id never sits in memory as such), bounded in size (oldest first).
-  const perAccount = new Map<string, { start: number; count: number }>();
+  // Per-account windows keyed by an HMAC under a key that never leaves this process (the account id never sits in memory as such, and the keys
+  // cannot be matched against an account list). Insertion order is window-start order, so ended windows are dropped from the front; the map
+  // is also bounded in size (oldest first).
+  const rateKey = randomBytes(32), perAccount = new Map<string, { start: number; count: number }>();
   const allowAccount = (accountId: string, at: number) => {
-    const key = createHash('sha256').update('flofi-journey:' + accountId).digest('hex').slice(0, 32);
+    for (const [stale, entry] of perAccount) { if (at - entry.start < ACCOUNT_WINDOW_MS) break; perAccount.delete(stale); }
+    const key = createHmac('sha256', rateKey).update(accountId).digest('base64url');
     const entry = perAccount.get(key);
-    if (!entry || at - entry.start >= ACCOUNT_WINDOW_MS) {
-      perAccount.delete(key); perAccount.set(key, { start: at, count: 1 });
+    if (!entry) {
+      perAccount.set(key, { start: at, count: 1 });
       while (perAccount.size > ACCOUNTS_TRACKED) perAccount.delete(perAccount.keys().next().value!);
       return true;
     }
     return ++entry.count <= LIMIT_PER_ACCOUNT;
   };
+  // Journey ids already logged (bounded, oldest first): a duplicated or replayed report is never counted twice.
+  const seen = new Set<string>();
+  const remember = (journeyId: string) => { seen.add(journeyId); if (seen.size > JOURNEYS_REMEMBERED) seen.delete(seen.values().next().value!); };
   return async function receive(request: Request): Promise<Response> {
     // Any unexpected failure is a refusal, never a 500 with a stack trace in the logs.
     try { return await handle(request); } catch { return new Response(null, { status: 400, headers }); }
@@ -79,7 +91,7 @@ export function createJourneyReceiver(options: { readonly env?: Env; readonly no
     try { sameOrigin = site ? site === 'same-origin' : origin !== null && origin === new URL(request.url).origin; } catch { sameOrigin = false; }
     if (!sameOrigin) return new Response(null, { status: 403, headers });
     // Cheapest refusals first: turned off, then no signed-in session, then size; the body is read only for a signed-in sender.
-    if (env.FLOFI_JOURNEY_TELEMETRY === 'off') return new Response(null, { status: 204, headers });
+    if (!enabled) return new Response(null, { status: 204, headers });
     const accountId = account(request);
     if (!accountId) return new Response(null, { status: 401, headers });
     if (Number(request.headers.get('content-length') ?? '0') > MAX_BYTES) return new Response(null, { status: 413, headers });
@@ -88,12 +100,17 @@ export function createJourneyReceiver(options: { readonly env?: Env; readonly no
     let event;
     try { event = parseJourneyEvent(JSON.parse(text)); } catch { event = null; }
     if (!event) return new Response(null, { status: 400, headers });
+    if (seen.has(event.journeyId)) return new Response(null, { status: 409, headers });
     const at = now();
     if (!allowAccount(accountId, at)) return new Response(null, { status: 429, headers });
     if (at - windowStart >= WINDOW_MS) { windowStart = at; accepted = 0; }
     if (++accepted > LIMIT_PER_WINDOW) return new Response(null, { status: 429, headers });
-    log({ evidence: 'CLIENT_REPORTED', journey_id: event.journeyId, operation: event.operation, network: event.network, provider: event.provider, wallet: event.wallet,
-      outcome: event.outcome, user_ms: event.userMs, system_ms: event.systemMs, ...event.metrics });
+    remember(event.journeyId);
+    // Totals are recomputed from the accepted metrics (the client's own figures are ignored); null when nothing contributing was measured.
+    const totals = journeyTotals(event.metrics);
+    log({ ...event.metrics, evidence: 'CLIENT_REPORTED', deployment, network_environment: journeyNetworkEnvironment(event.network), journey_id: event.journeyId,
+      operation: event.operation, network: event.network, provider: event.provider, wallet: event.wallet, outcome: event.outcome,
+      user_ms: totals.userMs, system_ms: totals.systemMs });
     return new Response(null, { status: 204, headers });
   }
 }

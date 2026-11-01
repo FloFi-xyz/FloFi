@@ -6,6 +6,9 @@
  * account identifier. Each metric is the time between two marks of the same journey. The person's own deliberation inside the wallet
  * (`wallet_open_to_user_decision_ms`) is reported separately and is never part of a system-latency figure. Percentiles are computed only from
  * a genuine sample (`summarizeLatency`), never extrapolated.
+ *
+ * Metric names avoid the shared logger's redacted key words (`authorization`, `signature`, `token`, …): a redacted value would silently never
+ * reach the report (`createLogger` replaces it with "[REDACTED]").
  */
 import { NETWORKS } from './network-registry';
 export const JOURNEY_MARKS = Object.freeze(['intent', 'first_quote', 'best_quote', 'review_requested', 'review_ready', 'authorize_clicked', 'wallet_open',
@@ -24,7 +27,7 @@ export const JOURNEY_METRICS = Object.freeze([
   ['review_to_wallet_open_ms', 'review_ready', 'wallet_open', 'MIXED'],
   ['authorize_to_wallet_open_ms', 'authorize_clicked', 'wallet_open', 'SYSTEM'],
   ['wallet_open_to_user_decision_ms', 'wallet_open', 'user_decision', 'USER'],
-  ['authorization_to_submission_ms', 'user_decision', 'submission', 'SYSTEM'],
+  ['decision_to_submission_ms', 'user_decision', 'submission', 'SYSTEM'],
   ['submission_to_hash_ms', 'submission', 'hash', 'OVERLAP'],
   ['submission_to_confirmation_ms', 'submission', 'confirmation', 'SYSTEM'],
   ['confirmation_to_reconciliation_ms', 'confirmation', 'reconciliation', 'SYSTEM'],
@@ -37,9 +40,10 @@ export const JOURNEY_OUTCOMES = Object.freeze(['reconciled', 'rejected', 'failed
 /** The closed, content-free event a journey reports. `network` is a chain reference (e.g. eip155:8453), `provider` a routing provider label. */
 export type JourneyEvent = { readonly format: 'flofi.journey-timing.v1'; readonly journeyId: string; readonly operation: typeof JOURNEY_OPERATIONS[number];
   readonly network: string; readonly provider: string | null; readonly wallet: typeof JOURNEY_WALLETS[number]; readonly outcome: typeof JOURNEY_OUTCOMES[number];
-  readonly metrics: Partial<Record<JourneyMetric, number>>; readonly userMs: number; readonly systemMs: number };
+  readonly metrics: Partial<Record<JourneyMetric, number>>; readonly userMs: number | null; readonly systemMs: number | null };
 
-const ID = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/;
+// A random (version 4) UUID, as crypto.randomUUID makes it.
+const ID = /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/;
 // Closed vocabularies (no free text): a journey names only one of FloFi's registered networks and a known provider label, so neither field can
 // carry an address or any other identifier.
 const knownNetwork = (value: unknown) => typeof value === 'string' && NETWORKS.some(network => network.chain === value);
@@ -47,11 +51,32 @@ export const JOURNEY_PROVIDERS = Object.freeze(['Uniswap V3', 'Jupiter', 'Orca W
 const knownProvider = (value: unknown) => typeof value === 'string' && (JOURNEY_PROVIDERS as readonly string[]).includes(value);
 const MAX_MS = 24 * 3_600_000;
 
-/** One journey's marks (first time wins: a repeated mark never moves a measured boundary). */
+/** The registry environment (MAINNET or TESTNET) of a journey's network, so a report never mixes testnet journeys into mainnet figures. */
+export const journeyNetworkEnvironment = (chain: string) => NETWORKS.find(network => network.chain === chain)?.environment ?? null;
+
+/**
+ * The person's own time and FloFi's system time from a journey's measured metrics, or null when no contributing metric was measured (an
+ * unmeasured stage is never reported as 0 ms). The server recomputes these from the metrics it accepted and ignores the client's figures.
+ */
+export function journeyTotals(metrics: Readonly<Partial<Record<JourneyMetric, number>>>): { readonly userMs: number | null; readonly systemMs: number | null } {
+  let userMs: number | null = null, systemMs: number | null = null;
+  for (const [metric, , , kind] of JOURNEY_METRICS) {
+    const ms = metrics[metric];
+    if (typeof ms !== 'number') continue;
+    if (kind === 'USER') userMs = (userMs ?? 0) + ms;
+    else if (kind === 'SYSTEM') systemMs = (systemMs ?? 0) + ms;
+  }
+  return { userMs, systemMs };
+}
+
+/**
+ * One journey's marks (first time wins: a repeated mark never moves a measured boundary). Its identifier is always a fresh random UUID: never a
+ * quote correlation id, trace, run, session or account id, so a journey line cannot be joined to anything else in the logs.
+ */
 export function createJourney(input: { readonly operation: JourneyEvent['operation']; readonly network: string; readonly provider?: string | null;
-  readonly wallet?: JourneyEvent['wallet']; readonly clock?: () => number; readonly id?: string }) {
+  readonly wallet?: JourneyEvent['wallet']; readonly clock?: () => number }) {
   const clock = input.clock ?? (() => performance.now()), marks = new Map<JourneyMark, number>();
-  const journeyId = input.id ?? crypto.randomUUID();
+  const journeyId = crypto.randomUUID();
   let provider = input.provider ?? null, wallet = input.wallet ?? 'unknown';
   return {
     journeyId,
@@ -63,18 +88,14 @@ export function createJourney(input: { readonly operation: JourneyEvent['operati
     /** The content-free event, or null when nothing measurable happened. */
     event(outcome: JourneyEvent['outcome']): JourneyEvent | null {
       const metrics: Partial<Record<JourneyMetric, number>> = {};
-      let userMs = 0, systemMs = 0;
-      for (const [metric, from, to, kind] of JOURNEY_METRICS) {
+      for (const [metric, from, to] of JOURNEY_METRICS) {
         const start = marks.get(from), end = marks.get(to);
         if (start === undefined || end === undefined || end < start || end - start > MAX_MS) continue;
-        const ms = Math.round(end - start);
-        metrics[metric] = ms;
-        if (kind === 'USER') userMs += ms;
-        else if (kind === 'SYSTEM') systemMs += ms;
+        metrics[metric] = Math.round(end - start);
       }
       if (!Object.keys(metrics).length) return null;
       return parseJourneyEvent({ format: 'flofi.journey-timing.v1', journeyId, operation: input.operation, network: input.network,
-        provider: knownProvider(provider) ? provider : null, wallet, outcome, metrics, userMs, systemMs });
+        provider: knownProvider(provider) ? provider : null, wallet, outcome, metrics, ...journeyTotals(metrics) });
     },
   };
 }
@@ -92,7 +113,7 @@ export function parseJourneyEvent(value: unknown): JourneyEvent | null {
   if (!knownNetwork(v.network)) return null;
   if (v.provider !== null && !knownProvider(v.provider)) return null;
   const ms = (n: unknown) => typeof n === 'number' && Number.isSafeInteger(n) && n >= 0 && n <= MAX_MS;
-  if (!ms(v.userMs) || !ms(v.systemMs) || !v.metrics || typeof v.metrics !== 'object' || Array.isArray(v.metrics)) return null;
+  if (!(v.userMs === null || ms(v.userMs)) || !(v.systemMs === null || ms(v.systemMs)) || !v.metrics || typeof v.metrics !== 'object' || Array.isArray(v.metrics)) return null;
   const names = new Set<string>(JOURNEY_METRICS.map(([metric]) => metric)), metrics = v.metrics as Record<string, unknown>;
   if (!Object.keys(metrics).length || Object.entries(metrics).some(([name, value]) => !names.has(name) || !ms(value))) return null;
   return v as JourneyEvent;

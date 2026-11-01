@@ -61,16 +61,19 @@ describe('BUILD-FLOFI-EXECUTION-PERFORMANCE-001 dedicated read pacing', () => {
           return method;
         } finally { active--; }
       }, { minIntervalMs: 5, maxInFlight: 3 });
-      const pending = Promise.all(['a', 'b', 'c', 'd', 'e', 'flaky'].map(m => rpc(m, [])));
+      // `flaky` goes first, so it fails (at +30 ms) while c, d and e are still queued: the pause is only proven shared if they wait it out too.
+      const pending = Promise.all(['flaky', 'a', 'b', 'c', 'd', 'e'].map(m => rpc(m, [])));
       await vi.advanceTimersByTimeAsync(10_000);
-      expect(await pending).toEqual(['a', 'b', 'c', 'd', 'e', 'flaky']);
+      expect(await pending).toEqual(['flaky', 'a', 'b', 'c', 'd', 'e']);
       expect(peak).toBe(3);
       const times = starts.map(s => s.at);
       expect(times.slice(1).every((t, i) => t - times[i]! >= 5)).toBe(true);
-      // The retry of the failed transport call waited out the shared pause (500 ms after the failure), and nothing else started inside it.
-      const failedAt = starts.find(s => s.method === 'flaky')!.at + 30, retry = starts.filter(s => s.method === 'flaky')[1]!.at;
-      expect(retry - failedAt).toBeGreaterThanOrEqual(500);
-      expect(starts.filter(s => s.at > failedAt && s.at < failedAt + 500)).toEqual([]);
+      const failedAt = starts[0]!.at + 30;
+      expect(starts.filter(s => s.at < failedAt).map(s => s.method)).toEqual(['flaky', 'a', 'b']);
+      // Every later start — the retry and the three reads queued behind it — waited out the shared pause (500 ms after the failure).
+      const later = starts.filter(s => s.at >= failedAt);
+      expect(later.map(s => s.method).sort()).toEqual(['c', 'd', 'e', 'flaky']);
+      expect(later.every(s => s.at >= failedAt + 500)).toBe(true);
       // A node answer (not a transport failure) is never retried.
       const before = starts.length, refused = rpc('refused', []);
       const outcome = refused.then(() => 'resolved', (error: Error) => error.message);

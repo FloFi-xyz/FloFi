@@ -60,7 +60,8 @@ export function useLiveQuote(workflow: SemanticWorkflow | undefined, nodeId: str
     if (known) { accept(known, false); return () => { clearTimeout(expire); }; }
     const correlationId = crypto.randomUUID();
     // BUILD-FLOFI-EXECUTION-PERFORMANCE-001: intent → first quote, content-free (the chain and provider label only), reported once per answered snapshot.
-    const journey = createJourney({ operation: bridge ? 'bridge' : 'swap', network: chain, provider, id: correlationId });
+    // Its own random id, never the quote correlation id: a journey line must not join the quote's server trace.
+    const journey = createJourney({ operation: bridge ? 'bridge' : 'swap', network: chain, provider });
     journey.mark('intent');
     const cancel = requestBuildEstimate(async signal => {
       const response = await fetch('/api/build-estimate', { method: 'POST', headers: { 'content-type': 'application/json', 'x-quote-correlation-id': correlationId },

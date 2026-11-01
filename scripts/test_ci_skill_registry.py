@@ -140,7 +140,7 @@ class SkillRegistry(unittest.TestCase):
         snapshot.mkdir()
         (snapshot / skills.snapshot_name(pinned["url"])).write_bytes(b"upstream changed\n")
         before = (self.root / "skills/protocols/jupiter/skill.json").read_bytes()
-        rows = skills.check_upstream(self.root, snapshot=snapshot)
+        rows = skills.check_upstream(self.root, snapshot=snapshot, today=dt.date.fromisoformat(pinned["reviewedAt"]))
         changed = [r for r in rows if r["url"] == pinned["url"]][0]
         self.assertEqual(changed["state"], "CHANGED")
         self.assertTrue(any(r["state"] == "UNPINNED" for r in rows))
@@ -148,9 +148,9 @@ class SkillRegistry(unittest.TestCase):
         self.assertIn(pinned["url"], [c["url"] for c in proposal["changes"]])
         self.assertIn("Never copy executable instructions", proposal["instructions"])
         self.assertEqual((self.root / "skills/protocols/jupiter/skill.json").read_bytes(), before)
-        matching = self.root / "matching"
-        matching.mkdir()
-        rows = skills.check_upstream(self.root, fetch=lambda url: pinned["reviewedDigest"] if url == pinned["url"] else None)
+        # Dated at the review day: the outcome never depends on the day CI happens to run (STALE is a separate, dated case below).
+        reviewed = dt.date.fromisoformat(pinned["reviewedAt"])
+        rows = skills.check_upstream(self.root, fetch=lambda url: pinned["reviewedDigest"] if url == pinned["url"] else None, today=reviewed)
         self.assertEqual([r for r in rows if r["url"] == pinned["url"]][0]["state"], "UNCHANGED")
         later = dt.date.fromisoformat(pinned["reviewedAt"]) + dt.timedelta(days=manifest["reviewIntervalDays"] + 1)
         rows = skills.check_upstream(self.root, fetch=lambda url: pinned["reviewedDigest"], today=later)

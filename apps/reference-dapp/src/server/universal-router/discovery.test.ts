@@ -143,6 +143,28 @@ describe('BUILD-FLOFI-EXECUTION-PERFORMANCE-001 discovery window', () => {
       expect(signals['price-api.mayan.finance']?.aborted).toBe(true);
     } finally { vi.useRealTimers(); }
   });
+  it('logs each provider\'s answer time once per discovery (however many routes it returned) and names the provider still pending as a timeout', async () => {
+    vi.useFakeTimers({ now: now() });
+    const written: string[] = [];
+    const spy = vi.spyOn(process.stdout, 'write').mockImplementation(chunk => { written.push(String(chunk)); return true; });
+    try {
+      const discovery = createUniversalDiscovery({ now, clock: clockOf(), window: { deadlineMs: 12_000, compareMs: 1_500 },
+        http: timedHttp({ 'api.relay.link/quote': { after: 400, value: relay.response }, 'li.quest': { after: 900, value: lifi },
+          'price-api.mayan.finance': { after: 0, hang: true } }, {}) });
+      const pending = discovery.discover(request, ['relay', 'lifi', 'mayan']);
+      await vi.advanceTimersByTimeAsync(1_901);
+      const result = await pending;
+      const lines = written.join('').split('\n').filter(Boolean).map(line => JSON.parse(line) as Record<string, unknown>);
+      const windows = lines.filter(line => line.event === 'quote.discovery_window'), results = lines.filter(line => line.event === 'quote.provider_result');
+      expect(result.candidates.filter(c => c.provider === 'lifi').length).toBeGreaterThan(1);
+      expect(windows).toHaveLength(1);
+      expect(windows[0]).toMatchObject({ asked_providers: 'relay,lifi,mayan', pending_providers: 'mayan', answer_ms_relay: 400, answer_ms_lifi: 900, answer_ms_mayan: null,
+        first_executable_ms: 400, window_deadline_ms: 12_000, duration_ms: 1_900, completeness: 'PARTIAL' });
+      // The per-route lines keep main's content-free shape; timings live only on the one window line.
+      expect(results).toHaveLength(result.candidates.length);
+      expect(results.every(line => !('duration_ms' in line))).toBe(true);
+    } finally { spy.mockRestore(); vi.useRealTimers(); }
+  });
 
   it('every provider answering inside the window gives the COMPLETE result, unchanged from waiting for all', async () => {
     vi.useFakeTimers({ now: now() });

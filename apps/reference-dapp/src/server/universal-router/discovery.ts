@@ -258,9 +258,13 @@ export function createUniversalDiscovery(config: { readonly http: UniversalHttp;
       const log = createLogger({ service: 'flofi-quotes' });
       for (const c of candidates) log.info('quote.provider_result', {
         correlation_id: config.correlationId, source_chain: r.source.chain, destination_chain: r.destination.chain,
-        provider: c.provider, status: c.status, code: c.reason, duration_ms: durations.get(c.provider) ?? null });
+        provider: c.provider, status: c.status, code: c.reason });
+      // One line per discovery carries the timings: each asked provider's answer time once (a provider returning many routes is still one
+      // sample), and the providers still pending when the window closed (a timeout is never dropped from the latency picture).
       log.info('quote.discovery_window', { correlation_id: config.correlationId, source_chain: r.source.chain, destination_chain: r.destination.chain,
-        completeness: pending.length ? 'PARTIAL' : 'COMPLETE', pending_providers: pending.join(','), first_executable_ms: firstExecutableMs, duration_ms: totalMs });
+        completeness: pending.length ? 'PARTIAL' : 'COMPLETE', asked_providers: providers.join(','), pending_providers: pending.join(','),
+        ...Object.fromEntries(providers.map(p => [`answer_ms_${p}`, durations.get(p) ?? null])),
+        first_executable_ms: firstExecutableMs, window_deadline_ms: window.deadlineMs, duration_ms: totalMs });
       // The automatic choice is the universal router's best guaranteed minimum (the certified Router pairs are chosen on their own flow).
       const recommended = candidates.findIndex(c => c.executableBy === 'UNIVERSAL_ROUTER');
       const status = candidates.length ? candidates[0]!.status : 'NO_ROUTE';
