@@ -1,6 +1,6 @@
 # BUILD-FLOFI-EXECUTION-PERFORMANCE-001 — End-to-end transaction acceleration and multichain engineering skills
 
-**Status:** ready for owner review. Nothing is merged, deployed or configured, and no production database, credential or
+**Status:** ready for owner review. PR: [FloFi-xyz/FloFi#148](https://github.com/FloFi-xyz/FloFi/pull/148), stacked on #146. Nothing is merged, deployed or configured, and no production database, credential or
 real-money transaction was touched.
 
 ## 1. Baseline
@@ -242,7 +242,9 @@ preview logs with at least 20 journeys per group are supplied, and it labels jou
 | `agent_guard.py check`, `governance_lite.py`, `test_ci_*` (179, including 9 new skills-registry tests) and `test_governance_lite` (21) | pass |
 | `skill_registry.py verify` | pass |
 | `skill_registry.py check-upstream --fetch` | 32 pinned sources UNCHANGED over live HTTPS; 12 doc sites UNREACHABLE from this network |
-| Critical browser tier | see §10 |
+| Critical browser tier (`guarded-release-browser.mjs critical`) | **6/6 profiles pass**: copilot-learning, canvas-corrections, solana-wallet-refusal, supply-provenance, review-execute-recovery-components, solana-transfer-ux |
+| Extended profiles relevant to this build | **pass**: auth-wallets (13 tests, Privy loopback stand-in), jupiter-provenance, router-provenance, execution-continuity (34 tests) |
+| Remaining extended shards | not run locally; CircleCI runs the complete suites |
 
 ## 7. Specialist review (existing agents, read-only, at most 3 at once)
 
@@ -270,7 +272,7 @@ flofi-workflow reviewed the diff. They ran as general agents following `.claude/
   - networks: EVM core, Ethereum, Base, Arbitrum One, Solana;
   - protocols: Uniswap, Aave, Jupiter, Orca, Across, LI.FI, Relay;
   - operations: swap, bridge, liquidity, lending, execution.
-  
+
   Each has FloFi-written guidance (`SKILL.md`, with its sha256 pinned) and a manifest declaring its scope, the existing
   domains it informs, path globs, keywords, dependencies, registered capability tuples, its sources and
   `ENGINEERING_REFERENCE_ONLY`.
