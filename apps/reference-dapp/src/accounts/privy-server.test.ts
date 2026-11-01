@@ -105,7 +105,7 @@ describe('Privy access tokens (verified by @privy-io/node)', () => {
         authenticatedAt: now, expiresAt: now + 3600, created: true, skipped: 0 }; },
       wallets: async () => [], account: async () => null,
     } satisfies Pick<AccountStore, 'consumeProof' | 'signInPrivy' | 'wallets' | 'account'>;
-    const service = createAccountService({ store: store as AccountStore, privy });
+    const service = createAccountService({ store: store as unknown as AccountStore, privy });
     // An invalid signature cannot consume the valid token's proof.
     await expect(service.completePrivy(token({}, other.privateKey))).rejects.toThrow('PRIVY_TOKEN_INVALID');
     expect(proofs.size).toBe(0);
