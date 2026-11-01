@@ -48,8 +48,9 @@ nonce reservation, reconciliation and evidence levels. No schema migration, envi
 | Gate | Result |
 | --- | --- |
 | `pnpm typecheck`, `pnpm lint`, `pnpm build` | pass (Node 24.22.1 for the first run; typecheck and lint re-run on the pinned 24.21.0 after the review fixes) |
-| `pnpm schemas:check`, `pnpm test` (unit) on the pinned **Node 24.21.0** (official binary, SHA-256 checked against nodejs.org SHASUMS256) | pass: 511 files, 6,213 tests; 2 files skipped by their own environment conditions (as on `main`). Run before the review-fix commits; the affected suites were re-run after them (see below). |
-| Account suites on PostgreSQL 16 (disposable loopback) | 16 files, 142 tests pass |
+| Final gate at the last code commit (`816eafc`) on the pinned **Node 24.21.0** (official binary, SHA-256 checked against nodejs.org SHASUMS256): `pnpm typecheck`, `pnpm lint`, `pnpm schemas:check`, `pnpm test` | pass: 511 files, 6,220 tests; 2 files skipped by their own environment conditions (as on `main`) |
+| Account suites on PostgreSQL 16 (disposable loopback), same commit | 16 files, 142 tests pass |
+| `pnpm build` (production) | pass |
 | After review fixes: wallet/state/account/Credentials suites; swap, estimate and canvas suites | 62 files / 549 tests; 5 files / 167 tests — pass |
 | `python3 scripts/governance_lite.py` + its unittest suite | pass (21 tests) |
 | `python3 scripts/agent_guard.py check` | pass |
