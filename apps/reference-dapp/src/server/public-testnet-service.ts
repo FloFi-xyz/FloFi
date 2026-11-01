@@ -14,7 +14,7 @@ import { closeSync, existsSync, fsyncSync, mkdirSync, openSync, readFileSync, re
 import { isAbsolute, join } from 'node:path';
 import { baseAssetRegistry, catalogAsset, referenceRegistry, resolveWorkflowCapability, uniswapV3PoolAddress, type AssetCatalog, type CanonicalAsset } from '@defi-workflow-engine/action-registry';
 import { createBaseSepoliaReviewContext, createReviewContext, reviewContextForChain, validateAuthoringWorkflow } from '@defi-workflow-engine/reference-linter';
-import { encodeNativeSwap, encodeSwap, encodeWethDeposit, encodeWethWithdraw, toHex } from '@defi-workflow-engine/reference-compiler';
+import { encodeNativeSwap, encodeSwap, encodeWethDeposit, encodeWethWithdraw, ownerAccountCode, toHex } from '@defi-workflow-engine/reference-compiler';
 import { catalogSwapKind, hashArtifactBytes, isCatalogSwapNode, isReferencePairSwap, readCatalogSwapNode, type CatalogAssetRef, type CatalogSwapFields, type EvidenceBundle, type SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
 import { validateArtifact } from '@defi-workflow-engine/workflow-contracts/schemas';
 import { createFileExecutionStorage, discoverTransferByNonce, utf8, type ExecutionStorage } from '@defi-workflow-engine/reference-executor';
@@ -30,7 +30,12 @@ type Tx = { readonly chainId: SwapProfile['chainHex']; readonly from: string; re
 /** Optional strict owner preflight on the shared engine. Quote-only previews cannot be authorized. */
 export type SwapOwnerReview = { readonly account: string; readonly router: string; readonly nonce: string; readonly step: Step;
   readonly allowance: string; readonly transaction: Tx; readonly gasEstimate: string; readonly maxFeePerGas: string;
-  readonly feeBudgetWei: string; readonly deadline: number; readonly simulationDigest: string };
+  readonly feeBudgetWei: string; readonly deadline: number; readonly simulationDigest: string;
+  /**
+   * BUILD-FLOFI-WALLET-UX-EXECUTION-FIX-001: the reviewed EIP-7702 delegate when the owner is a delegated EOA (a MetaMask Smart Account),
+   * absent for a plain EOA. Bound into the Review: a delegation added, removed or changed before Execute needs a new Review.
+   */
+  readonly delegation?: string };
 /** BUILD-RH-002: the identity and ERC-8056 multiplier state of a Stock Token side, read at the quote block and bound into the Review. */
 export type StockQuoteState = { readonly side: 'input' | 'output' | 'token0' | 'token1'; readonly symbol: string; readonly token: string; readonly officialId: string;
   /** Onchain `uiMultiplier()`, `newUIMultiplier()` and `effectiveAt()` (1e18 = 1.0; `effectiveAt` 0 when nothing is scheduled). */
@@ -819,7 +824,13 @@ async function bindSwapOwner(q: PublicQuote, rpc: Rpc, ownerValue: string, expir
     nativeIn ? nativeAt : rpc('eth_call', [{ to: q.inputToken, data: balanceData(account) }, at]).then(quantity),
     nativeAt, rpc('eth_gasPrice', []).then(quantity), rpc('eth_getCode', [account, at]),
   ]);
-  if (code !== '0x') fail('OWNER_NOT_EOA');
+  // BUILD-FLOFI-WALLET-UX-EXECUTION-FIX-001: an EIP-7702 delegated EOA (MetaMask Smart Account) still signs and originates this ordinary
+  // transaction with its own key; the exact-call simulation and gas estimate below run with its delegate code at the pinned block. Only a
+  // reviewed delegate is accepted (an unknown one could forward the swap's ETH elsewhere); contract wallets cannot originate it at all.
+  const kind = ownerAccountCode(code);
+  if (kind.kind === 'CONTRACT') fail('OWNER_NOT_EOA');
+  if (kind.kind === 'EIP7702' && !kind.verified) fail('OWNER_DELEGATION_UNVERIFIED');
+  const delegation = kind.kind === 'EIP7702' ? kind.delegate : null;
   // HOTFIX-WORKFLOW-CONCURRENCY-001: the owner's pending transactions never block a swap. The reviewed transaction carries the nonce the
   // account uses next, after all of them; each run reserves its nonce, so two runs never hold the same one.
   if (pending < nonce) fail('OWNER_NONCE_STATE_INVALID');
@@ -841,7 +852,8 @@ async function bindSwapOwner(q: PublicQuote, rpc: Rpc, ownerValue: string, expir
   const transaction: Tx = { ...call, chainId: P.chainHex, nonce: '0x' + pending.toString(16), gas: '0x' + gasLimit.toString(16),
     maxFeePerGas: '0x' + maxFee.toString(16), maxPriorityFeePerGas: '0x0' };
   const ownerReview: SwapOwnerReview = { account, router: P.router, nonce: pending.toString(), step, allowance: allowed.toString(), transaction,
-    gasEstimate: gas.toString(), maxFeePerGas: maxFee.toString(), feeBudgetWei: budget.toString(), deadline, simulationDigest: digest(simulation) };
+    gasEstimate: gas.toString(), maxFeePerGas: maxFee.toString(), feeBudgetWei: budget.toString(), deadline, simulationDigest: digest(simulation),
+    ...delegation ? { delegation } : {} };
   const { manifestHash, ...fields } = q;
   if (!HASH.test(manifestHash)) fail('QUOTE_BINDING_INVALID');
   const bound = { ...fields, expiresAt, estimatedGas: gas.toString(), ownerReview };
@@ -854,6 +866,7 @@ async function bindSwapOwner(q: PublicQuote, rpc: Rpc, ownerValue: string, expir
 function ownerReviewChanged(before: SwapOwnerReview, after: SwapOwnerReview): boolean {
   return before.account !== after.account || before.router !== after.router || before.nonce !== after.nonce || before.step !== after.step ||
     before.allowance !== after.allowance || before.transaction.data !== after.transaction.data || before.deadline !== after.deadline ||
+    (before.delegation ?? null) !== (after.delegation ?? null) ||
     BigInt(after.gasEstimate) > BigInt(before.transaction.gas) || BigInt(after.maxFeePerGas) > BigInt(before.maxFeePerGas);
 }
 

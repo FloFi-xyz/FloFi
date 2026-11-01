@@ -3,7 +3,7 @@
 import { useLocale } from '../i18n/locale';
 
 import type { SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
-import { buildEstimateFailureMessage } from '../domain/build-estimate';
+import { buildEstimateFailureMessage, buildEstimateFailureReference } from '../domain/build-estimate';
 import { useLiveQuote } from '../state/build-estimate';
 import { Handle, Position } from '@xyflow/react';
 import type { composerSummary, composerNodeState } from '../domain/composer-presentation';
@@ -441,9 +441,13 @@ export function ComposerCard({ data: card }: { data: ComposerCardData }) {
         </ValuePair> : <div className={pairDestination ? 'composer-value-pair' : undefined}>
           {amountParts ? <ValueBox readOnly source amount={amountParts[1]} token={amountParts[2]!} network={sourceNetwork} hint={card.summary.amount} fiatFirst={false} onFiatFirstChange={setFiatFirst}/>
             : <span className="numeric composer-amount">{tr(card.summary.amount)}</span>}
-          {pairDestination && <><span className="composer-value-arrow" aria-hidden="true">↓</span><ValueBox readOnly token={pairDestination} network={destinationNetwork} hint="Output estimate unavailable" fiatFirst={false} onFiatFirstChange={setFiatFirst}/></>}
+          {pairDestination && <><span className="composer-value-arrow" aria-hidden="true">↓</span><ValueBox readOnly token={pairDestination} network={destinationNetwork}
+            {...estimate ? { amount: estimate.expected } : {}} hint={estimate ? 'Approximate read-only output; simulate before review' : 'Output estimate unavailable'} fiatFirst={false} onFiatFirstChange={setFiatFirst}/></>}
         </div>}
-        {pairDestination && <span className="composer-quote-note" title={quote.status === 'unavailable' && quote.code ? [quote.code, quote.correlationId].filter(Boolean).join(' · ') : undefined}>{tr("Estimate unavailable")}</span>}
+        {/* BUILD-FLOFI-WALLET-UX-EXECUTION-FIX-001 (P0-07): the Simulate and Execute plans show the same shared live quote as Build, or why there is none. */}
+        {pairDestination && <span className="composer-quote-note" title={quote.status === 'unavailable' && quote.code ? [quote.code, quote.correlationId].filter(Boolean).join(' · ') : undefined}>{tr(estimate ? `Approximate · ${estimate.provider} · Simulate before review`
+          : quote.status === 'calculating' ? 'Calculating estimate…' : quote.status === 'unavailable' ? buildEstimateFailureMessage(quote.code ?? 'ESTIMATE_UNAVAILABLE') : 'Estimate unavailable')}
+          {quote.status === 'unavailable' && buildEstimateFailureReference(quote.code) && <> <small className="composer-quote-reference">{tr('Reference {0}', buildEstimateFailureReference(quote.code)!)}</small></>}</span>}
       </>        : amountBox ? <AmountContainer className="composer-amount-form nodrag nopan"
         onKeyDown={event => event.stopPropagation()}
         onSubmit={event => { event.preventDefault(); commitAmount(); }}
@@ -462,7 +466,8 @@ export function ComposerCard({ data: card }: { data: ComposerCardData }) {
           hint="Approximate read-only output; simulate before review" fiatFirst={fiatFirst} onFiatFirstChange={setFiatFirst}
           usd={usdLine(destinationNetwork, estimate?.usd?.output, usdState)}/>
         </ValuePair>
-        <span className="composer-quote-note" title={quote.status === 'unavailable' && quote.code ? [quote.code, quote.correlationId].filter(Boolean).join(' · ') : undefined}>{card.networkSelection?.valid === false ? tr('Choose matching networks') : <>{!amountParts && <>{tr(card.summary.amount)} · </>}{tr(estimate ? `Approximate · ${estimate.provider} · Simulate before review` : quote.status === 'calculating' ? 'Calculating estimate…' : quote.status === 'unavailable' ? buildEstimateFailureMessage(quote.code ?? 'ESTIMATE_UNAVAILABLE') : 'Estimate unavailable')}</>}</span>
+        <span className="composer-quote-note" title={quote.status === 'unavailable' && quote.code ? [quote.code, quote.correlationId].filter(Boolean).join(' · ') : undefined}>{card.networkSelection?.valid === false ? tr('Choose matching networks') : <>{!amountParts && <>{tr(card.summary.amount)} · </>}{tr(estimate ? `Approximate · ${estimate.provider} · Simulate before review` : quote.status === 'calculating' ? 'Calculating estimate…' : quote.status === 'unavailable' ? buildEstimateFailureMessage(quote.code ?? 'ESTIMATE_UNAVAILABLE') : 'Estimate unavailable')}</>}
+          {quote.status === 'unavailable' && buildEstimateFailureReference(quote.code) && <> <small className="composer-quote-reference">{tr('Reference {0}', buildEstimateFailureReference(quote.code)!)}</small></>}</span>
         {estimate?.bridge && <span className="composer-quote-note">{tr(estimate.bridge.execution === 'QUOTE_ONLY'
           ? 'Live quote only · execution is not validated' : 'Builder verified · simulation and Review still required')}</span>}
         {discovery && <details className="nodrag nopan"><summary>{tr('Provider estimates')}</summary><ul aria-label={tr('Provider estimates')}>

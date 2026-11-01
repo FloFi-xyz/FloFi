@@ -2,7 +2,7 @@
 'use client';
 import { useLocale } from '../i18n/locale';
 
-import { useEffect, useId, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useId, useRef, useState, type ReactNode } from 'react';
 import type { SecondaryWorkspace } from '../domain/secondary-workspaces';
 import { useBuild009Wallet } from '../state/build009-wallet-store';
 import { YourWorkflows, type WorkflowNavigation } from './saved-workflows';
@@ -10,16 +10,22 @@ import { AutomationsWorkspace, type AutomationNavigation } from './automations-w
 import { ExecutionCredentials, PasskeysPanel, type DelegationAccess } from './delegation-credentials';
 import { PrivacyControls } from './privacy-controls';
 import { useJupiter } from '../state/jupiter-store';
-import { brandLabel, LABEL_MAX, networkLabel, type SavedCard, type SavedWallet } from '../domain/credentials';
+import { brandLabel, LABEL_MAX, networkLabel, type SavedCard } from '../domain/credentials';
 import { removeSavedCredential, renameSavedCredential, saveCardReference, saveWalletReference, useCredentials } from '../state/credentials-store';
 import { evmNetworkRef, useWalletConnection, type ConnectedWallet } from '../state/wallet-connection';
 import { evmWalletEntries } from '../wallet/evm-discovery';
 import { solanaWalletChoices } from '../wallet/solana-wallet';
 import { EVM_WALLET_NETWORKS } from '../wallet/evm-networks';
-import { ECOSYSTEM_LABEL, type WalletEcosystem } from '../wallet/wallet-registry';
+import { ECOSYSTEM_LABEL } from '../wallet/wallet-registry';
 import { addProviderCard, cardProviderStatus, removeProviderCard, type CardEntryStatus } from '../app/card-action';
 import { parseCardFrameMessage, type CardParentMessage } from './card-frame-protocol';
-import { AccountWalletsSection } from './account/account-wallets';
+import { DeleteAccount, ExportWalletDialog } from './account/account-wallets';
+import { AccountIcon } from './account/account-icons';
+import { accountMessage } from './account/account-messages';
+import { accountState, removeAccountWallet, renameAccountWallet, type AccountState } from '../app/account-action';
+import { exportActions, isLegacyWallet, WALLET_LABEL_MAX } from '../accounts/account-model';
+import { walletInventory, walletStatus, type WalletInventoryEntry } from '../domain/wallet-inventory';
+import { floFiWalletProviderKey, isFloFiWalletChoice } from '../wallet/flofi-wallet-sync';
 
 type IconName = 'wallet' | 'agent' | 'key' | 'plus' | 'copy' | 'card' | 'secret';
 function WorkspaceIcon({ name, size = 20 }: { name: IconName; size?: number }) {
@@ -53,65 +59,86 @@ function credentialNetworkLabel(network: string | null): string {
   return networkLabel(network);
 }
 
-/** One wallet row: a saved reference, the active session, or both. Never a key or balance. */
-type WalletEntry = { readonly saved: SavedWallet | null; readonly active: ConnectedWallet | null;
-  readonly ecosystem: WalletEcosystem; readonly address: string; readonly providerKey: string; readonly providerName: string; readonly label: string;
-  readonly network: string | null };
-const sameWallet = (saved: SavedWallet, active: ConnectedWallet) => saved.ecosystem === active.ecosystem && saved.address === active.address &&
-  saved.providerKey === active.providerKey;
-
-function WalletCredentialCard({ entry, busy, onActivate, onDisconnect, onSave, onStatus }: {
-  entry: WalletEntry; busy: boolean; onActivate(saved: SavedWallet): void; onDisconnect(): void; onSave(active: ConnectedWallet): void; onStatus(message: string): void;
+/**
+ * BUILD-FLOFI-WALLET-UX-EXECUTION-FIX-001 (P1-03): one wallet of Credentials → Wallets — a device reference, the connection in this page, an
+ * account wallet, or any of them together (src/domain/wallet-inventory.ts). Never a key or balance. Actions follow what the entry is:
+ * rename (account or device name), export (FloFi-managed wallets only, in the provider's own screen), save, connect/disconnect, and remove
+ * (a device reference, or an external wallet's account association; FloFi-managed wallets stay in the account).
+ */
+const DESIGNATION = { privy: 'Managed by Privy', legacy: 'Legacy FloFi Wallet', external: 'External' } as const;
+function WalletCredentialCard({ entry, busy, accountView, onConnect, onDisconnect, onSave, onStatus, onAccountChanged }: {
+  entry: WalletInventoryEntry; busy: boolean; accountView: AccountState | null; onConnect(entry: WalletInventoryEntry): void; onDisconnect(): void;
+  onSave(active: ConnectedWallet): void; onStatus(message: string): void; onAccountChanged(): void;
 }) {
   const [mode, setMode] = useState<'view' | 'rename' | 'remove'>('view');
   const [draft, setDraft] = useState(entry.label);
   const [renameError, setRenameError] = useState('');
+  const [exporting, setExporting] = useState(false);
   const renameId = useId();
   const { t: tr } = useLocale();
+  const account = entry.account, removable = Boolean(entry.saved || account?.origin === 'external');
   async function copyAddress() {
     try { await navigator.clipboard.writeText(entry.address); onStatus('Address copied.'); } catch { onStatus('Address could not be copied.'); }
   }
-  function rename() {
+  async function rename() {
+    if (account) {
+      const result = await renameAccountWallet(account.id, draft).catch(() => ({ ok: false as const, code: 'ACCOUNTS_UNAVAILABLE' }));
+      if (!result.ok) { setRenameError(accountMessage(result.code)); return; }
+      if (entry.saved) { try { renameSavedCredential(entry.saved.id, draft); } catch { /* the account name is the one shown */ } }
+      setMode('view'); setRenameError(''); onStatus('Wallet renamed.'); onAccountChanged(); return;
+    }
     if (!entry.saved) return;
     try { renameSavedCredential(entry.saved.id, draft); setMode('view'); setRenameError(''); onStatus('Wallet renamed.'); }
     catch { setRenameError(`Use 1–${LABEL_MAX} characters.`); }
   }
-  function remove() {
-    if (!entry.saved) return;
+  async function remove() {
+    if (account?.origin === 'external') {
+      const result = await removeAccountWallet(account.id).catch(() => ({ ok: false as const, code: 'ACCOUNTS_UNAVAILABLE' }));
+      if (!result.ok) { setRenameError(accountMessage(result.code)); return; }
+      onAccountChanged();
+    }
     if (entry.active) onDisconnect();
-    removeSavedCredential(entry.saved.id); onStatus(`${entry.label} removed from FloFi. Your wallet and its funds are unchanged.`);
+    if (entry.saved) removeSavedCredential(entry.saved.id);
+    onStatus(`${entry.label} removed from FloFi. Your wallet and its funds are unchanged.`);
   }
-  const status = entry.active && entry.saved ? 'Active' : entry.active ? 'Connected · not saved' : 'Saved';
+  const status = walletStatus(entry);
   const icon = (entry.network && networkIcons[entry.network]) ?? ecosystemIcons[entry.ecosystem];
-  return <article className="workspace-wallet-card" aria-label={`${entry.label}, ${ECOSYSTEM_LABEL[entry.ecosystem]}`} data-active={entry.active ? 'true' : 'false'}>
+  return <article className="workspace-wallet-card" aria-label={`${entry.label}, ${ECOSYSTEM_LABEL[entry.ecosystem]}`} data-active={entry.active ? 'true' : 'false'}
+    {...account ? { 'data-origin': account.origin } : {}} data-designation={entry.designation}>
     <div className="workspace-wallet-heading">
       <span className="workspace-network-icon"><img src={icon} width="28" height="28" alt=""/></span>
-      <div><h3>{entry.label}</h3><p>{entry.providerName} · {ECOSYSTEM_LABEL[entry.ecosystem]}</p></div>
+      <div><h3>{entry.label}</h3><p>{entry.providerName} · {ECOSYSTEM_LABEL[entry.ecosystem]}{account || entry.designation !== 'external' ? <> · {tr(DESIGNATION[entry.designation])}</> : null}</p></div>
       <span className={`workspace-wallet-status${entry.active ? ' workspace-wallet-status-active' : ''}`}>{tr(status)}</span>
     </div>
-    <p className="workspace-wallet-network">{tr(credentialNetworkLabel(entry.network))}</p>
+    {entry.designation === 'privy' && <p className="workspace-wallet-signing" data-managed-signing="privy">{tr('Signs with your FloFi wallet (Privy), after you review the transaction in FloFi.')}</p>}
+    {entry.designation === 'legacy' && <p className="workspace-wallet-signing" data-managed-signing="legacy">{tr(accountMessage('LEGACY_WALLET_EXPORT_ONLY'))}</p>}
+    {(entry.active || entry.saved) && <p className="workspace-wallet-network">{tr(credentialNetworkLabel(entry.network))}</p>}
     <div className="workspace-wallet-address"><code title={entry.address}>{entry.address.slice(0, 6)}…{entry.address.slice(-4)}</code>
       <button type="button" className="workspace-copy" aria-label={tr('Copy {0} address', entry.label)} title={tr("Copy address")} onClick={() => void copyAddress()}><WorkspaceIcon name="copy" size={17}/></button>
     </div>
-    {mode === 'rename' && entry.saved ? <form className="workspace-inline-form" onSubmit={event => { event.preventDefault(); rename(); }}
+    {mode === 'rename' && (entry.saved || account) ? <form className="workspace-inline-form" onSubmit={event => { event.preventDefault(); void rename(); }}
       onKeyDown={event => { if (event.key === 'Escape') { event.preventDefault(); setMode('view'); setDraft(entry.label); setRenameError(''); } }}>
       <label htmlFor={renameId}>{tr("Wallet name")}</label>
-      <input id={renameId} value={draft} maxLength={LABEL_MAX} autoComplete="off" autoFocus aria-invalid={renameError ? 'true' : undefined}
+      <input id={renameId} value={draft} maxLength={account ? WALLET_LABEL_MAX : LABEL_MAX} autoComplete="off" autoFocus aria-invalid={renameError ? 'true' : undefined}
         aria-describedby={renameError ? `${renameId}-error` : undefined} onChange={event => setDraft(event.currentTarget.value)}/>
       {renameError && <p id={`${renameId}-error`} className="workspace-inline-error" role="alert">{tr(renameError)}</p>}
       <div className="workspace-wallet-actions"><button type="submit" className="workspace-action">{tr("Save name")}</button>
         <button type="button" className="workspace-action" onClick={() => { setMode('view'); setDraft(entry.label); setRenameError(''); }}>{tr("Cancel")}</button></div>
-    </form> : mode === 'remove' && entry.saved ? <div className="workspace-inline-form" role="group" aria-label={tr('Remove {0}', entry.label)}>
+    </form> : mode === 'remove' && removable ? <div className="workspace-inline-form" role="group" aria-label={tr('Remove {0}', entry.label)}>
       <p>{tr('Remove {0} from FloFi?', entry.label)}{tr(entry.active ? ' This also disconnects it.' : '')}{tr(" Only FloFi's reference is removed; the wallet and its assets are not affected.")}</p>
-      <div className="workspace-wallet-actions"><button type="button" className="workspace-action workspace-action-danger" onClick={remove}>{tr("Remove")}</button>
+      {renameError && <p className="workspace-inline-error" role="alert">{tr(renameError)}</p>}
+      <div className="workspace-wallet-actions"><button type="button" className="workspace-action workspace-action-danger" onClick={() => void remove()}>{tr("Remove")}</button>
         <button type="button" className="workspace-action" onClick={() => setMode('view')}>{tr("Cancel")}</button></div>
     </div> : <div className="workspace-wallet-actions">
-      {entry.saved && <button type="button" className="workspace-action" aria-label={tr('Rename {0}', entry.label)} onClick={() => { setDraft(entry.label); setMode('rename'); }}>{tr("Rename")}</button>}
-      {!entry.saved && entry.active && <button type="button" className="workspace-action" aria-label={tr('Save {0}', entry.label)} onClick={() => onSave(entry.active!)}>{tr("Save")}</button>}
+      {(entry.saved || account) && <button type="button" className="workspace-action" aria-label={tr('Rename {0}', entry.label)} onClick={() => { setDraft(entry.label); setMode('rename'); }}>{tr("Rename")}</button>}
+      {account && accountView && exportActions(account).length > 0 && <button type="button" className="workspace-action" aria-label={tr('Export {0}', entry.label)} onClick={() => setExporting(true)}>{tr('Export')}</button>}
+      {!entry.saved && !account && entry.active && <button type="button" className="workspace-action" aria-label={tr('Save {0}', entry.label)} onClick={() => onSave(entry.active!)}>{tr("Save")}</button>}
       {entry.active ? <button type="button" className="workspace-action" aria-label={tr('Disconnect {0}', entry.label)} disabled={busy} onClick={onDisconnect}>{tr("Disconnect")}</button>
-        : entry.saved && <button type="button" className="workspace-action" aria-label={tr('Connect {0}', entry.label)} disabled={busy} onClick={() => onActivate(entry.saved!)}>{tr("Connect")}</button>}
-      {entry.saved && <button type="button" className="workspace-action" aria-label={tr('Remove {0}', entry.label)} onClick={() => setMode('remove')}>{tr("Remove")}</button>}
+        : (entry.saved || account && !isLegacyWallet(account)) && <button type="button" className="workspace-action" aria-label={tr('Connect {0}', entry.label)} disabled={busy} onClick={() => onConnect(entry)}>{tr("Connect")}</button>}
+      {/* BUILD-FLOFI-PRIVY-UX-001: wallets FloFi's provider keeps (Privy, legacy FloFi Wallet) stay in the account (account-store.ts removeWallet). */}
+      {removable && <button type="button" className="workspace-action" aria-label={tr('Remove {0}', entry.label)} onClick={() => setMode('remove')}>{tr("Remove")}</button>}
     </div>}
+    {exporting && account && accountView && <ExportWalletDialog wallet={account} state={accountView} onClose={() => setExporting(false)}/>}
   </article>;
 }
 
@@ -252,20 +279,21 @@ function CredentialsWorkspace({ access }: { access?: DelegationAccess | undefine
   const connection = useWalletConnection();
   const [status, setStatus] = useState('');
   const [cardEntry, setCardEntry] = useState(false);
+  // BUILD-FLOFI-WALLET-UX-EXECUTION-FIX-001 (P1-03): the signed-in account's wallets join this one section (read after load, public data only).
+  const [account, setAccount] = useState<AccountState | null>(null);
+  const loadAccount = useCallback(() => { void accountState().then(setAccount, () => setAccount(null)); }, []);
+  useEffect(() => { loadAccount(); }, [loadAccount]);
+  // A Google/Apple/email link that failed returns here with a classified code.
+  useEffect(() => {
+    const code = new URLSearchParams(window.location.search).get('account_error');
+    if (code && /^[A-Z][A-Z0-9_]{2,80}$/.test(code)) setStatus(accountMessage(code));
+  }, []);
   const active: ConnectedWallet[] = [];
   if (evm.account) active.push({ ecosystem: 'evm', address: evm.account, providerKey: evm.provider?.key ?? 'injected', providerName: evm.provider?.name ?? 'Browser wallet', network: evmNetworkRef(evm.chainId) });
   if (solana.session) active.push({ ecosystem: 'solana', address: solana.session.account.address, providerKey: solana.session.wallet.name, providerName: solana.session.wallet.name, network: solana.session.chain });
-  const entries: WalletEntry[] = [
-    ...credentials.wallets.map(saved => {
-      const live = active.find(wallet => sameWallet(saved, wallet)) ?? null;
-      return { saved, active: live, ecosystem: saved.ecosystem, address: saved.address, providerKey: saved.providerKey, providerName: saved.providerName,
-        label: saved.label, network: live?.network ?? saved.lastNetwork };
-    }),
-    ...active.filter(wallet => !credentials.wallets.some(saved => sameWallet(saved, wallet))).map(wallet => ({ saved: null, active: wallet,
-      ecosystem: wallet.ecosystem, address: wallet.address, providerKey: wallet.providerKey, providerName: wallet.providerName,
-      // ACCEPTANCE-FIXES-001: an unsaved session is the ecosystem's default identity; the provider stays visible beneath it.
-      label: wallet.ecosystem === 'evm' ? 'EVM Default' : 'Solana Default', network: wallet.network })),
-  ];
+  const signedIn = Boolean(account?.availability.accounts && account.account);
+  const entries = walletInventory({ account: signedIn ? account!.account!.wallets : [], saved: credentials.wallets, active,
+    isFloFiProvider: wallet => isFloFiWalletChoice({ ecosystem: wallet.ecosystem, key: wallet.providerKey }) });
   const busy = evm.busy || solana.busy;
   function save(wallet: ConnectedWallet) {
     try { saveWalletReference(wallet); setStatus(`${wallet.providerName} saved to Credentials.`); } catch { setStatus('This wallet could not be saved.'); }
@@ -275,37 +303,45 @@ function CredentialsWorkspace({ access }: { access?: DelegationAccess | undefine
     const connected = await connection.connect({ title: 'Add a wallet' });
     if (connected) save(connected);
   }
-  function disconnect(wallet: WalletEntry) {
+  function disconnect(wallet: WalletInventoryEntry) {
     if (wallet.ecosystem === 'evm') evm.reset(); else void solana.disconnect();
     setStatus(`${wallet.label} disconnected.`);
   }
-  async function activate(saved: SavedWallet) {
+  /** Connects exactly this entry's wallet: its saved provider, or the provider of the account wallet (FloFi wallets through FloFi's own provider). */
+  async function activate(entry: WalletInventoryEntry) {
     setStatus('');
-    const mismatch = (address: string) => setStatus(`${saved.providerName} connected ${address.slice(0, 6)}…${address.slice(-4)}, not this saved wallet. Choose ${saved.address.slice(0, 6)}…${saved.address.slice(-4)} in ${saved.providerName} to use it.`);
-    if (saved.ecosystem === 'evm') {
-      const entry = evmWalletEntries().find(candidate => candidate.choice.key === saved.providerKey);
-      if (!entry) { setStatus(`${saved.providerName} isn't detected in this browser.`); return; }
-      const session = await evm.connectWith(entry.choice.id);
-      if (session && session.account !== saved.address) mismatch(session.account);
+    const providerKey = entry.saved?.providerKey ?? (entry.designation === 'privy' ? floFiWalletProviderKey(entry.ecosystem, entry.address) : entry.providerKey);
+    const providerName = entry.saved?.providerName ?? entry.providerName;
+    const mismatch = (address: string) => setStatus(`${providerName} connected ${address.slice(0, 6)}…${address.slice(-4)}, not this saved wallet. Choose ${entry.address.slice(0, 6)}…${entry.address.slice(-4)} in ${providerName} to use it.`);
+    if (!providerKey) { setStatus(`${providerName} isn't detected in this browser.`); return; }
+    if (entry.ecosystem === 'evm') {
+      const found = evmWalletEntries().find(candidate => candidate.choice.key === providerKey);
+      if (!found) { setStatus(`${providerName} isn't detected in this browser.`); return; }
+      const session = await evm.connectWith(found.choice.id);
+      if (session && session.account !== entry.address.toLowerCase()) mismatch(session.account);
       return;
     }
-    if (!solanaWalletChoices().some(choice => choice.key === saved.providerKey)) { setStatus(`${saved.providerName} isn't detected in this browser.`); return; }
-    const session = await solana.connectWith(saved.providerKey, connection.solanaChain);
-    if (!session) setStatus(`${saved.providerName} did not connect.`);
-    else if (session.account.address !== saved.address) mismatch(session.account.address);
+    if (!solanaWalletChoices().some(choice => choice.key === providerKey)) { setStatus(`${providerName} isn't detected in this browser.`); return; }
+    const session = await solana.connectWith(providerKey, connection.solanaChain);
+    if (!session) setStatus(`${providerName} did not connect.`);
+    else if (session.account.address !== entry.address) mismatch(session.account.address);
   }
   return <>
     <header className="secondary-workspace-heading"><h1>{tr("Credentials")}</h1><p>{tr("Keep the wallets and cards you use with FloFi in one place. Saved credentials are references only: they never approve a transaction or a payment.")}</p></header>
     <p className="workspace-notice" role="status">{tr(status || connection.error || '')}</p>
-    {/* BUILD-FLOFI-AUTH-WALLETS-001: wallets saved to the signed-in FloFi account (server-side, per account). The device-local
-        references below keep their own storage and semantics. */}
-    <AccountWalletsSection active={active.map(wallet => ({ ecosystem: wallet.ecosystem, address: wallet.address }))}/>
     <section className="workspace-section" aria-labelledby="credentials-wallets">
       <div className="workspace-section-heading"><div><WorkspaceIcon name="wallet"/><h2 id="credentials-wallets">{tr("Wallets")}</h2><span className="workspace-count">{entries.length}</span></div>
-        <button type="button" className="workspace-action" disabled={busy} onClick={() => void addWallet()}><WorkspaceIcon name="plus" size={16}/>{tr("Add wallet")}</button></div>
-      {entries.length ? <div className="workspace-wallet-grid">{entries.map(entry => <WalletCredentialCard key={entry.saved?.id ?? `active:${entry.ecosystem}:${entry.address}`}
-        entry={entry} busy={busy} onActivate={saved => void activate(saved)} onDisconnect={() => disconnect(entry)} onSave={save} onStatus={setStatus}/>)}</div>
+        <div className="workspace-wallet-actions">
+          {signedIn && account!.availability.managedWallets && <a className="workspace-action" style={{ textDecoration: 'none' }} href="/onboarding/wallets"><AccountIcon name="plus" size={16}/>{tr('Create or import')}</a>}
+          <button type="button" className="workspace-action" disabled={busy} onClick={() => void addWallet()}><WorkspaceIcon name="plus" size={16}/>{tr("Add wallet")}</button>
+        </div></div>
+      {account?.availability.accounts && !account.account && <p className="workspace-notice">{tr('Sign in to save wallet addresses to your account and find them on any device. Wallets saved only on this device are listed below.')}{' '}
+        <a href="/login?returnTo=%2Fapp%2Fcredentials">{tr('Sign in')}</a></p>}
+      {entries.length ? <div className="workspace-wallet-grid">{entries.map(entry => <WalletCredentialCard key={entry.key}
+        entry={entry} busy={busy} accountView={signedIn ? account : null} onConnect={target => void activate(target)} onDisconnect={() => disconnect(entry)} onSave={save}
+        onStatus={setStatus} onAccountChanged={loadAccount}/>)}</div>
         : <div className="workspace-empty"><span className="workspace-empty-icon"><WorkspaceIcon name="wallet" size={28}/></span><h3>{tr("No wallets yet")}</h3><p>{tr("Add a wallet to save its public address here. FloFi never holds your keys.")}</p></div>}
+      {signedIn && <DeleteAccount state={account!}/>}
     </section>
     <section className="workspace-section" aria-labelledby="credentials-cards">
       <div className="workspace-section-heading"><div><WorkspaceIcon name="card"/><h2 id="credentials-cards">{tr("Cards")}</h2><span className="workspace-count">{credentials.cards.length}</span></div>

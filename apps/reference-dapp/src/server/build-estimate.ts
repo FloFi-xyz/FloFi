@@ -10,7 +10,7 @@ import { isHostedDeployment } from './deployment.ts';
 import type { readBridgeDiscovery } from './bridge-discovery.ts';
 import type { FlowResult } from './cloud-api-client.ts';
 import type { FlowName } from '../../backend/flows.ts';
-import { publicSwapProfile } from '../domain/public-testnet-swap.ts';
+import { NATIVE_ETH, publicSwapProfile } from '../domain/public-testnet-swap.ts';
 import { cryptoSelectionOf } from '../domain/crypto-action-picker.ts';
 import { simulationAmount } from '../domain/simulation-presentation.ts';
 import type { BuildEstimateResult } from '../domain/build-estimate.ts';
@@ -126,16 +126,19 @@ async function readBuildEstimateValue(input: unknown, env: Env = process.env,
         const q = (catalogNetwork ? record?.quote : record) as Record<string, unknown> | null;
         const amount = node.inputs.find(i => i.name === 'amount-in'), output = node.inputs.find(i => i.name === 'asset-out');
         const slip = node.userConstraints.find(c => c.kind === 'MAXIMUM_SLIPPAGE_BPS');
-        if (!q || amount?.kind !== 'QUANTITY' || output?.kind !== 'ASSET' || !('address' in amount.value.asset) || !('address' in output.value) ||
-          slip?.kind !== 'MAXIMUM_SLIPPAGE_BPS') throw Error('ESTIMATE_RESPONSE_INVALID');
+        if (!q || amount?.kind !== 'QUANTITY' || output?.kind !== 'ASSET' || slip?.kind !== 'MAXIMUM_SLIPPAGE_BPS') throw Error('ESTIMATE_RESPONSE_INVALID');
         const inRef = amount.value.asset, outRef = output.value;
+        // BUILD-FLOFI-WALLET-UX-EXECUTION-FIX-001 (P0-07): a catalog network's native ETH side (`nativeId`, no address) is quoted by the runtime
+        // under its native sentinel. It matches only that sentinel, never WETH or another token; Solana sides are always mints.
+        const expectedToken = (ref: typeof inRef) => 'address' in ref ? ref.address : catalogNetwork ? NATIVE_ETH : null;
+        if (expectedToken(inRef) === null || expectedToken(outRef) === null) throw Error('ESTIMATE_RESPONSE_INVALID');
         const input = catalogNetwork ? { address: q.inputToken, decimals: q.inputDecimals, symbol: q.inputSymbol } : q.input as { mint?: unknown; decimals?: unknown; symbol?: unknown } | undefined;
         const out = catalogNetwork ? { address: q.outputToken, decimals: q.outputDecimals, symbol: q.outputSymbol } : q.output as { mint?: unknown; decimals?: unknown; symbol?: unknown } | undefined;
         const tokenAddress = (t: typeof input) => t && ('address' in t ? t.address : t.mint);
         const selection = cryptoSelectionOf(node);
         if (q.workflowHash !== workflowHash || q.nodeId !== node.nodeId || (catalogNetwork ? `eip155:${q.chainId}` : q.chain) !== node.chainId ||
           (catalogNetwork ? q.amountIn : q.amount) !== amount.value.amount || q.slippageBps !== slip.maximumBps || !input || !out ||
-          tokenAddress(input) !== inRef.address || tokenAddress(out) !== outRef.address || input.decimals !== inRef.decimals || out.decimals !== outRef.decimals ||
+          tokenAddress(input) !== expectedToken(inRef) || tokenAddress(out) !== expectedToken(outRef) || input.decimals !== inRef.decimals || out.decimals !== outRef.decimals ||
           typeof input.symbol !== 'string' || typeof out.symbol !== 'string' || selection && (selection.from !== input.symbol || selection.to !== out.symbol) ||
           typeof q.expiresAt !== 'string' || !Number.isFinite(Date.parse(q.expiresAt)) || Date.parse(q.expiresAt) <= now().getTime()) throw Error('ESTIMATE_RESPONSE_MISMATCH');
         const expected = q.expectedOut, minimum = q.minimumOut;

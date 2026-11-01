@@ -131,3 +131,37 @@ describe('production Swap quote parity through cloudPreview', () => {
     expect(result).toMatchObject({ ok: false, correlationId: expect.any(String) }); expect(result).not.toHaveProperty('estimate');
   });
 });
+
+/**
+ * BUILD-FLOFI-WALLET-UX-EXECUTION-FIX-001 (P0-07, T11/T12/T22): production logged `swap.quote_failed ESTIMATE_RESPONSE_INVALID` for every
+ * USDC → ETH Arbitrum estimate while the API's `arbitrum-swap` preview returned a real quote: a native ETH side (`nativeId`, no `address`)
+ * was refused by the hosted response check. A native side now matches only the runtime's native ETH sentinel, never WETH or another token.
+ */
+describe('production native ETH swap quotes through cloudPreview', () => {
+  const NATIVE = '0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee';
+  function nativeSetup(c: typeof networkCases[number], reverse = false) {
+    const s = evmSetup(c);
+    const w = workflow(c.id, reverse ? 'ETH' : c.stable, reverse ? c.stable : 'ETH');
+    return { ...s, w };
+  }
+  for (const c of networkCases.filter(n => n.id !== 'robinhood')) for (const reverse of [false, true])
+    it(`${c.id} ${reverse ? 'ETH → stable' : 'stable → ETH'}: the verified runtime quote reaches the card`, async () => {
+      const s = nativeSetup(c, reverse), output = s.w.nodes[0]!.inputs.find(i => i.name === 'asset-out');
+      expect(reverse ? output?.kind === 'ASSET' && 'address' in output.value : output?.kind === 'ASSET' && 'nativeId' in output.value).toBe(true);
+      const estimate = await readBuildEstimate({ workflow: s.w, nodeId: s.w.nodes[0]!.nodeId }, production, { preview: s.preview, prices: null });
+      expect(estimate).toMatchObject({ ok: true, estimate: { chain: s.w.nodes[0]!.chainId, provider: 'Uniswap V3', symbol: reverse ? c.stable : 'ETH', slippageBps: 100 } });
+      if (estimate.ok) expect(Number(estimate.estimate.expected)).toBeGreaterThan(0);
+    });
+  it.each([['WETH instead of native ETH', 'outputToken'], ['a native sentinel on the token side', 'inputToken']] as const)('refuses %s (no asset substitution)', async (_label, field) => {
+    const s = nativeSetup(networkCases[1]), weth = s.catalog.assets.find(a => a.symbol === 'WETH')!.address!;
+    const preview = async (flow: FlowName, args: readonly unknown[]) => {
+      const result = await s.preview(flow, args, {});
+      if (!result.ok) return result;
+      const value = structuredClone(result.value) as { quote: Record<string, unknown> };
+      value.quote[field] = field === 'outputToken' ? weth : NATIVE;
+      return { ok: true as const, value };
+    };
+    expect(await readBuildEstimate({ workflow: s.w, nodeId: s.w.nodes[0]!.nodeId }, production, { preview, prices: null }))
+      .toMatchObject({ ok: false, code: 'ESTIMATE_RESPONSE_MISMATCH' });
+  });
+});

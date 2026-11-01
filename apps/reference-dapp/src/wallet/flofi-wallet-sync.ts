@@ -15,7 +15,7 @@ import { configureFloFiWallet, markFloFiAccount } from './flofi-wallet-channel';
 import { requestThroughPrivy } from './flofi-privy-signer';
 import { createFloFiEvmProvider, retireFloFiEvmProvider, type FloFiEvmDeps, type FloFiEvmProvider } from './flofi-evm-provider';
 import { createFloFiSolanaWallet, FLOFI_WALLET_NAME, retireFloFiSolanaWallet, type FloFiSolanaWallet } from './flofi-solana-wallet';
-import { isFloFiWalletKey, registerManagedEvmProvider } from './evm-discovery';
+import { floFiWalletKey, isFloFiWalletKey, registerManagedEvmProvider } from './evm-discovery';
 import { registerSolanaWallet } from './solana-wallet';
 import type { WalletChoice } from './wallet-registry';
 
@@ -60,4 +60,12 @@ export function syncFloFiWallets(options: { readonly force?: boolean } = {}): Pr
 /** Whether a selector choice is one of FloFi Wallet's own entries. */
 export function isFloFiWalletChoice(choice: Pick<WalletChoice, 'ecosystem' | 'key'>): boolean {
   return choice.ecosystem === 'evm' ? isFloFiWalletKey(choice.key) : [...solana.values()].some(entry => entry.wallet.name === choice.key);
+}
+/**
+ * BUILD-FLOFI-WALLET-UX-EXECUTION-FIX-001: the selector key of the account's FloFi wallet at `address` (EVM: its provider key; Solana: the
+ * registered Wallet Standard name), or null while it is not registered on this page. Used by Credentials → Wallets → Connect.
+ */
+export function floFiWalletProviderKey(ecosystem: 'evm' | 'solana', address: string): string | null {
+  if (ecosystem === 'evm') return evm.has(address.toLowerCase()) ? floFiWalletKey(address) : null;
+  return solana.get(address)?.wallet.name ?? null;
 }

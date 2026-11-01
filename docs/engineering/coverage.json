@@ -206,6 +206,10 @@
       "path": "apps/reference-dapp/src/domain/intelligence/conversation-regression.test.ts",
       "stage": "unit"
     },
+    "app.domain.wallet-inventory": {
+      "path": "apps/reference-dapp/src/domain/wallet-inventory.test.ts",
+      "stage": "unit"
+    },
     "app.e2e.auth-wallets": {
       "path": "apps/reference-dapp/e2e/auth-wallets.spec.ts",
       "stage": "browser"
@@ -374,6 +378,10 @@
       "path": "apps/reference-dapp/src/server/woovi-pix-adapter.test.ts",
       "stage": "unit"
     },
+    "app.state.account-wallet-autoconnect": {
+      "path": "apps/reference-dapp/src/state/account-wallet-autoconnect.test.ts",
+      "stage": "unit"
+    },
     "app.state.flofi-conversation": {
       "path": "apps/reference-dapp/src/state/flofi-conversation.test.ts",
       "stage": "unit"
@@ -396,6 +404,10 @@
     },
     "app.wallet.evm-signed-transaction": {
       "path": "apps/reference-dapp/src/wallet/evm-signed-transaction.test.ts",
+      "stage": "unit"
+    },
+    "app.wallet.sign-in-wallet": {
+      "path": "apps/reference-dapp/src/wallet/sign-in-wallet.test.ts",
       "stage": "unit"
     },
     "app.wallet.solana-wallet": {
@@ -456,6 +468,10 @@
     },
     "developer-sdk.webhooks": {
       "path": "packages/developer-sdk/test/webhooks.test.ts",
+      "stage": "unit"
+    },
+    "reference-compiler.account-code": {
+      "path": "packages/reference-compiler/test/account-code.test.ts",
       "stage": "unit"
     },
     "reference-compiler.borrow": {
@@ -3092,11 +3108,13 @@
       ],
       "sharedFinancialCore": false,
       "sources": [
-        "apps/reference-dapp/src/domain/credentials.ts"
+        "apps/reference-dapp/src/domain/credentials.ts",
+        "apps/reference-dapp/src/domain/wallet-inventory.ts"
       ],
       "suites": [
         "action-registry.engineering-regression",
         "app.delegation.adversarial.pg",
+        "app.domain.wallet-inventory",
         "app.mcp.oauth.foundation",
         "app.state.review-authorization",
         "cloud-runtime.tenancy.pg"
@@ -4222,6 +4240,7 @@
       ],
       "sharedFinancialCore": true,
       "sources": [
+        "packages/reference-compiler/src/account-code.ts",
         "packages/reference-compiler/src/enforcement.ts",
         "packages/reference-compiler/src/erc7710.ts",
         "packages/reference-compiler/src/policy.ts",
@@ -4233,7 +4252,8 @@
         "app.delegation.adversarial.pg",
         "app.mcp.oauth.foundation",
         "app.state.review-authorization",
-        "cloud-runtime.tenancy.pg"
+        "cloud-runtime.tenancy.pg",
+        "reference-compiler.account-code"
       ],
       "gaps": [
         "Adversarial fixtures and isolation tests are not a penetration test or proof against all attacks."
@@ -5774,6 +5794,7 @@
       ],
       "sharedFinancialCore": false,
       "sources": [
+        "apps/reference-dapp/src/state/account-wallet-autoconnect.tsx",
         "apps/reference-dapp/src/state/mode-a-store.tsx",
         "apps/reference-dapp/src/state/mode-b-store.tsx",
         "apps/reference-dapp/src/state/wallet-connection.ts",
@@ -5781,6 +5802,7 @@
         "apps/reference-dapp/src/state/wallet-restore.ts"
       ],
       "suites": [
+        "app.state.account-wallet-autoconnect",
         "app.state.wallet-review-continuity",
         "app.state.wallet-synchronization",
         "app.wallet.eip1193",
@@ -5864,6 +5886,7 @@
         "apps/reference-dapp/src/wallet/evm-networks.ts",
         "apps/reference-dapp/src/wallet/liquidity-eip1193.ts",
         "apps/reference-dapp/src/wallet/position-mint-signer.ts",
+        "apps/reference-dapp/src/wallet/sign-in-wallet.ts",
         "apps/reference-dapp/src/wallet/solana-wallet.ts",
         "apps/reference-dapp/src/wallet/uniswap-liquidity-eip1193.ts",
         "apps/reference-dapp/src/wallet/wallet-errors.ts",
@@ -5874,6 +5897,7 @@
         "app.state.wallet-review-continuity",
         "app.state.wallet-synchronization",
         "app.wallet.eip1193",
+        "app.wallet.sign-in-wallet",
         "app.wallet.solana-wallet",
         "reference-executor.recovery",
         "reference-executor.restart.fork",

@@ -8,6 +8,8 @@ import { isLendingComposition } from '@defi-workflow-engine/workflow-contracts';
 import { composerActions, composerConnections, composerSummary } from '../domain/composer-presentation';
 import { canvasPosition } from '../domain/canvas-layout';
 import { useWorkflow } from '../state/workflow-store';
+import { useOptionalBuild009Wallet } from '../state/build009-wallet-store';
+import { useOptionalJupiter } from '../state/jupiter-store';
 import { ComposerCard, type ComposerCardData } from './composer-card';
 import { DarkSpotlight } from './dark-spotlight';
 import { CANVAS_GESTURES, CanvasNavigator } from './canvas-navigator';
@@ -56,13 +58,17 @@ export function SimulateWorkflowCanvas({ workflowName, primaryAction, stage = 's
   const actions = composerActions(workflow);
   const incomplete = Boolean(reviewError);
   const lending = isLendingComposition(workflow);
+  // BUILD-FLOFI-WALLET-UX-EXECUTION-FIX-001 (P0-07): swap and bridge steps show the same shared live quote as Build (display only).
+  const evmAccount = useOptionalBuild009Wallet()?.account ?? null, solanaAccount = useOptionalJupiter()?.session?.account.address ?? null;
   const nodes = useMemo<Node[]>(() => incomplete ? [] : composerActions(workflow).map((node, index) => ({
     id: node.nodeId, type: 'workflow', ariaLabel: `Step ${index + 1}: ${composerSummary(workflow, node, context).action}`,
     position: canvasLayout?.[node.nodeId] ? canvasPosition(canvasLayout, node, index) :
       lending ? { x: 180, y: 35 + index * 230 } : canvasPosition(canvasLayout ?? {}, node, index),
     data: { composer: true, inspection: true, step: index + 1, selected: false, vertical: lending,
-      summary: composerSummary(workflow, node, context) },
-  })), [workflow, context, canvasLayout, incomplete, lending]);
+      summary: composerSummary(workflow, node, context),
+      ...['asset.swap.exact-input', 'asset.bridge'].includes(node.actionType) ? { estimateWorkflow: workflow, estimateNodeId: node.nodeId,
+        estimateOwner: node.chainId.startsWith('solana:') ? solanaAccount : evmAccount, estimateEvmOwner: evmAccount, estimateSolanaOwner: solanaAccount } : {} },
+  })), [workflow, context, canvasLayout, incomplete, lending, evmAccount, solanaAccount]);
   const edges = useMemo(() => incomplete ? [] : composerConnections(workflow).map(({ id, source, target }) => ({
     id, source, target, type: 'smoothstep', animated: false,
     markerEnd: { type: MarkerType.ArrowClosed, width: 18, height: 18, color: 'var(--edge-line)' },

@@ -82,7 +82,8 @@ export function AddWallets({ state }: { state: AccountState }) {
         const saved = await savePrivyWallet(token, ecosystem, address);
         if (!saved.ok) throw new Error(saved.code);
         setWallets(current => merge(current, [saved.value]));
-        setStatus(t('{0} wallet created: {1}', NAME[ecosystem], shortAddress(saved.value.address)));
+        // The address is shown once, in its card (BUILD-FLOFI-WALLET-UX-EXECUTION-FIX-001 P1-01); the announcement does not repeat it.
+        setStatus(t('{0} wallet created.', NAME[ecosystem]));
       })());
     } catch (cause) {
       setStatus('');
@@ -100,29 +101,41 @@ export function AddWallets({ state }: { state: AccountState }) {
   }
 
   const valid = wallets.filter(wallet => isPrivyWallet(wallet) || isLegacyWallet(wallet) || wallet.origin === 'external');
+  /** Copies the full address (never the shortened text shown). */
+  function copy(wallet: AccountWallet) {
+    void navigator.clipboard.writeText(wallet.address).then(() => setStatus(t('Address copied.')), () => setStatus(t('Address could not be copied.')));
+  }
+  /** One wallet, shown once inside its card: status, shortened address and a copy button (BUILD-FLOFI-WALLET-UX-EXECUTION-FIX-001 P1-01). */
+  const walletTile = (wallet: AccountWallet, title: string, wide = false) => <div key={wallet.id} className={`${styles.tile} ${styles.tileDone}${wide ? ` ${styles.tileWide}` : ''}`}
+    data-wallet-address={wallet.address} role="group" aria-label={`${t(title)}: ${wallet.label}`}>
+    <strong><AccountIcon name="check" size={16}/>{t(title)}</strong>
+    <span className={styles.tileAddress}><code title={wallet.address}>{shortAddress(wallet.address)}</code>
+      <button type="button" className={styles.copyAddress} aria-label={t('Copy {0} address', wallet.label)} title={t('Copy address')} onClick={() => copy(wallet)}>
+        <AccountIcon name="copy" size={15}/></button></span>
+  </div>;
   const card = (ecosystem: WalletEcosystem) => {
     const own = valid.filter(wallet => wallet.ecosystem === ecosystem);
     const created = own.find(wallet => isPrivyWallet(wallet) && wallet.origin === 'generated');
+    const imported = own.find(wallet => isPrivyWallet(wallet) && wallet.origin === 'imported');
+    // A wallet linked in another way (MetaMask, Phantom, a legacy FloFi Wallet) keeps one full-width tile in the same card.
+    const others = own.filter(wallet => wallet !== created && wallet !== imported);
     const pending = busy === ecosystem;
     return <section key={ecosystem} className={`${styles.ecosystem} ${ecosystem === 'evm' ? styles.ecosystemEvm : styles.ecosystemSolana}`} aria-label={NAME[ecosystem]}
       data-ecosystem={ecosystem}>
       <div className={styles.ecosystemTab}><img src={`/brand/crypto/${ecosystem === 'evm' ? 'ethereum' : 'solana'}.svg`} alt=""/><span>{NAME[ecosystem]}</span></div>
       <div className={styles.ecosystemBody}>
-      {own.length > 0 && <ul className={`${styles.pending} ${styles.cardWallets}`} aria-label={t('{0} wallets', NAME[ecosystem])}>{own.map(wallet => <li key={wallet.id} data-wallet-address={wallet.address}>
-        <span>{wallet.label} · <code title={wallet.address}>{wallet.address}</code></span>
-        <span className={`${styles.badge} ${styles.badgeGreen}`}>{t(isLegacyWallet(wallet) ? 'Legacy FloFi Wallet' : wallet.origin === 'generated' ? 'Created'
-          : wallet.origin === 'imported' ? 'Imported' : 'Connected')}</span></li>)}</ul>}
       <div className={styles.tiles}>
-        <button type="button" className={`${styles.tile}${created ? ` ${styles.tileDone}` : ''}`} disabled={readiness !== 'ready' || busy !== null || Boolean(created)}
-          aria-busy={pending} onClick={() => void create(ecosystem)}>
-          <strong><AccountIcon name={created ? 'check' : 'plus'} size={16}/>{t(created ? 'Wallet created' : pending ? 'Creating…' : 'Create wallet')}</strong>
-          {created ? <code>{shortAddress(created.address)}</code> : <small>{t('A new {0} wallet, ready right away', NAME[ecosystem])}</small>}
-        </button>
-        {readiness === 'ready' && busy === null
+        {created ? walletTile(created, 'Wallet created')
+          : <button type="button" className={styles.tile} disabled={readiness !== 'ready' || busy !== null} aria-busy={pending} onClick={() => void create(ecosystem)}>
+            <strong><AccountIcon name="plus" size={16}/>{t(pending ? 'Creating…' : 'Create wallet')}</strong>
+            <small>{t('A new {0} wallet, ready right away', NAME[ecosystem])}</small>
+          </button>}
+        {imported ? walletTile(imported, 'Imported wallet') : readiness === 'ready' && busy === null
           ? <a className={styles.tile} href={`/onboarding/wallets/import/${ecosystem}`}>
             <strong><AccountIcon name="import" size={16}/>{t('Import key')}</strong><small>{t('Bring an existing {0} wallet with its private key', NAME[ecosystem])}</small></a>
           : <button type="button" className={styles.tile} disabled><strong><AccountIcon name="import" size={16}/>{t('Import key')}</strong>
             <small>{t('Bring an existing {0} wallet with its private key', NAME[ecosystem])}</small></button>}
+        {others.map(wallet => walletTile(wallet, isLegacyWallet(wallet) ? 'Legacy FloFi Wallet' : 'Connected', true))}
       </div>
       </div>
     </section>;

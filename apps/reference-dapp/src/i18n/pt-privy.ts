@@ -10,7 +10,7 @@ export const portuguesePrivy: Readonly<Record<string, string>> = {
   // Add your wallets
   'Create a new wallet or import one you already have. Keys are created and kept by our wallet provider, Privy — FloFi’s servers never receive or store them.':
     'Crie uma nova carteira ou importe uma que você já tem. As chaves são criadas e guardadas pelo nosso provedor de carteiras, a Privy — os servidores do FloFi nunca as recebem nem armazenam.',
-  'Creating your {0} wallet…': 'Criando sua carteira {0}…', '{0} wallets': 'Carteiras {0}', 'Wallet created': 'Carteira criada', 'Creating…': 'Criando…',
+  'Creating your {0} wallet…': 'Criando sua carteira {0}…', '{0} wallets': 'Carteiras {0}', 'Wallet created': 'Carteira criada', 'Imported wallet': 'Carteira importada', '{0} wallet created.': 'Carteira {0} criada.', 'Creating…': 'Criando…',
   'A new {0} wallet, ready right away': 'Uma carteira {0} nova, pronta na hora', 'Bring an existing {0} wallet with its private key': 'Traga uma carteira {0} existente com a chave privada',
   'Connecting to your wallet provider…': 'Conectando ao seu provedor de carteiras…', "Your wallet provider isn't responding.": 'Seu provedor de carteiras não está respondendo.',
   'Check your connection, then try again. Nothing was created.': 'Verifique sua conexão e tente de novo. Nada foi criado.',

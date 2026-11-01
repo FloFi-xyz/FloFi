@@ -419,3 +419,46 @@ describe('BUILD-FLOFI-BRIDGE-LIVE-FIX-003 native ETH on Arbitrum One (owner-boun
     expect((await s.observe(uid)).outcome).toMatchObject({ outputReceived: '5000000000000000' });
   });
 });
+
+describe('BUILD-FLOFI-WALLET-UX-EXECUTION-FIX-001 owner account types on the owner-bound swap (T16/T18)', () => {
+  const metaMaskDeleGator = '0x63c0c19a282a1b52b07dd5a65b58948a07dae32b';
+  const ETH = { chain: chainId, address: null, decimals: 18, officialId: null } as const;
+  const ref = (symbol: string) => ({ chain: chainId, address: asset(symbol).address!, decimals: asset(symbol).decimals, officialId: null });
+  const usdcToEth = () => flow(createCatalogSwapNode('node-002', { chain: chainId, amount: '10000000', slippageBps: 100, input: ref('USDC'), output: ETH }));
+  it('a standard EOA keeps its exact Review (no delegation field)', async () => {
+    const run = await swapService().prepare(usdcToEth(), owner);
+    expect(run.quote.ownerReview).toBeDefined();
+    expect(run.quote.ownerReview).not.toHaveProperty('delegation');
+  });
+  it('a MetaMask Smart Account (EIP-7702 delegated EOA) is simulated, reviewed, executed and reconciled — never refused as a contract', async () => {
+    chain.state.codeOverride.set(owner, '0xef0100' + metaMaskDeleGator.slice(2));
+    const s = swapService(), first = await s.prepare(usdcToEth(), owner), id = first.quote.executionId;
+    expect(first.quote.ownerReview).toMatchObject({ account: owner, step: 'approval', delegation: metaMaskDeleGator });
+    s.review(id, first.quote.manifestHash);
+    const approve = await s.begin(id, owner);
+    s.report(id, approve.attempt.attemptId, { kind: 'HASH', txHash: chain.apply(approve.tx) }); await s.observe(id);
+    const next = await s.refresh(id); s.review(id, next.quote.manifestHash);
+    expect(next.quote.ownerReview).toMatchObject({ step: 'swap', delegation: metaMaskDeleGator });
+    const begun = await s.begin(id, owner);
+    s.report(id, begun.attempt.attemptId, { kind: 'HASH', txHash: chain.apply(begun.tx) });
+    const done = await s.observe(id);
+    expect(done.divergence ?? null).toBeNull();
+    expect(BigInt(done.outcome!.outputReceived)).toBeGreaterThanOrEqual(BigInt(next.quote.minimumOut));
+  });
+  it('refuses a delegation to an unreviewed implementation with its own code (a sweeper delegate never receives swap output)', async () => {
+    chain.state.codeOverride.set(owner, '0xef0100' + '9'.repeat(40));
+    await expect(swapService().prepare(usdcToEth(), owner)).rejects.toThrow('OWNER_DELEGATION_UNVERIFIED');
+  });
+  it('still refuses a smart contract wallet that cannot originate the transaction', async () => {
+    chain.state.codeOverride.set(owner, '0x6080604052');
+    await expect(swapService().prepare(usdcToEth(), owner)).rejects.toThrow('OWNER_NOT_EOA');
+  });
+  it('a delegation added after Review needs a new Review before any wallet request (T19)', async () => {
+    const s = swapService(), run = await s.prepare(swap(), owner), id = run.quote.executionId;
+    s.review(id, run.quote.manifestHash);
+    chain.state.codeOverride.set(owner, '0xef0100' + metaMaskDeleGator.slice(2));
+    await expect(s.begin(id, owner)).rejects.toThrow('OWNER_STATE_CHANGED_REVIEW_REQUIRED');
+    expect(s.load(id).attempts).toHaveLength(0);
+    expect(s.load(id).reviewedManifestHash).toBeNull();
+  });
+});

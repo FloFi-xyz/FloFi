@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { LIVE_QUOTE_DEBOUNCE_MS, BUILD_ESTIMATE_TIMEOUT_MS, requestBuildEstimate, type BuildEstimateResult } from './build-estimate';
+import { LIVE_QUOTE_DEBOUNCE_MS, BUILD_ESTIMATE_TIMEOUT_MS, buildEstimateFailureMessage, buildEstimateFailureReference, requestBuildEstimate, type BuildEstimateResult } from './build-estimate';
 import { deferred } from '../test-utils/hook-harness';
 beforeEach(() => vi.useFakeTimers());
 afterEach(() => vi.useRealTimers());
@@ -43,5 +43,21 @@ describe('cancellable Build estimate requests', () => {
   it('reports failures without fabricating an estimate', async () => {
     const publish = vi.fn(); requestBuildEstimate(() => Promise.reject(Error('offline')), publish);
     await vi.advanceTimersByTimeAsync(350); expect(publish).toHaveBeenCalledExactlyOnceWith({ ok: false, code: 'ESTIMATE_UNAVAILABLE' });
+  });
+});
+
+describe('BUILD-FLOFI-WALLET-UX-EXECUTION-FIX-001 quote failures are explained (T12/T22)', () => {
+  it('names the cause for unsupported, dependent, test-network and inconsistent-network answers', () => {
+    expect(buildEstimateFailureMessage('ESTIMATE_UNSUPPORTED')).toMatch(/not available for this action on this network/);
+    expect(buildEstimateFailureMessage('ESTIMATE_DEPENDENCY_UNRESOLVED')).toMatch(/earlier step/);
+    expect(buildEstimateFailureMessage('TEST_NETWORK_NOT_AVAILABLE')).toMatch(/Choose a mainnet/);
+    expect(buildEstimateFailureMessage('STALE_CHAIN_HEAD')).toMatch(/did not answer consistently/);
+    for (const code of ['ESTIMATE_UNSUPPORTED', 'POOL_UNUSABLE', 'ESTIMATE_RESPONSE_INVALID', 'CLOUD_RUNTIME_NOT_CONFIGURED']) expect(buildEstimateFailureReference(code)).toBeNull();
+  });
+  it('a generic failure still says Quote unavailable, explains it and exposes its reference code', () => {
+    expect(buildEstimateFailureMessage('ESTIMATE_UNAVAILABLE')).toMatch(/^Quote unavailable: the provider returned no usable quote/);
+    expect(buildEstimateFailureReference('ESTIMATE_UNAVAILABLE')).toBe('ESTIMATE_UNAVAILABLE');
+    expect(buildEstimateFailureReference('SOMETHING_NEW')).toBe('SOMETHING_NEW');
+    expect(buildEstimateFailureReference('not a code')).toBeNull(); expect(buildEstimateFailureReference(undefined)).toBeNull();
   });
 });

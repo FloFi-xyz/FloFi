@@ -310,3 +310,22 @@ describe('Privy wallets are saved only for the account’s own Privy user', () =
     expect(await signIn(did(26))).toMatchObject({ created: true });
   });
 });
+
+describe('BUILD-FLOFI-WALLET-UX-EXECUTION-FIX-001 a wallet sign-in enters the app without wallet onboarding (P1-05, T01–T05)', () => {
+  it('MetaMask sign-in: pending onboarding, but no "Add your wallets" (the verified external wallet is the account wallet identity)', async () => {
+    users.set(did(41), [external(EVM_X)]);
+    const outcome = await signIn(did(41));
+    expect(outcome).toMatchObject({ created: true, onboarding: 'pending', walletOnboarding: false, session: { method: 'eip155' } });
+    // Nothing else is created or associated silently: no embedded wallet, no wallet record for a wallet the person did not save.
+    expect(await store().wallets(outcome.session.accountId)).toEqual([]);
+  });
+  it('Google sign-in without a wallet still adds wallets; once Privy lists an embedded wallet, the next sign-in goes straight to the app', async () => {
+    users.set(did(42), [google('g-42')]);
+    expect(await signIn(did(42))).toMatchObject({ onboarding: 'pending', walletOnboarding: true });
+    users.set(did(42), [google('g-42'), embedded(EVM_2), embedded(SOL_1, { solana: true })]);
+    const again = await signIn(did(42));
+    expect(again).toMatchObject({ onboarding: 'pending', walletOnboarding: false });
+    expect((await store().wallets(again.session.accountId)).map(wallet => [wallet.ecosystem, wallet.provider, wallet.origin]))
+      .toEqual(expect.arrayContaining([['evm', 'privy', 'generated'], ['solana', 'privy', 'generated']]));
+  });
+});

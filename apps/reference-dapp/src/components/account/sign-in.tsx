@@ -13,6 +13,7 @@ import { useEffect, useId, useRef, useState } from 'react';
 import { useLocale } from '../../i18n/locale';
 import { privySignIn, type AccountState } from '../../app/account-action';
 import { useFloFiPrivy } from '../../accounts/privy-client';
+import { rememberSignIn } from '../../wallet/sign-in-wallet';
 import { AccountIcon } from './account-icons';
 import { accountMessage } from './account-messages';
 import { AccountShell, accountStyles as styles } from './account-shell';
@@ -41,7 +42,8 @@ export function SignInScreen({ state, initialError, returnTo }: { state: Account
     const token = await privy.getAccessToken();
     const result = token ? await privySignIn(token, returnTo).catch(() => ({ ok: false as const, code: 'PRIVY_SIGN_IN_FAILED' }))
       : { ok: false as const, code: 'PRIVY_SESSION_REQUIRED' };
-    if (result.ok) { window.location.assign(result.value.next); return; }
+    // BUILD-FLOFI-WALLET-UX-EXECUTION-FIX-001: the verified sign-in re-allows silent restore of the wallet just used (no prompt, no authority).
+    if (result.ok) { rememberSignIn(result.value.method); window.location.assign(result.value.next); return; }
     // A refused sign-in leaves no Privy session behind either, so the next attempt starts clean.
     await privy.logout();
     finishing.current = false; started.current = false; setBusy(null); setError(result.code);

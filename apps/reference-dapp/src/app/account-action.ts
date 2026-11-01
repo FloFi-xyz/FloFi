@@ -59,13 +59,14 @@ export async function accountState(): Promise<AccountState> {
  * Completes a Privy sign-in (Google, email code or Web3 wallet): the server verifies the access token and reads the Privy user itself,
  * signs in to that person's one FloFi account and sets the session cookie. Returns where to continue.
  */
-export async function privySignIn(accessToken: string, returnTo = '/app'): Promise<Result<{ next: string }>> {
+export async function privySignIn(accessToken: string, returnTo = '/app'): Promise<Result<{ next: string; method: AccountSessionToken['method'] }>> {
   try {
     const h = await host(), previous = await currentAccountSession(h);
     const outcome = await h.service.completePrivy(accessToken);
     await supersede(h, previous, outcome.session);
     await setAccountCookie(outcome.session);
-    return { ok: true, value: { next: nextPath(outcome, 'sign-in', safeReturnPath(returnTo)) } };
+    // `method` is the server-verified sign-in method (public): the browser uses it only to restore the wallet it just authenticated with.
+    return { ok: true, value: { next: nextPath(outcome, 'sign-in', safeReturnPath(returnTo)), method: outcome.session.method } };
   } catch (cause) { return failure(cause, 'PRIVY_SIGN_IN_FAILED'); }
 }
 /** Saves one wallet just created or imported in Privy, after Privy's API confirms this account's own Privy user holds it. */

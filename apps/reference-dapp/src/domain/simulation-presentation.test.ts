@@ -287,3 +287,12 @@ describe('BUILD-FLOFI-BRIDGE-LIVE-FIX-003 Bridge fee accounting (the live Arbitr
     expect(simulationError('ROUTER_REVIEW_EXPIRED')).toBe('This result has expired. Refresh the simulation before continuing.');
   });
 });
+
+describe('BUILD-FLOFI-WALLET-UX-EXECUTION-FIX-001 account-specific owner refusals', () => {
+  it('names the actual account kind instead of calling every code-bearing account a smart contract account', () => {
+    expect(simulationError('OWNER_NOT_EOA')).toMatch(/smart contract wallet \(for example a Safe\).*MetaMask Smart Account/);
+    expect(simulationError('OWNER_DELEGATION_UNVERIFIED')).toMatch(/EIP-7702.*not verified/);
+    expect(simulationError('TRANSFER_OWNER_NOT_EOA')).toMatch(/^Transfers need a standard wallet account/);
+    for (const code of ['OWNER_NOT_EOA', 'OWNER_DELEGATION_UNVERIFIED', 'TRANSFER_OWNER_NOT_EOA']) expect(simulationError(code)).toMatch(/Nothing was simulated or sent\.$/);
+  });
+});

@@ -2,7 +2,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { encodeApprove, toHex } from '@defi-workflow-engine/reference-compiler';
 import { reviewFixture, reviewOwner, reviewSpender } from '../test-utils/review-fixture';
-import { useReviewAuthorization } from './review-authorization';
+import { reviewBindingAdopts, useReviewAuthorization } from './review-authorization';
 
 const f = vi.hoisted(() => ({ stores: {} as Record<string, Record<string, unknown>>, state: undefined as unknown }));
 // A minimal hook runner keeps the shell's binding state across wallet events.
@@ -159,5 +159,22 @@ describe('shared wallet and existing Review capability', () => {
     supply(); f.stores.supply!.retired = true; expect(useReviewAuthorization('supply').authorization.ready).toBe(false);
     f.stores.supply!.retired = false; f.stores.supply!.busy = true; expect(useReviewAuthorization('supply').authorization.ready).toBe(false);
     expect(useReviewAuthorization('unavailable').authorization).toMatchObject({ ready: false, approve: null });
+  });
+});
+
+describe('BUILD-FLOFI-WALLET-UX-EXECUTION-FIX-001 no false "Wallet changed" while the reviewed wallet restores (P0-10, T19)', () => {
+  const owner = '0x' + 'a'.repeat(40);
+  it('adopts only the Review owner, only from "no wallet", only within the same workflow restoration', () => {
+    expect(reviewBindingAdopts({ account: null, restorationEpoch: 0 }, owner.toUpperCase().replace('0X', '0x'), 0, owner, 'evm')).toBe(true);
+    expect(reviewBindingAdopts({ account: null, restorationEpoch: 0 }, '0x' + 'b'.repeat(40), 0, owner, 'evm')).toBe(false);
+    expect(reviewBindingAdopts({ account: owner, restorationEpoch: 0 }, owner, 0, owner, 'evm')).toBe(false);
+    expect(reviewBindingAdopts({ account: null, restorationEpoch: 0 }, owner, 1, owner, 'evm')).toBe(false);
+    expect(reviewBindingAdopts({ account: null, restorationEpoch: 0 }, owner, 0, null, 'evm')).toBe(false);
+    expect(reviewBindingAdopts({ account: null, restorationEpoch: 0 }, null, 0, owner, 'evm')).toBe(false);
+  });
+  it('compares Solana keys exactly', () => {
+    const key = '9'.repeat(32) + 'Ab';
+    expect(reviewBindingAdopts({ account: null, restorationEpoch: 2 }, key, 2, key, 'solana')).toBe(true);
+    expect(reviewBindingAdopts({ account: null, restorationEpoch: 2 }, key.toLowerCase(), 2, key, 'solana')).toBe(false);
   });
 });

@@ -28,6 +28,16 @@ import { ownerBoundSwapReview, quoteDecimals, swapProfile } from '../domain/publ
 import { solanaWalletChainRef } from '../wallet/environment';
 import { solanaProviderIdentity } from '../wallet/solana-wallet';
 
+/**
+ * BUILD-FLOFI-WALLET-UX-EXECUTION-FIX-001 (P0-10): whether a Review bound with no wallet connected may adopt the wallet that connects now. Only
+ * the Review's own owner (EVM case-insensitive, Solana exact), only from "no wallet", and only within the same workflow restoration.
+ */
+export function reviewBindingAdopts(bound: { readonly account: string | null; readonly restorationEpoch: number }, account: string | null, restorationEpoch: number,
+  owner: string | null, walletKind: string): boolean {
+  if (bound.account !== null || account === null || owner === null || bound.restorationEpoch !== restorationEpoch) return false;
+  return walletKind === 'solana' ? owner === account : owner.toLowerCase() === account.toLowerCase();
+}
+
 /** Review callbacks only: no install, request, begin, submit or execute method crosses this boundary. */
 export function useReviewAuthorization(kind: SimulationSource['kind']): { authorization: ReviewAuthorization; wallet: ReviewWallet } {
   const modeA = useModeA(), modeB = useModeB(), composition = useComposition(), liquidity = useLiquidity();
@@ -203,9 +213,15 @@ export function useReviewAuthorization(kind: SimulationSource['kind']): { author
   const identity = JSON.stringify([account, chain, environment.walletKind === 'evm' ? sharedWallet.revision : jupiter.revision ?? 0, restorationEpoch,
     environment.walletKind === 'evm' ? sharedWallet.chainId : environment.walletChain, providerKey]);
   // Keep this guard mounted in the shell. Returning to the old wallet cannot revive the old Review.
-  const [binding, setBinding] = useState({ key: authorization.key, identity, changed: false });
-  const changed = binding.key === authorization.key && (binding.changed || binding.identity !== identity);
-  if (binding.key !== authorization.key) setBinding({ key: authorization.key, identity, changed: false });
+  const [binding, setBinding] = useState({ key: authorization.key, identity, changed: false, account, restorationEpoch });
+  // BUILD-FLOFI-WALLET-UX-EXECUTION-FIX-001 (P0-10): a Review bound while no wallet was connected yet (the wallet still restoring after a
+  // reload or a navigation) adopts the first wallet that connects only when that wallet is exactly the Review's owner and nothing else
+  // changed: no false "Wallet changed". Any other wallet, any change once a wallet was bound, or another workflow still retires the Review.
+  const adopt = binding.key === authorization.key && !binding.changed && binding.identity !== identity && reviewBindingAdopts(binding, account, restorationEpoch,
+    authorization.owner, environment.walletKind);
+  const changed = binding.key === authorization.key && !adopt && (binding.changed || binding.identity !== identity);
+  if (binding.key !== authorization.key) setBinding({ key: authorization.key, identity, changed: false, account, restorationEpoch });
+  else if (adopt) setBinding({ ...binding, identity, account });
   else if (changed && !binding.changed) setBinding({ ...binding, changed: true });
   if (changed) authorization.ready = false;
   return { authorization, wallet: { account, chain, environment: environment.walletEnvironment, changed } };
