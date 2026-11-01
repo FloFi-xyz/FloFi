@@ -174,6 +174,27 @@ function loopbackDriver(): PrivyDriver | null {
   return driver && typeof driver.snapshot === 'function' && typeof driver.subscribe === 'function' ? driver : null;
 }
 const NO_DRIVER = Object.freeze({ ready: false, authenticated: false, userId: null, embedded: Object.freeze([]) as readonly PrivyEmbedded[] });
+/** Stub FloFiPrivy while the loopback driver has not attached yet (SSR and the first client paint). Non-null so sign-in SSR matches
+ * PrivyBridge: methods unavailable-but-configured, never the false "not configured on this deployment" status. */
+const PENDING: FloFiPrivy = Object.freeze({
+  ...NO_DRIVER,
+  canSign: () => false,
+  getAccessToken: async () => null,
+  onLogin: () => () => undefined,
+  onLoginError: () => () => undefined,
+  loginWithOAuth: async () => fail('PRIVY_UNAVAILABLE'),
+  sendEmailCode: async () => fail('PRIVY_UNAVAILABLE'),
+  loginWithEmailCode: async () => fail('PRIVY_UNAVAILABLE'),
+  loginWithWallet: () => fail('PRIVY_UNAVAILABLE'),
+  createWallet: async () => fail('PRIVY_UNAVAILABLE'),
+  importWallet: async () => fail('PRIVY_UNAVAILABLE'),
+  exportWallet: async () => fail('PRIVY_UNAVAILABLE'),
+  signEvmTransaction: async () => fail('PRIVY_UNAVAILABLE'),
+  signEvmMessage: async () => fail('PRIVY_UNAVAILABLE'),
+  signSolanaTransaction: async () => fail('PRIVY_UNAVAILABLE'),
+  signSolanaMessage: async () => fail('PRIVY_UNAVAILABLE'),
+  logout: async () => undefined,
+});
 function EmulatedPrivy({ children }: { children: ReactNode }) {
   const [driver, setDriver] = useState<PrivyDriver | null>(null);
   const logins = useRef(createLoginChannel());
@@ -183,8 +204,8 @@ function EmulatedPrivy({ children }: { children: ReactNode }) {
   useEffect(() => { if (driver?.attachFloFi) void import('../wallet/flofi-privy-signer').then(module => driver.attachFloFi!({ request: module.requestThroughPrivy })); }, [driver]);
   const subscribe = useCallback((listener: () => void) => driver?.subscribe(listener) ?? (() => undefined), [driver]);
   const snapshot = useSyncExternalStore(subscribe, () => driver?.snapshot() ?? NO_DRIVER, () => NO_DRIVER);
-  const value = useMemo<FloFiPrivy | null>(() => {
-    if (!driver) return null;
+  const value = useMemo<FloFiPrivy>(() => {
+    if (!driver) return PENDING;
     // The stand-in's errors go through the same mapping as Privy's (PrivyBridge): FloFi only ever sees its own codes.
     const wrap = <A extends unknown[], R>(run: (...args: A) => Promise<R>, fallback: string) => async (...args: A): Promise<R> => {
       try { return await run(...args); } catch (cause) { throw new Error(privyErrorCode(cause, fallback), { cause }); }
@@ -233,7 +254,11 @@ export function signerDocument(pathname: string, loaded: string | null): { reado
 export function FloFiPrivyProvider({ config, accounts = false, children }: { config: PrivyBrowserConfig | null; accounts?: boolean; children: ReactNode }) {
   const settings = useMemo(() => config ? floFiPrivyConfig(config) : null, [config]);
   const pathname = usePathname();
-  const loaded = useSyncExternalStore(NO_CHANGES, loadedDocumentPath, () => pathname);
+  // getServerSnapshot is this page's path (the proxy just served its policy). If the server path still evaluates the
+  // client snapshot, Navigation Timing is empty and would leave Privy unmounted in the SSR HTML ("not configured").
+  // Fall back to pathname only on the server; keep null on the client so a missing Timing entry stays fail-closed.
+  const timed = useSyncExternalStore(NO_CHANGES, loadedDocumentPath, () => pathname);
+  const loaded = timed ?? (typeof window === 'undefined' ? pathname : null);
   const { mount, reload } = signerDocument(pathname, loaded);
   useEffect(() => { if (reload) location.reload(); }, [reload]);
   const inner = reload ? null : !config || !settings || !mount ? <Context.Provider value={null}>{children}</Context.Provider>
