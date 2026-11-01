@@ -56,11 +56,14 @@ policy, so no mainnet chain data was read. Nothing about mainnet relays is assum
   enforcers, none of which moves funds) may log; amounts are proven from the receipt (`receiptSwap`, `receiptNative`, the single Approval).
 - **One transaction, one attempt:** the hash is claimed create-once (`claim-<chain>-<hash>.tx`); another attempt reporting it is
   `RELAYED_TRANSACTION_ALREADY_CLAIMED`.
-- **No duplicate:** before the receipt becomes evidence, every verified relayed execution of the same call since the run first prepared it, and
-  a direct one at the reviewed nonce, are looked for; any second execution is `RELAYED_DUPLICATE_EXECUTION`. A wallet "refusal" is trusted for a
-  new attempt only after checking it was not relayed (`REJECTED_ATTEMPT_EXECUTED`).
-- A **reverted** relay has no logs, so it cannot be tied to the owner and its authorization may still be redeemable: `RELAYED_SUBMISSION_REVERTED`,
-  never a final result and never a reservation release.
+- **No duplicate:** before the receipt becomes evidence, every relayed execution of the same call since the run first prepared it is looked
+  for — the reconcilable shape, and any other successful owner-rooted redemption whose input carries the call's exact bytes (e.g. batched with a
+  fee) — plus a direct one at the reviewed nonce; any second execution is `RELAYED_DUPLICATE_EXECUTION`. The check must cover the whole window
+  (up to 400 × 5,000 blocks, ~5.8 days on Arbitrum One); otherwise the attempt stays pending. A wallet "refusal" is trusted for a new attempt
+  only after the same check (`REJECTED_ATTEMPT_EXECUTED`, or `RELAYED_EXECUTION_PENDING` while incomplete), and a lost-hash attempt executed in
+  another shape is `RELAYED_EXECUTION_UNSUPPORTED_SHAPE`.
+- A **reverted** relay has no logs, so it cannot be tied to the owner and its authorization may still be redeemable: the run is recorded as
+  divergent (`RELAYED_SUBMISSION_REVERTED`) — never a success and never a reservation release (see §4.1 for the consequence).
 
 **Accounting.** For a delegated owner, balances can move through relays without its nonce moving, so its receipts are the proof for direct
 submissions too (`OWNER_DELEGATED_ACCOUNT_RECEIPT_RECONCILED`). The owner's fee is what the owner paid: a relayer-paid receipt contributes 0
@@ -107,7 +110,7 @@ appended intent lines in the existing execution storage (existing one-line inten
 | Account suites on PostgreSQL 16 (disposable loopback), same commit | 16 files, 142 tests pass |
 | `pnpm build` (production) | pass |
 | After review fixes: wallet/state/account/Credentials suites; swap, estimate and canvas suites | 62 files / 549 tests; 5 files / 167 tests — pass |
-| **Relayed reconciliation + CI fix (this follow-up), pinned Node 24.21.0:** `pnpm check` (typecheck, lint, production build, schema drift, unit tests) | pass: 511 files, 6,238 tests; 2 skipped by their own environment conditions (as on `main`) |
+| **Relayed reconciliation + CI fix (this follow-up), pinned Node 24.21.0:** `pnpm check` (typecheck, lint, production build, schema drift, unit tests) | pass: 511 files, 6,238 tests; after the re-review fixes 6,241 tests; 2 skipped by their own environment conditions (as on `main`) |
 | Swap/relay suites (`arbitrum-runtime`, `owner-submission`, `public-testnet-service`) and every other suite on the mocked chain (`base-swap`, `base-mainnet`, `robinhood-swap`, `ethereum-runtime`, `build-estimate-*`, `robinhood-transfer-mainnet`) | 3 files / 121 tests; 7 files / 179 tests — pass |
 | `default-product` specs `base-observation` + `mock-artifact-chain` in the CI image (§3b) | 15/15 pass with the regenerated baselines, no update flags |
 | `python3 scripts/governance_lite.py` + its unittest suite | pass (21 tests) |
@@ -168,6 +171,14 @@ so they reviewed the working tree directly):
 Additionally, beyond the reviews: relayed acceptance now requires a **single-use** delegation proven on chain (LimitedCalls(1) counted for
 exactly the redeemed delegation), verified against the real recorded relay.
 
+**Third round — verification of the fixes on `fb7f459`** (flofi-security, flofi-wallet-execution): all earlier high/medium findings resolved
+except one medium (security): a duplicate executed in a *non-reconcilable* relay shape (e.g. batch with a fee) was ignored by the duplicate
+checks — fixed (`unclassified` executions: any successful owner-rooted redemption carrying the call's exact bytes counts; batch tests added).
+Lows fixed: an incomplete scan no longer passes as complete (pending instead); the refusal check no longer depends on the current Review
+showing the delegation; more single-use negative cases (two counts, wrong counter sender, limit ≠ 1). Lows documented in §4.1: `eth_getLogs`
+dependency, reverted relays keep the reservation, nonce used elsewhere while unresolved. The single-use check was confirmed (by hand decoding
+and the test) to accept the real recorded MetaMask relay.
+
 Not invoked, with reasons: flofi-mcp, flofi-channels and flofi-developers — none of their modules imports the changed code (searched);
 they reach swaps only through backend flows by name, whose quote result gains one optional field (`ownerReview.delegation`) and one refusal
 code (`OWNER_DELEGATION_UNVERIFIED`); their schema/OpenAPI/boundary unit suites ran in `pnpm test`. flofi-admin-analytics, automations,
@@ -198,7 +209,14 @@ CI-IMAGE: the browser baselines (§3b). **None of this is mainnet execution evid
    - Duplicates are detected among executions present when the receipt is reconciled (and before any retry after a refusal). A single-use
      relayed delegation cannot run again; a further execution would need a new owner authorization in the wallet.
    - Lost-hash discovery scans at most 40 × 5,000 blocks per observation from the prepared block (~14 h on Arbitrum One, ~28 days on Ethereum);
-     an older relay stays unresolved (reservation kept). Provider `eth_getLogs` range limits or errors make observation retry; nothing is adopted.
+     an older relay stays unresolved (reservation kept). The duplicate check (400 × 5,000 blocks) keeps a receipt observed later than ~5.8 days
+     (Arbitrum One) after preparation pending: it then needs manual reconciliation.
+   - `eth_getLogs` (5,000-block ranges, allowed by the catalog RPC method list) is now required to reconcile any delegated owner's swap (direct
+     or relayed) and to retry after a refusal. A provider that caps ranges lower makes those observations retry indefinitely (never adopt).
+   - A reverted relayed swap (e.g. slippage or deadline) is divergent and keeps its reservation: the owner's next owner-bound swap on that chain
+     needs one direct transaction from the account first (the same unblock as any divergent relay).
+   - For a relay-capable owner whose reviewed nonce is used by a different transaction while the attempt has no hash, the run is still recorded
+     as `NONCE_CONSUMED_BY_DIFFERENT_TRANSACTION`; a relay of that call landing afterwards would not be reconciled by FloFi.
    - Two concurrent runs of the same owner with byte-identical calls (e.g. the same approval) and one relayed transaction: the first
      observation claims it, the other run is recorded as divergent.
    - Fee-on-transfer tokens fail closed for delegated owners (receipt proof needs exact transfer amounts).

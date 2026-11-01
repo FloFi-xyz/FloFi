@@ -46,15 +46,16 @@ const EXACT_EXECUTION = '0x146713078d39ecc1f5338309c28405ccf85abfbb', ANY_DELEGA
 const DELEGATION_ABI: erc7710.AbiType = { tuple: ['address', 'address', 'bytes32', { array: { tuple: ['address', 'bytes', 'bytes'] } }, 'uint256', 'bytes'] };
 const REDEEMED_TOPIC = '0x40dadaa36c6c2e3d7317e24757451ffb2d603d875f0ad5e92c5dd156573b1873';
 /** `redeemDelegations(bytes[] contexts, bytes32[] modes, bytes[] executionCallDatas)` of one single-call (default mode) execution of `target.data`. */
-export function encodeSingleRedemption(context: string, target: string, data: string): string {
+export function encodeSingleRedemption(context: string, target: string, data: string, mode = '0'.repeat(64)): string {
   const w = (n: bigint) => n.toString(16).padStart(64, '0');
   const pad = (hex: string) => hex + '0'.repeat((64 - (hex.length % 64)) % 64);
   const bytesArray = (hex: string) => w(1n) + w(32n) + w(BigInt(hex.length / 2)) + pad(hex);
   const contexts = bytesArray(context.slice(2)), modeOffset = 96 + contexts.length / 2;
-  return '0xcef6d209' + w(96n) + w(BigInt(modeOffset)) + w(BigInt(modeOffset + 64)) + contexts + w(1n) + w(0n) + bytesArray(target.slice(2).toLowerCase() + w(0n) + data.slice(2));
+  return '0xcef6d209' + w(96n) + w(BigInt(modeOffset)) + w(BigInt(modeOffset + 64)) + contexts + w(1n) + mode + bytesArray(target.slice(2).toLowerCase() + w(0n) + data.slice(2));
 }
 export type MockRelay = { readonly relayer: string; /** Logs of another contract the relayed transaction also emits (a shape FloFi must refuse). */ readonly extraLogs?: readonly Record<string, unknown>[];
-  /** false: the owner's delegation has no LimitedCalls(1) caveat, so the relay could redeem it again (a shape FloFi must refuse). */ readonly singleUse?: boolean };
+  /** false: the owner's delegation has no LimitedCalls(1) caveat, so the relay could redeem it again (a shape FloFi must refuse). */ readonly singleUse?: boolean;
+  /** true: the call is redeemed in batch mode (ModeCode CALLTYPE_BATCH), a shape FloFi does not reconcile, although the call still executes. */ readonly batch?: boolean };
 /**
  * The owner's open root delegation as MetaMask's relay redeems it (testdata/metamask-delegated-depth1-approval.base-sepolia.json): any redeemer,
  * LimitedCalls(1) and an exact-execution caveat for `target.data`; returns the `RedeemedDelegation` data and the delegation hash.
@@ -256,7 +257,7 @@ export function createRobinhoodMockChain(catalog: AssetCatalog, options: { reado
     const from = tx.from.toLowerCase(), to = tx.to.toLowerCase(), data = innerData(tx), selector = data.slice(0, 10);
     const relayer = relayed?.relayer.toLowerCase(), sender = relayer ?? from;
     if (relayed && (state.codeOverride.get(from) ?? '0x') !== '0xef0100' + MOCK_DELEGATOR_IMPL.slice(2)) throw new Error('execution reverted: not a DeleGator account');
-    const outer = relayed ? encodeSingleRedemption('0x' + '00'.repeat(64), to, tx.data) : tx.data;
+    const outer = relayed ? encodeSingleRedemption('0x' + '00'.repeat(64), to, tx.data, relayed.batch ? '01' + '0'.repeat(62) : undefined) : tx.data;
     const nonce = state.nonces.get(sender) ?? 0, hash = relayed ? hashOf(sender, nonce, outer) : hashOf(from, nonce, data);
     const logs: Record<string, unknown>[] = [];
     const delegation = relayed ? relayedDelegation(from, to, tx.data, BigInt(nonce) + 1n, relayed.singleUse !== false) : null;

@@ -620,6 +620,30 @@ describe('BUILD-FLOFI-WALLET-UX-EXECUTION-FIX-001 relayed MetaMask Smart Account
     expect(s.load(id).attempts).toHaveLength(1);
   });
 
+  it('a refused or lost attempt that the relay executed in another shape (batch) is recorded, never ignored and never reconciled', async () => {
+    const s = swapService(), id = (await s.prepare(swap(), owner)).quote.executionId, approve = await step(s, id);
+    s.report(id, approve.attempt.attemptId, { kind: 'REJECTED' });
+    chain.relay(approve.tx, { relayer, batch: true });
+    await expect(s.begin(id, owner)).rejects.toThrow('OWNER_STATE_CHANGED_REVIEW_REQUIRED');
+    s.review(id, s.load(id).quote.manifestHash);
+    await expect(s.begin(id, owner)).rejects.toThrow('RECONCILIATION_MISMATCH');
+    expect(s.load(id).divergence).toBe('REJECTED_ATTEMPT_EXECUTED');
+    chain.state.allowances.clear();
+    const r = swapService(), lost = (await r.prepare(swap(), owner)).quote.executionId, approveLost = await step(r, lost);
+    r.report(lost, approveLost.attempt.attemptId, { kind: 'UNKNOWN' });
+    chain.relay(approveLost.tx, { relayer, batch: true });
+    expect(await r.observe(lost)).toMatchObject({ divergence: 'RELAYED_EXECUTION_UNSUPPORTED_SHAPE', outcome: null });
+  });
+
+  it('keeps a relayed receipt pending when the duplicate check cannot cover the whole window (never reconciled on a partial scan)', async () => {
+    const s = swapService(), id = (await s.prepare(swap(), owner)).quote.executionId, approve = await step(s, id);
+    s.report(id, approve.attempt.attemptId, { kind: 'HASH', txHash: chain.relay(approve.tx, { relayer }) });
+    chain.mine(1); chain.state.head += 2_100_000; // observed far later than the bounded scan reaches
+    const pending = await s.observe(id);
+    expect(pending.divergence ?? null).toBeNull();
+    expect(pending.attempts[0]).toMatchObject({ state: 'PENDING', receipt: null });
+  });
+
   it('never accepts a relayed authorization that could be redeemed again, or a reverted relay, and keeps the nonce reservation', async () => {
     const s = swapService(), a = (await s.prepare(swap(), owner)).quote.executionId, approve = await step(s, a);
     s.report(a, approve.attempt.attemptId, { kind: 'HASH', txHash: chain.relay(approve.tx, { relayer, singleUse: false }) });

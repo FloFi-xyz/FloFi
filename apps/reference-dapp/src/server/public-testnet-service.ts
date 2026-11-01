@@ -431,8 +431,12 @@ export async function verifyOwnerSubmission(rpc: Rpc, attempt: { readonly txHash
     /** BUILD-FLOFI-WALLET-UX-EXECUTION-FIX-001: how the reviewed call reached the chain (relayed shapes carry no owner nonce or fee). */
     submission: direct ? 'DIRECT' as const : newlyAuthorized ? 'DELEGATED_NEW_AUTHORIZATION' as const : 'DELEGATED_EXISTING' as const };
 }
-/** Bound of the relayed-submission scan: blocks per `eth_getLogs` request and requests per observation. */
-const RELAY_SCAN_BLOCKS = 5_000, RELAY_SCAN_REQUESTS = 40;
+/**
+ * Bounds of the relayed-submission scan: blocks per `eth_getLogs` request; requests per lost-hash discovery poll (it repeats while unresolved);
+ * requests for the one-off duplicate checks before a receipt becomes evidence or a refused attempt is retried (~5.8 days on Arbitrum One,
+ * ~9 months on Ethereum). A duplicate check that cannot cover the whole window never passes: the attempt stays pending.
+ */
+const RELAY_SCAN_BLOCKS = 5_000, RELAY_SCAN_REQUESTS = 40, RELAY_DUPLICATE_SCAN_REQUESTS = 400;
 /**
  * BUILD-FLOFI-WALLET-UX-EXECUTION-FIX-001: every relayed execution of an attempt's exact reviewed call by this owner since `fromBlock`. A relayed
  * redemption does not use the owner's nonce, so nonce discovery cannot see it; the Delegation Manager's `RedeemedDelegation` logs naming the
@@ -442,12 +446,13 @@ const RELAY_SCAN_BLOCKS = 5_000, RELAY_SCAN_REQUESTS = 40;
  * blocks): `complete` is false when it stopped before the head, and nothing is then assumed about the rest.
  */
 async function relayedExecutions(rpc: Rpc, P: SwapProfile, attempt: Pick<PublicAttempt, 'account' | 'tx'>, fromBlock: number,
-  claimedElsewhere: (txHash: string) => Promise<boolean>): Promise<{ readonly verified: readonly string[]; readonly waiting: boolean; readonly complete: boolean }> {
+  claimedElsewhere: (txHash: string) => Promise<boolean>, maxRequests = RELAY_SCAN_REQUESTS):
+  Promise<{ readonly verified: readonly string[]; readonly unclassified: readonly string[]; readonly waiting: boolean; readonly complete: boolean }> {
   const head = Number(quantity(await rpc('eth_blockNumber', [])));
   if (!Number.isSafeInteger(head) || head < fromBlock) fail('RPC_RESPONSE_INVALID');
   const ownerTopic = '0x' + addrWord(attempt.account), candidates = new Set<string>();
   let from = fromBlock;
-  for (let request = 0; from <= head && request < RELAY_SCAN_REQUESTS; from += RELAY_SCAN_BLOCKS, request++) {
+  for (let request = 0; from <= head && request < maxRequests; from += RELAY_SCAN_BLOCKS, request++) {
     const logs = await rpc('eth_getLogs', [{ address: DELEGATION_MANAGER, topics: [REDEEMED_TOPIC, ownerTopic],
       fromBlock: blockHex(from), toBlock: blockHex(Math.min(head, from + RELAY_SCAN_BLOCKS - 1)) }]);
     if (!Array.isArray(logs)) fail('RPC_RESPONSE_INVALID');
@@ -457,22 +462,26 @@ async function relayedExecutions(rpc: Rpc, P: SwapProfile, attempt: Pick<PublicA
       if (log.removed !== true) candidates.add(hex(log.transactionHash));
     }
   }
-  const verified: string[] = [];
+  const verified: string[] = [], unclassified: string[] = [];
   let waiting = false;
   for (const txHash of candidates) {
     const [tx, raw] = await Promise.all([rpc('eth_getTransactionByHash', [txHash]), rpc('eth_getTransactionReceipt', [txHash])]);
     if (!isObject(raw)) { waiting = true; continue; }
+    if (await claimedElsewhere(txHash)) continue;
     try {
       await verifyOwnerSubmission(rpc, { txHash, account: attempt.account, target: attempt.tx.to, data: attempt.tx.data, preBlock: fromBlock,
         value: attempt.tx.value }, tx, raw, P.chainId, P.l1DataFee);
     } catch (cause) {
-      if (cause instanceof Error && cause.message === 'TRANSACTION_MISMATCH') continue;
       if (cause instanceof Error && cause.message === 'RECEIPT_NOT_CANONICAL') { waiting = true; continue; }
-      throw cause;
+      if (!(cause instanceof Error && cause.message === 'TRANSACTION_MISMATCH')) throw cause;
+      // Not the reconcilable shape, but a successful owner-rooted redemption whose input still carries the reviewed call's exact bytes (for
+      // example the call batched with a fee payment) may have executed it: never ignored, never reconciled.
+      if (Number(quantity(raw.status)) === 1 && isObject(tx) && hex(tx.input).includes(attempt.tx.data.toLowerCase().slice(2))) unclassified.push(txHash);
+      continue;
     }
-    if (!await claimedElsewhere(txHash)) verified.push(txHash);
+    verified.push(txHash);
   }
-  return { verified, waiting, complete: from > head };
+  return { verified, unclassified, waiting, complete: from > head };
 }
 function signed(value: bigint): bigint { return value >= 1n << 255n ? value - (1n << 256n) : value; }
 export function publicRecordingEnabled(env: NodeJS.ProcessEnv): boolean {
@@ -1203,12 +1212,12 @@ function createPublicTestnetCore(rpcFor: (profile: SwapProfile) => Rpc, now: () 
         }
         // BUILD-FLOFI-WALLET-UX-EXECUTION-FIX-001: a wallet refusal is trusted for a new attempt only after checking that no refused attempt of this
         // run reached the chain through a relay (a relayed redemption leaves the owner nonce unchanged, so the nonce check above cannot see it).
-        if (reviewedOwner!.delegation === DELEGATOR_IMPL) {
-          for (const refused of run.attempts.filter(a => a.state === 'REJECTED' && a.txHash === null)) {
-            const scan = await relayedExecutions(rpc, P, refused, refused.preBlock, async txHash => await persistence.claims.holder(P.chainId, txHash) !== null);
-            if (scan.verified.length) { await save({ ...run, divergence: 'REJECTED_ATTEMPT_EXECUTED', reviewedManifestHash: null }); fail('RECONCILIATION_MISMATCH'); }
-            if (scan.waiting) fail('RELAYED_EXECUTION_PENDING');
-          }
+        // (Checked for every refused attempt, not only while the Review still shows the delegation: it may have been cleared since.)
+        for (const refused of run.attempts.filter(a => a.state === 'REJECTED' && a.txHash === null)) {
+          const scan = await relayedExecutions(rpc, P, refused, refused.preBlock, async txHash => await persistence.claims.holder(P.chainId, txHash) !== null,
+            RELAY_DUPLICATE_SCAN_REQUESTS);
+          if (scan.verified.length || scan.unclassified.length) { await save({ ...run, divergence: 'REJECTED_ATTEMPT_EXECUTED', reviewedManifestHash: null }); fail('RECONCILIATION_MISMATCH'); }
+          if (scan.waiting || !scan.complete) fail('RELAYED_EXECUTION_PENDING');
         }
         // BUILD-FLOFI-WALLET-UX-EXECUTION-FIX-001: a reservation whose holder's reserved transaction was verified as relayed (owner nonce unused)
         // is taken over with that evidence; anything else keeps SWAP_NONCE_ALREADY_RESERVED.
@@ -1250,6 +1259,8 @@ function createPublicTestnetCore(rpcFor: (profile: SwapProfile) => Rpc, now: () 
           const scan = run.quote.ownerReview.delegation === DELEGATOR_IMPL ?
             await relayedExecutions(rpcFor(profile), profile, attempt, sameCallFrom(run, attempt), claimedElsewhere(profile, pending)) : null;
           if (scan?.waiting) return run;
+          // The reviewed call executed in a relayed shape FloFi does not reconcile: recorded, never adopted or ignored.
+          if (scan?.unclassified.length) return save({ ...run, divergence: 'RELAYED_EXECUTION_UNSUPPORTED_SHAPE' });
           if (scan && (scan.verified.length > 1 || scan.verified.length === 1 && found.hash && !found.mismatch))
             return save({ ...run, divergence: 'RELAYED_DUPLICATE_EXECUTION' });
           const relayedHash = scan?.verified[0] ?? null, hash = relayedHash ?? found.hash;
@@ -1327,11 +1338,11 @@ function createPublicTestnetCore(rpcFor: (profile: SwapProfile) => Rpc, now: () 
           // execution since the run first prepared this transaction, and (for a relayed receipt) a direct one at the reviewed nonce, are looked
           // for before this receipt becomes evidence; a candidate not yet final keeps the attempt pending.
           if (review.delegation === DELEGATOR_IMPL && status === 1) {
-            const scan = await relayedExecutions(rpc, P, attempt, sameCallFrom(run, attempt), claimedElsewhere(P, attempt));
-            if (scan.waiting) return await save({ ...run, attempts: run.attempts.map(a => a.attemptId === attempt.attemptId ? { ...a, state: 'PENDING' } : a) });
+            const scan = await relayedExecutions(rpc, P, attempt, sameCallFrom(run, attempt), claimedElsewhere(P, attempt), RELAY_DUPLICATE_SCAN_REQUESTS);
+            if (scan.waiting || !scan.complete) return await save({ ...run, attempts: run.attempts.map(a => a.attemptId === attempt.attemptId ? { ...a, state: 'PENDING' } : a) });
             const direct2 = relayed ? await discoverTransferByNonce({ nonce: review.nonce, transaction: { ...attempt.tx, maxFeePerGas: attempt.tx.maxFeePerGas!,
               maxPriorityFeePerGas: attempt.tx.maxPriorityFeePerGas! }, preparedAtBlock: attempt.preBlock, transactionHash: null }, rpc) : null;
-            if (scan.verified.some(hash => hash !== attempt.txHash) || direct2?.hash && !direct2.mismatch)
+            if (scan.verified.some(hash => hash !== attempt.txHash) || scan.unclassified.some(hash => hash !== attempt.txHash) || direct2?.hash && !direct2.mismatch)
               return save({ ...run, divergence: 'RELAYED_DUPLICATE_EXECUTION' });
           }
         }

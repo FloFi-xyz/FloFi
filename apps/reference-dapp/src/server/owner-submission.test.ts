@@ -7,6 +7,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import real from './testdata/metamask-delegated-depth1-approval.base-sepolia.json' with { type: 'json' };
+import { erc7710 } from '@defi-workflow-engine/reference-compiler';
 import { singleUseRelayedDelegation, verifyOwnerSubmission, type Rpc } from './public-testnet-service';
 import { encodeSingleRedemption } from '../../e2e/uniswap-liquidity-harness';
 
@@ -89,5 +90,17 @@ describe('BUILD-FLOFI-WALLET-UX-EXECUTION-FIX-001 single-use relayed delegation,
     expect(singleUseRelayedDelegation([{ ...counted, topics: [...counted.topics.slice(0, 3), '0x' + 'ab'.repeat(32)] }, ...logs.slice(1)], owner, relayer)).toBe(false);
     expect(singleUseRelayedDelegation([{ ...counted, data: '0x' + '0'.repeat(63) + '2' + '0'.repeat(63) + '1' }, ...logs.slice(1)], owner, relayer)).toBe(false);
     expect(singleUseRelayedDelegation(logs.slice(1), owner, relayer)).toBe(false);
+    expect(singleUseRelayedDelegation([counted, ...logs], owner, relayer)).toBe(false); // two LimitedCalls counts
+    expect(singleUseRelayedDelegation([{ ...counted, topics: [counted.topics[0], '0x' + '3'.repeat(64), ...counted.topics.slice(2)] }, ...logs.slice(1)], owner, relayer)).toBe(false); // not counted by the manager
+  });
+  it('refuses a LimitedCalls limit other than one, even when the count log matches that delegation', () => {
+    const type: erc7710.AbiType = { tuple: ['address', 'address', 'bytes32', { array: { tuple: ['address', 'bytes', 'bytes'] } }, 'uint256', 'bytes'] };
+    const redeemed = logs[2] as { data: string }, counted = logs[0] as { topics: string[]; data: string };
+    const [[delegate, delegator, authority, caveats, salt, signature]] = erc7710.abiDecode([type], erc7710.bytesOf(redeemed.data)) as [[string, string, string, [string, string, string][], bigint, string]];
+    const two = caveats.map(([enforcer, terms, args]) => [enforcer, enforcer === '0x04658b29f6b82ed55274221a06fc97d318e25416' ? '0x' + '0'.repeat(63) + '2' : terms, args] as [string, string, string]);
+    const data = erc7710.hexOf(erc7710.abiEncode([type], [[delegate, delegator, authority, two, salt, signature]]));
+    const hash = erc7710.delegationHash({ delegate, delegator, authority, salt, caveats: two.map(([enforcer, terms, args]) => ({ enforcer, terms, args })) });
+    expect(singleUseRelayedDelegation([{ ...counted, topics: [...counted.topics.slice(0, 3), hash], data: '0x' + '0'.repeat(63) + '2' + '0'.repeat(63) + '1' },
+      logs[1], { ...redeemed, data }], owner, relayer)).toBe(false);
   });
 });
