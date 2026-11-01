@@ -14,7 +14,12 @@ import { setActiveNetworkScope } from '../domain/network-scope';
  * projection. The workflow store, wallet, Copilot transport and execution controls are test doubles: nothing is simulated, signed or sent.
  */
 vi.mock('react', async original => ({ ...await original<typeof import('react')>(), ...(await import('../test-utils/hook-harness')).hookMocks }));
-const f = vi.hoisted(() => ({ store: null as unknown as Record<string, unknown>, propose: [] as unknown[], respond: null as null | ((text: string) => Promise<unknown>) }));
+const f = vi.hoisted(() => ({ store: null as unknown as Record<string, unknown>, propose: [] as unknown[], respond: null as null | ((text: string) => Promise<unknown>),
+  floFi: false, canSign: true }));
+// BUILD-FLOFI-EXECUTION-PERFORMANCE-001: the person's FloFi wallet (Privy) readiness, as the Canvas Authorize reads it.
+vi.mock('../wallet/flofi-wallet-channel', () => ({ usesFloFiWallet: () => f.floFi }));
+vi.mock('../accounts/privy-context', () => ({ useFloFiPrivy: () => ({ ready: true, authenticated: true, embedded: [], canSign: () => f.canSign }),
+  floFiPrivyWalletIssue: () => 'FLOFI_WALLET_NOT_READY' }));
 vi.mock('./workflow-store', () => ({ useWorkflow: () => f.store }));
 vi.mock('./build009-wallet-store', () => ({ useBuild009Wallet: () => ({ account: '0x1111111111111111111111111111111111111111' }) }));
 vi.mock('./asset-catalog-store', () => ({ ensureNetworkCatalog: async () => undefined }));
@@ -109,6 +114,22 @@ describe('BUILD-FLOFI-CONVERSATIONAL-001 conversational workflow', () => {
     expect(controls.authorize).toHaveBeenCalledTimes(1);
     expect(last(chat).text).toMatch(/^Preparing your reviewed wallet request: FloFi re-checks the quote, your wallet and its network first. Then confirm or reject it in your wallet; FloFi never signs for you/);
     expect(controls.request).not.toHaveBeenCalled();
+  });
+  it('BUILD-FLOFI-EXECUTION-PERFORMANCE-001: a FloFi wallet that cannot sign in this page stops the chat before any Review is accepted', async () => {
+    f.floFi = true; f.canSign = false;
+    try {
+      let chat = await say('swap 10 USDC to WETH on Base Sepolia slippage 100 bps');
+      chat = await say('Review workflow');
+      reviewedPatch = reviewed(); lifecycle(reviewedPatch); chat = render();
+      chat = await say('Yes, I confirm');
+      chat = await say('Yes, execute');
+      expect(controls.authorize).not.toHaveBeenCalled();
+      expect(last(chat).text).toMatch(/still loading in this page/);
+      // The chat has no Authorize control: it points to the option it offers (Review workflow), never "choose Authorize".
+      expect(last(chat).text).toMatch(/choose Review workflow and confirm again\. Nothing was signed\.$/);
+      expect(last(chat).text).not.toMatch(/Authorize/);
+      expect(controls.request).not.toHaveBeenCalled();
+    } finally { f.floFi = false; f.canSign = true; }
   });
   it('an unclear or negative answer changes nothing; a changed workflow, wallet or expired quote retires the confirmation', async () => {
     await say('swap 10 USDC to WETH on Base Sepolia slippage 100 bps');

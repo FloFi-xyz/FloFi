@@ -22,12 +22,19 @@ export function createBaseSepoliaReadRpc(url: string, methods: readonly string[]
       const text = await response.text();
       if (text.length > 1_048_576) throw new Error('PUBLIC_RPC_RESPONSE_TOO_LARGE');
       const result: unknown = JSON.parse(text);
-      if (result && typeof result === 'object' && 'error' in result && result.error && typeof result.error === 'object' &&
-          'message' in result.error && typeof result.error.message === 'string' &&
-          /missing trie node|historical state (?:is )?(?:unavailable|not available)|state .* is not available/i.test(result.error.message))
-        throw new Error('PUBLIC_RPC_HISTORY_UNAVAILABLE');
-      if (result && typeof result === 'object' && 'error' in result && result.error && typeof result.error === 'object' &&
-          'code' in result.error && [-32005, -32011, -32016, -32603].includes(Number(result.error.code))) throw new Error('PUBLIC_RPC_UNAVAILABLE');
+      const error = result && typeof result === 'object' && 'error' in result && result.error && typeof result.error === 'object'
+        ? result.error as { code?: unknown; message?: unknown } : null;
+      const code = error && 'code' in error ? Number(error.code) : undefined, message = error && typeof error.message === 'string' ? error.message : '';
+      // BUILD-FLOFI-EXECUTION-PERFORMANCE-001: an error carries the node's JSON-RPC code (`rpcErrorCode`) so a caller can tell an answer about the call
+      // from no usable answer; the provider's text never leaves this client. A lagging backend (no such block yet) is missing history, an
+      // explicit revert is an answer (never retried as an outage, whatever code the provider uses for it), and a rate limit reported in the body
+      // is an outage like an HTTP 429.
+      if (error && (/missing trie node|historical state (?:is )?(?:unavailable|not available)|state .* is not available|header not found|unknown block|block not found/i.test(message)))
+        throw Object.assign(new Error('PUBLIC_RPC_HISTORY_UNAVAILABLE'), { rpcErrorCode: code });
+      if (error && (code === 3 || /revert/i.test(message))) throw Object.assign(new Error('PUBLIC_RPC_RESPONSE_INVALID'), { rpcErrorCode: code, rpcReverted: true });
+      if (error && (code === -32005 || code === -32011 || code === -32016 || code === -32603 || code === 429 || /rate limit|too many requests/i.test(message)))
+        throw Object.assign(new Error('PUBLIC_RPC_UNAVAILABLE'), { rpcErrorCode: code });
+      if (error) throw Object.assign(new Error('PUBLIC_RPC_RESPONSE_INVALID'), { rpcErrorCode: code });
       if (!result || typeof result !== 'object' || !('result' in result) || 'error' in result) throw new Error('PUBLIC_RPC_RESPONSE_INVALID');
       return result.result;
     } catch (cause) {
@@ -84,14 +91,25 @@ export function baseSepoliaRpcUrl(override: string | undefined): string {
   return url.href;
 }
 /**
+ * BUILD-FLOFI-EXECUTION-PERFORMANCE-001: a read that got no usable answer from the node — the transport failed (HTTP error, timeout, refused
+ * connection), the node reported a rate, capacity or internal limit, or it does not have the pinned block yet (missing history, a lagging
+ * backend). Distinct from an answer about the call itself (a revert, or another error the node returned for the call: PUBLIC_RPC_RESPONSE_INVALID).
+ */
+export function readNotAnswered(cause: unknown): boolean {
+  return cause instanceof Error && (cause.message === 'PUBLIC_RPC_HISTORY_UNAVAILABLE' || cause.message === 'PUBLIC_RPC_UNAVAILABLE');
+}
+/**
  * Public endpoints rate-limit bursts (public Base answered HTTP 429 "over rate limit" to the router's parallel Review reads
  * during the BUILD-ROUTER-001 preflight). Every router RPC is a read, so calls are paced through one queue per transport and
  * transport failures are retried with backoff. An answer the node gave (including a JSON-RPC error) is never retried.
  */
-export function pacedReadRpc(rpc: Rpc, options: { minIntervalMs?: number; retries?: number; sleep?: (ms: number) => Promise<void> } = {}): Rpc {
+export function pacedReadRpc(rpc: Rpc, options: { minIntervalMs?: number; retries?: number; sleep?: (ms: number) => Promise<void>; maxInFlight?: number } = {}): Rpc {
   // Measured on public Base (2026-10-04): a burst of ~5 eth_call succeeds, then HTTP 429 for several seconds.
   const minIntervalMs = options.minIntervalMs ?? 250, retries = options.retries ?? 6;
   const sleep = options.sleep ?? ((ms: number) => new Promise<void>(resolve => setTimeout(resolve, ms)));
+  const maxInFlight = options.maxInFlight ?? 1;
+  if (!Number.isSafeInteger(maxInFlight) || maxInFlight < 1 || maxInFlight > 8) throw new Error('RPC_PACING_INVALID');
+  if (maxInFlight > 1) return concurrentPacedRpc(rpc, minIntervalMs, retries, sleep, maxInFlight);
   let queue: Promise<unknown> = Promise.resolve(), last = 0;
   return (method, params) => {
     const run = queue.then(async () => {
@@ -109,4 +127,42 @@ export function pacedReadRpc(rpc: Rpc, options: { minIntervalMs?: number; retrie
     queue = run.catch(() => undefined);
     return run;
   };
+}
+/**
+ * BUILD-FLOFI-EXECUTION-PERFORMANCE-001: the dedicated-endpoint variant. Starts stay at least `minIntervalMs` apart, at most `maxInFlight` reads
+ * run at once, and a transport failure pauses every later start for its backoff (the shared pause the one-at-a-time queue gives today). Same
+ * retry rule: only PUBLIC_RPC_UNAVAILABLE is retried; an answer the node gave never is. Reads only; no send method passes through here.
+ */
+function concurrentPacedRpc(rpc: Rpc, minIntervalMs: number, retries: number, sleep: (ms: number) => Promise<void>, maxInFlight: number): Rpc {
+  let last = 0, pausedUntil = 0, active = 0;
+  const waiting: (() => void)[] = [];
+  const acquire = async () => {
+    for (;;) {
+      if (active < maxInFlight) {
+        const wait = Math.max(last + minIntervalMs, pausedUntil) - Date.now();
+        if (wait <= 0) { active++; last = Date.now(); return; }
+        await sleep(wait);
+      } else await new Promise<void>(resolve => waiting.push(resolve));
+    }
+  };
+  const release = () => { active--; waiting.shift()?.(); };
+  return async (method, params) => {
+    for (let attempt = 0; ; attempt++) {
+      await acquire();
+      try { return await rpc(method, params); }
+      catch (cause) {
+        if (!(cause instanceof Error && cause.message === 'PUBLIC_RPC_UNAVAILABLE') || attempt >= retries) throw cause;
+        pausedUntil = Math.max(pausedUntil, Date.now() + 500 * 2 ** attempt);
+      } finally { release(); }
+    }
+  };
+}
+/**
+ * BUILD-FLOFI-EXECUTION-PERFORMANCE-001: read pacing for an operator-configured RPC endpoint. The public endpoints keep the measured
+ * one-at-a-time, 250 ms pacing. `GRYLOO_RPC_READ_PROFILE=dedicated` declares that the operator's endpoints — a configured
+ * `GRYLOO_<NETWORK>_RPC_URL`, the router's fallback URLs and its keyed Alchemy URL — are providers with capacity for parallel reads
+ * (25 ms between starts, at most 6 in flight); it never applies to a public default URL.
+ */
+export function readPacingFor(env: Readonly<Record<string, string | undefined>>, operatorEndpoint: boolean): { minIntervalMs?: number; maxInFlight?: number } {
+  return operatorEndpoint && env.GRYLOO_RPC_READ_PROFILE === 'dedicated' ? { minIntervalMs: 25, maxInFlight: 6 } : {};
 }

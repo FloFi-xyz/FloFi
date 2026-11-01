@@ -8,6 +8,7 @@
  * selects the profile and its own read client; no chain falls back to another. This service never signs or sends.
  */
 import { nitroGasLimit, nitroMaxFeePerGas } from './arbitrum-fees.ts';
+import { readNotAnswered } from './public-testnet-rpc.ts';
 import { createHash, randomBytes } from 'node:crypto';
 import { closeSync, existsSync, fsyncSync, mkdirSync, openSync, readFileSync, readdirSync, renameSync, unlinkSync, writeFileSync } from 'node:fs';
 import { isAbsolute, join } from 'node:path';
@@ -561,7 +562,29 @@ export function validatePublicRunLog(bytes: Uint8Array): void {
  * `provenance` labels quotes and evidence (`MOCKED` for the loopback harness). Code pins may be replaced only by a MOCKED harness.
  */
 export type CatalogSwapRuntime = { readonly catalogFor: (chain: string) => Promise<AssetCatalog>; readonly provenance: 'PUBLIC_MAINNET' | 'MOCKED';
-  readonly codePins?: Partial<Record<string, string>>; readonly executionEnabled: boolean };
+  readonly codePins?: Partial<Record<string, string>>; readonly executionEnabled: boolean;
+  /** BUILD-FLOFI-EXECUTION-PERFORMANCE-001: verified immutable deployment facts; undefined = the process cache on public mainnets, null = off. */
+  readonly deploymentFacts?: DeploymentFactCache | null };
+/**
+ * BUILD-FLOFI-EXECUTION-PERFORMANCE-001: positive verifications of IMMUTABLE deployment facts, remembered per process for a bounded time so a
+ * quote does not re-read them through the paced transport on every keystroke and every Review. Only facts the EVM cannot change once true are
+ * kept: a pinned contract's runtime code (a contract created by CREATE/CREATE2 keeps its code: no SELFDESTRUCT removal since EIP-6780, no
+ * CREATE2 redeploy; an EIP-7702 delegation designator on an account CAN change, so it is never remembered), the immutables compiled into that code
+ * (a router's/quoter's factory and WETH9, a pool's factory/token0/token1/fee), a listed token having code, and a CREATE2 pool having code.
+ * Failures are never remembered. Liquidity, slot0, the quoter's output, token decimals, Stock Token state, the head, balances, nonces, gas and
+ * the reorg check are always read fresh at the quote's pinned block. Keys carry the chain and the expected pin.
+ */
+export type DeploymentFactCache = { readonly has: (key: string, nowMs: number) => boolean; readonly add: (key: string, nowMs: number) => void };
+export function createDeploymentFactCache(ttlMs = 600_000, limit = 1_024): DeploymentFactCache {
+  const verified = new Map<string, number>();
+  return {
+    has: (key, nowMs) => { const at = verified.get(key); if (at === undefined) return false; if (nowMs - at < ttlMs && nowMs >= at) return true; verified.delete(key); return false; },
+    add: (key, nowMs) => { verified.delete(key); verified.set(key, nowMs); while (verified.size > limit) verified.delete(verified.keys().next().value!); },
+  };
+}
+const PUBLIC_DEPLOYMENT_FACTS = createDeploymentFactCache();
+const deploymentFactsOf = (runtime: CatalogSwapRuntime): DeploymentFactCache | null =>
+  runtime.deploymentFacts !== undefined ? runtime.deploymentFacts : runtime.provenance === 'PUBLIC_MAINNET' ? PUBLIC_DEPLOYMENT_FACTS : null;
 const sha256Hex = (code: string) => createHash('sha256').update(Buffer.from(code.slice(2), 'hex')).digest('hex');
 /** One side of a catalog swap: the current official catalog must still map the authored identity exactly. */
 function catalogSide(catalog: AssetCatalog, ref: CatalogAssetRef, side: 'input' | 'output'): CanonicalAsset {
@@ -601,18 +624,25 @@ export function catalogTokenPolicy(P: CatalogSwapProfile, codePins: Partial<Reco
  * catalog's decimals (listing is never authority). Returns the Stock Token state the Review binds, or null for any other asset. Read-only.
  */
 export async function verifyCatalogToken(rpc: Rpc, policy: CatalogTokenPolicy, asset: CanonicalAsset, side: StockQuoteState['side'],
-  block: string, headTime: number, reviewTtlSeconds: number, now: () => Date): Promise<StockQuoteState | null> {
+  block: string, headTime: number, reviewTtlSeconds: number, now: () => Date,
+  facts: { readonly cache: DeploymentFactCache; readonly chainId: number; readonly learn: (key: string) => void } | null = null): Promise<StockQuoteState | null> {
   const call = async (to: string, data: string) => hex(await rpc('eth_call', [{ to, data }, block]));
   const word0 = (value: string) => value.length >= 66 ? BigInt(value.slice(0, 66)) : fail('RPC_RESPONSE_INVALID');
   const addressOf = (value: string) => address('0x' + value.slice(-40));
-  const code = await rpc('eth_getCode', [asset.address, block]);
-  if (typeof code !== 'string' || !/^0x(?:[0-9a-fA-F]{2})*$/.test(code)) fail('RPC_RESPONSE_INVALID');
-  if (code === '0x') fail('CONTRACT_CODE_MISSING');
-  const tokenCode = sha256Hex(code.toLowerCase());
+  // A non-Stock token's code check is an immutable fact (its pinned hash, or for a listed token that code exists); decimals stay a fresh read.
+  const pin = asset.stock ? undefined : policy.pinnedTokens[asset.address!];
+  const factKey = facts && !asset.stock && (pin !== undefined || policy.listedTokens === 'CODE_AND_DECIMALS')
+    ? `${facts.chainId}:token-code:${asset.address!.toLowerCase()}:${pin ?? 'listed'}` : null;
+  const known = factKey !== null && facts!.cache.has(factKey, now().getTime());
+  const code = known ? null : await rpc('eth_getCode', [asset.address, block]);
+  if (!known && (typeof code !== 'string' || !/^0x(?:[0-9a-fA-F]{2})*$/.test(code))) fail('RPC_RESPONSE_INVALID');
+  if (!known && code === '0x') fail('CONTRACT_CODE_MISSING');
+  const tokenCode = known ? null : sha256Hex((code as string).toLowerCase());
   if (BigInt(await call(asset.address!, '0x313ce567')) !== BigInt(asset.decimals)) fail('TOKEN_METADATA_MISMATCH');
   if (!asset.stock) {
-    const pin = policy.pinnedTokens[asset.address!];
-    if (pin !== undefined ? tokenCode !== pin : policy.listedTokens !== 'CODE_AND_DECIMALS') fail('TOKEN_DEPLOYMENT_MISMATCH');
+    if (!known && (pin !== undefined ? tokenCode !== pin : policy.listedTokens !== 'CODE_AND_DECIMALS')) fail('TOKEN_DEPLOYMENT_MISMATCH');
+    // An EIP-7702 delegation designator (`0xef0100‖delegate`) is code an account can later change or clear: never remembered as a fact.
+    if (factKey !== null && !known && !(code as string).toLowerCase().startsWith('0xef0100')) facts!.learn(factKey);
     return null;
   }
   // Every official Stock Token is the same beacon proxy on the official beacon, and reports the registry's uid.
@@ -691,34 +721,62 @@ async function catalogQuote(workflow: SemanticWorkflow, executionId: string, P: 
   const codeAt = async (target: string) => { const value = await rpc('eth_getCode', [target, block]);
     return typeof value === 'string' && /^0x(?:[0-9a-fA-F]{2})*$/.test(value) ? value.toLowerCase() : fail('RPC_RESPONSE_INVALID'); };
   const code = async (target: string) => { const value = await codeAt(target); return value === '0x' ? fail('CONTRACT_CODE_MISSING') : value; };
-  for (const [name, target] of [['factory', P.factory], ['router', P.router], ['quoter', P.quoter]] as const)
+  // BUILD-FLOFI-EXECUTION-PERFORMANCE-001: immutable deployment facts verified earlier in this process are not re-read (see DeploymentFactCache).
+  // Facts verified by this quote are remembered only once its final same-block check passed (a reorged-out deployment is never remembered).
+  const facts = deploymentFactsOf(runtime), factKey = (key: string) => `${P.chainId}:${key}`, verified: string[] = [];
+  const known = (key: string) => facts !== null && facts.has(factKey(key), now().getTime());
+  const learn = (key: string) => { if (facts) verified.push(factKey(key)); };
+  for (const [name, target] of [['factory', P.factory], ['router', P.router], ['quoter', P.quoter]] as const) {
+    const key = `protocol-code:${name}:${target}:${pins[name]}`;
+    if (known(key)) continue;
     if (sha256Hex(await code(target)) !== pins[name]) fail('PROTOCOL_DEPLOYMENT_MISMATCH');
-  for (const target of [P.quoter, P.router])
-    if (addressOf(await call(target, '0xc45a0155', block)) !== P.factory || addressOf(await call(target, '0x4aa4a4fc', block)) !== P.weth) fail('PROTOCOL_DEPLOYMENT_MISMATCH');
+    learn(key);
+  }
+  // A router's and quoter's factory/WETH9 are immutables compiled into their pinned code.
+  const pointers = `protocol-pointers:${P.quoter}:${P.router}:${P.factory}:${P.weth}:${pins.quoter}:${pins.router}`;
+  if (!known(pointers)) {
+    for (const target of [P.quoter, P.router])
+      if (addressOf(await call(target, '0xc45a0155', block)) !== P.factory || addressOf(await call(target, '0x4aa4a4fc', block)) !== P.weth) fail('PROTOCOL_DEPLOYMENT_MISMATCH');
+    learn(pointers);
+  }
   const stocks: StockQuoteState[] = [];
   for (const [side, asset] of [['input', input], ['output', output]] as const) {
     if (asset.kind === 'NATIVE') continue;
-    const stock = await verifyCatalogToken(rpc, policy, asset, side, block, headTime, P.reviewTtlSeconds, now);
+    const stock = await verifyCatalogToken(rpc, policy, asset, side, block, headTime, P.reviewTtlSeconds, now,
+      facts ? { cache: facts, chainId: P.chainId, learn: key => verified.push(key) } : null);
     if (stock) stocks.push(stock);
   }
   // Native ETH travels through the router's WETH9 (the router's own `WETH9()`, checked above): it must carry its pinned code.
-  if (native && sha256Hex(await code(P.weth)) !== pins.weth) fail('TOKEN_DEPLOYMENT_MISMATCH');
-  const amountIn = BigInt(fields.amount), tiers: { fee: number; pool: string; expectedOut: string | null }[] = [];
+  const wethKey = `weth-code:${P.weth}:${pins.weth}`;
+  if (native && !known(wethKey)) { if (sha256Hex(await code(P.weth)) !== pins.weth) fail('TOKEN_DEPLOYMENT_MISMATCH'); learn(wethKey); }
+  const amountIn = BigInt(fields.amount);
   const routeToken = (asset: CanonicalAsset) => asset.kind === 'NATIVE' ? P.weth : asset.address!;
   const inRoute = routeToken(input), outRoute = routeToken(output);
   // Every standard fee tier's canonical pool is derived locally (CREATE2), checked for code and live liquidity, and quoted. A WETH9 conversion has none.
-  for (const tier of kind === 'SWAP' ? P.feeTiers : []) {
+  // The tiers are independent reads at the same pinned block, asked together; a failure is reported in tier order, as when they were sequential.
+  const quoteTier = async (tier: { fee: number }): Promise<{ fee: number; pool: string; expectedOut: string | null }> => {
     const pool = uniswapV3PoolAddress(P.factory, P.poolInitCodeHash, inRoute, outRoute, tier.fee);
-    if (await codeAt(pool) === '0x') { tiers.push({ fee: tier.fee, pool, expectedOut: null }); continue; }
     const [token0, token1] = [inRoute, outRoute].sort();
-    if (addressOf(await call(pool, '0xc45a0155', block)) !== P.factory || addressOf(await call(pool, '0x0dfe1681', block)) !== token0 ||
-        addressOf(await call(pool, '0xd21220a7', block)) !== token1 || BigInt(await call(pool, '0xddca3f43', block)) !== BigInt(tier.fee)) fail('POOL_METADATA_MISMATCH');
-    if (BigInt(await call(pool, '0x1a686502', block)) === 0n || word0(await call(pool, '0x3850c7bd', block)) === 0n) { tiers.push({ fee: tier.fee, pool, expectedOut: null }); continue; }
-    // A tier whose quote reverts (no usable liquidity for this size) is simply not a candidate.
+    // A pool with code keeps it, and its factory/token0/token1/fee are immutables; a missing pool is re-checked every time (it can be created).
+    const poolKey = `pool:${pool}:${P.factory}:${token0}:${token1}:${tier.fee}`;
+    if (!known(poolKey)) {
+      if (await codeAt(pool) === '0x') return { fee: tier.fee, pool, expectedOut: null };
+      if (addressOf(await call(pool, '0xc45a0155', block)) !== P.factory || addressOf(await call(pool, '0x0dfe1681', block)) !== token0 ||
+          addressOf(await call(pool, '0xd21220a7', block)) !== token1 || BigInt(await call(pool, '0xddca3f43', block)) !== BigInt(tier.fee)) fail('POOL_METADATA_MISMATCH');
+      learn(poolKey);
+    }
+    if (BigInt(await call(pool, '0x1a686502', block)) === 0n || word0(await call(pool, '0x3850c7bd', block)) === 0n) return { fee: tier.fee, pool, expectedOut: null };
+    // A tier whose quote reverts (no usable liquidity for this size) is simply not a candidate. BUILD-FLOFI-EXECUTION-PERFORMANCE-001: a read the
+    // node never answered (after the transport's own retries) is not a revert — the tier's price is unknown, so the quote fails closed instead of
+    // silently binding another tier. An explicit revert (code 3, or revert text under any code, -32603 included) still only removes this tier;
+    // a bare -32603 without revert text is an internal error, so it is treated as unanswered (public-testnet-rpc.ts).
     let out: bigint | null;
-    try { out = word0(await call(P.quoter, quoteData(inRoute, outRoute, amountIn, tier.fee), block)); } catch { out = null; }
-    tiers.push({ fee: tier.fee, pool, expectedOut: out && out > 0n ? out.toString() : null });
-  }
+    try { out = word0(await call(P.quoter, quoteData(inRoute, outRoute, amountIn, tier.fee), block)); }
+    catch (cause) { if (readNotAnswered(cause)) throw cause; out = null; }
+    return { fee: tier.fee, pool, expectedOut: out && out > 0n ? out.toString() : null };
+  };
+  const settled = await Promise.allSettled((kind === 'SWAP' ? P.feeTiers : []).map(quoteTier));
+  const tiers = settled.map(result => { if (result.status === 'rejected') throw result.reason; return result.value; });
   // A WETH9 conversion is exactly 1:1 on the WETH9 contract itself (its "pool"); its minimum is the amount.
   const best = kind !== 'SWAP' ? { fee: 0, pool: P.weth, expectedOut: amountIn.toString() }
     : tiers.filter(tier => tier.expectedOut !== null).sort((a, b) => BigInt(b.expectedOut!) > BigInt(a.expectedOut!) ? 1 : BigInt(b.expectedOut!) < BigInt(a.expectedOut!) ? -1 : a.fee - b.fee)[0];
@@ -727,6 +785,7 @@ async function catalogQuote(workflow: SemanticWorkflow, executionId: string, P: 
   if (minimumOut <= 0n) fail('QUOTE_INVALID');
   const sameBlock = await rpc('eth_getBlockByNumber', [block, false]);
   if (!isObject(sameBlock) || sameBlock.hash !== blockHash) fail('QUOTE_BLOCK_REORG');
+  for (const key of verified) facts?.add(key, now().getTime());
   const observedAt = now().toISOString();
   const quoteFields = { executionId, revision: workflow.revision, nodeId: node.nodeId,
     workflowHash: hashArtifactBytes('semantic-workflow', new TextEncoder().encode(JSON.stringify(workflow))), chainId: P.chainId,
@@ -752,11 +811,13 @@ async function bindSwapOwner(q: PublicQuote, rpc: Rpc, ownerValue: string, expir
   if (quantity(await rpc('eth_chainId', [])) !== BigInt(P.chainId)) fail('WRONG_PROVIDER_CHAIN');
   // BUILD-FLOFI-BRIDGE-LIVE-FIX-003: native ETH in is spent from the account's own balance (no allowance); an ERC-20 in keeps its allowance read.
   const nativeIn = q.native === 'INPUT' || q.conversion === 'WRAP', allowanceRead = needsAllowance(q);
+  // BUILD-FLOFI-EXECUTION-PERFORMANCE-001: the owner's native balance at the pinned block is read once (it was read twice for native ETH in).
+  const nativeAt = rpc('eth_getBalance', [account, at]).then(quantity);
   const [nonce, pending, allowed, input, native, gasPrice, code] = await Promise.all([
     rpc('eth_getTransactionCount', [account, at]).then(quantity), rpc('eth_getTransactionCount', [account, 'pending']).then(quantity),
     allowanceRead ? rpc('eth_call', [{ to: q.inputToken, data: allowanceData(account, P) }, at]).then(quantity) : Promise.resolve(BigInt(q.amountIn)),
-    nativeIn ? rpc('eth_getBalance', [account, at]).then(quantity) : rpc('eth_call', [{ to: q.inputToken, data: balanceData(account) }, at]).then(quantity),
-    rpc('eth_getBalance', [account, at]).then(quantity), rpc('eth_gasPrice', []).then(quantity), rpc('eth_getCode', [account, at]),
+    nativeIn ? nativeAt : rpc('eth_call', [{ to: q.inputToken, data: balanceData(account) }, at]).then(quantity),
+    nativeAt, rpc('eth_gasPrice', []).then(quantity), rpc('eth_getCode', [account, at]),
   ]);
   if (code !== '0x') fail('OWNER_NOT_EOA');
   // HOTFIX-WORKFLOW-CONCURRENCY-001: the owner's pending transactions never block a swap. The reviewed transaction carries the nonce the
@@ -936,7 +997,8 @@ function createPublicTestnetCore(rpcFor: (profile: SwapProfile) => Rpc, now: () 
       const head = Number(quantity(await rpc('eth_blockNumber', []))), at = blockHex(head);
       const amountIn = BigInt(run.quote.amountIn), q = run.quote;
       // BUILD-FLOFI-BRIDGE-LIVE-FIX-003: a native side is read as the account's native balance (never as WETH); native ETH in needs no allowance.
-      const nativeBalance = () => rpc('eth_getBalance', [owner, at]).then(quantity);
+      // BUILD-FLOFI-EXECUTION-PERFORMANCE-001: one native-balance read at the pinned block serves every native side and the fee check.
+      const nativeRead = rpc('eth_getBalance', [owner, at]).then(quantity), nativeBalance = () => nativeRead;
       const [inputBefore, outputBefore, allowanceBefore, ethBefore] = await Promise.all([
         q.inputToken === NATIVE_ETH ? nativeBalance() : balance(rpc, q.inputToken, owner, at), q.outputToken === NATIVE_ETH ? nativeBalance() : balance(rpc, q.outputToken, owner, at),
         needsAllowance(q) ? allowance(rpc, P, q.inputToken, owner, at) : Promise.resolve(amountIn), nativeBalance(),
@@ -948,10 +1010,14 @@ function createPublicTestnetCore(rpcFor: (profile: SwapProfile) => Rpc, now: () 
       const data = strict ? reviewedOwner!.transaction.data : step === 'approval' ? approveData(amountIn, P) : main.data;
       const to = step === 'approval' ? q.inputToken : main.to, value = step === 'approval' ? '0x0' : main.value;
       const baseTx = { chainId: P.chainHex, from: owner, to, data, value };
-      const gas = quantity(await rpc('eth_estimateGas', [{ from: owner, to, data, value }]));
-      const gasPrice = quantity(await rpc('eth_gasPrice', []));
+      // BUILD-FLOFI-EXECUTION-PERFORMANCE-001: gas, gas price and (OP Stack) the L1 data fee are independent reads of the same transaction: asked
+      // together, judged in the original order.
       // BUILD-BASE-001: on an OP Stack catalog network the owner also pays the L1 data fee, bounded by the GasPriceOracle (fails closed).
-      const l1Fee = 'gasPriceOracle' in P ? quantity(await rpc('eth_call', [{ to: P.gasPriceOracle, data: '0xf1c7a58b' + word(BigInt((data.length - 2) / 2 + 120)) }, at])) : 0n;
+      const [gasRead, priceRead, l1Read] = await Promise.allSettled([rpc('eth_estimateGas', [{ from: owner, to, data, value }]).then(quantity),
+        rpc('eth_gasPrice', []).then(quantity),
+        'gasPriceOracle' in P ? rpc('eth_call', [{ to: P.gasPriceOracle, data: '0xf1c7a58b' + word(BigInt((data.length - 2) / 2 + 120)) }, at]).then(quantity) : Promise.resolve(0n)]);
+      const settled = <T,>(r: PromiseSettledResult<T>): T => { if (r.status === 'rejected') throw r.reason; return r.value; };
+      const gas = settled(gasRead), gasPrice = settled(priceRead), l1Fee = settled(l1Read);
       // Native ETH in is paid from the same balance as the network fee: the account needs both.
       if (gas <= 0n || gasPrice <= 0n || ethBefore < gas * gasPrice * 2n + l1Fee + BigInt(value)) fail(P.environment === 'MAINNET' ? 'INSUFFICIENT_GAS_FUNDS' : 'INSUFFICIENT_TEST_ETH');
       const tx: Tx = strict ? reviewedOwner!.transaction : { ...baseTx, gas: '0x' + (gas * 12n / 10n).toString(16) };

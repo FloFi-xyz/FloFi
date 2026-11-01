@@ -194,18 +194,28 @@ async function simulateMessage(rpc: SolanaRpc, message: Uint8Array, intent: Jupi
   return { unitsConsumed, logs, owner: owner!, inAccount: inAccount!, outAccount: outAccount! };
 }
 
+/** A settled read's value, or its own failure (callers judge them in the original sequential order). */
+function settledValue<T>(result: PromiseSettledResult<T>): T {
+  if (result.status === 'rejected') throw result.reason;
+  return result.value;
+}
 /** Read-only: Jupiter /build, chain-verified tables, exact v0 message, RPC simulation, review artifacts. Never sends. */
 export async function simulateJupiterSwap(workflow: SemanticWorkflow, ownerInput: string, http: JupiterHttp, rpc: SolanaRpc, now = Date.now()): Promise<JupiterReview> {
   const intent = jupiterIntent(workflow, ownerInput);
-  await verifySolanaCluster(rpc, profile.genesisHash);
   const fetchedAt = new Date(now).toISOString();
-  const parsed = parseJupiterBuild(await http(jupiterBuildQuery(intent)), intent, fetchedAt);
+  // BUILD-FLOFI-EXECUTION-PERFORMANCE-001: the cluster check (one RPC read) and Jupiter's /build (one HTTPS read) are independent, so they run
+  // together; the cluster verdict is still decided first, and nothing from /build is used unless the cluster is mainnet-beta.
+  const [cluster, build] = await Promise.allSettled([verifySolanaCluster(rpc, profile.genesisHash), http(jupiterBuildQuery(intent))]);
+  settledValue(cluster);
+  const parsed = parseJupiterBuild(settledValue(build), intent, fetchedAt);
   const inspection = inspectJupiterInstructions(parsed, intent);
-  const tables = await verifyLookupTables(rpc, parsed.lookupTableAddresses);
-  const pre = await readJupiterBalances(rpc, intent, inspection);
+  // The verified lookup tables, the owner's balances and the latest blockhash are independent reads: asked together, judged in the original order.
+  const [tablesRead, balancesRead, latestRead] = await Promise.allSettled([verifyLookupTables(rpc, parsed.lookupTableAddresses),
+    readJupiterBalances(rpc, intent, inspection), rpc('getLatestBlockhash', [{ commitment: 'confirmed' }])]);
+  const tables = settledValue(tablesRead), pre = settledValue(balancesRead);
   if (inspection.wrappedSolAccount && (intent.input.native ? pre.input : pre.output) !== null) fail('JUPITER_WRAPPED_SOL_ACCOUNT_PRESENT');
   if (!intent.input.native && BigInt(pre.input ?? '0') < BigInt(intent.amount)) fail(`JUPITER_INSUFFICIENT_${intent.input.symbol}`);
-  const latest = rpcContextValue(await rpc('getLatestBlockhash', [{ commitment: 'confirmed' }]));
+  const latest = rpcContextValue(settledValue(latestRead));
   const blockhash = solanaAddress(latest.blockhash), lastValidBlockHeight = latest.lastValidBlockHeight;
   if (!Number.isSafeInteger(lastValidBlockHeight)) fail('SOLANA_RPC_INVALID');
   const compile = (units: number) => serializeMessageV0(compileMessageV0(intent.owner, jupiterInstructions(parsed, units), blockhash, tables));

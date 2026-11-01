@@ -1,0 +1,89 @@
+{
+  "format": "flofi.engineering-skill.v1",
+  "id": "operations/execution",
+  "title": "Wallet authorization, submission, observation and reconciliation",
+  "version": "1.0.0",
+  "networks": [],
+  "protocols": [],
+  "operations": [
+    "execution"
+  ],
+  "domains": [
+    "flofi-wallet-execution",
+    "flofi-workflow",
+    "flofi-security"
+  ],
+  "dependsOn": [
+    "networks/evm-core",
+    "networks/solana"
+  ],
+  "appliesTo": {
+    "paths": [
+      "apps/reference-dapp/src/workflow-runs/*",
+      "apps/reference-dapp/src/server/managed-signing.ts",
+      "apps/reference-dapp/src/app/flofi-wallet-*",
+      "apps/reference-dapp/src/wallet/flofi-privy-signer.ts",
+      "apps/reference-dapp/src/accounts/privy-*",
+      "apps/reference-dapp/src/domain/execution-*",
+      "apps/reference-dapp/src/domain/observation-schedule.ts",
+      "apps/reference-dapp/src/domain/canonical-execution-status.ts",
+      "apps/reference-dapp/src/domain/journey-metrics.ts",
+      "apps/reference-dapp/src/server/journey-telemetry.ts"
+    ],
+    "keywords": [
+      "submission",
+      "reconciliation",
+      "confirmation",
+      "finality",
+      "privy",
+      "signing",
+      "observe",
+      "latency"
+    ]
+  },
+  "capabilities": [
+    {
+      "actionType": "asset.transfer",
+      "adapterId": "evm.native-transfer",
+      "chainId": "eip155:8453"
+    },
+    {
+      "actionType": "asset.swap.exact-input",
+      "adapterId": "jupiter.swap-v2",
+      "chainId": "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp"
+    }
+  ],
+  "sources": [
+    {
+      "url": "https://raw.githubusercontent.com/ethereum/ethereum-org-website/e2b63f9e8a77744a7144a190e1390aeb03def9c8/public/content/developers/docs/transactions/index.md",
+      "publisher": "ethereum.org",
+      "kind": "OFFICIAL_DOCS",
+      "license": "MIT",
+      "status": "VERIFIED",
+      "reviewedRevision": "e2b63f9e8a77744a7144a190e1390aeb03def9c8",
+      "reviewedDigest": "sha256:e3d278593bbec030c72c4f4fc8993475633c6f5e6e799118705d42920d48b574",
+      "reviewedAt": "2026-11-01",
+      "crossCheckedAgainst": [],
+      "notes": "Transaction lifecycle on Ethereum."
+    },
+    {
+      "url": "https://raw.githubusercontent.com/solana-foundation/solana-com/17692a536015f33735432b961ba018cda263e03d/apps/docs/content/docs/en/core/transactions/index.mdx",
+      "publisher": "Solana Foundation",
+      "kind": "OFFICIAL_DOCS",
+      "license": "GPL-3.0",
+      "status": "VERIFIED",
+      "reviewedRevision": "17692a536015f33735432b961ba018cda263e03d",
+      "reviewedDigest": "sha256:cf6bdb35070c77d334492cf82a4d0fbe46083544164c7b13ffc4c1989ffe2ee2",
+      "reviewedAt": "2026-11-01",
+      "crossCheckedAgainst": [],
+      "notes": "Transaction lifecycle and expiry on Solana."
+    }
+  ],
+  "guidance": "SKILL.md",
+  "guidanceDigest": "sha256:0675c60fb57bfe4c17798ba11da119bc8e9d178707e87e3806b8b7c0c48c920d",
+  "reviewIntervalDays": 90,
+  "authority": "ENGINEERING_REFERENCE_ONLY",
+  "performance": [
+    "One attempt per authorization; observation is read-only with a backing-off schedule; only reconciliation completes."
+  ]
+}

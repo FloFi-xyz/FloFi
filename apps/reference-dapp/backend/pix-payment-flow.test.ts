@@ -4,6 +4,9 @@
 import { describe, expect, it } from 'vitest';
 import type { PaymentRecord } from '../src/server/payment-flow-service.ts';
 import { disabledCode, FLOWS, flowMode } from './flows.ts';
+import { canonicalRunLifecycle } from '../src/domain/canonical-execution-status.ts';
+import { projectDashboardRun } from '../src/lib/dashboard/run-mapping.ts';
+import type { DashboardRun } from '../src/lib/dashboard/types.ts';
 
 const flow = FLOWS['pix-payment'];
 const ID = `pay-${'a'.repeat(32)}`, OWNER = '0x1111111111111111111111111111111111111111', HASH = `0x${'ab'.repeat(32)}`;
@@ -51,6 +54,23 @@ describe('pix-payment flow definition', () => {
     expect(inFlight.work.map(item => item.kind)).toEqual(['reconcile']);
     // A divergent source needs a person, not a worker.
     expect(flow.projector(`${ID}.jsonl`, bytes(record({ state: 'UNKNOWN', attempt })))!.run.needsObservation).toBe(false);
+  });
+
+  it('BUILD-FLOFI-EXECUTION-PERFORMANCE-001: an AUTHORIZED payment publishes its source attempt, so no summary reads a wallet request in flight as "nothing was sent"', () => {
+    const summary = (state: string, attemptState: string | null) => flow.projector(`${ID}.jsonl`, bytes(record({ state: state as PaymentRecord['state'],
+      attempt: attemptState ? { ...attempt, state: attemptState, transactionHash: null } as PaymentRecord['attempt'] : null })))!.run;
+    expect(summary('AUTHORIZED', null).status).toBe('AUTHORIZED');
+    expect(summary('AUTHORIZED', 'PREPARED').status).toBe('PREPARED');
+    for (const inFlight of ['SUBMITTING', 'SUBMISSION_RESULT_UNKNOWN']) {
+      const run = summary('AUTHORIZED', inFlight);
+      expect(run.status).toBe(inFlight);
+      // Both readings agree: the MCP lifecycle (with attempts) and the Dashboard list (a summary without attempts).
+      expect(canonicalRunLifecycle(run).status).toBe('INCONCLUSIVE');
+      expect(canonicalRunLifecycle({ ...run, attempts: [] }).status).toBe('INCONCLUSIVE');
+      expect(projectDashboardRun({ ...run, ownerAccount: run.ownerAccount ?? '', workflowId: run.workflowId, createdAt: null, updatedAt: null,
+        errorCode: run.errorCode ?? null, attentionRequired: false } as DashboardRun).status).toBe('Unresolved');
+    }
+    expect(summary('SOURCE_SUBMITTED', 'SUBMITTED').status).toBe('SOURCE_SUBMITTED');
   });
 
   it('exports Evidence only for a settled run', () => {

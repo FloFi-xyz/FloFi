@@ -1,0 +1,72 @@
+{
+  "format": "flofi.engineering-skill.v1",
+  "id": "operations/bridge",
+  "title": "Bridge discovery, settlement and reconciliation",
+  "version": "1.0.0",
+  "networks": [],
+  "protocols": [],
+  "operations": [
+    "bridge"
+  ],
+  "domains": [
+    "flofi-bridge",
+    "flofi-workflow"
+  ],
+  "dependsOn": [],
+  "appliesTo": {
+    "paths": [
+      "apps/reference-dapp/src/server/bridge-*",
+      "apps/reference-dapp/src/server/universal-router/*",
+      "apps/reference-dapp/src/server/router-*",
+      "apps/reference-dapp/src/state/universal-router-store.tsx",
+      "apps/reference-dapp/src/components/universal-bridge-panel.tsx"
+    ],
+    "keywords": [
+      "bridge",
+      "cross-chain",
+      "settlement",
+      "discovery",
+      "fill"
+    ]
+  },
+  "capabilities": [
+    {
+      "actionType": "asset.bridge",
+      "adapterId": "flofi.router.universal",
+      "chainId": "eip155:8453"
+    }
+  ],
+  "sources": [
+    {
+      "url": "https://raw.githubusercontent.com/across-protocol/contracts/b1c4e86225420df5cb8d03042526622aca80fe61/README.md",
+      "publisher": "Across",
+      "kind": "OFFICIAL_SDK",
+      "license": "BUSL-1.1",
+      "status": "VERIFIED",
+      "reviewedRevision": "b1c4e86225420df5cb8d03042526622aca80fe61",
+      "reviewedDigest": "sha256:e6303877e147265ded5964705204f142bc2cd5ac7935e29ce99f51ab82ede872",
+      "reviewedAt": "2026-11-01",
+      "crossCheckedAgainst": [],
+      "notes": "Deposit and fill model."
+    },
+    {
+      "url": "https://raw.githubusercontent.com/relayprotocol/relay-kit/f66fb04e940e938482836822c5a6061f06663419/README.md",
+      "publisher": "Relay",
+      "kind": "OFFICIAL_SDK",
+      "license": "MIT",
+      "status": "VERIFIED",
+      "reviewedRevision": "f66fb04e940e938482836822c5a6061f06663419",
+      "reviewedDigest": "sha256:4a6bee252043e515f5aa1bd440630fb057de6d04cd65e8277d87cad7e92b3b62",
+      "reviewedAt": "2026-11-01",
+      "crossCheckedAgainst": [],
+      "notes": "Relay execution and status."
+    }
+  ],
+  "guidance": "SKILL.md",
+  "guidanceDigest": "sha256:49b84a2bed9d7ef876b7f0eaeb545e48bbf74ae5302eb2c2de54a71903d81808",
+  "reviewIntervalDays": 90,
+  "authority": "ENGINEERING_REFERENCE_ONLY",
+  "performance": [
+    "First verified executable route plus a compare window, bounded deadline, aborted stragglers named as pending; late answers discarded."
+  ]
+}

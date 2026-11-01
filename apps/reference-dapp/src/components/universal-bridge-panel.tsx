@@ -29,11 +29,17 @@ import type { DiscoveryCandidate } from '../server/universal-router/discovery';
 const amountOf = (units: string | null | undefined, decimals: number, symbol: string) => units ? `${formatTokenAmount(units, decimals)} ${symbol}` : '--';
 const short = (account: string) => account.length > 14 ? `${account.slice(0, 6)}…${account.slice(-4)}` : account;
 const LIFECYCLE: readonly RouterPhase[] = ['PREPARED', 'AUTHORIZED', 'SOURCE_SUBMITTED', 'SOURCE_CONFIRMED', 'IN_FLIGHT', 'DESTINATION_OBSERVED', 'RECONCILED'];
+/** A provider still pending when the discovery window closed was not compared: its availability is unknown, never "temporarily unavailable". */
+const notCompared = (result: { readonly completeness?: string; readonly pendingProviders?: readonly string[] }, provider: string) =>
+  result.completeness === 'PARTIAL' && (result.pendingProviders ?? []).includes(provider);
 const STATUS_LABEL: Readonly<Record<DiscoveryCandidate['status'], string>> = { INTERNAL_ERROR: 'Internal quote error', EXECUTABLE: 'Builder verified · simulation and Review still required', LIVE_QUOTE: 'Live quote only', SUPPORTED_BY_PROVIDER: 'Supported, no quote',
   TEMPORARILY_UNAVAILABLE: 'Temporarily unavailable', NO_ROUTE: 'No route', BELOW_MINIMUM: 'Below provider minimum', ABOVE_MAXIMUM: 'Above provider maximum', INSUFFICIENT_LIQUIDITY: 'Insufficient liquidity' };
 const PROVIDER_LABEL: Readonly<Record<string, string>> = { relay: 'Relay', lifi: 'LI.FI', mayan: 'Mayan', across: 'Across' };
 /** User-facing reasons for stable codes; anything else shows the code itself. */
 const REASONS: Readonly<Record<string, string>> = {
+  // BUILD-FLOFI-EXECUTION-PERFORMANCE-001: the discovery window closed before this provider answered; it was not compared.
+  RELAY_DISCOVERY_WINDOW_ELAPSED: 'Did not answer within the comparison window.', LIFI_DISCOVERY_WINDOW_ELAPSED: 'Did not answer within the comparison window.',
+  MAYAN_DISCOVERY_WINDOW_ELAPSED: 'Did not answer within the comparison window.', ACROSS_DISCOVERY_WINDOW_ELAPSED: 'Did not answer within the comparison window.',
   LIFI_BRIDGE_VERIFIER_NOT_IMPLEMENTED: 'FloFi cannot yet verify this bridge\'s transactions independently, so it is shown for comparison only.',
   MAYAN_TRANSACTION_BUILDER_NOT_VERIFIED: 'Mayan transactions are built by its SDK; FloFi has no verified builder yet, so this quote is for comparison only.',
   ACROSS_EXECUTES_ON_CERTIFIED_ROUTER_PAIRS_ONLY: 'Across executes through the certified Router for its USDC/USDG pairs only.',
@@ -184,12 +190,17 @@ function RouteDiscovery() {
   return <section aria-label={tr('Routes found')}>
     <button type="button" disabled={router.busy || !router.available} onClick={() => void router.discover()}>{tr('Find routes')}</button>
     {result && <>
-      <p role="status">{tr('Every provider was asked about this pair. Executable routes are verified by FloFi; others are shown with the reason they cannot be executed.')}</p>
+      {/* BUILD-FLOFI-EXECUTION-PERFORMANCE-001: the provisional note is announced with the result it qualifies (one live region). */}
+      <div role="status">
+        <p>{tr('Every provider was asked about this pair. Executable routes are verified by FloFi; others are shown with the reason they cannot be executed.')}</p>
+        {result.completeness === 'PARTIAL' && <p className="muted" data-discovery="provisional">{tr('Provisional comparison: {0} did not answer in time. Find routes again to compare them.',
+          (result.pendingProviders ?? []).map(p => PROVIDER_LABEL[p] ?? p).join(', '))}</p>}
+      </div>
       {result.quoteSubjects === 'PUBLIC_QUOTE_SUBJECT' && <p className="muted">{tr('Indicative quotes for a public address. Simulate quotes again for your own wallet.')}</p>}
       <table aria-label={tr('Route options')}><thead><tr><th>{tr('Provider')}</th><th>{tr('Bridge')}</th><th>{tr('Status')}</th><th>{tr('Expected')}</th><th>{tr('Minimum')}</th>
         <th>{tr('Time')}</th><th>{tr('Fees')}</th><th>{tr('Note')}</th><th/></tr></thead>
         <tbody>{result.candidates.map((c, i) => <tr key={`${c.provider}-${c.bridge}-${i}`} aria-current={i === result.recommended ? 'true' : undefined}>
-          <td>{PROVIDER_LABEL[c.provider] ?? c.provider}</td><td>{c.bridge}</td><td>{tr(STATUS_LABEL[c.status])}{i === result.recommended ? tr(' · recommended') : ''}</td>
+          <td>{PROVIDER_LABEL[c.provider] ?? c.provider}</td><td>{c.bridge}</td><td>{tr(notCompared(result, c.provider) ? 'Not compared in time' : STATUS_LABEL[c.status])}{i === result.recommended ? tr(' · recommended') : ''}</td>
           <td>{amountOf(c.expectedOutput, d.outputDecimals, d.outputSymbol)}</td><td>{amountOf(c.minimumOutput, d.outputDecimals, d.outputSymbol)}</td>
           <td>{c.estimatedDurationSeconds === null ? '--' : `${c.estimatedDurationSeconds}s`}</td>
           <td>{c.fees.map(f => `${f.label}: ${formatTokenAmount(f.amount, f.decimals)} ${f.symbol}${f.included ? '' : ' (separate)'}`).join('; ') || '--'}</td>

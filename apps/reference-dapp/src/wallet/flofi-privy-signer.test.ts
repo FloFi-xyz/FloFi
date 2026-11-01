@@ -111,3 +111,16 @@ describe('Privy signing behind the reviewed-attempt gate', () => {
     expect(messageGate).toHaveBeenLastCalledWith('solana', solana.address, 'hello');
   });
 });
+
+describe('BUILD-FLOFI-EXECUTION-PERFORMANCE-001 Privy confirmation text', () => {
+  it('states the Review deadline from FloFi\'s server summary, and nothing when there is none', async () => {
+    const { privyReview } = await import('./flofi-privy-signer');
+    const deadline = { ...SUMMARY, flow: 'base-mainnet-transfer', expiresAt: '2026-11-01T12:34:56.000Z' } as Parameters<typeof privyReview>[0];
+    expect(privyReview(deadline, 0).description)
+      .toBe('Base (real funds) · Confirm before 12:34:56 UTC · You send: 0.000000000000000001 ETH · FloFi run ' + evm.signing.runId);
+    // In the person's own clock, with its offset (São Paulo is UTC-3; getTimezoneOffset is positive west of UTC).
+    expect(privyReview(deadline, 180).description).toMatch(/· Confirm before 09:34:56 UTC-03:00 ·/);
+    expect(privyReview(deadline, -330).description).toMatch(/· Confirm before 18:04:56 UTC\+05:30 ·/);
+    expect(privyReview(SUMMARY as Parameters<typeof privyReview>[0]).description).not.toMatch(/Confirm before/);
+  });
+});

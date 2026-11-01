@@ -103,6 +103,26 @@ describe('Jupiter quote parsing (PUBLIC_READ_ONLY recorded responses)', () => {
 });
 
 describe('MOCKED simulation, review binding and signature binding', () => {
+  it('BUILD-FLOFI-EXECUTION-PERFORMANCE-001: /build overlaps the cluster check, a wrong cluster still refuses first, and no beta routing mode is sent', async () => {
+    const env = createMockedSolanaJupiter(), wallet = createMockedSolanaWallet();
+    env.fund(wallet.owner, 2_000_000_000n, { USDC: 50_000_000n });
+    const events: string[] = [], queries: Record<string, string>[] = [];
+    let release: () => void = () => undefined;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    const rpc: typeof env.rpc = async (method, params) => {
+      if (method === 'getGenesisHash') { events.push('genesis:start'); await gate; events.push('genesis:end'); }
+      return env.rpc(method, params);
+    };
+    const http: typeof env.http = async query => { events.push('build'); queries.push(query); release(); return env.http(query); };
+    await simulateJupiterSwap(solanaWorkflow('USDC', 'SOL', '10000000'), wallet.owner, http, rpc, Date.parse('2026-10-01T12:00:00.000Z'));
+    expect(events.slice(0, 3)).toEqual(['genesis:start', 'build', 'genesis:end']);
+    // mode=fast is a documented BETA that skips route splitting and estimates priority fees globally: not enabled for Review (build record §Jupiter).
+    expect(queries.every(q => !('mode' in q))).toBe(true);
+    const wrong: typeof env.rpc = async (method, params) => method === 'getGenesisHash' ? 'EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG' : env.rpc(method, params);
+    await expect(simulateJupiterSwap(solanaWorkflow('USDC', 'SOL', '10000000'), wallet.owner, env.http, wrong)).rejects.toThrow('SOLANA_WRONG_CLUSTER');
+    const failing: typeof env.http = async () => { throw new Error('JUPITER_UNAVAILABLE'); };
+    await expect(simulateJupiterSwap(solanaWorkflow('USDC', 'SOL', '10000000'), wallet.owner, failing, wrong)).rejects.toThrow('SOLANA_WRONG_CLUSTER');
+  });
   async function prepared(from: SolanaTokenSymbol = 'USDC', to: SolanaTokenSymbol = 'SOL', amount = '10000000', options = {}) {
     const env = createMockedSolanaJupiter(options), wallet = createMockedSolanaWallet();
     env.fund(wallet.owner, 2_000_000_000n, { USDC: 50_000_000n });

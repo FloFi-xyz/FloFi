@@ -1,0 +1,73 @@
+{
+  "format": "flofi.engineering-skill.v1",
+  "id": "operations/liquidity",
+  "title": "Concentrated liquidity operations",
+  "version": "1.0.0",
+  "networks": [],
+  "protocols": [],
+  "operations": [
+    "liquidity"
+  ],
+  "domains": [
+    "flofi-liquidity",
+    "flofi-workflow"
+  ],
+  "dependsOn": [],
+  "appliesTo": {
+    "paths": [
+      "apps/reference-dapp/src/server/*liquidity*",
+      "apps/reference-dapp/src/state/*liquidity*"
+    ],
+    "keywords": [
+      "liquidity",
+      "position",
+      "range",
+      "concentrated"
+    ]
+  },
+  "capabilities": [
+    {
+      "actionType": "asset.liquidity.concentrated",
+      "adapterId": "uniswap.v3",
+      "chainId": "eip155:8453"
+    },
+    {
+      "actionType": "asset.liquidity.concentrated",
+      "adapterId": "orca.whirlpools-mainnet-liquidity",
+      "chainId": "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp"
+    }
+  ],
+  "sources": [
+    {
+      "url": "https://raw.githubusercontent.com/orca-so/whirlpools/cc683ec92acb5e7606caa3d8e514d9383e9c7c11/README.md",
+      "publisher": "Orca",
+      "kind": "OFFICIAL_SDK",
+      "license": "LicenseRef-orca-whirlpools",
+      "status": "VERIFIED",
+      "reviewedRevision": "cc683ec92acb5e7606caa3d8e514d9383e9c7c11",
+      "reviewedDigest": "sha256:42e8a0c5d5350e9a441e7a5cc0dd8b062e0d31f2d6fc4440b78a712f11031759",
+      "reviewedAt": "2026-11-01",
+      "crossCheckedAgainst": [],
+      "notes": "Whirlpools positions."
+    },
+    {
+      "url": "https://raw.githubusercontent.com/Uniswap/v3-periphery/24ccf014fe7f81d74a14c1689d6fdf123f280e45/contracts/lens/QuoterV2.sol",
+      "publisher": "Uniswap Labs",
+      "kind": "OFFICIAL_SDK",
+      "license": "GPL-2.0-or-later",
+      "status": "VERIFIED",
+      "reviewedRevision": "24ccf014fe7f81d74a14c1689d6fdf123f280e45",
+      "reviewedDigest": "sha256:7c0a974a98e224b1ec63158bad6c13c73a659dec669dead1fd99a0b0d85418a6",
+      "reviewedAt": "2026-11-01",
+      "crossCheckedAgainst": [],
+      "notes": "V3 pool pricing used by liquidity previews."
+    }
+  ],
+  "guidance": "SKILL.md",
+  "guidanceDigest": "sha256:1e4c0b62dae914e91990f6146974a638bed54079b16ee4cf962a247d231b8e18",
+  "reviewIntervalDays": 90,
+  "authority": "ENGINEERING_REFERENCE_ONLY",
+  "performance": [
+    "Dependent steps wait for the earlier step to be reconciled before their own Review."
+  ]
+}

@@ -252,7 +252,10 @@ export function signerDocument(pathname: string, loaded: string | null): { reado
  * reloaded instead, and renders nothing until then.
  */
 export function FloFiPrivyProvider({ config, accounts = false, children }: { config: PrivyBrowserConfig | null; accounts?: boolean; children: ReactNode }) {
-  const settings = useMemo(() => config ? floFiPrivyConfig(config) : null, [config]);
+  // BUILD-FLOFI-EXECUTION-PERFORMANCE-001: keyed on the configuration's content, not its object identity. A server action that sets a cookie
+  // re-renders the layout with an equal but new `config` object; Privy must not receive new settings (and possibly re-initialise) for it.
+  const configKey = config ? JSON.stringify(config) : null;
+  const settings = useMemo(() => configKey ? floFiPrivyConfig(JSON.parse(configKey) as PrivyBrowserConfig) : null, [configKey]);
   const pathname = usePathname();
   // getServerSnapshot is this page's path (the proxy just served its policy). If the server path still evaluates the
   // client snapshot, Navigation Timing is empty and would leave Privy unmounted in the SSR HTML ("not configured").

@@ -4,22 +4,25 @@
  * route-discovery and status APIs). HTTPS only (loopback for the MOCKED harness), no redirects, no caching, size and time
  * bounds. Provider keys are optional server-side headers and never leave the server.
  */
+/** `signal` (BUILD-FLOFI-EXECUTION-PERFORMANCE-001) is request-scoped cancellation: discovery aborts a provider it no longer waits for. */
+export type UniversalHttpOptions = { readonly signal?: AbortSignal };
 export type UniversalHttp = {
-  readonly get: (url: string, headers?: Readonly<Record<string, string>>) => Promise<unknown>;
-  readonly post: (url: string, body: unknown, headers?: Readonly<Record<string, string>>) => Promise<unknown>;
+  readonly get: (url: string, headers?: Readonly<Record<string, string>>, options?: UniversalHttpOptions) => Promise<unknown>;
+  readonly post: (url: string, body: unknown, headers?: Readonly<Record<string, string>>, options?: UniversalHttpOptions) => Promise<unknown>;
 };
 const fail = (code: string): never => { throw new Error(code); };
 const LIMIT = 4_000_000;
 
 export function createUniversalHttp(fetcher: typeof fetch = fetch, timeoutMs = 20_000): UniversalHttp {
-  async function request(url: string, init: { method: 'GET' | 'POST'; body?: string; headers: Record<string, string> }): Promise<unknown> {
+  async function request(url: string, init: { method: 'GET' | 'POST'; body?: string; headers: Record<string, string>; signal?: AbortSignal }): Promise<unknown> {
     let target: URL;
     try { target = new URL(url); } catch { return fail('UNIVERSAL_PROVIDER_URL_INVALID'); }
     if (target.protocol !== 'https:' && !['127.0.0.1', 'localhost'].includes(target.hostname)) fail('UNIVERSAL_PROVIDER_URL_INVALID');
     let response: Response;
     try {
       response = await fetcher(target, { method: init.method, headers: { Accept: 'application/json', 'User-Agent': 'Flofi/BUILD-CROSSCHAIN-UNIVERSAL-001', ...init.headers },
-        ...init.body !== undefined ? { body: init.body } : {}, cache: 'no-store', redirect: 'error', signal: AbortSignal.timeout(timeoutMs) });
+        ...init.body !== undefined ? { body: init.body } : {}, cache: 'no-store', redirect: 'error',
+        signal: init.signal ? AbortSignal.any([AbortSignal.timeout(timeoutMs), init.signal]) : AbortSignal.timeout(timeoutMs) });
     } catch { return fail('UNIVERSAL_PROVIDER_UNAVAILABLE'); }
     if (response.status === 429) fail('UNIVERSAL_PROVIDER_RATE_LIMITED');
     if (Number(response.headers.get('content-length') ?? '0') > LIMIT) fail('UNIVERSAL_PROVIDER_RESPONSE_TOO_LARGE');
@@ -32,8 +35,9 @@ export function createUniversalHttp(fetcher: typeof fetch = fetch, timeoutMs = 2
     return value;
   }
   return {
-    get: (url, headers = {}) => request(url, { method: 'GET', headers: { ...headers } }),
-    post: (url, body, headers = {}) => request(url, { method: 'POST', body: JSON.stringify(body), headers: { 'Content-Type': 'application/json', ...headers } }),
+    get: (url, headers = {}, options = {}) => request(url, { method: 'GET', headers: { ...headers }, ...options.signal ? { signal: options.signal } : {} }),
+    post: (url, body, headers = {}, options = {}) => request(url, { method: 'POST', body: JSON.stringify(body), headers: { 'Content-Type': 'application/json', ...headers },
+      ...options.signal ? { signal: options.signal } : {} }),
   };
 }
 /** A provider's non-2xx JSON answer, as returned by `createUniversalHttp` (status and body), or null. */

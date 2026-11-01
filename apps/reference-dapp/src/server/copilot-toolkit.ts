@@ -6,8 +6,9 @@
  *   discovery  the platform's read-only universal route discovery (`readBridgeDiscovery`), public quote subjects, nothing persisted
  *   catalogs   the validated official catalogs this deployment enables (`authoringCatalogPreparer`)
  *
- * Channel Core uses the same contracts without route discovery (its boundary admits no flow runtime): its route tools answer
- * ROUTE_DISCOVERY_UNAVAILABLE instead of a substitute. `FLOFI_COPILOT_TOOLS=off` turns tools off everywhere.
+ * Channel Core's own toolkit uses the same contracts without route discovery (its boundary admits no flow runtime): its route tools answer
+ * ROUTE_DISCOVERY_UNAVAILABLE instead of a substitute. The authenticated channel adapters (Telegram, WhatsApp) use `channel-copilot-toolkit.ts`,
+ * which runs the same read-only discovery in-process with the conversational window. `FLOFI_COPILOT_TOOLS=off` turns tools off everywhere.
  */
 import { copilotToolkitOf, copilotToolsEnabled, type CopilotToolkit, type CopilotToolPorts } from '../platform/copilot-tools.ts';
 import { networkScope } from './network-scope.ts';
@@ -19,7 +20,7 @@ type Env = Readonly<Record<string, string | undefined>>;
 export function copilotToolkit(env: Env, ports?: CopilotToolPorts): CopilotToolkit | null {
   if (!copilotToolsEnabled(env)) return null;
   const discover: CopilotToolPorts['discover'] = async request => {
-    try { return await readBridgeDiscovery(request, env); } catch (cause) { return { ok: false, code: cause instanceof Error && /^[A-Z][A-Z0-9_]{2,80}$/.test(cause.message) ? cause.message : 'ROUTE_DISCOVERY_FAILED' }; }
+    try { return await readBridgeDiscovery(request, env, undefined, 'CONVERSATIONAL'); } catch (cause) { return { ok: false, code: cause instanceof Error && /^[A-Z][A-Z0-9_]{2,80}$/.test(cause.message) ? cause.message : 'ROUTE_DISCOVERY_FAILED' }; }
   };
   return copilotToolkitOf(networkScope(env), ports ?? { discover, prepareCatalogs: authoringCatalogPreparer(env) });
 }

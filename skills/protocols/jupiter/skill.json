@@ -1,0 +1,91 @@
+{
+  "format": "flofi.engineering-skill.v1",
+  "id": "protocols/jupiter",
+  "title": "Jupiter Swap API v2 /build",
+  "version": "1.0.0",
+  "networks": [
+    "solana"
+  ],
+  "protocols": [
+    "jupiter"
+  ],
+  "operations": [
+    "swap"
+  ],
+  "domains": [
+    "flofi-swap",
+    "flofi-protocol-integrations"
+  ],
+  "dependsOn": [
+    "networks/solana",
+    "operations/swap"
+  ],
+  "appliesTo": {
+    "paths": [
+      "apps/reference-dapp/src/server/jupiter-*",
+      "packages/reference-compiler/src/jupiter.ts",
+      "packages/reference-reconciler/src/jupiter.ts",
+      "packages/action-registry/src/jupiter-*",
+      "apps/reference-dapp/src/state/jupiter-store.tsx"
+    ],
+    "keywords": [
+      "jupiter",
+      "metis",
+      "swap-v2",
+      "jup.ag",
+      "mode-fast"
+    ]
+  },
+  "capabilities": [
+    {
+      "actionType": "asset.swap.exact-input",
+      "adapterId": "jupiter.swap-v2",
+      "chainId": "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp"
+    }
+  ],
+  "sources": [
+    {
+      "url": "https://raw.githubusercontent.com/jup-ag/docs/acbe70268b8bb985362548e36ac2e76a8ac89631/swap/build/index.mdx",
+      "publisher": "Jupiter",
+      "kind": "OFFICIAL_DOCS",
+      "license": null,
+      "status": "PENDING_VERIFICATION",
+      "reviewedRevision": "acbe70268b8bb985362548e36ac2e76a8ac89631",
+      "reviewedDigest": "sha256:bc95cfcb5a392c2f834afd69e21344c8a0da334f752960fe2bd92ed3f1506b2b",
+      "reviewedAt": "2026-11-01",
+      "crossCheckedAgainst": [],
+      "notes": "GET /swap/v2/build parameters, including mode=fast (BETA). The repository states no licence at this revision: FloFi links and summarises it, never copies it."
+    },
+    {
+      "url": "https://raw.githubusercontent.com/jup-ag/docs/acbe70268b8bb985362548e36ac2e76a8ac89631/swap/advanced/reduce-latency.mdx",
+      "publisher": "Jupiter",
+      "kind": "OFFICIAL_DOCS",
+      "license": null,
+      "status": "PENDING_VERIFICATION",
+      "reviewedRevision": "acbe70268b8bb985362548e36ac2e76a8ac89631",
+      "reviewedDigest": "sha256:2b1e69d12070221f19b687d5bd0307478a69c7e4c5f34a22b1866198808cf321",
+      "reviewedAt": "2026-11-01",
+      "crossCheckedAgainst": [],
+      "notes": "mode=fast: no route splitting, global priority-fee estimate; trade-offs. The repository states no licence at this revision: FloFi links and summarises it, never copies it."
+    },
+    {
+      "url": "https://developers.jup.ag/docs/swap/build",
+      "publisher": "Jupiter",
+      "kind": "OFFICIAL_DOCS",
+      "license": null,
+      "status": "PENDING_VERIFICATION",
+      "reviewedRevision": null,
+      "reviewedDigest": null,
+      "reviewedAt": null,
+      "crossCheckedAgainst": [],
+      "notes": "Published page of the pinned source above; not reachable from the build session."
+    }
+  ],
+  "guidance": "SKILL.md",
+  "guidanceDigest": "sha256:b72e0f651ad1b4fcf5e1ff115ba4222c8a0fcc94f8bdcd9f2cbe2935de5596a3",
+  "reviewIntervalDays": 90,
+  "authority": "ENGINEERING_REFERENCE_ONLY",
+  "performance": [
+    "mode=fast is BETA and trades route quality and fee accuracy for latency: not enabled for Review without a measured comparison and owner decision."
+  ]
+}

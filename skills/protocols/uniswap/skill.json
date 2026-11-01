@@ -1,0 +1,118 @@
+{
+  "format": "flofi.engineering-skill.v1",
+  "id": "protocols/uniswap",
+  "title": "Uniswap V3 on-chain quoting and the Trading API distinction",
+  "version": "1.0.0",
+  "networks": [
+    "evm",
+    "ethereum",
+    "base",
+    "arbitrum-one"
+  ],
+  "protocols": [
+    "uniswap"
+  ],
+  "operations": [
+    "swap",
+    "liquidity"
+  ],
+  "domains": [
+    "flofi-swap",
+    "flofi-liquidity",
+    "flofi-protocol-integrations"
+  ],
+  "dependsOn": [
+    "networks/evm-core",
+    "operations/swap"
+  ],
+  "appliesTo": {
+    "paths": [
+      "apps/reference-dapp/src/server/public-testnet-service.ts",
+      "apps/reference-dapp/src/server/uniswap-*",
+      "packages/action-registry/src/uniswap-*",
+      "packages/reference-compiler/src/*uniswap*"
+    ],
+    "keywords": [
+      "uniswap",
+      "quoterv2",
+      "fee-tier",
+      "routingpreference",
+      "fastest",
+      "best_price",
+      "weth9"
+    ]
+  },
+  "capabilities": [
+    {
+      "actionType": "asset.swap.exact-input",
+      "adapterId": "uniswap.v3",
+      "chainId": "eip155:1"
+    },
+    {
+      "actionType": "asset.swap.exact-input",
+      "adapterId": "uniswap.v3",
+      "chainId": "eip155:8453"
+    },
+    {
+      "actionType": "asset.swap.exact-input",
+      "adapterId": "uniswap.v3",
+      "chainId": "eip155:42161"
+    },
+    {
+      "actionType": "asset.swap.exact-input",
+      "adapterId": "uniswap.v3",
+      "chainId": "eip155:4663"
+    },
+    {
+      "actionType": "asset.liquidity.concentrated",
+      "adapterId": "uniswap.v3",
+      "chainId": "eip155:8453"
+    }
+  ],
+  "sources": [
+    {
+      "url": "https://raw.githubusercontent.com/Uniswap/docs/1c7597d73be0e9a3a4e44aa75b8fb212b40ea136/content/trading/swapping-api/concepts/swap-routing.mdx",
+      "publisher": "Uniswap Labs",
+      "kind": "OFFICIAL_DOCS",
+      "license": "MIT",
+      "status": "VERIFIED",
+      "reviewedRevision": "1c7597d73be0e9a3a4e44aa75b8fb212b40ea136",
+      "reviewedDigest": "sha256:af164a943cb8ac94ac89b80044f6752e57f75f5310fc7e4037dac6262ee6963a",
+      "reviewedAt": "2026-11-01",
+      "crossCheckedAgainst": [],
+      "notes": "Trading API routingPreference BEST_PRICE and FASTEST."
+    },
+    {
+      "url": "https://raw.githubusercontent.com/Uniswap/v3-periphery/24ccf014fe7f81d74a14c1689d6fdf123f280e45/contracts/lens/QuoterV2.sol",
+      "publisher": "Uniswap Labs",
+      "kind": "OFFICIAL_SDK",
+      "license": "GPL-2.0-or-later",
+      "status": "VERIFIED",
+      "reviewedRevision": "24ccf014fe7f81d74a14c1689d6fdf123f280e45",
+      "reviewedDigest": "sha256:7c0a974a98e224b1ec63158bad6c13c73a659dec669dead1fd99a0b0d85418a6",
+      "reviewedAt": "2026-11-01",
+      "crossCheckedAgainst": [],
+      "notes": "QuoterV2 quoteExactInputSingle: simulates the swap, catches its own callback revert and returns the amounts."
+    },
+    {
+      "url": "https://developers.uniswap.org/docs/trading/swapping-api/concepts/swap-routing",
+      "publisher": "Uniswap Labs",
+      "kind": "OFFICIAL_DOCS",
+      "license": null,
+      "status": "PENDING_VERIFICATION",
+      "reviewedRevision": null,
+      "reviewedDigest": null,
+      "reviewedAt": null,
+      "crossCheckedAgainst": [],
+      "notes": "Published page of the pinned source above; not reachable from the build session."
+    }
+  ],
+  "guidance": "SKILL.md",
+  "guidanceDigest": "sha256:84636691f071a9f54440884c2276732863dd63eb03f71e2a803f343fe4c360db",
+  "reviewIntervalDays": 90,
+  "authority": "ENGINEERING_REFERENCE_ONLY",
+  "performance": [
+    "FASTEST/BEST_PRICE are Trading API options, not applicable to FloFi on-chain QuoterV2 quoting.",
+    "Quote fee tiers together; pool immutables and protocol code are cacheable facts; liquidity, slot0 and quotes are not."
+  ]
+}

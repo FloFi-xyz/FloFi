@@ -118,6 +118,26 @@ describe('case 15: route discovery facts and provider failures', () => {
     expect((await runCopilotTool('find_routes', JSON.stringify({ sourceNetwork: 'base', destinationNetwork: 'arbitrum-one', inputAsset: 'usd', outputAsset: null, amount: '1' }), ctx())).outcome)
       .toBe('INPUT_ASSET_FIAT');
   });
+  it('BUILD-FLOFI-EXECUTION-PERFORMANCE-001: a PROVISIONAL comparison names who was not compared, never as unavailable, best or "no route"', async () => {
+    const pendingRelay = { provider: 'relay', bridge: 'relay', status: 'TEMPORARILY_UNAVAILABLE', executableBy: null, expectedOutput: null, minimumOutput: null,
+      estimatedDurationSeconds: null, reason: 'RELAY_DISCOVERY_WINDOW_ELAPSED', fees: [] };
+    const below = { provider: 'across', bridge: 'across', status: 'BELOW_MINIMUM', executableBy: null, expectedOutput: null, minimumOutput: null,
+      estimatedDurationSeconds: null, reason: 'ACROSS_BELOW_MINIMUM', fees: [] };
+    // Across answered BELOW_MINIMUM; Relay (the provider FloFi executes) was still answering when the window closed.
+    const partial = discovery({ status: 'BELOW_MINIMUM', recommended: null, candidates: [below, pendingRelay], completeness: 'PARTIAL', pendingProviders: ['relay'] });
+    const routes = (await runCopilotTool('find_routes', args, ctx({ discover: async () => ({ ok: true, value: partial }) }))).output;
+    expect(routes).toMatchObject({ ok: true, comparison: 'PROVISIONAL', notCompared: ['relay'],
+      candidates: [{ provider: 'across', status: 'BELOW_MINIMUM' }, { provider: 'relay', status: 'NOT_COMPARED_IN_TIME', executable: false }] });
+    const failed = (await runCopilotTool('get_quote', args, ctx({ discover: async () => ({ ok: true, value: partial }) }))).output;
+    expect(failed).toMatchObject({ ok: false, code: 'ROUTE_COMPARISON_INCOMPLETE', status: 'BELOW_MINIMUM', comparison: 'PROVISIONAL', notCompared: ['relay'] });
+    // A recommendation found inside the window is still provisional: the others were not compared against it.
+    const early = discovery({ completeness: 'PARTIAL', pendingProviders: ['lifi'] });
+    expect((await runCopilotTool('get_quote', args, ctx({ discover: async () => ({ ok: true, value: early }) }))).output)
+      .toMatchObject({ ok: true, quote: { provider: 'RELAY' }, comparison: 'PROVISIONAL', notCompared: ['lifi'] });
+    // A complete comparison keeps the provider's own answer and says COMPARED.
+    const complete = (await runCopilotTool('get_quote', args, ctx({ discover: async () => ({ ok: true, value: discovery() }) }))).output;
+    expect(complete).toMatchObject({ ok: true, comparison: 'COMPARED', notCompared: [] });
+  });
   it('the toolkit binds the scope, the card and the ports; Channel Core\'s has no discovery port and says so', async () => {
     const toolkit = copilotToolkitOf('PUBLIC_MAINNET', {});
     expect(toolkit.definitions).toBe(COPILOT_TOOL_DEFINITIONS);

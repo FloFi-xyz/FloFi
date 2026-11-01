@@ -1,0 +1,99 @@
+{
+  "format": "flofi.engineering-skill-registry.v1",
+  "version": "1.0.0",
+  "publishers": {
+    "Jupiter": {
+      "urlPrefixes": [
+        "https://developers.jup.ag/",
+        "https://dev.jup.ag/",
+        "https://raw.githubusercontent.com/jup-ag/"
+      ]
+    },
+    "Uniswap Labs": {
+      "urlPrefixes": [
+        "https://developers.uniswap.org/",
+        "https://docs.uniswap.org/",
+        "https://raw.githubusercontent.com/Uniswap/"
+      ]
+    },
+    "Solana Foundation": {
+      "urlPrefixes": [
+        "https://solana.com/",
+        "https://raw.githubusercontent.com/solana-foundation/"
+      ]
+    },
+    "Offchain Labs": {
+      "urlPrefixes": [
+        "https://docs.arbitrum.io/",
+        "https://raw.githubusercontent.com/OffchainLabs/"
+      ]
+    },
+    "ethereum.org": {
+      "urlPrefixes": [
+        "https://ethereum.org/",
+        "https://raw.githubusercontent.com/ethereum/"
+      ]
+    },
+    "OP Stack": {
+      "urlPrefixes": [
+        "https://specs.optimism.io/",
+        "https://raw.githubusercontent.com/ethereum-optimism/"
+      ]
+    },
+    "Base": {
+      "urlPrefixes": [
+        "https://docs.base.org/",
+        "https://raw.githubusercontent.com/base/"
+      ]
+    },
+    "Aave": {
+      "urlPrefixes": [
+        "https://aave.com/",
+        "https://raw.githubusercontent.com/aave/"
+      ]
+    },
+    "Orca": {
+      "urlPrefixes": [
+        "https://dev.orca.so/",
+        "https://raw.githubusercontent.com/orca-so/"
+      ]
+    },
+    "Across": {
+      "urlPrefixes": [
+        "https://docs.across.to/",
+        "https://raw.githubusercontent.com/across-protocol/"
+      ]
+    },
+    "LI.FI": {
+      "urlPrefixes": [
+        "https://docs.li.fi/",
+        "https://raw.githubusercontent.com/lifinance/"
+      ]
+    },
+    "Relay": {
+      "urlPrefixes": [
+        "https://docs.relay.link/",
+        "https://raw.githubusercontent.com/relayprotocol/"
+      ]
+    }
+  },
+  "skills": [
+    "networks/evm-core",
+    "networks/ethereum",
+    "networks/base",
+    "networks/arbitrum",
+    "networks/solana",
+    "protocols/uniswap",
+    "protocols/jupiter",
+    "protocols/orca",
+    "protocols/aave",
+    "protocols/across",
+    "protocols/lifi",
+    "protocols/relay",
+    "operations/swap",
+    "operations/bridge",
+    "operations/liquidity",
+    "operations/lending",
+    "operations/execution"
+  ]
+}

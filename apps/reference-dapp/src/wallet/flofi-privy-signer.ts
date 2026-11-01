@@ -21,8 +21,18 @@ const fromBase64 = (text: string) => Uint8Array.from(atob(text), char => char.ch
 const toBase64 = (bytes: Uint8Array) => { let text = ''; for (const byte of bytes) text += String.fromCharCode(byte); return btoa(text); };
 const toHex = (bytes: Uint8Array) => Array.from(bytes, byte => byte.toString(16).padStart(2, '0')).join('');
 /** What Privy's confirmation screen states: FloFi's server summary of the reviewed attempt (built from its own Review, never from the page). */
-export function privyReview(summary: SigningSummary): PrivyReview {
-  const lines = [`${summary.network}${summary.realFunds ? ' (real funds)' : ''}`, ...summary.lines.map(line => `${line.label}: ${line.value}`), `FloFi run ${summary.runId}`];
+/** A deadline in the person's own clock with its UTC offset (e.g. "09:34:56 UTC-03:00"; "12:34:56 UTC" at offset 0), never a bare UTC time. */
+export function localDeadline(iso: string, offsetMinutes = new Date(iso).getTimezoneOffset()): string {
+  const east = -offsetMinutes, local = new Date(Date.parse(iso) + east * 60_000).toISOString().slice(11, 19);
+  const pad = (n: number) => String(n).padStart(2, '0'), abs = Math.abs(east);
+  return east === 0 ? `${local} UTC` : `${local} UTC${east > 0 ? '+' : '-'}${pad(Math.floor(abs / 60))}:${pad(abs % 60)}`;
+}
+export function privyReview(summary: SigningSummary, offsetMinutes?: number): PrivyReview {
+  // BUILD-FLOFI-EXECUTION-PERFORMANCE-001: the Review's own deadline, so the person knows how long the confirmation stays valid (a confirmation
+  // after it is refused at broadcast and reconciled, never sent), in their own clock with its offset.
+  const expires = summary.expiresAt && Number.isFinite(Date.parse(summary.expiresAt)) ? `Confirm before ${localDeadline(summary.expiresAt, offsetMinutes)}` : null;
+  const lines = [`${summary.network}${summary.realFunds ? ' (real funds)' : ''}`, ...expires ? [expires] : [], ...summary.lines.map(line => `${line.label}: ${line.value}`),
+    `FloFi run ${summary.runId}`];
   return { title: 'FloFi reviewed strategy', action: summary.action.slice(0, 80), description: lines.join(' · ').slice(0, 600) };
 }
 /** After Privy was asked: a cancel there signed nothing; anything else may have signed. */

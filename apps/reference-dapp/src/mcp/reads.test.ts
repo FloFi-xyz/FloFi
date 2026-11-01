@@ -36,6 +36,8 @@ describe('BUILD-MCP-001 get_execution_status / get_evidence: owner-scoped reads'
     const status = (await session({ env, token: alice.token, runtime }).callTool('get_execution_status', { executionId: 'xroute-' + 'a'.repeat(32) })).output;
     expect(status).toMatchObject({ ok: true, executionId: 'xroute-' + 'a'.repeat(32), flow: 'crosschain-router-testnet', status: 'RECONCILED', provenance: 'PUBLIC_TESTNET',
       owner: A, accessBasis: 'OPERATOR_GRANTED_WALLET', hasEvidence: true });
+    // BUILD-FLOFI-EXECUTION-PERFORMANCE-001: the canonical lifecycle beside the flow's own status (additive; derived from the same recorded facts).
+    expect(status.lifecycle).toEqual({ status: 'RECONCILED', final: true, completed: true });
     expect(status.attempts).toEqual([{ attemptId: 'xroute-' + 'a'.repeat(32) + '.deposit.2', step: 'DEPOSIT', state: 'CONFIRMED', transactionHash: H('9'), reconciled: true,
       preparedAtBlock: '100', updatedAt: '2026-10-06T00:04:00.000Z' }]);
     expect(JSON.stringify(status)).not.toMatch(/tenantSecret|logName|namespace|"nonce"/);

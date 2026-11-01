@@ -1,0 +1,130 @@
+{
+  "format": "flofi.engineering-skill.v1",
+  "id": "networks/solana",
+  "title": "Solana transactions, blockhashes, lookup tables and fees",
+  "version": "1.0.0",
+  "networks": [
+    "solana"
+  ],
+  "protocols": [],
+  "operations": [
+    "execution"
+  ],
+  "domains": [
+    "flofi-wallet-execution",
+    "flofi-protocol-integrations",
+    "flofi-security"
+  ],
+  "dependsOn": [],
+  "appliesTo": {
+    "paths": [
+      "apps/reference-dapp/src/server/solana-*",
+      "packages/reference-compiler/src/solana*",
+      "apps/reference-dapp/src/wallet/flofi-solana-wallet.ts",
+      "apps/reference-dapp/src/state/solana-*",
+      "packages/reference-compiler/src/jupiter.ts"
+    ],
+    "keywords": [
+      "solana",
+      "blockhash",
+      "lookup-table",
+      "priority-fee",
+      "compute-units",
+      "versioned",
+      "lamports"
+    ]
+  },
+  "capabilities": [
+    {
+      "actionType": "asset.transfer",
+      "adapterId": "solana.system-transfer",
+      "chainId": "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp"
+    },
+    {
+      "actionType": "asset.transfer",
+      "adapterId": "solana.spl-transfer",
+      "chainId": "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp"
+    }
+  ],
+  "sources": [
+    {
+      "url": "https://raw.githubusercontent.com/solana-foundation/solana-dev-skill/a265d11fcc1b0cfbbbe9dfe9deda57fd3c210eee/skills/solana-dev/SKILL.md",
+      "publisher": "Solana Foundation",
+      "kind": "OFFICIAL_SKILL",
+      "license": "MIT",
+      "status": "VERIFIED",
+      "reviewedRevision": "a265d11fcc1b0cfbbbe9dfe9deda57fd3c210eee",
+      "reviewedDigest": "sha256:3f6c786b89d523d769052984d732f4f3e0f2fa906baed294eebf58d780df45fb",
+      "reviewedAt": "2026-11-01",
+      "crossCheckedAgainst": [],
+      "notes": "Official Solana Foundation developer skill (reference; never executed)."
+    },
+    {
+      "url": "https://raw.githubusercontent.com/solana-foundation/solana-com/17692a536015f33735432b961ba018cda263e03d/apps/docs/content/docs/en/core/transactions/index.mdx",
+      "publisher": "Solana Foundation",
+      "kind": "OFFICIAL_DOCS",
+      "license": "GPL-3.0",
+      "status": "VERIFIED",
+      "reviewedRevision": "17692a536015f33735432b961ba018cda263e03d",
+      "reviewedDigest": "sha256:cf6bdb35070c77d334492cf82a4d0fbe46083544164c7b13ffc4c1989ffe2ee2",
+      "reviewedAt": "2026-11-01",
+      "crossCheckedAgainst": [],
+      "notes": "Transactions, recent blockhash and expiry."
+    },
+    {
+      "url": "https://raw.githubusercontent.com/solana-foundation/solana-com/17692a536015f33735432b961ba018cda263e03d/apps/docs/content/docs/en/core/transactions/versioned-transactions.mdx",
+      "publisher": "Solana Foundation",
+      "kind": "OFFICIAL_DOCS",
+      "license": "GPL-3.0",
+      "status": "VERIFIED",
+      "reviewedRevision": "17692a536015f33735432b961ba018cda263e03d",
+      "reviewedDigest": "sha256:bac005bce0b74b4375aafc779bd36e966cd0cadfb90bff84c28990760f10e779",
+      "reviewedAt": "2026-11-01",
+      "crossCheckedAgainst": [],
+      "notes": "Versioned (v0) transactions and lookup tables."
+    },
+    {
+      "url": "https://raw.githubusercontent.com/solana-foundation/solana-com/17692a536015f33735432b961ba018cda263e03d/apps/docs/content/docs/en/core/fees/index.mdx",
+      "publisher": "Solana Foundation",
+      "kind": "OFFICIAL_DOCS",
+      "license": "GPL-3.0",
+      "status": "VERIFIED",
+      "reviewedRevision": "17692a536015f33735432b961ba018cda263e03d",
+      "reviewedDigest": "sha256:eb30b05289cf6387e2048caa9f2abd1aabc156e3726417bef9dd446541cb7a71",
+      "reviewedAt": "2026-11-01",
+      "crossCheckedAgainst": [],
+      "notes": "Base fee and prioritization fee."
+    },
+    {
+      "url": "https://raw.githubusercontent.com/solana-foundation/solana-com/17692a536015f33735432b961ba018cda263e03d/apps/docs/content/docs/en/core/fees/compute-budget.mdx",
+      "publisher": "Solana Foundation",
+      "kind": "OFFICIAL_DOCS",
+      "license": "GPL-3.0",
+      "status": "VERIFIED",
+      "reviewedRevision": "17692a536015f33735432b961ba018cda263e03d",
+      "reviewedDigest": "sha256:1abed985b5dd43e53d570240d85d532a1a3967d74aea73e7ee598226d85677a6",
+      "reviewedAt": "2026-11-01",
+      "crossCheckedAgainst": [],
+      "notes": "Compute budget instructions and limits."
+    },
+    {
+      "url": "https://solana.com/skills",
+      "publisher": "Solana Foundation",
+      "kind": "OFFICIAL_SKILL",
+      "license": null,
+      "status": "PENDING_VERIFICATION",
+      "reviewedRevision": null,
+      "reviewedDigest": null,
+      "reviewedAt": null,
+      "crossCheckedAgainst": [],
+      "notes": "Official Solana skills page named by the owner; not reachable from the build session. Its skill is pinned above from the official repository."
+    }
+  ],
+  "guidance": "SKILL.md",
+  "guidanceDigest": "sha256:3ebe6dee987a9a270629d2ba82ec46af655a3b45b9f1e4ec60eb9fb69b7acb31",
+  "reviewIntervalDays": 90,
+  "authority": "ENGINEERING_REFERENCE_ONLY",
+  "performance": [
+    "Overlap the cluster check with provider HTTP; ask lookup tables, balances and blockhash together; judge failures in order."
+  ]
+}

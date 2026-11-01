@@ -1,0 +1,76 @@
+{
+  "format": "flofi.engineering-skill.v1",
+  "id": "networks/base",
+  "title": "Base (OP Stack) mainnet",
+  "version": "1.0.0",
+  "networks": [
+    "base"
+  ],
+  "protocols": [],
+  "operations": [],
+  "domains": [
+    "flofi-protocol-integrations",
+    "flofi-wallet-execution"
+  ],
+  "dependsOn": [
+    "networks/evm-core"
+  ],
+  "appliesTo": {
+    "paths": [
+      "apps/reference-dapp/src/server/*base*",
+      "packages/action-registry/src/*base*"
+    ],
+    "keywords": [
+      "base",
+      "op-stack",
+      "l1-fee",
+      "8453",
+      "gaspriceoracle"
+    ]
+  },
+  "capabilities": [
+    {
+      "actionType": "asset.swap.exact-input",
+      "adapterId": "uniswap.v3",
+      "chainId": "eip155:8453"
+    },
+    {
+      "actionType": "asset.bridge",
+      "adapterId": "flofi.router.universal",
+      "chainId": "eip155:8453"
+    }
+  ],
+  "sources": [
+    {
+      "url": "https://raw.githubusercontent.com/ethereum-optimism/specs/808223dd701a447f79b3249df4ef04523fba13e1/specs/protocol/exec-engine.md",
+      "publisher": "OP Stack",
+      "kind": "OFFICIAL_DOCS",
+      "license": "CC0-1.0",
+      "status": "VERIFIED",
+      "reviewedRevision": "808223dd701a447f79b3249df4ef04523fba13e1",
+      "reviewedDigest": "sha256:24defa0da640dc542c46075aad51776653238e3b4878bf4bdb55128d5479af37",
+      "reviewedAt": "2026-11-01",
+      "crossCheckedAgainst": [],
+      "notes": "OP Stack execution engine: L1 data fee charged on L2 transactions."
+    },
+    {
+      "url": "https://docs.base.org/",
+      "publisher": "Base",
+      "kind": "OFFICIAL_DOCS",
+      "license": null,
+      "status": "PENDING_VERIFICATION",
+      "reviewedRevision": null,
+      "reviewedDigest": null,
+      "reviewedAt": null,
+      "crossCheckedAgainst": [],
+      "notes": "Official site; not reachable from the build session network. Verify, pin and record before relying on it."
+    }
+  ],
+  "guidance": "SKILL.md",
+  "guidanceDigest": "sha256:61c4cec43775ca96870825b52756009d6f3e23a84d7a9498acbfc0ebf2af026d",
+  "reviewIntervalDays": 90,
+  "authority": "ENGINEERING_REFERENCE_ONLY",
+  "performance": [
+    "Review budgets include the L1 data fee read from the GasPriceOracle predeploy; read it together with gas and price."
+  ]
+}

@@ -10,6 +10,7 @@ import { validateArtifact } from '@defi-workflow-engine/workflow-contracts/schem
 import type { CloudRun } from '../server/flow-runtime.ts';
 import type { McpRuntime as EngineRuntime } from '../mcp/runtime.ts';
 import { refuse } from './refusal.ts';
+import { canonicalRunLifecycle } from '../domain/canonical-execution-status.ts';
 
 export type OwnedRun = { readonly run: CloudRun; readonly owner: string };
 type Row = Record<string, unknown>;
@@ -37,7 +38,9 @@ export async function executionStatusView(runtime: EngineRuntime, found: OwnedRu
   const { run, owner } = found;
   const page = await runtime.journal(executionId, owner, journal.after ?? null, journal.limit ?? 25);
   if (!page.ok) return refuse(page.code);
-  return { executionId: run.runId, flow: run.flow, status: run.status, provenance: run.provenance, owner, accessBasis,
+  // BUILD-FLOFI-EXECUTION-PERFORMANCE-001: the canonical lifecycle (domain/canonical-execution-status.ts) beside the flow's own status, so a client
+  // never has to infer completion from a hash or a provider answer; `completed` is true only for a reconciled outcome.
+  return { executionId: run.runId, flow: run.flow, status: run.status, lifecycle: canonicalRunLifecycle(run), provenance: run.provenance, owner, accessBasis,
     ...pickRow(run, ['errorCode', 'needsObservation', 'attentionRequired', 'hasEvidence', 'createdAt', 'updatedAt']),
     attempts: (Array.isArray(run.attempts) ? run.attempts : []).slice(0, 64).map(a => pickRow(a, ['attemptId', 'step', 'state', 'transactionHash', 'reconciled', 'preparedAtBlock', 'updatedAt'])),
     journal: { items: (page.value?.items ?? []).map(e => pickRow(e, ['sequence', 'entryHash', 'level', 'entityId', 'attemptId', 'fromState', 'toState', 'recordedAt'])),

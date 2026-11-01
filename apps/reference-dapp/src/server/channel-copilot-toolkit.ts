@@ -8,7 +8,7 @@
 import { copilotToolkitOf, copilotToolsEnabled, type CopilotToolkit, type CopilotToolPorts } from '../platform/copilot-tools.ts';
 import { networkScope } from './network-scope.ts';
 import { authoringCatalogPreparer } from './authoring-catalogs.ts';
-import { createUniversalDiscovery } from './universal-router/discovery.ts';
+import { CONVERSATIONAL_DISCOVERY_WINDOW, createUniversalDiscovery } from './universal-router/discovery.ts';
 import { createUniversalHttp, type UniversalHttp } from './universal-router/http.ts';
 import { parseDiscoveryRequest } from './universal-router/requests.ts';
 
@@ -18,7 +18,7 @@ const CODE = /^[A-Z][A-Z0-9_]{2,80}$/;
 
 export function channelCopilotToolkit(env: Env, ports: ReadOnlyPorts = {}): CopilotToolkit | null {
   if (!copilotToolsEnabled(env)) return null;
-  const discovery = createUniversalDiscovery({ http: ports.http ?? createUniversalHttp(fetch, 7_000),
+  const discovery = createUniversalDiscovery({ http: ports.http ?? createUniversalHttp(fetch, 7_000), window: CONVERSATIONAL_DISCOVERY_WINDOW,
     keys: { ...env.RELAY_API_KEY ? { relay: env.RELAY_API_KEY } : {}, ...env.LIFI_API_KEY ? { lifi: env.LIFI_API_KEY } : {} } });
   const discover: NonNullable<CopilotToolPorts['discover']> = async request => {
     try {

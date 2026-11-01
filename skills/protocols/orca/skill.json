@@ -1,0 +1,78 @@
+{
+  "format": "flofi.engineering-skill.v1",
+  "id": "protocols/orca",
+  "title": "Orca Whirlpools concentrated liquidity",
+  "version": "1.0.0",
+  "networks": [
+    "solana"
+  ],
+  "protocols": [
+    "orca"
+  ],
+  "operations": [
+    "liquidity",
+    "swap"
+  ],
+  "domains": [
+    "flofi-liquidity",
+    "flofi-protocol-integrations"
+  ],
+  "dependsOn": [
+    "networks/solana",
+    "operations/liquidity"
+  ],
+  "appliesTo": {
+    "paths": [
+      "apps/reference-dapp/src/server/*orca*",
+      "apps/reference-dapp/src/server/solana-liquidity*",
+      "packages/reference-compiler/src/*orca*",
+      "packages/reference-compiler/src/*whirlpool*"
+    ],
+    "keywords": [
+      "orca",
+      "whirlpool",
+      "whirlpools",
+      "tick-array"
+    ]
+  },
+  "capabilities": [
+    {
+      "actionType": "asset.liquidity.concentrated",
+      "adapterId": "orca.whirlpools-mainnet-liquidity",
+      "chainId": "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp"
+    }
+  ],
+  "sources": [
+    {
+      "url": "https://raw.githubusercontent.com/orca-so/whirlpools/cc683ec92acb5e7606caa3d8e514d9383e9c7c11/README.md",
+      "publisher": "Orca",
+      "kind": "OFFICIAL_SDK",
+      "license": "LicenseRef-orca-whirlpools",
+      "status": "VERIFIED",
+      "reviewedRevision": "cc683ec92acb5e7606caa3d8e514d9383e9c7c11",
+      "reviewedDigest": "sha256:42e8a0c5d5350e9a441e7a5cc0dd8b062e0d31f2d6fc4440b78a712f11031759",
+      "reviewedAt": "2026-11-01",
+      "crossCheckedAgainst": [],
+      "notes": "Official Whirlpools program and SDK repository (licence changed in 2025)."
+    },
+    {
+      "url": "https://dev.orca.so/",
+      "publisher": "Orca",
+      "kind": "OFFICIAL_DOCS",
+      "license": null,
+      "status": "PENDING_VERIFICATION",
+      "reviewedRevision": null,
+      "reviewedDigest": null,
+      "reviewedAt": null,
+      "crossCheckedAgainst": [],
+      "notes": "Official site; not reachable from the build session network. Verify, pin and record before relying on it."
+    }
+  ],
+  "guidance": "SKILL.md",
+  "guidanceDigest": "sha256:9c8172f90c719e41dcef2daacbfed13f71ddab1b4e8e0f87f787e0d270da78c4",
+  "reviewIntervalDays": 90,
+  "authority": "ENGINEERING_REFERENCE_ONLY",
+  "performance": [
+    "Read whirlpool, tick arrays and vaults at Review; never reuse a reviewed message after its blockhash expires."
+  ]
+}

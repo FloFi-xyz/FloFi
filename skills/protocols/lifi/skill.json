@@ -1,0 +1,75 @@
+{
+  "format": "flofi.engineering-skill.v1",
+  "id": "protocols/lifi",
+  "title": "LI.FI routing",
+  "version": "1.0.0",
+  "networks": [
+    "evm",
+    "solana"
+  ],
+  "protocols": [
+    "lifi"
+  ],
+  "operations": [
+    "bridge"
+  ],
+  "domains": [
+    "flofi-bridge",
+    "flofi-protocol-integrations"
+  ],
+  "dependsOn": [
+    "operations/bridge"
+  ],
+  "appliesTo": {
+    "paths": [
+      "apps/reference-dapp/src/server/router-providers.ts",
+      "apps/reference-dapp/src/server/universal-router/discovery.ts"
+    ],
+    "keywords": [
+      "lifi",
+      "li.fi",
+      "li.quest",
+      "advanced-routes"
+    ]
+  },
+  "capabilities": [
+    {
+      "actionType": "asset.bridge",
+      "adapterId": "flofi.router",
+      "chainId": "eip155:8453"
+    }
+  ],
+  "sources": [
+    {
+      "url": "https://raw.githubusercontent.com/lifinance/sdk/5c2284c40d9bc694f5923a1379ba0aa04836b4f7/README.md",
+      "publisher": "LI.FI",
+      "kind": "OFFICIAL_SDK",
+      "license": "Apache-2.0",
+      "status": "VERIFIED",
+      "reviewedRevision": "5c2284c40d9bc694f5923a1379ba0aa04836b4f7",
+      "reviewedDigest": "sha256:b7d17fd7e3a6b49633e8f5b2a2dc595aa47127240081f4977c9524dbd44fef19",
+      "reviewedAt": "2026-11-01",
+      "crossCheckedAgainst": [],
+      "notes": "Official LI.FI SDK."
+    },
+    {
+      "url": "https://docs.li.fi/",
+      "publisher": "LI.FI",
+      "kind": "OFFICIAL_DOCS",
+      "license": null,
+      "status": "PENDING_VERIFICATION",
+      "reviewedRevision": null,
+      "reviewedDigest": null,
+      "reviewedAt": null,
+      "crossCheckedAgainst": [],
+      "notes": "Official site; not reachable from the build session network. Verify, pin and record before relying on it."
+    }
+  ],
+  "guidance": "SKILL.md",
+  "guidanceDigest": "sha256:0c5da2556312cf263b2bb0abfc002f0cba6cb4ac678300a462b48b1394190e32",
+  "reviewIntervalDays": 90,
+  "authority": "ENGINEERING_REFERENCE_ONLY",
+  "performance": [
+    "A LI.FI tool name is not verification; non-certified routes stay LIVE_QUOTE."
+  ]
+}

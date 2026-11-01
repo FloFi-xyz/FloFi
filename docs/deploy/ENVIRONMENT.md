@@ -341,6 +341,32 @@ so production needs none of them). The product's own `FLOFI_GOOGLE_CLIENT_*` / `
 this build (Privy replaced them), but a rollback to a version-18 build signs in with them: keep them configured until the rollback window
 closes.
 
+## 5k. Execution performance (BUILD-FLOFI-EXECUTION-PERFORMANCE-001)
+
+All optional; none is required in Production or Preview. Unset is not "the previous behaviour" for all three:
+`GRYLOO_RPC_READ_PROFILE` unset keeps the previous one-at-a-time pacing, but unset `GRYLOO_DEPLOYMENT_FACT_CACHE` turns the new
+deployment-fact cache on, and unset `FLOFI_JOURNEY_TELEMETRY` turns the new journey timing log on. Set them to `off` to opt out.
+
+| Variable | Where | Default | Effect |
+| --- | --- | --- | --- |
+| `GRYLOO_RPC_READ_PROFILE` | web + API | unset (paced: one read at a time, 250 ms apart) | `dedicated`: operator-configured RPC endpoints (`GRYLOO_<NETWORK>_RPC_URL`, router fallback URLs, the keyed Alchemy URL) run up to 6 reads at once, 25 ms apart. Never applies to a public default endpoint. Set it only when those endpoints are keyed providers with capacity for parallel reads. |
+| `GRYLOO_DEPLOYMENT_FACT_CACHE` | web + API | on for live mainnets (10-minute lifetime, per server instance) | `off`: re-verify every immutable deployment fact (pinned contract code, router/quoter immutables, pool immutables) on every Uniswap catalog quote. A fact is cached only after the same-block check; an EIP-7702 delegation is never cached. Economic state (balances, allowances, liquidity, prices, nonces, fees) is always read fresh either way. |
+| `FLOFI_JOURNEY_TELEMETRY` | web | on | Unset or `on` logs; any other value (`off`, `disabled`, a typo) makes `/api/flofi/journey` accept and drop every event, so a misconfigured switch turns logging off, never on. See below. |
+
+`/api/flofi/journey` logs one content-free line per finished journey (`journey.timing`, labelled `CLIENT_REPORTED`) to the existing structured
+log stream: no table, no address, amount, hash, signature, chat text, account or session identifier. It accepts only same-origin posts from a
+signed-in FloFi session. That session cookie is checked cryptographically only (MAC, host, expiry): to keep a database read off every beacon it
+skips the account store's revocation check, so a session revoked by sign-out-everywhere or account deletion can keep sending rate-bounded,
+content-free timings until its cookie expires; the account is used only as an in-memory rate key and is never logged, so erasure is unaffected.
+Bounds per server instance: 60 events per account per 10 minutes, 600 per minute overall, 4 KiB per body, each journey id logged once. The
+line's retention is the log platform's; no legal basis or retention period specific to this stream is recorded yet (owner/counsel decision,
+as for the content-free learning statistics in `docs/security/LEARNING-PRIVACY.md`). `node scripts/journey-latency-report.mjs --environment
+<label>` turns these lines into p50/p95 (at least 20 samples per group) and refuses lines written by another deployment.
+
+Release order for this build: deploy the API (Railway) before the web (Vercel). A newer web against an older API still
+works (chat route discovery falls back to the old call shape), but only the newer API applies the conversational
+discovery window. No migration, schema certificate or credential change is required.
+
 ## 6. Platform-provided (read, never set by hand)
 
 `VERCEL` (`1`: hosted), `VERCEL_ENV` (`production`/`preview`/`development`), `VERCEL_GIT_COMMIT_REF` (Preview tenant derivation),

@@ -29,6 +29,8 @@ export type ConversationCopy = {
   readonly checkingProviders: string;
   // BUILD-FLOFI-BRIDGE-LIVE-FIX-003: honest start wording, provider-side settlement, start refusals and quote-change recovery.
   readonly approvalIfNeeded: string; readonly providerSettles: (steps: string) => string; readonly executionNotStarted: (reason: string) => string;
+  /** BUILD-FLOFI-EXECUTION-PERFORMANCE-001: the chat has no Authorize control, so its not-ready wallet message points to Review workflow. */
+  readonly walletNotReady: string; readonly walletNotReadyToContinue: string;
   readonly quoteMoved: (reason: string) => string; readonly quoteChanges: (changes: string) => string; readonly quoteUnchanged: string;
   readonly confirmUpdated: string; readonly anotherRoute: string; readonly refreshing: string;
 };
@@ -101,6 +103,8 @@ const en: ConversationCopy = {
   approvalIfNeeded: 'A token approval is requested only if your current allowance is still too low when you execute.',
   providerSettles: steps => `Then the provider completes ${steps} on its own: FloFi observes and reconciles it, and your wallet signs nothing for it.`,
   executionNotStarted: reason => `Nothing was sent and no wallet request was opened. ${reason}`,
+  walletNotReady: 'Your FloFi wallet is still loading in this page. Wait a moment, then choose Review workflow and confirm again. Nothing was signed.',
+  walletNotReadyToContinue: 'Your FloFi wallet is still loading in this page. Wait a moment, then choose Continue again. Nothing was signed.',
   quoteMoved: reason => `Nothing was sent. ${reason} I am getting a fresh quote now; you review and confirm it again before anything is signed.`,
   quoteChanges: changes => `The quote changed since your last Review: ${changes}.`,
   quoteUnchanged: 'The fresh quote has the same amounts as your last Review.',
@@ -177,6 +181,8 @@ const pt: ConversationCopy = {
   approvalIfNeeded: 'Uma aprovação de token só é pedida se a sua permissão atual ainda for insuficiente no momento da execução.',
   providerSettles: steps => `Depois, o provedor conclui ${steps} por conta própria: a FloFi observa e reconcilia, e a sua carteira não assina nada para isso.`,
   executionNotStarted: reason => `Nada foi enviado e nenhum pedido foi aberto na carteira. ${reason}`,
+  walletNotReady: 'Sua carteira FloFi ainda está carregando nesta página. Aguarde um momento, escolha Revisar workflow e confirme de novo. Nada foi assinado.',
+  walletNotReadyToContinue: 'Sua carteira FloFi ainda está carregando nesta página. Aguarde um momento e escolha Continuar de novo. Nada foi assinado.',
   quoteMoved: reason => `Nada foi enviado. ${reason} Estou buscando uma nova cotação agora; você revisa e confirma de novo antes de qualquer assinatura.`,
   quoteChanges: changes => `A cotação mudou desde a sua última revisão: ${changes}.`,
   quoteUnchanged: 'A nova cotação tem os mesmos valores da sua última revisão.',

@@ -21,8 +21,10 @@ import { isPristineDraft } from '../domain/initial-workflow';
 import { useProductBootstrap } from './product-bootstrap';
 import { rememberWalletHint } from '../wallet/wallet-hint';
 import { WALLET_RESTORE_TIMEOUT_MS } from './wallet-restore';
-import { bindFloFiSigning } from '../wallet/flofi-wallet-channel';
+import { bindFloFiSigning, usesFloFiWallet } from '../wallet/flofi-wallet-channel';
 import { signingContextOf } from '../wallet/flofi-signing';
+import { observeUntilSettled } from '../domain/observation-schedule';
+import { createJourney, reportJourney, type Journey } from '../domain/journey-metrics';
 
 /**
  * One Solana swap store for both runtimes of the canonical swap. The workflow's cluster selects the runtime:
@@ -36,6 +38,8 @@ const runtimes = {
     review: solanaDevnetReview, invalidate: solanaDevnetInvalidate, begin: solanaDevnetBegin, walletFailure: solanaDevnetWalletFailure, submit: solanaDevnetSubmit,
     observe: solanaDevnetObserve, status: solanaDevnetStatus },
 } as const;
+/** BUILD-FLOFI-EXECUTION-PERFORMANCE-001: the cluster reference a journey timing names (no address or amount). */
+const JOURNEY_CHAIN: Readonly<Record<SolanaNetwork, string>> = { Solana: 'solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp', 'Solana Devnet': 'solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1' };
 const networkOfRecord = (record: JupiterRecord): SolanaNetwork => record.review.chain === ORCA_WHIRLPOOLS_DEVNET.chain ? 'Solana Devnet' : 'Solana';
 const networkOfId = (id: string): SolanaNetwork | null => /^jupiter-[a-f0-9]{32}$/.test(id) ? 'Solana' : /^orca-[a-f0-9]{32}$/.test(id) ? 'Solana Devnet' : null;
 type Store = { record: JupiterRecord | null; owner: string | null; network: SolanaNetwork;
@@ -92,6 +96,11 @@ export function JupiterProvider({ children }: { children: ReactNode }) {
   const latest = useRef(workflow); latest.current = workflow;
   const latestSession = useRef(session); latestSession.current = session;
   const busyRef = useRef(false), operationEpoch = useRef(0);
+  const journeyRef = useRef<Journey | null>(null);
+  // BUILD-FLOFI-EXECUTION-PERFORMANCE-001: the run the page follows by itself (after a refresh or an Execute). A newer simulation or record replaces
+  // it, so an older run's observation never overwrites the newer one on the page or in the recovery pointer.
+  const followed = useRef<string | null>(null), mountedRef = useRef(true), followToken = useRef(0), acceptedSinceMount = useRef(false);
+  useEffect(() => { mountedRef.current = true; return () => { mountedRef.current = false; followed.current = null; }; }, []);
   const authored = workflow.nodes.map(node => solanaSwapDetails(node)).find(Boolean) ?? null;
   // A Solana liquidity position uses the same wallet session as the swap on its own cluster (Devnet or, BUILD-SOLANA-MAINNET-001, mainnet-beta).
   // BUILD-SOLANA-TRANSFER-UX-001: a Solana transfer signs with the same session, on its own cluster.
@@ -100,7 +109,13 @@ export function JupiterProvider({ children }: { children: ReactNode }) {
   const runtime = runtimes[network];
   const pristineRecovery = recovered && isPristineDraft(workflow);
   const retired = Boolean(record && JSON.stringify(record.review.workflow) !== JSON.stringify(workflow) && !pristineRecovery);
-  function accept(value: JupiterRecord) { setRecord(value); try { window.localStorage.setItem(key, JSON.stringify({ id: value.id })); } catch { /* server journal remains authoritative */ } }
+  function accept(value: JupiterRecord) {
+    acceptedSinceMount.current = true;
+    if (followed.current !== null && followed.current !== value.id) followed.current = null;
+    setRecord(value); try { window.localStorage.setItem(key, JSON.stringify({ id: value.id })); } catch { /* server journal remains authoritative */ }
+  }
+  /** An observation of the followed run: applied only while that run is still the page's run. */
+  function acceptFollowed(value: JupiterRecord) { if (followed.current === value.id) accept(value); }
   useEffect(() => {
     let mounted = true;
     for (const name of ['Solana', 'Solana Devnet'] as const)
@@ -109,7 +124,13 @@ export function JupiterProvider({ children }: { children: ReactNode }) {
       const pointer = JSON.parse(window.localStorage.getItem(key) ?? 'null') as { id?: unknown } | null;
       const recoveredNetwork = pointer && typeof pointer.id === 'string' ? networkOfId(pointer.id) : null;
       if (recoveredNetwork && typeof pointer?.id === 'string')
-        runtimes[recoveredNetwork].status(pointer.id).then(result => { if (mounted && result.ok) { setRecord(result.value); setRecovered(true); } }).catch(() => undefined);
+        runtimes[recoveredNetwork].status(pointer.id).then(result => {
+          // A record this page already accepted (a new simulation while the status read was in flight) is never replaced by the recovered one.
+          if (!mounted || !result.ok || acceptedSinceMount.current) return;
+          setRecord(result.value); setRecovered(true);
+          // BUILD-FLOFI-EXECUTION-PERFORMANCE-001: a run that came back with a transaction in flight keeps being followed (read-only), without a click.
+          if (unresolved(result.value)) { followed.current = result.value.id; void poll(result.value.id).catch(() => undefined); }
+        }).catch(() => undefined);
     } catch { setError('JUPITER_RECOVERY_POINTER_INVALID'); }
     return () => { mounted = false; };
   }, []);
@@ -230,22 +251,29 @@ export function JupiterProvider({ children }: { children: ReactNode }) {
     updateWalletPreference({ solanaDisconnected: true }); rememberWalletHint('solana', false); setRestoring(false);
     if (current) await disconnectSolanaWallet(current);
   }
-  async function poll(id: string) {
+  async function poll(id: string, seen?: (value: JupiterRecord) => void) {
     const api = runtimes[networkOfId(id) ?? network];
-    for (let i = 0; i < 30; i++) {
+    // One loop at a time: a newer one (another Check result, an Execute) supersedes this one at its next step.
+    const token = ++followToken.current;
+    followed.current = id;
+    // BUILD-FLOFI-EXECUTION-PERFORMANCE-001: the shared schedule (2 s, then backing off for a few minutes); observe is read-only. It stops when the page
+    // unmounts, another run becomes the page's run, or a newer loop takes over.
+    const active = () => mountedRef.current && followed.current === id && followToken.current === token;
+    await observeUntilSettled(async () => {
       const observed = await api.observe(id); if (!observed.ok) throw new Error(observed.code);
-      accept(observed.value);
-      if (!unresolved(observed.value)) return;
-      await new Promise(resolve => setTimeout(resolve, 2000));
-    }
+      acceptFollowed(observed.value); seen?.(observed.value); return observed.value;
+    }, value => !unresolved(value), { active });
   }
   async function simulate() { await operation(async () => {
     // HOTFIX-WORKFLOW-CONCURRENCY-001: a pending transaction never blocks a new, separate simulation; the earlier run keeps being observed
     // server-side and stays listed in Dashboard.
+    const journey = createJourney({ operation: 'swap', network: JOURNEY_CHAIN[network], provider: 'Jupiter' });
+    journey.mark('review_requested');
     const owner = (await ensureSession()).account.address, snapshot = latest.current;
     const result = await runtime.simulate(snapshot, owner); if (!result.ok) throw new Error(result.code);
     if (latest.current !== snapshot) throw new Error(`${runtime.prefix}_SEMANTIC_REVISION_CHANGED`);
     accept(result.value); setRecovered(false);
+    journey.mark('review_ready'); journeyRef.current = journey;
   }); }
   async function review() { await operation(async () => {
     if (!record || retired) throw new Error(`${runtime.prefix}_SIMULATION_REQUIRED`);
@@ -253,9 +281,15 @@ export function JupiterProvider({ children }: { children: ReactNode }) {
     accept(result.value);
   }); }
   async function execute() { await operation(async () => {
+    const startedAt = performance.now();
     if (!record || retired || record.authorization !== record.review.commitment) throw new Error(`${runtime.prefix}_REVIEW_REQUIRED`);
     const api = runtimes[networkOfRecord(record)];
+    // BUILD-FLOFI-EXECUTION-PERFORMANCE-001: the content-free journey timing (no address, amount, signature or transaction leaves the page).
+    const journey = journeyRef.current ?? createJourney({ operation: 'swap', network: JOURNEY_CHAIN[networkOfRecord(record)], provider: 'Jupiter' });
+    journeyRef.current = null; journey.mark('authorize_clicked', startedAt);
+    const finish = (outcome: Parameters<typeof journey.event>[0]) => reportJourney(journey.event(outcome));
     const current = await ensureSession();
+    journey.describe({ wallet: usesFloFiWallet(current.account.address) ? 'privy-embedded' : 'external' });
     if (current.account.address !== record.review.owner) throw new Error(`${api.prefix}_WRONG_OWNER`);
     // The wallet session must be on the reviewed cluster before any durable attempt exists.
     if (current.chain !== api.walletChain) throw new Error(`${api.prefix}_WRONG_CLUSTER`);
@@ -270,21 +304,41 @@ export function JupiterProvider({ children }: { children: ReactNode }) {
       // The sole owner-signature request, reachable only from the owner's Execute click.
       // BUILD-FLOFI-AUTH-WALLETS-001: FloFi Wallet signs only for the reviewed run it is told about (no effect on any other wallet).
       bindFloFiSigning(current.wallet, signingContextOf(record.id, 'jupiter-swap'));
+      journey.mark('wallet_open');
       signed = await signWithSolanaWallet(current, begin.value.unsignedTransaction, api.prefix, () => {
         if (latestSession.current !== current) throw new Error(`${api.prefix}_WALLET_CHANGED`);
         if (JSON.stringify(latest.current) !== JSON.stringify(snapshot)) throw new Error(`${api.prefix}_SEMANTIC_REVISION_CHANGED`);
       });
     } catch (cause) {
       const failure = cause instanceof Error && new RegExp(`^${api.prefix}_[A-Z_]+$`).test(cause.message) ? cause.message : walletCode(cause, api.prefix);
+      if (journey.has('wallet_open')) { journey.mark('user_decision'); finish(/_WALLET_REJECTED$/.test(failure) ? 'rejected' : 'inconclusive'); }
       const recorded = await api.walletFailure(record.id, { stage: 'SIGN', code: failure, error: bounded(cause) });
       if (recorded.ok) accept(recorded.value);
       throw new Error(failure, { cause });
     } finally { setSigning(false); }
-    const submitted = await api.submit(record.id, signed); if (!submitted.ok) throw new Error(submitted.code);
-    accept(submitted.value);
-    if (submitted.value.attempt?.signature) await poll(record.id);
+    journey.mark('user_decision');
+    const submitted = await api.submit(record.id, signed); if (!submitted.ok) { finish('inconclusive'); throw new Error(submitted.code); }
+    accept(submitted.value); journey.mark('submission');
+    if (submitted.value.attempt?.signature) {
+      journey.mark('hash');
+      // BUILD-FLOFI-EXECUTION-PERFORMANCE-001: followed in the background (read-only), so the page stays usable — a new, separate simulation is
+      // allowed while this one settles — instead of holding the operation lock for the whole observation schedule.
+      void poll(record.id, value => {
+        if (value.attempt && ['CONFIRMED', 'REVERTED'].includes(value.attempt.state)) journey.mark('confirmation');
+        if (value.verdict !== 'PENDING') journey.mark('reconciliation');
+        if (value.verdict !== 'PENDING') finish(value.verdict === 'RECONCILED' ? 'reconciled' : value.attempt?.state === 'REVERTED' ? 'failed' : 'inconclusive');
+      }).catch(cause => { if (mountedRef.current && followed.current === record.id) setError(cause instanceof Error ? cause.message : `${api.prefix}_OPERATION_FAILED`); })
+        .finally(() => { if (!journey.has('reconciliation')) finish('in_progress'); });
+    } else finish('inconclusive');
   }); }
-  async function observe() { await operation(async () => { if (!record) throw new Error(`${runtime.prefix}_RUN_MISSING`); await poll(record.id); }); }
+  // "Check result" observes once under the operation lock, then keeps following in the background (read-only) so the page stays usable.
+  async function observe() { await operation(async () => {
+    if (!record) throw new Error(`${runtime.prefix}_RUN_MISSING`);
+    const id = record.id, api = runtimes[networkOfRecord(record)];
+    const observed = await api.observe(id); if (!observed.ok) throw new Error(observed.code);
+    accept(observed.value);
+    if (unresolved(observed.value)) void poll(id).catch(cause => { if (mountedRef.current && followed.current === id) setError(cause instanceof Error ? cause.message : `${api.prefix}_OPERATION_FAILED`); });
+  }); }
   return <Context.Provider value={{ record, owner: session && session.chain === runtime.walletChain ? session.account.address : null, network, session, codePrefix: runtime.prefix,
     busy, error, retired, recovered, revision, restoring, executionEnabled: enabled[network], walletChain: runtime.walletChain, connect, connectWith, connectWithResult, disconnect, switchCluster, switchClusterTo,
     simulate, review, execute, observe }}>

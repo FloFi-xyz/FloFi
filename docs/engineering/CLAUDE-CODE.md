@@ -60,7 +60,8 @@ Ask the main session, for example: "Review this branch against origin/main with
 the specialists selected by the impact report. Include flofi-workflow for shared
 core and flofi-security for authorization, wallet or identity boundaries; keep at
 most three running. Give each the base, the changed paths, the relevant diff and the
-output of `agent_guard.py domain <name> --base origin/main`." Specialists Read the
+output of `agent_guard.py domain <name> --base origin/main`." The domain report includes a `skills` list (BUILD-FLOFI-EXECUTION-PERFORMANCE-001):
+hand those `SKILL.md` paths to the specialist as well. Specialists Read the
 files they need and return any search, diff or test they want as a request. The main
 session runs those, the focused tests and the normal gates (`pnpm check`, the
 governance suites, applicable PostgreSQL/fork/browser runners), then:

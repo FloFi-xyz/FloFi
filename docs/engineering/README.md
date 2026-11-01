@@ -70,6 +70,15 @@ CLI's intentional HTTP rejection is not an agent/model test. The command fails
 if the installed CLI cannot discover the roles. Verified with Codex 0.163.0.
 Project trust/managed settings can restrict availability; do not weaken them.
 
+## Multichain engineering skills
+
+[skills/](../../skills/README.md) holds versioned network and protocol knowledge (EVM core, Ethereum, Base, Arbitrum,
+Solana; Uniswap, Aave, Jupiter, Orca, Across, LI.FI, Relay; swap, bridge, liquidity, lending and execution). `impact`
+and `domain` list the skills that apply to the changed paths, so the main session hands each read-only specialist the
+`SKILL.md` files to Read with its domain contract. Skills are reference knowledge with recorded, digest-pinned sources;
+they add no agent, no runtime dependency and no financial authority. `check` validates them; `skill_registry.py
+check-upstream --fetch` detects upstream changes and proposes updates for normal review.
+
 ## Maintaining the contract
 
 When adding or moving a maintained file, explicitly update its module's `sources`

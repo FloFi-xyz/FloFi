@@ -1,0 +1,114 @@
+{
+  "format": "flofi.engineering-skill.v1",
+  "id": "networks/arbitrum",
+  "title": "Arbitrum One (Nitro) mainnet",
+  "version": "1.0.0",
+  "networks": [
+    "arbitrum-one"
+  ],
+  "protocols": [],
+  "operations": [],
+  "domains": [
+    "flofi-protocol-integrations",
+    "flofi-wallet-execution"
+  ],
+  "dependsOn": [
+    "networks/evm-core"
+  ],
+  "appliesTo": {
+    "paths": [
+      "apps/reference-dapp/src/server/*arbitrum*",
+      "packages/action-registry/src/*arbitrum*"
+    ],
+    "keywords": [
+      "arbitrum",
+      "nitro",
+      "42161",
+      "l1-pricing"
+    ]
+  },
+  "capabilities": [
+    {
+      "actionType": "asset.swap.exact-input",
+      "adapterId": "uniswap.v3",
+      "chainId": "eip155:42161"
+    },
+    {
+      "actionType": "asset.bridge",
+      "adapterId": "flofi.router",
+      "chainId": "eip155:42161"
+    }
+  ],
+  "sources": [
+    {
+      "url": "https://raw.githubusercontent.com/OffchainLabs/arbitrum-docs/17a932287914386857e397df6b4eaba9ce09f96d/content/docs/how-arbitrum-works/deep-dives/gas-and-fees.mdx",
+      "publisher": "Offchain Labs",
+      "kind": "OFFICIAL_DOCS",
+      "license": null,
+      "status": "PENDING_VERIFICATION",
+      "reviewedRevision": "17a932287914386857e397df6b4eaba9ce09f96d",
+      "reviewedDigest": "sha256:e185303987f4e211b886a80f1e80d8cdd93055a632f0ef870b1259f90fc30250",
+      "reviewedAt": "2026-11-01",
+      "crossCheckedAgainst": [],
+      "notes": "Nitro gas: L2 execution plus L1 posting cost in the estimate. The repository states no licence at this revision: FloFi links and summarises it, never copies it."
+    },
+    {
+      "url": "https://raw.githubusercontent.com/OffchainLabs/arbitrum-docs/17a932287914386857e397df6b4eaba9ce09f96d/content/docs/how-arbitrum-works/reference/finality-and-reorgs.mdx",
+      "publisher": "Offchain Labs",
+      "kind": "OFFICIAL_DOCS",
+      "license": null,
+      "status": "PENDING_VERIFICATION",
+      "reviewedRevision": "17a932287914386857e397df6b4eaba9ce09f96d",
+      "reviewedDigest": "sha256:624822ce7cd4e7ad04076463cd6e6bbfe32ef8ce4dd1cc1b7c0f98752334bf7a",
+      "reviewedAt": "2026-11-01",
+      "crossCheckedAgainst": [],
+      "notes": "Sequencer soft finality versus L1 finality. The repository states no licence at this revision: FloFi links and summarises it, never copies it."
+    },
+    {
+      "url": "https://raw.githubusercontent.com/OffchainLabs/arbitrum-docs/17a932287914386857e397df6b4eaba9ce09f96d/content/docs/arbitrum-essentials/arbitrum-vs-ethereum/block-numbers-and-time.mdx",
+      "publisher": "Offchain Labs",
+      "kind": "OFFICIAL_DOCS",
+      "license": null,
+      "status": "PENDING_VERIFICATION",
+      "reviewedRevision": "17a932287914386857e397df6b4eaba9ce09f96d",
+      "reviewedDigest": "sha256:885177f4e7a409a9619526c764824091cc8fd59315e5f8bc3bce18b095bf780c",
+      "reviewedAt": "2026-11-01",
+      "crossCheckedAgainst": [],
+      "notes": "block.number semantics on Arbitrum. The repository states no licence at this revision: FloFi links and summarises it, never copies it."
+    },
+    {
+      "url": "https://docs.arbitrum.io/",
+      "publisher": "Offchain Labs",
+      "kind": "OFFICIAL_DOCS",
+      "license": null,
+      "status": "PENDING_VERIFICATION",
+      "reviewedRevision": null,
+      "reviewedDigest": null,
+      "reviewedAt": null,
+      "crossCheckedAgainst": [],
+      "notes": "Official site; not reachable from the build session network. Verify, pin and record before relying on it."
+    },
+    {
+      "url": "https://skills.rest/skill/arbitrum-defi-guide",
+      "publisher": "skills.rest (third party)",
+      "kind": "THIRD_PARTY",
+      "license": null,
+      "status": "PENDING_VERIFICATION",
+      "reviewedRevision": null,
+      "reviewedDigest": null,
+      "reviewedAt": null,
+      "crossCheckedAgainst": [
+        "https://raw.githubusercontent.com/OffchainLabs/arbitrum-docs/17a932287914386857e397df6b4eaba9ce09f96d/content/docs/how-arbitrum-works/deep-dives/gas-and-fees.mdx",
+        "https://raw.githubusercontent.com/OffchainLabs/arbitrum-docs/17a932287914386857e397df6b4eaba9ce09f96d/content/docs/how-arbitrum-works/reference/finality-and-reorgs.mdx"
+      ],
+      "notes": "Third-party guide named by the owner. Not official and not reachable from the build session; never loaded as guidance until every claim is cross-checked against the official Arbitrum documentation listed here."
+    }
+  ],
+  "guidance": "SKILL.md",
+  "guidanceDigest": "sha256:156685cf43acdb73a37eb78c187f28658436b04fe683469015745beb7e92c46d",
+  "reviewIntervalDays": 90,
+  "authority": "ENGINEERING_REFERENCE_ONLY",
+  "performance": [
+    "Nitro estimates include posting gas: bound them with nitroGasLimit and nitroMaxFeePerGas, never an OP-style L1 fee."
+  ]
+}
