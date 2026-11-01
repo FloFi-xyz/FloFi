@@ -1,7 +1,8 @@
 # BUILD-FLOFI-EXECUTION-PERFORMANCE-001 — End-to-end transaction acceleration and multichain engineering skills
 
-**Status:** ready for owner review. PR: [FloFi-xyz/FloFi#148](https://github.com/FloFi-xyz/FloFi/pull/148), stacked on #146. Nothing is merged, deployed or configured, and no production database, credential or
-real-money transaction was touched.
+**Status:** ready for owner review. PR: [FloFi-xyz/FloFi#148](https://github.com/FloFi-xyz/FloFi/pull/148), now based on `main` after PRs #146 and #147
+were merged (integration in §1a). Nothing is merged, deployed or configured, and no production database, credential or real-money transaction was
+touched.
 
 ## 1. Baseline
 
@@ -11,7 +12,7 @@ real-money transaction was touched.
 | Dependency | PR #146 BUILD-FLOFI-PRIVY-UX-001, **open, not merged** at implementation |
 | PR #146 head used | `ea4099eab4aff5339281d0841e98b20c76ddad5f` (newer than the prompt's historical `9dc8d23e`) |
 | This branch | `claude/build-flofi-execution-performance-001`, stacked on PR #146; PR #146 and its branch are unchanged |
-| Toolchain | Node **24.21.0** (official binary, SHA-256 checked) for the gates, pnpm 11.22.0, Anvil 1.8.3 (publisher digest verified), PostgreSQL 16 loopback |
+| Toolchain | Node **24.21.0** (official binary, SHA-256 checked) for the gates, pnpm 11.22.0, Anvil 1.8.3 (publisher digest verified); PostgreSQL 16 loopback at first, then **PostgreSQL 18.6** from CI's exact image digest for the integration (§1a, §6) |
 
 The session was assigned the branch `claude/wonderful-shannon-nacbbz`, which is PR #146's own head branch. The owner's
 instruction was to leave PR #146 and its branch unchanged and use a separate stacked branch, so all work is on
@@ -28,6 +29,27 @@ Agent procedure: `agent_guard.py check` passed at baseline. `agent_guard.py impa
 - selects all 19 domains, because `coverage.json` changed (a governance change);
 - reports no unmapped file;
 - selects 10 skills (§8).
+
+## 1a. Integration with `main` (after PRs #146 and #147 merged)
+
+| Item | Value |
+| --- | --- |
+| `main` at integration | `c9aa047f8cca67c80595a2b56d492577ee2f1130` (PR #146 and PR #147 merged) |
+| PR #148 head before | `bb6a434c` (stacked on the pre-merge Privy branch; GitHub reported conflicts and a failed `certification-checks`) |
+| Method | `git merge --no-ff origin/main` (merge commit `dbaab3c7`); no rebase, no force-push, published history unchanged; PR retargeted to `main` |
+| Diff vs `main` afterwards | only this build's files; nothing from #146/#147 recreated, duplicated or reverted |
+
+**Conflicts and how they were resolved.**
+- `accounts/privy-client.tsx`: kept `main`'s `FloFiPrivyProvider` (signer-document gating, `usePathname`, `useSyncExternalStore`, reload), and added
+  only this build's content-keyed memo of the Privy settings. The signing gate, `showWalletUIs: true`, signer-origin isolation, CSP, schema-19
+  compatibility, account isolation, exact-byte signing and wallet authorization are unchanged.
+- `docs/engineering/coverage.json` / `COVERAGE.md`: rebuilt from `main` plus this build's suites, modules and sources; `COVERAGE.md` regenerated.
+
+**The failed `certification-checks` job.** Root cause: the "dedicated" RPC pacing test in `server/router-runtime.test.ts` measured real
+wall-clock spacing between concurrent reads, so a loaded CI container could measure less than the asserted interval (a flaky test, not a product
+defect). Fix: the test runs on fake timers (`vi.useFakeTimers` + `advanceTimersByTimeAsync`), so the spacing is exact. A later review showed its
+shared-pause check could pass vacuously; it now fails a read first, so the reads queued behind it must wait out the shared 500 ms pause (a
+mutation to a per-call backoff fails it). No test was skipped or deleted.
 
 ## 2. Latency path traced (actual code, not reports)
 
@@ -155,33 +177,49 @@ measured 250 ms, one-at-a-time pacing.
 - **After a refresh:** a run with a transaction in flight resumes observing by itself. Recovery stays read-only and never
   creates a new transaction.
 - **Canonical lifecycle** (`domain/canonical-execution-status.ts`):
-  - `AUTHORIZATION_PENDING`, `SUBMITTED`, `HASH_KNOWN`, `CONFIRMED_ONCHAIN` and `SETTLEMENT_PENDING` (cross-chain);
-  - `RECONCILED`, the only status where `completed` is true;
+  - `AUTHORIZATION_PENDING`, `SUBMITTED`, `HASH_KNOWN`, `CONFIRMED_ONCHAIN` and `SETTLEMENT_PENDING` (cross-chain, and Pix's payout);
+  - `RECONCILED`, the only status where `completed` is true: the `RECONCILED` verdict, or a flow's settled end state (a composition's
+    `COMPLETED`, Pix's `PAYMENT_SETTLED`) only with recorded evidence;
   - `REJECTED`, `REVERTED`, `FAILED`, `INCONCLUSIVE` and `INTERVENTION_REQUIRED`.
-  - It is added to the MCP execution status view and checked against the Dashboard mapping by a test.
+  - Once the wallet was asked it is never `NOT_STARTED`: a run that still reads `AUTHORIZED` (as Pix keeps it) follows its latest attempt
+    (`SUBMITTING`/`SUBMISSION_RESULT_UNKNOWN` → `INCONCLUSIVE`), and a recorded `*_RESULT_UNKNOWN` error is `INCONCLUSIVE` even without attempts.
+    Working phases (`EXECUTING`, `PAUSED`, `PRODUCING`, `BOUND`, `CONSUMING`) follow the latest attempt. A hash is claimed only when recorded.
+  - It is added to the MCP execution status view (`lifecycle`, described in `get_execution_status`) and checked against the Dashboard mapping,
+    which shares its evidence and unknown-result rules, across evidence and error variants.
 
 ### Performance observability (P1)
 
 - **Journey marks** (`domain/journey-metrics.ts`): content-free marks per journey (a random id, the chain reference, the
   provider label, the wallet type and the outcome). They produce all required metrics:
   - `intent_to_first_quote_ms`, `intent_to_best_quote_ms`, `quote_to_review_ready_ms`;
-  - `review_to_wallet_open_ms`, `wallet_open_to_user_decision_ms`, `authorization_to_submission_ms`;
+  - `review_to_wallet_open_ms`, `wallet_open_to_user_decision_ms`, `decision_to_submission_ms` (renamed from
+    `authorization_to_submission_ms`: the shared logger redacts any key containing `authorization`, so that stage never reached the logs);
   - `submission_to_hash_ms`, `submission_to_confirmation_ms`, `confirmation_to_reconciliation_ms`;
   - `workflow_total_duration_ms`;
   - plus system-only splits: `review_request_to_ready_ms` and `authorize_to_wallet_open_ms`.
 - **User time vs system time:** the person's time in the wallet (`userMs`) is separated from system latency
-  (`systemMs`). Spans that mix both are reported but never summed as system latency.
+  (`systemMs`). Spans that mix both are reported but never summed as system latency. The server recomputes both from the metrics it
+  accepted (the client's figures are ignored) and logs `null`, never 0, for a total with no measured stage.
 - **Where it is wired:** the live quote, the EVM swap journey and the Jupiter journey. The browser sends a same-origin
   beacon to `POST /api/flofi/journey` (`server/journey-telemetry.ts`).
-- **The endpoint:**
-  - closed schema, same-origin, a 4 KiB cap (also without `Content-Length`), and a per-process rate bound;
-  - writes the existing `createLogger` JSON stream, with no new table or analytics system;
-  - labels events `CLIENT_REPORTED`;
-  - `FLOFI_JOURNEY_TELEMETRY=off` drops them.
-- **Report** (`scripts/journey-latency-report.mjs`): nearest-rank p50/p95 per metric and per network, operation, provider
-  and wallet, read from those logs (plus server-measured discovery durations).
-  - It requires an `--environment` label, which it copies verbatim.
-  - A group with fewer than 20 samples prints `INSUFFICIENT_SAMPLE`.
+- **The endpoint** (reviewed for abuse resistance, privacy and log cost):
+  - closed schema, same-origin, a 4 KiB cap (also without `Content-Length`);
+  - **requires a signed-in FloFi session**: the sealed, host-bound account cookie is checked cryptographically (no database read). It skips the
+    store's revocation check to keep a database read off every beacon, so a revoked session can send rate-bounded, content-free timings until its
+    cookie expires; the account is only an in-memory rate key (HMAC under a per-process random key, dropped when its window ends), never logged;
+  - bounds per server instance: 60 events per account per 10 minutes, 600 per minute overall; a journey id is logged once (409 on a repeat);
+  - a journey id is always a fresh v4 UUID, never the quote correlation id, so a journey line cannot be joined to a quote's server trace;
+  - one log line (at most about 0.8 KB) per accepted event, on the existing `createLogger` stream, with no new table or analytics system;
+  - each line is labelled `CLIENT_REPORTED` and names its deployment and the network's registry environment (MAINNET/TESTNET);
+  - `FLOFI_JOURNEY_TELEMETRY` fails closed: only unset or `on` logs (`off`, `disabled` or a typo drops every event).
+- **Discovery timings** (server-measured): each provider's answer time is logged once per discovery on `quote.discovery_window`, with the providers
+  still pending when the window closed; the per-route `quote.provider_result` line keeps `main`'s content-free shape.
+- **Report** (`scripts/journey-latency-report.mjs`, format v2): nearest-rank p50/p95 per metric and per network, operation, provider, wallet and
+  outcome, split by network environment.
+  - It requires an `--environment` label, copied verbatim, and excludes (and counts) journey lines written by another deployment.
+  - A journey reported twice counts once; a provider answer counts once per discovery, with its timeouts counted beside the percentile.
+  - A group with fewer than 20 samples prints `INSUFFICIENT_SAMPLE`; the minimum can be raised, never lowered.
+  - The script is linted, and its metric list is drift-tested against `JOURNEY_METRICS`.
 
 ## 4. Before/after evidence (environment and provenance labelled)
 
@@ -196,7 +234,8 @@ No public provider, public RPC, live Privy or production log was exercised. Ever
 | Uniswap catalog quote, RPC reads per quote (Base/Arbitrum fixture, 1 live pool) | 25 | **11** warm (cold unchanged) | MOCKED chain (`build-estimate-catalog.test.ts`) |
 | Same, Robinhood Stock Token pair | 30 | **17** warm | MOCKED |
 | Same, modelled at the public 250 ms pacing | 6.25 s / 7.5 s floor | 2.75 s / 4.25 s floor | Arithmetic on MOCKED counts; with 4 live pools the count is about 46 → 17 (derived, not measured) |
-| USD on estimates | Up to 2.5 s after the quote | Starts before the first chain read | MOCKED ordering test |
+| USD on estimates | Up to 2.5 s after the quote | Starts right before the first quote read, only after the network gates pass | MOCKED ordering tests (a refused path starts no price observation) |
+| Uniswap quoter read failures | Any failure dropped that fee tier (an outage could return a worse tier) | Classified by evidence: an explicit revert drops the tier; an outage, rate limit or lagging node fails the quote closed | MOCKED JSON-RPC classification tests |
 | Jupiter Review prologue | Genesis RTT, then `/build` | Overlapped (order asserted), cluster verdict still first | MOCKED |
 | `begin` (EVM) | 3 native balance reads; gas, price and L1 fee one after another | 1 balance read; gas, price and L1 fee together | Code + existing suites |
 | Privy gate DB reads | Session + 3 account queries (gate and broadcast each) | Session + 1 wallet query | Code + wallet suites |
@@ -295,7 +334,8 @@ flofi-workflow reviewed the diff. They ran as general agents following `.claude/
   - The third-party `skills.rest/skill/arbitrum-defi-guide` is THIRD_PARTY PENDING_VERIFICATION. It may become VERIFIED
     only after a cross-check against verified official sources.
 - **`scripts/skill_registry.py`** (no AI, no execution):
-  - `verify`: provenance, licence, official URL prefixes, guidance digest, negation-aware safety lint, dependencies and
+  - `verify`: provenance, licence, official URL prefixes (a source URL with a `.`/`..` segment, literal or percent-encoded, or an encoded or
+    backslash separator is refused, so a prefix check cannot be escaped), guidance digest, negation-aware safety lint, dependencies and
     cycles;
   - `select`: deterministic selection from path globs, task keywords and network/protocol/operation, then dependencies,
     with reviewers batched to three;
@@ -307,9 +347,16 @@ flofi-workflow reviewed the diff. They ran as general agents following `.claude/
   - `impact` and `domain` list the `SKILL.md` files the existing specialists should Read. There is no new agent, agent
     definition or orchestration.
   - A unit test (`platform/engineering-skills.test.ts`) asserts three things:
-    - every capability a skill names exists in `executionCapabilityRegistry`;
+    - every capability a skill names exists in `executionCapabilityRegistry` as a MAINNET row with `EXECUTE` (a MOCK or fork row is not
+      enough; no execution evidence is claimed);
     - the Capability API still profiles those networks;
     - no runtime source imports or reads `skills/`.
+- **Corrections after specialist review:** Base's L1 fee is read with `getL1FeeUpperBound(uint256)` (selector `0xf1c7a58b`, verified with
+  keccak), not `getL1Fee(bytes)`, and the catalog Review budget is the execution fee with the L1 bound added at `begin`; QuoterV2 catches its own
+  callback revert and returns the amounts (call it with `eth_call` only); an EIP-7702 delegation designator is never a cacheable fact; Aave is
+  "registered, deployment-gated"; Across lists its WETH routes; bridge wording names `pendingProviders` and `PARTIAL`. Digests regenerated.
+- **Governance test is date-independent:** `test_ci_skill_registry` passes `today` explicitly; it would otherwise have turned a pinned source
+  STALE on 2027-01-31 and failed every governance job (checked by running the suite with the clock set to 2028).
 - **Used in this build:** the review batches were selected with it, and the specialists read:
   - Jupiter, for the `mode=fast` decision;
   - Uniswap, for the Trading API distinction and the cacheable immutable facts;
@@ -320,8 +367,9 @@ flofi-workflow reviewed the diff. They ran as general agents following `.claude/
 ## 9. Release considerations
 
 - **No migration, schema certificate, dependency or credential change.**
-- **Optional variables** (`docs/deploy/ENVIRONMENT.md` §5k): `GRYLOO_RPC_READ_PROFILE=dedicated` (opt-in),
-  `GRYLOO_DEPLOYMENT_FACT_CACHE=off` (kill switch) and `FLOFI_JOURNEY_TELEMETRY=off`.
+- **Optional variables** (`docs/deploy/ENVIRONMENT.md` §5k): `GRYLOO_RPC_READ_PROFILE=dedicated` (opt-in; unset keeps the previous pacing),
+  `GRYLOO_DEPLOYMENT_FACT_CACHE=off` (kill switch; unset turns the new cache on) and `FLOFI_JOURNEY_TELEMETRY` (unset turns the new timing log
+  on; anything but `on` turns it off). None is required in Production or Preview.
 - **Deploy order:** the API (Railway) before the web (Vercel). A newer web against an older API keeps working through
   the fallback.
 - **`mode=fast` stays off.** Enabling it needs a measured comparison on real pairs and sizes and an owner decision.
@@ -330,7 +378,7 @@ flofi-workflow reviewed the diff. They ran as general agents following `.claude/
 
 - **Live providers not exercised.** Public providers, public RPC, live Privy and production logs were not exercised.
   Every latency figure is LOCAL or MOCKED, and p50/p95 are not available.
-- **PostgreSQL:** run on version 16, not CI's 18.6 (one environment-dependent test, §6).
+- **PostgreSQL:** the integration ran on 18.6 from CI's image digest (all suites pass, §6); the first session's version-16 run is superseded.
 - **Browser provenance:** the browser tier used the environment's pre-installed Chromium headless shell revision 1243.
   The verified bootstrap download host was unreachable.
 - **EVM wallet readiness:** Privy's `useWallets().ready` is not added to `canSign`, because live Privy was unavailable
@@ -338,6 +386,10 @@ flofi-workflow reviewed the diff. They ran as general agents following `.claude/
 - **Not addressed in this build:**
   - batching paced reads (JSON-RPC batch or Multicall3);
   - automatic observation in the other flow stores (router, liquidity, transfers);
-  - per-client telemetry authentication;
-  - a developer-API lifecycle field (the versioned public API is unchanged).
+  - a developer-API lifecycle field (the versioned public API is unchanged; the MCP view has it);
+  - the Dashboard list still has no attempts, so a summary that only an attempt can classify reads "Unresolved" there while MCP is precise;
+  - channel route discovery does not apply the web path's `GRYLOO_UNIVERSAL_ROUTER` gate or the loopback harness transport (pre-existing on
+    `main`; read-only public quotes; recorded for the owner);
+  - a legal basis and retention period for the journey timing log stream (owner/counsel decision; ENVIRONMENT.md §5k).
+- **Telemetry bounds are per server instance** (in-memory counters), so N instances admit up to N times the stated rates.
 - **Specialist reviews are advisory.** CircleCI remains the certification authority.
