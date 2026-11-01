@@ -399,16 +399,24 @@ export function createRouterService(input: { readonly storage: ExecutionStorage;
   const routeRequest = (owner: string, recipient: string, amount: string, slippageBps: number, buffer: number): RouteRequest =>
     ({ owner, recipient, amount, slippageBps, nowMs: now().getTime(), depositQuoteTimeBuffer: buffer });
 
-  /** Quote (each allowed provider, in preference order) → simulation → artifact chain → Review commitment. */
+  /** Quote (every allowed provider at once, folded in preference order) → simulation → artifact chain → Review commitment. */
   async function buildReview(workflow: SemanticWorkflow, owner: string): Promise<RouterReview> {
     const f = intentOf(workflow), recipient = f.recipient === 'CONNECTED_OWNER' ? owner : f.recipient;
     // The SpokePool's quote-time buffer bounds the provider quotes' validity; the spender is known only after selection.
     const probe = await readSource(owner, null);
     const considered: ProviderConsideration[] = [];
     let selected: CanonicalRoute | null = null;
-    for (const id of f.providers) {
+    // BUILD-FLOFI-EXECUTION-PERFORMANCE-001: the providers' quotes are independent (same request, no shared state), so they are asked at once;
+    // the answers are then folded in the reviewed preference order exactly as before. Selection and `considered` are unchanged; latency is the
+    // slowest provider instead of the sum. The destination observation (another chain's transport) overlaps them; its failure keeps its order below.
+    const request = routeRequest(owner, recipient, f.amount, f.slippageBps, probe.depositQuoteTimeBuffer);
+    const destinationRead = readDestination(recipient).then(value => ({ ok: true as const, value }), (cause: unknown) => ({ ok: false as const, cause }));
+    const answers = await Promise.allSettled(f.providers.map(id => providers[id].quote(request)));
+    for (const [index, id] of f.providers.entries()) {
+      const answer = answers[index]!;
       try {
-        const route = await providers[id].quote(routeRequest(owner, recipient, f.amount, f.slippageBps, probe.depositQuoteTimeBuffer));
+        if (answer.status === 'rejected') throw answer.reason;
+        const route = answer.value;
         if (route.routingProvider !== id || route.sourceChain !== SRC.chain || route.destinationChain !== DST.chain ||
             route.inputToken.address !== SRC.token || route.outputToken.address !== DST.token) fail('ROUTER_ROUTE_INTENT_MISMATCH');
         considered.push({ provider: id, outcome: selected ? 'AVAILABLE' : 'SELECTED', code: null, minimumOutput: route.minimumOutput, feeTotal: route.feeTotal,
@@ -423,7 +431,9 @@ export function createRouterService(input: { readonly storage: ExecutionStorage;
     const route = selected!;
     if (route.recipient !== recipient || route.depositor !== owner || route.inputAmount !== f.amount) fail('ROUTER_ROUTE_INTENT_MISMATCH');
     const allowance = wordAt(await call(rpc, SRC.token, SEL.allowance + addrWord(owner) + addrWord(route.approval.spender), tag(probe.block.number)), 0);
-    const source: SourceState = { ...probe, allowance }, destination = await readDestination(recipient), at = tag(source.block.number);
+    const observedDestination = await destinationRead;
+    if (!observedDestination.ok) throw observedDestination.cause;
+    const source: SourceState = { ...probe, allowance }, destination = observedDestination.value, at = tag(source.block.number);
     if (source.usdc < BigInt(route.inputAmount)) fail(SRC.symbol === 'USDC' ? 'ROUTER_INSUFFICIENT_USDC' : 'ROUTER_INSUFFICIENT_TOKEN');
     const approvals = [{ token: route.approval.token, spender: route.approval.spender, amount: route.approval.amount, currentAllowance: source.allowance.toString(),
       required: source.allowance < BigInt(route.approval.amount) }];

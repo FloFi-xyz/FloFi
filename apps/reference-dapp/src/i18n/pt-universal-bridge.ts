@@ -50,6 +50,9 @@ export const portugueseUniversalBridge: Readonly<Record<string, string>> = {
     'Todos os fornecedores foram consultados sobre este par. As rotas executáveis são verificadas pelo FloFi; as outras são mostradas com o motivo pelo qual não podem ser executadas.',
   'Indicative quotes for a public address. Simulate quotes again for your own wallet.': 'Cotações indicativas para um endereço público. Simular cota de novo para a sua própria carteira.',
   'Route options': 'Opções de rota', 'Note': 'Nota', '· recommended': '· recomendada',
+  'Did not answer within the comparison window.': 'Não respondeu dentro da janela de comparação.',
+  'Provisional comparison: {0} did not answer in time. Find routes again to compare them.':
+    'Comparação provisória: {0} não respondeu a tempo. Procure rotas de novo para as comparar.',
   'Executes on the certified Router bridge for this pair.': 'Executa na bridge certificada do Router para este par.', 'Use this route': 'Usar esta rota',
   'Executable': 'Executável', 'Live quote only': 'Só cotação em tempo real', 'Supported, no quote': 'Suportado, sem cotação', 'Temporarily unavailable': 'Temporariamente indisponível',
   'No route': 'Sem rota',

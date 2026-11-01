@@ -11,7 +11,7 @@
  */
 import { ROBINHOOD_CHAIN_MAINNET, ROBINHOOD_STOCK_TOKEN_REGISTRY, parseRobinhoodStockTokenRegistry, robinhoodNetworkCatalog,
   type AssetCatalog } from '@defi-workflow-engine/action-registry';
-import { chainBoundRpc, createBaseSepoliaReadRpc, pacedReadRpc } from './public-testnet-rpc.ts';
+import { chainBoundRpc, createBaseSepoliaReadRpc, pacedReadRpc, readPacingFor } from './public-testnet-rpc.ts';
 import type { CatalogSwapRuntime, Rpc } from './public-testnet-service.ts';
 import { createOfficialCatalogLoader, type RegistryFetch } from './network-catalog.ts';
 
@@ -42,7 +42,8 @@ export function robinhoodRpcUrl(override: string | undefined): string {
 /** The chain-bound read client: an `eth_chainId` for any chain but 4663 is refused, never followed. */
 export function robinhoodMainnetRpc(mode: 'live' | 'harness', env: Env, methods: readonly string[] = ROBINHOOD_MAINNET_RPC_METHODS): Rpc {
   if (mode === 'harness') return chainBoundRpc(createBaseSepoliaReadRpc(ROBINHOOD_MAINNET_HARNESS.rpc, methods), ROBINHOOD_CHAIN_MAINNET.chainId);
-  return chainBoundRpc(pacedReadRpc(createBaseSepoliaReadRpc(robinhoodRpcUrl(env.GRYLOO_ROBINHOOD_RPC_URL), methods)), ROBINHOOD_CHAIN_MAINNET.chainId);
+  return chainBoundRpc(pacedReadRpc(createBaseSepoliaReadRpc(robinhoodRpcUrl(env.GRYLOO_ROBINHOOD_RPC_URL), methods),
+    readPacingFor(env, Boolean(env.GRYLOO_ROBINHOOD_RPC_URL))), ROBINHOOD_CHAIN_MAINNET.chainId);
 }
 
 export type { RegistryFetch } from './network-catalog.ts';

@@ -13,6 +13,9 @@ import { catalogNetworksNamed } from '../domain/network-registry';
 import { useWorkflow } from './workflow-store';
 import { completeSendDestination, sendDestinationIssue, SEND_DESTINATION_INVALID, SEND_DESTINATION_QUESTION } from '../domain/send-destination';
 import { useBuild009Wallet } from './build009-wallet-store';
+import { usesFloFiWallet } from '../wallet/flofi-wallet-channel';
+import { floFiWalletMessage } from '../wallet/flofi-signing';
+import { floFiPrivyWalletIssue, useFloFiPrivy } from '../accounts/privy-context';
 import { copilotHelp, useCopilotInterpreter } from '../components/copilot-ai';
 import { FLOFI_WELCOME_COMMANDS } from '../domain/assistant-welcome';
 import { copilotRejection } from '../domain/copilot-authoring';
@@ -79,6 +82,9 @@ export function useFlofiConversation({ owner, epoch, bridge, direct, interfaceLa
   const workflow = useWorkflow();
   const { state, context, propose, dismissProposal, commitChatCommand, undoChatCommit } = workflow;
   const wallet = useBuild009Wallet();
+  // BUILD-FLOFI-EXECUTION-PERFORMANCE-001: the chat's confirmation checks the FloFi wallet (Privy) can sign in this page, as the Canvas Authorize does.
+  const privy = useFloFiPrivy(), privyRef = useRef(privy);
+  privyRef.current = privy;
   const copilot = useCopilotInterpreter({ direct });
   // BUILD-FLOFI-BRIDGE-LIVE-FIX-003: the FloFi Assistant's short welcome (the panel shows the Copilot mode's own variant when one is configured).
   const intro = (): ChatMessage => ({ id: 0, role: 'system', text: direct ? FLOFI_WELCOME_COMMANDS : 'Review each proposed change before applying it.' });
@@ -274,6 +280,16 @@ export function useFlofiConversation({ owner, epoch, bridge, direct, interfaceLa
     }
     // BUILD-FLOFI-BRIDGE-LIVE-FIX-003: FloFi says it is preparing the wallet request only once an authorization or request actually began; a start
     // the controls refuse at once says why, and nothing claims a wallet request that never opened.
+    // BUILD-FLOFI-EXECUTION-PERFORMANCE-001: when the person's FloFi wallet (Privy) will sign, the chat accepts the Review only once Privy can sign with
+    // it here — the same check as the Canvas Authorize — so no short-lived Review is accepted, begun or claimed for a wallet that cannot show it.
+    const account = view.wallet.account;
+    if (typeof account === 'string' && usesFloFiWallet(account)) {
+      const ecosystem = /^0x/i.test(account) ? 'evm' as const : 'solana' as const;
+      if (!privyRef.current?.canSign(ecosystem, account)) {
+        const issue = floFiPrivyWalletIssue(privyRef.current, ecosystem, account);
+        flofi(scope, language, c.executionNotStarted(translate(language, floFiWalletMessage(issue) ?? issue)), { options: [c.review] }); return;
+      }
+    }
     const startError = view.source.state.error, started = controls.authorize();
     if (!started.started) { flofi(scope, language, c.executionNotStarted(translate(language, started.issue ?? 'Execution cannot begin with the current wallet or execution state. Check this workflow in Simulate.')), { options: [c.review] }); return; }
     flofi(scope, language, c.executing);

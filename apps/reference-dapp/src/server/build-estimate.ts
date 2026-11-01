@@ -43,12 +43,30 @@ type QuoteSide = { readonly symbol: string; readonly units: string; readonly dec
  * USD equivalents of a MAINNET quote's two sides — each only for an asset the verified price source observes freshly (a stale, failed or
  * slow observation gives none). Bounded, so a price read never delays the token estimate itself.
  */
-async function usdOf(prices: PriceSource | null, now: Date, sides: readonly [QuoteSide, QuoteSide]): Promise<UsdEstimate | null> {
+type PriceObservation = Awaited<ReturnType<PriceSource['observe']>> | null;
+type Observe = (asset: PriceAsset) => Promise<PriceObservation>;
+/**
+ * BUILD-FLOFI-EXECUTION-PERFORMANCE-001: one price observation per asset per request, started as soon as the node names its assets, so the optional
+ * USD read runs alongside the quote instead of after it. Display only; a failed or slow observation still gives no USD.
+ */
+function priceObserver(prices: PriceSource | null, now: Date, symbols: readonly (string | null | undefined)[]): Observe | null {
+  if (!prices) return null;
+  const started = new Map<PriceAsset, Promise<PriceObservation>>();
+  const observe: Observe = asset => {
+    let pending = started.get(asset);
+    if (!pending) { pending = prices.observe(asset, now).catch(() => null); started.set(asset, pending); }
+    return pending;
+  };
+  for (const symbol of symbols) { const asset = symbol ? priceAssetOf(symbol) : null; if (asset && prices.assets.includes(asset)) void observe(asset); }
+  return observe;
+}
+async function usdOf(prices: PriceSource | null, now: Date, sides: readonly [QuoteSide, QuoteSide], observeAsset?: Observe | null): Promise<UsdEstimate | null> {
   if (!prices) return null;
   const assets = [...new Set(sides.map(side => priceAssetOf(side.symbol)).filter((asset): asset is PriceAsset => asset !== null && prices.assets.includes(asset)))];
   if (!assets.length) return null;
+  const observe = observeAsset ?? ((asset: PriceAsset) => prices.observe(asset, now).catch(() => null));
   let timer: ReturnType<typeof setTimeout> | undefined;
-  const observed = await Promise.race([Promise.all(assets.map(async asset => [asset, await prices.observe(asset, now).catch(() => null)] as const)),
+  const observed = await Promise.race([Promise.all(assets.map(async asset => [asset, await observe(asset)] as const)),
     new Promise<null>(resolve => { timer = setTimeout(() => resolve(null), USD_WAIT_MS); })]).finally(() => clearTimeout(timer));
   const fresh = new Map((observed ?? []).flatMap(([asset, result]) => result?.ok ? [[asset, result.observation] as const] : []));
   const value = (side: QuoteSide) => { const o = fresh.get(priceAssetOf(side.symbol)!); return o ? usdAmount(side.units, side.decimals, o.priceUsd) : null; };
@@ -84,8 +102,11 @@ async function readBuildEstimateValue(input: unknown, env: Env = process.env,
         slippageBps: q.slippageBps, expiresAt: q.expiresAt } };
     }
     const catalogNetwork = uniswap ? catalogNetworkOfChain(node.chainId) : null;
-    // USD is optional, including failure while constructing the configured price source.
-    const quoteUsd = async (sides: readonly [QuoteSide, QuoteSide]) => { try { return await usdOf(prices(), now(), sides); } catch { return null; } };
+    // USD is optional, including failure while constructing the configured price source. Its observations start now, alongside the quote.
+    const observedAt = now();
+    let observer: Observe | null = null;
+    try { const selection = cryptoSelectionOf(node); observer = priceObserver(prices(), observedAt, [selection?.from, selection?.to]); } catch { observer = null; }
+    const quoteUsd = async (sides: readonly [QuoteSide, QuoteSide]) => { try { return await usdOf(prices(), observedAt, sides, observer); } catch { return null; } };
     const solanaMainnet = node.chainId === JUPITER_SOLANA_MAINNET.chain && node.adapterConstraints.protocols.includes('jupiter');
     if ((catalogNetwork || solanaMainnet) && (seams.preview || !seams.rpc && !seams.http)) {
       const flow = catalogNetwork ? catalogNetwork.flows.swap : 'jupiter-swap';

@@ -128,6 +128,22 @@ describe('BUILD-ROUTER-001 Quote → Simulation → Review → route-bound Manif
     expect(r.artifacts.manifest.providers).toEqual({ kind: 'FIXED', providerId: 'lifi:across' });
     expect(r.artifacts.manifest.artifactSetHash).toBe(r.artifacts.hashes.artifactSet);
   });
+  it('BUILD-FLOFI-EXECUTION-PERFORMANCE-001: providers are asked at once and folded in preference order, whichever answers first', async () => {
+    const h = createRouterHarness();
+    const order: string[] = [], inFlight = { now: 0, peak: 0 };
+    // LI.FI (preferred) answers last; Across answers first. The reviewed selection must still be LI.FI, as before.
+    const delayed = (id: 'lifi' | 'across', ms: number) => ({ ...h.providers[id], quote: async (request: Parameters<typeof h.providers.lifi.quote>[0]) => {
+      inFlight.now++; inFlight.peak = Math.max(inFlight.peak, inFlight.now);
+      await new Promise(resolve => setTimeout(resolve, ms));
+      try { return await h.providers[id].quote(request); } finally { inFlight.now--; order.push(id); }
+    } });
+    const { service } = await setup({}, { h: { ...h, providers: { ...h.providers, lifi: delayed('lifi', 60), across: delayed('across', 5) } } });
+    const run = await service.simulate(workflow(), ROUTER_OWNER);
+    expect(order).toEqual(['across', 'lifi']);
+    expect(inFlight.peak).toBe(2);
+    expect(run.review.selection.considered.map(c => [c.provider, c.outcome])).toEqual([['lifi', 'SELECTED'], ['across', 'AVAILABLE']]);
+    expect(run.review.route.routingProvider).toBe('lifi');
+  });
   it('binds an explicit recipient and honors the routing policy', async () => {
     const { service } = await setup();
     const run = await service.simulate(workflow({ recipient: ROUTER_RECIPIENT, routing: 'ACROSS' }), ROUTER_OWNER);

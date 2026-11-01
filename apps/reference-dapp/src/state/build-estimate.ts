@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { hashArtifactBytes, type SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
 import { estimateMatchesNode, requestBuildEstimate, type BuildEstimate, type BuildEstimateResult } from '../domain/build-estimate';
 import { bridgeEstimateRequest } from '../domain/bridge-estimate';
+import { createJourney, reportJourney } from '../domain/journey-metrics';
 import type { DiscoveryResult } from '../server/universal-router/discovery';
 
 /**
@@ -58,6 +59,9 @@ export function useLiveQuote(workflow: SemanticWorkflow | undefined, nodeId: str
     const known = recalled(scope);
     if (known) { accept(known, false); return () => { clearTimeout(expire); }; }
     const correlationId = crypto.randomUUID();
+    // BUILD-FLOFI-EXECUTION-PERFORMANCE-001: intent → first quote, content-free (the chain and provider label only), reported once per answered snapshot.
+    const journey = createJourney({ operation: bridge ? 'bridge' : 'swap', network: chain, provider, id: correlationId });
+    journey.mark('intent');
     const cancel = requestBuildEstimate(async signal => {
       const response = await fetch('/api/build-estimate', { method: 'POST', headers: { 'content-type': 'application/json', 'x-quote-correlation-id': correlationId },
         body: JSON.stringify({ workflow: snapshot, nodeId, owner, ...destinationWallet ? { destinationWallet } : {} }), signal });
@@ -69,6 +73,7 @@ export function useLiveQuote(workflow: SemanticWorkflow | undefined, nodeId: str
       const estimate = response.ok && response.estimate.workflowHash === key && response.estimate.nodeId === nodeId && response.estimate.chain === chain &&
         (provider === 'Bridge' || response.estimate.provider === provider) && estimateMatchesNode(response.estimate, snapshot, nodeId) && Date.parse(response.estimate.expiresAt) > Date.now() ? response.estimate : null;
       if (estimate) remember(scope, estimate);
+      if (estimate && ticket === generation.current) { journey.mark('first_quote'); reportJourney(journey.event('in_progress')); }
       accept(estimate, !estimate, response.ok ? { ok: false, code: 'ESTIMATE_RESPONSE_MISMATCH' } : response);
     });
     return () => { cancel(); clearTimeout(expire); };

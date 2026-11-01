@@ -9,8 +9,10 @@ import { swapWalletRequestMatches, ownerBoundSwapReview, swapProfile } from '../
 import { injected, useBuild009Wallet } from './build009-wallet-store';
 import { useWorkflow } from './workflow-store';
 import { watchWalletResponse } from './wallet-request-lifecycle';
-import { bindFloFiSigning } from '../wallet/flofi-wallet-channel';
+import { bindFloFiSigning, usesFloFiWallet } from '../wallet/flofi-wallet-channel';
 import { floFiWalletMessage, PRE_SIGNATURE_CODES, signingContextOf } from '../wallet/flofi-signing';
+import { observeUntilSettled } from '../domain/observation-schedule';
+import { createJourney, reportJourney, type Journey } from '../domain/journey-metrics';
 
 const KEY = 'gryloo:public-testnet-execution-id';
 /**
@@ -43,6 +45,10 @@ function message(error: unknown): string {
   const floFi = code.startsWith('FLOFI_WALLET_') ? floFiWalletMessage(code) : null;
   if (floFi) return floFi;
   const messages: Record<string, string> = {
+    // BUILD-FLOFI-EXECUTION-PERFORMANCE-001: the wallet states the swap raises itself, in words instead of their codes.
+    WALLET_AUTHORIZATION_REJECTED: 'You declined the request in your wallet. Nothing was signed or sent.',
+    WRONG_WALLET_CHAIN: 'Your wallet is on another network. Switch it to the network of this swap, then authorize again. Nothing was sent.',
+    SUBMISSION_RESULT_UNKNOWN: 'Your wallet did not confirm whether it sent the transaction. FloFi keeps checking the network; do not send it again.',
     PUBLIC_RECORDING_OFF: 'Public testnet recording is not enabled on this app instance.',
     ROBINHOOD_MAINNET_NOT_ENABLED: 'Robinhood Chain is not enabled on this app instance.',
     BASE_MAINNET_NOT_ENABLED: 'Base mainnet is not enabled on this app instance.', BASE_STORAGE_NOT_CONFIGURED: 'Base mainnet is not enabled on this app instance.',
@@ -105,6 +111,8 @@ export function PublicTestnetProvider({ children }: { children: ReactNode }) {
   const workflowId = state.workflow.workflowId;
   useEffect(() => { setError(null); }, [workflowId]);
   const busyRef = useRef(false), operationEpoch = useRef(0);
+  // BUILD-FLOFI-EXECUTION-PERFORMANCE-001: the content-free timing of the current Simulate → Review → Authorize → wallet → outcome journey.
+  const journeyRef = useRef<Journey | null>(null);
   // BUILD-FLOFI-CHAT-E2E-FIX-002: the swap this runtime serves is the runtime workflow (the canonical workflow, or the sequence's current step).
   const workflowRef = useRef(runtimeWorkflow);
   workflowRef.current = runtimeWorkflow;
@@ -148,6 +156,12 @@ export function PublicTestnetProvider({ children }: { children: ReactNode }) {
         if (workflowRef.current === initialWorkflow.current && initialWorkflow.current.revision === 0 &&
             initialWorkflow.current.nodes.every(node => node.actionType.startsWith('mock-'))) restoreRef.current(recovered.workflow);
         setRun(recovered); setRecoveryOnly(true);
+        // BUILD-FLOFI-EXECUTION-PERFORMANCE-001: a run that came back with a submitted transaction keeps being followed (read-only observe; nothing
+        // is signed, submitted or retried), instead of waiting for "Check result" or the worker's backoff.
+        if (['HASH', 'PENDING'].includes(recovered.attempts.at(-1)?.state ?? '')) {
+          void observeUntilSettled(async () => { const observed = unwrap(await publicObserve(id)); if (!cancelled) setRun(observed); return observed; },
+            observed => observed.attempts.at(-1)?.state !== 'PENDING' && observed.attempts.at(-1)?.state !== 'HASH', { active: () => !cancelled }).catch(() => undefined);
+        }
       }
     }).catch(() => undefined);
     return () => { cancelled = true; };
@@ -157,6 +171,8 @@ export function PublicTestnetProvider({ children }: { children: ReactNode }) {
     if (!available) throw new Error(profile?.kind === 'CATALOG' ? 'PUBLIC_NETWORK_UNAVAILABLE' : 'PUBLIC_RECORDING_OFF');
     if (run?.attempts.some(a => ['PREPARED', 'HASH', 'PENDING', 'UNKNOWN'].includes(a.state))) throw new Error('ATTEMPT_ALREADY_ACTIVE');
     const workflow = workflowRef.current;
+    const journey = createJourney({ operation: 'swap', network: profile ? `eip155:${profile.chainId}` : 'eip155:8453', provider: 'Uniswap V3' });
+    journey.mark('review_requested');
     const approval = run?.attempts.at(-1);
     const resumeApproval = Boolean(run && !run.outcome && approval?.step === 'approval' &&
       approval.state === 'CONFIRMED' && (recoveryOnly || source === workflow));
@@ -167,6 +183,7 @@ export function PublicTestnetProvider({ children }: { children: ReactNode }) {
     const prepared = unwrap(resumeApproval ? await publicRefresh(run!.quote.executionId) :
       await publicPrepare(workflow as unknown as SemanticWorkflow, owner?.account));
     localStorage.setItem(KEY, prepared.quote.executionId); markTab(prepared.quote.executionId);
+    journey.mark('review_ready'); journeyRef.current = journey;
     setSource(workflow as unknown as SemanticWorkflow); setRecoveryOnly(false); setRun(prepared);
   }), [guarded, available, run, recoveryOnly, source, authoredChain, wallet]);
   const review = useCallback(() => guarded('Reviewing swap', async () => {
@@ -184,6 +201,7 @@ export function PublicTestnetProvider({ children }: { children: ReactNode }) {
     await wallet.switchTo(profile.chainHex);
   }), [guarded, wallet, run]);
   const execute = useCallback(() => guarded('Preparing transaction', async () => {
+    const startedAt = performance.now();
     if (!run || retired) throw new Error('REVIEW_REQUIRED');
     if (run.reviewedManifestHash !== run.quote.manifestHash) throw new Error('REVIEW_REQUIRED');
     const provider = injected();
@@ -202,9 +220,17 @@ export function PublicTestnetProvider({ children }: { children: ReactNode }) {
       throw new Error(begun.code);
     }
     const { attempt, tx } = begun.value;
+    const journey = journeyRef.current ?? createJourney({ operation: 'swap', network: `eip155:${run.quote.chainId}`, provider: 'Uniswap V3' });
+    journeyRef.current = null;
+    journey.mark('authorize_clicked', startedAt);
+    journey.describe({ wallet: usesFloFiWallet(session.account) ? 'privy-embedded' : 'external' });
+    const finish = (outcome: Parameters<typeof journey.event>[0]) => reportJourney(journey.event(outcome));
     const acceptCurrent = (value: PublicRun) => setRun(current => current?.quote.executionId === run.quote.executionId ? value : current);
     const clearSigning = () => setSigningAttempt(current => current === attempt.attemptId ? null : current);
-    setRun(unwrap(await publicStatus(run.quote.executionId)));
+    // BUILD-FLOFI-EXECUTION-PERFORMANCE-001: `begin` saved exactly this run plus its new attempt, so the page shows it at once instead of a
+    // status round trip (server actions run one at a time) before the wallet request. The next report returns the durable record.
+    if (attempt.executionId === run.quote.executionId && attempt.manifestHash === run.quote.manifestHash) acceptCurrent({ ...run, attempts: [...run.attempts, attempt] });
+    else setRun(unwrap(await publicStatus(run.quote.executionId)));
     // BUILD-FLOFI-BRIDGE-LIVE-FIX-003: the wallet request carries exactly the reviewed native value to the reviewed target (see swapWalletRequestMatches).
     if (!swapWalletRequestMatches(run.quote, attempt.step, tx, profile, session.account) || await calldataDigest(tx.data) !== attempt.calldataDigest) {
       unwrap(await publicReport(run.quote.executionId, attempt.attemptId, { kind: 'UNKNOWN' }));
@@ -222,11 +248,13 @@ export function PublicTestnetProvider({ children }: { children: ReactNode }) {
     setSigningAttempt(attempt.attemptId);
     // BUILD-FLOFI-AUTH-WALLETS-001: FloFi Wallet signs only for the reviewed run it is told about (no effect on any other wallet).
     bindFloFiSigning(provider, signingContextOf(run.quote.executionId, 'base-sepolia-swap'));
+    journey.mark('wallet_open');
     try { hash = await watchWalletResponse(provider, () => provider.request({ method: 'eth_sendTransaction', params: [tx] }), () => {
       clearSigning();
       void publicReport(run.quote.executionId, attempt.attemptId, { kind: 'UNKNOWN' }).then(result => { if (result.ok) acceptCurrent(result.value); }).catch(() => undefined);
     }); }
     catch (cause) {
+      journey.mark('user_decision'); finish(rejected(cause) ? 'rejected' : 'inconclusive');
       acceptCurrent(unwrap(await publicReport(run.quote.executionId, attempt.attemptId, { kind: rejected(cause) ? 'REJECTED' : 'UNKNOWN' })));
       const refusal = floFiRefusal(cause);
       if (refusal) throw new Error(refusal, { cause });
@@ -234,20 +262,28 @@ export function PublicTestnetProvider({ children }: { children: ReactNode }) {
       throw new Error('SUBMISSION_RESULT_UNKNOWN', { cause });
     }
     finally { clearSigning(); }
+    journey.mark('user_decision');
     if (typeof hash !== 'string' || !/^0x[0-9a-fA-F]{64}$/.test(hash)) {
+      finish('inconclusive');
       acceptCurrent(unwrap(await publicReport(run.quote.executionId, attempt.attemptId, { kind: 'UNKNOWN' })));
       throw new Error('SUBMISSION_RESULT_UNKNOWN');
     }
     const txHash = hash.toLowerCase();
     localStorage.setItem(KEY + ':' + attempt.attemptId, txHash);
     acceptCurrent(unwrap(await publicReport(run.quote.executionId, attempt.attemptId, { kind: 'HASH', txHash })));
-    for (let i = 0; i < 30; i++) {
-      const observed = unwrap(await publicObserve(run.quote.executionId));
-      acceptCurrent(observed);
-      const state = observed.attempts.at(-1)?.state;
-      if (state !== 'PENDING') break;
-      await new Promise<void>(resolve => setTimeout(resolve, 2_000));
-    }
+    // The wallet sent it and returned its hash: for this flow submission and the hash are the same moment.
+    journey.mark('submission'); journey.mark('hash');
+    try {
+      const followed = await observeUntilSettled(async () => {
+        const observed = unwrap(await publicObserve(run.quote.executionId)); acceptCurrent(observed);
+        const state = observed.attempts.at(-1)?.state;
+        if (state === 'CONFIRMED' || state === 'REVERTED') journey.mark('confirmation');
+        if (observed.outcome) journey.mark('reconciliation');
+        return observed;
+      }, observed => observed.attempts.at(-1)?.state !== 'PENDING');
+      const state = followed.value?.attempts.at(-1)?.state;
+      finish(state === 'REVERTED' ? 'failed' : state === 'UNKNOWN' ? 'inconclusive' : followed.value?.outcome ? 'reconciled' : 'in_progress');
+    } catch (cause) { finish('in_progress'); throw cause; }
   }), [guarded, run, retired, wallet]);
   const signing = Boolean(signingAttempt && run?.attempts.some(attempt => attempt.attemptId === signingAttempt));
   return <Context.Provider value={{ available, catalogAvailable, chainAvailable, availabilityKnown: availability.known, run, recoveryOnly, retired, busy, signing, error,

@@ -37,7 +37,9 @@ import { validateStrategy } from './strategy';
 export type RouteDiscovery = { readonly observedAt: string; readonly status: string; readonly quoteSubjects: string; readonly recommended: number | null;
   readonly candidates: readonly { readonly provider: string; readonly bridge: string; readonly status: string; readonly executableBy: string | null;
     readonly expectedOutput: string | null; readonly minimumOutput: string | null; readonly estimatedDurationSeconds: number | null; readonly reason: string | null;
-    readonly fees: readonly { readonly label: string; readonly amount: string; readonly symbol: string; readonly decimals: number; readonly included: boolean }[] }[] };
+    readonly fees: readonly { readonly label: string; readonly amount: string; readonly symbol: string; readonly decimals: number; readonly included: boolean }[] }[];
+  /** BUILD-FLOFI-EXECUTION-PERFORMANCE-001: PARTIAL when the discovery window closed before every provider answered. */
+  readonly completeness?: 'COMPLETE' | 'PARTIAL'; readonly pendingProviders?: readonly string[] };
 
 export const COPILOT_TOOL_NAMES = ['get_capabilities', 'resolve_asset', 'find_routes', 'get_quote', 'get_workflow_context', 'get_wallet_context', 'validate_strategy',
   'plan_goal', 'explain_failure'] as const;
@@ -157,6 +159,9 @@ async function discoveryRequest(args: Record<string, unknown>, ctx: CopilotToolC
 const display = (units: string | null, decimals: number) => units === null ? null : (() => { try { return formatTokenAmount(units, decimals); } catch { return null; } })();
 function routeView(result: RouteDiscovery, symbol: string, decimals: number) {
   return { provenance: 'FLOFI_UNIVERSAL_DISCOVERY', observedAt: result.observedAt, freshness: 'LIVE_AT_OBSERVATION_RE_QUOTED_AT_REVIEW', status: result.status,
+    // PROVISIONAL: some providers had not answered when the discovery window closed (named in notCompared); COMPARED: every provider answered.
+    // Either way the quote is re-made for the owner at Review: neither is "ready for Review".
+    comparison: result.completeness === 'PARTIAL' ? 'PROVISIONAL' : 'COMPARED', notCompared: (result.pendingProviders ?? []).slice(0, 4),
     quoteSubjects: result.quoteSubjects, receive: symbol,
     candidates: result.candidates.slice(0, COPILOT_TOOL_LIMITS.maxCandidates).map((candidate, index) => ({ provider: candidate.provider, bridge: candidate.bridge.slice(0, 40),
       status: candidate.status, executable: candidate.executableBy !== null, recommended: index === result.recommended,

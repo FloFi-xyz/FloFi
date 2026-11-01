@@ -86,8 +86,9 @@ export function routerRuntime(mode: 'live' | 'harness', env: Env): RouterRuntime
     destinationRpc: createBaseSepoliaReadRpc(ROUTER_MOCK_ARBITRUM_RPC_URL, ROUTER_ARBITRUM_RPC_METHODS),
     providers: createRouteProviders({ http, lifiApi: ROUTER_MOCK_LIFI_API, acrossApi: ROUTER_MOCK_ACROSS_API }), provenance: 'MOCKED', executionEnabled: true,
     mockedCodePins: ROUTER_MOCK_CODE_PINS, profile };
-  return { sourceRpc: bridgeReadRpc(profile.source.chainId, routerRpcUrl(env.GRYLOO_BASE_RPC_URL, profile.source.rpc), ROUTER_BASE_RPC_METHODS, env),
-    destinationRpc: bridgeReadRpc(profile.destination.chainId, routerRpcUrl(env.GRYLOO_ARBITRUM_RPC_URL, profile.destination.rpc), ROUTER_ARBITRUM_RPC_METHODS, env),
+  return { sourceRpc: bridgeReadRpc(profile.source.chainId, routerRpcUrl(env.GRYLOO_BASE_RPC_URL, profile.source.rpc), ROUTER_BASE_RPC_METHODS, env, Boolean(env.GRYLOO_BASE_RPC_URL)),
+    destinationRpc: bridgeReadRpc(profile.destination.chainId, routerRpcUrl(env.GRYLOO_ARBITRUM_RPC_URL, profile.destination.rpc), ROUTER_ARBITRUM_RPC_METHODS, env,
+      Boolean(env.GRYLOO_ARBITRUM_RPC_URL)),
     providers: createRouteProviders({ http, ...env.ACROSS_API_KEY ? { acrossApiKey: env.ACROSS_API_KEY } : {}, ...env.ACROSS_INTEGRATOR_ID ? { acrossIntegratorId: env.ACROSS_INTEGRATOR_ID } : {},
       ...env.LIFI_API_KEY ? { lifiApiKey: env.LIFI_API_KEY } : {} }),
     provenance: 'PUBLIC_MAINNET', executionEnabled: env.GRYLOO_ROUTER_OWNER_EXECUTION === 'MAINNET_OWNER_APPROVED', profile };
@@ -127,7 +128,8 @@ function pairRouterRuntime(route: RouterProfile, mode: 'live' | 'harness', env: 
     : routerRpcUrl(chainId === 1 ? env.GRYLOO_ETHEREUM_RPC_URL : chainId === 8453 ? env.GRYLOO_BASE_RPC_URL : env.GRYLOO_ARBITRUM_RPC_URL,
       (route.source.chainId === chainId ? route.source : route.destination).rpc);
   const client = (chainId: number, methods: readonly string[]) => mode === 'harness' ? chainBoundRpc(createBaseSepoliaReadRpc(url(chainId), methods), chainId)
-    : bridgeReadRpc(chainId, url(chainId), methods, env);
+    : bridgeReadRpc(chainId, url(chainId), methods, env, Boolean(chainId === 4663 ? env.GRYLOO_ROBINHOOD_RPC_URL : chainId === 1 ? env.GRYLOO_ETHEREUM_RPC_URL
+      : chainId === 8453 ? env.GRYLOO_BASE_RPC_URL : env.GRYLOO_ARBITRUM_RPC_URL));
   return { sourceRpc: client(route.source.chainId, ROUTER_BASE_RPC_METHODS), destinationRpc: client(route.destination.chainId, ROUTER_ARBITRUM_RPC_METHODS),
     providers: createRouteProviders({ http, profile: route, ...mode === 'live' && env.ACROSS_API_KEY ? { acrossApiKey: env.ACROSS_API_KEY } : {},
       ...mode === 'live' && env.ACROSS_INTEGRATOR_ID ? { acrossIntegratorId: env.ACROSS_INTEGRATOR_ID } : {}, ...mode === 'live' && env.LIFI_API_KEY ? { lifiApiKey: env.LIFI_API_KEY } : {},

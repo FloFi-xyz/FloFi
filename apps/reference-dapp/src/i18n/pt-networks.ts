@@ -17,6 +17,12 @@ export const portugueseNetworks: Readonly<Record<string, string>> = {
   'Swap independently reconciled. Paid': 'Troca reconciliada independentemente. Pago', '; received': '; recebido', '; fee': '; comissão', 'Explorer': 'Explorador', 'View on Solana Explorer (Devnet)': 'Ver no Solana Explorer (Devnet)',
   'Slot': 'Slot', 'Evidence:': 'Evidências:', 'Manifest': 'Manifesto', '{0} swap simulation': 'Simulação da troca em {0}', 'SIMULATE': 'SIMULAR', 'Uniswap swap ·': 'Troca Uniswap ·',
   'Get a current quote from the public pool before reviewing the swap.': 'Obtenha uma cotação atual da pool pública antes de rever a troca.',
+  // BUILD-FLOFI-EXECUTION-PERFORMANCE-001
+  'You declined the request in your wallet. Nothing was signed or sent.': 'Recusou o pedido na sua carteira. Nada foi assinado nem enviado.',
+  'Your wallet is on another network. Switch it to the network of this swap, then authorize again. Nothing was sent.':
+    'A sua carteira está noutra rede. Mude-a para a rede desta troca e autorize de novo. Nada foi enviado.',
+  'Your wallet did not confirm whether it sent the transaction. FloFi keeps checking the network; do not send it again.':
+    'A sua carteira não confirmou se enviou a transação. O FloFi continua a verificar a rede; não a envie de novo.',
   'Public testnet recording is not enabled on this app instance.': 'O registo na rede de teste pública não está ativo nesta instância.', 'Live swap quote': 'Cotação atual da troca',
   'Current quote': 'Cotação atual', 'You pay': 'Paga', 'Quote expired. Simulate again.': 'A cotação expirou. Simule novamente.',
   'The swap changed. Simulate again to review the new amount.': 'A troca mudou. Simule novamente para rever o novo montante.', 'Simulate your swap first': 'Simule primeiro a troca',

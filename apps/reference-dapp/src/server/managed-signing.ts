@@ -174,17 +174,19 @@ async function evmFields(request: ManagedSigningRequest, bound: { from: string; 
   if ((bound.nonce !== undefined && (nonce === null || tx.nonce !== nonce)) || (bound.maxFeePerGas !== undefined && (maxFee === null || tx.maxFeePerGas !== maxFee))
     || (bound.maxPriorityFeePerGas !== undefined && (priority === null || tx.maxPriorityFeePerGas !== priority))) return { ok: false, code: NO_MATCH };
   if (deps.filledBoundedAtSigning) return { ok: true, tx, filled: bound.nonce === undefined || bound.maxFeePerGas === undefined };
-  if (bound.nonce === undefined) {
-    if (!deps.pendingNonce) return { ok: false, code: 'FLOFI_WALLET_NETWORK_READ_FAILED' };
-    let pending: bigint;
-    try { pending = await deps.pendingNonce(bound.chainId, tx.from); } catch { return { ok: false, code: 'FLOFI_WALLET_NETWORK_READ_FAILED' }; }
+  // BUILD-FLOFI-EXECUTION-PERFORMANCE-001: the pending-nonce and fee reads are independent network reads: asked together, judged in the same order.
+  const needsNonce = bound.nonce === undefined, needsFees = bound.maxFeePerGas === undefined || bound.maxPriorityFeePerGas === undefined;
+  if ((needsNonce && !deps.pendingNonce) || (needsFees && !deps.fees)) return { ok: false, code: 'FLOFI_WALLET_NETWORK_READ_FAILED' };
+  const [nonceRead, feesRead] = await Promise.allSettled([needsNonce ? deps.pendingNonce!(bound.chainId, tx.from) : Promise.resolve(null),
+    needsFees ? deps.fees!(bound.chainId) : Promise.resolve(null)]);
+  if (needsNonce) {
+    if (nonceRead.status === 'rejected' || nonceRead.value === null) return { ok: false, code: 'FLOFI_WALLET_NETWORK_READ_FAILED' };
     // Only the owner's next nonce: a second signature for the same attempt could otherwise be valid alongside the first.
-    if (tx.nonce !== pending) return { ok: false, code: 'FLOFI_WALLET_NONCE_MISMATCH' };
+    if (tx.nonce !== nonceRead.value) return { ok: false, code: 'FLOFI_WALLET_NONCE_MISMATCH' };
   }
-  if (bound.maxFeePerGas === undefined || bound.maxPriorityFeePerGas === undefined) {
-    if (!deps.fees) return { ok: false, code: 'FLOFI_WALLET_NETWORK_READ_FAILED' };
-    let suggested: { maxFeePerGas: bigint; maxPriorityFeePerGas: bigint };
-    try { suggested = await deps.fees(bound.chainId); } catch { return { ok: false, code: 'FLOFI_WALLET_NETWORK_READ_FAILED' }; }
+  if (needsFees) {
+    if (feesRead.status === 'rejected' || feesRead.value === null) return { ok: false, code: 'FLOFI_WALLET_NETWORK_READ_FAILED' };
+    const suggested = feesRead.value;
     if (tx.maxFeePerGas > suggested.maxFeePerGas * FILLED_FEE_BOUND || tx.maxPriorityFeePerGas > suggested.maxPriorityFeePerGas * FILLED_FEE_BOUND + 1n)
       return { ok: false, code: 'FLOFI_WALLET_FEE_TOO_HIGH' };
   }

@@ -19,7 +19,7 @@ type Env = Readonly<Record<string, string | undefined>>;
 export function copilotToolkit(env: Env, ports?: CopilotToolPorts): CopilotToolkit | null {
   if (!copilotToolsEnabled(env)) return null;
   const discover: CopilotToolPorts['discover'] = async request => {
-    try { return await readBridgeDiscovery(request, env); } catch (cause) { return { ok: false, code: cause instanceof Error && /^[A-Z][A-Z0-9_]{2,80}$/.test(cause.message) ? cause.message : 'ROUTE_DISCOVERY_FAILED' }; }
+    try { return await readBridgeDiscovery(request, env, undefined, 'CONVERSATIONAL'); } catch (cause) { return { ok: false, code: cause instanceof Error && /^[A-Z][A-Z0-9_]{2,80}$/.test(cause.message) ? cause.message : 'ROUTE_DISCOVERY_FAILED' }; }
   };
   return copilotToolkitOf(networkScope(env), ports ?? { discover, prepareCatalogs: authoringCatalogPreparer(env) });
 }

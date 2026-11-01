@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 /** Bounded read failover. A provider refusal/revert is authoritative; transport outages can use another configured path. */
-import { chainBoundRpc, createBaseSepoliaReadRpc, pacedReadRpc } from './public-testnet-rpc.ts';
+import { chainBoundRpc, createBaseSepoliaReadRpc, pacedReadRpc, readPacingFor } from './public-testnet-rpc.ts';
 import type { Rpc } from './public-testnet-service.ts';
 
 type Env = Readonly<Record<string, string | undefined>>;
@@ -44,8 +44,11 @@ export function failoverReadRpc(providers: readonly Rpc[], chainId: number): Rpc
   };
 }
 
-export function bridgeReadRpc(chainId: number, primary: string, methods: readonly string[], env: Env): Rpc {
+export function bridgeReadRpc(chainId: number, primary: string, methods: readonly string[], env: Env, primaryIsOperatorEndpoint = false): Rpc {
   // At most four 3s paths. Queue backoff belongs to the durable worker, never a six-retry request behind the UI.
-  const clients = bridgeRpcUrls(chainId, primary, env).map(url => pacedReadRpc(createBaseSepoliaReadRpc(url, methods, 3_000), { retries: 0 }));
+  // BUILD-FLOFI-EXECUTION-PERFORMANCE-001: operator endpoints (a configured primary, the fallbacks and the keyed provider) may use the dedicated
+  // read profile; a public default primary keeps the measured pacing.
+  const clients = bridgeRpcUrls(chainId, primary, env).map((url, index) => pacedReadRpc(createBaseSepoliaReadRpc(url, methods, 3_000),
+    { retries: 0, ...readPacingFor(env, index > 0 || primaryIsOperatorEndpoint) }));
   return failoverReadRpc(clients, chainId);
 }

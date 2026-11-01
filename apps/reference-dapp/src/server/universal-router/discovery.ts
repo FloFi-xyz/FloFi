@@ -17,7 +17,7 @@
 import { UNIVERSAL_NETWORKS, UNIVERSAL_QUOTE_SUBJECTS, type UniversalNetwork, type UniversalRoutingProvider, type UniversalToken } from '@defi-workflow-engine/workflow-contracts';
 import { UNIVERSAL_ROUTER_DEPLOYMENT } from '@defi-workflow-engine/action-registry';
 import { createLogger } from '@defi-workflow-engine/cloud-runtime';
-import { providerHttpError, providerRefusalCode, type UniversalHttp } from './http.ts';
+import { providerHttpError, providerRefusalCode, type UniversalHttp, type UniversalHttpOptions } from './http.ts';
 import { normalizeRelayQuote, relayCurrency, relayQuoteBody, relayRefusal, RELAY_API, type UniversalQuoteRequest } from './relay-provider.ts';
 
 export type DiscoveryStatus = 'EXECUTABLE' | 'LIVE_QUOTE' | 'SUPPORTED_BY_PROVIDER' | 'TEMPORARILY_UNAVAILABLE' | 'NO_ROUTE' | 'BELOW_MINIMUM' | 'ABOVE_MAXIMUM' | 'INSUFFICIENT_LIQUIDITY' | 'INTERNAL_ERROR';
@@ -33,7 +33,13 @@ export type DiscoveryResult = { readonly format: 'flofi.universal-discovery.v1';
   readonly inputToken: UniversalToken; readonly outputToken: UniversalToken; readonly amount: string; readonly observedAt: string;
   readonly quoteSubjects: 'OWNER' | 'PUBLIC_QUOTE_SUBJECT'; readonly candidates: readonly DiscoveryCandidate[];
   /** Index of the executable candidate with the highest guaranteed minimum (the automatic choice), or null. */ readonly recommended: number | null;
-  readonly status: DiscoveryStatus };
+  readonly status: DiscoveryStatus;
+  /**
+   * BUILD-FLOFI-EXECUTION-PERFORMANCE-001 (optional for older producers): COMPLETE when every provider answered; PARTIAL when the discovery window
+   * closed first (`pendingProviders` were aborted and appear as TEMPORARILY_UNAVAILABLE). Presentation only: never a financial input.
+   */
+  readonly completeness?: 'COMPLETE' | 'PARTIAL'; readonly pendingProviders?: readonly UniversalRoutingProvider[];
+  readonly timing?: { readonly firstExecutableMs: number | null; readonly totalMs: number; readonly providers: readonly DiscoveryTiming[] } };
 export const QUOTE_SUBJECTS = UNIVERSAL_QUOTE_SUBJECTS;
 const UNITS = /^(0|[1-9][0-9]{0,77})$/;
 const AVAILABILITY = /_(HTTP_\d+|RATE_LIMITED|UNAVAILABLE|RESPONSE_TOO_LARGE|RESPONSE_INVALID|URL_INVALID)$/;
@@ -56,9 +62,9 @@ const sameAddress = (network: UniversalNetwork, a: unknown, b: string) => typeof
 const tokenKey = (n: UniversalNetwork, t: UniversalToken, native: string) => t.kind === 'NATIVE' ? native : t.address!;
 
 // --- Relay -------------------------------------------------------------------------------------------------------------
-async function discoverRelay(http: UniversalHttp, api: string, r: UniversalQuoteRequest, headers?: Record<string, string>): Promise<DiscoveryCandidate> {
+async function discoverRelay(http: UniversalHttp, api: string, r: UniversalQuoteRequest, headers: Record<string, string> | undefined, o: UniversalHttpOptions): Promise<DiscoveryCandidate> {
   let raw: unknown;
-  try { raw = await http.post(`${api}/quote/v2`, relayQuoteBody(r), headers); } catch (cause) { return failed('relay', 'relay-depository', cause); }
+  try { raw = await http.post(`${api}/quote/v2`, relayQuoteBody(r), headers, o); } catch (cause) { return failed('relay', 'relay-depository', cause); }
   const refused = providerHttpError(raw);
   if (refused) {
     const code = [401, 403, 408, 425, 429].includes(refused.status) || refused.status >= 500 ? providerRefusalCode('RELAY', refused) : relayRefusal(refused.message);
@@ -85,13 +91,14 @@ async function discoverRelay(http: UniversalHttp, api: string, r: UniversalQuote
 }
 
 // --- LI.FI -------------------------------------------------------------------------------------------------------------
-async function discoverLifi(http: UniversalHttp, api: string, r: DiscoveryRequest, owner: string, recipient: string, headers?: Record<string, string>): Promise<DiscoveryCandidate[]> {
+async function discoverLifi(http: UniversalHttp, api: string, r: DiscoveryRequest, owner: string, recipient: string, headers: Record<string, string> | undefined,
+  o: UniversalHttpOptions): Promise<DiscoveryCandidate[]> {
   const S = r.source, D = r.destination, native = (n: UniversalNetwork) => n.ecosystem === 'EVM' ? '0x0000000000000000000000000000000000000000' : '11111111111111111111111111111111';
   let raw: unknown;
   try {
     raw = await http.post(`${api}/advanced/routes`, { fromChainId: S.providers.lifi.chainId, toChainId: D.providers.lifi.chainId, fromTokenAddress: tokenKey(S, r.inputToken, native(S)),
       toTokenAddress: tokenKey(D, r.outputToken, native(D)), fromAmount: r.amount, fromAddress: owner, toAddress: recipient,
-      options: { slippage: r.slippageBps / 10_000, order: 'CHEAPEST', integrator: UNIVERSAL_ROUTER_DEPLOYMENT.providers.lifi.integrator, allowSwitchChain: false } }, headers);
+      options: { slippage: r.slippageBps / 10_000, order: 'CHEAPEST', integrator: UNIVERSAL_ROUTER_DEPLOYMENT.providers.lifi.integrator, allowSwitchChain: false } }, headers, o);
   } catch (cause) { return [failed('lifi', 'lifi', cause)]; }
   const refused = providerHttpError(raw);
   if (refused) { const code = providerRefusalCode('LIFI', refused); return [candidate('lifi', 'lifi', refusalStatus(code), { reason: code })]; }
@@ -120,7 +127,7 @@ async function discoverLifi(http: UniversalHttp, api: string, r: DiscoveryReques
 }
 
 // --- Mayan -------------------------------------------------------------------------------------------------------------
-async function discoverMayan(http: UniversalHttp, api: string, r: DiscoveryRequest, sdkVersion: string): Promise<DiscoveryCandidate[]> {
+async function discoverMayan(http: UniversalHttp, api: string, r: DiscoveryRequest, sdkVersion: string, o: UniversalHttpOptions): Promise<DiscoveryCandidate[]> {
   const S = r.source, D = r.destination;
   if (!S.providers.mayan || !D.providers.mayan) return [candidate('mayan', 'mayan', 'NO_ROUTE', { reason: 'MAYAN_NETWORK_UNSUPPORTED' })];
   // Mayan encodes every native coin (SOL included) as the zero address.
@@ -128,7 +135,7 @@ async function discoverMayan(http: UniversalHttp, api: string, r: DiscoveryReque
   const params = new URLSearchParams({ amountIn64: r.amount, fromToken: token(r.inputToken), fromChain: S.providers.mayan, toToken: token(r.outputToken), toChain: D.providers.mayan,
     slippageBps: String(r.slippageBps), gasDrop: '0', swift: 'true', mctp: 'true', fastMctp: 'true', wormhole: 'true', gasless: 'false', onlyDirect: 'false', fullList: 'true', sdkVersion });
   let raw: unknown;
-  try { raw = await http.get(`${api}/quote?${params}`); } catch (cause) { return [failed('mayan', 'mayan', cause)]; }
+  try { raw = await http.get(`${api}/quote?${params}`, undefined, o); } catch (cause) { return [failed('mayan', 'mayan', cause)]; }
   const refused = providerHttpError(raw);
   // An API version refusal is Mayan's availability to this FloFi build, never a statement about the route.
   if (refused && /SDK_VERSION/i.test(refused.message)) return [candidate('mayan', 'mayan', 'TEMPORARILY_UNAVAILABLE', { reason: 'MAYAN_API_VERSION_REJECTED' })];
@@ -149,7 +156,7 @@ async function discoverMayan(http: UniversalHttp, api: string, r: DiscoveryReque
 }
 
 // --- Across ------------------------------------------------------------------------------------------------------------
-async function discoverAcross(http: UniversalHttp, api: string, r: DiscoveryRequest, owner: string, recipient: string): Promise<DiscoveryCandidate> {
+async function discoverAcross(http: UniversalHttp, api: string, r: DiscoveryRequest, owner: string, recipient: string, o: UniversalHttpOptions): Promise<DiscoveryCandidate> {
   const S = r.source, D = r.destination;
   if (S.providers.across === null || D.providers.across === null) return candidate('across', 'across', 'NO_ROUTE', { reason: 'ACROSS_NETWORK_UNSUPPORTED' });
   // Across names native ETH by the chain's wrapped token with exact-input semantics; FloFi asks only for ERC-20 pairs here.
@@ -158,7 +165,7 @@ async function discoverAcross(http: UniversalHttp, api: string, r: DiscoveryRequ
     originChainId: String(S.providers.across), destinationChainId: String(D.providers.across), depositor: owner, recipient, refundAddress: owner, refundOnOrigin: 'true',
     slippage: String(r.slippageBps / 10_000) });
   let raw: unknown;
-  try { raw = await http.get(`${api}/swap/approval?${params}`); } catch (cause) { return failed('across', 'across', cause); }
+  try { raw = await http.get(`${api}/swap/approval?${params}`, undefined, o); } catch (cause) { return failed('across', 'across', cause); }
   const refused = providerHttpError(raw);
   if (refused) { const code = providerRefusalCode('ACROSS', refused); return candidate('across', 'across', refusalStatus(code), { reason: code }); }
   if (!isObject(raw)) return candidate('across', 'across', 'TEMPORARILY_UNAVAILABLE', { reason: 'ACROSS_RESPONSE_INVALID' });
@@ -173,34 +180,91 @@ async function discoverAcross(http: UniversalHttp, api: string, r: DiscoveryRequ
 }
 
 const RANK: Readonly<Record<DiscoveryStatus, number>> = { EXECUTABLE: 0, LIVE_QUOTE: 1, SUPPORTED_BY_PROVIDER: 2, BELOW_MINIMUM: 3, ABOVE_MAXIMUM: 4, INSUFFICIENT_LIQUIDITY: 5, TEMPORARILY_UNAVAILABLE: 6, NO_ROUTE: 7, INTERNAL_ERROR: 8 };
+const rank = (candidates: readonly DiscoveryCandidate[]) => [...candidates].sort((a, b) => RANK[a.status] - RANK[b.status] ||
+  (BigInt(b.minimumOutput ?? '0') > BigInt(a.minimumOutput ?? '0') ? 1 : BigInt(b.minimumOutput ?? '0') < BigInt(a.minimumOutput ?? '0') ? -1 : 0));
+
+/**
+ * BUILD-FLOFI-EXECUTION-PERFORMANCE-001: the discovery window. Providers are asked at once; discovery answers at the earliest of
+ *  - every provider answered (COMPLETE);
+ *  - an executable route FloFi verified (the universal router's Relay route) arrived and `compareMs` passed for the others to compare (PARTIAL);
+ *  - `deadlineMs` passed (PARTIAL).
+ * A provider still pending then is aborted (request-scoped cancellation) and reported TEMPORARILY_UNAVAILABLE with `<PROVIDER>_DISCOVERY_WINDOW_ELAPSED`,
+ * so one hanging provider never hides an executable route or holds a chat tool past its limit. Only Relay can be EXECUTABLE here, so the window never
+ * changes which route is recommended: the others are informational quotes. A provider answer that lands after the window is discarded, never merged.
+ * Discovery stays read-only; Review re-quotes and re-verifies everything for the owner.
+ */
+export type DiscoveryWindow = { readonly deadlineMs: number; readonly compareMs: number };
+/** UI and estimates: under the cloud flow's 30 s and the estimate's 45 s limits. */
+export const DISCOVERY_WINDOW: DiscoveryWindow = Object.freeze({ deadlineMs: 12_000, compareMs: 1_500 });
+/** Conversational tools (web chat, channels): under the tool's 8 s limit, so a partial answer arrives instead of a timeout. */
+export const CONVERSATIONAL_DISCOVERY_WINDOW: DiscoveryWindow = Object.freeze({ deadlineMs: 6_500, compareMs: 1_000 });
+const PROVIDER_CODE: Readonly<Record<UniversalRoutingProvider, string>> = { relay: 'RELAY', lifi: 'LIFI', mayan: 'MAYAN', across: 'ACROSS' };
+export type DiscoveryTiming = { readonly provider: UniversalRoutingProvider; readonly durationMs: number | null; readonly settled: boolean };
+
 export function createUniversalDiscovery(config: { readonly http: UniversalHttp; readonly now?: () => Date; readonly reviewTtlSeconds?: number;
   readonly correlationId?: string;
   readonly apis?: { readonly relay?: string; readonly lifi?: string; readonly mayan?: string; readonly across?: string };
-  readonly keys?: { readonly relay?: string; readonly lifi?: string } }) {
-  const now = config.now ?? (() => new Date()), P = UNIVERSAL_ROUTER_DEPLOYMENT.providers;
+  readonly keys?: { readonly relay?: string; readonly lifi?: string };
+  readonly window?: DiscoveryWindow; readonly clock?: () => number }) {
+  const now = config.now ?? (() => new Date()), P = UNIVERSAL_ROUTER_DEPLOYMENT.providers, clock = config.clock ?? (() => performance.now());
   const apis = { relay: config.apis?.relay ?? RELAY_API, lifi: config.apis?.lifi ?? P.lifi.api, mayan: config.apis?.mayan ?? P.mayan.api, across: config.apis?.across ?? P.across.api };
+  const window = config.window ?? DISCOVERY_WINDOW;
+  if (!(window.deadlineMs > 0 && window.compareMs >= 0 && window.compareMs <= window.deadlineMs)) throw new Error('UNIVERSAL_DISCOVERY_WINDOW_INVALID');
   return {
-    async discover(r: DiscoveryRequest, providers: readonly UniversalRoutingProvider[] = ['relay', 'lifi', 'mayan', 'across']): Promise<DiscoveryResult> {
+    async discover(r: DiscoveryRequest, providers: readonly UniversalRoutingProvider[] = ['relay', 'lifi', 'mayan', 'across'], options: { readonly signal?: AbortSignal } = {}): Promise<DiscoveryResult> {
       const subject = (n: UniversalNetwork) => n.ecosystem === 'EVM' ? QUOTE_SUBJECTS.EVM : QUOTE_SUBJECTS.SOLANA;
       const owner = r.owner ?? subject(r.source), recipient = r.recipient ?? subject(r.destination);
       const relayRequest: UniversalQuoteRequest = { source: r.source, destination: r.destination, inputToken: r.inputToken, outputToken: r.outputToken, amount: r.amount, owner,
         recipient, slippageBps: r.slippageBps, nowMs: now().getTime(), reviewTtlSeconds: config.reviewTtlSeconds ?? UNIVERSAL_ROUTER_DEPLOYMENT.reviewTtlSeconds,
         inputTokenProgram: r.inputTokenProgram ?? (r.source.ecosystem === 'SOLANA' && r.inputToken.kind === 'TOKEN' ? 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA' : null) };
       const relayHeaders = config.keys?.relay ? { 'x-api-key': config.keys.relay } : undefined, lifiHeaders = config.keys?.lifi ? { 'x-lifi-api-key': config.keys.lifi } : undefined;
-      const tasks: Promise<DiscoveryCandidate[]>[] = providers.map(p => p === 'relay' ? discoverRelay(config.http, apis.relay, relayRequest, relayHeaders).then(c => [c])
-        : p === 'lifi' ? discoverLifi(config.http, apis.lifi, r, owner, recipient, lifiHeaders) : p === 'mayan' ? discoverMayan(config.http, apis.mayan, r, P.mayan.sdkVersion)
-          : discoverAcross(config.http, apis.across, r, owner, recipient).then(c => [c]));
-      const candidates = (await Promise.all(tasks)).flat().sort((a, b) => RANK[a.status] - RANK[b.status] ||
-        (BigInt(b.minimumOutput ?? '0') > BigInt(a.minimumOutput ?? '0') ? 1 : BigInt(b.minimumOutput ?? '0') < BigInt(a.minimumOutput ?? '0') ? -1 : 0));
-      for (const c of candidates) createLogger({ service: 'flofi-quotes' }).info('quote.provider_result', {
+      // One controller per discovery: the window closing (or the caller cancelling) aborts every request still in flight.
+      const controller = new AbortController(), o: UniversalHttpOptions = { signal: controller.signal };
+      const cancel = () => controller.abort();
+      options.signal?.addEventListener('abort', cancel, { once: true });
+      const started = clock(), answers = new Map<UniversalRoutingProvider, DiscoveryCandidate[]>(), durations = new Map<UniversalRoutingProvider, number>();
+      let firstExecutableMs: number | null = null, settle: () => void = () => undefined, compareTimer: ReturnType<typeof setTimeout> | undefined;
+      const closed = new Promise<void>(resolve => { settle = resolve; });
+      const deadline = setTimeout(() => settle(), window.deadlineMs);
+      const ask = (p: UniversalRoutingProvider): Promise<DiscoveryCandidate[]> => p === 'relay' ? discoverRelay(config.http, apis.relay, relayRequest, relayHeaders, o).then(c => [c])
+        : p === 'lifi' ? discoverLifi(config.http, apis.lifi, r, owner, recipient, lifiHeaders, o) : p === 'mayan' ? discoverMayan(config.http, apis.mayan, r, P.mayan.sdkVersion, o)
+          : discoverAcross(config.http, apis.across, r, owner, recipient, o).then(c => [c]);
+      let open = true;
+      const tasks = providers.map(p => ask(p).catch(cause => [failed(p, p, cause)]).then(found => {
+        if (!open) return; // late: the window already closed; never merged into a delivered result
+        answers.set(p, found); durations.set(p, Math.round(clock() - started));
+        if (firstExecutableMs === null && found.some(c => c.status === 'EXECUTABLE')) {
+          firstExecutableMs = Math.round(clock() - started);
+          compareTimer = setTimeout(() => settle(), window.compareMs);
+        }
+        if (answers.size === providers.length) settle();
+      }));
+      if (options.signal?.aborted) settle();
+      else options.signal?.addEventListener('abort', () => settle(), { once: true });
+      await Promise.race([closed, Promise.all(tasks)]);
+      open = false;
+      clearTimeout(deadline); clearTimeout(compareTimer);
+      options.signal?.removeEventListener('abort', cancel);
+      const pending = providers.filter(p => !answers.has(p));
+      if (pending.length) cancel();
+      if (options.signal?.aborted) throw new Error('UNIVERSAL_DISCOVERY_CANCELLED');
+      // Ordered by the caller's provider order before ranking, so equal ranks keep the deterministic provider order.
+      const candidates = rank(providers.flatMap(p => answers.get(p) ?? [candidate(p, p, 'TEMPORARILY_UNAVAILABLE', { reason: `${PROVIDER_CODE[p]}_DISCOVERY_WINDOW_ELAPSED` })]));
+      const totalMs = Math.round(clock() - started);
+      const log = createLogger({ service: 'flofi-quotes' });
+      for (const c of candidates) log.info('quote.provider_result', {
         correlation_id: config.correlationId, source_chain: r.source.chain, destination_chain: r.destination.chain,
-        provider: c.provider, status: c.status, code: c.reason });
+        provider: c.provider, status: c.status, code: c.reason, duration_ms: durations.get(c.provider) ?? null });
+      log.info('quote.discovery_window', { correlation_id: config.correlationId, source_chain: r.source.chain, destination_chain: r.destination.chain,
+        completeness: pending.length ? 'PARTIAL' : 'COMPLETE', pending_providers: pending.join(','), first_executable_ms: firstExecutableMs, duration_ms: totalMs });
       // The automatic choice is the universal router's best guaranteed minimum (the certified Router pairs are chosen on their own flow).
       const recommended = candidates.findIndex(c => c.executableBy === 'UNIVERSAL_ROUTER');
       const status = candidates.length ? candidates[0]!.status : 'NO_ROUTE';
       return { format: 'flofi.universal-discovery.v1', sourceChain: r.source.chain, destinationChain: r.destination.chain, inputToken: r.inputToken, outputToken: r.outputToken,
         amount: r.amount, observedAt: now().toISOString(), quoteSubjects: r.owner && r.recipient ? 'OWNER' : 'PUBLIC_QUOTE_SUBJECT', candidates,
-        recommended: recommended >= 0 ? recommended : null, status };
+        recommended: recommended >= 0 ? recommended : null, status,
+        completeness: pending.length ? 'PARTIAL' : 'COMPLETE', pendingProviders: pending,
+        timing: { firstExecutableMs, totalMs, providers: providers.map(p => ({ provider: p, durationMs: durations.get(p) ?? null, settled: answers.has(p) })) } };
     },
   };
 }

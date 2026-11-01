@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import type { AssetCatalog } from '@defi-workflow-engine/action-registry';
-import { chainBoundRpc, createBaseSepoliaReadRpc, pacedReadRpc } from './public-testnet-rpc.ts';
+import { chainBoundRpc, createBaseSepoliaReadRpc, pacedReadRpc, readPacingFor } from './public-testnet-rpc.ts';
 import { createOfficialCatalogLoader, type RegistryFetch } from './network-catalog.ts';
 import type { CatalogSwapRuntime, Rpc } from './public-testnet-service.ts';
 
@@ -28,7 +28,7 @@ export function createEvmCatalogRuntime(profile: { chain: string; chainId: numbe
   const rpc = (m: 'live' | 'harness', env: Env, methods: readonly string[] = EVM_CATALOG_RPC_METHODS): Rpc => {
     if (m === 'harness' && !profile.harness) throw new Error(`${profile.prefix}_MAINNET_NOT_ENABLED`);
     const read = createBaseSepoliaReadRpc(m === 'harness' ? profile.harness!.rpc : rpcUrl(env[`${envPrefix}_RPC_URL`]), methods);
-    return chainBoundRpc(m === 'harness' ? read : pacedReadRpc(read), profile.chainId);
+    return chainBoundRpc(m === 'harness' ? read : pacedReadRpc(read, readPacingFor(env, Boolean(env[`${envPrefix}_RPC_URL`]))), profile.chainId);
   };
   function createCatalogLoader(options: { mode: 'live' | 'harness'; fetcher?: RegistryFetch; now?: () => Date; ttlMs?: number }) {
     if (options.mode === 'harness' && !profile.harness) throw new Error(`${profile.prefix}_MAINNET_NOT_ENABLED`);
@@ -43,7 +43,9 @@ export function createEvmCatalogRuntime(profile: { chain: string; chainId: numbe
     return loader;
   }
   const swapRuntime = (m: 'live' | 'harness', env: Env, load: (chain: string) => Promise<AssetCatalog>): CatalogSwapRuntime =>
-    ({ catalogFor: load, provenance: m === 'harness' ? 'MOCKED' : 'PUBLIC_MAINNET', executionEnabled: ownerExecutionEnabled(m, env) });
+    ({ catalogFor: load, provenance: m === 'harness' ? 'MOCKED' : 'PUBLIC_MAINNET', executionEnabled: ownerExecutionEnabled(m, env),
+      // BUILD-FLOFI-EXECUTION-PERFORMANCE-001: `GRYLOO_DEPLOYMENT_FACT_CACHE=off` re-verifies every immutable deployment fact on every quote.
+      ...env.GRYLOO_DEPLOYMENT_FACT_CACHE === 'off' ? { deploymentFacts: null } : {} });
   async function authoringCatalog(deploymentMode: EvmCatalogMode | null, env: Env = process.env) {
     const m = deploymentMode ?? mode(env);
     if (m === 'off') throw new Error(`${profile.prefix}_MAINNET_NOT_ENABLED`);

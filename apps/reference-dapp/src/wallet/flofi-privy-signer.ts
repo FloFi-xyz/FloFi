@@ -21,7 +21,11 @@ const toBase64 = (bytes: Uint8Array) => { let text = ''; for (const byte of byte
 const toHex = (bytes: Uint8Array) => Array.from(bytes, byte => byte.toString(16).padStart(2, '0')).join('');
 /** What Privy's confirmation screen states: FloFi's server summary of the reviewed attempt (built from its own Review, never from the page). */
 export function privyReview(summary: SigningSummary): PrivyReview {
-  const lines = [`${summary.network}${summary.realFunds ? ' (real funds)' : ''}`, ...summary.lines.map(line => `${line.label}: ${line.value}`), `FloFi run ${summary.runId}`];
+  // BUILD-FLOFI-EXECUTION-PERFORMANCE-001: the Review's own deadline, so the person knows how long the confirmation stays valid (a confirmation
+  // after it is refused at broadcast and reconciled, never sent).
+  const expires = summary.expiresAt && Number.isFinite(Date.parse(summary.expiresAt)) ? `Confirm before ${new Date(summary.expiresAt).toISOString().slice(11, 19)} UTC` : null;
+  const lines = [`${summary.network}${summary.realFunds ? ' (real funds)' : ''}`, ...expires ? [expires] : [], ...summary.lines.map(line => `${line.label}: ${line.value}`),
+    `FloFi run ${summary.runId}`];
   return { title: 'FloFi reviewed strategy', action: summary.action.slice(0, 80), description: lines.join(' · ').slice(0, 600) };
 }
 /** After Privy was asked: a cancel there signed nothing; anything else may have signed. */

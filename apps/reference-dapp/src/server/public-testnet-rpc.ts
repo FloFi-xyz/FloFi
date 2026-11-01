@@ -88,10 +88,13 @@ export function baseSepoliaRpcUrl(override: string | undefined): string {
  * during the BUILD-ROUTER-001 preflight). Every router RPC is a read, so calls are paced through one queue per transport and
  * transport failures are retried with backoff. An answer the node gave (including a JSON-RPC error) is never retried.
  */
-export function pacedReadRpc(rpc: Rpc, options: { minIntervalMs?: number; retries?: number; sleep?: (ms: number) => Promise<void> } = {}): Rpc {
+export function pacedReadRpc(rpc: Rpc, options: { minIntervalMs?: number; retries?: number; sleep?: (ms: number) => Promise<void>; maxInFlight?: number } = {}): Rpc {
   // Measured on public Base (2026-10-04): a burst of ~5 eth_call succeeds, then HTTP 429 for several seconds.
   const minIntervalMs = options.minIntervalMs ?? 250, retries = options.retries ?? 6;
   const sleep = options.sleep ?? ((ms: number) => new Promise<void>(resolve => setTimeout(resolve, ms)));
+  const maxInFlight = options.maxInFlight ?? 1;
+  if (!Number.isSafeInteger(maxInFlight) || maxInFlight < 1 || maxInFlight > 8) throw new Error('RPC_PACING_INVALID');
+  if (maxInFlight > 1) return concurrentPacedRpc(rpc, minIntervalMs, retries, sleep, maxInFlight);
   let queue: Promise<unknown> = Promise.resolve(), last = 0;
   return (method, params) => {
     const run = queue.then(async () => {
@@ -109,4 +112,41 @@ export function pacedReadRpc(rpc: Rpc, options: { minIntervalMs?: number; retrie
     queue = run.catch(() => undefined);
     return run;
   };
+}
+/**
+ * BUILD-FLOFI-EXECUTION-PERFORMANCE-001: the dedicated-endpoint variant. Starts stay at least `minIntervalMs` apart, at most `maxInFlight` reads
+ * run at once, and a transport failure pauses every later start for its backoff (the shared pause the one-at-a-time queue gives today). Same
+ * retry rule: only PUBLIC_RPC_UNAVAILABLE is retried; an answer the node gave never is. Reads only; no send method passes through here.
+ */
+function concurrentPacedRpc(rpc: Rpc, minIntervalMs: number, retries: number, sleep: (ms: number) => Promise<void>, maxInFlight: number): Rpc {
+  let last = 0, pausedUntil = 0, active = 0;
+  const waiting: (() => void)[] = [];
+  const acquire = async () => {
+    for (;;) {
+      if (active < maxInFlight) {
+        const wait = Math.max(last + minIntervalMs, pausedUntil) - Date.now();
+        if (wait <= 0) { active++; last = Date.now(); return; }
+        await sleep(wait);
+      } else await new Promise<void>(resolve => waiting.push(resolve));
+    }
+  };
+  const release = () => { active--; waiting.shift()?.(); };
+  return async (method, params) => {
+    for (let attempt = 0; ; attempt++) {
+      await acquire();
+      try { return await rpc(method, params); }
+      catch (cause) {
+        if (!(cause instanceof Error && cause.message === 'PUBLIC_RPC_UNAVAILABLE') || attempt >= retries) throw cause;
+        pausedUntil = Math.max(pausedUntil, Date.now() + 500 * 2 ** attempt);
+      } finally { release(); }
+    }
+  };
+}
+/**
+ * BUILD-FLOFI-EXECUTION-PERFORMANCE-001: read pacing for an operator-configured RPC endpoint. The public endpoints keep the measured
+ * one-at-a-time, 250 ms pacing. `GRYLOO_RPC_READ_PROFILE=dedicated` declares that the configured `GRYLOO_<NETWORK>_RPC_URL` endpoints are keyed
+ * providers with capacity for parallel reads (25 ms between starts, at most 6 in flight); it never applies to a public default URL.
+ */
+export function readPacingFor(env: Readonly<Record<string, string | undefined>>, operatorEndpoint: boolean): { minIntervalMs?: number; maxInFlight?: number } {
+  return operatorEndpoint && env.GRYLOO_RPC_READ_PROFILE === 'dedicated' ? { minIntervalMs: 25, maxInFlight: 6 } : {};
 }

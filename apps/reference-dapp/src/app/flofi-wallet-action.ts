@@ -43,10 +43,15 @@ async function signedIn(): Promise<{ host: AccountHost; session: AccountSessionT
   const session = await currentAccountSession(host);
   return host && session ? { host, session } : fail('FLOFI_WALLET_ACCOUNT_REQUIRED');
 }
-/** The account's Privy-managed wallets (legacy Turnkey wallets never sign). */
+/**
+ * The account's Privy-managed wallets (legacy Turnkey wallets never sign). BUILD-FLOFI-EXECUTION-PERFORMANCE-001: one wallet query on the signing
+ * path instead of the account record's three (account, identities, wallets); only an account with no wallet at all is checked for existence, so
+ * a removed account still answers FLOFI_WALLET_ACCOUNT_REQUIRED exactly as before.
+ */
 async function accountManagedWallets(host: AccountHost, session: AccountSessionToken) {
-  const account = await host.store.account(session.accountId) ?? fail('FLOFI_WALLET_ACCOUNT_REQUIRED');
-  return managedWallets(account!.wallets);
+  const wallets = await host.store.wallets(session.accountId);
+  if (!wallets.length && !await host.store.account(session.accountId)) fail('FLOFI_WALLET_ACCOUNT_REQUIRED');
+  return managedWallets(wallets);
 }
 const legacyOrigin = () => { const origin = walletOrigin(process.env); return origin && managedWalletsAvailable(process.env) ? origin : null; };
 

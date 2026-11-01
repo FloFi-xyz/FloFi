@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { readFileSync } from 'node:fs';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { UNIVERSAL_NETWORKS, type UniversalToken } from '@defi-workflow-engine/workflow-contracts';
 import { createUniversalDiscovery } from './discovery.ts';
 import type { UniversalHttp } from './http.ts';
@@ -97,4 +97,111 @@ it('malformed provider responses cannot claim a quote or execution', async () =>
   const d = createUniversalDiscovery({ http: http({ 'li.quest': {}, 'price-api.mayan.finance': {}, 'app.across.to': {} }) });
   const result = await d.discover({ source: UNIVERSAL_NETWORKS.base, destination: UNIVERSAL_NETWORKS['arbitrum-one'], inputToken: BASE_USDC, outputToken: ARB_USDC, amount: '1000000', slippageBps: 100 }, ['lifi', 'mayan', 'across']);
   expect(result.candidates.every(c => c.status !== 'EXECUTABLE' && c.status !== 'LIVE_QUOTE' && c.executableBy === null)).toBe(true);
+});
+
+describe('BUILD-FLOFI-EXECUTION-PERFORMANCE-001 discovery window', () => {
+  const request = { source: UNIVERSAL_NETWORKS.solana, destination: UNIVERSAL_NETWORKS.base, inputToken: SOL_USDC, outputToken: BASE_USDC, amount: '20000000',
+    slippageBps: 200, owner: String(relay.request!.user), recipient: String(relay.request!.recipient) };
+  type Behaviour = { readonly after: number; readonly value?: unknown; readonly hang?: true };
+  /** Each provider answers after `after` ms (fake clock) or hangs until its request is aborted; every request's signal is recorded. */
+  function timedHttp(routes: Record<string, Behaviour>, signals: Record<string, AbortSignal | undefined>): UniversalHttp {
+    const answer = (url: string, options?: { signal?: AbortSignal }) => {
+      const key = Object.keys(routes).find(k => url.includes(k));
+      if (!key) return Promise.reject(new Error('UNIVERSAL_PROVIDER_UNAVAILABLE'));
+      signals[key] = options?.signal;
+      const b = routes[key]!;
+      return new Promise((resolve, reject) => {
+        const timer = b.hang ? undefined : setTimeout(() => resolve(b.value), b.after);
+        options?.signal?.addEventListener('abort', () => { clearTimeout(timer); reject(new Error('UNIVERSAL_PROVIDER_UNAVAILABLE')); }, { once: true });
+      });
+    };
+    return { get: (url, _h, o) => answer(url, o), post: (url, _b, _h, o) => answer(url, o) };
+  }
+  const lifi = fixture('lifi-routes-sol-base').response, mayan = fixture('mayan-quote-sol-base').response;
+  const clockOf = () => () => Date.now();
+
+  it('a hanging provider never hides the executable route: Relay answers, the others are compared for the window, the straggler is aborted', async () => {
+    vi.useFakeTimers({ now: now() });
+    try {
+      const signals: Record<string, AbortSignal | undefined> = {};
+      const discovery = createUniversalDiscovery({ now, clock: clockOf(), window: { deadlineMs: 12_000, compareMs: 1_500 },
+        http: timedHttp({ 'api.relay.link/quote': { after: 400, value: relay.response }, 'li.quest': { after: 900, value: lifi },
+          'price-api.mayan.finance': { after: 0, hang: true } }, signals) });
+      const pending = discovery.discover(request);
+      await vi.advanceTimersByTimeAsync(1_899);
+      let settled = false; void pending.then(() => { settled = true; });
+      await vi.advanceTimersByTimeAsync(0);
+      expect(settled).toBe(false);
+      await vi.advanceTimersByTimeAsync(2);
+      const result = await pending;
+      expect(result.completeness).toBe('PARTIAL');
+      expect(result.pendingProviders).toEqual(['mayan']);
+      expect(result.candidates[result.recommended!]).toMatchObject({ provider: 'relay', status: 'EXECUTABLE', executableBy: 'UNIVERSAL_ROUTER', minimumOutput: '19574715' });
+      expect(result.candidates.find(c => c.provider === 'mayan')).toMatchObject({ status: 'TEMPORARILY_UNAVAILABLE', reason: 'MAYAN_DISCOVERY_WINDOW_ELAPSED', executableBy: null });
+      expect(result.candidates.filter(c => c.provider === 'lifi').every(c => c.status === 'LIVE_QUOTE')).toBe(true);
+      expect(result.timing).toMatchObject({ firstExecutableMs: 400, totalMs: 1_900 });
+      expect(signals['price-api.mayan.finance']?.aborted).toBe(true);
+    } finally { vi.useRealTimers(); }
+  });
+
+  it('every provider answering inside the window gives the COMPLETE result, unchanged from waiting for all', async () => {
+    vi.useFakeTimers({ now: now() });
+    try {
+      const routes = { 'api.relay.link/quote': { after: 300, value: relay.response }, 'li.quest': { after: 500, value: lifi }, 'price-api.mayan.finance': { after: 700, value: mayan } };
+      const windowed = createUniversalDiscovery({ now, clock: clockOf(), http: timedHttp(routes, {}) });
+      const pending = windowed.discover(request);
+      await vi.advanceTimersByTimeAsync(700);
+      const result = await pending;
+      expect(result.completeness).toBe('COMPLETE');
+      expect(result.pendingProviders).toEqual([]);
+      vi.useRealTimers();
+      const plain = await createUniversalDiscovery({ now, http: http({ 'api.relay.link/quote': relay.response, 'li.quest': lifi, 'price-api.mayan.finance': mayan }) }).discover(request);
+      expect(result.candidates).toEqual(plain.candidates);
+      expect(result.recommended).toBe(plain.recommended);
+    } finally { vi.useRealTimers(); }
+  });
+
+  it('without an executable answer the deadline bounds the wait; a late Relay answer is discarded, never merged', async () => {
+    vi.useFakeTimers({ now: now() });
+    try {
+      const discovery = createUniversalDiscovery({ now, clock: clockOf(), window: { deadlineMs: 6_500, compareMs: 1_000 },
+        http: timedHttp({ 'api.relay.link/quote': { after: 9_000, value: relay.response }, 'li.quest': { after: 200, value: lifi } }, {}) });
+      const pending = discovery.discover(request, ['relay', 'lifi']);
+      await vi.advanceTimersByTimeAsync(6_500);
+      const result = await pending;
+      const snapshot = structuredClone(result);
+      expect(result.recommended).toBeNull();
+      expect(result.candidates.find(c => c.provider === 'relay')).toMatchObject({ status: 'TEMPORARILY_UNAVAILABLE', reason: 'RELAY_DISCOVERY_WINDOW_ELAPSED' });
+      expect(result.status).toBe('LIVE_QUOTE');
+      await vi.advanceTimersByTimeAsync(5_000);
+      expect(result).toEqual(snapshot);
+    } finally { vi.useRealTimers(); }
+  });
+
+  it('a rate-limited provider stays classified while another provider supplies the executable route', async () => {
+    vi.useFakeTimers({ now: now() });
+    try {
+      const discovery = createUniversalDiscovery({ now, clock: clockOf(), http: timedHttp({ 'api.relay.link/quote': { after: 250, value: relay.response },
+        'li.quest': { after: 100, value: { __httpStatus: 429, __body: { message: 'Too many requests' } } } }, {}) });
+      const pending = discovery.discover(request, ['relay', 'lifi']);
+      await vi.advanceTimersByTimeAsync(250);
+      const result = await pending;
+      expect(result.completeness).toBe('COMPLETE');
+      expect(result.candidates.find(c => c.provider === 'lifi')).toMatchObject({ status: 'TEMPORARILY_UNAVAILABLE', reason: 'LIFI_HTTP_429' });
+      expect(result.candidates[result.recommended!]?.provider).toBe('relay');
+    } finally { vi.useRealTimers(); }
+  });
+
+  it('the caller cancelling aborts every provider request and returns no result', async () => {
+    const signals: Record<string, AbortSignal | undefined> = {}, caller = new AbortController();
+    const discovery = createUniversalDiscovery({ now, http: timedHttp({ 'api.relay.link/quote': { after: 0, hang: true }, 'li.quest': { after: 0, hang: true } }, signals) });
+    const pending = discovery.discover(request, ['relay', 'lifi'], { signal: caller.signal });
+    caller.abort();
+    await expect(pending).rejects.toThrow('UNIVERSAL_DISCOVERY_CANCELLED');
+    expect(signals['api.relay.link/quote']?.aborted && signals['li.quest']?.aborted).toBe(true);
+  });
+
+  it('refuses an incoherent window', () => {
+    expect(() => createUniversalDiscovery({ http: http({}), window: { deadlineMs: 1_000, compareMs: 2_000 } })).toThrow('UNIVERSAL_DISCOVERY_WINDOW_INVALID');
+  });
 });

@@ -39,7 +39,7 @@ import { createRouterService, ROUTER_RUN_ID, routerNeedsObservation, type Router
 import { routerNetworkMode, routerNetworkRuntime, type RouterNetwork } from '../src/server/router-runtime.ts';
 import { PAYMENT_OWNERSHIP, ROUTER_OWNERSHIP, UNIVERSAL_OWNERSHIP, type OwnershipPolicy } from '../src/server/run-ownership.ts';
 import { createUniversalRouterService, universalNeedsObservation, UNIVERSAL_RUN_ID, type UniversalRecord, type UniversalWalletDiagnostic } from '../src/server/universal-router/service.ts';
-import { createUniversalDiscovery } from '../src/server/universal-router/discovery.ts';
+import { CONVERSATIONAL_DISCOVERY_WINDOW, createUniversalDiscovery } from '../src/server/universal-router/discovery.ts';
 import { createRelayProvider } from '../src/server/universal-router/relay-provider.ts';
 import { universalRouterMode, universalRouterRuntime, universalRouterTransport, type UniversalRouterTransport } from '../src/server/universal-router/runtime.ts';
 import { parseDiscoveryRequest } from '../src/server/universal-router/requests.ts';
@@ -816,7 +816,8 @@ const crosschainUniversal: FlowDefinition = {
   name: 'crosschain-universal', busyCode: 'UNIVERSAL_BUSY', runId: UNIVERSAL_RUN_ID, unavailableCode: 'UNIVERSAL_SERVICE_UNAVAILABLE',
   methods: {
     info: { mutates: false, validate: shape() },
-    discover: { mutates: false, validate: shape(universalRequest) },
+    // BUILD-FLOFI-EXECUTION-PERFORMANCE-001: an optional discovery window name; older callers send the request alone.
+    discover: { mutates: false, validate: optionalShape(1, universalRequest, (value: unknown) => value === 'STANDARD' || value === 'CONVERSATIONAL') },
     simulate: { mutates: true, validate: optionalShape(2, workflow, universalAccount, universalAccount) },
     refresh: { mutates: true, validate: optionalShape(1, id(UNIVERSAL_RUN_ID), universalAccount) },
     review: { mutates: true, validate: shape(id(UNIVERSAL_RUN_ID), commitment, workflow) },
@@ -838,9 +839,10 @@ const crosschainUniversal: FlowDefinition = {
       providers: { relay: createRelayProvider({ http: runtime.http, ...runtime.apis.relay ? { api: runtime.apis.relay } : {}, ...runtime.keys.relay ? { apiKey: runtime.keys.relay } : {} }) },
       provenance: runtime.provenance, executionEnabled: runtime.executionEnabled, ...runtime.mockedDeployment ? { mockedDeployment: runtime.mockedDeployment } : {} });
     const discovery = createUniversalDiscovery({ http: runtime.http, apis: runtime.apis, keys: runtime.keys });
+    const conversational = createUniversalDiscovery({ http: runtime.http, apis: runtime.apis, keys: runtime.keys, window: CONVERSATIONAL_DISCOVERY_WINDOW });
     const table: Record<string, (args: Args) => Promise<unknown>> = {
       info: async () => ({ executionEnabled: s.executionEnabled }),
-      discover: async ([r]) => { const request = parseDiscoveryRequest(r); return discovery.discover(request, request.providers); },
+      discover: async ([r, w]) => { const request = parseDiscoveryRequest(r); return (w === 'CONVERSATIONAL' ? conversational : discovery).discover(request, request.providers); },
       simulate: ([w, a, d]) => s.simulate(w, a as string, d as string | undefined),
       refresh: ([i, d]) => s.refresh(i as string, d as string | undefined),
       review: ([i, c, w]) => s.review(i as string, c as string, w as SemanticWorkflow),

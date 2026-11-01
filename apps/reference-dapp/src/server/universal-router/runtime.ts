@@ -41,7 +41,8 @@ export function universalRouterTransport(mode: 'live' | 'harness', env: Env): Un
   const evmRpcs = Object.fromEntries(Object.values(D.evm).map(d => {
     const url = mode === 'harness' ? `${loop}/evm/${d.chainId}` : d.chainId === 4663 ? robinhoodRpcUrl(env.GRYLOO_ROBINHOOD_RPC_URL) : routerRpcUrl(overrideOf(env, d.chainId), d.rpc);
     const client = createBaseSepoliaReadRpc(url, UNIVERSAL_EVM_RPC_METHODS);
-    return [d.chain, mode === 'harness' ? chainBoundRpc(client, d.chainId) : bridgeReadRpc(d.chainId, url, UNIVERSAL_EVM_RPC_METHODS, env)];
+    return [d.chain, mode === 'harness' ? chainBoundRpc(client, d.chainId) : bridgeReadRpc(d.chainId, url, UNIVERSAL_EVM_RPC_METHODS, env,
+      Boolean(d.chainId === 4663 ? env.GRYLOO_ROBINHOOD_RPC_URL : overrideOf(env, d.chainId)))];
   }));
   const solanaRpc = createSolanaRpc(mode === 'harness' ? `${loop}/solana` : solanaRpcOverride(env.GRYLOO_SOLANA_RPC_URL, 'UNIVERSAL_RPC_CONFIGURATION_INVALID') ?? D.solana.rpc,
     mode === 'harness');

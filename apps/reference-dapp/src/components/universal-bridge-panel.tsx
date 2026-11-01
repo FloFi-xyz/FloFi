@@ -34,6 +34,9 @@ const STATUS_LABEL: Readonly<Record<DiscoveryCandidate['status'], string>> = { I
 const PROVIDER_LABEL: Readonly<Record<string, string>> = { relay: 'Relay', lifi: 'LI.FI', mayan: 'Mayan', across: 'Across' };
 /** User-facing reasons for stable codes; anything else shows the code itself. */
 const REASONS: Readonly<Record<string, string>> = {
+  // BUILD-FLOFI-EXECUTION-PERFORMANCE-001: the discovery window closed before this provider answered; it was not compared.
+  RELAY_DISCOVERY_WINDOW_ELAPSED: 'Did not answer within the comparison window.', LIFI_DISCOVERY_WINDOW_ELAPSED: 'Did not answer within the comparison window.',
+  MAYAN_DISCOVERY_WINDOW_ELAPSED: 'Did not answer within the comparison window.', ACROSS_DISCOVERY_WINDOW_ELAPSED: 'Did not answer within the comparison window.',
   LIFI_BRIDGE_VERIFIER_NOT_IMPLEMENTED: 'FloFi cannot yet verify this bridge\'s transactions independently, so it is shown for comparison only.',
   MAYAN_TRANSACTION_BUILDER_NOT_VERIFIED: 'Mayan transactions are built by its SDK; FloFi has no verified builder yet, so this quote is for comparison only.',
   ACROSS_EXECUTES_ON_CERTIFIED_ROUTER_PAIRS_ONLY: 'Across executes through the certified Router for its USDC/USDG pairs only.',
@@ -185,6 +188,8 @@ function RouteDiscovery() {
     <button type="button" disabled={router.busy || !router.available} onClick={() => void router.discover()}>{tr('Find routes')}</button>
     {result && <>
       <p role="status">{tr('Every provider was asked about this pair. Executable routes are verified by FloFi; others are shown with the reason they cannot be executed.')}</p>
+      {result.completeness === 'PARTIAL' && <p className="muted" data-discovery="provisional">{tr('Provisional comparison: {0} did not answer in time. Find routes again to compare them.',
+        (result.pendingProviders ?? []).map(p => PROVIDER_LABEL[p] ?? p).join(', '))}</p>}
       {result.quoteSubjects === 'PUBLIC_QUOTE_SUBJECT' && <p className="muted">{tr('Indicative quotes for a public address. Simulate quotes again for your own wallet.')}</p>}
       <table aria-label={tr('Route options')}><thead><tr><th>{tr('Provider')}</th><th>{tr('Bridge')}</th><th>{tr('Status')}</th><th>{tr('Expected')}</th><th>{tr('Minimum')}</th>
         <th>{tr('Time')}</th><th>{tr('Fees')}</th><th>{tr('Note')}</th><th/></tr></thead>

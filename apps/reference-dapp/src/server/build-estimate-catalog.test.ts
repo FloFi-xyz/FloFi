@@ -11,6 +11,7 @@ import { readBuildEstimate } from './build-estimate';
 import { asset as rhAsset, createRobinhoodMockChain, mockCatalogRuntime, officialCatalog } from './robinhood-mainnet.test-harness';
 import { baseAsset, baseCatalog } from './base-mainnet.test-harness';
 import type { PriceResult, PriceSource } from '../automations/price-source';
+import { createDeploymentFactCache } from './public-testnet-service';
 
 type Case = { name: string; chain: string; env: Record<string, string>; catalog: () => AssetCatalog; network?: 'base';
   pair: (catalog: AssetCatalog) => [CanonicalAsset, CanonicalAsset]; rate: (input: string, output: string) => Record<string, bigint>; amount: string; expected: string };
@@ -63,6 +64,44 @@ describe('UX-007 shared catalog-network live quote', () => {
     expect(await readBuildEstimate({ workflow, nodeId: 'node-002' }, c.env, seams)).toMatchObject({ ok: false, code: 'POOL_UNUSABLE', correlationId: expect.any(String) });
   });
 
+  it.each(CASES)('BUILD-FLOFI-EXECUTION-PERFORMANCE-001 $name: verified immutable deployment facts are not re-read; economic reads always are', async c => {
+    const { workflow, seams } = setup(c), calls: string[] = [], cache = createDeploymentFactCache();
+    const rpc: typeof seams.rpc = async (method, params) => { calls.push(method === 'eth_call' ? `eth_call:${String((params[0] as { data: string }).data).slice(0, 10)}` : method); return seams.rpc(method, params); };
+    const catalog = { ...seams.catalog, deploymentFacts: cache };
+    const first = await readBuildEstimate({ workflow, nodeId: 'node-002' }, c.env, { ...seams, rpc, catalog });
+    const cold = calls.splice(0);
+    const second = await readBuildEstimate({ workflow, nodeId: 'node-002' }, c.env, { ...seams, rpc, catalog });
+    const warm = calls.splice(0);
+    expect(first).toEqual(second);
+    expect(warm.length).toBeLessThan(cold.length);
+    // Fresh every time: chain identity, head, the reorg check, decimals, liquidity, slot0 and the quoter's output.
+    for (const read of ['eth_chainId', 'eth_getBlockByNumber', 'eth_call:0x313ce567', 'eth_call:0x1a686502', 'eth_call:0x3850c7bd', 'eth_call:0xc6a5026a'])
+      expect(warm.filter(m => m === read).length, read).toBe(cold.filter(m => m === read).length);
+    // Not re-read once verified: the protocol contracts' code and immutables, the pool's immutables.
+    for (const read of ['eth_call:0xc45a0155', 'eth_call:0x0dfe1681', 'eth_call:0xd21220a7', 'eth_call:0xddca3f43']) expect(warm, read).not.toContain(read);
+    // A disabled cache (null) reads everything every time.
+    await readBuildEstimate({ workflow, nodeId: 'node-002' }, c.env, { ...seams, rpc, catalog: { ...seams.catalog, deploymentFacts: null } });
+    expect(calls.splice(0)).toEqual(cold);
+  });
+  it('BUILD-FLOFI-EXECUTION-PERFORMANCE-001: a failed deployment verification is never remembered', async () => {
+    const c = CASES[0]!, { workflow, seams } = setup(c), cache = createDeploymentFactCache();
+    let tamper = true;
+    const rpc: typeof seams.rpc = async (method, params) => tamper && method === 'eth_getCode' ? '0x6001' : seams.rpc(method, params);
+    const catalog = { ...seams.catalog, deploymentFacts: cache };
+    expect(await readBuildEstimate({ workflow, nodeId: 'node-002' }, c.env, { ...seams, rpc, catalog })).toMatchObject({ ok: false, code: 'PROTOCOL_DEPLOYMENT_MISMATCH' });
+    tamper = false;
+    expect((await readBuildEstimate({ workflow, nodeId: 'node-002' }, c.env, { ...seams, rpc, catalog })).ok).toBe(true);
+    tamper = true;
+    // Verified facts stay verified within their window, but a fresh cache (or expiry) verifies again and refuses the tampered code.
+    expect(await readBuildEstimate({ workflow, nodeId: 'node-002' }, c.env, { ...seams, rpc, catalog: { ...seams.catalog, deploymentFacts: createDeploymentFactCache() } }))
+      .toMatchObject({ ok: false, code: 'PROTOCOL_DEPLOYMENT_MISMATCH' });
+  });
+  it('BUILD-FLOFI-EXECUTION-PERFORMANCE-001: the fact cache expires and is bounded', () => {
+    const cache = createDeploymentFactCache(1_000, 2);
+    cache.add('a', 0); expect(cache.has('a', 999)).toBe(true); expect(cache.has('a', 1_000)).toBe(false); expect(cache.has('a', 10)).toBe(false);
+    cache.add('b', 0); cache.add('c', 0); cache.add('d', 0); expect(cache.has('b', 1)).toBe(false); expect(cache.has('d', 1)).toBe(true);
+    cache.add('e', 100); expect(cache.has('e', 50)).toBe(false);
+  });
   // BUILD-FIX-UX-001: USD equivalents come only from the deployment's verified price source, for an asset that has a feed.
   const priced = (result: PriceResult, calls: string[] = []): PriceSource => ({ id: 'chainlink', maxAgeMs: 3_600_000, assets: ['ETH', 'BTC', 'SOL'],
     observe: async asset => { calls.push(asset); return result; } });
@@ -77,6 +116,17 @@ describe('UX-007 shared catalog-network live quote', () => {
     expect(result.estimate.usd).toMatchObject({ input: null, source: 'CHAINLINK', evidence: 'PUBLIC_READ_ONLY', observedAt: new Date(T0 - 60_000).toISOString() });
     const usd = Number(result.estimate.usd!.output), expected = Number(result.estimate.expected) * 2500.5;
     expect(Math.abs(usd - expected)).toBeLessThanOrEqual(Math.max(0.01, expected * 0.001));
+  });
+  it('BUILD-FLOFI-EXECUTION-PERFORMANCE-001: the USD observation runs alongside the quote (started before the first chain read finishes), once per asset', async () => {
+    const { workflow, seams } = setup(arbitrum), events: string[] = [];
+    const prices: PriceSource = { id: 'chainlink', maxAgeMs: 3_600_000, assets: ['ETH', 'BTC', 'SOL'],
+      observe: async asset => { events.push(`price:${asset}`); return ethAt('2500.5'); } };
+    let first = true;
+    const rpc: typeof seams.rpc = async (method, params) => { if (first) { first = false; events.push('rpc:first'); } return seams.rpc(method, params); };
+    const result = await readBuildEstimate({ workflow, nodeId: 'node-002' }, arbitrum.env, { ...seams, rpc, prices });
+    expect(result.ok && result.estimate.usd?.source).toBe('CHAINLINK');
+    expect(events.indexOf('price:ETH')).toBeLessThan(events.indexOf('rpc:first'));
+    expect(events.filter(e => e === 'price:ETH')).toHaveLength(1);
   });
   it.each([{ ok: false, code: 'PRICE_STALE' }, { ok: false, code: 'PRICE_SOURCE_TIMEOUT' }] as const)('a $code observation gives no USD figure, and the token estimate is unchanged', async failure => {
     const { workflow, seams } = setup(arbitrum);

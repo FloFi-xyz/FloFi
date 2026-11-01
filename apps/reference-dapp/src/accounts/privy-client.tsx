@@ -193,7 +193,10 @@ function EmulatedPrivy({ children }: { children: ReactNode }) {
  */
 export function FloFiPrivyProvider({ config, accounts = false, nonce, children }: { config: PrivyBrowserConfig | null; accounts?: boolean; nonce?: string;
   children: ReactNode }) {
-  const settings = useMemo(() => config ? floFiPrivyConfig(config, nonce) : null, [config, nonce]);
+  // BUILD-FLOFI-EXECUTION-PERFORMANCE-001: keyed on the configuration's content, not its object identity. A server action that sets a cookie
+  // re-renders the layout with an equal but new `config` object; Privy must not receive new settings (and possibly re-initialise) for it.
+  const configKey = config ? JSON.stringify(config) : null;
+  const settings = useMemo(() => configKey ? floFiPrivyConfig(JSON.parse(configKey) as PrivyBrowserConfig, nonce) : null, [configKey, nonce]);
   const inner = !config || !settings ? <Context.Provider value={null}>{children}</Context.Provider>
     : config.e2e ? <EmulatedPrivy>{children}</EmulatedPrivy>
       : <PrivyProvider appId={config.appId} config={settings}><PrivyBridge>{children}</PrivyBridge></PrivyProvider>;
