@@ -53,7 +53,15 @@ nonce reservation, reconciliation and evidence levels. No schema migration, envi
 | After review fixes: wallet/state/account/Credentials suites; swap, estimate and canvas suites | 62 files / 549 tests; 5 files / 167 tests — pass |
 | `python3 scripts/governance_lite.py` + its unittest suite | pass (21 tests) |
 | `python3 scripts/agent_guard.py check` | pass |
-| Browser (guarded runner, pinned chromium_headless_shell-1243, Anvil 1.8.3 publisher-digest verified) | `workflow-ux-authoring`, `arbitrum-authoring-certification`: pass. `auth-wallets`, `review-execute-recovery-components`, `default-product`: see §3b. |
+| Browser (guarded runner, pinned chromium_headless_shell-1243, Anvil 1.8.3 publisher-digest verified, disposable loopback PostgreSQL) | `auth-wallets` 15/15, `review-execute-recovery-components` 39/39 (critical tier), `workflow-ux-authoring`, `arbitrum-authoring-certification`: pass on the final build. `default-product`: 99 pass, 9 fail — see below. |
+
+**`default-product` in this sandbox.** The same 9 tests fail on unmodified `origin/main` built and run here the same way (7 visual baselines
+render differently in this sandbox, 2 BUILD-009 bridge-quote tests have no reachable route), so they are environmental here, not proof
+either way. Comparing this branch's rendered screenshots with `main`'s pixel by pixel: 4 are identical; **3 change on purpose** —
+`base-observation › observation-recorded.png` and `mock-artifact-chain › simulate-current.png / simulate-expired.png` — because the
+Simulate card now shows the live quote state (e.g. "Quote service is not configured. Contact support.") instead of a fixed "Estimate
+unavailable" (P0-07). Those specs now wait for the quote note to settle. **Their committed baselines must be regenerated in the CI rendering
+environment**; this sandbox cannot produce CI-identical images (`main`'s own baselines differ here).
 
 ## 3b. Specialist reviews (`.claude/agents/flofi-*.md`, read-only)
 
@@ -68,6 +76,13 @@ repository hook refuses `SubagentHandback` to reviewers, so their reports were r
 | flofi-workflow | 4 (1 medium) | Fixed: an owner already connected when the Review appeared may have its chain become known; Execute-stage cards show no bare "Estimate unavailable". Documented: Reviews without an owner (Base/Robinhood swaps are not owner-bound) still retire on reconnect (fails closed, §4.8); hook wiring is tested through the pure rule only. |
 | flofi-data-privacy | 5 (1 medium) | Fixed: an automatic FloFi connection restores the remembered wallet **and** Disconnect mark exactly (medium); "Remove from this device" for managed wallets saved on the device; synthetic test addresses and no full user address in this record; Disconnect forgets a remembered FloFi wallet. Documented: a wallet sign-in re-allows the passively read wallet of that ecosystem, which may differ from the signing wallet when several are installed (§4.9). |
 | flofi-frontend-ux | 14 (2 medium) | Fixed: Execute cards (medium, with workflow); honest Credentials sign-in notice (medium); transport failures no longer blamed on the provider; Disconnect accessible description; FloFi wallet "still loading"; stable card keys/order; pt-BR wording for new strings; robust copy buttons; live region; dead CSS. Documented: status-pill axes, same address under two providers stays two device references (owner confirmation), brief empty state before the account loads, header Disconnect enabled while a wallet request is busy (as the former Sign out was). |
+
+Not invoked, with reasons: flofi-mcp, flofi-channels and flofi-developers — none of their modules imports the changed code (searched);
+they reach swaps only through backend flows by name, whose quote result gains one optional field (`ownerReview.delegation`) and one refusal
+code (`OWNER_DELEGATION_UNVERIFIED`); their schema/OpenAPI/boundary unit suites ran in `pnpm test`. flofi-admin-analytics, automations,
+bridge, chat, infrastructure-ci, lending, liquidity, payments-billing, protocol-integrations, transfer-payments — selected only by the
+`coverage.json` governance change and shared-core propagation; no source of theirs changed; their regression suites ran in `pnpm test`.
+`agent_guard.py review --base origin/main` therefore reports them as not invoked.
 
 ## 4. Remaining gaps (honest)
 
