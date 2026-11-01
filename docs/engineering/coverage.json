@@ -777,8 +777,8 @@
     "app.accounts.account-host",
     "app.platform.engineering-skills",
     "app.domain.canonical-execution-status",
-"app.domain.journey-metrics",
-"app.server.journey-telemetry"
+    "app.domain.journey-metrics",
+    "app.server.journey-telemetry"
   ],
   "modules": [
     {

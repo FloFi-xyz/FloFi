@@ -1,4 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
+import { readdirSync, readFileSync, statSync } from 'node:fs';
+import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { CANONICAL_EXECUTION_STATUSES, canonicalRunLifecycle } from './canonical-execution-status';
 import { projectDashboardRun } from '../lib/dashboard/run-mapping';
@@ -118,5 +121,15 @@ describe('BUILD-FLOFI-EXECUTION-PERFORMANCE-001 canonical execution status', () 
     // Pix: a source that moved, but not as instructed, is never observed again: a person has to act.
     expect(canonicalRunLifecycle({ status: 'UNKNOWN', errorCode: 'PAYMENT_SOURCE_NOT_AS_INSTRUCTED' })).toMatchObject({ status: 'INTERVENTION_REQUIRED', final: false });
     expect(canonicalRunLifecycle({ status: 'UNKNOWN', needsObservation: true }).status).toBe('INCONCLUSIVE');
+  });
+  it('is a display contract only: no automation, delegation or workflow-run decision reads it (they keep their evidence-based checks)', () => {
+    const src = fileURLToPath(new URL('..', import.meta.url));
+    const files = (dir: string): string[] => readdirSync(dir).flatMap(name => {
+      const path = join(dir, name);
+      return statSync(path).isDirectory() ? files(path) : /\.(ts|tsx)$/.test(name) && !/\.test\./.test(name) ? [path] : [];
+    });
+    const decisions = ['automations', 'delegation', 'workflow-runs'].flatMap(dir => { try { return files(join(src, dir)); } catch { return []; } });
+    expect(decisions.length).toBeGreaterThan(10);
+    expect(decisions.filter(path => /canonical-execution-status|canonicalRunLifecycle/.test(readFileSync(path, 'utf8')))).toEqual([]);
   });
 });
