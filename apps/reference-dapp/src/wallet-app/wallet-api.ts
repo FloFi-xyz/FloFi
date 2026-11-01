@@ -8,10 +8,8 @@
  * phrase, provider session or token; the wallet session lives in an HttpOnly cookie the page cannot read.
  */
 import { readAccountWallet, type AccountWallet } from '../accounts/account-model';
-import { parseSigningSummary, type SigningSummary } from '../wallet/flofi-signing';
 import { withoutControlCharacters } from '../wallet/wallet-registry';
 import type { ExportGrant } from './provider-client';
-import type { SigningBinding } from './protocol';
 
 export type UnlockMethod = 'email' | 'google' | 'apple';
 export type WalletContext = { readonly accountId: string; readonly label: string; readonly methods: readonly UnlockMethod[];
@@ -101,12 +99,6 @@ export const walletApi = {
     if ((url.protocol !== 'https:' && !loopback) || url.username || url.password) invalid();
     return url.href;
   },
-  async saveWallets(ids: readonly string[]): Promise<{ saved: readonly AccountWallet[]; context: WalletContext }> {
-    const v = await call('/api/wallet/wallets', 'POST', { ids }, 'ACCOUNT_WALLET_SAVE_FAILED');
-    const saved = Array.isArray(v.saved) ? v.saved.map(readAccountWallet) : null;
-    if (!saved || saved.some(wallet => !wallet)) invalid();
-    return { saved: saved as AccountWallet[], context: contextOf(v, null) };
-  },
   /** One export of `wallet`, authorized by the server (unlock in the last 5 minutes); checked to be for exactly that wallet and kind. */
   async exportGrant(wallet: AccountWallet, kind: 'recovery-phrase' | 'private-key'): Promise<ExportGrant> {
     const v = record((await call('/api/wallet/export', 'POST', { id: wallet.id, kind }, 'EXPORT_NOT_AUTHORIZED')).grant) ?? invalid();
@@ -116,22 +108,5 @@ export const walletApi = {
       || (kind === 'recovery-phrase') !== (source === 'wallet') || typeof v.resource !== 'string'
       || (source === 'wallet-account' ? v.resource !== wallet.address : !RESOURCE.test(v.resource))) invalid();
     return { organizationId: v.organizationId as string, source, resource: v.resource as string, address: wallet.address, keyFormat };
-  },
-  /**
-   * The server's Review summary for the FloFi attempt `binding` names, if the request's bytes match it exactly (spec decision 2). The
-   * summary must name the same flow, run and owner as the request; otherwise, or when the server cannot answer, nothing is signable.
-   */
-  async signingContext(binding: SigningBinding, address: string, request: Json): Promise<SigningSummary> {
-    let v: Json;
-    try { v = await call('/api/wallet/sign-context', 'POST', { flow: binding.flow, runId: binding.runId, address, ...request }, 'FLOFI_WALLET_REVIEW_UNAVAILABLE'); }
-    catch (error) {
-      // The server's refusal code when it gave one (no match, flow not supported, expired…); otherwise the review could not be loaded.
-      throw error instanceof WalletApiError && error.message !== 'WALLET_REQUEST_FAILED' ? error : new WalletApiError('FLOFI_WALLET_REVIEW_UNAVAILABLE', 0);
-    }
-    const summary = parseSigningSummary(v.summary);
-    if (!summary) throw new WalletApiError('FLOFI_WALLET_REVIEW_UNAVAILABLE', 200);
-    const owner = summary.owner.startsWith('0x') ? summary.owner.toLowerCase() : summary.owner;
-    if (summary.flow !== binding.flow || summary.runId !== binding.runId || owner !== address) throw new WalletApiError('FLOFI_WALLET_NO_MATCHING_REVIEW', 200);
-    return summary;
   },
 };

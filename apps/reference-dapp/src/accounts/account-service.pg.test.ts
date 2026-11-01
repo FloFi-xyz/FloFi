@@ -1,166 +1,312 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 /**
- * BUILD-FLOFI-AUTH-WALLETS-001 integration on real PostgreSQL. The identity provider is a disposable RSA key served as a JWKS by an
- * in-process transport; the wallet provider is the shared MOCKED emulator (e2e/turnkey-emulator.ts) behind FloFi's REAL server client:
- * verified stamps, encrypted OTP with real HPKE, provider-signed verification tokens. MOCKED provider evidence only: this proves FloFi's
- * own verification, isolation and authorization rules, not the live providers.
+ * BUILD-FLOFI-PRIVY-UX-001 integration on real PostgreSQL: FloFi's own account rules behind Privy sign-in and Privy wallets. Privy's API is
+ * an in-memory stand-in for `verifyAccessToken` / `users._get` (the official SDK's verification itself is covered by privy-server.test.ts),
+ * so these tests prove what FloFi decides with Privy's answers: which account a sign-in reaches, that nothing is merged or moved, and that
+ * only the account's own Privy user's embedded wallets are saved. MOCKED provider evidence only.
  */
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import { createECDH, createSign, generateKeyPairSync, randomBytes, randomUUID } from 'node:crypto';
-import { encryptOtpCodeToBundle } from '@turnkey/crypto';
+import { beforeEach, afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createTestDatabase, type TestDatabase } from '../../../../packages/cloud-runtime/test/pg-harness';
 import { createAccountStore } from './account-store';
 import { createAccountService } from './account-service';
-import { clearJwksCache, oidcConfig } from './oidc';
-import { newOidcFlow, type AccountSessionToken } from './account-session';
-import { createTurnkeyServer, turnkeyConfig } from './turnkey-server';
-import { createTurnkeyEmulator, E2E_SIGN_IN_CODE } from '../../e2e/turnkey-emulator';
+import { createPrivyServer, type PrivyApi, type PrivyServerConfig } from './privy-server';
 
-const { privateKey, publicKey } = generateKeyPairSync('rsa', { modulusLength: 2048 });
-const jwks = (async () => new Response(JSON.stringify({ keys: [{ ...publicKey.export({ format: 'jwk' }), kid: 'k1', alg: 'RS256', use: 'sig' }] }))) as unknown as typeof fetch;
-const env = { FLOFI_PUBLIC_ORIGIN: 'https://flofi.xyz', FLOFI_APPLE_CLIENT_ID: 'xyz.flofi.web' };
-const apple = oidcConfig('apple', env)!;
-const b64 = (value: object) => Buffer.from(JSON.stringify(value)).toString('base64url');
-function idToken(sub: string, nonce: string, at: number) {
-  const input = `${b64({ alg: 'RS256', kid: 'k1' })}.${b64({ iss: 'https://appleid.apple.com', aud: apple.clientId, sub, nonce, iat: at, exp: at + 600, email: `${sub}@example.com`, email_verified: 'true', jti: randomUUID() })}`;
-  return `${input}.${createSign('RSA-SHA256').update(input).sign(privateKey).toString('base64url')}`;
-}
-const EVM = '0x' + 'e'.repeat(40), SOL = 'So11111111111111111111111111111111111111112';
-/** A sign-in attempt's browser key (only its public half is ever sent; this test plays the browser). */
-function browserKey() { const ecdh = createECDH('prime256v1'); ecdh.generateKeys(); return ecdh.getPublicKey('hex', 'compressed'); }
+const APP = 'cmflofitestapp0000000001';
+const config: PrivyServerConfig = { appId: APP, appSecret: 'x'.repeat(32), apiUrl: 'https://api.privy.io', verificationKey: null, apple: false, e2e: false };
+type Linked = Record<string, unknown>;
+const did = (n: number) => `did:privy:cmuser${String(n).padStart(19, '0')}`;
+/** Privy's verification time of an identity: `at` seconds after a moment shortly before the test clock (orders methods; stays recent). */
+const verified = (at: number) => Math.floor(clock.getTime() / 1000) - 100 + at;
+const google = (subject: string, at = 10): Linked => ({ type: 'google_oauth', subject, email: `${subject}@gmail.com`, latest_verified_at: verified(at), verified_at: verified(at) });
+const email = (address: string, at = 10): Linked => ({ type: 'email', address, latest_verified_at: verified(at), verified_at: verified(at) });
+const external = (address: string, at = 10): Linked => ({ type: 'wallet', chain_type: 'ethereum', address, wallet_client_type: 'metamask', connector_type: 'injected',
+  latest_verified_at: verified(at), verified_at: verified(at) });
+const embedded = (address: string, options: { solana?: boolean; imported?: boolean; id?: string } = {}): Linked => ({ type: 'wallet', id: options.id ?? `w${address.slice(-23)}`,
+  chain_type: options.solana ? 'solana' : 'ethereum', address, wallet_client_type: 'privy', connector_type: 'embedded', imported: options.imported === true, delegated: false,
+  verified_at: 1, latest_verified_at: 1 });
+const EVM_1 = '0x' + '1'.repeat(40), EVM_2 = '0x' + '2'.repeat(40), EVM_X = '0x' + 'a'.repeat(40), SOL_1 = '7EcDhSYGxXyscszYEp35KHN8vvw3svAuLKTzXwCFLtV';
 
-let t: TestDatabase, clock: Date, emulator: ReturnType<typeof createTurnkeyEmulator>, turnkey: ReturnType<typeof createTurnkeyServer>;
-function provider() {
-  const parent = createECDH('prime256v1'); parent.generateKeys();
-  const organization = randomUUID(), signer = randomBytes(32).toString('hex');
-  emulator = createTurnkeyEmulator({ parentPublicKey: parent.getPublicKey('hex', 'compressed'), parentOrg: organization, otpSignerPrivateKey: signer });
-  const config = turnkeyConfig({ FLOFI_TURNKEY_E2E: 'MOCKED_LOOPBACK_ONLY', FLOFI_TURNKEY_ORGANIZATION_ID: organization,
-    FLOFI_TURNKEY_API_PUBLIC_KEY: parent.getPublicKey('hex', 'compressed'), FLOFI_TURNKEY_API_PRIVATE_KEY: parent.getPrivateKey('hex').padStart(64, '0'),
-    FLOFI_TURNKEY_API_BASE_URL: 'http://127.0.0.1:9', FLOFI_TURNKEY_OTP_SIGNER_PUBLIC_KEY: emulator.otpSignerPublicKey })!;
-  turnkey = createTurnkeyServer(config, emulator.transport, async () => undefined);
-}
-const service = () => createAccountService({ store: createAccountStore(t.db, 'default'), turnkey, now: () => clock, transport: jwks });
-async function appleSignIn(sub: string, current: AccountSessionToken | null = null, intent: 'sign-in' | 'link' = 'sign-in') {
-  const flow = newOidcFlow('apple', null, intent, '/app');
-  return service().completeOidc(apple, flow, { idToken: idToken(sub, flow.nonce, Math.floor(clock.getTime() / 1000)) }, current);
-}
-/** Starts an email sign-in and returns the flow plus the browser-side encryption of `code` with the attempt's own key. */
-async function emailAttempt(email: string, key = browserKey()) {
-  const started = await service().startEmail(email, key);
-  const flow = { challengeId: started.challengeId, intent: 'sign-in' as const, returnTo: '/app' };
-  const encrypt = (code: string, as = key) => encryptOtpCodeToBundle(code, started.targetBundle, as, emulator.otpSignerPublicKey);
-  return { started, flow, key, encrypt };
-}
+let t: TestDatabase, clock: Date;
+const users = new Map<string, Linked[]>();
+/**
+ * Privy's two answers: a token is `h.<base64url {user, serial}>.s<n>` issued now (each payload unique, as Privy's are), or has a
+ * `.t<seconds>` signature for an issuance at that time; unknown or malformed ones are refused like a bad signature.
+ */
+const api: PrivyApi = {
+  verifyAccessToken: async token => {
+    const [head, body = '', tail = ''] = token.split('.'), user = head === 'h' ? (JSON.parse(Buffer.from(body, 'base64url').toString()) as { user: string }).user : '';
+    if (!users.has(user)) throw new Error('Authentication token is invalid');
+    const issuedAt = tail.startsWith('t') ? Number(tail.slice(1)) : Math.floor(clock.getTime() / 1000);
+    return { app_id: APP, user_id: user, session_id: 'sid', issued_at: issuedAt, expiration: Math.floor(Date.now() / 1000) + 3600 };
+  },
+  getUser: async id => ({ id, linked_accounts: users.get(id) ?? [] }),
+};
+let issued = 0;
+const tokenOf = (id: string, issuedAtSeconds?: number) => `h.${Buffer.from(JSON.stringify({ user: id, serial: ++issued })).toString('base64url')}.${issuedAtSeconds === undefined ? `s${issued}` : `t${issuedAtSeconds}`}`;
+const store = () => createAccountStore(t.db, 'default');
+const service = () => createAccountService({ store: store(), privy: createPrivyServer(config, api), now: () => clock });
+const signIn = (id: string) => service().completePrivy(tokenOf(id));
+const identities = async (accountId: string) => (await t.db.query<{ kind: string; subject: string }>(
+  'SELECT kind, subject FROM flofi_account_identities WHERE account_id=$1 ORDER BY kind, subject', [accountId])).rows;
+
 beforeAll(async () => { t = await createTestDatabase(); });
-afterAll(async () => t?.drop());
-beforeEach(async () => { await t.db.query('TRUNCATE flofi_accounts, flofi_account_email_challenges, flofi_account_used_proofs CASCADE'); provider(); clock = new Date(); clearJwksCache(); });
+afterAll(async () => { await t?.drop(); });
+beforeEach(async () => {
+  clock = new Date();
+  users.clear();
+  await t.db.query('DELETE FROM flofi_accounts WHERE tenant_id=$1', ['default']);
+});
 
-describe('email sign-in with the provider’s encrypted code', () => {
-  it('signs a new person in only after the provider verifies the code they encrypted in their browser; no wallet session is opened', async () => {
-    const { started, flow, encrypt } = await emailAttempt(' Bruno@Example.com ');
-    expect(started.email).toBe('bruno@example.com');
-    // The target is the provider's signed bundle; FloFi's server never receives the code itself.
-    expect(JSON.parse(started.targetBundle)).toMatchObject({ enclaveQuorumPublic: emulator.otpSignerPublicKey });
-    expect(await service().completeEmail(flow, await encrypt(E2E_SIGN_IN_CODE), null)).toMatchObject({ created: true, managed: null, managedError: null });
-    // Signing in opened no provider organization or session (managed wallets are unlocked only in FloFi Wallet).
-    expect(emulator.orgs.size).toBe(0);
-    expect(JSON.stringify((await t.db.query('SELECT * FROM flofi_account_email_challenges')).rows)).not.toContain(E2E_SIGN_IN_CODE);
+describe('Privy sign-in reaches exactly one FloFi account', () => {
+  it('creates an account for a new Privy user, with its verified Google identity, and returns to it afterwards', async () => {
+    users.set(did(1), [google('g-1')]);
+    const first = await signIn(did(1));
+    expect(first).toMatchObject({ created: true, onboarding: 'pending', session: { method: 'google' } });
+    expect(await identities(first.session.accountId)).toEqual([{ kind: 'GOOGLE', subject: 'g-1' }, { kind: 'PRIVY', subject: did(1) }]);
+    const again = await signIn(did(1));
+    expect(again).toMatchObject({ created: false, session: { accountId: first.session.accountId } });
+    expect(again.session.sessionId).not.toBe(first.session.sessionId);
+    // The view hides the Privy DID itself and says the account is linked to Privy.
+    const view = await service().view(again.session);
+    expect(view).toMatchObject({ privy: true, identities: [{ kind: 'google', label: 'g-1@gmail.com' }] });
   });
-  it('refuses wrong codes, garbage and a bundle encrypted for another browser key; nothing is signed in', async () => {
-    const { flow, encrypt } = await emailAttempt('carla@example.com');
-    await expect(service().completeEmail(flow, await encrypt('000000'), null)).rejects.toThrow('EMAIL_CODE_REJECTED');
-    await expect(service().completeEmail(flow, '{"encappedPublic":"04","ciphertext":"00"}'.padEnd(80, ' '), null)).rejects.toThrow('EMAIL_CODE_REJECTED');
-    await expect(service().completeEmail(flow, 'x', null)).rejects.toThrow('EMAIL_CODE_INVALID');
-    // The right code, encrypted with another key than the one this attempt declared: the provider-signed token names the other key.
-    await expect(service().completeEmail(flow, await encrypt(E2E_SIGN_IN_CODE, browserKey()), null)).rejects.toThrow('EMAIL_VERIFICATION_MISMATCH');
+
+  it('preserves every pre-Privy account: the same Google subject, verified email or external wallet reaches it', async () => {
+    const byGoogle = await store().signIn({ kind: 'google', subject: 'g-old', label: null });
+    const byEmail = await store().signIn({ kind: 'email', subject: 'old@example.com', label: 'old@example.com' });
+    const byWallet = await store().signIn({ kind: 'eip155', subject: EVM_X, label: null });
+    users.set(did(2), [google('g-old')]); users.set(did(3), [email('old@example.com')]); users.set(did(4), [external('0xAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA')]);
+    expect(await signIn(did(2))).toMatchObject({ created: false, session: { accountId: byGoogle.accountId, method: 'google' } });
+    expect(await signIn(did(3))).toMatchObject({ created: false, session: { accountId: byEmail.accountId, method: 'email' } });
+    expect(await signIn(did(4))).toMatchObject({ created: false, session: { accountId: byWallet.accountId, method: 'eip155' } });
+    expect(await identities(byWallet.accountId)).toEqual([{ kind: 'EIP155', subject: EVM_X }, { kind: 'PRIVY', subject: did(4) }]);
+  });
+
+  it('never matches across kinds: a Google account’s email does not reach the account that verified that address by code', async () => {
+    const byEmail = await store().signIn({ kind: 'email', subject: 'g-5@gmail.com', label: 'g-5@gmail.com' });
+    users.set(did(5), [google('g-5')]);
+    const outcome = await signIn(did(5));
+    expect(outcome.created).toBe(true);
+    expect(outcome.session.accountId).not.toBe(byEmail.accountId);
+  });
+
+  it('refuses a sign-in that matches two accounts, and merges, moves or creates nothing', async () => {
+    const a = await store().signIn({ kind: 'google', subject: 'g-a', label: null });
+    const b = await store().signIn({ kind: 'email', subject: 'b@example.com', label: 'b@example.com' });
+    users.set(did(6), [google('g-a'), email('b@example.com')]);
+    await expect(signIn(did(6))).rejects.toThrow('ACCOUNT_IDENTITY_CONFLICT');
+    expect(await identities(a.accountId)).toEqual([{ kind: 'GOOGLE', subject: 'g-a' }]);
+    expect(await identities(b.accountId)).toEqual([{ kind: 'EMAIL', subject: 'b@example.com' }]);
+    expect((await t.db.query("SELECT count(*)::int AS n FROM flofi_account_identities WHERE kind='PRIVY'")).rows).toEqual([{ n: 0 }]);
+  });
+
+  it('refuses a second Privy user for an account already linked to one (no identity takeover)', async () => {
+    users.set(did(7), [google('g-7')]);
+    const owner = await signIn(did(7));
+    users.set(did(8), [google('g-7')]);
+    await expect(signIn(did(8))).rejects.toThrow('ACCOUNT_PRIVY_USER_MISMATCH');
+    expect(await identities(owner.session.accountId)).toEqual([{ kind: 'GOOGLE', subject: 'g-7' }, { kind: 'PRIVY', subject: did(7) }]);
+  });
+
+  it('leaves an identity another account holds with that account when the Privy user later verifies it too', async () => {
+    users.set(did(9), [google('g-9')]);
+    const mine = await signIn(did(9));
+    const other = await store().signIn({ kind: 'email', subject: 'shared@example.com', label: 'shared@example.com' });
+    users.set(did(9), [google('g-9'), email('shared@example.com', 50)]);
+    const again = await signIn(did(9));
+    expect(again.session.accountId).toBe(mine.session.accountId);
+    expect(await identities(other.accountId)).toEqual([{ kind: 'EMAIL', subject: 'shared@example.com' }]);
+    expect(await identities(mine.session.accountId)).toEqual([{ kind: 'GOOGLE', subject: 'g-9' }, { kind: 'PRIVY', subject: did(9) }]);
+  });
+
+  it('never treats an embedded wallet as a sign-in identity, and refuses users with no accepted sign-in method', async () => {
+    const holder = await store().signIn({ kind: 'eip155', subject: EVM_1, label: null });
+    users.set(did(10), [embedded(EVM_1), { type: 'phone', number: '+15555550123', latest_verified_at: 99 }]);
+    await expect(signIn(did(10))).rejects.toThrow('PRIVY_LOGIN_METHOD_UNSUPPORTED');
+    expect(await identities(holder.accountId)).toEqual([{ kind: 'EIP155', subject: EVM_1 }]);
+  });
+
+  it('signs in only with a token Privy just issued, and only once', async () => {
+    users.set(did(14), [email('once@example.com')]);
+    const token = tokenOf(did(14));
+    const first = await service().completePrivy(token);
+    await expect(service().completePrivy(token)).rejects.toThrow('PRIVY_SIGN_IN_STALE');
+    // The stand-in accepts another signature for these same signed claims; it is still the same single-use proof.
+    await expect(service().completePrivy(token.replace(/\.[^.]+$/, '.anotherSignature'))).rejects.toThrow('PRIVY_SIGN_IN_STALE');
+    const old = Math.floor(clock.getTime() / 1000) - 11 * 60;
+    await expect(service().completePrivy(tokenOf(did(14), old))).rejects.toThrow('PRIVY_SIGN_IN_STALE');
+    expect((await service().completePrivy(tokenOf(did(14)))).session.accountId).toBe(first.session.accountId);
+    expect((await t.db.query("SELECT count(*)::int AS n FROM flofi_account_sessions WHERE revoked_at IS NULL")).rows).toEqual([{ n: 2 }]);
+  });
+
+  it('opens no session from a silently refreshed token of an old Privy login, and dates a session from Privy’s last verification', async () => {
+    // An hour-old Privy login whose access token was just refreshed: nothing is opened (the token is new, the login is not).
+    users.set(did(15), [google('g-15', -3600)]);
+    await expect(signIn(did(15))).rejects.toThrow('PRIVY_SIGN_IN_STALE');
+    // A verification time from the future, or none at all, counts as old too.
+    users.set(did(15), [google('g-15', 400)]);
+    await expect(signIn(did(15))).rejects.toThrow('PRIVY_SIGN_IN_STALE');
+    users.set(did(15), [{ type: 'google_oauth', subject: 'g-15', email: 'g-15@gmail.com' }]);
+    await expect(signIn(did(15))).rejects.toThrow('PRIVY_SIGN_IN_STALE');
+    expect((await t.db.query('SELECT count(*)::int AS n FROM flofi_account_sessions')).rows).toEqual([{ n: 0 }]);
+    // A real sign-in at Privy (a new verification) opens a session that counts as recent, from that verification.
+    users.set(did(15), [google('g-15')]);
+    const fresh = await signIn(did(15));
+    expect(fresh.session.authenticatedAt).toBe(verified(10));
+    await service().deleteAccount(fresh.session);
+  });
+
+  it('removes email-code challenges older than a day at every sign-in (they hold a plaintext email)', async () => {
+    await t.db.query(`INSERT INTO flofi_account_email_challenges (tenant_id, challenge_id, email, provider_challenge, browser_binding, created_at, expires_at)
+      VALUES ('default', $1, 'old@example.com', 'otp-12345678', $2, $3::timestamptz - interval '2 days', $3::timestamptz - interval '2 days' + interval '10 minutes'),
+             ('default', $4, 'new@example.com', 'otp-87654321', $2, $3, $3::timestamptz + interval '10 minutes')`,
+    ['a'.repeat(32), '02' + 'b'.repeat(64), clock, 'c'.repeat(32)]);
+    users.set(did(16), [google('g-16')]);
+    await signIn(did(16));
+    expect((await t.db.query('SELECT email FROM flofi_account_email_challenges ORDER BY email')).rows).toEqual([{ email: 'new@example.com' }]);
+  });
+
+  it('refuses an unverifiable token and writes nothing', async () => {
+    await expect(service().completePrivy(tokenOf(did(99)))).rejects.toThrow('PRIVY_TOKEN_INVALID');
+    await expect(service().completePrivy('not a token')).rejects.toThrow('PRIVY_TOKEN_INVALID');
     expect((await t.db.query('SELECT count(*)::int AS n FROM flofi_accounts')).rows).toEqual([{ n: 0 }]);
   });
-  it('is single use: a challenge, its encrypted bundle and its verification token sign in once', async () => {
-    const { flow, encrypt } = await emailAttempt('dora@example.com'), bundle = await encrypt(E2E_SIGN_IN_CODE);
-    await service().completeEmail(flow, bundle, null);
-    await expect(service().completeEmail(flow, bundle, null)).rejects.toThrow('EMAIL_CHALLENGE_EXPIRED');
-    // A second challenge for the same address cannot reuse the first attempt's bundle (another OTP id at the provider).
-    const second = await emailAttempt('dora@example.com');
-    await expect(service().completeEmail(second.flow, bundle, null)).rejects.toThrow('EMAIL_CODE_REJECTED');
+
+  it('serializes concurrent first sign-ins of one Privy user into one account', async () => {
+    users.set(did(11), [email('race@example.com')]);
+    const [one, two] = await Promise.all([signIn(did(11)), signIn(did(11))]);
+    expect(one.session.accountId).toBe(two.session.accountId);
+    expect((await t.db.query('SELECT count(*)::int AS n FROM flofi_accounts')).rows).toEqual([{ n: 1 }]);
   });
-  it('limits code guesses per challenge and code requests per address', async () => {
-    const { flow, encrypt } = await emailAttempt('erik@example.com');
-    for (let attempt = 0; attempt < 5; attempt++) await expect(service().completeEmail(flow, await encrypt('000000'), null)).rejects.toThrow('EMAIL_CODE_REJECTED');
-    // The sixth try is refused before reaching the provider, even with the right code.
-    await expect(service().completeEmail(flow, await encrypt(E2E_SIGN_IN_CODE), null)).rejects.toThrow('EMAIL_CHALLENGE_EXPIRED');
-    for (let request = 0; request < 4; request++) await service().startEmail('erik@example.com', browserKey());
-    await expect(service().startEmail('erik@example.com', browserKey())).rejects.toThrow('EMAIL_RATE_LIMITED');
-    await expect(service().startEmail('fern@example.com', browserKey())).resolves.toMatchObject({ email: 'fern@example.com' });
-    clock = new Date(clock.getTime() + 61 * 60_000);
-    await expect(service().startEmail('erik@example.com', browserKey())).resolves.toMatchObject({ email: 'erik@example.com' });
-  });
-  it('links a verified email only to the signed-in account, never moving it from another account', async () => {
-    const ana = await appleSignIn('ana'), bruno = await appleSignIn('bruno');
-    const first = await emailAttempt('shared@example.com');
-    await service().completeEmail({ ...first.flow, intent: 'link' }, await first.encrypt(E2E_SIGN_IN_CODE), ana.session);
-    const second = await emailAttempt('shared@example.com');
-    await expect(service().completeEmail({ ...second.flow, intent: 'link' }, await second.encrypt(E2E_SIGN_IN_CODE), bruno.session)).rejects.toThrow('ACCOUNT_IDENTITY_LINKED_ELSEWHERE');
-    expect((await service().view(ana.session))?.identities.map(identity => identity.kind).sort()).toEqual(['apple', 'email']);
-    expect((await service().view(bruno.session))?.identities.map(identity => identity.kind)).toEqual(['apple']);
+
+  it('never links two Privy users to one existing account, even when they sign in at the same time through different identities', async () => {
+    const before = await store().signIn({ kind: 'email', subject: 'both@example.com', label: 'both@example.com' });
+    await store().linkIdentity(before.accountId, { kind: 'google', subject: 'g-12', label: null });
+    users.set(did(12), [email('both@example.com')]);
+    users.set(did(13), [google('g-12')]);
+    const results = await Promise.allSettled([signIn(did(12)), signIn(did(13))]);
+    expect(results.filter(result => result.status === 'fulfilled')).toHaveLength(1);
+    expect(results.flatMap(result => result.status === 'rejected' ? [(result.reason as Error).message] : [])).toEqual(['ACCOUNT_PRIVY_USER_MISMATCH']);
+    expect((await t.db.query("SELECT count(*)::int AS n FROM flofi_account_identities WHERE kind='PRIVY' AND account_id=$1", [before.accountId])).rows).toEqual([{ n: 1 }]);
   });
 });
 
-describe('account service', () => {
-  it('signs a new Apple user in once per ID token and opens no wallet-provider session', async () => {
-    const outcome = await appleSignIn('ana');
-    expect(outcome).toMatchObject({ created: true, onboarding: 'pending', managed: null, managedError: null });
-    expect(await appleSignIn('ana')).toMatchObject({ created: false, session: { accountId: outcome.session.accountId } });
-    expect(emulator.orgs.size).toBe(0);
-    const flow = newOidcFlow('apple', null, 'sign-in', '/app'), token = idToken('ana', flow.nonce, Math.floor(clock.getTime() / 1000));
-    await service().completeOidc(apple, flow, { idToken: token }, null);
-    await expect(service().completeOidc(apple, flow, { idToken: token }, null)).rejects.toThrow('OIDC_TOKEN_REPLAYED');
+describe('Privy wallets are saved only for the account’s own Privy user', () => {
+  it('saves a created and an imported wallet with the Privy wallet id and a private-key export only', async () => {
+    users.set(did(20), [google('g-20'), embedded(EVM_1, { id: 'privywalletevm0000000020' })]);
+    const { session } = await signIn(did(20));
+    users.set(did(20), [google('g-20'), embedded(EVM_1, { id: 'privywalletevm0000000020' }), embedded(SOL_1, { solana: true, imported: true })]);
+    const created = await service().savePrivyWallet(session, tokenOf(did(20)), { ecosystem: 'evm', address: EVM_1.toUpperCase().replace('0X', '0x') });
+    expect(created).toMatchObject({ ecosystem: 'evm', address: EVM_1, origin: 'generated', provider: 'privy', export: 'private-key', label: 'EVM wallet' });
+    const imported = await service().savePrivyWallet(session, tokenOf(did(20)), { ecosystem: 'solana', address: SOL_1, label: '  My  Phantom key ' });
+    expect(imported).toMatchObject({ ecosystem: 'solana', origin: 'imported', provider: 'privy', export: 'private-key', label: 'My Phantom key' });
+    expect((await t.db.query("SELECT provider_resource FROM flofi_account_wallets WHERE address=$1", [EVM_1])).rows).toEqual([{ provider_resource: 'privywalletevm0000000020' }]);
+    // Idempotent: saving the same wallet again changes nothing.
+    expect(await service().savePrivyWallet(session, tokenOf(did(20)), { ecosystem: 'evm', address: EVM_1 })).toMatchObject({ id: created.id, label: 'EVM wallet' });
   });
-  it('rejects an ID token whose nonce is not this flow’s', async () => {
-    const flow = newOidcFlow('apple', null, 'sign-in', '/app'), other = newOidcFlow('apple', null, 'sign-in', '/app');
-    await expect(service().completeOidc(apple, flow, { idToken: idToken('ana', other.nonce, Math.floor(clock.getTime() / 1000)) }, null)).rejects.toThrow('OIDC_NONCE_MISMATCH');
+
+  it('refuses another Privy user’s token, a wallet that is not one of the user’s embedded wallets, a bad name, and an unlinked account', async () => {
+    users.set(did(21), [google('g-21'), embedded(EVM_1), external(EVM_X)]);
+    users.set(did(22), [google('g-22'), embedded(EVM_2)]);
+    const { session } = await signIn(did(21));
+    await expect(service().savePrivyWallet(session, tokenOf(did(22)), { ecosystem: 'evm', address: EVM_2 })).rejects.toThrow('PRIVY_ACCOUNT_MISMATCH');
+    await expect(service().savePrivyWallet(session, tokenOf(did(21)), { ecosystem: 'evm', address: EVM_X })).rejects.toThrow('ACCOUNT_WALLET_NOT_OWNED');
+    await expect(service().savePrivyWallet(session, tokenOf(did(21)), { ecosystem: 'evm', address: EVM_2 })).rejects.toThrow('ACCOUNT_WALLET_NOT_OWNED');
+    await expect(service().savePrivyWallet(session, tokenOf(did(21)), { ecosystem: 'evm', address: EVM_1, label: 'x'.repeat(41) })).rejects.toThrow('ACCOUNT_WALLET_LABEL_INVALID');
+    await expect(service().savePrivyWallet(session, tokenOf(did(21)), { ecosystem: 'bitcoin', address: EVM_1 })).rejects.toThrow('ACCOUNT_WALLET_INVALID');
+    const legacy = await store().signIn({ kind: 'google', subject: 'g-legacy', label: null });
+    await expect(service().savePrivyWallet(legacy, tokenOf(did(21)), { ecosystem: 'evm', address: EVM_1 })).rejects.toThrow('PRIVY_ACCOUNT_NOT_LINKED');
+    // Only the user's own embedded wallet was saved (by sign-in's recovery); never the external, foreign or refused ones.
+    expect((await t.db.query('SELECT account_id, address, provider FROM flofi_account_wallets')).rows).toEqual([{ account_id: session.accountId, address: EVM_1, provider: 'privy' }]);
   });
-  it('deletes an account and its data only after a recent sign-in', async () => {
-    const ana = await appleSignIn('ana');
+
+  it('never moves a wallet another account holds, and never replaces this account’s existing record of the same address', async () => {
+    const other = await store().signIn({ kind: 'email', subject: 'x@example.com', label: 'x@example.com' });
+    await store().saveWallet(other.accountId, { ecosystem: 'evm', address: EVM_1, origin: 'external', provider: 'io.metamask', providerName: 'MetaMask', providerResource: null, label: 'MetaMask' });
+    users.set(did(23), [google('g-23'), embedded(EVM_1, { imported: true })]);
+    const { session } = await signIn(did(23));
+    await expect(service().savePrivyWallet(session, tokenOf(did(23)), { ecosystem: 'evm', address: EVM_1 })).rejects.toThrow('ACCOUNT_WALLET_LINKED_ELSEWHERE');
+    // This account already lists EVM_2 as an external wallet; the person then imports its key into Privy.
+    await store().saveWallet(session.accountId, { ecosystem: 'evm', address: EVM_2, origin: 'external', provider: 'io.rabby', providerName: 'Rabby', providerResource: null, label: 'Rabby' });
+    users.set(did(23), [google('g-23'), embedded(EVM_1, { imported: true }), embedded(EVM_2, { imported: true })]);
+    expect(await service().savePrivyWallet(session, tokenOf(did(23)), { ecosystem: 'evm', address: EVM_2 })).toMatchObject({ origin: 'external', provider: 'io.rabby' });
+    expect((await t.db.query('SELECT account_id FROM flofi_account_wallets WHERE address=$1', [EVM_1])).rows).toEqual([{ account_id: other.accountId }]);
+  });
+
+  it('recovers wallets whose save never finished, at sign-in and on demand, and reports wallets held elsewhere', async () => {
+    users.set(did(24), [google('g-24')]);
+    const { session } = await signIn(did(24));
+    // Created at Privy, but the browser closed before FloFi saved it.
+    users.set(did(24), [google('g-24'), embedded(EVM_1)]);
+    expect((await signIn(did(24))).session.accountId).toBe(session.accountId);
+    expect((await store().wallets(session.accountId)).map(wallet => wallet.address)).toEqual([EVM_1]);
+    const other = await store().signIn({ kind: 'email', subject: 'y@example.com', label: 'y@example.com' });
+    await store().saveWallet(other.accountId, { ecosystem: 'evm', address: EVM_2, origin: 'external', provider: 'io.metamask', providerName: 'MetaMask', providerResource: null, label: 'MetaMask' });
+    users.set(did(24), [google('g-24'), embedded(EVM_1), embedded(EVM_2, { imported: true }), embedded(SOL_1, { solana: true })]);
+    const synced = await service().syncPrivyWallets(session, tokenOf(did(24)));
+    expect(synced.heldElsewhere).toBe(1);
+    expect(synced.wallets.map(wallet => `${wallet.ecosystem}:${wallet.origin}`).sort()).toEqual(['evm:generated', 'solana:generated']);
+    await expect(service().syncPrivyWallets(session, tokenOf(did(23)))).rejects.toThrow();
+  });
+
+  it('keeps legacy FloFi Wallet (Turnkey) wallets exactly as they were when the account starts using Privy', async () => {
+    const legacy = await store().signIn({ kind: 'email', subject: 'legacy@example.com', label: 'legacy@example.com' });
+    await store().setWalletOrganization(legacy.accountId, { provider: 'turnkey', organization: 'org-12345678', user: 'user-12345678', login: 'email' });
+    await store().saveWallet(legacy.accountId, { ecosystem: 'evm', address: EVM_X, origin: 'generated', provider: 'turnkey', providerName: 'FloFi wallet',
+      providerResource: 'wallet-12345678', label: 'EVM wallet' });
+    const before = (await t.db.query('SELECT * FROM flofi_account_wallets WHERE address=$1', [EVM_X])).rows;
+    users.set(did(25), [email('legacy@example.com'), embedded(EVM_1)]);
+    const outcome = await signIn(did(25));
+    expect(outcome.session.accountId).toBe(legacy.accountId);
+    expect((await t.db.query('SELECT * FROM flofi_account_wallets WHERE address=$1', [EVM_X])).rows).toEqual(before);
+    const view = await service().view(outcome.session);
+    expect(view?.wallets.map(wallet => `${wallet.provider}:${wallet.origin}:${wallet.export}`).sort()).toEqual(['privy:generated:private-key', 'turnkey:generated:recovery-phrase']);
+    expect(view?.managedLogin).toBe('email');
+    expect((await service().privyWallets(outcome.session)).map(wallet => wallet.address)).toEqual([EVM_1]);
+    // A background sync never changes the legacy record, even once Privy lists the same address (its key imported into Privy)…
+    users.set(did(25), [email('legacy@example.com'), embedded(EVM_1), embedded(EVM_X, { imported: true, id: 'privywalletlegacy0000001' })]);
+    await service().syncPrivyWallets(outcome.session, tokenOf(did(25)));
+    expect((await t.db.query('SELECT * FROM flofi_account_wallets WHERE address=$1', [EVM_X])).rows).toEqual(before);
+    // …only the person's explicit Import key does: the same address and name become that Privy wallet, now signable and exported from Privy.
+    const adopted = await service().savePrivyWallet(outcome.session, tokenOf(did(25)), { ecosystem: 'evm', address: EVM_X, label: 'Imported again' });
+    expect(adopted).toMatchObject({ address: EVM_X, label: 'EVM wallet', provider: 'privy', origin: 'imported', export: 'private-key' });
+    expect((await service().privyWallets(outcome.session)).map(wallet => wallet.address).sort()).toEqual([EVM_1, EVM_X].sort());
+    expect((await store().account(legacy.accountId))?.organization).toMatchObject({ provider: 'turnkey', organization: 'org-12345678' });
+  });
+
+  it('refuses a wallet name that looks like part of a key, so no key fragment reaches the database', async () => {
+    users.set(did(28), [google('g-28'), embedded(EVM_1)]);
+    const { session } = await signIn(did(28));
+    for (const label of ['a'.repeat(40), '0x' + 'ab'.repeat(19), '4NdmBQtrMJVYVfKf2PJy9NZUZdT', 'Main ' + 'f'.repeat(24)])
+      await expect(service().savePrivyWallet(session, tokenOf(did(28)), { ecosystem: 'evm', address: EVM_1, label })).rejects.toThrow('ACCOUNT_WALLET_LABEL_KEY_SHAPED');
+    await expect(store().renameWallet(session.accountId, 'evm', EVM_1, '0x' + 'cd'.repeat(19))).rejects.toThrow('ACCOUNT_WALLET_LABEL_KEY_SHAPED');
+    expect((await t.db.query("SELECT count(*)::int AS n FROM flofi_account_wallets WHERE label ~ '[0-9a-fA-F]{20}|[1-9A-HJ-NP-Za-km-z]{24}'")).rows).toEqual([{ n: 0 }]);
+    expect(await service().savePrivyWallet(session, tokenOf(did(28)), { ecosystem: 'evm', address: EVM_1, label: 'Trading 2026' })).toMatchObject({ address: EVM_1 });
+    await store().renameWallet(session.accountId, 'evm', EVM_1, 'Trading 2026');
+  });
+
+  it('never links one of the account’s own FloFi (Privy) wallets as an external wallet or a sign-in identity', async () => {
+    users.set(did(27), [google('g-27'), embedded(EVM_2)]);
+    const { session } = await signIn(did(27));
+    expect((await service().view(session))?.wallets.map(wallet => wallet.address)).toEqual([EVM_2]);
+    await expect(service().linkExternalWallet(session, { namespace: 'eip155', address: EVM_2 }, { key: 'io.metamask', name: 'MetaMask' }))
+      .rejects.toThrow('ACCOUNT_WALLET_IS_FLOFI_WALLET');
+    expect((await identities(session.accountId)).map(identity => identity.kind).sort()).toEqual(['GOOGLE', 'PRIVY']);
+    expect(await service().linkExternalWallet(session, { namespace: 'eip155', address: EVM_X }, { key: 'io.metamask', name: 'MetaMask' }))
+      .toMatchObject({ address: EVM_X, origin: 'external', provider: 'io.metamask' });
+  });
+
+  it('deletes an account and all its data (Privy identity, sign-ins, sessions, wallets) only after a recent sign-in', async () => {
+    users.set(did(26), [google('g-26'), email('ana26@example.com'), embedded(EVM_2)]);
+    const { session } = await signIn(did(26));
+    expect((await service().view(session))?.wallets.map(wallet => wallet.address)).toEqual([EVM_2]);
     clock = new Date(clock.getTime() + 11 * 60_000);
-    await expect(service().deleteAccount(ana.session)).rejects.toThrow('ACCOUNT_REAUTHENTICATION_REQUIRED');
-    const fresh = await appleSignIn('ana');
-    await service().deleteAccount(fresh.session);
+    await expect(service().deleteAccount(session)).rejects.toThrow('ACCOUNT_REAUTHENTICATION_REQUIRED');
+    clock = new Date(session.authenticatedAt * 1000);
+    await service().deleteAccount(session);
     for (const table of ['flofi_accounts', 'flofi_account_identities', 'flofi_account_sessions', 'flofi_account_wallets'])
       expect((await t.db.query(`SELECT count(*)::int AS n FROM ${table}`)).rows, table).toEqual([{ n: 0 }]);
-    expect(await appleSignIn('ana')).toMatchObject({ created: true });
-  });
-  it('signs a Web3 wallet in as its own account, recorded as a non-exportable external wallet', async () => {
-    const outcome = await service().completeWallet({ namespace: 'eip155', address: EVM.toUpperCase().replace('0X', '0x') }, { key: 'io.metamask', name: 'MetaMask' }, 'sign-in', null);
-    expect(outcome).toMatchObject({ created: true, managed: null });
-    expect((await service().view(outcome.session))?.wallets).toEqual([expect.objectContaining({ address: EVM, origin: 'external', export: 'none', provider: 'io.metamask' })]);
-  });
-  it('saves managed wallets only when the provider confirms they belong to this person’s own organization', async () => {
-    const ana = await appleSignIn('ana'), bruno = await appleSignIn('bruno');
-    // Organizations exist only after a FloFi Wallet unlock (wallet-service.pg.test.ts); here they are set up directly.
-    const orgA = { id: 'org-ana-00000001', user: 'user-ana-0001', email: null, oidc: null, sessions: new Map(), keys: [],
-      wallets: [{ walletId: 'wallet-ana-0001', accounts: [{ walletId: 'wallet-ana-0001', address: SOL, format: 'ADDRESS_FORMAT_SOLANA' }] }] };
-    const orgB = { id: 'org-bruno-000001', user: 'user-bruno-001', email: null, oidc: null, sessions: new Map(), wallets: [], keys: [] };
-    emulator.orgs.set(orgA.id, orgA); emulator.orgs.set(orgB.id, orgB);
-    const store = createAccountStore(t.db, 'default');
-    await store.setWalletOrganization(ana.session.accountId, { provider: 'turnkey', organization: orgA.id, user: orgA.user, login: 'apple' }, clock);
-    await store.setWalletOrganization(bruno.session.accountId, { provider: 'turnkey', organization: orgB.id, user: orgB.user, login: 'apple' }, clock);
-    expect(await service().saveManagedWallets(ana.session, [`solana:${SOL}`])).toEqual([expect.objectContaining({ origin: 'generated', export: 'recovery-phrase' })]);
-    await expect(service().saveManagedWallets(bruno.session, [`solana:${SOL}`])).rejects.toThrow('ACCOUNT_WALLET_NOT_OWNED');
-    await expect(service().saveManagedWallets(ana.session, ['evm:not-an-address'])).rejects.toThrow('ACCOUNT_WALLET_INVALID');
-  });
-  it('links identities only with a fresh session and never moves one from another account', async () => {
-    const ana = await appleSignIn('ana'), wallet = await service().completeWallet({ namespace: 'solana', address: SOL }, { key: 'Phantom', name: 'Phantom' }, 'sign-in', null);
-    await expect(service().linkExternalWallet(ana.session, { namespace: 'solana', address: SOL }, { key: 'Phantom', name: 'Phantom' })).rejects.toThrow('ACCOUNT_WALLET_LINKED_ELSEWHERE');
-    expect(await service().linkExternalWallet(ana.session, { namespace: 'eip155', address: EVM }, { key: 'io.metamask', name: 'MetaMask' })).toMatchObject({ origin: 'external' });
-    await expect(service().linkExternalWallet(ana.session, null, { key: 'x', name: 'x' })).rejects.toThrow('WALLET_SESSION_REQUIRED');
-    await expect(appleSignIn('carla', wallet.session, 'link')).resolves.toMatchObject({ session: { accountId: wallet.session.accountId } });
-    clock = new Date(clock.getTime() + 11 * 60_000);
-    await expect(appleSignIn('dora', ana.session, 'link')).rejects.toThrow('ACCOUNT_REAUTHENTICATION_REQUIRED');
-  });
-  it('keeps FloFi sign-in working when the wallet provider is not configured, and says so', async () => {
-    const plain = createAccountService({ store: createAccountStore(t.db, 'default'), turnkey: null, now: () => clock, transport: jwks });
-    const flow = newOidcFlow('apple', null, 'sign-in', '/app');
-    expect(await plain.completeOidc(apple, flow, { idToken: idToken('ana', flow.nonce, Math.floor(clock.getTime() / 1000)) }, null)).toMatchObject({ created: true, managed: null });
-    await expect(plain.startEmail('ana@example.com', browserKey())).rejects.toThrow('EMAIL_SIGN_IN_NOT_CONFIGURED');
+    // The same Privy user signing in again gets a new, empty account (its Privy wallet is listed again by the sign-in sync).
+    expect(await signIn(did(26))).toMatchObject({ created: true });
   });
 });

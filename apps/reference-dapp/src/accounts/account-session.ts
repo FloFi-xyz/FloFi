@@ -13,7 +13,7 @@
  */
 import { createHash, createHmac, hkdfSync, randomBytes, timingSafeEqual } from 'node:crypto';
 import { walletSessionKey } from '../server/wallet-session.ts';
-import { ACCOUNT_ID, type IdentityKind } from './account-model.ts';
+import { ACCOUNT_ID, type SessionMethod } from './account-model.ts';
 
 type Env = Readonly<Record<string, string | undefined>>;
 export const ACCOUNT_SESSION_COOKIE = 'flofi_account_session';
@@ -24,7 +24,7 @@ export const ACCOUNT_FLOW_TTL_SECONDS = 600;
 /** A sensitive action (wallet export) needs a sign-in at most this old. */
 export const ACCOUNT_REAUTH_SECONDS = 10 * 60;
 
-export type AccountSessionToken = { readonly accountId: string; readonly sessionId: string; readonly method: IdentityKind;
+export type AccountSessionToken = { readonly accountId: string; readonly sessionId: string; readonly method: SessionMethod;
   readonly authenticatedAt: number; readonly expiresAt: number };
 export type OidcProvider = 'google' | 'apple';
 export type AccountIntent = 'sign-in' | 'link';
@@ -38,7 +38,7 @@ export type EmailFlow = { readonly challengeId: string; readonly intent: Account
 /** a1 account session, o1 OIDC flow, m1 email flow, h1 FloFi Wallet handoff, w1 FloFi Wallet session, f1 FloFi Wallet unlock flow. */
 type Kind = 'a1' | 'o1' | 'm1' | 'h1' | 'w1' | 'f1';
 const seconds = (now: Date) => Math.floor(now.getTime() / 1000);
-const METHODS: readonly IdentityKind[] = ['google', 'apple', 'email', 'eip155', 'solana'];
+const METHODS: readonly SessionMethod[] = ['google', 'apple', 'email', 'eip155', 'solana'];
 const HEX32 = /^[0-9a-f]{32}$/, B64URL = /^[A-Za-z0-9_-]{43,128}$/;
 /** A compressed P-256 public key (hex): the browser's provider session key. */
 export const SESSION_PUBLIC_KEY = /^0[23][0-9a-f]{64}$/;
@@ -89,8 +89,8 @@ export function sealAccountSession(env: Env, session: AccountSessionToken, domai
 export function readAccountSession(env: Env, token: string | undefined, now: Date, domain: string): AccountSessionToken | null {
   const key = keyOrNull(env), v = key && unseal('a1', token, key, now, domain);
   if (!v || typeof v.a !== 'string' || !ACCOUNT_ID.test(v.a) || typeof v.s !== 'string' || !HEX32.test(v.s)
-    || !METHODS.includes(v.m as IdentityKind) || !Number.isSafeInteger(v.t) || (v.t as number) > seconds(now) + 60) return null;
-  return { accountId: v.a, sessionId: v.s, method: v.m as IdentityKind, authenticatedAt: v.t as number, expiresAt: v.e as number };
+    || !METHODS.includes(v.m as SessionMethod) || !Number.isSafeInteger(v.t) || (v.t as number) > seconds(now) + 60) return null;
+  return { accountId: v.a, sessionId: v.s, method: v.m as SessionMethod, authenticatedAt: v.t as number, expiresAt: v.e as number };
 }
 /** Whether a session signed in recently enough for a sensitive action. */
 export const freshlyAuthenticated = (session: Pick<AccountSessionToken, 'authenticatedAt'>, now: Date) =>
@@ -123,8 +123,8 @@ export function readOidcFlow(env: Env, token: string | undefined, now: Date, dom
     || (v.r !== 'sign-in' && v.r !== 'link')) return null;
   const l = Array.isArray(v.l) ? v.l : null;
   const linkSession = v.r === 'link' && l && l.length === 5 && typeof l[0] === 'string' && ACCOUNT_ID.test(l[0]) && typeof l[1] === 'string' && HEX32.test(l[1])
-    && METHODS.includes(l[2] as IdentityKind) && Number.isSafeInteger(l[3]) && Number.isSafeInteger(l[4])
-    ? { accountId: l[0], sessionId: l[1], method: l[2] as IdentityKind, authenticatedAt: l[3] as number, expiresAt: l[4] as number } : null;
+    && METHODS.includes(l[2] as SessionMethod) && Number.isSafeInteger(l[3]) && Number.isSafeInteger(l[4])
+    ? { accountId: l[0], sessionId: l[1], method: l[2] as SessionMethod, authenticatedAt: l[3] as number, expiresAt: l[4] as number } : null;
   return { provider: v.p, state: v.s, nonce: v.n, verifier: v.v, sessionKey: v.k as string | null, intent: v.r, returnTo: safeReturnPath(v.u), linkSession };
 }
 export function sealEmailFlow(env: Env, flow: EmailFlow, domain: string, now: Date): string {

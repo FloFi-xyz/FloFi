@@ -22,6 +22,8 @@ export const e2eAppOrigin = (port: number) => `http://127.0.0.1:${port}`;
 
 export const E2E_APP_PORT = e2eAppPort(process.env.FLOFI_E2E_APP_PORT ?? process.env.FLOFI_E2E_PORT ?? '3108');
 export const E2E_APP_ORIGIN = e2eAppOrigin(E2E_APP_PORT);
+/** BUILD-FLOFI-PRIVY-UX-001: the card origin of the MOCKED card suite, the same server under its other loopback name (another origin). */
+export const E2E_CARD_ORIGIN = `http://localhost:${E2E_APP_PORT}`;
 // Preserve release isolation and the earlier harness API; CI's canonical variable takes precedence.
 export const APP_PORT = String(E2E_APP_PORT);
 export const APP_ORIGIN = E2E_APP_ORIGIN;

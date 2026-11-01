@@ -41,7 +41,7 @@ export async function POST(request: Request) {
       if (!v || v.a !== session.account.accountId || v.s !== session.account.sessionId || typeof v.m !== 'string' || typeof v.k !== 'string'
         || typeof v.t !== 'string' || typeof v.i !== 'string' || !Number.isSafeInteger(v.x) || typeof v.u !== 'boolean') return walletJson(400, { code: 'EMAIL_CHALLENGE_EXPIRED' });
       const pending: PendingEmailUnlock = { email: v.m, key: v.k, verificationToken: v.t, tokenId: v.i, expiresAtMs: v.x as number, signup: v.u };
-      const unlocked = await host.service.finishEmailUnlock(session, pending, body.loginSignature, body.signupSignature);
+      const unlocked = await host.service.finishEmailUnlock(session, pending, body.loginSignature);
       const next = { ...session, unlockedKey: unlocked.key, unlockedAt: Math.floor(now.getTime() / 1000), unlockedUntil: Math.min(unlocked.until, session.expiresAt) };
       await setWalletSession(host, next);
       return walletJson(200, { context: await host.service.context(next), unlockedUntil: next.unlockedUntil });

@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 'use client';
+import { disconnectToLogin } from '../accounts/disconnect';
+import { useAccountsOffered, useFloFiPrivy } from '../accounts/privy-context';
 import { useLocale } from '../i18n/locale';
 
 import { product } from '../config/product';
@@ -66,10 +68,15 @@ export function TopBar({ tab, setTab, pathname, engineering = false, compact = f
   const solanaActive = walletKind === 'solana';
   const connection = useWalletConnection();
   const solanaDisconnect = () => { void jupiter.disconnect(); };
-  const disconnect = solanaActive ? solanaDisconnect : build009.reset;
+  const closeWallet = solanaActive ? solanaDisconnect : build009.reset;
+  // BUILD-FLOFI-PRIVY-UX-001: where FloFi accounts exist, Disconnect always ends the FloFi session and Privy too and lands on the sign-in
+  // page; a deployment without accounts has no sign-in to return to, so there it only closes the wallet connection, as before.
+  const privy = useFloFiPrivy(), accounts = useAccountsOffered();
+  const disconnect = accounts ? () => { void disconnectToLogin(privy, closeWallet); } : closeWallet;
   // BUILD-FLOFI-MAINNET-PRODUCT-001: there is no Mainnet/Testnet selector. FloFi runs on mainnets; a wallet on another network is offered the
   // workflow's own network below ("Switch to …"), and nothing moves a wallet to a test network.
-  const disconnectDisabled = solanaActive ? !jupiter.session || jupiter.busy : !build009.account || build009.busy;
+  const disconnectDisabled = accounts ? (solanaActive ? jupiter.busy : build009.busy)
+    : solanaActive ? !jupiter.session || jupiter.busy : !build009.account || build009.busy;
   const walletError = solanaActive ? connection.error : build009.error ?? connection.error;
   const provider = solanaActive ? jupiter.session ? { name: jupiter.session.wallet.name, icon: jupiter.session.wallet.icon ?? null } : null
     : build009.account ? build009.provider : null;

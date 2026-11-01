@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 /**
- * BUILD-FLOFI-AUTH-WALLETS-001: FloFi Wallet's server side (wallet origin only).
+ * BUILD-FLOFI-AUTH-WALLETS-001: FloFi Wallet's server side (wallet origin only). Since BUILD-FLOFI-PRIVY-UX-001 FloFi Wallet (Turnkey) is the
+ * legacy, export-only home of wallets created there before Privy: it unlocks only an account that already has its Turnkey organization,
+ * never creates one, saves nothing new and signs nothing (FloFi's wallets are Privy wallets now). Export keeps every rule below.
  *
  * Unlocking opens a provider session for a key that only the wallet origin holds (its IndexedDB stamper). It always needs the person:
  * - email: the provider sends a code to the account's own verified address (never one the browser names); the wallet page encrypts the
@@ -11,11 +13,11 @@
  * The person's provider organization has that identity as its only root user; FloFi's parent key is not a member.
  */
 import { createHash, createPublicKey, ECDH, verify } from 'node:crypto';
-import { canonicalAddress, exportActions, isManagedLogin, MANAGED_PROVIDER, normalizeEmail, parseAccountWalletId, type AccountWallet, type ManagedLogin } from './account-model.ts';
+import { exportActions, isLegacyWallet, isManagedLogin, LEGACY_MANAGED_PROVIDER, normalizeEmail, parseAccountWalletId, type AccountWallet, type ManagedLogin } from './account-model.ts';
 import { SESSION_PUBLIC_KEY, type OidcFlow } from './account-session.ts';
 import type { AccountStore } from './account-store.ts';
 import { exchangeGoogleCode, verifyIdToken, type OidcConfig } from './oidc.ts';
-import { clientSignature, emailSignupSignatureMessage, loginSignatureMessage, type TurnkeyServer } from './turnkey-server.ts';
+import { clientSignature, loginSignatureMessage, type TurnkeyServer } from './turnkey-server.ts';
 import { unlockedFor, WALLET_EXPORT_UNLOCK_SECONDS, type WalletSession } from './wallet-session.ts';
 
 export type UnlockMethod = ManagedLogin;
@@ -42,7 +44,6 @@ const fail = (code: string): never => { throw new Error(code); };
  * (5 per hour, apart from sign-in codes), and a sign-in challenge can never complete an unlock, nor an unlock challenge a sign-in.
  */
 export const unlockChallengeKey = (email: string) => `wallet-unlock:${email}`;
-const PROVIDER_LABEL: Readonly<Record<'google' | 'apple', 'Google' | 'Apple'>> = Object.freeze({ google: 'Google', apple: 'Apple' });
 const seconds = (now: Date) => Math.floor(now.getTime() / 1000);
 /** Whether `signature` (raw r‖s hex) is the P-256 signature of `message` (SHA-256) by the compressed `publicKey`. Checked before any submit. */
 function rawP256Valid(publicKey: string, message: string, signature: string): boolean {
@@ -82,12 +83,15 @@ export function createWalletService(input: { readonly store: AccountStore; reado
     const created = (await store.account(accountId))?.identities[0];
     return created && isManagedLogin(created.kind) ? [created.kind as ManagedLogin] : [];
   }
-  async function bind(accountId: string, login: ManagedLogin, locate: () => Promise<{ organization: string; user: string } | null>,
-    create: () => Promise<{ organization: string; user: string }>) {
+  /**
+   * The account's existing Turnkey organization for this login (recorded, or found at the provider for this verified identity). Legacy and
+   * export-only: an account without one has no FloFi Wallet wallets to export, and no organization is ever created any more.
+   */
+  async function bind(accountId: string, login: ManagedLogin, locate: () => Promise<{ organization: string; user: string } | null>) {
     const current = (await store.account(accountId))?.organization ?? null;
     if (current) return current.login === login ? current : fail(`MANAGED_WALLETS_NEED_${current.login.toUpperCase()}_SIGN_IN`);
-    const located = await locate() ?? await create();
-    return store.setWalletOrganization(accountId, { provider: 'turnkey', organization: located.organization, user: located.user, login }, now());
+    const located = await locate() ?? fail('LEGACY_WALLET_EXPORT_ONLY');
+    return store.setWalletOrganization(accountId, { provider: LEGACY_MANAGED_PROVIDER, organization: located!.organization, user: located!.user, login }, now());
   }
 
   const service = {
@@ -97,7 +101,7 @@ export function createWalletService(input: { readonly store: AccountStore; reado
       const label = account.identities.find(identity => isManagedLogin(identity.kind))?.label ?? account.identities[0]?.label ?? 'FloFi account';
       return { accountId: account.accountId, label, methods: await methodsOf(account.accountId, organization),
         organization: organization ? { organizationId: organization.organization, userId: organization.user, login: organization.login } : null,
-        wallets: account.wallets.filter(wallet => wallet.provider === MANAGED_PROVIDER && wallet.origin !== 'external'),
+        wallets: account.wallets.filter(isLegacyWallet),
         ...unlockState(session, seconds(now())) };
     },
     /** Sends a code to the account's own verified email address (the browser cannot name another one), bound to the wallet key. */
@@ -135,26 +139,20 @@ export function createWalletService(input: { readonly store: AccountStore; reado
       await store.consumeEmailChallenge(challengeId, now());
       const located = account.organization ? null : await provider().findOrganization({ email: email! });
       if (account.organization && account.organization.login !== 'email') fail(`MANAGED_WALLETS_NEED_${account.organization.login.toUpperCase()}_SIGN_IN`);
-      const signup = !account.organization && !located;
+      // Legacy, export-only: an unlock never signs anyone up at the provider.
+      if (!account.organization && !located) fail('LEGACY_WALLET_EXPORT_ONLY');
+      const signup = false;
       return { pending: { email: email!, key: challenge!.browserBinding, verificationToken: token, tokenId: claims.id, expiresAtMs: claims.expiresAtMs, signup },
         tokenId: claims.id, email: email!, signup };
     },
-    /** Creates the organization if needed (V8, sign-up signature) and opens the provider session for the wallet key (OTP_LOGIN_V2). */
-    async finishEmailUnlock(session: WalletSession, pending: PendingEmailUnlock, loginSignature: unknown, signupSignature: unknown): Promise<{ key: string; until: number }> {
+    /** Opens the provider session for the wallet key (OTP_LOGIN_V2) on the account's existing organization. */
+    async finishEmailUnlock(session: WalletSession, pending: PendingEmailUnlock, loginSignature: unknown): Promise<{ key: string; until: number }> {
       const account = await record(session);
-      if (pending.expiresAtMs <= now().getTime()) fail('EMAIL_CHALLENGE_EXPIRED');
+      if (pending.expiresAtMs <= now().getTime() || pending.signup) fail('EMAIL_CHALLENGE_EXPIRED');
       const login = clientSignature(pending.key, loginSignatureMessage(pending.tokenId, pending.key), loginSignature);
-      // Fail closed before any provider call: each signature must be the wallet key's over exactly the message FloFi expects.
+      // Fail closed before any provider call: the signature must be the wallet key's over exactly the message FloFi expects.
       if (!rawP256Valid(pending.key, login.message, login.signature)) fail('TURNKEY_CLIENT_SIGNATURE_INVALID');
-      if (pending.signup) {
-        const signup = clientSignature(pending.key, emailSignupSignatureMessage(pending.tokenId, pending.email), signupSignature);
-        if (!rawP256Valid(pending.key, signup.message, signup.signature)) fail('TURNKEY_CLIENT_SIGNATURE_INVALID');
-      }
-      const organization = await bind(account.accountId, 'email', () => provider().findOrganization({ email: pending.email }), async () => {
-        if (!pending.signup) fail('MANAGED_ORGANIZATION_CHANGED');
-        return provider().createOrganization(`flofi-${account.accountId}`, { email: pending.email, verificationToken: pending.verificationToken,
-          clientSignature: clientSignature(pending.key, emailSignupSignatureMessage(pending.tokenId, pending.email), signupSignature) });
-      });
+      const organization = await bind(account.accountId, 'email', () => provider().findOrganization({ email: pending.email }));
       const jwt = await provider().emailLogin(organization.organization, pending.verificationToken, pending.key, login);
       return { key: pending.key, until: sessionUntil(jwt, now()) };
     },
@@ -171,17 +169,10 @@ export function createWalletService(input: { readonly store: AccountStore; reado
       const identity = await verifyIdToken(config, idToken, flow, { now: now(), transport });
       if (identity.subject !== await store.identitySubject(account.accountId, config.provider)) fail('WALLET_UNLOCK_IDENTITY_MISMATCH');
       if (!await store.consumeProof(createHash('sha256').update(idToken as string).digest('hex'), identity.expiresAt, now())) fail('OIDC_TOKEN_REPLAYED');
-      const token = idToken as string, email = identity.emailVerified ? identity.email : null;
-      const organization = await bind(account.accountId, config.provider, () => provider().findOrganization({ oidcToken: token }),
-        () => provider().createOrganization(`flofi-${account.accountId}`, { provider: PROVIDER_LABEL[config.provider], oidcToken: token, email }));
+      const token = idToken as string;
+      const organization = await bind(account.accountId, config.provider, () => provider().findOrganization({ oidcToken: token }));
       const jwt = await provider().oidcLogin(organization.organization, token, key!);
       return { key: key!, until: sessionUntil(jwt, now()) };
-    },
-    /** Saves wallets created or imported in FloFi Wallet after the provider confirms they are in this person's organization. */
-    async saveWallets(session: WalletSession, ids: unknown, save: (ids: unknown) => Promise<AccountWallet[]>): Promise<AccountWallet[]> {
-      await record(session);
-      if (!session.unlockedKey) fail('MANAGED_SESSION_REQUIRED');
-      return save(ids);
     },
     /** One export of a managed wallet of this account, after an unlock in the last 5 minutes. External wallets are never exportable. */
     async exportGrant(session: WalletSession, id: unknown, kind: unknown): Promise<ExportGrant> {
@@ -189,20 +180,14 @@ export function createWalletService(input: { readonly store: AccountStore; reado
       if (!session.unlockedKey || !unlockedFor(session, session.unlockedKey, now(), WALLET_EXPORT_UNLOCK_SECONDS)) fail('WALLET_UNLOCK_REQUIRED');
       const organization = account.organization ?? fail('MANAGED_ORGANIZATION_MISSING');
       const parsed = parseAccountWalletId(id) ?? fail('ACCOUNT_WALLET_INVALID');
-      const wallet = account.wallets.find(candidate => candidate.ecosystem === parsed!.ecosystem && candidate.address === parsed!.address) ?? fail('ACCOUNT_WALLET_NOT_FOUND');
+      const wallet = account.wallets.find(candidate => isLegacyWallet(candidate) && candidate.ecosystem === parsed!.ecosystem
+        && candidate.address === parsed!.address) ?? fail('ACCOUNT_WALLET_NOT_FOUND');
       if (kind !== 'private-key' && kind !== 'recovery-phrase') fail('EXPORT_KIND_INVALID');
       if (!exportActions(wallet!).includes(kind as 'private-key')) fail('EXPORT_NOT_SUPPORTED');
       const resource = await store.managedResource(account.accountId, wallet!.ecosystem, wallet!.address) ?? fail('EXPORT_NOT_SUPPORTED');
       const source = kind === 'recovery-phrase' ? 'wallet' : resource!.origin === 'imported' ? 'private-key' : 'wallet-account';
       return { organizationId: organization!.organization, kind: kind as ExportGrant['kind'], resource: source === 'wallet-account' ? wallet!.address : resource!.resource,
         address: wallet!.address, keyFormat: wallet!.ecosystem === 'evm' ? 'HEXADECIMAL' : 'SOLANA', source };
-    },
-    /** Whether `address` is a managed wallet saved to this account (canonical form), for signing requests. */
-    async ownsManagedAddress(session: WalletSession, address: unknown): Promise<AccountWallet | null> {
-      const account = await record(session);
-      if (typeof address !== 'string') return null;
-      return account.wallets.find(wallet => wallet.provider === MANAGED_PROVIDER && wallet.origin !== 'external'
-        && canonicalAddress(wallet.ecosystem, address) === wallet.address) ?? null;
     },
   };
   return service;

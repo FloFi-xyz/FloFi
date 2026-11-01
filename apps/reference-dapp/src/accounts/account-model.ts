@@ -12,8 +12,11 @@
  */
 import { withoutControlCharacters, type WalletEcosystem } from '../wallet/wallet-registry';
 
-export type IdentityKind = 'google' | 'apple' | 'email' | 'eip155' | 'solana';
-export const IDENTITY_KINDS: readonly IdentityKind[] = Object.freeze(['google', 'apple', 'email', 'eip155', 'solana']);
+export type IdentityKind = 'google' | 'apple' | 'email' | 'eip155' | 'solana' | 'privy';
+export const IDENTITY_KINDS: readonly IdentityKind[] = Object.freeze(['google', 'apple', 'email', 'eip155', 'solana', 'privy']);
+/** How a browser session signed in (BUILD-FLOFI-PRIVY-UX-001: through Privy, with one of these methods). Never `privy` itself. */
+export type SessionMethod = Exclude<IdentityKind, 'privy'>;
+export const isSessionMethod = (kind: unknown): kind is SessionMethod => kind === 'google' || kind === 'apple' || kind === 'email' || kind === 'eip155' || kind === 'solana';
 /** Sign-in methods whose identity can also unlock the person's embedded-wallet provider organization. */
 export type ManagedLogin = 'google' | 'apple' | 'email';
 export const isManagedLogin = (kind: IdentityKind): kind is ManagedLogin => kind === 'google' || kind === 'apple' || kind === 'email';
@@ -29,7 +32,10 @@ export type AccountWallet = {
   readonly ecosystem: WalletEcosystem;
   readonly address: string;
   readonly origin: WalletOrigin;
-  /** `turnkey` for managed wallets; the wallet's provider key (EIP-6963 rdns or Wallet Standard name) for external ones. */
+  /**
+   * `privy` for wallets managed in the person's Privy embedded wallet, `turnkey` for legacy FloFi Wallet (Turnkey) wallets created before
+   * BUILD-FLOFI-PRIVY-UX-001; the wallet's provider key (EIP-6963 rdns or Wallet Standard name) for external ones.
+   */
   readonly provider: string;
   readonly providerName: string;
   readonly export: WalletExport;
@@ -40,12 +46,14 @@ export type AccountIdentity = { readonly kind: IdentityKind; readonly label: str
 export type AccountView = {
   readonly accountId: string;
   /** How this browser session signed in. */
-  readonly method: IdentityKind;
+  readonly method: SessionMethod;
   readonly identities: readonly AccountIdentity[];
   readonly onboarding: Onboarding;
   readonly wallets: readonly AccountWallet[];
-  /** The sign-in method that unlocks this account's managed wallets, when it has a provider organization. */
+  /** The sign-in method that unlocks this account's legacy FloFi Wallet (Turnkey) organization, when it has one (export only). */
   readonly managedLogin: ManagedLogin | null;
+  /** Whether the account is linked to a Privy user (every account that signed in since BUILD-FLOFI-PRIVY-UX-001). */
+  readonly privy: boolean;
   readonly authenticatedAt: string;
   readonly expiresAt: string;
 };
@@ -55,8 +63,15 @@ const PROVIDER = /^[A-Za-z0-9][A-Za-z0-9 ._:#-]{0,63}$/;
 const TIMESTAMP = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
 export const ACCOUNT_ID = /^acct_[0-9a-f]{32}$/;
 export const WALLET_LABEL_MAX = 40;
-export const MANAGED_PROVIDER = 'turnkey';
+/** The embedded-wallet provider of every wallet FloFi creates or imports now (BUILD-FLOFI-PRIVY-UX-001). */
+export const MANAGED_PROVIDER = 'privy';
+/** Wallets created or imported in FloFi Wallet (Turnkey) before Privy. Kept, shown and exportable; never created or signed with again. */
+export const LEGACY_MANAGED_PROVIDER = 'turnkey';
+export type ManagedProvider = typeof MANAGED_PROVIDER | typeof LEGACY_MANAGED_PROVIDER;
+export const isManagedProvider = (value: unknown): value is ManagedProvider => value === MANAGED_PROVIDER || value === LEGACY_MANAGED_PROVIDER;
 export const MANAGED_PROVIDER_NAME = 'FloFi wallet';
+/** A Privy user id (DID). */
+export const PRIVY_USER_ID = /^did:privy:[A-Za-z0-9]{8,64}$/;
 
 export function validAddress(ecosystem: WalletEcosystem, address: unknown): address is string {
   return typeof address === 'string' && (ecosystem === 'evm' ? EVM.test(address) : SOLANA.test(address));
@@ -80,6 +95,17 @@ export function walletLabel(value: unknown): string | null {
   const label = withoutControlCharacters(value).replace(/\s+/g, ' ').trim();
   return label && label.length <= WALLET_LABEL_MAX ? label : null;
 }
+/**
+ * Whether text looks like part of a private key or seed (a long unbroken run of hex or base58), for example a key pasted into the
+ * Wallet name field by mistake. Such a name is refused whenever a name is written, so no fragment of a key reaches FloFi's database
+ * (BUILD-FLOFI-PRIVY-UX-001); names already stored are still shown.
+ */
+export const keyShapedText = (value: string): boolean => /[0-9a-fA-F]{20,}/.test(value) || /[1-9A-HJ-NP-Za-km-z]{24,}/.test(value);
+/** A wallet name as it may be written: a valid label that does not look like key material. */
+export function writableWalletLabel(value: unknown): string | null {
+  const label = walletLabel(value);
+  return label && !keyShapedText(label) ? label : null;
+}
 export const validProvider = (value: unknown): value is string => typeof value === 'string' && PROVIDER.test(value);
 /** A verified email address, normalised to lower case. Only the shape is checked here; verification belongs to the provider. */
 export function normalizeEmail(value: unknown): string | null {
@@ -95,15 +121,25 @@ const exactKeys = (value: object, keys: readonly string[]) => {
   return own.length === keys.length && own.every(key => keys.includes(key));
 };
 const WALLET_KEYS = ['id', 'ecosystem', 'address', 'origin', 'provider', 'providerName', 'export', 'label', 'addedAt'] as const;
-/** The only export capabilities each origin may carry (mirrors the database CHECK constraints). */
-const EXPORTS: Readonly<Record<WalletOrigin, WalletExport>> = Object.freeze({ generated: 'recovery-phrase', imported: 'private-key', external: 'none' });
+/**
+ * The only export capability each wallet may carry (mirrors the database CHECK constraints): Turnkey generated an HD wallet with a
+ * recovery phrase; Privy shows its owner the private key of a generated or imported wallet; an external wallet's key was never held.
+ */
+export function exportOf(origin: WalletOrigin, provider: string): WalletExport {
+  if (origin === 'external') return 'none';
+  return origin === 'generated' && provider === LEGACY_MANAGED_PROVIDER ? 'recovery-phrase' : 'private-key';
+}
+/** Whether a wallet record is one of the person's Privy-managed wallets (the only managed wallets FloFi signs with). */
+export const isPrivyWallet = (wallet: Pick<AccountWallet, 'origin' | 'provider'>) => wallet.origin !== 'external' && wallet.provider === MANAGED_PROVIDER;
+/** Whether a wallet record is a legacy FloFi Wallet (Turnkey) wallet: listed and exportable, never signed with. */
+export const isLegacyWallet = (wallet: Pick<AccountWallet, 'origin' | 'provider'>) => wallet.origin !== 'external' && wallet.provider === LEGACY_MANAGED_PROVIDER;
 
 export function readAccountWallet(value: unknown): AccountWallet | null {
   if (!value || typeof value !== 'object' || !exactKeys(value, WALLET_KEYS)) return null;
   const v = value as Record<string, unknown>;
   if ((v.ecosystem !== 'evm' && v.ecosystem !== 'solana') || !validAddress(v.ecosystem, v.address)) return null;
-  if ((v.origin !== 'generated' && v.origin !== 'imported' && v.origin !== 'external') || v.export !== EXPORTS[v.origin]) return null;
-  if (!validProvider(v.provider) || (v.origin !== 'external') !== (v.provider === MANAGED_PROVIDER)) return null;
+  if (v.origin !== 'generated' && v.origin !== 'imported' && v.origin !== 'external') return null;
+  if (!validProvider(v.provider) || (v.origin !== 'external') !== isManagedProvider(v.provider) || v.export !== exportOf(v.origin, v.provider)) return null;
   if (walletLabel(v.providerName) !== v.providerName || walletLabel(v.label) !== v.label) return null;
   if (typeof v.addedAt !== 'string' || !TIMESTAMP.test(v.addedAt) || v.id !== accountWalletId(v.ecosystem, v.address)) return null;
   return { id: v.id, ecosystem: v.ecosystem, address: v.address, origin: v.origin, provider: v.provider, providerName: v.providerName as string,
@@ -117,5 +153,5 @@ export function exportActions(wallet: Pick<AccountWallet, 'origin' | 'export'>):
 }
 export const shortAddress = (address: string) => `${address.slice(0, 6)}…${address.slice(-4)}`;
 export const IDENTITY_LABEL: Readonly<Record<IdentityKind, string>> = Object.freeze({
-  google: 'Google', apple: 'Apple', email: 'Email', eip155: 'EVM wallet', solana: 'Solana wallet',
+  google: 'Google', apple: 'Apple', email: 'Email', eip155: 'EVM wallet', solana: 'Solana wallet', privy: 'Privy',
 });

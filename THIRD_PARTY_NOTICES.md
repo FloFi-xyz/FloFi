@@ -132,3 +132,48 @@ Protocol names and marks identify illustrative ecosystems and convey no endorsem
 ## Product fonts (OFL-1.1)
 
 Outfit (Copyright 2021 The Outfit Project Authors) and IBM Plex Mono (Copyright 2017 IBM Corp.; Reserved Font Name "Plex") remain licensed under SIL OFL 1.1. Their unchanged WOFF2 payloads, complete licenses, source links and exact SHA-256 manifest are bundled in [`public/fonts`](apps/reference-dapp/public/fonts/README.md). They are excluded from the application's source-license grant. Self-hosting the same font bytes removes a build-time Google Fonts parser failure; it changes no font design or screenshot baseline.
+
+## BUILD-FLOFI-PRIVY-UX-001 registry dependencies
+
+The Privy account and embedded-wallet integration adds six exact direct dependencies of the private
+reference application and 204 transitive registry packages (295 to 505). All are unmodified, SRI-pinned
+in `pnpm-lock.yaml`, keep their upstream licenses and are classified one by one by
+`python3 scripts/bootstrap-ci.py --verify-dependencies`; nothing is vendored or relicensed. Each archive
+below was downloaded from registry.npmjs.org and matched its lockfile SRI before its legal text was hashed.
+
+| Package | Registry SPDX expression | npm archive | Legal text in the archive | SHA-256 |
+|---|---|---|---|---|
+| `@privy-io/react-auth@3.51.0` | `Apache-2.0` | `react-auth-3.51.0.tgz` | `package/LICENSE` (Apache License 2.0, "Copyright 2022-2023 Horkos, Inc.") | `0671bbe283d00991c3e7a4243bac153a12c6dbab41e95b9d1893e2624a463357` |
+| `@privy-io/node@0.36.0` | `Apache-2.0` | `node-0.36.0.tgz` | `package/LICENSE` (Apache License 2.0, "Copyright 2025 Privy API") | `eeb98a22f07d4992e5175ea9764dc5f42f73821d46309fc29e7e33cc4da5160d` |
+| `@privy-io/node@0.36.0` | `Apache-2.0` | `node-0.36.0.tgz` | `package/src/internal/qs/LICENSE.md` (BSD-3-Clause, for its vendored `neoqs` query-string code) | `d8c77eaffed7f1f874b97f66ee47a557ae24fd59bae8ae14f9b1b84f26a94d2f` |
+| `@solana/kit@8.5.0` | `MIT` | `kit-8.5.0.tgz` | `package/LICENSE` ("Copyright (c) 2023 Solana Labs, Inc") | `c181f3e6911f515d2b5d18513f8e24fba252c36856978fa80b01249fa813453f` |
+| `@solana-program/memo@0.16.0` | `Apache-2.0` | `memo-0.16.0.tgz` | none supplied (manifest `license` only) | — |
+| `@solana-program/system@0.16.0` | `Apache-2.0` | `system-0.16.0.tgz` | none supplied (manifest `license` only) | — |
+| `@solana-program/token@0.18.0` | `Apache-2.0` | `token-0.18.0.tgz` | none supplied (manifest `license` only) | — |
+| `@privy-io/api-base@1.12.0` | none declared | `api-base-1.12.0.tgz` | `package/LICENSE` (Apache License 2.0, byte-identical to `@privy-io/react-auth@3.51.0`'s) | `0671bbe283d00991c3e7a4243bac153a12c6dbab41e95b9d1893e2624a463357` |
+| `fast-sha256@1.3.0` | `Unlicense` | `fast-sha256-1.3.0.tgz` | `package/LICENSE` (public-domain dedication) | `88d9b4eb60579c191ec391ca04c16130572d7eedc4a86daa58bf28c6e14c9bcd` |
+| `lru-cache@11.5.3` | `BlueOak-1.0.0` | `lru-cache-11.5.3.tgz` | `package/LICENSE.md` (Blue Oak Model License 1.0.0) | `8a1af140fdfbf5afd3df27f7e662f989c5b963a300020dfafce42033cae9e004` |
+
+The last three rows are the build's exact-identity license exceptions in `scripts/bootstrap-ci.py`;
+no license family is added to the allowlist.
+
+- `@privy-io/api-base@1.12.0`, a dependency of `@privy-io/react-auth` and `@privy-io/js-sdk-core`, declares no
+  license in its registry metadata or manifest. It is treated as Apache-2.0 because its archive ships the
+  Apache License 2.0 file above. The dependency evidence and the ephemeral SBOM keep the registry state
+  (no license asserted) rather than a concluded value.
+- `fast-sha256@1.3.0` (Dmitry Chestnykh) is reached only through `@privy-io/node` → `svix` →
+  `standardwebhooks`. The Unlicense dedicates it to the public domain and carries no attribution or notice
+  condition.
+- `lru-cache@11.5.3` (Isaac Z. Schlueter) is reached only through `@privy-io/node`. The Blue Oak Model
+  License requires that everyone who gets a copy of any part of it also gets the license text or a link:
+  <https://blueoakcouncil.org/license/1.0.0>.
+
+None of the 29 Apache-2.0 packages added here ships a NOTICE file, so Apache-2.0 section 4(d) adds no
+notice text and the root `NOTICE` is unchanged. Their license files stay in the unmodified archives, as do
+the permissive licenses of code vendored inside them (`neoqs`, BSD-3-Clause, also in
+`@privy-io/api-types@0.24.0`; `eth-eip712-util`, ISC, in `@coinbase/wallet-sdk@4.3.2`).
+
+Owner-reviewed exact overrides in `pnpm-workspace.yaml` remove four dependencies of
+`@privy-io/react-auth@3.51.0` that FloFi does not use, so none of their code is installed:
+`@walletconnect/ethereum-provider` and `@walletconnect/universal-provider` (WalletConnect Community
+License), `x402` (which brings wagmi connectors and the MetaMask SDK) and `@stripe/crypto`.

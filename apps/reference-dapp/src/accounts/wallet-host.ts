@@ -11,10 +11,11 @@ import { accountHost, type AccountHost } from './account-host.ts';
 import { readWalletSession, sealWalletSession, type WalletSession } from './wallet-session.ts';
 import { createWalletService, type WalletService } from './wallet-service.ts';
 import { walletOrigin, walletSessionCookie, type WalletOrigin } from './wallet-origin.ts';
-import { createTurnkeyServer, turnkeyConfig } from './turnkey-server.ts';
+import { createTurnkeyServer, turnkeyConfig, type TurnkeyBrowserConfig } from './turnkey-server.ts';
 
 type Env = Readonly<Record<string, string | undefined>>;
-export type WalletHost = { readonly origin: WalletOrigin; readonly account: AccountHost; readonly service: WalletService };
+/** `turnkey`: the provider's public endpoints for the legacy FloFi Wallet (export of pre-Privy wallets only). */
+export type WalletHost = { readonly origin: WalletOrigin; readonly account: AccountHost; readonly service: WalletService; readonly turnkey: TurnkeyBrowserConfig };
 const CODE = /^[A-Z][A-Z0-9_]{2,80}$/;
 
 export const walletJson = (status: number, value: unknown, headers: Record<string, string> = {}) => new Response(JSON.stringify(value),
@@ -36,7 +37,8 @@ export async function walletHost(env: Env = process.env): Promise<WalletHost | n
   if (!origin || !config) return null;
   const account = await accountHost(env);
   if (!account) return null;
-  return { origin, account, service: createWalletService({ store: account.store, turnkey: createTurnkeyServer(config) }) };
+  const turnkey = createTurnkeyServer(config);
+  return { origin, account, service: createWalletService({ store: account.store, turnkey }), turnkey: turnkey.browser() };
 }
 
 /** The verified wallet session of this request, or null (no cookie, tampered, expired, other host, or its account session ended). */

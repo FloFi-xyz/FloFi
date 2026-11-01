@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // BUILD-FLOFI-AUTH-WALLETS-001: FloFi Wallet reads its own server strictly and fails closed: malformed contexts, foreign origins, unsafe
-// sign-in URLs, export grants for another wallet and Review summaries for another run are all refused.
+// sign-in URLs and export grants for another wallet are all refused. Since BUILD-FLOFI-PRIVY-UX-001 FloFi Wallet (Turnkey) is legacy and
+// export-only: its context holds legacy wallets only, and it has no call to save a wallet or read a signing context any more.
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { parseWalletContext, walletApi, WalletApiError } from './wallet-api';
 
@@ -9,8 +10,6 @@ const wallet = { id: `evm:${EVM}`, ecosystem: 'evm', address: EVM, origin: 'gene
   label: 'FloFi EVM wallet', addedAt: '2026-10-31T10:00:00.000Z' };
 const context = { accountId: `acct_${'1'.repeat(32)}`, label: 'ana@example.com', methods: ['email'], unlocked: false, wallets: [wallet],
   organization: { organizationId: '0b5f2a8e-1c3d-4e5f-8a9b-0c1d2e3f4a5b', userId: '1b5f2a8e-1c3d-4e5f-8a9b-0c1d2e3f4a5b', login: 'email' } };
-const summary = { flow: 'robinhood-swap', runId: `rhs-${'c'.repeat(24)}`, network: 'Robinhood Chain', chain: 'eip155:4663', realFunds: true, action: 'Swap 10 USDC for ETH',
-  owner: EVM, lines: [{ label: 'Minimum received', value: '0.0031 ETH' }], expiresAt: '2026-10-31T12:05:00.000Z' };
 function respond(status: number, body: unknown) {
   const fetch = vi.fn(async () => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } }));
   vi.stubGlobal('fetch', fetch);
@@ -24,10 +23,12 @@ describe('wallet context', () => {
     expect(parseWalletContext({ ...context, unlocked: true, unlockedAt: 1_700_000_000, unlockedUntil: 1_700_001_800, unlockedKey: '02' + 'a'.repeat(64) }))
       .toMatchObject({ unlocked: true, unlockedAt: 1_700_000_000, unlockedUntil: 1_700_001_800 });
   });
-  it('fails closed on anything malformed, including an external or extended wallet record', () => {
+  it('fails closed on anything malformed, including an external, Privy or extended wallet record', () => {
     for (const bad of [{ ...context, accountId: 'acct_x' }, { ...context, methods: ['email', 'eip155'] }, { ...context, label: '' }, { ...context, unlocked: 'yes' },
       { ...context, organization: { ...context.organization, login: 'eip155' } }, { ...context, wallets: [{ ...wallet, origin: 'external', provider: 'io.metamask', export: 'none' }] },
-      { ...context, wallets: [{ ...wallet, privateKey: '00' }] }, { ...context, unlockedKey: 'zz' }, { ...context, unlockedUntil: -1 }, null, []])
+      { ...context, wallets: [{ ...wallet, privateKey: '00' }] }, { ...context, unlockedKey: 'zz' }, { ...context, unlockedUntil: -1 }, null, [],
+      // A Privy wallet is never FloFi Wallet's (legacy Turnkey wallets only): Privy wallets export in FloFi itself.
+      { ...context, wallets: [{ ...wallet, provider: 'privy', export: 'private-key' }] }])
       expect(parseWalletContext(bad)).toBeNull();
   });
 });
@@ -78,20 +79,14 @@ describe('wallet routes', () => {
       await expect(walletApi.exportGrant(wallet as never, 'recovery-phrase')).rejects.toThrow('WALLET_REQUEST_FAILED');
     }
   });
-  it('shows a Review summary only for the same run, flow and owner; network failures are pre-signature refusals', async () => {
-    const binding = { flow: summary.flow, runId: summary.runId };
-    const fetch = respond(200, { summary });
-    await expect(walletApi.signingContext(binding, EVM, { op: 'evm_sign_transaction' })).resolves.toMatchObject({ action: 'Swap 10 USDC for ETH' });
-    expect(JSON.parse((fetch.mock.calls[0] as unknown as [string, RequestInit])[1].body as string)).toEqual({ flow: summary.flow, runId: summary.runId, address: EVM, op: 'evm_sign_transaction' });
-    respond(200, { summary: { ...summary, owner: '0x' + 'b'.repeat(40) } });
-    await expect(walletApi.signingContext(binding, EVM, {})).rejects.toThrow('FLOFI_WALLET_NO_MATCHING_REVIEW');
-    respond(200, { summary: { ...summary, runId: `rhs-${'d'.repeat(24)}` } });
-    await expect(walletApi.signingContext(binding, EVM, {})).rejects.toThrow('FLOFI_WALLET_NO_MATCHING_REVIEW');
-    respond(200, { summary: { ...summary, lines: 'x' } });
-    await expect(walletApi.signingContext(binding, EVM, {})).rejects.toThrow('FLOFI_WALLET_REVIEW_UNAVAILABLE');
-    respond(409, { code: 'FLOFI_WALLET_NO_MATCHING_REVIEW' });
-    await expect(walletApi.signingContext(binding, EVM, {})).rejects.toThrow('FLOFI_WALLET_NO_MATCHING_REVIEW');
-    vi.stubGlobal('fetch', vi.fn(async () => { throw new TypeError('offline'); }));
-    await expect(walletApi.signingContext(binding, EVM, {})).rejects.toThrow('FLOFI_WALLET_REVIEW_UNAVAILABLE');
+  it('is export-only: no call saves a wallet or asks for a signing context, and the wallet routes it calls are the legacy ones', async () => {
+    // BUILD-FLOFI-PRIVY-UX-001: FloFi Wallet (Turnkey) no longer creates, imports, saves or signs; new wallets are Privy wallets in FloFi itself.
+    expect(Object.keys(walletApi).sort()).toEqual(['emailFinish', 'emailStart', 'emailVerify', 'exportGrant', 'lock', 'oidcStart', 'redeem', 'session']);
+    const fetch = respond(200, { context, appOrigin: APP, grant: { organizationId: context.organization.organizationId, kind: 'recovery-phrase', resource: 'wallet-id-123456',
+      address: EVM, keyFormat: 'HEXADECIMAL', source: 'wallet' } });
+    await walletApi.session(APP); await walletApi.redeem('h1.token', APP); await walletApi.lock(); await walletApi.exportGrant(wallet as never, 'recovery-phrase');
+    await walletApi.emailFinish('a'.repeat(128), null);
+    expect(fetch.mock.calls.map(call => (call as unknown as [string])[0])).toEqual(['/api/wallet/session', '/api/wallet/session', '/api/wallet/session', '/api/wallet/export',
+      '/api/wallet/unlock/email']);
   });
 });

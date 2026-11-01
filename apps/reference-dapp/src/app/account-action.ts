@@ -1,22 +1,22 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 'use server';
 /**
- * BUILD-FLOFI-AUTH-WALLETS-001: account server actions. Each one derives the account from the verified HttpOnly session
- * (sealed cookie + server-side record), never from an argument. Arguments are wallet ids, labels and choices only: no key,
- * phrase, token or code leaves the browser except the six-digit email code, which is forwarded to the provider once.
- * None of these actions signs, submits or authorizes a transaction.
+ * Account server actions (BUILD-FLOFI-AUTH-WALLETS-001; Privy since BUILD-FLOFI-PRIVY-UX-001). Each one derives the account from the
+ * verified HttpOnly session (sealed cookie + server-side record), never from an argument. Arguments are a Privy access token (verified
+ * server-side and never stored or logged), wallet ids, addresses, labels and choices: never a key, phrase or code. None of these actions
+ * signs, submits or authorizes a transaction, and none creates or imports a wallet: that happens in Privy, in the person's browser.
  */
-import { cookies } from 'next/headers';
-import { accountAvailability, accountCookieOptions, accountHost, clearAccountCookie, currentAccountSession, flowCookieOptions, nextPath, setAccountCookie,
-  supersede, type AccountAvailability, type AccountHost } from '../accounts/account-host';
-import { ACCOUNT_EMAIL_COOKIE, ACCOUNT_FLOW_TTL_SECONDS, ACCOUNT_OIDC_COOKIE, newOidcFlow, readEmailFlow, safeReturnPath, sealEmailFlow, sealOidcFlow,
-  type AccountIntent, type AccountSessionToken } from '../accounts/account-session';
+import { accountAvailability, accountHost, clearAccountCookie, currentAccountSession, nextPath, setAccountCookie, supersede, type AccountAvailability,
+  type AccountHost } from '../accounts/account-host';
+import { safeReturnPath, type AccountSessionToken } from '../accounts/account-session';
 import { parseAccountWalletId, type AccountView, type AccountWallet } from '../accounts/account-model';
-import { authorizationUrl, oidcConfig } from '../accounts/oidc';
-import type { TurnkeyBrowserConfig } from '../accounts/turnkey-server';
-import { currentSolanaSession, currentWalletSession, requestOrigin } from '../server/session-principal';
+import type { PrivyBrowserConfig } from '../accounts/privy-server';
+import type { PrivyWalletSync } from '../accounts/account-service';
+import { currentSolanaSession, currentWalletSession } from '../server/session-principal';
+import { publicOrigin } from '../server/deployment';
 import { WALLET_SESSION_TTL_SECONDS } from '../server/wallet-session';
 import { ACCOUNT_REAUTH_SECONDS } from '../accounts/account-session';
+import { solanaSignOut, walletSignOut } from './wallet-session-action';
 
 type Result<T> = { ok: true; value: T } | { ok: false; code: string };
 const CODE = /^[A-Z][A-Z0-9_]{2,80}$/;
@@ -37,95 +37,66 @@ async function signedIn(): Promise<{ host: AccountHost; session: AccountSessionT
   const h = await host(), session = await currentAccountSession(h);
   return session ? { host: h, session } : fail('ACCOUNT_SESSION_REQUIRED');
 }
+/** Where Disconnect lands: the deployment's own sign-in page (`https://flofi.xyz/login` in production). */
+export async function loginUrl(): Promise<string> {
+  const origin = publicOrigin(process.env);
+  return origin ? `${origin}/login` : '/login';
+}
 /**
- * What the product pages may know: availability, the signed-in account (public data), and the provider's non-secret settings the sign-in
- * page needs to encrypt an email code. No provider session ever exists for this origin; managed wallets live in FloFi Wallet.
+ * What the product pages may know: availability, the signed-in account (public data) and Privy's public app settings. Never a token or
+ * secret.
  */
-export type AccountState = { readonly availability: AccountAvailability; readonly account: AccountView | null; readonly provider: TurnkeyBrowserConfig | null };
+export type AccountState = { readonly availability: AccountAvailability; readonly account: AccountView | null; readonly privy: PrivyBrowserConfig | null };
 export async function accountState(): Promise<AccountState> {
   let h: AccountHost | null;
   try { h = await accountHost(); } catch { h = null; }
   const availability = accountAvailability(process.env, h), session = await currentAccountSession(h);
-  if (!h || !session) return { availability, account: null, provider: h?.turnkey ?? null };
-  return { availability, account: await h.service.view(session).catch(() => null), provider: h.turnkey };
-}
-
-/** Starts Google or Apple sign-in: returns the provider URL and seals state, nonce and PKCE verifier in an HttpOnly flow cookie. */
-export async function startSocialSignIn(provider: 'google' | 'apple', sessionKey: string | null, intent: AccountIntent = 'sign-in', returnTo = '/app'): Promise<Result<{ url: string }>> {
-  try {
-    const h = await host();
-    if (provider !== 'google' && provider !== 'apple') fail('OIDC_PROVIDER_INVALID');
-    if (intent !== 'sign-in' && intent !== 'link') fail('ACCOUNT_INTENT_INVALID');
-    const current = intent === 'link' ? await currentAccountSession(h) ?? fail('ACCOUNT_SESSION_REQUIRED') : null;
-    const config = oidcConfig(provider, process.env) ?? fail('OIDC_PROVIDER_NOT_CONFIGURED');
-    const origin = await requestOrigin();
-    // The provider returns to FLOFI_PUBLIC_ORIGIN; a flow started on any other host would lose its cookie, so it is refused up front.
-    if (!config.redirectUri.startsWith(`${origin.uri}/`)) fail('OIDC_ORIGIN_MISMATCH');
-    const flow = newOidcFlow(provider, sessionKey, intent, returnTo, current);
-    (await cookies()).set(ACCOUNT_OIDC_COOKIE, sealOidcFlow(process.env, flow, origin.domain, new Date()), flowCookieOptions(origin.secure, ACCOUNT_FLOW_TTL_SECONDS));
-    return { ok: true, value: { url: authorizationUrl(config, flow) } };
-  } catch (cause) { return failure(cause); }
+  if (!h || !session) return { availability, account: null, privy: h?.privy ?? null };
+  return { availability, account: await h.service.view(session).catch(() => null), privy: h.privy };
 }
 
 /**
- * Sends a one-time code (the wallet provider delivers it) and seals the challenge for this attempt's browser key. Returns the
- * provider's enclave-signed encryption target: the browser encrypts the code to it, so FloFi's server never receives the code.
+ * Completes a Privy sign-in (Google, email code or Web3 wallet): the server verifies the access token and reads the Privy user itself,
+ * signs in to that person's one FloFi account and sets the session cookie. Returns where to continue.
  */
-export async function startEmailSignIn(email: string, browserKey: string, intent: AccountIntent = 'sign-in', returnTo = '/app'): Promise<Result<{ email: string; targetBundle: string }>> {
+export async function privySignIn(accessToken: string, returnTo = '/app'): Promise<Result<{ next: string }>> {
   try {
-    const h = await host();
-    if (!h.service.validSessionKey(browserKey)) fail('ACCOUNT_SESSION_KEY_INVALID');
-    if (intent !== 'sign-in' && intent !== 'link') fail('ACCOUNT_INTENT_INVALID');
-    if (intent === 'link' && !await currentAccountSession(h)) fail('ACCOUNT_SESSION_REQUIRED');
-    const started = await h.service.startEmail(email, browserKey), origin = await requestOrigin();
-    // Same-site only (the code is typed on this page), so the challenge cookie stays Lax.
-    (await cookies()).set(ACCOUNT_EMAIL_COOKIE, sealEmailFlow(process.env, { challengeId: started.challengeId, intent, returnTo: safeReturnPath(returnTo) },
-      origin.domain, new Date()), accountCookieOptions(origin.secure, ACCOUNT_FLOW_TTL_SECONDS));
-    return { ok: true, value: { email: started.email, targetBundle: started.targetBundle } };
-  } catch (cause) { return failure(cause, 'EMAIL_SIGN_IN_FAILED'); }
-}
-/** Completes email sign-in with the code encrypted in the browser (`@turnkey/crypto` `encryptOtpCodeToBundle`). */
-export async function completeEmailSignIn(encryptedOtpBundle: string): Promise<Result<{ next: string }>> {
-  try {
-    const h = await host(), origin = await requestOrigin(), jar = await cookies();
-    const flow = readEmailFlow(process.env, jar.get(ACCOUNT_EMAIL_COOKIE)?.value, new Date(), origin.domain) ?? fail('EMAIL_CHALLENGE_EXPIRED');
-    const previous = await currentAccountSession(h);
-    let outcome;
-    try { outcome = await h.service.completeEmail(flow, encryptedOtpBundle, previous); }
-    catch (error) {
-      // An expired or exhausted challenge cannot be retried: the person requests a new code.
-      if (error instanceof Error && error.message === 'EMAIL_CHALLENGE_EXPIRED') jar.set(ACCOUNT_EMAIL_COOKIE, '', accountCookieOptions(origin.secure, 0));
-      throw error;
-    }
-    // The challenge is single-use once the provider accepted the code.
-    jar.set(ACCOUNT_EMAIL_COOKIE, '', accountCookieOptions(origin.secure, 0));
+    const h = await host(), previous = await currentAccountSession(h);
+    const outcome = await h.service.completePrivy(accessToken);
     await supersede(h, previous, outcome.session);
     await setAccountCookie(outcome.session);
-    return { ok: true, value: { next: nextPath(outcome, flow.intent, flow.returnTo) } };
-  } catch (cause) { return failure(cause, 'EMAIL_SIGN_IN_FAILED'); }
+    return { ok: true, value: { next: nextPath(outcome, 'sign-in', safeReturnPath(returnTo)) } };
+  } catch (cause) { return failure(cause, 'PRIVY_SIGN_IN_FAILED'); }
+}
+/** Saves one wallet just created or imported in Privy, after Privy's API confirms this account's own Privy user holds it. */
+export async function savePrivyWallet(accessToken: string, ecosystem: 'evm' | 'solana', address: string, label?: string): Promise<Result<AccountWallet>> {
+  try {
+    const { host: h, session } = await signedIn();
+    return { ok: true, value: await h.service.savePrivyWallet(session, accessToken, { ecosystem, address, label }) };
+  } catch (cause) { return failure(cause, 'ACCOUNT_WALLET_SAVE_FAILED'); }
+}
+/** Saves every Privy wallet of this account's Privy user that the account does not list yet (after a refresh, a timeout or a closed tab). */
+export async function syncPrivyWallets(accessToken: string): Promise<Result<PrivyWalletSync>> {
+  try {
+    const { host: h, session } = await signedIn();
+    return { ok: true, value: await h.service.syncPrivyWallets(session, accessToken) };
+  } catch (cause) { return failure(cause, 'ACCOUNT_WALLET_SAVE_FAILED'); }
 }
 
 /**
- * Web3 Wallet sign-in after the existing wallet proof (EIP-4361 or Sign-In With Solana) sealed a wallet session in this browser.
- * `provider` is display metadata only; the address comes from the verified wallet session.
+ * Disconnect: revokes this browser's FloFi session server-side (or every session of the account), clears the session cookie and this
+ * browser's wallet proofs (EIP-4361 / Sign-In With Solana sessions). Returns the sign-in page to go to. Nothing about the account, its
+ * wallets, keys, assets or history is deleted; the browser also logs out of Privy and forgets its wallet connections.
  */
-export async function walletAccountSignIn(namespace: 'eip155' | 'solana', providerKey: string, providerName: string, returnTo = '/app'): Promise<Result<{ next: string }>> {
-  try {
-    const h = await host(), proof = await freshWalletProof(namespace) ?? fail('WALLET_SESSION_REQUIRED');
-    const outcome = await h.service.completeWallet(proof, { key: providerKey, name: providerName }, 'sign-in', null);
-    await supersede(h, await currentAccountSession(h), outcome.session);
-    await setAccountCookie(outcome.session);
-    return { ok: true, value: { next: nextPath(outcome, 'sign-in', returnTo) } };
-  } catch (cause) { return failure(cause, 'WALLET_SIGN_IN_FAILED'); }
-}
-
-/** Signs this browser out (server-side revocation), or every browser of the account. Wallet sessions are separate and unchanged. */
-export async function accountSignOut(everywhere = false): Promise<void> {
+export async function accountSignOut(everywhere = false): Promise<{ readonly next: string }> {
   try {
     const h = await accountHost(), session = await currentAccountSession(h);
     if (h && session) await (everywhere ? h.store.revokeAllSessions(session.accountId) : h.store.revokeSession(session));
-  } catch { /* the cookie is cleared regardless */ }
+  } catch { /* the cookies are cleared regardless */ }
   await clearAccountCookie();
+  await walletSignOut().catch(() => undefined);
+  await solanaSignOut().catch(() => undefined);
+  return { next: await loginUrl() };
 }
 export async function setAccountOnboarding(value: 'completed' | 'dismissed'): Promise<Result<null>> {
   try {

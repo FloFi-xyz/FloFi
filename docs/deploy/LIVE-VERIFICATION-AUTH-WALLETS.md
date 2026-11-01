@@ -1,5 +1,7 @@
 # Live provider verification: FloFi accounts and FloFi Wallet (PR #143)
 
+> **Superseded for sign-in and new wallets by BUILD-FLOFI-PRIVY-UX-001** ([LIVE-VERIFICATION-PRIVY.md](./LIVE-VERIFICATION-PRIVY.md)). FloFi Wallet (Turnkey) remains only to export wallets created before Privy; its unlock and export checks below still apply to that legacy path.
+
 Status: not run. Every check below is still owed. The browser suite and the PostgreSQL tests run against the MOCKED loopback emulator
 (`apps/reference-dapp/e2e/turnkey-emulator.ts`). That proves FloFi's own checks, not Google's, Apple's or Turnkey's behaviour. **No live
 result may be claimed until this runbook has been executed and its evidence recorded.**

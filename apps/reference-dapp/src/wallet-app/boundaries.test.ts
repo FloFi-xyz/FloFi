@@ -58,7 +58,9 @@ describe('FloFi Wallet bundle boundary', () => {
 
   it('the browser modules reach no engine, Ajv, server code, server action or Node built-in, and only browser-safe account modules', () => {
     expect(WALLET_APP).toEqual(expect.arrayContaining(['src/wallet-app/wallet-app.tsx', 'src/wallet-app/protocol.ts', 'src/wallet-app/provider-client.ts',
-      'src/wallet-app/evm-transaction.ts', 'src/wallet-app/solana-transaction.ts', 'src/wallet-app/signing.tsx']));
+      'src/wallet-app/operations.tsx']));
+    // Legacy and export-only since BUILD-FLOFI-PRIVY-UX-001: FloFi Wallet has no signing screens or transaction decoders any more.
+    for (const removed of ['signing.tsx', 'evm-transaction.ts', 'solana-transaction.ts', 'sign-in-message.ts']) expect(WALLET_APP).not.toContain(`src/wallet-app/${removed}`);
     const reached = closure(WALLET_APP);
     expect(reached.packages).toEqual(['@turnkey/crypto', '@turnkey/iframe-stamper', '@turnkey/indexed-db-stamper', 'react']);
     expect(reached.files.filter(file => file.startsWith('src/server/') || file.startsWith('src/app/') || file.startsWith('src/state/') || /-action\.ts$/.test(file))).toEqual([]);

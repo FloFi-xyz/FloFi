@@ -21,6 +21,7 @@
       }
     ],
     "allowImportingTsExtensions": true,
+    "skipLibCheck": true,
     "declaration": false
   },
   "include": [

@@ -1,5 +1,7 @@
 # BUILD-FLOFI-AUTH-WALLETS-001 — Authentication, wallet onboarding and secure credentials
 
+> **BUILD-FLOFI-PRIVY-UX-001 replaced Turnkey with Privy** for sign-in, new wallets and signing ([BUILD-FLOFI-PRIVY-UX-001.md](./BUILD-FLOFI-PRIVY-UX-001.md)). Accounts, sessions and the reviewed-attempt signing binding described here remain; FloFi Wallet (Turnkey) is now legacy and export-only.
+
 Status: implemented on a review branch, **not merged, not deployed**. Live Google, Apple and Turnkey integrations are
 **unverified** in this build (no vendor credentials or network access to those services were available); every flow is
 implemented against the providers' published interfaces and exercised end to end against MOCKED loopback stand-ins only.

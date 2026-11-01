@@ -33,6 +33,8 @@ def load_script(name):
 
 
 bootstrap = load_script('bootstrap-ci')
+# BUILD-FLOFI-PRIVY-UX-001 exact-identity license exceptions, as the live registry reports them (@privy-io/api-base has no license).
+PRIVY_LICENSE_EXCEPTIONS = {'@privy-io/api-base@1.12.0': None, 'fast-sha256@1.3.0': 'Unlicense', 'lru-cache@11.5.3': 'BlueOak-1.0.0'}
 
 
 class ArchiveCache(unittest.TestCase):
@@ -359,8 +361,17 @@ class FullDependencyGate(unittest.TestCase):
         for entry in bootstrap.APPROVED_AGE_WAIVERS:
             if 'published_at' in entry:
                 self.registry[entry['package']]['time'][entry['version']] = entry['published_at']
+        for identity, license_id in PRIVY_LICENSE_EXCEPTIONS.items():
+            self.set_license(identity, license_id)
         self.scratch = tempfile.TemporaryDirectory()
         self.addCleanup(self.scratch.cleanup)
+
+    def set_license(self, identity, license_id):
+        name, version = identity.rsplit('@', 1)
+        package = self.registry[name]['versions'][version]
+        package.pop('license', None)
+        if license_id is not None:  # the live registry omits the field rather than sending null
+            package['license'] = license_id
 
     def verify(self):
         def fetch(url, **_):
@@ -371,7 +382,22 @@ class FullDependencyGate(unittest.TestCase):
     def test_full_inventory_and_existing_exceptions_pass(self):
         self.verify()
         evidence = json.loads((Path(self.scratch.name) / 'build-002-dependencies.json').read_text())
-        self.assertEqual(len(evidence), 295)
+        self.assertEqual(len(evidence), 505)
+        licenses = {row['name'] + '@' + row['version']: row['license'] for row in evidence}
+        self.assertEqual({identity: licenses[identity] for identity in PRIVY_LICENSE_EXCEPTIONS}, PRIVY_LICENSE_EXCEPTIONS)
+
+    def test_privy_license_exceptions_bind_exact_identity_and_license(self):
+        # The same license on another identity, or another license on an excepted identity, is still rejected.
+        for identity, license_id in (('@privy-io/api-types@0.24.0', None), ('zod@4.6.6', 'Unlicense'),
+                                     ('viem@2.57.8', 'BlueOak-1.0.0'), ('@privy-io/api-base@1.12.0', 'LicenseRef-Proprietary'),
+                                     ('fast-sha256@1.3.0', 'GPL-3.0-only'), ('lru-cache@11.5.3', None)):
+            with self.subTest(identity=identity, license=license_id):
+                saved = json.loads(json.dumps(self.registry))
+                self.set_license(identity, license_id)
+                with self.assertRaises(RuntimeError):
+                    self.verify()
+                self.assertFalse((Path(self.scratch.name) / 'build-002-dependencies.json').exists())
+                self.registry = saved
 
     def test_release_age_waivers_bind_exact_integrity_and_publication(self):
         young = '2999-01-01T00:00:00.000Z'
@@ -421,8 +447,10 @@ class SbomValidation(unittest.TestCase):
         self.validator = script.split("python3 - <<'PYCODE'\n", 1)[1].rsplit('\nPYCODE', 1)[0]
         lock = (ROOT / 'pnpm-lock.yaml').read_text().split('\npackages:\n')[1].split('\nsnapshots:\n')[0]
         identities = [identity.strip("'").rsplit('@', 1) for identity in re.findall(r'(?m)^  (\S[^\n]*):$', lock)]
+        # As the dependency gate records them: reviewed exceptions keep their registry license, including one without any (null).
         self.evidence = [
-            {'name': name, 'version': version, 'license': bootstrap.BUILD002_REVIEWED_LICENSE_EXCEPTIONS.get(
+            {'name': name, 'version': version, 'license': PRIVY_LICENSE_EXCEPTIONS[name + '@' + version]
+             if name + '@' + version in PRIVY_LICENSE_EXCEPTIONS else bootstrap.BUILD002_REVIEWED_LICENSE_EXCEPTIONS.get(
                 name + '@' + version, {}).get('license', 'MIT')}
             for name, version in identities
         ]
@@ -449,7 +477,7 @@ class SbomValidation(unittest.TestCase):
     def test_complete_reviewed_inventory_passes(self):
         result = self.validate()
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        self.assertIn('295 exact registry components', result.stdout)
+        self.assertIn('505 exact registry components', result.stdout)
 
     def test_missing_duplicate_unreviewed_and_dangling_components_fail(self):
         saved = json.dumps(self.document)

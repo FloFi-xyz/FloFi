@@ -1,124 +1,167 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// BUILD-FLOFI-AUTH-WALLETS-001: FloFi Wallet's relay forwards only what its rules allow, and a transaction signature only with a binding to a
-// reviewed FloFi attempt that the gate resolved and claimed for these exact bytes.
+// BUILD-FLOFI-AUTH-WALLETS-001: FloFi Wallet's relay forwards only what its rules allow. Since BUILD-FLOFI-PRIVY-UX-001 FloFi Wallet (Turnkey)
+// is the legacy, export-only home of wallets created there before Privy: the relay forwards only the export of a legacy wallet saved to the
+// account (after a recent unlock by exactly the unlocked key) and refuses creating, importing and signing, whatever the request carries.
 import { describe, expect, it, vi } from 'vitest';
 import { erc7710 } from '@defi-workflow-engine/reference-compiler';
-import { floFiSignInMessage, stampPublicKey, walletRelayDecision, type WalletSigningGate } from './wallet-relay';
-import type { AccountWallet } from './account-model';
+import { floFiSignInMessage, stampPublicKey, walletRelayDecision } from './wallet-relay';
+import { exportOf, isLegacyWallet, type AccountWallet } from './account-model';
 import type { WalletSession } from './wallet-session';
-import { SOLANA_SIGN_IN_STATEMENT, WALLET_SIGN_IN_STATEMENT } from '../server/wallet-session';
+import { SOLANA_SIGN_IN_STATEMENT, solanaSignInMessage, WALLET_CHALLENGE_TTL_SECONDS, WALLET_SIGN_IN_STATEMENT, walletSignInMessage } from '../server/wallet-session';
 
 const NOW = new Date('2026-10-31T12:00:00.000Z'), T = Math.floor(NOW.getTime() / 1000);
 const KEY = '02' + 'a'.repeat(64), OTHER_KEY = '03' + 'b'.repeat(64);
-const EVM = '0x' + '1'.repeat(40), SOLANA = '11111111111111111111111111111111';
+const EVM = '0x' + '1'.repeat(40), SOLANA = '11111111111111111111111111111111', PRIVY_EVM = '0x' + '3'.repeat(40), EXTERNAL_EVM = '0x' + '9'.repeat(40);
 const ORG = { organizationId: 'org-1', userId: 'user-1' }, APP = { host: 'flofi.xyz', origin: 'https://flofi.xyz' };
-const wallet = (ecosystem: 'evm' | 'solana', address: string, origin: AccountWallet['origin'] = 'generated'): AccountWallet => ({ id: `${ecosystem}:${address}`, ecosystem,
-  address, origin, provider: origin === 'external' ? 'io.metamask' : 'turnkey', providerName: 'FloFi wallet', export: 'none', label: 'Main', addedAt: NOW.toISOString() });
+const API = 'https://api.turnkey.com';
+const wallet = (ecosystem: 'evm' | 'solana', address: string, origin: AccountWallet['origin'] = 'generated',
+  provider = origin === 'external' ? 'io.metamask' : 'turnkey'): AccountWallet => ({ id: `${ecosystem}:${address}`, ecosystem, address, origin, provider,
+  providerName: 'FloFi wallet', export: exportOf(origin, provider), label: 'Main', addedAt: NOW.toISOString() });
+/** The account's wallets: a legacy generated EVM wallet, a legacy imported Solana key, a Privy wallet and an external wallet. */
+const WALLETS = [wallet('evm', EVM), wallet('solana', SOLANA, 'imported'), wallet('evm', PRIVY_EVM, 'generated', 'privy'), wallet('evm', EXTERNAL_EVM, 'external')];
+/** Provider resources by address (the store returns one for every non-external wallet; a Privy wallet may carry its Privy id). */
+const RESOURCES: Readonly<Record<string, { origin: string; resource: string }>> = { [EVM]: { origin: 'generated', resource: 'wallet-123456' },
+  [SOLANA]: { origin: 'imported', resource: 'key-abcdef12' }, [PRIVY_EVM]: { origin: 'generated', resource: 'wallet-privy01' } };
 const session = (patch: Partial<WalletSession> = {}): WalletSession => ({ account: { accountId: 'acct_' + '0'.repeat(32), sessionId: 'f'.repeat(32), method: 'email',
   authenticatedAt: T - 60, expiresAt: T + 3600 }, issuedAt: T - 60, expiresAt: T + 1800, unlockedKey: KEY, unlockedAt: T - 30, unlockedUntil: T + 600, ...patch });
 const stamp = (publicKey = KEY) => Buffer.from(JSON.stringify({ publicKey, scheme: 'SIGNATURE_SCHEME_TK_API_P256', signature: '30' + '0'.repeat(140) })).toString('base64url');
-const unsigned = (patch: Partial<erc7710.Eip1559> = {}) => Buffer.from(erc7710.unsignedEip1559({ chainId: 8453n, nonce: 7n, maxPriorityFeePerGas: 1n, maxFeePerGas: 2n,
-  gasLimit: 21_000n, to: '0x' + '2'.repeat(40), value: 5n, data: '0x', ...patch })).toString('hex');
-const solanaMessage = () => Buffer.from([0x80, 1, 0, 0, 1, ...new Array(32).fill(0), ...new Array(32).fill(7), 0]);
+const unsigned = () => Buffer.from(erc7710.unsignedEip1559({ chainId: 8453n, nonce: 7n, maxPriorityFeePerGas: 1n, maxFeePerGas: 2n,
+  gasLimit: 21_000n, to: '0x' + '2'.repeat(40), value: 5n, data: '0x' })).toString('hex');
+const TYPES: Readonly<Record<string, string>> = { 'submit/export_wallet': 'ACTIVITY_TYPE_EXPORT_WALLET', 'submit/export_wallet_account': 'ACTIVITY_TYPE_EXPORT_WALLET_ACCOUNT',
+  'submit/export_private_key': 'ACTIVITY_TYPE_EXPORT_PRIVATE_KEY', 'submit/create_wallet': 'ACTIVITY_TYPE_CREATE_WALLET',
+  'submit/init_import_private_key': 'ACTIVITY_TYPE_INIT_IMPORT_PRIVATE_KEY', 'submit/import_private_key': 'ACTIVITY_TYPE_IMPORT_PRIVATE_KEY',
+  'submit/sign_transaction': 'ACTIVITY_TYPE_SIGN_TRANSACTION_V2', 'submit/sign_raw_payload': 'ACTIVITY_TYPE_SIGN_RAW_PAYLOAD_V2' };
 type Input = Parameters<typeof walletRelayDecision>[0];
+const body = (path: string, parameters: Record<string, unknown>, organizationId = ORG.organizationId) =>
+  JSON.stringify({ type: TYPES[path] ?? 'ACTIVITY_TYPE_GET_ACTIVITY', timestampMs: String(NOW.getTime()), organizationId, parameters });
 function decide(path: string, parameters: Record<string, unknown>, patch: Partial<Input> = {}) {
-  const body = JSON.stringify({ type: path === 'submit/sign_transaction' ? 'ACTIVITY_TYPE_SIGN_TRANSACTION_V2' : path === 'submit/sign_raw_payload' ? 'ACTIVITY_TYPE_SIGN_RAW_PAYLOAD_V2'
-    : path === 'submit/export_wallet' ? 'ACTIVITY_TYPE_EXPORT_WALLET' : 'ACTIVITY_TYPE_CREATE_WALLET', timestampMs: String(NOW.getTime()), organizationId: ORG.organizationId, parameters });
-  return walletRelayDecision({ path, body, stamp: stamp(), message: null, app: APP, session: session(), organization: ORG, apiBaseUrl: 'https://api.turnkey.com',
-    wallets: async () => [wallet('evm', EVM), wallet('solana', SOLANA), wallet('evm', '0x' + '9'.repeat(40), 'external')],
-    managedResource: async () => ({ origin: 'generated', resource: 'wallet-123456' }), now: NOW, ...patch });
+  return walletRelayDecision({ path, body: body(path, parameters), stamp: stamp(), session: session(), organization: ORG, apiBaseUrl: API,
+    wallets: async () => WALLETS, managedResource: async item => RESOURCES[item.address] ?? null, now: NOW, ...patch });
 }
-const allow = (): WalletSigningGate & ReturnType<typeof vi.fn> => vi.fn(async () => ({ ok: true as const })) as never;
-const OK = { ok: true, url: 'https://api.turnkey.com/public/v1/submit/sign_transaction' };
+const forwarded = (path: string) => ({ ok: true, url: `${API}/public/v1/${path}` });
+const EXPORT = { walletId: 'wallet-123456', targetPublicKey: '04' + 'c'.repeat(128) };
 
 describe('wallet relay: session, key, request shape and organization', () => {
-  it('refuses without a provider, a wallet session, an organization, an allowlisted route or the unlocked key', async () => {
-    expect(await decide('submit/create_wallet', {}, { apiBaseUrl: null })).toEqual({ ok: false, status: 503, code: 'MANAGED_WALLETS_NOT_CONFIGURED' });
-    expect(await decide('submit/create_wallet', {}, { session: null })).toEqual({ ok: false, status: 401, code: 'WALLET_SESSION_REQUIRED' });
-    expect(await decide('submit/create_wallet', {}, { organization: null })).toEqual({ ok: false, status: 403, code: 'MANAGED_ORGANIZATION_MISSING' });
+  it('refuses without a provider, a wallet session, an organization, an allowlisted route, a stamp or the unlocked key', async () => {
+    expect(await decide('submit/export_wallet', EXPORT, { apiBaseUrl: null })).toEqual({ ok: false, status: 503, code: 'MANAGED_WALLETS_NOT_CONFIGURED' });
+    expect(await decide('submit/export_wallet', EXPORT, { session: null })).toEqual({ ok: false, status: 401, code: 'WALLET_SESSION_REQUIRED' });
+    expect(await decide('submit/export_wallet', EXPORT, { organization: null })).toEqual({ ok: false, status: 403, code: 'MANAGED_ORGANIZATION_MISSING' });
     expect(await decide('submit/eth_send_transaction', {})).toEqual({ ok: false, status: 404, code: 'PROVIDER_ROUTE_NOT_ALLOWED' });
     expect(await decide('submit/sol_send_transaction', {})).toEqual({ ok: false, status: 404, code: 'PROVIDER_ROUTE_NOT_ALLOWED' });
-    expect(await decide('submit/create_wallet', {}, { stamp: stamp(OTHER_KEY) })).toEqual({ ok: false, status: 403, code: 'WALLET_UNLOCK_REQUIRED' });
-    expect(await decide('submit/create_wallet', {}, { session: session({ unlockedUntil: T - 1 }) })).toEqual({ ok: false, status: 403, code: 'WALLET_UNLOCK_REQUIRED' });
+    expect(await decide('submit/export_wallet', EXPORT, { stamp: null })).toEqual({ ok: false, status: 400, code: 'PROVIDER_STAMP_REQUIRED' });
+    expect(await decide('submit/export_wallet', EXPORT, { stamp: stamp(OTHER_KEY) })).toEqual({ ok: false, status: 403, code: 'WALLET_UNLOCK_REQUIRED' });
+    expect(await decide('submit/export_wallet', EXPORT, { session: session({ unlockedUntil: T - 1 }) })).toEqual({ ok: false, status: 403, code: 'WALLET_UNLOCK_REQUIRED' });
+    expect(await decide('submit/export_wallet', EXPORT, { session: session({ unlockedKey: null, unlockedAt: null, unlockedUntil: null }) }))
+      .toEqual({ ok: false, status: 403, code: 'WALLET_UNLOCK_REQUIRED' });
     expect(stampPublicKey(stamp())).toBe(KEY);
   });
-  it('requires the canonical JSON the page stamped and the account’s own organization', async () => {
-    const body = '{"organizationId":"org-1", "type":"ACTIVITY_TYPE_CREATE_WALLET"}';
-    expect(await walletRelayDecision({ path: 'submit/create_wallet', body, stamp: stamp(), message: null, app: APP, session: session(), organization: ORG,
-      apiBaseUrl: 'https://api.turnkey.com', wallets: async () => [], managedResource: async () => null, now: NOW })).toEqual({ ok: false, status: 400, code: 'PROVIDER_REQUEST_NOT_CANONICAL' });
-    const foreign = JSON.stringify({ type: 'ACTIVITY_TYPE_CREATE_WALLET', organizationId: 'org-2', parameters: {} });
-    expect(await walletRelayDecision({ path: 'submit/create_wallet', body: foreign, stamp: stamp(), message: null, app: APP, session: session(), organization: ORG,
-      apiBaseUrl: 'https://api.turnkey.com', wallets: async () => [], managedResource: async () => null, now: NOW })).toEqual({ ok: false, status: 403, code: 'PROVIDER_ORGANIZATION_MISMATCH' });
-  });
-  it('exports only with a recent unlock and an owned managed wallet', async () => {
-    expect(await decide('submit/export_wallet', { walletId: 'wallet-123456', targetPublicKey: 'x' })).toMatchObject({ ok: true });
-    expect(await decide('submit/export_wallet', { walletId: 'wallet-other', targetPublicKey: 'x' })).toEqual({ ok: false, status: 403, code: 'EXPORT_NOT_SUPPORTED' });
-    expect(await decide('submit/export_wallet', { walletId: 'wallet-123456' }, { session: session({ unlockedAt: T - 301 }) })).toEqual({ ok: false, status: 403, code: 'WALLET_UNLOCK_REQUIRED' });
+  it('requires the canonical JSON the page stamped, the account’s own organization and the route’s own activity', async () => {
+    const base = { path: 'submit/export_wallet', stamp: stamp(), session: session(), organization: ORG, apiBaseUrl: API, wallets: async () => WALLETS,
+      managedResource: async (item: AccountWallet) => RESOURCES[item.address] ?? null, now: NOW };
+    const spaced = '{"organizationId":"org-1", "type":"ACTIVITY_TYPE_EXPORT_WALLET"}';
+    expect(await walletRelayDecision({ ...base, body: spaced })).toEqual({ ok: false, status: 400, code: 'PROVIDER_REQUEST_NOT_CANONICAL' });
+    expect(await walletRelayDecision({ ...base, body: body('submit/export_wallet', EXPORT, 'org-2') })).toEqual({ ok: false, status: 403, code: 'PROVIDER_ORGANIZATION_MISMATCH' });
+    const mismatched = JSON.stringify({ type: 'ACTIVITY_TYPE_EXPORT_PRIVATE_KEY', timestampMs: String(NOW.getTime()), organizationId: ORG.organizationId, parameters: EXPORT });
+    expect(await walletRelayDecision({ ...base, body: mismatched })).toEqual({ ok: false, status: 400, code: 'PROVIDER_ACTIVITY_MISMATCH' });
+    expect(await walletRelayDecision({ ...base, body: body('submit/export_wallet', EXPORT) })).toEqual(forwarded('submit/export_wallet'));
   });
 });
 
-describe('wallet relay: EVM transaction signatures are bound to a reviewed attempt', () => {
-  const params = (patch: Record<string, unknown> = {}) => ({ signWith: EVM, unsignedTransaction: unsigned(), type: 'TRANSACTION_TYPE_ETHEREUM', ...patch });
-  it('forwards the exact attempt bytes once the gate resolved them, decoded with the signer as sender', async () => {
-    const gate = allow();
-    expect(await decide('submit/sign_transaction', params(), { signing: `base-swap:bas-${'a'.repeat(24)}`, attempt: gate })).toEqual(OK);
-    expect(gate).toHaveBeenCalledWith({ flow: 'base-swap', runId: `bas-${'a'.repeat(24)}` }, { ecosystem: 'evm', tx: { from: EVM, to: '0x' + '2'.repeat(40), value: 5n,
-      data: '0x', chainId: 8453n, nonce: 7n, gas: 21_000n, maxFeePerGas: 2n, maxPriorityFeePerGas: 1n } });
-  });
-  it('refuses every chain but FloFi Wallet’s four EVM mainnets before the attempt is looked up', async () => {
-    for (const chainId of [1n, 42161n, 4663n]) {
-      const gate = allow();
-      expect(await decide('submit/sign_transaction', params({ unsignedTransaction: unsigned({ chainId }) }), { signing: `base-swap:bas-${'a'.repeat(24)}`, attempt: gate })).toEqual(OK);
-    }
-    for (const chainId of [84532n, 11155111n, 46630n, 421614n, 31337n]) {
-      const gate = allow();
-      expect(await decide('submit/sign_transaction', params({ unsignedTransaction: unsigned({ chainId }) }), { signing: `base-swap:bas-${'a'.repeat(24)}`, attempt: gate }))
-        .toEqual({ ok: false, status: 403, code: 'FLOFI_WALLET_NETWORK_UNSUPPORTED' });
-      expect(gate).not.toHaveBeenCalled();
-    }
-  });
-  it('refuses without a binding or a gate, and passes on the gate’s refusal', async () => {
-    expect(await decide('submit/sign_transaction', params())).toEqual({ ok: false, status: 403, code: 'FLOFI_WALLET_SIGNING_CONTEXT_REQUIRED' });
-    expect(await decide('submit/sign_transaction', params(), { signing: 'base-swap:bas-' + 'a'.repeat(24) })).toEqual({ ok: false, status: 403, code: 'FLOFI_WALLET_SIGNING_CONTEXT_REQUIRED' });
-    expect(await decide('submit/sign_transaction', params(), { signing: 'not a binding', attempt: allow() })).toEqual({ ok: false, status: 403, code: 'FLOFI_WALLET_SIGNING_CONTEXT_REQUIRED' });
-    for (const code of ['FLOFI_WALLET_NO_MATCHING_REVIEW', 'FLOFI_WALLET_FLOW_NOT_SUPPORTED', 'FLOFI_WALLET_ALREADY_SIGNED']) {
-      const gate = vi.fn(async () => ({ ok: false as const, code }));
-      expect(await decide('submit/sign_transaction', params(), { signing: 'base-swap:bas-' + 'a'.repeat(24), attempt: gate })).toEqual({ ok: false, status: 403, code });
+describe('wallet relay: legacy and export-only', () => {
+  it('refuses creating, importing and signing before it reads the account’s wallets, even for requests it used to forward', async () => {
+    const siwe = `${APP.host} wants you to sign in with your Ethereum account:\n${EVM}\n\n${WALLET_SIGN_IN_STATEMENT}\n\nURI: ${APP.origin}\nVersion: 1\nChain ID: 8453`;
+    const message = Buffer.from(siwe, 'utf8'), personal = Buffer.concat([Buffer.from(`\x19Ethereum Signed Message:\n${message.length}`, 'utf8'), message]).toString('hex');
+    const requests: [string, Record<string, unknown>][] = [
+      ['submit/create_wallet', { walletName: 'w', accounts: [{ curve: 'CURVE_SECP256K1', pathFormat: 'PATH_FORMAT_BIP32', path: "m/44'/60'/0'/0/0", addressFormat: 'ADDRESS_FORMAT_ETHEREUM' }] }],
+      ['submit/create_wallet_accounts', { walletId: 'wallet-123456', accounts: [] }],
+      ['submit/init_import_private_key', { userId: ORG.userId }],
+      ['submit/import_private_key', { userId: ORG.userId, privateKeyName: 'k', encryptedBundle: 'x', curve: 'CURVE_SECP256K1', addressFormats: ['ADDRESS_FORMAT_ETHEREUM'] }],
+      ['submit/init_import_wallet', { userId: ORG.userId }], ['submit/import_wallet', { userId: ORG.userId, walletName: 'w', encryptedBundle: 'x', accounts: [] }],
+      // Exactly what the relay forwarded before Privy (with a reviewed-attempt binding): a type 2 transaction on Base by a legacy wallet.
+      ['submit/sign_transaction', { signWith: EVM, unsignedTransaction: unsigned(), type: 'TRANSACTION_TYPE_ETHEREUM' }],
+      // FloFi's own sign-in message for this host, naming the legacy signer, as EIP-191 bytes hashed by the provider.
+      ['submit/sign_raw_payload', { signWith: EVM, payload: personal, encoding: 'PAYLOAD_ENCODING_HEXADECIMAL', hashFunction: 'HASH_FUNCTION_KECCAK256' }],
+      ['submit/sign_raw_payloads', { signWith: SOLANA, payloads: ['00'], encoding: 'PAYLOAD_ENCODING_HEXADECIMAL', hashFunction: 'HASH_FUNCTION_NOT_APPLICABLE' }],
+      ['submit/create_policy', {}], ['submit/create_api_keys', {}], ['submit/create_users', {}], ['query/list_wallets', {}], ['query/list_private_keys', {}],
+    ];
+    for (const [path, parameters] of requests) {
+      const wallets = vi.fn(async () => WALLETS), managedResource = vi.fn(async () => RESOURCES[EVM]!);
+      expect(await decide(path, parameters, { wallets, managedResource }), path).toEqual({ ok: false, status: 404, code: 'PROVIDER_ROUTE_NOT_ALLOWED' });
+      expect(wallets, path).not.toHaveBeenCalled();
+      expect(managedResource, path).not.toHaveBeenCalled();
     }
   });
-  it('keeps every local rule ahead of the gate: managed EVM signer, type 2 only, canonical encoding, no external signer', async () => {
-    const gate = allow(), bound = { signing: 'base-swap:bas-' + 'a'.repeat(24), attempt: gate };
-    expect(await decide('submit/sign_transaction', params({ signWith: '0x' + '9'.repeat(40) }), bound)).toEqual({ ok: false, status: 403, code: 'SIGNER_NOT_MANAGED' });
-    expect(await decide('submit/sign_transaction', params({ unsignedTransaction: '04' + unsigned().slice(2) }), bound)).toEqual({ ok: false, status: 400, code: 'SIGN_REQUEST_INVALID' });
-    expect(await decide('submit/sign_transaction', params({ unsignedTransaction: unsigned() + '00' }), bound)).toEqual({ ok: false, status: 400, code: 'SIGN_REQUEST_INVALID' });
-    expect(await decide('submit/sign_transaction', params({ externalSignerPubkey: 'x' }), bound)).toEqual({ ok: false, status: 400, code: 'SIGN_REQUEST_INVALID' });
-    expect(await decide('submit/sign_transaction', params({ type: 'TRANSACTION_TYPE_SOLANA' }), bound)).toEqual({ ok: false, status: 400, code: 'SIGN_REQUEST_INVALID' });
-    expect(gate).not.toHaveBeenCalled();
+  it('forwards an activity poll for the unlocked key, without any export rule', async () => {
+    expect(await decide('query/get_activity', { activityId: 'activity-1' })).toEqual(forwarded('query/get_activity'));
+    expect(await decide('query/get_activity', { activityId: 'activity-1' }, { stamp: stamp(OTHER_KEY) })).toEqual({ ok: false, status: 403, code: 'WALLET_UNLOCK_REQUIRED' });
+  });
+  it('exports only with a recent unlock and a legacy wallet of this account that owns the exported resource', async () => {
+    expect(await decide('submit/export_wallet', EXPORT)).toEqual(forwarded('submit/export_wallet'));
+    expect(await decide('submit/export_wallet', { ...EXPORT, walletId: 'wallet-other' })).toEqual({ ok: false, status: 403, code: 'EXPORT_NOT_SUPPORTED' });
+    expect(await decide('submit/export_wallet', EXPORT, { session: session({ unlockedAt: T - 301 }) })).toEqual({ ok: false, status: 403, code: 'WALLET_UNLOCK_REQUIRED' });
+    // A generated wallet's account by its address (any case), an imported key by its id; never one kind of resource through the other route.
+    expect(await decide('submit/export_wallet_account', { address: EVM.toUpperCase().replace('0X', '0x'), targetPublicKey: EXPORT.targetPublicKey }))
+      .toEqual(forwarded('submit/export_wallet_account'));
+    expect(await decide('submit/export_private_key', { privateKeyId: 'key-abcdef12', targetPublicKey: EXPORT.targetPublicKey })).toEqual(forwarded('submit/export_private_key'));
+    expect(await decide('submit/export_private_key', { privateKeyId: 'wallet-123456', targetPublicKey: EXPORT.targetPublicKey }))
+      .toEqual({ ok: false, status: 403, code: 'EXPORT_NOT_SUPPORTED' });
+    expect(await decide('submit/export_wallet', { ...EXPORT, walletId: 'key-abcdef12' })).toEqual({ ok: false, status: 403, code: 'EXPORT_NOT_SUPPORTED' });
+    expect(await decide('submit/export_wallet_account', { address: SOLANA, targetPublicKey: EXPORT.targetPublicKey })).toEqual({ ok: false, status: 403, code: 'EXPORT_NOT_SUPPORTED' });
+    // Another account's wallet (not in this account's list) is never exported, whatever resource the provider holds.
+    expect(await decide('submit/export_wallet', EXPORT, { wallets: async () => [] })).toEqual({ ok: false, status: 403, code: 'EXPORT_NOT_SUPPORTED' });
+  });
+  it('never exports a Privy or external wallet through FloFi Wallet, nor looks up their resources', async () => {
+    const managedResource = vi.fn(async (item: AccountWallet) => RESOURCES[item.address] ?? null);
+    expect(await decide('submit/export_wallet', { ...EXPORT, walletId: 'wallet-privy01' }, { managedResource })).toEqual({ ok: false, status: 403, code: 'EXPORT_NOT_SUPPORTED' });
+    expect(await decide('submit/export_wallet_account', { address: PRIVY_EVM, targetPublicKey: EXPORT.targetPublicKey }, { managedResource }))
+      .toEqual({ ok: false, status: 403, code: 'EXPORT_NOT_SUPPORTED' });
+    expect(await decide('submit/export_wallet_account', { address: EXTERNAL_EVM, targetPublicKey: EXPORT.targetPublicKey }, { managedResource }))
+      .toEqual({ ok: false, status: 403, code: 'EXPORT_NOT_SUPPORTED' });
+    expect(managedResource.mock.calls.length).toBeGreaterThan(0);
+    expect(managedResource.mock.calls.every(([item]) => isLegacyWallet(item))).toBe(true);
+    // The very resource a legacy wallet would own is refused when the account's wallet with it is a Privy wallet.
+    const privyOnly = [wallet('evm', EVM, 'generated', 'privy')];
+    expect(await decide('submit/export_wallet', EXPORT, { wallets: async () => privyOnly })).toEqual({ ok: false, status: 403, code: 'EXPORT_NOT_SUPPORTED' });
+    expect(await decide('submit/export_wallet_account', { address: EVM, targetPublicKey: EXPORT.targetPublicKey }, { wallets: async () => privyOnly }))
+      .toEqual({ ok: false, status: 403, code: 'EXPORT_NOT_SUPPORTED' });
   });
 });
 
-describe('wallet relay: Solana signatures', () => {
-  const params = (payload: string) => ({ signWith: SOLANA, payload, encoding: 'PAYLOAD_ENCODING_HEXADECIMAL', hashFunction: 'HASH_FUNCTION_NOT_APPLICABLE' });
-  it('binds a transaction message (fee payer = signer) to its reviewed attempt', async () => {
-    const gate = allow(), message = solanaMessage();
-    expect(await decide('submit/sign_raw_payload', params(message.toString('hex')), { signing: `jupiter-swap:jupiter-${'c'.repeat(32)}`, attempt: gate }))
-      .toEqual({ ok: true, url: 'https://api.turnkey.com/public/v1/submit/sign_raw_payload' });
-    expect(gate).toHaveBeenCalledWith({ flow: 'jupiter-swap', runId: `jupiter-${'c'.repeat(32)}` }, { ecosystem: 'solana', address: SOLANA, message: new Uint8Array(message) });
-    expect(await decide('submit/sign_raw_payload', params(message.toString('hex')))).toEqual({ ok: false, status: 403, code: 'FLOFI_WALLET_SIGNING_CONTEXT_REQUIRED' });
-    const otherPayer = solanaMessage(); otherPayer[5] = 1;
-    expect(await decide('submit/sign_raw_payload', params(otherPayer.toString('hex')), { signing: `jupiter-swap:jupiter-${'c'.repeat(32)}`, attempt: gate }))
-      .toEqual({ ok: false, status: 400, code: 'SIGN_REQUEST_INVALID' });
+describe('FloFi sign-in messages', () => {
+  const NOW = Date.parse('2026-10-31T12:00:00.000Z'), nonce = 'ab'.repeat(16);
+  const times = { nonce, issuedAt: '2026-10-31T11:59:00.000Z', expirationTime: '2026-10-31T12:04:00.000Z' };
+  const siws = solanaSignInMessage({ domain: APP.host, uri: APP.origin, address: SOLANA, ...times });
+  const siwe = (chainId: number) => walletSignInMessage({ domain: APP.host, uri: APP.origin, address: EVM, chainId, ...times });
+  it('accepts exactly the message FloFi’s server writes, for this host and that wallet, on FloFi’s mainnets', () => {
+    expect(floFiSignInMessage(siws, 'solana', SOLANA, APP, NOW)).toBe(true);
+    expect(floFiSignInMessage(siws.replace(APP.host, 'evil.example'), 'solana', SOLANA, APP, NOW)).toBe(false);
+    expect(floFiSignInMessage(siws, 'solana', '22222222222222222222222222222222', APP, NOW)).toBe(false);
+    expect(floFiSignInMessage(siws.replace(SOLANA_SIGN_IN_STATEMENT, 'Approve everything.'), 'solana', SOLANA, APP, NOW)).toBe(false);
+    // EVM sign-in on FloFi's four mainnets only; a testnet chain (Base Sepolia, Sepolia, Robinhood Chain Testnet) is refused.
+    for (const chain of [1, 8453, 42161, 4663]) expect(floFiSignInMessage(siwe(chain), 'evm', EVM, APP, NOW)).toBe(true);
+    for (const chain of [84532, 11155111, 46630, 421614]) expect(floFiSignInMessage(siwe(chain), 'evm', EVM, APP, NOW)).toBe(false);
+    expect(floFiSignInMessage(siwe(8453).replace(`URI: ${APP.origin}`, 'URI: https://evil.example'), 'evm', EVM, APP, NOW)).toBe(false);
   });
-  it('signs FloFi’s own sign-in messages without a run binding, and nothing else', async () => {
-    const siws = `${APP.host} wants you to sign in with your Solana account:\n${SOLANA}\n\n${SOLANA_SIGN_IN_STATEMENT}\n\nURI: ${APP.origin}\nVersion: 1\nNonce: abc`;
-    const gate = allow();
-    expect(await decide('submit/sign_raw_payload', params(Buffer.from(siws).toString('hex')), { message: siws, attempt: gate })).toMatchObject({ ok: true });
-    expect(gate).not.toHaveBeenCalled();
-    const foreign = siws.replace(APP.host, 'evil.example');
-    expect(await decide('submit/sign_raw_payload', params(Buffer.from(foreign).toString('hex')), { message: foreign })).toEqual({ ok: false, status: 400, code: 'SIGN_REQUEST_INVALID' });
-    const siwe = (chain: number) => `${APP.host} wants you to sign in with your Ethereum account:\n${EVM}\n\n${WALLET_SIGN_IN_STATEMENT}\n\nURI: ${APP.origin}\nVersion: 1\nChain ID: ${chain}`;
-    // EVM sign-in on FloFi Wallet's four mainnets only; a testnet chain (Base Sepolia, Sepolia, Robinhood Chain Testnet) is refused.
-    for (const chain of [1, 8453, 42161, 4663]) expect(floFiSignInMessage(siwe(chain), 'evm', EVM, APP)).toBe(true);
-    for (const chain of [84532, 11155111, 46630, 421614]) expect(floFiSignInMessage(siwe(chain), 'evm', EVM, APP)).toBe(false);
+  it('refuses extra or missing lines, malformed fields, carriage returns and expired messages', () => {
+    for (const [message, ecosystem, address] of [
+      [`${siws}\nResources:\n- https://evil.example`, 'solana', SOLANA], [siws.split('\n').slice(0, 8).join('\n'), 'solana', SOLANA],
+      [siws.replace(`Nonce: ${nonce}`, 'Nonce: abc'), 'solana', SOLANA], [siws.replace('Issued At: 2026-10-31T11:59:00.000Z', 'Issued At: yesterday'), 'solana', SOLANA],
+      [siws.replace('\n', '\r\n'), 'solana', SOLANA], [`${siwe(8453)}\nRequest ID: 1`, 'evm', EVM], [siwe(8453).replace('Chain ID: 8453', 'Chain ID: 8453 '), 'evm', EVM],
+    ] as const) expect(floFiSignInMessage(message, ecosystem, address, APP, NOW), message).toBe(false);
+    expect(floFiSignInMessage(siws, 'solana', SOLANA, APP, Date.parse(times.expirationTime))).toBe(false);
+    expect(floFiSignInMessage(siwe(8453), 'evm', EVM, APP, Date.parse(times.expirationTime) + 1)).toBe(false);
+  });
+  it.each(['evm', 'solana'] as const)('refuses future-issued or overlong %s sign-in messages before requesting a signature', ecosystem => {
+    const address = ecosystem === 'evm' ? EVM : SOLANA, ttl = WALLET_CHALLENGE_TTL_SECONDS * 1000;
+    const message = (issued: number, expires: number) => {
+      const fields = { domain: APP.host, uri: APP.origin, address, nonce, issuedAt: new Date(issued).toISOString(), expirationTime: new Date(expires).toISOString() };
+      return ecosystem === 'evm' ? walletSignInMessage({ ...fields, chainId: 1 }) : solanaSignInMessage(fields);
+    };
+    expect(floFiSignInMessage(message(NOW, NOW + ttl), ecosystem, address, APP, NOW)).toBe(true);
+    expect(floFiSignInMessage(message(NOW + 1, NOW + ttl + 1), ecosystem, address, APP, NOW)).toBe(false);
+    expect(floFiSignInMessage(message(NOW, NOW + ttl + 1), ecosystem, address, APP, NOW)).toBe(false);
+    expect(floFiSignInMessage(message(NOW - ttl - 1, NOW + 1), ecosystem, address, APP, NOW)).toBe(false);
+    expect(floFiSignInMessage(message(NOW, NOW), ecosystem, address, APP, NOW)).toBe(false);
+    expect(floFiSignInMessage(message(NOW, NOW + ttl), ecosystem, address, APP, NOW + ttl)).toBe(false);
   });
 });

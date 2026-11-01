@@ -1,5 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-/** BUILD-FLOFI-AUTH-WALLETS-001: `/login`. A verified session is restored server-side and continues to the app (or onboarding). */
+/**
+ * `/login` (BUILD-FLOFI-AUTH-WALLETS-001; Privy since BUILD-FLOFI-PRIVY-UX-001). A verified FloFi session continues to the app (or to adding
+ * wallets); everyone else signs in with Privy. Disconnect lands here (`accountSignOut`).
+ */
 import type { Metadata } from 'next';
 import { redirect } from 'next/navigation';
 import { accountState } from '../../account-action';
@@ -13,14 +16,9 @@ const one = (value: string | string[] | undefined) => typeof value === 'string' 
 
 export default async function LoginPage({ searchParams }: { searchParams: Search }) {
   const params = await searchParams, state = await accountState();
-  const intent = one(params.intent) === 'link' ? 'link' : 'sign-in', returnTo = safeReturnPath(one(params.returnTo) ?? '/app');
-  const method = one(params.method) === 'email' ? 'email' : one(params.method) === 'wallet' ? 'wallet' : null;
+  const returnTo = safeReturnPath(one(params.returnTo) ?? '/app');
   const error = one(params.error), code = error && /^[A-Z][A-Z0-9_]{2,80}$/.test(error) ? error : null;
-  // A returning, still-valid session goes straight on, unless the person explicitly asked to sign in again or to add a sign-in.
-  if (state.account && intent === 'sign-in' && !method && !code) {
-    const social = state.account.method === 'google' || state.account.method === 'apple' || state.account.method === 'email';
-    redirect(social && state.account.onboarding === 'pending' ? '/onboarding' : returnTo);
-  }
-  if (intent === 'link' && !state.account) redirect(`/login?returnTo=${encodeURIComponent(returnTo)}`);
-  return <SignInScreen state={state} initialError={code} returnTo={returnTo} intent={intent} initialMethod={method}/>;
+  // A returning, still-valid session goes straight on, unless the page shows an error.
+  if (state.account && !code) redirect(state.account.onboarding === 'pending' ? '/onboarding/wallets' : returnTo);
+  return <SignInScreen state={state} initialError={code} returnTo={returnTo}/>;
 }

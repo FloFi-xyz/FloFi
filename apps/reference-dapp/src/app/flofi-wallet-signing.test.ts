@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// BUILD-FLOFI-AUTH-WALLETS-001: FloFi Wallet's gate reads runs through each flow's own action, counts only managed wallets of the account,
-// and lets the relay claim each reviewed attempt's signature exactly once.
+// BUILD-FLOFI-AUTH-WALLETS-001: FloFi's signing gate reads runs through each flow's own action, counts only managed wallets of the account,
+// and claims each reviewed attempt's signature exactly once. Since BUILD-FLOFI-PRIVY-UX-001 the managed wallets that sign are Privy wallets;
+// legacy FloFi Wallet (Turnkey) wallets are export-only and never resolve a signing request.
 import { describe, expect, it, vi } from 'vitest';
 
 const status = vi.hoisted(() => ({ jupiter: vi.fn(), devnet: vi.fn(), solanaTransfer: vi.fn(), transfer: vi.fn(), swap: vi.fn() }));
@@ -9,12 +10,13 @@ vi.mock('./solana-devnet-action', () => ({ solanaDevnetStatus: status.devnet }))
 vi.mock('./solana-transfer-action', () => ({ solanaTransferStatus: status.solanaTransfer }));
 vi.mock('./robinhood-transfer-action', () => ({ transferStatus: status.transfer }));
 vi.mock('./public-testnet-action', () => ({ publicStatus: status.swap }));
-const { claimAttempt, claimDigest, loadSigningRun, managedWallets, RELEASABLE_PROVIDER_STATUSES, releaseAttempt, signingDeps, signingGate } = await import('./flofi-wallet-signing');
+const { claimAttempt, claimDigest, loadSigningRun, managedWallets, PRIVY_EVM_SIGNING_WINDOW_MS, RELEASABLE_PROVIDER_STATUSES, releaseAttempt, signingDeps, signingGate } = await import('./flofi-wallet-signing');
 import type { AccountWallet } from '../accounts/account-model';
 import type { ManagedSigningDeps } from '../server/managed-signing';
+import { classifySigningFailure } from '../wallet/flofi-signing';
 
 const EVM = '0x' + '1'.repeat(40), SOLANA = '7'.repeat(32) + 'abcd';
-const wallet = (ecosystem: 'evm' | 'solana', address: string, origin: AccountWallet['origin'] = 'generated', provider = 'turnkey'): AccountWallet => ({ id: `${ecosystem}:${address}`,
+const wallet = (ecosystem: 'evm' | 'solana', address: string, origin: AccountWallet['origin'] = 'generated', provider = 'privy'): AccountWallet => ({ id: `${ecosystem}:${address}`,
   ecosystem, address, origin, provider, providerName: 'x', export: 'none', label: 'x', addedAt: '2026-10-31T00:00:00.000Z' });
 
 describe('runs and wallets', () => {
@@ -30,14 +32,18 @@ describe('runs and wallets', () => {
     expect(await loadSigningRun('base-mainnet-transfer', 'bat-1')).toBe('t');
     await expect(loadSigningRun('base-swap', 'bas-1')).rejects.toThrow('BASE_MAINNET_NOT_ENABLED');
   });
-  it('counts only managed (generated or imported) wallets of the account', async () => {
-    const wallets = [wallet('evm', EVM), wallet('solana', SOLANA, 'imported'), wallet('evm', '0x' + '2'.repeat(40), 'external', 'io.metamask')];
+  it('counts only Privy-managed (generated or imported) wallets of the account, never an external or legacy FloFi Wallet (Turnkey) one', async () => {
+    const LEGACY_EVM = '0x' + '3'.repeat(40), LEGACY_SOLANA = '8'.repeat(32) + 'abcd';
+    const wallets = [wallet('evm', EVM), wallet('solana', SOLANA, 'imported'), wallet('evm', '0x' + '2'.repeat(40), 'external', 'io.metamask'),
+      wallet('evm', LEGACY_EVM, 'generated', 'turnkey'), wallet('solana', LEGACY_SOLANA, 'imported', 'turnkey')];
     expect(managedWallets(wallets).map(item => item.address)).toEqual([EVM, SOLANA]);
     const deps = signingDeps(wallets);
     expect(await deps.managed('evm', EVM.toUpperCase().replace('0X', '0x'))).toBe(true);
     expect(await deps.managed('evm', '0x' + '2'.repeat(40))).toBe(false);
     expect(await deps.managed('solana', SOLANA)).toBe(true);
     expect(await deps.managed('evm', SOLANA)).toBe(false);
+    expect(await deps.managed('evm', LEGACY_EVM)).toBe(false);
+    expect(await deps.managed('solana', LEGACY_SOLANA)).toBe(false);
   });
 });
 
@@ -49,12 +55,12 @@ describe('signing gate', () => {
   const request = { ecosystem: 'evm' as const, tx: { from: EVM, to: EVM, value: 1n, data: '0x', chainId: 8453n, nonce: 7n, gas: 21_000n, maxFeePerGas: 2n, maxPriorityFeePerGas: 1n } };
   const deps: ManagedSigningDeps = { load: async () => structuredClone(transferRecord), managed: (_e, address) => address === EVM };
   const context = { flow: 'base-mainnet-transfer', runId: transferRecord.id };
-  it('summarizes without claiming for the sign-context route', async () => {
+  it('summarizes without claiming when asked not to claim', async () => {
     const store = { consumeProof: vi.fn(async () => true) };
     expect((await signingGate(store, [], { claim: false }, deps)(context, request)).ok).toBe(true);
     expect(store.consumeProof).not.toHaveBeenCalled();
   });
-  it('claims the attempt’s single signature for the relay and refuses a second one', async () => {
+  it('claims the attempt’s single signature and refuses a second one', async () => {
     const claimed = new Set<string>(), store = { consumeProof: vi.fn(async (digest: string) => !claimed.has(digest) && Boolean(claimed.add(digest))) };
     const gate = signingGate(store, [], { claim: true }, deps);
     expect((await gate(context, request)).ok).toBe(true);
@@ -72,6 +78,15 @@ describe('signing gate', () => {
     await releaseAttempt(store, (first as { value: { attempt: string } }).value.attempt);
     expect((await gate(context, request)).ok).toBe(true);
     expect([...RELEASABLE_PROVIDER_STATUSES].sort()).toEqual([400, 401, 403]); // never 5xx or a missing answer: those may have signed
+  });
+  it('never claims an EVM attempt whose Review would expire while the person confirms in Privy', async () => {
+    const store = { consumeProof: vi.fn(async () => true) }, expires = Date.parse('2026-10-31T12:01:00.000Z');
+    const record = { ...transferRecord, review: { ...transferRecord.review, expiresAt: new Date(expires).toISOString() } };
+    const at = (now: number) => signingGate(store, [], { claim: true }, { ...deps, load: async () => structuredClone(record), now: () => now })(context, request);
+    expect(await at(expires - PRIVY_EVM_SIGNING_WINDOW_MS + 1)).toEqual({ ok: false, code: 'FLOFI_WALLET_REVIEW_EXPIRING' });
+    expect(store.consumeProof).not.toHaveBeenCalled();
+    expect(classifySigningFailure('FLOFI_WALLET_REVIEW_EXPIRING')).toBe('refused');
+    expect((await at(expires - PRIVY_EVM_SIGNING_WINDOW_MS)).ok).toBe(true);
   });
   it('never claims a refused request', async () => {
     const store = { consumeProof: vi.fn(async () => true) };
