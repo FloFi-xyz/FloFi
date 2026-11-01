@@ -641,3 +641,38 @@ followed by the migration-bearing release. No production migration or release wa
 retain the certificate or use a schema-18 compatible artifact; do not drop the account tables or loosen schema validation to
 accommodate an older binary. The exact Release A contents, deployment order and rollback table are in
 [RELEASE-AUTH-WALLETS-0018.md](./RELEASE-AUTH-WALLETS-0018.md).
+
+## 13. Certificate 0019_privy_accounts
+
+| Base | Certified forward migration | SHA-256 |
+| --- | --- | --- |
+| 0018 `flofi_accounts` | 0019 `privy_accounts` | `f73a0944731486ce0853ec69d349f65bdf37b8ff81ec73b02e0221542eb01145` |
+
+Migration 0019 (BUILD-FLOFI-PRIVY-UX-001) widens four CHECK constraints of two 0018 tables and does nothing else: no table, column,
+index, function, trigger or row is added, changed or removed.
+
+- `flofi_account_identities_kind_check` and `flofi_account_identities_check` also admit kind `PRIVY` with a Privy user id
+  (`did:privy:` followed by 8–64 letters and digits): the person's Privy user, verified by FloFi's server from a Privy access token.
+- `flofi_account_wallets_check2` and `flofi_account_wallets_check3` also admit Privy-managed wallets (`provider = 'privy'`, generated or
+  imported), whose export capability is the private key and whose Privy wallet id is optional. The Turnkey rules are unchanged: a
+  Turnkey-managed wallet still needs its resource id, and a Turnkey-generated wallet still exports a recovery phrase.
+
+Every row valid under 0018 is valid under 0019 unchanged, so the `ADD CONSTRAINT` validation scans cannot fail on existing data; the
+four constraints are replaced in two statements, inside the migration's single transaction, under `lock_timeout = '5s'` (both tables are
+small and touched only by account traffic). Still no column can hold a key, seed phrase, OTP, OAuth/OIDC or Privy token or password.
+
+A version-18 build runs unchanged on schema 19, including on rows written by a version-19 build:
+- its wallet reader drops a `privy` wallet row (its strict `readAccountWallet` accepts only `turnkey` as a managed provider), so
+  such a wallet is neither shown nor offered for signing or export by an old build, and `walletHolder` still refuses to give its address
+  to another account;
+- a `PRIVY` identity is listed with no kind (its label is the DID); it is never the method of a session (version 19 records sessions
+  with the 0018 methods only) and never a FloFi Wallet unlock method, so an old build can neither sign it in nor unlock with it;
+- nothing a version-18 build writes can violate a 0019 constraint (the constraints only widened).
+
+`privy-accounts-migration.pg.test.ts` checks the exact bytes, a Turnkey-era account surviving byte for byte with unchanged columns, the
+new Privy rows, the 0018 safety rules still refusing unsafe rows, atomic rollback, and a version-18 reader carrying this certificate
+starting on schema 19 (and refusing it without the certificate).
+
+Release order is certificate first, as for 0018: every version-18 database consumer must run a build carrying this certificate before
+0019 is applied. No production migration or release was performed during engineering. The release steps are in
+[RELEASE-PRIVY-0019.md](./RELEASE-PRIVY-0019.md).
