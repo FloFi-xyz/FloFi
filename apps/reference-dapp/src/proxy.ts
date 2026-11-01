@@ -64,6 +64,10 @@ export function proxy(request: NextRequest) {
     // The workspace may be framed only by FloFi itself: never by another site, nor by the same-site card origin (which runs Mercado Pago).
     return withNonce(request, nonce => productPagePolicy(nonce, { frameAncestors: NEVER_FRAMED.has(pathname) ? "'none'" : "'self'" }));
   }
+  // OAuth loopback landing used only as a same-origin redirect_uri (e2e MCP host). It must not carry a nonce script policy:
+  // Playwright's embedded host then replaces the document with setContent, and Chromium inherits the prior navigation's CSP into
+  // that document.write — which would block the host fixture's inline script and never render the approval panel.
+  if (pathname === '/mcp-e2e-callback') return NextResponse.next();
   // Privy's trust boundary is the entire product origin. Public pages, admin pages and even error documents must carry the same
   // script restrictions: a script injected there could otherwise open a signer page and drive its same-origin wallet frame.
   // Route handlers that return their own stricter policy (e.g. script-free OAuth consent) keep that response policy.

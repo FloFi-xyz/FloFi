@@ -61,6 +61,9 @@ describe('product page Content Security Policy (BUILD-FLOFI-PRIVY-UX-001: every 
       expect(response.headers.get('x-middleware-request-content-security-policy'), path).toBe(response.headers.get('content-security-policy'));
       expect(response.headers.get('x-middleware-request-x-flofi-pathname'), path).toBe(path);
     }
+    // OAuth loopback landing stays without a nonce script policy so the embedded MCP e2e host can setContent its fixture.
+    const callback = proxy(new NextRequest('https://flofi.xyz/mcp-e2e-callback', { headers: { host: 'flofi.xyz' } }));
+    expect(callback.headers.get('content-security-policy')).toBeNull();
   });
   it('runs only FloFi’s own scripts, talks only to FloFi and Privy, and keeps each page’s framing rule', () => {
     const nonce = cspNonce(), workspace = directives(productPagePolicy(nonce, { frameAncestors: null }, {}));

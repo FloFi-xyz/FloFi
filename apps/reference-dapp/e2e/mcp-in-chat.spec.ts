@@ -190,9 +190,11 @@ test.describe('BUILD-MCP-002 in-chat execution (mocked MCP Apps host)', () => {
     await panel.getByRole('button', { name: 'Refresh status' }).click();
     await expect.poll(() => frame.evaluate(() => (window as unknown as { frameIdentity: string }).frameIdentity)).toBe('same-signing-runtime');
     const cookies = (await context.cookies()).map(({ name, httpOnly, secure, sameSite, path }) => ({ name, httpOnly, secure, sameSite, path }));
-    const proof = cookies.find(cookie => cookie.name === `embedded_flofi_${namespace === 'evm' ? 'wallet' : 'solana'}_session`);
-    expect(proof).toMatchObject({ httpOnly: true, secure: true, sameSite: 'None', path: '/mcp/approve' });
+    const proofName = `__Host-embedded_flofi_${namespace === 'evm' ? 'wallet' : 'solana'}_session`;
+    const proof = cookies.find(cookie => cookie.name === proofName);
+    expect(proof).toMatchObject({ httpOnly: true, secure: true, sameSite: 'None', path: '/' });
     expect(cookies.some(cookie => cookie.name === `flofi_${namespace === 'evm' ? 'wallet' : 'solana'}_session`)).toBe(false);
+    expect(cookies.some(cookie => cookie.name === `embedded_flofi_${namespace === 'evm' ? 'wallet' : 'solana'}_session`)).toBe(false);
     expect((await hostLog(host)).openLinks).toEqual([]);
     expect(unexpected).toEqual([]);
     expect(namespace === 'evm' ? await journeySends() : await devnetControl({ action: 'sent' })).toBe(0);
