@@ -122,6 +122,8 @@ test('semantic edits invalidate; presentation, dismissal, no-op and stale propos
   await expect(panel(page).locator('.simulate-swap')).toBeVisible();
   await expect(panel(page).locator('.chain-strip')).toBeVisible();
   expect(await panel(page).evaluate(element => (element as HTMLDetailsElement).open)).toBe(true);
+  // BUILD-FLOFI-WALLET-UX-EXECUTION-FIX-001 (P0-07): Simulate cards show the live quote state; the snapshot waits for it to settle.
+  await expect(page.locator('.simulation-workflow-canvas .composer-quote-note', { hasText: 'Calculating' })).toHaveCount(0);
   await expect(page).toHaveScreenshot('simulate-current.png', { fullPage: true, ...hashMask(page) });
   await readIr(page);
   await tab(page, 'Execute');
@@ -196,6 +198,8 @@ test('expiry is detected on tab resume and on access without any timer firing (R
   await viewportFitted(page);
   await expect(panel(page).locator('.simulate-empty')).toBeVisible();
   expect(await panel(page).evaluate(element => (element as HTMLDetailsElement).open)).toBe(true);
+  // BUILD-FLOFI-WALLET-UX-EXECUTION-FIX-001 (P0-07): Simulate cards show the live quote state; the snapshot waits for it to settle.
+  await expect(page.locator('.simulation-workflow-canvas .composer-quote-note', { hasText: 'Calculating' })).toHaveCount(0);
   await expect(page).toHaveScreenshot('simulate-expired.png', { fullPage: true, ...hashMask(page) });
 
   await panel(page).getByRole('button', { name: 'Generate mocked artifacts for revision 1' }).click();

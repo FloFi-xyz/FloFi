@@ -92,6 +92,8 @@ for (const [from, to, amount, at] of [
     await expect(page.locator('.summary-bar[data-workflow-revision="1"]')).toBeVisible();
     if (from === 'WETH') {
       await expect(page.getByRole('region', { name: 'Simulation workflow graph' })).toHaveAttribute('data-viewport', 'fitted');
+      // BUILD-FLOFI-WALLET-UX-EXECUTION-FIX-001 (P0-07): Simulate cards show the live quote state; the snapshot waits for it to settle.
+      await expect(page.locator('.simulation-workflow-canvas .composer-quote-note', { hasText: 'Calculating' })).toHaveCount(0);
       await expect(page).toHaveScreenshot('observation-recorded.png', { fullPage: true, mask: [region.locator('[data-observation-hash^="artifact:"]')] }); // Derived from the per-visit draft identity.
       await page.clock.setSystemTime(new Date('2026-09-24T14:52:05.000Z'));
       await page.evaluate(() => window.dispatchEvent(new Event('focus')));
