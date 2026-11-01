@@ -71,8 +71,9 @@ export function AccountWalletAutoConnect({ disabled = false }: { disabled?: bool
       if (chosenEvmProvider() || current.account || current.busy || now.evm !== preference.evm ||
           accountWalletBlocked('evm', now, accountWalletReconnectAllowed('evm'))) return;
       const session = await evm.connectWith(choice.id);
-      // Automatic, not the person's choice: keep the remembered wallet as it was.
-      if (session) updateWalletPreference({ evm: preference.evm });
+      // Automatic, not the person's choice: keep the remembered wallet AND the Disconnect mark exactly as they were (a disconnected external
+      // wallet must not come back on the next load because this page connected the account's own FloFi wallet).
+      if (session) updateWalletPreference({ evm: preference.evm, evmDisconnected: preference.evmDisconnected });
     })();
   }, [off, evm, registrations]);
 
@@ -86,7 +87,8 @@ export function AccountWalletAutoConnect({ disabled = false }: { disabled?: bool
     const choice = accountWalletChoice(choices, floFi, preference.solana);
     if (!choice) return;
     tried.current.solana = true;
-    void solana.connectWithResult(choice.key, 'solana:mainnet').then(result => { if (result.ok) updateWalletPreference({ solana: preference.solana }); });
+    void solana.connectWithResult(choice.key, 'solana:mainnet').then(result => {
+      if (result.ok) updateWalletPreference({ solana: preference.solana, solanaDisconnected: preference.solanaDisconnected }); });
   }, [off, solana, registrations]);
   return null;
 }

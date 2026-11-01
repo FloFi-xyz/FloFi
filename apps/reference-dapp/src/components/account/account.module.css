@@ -104,9 +104,6 @@
 .ecosystemTab img{width:20px;height:20px;filter:brightness(0) invert(1)}
 /* BUILD-FLOFI-PRIVY-UX-001: the card's second column holds its wallet addresses above the Create / Import tiles. */
 .ecosystemBody{display:grid;min-width:0}
-.cardWallets{margin:8px 8px 0}
-.cardWallets li{min-width:0}
-.cardWallets code{overflow-wrap:anywhere;word-break:break-all}
 .tiles{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;padding:8px}
 .tile{display:grid;align-content:center;justify-items:center;gap:6px;text-align:center;min-height:104px;border-radius:12px;border:1px solid transparent;
   background:var(--acc-raised);color:var(--acc-ink);padding:12px}
@@ -119,7 +116,7 @@
 /* BUILD-FLOFI-WALLET-UX-EXECUTION-FIX-001 (P1-01): each wallet shows once, in its card, with a copy button beside its short address. */
 .tileWide{grid-column:1/-1;min-height:64px}
 .tileAddress{display:inline-flex;align-items:center;gap:6px;min-width:0}
-.copyAddress{display:inline-grid;place-items:center;width:28px;height:28px;border-radius:8px;border:1px solid var(--acc-line);background:var(--acc-raised);
+.copyAddress{display:inline-grid;place-items:center;width:32px;height:32px;border-radius:8px;border:1px solid var(--acc-line);background:var(--acc-raised);
   color:var(--acc-muted);cursor:pointer}
 .copyAddress:hover{color:var(--acc-ink);border-color:var(--eco)}
 .copyAddress:focus-visible{outline:2px solid var(--eco);outline-offset:2px}

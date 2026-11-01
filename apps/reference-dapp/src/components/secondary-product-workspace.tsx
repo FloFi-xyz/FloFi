@@ -76,8 +76,10 @@ function WalletCredentialCard({ entry, busy, accountView, onConnect, onDisconnec
   const [exporting, setExporting] = useState(false);
   const renameId = useId();
   const { t: tr } = useLocale();
-  // A wallet the account keeps (Privy, legacy FloFi Wallet) is never offered as removable, even when this device also saved it.
+  // A wallet the account keeps (Privy, legacy FloFi Wallet) is never removed from the account; when this device also saved it, only this
+  // device's reference can be removed ("Remove from this device").
   const account = entry.account, removable = account ? account.origin === 'external' : Boolean(entry.saved);
+  const deviceOnly = Boolean(account && account.origin !== 'external' && entry.saved);
   async function copyAddress() {
     try { await navigator.clipboard.writeText(entry.address); onStatus('Address copied.'); } catch { onStatus('Address could not be copied.'); }
   }
@@ -138,6 +140,8 @@ function WalletCredentialCard({ entry, busy, accountView, onConnect, onDisconnec
         : (entry.saved || account && !isLegacyWallet(account)) && <button type="button" className="workspace-action" aria-label={tr('Connect {0}', entry.label)} disabled={busy} onClick={() => onConnect(entry)}>{tr("Connect")}</button>}
       {/* BUILD-FLOFI-PRIVY-UX-001: wallets FloFi's provider keeps (Privy, legacy FloFi Wallet) stay in the account (account-store.ts removeWallet). */}
       {removable && <button type="button" className="workspace-action" aria-label={tr('Remove {0}', entry.label)} onClick={() => setMode('remove')}>{tr("Remove")}</button>}
+      {deviceOnly && <button type="button" className="workspace-action" aria-label={tr('Remove {0} from this device', entry.label)}
+        onClick={() => { removeSavedCredential(entry.saved!.id); onStatus('Removed from this device. The wallet stays in your FloFi account.'); }}>{tr('Remove from this device')}</button>}
     </div>}
     {exporting && account && accountView && <ExportWalletDialog wallet={account} state={accountView} onClose={() => setExporting(false)}/>}
   </article>;
@@ -314,7 +318,7 @@ function CredentialsWorkspace({ access }: { access?: DelegationAccess | undefine
     const providerKey = entry.saved?.providerKey ?? (entry.designation === 'privy' ? floFiWalletProviderKey(entry.ecosystem, entry.address) : entry.providerKey);
     const providerName = entry.saved?.providerName ?? entry.providerName;
     const mismatch = (address: string) => setStatus(`${providerName} connected ${address.slice(0, 6)}…${address.slice(-4)}, not this saved wallet. Choose ${entry.address.slice(0, 6)}…${entry.address.slice(-4)} in ${providerName} to use it.`);
-    if (!providerKey) { setStatus(`${providerName} isn't detected in this browser.`); return; }
+    if (!providerKey) { setStatus(entry.designation === 'privy' ? 'Your FloFi wallet is still loading in this page. Try again in a moment.' : `${providerName} isn't detected in this browser.`); return; }
     if (entry.ecosystem === 'evm') {
       const found = evmWalletEntries().find(candidate => candidate.choice.key === providerKey);
       if (!found) { setStatus(`${providerName} isn't detected in this browser.`); return; }
@@ -336,7 +340,7 @@ function CredentialsWorkspace({ access }: { access?: DelegationAccess | undefine
           {signedIn && account!.availability.managedWallets && <a className="workspace-action" style={{ textDecoration: 'none' }} href="/onboarding/wallets"><AccountIcon name="plus" size={16}/>{tr('Create or import')}</a>}
           <button type="button" className="workspace-action" disabled={busy} onClick={() => void addWallet()}><WorkspaceIcon name="plus" size={16}/>{tr("Add wallet")}</button>
         </div></div>
-      {account?.availability.accounts && !account.account && <p className="workspace-notice">{tr('Sign in to save wallet addresses to your account and find them on any device. Wallets saved only on this device are listed below.')}{' '}
+      {account?.availability.accounts && !account.account && <p className="workspace-notice">{tr('Sign in to create or import FloFi wallets that stay with your account. Wallets added here are saved on this device only.')}{' '}
         <a href="/login?returnTo=%2Fapp%2Fcredentials">{tr('Sign in')}</a></p>}
       {entries.length ? <div className="workspace-wallet-grid">{entries.map(entry => <WalletCredentialCard key={entry.key}
         entry={entry} busy={busy} accountView={signedIn ? account : null} onConnect={target => void activate(target)} onDisconnect={() => disconnect(entry)} onSave={save}

@@ -444,8 +444,9 @@ export function ComposerCard({ data: card }: { data: ComposerCardData }) {
           {pairDestination && <><span className="composer-value-arrow" aria-hidden="true">↓</span><ValueBox readOnly token={pairDestination} network={destinationNetwork}
             {...estimate ? { amount: estimate.expected } : {}} hint={estimate ? 'Approximate read-only output; simulate before review' : 'Output estimate unavailable'} fiatFirst={false} onFiatFirstChange={setFiatFirst}/></>}
         </div>}
-        {/* BUILD-FLOFI-WALLET-UX-EXECUTION-FIX-001 (P0-07): the Simulate and Execute plans show the same shared live quote as Build, or why there is none. */}
-        {pairDestination && <span className="composer-quote-note" title={quote.status === 'unavailable' && quote.code ? [quote.code, quote.correlationId].filter(Boolean).join(' · ') : undefined}>{tr(estimate ? `Approximate · ${estimate.provider} · Simulate before review`
+        {/* BUILD-FLOFI-WALLET-UX-EXECUTION-FIX-001 (P0-07): the Simulate plan shows the same shared live quote as Build, or why there is none. */}
+        {/* No quote note where no quote is asked for (the Execute plan shows reviewed amounts elsewhere), never a bare "unavailable". */}
+        {pairDestination && (card.estimateWorkflow || quote.status !== 'idle') && <span className="composer-quote-note" aria-live="polite" title={quote.status === 'unavailable' && quote.code ? [quote.code, quote.correlationId].filter(Boolean).join(' · ') : undefined}>{tr(estimate ? `Approximate · ${estimate.provider} · Simulate before review`
           : quote.status === 'calculating' ? 'Calculating estimate…' : quote.status === 'unavailable' ? buildEstimateFailureMessage(quote.code ?? 'ESTIMATE_UNAVAILABLE') : 'Estimate unavailable')}
           {quote.status === 'unavailable' && buildEstimateFailureReference(quote.code) && <> <small className="composer-quote-reference">{tr('Reference {0}', buildEstimateFailureReference(quote.code)!)}</small></>}</span>}
       </>        : amountBox ? <AmountContainer className="composer-amount-form nodrag nopan"

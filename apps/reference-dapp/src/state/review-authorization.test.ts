@@ -181,7 +181,9 @@ describe('BUILD-FLOFI-WALLET-UX-EXECUTION-FIX-001 no false "Wallet changed" whil
     const adopted = { account: owner, chain: null, restorationEpoch: 0, adopted: true };
     expect(reviewBindingAdopts(adopted, { account: owner, chain: arb }, 0, owner, 'evm')).toBe(true);
     expect(reviewBindingAdopts({ ...adopted, chain: arb }, { account: owner, chain: 'eip155:1' }, 0, owner, 'evm')).toBe(false);
-    expect(reviewBindingAdopts({ ...adopted, adopted: false }, { account: owner, chain: arb }, 0, owner, 'evm')).toBe(false);
+    // The owner was already connected (chain still unknown) when the Review appeared: its chain becoming known is not a wallet change.
+    expect(reviewBindingAdopts({ ...adopted, adopted: false }, { account: owner, chain: arb }, 0, owner, 'evm')).toBe(true);
+    expect(reviewBindingAdopts({ ...adopted, account: other, adopted: false }, { account: other, chain: arb }, 0, owner, 'evm')).toBe(false);
     expect(reviewBindingAdopts(adopted, { account: null, chain: null }, 0, owner, 'evm')).toBe(false);
   });
   it('compares Solana keys exactly', () => {

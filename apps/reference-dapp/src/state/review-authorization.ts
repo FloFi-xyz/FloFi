@@ -33,7 +33,8 @@ import { solanaProviderIdentity } from '../wallet/solana-wallet';
  * being retired as "Wallet changed". Only within the same workflow restoration, and only:
  *  - while no wallet is connected on either side (a provider registering or a hint settling changes nothing that was reviewed);
  *  - from "no wallet" to exactly the Review's owner (EVM case-insensitive, Solana exact): the reviewed wallet finished restoring/connecting;
- *  - for that adopted owner, its chain going from unknown to known (wallets report the account first, then the chain).
+ *  - for the owner already bound (adopted or connected when the Review appeared), its chain going from unknown to known (wallets report the
+ *    account first, then the chain).
  * An accepted Review never follows anything (a reload or another provider needs a fresh Review), and any other change still retires it.
  */
 export type ReviewWalletBinding = { readonly account: string | null; readonly chain: string | null; readonly restorationEpoch: number; readonly adopted: boolean };
@@ -45,7 +46,7 @@ export function reviewBindingAdopts(bound: ReviewWalletBinding, current: { reado
   const same = (a: string, b: string) => walletKind === 'solana' ? a === b : a.toLowerCase() === b.toLowerCase();
   if (!same(owner, current.account)) return false;
   if (bound.account === null) return true;
-  return bound.adopted && same(bound.account, current.account) && bound.chain === null && current.chain !== null;
+  return same(bound.account, current.account) && bound.chain === null && current.chain !== null;
 }
 
 /** Review callbacks only: no install, request, begin, submit or execute method crosses this boundary. */

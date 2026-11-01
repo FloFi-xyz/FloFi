@@ -102,8 +102,10 @@ export function AddWallets({ state }: { state: AccountState }) {
 
   const valid = wallets.filter(wallet => isPrivyWallet(wallet) || isLegacyWallet(wallet) || wallet.origin === 'external');
   /** Copies the full address (never the shortened text shown). */
-  function copy(wallet: AccountWallet) {
-    void navigator.clipboard.writeText(wallet.address).then(() => setStatus(t('Address copied.')), () => setStatus(t('Address could not be copied.')));
+  async function copy(wallet: AccountWallet) {
+    setStatus('');
+    try { await navigator.clipboard.writeText(wallet.address); setStatus(t('{0} address copied.', wallet.label)); }
+    catch { setStatus(t('Address could not be copied.')); }
   }
   /** One wallet, shown once inside its card: status, shortened address and a copy button (BUILD-FLOFI-WALLET-UX-EXECUTION-FIX-001 P1-01). */
   const walletTile = (wallet: AccountWallet, title: string, wide = false) => <div key={wallet.id} className={`${styles.tile} ${styles.tileDone}${wide ? ` ${styles.tileWide}` : ''}`}
@@ -111,7 +113,7 @@ export function AddWallets({ state }: { state: AccountState }) {
     <strong><AccountIcon name="check" size={16}/>{t(title)}</strong>
     <small>{wallet.label}</small>
     <span className={styles.tileAddress}><code title={wallet.address}>{shortAddress(wallet.address)}</code>
-      <button type="button" className={styles.copyAddress} aria-label={t('Copy {0} address', wallet.label)} title={t('Copy address')} onClick={() => copy(wallet)}>
+      <button type="button" className={styles.copyAddress} aria-label={t('Copy {0} address', wallet.label)} title={t('Copy address')} onClick={() => void copy(wallet)}>
         <AccountIcon name="copy" size={15}/></button></span>
   </div>;
   const card = (ecosystem: WalletEcosystem) => {

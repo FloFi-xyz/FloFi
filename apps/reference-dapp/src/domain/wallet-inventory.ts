@@ -47,16 +47,17 @@ export function walletInventory(input: { readonly account: readonly AccountWalle
       label: active.ecosystem === 'evm' ? 'EVM Default' : 'Solana Default', providerName: active.providerName, providerKey: active.providerKey,
       network: active.network, saved: null, active, account: null })),
   ];
-  // Account wallets join the entry of the same account identity (the connected one first); otherwise they are listed first, in account order.
-  const accountOnly: Draft[] = [];
+  // Account wallets join the entry of the same account identity (the connected one first). Every account wallet keeps one stable key and
+  // place (account order, first), so connecting or disconnecting it never remounts or moves its card.
+  const accountEntries: Draft[] = [];
   for (const wallet of input.account) {
     const matches = drafts.filter(draft => draft.account === null && identity(draft.ecosystem, draft.address) === identity(wallet.ecosystem, wallet.address));
     const target = matches.find(draft => draft.active) ?? matches[0];
-    if (target) { target.account = wallet; target.label = wallet.label; continue; }
-    accountOnly.push({ key: `account:${wallet.id}`, ecosystem: wallet.ecosystem, address: wallet.address, label: wallet.label, providerName: wallet.providerName,
+    if (target) { drafts.splice(drafts.indexOf(target), 1); accountEntries.push({ ...target, key: `account:${wallet.id}`, account: wallet, label: wallet.label }); continue; }
+    accountEntries.push({ key: `account:${wallet.id}`, ecosystem: wallet.ecosystem, address: wallet.address, label: wallet.label, providerName: wallet.providerName,
       providerKey: wallet.provider, network: null, saved: null, active: null, account: wallet });
   }
-  return [...accountOnly, ...drafts].map(draft => ({ ...draft,
+  return [...accountEntries, ...drafts].map(draft => ({ ...draft,
     designation: draft.account ? isPrivyWallet(draft.account) ? 'privy' : isLegacyWallet(draft.account) ? 'legacy' : 'external'
       : draft.active && input.isFloFiProvider?.(draft.active) ? 'privy' : 'external' }));
 }

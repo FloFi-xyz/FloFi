@@ -38,7 +38,7 @@ export function HeaderSettings({ onDisconnect, disconnectDisabled, onSupport }: 
    */
   const signedIn = Boolean(account?.availability.accounts && account.account);
   async function disconnect() { if (signedIn && disconnectDisabled) await disconnectToLogin(privy); else onDisconnect(); }
-  const languageDescriptionId = useId(), themeDescriptionId = useId();
+  const languageDescriptionId = useId(), themeDescriptionId = useId(), disconnectDescriptionId = useId();
   useEffect(() => {
     let saved: 'light' | 'dark' = 'light';
     try { if (localStorage.getItem('flofi.theme') === 'dark') saved = 'dark'; } catch { /* Preferences are optional when storage is unavailable. */ }
@@ -118,7 +118,9 @@ export function HeaderSettings({ onDisconnect, disconnectDisabled, onSupport }: 
       <button type="button" className="header-settings-action" onClick={() => { onSupport?.(); setOpen(false); toggle.current?.focus(); }}>
         <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="4"/><path d="m5.6 5.6 3.6 3.6m5.6 5.6 3.6 3.6M5.6 18.4l3.6-3.6m5.6-5.6 3.6-3.6"/></svg><span>{tr("Support")}</span>
       </button>
-      <button type="button" className="header-settings-action header-disconnect" disabled={disconnectDisabled && !signedIn}
+      <span id={disconnectDescriptionId} className="sr-only">{tr(signedIn ? 'End your FloFi session on this device and disconnect your wallet. Your account, wallets and history are kept.'
+        : 'Clear this app’s wallet connection. Wallet permissions are managed in your wallet.')}</span>
+      <button type="button" className="header-settings-action header-disconnect" disabled={disconnectDisabled && !signedIn} aria-describedby={disconnectDescriptionId}
         title={tr(signedIn ? 'End your FloFi session on this device and disconnect your wallet. Your account, wallets and history are kept.'
           : 'Clear this app’s wallet connection. Wallet permissions are managed in your wallet.')}
         onClick={() => { void disconnect(); setOpen(false); toggle.current?.focus(); }}>

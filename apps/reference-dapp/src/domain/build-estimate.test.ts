@@ -42,7 +42,7 @@ describe('cancellable Build estimate requests', () => {
   });
   it('reports failures without fabricating an estimate', async () => {
     const publish = vi.fn(); requestBuildEstimate(() => Promise.reject(Error('offline')), publish);
-    await vi.advanceTimersByTimeAsync(350); expect(publish).toHaveBeenCalledExactlyOnceWith({ ok: false, code: 'ESTIMATE_UNAVAILABLE' });
+    await vi.advanceTimersByTimeAsync(350); expect(publish).toHaveBeenCalledExactlyOnceWith({ ok: false, code: 'ESTIMATE_REQUEST_FAILED' });
   });
 });
 
@@ -52,6 +52,7 @@ describe('BUILD-FLOFI-WALLET-UX-EXECUTION-FIX-001 quote failures are explained (
     expect(buildEstimateFailureMessage('ESTIMATE_DEPENDENCY_UNRESOLVED')).toMatch(/earlier step/);
     expect(buildEstimateFailureMessage('TEST_NETWORK_NOT_AVAILABLE')).toMatch(/Choose a mainnet/);
     expect(buildEstimateFailureMessage('STALE_CHAIN_HEAD')).toMatch(/did not answer consistently/);
+    expect(buildEstimateFailureMessage('ESTIMATE_REQUEST_FAILED')).toMatch(/^FloFi could not reach its quote service/);
     expect(buildEstimateFailureMessage('RPC_RESPONSE_INVALID')).toMatch(/did not answer consistently/);
     expect(buildEstimateFailureMessage('ESTIMATE_RESPONSE_INVALID')).toBe('The quote did not match this swap. Try again.');
     for (const code of ['ESTIMATE_UNSUPPORTED', 'POOL_UNUSABLE', 'ESTIMATE_RESPONSE_INVALID', 'CLOUD_RUNTIME_NOT_CONFIGURED']) expect(buildEstimateFailureReference(code)).toBeNull();

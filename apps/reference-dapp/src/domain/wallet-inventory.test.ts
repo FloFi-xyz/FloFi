@@ -4,7 +4,8 @@ import type { AccountWallet } from '../accounts/account-model';
 import type { SavedWallet } from './credentials';
 import { walletInventory, walletStatus, type ActiveWallet } from './wallet-inventory';
 
-const EVM = '0x47d147fa3ba77fc74cba403961c80c4b2565f714', SOL = '6Crvh7FB483ZBHrYMwA1Q5oxcUu3EZXJxrTq4YasMei', MM = '0x4b212af0a923256961487ae72499ca79f920b3ce';
+// Synthetic addresses only.
+const EVM = '0x' + '4'.repeat(40), SOL = '7EcDhSYGxXyscszYEp35KHN8vvw3svAuLKTzXwCFLtV', MM = '0x' + '5'.repeat(40);
 const account = (ecosystem: 'evm' | 'solana', address: string, origin: AccountWallet['origin'], provider = 'privy', label = `${ecosystem} wallet`): AccountWallet => ({
   id: `${ecosystem}:${address}`, ecosystem, address, origin, provider, providerName: provider === 'privy' ? 'FloFi wallet' : 'MetaMask',
   export: origin === 'external' ? 'none' : 'private-key', label, addedAt: '2026-11-01T00:00:00.000Z' });
@@ -15,7 +16,7 @@ const active = (ecosystem: 'evm' | 'solana', address: string, providerKey: strin
 describe('BUILD-FLOFI-WALLET-UX-EXECUTION-FIX-001 one Wallets section (P1-03, T09)', () => {
   it('lists Privy EVM and Solana wallets and a connected Phantom once each, with their designation and an honest status', () => {
     const list = walletInventory({ account: [account('evm', EVM, 'generated'), account('solana', SOL, 'generated')], saved: [],
-      active: [active('solana', '5vn2NJ' + '1'.repeat(36), 'Phantom')] });
+      active: [active('solana', '9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM', 'Phantom')] });
     expect(list.map(entry => [entry.ecosystem, entry.designation, walletStatus(entry)])).toEqual([
       ['evm', 'privy', 'Not connected'], ['solana', 'privy', 'Not connected'], ['solana', 'external', 'Connected · not saved']]);
   });
@@ -43,5 +44,11 @@ describe('BUILD-FLOFI-WALLET-UX-EXECUTION-FIX-001 one Wallets section (P1-03, T0
   it('a connected FloFi wallet without an account record yet is still designated as Privy-managed', () => {
     const [entry] = walletInventory({ account: [], saved: [], active: [active('evm', EVM, 'xyz.flofi.wallet:' + EVM)], isFloFiProvider: wallet => wallet.providerKey.startsWith('xyz.flofi.wallet') });
     expect(entry).toMatchObject({ designation: 'privy', label: 'EVM Default' });
+  });
+  it('an account wallet keeps one stable key and place whether or not it is connected (no remount, no jump)', () => {
+    const wallets = [account('evm', EVM, 'generated'), account('solana', SOL, 'generated')];
+    const before = walletInventory({ account: wallets, saved: [], active: [] }).map(entry => entry.key);
+    const after = walletInventory({ account: wallets, saved: [], active: [active('evm', EVM, 'xyz.flofi.wallet:' + EVM)] }).map(entry => entry.key);
+    expect(after).toEqual(before);
   });
 });

@@ -54,7 +54,8 @@ export function requestBuildEstimate(load: (signal: AbortSignal) => Promise<Buil
   const timer = setTimeout(() => {
     timeout = setTimeout(() => { if (!active) return; active = false; controller.abort(); publish({ ok: false, code: 'ESTIMATE_TIMEOUT' }); }, timeoutMs);
     load(controller.signal).then(result => { if (active) { active = false; clearTimeout(timeout); publish(result); } }, () => {
-      if (active) { active = false; clearTimeout(timeout); publish({ ok: false, code: 'ESTIMATE_UNAVAILABLE' }); }
+      // BUILD-FLOFI-WALLET-UX-EXECUTION-FIX-001: FloFi's own request failed (offline, an HTML error page): not the provider's answer.
+      if (active) { active = false; clearTimeout(timeout); publish({ ok: false, code: 'ESTIMATE_REQUEST_FAILED' }); }
     });
   }, debounceMs);
   return () => { active = false; clearTimeout(timer); clearTimeout(timeout); controller.abort(); };
@@ -77,6 +78,7 @@ export function buildEstimateFailureMessage(code: string): string {
   if (/RESPONSE_|MINIMUM_INVALID|MISMATCH/.test(code)) return 'The quote did not match this swap. Try again.';
   if (/^JUPITER_.*(INVALID|UNSUPPORTED|UNEXPECTED)$/.test(code)) return 'The provider response could not be verified. Try another route or try again later.';
   // BUILD-FLOFI-WALLET-UX-EXECUTION-FIX-001 (P0-07): every remaining answer says what happened; none is an unexplained "unavailable".
+  if (code === 'ESTIMATE_REQUEST_FAILED') return 'FloFi could not reach its quote service. Check your connection and try again.';
   if (/DEPENDENCY_UNRESOLVED/.test(code)) return 'This step uses the output of an earlier step, so its quote is calculated when you simulate the workflow.';
   if (/TEST_NETWORK_NOT_AVAILABLE/.test(code)) return 'Test networks are not available in FloFi. Choose a mainnet for this swap.';
   if (/ESTIMATE_UNSUPPORTED|ESTIMATE_INVALID/.test(code)) return 'A live estimate is not available for this action on this network. Simulate to get the provider quote.';
