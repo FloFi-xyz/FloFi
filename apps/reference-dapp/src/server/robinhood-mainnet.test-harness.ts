@@ -9,7 +9,7 @@ import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { catalogAsset, parseRobinhoodStockTokenRegistry, robinhoodNetworkCatalog, uniswapV3PoolAddress, UNISWAP_V3_ETHEREUM, UNISWAP_V3_ARBITRUM, UNISWAP_V3_BASE, UNISWAP_V3_ROBINHOOD,
   type AssetCatalog, type CanonicalAsset } from '@defi-workflow-engine/action-registry';
-import { decodeNativeSwap, fromHex } from '@defi-workflow-engine/reference-compiler';
+import { decodeNativeSwap, erc7710, fromHex } from '@defi-workflow-engine/reference-compiler';
 import type { CatalogSwapRuntime, Rpc } from './public-testnet-service.ts';
 
 export const OFFICIAL_REGISTRY_TEXT = readFileSync(new URL('../../../../packages/action-registry/test/fixtures/robinhood-rhj-assets-2026-10-11.json', import.meta.url), 'utf8');
@@ -31,8 +31,45 @@ export const SCALED_TRANSFER_TOPIC = '0x37e7f0db430edc9dd31bc66f25f8449353aa0818
 export const SWAP_TOPIC = '0xc42079f94a6350d7e6235f29174924f928cc2ac818eb64fed8004e115fbcca67';
 /** BUILD-FLOFI-BRIDGE-LIVE-FIX-003: WETH9 `Deposit` / `Withdrawal` (Base, Ethereum); Arbitrum-style WETH logs a Transfer mint/burn instead. */
 export const DEPOSIT_TOPIC = '0xe1fffcc4923d04b559f4d29a8bfc6cda04eb5b0d3c460751c2402c5c5cc9109c';
+export const APPROVAL_TOPIC = '0x8c5be1e5ebec7d5bd14f71427d1e84f3dd0314c0f7b2291e5b200ac8c7c3b925';
 export const WITHDRAWAL_TOPIC = '0x7fcf532c15f0a6db0bd6d0e038bea71d30d808c7d98cb3bf7268a95bf5081b65';
 const ZERO = '0x' + '0'.repeat(40);
+/**
+ * BUILD-FLOFI-WALLET-UX-EXECUTION-FIX-001: the MetaMask Delegation Framework v1.3.0 contracts a relayed redemption touches, and the log shapes of
+ * the real MetaMask relay recorded in testdata/metamask-delegated-depth1-approval.base-sepolia.json (LimitedCalls `IncreasedCount`, the call's
+ * own logs, the manager's `RedeemedDelegation(rootDelegator, redeemer, delegation)`). Synthetic chain state; no real relay is reached.
+ */
+export const MOCK_DELEGATION_MANAGER = '0xdb9b1e94b5b69df7e401ddbede43491141047db3', MOCK_DELEGATOR_IMPL = '0x63c0c19a282a1b52b07dd5a65b58948a07dae32b';
+const LIMITED_CALLS = '0x04658b29f6b82ed55274221a06fc97d318e25416', INCREASED_COUNT_TOPIC = '0x449da07f2c06c9d1a6b19d2454ffe749e8cf991d22f686e076a1a4844c5ff370';
+/** The recorded relay's second caveat enforcer (exact target ‖ value ‖ calldata terms) and its open delegate. */
+const EXACT_EXECUTION = '0x146713078d39ecc1f5338309c28405ccf85abfbb', ANY_DELEGATE = '0x0000000000000000000000000000000000000a11';
+const DELEGATION_ABI: erc7710.AbiType = { tuple: ['address', 'address', 'bytes32', { array: { tuple: ['address', 'bytes', 'bytes'] } }, 'uint256', 'bytes'] };
+const REDEEMED_TOPIC = '0x40dadaa36c6c2e3d7317e24757451ffb2d603d875f0ad5e92c5dd156573b1873';
+/** `redeemDelegations(bytes[] contexts, bytes32[] modes, bytes[] executionCallDatas)` of one single-call (default mode) execution of `target.data`. */
+export function encodeSingleRedemption(context: string, target: string, data: string): string {
+  const w = (n: bigint) => n.toString(16).padStart(64, '0');
+  const pad = (hex: string) => hex + '0'.repeat((64 - (hex.length % 64)) % 64);
+  const bytesArray = (hex: string) => w(1n) + w(32n) + w(BigInt(hex.length / 2)) + pad(hex);
+  const contexts = bytesArray(context.slice(2)), modeOffset = 96 + contexts.length / 2;
+  return '0xcef6d209' + w(96n) + w(BigInt(modeOffset)) + w(BigInt(modeOffset + 64)) + contexts + w(1n) + w(0n) + bytesArray(target.slice(2).toLowerCase() + w(0n) + data.slice(2));
+}
+export type MockRelay = { readonly relayer: string; /** Logs of another contract the relayed transaction also emits (a shape FloFi must refuse). */ readonly extraLogs?: readonly Record<string, unknown>[];
+  /** false: the owner's delegation has no LimitedCalls(1) caveat, so the relay could redeem it again (a shape FloFi must refuse). */ readonly singleUse?: boolean };
+/**
+ * The owner's open root delegation as MetaMask's relay redeems it (testdata/metamask-delegated-depth1-approval.base-sepolia.json): any redeemer,
+ * LimitedCalls(1) and an exact-execution caveat for `target.data`; returns the `RedeemedDelegation` data and the delegation hash.
+ */
+function relayedDelegation(owner: string, target: string, data: string, salt: bigint, singleUse: boolean) {
+  const hex32 = (n: bigint) => n.toString(16).padStart(64, '0');
+  const caveats = [...singleUse ? [{ enforcer: LIMITED_CALLS, terms: '0x' + hex32(1n), args: '0x' }] : [],
+    { enforcer: EXACT_EXECUTION, terms: '0x' + target.slice(2).toLowerCase() + hex32(0n) + data.slice(2), args: '0x' }];
+  const delegation = { delegate: ANY_DELEGATE, delegator: owner, authority: erc7710.ROOT_AUTHORITY, caveats, salt };
+  const encoded = erc7710.hexOf(erc7710.abiEncode([DELEGATION_ABI], [[delegation.delegate, owner, delegation.authority,
+    caveats.map(c => [c.enforcer, c.terms, c.args]), salt, '0x' + '11'.repeat(65)]]));
+  return { data: encoded, hash: erc7710.delegationHash(delegation) };
+}
+/** Tokens whose `transferFrom` also logs the spent allowance, `Approval(owner, spender, remaining)` (OpenZeppelin ERC20, e.g. Arbitrum aeWETH, ARB). */
+export type MockApply = { readonly extraLogs?: readonly Record<string, unknown>[] };
 
 export type MockPool = { readonly fee: number; readonly liquidity: bigint;
   /** Output units per 1e18 input units, for each direction keyed by input address. */ readonly rate: Readonly<Record<string, bigint>> };
@@ -46,6 +83,7 @@ export type MockTx = { from: string; to: string; data: string; value: string; ga
 export function createRobinhoodMockChain(catalog: AssetCatalog, options: { readonly now: () => number;
   /** BUILD-BASE-001: the catalog network this chain plays (default Robinhood Chain): its Uniswap deployment, pinned tokens and OP Stack L1 fee. */
   readonly network?: 'robinhood' | 'base' }) {
+  const options_ = options;
   const base = options.network === 'base', eth = catalog.chain === 'eip155:1', arb = catalog.chain === 'eip155:42161';
   const UNI = { ...UNISWAP_V3_ROBINHOOD, ...base ? { factory: UNISWAP_V3_BASE.factory, router: UNISWAP_V3_BASE.router, quoter: UNISWAP_V3_BASE.quoter,
     positionManager: UNISWAP_V3_BASE.positionManager, weth: UNISWAP_V3_BASE.weth, poolInitCodeHash: UNISWAP_V3_BASE.poolInitCodeHash } : arb ? UNISWAP_V3_ARBITRUM : eth ? UNISWAP_V3_ETHEREUM : {} };
@@ -57,6 +95,7 @@ export function createRobinhoodMockChain(catalog: AssetCatalog, options: { reado
     code: new Map<string, string>(), receipts: new Map<string, Record<string, unknown>>(), transactions: new Map<string, Record<string, unknown>>(),
     gasPrice: 10_000_000n, gasUsed: 120_000n, blockTime: new Map<number, number>(), codeOverride: new Map<string, string>(),
     /** BUILD-BASE-001: a token whose `decimals()` differs from its catalog entry (a wrong list record). */ decimalsOverride: new Map<string, number>(),
+    /** BUILD-FLOFI-WALLET-UX-EXECUTION-FIX-001: tokens whose `transferFrom` logs the remaining allowance (see MockApply). */ transferFromApproval: new Set<string>(),
     /** Balances, native balances and nonces as they were at the end of each past block (historical reads). */
     snapshots: new Map<number, { balances: Map<string, bigint>; native: Map<string, bigint>; nonces: Map<string, number> }>(),
   };
@@ -163,7 +202,19 @@ export function createRobinhoodMockChain(catalog: AssetCatalog, options: { reado
     if (method === 'eth_call') { const request = params[0] as { to: string; data: string }; return call(request.to, request.data, at(params[1])); }
     if (method === 'eth_getTransactionReceipt') return state.receipts.get(String(params[0])) ?? null;
     if (method === 'eth_getTransactionByHash') return state.transactions.get(String(params[0])) ?? null;
-    if (method === 'eth_getLogs') return [];
+    if (method === 'eth_getLogs') {
+      // Exact filter semantics over the recorded receipts: address, positional topics, inclusive block range.
+      const filter = params[0] as { address?: unknown; topics?: unknown[]; fromBlock?: string; toBlock?: string; blockHash?: unknown };
+      // Only the filter shapes FloFi sends; anything else fails loudly instead of matching nothing.
+      if (filter.blockHash !== undefined || filter.address !== undefined && typeof filter.address !== 'string' ||
+          (filter.topics ?? []).some(topic => topic !== null && typeof topic !== 'string')) throw new Error('MOCK_GETLOGS_FILTER_UNSUPPORTED');
+      const from = filter.fromBlock ? Number(BigInt(filter.fromBlock)) : block, to = !filter.toBlock || filter.toBlock === 'latest' ? block : Number(BigInt(filter.toBlock));
+      return [...state.receipts.values()].filter(r => Number(BigInt(r.blockNumber as string)) >= from && Number(BigInt(r.blockNumber as string)) <= to)
+        .flatMap(r => (r.logs as Record<string, unknown>[]).map((log, logIndex): Record<string, unknown> => ({ ...log, transactionHash: r.transactionHash, blockNumber: r.blockNumber,
+          blockHash: r.blockHash, logIndex: '0x' + logIndex.toString(16), removed: false })))
+        .filter(log => (!filter.address || String(log.address).toLowerCase() === String(filter.address).toLowerCase()) &&
+          (filter.topics ?? []).every((topic, index) => topic === null || (log.topics as string[])[index] === topic));
+    }
     throw new Error('UNEXPECTED_METHOD ' + method);
   };
   /** HOTFIX-WORKFLOW-CONCURRENCY-001: transactions the wallet broadcast that no block includes yet (the account's 'pending' nonce counts them). */
@@ -171,7 +222,27 @@ export function createRobinhoodMockChain(catalog: AssetCatalog, options: { reado
   const innerData = (tx: MockTx) => tx.data.startsWith('0x5ae401dc') ? '0x' + tx.data.slice(10 + 5 * 64, 10 + 5 * 64 + Number(BigInt('0x' + tx.data.slice(10 + 4 * 64, 10 + 5 * 64))) * 2) : tx.data;
   const hashOf = (from: string, nonce: number, data: string) => '0x' + createHash('sha256').update(`rh-tx-${from}-${nonce}-${data}`).digest('hex');
   /** Plays the owner's wallet: executes one owner transaction against the mock state in a new block and returns its hash. */
-  function apply(tx: MockTx): string { snapshot(); state.head += 1; return include(tx); }
+  function apply(tx: MockTx, options: MockApply = {}): string { snapshot(); state.head += 1; return include(tx, undefined, options.extraLogs); }
+  /**
+   * BUILD-FLOFI-WALLET-UX-EXECUTION-FIX-001: plays a MetaMask relayer. The owner's account must carry the DeleGator designator; the relayer
+   * sends a type-2 `redeemDelegations` of exactly the owner's call to the Delegation Manager, which executes it from the owner's account. The
+   * relayer pays the fee and uses its own nonce; the owner's nonce and native balance are untouched.
+   */
+  function relay(tx: MockTx, options: MockRelay & { readonly reverted?: boolean }): string {
+    if (!state.code.has(MOCK_DELEGATION_MANAGER)) state.code.set(MOCK_DELEGATION_MANAGER, '0x600b600b');
+    snapshot(); state.head += 1;
+    if (!options.reverted) return include(tx, options);
+    // A redemption that reverted: the relayer's nonce and fee are spent, nothing else changes and nothing is logged.
+    const sender = options.relayer.toLowerCase(), nonce = state.nonces.get(sender) ?? 0, outer = encodeSingleRedemption('0x' + '00'.repeat(64), tx.to, tx.data);
+    const hash = hashOf(sender, nonce, outer), blockNumber = '0x' + state.head.toString(16);
+    state.nonces.set(sender, nonce + 1); state.native.set(sender, (state.native.get(sender) ?? 0n) - state.gasUsed * state.gasPrice);
+    state.blockTime.set(state.head, Math.floor(options_.now() / 1000));
+    state.transactions.set(hash, { hash, from: sender, to: MOCK_DELEGATION_MANAGER, input: outer, value: '0x0', chainId: state.chainHex, type: '0x2', nonce: '0x' + nonce.toString(16),
+      blockHash: blockHash(state.head), blockNumber, gas: '0x' + (state.gasUsed * 3n).toString(16), maxFeePerGas: '0x' + (state.gasPrice * 3n).toString(16) });
+    state.receipts.set(hash, { transactionHash: hash, status: '0x0', blockNumber, blockHash: blockHash(state.head), from: sender, to: MOCK_DELEGATION_MANAGER,
+      gasUsed: '0x' + state.gasUsed.toString(16), effectiveGasPrice: '0x' + state.gasPrice.toString(16), ...base ? { l1Fee: '0x' + state.l1Fee.toString(16) } : { gasUsedForL1: '0x0' }, logs: [] });
+    return hash;
+  }
   /** Plays the owner's wallet broadcasting without inclusion: the hash is known, the transaction waits in the mempool. */
   function queue(tx: MockTx): string {
     const from = tx.from.toLowerCase();
@@ -180,11 +251,17 @@ export function createRobinhoodMockChain(catalog: AssetCatalog, options: { reado
     return hashOf(from, nonce, innerData(tx));
   }
   /** Includes every mempool transaction, in broadcast (nonce) order, in ONE new block. */
-  function mineQueued(): string[] { snapshot(); state.head += 1; return mempool.splice(0).map(include); }
-  function include(tx: MockTx): string {
+  function mineQueued(): string[] { snapshot(); state.head += 1; return mempool.splice(0).map(tx => include(tx)); }
+  function include(tx: MockTx, relayed?: MockRelay, extraLogs: readonly Record<string, unknown>[] = []): string {
     const from = tx.from.toLowerCase(), to = tx.to.toLowerCase(), data = innerData(tx), selector = data.slice(0, 10);
-    const nonce = state.nonces.get(from) ?? 0, hash = hashOf(from, nonce, data);
+    const relayer = relayed?.relayer.toLowerCase(), sender = relayer ?? from;
+    if (relayed && (state.codeOverride.get(from) ?? '0x') !== '0xef0100' + MOCK_DELEGATOR_IMPL.slice(2)) throw new Error('execution reverted: not a DeleGator account');
+    const outer = relayed ? encodeSingleRedemption('0x' + '00'.repeat(64), to, tx.data) : tx.data;
+    const nonce = state.nonces.get(sender) ?? 0, hash = relayed ? hashOf(sender, nonce, outer) : hashOf(from, nonce, data);
     const logs: Record<string, unknown>[] = [];
+    const delegation = relayed ? relayedDelegation(from, to, tx.data, BigInt(nonce) + 1n, relayed.singleUse !== false) : null;
+    if (relayed && relayed.singleUse !== false) logs.push({ address: LIMITED_CALLS, topics: [INCREASED_COUNT_TOPIC, addressWord(MOCK_DELEGATION_MANAGER), addressWord(sender), delegation!.hash],
+      data: word(1n) + word(1n).slice(2) });
     const move = (token: string, a: string, b: string, amount: bigint) => {
       const before = state.balances.get(key(token, a)) ?? 0n;
       if (before < amount) throw new Error('execution reverted: balance');
@@ -234,6 +311,7 @@ export function createRobinhoodMockChain(catalog: AssetCatalog, options: { reado
         const allowance = state.allowances.get(allowanceKey(tokenIn, from, UNI.router)) ?? 0n;
         if (allowance < native.amountIn) throw new Error('execution reverted: STF');
         state.allowances.set(allowanceKey(tokenIn, from, UNI.router), allowance - native.amountIn);
+        if (state.transferFromApproval.has(tokenIn.toLowerCase())) logs.push({ address: tokenIn, topics: [APPROVAL_TOPIC, addressWord(from), addressWord(UNI.router)], data: word(allowance - native.amountIn) });
         move(tokenIn, from, pool, native.amountIn);
         state.balances.set(key(UNI.weth, pool), (state.balances.get(key(UNI.weth, pool)) ?? 0n) + out);
         move(UNI.weth, pool, UNI.router, out); swapLog(UNI.router);
@@ -241,7 +319,11 @@ export function createRobinhoodMockChain(catalog: AssetCatalog, options: { reado
         const held = state.balances.get(key(UNI.weth, UNI.router)) ?? 0n;
         state.balances.set(key(UNI.weth, UNI.router), 0n); unwrapLog(UNI.router, held); credit(native.recipient, held);
       }
-    } else if (selector === '0x095ea7b3') state.allowances.set(allowanceKey(to, from, readAddress(data, 0)), readWord(data, 1));
+    } else if (selector === '0x095ea7b3') {
+      state.allowances.set(allowanceKey(to, from, readAddress(data, 0)), readWord(data, 1));
+      // ERC-20 `Approval(owner, spender, value)`, as every listed token emits it.
+      logs.push({ address: to, topics: [APPROVAL_TOPIC, addressWord(from), addressWord(readAddress(data, 0))], data: word(readWord(data, 1)) });
+    }
     else if (selector === '0xa9059cbb') move(to, from, readAddress(data, 0), readWord(data, 1));
     else if (selector === '0x04e45aaf' && to === UNI.router) {
       const tokenIn = readAddress(data, 0), tokenOut = readAddress(data, 1), fee = Number(readWord(data, 2)), recipient = readAddress(data, 3);
@@ -251,6 +333,7 @@ export function createRobinhoodMockChain(catalog: AssetCatalog, options: { reado
       if (allowance < amountIn) throw new Error('execution reverted: STF');
       state.allowances.set(allowanceKey(tokenIn, from, UNI.router), allowance - amountIn);
       const pool = uniswapV3PoolAddress(UNI.factory, UNI.poolInitCodeHash, tokenIn, tokenOut, fee);
+      if (state.transferFromApproval.has(tokenIn.toLowerCase())) logs.push({ address: tokenIn, topics: [APPROVAL_TOPIC, addressWord(from), addressWord(UNI.router)], data: word(allowance - amountIn) });
       move(tokenIn, from, pool, amountIn);
       state.balances.set(key(tokenOut, pool), (state.balances.get(key(tokenOut, pool)) ?? 0n) + out);
       move(tokenOut, pool, recipient, out);
@@ -262,20 +345,23 @@ export function createRobinhoodMockChain(catalog: AssetCatalog, options: { reado
       state.native.set(from, (state.native.get(from) ?? 0n) - value);
       state.native.set(to, (state.native.get(to) ?? 0n) + value);
     } else throw new Error('UNSUPPORTED_MOCK_TRANSACTION');
+    if (relayed) logs.push({ address: MOCK_DELEGATION_MANAGER, topics: [REDEEMED_TOPIC, addressWord(from), addressWord(sender)], data: delegation!.data }, ...relayed.extraLogs ?? []);
+    logs.push(...extraLogs);
     const fee = state.gasUsed * state.gasPrice + state.l1Fee;
-    state.native.set(from, (state.native.get(from) ?? 0n) - fee);
-    state.nonces.set(from, nonce + 1);
-    const blockNumber = '0x' + state.head.toString(16);
+    state.native.set(sender, (state.native.get(sender) ?? 0n) - fee);
+    state.nonces.set(sender, nonce + 1);
+    const blockNumber = '0x' + state.head.toString(16), outerTo = relayed ? MOCK_DELEGATION_MANAGER : to;
     state.blockTime.set(state.head, Math.floor(options.now() / 1000));
-    state.transactions.set(hash, { hash, from, to, input: tx.data, value: tx.value, chainId: state.chainHex, type: '0x2', nonce: '0x' + nonce.toString(16),
-      blockHash: blockHash(state.head), blockNumber, gas: tx.gas ?? '0x' + (state.gasUsed * 2n).toString(16), maxFeePerGas: tx.maxFeePerGas ?? '0x' + (state.gasPrice * 2n).toString(16) });
-    state.receipts.set(hash, { transactionHash: hash, status: '0x1', blockNumber, blockHash: blockHash(state.head), from, to, gasUsed: '0x' + state.gasUsed.toString(16),
+    state.transactions.set(hash, { hash, from: sender, to: outerTo, input: outer, value: relayed ? '0x0' : tx.value, chainId: state.chainHex, type: '0x2', nonce: '0x' + nonce.toString(16),
+      blockHash: blockHash(state.head), blockNumber, gas: relayed ? '0x' + (state.gasUsed * 3n).toString(16) : tx.gas ?? '0x' + (state.gasUsed * 2n).toString(16),
+      maxFeePerGas: relayed ? '0x' + (state.gasPrice * 3n).toString(16) : tx.maxFeePerGas ?? '0x' + (state.gasPrice * 2n).toString(16) });
+    state.receipts.set(hash, { transactionHash: hash, status: '0x1', blockNumber, blockHash: blockHash(state.head), from: sender, to: outerTo, gasUsed: '0x' + state.gasUsed.toString(16),
       effectiveGasPrice: '0x' + state.gasPrice.toString(16), ...base ? { l1Fee: '0x' + state.l1Fee.toString(16) } : { gasUsedForL1: '0x0' }, logs });
     return hash;
   }
   /** Advances the head by `n` empty blocks (confirmations), keeping historical reads exact. */
   const mine = (n = 1) => { for (let i = 0; i < n; i++) { snapshot(); state.head += 1; state.blockTime.set(state.head, Math.floor(options.now() / 1000)); } };
-  return { rpc, state, addPool, apply, queue, mineQueued, mine, fund: (token: string, owner: string, amount: bigint) => state.balances.set(key(token, owner), amount),
+  return { rpc, state, addPool, apply, relay, queue, mineQueued, mine, fund: (token: string, owner: string, amount: bigint) => state.balances.set(key(token, owner), amount),
     fundNative: (owner: string, amount: bigint) => state.native.set(owner.toLowerCase(), amount), balance: (token: string, owner: string) => state.balances.get(key(token, owner)) ?? 0n };
 }
 export type RobinhoodMockChain = ReturnType<typeof createRobinhoodMockChain>;

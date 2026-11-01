@@ -14,7 +14,7 @@ import { closeSync, existsSync, fsyncSync, mkdirSync, openSync, readFileSync, re
 import { isAbsolute, join } from 'node:path';
 import { baseAssetRegistry, catalogAsset, referenceRegistry, resolveWorkflowCapability, uniswapV3PoolAddress, type AssetCatalog, type CanonicalAsset } from '@defi-workflow-engine/action-registry';
 import { createBaseSepoliaReviewContext, createReviewContext, reviewContextForChain, validateAuthoringWorkflow } from '@defi-workflow-engine/reference-linter';
-import { encodeNativeSwap, encodeSwap, encodeWethDeposit, encodeWethWithdraw, ownerAccountCode, toHex } from '@defi-workflow-engine/reference-compiler';
+import { encodeNativeSwap, encodeSwap, encodeWethDeposit, encodeWethWithdraw, erc7710, ownerAccountCode, toHex } from '@defi-workflow-engine/reference-compiler';
 import { catalogSwapKind, hashArtifactBytes, isCatalogSwapNode, isReferencePairSwap, readCatalogSwapNode, type CatalogAssetRef, type CatalogSwapFields, type EvidenceBundle, type SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
 import { validateArtifact } from '@defi-workflow-engine/workflow-contracts/schemas';
 import { createFileExecutionStorage, discoverTransferByNonce, utf8, type ExecutionStorage } from '@defi-workflow-engine/reference-executor';
@@ -97,8 +97,41 @@ const runIdPattern = (prefix: SwapRunPrefix) => new RegExp(`^${prefix}-[0-9a-f]{
 const prefixFor = (profile: SwapProfile): SwapRunPrefix => profile.kind === 'CATALOG' ? profile.runPrefix : 'pub';
 // MetaMask Delegation Framework v1.3.0 on Base Sepolia. This is a readback format only;
 // Gryloo still prepares one direct exact-call artifact and never constructs a delegation.
-const DELEGATION_MANAGER = '0xdb9b1e94b5b69df7e401ddbede43491141047db3';
-const DELEGATOR_IMPL = '0x63c0c19a282a1b52b07dd5a65b58948a07dae32b';
+const DELEGATION_MANAGER = erc7710.DELEGATION_FRAMEWORK_V1_3.delegationManager;
+const DELEGATOR_IMPL = erc7710.DELEGATION_FRAMEWORK_V1_3.eip7702StatelessDeleGator;
+/**
+ * BUILD-FLOFI-WALLET-UX-EXECUTION-FIX-001: contracts of the reviewed Delegation Framework v1.3.0 that may log in a relayed (Delegation Manager)
+ * redemption besides the swap's own tokens and pool: the manager's `RedeemedDelegation` and its caveat enforcers' bookkeeping (the real
+ * MetaMask redemption recorded in testdata logs the LimitedCalls enforcer's `IncreasedCount`). None of them moves funds; any fund movement
+ * still has to be one of the swap's own, exactly accounted logs.
+ */
+const RELAY_FRAMEWORK_LOGGERS: ReadonlySet<string> = new Set([DELEGATION_MANAGER, ...Object.values(erc7710.DELEGATION_FRAMEWORK_V1_3.enforcers)]);
+/**
+ * BUILD-FLOFI-WALLET-UX-EXECUTION-FIX-001: a relayed redemption is accepted only when its delegation is single use, as in the real MetaMask
+ * relay (testdata/metamask-delegated-depth1-approval.base-sepolia.json): the owner's root delegation carries the framework's LimitedCalls caveat
+ * with a limit of one, and LimitedCalls logged `IncreasedCount(sender, redeemer, delegationHash, limit, callCount)` reaching that one call for
+ * exactly this delegation. The enforcer then refuses every later redemption: the relay cannot execute the reviewed call a second time.
+ */
+const LIMITED_CALLS = erc7710.DELEGATION_FRAMEWORK_V1_3.enforcers.limitedCalls;
+const INCREASED_COUNT_TOPIC = erc7710.keccakHex('IncreasedCount(address,address,bytes32,uint256,uint256)');
+const DELEGATION_ABI: erc7710.AbiType = { tuple: ['address', 'address', 'bytes32', { array: { tuple: ['address', 'bytes', 'bytes'] } }, 'uint256', 'bytes'] };
+export function singleUseRelayedDelegation(logs: readonly unknown[], owner: string, relayer: string): boolean {
+  try {
+    const records = logs.filter(isObject);
+    const [redeemed, ...more] = records.filter(log => address(log.address) === DELEGATION_MANAGER && Array.isArray(log.topics) && log.topics[0] === REDEEMED_TOPIC);
+    if (!redeemed || more.length) return false;
+    const [value] = erc7710.abiDecode([DELEGATION_ABI], erc7710.bytesOf(hex(redeemed.data)));
+    const [delegate, delegator, authority, caveats, salt] = value as [string, string, string, [string, string, string][], bigint, string];
+    if (address(delegator) !== owner || authority !== erc7710.ROOT_AUTHORITY ||
+        !caveats.some(([enforcer, terms]) => address(enforcer) === LIMITED_CALLS && terms === '0x' + word(1n))) return false;
+    const hash = erc7710.delegationHash({ delegate, delegator, authority, salt,
+      caveats: caveats.map(([enforcer, terms, args]) => ({ enforcer, terms, args })) });
+    const counted = records.filter(log => address(log.address) === LIMITED_CALLS);
+    return counted.length === 1 && Array.isArray(counted[0]!.topics) && counted[0]!.topics.length === 4 && counted[0]!.topics[0] === INCREASED_COUNT_TOPIC &&
+      topicAddress(counted[0]!.topics[1]) === DELEGATION_MANAGER && topicAddress(counted[0]!.topics[2]) === relayer && counted[0]!.topics[3] === hash &&
+      hex(counted[0]!.data) === '0x' + word(1n) + word(1n);
+  } catch { return false; }
+}
 const REDEEM_SELECTOR = '0xcef6d209';
 const REDEEMED_TOPIC = '0x40dadaa36c6c2e3d7317e24757451ffb2d603d875f0ad5e92c5dd156573b1873';
 const APPROVAL_TOPIC = '0x8c5be1e5ebec7d5bd14f71427d1e84f3dd0314c0f7b2291e5b200ac8c7c3b925';
@@ -112,6 +145,14 @@ const SCALED_TRANSFER_TOPIC = '0x37e7f0db430edc9dd31bc66f25f8449353aa0818f503b90
  * from the router to the owner whose amounts match both transfers; a Stock Token's ERC-8056 companion log only mirrors a verified Transfer.
  * Returns the output amount received.
  */
+/**
+ * BUILD-FLOFI-WALLET-UX-EXECUTION-FIX-001: OpenZeppelin-style tokens (Arbitrum's aeWETH, ARB, …) also log `Approval(owner, router, remaining)`
+ * when the router's `transferFrom` spends the owner's allowance. That bookkeeping moves nothing; only that pair, on the input token, is accepted.
+ */
+function spendApprovals(tokenLogs: readonly Record<string, unknown>[], inputToken: string, owner: string, router: string): Record<string, unknown>[] {
+  return tokenLogs.filter(log => address(log.address) === inputToken && Array.isArray(log.topics) && log.topics.length === 3 && log.topics[0] === APPROVAL_TOPIC &&
+    topicAddress(log.topics[1]) === owner && topicAddress(log.topics[2]) === router);
+}
 function receiptSwap(logs: unknown[], quote: PublicQuote, owner: string, router: string, amountIn: bigint): bigint {
   const records = logs.filter(isObject), tokens = [quote.inputToken, quote.outputToken];
   const ofToken = records.filter(log => tokens.includes(address(log.address))), poolLogs = records.filter(log => address(log.address) === quote.pool);
@@ -120,7 +161,8 @@ function receiptSwap(logs: unknown[], quote: PublicQuote, owner: string, router:
     return Array.isArray(topics) && topics[0] === SCALED_TRANSFER_TOPIC && transfers.some(t => address(t.address) === address(log.address) &&
       (t.topics as unknown[])[1] === topics[1] && (t.topics as unknown[])[2] === topics[2] && hex(log.data).slice(0, 66) === hex(t.data).slice(0, 66)); };
   const input = transfers.find(log => address(log.address) === quote.inputToken), output = transfers.find(log => address(log.address) === quote.outputToken);
-  if (transfers.length !== 2 || !ofToken.every(log => transfers.includes(log) || companion(log)) || poolLogs.length !== 1 || !input || !output) fail('TRANSACTION_MISMATCH');
+  const spent = spendApprovals(ofToken, quote.inputToken, owner, router);
+  if (transfers.length !== 2 || spent.length > 1 || !ofToken.every(log => transfers.includes(log) || companion(log) || spent.includes(log)) || poolLogs.length !== 1 || !input || !output) fail('TRANSACTION_MISMATCH');
   const [pool] = poolLogs as [Record<string, unknown>];
   if (topicAddress((input.topics as unknown[])[1]) !== owner || topicAddress((input.topics as unknown[])[2]) !== quote.pool || quantity(input.data) !== amountIn ||
       topicAddress((output.topics as unknown[])[1]) !== quote.pool || topicAddress((output.topics as unknown[])[2]) !== owner ||
@@ -158,7 +200,9 @@ function receiptNative(logs: unknown[], quote: PublicQuote, owner: string, P: Ca
   const tokenTransfers = tokenLogs.filter(log => topics(log)[0] === TRANSFER_TOPIC);
   // A Stock Token's ERC-8056 companion log only mirrors a verified Transfer of the same token.
   const companion = (log: Record<string, unknown>) => topics(log)[0] === SCALED_TRANSFER_TOPIC && tokenTransfers.some(t => topics(t)[1] === topics(log)[1] && topics(t)[2] === topics(log)[2]);
-  if (tokenTransfers.length !== 1 || !tokenLogs.every(log => tokenTransfers.includes(log) || companion(log)) || poolLogs.length !== 1 ||
+  // A native-out swap spends the owner's ERC-20 through the router's allowance (its Approval bookkeeping is accepted, see spendApprovals).
+  const spent = quote.native === 'OUTPUT' ? spendApprovals(tokenLogs, token, owner, router) : [];
+  if (tokenTransfers.length !== 1 || spent.length > 1 || !tokenLogs.every(log => tokenTransfers.includes(log) || companion(log) || spent.includes(log)) || poolLogs.length !== 1 ||
       records.some(log => ![weth, token, quote.pool].includes(address(log.address)))) fail('TRANSACTION_MISMATCH');
   const [pool] = poolLogs as [Record<string, unknown>], [moved] = tokenTransfers as [Record<string, unknown>];
   const data = hex(pool.data), amount0 = data.length < 130 ? null : signed(BigInt('0x' + data.slice(2, 66))), amount1 = data.length < 130 ? null : signed(BigInt('0x' + data.slice(66, 130)));
@@ -383,7 +427,52 @@ export async function verifyOwnerSubmission(rpc: Rpc, attempt: { readonly txHash
     }
   }
   return { direct, delegated, delegationDepth: delegated ? delegationDepth! : 0, txFrom, txTo, txInput, status: status as 0 | 1, blockNumber,
-    gasUsed, effectiveGasPrice, l1Fee, nonce: quantity(tx.nonce) };
+    gasUsed, effectiveGasPrice, l1Fee, nonce: quantity(tx.nonce),
+    /** BUILD-FLOFI-WALLET-UX-EXECUTION-FIX-001: how the reviewed call reached the chain (relayed shapes carry no owner nonce or fee). */
+    submission: direct ? 'DIRECT' as const : newlyAuthorized ? 'DELEGATED_NEW_AUTHORIZATION' as const : 'DELEGATED_EXISTING' as const };
+}
+/** Bound of the relayed-submission scan: blocks per `eth_getLogs` request and requests per observation. */
+const RELAY_SCAN_BLOCKS = 5_000, RELAY_SCAN_REQUESTS = 40;
+/**
+ * BUILD-FLOFI-WALLET-UX-EXECUTION-FIX-001: every relayed execution of an attempt's exact reviewed call by this owner since `fromBlock`. A relayed
+ * redemption does not use the owner's nonce, so nonce discovery cannot see it; the Delegation Manager's `RedeemedDelegation` logs naming the
+ * owner as root delegator are the candidates, and only those `verifyOwnerSubmission` proves to execute exactly the reviewed call count. A
+ * transaction already credited to another attempt (another run's identical call) is that attempt's, not this one's. `waiting`: a candidate is
+ * not canonical yet (or its receipt is not served yet), so the answer is not final. The scan is bounded (RELAY_SCAN_REQUESTS × RELAY_SCAN_BLOCKS
+ * blocks): `complete` is false when it stopped before the head, and nothing is then assumed about the rest.
+ */
+async function relayedExecutions(rpc: Rpc, P: SwapProfile, attempt: Pick<PublicAttempt, 'account' | 'tx'>, fromBlock: number,
+  claimedElsewhere: (txHash: string) => Promise<boolean>): Promise<{ readonly verified: readonly string[]; readonly waiting: boolean; readonly complete: boolean }> {
+  const head = Number(quantity(await rpc('eth_blockNumber', [])));
+  if (!Number.isSafeInteger(head) || head < fromBlock) fail('RPC_RESPONSE_INVALID');
+  const ownerTopic = '0x' + addrWord(attempt.account), candidates = new Set<string>();
+  let from = fromBlock;
+  for (let request = 0; from <= head && request < RELAY_SCAN_REQUESTS; from += RELAY_SCAN_BLOCKS, request++) {
+    const logs = await rpc('eth_getLogs', [{ address: DELEGATION_MANAGER, topics: [REDEEMED_TOPIC, ownerTopic],
+      fromBlock: blockHex(from), toBlock: blockHex(Math.min(head, from + RELAY_SCAN_BLOCKS - 1)) }]);
+    if (!Array.isArray(logs)) fail('RPC_RESPONSE_INVALID');
+    for (const log of logs) {
+      if (!isObject(log) || address(log.address) !== DELEGATION_MANAGER || !Array.isArray(log.topics) || log.topics[0] !== REDEEMED_TOPIC ||
+          topicAddress(log.topics[1]) !== attempt.account) fail('RPC_RESPONSE_INVALID');
+      if (log.removed !== true) candidates.add(hex(log.transactionHash));
+    }
+  }
+  const verified: string[] = [];
+  let waiting = false;
+  for (const txHash of candidates) {
+    const [tx, raw] = await Promise.all([rpc('eth_getTransactionByHash', [txHash]), rpc('eth_getTransactionReceipt', [txHash])]);
+    if (!isObject(raw)) { waiting = true; continue; }
+    try {
+      await verifyOwnerSubmission(rpc, { txHash, account: attempt.account, target: attempt.tx.to, data: attempt.tx.data, preBlock: fromBlock,
+        value: attempt.tx.value }, tx, raw, P.chainId, P.l1DataFee);
+    } catch (cause) {
+      if (cause instanceof Error && cause.message === 'TRANSACTION_MISMATCH') continue;
+      if (cause instanceof Error && cause.message === 'RECEIPT_NOT_CANONICAL') { waiting = true; continue; }
+      throw cause;
+    }
+    if (!await claimedElsewhere(txHash)) verified.push(txHash);
+  }
+  return { verified, waiting, complete: from > head };
 }
 function signed(value: bigint): bigint { return value >= 1n << 255n ? value - (1n << 256n) : value; }
 export function publicRecordingEnabled(env: NodeJS.ProcessEnv): boolean {
@@ -394,25 +483,91 @@ export function explorerUrl(txHash: string, profile: SwapProfile = BASE_SEPOLIA)
 /** Persistence used by the shared core: synchronous files locally, async shared storage in the cloud. */
 type Persistence = { readonly save: (run: PublicRun) => PublicRun | Promise<PublicRun>; readonly load: (id: string) => PublicRun | Promise<PublicRun>;
   readonly locked: <T>(id: string, action: () => Promise<T>) => Promise<T>;
-  readonly reserveNonce: (run: PublicRun, owner: SwapOwnerReview) => Promise<void> };
-/** A permanent nonce intent survives restarts/unknown wallet results. No worker can release it or submit anything. */
+  readonly reserveNonce: (run: PublicRun, owner: SwapOwnerReview, released: NonceRelease) => Promise<void>;
+  /**
+   * BUILD-FLOFI-WALLET-UX-EXECUTION-FIX-001: one on-chain transaction is credited to at most one attempt. A direct submission is bound to its
+   * attempt by the reviewed owner nonce; a relayed redemption carries no owner nonce, so its hash is claimed once (create-once, never released).
+   * `claim` resolves true when the transaction is (now or already) this attempt's, false when another attempt holds it.
+   */
+  readonly claims: { readonly claim: (chainId: number, txHash: string, holder: TransactionClaim) => Promise<boolean>;
+    readonly holder: (chainId: number, txHash: string) => Promise<TransactionClaim | null> } };
+type TransactionClaim = { readonly id: string; readonly attemptId: string };
+function transactionClaims(storage: ExecutionStorage): Persistence['claims'] {
+  const name = (chainId: number, txHash: string) => { if (!HASH.test(txHash)) fail('TX_HASH_INVALID'); return `claim-${chainId}-${txHash}.tx`; };
+  const parse = (bytes: Uint8Array): TransactionClaim => {
+    const value = JSON.parse(utf8(bytes)) as unknown;
+    if (!isObject(value) || typeof value.id !== 'string' || typeof value.attemptId !== 'string') fail('PUBLIC_STORE_CORRUPT');
+    return { id: value.id, attemptId: value.attemptId };
+  };
+  const holder = async (chainId: number, txHash: string) => { const bytes = await storage.log.read(name(chainId, txHash)); return bytes ? parse(bytes) : null; };
+  return { holder, claim: async (chainId, txHash, claim) => {
+    if (await storage.log.create(name(chainId, txHash), new TextEncoder().encode(JSON.stringify({ id: claim.id, attemptId: claim.attemptId }) + '\n'))) return true;
+    const existing = await holder(chainId, txHash) ?? fail('PUBLIC_STORE_CORRUPT');
+    return existing.id === claim.id && existing.attemptId === claim.attemptId;
+  } };
+}
+/**
+ * BUILD-FLOFI-WALLET-UX-EXECUTION-FIX-001: whether the run holding a nonce intent provably never used that owner nonce, so a newer reviewed
+ * transaction may take the reservation over (`relayedNonceRelease`). Returns the attempt that proves it, or null.
+ */
+type NonceRelease = (holderId: string, nonce: string, transaction: Tx) => Promise<{ readonly attemptId: string; readonly txHash: string } | null>;
+type NonceIntent = { readonly id: string; readonly transaction: Tx; readonly supersedes?: string; readonly release?: { readonly attemptId: string; readonly txHash: string } };
+/** The intent log: one reservation, then only evidence-carrying hand-overs, each superseding the line before it. */
+function nonceIntents(bytes: Uint8Array): NonceIntent[] {
+  const text = utf8(bytes);
+  if (!text.endsWith('\n')) fail('PUBLIC_STORE_CORRUPT');
+  const lines = text.trimEnd().split('\n').map(line => JSON.parse(line) as NonceIntent);
+  lines.forEach((line, index) => {
+    if (!isObject(line) || typeof line.id !== 'string' || !isObject(line.transaction) || (index === 0) !== (line.supersedes === undefined) ||
+        index > 0 && (line.supersedes !== lines[index - 1]!.id || !isObject(line.release) || typeof line.release.attemptId !== 'string' || !HASH.test(String(line.release.txHash))))
+      fail('PUBLIC_STORE_CORRUPT');
+  });
+  return lines;
+}
+/**
+ * A permanent nonce intent survives restarts/unknown wallet results. No worker can release it or submit anything.
+ * BUILD-FLOFI-WALLET-UX-EXECUTION-FIX-001: a reservation is never released because a relay transaction was merely observed. A newer reviewed
+ * transaction takes it over only when the holder's own verified receipts prove that the owner nonce was never used (`released`), and the
+ * hand-over is appended with that evidence (the earlier lines stay).
+ */
 function nonceReservation(storage: ExecutionStorage): Persistence['reserveNonce'] {
-  return async (run, owner) => {
+  return async (run, owner, released) => {
     const key = `swap-${run.quote.chainId}-${owner.account}-${owner.nonce}`;
     await storage.leases.hold(key, async () => {
       const existing = await storage.log.read(key + '.intent');
+      const line = (extra: Partial<NonceIntent> = {}) => JSON.stringify({ id: run.quote.executionId, transaction: owner.transaction, ...extra }) + '\n';
       if (existing) {
-        const intent = JSON.parse(utf8(existing)) as { id: string; transaction: Tx };
+        const intents = nonceIntents(existing), intent = intents.at(-1)!;
         const last = run.attempts.at(-1);
         // Only this run's identical call, after an explicit pre-broadcast wallet refusal, can reuse its intent.
         if (intent.id === run.quote.executionId && canonical(intent.transaction) === canonical(owner.transaction) &&
             last?.state === 'REJECTED' && !last.txHash && last.tx.nonce === owner.transaction.nonce) return;
-        fail('SWAP_NONCE_ALREADY_RESERVED');
+        const release = await released(intent.id, owner.nonce, intent.transaction);
+        if (!release) fail('SWAP_NONCE_ALREADY_RESERVED');
+        await storage.log.extend(key + '.intent', new TextEncoder().encode(utf8(existing) + line({ supersedes: intent.id, release: release! })), bytes => { nonceIntents(bytes); });
+        return;
       }
-      if (!await storage.log.create(key + '.intent', new TextEncoder().encode(JSON.stringify({ id: run.quote.executionId, transaction: owner.transaction }) + '\n')))
+      if (!await storage.log.create(key + '.intent', new TextEncoder().encode(line())))
         fail('SWAP_NONCE_ALREADY_RESERVED');
     });
   };
+}
+/**
+ * BUILD-FLOFI-WALLET-UX-EXECUTION-FIX-001: whether the run holding the reservation of owner nonce `nonce` for `transaction` provably never used
+ * that nonce. True only when the reserved transaction itself reached the chain as a verified relayed redemption (the relayer, not the owner,
+ * sent it; no owner nonce is consumed) with a canonical receipt, single use and fully reconciled, every other attempt the
+ * holder made at that nonce is either such a relayed submission or an explicit pre-broadcast wallet refusal, and the holder recorded no
+ * divergence. A pending, unknown, unreconciled or direct attempt keeps the reservation, so does an observed relay that is not yet verified.
+ */
+export function relayedNonceRelease(holder: Pick<PublicRun, 'attempts' | 'divergence'>, nonce: string, transaction: Tx): { attemptId: string; txHash: string } | null {
+  if (holder.divergence) return null;
+  const atNonce = holder.attempts.filter(a => a.tx.nonce !== undefined && BigInt(a.tx.nonce) === BigInt(nonce));
+  const relayed = (a: PublicAttempt) => a.txHash !== null && a.receipt !== null && a.receipt.transactionHash === a.txHash &&
+    a.receipt.submissionKind === 'DELEGATED_SINGLE' && a.receipt.delegationDepth === 1 && a.receipt.gasPayer !== a.account && a.receipt.from !== a.account &&
+    a.state === 'CONFIRMED' && a.receipt.status === 1 && a.nativeAfter !== null;
+  if (!atNonce.every(a => relayed(a) || a.state === 'REJECTED' && a.txHash === null)) return null;
+  const proof = atNonce.find(a => relayed(a) && canonical(a.tx) === canonical(transaction));
+  return proof ? { attemptId: proof.attemptId, txHash: proof.txHash! } : null;
 }
 /** Pure Review transition, shared by the local and the durable service. */
 /** Legacy quotes remain readable for recovery/evidence, but cannot create fresh financial authority. */
@@ -479,8 +634,9 @@ export function createPublicTestnetService(config: { readonly rpc: Rpc; readonly
     locks.add(id);
     try { return await action(); } finally { locks.delete(id); unlinkSync(lockFile); }
   }
+  const storage = createFileExecutionStorage(journalDir, 'EXECUTION_BUSY');
   const core = createPublicTestnetCore(rpcRouter(config), now, { save, load, locked,
-    reserveNonce: nonceReservation(createFileExecutionStorage(journalDir, 'EXECUTION_BUSY')) }, config.catalog, config.idPrefix ?? 'pub');
+    reserveNonce: nonceReservation(storage), claims: transactionClaims(storage) }, config.catalog, config.idPrefix ?? 'pub');
   const review = (id: string, manifestHash: string): PublicRun => save(reviewPublicRun(load(id), manifestHash, now()));
   const report = (id: string, attemptId: string, result: { kind: 'HASH'; txHash: string } | { kind: 'REJECTED' | 'UNKNOWN' }): PublicRun =>
     save(reportPublicRun(load(id), attemptId, result, now()));
@@ -514,7 +670,8 @@ export function createDurablePublicTestnetService(config: { readonly rpc: Rpc; r
     return run;
   }
   const locked = <T,>(id: string, action: () => Promise<T>): Promise<T> => leases.hold(name(id).slice(0, -6), action);
-  const core = createPublicTestnetCore(rpcRouter(config), now, { save, load, locked, reserveNonce: nonceReservation(config.storage) }, config.catalog, config.idPrefix ?? 'pub');
+  const core = createPublicTestnetCore(rpcRouter(config), now, { save, load, locked, reserveNonce: nonceReservation(config.storage),
+    claims: transactionClaims(config.storage) }, config.catalog, config.idPrefix ?? 'pub');
   return { ...core, load,
     review: (id: string, manifestHash: string) => locked(id, async () => save(reviewPublicRun(await load(id), manifestHash, now()))),
     report: (id: string, attemptId: string, result: { kind: 'HASH'; txHash: string } | { kind: 'REJECTED' | 'UNKNOWN' }) =>
@@ -1044,7 +1201,21 @@ function createPublicTestnetCore(rpcFor: (profile: SwapProfile) => Rpc, now: () 
         if (pending !== BigInt(reviewedOwner!.nonce) || nonce > pending) {
           await save({ ...run, reviewedManifestHash: null }); fail('OWNER_STATE_CHANGED_REVIEW_REQUIRED');
         }
-        await persistence.reserveNonce(run, reviewedOwner!);
+        // BUILD-FLOFI-WALLET-UX-EXECUTION-FIX-001: a wallet refusal is trusted for a new attempt only after checking that no refused attempt of this
+        // run reached the chain through a relay (a relayed redemption leaves the owner nonce unchanged, so the nonce check above cannot see it).
+        if (reviewedOwner!.delegation === DELEGATOR_IMPL) {
+          for (const refused of run.attempts.filter(a => a.state === 'REJECTED' && a.txHash === null)) {
+            const scan = await relayedExecutions(rpc, P, refused, refused.preBlock, async txHash => await persistence.claims.holder(P.chainId, txHash) !== null);
+            if (scan.verified.length) { await save({ ...run, divergence: 'REJECTED_ATTEMPT_EXECUTED', reviewedManifestHash: null }); fail('RECONCILIATION_MISMATCH'); }
+            if (scan.waiting) fail('RELAYED_EXECUTION_PENDING');
+          }
+        }
+        // BUILD-FLOFI-WALLET-UX-EXECUTION-FIX-001: a reservation whose holder's reserved transaction was verified as relayed (owner nonce unused)
+        // is taken over with that evidence; anything else keeps SWAP_NONCE_ALREADY_RESERVED.
+        await persistence.reserveNonce(run, reviewedOwner!, async (holderId, nonce, transaction) => {
+          const holder = holderId === run.quote.executionId ? run : await Promise.resolve(load(holderId)).catch(() => null);
+          return holder && holder.quote.ownerReview?.account === owner && holder.quote.chainId === run.quote.chainId ? relayedNonceRelease(holder, nonce, transaction) : null;
+        });
       }
       const attempt: PublicAttempt = { attemptId: id + '.' + step + '.' + String(run.attempts.length + 1), executionId: id,
         step, state: 'PREPARED', createdAt: now().toISOString(), submittedAt: null, account: owner, chainId: P.chainId, environment: P.environment,
@@ -1056,6 +1227,14 @@ function createPublicTestnetCore(rpcFor: (profile: SwapProfile) => Rpc, now: () 
       return { attempt, tx };
     });
   }
+  /** BUILD-FLOFI-WALLET-UX-EXECUTION-FIX-001: a transaction credited to any other attempt (another run's identical call) is never this one's. */
+  const claimedElsewhere = (profile: SwapProfile, attempt: Pick<PublicAttempt, 'executionId' | 'attemptId'>) => async (txHash: string) => {
+    const holder = await persistence.claims.holder(profile.chainId, txHash);
+    return holder !== null && (holder.id !== attempt.executionId || holder.attemptId !== attempt.attemptId);
+  };
+  /** The first block from which this run could have had the attempt's exact call executed (its earliest attempt of that same transaction). */
+  const sameCallFrom = (run: PublicRun, attempt: PublicAttempt) =>
+    Math.min(...run.attempts.filter(a => canonical(a.tx) === canonical(attempt.tx)).map(a => a.preBlock), attempt.preBlock);
   async function observe(id: string): Promise<PublicRun> {
     return locked(id, async () => {
       let run = await load(id);
@@ -1063,10 +1242,20 @@ function createPublicTestnetCore(rpcFor: (profile: SwapProfile) => Rpc, now: () 
         let attempt = run.attempts.at(-1);
         if (run.divergence) return run;
         if (attempt && !attempt.txHash && run.quote.ownerReview && ['PREPARED', 'UNKNOWN'].includes(attempt.state)) {
-          const found = await discoverTransferByNonce({ nonce: run.quote.ownerReview.nonce, transaction: { ...attempt.tx, maxFeePerGas: attempt.tx.maxFeePerGas!, maxPriorityFeePerGas: attempt.tx.maxPriorityFeePerGas! }, preparedAtBlock: attempt.preBlock, transactionHash: null }, rpcFor(profileOf(run.quote.chainId)));
-          if (!found.hash) return run;
-          if (found.mismatch) return save({ ...run, divergence: 'NONCE_CONSUMED_BY_DIFFERENT_TRANSACTION' });
-          const changed: PublicAttempt = { ...attempt, state: 'HASH', txHash: found.hash, submittedAt: now().toISOString() };
+          const pending = attempt, profile = profileOf(run.quote.chainId);
+          const found = await discoverTransferByNonce({ nonce: run.quote.ownerReview.nonce, transaction: { ...attempt.tx, maxFeePerGas: attempt.tx.maxFeePerGas!, maxPriorityFeePerGas: attempt.tx.maxPriorityFeePerGas! }, preparedAtBlock: attempt.preBlock, transactionHash: null }, rpcFor(profile));
+          // BUILD-FLOFI-WALLET-UX-EXECUTION-FIX-001: an owner with the reviewed MetaMask delegation may have had the call relayed (its nonce
+          // unused, or later used by another of its transactions): a verified relayed execution is this attempt's submission. Both a relayed
+          // and a direct execution of the call, or two relayed ones, are a duplicate and are recorded as divergent.
+          const scan = run.quote.ownerReview.delegation === DELEGATOR_IMPL ?
+            await relayedExecutions(rpcFor(profile), profile, attempt, sameCallFrom(run, attempt), claimedElsewhere(profile, pending)) : null;
+          if (scan?.waiting) return run;
+          if (scan && (scan.verified.length > 1 || scan.verified.length === 1 && found.hash && !found.mismatch))
+            return save({ ...run, divergence: 'RELAYED_DUPLICATE_EXECUTION' });
+          const relayedHash = scan?.verified[0] ?? null, hash = relayedHash ?? found.hash;
+          if (!hash) return run;
+          if (!relayedHash && found.mismatch) return save({ ...run, divergence: 'NONCE_CONSUMED_BY_DIFFERENT_TRANSACTION' });
+          const changed: PublicAttempt = { ...attempt, state: 'HASH', txHash: hash, submittedAt: now().toISOString() };
           run = await save({ ...run, attempts: run.attempts.map(a => a.attemptId === changed.attemptId ? changed : a) });
           attempt = changed;
         }
@@ -1089,6 +1278,63 @@ function createPublicTestnetCore(rpcFor: (profile: SwapProfile) => Rpc, now: () 
           throw cause;
         }
         const { direct, delegated, delegationDepth, txFrom, txTo, txInput, status, blockNumber, gasUsed, effectiveGasPrice, l1Fee, nonce } = verified;
+        const review = run.quote.ownerReview;
+        // BUILD-FLOFI-WALLET-UX-EXECUTION-FIX-001: a MetaMask Smart Account (an EIP-7702 delegated EOA) may hand the reviewed call to a relayer,
+        // which redeems the owner's delegation through the Delegation Manager and pays the network fee. For an owner-bound swap this is accepted
+        // only in the shape verified on chain (testdata/metamask-delegated-depth1-approval.base-sepolia.json): a type-2 redemption, sent by a
+        // third party, of exactly the reviewed call (one call, depth 1, no native value) from the owner's reviewed DeleGator delegation, unchanged
+        // from preparation to inclusion, with a single `RedeemedDelegation` naming the owner. Any other delegated shape is recorded as divergent.
+        const relayed = review !== undefined && delegated && verified.submission === 'DELEGATED_EXISTING' && delegationDepth === 1 &&
+          review.delegation === DELEGATOR_IMPL && txFrom !== attempt.account;
+        // Whether the owner's balances can move without its nonce moving (relayed redemptions): the nonce count then cannot show that the
+        // balance window is this swap's alone, so the receipt is the proof (as HOTFIX-WORKFLOW-CONCURRENCY-001 does for concurrent transactions).
+        let relayCapable = false;
+        if (review) {
+          if (delegated && !relayed) return save({ ...run, divergence: 'OWNER_SUBMISSION_UNSUPPORTED' });
+          if (direct) {
+            // A direct submission is bounded by the reviewed transaction. A relayed one is the relayer's own transaction: its nonce, gas and fee
+            // are the relayer's and are never charged to the owner (the owner sent nothing, so its nonce is untouched).
+            const submitted = isObject(tx) ? tx : fail('TRANSACTION_MISMATCH');
+            const offeredFee = submitted.maxFeePerGas === undefined ? quantity(submitted.gasPrice) : quantity(submitted.maxFeePerGas);
+            if (nonce !== BigInt(attempt.tx.nonce!) || quantity(submitted.gas) > BigInt(attempt.tx.gas) || offeredFee > BigInt(attempt.tx.maxFeePerGas!) ||
+                gasUsed > BigInt(attempt.tx.gas) || effectiveGasPrice > BigInt(attempt.tx.maxFeePerGas!))
+              return save({ ...run, divergence: 'TRANSACTION_BOUNDS_MISMATCH' });
+          }
+          // The owner's account where the swap landed is still a standard account or a reviewed EIP-7702 delegation (MetaMask may upgrade an EOA
+          // in the meantime). Contract code or an unreviewed delegate (one that could forward the swap's ETH on receipt) is never reconciled.
+          const landed = ownerAccountCode(await rpc('eth_getCode', [attempt.account, blockHex(blockNumber)]));
+          if (landed.kind === 'CONTRACT' || landed.kind === 'EIP7702' && !landed.verified) return save({ ...run, divergence: 'OWNER_ACCOUNT_CODE_MISMATCH' });
+          relayCapable = relayed || review.delegation !== undefined || landed.kind === 'EIP7702';
+          if (relayed) {
+            // A relayed redemption carries no owner nonce: its hash is credited to this attempt once, never to another attempt or run.
+            if (!await persistence.claims.claim(P.chainId, attempt.txHash, { id, attemptId: attempt.attemptId }))
+              return save({ ...run, divergence: 'RELAYED_TRANSACTION_ALREADY_CLAIMED' });
+            // A reverted redemption has no logs: nothing proves whose authorization it carried, and an authorization that was not consumed may
+            // still be redeemed later. It is never treated as a final result for the owner (and never releases a nonce reservation).
+            if (status === 0) return save({ ...run, divergence: 'RELAYED_SUBMISSION_REVERTED' });
+            // Besides the swap's own tokens and pool (and WETH only where native ETH is wrapped or unwrapped), only the reviewed framework
+            // (Delegation Manager, its caveat enforcers) may log.
+            const native = Boolean(run.quote.native || run.quote.conversion);
+            const allowed = new Set([...RELAY_FRAMEWORK_LOGGERS, run.quote.inputToken,
+              ...attempt.step === 'swap' ? [run.quote.outputToken, run.quote.pool, ...native && P.kind === 'CATALOG' ? [P.weth] : []] : []]);
+            if (status === 1 && (!Array.isArray(raw.logs) || raw.logs.some(log => !isObject(log) || !allowed.has(address(log.address)))))
+              fail('TRANSACTION_MISMATCH');
+            // Single use, proven on chain: the relay can never redeem this authorization again (no relayed replay of the reviewed call).
+            if (status === 1 && !singleUseRelayedDelegation(raw.logs as unknown[], attempt.account, txFrom))
+              return save({ ...run, divergence: 'RELAYED_DELEGATION_NOT_SINGLE_USE' });
+          }
+          // No second execution of the same reviewed call: for an owner that relays, the owner nonce cannot prove it. Every verified relayed
+          // execution since the run first prepared this transaction, and (for a relayed receipt) a direct one at the reviewed nonce, are looked
+          // for before this receipt becomes evidence; a candidate not yet final keeps the attempt pending.
+          if (review.delegation === DELEGATOR_IMPL && status === 1) {
+            const scan = await relayedExecutions(rpc, P, attempt, sameCallFrom(run, attempt), claimedElsewhere(P, attempt));
+            if (scan.waiting) return await save({ ...run, attempts: run.attempts.map(a => a.attemptId === attempt.attemptId ? { ...a, state: 'PENDING' } : a) });
+            const direct2 = relayed ? await discoverTransferByNonce({ nonce: review.nonce, transaction: { ...attempt.tx, maxFeePerGas: attempt.tx.maxFeePerGas!,
+              maxPriorityFeePerGas: attempt.tx.maxPriorityFeePerGas! }, preparedAtBlock: attempt.preBlock, transactionHash: null }, rpc) : null;
+            if (scan.verified.some(hash => hash !== attempt.txHash) || direct2?.hash && !direct2.mismatch)
+              return save({ ...run, divergence: 'RELAYED_DUPLICATE_EXECUTION' });
+          }
+        }
         // HOTFIX-WORKFLOW-CONCURRENCY-001: other transactions of this owner between preparation and inclusion (independent workflows) also move
         // its balances, so that window is not this swap's alone. A direct submission is then proven from its own receipt instead; with no other
         // owner transaction in the window the balance proof below is unchanged. (Catalog networks; test-network pair runs are unchanged.)
@@ -1096,16 +1342,20 @@ function createPublicTestnetCore(rpcFor: (profile: SwapProfile) => Rpc, now: () 
           quantity(await rpc('eth_getTransactionCount', [attempt.account, blockHex(attempt.preBlock)])) > 1n;
         let receivedByReceipt: bigint | null = null;
         const nativeRun = Boolean(run.quote.native || run.quote.conversion);
-        if (concurrent && status === 1 && !(nativeRun && attempt.step === 'swap')) {
-          if (!Array.isArray(raw.logs)) fail('RECEIPT_INVALID');
-          const records = raw.logs.filter(isObject);
+        const proven = concurrent || relayCapable;
+        // The swap's own logs: a relayed receipt's framework bookkeeping (checked above) is not part of the swap's effects.
+        const ownLogs = Array.isArray(raw.logs) ? relayed ? raw.logs.filter(log => isObject(log) && !RELAY_FRAMEWORK_LOGGERS.has(address(log.address))) : raw.logs : null;
+        if (proven && status === 1 && !(nativeRun && attempt.step === 'swap')) {
+          if (!ownLogs) fail('RECEIPT_INVALID');
+          const records = ownLogs.filter(isObject);
           if (attempt.step === 'approval') {
             const approvals = records.filter(log => address(log.address) === run.quote.inputToken);
             if (approvals.length !== 1 || !Array.isArray(approvals[0]!.topics) || approvals[0]!.topics[0] !== APPROVAL_TOPIC || topicAddress(approvals[0]!.topics[1]) !== attempt.account ||
                 topicAddress(approvals[0]!.topics[2]) !== P.router || quantity(approvals[0]!.data) !== BigInt(attempt.authorizedInput)) fail('TRANSACTION_MISMATCH');
-          } else receivedByReceipt = receiptSwap(raw.logs, run.quote, attempt.account, P.router, BigInt(attempt.authorizedInput));
+          } else receivedByReceipt = receiptSwap(ownLogs, run.quote, attempt.account, P.router, BigInt(attempt.authorizedInput));
         }
-        if (delegated && status === 1) {
+        // Base Sepolia (not owner-bound) delegated redemptions keep their original window proof.
+        if (delegated && !relayed && status === 1) {
           if (!Array.isArray(raw.logs)) fail('RECEIPT_INVALID');
           if (attempt.step === 'approval') {
             const tokenLogs = raw.logs.filter(log => isObject(log) &&
@@ -1141,20 +1391,8 @@ function createPublicTestnetCore(rpcFor: (profile: SwapProfile) => Rpc, now: () 
         // BUILD-FLOFI-BRIDGE-LIVE-FIX-003: a native-ETH swap or WETH9 conversion is always proven from its own receipt (direct only).
         let nativeProof: { spent: bigint; received: bigint } | null = null;
         if (nativeRun && attempt.step === 'swap' && status === 1) {
-          if (!direct || P.kind !== 'CATALOG' || !Array.isArray(raw.logs)) fail('TRANSACTION_MISMATCH');
-          nativeProof = receiptNative(raw.logs, run.quote, attempt.account, P, BigInt(attempt.authorizedInput));
-        }
-        if (run.quote.ownerReview) {
-          const submitted = isObject(tx) ? tx : fail('TRANSACTION_MISMATCH');
-          const offeredFee = submitted.maxFeePerGas === undefined ? quantity(submitted.gasPrice) : quantity(submitted.maxFeePerGas);
-          if (!direct || nonce !== BigInt(attempt.tx.nonce!) || quantity(submitted.gas) > BigInt(attempt.tx.gas) || offeredFee > BigInt(attempt.tx.maxFeePerGas!) ||
-              gasUsed > BigInt(attempt.tx.gas) || effectiveGasPrice > BigInt(attempt.tx.maxFeePerGas!))
-            return save({ ...run, divergence: 'TRANSACTION_BOUNDS_MISMATCH' });
-          // BUILD-FLOFI-WALLET-UX-EXECUTION-FIX-001: the owner's account where the swap landed is still a standard account or a reviewed
-          // EIP-7702 delegation (MetaMask may upgrade an EOA in the meantime). Contract code or an unreviewed delegate (one that could forward the
-          // swap's ETH on receipt) is never reconciled: the run is recorded as divergent.
-          const landed = ownerAccountCode(await rpc('eth_getCode', [attempt.account, blockHex(blockNumber)]));
-          if (landed.kind === 'CONTRACT' || landed.kind === 'EIP7702' && !landed.verified) return save({ ...run, divergence: 'OWNER_ACCOUNT_CODE_MISMATCH' });
+          if (!(direct || relayed) || P.kind !== 'CATALOG' || !ownLogs) fail('TRANSACTION_MISMATCH');
+          nativeProof = receiptNative(ownLogs, run.quote, attempt.account, P, BigInt(attempt.authorizedInput));
         }
         const executionGasCost = gasUsed * effectiveGasPrice;
         const receipt: PublicReceipt = { transactionHash: attempt.txHash, status: status as 0 | 1,
@@ -1178,9 +1416,9 @@ function createPublicTestnetCore(rpcFor: (profile: SwapProfile) => Rpc, now: () 
             balance(rpc, run.quote.inputToken, attempt.account, at), nativeOut ? Promise.resolve(BigInt(attempt.outputBefore)) : balance(rpc, run.quote.outputToken, attempt.account, at),
             rpc('eth_getBalance', [attempt.account, at]).then(quantity),
           ]);
-          if (observed !== BigInt(attempt.authorizedInput) || !concurrent && (inputAfter !== BigInt(attempt.inputBefore) || outputAfter !== BigInt(attempt.outputBefore)) ||
-              (direct && BigInt(attempt.nativeBefore) - nativeAfter < BigInt(receipt.gasCostWei)) ||
-              (delegated && nativeAfter !== BigInt(attempt.nativeBefore)))
+          if (observed !== BigInt(attempt.authorizedInput) || !proven && (inputAfter !== BigInt(attempt.inputBefore) || outputAfter !== BigInt(attempt.outputBefore)) ||
+              (direct && !relayCapable && BigInt(attempt.nativeBefore) - nativeAfter < BigInt(receipt.gasCostWei)) ||
+              (delegated && !relayed && nativeAfter !== BigInt(attempt.nativeBefore)))
             fail('APPROVAL_NOT_EFFECTIVE');
           return await save({ ...run, attempts: run.attempts.map(a => a.attemptId === attempt.attemptId ?
             { ...a, nativeAfter: nativeAfter.toString() } : a) });
@@ -1191,28 +1429,31 @@ function createPublicTestnetCore(rpcFor: (profile: SwapProfile) => Rpc, now: () 
           run.quote.outputToken === NATIVE_ETH ? nativeAt() : balance(rpc, run.quote.outputToken, attempt.account, at),
           needsAllowance(run.quote) ? allowance(rpc, P, run.quote.inputToken, attempt.account, at) : Promise.resolve(0n), nativeAt(),
         ]);
+        // BUILD-FLOFI-WALLET-UX-EXECUTION-FIX-001: an owner-bound run's fees are what the owner paid: a relayed submission's fee is the relayer's.
+        // (The Base Sepolia pair runs keep reporting the receipt's own cost, sponsored or not, as before.)
+        const ownerPaid = (paid: PublicReceipt, owner: string) => !review || paid.gasPayer === owner ? BigInt(paid.gasCostWei) : 0n;
         const approvalGasCost = run.attempts.filter(a => a.step === 'approval' && a.state === 'CONFIRMED').reduce((sum, a) => {
           if (a.nativeAfter === null || a.receipt === null) fail('APPROVAL_GAS_UNKNOWN');
-          return sum + BigInt(a.receipt.gasCostWei);
+          return sum + ownerPaid(a.receipt, a.account);
         }, 0n);
-        const actualGasCost = BigInt(receipt.gasCostWei) + approvalGasCost;
+        const actualGasCost = ownerPaid(receipt, attempt.account) + approvalGasCost;
         let spent: bigint, received: bigint;
         if (nativeProof) {
           // The receipt proves the amounts; the balances only bound them. Native ETH and gas share one balance, so a gas deduction is never read
           // as a missing output: native in spent at most amount + gas; native out received at least the proven amount − gas. Third-party
           // deposits can only add to a balance; an owner transaction in the window (concurrent) leaves the receipt as the only proof.
           ({ spent, received } = nativeProof);
-          const gasCost = BigInt(receipt.gasCostWei), nativeDelta = nativeAfter - BigInt(attempt.nativeBefore);
+          const gasCost = ownerPaid(receipt, attempt.account), nativeDelta = nativeAfter - BigInt(attempt.nativeBefore);
           const nativeIn = run.quote.inputToken === NATIVE_ETH, nativeOut = run.quote.outputToken === NATIVE_ETH;
-          if (!concurrent && (nativeIn && -nativeDelta > spent + gasCost || nativeOut && nativeDelta + gasCost < received ||
+          if (!proven && (nativeIn && -nativeDelta > spent + gasCost || nativeOut && nativeDelta + gasCost < received ||
               !nativeIn && BigInt(attempt.inputBefore) - inputAfter !== spent || !nativeOut && outputAfter - BigInt(attempt.outputBefore) < received)) fail('RECONCILIATION_MISMATCH');
           if (spent !== BigInt(run.quote.amountIn) || received < BigInt(run.quote.minimumOut)) fail('RECONCILIATION_MISMATCH');
         } else {
-          spent = concurrent ? BigInt(attempt.authorizedInput) : BigInt(attempt.inputBefore) - inputAfter;
-          received = concurrent ? receivedByReceipt! : outputAfter - BigInt(attempt.outputBefore);
+          spent = proven ? BigInt(attempt.authorizedInput) : BigInt(attempt.inputBefore) - inputAfter;
+          received = proven ? receivedByReceipt! : outputAfter - BigInt(attempt.outputBefore);
           if (spent !== BigInt(run.quote.amountIn) || received < BigInt(run.quote.minimumOut) ||
-              (direct && BigInt(attempt.nativeBefore) - nativeAfter < BigInt(receipt.gasCostWei)) ||
-              (delegated && nativeAfter !== BigInt(attempt.nativeBefore))) fail('RECONCILIATION_MISMATCH');
+              (direct && !relayCapable && BigInt(attempt.nativeBefore) - nativeAfter < BigInt(receipt.gasCostWei)) ||
+              (delegated && !relayed && nativeAfter !== BigInt(attempt.nativeBefore))) fail('RECONCILIATION_MISMATCH');
         }
         const explorer = explorerUrl(attempt.txHash, P);
         run = { ...run, attempts: run.attempts.map(a => a.attemptId === attempt.attemptId ?
@@ -1230,7 +1471,9 @@ function createPublicTestnetCore(rpcFor: (profile: SwapProfile) => Rpc, now: () 
           residualAssets: [{ asset: inputAsset, amount: inputAfter.toString() }, { asset: outputAsset, amount: outputAfter.toString() }],
           ownership: [{ chainId: P.chainRef, address: attempt.account }],
           limitations: [...P.kind === 'CATALOG' ? ['OWNER_WALLET_MAINNET', ...run.quote.provenance === 'MOCKED' ? ['MOCKED_LOOPBACK_CHAIN'] : []] : ['PUBLIC_TESTNET_ONLY'],
-            ...concurrent ? ['OWNER_TRANSACTIONS_IN_WINDOW_RECEIPT_RECONCILED'] : [], ...nativeProof ? ['NATIVE_ETH_RECEIPT_RECONCILED'] : []] };
+            ...concurrent ? ['OWNER_TRANSACTIONS_IN_WINDOW_RECEIPT_RECONCILED'] : [], ...nativeProof ? ['NATIVE_ETH_RECEIPT_RECONCILED'] : [],
+            ...relayCapable && !concurrent ? ['OWNER_DELEGATED_ACCOUNT_RECEIPT_RECONCILED'] : [],
+            ...review && run.attempts.some(a => a.receipt?.submissionKind === 'DELEGATED_SINGLE' && a.receipt.gasPayer !== a.account) ? ['OWNER_SUBMISSION_RELAYED_FEE_PAID_BY_RELAYER'] : []] };
         const bundle = validateArtifact('evidence-bundle', { schemaVersion: '1.0.0',
           evidenceBundleId: id + '.evidence', version: 1, supersedes: null,
           semanticWorkflowHash: run.quote.workflowHash, artifactSetHash: digest(canonical(run.quote)),
