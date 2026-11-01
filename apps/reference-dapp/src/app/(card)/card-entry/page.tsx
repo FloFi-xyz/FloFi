@@ -18,8 +18,9 @@ export default async function CardEntryPage({ searchParams }: { searchParams: Pr
   // Only on the card origin, whatever path alias reached this page (the proxy routes the card host; this is the page's own check).
   if (!card || ((await headers()).get('host') ?? '').toLowerCase() !== card.host.toLowerCase()) notFound();
   const language = params.lang === 'PT' ? 'PT' : 'EN', theme = params.theme === 'dark' ? 'dark' : 'light';
-  return <LocaleProvider initialLanguage={language}>
+  // The page's language is set on its content: the root layout sets the document's from this origin's own (empty) saved preference.
+  return <LocaleProvider initialLanguage={language}><div lang={language === 'PT' ? 'pt' : 'en'}>
     {status.available ? <CardEntryFrame cardOrigin={card.origin} appOrigin={card.appOrigin} client={status.client} providerName={status.provider.name} theme={theme}/>
       : <CardEntryUnavailable appOrigin={card.appOrigin}/>}
-  </LocaleProvider>;
+  </div></LocaleProvider>;
 }

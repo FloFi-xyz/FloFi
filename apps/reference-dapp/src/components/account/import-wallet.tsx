@@ -35,14 +35,16 @@ export function ImportWallet({ state, ecosystem }: { state: AccountState; ecosys
   const { t } = useLocale();
   const privy = useFloFiPrivy();
   const keyField = useRef<HTMLInputElement>(null);
-  const [name, setName] = useState(`Imported ${NAME[ecosystem]} wallet`);
+  const [name, setName] = useState(() => t('Imported {0} wallet', NAME[ecosystem]));
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const nameId = useId(), keyId = useId(), noteId = useId();
-  // Where the browser can mask a text field, the key field is one: browsers offer to save (and sync) what is typed into a password
-  // field whatever `autocomplete` says, and a private key must never land in a password manager. Elsewhere it stays a password field.
-  const [masked, setMasked] = useState(false);
-  useEffect(() => { setMasked(maskedTextSupported()); }, []);
+  // Where the browser can mask a text field, the key field is one from the very first render (a field that was ever a password field may
+  // still be treated as one): browsers offer to save (and sync) what is typed into a password field whatever `autocomplete` says, and a
+  // private key must never land in a password manager. A browser that cannot mask text gets a password field instead, before anything
+  // can be typed (the field stays disabled until Privy is ready, after this effect).
+  const [masked, setMasked] = useState(true);
+  useEffect(() => { if (!maskedTextSupported()) setMasked(false); }, []);
   const ready = Boolean(state.account?.privy && state.availability.managedWallets && privy?.ready && privy.authenticated);
 
   async function submit(event: { preventDefault(): void }) {
@@ -82,7 +84,7 @@ export function ImportWallet({ state, ecosystem }: { state: AccountState; ecosys
       <label htmlFor={keyId}>{t('Private key')}</label>
       <input id={keyId} ref={keyField} className={masked ? `${styles.input} ${styles.maskedKey}` : styles.input} type={masked ? 'text' : 'password'} required
         autoComplete="off" spellCheck={false} autoCapitalize="off" autoCorrect="off" inputMode="text" data-1p-ignore="true" data-lpignore="true" data-bwignore="true"
-        data-form-type="other" aria-describedby={noteId} disabled={!ready || busy}
+        data-form-type="other" data-gramm="false" data-gramm_editor="false" data-enable-grammarly="false" aria-describedby={noteId} disabled={!ready || busy}
         placeholder={ecosystem === 'evm' ? '0x…' : t('Base58 private key')}/>
       <p id={noteId} className={styles.small} style={{ textAlign: 'left', margin: 0 }}>
         <AccountIcon name="shield" size={14}/> {t(ecosystem === 'evm' ? 'Paste the 64-character hexadecimal private key of the EVM wallet.' : 'Paste the base58 private key of the Solana wallet.')}

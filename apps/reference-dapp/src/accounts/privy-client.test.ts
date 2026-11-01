@@ -6,7 +6,8 @@
  */
 import { describe, expect, it } from 'vitest';
 import { ARBITRUM_ONE, ETHEREUM_MAINNET, ROBINHOOD_CHAIN_MAINNET } from '@defi-workflow-engine/action-registry';
-import { embeddedWallets, floFiPrivyConfig, PRIVY_EVM_CHAINS, privyErrorCode, privyOwnSolanaWallets } from './privy-client';
+import { embeddedWallets, floFiPrivyConfig, PRIVY_EVM_CHAINS, privyErrorCode, privyOwnSolanaWallets, signerDocument } from './privy-client';
+import { signerPolicy } from './signer-pages';
 import { PRIVY_CONNECT_SOURCES } from './privy-hosts';
 
 describe('FloFi’s Privy configuration', () => {
@@ -81,5 +82,30 @@ describe('Privy Solana wallets', () => {
     const address = '7EcDhSYGxXyscszYEp35KHN8vvw3svAuLKTzXwCFLtV';
     const own = { address, standardWallet: { name: 'Privy', isPrivyWallet: true } }, phantom = { address, standardWallet: { name: 'Phantom' } };
     expect(privyOwnSolanaWallets([phantom, own, { address }, { address, standardWallet: null }, { address, standardWallet: { isPrivyWallet: 'yes' } }])).toEqual([own]);
+  });
+});
+
+describe('Where Privy may mount', () => {
+  it('classes each signer page by the script policy the proxy serves it', () => {
+    expect(signerPolicy('/login')).toBe('login');
+    for (const path of ['/onboarding', '/onboarding/wallets', '/onboarding/wallets/import/evm']) expect(signerPolicy(path), path).toBe('account');
+    for (const path of ['/app', '/app/credentials', '/approve', '/connections', '/mcp/approve', '/__engineering']) expect(signerPolicy(path), path).toBe('product');
+    for (const path of ['/', '/docs', '/privacy', '/admin', '/card-entry', '/login/x', '/application', '/%61pp']) expect(signerPolicy(path), path).toBeNull();
+  });
+  it('mounts at once in a document loaded on the page (never a remount after hydration), and reloads a document of another class', () => {
+    // Server render and hydration: the document is the page being rendered.
+    for (const path of ['/login', '/onboarding/wallets', '/app', '/mcp/approve']) expect(signerDocument(path, path)).toEqual({ mount: true, reload: false });
+    // Client-side navigation within one class keeps the document (and its policy).
+    expect(signerDocument('/app/credentials', '/app')).toEqual({ mount: true, reload: false });
+    expect(signerDocument('/onboarding/wallets/import/evm', '/onboarding/wallets')).toEqual({ mount: true, reload: false });
+    // Into a signer page from a page without its policy, or across classes (the bot check may be allowed on /login only): reload once.
+    for (const [path, loaded] of [['/app', '/'], ['/app', '/docs'], ['/onboarding/wallets/import/evm', '/login'], ['/app', '/onboarding'], ['/login', '/app']] as const) {
+      expect(signerDocument(path, loaded), `${loaded} -> ${path}`).toEqual({ mount: false, reload: true });
+    }
+    // After that reload the document is the page itself: no loop.
+    expect(signerDocument('/onboarding/wallets/import/evm', '/onboarding/wallets/import/evm')).toEqual({ mount: true, reload: false });
+    // Unknown load path: fails closed (no Privy) without reloading; a page that does not host the signer never mounts it.
+    expect(signerDocument('/app', null)).toEqual({ mount: false, reload: false });
+    expect(signerDocument('/', '/app')).toEqual({ mount: false, reload: false });
   });
 });

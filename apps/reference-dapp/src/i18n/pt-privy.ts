@@ -17,7 +17,7 @@ export const portuguesePrivy: Readonly<Record<string, string>> = {
   'Sign in again to add wallets.': 'Entre de novo para adicionar carteiras.',
   'Your wallet provider session has ended in this browser. Your account and wallets are unchanged.':
     'Sua sessão no provedor de carteiras terminou neste navegador. Sua conta e suas carteiras não mudaram.',
-  'Check again': 'Verificar de novo', 'Created': 'Criada', 'Imported': 'Importada', 'Legacy FloFi Wallet': 'FloFi Wallet antiga', 'Continue': 'Continuar',
+  'Check again': 'Verificar de novo', 'Created': 'Criada', 'Imported': 'Importada', 'Imported {0} wallet': 'Carteira {0} importada', 'Legacy FloFi Wallet': 'FloFi Wallet antiga', 'Continue': 'Continuar',
   // Import screen
   'Import {0} wallet': 'Importar carteira {0}', 'Import your {0} wallet': 'Importe sua carteira {0}',
   'Your private key is handed, in this browser, straight to our wallet provider Privy, which takes it into its own secure frame. It passes briefly through this page’s code on the way and is never sent to FloFi’s servers, stored or logged.':

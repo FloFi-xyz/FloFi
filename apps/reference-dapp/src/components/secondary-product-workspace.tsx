@@ -150,14 +150,14 @@ const CARD_ERRORS: Readonly<Record<string, string>> = {
   CARD_REJECTED_BY_PROVIDER: 'The card could not be saved. Check the details and try again.',
   CARD_TOKEN_INVALID: 'The card could not be saved. Check the details and try again.',
 };
+/** How long Add card waits for the card page to report ready or unavailable. */
+const CARD_FRAME_TIMEOUT_MS = 20_000;
 /**
  * The provider's secure entry, framed from the card origin (src/server/card-origin.ts): Mercado Pago's SDK never runs on this origin,
  * which hosts the FloFi wallet signer. The card number, expiry and security code are typed into the provider's own iframes there; this
  * page receives only the provider's one-time token and the email (only from that origin and that frame) and saves the card with its own
  * server action. Adding a card never charges it.
  */
-/** How long Add card waits for the card page to report ready or unavailable. */
-const CARD_FRAME_TIMEOUT_MS = 20_000;
 function SecureCardFrame({ entry, providerName, onClose, onAdded }: { entry: string; providerName: string; onClose(): void; onAdded(label: string): void }) {
   const { t: tr, language } = useLocale();
   const frame = useRef<HTMLIFrameElement>(null);
@@ -165,7 +165,7 @@ function SecureCardFrame({ entry, providerName, onClose, onAdded }: { entry: str
   const origin = new URL(entry).origin;
   const theme = typeof document !== 'undefined' && document.documentElement.dataset.theme === 'dark' ? 'dark' : 'light';
   const src = `${entry}?lang=${language}&theme=${theme}`;
-  const close = useRef(onClose), added = useRef(onAdded);
+  const close = useRef(onClose), added = useRef(onAdded), closeButton = useRef<HTMLButtonElement>(null);
   close.current = onClose; added.current = onAdded;
   useEffect(() => {
     let saving = false;
@@ -195,11 +195,14 @@ function SecureCardFrame({ entry, providerName, onClose, onAdded }: { entry: str
     const timeout = setTimeout(() => setPhase(current => current === 'loading' ? 'unavailable' : current), CARD_FRAME_TIMEOUT_MS);
     return () => { window.removeEventListener('message', onMessage); clearTimeout(timeout); };
   }, [origin]);
+  // The frame (and any focus inside it) is gone once entry is unavailable: focus moves to Close.
+  useEffect(() => { if (phase === 'unavailable') closeButton.current?.focus(); }, [phase]);
   if (phase === 'unavailable') return <><div role="status" className="card-entry-body"><p>{tr("Secure card entry could not be loaded. Nothing was collected. Try again later.")}</p></div>
-    <div className="wallet-selector-footer"><button type="button" className="workspace-action" onClick={onClose}>{tr("Close")}</button></div></>;
+    <div className="wallet-selector-footer"><button ref={closeButton} type="button" className="workspace-action" onClick={onClose}>{tr("Close")}</button></div></>;
   // Sandboxed (it keeps its own origin for the provider) so the card page can never navigate this page; no Payment Request permission.
-  return <iframe ref={frame} className="card-entry-frame" src={src} title={tr('{0} secure card entry', providerName)} referrerPolicy="no-referrer"
-    sandbox="allow-scripts allow-same-origin allow-forms allow-popups" aria-busy={phase !== 'ready'}/>;
+  return <>{phase === 'loading' && <p role="status" className="card-entry-loading">{tr('Loading secure card entry…')}</p>}
+    <iframe ref={frame} className="card-entry-frame" src={src} title={tr('{0} secure card entry', providerName)} referrerPolicy="no-referrer"
+      sandbox="allow-scripts allow-same-origin allow-forms allow-popups" aria-busy={phase !== 'ready'}/></>;
 }
 
 /**

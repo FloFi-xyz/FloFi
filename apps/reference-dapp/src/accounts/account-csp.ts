@@ -57,9 +57,9 @@ export function accountPagePolicy(nonce: string, env: Env = process.env, options
 
 /**
  * The product pages' policy. Next.js serves one policy per response and this one replaces `next.config.ts`'s, so it is complete: the
- * signer's script rules, the network the product uses (itself, Privy and the bot protection), and who may frame the page (`'none'` for
- * the sensitive pages, the MCP hosts for `/mcp/approve`, unrestricted as before for the workspace). Frames, images and fonts keep the
- * product's existing freedom; none of them runs script in this origin.
+ * signer's script rules (never the bot-check loader, which only `/login` may load), the network the product uses (itself and Privy), and
+ * who may frame the page (`'none'` for the sensitive pages, the MCP hosts for `/mcp/approve`, FloFi itself for the workspace; `null`
+ * leaves it unrestricted). Frames, images and fonts keep the product's existing freedom; none of them runs script in this origin.
  */
 export function productPagePolicy(nonce: string, options: { readonly frameAncestors: string | null }, env: Env = process.env): string {
   return [

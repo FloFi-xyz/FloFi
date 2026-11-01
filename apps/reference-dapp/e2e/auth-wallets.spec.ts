@@ -312,6 +312,19 @@ test('Disconnect revokes the session, logs out of Privy and lands on /login; Bac
   expect(await wallets()).toBe(walletsBefore);
 });
 
+test('signer pages render Privy from the server render on (no remount, no false "not configured" text)', async ({ page }) => {
+  await setup(page, { email: 'keep@flofi-e2e.test' });
+  const html = await (await page.request.get('/login')).text();
+  expect(html).not.toContain('not configured on this deployment');
+  // The page stays mounted once loaded: what is typed survives Privy becoming ready, and the document is never reloaded.
+  await page.goto('/login');
+  await page.getByRole('button', { name: 'Email', exact: true }).click();
+  await page.getByLabel('Email address').fill('keep@flofi-e2e.test');
+  await expect(page.getByRole('button', { name: 'Email me a code' })).toBeEnabled();
+  await expect(page.getByLabel('Email address')).toHaveValue('keep@flofi-e2e.test');
+  expect(await page.evaluate(() => (performance.getEntriesByType('navigation')[0] as PerformanceNavigationTiming).type)).toBe('navigate');
+});
+
 test('a Privy session left in the browser is never reused by /login on its own', async ({ page, context }) => {
   await setup(page, { google: 'e2e-ana' });
   await googleSignIn(page);

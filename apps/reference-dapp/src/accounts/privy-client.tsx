@@ -22,7 +22,8 @@ import { defaultSolanaRpcsPlugin, toSolanaWalletConnectors, useCreateWallet as u
   useImportWallet as useImportSolanaWallet, useSignMessage as useSignSolanaMessage, useSignTransaction as useSignSolanaTransaction,
   useWallets as useSolanaWallets } from '@privy-io/react-auth/solana';
 import type { PrivyBrowserConfig } from './privy-server';
-import { isSignerPage } from './signer-pages';
+import { signerPolicy } from './signer-pages';
+import { usePathname } from 'next/navigation';
 import { createLoginChannel, FloFiAccountsContext as AccountsContext, FloFiPrivyContext as Context, privyErrorCode, Registrar, useFloFiPrivy, type FloFiPrivy, type PrivyEmbedded, type PrivyLoginEvent,
   type PrivyReview } from './privy-context';
 export { currentFloFiPrivy, FloFiPrivyContext, privyErrorCode, useAccountsOffered, useFloFiPrivy, type FloFiPrivy, type PrivyEmbedded, type PrivyEvmTransaction,
@@ -200,25 +201,42 @@ function EmulatedPrivy({ children }: { children: ReactNode }) {
   return <Context.Provider value={value}><Registrar/>{children}</Context.Provider>;
 }
 
+const NO_CHANGES = () => () => undefined;
+/** The path this document was loaded at (Navigation Timing), or null when the browser does not say. */
+export function loadedDocumentPath(): string | null {
+  try {
+    const entry = performance.getEntriesByType('navigation')[0];
+    return entry?.name ? new URL(entry.name).pathname : null;
+  } catch { return null; }
+}
+/**
+ * Whether Privy may mount for the page at `pathname` in a document loaded at `loaded`, and whether the document must be reloaded first.
+ * Privy mounts only when the document was served the same class of signer policy as the page needs (src/accounts/signer-pages.ts); a
+ * document that was not (one reached by a client-side navigation) is reloaded once, so it is served that page's own policy. When the
+ * browser does not say where the document was loaded, Privy stays unmounted (fails closed, never a reload loop).
+ */
+export function signerDocument(pathname: string, loaded: string | null): { readonly mount: boolean; readonly reload: boolean } {
+  const policy = signerPolicy(pathname);
+  if (policy === null || loaded === null) return { mount: false, reload: false };
+  const same = signerPolicy(loaded) === policy;
+  return { mount: same, reload: !same };
+}
+
 /**
  * Wraps a page in FloFi's Privy context. `config` comes from the server (`accountState().privy`): null means Privy is not configured here.
  *
- * Privy is mounted only in a document that was loaded as a page hosting the signer (src/accounts/signer-pages.ts), because only those
- * responses carry the signer pages' script policy and a document keeps the policy it was loaded with. A page reached by a client-side
- * navigation from another page (the landing, the docs) is reloaded once instead, so the signer never runs under a weaker policy.
+ * Privy is mounted only in a document that was loaded as a page hosting the signer with that page's class of policy (signerDocument).
+ * On the server and while hydrating, the document is the page being rendered (the proxy served it its own policy), so a page loaded
+ * directly renders Privy from the start and is never remounted; a page reached by a client-side navigation from another class of page is
+ * reloaded instead, and renders nothing until then.
  */
 export function FloFiPrivyProvider({ config, accounts = false, children }: { config: PrivyBrowserConfig | null; accounts?: boolean; children: ReactNode }) {
   const settings = useMemo(() => config ? floFiPrivyConfig(config) : null, [config]);
-  const [document, setDocument] = useState<'unknown' | 'signer' | 'other'>('unknown');
-  useEffect(() => {
-    const entry = performance.getEntriesByType('navigation')[0] as PerformanceNavigationTiming | undefined;
-    let loaded = location.pathname;
-    try { if (entry?.name) loaded = new URL(entry.name).pathname; } catch { /* keep the current path */ }
-    if (isSignerPage(loaded)) { setDocument('signer'); return; }
-    setDocument('other');
-    if (isSignerPage(location.pathname)) location.replace(location.href);
-  }, []);
-  const inner = !config || !settings || document !== 'signer' ? <Context.Provider value={null}>{children}</Context.Provider>
+  const pathname = usePathname();
+  const loaded = useSyncExternalStore(NO_CHANGES, loadedDocumentPath, () => pathname);
+  const { mount, reload } = signerDocument(pathname, loaded);
+  useEffect(() => { if (reload) location.reload(); }, [reload]);
+  const inner = reload ? null : !config || !settings || !mount ? <Context.Provider value={null}>{children}</Context.Provider>
     : config.e2e ? <EmulatedPrivy>{children}</EmulatedPrivy>
       : <PrivyProvider appId={config.appId} config={settings}><PrivyBridge>{children}</PrivyBridge></PrivyProvider>;
   return <AccountsContext.Provider value={accounts}>{inner}</AccountsContext.Provider>;

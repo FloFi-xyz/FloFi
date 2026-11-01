@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest';
 import { createECDH } from 'node:crypto';
 import { NextRequest } from 'next/server';
 import { cspNonce } from './account-csp';
+import { approvalFrameAncestors } from '../server/embedded-approval';
 import { isWalletAsset, isWalletPath, managedWalletsAvailable, walletOrigin, walletPagePolicy, walletSessionCookie } from './wallet-origin';
 import { proxy } from '../proxy';
 
@@ -97,6 +98,16 @@ describe('proxy routing by host', () => {
     // BUILD-FLOFI-PRIVY-UX-001: product pages host the Privy signer, so they run only FloFi's own scripts (account-csp.ts productPagePolicy).
     const app = await route('https://app.flofi.example/app');
     expect(app.headers.get('content-security-policy')).toMatch(/^script-src 'self' 'nonce-[A-Za-z0-9+/]{22}==' 'unsafe-eval'; /);
-    expect((await route('https://app.flofi.example/mcp/approve')).headers.get('content-security-policy')).toMatch(/^script-src 'self' 'nonce-.*; frame-ancestors /);
+    // Who may frame each signer page: FloFi itself for the workspace, nobody for the sensitive pages, the MCP hosts for /mcp/approve.
+    expect(app.headers.get('content-security-policy')).toMatch(/; frame-ancestors 'self'$/);
+    for (const path of ['/app/credentials', '/approve', '/connections']) {
+      expect((await route(`https://app.flofi.example${path}`)).headers.get('content-security-policy'), path).toMatch(/; frame-ancestors 'none'$/);
+    }
+    const mcp = await route('https://app.flofi.example/mcp/approve', {}, { FLOFI_PUBLIC_ORIGIN: 'https://app.flofi.example' });
+    expect(mcp.headers.get('content-security-policy')).toMatch(/^script-src 'self' 'nonce-.*; frame-ancestors /);
+    expect(mcp.headers.get('content-security-policy')).toContain(`; frame-ancestors ${approvalFrameAncestors({ FLOFI_PUBLIC_ORIGIN: 'https://app.flofi.example' })}`);
+    expect(mcp.headers.get('referrer-policy')).toBe('no-referrer');
+    expect(mcp.headers.get('cache-control')).toMatch(/no-store/);
+    expect(mcp.headers.get('x-frame-options')).toBeNull();
   });
 });

@@ -52,8 +52,10 @@ Browser (flofi.xyz)                                   FloFi server              
    no provider-hosted import input: `useImportWallet().importWallet({ privateKey })` takes the key as a string from the page, and the SDK
    posts it to Privy's frame on `auth.privy.io`. So the key is typed into FloFi's own import screen; the screen reads it once from an
    uncontrolled field (no React state, no `name`, no form action), clears the field and hands it straight to that call. Where the browser
-   can mask a text field (`-webkit-text-security`) the field is a masked text field, not a password field, so the browser's password
-   manager is not offered the key; elsewhere it stays a password field with autocomplete off (live runbook step 5). No server
+   can mask a text field (`-webkit-text-security`) the field is a masked text field from the server render on (never first a password
+   field), so the browser's password manager is not offered the key; elsewhere it is a password field with autocomplete off (live runbook
+   step 5). Trade-off: unlike a password field, a masked text field can be copied, may be echoed by a screen reader, and on some mobile
+   keyboards may feed suggestions (autocorrect, spell-check and writing-assistant extensions are turned off; runbook step 5). No server
    action, form submission, URL, log, analytics event or storage carries it; the browser suite proves no request to FloFi's origin, no
    browser storage and no database row contains it. Its exposure is FloFi's own page code only: the import screen is an account page under
    the signer pages' script policy (6.), with no workflow/Copilot/MCP code and no third-party script (not even the bot-check loader, which
@@ -72,13 +74,15 @@ Browser (flofi.xyz)                                   FloFi server              
 5. **No merges, no takeovers** (§4), **no automatic reconnection** (§6).
 6. **No untrusted script where the signer lives.** Privy's session and wallet frame trust the whole product origin and Privy's
    confirmation is drawn by the page, so any script running there could ask Privy to sign without FloFi's gate. The signer mounts only in
-   a document that was loaded on a signer page — account pages (`/login`, `/onboarding*`) and product pages (`/app*`, `/approve`,
-   `/connections`, `/mcp/approve`, `/__engineering`) — and each is served by the proxy with a per-request nonce policy
+   a document that was loaded with the policy of the page it shows — account pages (`/login`, `/onboarding*`) and product pages (`/app*`,
+   `/approve`, `/connections`, `/mcp/approve`, `/__engineering`) — and each is served by the proxy with a per-request nonce policy
    (src/accounts/account-csp.ts): `script-src 'self' 'nonce-…' 'unsafe-eval'` and no other host, no `'strict-dynamic'` (a script inserted
    at runtime must still come from FloFi), `script-src-attr 'none'`, `object-src`/`base-uri 'none'`, network only to FloFi and Privy.
-   Privy's bot-check loader (`FLOFI_PRIVY_BOT_PROTECTION`) is allowed on `/login` only, never on the import screen or the product. A
-   client-side navigation from a page without that policy (`/`, `/docs`, `/privacy`) into a signer page reloads it, so the signer never
-   runs under another page's policy (`FloFiPrivyProvider`'s document check, src/accounts/signer-pages.ts). No nonce is handed to Privy:
+   Privy's bot-check loader (`FLOFI_PRIVY_BOT_PROTECTION`) is allowed on `/login` only, never on the import screen or the product. The
+   signer pages fall in three policy classes (`/login`, other account pages, product pages; src/accounts/signer-pages.ts): a page loaded
+   directly renders Privy from the server render on (never remounted), and a client-side navigation into a signer page from a page of
+   another class or without that policy (`/`, `/docs`, `/privacy`) reloads it once, so the signer never runs under another class's policy
+   (`FloFiPrivyProvider`, `signerDocument`). Where the browser does not report how the document was loaded, Privy stays unmounted. No nonce is handed to Privy:
    Privy 3.51.0 has no such option, so what it loads must match the policy's hosts. Framing: `/approve`, `/connections` and
    `/app/credentials` are never framed; `/mcp/approve` keeps its MCP host allowlist; every other product page may be framed only by FloFi
    itself (`frame-ancestors 'self'`). `nosniff` everywhere, so no same-origin non-JavaScript response runs as a script. Third-party payment
@@ -205,6 +209,20 @@ verifies with the official SDK, serves Privy's user API, and signs with disposab
    refuses to broadcast it and the attempt is UNKNOWN until reconciled (fail-closed; nothing is sent).
 10. Not introduced here, still open: "Sign in again" for `ACCOUNT_REAUTHENTICATION_REQUIRED` (delete account, link a wallet) returns to the
     same page while the session is valid; Disconnect, then sign in, is the working path.
+11. The card origin is on the same site as the product (`cards.flofi.xyz` / `flofi.xyz`). Mercado Pago's script there cannot frame,
+    navigate or script the product, but a same-site script could set `Domain=flofi.xyz` cookies that shadow `flofi_account_session`
+    (sealed, so it could plant only a valid session of its own or push the person's out) and send requests that carry SameSite cookies
+    (server actions check Origin). Strictly better than before, when that SDK ran on the product origin itself. Follow-up: `__Host-`
+    cookie names and Origin checks on state-changing route handlers, or a card origin on its own registrable domain.
+12. Sign-in freshness relies on Privy updating a sign-in method's `latest_verified_at` at every login (verified only against the
+    stand-in; live runbook step 7a is a NO-GO check). It is the newest verification across the Privy user's identities: it proves a login
+    at Privy in the last 10 minutes, not in this browser; the browser-side logout of leftover sessions and the single-use token cover that.
+13. `/mcp/approve` inside an MCP host's frame mounts Privy but can never authorize there: the account cookie (`SameSite=Lax`) is not sent in
+    a cross-site frame, so the signing gate refuses (fails closed). The page keeps the nonce policy.
+14. Escape inside Mercado Pago's own card-number, expiry and security-code fields does not close Add card (they are cross-origin frames
+    within the card page); Cancel, Close and the backdrop do. The card frame has a fixed height (470 px, 560 px on narrow screens), so very
+    large text or a short landscape screen scrolls inside it.
+15. Privy's own screens show FloFi's English header and button texts ("Sign in to FloFi", "Sign"): Privy's configuration is not localized.
 
 ## 11a. Specialist review (CLAUDE.md procedure)
 
@@ -234,6 +252,24 @@ after this session started). Findings and disposition:
 `agent_guard.py review --base origin/main` reports all 19 domains as selected (the dependency, lockfile and CI changes select every
 domain) and every `flofi-*` specialist as not invoked: the hook ledger saw the three reviews above as `general-purpose` agents. The other 16
 domains had no specialist review in this session; their regression suites ran in the unit, critical browser and CircleCI gates.
+
+## 11b. Real specialist reviews (`.claude/agents/flofi-*.md`, recorded by the hook ledger)
+
+The `flofi-*` specialists ran read-only, at most three at once, each given the base (`origin/main` d37b6168), the diff, the changed
+paths and its `agent_guard.py domain` report. Their final reports reached main as plain text: the repository hook refuses `SubagentHandback`
+to reviewers (recorded as guard denials), which the ledger counts while still recording each review's `FLOFI_REVIEW_RESULT`.
+
+| Round | Specialist | Result (ledger) | Disposition |
+| --- | --- | --- | --- |
+| 1 | flofi-security | 5 findings, highest medium | Privy blocked on `/approve` and `/connections` (medium): fixed, Privy hosts in the product policy, one CSP header per route measured. Silently refreshed token passing the recent-sign-in check: fixed (Privy verification time; later also refused at sign-in). Disconnect order: fixed (FloFi session revoked first, each step bounded). Leftover Privy session reused via `privy_oauth_*`: fixed (login events buffered; browser test). Apple accepted while off: fixed |
+| 1 | flofi-wallet-execution | 3, medium | Nothing checked Privy's signed EVM bytes (medium): fixed, strict RLP decode and nine-field comparison before broadcast. Solana routed to an external wallet with the same address: fixed (`isPrivyWallet`). Browser suite lost signing checks: restored |
+| 1 | flofi-data-privacy | 5, medium | Key-shaped wallet names stored (medium): refused in the browser and by the server. Account deletion and privacy notice vs the Privy user (medium): `/privacy` names Privy and what deletion leaves at Privy; delete dialog says so. Email challenges cleanup: restored at sign-in. 0019 check3 admitted a Privy wallet claiming a recovery phrase: fixed (new SHA-256, Release A corrected). Rollback docs: completed |
+| 2 | flofi-security | 8, highest "high if confirmed" | Encoded path aliases (high if confirmed): measured, every alias is 404 (not exploitable); the card page also checks its host. Framing: workspace `frame-ancestors 'self'`, card frame sandboxed. Solana filter: tested. Bot-check loader: `/login` only; `scriptNonce` removed (not a Privy option). Stale Privy login: refused at sign-in. Key field: masked text field. Half-linked external wallet name: fixed. Docs: boundary stated as the origin |
+| 2 | flofi-wallet-execution | 2, low | Solana filter test added; RLP list-end check added with the reviewer's vector |
+| 2 | flofi-payments-billing | 4, medium | Invalid email left Add card stuck (medium): checked in the frame first. Blank dialog if the frame never loads: 20 s timeout to "unavailable". Escape: posts cancel. Test gaps: spoofed `postMessage`, status branches, card-origin routing tests added |
+| 3 | flofi-security | 7, medium | Key field first rendered as a password field (medium): masked text from the server render. Provider remounted every signer page (medium): stable tree, policy classes. Returning-login dependency on Privy (medium, verification gap): runbook step 7a NO-GO. Policy classes: implemented. Same-site card origin: §11.11. Masked-field trade-offs: §3.3, runbook. Stale comment: fixed |
+| 3 | flofi-mcp | 2, medium | Remount could drop the in-chat handoff capability (medium): fixed by the stable tree (no remount). Privy mounted in MCP host frames: §11.13. No MCP schema, OAuth, handoff or approval contract changed; `/mcp/approve` headers now pinned by test |
+| 3 | flofi-frontend-ux | 10, medium | Remount and false "not configured" flash (medium) and key field (medium): fixed as above, browser test for the login page. Card frame `lang`, loading status, focus to Close, PT wording, default wallet name in PT: fixed. Escape inside Mercado Pago's fields and fixed frame height: §11.14. Privy texts not localized: §11.15 |
 
 ## 12. GO / NO-GO
 
