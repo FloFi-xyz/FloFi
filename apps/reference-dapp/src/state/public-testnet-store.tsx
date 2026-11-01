@@ -49,7 +49,8 @@ function message(error: unknown): string {
     WALLET_AUTHORIZATION_REJECTED: 'You declined the request in your wallet. Nothing was signed or sent.',
     WRONG_WALLET_CHAIN: 'Your wallet is on another network. Switch it to the network of this swap, then authorize again. Nothing was sent.',
     SUBMISSION_RESULT_UNKNOWN: 'Your wallet did not confirm whether it sent the transaction. FloFi keeps checking the network; do not send it again.',
-    TRANSACTION_ARTIFACT_CHANGED: 'The reviewed transaction changed before your wallet was asked, so nothing was sent. Simulate again to review it.',
+    // The attempt is recorded as unresolved (Simulate stays closed until it is), so this names what happened, not a step the page cannot offer.
+    TRANSACTION_ARTIFACT_CHANGED: 'The transaction to sign did not match the reviewed one, so FloFi stopped before asking your wallet. Nothing was signed.',
     PUBLIC_RECORDING_OFF: 'Public testnet recording is not enabled on this app instance.',
     ROBINHOOD_MAINNET_NOT_ENABLED: 'Robinhood Chain is not enabled on this app instance.',
     BASE_MAINNET_NOT_ENABLED: 'Base mainnet is not enabled on this app instance.', BASE_STORAGE_NOT_CONFIGURED: 'Base mainnet is not enabled on this app instance.',
@@ -295,7 +296,9 @@ export function PublicTestnetProvider({ children }: { children: ReactNode }) {
         if (state === 'CONFIRMED' || state === 'REVERTED') journey.mark('confirmation');
         if (observed.outcome) journey.mark('reconciliation');
         return observed;
-      }, observed => Boolean(observed.divergence || observed.outcome) || observed.attempts.at(-1)?.state !== 'PENDING', { active: () => mountedRef.current });
+      // The same stopping rule as the follow after a reload: a hash without a receipt yet (HASH) keeps being followed.
+      }, observed => Boolean(observed.divergence || observed.outcome) || !['PENDING', 'HASH'].includes(observed.attempts.at(-1)?.state ?? ''),
+      { active: () => mountedRef.current });
       const state = followed.value?.attempts.at(-1)?.state;
       finish(state === 'REVERTED' ? 'failed' : state === 'UNKNOWN' ? 'inconclusive' : followed.value?.outcome ? 'reconciled' : 'in_progress');
     } catch (cause) { finish('in_progress'); throw cause; }

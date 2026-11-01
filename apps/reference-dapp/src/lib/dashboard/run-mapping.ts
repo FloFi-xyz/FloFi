@@ -34,7 +34,7 @@ export function projectDashboardRun(run: DashboardRun, progress: ExecutionLifecy
   const result = projectExecutionResult(progress);
   // A recorded unknown wallet or submission result: something may have been sent (the canonical lifecycle's INCONCLUSIVE).
   const unproven = recordedResultUnknown(run.errorCode);
-  let status: DashboardStatus = 'Unresolved', message = 'FloFi has not established the final workflow outcome.';
+  let status: DashboardStatus = 'Unresolved', message = 'FloFi has not established the final workflow outcome.', notSubmittedChip = 'Wallet confirmation was declined';
   if (progress) {
     status = progress.state === 'active' ? 'In progress' : progress.state === 'idle' ? 'Not started'
       : progress.state === 'complete' ? progress.planUnavailable ? 'Needs attention' : progress.evidence?.attention.length ? 'Completed with attention' : 'Completed'
@@ -48,6 +48,13 @@ export function projectDashboardRun(run: DashboardRun, progress: ExecutionLifecy
   // BUILD-FLOFI-EXECUTION-PERFORMANCE-001: the same groups as the canonical lifecycle (domain/canonical-execution-status.ts) for statuses flows emit.
   } else if (['CANCELLED', 'REJECTED', 'NOT_SUBMITTED', 'NOT_EXECUTED', 'EXPIRED'].includes(run.status) && !run.needsObservation) {
     status = 'Transaction not submitted'; message = 'This request was recorded as not submitted. Earlier confirmed actions and costs remain recorded.';
+    // Only a wallet decline or a cancellation is "declined": a request FloFi refused before the wallet (NOT_SUBMITTED) or one that expired
+    // without executing is said as such.
+    if (run.status === 'NOT_SUBMITTED') notSubmittedChip = 'The request was not submitted';
+    else if (run.status === 'NOT_EXECUTED' || run.status === 'EXPIRED') {
+      notSubmittedChip = 'The request expired without executing';
+      message = 'This request expired without executing. Earlier confirmed actions and costs remain recorded.';
+    }
   } else if (run.status === 'SUBMITTING') {
     status = 'Unresolved'; message = 'A recorded request still needs verification. No transaction is repeated.';
   } else if (['PARTIAL', 'PARTIALLY_COMPLETED'].includes(run.status)) {
@@ -66,7 +73,7 @@ export function projectDashboardRun(run: DashboardRun, progress: ExecutionLifecy
   const attention: string[] = [];
   if (status === 'Unresolved') attention.push('Execution status unresolved');
   else if (status === 'Partially completed' || status === 'Failed') attention.push('Review the incomplete action');
-  else if (status === 'Transaction not submitted') attention.push('Wallet confirmation was declined');
+  else if (status === 'Transaction not submitted') attention.push(progress ? 'Wallet confirmation was declined' : notSubmittedChip);
   else if (status === 'Needs attention') attention.push(message);
   if (run.needsObservation) attention.push('Awaiting an execution status check');
   // BUILD-FLOFI-CHAT-E2E-FIX-002: a run that never made a wallet request has nothing to attend to on chain: its recorded issue (an expired quote,

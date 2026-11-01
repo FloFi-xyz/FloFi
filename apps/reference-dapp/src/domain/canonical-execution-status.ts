@@ -68,6 +68,14 @@ function latestAttempt(run: RunSummaryFacts): { state: string; hash: boolean } |
 }
 /** Whether an earlier step of this run is already confirmed onchain (e.g. an approval before the swap, the first leg of a composition). */
 const earlierConfirmed = (run: RunSummaryFacts) => attemptsOf(run).some(a => a.state === 'CONFIRMED' || a.reconciled === true);
+/** Whether a step before the latest attempt is confirmed (the latest one reverted or failed after it). */
+const confirmedBeforeLatest = (run: RunSummaryFacts) => attemptsOf(run).slice(0, -1).some(a => a.state === 'CONFIRMED' || a.reconciled === true);
+/**
+ * A transaction that landed but did not reconcile as reviewed (a settlement, fee-budget or other mismatch; an attempt awaiting reconciliation):
+ * a person has to look, so it is never presented as a final failure or a partial completion.
+ */
+const landedUnreconciled = (run: RunSummaryFacts, attempt: { state: string } | null) =>
+  attempt?.state === 'RECONCILIATION_REQUIRED' || typeof run.errorCode === 'string' && /MISMATCH|DIVERGEN/.test(run.errorCode);
 /**
  * What the latest attempt says, when the run's own status does not settle it (it still reads as not started, or is a working phase). Anything
  * after the wallet was asked is never "nothing was sent": an attempt being submitted, or with an unknown result, is INCONCLUSIVE.
@@ -84,20 +92,32 @@ function attemptLifecycle(attempt: { state: string; hash: boolean }, confirmed: 
 
 export function canonicalRunLifecycle(run: RunSummaryFacts): CanonicalLifecycle {
   const observing = run.needsObservation === true, attention = run.attentionRequired === true || (typeof run.errorCode === 'string' && run.errorCode.length > 0);
-  const status = run.status, confirmed = earlierConfirmed(run);
+  const status = run.status, confirmed = earlierConfirmed(run), attempt = latestAttempt(run);
   if (settledWithEvidence(run) && !observing)
     return of(attention ? 'RECONCILED_WITH_ATTENTION' : 'RECONCILED');
   // The latest request was declined, cancelled, expired or never submitted. With an earlier step confirmed, the run is partially completed.
   if (DECLINED.has(status) && !observing) return of(confirmed ? 'PARTIALLY_COMPLETED' : 'REJECTED');
-  // Earlier steps completed (the Dashboard's "Partially completed"); while an observation is still pending the outcome can still change.
-  if (status === 'PARTIAL' || status === 'PARTIALLY_COMPLETED') return { ...of('PARTIALLY_COMPLETED'), final: !observing };
+  // A transaction landed but did not reconcile as reviewed (e.g. a lending borrow over its fee budget): never a final failure or partial result.
+  if (['PARTIAL', 'PARTIALLY_COMPLETED', 'REVERTED', 'FAILED'].includes(status) && landedUnreconciled(run, attempt)) return of('INTERVENTION_REQUIRED');
+  if (status === 'PARTIAL' || status === 'PARTIALLY_COMPLETED') {
+    // A resumable run between steps (the latest step confirmed, nothing wrong recorded) is not final: the next step can still be authorized.
+    if (attempt?.state === 'CONFIRMED' && !attention) return of('CONFIRMED_ONCHAIN');
+    // Earlier steps completed (the Dashboard's "Partially completed"); while an observation is still pending the outcome can still change.
+    return { ...of('PARTIALLY_COMPLETED'), final: !observing };
+  }
+  // A step reverted or failed after an earlier step was confirmed onchain (e.g. a borrow after a supply): earlier actions remain.
+  if ((status === 'REVERTED' || status === 'FAILED') && !observing && confirmedBeforeLatest(run)) return of('PARTIALLY_COMPLETED');
   if (status === 'REVERTED' && !observing) return of('REVERTED');
   // A bridge refunded on its origin chain: the transfer did not settle; the funds came back (final, never completion).
   if ((status === 'FAILED' || status === 'REFUNDED') && !observing) return of('FAILED');
+  // An unknown result nothing will observe again (e.g. a Pix source that moved, but not as instructed): a person has to act.
+  if (status === 'UNKNOWN' && !observing) return of('INTERVENTION_REQUIRED');
   if (INCONCLUSIVE.has(status)) return of('INCONCLUSIVE');
+  // A routine recovery while FloFi still observes an in-flight step (e.g. lending awaiting confirmations): what is happening is the attempt's.
+  if (status === 'RECOVERY_REQUIRED' && observing && attempt && ['PENDING', 'HASH', 'SUBMITTING', 'SUBMISSION_RESULT_UNKNOWN'].includes(attempt.state)
+    && !landedUnreconciled(run, attempt)) return of(attemptLifecycle(attempt, confirmed));
   if (INTERVENTION.has(status)) return of('INTERVENTION_REQUIRED');
   if (SETTLING.has(status)) return of('SETTLEMENT_PENDING');
-  const attempt = latestAttempt(run);
   if (NOT_STARTED.has(status)) {
     // A recorded unknown wallet result (the run itself may still read AUTHORIZED, as Pix's does) or a pending observation: never "nothing sent".
     if (recordedResultUnknown(run.errorCode) || observing) return of('INCONCLUSIVE');
@@ -105,7 +125,8 @@ export function canonicalRunLifecycle(run: RunSummaryFacts): CanonicalLifecycle 
     // Never "nothing was sent" when an earlier step (an approval, a first leg) is confirmed onchain.
     return of(confirmed ? 'CONFIRMED_ONCHAIN' : 'NOT_STARTED');
   }
-  if (WORKING.has(status)) return of(attempt ? attemptLifecycle(attempt, confirmed) : 'INCONCLUSIVE');
+  // BOUND: a bound composition's first leg is reconciled and bound (its projector carries no attempts).
+  if (WORKING.has(status)) return of(attempt ? attemptLifecycle(attempt, confirmed) : status === 'BOUND' ? 'CONFIRMED_ONCHAIN' : 'INCONCLUSIVE');
   // A hash is claimed only when one is recorded (HASH is the flow saying so); a summary without attempts says SUBMITTED.
   if (status === 'HASH') return of('HASH_KNOWN');
   if (status === 'PENDING' || SUBMITTED.has(status)) return of(attempt?.hash ? 'HASH_KNOWN' : 'SUBMITTED');

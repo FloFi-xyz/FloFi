@@ -94,5 +94,29 @@ describe('BUILD-FLOFI-EXECUTION-PERFORMANCE-001 canonical execution status', () 
     expect(canonicalRunLifecycle({ status: 'BOUND', attempts: [{ state: 'CONFIRMED' }] }).status).toBe('CONFIRMED_ONCHAIN');
     expect(canonicalRunLifecycle({ status: 'PRODUCING' }).status).toBe('INCONCLUSIVE');
     expect(canonicalRunLifecycle({ status: 'ATTENTION' }).status).toBe('INTERVENTION_REQUIRED');
+    // A bound composition's projector carries no attempts: BOUND means its first leg is reconciled and bound.
+    expect(canonicalRunLifecycle({ status: 'BOUND', attempts: [] }).status).toBe('CONFIRMED_ONCHAIN');
+  });
+  it('never calls a landed-but-unreconciled step a final failure, and keeps earlier confirmed steps visible (lending, Pix)', () => {
+    // A borrow mined over its fee budget after a reconciled supply: a person has to look (not FAILED, not final).
+    const overBudget = { status: 'FAILED', errorCode: 'LENDING_FEE_BUDGET_MISMATCH',
+      attempts: [{ state: 'CONFIRMED', reconciled: true }, { state: 'RECONCILIATION_REQUIRED', transactionHash: '0xabc' }] };
+    expect(canonicalRunLifecycle(overBudget)).toMatchObject({ status: 'INTERVENTION_REQUIRED', final: false });
+    expect(canonicalRunLifecycle({ status: 'PARTIALLY_COMPLETED', errorCode: 'LENDING_SWAP_SETTLEMENT_MISMATCH', attempts: [{ state: 'CONFIRMED' }] }).status)
+      .toBe('INTERVENTION_REQUIRED');
+    // A borrow that reverted after a confirmed supply: earlier actions remain (as a declined borrow already reads).
+    expect(canonicalRunLifecycle({ status: 'REVERTED', attempts: [{ state: 'CONFIRMED' }, { state: 'REVERTED' }] })).toMatchObject({ status: 'PARTIALLY_COMPLETED', final: true });
+    expect(canonicalRunLifecycle({ status: 'REVERTED', attempts: [{ state: 'REVERTED' }] }).status).toBe('REVERTED');
+    // A refunded bridge stays a failure even after its deposit confirmed: the funds came back.
+    expect(canonicalRunLifecycle({ status: 'REFUNDED', attempts: [{ state: 'CONFIRMED' }, { state: 'CONFIRMED' }] }).status).toBe('FAILED');
+    // A lending run between steps is resumable, not final.
+    expect(canonicalRunLifecycle({ status: 'PARTIALLY_COMPLETED', attempts: [{ state: 'CONFIRMED', reconciled: true }] })).toMatchObject({ status: 'CONFIRMED_ONCHAIN', final: false });
+    // A routine recovery while a step is still observed follows the attempt; a mismatch never does.
+    expect(canonicalRunLifecycle({ status: 'RECOVERY_REQUIRED', needsObservation: true, attempts: [{ state: 'PENDING', transactionHash: '0xabc' }] }).status).toBe('HASH_KNOWN');
+    expect(canonicalRunLifecycle({ status: 'RECOVERY_REQUIRED', needsObservation: true, errorCode: 'X_MISMATCH', attempts: [{ state: 'PENDING' }] }).status).toBe('INTERVENTION_REQUIRED');
+    expect(canonicalRunLifecycle({ status: 'RECOVERY_REQUIRED' }).status).toBe('INTERVENTION_REQUIRED');
+    // Pix: a source that moved, but not as instructed, is never observed again: a person has to act.
+    expect(canonicalRunLifecycle({ status: 'UNKNOWN', errorCode: 'PAYMENT_SOURCE_NOT_AS_INSTRUCTED' })).toMatchObject({ status: 'INTERVENTION_REQUIRED', final: false });
+    expect(canonicalRunLifecycle({ status: 'UNKNOWN', needsObservation: true }).status).toBe('INCONCLUSIVE');
   });
 });

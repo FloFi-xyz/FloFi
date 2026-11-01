@@ -991,7 +991,11 @@ const pixPayment: FlowDefinition = {
   projector(logName, bytes): Projection | null {
     if (!logName.endsWith('.jsonl')) return null;
     const record = lastRecord<PaymentRecord>(bytes), observe = paymentNeedsObservation(record), evidence = paymentEvidence(record);
-    return { run: { runId: record.id, workflowId: record.id, flow: 'pix-payment', status: record.state,
+    // BUILD-FLOFI-EXECUTION-PERFORMANCE-001: while the payment stays AUTHORIZED its source attempt says what happened (PREPARED, SUBMITTING,
+    // SUBMISSION_RESULT_UNKNOWN), as the transfer projectors publish it: a summary without attempts (the Dashboard list) never reads a wallet
+    // request in flight, or one with an unknown result, as "nothing was sent". The run log keeps the exact record.
+    const status = record.state === 'AUTHORIZED' && record.attempt ? record.attempt.state : record.state;
+    return { run: { runId: record.id, workflowId: record.id, flow: 'pix-payment', status,
       // The run log keeps the exact label; a provider sandbox is the valueless public-test class of the projection.
       provenance: record.provenance === 'PROVIDER_SANDBOX' ? 'PUBLIC_TESTNET' : record.provenance, ownerAccount: record.facts.owner.address, recoveryOf: null,
       errorCode: errorCode(record.error), needsObservation: observe, hasEvidence: evidence !== null,

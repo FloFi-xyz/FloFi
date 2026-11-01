@@ -50,6 +50,10 @@ export const portugueseFinancialExecution: Readonly<Record<string, string>> = {
   'Destination observed · awaiting reconciliation': 'Recebimento observado · aguardando verificação final',
   'Destination observed · awaiting finality': 'Recebimento observado · aguardando confirmação definitiva',
   'A recorded request still needs verification. No transaction is repeated.': 'Uma solicitação registrada ainda precisa ser verificada. Nenhuma transação é repetida.',
+  // BUILD-FLOFI-EXECUTION-PERFORMANCE-001: the Dashboard says why a request was not submitted.
+  'The request was not submitted': 'A solicitação não foi enviada', 'The request expired without executing': 'A solicitação expirou sem ser executada',
+  'This request expired without executing. Earlier confirmed actions and costs remain recorded.':
+    'Esta solicitação expirou sem ser executada. Operações anteriores confirmadas e custos continuam registrados.',
   'This request was recorded as not submitted. Earlier confirmed actions and costs remain recorded.': 'Esta solicitação foi registrada como não enviada. Operações anteriores confirmadas e seus custos continuam registrados.',
   'Complete the amount, assets, networks and recipient in Build before simulating.': 'Preencha o valor, os tokens, as redes e o destinatário em Criar antes de simular.',
   'This workflow has no supported simulation route on the selected public mainnets.': 'Esta operação não tem uma rota de simulação compatível nas redes principais selecionadas.',

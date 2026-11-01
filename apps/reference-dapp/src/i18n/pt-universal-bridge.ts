@@ -51,6 +51,7 @@ export const portugueseUniversalBridge: Readonly<Record<string, string>> = {
   'Indicative quotes for a public address. Simulate quotes again for your own wallet.': 'Cotações indicativas para um endereço público. Simular cota de novo para a sua própria carteira.',
   'Route options': 'Opções de rota', 'Note': 'Nota', '· recommended': '· recomendada',
   'Did not answer within the comparison window.': 'Não respondeu dentro da janela de comparação.',
+  'Not compared in time': 'Não comparado a tempo',
   'Provisional comparison: {0} did not answer in time. Find routes again to compare them.':
     'Comparação provisória: sem resposta a tempo de {0}. Procure rotas de novo para as comparar.',
   'Executes on the certified Router bridge for this pair.': 'Executa na bridge certificada do Router para este par.', 'Use this route': 'Usar esta rota',
