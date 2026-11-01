@@ -130,7 +130,7 @@ async function readBuildEstimateValue(input: unknown, env: Env = process.env,
         const inRef = amount.value.asset, outRef = output.value;
         // BUILD-FLOFI-WALLET-UX-EXECUTION-FIX-001 (P0-07): a catalog network's native ETH side (`nativeId`, no address) is quoted by the runtime
         // under its native sentinel. It matches only that sentinel, never WETH or another token; Solana sides are always mints.
-        const expectedToken = (ref: typeof inRef) => 'address' in ref ? ref.address : catalogNetwork ? NATIVE_ETH : null;
+        const expectedToken = (ref: typeof inRef) => 'address' in ref ? ref.address : catalogNetwork && ref.decimals === 18 && ref.chainId === node.chainId ? NATIVE_ETH : null;
         if (expectedToken(inRef) === null || expectedToken(outRef) === null) throw Error('ESTIMATE_RESPONSE_INVALID');
         const input = catalogNetwork ? { address: q.inputToken, decimals: q.inputDecimals, symbol: q.inputSymbol } : q.input as { mint?: unknown; decimals?: unknown; symbol?: unknown } | undefined;
         const out = catalogNetwork ? { address: q.outputToken, decimals: q.outputDecimals, symbol: q.outputSymbol } : q.output as { mint?: unknown; decimals?: unknown; symbol?: unknown } | undefined;

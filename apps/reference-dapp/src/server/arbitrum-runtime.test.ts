@@ -453,6 +453,18 @@ describe('BUILD-FLOFI-WALLET-UX-EXECUTION-FIX-001 owner account types on the own
     chain.state.codeOverride.set(owner, '0x6080604052');
     await expect(swapService().prepare(usdcToEth(), owner)).rejects.toThrow('OWNER_NOT_EOA');
   });
+  it('never reconciles a swap whose owner account carries contract code or an unreviewed delegate where it landed', async () => {
+    const s = swapService(), first = await s.prepare(usdcToEth(), owner), id = first.quote.executionId;
+    s.review(id, first.quote.manifestHash);
+    const approve = await s.begin(id, owner);
+    s.report(id, approve.attempt.attemptId, { kind: 'HASH', txHash: chain.apply(approve.tx) }); await s.observe(id);
+    const next = await s.refresh(id); s.review(id, next.quote.manifestHash);
+    const begun = await s.begin(id, owner);
+    s.report(id, begun.attempt.attemptId, { kind: 'HASH', txHash: chain.apply(begun.tx) });
+    chain.state.codeOverride.set(owner, '0xef0100' + '9'.repeat(40));
+    const done = await s.observe(id);
+    expect(done).toMatchObject({ divergence: 'OWNER_ACCOUNT_CODE_MISMATCH', outcome: null });
+  });
   it('a delegation added after Review needs a new Review before any wallet request (T19)', async () => {
     const s = swapService(), run = await s.prepare(swap(), owner), id = run.quote.executionId;
     s.review(id, run.quote.manifestHash);

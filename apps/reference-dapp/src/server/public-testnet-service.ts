@@ -1150,6 +1150,11 @@ function createPublicTestnetCore(rpcFor: (profile: SwapProfile) => Rpc, now: () 
           if (!direct || nonce !== BigInt(attempt.tx.nonce!) || quantity(submitted.gas) > BigInt(attempt.tx.gas) || offeredFee > BigInt(attempt.tx.maxFeePerGas!) ||
               gasUsed > BigInt(attempt.tx.gas) || effectiveGasPrice > BigInt(attempt.tx.maxFeePerGas!))
             return save({ ...run, divergence: 'TRANSACTION_BOUNDS_MISMATCH' });
+          // BUILD-FLOFI-WALLET-UX-EXECUTION-FIX-001: the owner's account where the swap landed is still a standard account or a reviewed
+          // EIP-7702 delegation (MetaMask may upgrade an EOA in the meantime). Contract code or an unreviewed delegate (one that could forward the
+          // swap's ETH on receipt) is never reconciled: the run is recorded as divergent.
+          const landed = ownerAccountCode(await rpc('eth_getCode', [attempt.account, blockHex(blockNumber)]));
+          if (landed.kind === 'CONTRACT' || landed.kind === 'EIP7702' && !landed.verified) return save({ ...run, divergence: 'OWNER_ACCOUNT_CODE_MISMATCH' });
         }
         const executionGasCost = gasUsed * effectiveGasPrice;
         const receipt: PublicReceipt = { transactionHash: attempt.txHash, status: status as 0 | 1,

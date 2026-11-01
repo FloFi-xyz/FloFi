@@ -66,9 +66,10 @@ export function SimulateWorkflowCanvas({ workflowName, primaryAction, stage = 's
       lending ? { x: 180, y: 35 + index * 230 } : canvasPosition(canvasLayout ?? {}, node, index),
     data: { composer: true, inspection: true, step: index + 1, selected: false, vertical: lending,
       summary: composerSummary(workflow, node, context),
-      ...['asset.swap.exact-input', 'asset.bridge'].includes(node.actionType) ? { estimateWorkflow: workflow, estimateNodeId: node.nodeId,
+      // Simulate only: the Execute plan shows the reviewed amounts, never a newer approximate quote beside them.
+      ...stage === 'simulate' && ['asset.swap.exact-input', 'asset.bridge'].includes(node.actionType) ? { estimateWorkflow: workflow, estimateNodeId: node.nodeId,
         estimateOwner: node.chainId.startsWith('solana:') ? solanaAccount : evmAccount, estimateEvmOwner: evmAccount, estimateSolanaOwner: solanaAccount } : {} },
-  })), [workflow, context, canvasLayout, incomplete, lending, evmAccount, solanaAccount]);
+  })), [workflow, context, canvasLayout, incomplete, lending, evmAccount, solanaAccount, stage]);
   const edges = useMemo(() => incomplete ? [] : composerConnections(workflow).map(({ id, source, target }) => ({
     id, source, target, type: 'smoothstep', animated: false,
     markerEnd: { type: MarkerType.ArrowClosed, width: 18, height: 18, color: 'var(--edge-line)' },

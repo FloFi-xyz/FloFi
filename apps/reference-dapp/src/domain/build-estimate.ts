@@ -72,13 +72,14 @@ export function buildEstimateFailureMessage(code: string): string {
   if (/NO_POOL|NO_ROUTE|LIQUIDITY|POOL_UNUSABLE/.test(code)) return 'No liquid pool is available for this pair and amount.';
   if (/NOT_ENABLED/.test(code)) return 'Quotes are not enabled for this network.';
   if (code !== 'ESTIMATE_UNAVAILABLE' && /UNAVAILABLE|HTTP_|RATE_LIMIT/.test(code)) return 'The quote provider or network is unavailable. Try again shortly.';
+  // BUILD-FLOFI-WALLET-UX-EXECUTION-FIX-001: before the RESPONSE_/MISMATCH match below, which would otherwise take these network answers.
+  if (/WRONG_PROVIDER_CHAIN|STALE_CHAIN_HEAD|RPC_RESPONSE_INVALID|QUOTE_BLOCK_REORG/.test(code)) return 'The network did not answer consistently, so no quote is shown. Try again shortly.';
   if (/RESPONSE_|MINIMUM_INVALID|MISMATCH/.test(code)) return 'The quote did not match this swap. Try again.';
   if (/^JUPITER_.*(INVALID|UNSUPPORTED|UNEXPECTED)$/.test(code)) return 'The provider response could not be verified. Try another route or try again later.';
   // BUILD-FLOFI-WALLET-UX-EXECUTION-FIX-001 (P0-07): every remaining answer says what happened; none is an unexplained "unavailable".
   if (/DEPENDENCY_UNRESOLVED/.test(code)) return 'This step uses the output of an earlier step, so its quote is calculated when you simulate the workflow.';
   if (/TEST_NETWORK_NOT_AVAILABLE/.test(code)) return 'Test networks are not available in FloFi. Choose a mainnet for this swap.';
   if (/ESTIMATE_UNSUPPORTED|ESTIMATE_INVALID/.test(code)) return 'A live estimate is not available for this action on this network. Simulate to get the provider quote.';
-  if (/WRONG_PROVIDER_CHAIN|STALE_CHAIN_HEAD|RPC_RESPONSE_INVALID|QUOTE_BLOCK_REORG/.test(code)) return 'The network did not answer consistently, so no quote is shown. Try again shortly.';
   if (/INSUFFICIENT_INPUT|INSUFFICIENT_BALANCE/.test(code)) return 'The wallet balance is lower than this amount. Reduce the amount or add funds.';
   return 'Quote unavailable: the provider returned no usable quote for this swap and amount. Try again, or simulate to see the provider’s full answer.';
 }
