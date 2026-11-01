@@ -871,7 +871,7 @@ class GuardedRunner(unittest.TestCase):
 
     def test_a_plan_that_drops_or_repeats_a_profile_refuses_to_run(self):
         source = (self.root / RUNNER).read_text()
-        for broken in [source.replace(", 'chat-automations'],", "],", 1), source.replace('const critical = [', "const critical = ['copilot', ", 1)]:
+        for broken in [source.replace(", 'universal-bridge'],", "],", 1), source.replace('const critical = [', "const critical = ['copilot', ", 1)]:
             with self.subTest():
                 self.assertNotEqual(broken, source)
                 (self.root / RUNNER).write_text(broken)

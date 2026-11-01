@@ -686,11 +686,13 @@ def verify_signatures(items, keys, node=None):
     return verdicts
 
 
-def run_audit(root, pnpm=None):
+def run_audit(root, pnpm=None, registry="https://registry.npmjs.org/"):
+    """Advisories from the policy registry's advisory service, whatever .npmrc says (a substituted registry is BLOCKed
+    separately); the separate `pnpm audit --audit-level low` CI step keeps the repository configuration."""
     pnpm = pnpm or shutil.which("pnpm")
     if not pnpm:
         raise EvidenceError("pnpm is required for the advisory check")
-    result = subprocess.run([pnpm, "audit", "--json"], cwd=root, capture_output=True, text=True, timeout=300)
+    result = subprocess.run([pnpm, "audit", "--json", "--registry", registry], cwd=root, capture_output=True, text=True, timeout=300)
     try:
         document = json.loads(result.stdout)
     except ValueError:
@@ -1248,7 +1250,7 @@ def verify(root=ROOT, evidence_path=None, base_ref="origin/main", fetch=None, no
     workspace = parse_yaml(load_text(root, "pnpm-workspace.yaml") or "")
     identities = graph.identities()
     metadata = registry_metadata(identities, fetch=fetch)
-    audit = advisories_by_identity(run_audit(root), policy["vulnerabilities"]["block_at_or_above"])
+    audit = advisories_by_identity(run_audit(root, registry=policy["registry"]["url"]), policy["vulnerabilities"]["block_at_or_above"])
     base_graph, policy_changed = baseline(root, base_ref) if base_ref else (None, None)
     evidence = evaluate(root, policy=policy, policy_sha256=policy_sha256, graph=graph, metadata=metadata, audit=audit,
                         base_graph=base_graph, policy_changed=policy_changed, now=now, revision=current_revision(root),

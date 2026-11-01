@@ -124,21 +124,22 @@ const composition = [['composition-provenance', ['release-composition-provenance
 // PostgreSQL and fork suites; CircleCI: at the head of browser job 1): Copilot learning and wallet isolation, Canvas basics, the P0
 // wallet refusal and the financial Review/Execute boundaries.
 const critical = ['copilot-learning', 'canvas-corrections', 'solana-wallet-refusal', 'supply-provenance', 'review-execute-recovery-components', 'solana-transfer-ux'];
-// The other product profiles in three shards, balanced on measured profile seconds (CircleCI PR #150 final head, the
-// BUILD-FLOFI-CI-ARCHITECTURE-001 baseline): shard 1 follows critical (~283s) in browser job 1 (~863s), shard 2 precedes
-// composition in browser job 2 (~1124s, execution-continuity alone ~551s), shard 3 closes certification-checks after its
-// unit, PostgreSQL and fork suites (~328s). Each container has its own loopback ports and PostgreSQL. Each list runs in
-// order: fast financial boundaries first, longer suites after. GitHub Actions and Cloud Build run all three in one place.
+// The other product profiles in three shards, balanced on the mean measured profile seconds of three CircleCI certifications
+// (main b8126a6, PR #150 822d2ef, main 3769eff; BUILD-FLOFI-CI-ARCHITECTURE-001): shard 1 follows critical (~300s) in browser
+// job 1 (~860s), shard 2 precedes composition in browser job 2 (~1150s; execution-continuity alone ~555s), shard 3 closes
+// certification-checks after its unit, PostgreSQL and fork suites and a production build (~340s). Each container has its own
+// loopback ports and PostgreSQL. Each list runs shortest first, so fast financial boundaries report before long suites.
+// GitHub Actions (one job) and Cloud Build run the three shards in one place.
 const shards = [
-  ['lending-provenance', 'jupiter-provenance', 'devnet-provenance', 'orca-liquidity-provenance', 'solana-composition-provenance',
-    'transfer-provenance', 'uniswap-provenance', 'router-provenance', 'journey-provenance', 'unsafe-lending-simulations', 'default-product',
-    'copilot', 'copilot-solana', 'solana-mainnet-network', 'robinhood-mainnet-authoring', 'base-mainnet-authoring',
-    'arbitrum-authoring-certification', 'ethereum-authoring-certification', 'workflow-ux-authoring', 'canvas-workflow-ux', 'cow-loopback',
-    'card-provider-loopback', 'swap-read-acceptance'],
-  ['admin-console', 'mcp-embedded-signing', 'canvas-automation-ux', 'owner-history', 'universal-bridge', 'auth-wallets',
-    'approve-workflow-run', 'mcp-in-chat', 'approve-authorize-journeys', 'execution-continuity'],
-  ['cloud-provenance', 'synthetic-fork-provenance', 'developer-journey', 'mcp-routes-oauth-disabled', 'automations', 'channel-signing',
-    'delegated-execution', 'workflow-acceptance', 'channel-approve', 'chat-automations'],
+  ['unsafe-lending-simulations', 'router-provenance', 'devnet-provenance', 'uniswap-provenance', 'transfer-provenance',
+    'robinhood-mainnet-authoring', 'mcp-routes-oauth-disabled', 'card-provider-loopback', 'delegated-execution', 'workflow-ux-authoring',
+    'channel-approve', 'arbitrum-authoring-certification', 'ethereum-authoring-certification', 'auth-wallets', 'approve-workflow-run',
+    'default-product'],
+  ['admin-console', 'jupiter-provenance', 'orca-liquidity-provenance', 'solana-composition-provenance', 'synthetic-fork-provenance',
+    'copilot-solana', 'mcp-embedded-signing', 'swap-read-acceptance', 'workflow-acceptance', 'cow-loopback', 'chat-automations', 'copilot',
+    'owner-history', 'mcp-in-chat', 'approve-authorize-journeys', 'execution-continuity'],
+  ['journey-provenance', 'lending-provenance', 'cloud-provenance', 'solana-mainnet-network', 'developer-journey', 'base-mainnet-authoring',
+    'canvas-workflow-ux', 'channel-signing', 'automations', 'canvas-automation-ux', 'universal-bridge'],
 ];
 // Fail closed on any plan drift: every product profile runs in exactly one place, and every name in the plan exists.
 const names = definitions.map(([name]) => name), planned = [...critical, ...shards.flat()];
