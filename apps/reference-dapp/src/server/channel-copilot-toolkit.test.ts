@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 /** Provider transports are test doubles; these tests exercise the actual discovery adapters and tool contract, never public APIs. */
 import { randomBytes } from 'node:crypto';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { UNIVERSAL_QUOTE_SUBJECTS } from '@defi-workflow-engine/workflow-contracts';
 import { channelCopilotToolkit } from './channel-copilot-toolkit.ts';
 import { registerFixtureCatalogs, resetNetworkCatalogs } from '../domain/intelligence/intelligence.test-harness';
@@ -38,6 +38,30 @@ describe('authenticated channel read-only provider boundary', () => {
     expect(JSON.stringify(result)).not.toMatch(/0x[0-9a-fA-F]{40}|transaction|calldata|signature/i);
     expect(calls.every(c => c.url.startsWith('https://'))).toBe(true);
     expect(await toolkit.run('execute', '{}', context)).toMatchObject({ outcome: 'TOOL_NOT_ALLOWED' });
+  });
+
+  it('BUILD-FLOFI-EXECUTION-PERFORMANCE-001: answers within the conversational window (5.5 s) and names the provider still answering', async () => {
+    vi.useFakeTimers();
+    try {
+      let relaySignal: AbortSignal | undefined;
+      const answer = async (url: string) => url.includes('across') ? { inputAmount: '10000000',
+        inputToken: { chainId: 8453, address: '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913', decimals: 6 },
+        outputToken: { chainId: 42161, address: '0xaf88d065e77c8cc2239327c5edb3a432268e5831', decimals: 6 },
+        expectedOutputAmount: '9995000', minOutputAmount: '9990000', expectedFillTime: 2 } : url.includes('li.quest') ? { routes: [] } : { quotes: [] };
+      // Relay never answers (it only notices the abort): the channel must not wait for its 7 s transport timeout or the 8 s tool limit.
+      const http: UniversalHttp = { get: url => answer(url),
+        post: (url, _body, _headers, options) => url.includes('relay') ? new Promise(() => { relaySignal = options?.signal; }) : answer(url) };
+      const toolkit = channelCopilotToolkit({}, { http, prepareCatalogs: async () => undefined })!;
+      let settled = false;
+      const pending = toolkit.run('find_routes', JSON.stringify(args), context).finally(() => { settled = true; });
+      await vi.advanceTimersByTimeAsync(5_400);
+      expect(settled).toBe(false);
+      await vi.advanceTimersByTimeAsync(200);
+      const result = await pending;
+      expect(result).toMatchObject({ outcome: 'OK', output: { ok: true, comparison: 'PROVISIONAL', notCompared: ['relay'],
+        candidates: expect.arrayContaining([expect.objectContaining({ provider: 'relay', status: 'NOT_COMPARED_IN_TIME', reason: 'RELAY_DISCOVERY_WINDOW_ELAPSED' })]) } });
+      expect(relaySignal?.aborted).toBe(true);
+    } finally { vi.useRealTimers(); }
   });
 
   it('rejects public testnets and owner-supplied tool fields before reaching a provider', async () => {

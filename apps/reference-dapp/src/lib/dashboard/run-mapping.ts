@@ -4,6 +4,7 @@ import type { ExecutionLifecycle } from '../../domain/execution-lifecycle';
 import type { ExecutionRecovery } from '../../domain/execution-recovery';
 import { projectExecutionResult } from '../../domain/execution-result';
 import { shellChainLabel } from '../../domain/product-shell';
+import { recordedResultUnknown, settledWithEvidence } from '../../domain/canonical-execution-status';
 import type { DashboardRun, DashboardRunView, DashboardStatus } from './types';
 
 export const dashboardRunId = (value: unknown): value is string => typeof value === 'string' && /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(value);
@@ -31,7 +32,8 @@ const titles: Record<string, string> = { 'aave-supply': 'Aave workflow', 'base-s
 
 export function projectDashboardRun(run: DashboardRun, progress: ExecutionLifecycle | null = null, title = titles[run.flow] ?? (run.flow.startsWith('crosschain-router-') ? 'Bridge' : 'Financial operation'), current = false): DashboardRunView {
   const result = projectExecutionResult(progress);
-  const unproven = /SUBMISSION_EXPIRED_NOT_EXECUTED$/.test(run.errorCode ?? '');
+  // A recorded unknown wallet or submission result: something may have been sent (the canonical lifecycle's INCONCLUSIVE).
+  const unproven = recordedResultUnknown(run.errorCode);
   let status: DashboardStatus = 'Unresolved', message = 'FloFi has not established the final workflow outcome.';
   if (progress) {
     status = progress.state === 'active' ? 'In progress' : progress.state === 'idle' ? 'Not started'
@@ -39,7 +41,8 @@ export function projectDashboardRun(run: DashboardRun, progress: ExecutionLifecy
       : progress.state === 'uncertain' ? 'Unresolved' : result?.label === 'Execution partially completed' ? 'Partially completed'
       : result?.label === 'Transaction not submitted' ? 'Transaction not submitted' : result?.label === 'Execution failed' ? 'Failed' : 'Needs attention';
     message = result?.message ?? progress.message;
-  } else if (run.status === 'RECONCILED' && !run.needsObservation) {
+  // A flow's settled end state (a composition's COMPLETED, Pix's PAYMENT_SETTLED) counts only with recorded evidence, as in the canonical lifecycle.
+  } else if (settledWithEvidence(run) && !run.needsObservation) {
     status = run.attentionRequired || run.errorCode ? 'Completed with attention' : 'Completed';
     message = 'The run records a reconciled outcome.';
   // BUILD-FLOFI-EXECUTION-PERFORMANCE-001: the same groups as the canonical lifecycle (domain/canonical-execution-status.ts) for statuses flows emit.
@@ -52,10 +55,10 @@ export function projectDashboardRun(run: DashboardRun, progress: ExecutionLifecy
   } else if (['FAILED', 'REVERTED', 'REFUNDED'].includes(run.status) && !run.needsObservation) {
     // A summary alone cannot establish whether earlier actions completed.
     status = 'Needs attention'; message = 'A failed action is recorded. Open the run to review any earlier completed actions.';
-  } else if (['PREPARED', 'SIMULATED', 'AUTHORIZED', 'REVIEWED', 'QUOTED'].includes(run.status)) {
+  } else if (['DRAFT', 'PREPARED', 'SIMULATED', 'AUTHORIZED', 'REVIEWED', 'QUOTED'].includes(run.status)) {
     status = run.needsObservation || unproven ? 'Unresolved' : 'Not started';
     message = run.needsObservation || unproven ? 'A recorded request still needs verification. No transaction is repeated.' : 'Simulated or reviewed only: no wallet request was made, so nothing was sent.';
-  } else if (['RESERVED', 'SUBMITTING', 'PENDING', 'HASH', 'SOURCE_SUBMITTED', 'SOURCE_CONFIRMED', 'IN_FLIGHT', 'DESTINATION_OBSERVED', 'SIGNED', 'POSTING', 'POSTED', 'OPEN', 'SETTLING', 'FULFILLED', 'PARTIALLY_FILLED'].includes(run.status)) {
+  } else if (['RESERVED', 'SUBMITTING', 'PENDING', 'HASH', 'SOURCE_SUBMITTED', 'SOURCE_CONFIRMED', 'IN_FLIGHT', 'DESTINATION_OBSERVED', 'SIGNED', 'POSTING', 'POSTED', 'OPEN', 'SETTLING', 'FULFILLED', 'PARTIALLY_FILLED', 'PAYMENT_PENDING', 'PAYMENT_SETTLED'].includes(run.status)) {
     status = 'In progress'; message = 'The recorded execution is still awaiting its final outcome.';
   } else if (run.status === 'CONFIRMED') {
     status = 'Needs attention'; message = 'A transaction is confirmed. Full workflow completion has not been established by this summary.';

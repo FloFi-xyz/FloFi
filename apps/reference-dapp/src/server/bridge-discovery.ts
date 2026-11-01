@@ -6,7 +6,8 @@ import { universalRouterMode, universalRouterRuntime } from './universal-router/
 import type { FlowResult } from './cloud-api-client.ts';
 
 /**
- * The same read-only discovery for Canvas, standalone discovery and channels. No simulation, run or financial authority.
+ * The same read-only discovery for Canvas, standalone discovery and the web chat's tools. No simulation, run or financial authority. (The
+ * authenticated channel adapters build their own in-process discovery with the same conversational window: `channel-copilot-toolkit.ts`.)
  * `window` CONVERSATIONAL (chat tools) closes the discovery window under the tool's own time limit (BUILD-FLOFI-EXECUTION-PERFORMANCE-001).
  */
 export async function readBridgeDiscovery(request: unknown, env: Readonly<Record<string, string | undefined>> = process.env,

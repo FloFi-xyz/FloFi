@@ -6,8 +6,9 @@
  *   discovery  the platform's read-only universal route discovery (`readBridgeDiscovery`), public quote subjects, nothing persisted
  *   catalogs   the validated official catalogs this deployment enables (`authoringCatalogPreparer`)
  *
- * Channel Core uses the same contracts without route discovery (its boundary admits no flow runtime): its route tools answer
- * ROUTE_DISCOVERY_UNAVAILABLE instead of a substitute. `FLOFI_COPILOT_TOOLS=off` turns tools off everywhere.
+ * Channel Core's own toolkit uses the same contracts without route discovery (its boundary admits no flow runtime): its route tools answer
+ * ROUTE_DISCOVERY_UNAVAILABLE instead of a substitute. The authenticated channel adapters (Telegram, WhatsApp) use `channel-copilot-toolkit.ts`,
+ * which runs the same read-only discovery in-process with the conversational window. `FLOFI_COPILOT_TOOLS=off` turns tools off everywhere.
  */
 import { copilotToolkitOf, copilotToolsEnabled, type CopilotToolkit, type CopilotToolPorts } from '../platform/copilot-tools.ts';
 import { networkScope } from './network-scope.ts';

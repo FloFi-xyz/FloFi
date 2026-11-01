@@ -125,6 +125,9 @@ describe('BUILD-FLOFI-CONVERSATIONAL-001 conversational workflow', () => {
       chat = await say('Yes, execute');
       expect(controls.authorize).not.toHaveBeenCalled();
       expect(last(chat).text).toMatch(/still loading in this page/);
+      // The chat has no Authorize control: it points to the option it offers (Review workflow), never "choose Authorize".
+      expect(last(chat).text).toMatch(/choose Review workflow and confirm again\. Nothing was signed\.$/);
+      expect(last(chat).text).not.toMatch(/Authorize/);
       expect(controls.request).not.toHaveBeenCalled();
     } finally { f.floFi = false; f.canSign = true; }
   });

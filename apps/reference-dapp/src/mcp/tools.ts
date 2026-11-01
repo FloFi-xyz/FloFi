@@ -411,7 +411,8 @@ export function createFlofiMcpServer(ctx: ToolContext): McpServer {
         'A simulation is evidence of what would happen at the observed block, not a guarantee and not an execution.'] };
   });
 
-  register('get_execution_status', 'Execution status', 'Status, attempts and journal page of one FloFi execution, read from FloFi\'s durable state. Visible only when its ' +
+  register('get_execution_status', 'Execution status', 'Status, attempts and journal page of one FloFi execution, read from FloFi\'s durable state, with its canonical ' +
+    'lifecycle (status, final, completed: only a reconciled outcome is completed; a hash or a confirmation never is). Visible only when its ' +
     'owner wallet is one the deployment owner granted to this MCP credential; otherwise it is reported as not found.', Schemas.status, { ...pure, idempotentHint: false }, async args => {
     const found = await findOwnedRun(ctx.runtime, ctx.principal.wallets, args.executionId);
     return { ok: true, ...await executionStatusView(ctx.runtime, found, args.executionId, accessBasis(ctx), { after: args.journalAfter, limit: args.journalLimit }),

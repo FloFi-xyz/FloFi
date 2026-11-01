@@ -72,11 +72,13 @@ export const COPILOT_TOOL_DEFINITIONS: readonly Record<string, unknown>[] = Obje
     'several candidates, a currency (not a token) with that network\'s stablecoins, or a closed failure.',
     parameters: object({ network: SCHEMA_STRING(NETWORK_TEXT, 60), reference: SCHEMA_STRING('The token symbol or name exactly as written.') }) },
   { type: 'function', name: 'find_routes', strict: true, description: 'Read-only live route discovery between two networks for an amount: every provider\'s status, expected and ' +
-    'guaranteed amounts, fees and durations, observed now. Also says whether a certified Cross-chain Router route exists. Nothing is reserved or executed.',
+    'guaranteed amounts, fees and durations, observed now. Also says whether a certified Cross-chain Router route exists. Nothing is reserved or executed. ' +
+    'comparison PROVISIONAL means the providers in notCompared had not answered in time: the comparison is incomplete, not a "no route".',
     parameters: object({ sourceNetwork: SCHEMA_STRING(NETWORK_TEXT, 60), destinationNetwork: SCHEMA_STRING(NETWORK_TEXT, 60), inputAsset: SCHEMA_STRING('Asset spent, as written.'),
       outputAsset: NULLABLE('Asset received, as written; null for the same asset.'), amount: SCHEMA_STRING('Decimal amount the user wrote ("." separator).', 40) }) },
   { type: 'function', name: 'get_quote', strict: true, description: 'The recommended executable route of a live read-only discovery (the one FloFi would pick by guaranteed amount), ' +
-    'with provider, fees, expected and guaranteed amount and observation time. Swaps are quoted by the fresh simulation at Review, not here.',
+    'with provider, fees, expected and guaranteed amount and observation time. Swaps are quoted by the fresh simulation at Review, not here. ' +
+    'comparison PROVISIONAL means the providers in notCompared had not answered in time, so no route was compared against them.',
     parameters: object({ sourceNetwork: SCHEMA_STRING(NETWORK_TEXT, 60), destinationNetwork: SCHEMA_STRING(NETWORK_TEXT, 60), inputAsset: SCHEMA_STRING('Asset spent, as written.'),
       outputAsset: NULLABLE('Asset received, as written; null for the same asset.'), amount: SCHEMA_STRING('Decimal amount the user wrote ("." separator).', 40) }) },
   { type: 'function', name: 'get_workflow_context', strict: true, description: 'The user\'s current FloFi workflow (steps in order with FloFi\'s own summaries, revision), the pending ' +
@@ -158,13 +160,15 @@ async function discoveryRequest(args: Record<string, unknown>, ctx: CopilotToolC
 }
 const display = (units: string | null, decimals: number) => units === null ? null : (() => { try { return formatTokenAmount(units, decimals); } catch { return null; } })();
 function routeView(result: RouteDiscovery, symbol: string, decimals: number) {
+  // A provider still pending when the window closed was not compared: it is never shown as unavailable (its availability is unknown).
+  const pending = new Set(result.completeness === 'PARTIAL' ? result.pendingProviders ?? [] : []);
   return { provenance: 'FLOFI_UNIVERSAL_DISCOVERY', observedAt: result.observedAt, freshness: 'LIVE_AT_OBSERVATION_RE_QUOTED_AT_REVIEW', status: result.status,
     // PROVISIONAL: some providers had not answered when the discovery window closed (named in notCompared); COMPARED: every provider answered.
     // Either way the quote is re-made for the owner at Review: neither is "ready for Review".
     comparison: result.completeness === 'PARTIAL' ? 'PROVISIONAL' : 'COMPARED', notCompared: (result.pendingProviders ?? []).slice(0, 4),
     quoteSubjects: result.quoteSubjects, receive: symbol,
     candidates: result.candidates.slice(0, COPILOT_TOOL_LIMITS.maxCandidates).map((candidate, index) => ({ provider: candidate.provider, bridge: candidate.bridge.slice(0, 40),
-      status: candidate.status, executable: candidate.executableBy !== null, recommended: index === result.recommended,
+      status: pending.has(candidate.provider) ? 'NOT_COMPARED_IN_TIME' : candidate.status, executable: candidate.executableBy !== null, recommended: index === result.recommended,
       expectedOutput: display(candidate.expectedOutput, decimals), guaranteedOutput: display(candidate.minimumOutput, decimals),
       estimatedDurationSeconds: candidate.estimatedDurationSeconds, reason: candidate.reason,
       fees: candidate.fees.slice(0, 6).map(fee => ({ label: fee.label.slice(0, 40), amount: display(fee.amount, fee.decimals), symbol: fee.symbol, includedInAmount: fee.included })) })) };
@@ -221,11 +225,14 @@ export async function runCopilotTool(name: string, rawArguments: string, ctx: Co
         const view = routeView(result.value, prepared.outputSymbol, prepared.decimals);
         if (known === 'find_routes') return done({ ok: true, ...view, certifiedRouteAssets: certified });
         const recommended = view.candidates.find(candidate => candidate.recommended);
-        return done(recommended ? { ok: true, provenance: view.provenance, observedAt: view.observedAt, freshness: view.freshness, receive: view.receive, quote: recommended }
-          // BUILD-FLOFI-EXECUTION-PERFORMANCE-001: a PROVISIONAL comparison names the providers that did not answer in time (e.g. Relay), so "no
-          // executable route" is never confused with "the executable provider was still answering".
-          : { ok: false, code: view.status === 'EXECUTABLE' ? 'NO_RECOMMENDED_ROUTE' : view.status, observedAt: view.observedAt, comparison: view.comparison,
-            notCompared: view.notCompared });
+        // BUILD-FLOFI-EXECUTION-PERFORMANCE-001: a PROVISIONAL comparison names the providers that did not answer in time (e.g. Relay), on success
+        // too (the recommendation was not compared against them), and an incomplete comparison is its own failure code, never another provider's
+        // answer (BELOW_MINIMUM, NO_ROUTE …) standing in for the provider that was still answering.
+        const partial = view.comparison === 'PROVISIONAL';
+        return done(recommended ? { ok: true, provenance: view.provenance, observedAt: view.observedAt, freshness: view.freshness, receive: view.receive, quote: recommended,
+          comparison: view.comparison, notCompared: view.notCompared }
+          : { ok: false, code: partial ? 'ROUTE_COMPARISON_INCOMPLETE' : view.status === 'EXECUTABLE' ? 'NO_RECOMMENDED_ROUTE' : view.status, status: view.status,
+            observedAt: view.observedAt, comparison: view.comparison, notCompared: view.notCompared });
       }
       case 'get_workflow_context': {
         exactArgs(rawArguments, []);

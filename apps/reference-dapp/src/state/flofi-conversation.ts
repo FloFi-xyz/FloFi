@@ -287,7 +287,8 @@ export function useFlofiConversation({ owner, epoch, bridge, direct, interfaceLa
       const ecosystem = /^0x/i.test(account) ? 'evm' as const : 'solana' as const;
       if (!privyRef.current?.canSign(ecosystem, account)) {
         const issue = floFiPrivyWalletIssue(privyRef.current, ecosystem, account);
-        flofi(scope, language, c.executionNotStarted(translate(language, floFiWalletMessage(issue) ?? issue)), { options: [c.review] }); return;
+        const reason = issue === 'FLOFI_WALLET_NOT_READY' ? c.walletNotReady : translate(language, floFiWalletMessage(issue) ?? issue);
+        flofi(scope, language, c.executionNotStarted(reason), { options: [c.review] }); return;
       }
     }
     const startError = view.source.state.error, started = controls.authorize();
