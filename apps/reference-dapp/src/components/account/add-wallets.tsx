@@ -109,6 +109,7 @@ export function AddWallets({ state }: { state: AccountState }) {
   const walletTile = (wallet: AccountWallet, title: string, wide = false) => <div key={wallet.id} className={`${styles.tile} ${styles.tileDone}${wide ? ` ${styles.tileWide}` : ''}`}
     data-wallet-address={wallet.address} role="group" aria-label={`${t(title)}: ${wallet.label}`}>
     <strong><AccountIcon name="check" size={16}/>{t(title)}</strong>
+    <small>{wallet.label}</small>
     <span className={styles.tileAddress}><code title={wallet.address}>{shortAddress(wallet.address)}</code>
       <button type="button" className={styles.copyAddress} aria-label={t('Copy {0} address', wallet.label)} title={t('Copy address')} onClick={() => copy(wallet)}>
         <AccountIcon name="copy" size={15}/></button></span>

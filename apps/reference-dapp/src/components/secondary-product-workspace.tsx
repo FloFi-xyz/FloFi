@@ -76,7 +76,8 @@ function WalletCredentialCard({ entry, busy, accountView, onConnect, onDisconnec
   const [exporting, setExporting] = useState(false);
   const renameId = useId();
   const { t: tr } = useLocale();
-  const account = entry.account, removable = Boolean(entry.saved || account?.origin === 'external');
+  // A wallet the account keeps (Privy, legacy FloFi Wallet) is never offered as removable, even when this device also saved it.
+  const account = entry.account, removable = account ? account.origin === 'external' : Boolean(entry.saved);
   async function copyAddress() {
     try { await navigator.clipboard.writeText(entry.address); onStatus('Address copied.'); } catch { onStatus('Address could not be copied.'); }
   }

@@ -163,18 +163,30 @@ describe('shared wallet and existing Review capability', () => {
 });
 
 describe('BUILD-FLOFI-WALLET-UX-EXECUTION-FIX-001 no false "Wallet changed" while the reviewed wallet restores (P0-10, T19)', () => {
-  const owner = '0x' + 'a'.repeat(40);
+  const owner = '0x' + 'a'.repeat(40), other = '0x' + 'b'.repeat(40), arb = 'eip155:42161';
+  const none = { account: null, chain: null, restorationEpoch: 0, adopted: false };
   it('adopts only the Review owner, only from "no wallet", only within the same workflow restoration', () => {
-    expect(reviewBindingAdopts({ account: null, restorationEpoch: 0 }, owner.toUpperCase().replace('0X', '0x'), 0, owner, 'evm')).toBe(true);
-    expect(reviewBindingAdopts({ account: null, restorationEpoch: 0 }, '0x' + 'b'.repeat(40), 0, owner, 'evm')).toBe(false);
-    expect(reviewBindingAdopts({ account: owner, restorationEpoch: 0 }, owner, 0, owner, 'evm')).toBe(false);
-    expect(reviewBindingAdopts({ account: null, restorationEpoch: 0 }, owner, 1, owner, 'evm')).toBe(false);
-    expect(reviewBindingAdopts({ account: null, restorationEpoch: 0 }, owner, 0, null, 'evm')).toBe(false);
-    expect(reviewBindingAdopts({ account: null, restorationEpoch: 0 }, null, 0, owner, 'evm')).toBe(false);
+    expect(reviewBindingAdopts(none, { account: owner.toUpperCase().replace('0X', '0x'), chain: arb }, 0, owner, 'evm')).toBe(true);
+    expect(reviewBindingAdopts(none, { account: other, chain: arb }, 0, owner, 'evm')).toBe(false);
+    expect(reviewBindingAdopts({ ...none, account: owner, chain: arb }, { account: owner, chain: arb }, 0, owner, 'evm')).toBe(false);
+    expect(reviewBindingAdopts(none, { account: owner, chain: arb }, 1, owner, 'evm')).toBe(false);
+    expect(reviewBindingAdopts(none, { account: owner, chain: arb }, 0, null, 'evm')).toBe(false);
+  });
+  it('an accepted Review never follows a wallet (a reload or another provider needs a fresh Review)', () => {
+    expect(reviewBindingAdopts(none, { account: owner, chain: arb }, 0, owner, 'evm', true)).toBe(false);
+    expect(reviewBindingAdopts(none, { account: null, chain: null }, 0, owner, 'evm', true)).toBe(false);
+  });
+  it('tolerates the two-step connect (account, then chain) and wallet-less provider changes, nothing else', () => {
+    expect(reviewBindingAdopts(none, { account: null, chain: null }, 0, owner, 'evm')).toBe(true);
+    const adopted = { account: owner, chain: null, restorationEpoch: 0, adopted: true };
+    expect(reviewBindingAdopts(adopted, { account: owner, chain: arb }, 0, owner, 'evm')).toBe(true);
+    expect(reviewBindingAdopts({ ...adopted, chain: arb }, { account: owner, chain: 'eip155:1' }, 0, owner, 'evm')).toBe(false);
+    expect(reviewBindingAdopts({ ...adopted, adopted: false }, { account: owner, chain: arb }, 0, owner, 'evm')).toBe(false);
+    expect(reviewBindingAdopts(adopted, { account: null, chain: null }, 0, owner, 'evm')).toBe(false);
   });
   it('compares Solana keys exactly', () => {
-    const key = '9'.repeat(32) + 'Ab';
-    expect(reviewBindingAdopts({ account: null, restorationEpoch: 2 }, key, 2, key, 'solana')).toBe(true);
-    expect(reviewBindingAdopts({ account: null, restorationEpoch: 2 }, key.toLowerCase(), 2, key, 'solana')).toBe(false);
+    const key = '9'.repeat(32) + 'Ab', bound = { ...none, restorationEpoch: 2 };
+    expect(reviewBindingAdopts(bound, { account: key, chain: 'solana:mainnet' }, 2, key, 'solana')).toBe(true);
+    expect(reviewBindingAdopts(bound, { account: key.toLowerCase(), chain: 'solana:mainnet' }, 2, key, 'solana')).toBe(false);
   });
 });

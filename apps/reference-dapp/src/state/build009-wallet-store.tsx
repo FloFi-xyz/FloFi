@@ -9,6 +9,7 @@ import { useWalletSelector } from '../components/wallet-selector';
 import { evmWalletErrorMessage } from '../wallet/wallet-errors';
 import { useProductBootstrap } from './product-bootstrap';
 import { rememberWalletHint } from '../wallet/wallet-hint';
+import { forgetAccountWalletReconnect } from '../wallet/sign-in-wallet';
 import { WALLET_RESTORE_TIMEOUT_MS } from './wallet-restore';
 
 export const BASE_HEX = '0x2105';
@@ -199,7 +200,7 @@ export function Build009WalletProvider({ children }: { children: ReactNode }) {
   }, [chainId, updateAuthority]);
   // Disconnect ends FloFi's use of the wallet: no silent reuse until the owner picks a wallet again.
   const reset = useCallback(() => { ++generation.current; ++events.current; updateAuthority({ account: null, chainId: null }, true);
-    updateWalletPreference({ evmDisconnected: true }); clearChosenEvmWallet(); suppressed.current = true;
+    updateWalletPreference({ evmDisconnected: true }); forgetAccountWalletReconnect('evm'); clearChosenEvmWallet(); suppressed.current = true;
     rememberWalletHint('evm', false); setRestoring(false);
     setError(null); setBusy(false); }, [updateAuthority]);
   return <Context.Provider value={{ available, providerError, account, chainId, provider: identity, error, revision, busy, restoring, session, connect, connectWith, switchTo, reset }}>{children}</Context.Provider>;

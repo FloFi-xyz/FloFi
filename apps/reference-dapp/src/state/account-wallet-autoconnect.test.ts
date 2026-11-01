@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { describe, expect, it } from 'vitest';
-import { accountWalletChoice, prefersExternalWallet } from './account-wallet-autoconnect';
+import { accountWalletBlocked, accountWalletChoice, prefersExternalWallet } from './account-wallet-autoconnect';
 import { floFiWalletKey, isFloFiWalletKey } from '../wallet/evm-discovery';
 import type { WalletChoice } from '../wallet/wallet-registry';
 
@@ -21,5 +21,11 @@ describe('BUILD-FLOFI-WALLET-UX-EXECUTION-FIX-001 the account FloFi wallet is re
     expect(prefersExternalWallet('io.metamask', isFloFiWalletKey)).toBe(true);
     expect(prefersExternalWallet(a.key, isFloFiWalletKey)).toBe(false);
     expect(prefersExternalWallet(null, isFloFiWalletKey)).toBe(false);
+  });
+  it('stays off after an explicit Disconnect unless a sign-in since then re-allowed the account\'s own FloFi wallet', () => {
+    const preference = { evm: null, solana: null, evmDisconnected: true, solanaDisconnected: false };
+    expect(accountWalletBlocked('evm', preference, false)).toBe(true);
+    expect(accountWalletBlocked('evm', preference, true)).toBe(false);
+    expect(accountWalletBlocked('solana', preference, false)).toBe(false);
   });
 });

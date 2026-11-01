@@ -80,6 +80,9 @@ function message(error: unknown): string {
     // BUILD-FIX-UX-001: owner-bound mainnet swaps keep the reviewed wallet nonce reserved for the earlier request (a deliberate safety rule).
     SWAP_NONCE_ALREADY_RESERVED: 'This wallet\'s next transaction on this network is still reserved for an earlier request, so a different one cannot be prepared yet. Nothing was sent.',
     RECONCILIATION_MISMATCH: 'The transaction needs manual review. The observed balances did not match the swap bounds.',
+    // BUILD-FLOFI-WALLET-UX-EXECUTION-FIX-001: the same account-specific owner refusals as the simulation surface (simulation-presentation.ts).
+    OWNER_NOT_EOA: 'This address is a smart contract wallet (for example a Safe), so it cannot sign this transaction itself. Use a standard account or a MetaMask Smart Account. Nothing was simulated or sent.',
+    OWNER_DELEGATION_UNVERIFIED: 'This account is upgraded to a smart account (EIP-7702) whose code FloFi has not verified, and that code could act on funds this workflow sends to it. Use a standard account or a MetaMask Smart Account. Nothing was simulated or sent.',
   };
   return messages[code] ?? (code.startsWith('PUBLIC_') ? 'The public testnet request could not be completed. Try again.' : code || 'Could not continue. Try again.');
 }

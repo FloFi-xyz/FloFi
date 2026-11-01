@@ -233,7 +233,8 @@ test('Import key: a dedicated FloFi screen per ecosystem; the key goes only to P
   await form.getByLabel('Private key').fill(evmKey);
   await form.getByRole('button', { name: 'Import wallet' }).click();
   await expect(page).toHaveURL('/onboarding/wallets');
-  const imported = card(page, 'evm').locator('li', { hasText: 'My Rabby key' });
+  // BUILD-FLOFI-WALLET-UX-EXECUTION-FIX-001 (P1-01): the imported wallet is its card's tile (name, short address, copy), not a row above it.
+  const imported = card(page, 'evm').locator('[data-wallet-address]', { hasText: 'My Rabby key' });
   await expect(imported).toContainText('Imported');
 
   // Solana: a 64-byte base58 secret key, as Phantom exports it.

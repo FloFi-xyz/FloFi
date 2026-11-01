@@ -12,6 +12,7 @@
  */
 import { accountSignOut } from '../app/account-action';
 import { updateWalletPreference } from '../wallet/wallet-registry';
+import { forgetAccountWalletReconnect } from '../wallet/sign-in-wallet';
 import type { FloFiPrivy } from './privy-context';
 
 /** How long Disconnect waits for each browser-side step (wallet close, Privy logout) before moving on. */
@@ -25,6 +26,8 @@ export async function disconnectToLogin(privy: Pick<FloFiPrivy, 'logout'> | null
   leaving = true;
   await bounded(() => closeWallet?.());
   updateWalletPreference({ evmDisconnected: true, solanaDisconnected: true });
+  // BUILD-FLOFI-WALLET-UX-EXECUTION-FIX-001: not even the account's own FloFi wallets reconnect until the next sign-in.
+  forgetAccountWalletReconnect('evm', 'solana');
   const next = await accountSignOut().then(result => result.next, () => '/login');
   await bounded(() => privy?.logout());
   window.location.replace(next);
