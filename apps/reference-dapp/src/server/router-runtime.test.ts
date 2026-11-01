@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { pacedReadRpc, routerMode, routerRpcUrl, routerRuntime, ROUTER_ARBITRUM_RPC_METHODS, ROUTER_BASE_RPC_METHODS } from './router-runtime';
 import { readPacingFor } from './public-testnet-rpc';
 
@@ -47,25 +47,36 @@ describe('BUILD-FLOFI-EXECUTION-PERFORMANCE-001 dedicated read pacing', () => {
     expect(peak).toBe(1);
   });
   it('dedicated: bounded concurrency, spaced starts, and a transport failure pauses every later start', async () => {
-    let active = 0, peak = 0;
-    const starts: number[] = [];
-    let failures = 1;
-    const rpc = pacedReadRpc(async method => {
-      starts.push(Date.now()); active++; peak = Math.max(peak, active);
-      try {
-        await new Promise(r => setTimeout(r, 30));
-        if (method === 'flaky' && failures-- > 0) throw new Error('PUBLIC_RPC_UNAVAILABLE');
-        if (method === 'refused') throw new Error('RPC_ERROR');
-        return method;
-      } finally { active--; }
-    }, { minIntervalMs: 5, maxInFlight: 3 });
-    const results = await Promise.all(['a', 'b', 'c', 'd', 'e', 'flaky'].map(m => rpc(m, [])));
-    expect(results).toEqual(['a', 'b', 'c', 'd', 'e', 'flaky']);
-    expect(peak).toBe(3);
-    expect(starts.slice(1).every((t, i) => t - starts[i]! >= 4)).toBe(true);
-    // A node answer (not a transport failure) is never retried.
-    const before = starts.length;
-    await expect(rpc('refused', [])).rejects.toThrow('RPC_ERROR');
-    expect(starts.length - before).toBe(1);
+    // Fake timers move Date.now and setTimeout together, so the spacing the pacer enforces is measured exactly (no event-loop jitter).
+    vi.useFakeTimers({ now: 1_000_000 });
+    try {
+      let active = 0, peak = 0, failures = 1;
+      const starts: { method: string; at: number }[] = [];
+      const rpc = pacedReadRpc(async method => {
+        starts.push({ method, at: Date.now() }); active++; peak = Math.max(peak, active);
+        try {
+          await new Promise(r => setTimeout(r, 30));
+          if (method === 'flaky' && failures-- > 0) throw new Error('PUBLIC_RPC_UNAVAILABLE');
+          if (method === 'refused') throw new Error('RPC_ERROR');
+          return method;
+        } finally { active--; }
+      }, { minIntervalMs: 5, maxInFlight: 3 });
+      const pending = Promise.all(['a', 'b', 'c', 'd', 'e', 'flaky'].map(m => rpc(m, [])));
+      await vi.advanceTimersByTimeAsync(10_000);
+      expect(await pending).toEqual(['a', 'b', 'c', 'd', 'e', 'flaky']);
+      expect(peak).toBe(3);
+      const times = starts.map(s => s.at);
+      expect(times.slice(1).every((t, i) => t - times[i]! >= 5)).toBe(true);
+      // The retry of the failed transport call waited out the shared pause (500 ms after the failure), and nothing else started inside it.
+      const failedAt = starts.find(s => s.method === 'flaky')!.at + 30, retry = starts.filter(s => s.method === 'flaky')[1]!.at;
+      expect(retry - failedAt).toBeGreaterThanOrEqual(500);
+      expect(starts.filter(s => s.at > failedAt && s.at < failedAt + 500)).toEqual([]);
+      // A node answer (not a transport failure) is never retried.
+      const before = starts.length, refused = rpc('refused', []);
+      const outcome = refused.then(() => 'resolved', (error: Error) => error.message);
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(await outcome).toBe('RPC_ERROR');
+      expect(starts.length - before).toBe(1);
+    } finally { vi.useRealTimers(); }
   });
 });
