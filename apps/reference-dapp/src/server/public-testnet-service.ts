@@ -768,7 +768,8 @@ async function catalogQuote(workflow: SemanticWorkflow, executionId: string, P: 
     if (BigInt(await call(pool, '0x1a686502', block)) === 0n || word0(await call(pool, '0x3850c7bd', block)) === 0n) return { fee: tier.fee, pool, expectedOut: null };
     // A tier whose quote reverts (no usable liquidity for this size) is simply not a candidate. BUILD-FLOFI-EXECUTION-PERFORMANCE-001: a read the
     // node never answered (after the transport's own retries) is not a revert — the tier's price is unknown, so the quote fails closed instead of
-    // silently binding another tier. An answered error (a revert, including JSON-RPC -32603) still only removes this tier.
+    // silently binding another tier. An explicit revert (code 3, or revert text under any code, -32603 included) still only removes this tier;
+    // a bare -32603 without revert text is an internal error, so it is treated as unanswered (public-testnet-rpc.ts).
     let out: bigint | null;
     try { out = word0(await call(P.quoter, quoteData(inRoute, outRoute, amountIn, tier.fee), block)); }
     catch (cause) { if (readNotAnswered(cause)) throw cause; out = null; }

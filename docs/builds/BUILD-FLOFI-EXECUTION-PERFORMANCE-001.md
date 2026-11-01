@@ -272,19 +272,20 @@ preview logs with at least 20 journeys per group are supplied, and it labels jou
 
 ## 6. Gates (final head)
 
-Final code head `6b65a26d` (the build-record commits after it change documentation only). Toolchain: Node 24.21.0 (official binary), pnpm
+Final code: `6b65a26d` plus the last review follow-ups (a boundary test, the reverted-attempt mapping, two wording fixes and a comment);
+later build-record commits change documentation only. Toolchain: Node 24.21.0 (official binary), pnpm
 11.22.0, PostgreSQL **18.6** from CI's exact image digest (`postgres:18.6-bookworm@sha256:3725f4e2…`), headless shell revision 1243.
 
 | Gate | Result |
 | --- | --- |
 | `pnpm typecheck`, `pnpm lint` (now including `scripts/journey-latency-report.mjs`), `pnpm build` | pass |
 | `pnpm schemas:check` | pass (11 exports) |
-| `pnpm test` + `agent_guard.py verify-results --stage unit` | **507 files, 6173 tests pass**, 2 existing conditional skips; **43 required suites** pass (two journey suites newly required) |
-| `pnpm test:postgres` (PostgreSQL 18.6) + `verify-results --stage postgres` | **89 files, 575 tests pass**, 3 existing conditional skips; **29 required suites** pass (the version-16 environment failure is gone) |
+| `pnpm test` + `agent_guard.py verify-results --stage unit` | **507 files, 6174 tests pass** on the final code, 2 existing conditional skips; **43 required suites** pass (two journey suites newly required) |
+| `pnpm test:postgres` (PostgreSQL 18.6) + `verify-results --stage postgres` | **89 files, 575 tests pass** at `6b65a26d`, 3 existing conditional skips; **29 required suites** pass (the version-16 environment failure is gone) |
 | `governance_lite.py`, `test_ci_*` (179) and `test_governance_lite` (21), `agent_guard.py check`, `skill_registry.py verify` | pass |
 | `skill_registry.py check-upstream --fetch` (first session) | 32 pinned sources UNCHANGED; 12 UNPINNED sites (11 official + the third-party Arbitrum guide) unreachable from this network |
 | Browser at `143561ce` | **pass**: critical tier 6/6 (copilot-learning, canvas-corrections, solana-wallet-refusal, supply-provenance, review-execute-recovery-components, solana-transfer-ux), auth-wallets, jupiter-provenance, router-provenance, execution-continuity (34 tests) |
-| Browser at `6b65a26d` (after the last UI fixes) | running when this record was written (critical, execution-continuity, universal-bridge, owner-history, auth-wallets); the result is reported on the PR |
+| Browser at `6b65a26d` (after the last UI fixes) | critical tier **6/6 pass**; execution-continuity, universal-bridge, owner-history and auth-wallets were running when this record was written (result on the PR) |
 | Remaining extended shards | not run locally; CircleCI runs every profile (browser-1/2) |
 | CircleCI / Vercel Preview on the final head | reported on the PR: CircleCI is the certification authority, and a record cannot certify the commit that contains it |
 
@@ -306,7 +307,7 @@ allow the handback tool. `agent_guard.py review` records each reviewer's result 
 | 3 | flofi-admin-analytics, flofi-data-privacy, flofi-infrastructure-ci | 10 (medium); 5 (low); 5 (medium) |
 | 4 | flofi-mcp, flofi-channels, flofi-chat | 5 (medium); 3 low; 3 (medium) |
 | 5 | flofi-transfer-payments, flofi-frontend-ux, flofi-lending | 4 (**high**); 10 (medium); 7 (medium) |
-| 6 | flofi-liquidity, flofi-automations, flofi-developers | running when this record was written; reported on the PR |
+| 6 | flofi-liquidity, flofi-automations, flofi-developers | 3 (medium); 3 (low; none in this PR's code); none |
 
 Verified findings and their resolution (each fixed with a test unless stated):
 
@@ -331,9 +332,15 @@ Verified findings and their resolution (each fixed with a test unless stated):
 | Low | Channel window untested; misleading wiring comments; chat continuation skipped the wallet check | Hanging-provider test (mutation fails it); comments fixed; check added |
 | Low | Privy deadline in UTC only; provisional note not announced; European Portuguese strings | Local clock with offset; one live region; Brazilian Portuguese |
 | Low | Report script unlinted / metric list drift; source URLs with dot segments; MAINNET rows | Linted and drift-tested; refused; MAINNET `EXECUTE` required |
+| Low | A reverted Uniswap approval or mint (run still `SIMULATED`) read INCONCLUSIVE forever | A proven revert is REVERTED, or PARTIALLY_COMPLETED after a confirmed step |
+| Low | `NOT_EXECUTED` (also a composition leg never signed) was worded "expired" | "Was not executed" (EN/PT); "expired" only for `EXPIRED` |
+| Info | The lifecycle must never become a completion or settlement gate | Boundary test: no automation, delegation or workflow-run module reads it |
 
-Not changed here (recorded for the owner): the Dashboard list has no attempts, so an Aave or lending run between steps can still read
-"Not started" there while MCP is precise (needs the run summary to carry an earlier-confirmed flag); channel discovery does not apply the
+Not changed here (recorded for the owner): the Dashboard list has no attempts, so an Aave, lending or Uniswap liquidity run whose approval
+(or first step) already landed can still read "Not started … nothing was sent" there while MCP is precise. Reported as medium by three
+reviewers; the branch predates this PR. A projector change like the Pix fix would misdescribe a run that was re-reviewed after a revert or
+decline, so the right fix is a run-summary flag for a landed attempt that both mappings honour; the Automations History label "Owner executed —
+reconciling" for runs only simulated or declined is pre-existing too; channel discovery does not apply the
 web path's `GRYLOO_UNIVERSAL_ROUTER` gate (pre-existing); `get_approval_status` never lists Pix runs and requires `errorCode === null` for
 `reconciled`, which differs from the lifecycle's RECONCILED_WITH_ATTENTION (pre-existing; owner decision); lending/Aave "proven not
 submitted" attempts read INCONCLUSIVE until a new attempt (overstates, never understates); the developer API has no `lifecycle` field.

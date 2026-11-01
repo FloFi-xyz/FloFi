@@ -110,6 +110,10 @@ describe('BUILD-FLOFI-EXECUTION-PERFORMANCE-001 canonical execution status', () 
     // A borrow that reverted after a confirmed supply: earlier actions remain (as a declined borrow already reads).
     expect(canonicalRunLifecycle({ status: 'REVERTED', attempts: [{ state: 'CONFIRMED' }, { state: 'REVERTED' }] })).toMatchObject({ status: 'PARTIALLY_COMPLETED', final: true });
     expect(canonicalRunLifecycle({ status: 'REVERTED', attempts: [{ state: 'REVERTED' }] }).status).toBe('REVERTED');
+    // A Uniswap liquidity run keeps a not-started-looking status after a mint reverted: the receipt proves it (never "still verifying").
+    expect(canonicalRunLifecycle({ status: 'SIMULATED', attempts: [{ state: 'CONFIRMED', reconciled: true }, { state: 'REVERTED', transactionHash: '0xabc' }] }))
+      .toMatchObject({ status: 'PARTIALLY_COMPLETED', final: true });
+    expect(canonicalRunLifecycle({ status: 'SIMULATED', attempts: [{ state: 'REVERTED', transactionHash: '0xabc' }] }).status).toBe('REVERTED');
     // A refunded bridge stays a failure even after its deposit confirmed: the funds came back.
     expect(canonicalRunLifecycle({ status: 'REFUNDED', attempts: [{ state: 'CONFIRMED' }, { state: 'CONFIRMED' }] }).status).toBe('FAILED');
     // A lending run between steps is resumable, not final.

@@ -52,6 +52,9 @@ export const portugueseFinancialExecution: Readonly<Record<string, string>> = {
   'A recorded request still needs verification. No transaction is repeated.': 'Uma solicitação registrada ainda precisa ser verificada. Nenhuma transação é repetida.',
   // BUILD-FLOFI-EXECUTION-PERFORMANCE-001: the Dashboard says why a request was not submitted.
   'The request was not submitted': 'A solicitação não foi enviada', 'The request expired without executing': 'A solicitação expirou sem ser executada',
+  'The request was not executed': 'A solicitação não foi executada',
+  'This request was not executed. Earlier confirmed actions and costs remain recorded.':
+    'Esta solicitação não foi executada. Operações anteriores confirmadas e custos continuam registrados.',
   'This request expired without executing. Earlier confirmed actions and costs remain recorded.':
     'Esta solicitação expirou sem ser executada. Operações anteriores confirmadas e custos continuam registrados.',
   'This request was recorded as not submitted. Earlier confirmed actions and costs remain recorded.': 'Esta solicitação foi registrada como não enviada. Operações anteriores confirmadas e seus custos continuam registrados.',

@@ -51,7 +51,11 @@ export function projectDashboardRun(run: DashboardRun, progress: ExecutionLifecy
     // Only a wallet decline or a cancellation is "declined": a request FloFi refused before the wallet (NOT_SUBMITTED) or one that expired
     // without executing is said as such.
     if (run.status === 'NOT_SUBMITTED') notSubmittedChip = 'The request was not submitted';
-    else if (run.status === 'NOT_EXECUTED' || run.status === 'EXPIRED') {
+    // NOT_EXECUTED is also a composition leg never signed (a decline), so only EXPIRED says "expired".
+    else if (run.status === 'NOT_EXECUTED') {
+      notSubmittedChip = 'The request was not executed';
+      message = 'This request was not executed. Earlier confirmed actions and costs remain recorded.';
+    } else if (run.status === 'EXPIRED') {
       notSubmittedChip = 'The request expired without executing';
       message = 'This request expired without executing. Earlier confirmed actions and costs remain recorded.';
     }

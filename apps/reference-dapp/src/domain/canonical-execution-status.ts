@@ -86,7 +86,9 @@ function attemptLifecycle(attempt: { state: string; hash: boolean }, confirmed: 
   if (ATTEMPT_DECLINED.has(state)) return confirmed ? 'CONFIRMED_ONCHAIN' : 'REJECTED';
   if (state === 'CONFIRMED') return 'CONFIRMED_ONCHAIN';
   if (state === 'PENDING' || state === 'SUBMITTED' || state === 'HASH' || SUBMITTED.has(state)) return attempt.hash ? 'HASH_KNOWN' : 'SUBMITTED';
-  if (INCONCLUSIVE.has(state) || state === 'REVERTED' || state === 'FAILED') return 'INCONCLUSIVE';
+  // A revert is proven by its receipt (e.g. a Uniswap mint after a confirmed approval): never "still verifying".
+  if (state === 'REVERTED') return confirmed ? 'PARTIALLY_COMPLETED' : 'REVERTED';
+  if (INCONCLUSIVE.has(state) || state === 'FAILED') return 'INCONCLUSIVE';
   return 'INTERVENTION_REQUIRED';
 }
 
