@@ -315,13 +315,23 @@ export type ConversationExecution = {
  * from chat state): the last confirmed wallet request, whether it was a token approval (which is never the action itself), and the first wallet
  * request not attempted yet. Null when the run has no confirmed request followed by an unattempted one.
  */
-export function executionContinuation(view: Pick<LifecycleView, 'progress'>): { readonly done: string; readonly approval: boolean; readonly next: string } | null {
+export function executionContinuation(view: Pick<LifecycleView, 'progress'>): { readonly done: string; readonly approval: boolean; readonly next: string;
+  /** The run and its next wallet request: a stable identity for “this continuation” (never the record's whole fingerprint). */
+  readonly key: string } | null {
   const live = currentExecution(view.progress);
   if (!live) return null;
   const operations = live.steps.flatMap(step => step.operations).filter(operation => operation.wallet);
   const next = operations.findIndex(operation => operation.state === 'waiting');
   const done = next > 0 ? operations.slice(0, next).reverse().find(operation => operation.state === 'confirmed') : undefined;
-  return done && next > 0 ? { done: done.title, approval: done.approval, next: operations[next]!.title } : null;
+  return done && next > 0 ? { done: done.title, approval: done.approval, next: operations[next]!.title, key: `${live.runKey}:${operations[next]!.id}` } : null;
+}
+/**
+ * BUILD-FLOFI-E2E-RELIABILITY-001: a reason shown about the NEXT request of a run whose earlier request landed. The shared reasons say “nothing
+ * was sent”, true for that request but false for the run; here they say “nothing new”. Applied after translation (English and Portuguese).
+ */
+export function aboutNextRequest(text: string): string {
+  return text.replace(/\bso nothing was sent\b/g, 'so this request was not sent').replace(/\b([Nn])othing was (simulated or )?sent\b/g, '$1othing new was $2sent')
+    .replace(/\b([Nn])ada foi (simulado nem )?enviado\b/g, '$1ada novo foi $2enviado');
 }
 export function conversationExecution(view: LifecycleView): ConversationExecution | null {
   const live = currentExecution(view.progress);

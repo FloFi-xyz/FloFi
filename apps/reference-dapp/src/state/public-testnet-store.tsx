@@ -151,7 +151,8 @@ export function PublicTestnetProvider({ children }: { children: ReactNode }) {
   const guarded = useCallback((label: string, action: () => Promise<void>) => {
     if (busyRef.current) return;
     const epoch = ++operationEpoch.current; busyRef.current = true; setBusy(label); setError(null);
-    action().catch(cause => setError(publicSwapErrorCode(cause))).finally(() => { if (operationEpoch.current === epoch) { busyRef.current = false; setBusy(null); } });
+    // BUILD-FLOFI-E2E-RELIABILITY-001: a late failure of an older operation (its tail outlives its busy flag) never overwrites a newer one's.
+    action().catch(cause => { if (operationEpoch.current === epoch) setError(publicSwapErrorCode(cause)); }).finally(() => { if (operationEpoch.current === epoch) { busyRef.current = false; setBusy(null); } });
   }, []);
   useEffect(() => {
     let cancelled = false;
@@ -304,7 +305,12 @@ export function PublicTestnetProvider({ children }: { children: ReactNode }) {
     }
     const txHash = hash.toLowerCase();
     localStorage.setItem(KEY + ':' + attempt.attemptId, txHash);
-    acceptCurrent(unwrap(await publicReport(run.quote.executionId, attempt.attemptId, { kind: 'HASH', txHash })));
+    // BUILD-FLOFI-E2E-RELIABILITY-001: once the wallet returned a hash, a failure to record or follow it is never "nothing was sent": the hash is
+    // kept for recovery and the outcome is unknown until observed (a classified engine answer such as a reconciliation mismatch keeps its code).
+    const afterHash = (cause: unknown) => { const code = publicSwapErrorCode(cause);
+      return /^(PUBLIC_OPERATION_FAILED|CLOUD_API_.*|.*_UNAVAILABLE|.*TIMEOUT.*)$/.test(code) ? new Error('SUBMISSION_RESULT_UNKNOWN', { cause }) : cause; };
+    try { acceptCurrent(unwrap(await publicReport(run.quote.executionId, attempt.attemptId, { kind: 'HASH', txHash }))); }
+    catch (cause) { finish('inconclusive'); throw afterHash(cause); }
     // The wallet sent it and returned its hash: for this flow submission and the hash are the same moment.
     journey.mark('submission'); journey.mark('hash');
     try {
@@ -319,7 +325,7 @@ export function PublicTestnetProvider({ children }: { children: ReactNode }) {
       { active: () => mountedRef.current });
       const state = followed.value?.attempts.at(-1)?.state;
       finish(state === 'REVERTED' ? 'failed' : state === 'UNKNOWN' ? 'inconclusive' : followed.value?.outcome ? 'reconciled' : 'in_progress');
-    } catch (cause) { finish('in_progress'); throw cause; }
+    } catch (cause) { finish('in_progress'); throw afterHash(cause); }
   }), [guarded, run, retired, wallet]);
   const signing = Boolean(signingAttempt && run?.attempts.some(attempt => attempt.attemptId === signingAttempt));
   return <Context.Provider value={{ available, catalogAvailable, chainAvailable, availabilityKnown: availability.known, run, recoveryOnly, retired, busy, signing, error,

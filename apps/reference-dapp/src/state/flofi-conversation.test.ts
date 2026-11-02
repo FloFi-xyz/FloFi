@@ -503,6 +503,33 @@ describe('BUILD-FLOFI-E2E-RELIABILITY-001 continuation after a landed approval',
     expect(last(chat).question).toBe('Accept this updated quote and continue to your wallet for this request?');
     expect(controls.authorize).not.toHaveBeenCalled();
   });
+  it('"Not now" to the first Continue is remembered: when the quote then expires, FloFi does not re-quote or ask again by itself', async () => {
+    let chat = await executedWithLandedApproval(true);
+    chat = await say('Not now');
+    expect(last(chat).text).toBe('The next wallet request did not start, so nothing new was sent. Earlier confirmed requests stay recorded. You chose not to continue now.');
+    vi.setSystemTime(reviewNow + 200_000); lifecycle(reviewedPatch); bridge = { ...bridge, controls: { ...bridge.controls, canContinue: false } as ConversationBridge['controls'] };
+    render(); await flush(); chat = render();
+    expect(simulate).toHaveBeenCalledTimes(1);
+    expect(chat.question).toBeNull();
+    // The owner can still ask: then the remaining request gets its own fresh Review.
+    chat = await say('Review workflow');
+    expect(simulate).toHaveBeenCalledTimes(2);
+  });
+  it('another runtime\'s landed request (not the public swap) never gets the automatic re-quote or the single-answer Review', async () => {
+    await executedWithLandedApproval(false);
+    vi.setSystemTime(reviewNow + 200_000);
+    reviewedPatch = { ...reviewedPatch, source: { ...reviewedPatch.source!, kind: 'universal' } as SimulationSource };
+    lifecycle(reviewedPatch); bridge = { ...bridge, controls: { ...bridge.controls, canContinue: false } as ConversationBridge['controls'] };
+    render(); await flush(); const chat = render();
+    expect(simulate).toHaveBeenCalledTimes(1);
+    expect(chat.messages.some(message => /getting a fresh quote/.test(message.text))).toBe(false);
+  });
+  it('reasons about the next request never say "nothing was sent" for the run (EN and PT)', async () => {
+    const { aboutNextRequest } = await import('../domain/conversation-lifecycle');
+    expect(aboutNextRequest('The workflow changed before your wallet was asked, so nothing was sent. Review it again.')).toBe('The workflow changed before your wallet was asked, so this request was not sent. Review it again.');
+    expect(aboutNextRequest('Nothing was simulated or sent.')).toBe('Nothing new was simulated or sent.');
+    expect(aboutNextRequest('A rede recusou, então nada foi enviado.')).toBe('A rede recusou, então nada novo foi enviado.');
+  });
   it('PT: the same continuation in Portuguese', async () => {
     const chat = await executedWithLandedApproval(true);
     void chat;
