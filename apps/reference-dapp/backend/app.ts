@@ -33,11 +33,13 @@ export function observeOnly(rpc: Rpc): Rpc {
 export function untilAborted(rpc: Rpc, signal: AbortSignal): Rpc {
   return (method, params) => signal.aborted ? Promise.reject(new Error('CLOUD_PREVIEW_TIMEOUT')) : rpc(method, params);
 }
-function previewTransport(deps: FlowDeps, signal: AbortSignal): FlowDeps {
+export function previewTransport(deps: FlowDeps, signal: AbortSignal): FlowDeps {
   const router = deps.router ? { router: { ...deps.router, destinationRpc: untilAborted(deps.router.destinationRpc, signal) } } : {};
   const universal = deps.universal ? { universal: { ...deps.universal, solanaRpc: untilAborted(deps.universal.solanaRpc, signal),
     evmRpcs: Object.fromEntries(Object.entries(deps.universal.evmRpcs).map(([chain, rpc]) => [chain, untilAborted(rpc, signal)])) } } : {};
-  return { ...deps, ...router, ...universal, rpc: untilAborted(deps.rpc, signal) };
+  // Per-chain read clients (Aave supply, transfers, catalog liquidity) share the same paced transports (follow-up review).
+  const chains = deps.chains ? { chains: { ...deps.chains, rpcs: Object.fromEntries(Object.entries(deps.chains.rpcs).map(([chain, rpc]) => [chain, untilAborted(rpc, signal)])) } } : {};
+  return { ...deps, ...router, ...universal, ...chains, rpc: untilAborted(deps.rpc, signal) };
 }
 
 export type FlowResult = { ok: true; value: unknown } | { ok: false; code: string; correlationId?: string };

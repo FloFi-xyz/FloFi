@@ -589,6 +589,7 @@ class CiParity(unittest.TestCase):
     # Gates both CI systems run unconditionally (GitHub Actions in one job, CircleCI across the certification jobs).
     MANDATORY = ['python3 scripts/bootstrap-ci.py', 'pnpm install --frozen-lockfile --ignore-scripts', 'python3 scripts/dependency_security.py verify',
                  'pnpm audit --audit-level low', 'pnpm typecheck', 'pnpm lint', 'pnpm exec eslint scripts/guarded-release-browser.mjs', 'pnpm build',
+                 'python3 scripts/function_traces.py apps/reference-dapp',
                  'pnpm schemas:check', 'python3 scripts/agent_guard.py check',
                  'pnpm test --reporter=default --reporter=json --outputFile="$RUNNER_TEMP/flofi-agent-unit.json"',
                  'python3 scripts/agent_guard.py verify-results "$RUNNER_TEMP/flofi-agent-unit.json"',

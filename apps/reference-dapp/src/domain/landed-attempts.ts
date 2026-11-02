@@ -50,7 +50,25 @@ const ATTEMPT_DEPENDENT = new Set(['DRAFT', 'PREPARED', 'SIMULATED', 'AUTHORIZED
   'EXPIRED', 'CONFIRMED', 'COMPLETED', 'SETTLED', 'FAILED', 'REVERTED', 'PARTIAL', 'PARTIALLY_COMPLETED', 'EXECUTING', 'PAUSED', 'PRODUCING', 'BOUND', 'CONSUMING',
   'RECOVERY_REQUIRED']);
 export const attemptDependentStatus = (status: string) => ATTEMPT_DEPENDENT.has(status);
-/** The Portuguese of every approval-only label (shared by the PT catalog and Channel Core, which may not import the i18n layer). */
+/**
+ * BUILD-FLOFI-E2E-RELIABILITY-001 (channels review): what each landed label means for the person, as a closed set — so a surface that only has
+ * the label (Channel Core) words its follow-up by it (never "continue" while the main action may already be in flight) and keys one notice per
+ * meaning.
+ */
+export type LandedKind = 'not-sent' | 'awaiting-wallet' | 'not-submitted' | 'pending' | 'failed' | 'unresolved' | 'confirmed-unreconciled' | 'later-incomplete';
+const LANDED_KINDS: Readonly<Record<string, LandedKind>> = {
+  'Approval confirmed · main action not sent': 'not-sent',
+  'Approval confirmed · main action awaiting wallet confirmation': 'awaiting-wallet',
+  'Approval confirmed · main action not submitted': 'not-submitted',
+  'Approval confirmed · main action pending confirmation': 'pending',
+  'Approval confirmed · main action failed': 'failed',
+  'Approval confirmed · main action unresolved': 'unresolved',
+  'Confirmed onchain · workflow outcome not reconciled yet': 'confirmed-unreconciled',
+  'Earlier actions confirmed onchain · a later action is not complete': 'later-incomplete',
+};
+/** A label's kind; a label this module did not produce is `unresolved` (never read as "not sent"). */
+export const landedKind = (label: string): LandedKind => LANDED_KINDS[label] ?? 'unresolved';
+/** The Portuguese of every landed label (shared by the PT catalog and Channel Core, which may not import the i18n layer). */
 export const LANDED_LABELS_PT: Readonly<Record<string, string>> = {
   'Approval confirmed · main action not sent': 'Aprovação confirmada · ação principal não enviada',
   'Approval confirmed · main action awaiting wallet confirmation': 'Aprovação confirmada · ação principal aguardando confirmação na carteira',
@@ -58,4 +76,6 @@ export const LANDED_LABELS_PT: Readonly<Record<string, string>> = {
   'Approval confirmed · main action pending confirmation': 'Aprovação confirmada · ação principal aguardando confirmação',
   'Approval confirmed · main action failed': 'Aprovação confirmada · a ação principal falhou',
   'Approval confirmed · main action unresolved': 'Aprovação confirmada · estado da ação principal não resolvido',
+  'Confirmed onchain · workflow outcome not reconciled yet': 'Confirmada onchain · resultado do workflow ainda não reconciliado',
+  'Earlier actions confirmed onchain · a later action is not complete': 'Ações anteriores confirmadas onchain · uma ação posterior não foi concluída',
 };

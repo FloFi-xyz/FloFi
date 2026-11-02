@@ -28,6 +28,18 @@ describe('BUILD-FLOFI-E2E-RELIABILITY-001 gateway hard-deadline answer', () => {
       requestId: response.headers.get('x-flofi-request-id') });
     expect(JSON.stringify(message)).not.toMatch(/apr_|flofi_hs_|approvalUrl/);
   });
+  it('a client that leaves is logged CLIENT_CLOSED (never a 5xx, a timeout or a store outage)', async () => {
+    const lines: { event: string; fields: Record<string, unknown> }[] = [], left = new AbortController();
+    const logger = { info: (event: string, fields: Record<string, unknown> = {}) => lines.push({ event, fields }), warn: (event: string, fields: Record<string, unknown> = {}) => lines.push({ event, fields }) };
+    const client = session({ env, token: alice.token, budgetMs: 5_000, marginMs: 400, logger, signal: left.signal });
+    setTimeout(() => left.abort(), 150);
+    const response = await client.post({ jsonrpc: '2.0', id: 'c1', method: 'tools/call', params: { name: 'get_supported_networks', arguments: {} } }, headers);
+    const line = lines.find(l => l.event === 'mcp.request')!;
+    expect(line.fields).toMatchObject({ outcome: 'CLIENT_CLOSED' });
+    expect(Number(line.fields.status)).toBeLessThan(500);
+    expect(response.status).toBeLessThan(500);
+    expect(lines.some(l => l.event === 'mcp.oauth.store_unavailable')).toBe(false);
+  });
   it('a batch echoes every request id (long ids included); a non-tool method keeps a JSON-RPC error', async () => {
     const client = session({ env, token: alice.token, budgetMs: 1_200, marginMs: 400 });
     const long = 'x'.repeat(300);

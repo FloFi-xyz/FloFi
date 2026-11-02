@@ -32,13 +32,18 @@ describe('Issue #149: Automations History run phases', () => {
     expect(automationRunLabel(view('DIVERGENT', landed, { errorCode: 'RECONCILIATION_MISMATCH' }))).not.toMatch(/^Approval confirmed/);
   });
   it('a refused, cancelled, expired or never-submitted request is a refusal: nothing was sent', () => {
-    for (const status of ['CANCELLED', 'REJECTED', 'NOT_SUBMITTED', 'EXPIRED', 'NOT_EXECUTED']) expect(automationRunLabel(view(status)), status).toBe('Refused or not submitted — nothing was sent');
+    for (const status of ['CANCELLED', 'REJECTED', 'NOT_SUBMITTED', 'EXPIRED', 'NOT_EXECUTED']) {
+      expect(automationRunLabel(view(status, [])), status).toBe('Refused or not submitted — nothing was sent');
+      // BUILD-FLOFI-E2E-RELIABILITY-001 (automations review, intentional change): attempts that could not be read cannot rule out a landed
+      // approval, so the same statuses are unresolved — this case previously asserted "nothing was sent" for unread attempts.
+      expect(automationRunLabel(view(status, null)), status).toBe('Status unresolved — no transaction is repeated');
+    }
     expect(automationRunLabel(view('AUTHORIZED', [a('SWAP', 'REFUSED')]))).toBe('Refused or not submitted — nothing was sent');
     // A recorded error does not turn a refusal into "Execution ended" or an execution.
     expect(automationRunLabel(view('REJECTED', [], { errorCode: 'WALLET_REJECTED', terminal: true }))).toBe('Refused or not submitted — nothing was sent');
   });
   it('submission, onchain confirmation and reconciliation are distinct; only verified evidence is "reconciled"', () => {
-    expect(automationRunLabel(view('AUTHORIZED', [a('SWAP', 'PREPARED')]))).toBe('Awaiting your wallet confirmation — nothing sent yet');
+    expect(automationRunLabel(view('AUTHORIZED', [a('SWAP', 'PREPARED')]))).toBe('Wallet request prepared — no submission recorded; open the run to check');
     expect(automationRunLabel(view('PENDING', [a('SWAP', 'PENDING')]))).toBe('Submitted — awaiting confirmation');
     expect(automationRunLabel(view('PENDING', [a('SWAP', 'PENDING', { transactionHash: hash })]))).toBe('Transaction sent — awaiting onchain confirmation');
     expect(automationRunLabel(view('CONFIRMED', [a('SWAP', 'CONFIRMED', { transactionHash: hash })]))).toBe('Confirmed onchain — reconciling');

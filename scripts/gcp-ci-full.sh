@@ -108,6 +108,7 @@ bash scripts/ci-sbom.sh
 (
   source scripts/ci-observe.sh 'Production build'
   pnpm build
+  python3 scripts/function_traces.py apps/reference-dapp
 )
 (
   source scripts/ci-observe.sh 'Anvil bootstrap'

@@ -2,8 +2,8 @@
 /**
  * MCP request deadlines. Every `/api/mcp` request gets ONE budget, created by the gateway when the request arrives:
  *
- *   hard deadline   MCP_REQUEST_BUDGET_MS after arrival: the gateway answers by then whatever is still running (a JSON-RPC error with
- *                   the request id), comfortably below the function limit (`maxDuration` 300 s), so a request never runs until the
+ *   hard deadline   MCP_REQUEST_BUDGET_MS after arrival: the gateway answers by then whatever is still running (a classified tool
+ *                   result for a tool call, a JSON-RPC error otherwise, with the request id), comfortably below the function limit (`maxDuration` 300 s), so a request never runs until the
  *                   platform kills it with no answer and no log line
  *   tool deadline   MCP_RESPONSE_MARGIN_MS earlier: `signal` aborts, every upstream read in flight is cancelled (the remote runtime's
  *                   fetches carry it) and the tool answers with a classified timeout result instead of waiting
@@ -39,6 +39,12 @@ export const MCP_UPSTREAM_TIMEOUTS = Object.freeze({
  * now answers NOT_COMPLETED (retryable) instead of a late success the client would not have received anyway.
  */
 export const MCP_TOOL_TIMEOUTS = Object.freeze({ approvalWrite: 50_000, default: 55_000 });
+/**
+ * A tool's cap counted from the request's ARRIVAL (follow-up review): the gateway's own bounded work before the tool (OAuth store, body read)
+ * comes out of the same ~60 s host window. A tool always keeps a short floor, so a request delayed upstream still gets its classified answer.
+ */
+export const toolCap = (budget: RequestBudget | null | undefined, capMs: number, floorMs = 5_000) =>
+  budget ? Math.max(floorMs, capMs - budget.elapsed()) : capMs;
 
 export type BudgetEnd = 'DEADLINE' | 'CLIENT_CLOSED';
 export type RequestBudget = {
@@ -52,6 +58,8 @@ export type RequestBudget = {
   readonly signal: AbortSignal;
   /** Milliseconds left before the tool deadline (0 when passed). */
   readonly remaining: () => number;
+  /** Milliseconds since the request arrived (the gateway's own work before a tool counts against the tool caps). */
+  readonly elapsed: () => number;
   /** Why `signal` aborted, or null while the budget is open. */
   readonly ended: () => BudgetEnd | null;
   /** Releases the timer (the gateway calls it once the response is built). */
@@ -80,7 +88,7 @@ export function createRequestBudget(options: { readonly totalMs?: number; readon
   const parent = options.parent ?? null, onParent = () => end('CLIENT_CLOSED');
   if (parent?.aborted) onParent(); else parent?.addEventListener('abort', onParent, { once: true });
   return { requestId: options.requestId && REQUEST_ID.test(options.requestId) ? options.requestId : randomUUID(), toolDeadline, hardDeadline,
-    signal: controller.signal, remaining: () => Math.max(0, toolDeadline - now()), ended: () => ended,
+    signal: controller.signal, remaining: () => Math.max(0, toolDeadline - now()), elapsed: () => Math.max(0, now() - started), ended: () => ended,
     // BUILD-FLOFI-E2E-RELIABILITY-001 (MCP review): the answer is already buffered when the request is disposed, so any read still running
     // (one its own cap or the gateway's deadline answer left behind) is aborted instead of loading the upstream for nobody. `ended` is not
     // set: disposing is not a deadline, and nothing classifies the request after it.

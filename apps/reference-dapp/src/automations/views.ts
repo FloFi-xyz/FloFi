@@ -36,7 +36,9 @@ export type OccurrenceView = {
   readonly state: 'PENDING_OWNER' | 'APPROVAL_CREATED' | 'COMPLETED' | 'DISMISSED' | 'EXPIRED' | 'DELEGATED'; readonly dueAt: string; readonly expiresAt: string;
   readonly action: ActionView; readonly observations: readonly ObservationView[]; readonly outcome: string | null; readonly decidedAt: string | null;
   /** `runsComplete` false: a run read failed, so the listed runs may not be all of them (never "no runs"). */
-  readonly approval: { readonly status: string; readonly runs: readonly RunView[]; readonly runsComplete: boolean } | null;
+  readonly approval: { readonly status: string; readonly runs: readonly RunView[]; readonly runsComplete: boolean;
+    /** Older runs of the wallet were not examined: with no run listed, never "no run of this proposal". */
+    readonly runsTruncated?: boolean } | null;
   readonly notifications: readonly { readonly channel: string; readonly status: string; readonly code: string | null }[];
 };
 export type HistoryEntryView = { readonly at: string; readonly outcome: string; readonly occurrenceId: string | null; readonly observation: ObservationView | null;

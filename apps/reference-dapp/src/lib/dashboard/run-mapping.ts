@@ -42,7 +42,8 @@ function fromLifecycle(lifecycle: CanonicalLifecycle, landed: LandedEvidence, ru
   const keep = (status: DashboardStatus, message: string): Summary => summary.status === status ? summary : { status, message };
   switch (lifecycle.status) {
     case 'NOT_STARTED': case 'RECONCILED': case 'RECONCILED_WITH_ATTENTION': return summary;
-    case 'AUTHORIZATION_PENDING': return { status: 'In progress', message: 'A wallet request is prepared and awaits your wallet confirmation. Nothing is sent without it.' };
+    // A prepared request may already have been signed in a tab that closed before its hash was reported: never "nothing sent".
+    case 'AUTHORIZATION_PENDING': return { status: 'In progress', message: 'A wallet request is prepared; no submission is recorded yet. Open the run to check it before doing anything else.' };
     case 'REJECTED': return keep('Transaction not submitted', 'This request was recorded as not submitted. Earlier confirmed actions and costs remain recorded.');
     case 'SUBMITTED': case 'HASH_KNOWN': case 'SETTLEMENT_PENDING': return keep('In progress', 'The recorded execution is still awaiting its final outcome.');
     // A step landed and the workflow is not reconciled: between steps (an approval before the swap, a supply before the borrow) earlier
@@ -69,13 +70,14 @@ const titles: Record<string, string> = { 'aave-supply': 'Aave workflow', 'base-s
   'solana-devnet-composition': 'Swap + Liquidity workflow', 'pix-payment': 'Payment' };
 
 /**
- * Only a wallet decline or a cancellation is "declined": a request FloFi refused before the wallet (NOT_SUBMITTED) or one that expired without
- * executing is said as such. NOT_EXECUTED is also a composition leg never signed (a decline), so only EXPIRED says "expired".
+ * Only a wallet decline is "declined": a cancellation, a request FloFi refused before the wallet (NOT_SUBMITTED) or one that expired
+ * without executing is said as such. NOT_EXECUTED is also a composition leg never signed (a decline), so only EXPIRED says "expired".
  */
 function notSubmittedWording(state: string, message: string): { chip: string; message: string } {
   if (state === 'NOT_SUBMITTED') return { chip: 'The request was not submitted', message };
   if (state === 'NOT_EXECUTED') return { chip: 'The request was not executed', message: 'This request was not executed. Earlier confirmed actions and costs remain recorded.' };
   if (state === 'EXPIRED') return { chip: 'The request expired without executing', message: 'This request expired without executing. Earlier confirmed actions and costs remain recorded.' };
+  if (state === 'CANCELLED') return { chip: 'The request was cancelled', message };
   return { chip: 'Wallet confirmation was declined', message };
 }
 const NOT_SUBMITTED_RUN = ['CANCELLED', 'REJECTED', 'NOT_SUBMITTED', 'NOT_EXECUTED', 'EXPIRED'];
@@ -136,6 +138,9 @@ export function projectDashboardRun(run: DashboardRun, progress: ExecutionLifecy
   } else if (run.attemptsUnavailable && status === 'Not started') {
     // The summary looks not started, but the attempts that would prove it could not be read: fail closed, never "nothing was sent".
     status = 'Unresolved'; message = 'The recorded requests of this run could not be read, so FloFi does not claim that nothing was sent. Refresh history to check again.';
+  } else if (run.attemptsUnavailable && status === 'Transaction not submitted') {
+    // The latest request was declined or not submitted, but whether an earlier one (a token approval) landed could not be read (follow-up review).
+    status = 'Unresolved'; message = 'The latest request was not submitted, but the earlier requests of this run could not be read, so an earlier confirmed action (such as a token approval) cannot be ruled out. Refresh history to check again.';
   }
   const attention: string[] = [];
   if (status === 'Unresolved') attention.push('Execution status unresolved');

@@ -16,7 +16,8 @@
  *
  * Deadlines (`deadline.ts`): every request has one budget well below the function limit. Each store read before the exchange, every
  * runtime read and each tool is bounded by it; the forwarded request carries an abort signal (client close, hard deadline), and if the
- * exchange is still running at the hard deadline the gateway answers itself with a classified JSON-RPC error carrying the request id.
+ * exchange is still running at the hard deadline the gateway answers each request id itself: a `tools/call` as a classified tool result
+ * (`isError`), any other method as a JSON-RPC error.
  * Every response names its request id (`x-flofi-request-id`) and every request ends with one `mcp.request` log line.
  */
 import { networkScope } from '../server/network-scope.ts';
@@ -39,8 +40,13 @@ export type GatewayOptions = { readonly env?: Env; readonly runtime?: McpRuntime
   readonly budgetMs?: number; readonly marginMs?: number };
 export const MCP_MAX_BODY_BYTES = 65_536;
 const HEADERS = { 'cache-control': 'no-store', 'x-content-type-options': 'nosniff' };
-const reject = (status: number, code: string, extra: Record<string, string> = {}) =>
-  Response.json({ ok: false, code }, { status, headers: { ...HEADERS, ...extra } });
+/** The classified code of each refusal the gateway answers itself (logged as metadata on `mcp.request`). */
+const refusals = new WeakMap<Response, string>();
+const reject = (status: number, code: string, extra: Record<string, string> = {}) => {
+  const response = Response.json({ ok: false, code }, { status, headers: { ...HEADERS, ...extra } });
+  refusals.set(response, code);
+  return response;
+};
 
 /** RFC 6750 §3 challenge with the RFC 9728 `resource_metadata` pointer and the scopes to ask for. */
 function challenge(oauth: OAuthConfig, scopes: readonly McpScope[], error?: 'invalid_token' | 'insufficient_scope'): string {
@@ -94,8 +100,8 @@ function messagesOf(body: string | null): { readonly methods: string; readonly t
   return { methods, tool, batch: Array.isArray(parsed), requests };
 }
 /**
- * The gateway's own answer when the exchange is still running at the hard deadline: one JSON-RPC error per request id, carrying the
- * request id and what the call may have done (`timeoutResult`: never "nothing was submitted"; an approval request is UNKNOWN).
+ * The gateway's own answer when the exchange is still running at the hard deadline: one answer per request id (a tool result with
+ * `isError` for a `tools/call`, a JSON-RPC error otherwise), carrying the request id and what the call may have done (`timeoutResult`: never "nothing was submitted"; an approval request is UNKNOWN).
  */
 function deadlineResponse(body: string | null, budget: RequestBudget): Response {
   const { requests, batch } = messagesOf(body);
@@ -123,12 +129,16 @@ export async function handleMcpRequest(request: Request, options: GatewayOptions
     seen.outcome = isDeadlineError(error) ? error.code : request.signal.aborted ? 'CLIENT_CLOSED' : 'MCP_INTERNAL_ERROR';
     response = reject(isDeadlineError(error) ? 503 : 500, seen.outcome);
   } finally { budget.dispose(); }
+  // BUILD-FLOFI-E2E-RELIABILITY-001 (admin-analytics review): a client that left is CLIENT_CLOSED whatever answered after it (a body or store
+  // read cut by the close, an exchange that rejected) — never counted as a server error, a timeout or a store outage. 499: nobody receives it.
+  if (request.signal.aborted && response.status >= 400) { seen.outcome = 'CLIENT_CLOSED'; response = reject(499, 'CLIENT_CLOSED'); }
+  const refusal = refusals.get(response);
   const headers = new Headers(response.headers);
   headers.set('x-flofi-request-id', budget.requestId);
   const { methods, tool } = messagesOf(seen.body), platform = request.headers.get('x-vercel-id');
   logger?.info('mcp.request', { request_id: budget.requestId, ...platform && /^[A-Za-z0-9:_-]{1,128}$/.test(platform) ? { platform_request_id: platform } : {},
     principal: seen.principal, http_method: request.method, rpc: methods || null, tool, status: response.status,
-    outcome: seen.outcome ?? (response.status < 400 ? 'OK' : 'REFUSED'), duration_ms: Date.now() - started });
+    outcome: seen.outcome ?? (response.status < 400 ? 'OK' : 'REFUSED'), ...refusal ? { code: refusal } : {}, duration_ms: Date.now() - started });
   return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
 }
 type Seen = { principal: string | null; body: string | null; outcome: string | null };
@@ -204,6 +214,10 @@ async function serve(request: Request, options: GatewayOptions, budget: RequestB
   if (request.signal.aborted) closeForwarded(); else request.signal.addEventListener('abort', closeForwarded, { once: true });
   let hardTimer: ReturnType<typeof setTimeout> | undefined;
   const hardDeadline = new Promise<'DEADLINE'>(resolve => { hardTimer = setTimeout(() => { resolve('DEADLINE'); closeForwarded(); }, Math.max(0, budget.hardDeadline - Date.now())); });
+  // A client that left gets no answer: the gateway stops waiting for the exchange (already told to stop) instead of holding the function.
+  let onClientGone: (() => void) | undefined;
+  const clientGone = new Promise<'CLIENT_CLOSED'>(resolve => { onClientGone = () => resolve('CLIENT_CLOSED');
+    if (request.signal.aborted) onClientGone(); else request.signal.addEventListener('abort', onClientGone, { once: true }); });
   try {
     // The body was read for the scope check; the SDK gets an identical request.
     const forwarded = new Request(request.url, { method: request.method, headers: request.headers, signal: forwardedAbort.signal, ...body === null ? {} : { body } });
@@ -212,7 +226,8 @@ async function serve(request: Request, options: GatewayOptions, budget: RequestB
       const response = await handler.fetch(forwarded), text = response.status === 204 || response.status === 202 ? null : await response.text();
       return { response, text };
     })();
-    const done = await Promise.race([exchange, hardDeadline]);
+    const done = await Promise.race([exchange, hardDeadline, clientGone]);
+    if (done === 'CLIENT_CLOSED') { exchange.catch(() => undefined); seen.outcome = 'CLIENT_CLOSED'; return reject(499, 'CLIENT_CLOSED'); }
     if (done === 'DEADLINE') {
       exchange.catch(() => undefined);
       seen.outcome = 'MCP_REQUEST_TIMEOUT';
@@ -227,6 +242,7 @@ async function serve(request: Request, options: GatewayOptions, budget: RequestB
   } finally {
     clearTimeout(hardTimer);
     request.signal.removeEventListener('abort', closeForwarded);
+    if (onClientGone) request.signal.removeEventListener('abort', onClientGone);
     // Bounded: a handler that waits for a stuck exchange never holds the gateway's own answer (or the function) past its deadline.
     let closeTimer: ReturnType<typeof setTimeout> | undefined;
     await Promise.race([handler.close().catch(() => undefined), new Promise<void>(resolve => { closeTimer = setTimeout(resolve, 1_000); })]);

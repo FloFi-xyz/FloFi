@@ -27,10 +27,14 @@ export async function recordedRunFacts(reads: Pick<EngineRuntime, 'run'>, execut
   const read = await reads.run(executionId, owner).catch(() => null);
   const run = read?.ok ? read.value : null;
   if (!run || run.runId !== executionId) return { needsObservation: null, attempts: null };
-  // The newest 64 (attempts are recorded oldest first; the lifecycle reads the latest).
-  const attempts = (Array.isArray(run.attempts) ? run.attempts : []).slice(-64).flatMap((a): RunAttemptView[] => {
+  // A record without an attempts list proves nothing about what was sent (an older API, a projector that omits it): unknown, never "none".
+  if (!Array.isArray(run.attempts)) return { needsObservation: run.needsObservation === true, attempts: null };
+  const all = run.attempts.flatMap((a): RunAttemptView[] => {
     const row = a && typeof a === 'object' ? a as Record<string, unknown> : {}, step = text(row.step), state = text(row.state);
     return step && state ? [{ step, state, transactionHash: text(row.transactionHash), reconciled: row.reconciled === true }] : [];
   });
+  // The newest 64 (attempts are recorded oldest first; the lifecycle reads the latest), plus every attempt that landed, in order: an approval
+  // recorded long before is never cut away, so the History never says "nothing was sent" for a run whose approval is confirmed onchain.
+  const attempts = all.filter((a, i) => i >= all.length - 64 || a.state === 'CONFIRMED' || a.reconciled);
   return { needsObservation: run.needsObservation === true, attempts };
 }

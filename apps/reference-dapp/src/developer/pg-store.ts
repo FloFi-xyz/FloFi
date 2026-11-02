@@ -189,7 +189,10 @@ export function createPgDeveloperStore(db: Database, tenantId: string): Develope
         .map(row => ({ day: String(row.day), metric: String(row.metric), dimension: String(row.dimension), count: Number(row.count) }));
     },
     async purge(now) {
-      await db.query('DELETE FROM developer_events WHERE tenant_id = $1 AND created_at < $2', [tenantId, new Date(now.getTime() - 30 * DAY)]);
+      // BUILD-FLOFI-E2E-RELIABILITY-001: an approval still being synced keeps its events (they are its de-duplication record), so an approval
+      // whose reads recover late never re-records an event that was already delivered under another id.
+      await db.query(`DELETE FROM developer_events e WHERE e.tenant_id = $1 AND e.created_at < $2 AND NOT EXISTS (SELECT 1 FROM developer_approvals a
+        WHERE a.tenant_id = e.tenant_id AND a.handoff_id = e.approval_id AND a.sync_state = 'OPEN')`, [tenantId, new Date(now.getTime() - 30 * DAY)]);
       // Developer abuse-limit windows (the shared table; MCP purges its own buckets the same way).
       await db.query(`DELETE FROM mcp_rate_limits WHERE tenant_id = $1 AND window_start < $2 AND (bucket LIKE 'dev:%' OR bucket LIKE 'handoff:project:%')`,
         [tenantId, new Date(now.getTime() - DAY)]);

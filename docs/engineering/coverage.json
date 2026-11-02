@@ -594,6 +594,10 @@
       "path": "scripts/test_ci_claude_agents.py",
       "stage": "governance"
     },
+    "scripts.test_ci_function_traces": {
+      "path": "scripts/test_ci_function_traces.py",
+      "stage": "governance"
+    },
     "scripts.test_ci_gcp_orchestration": {
       "path": "scripts/test_ci_gcp_orchestration.py",
       "stage": "governance"
@@ -604,6 +608,10 @@
     },
     "scripts.test_ci_source_snapshot": {
       "path": "scripts/test_ci_source_snapshot.py",
+      "stage": "governance"
+    },
+    "scripts.test_ci_vercel_deployment_cleanup": {
+      "path": "scripts/test_ci_vercel_deployment_cleanup.py",
       "stage": "governance"
     },
     "scripts.test_governance_lite": {
@@ -3858,6 +3866,7 @@
         "scripts/ci-sbom.sh",
         "scripts/ci_archive_cache.py",
         "scripts/export-schemas.mjs",
+        "scripts/function_traces.py",
         "scripts/gcp-ci-certify.sh",
         "scripts/gcp-ci-composition.sh",
         "scripts/gcp-ci-full.sh",
@@ -3866,6 +3875,7 @@
         "scripts/guarded-release-browser.mjs",
         "scripts/summarize-screenshot-diffs.py",
         "scripts/universal-route-matrix.mjs",
+        "scripts/vercel_deployment_cleanup.py",
         "scripts/verify_claude_agents.py",
         "scripts/verify_codex_agents.py",
         "tsconfig.base.json",
@@ -3876,9 +3886,11 @@
         "scripts.test_ci_agent_guard",
         "scripts.test_ci_claude_agents",
         "scripts.test_ci_dependency_security",
+        "scripts.test_ci_function_traces",
         "scripts.test_ci_gcp_orchestration",
         "scripts.test_ci_optimization",
         "scripts.test_ci_source_snapshot",
+        "scripts.test_ci_vercel_deployment_cleanup",
         "scripts.test_governance_lite"
       ],
       "gaps": [

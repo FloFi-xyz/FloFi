@@ -11,7 +11,7 @@ import { createHash } from 'node:crypto';
 import type { HandoffRecord } from '../../platform/index.ts';
 import type { channelApprovalProgress } from './approval.ts';
 import type { ChannelLanguage } from './config.ts';
-import { channelCopy, shorten, type RunFacts } from './copy.ts';
+import { channelCopy, runLandedKind, shorten, type RunFacts } from './copy.ts';
 import type { ChannelReply } from './types.ts';
 
 type Progress = NonNullable<Awaited<ReturnType<typeof channelApprovalProgress>>>['progress'];
@@ -42,7 +42,8 @@ export function statusReplies(language: ChannelLanguage, found: { readonly hando
     if (!progress.runsVisible) lines.push(m.notShared);
     // BUILD-FLOFI-E2E-RELIABILITY-001: a failed run read is never "no record" — the runs read so far are listed, then the unknown remainder.
     else if (progress.runsComplete === false) lines.push(...progress.runs.map(m.run), m.runsUnknown);
-    else if (!progress.runs.length) lines.push(m.noRuns);
+    // Older runs of the wallet were not examined: no run found among the recent ones is never "no record".
+    else if (!progress.runs.length) lines.push(progress.runsTruncated ? m.runsOlder : m.noRuns);
     else lines.push(...progress.runs.map(m.run));
   }
   return [text(lines.join('\n'))];
@@ -65,7 +66,10 @@ export function plannedNotifications(language: ChannelLanguage, handoff: Handoff
   for (const run of progress.runs) {
     const id = createHash('sha256').update(run.executionId).digest('hex').slice(0, 16);
     // Preparation creates a run too. Keep its notice distinct so it cannot consume a later authorization/submission notice.
-    if (!run.terminal) due.push({ key: `notify:${handoff.handoffId}:run:${id}:state:${run.status.toLowerCase()}${run.landed ? ':approval-landed' : ''}`, text: shorten(m.run(run)) });
+    // A landed label keys its own notice by what it means (not sent, pending, failed, unresolved, …), so a later outcome under the same summary
+    // status (e.g. Uniswap falling back to AUTHORIZED after a reverted mint) is still sent once, and never shadowed by an earlier notice.
+    const landed = runLandedKind(run);
+    if (!run.terminal) due.push({ key: `notify:${handoff.handoffId}:run:${id}:state:${run.status.toLowerCase()}${landed ? `:landed:${landed}` : ''}`, text: shorten(m.run(run)) });
     else due.push({ key: `notify:${handoff.handoffId}:run:${id}:${run.reconciled ? 'reconciled' : 'ended'}`, text: shorten(m.run(run)) });
   }
   // An incomplete run read never ends the follow-up (an unread run may still be in flight).

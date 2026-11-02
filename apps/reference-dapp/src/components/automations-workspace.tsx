@@ -211,7 +211,8 @@ export function HistoryPanel({ history, onClose }: { history: RuleHistoryView; o
     {history.occurrences.length ? <ul className="automation-history-list">{history.occurrences.map(o => <li key={o.occurrenceId}>
       <When iso={o.dueAt} zone={zone}/> · {t(OCCURRENCE_LABEL[o.state] ?? o.state)}{o.outcome && OUTCOME_LABEL[o.outcome] && o.outcome !== 'APPROVAL_APPLIED' ? <> · {t(OUTCOME_LABEL[o.outcome])}</> : null}
       {o.approval?.status === 'APPLIED' && o.approval.runsComplete === false && <> · {t('Run status could not be read now — not evidence that nothing was sent')}</>}
-      {o.approval?.status === 'APPLIED' && o.approval.runsComplete !== false && o.approval.runs.length === 0 && <> · {t('No run of this exact proposal recorded yet')}</>}
+      {o.approval?.status === 'APPLIED' && o.approval.runsComplete !== false && o.approval.runs.length === 0 && <> · {t(o.approval.runsTruncated
+        ? 'No run of this proposal among this wallet\'s recent runs — older runs were not checked' : 'No run of this exact proposal recorded yet')}</>}
       {o.approval?.runs.map(r => <span key={r.executionId}> · {t(automationRunLabel(r))}
         {r.evidenceEnvironment && <> ({t('evidence')}: {r.evidenceEnvironment})</>} · <a href={`/app/dashboard/runs/${encodeURIComponent(r.executionId)}`}>{t('Open run')}</a></span>)}
     </li>)}</ul> : <p className="muted">{t('No proposals yet.')}</p>}
@@ -465,6 +466,7 @@ export function AutomationsWorkspace({ owner: ownerProp, proof, onPropose, canva
               {overview.recent.length > 0 && <section className="workspace-section" aria-labelledby="automation-recent">
                 <div className="workspace-section-heading"><div><h2 id="automation-recent">{t('Recent proposals')}</h2></div></div>
                 <ul className="automation-history-list">{overview.recent.map(o => <li key={o.occurrenceId}>{o.ruleName} · <When iso={o.dueAt} zone={byId.get(o.ruleId)?.timezone ?? 'UTC'}/> · {t(OCCURRENCE_LABEL[o.state] ?? o.state)}
+                  {o.approval?.status === 'APPLIED' && o.approval.runsComplete === false && <> · {t('Run status could not be read now — not evidence that nothing was sent')}</>}
                   {o.approval?.runs.map(r => <span key={r.executionId}> · {t(automationRunLabel(r))} · <a href={`/app/dashboard/runs/${encodeURIComponent(r.executionId)}`}>{t('Open run')}</a></span>)}</li>)}</ul>
               </section>}
               <Notifications overview={overview} owner={owner} busy={busy} run={run}/>

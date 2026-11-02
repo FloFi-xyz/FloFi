@@ -54,6 +54,14 @@ describe('Issue #149: Dashboard list attempt evidence', () => {
     for (const view of dashboardRunIndex(account, snapshot.runs, null)) expect(view.status, view.run.runId).toBe('Unresolved');
   });
 
+  it('a declined-status run whose attempts could not be read is unresolved, never "not submitted" (a landed approval cannot be ruled out)', async () => {
+    setup({ 'cancelled-unread': new Error('offline') }, [summary('cancelled-unread', 'CANCELLED')]);
+    const snapshot = await loadDashboardSnapshot(account);
+    const [view] = dashboardRunIndex(account, snapshot.runs, null);
+    expect(view).toMatchObject({ status: 'Unresolved' });
+    expect(view!.message).toMatch(/cannot be ruled out/);
+  });
+
   it('bounds the reads of one page (25 runs, at most 5 at a time)', async () => {
     let inFlight = 0, peak = 0;
     vi.mocked(currentWalletPrincipal).mockResolvedValue(account);
