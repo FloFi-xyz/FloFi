@@ -179,33 +179,38 @@ another revision and fails when the revision is unknown. The dependency stage is
 
 ## 9. Before / after performance (measured, CircleCI)
 
-Before: main `3769eff` (this PR's base), workflow `0a2b9073`; also main `b8126a6` (`79cb79d6`) and PR #150's final head
-(`9c6537e0`). After: this PR at `721ca03`, workflow `01ec952f` (all jobs green). Seconds are CircleCI job/step times;
-the stage values come from each job's `ci-observe.py summary`.
+Before: three successful certifications — main `3769eff` (this PR's base, workflow `0a2b9073`), main `b8126a6`
+(`79cb79d6`) and PR #150's final head (`9c6537e0`). After: three successful certifications of this PR — `721ca03`
+(`01ec952f`), `507e5b8` (`cf71aef6`) and `4c05209` (`2a9c4b73`). Seconds are CircleCI job/step times; stage values come
+from each job's `ci-observe.py summary`. All six runs are on the same `large` executor.
 
-| Metric | Before (base 3769eff) | After (721ca03) | Improvement |
+| Run | Wall clock | governance | checks | browser-1 | browser-2 | certification | Runner compute |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| before: main 3769eff (base) | 1830.9 s | 48.4 | 904.4 | 1389.1 | 1764.0 | 10.2 | 4116.1 s |
+| before: main b8126a6 | 1788.2 s | 41.7 | 845.3 | 1242.2 | 1728.3 | 10.3 | 3867.8 s |
+| before: PR #150 822d2ef | 1879.1 s | 54.1 | 889.1 | 1215.4 | 1784.5 | 31.8 | 3974.7 s |
+| after: 721ca03 | 1387.3 s | 48.5 | 1240.9 | 1249.1 | 1319.1 | 11.5 | 3869.1 s |
+| after: 507e5b8 | 1380.2 s | 44.1 | 1242.1 | 1292.0 | 1314.5 | 14.6 | 3907.3 s |
+| after: 4c05209 | 1538.8 s | 61.1 | 1369.3 | 1442.1 | 1447.0 | 22.8 | 4342.3 s |
+
+| Metric | Before | After | Improvement |
 |---|---:|---:|---:|
-| Full certification (workflow wall clock) | 1830.9 s | 1387.3 s | **−24.2%** (−24.3% vs the 3-run mean 1832.7 s) |
-| Dependency installation (frozen install, mean per job) | 13.4 s (12.3 / 15.2 / 12.8) | 9.4 s (9.0 / 10.3 / 9.0) | −30% — runner variance: the install command is unchanged |
-| Dependency security verification (policy + audit + SBOM) | 15.5 s (13.4 + 1.1 + 1.1) | 19.5 s (17.5 + 1.0 + 1.1) | **+26%** (+4 s: registry signatures, advisory evidence, risk checks) |
-| Production build overhead (sum over jobs) | 280.2 s (2 builds) | 373.0 s (3 builds: 123.4 / 139.4 / 110.2) | +33% compute, off the critical path |
-| Browser certification (longest browser job) | 1764.0 s (browser-2) | 1319.1 s (browser-2) | **−25.2%** |
-| Browser stage seconds (sum) | 2773.6 s | 2554.4 s | −7.9% (run variance; same 50 profiles) |
-| Total runner compute (sum of job times) | 4116.1 s | 3869.1 s | **−6.0%** (−2.9% vs the 3-run mean 3986.2 s) |
+| Full certification (wall clock, mean of 3) | 1832.7 s | 1435.4 s | **−21.7%** (best −24.7%, worst −16.0%; −21.6% vs the base alone) |
+| Longest job (critical path, mean of 3) | 1758.9 s (browser-2) | 1360.2 s | **−22.7%** |
+| Dependency installation (frozen install, mean per job) | 13.4 s (base: 12.3 / 15.2 / 12.8) | 9.4–11.7 s | not attributable: the install command is unchanged (runner variance) |
+| Dependency security verification (policy + audit + SBOM, base vs after) | 15.5 s (13.4 + 1.1 + 1.1) | 19.5–21.0 s (17.5–18.9 + 1.0 + 1.1) | **+26–35%** (+4–5 s: registry signatures, 1023 edge checks, advisory evidence, risk checks) |
+| Production build overhead (sum over jobs, base vs 721ca03) | 280.2 s (2 builds) | 373.0 s (3 builds) | +33% compute, off the critical path |
+| Browser certification (longest browser job, mean of 3) | 1758.9 s | 1360.2 s | **−22.7%** |
+| Total runner compute (mean of 3) | 3986.2 s | 4039.6 s | +1.3% (≈ flat; −1.9% vs the base alone) |
 
-| Job | Before (base) | After |
-|---|---:|---:|
-| governance | 48.4 s | 48.5 s |
-| certification-checks | 904.4 s | 1240.9 s (now includes build 110 s + browser shard 3: 345 s) |
-| certification-browser-1 | 1389.1 s | 1249.1 s (critical 260 s, shard 1: 812 s) |
-| certification-browser-2 | 1764.0 s | 1319.1 s (shard 2: 1118 s, composition 20 s) |
-| certification (ledger) | 10.2 s | 11.5 s |
-
-The three certification jobs finished within 78 s of each other (1241–1319 s), against a projection of ~1352 s each.
-The new tool-archive cache key was cold on this run (every archive `MISS/REJECTED` → `DOWNLOAD`, then digest-verified),
-so none of the gain comes from caching. One after-run is a single sample; profile times vary ~10% between runs.
-GitHub Actions has no timing data: the repository's Actions workflows have not run since 2026-10-14 (CircleCI is the
-certification of record), so Actions parity is established by the static parity tests only.
+The three certification jobs of each after-run finish within 72–78 s of each other, against a projection of ~1352 s
+each. The third after-run was ~10% slower in every job and nearly every browser profile (e.g. production build 153 s vs
+139 s, `copilot` 52 s vs 43–47 s); the base run shows the same ~10% runner variance against b8126a6, and the commits
+between the second and third after-run change only Python and one workspace setting. The new tool-archive cache key
+was cold on the first run of each key (`MISS/REJECTED` → `DOWNLOAD`, then digest-verified); a warm hit saves under a
+second per job, so none of the gain comes from caching. GitHub Actions has no timing data: the repository's Actions
+workflows have not run since 2026-10-14 (CircleCI is the certification of record), so Actions parity is established by
+the static parity tests only.
 
 ## 10. Security regression results (Tests A–R)
 
