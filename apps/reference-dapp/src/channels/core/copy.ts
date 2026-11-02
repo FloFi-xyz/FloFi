@@ -6,7 +6,7 @@
  * anything; execution happens only in FloFi with the owner's wallet.
  */
 import type { ChannelLanguage } from './config.ts';
-import { LANDED_LABELS_PT } from '../../domain/landed-attempts.ts';
+import { LANDED_LABELS_PT, landedKind, type LandedKind } from '../../domain/landed-attempts.ts';
 
 /** `0x1234…abcd` for every address or hash in a channel text. */
 export const shorten = (text: string) => text.replace(/0x([0-9a-fA-F]{4})[0-9a-fA-F]{32,60}([0-9a-fA-F]{4})(?![0-9a-fA-F])/g, '0x$1…$2');
@@ -21,8 +21,41 @@ export type ReadyFacts = { readonly lines: readonly string[]; readonly networks:
   readonly notes: readonly string[]; readonly preview: PreviewNote; readonly intendedWallet: string | null; readonly aiInterpreted: boolean; readonly expiresMinutes: number };
 export type RunLine = { readonly status: string; readonly reconciled: boolean; readonly terminal: boolean; readonly errorCode: string | null;
   readonly evidenceEnvironment: string | null; readonly evidenceOutcome: string | null; readonly evidenceBundleHash: string | null; readonly receiptUrl?: string | null;
-  /** BUILD-FLOFI-E2E-RELIABILITY-001: only a token approval of this run is confirmed onchain (the label of what landed). */
+  /** BUILD-FLOFI-E2E-RELIABILITY-001: what of this run is confirmed onchain while it is not reconciled (the label of what landed). */
   readonly landed?: string | null };
+
+/** Run statuses where something may be in flight or its outcome is not known: a landed label never says "not sent" over them. */
+const MAY_BE_IN_FLIGHT = new Set(['RESERVED', 'SUBMITTING', 'SUBMITTED', 'PENDING', 'HASH', 'SUBMISSION_RESULT_UNKNOWN', 'UNKNOWN', 'RECONCILIATION_REQUIRED',
+  'RECOVERY_REQUIRED', 'INCONCLUSIVE', 'SIGNED', 'POSTING', 'POSTED', 'SOURCE_SUBMITTED', 'IN_FLIGHT']);
+/**
+ * BUILD-FLOFI-E2E-RELIABILITY-001 (channels review): the follow-up a landed label allows. Only a main action that was not sent, not submitted or
+ * still awaits the wallet can be continued; one that is pending or unresolved may already have been sent, so it is checked, never started again.
+ */
+export function runLandedKind(r: Pick<RunLine, 'status' | 'landed'>): LandedKind | null {
+  if (!r.landed) return null;
+  const kind = landedKind(r.landed);
+  return MAY_BE_IN_FLIGHT.has(r.status) && (kind === 'not-sent' || kind === 'not-submitted' || kind === 'awaiting-wallet') ? 'unresolved' : kind;
+}
+const LANDED_EN: Readonly<Record<LandedKind, string>> = {
+  'not-sent': 'The token approval is confirmed onchain, but it moves no funds by itself; the main action was not sent. You can continue in FloFi with your wallet.',
+  'awaiting-wallet': 'The token approval is confirmed onchain; the main action\'s wallet request is prepared and no submission is recorded yet. Check it in FloFi before doing anything else.',
+  'not-submitted': 'The token approval is confirmed onchain, but it moves no funds by itself; the main action was not submitted. You can review it again in FloFi.',
+  'pending': 'The main action was sent and awaits confirmation onchain. FloFi keeps checking it — do not start it again.',
+  'failed': 'The main action failed onchain; the token approval stays confirmed and moves no funds by itself. Review it in FloFi.',
+  'unresolved': 'The outcome of the main action is not known yet — it may have been sent. FloFi checks the existing attempt before any further action and never resends it; do not start it again.',
+  'confirmed-unreconciled': 'A transaction is confirmed onchain; FloFi is still reconciling the workflow outcome. Do not start it again.',
+  'later-incomplete': 'Earlier actions are confirmed onchain and remain recorded; a later action is not complete. Check it in FloFi.',
+};
+const LANDED_PT: Readonly<Record<LandedKind, string>> = {
+  'not-sent': 'A aprovação do token está confirmada na rede, mas sozinha não movimenta fundos; a ação principal não foi enviada. Você pode continuar no FloFi com a sua carteira.',
+  'awaiting-wallet': 'A aprovação do token está confirmada na rede; a solicitação da ação principal à carteira está preparada e nenhum envio foi registrado ainda. Verifique no FloFi antes de qualquer outra ação.',
+  'not-submitted': 'A aprovação do token está confirmada na rede, mas sozinha não movimenta fundos; a ação principal não foi submetida. Você pode revisá-la de novo no FloFi.',
+  'pending': 'A ação principal foi enviada e aguarda confirmação na rede. O FloFi continua verificando — não a inicie de novo.',
+  'failed': 'A ação principal falhou na rede; a aprovação do token continua confirmada e sozinha não movimenta fundos. Revise no FloFi.',
+  'unresolved': 'O resultado da ação principal ainda não é conhecido — ela pode ter sido enviada. O FloFi verifica a tentativa existente antes de qualquer outra ação e nunca a reenvia; não a inicie de novo.',
+  'confirmed-unreconciled': 'Uma transação está confirmada na rede; o FloFi ainda está reconciliando o resultado do workflow. Não a inicie de novo.',
+  'later-incomplete': 'Ações anteriores estão confirmadas na rede e continuam registradas; uma ação posterior não foi concluída. Verifique no FloFi.',
+};
 
 /** Pre-submission records are created by preparation, without a wallet request or any movement of funds. */
 const RUN_EN: Readonly<Record<string, string>> = {
@@ -70,10 +103,12 @@ const EN = {
   approval: (status: string, expires: string) => APPROVAL_EN[status]?.(expires) ?? `Proposal: ${status}.`,
   notShared: 'The wallet owner has not shared run status with this chat (it can be turned on in FloFi).',
   noRuns: 'No simulation or execution record is available from this proposal yet.',
+  runsOlder: 'No run of this proposal is among the wallet\'s most recent runs; older runs were not checked here. Open FloFi to see all your runs.',
   runsUnknown: 'Some run records of this proposal could not be read right now, so their status is unknown — this is not evidence that nothing was sent. Send STATUS again in a moment.',
   run: (r: RunLine) => r.reconciled ? `Execution reconciled ✅ · evidence: ${r.evidenceEnvironment ?? 'unknown'} · outcome: ${r.evidenceOutcome ?? 'unknown'}${r.evidenceBundleHash ? ` · bundle ${shorten(r.evidenceBundleHash)}` : ''}${r.receiptUrl ? `\nReceipt: ${r.receiptUrl}` : ''}`
-    : r.landed ? `${r.landed}. The token approval is confirmed onchain, but it moves no funds by itself; the main action has not completed. Continue or check it in FloFi.`
-    : r.terminal ? `Workflow ended without verified execution (${r.errorCode ?? r.status}). See FloFi for details.`
+    // A terminal run keeps its terminal sentence (never "continue"); the landed label only says what is confirmed onchain.
+    : r.terminal ? `${r.landed ? `${r.landed}. ` : ''}Workflow ended without verified execution (${r.errorCode ?? r.status}). See FloFi for details.`
+    : r.landed ? `${r.landed}. ${LANDED_EN[runLandedKind(r)!]}`
       : RUN_EN[r.status] ?? `Workflow status: ${r.status}. No verified execution receipt is available yet.`,
   loaded: 'Your proposal is loaded in FloFi for the connected wallet. Loading it does not authorize or submit a transaction. Check FloFi for the current workflow status.',
   secret: 'Never send a private key or seed phrase — FloFi never needs one. I did not store this message or send it to any AI, but it already reached the messaging provider: if it was real, treat it as compromised and move your funds to a new wallet.',
@@ -168,10 +203,11 @@ const PT: Copy = {
   approval: (status, expires) => APPROVAL_PT[status]?.(expires) ?? `Proposta: ${status}.`,
   notShared: 'O dono da carteira não compartilhou o status das execuções com esta conversa (dá para ativar no FloFi).',
   noRuns: 'Ainda não há registro de simulação ou execução disponível para esta proposta.',
-  runsUnknown: 'Alguns registros de execução desta proposta não puderam ser lidos agora, então o status deles é desconhecido — isso não é prova de que nada foi enviado. Envie STATUS de novo em instantes.',
+  runsOlder: 'Nenhuma execução desta proposta está entre as execuções mais recentes da carteira; as mais antigas não foram verificadas aqui. Abra o FloFi para ver todas as suas execuções.',
+  runsUnknown: 'Alguns registros de execução desta proposta não puderam ser lidos agora, então o status deles é desconhecido — isso não é prova de que nada foi enviado. Envie ESTADO de novo em instantes.',
   run: r => r.reconciled ? `Execução reconciliada ✅ · evidência: ${r.evidenceEnvironment ?? 'desconhecida'} · resultado: ${r.evidenceOutcome ?? 'desconhecido'}${r.evidenceBundleHash ? ` · bundle ${shorten(r.evidenceBundleHash)}` : ''}${r.receiptUrl ? `\nRecibo: ${r.receiptUrl}` : ''}`
-    : r.landed ? `${LANDED_LABELS_PT[r.landed] ?? r.landed}. A aprovação do token está confirmada na rede, mas sozinha não movimenta fundos; a ação principal não foi concluída. Continue ou verifique no FloFi.`
-    : r.terminal ? `Workflow terminou sem execução verificada (${r.errorCode ?? r.status}). Veja os detalhes no FloFi.`
+    : r.terminal ? `${r.landed ? `${LANDED_LABELS_PT[r.landed] ?? r.landed}. ` : ''}Workflow terminou sem execução verificada (${r.errorCode ?? r.status}). Veja os detalhes no FloFi.`
+    : r.landed ? `${LANDED_LABELS_PT[r.landed] ?? r.landed}. ${LANDED_PT[runLandedKind(r)!]}`
       : RUN_PT[r.status] ?? `Estado do workflow: ${r.status}. Ainda não há recibo de execução verificado.`,
   loaded: 'Sua proposta foi carregada no FloFi para a carteira conectada. Carregá-la não autoriza nem envia uma transação. Confira o estado atual do workflow no FloFi.',
   secret: 'Nunca envie chave privada ou frase-semente — o FloFi nunca precisa disso. Não guardei esta mensagem nem a enviei para nenhuma IA, mas ela já passou pelo provedor de mensagens: se era real, considere-a comprometida e mova seus fundos para uma nova carteira.',

@@ -28,8 +28,9 @@ export function automationRunLabel(run: Pick<RunView, 'status' | 'reconciled' | 
   switch (lifecycle.status) {
     // Attempts that could not be read never prove that nothing was sent (the Dashboard fails closed the same way).
     case 'NOT_STARTED': return run.attempts === null ? 'Status unresolved — no transaction is repeated' : SIMULATED.has(run.status) ? 'Simulated only — nothing was sent' : 'Reviewed only — nothing was sent';
-    case 'AUTHORIZATION_PENDING': return 'Awaiting your wallet confirmation — nothing sent yet';
-    case 'REJECTED': return 'Refused or not submitted — nothing was sent';
+    case 'AUTHORIZATION_PENDING': return 'Wallet request prepared — no submission recorded; open the run to check';
+    // Attempts that could not be read cannot rule out an approval or an earlier step that landed (BUILD-FLOFI-E2E-RELIABILITY-001).
+    case 'REJECTED': return run.attempts === null ? 'Status unresolved — no transaction is repeated' : 'Refused or not submitted — nothing was sent';
     case 'SUBMITTED': return 'Submitted — awaiting confirmation';
     case 'HASH_KNOWN': return 'Transaction sent — awaiting onchain confirmation';
     case 'CONFIRMED_ONCHAIN': return 'Confirmed onchain — reconciling';
@@ -44,7 +45,7 @@ export function automationRunLabel(run: Pick<RunView, 'status' | 'reconciled' | 
 }
 /** Every label the History can show for a run (the PT catalog covers each). */
 export const AUTOMATION_RUN_LABELS = Object.freeze(['Execution reconciled', 'Simulated only — nothing was sent', 'Reviewed only — nothing was sent',
-  'Awaiting your wallet confirmation — nothing sent yet', 'Refused or not submitted — nothing was sent', 'Submitted — awaiting confirmation',
+  'Wallet request prepared — no submission recorded; open the run to check', 'Refused or not submitted — nothing was sent', 'Submitted — awaiting confirmation',
   'Transaction sent — awaiting onchain confirmation', 'Confirmed onchain — reconciling', 'Origin confirmed — settlement pending',
   'Outcome recorded — not yet verified as reconciled', 'Partially completed — earlier actions confirmed', 'Transaction reverted', 'Execution failed',
   'Status unresolved — no transaction is repeated', 'Needs your review — open the run']);

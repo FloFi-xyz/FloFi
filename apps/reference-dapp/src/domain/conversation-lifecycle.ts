@@ -259,7 +259,7 @@ export const QUOTE_MOVED = /ROUTE_CHANGED|QUOTE_CHANGED|REQUOTE|STATE_CHANGED|GA
 export function continuationReason(code: string): string | null {
   if (/STOCK_MULTIPLIER_CHANGED/.test(code)) return 'A corporate action changed the shares per token since your Review.';
   if (/REVIEW_EXPIRED|QUOTE_EXPIRED/.test(code)) return 'The reviewed quote expired before the next request could start.';
-  if (/QUOTE_CHANGED|ROUTE_CHANGED|REQUOTE/.test(code)) return 'The reviewed route no longer quotes your reviewed minimum output.';
+  if (/QUOTE_CHANGED|ROUTE_CHANGED|REQUOTE/.test(code)) return 'The quote moved outside the bounds of your Review.';
   if (/STATE_CHANGED|GAS_CHANGED/.test(code)) return 'Your wallet’s on-chain state or the network fee changed since the Review (for example its next transaction number, allowance or the fee ceiling).';
   return null;
 }

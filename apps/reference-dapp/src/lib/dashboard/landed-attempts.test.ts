@@ -85,8 +85,9 @@ describe('Issue #149: Dashboard landed-attempt truth', () => {
     expect(chip('NOT_SUBMITTED')).toMatchObject({ status: 'Transaction not submitted', attention: ['The request was not submitted'] });
     expect(chip('NOT_EXECUTED').attention).toEqual(['The request was not executed']);
     expect(chip('REJECTED').attention).toEqual(['Wallet confirmation was declined']);
-    // The run's own not-submitted status keeps deciding when it has one.
-    expect(projectDashboardRun(run('base-swap', 'CANCELLED', [attempt('SWAP', 'EXPIRED')])).attention).toEqual(['Wallet confirmation was declined']);
+    // The run's own not-submitted status keeps deciding when it has one; a cancellation is said as such, never as a wallet decline.
+    expect(projectDashboardRun(run('base-swap', 'CANCELLED', [attempt('SWAP', 'EXPIRED')])).attention).toEqual(['The request was cancelled']);
+    expect(projectDashboardRun(run('base-swap', 'REJECTED', [attempt('SWAP', 'REJECTED')])).attention).toEqual(['Wallet confirmation was declined']);
   });
 
   it('a prepared wallet request awaits the wallet; simulated-only runs with no attempts still say nothing was sent', () => {

@@ -8,12 +8,12 @@ export const portugueseStatusTruth: Readonly<Record<string, string>> = {
   ...LANDED_LABELS_PT,
   // Dashboard: what landed onchain, from the run's recorded attempts.
   'Landed onchain': 'Confirmado onchain',
-  'Confirmed onchain · workflow outcome not reconciled yet': 'Confirmada onchain · resultado do workflow ainda não reconciliado',
-  'Earlier actions confirmed onchain · a later action is not complete': 'Ações anteriores confirmadas onchain · uma ação posterior não foi concluída',
   'Only the token approval is confirmed onchain. An approval moves no funds by itself, and the main action has not completed.':
     'Apenas a aprovação do token está confirmada onchain. Uma aprovação não move fundos por si só, e a ação principal não foi concluída.',
-  'A wallet request is prepared and awaits your wallet confirmation. Nothing is sent without it.':
-    'Uma solicitação à carteira está preparada e aguarda a sua confirmação na carteira. Nada é enviado sem ela.',
+  'The request was cancelled': 'A solicitação foi cancelada',
+  'A wallet request is prepared; no submission is recorded yet. Open the run to check it before doing anything else.':
+    'Uma solicitação à carteira está preparada; nenhum envio foi registrado ainda. Abra a execução para verificá-la antes de qualquer outra ação.',
+  'Wallet request prepared — no submission recorded; open the run to check': 'Solicitação à carteira preparada — nenhum envio registrado; abra a execução para verificar',
   'A recorded transaction needs review before anything else happens. Open the run.': 'Uma transação registrada precisa ser revista antes de qualquer outra ação. Abra a execução.',
   'The recorded requests of this run could not be read, so FloFi does not claim that nothing was sent. Refresh history to check again.':
     'Não foi possível ler as solicitações registradas desta execução, por isso a FloFi não afirma que nada foi enviado. Atualize o histórico para verificar novamente.',
@@ -21,6 +21,8 @@ export const portugueseStatusTruth: Readonly<Record<string, string>> = {
   'Intention only — not simulated or sent yet': 'Apenas a intenção — ainda não simulada nem enviada',
   'Run status could not be read now — not evidence that nothing was sent': 'O status das execuções não pôde ser lido agora — não é prova de que nada foi enviado',
   'No run of this exact proposal recorded yet': 'Ainda não há execução registrada desta proposta exata',
+  'No run of this proposal among this wallet\'s recent runs — older runs were not checked':
+    'Nenhuma execução desta proposta entre as execuções recentes desta carteira — as mais antigas não foram verificadas',
   'Simulated only — nothing was sent': 'Apenas simulada — nada foi enviado',
   'Reviewed only — nothing was sent': 'Apenas revisada — nada foi enviado',
   'Awaiting your wallet confirmation — nothing sent yet': 'Aguardando a confirmação na sua carteira — nada enviado ainda',

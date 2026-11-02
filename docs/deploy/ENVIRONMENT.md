@@ -3,8 +3,9 @@
 Bridge recovery read failover (`FIX-BRIDGE-RECOVERY-CAIO-001`): directed and Universal EVM bridges accept optional server-only comma-separated HTTPS `GRYLOO_BASE_FALLBACK_RPC_URLS`, `GRYLOO_ARBITRUM_FALLBACK_RPC_URLS`, `GRYLOO_ETHEREUM_FALLBACK_RPC_URLS` and `GRYLOO_ROBINHOOD_FALLBACK_RPC_URLS`. Their normal primary override remains authoritative. The existing `GRYLOO_ALCHEMY_API_KEY`, when configured, supplies an independent Base/Arbitrum/Ethereum path, including historical reads. At most four distinct paths are accepted, each chain-bound and limited to a 3-second read transport timeout. Credentials never reach the browser or logs. Outages and pruned historical state can use a configured fallback; reverts and wrong-chain answers are refused. No financial execution gate or production variable is changed by this build.
 
 Every variable the reference app, the backend and the build read, per environment. Values are supplied by the hosting platform or
-your own shell; none is committed. **No variable is `NEXT_PUBLIC_*`, and none may be**: everything below is read on the server,
-and the browser only talks to its own origin plus, for Credentials → Add card, Mercado Pago's three Secure Fields origins (CSP
+your own shell; none is committed. **No variable is `NEXT_PUBLIC_*`, and none may be**, with one reviewed exception:
+`NEXT_PUBLIC_FLOFI_JOURNEY_TELEMETRY` (§5k), a non-secret on/off switch inlined into the browser build (issue #149). Everything else below is
+read on the server, and the browser only talks to its own origin plus, for Credentials → Add card, Mercado Pago's three Secure Fields origins (CSP
 `connect-src 'self' https://api.mercadopago.com https://api-static.mercadopago.com https://secure-fields.mercadopago.com`).
 
 Columns: **Dev** = local `next dev`/`next start` on WSL; **CI** = the GitHub Actions suites; **Preview** = a Vercel Preview
@@ -209,6 +210,7 @@ closed). All server-only, never `NEXT_PUBLIC_*`. Guides: [TELEGRAM.md](TELEGRAM.
 | `FLOFI_CHANNEL_HANDOFF_TEST_FUNDS` | `enabled`/`disabled`: test-funds proposals may be handed to their owner | no | optional | optional | `enabled` |
 | `FLOFI_CHANNEL_HANDOFF_MAINNET_NETWORKS` | mainnet ids a channel proposal may be handed over on | no | **leave empty** | **leave empty** | empty: mainnet refused by policy |
 | `FLOFI_CHANNEL_DISPATCH_TOKEN_SHA256` | SHA-256 hex of the scheduler bearer for `/api/channels/dispatch` and `/api/channels/health` (Vercel Cron: the digest of `CRON_SECRET`; `channels-admin.ts dispatch-token` creates both) | digest only | recommended | **required** for retries and status without an open page | unset: both endpoints `404` |
+| `GRYLOO_UNIVERSAL_ROUTER` | (shared with §3) cross-network route discovery in channels (`find_routes`, `get_quote`) follows the web's own gate (BUILD-FLOFI-E2E-RELIABILITY-001): `live` → available; unset/`off` → `UNIVERSAL_ROUTER_NOT_ENABLED`; `harness` → closed. Channel Core runs on the **web** deployment, so with a remote API (`API_BASE_URL`) it must also be set **here** — the API's value is not visible to it. Other channel tools are unaffected. | no | as the API | `live` where the router is live | unset (off) |
 
 **Telegram** (the live provider; a plain bot, no Mini App)
 
@@ -352,7 +354,7 @@ deployment owner opts in with both `NEXT_PUBLIC_FLOFI_JOURNEY_TELEMETRY=on` and 
 | `GRYLOO_RPC_READ_PROFILE` | web + API | unset (paced: one read at a time, 250 ms apart) | `dedicated`: operator-configured RPC endpoints (`GRYLOO_<NETWORK>_RPC_URL`, router fallback URLs, the keyed Alchemy URL) run up to 6 reads at once, 25 ms apart. Never applies to a public default endpoint. Set it only when those endpoints are keyed providers with capacity for parallel reads. |
 | `GRYLOO_DEPLOYMENT_FACT_CACHE` | web + API | on for live mainnets (10-minute lifetime, per server instance) | `off`: re-verify every immutable deployment fact (pinned contract code, router/quoter immutables, pool immutables) on every Uniswap catalog quote. A fact is cached only after the same-block check; an EIP-7702 delegation is never cached. Economic state (balances, allowances, liquidity, prices, nonces, fees) is always read fresh either way. |
 | `FLOFI_JOURNEY_TELEMETRY` | web | off | Only `on` logs. Unset or any other value (`off`, `true`, a typo): `/api/flofi/journey` answers 204 and reads and logs nothing, so a missing or misconfigured switch never collects. See below. |
-| `NEXT_PUBLIC_FLOFI_JOURNEY_TELEMETRY` | web (build) | off | Only `on` lets browsers send journey timings; inlined at build time (redeploy to change). Anything else: no request is made. |
+| `NEXT_PUBLIC_FLOFI_JOURNEY_TELEMETRY` | web (build) | off | Only `on` lets browsers send journey timings; inlined at build time (redeploy to change). Anything else: no request is made **by new bundles** — tabs still running an earlier bundle keep sending until they reload; `FLOFI_JOURNEY_TELEMETRY` is what stops FloFi's logging. |
 
 With both switches on, `/api/flofi/journey` logs one content-free line per finished journey (`journey.timing`, labelled `CLIENT_REPORTED`) to the existing structured
 log stream: no table, no address, amount, hash, signature, chat text, account or session identifier. It accepts only same-origin posts from a

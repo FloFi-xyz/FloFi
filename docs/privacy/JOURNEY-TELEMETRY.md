@@ -27,9 +27,12 @@ evidence.
 | `FLOFI_JOURNEY_TELEMETRY` | server (web) | when the route module loads | `on`: `/api/flofi/journey` validates and logs accepted events. Anything else: the route answers `204` at once and reads no cookie, header or body, keeps no counter and logs nothing. |
 
 Only the exact value `on` (any case, surrounding spaces ignored) turns a switch on; unset, empty, `off`, `true`, `1` or a typo
-keep it off (`journeyTelemetryEnabled`, `apps/reference-dapp/src/domain/journey-metrics.ts`). Both must be `on` for anything to
-be collected; either alone collects nothing. Environment changes apply to a new deployment, and the browser switch needs a
-rebuild, so redeploy after changing either.
+keep it off (`journeyTelemetryEnabled`, `apps/reference-dapp/src/domain/journey-metrics.ts`). Both must be `on` for FloFi to log
+anything. With the server switch off, FloFi logs no journey line, but browsers still running a bundle built with the browser switch on
+keep sending beacons (each an HTTP request the hosting platform itself records: IP, user agent, time, the session cookie) until they
+reload a new build. With only the browser switch turned off, tabs already open on an earlier bundle keep sending — and the server keeps
+logging them — until they reload. Environment changes apply to a new deployment, and the browser switch needs a rebuild, so redeploy
+after changing either.
 
 Before turning them on in production, the owner (with counsel):
 
@@ -109,7 +112,10 @@ instances admit N times as much. Off: zero work, zero lines.
 
 ## 7. Opting out
 
-- **Deployment**: unset either switch (or set it to `off`) and redeploy; nothing is sent or logged afterwards.
+- **Deployment**: set `FLOFI_JOURNEY_TELEMETRY=off` and redeploy: FloFi logs nothing from then on. Also set
+  `NEXT_PUBLIC_FLOFI_JOURNEY_TELEMETRY=off` and redeploy so new bundles send no request; tabs already open keep sending (answered `204`,
+  not logged) until they reload. Set `off` explicitly rather than unsetting it while a rollback to a build from before issue #149 remains
+  possible: those builds collected when the variable was unset, so a rollback or a redeploy of an older commit would collect again.
 - **Person**: there is no per-person switch in the product today (gap, §4). A person can object through the contact on the
   privacy page, and a browser that blocks beacons sends nothing. Counsel decides whether a per-person switch is needed
   before production.

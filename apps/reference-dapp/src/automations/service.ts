@@ -148,10 +148,12 @@ export function createAutomationService(deps: ServiceDeps) {
         const claimant = h.claimed && sameOwner(o.owner, h.claimed) ? h.claimed.address : null, reads = onceEachRun(deps.runtime);
         // BUILD-FLOFI-E2E-RELIABILITY-001 (workflow review): a failed run read is INCOMPLETE — never turned back into "no runs" (it read as
         // "Intention only — not simulated or sent yet" for a proposal whose swap may have executed).
-        const read = claimant ? await sharedRunsRead({ ...h, shareStatus: true } as HandoffRecord, reads, deps.handoffs).catch(() => ({ runs: [], complete: false })) : null;
+        const read = claimant ? await sharedRunsRead({ ...h, shareStatus: true } as HandoffRecord, reads, deps.handoffs).catch(() => ({ runs: [], complete: false, truncated: false })) : null;
         const owned = read?.runs ?? null;
         // Issue #149: each run's own recorded attempts (from the same read), so the History never calls a simulation or a refusal an execution.
-        approval = { status: h.status, runsComplete: !claimant || read?.complete !== false, runs: await Promise.all((owned ?? []).map(async r => ({ executionId: r.executionId, status: r.status, reconciled: r.reconciled,
+        // An applied proposal whose runs this deployment could not read at all (no run reads, no claim time) is incomplete, never "no run".
+        const applied = h.status === 'APPLIED' && claimant !== null;
+        approval = { status: h.status, runsComplete: !applied || (read !== null && read.complete), ...applied && read?.truncated ? { runsTruncated: true } : {}, runs: await Promise.all((owned ?? []).map(async r => ({ executionId: r.executionId, status: r.status, reconciled: r.reconciled,
           terminal: r.terminal, errorCode: r.errorCode, evidenceEnvironment: r.evidenceEnvironment, evidenceOutcome: r.evidenceOutcome, evidenceBundleHash: r.evidenceBundleHash,
           ...await recordedRunFacts(reads, r.executionId, claimant!) }))) };
       }

@@ -3,7 +3,7 @@
 export const portugueseE2eReliability: Readonly<Record<string, string>> = {
   'Your input token balance is too low for this swap. This request was not sent.': 'O seu saldo do token de entrada é insuficiente para esta troca. Este pedido não foi enviado.',
   'You declined the request in your wallet. It was not signed or sent.': 'Você recusou o pedido na carteira. Ele não foi assinado nem enviado.',
-  'This request could not be completed, so no new transaction was sent. Try again.': 'Este pedido não pôde ser concluído, então nenhuma transação nova foi enviada. Tente de novo.',
+  'This request could not be completed. Check its status before trying again.': 'Este pedido não pôde ser concluído. Verifique o status dele antes de tentar de novo.',
   'This request could not be completed. Try again.': 'Este pedido não pôde ser concluído. Tente de novo.',
   'Accept and continue': 'Aceitar e continuar',
   'The observed on-chain result does not match the reviewed bounds, so FloFi stopped and keeps this run for review. Nothing is retried automatically.':
@@ -22,7 +22,7 @@ export const portugueseE2eReliability: Readonly<Record<string, string>> = {
     'Nenhuma pool deste par tem liquidez utilizável para este montante agora, então nada foi simulado nem enviado. Tente um montante menor ou outro par.',
   'A corporate action changed the shares per token since your Review.': 'Um evento societário alterou as ações por token desde a sua revisão.',
   'The reviewed quote expired before the next request could start.': 'A cotação revisada expirou antes de o próximo pedido poder começar.',
-  'The reviewed route no longer quotes your reviewed minimum output.': 'A rota revisada já não cota o seu mínimo de saída revisado.',
+  'The quote moved outside the bounds of your Review.': 'A cotação saiu dos limites da sua Revisão.',
   'Your wallet’s on-chain state or the network fee changed since the Review (for example its next transaction number, allowance or the fee ceiling).':
     'O estado da sua carteira na rede ou a taxa de rede mudou desde a revisão (por exemplo o próximo número de transação, a permissão ou o teto de taxa).',
 };

@@ -4,7 +4,7 @@
  * later sweep instead of being lost once the watch window has passed. In-memory doubles; nothing reaches a network or a database.
  */
 import { describe, expect, it, vi } from 'vitest';
-import { APPLIED_WATCH_MS, syncDeveloperApprovals } from './events';
+import { APPLIED_WATCH_MS, INCOMPLETE_READ_GRACE_MS, syncDeveloperApprovals } from './events';
 import type { DeveloperStore } from './store';
 import type { EngineRuntime, HandoffRecord, HandoffStore } from '../platform/index.ts';
 
@@ -28,5 +28,12 @@ describe('BUILD-FLOFI-E2E-RELIABILITY-001 developer approval sync', () => {
     const reading = deps(async () => ({ ok: true, value: [] }));
     await syncDeveloperApprovals(reading.deps, {} as never, 10);
     expect(reading.markSynced).toHaveBeenCalledWith('apr_test', true, now);
+  });
+  it('a read that never recovers settles after the grace period, well inside the 30-day event retention (never re-emitted)', async () => {
+    const late = new Date(handoff.appliedAt!.getTime() + APPLIED_WATCH_MS + INCOMPLETE_READ_GRACE_MS + 1_000);
+    expect(late.getTime() - handoff.appliedAt!.getTime()).toBeLessThan(30 * 86_400_000);
+    const failing = deps(async () => ({ ok: false, code: 'CLOUD_RUNTIME_UNAVAILABLE' }));
+    await syncDeveloperApprovals({ ...failing.deps, now: late }, {} as never, 10);
+    expect(failing.markSynced).toHaveBeenCalledWith('apr_test', true, late);
   });
 });

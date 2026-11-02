@@ -457,7 +457,7 @@ describe('BUILD-FLOFI-E2E-RELIABILITY-001 continuation after a landed approval',
     reviewedPatch = { ...reviewedPatch, source: { ...reviewedPatch.source!, state: { ...reviewedPatch.source!.state, error: 'QUOTE_CHANGED_REVIEW_REQUIRED' } } as SimulationSource };
     lifecycle(reviewedPatch); render(); await flush(); chat = render();
     const refusal = chat.messages.find(message => /nothing new was sent/.test(message.text));
-    expect(refusal?.text).toBe('Your earlier confirmed request stays in place, and nothing new was sent. The reviewed route no longer quotes your reviewed minimum output. I am getting a fresh quote for the next request now; you confirm it before your wallet is asked.');
+    expect(refusal?.text).toBe('Your earlier confirmed request stays in place, and nothing new was sent. The quote moved outside the bounds of your Review. I am getting a fresh quote for the next request now; you confirm it before your wallet is asked.');
     expect(chat.messages.some(message => /^The wallet request could not start, and nothing was sent|could not complete this simulation/.test(message.text))).toBe(false);
     expect(simulate).toHaveBeenCalledTimes(2);
     // The fresh quote for the swap: presented with what changed, and accepted with one explicit answer that opens the wallet.

@@ -18,6 +18,12 @@ import { developerRequesterRef, type ApprovalBinding, type DeveloperEventType, t
 
 /** An APPLIED approval keeps being watched for runs this long; after that (or once it ended) it is settled. */
 export const APPLIED_WATCH_MS = 7 * 86_400_000;
+/**
+ * BUILD-FLOFI-E2E-RELIABILITY-001 (developers review): how much longer an applied approval whose run reads keep failing is followed. It settles
+ * by then (21 days after it was applied), well inside the 30-day event retention, so a read that never recovers can never outlive its own
+ * recorded events and re-emit them under new ids; the purge also keeps the events of approvals still being followed.
+ */
+export const INCOMPLETE_READ_GRACE_MS = 14 * 86_400_000;
 
 export function deriveEvents(binding: ApprovalBinding, h: HandoffRecord, runs: readonly RunProgress[] | null): readonly NewEvent[] {
   const events: NewEvent[] = [], base = { approvalId: h.handoffId, strategyId: binding.strategyId, workflowHash: h.workflowHash };
@@ -57,7 +63,9 @@ export async function syncDeveloperApprovals(deps: SyncDeps, filter: SyncFilter,
     const step = h.plan.steps[0];
     for (const event of recorded) if (event.type === 'execution.reconciled')
       await deps.store.incrementUsage(scope, 'execution.reconciled', step ? `${step.network}:${step.protocol}` : '', deps.now);
-    const settled = !readFailed && (TERMINAL.includes(h.status) || (h.appliedAt !== null && deps.now.getTime() - h.appliedAt.getTime() > APPLIED_WATCH_MS));
+    const applied = h.appliedAt === null ? null : deps.now.getTime() - h.appliedAt.getTime();
+    const settled = TERMINAL.includes(h.status) && !readFailed
+      || applied !== null && applied > APPLIED_WATCH_MS + (readFailed ? INCOMPLETE_READ_GRACE_MS : 0);
     await deps.store.markSynced(binding.handoffId, settled, deps.now);
   }
   return bindings.length;

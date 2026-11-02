@@ -87,7 +87,7 @@ function message(error: unknown): string {
     QUOTE_EXPIRED_REVIEW_REQUIRED: 'Quote expired. Review a fresh quote.',
     REVIEW_EXPIRED: 'Quote expired. Simulate again.', REVIEW_REQUIRED: 'Review the current swap first.',
     INSUFFICIENT_INPUT: 'Your input token balance is too low for this swap. This request was not sent.',
-    PUBLIC_OPERATION_FAILED: 'This request could not be completed, so no new transaction was sent. Try again.', INSUFFICIENT_TEST_ETH: 'Insufficient test ETH for network fees on this network.',
+    PUBLIC_OPERATION_FAILED: 'This request could not be completed. Check its status before trying again.', INSUFFICIENT_TEST_ETH: 'Insufficient test ETH for network fees on this network.',
     POOL_UNUSABLE: 'The selected pool is unavailable. Try again later.', POOL_FACTORY_MISMATCH: 'The selected pool could not be verified.',
     WRONG_PROVIDER_CHAIN: 'The provider is not on the reviewed network.', PUBLIC_NETWORK_UNAVAILABLE: 'This network is not enabled on this app instance.',
     ATTEMPT_ALREADY_ACTIVE: 'A transaction is already in progress. Check its result before trying again.',
@@ -290,7 +290,10 @@ export function PublicTestnetProvider({ children }: { children: ReactNode }) {
     }); }
     catch (cause) {
       journey.mark('user_decision'); finish(rejected(cause) ? 'rejected' : 'inconclusive');
-      acceptCurrent(unwrap(await publicReport(run.quote.executionId, attempt.attemptId, { kind: rejected(cause) ? 'REJECTED' : 'UNKNOWN' })));
+      // BUILD-FLOFI-E2E-RELIABILITY-001 (frontend review): the wallet's answer decides what is said, even when recording it fails — an unknown
+      // result is never turned into a generic failure ("nothing was sent") by a report that could not be saved.
+      try { acceptCurrent(unwrap(await publicReport(run.quote.executionId, attempt.attemptId, { kind: rejected(cause) ? 'REJECTED' : 'UNKNOWN' }))); }
+      catch (reportError) { if (!rejected(cause) && !floFiRefusal(cause)) throw new Error('SUBMISSION_RESULT_UNKNOWN', { cause: reportError }); }
       const refusal = floFiRefusal(cause);
       if (refusal) throw new Error(refusal, { cause });
       if (rejected(cause)) throw new Error('WALLET_AUTHORIZATION_REJECTED', { cause });
@@ -300,7 +303,8 @@ export function PublicTestnetProvider({ children }: { children: ReactNode }) {
     journey.mark('user_decision');
     if (typeof hash !== 'string' || !/^0x[0-9a-fA-F]{64}$/.test(hash)) {
       finish('inconclusive');
-      acceptCurrent(unwrap(await publicReport(run.quote.executionId, attempt.attemptId, { kind: 'UNKNOWN' })));
+      try { acceptCurrent(unwrap(await publicReport(run.quote.executionId, attempt.attemptId, { kind: 'UNKNOWN' }))); }
+      catch (reportError) { throw new Error('SUBMISSION_RESULT_UNKNOWN', { cause: reportError }); }
       throw new Error('SUBMISSION_RESULT_UNKNOWN');
     }
     const txHash = hash.toLowerCase();
