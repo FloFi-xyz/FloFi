@@ -1069,7 +1069,7 @@
         "reference-compiler.orca-mainnet-liquidity"
       ],
       "gaps": [
-        "Public-wallet execution and live price/provider changes need separate acceptance; favorable requotes remain owned by open PR #137.",
+        "Public-wallet execution and live price/provider changes need separate acceptance; execution-boundary quote movement within the reviewed bounds is covered offline by BUILD-FLOFI-E2E-RELIABILITY-001 (superseding draft PR #137), not by mainnet evidence.",
         "Mapped fork suites include existing owner-gated cases that may skip; a successful stage is not proof those optional cases ran."
       ]
     },
@@ -1664,7 +1664,7 @@
         "reference-compiler.orca-mainnet-liquidity"
       ],
       "gaps": [
-        "Public-wallet execution and live price/provider changes need separate acceptance; favorable requotes remain owned by open PR #137.",
+        "Public-wallet execution and live price/provider changes need separate acceptance; execution-boundary quote movement within the reviewed bounds is covered offline by BUILD-FLOFI-E2E-RELIABILITY-001 (superseding draft PR #137), not by mainnet evidence.",
         "Mapped fork suites include existing owner-gated cases that may skip; a successful stage is not proof those optional cases ran."
       ]
     },
@@ -2672,7 +2672,7 @@
         "reference-compiler.orca-mainnet-liquidity"
       ],
       "gaps": [
-        "Public-wallet execution and live price/provider changes need separate acceptance; favorable requotes remain owned by open PR #137.",
+        "Public-wallet execution and live price/provider changes need separate acceptance; execution-boundary quote movement within the reviewed bounds is covered offline by BUILD-FLOFI-E2E-RELIABILITY-001 (superseding draft PR #137), not by mainnet evidence.",
         "Mapped fork suites include existing owner-gated cases that may skip; a successful stage is not proof those optional cases ran."
       ]
     },
@@ -3225,7 +3225,7 @@
         "reference-compiler.orca-mainnet-liquidity"
       ],
       "gaps": [
-        "Public-wallet execution and live price/provider changes need separate acceptance; favorable requotes remain owned by open PR #137.",
+        "Public-wallet execution and live price/provider changes need separate acceptance; execution-boundary quote movement within the reviewed bounds is covered offline by BUILD-FLOFI-E2E-RELIABILITY-001 (superseding draft PR #137), not by mainnet evidence.",
         "Mapped fork suites include existing owner-gated cases that may skip; a successful stage is not proof those optional cases ran."
       ]
     },
@@ -4372,7 +4372,7 @@
         "reference-compiler.orca-mainnet-liquidity"
       ],
       "gaps": [
-        "Public-wallet execution and live price/provider changes need separate acceptance; favorable requotes remain owned by open PR #137.",
+        "Public-wallet execution and live price/provider changes need separate acceptance; execution-boundary quote movement within the reviewed bounds is covered offline by BUILD-FLOFI-E2E-RELIABILITY-001 (superseding draft PR #137), not by mainnet evidence.",
         "Mapped fork suites include existing owner-gated cases that may skip; a successful stage is not proof those optional cases ran."
       ]
     },
@@ -4616,7 +4616,7 @@
         "reference-compiler.orca-mainnet-liquidity"
       ],
       "gaps": [
-        "Public-wallet execution and live price/provider changes need separate acceptance; favorable requotes remain owned by open PR #137.",
+        "Public-wallet execution and live price/provider changes need separate acceptance; execution-boundary quote movement within the reviewed bounds is covered offline by BUILD-FLOFI-E2E-RELIABILITY-001 (superseding draft PR #137), not by mainnet evidence.",
         "Mapped fork suites include existing owner-gated cases that may skip; a successful stage is not proof those optional cases ran."
       ]
     },
@@ -4875,7 +4875,7 @@
         "reference-compiler.orca-mainnet-liquidity"
       ],
       "gaps": [
-        "Public-wallet execution and live price/provider changes need separate acceptance; favorable requotes remain owned by open PR #137.",
+        "Public-wallet execution and live price/provider changes need separate acceptance; execution-boundary quote movement within the reviewed bounds is covered offline by BUILD-FLOFI-E2E-RELIABILITY-001 (superseding draft PR #137), not by mainnet evidence.",
         "Mapped fork suites include existing owner-gated cases that may skip; a successful stage is not proof those optional cases ran."
       ]
     },
@@ -5081,7 +5081,7 @@
         "reference-compiler.orca-mainnet-liquidity"
       ],
       "gaps": [
-        "Public-wallet execution and live price/provider changes need separate acceptance; favorable requotes remain owned by open PR #137.",
+        "Public-wallet execution and live price/provider changes need separate acceptance; execution-boundary quote movement within the reviewed bounds is covered offline by BUILD-FLOFI-E2E-RELIABILITY-001 (superseding draft PR #137), not by mainnet evidence.",
         "Mapped fork suites include existing owner-gated cases that may skip; a successful stage is not proof those optional cases ran."
       ]
     },
@@ -5557,7 +5557,7 @@
         "reference-compiler.orca-mainnet-liquidity"
       ],
       "gaps": [
-        "Public-wallet execution and live price/provider changes need separate acceptance; favorable requotes remain owned by open PR #137.",
+        "Public-wallet execution and live price/provider changes need separate acceptance; execution-boundary quote movement within the reviewed bounds is covered offline by BUILD-FLOFI-E2E-RELIABILITY-001 (superseding draft PR #137), not by mainnet evidence.",
         "Mapped fork suites include existing owner-gated cases that may skip; a successful stage is not proof those optional cases ran."
       ]
     },
@@ -5845,7 +5845,7 @@
         "reference-compiler.orca-mainnet-liquidity"
       ],
       "gaps": [
-        "Public-wallet execution and live price/provider changes need separate acceptance; favorable requotes remain owned by open PR #137.",
+        "Public-wallet execution and live price/provider changes need separate acceptance; execution-boundary quote movement within the reviewed bounds is covered offline by BUILD-FLOFI-E2E-RELIABILITY-001 (superseding draft PR #137), not by mainnet evidence.",
         "Mapped fork suites include existing owner-gated cases that may skip; a successful stage is not proof those optional cases ran."
       ]
     },
@@ -6195,7 +6195,7 @@
         "reference-compiler.orca-mainnet-liquidity"
       ],
       "gaps": [
-        "Public-wallet execution and live price/provider changes need separate acceptance; favorable requotes remain owned by open PR #137.",
+        "Public-wallet execution and live price/provider changes need separate acceptance; execution-boundary quote movement within the reviewed bounds is covered offline by BUILD-FLOFI-E2E-RELIABILITY-001 (superseding draft PR #137), not by mainnet evidence.",
         "Mapped fork suites include existing owner-gated cases that may skip; a successful stage is not proof those optional cases ran."
       ]
     },

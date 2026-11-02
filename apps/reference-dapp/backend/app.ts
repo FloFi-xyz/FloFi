@@ -46,7 +46,10 @@ export type BackendOptions = {
   readonly holderId: string; readonly evidenceStore: EvidenceStore | null;
   /** Test seam: loopback MOCKED chains replace the network clients. Never used by the deployed entry point. */
   readonly rpc?: Partial<Record<FlowName, Rpc>>; readonly http?: JupiterHttp; readonly leaseTtlMs?: number; readonly busyRetries?: number;
-  /** BUILD-FLOFI-E2E-RELIABILITY-001: a read-only preview's total deadline (default 80 s, below the MCP preview cap of 90 s). */
+  /**
+   * BUILD-FLOFI-E2E-RELIABILITY-001: a read-only preview's total deadline (default 80 s). The developer API sets no preview cap of its own and
+   * relies on it; MCP (45 s) and channels (≤ 60 s) stop waiting earlier. After it, the abandoned preview starts no further read.
+   */
   readonly previewTimeoutMs?: number;
   /** Test seam (BUILD-ROUTER-001): the MOCKED destination chain and providers used with `rpc['crosschain-router']`. */
   readonly router?: FlowDeps['router'];

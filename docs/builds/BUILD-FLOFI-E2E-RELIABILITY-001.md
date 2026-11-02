@@ -105,7 +105,7 @@ close #137.
 
 | Item | Root cause | Fix | Tests |
 | --- | --- | --- | --- |
-| Dashboard “Not started” after a landed approval (Aave, Uniswap liquidity, lending, swap) | Run summaries (`packages/cloud-runtime/src/queries.ts` `listRuns`) carry no attempts; the status column alone loses the evidence: Aave/Uniswap show `AUTHORIZED` after a reconciled approval, lending returns to `SIMULATED` after a refreshed Review, `base-swap` shows the approval's `CONFIRMED`; `run-mapping.ts` mapped these to “Not started / nothing was sent” or a generic attention state. | `lib/dashboard/data-service.ts` reads each ambiguous run's own owner-scoped record (at most 5 at a time) and attaches its attempts; `run-mapping.ts` follows `canonicalRunLifecycle` (the evidence MCP's execution status reads); `landed-attempts.ts` names what landed (“Approval confirmed · main action not sent / not submitted / failed / awaiting wallet confirmation”); an approval-only run is “Partially completed”, never Completed; an unreadable record is “Unresolved”, never “nothing was sent”. | `landed-attempts.test.ts` (Aave, Uniswap, lending, the base-swap production shape; every status × attempt-history combination against the canonical lifecycle), `data-service-attempts.test.ts` (bounded reads, owner/id mismatch, read failure), `dashboard-landed.test.tsx` |
+| Dashboard “Not started” after a landed approval (Aave, Uniswap liquidity, lending, swap) | Run summaries (`packages/cloud-runtime/src/queries.ts` `listRuns`) carry no attempts; the status column alone loses the evidence: Aave/Uniswap show `AUTHORIZED` after a reconciled approval, lending returns to `SIMULATED` after a refreshed Review, `base-swap` shows the approval's `CONFIRMED`; `run-mapping.ts` mapped these to “Not started / nothing was sent” or a generic attention state. | `lib/dashboard/data-service.ts` reads each ambiguous run's own owner-scoped record (at most 5 at a time) and attaches its attempts; `run-mapping.ts` follows `canonicalRunLifecycle` (the evidence MCP's execution status reads); `landed-attempts.ts` names what landed (“Approval confirmed · main action not sent / not submitted / failed / awaiting wallet confirmation”); an approval-only run is “Partially completed”, never Completed; an unreadable record is “Unresolved”, never “nothing was sent”. All reads of one page share a 10 s total budget (a hung API marks the rest “Unresolved” instead of holding the Dashboard) and runs whose verified evidence already settles them are not read. A “not submitted” that only the latest attempt proves keeps that attempt's wording (expired / not submitted / not executed), never “Wallet confirmation was declined”. | `landed-attempts.test.ts` (Aave, Uniswap, lending, the base-swap production shape; every status × attempt-history combination against the canonical lifecycle; chip wording), `data-service-attempts.test.ts` (bounded reads, owner/id mismatch, read failure, total budget with a hung read, settled runs skipped), `dashboard-landed.test.tsx` |
 | Automations History “Owner executed — reconciling” for simulated/refused runs | `automations-workspace.tsx` fell through to “Owner executed” whenever a run had no error code. | `automations/run-facts.ts` attaches attempts (same single read); `components/automation-run-status.ts` maps the canonical lifecycle: simulated, reviewed, refused, awaiting wallet, submitted, hash pending, confirmed onchain, settlement pending, partial, reverted, failed, unresolved; “reconciled” only with verified evidence; an applied proposal without a run is “Intention only — not simulated or sent yet”. | `automation-run-status.test.tsx` |
 | Pix `get_approval_status` | see §2.8 (MCP) | | |
 | Channel route discovery without the web's capability gate | `server/channel-copilot-toolkit.ts`, wired from `channels/http.ts` and `dispatch-http.ts`, had no `GRYLOO_UNIVERSAL_ROUTER` gate. | `channels/route-discovery.ts` for both entry points: live → the existing toolkit; off → the web's own refusal (`UNIVERSAL_ROUTER_NOT_ENABLED`); harness → closed. With a remote API the web deployment's env also needs `GRYLOO_UNIVERSAL_ROUTER=live` for channel discovery. | `route-discovery.test.ts` (parity with `universalRouterMode`, off/on/harness, wiring) |
@@ -141,17 +141,26 @@ timed-out request left no line at all (`mcp.tool` was logged only when a tool fi
 
 **Fixes:**
 - `src/mcp/deadline.ts`: one budget per request (150 s total; tools stop 10 s earlier; the platform limit stays 300 s; `maxDuration` not
-  raised), per-operation caps (read 15 s, preview 90 s, store 20 s), a UUID `requestId` per request.
+  raised), per-operation caps (read 15 s, preview 45 s, store 20 s) and per-tool caps (55 s; an approval write 50 s) so a hosted client that
+  stops waiting after about 60 s still receives the classified answer, a UUID `requestId` per request. Disposing a request (its answer is
+  already buffered) aborts any read it no longer waits for.
 - `src/mcp/gateway.ts`: the forwarded request carries an abort signal (client close or deadline); OAuth, wallet-link and body reads are
-  bounded; at the hard deadline the gateway answers a JSON-RPC error itself; every response has `x-flofi-request-id`; every request ends with
-  one metadata-only `mcp.request` log line. The server advertises `listChanged: false` (cause 1).
+  bounded; at the hard deadline the gateway answers every request id itself — a `tools/call` as a tool result with `isError` and the
+  classified timeout body (so the host hands the model “outcome UNKNOWN, no automatic retry”), any other method as a JSON-RPC error; a client
+  that left is logged `CLIENT_CLOSED`, not an internal error; every response has `x-flofi-request-id`; every request ends with one
+  metadata-only `mcp.request` log line. The server advertises `listChanged: false` (cause 1).
 - `src/mcp/runtime.ts` / `src/server/cloud-api-client.ts`: remote calls carry the signal; a caller deadline ends retries
-  (`CLOUD_API_DEADLINE_EXCEEDED`, never retried); 2 attempts for reads, 1 for previews. A timeout is never read as “off” or “not found”.
+  (`CLOUD_API_DEADLINE_EXCEEDED`, never retried); 2 attempts for reads, 1 for previews; run and journal reads carry the 15 s read cap (not
+  the client's 30 s default). A timeout is never read as “off” or “not found”.
 - `src/mcp/tools.ts`: every tool is bounded; timeouts are classified by what the tool may have done — read-only → `NOT_COMPLETED`; status
   reads → `STATUS_UNKNOWN` (“not evidence that nothing was submitted”); `request_user_approval` / `open_approval_session` → outcome
   `UNKNOWN`, `automaticRetry: false`, next `get_approval_status`. Nothing is resubmitted after a timeout.
 - `backend/app.ts`: a read-only preview has an 80 s total deadline (`CLOUD_PREVIEW_TIMEOUT`, logged `flow.preview_timeout`); its storage is
-  per call and discarded, so stopping is safe.
+  per call and discarded, so stopping is safe. Once the deadline passes, the abandoned preview cannot start another read on the flow's
+  shared, paced transport, so it cannot keep starving the reads of executions (`begin`, status, observation). The developer API sets no
+  preview cap of its own and relies on this deadline.
+- `src/platform/preview.ts`: in a multi-step workflow preview, a step whose read ran out of time is `NOT_COMPLETED`, never `FAILED`; the
+  request's own deadline ends the preview instead of starting later steps.
 - `platform/approvals.ts`: a failed run read is **incomplete**, never “no runs” — `approvalProgress` returns `runsComplete: false` and an
   UNKNOWN note; `sharedRuns` (developer API, events) refuses with `CLOUD_RUNTIME_UNAVAILABLE` (public `SERVICE_UNAVAILABLE`) instead of `[]`.
 
@@ -163,12 +172,16 @@ gap):** nothing creates Pix approvals or binds Pix runs to an approval today, so
 `handoffs.bindRuns(handoffId, [runId])` when it starts a run from an applied approval.
 
 **Not fixed:** in-process DApp server actions still allow 4 × 240 s for cloud calls (they are not on the MCP path); an embedded-runtime call
-cannot be cancelled, only no longer awaited.
+cannot be cancelled, only no longer awaited. Between MCP's 45 s preview cap and the backend's 80 s deadline an abandoned preview may still
+read (it stops starting reads at 80 s); the per-instance simulation counter (`platform/preview.ts`, cap 2) is released when the caller stops
+waiting, so during that window it can undercount embedded previews still running.
 
 Tests: `deadline.test.ts` (silent provider bounded within budget, client abort reaches the fetch, no retry and a single write, the listen
 hang, a late-committing approval write → `UNKNOWN` with one row), `deadline.pg.test.ts`, `pix-approval-status.test.ts` (incl. cross-account
 and cross-owner isolation), `cloud-api-client.test.ts`, `gateway.test.ts`, `platform/approvals.test.ts` (incomplete reads),
-`cloud-execution.pg.test.ts` (bounded preview, no run written).
+`cloud-execution.pg.test.ts` (bounded preview, no run written; an abandoned preview makes no read after its deadline — 27 late reads
+without the cutoff, 0 with it), `gateway-deadline.test.ts` (every id answered, tool result with `isError`), `platform/preview.test.ts`
+(`NOT_COMPLETED` step, request deadline propagates), `developer/events-sync.test.ts` (an incomplete runs read never settles an approval).
 
 ## 3. Same failure class across the other operations (audit)
 
