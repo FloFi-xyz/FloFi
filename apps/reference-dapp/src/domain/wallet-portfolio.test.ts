@@ -5,13 +5,14 @@ import { formatObservedAt, formatShare, formatTokenAmount, formatUsdPrice, forma
 
 const holding = (symbol: string, units: string, decimals: number, valueUsd: string | null, network: PortfolioHolding['networkId'] = 'base'): PortfolioHolding => ({
   networkId: network, network: network === 'solana' ? 'Solana' : 'Base', chain: network === 'solana' ? 'solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp' : 'eip155:8453',
-  symbol, name: symbol, address: symbol === 'ETH' || symbol === 'SOL' ? null : `0x${symbol.toLowerCase().padStart(40, '0')}`, decimals, units, native: symbol === 'ETH' || symbol === 'SOL',
+  symbol, name: symbol, address: symbol === 'ETH' || symbol === 'SOL' ? null : `0x${symbol.toLowerCase().padStart(40, '0')}`, decimals, units, displayUnits: units,
+  displayBasis: 'RAW', unavailableCode: null, native: symbol === 'ETH' || symbol === 'SOL',
   provenance: 'PUBLIC_MAINNET', price: valueUsd ? { usd: '3000', source: 'CHAINLINK', observedAt: `2026-11-02T11:5${symbol.length}:00.000Z` } : null, valueUsd, logo: null });
 const network = (id: PortfolioNetwork['id'], status: PortfolioNetwork['status'], tokens: PortfolioNetwork['tokens'] = status === 'READ' ? 'ALL' : null): PortfolioNetwork => ({
   id, name: id === 'solana' ? 'Solana' : id === 'base' ? 'Base' : id, chain: 'eip155:1', chainId: 1, ecosystem: id === 'solana' ? 'solana' : 'evm', status,
   provenance: status === 'NOT_ENABLED' ? null : 'PUBLIC_MAINNET', observedAt: null, block: null, slot: null, tokens, uncheckedTokens: 0, code: null });
 function portfolio(holdings: PortfolioHolding[], networks: PortfolioNetwork[] = [network('base', 'READ'), network('solana', 'READ')]): WalletPortfolio {
-  return { format: 'flofi.wallet-portfolio.v1', observedAt: '2026-11-02T12:00:00.000Z', accounts: [], networks, holdings, pricedTotalUsd: sumUsd(holdings.map(h => h.valueUsd)),
+  return { format: 'flofi.wallet-portfolio.v2', observedAt: '2026-11-02T12:00:00.000Z', accounts: [], networks, holdings, pricedTotalUsd: sumUsd(holdings.map(h => h.valueUsd)),
     unpricedCount: holdings.filter(h => !h.valueUsd).length, unlisted: 0, priceSource: 'CHAINLINK', mocked: false };
 }
 
@@ -50,6 +51,13 @@ describe('wallet portfolio presentation', () => {
     const sorted = sortHoldings([holding('USDC', '500000000', 6, null), holding('WETH', '10', 18, '0.01'), holding('DAI', '2000000000000000000000', 18, null),
       holding('ETH', '10', 18, '120.00'), holding('SOL', '1000000000', 9, '150.00', 'solana')]);
     expect(sorted.map(h => h.symbol)).toEqual(['SOL', 'ETH', 'WETH', 'DAI', 'USDC']);
+  });
+  it('orders by the shown balance, never the raw one, and lists an unavailable balance last', () => {
+    // A scaled token whose raw amount is the largest but whose shown amount is the smallest, and a balance that cannot be interpreted.
+    const scaled = { ...holding('SCALED', '9000000', 6, null, 'solana'), displayUnits: '4500', displayBasis: 'SCALED_UI_AMOUNT' as const };
+    const unknown = { ...holding('ODD', '1', 6, null, 'solana'), displayUnits: null, unavailableCode: 'SOLANA_TOKEN_EXTENSION_UNSUPPORTED' };
+    const sorted = sortHoldings([unknown, scaled, holding('USDC', '1000000', 6, null, 'solana')]);
+    expect(sorted.map(h => h.symbol)).toEqual(['USDC', 'SCALED', 'ODD']);
   });
   it('summarizes the priced share of the top holdings, the rest as Other, per network and by coverage', () => {
     const value = portfolio([holding('ETH', '1', 18, '600.00'), holding('WETH', '1', 18, '200.00'), holding('SOL', '1', 9, '150.00', 'solana'),

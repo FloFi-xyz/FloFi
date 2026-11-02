@@ -5,8 +5,13 @@
  *
  * Every figure here comes from a real read. A holding is a non-zero balance of an asset in a network's validated official catalog, read
  * on chain; a USD value exists only where the deployment's verified price source (Chainlink USD feeds on Base) observed a fresh price for
- * that exact asset (ETH/WETH or SOL/WSOL). Nothing is estimated, assumed (a stablecoin is never "$1") or filled in: an unpriced holding
- * has no value, a network that could not be read has no holdings, and a loopback harness or a fixture price is test data (`MOCKED`).
+ * that exact asset (ETH/WETH, SOL/WSOL, or the canonical USDC/USDT contract). Nothing is estimated, assumed (a stablecoin is never "$1")
+ * or filled in: an unpriced holding has no value, a network that could not be read has no holdings, and a loopback harness or a fixture
+ * price is test data (`MOCKED`).
+ *
+ * A holding keeps two amounts apart: `units`, the canonical raw on-chain balance, and `displayUnits`, the balance the asset's own rules
+ * define for people (a Robinhood Stock Token's underlying shares, a Token-2022 mint's scaled UI amount or accrued interest). Presentation and
+ * USD values use `displayUnits`; a balance FloFi cannot interpret safely has none (`unavailableCode`) and is never shown as a raw number.
  */
 import { usdAmount } from './usd-estimate';
 
@@ -32,21 +37,33 @@ export type PortfolioNetwork = {
   /** A closed reason code for UNAVAILABLE, NOT_ENABLED or partial token coverage. */
   readonly code: string | null;
 };
+/** How `displayUnits` relates to the raw `units`. */
+export type PortfolioDisplayBasis = 'RAW' | 'STOCK_MULTIPLIER' | 'SCALED_UI_AMOUNT' | 'INTEREST_BEARING';
 export type PortfolioPrice = { readonly usd: string; readonly source: PortfolioPriceSource; readonly observedAt: string };
 export type PortfolioHolding = {
   readonly networkId: PortfolioNetworkId; readonly network: string; readonly chain: string;
   readonly symbol: string; readonly name: string;
   /** Lowercase EVM token address or Solana mint; null for the network's native asset. */
   readonly address: string | null; readonly decimals: number;
-  /** The exact on-chain balance in base units. */
-  readonly units: string; readonly native: boolean; readonly provenance: PortfolioProvenance;
+  /** The canonical raw on-chain balance in base units (never scaled). */
+  readonly units: string;
+  /**
+   * The balance shown, in base units at `decimals`: equal to `units` (`RAW`), or derived from it by the asset's own on-chain rules at the read
+   * time — a Stock Token's official multiplier, a Token-2022 Scaled UI Amount multiplier or Interest-Bearing rate — truncated, never rounded up.
+   * null: the balance cannot be interpreted safely (see `unavailableCode`); the asset is listed, never with a number.
+   */
+  readonly displayUnits: string | null;
+  readonly displayBasis: PortfolioDisplayBasis;
+  /** A closed reason code when `displayUnits` is null. */
+  readonly unavailableCode: string | null;
+  readonly native: boolean; readonly provenance: PortfolioProvenance;
   readonly price: PortfolioPrice | null;
-  /** `units` at `price`, in USD rounded to cents ("1234.56"); null without a verified price. */
+  /** `displayUnits` at `price`, in USD rounded to cents ("1234.56"); null without a verified price or a displayable balance. */
   readonly valueUsd: string | null;
   readonly logo: string | null;
 };
 export type WalletPortfolio = {
-  readonly format: 'flofi.wallet-portfolio.v1'; readonly observedAt: string;
+  readonly format: 'flofi.wallet-portfolio.v2'; readonly observedAt: string;
   readonly accounts: readonly PortfolioAccount[];
   readonly networks: readonly PortfolioNetwork[];
   readonly holdings: readonly PortfolioHolding[];
@@ -135,12 +152,13 @@ export function formatObservedAt(iso: string | null | undefined, language: Portf
 }
 
 // ── Ordering and summary ─────────────────────────────────────────────────────────────────────────────────────────────────────────
-/** Compares two balances by their decimal amount (exact cross-multiplication; different decimals compare correctly). */
+/** Compares two shown balances by their decimal amount (exact cross-multiplication; different decimals compare correctly); unavailable last. */
 function compareAmount(a: PortfolioHolding, b: PortfolioHolding): number {
-  const left = BigInt(a.units) * 10n ** BigInt(b.decimals), right = BigInt(b.units) * 10n ** BigInt(a.decimals);
+  if (a.displayUnits === null || b.displayUnits === null) return a.displayUnits === b.displayUnits ? 0 : a.displayUnits === null ? 1 : -1;
+  const left = BigInt(a.displayUnits) * 10n ** BigInt(b.decimals), right = BigInt(b.displayUnits) * 10n ** BigInt(a.decimals);
   return left === right ? 0 : left > right ? -1 : 1;
 }
-/** Priced holdings first by value (highest first), then every holding by amount, then by network and symbol. Stable. */
+/** Priced holdings first by value (highest first), then every holding by shown amount (unavailable balances last), then by network and symbol. Stable. */
 export function sortHoldings(holdings: readonly PortfolioHolding[]): PortfolioHolding[] {
   return [...holdings].sort((a, b) => {
     const left = usdCents(a.valueUsd), right = usdCents(b.valueUsd);

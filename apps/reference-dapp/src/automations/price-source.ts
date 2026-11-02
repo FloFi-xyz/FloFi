@@ -16,11 +16,19 @@
  */
 import { readFile } from 'node:fs/promises';
 import { formatScaled, parseScaled, PRICE_SCALE } from './decimal.ts';
-import { OBSERVED_ASSETS, type ObservedAsset } from './trigger.ts';
+import { OBSERVED_ASSETS } from './trigger.ts';
+
+/**
+ * The USD feeds a price source can serve: the automation trigger assets (`OBSERVED_ASSETS`, unchanged) plus the canonical USDC and USDT
+ * used to value the Dashboard portfolio (BUILD-FLOFI-CHAT-E2E-DASHBOARD-UX-001). A stablecoin is valued only from its own verified feed,
+ * never assumed to be $1; a deployment without that feed values it at nothing.
+ */
+export const PRICE_FEED_ASSETS = Object.freeze([...OBSERVED_ASSETS, 'USDC', 'USDT'] as const);
+export type PriceFeedAsset = (typeof PRICE_FEED_ASSETS)[number];
 
 export type PriceEvidence = 'PUBLIC_READ_ONLY' | 'MOCKED';
 export type PriceObservation = {
-  readonly asset: ObservedAsset; readonly priceUsd: string; readonly observedAt: string; readonly receivedAt: string;
+  readonly asset: PriceFeedAsset; readonly priceUsd: string; readonly observedAt: string; readonly receivedAt: string;
   readonly source: 'CHAINLINK' | 'FIXTURE'; readonly evidence: PriceEvidence;
   readonly provenance: { readonly network?: 'base'; readonly chainId?: number; readonly feed?: string; readonly roundId?: string; readonly description?: string };
 };
@@ -30,8 +38,8 @@ export interface PriceSource {
   /** Observations older than this (by the source's own timestamp) are stale and never used. */
   readonly maxAgeMs: number;
   /** The assets this source can observe on this deployment. */
-  readonly assets: readonly ObservedAsset[];
-  readonly observe: (asset: ObservedAsset, now: Date) => Promise<PriceResult>;
+  readonly assets: readonly PriceFeedAsset[];
+  readonly observe: (asset: PriceFeedAsset, now: Date) => Promise<PriceResult>;
 }
 /** Fresh: not older than `maxAgeMs` and not more than a minute in the future. */
 export const observationFresh = (o: PriceObservation, now: Date, maxAgeMs: number) => {
@@ -94,18 +102,18 @@ export function scaledPrice(answer: bigint, decimals: number): string {
   return formatScaled(units, PRICE_SCALE);
 }
 
-export type ChainlinkConfig = { readonly rpc: RpcTransport; readonly feeds: Readonly<Partial<Record<ObservedAsset, string>>>; readonly maxAgeMs: number };
+export type ChainlinkConfig = { readonly rpc: RpcTransport; readonly feeds: Readonly<Partial<Record<PriceFeedAsset, string>>>; readonly maxAgeMs: number };
 const BASE_CHAIN_ID = 8453;
 /** The Chainlink source: every feed is verified on-chain (chain, description, decimals) once per process before its answers are used. */
 export function chainlinkSource(config: ChainlinkConfig): PriceSource {
-  const verified = new Map<ObservedAsset, Promise<{ decimals: number; description: string }>>();
+  const verified = new Map<PriceFeedAsset, Promise<{ decimals: number; description: string }>>();
   let chain: Promise<void> | null = null;
   const call = (to: string, data: string) => config.rpc('eth_call', [{ to, data }, 'latest']);
   const verifyChain = () => chain ??= (async () => {
     const id = await config.rpc('eth_chainId', []);
     if (typeof id !== 'string' || !/^0x[0-9a-fA-F]{1,16}$/.test(id) || Number.parseInt(id, 16) !== BASE_CHAIN_ID) throw new Error('PRICE_SOURCE_WRONG_CHAIN');
   })().catch(error => { chain = null; throw error; });
-  const verifyFeed = (asset: ObservedAsset, feed: string) => {
+  const verifyFeed = (asset: PriceFeedAsset, feed: string) => {
     let v = verified.get(asset);
     if (!v) {
       v = (async () => {
@@ -121,8 +129,8 @@ export function chainlinkSource(config: ChainlinkConfig): PriceSource {
     }
     return v;
   };
-  const assets = OBSERVED_ASSETS.filter(a => Boolean(config.feeds[a]));
-  return Object.freeze({ id: 'chainlink' as const, maxAgeMs: config.maxAgeMs, assets, async observe(asset: ObservedAsset, now: Date): Promise<PriceResult> {
+  const assets = PRICE_FEED_ASSETS.filter(a => Boolean(config.feeds[a]));
+  return Object.freeze({ id: 'chainlink' as const, maxAgeMs: config.maxAgeMs, assets, async observe(asset: PriceFeedAsset, now: Date): Promise<PriceResult> {
     const feed = config.feeds[asset];
     if (!feed) return { ok: false, code: 'PRICE_ASSET_UNSUPPORTED' } as const;
     try {
@@ -144,7 +152,7 @@ export function chainlinkSource(config: ChainlinkConfig): PriceSource {
  * rewrite it). An entry without `observedAt` is observed "now".
  */
 export function fixtureSource(path: string, maxAgeMs: number, read: (path: string) => Promise<string> = p => readFile(p, 'utf8')): PriceSource {
-  return Object.freeze({ id: 'fixture' as const, maxAgeMs, assets: [...OBSERVED_ASSETS], async observe(asset: ObservedAsset, now: Date): Promise<PriceResult> {
+  return Object.freeze({ id: 'fixture' as const, maxAgeMs, assets: [...PRICE_FEED_ASSETS], async observe(asset: PriceFeedAsset, now: Date): Promise<PriceResult> {
     let entry: { priceUsd?: unknown; observedAt?: unknown } | undefined;
     try { entry = (JSON.parse(await read(path)) as Record<string, typeof entry>)[asset]; } catch { return { ok: false, code: 'PRICE_SOURCE_UNREACHABLE' } as const; }
     if (!entry) return { ok: false, code: 'PRICE_ASSET_UNSUPPORTED' } as const;

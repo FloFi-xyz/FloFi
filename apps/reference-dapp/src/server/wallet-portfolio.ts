@@ -9,14 +9,18 @@
  *  - Assets: only the network's validated official catalog (the same catalogs authoring uses; Solana: the Jupiter verified list). EVM
  *    balances are one Multicall3 `aggregate3` per ≤ 120 listed tokens at one pinned block (native balance included); a network without
  *    Multicall3 reads its native balance only. Solana reads the owner account and its SPL/Token-2022 accounts; mints outside the verified
- *    list are counted (`unlisted`), never shown or valued.
+ *    list are counted (`unlisted`), never shown or valued. A listed Token-2022 mint is read with the cluster clock in one call and its
+ *    balance shown by its own Scaled UI Amount / Interest-Bearing rules (`solana-token-amount.ts`); one it cannot interpret is listed as
+ *    unavailable. The raw amount stays separate from the shown amount (a Stock Token shows underlying shares the same way).
  *  - Prices: the deployment's verified price source only (`automations/config.ts` `deploymentPriceSource`: Chainlink USD feeds on Base, or
- *    a MOCKED fixture in tests), for ETH/WETH and SOL/WSOL (`domain/usd-estimate.ts` `priceAssetOf`), and only for the native asset or the
- *    canonical wrapped native (never a token that merely shares the symbol). A stablecoin is never assumed to be $1.
+ *    a MOCKED fixture in tests): ETH/WETH and SOL/WSOL (the native asset or the canonical wrapped native), and USDC/USDT only at their
+ *    issuer-canonical contract or mint (`CANONICAL_STABLECOINS`) and only from their own USD feed — never a token that merely shares the
+ *    symbol, never a stablecoin assumed to be $1. A feed the deployment does not configure leaves that asset unpriced.
  *  - Each network is isolated (one failure leaves the others), the whole read has a time budget, and results are cached briefly per wallet.
  */
 import { CATALOG_NETWORKS, type CatalogNetworkId } from './catalog-networks.ts';
-import { JUPITER_SOLANA_MAINNET, SOLANA_MAINNET_TOKENS, underlyingShares, type AssetCatalog, type CanonicalAsset } from '@defi-workflow-engine/action-registry';
+import { ARBITRUM_BASE_ASSETS, BASE_BASE_ASSETS, ETHEREUM_BASE_ASSETS, JUPITER_SOLANA_MAINNET, SOLANA_MAINNET_TOKENS, underlyingShares, type AssetCatalog,
+  type CanonicalAsset } from '@defi-workflow-engine/action-registry';
 import { decodeRpcAccount, decodeSplTokenAccount, readSolanaAccounts, verifySolanaCluster, type SolanaRpc } from '@defi-workflow-engine/reference-compiler';
 import { isSolanaPublicKey } from '@defi-workflow-engine/workflow-contracts';
 import { cloudFlowMode } from './flow-runtime.ts';
@@ -26,6 +30,8 @@ import { loadSolanaCatalog } from './solana-asset-catalog.ts';
 import type { Rpc } from './public-testnet-service.ts';
 import { deploymentPriceSource } from '../automations/config.ts';
 import type { PriceObservation, PriceSource } from '../automations/price-source.ts';
+import { clockUnixTimestamp, SOLANA_CLOCK_SYSVAR, SOLANA_TOKEN_2022_PROGRAM, token2022AccountIssue, token2022Display, token2022Rule,
+  type Token2022Rule } from './solana-token-amount.ts';
 import { priceAssetOf, usdAmount, type PriceAsset } from '../domain/usd-estimate.ts';
 import type { SolanaAssetCatalog, SolanaCatalogAsset } from '../domain/solana-asset-catalog.ts';
 import { normalizeEvmAddress, sumUsd, type PortfolioAccount, type PortfolioHolding, type PortfolioNetwork, type PortfolioNetworkId,
@@ -46,8 +52,10 @@ export const PORTFOLIO_CHUNK = 120, PORTFOLIO_MAX_TOKENS = 600;
 export const PORTFOLIO_EVM_RPC_METHODS = Object.freeze(['eth_chainId', 'eth_blockNumber', 'eth_getCode', 'eth_call', 'eth_getBalance']);
 const SOLANA_TOKEN_PROGRAMS = Object.freeze([
   { id: JUPITER_SOLANA_MAINNET.programs.token, token2022: false },
-  { id: 'TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb', token2022: true },
+  { id: SOLANA_TOKEN_2022_PROGRAM, token2022: true },
 ]);
+/** Token-2022 mints interpreted per read: one `getMultipleAccounts` (≤ 100 keys) also carries the Clock sysvar. */
+export const PORTFOLIO_MAX_TOKEN_2022_MINTS = 99;
 const WSOL_MINT = SOLANA_MAINNET_TOKENS.SOL.mint;
 /** Loopback MOCKED harnesses of the Solana mainnet flows (tests only; never a public provider). */
 const SOLANA_HARNESS_RPC = Object.freeze({ jupiter: 'http://127.0.0.1:8551/rpc', transfer: 'http://127.0.0.1:8552/transfer-rpc' });
@@ -159,7 +167,29 @@ const uint256 = (result: { readonly success: boolean; readonly data: string } | 
 
 // ── EVM networks ───────────────────────────────────────────────────────────────────────────────────────────────────────────────
 type NetworkRead = { readonly network: PortfolioNetwork; readonly holdings: readonly HoldingDraft[]; readonly unlisted: number };
-type HoldingDraft = Omit<PortfolioHolding, 'price' | 'valueUsd'> & { readonly priceAsset: PriceAsset | null };
+type PortfolioPriceAsset = PriceAsset | 'USDC' | 'USDT';
+type HoldingDraft = Omit<PortfolioHolding, 'price' | 'valueUsd'> & { readonly priceAsset: PortfolioPriceAsset | null };
+const raw = (units: string) => ({ units, displayUnits: units, displayBasis: 'RAW' as const, unavailableCode: null });
+/** Tether USDt on Ethereum (issuer list: https://tether.to/en/supported-protocols/). */
+export const ETHEREUM_USDT = '0xdac17f958d2ee523a2206206994597c13d831ec7';
+/**
+ * The issuer-canonical stablecoins a USDC/USDT feed values, keyed by chain and contract (or mint): Circle USDC as FloFi pins it on Ethereum,
+ * Base and Arbitrum One, Tether USDt on Ethereum, and the Solana USDC/USDT mints pinned for Jupiter. Any other contract — a bridged copy, a
+ * token that only shares the symbol, USDG or a stock token — is never valued by these feeds.
+ */
+export const CANONICAL_STABLECOINS: ReadonlyMap<string, { readonly asset: 'USDC' | 'USDT'; readonly decimals: number }> = new Map([
+  ...[ETHEREUM_BASE_ASSETS, BASE_BASE_ASSETS, ARBITRUM_BASE_ASSETS].flatMap(pinned => pinned.assets
+    .filter(asset => asset.symbol === 'USDC' && asset.assetClass === 'STABLECOIN' && asset.address)
+    .map(asset => [`${pinned.chain}:${asset.address!.toLowerCase()}`, { asset: 'USDC' as const, decimals: asset.decimals }] as const)),
+  [`${CATALOG_NETWORKS.ethereum.chain}:${ETHEREUM_USDT}`, { asset: 'USDT', decimals: 6 }],
+  [`${JUPITER_SOLANA_MAINNET.chain}:${SOLANA_MAINNET_TOKENS.USDC.mint}`, { asset: 'USDC', decimals: SOLANA_MAINNET_TOKENS.USDC.decimals }],
+  [`${JUPITER_SOLANA_MAINNET.chain}:${SOLANA_MAINNET_TOKENS.USDT.mint}`, { asset: 'USDT', decimals: SOLANA_MAINNET_TOKENS.USDT.decimals }],
+]);
+/** The canonical stablecoin a contract is, when its decimals also match the issuer's; null otherwise. */
+function canonicalStablecoin(chain: string, address: string, decimals: number): 'USDC' | 'USDT' | null {
+  const known = CANONICAL_STABLECOINS.get(`${chain}:${chain.startsWith('eip155:') ? address.toLowerCase() : address}`);
+  return known && known.decimals === decimals ? known.asset : null;
+}
 const ASSET_ORDER: Readonly<Record<CanonicalAsset['assetClass'], number>> = { NATIVE: 0, WRAPPED_NATIVE: 1, STABLECOIN: 2, STOCK_TOKEN: 3, TOKEN: 3 };
 /** The listed ERC-20s, featured and base assets first (so a capped catalog still checks the common ones). */
 function listedTokens(catalog: AssetCatalog): CanonicalAsset[] {
@@ -168,9 +198,13 @@ function listedTokens(catalog: AssetCatalog): CanonicalAsset[] {
     .sort((a, b) => (featured.get(a.asset.id) ?? 1e6) - (featured.get(b.asset.id) ?? 1e6) ||
       ASSET_ORDER[a.asset.assetClass] - ASSET_ORDER[b.asset.assetClass] || a.index - b.index).map(({ asset }) => asset);
 }
-/** Only the native asset and the canonical wrapped native follow a price feed; a token that merely shares the symbol never does. */
-const evmPriceAsset = (asset: Pick<CanonicalAsset, 'kind' | 'assetClass' | 'symbol'>) =>
-  asset.kind === 'NATIVE' || asset.assetClass === 'WRAPPED_NATIVE' ? priceAssetOf(asset.symbol) : null;
+/**
+ * The feed an EVM asset follows: the native asset and the canonical wrapped native follow ETH, a canonical USDC/USDT contract its own feed;
+ * a token that merely shares a symbol follows none.
+ */
+const evmPriceAsset = (chain: string, asset: Pick<CanonicalAsset, 'kind' | 'assetClass' | 'symbol' | 'address' | 'decimals'>): PortfolioPriceAsset | null =>
+  asset.kind === 'NATIVE' || asset.assetClass === 'WRAPPED_NATIVE' ? priceAssetOf(asset.symbol)
+    : asset.address ? canonicalStablecoin(chain, asset.address, asset.decimals) : null;
 
 async function readEvmNetwork(id: CatalogNetworkId, mode: ReadMode, owner: string, env: Env, seams: WalletPortfolioSeams, now: () => Date): Promise<NetworkRead> {
   const runtime = CATALOG_NETWORKS[id], provenance: PortfolioProvenance = mode === 'harness' ? 'MOCKED' : 'PUBLIC_MAINNET';
@@ -211,14 +245,17 @@ async function readEvmNetwork(id: CatalogNetworkId, mode: ReadMode, owner: strin
   const holdings: HoldingDraft[] = [];
   if (native > 0n) {
     const asset = nativeAsset ?? { kind: 'NATIVE' as const, assetClass: 'NATIVE' as const, symbol: 'ETH', name: 'Ether', decimals: 18, logoUrl: null };
-    holdings.push({ ...base, symbol: asset.symbol, name: asset.name, address: null, decimals: asset.decimals, units: native.toString(), native: true,
-      logo: asset.logoUrl, priceAsset: evmPriceAsset(asset) });
+    holdings.push({ ...base, symbol: asset.symbol, name: asset.name, address: null, decimals: asset.decimals, ...raw(native.toString()), native: true,
+      logo: asset.logoUrl, priceAsset: evmPriceAsset(runtime.chain, { ...asset, address: null }) });
   }
   for (const token of checked) {
     const units = balances.get(token.address!);
-    // A Robinhood Stock Token's balance scales by its official multiplier (ERC-8056): show the underlying shares, as Robinhood does.
+    // A Robinhood Stock Token's balance scales by its official multiplier (ERC-8056): show the underlying shares, as Robinhood does; the
+    // raw token balance stays the canonical amount.
     if (units && units > 0n) holdings.push({ ...base, symbol: token.symbol, name: token.name, address: token.address, decimals: token.decimals,
-      units: token.stock ? underlyingShares(units.toString(), token.stock.multiplierWad) : units.toString(), native: false, logo: token.logoUrl, priceAsset: evmPriceAsset(token) });
+      ...token.stock ? { units: units.toString(), displayUnits: underlyingShares(units.toString(), token.stock.multiplierWad), displayBasis: 'STOCK_MULTIPLIER' as const,
+        unavailableCode: null } : raw(units.toString()),
+      native: false, logo: token.logoUrl, priceAsset: evmPriceAsset(runtime.chain, token) });
   }
   return { holdings, unlisted: 0, network: { id, name: runtime.name, chain: runtime.chain, chainId: runtime.chainId, ecosystem: 'evm', status: 'READ', provenance,
     observedAt: now().toISOString(), block: block.toString(), slot: null, tokens: coverage, uncheckedTokens: unchecked, code: coverage === 'ALL' ? null : failure } };
@@ -240,15 +277,18 @@ function solanaReadRpc(mode: ReadMode, env: Env): SolanaRpc {
   return createSolanaRpc(solanaRpcOverride(env.GRYLOO_SOLANA_RPC_URL, 'SOLANA_RPC_CONFIGURATION_INVALID') ?? JUPITER_SOLANA_MAINNET.rpc, false);
 }
 /**
- * Non-zero token balances per mint, summed over the owner's accounts of one token program. An account the RPC attributes to another program
- * or owner fails the whole program (the response is not trusted); an account whose layout cannot be decoded is skipped and counted.
+ * Token balances per mint, summed over the owner's accounts of one token program: non-zero ones, and (Token-2022) any account whose
+ * balance is partly confidential. An account the RPC attributes to another program or owner fails the whole program (the response is not
+ * trusted); an account whose layout cannot be decoded is skipped and counted. `issue`: why a Token-2022 account's public amount is not
+ * its whole balance (the mint is then shown as unavailable).
  */
+type MintBalance = { readonly amount: bigint; readonly issue: string | null };
 async function solanaTokenBalances(rpc: SolanaRpc, owner: string, program: { readonly id: string; readonly token2022: boolean }):
-  Promise<{ readonly balances: Map<string, bigint>; readonly unreadable: number }> {
+  Promise<{ readonly balances: Map<string, MintBalance>; readonly unreadable: number }> {
   const result = await rpc('getTokenAccountsByOwner', [owner, { programId: program.id }, { encoding: 'base64', commitment: 'confirmed' }]);
   const value = result && typeof result === 'object' ? (result as { value?: unknown }).value : undefined;
   if (!Array.isArray(value)) throw new Error('SOLANA_RPC_INVALID');
-  const balances = new Map<string, bigint>();
+  const balances = new Map<string, MintBalance>();
   let unreadable = 0;
   for (const entry of value) {
     const account = decodeRpcAccount(entry && typeof entry === 'object' ? (entry as { account?: unknown }).account ?? null : null);
@@ -256,10 +296,30 @@ async function solanaTokenBalances(rpc: SolanaRpc, owner: string, program: { rea
     let decoded: ReturnType<typeof decodeSplTokenAccount>;
     try { decoded = decodeSplTokenAccount(account.data, program.token2022); } catch { unreadable++; continue; }
     if (decoded.owner !== owner) throw new Error('SOLANA_TOKEN_ACCOUNT_MISMATCH');
-    if (decoded.state === 0 || decoded.amount === 0n) continue;
-    balances.set(decoded.mint, (balances.get(decoded.mint) ?? 0n) + decoded.amount);
+    const issue = program.token2022 ? token2022AccountIssue(decoded.extensions.map(extension => extension.type)) : null;
+    if (decoded.state === 0 || (decoded.amount === 0n && issue !== 'SOLANA_TOKEN_CONFIDENTIAL_BALANCE')) continue;
+    const prior = balances.get(decoded.mint);
+    balances.set(decoded.mint, { amount: (prior?.amount ?? 0n) + decoded.amount, issue: prior?.issue ?? issue });
   }
   return { balances, unreadable };
+}
+/**
+ * The display rule of each listed Token-2022 mint, read with the Clock sysvar in one `getMultipleAccounts` (one slot, one cluster time).
+ * A failed read makes these mints unavailable, never the network; mints past the per-read cap are unavailable too.
+ */
+async function token2022Rules(rpc: SolanaRpc, mints: readonly string[]): Promise<ReadonlyMap<string, Token2022Rule>> {
+  const keys = mints.slice(0, PORTFOLIO_MAX_TOKEN_2022_MINTS);
+  const rules = new Map<string, Token2022Rule>(mints.slice(keys.length).map(mint => [mint, { ok: false, code: 'PORTFOLIO_TOKEN_LIMIT' }] as const));
+  if (!keys.length) return rules;
+  try {
+    const { accounts } = await readSolanaAccounts(rpc, [...keys, SOLANA_CLOCK_SYSVAR]);
+    const now = clockUnixTimestamp(accounts[keys.length] ?? null);
+    keys.forEach((mint, i) => rules.set(mint, token2022Rule(accounts[i] ?? null, now)));
+  } catch (error) {
+    const code = codeOf(error, 'SOLANA_TOKEN_MINT_UNAVAILABLE');
+    keys.forEach(mint => rules.set(mint, { ok: false, code }));
+  }
+  return rules;
 }
 async function readSolanaNetwork(mode: ReadMode, owner: string, env: Env, seams: WalletPortfolioSeams, now: () => Date): Promise<NetworkRead> {
   const provenance: PortfolioProvenance = mode === 'harness' ? 'MOCKED' : 'PUBLIC_MAINNET';
@@ -269,16 +329,13 @@ async function readSolanaNetwork(mode: ReadMode, owner: string, env: Env, seams:
   await verifySolanaCluster(rpc, JUPITER_SOLANA_MAINNET.genesisHash);
   const { slot, accounts } = await readSolanaAccounts(rpc, [owner]);
   const lamports = accounts[0]?.lamports ?? 0n;
-  const balances = new Map<string, bigint>();
+  const classic = new Map<string, MintBalance>(), token2022 = new Map<string, MintBalance>();
   let failedPrograms = 0, unreadable = 0, failure: string | null = null;
-  let scaled = 0;
   for (const program of SOLANA_TOKEN_PROGRAMS) {
     try {
       const read = await solanaTokenBalances(rpc, owner, program);
-      // A Token-2022 mint can carry a scaled-UI or interest-bearing extension this read does not apply: never show a raw amount as the
-      // balance — count those tokens as not checked instead.
-      if (program.token2022) { scaled += read.balances.size; unreadable += read.unreadable; continue; }
-      for (const [mint, amount] of read.balances) balances.set(mint, (balances.get(mint) ?? 0n) + amount);
+      // A mint belongs to exactly one token program, so the two maps never share a mint.
+      for (const [mint, balance] of read.balances) (program.token2022 ? token2022 : classic).set(mint, balance);
       unreadable += read.unreadable;
     } catch (error) { failedPrograms++; failure ??= codeOf(error, 'SOLANA_TOKEN_ACCOUNTS_UNAVAILABLE'); }
   }
@@ -286,23 +343,41 @@ async function readSolanaNetwork(mode: ReadMode, owner: string, env: Env, seams:
   const verified = new Map<string, SolanaCatalogAsset>(listed.ok ? listed.value.assets.filter(asset => !asset.native).map(asset => [asset.mint, asset] as const) : []);
   const base = { networkId: 'solana', network: SOLANA_NAME, chain: JUPITER_SOLANA_MAINNET.chain, provenance } as const;
   const holdings: HoldingDraft[] = [];
-  if (lamports > 0n) holdings.push({ ...base, symbol: 'SOL', name: 'Solana', address: null, decimals: 9, units: lamports.toString(), native: true, logo: null, priceAsset: 'SOL' });
+  if (lamports > 0n) holdings.push({ ...base, symbol: 'SOL', name: 'Solana', address: null, decimals: 9, ...raw(lamports.toString()), native: true, logo: null, priceAsset: 'SOL' });
   let unlisted = 0, unidentified = 0;
-  for (const [mint, amount] of balances) {
+  for (const [mint, { amount }] of classic) {
     // Wrapped SOL is the canonical SPL form of SOL; it keeps its own name so it never reads as native SOL twice.
     const asset = mint === WSOL_MINT ? { symbol: 'WSOL', name: 'Wrapped SOL', decimals: 9, logoUrl: verified.get(mint)?.logoUrl ?? null } : verified.get(mint);
     if (!listed.ok && mint !== WSOL_MINT) { unidentified++; continue; }
     if (!asset) { unlisted++; continue; }
-    holdings.push({ ...base, symbol: asset.symbol, name: asset.name, address: mint, decimals: asset.decimals, units: amount.toString(), native: false,
-      logo: asset.logoUrl, priceAsset: mint === WSOL_MINT ? 'SOL' : null });
+    holdings.push({ ...base, symbol: asset.symbol, name: asset.name, address: mint, decimals: asset.decimals, ...raw(amount.toString()), native: false,
+      logo: asset.logoUrl, priceAsset: mint === WSOL_MINT ? 'SOL' : canonicalStablecoin(JUPITER_SOLANA_MAINNET.chain, mint, asset.decimals) });
+  }
+  // Token-2022: identified by the verified list first; each listed mint is then shown by its own on-chain rules at the cluster time.
+  const shown: { readonly mint: string; readonly balance: MintBalance; readonly asset: SolanaCatalogAsset }[] = [];
+  for (const [mint, balance] of token2022) {
+    if (!listed.ok) { unidentified++; continue; }
+    const asset = verified.get(mint);
+    if (!asset) { unlisted++; continue; }
+    shown.push({ mint, balance, asset });
+  }
+  const rules = await token2022Rules(rpc, shown.filter(entry => !entry.balance.issue).map(entry => entry.mint));
+  for (const { mint, balance, asset } of shown) {
+    const rule = rules.get(mint);
+    const display = balance.issue ? { ok: false as const, code: balance.issue } : !rule ? { ok: false as const, code: 'SOLANA_TOKEN_MINT_UNAVAILABLE' }
+      : rule.ok && rule.decimals !== asset.decimals ? { ok: false as const, code: 'SOLANA_TOKEN_DECIMALS_MISMATCH' } : token2022Display(balance.amount, rule);
+    // Token-2022 mints are never valued: no canonical stablecoin or verified feed is a Token-2022 mint.
+    holdings.push({ ...base, symbol: asset.symbol, name: asset.name, address: mint, decimals: asset.decimals, units: balance.amount.toString(),
+      ...display.ok ? { displayUnits: display.units.toString(), displayBasis: display.basis, unavailableCode: null }
+        : { displayUnits: null, displayBasis: 'RAW' as const, unavailableCode: display.code },
+      native: false, logo: asset.logoUrl, priceAsset: null });
   }
   const coverage: PortfolioTokenCoverage = failedPrograms === SOLANA_TOKEN_PROGRAMS.length || !listed.ok ? 'NATIVE_ONLY'
-    : failedPrograms || unreadable || scaled ? 'PARTIAL' : 'ALL';
+    : failedPrograms || unreadable ? 'PARTIAL' : 'ALL';
   if (!listed.ok) failure ??= 'SOLANA_TOKEN_CATALOG_UNAVAILABLE';
   if (unreadable) failure ??= 'SOLANA_TOKEN_ACCOUNT_UNREADABLE';
-  if (scaled) failure ??= 'SOLANA_TOKEN_2022_NOT_SHOWN';
   return { holdings, unlisted, network: { id: 'solana', name: SOLANA_NAME, chain: JUPITER_SOLANA_MAINNET.chain, chainId: null, ecosystem: 'solana', status: 'READ',
-    provenance, observedAt: now().toISOString(), block: null, slot, tokens: coverage, uncheckedTokens: unidentified + unreadable + scaled,
+    provenance, observedAt: now().toISOString(), block: null, slot, tokens: coverage, uncheckedTokens: unidentified + unreadable,
     code: coverage === 'ALL' ? null : failure } };
 }
 
@@ -333,12 +408,21 @@ async function readSnapshot(accounts: readonly PortfolioAccount[], env: Env, sea
   const resolveMode = seams.mode ?? ((id: PortfolioNetworkId) => defaultMode(id, env));
   const modes = await withDeadline(Promise.all(ids.map(id => resolveMode(id).catch((): PortfolioMode => 'off'))), remaining(), 'PORTFOLIO_READ_TIMEOUT')
     .catch(() => ids.map((): PortfolioMode => 'off'));
-  // Prices are observed alongside the balance reads, only for the feeds an enabled network can use.
+  // Prices: one observation per feed per snapshot. ETH and SOL start alongside the balance reads for the enabled networks; a stablecoin
+  // feed is observed only when a canonical USDC/USDT holding was actually found.
   const prices = priceSourceOf(env, seams), observedAt = now();
-  const wanted = new Set<PriceAsset>([...ids.some((id, i) => id !== 'solana' && modes[i] !== 'off') ? ['ETH' as const] : [],
-    ...ids.some((id, i) => id === 'solana' && modes[i] !== 'off') ? ['SOL' as const] : []]);
-  const observing = Promise.all([...wanted].filter(asset => prices?.assets.includes(asset)).map(async asset =>
-    [asset, await prices!.observe(asset, observedAt).then(result => result.ok ? result.observation : null, () => null)] as const));
+  const observations = new Map<PortfolioPriceAsset, Promise<PriceObservation | null>>();
+  const observe = (asset: PortfolioPriceAsset) => {
+    if (!prices?.assets.includes(asset)) return null;
+    let observation = observations.get(asset);
+    if (!observation) {
+      observation = prices.observe(asset, observedAt).then(result => result.ok ? result.observation : null, () => null);
+      observations.set(asset, observation);
+    }
+    return observation;
+  };
+  if (ids.some((id, i) => id !== 'solana' && modes[i] !== 'off')) observe('ETH');
+  if (ids.some((id, i) => id === 'solana' && modes[i] !== 'off')) observe('SOL');
   const reads = await Promise.all(ids.map(async (id, i): Promise<NetworkRead> => {
     const mode = modes[i]!;
     if (mode === 'off') return { network: unreadNetwork(id, 'NOT_ENABLED', 'NETWORK_NOT_ENABLED', null), holdings: [], unlisted: 0 };
@@ -348,16 +432,19 @@ async function readSnapshot(accounts: readonly PortfolioAccount[], env: Env, sea
       return { network: unreadNetwork(id, 'UNAVAILABLE', codeOf(error, 'PORTFOLIO_NETWORK_UNAVAILABLE'), mode === 'harness' ? 'MOCKED' : 'PUBLIC_MAINNET'), holdings: [], unlisted: 0 };
     }
   }));
-  const observed = new Map<PriceAsset, PriceObservation>((await withDeadline(observing, remaining(), 'PRICE_TIMEOUT').catch(() => []))
+  const needed = [...new Set(reads.flatMap(read => read.holdings).flatMap(holding => holding.priceAsset && holding.displayUnits !== null ? [holding.priceAsset] : []))];
+  const observing = Promise.all(needed.map(async asset => [asset, await observe(asset)] as const));
+  const observed = new Map<PortfolioPriceAsset, PriceObservation>((await withDeadline(observing, remaining(), 'PRICE_TIMEOUT').catch(() => []))
     .flatMap(([asset, observation]) => observation ? [[asset, observation] as const] : []));
   const holdings: PortfolioHolding[] = reads.flatMap(read => read.holdings).map(({ priceAsset, ...holding }) => {
-    const observation = priceAsset ? observed.get(priceAsset) : undefined;
-    const valueUsd = observation ? usdAmount(holding.units, holding.decimals, observation.priceUsd) : null;
+    // The value follows the shown balance (underlying shares, scaled or accrued amount); a balance that cannot be shown has no value.
+    const observation = priceAsset && holding.displayUnits !== null ? observed.get(priceAsset) : undefined;
+    const valueUsd = observation && holding.displayUnits !== null ? usdAmount(holding.displayUnits, holding.decimals, observation.priceUsd) : null;
     return { ...holding, price: observation && valueUsd !== null ? { usd: observation.priceUsd, source: observation.source, observedAt: observation.observedAt } : null,
       valueUsd: observation ? valueUsd : null };
   });
   const networks = reads.map(read => read.network), priceSource = sourceOf(prices);
-  return { format: 'flofi.wallet-portfolio.v1', observedAt: now().toISOString(), accounts, networks, holdings,
+  return { format: 'flofi.wallet-portfolio.v2', observedAt: now().toISOString(), accounts, networks, holdings,
     pricedTotalUsd: sumUsd(holdings.map(holding => holding.valueUsd)), unpricedCount: holdings.filter(holding => holding.valueUsd === null).length,
     unlisted: reads.reduce((sum, read) => sum + read.unlisted, 0), priceSource,
     mocked: networks.some(network => network.status === 'READ' && network.provenance === 'MOCKED') || holdings.some(holding => holding.price?.source === 'FIXTURE') };

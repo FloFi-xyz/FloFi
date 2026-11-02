@@ -31,7 +31,8 @@ function Harness() {
   const [account, setAccount] = useState<string | null>(reviewOwner), [runId, setRunId] = useState<string | null>(null), [current, setCurrent] = useState(false);
   const [navigation, setNavigation] = useState<string[]>([]);
   const [surface, setSurface] = useState<'dashboard' | 'records'>('dashboard');
-  const go = (path: string) => { setNavigation(value => [...value, path]); setRunId(dashboardRoute(path)?.runId ?? null); };
+  // Like the product router, the route is the pathname: a fragment (`#from-workflows`, a record opened from Your workflows) is not part of the run id.
+  const go = (path: string) => { setNavigation(value => [...value, path]); setRunId(dashboardRoute(path.split('#')[0])?.runId ?? null); };
   window.flofiWorkspaceAcceptance = {
     read(owner, id, cursor = null) { return new Promise(resolve => { requests.push({ account: owner, runId: id, cursor, resolve, done: false }); }); },
     requests: () => requests.map(({ account, runId, cursor, done }) => ({ account, runId, cursor, done })),

@@ -79,6 +79,9 @@
 .asset strong, .asset small { display: block; }
 .asset small { color: var(--muted); font-size: 12px; max-width: 220px; overflow: hidden; text-overflow: ellipsis; }
 .assetIcon { display: grid; place-items: center; width: 20px; height: 20px; flex: none; }
+.table .basis, .table .unavailable small { display: block; color: var(--muted); font-size: 12px; font-weight: 400; white-space: normal; }
+.table .unavailable { color: var(--muted); min-width: 160px; }
+.table .unavailable small { max-width: 240px; margin-left: auto; }
 .detailsBody .note + .note { margin-top: 6px; }
 .tableWrap + .note { margin-top: 10px; }
 .scope { margin: 0; padding: 10px 12px; border-radius: 8px; background: var(--soft); color: var(--muted); font-size: 12px; line-height: 1.6; }

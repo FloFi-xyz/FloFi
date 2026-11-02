@@ -44,6 +44,8 @@ describe('BUILD-AUTOMATION-001 configuration (fail closed)', () => {
       VERCEL: '1', VERCEL_ENV: 'production' }))).toBe('FLOFI_AUTOMATION_CHAINLINK_RPC_URL');
     expect(parseFeeds(`ETH=${FEED},ETH=${FEED}`)).toBeNull();
     expect(parseFeeds(`DOGE=${FEED}`)).toBeNull();
+    // The Dashboard portfolio's stablecoin feeds (BUILD-FLOFI-CHAT-E2E-DASHBOARD-UX-001); each is still verified on-chain as "<ASSET> / USD" before use.
+    expect(parseFeeds(`ETH=${FEED},USDC=${FEED},USDT=${FEED}`)).toEqual({ ETH: FEED, USDC: FEED, USDT: FEED });
     expect(reason(base({ FLOFI_AUTOMATION_PRICE_SOURCE: 'fixture', FLOFI_AUTOMATION_PRICE_FIXTURE: '/tmp/prices.json' }))).toBe('ENABLED');
     expect(reason(base({ FLOFI_AUTOMATION_PRICE_SOURCE: 'fixture', FLOFI_AUTOMATION_PRICE_FIXTURE: '/home/prices.json' }))).toBe('FLOFI_AUTOMATION_PRICE_FIXTURE');
     expect(reason(base({ FLOFI_AUTOMATION_PRICE_SOURCE: 'fixture', FLOFI_AUTOMATION_PRICE_FIXTURE: '/tmp/prices.json', FLOFI_DEPLOYMENT: 'hosted' }))).toBe('FLOFI_AUTOMATION_PRICE_FIXTURE');

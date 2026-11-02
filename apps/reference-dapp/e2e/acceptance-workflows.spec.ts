@@ -198,7 +198,7 @@ test('Save → Your workflows → exact Canvas restoration; grouped executions, 
   await expect(page.locator('.build009-wallet-info')).toHaveAttribute('title', new RegExp(B.address, 'i'));
   await library.getByRole('button', { name: 'Ligar carteira e verificar titularidade', exact: true }).click();
   await expect(page.locator('dialog.wallet-selector[open]')).toHaveCount(0);
-  await expect(library).toContainText('Nenhum workflow guardado à espera.');
+  await expect(library).toContainText('Nenhum workflow salvo aguardando.');
   await expect(library.locator('.dashboard-run-card')).toHaveCount(0);
   expect(errors).toEqual([]); networkGuard.assertClean();
 });

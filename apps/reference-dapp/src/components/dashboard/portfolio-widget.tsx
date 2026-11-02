@@ -74,7 +74,8 @@ function PortfolioBody({ portfolio, expanded, copied, summaryButton, toggle, col
   const { t: tr, language } = useLocale();
   const summary = portfolioSummary(portfolio), count = summary.holdings.length;
   if (!summary.read.length && !summary.unavailable.length) return <p className={styles.note}>{tr('No network is enabled for balance reads on this deployment.')}</p>;
-  const amount = (holding: PortfolioHolding) => `${formatTokenAmount(holding.units, holding.decimals, language)} ${holding.symbol}`;
+  const amount = (holding: PortfolioHolding) => holding.displayUnits === null ? tr('{0}: balance unavailable', holding.symbol)
+    : `${formatTokenAmount(holding.displayUnits, holding.decimals, language)} ${holding.symbol}`;
   const shares = [...summary.segments.map((segment, i) => ({ key: segment.key, label: segment.symbol, perMille: segment.perMille, tone: SEGMENT_TONES[i] ?? OTHER_TONE })),
     ...summary.other ? [{ key: 'other', label: tr('Other'), perMille: summary.other.perMille, tone: OTHER_TONE }] : []];
   return <>
@@ -103,6 +104,22 @@ function PortfolioBody({ portfolio, expanded, copied, summaryButton, toggle, col
   </>;
 }
 
+/** Why a balance is shown differently from its raw on-chain amount, or cannot be shown at all. */
+const BASIS_NOTE: Readonly<Record<PortfolioHolding['displayBasis'], string | null>> = { RAW: null, STOCK_MULTIPLIER: 'Underlying shares',
+  SCALED_UI_AMOUNT: 'Scaled by the token multiplier', INTEREST_BEARING: 'Includes accrued interest' };
+const UNAVAILABLE_REASON = (code: string | null) => code === 'SOLANA_TOKEN_CONFIDENTIAL_BALANCE' ? 'Part of this balance is confidential and cannot be read.'
+  : code === 'SOLANA_TOKEN_EXTENSION_UNSUPPORTED' ? 'This token uses a Token-2022 extension FloFi cannot interpret, so its balance is not shown.'
+  : 'This balance could not be interpreted safely, so it is not shown.';
+function BalanceCell({ holding }: { holding: PortfolioHolding }) {
+  const { t: tr, language } = useLocale();
+  if (holding.displayUnits === null) return <td className={`${styles.end} ${styles.unavailable}`} data-code={holding.unavailableCode ?? undefined}>
+    <span>{tr('Unavailable')}</span><small>{tr(UNAVAILABLE_REASON(holding.unavailableCode))}</small></td>;
+  const note = BASIS_NOTE[holding.displayBasis];
+  // The canonical raw amount stays available next to a balance shown by the token's own rules.
+  return <td className={`${styles.end} numeric`} title={note ? tr('On-chain amount: {0}', formatTokenAmount(holding.units, holding.decimals, language)) : undefined}>
+    {formatTokenAmount(holding.displayUnits, holding.decimals, language)}{note && <small className={styles.basis}>{tr(note)}</small>}</td>;
+}
+
 function NetworkRow({ network }: { network: PortfolioNetwork }) {
   const { t: tr } = useLocale();
   const coverage = network.status !== 'READ' ? null : network.tokens === 'NATIVE_ONLY' ? tr('Native balance only: listed token balances could not be read.')
@@ -126,7 +143,7 @@ function PortfolioDetails({ portfolio, copied, copy, collapse }: { portfolio: Wa
   const updated = formatObservedAt(portfolio.observedAt, language), shown = [...summary.read, ...summary.unavailable];
   const fixture = portfolio.holdings.some(holding => holding.price?.source === 'FIXTURE');
   const priceNote = !summary.holdings.length ? null : !portfolio.priceSource ? tr('USD values are unavailable on this deployment.')
-    : portfolio.unpricedCount > 0 ? tr('Only ETH, WETH, SOL and WSOL have a verified USD price here. Other assets show no value.') : null;
+    : portfolio.unpricedCount > 0 ? tr('Only assets with a verified Chainlink USD feed on this deployment are priced. Other assets show no value.') : null;
   return <div className={styles.detailsBody}>
     <dl className={styles.identity} aria-label={tr('Wallet')}>{portfolio.accounts.map(account => <div key={account.ecosystem}>
       <dt>{tr(account.ecosystem === 'evm' ? 'EVM wallet' : 'Solana wallet')}</dt>
@@ -148,7 +165,7 @@ function PortfolioDetails({ portfolio, copied, copy, collapse }: { portfolio: Wa
             <TokenBrandIcon symbol={holding.symbol} network={holding.chain} address={holding.address ?? undefined}/></span>
             <span><strong>{holding.symbol}</strong><small title={holding.address ?? undefined}>{holding.name}</small></span></span></th>
           <td>{holding.network}</td>
-          <td className={`${styles.end} numeric`}>{formatTokenAmount(holding.units, holding.decimals, language)}</td>
+          <BalanceCell holding={holding}/>
           <td className={`${styles.end} numeric`}>{holding.price ? formatUsdPrice(holding.price.usd, language) : '—'}</td>
           <td className={`${styles.end} numeric`}>{holding.valueUsd ? formatUsdValue(holding.valueUsd, language) : '—'}</td>
         </tr>)}</tbody>

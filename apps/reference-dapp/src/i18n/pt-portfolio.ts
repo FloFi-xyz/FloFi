@@ -28,8 +28,17 @@ export const portuguesePortfolio: Readonly<Record<string, string>> = {
   'Prices: Chainlink USD feeds on Base, observed {0}. Values are estimates, not quotes.':
     'Preços: feeds USD da Chainlink na Base, observados em {0}. Os valores são estimativas, não cotações.',
   'Prices: test fixture (MOCKED), observed {0}. Not market data.': 'Preços: fixture de teste (MOCKED), observados em {0}. Não são dados de mercado.',
-  'Only ETH, WETH, SOL and WSOL have a verified USD price here. Other assets show no value.':
-    'Somente ETH, WETH, SOL e WSOL têm preço verificado em USD aqui. Os demais ativos não exibem valor.',
+  'Only assets with a verified Chainlink USD feed on this deployment are priced. Other assets show no value.':
+    'Somente ativos com um feed USD verificado da Chainlink nesta implantação têm preço. Os demais ativos não exibem valor.',
+  '{0}: balance unavailable': '{0}: saldo indisponível',
+  'Underlying shares': 'Ações subjacentes',
+  'Scaled by the token multiplier': 'Ajustado pelo multiplicador do token',
+  'Includes accrued interest': 'Inclui juros acumulados',
+  'On-chain amount: {0}': 'Quantidade on-chain: {0}',
+  'Part of this balance is confidential and cannot be read.': 'Parte deste saldo é confidencial e não pode ser lida.',
+  'This token uses a Token-2022 extension FloFi cannot interpret, so its balance is not shown.':
+    'Este token usa uma extensão Token-2022 que a FloFi não consegue interpretar, por isso o saldo não é exibido.',
+  'This balance could not be interpreted safely, so it is not shown.': 'Este saldo não pôde ser interpretado com segurança, por isso não é exibido.',
   'Transactions, DeFi positions and perpetuals are not shown: FloFi has no verified source for them. Your FloFi executions are in Your workflows.':
     'Transações, posições DeFi e perpétuos não são exibidos: o FloFi não tem uma fonte verificada para eles. Suas execuções no FloFi estão em Seus workflows.',
   'Updated {0}': 'Atualizado em {0}',

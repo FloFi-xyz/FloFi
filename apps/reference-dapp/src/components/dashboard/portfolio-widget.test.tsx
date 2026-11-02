@@ -25,12 +25,12 @@ const network = (id: PortfolioNetwork['id'], name: string, status: PortfolioNetw
   provenance: status === 'NOT_ENABLED' ? null : 'PUBLIC_MAINNET', observedAt: status === 'READ' ? '2026-11-02T12:00:00.000Z' : null, block: status === 'READ' ? '38123456' : null,
   slot: null, tokens: status === 'READ' ? 'ALL' : null, uncheckedTokens: 0, code: status === 'READ' ? null : status === 'NOT_ENABLED' ? 'NETWORK_NOT_ENABLED' : 'PUBLIC_RPC_UNAVAILABLE', ...extra });
 const ETH: PortfolioHolding = { networkId: 'base', network: 'Base', chain: 'eip155:8453', symbol: 'ETH', name: 'Ether', address: null, decimals: 18,
-  units: '1500000000000000000', native: true, provenance: 'PUBLIC_MAINNET', price: { usd: '3000.5', source: 'CHAINLINK', observedAt: '2026-11-02T11:59:00.000Z' },
+  units: '1500000000000000000', displayUnits: '1500000000000000000', displayBasis: 'RAW', unavailableCode: null, native: true, provenance: 'PUBLIC_MAINNET', price: { usd: '3000.5', source: 'CHAINLINK', observedAt: '2026-11-02T11:59:00.000Z' },
   valueUsd: '4500.75', logo: null };
-const USDC: PortfolioHolding = { ...ETH, symbol: 'USDC', name: 'USD Coin', address: '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913', decimals: 6, units: '1234560000', native: false,
+const USDC: PortfolioHolding = { ...ETH, symbol: 'USDC', name: 'USD Coin', address: '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913', decimals: 6, units: '1234560000', displayUnits: '1234560000', native: false,
   price: null, valueUsd: null };
 function snapshot(extra: Partial<WalletPortfolio> = {}): WalletPortfolio {
-  return { format: 'flofi.wallet-portfolio.v1', observedAt: '2026-11-02T12:00:00.000Z', accounts: [{ ecosystem: 'evm', address: OWNER }],
+  return { format: 'flofi.wallet-portfolio.v2', observedAt: '2026-11-02T12:00:00.000Z', accounts: [{ ecosystem: 'evm', address: OWNER }],
     networks: [network('ethereum', 'Ethereum', 'NOT_ENABLED'), network('base', 'Base', 'READ'), network('arbitrum-one', 'Arbitrum One', 'NOT_ENABLED'),
       network('robinhood', 'Robinhood Chain', 'UNAVAILABLE')],
     holdings: [ETH, USDC], pricedTotalUsd: '4500.75', unpricedCount: 1, unlisted: 0, priceSource: 'CHAINLINK', mocked: false, ...extra };
@@ -82,7 +82,7 @@ describe('Dashboard wallet portfolio widget', () => {
     expect(expanded).toContain('1.5</td>'); expect(expanded).toContain('$3,000.50'); expect(expanded).toContain('$4,500.75');
     expect(expanded).toContain('1,234.56</td>'); expect(expanded).toMatch(/1,234\.56<\/td><td class="[^"]*">—<\/td><td class="[^"]*">—<\/td>/);
     expect(expanded).toMatch(/Prices: Chainlink USD feeds on Base, observed [^<]*2026[^<]*11:59[^<]* UTC\. Values are estimates, not quotes\./);
-    expect(expanded).toContain('Only ETH, WETH, SOL and WSOL have a verified USD price here.');
+    expect(expanded).toContain('Only assets with a verified Chainlink USD feed on this deployment are priced.');
     expect(expanded).toContain('Your FloFi executions are in Your workflows.');
     expect(expanded).not.toMatch(/role="tab"|>Transactions<|>DeFi<|>Perpetuals</);
     click(props, labelled('Collapse'));
@@ -100,6 +100,25 @@ describe('Dashboard wallet portfolio widget', () => {
     expect(expanded).toContain('Ativos'); expect(expanded).toContain('Saldo'); expect(expanded).toContain('Rede principal'); expect(expanded).toContain('Carteira EVM');
     expect(expanded).toContain('1.234,56</td>'); expect(expanded).toContain('1,5</td>'); expect(expanded).toContain('Recolher');
     expect(expanded).toContain('Não habilitadas nesta implantação: Ethereum, Arbitrum One');
+  });
+  it('shows a balance by the token’s own rules with its raw amount kept apart, and an uninterpretable balance as unavailable, never a number', async () => {
+    const SCALED: PortfolioHolding = { ...USDC, networkId: 'solana', network: 'Solana', chain: 'solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp', symbol: 'xAAPL', name: 'Apple xStock',
+      address: 'XsbEhLAtcf6HdfpFZ5xEMdqW8nfAvcsP5bdudRLJzJp', decimals: 8, units: '300000000', displayUnits: '450000000', displayBasis: 'SCALED_UI_AMOUNT' };
+    const ODD: PortfolioHolding = { ...SCALED, symbol: 'ODD', name: 'Odd token', address: 'Odd1111111111111111111111111111111111111111', units: '777', displayUnits: null,
+      displayBasis: 'RAW', unavailableCode: 'SOLANA_TOKEN_EXTENSION_UNSUPPORTED' };
+    const props: Props = { evm: null, solana: 'So1ana1111111111111111111111111111111111111', load: loader({ ok: true, portfolio: snapshot({ holdings: [SCALED, ODD],
+      pricedTotalUsd: null, unpricedCount: 2, accounts: [{ ecosystem: 'solana', address: 'So1ana1111111111111111111111111111111111111' }] }) }) };
+    view(props); await settle();
+    expect(view(props)).toContain('4.5 xAAPL · ODD: balance unavailable');
+    click(props, disclosure);
+    const expanded = view(props);
+    expect(expanded).toMatch(/title="On-chain amount: 3"[^>]*>4\.5<small[^>]*>Scaled by the token multiplier<\/small><\/td>/);
+    expect(expanded).toMatch(/data-code="SOLANA_TOKEN_EXTENSION_UNSUPPORTED"><span>Unavailable<\/span><small>This token uses a Token-2022 extension FloFi cannot interpret/);
+    expect(expanded).not.toContain('>777<'); expect(expanded).not.toContain('0.00000777');
+    host = new HookHarness(); locale.language = 'PT';
+    view(props); await settle(); click(props, disclosure);
+    const pt = view(props);
+    expect(pt).toContain('Ajustado pelo multiplicador do token'); expect(pt).toContain('Quantidade on-chain: 3'); expect(pt).toContain('Indisponível');
   });
   it('shows an unavailable state with Retry, and Retry reads again', async () => {
     const load = loader({ ok: false, code: 'PORTFOLIO_UNAVAILABLE' }, { ok: true, portfolio: snapshot() }), props: Props = { evm: OWNER, solana: null, load };

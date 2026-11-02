@@ -834,6 +834,10 @@
       "path": "apps/reference-dapp/src/server/wallet-portfolio.test.ts",
       "stage": "unit"
     },
+    "app.server.solana-token-amount": {
+      "path": "apps/reference-dapp/src/server/solana-token-amount.test.ts",
+      "stage": "unit"
+    },
     "app.domain.wallet-portfolio": {
       "path": "apps/reference-dapp/src/domain/wallet-portfolio.test.ts",
       "stage": "unit"
@@ -5543,7 +5547,8 @@
         "apps/reference-dapp/src/server/robinhood-rpc.ts",
         "apps/reference-dapp/src/server/solana-asset-catalog.ts",
         "apps/reference-dapp/src/server/solana-rpc.ts",
-        "apps/reference-dapp/src/server/wallet-portfolio.ts"
+        "apps/reference-dapp/src/server/wallet-portfolio.ts",
+        "apps/reference-dapp/src/server/solana-token-amount.ts"
       ],
       "suites": [
         "action-registry.asset-registry",
@@ -5551,7 +5556,8 @@
         "action-registry.execution-capabilities",
         "app.server.provider-boundary",
         "app.server.router-providers",
-        "app.server.wallet-portfolio"
+        "app.server.wallet-portfolio",
+        "app.server.solana-token-amount"
       ],
       "gaps": [
         "Catalog/discovery and offline provider responses do not certify provider uptime or real execution."

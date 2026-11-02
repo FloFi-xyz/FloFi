@@ -29,7 +29,7 @@ export const enabledRuntime: EngineRuntime = Object.freeze({ kind: 'embedded', m
 
 /** A price source the test drives: `set(asset, price, observedAt?)`; `fail(asset, code)`. Evidence MOCKED. */
 export function scriptedPrices(maxAgeMs = 3_600_000) {
-  const values = new Map<ObservedAsset, PriceResult>();
+  const values = new Map<string, PriceResult>();
   const source: PriceSource = { id: 'fixture', maxAgeMs, assets: [...OBSERVED_ASSETS], observe: async asset => values.get(asset) ?? { ok: false, code: 'PRICE_ASSET_UNSUPPORTED' } };
   return { source, calls: [] as string[],
     set(asset: ObservedAsset, priceUsd: string, observedAt: Date) {

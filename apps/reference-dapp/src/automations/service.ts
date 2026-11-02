@@ -133,7 +133,8 @@ export function createAutomationService(deps: ServiceDeps) {
       }
     }
     return { priceSource: deps.price.id, priceEvidence: deps.price.id === 'chainlink' ? 'PUBLIC_READ_ONLY' : deps.price.id === 'fixture' ? 'MOCKED' : null,
-      observable: [...deps.price.assets], routes, unavailable };
+      // A stablecoin feed configured for the Dashboard portfolio is never an automation trigger asset.
+      observable: deps.price.assets.filter((asset): asset is ObservedAsset => (OBSERVED_ASSETS as readonly string[]).includes(asset)), routes, unavailable };
   }
 
   /** The owner's view of one occurrence: its approval state and, once applied, the runs of the owner's own wallet that reviewed exactly it. */

@@ -46,6 +46,16 @@ describe('BUILD-AUTOMATION-001 read-only price sources', () => {
     expect(await s.observe('BTC', NOW)).toEqual({ ok: false, code: 'PRICE_ASSET_UNSUPPORTED' });
   });
 
+  it('observes a stablecoin only from its own verified "<ASSET> / USD" feed, never assuming $1 (Dashboard portfolio)', async () => {
+    const usdc = (description: string) => { const n = node({ description, answer: 99_985_000n });
+      return chainlinkSource({ rpc: readOnlyRpc('https://base.example', n.fetch), feeds: { USDC: FEED }, maxAgeMs: 3_600_000 }); };
+    expect(usdc('USDC / USD').assets).toEqual(['USDC']);
+    expect(await usdc('USDC / USD').observe('USDC', NOW)).toMatchObject({ ok: true, observation: { asset: 'USDC', priceUsd: '0.99985', source: 'CHAINLINK' } });
+    // A feed configured under USDC that describes another market is refused; an asset without a configured feed has no price.
+    expect(await usdc('USDT / USD').observe('USDC', NOW)).toEqual({ ok: false, code: 'PRICE_FEED_MISMATCH' });
+    expect(await usdc('USDC / USD').observe('USDT', NOW)).toEqual({ ok: false, code: 'PRICE_ASSET_UNSUPPORTED' });
+  });
+
   it('fails closed on the wrong chain, a feed that is not the asset’s USD feed, stale or invalid answers and provider failures', async () => {
     expect(await source({ chain: '0x1' }).s.observe('ETH', NOW)).toEqual({ ok: false, code: 'PRICE_SOURCE_WRONG_CHAIN' });
     expect(await source({ description: 'BTC / USD' }).s.observe('ETH', NOW)).toEqual({ ok: false, code: 'PRICE_FEED_MISMATCH' });

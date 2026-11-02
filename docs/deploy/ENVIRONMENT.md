@@ -370,6 +370,28 @@ Release order for this build: deploy the API (Railway) before the web (Vercel). 
 works (chat route discovery falls back to the old call shape), but only the newer API applies the conversational
 discovery window. No migration, schema certificate or credential change is required.
 
+## 5l. Dashboard wallet portfolio (BUILD-FLOFI-CHAT-E2E-DASHBOARD-UX-001, Dashboard → Wallet portfolio)
+
+A read-only snapshot of the connected wallet's balances: no signer, no submission, nothing persisted. Which networks it reads follows the
+deployment's existing flow gates (§3: on a hosted deployment the web asks the API for each network's swap-flow mode; Solana follows Jupiter or
+Solana transfer), so it adds no gate of its own. The reads themselves run **in the Vercel web process** (a server action), with that
+process's environment: set the dedicated RPC endpoints and the price source on the **Vercel web project** (Production, and Preview if wanted),
+not only on the API. Nothing here is set by this build; production configuration is the owner's change.
+
+| Variable | Where | Purpose | Secret | Default without it |
+| --- | --- | --- | --- | --- |
+| `GRYLOO_ETHEREUM_RPC_URL`, `GRYLOO_BASE_RPC_URL`, `GRYLOO_ARBITRUM_RPC_URL`, `GRYLOO_ROBINHOOD_RPC_URL` | Vercel web | Dedicated (keyed) production EVM endpoints, one per chain (§4). The portfolio sends only `eth_chainId`, `eth_blockNumber`, `eth_getCode`, `eth_call` (one Multicall3 `aggregate3` per ≤ 120 listed tokens) and `eth_getBalance`, and verifies the chain id first | yes if keyed (mark Sensitive) | the chain's public endpoint (rate-limited) |
+| `GRYLOO_SOLANA_RPC_URL` | Vercel web | Dedicated Solana mainnet-beta endpoint (genesis-verified). The portfolio sends `getGenesisHash`, `getMultipleAccounts` (owner; listed Token-2022 mints with the Clock sysvar) and `getTokenAccountsByOwner` (SPL Token and Token-2022) | yes if keyed | `https://api.mainnet-beta.solana.com` (rate-limited) |
+| `GRYLOO_RPC_READ_PROFILE` | Vercel web | `dedicated` lets the dedicated endpoints above take parallel reads (§5k) | no | paced one read at a time |
+| `FLOFI_AUTOMATION_PRICE_SOURCE` | Vercel web | `chainlink`: USD values from the existing verified Chainlink source (§5f). Without it the portfolio shows balances and no USD value or total | no | `off` |
+| `FLOFI_AUTOMATION_CHAINLINK_FEEDS` | Vercel web | Base mainnet USD proxy addresses from data.chain.link. The portfolio values `ETH` (ETH, WETH), `SOL` (SOL, WSOL) and, since this build, `USDC` and `USDT` — e.g. `ETH=0x…,SOL=0x…,USDC=0x…,USDT=0x…`. Each feed is verified on-chain before use (chain 8453, `description()` = `<ASSET> / USD`, decimals); a stablecoin is never assumed to be $1. USDC/USDT feeds value only the issuer-canonical contracts (Circle USDC on Ethereum, Base, Arbitrum One and Solana; Tether USDt on Ethereum and Solana); automations never use them as trigger assets | no | — (asset unpriced) |
+| `FLOFI_AUTOMATION_CHAINLINK_RPC_URL` | Vercel web | Keyed Base mainnet endpoint for the feeds (`eth_chainId`, `eth_call` only) | yes if keyed | `GRYLOO_BASE_RPC_URL`, else `https://mainnet.base.org` |
+| `FLOFI_AUTOMATION_PRICE_MAX_AGE_SECONDS` | Vercel web | One maximum age for every feed (also automations'). A feed whose heartbeat is longer than this — check each feed's heartbeat on data.chain.link; stablecoin feeds typically update less often than ETH/USD — is stale between updates and its asset then shows no value | no | `3600` |
+
+Assets outside these feeds (other tokens, Robinhood Stock Tokens, every Token-2022 mint) are listed without a USD value. Solana Token-2022
+balances are shown by each mint's own Scaled UI Amount or Interest-Bearing rules at the cluster time; a mint FloFi cannot interpret is
+listed as unavailable. No migration and no new secret.
+
 ## 6. Platform-provided (read, never set by hand)
 
 `VERCEL` (`1`: hosted), `VERCEL_ENV` (`production`/`preview`/`development`), `VERCEL_GIT_COMMIT_REF` (Preview tenant derivation),

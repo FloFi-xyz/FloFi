@@ -1,14 +1,15 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { describe, expect, it } from 'vitest';
-import type { AssetCatalog, CanonicalAsset } from '@defi-workflow-engine/action-registry';
+import { toChecksumAddress, type AssetCatalog, type CanonicalAsset } from '@defi-workflow-engine/action-registry';
 import { base58Decode, base58Encode, type SolanaRpc } from '@defi-workflow-engine/reference-compiler';
-import type { PriceSource } from '../automations/price-source.ts';
+import type { PriceFeedAsset, PriceSource } from '../automations/price-source.ts';
+import { clockAccount, interestBearing, metadataPointer, scaledUiAmount, token2022Mint } from '../test-utils/token-2022-fixtures.ts';
 import type { SolanaAssetCatalog } from '../domain/solana-asset-catalog.ts';
 import type { PortfolioNetworkId } from '../domain/wallet-portfolio.ts';
 import type { Rpc } from './public-testnet-service.ts';
 import { CATALOG_NETWORKS, type CatalogNetworkId } from './catalog-networks.ts';
-import { decodeAggregate3, encodeAggregate3, MULTICALL3, PORTFOLIO_CHUNK, PORTFOLIO_MAX_TOKENS, portfolioAccounts, readWalletPortfolio, type PortfolioCache,
-  type PortfolioMode, type WalletPortfolioSeams } from './wallet-portfolio.ts';
+import { CANONICAL_STABLECOINS, decodeAggregate3, encodeAggregate3, ETHEREUM_USDT, MULTICALL3, PORTFOLIO_CHUNK, PORTFOLIO_MAX_TOKENS, portfolioAccounts, readWalletPortfolio,
+  type PortfolioCache, type PortfolioMode, type WalletPortfolioSeams } from './wallet-portfolio.ts';
 
 // Everything here is a closed, in-process fake: no test reaches a public RPC, token list or price feed.
 const OWNER = '0x' + 'ab'.repeat(20), NOW = new Date('2026-11-02T12:00:00.000Z');
@@ -74,9 +75,10 @@ function evmRpc(chain: EvmChain, log: { method: string; params: readonly unknown
     throw new Error('PUBLIC_RPC_METHOD_DENIED');
   };
 }
-function prices(values: Partial<Record<'ETH' | 'SOL' | 'BTC', string>>, id: 'fixture' | 'chainlink' = 'fixture'): PriceSource & { observed: string[] } {
+function prices(values: Partial<Record<PriceFeedAsset, string>>, id: 'fixture' | 'chainlink' = 'fixture',
+  assets: readonly PriceFeedAsset[] = ['ETH', 'BTC', 'SOL', 'USDC', 'USDT']): PriceSource & { observed: string[] } {
   const observed: string[] = [];
-  return { id, maxAgeMs: 60_000, assets: ['ETH', 'BTC', 'SOL'], observed, observe: async asset => {
+  return { id, maxAgeMs: 60_000, assets, observed, observe: async asset => {
     observed.push(asset);
     const priceUsd = values[asset];
     return priceUsd ? { ok: true, observation: { asset, priceUsd, observedAt: '2026-11-02T11:59:00.000Z', receivedAt: NOW.toISOString(),
@@ -117,17 +119,48 @@ describe('wallet portfolio: EVM reads through one Multicall3 aggregate', () => {
     const stock = { ...asset('base', 'AAPL', STOCK, 18), stock: { multiplierWad: '2000000000000000000' } as unknown as CanonicalAsset['stock'] };
     const portfolio = await readWalletPortfolio({ evm: OWNER, solana: null }, {}, seams({ modes: { base: 'live' }, catalogs: { base: catalog('base', [stock]) },
       chains: { base: base({ [STOCK]: 3n * 10n ** 18n }) }, prices: prices({ ETH: '3000' }) }));
-    expect(portfolio.holdings.map(h => [h.symbol, h.units, h.price])).toEqual([['AAPL', '6000000000000000000', null]]);
+    // The raw token balance stays canonical; the shown balance is the underlying shares.
+    expect(portfolio.holdings.map(h => [h.symbol, h.units, h.displayUnits, h.displayBasis, h.price])).toEqual([['AAPL', '3000000000000000000', '6000000000000000000', 'STOCK_MULTIPLIER', null]]);
   });
-  it('never prices a stablecoin, or a token that only shares the WETH symbol, and shows no total without a price source', async () => {
+  it('never prices a non-canonical stablecoin, or a token that only shares the WETH symbol, and shows no total without a price source', async () => {
     const tokens = [asset('base', 'USDC', USDC, 6, 'STABLECOIN'), asset('base', 'WETH', FAKE_WETH, 18, 'TOKEN')];
     const priced = await readWalletPortfolio({ evm: OWNER, solana: null }, {}, seams({ modes: { base: 'live' }, catalogs: { base: catalog('base', tokens) },
-      chains: { base: base({ [USDC]: 5_000_000n, [FAKE_WETH]: 10n ** 18n }) }, prices: prices({ ETH: '3000' }) }));
+      chains: { base: base({ [USDC]: 5_000_000n, [FAKE_WETH]: 10n ** 18n }) }, prices: prices({ ETH: '3000', USDC: '1.0001' }) }));
     expect(priced.holdings.map(h => [h.symbol, h.valueUsd, h.price])).toEqual([['USDC', null, null], ['WETH', null, null]]);
     expect(priced).toMatchObject({ pricedTotalUsd: null, unpricedCount: 2, priceSource: 'FIXTURE', mocked: false });
     const none = await readWalletPortfolio({ evm: OWNER, solana: null }, {}, seams({ modes: { base: 'live' }, chains: { base: base({ [WETH]: 10n ** 18n }, 10n ** 18n) } }));
     expect(none).toMatchObject({ pricedTotalUsd: null, priceSource: null, unpricedCount: 2, mocked: false });
     expect(none.holdings.every(h => h.price === null && h.valueUsd === null)).toBe(true);
+  });
+  it('values canonical USDC and USDT only from their own verified feeds, observed only when such a holding exists', async () => {
+    const BASE_USDC = '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913', ETH_USDC = '0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48', BRIDGED_USDT = address(0xb7);
+    const source = prices({ ETH: '3000', USDC: '0.99985', USDT: '1.0002' }, 'chainlink');
+    const portfolio = await readWalletPortfolio({ evm: OWNER, solana: null }, {}, seams({ modes: { base: 'live', ethereum: 'live' }, prices: source,
+      catalogs: { base: catalog('base', [asset('base', 'USDC', BASE_USDC, 6, 'STABLECOIN'), asset('base', 'USDT', BRIDGED_USDT, 6, 'STABLECOIN')]),
+        // A token at the canonical USDC address but with other decimals is not the issuer's token: never valued.
+        ethereum: catalog('ethereum', [asset('ethereum', 'USDT', ETHEREUM_USDT, 6, 'STABLECOIN'), asset('ethereum', 'USDC', ETH_USDC, 18, 'STABLECOIN')]) },
+      chains: { base: base({ [BASE_USDC]: 100_000_000n, [BRIDGED_USDT]: 50_000_000n }),
+        ethereum: { chainId: 1, native: 0n, balances: { [ETHEREUM_USDT]: 2_000_000n, [ETH_USDC]: 10n ** 18n } } } }));
+    const valued = Object.fromEntries(portfolio.holdings.map(h => [`${h.network}:${h.symbol}`, [h.valueUsd, h.price?.usd ?? null]]));
+    expect(valued).toEqual({ 'Base:USDC': ['99.99', '0.99985'], 'Ethereum:USDT': ['2.00', '1.0002'], 'Base:USDT': [null, null], 'Ethereum:USDC': [null, null] });
+    expect(portfolio).toMatchObject({ pricedTotalUsd: '101.99', unpricedCount: 2 });
+    expect([...source.observed].sort()).toEqual(['ETH', 'USDC', 'USDT']);
+    // No canonical stablecoin holding: its feed is never observed. A deployment without the feed leaves the stablecoin unpriced.
+    const quiet = prices({ ETH: '3000', USDC: '1' }, 'chainlink');
+    await readWalletPortfolio({ evm: OWNER, solana: null }, {}, seams({ modes: { base: 'live' }, prices: quiet, chains: { base: base({ [WETH]: 1n }, 1n) } }));
+    expect(quiet.observed).toEqual(['ETH']);
+    const ethOnly = prices({ ETH: '3000' }, 'chainlink', ['ETH', 'SOL']);
+    const noFeed = await readWalletPortfolio({ evm: OWNER, solana: null }, {}, seams({ modes: { base: 'live' }, prices: ethOnly,
+      catalogs: { base: catalog('base', [asset('base', 'USDC', BASE_USDC, 6, 'STABLECOIN')]) }, chains: { base: base({ [BASE_USDC]: 100_000_000n }) } }));
+    expect(noFeed.holdings.map(h => [h.symbol, h.valueUsd, h.price])).toEqual([['USDC', null, null]]);
+    expect(ethOnly.observed).toEqual(['ETH']);
+  });
+  it('knows exactly the issuer-canonical stablecoin contracts and mints', () => {
+    expect(toChecksumAddress(ETHEREUM_USDT)).toBe('0xdAC17F958D2ee523a2206206994597C13D831ec7');
+    expect([...CANONICAL_STABLECOINS].map(([key, value]) => `${key}=${value.asset}/${value.decimals}`).sort()).toEqual([
+      'eip155:1:0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48=USDC/6', 'eip155:1:0xdac17f958d2ee523a2206206994597c13d831ec7=USDT/6',
+      'eip155:42161:0xaf88d065e77c8cc2239327c5edb3a432268e5831=USDC/6', 'eip155:8453:0x833589fcd6edb6e08f4c7c32d4f71b54bda02913=USDC/6',
+      `solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp:${USDC_MINT}=USDC/6`, 'solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp:Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB=USDT/6'].sort());
   });
   it('labels a fixture price and a loopback harness balance as MOCKED test data', async () => {
     const fixture = await readWalletPortfolio({ evm: OWNER, solana: null }, {}, seams({ modes: { base: 'live' }, chains: { base: base({}, 10n ** 18n) }, prices: prices({ ETH: '2000' }) }));
@@ -202,10 +235,30 @@ function solanaCatalog(): SolanaAssetCatalog {
   return { assets: [{ symbol: 'SOL', name: 'Solana', mint: WSOL_MINT, decimals: 9, native: true, logoUrl: null },
     { symbol: 'USDC', name: 'USD Coin', mint: USDC_MINT, decimals: 6, native: false, logoUrl: null }], fetchedAt: NOW.toISOString(), source: 'test', contentSha256: '', excludedRecords: 0 };
 }
-function solanaRpc(options: { genesis?: string; lamports?: number; classic?: unknown[]; token2022?: unknown[] | Error; calls?: string[] }): SolanaRpc {
+/** A Token-2022 account (165 bytes, account type 2, then TLV extensions; ImmutableOwner by default, as associated accounts carry). */
+function token2022Account(mint: string, owner: string, amount: bigint, extensions: readonly { type: number; value: Uint8Array }[] = [{ type: 7, value: new Uint8Array(0) }]): string {
+  const data = new Uint8Array(166 + extensions.reduce((size, extension) => size + 4 + extension.value.length, 0)), view = new DataView(data.buffer);
+  data.set(Buffer.from(tokenAccount(mint, owner, amount), 'base64'), 0); data[165] = 2;
+  let at = 166;
+  for (const { type, value } of extensions) { view.setUint16(at, type, true); view.setUint16(at + 2, value.length, true); data.set(value, at + 4); at += 4 + value.length; }
+  return Buffer.from(data).toString('base64');
+}
+const CLOCK = 'SysvarC1ock11111111111111111111111111111111', CLUSTER_NOW = 1_793_620_000n;
+const wire = (account: { lamports: bigint; owner: string; data: Uint8Array }) => ({ data: [Buffer.from(account.data).toString('base64'), 'base64'], executable: false,
+  lamports: Number(account.lamports), owner: account.owner, rentEpoch: 0 });
+type MintFixture = { readonly data: Uint8Array; readonly owner?: string };
+function solanaRpc(options: { genesis?: string; lamports?: number; classic?: unknown[]; token2022?: unknown[] | Error; calls?: string[];
+  mints?: Record<string, MintFixture>; clockOwner?: string; mintReads?: string[][]; mintError?: Error }): SolanaRpc {
   return async (method, params) => {
     options.calls?.push(method);
     if (method === 'getGenesisHash') return options.genesis ?? MAINNET_GENESIS;
+    if (method === 'getMultipleAccounts' && (params[0] as string[]).includes(CLOCK)) {
+      const keys = params[0] as string[];
+      options.mintReads?.push(keys);
+      if (options.mintError) throw options.mintError;
+      return { context: { slot: 400_000_002 }, value: keys.map(key => key === CLOCK ? wire(clockAccount(CLUSTER_NOW, options.clockOwner))
+        : options.mints?.[key] ? wire({ lamports: 2_000_000n, owner: options.mints[key]!.owner ?? TOKEN_2022, data: options.mints[key]!.data }) : null) };
+    }
     if (method === 'getMultipleAccounts') {
       expect(params[0]).toEqual([SOL_OWNER]);
       return { context: { slot: 400_000_001 }, value: [options.lamports === undefined ? null : { data: ['', 'base64'], executable: false, lamports: options.lamports, owner: '11111111111111111111111111111111', rentEpoch: 0 }] };
@@ -236,15 +289,67 @@ describe('wallet portfolio: Solana reads the owner and its token accounts', () =
       ['USDC', USDC_MINT, '50000000', null], ['WSOL', WSOL_MINT, '1000000000', '150.00']]);
     expect(portfolio).toMatchObject({ unlisted: 1, pricedTotalUsd: '450.00', unpricedCount: 1, priceSource: 'CHAINLINK', mocked: false });
   });
-  // BUILD-FLOFI-CHAT-E2E-DASHBOARD-UX-001 review: a Token-2022 mint may scale its displayed amount (scaled-UI / interest-bearing extensions this
-  // read does not apply), so its balances are counted as not checked — never shown as a raw amount.
-  it('counts Token-2022 balances as not checked (never shown unscaled), and skips and counts an account whose layout cannot be decoded', async () => {
-    const PYUSD = base58Encode(new Uint8Array(32).fill(13)), malformed = Buffer.from(new Uint8Array(170)).toString('base64');
-    const listed: SolanaAssetCatalog = { ...solanaCatalog(), assets: [...solanaCatalog().assets, { symbol: 'PYUSD', name: 'PayPal USD', mint: PYUSD, decimals: 6, native: false, logoUrl: null }] };
+  // BUILD-FLOFI-CHAT-E2E-DASHBOARD-UX-001 (owner decision): a listed Token-2022 mint is shown by its own on-chain rules, read with the
+  // cluster clock in one call; the raw amount stays separate; a mint FloFi cannot interpret is listed as unavailable, alone.
+  it('shows listed Token-2022 balances — standard, Scaled UI Amount and Interest-Bearing — by their mint rules at the cluster time, raw amounts kept', async () => {
+    const STD = base58Encode(new Uint8Array(32).fill(21)), SCALED = base58Encode(new Uint8Array(32).fill(22)), INTEREST = base58Encode(new Uint8Array(32).fill(23));
+    const UNLISTED_2022 = base58Encode(new Uint8Array(32).fill(24)), YEAR = 31_556_736n, mintReads: string[][] = [];
+    const listed: SolanaAssetCatalog = { ...solanaCatalog(), assets: [...solanaCatalog().assets,
+      { symbol: 'PYUSD', name: 'PayPal USD', mint: STD, decimals: 6, native: false, logoUrl: null },
+      { symbol: 'xAAPL', name: 'Apple xStock', mint: SCALED, decimals: 8, native: false, logoUrl: null },
+      { symbol: 'YLD', name: 'Yield token', mint: INTEREST, decimals: 6, native: false, logoUrl: null }] };
     const portfolio = await readWalletPortfolio({ evm: null, solana: SOL_OWNER }, {}, seams({ modes: { solana: 'live' }, solanaCatalog: listed,
-      solana: solanaRpc({ lamports: 0, token2022: [rpcAccount(TOKEN_2022, tokenAccount(PYUSD, SOL_OWNER, 7_000_000n)), rpcAccount(TOKEN_2022, malformed)] }) }));
-    expect(portfolio.holdings).toEqual([]);
-    expect(portfolio.networks[0]).toMatchObject({ tokens: 'PARTIAL', uncheckedTokens: 2, code: 'SOLANA_TOKEN_ACCOUNT_UNREADABLE' });
+      prices: prices({ SOL: '150', USDC: '1' }, 'chainlink'), solana: solanaRpc({ lamports: 0, mintReads, token2022: [
+        rpcAccount(TOKEN_2022, token2022Account(STD, SOL_OWNER, 7_000_000n)), rpcAccount(TOKEN_2022, token2022Account(SCALED, SOL_OWNER, 200_000_000n)),
+        rpcAccount(TOKEN_2022, token2022Account(INTEREST, SOL_OWNER, 1_000_000_000n)), rpcAccount(TOKEN_2022, token2022Account(UNLISTED_2022, SOL_OWNER, 9n))],
+      mints: { [STD]: { data: token2022Mint(6, [metadataPointer()]) }, [SCALED]: { data: token2022Mint(8, [metadataPointer(), scaledUiAmount(1.5, CLUSTER_NOW + 60n, 3)]) },
+        [INTEREST]: { data: token2022Mint(6, [interestBearing(CLUSTER_NOW - YEAR, 0, CLUSTER_NOW - YEAR, 500)]) } } }) }));
+    expect(mintReads).toEqual([[STD, SCALED, INTEREST, CLOCK]]); // the unlisted mint is never read
+    expect(portfolio.holdings.map(h => [h.symbol, h.units, h.displayUnits, h.displayBasis, h.unavailableCode, h.valueUsd])).toEqual([
+      ['PYUSD', '7000000', '7000000', 'RAW', null, null], ['xAAPL', '200000000', '300000000', 'SCALED_UI_AMOUNT', null, null],
+      ['YLD', '1000000000', '1051271096', 'INTEREST_BEARING', null, null]]);
+    expect(portfolio.networks[0]).toMatchObject({ tokens: 'ALL', uncheckedTokens: 0, code: null });
+    expect(portfolio).toMatchObject({ unlisted: 1, pricedTotalUsd: null, unpricedCount: 3 });
+  });
+  it('lists a Token-2022 balance it cannot interpret as unavailable — never as a raw number — and keeps every other asset', async () => {
+    const mint = (n: number) => base58Encode(new Uint8Array(32).fill(n));
+    const [NEXT, ODD, NAN, DECIMALS, CONFIDENTIAL, MISSING] = [31, 32, 33, 34, 35, 36].map(mint) as [string, string, string, string, string, string];
+    const USDT_MINT = 'Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB', mintReads: string[][] = [];
+    const listed: SolanaAssetCatalog = { ...solanaCatalog(), assets: [...solanaCatalog().assets,
+      { symbol: 'USDT', name: 'Tether USD', mint: USDT_MINT, decimals: 6, native: false, logoUrl: null },
+      ...[['NEXT', NEXT], ['ODD', ODD], ['NAN', NAN], ['DEC', DECIMALS], ['CONF', CONFIDENTIAL], ['MISS', MISSING]].map(([symbol, address]) =>
+        ({ symbol: symbol!, name: symbol!, mint: address!, decimals: 6, native: false, logoUrl: null }))] };
+    const account = (address: string, extensions?: { type: number; value: Uint8Array }[]) => rpcAccount(TOKEN_2022, token2022Account(address, SOL_OWNER, 777n, extensions));
+    const portfolio = await readWalletPortfolio({ evm: null, solana: SOL_OWNER }, {}, seams({ modes: { solana: 'live' }, solanaCatalog: listed,
+      prices: prices({ SOL: '150', USDC: '0.9998', USDT: '1.0001' }, 'chainlink'), solana: solanaRpc({ lamports: 1_000_000_000, mintReads,
+        classic: [rpcAccount(TOKEN_PROGRAM, tokenAccount(USDC_MINT, SOL_OWNER, 50_000_000n)), rpcAccount(TOKEN_PROGRAM, tokenAccount(USDT_MINT, SOL_OWNER, 10_000_000n))],
+        token2022: [account(NEXT), account(ODD), account(NAN), account(DECIMALS), account(CONFIDENTIAL, [{ type: 7, value: new Uint8Array(0) }, { type: 5, value: new Uint8Array(8) }]),
+          account(MISSING)],
+        mints: { [NEXT]: { data: token2022Mint(6, [scaledUiAmount(1.5, CLUSTER_NOW, 2)]) }, [ODD]: { data: token2022Mint(6, [{ type: 99, value: new Uint8Array(4) }]) },
+          [NAN]: { data: token2022Mint(6, [scaledUiAmount(Number.NaN, CLUSTER_NOW + 1n, 1)]) }, [DECIMALS]: { data: token2022Mint(9) } } }) }));
+    expect(mintReads).toEqual([[NEXT, ODD, NAN, DECIMALS, MISSING, CLOCK]]); // a confidential account's mint needs no read
+    expect(portfolio.holdings.map(h => [h.symbol, h.units, h.displayUnits, h.unavailableCode, h.valueUsd])).toEqual([
+      ['SOL', '1000000000', '1000000000', null, '150.00'], ['USDC', '50000000', '50000000', null, '49.99'], ['USDT', '10000000', '10000000', null, '10.00'],
+      ['NEXT', '777', '1554', null, null], ['ODD', '777', null, 'SOLANA_TOKEN_EXTENSION_UNSUPPORTED', null], ['NAN', '777', null, 'SOLANA_TOKEN_EXTENSION_INVALID', null],
+      ['DEC', '777', null, 'SOLANA_TOKEN_DECIMALS_MISMATCH', null], ['CONF', '777', null, 'SOLANA_TOKEN_CONFIDENTIAL_BALANCE', null],
+      ['MISS', '777', null, 'SOLANA_TOKEN_MINT_UNAVAILABLE', null]]);
+    expect(portfolio.networks[0]).toMatchObject({ status: 'READ', tokens: 'ALL', code: null });
+    expect(portfolio).toMatchObject({ pricedTotalUsd: '209.99', unpricedCount: 6 });
+  });
+  it('a failed mint read or a foreign clock makes only the Token-2022 rows unavailable; an undecodable account is counted, never shown', async () => {
+    const STD = base58Encode(new Uint8Array(32).fill(41)), malformed = Buffer.from(new Uint8Array(170)).toString('base64');
+    const listed: SolanaAssetCatalog = { ...solanaCatalog(), assets: [...solanaCatalog().assets, { symbol: 'STD', name: 'Standard', mint: STD, decimals: 6, native: false, logoUrl: null }] };
+    const read = (options: Parameters<typeof solanaRpc>[0]) => readWalletPortfolio({ evm: null, solana: SOL_OWNER }, {}, seams({ modes: { solana: 'live' }, solanaCatalog: listed,
+      solana: solanaRpc({ lamports: 5, classic: [rpcAccount(TOKEN_PROGRAM, tokenAccount(USDC_MINT, SOL_OWNER, 1n))],
+        token2022: [rpcAccount(TOKEN_2022, token2022Account(STD, SOL_OWNER, 3n))], mints: { [STD]: { data: token2022Mint(6) } }, ...options }) }));
+    const failed = await read({ mintError: new Error('SOLANA_RPC_RATE_LIMITED') });
+    expect(failed.holdings.map(h => [h.symbol, h.displayUnits, h.unavailableCode])).toEqual([['SOL', '5', null], ['USDC', '1', null], ['STD', null, 'SOLANA_RPC_RATE_LIMITED']]);
+    expect(failed.networks[0]).toMatchObject({ status: 'READ', tokens: 'ALL' });
+    const foreignClock = await read({ clockOwner: base58Encode(new Uint8Array(32).fill(1)) });
+    expect(foreignClock.holdings.find(h => h.symbol === 'STD')).toMatchObject({ displayUnits: null, unavailableCode: 'SOLANA_CLOCK_UNAVAILABLE' });
+    const undecodable = await read({ token2022: [rpcAccount(TOKEN_2022, malformed)] });
+    expect(undecodable.holdings.map(h => h.symbol)).toEqual(['SOL', 'USDC']);
+    expect(undecodable.networks[0]).toMatchObject({ tokens: 'PARTIAL', uncheckedTokens: 1, code: 'SOLANA_TOKEN_ACCOUNT_UNREADABLE' });
   });
   it('keeps SOL when one token program fails, and refuses a response for another owner', async () => {
     const partial = await readWalletPortfolio({ evm: null, solana: SOL_OWNER }, {}, seams({ modes: { solana: 'live' },

@@ -60,14 +60,40 @@ transaction history exists. The widget therefore adds one read-only path and sho
 | --- | --- |
 | `src/server/wallet-portfolio.ts` | `readWalletPortfolio({ evm, solana })`. Networks: Ethereum, Base, Arbitrum One and Robinhood Chain for an EVM wallet, Solana mainnet-beta for a Solana wallet — each read only where the deployment enables it (the same gate as its swap/transfer flow; a loopback harness is `MOCKED` test data and a hosted deployment never reads one). EVM: chain-id check, one pinned block, Multicall3 code check, `aggregate3` of `balanceOf` over the network's validated official token list (≤ 120 per call, ≤ 600 tokens) plus the native balance; without Multicall3 only the native balance (`eth_getBalance`) and the network says token balances could not be read. Solana: cluster check, owner account, SPL and Token-2022 accounts; mints outside the Jupiter verified list are counted ("N unlisted tokens not shown"), never shown or valued. Each network fails alone; 12 s budget; 30 s cache (5 s when a network was unavailable). No signer, session, submission or persistence. |
 | `src/app/portfolio-action.ts` | Server action; closed error codes; a per-process admission window (4 concurrent, 120 per minute) bounds the RPC reads any caller can cause. |
-| `src/domain/wallet-portfolio.ts` | Types, address checks, exact EN/PT amount and USD formatting, sorting, summary and network breakdown. |
+| `src/domain/wallet-portfolio.ts` | Types (`flofi.wallet-portfolio.v2`: each holding keeps the canonical raw `units` apart from the shown `displayUnits`, its `displayBasis` and, when it cannot be shown, `unavailableCode`), address checks, exact EN/PT amount and USD formatting, sorting by the shown balance, summary and network breakdown. |
+| `src/server/solana-token-amount.ts` | Owner decision (§2.6): the shown balance of a listed Solana Token-2022 mint from the mint's own extensions at the cluster's Clock time — Scaled UI Amount (current multiplier, switching to the new one at its effective time) and Interest-Bearing (the token program's continuous-compounding formula: pre-update average rate, then the current rate since the last update, 365.24-day year, basis points); IEEE-754 doubles as the program uses, truncated to a base unit. Fails closed per token: missing/foreign/malformed/uninitialized mint, an unclassified extension or both scaling extensions, a non-finite or non-positive multiplier, an unrepresentable amount, or a confidential account balance. |
 | `src/components/dashboard/portfolio-widget.tsx` (+ CSS module) | Compact card (priced total or holdings count, proportional bar of the priced holdings, top holdings, networks read, Refresh); the card expands in place (`aria-expanded`) into the wallet identity (short address, ecosystem, copy), the networks read with status and provenance, and an **Assets** table (asset, network, balance, price, value; “—” where no price), with the price source and observation time. Transactions, DeFi positions and perpetuals are not shown — FloFi has no verified source for them — and the widget says so, pointing to Your workflows for FloFi's own executions. |
 | `src/i18n/pt-portfolio.ts` | PT entries (spread first, so existing translations keep precedence). |
 
-**Prices.** The only USD source is the deployment's verified price source (`deploymentPriceSource`: Chainlink USD feeds on Base, or the MOCKED
-fixture in tests), applied only to native ETH/SOL and the canonical wrapped WETH/WSOL. A stablecoin is never assumed to be worth $1 and no
-other asset is valued. The total is “Priced holdings” with the count of holdings that have no price; with no price source configured no USD
-figure appears anywhere and the widget says values are unavailable on this deployment.
+**Prices.** The only USD source is the deployment's verified price source (`deploymentPriceSource`: Chainlink USD feeds on Base, each verified
+on-chain as `<ASSET> / USD`, or the MOCKED fixture in tests). It values native ETH/SOL and the canonical wrapped WETH/WSOL and — owner decision
+(§2.6) — USDC and USDT, each from its own feed and only at the issuer-canonical contract or mint with the issuer's decimals
+(`CANONICAL_STABLECOINS`: Circle USDC as FloFi pins it on Ethereum, Base and Arbitrum One and the Solana USDC mint; Tether USDt on Ethereum and
+the Solana USDT mint). A stablecoin is never assumed to be worth $1; a bridged copy, a token that only shares the symbol, USDG, stock tokens
+and every Token-2022 mint stay unpriced. A stablecoin feed is observed only when such a holding was found. The total is “Priced holdings”
+with the count of holdings that have no price; with no price source configured no USD figure appears anywhere and the widget says values
+are unavailable on this deployment.
+
+**Balances.** The raw on-chain amount is always kept as the canonical balance; the table shows the balance the asset's own rules define (a
+Stock Token's underlying shares, a Token-2022 scaled or accrued amount) with a short note, and the raw amount in the cell's title. A balance
+that cannot be interpreted safely is listed as **Unavailable** with its reason — never as a number — and every other asset is unaffected.
+
+### 2.6 Owner decisions on PR #155 (follow-up in this PR)
+
+1. **Delete through a signed-in account:** no mandatory fresh sign-in for an already valid session. Kept as built: Delete asks for explicit
+   confirmation (“Delete permanently?”), the server verifies ownership of the record (`historyPrincipals`) and the financial-record deletion
+   restrictions are unchanged (a record with financial activity can only be archived).
+2. **Later wallets:** no second blocking modal; learning for a wallet that appears later stays off until enabled for that wallet; consent is
+   never inherited. Kept as built: under the opt-in basis a wallet without its own setting is not permitted (`automaticPermitted('CONSENT',
+   null) === false`), and the notice's agreement is applied once, to the wallet available when it is given (`learningAgree`). Under a
+   deployment's legitimate-interest basis the existing per-wallet objection on the Privacy page is unchanged.
+3. **Portfolio pricing:** verified Chainlink pricing; canonical USDC/USDT where verified feeds are available; never $1, never an invented
+   total; unsupported assets unpriced. Implemented (`price-source.ts` `PRICE_FEED_ASSETS` adds USDC/USDT feeds, each still verified on-chain;
+   automations keep their trigger assets ETH/BTC/SOL; `wallet-portfolio.ts` `CANONICAL_STABLECOINS`).
+4. **Infrastructure:** dedicated production RPCs and the existing verified price source; the required Vercel variables are documented in
+   [ENVIRONMENT.md §5l](../deploy/ENVIRONMENT.md); no production configuration was changed.
+5. **Token-2022 (not deferred):** implemented as described in §2.5 (Scaled UI Amount, Interest-Bearing, raw and shown amounts separate,
+   unavailable per token, never valued).
 
 ## 3. Tests
 
@@ -80,6 +106,23 @@ Intentional test changes (none weakened; nothing skipped):
   control; reopen buttons carry the saved name.
 - Browser suites visit as a returning visitor who answered the notice “not now” (`answeredPrivacyNotice` in every Playwright config and custom
   context); `privacy-notice.spec.ts` removes the answer and covers first access.
+
+- Owner-decision follow-up: the portfolio test that expected Token-2022 balances to be counted as not checked now expects them shown by their
+  mint rules (the owner's decision); the Stock Token test asserts the raw balance and the shown underlying shares separately; the price-note
+  copy names the verified-feed rule. The dashboard workspace acceptance harness now routes like the product router (the `#from-workflows`
+  fragment is not part of the run id), which the records-mode detail test needed. `acceptance-workflows.spec.ts` asserts the pt-BR empty
+  library copy (“Nenhum workflow salvo aguardando.”) that the review follow-up introduced.
+- New: `solana-token-amount.test.ts` (standard Token-2022 including amounts beyond 2^53, Scaled UI Amount before/at its effective time and
+  truncation, Interest-Bearing at 5 % for a year and with a rate change, zero rate, every fail-closed case, account extensions, Clock
+  sysvar); portfolio tests for Token-2022 holdings end to end (one mint read with the clock, unlisted mints never read, unavailable rows next to
+  priced SOL/USDC/USDT, failed mint read, foreign clock, undecodable account) and for canonical USDC/USDT pricing (non-canonical contracts and
+  wrong decimals unpriced, feeds observed only when needed, no feed → unpriced); Chainlink USDC feed verification; feed parsing; widget
+  rows for scaled and unavailable balances (EN/PT).
+- New browser test (owner request): `owner-history.spec.ts` — a signed-in **email account** that holds the wallet sees its history in Your
+  workflows and opens the record with no wallet-proof signature and no signing request; another email account with the same wallet connected
+  in another browser does not; after sign-out (session revoked) the same browser does not. The session is created by the account store as
+  an email sign-in creates it and its cookie sealed with the run's deployment secret as the sign-in route seals it
+  (`playwright.owner-history.config.ts` now generates that secret per run); the email-code screens are covered by `auth-wallets.spec.ts`.
 
 Results: see §5.
 
@@ -112,7 +155,7 @@ flofi-security, flofi-data-privacy, flofi-workflow. Batch 2: flofi-chat, flofi-f
 | frontend-ux MEDIUM/LOW: PT pt-PT forms; modal description; Continue before the basis is known; Privacy page not refreshed after an agreement; table keyboard access; “Copied” never reset; non-deterministic e2e branch | Fixed (pt-BR copy; `aria-describedby`; Continue waits for the basis; the page listens for the change; focusable table region; the copy state resets and is announced; the spec asserts the default profile's state). |
 | frontend-ux LOW: the whole portfolio card is the disclosure button; `<h2>` inside `<summary>` | Left as is (documented). |
 | protocol MEDIUM: per-read RPC clients and an admission slot taken before the cache | Fixed: one paced client per network for the process; a cached snapshot answers without an admission slot; the admission window is 2 concurrent / 60 per minute. |
-| protocol MEDIUM: multiplier tokens shown in raw units | Fixed: Robinhood Stock Tokens are shown in underlying shares (official ERC-8056 multiplier); Token-2022 balances (a mint may scale its UI amount) are counted as not checked, never shown raw. Tests. |
+| protocol MEDIUM: multiplier tokens shown in raw units | Fixed: Robinhood Stock Tokens are shown in underlying shares (official ERC-8056 multiplier). Token-2022 balances were first counted as not checked; superseded by the owner's decision (§2.6): they are shown by their own mint rules, with the raw amount kept. Tests. |
 | protocol LOW: slow catalog loses a read native balance; lagging node; Solana slot pinning; PARTIAL cached 30 s; failed gate labelled NOT_ENABLED; list decimals trusted | Left as is (documented); each fails toward “unavailable” or an incomplete-but-labelled snapshot, never a fabricated value. |
 
 ## 5. Validation
