@@ -5,6 +5,7 @@ import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { test as forkTest, expect, forkRpc } from './mode-a-fixtures';
 import { LIQUIDITY_FACTORY, LIQUIDITY_USDC, LIQUIDITY_WETH, POSITION_MANAGER } from '@defi-workflow-engine/reference-compiler';
+import { openEditorSection } from './build-entry-navigation';
 export { expect, forkRpc };
 export type LiquidityFixture = { owner: string; pool: string; tick: number; lower: number; upper: number; journalDir: string };
 const addressWord = (value: string) => value.slice(2).padStart(64, '0');
@@ -42,7 +43,7 @@ export const test = forkTest.extend<{ liquidity: LiquidityFixture }>({
   },
 });
 export async function authorLiquidity(page: import('@playwright/test').Page, fixture: LiquidityFixture): Promise<void> {
-  await page.getByRole('navigation', { name: 'Workflow stages' }).getByRole('button', { name: 'Build', exact: true }).click();
+  await openEditorSection(page, 'Build');
   await page.getByText('Advanced action setup', { exact: true }).click();
   const form = page.getByRole('form', { name: 'Create or edit Base liquidity proposal' });
   await form.getByLabel('Maximum WETH').fill('0.1');

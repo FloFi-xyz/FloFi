@@ -3445,6 +3445,7 @@
         "apps/reference-dapp/src/i18n/pt-bridges.ts",
         "apps/reference-dapp/src/i18n/pt-build-entry.ts",
         "apps/reference-dapp/src/i18n/pt-chat-e2e-fix.ts",
+        "apps/reference-dapp/src/i18n/pt-chat-editor.ts",
         "apps/reference-dapp/src/i18n/pt-concurrency.ts",
         "apps/reference-dapp/src/i18n/pt-conversation.ts",
         "apps/reference-dapp/src/i18n/pt-cross-chain.ts",

@@ -86,9 +86,9 @@ export function SimulateWorkflowCanvas({ workflowName, primaryAction, stage = 's
         <DarkSpotlight/>
         <CanvasNavigator fitViewOptions={{ padding: FIT_PADDING }} compactBelow={1024}/>
       </ReactFlow>
-      {nodes.length === 0 && <div className="simulation-workflow-empty"><strong>{tr(incomplete ? 'Check your workflow' : 'Add an action to your workflow')}</strong><p>{tr(incomplete ? stage === 'execute' ? 'Complete its configuration in Build before executing.' : 'Complete its configuration in Build before simulating.' : stage === 'execute' ? 'Create a workflow in Build first.' : 'Create your strategy in Build, then return here to simulate it.')}</p></div>}
+      {nodes.length === 0 && <div className="simulation-workflow-empty"><strong>{tr(incomplete ? 'Check your workflow' : 'Add an action to your workflow')}</strong><p>{tr(incomplete ? stage === 'execute' ? 'Complete its configuration on the Canvas before executing.' : 'Complete its configuration on the Canvas before simulating.' : stage === 'execute' ? 'Create a workflow in the Editor first.' : 'Create your strategy on the Canvas, then return here to simulate it.')}</p></div>}
       {primaryAction && <div className="canvas-primary-action simulation-canvas-actions">{primaryAction}</div>}
     </div>
-    <div className="canvas-foot"><span>{tr(stage === 'execute' ? 'Execution plan' : 'Workflow preview')}</span><span>{tr("Configured in Build")}</span></div>
+    <div className="canvas-foot"><span>{tr(stage === 'execute' ? 'Execution plan' : 'Workflow preview')}</span><span>{tr("Configured on the Canvas")}</span></div>
   </section>;
 }

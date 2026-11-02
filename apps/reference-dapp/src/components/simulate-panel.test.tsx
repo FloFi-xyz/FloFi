@@ -40,7 +40,7 @@ describe('Simulate control presentation', () => {
     const html = render();
     expect(html).not.toMatch(/simulate-details-toggle|Show technical details|Hide technical details/);
     expect(html).not.toMatch(/>SIMULATE<|<h2>Simulation<\/h2>/);
-    expect(html).toContain('class="simulation-back">Back to Build</button>');
+    expect(html).toContain('class="simulation-back">Back to the Canvas</button>');
     expect(html).toContain('aria-label="Simulation Summary"');
     expect(html.indexOf('Add a Base swap')).toBeGreaterThan(html.indexOf('simulation-technical'));
     expect(html.indexOf('simulation-technical')).toBeGreaterThan(html.indexOf('simulate-workspace-grid'));

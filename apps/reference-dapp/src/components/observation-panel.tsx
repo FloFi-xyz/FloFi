@@ -68,7 +68,7 @@ export function ObservationPanel() {
       <span className="observation-badge">{tr("NOT EVIDENCE · NOT AN AUTHORIZATION INPUT")}</span>
     </div>
     <p className="observation-disclosure">{tr("A read sends the token pair, exact input amount and server IP to Alchemy (")}{tr(BASE_OBSERVATION_PROFILE.providerHost)}{tr("). The API key stays on the local server; no wallet address or browser cookie is sent.")}</p>
-    {rows.length === 0 ? <div className="simulate-empty"><strong>{tr("No Base swap to read")}</strong><p>{tr("Add a Base swap in Build before reading a Base quote.")}</p></div>
+    {rows.length === 0 ? <div className="simulate-empty"><strong>{tr("No Base swap to read")}</strong><p>{tr("Add a Base swap in the Editor before reading a Base quote.")}</p></div>
       : rows.map(row => {
         const view = row.current ? observationView(row.current, context) : null;
         const record = row.current;

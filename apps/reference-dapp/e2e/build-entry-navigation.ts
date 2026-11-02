@@ -26,3 +26,45 @@ export async function reloadBuilder(page: Page): Promise<void> {
   await page.reload();
   await continueToBuilder(page);
 }
+
+/**
+ * BUILD-FLOFI-CHAT-EDITOR-UX-001: the navigation is Dashboard | Chat | Editor. Chat is the intent entry (the former Build 0) and the Editor is the
+ * former Build 1 (Canvas and side chat). Simulate and Execute are no longer tabs: they are the Editor's simulation/Review and execution sections,
+ * reached through the Canvas lifecycle action (as before) or opened from the Editor's footer. Each section is named by its `main` landmark.
+ */
+export const stagesNavigation = (page: Page) => page.getByRole('navigation', { name: 'Workflow stages' });
+export const EDITOR_SECTION_WORKSPACES = { Build: 'Workflow workspace', Simulate: 'Simulation workspace', Execute: 'Execution workspace' } as const;
+export type EditorSection = keyof typeof EDITOR_SECTION_WORKSPACES;
+const EDITOR_SECTION_ACTIONS = { Simulate: 'View simulation', Execute: 'View execution' } as const;
+export const editorTab = (page: Page) => stagesNavigation(page).getByRole('button', { name: 'Editor', exact: true });
+export const chatTab = (page: Page) => stagesNavigation(page).getByRole('button', { name: 'Chat', exact: true });
+export const editorSectionWorkspace = (page: Page, section: EditorSection) => page.getByRole('main', { name: EDITOR_SECTION_WORKSPACES[section], exact: true });
+/** The Editor footer's control for a section (offered on the Canvas, and for execution on the simulation section). */
+export const editorSectionAction = (page: Page, section: Exclude<EditorSection, 'Build'>) =>
+  page.locator('footer.summary-bar').getByRole('button', { name: EDITOR_SECTION_ACTIONS[section], exact: true });
+/**
+ * Opens an Editor section the way an owner does where the former Simulate or Execute tab was clicked: the Editor tab opens the Canvas; the
+ * footer opens the simulation or execution section. Nothing is simulated, accepted or signed by this navigation.
+ */
+export async function openEditorSection(page: Page, section: EditorSection): Promise<void> {
+  if (section === 'Build') { await editorTab(page).click(); return; }
+  if (await editorSectionWorkspace(page, section).count()) return;
+  const action = editorSectionAction(page, section);
+  if (!(await action.count())) await editorTab(page).click();
+  await action.click();
+}
+/** The Editor is the current navigation item and the named section is the one in view. */
+export async function expectEditorSection(page: Page, section: EditorSection, options?: { timeout?: number }): Promise<void> {
+  await expect(editorTab(page)).toHaveAttribute('aria-current', 'page', options);
+  await expect(editorSectionWorkspace(page, section)).toBeVisible(options);
+}
+/** Where a spec walked the former Dashboard / Build / Simulate / Execute tabs: Dashboard stays a tab; the others are the Editor's sections. */
+export type ProductSection = EditorSection | 'Dashboard';
+export async function openProductSection(page: Page, section: ProductSection): Promise<void> {
+  if (section === 'Dashboard') await stagesNavigation(page).getByRole('button', { name: 'Dashboard', exact: true }).click();
+  else await openEditorSection(page, section);
+}
+export async function expectProductSection(page: Page, section: ProductSection): Promise<void> {
+  if (section === 'Dashboard') await expect(stagesNavigation(page).getByRole('button', { name: 'Dashboard', exact: true })).toHaveAttribute('aria-current', 'page');
+  else await expectEditorSection(page, section);
+}

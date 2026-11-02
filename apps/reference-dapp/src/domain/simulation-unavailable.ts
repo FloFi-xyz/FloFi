@@ -4,7 +4,7 @@ import { simulationError } from './simulation-presentation';
 export function simulationUnavailableReason(facts: {
   incomplete: boolean; unsupported: boolean; walletRequired: boolean; providerUnavailable: boolean; staleQuote: boolean; error?: string | null;
 }): string | null {
-  if (facts.incomplete) return 'Complete the amount, assets, networks and recipient in Build before simulating.';
+  if (facts.incomplete) return 'Complete the amount, assets, networks and recipient on the Canvas before simulating.';
   if (facts.unsupported) return 'This workflow has no supported simulation route on the selected public mainnets.';
   if (facts.walletRequired) return 'Connect the wallet required for this workflow before simulating.';
   if (facts.error) return simulationError(facts.error);

@@ -10,9 +10,9 @@ import { createBackend, type FlowResult } from '../backend/app';
 import type { RouterBegin, RouterRecord } from '../src/server/router-service';
 import { createTestWallet, type TestWallet } from '../../../packages/reference-reconciler/test/test-wallet';
 import { installJourneyWallet, resetJourneyHarness, journeySends, switchAccount, walletRequests, setWalletChain } from './journey-fixtures';
-import { continueToBuilder, openBuilder, reloadBuilder } from './build-entry-navigation';
+import { continueToBuilder, type EditorSection, openBuilder, openEditorSection, reloadBuilder } from './build-entry-navigation';
 
-const stage = (page: Page, name: string) => page.getByRole('navigation', { name: 'Workflow stages' }).getByRole('button', { name, exact: true }).click();
+const stage = (page: Page, name: EditorSection) => openEditorSection(page, name);
 async function author(page: Page) {
   await sendChatCommand(page, 'Bridge 1 USDC from Base Sepolia to Arbitrum Sepolia');
 

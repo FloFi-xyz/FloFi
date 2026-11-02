@@ -22,7 +22,7 @@ describe('Execute product workspace', () => {
     expect(html).not.toMatch(/disabled="">Authorize in wallet/); expect(data.execution.start).not.toHaveBeenCalled();
     expect(html.match(/>Authorize in wallet</g)).toHaveLength(1);
     expect(html).not.toMatch(/Advanced Settings|Undo|Redo|Token selector|Execution limits|Strategy Manifest|schemaVersion|digest|canonical|mock|payload/);
-    expect(html).toContain('Back to Build'); expect(html).toContain('Back to Simulate');
+    expect(html).toContain('Back to the Canvas'); expect(html).toContain('Back to simulation');
     expect(html).not.toContain('execution-authorization-attention');
     expect(html).not.toMatch(/execute-heading|>EXECUTE<|Run your workflow|Check the plan and connected wallet before starting/);
   });
@@ -89,7 +89,7 @@ describe('live execution workspace', () => {
   it('retains navigation without implying cancellation and exposes an explicit next action', () => {
     const data = live('CONFIRMED', true); data.authorization.ready = false; data.execution.next = vi.fn(); data.execution.nextLabel = 'Continue to swap';
     const html = render(data); expect(html).toContain('>Continue to swap</button>'); expect(html).not.toMatch(/disabled="">Continue to swap/);
-    expect(html).toContain('Back to Build'); expect(html).toContain('Back to Simulate'); expect(data.execution.next).not.toHaveBeenCalled();
+    expect(html).toContain('Back to the Canvas'); expect(html).toContain('Back to simulation'); expect(data.execution.next).not.toHaveBeenCalled();
     data.wallet.changed = true; expect(render(data)).not.toContain('>Continue to swap</button>');
   });
   it('gives the available status check primary emphasis without a disabled progress action', () => {
@@ -144,8 +144,8 @@ describe('live execution workspace', () => {
 it('places the ordered Execute action pair inside the canvas and keeps the summary informational', () => {
   const data = fixture(), html = render(data), summary = html.slice(html.indexOf('<aside'), html.indexOf('</aside>'));
   const canvas = html.slice(html.indexOf('aria-label="Execution plan"'), html.indexOf('<aside'));
-  expect(canvas).toContain('>Back to Build</button>'); expect(canvas).toContain('>Authorize in wallet</button>');
-  expect(canvas.indexOf('Back to Build')).toBeLessThan(canvas.indexOf('Authorize in wallet'));
+  expect(canvas).toContain('>Back to the Canvas</button>'); expect(canvas).toContain('>Authorize in wallet</button>');
+  expect(canvas.indexOf('Back to the Canvas')).toBeLessThan(canvas.indexOf('Authorize in wallet'));
   expect(summary).not.toContain('>Authorize in wallet</button>'); expect(data.execution.start).not.toHaveBeenCalled();
 });
 
@@ -189,11 +189,11 @@ describe('UX-003 / UX-004 processing CTA and Create new workflow (presentation o
     expect(canvas).not.toContain('role="status" data-lifecycle-action="status"');
   });
   it.each([['CONFIRMED', 'Execution completed'], ['REVERTED', 'Execution failed'], ['REJECTED', 'Transaction not submitted']] as const)(
-    'offers Create new workflow beside Return to Build after the final result %s', (state, label) => {
+    'offers Create new workflow beside Return to the Canvas after the final result %s', (state, label) => {
       const data = recorded(state), html = render(data);
       expect(html).toContain(label);
       expect(html).toContain('class="primary execute-new-workflow">Create new workflow</button>');
-      expect(html.indexOf('Create new workflow')).toBeLessThan(html.indexOf('>Return to Build</button>'));
+      expect(html.indexOf('Create new workflow')).toBeLessThan(html.indexOf('>Return to the Canvas</button>'));
       expect(data.startNewWorkflow).not.toHaveBeenCalled(); expect(data.backToBuild).not.toHaveBeenCalled();
     });
   it.each(['UNKNOWN', 'PENDING', 'HASH'] as const)('never offers Create new workflow while the run is %s (recovery stays in place)', state => {
@@ -201,6 +201,6 @@ describe('UX-003 / UX-004 processing CTA and Create new workflow (presentation o
   });
   it('omits Create new workflow where the shell does not provide it', () => {
     const data: ExecuteWorkspaceProps = recorded('CONFIRMED'); delete data.startNewWorkflow;
-    expect(render(data)).not.toContain('Create new workflow'); expect(render(data)).toContain('>Return to Build</button>');
+    expect(render(data)).not.toContain('Create new workflow'); expect(render(data)).toContain('>Return to the Canvas</button>');
   });
 });

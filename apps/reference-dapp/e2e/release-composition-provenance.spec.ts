@@ -2,6 +2,7 @@
 import { test, expect, sendChatCommand, openSimulationDetails, assertNoFinancialCanvasAction, AUTHORIZE_IN_WALLET } from './fixtures';
 import { profile, fork, snapshot } from './composition-fixtures';
 import { assertExecutionBlocked } from './release-safety-fixtures';
+import { openEditorSection } from './build-entry-navigation';
 
 test('Pinned local composition requires shared Review without automatically installing or executing', async ({ page }) => {
   const p = profile();
@@ -25,7 +26,7 @@ test('Pinned local composition requires shared Review without automatically inst
     });
     await page.goto('/__engineering');
     await sendChatCommand(page, `compose swap 400 USDC to WETH slippage 100 bps then mint maximum 0.1 WETH and 200 USDC minimum 0.000001 WETH and 0.001 USDC ticks ${center - 100} to ${center + 100} safe ${p.safe}`);
-    await page.getByRole('button', { name: 'Simulate', exact: true }).click();
+    await openEditorSection(page, 'Simulate');
     await openSimulationDetails(page);
     const panel = page.getByRole('region', { name: 'Mode B swap to liquidity composition', exact: true });
     await panel.getByRole('button', { name: 'Prepare chained review', exact: true }).click();
@@ -37,17 +38,17 @@ test('Pinned local composition requires shared Review without automatically inst
     await expect(authorize).toHaveAttribute('data-lifecycle-action', 'approve');
     await expect(page.getByRole('region', { name: 'Authorization technical details', exact: true })).toContainText('Strategy Manifest');
     // Before that action, Execute offers only the same unaccepted Review: nothing is executable, evidenced or requested.
-    await page.getByRole('navigation', { name: 'Workflow stages' }).getByRole('button', { name: 'Execute', exact: true }).click();
+    await openEditorSection(page, 'Execute');
     await expect(page.locator('.canvas-primary-action button[data-lifecycle-action="execute"]:enabled, .canvas-primary-action button[data-lifecycle-action="continue"]:enabled')).toHaveCount(0);
     await expect(page.getByRole('link', { name: /Download.*Evidence Bundle/ })).toHaveCount(0);
     await expect(page.getByRole('heading', { name: 'Result Summary', exact: true })).toHaveCount(0);
     expect(await requests()).toBe(0);
-    await page.getByRole('navigation', { name: 'Workflow stages' }).getByRole('button', { name: 'Simulate', exact: true }).click();
+    await openEditorSection(page, 'Simulate');
     // Authorize accepts the Review; this runtime has no connected execution wallet, so no wallet request follows.
     await authorize.click();
     await expect(page.locator('.canvas-primary-action button[data-lifecycle-action="execute"]')).toBeDisabled();
     expect(await requests()).toBe(0);
-    await page.getByRole('navigation', { name: 'Workflow stages' }).getByRole('button', { name: 'Execute', exact: true }).click();
+    await openEditorSection(page, 'Execute');
     // Shared Review must not silently connect the execution wallet or install
     // delegated authority. The passive global wallet is insufficient.
     await assertNoFinancialCanvasAction(page);

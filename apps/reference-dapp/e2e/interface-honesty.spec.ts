@@ -1,22 +1,22 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { test, expect, openSimulationDetails, assertNoFinancialCanvasAction } from './fixtures';
-import { openBuilder } from './build-entry-navigation';
+import { openBuilder, openEditorSection } from './build-entry-navigation';
 
 test('shows honest authorization and unavailable stage states', async ({ page }) => {
   await openBuilder(page);
   await expect(page.getByText('Demo mode', { exact: true })).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'Simulate workflow' })).toBeDisabled();
-  await page.getByRole('button', { name: 'Simulate', exact: true }).click();
+  await openEditorSection(page, 'Simulate');
   await openSimulationDetails(page);
   await expect(page.locator('.simulation-technical .engineering-artifacts > .simulate-head')).toContainText('Mocked artifacts cannot authorize execution.');
-  await expect(page.locator('.simulation-technical')).toContainText('Add a Base swap in Build before generating mocked artifacts.');
+  await expect(page.locator('.simulation-technical')).toContainText('Add a Base swap in the Editor before generating mocked artifacts.');
   await expect(page.locator('.simulation-technical')).toContainText('USD values: not modeled.');
   await expect(page.getByRole('region', { name: 'Review & Authorization' })).toContainText('Review unavailable until simulation is ready.');
   await expect(page.getByRole('button', { name: 'Authorize in wallet' })).toHaveCount(0);
-  await page.getByRole('button', { name: 'Execute', exact: true }).click();
+  await openEditorSection(page, 'Execute');
   await assertNoFinancialCanvasAction(page);
   await expect(page.getByRole('region', { name: 'Workflow execution workspace' })).toContainText('No workflow ready to execute');
-  await expect(page.getByRole('button', { name: 'Create a workflow in Build', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Create a workflow in the Editor', exact: true })).toBeVisible();
 });
 
 test('provides semantic landmarks, labelled controls and keyboard access', async ({ page }) => {
@@ -51,14 +51,14 @@ test('labels the local fork honestly and enables no execution without a reviewed
   await banner.getByText('Technical connection details', { exact: true }).click();
   await expect(banner.getByText(/^Local fork · (MOCKED|FORK_REPRODUCED)$/)).toBeVisible();
   await expect(banner).toContainText('EVM Default: injected · not connected');
-  await page.getByRole('button', { name: 'Simulate', exact: true }).click();
+  await openEditorSection(page, 'Simulate');
   await openSimulationDetails(page);
   const fork = page.getByRole('region', { name: 'Local fork Mode A simulation' });
   await expect(fork).toContainText('Local-fork Mode A needs exactly one USDC/WETH swap in the workflow.');
   await expect(fork.getByRole('button', { name: 'Simulate on local fork for revision 0' })).toBeDisabled();
   await expect(page.getByRole('region', { name: 'Review & Authorization' })).toContainText('Review unavailable until simulation is ready.');
   await expect(page.getByRole('button', { name: 'Authorize in wallet' })).toHaveCount(0);
-  await page.getByRole('button', { name: 'Execute', exact: true }).click();
+  await openEditorSection(page, 'Execute');
   await assertNoFinancialCanvasAction(page);
   await expect(page.getByRole('region', { name: 'Workflow execution workspace' })).toContainText('No workflow ready to execute');
   await expect(page.getByRole('region', { name: 'Mode A execution' })).toHaveCount(0);

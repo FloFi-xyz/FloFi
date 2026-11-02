@@ -39,7 +39,7 @@ const OUTCOME_LABEL: Readonly<Record<string, string>> = {
   CONDITION_STILL_MET: 'Condition still met — no new proposal', REARMED: 'Condition cleared — watching again', COOLDOWN: 'Crossing during the cooldown — no proposal',
   LIMIT_BLOCKED: 'Blocked by a limit — no proposal', MISSED: 'Missed while FloFi was unavailable', WORKFLOW_CHANGED: 'Saved workflow changed — rebind required',
   STRATEGY_STALE: 'No longer reproducible — rebind required', APPROVAL_REQUESTED: 'Opened for review', APPROVAL_APPLIED: 'Loaded into your workflow',
-  OWNER_DISMISSED: 'Dismissed', OWNER_PREPARED_BUY: 'You started your own buy in Build', OWNER_PREPARED_SELL: 'You started your own sell in Build', DUPLICATE_TRIGGER: 'Duplicate trigger ignored',
+  OWNER_DISMISSED: 'Dismissed', OWNER_PREPARED_BUY: 'You started your own buy in the Editor', OWNER_PREPARED_SELL: 'You started your own sell in the Editor', DUPLICATE_TRIGGER: 'Duplicate trigger ignored',
   PRICE_STALE: 'Price observation too old — ignored', PRICE_SOURCE_OFF: 'No price source on this deployment', PRICE_SOURCE_TIMEOUT: 'Price source timed out — ignored',
   PRICE_SOURCE_UNREACHABLE: 'Price source unreachable — ignored', PRICE_SOURCE_ERROR: 'Price source error — ignored', PRICE_FEED_MISMATCH: 'Price feed failed verification — ignored',
   OCCURRENCE_EXPIRED: 'Expired', AUTOMATION_REBOUND_WITHDRAWN: 'Withdrawn by a rebind' };
@@ -133,7 +133,7 @@ function PendingCard({ o, rule, highlighted, capabilities, busy, run, onPropose,
       const prepared = await prepareWatchProposal(owner, o.occurrenceId, { ...trade, slippageBps: DEFAULT_SLIPPAGE_BPS });
       if (prepared.ok) onPropose(prepared.value.command);
       return prepared;
-    }, 'Your own trade is in Build. Apply it, simulate and review before signing.');
+    }, 'Your own trade is in the Editor. Apply it, simulate and review before signing.');
   }
   const routes = (asset: string) => capabilities.routes.filter(r => r.asset === asset && r.executable);
   return <article className="automation-card automation-pending" id={`occurrence-${o.occurrenceId}`} data-highlighted={highlighted ? 'true' : undefined}
@@ -153,9 +153,9 @@ function PendingCard({ o, rule, highlighted, capabilities, busy, run, onPropose,
         {routes(trade.asset).map(r => <option key={r.network} value={r.network}>{t(r.networkLabel)}</option>)}</select></label>
       <label>{t('Amount ({0})', trade.side === 'BUY' ? routes(trade.asset).find(r => r.network === trade.network)?.quote ?? '' : routes(trade.asset).find(r => r.network === trade.network)?.base ?? '')}
         <input inputMode="decimal" aria-label={t('Amount')} value={trade.amount} onChange={e => setTrade({ ...trade, amount: e.currentTarget.value.trim() })} required/></label>
-      <div className="automation-row-actions"><button type="submit" className="workspace-action" disabled={busy}>{t('Prepare in Build')}</button>
+      <div className="automation-row-actions"><button type="submit" className="workspace-action" disabled={busy}>{t('Prepare in the Editor')}</button>
         <button type="button" className="workspace-action" onClick={() => setTrade(null)}>{t('Cancel')}</button></div>
-      <p className="muted">{t('This is your own new trade, not part of this automation: it goes to your Build draft as an ordinary proposal, exactly as if you had composed it there. The automation adds no authority and no limits to it. Nothing is signed: apply it, simulate and review the Strategy Manifest first.')}</p>
+      <p className="muted">{t('This is your own new trade, not part of this automation: it goes to your Editor draft as an ordinary proposal, exactly as if you had composed it there. The automation adds no authority and no limits to it. Nothing is signed: apply it, simulate and review the Strategy Manifest first.')}</p>
     </form>}
     <p className="muted">{t('Waiting until')} <When iso={o.expiresAt} zone={zone}/>{o.notifications.map(n => <span key={n.channel}> · {t('Telegram')}: {t(n.status === 'QUEUED' ? 'sent to your chat' : 'not delivered')}</span>)}</p>
     <div className="automation-row-actions">

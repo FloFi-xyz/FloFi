@@ -9,6 +9,9 @@ import { TopBar } from './top-bar';
 import { HeaderSettings } from './header-settings';
 import { NavigationDrawer } from './navigation-drawer';
 import { WORKFLOW_STAGES } from '../domain/product-shell';
+import { BUILD_ENTRY } from '../domain/build-entry';
+import { translate } from '../i18n/locale';
+import { portuguese } from '../i18n/pt';
 
 const fixture = vi.hoisted(() => ({ workflow: null as unknown as Workflow, diagnosticsAvailable: false }));
 const wallet = vi.hoisted(() => ({ account: null as string | null, chainId: null as string | null,
@@ -113,12 +116,14 @@ describe('product shell rendering', () => {
     expect(vi.mocked(NavigationDrawer).mock.calls.at(-1)?.[0]).toMatchObject({ onDisconnect: wallet.reset, disconnectDisabled: true });
   });
 
-  it.each(WORKFLOW_STAGES)('marks %s as the current view without performing wallet actions', stage => {
+  // BUILD-FLOFI-CHAT-EDITOR-UX-001: Simulate and Execute are sections of the Editor, so the Editor is the current view on each of them.
+  it.each(WORKFLOW_STAGES)('marks the Editor as the current view on its %s section without performing wallet actions', stage => {
     const setTab = vi.fn();
     const html = renderToStaticMarkup(createElement(TopBar, { tab: stage, setTab }));
     expect(html).toContain('aria-label="Workflow stages"');
     expect(stageMarkup(html).match(/aria-current="page"/g)).toHaveLength(1);
-    expect(html).toMatch(new RegExp(`aria-current="page"[^>]*><span[^>]*aria-hidden="true"[^>]*>[123]</span>${stage}</button>`));
+    expect(stageMarkup(html)).toMatch(/aria-current="page" class="selected">Editor<\/button>/);
+    expect(stageMarkup(html)).not.toMatch(/>(Build|Simulate|Execute)<\/button>|stage-number|data-build-stage/);
     expect(html).not.toMatch(/Draft · Untitled workflow|Current stage ·|workspace-title|stage-guidance/);
     expect(setTab).not.toHaveBeenCalled();
     expect(wallet.connect).not.toHaveBeenCalled();
@@ -162,14 +167,15 @@ describe('product shell rendering', () => {
     expect(html).toContain('<span class="numeric wallet-address">0x1111…1111</span>');
   });
 
-  it('keeps Dashboard unnumbered and separate from the three lifecycle steps', () => {
+  // BUILD-FLOFI-CHAT-EDITOR-UX-001: the navigation is Dashboard | Chat | Editor (Chat only where the intent entry is offered), with no stage
+  // numbers and no standalone Simulate or Execute tab.
+  it('keeps Dashboard separate from the unnumbered Editor, with no Simulate or Execute tab', () => {
     const html = renderToStaticMarkup(createElement(TopBar, { tab: 'Dashboard', setTab: vi.fn() }));
     expect(html).toMatch(/aria-current="page"[^>]*>Dashboard<\/button>/);
     expect(stageMarkup(html).match(/aria-current="page"/g)).toHaveLength(1);
-    expect(html.match(/class="stage-number"/g)).toHaveLength(3);
-    for (const [index, stage] of WORKFLOW_STAGES.entries()) {
-      expect(html).toContain(`>${index + 1}</span>${stage}</button>`);
-    }
+    expect(html).not.toContain('stage-number');
+    expect(html).not.toContain('data-build-stage');
+    expect([...stageMarkup(html).matchAll(/<button[^>]*>([^<]*)<\/button>/g)].map(match => match[1])).toEqual(['Dashboard', 'Editor']);
     expect(html).toContain('class="flofi-logo" role="img" aria-label="FloFi"');
     expect(html).toContain('src="/brand/flofi-symbol-light.svg"');
     expect(html).toContain('src="/brand/flofi-symbol-dark.svg"');
@@ -181,6 +187,29 @@ describe('product shell rendering', () => {
     expect(wallet.reset).not.toHaveBeenCalled();
   });
 
+  it.each([
+    { tab: BUILD_ENTRY, current: 'Chat' }, { tab: 'Build', current: 'Editor' }, { tab: 'Simulate', current: 'Editor' }, { tab: 'Execute', current: 'Editor' },
+    { tab: 'Dashboard', current: 'Dashboard' },
+  ] as const)('offers Dashboard | Chat | Editor in the chat-first workspace, $current current on $tab, without wallet activity', ({ tab, current }) => {
+    const html = renderToStaticMarkup(createElement(TopBar, { tab, setTab: vi.fn(), entry: true }));
+    const nav = stageMarkup(html);
+    expect([...nav.matchAll(/<button[^>]*>([^<]*)<\/button>/g)].map(match => match[1])).toEqual(['Dashboard', 'Chat', 'Editor']);
+    expect(nav.match(/aria-current="page"/g)).toHaveLength(1);
+    expect(nav).toMatch(new RegExp(`aria-current="page" class="selected">${current}</button>`));
+    expect(nav).toContain('title="Describe what you want to do"');
+    expect(nav).toContain('title="Edit the workflow on the Canvas and in the chat"');
+    expect(nav).not.toMatch(/stage-number|data-build-stage|aria-label="Build 0"|>(Build|Simulate|Execute)<\/button>|disabled/);
+    expect(wallet.connect).not.toHaveBeenCalled();
+    expect(wallet.switchTo).not.toHaveBeenCalled();
+    expect(wallet.reset).not.toHaveBeenCalled();
+  });
+
+  it('renders the Chat and Editor labels from the Portuguese catalog', () => {
+    expect(translate('PT', 'Chat')).toBe('Chat');
+    expect(translate('PT', 'Editor')).toBe('Editor');
+    expect(Object.hasOwn(portuguese, 'Chat') && Object.hasOwn(portuguese, 'Editor')).toBe(true);
+  });
+
   it('uses the existing Build lifecycle transition from the drawer without wallet activity', () => {
     const setTab = vi.fn();
     renderToStaticMarkup(createElement(TopBar, { tab: 'Execute', pathname: '/', setTab }));
@@ -188,6 +217,21 @@ describe('product shell rendering', () => {
     expect(props.section).toBe('Execute');
     props.onBuild();
     expect(setTab).toHaveBeenCalledExactlyOnceWith('Build');
+    expect(props.onChat).toBeUndefined();
+    expect(wallet.reset).not.toHaveBeenCalled();
+    expect(wallet.connect).not.toHaveBeenCalled();
+  });
+
+  // BUILD-FLOFI-CHAT-EDITOR-UX-001: the drawer agrees with the top bar: Chat where the entry is offered, current on it.
+  it('gives the drawer the Chat entry and section where the top bar offers Chat', () => {
+    const setTab = vi.fn();
+    renderToStaticMarkup(createElement(TopBar, { tab: BUILD_ENTRY, pathname: '/app', setTab, entry: true }));
+    const props = vi.mocked(NavigationDrawer).mock.calls.at(-1)![0];
+    expect(props.section).toBe('Chat');
+    props.onChat?.();
+    expect(setTab).toHaveBeenCalledExactlyOnceWith(BUILD_ENTRY);
+    props.onBuild();
+    expect(setTab).toHaveBeenLastCalledWith('Build');
     expect(wallet.reset).not.toHaveBeenCalled();
     expect(wallet.connect).not.toHaveBeenCalled();
   });

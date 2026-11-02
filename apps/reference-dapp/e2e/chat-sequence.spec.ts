@@ -13,7 +13,7 @@ import type { APIRequestContext, Page } from '@playwright/test';
 import { test, expect, readWorkflowIr } from './fixtures';
 import { installJourneyWallet, walletRequests } from './journey-fixtures';
 import { createTestWallet } from '../../../packages/reference-reconciler/test/test-wallet';
-import { openBuilder } from './build-entry-navigation';
+import { expectEditorSection, openBuilder, openEditorSection } from './build-entry-navigation';
 
 test.skip(process.env.FLOFI_SWAP_EXECUTION_E2E !== 'MOCKED_LOOPBACK_ONLY', 'Requires the opt-in loopback swap execution harness');
 test.setTimeout(180_000);
@@ -22,7 +22,6 @@ const chat = (page: Page) => page.locator('.chat-messages[role="log"]');
 /** FloFi's latest message (the live execution card, always last in the log, is not a message). */
 const flofi = (page: Page) => chat(page).locator('.message:not(.you):not(.conversation-execution-message)').last();
 const cards = (page: Page) => page.locator('.build-flow-surface .composer-card');
-const stage = (page: Page, name: 'Build' | 'Simulate' | 'Execute') => page.getByRole('navigation', { name: 'Workflow stages' }).getByRole('button', { name, exact: true });
 async function say(page: Page, text: string) {
   await page.locator('#mock-prompt').fill(text);
   await page.locator('.chat-form button[type=submit]').click();
@@ -97,7 +96,7 @@ test('Swap → Swap funded by the first: each step simulated, confirmed, signed 
   await expect(review).toContainText('Quoted output'); await expect(review).toContainText('Minimum receipt'); await expect(review).toContainText('Total additional payable costs');
   await expect(review).toContainText('Excludes:'); await expect(review).toContainText('Step 2 (simulated after the steps before it)');
   await expect(review).toContainText('This workflow runs as 2 separate wallet transactions');
-  await expect(stage(page, 'Build')).toHaveAttribute('aria-current', 'page');
+  await expectEditorSection(page, 'Build');
   // The Canvas action names the step it serves: a step's result never reads as the whole workflow's.
   await expect(page.locator('.canvas-sequence-note')).toContainText('Step 1 of 2: Swap. Each step is simulated, reviewed and signed on its own, in order; this result covers this step only.');
   expect(owner.requested()).toBe(0);
@@ -196,7 +195,7 @@ for (const width of [1920, 1440, 1280, 1024, 390, 375]) test(`chat-first layout 
   await page.screenshot({ path: testInfo.outputPath(`build-${width}.png`) });
   for (const [name, grid, summary, details] of [['Simulate', '.simulate-workspace-grid', '.simulation-summary', '.simulation-details'],
     ['Execute', '.execute-workspace-grid', '.execution-summary', null]] as const) {
-    await stage(page, name).click();
+    await openEditorSection(page, name);
     await expect(page.locator(grid)).toBeVisible();
     // One column: the canvas (or timeline). The summary is an optional, collapsed details surface — never a third column beside the chat.
     expect((await page.locator(grid).evaluate(element => getComputedStyle(element).gridTemplateColumns)).trim().split(/\s+/)).toHaveLength(1);

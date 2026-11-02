@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { test, expect, sendChatCommand, applyPendingProposal, openSimulationDetails, readWorkflowIr, openFirstActionSettings, openProposalReview, assertNoFinancialCanvasAction } from './fixtures';
 import type { Page } from '@playwright/test';
+import { type EditorSection, openEditorSection } from './build-entry-navigation';
 import { hashArtifactBytes, parseArtifactBytes } from '@defi-workflow-engine/workflow-contracts';
 
 const T0 = new Date('2026-09-24T12:00:00.000Z');
@@ -12,8 +13,8 @@ const REPLACING = 'compose supply 0.1 USDC to Aave then borrow 0.01 USDC then sw
 const bytes = (value: unknown) => new TextEncoder().encode(JSON.stringify(value));
 const panel = (page: Page) => page.locator('.simulation-technical');
 const chip = (page: Page, status: string) => panel(page).getByText(`ARTIFACTS: ${status}`, { exact: true });
-const tab = async (page: Page, name: 'Build' | 'Simulate' | 'Execute') => {
-  await page.getByRole('navigation', { name: 'Workflow stages' }).getByRole('button', { name, exact: true }).click();
+const tab = async (page: Page, name: EditorSection) => {
+  await openEditorSection(page, name);
   if (name === 'Simulate') await openSimulationDetails(page);
 };
 
@@ -240,7 +241,7 @@ test('ineligible workflows cannot generate; zero outputs carry a blocking findin
   await open(page);
   await tab(page, 'Simulate');
   await expect(panel(page).getByRole('button', { name: 'Generate mocked artifacts for revision 0' })).toBeDisabled();
-  await expect(panel(page)).toContainText('Add a Base swap in Build before generating mocked artifacts.');
+  await expect(panel(page)).toContainText('Add a Base swap in the Editor before generating mocked artifacts.');
   await tab(page, 'Build');
   await apply(page, 'swap 2 USDC to WETH on Base slippage 301 bps');
   await tab(page, 'Simulate');
@@ -281,7 +282,7 @@ test('mocked numbers stay labelled and execution stays unavailable after generat
   await tab(page, 'Execute');
   await assertNoFinancialCanvasAction(page);
   await expect(page.getByRole('region', { name: 'Workflow execution workspace' })).toContainText('Connect the wallet that will authorize this workflow.');
-  await expect(page.getByRole('button', { name: 'Back to Simulate', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Back to simulation', exact: true })).toBeVisible();
   await expect(page.getByText('Simulation: CURRENT', { exact: true })).toHaveCount(0);
 });
 

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { test, expect, installPassiveWallet, assertPassiveWallet } from './fixtures';
 import { configureCanvasAction } from './composer-authoring-fixtures';
-import { openBuilder, reloadBuilder } from './build-entry-navigation';
+import { editorSectionAction, openBuilder, reloadBuilder } from './build-entry-navigation';
 
 test('normal Build keeps capability details internal and authoring requests no financial wallet authority', async ({ page }) => {
   await openBuilder(page);
@@ -29,9 +29,8 @@ test('an unprepared liquidity workflow cannot authorize or execute', async ({ pa
   await page.getByRole('button', { name: 'Add pool', exact: true }).click();
   await expect(page.locator('.build-flow-surface .composer-card')).toHaveCount(1);
   await expect(page.getByRole('region', { name: 'Workflow readiness' })).toHaveCount(0);
-  const stages = page.getByRole('navigation', { name: 'Workflow stages' });
-  await expect(stages.getByRole('button', { name: 'Simulate', exact: true })).toBeDisabled();
-  await expect(stages.getByRole('button', { name: 'Execute', exact: true })).toBeDisabled();
+  await expect(editorSectionAction(page, 'Simulate')).toBeDisabled();
+  await expect(editorSectionAction(page, 'Execute')).toBeDisabled();
   await expect(page.getByRole('button', { name: 'Simulate workflow', exact: true })).toBeDisabled();
   await expect(page.getByRole('button', { name: 'Authorize in wallet', exact: true })).toHaveCount(0);
   await expect(page.getByRole('region', { name: 'Mode A execution' })).toHaveCount(0);

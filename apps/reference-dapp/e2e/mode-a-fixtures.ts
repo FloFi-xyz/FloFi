@@ -12,6 +12,7 @@ import type { Page } from '@playwright/test';
 import { decodeSwap, encodeApprove, encodeSwap, fromHex, toHex } from '@defi-workflow-engine/reference-compiler';
 import { test as guarded, expect, openProposalReview, acceptProductReview } from './fixtures';
 import { E2E_FORK_URL } from './fork/ports';
+import { type EditorSection, openEditorSection } from './build-entry-navigation';
 
 export type ModeAFixture = { readonly format: 'gryloo.mode-a-e2e-fixture.v1'; readonly environment: 'MOCKED' | 'FORK_REPRODUCED';
   readonly rpcUrl: string; readonly owner: string; readonly setup: string; baseline: string; readonly journal: string };
@@ -170,7 +171,7 @@ export async function visual(page: Page, name: string): Promise<void> {
   await readyForVisualCapture(page);
   await expect(page).toHaveScreenshot(name, { fullPage: true });
 }
-const stage = (page: Page, name: 'Build' | 'Simulate' | 'Execute') => page.getByRole('navigation', { name: 'Workflow stages' }).getByRole('button', { name, exact: true }).click();
+const stage = (page: Page, name: EditorSection) => openEditorSection(page, name);
 export async function authorSwap(page: Page, direction: 'WETH_TO_USDC' | 'USDC_TO_WETH', amount: string, slippage: string): Promise<void> {
   await stage(page, 'Build');
   await page.getByText('Advanced action setup', { exact: true }).click();

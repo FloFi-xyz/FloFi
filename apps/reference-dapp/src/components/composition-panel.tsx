@@ -27,7 +27,7 @@ export function CompositionPanel({ view }: { view: 'simulate' | 'execute' }) {
     <p className="muted">{tr(flow.info.environment === 'FORK_REPRODUCED' ? 'Recorded Base state is replayed locally.' :
       'Synthetic Base-like source state is used for this mocked test.')}{tr(" Wallet setup and executor calls have no public-chain effect.")}</p>
     {view === 'simulate' && <>
-      {!graph && <p role="status">{tr("Author the two-node Mode B composition in Build to prepare a review.")}</p>}
+      {!graph && <p role="status">{tr("Author the two-node Mode B composition in the Editor to prepare a review.")}</p>}
       <button type="button" onClick={flow.prepare} disabled={!graph || Boolean(flow.busy)} aria-busy={flow.busy === 'Preparing composition'}>{tr("Prepare chained review")}</button>
     </>}
     {prepared && <>

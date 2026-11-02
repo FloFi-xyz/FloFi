@@ -360,7 +360,7 @@ export const COPILOT_EVAL_CASES: readonly EvalCase[] = [
   { id: 'Q20', category: 'read-only', language: 'EN', setup: [FIXTURE.supply], turns: [{ user: 'What did the simulation show?', model: intent.question('SIMULATION'),
     expect: A('SIMULATION', ['There is no simulation result for this workflow yet.']) }] },
   { id: 'Q21', category: 'read-only', language: 'EN', setup: [FIXTURE.supply], facts: { simulation: { status: 'CURRENT', reviewed: false } }, turns: [
-    { user: 'What did the simulation show?', model: intent.question('SIMULATION'), expect: A('SIMULATION', ['A current simulation exists for this revision', 'Simulate tab']) }] },
+    { user: 'What did the simulation show?', model: intent.question('SIMULATION'), expect: A('SIMULATION', ['A current simulation exists for this revision', 'Editor\'s simulation view']) }] },
   { id: 'Q22', category: 'read-only', language: 'EN', setup: [FIXTURE.supply], facts: { simulation: { status: 'STALE', reviewed: false } }, turns: [
     { user: 'Is the simulation still valid?', model: intent.question('SIMULATION'), expect: A('SIMULATION', ['The last simulation is stale']) }] },
   { id: 'Q23', category: 'read-only', language: 'EN', facts: { simulation: { flow: 'MOCKED_CHAIN', status: 'CURRENT', reviewed: false } }, turns: [

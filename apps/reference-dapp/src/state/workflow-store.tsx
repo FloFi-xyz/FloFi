@@ -188,7 +188,7 @@ export function WorkflowProvider({ children, initialContext, initialWorkflowId =
     setSequenceRun({ workflowId: workflow.workflowId, completed: [...completed, { nodeId: step.nodeId, node: stepNodeKey(node), received: completion.received, runKey: completion.runKey,
       allocations: fundingAllocations(step, completed) }] });
   }, []);
-  const eligibility: Eligibility = useMemo(() => authoringIncomplete ? { eligible: false, reason: 'Configure the amount in Build before simulating.' }
+  const eligibility: Eligibility = useMemo(() => authoringIncomplete ? { eligible: false, reason: 'Configure the amount on the Canvas before simulating.' }
     : generationEligibility(state.workflow, context), [state.workflow, context, authoringIncomplete]);
 
   // An accepted semantic edit replaces the immutable IR object and invalidates the chain.

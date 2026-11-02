@@ -29,10 +29,10 @@ describe('Simulate product workspace', () => {
     expect(html.match(/simulation-workspace-actions/g)).toHaveLength(2);
   });
   it('keeps the empty-workflow guidance when a generic simulation blocker is supplied', () => {
-    const reason = 'Complete the amount, assets, networks and recipient in Build before simulating.';
+    const reason = 'Complete the amount, assets, networks and recipient on the Canvas before simulating.';
     const html = renderToStaticMarkup(createElement(SimulateWorkspace, { workflowName: 'My strategy', simulationReason: reason }));
     expect(html).toContain('No workflow');
-    expect(html).toContain('Create a workflow in Build first.');
+    expect(html).toContain('Create a workflow in the Editor first.');
     expect(html).not.toContain(reason);
   });
   it('shows unavailable values without generating estimates or Review readiness', () => {
@@ -40,7 +40,7 @@ describe('Simulate product workspace', () => {
     expect(html).toContain('My strategy');
     expect(html).toContain('aria-label="Simulation Summary"');
     for (const row of ['Slippage', 'Price impact', 'Workflow network']) expect(html).toContain(`<dt>${row}</dt><dd>—</dd>`);
-    expect(html).toContain('Back to Build');
+    expect(html).toContain('Back to the Canvas');
     expect(html).not.toMatch(/mock|synthetic|debug|artifact|canonical|<button[^>]*>Review/i);
   });
 
@@ -90,7 +90,7 @@ describe('UX-004B result sections', () => {
   });
   it('keeps an invalid workflow blocking even if the source is absent', () => {
     fixture.store = { ...fixture.store, reviewError: 'raw.validation.path' };
-    const html = render(); expect(html).toContain('Check workflow'); expect(html).toContain('Check the workflow configuration in Build');
+    const html = render(); expect(html).toContain('Check workflow'); expect(html).toContain('Check the workflow configuration on the Canvas');
     expect(html).not.toContain('raw.validation.path');
   });
 });
@@ -114,7 +114,7 @@ describe('embedded authorization in Simulate', () => {
     for (const section of ['Expected result', 'Route', 'Fees', 'Market impact'])
       expect(primary.match(new RegExp(`aria-label="${section}"`, 'g'))).toHaveLength(1);
     expect(primary.match(/aria-label="Authorization preview"/g)).toHaveLength(1);
-    expect(primary).not.toContain('review-workflow-steps'); expect(primary).not.toContain('Back to Simulate');
+    expect(primary).not.toContain('review-workflow-steps'); expect(primary).not.toContain('Back to simulation');
     expect(WORKFLOW_STAGES).toEqual(['Build', 'Simulate', 'Execute']);
   });
   it('locks the embedded section before valid simulation', () => {
@@ -146,7 +146,7 @@ describe('embedded authorization in Simulate', () => {
 
 describe('UX-004D compact simulation states', () => {
   it('renders empty and loading copy without developer state labels', () => {
-    expect(render()).toContain('No workflow'); expect(render()).toContain('Create a workflow in Build first');
+    expect(render()).toContain('No workflow'); expect(render()).toContain('Create a workflow in the Editor first');
     fixture.store.state = editorReducer(initialEditor(), { type: 'ADD_SWAP', direction: 'USDC_TO_WETH', amount: '1', slippage: '50', source: 'CHAT', baseRevision: 0 }, fixture.store.context);
     expect(render()).toContain('No simulation yet');
     const loading = render({ kind: 'unavailable', state: { busy: 'Generating mocked artifacts raw payload', error: null } });
@@ -158,8 +158,8 @@ describe('UX-004D compact simulation states', () => {
     const html = renderToStaticMarkup(createElement(SimulateWorkspace, { workflowName: 'My strategy', returnToBuild: vi.fn(), reviewActionHost: vi.fn(), simulateAction: createElement('button', { onClick: simulate }, 'Simulate workflow') }));
     expect(html.indexOf('Simulate workflow')).toBeGreaterThan(html.indexOf('simulation-workspace-actions'));
     expect(html.indexOf('Simulate workflow')).toBeLessThan(html.indexOf('aria-label="Simulation Summary"'));
-    expect(html.indexOf('Back to Build')).toBeLessThan(html.indexOf('aria-label="Simulation Summary"'));
-    expect(html.indexOf('Back to Build')).toBeLessThan(html.indexOf('Simulate workflow'));
+    expect(html.indexOf('Back to the Canvas')).toBeLessThan(html.indexOf('aria-label="Simulation Summary"'));
+    expect(html.indexOf('Back to the Canvas')).toBeLessThan(html.indexOf('Simulate workflow'));
     expect(html.indexOf('simulation-review-action')).toBeGreaterThan(html.indexOf('aria-label="Simulation Summary"'));
     expect(simulate).not.toHaveBeenCalled();
   });

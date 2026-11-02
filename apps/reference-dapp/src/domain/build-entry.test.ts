@@ -5,6 +5,7 @@ import { createReviewContext } from '@defi-workflow-engine/reference-linter';
 import type { SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
 import { BUILD_ENTRY_SUGGESTIONS, buildEntryFresh, buildEntryLanding, buildEntryOutcome, type BuildEntrySnapshot } from './build-entry';
 import { parseLocalCommand } from './commands';
+import { conversationCopy } from './conversation-copy';
 import { editorReducer } from './editor';
 import { editorHistoryReducer, initialEditorHistory } from './editor-history';
 import { introducedTestNetworks } from './network-scope';
@@ -63,10 +64,32 @@ describe('BUILD0-UX-001 Build 0 outcome (read from the stored workflow and FloFi
     expect(buildEntryOutcome(before, { ...before, messages: 3, log: [intro, you, { role: 'system', text: 'Which wallet should I send it to?', options: ['Connect wallet'] }] }).kind).toBe('CONVERSATION');
     expect(buildEntryOutcome(before, { ...before, automation: { rule: 1 }, messages: 3, log: [intro, you, { role: 'system', text: 'Automation proposed.' }] }).kind).toBe('CONVERSATION');
   });
+  // BUILD-FLOFI-CHAT-EDITOR-UX-001: a lifecycle answer or request typed on Chat is the conversation continuing (its progress, even a wallet
+  // request, continues in the Editor's chat), never a refusal shown on Chat.
+  it('an answer to an open lifecycle question continues in the Editor, never as a refusal', () => {
+    const en = conversationCopy('EN');
+    expect(buildEntryOutcome({ ...before, question: 'CONFIRM_EXECUTION' }, { ...before, messages: 3, log: [intro, { role: 'you', text: 'yes' }, { role: 'flofi', text: en.executing }] }, 'yes'))
+      .toEqual({ kind: 'CONVERSATION' });
+    for (const question of ['CONFIRM_WORKFLOW', 'CONFIRM_CONTINUE', 'CONFIRM_CONTINUE_REVIEW', 'RESOLVE_EDIT']) {
+      expect(buildEntryOutcome({ ...before, question }, { ...before, messages: 3, log: [intro, { role: 'you', text: 'continue' }, { role: 'flofi', text: 'Progress.' }] }, 'continue').kind, question)
+        .toBe('CONVERSATION');
+    }
+  });
+  it('a lifecycle request the chat handles itself continues in the Editor, never as a refusal', () => {
+    const en = conversationCopy('EN');
+    expect(buildEntryOutcome(before, { ...before, messages: 3, log: [intro, { role: 'you', text: 'review workflow' }, { role: 'flofi', text: en.reviewStarting }] }, 'review workflow'))
+      .toEqual({ kind: 'CONVERSATION' });
+    expect(buildEntryOutcome({ ...before, question: 'NEXT_STEP' }, { ...before, messages: 3, log: [intro, { role: 'you', text: 'check status' }, { role: 'flofi', text: 'No execution yet.' }] }, 'check status'))
+      .toEqual({ kind: 'CONVERSATION' });
+    // NEXT_STEP is not a lifecycle question: an unrelated request with no reply of its own is still refused.
+    expect(buildEntryOutcome({ ...before, question: 'NEXT_STEP' }, { ...before, messages: 3, log: [intro, you, { role: 'system', text: 'Not understood.' }] }, you.text).kind).toBe('REFUSED');
+  });
   it('nothing changed: the entry shows FloFi’s own reason and keeps the request', () => {
     const reason = 'This request could not be understood. Check the action, amount, asset and chain, then try again.';
     expect(buildEntryOutcome(before, { ...before, messages: 3, log: [intro, you, { role: 'system', text: reason }] })).toEqual({ kind: 'REFUSED', message: reason, language: null });
     expect(buildEntryOutcome(before, { ...before, messages: 3, log: [intro, you, { role: 'flofi', text: 'Adicione uma ação primeiro.', language: 'PT' }] }))
+      .toEqual({ kind: 'REFUSED', message: 'Adicione uma ação primeiro.', language: 'PT' });
+    expect(buildEntryOutcome(before, { ...before, messages: 3, log: [intro, { role: 'you', text: 'Quero algo diferente' }, { role: 'flofi', text: 'Adicione uma ação primeiro.', language: 'PT' }] }, 'Quero algo diferente'))
       .toEqual({ kind: 'REFUSED', message: 'Adicione uma ação primeiro.', language: 'PT' });
     // Earlier conversation messages are never read as this request's answer.
     expect(buildEntryOutcome({ ...before, messages: 3 }, { ...before, messages: 4, log: [intro, you, { role: 'ai', text: 'Earlier reply' }, you] })).toEqual({ kind: 'REFUSED', message: null, language: null });

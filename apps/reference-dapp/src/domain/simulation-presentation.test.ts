@@ -130,7 +130,7 @@ describe('simulation financial presentation', () => {
     expect(simulationError('JUPITER_SOLANA_WALLET_SELECTION_REQUIRED')).toContain('Connect the wallet');
     expect(simulationError('REPAY_PARTIAL_DEBT_REQUIRED')).toContain('current debt is lower');
     expect(simulationError('SOLANA_TRANSFER_EXECUTION_NOT_ENABLED')).toContain('not available on this FloFi server');
-    expect(simulationError('SOMETHING_NEW')).toBe('FloFi could not complete this simulation, and nothing was sent. Check the workflow in Build, then simulate again.');
+    expect(simulationError('SOMETHING_NEW')).toBe('FloFi could not complete this simulation, and nothing was sent. Check the workflow on the Canvas, then simulate again.');
     for (const code of ['SOLANA_TRANSFER_RECIPIENT_INVALID', 'UNKNOWN_FAILURE', 'X_SIMULATION_FAILED']) expect(simulationError(code)).not.toMatch(/Simulation could not be completed/);
     expect(simulationError('SUPPLY_STORAGE_NOT_CONFIGURED')).toContain('currently unavailable');
   });

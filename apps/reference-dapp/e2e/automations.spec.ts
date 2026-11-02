@@ -20,6 +20,7 @@ import { assertAutomationHarness, dispatch, occurrencesOf, query, ruleOf, setPri
 import { test, expect, proveConnectedEvmWallet, readWorkflowIr } from './fixtures';
 import { installJourneyWallet, walletRequests } from './journey-fixtures';
 import type { Page } from '@playwright/test';
+import { expectEditorSection } from './build-entry-navigation';
 
 const SIGNING = ['eth_sendTransaction', 'eth_sendRawTransaction', 'eth_signTypedData_v4', 'eth_signTransaction'];
 /** BUILD-SOLANA-TRANSFER-UX-001: the proof reuses the wallet already connected in this browser (no selector); it signs the sign-in message. */
@@ -124,7 +125,7 @@ test.describe('BUILD-AUTOMATION-001 Automations (fixture prices, test clock, loo
     await expect(page.getByRole('region', { name: /^Proposal from / })).toHaveCount(0);
     await unchanged();
     // FloFi's own fresh simulation of the re-opened proposal (no owner click is needed for this read-only step).
-    await expect(page.getByRole('navigation', { name: 'Workflow stages' }).getByRole('button', { name: 'Simulate', exact: true })).toHaveAttribute('aria-current', 'page');
+    await expectEditorSection(page, 'Simulate');
     const summary = page.getByRole('complementary', { name: 'Simulation Summary', exact: true });
     await expect(summary.getByRole('region', { name: 'Expected result' })).toContainText('0.025 WETH', { timeout: 30_000 });
     // BUILD-SOLANA-TRANSFER-UX-001: the one owner action ("Authorize in wallet": Review acceptance, then the wallet request) is offered once and

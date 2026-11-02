@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { test, expect } from './fixtures';
 import { authorSolanaSwap, chooseSolanaWallet, installSolanaWallet, jupiterControl, resetJupiterHarness, reviewSolanaSwap, signRequests } from './jupiter-fixtures';
+import { openEditorSection } from './build-entry-navigation';
 
 const panel = (page: import('@playwright/test').Page) => page.getByRole('region', { name: 'Jupiter swap' });
 test.afterEach(async ({ page }, info) => { if (info.status !== info.expectedStatus) console.error('Jupiter failure:', await panel(page).locator('pre').textContent().catch(() => 'no panel')); });
@@ -74,12 +75,12 @@ test('stale quote cannot be executed', async ({ page }) => {
 test('semantic edit after Review invalidates authorization', async ({ page }) => {
   const wallet = await resetJupiterHarness(); await installSolanaWallet(page, wallet);
   await authorSolanaSwap(page); await reviewSolanaSwap(page);
-  await page.getByRole('button', { name: 'Build', exact: true }).click();
+  await openEditorSection(page, 'Build');
   await page.locator('.react-flow__node[data-id="node-002"] .flow-card').click();
   const form = page.getByRole('form', { name: 'Edit Solana swap' });
   await form.getByLabel('Amount').fill('11'); await form.getByRole('button', { name: 'Review swap change' }).click();
   await page.getByRole('button', { name: 'Apply proposal' }).click();
-  await page.getByRole('navigation', { name: 'Workflow stages' }).getByRole('button', { name: 'Execute', exact: true }).click();
+  await openEditorSection(page, 'Execute');
   await expect(panel(page)).toContainText('The workflow changed. Prior authorization is invalid.');
   await expect(panel(page).getByRole('button', { name: 'Execute swap' })).toHaveCount(0);
   expect(await signRequests(page)).toBe(0);
@@ -98,7 +99,7 @@ test('a dropped transaction survives reload and resolves as expired, never resub
   await expect(panel(page)).toContainText('Swap: pending');
   expect(await signRequests(page)).toBe(1);
   await page.reload();
-  await page.getByRole('navigation', { name: 'Workflow stages' }).getByRole('button', { name: 'Execute', exact: true }).click();
+  await openEditorSection(page, 'Execute');
   await expect(panel(page).getByRole('button', { name: 'Observe existing transaction' })).toBeVisible();
   await jupiterControl({ action: 'advance', blocks: 200 });
   await panel(page).getByRole('button', { name: 'Observe existing transaction' }).click();
@@ -110,8 +111,8 @@ test('pending wallet signature keeps navigation available without a duplicate si
   await authorSolanaSwap(page); await reviewSolanaSwap(page);
   await panel(page).getByRole('button', { name: 'Execute swap' }).click();
   await expect(page.locator('[data-jupiter-wallet-pending="true"]')).not.toHaveAttribute('inert', '');
-  await page.getByRole('navigation', { name: 'Workflow stages' }).getByRole('button', { name: 'Build', exact: true }).click();
-  await page.getByRole('navigation', { name: 'Workflow stages' }).getByRole('button', { name: 'Execute', exact: true }).click();
+  await openEditorSection(page, 'Build');
+  await openEditorSection(page, 'Execute');
   expect(await signRequests(page)).toBe(1);
   await page.evaluate(() => (window as unknown as { releaseSolanaSignature: () => void }).releaseSolanaSignature());
   await expect(page.getByRole('link', { name: 'Download Evidence Bundle' })).toBeVisible();

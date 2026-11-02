@@ -8,12 +8,12 @@ import { test, expect } from './fixtures';
 import type { Page } from '@playwright/test';
 import { createDatabase } from '@defi-workflow-engine/cloud-runtime';
 import { installTransferWallet, sendRequests, transferHarnessRpc, TRANSFER_OWNER as owner, type TransferWalletOptions } from './robinhood-transfer-fixtures';
-import { openBuilder, reloadBuilder } from './build-entry-navigation';
+import { type EditorSection, openBuilder, openEditorSection, reloadBuilder } from './build-entry-navigation';
 
 const region = (page: Page) => page.getByRole('region', { name: 'Robinhood Testnet transfer' });
 const execute = (page: Page) => region(page).getByRole('button', { name: 'Execute', exact: true }).click();
 // The stage navigation (not a call-to-action label) so the suite does not depend on presentation copy.
-const stage = (page: Page, name: 'Simulate' | 'Execute') => page.getByRole('navigation', { name: 'Workflow stages' }).getByRole('button', { name, exact: true }).click();
+const stage = (page: Page, name: EditorSection) => openEditorSection(page, name);
 /** Each test starts its MOCKED chain at its own owner nonce: economic intents are durable across tests on PostgreSQL. */
 async function reset(nonce: number) {
   if (process.env.GRYLOO_CLOUD_RUNTIME_E2E !== 'EMBEDDED_LOOPBACK_ONLY' || !process.env.FLOFI_E2E_DATABASE_URL) throw new Error('MOCK_RESET_DENIED');

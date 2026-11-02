@@ -1,17 +1,16 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { test, expect, assertNoFinancialCanvasAction, sendChatCommand } from './fixtures';
-import { openBuilder } from './build-entry-navigation';
+import { openBuilder, openEditorSection } from './build-entry-navigation';
 
 test('Execute shows the shared authored workflow without authorizing or inventing execution', async ({ page }) => {
   await openBuilder(page);
-  const nav = page.getByRole('navigation', { name: 'Workflow stages' });
   await page.getByRole('button', { name: 'Rename workflow', exact: true }).click();
   await page.getByRole('textbox', { name: 'Workflow name', exact: true }).fill('ESPARTACUS');
   await page.getByRole('textbox', { name: 'Workflow name', exact: true }).press('Enter');
   await sendChatCommand(page, 'swap 2.25 USDC to WETH on Base slippage 50 bps');
   await page.getByRole('button', { name: 'Simulate workflow', exact: true }).click();
   await expect(page.locator('.simulate-canvas').getByRole('heading', { name: 'ESPARTACUS', exact: true })).toBeVisible();
-  await nav.getByRole('button', { name: 'Execute', exact: true }).click();
+  await openEditorSection(page, 'Execute');
   const execution = page.getByRole('main', { name: 'Execution workspace', exact: true });
   const graph = execution.getByRole('region', { name: 'Execution workflow graph', exact: true });
   await expect(execution.locator(':scope > :first-child')).toHaveAttribute('aria-label', 'Workflow execution workspace');
@@ -23,7 +22,7 @@ test('Execute shows the shared authored workflow without authorizing or inventin
   await expect(graph.locator('.composer-amount')).toHaveText('2.25 USDC');
   await expect(graph.locator('.composer-card')).toContainText('Base');
   await expect(execution.locator('form, input:not([type=range]), [data-mocked-value]')).toHaveCount(0);
-  await expect(execution.getByRole('button', { name: /^(Return to Build|Execute|Execute swap|Authorize|Accept review)$/ })).toHaveCount(0);
+  await expect(execution.getByRole('button', { name: /^(Return to the Canvas|Execute|Execute swap|Authorize|Accept review)$/ })).toHaveCount(0);
   await assertNoFinancialCanvasAction(page);
   await expect(execution.getByRole('link', { name: /Download.*Evidence Bundle/ })).toHaveCount(0);
   expect(await execution.innerText()).not.toMatch(/EXECUTE \/ UNAVAILABLE|Prepare for execution|Mocked|Running|Confirmed|Completed/);
@@ -37,7 +36,7 @@ test('Execute shows the shared authored workflow without authorizing or inventin
     expect(controlsBox.y + controlsBox.height).toBeLessThanOrEqual(graphBox.y + graphBox.height);
     expect(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth)).toBe(false);
   }
-  await nav.getByRole('button', { name: 'Build', exact: true }).click();
+  await openEditorSection(page, 'Build');
   await expect(page.locator('.summary-bar')).toHaveAttribute('data-workflow-revision', '1');
   await expect(page.getByRole('heading', { name: 'ESPARTACUS', exact: true })).toBeVisible();
   await expect(page.locator('.build-flow-surface .composer-card')).toHaveCount(1);

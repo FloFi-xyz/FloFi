@@ -45,7 +45,7 @@ test('saved run summary, actual values, archive evidence and secondary technical
   await technical.focus(); await technical.press('Enter');
   await expect(page.locator('.execution-evidence-details')).toContainText('Saved execution record');
   await expect(page.getByRole('button', { name: 'Authorize in wallet', exact: true })).toHaveCount(0);
-  await expect(page.getByRole('button', { name: 'Back to Build', exact: true })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Back to the Canvas', exact: true })).toHaveCount(0);
   await page.getByRole('button', { name: 'Back to Dashboard' }).click();
   await expect(page.getByRole('heading', { name: 'Your execution workspace' })).toBeVisible();
   expect(await page.evaluate(() => window.flofiRunDetailAcceptance.counts())).toEqual({ back: 1, reloaded: 0, executeNavigation: 0, built: 0 });

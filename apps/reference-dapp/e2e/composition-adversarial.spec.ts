@@ -3,6 +3,7 @@
 import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { test, expect, compositionEnabled, profile, snapshot, authorComposition } from './composition-fixtures';
+import { openEditorSection } from './build-entry-navigation';
 test.skip(!compositionEnabled, 'BUILD-007 local composition profile is required');
 test('wrong-chain injected owner is rejected before any signature or installation', async ({ page }) => {
   test.setTimeout(90_000);
@@ -22,7 +23,7 @@ test('wrong-chain injected owner is rejected before any signature or installatio
   });
   try {
     const panel = await authorComposition(page);
-    await page.getByRole('navigation', { name: 'Workflow stages' }).getByRole('button', { name: 'Execute', exact: true }).click();
+    await openEditorSection(page, 'Execute');
     await panel.getByRole('button', { name: 'Connect disposable owner wallet' }).click();
     await expect(panel.getByRole('alert')).toContainText('WALLET_WRONG_CHAIN');
     expect(sends).toBe(0);

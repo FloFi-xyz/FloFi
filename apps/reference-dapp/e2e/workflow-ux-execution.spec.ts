@@ -8,11 +8,10 @@ import { test, expect, AUTHORIZE_IN_WALLET, readWorkflowIr, openFirstActionSetti
 import { installJourneyWallet, walletRequests } from './journey-fixtures';
 import { createTestWallet } from '../../../packages/reference-reconciler/test/test-wallet';
 import { createDatabase } from '@defi-workflow-engine/cloud-runtime';
-import { openBuilder, reloadBuilder } from './build-entry-navigation';
+import { expectEditorSection, openBuilder, openEditorSection, reloadBuilder } from './build-entry-navigation';
 
 test.skip(process.env.FLOFI_SWAP_EXECUTION_E2E !== 'MOCKED_LOOPBACK_ONLY', 'Requires the opt-in loopback swap execution harness');
 test.setTimeout(90_000);
-const stage = (page: Page, name: 'Build' | 'Simulate' | 'Execute') => page.getByRole('navigation', { name: 'Workflow stages' }).getByRole('button', { name, exact: true });
 const summary = (page: Page) => page.locator('.execution-summary');
 /** BUILD0-UX-001: the chat-first Execute status panel (always visible) offers Create new workflow beside Return to Build. */
 const createNew = (page: Page) => page.locator('.execution-status-panel').getByRole('button', { name: 'Create new workflow', exact: true });
@@ -72,7 +71,7 @@ async function setup(page: Page, request: APIRequestContext, options: { decline?
   await expect(wallet.locator('.header-wallet-provider')).toHaveAttribute('title', 'MetaMask');
   await expect(wallet.locator('.wallet-connection')).toHaveAttribute('title', /Base Sepolia/);
   await buildSwap(page);
-  await stage(page, 'Simulate').click();
+  await openEditorSection(page, 'Simulate');
   return {
     wallet, requested: () => requested, sends: () => control(request, 'MOCK_sends'),
     confirm: async () => { await expect.poll(() => confirmations.length).toBe(1); confirmations.shift()!(); },
@@ -121,7 +120,7 @@ async function expectWaitingForWallet(page: Page, owner: Awaited<ReturnType<type
   await expect(processing(page)).toHaveText('Waiting for wallet…'); await expect(processing(page)).toBeDisabled();
   await expect(processing(page)).toHaveAttribute('aria-busy', 'true');
   await processing(page).click({ force: true }); await processing(page).evaluate(button => (button as HTMLButtonElement).click());
-  await stage(page, 'Build').click(); await stage(page, 'Execute').click();
+  await openEditorSection(page, 'Build'); await openEditorSection(page, 'Execute');
   await expect(cta(page).locator('[data-lifecycle-action="approve"], [data-lifecycle-action="execute"], [data-lifecycle-action="continue"]')).toHaveCount(0);
   await page.waitForTimeout(300); expect(owner.requested()).toBe(count);
 }
@@ -142,7 +141,7 @@ async function simulateAndExecute(page: Page, owner: Awaited<ReturnType<typeof s
   await authorizeInWallet(page, owner, 1);
 }
 async function expectCleanNewWorkflow(page: Page, owner: Awaited<ReturnType<typeof setup>>, before: { workflowId: string; requested: number; sends: unknown }) {
-  await expect(stage(page, 'Build')).toHaveAttribute('aria-current', 'page');
+  await expectEditorSection(page, 'Build');
   await expect(page.locator('.build-flow-surface .canvas-empty')).toContainText('Start your workflow');
   await expect(page.locator('.build-canvas-head .revision')).toHaveText('0 actions');
   await expect(page.locator('.build-flow-surface .composer-card')).toHaveCount(0);
@@ -157,15 +156,15 @@ async function expectCleanNewWorkflow(page: Page, owner: Awaited<ReturnType<type
   await expect(owner.wallet.locator('.wallet-connection')).toHaveAttribute('title', /Base Sepolia/);
   expect(owner.requested()).toBe(before.requested); expect(await owner.sends()).toEqual(before.sends);
   // No stale simulation, Review or execution result belongs to the new workflow.
-  await stage(page, 'Simulate').click();
+  await openEditorSection(page, 'Simulate');
   await expect(page.getByRole('button', { name: /Approve|Execute workflow|Authorize in wallet/ })).toHaveCount(0);
-  await stage(page, 'Execute').click();
+  await openEditorSection(page, 'Execute');
   await expect(summary(page)).not.toContainText(/Execution completed|Transaction not submitted|Result Summary/);
   await expect(page.getByRole('button', { name: 'Create new workflow', exact: true })).toHaveCount(0);
-  await stage(page, 'Build').click();
+  await openEditorSection(page, 'Build');
 }
 
-test('UX-003/UX-004: completed run — locked CTAs, Return to Build keeps the workflow, Create new workflow starts clean', async ({ page, request, networkGuard }) => {
+test('UX-003/UX-004: completed run — locked CTAs, Return to the Canvas keeps the workflow, Create new workflow starts clean', async ({ page, request, networkGuard }) => {
   const errors: string[] = []; page.on('pageerror', error => errors.push(error.message));
   const owner = await setup(page, request);
   await simulateAndExecute(page, owner);
@@ -176,11 +175,11 @@ test('UX-003/UX-004: completed run — locked CTAs, Return to Build keeps the wo
   await owner.confirm();
   await expect(summary(page)).toContainText('Execution completed'); await expect(processing(page)).toHaveCount(0);
   const create = createNew(page);
-  await expect(create).toBeVisible(); await expect(summary(page).getByRole('button', { name: 'Return to Build', exact: true })).toBeVisible();
+  await expect(create).toBeVisible(); await expect(summary(page).getByRole('button', { name: 'Return to the Canvas', exact: true })).toBeVisible();
   // Return to Build keeps editing the same workflow; the result stays available.
   const authored = await readWorkflowIr(page);
-  await summary(page).getByRole('button', { name: 'Return to Build', exact: true }).click();
-  await expect(stage(page, 'Build')).toHaveAttribute('aria-current', 'page');
+  await summary(page).getByRole('button', { name: 'Return to the Canvas', exact: true }).click();
+  await expectEditorSection(page, 'Build');
   expect(await readWorkflowIr(page)).toBe(authored); await expect(page.locator('.build-canvas-head .revision')).toHaveText('1 action');
   // The old workflow's conversation must not survive a new workflow (BUILD-FLOFI-CONVERSATIONAL-001: the chat reports the recorded result and
   // offers Create new workflow; it never simulates over a completed run).
@@ -188,7 +187,7 @@ test('UX-003/UX-004: completed run — locked CTAs, Return to Build keeps the wo
   await expect(page.getByRole('log', { name: 'Conversation' }).locator('.message').last()).toContainText('Execution completed');
   await expect(page.getByRole('log', { name: 'Conversation' }).getByRole('button', { name: 'Create new workflow', exact: true })).toBeVisible();
   expect(owner.requested()).toBe(2);
-  await stage(page, 'Execute').click(); await expect(summary(page)).toContainText('Execution completed');
+  await openEditorSection(page, 'Execute'); await expect(summary(page)).toContainText('Execution completed');
   const before = { workflowId: (JSON.parse(authored) as { workflowId: string }).workflowId, requested: owner.requested(), sends: await owner.sends() };
   await createNew(page).click();
   await expectCleanNewWorkflow(page, owner, before);
@@ -240,9 +239,9 @@ test('BUILD-FIX-UX-001: declined request → Create new workflow → same swap �
   expect(fresh.workflowId).not.toBe(first.workflowId); expect(fresh.revision).toBe(1);
   // No stale execution state belongs to the new workflow, on any stage.
   await expect(cta(page).getByRole('button', { name: /^Simulate (workflow|again)$/ })).toBeEnabled({ timeout: 30_000 });
-  await stage(page, 'Execute').click();
+  await openEditorSection(page, 'Execute');
   await expect(summary(page)).not.toContainText(/Transaction not submitted|Execution already started|Result Summary|wallet request was cancelled/);
-  await stage(page, 'Simulate').click();
+  await openEditorSection(page, 'Simulate');
   // Nothing was sent while starting over; the next request is a new, explicitly confirmed one with the same connected wallet.
   expect(owner.requested()).toBe(1); expect(await owner.sends()).toBe(0);
   await simulateReviewExecute(page, owner, 2);
@@ -272,12 +271,12 @@ test('BUILD-FIX-UX-001: a declined request restored after reload offers Simulate
   await expect(cta(page).getByRole('button', { name: 'Simulate again', exact: true })).toBeEnabled({ timeout: 30_000 });
   await expect(cta(page)).not.toContainText('Recover execution');
   expect((JSON.parse(await readWorkflowIr(page)) as { workflowId: string }).workflowId).toBe(authored.workflowId);
-  await stage(page, 'Execute').click();
+  await openEditorSection(page, 'Execute');
   await expect(summary(page)).toContainText('Transaction not submitted');
   await expect(createNew(page)).toBeVisible();
   expect(owner.requested()).toBe(1); expect(await owner.sends()).toBe(0);
   // Navigating away and back does not resurrect recovery either.
-  await stage(page, 'Build').click(); await stage(page, 'Simulate').click();
+  await openEditorSection(page, 'Build'); await openEditorSection(page, 'Simulate');
   await simulateReviewExecute(page, owner, 2);
   expect(await pointer(page)).not.toBe(declined);
   await confirmApprovalAndSwap(page, owner, 2);
@@ -291,7 +290,7 @@ const swapIr = async (page: Page) => (JSON.parse(await readWorkflowIr(page)) as 
 const slippageOf = async (page: Page) => (await swapIr(page)).userConstraints.find(c => c.kind === 'MAXIMUM_SLIPPAGE_BPS')!.maximumBps;
 /** The applied limit everywhere the owner reads it: the card's action settings, the simulation, and the Review that authorizes it. */
 async function simulateAndReadLimits(page: Page) {
-  await stage(page, 'Simulate').click();
+  await openEditorSection(page, 'Simulate');
   const simulate = cta(page).getByRole('button', { name: /^Simulate (workflow|again)$/ });
   await expect(simulate).toBeEnabled({ timeout: 30_000 }); await simulate.click();
   await expect(authorize(page)).toBeEnabled({ timeout: 30_000 });
@@ -307,7 +306,7 @@ async function simulateAndReadLimits(page: Page) {
 test('BUILD-FIX-UX-001: a new swap starts at 100 bps; slippage and amount apply directly and each fresh simulation and Review uses them', async ({ page, request, networkGuard }) => {
   const errors: string[] = []; page.on('pageerror', error => errors.push(error.message));
   const owner = await setup(page, request);
-  await stage(page, 'Build').click();
+  await openEditorSection(page, 'Build');
   expect(await slippageOf(page)).toBe(100);
   await openFirstActionSettings(page);
   const inspector = page.getByRole('dialog', { name: 'Action settings', exact: true }), field = inspector.getByLabel('Slippage (bps)', { exact: true });
@@ -322,7 +321,7 @@ test('BUILD-FIX-UX-001: a new swap starts at 100 bps; slippage and amount apply 
   const first = await simulateAndReadLimits(page);
   expect(first.slippage).toBe('1.00%');
   // A slippage edit is one ordinary edit: it applies to the workflow and retires the earlier simulation and Review.
-  await stage(page, 'Build').click(); await openFirstActionSettings(page);
+  await openEditorSection(page, 'Build'); await openFirstActionSettings(page);
   await field.fill('75'); await inspector.getByRole('button', { name: 'Apply slippage', exact: true }).click();
   await expect(inspector).toContainText('Applied limit: 75 bps (0.75%)');
   expect(await slippageOf(page)).toBe(75);
@@ -331,7 +330,7 @@ test('BUILD-FIX-UX-001: a new swap starts at 100 bps; slippage and amount apply 
   expect(seventyFive.slippage).toBe('0.75%');
   // The Review (Strategy Manifest) authorizes exactly the applied limit.
   expect(first.maximum).toBe('1.00%'); expect(seventyFive.maximum).toBe('0.75%');
-  await stage(page, 'Build').click(); await openFirstActionSettings(page);
+  await openEditorSection(page, 'Build'); await openFirstActionSettings(page);
   await field.fill('100'); await field.press('Enter');
   expect(await slippageOf(page)).toBe(100);
   // An amount edit applies on Enter; the earlier Review can no longer authorize anything, and the fresh simulation uses the new amount.

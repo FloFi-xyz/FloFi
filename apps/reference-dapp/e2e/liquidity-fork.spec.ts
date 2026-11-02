@@ -3,9 +3,9 @@ import { authorLiquidity, expect, forkRpc, test } from './liquidity-fixtures';
 import { LIQUIDITY_USDC, LIQUIDITY_WETH, POSITION_MANAGER } from '@defi-workflow-engine/reference-compiler';
 import type { LiquidityOperation } from '../src/server/liquidity-service';
 import { E2E_APP_ORIGIN } from './app-origin';
+import { type EditorSection, openEditorSection } from './build-entry-navigation';
 test.skip(process.env.GRYLOO_LIQUIDITY_E2E !== 'replay', 'Requires the BUILD-006 closed transcript and opt-in local liquidity profile');
-const stage = (page: import('@playwright/test').Page, name: 'Build' | 'Simulate' | 'Execute') =>
-  page.getByRole('navigation', { name: 'Workflow stages' }).getByRole('button', { name, exact: true }).click();
+const stage = (page: import('@playwright/test').Page, name: EditorSection) => openEditorSection(page, name);
 async function operation(page: import('@playwright/test').Page, name: LiquidityOperation, tokenId?: string) {
   await stage(page, 'Simulate');
   await page.locator('.simulation-technical > summary').click();

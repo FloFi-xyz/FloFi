@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import {test,expect} from './fixtures';
 import {installSupplyWallet,resetSupplyHarness,authorSupply,reviewSupply,supplySendCount} from './supply-fixtures';
+import { openEditorSection } from './build-entry-navigation';
 test.afterEach(async({page},info)=>{if(info.status!==info.expectedStatus){const detail=await page.getByRole('region',{name:'Aave Supply'}).locator('pre').textContent(); console.error('Supply failure:',detail?JSON.parse(detail).error:'no details');}});
 test.beforeEach(async()=>{await resetSupplyHarness();});
 test('canonical Build → Supply → Simulate → Review → Execute through injected wallet',async({page})=>{
@@ -22,11 +23,11 @@ test('sufficient real allowance uses one Supply request and no approval',async({
   await page.getByRole('region',{name:'Aave Supply'}).getByRole('button',{name:'Execute',exact:true}).click();await expect(page.getByRole('link',{name:'Download Evidence Bundle'})).toBeVisible();expect(await supplySendCount(page)).toBe(1);
 });
 test('semantic edit invalidates reviewed authorization',async({page})=>{
-  await installSupplyWallet(page);await authorSupply(page);await reviewSupply(page);await page.getByRole('button',{name:'Build',exact:true}).click();
+  await installSupplyWallet(page);await authorSupply(page);await reviewSupply(page);await openEditorSection(page,'Build');
   await page.locator('.react-flow__node[data-id="node-002"] .flow-card').click();const form=page.getByRole('form',{name:'Edit Supply'});
   await form.getByLabel('Supply amount (USDC)').fill('11');await form.getByRole('button',{name:'Review Supply change'}).click();await page.getByRole('button',{name:'Apply proposal'}).click();
-  await page.getByRole('navigation',{name:'Workflow stages'}).getByRole('button',{name:'Execute',exact:true}).click();await expect(page.getByText('The workflow changed.',{exact:false})).toBeVisible();
-  await expect(page.getByRole('button',{name:'Execute',exact:true})).toHaveCount(1); // navigation only
+  await openEditorSection(page,'Execute');await expect(page.getByText('The workflow changed.',{exact:false})).toBeVisible();
+  await expect(page.getByRole('button',{name:'Execute',exact:true})).toHaveCount(0); // BUILD-FLOFI-CHAT-EDITOR-UX-001: no Execute action at all (Execute is no longer a tab)
   expect(await supplySendCount(page)).toBe(0);
 });
 
@@ -40,12 +41,12 @@ for(const kind of ['wrong chain','wrong account','approval rejected','Supply rej
 
 test('pending wallet signature keeps navigation available and sends the recorded request only once',async({page})=>{
   await installSupplyWallet(page,{pause:'APPROVAL'});await authorSupply(page);await reviewSupply(page);
-  const build=await page.getByRole('button',{name:'Build',exact:true}).boundingBox();if(!build)throw new Error('Build navigation missing');
+  const build=await page.getByRole('navigation',{name:'Workflow stages'}).getByRole('button',{name:'Editor',exact:true}).boundingBox();if(!build)throw new Error('Editor navigation missing');
   await page.getByRole('region',{name:'Aave Supply'}).getByRole('button',{name:'Execute',exact:true}).click();
   await expect(page.locator('[data-supply-wallet-pending="true"]')).not.toHaveAttribute('inert','');
   await page.mouse.click(build.x+build.width/2,build.y+build.height/2);
   await expect(page.getByRole('region',{name:'Aave Supply'})).toHaveCount(0);
-  await page.getByRole('navigation',{name:'Workflow stages'}).getByRole('button',{name:'Execute',exact:true}).click();
+  await openEditorSection(page,'Execute');
   await expect(page.locator('.summary-bar[data-workflow-revision="1"]')).toHaveCount(1);
   await page.evaluate(()=>{const w=window as unknown as {releaseSupplyWalletRequest:()=>void};w.releaseSupplyWalletRequest();});
   await expect(page.getByRole('button',{name:'Execute Supply',exact:true})).toBeVisible();expect(await supplySendCount(page)).toBe(1);

@@ -156,7 +156,7 @@ export function SolanaLiquidityPanel({ view }: { view: 'simulate' | 'execute' })
       : <p>{tr("Concentrated liquidity on Solana Mainnet via Orca Whirlpools: up to ")}{tr(fields.maxSol)}{tr(" SOL and ")}{tr(fields.maxDevUsdc)}{tr(" USDC between ")}{tr(fields.lowerPrice)}{tr(" and ")}{tr(fields.upperPrice)}{tr(" USDC per SOL.")}</p>)}
     <p role="note">{tr(devnet ? "Solana Devnet test tokens only. They have no value, and no real funds are used." : "This position uses real funds on Solana Mainnet.")}</p>
     {liquidity.retired && <p role="alert">{tr("The workflow changed. Prior authorization is invalid. Simulate the current position again.")}</p>}
-    {stagedPosition && liquidity.positions && !active && <p role="alert">{tr('The selected position is unavailable for this wallet. Choose a position again in Build.')}</p>}
+    {stagedPosition && liquidity.positions && !active && <p role="alert">{tr('The selected position is unavailable for this wallet. Choose a position again on the Canvas.')}</p>}
     {!liquidity.owner && <button type="button" disabled={jupiter.busy} onClick={() => void jupiter.connect(liquidity.walletChain)}>{tr("Connect Solana wallet")}</button>}
     {liquidity.owner && <p>{tr(devnet ? "Wallet connected · Solana Devnet: " : "Wallet connected · Solana Mainnet: ")}<span>{tr(liquidity.owner)}</span></p>}
     {jupiter.error && !liquidity.owner && <p role="status">{tr(jupiter.error)}</p>}

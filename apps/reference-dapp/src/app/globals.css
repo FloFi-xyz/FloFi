@@ -326,8 +326,6 @@
 .tabs{height:auto;gap:4px;order:0}
 .tabs button{min-height:44px;min-width:106px;display:flex;align-items:center;justify-content:center;gap:8px;padding:10px 14px;border:1px solid transparent;border-radius:8px;font-weight:600}
 .tabs button:hover{background:var(--soft)}.tabs button.selected{background:var(--blue-soft);border-color:var(--accent-line);color:var(--blue)}
-.stage-number{width:20px;height:20px;flex:none;display:grid;place-items:center;border:1px solid var(--line);border-radius:50%;font-size:10px;font-variant-numeric:tabular-nums}
-.tabs button.selected .stage-number{background:var(--primary);border-color:var(--primary);color:var(--on-accent)}
 .top-meta{min-width:0;display:flex;justify-content:flex-end;gap:8px;flex-wrap:nowrap;white-space:normal;color:var(--ink)}
 .top-meta .wallet-connection{display:inline;font-size:12px;line-height:1.6;overflow-wrap:anywhere}
 .top-meta>button,.shell-network-row>button{min-height:36px;border:1px solid var(--line);border-radius:7px;background:var(--paper);padding:7px 10px;color:var(--blue);font-weight:600;font-size:12px}
@@ -1620,7 +1618,6 @@ button.wallet-option .wallet-option-status{border-color:var(--accent-line);backg
   .mobile-build-navigation { left: 12px; right: 12px; }
   .tabs { gap: 2px; }
   .tabs button { gap: 4px; padding-inline: 4px; font-size: 12px; }
-  .stage-number { display: none; }
   .workflow-workspace :is(.canvas-head,.canvas-foot) { padding-inline: 12px; }
   .canvas-head .canvas-toolbox button span { display: inline; }
   .canvas-head .canvas-toolbox { gap: 4px; }
@@ -1876,9 +1873,11 @@ button.wallet-option .wallet-option-status{border-color:var(--accent-line);backg
 .message p.conversation-review-note{margin-top:8px;color:var(--muted);font-size:12px}
 .message p.conversation-question{margin-top:10px}
 
-/* BUILD0-UX-001: Build 0 fills the workspace edge to edge (its own dotted field); the stage badges keep "0 Build" and "1 Build" distinct on phones. */
+/* BUILD0-UX-001: Build 0 (Chat) fills the workspace edge to edge (its own dotted field). */
 .main.build-entry-workspace{max-width:none;margin:0;padding:0}
-@media (max-width: 480px) { .tabs button[data-build-stage] .stage-number { display: grid; width: 16px; height: 16px; font-size: 9px; } }
+/* BUILD-FLOFI-CHAT-EDITOR-UX-001: the Editor's footer opens its simulation and execution sections; secondary to the Canvas lifecycle action. */
+.summary-sections{display:flex;flex-wrap:wrap;justify-content:flex-end;gap:8px}
+.summary-bar .summary-sections button:not(:disabled){background:var(--soft);border-color:var(--line);color:var(--ink)}
 /* BUILD0-UX-001: the chat-first Execute status panel (replaces the "Result details" and "View technical details" disclosures). */
 .execution-status-panel{margin:14px 0 0;padding:18px 20px;display:grid;gap:12px;min-width:0}
 .execution-status-panel>.simulation-validity{margin:0}

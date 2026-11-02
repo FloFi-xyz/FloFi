@@ -3,6 +3,7 @@ import {
   authorSwap, executionPanel, expect, forkPanel, openTechnicalDetails, requestStep, reviewAndConnect, simulateOnFork, stepState, test, visual,
 } from './mode-a-fixtures';
 import { E2E_APP_ORIGIN } from './app-origin';
+import { openEditorSection } from './build-entry-navigation';
 
 const sends = (calls: readonly { method: string }[]) => calls.filter(call => call.method === 'eth_sendTransaction').length;
 
@@ -56,7 +57,7 @@ test('an expired fork quote blocks the first wallet request', async ({ page, for
 test('slippage above the reviewed ceiling cannot be simulated or authorized', async ({ page, fork, testWallet }) => {
   await page.goto('/__engineering');
   await authorSwap(page, 'WETH_TO_USDC', '1', '301');
-  await page.getByRole('navigation', { name: 'Workflow stages' }).getByRole('button', { name: 'Simulate', exact: true }).click();
+  await openEditorSection(page, 'Simulate');
   await openTechnicalDetails(page);
   await forkPanel(page).getByRole('button', { name: /^Simulate on local fork for revision \d+$/ }).click();
   await expect(forkPanel(page)).toContainText('SLIPPAGE_NOT_ELIGIBLE');
@@ -67,7 +68,7 @@ test('slippage above the reviewed ceiling cannot be simulated or authorized', as
 test('manipulated calldata or an unknown spender in a server response is blocked in the browser', async ({ page, testWallet }) => {
   await page.goto('/__engineering');
   await authorSwap(page, 'WETH_TO_USDC', '1', '100');
-  await page.getByRole('navigation', { name: 'Workflow stages' }).getByRole('button', { name: 'Simulate', exact: true }).click();
+  await openEditorSection(page, 'Simulate');
   await openTechnicalDetails(page);
   // Intercept only the fork simulation action: earlier authoring actions are unrelated to this tamper case.
   await page.route(E2E_APP_ORIGIN + '/**', async route => {

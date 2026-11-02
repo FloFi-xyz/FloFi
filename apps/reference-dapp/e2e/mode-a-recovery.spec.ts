@@ -2,10 +2,9 @@
 import {
   authorSwap, executionPanel, expect, forkRpc, preparedRecord, requestStep, reviewAndConnect, simulateOnFork, stepState, test, visual,
 } from './mode-a-fixtures';
-import { openBuilder, reloadBuilder } from './build-entry-navigation';
+import { type EditorSection, openBuilder, openEditorSection, reloadBuilder } from './build-entry-navigation';
 
-const stage = (page: import('@playwright/test').Page, name: 'Execute') =>
-  page.getByRole('navigation', { name: 'Workflow stages' }).getByRole('button', { name, exact: true }).click();
+const stage = (page: import('@playwright/test').Page, name: EditorSection) => openEditorSection(page, name);
 
 test('an unknown wallet result survives a browser restart and is recovered from the fork without a duplicate', async ({ page, fork, testWallet }) => {
   await openBuilder(page);

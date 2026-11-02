@@ -57,7 +57,7 @@ export function describeProposal(before: EditorState, after: EditorState, comman
       `FloFi position ${command.positionMint}: ${command.operation === 'EXIT' ? 'remove all liquidity, collect fees and close it' : `remove ${command.partBps! / 100}% of its liquidity and collect fees`}`,
       `Position step: ticks ${command.input.lower} to ${command.input.upper} on Solana Devnet (Orca), its only financial step` +
         (removed.length ? `; removed steps: ${removed.map(node => node.nodeId).join(', ')}` : ''),
-      'Applying only prepares the operation in Simulate. Nothing is removed until you simulate, review and sign in your wallet.']);
+      'Applying only prepares the operation for simulation. Nothing is removed until you simulate, review and sign in your wallet.']);
   }
   if(command.type==='AUTHOR_LENDING')return [`Revision ${before.workflow.revision} → ${after.workflow.revision}`,`Supply ${command.input.supply} Aave USDC → health checkpoint HF ≥ 2.0 → Borrow ${command.input.borrow} Aave USDC → Swap exactly borrowed USDC to WETH`, `Owner ${command.input.owner}; Base Sepolia; slippage ${command.input.slippage} bps`, 'Debt remains after Swap. If Swap fails, borrowed USDC and debt remain; no automatic repayment or retry.', 'Acceptance replaces the workflow and invalidates previous simulation, Manifest and Review. Full public path must pass before any transaction.'];
   if (command.type === 'AUTHOR_CROSS_CHAIN_LIQUIDITY') return Object.freeze([
@@ -158,7 +158,7 @@ export function describeProposal(before: EditorState, after: EditorState, comman
     `Slippage: ${oldSwap?.slippage ?? 'none'} → ${newSwap.slippage ?? 'missing'} bps`,
     `Assets: ${JSON.stringify(context.assets[newSwap.from].asset)} → ${JSON.stringify(context.assets[newSwap.to].asset)}`,
     `Amount lock: ${Boolean(oldNode?.lockedParameters.length)} → ${Boolean(newNode?.lockedParameters.length)}`,
-    command.type === 'ADD_COW_SWAP' ? 'Minimum output: 0 unquoted; local CoW signed-intent review follows in Simulate' : 'Minimum output: 0 unquoted; execution unavailable',
+    command.type === 'ADD_COW_SWAP' ? 'Minimum output: 0 unquoted; local CoW signed-intent review follows in the simulation' : 'Minimum output: 0 unquoted; execution unavailable',
   ]);
   return Object.freeze([`Revision ${before.workflow.revision} → ${after.workflow.revision}`, `Edit: ${command.type}`]);
 }

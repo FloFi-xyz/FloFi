@@ -2,7 +2,7 @@
 import { test, expect, openSimulationDetails, sendChatCommand, assertNoFinancialCanvasAction } from './fixtures';
 import { installSupplyWallet, resetSupplyHarness, authorSupply, supplySendCount, SUPPLY_OWNER, REPAY_OWNER, repayOptions } from './supply-fixtures';
 import { withdrawOptions } from './withdraw-fixtures';
-import { openBuilder, reloadBuilder } from './build-entry-navigation';
+import { openBuilder, openEditorSection, reloadBuilder } from './build-entry-navigation';
 
 test('a valid MOCKED Supply simulation cannot grant production Review or submit a transaction', async ({ page, networkGuard }) => {
   await resetSupplyHarness();
@@ -18,7 +18,7 @@ test('a valid MOCKED Supply simulation cannot grant production Review or submit 
   await expect(page.locator('.review-authorization-details')).toContainText('A simulation that can authorize this workflow is required before approval.');
   expect(await supplySendCount(page)).toBe(0);
   await expect(page.getByRole('link', { name: 'Download Evidence Bundle' })).toHaveCount(0);
-  await page.getByRole('navigation', { name: 'Workflow stages' }).getByRole('button', { name: 'Execute', exact: true }).click();
+  await openEditorSection(page, 'Execute');
   await assertNoFinancialCanvasAction(page);
   expect(await supplySendCount(page)).toBe(0);
   await reloadBuilder(page);
@@ -51,13 +51,13 @@ for (const row of [
     await expect(page.getByRole('button', { name: 'Authorize in wallet', exact: true })).toBeDisabled();
     await expect(page.locator('.review-authorization-details')).toContainText('A simulation that can authorize this workflow is required before approval.');
     expect(await supplySendCount(page)).toBe(0);
-    await page.getByRole('navigation', { name: 'Workflow stages' }).getByRole('button', { name: 'Execute', exact: true }).click();
+    await openEditorSection(page, 'Execute');
     await assertNoFinancialCanvasAction(page);
     await expect(page.getByRole('link', { name: 'Download Evidence Bundle' })).toHaveCount(0);
     await expect(page.getByRole('button', { name: 'Observe existing transaction' })).toHaveCount(0);
     expect(await supplySendCount(page)).toBe(0);
     await reloadBuilder(page);
-    await page.getByRole('navigation', { name: 'Workflow stages' }).getByRole('button', { name: 'Execute', exact: true }).click();
+    await openEditorSection(page, 'Execute');
     await assertNoFinancialCanvasAction(page);
     await expect(page.getByRole('link', { name: 'Download Evidence Bundle' })).toHaveCount(0);
     await expect(page.getByRole('button', { name: 'Observe existing transaction' })).toHaveCount(0);
@@ -86,7 +86,7 @@ test('Ethereum Sepolia WBTC retains the correct chain, asset and amount while MO
   await expect(page.getByRole('button', { name: 'Authorize in wallet', exact: true })).toBeDisabled();
   await expect(page.locator('.review-authorization-details')).toContainText('A simulation that can authorize this workflow is required before approval.');
   expect(await supplySendCount(page)).toBe(0);
-  await page.getByRole('navigation', { name: 'Workflow stages' }).getByRole('button', { name: 'Execute', exact: true }).click();
+  await openEditorSection(page, 'Execute');
   await assertNoFinancialCanvasAction(page);
   await expect(page.getByRole('link', { name: 'Download Evidence Bundle' })).toHaveCount(0);
   expect(await supplySendCount(page)).toBe(0);

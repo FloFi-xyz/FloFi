@@ -5,7 +5,7 @@ import { seedCopilotPosition } from './copilot-solana-fixtures';
 import { assertSimulationReviewBlocked } from './release-safety-fixtures';
 import { chooseSolanaWallet, signRequests } from './jupiter-fixtures';
 import { devnetControl, installDevnetWallet, resetDevnetHarness } from './solana-devnet-fixtures';
-import { openBuilder } from './build-entry-navigation';
+import { type EditorSection, openBuilder, openEditorSection } from './build-entry-navigation';
 
 // PR B: context-aware Solana Devnet authoring in the Copilot, on committed replay answers (e2e/copilot/replay-v2.json) and the MOCKED Devnet
 // loopback. The pool price and the wallet's FloFi positions are read by FloFi itself; BUILD-FLOFI-CONVERSATIONAL-001: a valid request is committed to
@@ -16,7 +16,7 @@ const conversation = (page: Page) => page.getByRole('log', { name: 'Conversation
 const copilotSays = (page: Page) => conversation(page).locator('.message.ai').last();
 const proposal = (page: Page) => page.getByRole('button', { name: /^Review proposed change:/ });
 const revision = (page: Page, value: number) => expect(page.locator(`.summary-bar[data-workflow-revision="${value}"]`)).toHaveCount(1);
-const stage = (page: Page, name: string) => page.getByRole('navigation', { name: 'Workflow stages' }).getByRole('button', { name, exact: true }).click();
+const stage = (page: Page, name: EditorSection) => openEditorSection(page, name);
 const liquidityPanel = (page: Page) => page.getByRole('region', { name: 'Solana Devnet liquidity' });
 /** The chat's confirmations that it committed a change, counted from the start of the conversation. */
 const commits = (page: Page, count: number) => expect(conversation(page).locator('.message', { hasText: CHAT_COMMITTED })).toHaveCount(count);

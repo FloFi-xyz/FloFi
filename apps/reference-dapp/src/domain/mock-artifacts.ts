@@ -13,15 +13,15 @@ export type Eligibility = { readonly eligible: true } | { readonly eligible: fal
 
 export function generationEligibility(workflow: Workflow, context: ReviewContext): Eligibility {
   if (!workflow.nodes.some(node => node.actionType === SWAP_ACTION)) {
-    return { eligible: false, reason: 'Add a Base swap in Build before generating mocked artifacts.' };
+    return { eligible: false, reason: 'Add a Base swap in the Editor before generating mocked artifacts.' };
   }
   let findings;
   try { findings = lintWorkflow(workflow, context).findings; }
   catch (cause) {
-    return { eligible: false, reason: `Workflow review failed (${cause instanceof Error ? cause.message : 'INVALID_WORKFLOW'}). Fix the workflow in Build first.` };
+    return { eligible: false, reason: `Workflow review failed (${cause instanceof Error ? cause.message : 'INVALID_WORKFLOW'}). Fix the workflow in the Editor first.` };
   }
   const block = findings.find(finding => finding.severity === 'BLOCK' && finding.code !== 'UNQUOTED_EXECUTION_UNAVAILABLE');
-  if (block) return { eligible: false, reason: `${block.code} on ${block.nodeId} blocks generation. Resolve it in Build first.` };
+  if (block) return { eligible: false, reason: `${block.code} on ${block.nodeId} blocks generation. Resolve it in the Editor first.` };
   return { eligible: true };
 }
 

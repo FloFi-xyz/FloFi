@@ -49,7 +49,7 @@ describe('local mocked artifact generation', () => {
   });
 
   it('reports eligibility reasons and refuses ineligible generation', async () => {
-    expect(generationEligibility(initialEditor().workflow, context)).toEqual({ eligible: false, reason: 'Add a Base swap in Build before generating mocked artifacts.' });
+    expect(generationEligibility(initialEditor().workflow, context)).toEqual({ eligible: false, reason: 'Add a Base swap in the Editor before generating mocked artifacts.' });
     const blocked = authored(swap('USDC_TO_WETH', '2', '301')).workflow;
     const eligibility = generationEligibility(blocked, context);
     expect(eligibility.eligible).toBe(false);

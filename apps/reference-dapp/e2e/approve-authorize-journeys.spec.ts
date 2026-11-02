@@ -19,6 +19,7 @@ import { E2E_APP_ORIGIN as APP_ORIGIN } from './app-origin';
 import { AUTHORIZE_IN_WALLET, proveConnectedEvmWallet, signingSurface } from './fixtures';
 import { guardedContext, installJourneyWallet, walletRequests } from './journey-fixtures';
 import { assertMcpHarness, CLIENT_NAME, connectViaBrowser, hostLog, mcpClient, openHost, panelHtmlOf } from './mcp-fixtures';
+import { expectEditorSection } from './build-entry-navigation';
 
 test.skip(process.env.GRYLOO_MCP_E2E !== 'EMBEDDED_LOOPBACK_ONLY' || process.env.FLOFI_SWAP_EXECUTION_E2E !== 'MOCKED_LOOPBACK_ONLY',
   'Requires the MCP harness and the opt-in loopback swap execution harness');
@@ -170,12 +171,11 @@ test('optional Canvas: View in FloFi → action card → one Authorize in wallet
   await proveConnectedEvmWallet(page, region, owner.address);
   await expect(region.getByRole('status')).toContainText('Ready for your review.');
   // FloFi prepared the fresh simulation and shows it on the Canvas's Simulate stage; the one owner action is on the Canvas.
-  const stages = page.getByRole('navigation', { name: 'Workflow stages' });
-  await expect(stages.getByRole('button', { name: 'Simulate', exact: true })).toHaveAttribute('aria-current', 'page');
+  await expectEditorSection(page, 'Simulate');
   await expect(page.getByRole('region', { name: 'Simulation workflow graph', exact: true }).locator('.composer-card')).toContainText('Base Sepolia');
   const actions = page.locator('.canvas-primary-action');
   await authorizeAndComplete(journey, actions);
-  await expect(stages.getByRole('button', { name: 'Execute', exact: true })).toHaveAttribute('aria-current', 'page');
+  await expectEditorSection(page, 'Execute');
   await expect(page.locator('.execution-summary')).toContainText('Execution completed', { timeout: 45_000 });
   await expect(page.locator('.execution-summary')).toContainText('1 of 1');
   await finish(journey, await receiptInChat(journey));

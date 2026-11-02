@@ -4,7 +4,7 @@ import { installSupplyWallet, SUPPLY_OWNER } from './supply-fixtures';
 import { configureCanvasAction } from './composer-authoring-fixtures';
 import { selectSettingsTheme } from './settings-fixtures';
 import type { Page } from '@playwright/test';
-import { openBuilder } from './build-entry-navigation';
+import { expectEditorSection, openBuilder, openEditorSection } from './build-entry-navigation';
 
 const workspaces = ['Credentials', 'Agents', 'Passkeys'] as const;
 function watchErrors(page: Page) {
@@ -50,7 +50,8 @@ for (const theme of ['light', 'dark'] as const) {
       await expect(page.getByRole('main')).toHaveCount(1);
       await expect(page.getByRole('group', { name: 'Wallet connection' })).toContainText('0x1111…1111');
       await expect(stages.locator('[aria-current=page]')).toHaveCount(0);
-      for (const stage of ['Dashboard', 'Build', 'Simulate', 'Execute']) await expect(stages.getByRole('button', { name: stage, exact: true })).toBeVisible();
+      // BUILD-FLOFI-CHAT-EDITOR-UX-001: Dashboard | Chat | Editor; Simulate and Execute are the Editor's sections, not tabs.
+      await expect(stages.getByRole('button')).toHaveText(['Dashboard', 'Chat', 'Editor']);
       await page.locator('.navigation-trigger').click();
       const navigation = page.getByRole('navigation', { name: 'Workspace navigation' });
       await expect(navigation.getByRole('link', { name: label, exact: true })).toHaveAttribute('aria-current', 'page');
@@ -110,7 +111,7 @@ for (const theme of ['light', 'dark'] as const) {
     await stages.getByRole('button', { name: 'Dashboard', exact: true }).click();
     await expect(page).toHaveURL('/app/dashboard');
     await expect(page.getByRole('main', { name: 'Dashboard', exact: true })).toBeVisible();
-    await stages.getByRole('button', { name: 'Build', exact: true }).click();
+    await openEditorSection(page, 'Build');
     await expect(page).toHaveURL('/app'); await expect(page.locator('.canvas-empty-mascot')).toBeVisible();
     expect(errors).toEqual([]);
   });
@@ -158,19 +159,18 @@ for (const theme of ['light', 'dark'] as const) {
     await page.evaluate(() => document.fonts.ready);
     await page.getByRole('button', { name: 'Add supply', exact: true }).click(); await configureCanvasAction(page, '1');
     const measurements: Record<string, Awaited<ReturnType<typeof stageGeometry>>> = {};
-    const stages = page.getByRole('navigation', { name: 'Workflow stages' });
     for (const width of [320, 375, 768, 1024, 1440]) {
       await page.setViewportSize({ width, height: 900 });
-      for (const [index, stage] of ['Build', 'Simulate', 'Execute'].entries()) {
-        await stages.getByRole('button', { name: stage, exact: true }).click();
-        await expect(stages.getByRole('button', { name: stage, exact: true })).toHaveAttribute('aria-current', 'page');
+      for (const [index, stage] of (['Build', 'Simulate', 'Execute'] as const).entries()) {
+        await openEditorSection(page, stage);
+        await expectEditorSection(page, stage);
         await page.evaluate(() => window.scrollTo(0, 0));
         const before = await stageGeometry(page);
         measurements[`${width}-${stage}`] = before;
         await navigateWorkspace(page, workspaces[index]!);
-        await stages.getByRole('button', { name: stage, exact: true }).click();
+        await openEditorSection(page, stage);
         await expect(page).toHaveURL('/app');
-        await expect(stages.getByRole('button', { name: stage, exact: true })).toHaveAttribute('aria-current', 'page');
+        await expectEditorSection(page, stage);
         await page.evaluate(() => window.scrollTo(0, 0));
         expect(await stageGeometry(page)).toEqual(before);
         await expect(page.locator('.canvas-navigator')).toBeVisible();

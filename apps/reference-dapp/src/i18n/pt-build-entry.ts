@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 /** BUILD0-UX-001: Build 0 (the intent entry) and the shorter Execute workspace. */
 export const portugueseBuildEntry: Readonly<Record<string, string>> = {
-  'Build 0': 'Criar 0', 'Describe what you want to do': 'Descreva o que você quer fazer', 'Edit the workflow on the Canvas and in the chat': 'Edite o workflow no Canvas e no chat',
+  'Describe what you want to do': 'Descreva o que você quer fazer', 'Edit the workflow on the Canvas and in the chat': 'Edite o workflow no Canvas e no chat',
   'What do you': 'O que você', 'want to do?': 'quer fazer?',
   'Describe your goal in one sentence. FloFi turns it into a workflow you can review before simulating or executing.':
     'Descreva seu objetivo em uma frase. O FloFi transforma isso em um workflow que você pode revisar antes de simular ou executar.',

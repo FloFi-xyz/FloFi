@@ -8,16 +8,16 @@ import type { Page } from '@playwright/test';
 import { cowCancellationDigest, cowOrderDigest, type CowOrder } from '@defi-workflow-engine/reference-compiler';
 import { signCowDisposable } from '@defi-workflow-engine/reference-executor';
 import { test as guarded, expect, openProposalReview } from './fixtures';
+import { type EditorSection, expectEditorSection, openEditorSection } from './build-entry-navigation';
 
 export type CowWallet = { readonly owner: string; readonly calls: { method: string; params: unknown[] }[];
   chain: string; account: string; reject: boolean };
 export const cowPanel = (page: Page, stage: 'simulation' | 'execution') =>
   page.getByRole('region', { name: 'CoW signed-intent ' + stage });
-export async function stage(page: Page, name: 'Build' | 'Simulate' | 'Execute'): Promise<void> {
-  const tab = page.getByRole('navigation', { name: 'Workflow stages' }).getByRole('button', { name, exact: true });
-  // Selecting the current stage is a no-op in the app; clicking it anyway only waits for the header to become actionable.
-  if (await tab.getAttribute('aria-current') !== 'page') await tab.click();
-  await expect(tab).toHaveAttribute('aria-current', 'page');
+export async function stage(page: Page, name: EditorSection): Promise<void> {
+  // BUILD-FLOFI-CHAT-EDITOR-UX-001: Simulate and Execute are the Editor's sections. Opening the current section is a no-op in the app.
+  await openEditorSection(page, name);
+  await expectEditorSection(page, name);
   if (name === 'Execute') {
     const details = page.locator('.execute-technical');
     await expect(details).toBeVisible();

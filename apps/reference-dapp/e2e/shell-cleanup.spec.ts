@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { test, expect } from './fixtures';
 import { installSupplyWallet } from './supply-fixtures';
-import { openBuilder } from './build-entry-navigation';
+import { openBuilder, openEditorSection } from './build-entry-navigation';
 
 test('Build opens directly into the workspace with a standalone logo and neutral Dashboard item', async ({ page }) => {
   await openBuilder(page);
@@ -13,10 +13,9 @@ test('Build opens directly into the workspace with a standalone logo and neutral
   await expect(page.locator('.brand small')).toHaveCount(0);
   const nav = page.getByRole('navigation', { name: 'Workflow stages' });
   await expect(nav.getByRole('button').first()).toHaveText('Dashboard');
-  await expect(nav.getByRole('button', { name: 'Dashboard', exact: true }).locator('.stage-number')).toHaveCount(0);
-  for (const [index, stage] of ['Build', 'Simulate', 'Execute'].entries()) {
-    await expect(nav.getByRole('button', { name: stage, exact: true }).locator('.stage-number')).toHaveText(String(index + 1));
-  }
+  // BUILD-FLOFI-CHAT-EDITOR-UX-001: Dashboard | Chat | Editor, with no stage numbers.
+  await expect(nav.getByRole('button')).toHaveText(['Dashboard', 'Chat', 'Editor']);
+  await expect(nav.locator('.stage-number')).toHaveCount(0);
 });
 
 test('Dashboard has an intentionally blank content area', async ({ page }) => {
@@ -40,12 +39,12 @@ test('switching through Dashboard preserves the canonical draft and supported Bu
   await page.getByRole('button', { name: 'Apply proposal', exact: true }).click();
   await expect(page.locator('.summary-bar')).toHaveAttribute('data-workflow-revision', '2');
   await page.getByRole('button', { name: 'Dashboard', exact: true }).click();
-  await page.getByRole('button', { name: 'Build', exact: true }).click();
+  await openEditorSection(page, 'Build');
   await expect(page.locator('.flow-card')).toHaveCount(1);
   await expect(form.getByLabel('Supply amount (USDC)')).toHaveValue('2');
   await expect(page.locator('.summary-bar')).toHaveAttribute('data-workflow-revision', '2');
-  for (const stage of ['Simulate', 'Execute']) {
-    await page.getByRole('navigation', { name: 'Workflow stages' }).getByRole('button', { name: stage, exact: true }).click();
+  for (const stage of ['Simulate', 'Execute'] as const) {
+    await openEditorSection(page, stage);
     await expect(page.getByRole('heading', { level: 1, name: stage, exact: true })).toBeVisible();
   }
 });

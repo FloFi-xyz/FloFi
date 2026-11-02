@@ -72,12 +72,12 @@ test('wallet changes require a new review and never carry over authorization', a
   await expect(page.getByRole('button', { name: 'Simulate again', exact: true })).toBeVisible();
   expect(await page.evaluate(() => window.flofiSigningAcceptance.counts())).toEqual({ reviews: 0, walletRequests: 0 }); verify();
 });
-for (const width of [320, 1440]) test(`optional Canvas and normal Back to Build geometry at ${width}px`, async ({ page }) => {
+for (const width of [320, 1440]) test(`optional Canvas and normal Back to the Canvas geometry at ${width}px`, async ({ page }) => {
   const verify = await open(page, await solanaTransferReviewFixture(), width);
   await expect(page.locator('body')).not.toContainText(/mock-read|mock:local|sample units|beta testing/);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   await page.getByRole('button', { name: 'Open Canvas', exact: true }).click();
-  const back = page.getByRole('button', { name: 'Back to Build', exact: true }); await expect(back).toBeVisible();
+  const back = page.getByRole('button', { name: 'Back to the Canvas', exact: true }); await expect(back).toBeVisible();
   const rect = await back.boundingBox(); expect(rect!.height).toBeLessThanOrEqual(52); expect(rect!.width).toBeLessThan(180);
   expect(rect!.x).toBeGreaterThanOrEqual(0); expect(rect!.x + rect!.width).toBeLessThanOrEqual(width);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);

@@ -3,7 +3,7 @@ import { test, expect } from './fixtures';
 import { installSupplyWallet, setSupplyWalletChain } from './supply-fixtures';
 import { configureCanvasAction, configureCanvasPool, openCanvasSettings } from './composer-authoring-fixtures';
 import type { Locator } from '@playwright/test';
-import { openBuilder } from './build-entry-navigation';
+import { editorSectionAction, openBuilder, openEditorSection } from './build-entry-navigation';
 
 async function checkTokenPills(card: Locator) {
   for (const pill of await card.locator('.composer-amount-box > .composer-token-chip').all()) {
@@ -156,7 +156,7 @@ for (const action of ['swap', 'bridge'] as const) test(`${action} shows why ther
   await openCanvasSettings(page);
   await expect(page.getByRole('dialog', { name: 'Action settings', exact: true }).getByLabel(action === 'swap' ? 'Input amount (USDC)' : 'Cross-chain amount (USDC)', { exact: true })).toHaveValue('2.5');
   await expect(card.getByRole('button', { name: 'Review amount', exact: true })).toHaveCount(0);
-  await page.getByRole('navigation', { name: 'Workflow stages' }).getByRole('button', { name: 'Simulate', exact: true }).click();
+  await openEditorSection(page, 'Simulate');
   await expect(page.locator('.simulate-flow-surface .composer-amount')).toHaveText('2.5 USDC');
   expect(await page.evaluate(() => (window as unknown as { supplyWalletRequests: { method: string }[] }).supplyWalletRequests.filter(request => /send|sign/i.test(request.method)))).toEqual([]);
 });
@@ -193,7 +193,7 @@ for (const action of ['borrow', 'repay', 'withdraw'] as const) test(`${action} u
   }
   const revision = page.locator('.summary-bar');
   const simulate = page.getByRole('button', { name: 'Simulate workflow', exact: true });
-  const execute = page.getByRole('navigation', { name: 'Workflow stages' }).getByRole('button', { name: 'Execute', exact: true });
+  const execute = editorSectionAction(page, 'Execute');
   await expect(simulate).toBeDisabled(); await expect(execute).toBeDisabled();
   await expect(revision).toHaveAttribute('data-workflow-revision', '0');
   await openCanvasSettings(page);
@@ -223,7 +223,7 @@ for (const action of ['borrow', 'repay', 'withdraw'] as const) test(`${action} u
   await settingsAmount.fill('3.05'); await expect(inline).toHaveValue('3.05');
   await review.click(); await expect(apply).toBeEnabled(); await apply.click();
   await expect(revision).toHaveAttribute('data-workflow-revision', '2');
-  await page.getByRole('navigation', { name: 'Workflow stages' }).getByRole('button', { name: 'Simulate', exact: true }).click();
+  await openEditorSection(page, 'Simulate');
   await expect(page.locator('.simulate-flow-surface .composer-amount')).toHaveText('3.05 USDC');
   expect(await page.evaluate(() => (window as unknown as { supplyWalletRequests: { method: string }[] }).supplyWalletRequests.filter(request => /send|sign/i.test(request.method)))).toEqual([]);
 });
@@ -304,7 +304,7 @@ test('Supply edits inline with one shared editor value and validates through its
   }
   await openCanvasSettings(page); await expect(panel.getByLabel('Supply amount (USDC)', { exact: true })).toHaveValue('3');
   await expect(page.locator('.summary-bar')).toHaveAttribute('data-workflow-revision', '1');
-  await page.getByRole('navigation', { name: 'Workflow stages' }).getByRole('button', { name: 'Simulate', exact: true }).click();
+  await openEditorSection(page, 'Simulate');
   await expect(page.locator('.simulate-flow-surface .composer-amount')).toHaveText('3 USDC');
   expect(await page.evaluate(() => (window as unknown as { supplyWalletRequests: { method: string }[] }).supplyWalletRequests.filter(request => /sign|send/i.test(request.method)))).toEqual([]);
 });
@@ -354,7 +354,7 @@ test('header wallet network follows wallet changes without rewriting action amou
     await expect(page.locator('.summary-bar')).toHaveAttribute('data-workflow-revision', '0');
     await expect(wallet).toContainText(value === 'MAINNET' ? 'Base (8453)' : 'Base Sepolia');
     await expect(page.getByRole('button', { name: 'Simulate workflow', exact: true })).toBeDisabled();
-    await expect(page.getByRole('navigation', { name: 'Workflow stages' }).getByRole('button', { name: 'Execute', exact: true })).toBeDisabled();
+    await expect(editorSectionAction(page, 'Execute')).toBeDisabled();
   }
   expect(await page.evaluate(() => (window as unknown as { supplyWalletRequests: { method: string }[] }).supplyWalletRequests.filter(request => /sign|send|switch|addEthereumChain/i.test(request.method)))).toEqual([]);
   await configureCanvasAction(page, '2');

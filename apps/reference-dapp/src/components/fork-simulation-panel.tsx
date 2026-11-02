@@ -84,7 +84,7 @@ export function ForkSimulationPanel() {
           : 'The browser has not verified these payloads; no wallet request is possible.')}</p>
       {prepared.excludedMockNodes.length > 0 && <p className="simulate-note">{tr("Mock nodes excluded from execution: ")}{tr(prepared.excludedMockNodes.join(', '))}{tr(". They have no financial meaning.")}</p>}
       <p className="not-modeled"><strong>{tr("Not modeled:")}</strong>{tr(" current markets, MEV, other users and L1 data costs beyond the fork. USD values: not modeled.")}</p>
-      <p className="simulate-next">{tr(current && !verifyError ? 'Next step: review the Mode A Manifest and both exact wallet authorizations in Execute.' : 'Next step: simulate the current revision.')}</p>
+      <p className="simulate-next">{tr(current && !verifyError ? 'Next step: review the Mode A Manifest and both exact wallet authorizations in the execution view.' : 'Next step: simulate the current revision.')}</p>
     </div>}
   </section>;
 }

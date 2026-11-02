@@ -28,9 +28,9 @@ export const portugueseAutomations: Readonly<Record<string, string>> = {
   // Cards
   'Proposal from {0}': 'Proposta de {0}', 'Scheduled for': 'Agendada para', 'met': 'atingida', 'not observed': 'sem observação', '{0} since the last round': '{0} desde a última ronda',
   'fixture': 'dados de teste', 'Buy': 'Comprar', 'Sell': 'Vender', 'No BTC swap route in FloFi yet': 'O FloFi ainda não tem rota de troca para BTC',
-  'Not executable on this deployment': 'Não executável neste ambiente', 'REAL FUNDS': 'FUNDOS REAIS', 'Amount ({0})': 'Montante ({0})', 'Prepare in Build': 'Preparar em Criar',
-  'This is your own new trade, not part of this automation: it goes to your Build draft as an ordinary proposal, exactly as if you had composed it there. The automation adds no authority and no limits to it. Nothing is signed: apply it, simulate and review the Strategy Manifest first.':
-    'Esta é uma nova operação sua, que não faz parte desta automação: vai para o seu rascunho em Criar como uma proposta normal, tal como se a tivesse composto lá. A automação não lhe acrescenta autoridade nem limites. Nada é assinado: aplique-a, simule e reveja primeiro o Strategy Manifest.',
+  'Not executable on this deployment': 'Não executável neste ambiente', 'REAL FUNDS': 'FUNDOS REAIS', 'Amount ({0})': 'Montante ({0})', 'Prepare in the Editor': 'Preparar no Editor',
+  'This is your own new trade, not part of this automation: it goes to your Editor draft as an ordinary proposal, exactly as if you had composed it there. The automation adds no authority and no limits to it. Nothing is signed: apply it, simulate and review the Strategy Manifest first.':
+    'Esta é uma nova operação sua, que não faz parte desta automação: vai para o seu rascunho no Editor como uma proposta normal, tal como se a tivesse composto lá. A automação não lhe acrescenta autoridade nem limites. Nada é assinado: aplique-a, simule e reveja primeiro o Strategy Manifest.',
   'Waiting until': 'À espera até', 'sent to your chat': 'enviada para a sua conversa', 'not delivered': 'não entregue', 'Review in FloFi': 'Rever no FloFi',
   'Ignore': 'Ignorar', 'Acknowledge': 'Tomar conhecimento',
   'Nothing is authorized yet. Review opens FloFi’s approval: prove your wallet, run a fresh simulation, review the Strategy Manifest and sign with your own wallet.':
@@ -79,15 +79,15 @@ export const portugueseAutomations: Readonly<Record<string, string>> = {
   'Condition still met — no new proposal': 'Condição ainda atingida — sem nova proposta', 'Condition cleared — watching again': 'Condição desfeita — a observar de novo',
   'Crossing during the cooldown — no proposal': 'Cruzamento durante o intervalo de espera — sem proposta', 'Blocked by a limit — no proposal': 'Bloqueada por um limite — sem proposta',
   'Missed while FloFi was unavailable': 'Perdida enquanto o FloFi esteve indisponível', 'Saved workflow changed — rebind required': 'Fluxo guardado alterado — é preciso voltar a associar',
-  'No longer reproducible — rebind required': 'Já não reproduzível — é preciso voltar a associar', 'You started your own buy in Build': 'Iniciou uma compra sua em Criar',
-  'You started your own sell in Build': 'Iniciou uma venda sua em Criar', 'Duplicate trigger ignored': 'Gatilho duplicado ignorado', 'Price observation too old — ignored': 'Observação de preço demasiado antiga — ignorada',
+  'No longer reproducible — rebind required': 'Já não reproduzível — é preciso voltar a associar', 'You started your own buy in the Editor': 'Iniciou uma compra sua no Editor',
+  'You started your own sell in the Editor': 'Iniciou uma venda sua no Editor', 'Duplicate trigger ignored': 'Gatilho duplicado ignorado', 'Price observation too old — ignored': 'Observação de preço demasiado antiga — ignorada',
   'No price source on this deployment': 'Sem fonte de preços neste ambiente', 'Price source timed out — ignored': 'A fonte de preços excedeu o tempo — ignorada',
   'Price source unreachable — ignored': 'Fonte de preços inacessível — ignorada', 'Price source error — ignored': 'Erro da fonte de preços — ignorado',
   'Price feed failed verification — ignored': 'O feed de preços falhou a verificação — ignorado', 'Withdrawn by a rebind': 'Retirada por uma nova associação',
   // Notices and errors
   'Automation created. FloFi will ask you before every execution.': 'Automação criada. O FloFi pergunta-lhe antes de cada execução.', 'Automation paused.': 'Automação em pausa.',
   'Automation resumed.': 'Automação retomada.', 'Automation archived.': 'Automação arquivada.', 'Automation rebound.': 'Automação associada de novo.', 'Proposal dismissed.': 'Proposta recusada.',
-  'Your own trade is in Build. Apply it, simulate and review before signing.': 'A sua operação está em Criar. Aplique-a, simule e reveja antes de assinar.', 'Telegram unlinked.': 'Telegram desligado.',
+  'Your own trade is in the Editor. Apply it, simulate and review before signing.': 'A sua operação está no Editor. Aplique-a, simule e reveja antes de assinar.', 'Telegram unlinked.': 'Telegram desligado.',
   'FloFi could not complete this ({0}).': 'O FloFi não conseguiu concluir isto ({0}).', 'Automations are unavailable on this deployment right now.': 'As automações estão indisponíveis neste ambiente de momento.',
   'This automation changed in another session. Refresh and try again.': 'Esta automação mudou noutra sessão. Atualize e tente novamente.',
   'You have reached the maximum number of automations.': 'Atingiu o número máximo de automações.',

@@ -3,11 +3,11 @@
 import { test, expect, openProposalReview, openSimulationDetails, acceptProductReview } from './fixtures';
 import type { Page } from '@playwright/test';
 import { installRouterWallet, resetRouterHarness, routerControl, routerSendRequests, routerWalletSends } from './router-fixtures';
-import { openBuilder, reloadBuilder } from './build-entry-navigation';
+import { type EditorSection, openBuilder, openEditorSection, reloadBuilder } from './build-entry-navigation';
 
 const USDC = '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913', DIAMOND = '0x1231deb6f5749ef6ce6943a275a1d3e7486f4eae';
 const region = (page: Page) => page.getByRole('region', { name: 'Cross-chain bridge' });
-const stage = (page: Page, name: 'Build' | 'Simulate' | 'Execute') => page.getByRole('navigation', { name: 'Workflow stages' }).getByRole('button', { name, exact: true }).click();
+const stage = (page: Page, name: EditorSection) => openEditorSection(page, name);
 const transactions = (page: Page) => region(page).getByRole('list', { name: 'Base transactions' });
 async function authorByChat(page: Page, text = 'Bridge 10 USDC from Base to Arbitrum', options: { rejectStep?: number } = {}) {
   await installRouterWallet(page, options); await openBuilder(page);

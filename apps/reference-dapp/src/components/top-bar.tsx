@@ -30,14 +30,19 @@ import { WalletMark } from './wallet-selector';
 import { BUILD_ENTRY, type BuildEntrySection } from '../domain/build-entry';
 
 export type Tab = WorkflowStage;
-/** BUILD0-UX-001: Build 0 (the intent entry) precedes the existing Build (Build 1), Simulate and Execute stages. */
+/**
+ * BUILD0-UX-001: Build 0 (the intent entry) precedes the existing Build (Build 1), Simulate and Execute stages.
+ * BUILD-FLOFI-CHAT-EDITOR-UX-001: the navigation is Dashboard | Chat | Editor. Chat is the intent entry (`BUILD_ENTRY`); the Editor is the
+ * existing Build workspace (Canvas and side chat), and Simulate and Execute remain its sections, reached through the shared lifecycle, never
+ * through top-level tabs. The section values are unchanged, so every existing transition keeps its target.
+ */
 export type ProductSection = Tab | 'Dashboard' | BuildEntrySection;
 
 const shortAddress = (address: string) => `${address.slice(0, 6)}…${address.slice(-4)}`;
 
 /** `compact` (BUILD-SOLANA-TRANSFER-UX-001, the `/approve` signing surface): brand, wallet and settings only — no stage navigation and no
- * Mainnet/Testnet switch, because the proposal fixes its own network. `entry` (BUILD0-UX-001) offers Build 0 before Build 1 in the public
- * chat-first workspace only. */
+ * Mainnet/Testnet switch, because the proposal fixes its own network. `entry` (BUILD0-UX-001) offers Chat (the intent entry) before the Editor
+ * in the public chat-first workspace only. */
 export function TopBar({ tab, setTab, pathname, engineering = false, compact = false, entry = false }: { tab: ProductSection; setTab: (value: ProductSection) => void; pathname?: string | null; engineering?: boolean; compact?: boolean; entry?: boolean }) {
   const { t: tr } = useLocale();
   const secondaryWorkspace = secondaryWorkspaceRoute(pathname);
@@ -46,7 +51,7 @@ export function TopBar({ tab, setTab, pathname, engineering = false, compact = f
   const modeB = useModeB();
   const build009 = useBuild009Wallet();
   const bridgeSwap = useBridgeSwap();
-  const { state, authoringIncomplete } = useWorkflow();
+  const { state } = useWorkflow();
   const workflow = state.workflow;
   const context = workflowShellContext(workflow);
   const router = useRouter();
@@ -87,14 +92,15 @@ export function TopBar({ tab, setTab, pathname, engineering = false, compact = f
     ? `${jupiter.session.wallet.name} · ${solanaAddress} · ${jupiter.session.chain === 'solana:devnet' ? 'Solana Devnet' : jupiter.session.chain === 'solana:mainnet' ? 'Solana mainnet-beta' : jupiter.session.chain}`
     : undefined;
   const evmTitle = build009.account ? `${provider?.name ?? 'EVM'} · ${build009.account} · ${chainName(build009.chainId)}` : undefined;
+  const editor = (WORKFLOW_STAGES as readonly ProductSection[]).includes(tab);
   return <header className={`top-bar${compact ? ' top-bar-compact' : ''}`}>
-    <div className="brand">{!compact && <NavigationDrawer pathname={pathname ?? null} section={tab === BUILD_ENTRY ? 'Build' : tab} onBuild={() => setTab('Build')}
+    <div className="brand">{!compact && <NavigationDrawer pathname={pathname ?? null} section={tab === BUILD_ENTRY ? 'Chat' : tab} onBuild={() => setTab('Build')} onChat={entry ? () => setTab(BUILD_ENTRY) : undefined}
       onDisconnect={disconnect} disconnectDisabled={disconnectDisabled}/>}<FloFiLogo/></div>
     {!compact && <nav aria-label={tr("Workflow stages")} className="tabs"><button type="button" onClick={() => setTab('Dashboard')} aria-current={!secondaryWorkspace && tab === 'Dashboard' ? 'page' : undefined} className={!secondaryWorkspace && tab === 'Dashboard' ? 'selected' : ''}>{tr("Dashboard")}</button>
-      {/* Visible "0 Build" / "1 Build"; the entry's accessible name is "Build 0" while Build 1 keeps the existing "Build". */}
-      {entry && <button type="button" onClick={() => setTab(BUILD_ENTRY)} aria-label={tr('Build 0')} title={tr('Describe what you want to do')} data-build-stage="0" aria-current={!secondaryWorkspace && tab === BUILD_ENTRY ? 'page' : undefined} className={!secondaryWorkspace && tab === BUILD_ENTRY ? 'selected' : ''}><span className="stage-number" aria-hidden="true">0</span>{tr('Build')}</button>}
-      {WORKFLOW_STAGES.map((value, index) =>
-      <button key={value} type="button" onClick={() => setTab(value)} disabled={Boolean(authoringIncomplete && value !== 'Build')} title={tr(authoringIncomplete && value !== 'Build' ? 'Configure the action amount in Build first' : entry && value === 'Build' ? 'Edit the workflow on the Canvas and in the chat' : undefined)} data-build-stage={entry && value === 'Build' ? '1' : undefined} aria-current={!secondaryWorkspace && tab === value ? 'page' : undefined} className={!secondaryWorkspace && tab === value ? 'selected' : ''}><span className="stage-number" aria-hidden="true">{tr(index + 1)}</span>{tr(value)}</button>)}</nav>}
+      {/* BUILD-FLOFI-CHAT-EDITOR-UX-001: Dashboard | Chat | Editor, unnumbered. The Editor is current on each of its sections (Canvas, simulation and
+          Review, execution); choosing it opens the Canvas, exactly as Build did. */}
+      {entry && <button type="button" onClick={() => setTab(BUILD_ENTRY)} title={tr('Describe what you want to do')} aria-current={!secondaryWorkspace && tab === BUILD_ENTRY ? 'page' : undefined} className={!secondaryWorkspace && tab === BUILD_ENTRY ? 'selected' : ''}>{tr('Chat')}</button>}
+      <button type="button" onClick={() => setTab('Build')} title={tr(entry ? 'Edit the workflow on the Canvas and in the chat' : undefined)} aria-current={!secondaryWorkspace && editor ? 'page' : undefined} className={!secondaryWorkspace && editor ? 'selected' : ''}>{tr('Editor')}</button></nav>}
     <div className="top-meta">
       <div className="header-wallet" role="group" aria-label={tr("Wallet connection")}>
       {provider && <span className="header-wallet-provider" title={provider.name}><WalletMark icon={provider.icon}/><span className="sr-only">{provider.name}</span></span>}

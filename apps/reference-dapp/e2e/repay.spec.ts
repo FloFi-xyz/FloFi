@@ -4,7 +4,7 @@ import { configureCanvasAction, openCanvasSettings } from './composer-authoring-
 import type {Page} from '@playwright/test';
 import {installSupplyWallet,resetSupplyHarness,supplySendCount,supplyHarnessRpc} from './supply-fixtures';
 import {REPAY_OWNER,repayOptions} from './supply-fixtures';
-import { openBuilder, reloadBuilder } from './build-entry-navigation';
+import { openBuilder, openEditorSection, reloadBuilder } from './build-entry-navigation';
 async function author(page:Page,options:Parameters<typeof installSupplyWallet>[1]={}){
   await installSupplyWallet(page,{account:REPAY_OWNER,...options});await openBuilder(page);await page.getByRole('button',{name:'Add repay',exact:true}).click();
   await configureCanvasAction(page,'0.005');
@@ -30,11 +30,11 @@ test('Build → Repay → read-only Simulate → Review → exact approval → o
 });
 test('lost approval response recovers after reload then proceeds without another approval',async({page})=>{
   await author(page,{uncertain:'APPROVAL'});await review(page);await approve(page);await expect(page.getByRole('button',{name:'Observe existing transaction'})).toBeEnabled();
-  await reloadBuilder(page);await page.getByRole('navigation',{name:'Workflow stages'}).getByRole('button',{name:'Execute',exact:true}).click();await page.getByRole('button',{name:'Observe existing transaction'}).click();await expect(region(page)).toContainText('Approval: Independently verified');await execute(page);await expect(page.getByRole('link',{name:'Download Evidence Bundle'})).toBeVisible();expect(await supplySendCount(page)).toBe(1);
+  await reloadBuilder(page);await openEditorSection(page,'Execute');await page.getByRole('button',{name:'Observe existing transaction'}).click();await expect(region(page)).toContainText('Approval: Independently verified');await execute(page);await expect(page.getByRole('link',{name:'Download Evidence Bundle'})).toBeVisible();expect(await supplySendCount(page)).toBe(1);
 });
 test('lost Repay response recovers the same transaction after reload without another send',async({page})=>{
   await resetSupplyHarness({...repayOptions,allowance:'5000'});await author(page,{uncertain:'SUPPLY'});await review(page);await execute(page);await expect(page.getByRole('button',{name:'Observe existing transaction'})).toBeEnabled();
-  await reloadBuilder(page);await page.getByRole('navigation',{name:'Workflow stages'}).getByRole('button',{name:'Execute',exact:true}).click();await page.getByRole('button',{name:'Observe existing transaction'}).click();await expect(page.getByRole('link',{name:'Download Evidence Bundle'})).toBeVisible();expect(await supplySendCount(page)).toBe(0);
+  await reloadBuilder(page);await openEditorSection(page,'Execute');await page.getByRole('button',{name:'Observe existing transaction'}).click();await expect(page.getByRole('link',{name:'Download Evidence Bundle'})).toBeVisible();expect(await supplySendCount(page)).toBe(0);
 });
 test('known approval refusal requires fresh owner Review and no financial evidence',async({page})=>{
   await author(page,{reject:'APPROVAL'});await review(page);await approve(page);await expect(region(page)).toContainText('not submitted');await expect(page.getByRole('link',{name:'Download Evidence Bundle'})).toHaveCount(0);await page.getByRole('button',{name:'Prepare fresh review'}).click();await expect(page.getByRole('button',{name:'Accept Repay review'})).toBeVisible();expect(await supplySendCount(page)).toBe(1);
@@ -45,7 +45,7 @@ test('wrong owner prevents owner request',async({page})=>{
 });
 test('debt change invalidates Review at Execute',async({page})=>{await author(page);await review(page);await supplyHarnessRpc('MOCK_reset',[{...repayOptions,scaledDebt:'8002'}]);await approve(page);await expect(region(page)).toContainText('changed');expect(await supplySendCount(page)).toBe(0);});
 test('semantic amount edit removes Repay authorization',async({page})=>{
-  await author(page);await review(page);await page.getByRole('button',{name:'Build',exact:true}).click();await page.locator('.react-flow__node[data-id="node-002"] .flow-card').click();await openCanvasSettings(page);const form=page.getByRole('form',{name:'Edit Repay'});await form.getByLabel('Repay amount (USDC)').fill('0.004');await page.locator('.build-flow-surface .composer-card.active').getByRole('button',{name:'Review Repay change'}).click();await page.getByRole('button',{name:'Apply proposal'}).click();await page.getByRole('navigation',{name:'Workflow stages'}).getByRole('button',{name:'Execute',exact:true}).click();await expect(region(page)).toContainText('The workflow changed');await expect(region(page).getByRole('button',{name:'Approve exactly 5000 raw USDC'})).toHaveCount(0);expect(await supplySendCount(page)).toBe(0);
+  await author(page);await review(page);await page.getByRole('button',{name:'Build',exact:true}).click();await page.locator('.react-flow__node[data-id="node-002"] .flow-card').click();await openCanvasSettings(page);const form=page.getByRole('form',{name:'Edit Repay'});await form.getByLabel('Repay amount (USDC)').fill('0.004');await page.locator('.build-flow-surface .composer-card.active').getByRole('button',{name:'Review Repay change'}).click();await page.getByRole('button',{name:'Apply proposal'}).click();await openEditorSection(page,'Execute');await expect(region(page)).toContainText('The workflow changed');await expect(region(page).getByRole('button',{name:'Approve exactly 5000 raw USDC'})).toHaveCount(0);expect(await supplySendCount(page)).toBe(0);
 });
 test('insufficient debt blocks read-only simulation',async({page})=>{
   await resetSupplyHarness({...repayOptions,scaledDebt:'4000'});await installSupplyWallet(page,{account:REPAY_OWNER});await openBuilder(page);

@@ -33,7 +33,7 @@ export function SimulateWorkspace({ workflowName, returnToBuild, reviewActionHos
   return <section className="simulate-workspace" aria-label={tr("Workflow simulation workspace")}>
     <div className={`simulate-workspace-grid${detailsOnly ? ' stage-grid-single' : ''}`}>
       <SimulateWorkflowCanvas workflowName={workflowName} primaryAction={<div className="simulation-workspace-actions">
-        {returnToBuild && <button type="button" className="simulation-back" onClick={returnToBuild}>{tr("Back to Build")}</button>}
+        {returnToBuild && <button type="button" className="simulation-back" onClick={returnToBuild}>{tr("Back to the Canvas")}</button>}
         {tr(simulateAction)}
       </div>}/>
       {!detailsOnly && summary}

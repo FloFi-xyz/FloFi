@@ -23,7 +23,7 @@ describe('Run Details preserves the existing wallet-owner boundary', () => {
   it.each([null, '0x' + '2'.repeat(40)])('cannot reveal a current execution to a disconnected or unrelated wallet (%s)', account => {
     const html = workspace(account);
     expect(html).not.toContain('Owned current workflow'); expect(html).not.toContain('fixture-evidence-bundle');
-    expect(html).not.toContain('0.0243 WETH'); expect(html).not.toContain('Open current execution'); expect(html).not.toContain('View result in Execute');
+    expect(html).not.toContain('0.0243 WETH'); expect(html).not.toContain('Open current execution'); expect(html).not.toContain('View execution result');
   });
   it('does not substitute the current execution for an unrelated deep-link ID', () => {
     const html = workspace(reviewOwner, 'unrelated-run');

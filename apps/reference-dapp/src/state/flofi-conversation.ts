@@ -360,7 +360,7 @@ export function useFlofiConversation({ owner, epoch, bridge, direct, interfaceLa
     const refusal = floFiWalletRefusal(view.wallet.account, language, false);
     if (refusal) { flofi(scope, language, notStarted(refusal), { options: [c.review] }); return; }
     const startError = view.source.state.error, started = controls.authorize();
-    if (!started.started) { flofi(scope, language, notStarted(translate(language, started.issue ?? 'Execution cannot begin with the current wallet or execution state. Check this workflow in Simulate.')), { options: [c.review] }); return; }
+    if (!started.started) { flofi(scope, language, notStarted(translate(language, started.issue ?? 'Execution cannot begin with the current wallet or execution state. Check this workflow\'s simulation.')), { options: [c.review] }); return; }
     flofi(scope, language, c.executing);
     const live = currentExecution(view.progress);
     watch.current = live?.started

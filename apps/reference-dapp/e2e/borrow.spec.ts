@@ -3,7 +3,7 @@ import {test,expect, openSimulationDetails, acceptProductReview } from './fixtur
 import { configureCanvasAction, openCanvasSettings } from './composer-authoring-fixtures';
 import type {Page} from '@playwright/test';
 import {installSupplyWallet,resetSupplyHarness,supplySendCount,supplyHarnessRpc,SUPPLY_OWNER} from './supply-fixtures';
-import { openBuilder, reloadBuilder } from './build-entry-navigation';
+import { openBuilder, openEditorSection, reloadBuilder } from './build-entry-navigation';
 async function author(page:Page,options:Parameters<typeof installSupplyWallet>[1]={}){
   await installSupplyWallet(page,options);await openBuilder(page);await page.getByRole('button',{name:'Add borrow',exact:true}).click();
   await configureCanvasAction(page,'0.01');
@@ -30,7 +30,7 @@ test('lost response recovers the same Borrow across reload without another send'
   await author(page,{uncertain:'SUPPLY'});await review(page);await execute(page);
   await expect.poll(()=>supplySendCount(page)).toBe(1);await expect(page.getByRole('button',{name:'Observe existing transaction'})).toBeEnabled();
   await expect(page.getByRole('link',{name:'Download Evidence Bundle'})).toHaveCount(0);
-  await reloadBuilder(page);await page.getByRole('navigation',{name:'Workflow stages'}).getByRole('button',{name:'Execute',exact:true}).click();
+  await reloadBuilder(page);await openEditorSection(page,'Execute');
   await page.getByRole('button',{name:'Observe existing transaction'}).click();await expect(page.getByRole('link',{name:'Download Evidence Bundle'})).toBeVisible();expect(await supplySendCount(page)).toBe(0);
 });
 test('owner refusal needs fresh owner Review and records no successful debt evidence',async({page})=>{
@@ -53,9 +53,9 @@ test('changed public price invalidates Review again at Execute',async({page})=>{
   await expect(page.getByRole('region',{name:'Aave Borrow'})).toContainText('changed');expect(await supplySendCount(page)).toBe(0);
 });
 test('semantic amount edits invalidate Borrow Review',async({page})=>{
-  await author(page);await review(page);await page.getByRole('button',{name:'Build',exact:true}).click();await page.locator('.react-flow__node[data-id="node-002"] .flow-card').click();
+  await author(page);await review(page);await openEditorSection(page,'Build');await page.locator('.react-flow__node[data-id="node-002"] .flow-card').click();
   await openCanvasSettings(page);const form=page.getByRole('form',{name:'Edit Borrow'});await form.getByLabel('Borrow amount (USDC)').fill('0.02');await page.locator('.build-flow-surface .composer-card.active').getByRole('button',{name:'Review Borrow change'}).click();await page.getByRole('button',{name:'Apply proposal'}).click();
-  await page.getByRole('navigation',{name:'Workflow stages'}).getByRole('button',{name:'Execute',exact:true}).click();await expect(page.getByRole('region',{name:'Aave Borrow'})).toContainText('The workflow changed');
+  await openEditorSection(page,'Execute');await expect(page.getByRole('region',{name:'Aave Borrow'})).toContainText('The workflow changed');
   await expect(page.getByRole('region',{name:'Aave Borrow'}).getByRole('button',{name:'Execute',exact:true})).toHaveCount(0);expect(await supplySendCount(page)).toBe(0);
 });
 test('read-only simulation blocks unsafe Borrow before Review',async({page})=>{

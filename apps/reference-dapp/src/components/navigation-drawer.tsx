@@ -8,11 +8,12 @@ import { SECONDARY_WORKSPACES as items, secondaryWorkspaceRoute, type SecondaryW
 import { dashboardRoute } from '../lib/dashboard/routes';
 import type { WorkflowStage } from '../domain/product-shell';
 
-type NavigationItem = SecondaryWorkspace['id'] | 'dashboard' | 'build' | 'logout';
+type NavigationItem = SecondaryWorkspace['id'] | 'dashboard' | 'chat' | 'build' | 'logout';
 
 function NavigationIcon({ item }: { item: NavigationItem }) {
   return <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
     {item === 'dashboard' ? <><rect x="3" y="3" width="7" height="7" rx="2"/><rect x="14" y="3" width="7" height="7" rx="2"/><rect x="3" y="14" width="7" height="7" rx="2"/><rect x="14" y="14" width="7" height="7" rx="2"/></>
+      : item === 'chat' ? <><path d="M4 5.5A2.5 2.5 0 0 1 6.5 3h11A2.5 2.5 0 0 1 20 5.5v8a2.5 2.5 0 0 1-2.5 2.5H10l-4.5 4v-4h0A1.5 1.5 0 0 1 4 14.5Z"/><path d="M8.5 8.5h7M8.5 11.5h4"/></>
       : item === 'build' ? <><rect x="3" y="3" width="7" height="5" rx="1.5"/><rect x="14" y="16" width="7" height="5" rx="1.5"/><path d="M6.5 8v7a3.5 3.5 0 0 0 3.5 3.5h4M14 5.5h7m-3-3 3 3-3 3"/></>
         : item === 'logout' ? <><path d="M10 4H5a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h5M10 12h11m-4-4 4 4-4 4"/></>
           : item === 'workflows' ? <><path d="M4 3h12l4 4v14H4Z"/><path d="M8 3v6h8V3M8 21v-7h8v7"/></>
@@ -23,16 +24,22 @@ function NavigationIcon({ item }: { item: NavigationItem }) {
   </svg>;
 }
 
-/** All navigation uses the existing overlay and persistent product shell. */
-export function NavigationDrawer({ pathname, section = 'Build', onBuild, onDisconnect, disconnectDisabled }: {
-  pathname?: string | null; section?: WorkflowStage | 'Dashboard'; onBuild: () => void;
+/**
+ * All navigation uses the existing overlay and persistent product shell. BUILD-FLOFI-CHAT-EDITOR-UX-001: the drawer agrees with the top bar —
+ * Chat (offered only where the top bar offers it, `onChat`) is current on the intent entry, and the Editor on each of its sections (the Canvas,
+ * the simulation and Review, the execution). The click targets are the top bar's: Chat opens the entry, the Editor opens the Canvas.
+ */
+export function NavigationDrawer({ pathname, section = 'Build', onBuild, onChat, onDisconnect, disconnectDisabled }: {
+  pathname?: string | null; section?: WorkflowStage | 'Dashboard' | 'Chat'; onBuild: () => void; onChat?: (() => void) | undefined;
   onDisconnect: () => void; disconnectDisabled: boolean;
 }) {
   const { t: tr } = useLocale();
   const [open, setOpen] = useState(false);
+  const workspace = !pathname || pathname === '/app';
   const selected = secondaryWorkspaceRoute(pathname)?.id
     ?? (dashboardRoute(pathname) || (!pathname && section === 'Dashboard') ? 'dashboard'
-      : (!pathname || pathname === '/app') && section === 'Build' ? 'build' : null);
+      : workspace && section === 'Chat' && onChat ? 'chat'
+        : workspace && (section === 'Build' || section === 'Simulate' || section === 'Execute') ? 'build' : null);
   const container = useRef<HTMLDivElement>(null);
   const trigger = useRef<HTMLButtonElement>(null);
   const layer = useRef<HTMLDivElement>(null);
@@ -108,9 +115,13 @@ export function NavigationDrawer({ pathname, section = 'Build', onBuild, onDisco
             <Link ref={firstItem} href="/app/dashboard" className="navigation-row" aria-current={selected === 'dashboard' ? 'page' : undefined} onClick={() => close(true)}>
               <NavigationIcon item="dashboard"/><span>{tr("Dashboard")}</span>
             </Link>
+            {onChat && <Link href="/app" className="navigation-row" aria-current={selected === 'chat' ? 'page' : undefined}
+              onClick={event => { event.preventDefault(); onChat(); close(true); }}>
+              <NavigationIcon item="chat"/><span>{tr("Chat")}</span>
+            </Link>}
             <Link href="/app" className="navigation-row" aria-current={selected === 'build' ? 'page' : undefined}
               onClick={event => { event.preventDefault(); onBuild(); close(true); }}>
-              <NavigationIcon item="build"/><span>{tr("Build Workflow")}</span>
+              <NavigationIcon item="build"/><span>{tr("Editor")}</span>
             </Link>
             <hr className="navigation-separator"/>
             {items.map(item => <Link key={item.id} href={item.href}

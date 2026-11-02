@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { test, expect, assertNoFinancialCanvasAction, sendChatCommand } from './fixtures';
-import { openBuilder } from './build-entry-navigation';
+import { openBuilder, openEditorSection } from './build-entry-navigation';
 
 const widths = [320, 375, 390, 430, 768, 1024, 1440];
 async function noOverflow(page: import('@playwright/test').Page) {
@@ -66,7 +66,7 @@ for (const width of [320, 375, 390, 430]) {
     expect(poolBox.width).toBeGreaterThanOrEqual(44);
     expect(poolBox.height).toBeGreaterThanOrEqual(44);
     expect(poolBox.x + poolBox.width).toBeLessThanOrEqual(width);
-    const shortcuts = page.getByRole('navigation', { name: 'Build workspace navigation' });
+    const shortcuts = page.getByRole('navigation', { name: 'Editor navigation' });
     await shortcuts.getByRole('button', { name: 'Copilot', exact: true }).click();
     const input = page.getByLabel('Describe your flow');
     await expect(input).toBeFocused();
@@ -109,13 +109,12 @@ for (const width of [320, 375, 390, 430]) {
     await expect(page.getByRole('link', { name: 'Dashboard', exact: true })).toBeFocused();
     await page.keyboard.press('Escape');
     await expect(page.getByRole('button', { name: 'Open navigation', exact: true })).toBeFocused();
-    const stages = page.getByRole('navigation', { name: 'Workflow stages' });
-    await stages.getByRole('button', { name: 'Simulate', exact: true }).click();
+    await openEditorSection(page, 'Simulate');
     await expect(page.getByRole('main', { name: 'Simulation workspace', exact: true })).toBeVisible();
     await page.getByRole('navigation', { name: 'Simulation workspace navigation', exact: true }).getByRole('button', { name: 'Review', exact: true }).click();
     await expect(page.locator('.simulation-summary')).toBeFocused();
     await noOverflow(page);
-    await stages.getByRole('button', { name: 'Execute', exact: true }).click();
+    await openEditorSection(page, 'Execute');
     await expect(page.getByRole('main', { name: 'Execution workspace', exact: true })).toBeVisible();
     await page.getByRole('navigation', { name: 'Execution workspace navigation', exact: true }).getByRole('button', { name: 'Execution Summary', exact: true }).click();
     await expect(page.locator('.execution-summary')).toBeFocused();

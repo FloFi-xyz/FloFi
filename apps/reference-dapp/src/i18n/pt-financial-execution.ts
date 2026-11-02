@@ -58,7 +58,7 @@ export const portugueseFinancialExecution: Readonly<Record<string, string>> = {
   'This request expired without executing. Earlier confirmed actions and costs remain recorded.':
     'Esta solicitação expirou sem ser executada. Operações anteriores confirmadas e custos continuam registrados.',
   'This request was recorded as not submitted. Earlier confirmed actions and costs remain recorded.': 'Esta solicitação foi registrada como não enviada. Operações anteriores confirmadas e seus custos continuam registrados.',
-  'Complete the amount, assets, networks and recipient in Build before simulating.': 'Preencha o valor, os tokens, as redes e o destinatário em Criar antes de simular.',
+  'Complete the amount, assets, networks and recipient on the Canvas before simulating.': 'Preencha o valor, os tokens, as redes e o destinatário no Canvas antes de simular.',
   'This workflow has no supported simulation route on the selected public mainnets.': 'Esta operação não tem uma rota de simulação compatível nas redes principais selecionadas.',
   'Connect the wallet required for this workflow before simulating.': 'Conecte a carteira necessária para esta operação antes de simular.',
   'The simulation provider is temporarily unavailable. Try checking again shortly.': 'O serviço de simulação está temporariamente indisponível. Tente verificar novamente em instantes.',

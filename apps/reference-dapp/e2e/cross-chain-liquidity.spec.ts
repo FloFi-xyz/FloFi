@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { test, expect, sendChatCommand, applyPendingProposal, openSimulationDetails, readWorkflowIr, installPassiveWallet, assertPassiveWallet, assertNoFinancialCanvasAction } from './fixtures';
+import { openEditorSection } from './build-entry-navigation';
 const recipient = '0x1111111111111111111111111111111111111111';
 
 test('cross-chain canvas and chat author the same graph while MOCKED simulation cannot authorize Execute', async ({ page }) => {
@@ -15,14 +16,14 @@ test('cross-chain canvas and chat author the same graph while MOCKED simulation 
   expect(canvasIR.nodes).toHaveLength(4);
   expect(JSON.stringify(canvasIR)).toContain('"outputId":"swap-input"');
   expect(JSON.stringify(canvasIR)).toContain('"actionType":"asset.liquidity.uniswap-v3"');
-  await page.getByRole('button', { name: 'Simulate', exact: true }).click();
+  await openEditorSection(page, 'Simulate');
   await openSimulationDetails(page);
   const panel = page.getByRole('region', { name: 'Cross-chain liquidity composition' });
   await panel.getByRole('button', { name: 'Generate MOCKED chained simulation' }).click();
   await expect(panel).toContainText('Estimated bridge output:');
   await expect(panel).toContainText('pool swap fee');
   await expect(panel).toContainText('Stage: SOURCE PREPARED');
-  await page.getByRole('button', { name: 'Execute', exact: true }).click();
+  await openEditorSection(page, 'Execute');
   await assertNoFinancialCanvasAction(page);
   await expect(page.getByRole('button', { name: 'Submit MOCKED bridge' })).toHaveCount(0);
   await expect(page.getByRole('link', { name: 'Download Evidence Bundle' })).toHaveCount(0);

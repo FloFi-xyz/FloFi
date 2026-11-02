@@ -1,11 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import {test,expect} from './fixtures';
 import {installSupplyWallet,resetSupplyHarness,authorSupply,reviewSupply,supplySendCount,supplyHarnessRpc} from './supply-fixtures';
+import { openEditorSection } from './build-entry-navigation';
 test.afterEach(async({page},info)=>{if(info.status!==info.expectedStatus){const detail=await page.getByRole('region',{name:'Aave Supply'}).locator('pre').textContent(); console.error('Supply failure:',detail?JSON.parse(detail).error:'no details');}});
 for(const step of ['APPROVAL','SUPPLY'] as const)test('restart observes uncertain '+step+' without a duplicate wallet submission',async({page})=>{
   await resetSupplyHarness(step==='SUPPLY'?{allowance:'10000000'}:{});await installSupplyWallet(page,{uncertain:step});await authorSupply(page);await reviewSupply(page);
   await page.getByRole('region',{name:'Aave Supply'}).getByRole('button',{name:'Execute',exact:true}).click();await expect(page.getByRole('button',{name:'Observe existing transaction'})).toBeVisible();await expect.poll(()=>supplySendCount(page)).toBe(1);await expect(page.getByRole('button',{name:'Observe existing transaction'})).toBeEnabled();
-  await page.reload();await page.getByRole('navigation',{name:'Workflow stages'}).getByRole('button',{name:'Execute',exact:true}).click();
+  await page.reload();await openEditorSection(page,'Execute');
   await page.getByRole('button',{name:'Observe existing transaction'}).click();
   if(step==='APPROVAL'){await expect(page.getByText('Approval: Independently verified',{exact:false})).toBeVisible();await expect(page.getByRole('button',{name:'Execute Supply',exact:true})).toBeVisible();}
   else await expect(page.getByRole('link',{name:'Download Evidence Bundle'})).toBeVisible();
@@ -16,7 +17,7 @@ test('restart preserves a reverted approval and never requests it again',async({
   await resetSupplyHarness({revert:true});await installSupplyWallet(page);await authorSupply(page);await reviewSupply(page);
   await page.getByRole('region',{name:'Aave Supply'}).getByRole('button',{name:'Execute',exact:true}).click();
   await expect(page.getByText('Approval: reverted',{exact:false})).toBeVisible();await expect.poll(()=>supplySendCount(page)).toBe(1);await expect(page.getByRole('button',{name:'Observe existing transaction'})).toBeEnabled();
-  await page.reload();await page.getByRole('navigation',{name:'Workflow stages'}).getByRole('button',{name:'Execute',exact:true}).click();
+  await page.reload();await openEditorSection(page,'Execute');
   await expect(page.getByText('Approval: reverted',{exact:false})).toBeVisible();await expect(page.getByRole('link',{name:'Download Evidence Bundle'})).toHaveCount(0);expect(await supplySendCount(page)).toBe(0);
 });
 
@@ -26,7 +27,7 @@ test('wallet-managed unknown approval remains observation-only after restart and
   await expect(page.getByRole('button',{name:'Observe existing transaction'})).toBeEnabled();expect(await supplySendCount(page)).toBe(1);
   await supplyHarnessRpc('MOCK_reset',[{block:200,nonce:3}]);await page.getByRole('button',{name:'Observe existing transaction'}).click();
   await expect(page.getByRole('region',{name:'Aave Supply'}).locator('pre')).toContainText('SUPPLY_OBSERVATION_BOUND_REACHED');
-  await page.reload();await page.getByRole('navigation',{name:'Workflow stages'}).getByRole('button',{name:'Execute',exact:true}).click();
+  await page.reload();await openEditorSection(page,'Execute');
   await expect(page.getByRole('button',{name:'Prepare fresh review'})).toHaveCount(0);await expect(page.getByRole('button',{name:'Observe existing transaction'})).toBeVisible();expect(await supplySendCount(page)).toBe(0);
 });
 
@@ -48,7 +49,7 @@ test('a failure after durable preparation is positively classified not submitted
   let detail=JSON.parse((await page.getByRole('region',{name:'Aave Supply'}).locator('pre').textContent())!);
   expect(detail.notSubmitted).toBe(true);expect(detail.attempts[0].state).toBe('CANCELLED');expect(detail.walletDiagnostic.invoked).toBe(false);
   expect(detail.walletDiagnostic.transaction).toMatchObject({chainId:'0x14a34',to:'0xba50cd2a20f6da35d788639e581bca8d0b5d4d5f'});expect(await supplySendCount(page)).toBe(0);
-  await page.reload();await page.getByRole('navigation',{name:'Workflow stages'}).getByRole('button',{name:'Execute',exact:true}).click();
+  await page.reload();await openEditorSection(page,'Execute');
   await page.getByRole('button',{name:'Prepare fresh review'}).click();await page.getByRole('button',{name:'Accept Supply review'}).click();
   detail=JSON.parse((await page.getByRole('region',{name:'Aave Supply'}).locator('pre').textContent())!);expect(detail.attempts).toEqual([]);expect(detail.recoveryOf).toMatch(/^supply-/);expect(await supplySendCount(page)).toBe(0);
 });
