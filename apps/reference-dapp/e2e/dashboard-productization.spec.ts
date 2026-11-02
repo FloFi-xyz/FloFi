@@ -38,19 +38,25 @@ test.afterEach(({ page }) => { expect(errors.get(page)).toEqual([]); });
 test('current execution and saved cards retain status, evidence and distinct review actions', async ({ page }) => {
   const current = page.getByRole('region', { name: 'Current execution', exact: true });
   await expect(current).toContainText('Unresolved'); await expect(current).toContainText('0 of 1 step confirmed');
-  await expect(page.locator('.dashboard-run-list>.dashboard-run-card')).toHaveCount(0);
-  await expect(page.locator('.dashboard-run-list>li')).toHaveCount(3);
+  // BUILD-FLOFI-CHAT-E2E-DASHBOARD-UX-001: the Dashboard summarizes the records; the history itself is in Your workflows.
+  const summary = page.getByRole('region', { name: 'Workflow records', exact: true });
+  await expect(summary).toContainText('3 records need attention'); await expect(summary).toContainText('1 executed record');
+  await expect(page.locator('.dashboard-run-list')).toHaveCount(0);
   await expect(page.locator('.dashboard-run-current')).toHaveCount(1);
-  const attention = page.getByRole('complementary', { name: 'Needs attention', exact: true });
-  await expect(attention.getByRole('listitem')).toHaveCount(2);
-  await expect(attention).toContainText('Execution status unresolved');
-  await expect(attention).toContainText('Review the incomplete action');
   await current.getByRole('link').focus(); await current.getByRole('link').press('Enter');
   await expect(page.locator('.dashboard-result-summary')).toContainText('Unresolved');
   await expect(page.getByRole('button', { name: 'Open current execution', exact: true })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Retry', exact: true })).toHaveCount(0);
   expect(await page.evaluate(() => window.flofiDashboardAcceptance.counts().executed)).toBe(0);
   await page.getByRole('button', { name: 'Back to Dashboard' }).click();
+  await page.evaluate(() => window.flofiDashboardAcceptance.view('records'));
+  // Each run is in exactly one section: executed history, or the records that need attention (unresolved, incomplete or in progress).
+  const history = page.getByRole('region', { name: 'Executed and history', exact: true }), attention = page.getByRole('region', { name: 'Needs attention', exact: true });
+  await expect(history.locator('.dashboard-run-list>li')).toHaveCount(1);
+  await expect(attention.locator('.dashboard-run-list>li')).toHaveCount(3);
+  await expect(attention).toContainText('Execution status unresolved');
+  await expect(attention).toContainText('Review the incomplete action');
+  await expect(page.locator('.dashboard-run-list>.dashboard-run-card')).toHaveCount(0);
   await page.getByRole('link', { name: 'View Swap run fixture-completed', exact: true }).click();
   await expect(page.locator('.dashboard-result-summary')).toContainText('Completed');
   await expect(page.getByRole('button', { name: 'Open current execution', exact: true })).toHaveCount(0);
@@ -62,9 +68,16 @@ test('loading, verification and unavailable history preserve the current executi
     await page.evaluate(value => window.flofiDashboardAcceptance.mode(value), mode);
     await expect(page.locator('.dashboard-current')).toBeVisible();
     await expect(page.locator('.dashboard-current')).toContainText('Unresolved');
-    await expect(page.locator('.dashboard-attention')).toContainText('Execution status unresolved');
+    await expect(page.locator('.dashboard-records-summary')).toBeVisible();
     await expect(page.getByRole('heading', { name: 'No workflows executed yet', exact: true })).toHaveCount(0);
   }
+  await page.evaluate(() => window.flofiDashboardAcceptance.view('records'));
+  for (const mode of ['loading', 'verify', 'unavailable', 'not-configured', 'current-only'] as const) {
+    await page.evaluate(value => window.flofiDashboardAcceptance.mode(value), mode);
+    await expect(page.locator('.workflows-attention')).toContainText('Execution status unresolved');
+    await expect(page.getByRole('heading', { name: 'No workflows executed yet', exact: true })).toHaveCount(0);
+  }
+  await page.evaluate(() => window.flofiDashboardAcceptance.view('dashboard'));
   await page.evaluate(() => window.flofiDashboardAcceptance.mode('verify'));
   await page.getByRole('button', { name: 'Verify wallet for history', exact: true }).click();
   expect(await page.evaluate(() => window.flofiDashboardAcceptance.counts().verified)).toBe(1);
@@ -75,33 +88,45 @@ test('loading, verification and unavailable history preserve the current executi
 });
 
 test('verified empty and disconnected states have no fabricated history or financial values', async ({ page }) => {
-  await page.evaluate(() => window.flofiDashboardAcceptance.mode('empty'));
+  await page.evaluate(() => { window.flofiDashboardAcceptance.mode('empty'); window.flofiDashboardAcceptance.view('records'); });
   await expect(page.getByRole('heading', { name: 'No workflows executed yet', exact: true })).toBeVisible();
   await expect(page.locator('.dashboard-run-card')).toHaveCount(0);
-  await expect(page.locator('.dashboard-attention')).toContainText('No available runs need attention');
+  await expect(page.locator('.workflows-attention')).toContainText('No available runs need attention');
   await page.locator('.dashboard-history-empty').getByRole('button', { name: 'Build workflow', exact: true }).click();
   expect(await page.evaluate(() => window.flofiDashboardAcceptance.counts().built)).toBe(1);
-  await page.evaluate(() => window.flofiDashboardAcceptance.mode('disconnected'));
+  await page.evaluate(() => { window.flofiDashboardAcceptance.mode('disconnected'); window.flofiDashboardAcceptance.view('dashboard'); });
   await expect(page.getByRole('status')).toContainText('Connect your wallet to view your execution history');
-  await expect(page.locator('.dashboard-attention,.dashboard-current')).toHaveCount(0);
+  await expect(page.locator('.workflows-attention,.dashboard-current,.dashboard-records-summary')).toHaveCount(0);
   expect(await page.locator('.dashboard-workspace').innerText()).not.toMatch(/\$|APY|PnL|0 ETH|0 USDC/);
 });
 
 for (const theme of ['light', 'dark'] as const) test(`${theme} Dashboard cards, attention, details and long titles fit wide and narrow widths`, async ({ page }) => {
   await page.evaluate(value => document.documentElement.dataset.theme = value, theme);
+  // The in-progress record is listed under Needs attention in Your workflows.
+  await page.evaluate(() => window.flofiDashboardAcceptance.view('records'));
   const colors = await page.locator('.dashboard-status-progress').evaluate(element => {
     const sample = document.createElement('span'); sample.style.color = 'var(--accent-ink)'; document.body.append(sample);
     const status = getComputedStyle(element).color, token = getComputedStyle(sample).color; sample.remove(); return { status, token };
   });
   expect(colors.status).toBe(colors.token);
+  await page.evaluate(() => window.flofiDashboardAcceptance.view('dashboard'));
   for (const width of [1440, 1024, 820, 390, 320]) {
     await page.setViewportSize({ width, height: 1000 });
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
-    const activity = await page.locator('.dashboard-activity').boundingBox(), attention = await page.locator('.dashboard-attention').boundingBox();
-    expect(activity).not.toBeNull(); expect(attention).not.toBeNull();
-    if (width > 900) expect(activity!.x + activity!.width).toBeLessThan(attention!.x);
-    else expect(attention!.y + attention!.height).toBeLessThan(activity!.y);
+    const current = await page.locator('.dashboard-current').boundingBox(), records = await page.locator('.dashboard-records-summary').boundingBox();
+    expect(current).not.toBeNull(); expect(records).not.toBeNull();
+    expect(current!.y + current!.height).toBeLessThan(records!.y);
   }
+  // Your workflows: the executed history, then the records that need attention, at every width.
+  await page.evaluate(() => window.flofiDashboardAcceptance.view('records'));
+  for (const width of [1440, 1024, 820, 390, 320]) {
+    await page.setViewportSize({ width, height: 1000 });
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+    const activity = await page.locator('.dashboard-activity').boundingBox(), attention = await page.locator('.workflows-attention').boundingBox();
+    expect(activity).not.toBeNull(); expect(attention).not.toBeNull();
+    expect(activity!.y + activity!.height).toBeLessThan(attention!.y);
+  }
+  await page.evaluate(() => window.flofiDashboardAcceptance.view('dashboard'));
   await page.setViewportSize({ width: 1440, height: 1000 });
   await page.screenshot({ path: `.tmp/ux006b-dashboard-${theme}.png`, fullPage: true });
   await page.evaluate(() => window.flofiDashboardAcceptance.longTitle());

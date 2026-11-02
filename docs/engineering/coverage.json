@@ -817,6 +817,30 @@
     "app.developer.events-sync": {
       "path": "apps/reference-dapp/src/developer/events-sync.test.ts",
       "stage": "unit"
+    },
+    "app.server.history-principals": {
+      "path": "apps/reference-dapp/src/server/history-principals.test.ts",
+      "stage": "unit"
+    },
+    "app.domain.privacy-notice": {
+      "path": "apps/reference-dapp/src/domain/privacy-notice.test.ts",
+      "stage": "unit"
+    },
+    "app.e2e.privacy-notice": {
+      "path": "apps/reference-dapp/e2e/privacy-notice.spec.ts",
+      "stage": "browser"
+    },
+    "app.server.wallet-portfolio": {
+      "path": "apps/reference-dapp/src/server/wallet-portfolio.test.ts",
+      "stage": "unit"
+    },
+    "app.domain.wallet-portfolio": {
+      "path": "apps/reference-dapp/src/domain/wallet-portfolio.test.ts",
+      "stage": "unit"
+    },
+    "app.components.dashboard.portfolio-widget": {
+      "path": "apps/reference-dapp/src/components/dashboard/portfolio-widget.test.tsx",
+      "stage": "unit"
     }
   },
   "requiredUnitSuites": [
@@ -1609,7 +1633,8 @@
       "sources": [
         "apps/reference-dapp/src/app/asset-catalog-action.ts",
         "apps/reference-dapp/src/app/solana-asset-catalog-action.ts",
-        "apps/reference-dapp/src/app/solana-devnet-action.ts"
+        "apps/reference-dapp/src/app/solana-devnet-action.ts",
+        "apps/reference-dapp/src/app/portfolio-action.ts"
       ],
       "suites": [
         "action-registry.asset-registry",
@@ -2374,7 +2399,9 @@
       ],
       "sharedFinancialCore": false,
       "sources": [
-        "apps/reference-dapp/src/components/privacy-controls.tsx"
+        "apps/reference-dapp/src/components/privacy-controls.tsx",
+        "apps/reference-dapp/src/components/privacy-notice.tsx",
+        "apps/reference-dapp/src/components/privacy-notice.module.css"
       ],
       "suites": [
         "app.learning.automatic",
@@ -2382,7 +2409,8 @@
         "app.learning.learning.pg",
         "cloud-runtime.forward-compatibility.pg",
         "cloud-runtime.migration-manifest",
-        "cloud-runtime.tenancy.pg"
+        "cloud-runtime.tenancy.pg",
+        "app.e2e.privacy-notice"
       ],
       "gaps": [
         "Disposable PostgreSQL does not establish hosted Neon operational compatibility, retention operations or legal LGPD compliance."
@@ -2487,7 +2515,9 @@
         "apps/reference-dapp/src/components/workflow-canvas.tsx",
         "apps/reference-dapp/src/components/workflow-edit-review.tsx",
         "apps/reference-dapp/src/components/workflow-name.tsx",
-        "apps/reference-dapp/src/components/workflow-run-panel.tsx"
+        "apps/reference-dapp/src/components/workflow-run-panel.tsx",
+        "apps/reference-dapp/src/components/dashboard/portfolio-widget.tsx",
+        "apps/reference-dapp/src/components/dashboard/portfolio-widget.module.css"
       ],
       "suites": [
         "app.components.canvas-panel-reveal",
@@ -2498,7 +2528,8 @@
         "app.e2e.landing07",
         "app.e2e.wallet-selector",
         "app.i18n.catalog",
-        "app.i18n.locale"
+        "app.i18n.locale",
+        "app.components.dashboard.portfolio-widget"
       ],
       "gaps": [
         "Browser profiles cover selected journeys; full accessibility audit, device matrix and language completeness remain acceptance gaps."
@@ -2725,7 +2756,8 @@
         "apps/reference-dapp/src/components/wallet-authority-epoch.ts",
         "apps/reference-dapp/src/components/wallet-pending-notice.tsx",
         "apps/reference-dapp/src/components/wallet-proof.tsx",
-        "apps/reference-dapp/src/components/wallet-selector.tsx"
+        "apps/reference-dapp/src/components/wallet-selector.tsx",
+        "apps/reference-dapp/src/domain/wallet-proof-events.ts"
       ],
       "suites": [
         "app.state.wallet-review-continuity",
@@ -3071,7 +3103,8 @@
         "apps/reference-dapp/src/domain/intelligence/grounding.ts",
         "apps/reference-dapp/src/domain/intelligence/operational-state.ts",
         "apps/reference-dapp/src/domain/intelligence/turn-metrics.ts",
-        "apps/reference-dapp/src/domain/proposal.ts"
+        "apps/reference-dapp/src/domain/proposal.ts",
+        "apps/reference-dapp/src/domain/privacy-notice.ts"
       ],
       "suites": [
         "app.domain.build-entry",
@@ -3083,7 +3116,8 @@
         "app.e2e.chat-assistant",
         "app.platform.engineering-continuity",
         "app.platform.intelligence-parity",
-        "app.state.flofi-conversation"
+        "app.state.flofi-conversation",
+        "app.domain.privacy-notice"
       ],
       "gaps": [
         "Goal plans compose certified sequence steps including funded liquidity after a conversion when the position and range are stated; Channel Core uses the public-quote discovery adapter.",
@@ -3359,7 +3393,8 @@
         "apps/reference-dapp/src/domain/workflow-steps.ts",
         "apps/reference-dapp/src/domain/canonical-execution-status.ts",
         "apps/reference-dapp/src/domain/observation-schedule.ts",
-        "apps/reference-dapp/src/domain/landed-attempts.ts"
+        "apps/reference-dapp/src/domain/landed-attempts.ts",
+        "apps/reference-dapp/src/domain/wallet-portfolio.ts"
       ],
       "suites": [
         "action-registry.engineering-regression",
@@ -3372,7 +3407,8 @@
         "reference-reconciler.evidence",
         "workflow-contracts.revision-state",
         "app.domain.canonical-execution-status",
-        "app.domain.observation-schedule"
+        "app.domain.observation-schedule",
+        "app.domain.wallet-portfolio"
       ],
       "gaps": [
         "Mapped suites are representative boundary tests, not exhaustive path or public execution coverage.",
@@ -3472,7 +3508,9 @@
         "apps/reference-dapp/src/i18n/pt-universal-bridge.ts",
         "apps/reference-dapp/src/i18n/pt-wallets.ts",
         "apps/reference-dapp/src/i18n/pt-workflow-runs.ts",
-        "apps/reference-dapp/src/i18n/pt.ts"
+        "apps/reference-dapp/src/i18n/pt.ts",
+        "apps/reference-dapp/src/i18n/pt-chat-dashboard.ts",
+        "apps/reference-dapp/src/i18n/pt-portfolio.ts"
       ],
       "suites": [
         "app.e2e.canvas-keyboard",
@@ -5504,14 +5542,16 @@
         "apps/reference-dapp/src/server/robinhood-mainnet.ts",
         "apps/reference-dapp/src/server/robinhood-rpc.ts",
         "apps/reference-dapp/src/server/solana-asset-catalog.ts",
-        "apps/reference-dapp/src/server/solana-rpc.ts"
+        "apps/reference-dapp/src/server/solana-rpc.ts",
+        "apps/reference-dapp/src/server/wallet-portfolio.ts"
       ],
       "suites": [
         "action-registry.asset-registry",
         "action-registry.engineering-regression",
         "action-registry.execution-capabilities",
         "app.server.provider-boundary",
-        "app.server.router-providers"
+        "app.server.router-providers",
+        "app.server.wallet-portfolio"
       ],
       "gaps": [
         "Catalog/discovery and offline provider responses do not certify provider uptime or real execution."
@@ -5532,14 +5572,16 @@
         "apps/reference-dapp/src/server/card-binding.ts",
         "apps/reference-dapp/src/server/delegation-operation.ts",
         "apps/reference-dapp/src/server/run-ownership.ts",
-        "apps/reference-dapp/src/server/session-principal.ts"
+        "apps/reference-dapp/src/server/session-principal.ts",
+        "apps/reference-dapp/src/server/history-principals.ts"
       ],
       "suites": [
         "action-registry.engineering-regression",
         "app.delegation.adversarial.pg",
         "app.mcp.oauth.foundation",
         "app.state.review-authorization",
-        "cloud-runtime.tenancy.pg"
+        "cloud-runtime.tenancy.pg",
+        "app.server.history-principals"
       ],
       "gaps": [
         "Adversarial fixtures and isolation tests are not a penetration test or proof against all attacks."

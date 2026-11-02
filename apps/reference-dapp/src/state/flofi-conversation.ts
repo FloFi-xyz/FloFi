@@ -65,6 +65,13 @@ export type ConversationBridge = LifecycleView & {
   readonly walletNetwork?: string | null | undefined; readonly networkError?: string | null | undefined;
   /** True while a runtime this workflow needs has not answered whether it is available here (unknown, not "unavailable"). */
   readonly runtimeChecking?: boolean | undefined;
+  /** BUILD-FLOFI-CHAT-E2E-DASHBOARD-UX-001: executed actions of this workflow still in it, and how many the runtime skips as completed steps. */
+  readonly executedActions?: { readonly executed: number; readonly carried: number } | undefined;
+  /**
+   * Whether this completed workflow can continue as further steps (a finished sequence, or one action whose runtime runs steps): an added action
+   * is then its own next step. Otherwise (a composition, a runtime that runs the workflow as a whole) any change is reviewed as a whole again.
+   */
+  readonly continuable?: boolean | undefined;
 };
 export type PendingEdit = { readonly nodeId: string; readonly step: number; readonly action: string; readonly value: string };
 type Question = { readonly open: PendingQuestion; readonly language: ConversationLanguage };
@@ -122,6 +129,8 @@ export function useFlofiConversation({ owner, epoch, bridge, direct, interfaceLa
   const questionRef = useRef<Question | null>(null);
   const latest = useRef({ bridge, state, context }); latest.current = { bridge, state, context };
   const pendingCommit = useRef<Commit | null>(null), lastCommit = useRef<{ readonly before: Workflow; readonly expected: Workflow } | null>(null);
+  /** BUILD-FLOFI-CHAT-E2E-DASHBOARD-UX-001: the workflow FloFi last reported a final completed result for, and whether it continues as steps. */
+  const finished = useRef<{ readonly workflowId: string; readonly continuable: boolean } | null>(null);
   const reviewLock = useRef<{ scope: number; key: string | null; sawBusy: boolean; settled: boolean; language: ConversationLanguage; continuation?: boolean } | null>(null);
   /**
    * The execution the chat follows. `start` (BUILD-FLOFI-CHAT-E2E-FIX-002) exists only while the chat's own wallet request is starting: the runtime
@@ -180,7 +189,7 @@ export function useFlofiConversation({ owner, epoch, bridge, direct, interfaceLa
     // A reopened workflow keeps the conversation, but no open question of the previous workflow.
     // BUILD-FLOFI-E2E-RELIABILITY-001: the previous workflow's follow-up (and its permission to re-quote by itself) does not carry over either.
     if (lastWorkflow.current !== state.workflow.workflowId) { lastWorkflow.current = state.workflow.workflowId; setQuestion(null); pendingCommit.current = null; lastCommit.current = null;
-      watch.current = null; reviewLock.current = null; requote.current = null; resume.current = null; handover.current = null; }
+      watch.current = null; reviewLock.current = null; requote.current = null; resume.current = null; handover.current = null; finished.current = null; }
   }, [state.workflow.workflowId]);
 
   // A committed chat change is confirmed from the stored workflow once it lands; a refused or superseded commit says so.
@@ -200,9 +209,26 @@ export function useFlofiConversation({ owner, epoch, bridge, direct, interfaceLa
   /** FloFi's confirmation of a landed commit, read from the stored workflow, then its next question. */
   function confirm(scope: number, commit: Commit, stored: Workflow) {
     const c = conversationCopy(commit.language), lines = describeChatChange(commit.before, stored, latest.current.context, commit.language);
+    // BUILD-FLOFI-CHAT-E2E-DASHBOARD-UX-001: after an execution, say whether what already executed stays completed or would be reviewed again.
+    const executed = latest.current.bridge.executedActions, whole = finished.current?.workflowId === stored.workflowId && !finished.current.continuable;
+    const history = executed?.executed ? executed.executed > executed.carried ? [c.executedAgain] : [c.executedKept(executed.carried)] : whole ? [c.executedAgain] : [];
     append(scope, { role: commit.role, language: commit.language, text: commit.summary ? `${commit.summary}. ${c.positionPrepared}` : lines.join(' '),
-      notes: [...commit.notes, ...commit.reviewed ? [c.changed] : []], question: c.nextQuestion, options: commit.summary ? [c.addAnother, c.review] : [c.addAnother, c.review, c.undo] });
+      notes: [...commit.notes, ...commit.reviewed ? [c.changed] : [], ...history], question: c.nextQuestion, options: commit.summary ? [c.addAnother, c.review] : [c.addAnother, c.review, c.undo] });
     setQuestion({ open: { kind: 'NEXT_STEP', workflowId: stored.workflowId, revision: stored.revision }, language: commit.language });
+  }
+
+  /**
+   * BUILD-FLOFI-CHAT-E2E-DASHBOARD-UX-001: after a final completed result the side chat keeps the workflow open for more work: add another action
+   * (it becomes this workflow's next step; what executed is not sent again), modify it, or create a new workflow. Authoring only: nothing is
+   * simulated, reviewed or signed until the owner asks, and every later request still needs its own fresh Review and wallet confirmation.
+   */
+  function offerNextSteps(scope: number, language: ConversationLanguage, text: string, notes: readonly string[] = []) {
+    const c = conversationCopy(language), view = latest.current.bridge, workflow = latest.current.state.workflow;
+    // Only a workflow that continues as steps is promised that what executed is not sent again; anything else says it is reviewed as a whole.
+    finished.current = { workflowId: workflow.workflowId, continuable: view.continuable === true };
+    setQuestion({ open: { kind: 'NEXT_STEP', workflowId: workflow.workflowId, revision: workflow.revision, executed: true }, language });
+    flofi(scope, language, text, { ...notes.length ? { notes } : {}, question: view.continuable ? c.afterExecution : c.afterExecutionWhole,
+      options: [c.addAnother, c.modify, ...view.startNewWorkflow ? [c.startNew] : []] });
   }
 
   function commit(scope: number, command: Command, meta: { exact: boolean; role: 'flofi' | 'ai'; language: ConversationLanguage; notes: readonly string[]; summary?: string }) {
@@ -269,7 +295,7 @@ export function useFlofiConversation({ owner, epoch, bridge, direct, interfaceLa
     // A runtime's availability that has not answered yet is unknown: FloFi waits and continues by itself instead of calling it unavailable.
     if (view.runtimeChecking) { resume.current = { scope, language, until: 'READY', error: null }; flofi(scope, language, c.checkingProviders); return; }
     const sequence = view.sequence;
-    if (sequence?.finished) { flofi(scope, language, c.workflowCompleted(sequence.total), view.startNewWorkflow ? { options: [c.startNew] } : {}); return; }
+    if (sequence?.finished) { offerNextSteps(scope, language, c.workflowCompleted(sequence.total)); return; }
     if (sequence?.awaitingDelivery) { flofi(scope, language, c.awaitingDelivery(sequence.current), view.controls.canCheck ? { options: [c.checkStatus] } : {}); return; }
     // The current Review is still approvable (also a fresh Review for the rest of a started run): present it as the Canvas does — unless the owner
     // asked for a fresh quote before anything was requested (BUILD-FLOFI-BRIDGE-LIVE-FIX-003), which re-simulates and retires the unused Review.
@@ -434,6 +460,7 @@ export function useFlofiConversation({ owner, epoch, bridge, direct, interfaceLa
     if (request === 'REFRESH') { startReview(scope, language, true); return; }
     if (request === 'ROUTE') { flofi(scope, language, c.anotherRoute); startReview(scope, language, true); return; }
     if (request === 'ADD') { setQuestion(null); flofi(scope, language, c.addPrompt); return; }
+    if (request === 'MODIFY') { setQuestion(null); flofi(scope, language, c.modifyPrompt); return; }
     if (request === 'UNDO') {
       const done = lastCommit.current && undoChatCommit(lastCommit.current);
       lastCommit.current = null; setQuestion(null);
@@ -562,7 +589,8 @@ export function useFlofiConversation({ owner, epoch, bridge, direct, interfaceLa
         // the shell records this step's reconciled delivery (`handover`); a step that did not complete stops the sequence there.
         const sequence = bridge.sequence;
         if (sequence && phase === 'COMPLETED' && sequence.current < sequence.total) { handover.current = { scope: followed.scope, language, from: sequence.current, waiting: false }; setTick(n => n + 1); return; }
-        if (sequence && phase === 'COMPLETED') { flofi(followed.scope, language, c.workflowCompleted(sequence.total), bridge.startNewWorkflow ? { options: [c.startNew] } : {}); return; }
+        if (sequence && phase === 'COMPLETED') { offerNextSteps(followed.scope, language, c.workflowCompleted(sequence.total)); return; }
+        if (!sequence && phase === 'COMPLETED' && view.final) { offerNextSteps(followed.scope, language, status, [c.finished]); return; }
         flofi(followed.scope, language, status, { ...sequence ? { notes: [c.stepStopped(sequence.current, sequence.total)] } : view.final && bridge.startNewWorkflow ? { notes: [c.finished] } : {},
           ...view.final && bridge.startNewWorkflow ? { options: [c.startNew] } : {} });
         return;
@@ -661,9 +689,14 @@ export function useFlofiConversation({ owner, epoch, bridge, direct, interfaceLa
       // A bare yes/no does not choose between "add another action" and "review": FloFi asks again, or closes its question.
       const bare = open ? classifyAnswer(text, 'CONFIRM_CONTINUE') : 'UNCLEAR';
       if (open && bare !== 'UNCLEAR') {
+        const asked = conversationCopy(open.language);
         setQuestion(bare === 'NO' ? null : open);
-        flofi(scope, open.language, bare === 'NO' ? conversationCopy(open.language).declined : conversationCopy(open.language).nextQuestion,
-          bare === 'NO' ? {} : { options: [conversationCopy(open.language).addAnother, conversationCopy(open.language).review] });
+        if (bare !== 'NO' && open.open.kind === 'NEXT_STEP' && open.open.executed) {
+          flofi(scope, open.language, finished.current?.continuable ? asked.afterExecution : asked.afterExecutionWhole,
+            { options: [asked.addAnother, asked.modify, ...bridge.startNewWorkflow ? [asked.startNew] : []] });
+          return;
+        }
+        flofi(scope, open.language, bare === 'NO' ? asked.declined : asked.nextQuestion, bare === 'NO' ? {} : { options: [asked.addAnother, asked.review] });
         return;
       }
       const request = lifecycleRequest(text);

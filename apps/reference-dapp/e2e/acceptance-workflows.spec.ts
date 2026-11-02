@@ -146,18 +146,24 @@ test('Save → Your workflows → exact Canvas restoration; grouped executions, 
   await expect(page.locator('main .navigation-workflows, main .saved-workflows')).toHaveCount(0);
   await expect(page.locator('main').getByRole('heading', { name: 'Workflows', exact: true })).toHaveCount(0);
   await expect(page.locator('main')).not.toContainText('Workflows are temporarily unavailable. Try again.');
-  await expect(page.getByRole('heading', { name: 'Recent activity', exact: true })).toBeVisible();
-  await expect(page.locator('.dashboard-run-list>li')).toHaveCount(3);
+  // BUILD-FLOFI-CHAT-E2E-DASHBOARD-UX-001: the Dashboard summarizes the records; the executed history is in Your workflows.
+  await expect(page.getByRole('region', { name: 'Workflow records', exact: true })).toContainText('3 executed records');
+  await expect(page.locator('.dashboard-run-list')).toHaveCount(0);
+  library = await libraryWorkspace(page);
+  await expect(library.getByRole('region', { name: 'Executed and history', exact: true }).locator('.dashboard-run-list>li')).toHaveCount(3);
+  // The saved workflow ran, so it is listed with its records (reopenable there), not under Saved workflows.
+  await expect(library.locator('.workflows-saved')).not.toContainText(name);
+  await expect(library.getByRole('button', { name: `Open workflow: ${name}`, exact: true })).toHaveCount(2);
   await page.locator(`a[href="/app/dashboard/runs/${run1}"]`).click();
   await expect(page.locator('main')).toContainText(run1);
   await expect(page.locator('main')).toContainText('Evidence');
   expect(run1).not.toBe(run2);
   await reloadBuilder(page);
   library = await libraryWorkspace(page);
-  await expect(library.getByRole('button', { name, exact: true })).toHaveCount(1);
-  await expect(library.getByRole('button', { name: 'Workflow', exact: true })).toHaveCount(1);
+  await expect(library.getByRole('button', { name: `Open workflow: ${name}`, exact: true })).toHaveCount(2);
+  await expect(library.getByRole('button', { name: 'Open workflow', exact: true })).toHaveCount(1);
   expect(await library.innerText()).not.toMatch(/RECONCILED|0x[0-9a-f]{40}|crx-/);
-  await library.getByRole('button', { name, exact: true }).click();
+  await library.getByRole('button', { name: `Open workflow: ${name}`, exact: true }).first().click();
   await expect(page).toHaveURL('/app');
   await expect(page.locator('.build-flow-surface .composer-card').first().getByRole('textbox', { name: 'Source amount (USDC)', exact: true })).toHaveValue('1');
   await page.getByRole('button', { name: 'Save workflow', exact: true }).click();
@@ -178,21 +184,22 @@ test('Save → Your workflows → exact Canvas restoration; grouped executions, 
   await page.getByRole('button', { name: 'Settings', exact: true }).click(); await page.getByRole('switch', { name: 'Language', exact: true }).click();
   await expect(page.locator('html')).toHaveAttribute('lang', 'pt'); await page.keyboard.press('Escape');
   library = await libraryWorkspace(page, 'PT');
-  await expect(library.getByRole('button', { name, exact: true })).toHaveCount(1);
+  await expect(library.getByRole('button', { name: `Abrir fluxo: ${name}`, exact: true })).toHaveCount(2);
   await expect(page.getByRole('group', { name: 'Ligação da carteira' })).toContainText(A.address.slice(0, 6));
-  await library.getByRole('button', { name, exact: true }).click();
+  await library.getByRole('button', { name: `Abrir fluxo: ${name}`, exact: true }).first().click();
   await expect(page.locator('.build-flow-surface .composer-card').first().getByRole('textbox', { name: 'Montante de origem (USDC)', exact: true })).toHaveValue('1');
   await page.getByRole('button', { name: 'Guardar fluxo', exact: true }).click();
   await expect.poll(() => savedCanonical(A.address)).toEqual(workflow);
   expect((await walletRequests(page)).filter(method => method !== 'eth_accounts' && method !== 'eth_chainId')).toEqual(requests.filter(method => method !== 'eth_accounts' && method !== 'eth_chainId'));
   await switchAccount(page, B.address);
   library = await libraryWorkspace(page, 'PT');
-  await expect(library.getByRole('button', { name, exact: true })).toHaveCount(0);
+  await expect(library.getByRole('button', { name: `Abrir fluxo: ${name}`, exact: true })).toHaveCount(0);
   // The proof reuses the account the wallet now exposes (B), never A's earlier session; no selector opens.
   await expect(page.locator('.build009-wallet-info')).toHaveAttribute('title', new RegExp(B.address, 'i'));
   await library.getByRole('button', { name: 'Ligar carteira e verificar titularidade', exact: true }).click();
   await expect(page.locator('dialog.wallet-selector[open]')).toHaveCount(0);
-  await expect(library).toContainText('Ainda não há workflows.');
+  await expect(library).toContainText('Nenhum workflow guardado à espera.');
+  await expect(library.locator('.dashboard-run-card')).toHaveCount(0);
   expect(errors).toEqual([]); networkGuard.assertClean();
 });
 

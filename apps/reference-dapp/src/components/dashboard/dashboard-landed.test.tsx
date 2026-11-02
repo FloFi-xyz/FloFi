@@ -14,7 +14,7 @@ const run: DashboardRun = { runId: 'bas-0123456789abcdef01234567', workflowId: '
 
 describe('Issue #149: landed-attempt indicator in the Dashboard', () => {
   it('the run card shows the landed approval and the incomplete main action, never "Not started"', () => {
-    const html = renderToStaticMarkup(<DashboardView account={owner} connection="CONNECTED" runs={[projectDashboardRun(run)]} hasMore={false} loading={false} build={noop}
+    const html = renderToStaticMarkup(<DashboardView mode="records" account={owner} connection="CONNECTED" runs={[projectDashboardRun(run)]} hasMore={false} loading={false} build={noop}
       openRun={noop} verify={noop} verifying={false} verificationIssue={null} refresh={noop}/>);
     expect(html).toContain('Approval confirmed · main action not sent');
     expect(html).toContain('Partially completed');

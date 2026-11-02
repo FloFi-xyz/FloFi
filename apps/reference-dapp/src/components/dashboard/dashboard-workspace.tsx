@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 'use client';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import type { ExecutionLifecycle } from '../../domain/execution-lifecycle';
 import type { ExecutionRecovery } from '../../domain/execution-recovery';
 import type { ReviewWallet } from '../../domain/review-presentation';
@@ -11,12 +11,18 @@ import { injected, useBuild009Wallet } from '../../state/build009-wallet-store';
 import { currentDashboardRun, dashboardRunIndex, projectDashboardRun, sameOwner } from '../../lib/dashboard/run-mapping';
 import { projectDashboardRecord } from '../../lib/dashboard/record-projection';
 import type { DashboardDetailResponse, DashboardSnapshot } from '../../lib/dashboard/types';
-import { DashboardView } from './dashboard-view';
+import { DashboardView, type OpenWorkflow } from './dashboard-view';
+import { WALLET_PROOF_CHANGED } from '../../domain/wallet-proof-events';
 import { RunDetailView } from './run-detail-view';
 
-export function DashboardWorkspace({ workflowName, progress, recovery, wallet, context, runId, build, execute, navigate }: {
+/**
+ * BUILD-FLOFI-CHAT-E2E-DASHBOARD-UX-001: `records` renders this wallet's execution history inside Your workflows (executed records and records
+ * that need attention); the Dashboard (`dashboard`) keeps the overview: the wallet portfolio, the current execution and a records summary.
+ */
+export function DashboardWorkspace({ workflowName, progress, recovery, wallet, context, runId, build, execute, navigate, mode = 'dashboard', portfolio, openWorkflow, signInPrompt }: {
   workflowName: string; progress: ExecutionLifecycle; recovery: ExecutionRecovery; wallet: ReviewWallet; context: ReviewContext;
   runId: string | null; build(): void; execute(): void; navigate(path: string): void;
+  mode?: 'dashboard' | 'records'; portfolio?: ReactNode; openWorkflow?: OpenWorkflow | undefined; signInPrompt?: boolean;
 }) {
   const sharedWallet = useBuild009Wallet();
   const account = wallet.account;
@@ -26,6 +32,12 @@ export function DashboardWorkspace({ workflowName, progress, recovery, wallet, c
   const isCurrent = Boolean(runId && ownedCurrent?.run.runId === runId);
   const [version, refresh] = useState(0);
   const latestAccount = useRef(account); latestAccount.current = account;
+  // A wallet proven anywhere on the page (Your workflows, Save, /approve) re-reads the history: a read, never another signature.
+  useEffect(() => {
+    const changed = () => refresh(value => value + 1);
+    window.addEventListener(WALLET_PROOF_CHANGED, changed);
+    return () => window.removeEventListener(WALLET_PROOF_CHANGED, changed);
+  }, []);
   const currentKey = JSON.stringify([account, ownedCurrent?.run.runId, version]);
   const [currentVisibility, setCurrentVisibility] = useState<{ key: string; disposition: 'VISIBLE' | 'DELETED' | 'ARCHIVED' } | null>(null);
   const [removed, setRemoved] = useState<{ owner: string; ids: readonly string[] } | null>(null);
@@ -105,7 +117,8 @@ export function DashboardWorkspace({ workflowName, progress, recovery, wallet, c
       if (!after || !sameOwner(after.account, account) || injected() !== provider || typeof signature !== 'string') throw new Error('WALLET_CHANGED');
       const signed = await walletSignIn(session.account, chainId, signature);
       if (!signed.ok) throw new Error(signed.code);
-      refresh(value => value + 1);
+      // Re-reads this history (the listener above) and every other proof of this wallet on the page.
+      window.dispatchEvent(new CustomEvent(WALLET_PROOF_CHANGED, { detail: { namespace: 'eip155' } }));
     } catch (cause) {
       setVerificationIssue({ account, message: cause instanceof Error && cause.message === 'WALLET_CHANGED' ? 'The wallet changed. Verify the wallet currently connected in the header.'
         : 'Wallet verification was not completed. Your execution records have not changed.' });
@@ -119,5 +132,6 @@ export function DashboardWorkspace({ workflowName, progress, recovery, wallet, c
   return <DashboardView account={account} connection={snapshot?.connection ?? null} runs={runs} hasMore={snapshot?.hasMore ?? false}
     loadMore={loadMore} loadingMore={loadingMore} pageIssue={pageIssue}
     loading={loading} build={build} openRun={id => navigate(`/app/dashboard/runs/${encodeURIComponent(id)}`)} verify={() => void verify()} verifying={verifying}
-    verificationIssue={verificationIssue?.account === account ? verificationIssue.message : null} refresh={() => refresh(value => value + 1)} {...history ? { history } : {}}/>;
+    verificationIssue={verificationIssue?.account === account ? verificationIssue.message : null} refresh={() => refresh(value => value + 1)} {...history ? { history } : {}}
+    mode={mode} portfolio={portfolio} openRecords={() => navigate('/app/workflows')} openWorkflow={openWorkflow} signInPrompt={Boolean(signInPrompt)}/>;
 }

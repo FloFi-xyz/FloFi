@@ -50,15 +50,21 @@ async function inspect(id: string) {
   finally { await database.close(); }
 }
 const card = (page: Page, id: string) => page.locator('.dashboard-run-card').filter({ has: page.locator(`a[href="/app/dashboard/runs/${id}"]`) });
+/**
+ * BUILD-FLOFI-CHAT-E2E-DASHBOARD-UX-001: the execution history lives in Your workflows. A wallet that no signed-in FloFi account holds (these
+ * test wallets have no account) proves itself once there — one sign-in signature for the saved workflows and the history together.
+ */
 async function signIn(page: Page) {
-  await expect(page.getByRole('button', { name: 'Verify wallet for history', exact: true })).toBeVisible();
-  await page.getByRole('button', { name: 'Verify wallet for history', exact: true }).click();
+  const prove = page.getByRole('button', { name: 'Connect wallet and prove ownership', exact: true });
+  await expect(prove).toBeVisible();
   await expect(page.getByRole('button', { name: 'Verify wallet for history', exact: true })).toHaveCount(0);
+  await prove.click();
+  await expect(prove).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'Refresh history', exact: true })).toBeVisible();
 }
 async function open(page: Page, wallets: TestWallet[]) {
   await installJourneyWallet(page, wallets, { chain: '0xa4b1', transactionControl: async () => { throw Error('FINANCIAL_REQUEST_FORBIDDEN'); } });
-  await page.goto('/app/dashboard'); await signIn(page);
+  await page.goto('/app/workflows'); await signIn(page);
 }
 
 test('permanent deletion removes real bytes and stays deleted after refresh, a new session, and wallet changes', async ({ page, browser }) => {

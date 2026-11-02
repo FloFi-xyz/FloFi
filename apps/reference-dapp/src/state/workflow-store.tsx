@@ -19,7 +19,7 @@ import { readBaseQuote } from '../app/observation-action';
 import { browserFailureMessage, initialObservationState, observationReducer, receiveObservation, type ObservationState } from '../domain/base-observation';
 import { actionReviewValue } from '../domain/canvas-action-setup';
 import { createCryptoActionNode, type CryptoActionInput, type CryptoSelection, type CryptoSelections } from '../domain/crypto-action-picker';
-import { boundAmount, boundProjection, fundingAllocations, stepNodeKey, validCompletions, workflowSequence, type CompletedStep, type SequenceStep, type WorkflowSequence } from '../domain/workflow-sequence';
+import { boundAmount, boundProjection, compositionWorkflow, fundingAllocations, sequenceOrder, stepNodeKey, validCompletions, workflowSequence, type CompletedStep, type SequenceStep, type WorkflowSequence } from '../domain/workflow-sequence';
 
 type Pending = { valid: boolean; command: Command; diff: readonly string[]; review: ReviewResult | null; authoringId?: string; authoringAmount?: string };
 type Store = { restorationEpoch: number; state: EditorState; dispatch: Dispatch<Command>; context: ReviewContext;
@@ -79,6 +79,17 @@ type Store = { restorationEpoch: number; state: EditorState; dispatch: Dispatch<
   runtimeWorkflow: Workflow; sequence: SequenceView | null;
   /** Records that the sequence's current step reconciled (from its own durable record); the next step becomes the runtime workflow. */
   completeSequenceStep(index: number, completion: { readonly received: string | null; readonly runKey: string | null }): void;
+  /**
+   * BUILD-FLOFI-CHAT-E2E-DASHBOARD-UX-001: records that a one-action workflow's own run is final and every action of it reconciled (its durable
+   * record). An action the owner adds afterwards makes the workflow a sequence whose first step is this executed action: only the new step is
+   * simulated, reviewed and signed. Changing the executed action itself, or anything before it, starts over (`validCompletions`).
+   */
+  recordExecutedAction(completion: { readonly received: string | null; readonly runKey: string | null }): void;
+  /**
+   * Actions of this workflow that already executed this visit and still describe it exactly (`executed`), and how many of them the current
+   * runtime workflow skips as completed steps (`carried`). `executed > carried` means the next Review covers an executed action again.
+   */
+  executedActions: { readonly executed: number; readonly carried: number };
   chain: ChainState; eligibility: Eligibility; generateArtifacts(): void; refreshArtifacts(): void; accessCheck(): void };
 /** The sequence as the shell, chat and Review present it. `cursor` is the step its runtime serves now; `finished` once every step reconciled. */
 export type SequenceView = { readonly steps: WorkflowSequence['steps']; readonly cursor: number; readonly current: SequenceStep; readonly completed: readonly CompletedStep[];
@@ -188,6 +199,25 @@ export function WorkflowProvider({ children, initialContext, initialWorkflowId =
     setSequenceRun({ workflowId: workflow.workflowId, completed: [...completed, { nodeId: step.nodeId, node: stepNodeKey(node), received: completion.received, runKey: completion.runKey,
       allocations: fundingAllocations(step, completed) }] });
   }, []);
+  const recordExecutedAction = useCallback((completion: { readonly received: string | null; readonly runKey: string | null }) => {
+    const { sequence, workflow } = sequenceRef.current, actions = sequenceOrder(workflow), node = actions[0];
+    // A sequence records its own steps; a composition runtime executes its workflow as a whole and is never split into steps.
+    if (sequence || actions.length !== 1 || !node || compositionWorkflow(workflow)) return;
+    const done: CompletedStep = { nodeId: node.nodeId, node: stepNodeKey(node), received: completion.received, runKey: completion.runKey, allocations: [] };
+    setSequenceRun(run => {
+      // The same executed run already heads this workflow's history: keep every later step (an undone and redone addition), only learning a
+      // delivery its record proves now.
+      const kept = run.workflowId === workflow.workflowId ? run.completed[0] : undefined;
+      if (kept && kept.nodeId === done.nodeId && kept.node === done.node && kept.runKey === done.runKey)
+        return kept.received === done.received || done.received === null ? run : { ...run, completed: [{ ...kept, received: done.received }, ...run.completed.slice(1)] };
+      return { workflowId: workflow.workflowId, completed: [done] };
+    });
+  }, []);
+  const executedActions = useMemo(() => {
+    if (sequenceRun.workflowId !== state.workflow.workflowId) return { executed: 0, carried: 0 };
+    const executed = sequenceRun.completed.filter(done => state.workflow.nodes.some(node => node.nodeId === done.nodeId && stepNodeKey(node) === done.node)).length;
+    return { executed, carried: sequence ? Math.min(completed.length, sequence.steps.length) : 0 };
+  }, [sequenceRun, state.workflow, sequence, completed]);
   const eligibility: Eligibility = useMemo(() => authoringIncomplete ? { eligible: false, reason: 'Configure the amount on the Canvas before simulating.' }
     : generationEligibility(state.workflow, context), [state.workflow, context, authoringIncomplete]);
 
@@ -370,7 +400,7 @@ export function WorkflowProvider({ children, initialContext, initialWorkflowId =
     startActionSetup, startStocksSetup, editCanvasAmount, editPoolSetup, editSwapSetupDirection, cancelCanvasAmount, reviewCanvasAmount, commitCanvasAmount, removeActionSetup,
     recipientInputs: history.recipientInputs, editCanvasRecipient,
     canRedo: history.future.length > 0, undo, redo, moveCanvasNodes, addCanvasCommand, duplicateCanvasNodes,
-    pending, propose, applyProposal, dismissProposal: () => setPending(null), commitChatCommand, undoChatCommit, stagedPosition, ...reviewState, runtimeWorkflow, sequence: sequenceView, completeSequenceStep,
+    pending, propose, applyProposal, dismissProposal: () => setPending(null), commitChatCommand, undoChatCommit, stagedPosition, ...reviewState, runtimeWorkflow, sequence: sequenceView, completeSequenceStep, recordExecutedAction, executedActions,
     chain, eligibility, generateArtifacts, refreshArtifacts, accessCheck }}>
     <BaseObservationProvider>{children}</BaseObservationProvider>
   </Context.Provider>;

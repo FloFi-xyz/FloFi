@@ -10,6 +10,7 @@ import { ProductWorkspace } from '../../components/product-workspace';
 import { LocaleProvider } from '../../i18n/locale';
 import { LANGUAGE_COOKIE, parseLanguage } from '../../i18n/language';
 import { parseWalletHint, WALLET_HINT_COOKIE } from '../../wallet/wallet-hint';
+import { parsePrivacyNotice, PRIVACY_NOTICE_COOKIE } from '../../domain/privacy-notice';
 import { FloFiPrivyProvider } from '../../accounts/privy-client';
 import { privyBrowserConfig } from '../../accounts/privy-server';
 import { SessionGuard } from '../../components/account/session-guard';
@@ -27,7 +28,8 @@ export default async function ProductLayout({ children }: { children: ReactNode 
   const initialWorkflowId = `workflow-${randomUUID()}`;
   const jar = await cookies();
   const configured = copilotConfig(process.env).mode;
-  const bootstrap = { walletHint: parseWalletHint(jar.get(WALLET_HINT_COOKIE)?.value), copilotMode: configured };
+  const bootstrap = { walletHint: parseWalletHint(jar.get(WALLET_HINT_COOKIE)?.value), copilotMode: configured,
+    privacyNotice: parsePrivacyNotice(jar.get(PRIVACY_NOTICE_COOKIE)?.value) ?? 'UNANSWERED' as const };
   // BUILD-FLOFI-PRIVY-UX-001: the person's Privy wallets sign here (with Privy's own confirmation), and Disconnect logs out of Privy. The page
   // runs under the proxy's nonce policy (account-csp.ts productPagePolicy): Next.js puts the nonce on its own scripts.
   return <LocaleProvider initialLanguage={parseLanguage(jar.get(LANGUAGE_COOKIE)?.value) ?? 'EN'}>

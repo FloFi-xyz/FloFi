@@ -22,12 +22,15 @@ declare global {
       run(runId: string | null): void;
       current(): void;
       navigation(): string[];
+      /** BUILD-FLOFI-CHAT-E2E-DASHBOARD-UX-001: the Dashboard overview, or the same records as Your workflows lists them (no remount, no new read). */
+      view(value: 'dashboard' | 'records'): void;
     };
   }
 }
 function Harness() {
   const [account, setAccount] = useState<string | null>(reviewOwner), [runId, setRunId] = useState<string | null>(null), [current, setCurrent] = useState(false);
   const [navigation, setNavigation] = useState<string[]>([]);
+  const [surface, setSurface] = useState<'dashboard' | 'records'>('dashboard');
   const go = (path: string) => { setNavigation(value => [...value, path]); setRunId(dashboardRoute(path)?.runId ?? null); };
   window.flofiWorkspaceAcceptance = {
     read(owner, id, cursor = null) { return new Promise(resolve => { requests.push({ account: owner, runId: id, cursor, resolve, done: false }); }); },
@@ -45,11 +48,12 @@ function Harness() {
       request.resolve(request.runId ? { connection, account: request.account, detail: mode === 'owned' || mode === 'unrelated' ? saved.detail : null } as DashboardDetailResponse
         : { connection, account: request.account, runs: mode === 'owned' || mode === 'unrelated' ? [saved.detail.run] : [], hasMore: false } as DashboardSnapshot);
     },
-    wallet: setAccount, run: setRunId, current: () => setCurrent(true), navigation: () => navigation,
+    wallet: setAccount, run: setRunId, current: () => setCurrent(true), navigation: () => navigation, view: setSurface,
   };
-  return <DashboardWorkspace workflowName="Current workspace workflow" progress={current ? pending.view.progress! : { ...pending.view.progress!, started: false }}
+  // One stable frame: switching views never remounts the workspace (and never re-reads); the records get the page frame they have in the product.
+  return <div className={surface === 'records' && !runId ? 'dashboard-workspace' : 'acceptance-frame'}><DashboardWorkspace mode={surface} workflowName="Current workspace workflow" progress={current ? pending.view.progress! : { ...pending.view.progress!, started: false }}
     recovery={{ contextIssue: null, action: null, label: '', message: '', operationId: null, checking: false, recordOnly: true, check: null }} wallet={{ ...review.wallet, account }} context={review.context} runId={runId}
-    build={() => setNavigation(value => [...value, 'Build'])} execute={() => setNavigation(value => [...value, 'Execute'])} navigate={go}/>;
+    build={() => setNavigation(value => [...value, 'Build'])} execute={() => setNavigation(value => [...value, 'Execute'])} navigate={go}/></div>;
 }
 export function mount(element: HTMLElement) { createRoot(element).render(<Harness/>); }
 export { mount as mountDetails } from './run-detail-acceptance-harness';

@@ -2,18 +2,18 @@
 /** Issue #149: the Dashboard list reads the recorded attempts of runs whose summary cannot say what landed (owner-scoped, read-only). */
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cloudApiBaseUrl, callCloudFlow } from '../../server/cloud-api-client';
-import { currentWalletPrincipal } from '../../server/session-principal';
+import { currentWalletPrincipal, currentWalletPrincipals } from '../../server/session-principal';
 import { loadDashboardSnapshot } from './data-service';
 import { dashboardRunIndex } from './run-mapping';
 
 vi.mock('../../server/cloud-api-client', () => ({ cloudApiBaseUrl: vi.fn(), callCloudFlow: vi.fn() }));
-vi.mock('../../server/session-principal', () => ({ currentWalletPrincipal: vi.fn() }));
+vi.mock('../../server/session-principal', () => ({ currentWalletPrincipal: vi.fn(), currentWalletPrincipals: vi.fn() }));
 const account = '0x' + 'a'.repeat(40), other = '0x' + 'b'.repeat(40), hash = '0x' + 'c'.repeat(64);
 const summary = (runId: string, status: string, flow = 'base-aave') => ({ runId, ownerAccount: account, flow, status, hasEvidence: false });
 const response = (value: unknown, status = 200) => new Response(JSON.stringify({ ok: status === 200, value }), { status });
 afterEach(() => { vi.unstubAllGlobals(); vi.resetAllMocks(); });
 function setup(details: Record<string, unknown>, list: unknown[]) {
-  vi.mocked(currentWalletPrincipal).mockResolvedValue(account);
+  vi.mocked(currentWalletPrincipal).mockResolvedValue(account); vi.mocked(currentWalletPrincipals).mockResolvedValue(account ? [{ namespace: 'eip155', address: account }] : []);
   vi.mocked(cloudApiBaseUrl).mockReturnValue(new URL('http://127.0.0.1:9999/'));
   const transport = vi.fn().mockImplementation((url: URL) => {
     if (url.pathname === '/v1/runs') return Promise.resolve(response({ items: list, next: null }));
@@ -64,7 +64,7 @@ describe('Issue #149: Dashboard list attempt evidence', () => {
 
   it('bounds the reads of one page (25 runs, at most 5 at a time)', async () => {
     let inFlight = 0, peak = 0;
-    vi.mocked(currentWalletPrincipal).mockResolvedValue(account);
+    vi.mocked(currentWalletPrincipal).mockResolvedValue(account); vi.mocked(currentWalletPrincipals).mockResolvedValue(account ? [{ namespace: 'eip155', address: account }] : []);
     vi.mocked(cloudApiBaseUrl).mockReturnValue(new URL('http://127.0.0.1:9999/'));
     const list = Array.from({ length: 25 }, (_, i) => summary(`run-${i}`, 'SIMULATED'));
     vi.stubGlobal('fetch', vi.fn().mockImplementation(async (url: URL) => {
@@ -81,7 +81,7 @@ describe('Issue #149: Dashboard list attempt evidence', () => {
   });
 
   it('skips runs whose verified evidence already settles them, and shares one total read budget (a hung API never holds the Dashboard)', async () => {
-    vi.mocked(currentWalletPrincipal).mockResolvedValue(account);
+    vi.mocked(currentWalletPrincipal).mockResolvedValue(account); vi.mocked(currentWalletPrincipals).mockResolvedValue(account ? [{ namespace: 'eip155', address: account }] : []);
     vi.mocked(cloudApiBaseUrl).mockReturnValue(new URL('http://127.0.0.1:9999/'));
     const list = [{ ...summary('settled', 'COMPLETED'), hasEvidence: true }, summary('fast', 'SIMULATED'), summary('hung', 'AUTHORIZED')];
     const transport = vi.fn().mockImplementation((url: URL) => {

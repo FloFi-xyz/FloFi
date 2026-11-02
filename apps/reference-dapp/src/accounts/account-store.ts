@@ -266,6 +266,27 @@ export function createAccountStore(db: Database, tenantId: string) {
       return (await db.query<{ account_id: string }>('SELECT account_id FROM flofi_account_wallets WHERE tenant_id=$1 AND ecosystem=$2 AND address=$3',
         [tenantId, ecosystem === 'evm' ? 'EVM' : 'SOLANA', address])).rows[0]?.account_id ?? null;
     },
+    /**
+     * BUILD-FLOFI-CHAT-E2E-DASHBOARD-UX-001: every wallet address this account holds in this tenant — its saved wallets (embedded wallets the
+     * provider listed for this account, legacy FloFi Wallet records, external wallets linked with a fresh FloFi wallet proof) and the wallets it
+     * signs in with (verified at sign-in). Each table holds an address for one account only, but the two tables are written separately: an
+     * address another account holds in either table is left out (fail closed), so no wallet is ever shared by two accounts. Read on every
+     * request, never cached.
+     */
+    async walletAddresses(accountId: string): Promise<{ readonly namespace: 'eip155' | 'solana'; readonly address: string }[]> {
+      const { rows } = await db.query<{ namespace: string; address: string }>(`WITH held AS (
+          SELECT account_id, CASE ecosystem WHEN 'EVM' THEN 'eip155' ELSE 'solana' END AS namespace, address FROM flofi_account_wallets WHERE tenant_id=$1
+          UNION ALL SELECT account_id, CASE kind WHEN 'EIP155' THEN 'eip155' ELSE 'solana' END AS namespace, subject AS address
+          FROM flofi_account_identities WHERE tenant_id=$1 AND kind IN ('EIP155', 'SOLANA'))
+        SELECT DISTINCT namespace, address FROM held mine WHERE mine.account_id=$2
+          AND NOT EXISTS (SELECT 1 FROM held other WHERE other.namespace=mine.namespace AND other.address=mine.address AND other.account_id<>$2)
+        ORDER BY namespace, address`, [tenantId, accountId]);
+      return rows.flatMap(row => {
+        const namespace = row.namespace === 'eip155' ? 'eip155' as const : row.namespace === 'solana' ? 'solana' as const : null;
+        const address = namespace && canonicalAddress(namespace === 'eip155' ? 'evm' : 'solana', row.address);
+        return namespace && address ? [{ namespace, address }] : [];
+      });
+    },
     async wallets(accountId: string): Promise<AccountWallet[]> {
       const { rows } = await db.query<WalletRow>(`SELECT ecosystem, address, origin, provider, provider_name, export, label, created_at FROM flofi_account_wallets
         WHERE tenant_id=$1 AND account_id=$2 ORDER BY created_at, ecosystem, address`, [tenantId, accountId]);

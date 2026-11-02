@@ -33,11 +33,15 @@ import { portugueseStatusTruth } from './pt-status-truth';
 import { portugueseBridgeLiveFix } from './pt-bridge-live-fix';
 import { portugueseBuildEntry } from './pt-build-entry';
 import { portugueseChatEditor } from './pt-chat-editor';
+import { portugueseChatDashboard } from './pt-chat-dashboard';
+import { portuguesePortfolio } from './pt-portfolio';
 import { portugueseAccounts } from './pt-accounts';
 import { portugueseWallet } from './pt-wallet';
 import { portuguesePrivy } from './pt-privy';
 /** English source messages are stable presentation keys. Technical identifiers never enter this catalog. */
 export const portuguese: Readonly<Record<string, string>> = {
+  // BUILD-FLOFI-CHAT-E2E-DASHBOARD-UX-001: the wallet portfolio widget, first so every existing translation of a shared word still wins.
+  ...portuguesePortfolio,
   // BUILD-FLOFI-E2E-RELIABILITY-001 (#149): new keys only, first so every existing translation still wins.
   ...portugueseStatusTruth,
   // BUILD-FLOFI-AUTH-WALLETS-001: first, so every existing product translation of a shared word keeps precedence.
@@ -65,6 +69,7 @@ export const portuguese: Readonly<Record<string, string>> = {
   ...portugueseBridgeLiveFix,
   ...portugueseBuildEntry,
   ...portugueseChatEditor,
+  ...portugueseChatDashboard,
   'Automation workflow': 'Fluxo da automação',
   'Prepared by your FloFi automation. Simulate and review before executing.': 'Preparado pela sua automação FloFi. Simule e revise antes de executar.',
   'Loading your exact automation workflow…': 'Carregando o fluxo exato da sua automação…',

@@ -144,6 +144,22 @@ describe('BUILD-FLOFI-CHAT-E2E-FIX-002 workflow sequence', () => {
     expect(validCompletions(null, workflow, done)).toEqual([]);
   });
 
+  it('BUILD-FLOFI-CHAT-E2E-DASHBOARD-UX-001: an executed one-action workflow stays its completed first step when the owner adds an action', () => {
+    const single = author('swap 10 USDC to WETH on Base slippage 100 bps');
+    expect(workflowSequence(single, lint)).toBeNull();
+    // What the store records once the single action's own run is final and reconciled (`recordExecutedAction`).
+    const executed: CompletedStep[] = [{ nodeId: single.nodes[0]!.nodeId, node: stepNodeKey(single.nodes[0]!), received: '420', runKey: 'pub-1', allocations: [] }];
+    const extended = author('swap 10 USDC to WETH on Base slippage 100 bps', 'bridge 0.001 WETH from Base to Arbitrum');
+    const sequence = workflowSequence(extended, lint)!;
+    expect(sequence.steps.map(step => step.nodeId)).toEqual([single.nodes[0]!.nodeId, extended.nodes[1]!.nodeId]);
+    // The executed swap is carried as step 1 (never reviewed or sent again); the bridge is the next step, funded by what the swap delivered.
+    expect(validCompletions(sequence, extended, executed)).toEqual(executed);
+    expect(boundAmount(sequence.steps[1]!, executed)).toBe('420');
+    // Changing the executed action itself starts over: the changed action is a new action to review.
+    const changed = author('swap 12 USDC to WETH on Base slippage 100 bps', 'bridge 0.001 WETH from Base to Arbitrum');
+    expect(validCompletions(workflowSequence(changed, lint), changed, executed)).toEqual([]);
+  });
+
   it('reads only reconciled deliveries of exactly the funded asset', () => {
     const weth = { chainId: 'eip155:8453', address: BASE_WETH, decimals: 18 };
     const swap = { quote: { chainId: 8453, outputToken: BASE_WETH }, outcome: { outputReceived: '420' } };

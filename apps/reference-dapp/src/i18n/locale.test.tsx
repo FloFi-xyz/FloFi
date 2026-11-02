@@ -53,7 +53,7 @@ describe('locale preference and workflow isolation', () => {
     const html = host.render(() => renderToStaticMarkup(<LocaleProvider initialLanguage="PT"><YourWorkflows list={{ items: [], hasMore: true }} busy={false} error="WORKFLOW_UNAVAILABLE" open={vi.fn()} refresh={vi.fn()}/></LocaleProvider>));
     for (const message of ['Your workflows are temporarily unavailable.', 'Showing up to 100 workflows.']) expect(html).toContain(portuguese[message]);
     const empty = host.render(() => renderToStaticMarkup(<LocaleProvider initialLanguage="PT"><YourWorkflows list={{ items: [], hasMore: false }}/></LocaleProvider>));
-    expect(empty).toContain(portuguese['No workflows yet.']);
+    expect(empty).toContain(portuguese['No saved workflows waiting.']!);
     expect(html).not.toContain('Workflows are temporarily unavailable');
   });
   it('preserves user names, addresses and template values', () => {

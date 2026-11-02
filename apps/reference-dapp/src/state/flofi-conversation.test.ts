@@ -306,6 +306,55 @@ describe('BUILD-FLOFI-CHAT-E2E-FIX-002 chat-first review and sequences', () => {
     reviewedPatch = { ...reviewed(), sequence: next }; lifecycle(reviewedPatch); chat = render();
     expect(last(chat).question).toBe('Do you confirm step 2 of 2?');
   });
+  it('BUILD-FLOFI-CHAT-E2E-DASHBOARD-UX-001: after a final completed result the side chat offers to keep building, modify or start anew; nothing is simulated', async () => {
+    await say('swap 10 USDC to WETH on Base Sepolia slippage 100 bps');
+    await say('Review workflow');
+    reviewedPatch = { ...reviewed(), startNewWorkflow: vi.fn(), continuable: true }; lifecycle(reviewedPatch); render();
+    await say('Yes, I confirm'); await say('Yes, execute');
+    controls.authorizing = false;
+    reviewedPatch = { ...reviewedPatch, progress: completedRun as unknown as ConversationBridge['progress'] }; lifecycle(reviewedPatch); render(); await flush();
+    let chat = render();
+    expect(last(chat).text).toMatch(/^Execution completed\. /);
+    expect(last(chat).notes).toContain('This run has a final result. Its record stays in your history.');
+    expect(last(chat).question).toBe('What would you like to do next? Add another action to keep building this workflow (what already executed is not sent again), change it, or create a new workflow.');
+    expect(last(chat).options).toEqual(['Add another action', 'Modify this workflow', 'Create new workflow']);
+    const simulated = simulate.mock.calls.length;
+    // A bare answer does not choose: the same next steps are offered again.
+    chat = await say('yes');
+    expect(last(chat).text).toMatch(/^What would you like to do next\?/); expect(last(chat).options).toEqual(['Add another action', 'Modify this workflow', 'Create new workflow']);
+    chat = await say('Modify this workflow');
+    expect(last(chat).text).toMatch(/^Tell me what to change in a step/);
+    chat = await say('Add another action');
+    expect(last(chat).text).toMatch(/Describe the next action/);
+    expect(simulate.mock.calls.length).toBe(simulated); expect(controls.authorize).toHaveBeenCalledTimes(1);
+  });
+  it('BUILD-FLOFI-CHAT-E2E-DASHBOARD-UX-001: a workflow that runs as a whole is never promised that what executed stays executed', async () => {
+    await say('swap 10 USDC to WETH on Base Sepolia slippage 100 bps');
+    await say('Review workflow');
+    reviewedPatch = { ...reviewed(), startNewWorkflow: vi.fn(), continuable: false }; lifecycle(reviewedPatch); render();
+    await say('Yes, I confirm'); await say('Yes, execute');
+    controls.authorizing = false;
+    reviewedPatch = { ...reviewedPatch, progress: completedRun as unknown as ConversationBridge['progress'] }; lifecycle(reviewedPatch); render(); await flush();
+    let chat = render();
+    expect(last(chat).question).toMatch(/^What would you like to do next\? You can change this workflow, add an action or create a new workflow\. This workflow runs as a whole/);
+    expect(last(chat).question).not.toMatch(/not sent again/);
+    // A change to it says the next review covers the executed actions again (nothing was recorded as a carried step).
+    reviewedPatch = { ...reviewedPatch, progress: null }; lifecycle(reviewedPatch);
+    chat = await say('swap 2 USDC to WETH on Base Sepolia slippage 100 bps');
+    expect(last(chat).notes).toContain('This workflow still holds an action you already executed, and as it is now the next review covers it again: confirming would send it again. Undo this change if that is not what you want.');
+  });
+  it('BUILD-FLOFI-CHAT-E2E-DASHBOARD-UX-001: a change after an execution says whether what executed stays completed or would be reviewed again', async () => {
+    await say('swap 10 USDC to WETH on Base Sepolia slippage 100 bps');
+    reviewedPatch = { executedActions: { executed: 1, carried: 1 } }; lifecycle(reviewedPatch);
+    let chat = await say('swap 2 USDC to WETH on Base Sepolia slippage 100 bps');
+    expect(last(chat).notes).toContain('The action you already executed stays completed and is not sent again: reviews cover only the steps not executed yet.');
+    reviewedPatch = { executedActions: { executed: 1, carried: 0 } }; lifecycle(reviewedPatch);
+    chat = await say('swap 3 USDC to WETH on Base Sepolia slippage 100 bps');
+    expect(last(chat).notes).toContain('This workflow still holds an action you already executed, and as it is now the next review covers it again: confirming would send it again. Undo this change if that is not what you want.');
+    reviewedPatch = {}; lifecycle(reviewedPatch);
+    chat = await say('swap 4 USDC to WETH on Base Sepolia slippage 100 bps');
+    expect(last(chat).notes?.some(note => /already executed/.test(note))).toBe(false);
+  });
   it('a completed step whose delivery is not reconciled yet waits (nothing resent); a finished sequence says every step completed', async () => {
     await say('swap 10 USDC to WETH on Base Sepolia slippage 100 bps');
     let chat = (reviewedPatch = { sequence: { total: 2, current: 1, finished: false, steps: SEQUENCE_STEPS, issue: null, awaitingDelivery: true } }, lifecycle(reviewedPatch), await say('Review workflow'));
@@ -314,6 +363,7 @@ describe('BUILD-FLOFI-CHAT-E2E-FIX-002 chat-first review and sequences', () => {
     reviewedPatch = { sequence: { total: 2, current: 2, finished: true, steps: SEQUENCE_STEPS, issue: null, awaitingDelivery: false } }; lifecycle(reviewedPatch);
     chat = await say('Review workflow');
     expect(last(chat).text).toBe('All 2 steps of this workflow are completed and reconciled. Their records stay in your history.');
+    expect(last(chat).options).toEqual(['Add another action', 'Modify this workflow']);
     expect(simulate).not.toHaveBeenCalled();
   });
   it('a step that cannot run in a sequence is named before anything is simulated', async () => {

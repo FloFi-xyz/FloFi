@@ -2,7 +2,8 @@
 'use client';
 import { useCallback, useEffect, useState } from 'react';
 import { useLocale } from '../i18n/locale';
-import { learningApply, learningErase, learningSettings, learningStatus } from '../app/learning-action';
+import { learningAgree, learningApply, learningErase, learningSettings, learningStatus } from '../app/learning-action';
+import { privacyNoticeCookie, privacyNoticeFromCookies, type PrivacyNoticeChoice } from '../domain/privacy-notice';
 import { targetLabel } from '../domain/copilot-learning-copy';
 import { isLexiconTarget } from '../domain/copilot-lexicon';
 import type { LearningStatusView } from '../learning/web-actions';
@@ -18,6 +19,35 @@ const ORIGIN: Readonly<Record<string, string>> = { STATED: 'you told FloFi', LEA
  * consent, opt-out under legitimate interest), pausing saved meanings, contributing to the shared glossary, deleting one meaning or everything, and
  * downloading a copy. Nothing here touches a workflow, a proposal, an approval or a wallet signature; the Copilot works the same whatever is chosen.
  */
+/**
+ * BUILD-FLOFI-CHAT-E2E-DASHBOARD-UX-001: this browser's answer to the Privacy & Memory notice. Agreeing (no wallet proof) turns learning on, under
+ * an opt-in basis, for the wallet available right now only; withdrawing records "not now" here and, when that wallet's learning was on under
+ * consent, turns it off (which deletes what it learned, as the switch above says).
+ */
+function BrowserAgreement({ identity, changed }: { identity?: Ready | undefined; changed(): void }) {
+  const { t: tr } = useLocale();
+  const [answer, setAnswer] = useState<PrivacyNoticeChoice | null>(null), [busy, setBusy] = useState(false);
+  useEffect(() => { setAnswer(privacyNoticeFromCookies(document.cookie)); }, []);
+  const record = (choice: PrivacyNoticeChoice) => { document.cookie = privacyNoticeCookie(choice, window.location.protocol === 'https:'); setAnswer(choice); };
+  async function agree() {
+    setBusy(true); record('AGREED');
+    try { if ((await learningAgree(identity?.identity?.namespace)).applied) window.dispatchEvent(new Event(LEARNING_CHANGED)); } catch { /* the answer is kept */ }
+    finally { setBusy(false); changed(); }
+  }
+  async function withdraw() {
+    setBusy(true); record('NOT_NOW');
+    try {
+      if (identity?.identity && identity.automatic.mode === 'CONSENT' && identity.automatic.permitted) {
+        await learningSettings({ automatic: false }, identity.identity.namespace); window.dispatchEvent(new Event(LEARNING_CHANGED));
+      }
+    } catch { /* the answer is kept; the switch above still shows the server's state */ }
+    finally { setBusy(false); changed(); }
+  }
+  if (answer === 'AGREED') return <p role="status">{tr('You agreed to Privacy & Memory in this browser.')}{' '}
+    <button type="button" className="quiet" disabled={busy} onClick={() => void withdraw()}>{tr('Withdraw agreement')}</button></p>;
+  return <div className="workspace-secondary-actions"><button type="button" disabled={busy} onClick={() => void agree()}>{tr('I agree to Privacy & Memory')}</button></div>;
+}
+
 export function PrivacyControls({ proof }: { proof?: ReturnType<typeof useWalletProof> | undefined }) {
   const { t: tr, language } = useLocale();
   const [view, setView] = useState<LearningStatusView | null>(null), [identity, setIdentity] = useState<Namespace | undefined>(undefined);
@@ -59,7 +89,11 @@ export function PrivacyControls({ proof }: { proof?: ReturnType<typeof useWallet
       <h2 id="privacy-identity">{tr('Copilot memory')}</h2>
       {ready.learning.memory === 'UNAVAILABLE' ? <p role="status">{tr('Memory is unavailable right now. The Copilot works as usual.')}</p>
         : !ready.identity ? <>
-          <p>{tr('Prove a wallet to see and manage what FloFi keeps for it. Proving signs a sign-in message only; it never moves funds.')}</p>
+          {/* BUILD-FLOFI-CHAT-E2E-DASHBOARD-UX-001: answering needs no wallet proof; memory itself is per wallet, so what is kept shows once a
+              wallet is available (signed in to FloFi, or verified in this browser — an optional step, never the default path). */}
+          <p>{tr('Memory is kept per wallet. Sign in to FloFi to see and manage what is kept for your wallets.')}</p>
+          <BrowserAgreement changed={() => void load(identity)}/>
+          {proof && <p className="muted">{tr('Not signed in? You can verify a wallet in this browser instead. Verifying signs a sign-in message only; it never moves funds.')}</p>}
           {proof && <div className="workspace-secondary-actions">
             <button type="button" className="quiet" disabled={proof.busy} onClick={() => void proof.proveEvm().then(() => load(identity))}>{tr('Prove an EVM wallet')}</button>
             <button type="button" className="quiet" disabled={proof.busy} onClick={() => void proof.proveSolana().then(() => load(identity))}>{tr('Prove a Solana wallet')}</button>
@@ -70,6 +104,7 @@ export function PrivacyControls({ proof }: { proof?: ReturnType<typeof useWallet
               <option value="eip155">{tr('EVM wallet')}</option><option value="solana">{tr('Solana wallet')}</option>
             </select></label>}
           <p>{tr('Memory for wallet')} <code>{ready.identity.short}</code> ({ready.identity.namespace === 'solana' ? 'Solana' : 'EVM'}). {tr('Other wallets and chat accounts never share it.')}</p>
+          <BrowserAgreement identity={ready} changed={() => void load(identity)}/>
           {mode !== 'OFF' && <label className="privacy-toggle"><input type="checkbox" checked={ready.automatic.permitted} disabled={busy}
             onChange={event => void act(() => learningSettings({ automatic: event.target.checked }, ready.identity!.namespace))}/>
             <span><strong>{tr('Learn from how I use the Copilot')}</strong><br/>
