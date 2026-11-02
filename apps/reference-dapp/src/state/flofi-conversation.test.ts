@@ -445,7 +445,7 @@ describe('BUILD-FLOFI-E2E-RELIABILITY-001 continuation after a landed approval',
     let chat = await executedWithLandedApproval(true);
     expect(last(chat).text).toBe('Approve USDC is confirmed on-chain. An approval only allows the spend; it is not the action itself. Swap has not been sent yet and needs its own confirmation in your wallet. Continue to your wallet?');
     expect(last(chat).options).toEqual(['Continue', 'Not now']);
-    chat = await say('Continue');
+    await say('Continue');
     expect(controls.request).toHaveBeenCalledWith(true);
     // The runtime refuses the swap start (the quote moved below the reviewed minimum): nothing new was sent, the record did not move.
     render(); await flush();
@@ -468,10 +468,10 @@ describe('BUILD-FLOFI-E2E-RELIABILITY-001 continuation after a landed approval',
     expect(last(chat).text).toMatch(/^Preparing your reviewed wallet request/);
   });
   it('an approval that lands after the reviewed quote expired: the swap is re-quoted once by itself, asked once, and never re-offered after "Not now"', async () => {
-    let chat = await executedWithLandedApproval(false);
+    await executedWithLandedApproval(false);
     // The Review expired while the approval confirmed: no Continue is offered; FloFi prepares the swap's own fresh Review (read-only).
     vi.setSystemTime(reviewNow + 200_000); lifecycle(reviewedPatch); bridge = { ...bridge, controls: { ...bridge.controls, canContinue: false } as ConversationBridge['controls'] };
-    render(); await flush(); chat = render();
+    render(); await flush(); let chat = render();
     expect(chat.messages.some(message => message.text === 'Your earlier confirmed request stays in place, and nothing new was sent. The reviewed quote is no longer valid. I am getting a fresh quote for the next request now; you confirm it before your wallet is asked.')).toBe(true);
     expect(simulate).toHaveBeenCalledTimes(2);
     vi.setSystemTime(reviewNow);
@@ -495,7 +495,7 @@ describe('BUILD-FLOFI-E2E-RELIABILITY-001 continuation after a landed approval',
     expect(chat.messages.some(message => /getting a fresh quote/.test(message.text))).toBe(false);
     expect(simulate).not.toHaveBeenCalled();
     // The owner asks: the remaining request gets its own fresh Review and one question.
-    chat = await say('Review workflow');
+    await say('Review workflow');
     expect(simulate).toHaveBeenCalledTimes(1);
     vi.setSystemTime(reviewNow);
     reviewedPatch = { ...requoted('25000000000000000', '24875000000000000'), progress: { ...approvalLanded, restored: true } as unknown as ConversationBridge['progress'] };
@@ -504,15 +504,15 @@ describe('BUILD-FLOFI-E2E-RELIABILITY-001 continuation after a landed approval',
     expect(controls.authorize).not.toHaveBeenCalled();
   });
   it('"Not now" to the first Continue is remembered: when the quote then expires, FloFi does not re-quote or ask again by itself', async () => {
-    let chat = await executedWithLandedApproval(true);
-    chat = await say('Not now');
+    await executedWithLandedApproval(true);
+    let chat = await say('Not now');
     expect(last(chat).text).toBe('The next wallet request did not start, so nothing new was sent. Earlier confirmed requests stay recorded. You chose not to continue now.');
     vi.setSystemTime(reviewNow + 200_000); lifecycle(reviewedPatch); bridge = { ...bridge, controls: { ...bridge.controls, canContinue: false } as ConversationBridge['controls'] };
     render(); await flush(); chat = render();
     expect(simulate).toHaveBeenCalledTimes(1);
     expect(chat.question).toBeNull();
     // The owner can still ask: then the remaining request gets its own fresh Review.
-    chat = await say('Review workflow');
+    await say('Review workflow');
     expect(simulate).toHaveBeenCalledTimes(2);
   });
   it('another runtime\'s landed request (not the public swap) never gets the automatic re-quote or the single-answer Review', async () => {
