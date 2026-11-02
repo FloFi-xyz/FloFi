@@ -40,11 +40,12 @@ afterAll(async () => { await t?.drop(); });
 let nextNonce = 100;
 const freshChain = () => createRobinhoodTransferChain({ nonce: nextNonce++ });
 /** One "deployment": API backend + worker sharing a database; each call builds fresh processes' worth of state. */
-async function deployment(options: { db?: Database; chain?: ReturnType<typeof createRobinhoodTransferChain>; model?: ReturnType<typeof supplyModel>; swapChain?: SwapChain; tenantId?: string; evidenceDir?: string } = {}) {
+async function deployment(options: { db?: Database; chain?: ReturnType<typeof createRobinhoodTransferChain>; model?: ReturnType<typeof supplyModel>; swapChain?: SwapChain; tenantId?: string; evidenceDir?: string;
+  logger?: ReturnType<typeof createLogger> } = {}) {
   const chain = options.chain ?? freshChain(), model = options.model ?? supplyModel();
   const evidenceDir = options.evidenceDir ?? await mkdtemp(join(tmpdir(), 'flofi-cloud-evidence-'));
   const db = options.db ?? t.open(6), tenantId = options.tenantId ?? 'default', workerId = `worker-${Math.random().toString(16).slice(2, 8)}`;
-  const backend = createBackend({ db, env, logger: quiet, tenantId, holderId: workerId, evidenceStore: createFilesystemEvidenceStore(evidenceDir),
+  const backend = createBackend({ db, env, logger: options.logger ?? quiet, tenantId, holderId: workerId, evidenceStore: createFilesystemEvidenceStore(evidenceDir),
     rpc: { 'robinhood-transfer': chain.rpc, 'aave-supply': model.rpc, ...options.swapChain ? { 'base-sepolia-swap': options.swapChain.rpc } : {} }, busyRetries: 3 });
   const worker = createWorker({ queue: createPostgresWorkQueue({ db, ownerId: workerId }), handlers: backend.handlers, logger: quiet, workerId, concurrency: 8 });
   const rh = (method: string, ...args: unknown[]) => backend.callFlow('robinhood-transfer', method, args);
@@ -212,6 +213,16 @@ describe('BUILD-CLOUD-001 Robinhood transfer on durable cloud state', () => {
     const item = await t.db.query(`SELECT state, last_error FROM work_items WHERE run_id = $1 ORDER BY id DESC LIMIT 1`, [record.id]);
     expect(item.rows[0]).toEqual({ state: 'DEAD', last_error: 'JOURNAL_CORRUPT' });
     expect(d.chain.transactions).toHaveLength(0);
+  });
+
+  it('BUILD-FLOFI-E2E-RELIABILITY-001: a refusal (HTTP 200, ok: false) is logged with its classified code only, never as a bare "ok"', async () => {
+    const lines: string[] = [], d = await deployment({ logger: createLogger({ service: 'test', sink: line => lines.push(line) }) }), record = await reviewedTransfer(d);
+    ok(await d.rh('begin', record.id, owner, transferWorkflow));
+    const refused = await d.rh('begin', record.id, owner, transferWorkflow);
+    expect(refused.ok).toBe(false);
+    const logged = lines.map(line => JSON.parse(line) as Record<string, unknown>).filter(line => line.event === 'flow.refused');
+    expect(logged).toEqual([expect.objectContaining({ flow: 'robinhood-transfer', action: 'begin', run_id: record.id, code: (refused as { code: string }).code })]);
+    expect(Object.keys(logged[0]!).sort()).toEqual(['action', 'code', 'event', 'flow', 'run_id', 'service', 'severity', 'timestamp', ...Object.keys(logged[0]!).filter(key => /^(trace_id|span_id|parent_span_id)$/.test(key))].sort());
   });
 
   it('tenants cannot read or act on each other\'s runs', async () => {

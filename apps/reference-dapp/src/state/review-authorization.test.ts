@@ -172,6 +172,19 @@ describe('BUILD-FLOFI-WALLET-UX-EXECUTION-FIX-001 no false "Wallet changed" whil
     expect(reviewBindingAdopts(none, { account: owner, chain: arb }, 1, owner, 'evm')).toBe(false);
     expect(reviewBindingAdopts(none, { account: owner, chain: arb }, 0, null, 'evm')).toBe(false);
   });
+  it('BUILD-FLOFI-E2E-RELIABILITY-001: a Review that binds no owner (Base swap) adopts the first wallet that connects, on its own network only', () => {
+    const base = 'eip155:8453';
+    expect(reviewBindingAdopts(none, { account: other, chain: base }, 0, null, 'evm', false, base)).toBe(true);
+    // Account first, then chain: both steps are adopted, but only onto the Review's network.
+    expect(reviewBindingAdopts(none, { account: other, chain: null }, 0, null, 'evm', false, base)).toBe(true);
+    expect(reviewBindingAdopts({ ...none, account: other, adopted: true }, { account: other, chain: base }, 0, null, 'evm', false, base)).toBe(true);
+    expect(reviewBindingAdopts({ ...none, account: other, adopted: true }, { account: owner, chain: base }, 0, null, 'evm', false, base)).toBe(false);
+    expect(reviewBindingAdopts(none, { account: other, chain: arb }, 0, null, 'evm', false, base)).toBe(false);
+    // Never once a wallet was bound, never an accepted Review, never across a workflow restoration.
+    expect(reviewBindingAdopts({ ...none, account: owner, chain: base }, { account: other, chain: base }, 0, null, 'evm', false, base)).toBe(false);
+    expect(reviewBindingAdopts(none, { account: other, chain: base }, 0, null, 'evm', true, base)).toBe(false);
+    expect(reviewBindingAdopts(none, { account: other, chain: base }, 1, null, 'evm', false, base)).toBe(false);
+  });
   it('an accepted Review never follows a wallet (a reload or another provider needs a fresh Review)', () => {
     expect(reviewBindingAdopts(none, { account: owner, chain: arb }, 0, owner, 'evm', true)).toBe(false);
     expect(reviewBindingAdopts(none, { account: null, chain: null }, 0, owner, 'evm', true)).toBe(false);

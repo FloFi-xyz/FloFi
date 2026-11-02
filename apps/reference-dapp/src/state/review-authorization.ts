@@ -35,15 +35,24 @@ import { solanaProviderIdentity } from '../wallet/solana-wallet';
  *  - from "no wallet" to exactly the Review's owner (EVM case-insensitive, Solana exact): the reviewed wallet finished restoring/connecting;
  *  - for the owner already bound (adopted or connected when the Review appeared), its chain going from unknown to known (wallets report the
  *    account first, then the chain).
+ * BUILD-FLOFI-E2E-RELIABILITY-001: a Review that binds no owner at all (`unownedChain`: Base and Robinhood swaps, whose quote is the same for
+ * every wallet and whose execution re-reads the executing wallet's balance and allowance) also adopts "no wallet" → the first wallet that
+ * connects, but only on the Review's own network. Before, such a Review was always retired as "Wallet changed" when the wallet connected
+ * after it, which forced a fresh simulation for nothing.
  * An accepted Review never follows anything (a reload or another provider needs a fresh Review), and any other change still retires it.
  */
 export type ReviewWalletBinding = { readonly account: string | null; readonly chain: string | null; readonly restorationEpoch: number; readonly adopted: boolean };
 export function reviewBindingAdopts(bound: ReviewWalletBinding, current: { readonly account: string | null; readonly chain: string | null }, restorationEpoch: number,
-  owner: string | null, walletKind: string, accepted = false): boolean {
+  owner: string | null, walletKind: string, accepted = false, unownedChain: string | null = null): boolean {
   if (accepted || bound.restorationEpoch !== restorationEpoch) return false;
   if (bound.account === null && current.account === null) return true;
-  if (owner === null || current.account === null) return false;
   const same = (a: string, b: string) => walletKind === 'solana' ? a === b : a.toLowerCase() === b.toLowerCase();
+  if (owner === null && unownedChain !== null && current.account !== null) {
+    // The first wallet that connects (its chain may arrive just after its account), then only that wallet's chain becoming the Review's.
+    if (bound.account === null) return current.chain === null || current.chain === unownedChain;
+    return same(bound.account, current.account) && bound.chain === null && current.chain === unownedChain;
+  }
+  if (owner === null || current.account === null) return false;
   if (!same(owner, current.account)) return false;
   if (bound.account === null) return true;
   return same(bound.account, current.account) && bound.chain === null && current.chain !== null;
@@ -228,8 +237,10 @@ export function useReviewAuthorization(kind: SimulationSource['kind']): { author
   // BUILD-FLOFI-WALLET-UX-EXECUTION-FIX-001 (P0-10): a Review bound while no wallet was connected yet (the wallet still restoring after a
   // reload or a navigation) adopts the first wallet that connects only when that wallet is exactly the Review's owner and nothing else
   // changed: no false "Wallet changed". Any other wallet, any change once a wallet was bound, or another workflow still retires the Review.
+  const publicProfile = kind === 'public' ? swapProfile(publicSwap.run?.quote.chainId) : null;
+  const unownedChain = publicProfile && !ownerBoundSwapReview(publicProfile) && authorization.owner === null ? authorization.chain : null;
   const adopt = binding.key === authorization.key && !binding.changed && binding.identity !== identity && reviewBindingAdopts(binding, { account, chain }, restorationEpoch,
-    authorization.owner, environment.walletKind, authorization.accepted);
+    authorization.owner, environment.walletKind, authorization.accepted, unownedChain);
   const changed = binding.key === authorization.key && !adopt && (binding.changed || binding.identity !== identity);
   if (binding.key !== authorization.key) setBinding({ key: authorization.key, identity, changed: false, account, chain, restorationEpoch, adopted: false });
   else if (adopt) setBinding({ ...binding, identity, account, chain, adopted: binding.adopted || account !== null });
