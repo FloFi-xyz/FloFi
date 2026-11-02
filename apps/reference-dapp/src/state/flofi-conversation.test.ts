@@ -338,7 +338,7 @@ describe('BUILD-FLOFI-CHAT-E2E-FIX-002 a wallet request that cannot start', () =
     expect(last(chat).text).toMatch(/confirm or reject it in your wallet/);
     // The runtime refuses the request (its own error) and the controls settle: no run exists, so nothing was sent.
     controls.authorizing = false;
-    reviewedPatch = { ...reviewedPatch, source: { ...reviewedPatch.source!, state: { ...reviewedPatch.source!.state, error: 'Insufficient test token balance.' } } as SimulationSource };
+    reviewedPatch = { ...reviewedPatch, source: { ...reviewedPatch.source!, state: { ...reviewedPatch.source!.state, error: 'INSUFFICIENT_INPUT' } } as SimulationSource };
     lifecycle(reviewedPatch); render(); await flush(); chat = render();
     expect(last(chat).text).toBe('The wallet request could not start, and nothing was sent. Your available balance is too low for this workflow.');
     expect(last(chat).options).toEqual(['Review workflow']);
@@ -412,5 +412,81 @@ describe('BUILD-FLOFI-BRIDGE-LIVE-FIX-003 the live Bridge start failure and its 
     chat = await say('try another route');
     expect(chat.messages.some(message => /never switches providers by itself/.test(message.text))).toBe(true);
     expect(simulate).toHaveBeenCalledTimes(1);
+  });
+});
+
+/**
+ * BUILD-FLOFI-E2E-RELIABILITY-001 — the 2026-11-01 production chat (1 USDC → ETH on Base): the approval landed, the chat asked a generic
+ * "Continue to your wallet?", the swap start was refused for a moved quote, and the chat only repeated "0 of 1 actions completed".
+ */
+const op = (id: string, title: string, state: string, approval: boolean) =>
+  ({ id, nodeId: 'swap', title, label: state, state, hash: state === 'confirmed' ? `0x${'b'.repeat(64)}` : null, explorer: null, chain: 'eip155:8453', fee: null, approval, intent: false, wallet: true });
+const approvalLanded = { started: true, restored: false, local: false, matchesWorkflow: true, completed: 0, label: 'Execution in progress', state: 'active' as const,
+  message: '0 of 1 actions completed. The token approval is confirmed on-chain; it only allows the spend. The action itself has not been sent yet and needs its own confirmation in your wallet.',
+  runKey: 'bas-1', fingerprint: 'approval-confirmed', busy: false,
+  steps: [{ id: 'swap', number: 1, action: 'Swap', operations: [op('approval', 'Approve USDC', 'confirmed', true), op('swap', 'Swap', 'waiting', false)] }] };
+(approvalLanded as unknown as { active: unknown }).active = approvalLanded.steps[0];
+describe('BUILD-FLOFI-E2E-RELIABILITY-001 continuation after a landed approval', () => {
+  async function executedWithLandedApproval(canContinue: boolean) {
+    await say('swap 10 USDC to WETH on Base Sepolia slippage 100 bps');
+    await say('Review workflow');
+    reviewedPatch = reviewed(); lifecycle(reviewedPatch); render();
+    await say('Yes, I confirm');
+    await say('Yes, execute');
+    controls.authorizing = false;
+    // Like the real controls: Authorize accepted the Review, and a continuation request is "requesting" from the click.
+    controls.request = vi.fn(() => { (controls as Record<string, unknown>).requesting = true; });
+    // The durable record: the approval is confirmed on-chain, the swap was never requested.
+    reviewedPatch = { ...reviewedPatch, authorization: { ...reviewedPatch.authorization!, accepted: true }, progress: approvalLanded as unknown as ConversationBridge['progress'] };
+    lifecycle(reviewedPatch); bridge = { ...bridge, controls: { ...bridge.controls, canContinue } as ConversationBridge['controls'] };
+    render(); await flush(); return render();
+  }
+  it('names the landed approval and the unsent swap; a refused start for a moved quote re-quotes the swap only and asks once', async () => {
+    let chat = await executedWithLandedApproval(true);
+    expect(last(chat).text).toBe('Approve USDC is confirmed on-chain. An approval only allows the spend; it is not the action itself. Swap has not been sent yet and needs its own confirmation in your wallet. Continue to your wallet?');
+    expect(last(chat).options).toEqual(['Continue', 'Not now']);
+    chat = await say('Continue');
+    expect(controls.request).toHaveBeenCalledWith(true);
+    // The runtime refuses the swap start (the quote moved below the reviewed minimum): nothing new was sent, the record did not move.
+    render(); await flush();
+    (controls as Record<string, unknown>).requesting = false;
+    reviewedPatch = { ...reviewedPatch, source: { ...reviewedPatch.source!, state: { ...reviewedPatch.source!.state, error: 'QUOTE_CHANGED_REVIEW_REQUIRED' } } as SimulationSource };
+    lifecycle(reviewedPatch); render(); await flush(); chat = render();
+    const refusal = chat.messages.find(message => /nothing new was sent/.test(message.text));
+    expect(refusal?.text).toBe('Your earlier confirmed request stays in place, and nothing new was sent. The reviewed route no longer quotes your reviewed minimum output. I am getting a fresh quote for the next request now; you confirm it before your wallet is asked.');
+    expect(chat.messages.some(message => /^The wallet request could not start, and nothing was sent|could not complete this simulation/.test(message.text))).toBe(false);
+    expect(simulate).toHaveBeenCalledTimes(2);
+    // The fresh quote for the swap: presented with what changed, and accepted with one explicit answer that opens the wallet.
+    reviewedPatch = { ...requoted('24000000000000000', '23880000000000000'), progress: approvalLanded as unknown as ConversationBridge['progress'] }; lifecycle(reviewedPatch); render(); await flush(); chat = render();
+    expect(last(chat).text).toBe('Here is the fresh quote for Swap, which has not been sent yet. Your earlier confirmed request stays in place and is not repeated. Amounts are estimates from this simulation, not executed results.');
+    expect(last(chat).notes?.[0]).toMatch(/^The quote changed since your last Review: Expected receipt/);
+    expect(last(chat).question).toBe('Continue to your wallet for this request?');
+    expect(chat.question).toBe('CONFIRM_CONTINUE_REVIEW');
+    chat = await say('Continue');
+    expect(controls.authorize).toHaveBeenCalledTimes(2);
+    expect(last(chat).text).toMatch(/^Preparing your reviewed wallet request/);
+  });
+  it('an approval that lands after the reviewed quote expired: the swap is re-quoted once by itself, asked once, and never re-offered after "Not now"', async () => {
+    let chat = await executedWithLandedApproval(false);
+    // The Review expired while the approval confirmed: no Continue is offered; FloFi prepares the swap's own fresh Review (read-only).
+    vi.setSystemTime(reviewNow + 200_000); lifecycle(reviewedPatch); bridge = { ...bridge, controls: { ...bridge.controls, canContinue: false } as ConversationBridge['controls'] };
+    render(); await flush(); chat = render();
+    expect(chat.messages.some(message => message.text === 'Your earlier confirmed request stays in place, and nothing new was sent. The reviewed quote is no longer valid. I am getting a fresh quote for the next request now; you confirm it before your wallet is asked.')).toBe(true);
+    expect(simulate).toHaveBeenCalledTimes(2);
+    vi.setSystemTime(reviewNow);
+    reviewedPatch = { ...requoted('25000000000000000', '24875000000000000'), progress: approvalLanded as unknown as ConversationBridge['progress'] }; lifecycle(reviewedPatch); render(); await flush(); chat = render();
+    expect(last(chat).question).toBe('Continue to your wallet for this request?');
+    chat = await say('Not now');
+    expect(last(chat).text).toBe('The next wallet request did not start, so nothing new was sent. Earlier confirmed requests stay recorded. You chose not to continue now.');
+    render(); await flush(); chat = render();
+    expect(chat.question).toBeNull();
+    expect(simulate).toHaveBeenCalledTimes(2);
+    expect(controls.authorize).toHaveBeenCalledTimes(1);
+  });
+  it('PT: the same continuation in Portuguese', async () => {
+    const chat = await executedWithLandedApproval(true);
+    void chat;
+    const pt = (await import('../domain/conversation-copy')).conversationCopy('PT');
+    expect(pt.continueAfter('Aprovar USDC', 'Trocar', true)).toBe('Aprovar USDC: confirmado na rede. Uma aprovação apenas autoriza o gasto; não é a ação em si. Trocar: ainda não enviado, precisa da sua própria confirmação na carteira. Continuar para a carteira?');
   });
 });

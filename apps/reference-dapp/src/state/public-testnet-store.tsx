@@ -40,6 +40,20 @@ function unwrap<T>(result: { ok: true; value: T } | { ok: false; code: string })
   if (!result.ok) throw new Error(result.code);
   return result.value;
 }
+/**
+ * BUILD-FLOFI-E2E-RELIABILITY-001: the store keeps the runtime's CODE (as every other runtime store does), never its English sentence. The chat
+ * and the Simulate/Review projections classify codes (`simulationError`, `QUOTE_MOVED`); a sentence matched none of them, so every Base swap
+ * refusal — QUOTE_CHANGED_REVIEW_REQUIRED included — reached the owner as "FloFi could not complete this simulation". Unclassified causes keep a
+ * stable code of their own.
+ */
+export function publicSwapErrorCode(error: unknown): string {
+  const code = error instanceof Error ? error.message : '';
+  return /^[A-Z][A-Z0-9_]{2,80}$/.test(code) ? code : 'PUBLIC_OPERATION_FAILED';
+}
+/** The engineering panel's own sentence for a public swap code (the chat and Review surfaces use `simulationError`). */
+export function publicSwapMessage(code: string): string {
+  return message(new Error(code));
+}
 function message(error: unknown): string {
   const code = error instanceof Error ? error.message : '';
   const floFi = code.startsWith('FLOFI_WALLET_') ? floFiWalletMessage(code) : null;
@@ -72,7 +86,7 @@ function message(error: unknown): string {
     QUOTE_CHANGED_REVIEW_REQUIRED: 'The quote changed. Review the updated amounts before executing.',
     QUOTE_EXPIRED_REVIEW_REQUIRED: 'Quote expired. Review a fresh quote.',
     REVIEW_EXPIRED: 'Quote expired. Simulate again.', REVIEW_REQUIRED: 'Review the current swap first.',
-    INSUFFICIENT_INPUT: 'Insufficient test token balance.', INSUFFICIENT_TEST_ETH: 'Insufficient test ETH for network fees on this network.',
+    INSUFFICIENT_INPUT: 'Your input token balance is too low for this swap. Nothing was sent.', INSUFFICIENT_TEST_ETH: 'Insufficient test ETH for network fees on this network.',
     POOL_UNUSABLE: 'The selected pool is unavailable. Try again later.', POOL_FACTORY_MISMATCH: 'The selected pool could not be verified.',
     WRONG_PROVIDER_CHAIN: 'The provider is not on the reviewed network.', PUBLIC_NETWORK_UNAVAILABLE: 'This network is not enabled on this app instance.',
     ATTEMPT_ALREADY_ACTIVE: 'A transaction is already in progress. Check its result before trying again.',
@@ -136,7 +150,7 @@ export function PublicTestnetProvider({ children }: { children: ReactNode }) {
   const guarded = useCallback((label: string, action: () => Promise<void>) => {
     if (busyRef.current) return;
     const epoch = ++operationEpoch.current; busyRef.current = true; setBusy(label); setError(null);
-    action().catch(cause => setError(message(cause))).finally(() => { if (operationEpoch.current === epoch) { busyRef.current = false; setBusy(null); } });
+    action().catch(cause => setError(publicSwapErrorCode(cause))).finally(() => { if (operationEpoch.current === epoch) { busyRef.current = false; setBusy(null); } });
   }, []);
   useEffect(() => {
     let cancelled = false;

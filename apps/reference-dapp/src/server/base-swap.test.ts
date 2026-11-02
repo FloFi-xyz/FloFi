@@ -189,6 +189,65 @@ describe('BUILD-FLOFI-BRIDGE-LIVE-FIX-003 native ETH on Base: swaps in and out, 
     expect(chain.state.native.get(owner)! - nativeBefore).toBe(received - gas);
     expect(chain.balance(UNI.weth, owner)).toBe(0n);
   });
+  /**
+   * BUILD-FLOFI-E2E-RELIABILITY-001 — the 2026-11-01 production reproduction (canonical records of runs bas-08aa…/bas-76e5…): 1 USDC → native
+   * ETH on Base, 100 bps. The Review bound the 0.3% tier; 26 s later the best tier was the 0.01% one and the reviewed tier quoted 0.014% less, so
+   * `begin` retired the Review (QUOTE_CHANGED_REVIEW_REQUIRED, "could not complete this simulation" in chat). The second run's approval landed,
+   * and the swap `begin` 29 s after the quote retired the Review again on a 0.034% move: a confirmed approval and no swap. Now both steps run
+   * under the one Review, on the reviewed tier, with the reviewed minimum.
+   */
+  it('P0 reproduction — USDC → native ETH: tier switch and small moves after Review neither retire it nor strand the approval', async () => {
+    const R0 = 4001n * 10n ** 23n, pool = (fee: number, rate: bigint) => chain.addPool(usdc.address!, weth.address!, { fee, liquidity: 10n ** 20n, rate: { [usdc.address!]: rate } });
+    pool(3000, R0);
+    const { s, id } = await run(nativeWorkflow(ref(usdc), ETH, '1000000', 100));
+    const reviewed = s.load(id).quote;
+    expect(reviewed).toMatchObject({ native: 'OUTPUT', fee: 3000, slippageBps: 100 });
+    // After Review: the reviewed tier −0.014%, and the 0.01% tier becomes the best one.
+    clock += 26_000; pool(3000, R0 * 99_986n / 100_000n); pool(100, R0 * 99_990n / 100_000n);
+    const approval = await s.begin(id, owner);
+    expect(approval.attempt).toMatchObject({ step: 'approval', manifestHash: reviewed.manifestHash });
+    expect(approval.tx).toMatchObject({ to: usdc.address, value: '0x0' });
+    s.report(id, approval.attempt.attemptId, { kind: 'HASH', txHash: wallet(approval.tx) });
+    expect((await s.observe(id)).attempts.at(-1)).toMatchObject({ step: 'approval', state: 'CONFIRMED' });
+    // The swap, 29 s after the quote, after a further −0.034% move: the same Review, the reviewed tier and minimum, no new approval.
+    clock += 3_000; pool(3000, R0 * 99_952n / 100_000n);
+    expect(s.load(id).reviewedManifestHash).toBe(reviewed.manifestHash);
+    const swap = await s.begin(id, owner);
+    expect(swap.attempt).toMatchObject({ step: 'swap', manifestHash: reviewed.manifestHash, authorizedMinimumOutput: reviewed.minimumOut });
+    expect(decodeNativeSwap(fromHex(swap.tx.data), UNI.weth)).toMatchObject({ native: 'OUTPUT', fee: 3000, recipient: owner, amountIn: 1_000_000n,
+      amountOutMinimum: BigInt(reviewed.minimumOut) });
+    const nativeBefore = chain.state.native.get(owner)!;
+    s.report(id, swap.attempt.attemptId, { kind: 'HASH', txHash: wallet(swap.tx) });
+    const done = await s.observe(id);
+    const received = BigInt(done.outcome!.outputReceived), gas = BigInt(done.attempts.at(-1)!.receipt!.gasCostWei);
+    expect(received).toBeGreaterThanOrEqual(BigInt(reviewed.minimumOut));
+    expect(chain.state.native.get(owner)! - nativeBefore).toBe(received - gas);
+    expect(chain.balance(UNI.weth, owner)).toBe(0n);
+    expect(done.attempts.map(a => [a.step, a.state])).toEqual([['approval', 'CONFIRMED'], ['swap', 'CONFIRMED']]);
+    // A repeated Continue/Execute after the outcome never prepares another transaction.
+    await expect(s.begin(id, owner)).rejects.toThrow('ATTEMPT_ALREADY_ACTIVE');
+  });
+  it('after a landed approval, a material move or expiry needs a fresh Review of the swap only — the approval stays confirmed and is not repeated', async () => {
+    const { s, id } = await run(nativeWorkflow(ref(usdc), ETH, '1000000', 100));
+    const reviewed = s.load(id).quote;
+    const approval = await s.begin(id, owner);
+    s.report(id, approval.attempt.attemptId, { kind: 'HASH', txHash: wallet(approval.tx) });
+    await s.observe(id);
+    // −2% on a 1% Review: below the reviewed minimum.
+    chain.addPool(usdc.address!, weth.address!, { fee: 500, liquidity: 10n ** 20n, rate: { [usdc.address!]: 392n * 10n ** 24n } });
+    await expect(s.begin(id, owner)).rejects.toThrow('QUOTE_CHANGED_REVIEW_REQUIRED');
+    const presented = s.load(id);
+    expect(presented.reviewedManifestHash).toBeNull();
+    expect(presented.quote.manifestHash).not.toBe(reviewed.manifestHash);
+    expect(BigInt(presented.quote.expectedOut)).toBeLessThan(BigInt(reviewed.minimumOut));
+    expect(presented.attempts.map(a => [a.step, a.state])).toEqual([['approval', 'CONFIRMED']]);
+    // Expiry of that new quote before its Review: the swap's own fresh quote (refresh) is reviewed; still no second approval.
+    clock += 61_000;
+    s.review(id, (await s.refresh(id)).quote.manifestHash);
+    const swap = await s.begin(id, owner);
+    expect(swap.attempt.step).toBe('swap');
+    expect(s.load(id).attempts.filter(a => a.step === 'approval')).toHaveLength(1);
+  });
   it('G/H — wrap ETH → WETH and unwrap WETH → ETH are WETH9 deposit/withdraw of exactly the amount (1:1, no pool, no approval)', async () => {
     chain.fundNative(owner, 10n ** 18n);
     const wrapped = await run(nativeWorkflow(ETH, ref(weth), '10000000000000000', 0));

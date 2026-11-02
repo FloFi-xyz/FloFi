@@ -28,6 +28,7 @@ import { portugueseConcurrency } from './pt-concurrency';
 import { portugueseUniversalBridge } from './pt-universal-bridge';
 import { portugueseConversation } from './pt-conversation';
 import { portugueseChatE2eFix } from './pt-chat-e2e-fix';
+import { portugueseE2eReliability } from './pt-e2e-reliability';
 import { portugueseBridgeLiveFix } from './pt-bridge-live-fix';
 import { portugueseBuildEntry } from './pt-build-entry';
 import { portugueseAccounts } from './pt-accounts';
@@ -56,6 +57,7 @@ export const portuguese: Readonly<Record<string, string>> = {
   ...portugueseWorkflowRuns,
   ...portugueseConversation,
   ...portugueseChatE2eFix,
+  ...portugueseE2eReliability,
   ...portugueseBridgeLiveFix,
   ...portugueseBuildEntry,
   'Automation workflow': 'Fluxo da automação',

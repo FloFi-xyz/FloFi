@@ -118,6 +118,9 @@ export function createBackend(options: BackendOptions) {
           if (code === definition.busyCode && attempt < (options.busyRetries ?? 12)) { await new Promise(resolve => setTimeout(resolve, Math.min(1_000, 100 * 2 ** attempt))); continue; }
           if (!(error instanceof Error && CODE.test(error.message))) logger.warn('flow.unclassified_error', { flow, action: method, run_id: runId });
           if (flow === 'crosschain-universal') return reportUniversalFailure(error, method, fields => logger.warn('bridge.operation_failed', fields));
+          // BUILD-FLOFI-E2E-RELIABILITY-001: a refusal is an HTTP 200 with `{ ok: false, code }`, so `flow.call` alone logged it as "ok" and the
+          // 2026-11-01 Base swap refusals were invisible in production logs. The classified code only (never arguments, accounts or amounts).
+          logger.info('flow.refused', { flow, action: method, run_id: runId, code });
           return { ok: false, code } as const;
         }
       }

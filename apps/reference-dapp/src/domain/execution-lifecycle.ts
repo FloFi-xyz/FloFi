@@ -297,8 +297,13 @@ export function projectExecutionLifecycle(currentWorkflow: Workflow, context: Re
   // BUILD-FLOFI-CHAT-E2E-FIX-002: a record with no wallet request (simulated or reviewed only) says that nothing was sent, never "0 of N completed"
   // with operations "Waiting" as if a wallet request were pending.
   if (!started) for (const step of steps) { step.label = 'Not requested'; for (const op of step.operations) op.label = 'Not requested'; }
+  // BUILD-FLOFI-E2E-RELIABILITY-001: a confirmed token approval of the active step is named as such — it only allows the spend — and the step's
+  // own request is said to be not sent yet, so a landed approval is never read as the completed action nor as "nothing was sent".
+  const approvalLanded = Boolean(active?.operations.some(op => op.approval && op.state === 'confirmed') && active?.operations.some(op => !op.approval && op.wallet && op.state === 'waiting'));
   const message = lifecycleState === 'uncertain' ? 'The current request cannot be confirmed or ruled out. No transaction is repeated.' : lifecycleState === 'attention' ? 'The current step could not complete. Any confirmed actions remain recorded. Nothing is retried automatically.' : lifecycleState === 'complete' ? planUnavailable ? 'The saved requests are confirmed. Original workflow details remain unavailable.' : 'All workflow actions are confirmed in the current execution record.'
-    : lifecycleState === 'idle' ? 'Simulated or reviewed only: no wallet request was made, so nothing was sent.' : `${completed} of ${steps.length} actions completed. Each new wallet request requires your explicit confirmation.`;
+    : lifecycleState === 'idle' ? 'Simulated or reviewed only: no wallet request was made, so nothing was sent.'
+    : approvalLanded ? `${completed} of ${steps.length} actions completed. The token approval is confirmed on-chain; it only allows the spend. The action itself has not been sent yet and needs its own confirmation in your wallet.`
+    : `${completed} of ${steps.length} actions completed. Each new wallet request requires your explicit confirmation.`;
   // The selected runtime restores into the visit's untouched draft. Terminal results must attach there too, just as pending results do.
   const matchesWorkflow = !planUnavailable && (JSON.stringify(workflow) === JSON.stringify(currentWorkflow) || restored && isPristineDraft(currentWorkflow));
   return { started, restored, local, matchesWorkflow, planUnavailable, steps, active, completed, label, message, state: lifecycleState, runKey, fingerprint: JSON.stringify(operations.map(op => [op.id, op.state, op.hash])), busy: Boolean(state.busy) };

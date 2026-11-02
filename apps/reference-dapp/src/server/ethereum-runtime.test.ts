@@ -130,17 +130,32 @@ describe('Ethereum swaps on the shared owner runtime', () => {
     expect(s.load(run.quote.executionId).attempts).toEqual([]);
     expect((await swapService({ path }).begin(run.quote.executionId, owner)).attempt.state).toBe('PREPARED');
   });
+  // BUILD-FLOFI-E2E-RELIABILITY-001: a quote below the reviewed minimum is material; ordinary movement inside the reviewed bounds is not (next test).
   it.each(['quote', 'allowance', 'nonce', 'fee', 'expiry'] as const)('invalidates stale Review when %s changes', async change => {
     const s = swapService(), run = await s.prepare(swap(), owner); s.review(run.quote.executionId, run.quote.manifestHash);
-    if (change === 'quote') chain.addPool(UNI.usdc, UNI.weth, { fee: 500, liquidity: 10n ** 20n, rate: { [UNI.usdc]: 5n * 10n ** 26n } });
+    // −2.5% on a 0.5% slippage Review: the reviewed route now quotes below the reviewed minimum.
+    if (change === 'quote') chain.addPool(UNI.usdc, UNI.weth, { fee: 500, liquidity: 10n ** 20n, rate: { [UNI.usdc]: 39n * 10n ** 25n } });
     if (change === 'allowance') chain.state.allowances.set(`${UNI.usdc}:${owner}:${UNI.router}`, 1n);
     if (change === 'nonce') chain.state.nonces.set(owner, 1);
     if (change === 'fee') chain.state.gasPrice *= 3n;
     if (change === 'expiry') now += 61_000;
-    await expect(s.begin(run.quote.executionId, owner)).rejects.toThrow(/REVIEW_REQUIRED/);
+    await expect(s.begin(run.quote.executionId, owner)).rejects.toThrow(change === 'quote' ? 'QUOTE_CHANGED_REVIEW_REQUIRED' : /REVIEW_REQUIRED/);
     expect(s.load(run.quote.executionId).reviewedManifestHash).toBeNull();
     expect(s.load(run.quote.executionId).attempts).toHaveLength(0);
   });
+  it.each([['a better price (+25%)', 5n * 10n ** 26n], ['a small decline inside the slippage (−0.25%)', 399n * 10n ** 24n]] as const)(
+    'keeps the Review and signs exactly the reviewed swap after %s', async (_label, rate) => {
+      // Allowance already in place: the reviewed transaction is the swap itself, whose calldata carries the reviewed route, minimum and deadline.
+      chain.state.allowances.set(`${UNI.usdc}:${owner}:${UNI.router}`, 10_000_000n);
+      const s = swapService(), run = await s.prepare(swap(), owner), id = run.quote.executionId;
+      expect(run.quote.ownerReview?.step).toBe('swap');
+      s.review(id, run.quote.manifestHash);
+      chain.addPool(UNI.usdc, UNI.weth, { fee: 500, liquidity: 10n ** 20n, rate: { [UNI.usdc]: rate } });
+      const begun = await s.begin(id, owner);
+      expect(begun.tx).toEqual(run.quote.ownerReview!.transaction);
+      expect(begun.attempt).toMatchObject({ step: 'swap', manifestHash: run.quote.manifestHash, authorizedMinimumOutput: run.quote.minimumOut });
+      expect(s.load(id)).toMatchObject({ reviewedManifestHash: run.quote.manifestHash, quote: { manifestHash: run.quote.manifestHash } });
+    });
   it('approves exactly the input, refreshes, reviews the deadline-bound swap, restarts, and reconciles MOCKED fees', async () => {
     const path = dir(), s = swapService({ path }), prepared = await s.prepare(swap(), owner), id = prepared.quote.executionId;
     expect(prepared.quote.ownerReview).toMatchObject({ step: 'approval', allowance: '0', nonce: '0', feeBudgetWei: '3600000000000' });

@@ -26,7 +26,7 @@ import { simulationError } from '../domain/simulation-presentation';
 import { translate } from '../i18n/locale';
 import type { ExecutionControls } from './execution-controls';
 import { conversationCopy } from '../domain/conversation-copy';
-import { answerLanguage, bindingIssue, classifyAnswer, conversationExecution, conversationPhase, conversationReview, describeChatChange, lifecycleRequest, lostSteps,
+import { answerLanguage, bindingIssue, classifyAnswer, continuationReason, conversationExecution, conversationPhase, conversationReview, describeChatChange, executionContinuation, lifecycleRequest, lostSteps,
   QUOTE_MOVED, reviewBinding, reviewChanges, type ConversationLanguage, type ConversationReview, type LifecycleView, type PendingQuestion, type ReviewBinding } from '../domain/conversation-lifecycle';
 
 /**
@@ -112,13 +112,20 @@ export function useFlofiConversation({ owner, epoch, bridge, direct, interfaceLa
   const questionRef = useRef<Question | null>(null);
   const latest = useRef({ bridge, state, context }); latest.current = { bridge, state, context };
   const pendingCommit = useRef<Commit | null>(null), lastCommit = useRef<{ readonly before: Workflow; readonly expected: Workflow } | null>(null);
-  const reviewLock = useRef<{ scope: number; key: string | null; sawBusy: boolean; settled: boolean; language: ConversationLanguage } | null>(null);
+  const reviewLock = useRef<{ scope: number; key: string | null; sawBusy: boolean; settled: boolean; language: ConversationLanguage; continuation?: boolean } | null>(null);
   /**
    * The execution the chat follows. `start` (BUILD-FLOFI-CHAT-E2E-FIX-002) exists only while the chat's own wallet request is starting: the runtime
    * error it saw then, and whether the authorize/request controls became active, so a start that ends without any execution record is reported.
    */
   const watch = useRef<{ scope: number; language: ConversationLanguage; phase: string | null; runKey: string | null; continued: string | null;
-    start?: { error: string | null; active: boolean; idle: number } | undefined } | null>(null);
+    start?: { error: string | null; active: boolean; idle: number } | undefined;
+    /**
+     * BUILD-FLOFI-E2E-RELIABILITY-001: the next wallet request of a run that already has a confirmed one (a continuation), while it starts. A start
+     * that ends without a new wallet request is reported with its reason (before, the chat stayed silent and repeated "0 of 1 actions completed").
+     */
+    continuing?: { error: string | null; cleared: boolean; active: boolean; idle: number; fingerprint: string } | undefined;
+    /** The continuation (run and record fingerprint) whose fresh Review FloFi already prepared, so it is never re-offered in a loop. */
+    requoted?: string | null | undefined } | null>(null);
   const restored = useRef<string | null>(null);
   // BUILD-FLOFI-CHAT-E2E-FIX-002: a Review the chat continues by itself once what blocked it is resolved (the wallet's network switched, an edit
   // applied or discarded), and the sequence step whose completion hands over to the next step's own Review.
@@ -201,7 +208,7 @@ export function useFlofiConversation({ owner, epoch, bridge, direct, interfaceLa
   }
 
   // ── Review ───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-  function presentReview(scope: number, language: ConversationLanguage) {
+  function presentReview(scope: number, language: ConversationLanguage, continuation = false) {
     const view = latest.current.bridge, c = conversationCopy(language), review = conversationReview(view), binding = reviewBinding(view);
     if (!binding || !review.canConfirm) {
       // A simulation that failed or was refused says why in its own words (a retired earlier Review would only say the workflow changed).
@@ -209,16 +216,21 @@ export function useFlofiConversation({ owner, epoch, bridge, direct, interfaceLa
         { ...review.steps.length && !review.simulationProblem ? { review } : {}, options: [c.review] });
       return;
     }
-    setQuestion({ open: { kind: 'CONFIRM_WORKFLOW', binding }, language });
     const sequence = view.sequence, workflow = view.workflow, previous = lastReview.current;
+    // BUILD-FLOFI-E2E-RELIABILITY-001: the remaining request of a run whose earlier request already landed. The workflow was confirmed already;
+    // this fresh Review of the next request alone is accepted with one explicit answer, which also opens the wallet (the binding is checked again).
+    const next = continuation ? executionContinuation(view) : null;
+    setQuestion(next ? { open: { kind: 'CONFIRM_CONTINUE_REVIEW', binding, runKey: currentExecution(view.progress)?.runKey ?? null }, language }
+      : { open: { kind: 'CONFIRM_WORKFLOW', binding }, language });
     // A fresh quote after a refused start (or one the owner asked for) says exactly what changed before it asks again; nothing is reused.
     const requoted = requote.current?.scope === scope && previous?.workflowId === workflow.workflowId && previous.revision === workflow.revision ? previous.review : null;
     requote.current = null;
     lastReview.current = { workflowId: workflow.workflowId, revision: workflow.revision, review };
     const changes = requoted ? reviewChanges(requoted, review).map(change => `${translate(language, change.label)} ${change.before} → ${change.after}`) : [];
+    const notes = requoted ? { notes: [changes.length ? c.quoteChanges(changes.join('; ')) : c.quoteUnchanged] } : {};
+    if (next) { flofi(scope, language, c.continuationReview(translate(language, next.next)), { review, ...notes, question: c.continuationQuestion, options: [c.continueYes, c.executeNo] }); return; }
     flofi(scope, language, sequence ? c.sequenceReviewReady(sequence.current, sequence.total) : c.reviewReady,
-      { review, ...requoted ? { notes: [changes.length ? c.quoteChanges(changes.join('; ')) : c.quoteUnchanged] } : {},
-        question: sequence ? c.confirmStep(sequence.current, sequence.total) : requoted ? c.confirmUpdated : c.confirmWorkflow, options: [c.confirmYes, c.confirmNo] });
+      { review, ...notes, question: sequence ? c.confirmStep(sequence.current, sequence.total) : requoted ? c.confirmUpdated : c.confirmWorkflow, options: [c.confirmYes, c.confirmNo] });
   }
   function startReview(scope: number, language: ConversationLanguage, fresh = false) {
     const view = latest.current.bridge, c = conversationCopy(language);
@@ -242,7 +254,9 @@ export function useFlofiConversation({ owner, epoch, bridge, direct, interfaceLa
     // The current Review is still approvable (also a fresh Review for the rest of a started run): present it as the Canvas does — unless the owner
     // asked for a fresh quote before anything was requested (BUILD-FLOFI-BRIDGE-LIVE-FIX-003), which re-simulates and retires the unused Review.
     const refresh = fresh && !currentExecution(view.progress)?.started && (action.kind === 'approve' || action.kind === 'execute') && !action.disabled;
-    if (!refresh && (action.kind === 'approve' || action.kind === 'execute')) { presentReview(scope, language); return; }
+    // BUILD-FLOFI-E2E-RELIABILITY-001: a run that already has a confirmed request continues with a Review of its next request only.
+    const continuation = Boolean(currentExecution(view.progress)?.started && executionContinuation(view));
+    if (!refresh && (action.kind === 'approve' || action.kind === 'execute')) { presentReview(scope, language, continuation); return; }
     // Otherwise an execution of this workflow is the financial truth: follow it (recovery stays observation-only), never simulate over it.
     if (currentExecution(view.progress) && action.kind !== 'simulate') { follow(scope, language); return; }
     // The wallet is on another network than the workflow: the existing wallet network request comes first (nothing is simulated on the wrong chain).
@@ -258,10 +272,10 @@ export function useFlofiConversation({ owner, epoch, bridge, direct, interfaceLa
       flofi(scope, language, c.reviewBlocked(reason), options.length ? { options } : {});
       return;
     }
-    const next = { scope, key: view.authorization.key, sawBusy: false, settled: false, language };
+    const next = { scope, key: view.authorization.key, sawBusy: false, settled: false, language, continuation };
     reviewLock.current = next;
     if (fresh && lastReview.current) requote.current = { scope };
-    flofi(scope, language, sequence ? c.stepSimulatingNext(sequence.current) : fresh ? c.refreshing : c.reviewStarting);
+    if (!continuation) flofi(scope, language, sequence ? c.stepSimulatingNext(sequence.current) : fresh ? c.refreshing : c.reviewStarting);
     void Promise.resolve().then(view.simulate).catch(() => undefined).finally(() => { if (reviewLock.current === next) { next.settled = true; setTick(n => n + 1); } });
   }
   useEffect(() => {
@@ -271,7 +285,7 @@ export function useFlofiConversation({ owner, epoch, bridge, direct, interfaceLa
     if (!current.sawBusy && !current.settled && bridge.authorization.key === current.key) return;
     reviewLock.current = null;
     if (current.scope !== session.current) return;
-    presentReview(current.scope, current.language);
+    presentReview(current.scope, current.language, current.continuation);
   });
 
   // ── Confirmation, execution and follow-up ──────────────────────────────────────────────────────────────────────────────────────────
@@ -294,12 +308,18 @@ export function useFlofiConversation({ owner, epoch, bridge, direct, interfaceLa
     // the controls refuse at once says why, and nothing claims a wallet request that never opened.
     // BUILD-FLOFI-EXECUTION-PERFORMANCE-001: when the person's FloFi wallet (Privy) will sign, the chat accepts the Review only once Privy can sign with
     // it here — the same check as the Canvas Authorize — so no short-lived Review is accepted, begun or claimed for a wallet that cannot show it.
-    const refusal = floFiWalletRefusal(view.wallet.account, language, false);
-    if (refusal) { flofi(scope, language, c.executionNotStarted(refusal), { options: [c.review] }); return; }
+    // BUILD-FLOFI-E2E-RELIABILITY-001: once a request of this run landed, a refusal concerns the next request only (never "nothing was sent").
+    const notStarted = (reason: string) => currentExecution(view.progress)?.started ? c.continueFailed(reason) : c.executionNotStarted(reason);
+    const refusal = floFiWalletRefusal(view.wallet.account, language, Boolean(currentExecution(view.progress)?.started));
+    if (refusal) { flofi(scope, language, notStarted(refusal), { options: [c.review] }); return; }
     const startError = view.source.state.error, started = controls.authorize();
-    if (!started.started) { flofi(scope, language, c.executionNotStarted(translate(language, started.issue ?? 'Execution cannot begin with the current wallet or execution state. Check this workflow in Simulate.')), { options: [c.review] }); return; }
+    if (!started.started) { flofi(scope, language, notStarted(translate(language, started.issue ?? 'Execution cannot begin with the current wallet or execution state. Check this workflow in Simulate.')), { options: [c.review] }); return; }
     flofi(scope, language, c.executing);
-    watch.current = { scope, language, phase: null, runKey: null, continued: null, start: { error: startError, active: false, idle: 0 } };
+    const live = currentExecution(view.progress);
+    watch.current = live?.started
+      ? { scope, language, phase: null, runKey: live.runKey, continued: null, requoted: watch.current?.requoted,
+        continuing: { error: startError, cleared: startError === null, active: false, idle: 0, fingerprint: live.fingerprint } }
+      : { scope, language, phase: null, runKey: null, continued: null, start: { error: startError, active: false, idle: 0 } };
   }
   function answer(scope: number, open: Question, text: string) {
     const language = open.language, c = conversationCopy(language), verdict = classifyAnswer(text, open.open.kind), view = latest.current.bridge;
@@ -314,7 +334,12 @@ export function useFlofiConversation({ owner, epoch, bridge, direct, interfaceLa
       setTick(n => n + 1);
       return true;
     }
-    if (verdict === 'NO') { setQuestion(null); flofi(scope, language, c.declined, { options: [c.review] }); return true; }
+    if (verdict === 'NO') {
+      setQuestion(null);
+      // A run with a confirmed request is never described as "nothing was sent": only the next request was not.
+      const started = Boolean(currentExecution(view.progress)?.started);
+      flofi(scope, language, started ? c.continueFailed(translate(language, 'You chose not to continue now.')) : c.declined, { options: [c.review] }); return true;
+    }
     if (verdict === 'UNCLEAR') {
       const options = open.open.kind === 'CONFIRM_WORKFLOW' ? [c.confirmYes, c.confirmNo] : open.open.kind === 'CONFIRM_EXECUTION' ? [c.executeYes, c.executeNo] : [c.continueYes, c.executeNo];
       flofi(scope, language, c.unclear, { options }); return true;
@@ -326,13 +351,17 @@ export function useFlofiConversation({ owner, epoch, bridge, direct, interfaceLa
       if (!view.controls.canContinue || live?.runKey !== open.open.runKey || live?.fingerprint !== open.open.fingerprint) { follow(scope, language); return true; }
       // BUILD-FLOFI-EXECUTION-PERFORMANCE-001: the same FloFi wallet check as the first request; the question stays open to answer again.
       const refusal = floFiWalletRefusal(view.wallet.account, language, true);
-      if (refusal) { setQuestion(open); flofi(scope, language, c.executionNotStarted(refusal), { options: [c.continueYes, c.executeNo] }); return true; }
+      if (refusal) { setQuestion(open); flofi(scope, language, c.continueFailed(refusal), { options: [c.continueYes, c.executeNo] }); return true; }
       flofi(scope, language, c.executing);
+      const followed = watch.current?.scope === scope ? watch.current : null, startError = view.source.state.error;
+      watch.current = { scope, language, phase: followed?.phase ?? null, runKey: live?.runKey ?? null, continued: followed?.continued ?? null, requoted: followed?.requoted,
+        continuing: { error: startError, cleared: startError === null, active: false, idle: 0, fingerprint: live?.fingerprint ?? '' } };
       view.controls.request(true);
       return true;
     }
     const issue = bindingIssue(open.open.binding, view);
     if (issue) { setQuestion(null); flofi(scope, language, c.invalidated[issue], { options: [c.review] }); return true; }
+    if (open.open.kind === 'CONFIRM_CONTINUE_REVIEW') { execute(scope, language, open.open.binding); return true; }
     if (open.open.kind === 'CONFIRM_WORKFLOW') {
       const review = conversationReview(view);
       setQuestion({ open: { kind: 'CONFIRM_EXECUTION', binding: open.open.binding }, language });
@@ -424,6 +453,36 @@ export function useFlofiConversation({ owner, epoch, bridge, direct, interfaceLa
       return;
     }
     if (followed.start) followed.start = undefined;
+    // BUILD-FLOFI-E2E-RELIABILITY-001: a continuation that ends without a new wallet request (the record's operations did not move) is reported
+    // with its reason; a quote that moved or expired is re-quoted at once for the next request only. Nothing is resent, and the earlier
+    // confirmed request is never described as "nothing was sent".
+    const going = followed.continuing;
+    if (going) {
+      const error = bridge.source.state.error, active = bridge.controls.authorizing || bridge.controls.requesting || Boolean(bridge.source.state.busy);
+      if (error === null) going.cleared = true;
+      if (live.fingerprint !== going.fingerprint) followed.continuing = undefined;
+      else if (active) { going.active = true; going.idle = 0; return; }
+      else {
+        const newError = Boolean(error) && (going.cleared || error !== going.error);
+        if (bridge.controls.requestFailed || newError || going.active || ++going.idle > 1) {
+          followed.continuing = undefined;
+          followed.requoted = `${live.runKey}:${live.fingerprint}`;
+          if (error && newError && QUOTE_MOVED.test(error)) {
+            const why = continuationReason(error);
+            flofi(followed.scope, language, c.continuationRequote(why ? translate(language, why) : null));
+            requote.current = { scope: followed.scope };
+            startReview(followed.scope, language);
+            return;
+          }
+          const reason = error && (newError || bridge.controls.requestFailed) ? translate(language, simulationError(error))
+            : bridge.controls.startIssue ? translate(language, bridge.controls.startIssue) : null;
+          flofi(followed.scope, language, c.continueFailed(reason ?? translate(language, 'Check the status, then continue again.')), { options: bridge.controls.canCheck ? [c.checkStatus] : [c.review] });
+          return;
+        }
+        setTick(n => n + 1);
+        return;
+      }
+    }
     const view = conversationExecution(bridge)!, phase = view.phase;
     if (phase !== followed.phase) {
       followed.phase = phase; followed.runKey = live.runKey;
@@ -442,13 +501,29 @@ export function useFlofiConversation({ owner, epoch, bridge, direct, interfaceLa
         return;
       } else if (phase === 'RECONCILING') flofi(followed.scope, language, translate(language, live.message));
     }
-    const continuation = `${live.runKey}:${live.fingerprint}`;
+    const continuation = `${live.runKey}:${live.fingerprint}`, next = executionContinuation(bridge);
     if (bridge.controls.canContinue && followed.continued !== continuation && !questionRef.current) {
       const binding = reviewBinding(bridge);
       if (!binding) return;
       followed.continued = continuation;
       setQuestion({ open: { kind: 'CONFIRM_CONTINUE', binding, runKey: live.runKey, fingerprint: live.fingerprint }, language });
-      flofi(followed.scope, language, c.continueQuestion, { options: [c.continueYes, c.executeNo] });
+      // BUILD-FLOFI-E2E-RELIABILITY-001: name what landed (an approval is never the action itself) and what has not been sent yet.
+      flofi(followed.scope, language, next ? c.continueAfter(translate(language, next.done), translate(language, next.next), next.approval) : c.continueQuestion,
+        { options: [c.continueYes, c.executeNo] });
+      return;
+    }
+    // BUILD-FLOFI-E2E-RELIABILITY-001: the earlier request landed but its Review can no longer start the next one (the quote expired while the
+    // approval confirmed, or a fresh quote awaits its Review). FloFi prepares the next request's own fresh Review once (read-only) and asks once;
+    // it never re-offers the same continuation after the owner declined it, and never repeats the landed request.
+    if (next && live.state === 'active' && !bridge.controls.canContinue && !questionRef.current && !reviewLock.current && followed.requoted !== continuation &&
+        !bridge.source.state.busy && !bridge.controls.requesting && !bridge.controls.authorizing) {
+      const action = projectCanvasAction(bridge.controls.current, bridge.controls);
+      if ((action.kind === 'simulate' || action.kind === 'approve') && !action.disabled) {
+        followed.requoted = continuation;
+        if (action.kind === 'simulate') flofi(followed.scope, language, c.continuationRequote(null));
+        requote.current = { scope: followed.scope };
+        startReview(followed.scope, language);
+      }
     }
   });
 

@@ -969,10 +969,42 @@ async function catalogQuote(workflow: SemanticWorkflow, executionId: string, P: 
     ...native ? { native } : {}, ...kind !== 'SWAP' ? { conversion: kind } : {} };
   return { ...quoteFields, manifestHash: digest(canonical(quoteFields)) };
 }
-/** The economically material state of a catalog quote: a change of any of it needs a new Review. */
-function catalogEconomics(quote: PublicQuote) {
-  return canonical({ expectedOut: quote.expectedOut, minimumOut: quote.minimumOut, pool: quote.pool, fee: quote.fee,
-    stocks: (quote.stocks ?? []).map(stock => [stock.officialId, stock.multiplierWad, stock.scheduledMultiplierWad, stock.scheduledEffectiveAt]) });
+/**
+ * BUILD-FLOFI-E2E-RELIABILITY-001: the fresh output of the REVIEWED route (pool and fee tier) in a fresh quote, or null when that route no longer
+ * quotes. The fresh best tier may differ from the reviewed one; the transaction is always built on the reviewed route.
+ */
+function reviewedRouteOut(reviewed: PublicQuote, fresh: PublicQuote): bigint | null {
+  if (fresh.pool === reviewed.pool && fresh.fee === reviewed.fee) return BigInt(fresh.expectedOut);
+  const tier = fresh.feeTiers?.find(item => item.fee === reviewed.fee && item.pool === reviewed.pool);
+  return tier?.expectedOut ? BigInt(tier.expectedOut) : null;
+}
+/**
+ * BUILD-FLOFI-E2E-RELIABILITY-001: whether a fresh quote still lets the REVIEWED swap execute inside the owner's reviewed bounds. The Review
+ * authorizes an exact input on a reviewed route with a reviewed minimum output, and the transaction FloFi asks the wallet to sign carries exactly
+ * those bounds (the router reverts below the minimum). Ordinary price movement between Review and Execute — every block on an active pool, which
+ * before this build retired every live Base, Arbitrum and Ethereum Review — needs no new Review while the reviewed route still quotes at least the
+ * reviewed minimum. Anything else is material and needs a fresh Review: other assets, amount, slippage setting, native/conversion kind or
+ * decimals, another workflow, a reviewed route that no longer quotes, or one that quotes below the reviewed minimum.
+ */
+export function reviewedBoundsHold(reviewed: PublicQuote, fresh: PublicQuote): boolean {
+  if (fresh.chainId !== reviewed.chainId || fresh.workflowHash !== reviewed.workflowHash || fresh.nodeId !== reviewed.nodeId ||
+      fresh.inputToken !== reviewed.inputToken || fresh.outputToken !== reviewed.outputToken || fresh.amountIn !== reviewed.amountIn ||
+      fresh.slippageBps !== reviewed.slippageBps || (fresh.native ?? null) !== (reviewed.native ?? null) || (fresh.conversion ?? null) !== (reviewed.conversion ?? null) ||
+      (fresh.inputDecimals ?? null) !== (reviewed.inputDecimals ?? null) || (fresh.outputDecimals ?? null) !== (reviewed.outputDecimals ?? null)) return false;
+  const out = reviewedRouteOut(reviewed, fresh);
+  return out !== null && out >= BigInt(reviewed.minimumOut);
+}
+/** The Stock Token multiplier state of a catalog quote: economic (a changed multiplier changes what the tokens represent), compared exactly. */
+const stockState = (quote: PublicQuote) =>
+  canonical((quote.stocks ?? []).map(stock => [stock.officialId, stock.multiplierWad, stock.scheduledMultiplierWad, stock.scheduledEffectiveAt]));
+/**
+ * The fresh observation on the reviewed route with the reviewed minimum, so an owner-bound preflight re-binds exactly the reviewed transaction
+ * (its calldata carries the route, minimum and deadline). Only used once `reviewedBoundsHold` passed; never presented as a new Review.
+ */
+function pinReviewedBounds(fresh: PublicQuote, reviewed: PublicQuote): PublicQuote {
+  const out = reviewedRouteOut(reviewed, fresh);
+  if (out === null) fail('QUOTE_CHANGED_REVIEW_REQUIRED');
+  return { ...fresh, pool: reviewed.pool, fee: reviewed.fee, expectedOut: out.toString(), minimumOut: reviewed.minimumOut };
 }
 
 /** Read-only exact owner transaction preflight, hashed into Review before any wallet request is prepared. */
@@ -1143,29 +1175,37 @@ function createPublicTestnetCore(rpcFor: (profile: SwapProfile) => Rpc, now: () 
         const renewed = await quote(run.workflow, id, reviewedOwner?.account);
         await save({ ...run, quote: renewed, reviewedManifestHash: null }); fail('QUOTE_EXPIRED_REVIEW_REQUIRED');
       }
-      let fresh: PublicQuote;
-      try { fresh = await quote(run.workflow, id, reviewedOwner?.account, strict ? run.quote.expiresAt : undefined); }
-      catch (cause) {
-        // A Stock Token multiplier change now inside the Review window invalidates the reviewed authority.
-        if (strict || cause instanceof Error && cause.message === 'STOCK_MULTIPLIER_CHANGE_PENDING') { await save({ ...run, reviewedManifestHash: null }); }
-        throw cause;
+      // A fresh read that fails retires an owner-bound Review (its exact preflight no longer stands), and a Stock Token multiplier change now
+      // inside the Review window invalidates the reviewed authority on any network.
+      const reread = async <T,>(read: () => Promise<T>): Promise<T> => {
+        try { return await read(); }
+        catch (cause) {
+          if (strict || cause instanceof Error && cause.message === 'STOCK_MULTIPLIER_CHANGE_PENDING') await save({ ...run, reviewedManifestHash: null });
+          throw cause;
+        }
+      };
+      // The quote a new Review would present: the fresh observation, bound to the reviewed owner where the network binds owners (own fresh expiry).
+      const presentable = (q: PublicQuote) => reread(() => strict ? bindSwapOwner(q, rpc, reviewedOwner!.account) : Promise.resolve(q));
+      // BUILD-FLOFI-E2E-RELIABILITY-001: the fresh market observation is compared with the REVIEWED bounds, not with the reviewed observation. The
+      // swap is still built from the reviewed quote (route, minimum, deadline), so ordinary movement inside those bounds needs no new Review; see
+      // `reviewedBoundsHold`. Production evidence (2026-11-01, Base): a 0.014% and a 0.034% move, both far above the reviewed minimum, each retired
+      // the Review and left a confirmed approval without its swap.
+      const observed = await reread(() => quote(run.workflow, id));
+      const stockChanged = stockState(observed) !== stockState(run.quote);
+      if (stockChanged || !reviewedBoundsHold(run.quote, observed)) {
+        run = await save({ ...run, quote: await presentable(observed), reviewedManifestHash: null });
+        fail(stockChanged ? 'STOCK_MULTIPLIER_CHANGED_REVIEW_REQUIRED' : 'QUOTE_CHANGED_REVIEW_REQUIRED');
       }
-      if (strict && reviewedOwner && fresh.ownerReview && ownerReviewChanged(reviewedOwner, fresh.ownerReview)) {
-        await save({ ...run, quote: fresh, reviewedManifestHash: null }); fail('OWNER_STATE_CHANGED_REVIEW_REQUIRED');
-      }
-      if (fresh.manifestHash !== run.quote.manifestHash) {
-        // Observation metadata changes each block; only economic changes require a new review. For a catalog quote the
-        // Stock Token multiplier state is economic: a changed multiplier changes what the owner's tokens represent.
-        const stockChanged = canonical((fresh.stocks ?? []).map(x => [x.officialId, x.multiplierWad, x.scheduledMultiplierWad, x.scheduledEffectiveAt])) !==
-          canonical((run.quote.stocks ?? []).map(x => [x.officialId, x.multiplierWad, x.scheduledMultiplierWad, x.scheduledEffectiveAt]));
-        if (P.kind === 'CATALOG' ? catalogEconomics(fresh) !== catalogEconomics(run.quote) : fresh.expectedOut !== run.quote.expectedOut ||
-            fresh.minimumOut !== run.quote.minimumOut || fresh.pool !== run.quote.pool || fresh.fee !== run.quote.fee) {
-          run = await save({ ...run, quote: fresh, reviewedManifestHash: null });
-          fail(stockChanged ? 'STOCK_MULTIPLIER_CHANGED_REVIEW_REQUIRED' : 'QUOTE_CHANGED_REVIEW_REQUIRED');
+      if (strict) {
+        // The owner's exact preflight is re-run on the reviewed route, minimum and deadline: within bounds its calldata is the reviewed calldata,
+        // so only a real owner change (nonce, allowance, step, delegation, gas or fee ceiling) still needs a new Review.
+        const pinned = await reread(() => bindSwapOwner(pinReviewedBounds(observed, run.quote), rpc, reviewedOwner!.account, run.quote.expiresAt));
+        if (!pinned.ownerReview || ownerReviewChanged(reviewedOwner!, pinned.ownerReview)) {
+          run = await save({ ...run, quote: await presentable(observed), reviewedManifestHash: null }); fail('OWNER_STATE_CHANGED_REVIEW_REQUIRED');
         }
       }
       if (now().getTime() >= Date.parse(run.quote.expiresAt)) {
-        run = await save({ ...run, quote: fresh, reviewedManifestHash: null });
+        run = await save({ ...run, quote: await presentable(observed), reviewedManifestHash: null });
         fail('QUOTE_EXPIRED_REVIEW_REQUIRED');
       }
       const gate = resolveWorkflowCapability(run.workflow, { environment: P.environment, runtime: {

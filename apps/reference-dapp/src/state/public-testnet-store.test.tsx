@@ -9,7 +9,7 @@ import { initialEditor } from '../domain/editor';
 import { deferred, HookHarness } from '../test-utils/hook-harness';
 import { reviewFixture } from '../test-utils/review-fixture';
 import { composeStrategy } from '../engine/strategy-engine';
-import { floFiRefusal, rejected } from './public-testnet-store';
+import { floFiRefusal, publicSwapMessage, rejected } from './public-testnet-store';
 import { FloFiProviderError } from '../wallet/flofi-evm-provider';
 
 vi.mock('react', async original => ({ ...await original<typeof import('react')>(), ...(await import('../test-utils/hook-harness')).hookMocks }));
@@ -88,7 +88,9 @@ describe('public swap durable recovery and explicit fresh Review', () => {
     run = { ...run, attempts: [{ step: 'swap', state: 'UNKNOWN' }] } as unknown as PublicRun;
     vi.mocked(publicStatus).mockResolvedValue({ ok: true, value: run });
     read(); await settle(); store.simulate(); await settle();
-    expect(store.error).toContain('transaction is already in progress');
+    // BUILD-FLOFI-E2E-RELIABILITY-001: the store keeps the code (the chat and Review classify codes); the panel shows its sentence.
+    expect(store.error).toBe('ATTEMPT_ALREADY_ACTIVE');
+    expect(publicSwapMessage(store.error!)).toContain('transaction is already in progress');
     expect(publicPrepare).not.toHaveBeenCalled(); expect(publicRefresh).not.toHaveBeenCalled(); expect(publicBegin).not.toHaveBeenCalled();
   });
 });
