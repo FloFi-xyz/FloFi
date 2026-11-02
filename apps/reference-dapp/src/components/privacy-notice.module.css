@@ -1,0 +1,14 @@
+/* SPDX-License-Identifier: AGPL-3.0-only */
+/* BUILD-FLOFI-CHAT-E2E-DASHBOARD-UX-001: the first-access Privacy & Memory notice — a centered dialog over a dimmed page. */
+.dialog{width:min(480px,calc(100vw - 32px));max-height:min(640px,calc(100dvh - 32px));margin:auto;padding:0;border:1px solid var(--line);border-radius:14px;background:var(--paper);color:var(--ink);box-shadow:0 24px 64px rgb(15 30 55 / .24);overflow:hidden}
+.dialog::backdrop{background:rgb(12 22 38 / .55)}
+.panel{display:grid;gap:14px;max-height:inherit;padding:22px 22px 20px;overflow-y:auto;overscroll-behavior:contain;font-size:14px;line-height:1.5}
+.panel h2{margin:0;font-size:19px;line-height:1.3}
+.panel p{margin:0}
+.panel ul{margin:0;padding-left:18px;display:grid;gap:6px}
+.muted{color:var(--muted)}
+.agree{display:flex;gap:10px;align-items:center;font-weight:600}
+.agree input{width:18px;height:18px;margin:0}
+.actions{display:flex;flex-wrap:wrap;gap:10px;justify-content:flex-end}
+.actions button{min-height:40px;padding:0 16px;border-radius:8px}
+@media(max-width:480px){.dialog{width:calc(100vw - 24px);border-radius:12px}.panel{padding:18px 16px 16px}.actions button{flex:1 1 auto}}

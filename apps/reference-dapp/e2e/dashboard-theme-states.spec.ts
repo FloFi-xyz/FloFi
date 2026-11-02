@@ -57,6 +57,8 @@ test.beforeEach(async ({ page }) => {
 test.afterEach(({ page }) => { expect(errors.get(page)).toEqual([]); });
 
 test('shared theme switching preserves runs, read state, navigation and the single wallet model', async ({ page }) => {
+  // BUILD-FLOFI-CHAT-E2E-DASHBOARD-UX-001: the run history is in Your workflows (the records view).
+  await page.evaluate(() => window.flofiDashboardAcceptance.view('records'));
   const index = workspace(page);
   const before = await index.innerText();
   for (const value of ['dark', 'light', 'dark'] as const) {
@@ -80,13 +82,13 @@ for (const value of ['light', 'dark'] as const) {
   test(`${value} product states distinguish empty, disconnected, verification, loading and unavailable history`, async ({ page }) => {
     await theme(page, value);
     const index = workspace(page);
-    await page.evaluate(() => window.flofiDashboardAcceptance.mode('empty'));
+    await page.evaluate(() => { window.flofiDashboardAcceptance.mode('empty'); window.flofiDashboardAcceptance.view('records'); });
     await expect(index.getByRole('heading', { name: 'No workflows executed yet', exact: true })).toBeVisible();
     await expect(index.locator('.dashboard-run-card,.dashboard-attention-required')).toHaveCount(0);
     await index.locator('.dashboard-history-empty').getByRole('button', { name: 'Build workflow', exact: true }).click();
     expect(await page.evaluate(() => window.flofiDashboardAcceptance.counts().built)).toBe(1);
     await page.screenshot({ style: 'nextjs-portal{display:none}', path: `.tmp/ux006d-empty-${value}.png`, fullPage: true });
-    await page.evaluate(() => window.flofiDashboardAcceptance.mode('disconnected'));
+    await page.evaluate(() => { window.flofiDashboardAcceptance.mode('disconnected'); window.flofiDashboardAcceptance.view('dashboard'); });
     await expect(index.getByRole('status')).toContainText('Use the wallet control in the FloFi header');
     await expect(index.locator('.dashboard-current,.dashboard-attention')).toHaveCount(0);
     await expect(index.getByRole('button', { name: /Connect wallet/i })).toHaveCount(0);
@@ -116,8 +118,9 @@ for (const value of ['light', 'dark'] as const) {
   test(`${value} status hierarchy, contrast, hover and keyboard focus remain calm and readable`, async ({ page }) => {
     await theme(page, value);
     const index = workspace(page);
-    await expect(index.locator('.dashboard-attention li')).toHaveCount(2);
-    await expect(index.locator('.dashboard-attention')).toContainText('Execution status unresolved');
+    await page.evaluate(() => window.flofiDashboardAcceptance.view('records'));
+    await expect(index.locator('.workflows-attention .dashboard-run-list>li')).toHaveCount(3);
+    await expect(index.locator('.workflows-attention')).toContainText('Execution status unresolved');
     const checks = await index.locator('.dashboard-status,.dashboard-run-message,.dashboard-run-facts,.dashboard-run-records').evaluateAll(elements => {
       const canvas = document.createElement('canvas'); canvas.width = canvas.height = 1;
       const context = canvas.getContext('2d')!;
@@ -197,10 +200,11 @@ for (const value of ['light', 'dark'] as const) {
 
   test(`${value} common widths preserve cards, attention, long values and evidence without overflow`, async ({ page }) => {
     await theme(page, value);
-    for (const mode of ['history', 'verify', 'unavailable', 'empty', 'disconnected'] as const) {
-      await page.evaluate(value => window.flofiDashboardAcceptance.mode(value), mode);
+    for (const surface of ['dashboard', 'records'] as const) for (const mode of ['history', 'verify', 'unavailable', 'empty', 'disconnected'] as const) {
+      await page.evaluate(([value, view]) => { window.flofiDashboardAcceptance.mode(value); window.flofiDashboardAcceptance.view(view); }, [mode, surface] as const);
       for (const width of [1440, 1024, 768, 375, 320]) { await page.setViewportSize({ width, height: 1000 }); await noOverflow(page); }
     }
+    await page.evaluate(() => window.flofiDashboardAcceptance.view('dashboard'));
     await page.evaluate(() => { window.flofiDashboardAcceptance.mode('history'); window.flofiDashboardAcceptance.longTitle(); });
     await noOverflow(page);
     expect(await workspace(page).locator('.dashboard-run-current h3').evaluate(element => element.getAttribute('title') === element.textContent && element.getBoundingClientRect().height <= parseFloat(getComputedStyle(element).lineHeight) * 3 + 1)).toBe(true);

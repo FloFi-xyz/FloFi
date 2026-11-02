@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { test as base, expect, type BrowserContext, type Locator, type Page } from '@playwright/test';
-import { E2E_APP_ORIGIN as APP_ORIGIN, E2E_CARD_ORIGIN } from './app-origin';
+import { answeredPrivacyNotice, E2E_APP_ORIGIN as APP_ORIGIN, E2E_CARD_ORIGIN } from './app-origin';
 import { openEditorSection } from './build-entry-navigation';
 
 export const SYNTHETIC_GUARD_URL = 'https://example.invalid/gryloo-guard-self-test';
@@ -16,7 +16,7 @@ function guardedTest(negativeSelfTest: boolean) {
       const context = await browser.newContext({
         baseURL: APP_ORIGIN,
         serviceWorkers: 'block', bypassCSP: negativeSelfTest, viewport: { width: 1440, height: 900 },
-        colorScheme: 'light', reducedMotion: 'reduce', locale: 'en-US',
+        colorScheme: 'light', reducedMotion: 'reduce', locale: 'en-US', storageState: answeredPrivacyNotice(APP_ORIGIN),
       });
       const unexpected: string[] = [];
       const guard: Guard = {

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Selectively adapted from the delivery's server read adapter. No submission or observation calls.
 import { cloudApiBaseUrl, callCloudFlow } from '../../server/cloud-api-client';
-import { currentWalletPrincipal, currentWalletPrincipals } from '../../server/session-principal';
+import { historyPrincipals } from '../../server/history-principals';
 import { WALLET_PRINCIPAL_HEADER, normalizePrincipal } from '../../server/run-ownership';
 import { embeddedRuntime, flowRuntimeKind } from '../../server/flow-runtime';
 import { workflowOwner, WORKFLOW_OWNER_HEADER } from '../../domain/saved-workflow';
@@ -14,8 +14,8 @@ async function connection(expectedAccount: string): Promise<{ connection: Dashbo
   const evm = /^0x[0-9a-f]{40}$/i.test(expectedAccount);
   const expected = evm ? normalizePrincipal(expectedAccount.toLowerCase()) : workflowOwner(`solana:${expectedAccount}`)?.address;
   if (!expected) return { connection: 'SIGN_IN_REQUIRED', account: null, base: null };
-  const principal = evm ? await currentWalletPrincipal().catch(() => null) :
-    (await currentWalletPrincipals().catch(() => [])).find(p => p.namespace === 'solana' && p.address === expected)?.address;
+  // BUILD-FLOFI-CHAT-E2E-DASHBOARD-UX-001: a wallet proven in this browser or held by the signed-in FloFi account (`historyPrincipals`).
+  const principal = (await historyPrincipals().catch(() => [])).find(p => p.namespace === (evm ? 'eip155' : 'solana') && p.address === expected)?.address;
   if (!principal || principal !== expected) return { connection: 'SIGN_IN_REQUIRED', account: null, base: null };
   try {
     const base = flowRuntimeKind(process.env) === 'embedded' ? new URL('http://127.0.0.1/') : cloudApiBaseUrl();

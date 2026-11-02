@@ -90,6 +90,25 @@ describe('FloFi account store', () => {
     expect((await store().wallets(bruno.accountId)).map(wallet => wallet.id)).toEqual([privy.id]);
   });
 
+  it('lists the wallet addresses an account holds (saved wallets and sign-in wallets) and never another account\'s', async () => {
+    const ana = await store().signIn(google), bruno = await store().signIn(email);
+    await store().saveWallet(ana.accountId, generated);
+    await store().linkIdentity(ana.accountId, { kind: 'eip155', subject: evm, label: null });
+    await store().saveWallet(ana.accountId, metaMask);
+    expect(await store().walletAddresses(ana.accountId)).toEqual([{ namespace: 'eip155', address: evm }, { namespace: 'solana', address: solana }]);
+    expect(await store().walletAddresses(bruno.accountId)).toEqual([]);
+    expect(await store('other-tenant').walletAddresses(ana.accountId)).toEqual([]);
+    // A removed external wallet (and its sign-in identity) is gone at once.
+    await store().removeWallet(ana.accountId, 'evm', evm);
+    expect(await store().walletAddresses(ana.accountId)).toEqual([{ namespace: 'solana', address: solana }]);
+    // The two tables are written separately: an address another account also holds (here Bruno's saved wallet = Ana's sign-in identity) is
+    // left out for both accounts — never shared.
+    await store().linkIdentity(ana.accountId, { kind: 'eip155', subject: evm, label: null });
+    await store().saveWallet(bruno.accountId, metaMask);
+    expect(await store().walletAddresses(ana.accountId)).toEqual([{ namespace: 'solana', address: solana }]);
+    expect(await store().walletAddresses(bruno.accountId)).toEqual([]);
+  });
+
   it('refuses inconsistent wallet metadata before it reaches the database', async () => {
     const ana = await store().signIn(google);
     await expect(store().saveWallet(ana.accountId, { ...metaMask, providerResource: 'wallet-0001-abcd' })).rejects.toThrow('ACCOUNT_WALLET_INVALID');

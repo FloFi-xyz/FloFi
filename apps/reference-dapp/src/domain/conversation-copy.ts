@@ -8,6 +8,12 @@ import type { BindingIssue, ConversationLanguage } from './conversation-lifecycl
 export type ConversationCopy = {
   readonly added: (action: string, detail: string) => string; readonly updated: (action: string, detail: string) => string; readonly removed: (action: string) => string;
   readonly changed: string; readonly nextQuestion: string; readonly addAnother: string; readonly review: string; readonly addPrompt: string; readonly undo: string;
+  /** BUILD-FLOFI-CHAT-E2E-DASHBOARD-UX-001: after a final completed result, the next steps the side chat offers to keep building. */
+  readonly afterExecution: string; readonly afterExecutionWhole: string; readonly modify: string; readonly modifyPrompt: string;
+  /** Without the Copilot: the Canvas card is how a step changes. After a completed run, a "no" closes the question without claims about funds. */
+  readonly modifyOnCanvas: string; readonly closedAfterExecution: string;
+  /** A committed change after an execution: executed actions kept as completed steps, or an executed action the next Review covers again. */
+  readonly executedKept: (executed: number) => string; readonly executedAgain: string;
   readonly undone: string; readonly undoUnavailable: string; readonly emptyWorkflow: string; readonly reviewStarting: string; readonly reviewBlocked: (reason: string) => string;
   readonly reviewFailed: (reason: string) => string; readonly reviewReady: string; readonly reviewNotApprovable: (reason: string) => string; readonly confirmWorkflow: string;
   readonly confirmYes: string; readonly confirmNo: string; readonly workflowConfirmed: (revision: number, account: string) => string; readonly executeQuestion: string;
@@ -55,6 +61,15 @@ const en: ConversationCopy = {
   nextQuestion: 'Would you like to add another action or review your workflow?',
   addAnother: 'Add another action', review: 'Review workflow',
   addPrompt: 'Describe the next action, for example “bridge 5 USDC from Base to Arbitrum”.',
+  afterExecution: 'What would you like to do next? Add another action to keep building this workflow (what already executed is not sent again), change it, or create a new workflow.',
+  afterExecutionWhole: 'What would you like to do next? You can change this workflow, add an action or create a new workflow. This workflow runs as a whole, so after a change the next review covers everything in it again, including what already executed; nothing is sent until you confirm it in your wallet.',
+  modify: 'Modify this workflow',
+  modifyOnCanvas: 'To change a step, open its card on the Canvas and edit its amount or settings; to add a step, describe the action here, for example “bridge 5 USDC from Base to Arbitrum”. Any change gets a fresh simulation and review before your wallet is asked to sign.',
+  closedAfterExecution: 'Okay. The completed run stays in your history; add an action or create a new workflow whenever you like.',
+  modifyPrompt: 'Tell me what to change in a step (its amount, asset, network or slippage), or edit that step’s card on the Canvas. Any change gets a fresh simulation and review before your wallet is asked to sign.',
+  executedKept: executed => executed === 1 ? 'The action you already executed stays completed and is not sent again: reviews cover only the steps not executed yet.'
+    : `The ${executed} steps you already executed stay completed and are not sent again: reviews cover only the steps not executed yet.`,
+  executedAgain: 'This workflow still holds an action you already executed, and as it is now the next review covers it again: confirming would send it again. Undo this change if that is not what you want.',
   undo: 'Undo this change', undone: 'Undone. Your workflow is back to its previous version.',
   undoUnavailable: 'There is no chat change to undo: the workflow changed after it.',
   emptyWorkflow: 'Your workflow has no actions yet. Describe an action to add, for example “swap 10 USDC to WETH on Base”.',
@@ -143,6 +158,15 @@ const pt: ConversationCopy = {
   nextQuestion: 'Quer adicionar outra ação ou revisar o seu workflow?',
   addAnother: 'Adicionar outra ação', review: 'Revisar workflow',
   addPrompt: 'Descreva a próxima ação, por exemplo “bridge 5 USDC from Base to Arbitrum”.',
+  afterExecution: 'O que quer fazer agora? Adicione outra ação para continuar este workflow (o que já foi executado não é reenviado), altere-o ou crie um novo fluxo.',
+  afterExecutionWhole: 'O que quer fazer agora? Você pode alterar este workflow, adicionar uma ação ou criar um novo fluxo. Este workflow é executado como um todo, então depois de uma alteração a próxima revisão volta a incluir tudo, até o que já foi executado; nada é enviado sem a sua confirmação na carteira.',
+  modify: 'Modificar este workflow',
+  modifyOnCanvas: 'Para alterar uma etapa, abra o card dela no Canvas e edite o montante ou as configurações; para adicionar uma etapa, descreva a ação aqui, por exemplo “bridge 5 USDC from Base to Arbitrum”. Qualquer alteração recebe uma nova simulação e revisão antes de a carteira pedir a sua assinatura.',
+  closedAfterExecution: 'Certo. A execução concluída fica no seu histórico; adicione uma ação ou crie um novo fluxo quando quiser.',
+  modifyPrompt: 'Diga o que quer alterar em uma etapa (montante, ativo, rede ou slippage), ou edite o card dessa etapa no Canvas. Qualquer alteração recebe uma nova simulação e revisão antes de a carteira pedir a sua assinatura.',
+  executedKept: executed => executed === 1 ? 'A ação que você já executou continua concluída e não é reenviada: as revisões cobrem apenas as etapas ainda não executadas.'
+    : `As ${executed} etapas que você já executou continuam concluídas e não são reenviadas: as revisões cobrem apenas as etapas ainda não executadas.`,
+  executedAgain: 'Este workflow ainda contém uma ação que você já executou e, do jeito que está, a próxima revisão volta a incluí-la: confirmar faria com que fosse enviada de novo. Desfaça esta alteração se não for isso que você quer.',
   undo: 'Desfazer esta alteração', undone: 'Desfeito. O seu workflow voltou à versão anterior.',
   undoUnavailable: 'Não há alteração do chat para desfazer: o workflow mudou depois dela.',
   emptyWorkflow: 'O seu workflow ainda não tem ações. Descreva uma ação para adicionar, por exemplo “swap 10 USDC to WETH on Base”.',

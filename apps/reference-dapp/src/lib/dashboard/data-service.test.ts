@@ -1,17 +1,17 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cloudApiBaseUrl, callCloudFlow } from '../../server/cloud-api-client';
-import { currentWalletPrincipal } from '../../server/session-principal';
+import { currentWalletPrincipal, currentWalletPrincipals } from '../../server/session-principal';
 import { loadDashboardRunDetail, loadDashboardSnapshot } from './data-service';
 
 vi.mock('../../server/cloud-api-client', () => ({ cloudApiBaseUrl: vi.fn(), callCloudFlow: vi.fn() }));
-vi.mock('../../server/session-principal', () => ({ currentWalletPrincipal: vi.fn() }));
+vi.mock('../../server/session-principal', () => ({ currentWalletPrincipal: vi.fn(), currentWalletPrincipals: vi.fn() }));
 const account = '0x' + 'a'.repeat(40), other = '0x' + 'b'.repeat(40);
 const run = (ownerAccount = account, runId = 'owned-run') => ({ runId, ownerAccount, flow: 'aave-supply', status: 'RECONCILED', hasEvidence: true });
 const response = (value: unknown, status = 200) => new Response(JSON.stringify({ ok: status === 200, value }), { status });
 afterEach(() => { vi.unstubAllGlobals(); vi.resetAllMocks(); });
 function setup() {
-  vi.mocked(currentWalletPrincipal).mockResolvedValue(account);
+  vi.mocked(currentWalletPrincipal).mockResolvedValue(account); vi.mocked(currentWalletPrincipals).mockResolvedValue(account ? [{ namespace: 'eip155', address: account }] : []);
   vi.mocked(cloudApiBaseUrl).mockReturnValue(new URL('http://127.0.0.1:9999/'));
   vi.mocked(callCloudFlow).mockResolvedValue({ ok: true, value: { id: 'owned-run' } });
 }
@@ -34,7 +34,7 @@ describe('Dashboard owner-scoped query boundary', () => {
     expect(transport).toHaveBeenCalledTimes(3);
   });
   it.each([null, other])('requires a matching signed principal (%s) before querying any records', async principal => {
-    vi.mocked(currentWalletPrincipal).mockResolvedValue(principal);
+    vi.mocked(currentWalletPrincipal).mockResolvedValue(principal); vi.mocked(currentWalletPrincipals).mockResolvedValue(principal ? [{ namespace: 'eip155', address: principal }] : []);
     const transport = vi.fn(); vi.stubGlobal('fetch', transport);
     expect(await loadDashboardSnapshot(account)).toMatchObject({ connection: 'SIGN_IN_REQUIRED', runs: [], account: null });
     expect(transport).not.toHaveBeenCalled(); expect(callCloudFlow).not.toHaveBeenCalled();

@@ -28,13 +28,8 @@ import { solanaWalletErrorMessage } from '../wallet/wallet-errors';
 export type Namespace = 'eip155' | 'solana';
 /** One proof attempt: the account the server verified (null when cancelled or failed), the error code, and the wallet chosen. */
 export type ProofOutcome = { readonly account: string | null; readonly error: string | null; readonly wallet: { readonly key: string; readonly name: string } | null };
-/** BUILD-CHAT-LEARNING-002: dispatched on `window` when the proven wallet or a Privacy & memory choice changed. */
-export const LEARNING_CHANGED = 'flofi:learning-changed';
-/**
- * BUILD-FLOFI-MAINNET-PRODUCT-001 (wallet D): dispatched on `window` after a sign-in (detail: its namespace). Every other proof of that namespace
- * re-reads the server's session — a read, never a second signature — so a wallet proven on /approve is proven for Save and Your workflows too.
- */
-export const WALLET_PROOF_CHANGED = 'flofi:wallet-proof-changed';
+import { LEARNING_CHANGED, WALLET_PROOF_CHANGED } from '../domain/wallet-proof-events';
+export { LEARNING_CHANGED, WALLET_PROOF_CHANGED };
 /** The cluster a Solana proof reuses a session on: mainnet-beta in the public product (engineering certification keeps Devnet). */
 export const defaultProofChain = (): SolanaWalletChain => activeNetworkScope() === 'ENGINEERING' ? 'solana:devnet' : 'solana:mainnet';
 /** Owner-facing text for a proof failure code (wallet F): never a raw code. */

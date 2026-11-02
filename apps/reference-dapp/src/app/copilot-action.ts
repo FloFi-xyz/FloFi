@@ -9,7 +9,7 @@ import { logCopilotSettingsFailure, publicCopilotCode, resolveCopilotLive, runti
 import { webCopilotSettingsReader } from '../server/copilot-settings-source';
 import { parseInterpretOptions, requestGlossary } from '../learning/web-actions';
 import { webLearningService, pickPrincipal } from '../server/learning-web';
-import { currentWalletPrincipals } from '../server/session-principal';
+import { memoryPrincipals } from '../server/history-principals';
 import { copilotToolkit } from '../server/copilot-toolkit';
 import { logCopilotTurn } from '../server/copilot-service';
 import { parseTurnMetrics } from '../domain/intelligence/turn-metrics';
@@ -75,7 +75,7 @@ async function learningFor(input: unknown, options: unknown) {
   const service = await webLearningService(process.env);
   if (typeof service === 'string') return null;
   try {
-    const parsed = parseInterpretOptions(options), principal = pickPrincipal(await currentWalletPrincipals().catch(() => []), parsed.identity);
+    const parsed = parseInterpretOptions(options), principal = pickPrincipal(await memoryPrincipals().catch(() => []), parsed.identity);
     const session = await service.session(principal);
     const messages = (input as { messages?: unknown }).messages;
     const { glossary, entries } = requestGlossary(session, Array.isArray(messages) ? messages.filter((m): m is { role: string; text: string } =>

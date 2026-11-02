@@ -39,7 +39,8 @@ export function useSavedWorkflows(owner: WorkflowOwner | null) {
     }, () => { if (active && latestOwner.current === ownerKey) setError({ owner: ownerKey, code: 'WORKFLOW_UNAVAILABLE' }); }).finally(() => { if (active && latestOwner.current === ownerKey) setPendingList(null); });
     return () => { active = false; };
   }, [ownerKey, serial]);
-  async function save(workflow: SemanticWorkflow, name: string) {
+  /** `refused`: told the server's refusal code (BUILD-FLOFI-CHAT-E2E-DASHBOARD-UX-001: WALLET_SESSION_REQUIRED asks for a wallet proof only then). */
+  async function save(workflow: SemanticWorkflow, name: string, refused?: (code: string) => void) {
     if (!owner || !ownerKey || busyRef.current) return false;
     busyRef.current = true; setBusy(true); setError(null);
     try {
@@ -48,7 +49,7 @@ export function useSavedWorkflows(owner: WorkflowOwner | null) {
       const hash = savedWorkflowHash(workflow);
       const result = await saveWorkflow(owner, workflow, name, expected);
       if (latestOwner.current !== ownerKey) return false;
-      if (!result.ok) { setError({ owner: ownerKey, code: result.code }); return false; }
+      if (!result.ok) { setError({ owner: ownerKey, code: result.code }); refused?.(result.code); return false; }
       if (savedWorkflowHash(result.value.workflow) !== hash || result.value.workflowId !== workflow.workflowId) throw Error('WORKFLOW_RESPONSE_INVALID');
       setVersion({ owner: ownerKey, workflowId: workflow.workflowId, value: result.value.version }); refresh(); return true;
     } catch { if (latestOwner.current === ownerKey) setError({ owner: ownerKey, code: 'WORKFLOW_UNAVAILABLE' }); return false; }

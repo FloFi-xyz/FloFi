@@ -11,6 +11,9 @@ import { registerNetworkCatalog } from '../src/domain/asset-catalogs';
 import { validateSavedWorkflow } from '../src/domain/saved-workflow';
 import { createDurablePublicTestnetService } from '../src/server/public-testnet-service';
 import { createRobinhoodMockChain, mockCatalogRuntime } from '../src/server/robinhood-mainnet.test-harness';
+import { createAccountStore } from '../src/accounts/account-store';
+import { ACCOUNT_SESSION_COOKIE, sealAccountSession, type AccountSessionToken } from '../src/accounts/account-session';
+import { APP_ORIGIN } from './app-origin';
 import { guardedContext, installJourneyWallet, switchAccount, walletRequests } from './journey-fixtures';
 import { test, expect } from './fixtures';
 
@@ -50,15 +53,21 @@ async function inspect(id: string) {
   finally { await database.close(); }
 }
 const card = (page: Page, id: string) => page.locator('.dashboard-run-card').filter({ has: page.locator(`a[href="/app/dashboard/runs/${id}"]`) });
+/**
+ * BUILD-FLOFI-CHAT-E2E-DASHBOARD-UX-001: the execution history lives in Your workflows. A wallet that no signed-in FloFi account holds (these
+ * test wallets have no account) proves itself once there — one sign-in signature for the saved workflows and the history together.
+ */
 async function signIn(page: Page) {
-  await expect(page.getByRole('button', { name: 'Verify wallet for history', exact: true })).toBeVisible();
-  await page.getByRole('button', { name: 'Verify wallet for history', exact: true }).click();
+  const prove = page.getByRole('button', { name: 'Connect wallet and prove ownership', exact: true });
+  await expect(prove).toBeVisible();
   await expect(page.getByRole('button', { name: 'Verify wallet for history', exact: true })).toHaveCount(0);
+  await prove.click();
+  await expect(prove).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'Refresh history', exact: true })).toBeVisible();
 }
 async function open(page: Page, wallets: TestWallet[]) {
   await installJourneyWallet(page, wallets, { chain: '0xa4b1', transactionControl: async () => { throw Error('FINANCIAL_REQUEST_FORBIDDEN'); } });
-  await page.goto('/app/dashboard'); await signIn(page);
+  await page.goto('/app/workflows'); await signIn(page);
 }
 
 test('permanent deletion removes real bytes and stays deleted after refresh, a new session, and wallet changes', async ({ page, browser }) => {
@@ -118,4 +127,69 @@ test('Portuguese confirmation remains usable on a narrow screen and keeps the ca
   await page.screenshot({ path: info.outputPath('delete-confirmation-pt.png') });
   await dialog.getByRole('button', { name: 'Cancelar', exact: true }).click();
   expect((await inspect(id)).runs).toBe(1);
+});
+
+/**
+ * BUILD-FLOFI-CHAT-E2E-DASHBOARD-UX-001 (owner decision on PR #155): signed in with a FloFi email account, the history of a wallet that account
+ * holds opens in Your workflows with no wallet-proof signature. The account session is created by the account store exactly as an email
+ * sign-in creates it, and its cookie is sealed with this run's deployment secret exactly as the sign-in route seals it (the email-code
+ * screens themselves are covered by auth-wallets.spec.ts). Another account, or the same browser after sign-out, never sees that history.
+ */
+async function emailAccount(email: string, wallet: string | null): Promise<AccountSessionToken> {
+  const database = db();
+  try {
+    const store = createAccountStore(database, 'default'), session = await store.signIn({ kind: 'email', subject: email, label: email });
+    await store.setOnboarding(session.accountId, 'completed');
+    // A FloFi-managed wallet of this account (public metadata only, as the wallet onboarding saves it).
+    if (wallet) await store.saveWallet(session.accountId, { ecosystem: 'evm', address: wallet, origin: 'generated', provider: 'privy', providerName: 'FloFi wallet',
+      providerResource: null, label: 'Main wallet' });
+    return session;
+  } finally { await database.close(); }
+}
+async function revoke(session: AccountSessionToken) {
+  const database = db();
+  try { await createAccountStore(database, 'default').revokeSession(session); } finally { await database.close(); }
+}
+async function signedInAs(page: Page, session: AccountSessionToken) {
+  const secret = process.env.FLOFI_E2E_SESSION_SECRET;
+  if (!secret) throw Error('SESSION_SECRET_REQUIRED');
+  await page.context().addCookies([{ name: ACCOUNT_SESSION_COOKIE, url: APP_ORIGIN, httpOnly: true, sameSite: 'Lax',
+    value: sealAccountSession({ FLOFI_SESSION_SECRET: secret }, session, new URL(APP_ORIGIN).host, new Date()) }]);
+}
+const proveButton = (page: Page) => page.getByRole('button', { name: 'Connect wallet and prove ownership', exact: true });
+
+test('a signed-in email account sees its own wallet history without a wallet proof; another account and a signed-out browser do not', async ({ page, browser }) => {
+  const owner = createTestWallet(), id = await seed(owner);
+  const erin = await emailAccount(`erin-${Date.now()}@flofi-e2e.test`, owner.address);
+  await installJourneyWallet(page, [owner], { chain: '0xa4b1', transactionControl: async () => { throw Error('FINANCIAL_REQUEST_FORBIDDEN'); } });
+  await signedInAs(page, erin);
+  await page.goto('/app/workflows');
+  await expect(card(page, id)).toBeVisible();
+  await expect(proveButton(page)).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Verify wallet for history', exact: true })).toHaveCount(0);
+  // The account opened it: no message or transaction was ever asked of the wallet.
+  expect((await walletRequests(page)).filter(method => /sign|send/i.test(method))).toEqual([]);
+  // Its record opens too (the detail read takes the same account path), with the way back to Your workflows.
+  await card(page, id).locator(`a[href="/app/dashboard/runs/${id}"]`).click();
+  await expect(page).toHaveURL(new RegExp(`/app/dashboard/runs/${id}`));
+  await expect(page.locator('.dashboard-run-detail')).toBeVisible();
+  await expect(page.locator('.dashboard-detail-empty')).toHaveCount(0);
+
+  // Another email account (no wallet of its own) in another browser, with the same wallet connected: the history stays closed.
+  const other = await guardedContext(browser);
+  try {
+    const second = await other.context.newPage();
+    await installJourneyWallet(second, [owner], { chain: '0xa4b1', transactionControl: async () => { throw Error('FINANCIAL_REQUEST_FORBIDDEN'); } });
+    await signedInAs(second, await emailAccount(`finn-${Date.now()}@flofi-e2e.test`, null));
+    await second.goto('/app/workflows');
+    await expect(proveButton(second)).toBeVisible();
+    await expect(card(second, id)).toHaveCount(0);
+    expect(other.unexpected).toEqual([]);
+  } finally { await other.context.close(); }
+
+  // Signed out (the server-side session revoked): the same browser no longer reads that history.
+  await revoke(erin);
+  await page.goto('/app/workflows');
+  await expect(proveButton(page)).toBeVisible();
+  await expect(card(page, id)).toHaveCount(0);
 });

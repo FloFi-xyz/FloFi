@@ -7,6 +7,8 @@
  * keeps the release isolated on 3108. The value is strict: decimal digits without sign, spaces or leading zeros, an unprivileged port
  * (1024–65535), and never one of the suites' own loopback harness or fork ports.
  */
+import { PRIVACY_NOTICE_COOKIE, PRIVACY_NOTICE_VERSION } from '../src/domain/privacy-notice.ts';
+
 export const E2E_DEFAULT_APP_PORT = 3000;
 /** Loopback ports the browser suites already bind (MOCKED harnesses, synthetic and replayed forks). */
 export const E2E_RESERVED_PORTS: readonly number[] = Object.freeze([8545, 8546, 8547, 8549, 8551, 8552, 8553, 8554, 8555, 8556, 8557, 8560]);
@@ -38,4 +40,14 @@ export function e2eNetworkScopeEnv(value = process.env.FLOFI_E2E_NETWORK_SCOPE):
   // An explicit empty value: nothing the parent shell exported can opt this server into engineering.
   if (value === 'PUBLIC_MAINNET') return { FLOFI_NETWORK_SCOPE: '' };
   throw new Error('FLOFI_E2E_NETWORK_SCOPE_INVALID');
+}
+
+/**
+ * BUILD-FLOFI-CHAT-E2E-DASHBOARD-UX-001: the browser suites visit /app as a returning visitor who already answered the first-access Privacy &
+ * Memory notice ("not now": nothing is consented, so no suite's memory or learning changes). The notice's own suite starts without it.
+ */
+export function answeredPrivacyNotice(origin: string = E2E_APP_ORIGIN) {
+  const url = new URL(origin);
+  return { cookies: [{ name: PRIVACY_NOTICE_COOKIE, value: `${PRIVACY_NOTICE_VERSION}.NOT_NOW`, domain: url.hostname, path: '/', expires: -1, httpOnly: false,
+    secure: url.protocol === 'https:', sameSite: 'Lax' as const }], origins: [] };
 }

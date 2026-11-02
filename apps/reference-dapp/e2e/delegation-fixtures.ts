@@ -8,7 +8,7 @@
 import { erc7710 } from '@defi-workflow-engine/reference-compiler';
 import { memorySignerProvider } from '@defi-workflow-engine/reference-executor';
 import { test as base, type BrowserContext, type CDPSession, type Page } from '@playwright/test';
-import { E2E_APP_PORT } from './app-origin';
+import { answeredPrivacyNotice, E2E_APP_PORT } from './app-origin';
 
 /** WebAuthn refuses IP-address RP ids, so this journey visits the same app server on `localhost` (FLOFI_PASSKEY_ORIGIN). */
 export const DELEGATION_ORIGIN = `http://localhost:${E2E_APP_PORT}`;
@@ -20,7 +20,7 @@ const HARNESS = 'http://127.0.0.1:8560';
  */
 export const test = base.extend<{ context: BrowserContext; page: Page }>({
   context: async ({ browser }, use) => {
-    const context = await browser.newContext({ baseURL: DELEGATION_ORIGIN, serviceWorkers: 'block', viewport: { width: 1440, height: 900 }, colorScheme: 'light',
+    const context = await browser.newContext({ baseURL: DELEGATION_ORIGIN, storageState: answeredPrivacyNotice(DELEGATION_ORIGIN), serviceWorkers: 'block', viewport: { width: 1440, height: 900 }, colorScheme: 'light',
       reducedMotion: 'reduce', locale: 'en-US', timezoneId: 'Europe/Lisbon' });
     const unexpected: string[] = [];
     let pages = 0;

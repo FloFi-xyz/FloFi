@@ -1886,3 +1886,22 @@ button.wallet-option .wallet-option-status{border-color:var(--accent-line);backg
 .execution-status-panel .execution-status-actions{display:flex;flex-wrap:wrap;justify-content:flex-end;gap:10px;margin:2px 0 0}
 .execution-status-panel .execution-status-actions button{width:auto;flex:0 1 auto}
 @media(max-width:480px){.execution-status-panel{padding:16px}.execution-status-panel .execution-status-actions button{flex:1 1 100%}}
+/* BUILD-FLOFI-CHAT-E2E-DASHBOARD-UX-001: Your workflows hub (saved, executed and history, needs attention) and the Dashboard records summary. */
+.workflows-hub{display:grid;gap:20px}.workflows-hub>.secondary-workspace-heading{margin-bottom:4px}
+.workflow-records{display:grid;gap:20px;min-width:0}
+.workflows-section{padding:24px;min-width:0}
+.workflows-saved>summary{display:flex;align-items:center;gap:10px;cursor:pointer;list-style:none}.workflows-saved>summary::-webkit-details-marker{display:none}
+.workflows-saved>summary::after{content:'';width:8px;height:8px;margin-left:auto;border-right:2px solid var(--muted);border-bottom:2px solid var(--muted);transform:rotate(45deg);transition:transform .15s}
+.workflows-saved:not([open])>summary::after{transform:rotate(-45deg)}
+.workflows-saved>summary h2{margin:0;font-size:18px}.workflows-saved>p.muted{margin:10px 0 16px;font-size:13px}
+.workflows-saved .saved-workflow-list>li{display:grid;gap:6px}.workflows-saved .saved-workflow-list time{font-size:12px}
+.workflows-count{display:grid;place-items:center;min-width:25px;min-height:25px;padding:3px 7px;border:1px solid var(--line);border-radius:6px;font-size:11px;font-weight:600;color:var(--muted)}
+.workflows-attention .dashboard-attention-context{font-size:13px;color:var(--muted);margin:-6px 0 18px;line-height:1.6}
+.dashboard-run-attention{list-style:none;margin:0 0 12px;padding:0;display:grid;gap:6px}
+.dashboard-run-attention li{font-size:13px;line-height:1.5;color:var(--amber);padding-left:14px;position:relative}.dashboard-run-attention li::before{content:'';position:absolute;left:0;top:.6em;width:6px;height:6px;border-radius:50%;background:var(--amber)}
+.dashboard-run-open-workflow{margin-top:10px}
+.dashboard-records-summary{padding:24px;min-width:0}
+.dashboard-records-counts{list-style:none;margin:0;padding:0;display:flex;flex-wrap:wrap;gap:12px}
+.dashboard-records-counts li{flex:1 1 200px;padding:14px 16px;border:1px solid var(--line);border-radius:10px;color:var(--muted);font-size:13px}
+.dashboard-records-counts strong{display:block;font-size:22px;color:var(--ink);font-variant-numeric:tabular-nums}
+@media(max-width:480px){.workflows-section,.dashboard-records-summary{padding:18px}}

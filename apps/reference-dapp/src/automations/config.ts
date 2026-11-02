@@ -30,12 +30,11 @@ import { NETWORKS } from '../engine/strategy-engine';
 import { NETWORK_IDS, type NetworkId } from '../engine/strategy-spec';
 import type { HandoffPolicy } from '../platform/index.ts';
 import { deploymentTenant, isHostedDeployment, publicOrigin } from '../server/deployment.ts';
-import { chainlinkSource, fixtureSource, OFF_SOURCE, readOnlyRpc, type PriceSource } from './price-source.ts';
-import { OBSERVED_ASSETS, type ObservedAsset } from './trigger.ts';
+import { chainlinkSource, fixtureSource, OFF_SOURCE, PRICE_FEED_ASSETS, readOnlyRpc, type PriceFeedAsset, type PriceSource } from './price-source.ts';
 
 type Env = Readonly<Record<string, string | undefined>>;
 export type AutomationKeys = { readonly approval: Buffer; readonly linkCode: Buffer };
-export type PriceSourceConfig = { readonly kind: 'off' } | { readonly kind: 'chainlink'; readonly rpcUrl: string; readonly feeds: Readonly<Partial<Record<ObservedAsset, string>>>;
+export type PriceSourceConfig = { readonly kind: 'off' } | { readonly kind: 'chainlink'; readonly rpcUrl: string; readonly feeds: Readonly<Partial<Record<PriceFeedAsset, string>>>;
   readonly maxAgeMs: number } | { readonly kind: 'fixture'; readonly path: string; readonly maxAgeMs: number };
 export type AutomationConfig = {
   readonly enabled: true; readonly tenantId: string; readonly origin: string; readonly keys: AutomationKeys; readonly policy: Extract<HandoffPolicy, { ok: true }>;
@@ -63,12 +62,12 @@ function rpcUrl(raw: string, hosted: boolean): string | null {
   } catch { return null; }
 }
 /** `ETH=0x…,BTC=0x…` → feeds; null on any malformed or duplicate entry. */
-export function parseFeeds(raw: string): Partial<Record<ObservedAsset, string>> | null {
-  const feeds: Partial<Record<ObservedAsset, string>> = {};
+export function parseFeeds(raw: string): Partial<Record<PriceFeedAsset, string>> | null {
+  const feeds: Partial<Record<PriceFeedAsset, string>> = {};
   for (const item of raw.split(',').map(s => s.trim()).filter(Boolean)) {
     const match = /^([A-Z]{2,5})=(0x[0-9a-fA-F]{40})$/.exec(item);
-    if (!match || !(OBSERVED_ASSETS as readonly string[]).includes(match[1]!) || feeds[match[1] as ObservedAsset]) return null;
-    feeds[match[1] as ObservedAsset] = match[2]!.toLowerCase();
+    if (!match || !(PRICE_FEED_ASSETS as readonly string[]).includes(match[1]!) || feeds[match[1] as PriceFeedAsset]) return null;
+    feeds[match[1] as PriceFeedAsset] = match[2]!.toLowerCase();
   }
   return feeds;
 }

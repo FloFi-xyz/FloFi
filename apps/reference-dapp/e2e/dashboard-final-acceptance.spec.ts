@@ -51,6 +51,8 @@ async function mount(page: Page, details = false) {
   }, details);
 }
 const workspace = (page: Page) => page.locator('.main > div:visible .dashboard-workspace');
+/** BUILD-FLOFI-CHAT-E2E-DASHBOARD-UX-001: the history list (paging, refresh, wallet changes) now renders in Your workflows. */
+const records = (page: Page) => page.evaluate(() => window.flofiWorkspaceAcceptance.view('records'));
 async function reads(page: Page, count: number) {
   await expect.poll(() => page.evaluate(() => window.flofiWorkspaceAcceptance.requests().length)).toBe(count);
 }
@@ -62,6 +64,7 @@ test.beforeEach(async ({ page }) => {
 });
 test.afterEach(({ page }) => { expect(errors.get(page)).toEqual([]); });
 test('loads all 75 history records in bounded pages, keeps loaded records during a failed page and retries the same cursor',async({page})=>{
+  await records(page);
   const index=workspace(page),rows=index.locator('.dashboard-run-list > li'),more=index.getByRole('button',{name:'Load more history',exact:true});
   await page.evaluate(()=>window.flofiWorkspaceAcceptance.respond(0,'page')); await expect(rows).toHaveCount(25);
   await more.click(); await reads(page,2);
@@ -75,6 +78,7 @@ test('loads all 75 history records in bounded pages, keeps loaded records during
   expect(await page.evaluate(()=>window.flofiWorkspaceAcceptance.navigation())).toEqual([]);
 });
 test('a pending history page from another wallet cannot populate the current wallet',async({page})=>{
+  await records(page);
   const index=workspace(page);
   await page.evaluate(()=>window.flofiWorkspaceAcceptance.respond(0,'page'));
   await index.getByRole('button',{name:'Load more history',exact:true}).click(); await reads(page,2);
@@ -86,6 +90,7 @@ test('a pending history page from another wallet cannot populate the current wal
 });
 
 test('loading and refresh never present a misleading empty account; source and verification states stay distinct', async ({ page }) => {
+  await records(page);
   const index = workspace(page);
   await expect(index.getByRole('status')).toContainText('Loading execution history');
   await expect(index.getByRole('heading', { name: 'No workflows executed yet', exact: true })).toHaveCount(0);
@@ -104,6 +109,7 @@ test('loading and refresh never present a misleading empty account; source and v
 });
 
 test('wallet changes immediately hide loaded history and ignore late responses from previous owners', async ({ page }) => {
+  await records(page);
   const index = workspace(page), run = index.getByRole('link', { name: 'View Swap run fixture-detail-run', exact: true });
   await page.evaluate(() => window.flofiWorkspaceAcceptance.respond(0, 'owned')); await expect(run).toBeVisible();
   await page.evaluate(value => window.flofiWorkspaceAcceptance.wallet(value), other); await reads(page, 2);
@@ -118,13 +124,14 @@ test('wallet changes immediately hide loaded history and ignore late responses f
   await page.evaluate(value => window.flofiWorkspaceAcceptance.wallet(value), other); await reads(page, 4);
   await page.evaluate(() => window.flofiWorkspaceAcceptance.respond(3, 'unrelated'));
   await expect(run).toHaveCount(0); await expect(index.getByRole('heading', { name: 'No workflows executed yet', exact: true })).toBeVisible();
-  await page.evaluate(() => window.flofiWorkspaceAcceptance.wallet(null));
+  await page.evaluate(() => { window.flofiWorkspaceAcceptance.wallet(null); window.flofiWorkspaceAcceptance.view('dashboard'); });
   await expect(index.getByRole('status')).toContainText('Connect your wallet');
   await expect(index.locator('.dashboard-run-card')).toHaveCount(0);
   expect(await page.evaluate(() => window.flofiWorkspaceAcceptance.requests().length)).toBe(4);
 });
 
 test('saved detail responses cannot leak amounts, evidence or owner identifiers across wallet changes', async ({ page }) => {
+  await records(page);
   const detail = workspace(page);
   await page.evaluate(() => window.flofiWorkspaceAcceptance.respond(0, 'owned'));
   await detail.getByRole('link', { name: 'View Swap run fixture-detail-run', exact: true }).click(); await reads(page, 2);

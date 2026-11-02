@@ -5,6 +5,7 @@
 // under Privacy & memory (Settings), repeated evidence is learned for that wallet only and used in a later session; another wallet never inherits it;
 // a published global entry reaches both; turning learning off and deleting everything erase it; an exact command is unchanged.
 import { createTestWallet } from '../../../packages/reference-reconciler/test/test-wallet';
+import { answeredPrivacyNotice } from './app-origin';
 import { test, expect } from './fixtures';
 import { installJourneyWallet, walletRequests } from './journey-fixtures';
 import { query } from './automation-fixtures';
@@ -106,7 +107,7 @@ test('invisible learning: adapted in the conversation, learned after consent and
   await expect(lastAi(page).locator('.copilot-notes')).toContainText('“sol dev” read as Solana Devnet — learned from your earlier choices.');
 
   // B, another wallet in another browser: asked, never given A's meaning.
-  const other = await browser.newContext(), pageB = await other.newPage();
+  const other = await browser.newContext({ storageState: answeredPrivacyNotice() }), pageB = await other.newPage();
   await installJourneyWallet(pageB, [b], { chain: '0x14a34' });
   await provePrivacy(pageB);
   await expect(pageB.locator('.privacy-list')).toHaveCount(0);

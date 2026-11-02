@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { defineConfig } from '@playwright/test';
+import { randomBytes } from 'node:crypto';
 import { basename, join } from 'node:path';
 import { existsSync } from 'node:fs';
-import { E2E_APP_ORIGIN, E2E_APP_PORT } from './e2e/app-origin';
+import { E2E_APP_ORIGIN, E2E_APP_PORT, answeredPrivacyNotice } from './e2e/app-origin';
 
 // Dashboard → actual server actions → embedded backend → disposable PostgreSQL.
 // No RPC harness server or financial execution is needed: the spec prepares its
@@ -19,14 +20,17 @@ if (!process.env.FLOFI_E2E_DATABASE_URL) {
 } else database.href = process.env.FLOFI_E2E_DATABASE_URL;
 if (!['127.0.0.1','localhost','[::1]'].includes(database.hostname) || !/^\/flofi_e2e_history_[0-9_]+$/.test(database.pathname)) throw Error('HISTORY_DATABASE_REQUIRED');
 process.env.FLOFI_E2E_NETWORK_SCOPE = 'PUBLIC_MAINNET';
+// BUILD-FLOFI-CHAT-E2E-DASHBOARD-UX-001: a per-run session secret, generated in memory and never written. The server seals account and wallet
+// sessions with it; the spec seals the account session an email sign-in leaves. Workers inherit it from the runner.
+process.env.FLOFI_E2E_SESSION_SECRET ??= randomBytes(32).toString('hex');
 
 export default defineConfig({
   testDir: './e2e', testMatch: ['owner-history.spec.ts', 'dashboard-final-acceptance.spec.ts'], workers: 1, fullyParallel: false, retries: 0,
   globalSetup: './e2e/cloud-runtime-setup.ts', timeout: 60_000, expect: { timeout: 10_000 }, reporter: 'list',
-  use: { baseURL: E2E_APP_ORIGIN, browserName: 'chromium', headless: true, launchOptions: { executablePath },
+  use: { baseURL: E2E_APP_ORIGIN, storageState: answeredPrivacyNotice(E2E_APP_ORIGIN), browserName: 'chromium', headless: true, launchOptions: { executablePath },
     viewport: { width: 1440, height: 900 }, serviceWorkers: 'block', locale: 'en-US', colorScheme: 'light', reducedMotion: 'reduce',
     trace: 'off', screenshot: 'only-on-failure' },
   webServer: { command: 'pnpm start', url: E2E_APP_ORIGIN, reuseExistingServer: false, timeout: 60_000,
     env: { PORT: String(E2E_APP_PORT), NEXT_TELEMETRY_DISABLED: '1', PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1',
-      FLOFI_RUNTIME: 'embedded', DATABASE_URL: database.href } },
+      FLOFI_RUNTIME: 'embedded', DATABASE_URL: database.href, FLOFI_SESSION_SECRET: process.env.FLOFI_E2E_SESSION_SECRET } },
 });

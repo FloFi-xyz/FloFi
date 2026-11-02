@@ -8,8 +8,11 @@
 import { createContext, useContext, type ReactNode } from 'react';
 import type { CopilotMode } from '../domain/copilot-mode';
 import type { WalletHintEcosystem } from '../wallet/wallet-hint';
+import type { PrivacyNoticeChoice } from '../domain/privacy-notice';
 
-export type ProductBootstrap = { readonly walletHint: readonly WalletHintEcosystem[]; readonly copilotMode: CopilotMode | null };
+export type ProductBootstrap = { readonly walletHint: readonly WalletHintEcosystem[]; readonly copilotMode: CopilotMode | null;
+  /** BUILD-FLOFI-CHAT-E2E-DASHBOARD-UX-001: this browser's answer to the Privacy & Memory notice, as the server read it (absent: unknown, not shown). */
+  readonly privacyNotice?: PrivacyNoticeChoice | 'UNANSWERED' | undefined };
 const NONE: ProductBootstrap = Object.freeze({ walletHint: Object.freeze([]), copilotMode: null });
 const Context = createContext<ProductBootstrap>(NONE);
 export function ProductBootstrapProvider({ value, children }: { value: ProductBootstrap; children: ReactNode }) {

@@ -3,7 +3,7 @@
 import { simulationUnavailableReason } from '../domain/simulation-unavailable';
 import { refreshBridgeAfterApproval } from '../domain/bridge-review-recovery';
 import { selectOwnerRuntime, type OwnerRuntimeSignals } from '../domain/runtime-selection';
-import { DELIVERY_READABLE, deliveredByRecord, SEQUENCE_RUNTIMES } from '../domain/workflow-sequence';
+import { DELIVERY_READABLE, deliveredByRecord, SEQUENCE_RUNTIMES, sequenceOrder, stepAssets } from '../domain/workflow-sequence';
 import { presentSequence, sequenceFundingMessage, sequenceUnservedMessage, sequenceUnsupportedMessage } from '../domain/sequence-presentation';
 import { composerActions, composerSummary } from '../domain/composer-presentation';
 import { setupSummary } from '../domain/canvas-action-setup';
@@ -92,6 +92,7 @@ import { useRouter } from '../state/router-store';
 import { UniversalBridgePanel } from './universal-bridge-panel';
 import { useUniversalRouter } from '../state/universal-router-store';
 import { DashboardWorkspace } from './dashboard/dashboard-workspace';
+import { PortfolioWidget } from './dashboard/portfolio-widget';
 import { dashboardRoute as resolveDashboardRoute } from '../lib/dashboard/routes';
 import { secondaryWorkspaceRoute } from '../domain/secondary-workspaces';
 import { SecondaryProductWorkspace } from './secondary-product-workspace';
@@ -124,7 +125,7 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
   const [interactive, setInteractive] = useState(false);
   useEffect(() => { setInteractive(true); }, []);
   const { state, context, reviewError, authoringIncomplete, restoreWorkflow, restorationEpoch, propose, createNewWorkflow, newWorkflow, runtimeWorkflow, sequence, completeSequenceStep,
-    amountInputs, actionSetup, commitCanvasAmount, cancelCanvasAmount, removeActionSetup, pending: proposal, canvasRestoring } = useWorkflow();
+    recordExecutedAction, executedActions, amountInputs, actionSetup, commitCanvasAmount, cancelCanvasAmount, removeActionSetup, pending: proposal, canvasRestoring } = useWorkflow();
   // BUILD-FLOFI-CHAT-E2E-FIX-002: every runtime path below serves `runtimeWorkflow` — the canonical workflow, or the current step of a sequence of
   // independent owner-wallet actions (Swap → Bridge). The Canvas, chat and saving keep the canonical `state.workflow`.
   // UX-004: a run recovered (or just finished) into the visit's initial draft is not re-attached to a workflow the owner created afresh.
@@ -176,8 +177,9 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
   async function saveCurrentWorkflow() {
     if (!owner) { setSaveNotice({ owner: null, message: 'Connect your wallet to save workflows.' }); return; }
     if (authoringIncomplete) { setSaveNotice({ owner: ownerKey, message: 'Configure the workflow before saving.' }); return; }
-    if (proof.proven !== owner.address) { setShowVerification(true); return; }
-    const saved = await library.save(state.workflow as SemanticWorkflow, workflowName);
+    // BUILD-FLOFI-CHAT-E2E-DASHBOARD-UX-001: the server decides who owns the library (a wallet proven here or held by the signed-in FloFi account);
+    // a wallet proof is asked for only when it refused this wallet.
+    const saved = await library.save(state.workflow as SemanticWorkflow, workflowName, code => { if (code === 'WALLET_SESSION_REQUIRED') setShowVerification(true); });
     if (saved) setSaveNotice({ owner: ownerKey, message: 'Workflow saved.' });
   }
   async function reopenWorkflow(id: string) {
@@ -320,6 +322,15 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
     if (!sequence || !stepDone || awaitingDelivery) return;
     completeSequenceStep(sequence.cursor, { received: stepDelivered, runKey: stepRunKey });
   }, [sequence?.cursor, stepDone, awaitingDelivery, stepDelivered, stepRunKey, completeSequenceStep]);
+  // BUILD-FLOFI-CHAT-E2E-DASHBOARD-UX-001: a one-action workflow whose own run is final and reconciled (same rule as a sequence step) is kept as
+  // an executed first step, so the owner can keep building it: an action added afterwards is its own next step, never a repeat of this one.
+  const soleAction = !sequence ? sequenceOrder(state.workflow) : [];
+  const actionDone = Boolean(!sequence && soleAction.length === 1 && SEQUENCE_RUNTIMES.includes(simulationSource.kind) && liveStep && liveStep.matchesWorkflow !== false &&
+    liveStep.state === 'complete' && isFinalExecutionResult(liveStep));
+  const actionDelivered = actionDone ? deliveredByRecord(simulationSource.kind, stepRecord, stepAssets(soleAction[0]!).output) : null;
+  useEffect(() => {
+    if (actionDone) recordExecutedAction({ received: actionDelivered, runKey: stepRunKey });
+  }, [actionDone, actionDelivered, stepRunKey, recordExecutedAction]);
   const sequencePresentation = sequence ? { ...presentSequence(state.workflow, context, sequence), issue: sequenceIssue, awaitingDelivery } : null;
   // Every runtime surface names the step it serves, so a step's simulation or Review never reads as the whole workflow's.
   const sequenceNote = sequencePresentation ? sequencePresentation.finished ? tr('All {0} steps of this workflow are completed and reconciled.', sequencePresentation.total)
@@ -426,7 +437,7 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
       invalidWorkflow: lifecycleState.invalidWorkflow, simulate: simulateAgain, controls: lifecycleControls, networkAction, sequence: sequencePresentation,
       pendingEdits, resolveEdit, runtimeChecking, walletNetwork: reviewBinding.wallet.chain ? shellChainLabel(reviewBinding.wallet.chain) : null, networkError: walletConnection.error,
       simulationBlocked: walletIssue ?? (simulationDisabled || !actionable || lifecycleState.invalidWorkflow ? simulationReason ?? 'Simulation is not available for this workflow.' : null),
-      connectWallet: () => void walletConnection.connect(), startNewWorkflow } });
+      connectWallet: () => void walletConnection.connect(), startNewWorkflow, executedActions, continuable: Boolean(sequence?.finished) || actionDone } });
   // BUILD-FLOFI-CHAT-E2E-FIX-002: the public chat-first workspace presents the Review and progress in the chat; Simulate and Execute show the canvas
   // beside it, with their summaries in an optional details surface (approval surfaces and the engineering workspace keep their side panels).
   const chatFirst = conversation.direct && !engineering;
@@ -446,14 +457,18 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
       startNewWorkflow={navigate ? () => { startNewWorkflow(); navigate('/app'); } : undefined}/>
   </div>;
   if (secondaryRoute) return <div className="app-shell" inert={!interactive}><a className="skip-link" href="#workspace">{tr("Skip to workspace")}</a><TopBar tab={tab} setTab={setTab} pathname={pathname ?? null} engineering={engineering} entry={entry}/>{betaNotice}
-    <main id="workspace" className="main secondary-workspace" tabIndex={-1} aria-label={tr('{0} workspace', tr(secondaryRoute.label))}><SecondaryProductWorkspace workspace={secondaryRoute.id} workflows={{ ...workflows, loading: library.loading, connected: Boolean(owner), verification: owner && library.error === 'WALLET_SESSION_REQUIRED' ? <WorkflowVerification namespace={owner.namespace} account={owner.address} proof={proof}/> : undefined }}
+    <main id="workspace" className="main secondary-workspace" tabIndex={-1} aria-label={tr('{0} workspace', tr(secondaryRoute.label))}><SecondaryProductWorkspace workspace={secondaryRoute.id} workflows={{ ...workflows, loading: library.loading, connected: Boolean(owner), verification: owner && library.error === 'WALLET_SESSION_REQUIRED' ? <WorkflowVerification namespace={owner.namespace} account={owner.address} proof={proof}/> : undefined,
+      // BUILD-FLOFI-CHAT-E2E-DASHBOARD-UX-001: the execution history moved here from the Dashboard (same records, same server-checked actions).
+      records: secondaryRoute.id === 'workflows' && owner ? <DashboardWorkspace mode="records" workflowName={workflowName} progress={executionProgress} recovery={executionProgress.recovery}
+        wallet={{ ...reviewBinding.wallet, account: owner.address }} context={context} runId={null} build={() => setTab('Build')} execute={() => setTab('Execute')} navigate={navigate ?? (() => undefined)}
+        openWorkflow={{ names: new Map(library.list?.items.map(item => [item.workflowId, item.name] as const) ?? []), open: id => { void reopenWorkflow(id); } }} signInPrompt={library.error === 'WALLET_SESSION_REQUIRED'}/> : undefined }}
       automations={{ owner, proof, onPropose: command => { propose(command); setTab('Build'); },
         canvas: automateCanvas ? { workflow: state.workflow, name: workflowName, dismiss: () => setAutomateCanvas(false) } : null }}/>
 </main>
   </div>;
   if (tab === 'Dashboard') return <div className="app-shell" inert={!interactive}><a className="skip-link" href="#workspace">{tr("Skip to workspace")}</a><TopBar tab={tab} setTab={setTab} pathname={pathname ?? null} engineering={engineering} entry={entry}/>{betaNotice}
     <main id="workspace" className="main" tabIndex={-1} aria-label={tr("Dashboard")}><DashboardWorkspace workflowName={workflowName} progress={executionProgress} recovery={executionProgress.recovery} wallet={reviewBinding.wallet} context={context}
-      runId={dashboardRoute?.runId ?? null}
+      runId={dashboardRoute?.runId ?? null} portfolio={<PortfolioWidget evm={connectedWallet.account} solana={solanaSession?.account.address ?? null}/>}
       build={() => setTab('Build')} execute={() => setTab('Execute')} navigate={navigate ?? (() => undefined)}/></main>
   </div>;
   // BUILD0-UX-001: Build 0 has no Canvas, chat panel or summary bar; its request continues in the same conversation, shown in Build 1.

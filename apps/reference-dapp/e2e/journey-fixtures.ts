@@ -10,7 +10,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { Browser, BrowserContext, Page } from '@playwright/test';
 import { routerControl } from './router-fixtures';
-import { E2E_APP_ORIGIN as APP_ORIGIN } from './app-origin';
+import { answeredPrivacyNotice, E2E_APP_ORIGIN as APP_ORIGIN } from './app-origin';
 import { personalSignText, type TestWallet } from '../../../packages/reference-reconciler/test/test-wallet.ts';
 
 export const BASE_SEPOLIA_HEX = '0x14a34';
@@ -28,7 +28,7 @@ export const journeyAdvance = (seconds: number) => routerControl('MOCK_advance',
 
 /** A context with the shared fixture's guard: only the app origin is reachable; anything else is recorded and aborted. */
 export async function guardedContext(browser: Browser): Promise<{ context: BrowserContext; unexpected: string[] }> {
-  const context = await browser.newContext({ baseURL: APP_ORIGIN, serviceWorkers: 'block', viewport: { width: 1440, height: 900 }, colorScheme: 'light', reducedMotion: 'reduce', locale: 'en-US' });
+  const context = await browser.newContext({ baseURL: APP_ORIGIN, storageState: answeredPrivacyNotice(APP_ORIGIN), serviceWorkers: 'block', viewport: { width: 1440, height: 900 }, colorScheme: 'light', reducedMotion: 'reduce', locale: 'en-US' });
   const unexpected: string[] = [];
   await context.route('**/*', async route => {
     let allowed = false;

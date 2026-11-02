@@ -2,15 +2,19 @@
 import { randomUUID } from 'node:crypto';
 import { cloudApiBaseUrl, type FlowResult } from './cloud-api-client.ts';
 import { embeddedRuntime, flowRuntimeKind } from './flow-runtime.ts';
-import { currentWalletPrincipals } from './session-principal.ts';
+import { historyPrincipals } from './history-principals.ts';
+import type { currentWalletPrincipals } from './session-principal.ts';
 import { workflowOwner, WORKFLOW_OWNER_HEADER, type WorkflowOwner } from '../domain/saved-workflow.ts';
 
-/** BFF session boundary shared by all save/list/open operations. Browser addresses are only selection hints. */
+/**
+ * BFF session boundary shared by all save/list/open operations. Browser addresses are only selection hints. BUILD-FLOFI-CHAT-E2E-DASHBOARD-UX-001:
+ * the owner is a wallet proven in this browser or held by the signed-in FloFi account (`historyPrincipals`).
+ */
 export async function workflowOperation<T>(method: 'list' | 'get' | 'save', args: readonly unknown[], expected: WorkflowOwner,
   seams: { principals?: typeof currentWalletPrincipals; transport?: typeof fetch; env?: Readonly<Record<string, string | undefined>> } = {}): Promise<FlowResult<T>> {
   try {
     if (!expected || !workflowOwner(`${expected.namespace}:${expected.address}`)) return { ok: false, code: 'WALLET_SESSION_REQUIRED' };
-    const principals = await (seams.principals ?? currentWalletPrincipals)();
+    const principals = await (seams.principals ?? historyPrincipals)();
     const principal = principals.find(p => p.namespace === expected.namespace && p.address === expected.address);
     if (!principal) return { ok: false, code: 'WALLET_SESSION_REQUIRED' };
     const env = seams.env ?? process.env, kind = flowRuntimeKind(env);

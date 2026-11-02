@@ -8,7 +8,7 @@ import { existsSync } from 'node:fs';
 import { randomBytes } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
-import { E2E_APP_ORIGIN, E2E_APP_PORT, e2eNetworkScopeEnv } from './e2e/app-origin';
+import { E2E_APP_ORIGIN, E2E_APP_PORT, e2eNetworkScopeEnv, answeredPrivacyNotice } from './e2e/app-origin';
 const cache = process.env.BUILD002_BROWSER_CACHE;
 if (!cache || basename(cache) !== 'chromium_headless_shell-1243') throw Error('VERIFIED_BROWSER_1243_REQUIRED');
 const executablePath = join(cache, 'chrome-headless-shell-linux64', 'chrome-headless-shell');
@@ -22,7 +22,7 @@ process.env.FLOFI_WORKFLOW_UX_AUTHORING_E2E = 'MOCKED_LOOPBACK_ONLY';
 export default defineConfig({
   testDir: './e2e', testMatch: 'workflow-ux-authoring.spec.ts', workers: 1, fullyParallel: false, retries: 0,
   timeout: 45_000, expect: { timeout: 10_000 }, reporter: 'list',
-  use: { baseURL: E2E_APP_ORIGIN, browserName: 'chromium', headless: true, launchOptions: { executablePath },
+  use: { baseURL: E2E_APP_ORIGIN, storageState: answeredPrivacyNotice(E2E_APP_ORIGIN), browserName: 'chromium', headless: true, launchOptions: { executablePath },
     serviceWorkers: 'block', trace: 'off', screenshot: 'only-on-failure', video: 'off' },
   webServer: [
     { command: 'node e2e/robinhood-mainnet-serve.ts', url: 'http://127.0.0.1:8561', reuseExistingServer: false, timeout: 30_000 },

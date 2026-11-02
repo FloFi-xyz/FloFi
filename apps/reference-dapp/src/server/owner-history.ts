@@ -2,15 +2,19 @@
 import type { HistoryDisposition, HistoryKind } from '@defi-workflow-engine/cloud-runtime';
 import { cloudApiBaseUrl } from './cloud-api-client.ts';
 import { embeddedRuntime, flowRuntimeKind } from './flow-runtime.ts';
-import { currentWalletPrincipals } from './session-principal.ts';
+import { historyPrincipals } from './history-principals.ts';
+import type { currentWalletPrincipals } from './session-principal.ts';
 import { workflowOwner, WORKFLOW_OWNER_HEADER } from '../domain/saved-workflow.ts';
 
-/** Server session is the authority. Browser account is an expected-wallet guard, never an ownership claim. */
+/**
+ * Server session is the authority. Browser account is an expected-wallet guard, never an ownership claim. BUILD-FLOFI-CHAT-E2E-DASHBOARD-UX-001:
+ * a wallet proven in this browser or held by the signed-in FloFi account (`historyPrincipals`); deletion still rechecks financial eligibility.
+ */
 export async function ownerHistoryOperation(expectedAccount: string, method: 'change' | 'disposition', kind: HistoryKind, id: string, action?: 'DELETE' | 'ARCHIVE',
   seams: { principals?: typeof currentWalletPrincipals; transport?: typeof fetch; env?: Readonly<Record<string, string | undefined>> } = {}): Promise<HistoryDisposition> {
   try {
     const expected = workflowOwner(/^0x/i.test(expectedAccount) ? `eip155:${expectedAccount.toLowerCase()}` : `solana:${expectedAccount}`);
-    const principals = await (seams.principals ?? currentWalletPrincipals)();
+    const principals = await (seams.principals ?? historyPrincipals)();
     const principal = expected && principals.find(p => p.namespace === expected.namespace && p.address === expected.address);
     if (!principal) return { ok: false, code: 'RUN_NOT_FOUND' };
     const env = seams.env ?? process.env, runtime = flowRuntimeKind(env), args = [kind, id, ...method === 'change' ? [action] : []];

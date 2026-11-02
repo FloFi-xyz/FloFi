@@ -3,8 +3,9 @@
  * BUILD-FLOFI-AUTH-WALLETS-001: the FloFi account model shared by the server and the browser.
  *
  * An account is identity, never financial authority. It groups sign-in identities (Google, Apple, a verified email, a proven
- * EVM or Solana wallet) and public wallet metadata. It never owns a workflow run: run access stays bound to the wallet session
- * that proved the run's owner (`server/run-ownership.ts`), so signing in with Google can never reach another wallet's history.
+ * EVM or Solana wallet) and public wallet metadata. It never owns a workflow run: a run belongs to its owner wallet (`server/run-ownership.ts`).
+ * BUILD-FLOFI-CHAT-E2E-DASHBOARD-UX-001: the verified account session may read and manage the history of the wallets the account itself holds
+ * (`server/history-principals.ts`), so signing in with Google reaches the history of the account's own wallets — never another wallet's.
  *
  * Wallet records are references: an address, its ecosystem, where it came from (generated or imported at the embedded-wallet
  * provider, or an external wallet such as MetaMask or Phantom) and what the provider can export to the owner. Readers are strict:

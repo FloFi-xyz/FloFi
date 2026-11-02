@@ -16,6 +16,8 @@ const row: DashboardRun = { runId: 'real-owned-id', workflowId: 'workflow-id', f
 function index(props: Partial<Parameters<typeof DashboardView>[0]> = {}) {
   return renderToStaticMarkup(<DashboardView account={owner} connection="CONNECTED" runs={[]} hasMore={false} loading={false} build={noop} openRun={noop} verify={noop} verifying={false} verificationIssue={null} refresh={noop} {...props}/>);
 }
+/** BUILD-FLOFI-CHAT-E2E-DASHBOARD-UX-001: the execution history (executed records and records that need attention) now renders in Your workflows. */
+const records = (props: Partial<Parameters<typeof DashboardView>[0]> = {}) => index({ mode: 'records', ...props });
 describe('Dashboard foundation inside the canonical shell', () => {
   it('contains no duplicate header, wallet connection, environment selector or theme controller', () => {
     const html = index();
@@ -23,9 +25,18 @@ describe('Dashboard foundation inside the canonical shell', () => {
     expect(html).not.toContain('Settings'); expect(html).not.toContain('Light Theme');
   });
   it('shows a connected empty state with a Build action and no invented portfolio, prices or history', () => {
-    const html = index();
+    const html = records();
     expect(html).toContain('No workflows executed yet'); expect(html).toContain('Build workflow');
     expect(html).not.toContain('real-owned-id'); expect(html).not.toMatch(/\$|APY|PnL|0 ETH|0 USDC/);
+    const overview = index();
+    expect(overview).toContain('Workflow records'); expect(overview).toContain('Build workflow'); expect(overview).not.toMatch(/\$|APY|PnL|0 ETH|0 USDC/);
+  });
+  it('keeps the Dashboard an overview: portfolio slot, current execution and a records summary, never the history list', () => {
+    const html = index({ runs: [projectDashboardRun(row)], portfolio: <section aria-label="Wallet portfolio">portfolio slot</section>, openRecords: noop });
+    expect(html).toContain('portfolio slot'); expect(html).toContain('Open Your workflows');
+    expect(html).toContain('<strong>0</strong> records need attention'); expect(html).toContain('<strong>1</strong> executed record');
+    expect(html).not.toContain(`/app/dashboard/runs/${row.runId}`); expect(html).not.toContain('dashboard-run-list');
+    expect(html.indexOf('portfolio slot')).toBeLessThan(html.indexOf('aria-labelledby="dashboard-records"'));
   });
   it('shows disconnected truth instead of run data', () => {
     const html = index({ account: null, runs: [projectDashboardRun(row)] });
@@ -33,22 +44,27 @@ describe('Dashboard foundation inside the canonical shell', () => {
   });
   it('does not present an unavailable source as a verified empty account', () => {
     for (const connection of ['UNAVAILABLE', 'NOT_CONFIGURED', 'SIGN_IN_REQUIRED'] as const) {
-      const html = index({ connection }); expect(html).not.toContain('No workflows executed yet');
+      const html = records({ connection }); expect(html).not.toContain('No workflows executed yet');
+      expect(index({ connection })).not.toContain('executed record');
     }
   });
   it('shows a loading announcement without invented runs or a verified empty state', () => {
-    const html = index({ connection: null, loading: true });
+    const html = records({ connection: null, loading: true });
     expect(html).toContain('Loading execution history'); expect(html).toContain('Checking available records');
     expect(html).not.toContain('No workflows executed yet'); expect(html).not.toContain('No available runs need attention');
     expect(html).not.toContain('dashboard-run-card');
   });
   it('separates the current execution from saved history without displaying it twice', () => {
     const current = projectDashboardRun({ ...row, runId: 'current-owned-run', status: 'UNKNOWN' }, null, 'Current workflow', true);
-    const html = index({ runs: [current, projectDashboardRun(row)] });
-    expect(html).toContain('Current execution'); expect(html).toContain('View current run');
+    const overview = index({ runs: [current, projectDashboardRun(row)] });
+    expect(overview).toContain('Current execution'); expect(overview).toContain('View current run');
+    expect(overview.match(/href="\/app\/dashboard\/runs\/current-owned-run"/g)).toHaveLength(1);
+    expect(overview).toContain('<strong>1</strong> record needs attention'); expect(overview).not.toContain(`/app/dashboard/runs/${row.runId}`);
+    // In Your workflows each run is in exactly one section: the unresolved current run needs attention, the completed one is history.
+    const html = records({ runs: [current, projectDashboardRun(row)] });
     expect(html.match(/href="\/app\/dashboard\/runs\/current-owned-run"/g)).toHaveLength(1);
+    expect(html.match(new RegExp(`href="/app/dashboard/runs/${row.runId}"`, 'g'))).toHaveLength(1);
     expect(html).toContain('Execution status unresolved'); expect(html).toContain('1 available run needs attention');
-    expect(html).toContain(`/app/dashboard/runs/${row.runId}`);
     expect(html).not.toContain('No workflows executed yet');
   });
   it('keeps a current run visible while saved history is unavailable', () => {
@@ -56,26 +72,33 @@ describe('Dashboard foundation inside the canonical shell', () => {
     for (const connection of ['UNAVAILABLE', 'NOT_CONFIGURED', 'SIGN_IN_REQUIRED'] as const) {
       const html = index({ connection, runs: [current] });
       expect(html).toContain('Current execution'); expect(html).toContain('Unresolved');
-      expect(html).toContain('Your current execution is shown above');
-      expect(html).not.toContain('No workflows executed yet');
+      expect(html).not.toContain('No workflows executed yet'); expect(html).not.toContain('executed record');
+      expect(records({ connection, runs: [current] })).toContain('Executed workflows will appear here when their records are available.');
     }
-    expect(index({ runs: [current] })).toContain('No other saved runs');
+    expect(records({ runs: [current] })).toContain('Records that need attention are listed below.');
   });
-  it('puts real attention before saved activity in reading and keyboard order, keeping current execution first', () => {
+  it('orders Your workflows as the owner specified (executed history, then records that need attention) and keeps the current execution first on the Dashboard', () => {
     const current = projectDashboardRun({ ...row, runId: 'current-owned-run', status: 'UNKNOWN' }, null, 'Current workflow', true);
-    const html = index({ runs: [current, projectDashboardRun(row)] });
-    expect(html.indexOf('aria-labelledby="dashboard-current"')).toBeLessThan(html.indexOf('aria-labelledby="dashboard-attention"'));
-    expect(html.indexOf('aria-labelledby="dashboard-attention"')).toBeLessThan(html.indexOf('aria-labelledby="dashboard-activity"'));
-    const calm = index({ runs: [projectDashboardRun(row)] });
-    expect(calm.indexOf('aria-labelledby="dashboard-activity"')).toBeLessThan(calm.indexOf('aria-labelledby="dashboard-attention"'));
-    expect(calm).not.toContain('dashboard-attention-required');
+    const overview = index({ runs: [current, projectDashboardRun(row)] });
+    expect(overview.indexOf('aria-labelledby="dashboard-current"')).toBeLessThan(overview.indexOf('aria-labelledby="dashboard-records"'));
+    expect(overview).toContain('dashboard-attention-required');
+    const html = records({ runs: [current, projectDashboardRun(row)] });
+    expect(html.indexOf('aria-labelledby="workflows-history"')).toBeLessThan(html.indexOf('aria-labelledby="dashboard-attention"'));
+    expect(html).toContain('dashboard-attention-required');
+    expect(records({ runs: [projectDashboardRun(row)] })).not.toContain('dashboard-attention-required');
+  });
+  it('offers the workflow behind a run only when it is in the owner\'s library', () => {
+    const open = { names: new Map([['workflow-id', 'My saved name'], ['unnamed-id', null]]), open: noop };
+    expect(records({ runs: [projectDashboardRun(row)], openWorkflow: open })).toContain('Open workflow: My saved name');
+    expect(records({ runs: [projectDashboardRun({ ...row, workflowId: 'unnamed-id' })], openWorkflow: open })).toContain('>Open workflow</button>');
+    expect(records({ runs: [projectDashboardRun({ ...row, workflowId: 'another' })], openWorkflow: open })).not.toContain('Open workflow');
   });
   it.each<[DashboardStatus, string]>([
     ['Completed', 'complete'], ['Completed with attention', 'attention'], ['In progress', 'progress'],
     ['Needs attention', 'attention'], ['Partially completed', 'attention'], ['Failed', 'failed'],
     ['Unresolved', 'attention'], ['Transaction not submitted', 'neutral'], ['Not started', 'neutral'],
   ])('keeps the exact %s label with its presentation tone', (status, tone) => {
-    const html = index({ runs: [{ ...projectDashboardRun(row), status }] });
+    const html = records({ runs: [{ ...projectDashboardRun(row), status }] });
     expect(html).toContain(`dashboard-status-${tone}`); expect(html).toContain(status);
   });
   it('keeps verification progress and errors separate from execution results', () => {
@@ -85,10 +108,10 @@ describe('Dashboard foundation inside the canonical shell', () => {
     expect(html).not.toContain('No workflows executed yet'); expect(html).not.toContain('Execution failed');
   });
   it('uses the actual run ID for detail navigation, real evidence availability, and no fabricated time/count', () => {
-    const html = index({ runs: [projectDashboardRun(row)] });
+    const html = records({ runs: [projectDashboardRun(row)] });
     expect(html).toContain(`/app/dashboard/runs/${row.runId}`); expect(html).toContain('Completed'); expect(html).toContain('Evidence available');
     expect(html).not.toContain('steps confirmed'); expect(html).not.toContain('<time');
-    expect(index({ runs: [projectDashboardRun({ ...row, hasEvidence: false })] })).not.toContain('Evidence available');
+    expect(records({ runs: [projectDashboardRun({ ...row, hasEvidence: false })] })).not.toContain('Evidence available');
   });
   it.each(['UNKNOWN', 'PARTIALLY_COMPLETED'])('keeps %s truthful in run cards and details', status => {
     const view = projectDashboardRun({ ...row, status });

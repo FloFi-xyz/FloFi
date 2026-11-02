@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Normalized read-only records for browser presentation checks; no RPC or signatures.
-import { useState } from 'react';
+import { useState, type JSX } from 'react';
 import { createRoot } from 'react-dom/client';
 import { DashboardView } from '../components/dashboard/dashboard-view';
 import { RunDetailView } from '../components/dashboard/run-detail-view';
@@ -22,22 +22,28 @@ const saved = [projectDashboardRun(row('fixture-completed', 'RECONCILED')), proj
 
 declare global {
   interface Window {
-    flofiDashboardAcceptance: { mode(value: Mode): void; longTitle(): void; counts(): { built: number; refreshed: number; verified: number; executed: number } };
+    flofiDashboardAcceptance: { mode(value: Mode): void; longTitle(): void; counts(): { built: number; refreshed: number; verified: number; executed: number };
+      /** BUILD-FLOFI-CHAT-E2E-DASHBOARD-UX-001: the Dashboard overview, or the execution records as Your workflows shows them. */
+      view(value: 'dashboard' | 'records'): void };
   }
 }
 function Harness() {
   const [mode, setMode] = useState<Mode>('history');
+  const [surface, setSurface] = useState<'dashboard' | 'records'>('dashboard');
   const [long, setLong] = useState(false);
   const [runId, setRunId] = useState<string | null>(null);
   const [counts, setCounts] = useState({ built: 0, refreshed: 0, verified: 0, executed: 0 });
   const count = (key: keyof typeof counts) => () => setCounts(value => ({ ...value, [key]: value[key] + 1 }));
-  window.flofiDashboardAcceptance = { mode(value) { setMode(value); setRunId(null); }, longTitle: () => setLong(true), counts: () => counts };
+  window.flofiDashboardAcceptance = { mode(value) { setMode(value); setRunId(null); }, longTitle: () => setLong(true), counts: () => counts,
+    view(value) { setSurface(value); setRunId(null); } };
   const connection: DashboardConnection | null = ['verify', 'verifying', 'verification-issue'].includes(mode) ? 'SIGN_IN_REQUIRED' : mode === 'unavailable' ? 'UNAVAILABLE' : mode === 'not-configured' ? 'NOT_CONFIGURED' : mode === 'loading' ? null : 'CONNECTED';
   const currentView = long ? { ...current, title: 'OwnerDefinedWorkflowTitle'.repeat(12) } : current;
   const runs = ['empty', 'disconnected'].includes(mode) ? [] : mode === 'history' ? [currentView, ...saved] : [currentView];
   const view = runs.find(run => run.run.runId === runId) ?? null;
+  // The records view sits inside Your workflows in the product; here it gets the same page frame as the Dashboard.
+  const frame = (content: JSX.Element) => surface === 'records' ? <div className="dashboard-workspace">{content}</div> : content;
   return runId ? <RunDetailView view={view} detail={view?.current ? detail : null} connection={connection} loading={false} back={() => setRunId(null)} build={count('built')} execute={count('executed')}/>
-    : <DashboardView account={mode === 'disconnected' ? null : reviewOwner} connection={connection} runs={runs} hasMore={false} loading={mode === 'loading'} build={count('built')} openRun={setRunId}
-      verify={count('verified')} verifying={mode === 'verifying'} verificationIssue={mode === 'verification-issue' ? 'Wallet verification was not completed. Your execution records have not changed.' : null} refresh={count('refreshed')}/>;
+    : frame(<DashboardView mode={surface} account={mode === 'disconnected' ? null : reviewOwner} connection={connection} runs={runs} hasMore={false} loading={mode === 'loading'} build={count('built')} openRun={setRunId}
+      verify={count('verified')} verifying={mode === 'verifying'} verificationIssue={mode === 'verification-issue' ? 'Wallet verification was not completed. Your execution records have not changed.' : null} refresh={count('refreshed')}/>);
 }
 export function mount(element: HTMLElement) { createRoot(element).render(<Harness/>); }
