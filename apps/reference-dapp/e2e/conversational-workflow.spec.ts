@@ -131,7 +131,9 @@ test('Build 0 request → card at once → Review in chat → workflow confirmat
   await expect(page.locator('.copilot')).toHaveAttribute('data-conversation-phase', 'AWAITING_WALLET');
   await owner.confirm();
   // The approval is confirmed; the swap is a separate wallet request, asked for separately.
-  await expect(flofi(page)).toContainText('The previous wallet request is confirmed.', { timeout: 30_000 });
+  // BUILD-FLOFI-E2E-RELIABILITY-001: FloFi names what landed (an approval is never the swap) and what has not been sent yet.
+  await expect(flofi(page)).toContainText('Approve USDC is confirmed on-chain. An approval only allows the spend; it is not the action itself.', { timeout: 30_000 });
+  await expect(flofi(page)).toContainText('Swap has not been sent yet and needs its own confirmation in your wallet. Continue to your wallet?');
   await page.waitForTimeout(300); expect(owner.requested()).toBe(1);
   await pick(page, 'Continue');
   await expect.poll(owner.requested).toBe(2);
