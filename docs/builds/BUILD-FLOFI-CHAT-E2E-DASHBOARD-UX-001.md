@@ -160,40 +160,52 @@ flofi-security, flofi-data-privacy, flofi-workflow. Batch 2: flofi-chat, flofi-f
 
 ## 5. Validation
 
-Local (Node v24.21.0, pnpm 11.22.0, loopback only; PostgreSQL 16 on loopback):
+Local (Node v24.21.0, pnpm 11.22.0, loopback only; PostgreSQL 16 on loopback), on the owner-decision follow-up (`43725a6`):
 
-- typecheck, lint of the changed files, `agent_guard.py check`, governance-lite and the CI-profile tests pass.
-- `pnpm test`: 6,411 passed, 2 skipped (environment-gated), 1 failure: a source-pinned import line in `playwright.config.ts`, fixed (the suite
-  then passes 5/5). Suites touched after that run pass again (components, state, i18n, domain, server).
-- PostgreSQL: `account-store.pg.test.ts` 9 passed (new: the account's wallet addresses; removed wallets; an address shared across accounts).
-- Guarded browser profiles: owner-history 11 passed; workflow-acceptance 5 passed; default-product 102 passed with 9 failures that are this
-  container's, not this change's — 2 build009 tests need the live LI.FI host, and 7 screenshot comparisons render with a different height in
-  this container's Chromium and fonts (CircleCI's image is the authority for screenshots; see §5.1).
+- Typecheck, lint of the changed files, `agent_guard.py check` (PASS), governance-lite and the scripts' unittest suite (277) pass.
+- `pnpm test`: 528 files, **6,428 passed**, 2 skipped (environment-gated), 0 failed.
+- PostgreSQL suites run with `TEST_DATABASE_URL`: automations (incl. migrations, scheduler, worker) and `account-store.pg.test.ts` pass.
+- Guarded browser profiles:
+  - owner-history **12 passed** (incl. the new signed-in email-account history test and the records-mode detail test);
+  - workflow-acceptance **5 passed**; execution-continuity **34 passed**; copilot-learning **1 passed**;
+  - default-product with the CI image's browser (`cimg/node:24.21.0-browsers` headless shell 1243 through chroot) **109 passed**, 2 failed:
+    both `build009.spec.ts` tests need the live LI.FI host, which this container cannot resolve (`getaddrinfo ENOTFOUND li.quest`). They pass
+    in CircleCI (certification-browser-1). The screenshot specs (`visual-shell`, `swap-authoring`, `mock-artifact-chain`, `base-observation`)
+    and `privacy-notice` also passed 26/26 in that image, so the earlier height differences were this container's own Chromium and fonts.
 - CircleCI is the certification authority (§5.1).
 
 ### 5.1 CircleCI
 
-Pending at the time of writing; the PR description carries the result.
+- `c00a578`: governance, certification-checks and certification-browser-1 (default-product, screenshots included) passed;
+  certification-browser-2 failed on one assertion — `acceptance-workflows.spec.ts` still expected the pt-PT empty-library copy the review
+  follow-up had changed. Fixed in `43725a6`, which also fixes the records-mode detail test harness (§3).
+- The final head's run is reported in the PR description.
 
-## 6. Open questions and limitations
+## 6. Owner decisions, open points and limitations
 
-**For the owner**
-1. Signed-in history access includes every wallet the account holds (embedded, legacy, linked external, sign-in wallets). Permanent Delete
-   through an account-held wallet needs no recent sign-in (it still rechecks financial eligibility); should Delete ask for a fresh sign-in?
-2. The Privacy & Memory notice applies an agreement only to the wallet available at that moment; should FloFi offer a one-line confirmation
-   when a new wallet appears later in the same browser (consent per wallet), instead of leaving it to Privacy & memory?
-3. The portfolio prices only ETH/WETH and SOL/WSOL (the deployment's Chainlink feeds). Valuing stablecoins or other assets needs a verified
-   price source the owner chooses; until then their value column shows “—” and the total is labelled “Priced holdings”.
-4. The portfolio reads only where the deployment enables each network's swap/transfer flow, and uses the public RPCs unless
-   `GRYLOO_<NETWORK>_RPC_URL` / `GRYLOO_SOLANA_RPC_URL` is set on the web process; prices need `FLOFI_AUTOMATION_PRICE_SOURCE` there too.
+**Owner decisions (recorded on PR #155; see §2.6)** — Delete without a mandatory fresh sign-in (explicit confirmation, server-side ownership
+check, financial restrictions unchanged); no second privacy modal and no inherited consent for later wallets; verified Chainlink pricing incl.
+canonical USDC/USDT; dedicated production RPCs and the existing price source, documented for Vercel without changing production; Token-2022
+balances implemented.
+
+**For the owner (configuration, not code)**
+- Production needs, on the **Vercel web** project: the dedicated `GRYLOO_<NETWORK>_RPC_URL` / `GRYLOO_SOLANA_RPC_URL`,
+  `FLOFI_AUTOMATION_PRICE_SOURCE=chainlink` and `FLOFI_AUTOMATION_CHAINLINK_FEEDS` including `USDC=` and `USDT=` Base mainnet proxies
+  ([ENVIRONMENT.md §5l](../deploy/ENVIRONMENT.md)).
+- `FLOFI_AUTOMATION_PRICE_MAX_AGE_SECONDS` (default 3600) applies to every feed. If a stablecoin feed's heartbeat is longer, its asset shows no
+  value between updates; raising the age also affects automations. Per-feed ages would be a separate change.
 
 **Limitations**
-- Area 3 is covered by unit and PostgreSQL tests (resolver, store, callers' fail-closed paths) and the owner-history browser suite; no
-  browser suite signs in through the Privy emulator and then reads history (the account path's browser test is a follow-up).
 - Carry-over after an execution covers one-action workflows on the step runtimes and sequences. Compositions and runtimes that run a
   workflow as a whole say a change is reviewed as a whole. A carried step whose delivery was not yet proven when an action was added keeps
   the funded step blocked (fail-closed) until the owner undoes and re-adds after reconciliation.
+- The signed-in history browser test creates the email account session through the account store and seals its cookie as the sign-in
+  route does; the email-code screens themselves are covered by `auth-wallets.spec.ts`, not chained in one browser test.
+- USDT is priced on Ethereum and Solana only: Base, Arbitrum One and Robinhood Chain have no Tether-issued USDT contract FloFi pins (USD₮0 and
+  bridged copies stay unpriced). Token-2022 mints are never priced.
+- Token-2022 shown amounts follow the token program's double-precision formulas, truncated to a base unit (never rounded up); a wallet that
+  rounds may show one base unit more. Confidential balances are not readable and are listed as unavailable.
 - Multicall3 presence on Robinhood Chain is checked at runtime (code at the canonical address), not pinned by code hash; without it only
-  the native balance is read. Token-2022 balances are not shown. Solana token accounts are not pinned to the owner-account slot.
+  the native balance is read. Solana token accounts and Token-2022 mints are read in separate calls (not pinned to one slot).
 - The workflow hub lists executed records page by page (25 at a time); the Dashboard summary marks counts “+” when more exist.
 - Evidence level: MOCKED / loopback only. Nothing was deployed, configured, signed or sent.
