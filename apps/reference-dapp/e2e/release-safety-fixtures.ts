@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import type { Page } from '@playwright/test';
 import { expect, AUTHORIZE_IN_WALLET, FINANCIAL_CANVAS_ACTIONS } from './fixtures';
+import { openEditorSection } from './build-entry-navigation';
 
 /** Visible production boundaries only. This never supplies or changes provenance. */
 export async function assertSimulationReviewBlocked(page: Page, requests: () => Promise<number>) {
@@ -16,7 +17,7 @@ export async function assertSimulationReviewBlocked(page: Page, requests: () => 
 }
 
 export async function assertExecutionBlocked(page: Page, requests: () => Promise<number>) {
-  await page.getByRole('navigation', { name: 'Workflow stages' }).getByRole('button', { name: 'Execute', exact: true }).click();
+  await openEditorSection(page, 'Execute');
   await expect(page.locator('.canvas-primary-action')).toBeVisible();
   await expect(page.locator('.canvas-primary-action').locator(FINANCIAL_CANVAS_ACTIONS)).toHaveCount(0);
   await expect(page.getByRole('link', { name: /Download.*Evidence Bundle/ })).toHaveCount(0);

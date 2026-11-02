@@ -2,7 +2,7 @@
 import { test, expect } from './fixtures';
 import { installSupplyWallet } from './supply-fixtures';
 import { configureCanvasAction } from './composer-authoring-fixtures';
-import { openBuilder } from './build-entry-navigation';
+import { openBuilder, openEditorSection } from './build-entry-navigation';
 
 for (const theme of ['light', 'dark'] as const) {
   test(`${theme} workflow save utility is truthful and preserves title, cards and session identity`, async ({ page }) => {
@@ -48,11 +48,11 @@ for (const theme of ['light', 'dark'] as const) {
     const nav = page.getByRole('navigation', { name: 'Workflow stages' });
     await nav.getByRole('button', { name: 'Dashboard', exact: true }).click();
     await expect(page.getByRole('button', { name: 'Save workflow', exact: true })).toHaveCount(0);
-    await nav.getByRole('button', { name: 'Build', exact: true }).click();
+    await openEditorSection(page, 'Build');
     await expect(canvas.getByRole('heading', { name: 'Team workflow', exact: true })).toBeVisible();
     await expect(selected).toHaveText(cardBefore, { useInnerText: true });
-    for (const stage of ['Simulate', 'Execute']) {
-      await nav.getByRole('button', { name: stage, exact: true }).click();
+    for (const stage of ['Simulate', 'Execute'] as const) {
+      await openEditorSection(page, stage);
       await expect(page.getByRole('button', { name: 'Save workflow', exact: true })).toHaveCount(0);
       await expect(page.locator('.canvas-head h2')).toHaveText('Team workflow');
     }

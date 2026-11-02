@@ -2,6 +2,7 @@
 import { test, expect, sendChatCommand } from './fixtures';
 import { hashArtifactBytes, parseArtifactBytes } from '@defi-workflow-engine/workflow-contracts';
 import { digestRawResponse } from '@defi-workflow-engine/reference-linter';
+import { openEditorSection } from './build-entry-navigation';
 
 const observation = (page: import('@playwright/test').Page) => page.getByRole('region', { name: 'Base read-only observation' });
 
@@ -9,7 +10,7 @@ test('replay fails closed for an unrecorded swap and preserves the authority bou
   const response = await page.goto('/__engineering');
   expect(response?.headers()['content-security-policy']).toContain("connect-src 'self'");
   await sendChatCommand(page, 'swap 3 USDC to WETH on Base slippage 50 bps');
-  await page.getByRole('navigation', { name: 'Workflow stages' }).getByRole('button', { name: 'Simulate' }).click();
+  await openEditorSection(page, 'Simulate');
   await page.locator('.simulation-technical > summary').click();
   const mocked = page.locator('.simulation-technical');
   await mocked.getByRole('button', { name: 'Generate mocked artifacts for revision 1' }).click();
@@ -33,7 +34,7 @@ test('replay fails closed for an unrecorded swap and preserves the authority bou
 test('observation controls are keyboard reachable and fit mobile, tablet and desktop widths', async ({ page }) => {
   await page.goto('/__engineering');
   await sendChatCommand(page, 'swap 1 WETH to USDC on Base slippage 50 bps');
-  await page.getByRole('navigation', { name: 'Workflow stages' }).getByRole('button', { name: 'Simulate' }).click();
+  await openEditorSection(page, 'Simulate');
   await page.locator('.simulation-technical > summary').click();
   const read = observation(page).getByRole('button', { name: 'Read Base quote' });
   for (const width of [375, 768, 1280]) {
@@ -58,7 +59,7 @@ for (const [from, to, amount, at] of [
     // Keep the recorded wall time fixed while ResizeObserver and animation frames fit the graph.
     await page.clock.setFixedTime(new Date(at));
     await sendChatCommand(page, `swap ${amount} ${from} to ${to} on Base slippage 50 bps`);
-    await page.getByRole('navigation', { name: 'Workflow stages' }).getByRole('button', { name: 'Simulate' }).click();
+    await openEditorSection(page, 'Simulate');
     await page.locator('.simulation-technical > summary').click();
     const region = observation(page);
     await region.getByRole('button', { name: 'Read Base quote' }).click();
@@ -114,7 +115,7 @@ test('a semantic edit retires a recorded quote without touching the mocked chain
   // Navigation can exceed one second; keep replay time fixed without rewinding timers.
   await page.clock.setFixedTime(at);
   await sendChatCommand(page, 'swap 1 WETH to USDC on Base slippage 50 bps');
-  await page.getByRole('navigation', { name: 'Workflow stages' }).getByRole('button', { name: 'Simulate' }).click();
+  await openEditorSection(page, 'Simulate');
   await page.locator('.simulation-technical > summary').click();
   const mocked = page.locator('.simulation-technical');
   await mocked.getByRole('button', { name: 'Generate mocked artifacts for revision 1' }).click();
@@ -122,9 +123,9 @@ test('a semantic edit retires a recorded quote without touching the mocked chain
   const region = observation(page);
   await region.getByRole('button', { name: 'Read Base quote' }).click();
   await expect(region).toContainText('OBSERVATION: CURRENT');
-  await page.getByRole('navigation', { name: 'Workflow stages' }).getByRole('button', { name: 'Build' }).click();
+  await openEditorSection(page, 'Build');
   await sendChatCommand(page, 'set node-002 amount 2');
-  await page.getByRole('navigation', { name: 'Workflow stages' }).getByRole('button', { name: 'Simulate' }).click();
+  await openEditorSection(page, 'Simulate');
   await page.locator('.simulation-technical > summary').click();
   await expect(region).toContainText('OBSERVATION: INVALIDATED');
   await expect(region.locator('[data-observed-value]')).toHaveCount(0);

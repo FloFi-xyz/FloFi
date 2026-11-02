@@ -6,6 +6,7 @@ import type { Page } from '@playwright/test';
 import { fromHex } from '@defi-workflow-engine/reference-compiler';
 import { signModeBLocalTransaction } from '@defi-workflow-engine/reference-executor';
 import { test, expect } from './fixtures';
+import { openEditorSection } from './build-entry-navigation';
 export { test, expect };
 const profilePath = process.env.GRYLOO_COMPOSITION_PROFILE;
 const keysPath = process.env.GRYLOO_COMPOSITION_EXECUTOR_KEY_FILE;
@@ -71,7 +72,7 @@ export async function authorComposition(page: Page) {
   await page.getByRole('button', { name: 'Send', exact: true }).click();
   await page.getByRole('button', { name: 'Apply proposal' }).click();
   await expect(page.getByText('WETH output reference')).toBeVisible();
-  await page.getByRole('navigation', { name: 'Workflow stages' }).getByRole('button', { name: 'Simulate', exact: true }).click();
+  await openEditorSection(page, 'Simulate');
   await page.locator('.simulation-technical > summary').click();
   const panel = page.getByRole('region', { name: 'Mode B swap to liquidity composition' });
   await panel.getByRole('button', { name: 'Prepare chained review' }).click();

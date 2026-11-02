@@ -2,7 +2,7 @@
 import { test, expect, readWorkflowIr, applyPendingProposal } from './fixtures';
 import { installSupplyWallet, supplySendCount, SUPPLY_OWNER } from './supply-fixtures';
 import { configureCanvasAction, configureCanvasPool } from './composer-authoring-fixtures';
-import { openBuilder } from './build-entry-navigation';
+import { openBuilder, openEditorSection } from './build-entry-navigation';
 
 for (const action of ['swap', 'bridge', 'supply', 'borrow', 'repay', 'withdraw', 'pool', 'lending', 'transfer']) test(`Canvas parity without Advanced action setup: ${action}`, async ({ page }) => {
   // The wallet accepts an explicit network switch (only the Robinhood Chain Testnet Send asks for one).
@@ -40,7 +40,7 @@ for (const action of ['swap', 'bridge', 'supply', 'borrow', 'repay', 'withdraw',
 test('normal Simulate has concise safety details and no engineering or duplicate lifecycle workspace, desktop and mobile', async ({ page }) => {
   await installSupplyWallet(page); await openBuilder(page);
   await page.getByRole('button', { name: 'Add swap', exact: true }).click(); await configureCanvasAction(page, '1');
-  await page.getByRole('navigation', { name: 'Workflow stages' }).getByRole('button', { name: 'Simulate', exact: true }).click();
+  await openEditorSection(page, 'Simulate');
   // BUILD-FLOFI-CHAT-E2E-FIX-002: the chat-first Simulation Summary (and its embedded Review) is an optional, collapsed details surface.
   await page.locator('.simulation-details > summary').click();
   const details = page.locator('.review-authorization-details');
@@ -65,7 +65,7 @@ test('normal Simulate has concise safety details and no engineering or duplicate
 test('engineering harness is explicitly invoked separately from the normal workspace', async ({ page }) => {
   await page.goto('/__engineering');
   await expect(page.getByText('Advanced action setup', { exact: true })).toBeVisible();
-  await page.getByRole('navigation', { name: 'Workflow stages' }).getByRole('button', { name: 'Simulate', exact: true }).click();
+  await openEditorSection(page, 'Simulate');
   const details = page.locator('.simulation-technical'); await details.locator('> summary').click();
   await expect(page.getByRole('region', { name: 'Authorization technical details', exact: true }).first()).toBeVisible();
   await expect(page.getByRole('button', { name: /Generate mocked artifacts for revision/ })).toBeVisible();

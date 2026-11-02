@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { test, expect } from './fixtures';
 import { installSupplyWallet } from './supply-fixtures';
-import { openBuilder } from './build-entry-navigation';
+import { openBuilder, openEditorSection } from './build-entry-navigation';
 
 test('workflow naming confirms inline, cancels without clearing selection and survives navigation', async ({ page }) => {
   await installSupplyWallet(page);
@@ -34,7 +34,7 @@ test('workflow naming confirms inline, cancels without clearing selection and su
   await expect(canvas.getByRole('heading', { name: 'ETH Income Strategy', exact: true })).toBeVisible();
   const nav = page.getByRole('navigation', { name: 'Workflow stages' });
   await nav.getByRole('button', { name: 'Dashboard', exact: true }).click();
-  await nav.getByRole('button', { name: 'Build', exact: true }).click();
+  await openEditorSection(page, 'Build');
   await expect(canvas.getByRole('heading', { name: 'ETH Income Strategy', exact: true })).toBeVisible();
   await expect(canvas.locator('.flow-card.active')).toHaveCount(1);
   await expect(page.locator('.summary-bar')).toHaveAttribute('data-workflow-revision', '1');

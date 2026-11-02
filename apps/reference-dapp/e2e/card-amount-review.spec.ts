@@ -7,7 +7,7 @@
 import { test, expect } from './fixtures';
 import { installSupplyWallet } from './supply-fixtures';
 import { configureCanvasAction, openCanvasSettings } from './composer-authoring-fixtures';
-import { openBuilder } from './build-entry-navigation';
+import { editorSectionAction, openBuilder, openEditorSection } from './build-entry-navigation';
 
 for (const action of ['swap', 'bridge'] as const) test(`${action} applies a valid amount on Enter, refuses an invalid one inline and keeps one canonical value`, async ({ page }) => {
   await installSupplyWallet(page); await openBuilder(page);
@@ -16,7 +16,6 @@ for (const action of ['swap', 'bridge'] as const) test(`${action} applies a vali
   const source = card.getByRole('textbox', { name: 'Source amount (USDC)', exact: true });
   const revision = page.locator('.summary-bar');
   const settings = page.getByRole('dialog', { name: 'Action settings', exact: true }).getByRole('button', { name: 'Action settings', exact: true });
-  const stages = page.getByRole('navigation', { name: 'Workflow stages' });
   const hint = card.locator('.composer-amount-hint');
   await expect(hint).toHaveText('Press Enter to apply');
   await expect(page.getByRole('button', { name: /^(Review|Apply) amount$/ })).toHaveCount(0);
@@ -29,8 +28,8 @@ for (const action of ['swap', 'bridge'] as const) test(`${action} applies a vali
   await expect(card.getByRole('alert')).toHaveCount(0);
   // A draft is not the workflow: nothing is simulated or executable from it.
   await expect(revision).toHaveAttribute('data-workflow-revision', '0');
-  await expect(stages.getByRole('button', { name: 'Simulate', exact: true })).toBeDisabled();
-  await expect(stages.getByRole('button', { name: 'Execute', exact: true })).toBeDisabled();
+  await expect(editorSectionAction(page, 'Simulate')).toBeDisabled();
+  await expect(editorSectionAction(page, 'Execute')).toBeDisabled();
   await expect(page.getByRole('region', { name: 'Workflow edit review', exact: true })).toHaveCount(0);
   await openCanvasSettings(page);
   await expect(page.getByRole('button', { name: /^(Review|Apply) amount$/ })).toHaveCount(0);
@@ -56,11 +55,11 @@ for (const action of ['swap', 'bridge'] as const) test(`${action} applies a vali
   await expect(source).toHaveValue('3'); await expect(revision).toHaveAttribute('data-workflow-revision', '1');
   // Stage inspection does not grant simulation capability in this supply-only fixture.
   await expect(page.getByRole('button', { name: 'Simulate workflow', exact: true })).toBeDisabled();
-  await expect(stages.getByRole('button', { name: 'Simulate', exact: true })).toBeEnabled();
+  await expect(editorSectionAction(page, 'Simulate')).toBeEnabled();
   await openCanvasSettings(page);
   await expect(page.getByRole('dialog', { name: 'Action settings', exact: true }).getByLabel(action === 'swap' ? 'Input amount (USDC)' : 'Cross-chain amount (USDC)', { exact: true })).toHaveValue('3');
   await settings.click();
-  await stages.getByRole('button', { name: 'Simulate', exact: true }).click();
+  await openEditorSection(page, 'Simulate');
   await expect(page.locator('.simulate-flow-surface .composer-amount')).toHaveText('3 USDC');
   expect(await page.evaluate(() => (window as unknown as { supplyWalletRequests: { method: string }[] }).supplyWalletRequests.filter(request => /sign|send/i.test(request.method)))).toEqual([]);
 });
@@ -93,5 +92,5 @@ test('an applied amount is scoped to its own card; leaving a step applies only t
   await expect(amount(first)).toHaveValue('4'); await expect(revision).toHaveAttribute('data-workflow-revision', '4');
   // Stage inspection does not grant simulation capability in this supply-only fixture.
   await expect(page.getByRole('button', { name: 'Simulate workflow', exact: true })).toBeDisabled();
-  await expect(page.getByRole('navigation', { name: 'Workflow stages' }).getByRole('button', { name: 'Simulate', exact: true })).toBeEnabled();
+  await expect(editorSectionAction(page, 'Simulate')).toBeEnabled();
 });

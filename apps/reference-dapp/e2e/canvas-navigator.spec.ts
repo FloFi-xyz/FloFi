@@ -3,7 +3,7 @@ import { test, expect, applyPendingProposal } from './fixtures';
 import { installSupplyWallet } from './supply-fixtures';
 import { configureCanvasAction } from './composer-authoring-fixtures';
 import type { Page, Locator } from '@playwright/test';
-import { openBuilder } from './build-entry-navigation';
+import { expectEditorSection, openBuilder, openEditorSection } from './build-entry-navigation';
 
 async function prepare(page: Page, theme: 'light' | 'dark') {
   await page.addInitScript(value => localStorage.setItem('flofi.theme', value), theme);
@@ -48,10 +48,9 @@ for (const theme of ['light', 'dark'] as const) {
     await prepare(page, theme);
     await page.getByRole('button', { name: 'Add supply', exact: true }).click();
     await configureCanvasAction(page, '1');
-    const stages = page.getByRole('navigation', { name: 'Workflow stages' });
     const graph = page.locator('main .flow-surface').first();
     for (const stage of ['Build', 'Simulate', 'Execute'] as const) {
-      await stages.getByRole('button', { name: stage, exact: true }).click();
+      await openEditorSection(page, stage);
       const navigator = graph.getByRole('group', { name: 'Canvas navigator' });
       const slider = navigator.getByRole('slider', { name: 'Canvas zoom' });
       const positions = await graph.locator('.react-flow__node').evaluateAll(nodes => nodes.map(node => (node as HTMLElement).style.transform));
@@ -100,7 +99,7 @@ for (const theme of ['light', 'dark'] as const) {
       expect(await graph.locator('.react-flow__node').evaluateAll(nodes => nodes.map(node => (node as HTMLElement).style.transform))).toEqual(positions);
       if (stage !== 'Execute') await expect(page.locator('.summary-bar')).toHaveAttribute('data-workflow-revision', '1');
     }
-    await stages.getByRole('button', { name: 'Build', exact: true }).click();
+    await openEditorSection(page, 'Build');
     await expect(page.locator('.summary-bar')).toHaveAttribute('data-workflow-revision', '1');
     expect(errors).toEqual([]);
   });
@@ -112,14 +111,13 @@ for (const theme of ['light', 'dark'] as const) {
     await prepare(page, theme);
     await page.getByRole('button', { name: 'Add supply', exact: true }).click();
     await configureCanvasAction(page, '1');
-    const stages = page.getByRole('navigation', { name: 'Workflow stages' });
     const graph = page.locator('main .flow-surface').first();
     const measurements: Record<string, Awaited<ReturnType<typeof geometry>>> = {};
     for (const width of [320, 375, 768, 1024, 1440]) {
       await page.setViewportSize({ width, height: 900 });
       for (const stage of ['Build', 'Simulate', 'Execute'] as const) {
-        await stages.getByRole('button', { name: stage, exact: true }).click();
-        await expect(stages.getByRole('button', { name: stage, exact: true })).toHaveAttribute('aria-current', 'page');
+        await openEditorSection(page, stage);
+        await expectEditorSection(page, stage);
         await page.evaluate(() => window.scrollTo(0, 0));
         measurements[`${width}-${stage}`] = await geometry(page);
         const graphBox = (await graph.boundingBox())!;

@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { test, expect } from './fixtures';
+import { openEditorSection } from './build-entry-navigation';
 
 const OWNER = '0x1111111111111111111111111111111111111111';
 
@@ -33,7 +34,7 @@ test('chat and canvas share bridge IR; live route drives durable MOCKED recovery
   const canvas = JSON.parse((await page.locator('[data-workflow-ir]').textContent()) ?? '{}');
   expect(canvas).toEqual(chat);
 
-  await page.getByRole('button', { name: 'Simulate', exact: true }).click();
+  await openEditorSection(page, 'Simulate');
   const review = page.getByRole('region', { name: 'LI.FI bridge quote and review' });
   await expect(review).toBeVisible();
   await review.getByRole('button', { name: 'Connect Base wallet address' }).click();
@@ -45,14 +46,14 @@ test('chat and canvas share bridge IR; live route drives durable MOCKED recovery
   await expect(review).toContainText('MOCKED EXECUTION');
   await expect(review.locator('[data-bridge-manifest]')).toHaveText(/^0x[0-9a-f]{64}$/);
 
-  await page.getByRole('button', { name: 'Execute', exact: true }).click();
+  await openEditorSection(page, 'Execute');
   const execution = page.getByRole('region', { name: 'LI.FI mocked bridge execution' });
   await execution.getByRole('button', { name: 'Authorize reviewed Manifest for MOCKED rehearsal' }).click();
   await execution.getByRole('button', { name: 'Rehearse exact USDC approval' }).click();
   await execution.getByRole('button', { name: 'Rehearse source transaction' }).click();
   await expect(execution.locator('[data-bridge-state]')).toHaveText('UNKNOWN');
   await page.reload();
-  await page.getByRole('button', { name: 'Execute', exact: true }).click();
+  await openEditorSection(page, 'Execute');
   const recovered = page.getByRole('region', { name: 'LI.FI mocked bridge execution' });
   await expect(recovered).toContainText('Recovered from the durable journal after restart');
   await expect(recovered.locator('[data-bridge-state]')).toHaveText('UNKNOWN');

@@ -4,7 +4,7 @@ import { test, expect } from './fixtures';
 import { installJourneyWallet, walletRequests, setWalletChain } from './journey-fixtures';
 import { createTestWallet } from '../../../packages/reference-reconciler/test/test-wallet';
 import { hashArtifactBytes, type SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
-import { openBuilder } from './build-entry-navigation';
+import { openBuilder, openEditorSection } from './build-entry-navigation';
 
 for (const [network, chain] of [['Base Sepolia', '0x14a34'], ['Ethereum Sepolia', '0xaa36a7']] as const) {
   test(`${network}: Canvas → real read client estimate → Simulate → Review; locale preserves authority and wallet changes invalidate it`, async ({ page, request, networkGuard }) => {
@@ -28,7 +28,7 @@ for (const [network, chain] of [['Base Sepolia', '0x14a34'], ['Ethereum Sepolia'
     await expect.poll(() => workflows.length).toBeGreaterThan(0);
     const workflow = workflows.at(-1)!, revision = await page.locator('.summary-bar').getAttribute('data-workflow-revision');
     const hash = hashArtifactBytes('semantic-workflow', new TextEncoder().encode(JSON.stringify(workflow)));
-    await page.getByRole('navigation', { name: 'Workflow stages' }).getByRole('button', { name: 'Simulate', exact: true }).click();
+    await openEditorSection(page, 'Simulate');
     // BUILD-FLOFI-CHAT-E2E-FIX-002: the chat-first Simulation Summary is an optional, collapsed details surface under the canvas.
     await page.locator('.simulation-details > summary').click();
     const summary = page.getByRole('complementary', { name: 'Simulation Summary', exact: true });

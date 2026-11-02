@@ -2,7 +2,7 @@
 import { test, expect } from './fixtures';
 import { installSupplyWallet } from './supply-fixtures';
 import { configureCanvasAction } from './composer-authoring-fixtures';
-import { openBuilder, reloadBuilder } from './build-entry-navigation';
+import { openBuilder, openEditorSection, reloadBuilder } from './build-entry-navigation';
 
 test('Settings switches toggle from either segment, the middle and edges with one keyboard stop each', async ({ page }) => {
   await installSupplyWallet(page); await openBuilder(page);
@@ -173,7 +173,7 @@ for (const theme of ['light', 'dark'] as const) {
     await expect(page.locator('.summary-bar')).toHaveAttribute('data-workflow-revision', revision!);
     expect(await canvas.boundingBox()).toEqual(geometry); expect(await graph.locator('.canvas-primary-action').boundingBox()).toEqual(primary);
     for (const stage of ['Simulate', 'Execute'] as const) {
-      await page.getByRole('navigation', { name: 'Workflow stages' }).getByRole('button', { name: stage, exact: true }).click();
+      await openEditorSection(page, stage);
       const preview = page.locator('main .canvas').first();
       expect(await preview.boundingBox()).toEqual(geometry);
       await expect(preview.locator('.dark-spotlight')).toHaveCount(1);

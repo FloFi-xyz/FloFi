@@ -4,7 +4,7 @@ import { selectSettingsTheme } from './settings-fixtures';
 import type { Page, Locator } from '@playwright/test';
 import { installSupplyWallet } from './supply-fixtures';
 import { configureCanvasAction } from './composer-authoring-fixtures';
-import { openBuilder } from './build-entry-navigation';
+import { editorTab, openBuilder, openEditorSection, openProductSection, stagesNavigation } from './build-entry-navigation';
 
 const widths = [1440, 1024, 768, 375, 320];
 async function dark(page: Page) {
@@ -56,17 +56,16 @@ test('graphite palette follows the real lifecycle shell, settings and workspace 
   await expect(page.locator('.flofi-logo-dark .flofi-logo-symbol')).toHaveAttribute('src', '/brand/flofi-symbol-dark.svg');
   await page.screenshot({ style: 'nextjs-portal{display:none}', path: '.tmp/ux007-team3-empty-build-dark.png', fullPage: true });
   await page.getByRole('button', { name: 'Add supply', exact: true }).click(); await configureCanvasAction(page, '1');
-  const navigation = page.getByRole('navigation', { name: 'Workflow stages' });
   for (const width of widths) {
     await page.setViewportSize({ width, height: 900 });
     for (const stage of ['Build', 'Simulate', 'Execute', 'Dashboard'] as const) {
-      await navigation.getByRole('button', { name: stage, exact: true }).click();
-      const selected = navigation.getByRole('button', { name: stage, exact: true });
+      // BUILD-FLOFI-CHAT-EDITOR-UX-001: Build, Simulate and Execute are the Editor's sections (the Editor tab is the selected one); no stage numbers.
+      await openProductSection(page, stage);
+      const selected = stage === 'Dashboard' ? stagesNavigation(page).getByRole('button', { name: 'Dashboard', exact: true }) : editorTab(page);
       await expect(selected).toHaveCSS('background-color', 'rgb(26, 35, 80)');
       await expect(selected).toHaveCSS('color', 'rgb(147, 166, 255)');
+      await expect(stagesNavigation(page).locator('.stage-number')).toHaveCount(0);
       if (stage !== 'Dashboard') {
-        await expect(selected.locator('.stage-number')).toHaveCSS('background-color', 'rgb(35, 67, 217)');
-        await expect(selected.locator('.stage-number')).toHaveCSS('color', 'rgb(255, 255, 255)');
         await expect(page.locator('.flow-surface')).toHaveCSS('background-image', 'linear-gradient(135deg, rgb(28, 32, 41), rgb(28, 32, 41))');
         await expect(page.locator('.canvas-navigator')).toHaveCSS('background-color', 'rgb(28, 32, 41)');
         await expect(page.locator('.canvas-foot')).toHaveCSS('color', 'rgb(164, 171, 184)');
@@ -92,7 +91,7 @@ test('graphite palette follows the real lifecycle shell, settings and workspace 
     if (width === 1440 || width === 320) await page.screenshot({ style: 'nextjs-portal{display:none}', path: `.tmp/ux007-team3-settings-dark-${width}.png`, fullPage: true });
     await settings.press('Escape'); await expect(settings).toBeFocused();
   }
-  await navigation.getByRole('button', { name: 'Build', exact: true }).click();
+  await openEditorSection(page, 'Build');
   await expect(page.locator('.summary-bar')).toHaveAttribute('data-workflow-revision', '1');
   await expect(page.getByRole('textbox', { name: 'Source amount (USDC)', exact: true }).first()).toHaveValue('1');
   expect(await page.evaluate(() => (window as unknown as { supplyWalletRequests: { method: string }[] }).supplyWalletRequests.filter(request => /send|sign/i.test(request.method)))).toEqual([]);

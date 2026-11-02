@@ -2,10 +2,10 @@
 import { test, expect, openProposalReview, openSimulationDetails, acceptProductReview } from './fixtures';
 import type { Page } from '@playwright/test';
 import { installTransferWallet, resetTransferHarness, chainBroadcasts, sendRequests, TRANSFER_OWNER as owner, type TransferWalletOptions } from './robinhood-transfer-fixtures';
-import { openBuilder, reloadBuilder } from './build-entry-navigation';
+import { type EditorSection, openBuilder, openEditorSection, reloadBuilder } from './build-entry-navigation';
 
 const region = (page: Page) => page.getByRole('region', { name: 'Robinhood Testnet transfer' });
-const stage = (page: Page, name: 'Build' | 'Simulate' | 'Execute') => page.getByRole('navigation', { name: 'Workflow stages' }).getByRole('button', { name, exact: true }).click();
+const stage = (page: Page, name: EditorSection) => openEditorSection(page, name);
 async function author(page: Page, options: TransferWalletOptions = {}) {
   await installTransferWallet(page, options); await openBuilder(page);
   await page.getByText('Advanced action setup', { exact: true }).click();

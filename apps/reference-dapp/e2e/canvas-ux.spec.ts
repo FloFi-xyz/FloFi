@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { test, expect, installPassiveWallet, assertPassiveWallet, sendChatCommand, openSimulationDetails, readWorkflowIr } from './fixtures';
 import type { Page } from '@playwright/test';
-import { continueToBuilder, openBuilder, reloadBuilder } from './build-entry-navigation';
+import { continueToBuilder, openBuilder, openEditorSection, reloadBuilder } from './build-entry-navigation';
 
 test.beforeEach(async ({ page }) => { await installPassiveWallet(page); });
 test.afterEach(async ({ page }) => { await assertPassiveWallet(page); });
@@ -94,8 +94,8 @@ test('dragging updates stored layout, survives editor changes and Build navigati
   expect(saved.x).toBeCloseTo(movedPosition.x, 2);
   expect(saved.y).toBeCloseTo(movedPosition.y, 2);
   await addFromToolbox(page, 'swap');
-  await page.getByRole('button', { name: 'Simulate', exact: true }).click();
-  await page.getByRole('button', { name: 'Build', exact: true }).click();
+  await openEditorSection(page, 'Simulate');
+  await openEditorSection(page, 'Build');
   const returned = page.locator(`.react-flow__node[data-id="${id}"]`);
   await expect(returned).toBeVisible();
   const position = await returned.evaluate(element => getComputedStyle(element).transform);
@@ -146,7 +146,7 @@ test('selected action parameters edit shared IR', async ({ page }) => {
   await expect(card.getByRole('textbox', { name: 'Source amount (USDC)' })).toHaveValue('2.5');
   const ir = JSON.parse(await readWorkflowIr(page));
   expect(ir.nodes.find((node: { nodeId: string }) => node.nodeId === 'node-002').inputs).toContainEqual(expect.objectContaining({ name: 'amount-in', value: expect.objectContaining({ amount: '2500000' }) }));
-  await page.getByRole('button', { name: 'Simulate', exact: true }).click();
+  await openEditorSection(page, 'Simulate');
   await expect(page.locator('.simulation-workflow-canvas')).toContainText('2.5');
 });
 
@@ -162,8 +162,8 @@ test('toolbox mode is presentation-only and persists across Build navigation', a
   await expect(graph.locator('.react-flow__node')).toHaveCount(original);
   await expect(page.locator('.summary-bar')).toHaveAttribute('data-workflow-revision', revisionBeforeSwitch!);
   await addFromToolbox(page, 'swap');
-  await page.getByRole('button', { name: 'Simulate', exact: true }).click();
-  await page.getByRole('button', { name: 'Build', exact: true }).click();
+  await openEditorSection(page, 'Simulate');
+  await openEditorSection(page, 'Build');
   await expect(page.getByRole('button', { name: 'Dock toolbar' })).toHaveAttribute('aria-pressed', 'true');
   await expect(graph.locator('.floating-toolbox')).toBeVisible();
   await page.getByRole('button', { name: 'Dock toolbar' }).click();
@@ -360,12 +360,12 @@ test('floating toolbox stays inside a narrow editor without page overflow', asyn
 test('dragging a swap preserves current mocked artifacts', async ({ page }) => {
   await openBuilder(page);
   await addFromToolbox(page, 'swap');
-  await page.getByRole('button', { name: 'Simulate', exact: true }).click();
+  await openEditorSection(page, 'Simulate');
   await openSimulationDetails(page);
   const artifacts = page.locator('.simulation-technical');
   await artifacts.getByRole('button', { name: /^Generate mocked artifacts for revision 1$/ }).click();
   await expect(artifacts.getByText('ARTIFACTS: CURRENT', { exact: true })).toBeVisible();
-  await page.getByRole('button', { name: 'Build', exact: true }).click();
+  await openEditorSection(page, 'Build');
   const card = page.locator('.react-flow__node[data-id="node-002"]');
   const box = await card.boundingBox();
   if (!box) throw new Error('Swap node missing');
@@ -374,7 +374,7 @@ test('dragging a swap preserves current mocked artifacts', async ({ page }) => {
   await page.mouse.move(box.x + 95, box.y + 78, { steps: 10 });
   await page.mouse.up();
   await expect(page.locator('.summary-bar')).toHaveAttribute('data-workflow-revision', '1');
-  await page.getByRole('button', { name: 'Simulate', exact: true }).click();
+  await openEditorSection(page, 'Simulate');
   await openSimulationDetails(page);
   await expect(artifacts.getByText('ARTIFACTS: CURRENT', { exact: true })).toBeVisible();
 });

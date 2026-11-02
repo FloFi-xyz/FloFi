@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { test as base, expect, type BrowserContext, type Locator, type Page } from '@playwright/test';
 import { E2E_APP_ORIGIN as APP_ORIGIN, E2E_CARD_ORIGIN } from './app-origin';
+import { openEditorSection } from './build-entry-navigation';
 
 export const SYNTHETIC_GUARD_URL = 'https://example.invalid/gryloo-guard-self-test';
 
@@ -139,8 +140,8 @@ export async function acceptProductReview(page: Page): Promise<void> {
   await expect(authorize).toHaveAttribute('data-lifecycle-action', 'approve');
   await authorize.click();
   await expect(page.locator('.canvas-primary-action button[data-lifecycle-action="approve"]')).toHaveCount(0);
-  const execute = page.getByRole('navigation', { name: 'Workflow stages' }).getByRole('button', { name: 'Execute', exact: true });
-  if (await execute.getAttribute('aria-current') !== 'page') await execute.click();
+  // BUILD-FLOFI-CHAT-EDITOR-UX-001: Execute is the Editor's execution section (a no-op when the authorization already opened it).
+  await openEditorSection(page, 'Execute');
 }
 
 /** BUILD-SOLANA-TRANSFER-UX-001: the minimal signing surface `/approve` opens on (chat-first; the Canvas is optional, "View in FloFi"). */
@@ -162,7 +163,7 @@ export async function proveConnectedEvmWallet(page: Page, region: Locator, accou
  */
 export async function openProposalSimulationDetails(page: Page): Promise<void> {
   if (await signingSurface(page).count()) await page.getByRole('button', { name: 'Open Canvas', exact: true }).click();
-  await page.getByRole('navigation', { name: 'Workflow stages' }).getByRole('button', { name: 'Simulate', exact: true }).click();
+  await openEditorSection(page, 'Simulate');
   await openSimulationDetails(page);
 }
 

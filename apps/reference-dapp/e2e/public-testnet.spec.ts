@@ -2,7 +2,7 @@
 import { test, expect, openSimulationDetails, installPassiveWallet, assertPassiveWallet } from './fixtures';
 import type { Page } from '@playwright/test';
 import { configureCanvasAction } from './composer-authoring-fixtures';
-import { openBuilder } from './build-entry-navigation';
+import { openBuilder, openEditorSection } from './build-entry-navigation';
 
 async function authorSwap(page: Page) {
   await expect(page.getByText('Advanced action setup', { exact: true })).toHaveCount(0);
@@ -17,7 +17,7 @@ test('public recording remains off in standard browser CI', async ({ page }) => 
   await installPassiveWallet(page, '0x14a34');
   await openBuilder(page);
   await authorSwap(page);
-  await page.getByRole('button', { name: 'Simulate', exact: true }).first().click();
+  await openEditorSection(page, 'Simulate');
   await openSimulationDetails(page);
   await expect(page.getByRole('region', { name: 'Base Sepolia swap simulation' })).toBeVisible();
   await expect(page.getByText('Public testnet recording is not enabled on this app instance.')).toBeVisible();

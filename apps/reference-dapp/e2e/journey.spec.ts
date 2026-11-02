@@ -8,13 +8,13 @@ import type { Page } from '@playwright/test';
 import { createTestWallet, type TestWallet } from '../../../packages/reference-reconciler/test/test-wallet.ts';
 import { BASE_SEPOLIA_HEX, guardedContext, installJourneyWallet, journeyAdvance, journeySends, resetJourneyHarness, setWalletChain, switchAccount,
   walletRequests } from './journey-fixtures';
-import { openBuilder, reloadBuilder } from './build-entry-navigation';
+import { type EditorSection, openBuilder, openEditorSection, reloadBuilder } from './build-entry-navigation';
 
 const USDC = '0x036cbd53842c5426634e7929541ec2318f3dcf7e', DIAMOND = '0x816fc6eee47e3157a666827a0c06205294c81770';
 const POINTER = 'flofi:crosschain-router-testnet:run';
 const card = (page: Page) => page.getByRole('region', { name: 'Testnet journey' });
 const region = (page: Page) => page.getByRole('region', { name: 'Cross-chain bridge' });
-const stage = (page: Page, name: 'Build' | 'Simulate' | 'Execute') => page.getByRole('navigation', { name: 'Workflow stages' }).getByRole('button', { name, exact: true }).click();
+const stage = (page: Page, name: EditorSection) => openEditorSection(page, name);
 const transactions = (page: Page) => region(page).getByRole('list', { name: 'Base Sepolia transactions' });
 async function signIn(scope: ReturnType<typeof card>) {
   if (await scope.getByRole('button', { name: 'Connect wallet' }).isVisible()) {

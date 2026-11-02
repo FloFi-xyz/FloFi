@@ -4,13 +4,14 @@ import { readFileSync, readdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { test, expect } from './fixtures';
 import { authorSwap } from './mode-a-fixtures';
+import { openEditorSection } from './build-entry-navigation';
 const profilePath = process.env.GRYLOO_MODE_B_PROFILE;
 test.skip(!profilePath, 'The pinned local Mode B fork is required');
 const profile = () => JSON.parse(readFileSync(profilePath!, 'utf8')) as { owner: string; journalDir: string; rpcUrl: string };
 async function prepare(page: import('@playwright/test').Page) {
   await page.goto('/__engineering');
   await authorSwap(page, 'WETH_TO_USDC', '1', '100');
-  await page.getByRole('navigation', { name: 'Workflow stages' }).getByRole('button', { name: 'Simulate', exact: true }).click();
+  await openEditorSection(page, 'Simulate');
   await page.locator('.simulation-technical > summary').click();
   const panel = page.getByRole('region', { name: 'Finite Mode B authority' });
   await panel.getByRole('button', { name: /Simulate finite Mode B for revision/ }).click();
@@ -52,12 +53,12 @@ test('semantic revision change retires the reviewed installation', async ({ page
   const panel = await prepare(page);
   await panel.getByRole('button', { name: 'Connect local owner wallet' }).click();
   await panel.getByRole('button', { name: 'I reviewed the finite permission and signatures' }).click();
-  await page.getByRole('navigation', { name: 'Workflow stages' }).getByRole('button', { name: 'Build', exact: true }).click();
+  await openEditorSection(page, 'Build');
   await page.locator('.flow-card').nth(1).click();
   await page.locator('.inspector').getByLabel('Slippage (bps)', { exact: true }).fill('50');
   // BUILD-FIX-UX-001: a slippage edit applies directly — still a new semantic revision that retires the finite authority.
   await page.getByRole('button', { name: 'Apply slippage', exact: true }).click();
-  await page.getByRole('navigation', { name: 'Workflow stages' }).getByRole('button', { name: 'Execute', exact: true }).click();
+  await openEditorSection(page, 'Execute');
   const retired = page.getByRole('region', { name: 'Finite Mode B authority' });
   await expect(retired).toContainText('Semantic revision changed');
   await expect(retired.getByRole('button', { name: /Request owner signature/ })).toBeDisabled();

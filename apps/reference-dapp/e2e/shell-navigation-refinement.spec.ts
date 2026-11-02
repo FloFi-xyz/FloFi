@@ -3,7 +3,7 @@ import { test, expect, chooseWallet } from './fixtures';
 import { installSupplyWallet } from './supply-fixtures';
 import { configureCanvasAction } from './composer-authoring-fixtures';
 import type { Page } from '@playwright/test';
-import { openBuilder } from './build-entry-navigation';
+import { expectEditorSection, openBuilder, openEditorSection } from './build-entry-navigation';
 
 function captureErrors(page: Page) {
   const errors: string[] = [];
@@ -32,14 +32,13 @@ for (const theme of ['light', 'dark'] as const) {
     await configureCanvasAction(page, '1');
     const revision = await page.locator('.summary-bar').getAttribute('data-workflow-revision');
     const trigger = page.locator('.navigation-trigger'), drawer = page.locator('.navigation-drawer');
-    const stages = page.getByRole('navigation', { name: 'Workflow stages' });
     for (const stage of ['Simulate', 'Execute'] as const) {
-      await stages.getByRole('button', { name: stage, exact: true }).click();
+      await openEditorSection(page, stage);
       await trigger.click();
       await expect(drawer.locator('[aria-current=page]')).toHaveCount(0);
       await drawer.getByRole('link', { name: 'Build Workflow', exact: true }).press('Enter');
       await expect(page).toHaveURL('/app');
-      await expect(stages.getByRole('button', { name: 'Build', exact: true })).toHaveAttribute('aria-current', 'page');
+      await expectEditorSection(page, 'Build');
       await expect(drawer).toBeHidden();
       await expect(page.locator('.summary-bar')).toHaveAttribute('data-workflow-revision', revision!);
     }

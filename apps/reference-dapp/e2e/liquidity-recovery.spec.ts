@@ -1,17 +1,18 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { authorLiquidity, expect, test } from './liquidity-fixtures';
+import { openEditorSection } from './build-entry-navigation';
 test.skip(process.env.GRYLOO_LIQUIDITY_E2E !== 'replay', 'Requires the BUILD-006 closed transcript and opt-in local liquidity profile');
 test('lost wallet response freezes submission, restart readback finds exact nonce and reconciles', async ({ page, liquidity, testWallet }) => {
   test.setTimeout(90_000);
   await page.goto('/__engineering');
   await authorLiquidity(page, liquidity);
-  await page.getByRole('navigation', { name: 'Workflow stages' }).getByRole('button', { name: 'Simulate', exact: true }).click();
+  await openEditorSection(page, 'Simulate');
   await page.locator('.simulation-technical > summary').click();
   const simulate = page.getByRole('region', { name: 'Local fork liquidity simulation' });
   await simulate.getByLabel('Next operation').selectOption('APPROVE_WETH');
   await simulate.getByRole('button', { name: 'Simulate exact local operation' }).click();
   await expect(simulate.locator('.liquidity-review h3')).toContainText('APPROVE WETH');
-  await page.getByRole('navigation', { name: 'Workflow stages' }).getByRole('button', { name: 'Execute', exact: true }).click();
+  await openEditorSection(page, 'Execute');
   const execute = page.getByRole('region', { name: 'Local fork liquidity execution' });
   await execute.getByRole('button', { name: 'Accept exact review' }).click();
   await execute.getByRole('button', { name: 'Connect chain 31337 wallet' }).click();
@@ -20,7 +21,7 @@ test('lost wallet response freezes submission, restart readback finds exact nonc
   await expect(execute).toContainText('SUBMISSION_RESULT_UNKNOWN');
   await expect(execute.getByRole('button', { name: 'Request this wallet transaction' })).toBeDisabled();
   await page.reload();
-  await page.getByRole('navigation', { name: 'Workflow stages' }).getByRole('button', { name: 'Execute', exact: true }).click();
+  await openEditorSection(page, 'Execute');
   const restarted = page.getByRole('region', { name: 'Local fork liquidity execution' });
   await restarted.getByRole('button', { name: 'Scan unknown submission' }).click();
   await expect(restarted).toContainText('journal: PENDING');

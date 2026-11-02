@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { payloadIdentity, fromHex, encodeUnsignedPayload } from '@defi-workflow-engine/reference-compiler';
 import { verifySignedPayload } from '@defi-workflow-engine/reference-reconciler';
+import { openEditorSection } from './build-entry-navigation';
 import {
   authorSwap, executionPanel, expect, forkPanel, forkRpc, openTechnicalDetails, preparedRecord, requestStep, reviewAndConnect, simulateOnFork, stepState, test, visual,
 } from './mode-a-fixtures';
@@ -79,13 +80,13 @@ test('a semantic edit retires the reviewed fork action and no wallet request is 
   await page.goto('/__engineering');
   await authorSwap(page, 'WETH_TO_USDC', '1', '100');
   await simulateOnFork(page);
-  await page.getByRole('navigation', { name: 'Workflow stages' }).getByRole('button', { name: 'Build', exact: true }).click();
+  await openEditorSection(page, 'Build');
   await page.locator('.flow-card').nth(1).click();
   await page.locator('.inspector').getByLabel('Slippage (bps)', { exact: true }).fill('50');
   // BUILD-FIX-UX-001: a slippage edit applies directly — still a new semantic revision that retires the reviewed fork action.
   await page.getByRole('button', { name: 'Apply slippage', exact: true }).click();
   await expect(page.locator('.summary-bar[data-workflow-revision="2"]')).toBeVisible();
-  await page.getByRole('navigation', { name: 'Workflow stages' }).getByRole('button', { name: 'Simulate', exact: true }).click();
+  await openEditorSection(page, 'Simulate');
   await openTechnicalDetails(page);
   await expect(forkPanel(page).getByText('FORK: INVALIDATED', { exact: true })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Review swap' })).toBeDisabled();
@@ -95,13 +96,13 @@ test('a semantic edit retires the reviewed fork action and no wallet request is 
 test('mocked and observed artifacts can never open Mode A review or execution', async ({ page, testWallet, fork }) => {
   await page.goto('/__engineering');
   await authorSwap(page, 'WETH_TO_USDC', '1', '100');
-  await page.getByRole('navigation', { name: 'Workflow stages' }).getByRole('button', { name: 'Simulate', exact: true }).click();
+  await openEditorSection(page, 'Simulate');
   await openTechnicalDetails(page);
   const mocked = page.getByRole('region', { name: 'Mocked artifact chain' });
   await mocked.getByRole('button', { name: 'Generate mocked artifacts for revision 1' }).click();
   await expect(mocked).toContainText('ARTIFACTS: CURRENT');
   await expect(page.getByRole('button', { name: 'Review swap' })).toBeDisabled();
-  await page.getByRole('navigation', { name: 'Workflow stages' }).getByRole('button', { name: 'Execute', exact: true }).click();
+  await openEditorSection(page, 'Execute');
   await expect(page.getByRole('region', { name: 'Execute unavailable' })).toContainText('Mocked quote and simulation artifacts cannot authorize execution.');
   expect(fork.preparedFiles()).toHaveLength(0);
   expect(testWallet.calls.filter(call => call.method === 'eth_sendTransaction')).toHaveLength(0);

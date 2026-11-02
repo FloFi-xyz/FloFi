@@ -2,7 +2,7 @@
 import { test, expect } from './fixtures';
 import { installSupplyWallet, SUPPLY_OWNER } from './supply-fixtures';
 import { configureCanvasAction } from './composer-authoring-fixtures';
-import { openBuilder } from './build-entry-navigation';
+import { expectEditorSection, openBuilder, openEditorSection } from './build-entry-navigation';
 
 test('Build CTA floats inside the wider canvas without colliding with existing controls', async ({ page }) => {
   await installSupplyWallet(page);
@@ -14,7 +14,9 @@ test('Build CTA floats inside the wider canvas without colliding with existing c
   const graph = page.getByRole('region', { name: 'Workflow graph', exact: true });
   const cta = graph.getByRole('button', { name: 'Simulate workflow', exact: true });
   await expect(page.getByRole('button', { name: 'Continue to Simulate', exact: true })).toHaveCount(0);
-  await expect(page.locator('.summary-bar button')).toHaveCount(0);
+  // BUILD-FLOFI-CHAT-EDITOR-UX-001: the footer only opens the Editor's sections; it has no lifecycle action of its own.
+  await expect(page.locator('.summary-bar button')).toHaveText(['View simulation', 'View execution']);
+  await expect(page.locator('.summary-bar button.primary, .summary-bar button[data-lifecycle-action]')).toHaveCount(0);
   for (const floating of [false, true]) {
     if (floating) await page.getByRole('button', { name: 'Undock toolbar', exact: true }).click();
     for (const width of [1920, 1440, 390]) {
@@ -77,16 +79,16 @@ test('Canvas simulation runs the shared Supply lifecycle with one guarded Review
   await page.getByRole('button', { name: 'Add supply', exact: true }).click();
   await configureCanvasAction(page, '1');
   await page.getByRole('region', { name: 'Workflow graph', exact: true }).getByRole('button', { name: 'Simulate workflow', exact: true }).click();
-  const nav = page.getByRole('navigation', { name: 'Workflow stages' });
-  await expect(nav.getByRole('button', { name: 'Simulate', exact: true })).toHaveAttribute('aria-current', 'page');
+  await expectEditorSection(page, 'Simulate');
   const primary = page.getByRole('region', { name: 'Simulation workflow graph', exact: true }).locator('.canvas-primary-action');
   await expect(primary.getByRole('button', { name: 'Authorize in wallet', exact: true })).toBeDisabled();
   await expect(page.getByRole('button', { name: 'Authorize in wallet', exact: true })).toHaveCount(1);
   await expect(page.getByRole('button', { name: 'Simulate Supply', exact: true })).toHaveCount(0);
-  await expect(page.locator('.summary-bar button')).toHaveCount(0);
+  await expect(page.locator('.summary-bar button')).toHaveText(['View execution']);
+  await expect(page.locator('.summary-bar button.primary, .summary-bar button[data-lifecycle-action]')).toHaveCount(0);
   await expect(page.locator('.summary-bar')).toHaveAttribute('data-workflow-revision', '1');
   await expect(page.getByRole('button', { name: 'Simulate workflow', exact: true })).toHaveCount(0);
-  await nav.getByRole('button', { name: 'Build', exact: true }).click();
+  await openEditorSection(page, 'Build');
   await expect(page.locator('.canvas-primary-action').getByRole('button', { name: 'Authorize in wallet', exact: true })).toBeDisabled();
   await expect(page.locator('.flow-card.active')).toHaveCount(1);
   await expect(page.locator('.summary-bar')).toHaveAttribute('data-workflow-revision', '1');

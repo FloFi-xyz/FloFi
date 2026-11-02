@@ -2,11 +2,10 @@
 import { test, expect, applyPendingProposal, openSimulationDetails } from './fixtures';
 import type { Page } from '@playwright/test';
 import { configureCanvasAction, configureCanvasPool, openCanvasSettings } from './composer-authoring-fixtures';
-import { openBuilder } from './build-entry-navigation';
+import { expectEditorSection, openBuilder, openEditorSection } from './build-entry-navigation';
 const owner = '0x1111111111111111111111111111111111111111';
 const graph = (page: Page) => page.getByRole('region', { name: 'Simulation workflow graph', exact: true });
 const summary = (page: Page) => page.getByRole('complementary', { name: 'Simulation Summary', exact: true });
-const stages = (page: Page) => page.getByRole('navigation', { name: 'Workflow stages' });
 const summaries = (page: Page, surface: string) => page.locator(`${surface} .composer-card`).evaluateAll(cards => cards.map(card => {
   const title = card.querySelector('strong')?.textContent ?? '';
   const number = title.match(/^(\d+)\. /)?.[1];
@@ -60,7 +59,7 @@ test('lending projects the same authored strategy, shared title and links withou
   await applyPendingProposal(page);
   const build = await summaries(page, '.build-flow-surface');
   const positions = await page.locator('.build-flow-surface .react-flow__node').evaluateAll(nodes => nodes.map(node => (node as HTMLElement).style.transform));
-  await stages(page).getByRole('button', { name: 'Simulate', exact: true }).click();
+  await openEditorSection(page, 'Simulate');
   await expect(graph(page)).toHaveAttribute('data-viewport', 'fitted');
   await expect(page.locator('.simulation-workflow-canvas h2')).toHaveText('ESPARTACUS');
   expect(await summaries(page, '.simulate-flow-surface')).toEqual(build);
@@ -83,7 +82,7 @@ test('lending projects the same authored strategy, shared title and links withou
   await expect(graph(page).locator('.react-flow__node.selected')).toHaveCount(0);
   await expect(page.locator('.summary-bar')).toHaveAttribute('data-workflow-revision', '1');
   await graph(page).getByRole('button', { name: 'Back to Build', exact: true }).click();
-  await expect(stages(page).getByRole('button', { name: 'Build', exact: true })).toHaveAttribute('aria-current', 'page');
+  await expectEditorSection(page, 'Build');
   await expect(page.locator('.build-flow-surface .composer-card.active')).toHaveCount(1);
 });
 
@@ -91,7 +90,7 @@ test('accepted Build edits refresh Simulate while current diagnostic artifacts a
   await open(page); await page.getByRole('button', { name: 'Add swap', exact: true }).click();
   await configureCanvasAction(page, '1');
   await rename(page, 'ETH Carry Strategy');
-  await stages(page).getByRole('button', { name: 'Simulate', exact: true }).click();
+  await openEditorSection(page, 'Simulate');
   await expect(graph(page).locator('.composer-amount')).toHaveText('1 USDC');
   const details = page.locator('.simulation-technical');
   await expect(page.getByRole('button', { name: 'Generate mocked artifacts for revision 1', exact: true })).toBeHidden();
@@ -113,7 +112,7 @@ test('accepted Build edits refresh Simulate while current diagnostic artifacts a
   // BUILD-FIX-UX-001: Enter in Advanced Settings applies the amount directly.
   await inspectorAmount.fill('2.5'); await inspectorAmount.press('Enter');
   await rename(page, 'Updated Strategy');
-  await stages(page).getByRole('button', { name: 'Simulate', exact: true }).click();
+  await openEditorSection(page, 'Simulate');
   await expect(graph(page).locator('.composer-amount')).toHaveText('2.5 USDC');
   await expect(page.locator('.simulation-workflow-canvas h2')).toHaveText('Updated Strategy');
   await expect(page.locator('.summary-bar')).toHaveAttribute('data-workflow-revision', '2');
@@ -126,7 +125,7 @@ test('empty workflows and supported isolated actions keep the same graph and ori
     if (action && action !== 'pool') await configureCanvasAction(page, '1');
     if (action === 'pool') await configureCanvasPool(page);
     const build = await summaries(page, '.build-flow-surface');
-    await stages(page).getByRole('button', { name: 'Simulate', exact: true }).click();
+    await openEditorSection(page, 'Simulate');
     await expect(graph(page)).toBeVisible();
     expect(await summaries(page, '.simulate-flow-surface')).toEqual(build);
     await expect(page.locator('.simulation-workflow-canvas')).toHaveCount(1);
@@ -142,7 +141,7 @@ test('empty workflows and supported isolated actions keep the same graph and ori
 test('desktop/mobile graph keeps approved action order, zoom/fit controls and card clearance', async ({ page }) => {
   await open(page); await page.getByRole('button', { name: 'Add Supply → Borrow → Swap', exact: true }).click();
   await applyPendingProposal(page);
-  await stages(page).getByRole('button', { name: 'Simulate', exact: true }).click();
+  await openEditorSection(page, 'Simulate');
   for (const width of [1440, 390]) {
     await page.setViewportSize({ width, height: 900 });
     await expect(graph(page)).toHaveAttribute('data-viewport', 'fitted');

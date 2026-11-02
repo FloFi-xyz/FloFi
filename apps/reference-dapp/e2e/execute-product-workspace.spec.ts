@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { configureCanvasAction } from './composer-authoring-fixtures';
 import type { Page } from '@playwright/test';
 import { reviewNow } from '../src/test-utils/review-fixture';
-import { openBuilder, reloadBuilder } from './build-entry-navigation';
+import { editorTab, expectEditorSection, openBuilder, openEditorSection, reloadBuilder } from './build-entry-navigation';
 
 // Mount Execute with a real read-only canvas to verify native clicks, expiry and wallet updates.
 // These normalized fixtures do not claim to exercise RPC or wallet signatures.
@@ -234,13 +234,13 @@ test('the real shell preserves Build and embedded Review while Execute stays rea
   await configureCanvasAction(page, '2.5');
   // This idle-shell check has no RPC fixture. Navigation exposes the read-only
   // summary; financial simulation is covered by the dedicated swap acceptance.
-  await page.getByRole('navigation', { name: 'Workflow stages' }).getByRole('button', { name: 'Simulate', exact: true }).click();
+  await openEditorSection(page, 'Simulate');
   // BUILD-FLOFI-CHAT-E2E-FIX-002: in the chat-first workspace the summaries are an optional, collapsed details surface under the canvas.
   await expect(page.locator('#simulation-review')).toBeHidden();
   await page.locator('.simulation-details > summary').click();
   await expect(page.locator('#simulation-review')).toBeVisible();
   await expect(page.getByRole('navigation', { name: 'Workflow stages' }).getByRole('button', { name: 'Review', exact: true })).toHaveCount(0);
-  await page.getByRole('navigation', { name: 'Workflow stages' }).getByRole('button', { name: 'Execute', exact: true }).click();
+  await openEditorSection(page, 'Execute');
   await expect(page.locator('.execute-heading')).toHaveCount(0);
   await expect(page.getByRole('heading', { name: 'Your Workflow', exact: true })).toBeVisible();
   // BUILD0-UX-001: no "Execution details" / "View technical details" disclosures; the status panel stays visible under the canvas.
@@ -257,7 +257,7 @@ test('the real shell preserves Build and embedded Review while Execute stays rea
   await expect(page.locator('#simulation-review')).toHaveCount(0);
   for (const theme of ['light', 'dark']) {
     await page.evaluate(value => document.documentElement.dataset.theme = value, theme);
-    await expect(page.getByRole('navigation', { name: 'Workflow stages' }).getByRole('button', { name: 'Execute', exact: true })).toHaveClass('selected');
+    await expectEditorSection(page, 'Execute'); await expect(editorTab(page)).toHaveClass('selected');
     for (const width of [1440, 1024, 768, 375, 320]) {
       await page.setViewportSize({ width, height: 900 });
       await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);

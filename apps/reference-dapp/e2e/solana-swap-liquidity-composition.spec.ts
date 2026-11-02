@@ -3,6 +3,7 @@ import type { Page } from '@playwright/test';
 import { test, expect, sendChatCommand, openSimulationDetails } from './fixtures';
 import { chooseSolanaWallet, signChains, signRequests } from './jupiter-fixtures';
 import { devnetControl, installDevnetWallet, linkSwapToPosition, resetDevnetHarness } from './solana-devnet-fixtures';
+import { openEditorSection } from './build-entry-navigation';
 
 // Solana Devnet Swap → Orca liquidity on the MOCKED Devnet loopback only: these runs prove the UX, the single-swap rule and the
 // fail-closed paths of the composed flow. They are diagnostic (never DEVNET_EXECUTED) and use the engineering panel's own buttons.
@@ -55,7 +56,7 @@ test('one reviewed swap, the reconciled output bound to the position, one freshl
   expect(evidence).toMatchObject({ bundle: { environment: 'MOCKED', outcome: 'RECONCILED' }, evidenceClass: 'MOCKED', composition: { bound } });
   expect(evidence.bundle.receipts).toHaveLength(2);
   // Each operation's progress in the existing execution timeline.
-  await page.getByRole('navigation', { name: 'Workflow stages' }).getByRole('button', { name: 'Execute', exact: true }).click();
+  await openEditorSection(page, 'Execute');
   await expect(page.locator('.execution-timeline .execution-step.execution-state-confirmed')).toHaveCount(2);
   expect(errors).toEqual([]);
 });
@@ -73,7 +74,7 @@ test('a declined position keeps the swap and sends nothing again; after a reload
   expect(await signRequests(page)).toBe(2); expect(await devnetControl({ action: 'sent' })).toBe(1);
   // The persisted run is recovered from the server journal into the visit's draft: the swap is done and is never offered again.
   await page.reload();
-  await page.getByRole('navigation', { name: 'Workflow stages' }).getByRole('button', { name: 'Simulate', exact: true }).click();
+  await openEditorSection(page, 'Simulate');
   await openSimulationDetails(page);
   // BUILD-SOLANA-TRANSFER-UX-001: the Solana wallet the owner already chose is recognized again after the reload without a prompt (a
   // Wallet Standard silent connect: connection only, no transaction permission); no second connection is requested.
@@ -121,7 +122,7 @@ test('a wallet that changes the reviewed swap is refused before broadcast; Execu
   expect(await signRequests(page)).toBe(1); expect(await devnetControl({ action: 'sent' })).toBe(0);
   await expect(panel(page).getByRole('status')).toContainText('Your wallet added 2 instruction(s) from Lighthouse that FloFi could not verify as read-only protection checks');
   // Execute: a concrete outcome and a way forward, never a terminal "Cancelled".
-  await page.getByRole('navigation', { name: 'Workflow stages' }).getByRole('button', { name: 'Execute', exact: true }).click();
+  await openEditorSection(page, 'Execute');
   const swapStep = page.locator('.execution-timeline .execution-step').first();
   await expect(swapStep).toHaveClass(/execution-state-not-submitted/);
   await expect(swapStep).toContainText('that FloFi could not verify as read-only protection checks of the transaction you reviewed, so it did not send it and nothing reached Solana.');
@@ -143,7 +144,7 @@ test('a wallet that changes the reviewed swap is refused before broadcast; Execu
   await panel(page).getByRole('button', { name: 'Execute position', exact: true }).click();
   await phase(page, 'COMPLETED');
   expect(await signRequests(page)).toBe(3); expect(await devnetControl({ action: 'sent' })).toBe(2);
-  await page.getByRole('navigation', { name: 'Workflow stages' }).getByRole('button', { name: 'Execute', exact: true }).click();
+  await openEditorSection(page, 'Execute');
   await expect(page.locator('.execution-timeline .execution-step.execution-state-confirmed')).toHaveCount(2);
   expect(errors).toEqual([]);
 });
@@ -162,7 +163,7 @@ test('a Phantom-like wallet signs the exact reviewed swap and position: both sen
   await panel(page).getByRole('button', { name: 'Execute position', exact: true }).click();
   await phase(page, 'COMPLETED');
   expect(await signRequests(page)).toBe(2); expect(await devnetControl({ action: 'sent' })).toBe(2);
-  await page.getByRole('navigation', { name: 'Workflow stages' }).getByRole('button', { name: 'Execute', exact: true }).click();
+  await openEditorSection(page, 'Execute');
   await expect(page.locator('.execution-timeline .execution-step.execution-state-confirmed')).toHaveCount(2);
   expect(errors).toEqual([]);
 });
@@ -181,7 +182,7 @@ test('a Phantom wallet with Lighthouse protections signs verified guards on the 
   await panel(page).getByRole('button', { name: 'Execute position', exact: true }).click();
   await phase(page, 'COMPLETED');
   expect(await signRequests(page)).toBe(2); expect(await devnetControl({ action: 'sent' })).toBe(2);
-  await page.getByRole('navigation', { name: 'Workflow stages' }).getByRole('button', { name: 'Execute', exact: true }).click();
+  await openEditorSection(page, 'Execute');
   await expect(page.locator('.execution-timeline .execution-step.execution-state-confirmed')).toHaveCount(2);
   expect(errors).toEqual([]);
 });
@@ -200,7 +201,7 @@ test('a reconciled swap continues to its Orca position through the Canvas after 
   const runId = () => page.evaluate(() => (JSON.parse(window.localStorage.getItem('gryloo:solana-composition') ?? '{}') as { id?: string }).id);
   const run = await runId();
   await page.reload();
-  await page.getByRole('navigation', { name: 'Workflow stages' }).getByRole('button', { name: 'Simulate', exact: true }).click();
+  await openEditorSection(page, 'Simulate');
   await openSimulationDetails(page);
   // BUILD-SOLANA-TRANSFER-UX-001: the Solana wallet the owner already chose is recognized again after the reload without a prompt (a
   // Wallet Standard silent connect: connection only, no transaction permission); no second connection is requested.
@@ -224,7 +225,7 @@ test('a reconciled swap continues to its Orca position through the Canvas after 
   // One wallet request on this page load (the position), two sends in total, the same run.
   expect(await signRequests(page)).toBe(1); expect(await devnetControl({ action: 'sent' })).toBe(2);
   expect(await runId()).toBe(run);
-  await page.getByRole('navigation', { name: 'Workflow stages' }).getByRole('button', { name: 'Execute', exact: true }).click();
+  await openEditorSection(page, 'Execute');
   await expect(page.locator('.execution-timeline .execution-step.execution-state-confirmed')).toHaveCount(2);
   expect(errors).toEqual([]);
 });

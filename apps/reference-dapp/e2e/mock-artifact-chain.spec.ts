@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { test, expect, sendChatCommand, applyPendingProposal, openSimulationDetails, readWorkflowIr, openFirstActionSettings, openProposalReview, assertNoFinancialCanvasAction } from './fixtures';
 import type { Page } from '@playwright/test';
+import { type EditorSection, openEditorSection } from './build-entry-navigation';
 import { hashArtifactBytes, parseArtifactBytes } from '@defi-workflow-engine/workflow-contracts';
 
 const T0 = new Date('2026-09-24T12:00:00.000Z');
@@ -12,8 +13,8 @@ const REPLACING = 'compose supply 0.1 USDC to Aave then borrow 0.01 USDC then sw
 const bytes = (value: unknown) => new TextEncoder().encode(JSON.stringify(value));
 const panel = (page: Page) => page.locator('.simulation-technical');
 const chip = (page: Page, status: string) => panel(page).getByText(`ARTIFACTS: ${status}`, { exact: true });
-const tab = async (page: Page, name: 'Build' | 'Simulate' | 'Execute') => {
-  await page.getByRole('navigation', { name: 'Workflow stages' }).getByRole('button', { name, exact: true }).click();
+const tab = async (page: Page, name: EditorSection) => {
+  await openEditorSection(page, name);
   if (name === 'Simulate') await openSimulationDetails(page);
 };
 

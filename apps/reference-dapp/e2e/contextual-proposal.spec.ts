@@ -3,7 +3,7 @@ import { test, expect } from './fixtures';
 import type { Page } from '@playwright/test';
 import { installSupplyWallet, SUPPLY_OWNER } from './supply-fixtures';
 import { configureCanvasAction } from './composer-authoring-fixtures';
-import { openBuilder } from './build-entry-navigation';
+import { openBuilder, openEditorSection } from './build-entry-navigation';
 
 const artifact = (page: Page) => page.getByRole('button', { name: /^Review proposed change:/ });
 const popover = (page: Page) => page.getByRole('dialog', { name: 'Proposed change' });
@@ -120,9 +120,9 @@ for (const theme of ['light', 'dark']) {
     await popover(page).getByRole('button', { name: 'Dismiss proposal' }).click();
     expect(await page.locator('.composer-card').allTextContents()).toEqual(applied);
     await propose(page, '0.4', '0.04'); await artifact(page).click();
-    await page.getByRole('navigation', { name: 'Workflow stages' }).getByRole('button', { name: 'Simulate', exact: true }).click();
+    await openEditorSection(page, 'Simulate');
     await expect(popover(page)).toHaveCount(0);
-    await page.getByRole('navigation', { name: 'Workflow stages' }).getByRole('button', { name: 'Build', exact: true }).click();
+    await openEditorSection(page, 'Build');
     await expect(artifact(page)).toBeVisible(); await artifact(page).click();
     await expect(popover(page)).toContainText('Supply 0.4 USDC');
     await page.keyboard.press('Escape');

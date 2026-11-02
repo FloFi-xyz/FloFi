@@ -2,14 +2,13 @@
 import { test, expect, assertNoFinancialCanvasAction } from './fixtures';
 import { configureCanvasAction } from './composer-authoring-fixtures';
 import { installSupplyWallet } from './supply-fixtures';
-import { openBuilder } from './build-entry-navigation';
+import { openBuilder, openEditorSection } from './build-entry-navigation';
 
 test('Simulate and Execute open directly on existing content without a workspace introduction', async ({ page }) => {
   await installSupplyWallet(page);
   await openBuilder(page);
-  const nav = page.getByRole('navigation', { name: 'Workflow stages' });
   const execution = page.getByRole('main', { name: 'Execution workspace', exact: true });
-  await nav.getByRole('button', { name: 'Execute', exact: true }).click();
+  await openEditorSection(page, 'Execute');
   await expect(execution).toBeVisible();
   await expect(execution.locator('.workspace-heading, .workflow-context, .page-heading, .stage-current, .stage-guidance, #workspace-title')).toHaveCount(0);
   await expect(execution.getByRole('heading', { name: 'Execute', exact: true })).toHaveCount(0);
@@ -20,14 +19,14 @@ test('Simulate and Execute open directly on existing content without a workspace
   await expect(execution.getByRole('button', { name: 'Return to Build', exact: true })).toHaveCount(0);
   await expect(execution.getByRole('region', { name: 'Execute unavailable', exact: true })).toHaveCount(0);
   await assertNoFinancialCanvasAction(page);
-  await nav.getByRole('button', { name: 'Simulate', exact: true }).click();
+  await openEditorSection(page, 'Simulate');
   const main = page.getByRole('main', { name: 'Simulation workspace', exact: true });
   await expect(main).toBeVisible();
   await expect(main.locator('.workspace-heading, .workflow-context, .page-heading, .stage-current, .stage-guidance, #workspace-title')).toHaveCount(0);
   await expect(main.getByRole('region', { name: 'Simulation workflow graph', exact: true })).toBeVisible();
   await expect(main.getByRole('heading', { name: 'Prepare your workflow', exact: true })).toHaveCount(0);
   await expect(main.locator(':scope > :first-child')).toHaveAttribute('aria-label', 'Workflow simulation workspace');
-  await nav.getByRole('button', { name: 'Build', exact: true }).click();
+  await openEditorSection(page, 'Build');
   await page.getByRole('button', { name: 'Add supply', exact: true }).click();
   await configureCanvasAction(page, '1');
   await page.getByRole('button', { name: 'Simulate workflow', exact: true }).click();
@@ -42,7 +41,7 @@ test('Simulate and Execute open directly on existing content without a workspace
   await expect(main.getByRole('region', { name: 'Aave Supply', exact: true })).toHaveCount(0);
   await expect(main.getByRole('complementary', { name: 'Simulation Summary', exact: true }).getByRole('button', { name: 'Review Supply', exact: true })).toHaveCount(0);
   await expect(page.locator('.summary-bar')).toHaveAttribute('data-workflow-revision', '1');
-  await nav.getByRole('button', { name: 'Execute', exact: true }).click();
+  await openEditorSection(page, 'Execute');
   await expect(execution).toBeVisible();
   await expect(execution.locator('.workspace-heading, .workflow-context, .page-heading, .stage-current, .stage-guidance, #workspace-title')).toHaveCount(0);
   await expect(execution.getByRole('heading', { name: 'Execute', exact: true })).toHaveCount(0);
@@ -52,7 +51,7 @@ test('Simulate and Execute open directly on existing content without a workspace
   await expect(execution.locator('.canvas-primary-action').getByRole('button', { name: 'Authorize in wallet', exact: true })).toBeDisabled();
   await expect(execution.getByRole('button', { name: 'Accept Supply review', exact: true })).toHaveCount(0);
   await expect(execution.getByRole('button', { name: /^(Execute|Execute Supply)$/ })).toHaveCount(0);
-  await nav.getByRole('button', { name: 'Build', exact: true }).click();
+  await openEditorSection(page, 'Build');
   await expect(page.locator('.build-grid .canvas-head h2')).toBeVisible();
   await expect(page.locator('.canvas-primary-action').getByRole('button', { name: 'Authorize in wallet', exact: true })).toBeDisabled();
   await expect(page.locator('.composer-card.active')).toHaveCount(1);

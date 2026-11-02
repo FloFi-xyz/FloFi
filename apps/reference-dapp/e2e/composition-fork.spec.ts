@@ -5,6 +5,7 @@ import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { test, expect, compositionEnabled, profile, snapshot, injectWallet, authorComposition } from './composition-fixtures';
+import { openEditorSection } from './build-entry-navigation';
 const workerPath = fileURLToPath(new URL('./fork/composition-harness.mjs', import.meta.url));
 const verifierPath = fileURLToPath(new URL('./fork/composition-verify-manual-wallet.mjs', import.meta.url));
 function workerOnce(): Promise<string> {
@@ -25,7 +26,7 @@ test('review exact owner setup, complete with browser closed, reconcile Safe NFT
   const wallet = await injectWallet(page);
   try {
     await authorComposition(page);
-    await page.getByRole('navigation', { name: 'Workflow stages' }).getByRole('button', { name: 'Execute', exact: true }).click();
+    await openEditorSection(page, 'Execute');
     const panel = page.getByRole('region', { name: 'Mode B swap to liquidity composition' });
     await expect(panel).toContainText(profile().environment === 'FORK_REPRODUCED'
       ? 'Recorded Base state is replayed locally.' : 'Synthetic Base-like source state is used for this mocked test.');
@@ -53,7 +54,7 @@ test('review exact owner setup, complete with browser closed, reconcile Safe NFT
     }
     expect(final).toContain('MINT RECONCILED');
     await page.goto('/__engineering');
-    await page.getByRole('navigation', { name: 'Workflow stages' }).getByRole('button', { name: 'Execute', exact: true }).click();
+    await openEditorSection(page, 'Execute');
     const recovered = page.getByRole('region', { name: 'Mode B swap to liquidity composition' });
     await expect(recovered).toContainText('prior execution was loaded after browser restart');
     await expect(recovered).toContainText('Reconciled Safe-owned position NFT #');

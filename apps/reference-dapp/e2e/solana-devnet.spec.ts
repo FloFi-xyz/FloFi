@@ -2,6 +2,7 @@
 import { test, expect, chooseWallet, openSimulationDetails, acceptProductReview } from './fixtures';
 import { MOCKED_SOLANA_WALLET, chooseSolanaWallet, decoyWalletCalls, signChains, signRequests } from './jupiter-fixtures';
 import { authorDevnetSwap, devnetControl, devnetPanel as panel, installDevnetWallet, resetDevnetHarness, reviewDevnetSwap } from './solana-devnet-fixtures';
+import { openEditorSection } from './build-entry-navigation';
 
 // MOCKED Devnet loopback only: these runs prove the UX and fail-closed paths, never DEVNET_EXECUTED.
 test.afterEach(async ({ page }, info) => { if (info.status !== info.expectedStatus) console.error('Devnet failure:', await panel(page).locator('pre').textContent().catch(() => 'no panel')); });
@@ -83,12 +84,12 @@ test('a stale Devnet Review cannot be executed, and a semantic edit invalidates 
   await devnetControl({ action: 'advance', blocks: 140 });
   await panel(page).getByRole('button', { name: 'Execute swap' }).click();
   await expect(panel(page).getByRole('status')).toContainText('This quote has expired');
-  await page.getByRole('button', { name: 'Build', exact: true }).click();
+  await openEditorSection(page, 'Build');
   await page.locator('.react-flow__node[data-id="node-002"] .flow-card').click();
   const form = page.getByRole('form', { name: 'Edit Solana Devnet swap' });
   await form.getByLabel('Amount').fill('0.2'); await form.getByRole('button', { name: 'Review swap change' }).click();
   await page.getByRole('button', { name: 'Apply proposal' }).click();
-  await page.getByRole('navigation', { name: 'Workflow stages' }).getByRole('button', { name: 'Execute', exact: true }).click();
+  await openEditorSection(page, 'Execute');
   await expect(panel(page)).toContainText('The workflow changed. Prior authorization is invalid.');
   await expect(panel(page).getByRole('button', { name: 'Execute swap' })).toHaveCount(0);
   expect(await signRequests(page)).toBe(0); expect(await devnetControl({ action: 'sent' })).toBe(0);
@@ -106,7 +107,7 @@ test('a dropped Devnet transaction survives reload and resolves as expired, neve
   await panel(page).getByRole('button', { name: 'Execute swap' }).click();
   await expect(panel(page)).toContainText('Swap: pending');
   await page.reload();
-  await page.getByRole('navigation', { name: 'Workflow stages' }).getByRole('button', { name: 'Execute', exact: true }).click();
+  await openEditorSection(page, 'Execute');
   await expect(panel(page).getByRole('button', { name: 'Observe existing transaction' })).toBeVisible();
   await devnetControl({ action: 'advance', blocks: 200 });
   await panel(page).getByRole('button', { name: 'Observe existing transaction' }).click();

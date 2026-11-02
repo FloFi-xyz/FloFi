@@ -4,7 +4,7 @@ import { selectSettingsTheme } from './settings-fixtures';
 import type { Locator } from '@playwright/test';
 import { installSupplyWallet } from './supply-fixtures';
 import { configureCanvasAction } from './composer-authoring-fixtures';
-import { openBuilder } from './build-entry-navigation';
+import { expectEditorSection, openBuilder, openEditorSection } from './build-entry-navigation';
 
 type Box = { x: number; y: number; width: number; height: number };
 const right = (box: Box) => box.x + box.width;
@@ -53,7 +53,6 @@ for (const theme of ['Light', 'Dark'] as const) for (const layout of ['standard'
       await page.getByRole('button', { name: 'Undock toolbar', exact: true }).click();
       await expect(page.locator('main')).toHaveAttribute('data-workspace-toolbox', 'floating');
     }
-    const nav = page.getByRole('navigation', { name: 'Workflow stages' });
     const canvas = page.locator('main :is(.build-grid,.simulate-workspace-grid,.execute-workspace-grid) > .canvas').first();
     const graph = canvas.locator('.flow-surface');
     const wallet = page.getByRole('group', { name: 'Wallet connection', exact: true });
@@ -63,7 +62,7 @@ for (const theme of ['Light', 'Dark'] as const) for (const layout of ['standard'
     const measurements = [];
     for (const width of [1440, 1024, 375, 320]) {
       await page.setViewportSize({ width, height: 900 });
-      await nav.getByRole('button', { name: 'Build', exact: true }).click();
+      await openEditorSection(page, 'Build');
       await expect(canvas).toBeVisible();
       const expectedHeight = layout === 'floating' ? 760 : layout === 'lending' || width <= 800 ? 820 : 590;
       await expect(canvas).toHaveCSS('height', `${expectedHeight}px`);
@@ -73,8 +72,8 @@ for (const theme of ['Light', 'Dark'] as const) for (const layout of ['standard'
       await expect(page.locator('.summary-bar')).toHaveAttribute('data-workflow-revision', '1');
       const buildAmounts = await graph.locator('.composer-card input').evaluateAll(inputs => inputs.map(input => (input as HTMLInputElement).value));
       for (const stage of ['Build', 'Simulate', 'Execute'] as const) {
-        if (stage !== 'Build') await nav.getByRole('button', { name: stage, exact: true }).click();
-        await expect(nav.getByRole('button', { name: stage, exact: true })).toHaveAttribute('aria-current', 'page');
+        if (stage !== 'Build') await openEditorSection(page, stage);
+        await expectEditorSection(page, stage);
         await expect(canvas).toBeVisible();
         if (stage !== 'Build') {
           await expect(graph).toHaveAttribute('data-viewport', 'fitted');
@@ -124,8 +123,8 @@ for (const theme of ['Light', 'Dark'] as const) for (const layout of ['standard'
           await canvas.screenshot({ path: `.tmp/ux007-team1-${stage.toLowerCase()}-${theme.toLowerCase()}-${width}.png` });
         }
       }
-      await nav.getByRole('button', { name: 'Build', exact: true }).click();
-      await expect(nav.getByRole('button', { name: 'Build', exact: true })).toHaveAttribute('aria-current', 'page');
+      await openEditorSection(page, 'Build');
+      await expectEditorSection(page, 'Build');
       expect(await graph.locator('.composer-card input').evaluateAll(inputs => inputs.map(input => (input as HTMLInputElement).value))).toEqual(buildAmounts);
       await expect(page.locator('.summary-bar')).toHaveAttribute('data-workflow-revision', '1');
       if (layout === 'floating') await expect(graph.locator('.floating-toolbox')).toBeVisible();

@@ -10,11 +10,10 @@ import type { APIRequestContext, Page } from '@playwright/test';
 import { test, expect, readWorkflowIr } from './fixtures';
 import { installJourneyWallet, walletRequests } from './journey-fixtures';
 import { createTestWallet } from '../../../packages/reference-reconciler/test/test-wallet';
-import { openBuilder } from './build-entry-navigation';
+import { expectEditorSection, openBuilder, openEditorSection } from './build-entry-navigation';
 
 test.skip(process.env.FLOFI_SWAP_EXECUTION_E2E !== 'MOCKED_LOOPBACK_ONLY', 'Requires the opt-in loopback swap execution harness');
 test.setTimeout(120_000);
-const stage = (page: Page, name: 'Build' | 'Simulate' | 'Execute') => page.getByRole('navigation', { name: 'Workflow stages' }).getByRole('button', { name, exact: true });
 /** The conversation log (by class: its accessible name is translated in Portuguese). */
 const chat = (page: Page) => page.locator('.chat-messages[role="log"]');
 /** FloFi's latest message. BUILD0-UX-001: the chat has no execution report card; the class stays excluded for older builds' markup. */
@@ -83,7 +82,7 @@ async function chatReview(page: Page, option = 'Review workflow') {
   await pick(page, option);
   await expect(chat(page)).toContainText(/Simulating your workflow|Simulando o seu workflow/);
   await expect(flofi(page)).toContainText(/Do you confirm this workflow\?|Você confirma este workflow\?/, { timeout: 30_000 });
-  await expect(stage(page, 'Build')).toHaveAttribute('aria-current', 'page');
+  await expectEditorSection(page, 'Build');
 }
 
 test('Build 0 request → card at once → Review in chat → workflow confirmation → separate execution confirmation → wallet → reconciliation', async ({ page, request, networkGuard }) => {
@@ -92,7 +91,7 @@ test('Build 0 request → card at once → Review in chat → workflow confirmat
   // BUILD0-UX-001: the first request is typed in Build 0; the same conversation commits it and continues in the Build 1 chat.
   await page.locator('#build-entry-request').fill('swap 1 USDC to WETH on Base Sepolia slippage 50 bps');
   await page.getByRole('button', { name: 'Create strategy', exact: true }).click();
-  await expect(stage(page, 'Build')).toHaveAttribute('aria-current', 'page');
+  await expectEditorSection(page, 'Build');
   await expect(chat(page).locator('.message.you > p')).toHaveText(['swap 1 USDC to WETH on Base Sepolia slippage 50 bps']);
   await expect(flofi(page)).toContainText('Swap added to your workflow: 1 USDC');
   await expect(flofi(page)).toContainText('Would you like to add another action or review your workflow?');
@@ -110,11 +109,11 @@ test('Build 0 request → card at once → Review in chat → workflow confirmat
   // BUILD-FLOFI-BRIDGE-LIVE-FIX-003: the compact Review names it "Expected receipt" (the quote kind is the small note under the value).
   const quoted = (await review.locator('dt', { hasText: 'Expected receipt' }).first().locator('xpath=following-sibling::dd').evaluate(dd => dd.firstChild?.textContent ?? '')).trim();
   expect(quoted).toMatch(/^\d+(\.\d+)? WETH$/);
-  await stage(page, 'Simulate').click();
+  await openEditorSection(page, 'Simulate');
   await expect(page.locator('.simulation-summary')).toContainText(quoted.split(' ')[0]!);
   // The conversation survives stage navigation, with its open question.
   const messages = await chat(page).locator('.message').count();
-  await stage(page, 'Execute').click(); await stage(page, 'Build').click();
+  await openEditorSection(page, 'Execute'); await openEditorSection(page, 'Build');
   await expect(chat(page).locator('.message')).toHaveCount(messages);
   await expect(page.locator('.copilot')).toHaveAttribute('data-conversation-phase', 'AWAITING_WORKFLOW_CONFIRMATION');
   // An unclear answer changes nothing.
@@ -144,7 +143,7 @@ test('Build 0 request → card at once → Review in chat → workflow confirmat
   await expect(chat(page).locator('a[href*="/tx/"], code, .conversation-execution-operations')).toHaveCount(0);
   await expect(chat(page)).not.toContainText(/steps confirmed|Current step|Action transaction|Approval transaction/);
   await page.screenshot({ path: '.tmp/build0-chat-after-execution.png' });
-  await stage(page, 'Execute').click();
+  await openEditorSection(page, 'Execute');
   await expect(page.locator('.execution-status-panel')).toContainText('Execution completed');
   await page.screenshot({ path: '.tmp/build0-execute-result.png', fullPage: true });
   await expect(page.locator('.execution-status-panel')).toContainText('1 of 1');
@@ -229,7 +228,7 @@ test('an unresolved wallet response restored after reload is followed read-only:
   const sends = await owner.sends();
   await page.reload();
   // BUILD0-UX-001: the recovered run never stays behind Build 0: the visit opens Build 1 with the chat following it.
-  await expect(stage(page, 'Build')).toHaveAttribute('aria-current', 'page', { timeout: 30_000 });
+  await expectEditorSection(page, 'Build', { timeout: 30_000 });
   await expect(chat(page)).toContainText('FloFi restored this workflow’s execution from its saved record.', { timeout: 30_000 });
   await expect(flofi(page)).toContainText(/unresolved|uncertain/i);
   await expect(executionCard(page)).toHaveCount(0);
@@ -257,7 +256,9 @@ for (const viewport of [{ width: 1440, height: 1000 }, { width: 390, height: 844
   await expect(flofi(page)).toContainText('Nada foi assinado nem enviado.');
   expect(owner.requested()).toBe(0);
   // The chat stays usable on every stage, and the layout never scrolls sideways.
-  await page.locator('nav.tabs button', { hasText: 'Simular' }).click();
+  // BUILD-FLOFI-CHAT-EDITOR-UX-001: Simulate is the Editor's simulation section, opened from the Editor's footer ("Ver simulação").
+  await page.locator('nav.tabs button', { hasText: 'Editor' }).click();
+  await page.locator('footer.summary-bar button', { hasText: 'Ver simulação' }).click();
   await expect(page.locator('.stage-with-chat #mock-prompt')).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(0);
   networkGuard.assertClean();

@@ -8,11 +8,11 @@ import { createDatabase } from '@defi-workflow-engine/cloud-runtime';
 import { hashArtifactBytes } from '@defi-workflow-engine/workflow-contracts';
 import { validateArtifact } from '@defi-workflow-engine/workflow-contracts/schemas';
 import { validatePublicRunLog, type PublicRun } from '../src/server/public-testnet-service';
-import { openBuilder, reloadBuilder } from './build-entry-navigation';
+import { type EditorSection, openBuilder, openEditorSection, reloadBuilder } from './build-entry-navigation';
 
 test.skip(process.env.FLOFI_SWAP_EXECUTION_E2E !== 'MOCKED_LOOPBACK_ONLY', 'Requires the opt-in loopback swap execution harness');
 test.setTimeout(90_000);
-const stage = (page: Page, name: 'Build' | 'Simulate' | 'Execute') => page.getByRole('navigation', { name: 'Workflow stages' }).getByRole('button', { name, exact: true }).click();
+const stage = (page: Page, name: EditorSection) => openEditorSection(page, name);
 const summary = (page: Page) => page.locator('.execution-summary');
 const falseWalletChange = 'Wallet changed. Simulate and review this workflow again with the connected wallet.';
 const pointer = (page: Page) => page.evaluate(() => localStorage.getItem('gryloo:public-testnet-execution-id'));

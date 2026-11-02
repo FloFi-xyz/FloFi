@@ -3,7 +3,7 @@
 import { test, expect, chooseWallet, openProposalReview, openSimulationDetails } from './fixtures';
 import type { Page } from '@playwright/test';
 import { lendingRpc, resetLending, LENDING_OWNER } from './lending-fixtures';
-import { openBuilder } from './build-entry-navigation';
+import { openBuilder, openEditorSection } from './build-entry-navigation';
 
 type Request = { provider: string; method: string; params?: unknown[] };
 type Controls = { requests: Request[]; announceMetaMask(): void; emit(provider: string, event: string, value: unknown): void;
@@ -64,7 +64,7 @@ async function approveAndExecutePoolApproval(page: Page) {
   await page.getByRole('button', { name: 'Approve & Continue', exact: true }).click();
   await expect(page.getByRole('button', { name: 'Review approved', exact: true })).toBeVisible();
   expect((await controls(page)).filter(request => request.method === 'eth_sendTransaction')).toHaveLength(0);
-  await page.getByRole('navigation', { name: 'Workflow stages' }).getByRole('button', { name: 'Execute', exact: true }).click();
+  await openEditorSection(page, 'Execute');
   await page.getByRole('button', { name: 'Execute workflow', exact: true }).click();
   await expect(page.locator('.execution-operation.execution-state-confirmed')).toHaveCount(1);
 }

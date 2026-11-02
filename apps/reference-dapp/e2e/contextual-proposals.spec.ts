@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import type { Page } from '@playwright/test';
 import { test, expect, openProposalReview, applyPendingProposal, sendChatCommand, installPassiveWallet, assertPassiveWallet, assertNoFinancialCanvasAction } from './fixtures';
-import { openBuilder } from './build-entry-navigation';
+import { openBuilder, openEditorSection } from './build-entry-navigation';
 
 test.beforeEach(async ({ page }) => { await installPassiveWallet(page, '0x14a34'); await openBuilder(page); });
 test.afterEach(async ({ page }) => { await assertPassiveWallet(page); });
@@ -53,7 +53,7 @@ test('a three-step chat composition commits atomically and grants no financial a
   await expect(page.locator('.build-flow-surface .composer-card')).toHaveCount(3);
   await expect(page.locator('.react-flow__edge')).toHaveCount(2);
   await expect(page.getByRole('button', { name: /^Review proposed change:/ })).toHaveCount(0);
-  await page.getByRole('navigation', { name: 'Workflow stages' }).getByRole('button', { name: 'Execute', exact: true }).click();
+  await openEditorSection(page, 'Execute');
   await assertNoFinancialCanvasAction(page);
   await expect(page.getByRole('button', { name: 'Authorize in wallet', exact: true })).toHaveCount(0);
   await expect(page.getByRole('link', { name: 'Download Evidence Bundle' })).toHaveCount(0);

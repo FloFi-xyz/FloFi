@@ -3,7 +3,7 @@ import { test, expect } from './fixtures';
 import { installSupplyWallet } from './supply-fixtures';
 import { configureCanvasAction } from './composer-authoring-fixtures';
 import type { Page } from '@playwright/test';
-import { openBuilder } from './build-entry-navigation';
+import { expectProductSection, openBuilder, openProductSection } from './build-entry-navigation';
 
 async function geometry(page: Page) {
   return page.evaluate(() => {
@@ -76,15 +76,14 @@ for (const theme of ['light', 'dark'] as const) {
     await page.evaluate(() => document.fonts.ready);
     await page.getByRole('button', { name: 'Add supply', exact: true }).click();
     await configureCanvasAction(page, '1');
-    const stages = page.getByRole('navigation', { name: 'Workflow stages' });
     const trigger = page.locator('.navigation-trigger');
     const drawer = page.locator('.navigation-drawer');
     const measurements: Record<string, Awaited<ReturnType<typeof geometry>>> = {};
     for (const width of [320, 375, 768, 1024, 1440]) {
       await page.setViewportSize({ width, height: 900 });
       for (const stage of ['Build', 'Simulate', 'Execute', 'Dashboard'] as const) {
-        await stages.getByRole('button', { name: stage, exact: true }).click();
-        await expect(stages.getByRole('button', { name: stage, exact: true })).toHaveAttribute('aria-current', 'page');
+        await openProductSection(page, stage);
+        await expectProductSection(page, stage);
         if (stage === 'Dashboard') await expect(page.locator('.dashboard-loading')).toHaveCount(0);
         await page.evaluate(() => window.scrollTo(0, 0));
         const before = await geometry(page);

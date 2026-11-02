@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { test, expect, applyPendingProposal, chooseWallet, openSimulationDetails, assertNoFinancialCanvasAction } from './fixtures';
+import { openEditorSection } from './build-entry-navigation';
 const OWNER = '0x1111111111111111111111111111111111111111';
 test('BUILD-009 passive wallet restoration and read-only quote cannot grant production execution', async ({ page }) => {
   test.setTimeout(180_000);
@@ -37,12 +38,12 @@ test('BUILD-009 passive wallet restoration and read-only quote cannot grant prod
   await applyPendingProposal(page);
   await expect(page.getByText('Workflow network: Base (8453)', { exact: true })).toBeVisible();
   await expect(page.getByText('0x1111…1111')).toBeVisible();
-  await page.getByRole('button', { name: 'Simulate', exact: true }).click();
+  await openEditorSection(page, 'Simulate');
   await openSimulationDetails(page);
   const panel = page.getByRole('region', { name: 'Base to Arbitrum bridge and swap' });
   await panel.getByRole('button', { name: 'Get live Base → Arbitrum LI.FI bridge quote' }).click();
   await expect(panel.locator('[data-build009-state]')).toContainText('BRIDGE_QUOTED', { timeout: 30_000 });
-  await page.getByRole('button', { name: 'Execute', exact: true }).click();
+  await openEditorSection(page, 'Execute');
   // The old direct-demo partial lifecycle is covered by domain/build009-run.test.ts.
   // Production Execute requires a supported simulation and shared Review/Manifest.
   await assertNoFinancialCanvasAction(page);
@@ -52,7 +53,7 @@ test('BUILD-009 passive wallet restoration and read-only quote cannot grant prod
   await page.reload();
   await expect(page.getByText('0x1111…1111')).toBeVisible();
   expect(await page.evaluate(() => (window as unknown as { __build009WalletTest: { accountRequests: number } }).__build009WalletTest.accountRequests)).toBe(0);
-  await page.getByRole('button', { name: 'Execute', exact: true }).click();
+  await openEditorSection(page, 'Execute');
   await assertNoFinancialCanvasAction(page);
   await expect(page.getByRole('link', { name: 'Download Evidence Bundle' })).toHaveCount(0);
   await page.getByRole('button', { name: 'Settings', exact: true }).click();
@@ -93,7 +94,7 @@ test('BUILD-009 switches back to Base and invalidates quote on chain/account/pro
   await expect(page.getByRole('button', { name: 'Switch to Base (8453)' })).toBeVisible();
   await page.getByRole('button', { name: 'Switch to Base (8453)' }).click();
   await expect(page.getByText('0x1111…1111')).toBeVisible();
-  await page.getByRole('button', { name: 'Simulate', exact: true }).click();
+  await openEditorSection(page, 'Simulate');
   await openSimulationDetails(page);
   const panel = page.getByRole('region', { name: 'Base to Arbitrum bridge and swap' });
   await panel.getByRole('button', { name: 'Get live Base → Arbitrum LI.FI bridge quote' }).click();

@@ -5,6 +5,7 @@ import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { test, expect, compositionEnabled, profile, snapshot, injectWallet, authorComposition } from './composition-fixtures';
+import { openEditorSection } from './build-entry-navigation';
 const worker = fileURLToPath(new URL('./fork/composition-harness.mjs', import.meta.url));
 const once = () => new Promise<string>((resolve, reject) => {
   const process = spawn(globalThis.process.execPath, [worker, 'composition-worker-once'], { stdio: ['ignore', 'pipe', 'pipe'],
@@ -21,7 +22,7 @@ test('restart resumes known pending hashes without duplicate sends', async ({ pa
   const wallet = await injectWallet(page);
   try {
     const panel = await authorComposition(page);
-    await page.getByRole('navigation', { name: 'Workflow stages' }).getByRole('button', { name: 'Execute', exact: true }).click();
+    await openEditorSection(page, 'Execute');
     await panel.getByRole('button', { name: 'Connect disposable owner wallet' }).click();
     await panel.getByRole('button', { name: 'I reviewed this finite authority' }).click();
     const id = readdirSync(profile().journalDir).find(name => /^exec-[0-9a-f]{24}$/.test(name))!;

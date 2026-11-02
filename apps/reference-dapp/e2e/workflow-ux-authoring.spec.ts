@@ -8,7 +8,7 @@ import { hashArtifactBytes, type SemanticWorkflow } from '@defi-workflow-engine/
 import { test, expect, assertPassiveWallet, installPassiveWallet, readWorkflowIr, sendChatCommand, CHAT_COMMITTED } from './fixtures';
 import { replayProviderLogos } from './asset-logo-replay';
 import { composeStrategy } from '../src/engine/strategy-engine';
-import { openBuilder } from './build-entry-navigation';
+import { expectEditorSection, openBuilder } from './build-entry-navigation';
 
 test.skip(process.env.FLOFI_WORKFLOW_UX_AUTHORING_E2E !== 'MOCKED_LOOPBACK_ONLY', 'Runs under playwright.workflow-ux.config.ts');
 // The EIP-55 reference vector (mixed case) and the same address with one letter's case flipped (checksum fails).
@@ -225,7 +225,7 @@ test.describe('UX-007 fast live quote feedback', () => {
     // Estimation only: the draft is not applied, simulated, reviewed or signed.
     await expect(revision(page)).toHaveAttribute('data-workflow-revision', '0');
     await expect(page.getByRole('complementary', { name: 'Simulation Summary' })).toHaveCount(0);
-    await expect(page.getByRole('navigation', { name: 'Workflow stages' }).getByRole('button', { name: 'Build', exact: true })).toHaveAttribute('aria-current', 'page');
+    await expectEditorSection(page, 'Build');
     await assertPassiveWallet(page); networkGuard.assertClean();
   });
 

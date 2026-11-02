@@ -2,7 +2,7 @@
 import { test, expect } from './fixtures';
 import { installSupplyWallet } from './supply-fixtures';
 import { openCanvasSettings } from './composer-authoring-fixtures';
-import { openBuilder } from './build-entry-navigation';
+import { editorSectionAction, expectEditorSection, openBuilder, openEditorSection } from './build-entry-navigation';
 
 for (const action of ['swap', 'bridge', 'supply', 'borrow', 'repay', 'withdraw'] as const) test(`${action} uses consistent zero replacement, decimal entry and empty-on-blur behavior`, async ({ page }) => {
   await installSupplyWallet(page); await openBuilder(page);
@@ -30,12 +30,11 @@ for (const action of ['swap', 'bridge', 'supply', 'borrow', 'repay', 'withdraw']
   await expect(source).toHaveValue('0'); await expect(source).toHaveAttribute('placeholder', '0');
   await expect(revision).toHaveAttribute('data-workflow-revision', '0');
   await expect(page.getByRole('button', { name: 'Simulate workflow', exact: true })).toBeDisabled();
-  const stages = page.getByRole('navigation', { name: 'Workflow stages' });
-  for (const stage of ['Simulate', 'Execute']) {
-    const button = stages.getByRole('button', { name: stage, exact: true });
+  for (const stage of ['Simulate', 'Execute'] as const) {
+    const button = editorSectionAction(page, stage);
     await expect(button).toBeDisabled(); await button.dispatchEvent('click');
   }
-  await expect(stages.getByRole('button', { name: 'Build', exact: true })).toHaveAttribute('aria-current', 'page');
+  await expectEditorSection(page, 'Build');
 
   // Clicking the zero and even moving the caret before it must replace it, not produce 50500.
   await source.click(); await source.press('ArrowLeft'); await source.pressSequentially('005050');
@@ -96,7 +95,7 @@ for (const action of ['swap', 'bridge', 'supply', 'borrow', 'repay', 'withdraw']
   await expect(revision).toHaveAttribute('data-workflow-revision', '1');
   await accept('1'); await expect(source).toHaveValue(replacement);
   await expect(revision).toHaveAttribute('data-workflow-revision', '2');
-  await page.getByRole('navigation', { name: 'Workflow stages' }).getByRole('button', { name: 'Simulate', exact: true }).click();
+  await openEditorSection(page, 'Simulate');
   await expect(page.locator('.simulate-flow-surface .composer-amount')).toHaveText(`${replacement} USDC`);
   expect(await page.evaluate(() => (window as unknown as { supplyWalletRequests: { method: string }[] }).supplyWalletRequests.filter(request => request.method === 'eth_sendTransaction' || request.method.startsWith('eth_sign') || request.method.startsWith('personal_sign')))).toEqual([]);
 });

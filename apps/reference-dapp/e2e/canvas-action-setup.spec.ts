@@ -3,7 +3,7 @@ import { test, expect, readWorkflowIr } from './fixtures';
 import { installSupplyWallet } from './supply-fixtures';
 import { configureCanvasAction, openCanvasSettings } from './composer-authoring-fixtures';
 import type { Page } from '@playwright/test';
-import { openBuilder } from './build-entry-navigation';
+import { editorSectionAction, expectEditorSection, openBuilder, openEditorSection } from './build-entry-navigation';
 
 const card = (page: Page) => page.locator('.build-flow-surface .composer-card');
 async function readWorkflow(page: Page) {
@@ -11,13 +11,12 @@ async function readWorkflow(page: Page) {
   return workflow.nodes.some(node => !node.actionType.startsWith('mock-')) ? workflow : null;
 }
 async function expectBlocked(page: Page) {
-  const nav = page.getByRole('navigation', { name: 'Workflow stages' });
-  await expect(nav.getByRole('button', { name: 'Simulate', exact: true })).toBeDisabled();
-  await expect(nav.getByRole('button', { name: 'Execute', exact: true })).toBeDisabled();
+  await expect(editorSectionAction(page, 'Simulate')).toBeDisabled();
+  await expect(editorSectionAction(page, 'Execute')).toBeDisabled();
   await expect(page.getByRole('button', { name: 'Simulate workflow', exact: true })).toBeDisabled();
-  await nav.getByRole('button', { name: 'Simulate', exact: true }).dispatchEvent('click');
-  await nav.getByRole('button', { name: 'Execute', exact: true }).dispatchEvent('click');
-  await expect(nav.getByRole('button', { name: 'Build', exact: true })).toHaveAttribute('aria-current', 'page');
+  await editorSectionAction(page, 'Simulate').dispatchEvent('click');
+  await editorSectionAction(page, 'Execute').dispatchEvent('click');
+  await expectEditorSection(page, 'Build');
   await expect(page.getByRole('main', { name: 'Simulation workspace', exact: true })).toHaveCount(0);
   await expect(page.getByRole('main', { name: 'Execution workspace', exact: true })).toHaveCount(0);
 }
@@ -68,9 +67,9 @@ for (const action of ['swap', 'bridge'] as const) test(`${action} starts unconfi
   await expect(source).toHaveValue('2.5');
   // Authoring enables stage inspection; this supply-only harness cannot simulate Swap/Router.
   await expect(page.getByRole('button', { name: 'Simulate workflow', exact: true })).toBeDisabled();
-  await expect(page.getByRole('navigation', { name: 'Workflow stages' }).getByRole('button', { name: 'Simulate', exact: true })).toBeEnabled();
+  await expect(editorSectionAction(page, 'Simulate')).toBeEnabled();
   await expect(card(page)).toHaveClass(/active/);
-  await page.getByRole('navigation', { name: 'Workflow stages' }).getByRole('button', { name: 'Simulate', exact: true }).click();
+  await openEditorSection(page, 'Simulate');
   await expect(page.getByRole('main', { name: 'Simulation workspace', exact: true })).toBeVisible();
   await expect(page.locator('.simulate-flow-surface .composer-amount')).toHaveText('2.5 USDC');
 });
@@ -93,7 +92,7 @@ test('clearing an existing amount blocks both later stages without sending zero 
   await expect(source).toHaveValue('2');
   // Authoring enables stage inspection; this supply-only harness cannot simulate Swap/Router.
   await expect(page.getByRole('button', { name: 'Simulate workflow', exact: true })).toBeDisabled();
-  await expect(page.getByRole('navigation', { name: 'Workflow stages' }).getByRole('button', { name: 'Simulate', exact: true })).toBeEnabled();
+  await expect(editorSectionAction(page, 'Simulate')).toBeEnabled();
   expect(await readWorkflow(page)).toEqual(original);
 });
 
@@ -139,6 +138,6 @@ test('a new isolated Bridge cannot replace an already-configured workflow throug
   await expect(card(page).getByRole('textbox', { name: 'Source amount (USDC)', exact: true })).toHaveValue('2');
   // Authoring enables stage inspection; this supply-only harness cannot simulate Swap/Router.
   await expect(page.getByRole('button', { name: 'Simulate workflow', exact: true })).toBeDisabled();
-  await expect(page.getByRole('navigation', { name: 'Workflow stages' }).getByRole('button', { name: 'Simulate', exact: true })).toBeEnabled();
+  await expect(editorSectionAction(page, 'Simulate')).toBeEnabled();
   expect(await readWorkflow(page)).toEqual(original);
 });
