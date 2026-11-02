@@ -84,7 +84,9 @@ CAPABILITY_PATTERNS = {
     "subprocess": re.compile(r"""['"](?:node:)?child_process['"]|\bexecSync\s*\(|\bspawnSync\s*\("""),
     "dynamic-code": re.compile(r"""\beval\s*\(|\bnew\s+Function\s*\("""),
     "environment": re.compile(r"""\bprocess\.env\b"""),
-    "credential-access": re.compile(r"""(?:\.npmrc|NPM_TOKEN|NODE_AUTH_TOKEN|GITHUB_TOKEN|GH_TOKEN|AWS_SECRET_ACCESS_KEY|\.aws/credentials|\.ssh/id_(?:rsa|ed25519)|\.config/gcloud|JSON\.stringify\(\s*process\.env\s*\)|Object\.(?:keys|entries)\(\s*process\.env\s*\))"""),
+    # Specific credential stores and whole-environment serialization only. Enumerating process.env (debug's DEBUG_* options,
+    # framework env prefixes) is routine and matched 8 benign packages of the real graph; this pattern matches 1 (vite).
+    "credential-access": re.compile(r"""(?:\.npmrc\b|\bNPM_TOKEN\b|\bNODE_AUTH_TOKEN\b|\bGITHUB_TOKEN\b|\bGH_TOKEN\b|\bAWS_SECRET_ACCESS_KEY\b|\.aws/credentials|\.ssh/id_(?:rsa|ed25519)|\.config/gcloud|JSON\.stringify\(\s*process\.env\s*\))"""),
 }
 DOWNLOAD_EXECUTE = re.compile(r"(?:curl|wget)\b[^\n|;]*\|\s*(?:ba|z)?sh\b|node\s+-e\s+.*(?:base64|atob|eval)", re.I)
 MALWARE_NOTICE = re.compile(r"\b(?:malware|malicious|compromised|backdoor|hijacked)\b", re.I)
@@ -1011,6 +1013,21 @@ def _instant(text):
         return None
 
 
+def _repository(document):
+    """Normalized source repository (URL plus monorepo directory) of a registry version document."""
+    value = (document or {}).get("repository")
+    url, directory = (value.get("url"), value.get("directory")) if isinstance(value, dict) else (value, None)
+    if not isinstance(url, str) or not url.strip():
+        return None
+    url = url.strip().lower()
+    url = re.sub(r"^github:", "https://github.com/", url) if url.startswith("github:") else url
+    if re.fullmatch(r"[\w.-]+/[\w.-]+", url):
+        url = "https://github.com/" + url
+    url = re.sub(r"^(?:git\+)?(?:ssh://git@|git://|https?://|git@)", "", url).replace("github.com:", "github.com/")
+    url = re.sub(r"\.git$|/$", "", url)
+    return url + ("#" + str(directory).strip("/").lower() if directory else "")
+
+
 def _install_hooks(document, hooks):
     scripts = document.get("scripts") if isinstance(document.get("scripts"), dict) else {}
     found = {hook: str(scripts[hook]) for hook in hooks if hook in scripts}
@@ -1390,6 +1407,10 @@ def evaluate(root, *, policy, policy_sha256, graph, metadata, audit, signature_v
         prior_attested = bool(((prior or {}).get("dist") or {}).get("attestations"))
         first_release = bool(document) and prior is None
         publisher_changed = prior is not None and publisher != prior_publisher
+        # A move to (or within) attested publishing from the same source is a security improvement, not a risk trigger:
+        # the release carries npm provenance and is trusted-published or built from the prior release's repository.
+        attested_same_source = attested and (bool((document.get("_npmUser") or {}).get("trustedPublisher"))
+                                             or (prior is not None and _repository(document) and _repository(document) == _repository(prior)))
         provenance_dropped = prior_attested and not attested
         for hook, command in install.items():
             if DOWNLOAD_EXECUTE.search(command):
@@ -1440,6 +1461,8 @@ def evaluate(root, *, policy, policy_sha256, graph, metadata, audit, signature_v
                 scan = {"status": "scanned", **capability_scan(directory, supply.get("capability_scan") or {})}
                 caps = set(scan["capabilities"])
                 strong = {"install-script-present", "first-release", "publisher-changed", "provenance-dropped"} & set(signals)
+                if attested_same_source:
+                    strong.discard("publisher-changed")
                 if "credential-access" in caps and caps & {"network", "subprocess"} and strong:
                     findings.append(_finding("suspicious-capabilities", "credential access with "
                                              + "/".join(sorted(caps & {"network", "subprocess"})) + " in "

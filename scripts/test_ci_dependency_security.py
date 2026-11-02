@@ -206,6 +206,10 @@ class Harness(unittest.TestCase):
                         body[key] = details[key]
                 if details.get("attested"):
                     body["dist"]["attestations"] = {"url": "https://registry.npmjs.org/-/npm/v1/attestations/x", "provenance": {"predicateType": "https://slsa.dev/provenance/v1"}}
+                if details.get("trusted"):
+                    body["_npmUser"]["trustedPublisher"] = {"id": "github"}
+                if details.get("repository"):
+                    body["repository"] = details["repository"]
                 document["versions"][release] = body
                 document["time"][release] = published
                 signature = details.get("signature", "valid")
@@ -744,6 +748,29 @@ class ReviewHardening(Harness):
         self.assertEqual(results[1], results[2])
         self.assertIn(("lefft-pad@1.0.0", ds.REVIEW), results[0])
         self.assertIn(("evil-pkg@0.0.1-security", ds.BLOCK), results[0])
+
+    def test_move_to_trusted_publishing_is_not_a_risk_trigger(self):
+        """A framework that bundles `debug` (Object.keys(process.env)) or serializes its env next to network code and
+        switches to attested, trusted publishing must not need a review; the same switch without provenance does."""
+        repo = {"type": "git", "url": "git+https://github.com/example/framework.git"}
+        cases = (({"publisher": "GitHub Actions", "attested": True, "trusted": True, "repository": repo}, ds.PASS),
+                 ({"publisher": "GitHub Actions", "attested": True, "repository": repo}, ds.PASS),  # same repository
+                 ({"publisher": "someone-else", "repository": repo}, ds.REVIEW))
+        for details, decision in cases:
+            with self.subTest(details=details):
+                self.setUp()
+                identity = self.add("framework@2.0.0", parent="tool-kit@2.0.0",
+                                    prior={"version": "1.9.0", "publisher": "release-bot", "repository": repo}, **details)
+                self.write_repository()
+                self.install(identity, {"index.js": "const https = require('https');\nconst env = JSON.stringify(process.env);\n"})
+                record = next(r for r in self.run_gate()["packages"] if r["identity"] == identity)
+                self.assertEqual(record["decision"], decision, record["findings"])
+                self.assertIn("publisher-changed", record["signals"])  # always recorded as evidence
+        self.setUp()
+        identity = self.add("debug-like@2.0.0", parent="tool-kit@2.0.0", publisher="someone-else")
+        self.write_repository()
+        self.install(identity, {"index.js": "const https = require('https');\nObject.keys(process.env).filter(k => /^debug_/i.test(k));\n"})
+        self.assertEqual(next(r for r in self.run_gate()["packages"] if r["identity"] == identity)["decision"], ds.PASS)
 
     def test_semver_matches_node_semver(self):
         cases = [("1.2.3", "^1.2.0", True), ("2.0.0", "^1.2.0", False), ("0.2.5", "^0.2.3", True), ("0.3.0", "^0.2.3", False),
