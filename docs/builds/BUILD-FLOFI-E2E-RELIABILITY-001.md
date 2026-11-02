@@ -294,4 +294,3 @@ was executed on a public network; production was only read.
 - Read-only check of journey switches: production Vercel defines `FLOFI_JOURNEY_TELEMETRY` (value not read) and does not define
   `NEXT_PUBLIC_FLOFI_JOURNEY_TELEMETRY`, so after this deploy no browser sends journey beacons.
 - Draft PR #137 is superseded by this build (§1); the owner can close it.
-

@@ -86,4 +86,3 @@ describe('BUILD-FLOFI-E2E-RELIABILITY-001 abandoned preview cutoff', () => {
     expect(calls).toEqual(['main:eth_blockNumber', 'base:eth_chainId']);
   });
 });
-
