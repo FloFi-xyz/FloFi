@@ -54,6 +54,12 @@ export function PrivacyControls({ proof }: { proof?: ReturnType<typeof useWallet
   const [busy, setBusy] = useState(false), [error, setError] = useState<string | null>(null), [confirming, setConfirming] = useState(false);
   const load = useCallback(async (namespace?: Namespace) => setView(await learningStatus(namespace).catch(() => null)), []);
   useEffect(() => { void load(identity); }, [load, identity]);
+  // BUILD-FLOFI-CHAT-E2E-DASHBOARD-UX-001: an agreement given in the notice (or a proof elsewhere) refreshes what this page shows.
+  useEffect(() => {
+    const changed = () => void load(identity);
+    window.addEventListener(LEARNING_CHANGED, changed);
+    return () => window.removeEventListener(LEARNING_CHANGED, changed);
+  }, [load, identity]);
   async function act(work: () => Promise<{ ok: boolean; code?: string }>) {
     if (busy) return;
     setBusy(true); setError(null);

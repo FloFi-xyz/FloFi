@@ -112,6 +112,13 @@ describe('wallet portfolio: EVM reads through one Multicall3 aggregate', () => {
     expect(portfolio).toMatchObject({ pricedTotalUsd: '6001.00', unpricedCount: 1, unlisted: 0, priceSource: 'CHAINLINK', mocked: false });
     expect(log.every(entry => ['eth_chainId', 'eth_blockNumber', 'eth_getCode', 'eth_call', 'eth_getBalance'].includes(entry.method))).toBe(true);
   });
+  it('shows a Stock Token in underlying shares (its official ERC-8056 multiplier), never priced', async () => {
+    const STOCK = address(0xa1);
+    const stock = { ...asset('base', 'AAPL', STOCK, 18), stock: { multiplierWad: '2000000000000000000' } as unknown as CanonicalAsset['stock'] };
+    const portfolio = await readWalletPortfolio({ evm: OWNER, solana: null }, {}, seams({ modes: { base: 'live' }, catalogs: { base: catalog('base', [stock]) },
+      chains: { base: base({ [STOCK]: 3n * 10n ** 18n }) }, prices: prices({ ETH: '3000' }) }));
+    expect(portfolio.holdings.map(h => [h.symbol, h.units, h.price])).toEqual([['AAPL', '6000000000000000000', null]]);
+  });
   it('never prices a stablecoin, or a token that only shares the WETH symbol, and shows no total without a price source', async () => {
     const tokens = [asset('base', 'USDC', USDC, 6, 'STABLECOIN'), asset('base', 'WETH', FAKE_WETH, 18, 'TOKEN')];
     const priced = await readWalletPortfolio({ evm: OWNER, solana: null }, {}, seams({ modes: { base: 'live' }, catalogs: { base: catalog('base', tokens) },
@@ -229,13 +236,15 @@ describe('wallet portfolio: Solana reads the owner and its token accounts', () =
       ['USDC', USDC_MINT, '50000000', null], ['WSOL', WSOL_MINT, '1000000000', '150.00']]);
     expect(portfolio).toMatchObject({ unlisted: 1, pricedTotalUsd: '450.00', unpricedCount: 1, priceSource: 'CHAINLINK', mocked: false });
   });
-  it('reads Token-2022 accounts, and skips and counts an account whose layout cannot be decoded', async () => {
+  // BUILD-FLOFI-CHAT-E2E-DASHBOARD-UX-001 review: a Token-2022 mint may scale its displayed amount (scaled-UI / interest-bearing extensions this
+  // read does not apply), so its balances are counted as not checked — never shown as a raw amount.
+  it('counts Token-2022 balances as not checked (never shown unscaled), and skips and counts an account whose layout cannot be decoded', async () => {
     const PYUSD = base58Encode(new Uint8Array(32).fill(13)), malformed = Buffer.from(new Uint8Array(170)).toString('base64');
     const listed: SolanaAssetCatalog = { ...solanaCatalog(), assets: [...solanaCatalog().assets, { symbol: 'PYUSD', name: 'PayPal USD', mint: PYUSD, decimals: 6, native: false, logoUrl: null }] };
     const portfolio = await readWalletPortfolio({ evm: null, solana: SOL_OWNER }, {}, seams({ modes: { solana: 'live' }, solanaCatalog: listed,
       solana: solanaRpc({ lamports: 0, token2022: [rpcAccount(TOKEN_2022, tokenAccount(PYUSD, SOL_OWNER, 7_000_000n)), rpcAccount(TOKEN_2022, malformed)] }) }));
-    expect(portfolio.holdings.map(h => [h.symbol, h.units, h.valueUsd])).toEqual([['PYUSD', '7000000', null]]);
-    expect(portfolio.networks[0]).toMatchObject({ tokens: 'PARTIAL', uncheckedTokens: 1, code: 'SOLANA_TOKEN_ACCOUNT_UNREADABLE' });
+    expect(portfolio.holdings).toEqual([]);
+    expect(portfolio.networks[0]).toMatchObject({ tokens: 'PARTIAL', uncheckedTokens: 2, code: 'SOLANA_TOKEN_ACCOUNT_UNREADABLE' });
   });
   it('keeps SOL when one token program fails, and refuses a response for another owner', async () => {
     const partial = await readWalletPortfolio({ evm: null, solana: SOL_OWNER }, {}, seams({ modes: { solana: 'live' },

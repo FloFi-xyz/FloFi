@@ -22,10 +22,11 @@ export function PrivacyNotice({ initial }: { initial: PrivacyNoticeChoice | 'UNA
   // The server's reading on the first render (no hydration flip); a later remount (client navigation) reads the answer given since.
   const [answer, setAnswer] = useState<PrivacyNoticeChoice | null>(() => initial !== 'UNANSWERED' ? initial
     : typeof document === 'undefined' ? null : privacyNoticeFromCookies(document.cookie));
-  const [agreed, setAgreed] = useState(false), [notice, setNotice] = useState<Notice | null>(null);
-  const dialog = useRef<HTMLDialogElement>(null), title = useId(), checkbox = useId();
+  const [agreed, setAgreed] = useState(false), [notice, setNotice] = useState<Notice | null>(null), [ready, setReady] = useState(false);
+  const dialog = useRef<HTMLDialogElement>(null), title = useId(), checkbox = useId(), description = useId();
   const open = answer === null;
-  useEffect(() => { if (open) void learningNotice().then(setNotice, () => setNotice(null)); }, [open]);
+  // Continue waits for the deployment's basis, so an agreement is never recorded without its effect (a failed read still lets the person answer).
+  useEffect(() => { if (open) void learningNotice().then(setNotice, () => setNotice(null)).finally(() => setReady(true)); }, [open]);
   useEffect(() => {
     const element = dialog.current;
     if (open && element && !element.open && typeof element.showModal === 'function') element.showModal();
@@ -40,10 +41,10 @@ export function PrivacyNotice({ initial }: { initial: PrivacyNoticeChoice | 'UNA
   }
   if (!open) return null;
   const learning = notice?.tier === 'ENABLED' && notice.automatic !== 'OFF';
-  return <dialog ref={dialog} className={styles.dialog} aria-labelledby={title} onCancel={event => { event.preventDefault(); decide('NOT_NOW'); }}>
+  return <dialog ref={dialog} className={styles.dialog} aria-labelledby={title} aria-describedby={description} onCancel={event => { event.preventDefault(); decide('NOT_NOW'); }}>
     <form className={styles.panel} method="dialog" onSubmit={event => { event.preventDefault(); if (agreed) decide('AGREED'); }}>
       <h2 id={title}>{tr('Privacy & Memory')}</h2>
-      <p>{tr('FloFi’s Copilot can remember how you write to it, per wallet: the words you use for networks, tokens and actions, and preferences such as your reply language, so it understands you faster.')}</p>
+      <p id={description}>{tr('FloFi’s Copilot can remember how you write to it, per wallet: the words you use for networks, tokens and actions, and preferences such as your reply language, so it understands you faster.')}</p>
       {learning && <p>{tr('When you answer FloFi’s questions or correct how it read a network, token or action, FloFi can keep that meaning for this wallet after repeated evidence. Never amounts, addresses, balances or decisions, and a meaning it learned never selects a real-funds network on its own.')}{' '}
         {tr(notice.automatic === 'CONSENT' ? 'Off unless you turn it on.' : 'On unless you turn it off. Turning it off deletes what it learned.')}</p>}
       {learning && notice.automatic === 'CONSENT' && <p>{tr('If you agree, it is turned on for the wallet you use now (verified in this browser, or held by the FloFi account you are signed in to), never for a wallet used later. With no such wallet now, nothing is stored; you can turn it on later in Privacy & memory.')}</p>}
@@ -59,7 +60,7 @@ export function PrivacyNotice({ initial }: { initial: PrivacyNoticeChoice | 'UNA
       <label className={styles.agree} htmlFor={checkbox}><input id={checkbox} type="checkbox" checked={agreed} onChange={event => setAgreed(event.target.checked)}/>{tr('I agree')}</label>
       <div className={styles.actions}>
         <button type="button" className="quiet" onClick={() => decide('NOT_NOW')}>{tr('Not now')}</button>
-        <button type="submit" className="primary" disabled={!agreed}>{tr('Continue')}</button>
+        <button type="submit" className="primary" disabled={!agreed || !ready}>{tr('Continue')}</button>
       </div>
       <p className={styles.muted}><a href={language === 'PT' ? '/privacy#memoria-copilot' : '/privacy#copilot-memory'}>{tr('How FloFi uses memory')}</a></p>
     </form>

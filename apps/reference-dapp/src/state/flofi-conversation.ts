@@ -177,7 +177,7 @@ export function useFlofiConversation({ owner, epoch, bridge, direct, interfaceLa
     session.current += 1; ids.current = 1;
     setMessages([intro()]); setQuestion(null); setAutomation(null); setDestination(null); setInput('');
     copilot.clear(); pendingCommit.current = null; lastCommit.current = null; reviewLock.current = null; watch.current = null; restored.current = null;
-    resume.current = null; handover.current = null; lastReview.current = null; requote.current = null; declined.current = new Set();
+    resume.current = null; handover.current = null; lastReview.current = null; requote.current = null; declined.current = new Set(); finished.current = null;
   }
   useEffect(() => {
     const changed = ownerKey !== null && lastOwner.current !== null && ownerKey !== lastOwner.current;
@@ -222,12 +222,14 @@ export function useFlofiConversation({ owner, epoch, bridge, direct, interfaceLa
    * (it becomes this workflow's next step; what executed is not sent again), modify it, or create a new workflow. Authoring only: nothing is
    * simulated, reviewed or signed until the owner asks, and every later request still needs its own fresh Review and wallet confirmation.
    */
-  function offerNextSteps(scope: number, language: ConversationLanguage, text: string, notes: readonly string[] = []) {
+  function offerNextSteps(scope: number, language: ConversationLanguage, text: string, notes: readonly string[] = [], sequence = false) {
     const c = conversationCopy(language), view = latest.current.bridge, workflow = latest.current.state.workflow;
     // Only a workflow that continues as steps is promised that what executed is not sent again; anything else says it is reviewed as a whole.
-    finished.current = { workflowId: workflow.workflowId, continuable: view.continuable === true };
+    // A sequence's steps are carried by construction (its last step's completion is recorded on the next render).
+    const continuable = sequence || view.continuable === true;
+    finished.current = { workflowId: workflow.workflowId, continuable };
     setQuestion({ open: { kind: 'NEXT_STEP', workflowId: workflow.workflowId, revision: workflow.revision, executed: true }, language });
-    flofi(scope, language, text, { ...notes.length ? { notes } : {}, question: view.continuable ? c.afterExecution : c.afterExecutionWhole,
+    flofi(scope, language, text, { ...notes.length ? { notes } : {}, question: continuable ? c.afterExecution : c.afterExecutionWhole,
       options: [c.addAnother, c.modify, ...view.startNewWorkflow ? [c.startNew] : []] });
   }
 
@@ -295,7 +297,7 @@ export function useFlofiConversation({ owner, epoch, bridge, direct, interfaceLa
     // A runtime's availability that has not answered yet is unknown: FloFi waits and continues by itself instead of calling it unavailable.
     if (view.runtimeChecking) { resume.current = { scope, language, until: 'READY', error: null }; flofi(scope, language, c.checkingProviders); return; }
     const sequence = view.sequence;
-    if (sequence?.finished) { offerNextSteps(scope, language, c.workflowCompleted(sequence.total)); return; }
+    if (sequence?.finished) { offerNextSteps(scope, language, c.workflowCompleted(sequence.total), [], true); return; }
     if (sequence?.awaitingDelivery) { flofi(scope, language, c.awaitingDelivery(sequence.current), view.controls.canCheck ? { options: [c.checkStatus] } : {}); return; }
     // The current Review is still approvable (also a fresh Review for the rest of a started run): present it as the Canvas does — unless the owner
     // asked for a fresh quote before anything was requested (BUILD-FLOFI-BRIDGE-LIVE-FIX-003), which re-simulates and retires the unused Review.
@@ -460,7 +462,10 @@ export function useFlofiConversation({ owner, epoch, bridge, direct, interfaceLa
     if (request === 'REFRESH') { startReview(scope, language, true); return; }
     if (request === 'ROUTE') { flofi(scope, language, c.anotherRoute); startReview(scope, language, true); return; }
     if (request === 'ADD') { setQuestion(null); flofi(scope, language, c.addPrompt); return; }
-    if (request === 'MODIFY') { setQuestion(null); flofi(scope, language, c.modifyPrompt); return; }
+    if (request === 'MODIFY') {
+      setQuestion(null);
+      flofi(scope, language, !actionable(latest.current.state.workflow) ? c.emptyWorkflow : copilot.mayInterpret ? c.modifyPrompt : c.modifyOnCanvas); return;
+    }
     if (request === 'UNDO') {
       const done = lastCommit.current && undoChatCommit(lastCommit.current);
       lastCommit.current = null; setQuestion(null);
@@ -589,7 +594,7 @@ export function useFlofiConversation({ owner, epoch, bridge, direct, interfaceLa
         // the shell records this step's reconciled delivery (`handover`); a step that did not complete stops the sequence there.
         const sequence = bridge.sequence;
         if (sequence && phase === 'COMPLETED' && sequence.current < sequence.total) { handover.current = { scope: followed.scope, language, from: sequence.current, waiting: false }; setTick(n => n + 1); return; }
-        if (sequence && phase === 'COMPLETED') { offerNextSteps(followed.scope, language, c.workflowCompleted(sequence.total)); return; }
+        if (sequence && phase === 'COMPLETED') { offerNextSteps(followed.scope, language, c.workflowCompleted(sequence.total), [], true); return; }
         if (!sequence && phase === 'COMPLETED' && view.final) { offerNextSteps(followed.scope, language, status, [c.finished]); return; }
         flofi(followed.scope, language, status, { ...sequence ? { notes: [c.stepStopped(sequence.current, sequence.total)] } : view.final && bridge.startNewWorkflow ? { notes: [c.finished] } : {},
           ...view.final && bridge.startNewWorkflow ? { options: [c.startNew] } : {} });
@@ -696,7 +701,8 @@ export function useFlofiConversation({ owner, epoch, bridge, direct, interfaceLa
             { options: [asked.addAnother, asked.modify, ...bridge.startNewWorkflow ? [asked.startNew] : []] });
           return;
         }
-        flofi(scope, open.language, bare === 'NO' ? asked.declined : asked.nextQuestion, bare === 'NO' ? {} : { options: [asked.addAnother, asked.review] });
+        flofi(scope, open.language, bare === 'NO' ? open.open.kind === 'NEXT_STEP' && open.open.executed ? asked.closedAfterExecution : asked.declined : asked.nextQuestion,
+          bare === 'NO' ? {} : { options: [asked.addAnother, asked.review] });
         return;
       }
       const request = lifecycleRequest(text);
@@ -704,7 +710,8 @@ export function useFlofiConversation({ owner, epoch, bridge, direct, interfaceLa
       if (bridge.networkAction && text === bridge.networkAction.label) { bridge.networkAction.request(); return; }
       if (text === translate(language, 'Connect wallet') || text === 'Connect wallet') { bridge.connectWallet(); return; }
       if (text === c.checkStatus) { lifecycle(scope, 'STATUS', language); return; }
-      if (text === c.startNew && bridge.startNewWorkflow) { bridge.startNewWorkflow(); return; }
+      // The option is matched in either language: its label carries no word that tells the reply language.
+      if ((text === conversationCopy('EN').startNew || text === conversationCopy('PT').startNew) && bridge.startNewWorkflow) { bridge.startNewWorkflow(); return; }
       setQuestion(null);
     }
     // BUILD-RH-002 / BUILD-BASE-001: catalog-network symbols resolve only in validated catalogs; load those the sentence names first.

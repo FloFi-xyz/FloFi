@@ -16,7 +16,7 @@
  *  - Each network is isolated (one failure leaves the others), the whole read has a time budget, and results are cached briefly per wallet.
  */
 import { CATALOG_NETWORKS, type CatalogNetworkId } from './catalog-networks.ts';
-import { JUPITER_SOLANA_MAINNET, SOLANA_MAINNET_TOKENS, type AssetCatalog, type CanonicalAsset } from '@defi-workflow-engine/action-registry';
+import { JUPITER_SOLANA_MAINNET, SOLANA_MAINNET_TOKENS, underlyingShares, type AssetCatalog, type CanonicalAsset } from '@defi-workflow-engine/action-registry';
 import { decodeRpcAccount, decodeSplTokenAccount, readSolanaAccounts, verifySolanaCluster, type SolanaRpc } from '@defi-workflow-engine/reference-compiler';
 import { isSolanaPublicKey } from '@defi-workflow-engine/workflow-contracts';
 import { cloudFlowMode } from './flow-runtime.ts';
@@ -174,7 +174,8 @@ const evmPriceAsset = (asset: Pick<CanonicalAsset, 'kind' | 'assetClass' | 'symb
 
 async function readEvmNetwork(id: CatalogNetworkId, mode: ReadMode, owner: string, env: Env, seams: WalletPortfolioSeams, now: () => Date): Promise<NetworkRead> {
   const runtime = CATALOG_NETWORKS[id], provenance: PortfolioProvenance = mode === 'harness' ? 'MOCKED' : 'PUBLIC_MAINNET';
-  const rpc = seams.evmRpc ? seams.evmRpc(id, mode) : runtime.rpc(mode, env, PORTFOLIO_EVM_RPC_METHODS);
+  // One paced client per network endpoint for the whole process (BUILD-FLOFI-CHAT-E2E-DASHBOARD-UX-001 review): concurrent reads share its pacing.
+  const rpc = seams.evmRpc ? seams.evmRpc(id, mode) : sharedClient(env, `evm:${id}:${mode}`, () => runtime.rpc(mode, env, PORTFOLIO_EVM_RPC_METHODS));
   const catalog = (seams.evmCatalog ? seams.evmCatalog(id, mode) : runtime.catalogFor(mode)(runtime.chain))
     .then(value => ({ ok: true as const, value }), (error: unknown) => ({ ok: false as const, code: codeOf(error, runtime.catalogUnavailableCode) }));
   const chainId = await rpc('eth_chainId', []);
@@ -215,8 +216,9 @@ async function readEvmNetwork(id: CatalogNetworkId, mode: ReadMode, owner: strin
   }
   for (const token of checked) {
     const units = balances.get(token.address!);
+    // A Robinhood Stock Token's balance scales by its official multiplier (ERC-8056): show the underlying shares, as Robinhood does.
     if (units && units > 0n) holdings.push({ ...base, symbol: token.symbol, name: token.name, address: token.address, decimals: token.decimals,
-      units: units.toString(), native: false, logo: token.logoUrl, priceAsset: evmPriceAsset(token) });
+      units: token.stock ? underlyingShares(units.toString(), token.stock.multiplierWad) : units.toString(), native: false, logo: token.logoUrl, priceAsset: evmPriceAsset(token) });
   }
   return { holdings, unlisted: 0, network: { id, name: runtime.name, chain: runtime.chain, chainId: runtime.chainId, ecosystem: 'evm', status: 'READ', provenance,
     observedAt: now().toISOString(), block: block.toString(), slot: null, tokens: coverage, uncheckedTokens: unchecked, code: coverage === 'ALL' ? null : failure } };
@@ -261,7 +263,7 @@ async function solanaTokenBalances(rpc: SolanaRpc, owner: string, program: { rea
 }
 async function readSolanaNetwork(mode: ReadMode, owner: string, env: Env, seams: WalletPortfolioSeams, now: () => Date): Promise<NetworkRead> {
   const provenance: PortfolioProvenance = mode === 'harness' ? 'MOCKED' : 'PUBLIC_MAINNET';
-  const rpc = seams.solanaRpc ? seams.solanaRpc(mode) : solanaReadRpc(mode, env);
+  const rpc = seams.solanaRpc ? seams.solanaRpc(mode) : sharedClient(env, `solana:${mode}`, () => solanaReadRpc(mode, env));
   const catalog = (seams.solanaCatalog ? seams.solanaCatalog(mode) : mode === 'harness' ? Promise.resolve(pinnedSolanaCatalog()) : loadSolanaCatalog())
     .then(value => ({ ok: true as const, value }), () => ({ ok: false as const }));
   await verifySolanaCluster(rpc, JUPITER_SOLANA_MAINNET.genesisHash);
@@ -269,9 +271,13 @@ async function readSolanaNetwork(mode: ReadMode, owner: string, env: Env, seams:
   const lamports = accounts[0]?.lamports ?? 0n;
   const balances = new Map<string, bigint>();
   let failedPrograms = 0, unreadable = 0, failure: string | null = null;
+  let scaled = 0;
   for (const program of SOLANA_TOKEN_PROGRAMS) {
     try {
       const read = await solanaTokenBalances(rpc, owner, program);
+      // A Token-2022 mint can carry a scaled-UI or interest-bearing extension this read does not apply: never show a raw amount as the
+      // balance — count those tokens as not checked instead.
+      if (program.token2022) { scaled += read.balances.size; unreadable += read.unreadable; continue; }
       for (const [mint, amount] of read.balances) balances.set(mint, (balances.get(mint) ?? 0n) + amount);
       unreadable += read.unreadable;
     } catch (error) { failedPrograms++; failure ??= codeOf(error, 'SOLANA_TOKEN_ACCOUNTS_UNAVAILABLE'); }
@@ -291,11 +297,12 @@ async function readSolanaNetwork(mode: ReadMode, owner: string, env: Env, seams:
       logo: asset.logoUrl, priceAsset: mint === WSOL_MINT ? 'SOL' : null });
   }
   const coverage: PortfolioTokenCoverage = failedPrograms === SOLANA_TOKEN_PROGRAMS.length || !listed.ok ? 'NATIVE_ONLY'
-    : failedPrograms || unreadable ? 'PARTIAL' : 'ALL';
+    : failedPrograms || unreadable || scaled ? 'PARTIAL' : 'ALL';
   if (!listed.ok) failure ??= 'SOLANA_TOKEN_CATALOG_UNAVAILABLE';
   if (unreadable) failure ??= 'SOLANA_TOKEN_ACCOUNT_UNREADABLE';
+  if (scaled) failure ??= 'SOLANA_TOKEN_2022_NOT_SHOWN';
   return { holdings, unlisted, network: { id: 'solana', name: SOLANA_NAME, chain: JUPITER_SOLANA_MAINNET.chain, chainId: null, ecosystem: 'solana', status: 'READ',
-    provenance, observedAt: now().toISOString(), block: null, slot, tokens: coverage, uncheckedTokens: unidentified + unreadable,
+    provenance, observedAt: now().toISOString(), block: null, slot, tokens: coverage, uncheckedTokens: unidentified + unreadable + scaled,
     code: coverage === 'ALL' ? null : failure } };
 }
 
@@ -357,6 +364,20 @@ async function readSnapshot(accounts: readonly PortfolioAccount[], env: Env, sea
 }
 
 const processCache: PortfolioCache = new Map();
+const processClients = new Map<string, unknown>();
+/** The process environment's clients are shared (their pacing then bounds every concurrent read); any other environment gets its own. */
+function sharedClient<T>(env: Env, key: string, create: () => T): T {
+  if (env !== process.env) return create();
+  if (!processClients.has(key)) processClients.set(key, create());
+  return processClients.get(key) as T;
+}
+/** A fresh cached snapshot of this exact wallet set, or null — lets the action answer from cache without taking an admission slot. */
+export function cachedWalletPortfolio(input: { readonly evm: string | null; readonly solana: string | null }): Promise<WalletPortfolio> | null {
+  let accounts: readonly PortfolioAccount[];
+  try { accounts = portfolioAccounts(input); } catch { return null; }
+  const hit = processCache.get(accounts.map(account => `${account.ecosystem}:${account.address}`).join('|'));
+  return hit && Date.now() - hit.at < hit.ttlMs ? hit.value : null;
+}
 /**
  * The wallet's portfolio snapshot. Throws only a closed input code (PORTFOLIO_INPUT_INVALID, PORTFOLIO_EVM_ADDRESS_INVALID,
  * PORTFOLIO_SOLANA_ADDRESS_INVALID, PORTFOLIO_NO_ACCOUNT); every network or price failure is reported inside the snapshot.

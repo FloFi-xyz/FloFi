@@ -32,6 +32,9 @@ export function DashboardWorkspace({ workflowName, progress, recovery, wallet, c
   const isCurrent = Boolean(runId && ownedCurrent?.run.runId === runId);
   const [version, refresh] = useState(0);
   const latestAccount = useRef(account); latestAccount.current = account;
+  // BUILD-FLOFI-CHAT-E2E-DASHBOARD-UX-001: a record opened from Your workflows (`#from-workflows`) returns there; read after hydration.
+  const [returnTo, setReturnTo] = useState<'/app/dashboard' | '/app/workflows'>('/app/dashboard');
+  useEffect(() => { setReturnTo(runId && window.location.hash === '#from-workflows' ? '/app/workflows' : '/app/dashboard'); }, [runId]);
   // A wallet proven anywhere on the page (Your workflows, Save, /approve) re-reads the history: a read, never another signature.
   useEffect(() => {
     const changed = () => refresh(value => value + 1);
@@ -98,7 +101,7 @@ export function DashboardWorkspace({ workflowName, progress, recovery, wallet, c
     if (id === ownedCurrent?.run.runId) setCurrentVisibility({ key: currentKey, disposition });
     window.dispatchEvent(new CustomEvent('flofi:history-changed', { detail: { account, id } }));
     refresh(value => value + 1);
-    if (runId) navigate('/app/dashboard');
+    if (runId) navigate(returnTo);
   }
   const history = account ? { change: (id: string) => (action: 'DELETE' | 'ARCHIVE') => changeRunHistory(account, id, action), changed: historyChanged } : undefined;
 
@@ -126,12 +129,12 @@ export function DashboardWorkspace({ workflowName, progress, recovery, wallet, c
   }
   if (runId) return <RunDetailView view={isCurrent ? currentDisposition === 'DELETED' || currentDisposition === null ? null : ownedCurrent : historical} detail={ownedDetail} loading={loading}
     connection={!account ? 'DISCONNECTED' : visible?.response?.connection ?? null}
-    back={() => navigate('/app/dashboard')} build={build} execute={execute} refresh={() => refresh(value => value + 1)}
+    back={() => navigate(returnTo)} backLabel={returnTo === '/app/workflows' ? ' Back to Your workflows' : ' Back to Dashboard'} build={build} execute={execute} refresh={() => refresh(value => value + 1)}
     {...history ? { history: { change: history.change(runId), changed: disposition => historyChanged(runId, disposition) } } : {}}/>;
   const runs = dashboardRunIndex(account, snapshot?.runs ?? [], visibleCurrent).filter(view => removed?.owner !== account || !removed.ids.includes(view.run.runId));
   return <DashboardView account={account} connection={snapshot?.connection ?? null} runs={runs} hasMore={snapshot?.hasMore ?? false}
     loadMore={loadMore} loadingMore={loadingMore} pageIssue={pageIssue}
-    loading={loading} build={build} openRun={id => navigate(`/app/dashboard/runs/${encodeURIComponent(id)}`)} verify={() => void verify()} verifying={verifying}
+    loading={loading} build={build} openRun={id => navigate(`/app/dashboard/runs/${encodeURIComponent(id)}${mode === 'records' ? '#from-workflows' : ''}`)} verify={() => void verify()} verifying={verifying}
     verificationIssue={verificationIssue?.account === account ? verificationIssue.message : null} refresh={() => refresh(value => value + 1)} {...history ? { history } : {}}
     mode={mode} portfolio={portfolio} openRecords={() => navigate('/app/workflows')} openWorkflow={openWorkflow} signInPrompt={Boolean(signInPrompt)}/>;
 }

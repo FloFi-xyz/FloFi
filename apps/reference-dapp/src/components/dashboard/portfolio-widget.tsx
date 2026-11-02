@@ -58,7 +58,7 @@ export function PortfolioWidget({ evm, solana, load = walletPortfolio }: { evm: 
     {portfolio ? <PortfolioBody portfolio={portfolio} expanded={expanded} copied={copied} summaryButton={summaryButton}
       toggle={() => setExpandedFor(expanded ? null : wallet)}
       collapse={() => { setExpandedFor(null); summaryButton.current?.focus(); }}
-      copy={address => { void globalThis.navigator?.clipboard?.writeText(address).then(() => setCopied(address), () => undefined); }}/>
+      copy={address => { void globalThis.navigator?.clipboard?.writeText(address).then(() => { setCopied(address); setTimeout(() => setCopied(current => current === address ? null : current), 2_000); }, () => undefined); }}/>
       : failure ? <div className={styles.state} role="alert" data-code={failure}><p>{tr('Wallet balances are unavailable right now.')}</p>
         <button type="button" onClick={refresh}>{tr('Retry')}</button></div>
       : <div className={styles.state} role="status"><span className={styles.skeleton} aria-hidden="true"><span/><span/></span>
@@ -131,7 +131,7 @@ function PortfolioDetails({ portfolio, copied, copy, collapse }: { portfolio: Wa
     <dl className={styles.identity} aria-label={tr('Wallet')}>{portfolio.accounts.map(account => <div key={account.ecosystem}>
       <dt>{tr(account.ecosystem === 'evm' ? 'EVM wallet' : 'Solana wallet')}</dt>
       <dd><code title={account.address}>{shortAddress(account.address)}</code>
-        <button type="button" className={styles.copy} onClick={() => copy(account.address)}>{tr(copied === account.address ? 'Copied' : 'Copy address')}</button></dd>
+        <button type="button" className={styles.copy} onClick={() => copy(account.address)} aria-live="polite">{tr(copied === account.address ? 'Copied' : 'Copy address')}</button></dd>
     </div>)}</dl>
     <section aria-labelledby="dashboard-portfolio-networks">
       <h3 id="dashboard-portfolio-networks">{tr('Networks')}</h3>
@@ -140,7 +140,7 @@ function PortfolioDetails({ portfolio, copied, copy, collapse }: { portfolio: Wa
     </section>
     <section aria-labelledby="dashboard-portfolio-assets">
       <h3 id="dashboard-portfolio-assets">{tr('Assets')}</h3>
-      {summary.holdings.length ? <div className={styles.tableWrap}><table className={styles.table}>
+      {summary.holdings.length ? <div className={styles.tableWrap} tabIndex={0} role="region" aria-label={tr('Assets')}><table className={styles.table}>
         <thead><tr><th scope="col">{tr('Asset')}</th><th scope="col">{tr('Network')}</th><th scope="col" className={styles.end}>{tr('Balance')}</th>
           <th scope="col" className={styles.end}>{tr('Price')}</th><th scope="col" className={styles.end}>{tr('Value')}</th></tr></thead>
         <tbody>{summary.holdings.map(holding => <tr key={holdingKey(holding)}>

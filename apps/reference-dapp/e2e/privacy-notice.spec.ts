@@ -51,17 +51,12 @@ test('"Not now" and Escape close the notice without any agreement, and it does n
   expect(await answer(context)).toBe(`${PRIVACY_NOTICE_VERSION}.NOT_NOW`);
 });
 
-test('Privacy & memory accepts the agreement later without a wallet proof', async ({ page, context }) => {
+test('Privacy & memory: on a deployment without Copilot learning nothing is kept, and no wallet proof is asked', async ({ page }) => {
+  // The default product profile runs without FLOFI_LEARNING: the notice and the page say nothing about how you write is kept.
   await page.goto('/app/privacy');
+  await expect(notice(page)).toContainText('Copilot learning is not enabled on this FloFi deployment: nothing about how you write is kept.');
   await notice(page).getByRole('button', { name: 'Not now', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'Privacy & memory', exact: true })).toBeVisible();
-  const agree = page.getByRole('button', { name: 'I agree to Privacy & Memory', exact: true });
-  if (await agree.count()) {
-    await agree.click();
-    await expect(page.getByRole('status').filter({ hasText: 'You agreed to Privacy & Memory in this browser.' })).toBeVisible();
-    expect(await answer(context)).toBe(`${PRIVACY_NOTICE_VERSION}.AGREED`);
-  } else {
-    // A deployment without Copilot learning keeps nothing: the page says so and offers no agreement to give.
-    await expect(page.locator('.privacy-controls')).toContainText(/nothing about how you write is kept|within a conversation only/);
-  }
+  await expect(page.locator('.privacy-controls')).toContainText('Copilot learning is not enabled on this FloFi deployment: nothing about how you write is kept.');
+  await expect(page.getByRole('button', { name: /^Prove an? (EVM|Solana) wallet$/ })).toHaveCount(0);
 });

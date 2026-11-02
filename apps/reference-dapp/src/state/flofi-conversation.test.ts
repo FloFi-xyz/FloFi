@@ -323,10 +323,22 @@ describe('BUILD-FLOFI-CHAT-E2E-FIX-002 chat-first review and sequences', () => {
     chat = await say('yes');
     expect(last(chat).text).toMatch(/^What would you like to do next\?/); expect(last(chat).options).toEqual(['Add another action', 'Modify this workflow', 'Create new workflow']);
     chat = await say('Modify this workflow');
-    expect(last(chat).text).toMatch(/^Tell me what to change in a step/);
+    // Without the Copilot the chat points to the step's Canvas card (the local parser has no free-form edit grammar).
+    expect(last(chat).text).toMatch(/^To change a step, open its card on the Canvas/);
     chat = await say('Add another action');
     expect(last(chat).text).toMatch(/Describe the next action/);
     expect(simulate.mock.calls.length).toBe(simulated); expect(controls.authorize).toHaveBeenCalledTimes(1);
+  });
+  it('BUILD-FLOFI-CHAT-E2E-DASHBOARD-UX-001: "no" after a completed run closes the question without any claim about funds', async () => {
+    await say('swap 10 USDC to WETH on Base Sepolia slippage 100 bps');
+    await say('Review workflow');
+    reviewedPatch = { ...reviewed(), startNewWorkflow: vi.fn(), continuable: true }; lifecycle(reviewedPatch); render();
+    await say('Yes, I confirm'); await say('Yes, execute');
+    controls.authorizing = false;
+    reviewedPatch = { ...reviewedPatch, progress: completedRun as unknown as ConversationBridge['progress'] }; lifecycle(reviewedPatch); render(); await flush();
+    const chat = await say('no');
+    expect(last(chat).text).toBe('Okay. The completed run stays in your history; add an action or create a new workflow whenever you like.');
+    expect(last(chat).text).not.toMatch(/Nothing was signed or sent/);
   });
   it('BUILD-FLOFI-CHAT-E2E-DASHBOARD-UX-001: a workflow that runs as a whole is never promised that what executed stays executed', async () => {
     await say('swap 10 USDC to WETH on Base Sepolia slippage 100 bps');
@@ -364,6 +376,8 @@ describe('BUILD-FLOFI-CHAT-E2E-FIX-002 chat-first review and sequences', () => {
     chat = await say('Review workflow');
     expect(last(chat).text).toBe('All 2 steps of this workflow are completed and reconciled. Their records stay in your history.');
     expect(last(chat).options).toEqual(['Add another action', 'Modify this workflow']);
+    // A sequence's steps stay completed: the owner is told they are not sent again (never "runs as a whole").
+    expect(last(chat).question).toMatch(/what already executed is not sent again/);
     expect(simulate).not.toHaveBeenCalled();
   });
   it('a step that cannot run in a sequence is named before anything is simulated', async () => {

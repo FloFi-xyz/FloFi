@@ -31,9 +31,10 @@ function RecordedRequests({ detail }: { detail: DashboardRunDetail | null }) {
   </section>;
 }
 
-export function RunDetailView({ view, detail, connection, loading, back, execute, refresh, history }: {
+export function RunDetailView({ view, detail, connection, loading, back, execute, refresh, history, backLabel = ' Back to Dashboard' }: {
   view: DashboardRunView | null; detail: DashboardRunDetail | null; connection: DashboardDetailResponse['connection'] | 'DISCONNECTED' | null;
   loading: boolean; back(): void; build(): void; execute(): void; refresh?: () => void;
+  /** BUILD-FLOFI-CHAT-E2E-DASHBOARD-UX-001: a record opened from Your workflows returns there. */ backLabel?: ' Back to Dashboard' | ' Back to Your workflows';
   history?: { change: HistoryChange; changed(disposition: 'DELETED' | 'ARCHIVED'): void };
 }) {
   const { t: tr } = useLocale();
@@ -41,7 +42,7 @@ export function RunDetailView({ view, detail, connection, loading, back, execute
   const unavailable = connection === 'UNAVAILABLE' || connection === null || connection === 'CONNECTED';
   const updated = dateLabel(view?.run.updatedAt ?? null), created = dateLabel(view?.run.createdAt ?? null);
   const hasContext = Boolean(view && (view.attention.length || view.recovered || view.reconciled || view.progress?.restored));
-  return <div className="dashboard-workspace dashboard-run-detail"><button type="button" className="dashboard-back" onClick={back}><span aria-hidden="true">←</span>{tr(" Back to Dashboard")}</button>
+  return <div className="dashboard-workspace dashboard-run-detail"><button type="button" className="dashboard-back" onClick={back}><span aria-hidden="true">←</span>{tr(backLabel)}</button>
     {!view ? <section className="panel dashboard-empty dashboard-detail-empty" role="status"><span className="dashboard-empty-icon"><DashboardIcon kind={connection === 'DISCONNECTED' || connection === 'SIGN_IN_REQUIRED' ? 'wallet' : 'history'}/></span><p className="eyebrow">{tr("EXECUTION RECORD")}</p><h1>{tr(loading ? 'Loading execution…' : connection === 'DISCONNECTED' ? 'Connect the wallet used for this execution' : connection === 'NOT_FOUND' ? 'Run not found' : connection === 'SIGN_IN_REQUIRED' ? 'Verify your wallet to view this execution' : connection === 'NOT_CONFIGURED' ? 'Execution history unavailable in this environment' : 'Execution details temporarily unavailable')}</h1><p>{tr(loading ? 'Checking the selected execution record.' : connection === 'SIGN_IN_REQUIRED' ? 'Verify the connected wallet from Dashboard to view its saved history.' : connection === 'NOT_FOUND' ? 'This execution is unavailable for the connected wallet.' : connection === 'DISCONNECTED' ? 'Use the wallet control in the FloFi header, then return to this run.' : connection === 'NOT_CONFIGURED' ? 'Saved execution records are not available from this environment.' : 'The history source could not be reached. This does not establish that the run is missing.')}</p>{!loading && unavailable && refresh && <button type="button" onClick={refresh}>{tr("Reload details")}</button>}</section> : <>
       <div className="dashboard-detail-heading"><div><p className="eyebrow">{tr(view.current ? 'CURRENT EXECUTION' : 'SAVED EXECUTION')}{tr(" · READ-ONLY")}</p><h1 title={view.title}>{view.title}</h1>{!view.current && <p className="dashboard-title-context">{tr("Saved workflow · original title not recorded")}</p>}</div>{updated && <div className="dashboard-detail-updated"><span>{tr("Last updated")}</span><time dateTime={view.run.updatedAt!}>{tr(updated)}</time></div>}</div>
       {history && <HistoryActions key={`${view.run.ownerAccount}:${view.run.runId}`} kind="execution" change={history.change} changed={history.changed}/>}

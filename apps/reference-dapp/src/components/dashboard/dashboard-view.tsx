@@ -72,15 +72,18 @@ export function DashboardView({ account, connection, runs, hasMore, loading, bui
   const attention = runs.filter(needsAttention);
   const current = runs.filter(run => run.current);
   const executed = runs.filter(run => !needsAttention(run));
+  // The Dashboard's verification signs with the connected EVM wallet; a Solana wallet proves itself in Your workflows.
+  const evmAccount = Boolean(account && /^0x[0-9a-f]{40}$/i.test(account));
   const notices = <>
     {loading && <p className="dashboard-notice dashboard-loading" role="status"><DashboardIcon kind="history"/>{tr("Loading execution history…")}</p>}
-    {!loading && connection === 'SIGN_IN_REQUIRED' && (signInPrompt ? null : <section className="dashboard-notice dashboard-source-notice" role="status"><span className="dashboard-notice-icon"><DashboardIcon kind="wallet"/></span><div><strong>{tr("Verify this wallet to view saved execution history.")}</strong><p>{tr("This wallet is not held by a FloFi account you are signed in to, so FloFi asks for its one-time verification message. It does not authorize a transaction.")}</p></div><button type="button" onClick={verify} disabled={verifying}>{tr(verifying ? 'Waiting for wallet…' : 'Verify wallet for history')}</button></section>)}
+    {!loading && connection === 'SIGN_IN_REQUIRED' && (signInPrompt ? null : <section className="dashboard-notice dashboard-source-notice" role="status"><span className="dashboard-notice-icon"><DashboardIcon kind="wallet"/></span><div><strong>{tr("Verify this wallet to view saved execution history.")}</strong><p>{tr("This wallet is not held by a FloFi account you are signed in to, so FloFi asks for its one-time verification message. It does not authorize a transaction.")}</p></div>{evmAccount ? <button type="button" onClick={verify} disabled={verifying}>{tr(verifying ? 'Waiting for wallet…' : 'Verify wallet for history')}</button>
+      : openRecords && <button type="button" onClick={openRecords}>{tr('Open Your workflows')}</button>}</section>)}
     {!loading && connection === 'NOT_CONFIGURED' && <section className="dashboard-notice dashboard-source-notice" role="status"><span className="dashboard-notice-icon"><DashboardIcon kind="history"/></span><div><strong>{tr("Saved history is unavailable in this environment")}</strong><p>{tr("Saved execution history is not available in this environment. Any current execution remains visible below.")}</p></div></section>}
     {!loading && connection === 'UNAVAILABLE' && <section className="dashboard-notice dashboard-source-notice" role="status"><span className="dashboard-notice-icon"><DashboardIcon kind="history"/></span><div><strong>{tr("Execution history temporarily unavailable.")}</strong><p>{tr("Saved history could not be loaded. Any current execution remains visible below.")}</p></div><button type="button" onClick={refresh}>{tr("Refresh history")}</button></section>}
     {verificationIssue && <p className="dashboard-notice dashboard-verification-issue" role="alert">{tr(verificationIssue)}</p>}
   </>;
   if (mode === 'records') return <div className="workflow-records">
-    {!account ? null : <>
+    {!account ? null : !loading && connection === 'SIGN_IN_REQUIRED' && signInPrompt ? <p className="muted workflows-records-pending" role="status">{tr('Your executed history and the records that need attention appear here once this wallet is verified above.')}</p> : <>
       {notices}
       <section className="panel workflows-section dashboard-activity" aria-labelledby="workflows-history"><div className="dashboard-section-heading"><div><h2 id="workflows-history">{tr("Executed and history")}</h2><p>{tr("Workflows you executed and the results recorded for them.")}</p></div>{connection === 'CONNECTED' && <button type="button" onClick={refresh} disabled={loading}>{tr("Refresh history")}</button>}</div>
         {executed.length ? <ol className="dashboard-run-list">{executed.map(view => <li key={view.run.runId}><RunCard view={view} openRun={openRun} history={history} openWorkflow={openWorkflow}/></li>)}</ol>
@@ -104,9 +107,10 @@ export function DashboardView({ account, connection, runs, hasMore, loading, bui
       {current.length > 0 && <section className="dashboard-current" aria-labelledby="dashboard-current"><div className="dashboard-section-heading"><div><p className="eyebrow">{tr("FROM THIS WORKSPACE")}</p><h2 id="dashboard-current">{tr("Current execution")}</h2></div><span className="dashboard-read-only">{tr("Read-only overview")}</span></div>{current.map(view => <RunCard key={view.run.runId} view={view} openRun={openRun} history={history}/>)}</section>}
       <section className={`panel dashboard-records-summary${attention.length ? ' dashboard-attention-required' : ''}`} aria-labelledby="dashboard-records"><div className="dashboard-section-heading"><div><h2 id="dashboard-records">{tr("Workflow records")}</h2><p>{tr("Saved workflows, executed history and records that need attention live in Your workflows.")}</p></div>{openRecords && <button type="button" onClick={openRecords}>{tr("Open Your workflows")}</button>}</div>
         {connection === 'CONNECTED' && !loading && <ul className="dashboard-records-counts">
-          <li><strong>{tr(attention.length)}</strong> {tr(attention.length === 1 ? 'record needs attention' : 'records need attention')}</li>
+          <li><strong>{tr(attention.length)}{hasMore ? '+' : ''}</strong> {tr(attention.length === 1 && !hasMore ? 'record needs attention' : 'records need attention')}</li>
           <li><strong>{tr(executed.length)}{hasMore ? '+' : ''}</strong> {tr(executed.length === 1 && !hasMore ? 'executed record' : 'executed records')}</li>
         </ul>}
+        {connection === 'CONNECTED' && !loading && hasMore && <p className="muted">{tr('Counted from your most recent records; Your workflows loads the rest.')}</p>}
       </section>
     </>}
   </div>;
