@@ -4,7 +4,11 @@
 from datetime import datetime, timezone
 import importlib.util
 import io
-from contextlib import redirect_stderr, redirect_stdout
+from contextlib import redirect_stdout
+import json
+import tempfile
+import urllib.error
+import urllib.request
 from pathlib import Path
 import unittest
 from unittest import mock
@@ -134,6 +138,20 @@ def aliases():
     return {row[0]: ['alias.vercel.app'] if row[0] in ALIASED else [] for row in INVENTORY}
 
 
+def branches():
+    """GitHub state at the snapshot: every branch had a PR except the concurrent E2E build's branch (no PR yet)."""
+    return {row[4]: {'open_pr': row[4] in OPEN_PULL_REQUESTS, 'had_pr': row[4] != 'claude/festive-keller-om54li', 'last_commit': None}
+            for row in INVENTORY}
+
+
+def known(*names, open_pr=False, had_pr=True, last_commit=None):
+    return {name: {'open_pr': open_pr, 'had_pr': had_pr, 'last_commit': last_commit} for name in names}
+
+
+DAY = 24 * 3600 * 1000
+OLD = int(SNAPSHOT.timestamp() * 1000) - 10 * DAY
+
+
 class FakeVercel:
     def __init__(self, deployments, alias_map):
         self.items, self.alias_map, self.deleted = {d['uid']: d for d in deployments}, alias_map, []
@@ -155,7 +173,7 @@ class FakeVercel:
 
 class Plan(unittest.TestCase):
     def test_real_inventory_plan_matches_the_verified_manifest(self):
-        removable, preserved = cleanup.classify(inventory(), aliases(), OPEN_PULL_REQUESTS, {}, SNAPSHOT)
+        removable, preserved = cleanup.classify(inventory(), aliases(), branches(), SNAPSHOT)
         self.assertEqual({entry['id'] for entry in removable}, EXPECTED)
         self.assertEqual(len(removable) + len(preserved), len(INVENTORY))
         kinds = sorted(entry['kind'] for entry in removable)
@@ -170,13 +188,14 @@ class Plan(unittest.TestCase):
         # Open pull requests keep every deployment; recent ones wait for the 24-hour window.
         self.assertIn('branch has an open pull request', reasons['dpl_FTwa1iWaXy6Y75nr71HrofaeDozu'])
         self.assertIn('created in the last 24 hours', reasons['dpl_3oQ4iscJSnj2Qo9d65f8NnZRbTVd'])
-        # The only, unaliased READY deployment of a merged branch is still its latest: kept.
-        self.assertEqual(reasons['dpl_2D2eqyaFQh8m4fLVmzZWFUZ1aCab'], ['latest of its branch'])
+        # The only, unaliased READY deployment of a merged branch is still its newest READY one: kept.
+        self.assertEqual(reasons['dpl_2D2eqyaFQh8m4fLVmzZWFUZ1aCab'], ['newest READY deployment of its branch'])
 
     def test_a_day_later_superseded_previews_of_merged_branches_become_removable(self):
         later = datetime(2026, 11, 3, 3, 0, tzinfo=timezone.utc)
-        removable, preserved = cleanup.classify(inventory(), aliases(), OPEN_PULL_REQUESTS, {}, later)
+        removable, preserved = cleanup.classify(inventory(), aliases(), branches(), later)
         ids = {entry['id'] for entry in removable}
+        self.assertEqual(len(ids), 39)
         self.assertTrue(EXPECTED < ids)
         self.assertIn('dpl_HS8Nb756NgjY5R7niJVTw4i6X9T7', ids)  # PR #151, superseded by 91bbb85
         self.assertNotIn('dpl_6vL9d2Qkujv8hH9eLr2S6DTr841D', ids)  # its latest, branch alias
@@ -184,26 +203,41 @@ class Plan(unittest.TestCase):
         self.assertFalse(ids & ALIASED)
 
     def test_active_branch_keeps_its_latest_two_and_a_recent_commit_counts_as_activity(self):
-        day = 24 * 3600 * 1000
-        base = int(SNAPSHOT.timestamp() * 1000) - 10 * day
-        items = [deployment(f'dpl_{i}', base + i * 1000, 'READY', None, 'feature', 'FloFi-xyz/FloFi') for i in range(4)]
-        removable, _ = cleanup.classify(items, {}, set(), {}, SNAPSHOT)
-        self.assertEqual({e['id'] for e in removable}, {'dpl_0', 'dpl_1', 'dpl_2'})  # inactive: only the latest stays
-        removable, _ = cleanup.classify(items, {}, set(), {'feature': SNAPSHOT}, SNAPSHOT)
+        items = [deployment(f'dpl_{i}', OLD + i * 1000, 'READY', None, 'feature', 'FloFi-xyz/FloFi') for i in range(4)]
+        removable, _ = cleanup.classify(items, {}, known('feature'), SNAPSHOT)
+        self.assertEqual({e['id'] for e in removable}, {'dpl_0', 'dpl_1', 'dpl_2'})  # inactive: only the newest READY stays
+        removable, _ = cleanup.classify(items, {}, known('feature', last_commit=SNAPSHOT), SNAPSHOT)
         self.assertEqual({e['id'] for e in removable}, {'dpl_0', 'dpl_1'})
-        removable, _ = cleanup.classify(items, {}, {'feature'}, {}, SNAPSHOT)
+        removable, _ = cleanup.classify(items, {}, known('feature', open_pr=True), SNAPSHOT)
         self.assertEqual(removable, [])
 
+    def test_newest_ready_survives_newer_failed_or_stuck_builds(self):
+        """Review finding: a newer ERROR, CANCELED or long-stuck BUILDING deployment must not expose the branch's working preview."""
+        for later_state in ('ERROR', 'CANCELED', 'BUILDING'):
+            with self.subTest(later_state=later_state):
+                items = [deployment('dpl_ready', OLD, 'READY', None, 'feature', 'FloFi-xyz/FloFi'),
+                         deployment('dpl_later', OLD + 1000, later_state, None, 'feature', 'FloFi-xyz/FloFi')]
+                removable, preserved = cleanup.classify(items, {}, known('feature'), SNAPSHOT)
+                self.assertNotIn('dpl_ready', {e['id'] for e in removable})
+                self.assertIn('newest READY deployment of its branch', {e['id']: e['reasons'] for e in preserved}['dpl_ready'])
+
+    def test_branch_without_pull_request_history_is_kept_whole(self):
+        """Review finding: an idle branch nobody opened a PR for has an uncertain status, so none of its deployments go."""
+        items = [deployment(f'dpl_{i}', OLD + i * 1000, 'READY', None, 'spike', 'FloFi-xyz/FloFi') for i in range(3)]
+        removable, preserved = cleanup.classify(items, {}, known('spike', had_pr=False), SNAPSHOT)
+        self.assertEqual(removable, [])
+        self.assertIn('branch has no pull request history', {e['id']: e['reasons'] for e in preserved}['dpl_0'])
+
     def test_uncertain_ownership_is_preserved(self):
-        old = int(SNAPSHOT.timestamp() * 1000) - 5 * 24 * 3600 * 1000
-        items = [deployment('dpl_new', old + 1, 'READY', None, 'x', 'FloFi-xyz/FloFi'),
-                 deployment('dpl_other', old, 'READY', None, 'x', 'someone/else'),
-                 deployment('dpl_custom', old, 'READY', 'staging', 'x', 'FloFi-xyz/FloFi'),
-                 deployment('dpl_rollback', old, 'READY', None, 'x', 'FloFi-xyz/FloFi') | {'isRollbackCandidate': True},
-                 deployment('dpl_queued', old, 'QUEUED', None, 'x', 'FloFi-xyz/FloFi')]
-        items.append({**deployment('dpl_nobranch', old, 'ERROR', None, 'x', 'FloFi-xyz/FloFi'), 'meta': {}})
-        items.append({**deployment('dpl_retained', old, 'READY', None, 'x', 'FloFi-xyz/FloFi'), 'softDeletedByRetention': True})
-        removable, preserved = cleanup.classify(items, {}, set(), {}, SNAPSHOT)
+        items = [deployment('dpl_new', OLD + 1, 'READY', None, 'x', 'FloFi-xyz/FloFi'),
+                 deployment('dpl_other', OLD, 'READY', None, 'x', 'someone/else'),
+                 deployment('dpl_custom', OLD, 'READY', 'staging', 'x', 'FloFi-xyz/FloFi'),
+                 deployment('dpl_rollback', OLD, 'READY', None, 'x', 'FloFi-xyz/FloFi') | {'isRollbackCandidate': True},
+                 deployment('dpl_queued', OLD, 'QUEUED', None, 'x', 'FloFi-xyz/FloFi'),
+                 deployment('dpl_unknown_branch', OLD, 'ERROR', None, 'never-looked-up', 'FloFi-xyz/FloFi')]
+        items.append({**deployment('dpl_nobranch', OLD, 'ERROR', None, 'x', 'FloFi-xyz/FloFi'), 'meta': {}})
+        items.append({**deployment('dpl_retained', OLD, 'READY', None, 'x', 'FloFi-xyz/FloFi'), 'softDeletedByRetention': True})
+        removable, preserved = cleanup.classify(items, {}, known('x'), SNAPSHOT)
         self.assertEqual(removable, [])
         reasons = {e['id']: ' '.join(e['reasons']) for e in preserved}
         self.assertIn('unknown repository', reasons['dpl_other'])
@@ -212,36 +246,44 @@ class Plan(unittest.TestCase):
         self.assertIn('state QUEUED', reasons['dpl_queued'])
         self.assertIn('unknown repository or branch', reasons['dpl_nobranch'])
         self.assertIn('already deleted', reasons['dpl_retained'])
+        self.assertIn('branch state unknown', reasons['dpl_unknown_branch'])
 
 
 class Apply(unittest.TestCase):
-    def run_main(self, vercel, *argv):
+    def setUp(self):
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        self.plan_path = str(Path(directory.name) / 'plan.json')
+        self.report_path = str(Path(directory.name) / 'report.json')
+
+    def run_main(self, vercel, *argv, open_pr_now=()):
         out = io.StringIO()
-        with mock.patch.object(cleanup, 'github_state', return_value=(OPEN_PULL_REQUESTS, {})), \
+        with mock.patch.object(cleanup, 'github_state', return_value=branches()), \
+             mock.patch.object(cleanup, 'branch_state', side_effect=lambda b: {'open_pr': b in open_pr_now, 'had_pr': True, 'last_commit': None}), \
              mock.patch.object(cleanup, 'datetime', wraps=datetime) as clock, redirect_stdout(out):
             clock.now.return_value = SNAPSHOT
             code = cleanup.main(list(argv), vercel=vercel)
         return code, out.getvalue()
 
+    def reviewed_plan(self, drop=()):
+        self.run_main(FakeVercel(inventory(), aliases()), '--report', self.plan_path)
+        document = json.loads(Path(self.plan_path).read_text())
+        document['removable'] = [e for e in document['removable'] if e['id'] not in drop]
+        Path(self.plan_path).write_text(json.dumps(document))
+
     def test_plan_only_by_default(self):
         vercel = FakeVercel(inventory(), aliases())
-        code, out = self.run_main(vercel)
+        code, out = self.run_main(vercel, '--report', self.plan_path)
         self.assertEqual((code, vercel.deleted), (0, []))
         self.assertIn('Plan: 14 removable, 70 preserved', out)
+        self.assertEqual({e['id'] for e in json.loads(Path(self.plan_path).read_text())['removable']}, EXPECTED)
 
-    def test_apply_requires_the_reviewed_count(self):
+    def test_apply_deletes_only_reviewed_deployments_and_rechecks_each_one(self):
+        """Review finding: a count is not a review. Only IDs in the reviewed plan file are ever deleted."""
+        unreviewed = 'dpl_Gaw2tR7o7hNwmpbTRAgz8KL2zaKF'
+        self.reviewed_plan(drop={unreviewed})
         vercel = FakeVercel(inventory(), aliases())
-        with self.assertRaises(SystemExit), redirect_stderr(io.StringIO()):
-            self.run_main(vercel, '--apply')
-        with self.assertRaisesRegex(SystemExit, 'does not match the 14 removable'):
-            self.run_main(vercel, '--apply', '--expect', '13')
-        self.assertEqual(vercel.deleted, [])
-
-    def test_apply_deletes_exactly_the_plan_and_rechecks_each_one(self):
-        alias_map = aliases()
-        vercel = FakeVercel(inventory(), alias_map)
-        real_aliases = vercel.aliases
-        calls = []
+        real_aliases, calls = vercel.aliases, []
 
         def aliases_now(deployment_id):  # an alias appears on one candidate after the plan was made
             calls.append(deployment_id)
@@ -249,11 +291,46 @@ class Apply(unittest.TestCase):
                 return ['new.vercel.app']
             return real_aliases(deployment_id)
         vercel.aliases = aliases_now
-        code, out = self.run_main(vercel, '--apply', '--expect', '14')
+        code, out = self.run_main(vercel, '--apply', self.plan_path, '--report', self.report_path,
+                                  open_pr_now={'claude/festive-darwin-du0oft'})
         self.assertEqual(code, 0)
-        self.assertEqual(set(vercel.deleted), EXPECTED - {'dpl_7NfoYcGvWAZsdGR1njeFGdM3uGZR'})
+        skipped = {'dpl_7NfoYcGvWAZsdGR1njeFGdM3uGZR', 'dpl_AFo22PdoQyJEB8jbcYdje6mgAYA8'}
+        self.assertEqual(set(vercel.deleted), EXPECTED - {unreviewed} - skipped)
         self.assertIn('SKIPPED  dpl_7NfoYcGvWAZsdGR1njeFGdM3uGZR now aliased', out)
+        self.assertIn('SKIPPED  dpl_AFo22PdoQyJEB8jbcYdje6mgAYA8 branch now has an open pull request', out)
+        self.assertIn('Removed 11, skipped 2; 1 newly removable deployment(s) were not in the reviewed plan and were left alone', out)
+        outcomes = json.loads(Path(self.report_path).read_text())['outcomes']
+        self.assertEqual(sum(o['result'] == 'deleted' for o in outcomes), 11)
+
+    def test_reviewed_deployment_no_longer_removable_is_skipped(self):
+        self.reviewed_plan()
+        alias_map = aliases() | {'dpl_9v4TzUp1CSfjBmVDjo85t29xirtc': ['late.vercel.app']}
+        vercel = FakeVercel(inventory(), alias_map)
+        _, out = self.run_main(vercel, '--apply', self.plan_path)
+        self.assertNotIn('dpl_9v4TzUp1CSfjBmVDjo85t29xirtc', vercel.deleted)
         self.assertIn('Removed 13, skipped 1', out)
+
+    def test_report_keeps_completed_deletions_when_a_run_stops(self):
+        """Review finding: an API failure mid-run must not lose the record of what was already deleted."""
+        self.reviewed_plan()
+        vercel = FakeVercel(inventory(), aliases())
+        real_delete = vercel.delete
+
+        def delete(deployment_id):
+            if len(vercel.deleted) == 3:
+                raise SystemExit('Vercel DELETE: HTTP 500')
+            return real_delete(deployment_id)
+        vercel.delete = delete
+        with self.assertRaises(SystemExit):
+            self.run_main(vercel, '--apply', self.plan_path, '--report', self.report_path)
+        outcomes = json.loads(Path(self.report_path).read_text())['outcomes']
+        self.assertEqual([o['id'] for o in outcomes if o['result'] == 'deleted'], vercel.deleted)
+        self.assertEqual(len(vercel.deleted), 3)
+
+    def test_plan_file_must_belong_to_this_project(self):
+        Path(self.plan_path).write_text(json.dumps({'project': 'prj_other', 'removable': []}))
+        with self.assertRaisesRegex(SystemExit, 'is not a plan of project'):
+            self.run_main(FakeVercel(inventory(), aliases()), '--apply', self.plan_path)
 
     def test_open_pull_requests_must_be_listed_completely(self):
         with mock.patch.object(cleanup, 'github', return_value=[{'head': {'ref': f'b{i}'}} for i in range(100)]):
@@ -263,6 +340,20 @@ class Apply(unittest.TestCase):
             with self.assertRaisesRegex(SystemExit, 'could not be listed completely'):
                 cleanup.github_state({'b1'})
 
+    def test_branch_lookup_tries_both_path_spellings_and_reads_pr_history(self):
+        calls = []
+
+        def github(path):
+            calls.append(path)
+            if '/pulls?' in path:
+                return [{'state': 'closed'}]
+            return None if '%2F' not in path.split('/branches/')[1] else {'commit': {'commit': {'committer': {'date': '2026-11-02T01:00:00Z'}}}}
+        with mock.patch.object(cleanup, 'github', side_effect=github):
+            state = cleanup.branch_state('claude/x')
+        self.assertEqual(state, {'open_pr': False, 'had_pr': True, 'last_commit': datetime(2026, 11, 2, 1, tzinfo=timezone.utc)})
+        self.assertIn('head=FloFi-xyz%3Aclaude%2Fx', calls[0])
+        self.assertEqual([c.split('/branches/')[1] for c in calls[1:]], ['claude/x', 'claude%2Fx'])
+
     def test_missing_credentials_remove_nothing(self):
         with mock.patch.dict('os.environ', {}, clear=True):
             with self.assertRaisesRegex(SystemExit, 'VERCEL_TOKEN is not set'):
@@ -270,6 +361,38 @@ class Apply(unittest.TestCase):
             with mock.patch.object(cleanup.shutil, 'which', return_value=None):
                 with self.assertRaisesRegex(SystemExit, 'GitHub state is required'):
                     cleanup.github('/repos/FloFi-xyz/FloFi/pulls')
+
+
+class Client(unittest.TestCase):
+    def pages(self, *pages):
+        responses = iter(pages)
+
+        class Response(io.BytesIO):
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *exc):
+                return False
+        return lambda request, timeout: Response(json.dumps(next(responses)).encode())
+
+    def test_overlapping_pages_count_each_deployment_once(self):
+        """Review finding: a deployment repeated at a page boundary would shift the ranks of its branch."""
+        a, b, c = ({'uid': u} for u in ('dpl_a', 'dpl_b', 'dpl_c'))
+        vercel = cleanup.Vercel('token', opener=self.pages({'deployments': [a, b], 'pagination': {'next': 1}},
+                                                           {'deployments': [b, c], 'pagination': {'next': None}}))
+        self.assertEqual([d['uid'] for d in vercel.deployments()], ['dpl_a', 'dpl_b', 'dpl_c'])
+
+    def test_malformed_alias_response_stops_the_run(self):
+        """Review finding: a response without `aliases` must not read as 'unaliased'."""
+        vercel = cleanup.Vercel('token', opener=self.pages({'error': 'something'}))
+        with self.assertRaisesRegex(SystemExit, 'unexpected response'):
+            vercel.aliases('dpl_a')
+        self.assertEqual(cleanup.Vercel('token', opener=self.pages({'aliases': [{'alias': 'x.vercel.app'}]})).aliases('dpl_a'), ['x.vercel.app'])
+
+    def test_redirects_are_refused_so_tokens_never_follow_them(self):
+        request = urllib.request.Request('https://api.vercel.com/v7/deployments', headers={'Authorization': 'Bearer secret'})
+        with self.assertRaises(urllib.error.HTTPError):
+            cleanup.NoRedirect().redirect_request(request, None, 302, 'Found', {}, 'https://elsewhere.example/')
 
 
 if __name__ == '__main__':

@@ -41,13 +41,15 @@ Facts the cleanup rules depend on:
 
 ## 3. Cleanup: verified plan and the owner-run tool
 
-`scripts/vercel_deployment_cleanup.py` evaluates every rule on live state each time it runs, plans by default, deletes only
-with `--apply --expect N` and fetches each deployment again immediately before deleting it (skipping it if it became
-aliased, changed state or target, or moved project). It **never** removes: production or custom-environment deployments,
-rollback candidates, aliased deployments, anything less than 24 hours old or still building, any deployment of a branch
-with an open PR, the latest two deployments of an active branch (open PR, a commit or a deployment within 24 hours), the
-latest READY deployment of any branch, or anything whose project, repository or branch is unknown. GitHub state is
-required (GITHUB_TOKEN or `gh`); without it nothing is removed.
+`scripts/vercel_deployment_cleanup.py` evaluates every rule on live state each time it runs and only plans unless given
+`--apply PLAN`, the plan file the owner reviewed. It then deletes only deployments listed in that plan that are still
+removable under a fresh evaluation, and fetches each one again immediately before deleting it. It skips a deployment that
+became aliased or a rollback candidate, changed state, target or project, was deleted, or whose branch now has an open PR.
+It **never** removes: production or custom-environment deployments, rollback candidates, aliased deployments, anything less
+than 24 hours old or still building, any deployment of a branch with an open PR or with no PR history at all (uncertain
+status), the latest two deployments of an active branch (a commit or a deployment within 24 hours), the newest READY
+deployment of any branch, or anything whose project, repository, branch or GitHub state is unknown. GitHub state is required
+(GITHUB_TOKEN or `gh`), redirects are refused so a token never follows one, and the report is rewritten after every deletion.
 
 ### Removable at the snapshot (hand-verified; the tool's unit test replays this exact state and gets the same 14)
 
@@ -69,7 +71,7 @@ required (GITHUB_TOKEN or `gh`); without it nothing is removed.
 | `dpl_7NfoYcGvWAZsdGR1njeFGdM3uGZR` | 10-27 20:39 | canceled | codex/build-copilot-context-engine-001 (#129 merged) | CANCELED, unaliased |
 
 Preserved at the snapshot (70), by first reason: production 25, created in the last 24 hours 25, aliased 18 (custom
-domains, branch URLs, open PRs), branch with an open PR 1, latest READY deployment of a merged branch 1.
+domains, branch URLs, open PRs), branch with an open PR 1, newest READY deployment of a merged branch 1.
 
 Once the 24-hour window passes, the same rules add the superseded previews of merged PRs #146, #148, #150 and #151:
 the tool's test computes **39 removable** at 2026-11-03 03:00 UTC (35 superseded previews, 2 errored, 2 canceled)
@@ -80,9 +82,10 @@ while it has an open PR.
 
 1. Make `VERCEL_TOKEN` (a token with access to the team) available in your shell, and be logged in with `gh` (or set
    `GITHUB_TOKEN`).
-2. `python3 scripts/vercel_deployment_cleanup.py --report /tmp/flofi-vercel-plan.json` and read the plan.
-3. `python3 scripts/vercel_deployment_cleanup.py --apply --expect N --report /tmp/flofi-vercel-cleanup.json`, with N
-   the removable count of the plan you reviewed. A different count refuses to run.
+2. `python3 scripts/vercel_deployment_cleanup.py --report /tmp/flofi-vercel-plan.json` and read the plan (you may remove
+   entries from its `removable` list; nothing outside it is ever deleted).
+3. `python3 scripts/vercel_deployment_cleanup.py --apply /tmp/flofi-vercel-plan.json --report /tmp/flofi-vercel-cleanup.json`.
+   Deployments that became removable after your review are left alone and counted in the summary.
 
 The same list can be deleted from the Vercel dashboard (Deployments, select, Delete) after checking that each has no
 domain. Vercel keeps deleted deployments recoverable for 30 days before removing them permanently; whether Usage drops at
@@ -167,8 +170,8 @@ Measured here: none of the Usage figures (section 1). Everything below is an **e
 | Check | Result |
 | --- | --- |
 | `python3 -m unittest scripts/test_ci_function_traces.py` | 11 OK |
-| `python3 -m unittest scripts/test_ci_vercel_deployment_cleanup.py` (incl. the real-inventory replay) | 9 OK |
-| `python3 -m unittest discover -s scripts -p 'test_ci_*.py'` | 245 OK |
+| `python3 -m unittest scripts/test_ci_vercel_deployment_cleanup.py` (incl. the real-inventory replay) | 17 OK |
+| `python3 -m unittest discover -s scripts -p 'test_ci_*.py'` | 253 OK |
 | `python3 -m unittest discover -s scripts -p 'test_governance_lite.py'`, `python3 scripts/governance_lite.py` | 21 OK / PASS |
 | `python3 scripts/agent_guard.py check` | PASS |
 | `pnpm check` (typecheck, lint, build, schema drift, unit tests; pinned Node 24.21.0) | PASS: 511 files, 6,241 tests passed, 2 skipped (the same environment-gated skips as `main`) |
@@ -176,7 +179,22 @@ Measured here: none of the Usage figures (section 1). Everything below is an **e
 | CircleCI certification (browser suites on the built app) | see PR; note it serves `next start` from a full checkout, so it cannot see a file missing from a Vercel function |
 | Vercel preview of this branch (the only place traced packages run) | `dpl_3Zu4BsfmAyKE4mykmTbcoN9Cetwp` (`74df668`) built READY in 108 s. Read-only GETs answered exactly as the previous preview built from main's code (`dpl_6vL9d2Qkujv8hH9eLr2S6DTr841D`): `/api/channels/health` and `/api/automations/health` `404 ROUTE_NOT_FOUND` (features off in Preview), `/.well-known/oauth-protected-resource/api/mcp` `404 MCP_OAUTH_NOT_ENABLED`, `/api/build-estimate` `405` for GET; `/app/workflows` server-rendered `200` with the Privy provider and product workspace. No runtime log records for the deployment. Copilot replay is off in Preview, so the replay fixtures were shipped (gate) but not exercised |
 
-## 8. Owner decisions requested
+## 8. Review
+
+- FloFi specialists (read-only): flofi-infrastructure-ci, flofi-security and flofi-data-privacy were run in parallel on the
+  diff with their `agent_guard.py domain` reports. **None delivered a report** (each ended without a hand-back, the same
+  harness failure recorded in BUILD-FLOFI-CI-ARCHITECTURE-001). Their questions were checked directly: the migrations change
+  is comment-only and the app's two schema checks pass `SHIPPED_MIGRATIONS`. The gate runs inside the Production build stage
+  under `set -euo pipefail` in all three providers and passed in CircleCI. Runtime file needs were checked by searching every
+  path-based read and the names of the Vercel environment variables, and by the preview smoke test.
+- Independent review of the deletion tool (general-purpose reviewer, read-only, local reproductions): 3 medium and 5 low
+  findings, **all fixed with regression tests**. (1) A newer failed or stuck build exposed a branch's only working preview:
+  now the newest READY deployment of each branch is kept. (2) `--expect N` matched a count, not the reviewed set: replaced
+  by `--apply PLAN`. (3) Branches with no PR history counted as inactive: now kept whole; branch lookups try both path
+  spellings. Also fixed: de-duplication across overlapping pages; a malformed alias response stops the run; the pre-delete
+  recheck covers rollback, deleted and open-PR state; redirects are refused; the report survives a mid-run failure.
+
+## 9. Owner decisions requested
 
 1. Run the cleanup tool (section 3) or delete the listed deployments in the dashboard.
 2. Apply the retention settings (section 4); choose Preview 1 month or 2 months for the dormant open PRs.
