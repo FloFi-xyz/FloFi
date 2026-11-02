@@ -60,11 +60,23 @@ profiles: every product profile passed (e.g. review-execute-recovery-components 
 mismatches from the changed header/footer and 2 build009 tests that need the live LI.FI quote (`ENOTFOUND li.quest`, as on the base).
 `composition-provenance` was not run (needs official artifact downloads and the Mode B harness; its only change is one navigation line).
 
-**Screenshot baselines (CI blocker until regenerated in the CI image):** visual-shell (build, simulate, execute), swap-authoring
-(chat-committed, review-blocked), mock-artifact-chain (simulate-current, simulate-invalidated, simulate-expired), base-observation
-(observation-recorded, observation-expired). The base commit's own baselines do not match in this sandbox and there is no Docker daemon for
-`cimg/node:24.21.0-browsers`, so no locally rendered baseline was committed; they are regenerated from the CI rendering environment and the
-diffs inspected (header nav and footer only) before committing.
+**Screenshot baselines, regenerated in the CI rendering environment.** The 10 baselines that show the navigation — visual-shell (build,
+simulate, execute), swap-authoring (chat-committed, review-blocked), mock-artifact-chain (simulate-current, simulate-invalidated,
+simulate-expired) and base-observation (observation-recorded, observation-expired) — were regenerated as follows (no Docker daemon here):
+- the CI image `cimg/node:24.21.0-browsers` (index `sha256:7e52dee8…`, linux/amd64 manifest `sha256:87f34dbe…`) pulled from Docker Hub
+  layer by layer, every layer checked against its manifest digest, and unpacked into a root filesystem (Ubuntu 24.04.4, the image's fonts);
+- the approved headless shell 1243 fetched from the pinned URL and verified against `scripts/bootstrap-playwright.py` (119,809,080 bytes,
+  SHA-256 `a9da0288…`), run inside that root filesystem through `chroot` as `BUILD002_BROWSER_CACHE` (no repository file changed for this);
+- **fidelity check before any update:** on `754fb23` the `default-product` profile reproduced CircleCI's exact failures — 2,151 px
+  (observation-recorded, simulate-current, simulate-expired), 2,096 px (chat-committed, build), 3,027 px (simulate), 2,874 px (execute) — and
+  every other test passed with the committed baselines;
+- `playwright test` of the four specs with `--update-snapshots=changed` rewrote exactly these 10 files and no other;
+- the diffs were inspected: the header (“Dashboard · 0 Build · 1 Build · 2 Simulate · 3 Execute” → “Dashboard · Chat · Editor”), the footer
+  (“View simulation” / “View execution”) and the renamed in-page labels (“Back to the Canvas”, “Configured on the Canvas”, “…on the Canvas, then
+  return here…”, “Create a workflow in the Editor first.”); the only other differences are 1–21-pixel rasterization specks (≤ 6/255 in one
+  channel) that are part of CI's own rendering of these pages (they are inside CircleCI's exact counts above);
+- `default-product` then passed in the CI image without update flags: 106 passed; the 2 failures are the build009 tests that need the live
+  LI.FI host, unreachable here (they pass in CircleCI). No screenshot assertion, threshold or required check was changed or skipped.
 
 ## 5. Specialist reviews and follow-up (`de474cc`)
 
@@ -83,8 +95,8 @@ profiles 439 passed, 9 failed (the 7 screenshot baselines below and the 2 build0
 
 CircleCI on `3189e8d`: governance, certification-checks and certification-browser-2 passed; certification-browser-1 failed only on the 7 reachable
 screenshot comparisons (1,373–2,096 px each: header, footer and, after the follow-up, renamed in-page labels). The CI-rendered images are
-served from `output.circle-artifacts.com`, which this session's network policy denies, so the baselines are regenerated in the CI image after
-this follow-up (owner action, or once that host is allowed).
+served from `output.circle-artifacts.com`, which this session's network policy denies, so the baselines were regenerated in the CI image itself
+(§4).
 
 ## 6. Open questions for the owner and items left as they are
 
