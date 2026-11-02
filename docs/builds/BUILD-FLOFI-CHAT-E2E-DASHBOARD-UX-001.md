@@ -115,6 +115,42 @@ flofi-security, flofi-data-privacy, flofi-workflow. Batch 2: flofi-chat, flofi-f
 | protocol MEDIUM: multiplier tokens shown in raw units | Fixed: Robinhood Stock Tokens are shown in underlying shares (official ERC-8056 multiplier); Token-2022 balances (a mint may scale its UI amount) are counted as not checked, never shown raw. Tests. |
 | protocol LOW: slow catalog loses a read native balance; lagging node; Solana slot pinning; PARTIAL cached 30 s; failed gate labelled NOT_ENABLED; list decimals trusted | Left as is (documented); each fails toward “unavailable” or an incomplete-but-labelled snapshot, never a fabricated value. |
 
+## 5. Validation
+
+Local (Node v24.21.0, pnpm 11.22.0, loopback only; PostgreSQL 16 on loopback):
+
+- typecheck, lint of the changed files, `agent_guard.py check`, governance-lite and the CI-profile tests pass.
+- `pnpm test`: 6,411 passed, 2 skipped (environment-gated), 1 failure: a source-pinned import line in `playwright.config.ts`, fixed (the suite
+  then passes 5/5). Suites touched after that run pass again (components, state, i18n, domain, server).
+- PostgreSQL: `account-store.pg.test.ts` 9 passed (new: the account's wallet addresses; removed wallets; an address shared across accounts).
+- Guarded browser profiles: owner-history 11 passed; workflow-acceptance 5 passed; default-product 102 passed with 9 failures that are this
+  container's, not this change's — 2 build009 tests need the live LI.FI host, and 7 screenshot comparisons render with a different height in
+  this container's Chromium and fonts (CircleCI's image is the authority for screenshots; see §5.1).
+- CircleCI is the certification authority (§5.1).
+
+### 5.1 CircleCI
+
+Pending at the time of writing; the PR description carries the result.
+
 ## 6. Open questions and limitations
 
-See §6.
+**For the owner**
+1. Signed-in history access includes every wallet the account holds (embedded, legacy, linked external, sign-in wallets). Permanent Delete
+   through an account-held wallet needs no recent sign-in (it still rechecks financial eligibility); should Delete ask for a fresh sign-in?
+2. The Privacy & Memory notice applies an agreement only to the wallet available at that moment; should FloFi offer a one-line confirmation
+   when a new wallet appears later in the same browser (consent per wallet), instead of leaving it to Privacy & memory?
+3. The portfolio prices only ETH/WETH and SOL/WSOL (the deployment's Chainlink feeds). Valuing stablecoins or other assets needs a verified
+   price source the owner chooses; until then their value column shows “—” and the total is labelled “Priced holdings”.
+4. The portfolio reads only where the deployment enables each network's swap/transfer flow, and uses the public RPCs unless
+   `GRYLOO_<NETWORK>_RPC_URL` / `GRYLOO_SOLANA_RPC_URL` is set on the web process; prices need `FLOFI_AUTOMATION_PRICE_SOURCE` there too.
+
+**Limitations**
+- Area 3 is covered by unit and PostgreSQL tests (resolver, store, callers' fail-closed paths) and the owner-history browser suite; no
+  browser suite signs in through the Privy emulator and then reads history (the account path's browser test is a follow-up).
+- Carry-over after an execution covers one-action workflows on the step runtimes and sequences. Compositions and runtimes that run a
+  workflow as a whole say a change is reviewed as a whole. A carried step whose delivery was not yet proven when an action was added keeps
+  the funded step blocked (fail-closed) until the owner undoes and re-adds after reconciliation.
+- Multicall3 presence on Robinhood Chain is checked at runtime (code at the canonical address), not pinned by code hash; without it only
+  the native balance is read. Token-2022 balances are not shown. Solana token accounts are not pinned to the owner-account slot.
+- The workflow hub lists executed records page by page (25 at a time); the Dashboard summary marks counts “+” when more exist.
+- Evidence level: MOCKED / loopback only. Nothing was deployed, configured, signed or sent.
