@@ -202,6 +202,7 @@ class Plan(unittest.TestCase):
                  deployment('dpl_rollback', old, 'READY', None, 'x', 'FloFi-xyz/FloFi') | {'isRollbackCandidate': True},
                  deployment('dpl_queued', old, 'QUEUED', None, 'x', 'FloFi-xyz/FloFi')]
         items.append({**deployment('dpl_nobranch', old, 'ERROR', None, 'x', 'FloFi-xyz/FloFi'), 'meta': {}})
+        items.append({**deployment('dpl_retained', old, 'READY', None, 'x', 'FloFi-xyz/FloFi'), 'softDeletedByRetention': True})
         removable, preserved = cleanup.classify(items, {}, set(), {}, SNAPSHOT)
         self.assertEqual(removable, [])
         reasons = {e['id']: ' '.join(e['reasons']) for e in preserved}
@@ -210,6 +211,7 @@ class Plan(unittest.TestCase):
         self.assertIn('rollback candidate', reasons['dpl_rollback'])
         self.assertIn('state QUEUED', reasons['dpl_queued'])
         self.assertIn('unknown repository or branch', reasons['dpl_nobranch'])
+        self.assertIn('already deleted', reasons['dpl_retained'])
 
 
 class Apply(unittest.TestCase):

@@ -48,7 +48,7 @@ def classify(deployments, aliases, open_branches, branch_commits, now):
     for deployment in deployments:
         meta, reasons = deployment.get('meta') or {}, []
         branch, created = meta.get('githubCommitRef'), datetime.fromtimestamp(deployment['created'] / 1000, timezone.utc)
-        state = deployment.get('state') or deployment.get('readyState')
+        state = deployment.get('readyState') or deployment.get('state')
         if deployment.get('projectId', PROJECT_ID) != PROJECT_ID:
             reasons.append('other project')
         if deployment.get('target') == 'production':
@@ -57,6 +57,8 @@ def classify(deployments, aliases, open_branches, branch_commits, now):
             reasons.append('custom environment')
         if deployment.get('isRollbackCandidate'):
             reasons.append('rollback candidate')
+        if deployment.get('softDeletedByRetention') or deployment.get('deleted'):
+            reasons.append('already deleted')
         if aliases.get(deployment['uid']):
             reasons.append('aliased: ' + ', '.join(sorted(aliases[deployment['uid']])))
         if now - created < MIN_AGE:
@@ -102,7 +104,7 @@ class Vercel:
     def deployments(self):
         found, until = [], None
         while True:
-            page = self.request('GET', '/v6/deployments', projectId=PROJECT_ID, limit=100, **({'until': until} if until else {}))
+            page = self.request('GET', '/v7/deployments', projectId=PROJECT_ID, limit=100, **({'until': until} if until else {}))
             found += page.get('deployments', [])
             until = (page.get('pagination') or {}).get('next')
             if not until:
