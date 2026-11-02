@@ -174,7 +174,7 @@ Measured here: none of the Usage figures (section 1). Everything below is an **e
 | `pnpm check` (typecheck, lint, build, schema drift, unit tests; pinned Node 24.21.0) | PASS: 511 files, 6,241 tests passed, 2 skipped (the same environment-gated skips as `main`) |
 | `python3 scripts/function_traces.py apps/reference-dapp` on that build | PASS, largest 45.0 MB |
 | CircleCI certification (browser suites on the built app) | see PR; note it serves `next start` from a full checkout, so it cannot see a file missing from a Vercel function |
-| Vercel preview of this branch (the only place traced packages run) | see PR |
+| Vercel preview of this branch (the only place traced packages run) | `dpl_3Zu4BsfmAyKE4mykmTbcoN9Cetwp` (`74df668`) built READY in 108 s. Read-only GETs answered exactly as the previous preview built from main's code (`dpl_6vL9d2Qkujv8hH9eLr2S6DTr841D`): `/api/channels/health` and `/api/automations/health` `404 ROUTE_NOT_FOUND` (features off in Preview), `/.well-known/oauth-protected-resource/api/mcp` `404 MCP_OAUTH_NOT_ENABLED`, `/api/build-estimate` `405` for GET; `/app/workflows` server-rendered `200` with the Privy provider and product workspace. No runtime log records for the deployment. Copilot replay is off in Preview, so the replay fixtures were shipped (gate) but not exercised |
 
 ## 8. Owner decisions requested
 
