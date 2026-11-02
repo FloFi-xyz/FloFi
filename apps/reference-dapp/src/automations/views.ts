@@ -22,8 +22,15 @@ export type RuleView = {
   readonly lastObservation: ObservationView | null; readonly armed: boolean | null; readonly attention: 'WORKFLOW_CHANGED' | 'STRATEGY_STALE' | null;
   readonly expiresAt: string | null; readonly createdAt: string; readonly pending: number;
 };
+/** Issue #149: one recorded wallet request of a run (public facts only: no calldata, nonce or signature). */
+export type RunAttemptView = { readonly step: string; readonly state: string; readonly transactionHash: string | null; readonly reconciled: boolean };
 export type RunView = { readonly executionId: string; readonly status: string; readonly reconciled: boolean; readonly terminal: boolean; readonly errorCode: string | null;
-  readonly evidenceEnvironment: string | null; readonly evidenceOutcome: string | null; readonly evidenceBundleHash: string | null };
+  readonly evidenceEnvironment: string | null; readonly evidenceOutcome: string | null; readonly evidenceBundleHash: string | null;
+  /**
+   * Issue #149: the run's recorded attempts and observation flag, so the History distinguishes a simulation, a refusal, a submission, an
+   * onchain confirmation (an approval alone included) and reconciliation. `null` when the run could not be read.
+   */
+  readonly needsObservation: boolean | null; readonly attempts: readonly RunAttemptView[] | null };
 export type OccurrenceView = {
   readonly occurrenceId: string; readonly ruleId: string; readonly ruleName: string; readonly kind: 'SCHEDULE' | 'PRICE' | 'WATCH';
   readonly state: 'PENDING_OWNER' | 'APPROVAL_CREATED' | 'COMPLETED' | 'DISMISSED' | 'EXPIRED' | 'DELEGATED'; readonly dueAt: string; readonly expiresAt: string;

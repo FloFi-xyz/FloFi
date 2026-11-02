@@ -5,8 +5,9 @@ import { currentWalletPrincipal, currentWalletPrincipals } from '../../server/se
 import { WALLET_PRINCIPAL_HEADER, normalizePrincipal } from '../../server/run-ownership';
 import { embeddedRuntime, flowRuntimeKind } from '../../server/flow-runtime';
 import { workflowOwner, WORKFLOW_OWNER_HEADER } from '../../domain/saved-workflow';
-import { dashboardRunId, object, optionalText, textValue, toDashboardRun } from './run-mapping';
-import type { DashboardDetailResponse, DashboardSnapshot } from './types';
+import { dashboardRunId, object, optionalText, textValue, toDashboardAttempts, toDashboardRun } from './run-mapping';
+import { attemptDependentStatus } from './landed-attempts';
+import type { DashboardDetailResponse, DashboardRun, DashboardSnapshot } from './types';
 
 async function connection(expectedAccount: string): Promise<{ connection: DashboardSnapshot['connection']; account: string | null; base: URL | null }> {
   const evm = /^0x[0-9a-f]{40}$/i.test(expectedAccount);
@@ -40,6 +41,24 @@ async function cloudGet(base: URL, path: string, account: string): Promise<unkno
   if (!response.ok || !object(body) || body.ok !== true) throw new Error('CLOUD_API_UNAVAILABLE');
   return body.value;
 }
+/**
+ * Issue #149: a run summary does not carry its attempts, so a status that looks not started, declined, failed or confirmed cannot say
+ * whether an approval (or an earlier step) already landed onchain. Those runs' own owner-scoped records are read (a few at a time) and their
+ * recorded attempts attached; the projection then follows the canonical lifecycle. A read that fails marks the run, so it never reads
+ * "nothing was sent". Runs whose summary already carries attempts are not read again.
+ */
+async function withAttempts(base: URL, account: string, runs: readonly DashboardRun[]): Promise<DashboardRun[]> {
+  const out = [...runs], pending = out.map((run, index) => ({ run, index })).filter(({ run }) => !run.attempts && attemptDependentStatus(run.status));
+  for (let i = 0; i < pending.length; i += 5) await Promise.all(pending.slice(i, i + 5).map(async ({ run, index }) => {
+    try {
+      const raw = await cloudGet(base, `v1/runs/${encodeURIComponent(run.runId)}`, account);
+      // The same owner-scoped record, or nothing: a record of another run or owner never lends its attempts.
+      const own = toDashboardRun(raw, account);
+      out[index] = own?.runId === run.runId && own.attempts ? { ...run, attempts: own.attempts } : { ...run, attemptsUnavailable: true };
+    } catch { out[index] = { ...run, attemptsUnavailable: true }; }
+  }));
+  return out;
+}
 export async function loadDashboardSnapshot(expectedAccount: string, cursor: string | null = null): Promise<DashboardSnapshot> {
   const scope = await connection(expectedAccount);
   const empty: DashboardSnapshot = { connection: scope.connection, account: scope.account, runs: [], hasMore: false };
@@ -49,7 +68,8 @@ export async function loadDashboardSnapshot(expectedAccount: string, cursor: str
     const query = new URLSearchParams({ limit: '25', ...cursor ? { cursor } : {} });
     const value = await cloudGet(scope.base, `v1/runs?${query}`, scope.account);
     if (!object(value) || !Array.isArray(value.items)) throw new Error('CLOUD_API_UNAVAILABLE');
-    return { ...empty, runs: value.items.flatMap(item => { const run = toDashboardRun(item, scope.account!); return run ? [run] : []; }), hasMore: Boolean(optionalText(value.next)), next: optionalText(value.next) };
+    const runs = value.items.flatMap(item => { const run = toDashboardRun(item, scope.account!); return run ? [run] : []; });
+    return { ...empty, runs: await withAttempts(scope.base, scope.account, runs), hasMore: Boolean(optionalText(value.next)), next: optionalText(value.next) };
   } catch { return { ...empty, connection: 'UNAVAILABLE' }; }
 }
 
@@ -73,8 +93,7 @@ export async function loadDashboardRunDetail(expectedAccount: string, runId: str
     const evidenceRaw = evidence.status === 'fulfilled' && Array.isArray(evidence.value) ? evidence.value : null;
     const recordRaw = record.status === 'fulfilled' && record.value.ok ? record.value.value : null;
     return { ...empty, detail: { run, record: recordRaw, recordUnavailable: recordRaw === null, evidenceUnavailable: evidenceRaw === null,
-      attempts: Array.isArray(raw.attempts) ? raw.attempts.filter(object).filter(item => textValue(item.attemptId) && textValue(item.step) && textValue(item.state)).map(item => ({
-        attemptId: textValue(item.attemptId), step: textValue(item.step), state: textValue(item.state), transactionHash: optionalText(item.transactionHash), reconciled: item.reconciled === true })) : [],
+      attempts: toDashboardAttempts(raw.attempts),
       evidence: (evidenceRaw ?? []).filter(object).filter(item => optionalText(item.bundleHash)).map(item => ({ bundleHash: textValue(item.bundleHash), environment: textValue(item.environment),
         outcome: textValue(item.outcome), verified: item.verified === true, createdAt: optionalText(item.createdAt) })) } };
   } catch (cause) { return { ...empty, connection: cause instanceof Error && cause.message === 'RUN_NOT_FOUND' ? 'NOT_FOUND' : 'UNAVAILABLE' }; }

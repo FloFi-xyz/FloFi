@@ -14,6 +14,7 @@ import type { CapabilityView, HistoryEntryView, LinkCodeView, ObservationView, O
 import type { Command } from '../domain/commands';
 import type { OwnerWorkflow, WorkflowOwner } from '../domain/saved-workflow';
 import { useLocale } from '../i18n/locale';
+import { automationRunLabel } from './automation-run-status';
 import { WalletProof, type useWalletProof } from './wallet-proof';
 import type { ReviewView } from '../delegation/views';
 import { AuthorizationReview, DelegatedAuthorizations, DelegatedCreate, DELEGATION_ERROR_TEXT, useDelegation } from './delegated-automations';
@@ -199,7 +200,7 @@ function RuleCard({ rule, busy, run, owner, onHistory }: { rule: RuleView; busy:
   </article>;
 }
 
-function HistoryPanel({ history, onClose }: { history: RuleHistoryView; onClose: () => void }) {
+export function HistoryPanel({ history, onClose }: { history: RuleHistoryView; onClose: () => void }) {
   const { t } = useLocale();
   const zone = history.rule.timezone;
   return <section className="workspace-section automation-history" aria-label={t('History of {0}', history.rule.name)}>
@@ -209,7 +210,8 @@ function HistoryPanel({ history, onClose }: { history: RuleHistoryView; onClose:
     <h3>{t('Proposals')}</h3>
     {history.occurrences.length ? <ul className="automation-history-list">{history.occurrences.map(o => <li key={o.occurrenceId}>
       <When iso={o.dueAt} zone={zone}/> · {t(OCCURRENCE_LABEL[o.state] ?? o.state)}{o.outcome && OUTCOME_LABEL[o.outcome] && o.outcome !== 'APPROVAL_APPLIED' ? <> · {t(OUTCOME_LABEL[o.outcome])}</> : null}
-      {o.approval?.runs.map(r => <span key={r.executionId}> · {t(r.reconciled ? 'Execution reconciled' : r.terminal ? 'Execution ended' : 'Owner executed — reconciling')}
+      {o.approval?.status === 'APPLIED' && o.approval.runs.length === 0 && <> · {t('Intention only — not simulated or sent yet')}</>}
+      {o.approval?.runs.map(r => <span key={r.executionId}> · {t(automationRunLabel(r))}
         {r.evidenceEnvironment && <> ({t('evidence')}: {r.evidenceEnvironment})</>} · <a href={`/app/dashboard/runs/${encodeURIComponent(r.executionId)}`}>{t('Open run')}</a></span>)}
     </li>)}</ul> : <p className="muted">{t('No proposals yet.')}</p>}
     <h3>{t('Evaluations')}</h3>
@@ -462,7 +464,7 @@ export function AutomationsWorkspace({ owner: ownerProp, proof, onPropose, canva
               {overview.recent.length > 0 && <section className="workspace-section" aria-labelledby="automation-recent">
                 <div className="workspace-section-heading"><div><h2 id="automation-recent">{t('Recent proposals')}</h2></div></div>
                 <ul className="automation-history-list">{overview.recent.map(o => <li key={o.occurrenceId}>{o.ruleName} · <When iso={o.dueAt} zone={byId.get(o.ruleId)?.timezone ?? 'UTC'}/> · {t(OCCURRENCE_LABEL[o.state] ?? o.state)}
-                  {o.approval?.runs.map(r => <span key={r.executionId}> · {t(r.reconciled ? 'Execution reconciled' : r.terminal ? 'Execution ended' : 'Owner executed — reconciling')} · <a href={`/app/dashboard/runs/${encodeURIComponent(r.executionId)}`}>{t('Open run')}</a></span>)}</li>)}</ul>
+                  {o.approval?.runs.map(r => <span key={r.executionId}> · {t(automationRunLabel(r))} · <a href={`/app/dashboard/runs/${encodeURIComponent(r.executionId)}`}>{t('Open run')}</a></span>)}</li>)}</ul>
               </section>}
               <Notifications overview={overview} owner={owner} busy={busy} run={run}/>
             </>}

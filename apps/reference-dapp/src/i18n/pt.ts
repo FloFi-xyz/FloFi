@@ -29,6 +29,7 @@ import { portugueseUniversalBridge } from './pt-universal-bridge';
 import { portugueseConversation } from './pt-conversation';
 import { portugueseChatE2eFix } from './pt-chat-e2e-fix';
 import { portugueseE2eReliability } from './pt-e2e-reliability';
+import { portugueseStatusTruth } from './pt-status-truth';
 import { portugueseBridgeLiveFix } from './pt-bridge-live-fix';
 import { portugueseBuildEntry } from './pt-build-entry';
 import { portugueseAccounts } from './pt-accounts';
@@ -36,6 +37,8 @@ import { portugueseWallet } from './pt-wallet';
 import { portuguesePrivy } from './pt-privy';
 /** English source messages are stable presentation keys. Technical identifiers never enter this catalog. */
 export const portuguese: Readonly<Record<string, string>> = {
+  // BUILD-FLOFI-E2E-RELIABILITY-001 (#149): new keys only, first so every existing translation still wins.
+  ...portugueseStatusTruth,
   // BUILD-FLOFI-AUTH-WALLETS-001: first, so every existing product translation of a shared word keeps precedence.
   // FloFi Wallet first: where both catalogues translate the same English text, the product's account wording wins.
   ...portugueseWallet,

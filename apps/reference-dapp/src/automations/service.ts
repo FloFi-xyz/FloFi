@@ -37,6 +37,7 @@ import { nextSlotAfter } from './schedule.ts';
 import { MAX_RULES_PER_OWNER, OPEN_OCCURRENCE, type AutomationStore, type EvaluationRecord, type OccurrenceRecord, type Owner, type RuleRecord } from './store.ts';
 import { createLinkCode, ownerBucket, targetsOf, unlinkOwner } from './subscriptions.ts';
 import { conditionThreshold, OBSERVED_ASSETS, type ObservedAsset } from './trigger.ts';
+import { onceEachRun, recordedRunFacts } from './run-facts.ts';
 import type { ActionView, CapabilityView, HistoryEntryView, LinkCodeView, ObservationView, OccurrenceView, OpenedView, OverviewView, RuleHistoryView, RuleView,
   RouteCapability } from './views.ts';
 
@@ -144,9 +145,12 @@ export function createAutomationService(deps: ServiceDeps) {
         if (h.status === 'APPLIED' && o.state === 'APPROVAL_CREATED') await store.completeApproval(o.occurrenceId, h.handoffId, deps.now()).catch(() => false);
         // The viewer IS the owner (a verified session) and the claim policy only lets the owner's wallet claim: reading the owner's own runs
         // needs no sharing choice. Runs of any other wallet are never read.
-        const owned = h.claimed && sameOwner(o.owner, h.claimed) ? await sharedRuns({ ...h, shareStatus: true } as HandoffRecord, deps.runtime, deps.handoffs).catch(() => null) : null;
-        approval = { status: h.status, runs: (owned ?? []).map(r => ({ executionId: r.executionId, status: r.status, reconciled: r.reconciled, terminal: r.terminal,
-          errorCode: r.errorCode, evidenceEnvironment: r.evidenceEnvironment, evidenceOutcome: r.evidenceOutcome, evidenceBundleHash: r.evidenceBundleHash })) };
+        const claimant = h.claimed && sameOwner(o.owner, h.claimed) ? h.claimed.address : null, reads = onceEachRun(deps.runtime);
+        const owned = claimant ? await sharedRuns({ ...h, shareStatus: true } as HandoffRecord, reads, deps.handoffs).catch(() => null) : null;
+        // Issue #149: each run's own recorded attempts (from the same read), so the History never calls a simulation or a refusal an execution.
+        approval = { status: h.status, runs: await Promise.all((owned ?? []).map(async r => ({ executionId: r.executionId, status: r.status, reconciled: r.reconciled,
+          terminal: r.terminal, errorCode: r.errorCode, evidenceEnvironment: r.evidenceEnvironment, evidenceOutcome: r.evidenceOutcome, evidenceBundleHash: r.evidenceBundleHash,
+          ...await recordedRunFacts(reads, r.executionId, claimant!) }))) };
       }
     }
     const state = approval?.status === 'APPLIED' && o.state === 'APPROVAL_CREATED' ? 'COMPLETED' : o.state;

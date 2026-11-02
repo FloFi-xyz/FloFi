@@ -4,8 +4,9 @@ import type { ExecutionLifecycle } from '../../domain/execution-lifecycle';
 import type { ExecutionRecovery } from '../../domain/execution-recovery';
 import { projectExecutionResult } from '../../domain/execution-result';
 import { shellChainLabel } from '../../domain/product-shell';
-import { recordedResultUnknown, settledWithEvidence } from '../../domain/canonical-execution-status';
-import type { DashboardRun, DashboardRunView, DashboardStatus } from './types';
+import { canonicalRunLifecycle, recordedResultUnknown, settledWithEvidence, type CanonicalLifecycle } from '../../domain/canonical-execution-status';
+import { landedAttempts, type LandedEvidence } from './landed-attempts';
+import type { DashboardAttempt, DashboardRun, DashboardRunView, DashboardStatus } from './types';
 
 export const dashboardRunId = (value: unknown): value is string => typeof value === 'string' && /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(value);
 export const object = (value: unknown): value is Record<string, unknown> => value !== null && typeof value === 'object' && !Array.isArray(value);
@@ -14,12 +15,49 @@ export const optionalText = (value: unknown) => typeof value === 'string' && val
 export const sameOwner = (left: string | null | undefined, right: string | null | undefined) => Boolean(left && right &&
   (/^0x[0-9a-f]{40}$/i.test(left) && /^0x[0-9a-f]{40}$/i.test(right) ? left.toLowerCase() === right.toLowerCase() : left === right));
 
+/** The recorded attempts of a run read model (`v1/runs/:id`), reduced to public facts. */
+export function toDashboardAttempts(value: unknown): DashboardAttempt[] {
+  return Array.isArray(value) ? value.filter(object).filter(item => textValue(item.attemptId) && textValue(item.step) && textValue(item.state)).map(item => ({
+    attemptId: textValue(item.attemptId), step: textValue(item.step), state: textValue(item.state), transactionHash: optionalText(item.transactionHash),
+    reconciled: item.reconciled === true })) : [];
+}
 export function toDashboardRun(value: unknown, account: string): DashboardRun | null {
   if (!object(value) || !sameOwner(textValue(value.ownerAccount), account) || !dashboardRunId(value.runId) || !textValue(value.flow) || !textValue(value.status)) return null;
   return { runId: value.runId, workflowId: textValue(value.workflowId), flow: textValue(value.flow), status: textValue(value.status),
     provenance: textValue(value.provenance), ownerAccount: account, errorCode: optionalText(value.errorCode),
     needsObservation: value.needsObservation === true, attentionRequired: value.attentionRequired === true, hasEvidence: value.hasEvidence === true,
-    createdAt: optionalText(value.createdAt), updatedAt: optionalText(value.updatedAt) };
+    createdAt: optionalText(value.createdAt), updatedAt: optionalText(value.updatedAt),
+    // Issue #149: a read model that carries its attempts (a run detail) keeps them; a summary without them stays "not read".
+    ...Array.isArray(value.attempts) ? { attempts: toDashboardAttempts(value.attempts) } : {} };
+}
+
+type Summary = { status: DashboardStatus; message: string };
+const APPROVAL_ONLY = 'Only the token approval is confirmed onchain. An approval moves no funds by itself, and the main action has not completed.';
+/**
+ * Issue #149: the Dashboard status of a run whose recorded attempts were read is the canonical lifecycle's (the same evidence MCP's
+ * execution status reads), so it never says "Not started" when an attempt was made or landed, and never calls a landed approval the
+ * completed action. Where the summary already says the same thing, its wording is kept.
+ */
+function fromLifecycle(lifecycle: CanonicalLifecycle, landed: LandedEvidence, run: DashboardRun, summary: Summary): Summary {
+  const keep = (status: DashboardStatus, message: string): Summary => summary.status === status ? summary : { status, message };
+  switch (lifecycle.status) {
+    case 'NOT_STARTED': case 'RECONCILED': case 'RECONCILED_WITH_ATTENTION': return summary;
+    case 'AUTHORIZATION_PENDING': return { status: 'In progress', message: 'A wallet request is prepared and awaits your wallet confirmation. Nothing is sent without it.' };
+    case 'REJECTED': return keep('Transaction not submitted', 'This request was recorded as not submitted. Earlier confirmed actions and costs remain recorded.');
+    case 'SUBMITTED': case 'HASH_KNOWN': case 'SETTLEMENT_PENDING': return keep('In progress', 'The recorded execution is still awaiting its final outcome.');
+    // A step landed and the workflow is not reconciled: between steps (an approval before the swap, a supply before the borrow) earlier
+    // actions completed; a confirmed main action whose outcome is not reconciled yet is not completion either.
+    case 'CONFIRMED_ONCHAIN':
+      if (landed.approvalOnly) return { status: 'Partially completed', message: APPROVAL_ONLY };
+      return ['CONFIRMED', 'COMPLETED', 'SETTLED'].includes(run.status)
+        ? keep('Needs attention', 'A transaction is confirmed. Full workflow completion has not been established by this summary.')
+        : keep('Partially completed', 'Earlier completed actions remain recorded.');
+    case 'PARTIALLY_COMPLETED': return landed.approvalOnly ? { status: 'Partially completed', message: APPROVAL_ONLY } : keep('Partially completed', 'Earlier completed actions remain recorded.');
+    case 'REVERTED': case 'FAILED': return keep('Needs attention', 'A failed action is recorded. Open the run to review any earlier completed actions.');
+    case 'INCONCLUSIVE': return keep('Unresolved', 'A recorded request still needs verification. No transaction is repeated.');
+    case 'INTERVENTION_REQUIRED': return summary.status === 'Unresolved' || summary.status === 'Needs attention' ? summary
+      : { status: 'Needs attention', message: 'A recorded transaction needs review before anything else happens. Open the run.' };
+  }
 }
 const titles: Record<string, string> = { 'aave-supply': 'Aave workflow', 'base-sepolia-swap': 'Swap', 'crosschain-router': 'Bridge', 'crosschain-universal': 'Bridge',
   'crosschain-router-testnet': 'Bridge', 'robinhood-transfer': 'Send', 'jupiter-swap': 'Swap', 'solana-devnet-swap': 'Swap',
@@ -74,6 +112,19 @@ export function projectDashboardRun(run: DashboardRun, progress: ExecutionLifecy
   } else if (run.status === 'CONFIRMED') {
     status = 'Needs attention'; message = 'A transaction is confirmed. Full workflow completion has not been established by this summary.';
   }
+  // Issue #149: the run's recorded attempts, when read, decide what was sent and what landed (never the summary status alone).
+  const landed = landedAttempts(run.attempts);
+  if (run.attempts?.length) {
+    const lifecycle = canonicalRunLifecycle(run), summary = { status, message };
+    if (!progress) ({ status, message } = fromLifecycle(lifecycle, landed, run, summary));
+    // A saved run's projected progress keeps its own truth, except where the attempts prove more: never "Not started" once something was
+    // asked or landed, and a run whose only landed request is an approval is not still "in progress" when nothing else is pending.
+    else if (status === 'Not started' && lifecycle.status !== 'NOT_STARTED') ({ status, message } = fromLifecycle(lifecycle, landed, run, summary));
+    else if (status === 'In progress' && landed.approvalOnly && lifecycle.status === 'CONFIRMED_ONCHAIN') { status = 'Partially completed'; message = APPROVAL_ONLY; }
+  } else if (run.attemptsUnavailable && status === 'Not started') {
+    // The summary looks not started, but the attempts that would prove it could not be read: fail closed, never "nothing was sent".
+    status = 'Unresolved'; message = 'The recorded requests of this run could not be read, so FloFi does not claim that nothing was sent. Refresh history to check again.';
+  }
   const attention: string[] = [];
   if (status === 'Unresolved') attention.push('Execution status unresolved');
   else if (status === 'Partially completed' || status === 'Failed') attention.push('Review the incomplete action');
@@ -89,6 +140,7 @@ export function projectDashboardRun(run: DashboardRun, progress: ExecutionLifecy
   }
   attention.push(...(progress?.evidence?.attention ?? []));
   return { run, title, status, message, attention: [...new Set(attention)],
+    landed: status === 'Completed' || status === 'Completed with attention' ? null : landed.label,
     networks: progress ? [...new Set(progress.steps.flatMap(step => step.operations.map(operation => operation.chain)).filter(Boolean))].map(shellChainLabel) : [],
     completed: progress?.planUnavailable ? null : progress?.completed ?? null, total: progress?.planUnavailable ? null : progress?.steps.length ?? null,
     recovered: Object.values(progress?.stepEvidence ?? {}).some(step => step.recovered),
