@@ -43,7 +43,7 @@ EXIT = {PASS: 0, REVIEW: 2, BLOCK: 3}
 
 # Mandatory controls: a finding with one of these codes is BLOCK and no policy exception may resolve it.
 BLOCK_CODES = frozenset({
-    "dependency-confusion", "integrity-mismatch", "integrity-missing", "license-prohibited", "malicious-indicator",
+    "dependency-confusion", "graph-substitution", "integrity-mismatch", "integrity-missing", "license-prohibited", "malicious-indicator",
     "metadata-inconsistent", "non-exact-direct-specifier", "policy-bypass", "registry-signature-invalid",
     "source-substitution", "vulnerability", "workspace-constraint",
 })
@@ -55,6 +55,7 @@ REVIEW_CODES = frozenset({
 SEVERITIES = ("info", "low", "moderate", "high", "critical")
 REMEDIATION = {
     "dependency-confusion": "Internal names must be workspace links; remove the registry package that claims an internal scope or name.",
+    "graph-substitution": "The lockfile edge is not what the parent's published manifest (and the workspace overrides) request. Regenerate pnpm-lock.yaml with pnpm from the official registry; never edit resolutions by hand.",
     "integrity-mismatch": "The lockfile integrity differs from the registry's signed integrity. Regenerate the lockfile from the official registry and investigate tampering.",
     "integrity-missing": "Every registry package needs a sha512 integrity in pnpm-lock.yaml.",
     "license-prohibited": "Remove or replace the dependency; prohibited licenses cannot be excepted.",
@@ -110,12 +111,18 @@ def _strip_comment(line):
     return line.rstrip()
 
 
+_UNSAFE_PLAIN = ("!", "&", "*", "%", "@", "`", "|", ">")
+
+
 def _scalar(text):
     text = text.strip()
     if len(text) >= 2 and text[0] == text[-1] == "'":
         return text[1:-1].replace("''", "'")
     if len(text) >= 2 and text[0] == text[-1] == '"':
         return json.loads(text)
+    if text.startswith(_UNSAFE_PLAIN[:4]):
+        # Tags, anchors, aliases and directives change what other YAML readers (pnpm) see: fail closed.
+        raise ValueError("YAML tags, anchors and aliases are not supported: " + text[:40])
     if text in ("true", "false"):
         return text == "true"
     if text in ("null", "~", ""):
@@ -200,7 +207,7 @@ def _split_key(content):
                     index += 2
                     continue
                 break
-            index += 1
+            index += 2 if quote == '"' and content[index] == "\\" else 1
         key, rest = _scalar(content[:index + 1]), content[index + 1:]
         if not rest.startswith(":"):
             raise ValueError("Quoted key without ':'")
@@ -208,24 +215,72 @@ def _split_key(content):
     match = re.match(r"^(.*?):(?: (.*))?$", content)
     if not match:
         raise ValueError("Mapping entry without ':': " + content[:60])
-    return match.group(1).strip(), (match.group(2) or "").strip()
+    key = match.group(1).strip()
+    if not key or key.startswith(_UNSAFE_PLAIN + ("{", "[", "?", "<<")) or key == "<<":
+        raise ValueError("Unsupported YAML key syntax: " + key[:40])
+    return key, (match.group(2) or "").strip()
 
 
 def parse_yaml(text):
+    """The YAML subset pnpm writes (block mappings and sequences, one-line flow collections, quoted scalars, block
+    scalars). Anything that could make another YAML reader see different data (tags, anchors, aliases, merge keys,
+    directives, several documents, a BOM, tabs) raises ValueError: callers fail closed."""
+    if text.startswith("\ufeff"):
+        raise ValueError("Byte-order mark is not supported")
+    raw_lines = text.split("\n")
     lines = []
-    for raw in text.split("\n"):
+    for number, raw in enumerate(raw_lines):
         if "\t" in raw[:len(raw) - len(raw.lstrip())]:
             raise ValueError("Tab indentation is not supported")
         line = _strip_comment(raw)
         if line.strip():
-            lines.append((len(line) - len(line.lstrip(" ")), line.strip()))
+            content = line.strip()
+            if line[0] != " " and (content in ("---", "...") or content.startswith(("%", "--- "))):
+                raise ValueError("YAML directives and document markers are not supported")
+            lines.append((len(line) - len(line.lstrip(" ")), content, number))
     position = 0
 
-    def value(rest):
+    def block_scalar(indicator, parent_indent, start_line):
+        """Literal (|) and folded (>) scalars with optional chomping (-/+) and explicit indentation."""
+        nonlocal position
+        match = re.fullmatch(r"([|>])([1-9])?([+-])?|([|>])([+-])([1-9])", indicator)
+        if not match:
+            raise ValueError("Unsupported block scalar header: " + indicator)
+        style = match.group(1) or match.group(4)
+        explicit = match.group(2) or match.group(6)
+        chomp = match.group(3) or match.group(5) or ""
+        body, end = [], start_line + 1
+        while end < len(raw_lines):
+            raw = raw_lines[end]
+            if raw.strip() and len(raw) - len(raw.lstrip(" ")) <= parent_indent:
+                break
+            body.append(raw)
+            end += 1
+        while position < len(lines) and lines[position][2] < end:
+            position += 1
+        content = [line for line in body if line.strip()]
+        indent = parent_indent + int(explicit) if explicit else (min(len(l) - len(l.lstrip(" ")) for l in content) if content else 0)
+        texts = [line[indent:] if line.strip() else "" for line in body]
+        while texts and texts[-1] == "" and chomp != "+":
+            texts.pop()
+        if style == "|":
+            value_text = "\n".join(texts)
+        else:
+            value_text, previous_blank = "", False
+            for line in texts:
+                if not line:
+                    value_text += "\n"
+                    previous_blank = True
+                else:
+                    value_text += ("" if not value_text or previous_blank or value_text.endswith("\n") else " ") + line
+                    previous_blank = False
+        return value_text if chomp == "-" or not texts else value_text + "\n"
+
+    def value(rest, parent_indent, line_number):
         if rest.startswith(("{", "[")):
             return _flow(rest)
         if rest.startswith(("|", ">")):
-            raise ValueError("Block scalars are not supported")
+            return block_scalar(rest, parent_indent, line_number)
         return _scalar(rest)
 
     def block(indent):
@@ -234,10 +289,12 @@ def parse_yaml(text):
             items = []
             while position < len(lines) and lines[position][0] == indent and (
                     lines[position][1].startswith("- ") or lines[position][1] == "-"):
-                item = lines[position][1][1:].strip()
+                item, number = lines[position][1][1:].strip(), lines[position][2]
                 position += 1
                 if item:
-                    items.append(value(item))
+                    if re.match(r"^(?:'[^']*'|\"[^\"]*\"|[^\s'\"{\[][^:]*):(?: |$)", item):
+                        raise ValueError("Mappings inside sequence items are not supported")
+                    items.append(value(item, indent, number))
                 elif position < len(lines) and lines[position][0] > indent:
                     items.append(block(lines[position][0]))
                 else:
@@ -246,11 +303,12 @@ def parse_yaml(text):
         mapping = {}
         while position < len(lines) and lines[position][0] == indent and not lines[position][1].startswith("- "):
             key, rest = _split_key(lines[position][1])
+            number = lines[position][2]
             position += 1
             if key in mapping:
                 raise ValueError("Duplicate key: " + key)
             if rest:
-                mapping[key] = value(rest)
+                mapping[key] = value(rest, indent, number)
             elif position < len(lines) and (lines[position][0] > indent or (
                     lines[position][0] == indent and lines[position][1].startswith("- "))):
                 mapping[key] = block(lines[position][0])
@@ -260,7 +318,9 @@ def parse_yaml(text):
 
     if not lines:
         return {}
-    result = block(lines[0][0])
+    if lines[0][0] != 0:
+        raise ValueError("The document must start at column 0")
+    result = block(0)
     if position != len(lines):
         raise ValueError("Unexpected indentation at line content: " + lines[position][1][:60])
     return result
@@ -298,9 +358,11 @@ def dependency_identity(name, reference):
 class Graph:
     """Everything derived from pnpm-lock.yaml; no other inventory exists."""
 
-    def __init__(self, text):
+    def __init__(self, text, sha256=None):
+        if isinstance(text, bytes):
+            sha256, text = sha256 or hashlib.sha256(text).hexdigest(), text.decode("utf-8")
         self.text = text
-        self.sha256 = hashlib.sha256(text.encode()).hexdigest()
+        self.sha256 = sha256 or hashlib.sha256(text.encode()).hexdigest()
         data = parse_yaml(text)
         if not isinstance(data, dict):
             raise EvidenceError("pnpm-lock.yaml is not a mapping")
@@ -363,6 +425,117 @@ def workspace_manifests(root, workspace):
             if "node_modules" not in manifest.parts:
                 result[manifest.parent.relative_to(root).as_posix()] = json.loads(manifest.read_text())
     return result
+
+
+# ---------------------------------------------------------------------------------------------------------------------
+# npm semver ranges (node-semver semantics without includePrerelease), to check lockfile edges against published manifests
+# ---------------------------------------------------------------------------------------------------------------------
+
+_SEMVER = re.compile(r"^v?(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?(?:\+[0-9A-Za-z.-]+)?$")
+_PARTIAL = re.compile(r"^v?(\d+|[xX*])(?:\.(\d+|[xX*]))?(?:\.(\d+|[xX*]))?(?:-([0-9A-Za-z.-]+))?(?:\+[0-9A-Za-z.-]+)?$")
+
+
+def parse_semver(text):
+    match = _SEMVER.match(str(text).strip())
+    if not match:
+        return None
+    pre = tuple(int(p) if p.isdigit() else p for p in match.group(4).split(".")) if match.group(4) else ()
+    return (int(match.group(1)), int(match.group(2)), int(match.group(3)), pre)
+
+
+def _compare(a, b):
+    if a[:3] != b[:3]:
+        return -1 if a[:3] < b[:3] else 1
+    if a[3] == b[3]:
+        return 0
+    if not a[3] or not b[3]:
+        return 1 if not a[3] else -1
+    for x, y in zip(a[3], b[3]):
+        if x == y:
+            continue
+        if isinstance(x, int) != isinstance(y, int):
+            return -1 if isinstance(x, int) else 1
+        return -1 if x < y else 1
+    return (len(a[3]) > len(b[3])) - (len(a[3]) < len(b[3]))
+
+
+def _comparators(token):
+    """One range token -> [(operator, version)] (versions as parse_semver tuples)."""
+    match = re.match(r"^(\^|~>?|>=|<=|>|<|=)?(.*)$", token)
+    operator, rest = match.group(1) or "", match.group(2)
+    if rest in ("", "*", "x", "X"):
+        return [] if operator in ("", "=", "^", "~", "~>", ">=", "<=") else None if operator in ("<", ">") else []
+    partial = _PARTIAL.match(rest)
+    if not partial:
+        raise ValueError("Unparseable range token: " + token)
+    parts = [None if p is None or p in "xX*" else int(p) for p in partial.group(1, 2, 3)]
+    pre = tuple(int(p) if p.isdigit() else p for p in partial.group(4).split(".")) if partial.group(4) else ()
+    major, minor, patch = parts
+    if major is None:
+        return []
+    zero = (0,)
+    if operator in ("", "="):
+        if minor is None:
+            return [(">=", (major, 0, 0, ())), ("<", (major + 1, 0, 0, zero))]
+        if patch is None:
+            return [(">=", (major, minor, 0, ())), ("<", (major, minor + 1, 0, zero))]
+        return [("=", (major, minor, patch, pre))]
+    if operator in ("~", "~>"):
+        if minor is None:
+            return [(">=", (major, 0, 0, ())), ("<", (major + 1, 0, 0, zero))]
+        return [(">=", (major, minor, patch or 0, pre)), ("<", (major, minor + 1, 0, zero))]
+    if operator == "^":
+        low = (major, minor or 0, patch or 0, pre)
+        if major > 0 or minor is None:
+            return [(">=", low), ("<", (major + 1, 0, 0, zero))]
+        if minor > 0 or patch is None:
+            return [(">=", low), ("<", (0, minor + 1, 0, zero))]
+        return [(">=", low), ("<", (0, 0, patch + 1, zero))]
+    if minor is None or patch is None:  # partial with a comparison operator
+        if operator == ">":
+            return [(">=", (major + 1, 0, 0, ())) if minor is None else (">=", (major, minor + 1, 0, ()))]
+        if operator == "<=":
+            return [("<", (major + 1, 0, 0, zero)) if minor is None else ("<", (major, minor + 1, 0, zero))]
+        if operator == "<":
+            return [("<", (major, minor or 0, 0, zero))]
+        return [(">=", (major, minor or 0, 0, ()))]
+    return [(operator, (major, minor, patch, pre))]
+
+
+def range_sets(spec):
+    """'>=1.2 <2 || ^3.0.0' -> list of comparator sets; raises ValueError for anything that is not a semver range."""
+    sets = []
+    for part in str(spec).split("||"):
+        part = re.sub(r"(<=|>=|<|>|=|~>?|\^)\s+", r"\1", part.strip())
+        hyphen = re.fullmatch(r"(\S+)\s+-\s+(\S+)", part)
+        if hyphen:
+            low, high = _comparators(">=" + hyphen.group(1)), _comparators("<=" + hyphen.group(2))
+            sets.append((low or []) + (high or []))
+            continue
+        comparators = []
+        for token in part.split():
+            result = _comparators(token)
+            if result is None:  # <* / >* match nothing
+                comparators = None
+                break
+            comparators += result
+        if comparators is not None:
+            sets.append(comparators)
+    return sets
+
+
+def satisfies(version, spec):
+    parsed = parse_semver(version)
+    if parsed is None:
+        raise ValueError("Not a semver version: " + str(version))
+    tests = {"=": lambda c: c == 0, ">": lambda c: c > 0, ">=": lambda c: c >= 0, "<": lambda c: c < 0, "<=": lambda c: c <= 0}
+    for comparators in range_sets(spec):
+        if not all(tests[op](_compare(parsed, bound)) for op, bound in comparators):
+            continue
+        if parsed[3] and not any(bound[3] and bound[:3] == parsed[:3] for _, bound in comparators):
+            continue  # a prerelease only satisfies a range that names a prerelease of the same version
+        return True
+    return False
 
 
 # ---------------------------------------------------------------------------------------------------------------------
@@ -497,27 +670,33 @@ def exception_errors(entry, seen=None):
 
 
 def load_policy(root):
-    text = load_text(root, POLICY_PATH)
-    if text is None:
+    path = Path(root) / POLICY_PATH
+    if not path.is_file():
         raise EvidenceError("Dependency policy missing: " + POLICY_PATH)
+    raw = path.read_bytes()  # the evidence binds these exact bytes (scripts/sbom_verify.py hashes the same bytes)
     try:
-        policy = json.loads(text)
+        policy = json.loads(raw.decode("utf-8"))
     except ValueError:
         raise EvidenceError("Dependency policy is not valid JSON") from None
     errors = policy_errors(policy)
     if errors:
         raise EvidenceError("Dependency policy invalid:\n  " + "\n  ".join(errors))
-    return policy, hashlib.sha256(text.encode()).hexdigest()
+    return policy, hashlib.sha256(raw).hexdigest()
 
 
 # ---------------------------------------------------------------------------------------------------------------------
 # Licenses (SPDX expressions)
 # ---------------------------------------------------------------------------------------------------------------------
 
+# Non-SPDX spellings of the prohibited families (GPL, GPLv3, AGPL-3.0+, "GNU GPL", SSPL, BUSL); LGPL stays a review license.
+_PROHIBITED_FAMILY = re.compile(r"^(?:GNU[ -]?)?(?:A?GPL|SSPL|BUSL)(?:$|[-v\d. +])", re.I)
+
+
 def license_category(identifier, licenses):
     if identifier in licenses["allowed"]:
         return "allowed"
-    if identifier in licenses["prohibited"] or any(identifier.startswith(p) for p in licenses.get("prohibited_prefixes", [])):
+    if (identifier in licenses["prohibited"] or any(identifier.startswith(p) for p in licenses.get("prohibited_prefixes", []))
+            or _PROHIBITED_FAMILY.match(identifier)):
         return "prohibited"
     return "review"
 
@@ -576,6 +755,10 @@ def evaluate_license(value, licenses):
         if position != len(tokens):
             raise ValueError
     except ValueError:
+        # "GNU GPL", "MIT AND GPL v3": not SPDX, but plainly a prohibited family. With an OR a permissive choice may
+        # exist, so a person reads it; otherwise it is prohibited.
+        if re.search(r"(?:^|[\s(])(?:GNU[ -]?)?(?:A?GPL|SSPL|BUSL)(?:$|[-v\d. +)])", text, re.I):
+            return ("review", "unparseable SPDX expression: " + text) if re.search(r"\bOR\b", text) else ("prohibited", text)
         return "review", "unparseable SPDX expression: " + text
     return category, text
 
@@ -594,12 +777,14 @@ def _version_key(version):
 
 
 def prior_release(packument, version):
-    """The highest earlier release published before this one (stable releases compare only with stable ones)."""
+    """The highest earlier release published before this one. A stable release compares with stable releases, or with
+    its prereleases when it is the first stable one (1.0.0 after 1.0.0-rc.3 is not a "first release")."""
     times = packument.get("time") or {}
     published = times.get(version)
-    stable = "-" not in version
-    candidates = [v for v in (packument.get("versions") or {}) if v != version and v in times and published
-                  and times[v] < published and _version_key(v) < _version_key(version) and (not stable or "-" not in v)]
+    earlier = [v for v in (packument.get("versions") or {}) if v != version and v in times and published
+               and times[v] < published and _version_key(v) < _version_key(version)]
+    stable = [v for v in earlier if "-" not in v] if "-" not in version else earlier
+    candidates = stable or earlier
     return max(candidates, key=_version_key) if candidates else None
 
 
@@ -743,17 +928,45 @@ def installed_directory(root, name, version):
     return None
 
 
+# Full-text markers of the standard license texts a package may ship without declaring them in package.json.
+_LICENSE_TEXTS = {
+    "Apache-2.0": ("Apache License", "Version 2.0, January 2004", "TERMS AND CONDITIONS FOR USE, REPRODUCTION, AND DISTRIBUTION"),
+    "MIT": ("Permission is hereby granted, free of charge, to any person obtaining a copy",
+            "THE SOFTWARE IS PROVIDED \"AS IS\", WITHOUT WARRANTY OF ANY KIND"),
+    "ISC": ("Permission to use, copy, modify, and/or distribute this software for any purpose with or without fee is hereby granted",
+            "THE SOFTWARE IS PROVIDED \"AS IS\" AND THE AUTHOR DISCLAIMS ALL WARRANTIES"),
+}
+
+
+def archive_license(directory):
+    """The single standard license text shipped in an installed package's top-level LICENSE/LICENCE/COPYING file, or None
+    when there is none, several, or an unrecognized one (then a person reads it)."""
+    candidates = [path for path in sorted(directory.iterdir()) if path.is_file() and not path.is_symlink()
+                  and re.match(r"^(?:LICEN[CS]E|COPYING)(?:[.-][\w.-]+)?$", path.name, re.I)]
+    found = set()
+    for path in candidates:
+        text = " ".join(path.read_text(errors="replace")[:65536].split())
+        matches = [spdx for spdx, markers in _LICENSE_TEXTS.items() if all(" ".join(m.split()) in text for m in markers)]
+        if len(matches) != 1:
+            return None
+        found.add(matches[0])
+    return found.pop() if len(found) == 1 else None
+
+
 def glob_escape(text):
     return re.sub(r"([*?[])", r"[\1]", text)
 
 
 def capability_scan(directory, limits):
-    capabilities, files, scanned = {}, {}, 0
+    capabilities, files, scanned, oversize = {}, {}, 0, []
     extensions = tuple(limits.get("extensions") or (".js", ".cjs", ".mjs"))
     for path in sorted(directory.rglob("*")):
         if path.is_symlink() or not path.is_file() or "node_modules" in path.relative_to(directory).parts:
             continue
-        if path.suffix not in extensions or path.stat().st_size > limits.get("max_file_bytes", 4 << 20):
+        if path.suffix not in extensions:
+            continue
+        if path.stat().st_size > limits.get("max_file_bytes", 4 << 20):
+            oversize.append(path.relative_to(directory).as_posix())  # recorded, never silently treated as clean
             continue
         if scanned + path.stat().st_size > limits.get("max_package_bytes", 32 << 20):
             capabilities["scan-truncated"] = True
@@ -765,7 +978,7 @@ def capability_scan(directory, limits):
                 capabilities[label] = True
                 files.setdefault(label, []).append(path.relative_to(directory).as_posix())
     return {"capabilities": sorted(capabilities), "files": {k: v[:5] for k, v in sorted(files.items())},
-            "scanned_bytes": scanned}
+            "scanned_bytes": scanned, "skipped_oversize_files": oversize[:20], "skipped_oversize_count": len(oversize)}
 
 
 # ---------------------------------------------------------------------------------------------------------------------
@@ -832,43 +1045,164 @@ def exception_matches(entry, identity, record, graph, code):
     return None
 
 
+_SELECTOR = re.compile(r"^(?:(?P<parent>(?:@[^/@>]+/)?[^@>]+)(?:@(?P<parent_range>[^>]+))?>)?(?P<child>(?:@[^/@>]+/)?[^@>]+)(?:@(?P<child_range>.+))?$")
+
+
+def _selectors(mapping, label):
+    """pnpm `parent@range>child` selectors -> [(parent, parent_range, child, child_range, value)]."""
+    result = []
+    for selector, value in (mapping or {}).items():
+        match = _SELECTOR.match(str(selector))
+        if not match:
+            raise EvidenceError(f"Unsupported {label} selector: {selector}")
+        result.append((match.group("parent"), match.group("parent_range"), match.group("child"), match.group("child_range"), value))
+    return result
+
+
+def _spec_satisfied(name, target, spec):
+    """Does the locked target identity satisfy one declared dependency spec (a range or an npm: alias)?"""
+    target_name, target_version = split_identity(target)
+    spec = str(spec).strip()
+    if spec.startswith("npm:"):
+        alias_name, _, alias_range = spec[4:].rpartition("@") if "@" in spec[5:] else (spec[4:], "", "")
+        if not alias_name:
+            alias_name, alias_range = spec[4:], ""
+        return target_name == alias_name and satisfies(target_version, alias_range or "*")
+    if target_name != name:
+        return False
+    try:
+        return satisfies(target_version, spec)
+    except ValueError:
+        return False
+
+
+def graph_edge_findings(graph, metadata, workspace):
+    """Every lockfile edge must be requested by its parent's published manifest (dependencies, optional or peer
+    dependencies, after the workspace's overrides, packageExtensions and peerDependencyRules), so a lockfile cannot point
+    a dependency at another package or version than the registry-signed manifests ask for. Returns
+    ({parent identity: [finding]}, [global finding])."""
+    workspace = workspace or {}
+    overrides = _selectors(workspace.get("overrides") or graph.overrides, "override")
+    extensions = _selectors(workspace.get("packageExtensions"), "packageExtensions")
+    rules = (workspace.get("peerDependencyRules") or {})
+    allowed = _selectors(rules.get("allowedVersions"), "peerDependencyRules")
+    allow_any = set(rules.get("allowAny") or [])
+    per_package, global_findings = {}, []
+
+    def matches(parent, parent_range, name, version):
+        return parent == name and (parent_range is None or satisfies(version, parent_range))
+
+    for key, body in sorted(graph.snapshots.items()):
+        identity = base_identity(key)
+        name, version = split_identity(identity)
+        document = (metadata.get(name) or {}).get("versions", {}).get(version)
+        if document is None:
+            continue  # the package itself is already BLOCKed as metadata-inconsistent
+        declared = {**(document.get("dependencies") or {}), **(document.get("optionalDependencies") or {})}
+        peers = dict(document.get("peerDependencies") or {})
+        for peer in document.get("peerDependenciesMeta") or {}:
+            peers.setdefault(peer, "*")  # pnpm treats a peer named only in peerDependenciesMeta as an optional `*` peer
+        for _, _, selector, selector_range, extension in extensions:  # packageExtensions keys are `name@range`
+            if selector == name and (selector_range is None or satisfies(version, selector_range)):
+                declared.update((extension or {}).get("dependencies") or {})
+                declared.update((extension or {}).get("optionalDependencies") or {})
+                peers.update((extension or {}).get("peerDependencies") or {})
+        for group in ("dependencies", "optionalDependencies"):
+            for child_name, reference in ((body or {}).get(group) or {}).items():
+                target = dependency_identity(child_name, reference)
+                if target is None:
+                    continue  # link:/file: references are BLOCKed separately
+                applicable = [(p, v) for p, pr, c, cr, v in overrides if c == child_name and (p is None or matches(p, pr, name, version))]
+                applicable.sort(key=lambda item: item[0] is None)  # a parent-scoped override wins over a global one
+                problem = None
+                if applicable:
+                    value = str(applicable[0][1])
+                    if value == "-":
+                        problem = "removed by an override but still resolved"
+                    elif not _spec_satisfied(child_name, target, value):
+                        problem = f"override requires {value}"
+                elif child_name in declared:
+                    if not _spec_satisfied(child_name, target, declared[child_name]):
+                        problem = f"published manifest requests {declared[child_name]}"
+                elif child_name in peers:
+                    spec = peers[child_name]
+                    if not _spec_satisfied(child_name, target, spec) and child_name not in allow_any and not any(
+                            c == child_name and (p is None or matches(p, pr, name, version)) and _spec_satisfied(child_name, target, v)
+                            for p, pr, c, cr, v in allowed):
+                        problem = f"published peer range is {spec}"
+                else:
+                    problem = "not declared by the published manifest"
+                if problem:
+                    per_package.setdefault(identity, []).append(_finding(
+                        "graph-substitution", f"lockfile resolves {name}@{version} -> {child_name} to {target}: {problem}"))
+    for path, dependencies in sorted(graph.direct.items()):
+        for child_name, entry in sorted(dependencies.items()):
+            specifier, target = str(entry["specifier"]), dependency_identity(child_name, entry["version"] or "")
+            if target is None or specifier.startswith(("workspace:", "link:", "file:")):
+                continue
+            applicable = [v for p, pr, c, cr, v in overrides if c == child_name and p is None]
+            expected = str(applicable[0]) if applicable else specifier
+            if not _spec_satisfied(child_name, target, expected):
+                global_findings.append(_finding("graph-substitution",
+                                                f"{path}: {child_name}@{specifier} resolves to {target}"))
+    return per_package, global_findings
+
+
 def evaluate(root, *, policy, policy_sha256, graph, metadata, audit, signature_verdicts=None, verifier=None,
-             base_graph=None, now=None, revision=None, workspace=None, npmrc=None, policy_changed=None):
+             base_graph=None, now=None, revision=None, workspace=None, npmrc=None, policy_changed=None, extra_lockfiles=()):
     """Pure evaluation of collected evidence. Returns the evidence document."""
     now = now or datetime.datetime.now(datetime.timezone.utc)
     licenses = policy["licenses"]
     supply = policy["supply_chain"]
     hooks = supply["install_script_hooks"]
     global_findings = []
+    package_findings = {}  # findings raised outside a package's own evaluation (aliases, lockfile edges)
     manifests = workspace_manifests(root, workspace)
     workspace_names = {m.get("name") for m in manifests.values() if m.get("name")}
 
     # -- Configuration controls ---------------------------------------------------------------------------------------
-    npmrc_lines = {line.split("=", 1)[0].strip(): line.split("=", 1)[1].strip() for line in (npmrc or "").splitlines()
-                   if "=" in line and not line.strip().startswith(("#", ";"))}
+    # pnpm 11 reads only registry and authentication settings from .npmrc (quoted keys included); everything else,
+    # including ignoreScripts and the audit settings, comes from pnpm-workspace.yaml.
+    npmrc_lines = {}
+    for line in (npmrc or "").splitlines():
+        stripped = line.strip()
+        if "=" in stripped and not stripped.startswith(("#", ";")):
+            key, value = stripped.split("=", 1)
+            npmrc_lines[key.strip().strip("'\"").strip()] = value.strip().strip("'\"").strip()
     if npmrc_lines.get("registry") != policy["registry"]["url"]:
         global_findings.append(_finding("source-substitution", ".npmrc registry is not " + policy["registry"]["url"]))
     for key in npmrc_lines:
-        if key.endswith(":registry"):
-            global_findings.append(_finding("source-substitution", ".npmrc scoped registry " + key))
-    if npmrc_lines.get("ignore-scripts") != "true":
-        global_findings.append(_finding("policy-bypass", ".npmrc must keep ignore-scripts=true"))
+        if key.endswith(":registry") or key == "registries":
+            global_findings.append(_finding("source-substitution", ".npmrc custom registry " + key))
     workspace = workspace or {}
     for key in ("registry", "registries"):
         if key in workspace:
             global_findings.append(_finding("source-substitution", f"pnpm-workspace.yaml sets {key}"))
-    audit_config = workspace.get("auditConfig") or {}
-    if any(audit_config.get(k) for k in ("ignoreCves", "ignoreGhsas")):
-        global_findings.append(_finding("policy-bypass", "pnpm-workspace.yaml auditConfig ignores advisories"))
+    for key in ("audit", "auditConfig", "auditLevel"):
+        if workspace.get(key) not in (None, {}, []):
+            global_findings.append(_finding("policy-bypass", f"pnpm-workspace.yaml {key} can ignore advisories or raise the audit level"))
+    if workspace.get("ignoreScripts") is not True:
+        global_findings.append(_finding("policy-bypass", "pnpm-workspace.yaml must keep ignoreScripts: true (pnpm 11 ignores .npmrc ignore-scripts)"))
     if workspace.get("dangerouslyAllowAllBuilds") or workspace.get("onlyBuiltDependencies") or workspace.get("allowBuilds"):
         global_findings.append(_finding("policy-bypass", "pnpm-workspace.yaml enables dependency lifecycle scripts"))
+    lockfile_settings = {"gitBranchLockfile": True, "lockfileDir": None, "useLockfile": False, "lockfile": False,
+                         "sharedWorkspaceLockfile": False, "optional": False}
+    for key, forbidden in lockfile_settings.items():
+        if key in workspace and (forbidden is None or workspace[key] == forbidden):
+            global_findings.append(_finding("policy-bypass", f"pnpm-workspace.yaml {key}: {workspace[key]} changes which lockfile or "
+                                            "dependencies pnpm installs and audits"))
+    for path in extra_lockfiles:
+        global_findings.append(_finding("policy-bypass", f"{path}: only the root pnpm-lock.yaml may define the installed graph"))
     release_age = workspace.get("minimumReleaseAge")
     for selector, value in sorted({**(workspace.get("overrides") or {}), **graph.overrides}.items()):
         value = str(value)
         if value == "-" or _EXACT_VERSION.fullmatch(value):
             continue
         if value.startswith("npm:"):
-            global_findings.append(_finding("alias-substitution", f"override {selector} -> {value}"))
+            target = value[4:]
+            target = target if "@" in target.lstrip("@") else None
+            (package_findings.setdefault(target, []) if target in graph.packages else global_findings).append(
+                _finding("alias-substitution", f"override {selector} -> {value}"))
         elif re.match(r"^(?:link:|file:|git|github:|https?:|[\w.-]+/[\w.-]+#)", value):
             global_findings.append(_finding("source-substitution", f"override {selector} -> {value}"))
         else:
@@ -889,7 +1223,9 @@ def evaluate(root, *, policy, policy_sha256, graph, metadata, audit, signature_v
                 if normalized not in manifests or manifests[normalized].get("name") != name:
                     global_findings.append(_finding("source-substitution", where + " does not link a workspace package"))
             elif specifier.startswith("npm:"):
-                global_findings.append(_finding("alias-substitution", where))
+                target = dependency_identity(name, resolved)
+                (package_findings.setdefault(target, []) if target in graph.packages else global_findings).append(
+                    _finding("alias-substitution", where))
             elif re.match(r"^(?:link:|file:|git|github:|https?:|[\w.-]+/[\w.-]+#)", specifier) or resolved.startswith(("link:", "file:")):
                 global_findings.append(_finding("source-substitution", where))
             elif not _EXACT_VERSION.fullmatch(specifier) and policy["direct_dependencies"]["exact_versions"]:
@@ -909,11 +1245,12 @@ def evaluate(root, *, policy, policy_sha256, graph, metadata, audit, signature_v
     for reference in graph.local_references:
         global_findings.append(_finding("source-substitution", "local reference in the registry graph: " + reference))
     for constraint in policy.get("workspace", {}).get("constraints", []):
-        count = len([n for n, e in graph.direct.get(constraint["importer"], {}).items()
-                     if not str(e["specifier"]).startswith("workspace:")])
-        if count > constraint.get("max_registry_dependencies", count):
-            global_findings.append(_finding("workspace-constraint",
-                                            f"{constraint['importer']} has {count} registry dependencies: {constraint['reason']}"))
+        dependencies = graph.direct.get(constraint["importer"], {})
+        registry = [n for n, e in dependencies.items() if not str(e["specifier"]).startswith("workspace:")]
+        if len(dependencies) > constraint.get("max_dependencies", len(dependencies)) or len(registry) > constraint.get(
+                "max_registry_dependencies", len(registry)):
+            global_findings.append(_finding("workspace-constraint", f"{constraint['importer']} has {len(dependencies)} dependencies "
+                                            f"({len(registry)} from the registry): {constraint['reason']}"))
     for path, manifest in sorted(manifests.items()):
         if path != "." and (manifest.get("private") is not True or manifest.get("license") not in policy["workspace"]["licenses"]):
             global_findings.append(_finding("workspace-constraint", f"{path} must be private with a workspace license"))
@@ -946,13 +1283,18 @@ def evaluate(root, *, policy, policy_sha256, graph, metadata, audit, signature_v
         name, version = split_identity(identity)
         current_names.setdefault(name, set()).add(version)
 
+    edge_findings, edge_global = graph_edge_findings(graph, metadata, workspace)
+    global_findings.extend(edge_global)
+    for identity, items in edge_findings.items():
+        package_findings.setdefault(identity, []).extend(items)
+
     records = []
     exceptions = policy.get("exceptions") or []
     used_exceptions = set()
     for identity in identities:
         name, version = split_identity(identity)
         block = graph.packages.get(identity) or {}
-        findings, signals = [], []
+        findings, signals = list(package_findings.get(identity, [])), []
         resolution = block.get("resolution") if isinstance(block.get("resolution"), dict) else {}
         integrity = resolution.get("integrity")
         if set(resolution) - {"integrity"}:
@@ -1019,6 +1361,7 @@ def evaluate(root, *, policy, policy_sha256, graph, metadata, audit, signature_v
                                          + (" (signed by an unpinned key)" if signature_state == "untrusted-key" else "")))
 
         # License.
+        archive_detected = None
         declared = document.get("license") if document else None
         if isinstance(declared, dict):
             declared = declared.get("type")
@@ -1028,7 +1371,15 @@ def evaluate(root, *, policy, policy_sha256, graph, metadata, audit, signature_v
         elif document and category == "review":
             findings.append(_finding("license-review", license_detail))
         elif document and category == "missing":
-            findings.append(_finding("license-missing", license_detail))
+            # The registry declares nothing: read the archive's own license file before asking a person.
+            directory = installed_directory(root, name, version)
+            shipped = archive_license(directory) if directory is not None else None
+            if shipped and license_category(shipped, licenses) == "allowed":
+                archive_detected = shipped
+                signals.append("license-from-archive")
+            else:
+                findings.append(_finding("license-missing", license_detail + (
+                    "" if directory is not None else " (archive not installed: run after pnpm install to read its LICENSE)")))
 
         # Supply-chain risk (stateless: compared with this package's own prior release on the registry).
         install = _install_hooks(document, hooks) if document else {}
@@ -1062,15 +1413,15 @@ def evaluate(root, *, policy, policy_sha256, graph, metadata, audit, signature_v
             signals.append("recently-published")
         typosquat = supply["typosquat"]
         unscoped = name.rsplit("/", 1)[-1]
-        if name not in protected and len(name) >= typosquat["min_name_length"]:
-            for target in sorted(protected):
+        if name not in typosquat["protected_names"] and len(name) >= typosquat["min_name_length"]:
+            for target in sorted(protected - {name}):  # a direct dependency is checked too (a typo'd one is "protected")
                 if target.rsplit("/", 1)[-1] == unscoped:
                     continue  # @types/react and react are different packages, not one-letter look-alikes
                 if _distance(name, target, typosquat["max_distance"]) <= typosquat["max_distance"]:
                     created = _instant((packument.get("time") or {}).get("created"))
                     established = (packument.get("version_count", 0) >= typosquat["established_min_versions"]
-                                   or (created and published_at and published_at - created
-                                       >= datetime.timedelta(days=typosquat["established_min_age_days"])))
+                                   and bool(created and published_at and published_at - created
+                                            >= datetime.timedelta(days=typosquat["established_min_age_days"])))
                     if not established:
                         findings.append(_finding("typosquat-suspect", f"one edit from protected package {target}"))
                     else:
@@ -1083,7 +1434,8 @@ def evaluate(root, *, policy, policy_sha256, graph, metadata, audit, signature_v
         if document and (triggers & set(signals) or any(f["code"] == "typosquat-suspect" for f in findings)):
             directory = installed_directory(root, name, version)
             if directory is None:
-                scan = {"status": "not-installed"}
+                store = (Path(root) / "node_modules" / ".pnpm").is_dir()
+                scan = {"status": "not-installed" if store else "store-unavailable"}
             else:
                 scan = {"status": "scanned", **capability_scan(directory, supply.get("capability_scan") or {})}
                 caps = set(scan["capabilities"])
@@ -1094,7 +1446,7 @@ def evaluate(root, *, policy, policy_sha256, graph, metadata, audit, signature_v
                                              + ", ".join(scan["files"].get("credential-access", [])[:3])))
 
         record = {"identity": identity, "name": name, "version": version, "source": policy["registry"]["tarball_host"],
-                  "integrity": integrity, "license": {"declared": declared, "category": category},
+                  "integrity": integrity, "license": {"declared": declared, "category": category, "archive": archive_detected},
                   "published": published, "publisher": publisher,
                   "provenance": {"registry_signature": signature_state, "verified_keys": verified_by,
                                  "npm_provenance_attestation": attested},
@@ -1113,8 +1465,10 @@ def evaluate(root, *, policy, policy_sha256, graph, metadata, audit, signature_v
             elif version in before:
                 record["change"] = "unchanged"
             else:
-                newest = max(before, key=_version_key)
-                record["change"] = "upgraded" if _version_key(version) > _version_key(newest) else "downgraded"
+                # Compare with the base release of the same major line (a 7.x patch next to 8.x is an upgrade).
+                same_line = [v for v in before if v.split(".", 1)[0] == version.split(".", 1)[0]] or list(before)
+                nearest = max(same_line, key=_version_key)
+                record["change"] = "upgraded" if _version_key(version) > _version_key(nearest) else "downgraded"
         else:
             record["change"] = "unknown (no baseline)"
         for finding in findings:
@@ -1146,9 +1500,12 @@ def evaluate(root, *, policy, policy_sha256, graph, metadata, audit, signature_v
     for record in records:
         changes[record["change"]] = changes.get(record["change"], 0) + 1
     if base_graph is not None:
-        for name, versions in sorted(base_names.items()):
-            if name not in current_names:
-                changes["removed"] = changes.get("removed", 0) + len(versions)
+        removed = set(base_graph.identities()) - set(identities)
+        replaced = {i for i in removed if split_identity(i)[0] in current_names}
+        if removed - replaced:
+            changes["removed"] = len(removed - replaced)
+        if replaced:
+            changes["replaced (prior version left the graph)"] = len(replaced)
     license_inventory = {}
     for record in records:
         key = record["license"]["declared"] if isinstance(record["license"]["declared"], str) else "NOASSERTION"
@@ -1190,6 +1547,16 @@ def current_revision(root=ROOT):
     except (OSError, subprocess.SubprocessError):
         value = ""
     return value if re.fullmatch(r"[0-9a-f]{40}", value) else "UNKNOWN"
+
+
+def extra_lockfiles(root):
+    """Lockfiles other than the root pnpm-lock.yaml (per-branch or per-project) that pnpm could install from instead."""
+    try:
+        listed = subprocess.run(["git", "ls-files", "--cached", "--others", "--exclude-standard"], cwd=root, capture_output=True,
+                                text=True, timeout=60, check=True).stdout.splitlines()
+    except (OSError, subprocess.SubprocessError):
+        listed = [path.relative_to(root).as_posix() for path in Path(root).rglob("pnpm-lock*.yaml") if "node_modules" not in path.parts]
+    return sorted(path for path in listed if re.fullmatch(r"(?:.*/)?pnpm-lock(?:\.[^/]+)?\.yaml", path) and path != "pnpm-lock.yaml")
 
 
 def baseline(root, ref):
@@ -1241,10 +1608,9 @@ def report(evidence, stream=None):
 def verify(root=ROOT, evidence_path=None, base_ref="origin/main", fetch=None, now=None):
     root = Path(root)
     policy, policy_sha256 = load_policy(root)
-    lock_text = load_text(root, "pnpm-lock.yaml")
-    if lock_text is None:
+    if not (root / "pnpm-lock.yaml").is_file():
         raise EvidenceError("pnpm-lock.yaml missing")
-    graph = Graph(lock_text)
+    graph = Graph((root / "pnpm-lock.yaml").read_bytes())
     if graph.version != "9.0":
         raise EvidenceError("Unsupported lockfile version " + graph.version)
     workspace = parse_yaml(load_text(root, "pnpm-workspace.yaml") or "")
@@ -1254,7 +1620,7 @@ def verify(root=ROOT, evidence_path=None, base_ref="origin/main", fetch=None, no
     base_graph, policy_changed = baseline(root, base_ref) if base_ref else (None, None)
     evidence = evaluate(root, policy=policy, policy_sha256=policy_sha256, graph=graph, metadata=metadata, audit=audit,
                         base_graph=base_graph, policy_changed=policy_changed, now=now, revision=current_revision(root),
-                        workspace=workspace, npmrc=load_text(root, ".npmrc"))
+                        workspace=workspace, npmrc=load_text(root, ".npmrc"), extra_lockfiles=extra_lockfiles(root))
     destination = Path(evidence_path or Path(os.environ.get("RUNNER_TEMP", root)) / EVIDENCE_NAME)
     destination.write_text(json.dumps(evidence, indent=1, sort_keys=True) + "\n")
     report(evidence)

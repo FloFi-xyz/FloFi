@@ -691,11 +691,15 @@ class CiParity(unittest.TestCase):
         self.assertEqual(len(saves), 2)
         for key, paths in saves:
             self.assertEqual(paths.strip().splitlines(), ['- /tmp/flofi-ci/archives'])
-            self.assertIn('{{ arch }}', key)
+            # A restored cache can write any path the job user can write: it must come from this branch, by exact key.
+            self.assertIn('-{{ .Branch }}-', key)
+            for script in ('bootstrap-ci.py', 'bootstrap-anvil.py', 'bootstrap-playwright.py', 'ci_archive_cache.py'):
+                self.assertIn('{{ checksum "scripts/' + script + '" }}', key)
         for script in ('bootstrap-ci.py', 'bootstrap-anvil.py', 'bootstrap-playwright.py'):
             self.assertIn('verified_archive(', (ROOT / 'scripts' / script).read_text(), script)
-        restore = re.search(r'(?m)^      - restore_cache:\n          keys:\n((?:            - .+\n)+)', self.circle).group(1)
-        self.assertEqual([line.strip()[2:] for line in restore.splitlines()], [saves[0][0], 'flofi-circleci-archives-v2-{{ arch }}-'])
+        restores = re.findall(r'(?m)^      - restore_cache:\n          keys:\n((?:            - .+\n)+)', self.circle)
+        self.assertEqual(len(restores), 1)
+        self.assertEqual([line.strip()[2:] for line in restores[0].splitlines()], [saves[0][0]])  # no prefix fallback
         self.assertNotRegex(self.circle, r'node_modules|\.next/cache|\.turbo|pnpm-store|persist_to_workspace:\n          root: /tmp/flofi-ci\n          paths:\n            - (?!flofi-ci-metrics)')
 
     def test_critical_browser_regressions_run_before_the_slow_suites(self):
@@ -968,7 +972,8 @@ class CertificationLedger(unittest.TestCase):
     def test_missing_repeated_failed_or_unplanned_profiles_fail(self):
         plan = browser_plan()
         cases = {
-            'missing': lambda: self.write_report('extended-2-2', 'extended', '2/2', plan['shards'][1][1:]),
+            # Overwrite shard 2's real report (same label) without its first profile: a profile that never ran.
+            'missing': lambda: self.write_report(f'extended-2-{len(plan["shards"])}', 'extended', f'2/{len(plan["shards"])}', plan['shards'][1][1:]),
             'repeated': lambda: self.write_report('extended-again', 'extended', None, plan['shards'][0][:1]),
             'failed': lambda: self.write_report('critical-all', 'critical', None, plan['critical'], status='FAIL'),
             'running': lambda: self.write_report('composition-all', 'composition', None, plan['composition'], status='RUNNING'),

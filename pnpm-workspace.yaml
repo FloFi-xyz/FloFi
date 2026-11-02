@@ -7,6 +7,8 @@ minimumReleaseAge: 0
 pmOnFail: error
 strictPeerDependencies: true
 autoInstallPeers: false
+# pnpm 11 no longer reads ignore-scripts from .npmrc: dependency lifecycle scripts stay disabled here (also passed in CI).
+ignoreScripts: true
 # Exact security patches for the existing transitive consumers only.
 overrides:
   'postcss@8.5.23>source-map-js': 1.2.2

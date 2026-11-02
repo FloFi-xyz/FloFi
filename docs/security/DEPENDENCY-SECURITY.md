@@ -20,12 +20,14 @@ PR merge approval is unchanged: the owner reviews and merges every PR.
 
 | Control | Source of truth | Outcome on failure |
 | --- | --- | --- |
-| Frozen lockfile, lifecycle scripts disabled | `pnpm install --frozen-lockfile --ignore-scripts`, `.npmrc` | install fails / BLOCK |
+| Frozen lockfile, lifecycle scripts disabled | `pnpm install --frozen-lockfile --ignore-scripts`; `ignoreScripts: true` in `pnpm-workspace.yaml` (pnpm 11 no longer reads `.npmrc` for it) | install fails / BLOCK |
+| One lockfile, unweakened settings: no `audit`/`auditConfig`/`auditLevel`, `gitBranchLockfile`, `lockfileDir`, `useLockfile`/`lockfile: false`, `sharedWorkspaceLockfile: false`, `optional: false`, build allowances, extra `pnpm-lock*.yaml` | `pnpm-workspace.yaml` (parsed strictly: YAML tags, anchors, aliases, merge keys, directives and BOMs are refused) | BLOCK |
+| Every lockfile edge is requested by the parent's published manifest (dependencies, optional or peer dependencies, after workspace `overrides`, `packageExtensions`, `peerDependencyRules`); direct versions equal their exact specifiers | lockfile + registry manifests (npm semver ranges) | BLOCK |
 | Registry source (no tarball, git, file or custom registry; no scoped registries) | lockfile, `.npmrc`, workspace, registry `dist.tarball` | BLOCK |
 | Lockfile integrity equals the registry's `dist.integrity` (sha512) | lockfile + live registry document | BLOCK |
 | npm registry ECDSA signature over `name@version:integrity` by a pinned npm key | policy `registry_signatures.keys` | invalid: BLOCK; missing: REVIEW |
 | Advisories (`pnpm audit`, severity ≥ low) with affected paths | `pnpm audit --json` | BLOCK (never excepted) |
-| License (SPDX expression) | registry `license` | prohibited: BLOCK; weak copyleft, attribution, custom or missing: REVIEW |
+| License (SPDX expression) | registry `license`; when none is declared, the installed archive's single standard LICENSE text (Apache-2.0, MIT, ISC) | prohibited (also non-SPDX "GPL", "GPLv3"...): BLOCK; weak copyleft, attribution, custom or unreadable: REVIEW |
 | Exact direct versions, workspace-only links | importers, manifests | BLOCK |
 | Internal scope on the public registry (dependency confusion) | `@defi-workflow-engine/` | BLOCK |
 | npm security placeholder, compromise notice, download-and-execute install hook | registry document | BLOCK |
@@ -35,7 +37,13 @@ PR merge approval is unchanged: the owner reviews and merges every PR.
 | Credential access combined with network/subprocess in a package with a registry trigger | bounded scan of the installed files | REVIEW |
 
 Signals that are recorded but never decide on their own: recent publication, publisher change, first release, provenance
-dropped, unchanged install hooks, network/environment capabilities.
+dropped, unchanged install hooks, network/environment capabilities. No decision depends on the current time: the
+typosquat "established" test uses the package's own history (at least 10 versions *and* 365 days between its first
+publication and the locked release), and "recently published" only widens the capability scan.
+
+Measured on the real graph's registry histories (47,076 releases in the year to 2026-11-01): the provenance-regression
+pattern (provenance dropped *and* a different publisher) occurred 25 times in 18 packages, mostly prereleases FloFi does
+not lock; stable Next.js and Vite releases never triggered it.
 
 ## REVIEW_REQUIRED
 
@@ -45,8 +53,8 @@ CI prints the finding, the evidence and how to resolve it. If the concern is acc
 - License review (`license-review`): name-scoped (`packages`) with the exact `license` expression and, where the role
   matters, `parents`, `optional` and `platform_restricted`. Later versions with the same license and role pass without a
   new approval; a license or role change returns to review.
-- Anything else (`license-missing`, `install-script-introduced`, ...): exact `identity` (`name@version`) plus its sha512
-  `integrity`, so the record covers only the reviewed archive.
+- Anything else (`license-missing`, `install-script-introduced`, `alias-substitution`, ...): exact `identity`
+  (`name@version`) plus its sha512 `integrity`, so the record covers only the reviewed archive.
 - Required: `id`, `resolves`, `reason`, `approved_by: "Owner"`, `approved_at`, `record` (the review document).
 
 BLOCK findings cannot be excepted (`policy_errors` rejects such records). Fix the cause instead.
@@ -61,8 +69,9 @@ rotates its registry key, add the new public key from `https://registry.npmjs.or
 
 ## Evidence
 
-`$RUNNER_TEMP/flofi-dependency-evidence.json` (CircleCI artifact `dependency-security/`, GitHub Actions artifact
-`flofi-dependency-evidence-*`): policy version and SHA-256, CI revision, lockfile SHA-256 and computed package count,
+`$RUNNER_TEMP/flofi-dependency-evidence.json` (CircleCI keeps it as the `dependency-security/` artifact when the gate
+passes; when it fails, the CI log lists every finding with its remedy. GitHub Actions uploads it in both cases as
+`flofi-dependency-evidence-*` or with the failure artifacts): policy version and SHA-256, CI revision, lockfile SHA-256 and computed package count,
 then per package: identity, source, integrity, change class against the merge base when git history has it, license,
 advisories, registry signature and provenance attestation, install hooks, risk signals, findings, the exception that
 resolved a finding, and the decision. `scripts/sbom_verify.py` accepts only a PASS evidence file for the same revision,
@@ -73,6 +82,10 @@ lockfile and policy.
 - Integrity and registry signatures prove the archive is what npm published under that name and version, not that its
   code is benign.
 - npm provenance attestations are recorded as present or absent; CI does not verify the Sigstore bundle.
-- The capability scan reads only packages with a registry trigger and only JavaScript files within fixed size bounds.
-  It describes risk; it does not prove safety.
+- The capability scan reads only packages with a registry trigger and only JavaScript files within fixed size bounds
+  (oversize files are listed, never treated as clean). It describes risk; it does not prove safety.
+- Lockfile edges are checked against the registry manifests' declared ranges; a `.pnpmfile.cjs` `readPackage` hook that
+  rewrites manifests would surface as edges the published manifests do not request.
+- A policy change is flagged in the CI log only where Git history provides the merge base (CircleCI); the PR diff is
+  the authoritative signal everywhere.
 - `pnpm audit` reflects advisories known to the registry at run time; a later advisory fails the next run.

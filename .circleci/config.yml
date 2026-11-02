@@ -51,12 +51,12 @@ commands:
               sleep 1
             done
             (echo >/dev/tcp/127.0.0.1/5432) >/dev/null 2>&1 || { echo 'PostgreSQL unavailable' >&2; exit 1; }
-      # Raw tool archives only (Node, pnpm, anvil, headless shell). Every archive is digest-verified before use
-      # (scripts/ci_archive_cache.py), so the prefix fallback can only save a download, never supply unverified bytes.
+      # Raw tool archives only (Node, pnpm, anvil, headless shell), digest-verified before use (scripts/ci_archive_cache.py).
+      # A restored cache is a tarball that can write any path the job user can write, so the key is exact (no prefix
+      # fallback) and scoped to this branch: another branch can never supply main's (or this PR's) cache.
       - restore_cache:
           keys:
-            - flofi-circleci-archives-v2-{{ arch }}-{{ checksum "scripts/bootstrap-ci.py" }}-{{ checksum "scripts/bootstrap-anvil.py" }}-{{ checksum "scripts/bootstrap-playwright.py" }}-{{ checksum "scripts/ci_archive_cache.py" }}
-            - flofi-circleci-archives-v2-{{ arch }}-
+            - flofi-circleci-archives-v3-linux-x64-{{ .Branch }}-{{ checksum "scripts/bootstrap-ci.py" }}-{{ checksum "scripts/bootstrap-anvil.py" }}-{{ checksum "scripts/bootstrap-playwright.py" }}-{{ checksum "scripts/ci_archive_cache.py" }}
       - run:
           name: "Bootstrap exact approved Node and pnpm"
           command: |
@@ -292,7 +292,7 @@ jobs:
       - browser-results
       - record-certification
       - save_cache:
-          key: flofi-circleci-archives-v2-{{ arch }}-{{ checksum "scripts/bootstrap-ci.py" }}-{{ checksum "scripts/bootstrap-anvil.py" }}-{{ checksum "scripts/bootstrap-playwright.py" }}-{{ checksum "scripts/ci_archive_cache.py" }}
+          key: flofi-circleci-archives-v3-linux-x64-{{ .Branch }}-{{ checksum "scripts/bootstrap-ci.py" }}-{{ checksum "scripts/bootstrap-anvil.py" }}-{{ checksum "scripts/bootstrap-playwright.py" }}-{{ checksum "scripts/ci_archive_cache.py" }}
           paths:
             - /tmp/flofi-ci/archives
   certification-browser-2:
@@ -318,7 +318,7 @@ jobs:
       - browser-results
       - record-certification
       - save_cache:
-          key: flofi-circleci-archives-v2-{{ arch }}-{{ checksum "scripts/bootstrap-ci.py" }}-{{ checksum "scripts/bootstrap-anvil.py" }}-{{ checksum "scripts/bootstrap-playwright.py" }}-{{ checksum "scripts/ci_archive_cache.py" }}
+          key: flofi-circleci-archives-v3-linux-x64-{{ .Branch }}-{{ checksum "scripts/bootstrap-ci.py" }}-{{ checksum "scripts/bootstrap-anvil.py" }}-{{ checksum "scripts/bootstrap-playwright.py" }}-{{ checksum "scripts/ci_archive_cache.py" }}
           paths:
             - /tmp/flofi-ci/archives
   certification:

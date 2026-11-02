@@ -56,24 +56,32 @@ One policy file, [`docs/security/dependency-policy.json`](../security/dependency
 engine, `scripts/dependency_security.py` (standard library plus Node's crypto for signatures), one developer guide,
 [`docs/security/DEPENDENCY-SECURITY.md`](../security/DEPENDENCY-SECURITY.md).
 
-The engine parses `pnpm-lock.yaml` (a strict YAML-subset parser, verified identical to PyYAML on the repository's
-lockfile and workspace file), fetches one fresh full registry document per name (no cache), verifies npm registry
-signatures, runs `pnpm audit --json` against the policy registry, and evaluates every locked identity.
+The engine parses `pnpm-lock.yaml` and `pnpm-workspace.yaml` with a strict YAML-subset parser (identical to PyYAML on
+the repository's files and on block scalars; YAML tags, anchors, aliases, merge keys, directives, several documents and
+BOMs are refused, because pnpm would read them differently), fetches one fresh full registry document per name (no
+cache), verifies npm registry signatures, runs `pnpm audit --json` against the policy registry, checks every lockfile
+edge against the parent's published manifest with an npm-semver implementation (node-semver semantics, including
+prerelease rules; 1023 real edges consistent), and evaluates every locked identity.
 
 ### PASS / REVIEW_REQUIRED / BLOCK
 
 | Decision | Codes | Can an exception resolve it? |
 | --- | --- | --- |
-| **BLOCK** | `integrity-mismatch`, `integrity-missing`, `registry-signature-invalid` (incl. a key past expiry), `vulnerability` (≥ low), `license-prohibited` (GPL/AGPL/SSPL/BUSL/Elastic/CC-BY-NC/UNLICENSED), `source-substitution` (tarball/git/file/link sources, non-npm tarball host, `.npmrc`/workspace registry, scoped registries), `metadata-inconsistent` (unpublished release, name/version mismatch, lockfile packages/snapshots/importers inconsistent), `malicious-indicator` (npm `0.0.1-security` placeholder, compromise/malware deprecation notice, download-and-execute install hook), `dependency-confusion` (`@defi-workflow-engine/` or a workspace name on the registry), `policy-bypass` (advisory ignores, lifecycle scripts enabled, build allowances), `non-exact-direct-specifier`, `workspace-constraint` | **No** (`policy_errors` rejects such records) |
-| **REVIEW_REQUIRED** | `license-review` (weak copyleft, attribution, custom, unknown SPDX, `WITH` exceptions), `license-missing`, `install-script-introduced` (hook absent in the prior release, or in a first release), `provenance-regression` (prior release had npm provenance; this one has none *and* a different publisher), `typosquat-suspect` (one edit from a protected/direct name *and* not established: < 10 versions and < 365 days), `suspicious-capabilities` (credential access + network/subprocess in a package that also has a registry trigger), `registry-signature-missing`, `alias-substitution` | Yes, one record |
+| **BLOCK** | `integrity-mismatch`, `integrity-missing`, `registry-signature-invalid` (incl. a key past expiry), `vulnerability` (≥ low), `license-prohibited` (GPL/AGPL/SSPL/BUSL/Elastic/CC-BY-NC/UNLICENSED), `source-substitution` (tarball/git/file/link sources, non-npm tarball host, `.npmrc`/workspace registry, scoped registries), `metadata-inconsistent` (unpublished release, name/version mismatch, lockfile packages/snapshots/importers inconsistent), `malicious-indicator` (npm `0.0.1-security` placeholder, compromise/malware deprecation notice, download-and-execute install hook), `dependency-confusion` (`@defi-workflow-engine/` or a workspace name on the registry), `policy-bypass` (pnpm 11 `audit`/`auditConfig`/`auditLevel`, `ignoreScripts` not `true`, build allowances, `gitBranchLockfile`, `lockfileDir`, `useLockfile`/`lockfile: false`, `sharedWorkspaceLockfile: false`, `optional: false`, any extra `pnpm-lock*.yaml`), `graph-substitution` (a lockfile edge the parent's published manifest does not request after overrides/`packageExtensions`/`peerDependencyRules`, an aliased or out-of-range edge, a direct version that differs from its exact specifier), `non-exact-direct-specifier`, `workspace-constraint` | **No** (`policy_errors` rejects such records) |
+| **REVIEW_REQUIRED** | `license-review` (weak copyleft, attribution, custom, unknown SPDX, `WITH` exceptions), `license-missing`, `install-script-introduced` (hook absent in the prior release, or in a first release), `provenance-regression` (prior release had npm provenance; this one has none *and* a different publisher), `typosquat-suspect` (one edit from a protected or direct-dependency name, direct dependencies included, *and* not established: fewer than 10 versions or under 365 days between first publication and the locked release), `suspicious-capabilities` (credential access + network/subprocess in a package that also has a registry trigger), `registry-signature-missing`, `alias-substitution` | Yes, one record |
 | **PASS** | Everything else. Recorded signals that never decide alone: recent publication, publisher change (21 in today's graph, mostly moves to GitHub Actions trusted publishing), first release (6 benign today), provenance dropped without publisher change, unchanged install hooks, network/environment use | — |
 
-Calibration against the real graph (505 packages): no false REVIEW/BLOCK; the capability scan inspected the 33 packages
-with a registry trigger and found no credential-access pattern.
+Calibration against the real graph (505 packages, 1023 edges): no false REVIEW/BLOCK; the capability scan inspected the
+33 packages with a registry trigger and found no credential-access pattern. A registry that declares no license is
+followed by the installed archive's own LICENSE file: exactly one standard Apache-2.0, MIT or ISC text passes
+(`@privy-io/api-base@1.12.0` ships Apache-2.0), anything else is REVIEW. Measured over the graph's registry histories
+(47,076 releases in the last year), the provenance-regression rule matched 25 releases in 18 packages, mostly
+prereleases that are never locked; stable Next.js and Vite releases never matched.
 
 ### Exceptions (one canonical record each)
 
-Six existing reviewed exceptions were migrated from code into the policy, preserving their protections:
+Five existing reviewed license exceptions were migrated from code into the policy, preserving their protections (the
+sixth, `@privy-io/api-base`'s undeclared license, is now resolved automatically from its archive's LICENSE file):
 
 | id | resolves | binding |
 | --- | --- | --- |
@@ -82,19 +90,20 @@ Six existing reviewed exceptions were migrated from code into the policy, preser
 | `sharp-wasm32-lgpl` (1) | license-review | exact expression; parents the two wasm32 sharp packages; optional |
 | `caniuse-lite-cc-by` | license-review | `CC-BY-4.0`; parent `next` |
 | `lightningcss-mpl` (12) | license-review | `MPL-2.0`; parents `vite` / `lightningcss` |
-| `privy-api-base-undeclared` | license-missing | exact `@privy-io/api-base@1.12.0` + sha512 integrity; parents the two Privy SDK packages |
 
 License exceptions are name-scoped and bound to the exact license expression and role (parents, optional, platform):
 a routine Next.js or sharp bump with the same license and role passes; a license change, a new dependent, or loss of
 optional/platform restriction returns to REVIEW and the CI output names which binding broke. Every other exception is
-bound to an exact `name@version` and its sha512 integrity. 0BSD, BlueOak-1.0.0 and Unlicense, previously four
-exact-identity exceptions each reviewed as "OSI-approved permissive", are now in the permissive category (with MIT-0,
-CC0-1.0 and Zlib) — see §17 owner decisions.
+bound to an exact `name@version` and its sha512 integrity (test `test_identity_exception_is_bound_to_the_reviewed_archive`).
+0BSD, BlueOak-1.0.0 and Unlicense — previously six exact-identity exceptions (`tslib@2.8.1`, `tslib@1.14.1`;
+`minimatch@11.0.3`, `@isaacs/nonrecursive-glob-match@1.0.3`, `lru-cache@11.5.3`; `fast-sha256@1.3.0`), each reviewed
+as "OSI-approved permissive" — are now in the permissive category (with MIT-0, CC0-1.0 and Zlib); see §17.
 
 ### Evidence
 
-`$RUNNER_TEMP/flofi-dependency-evidence.json` (CircleCI artifact `dependency-security/`, Actions artifact
-`flofi-dependency-evidence-<run>`): policy version and SHA-256, CI revision, lockfile SHA-256 and computed counts,
+`$RUNNER_TEMP/flofi-dependency-evidence.json` (CircleCI keeps it as the `dependency-security/` artifact when the gate
+passes — on a failure the CI log carries every finding with its remedy; Actions uploads it on success and with the
+failure artifacts): policy version and SHA-256, CI revision, lockfile SHA-256 and computed counts,
 baseline availability, release-age setting, summary (decisions, change classes, licenses, advisories, signatures,
 attestations, install hooks, exceptions used/unused) and, per package: identity, source, integrity, change class
 (added/upgraded/downgraded/unchanged against the merge base when Git history has it; decisions never depend on it),
@@ -109,8 +118,10 @@ URLs are reduced to `<url>` in errors; no environment or credentials are recorde
 - `governance_lite.py` (Governance job, every push/PR) validates the policy with the same `policy_errors`: registry,
   sha512, release age 0, required signatures with pinned keys, advisory threshold `low`, permissive-only allowed list,
   GPL/AGPL/SSPL/UNLICENSED prohibited, typosquat and scan thresholds, exact exception identities, Owner approval.
-- Workspace advisory ignores, build allowances and custom registries fail governance and the engine.
-- The evidence records `changed_in_revision` and CI prints a NOTICE when a PR changes the policy, so the owner sees it.
+- Every workspace setting that could silence advisories, switch lockfiles, enable scripts or change the registry fails
+  governance (structurally, on the strictly parsed workspace: quoting, flow style or tags cannot hide it) and the engine.
+- The evidence records `changed_in_revision` and the CI log prints a NOTICE when a PR changes the policy where Git
+  history has the merge base (CircleCI); elsewhere the PR diff is the signal.
 - Self-tests cannot make PR-controlled code tamper-proof: a PR could edit the engine itself. Owner review of the diff
   and owner-managed branch protection remain the backstop (as stated in `docs/SCOPE_GUARD.md`).
 
@@ -133,7 +144,7 @@ URLs are reduced to `<url>` in errors; no environment or credentials are recorde
 
 | Option | Decision | Evidence / reason |
 | --- | --- | --- |
-| Tool-archive cache key | **Changed.** CircleCI: `v2-{{ arch }}` + checksums of the three bootstrap scripts and `ci_archive_cache.py`, with a `v2-{{ arch }}-` prefix fallback. Actions: dropped `pnpm-lock.yaml`, `.npmrc`, `pnpm-workspace.yaml` from the key. | Previously keyed only on `bootstrap-ci.py`, which changed with every dependency edit (it held the inventories), so caches were invalidated by unrelated changes. Every archive is SHA-256/SHA-512 verified before parsing (`verified_archive`); a stale or poisoned restore can only cost a download. |
+| Tool-archive cache key | **Changed.** CircleCI: `v3-linux-x64-{{ .Branch }}` + checksums of the three bootstrap scripts and `ci_archive_cache.py`, exact key only. Actions: dropped `pnpm-lock.yaml`, `.npmrc`, `pnpm-workspace.yaml` from the key (Actions caches are already branch-scoped). | Previously keyed only on `bootstrap-ci.py`, which changed with every dependency edit. Every archive is SHA-256/SHA-512 verified before parsing (`verified_archive`). A CircleCI cache is a tarball restored to absolute paths and CircleCI shares caches across a project's branches, so the review's first version (prefix fallback) would have let another branch's cache write files into main's job; the key is now exact and branch-scoped. Measured value is small: warm toolchain bootstrap 6.3 s vs cold 7.0 s. |
 | pnpm store cache | Not adopted | Frozen install measured 12–23 s per job (base run 12.3/12.8/15.2 s). Restoring a multi-hundred-MB store costs about the same; pnpm still verifies store content. No measurable gain. |
 | Next.js build cache (`.next/cache`) | Not adopted | CircleCI caches are shared across branches; a PR could seed compiled modules that a later main build would reuse — a trust escalation into the build that browser certification tests. |
 | Shared production build artifact | Not adopted | Builds run in parallel inside each job (119–152 s). A build job before the browser jobs would add its spin-up, install, build and workspace transfer (≥ 160 s) to the critical path. Each job builds the same revision itself. |

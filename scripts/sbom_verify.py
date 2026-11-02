@@ -75,7 +75,7 @@ def load_evidence(path, root, graph):
 
 def validate(sbom_path, evidence_path, root=ROOT, summary=None):
     root = Path(root)
-    graph = Graph((root / "pnpm-lock.yaml").read_text())
+    graph = Graph((root / "pnpm-lock.yaml").read_bytes())
     evidence, records = load_evidence(evidence_path, root, graph)
     expected = set(graph.identities())
     document = json.loads(Path(sbom_path).read_text())

@@ -139,7 +139,7 @@ class Harness(unittest.TestCase):
             "reason": "Fixture: an unmodified, dynamically loaded optional LGPL platform binary.",
             "approved_by": "Owner", "approved_at": "2026-11-01", "record": "docs/builds/BUILD-FLOFI-CI-ARCHITECTURE-001.md"}]
         self.workspace = ("packages:\n  - packages/*\nminimumReleaseAge: 0\npmOnFail: error\nstrictPeerDependencies: true\n"
-                          "autoInstallPeers: false\n")
+                          "autoInstallPeers: false\nignoreScripts: true\n")
         self.npmrc = (ROOT / ".npmrc").read_text()
         self.audit = {"advisories": {}, "metadata": {}}
         self.missing, self.offline = set(), set()
@@ -192,6 +192,11 @@ class Harness(unittest.TestCase):
                              package.get("published", "2021-01-01T00:00:00.000Z"), package.get("registry_integrity", package["integrity"])))
             for release, details, published, integrity in releases:
                 body = {"name": details.get("registry_name", name), "version": release, "_npmUser": {"name": details["publisher"]},
+                        # The published manifest requests exactly what the fixture lockfile resolves (unless a test says otherwise).
+                        "dependencies": details.get("declared", {n: "^" + v for n, v in (package.get("deps") or {}).items()
+                                                                 if not str(v).startswith("link:")}),
+                        "optionalDependencies": {n: v for n, v in (package.get("optional_deps") or {}).items()},
+                        **({"peerDependenciesMeta": {n: {"optional": True} for n in (package.get("deps") or {})}} if details.get("peer_meta") else {}),
                         "dist": {"integrity": integrity, "tarball": details.get(
                             "tarball", f"https://registry.npmjs.org/{name}/-/{name.rsplit('/', 1)[-1]}-{release}.tgz")}}
                 if details.get("license", "<absent>") != "<absent>" and details.get("license") is not None:
@@ -300,7 +305,7 @@ class AutomaticAcceptance(Harness):
         self.assert_pass(evidence)
         record = next(r for r in evidence["packages"] if r["identity"] == "fresh-lib@3.0.0")
         self.assertIn("recently-published", record["signals"])  # a risk signal, never a waiting period
-        self.assertEqual(record["capability_scan"]["status"], "not-installed")
+        self.assertEqual(record["capability_scan"]["status"], "store-unavailable")  # no node_modules in the fixture
         self.assertEqual(json.dumps(self.policy, sort_keys=True), policy_before)
 
     def test_r_publication_age_never_changes_the_decision(self):
@@ -511,7 +516,14 @@ class SecurityRejection(Harness):
 
     def test_k_policy_bypass_fails(self):
         for label, change in (("audit ignores", lambda: setattr(self, "workspace", self.workspace + "auditConfig:\n  ignoreGhsas:\n    - GHSA-aaaa-bbbb-cccc\n")),
-                              ("lifecycle scripts", lambda: setattr(self, "npmrc", self.npmrc.replace("ignore-scripts=true", "ignore-scripts=false"))),
+                              ("lifecycle scripts", lambda: setattr(self, "workspace", self.workspace.replace("ignoreScripts: true", "ignoreScripts: false"))),
+                              ("scripts default", lambda: setattr(self, "workspace", self.workspace.replace("ignoreScripts: true\n", ""))),
+                              ("audit ignore list", lambda: setattr(self, "workspace", self.workspace + "audit:\n  ignore:\n    - GHSA-aaaa-bbbb-cccc\n")),
+                              ("audit level", lambda: setattr(self, "workspace", self.workspace + "auditLevel: critical\n")),
+                              ("branch lockfile", lambda: setattr(self, "workspace", self.workspace + "gitBranchLockfile: true\n")),
+                              ("optional excluded", lambda: setattr(self, "workspace", self.workspace + "optional: false\n")),
+                              ("quoted npmrc registry", lambda: setattr(self, "npmrc", self.npmrc.replace("registry=", '"registry"=').replace(
+                                  "https://registry.npmjs.org/", "https://mirror.example/"))),
                               ("build allowance", lambda: setattr(self, "workspace", self.workspace + "onlyBuiltDependencies:\n  - left-pad\n")),
                               ("range specifier", lambda: self.world["specifiers"].update({("packages/a", "left-pad"): "^1.3.0"}))):
             with self.subTest(bypass=label):
@@ -575,6 +587,174 @@ class SecurityRejection(Harness):
         self.assertIn(("left-pad@1.3.0", "registry-signature-invalid", ds.BLOCK), self.findings(self.run_gate()))
 
 
+MIT_TEXT = ("MIT License\n\nPermission is hereby granted, free of charge, to any person obtaining a copy of this software ...\n\n"
+            "THE SOFTWARE IS PROVIDED \"AS IS\", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED.\n")
+
+
+class ReviewHardening(Harness):
+    """Regression tests for the adversarial review of BUILD-FLOFI-CI-ARCHITECTURE-001 (round one)."""
+
+    def install(self, identity, files):
+        name, version = ds.split_identity(identity)
+        directory = self.root / "node_modules/.pnpm" / (name.replace("/", "+") + "@" + version) / "node_modules" / name
+        directory.mkdir(parents=True, exist_ok=True)
+        (directory / "package.json").write_text(json.dumps({"name": name, "version": version}))
+        for relative, text in files.items():
+            (directory / relative).write_text(text)
+
+    def test_lockfile_edges_must_match_the_published_manifests(self):
+        self.assert_pass(self.run_gate())
+        cases = {
+            "undeclared edge": lambda: self.package("tool-kit@2.0.0").update(declared={}),
+            "aliased edge": lambda: self.package("tool-kit@2.0.0")["deps"].update({"tiny-helper": "left-pad@1.3.0"}),
+            "version outside range": lambda: self.package("tool-kit@2.0.0").update(declared={"tiny-helper": "^2.0.0"}),
+            "override ignored": lambda: setattr(self, "workspace", self.workspace + "overrides:\n  'tool-kit@2.0.0>tiny-helper': 1.0.0\n"),
+            "removed by override": lambda: setattr(self, "workspace", self.workspace + "overrides:\n  'tool-kit@2.0.0>tiny-helper': '-'\n"),
+            "direct specifier mismatch": lambda: self.world["specifiers"].update({("packages/a", "left-pad"): "1.2.0"}),
+        }
+        for label, mutate in cases.items():
+            with self.subTest(case=label):
+                self.setUp()
+                mutate()
+                evidence = self.run_gate()
+                self.assertEqual(evidence["decision"], ds.BLOCK, label)
+                self.assertIn("graph-substitution", {code for _, code, _ in self.findings(evidence)}, label)
+        # An override that the lockfile honours, and a declared npm: alias, are accepted.
+        self.setUp()
+        self.workspace += "overrides:\n  'tool-kit@2.0.0>tiny-helper': 1.1.0\n"
+        self.package("tool-kit@2.0.0")["declared"] = {"tiny-helper": "^1.0.0", "pad": "npm:left-pad@^1.3.0"}
+        self.package("tool-kit@2.0.0")["deps"]["pad"] = "left-pad@1.3.0"
+        self.assert_pass(self.run_gate())
+
+    def test_peer_rules_and_meta_only_peers_are_honoured(self):
+        self.package("tool-kit@2.0.0").update(declared={})
+        self.package("tool-kit@2.0.0")["deps"] = {"tiny-helper": "1.1.0"}
+        self.package("tool-kit@2.0.0")["peer_meta"] = True
+        evidence = self.run_gate()
+        self.assert_pass(evidence)  # a peer named only in peerDependenciesMeta is an optional `*` peer (sharp's @types/node)
+
+    def test_stray_lockfiles_block(self):
+        self.write_repository()
+        (self.root / "pnpm-lock.feature.yaml").write_text("lockfileVersion: '9.0'\n")
+        self.assertIn(("<configuration>", "policy-bypass", ds.BLOCK), self.findings(self.run_gate()))
+
+    def test_typo_of_a_direct_dependency_is_checked_even_when_it_is_direct(self):
+        self.world["importers"]["packages/a"]["dependencies"]["tool-kitt"] = "1.0.0"
+        self.add("tool-kitt@1.0.0", history=0, created=iso(NOW - datetime.timedelta(days=2)))
+        self.assertIn(("tool-kitt@1.0.0", "typosquat-suspect", ds.REVIEW), self.findings(self.run_gate()))
+
+    def test_undeclared_license_is_read_from_the_archive(self):
+        identity = self.add("no-license-meta@1.0.0", parent="tool-kit@2.0.0", license=None)
+        self.write_repository()
+        self.assertIn((identity, "license-missing", ds.REVIEW), self.findings(self.run_gate()))
+        self.install(identity, {"LICENSE": MIT_TEXT})
+        evidence = self.run_gate()
+        self.assert_pass(evidence)
+        record = next(r for r in evidence["packages"] if r["identity"] == identity)
+        self.assertEqual((record["license"]["declared"], record["license"]["archive"]), (None, "MIT"))
+        self.install(identity, {"LICENSE": MIT_TEXT, "COPYING": "Proprietary. All rights reserved.\n"})
+        self.assertIn((identity, "license-missing", ds.REVIEW), self.findings(self.run_gate()))
+
+    def test_first_stable_release_compares_with_its_prereleases(self):
+        hook = {"install": "node-gyp rebuild"}
+        self.add("native-thing@1.0.0", parent="tool-kit@2.0.0", history=0, scripts=hook, prior={"version": "1.0.0-rc.1", "scripts": hook})
+        self.assert_pass(self.run_gate())
+
+    def test_developer_sdk_has_no_dependencies_at_all(self):
+        self.world["importers"]["packages/developer-sdk"] = {"dependencies": {"@defi-workflow-engine/a": "link:../a"}}
+        self.world["specifiers"][("packages/developer-sdk", "@defi-workflow-engine/a")] = "workspace:0.1.0"
+        self.assertIn(("<configuration>", "workspace-constraint", ds.BLOCK), self.findings(self.run_gate()))
+
+    def test_alias_is_resolvable_by_one_identity_exception(self):
+        del self.world["importers"]["packages/a"]["dependencies"]["left-pad"]
+        self.world["importers"]["packages/a"]["dependencies"]["pad"] = "left-pad@1.3.0"
+        self.world["specifiers"][("packages/a", "pad")] = "npm:left-pad@1.3.0"
+        evidence = self.run_gate()
+        self.assertIn(("left-pad@1.3.0", "alias-substitution", ds.REVIEW), self.findings(evidence))
+        integrity = next(r for r in evidence["packages"] if r["identity"] == "left-pad@1.3.0")["integrity"]
+        self.policy["exceptions"].append({"id": "pad-alias", "resolves": ["alias-substitution"], "identity": "left-pad@1.3.0",
+                                          "integrity": integrity, "reason": "Fixture: a reviewed npm alias kept for an API name.",
+                                          "approved_by": "Owner", "approved_at": "2026-11-02", "record": "docs/builds/X.md"})
+        self.assert_pass(self.run_gate())
+
+    def test_change_classes_compare_within_the_major_line(self):
+        self.add("multi@7.29.9", parent="tool-kit@2.0.0")
+        self.package("left-pad@1.3.0")["deps"] = {"multi": "8.0.8"}
+        self.add("multi@8.0.8")
+        self.package("tool-kit@2.0.0")["declared"] = {"tiny-helper": "^1.1.0", "multi": "^7.0.0"}
+        before = copy.deepcopy(self.world)
+        del self.world["packages"]["multi@7.29.9"]
+        self.add("multi@7.29.10")
+        self.package("tool-kit@2.0.0")["deps"]["multi"] = "7.29.10"
+        evidence = self.run_gate(base_world_value=before)
+        changes = {r["identity"]: r["change"] for r in evidence["packages"]}
+        self.assertEqual((changes["multi@7.29.10"], changes["multi@8.0.8"]), ("upgraded", "unchanged"))
+        self.assertEqual(evidence["summary"]["changes"].get("replaced (prior version left the graph)"), 1)
+
+    def test_non_spdx_prohibited_families_block(self):
+        licenses = self.policy["licenses"]
+        for text in ("GPL", "GPLv3", "AGPLv3", "GNU GPL", "gpl-2.0+", "SSPL", "MIT AND GPL v3"):
+            with self.subTest(license=text):
+                self.assertEqual(ds.evaluate_license(text, licenses)[0], "prohibited")
+        for text, category in (("LGPLv3", "review"), ("GPL-2.0-only WITH Classpath-exception-2.0", "review"), ("MIT OR GPLv2", "allowed")):
+            self.assertEqual(ds.evaluate_license(text, licenses)[0], category, text)
+
+    def test_identity_exception_is_bound_to_the_reviewed_archive(self):
+        identity = self.add("hooked@1.0.0", parent="tool-kit@2.0.0", scripts={"postinstall": "node setup.js"})
+        evidence = self.run_gate()
+        self.assertIn((identity, "install-script-introduced", ds.REVIEW), self.findings(evidence))
+        integrity = next(r for r in evidence["packages"] if r["identity"] == identity)["integrity"]
+        entry = {"id": "hooked-setup", "resolves": ["install-script-introduced"], "identity": identity, "integrity": integrity,
+                 "reason": "Fixture: the postinstall hook was read and only copies a bundled file.", "approved_by": "Owner",
+                 "approved_at": "2026-11-02", "record": "docs/builds/X.md"}
+        self.policy["exceptions"].append(entry)
+        self.assert_pass(self.run_gate())
+        # Different bytes under the same name@version (or a later version) need their own review.
+        self.package(identity)["integrity"] = integrity_of("other archive")
+        evidence = self.run_gate()
+        finding = next(f for r in evidence["packages"] if r["identity"] == identity for f in r["findings"] if f["code"] == "install-script-introduced")
+        self.assertNotIn("resolved_by", finding)
+        self.assertIn("integrity differs", " ".join(finding["exception_mismatch"]))
+
+    def test_cli_exit_codes(self):
+        for decision, code in ((ds.PASS, 0), (ds.REVIEW, 2), (ds.BLOCK, 3)):
+            with self.subTest(decision=decision), patch.object(ds, "verify", return_value={"decision": decision}):
+                self.assertEqual(ds.main(["verify"]), code)
+        with patch.object(ds, "verify", side_effect=ds.EvidenceError("registry unavailable")), patch("sys.stderr", io.StringIO()) as err:
+            self.assertEqual(ds.main(["verify"]), 1)
+        self.assertIn("INVALID", err.getvalue())
+
+    def test_evaluation_time_never_changes_a_decision(self):
+        """Publication age relative to *now* is never a gate: the same graph (with a REVIEW and a BLOCK in it) decides
+        identically one minute or three years after publication. Typosquat 'established' uses the package's own history
+        (first publication to this release), which does not move with time."""
+        self.add("lefft-pad@1.0.0", parent="tool-kit@2.0.0", history=0, created="2021-01-01T00:00:00.000Z",
+                 published="2021-01-01T00:01:00.000Z")
+        self.add("evil-pkg@0.0.1-security", parent="tool-kit@2.0.0")
+        results = []
+        for now in (datetime.datetime(2021, 1, 1, 0, 2, tzinfo=datetime.timezone.utc), NOW, NOW + datetime.timedelta(days=1100)):
+            with patch.object(ds.datetime, "datetime", wraps=datetime.datetime):
+                self.write_repository()
+                documents = self.registry()
+                with patch.object(ds, "run_audit", return_value=self.audit), patch.object(ds, "baseline", return_value=(None, False)), \
+                        redirect_stdout(io.StringIO()):
+                    evidence = ds.verify(self.root, self.temp / ds.EVIDENCE_NAME, base_ref=None, fetch=self.fetch_from(documents), now=now)
+            results.append(sorted((r["identity"], r["decision"]) for r in evidence["packages"]))
+        self.assertEqual(results[0], results[1])
+        self.assertEqual(results[1], results[2])
+        self.assertIn(("lefft-pad@1.0.0", ds.REVIEW), results[0])
+        self.assertIn(("evil-pkg@0.0.1-security", ds.BLOCK), results[0])
+
+    def test_semver_matches_node_semver(self):
+        cases = [("1.2.3", "^1.2.0", True), ("2.0.0", "^1.2.0", False), ("0.2.5", "^0.2.3", True), ("0.3.0", "^0.2.3", False),
+                 ("0.0.4", "^0.0.3", False), ("1.2.9", "~1.2.3", True), ("1.3.0", "~1.2.3", False), ("2.0.0", "1.x", False),
+                 ("2.3.4", "1.2.3 - 2.3.4", True), ("2.4.0", "1.2.3 - 2.3", False), ("3.1.0", ">=1.0.0 <2.0.0 || ^3", True),
+                 ("1.2.3-beta.1", "^1.2.3-beta.0", True), ("1.2.4-beta.1", "^1.2.3-beta.0", False), ("1.2.3-beta", "^1.2.0", False),
+                 ("2.0.0-0", "^1.0.0", False), ("0.5.9", "> 0.5", False), ("1.3.0", "<=1.2", False), ("0.1.0", "^0.0.x", False),
+                 ("5.0.0", "*", True), ("1.0.0", "", True), ("2.0.0", "<*", False)]
+        self.assertEqual([c for c in cases if ds.satisfies(c[0], c[1]) != c[2]], [])
+
+
 class SbomGate(Harness):
     def setUp(self):
         super().setUp()
@@ -597,7 +777,7 @@ class SbomGate(Harness):
             "source": lambda d: d["components"][0]["externalReferences"][0].update(url="https://evil.example/x.tgz"),
             "fabricated edge": lambda d: d["dependencies"][1]["dependsOn"].append(d["dependencies"][2]["ref"]),
             "dangling edge": lambda d: d["dependencies"][1]["dependsOn"].append("pkg:npm/nowhere@1.0.0"),
-            "orphan": lambda d: [entry["dependsOn"].clear() for entry in d["dependencies"]],
+            "root edges": lambda d: [entry["dependsOn"].clear() for entry in d["dependencies"]],
             "root license": lambda d: d["metadata"]["component"].update(licenses=[{"license": {"id": "MIT"}}]),
             "format": lambda d: d.update(specVersion="1.5"),
         }
@@ -605,6 +785,14 @@ class SbomGate(Harness):
             with self.subTest(corruption=label):
                 status, errors = self.validate_sbom(edit(mutate))
                 self.assertNotEqual(status, 0, label)
+
+    def test_m_unreachable_component_fails_for_the_right_reason(self):
+        document = self.sbom()
+        tool_kit = next(e for e in document["dependencies"] if e["ref"] == sbom_verify.purl("tool-kit@2.0.0"))
+        tool_kit["dependsOn"] = [ref for ref in tool_kit["dependsOn"] if ref != sbom_verify.purl("tiny-helper@1.1.0")]
+        status, errors = self.validate_sbom(document)
+        self.assertNotEqual(status, 0)
+        self.assertIn("unreachable from the root", errors)
 
     def test_l_sbom_refuses_missing_foreign_or_non_pass_evidence(self):
         evidence_path = self.temp / ds.EVIDENCE_NAME
@@ -635,13 +823,17 @@ class GraphParsing(unittest.TestCase):
             "packages": ["packages/*", "apps/x"], "minimumReleaseAge": 0, "overrides": {"@a/b@1.0.0>c": "1.2.3", "d": "-"},
             "nested": {"key": {"integrity": "sha512-abc==", "tarball": "https://x/y#z"}, "list": ["linux", "darwin"], "empty": {},
                        "flag": True, "quoted": "it's"}})
-        for invalid in ("a:\n\tb: 1\n", "a: |\n  text\n", "a: 1\na: 2\n", "a: {b: 1\n"):
+        self.assertEqual(ds.parse_yaml("deprecated: |-\n  line one\n  # kept\n\n  line three\nnext: >\n  folded\n  text\n"),
+                         {"deprecated": "line one\n# kept\n\nline three", "next": "folded text\n"})
+        for invalid in ("a:\n\tb: 1\n", "a: 1\na: 2\n", "a: {b: 1\n", "!!str dangerouslyAllowAllBuilds: true\n", "a: &x 1\nb: *x\n",
+                        "<<: {a: 1}\n", "\ufeffa: 1\n", "---\na: 1\n", "%YAML 1.2\na: 1\n", "a: !!bool true\n", "a: [!!str x]\n", "{a: 1}\n"):
             with self.subTest(invalid=invalid), self.assertRaises(ValueError):
                 ds.parse_yaml(invalid)
 
     def test_repository_lockfile_is_fully_derived(self):
         graph = ds.Graph((ROOT / "pnpm-lock.yaml").read_text())
-        self.assertEqual(len(graph.identities()), len(graph.snapshots))
+        # Several peer-resolved snapshots may share one package; every snapshot must name a locked package and vice versa.
+        self.assertEqual({ds.base_identity(key) for key in graph.snapshots}, set(graph.identities()))
         self.assertTrue(all(graph.integrity(identity).startswith("sha512-") for identity in graph.identities()))
         self.assertEqual(set(graph.importers), set(ds.workspace_manifests(ROOT, ds.parse_yaml((ROOT / "pnpm-workspace.yaml").read_text()))))
         self.assertEqual(ds.policy_errors(json.loads((ROOT / ds.POLICY_PATH).read_text())), [])

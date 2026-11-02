@@ -30,9 +30,14 @@ DEPENDENCY_POLICY = "docs/security/dependency-policy.json"
 SBOM_SCRIPT = "scripts/ci-sbom.sh"
 # BUILD-FLOFI-CI-ARCHITECTURE-001 (owner decision): no time-based installation restriction. pnpm 11 applies a 1440-minute
 # default when minimumReleaseAge is unset, so the workspace sets 0 explicitly; waivers no longer exist.
-RELEASE_AGE_SETTINGS = re.compile(r"(?m)^\s*(?:minimumReleaseAge(?:Exclude|Strict|IgnoreMissingTime)?|minimum-release-age[\w-]*)\s*[:=]")
-# Dependency settings that would silently weaken the dependency security policy.
-WORKSPACE_BYPASS = re.compile(r"(?m)^(?:\s*(?:ignoreCves|ignoreGhsas|dangerouslyAllowAllBuilds|onlyBuiltDependencies|allowBuilds|registry|registries)\s*:)")
+RELEASE_AGE_SETTINGS = re.compile(r"(?mi)^\s*['\"]?(?:minimumReleaseAge\w*|minimum-release-age[\w-]*)['\"]?\s*[:=]")
+# pnpm 11 settings that would silently weaken dependency security (checked on the parsed workspace, so quoting or flow
+# style cannot hide them). None: forbidden whenever set; any other value: forbidden when equal to it.
+WORKSPACE_FORBIDDEN = {"audit": None, "auditConfig": None, "auditLevel": None, "registry": None, "registries": None,
+                       "dangerouslyAllowAllBuilds": None, "onlyBuiltDependencies": None, "allowBuilds": None,
+                       "gitBranchLockfile": None, "lockfileDir": None, "useLockfile": False, "lockfile": False,
+                       "sharedWorkspaceLockfile": False, "optional": False}
+WORKSPACE_REQUIRED = {"minimumReleaseAge": 0, "ignoreScripts": True, "strictPeerDependencies": True, "autoInstallPeers": False}
 
 
 def dependency_policy_errors(files):
@@ -45,17 +50,45 @@ def dependency_policy_errors(files):
     return [f"{DEPENDENCY_POLICY}: {error}" for error in policy_errors(policy)]
 
 
+def workspace_settings(files):
+    """pnpm-workspace.yaml parsed with the dependency engine's fail-closed YAML subset (tags, anchors, merges refused)."""
+    from dependency_security import parse_yaml
+    try:
+        settings = parse_yaml(files.get("pnpm-workspace.yaml", ""))
+    except ValueError as exc:
+        return None, [f"pnpm-workspace.yaml: unsupported YAML ({exc})"]
+    if not isinstance(settings, dict):
+        return None, ["pnpm-workspace.yaml: not a mapping"]
+    return settings, []
+
+
 def release_age_errors(files):
-    """Test R: no release-age gate, waiver list or hidden pnpm default may come back."""
+    """Test R: no release-age gate, waiver list or hidden pnpm default may come back; no setting may silence advisories,
+    switch lockfiles, enable dependency scripts or change the registry."""
     errors = []
     workspace = files.get("pnpm-workspace.yaml", "")
-    settings = RELEASE_AGE_SETTINGS.findall(workspace)
-    if workspace.splitlines().count("minimumReleaseAge: 0") != 1 or len(settings) != 1:
+    settings, parse_errors = workspace_settings(files)
+    errors.extend(parse_errors)
+    if workspace.splitlines().count("minimumReleaseAge: 0") != 1 or len(RELEASE_AGE_SETTINGS.findall(workspace)) != 1:
         errors.append("pnpm-workspace.yaml: minimumReleaseAge must be exactly 0 (no release-age gate or waiver list)")
     if RELEASE_AGE_SETTINGS.search(files.get(".npmrc", "")):
         errors.append(".npmrc: release-age settings are not allowed")
-    if WORKSPACE_BYPASS.search(workspace):
-        errors.append("pnpm-workspace.yaml: advisory ignores, lifecycle-script allowances or custom registries bypass dependency security")
+    if settings is not None:
+        for key, value in WORKSPACE_REQUIRED.items():
+            if settings.get(key) != value or type(settings.get(key)) is not type(value):
+                errors.append(f"pnpm-workspace.yaml: {key} must be {str(value).lower()}")
+        for key, forbidden in WORKSPACE_FORBIDDEN.items():
+            if key in settings and (forbidden is None or settings[key] == forbidden):
+                errors.append(f"pnpm-workspace.yaml: {key} bypasses dependency security (advisories, lockfile, scripts or registry)")
+        if any(key.lower().startswith("minimumreleaseage") and key != "minimumReleaseAge" for key in settings):
+            errors.append("pnpm-workspace.yaml: release-age waivers are not allowed")
+    npmrc = {}
+    for line in files.get(".npmrc", "").splitlines():
+        if "=" in line and not line.strip().startswith(("#", ";")):
+            key, value = line.split("=", 1)
+            npmrc[key.strip().strip("'\"").strip()] = value.strip().strip("'\"").strip()
+    if npmrc.get("registry") != "https://registry.npmjs.org/" or any(key.endswith(":registry") for key in npmrc):
+        errors.append(".npmrc: only https://registry.npmjs.org/ may be configured")
     return errors
 
 
@@ -159,6 +192,8 @@ def control_errors(files):
         if line not in files.get("pnpm-workspace.yaml", "").splitlines():
             errors.append("pnpm-workspace.yaml: dependency control missing: " + line)
     errors.extend(release_age_errors(files))
+    errors.extend(f"{path}: only the root pnpm-lock.yaml may define the installed graph" for path in files
+                  if re.fullmatch(r"(?:.*/)?pnpm-lock(?:\.[^/]+)?\.yaml", path) and path != "pnpm-lock.yaml")
     errors.extend(dependency_policy_errors(files))
     # The one SBOM gate every CI provider calls: it must generate, validate and fail fast.
     sbom = files.get(SBOM_SCRIPT, "")
