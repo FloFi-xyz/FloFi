@@ -248,6 +248,18 @@ describe('BUILD-FLOFI-BRIDGE-LIVE-FIX-003 native ETH on Base: swaps in and out, 
     expect(swap.attempt.step).toBe('swap');
     expect(s.load(id).attempts.filter(a => a.step === 'approval')).toHaveLength(1);
   });
+  it('one run, one wallet: after A\'s approval landed, another wallet cannot begin the swap of that run (Review binds no owner)', async () => {
+    const other = '0x2222222222222222222222222222222222222222';
+    chain.fund(usdc.address!, other, 1_000_000_000n); chain.fundNative(other, 10n ** 17n);
+    chain.state.allowances.set(`${usdc.address}:${other}:${UNI.router}`, 10n ** 12n);
+    const { s, id } = await run(nativeWorkflow(ref(usdc), ETH, '1000000', 100));
+    const approval = await s.begin(id, owner);
+    s.report(id, approval.attempt.attemptId, { kind: 'HASH', txHash: wallet(approval.tx) });
+    await s.observe(id);
+    await expect(s.begin(id, other)).rejects.toThrow('OWNER_REVIEW_MISMATCH');
+    expect(s.load(id).attempts.map(a => a.account)).toEqual([owner]);
+    expect((await s.begin(id, owner)).attempt.step).toBe('swap');
+  });
   it('G/H — wrap ETH → WETH and unwrap WETH → ETH are WETH9 deposit/withdraw of exactly the amount (1:1, no pool, no approval)', async () => {
     chain.fundNative(owner, 10n ** 18n);
     const wrapped = await run(nativeWorkflow(ETH, ref(weth), '10000000000000000', 0));

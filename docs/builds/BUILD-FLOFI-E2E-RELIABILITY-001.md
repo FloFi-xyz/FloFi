@@ -51,15 +51,25 @@ close #137.
 
 ### 2.1 Swap engine (`src/server/public-testnet-service.ts`) — all swap networks (Base, Arbitrum One, Ethereum, Robinhood Chain, testnet pairs)
 - `reviewedBoundsHold(reviewed, fresh)`: the Review authorizes an exact input on a reviewed **route** (pool + fee tier) with a reviewed
-  **minimum output**. Execution proceeds while the reviewed route still quotes **at least the reviewed minimum** and the assets, amount, slippage
-  setting, native/conversion kind, decimals and workflow are unchanged. The fresh best tier may differ; the transaction is still built on the
-  reviewed route with the reviewed minimum and deadline (the router reverts below the minimum), so execution can never leave the reviewed
-  constraints. Price improvements and small adverse moves inside the bound need no new Review.
-- **Material** (fresh Review required, a presentable fresh quote is saved, nothing is prepared): reviewed route below the minimum or no longer
-  quoting, other assets/amount/slippage/kind, Stock Token multiplier change, quote expiry (`QUOTE_EXPIRED_REVIEW_REQUIRED`).
+  **minimum output**. Execution proceeds while the reviewed route still quotes **at least the reviewed minimum and at most half a slippage band
+  above the reviewed expected output**, and the assets, amount, slippage setting, native/conversion kind, decimals and workflow are unchanged.
+  The fresh best tier may differ; the transaction is still built on the reviewed route with the reviewed minimum (the router reverts below
+  it), so execution never leaves the reviewed constraints. Native-ETH and owner-bound swaps also carry the reviewed deadline; a plain ERC-20
+  `exactInputSingle` on Base/Robinhood has no on-chain deadline (pre-existing; FloFi's 60 s Review window and 15 s signing margin still apply).
+- The upper half-band (the liquidity runtime's drift rule) keeps the signed minimum from sitting further below the *current* price than the
+  owner's slippage setting allows — the room a sandwich could take (security/swap review).
+- **Material** (fresh Review required, a presentable fresh quote is saved, nothing is prepared): reviewed route below the minimum, above the
+  half-band or no longer quoting, other assets/amount/slippage/kind, Stock Token multiplier change, quote expiry or less than **15 s** of the
+  quote window left to sign (`QUOTE_EXPIRED_REVIEW_REQUIRED`).
+- **One run, one wallet:** a run whose earlier request came from wallet A is never continued by wallet B (`OWNER_REVIEW_MISMATCH`), also for
+  Reviews that bind no owner.
 - **Owner-bound networks:** the owner's exact preflight is re-run on the reviewed route, minimum and deadline (`pinReviewedBounds`), so inside
-  the bound its calldata is byte-identical to the reviewed calldata; only a real owner change (nonce, allowance, step, EIP-7702 delegation, gas
-  or fee ceiling) still needs a new Review. The reviewed transaction is what the wallet is asked to sign, unchanged.
+  the bound its calldata is byte-identical to the reviewed calldata; only a real owner change (nonce, allowance, step, EIP-7702 delegation, a
+  gas estimate above the reviewed gas limit, or a gas price above the reviewed transaction's own fee ceiling) still needs a new Review, and the
+  balance is checked against the reviewed fee budget. Before, any 1-wei gas-price rise retired an Ethereum Review (ceilings were compared, not
+  the fresh price against the reviewed ceiling). The reviewed transaction is what the wallet is asked to sign, unchanged.
+- On owner-bound networks the swap after an approval is always a **new owner transaction** (step, nonce, allowance change), so it legitimately
+  gets its own fresh owner-bound Review: the chat presents it with one “Accept and continue” question (§2.2).
 - Unchanged: nonce reservation, relayed-submission reconciliation (PR #150 §1a), duplicate prevention, exact-approval amount, receipt
   reconciliation, the 0.1 % fee policy (not implemented here, by instruction), evidence levels.
 
@@ -196,5 +206,7 @@ Prerequisite: this branch deployed to both Vercel and the Railway API. Use a sma
 4. Wait > 60 s after the approval before answering: expect “The reviewed quote expired …” → a fresh quote for the swap only → one question → swap.
 5. Decline the swap in MetaMask: expect “You declined this request in your wallet … Earlier confirmed requests stay recorded.”, approval still
    shown as confirmed, no “nothing was sent” for the run.
-6. On Arbitrum One (owner-bound), steps 1–2 with an EOA and with a MetaMask Smart Account.
+6. On Arbitrum One (owner-bound), steps 1–2 with an EOA and with a MetaMask Smart Account. After the approval confirms, expect FloFi to show a
+   fresh quote for the swap and ask “Accept this updated quote and continue …?” **before** the second MetaMask request (the swap is a new
+   owner-bound transaction with its own Review).
 Observe in Railway: `flow.refused` events now carry the code of any refusal.

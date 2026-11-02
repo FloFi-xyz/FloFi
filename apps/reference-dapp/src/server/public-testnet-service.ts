@@ -7,7 +7,7 @@
  * (pinned USDC/WETH plus the validated token list; `bas-` runs), with the OP Stack L1 fee in its balance check. The authored chain
  * selects the profile and its own read client; no chain falls back to another. This service never signs or sends.
  */
-import { nitroGasLimit, nitroMaxFeePerGas } from './arbitrum-fees.ts';
+import { nitroFeeWithinCeiling, nitroGasLimit, nitroMaxFeePerGas } from './arbitrum-fees.ts';
 import { readNotAnswered } from './public-testnet-rpc.ts';
 import { createHash, randomBytes } from 'node:crypto';
 import { closeSync, existsSync, fsyncSync, mkdirSync, openSync, readFileSync, readdirSync, renameSync, unlinkSync, writeFileSync } from 'node:fs';
@@ -978,13 +978,17 @@ function reviewedRouteOut(reviewed: PublicQuote, fresh: PublicQuote): bigint | n
   const tier = fresh.feeTiers?.find(item => item.fee === reviewed.fee && item.pool === reviewed.pool);
   return tier?.expectedOut ? BigInt(tier.expectedOut) : null;
 }
+/** BUILD-FLOFI-E2E-RELIABILITY-001: a request is prepared only with at least this much of its quote window left to sign it in the wallet. */
+const SIGNING_MARGIN_MS = 15_000;
 /**
  * BUILD-FLOFI-E2E-RELIABILITY-001: whether a fresh quote still lets the REVIEWED swap execute inside the owner's reviewed bounds. The Review
- * authorizes an exact input on a reviewed route with a reviewed minimum output, and the transaction FloFi asks the wallet to sign carries exactly
- * those bounds (the router reverts below the minimum). Ordinary price movement between Review and Execute — every block on an active pool, which
- * before this build retired every live Base, Arbitrum and Ethereum Review — needs no new Review while the reviewed route still quotes at least the
- * reviewed minimum. Anything else is material and needs a fresh Review: other assets, amount, slippage setting, native/conversion kind or
- * decimals, another workflow, a reviewed route that no longer quotes, or one that quotes below the reviewed minimum.
+ * authorizes an exact input on a reviewed route with a reviewed minimum output, and the transaction FloFi asks the wallet to sign carries that
+ * input, route and minimum (the router reverts below the minimum; native-ETH and owner-bound swaps also carry the reviewed deadline, a plain
+ * ERC-20 `exactInputSingle` on Base/Robinhood has none on chain). Ordinary price movement between Review and Execute — every block on an active
+ * pool, which before this build retired every live Base, Arbitrum and Ethereum Review — needs no new Review while the reviewed route quotes at
+ * least the reviewed minimum and at most half a slippage band above the reviewed expected output. Anything else is material and needs a fresh
+ * Review: other assets, amount, slippage setting, native/conversion kind or decimals, another workflow, a reviewed route that no longer quotes,
+ * one below the reviewed minimum, or one so far above the Review that the signed minimum would leave more room than the slippage setting.
  */
 export function reviewedBoundsHold(reviewed: PublicQuote, fresh: PublicQuote): boolean {
   if (fresh.chainId !== reviewed.chainId || fresh.workflowHash !== reviewed.workflowHash || fresh.nodeId !== reviewed.nodeId ||
@@ -992,7 +996,10 @@ export function reviewedBoundsHold(reviewed: PublicQuote, fresh: PublicQuote): b
       fresh.slippageBps !== reviewed.slippageBps || (fresh.native ?? null) !== (reviewed.native ?? null) || (fresh.conversion ?? null) !== (reviewed.conversion ?? null) ||
       (fresh.inputDecimals ?? null) !== (reviewed.inputDecimals ?? null) || (fresh.outputDecimals ?? null) !== (reviewed.outputDecimals ?? null)) return false;
   const out = reviewedRouteOut(reviewed, fresh);
-  return out !== null && out >= BigInt(reviewed.minimumOut);
+  if (out === null || out < BigInt(reviewed.minimumOut)) return false;
+  // A favorable move beyond half the slippage band is material too: the signed minimum would then sit further below the current price than
+  // the owner's slippage setting allows (room a sandwich could take). The same half-band rule as the liquidity runtime's drift check.
+  return (out - BigInt(reviewed.expectedOut)) * 20_000n <= BigInt(reviewed.expectedOut) * BigInt(reviewed.slippageBps);
 }
 /** The Stock Token multiplier state of a catalog quote: economic (a changed multiplier changes what the tokens represent), compared exactly. */
 const stockState = (quote: PublicQuote) =>
@@ -1008,7 +1015,7 @@ function pinReviewedBounds(fresh: PublicQuote, reviewed: PublicQuote): PublicQuo
 }
 
 /** Read-only exact owner transaction preflight, hashed into Review before any wallet request is prepared. */
-async function bindSwapOwner(q: PublicQuote, rpc: Rpc, ownerValue: string, expiresAt = q.expiresAt): Promise<PublicQuote> {
+async function bindSwapOwner(q: PublicQuote, rpc: Rpc, ownerValue: string, expiresAt = q.expiresAt, reviewedBudgetWei?: bigint): Promise<PublicQuote> {
   const P = profileOf(q.chainId), account = address(ownerValue), at = blockHex(q.blockNumber);
   if (account === '0x' + '0'.repeat(40)) fail('ADDRESS_INVALID');
   if (quantity(await rpc('eth_chainId', [])) !== BigInt(P.chainId)) fail('WRONG_PROVIDER_CHAIN');
@@ -1045,8 +1052,9 @@ async function bindSwapOwner(q: PublicQuote, rpc: Rpc, ownerValue: string, expir
   if (gas < 21_000n || gas > 30_000_000n || gasPrice <= 0n || gasPrice >= 1n << 128n) fail('SWAP_FEE_INVALID');
   // Nitro: estimate includes posting gas. No separate OP Stack l1Fee, no quoter-only gas estimate.
   const gasLimit = nitroGasLimit(gas), maxFee = nitroMaxFeePerGas(gasPrice), budget = gasLimit * maxFee;
-  // Native ETH in must cover the amount AND the network fee ceiling (the wallet pays both from the same balance).
-  if (native < budget + BigInt(call.value)) fail(native < BigInt(call.value) ? 'INSUFFICIENT_INPUT' : 'INSUFFICIENT_GAS_FUNDS');
+  // Native ETH in must cover the amount AND the network fee ceiling (the wallet pays both from the same balance). BUILD-FLOFI-E2E-RELIABILITY-001:
+  // re-binding a reviewed transaction checks the budget that transaction actually carries (its reviewed gas limit × fee ceiling).
+  if (native < (reviewedBudgetWei ?? budget) + BigInt(call.value)) fail(native < BigInt(call.value) ? 'INSUFFICIENT_INPUT' : 'INSUFFICIENT_GAS_FUNDS');
   const transaction: Tx = { ...call, chainId: P.chainHex, nonce: '0x' + pending.toString(16), gas: '0x' + gasLimit.toString(16),
     maxFeePerGas: '0x' + maxFee.toString(16), maxPriorityFeePerGas: '0x0' };
   const ownerReview: SwapOwnerReview = { account, router: P.router, nonce: pending.toString(), step, allowance: allowed.toString(), transaction,
@@ -1065,7 +1073,10 @@ function ownerReviewChanged(before: SwapOwnerReview, after: SwapOwnerReview): bo
   return before.account !== after.account || before.router !== after.router || before.nonce !== after.nonce || before.step !== after.step ||
     before.allowance !== after.allowance || before.transaction.data !== after.transaction.data || before.deadline !== after.deadline ||
     (before.delegation ?? null) !== (after.delegation ?? null) ||
-    BigInt(after.gasEstimate) > BigInt(before.transaction.gas) || BigInt(after.maxFeePerGas) > BigInt(before.maxFeePerGas);
+    // BUILD-FLOFI-E2E-RELIABILITY-001: the reviewed transaction carries its own fee ceiling (`maxFeePerGas`, a multiple of the Review-time gas
+    // price); only a fresh gas price above that ceiling changes what can be signed. Comparing the two ceilings retired an Ethereum Review on
+    // any 1-wei base-fee rise between Review and Execute.
+    BigInt(after.gasEstimate) > BigInt(before.transaction.gas) || !nitroFeeWithinCeiling(BigInt(after.maxFeePerGas), BigInt(before.maxFeePerGas));
 }
 
 /** Shared verified read path. It has no persistence, Review or transaction submission port. */
@@ -1171,7 +1182,11 @@ function createPublicTestnetCore(rpcFor: (profile: SwapProfile) => Rpc, now: () 
       if (P.kind === 'CATALOG' && !catalog?.executionEnabled) fail('OWNER_EXECUTION_NOT_ENABLED');
       const strict = ownerBoundSwapReview(P), reviewedOwner = run.quote.ownerReview;
       if (strict && (!reviewedOwner || reviewedOwner.account !== owner)) fail('OWNER_REVIEW_MISMATCH');
-      if (now().getTime() >= Date.parse(run.quote.expiresAt)) {
+      // BUILD-FLOFI-E2E-RELIABILITY-001 (security review): one run, one wallet. A Review that binds no owner (Base, Robinhood) is never
+      // continued by another wallet than the one whose request already landed (its approval would be stranded and the record mixed).
+      if (run.attempts.some(attempt => attempt.account !== owner)) fail('OWNER_REVIEW_MISMATCH');
+      // A request is prepared only while enough of the quote window is left to sign it (a native swap past its deadline reverts on chain).
+      if (now().getTime() >= Date.parse(run.quote.expiresAt) - SIGNING_MARGIN_MS) {
         const renewed = await quote(run.workflow, id, reviewedOwner?.account);
         await save({ ...run, quote: renewed, reviewedManifestHash: null }); fail('QUOTE_EXPIRED_REVIEW_REQUIRED');
       }
@@ -1199,12 +1214,13 @@ function createPublicTestnetCore(rpcFor: (profile: SwapProfile) => Rpc, now: () 
       if (strict) {
         // The owner's exact preflight is re-run on the reviewed route, minimum and deadline: within bounds its calldata is the reviewed calldata,
         // so only a real owner change (nonce, allowance, step, delegation, gas or fee ceiling) still needs a new Review.
-        const pinned = await reread(() => bindSwapOwner(pinReviewedBounds(observed, run.quote), rpc, reviewedOwner!.account, run.quote.expiresAt));
+        const pinned = await reread(() => bindSwapOwner(pinReviewedBounds(observed, run.quote), rpc, reviewedOwner!.account, run.quote.expiresAt,
+          BigInt(reviewedOwner!.feeBudgetWei)));
         if (!pinned.ownerReview || ownerReviewChanged(reviewedOwner!, pinned.ownerReview)) {
           run = await save({ ...run, quote: await presentable(observed), reviewedManifestHash: null }); fail('OWNER_STATE_CHANGED_REVIEW_REQUIRED');
         }
       }
-      if (now().getTime() >= Date.parse(run.quote.expiresAt)) {
+      if (now().getTime() >= Date.parse(run.quote.expiresAt) - SIGNING_MARGIN_MS) {
         run = await save({ ...run, quote: await presentable(observed), reviewedManifestHash: null });
         fail('QUOTE_EXPIRED_REVIEW_REQUIRED');
       }

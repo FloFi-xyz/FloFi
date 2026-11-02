@@ -1,7 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 /** BUILD-FLOFI-E2E-RELIABILITY-001: execution-boundary refusals named precisely, and a landed approval never read as the action itself. */
 export const portugueseE2eReliability: Readonly<Record<string, string>> = {
-  'Your input token balance is too low for this swap. Nothing was sent.': 'O seu saldo do token de entrada é insuficiente para esta troca. Nada foi enviado.',
+  'Your input token balance is too low for this swap. This request was not sent.': 'O seu saldo do token de entrada é insuficiente para esta troca. Este pedido não foi enviado.',
+  'You declined the request in your wallet. It was not signed or sent.': 'Você recusou o pedido na carteira. Ele não foi assinado nem enviado.',
+  'This request could not be completed, so no new transaction was sent. Try again.': 'Este pedido não pôde ser concluído, então nenhuma transação nova foi enviada. Tente de novo.',
+  'This request could not be completed. Try again.': 'Este pedido não pôde ser concluído. Tente de novo.',
+  'Accept and continue': 'Aceitar e continuar',
   'The observed on-chain result does not match the reviewed bounds, so FloFi stopped and keeps this run for review. Nothing is retried automatically.':
     'O resultado observado na rede não corresponde aos limites revisados, então a FloFi parou e mantém esta execução para revisão. Nada é repetido automaticamente.',
   'You declined this request in your wallet, so it was not signed or sent. Earlier confirmed requests stay recorded.':

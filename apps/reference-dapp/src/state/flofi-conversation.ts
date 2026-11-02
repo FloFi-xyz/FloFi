@@ -228,7 +228,7 @@ export function useFlofiConversation({ owner, epoch, bridge, direct, interfaceLa
     lastReview.current = { workflowId: workflow.workflowId, revision: workflow.revision, review };
     const changes = requoted ? reviewChanges(requoted, review).map(change => `${translate(language, change.label)} ${change.before} → ${change.after}`) : [];
     const notes = requoted ? { notes: [changes.length ? c.quoteChanges(changes.join('; ')) : c.quoteUnchanged] } : {};
-    if (next) { flofi(scope, language, c.continuationReview(translate(language, next.next)), { review, ...notes, question: c.continuationQuestion, options: [c.continueYes, c.executeNo] }); return; }
+    if (next) { flofi(scope, language, c.continuationReview(translate(language, next.next)), { review, ...notes, question: c.continuationQuestion, options: [c.continueAccept, c.executeNo] }); return; }
     flofi(scope, language, sequence ? c.sequenceReviewReady(sequence.current, sequence.total) : c.reviewReady,
       { review, ...notes, question: sequence ? c.confirmStep(sequence.current, sequence.total) : requoted ? c.confirmUpdated : c.confirmWorkflow, options: [c.confirmYes, c.confirmNo] });
   }
@@ -341,7 +341,8 @@ export function useFlofiConversation({ owner, epoch, bridge, direct, interfaceLa
       flofi(scope, language, started ? c.continueFailed(translate(language, 'You chose not to continue now.')) : c.declined, { options: [c.review] }); return true;
     }
     if (verdict === 'UNCLEAR') {
-      const options = open.open.kind === 'CONFIRM_WORKFLOW' ? [c.confirmYes, c.confirmNo] : open.open.kind === 'CONFIRM_EXECUTION' ? [c.executeYes, c.executeNo] : [c.continueYes, c.executeNo];
+      const options = open.open.kind === 'CONFIRM_WORKFLOW' ? [c.confirmYes, c.confirmNo] : open.open.kind === 'CONFIRM_EXECUTION' ? [c.executeYes, c.executeNo]
+        : open.open.kind === 'CONFIRM_CONTINUE_REVIEW' ? [c.continueAccept, c.executeNo] : [c.continueYes, c.executeNo];
       flofi(scope, language, c.unclear, { options }); return true;
     }
     if (open.open.kind === 'CONFIRM_CONTINUE') {
@@ -361,7 +362,11 @@ export function useFlofiConversation({ owner, epoch, bridge, direct, interfaceLa
     }
     const issue = bindingIssue(open.open.binding, view);
     if (issue) { setQuestion(null); flofi(scope, language, c.invalidated[issue], { options: [c.review] }); return true; }
-    if (open.open.kind === 'CONFIRM_CONTINUE_REVIEW') { execute(scope, language, open.open.binding); return true; }
+    if (open.open.kind === 'CONFIRM_CONTINUE_REVIEW') {
+      // The fresh Review belongs to one run: an answer after that run was replaced (another execution record) starts nothing.
+      if (currentExecution(view.progress)?.runKey !== open.open.runKey) { setQuestion(null); flofi(scope, language, c.invalidated.REVIEW_REPLACED, { options: [c.review] }); return true; }
+      execute(scope, language, open.open.binding); return true;
+    }
     if (open.open.kind === 'CONFIRM_WORKFLOW') {
       const review = conversationReview(view);
       setQuestion({ open: { kind: 'CONFIRM_EXECUTION', binding: open.open.binding }, language });

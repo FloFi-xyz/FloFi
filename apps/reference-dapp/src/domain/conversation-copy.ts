@@ -40,6 +40,8 @@ export type ConversationCopy = {
   readonly continueAfter: (done: string, next: string, approval: boolean) => string;
   readonly continuationRequote: (reason: string | null) => string; readonly continuationReview: (next: string) => string;
   readonly continuationQuestion: string; readonly continueFailed: (reason: string) => string;
+  /** The answer that accepts a fresh continuation Review (distinct from the plain Continue of an already accepted one). */
+  readonly continueAccept: string;
 };
 const en: ConversationCopy = {
   added: (action, detail) => `${action} added to your workflow: ${detail}.`,
@@ -121,7 +123,7 @@ const en: ConversationCopy = {
   continueAfter: (done, next, approval) => `${done} is confirmed on-chain.${approval ? ' An approval only allows the spend; it is not the action itself.' : ''} ${next} has not been sent yet and needs its own confirmation in your wallet. Continue to your wallet?`,
   continuationRequote: reason => `Your earlier confirmed request stays in place, and nothing new was sent.${reason ? ` ${reason}` : ' The reviewed quote is no longer valid.'} I am getting a fresh quote for the next request now; you confirm it before your wallet is asked.`,
   continuationReview: next => `Here is the fresh quote for ${next}, which has not been sent yet. Your earlier confirmed request stays in place and is not repeated. Amounts are estimates from this simulation, not executed results.`,
-  continuationQuestion: 'Continue to your wallet for this request?',
+  continuationQuestion: 'Accept this updated quote and continue to your wallet for this request?', continueAccept: 'Accept and continue',
   continueFailed: reason => `The next wallet request did not start, so nothing new was sent. Earlier confirmed requests stay recorded. ${reason}`,
 };
 const pt: ConversationCopy = {
@@ -204,7 +206,7 @@ const pt: ConversationCopy = {
   continueAfter: (done, next, approval) => `${done}: confirmado na rede.${approval ? ' Uma aprovação apenas autoriza o gasto; não é a ação em si.' : ''} ${next}: ainda não enviado, precisa da sua própria confirmação na carteira. Continuar para a carteira?`,
   continuationRequote: reason => `O seu pedido anterior já confirmado continua válido, e nada novo foi enviado.${reason ? ` ${reason}` : ' A cotação revisada já não é válida.'} Estou buscando uma nova cotação para o próximo pedido; você a confirma antes de a carteira ser chamada.`,
   continuationReview: next => `Esta é a nova cotação para ${next}, que ainda não foi enviado. O seu pedido anterior já confirmado continua válido e não é repetido. Os montantes são estimativas desta simulação, não resultados executados.`,
-  continuationQuestion: 'Continuar para a carteira com este pedido?',
+  continuationQuestion: 'Aceitar esta cotação atualizada e continuar para a carteira com este pedido?', continueAccept: 'Aceitar e continuar',
   continueFailed: reason => `O próximo pedido na carteira não começou, então nada novo foi enviado. Os pedidos já confirmados continuam registrados. ${reason}`,
 };
 export const conversationCopy = (language: ConversationLanguage): ConversationCopy => language === 'PT' ? pt : en;

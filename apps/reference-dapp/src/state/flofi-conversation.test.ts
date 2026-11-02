@@ -460,9 +460,10 @@ describe('BUILD-FLOFI-E2E-RELIABILITY-001 continuation after a landed approval',
     reviewedPatch = { ...requoted('24000000000000000', '23880000000000000'), progress: approvalLanded as unknown as ConversationBridge['progress'] }; lifecycle(reviewedPatch); render(); await flush(); chat = render();
     expect(last(chat).text).toBe('Here is the fresh quote for Swap, which has not been sent yet. Your earlier confirmed request stays in place and is not repeated. Amounts are estimates from this simulation, not executed results.');
     expect(last(chat).notes?.[0]).toMatch(/^The quote changed since your last Review: Expected receipt/);
-    expect(last(chat).question).toBe('Continue to your wallet for this request?');
+    expect(last(chat).question).toBe('Accept this updated quote and continue to your wallet for this request?');
+    expect(last(chat).options).toEqual(['Accept and continue', 'Not now']);
     expect(chat.question).toBe('CONFIRM_CONTINUE_REVIEW');
-    chat = await say('Continue');
+    chat = await say('Accept and continue');
     expect(controls.authorize).toHaveBeenCalledTimes(2);
     expect(last(chat).text).toMatch(/^Preparing your reviewed wallet request/);
   });
@@ -475,7 +476,7 @@ describe('BUILD-FLOFI-E2E-RELIABILITY-001 continuation after a landed approval',
     expect(simulate).toHaveBeenCalledTimes(2);
     vi.setSystemTime(reviewNow);
     reviewedPatch = { ...requoted('25000000000000000', '24875000000000000'), progress: approvalLanded as unknown as ConversationBridge['progress'] }; lifecycle(reviewedPatch); render(); await flush(); chat = render();
-    expect(last(chat).question).toBe('Continue to your wallet for this request?');
+    expect(last(chat).question).toBe('Accept this updated quote and continue to your wallet for this request?');
     chat = await say('Not now');
     expect(last(chat).text).toBe('The next wallet request did not start, so nothing new was sent. Earlier confirmed requests stay recorded. You chose not to continue now.');
     render(); await flush(); chat = render();

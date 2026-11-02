@@ -106,6 +106,7 @@ const CONFIRM_EXECUTION = pattern(['yes', 'yes please', 'yes execute', 'yes exec
   'sim executa', 'sim execute', 'executar', 'executa', 'executar agora', 'execute agora', 'pode executar', 'sim pode executar', 'executar workflow', 'executar o workflow',
   'executar o fluxo', 'sim executar agora']);
 const CONTINUE = pattern(['yes', 'yes please', 'continue', 'yes continue', 'continue to wallet', 'yes continue to wallet', 'sim', 'continuar', 'sim continuar', 'continua', 'pode continuar']);
+const ACCEPT_CONTINUE = pattern(['accept and continue', 'accept', 'yes accept', 'accept it', 'accept the updated quote', 'aceitar e continuar', 'aceitar', 'sim aceitar', 'aceito']);
 const APPLY_EDIT = pattern(['yes', 'yes please', 'apply', 'apply it', 'apply the edit', 'apply the amount', 'yes apply', 'yes apply it', 'use it', 'sim', 'aplicar', 'aplica',
   'aplicar a edição', 'aplicar a edicao', 'aplicar o montante', 'sim aplicar', 'sim aplica', 'usar']);
 const DISCARD_EDIT = pattern(['discard', 'discard it', 'discard the edit', 'discard edit', 'no discard', 'drop it', 'descartar', 'descarta', 'descartar a edição',
@@ -128,14 +129,14 @@ const STATUS_REQUEST = pattern(['status', 'check status', 'execution status', 'w
   'verificar status', 'ver status', 'status da execução', 'status da execucao', 'verificar execução', 'verificar execucao', 'atualizar status']);
 const UNDO_REQUEST = pattern(['undo', 'undo that', 'undo this change', 'undo last change', 'desfazer', 'desfaz', 'desfazer isso', 'desfazer esta alteração', 'desfazer esta alteracao',
   'desfazer última alteração', 'desfazer ultima alteracao']);
-const PT_LIFECYCLE = /\b(?:sim|não|nao|confirmo|confirmar|executar|executa|revisar|revise|simular|adicionar|outra|cancelar|verificar|desfazer|continuar|agora|fluxo|aplicar|aplica|descartar|descarta|novamente|cotação|cotacao|rota|tentar)\b/;
+const PT_LIFECYCLE = /\b(?:sim|não|nao|confirmo|confirmar|executar|executa|revisar|revise|simular|adicionar|outra|cancelar|verificar|desfazer|continuar|agora|fluxo|aplicar|aplica|descartar|descarta|novamente|cotação|cotacao|rota|tentar|aceitar|aceito)\b/;
 
 /** An explicit answer to FloFi's open question. Anything else — extra content, an edit, a hedge — is UNCLEAR and changes nothing. */
 export function classifyAnswer(text: string, question: PendingQuestion['kind']): Answer {
   const value = normalize(text);
   if (question === 'RESOLVE_EDIT') return DISCARD_EDIT.test(value) ? 'NO' : APPLY_EDIT.test(value) ? 'YES' : NO_WORDS.test(value) ? 'NO' : 'UNCLEAR';
   if (NO_WORDS.test(value)) return 'NO';
-  if (question === 'CONFIRM_CONTINUE_REVIEW') return CONTINUE.test(value) || CONFIRM_EXECUTION.test(value) ? 'YES' : 'UNCLEAR';
+  if (question === 'CONFIRM_CONTINUE_REVIEW') return ACCEPT_CONTINUE.test(value) || CONTINUE.test(value) || CONFIRM_EXECUTION.test(value) ? 'YES' : 'UNCLEAR';
   const yes = question === 'CONFIRM_WORKFLOW' ? CONFIRM_WORKFLOW : question === 'CONFIRM_EXECUTION' ? CONFIRM_EXECUTION : question === 'CONFIRM_CONTINUE' ? CONTINUE : null;
   return yes?.test(value) ? 'YES' : 'UNCLEAR';
 }
@@ -148,7 +149,7 @@ export function lifecycleRequest(text: string): 'REVIEW' | 'REFRESH' | 'ROUTE' |
 /** The language of a short lifecycle message (PT words decide), else the interface language. */
 export function answerLanguage(text: string, fallback: ConversationLanguage): ConversationLanguage {
   const value = normalize(text);
-  return PT_LIFECYCLE.test(value) ? 'PT' : /\b(?:yes|no|confirm|execute|review|simulate|add|another|cancel|status|undo|continue|run|apply|discard|refresh|quote|route|retry|again)\b/.test(value) ? 'EN' : fallback;
+  return PT_LIFECYCLE.test(value) ? 'PT' : /\b(?:yes|no|confirm|execute|review|simulate|add|another|cancel|status|undo|continue|run|apply|discard|refresh|quote|route|retry|again|accept)\b/.test(value) ? 'EN' : fallback;
 }
 
 // ── Phase ───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────

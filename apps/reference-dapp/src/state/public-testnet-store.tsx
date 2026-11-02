@@ -60,7 +60,7 @@ function message(error: unknown): string {
   if (floFi) return floFi;
   const messages: Record<string, string> = {
     // BUILD-FLOFI-EXECUTION-PERFORMANCE-001: the wallet states the swap raises itself, in words instead of their codes.
-    WALLET_AUTHORIZATION_REJECTED: 'You declined the request in your wallet. Nothing was signed or sent.',
+    WALLET_AUTHORIZATION_REJECTED: 'You declined the request in your wallet. It was not signed or sent.',
     WRONG_WALLET_CHAIN: 'Your wallet is on another network. Switch it to the network of this swap, then authorize again. Nothing was sent.',
     SUBMISSION_RESULT_UNKNOWN: 'Your wallet did not confirm whether it sent the transaction. FloFi keeps checking the network; do not send it again.',
     // The attempt is recorded as unresolved (Simulate stays closed until it is), so this names what happened, not a step the page cannot offer.
@@ -86,7 +86,8 @@ function message(error: unknown): string {
     QUOTE_CHANGED_REVIEW_REQUIRED: 'The quote changed. Review the updated amounts before executing.',
     QUOTE_EXPIRED_REVIEW_REQUIRED: 'Quote expired. Review a fresh quote.',
     REVIEW_EXPIRED: 'Quote expired. Simulate again.', REVIEW_REQUIRED: 'Review the current swap first.',
-    INSUFFICIENT_INPUT: 'Your input token balance is too low for this swap. Nothing was sent.', INSUFFICIENT_TEST_ETH: 'Insufficient test ETH for network fees on this network.',
+    INSUFFICIENT_INPUT: 'Your input token balance is too low for this swap. This request was not sent.',
+    PUBLIC_OPERATION_FAILED: 'This request could not be completed, so no new transaction was sent. Try again.', INSUFFICIENT_TEST_ETH: 'Insufficient test ETH for network fees on this network.',
     POOL_UNUSABLE: 'The selected pool is unavailable. Try again later.', POOL_FACTORY_MISMATCH: 'The selected pool could not be verified.',
     WRONG_PROVIDER_CHAIN: 'The provider is not on the reviewed network.', PUBLIC_NETWORK_UNAVAILABLE: 'This network is not enabled on this app instance.',
     ATTEMPT_ALREADY_ACTIVE: 'A transaction is already in progress. Check its result before trying again.',
@@ -98,7 +99,7 @@ function message(error: unknown): string {
     OWNER_NOT_EOA: 'This address is a smart contract wallet (for example a Safe), so it cannot sign this transaction itself. Use a standard account or a MetaMask Smart Account. Nothing was simulated or sent.',
     OWNER_DELEGATION_UNVERIFIED: 'This account is upgraded to a smart account (EIP-7702) whose code FloFi has not verified, and that code could act on funds this workflow sends to it. Use a standard account or a MetaMask Smart Account. Nothing was simulated or sent.',
   };
-  return messages[code] ?? (code.startsWith('PUBLIC_') ? 'The public testnet request could not be completed. Try again.' : code || 'Could not continue. Try again.');
+  return messages[code] ?? (code.startsWith('PUBLIC_') ? 'This request could not be completed. Try again.' : code || 'Could not continue. Try again.');
 }
 /** FloFi Wallet's own code when it refused before any signing activity existed (EIP-1193 4100 with a proven pre-signature code). */
 export function floFiRefusal(error: unknown): string | null {
