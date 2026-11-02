@@ -125,7 +125,12 @@ export function useFlofiConversation({ owner, epoch, bridge, direct, interfaceLa
      */
     continuing?: { error: string | null; cleared: boolean; active: boolean; idle: number; fingerprint: string } | undefined;
     /** The continuation (run and record fingerprint) whose fresh Review FloFi already prepared, so it is never re-offered in a loop. */
-    requoted?: string | null | undefined } | null>(null);
+    requoted?: string | null | undefined;
+    /**
+     * Whether FloFi may prepare the next request's fresh Review by itself: only for a continuation the owner started in this conversation
+     * (Execute or Continue). A run restored after a reload stays observation-only until the owner asks (“Review workflow”).
+     */
+    auto?: boolean | undefined } | null>(null);
   const restored = useRef<string | null>(null);
   // BUILD-FLOFI-CHAT-E2E-FIX-002: a Review the chat continues by itself once what blocked it is resolved (the wallet's network switched, an edit
   // applied or discarded), and the sequence step whose completion hands over to the next step's own Review.
@@ -290,9 +295,9 @@ export function useFlofiConversation({ owner, epoch, bridge, direct, interfaceLa
 
   // ── Confirmation, execution and follow-up ──────────────────────────────────────────────────────────────────────────────────────────
   /** Follows the current execution in the chat from its durable record (announcing its phases), and offers only what the record allows. */
-  function follow(scope: number, language: ConversationLanguage) {
+  function follow(scope: number, language: ConversationLanguage, auto = false) {
     const live = currentExecution(latest.current.bridge.progress);
-    watch.current = { scope, language, phase: null, runKey: live?.runKey ?? null, continued: null };
+    watch.current = { scope, language, phase: null, runKey: live?.runKey ?? null, continued: null, auto };
     setTick(n => n + 1);
   }
   function execute(scope: number, language: ConversationLanguage, binding: ReviewBinding) {
@@ -317,9 +322,9 @@ export function useFlofiConversation({ owner, epoch, bridge, direct, interfaceLa
     flofi(scope, language, c.executing);
     const live = currentExecution(view.progress);
     watch.current = live?.started
-      ? { scope, language, phase: null, runKey: live.runKey, continued: null, requoted: watch.current?.requoted,
+      ? { scope, language, phase: null, runKey: live.runKey, continued: null, requoted: watch.current?.requoted, auto: true,
         continuing: { error: startError, cleared: startError === null, active: false, idle: 0, fingerprint: live.fingerprint } }
-      : { scope, language, phase: null, runKey: null, continued: null, start: { error: startError, active: false, idle: 0 } };
+      : { scope, language, phase: null, runKey: null, continued: null, auto: true, start: { error: startError, active: false, idle: 0 } };
   }
   function answer(scope: number, open: Question, text: string) {
     const language = open.language, c = conversationCopy(language), verdict = classifyAnswer(text, open.open.kind), view = latest.current.bridge;
@@ -349,13 +354,13 @@ export function useFlofiConversation({ owner, epoch, bridge, direct, interfaceLa
       // Only the next never-attempted request of this same run, under the authority already accepted: the existing continuation gate decides.
       setQuestion(null);
       const live = currentExecution(view.progress);
-      if (!view.controls.canContinue || live?.runKey !== open.open.runKey || live?.fingerprint !== open.open.fingerprint) { follow(scope, language); return true; }
+      if (!view.controls.canContinue || live?.runKey !== open.open.runKey || live?.fingerprint !== open.open.fingerprint) { follow(scope, language, true); return true; }
       // BUILD-FLOFI-EXECUTION-PERFORMANCE-001: the same FloFi wallet check as the first request; the question stays open to answer again.
       const refusal = floFiWalletRefusal(view.wallet.account, language, true);
       if (refusal) { setQuestion(open); flofi(scope, language, c.continueFailed(refusal), { options: [c.continueYes, c.executeNo] }); return true; }
       flofi(scope, language, c.executing);
       const followed = watch.current?.scope === scope ? watch.current : null, startError = view.source.state.error;
-      watch.current = { scope, language, phase: followed?.phase ?? null, runKey: live?.runKey ?? null, continued: followed?.continued ?? null, requoted: followed?.requoted,
+      watch.current = { scope, language, phase: followed?.phase ?? null, runKey: live?.runKey ?? null, continued: followed?.continued ?? null, requoted: followed?.requoted, auto: true,
         continuing: { error: startError, cleared: startError === null, active: false, idle: 0, fingerprint: live?.fingerprint ?? '' } };
       view.controls.request(true);
       return true;
@@ -520,7 +525,7 @@ export function useFlofiConversation({ owner, epoch, bridge, direct, interfaceLa
     // BUILD-FLOFI-E2E-RELIABILITY-001: the earlier request landed but its Review can no longer start the next one (the quote expired while the
     // approval confirmed, or a fresh quote awaits its Review). FloFi prepares the next request's own fresh Review once (read-only) and asks once;
     // it never re-offers the same continuation after the owner declined it, and never repeats the landed request.
-    if (next && live.state === 'active' && !bridge.controls.canContinue && !questionRef.current && !reviewLock.current && followed.requoted !== continuation &&
+    if (followed.auto && next && live.state === 'active' && !bridge.controls.canContinue && !questionRef.current && !reviewLock.current && followed.requoted !== continuation &&
         !bridge.source.state.busy && !bridge.controls.requesting && !bridge.controls.authorizing) {
       const action = projectCanvasAction(bridge.controls.current, bridge.controls);
       if ((action.kind === 'simulate' || action.kind === 'approve') && !action.disabled) {

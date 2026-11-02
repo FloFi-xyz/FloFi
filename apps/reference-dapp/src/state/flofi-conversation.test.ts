@@ -484,6 +484,25 @@ describe('BUILD-FLOFI-E2E-RELIABILITY-001 continuation after a landed approval',
     expect(simulate).toHaveBeenCalledTimes(2);
     expect(controls.authorize).toHaveBeenCalledTimes(1);
   });
+  it('after a reload the restored run stays observation-only: nothing is re-quoted until the owner asks, then one question for the next request', async () => {
+    await say('swap 10 USDC to WETH on Base Sepolia slippage 100 bps');
+    // A reload: the durable record comes back (restored) with the approval landed and the Review expired; this conversation started nothing.
+    vi.setSystemTime(reviewNow + 200_000);
+    reviewedPatch = { ...reviewed(), authorization: { ...reviewed().authorization, accepted: true },
+      progress: { ...approvalLanded, restored: true } as unknown as ConversationBridge['progress'] };
+    lifecycle(reviewedPatch); render(); await flush(); let chat = render();
+    expect(chat.messages.some(message => /restored this workflow’s execution/.test(message.text))).toBe(true);
+    expect(chat.messages.some(message => /getting a fresh quote/.test(message.text))).toBe(false);
+    expect(simulate).not.toHaveBeenCalled();
+    // The owner asks: the remaining request gets its own fresh Review and one question.
+    chat = await say('Review workflow');
+    expect(simulate).toHaveBeenCalledTimes(1);
+    vi.setSystemTime(reviewNow);
+    reviewedPatch = { ...requoted('25000000000000000', '24875000000000000'), progress: { ...approvalLanded, restored: true } as unknown as ConversationBridge['progress'] };
+    lifecycle(reviewedPatch); render(); await flush(); chat = render();
+    expect(last(chat).question).toBe('Accept this updated quote and continue to your wallet for this request?');
+    expect(controls.authorize).not.toHaveBeenCalled();
+  });
   it('PT: the same continuation in Portuguese', async () => {
     const chat = await executedWithLandedApproval(true);
     void chat;
