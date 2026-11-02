@@ -66,13 +66,33 @@ mismatches from the changed header/footer and 2 build009 tests that need the liv
 `cimg/node:24.21.0-browsers`, so no locally rendered baseline was committed; they are regenerated from the CI rendering environment and the
 diffs inspected (header nav and footer only) before committing.
 
-## 5. Open questions for the owner (left unchanged, out of the stated scope)
+## 5. Specialist reviews and follow-up (`de474cc`)
 
-1. Labels that still name the old stages: “Back to Build”, “Return to Build”, “Back to Simulate”, “Create a workflow in Build”, “View result in
-   Execute”, “Configure the action amount in Build first”, the drawer's “Build Workflow” — rename to Editor wording?
-2. The navigation's accessible name is still “Workflow stages” / “Etapas do fluxo”.
-3. Footer “View simulation” / “View execution” are always shown (disabled while a Canvas amount is unapplied) — or only when a simulation/run exists?
-4. Should Chat itself show review/execution status, rather than handing off to the Editor's side chat as now?
-5. PT keeps the English words “Chat” and “Editor”.
+flofi-frontend-ux and flofi-chat reviewed the diff (read-only): no HIGH; the MEDIUM findings are fixed.
+
+| Finding | Fix |
+| --- | --- |
+| A lifecycle reply typed on Chat (“review workflow”, “yes” to an open confirmation, “continue”, “check status”) was classified as a refusal: the page showed real progress inside the refusal alert and stayed on Chat while the action proceeded (chat, MEDIUM; behaviour since BUILD0-UX-001) | `buildEntryOutcome` treats a turn that answered an open question (other than NEXT_STEP) or was a lifecycle request as conversation and opens the Editor, where the side chat and Review are visible (`build-entry.test.ts`) |
+| The navigation drawer still followed the old stages (“Build Workflow” current on Chat; nothing current on simulation/execution) (frontend-ux, MEDIUM) | Drawer items “Chat” (only where the top bar offers it) and “Editor” (current on Canvas, simulation and execution); same click targets (`navigation-drawer.test.tsx`, `product-shell.test.tsx`) |
+| Labels and chat/recovery messages sent people to “Build”, “Simulate” or “Execute” (both, MEDIUM) | Destination wording: “Back to the Canvas”, “…in the Editor…”, “Back to simulation”, “View execution result”, “Check this workflow's simulation”, “the Editor's execution view”, “Prepared for simulation”, “Editor navigation”; exact PT entries; actions that are not destinations (“Simulate again”, “Run Simulate first”) unchanged |
+| Footer section buttons looked enabled under the /approve gate (LOW) | disabled under `authoringIncomplete || approvalGate`; the “Canvas first” title only for an incomplete amount |
+
+All test changes in the follow-up are renames of matched strings or new tests for the new behaviour; none is weakened. Evidence on `de474cc`:
+typecheck, lint, build; `pnpm test` 6,364 passed, 2 skipped (environment-gated); governance-lite and `agent_guard check` pass; guarded browser
+profiles 439 passed, 9 failed (the 7 screenshot baselines below and the 2 build009 tests that need the live LI.FI host here — both pass in CircleCI).
+
+CircleCI on `3189e8d`: governance, certification-checks and certification-browser-2 passed; certification-browser-1 failed only on the 7 reachable
+screenshot comparisons (1,373–2,096 px each: header, footer and, after the follow-up, renamed in-page labels). The CI-rendered images are
+served from `output.circle-artifacts.com`, which this session's network policy denies, so the baselines are regenerated in the CI image after
+this follow-up (owner action, or once that host is allowed).
+
+## 6. Open questions for the owner and items left as they are
+
+1. The navigation's accessible name is still “Workflow stages” / “Etapas do fluxo”.
+2. Footer “View simulation” / “View execution” are always shown (disabled while a Canvas amount is unapplied) — or only when a simulation/run exists?
+3. Should Chat itself show review/execution status, rather than handing off to the Editor's side chat as now?
+4. PT keeps the English words “Chat” and “Editor”.
+5. Left as they are (LOW): no footer on the execution section (reachable through its own buttons and the Editor tab); a Chat draft is kept when
+   leaving mid-request (pre-existing); the unused PT key “Build Workflow”.
 
 Evidence level: MOCKED / loopback only; no public-network execution.
