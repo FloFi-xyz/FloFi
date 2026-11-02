@@ -131,6 +131,9 @@ export function simulationError(error: string): string {
   if (/WALLET_UNAUTHORIZED/i.test(error)) return 'Your wallet did not authorize FloFi for this account. Reconnect the wallet, then try again.';
   if (/WALLET_METHOD_UNSUPPORTED/i.test(error)) return 'This wallet cannot send this kind of request. Use another wallet, then try again.';
   if (/EXPIRED|STALE|quote.*expired/i.test(error)) return 'This result has expired. Refresh the simulation before continuing.';
+  // Issue #149 (quoter): a read the network never answered is not a missing pool, and a missing pool is not an outage.
+  if (/PUBLIC_RPC_UNAVAILABLE|RPC_HISTORY_UNAVAILABLE/i.test(error)) return 'The network did not answer FloFi\'s reads, so nothing was simulated or sent. This is not a liquidity problem; try again shortly.';
+  if (/POOL_UNUSABLE|NO_LIQUID_POOL/i.test(error)) return 'No pool for this pair has usable liquidity for this amount right now, so nothing was simulated or sent. Try a smaller amount or another pair.';
   if (/SERVICE_UNAVAILABLE|STORAGE_NOT_CONFIGURED|RPC_(?:ERROR|RATE_LIMITED|UNAVAILABLE)|_OFF$|_RATE_LIMITED$/i.test(error)) return 'Simulation is currently unavailable. Try again before continuing.';
   // BUILD-SOLANA-TRANSFER-UX-001: specific meanings before the broad route and fallback messages (nothing here echoes provider text).
   if (/WALLET_SELECTION_REQUIRED|_WALLET_REQUIRED$|WALLET_NOT_CONNECTED|OWNER_REQUIRED|WALLET_PROOF_REQUIRED/i.test(error)) return 'Connect the wallet that will sign this workflow, then simulate again.';

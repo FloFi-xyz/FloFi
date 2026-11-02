@@ -113,6 +113,16 @@ describe('simulation financial presentation', () => {
     }
     expect(simulationError('BORROW_UNSAFE_HEALTH_FACTOR')).toContain('safety limit');
     expect(simulationError('UNISWAP_LIQUIDITY_SIMULATION_FAILED')).toBe('The network rejected this transaction in simulation, so nothing was sent. Check the amounts and your balances, then simulate again.');
+    // BUILD-FLOFI-E2E-RELIABILITY-001: the swap engine's own refusals are named (they reached the 2026-11-01 owner as the generic fallback).
+    const generic = simulationError('NOT_A_KNOWN_CODE');
+    expect(generic).toMatch(/could not complete this simulation/);
+    for (const code of ['QUOTE_CHANGED_REVIEW_REQUIRED', 'OWNER_STATE_CHANGED_REVIEW_REQUIRED', 'QUOTE_EXPIRED_REVIEW_REQUIRED', 'SUBMISSION_RESULT_UNKNOWN', 'RELAYED_EXECUTION_PENDING',
+      'RECONCILIATION_MISMATCH', 'WALLET_AUTHORIZATION_REJECTED', 'WALLET_NOT_FOUND', 'OWNER_REVIEW_MISMATCH', 'ATTEMPT_ALREADY_ACTIVE', 'SWAP_ALREADY_ATTEMPTED',
+      'PUBLIC_RPC_UNAVAILABLE', 'POOL_UNUSABLE']) expect(simulationError(code), code).not.toBe(generic);
+    expect(simulationError('WALLET_AUTHORIZATION_REJECTED')).toContain('Earlier confirmed requests stay recorded');
+    // Issue #149 (quoter): an unanswered read is not a missing pool, and a missing pool is not an outage.
+    expect(simulationError('PUBLIC_RPC_UNAVAILABLE')).toContain('not a liquidity problem');
+    expect(simulationError('POOL_UNUSABLE')).toContain('No pool for this pair has usable liquidity');
     // BUILD-SOLANA-TRANSFER-UX-001: specific, readable meanings instead of one generic failure.
     expect(simulationError('SOLANA_TRANSFER_RECIPIENT_IS_TOKEN_ACCOUNT')).toContain('destination address');
     expect(simulationError('SOLANA_TRANSFER_TOKEN_EXTENSION_UNSUPPORTED')).toContain('cannot verify safely');

@@ -12,6 +12,10 @@ export const portugueseE2eReliability: Readonly<Record<string, string>> = {
     '{0} de {1} ações concluídas. A aprovação do token está confirmada na rede; ela apenas autoriza o gasto. A ação em si ainda não foi enviada e precisa da sua própria confirmação na carteira.',
   'You chose not to continue now.': 'Você escolheu não continuar agora.',
   'Check the status, then continue again.': 'Verifique o status e depois continue de novo.',
+  'The network did not answer FloFi\'s reads, so nothing was simulated or sent. This is not a liquidity problem; try again shortly.':
+    'A rede não respondeu às leituras da FloFi, então nada foi simulado nem enviado. Não é um problema de liquidez; tente de novo em instantes.',
+  'No pool for this pair has usable liquidity for this amount right now, so nothing was simulated or sent. Try a smaller amount or another pair.':
+    'Nenhuma pool deste par tem liquidez utilizável para este montante agora, então nada foi simulado nem enviado. Tente um montante menor ou outro par.',
   'A corporate action changed the shares per token since your Review.': 'Um evento societário alterou as ações por token desde a sua revisão.',
   'The reviewed quote expired before the next request could start.': 'A cotação revisada expirou antes de o próximo pedido poder começar.',
   'The reviewed route no longer quotes your reviewed minimum output.': 'A rota revisada já não cota o seu mínimo de saída revisado.',

@@ -41,6 +41,12 @@ invisible in production logs; the client then called `status` (the `begin → st
 Hypotheses from the brief that the evidence **rules out**: quote expiry (both refusals were well inside the 60 s window), review-state
 corruption, a wallet lifecycle mismatch, and an approval that did not land (it is `CONFIRMED` with a receipt).
 
+**Same root cause, earlier incident.** Draft PR #137 (2026-10-30, never merged, stale base) recorded two more Base refusals of the same
+kind (`bas-bb8c…`, `bas-6cfe…`, fresh quotes *better* than reviewed) and proposed “fresh expected ≥ reviewed minimum”. It would still have
+refused the 2026-11-01 run 1 (its economics keep the **best** pool/fee tier, and run 1's best tier switched 0.3 % → 0.01 %), it compared the
+best tier rather than the reviewed route, and it did not touch the owner-bound calldata or the chat. This build supersedes it; the owner can
+close #137.
+
 ## 2. Fixes
 
 ### 2.1 Swap engine (`src/server/public-testnet-service.ts`) — all swap networks (Base, Arbitrum One, Ethereum, Robinhood Chain, testnet pairs)
@@ -84,6 +90,29 @@ corruption, a wallet lifecycle mismatch, and an approval that did not land (it i
 
 ### 2.5 Observability (`backend/app.ts`)
 - A refused flow call is logged as `flow.refused` with `{ flow, action, run_id, code }` (classified code only; no arguments, accounts or amounts).
+
+## 2.6 Issue #149 — P0 transaction truth
+
+| Item | Root cause | Fix | Tests |
+| --- | --- | --- | --- |
+| Dashboard “Not started” after a landed approval (Aave, Uniswap liquidity, lending, swap) | Run summaries (`packages/cloud-runtime/src/queries.ts` `listRuns`) carry no attempts; the status column alone loses the evidence: Aave/Uniswap show `AUTHORIZED` after a reconciled approval, lending returns to `SIMULATED` after a refreshed Review, `base-swap` shows the approval's `CONFIRMED`; `run-mapping.ts` mapped these to “Not started / nothing was sent” or a generic attention state. | `lib/dashboard/data-service.ts` reads each ambiguous run's own owner-scoped record (at most 5 at a time) and attaches its attempts; `run-mapping.ts` follows `canonicalRunLifecycle` (the evidence MCP's execution status reads); `landed-attempts.ts` names what landed (“Approval confirmed · main action not sent / not submitted / failed / awaiting wallet confirmation”); an approval-only run is “Partially completed”, never Completed; an unreadable record is “Unresolved”, never “nothing was sent”. | `landed-attempts.test.ts` (Aave, Uniswap, lending, the base-swap production shape; every status × attempt-history combination against the canonical lifecycle), `data-service-attempts.test.ts` (bounded reads, owner/id mismatch, read failure), `dashboard-landed.test.tsx` |
+| Automations History “Owner executed — reconciling” for simulated/refused runs | `automations-workspace.tsx` fell through to “Owner executed” whenever a run had no error code. | `automations/run-facts.ts` attaches attempts (same single read); `components/automation-run-status.ts` maps the canonical lifecycle: simulated, reviewed, refused, awaiting wallet, submitted, hash pending, confirmed onchain, settlement pending, partial, reverted, failed, unresolved; “reconciled” only with verified evidence; an applied proposal without a run is “Intention only — not simulated or sent yet”. | `automation-run-status.test.tsx` |
+| Pix `get_approval_status` | see §2.8 (MCP) | | |
+| Channel route discovery without the web's capability gate | `server/channel-copilot-toolkit.ts`, wired from `channels/http.ts` and `dispatch-http.ts`, had no `GRYLOO_UNIVERSAL_ROUTER` gate. | `channels/route-discovery.ts` for both entry points: live → the existing toolkit; off → the web's own refusal (`UNIVERSAL_ROUTER_NOT_ENABLED`); harness → closed. With a remote API the web deployment's env also needs `GRYLOO_UNIVERSAL_ROUTER=live` for channel discovery. | `route-discovery.test.ts` (parity with `universalRouterMode`, off/on/harness, wiring) |
+
+Follow-up (performance, not correctness): aggregate attempts into `listRuns` (`json_agg` over `execution_attempts`) so the Dashboard needs no
+per-run reads; it already skips them when a summary carries attempts.
+
+## 2.7 Issue #149 — P1 privacy, reliability and agent infrastructure
+
+| Item | Decision / fix | Evidence |
+| --- | --- | --- |
+| Journey telemetry (LGPD/GDPR) | **Off by default.** Collection needs both `NEXT_PUBLIC_FLOFI_JOURNEY_TELEMETRY=on` (browser beacon; otherwise no request) and `FLOFI_JOURNEY_TELEMETRY=on` (receiver; otherwise 204 without reading cookie or body). Unchanged bounds: 4 KiB body, schema, 60 events/account/10 min, 600/min/instance, bounded memory; content-free fields only. Policy `docs/privacy/JOURNEY-TELEMETRY.md` (purpose, LGPD art. 7 IX/10 and GDPR 6(1)(f) balancing, retention = log platform's, deletion, access, opt-out) — an **engineering policy pending owner/legal review**; `/privacy` must describe the processing before anyone turns it on. `docs/deploy/ENVIRONMENT.md` corrected. | `journey-metrics.test.ts`, `journey-telemetry.test.ts`, `route.test.ts` |
+| Uniswap quoter: RPC vs no liquidity | The engine already separates them (`readNotAnswered` since BUILD-FLOFI-EXECUTION-PERFORMANCE-001: an unanswered read fails the quote closed as `PUBLIC_RPC_UNAVAILABLE`; an explicit revert removes only that fee tier; no tier left is `POOL_UNUSABLE`), and the Build estimate names both. The Simulate/Review/chat path did not: `POOL_UNUSABLE` fell through to the generic “could not complete this simulation”, and an RPC outage read as “Simulation is currently unavailable”. `simulationError` now says which one happened (“…not a liquidity problem; try again shortly” / “No pool for this pair has usable liquidity for this amount…”). | `simulation-presentation.test.ts` |
+| Auto-follow for router, liquidity, transfer | The chat now follows every runtime's durable record after a landed request and continues only through each runtime's own Review/continuation gates (§2.2); observation stays read-only. | `flofi-conversation.test.ts` |
+| Privy EVM `canSign` | `privyCanSign` uses each ecosystem's own readiness: EVM also waits for Privy's `useWallets().ready` (embedded frame and the person's EVM wallets), and the provider value updates when it becomes ready. `floFiSigningGate` and exact-byte checks unchanged. **Not verified against a live Privy app** (needs a real app id and browser). | `privy-bridge.test.tsx` (fails without the readiness check), `privy-client.test.ts` |
+| Specialist report hand-back | In auto mode Claude Code appends `SubagentHandback` to every subagent and delivers only reports sent through it; the read-only guard denied it, so reports were lost. The guard now allows exactly that tool with one non-empty `message` and records only the validated `FLOFI_REVIEW_RESULT`; frontmatter stays `tools: Read`, everything else stays denied; 19 agents regenerated; the probe gained an auto-mode phase. | `test_ci_claude_agents.py`, `test_ci_agent_guard.py`, `verify_claude_agents.py` |
+| Protocol documentation | Uniswap re-verified (digest, MIT licence, GPL-2.0-or-later header, claims, review date 2026-11-02). Jupiter stays **pending** (no licence at the pinned revision; developers.jup.ag blocked). Arbitrum third-party guide **pending** (never read; its overstated cross-check list removed); the official Arbitrum sources stay pending (no licence). Blocker: this session's network policy denies developers.jup.ag, developers.uniswap.org, docs.arbitrum.io and skills.rest. | `skill_registry.py verify` |
 
 ## 3. Same failure class across the other operations (audit)
 
