@@ -180,8 +180,8 @@ another revision and fails when the revision is unknown. The dependency stage is
 ## 9. Before / after performance (measured, CircleCI)
 
 Before: three successful certifications — main `3769eff` (this PR's base, workflow `0a2b9073`), main `b8126a6`
-(`79cb79d6`) and PR #150's final head (`9c6537e0`). After: three successful certifications of this PR — `721ca03`
-(`01ec952f`), `507e5b8` (`cf71aef6`) and `4c05209` (`2a9c4b73`). Seconds are CircleCI job/step times; stage values come
+(`79cb79d6`) and PR #150's final head (`9c6537e0`). After: four successful certifications of this PR — `721ca03`
+(`01ec952f`), `507e5b8` (`cf71aef6`), `4c05209` (`2a9c4b73`) and `1b71d0e` (`3e84996b`). Seconds are CircleCI job/step times; stage values come
 from each job's `ci-observe.py summary`. All six runs are on the same `large` executor.
 
 | Run | Wall clock | governance | checks | browser-1 | browser-2 | certification | Runner compute |
@@ -192,18 +192,19 @@ from each job's `ci-observe.py summary`. All six runs are on the same `large` ex
 | after: 721ca03 | 1387.3 s | 48.5 | 1240.9 | 1249.1 | 1319.1 | 11.5 | 3869.1 s |
 | after: 507e5b8 | 1380.2 s | 44.1 | 1242.1 | 1292.0 | 1314.5 | 14.6 | 3907.3 s |
 | after: 4c05209 | 1538.8 s | 61.1 | 1369.3 | 1442.1 | 1447.0 | 22.8 | 4342.3 s |
+| after: 1b71d0e | 1425.4 s | 49.1 | 1175.7 | 1359.4 | 1315.6 | 9.0 | 3908.8 s |
 
 | Metric | Before | After | Improvement |
 |---|---:|---:|---:|
-| Full certification (wall clock, mean of 3) | 1832.7 s | 1435.4 s | **−21.7%** (best −24.7%, worst −16.0%; −21.6% vs the base alone) |
-| Longest job (critical path, mean of 3) | 1758.9 s (browser-2) | 1360.2 s | **−22.7%** |
+| Full certification (wall clock, mean) | 1832.7 s (3 runs) | 1432.9 s (4 runs) | **−21.8%** (best −24.7%, worst −16.0%; −21.7% vs the base alone) |
+| Longest job (critical path, mean) | 1758.9 s (browser-2) | 1360.0 s | **−22.7%** |
 | Dependency installation (frozen install, mean per job) | 13.4 s (base: 12.3 / 15.2 / 12.8) | 9.4–11.7 s | not attributable: the install command is unchanged (runner variance) |
 | Dependency security verification (policy + audit + SBOM, base vs after) | 15.5 s (13.4 + 1.1 + 1.1) | 19.5–21.0 s (17.5–18.9 + 1.0 + 1.1) | **+26–35%** (+4–5 s: registry signatures, 1023 edge checks, advisory evidence, risk checks) |
 | Production build overhead (sum over jobs, base vs 721ca03) | 280.2 s (2 builds) | 373.0 s (3 builds) | +33% compute, off the critical path |
-| Browser certification (longest browser job, mean of 3) | 1758.9 s | 1360.2 s | **−22.7%** |
-| Total runner compute (mean of 3) | 3986.2 s | 4039.6 s | +1.3% (≈ flat; −1.9% vs the base alone) |
+| Browser certification (longest browser job, mean) | 1758.9 s | 1360.0 s | **−22.7%** |
+| Total runner compute (mean) | 3986.2 s | 4006.9 s | +0.5% (≈ flat; −2.7% vs the base alone) |
 
-The three certification jobs of each after-run finish within 72–78 s of each other, against a projection of ~1352 s
+The three certification jobs of each after-run finish within 72–184 s of each other, against a projection of ~1352 s
 each. The third after-run was ~10% slower in every job and nearly every browser profile (e.g. production build 153 s vs
 139 s, `copilot` 52 s vs 43–47 s); the base run shows the same ~10% runner variance against b8126a6, and the commits
 between the second and third after-run change only Python and one workspace setting. The new tool-archive cache key
