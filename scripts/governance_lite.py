@@ -121,14 +121,14 @@ def control_errors(files):
     required = (GOVERNANCE, CONTRACTS, "scripts/guarded-release-browser.mjs", "scripts/governance_lite.py",
                 "scripts/test_governance_lite.py", "CLAUDE.md", "docs/SCOPE_GUARD.md",
                 "scripts/bootstrap-ci.py", "pnpm-lock.yaml", "pnpm-workspace.yaml", DEPENDENCY_POLICY,
-                "scripts/dependency_security.py", "scripts/sbom_verify.py", SBOM_SCRIPT)
+                "scripts/dependency_security.py", "scripts/sbom_verify.py", SBOM_SCRIPT, "scripts/function_traces.py")
     errors.extend("Missing safety control: " + path for path in required if not files.get(path))
     for path, commands in {
         GOVERNANCE: ("python3 -m unittest discover -s scripts -p 'test_governance_lite.py'",
                      "python3 scripts/governance_lite.py", "git diff --check", "git diff --check HEAD^1 HEAD"),
         CONTRACTS: ("python3 scripts/bootstrap-ci.py", "pnpm install --frozen-lockfile --ignore-scripts",
                     "python3 scripts/dependency_security.py verify", "bash scripts/ci-sbom.sh", "pnpm typecheck", "pnpm lint",
-                    "pnpm build", "pnpm schemas:check", "python3 scripts/agent_guard.py check",
+                    "pnpm build", "python3 scripts/function_traces.py apps/reference-dapp", "pnpm schemas:check", "python3 scripts/agent_guard.py check",
                     'pnpm test --reporter=default --reporter=json --outputFile="$RUNNER_TEMP/flofi-agent-unit.json"',
                     'python3 scripts/agent_guard.py verify-results "$RUNNER_TEMP/flofi-agent-unit.json"', "pnpm test:anvil",
                     "pnpm test:fork --testTimeout=30000", "pnpm audit --audit-level low",

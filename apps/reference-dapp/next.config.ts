@@ -8,6 +8,10 @@ import { PRIVY_CONNECT_SOURCES } from './src/accounts/privy-hosts.ts';
  */
 const PRIVY_REMOVED = './src/vendor/privy-removed-dependency.ts';
 export const PRIVY_REMOVED_DEPENDENCIES = Object.freeze(['@walletconnect/ethereum-provider', '@walletconnect/universal-provider', 'x402/client', '@stripe/crypto']);
+/** The only repository files server code reads at runtime by path (relative to this app): Copilot replay and recorded Base observations. */
+export const RUNTIME_FIXTURES = Object.freeze(['./e2e/copilot/replay.json', './e2e/copilot/replay-v2.json', './e2e/observations/base-recorded-observations.json']);
+export const TRACE_EXCLUDES = Object.freeze(['./e2e/visual-evidence/**', './e2e/fork/**', './e2e/**/*.ts', './src/**/testdata/**', './src/**/*.fixture.json',
+  './src/**/*.ts', './src/**/*.tsx', './backend/**', './public/**']);
 
 const config: NextConfig = {
   reactStrictMode: true,
@@ -21,11 +25,14 @@ const config: NextConfig = {
   ...(process.env.FLOFI_DOCS_PREVIEW === 'true' ? { typescript: { tsconfigPath: 'tsconfig.docs-preview.json' } } : {}),
   // BUILD-CLOUD-PARITY-001: committed, read-only replay fixtures read at runtime (`FLOFI_COPILOT=replay`, recorded Base observation
   // replay) ship with the serverless functions, so those modes behave on a Vercel deployment as they do locally.
-  outputFileTracingIncludes: {
-    '/app{,/**}': ['./e2e/copilot/replay.json', './e2e/copilot/replay-v2.json', './e2e/observations/base-recorded-observations.json'],
-    '/approve': ['./e2e/copilot/replay.json', './e2e/copilot/replay-v2.json', './e2e/observations/base-recorded-observations.json'],
-    '/mcp/approve': ['./e2e/copilot/replay.json', './e2e/copilot/replay-v2.json', './e2e/observations/base-recorded-observations.json'],
-  },
+  // BUILD-FLOFI-VERCEL-STORAGE-001: every function, as before. Until now the whole-project trace (packages/cloud-runtime
+  // loadMigrations) also put them, with 89 MB of e2e evidence, in the Channels, MCP and API functions; these 0.3 MB are all that stays.
+  // scripts/function_traces.py fails the production build if a function ships anything else from e2e/, src/ or public/.
+  outputFileTracingIncludes: { '/**': [...RUNTIME_FIXTURES] },
+  // What the tracer still guesses from runtime-chosen journal paths (`<dir>/<id>.json` matches every JSON file of the app; Router
+  // journals match `router-*`) but no function reads: e2e evidence and fork transcripts, test data, TypeScript sources and tests
+  // (functions run the compiled .next/server chunks) and public/ (served by the CDN). Never a RUNTIME_FIXTURES path.
+  outputFileTracingExcludes: { '/**': [...TRACE_EXCLUDES] },
   // The browser may connect only to its own origin (read-only Base reads run on the local server) and Privy. Credentials → Add card frames
   // the card origin, where Mercado Pago's Secure Fields SDK talks to Mercado Pago (src/server/card-origin.ts); card data is typed only
   // inside the provider's own cross-origin iframes there.

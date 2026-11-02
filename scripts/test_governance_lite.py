@@ -18,7 +18,7 @@ def safety_files():
     paths = [GOVERNANCE, CONTRACTS, "scripts/guarded-release-browser.mjs", "scripts/governance_lite.py", "scripts/test_governance_lite.py",
              "scripts/bootstrap-ci.py", "CLAUDE.md", "docs/SCOPE_GUARD.md", "package.json",
              "pnpm-lock.yaml", "pnpm-workspace.yaml", ".npmrc", DEPENDENCY_POLICY, SBOM_SCRIPT,
-             "scripts/dependency_security.py", "scripts/sbom_verify.py",
+             "scripts/dependency_security.py", "scripts/sbom_verify.py", "scripts/function_traces.py",
              "LICENSES/Apache-2.0.txt", "LICENSES/AGPL-3.0-only.txt"]
     return {path: (ROOT / path).read_text() for path in paths}
 
@@ -156,6 +156,7 @@ class GovernanceLite(unittest.TestCase):
                         'python3 scripts/agent_guard.py verify-results "$RUNNER_TEMP/flofi-agent-unit.json"',
                         "pnpm install --frozen-lockfile --ignore-scripts", "pnpm audit --audit-level low",
                         "python3 scripts/dependency_security.py verify", "bash scripts/ci-sbom.sh",
+                        "python3 scripts/function_traces.py apps/reference-dapp",
                         "node scripts/guarded-release-browser.mjs critical",
                         "node scripts/guarded-release-browser.mjs extended",
                         "node scripts/guarded-release-browser.mjs composition"):
