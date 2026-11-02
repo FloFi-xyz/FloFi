@@ -457,9 +457,10 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
       build={() => setTab('Build')} execute={() => setTab('Execute')} navigate={navigate ?? (() => undefined)}/></main>
   </div>;
   // BUILD0-UX-001: Build 0 has no Canvas, chat panel or summary bar; its request continues in the same conversation, shown in Build 1.
+  // BUILD-FLOFI-CHAT-EDITOR-UX-001: Build 0 is presented as Chat and Build 1 as the Editor; this section and its continuation are unchanged.
   if (tab === BUILD_ENTRY) return <div className="app-shell" inert={!interactive}><a className="skip-link" href="#workspace">{tr("Skip to workspace")}</a><TopBar tab={tab} setTab={setTab} pathname={pathname ?? null} engineering={engineering} entry={entry}/>{betaNotice}
     <AutomationInbox owner={owner} proven={Boolean(owner && proof.proven === owner.address)} open={() => navigate?.('/app/automations')}/>
-    <main id="workspace" className="main build-entry-workspace" tabIndex={-1} aria-label={tr('Build 0')}>
+    <main id="workspace" className="main build-entry-workspace" tabIndex={-1} aria-label={tr('Chat')}>
       <BuildEntry conversation={conversation} workflow={state.workflow} proposal={proposal} actions={orderedActions.length} draft={entryDraft} setDraft={setEntryDraft}
         interactive={interactive} openBuilder={() => setTab('Build')}/>
     </main>
@@ -489,6 +490,7 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
         </SimulateWorkspace> : stageContent}
       <MobileBuildNavigation stage={tab === 'Build' ? 'Build' : tab === 'Simulate' ? 'Simulate' : 'Execute'}/>
       {state.error && <div className="error-banner" role="alert"><strong>{tr("Edit not applied")}</strong><span>{tr(tab !== 'Build' ? 'Review the workflow configuration in Build before simulating again.' : state.error)}</span></div>}
-    </main>)}{tab !== 'Execute' && <SummaryBar tab={tab} setTab={setTab} canvasOwnsAction/>}
+    </main>)}{/* BUILD-FLOFI-CHAT-EDITOR-UX-001: without Simulate and Execute tabs, the Editor's footer opens those sections (same availability as the tabs). */}
+    {tab !== 'Execute' && <SummaryBar tab={tab} setTab={setTab} canvasOwnsAction sections={{ disabled: Boolean(authoringIncomplete) }}/>}
   </div></EstimateOwnersContext.Provider>;
 }

@@ -32,6 +32,7 @@ import { portugueseE2eReliability } from './pt-e2e-reliability';
 import { portugueseStatusTruth } from './pt-status-truth';
 import { portugueseBridgeLiveFix } from './pt-bridge-live-fix';
 import { portugueseBuildEntry } from './pt-build-entry';
+import { portugueseChatEditor } from './pt-chat-editor';
 import { portugueseAccounts } from './pt-accounts';
 import { portugueseWallet } from './pt-wallet';
 import { portuguesePrivy } from './pt-privy';
@@ -63,6 +64,7 @@ export const portuguese: Readonly<Record<string, string>> = {
   ...portugueseE2eReliability,
   ...portugueseBridgeLiveFix,
   ...portugueseBuildEntry,
+  ...portugueseChatEditor,
   'Automation workflow': 'Fluxo da automação',
   'Prepared by your FloFi automation. Simulate and review before executing.': 'Preparado pela sua automação FloFi. Simule e revise antes de executar.',
   'Loading your exact automation workflow…': 'Carregando o fluxo exato da sua automação…',

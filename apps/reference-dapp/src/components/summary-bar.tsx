@@ -18,7 +18,13 @@ import { useRobinhoodTransfer } from '../state/robinhood-transfer-store';
 import { useJupiter } from '../state/jupiter-store';
 import { useSolanaLiquidity } from '../state/solana-liquidity-store';
 
-export function SummaryBar({ tab, setTab, simulationActionHost, reviewAvailable, focusReview, canvasOwnsAction }: { canvasOwnsAction?: boolean; tab: Tab; setTab: (value: Tab) => void; simulationActionHost?: HTMLDivElement | null; reviewAvailable?: boolean; focusReview?: () => void }) {
+/**
+ * `sections` (BUILD-FLOFI-CHAT-EDITOR-UX-001): Simulate and Execute are no longer top-level tabs; the Editor's footer opens its simulation/Review
+ * and execution sections instead, with the same availability the tabs had (closed while a Canvas amount is unapplied). Navigation only: each
+ * section keeps its own simulation, Review, wallet and execution gates, and nothing here simulates, accepts, signs or submits.
+ */
+export function SummaryBar({ tab, setTab, simulationActionHost, reviewAvailable, focusReview, canvasOwnsAction, sections }: { canvasOwnsAction?: boolean; tab: Tab; setTab: (value: Tab) => void; simulationActionHost?: HTMLDivElement | null; reviewAvailable?: boolean; focusReview?: () => void;
+  sections?: { readonly disabled: boolean } }) {
   const { t: tr } = useLocale();
   const { state, actionSetup } = useWorkflow();
   const { info, prepared, retired, verifyError, verified } = useModeA();
@@ -60,5 +66,9 @@ export function SummaryBar({ tab, setTab, simulationActionHost, reviewAvailable,
     <div><span className="eyebrow">{tr("WORKFLOW")}</span><strong>{tr(actionCount)} {tr(actionCount === 1 ? 'action' : 'actions')}</strong></div>
     {/* Relocate the existing action without duplicating its review gates or handler. */}
     {tr(tab === 'Simulate' && simulationActionHost ? createPortal(action, simulationActionHost) : action)}
+    {sections && <div className="summary-sections" role="group" aria-label={tr('Editor sections')}>
+      {tab !== 'Simulate' && <button type="button" onClick={() => setTab('Simulate')} disabled={sections.disabled} title={tr(sections.disabled ? 'Configure the action amount in Build first' : undefined)}>{tr('View simulation')}</button>}
+      {tab !== 'Execute' && <button type="button" onClick={() => setTab('Execute')} disabled={sections.disabled} title={tr(sections.disabled ? 'Configure the action amount in Build first' : undefined)}>{tr('View execution')}</button>}
+    </div>}
   </footer>;
 }
