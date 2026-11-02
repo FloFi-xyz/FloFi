@@ -174,10 +174,16 @@ describe('BUILD-MCP-001 gateway: protocol and tool surface', () => {
       mcp: { compose: true, simulate: false, simulateUnavailableReason: 'MCP_CLOUD_RUNTIME_REQUIRED', execute: false } });
   });
 
-  it('logs metadata only: principal, tool, outcome, duration', async () => {
+  it('logs metadata only: request id, principal, tool, outcome, duration', async () => {
     const logger = memoryLogger();
     await session({ env, token: alice.token, logger }).callTool('compose_strategy', { strategy: { ...BRIDGE, recipient: OWNER } });
-    expect(logger.lines).toEqual([{ event: 'mcp.tool', fields: { principal: 'dev-alice', tenant: 'default', tool: 'compose_strategy', outcome: 'OK', duration_ms: expect.any(Number) } }]);
+    // Every request ends with one `mcp.request` line carrying the same correlation id as its tool events (and its response header).
+    const requestId = expect.stringMatching(/^[0-9a-f-]{36}$/);
+    expect(logger.lines).toEqual([
+      { event: 'mcp.tool', fields: { request_id: requestId, principal: 'dev-alice', tenant: 'default', tool: 'compose_strategy', outcome: 'OK', duration_ms: expect.any(Number) } },
+      { event: 'mcp.request', fields: { request_id: requestId, principal: 'dev-alice', http_method: 'POST', rpc: 'tools/call', tool: 'compose_strategy', status: 200,
+        outcome: 'OK', duration_ms: expect.any(Number) } }]);
+    expect(logger.lines[0]!.fields.request_id).toBe(logger.lines[1]!.fields.request_id);
     expect(JSON.stringify(logger.lines)).not.toContain(OWNER);
   });
 });

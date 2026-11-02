@@ -29,13 +29,14 @@ export type Session = {
 };
 /** One client of one gateway configuration. `token: null` sends no Authorization header. */
 export function session(options: { env: Record<string, string>; token: string | null; runtime?: McpRuntime; logger?: GatewayLogger; state?: McpState;
-  now?: () => Date }): Session {
+  now?: () => Date; budgetMs?: number; marginMs?: number; signal?: AbortSignal }): Session {
   let id = 0;
   const post: Session['post'] = async (body, headers = {}) => {
     const response = await handleMcpRequest(new Request('https://flofi.test/api/mcp', { method: 'POST', body: typeof body === 'string' ? body : JSON.stringify(body),
-      headers: { 'content-type': 'application/json', accept: 'application/json, text/event-stream', ...options.token === null ? {} : { authorization: `Bearer ${options.token}` }, ...headers } }),
+      ...options.signal ? { signal: options.signal } : {}, headers: { 'content-type': 'application/json', accept: 'application/json, text/event-stream', ...options.token === null ? {} : { authorization: `Bearer ${options.token}` }, ...headers } }),
     { env: options.env, ...options.runtime ? { runtime: options.runtime } : {}, ...options.logger ? { logger: options.logger } : {},
-      ...options.state ? { state: options.state } : {}, ...options.now ? { now: options.now } : {} });
+      ...options.state ? { state: options.state } : {}, ...options.now ? { now: options.now } : {},
+      ...options.budgetMs === undefined ? {} : { budgetMs: options.budgetMs }, ...options.marginMs === undefined ? {} : { marginMs: options.marginMs } });
     const text = await response.text();
     // Legacy stateless serving answers with one SSE `message` event; modern serving answers with a JSON body.
     const json = response.headers.get('content-type')?.startsWith('text/event-stream') ? text.split('\n').find(line => line.startsWith('data: '))?.slice(6) : text;

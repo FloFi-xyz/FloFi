@@ -31,6 +31,8 @@ export type BackendOptions = {
   readonly holderId: string; readonly evidenceStore: EvidenceStore | null;
   /** Test seam: loopback MOCKED chains replace the network clients. Never used by the deployed entry point. */
   readonly rpc?: Partial<Record<FlowName, Rpc>>; readonly http?: JupiterHttp; readonly leaseTtlMs?: number; readonly busyRetries?: number;
+  /** BUILD-FLOFI-E2E-RELIABILITY-001: a read-only preview's total deadline (default 80 s, below the MCP preview cap of 90 s). */
+  readonly previewTimeoutMs?: number;
   /** Test seam (BUILD-ROUTER-001): the MOCKED destination chain and providers used with `rpc['crosschain-router']`. */
   readonly router?: FlowDeps['router'];
   /** Test seam (BUILD-JOURNEY-001): per-flow MOCKED destination chains when both Router networks run in one test. */
@@ -142,13 +144,20 @@ export function createBackend(options: BackendOptions) {
     const refusal = mode === 'live' ? testNetworkPreviewRefusal(flow, scopeEnv) : null;
     if (refusal) return { ok: false, code: refusal };
     return withSpan(logger, 'flow.preview', { flow, action: method }, async () => {
-      try { return { ok: true, value: purpose === 'QUOTE' ? await jupiterQuotePreview(args, depsFor(flow, true))
-        : await definition.create(previewStorage(), depsFor(flow, true), {}).call(method, args) } as const; }
+      // BUILD-FLOFI-E2E-RELIABILITY-001: a preview reads only (its storage is per call and discarded), so a deadline that stops waiting is safe.
+      // Paced public RPC reads with retries could otherwise hold one preview for minutes, past every caller's own deadline (/api/mcp hit 300 s).
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const deadline = new Promise<FlowResult>(resolve => { timer = setTimeout(() => {
+        logger.warn('flow.preview_timeout', { flow, action: method }); resolve({ ok: false, code: 'CLOUD_PREVIEW_TIMEOUT' });
+      }, options.previewTimeoutMs ?? 80_000); });
+      try { return await Promise.race([deadline, (async () => ({ ok: true, value: purpose === 'QUOTE' ? await jupiterQuotePreview(args, depsFor(flow, true))
+        : await definition.create(previewStorage(), depsFor(flow, true), {}).call(method, args) }) as const)()]); }
       catch (error) {
         if (!(error instanceof Error && CODE.test(error.message))) logger.warn('flow.unclassified_error', { flow, action: method });
         if (flow === 'crosschain-universal') return reportUniversalFailure(error, method, fields => logger.warn('bridge.operation_failed', fields));
         return { ok: false, code: error instanceof Error && CODE.test(error.message) ? error.message : definition.unavailableCode } as const;
       }
+      finally { clearTimeout(timer); }
     });
   }
 

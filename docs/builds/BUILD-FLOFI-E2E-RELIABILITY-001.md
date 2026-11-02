@@ -114,6 +114,52 @@ per-run reads; it already skips them when a summary carries attempts.
 | Specialist report hand-back | In auto mode Claude Code appends `SubagentHandback` to every subagent and delivers only reports sent through it; the read-only guard denied it, so reports were lost. The guard now allows exactly that tool with one non-empty `message` and records only the validated `FLOFI_REVIEW_RESULT`; frontmatter stays `tools: Read`, everything else stays denied; 19 agents regenerated; the probe gained an auto-mode phase. | `test_ci_claude_agents.py`, `test_ci_agent_guard.py`, `verify_claude_agents.py` |
 | Protocol documentation | Uniswap re-verified (digest, MIT licence, GPL-2.0-or-later header, claims, review date 2026-11-02). Jupiter stays **pending** (no licence at the pinned revision; developers.jup.ag blocked). Arbitrum third-party guide **pending** (never read; its overstated cross-check list removed); the official Arbitrum sources stay pending (no licence). Blocker: this session's network policy denies developers.jup.ag, developers.uniswap.org, docs.arbitrum.io and skills.rest. | `skill_registry.py verify` |
 
+## 2.8 `/api/mcp` 300-second timeouts, and Pix `get_approval_status`
+
+**Evidence (PROD-LOG, read-only):** Vercel runtime errors list **252 × “Task timed out after 300 seconds” for 55 users, all on `/api/mcp`**,
+2026-10-07 → 2026-11-01T23:54Z. Runtime logs are kept 1 h on this plan, so individual requests could not be tied to a method or tool; a
+timed-out request left no line at all (`mcp.tool` was logged only when a tool finished). Production reports `runtime: "remote"`.
+
+**Root causes (CODE, reproduced by tests; not individually confirmed in production logs):**
+1. **`subscriptions/listen` never ended.** The SDK advertises `tools.listChanged: true` by default, so a 2026-07-28 client keeps an SSE stream
+   open with keep-alives until `request.signal` aborts. The gateway forwarded the request **without a signal** and awaited `response.text()`
+   before closing, so the function ran until the platform killed it.
+2. **No deadline on the remote runtime.** MCP called the cloud API with the client defaults: up to 4 × 240 s per call (3 × 240 s for previews).
+   One slow preview already exceeds the function limit with one retry.
+3. (HYPOTHESIS, why previews are slow) the backend `previewFlow` had no deadline, and paced public RPC reads retry with backoff (up to ~31 s
+   per read) through one queue per flow.
+
+**Fixes:**
+- `src/mcp/deadline.ts`: one budget per request (150 s total; tools stop 10 s earlier; the platform limit stays 300 s; `maxDuration` not
+  raised), per-operation caps (read 15 s, preview 90 s, store 20 s), a UUID `requestId` per request.
+- `src/mcp/gateway.ts`: the forwarded request carries an abort signal (client close or deadline); OAuth, wallet-link and body reads are
+  bounded; at the hard deadline the gateway answers a JSON-RPC error itself; every response has `x-flofi-request-id`; every request ends with
+  one metadata-only `mcp.request` log line. The server advertises `listChanged: false` (cause 1).
+- `src/mcp/runtime.ts` / `src/server/cloud-api-client.ts`: remote calls carry the signal; a caller deadline ends retries
+  (`CLOUD_API_DEADLINE_EXCEEDED`, never retried); 2 attempts for reads, 1 for previews. A timeout is never read as “off” or “not found”.
+- `src/mcp/tools.ts`: every tool is bounded; timeouts are classified by what the tool may have done — read-only → `NOT_COMPLETED`; status
+  reads → `STATUS_UNKNOWN` (“not evidence that nothing was submitted”); `request_user_approval` / `open_approval_session` → outcome
+  `UNKNOWN`, `automaticRetry: false`, next `get_approval_status`. Nothing is resubmitted after a timeout.
+- `backend/app.ts`: a read-only preview has an 80 s total deadline (`CLOUD_PREVIEW_TIMEOUT`, logged `flow.preview_timeout`); its storage is
+  per call and discarded, so stopping is safe.
+- `platform/approvals.ts`: a failed run read is **incomplete**, never “no runs” — `approvalProgress` returns `runsComplete: false` and an
+  UNKNOWN note; `sharedRuns` (developer API, events) refuses with `CLOUD_RUNTIME_UNAVAILABLE` (public `SERVICE_UNAVAILABLE`) instead of `[]`.
+
+**Pix `get_approval_status` (issue #149):** `src/mcp/pix-approval-status.ts` lists, for an approval whose plan runs through `pix-payment`,
+only the runs durably bound to that approval, each read as the claimant wallet (summary and record owner must both be that wallet, created
+after the claim, status shared and approval applied); it shows the recorded and shared execution status, never “not started”, counts a run as
+settled only with `PAYMENT_SETTLED` evidence whose bundle hash matches the record, and never changes the approval. **Limitation (genuine
+gap):** nothing creates Pix approvals or binds Pix runs to an approval today, so the list stays empty until a Pix flow calls
+`handoffs.bindRuns(handoffId, [runId])` when it starts a run from an applied approval.
+
+**Not fixed:** in-process DApp server actions still allow 4 × 240 s for cloud calls (they are not on the MCP path); an embedded-runtime call
+cannot be cancelled, only no longer awaited.
+
+Tests: `deadline.test.ts` (silent provider bounded within budget, client abort reaches the fetch, no retry and a single write, the listen
+hang, a late-committing approval write → `UNKNOWN` with one row), `deadline.pg.test.ts`, `pix-approval-status.test.ts` (incl. cross-account
+and cross-owner isolation), `cloud-api-client.test.ts`, `gateway.test.ts`, `platform/approvals.test.ts` (incomplete reads),
+`cloud-execution.pg.test.ts` (bounded preview, no run written).
+
 ## 3. Same failure class across the other operations (audit)
 
 | Capability | Execution-boundary quote check | Error codes to chat/Review | Continuation after approval | Result |

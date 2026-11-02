@@ -41,12 +41,13 @@ let nextNonce = 100;
 const freshChain = () => createRobinhoodTransferChain({ nonce: nextNonce++ });
 /** One "deployment": API backend + worker sharing a database; each call builds fresh processes' worth of state. */
 async function deployment(options: { db?: Database; chain?: ReturnType<typeof createRobinhoodTransferChain>; model?: ReturnType<typeof supplyModel>; swapChain?: SwapChain; tenantId?: string; evidenceDir?: string;
-  logger?: ReturnType<typeof createLogger> } = {}) {
+  logger?: ReturnType<typeof createLogger>; previewTimeoutMs?: number } = {}) {
   const chain = options.chain ?? freshChain(), model = options.model ?? supplyModel();
   const evidenceDir = options.evidenceDir ?? await mkdtemp(join(tmpdir(), 'flofi-cloud-evidence-'));
   const db = options.db ?? t.open(6), tenantId = options.tenantId ?? 'default', workerId = `worker-${Math.random().toString(16).slice(2, 8)}`;
   const backend = createBackend({ db, env, logger: options.logger ?? quiet, tenantId, holderId: workerId, evidenceStore: createFilesystemEvidenceStore(evidenceDir),
-    rpc: { 'robinhood-transfer': chain.rpc, 'aave-supply': model.rpc, ...options.swapChain ? { 'base-sepolia-swap': options.swapChain.rpc } : {} }, busyRetries: 3 });
+    rpc: { 'robinhood-transfer': chain.rpc, 'aave-supply': model.rpc, ...options.swapChain ? { 'base-sepolia-swap': options.swapChain.rpc } : {} }, busyRetries: 3,
+    ...options.previewTimeoutMs ? { previewTimeoutMs: options.previewTimeoutMs } : {} });
   const worker = createWorker({ queue: createPostgresWorkQueue({ db, ownerId: workerId }), handlers: backend.handlers, logger: quiet, workerId, concurrency: 8 });
   const rh = (method: string, ...args: unknown[]) => backend.callFlow('robinhood-transfer', method, args);
   const sp = (method: string, ...args: unknown[]) => backend.callFlow('aave-supply', method, args);
@@ -233,6 +234,19 @@ describe('BUILD-CLOUD-001 Robinhood transfer on durable cloud state', () => {
     const listed = await runsRoute.handler({ method: 'GET', path: '/v1/runs', query: new URLSearchParams(), headers: {}, body: null, requestId: 'x' }, runsRoute.pattern.exec('/v1/runs')!);
     expect((listed.body as { value: { items: { runId: string }[] } }).value.items.map(i => i.runId)).not.toContain(record.id);
     expect(ok<TransferRecord>(await a.rh('status', record.id)).id).toBe(record.id);
+  });
+});
+
+describe('BUILD-FLOFI-E2E-RELIABILITY-001 read-only previews are bounded', () => {
+  it('a preview whose network never answers ends with CLOUD_PREVIEW_TIMEOUT within its deadline, and writes no run', async () => {
+    const silent = { ...supplyModel(), rpc: () => new Promise<never>(() => undefined) } as unknown as ReturnType<typeof supplyModel>;
+    const lines: string[] = [], d = await deployment({ model: silent, previewTimeoutMs: 300, logger: createLogger({ service: 'test', sink: line => lines.push(line) }) });
+    const started = Date.now(), result = await d.backend.previewFlow('aave-supply', [supplyWorkflow, SUPPLY_OWNER]);
+    expect(result).toEqual({ ok: false, code: 'CLOUD_PREVIEW_TIMEOUT' });
+    expect(Date.now() - started).toBeLessThan(5_000);
+    expect(lines.some(line => JSON.parse(line).event === 'flow.preview_timeout')).toBe(true);
+    const runs = await t.db.query(`SELECT count(*)::int AS n FROM execution_runs WHERE flow = 'aave-supply' AND created_at > now() - interval '1 minute' AND owner_account = $1`, [SUPPLY_OWNER.toLowerCase()]);
+    expect(runs.rows[0]).toEqual({ n: 0 });
   });
 });
 

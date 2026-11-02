@@ -238,17 +238,24 @@ export type RunProgress = { readonly executionId: string; readonly flow: string;
  * after the claim, whose reviewed workflow hashes EXACTLY to the handoff's workflow hash (an edited strategy is not this proposal).
  * Everything is read server-side as the owner; only public facts leave (ids, states, evidence environment and bundle hash).
  */
-export async function sharedRuns(h: HandoffRecord, runtime: EngineRuntime, handoffs: HandoffStore): Promise<readonly RunProgress[] | null> {
+/**
+ * BUILD-FLOFI-E2E-RELIABILITY-001: the shared runs and whether every read that decides them answered. A listing or run/record read that
+ * failed makes the list INCOMPLETE: before, it returned an empty list, which every surface showed as "no runs" (as if nothing was sent).
+ */
+export async function sharedRunsRead(h: HandoffRecord, runtime: EngineRuntime, handoffs: HandoffStore): Promise<{ readonly runs: readonly RunProgress[]; readonly complete: boolean } | null> {
   if (h.status !== 'APPLIED' || !h.shareStatus || !h.claimed || !h.claimedAt || !h.plan.flow || !runtime.runs || !runtime.record) return null;
   const flow = h.plan.flow, owner = h.claimed.address, listed = await runtime.runs(flow, owner);
-  if (!listed.ok) return [];
+  if (!listed.ok) return { runs: [], complete: false };
   const candidates = listed.value.filter(r => Date.parse(r.updatedAt) >= h.claimedAt!.getTime() - 1_000).slice(0, 8);
   const out: RunProgress[] = [];
+  let complete = true;
   for (const candidate of candidates) {
     const run = await runtime.run(candidate.runId, owner);
-    if (!run.ok || !run.value || Date.parse(run.value.createdAt) < h.claimedAt.getTime() - 1_000) continue;
+    if (!run.ok) { complete = false; continue; }
+    if (!run.value || Date.parse(run.value.createdAt) < h.claimedAt.getTime() - 1_000) continue;
     const record = await runtime.record(flow, candidate.runId, owner);
-    if (!record.ok || !reviewedWorkflows(record.value).some(w => { try { return semanticWorkflowHash(w as Workflow) === h.workflowHash; } catch { return false; } })) continue;
+    if (!record.ok) { complete = false; continue; }
+    if (!reviewedWorkflows(record.value).some(w => { try { return semanticWorkflowHash(w as Workflow) === h.workflowHash; } catch { return false; } })) continue;
     let evidence: { environment: string; outcome: string; bundleHash: string } | null = null;
     if (run.value.hasEvidence) { const e = await runtime.evidence(flow, candidate.runId, owner); if (e.ok && e.value) evidence = { environment: e.value.environment, outcome: e.value.outcome, bundleHash: e.value.bundleHash }; }
     // A read-model flag is not reconciliation. Read the flow's independently reconciled evidence as the owner;
@@ -262,23 +269,33 @@ export async function sharedRuns(h: HandoffRecord, runtime: EngineRuntime, hando
   }
   const known = new Set(h.runIds), fresh = out.map(r => r.executionId).filter(id => !known.has(id));
   if (fresh.length) await handoffs.bindRuns(h.handoffId, fresh);
-  return out;
+  return { runs: out, complete };
+}
+/** The shared runs, or null when not shared. An incomplete read fails as CLOUD_RUNTIME_UNAVAILABLE (never an empty "no runs" list). */
+export async function sharedRuns(h: HandoffRecord, runtime: EngineRuntime, handoffs: HandoffStore): Promise<readonly RunProgress[] | null> {
+  const read = await sharedRunsRead(h, runtime, handoffs);
+  if (read && !read.complete) throw new Error('CLOUD_RUNTIME_UNAVAILABLE');
+  return read?.runs ?? null;
 }
 /**
  * The approval's status for its requester, with the shared runs when the owner shares them. BUILD-CHAT-E2E-001: a multi-step approval also
  * carries its workflow run (`runs`): every step's state always, and its transactions, amounts and evidence only when the owner shares status.
  */
 export type ApprovalProgress = ReturnType<typeof approvalStatus> & { readonly runs: readonly (RunProgress & { readonly receiptUrl?: string | null })[];
-  readonly runsVisible: boolean; readonly workflowRun: RunView | null; readonly note: string | null };
+  readonly runsVisible: boolean; readonly workflowRun: RunView | null; readonly note: string | null;
+  /** BUILD-FLOFI-E2E-RELIABILITY-001: present (false) only when a run read failed: the listed runs are then not all of them. */
+  readonly runsComplete?: false; readonly runsReadError?: string };
 export async function approvalProgress(h: HandoffRecord, runtime: EngineRuntime, handoffs: HandoffStore, origin?: string,
   workflowRuns?: Pick<WorkflowRunStore, 'byHandoff' | 'steps'> | null): Promise<ApprovalProgress> {
   const run = h.plan.kind === 'SEQUENTIAL' && workflowRuns ? await workflowRuns.byHandoff(h.handoffId) : null;
   const workflowRun = run && workflowRuns ? await runView({ store: workflowRuns }, run, { outcomes: h.shareStatus, origin: origin ?? null }) : null;
   if (h.plan.kind === 'SEQUENTIAL') return { ...approvalStatus(h), runs: [], runsVisible: h.shareStatus, workflowRun,
     note: run ? null : h.status === 'PENDING' ? 'Waiting for the owner to open the approval and prove their wallets.' : null };
-  const shared = await sharedRuns(h, runtime, handoffs);
+  const shared = await sharedRunsRead(h, runtime, handoffs);
   // A receipt link grants no read access: the existing Dashboard still requires the execution owner's authenticated wallet.
-  const runs = shared?.map(run => origin ? { ...run, receiptUrl: run.reconciled ? `${origin}/app/dashboard/runs/${encodeURIComponent(run.executionId)}` : null } : run);
+  const runs = shared?.runs.map(run => origin ? { ...run, receiptUrl: run.reconciled ? `${origin}/app/dashboard/runs/${encodeURIComponent(run.executionId)}` : null } : run);
   return { ...approvalStatus(h), runs: runs ?? [], runsVisible: shared !== null, workflowRun: null,
-    note: h.status === 'APPLIED' && !h.shareStatus ? 'The owner has not shared the status of runs started from this proposal.' : null };
+    ...shared && !shared.complete ? { runsComplete: false as const, runsReadError: 'RUNS_READ_FAILED' } : {},
+    note: shared && !shared.complete ? 'Some runs of this approval could not be read now; their state is UNKNOWN (not "not started"). Read the status again.'
+      : h.status === 'APPLIED' && !h.shareStatus ? 'The owner has not shared the status of runs started from this proposal.' : null };
 }

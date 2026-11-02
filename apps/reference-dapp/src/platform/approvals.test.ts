@@ -5,7 +5,7 @@ import { STRATEGY_EXAMPLES } from '../engine/strategy-examples';
 import type { CloudRun } from '../server/flow-runtime';
 import type { EvidenceRecord, McpRuntime, Result } from '../mcp/runtime';
 import type { HandoffRecord, HandoffStore } from './handoff-store';
-import { approvalProgress } from './approvals';
+import { approvalProgress, sharedRuns } from './approvals';
 
 const composition = composeWorkflow(STRATEGY_EXAMPLES.find(e => e.id === 'transfer-ethereum-sepolia')!.strategy);
 if (!composition.ok) throw new Error(composition.code);
@@ -55,5 +55,26 @@ describe('shared proposal status requires independently reconciled evidence befo
     const { progress, runtime } = setup();
     expect(await progress({ ...handoff, shareStatus: false })).toMatchObject({ runsVisible: false, runs: [] });
     expect(runtime.runs).not.toHaveBeenCalled(); expect(runtime.evidence).not.toHaveBeenCalled();
+  });
+});
+
+describe('BUILD-FLOFI-E2E-RELIABILITY-001 a failed run read is never "no runs"', () => {
+  it('a failed listing or run/record read marks the shared runs incomplete (state UNKNOWN), never an empty, complete list', async () => {
+    for (const fail of ['runs', 'run', 'record'] as const) {
+      const { runtime, progress } = setup();
+      (runtime[fail] as ReturnType<typeof vi.fn>).mockResolvedValueOnce({ ok: false, code: 'CLOUD_RUNTIME_UNAVAILABLE' });
+      const value = await progress();
+      expect(value, fail).toMatchObject({ runsVisible: true, runsComplete: false, runsReadError: 'RUNS_READ_FAILED', runs: [] });
+      expect(value.note, fail).toMatch(/UNKNOWN \(not "not started"\)/);
+    }
+    // A complete read carries no incompleteness flag at all.
+    expect('runsComplete' in await setup().progress()).toBe(false);
+  });
+  it('sharedRuns refuses an incomplete read (SERVICE_UNAVAILABLE for developers) instead of returning an empty list', async () => {
+    const { runtime } = setup(), store = { bindRuns: vi.fn(async () => undefined) } as unknown as HandoffStore;
+    (runtime.runs as ReturnType<typeof vi.fn>).mockResolvedValueOnce({ ok: false, code: 'CLOUD_RUNTIME_UNAVAILABLE' });
+    await expect(sharedRuns(handoff, runtime, store)).rejects.toThrow('CLOUD_RUNTIME_UNAVAILABLE');
+    expect(await sharedRuns(handoff, runtime, store)).toHaveLength(1);
+    expect(await sharedRuns({ ...handoff, shareStatus: false }, runtime, store)).toBeNull();
   });
 });

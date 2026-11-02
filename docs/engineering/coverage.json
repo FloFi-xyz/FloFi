@@ -769,6 +769,38 @@
     "scripts.test_ci_dependency_security": {
       "path": "scripts/test_ci_dependency_security.py",
       "stage": "governance"
+    },
+    "app.mcp.deadline": {
+      "path": "apps/reference-dapp/src/mcp/deadline.test.ts",
+      "stage": "unit"
+    },
+    "app.mcp.deadline.pg": {
+      "path": "apps/reference-dapp/src/mcp/deadline.pg.test.ts",
+      "stage": "postgres"
+    },
+    "app.mcp.pix-approval-status": {
+      "path": "apps/reference-dapp/src/mcp/pix-approval-status.test.ts",
+      "stage": "unit"
+    },
+    "app.lib.dashboard.landed-attempts": {
+      "path": "apps/reference-dapp/src/lib/dashboard/landed-attempts.test.ts",
+      "stage": "unit"
+    },
+    "app.lib.dashboard.data-service-attempts": {
+      "path": "apps/reference-dapp/src/lib/dashboard/data-service-attempts.test.ts",
+      "stage": "unit"
+    },
+    "app.components.dashboard.landed": {
+      "path": "apps/reference-dapp/src/components/dashboard/dashboard-landed.test.tsx",
+      "stage": "unit"
+    },
+    "app.components.automation-run-status": {
+      "path": "apps/reference-dapp/src/components/automation-run-status.test.tsx",
+      "stage": "unit"
+    },
+    "app.channels.route-discovery": {
+      "path": "apps/reference-dapp/src/channels/route-discovery.test.ts",
+      "stage": "unit"
     }
   },
   "requiredUnitSuites": [
@@ -2024,6 +2056,7 @@
         "app.channels.core.conversation",
         "app.channels.core.delivery",
         "app.channels.core.workflow",
+        "app.channels.route-discovery",
         "app.channels.telegram.learning.pg",
         "app.channels.telegram.workflow.pg",
         "app.channels.whatsapp.journey.pg",
@@ -2215,7 +2248,8 @@
         "app.automations.remote.pg",
         "app.automations.schedule",
         "app.automations.scheduler.pg",
-        "app.backend.automation-production.pg"
+        "app.backend.automation-production.pg",
+        "app.components.automation-run-status"
       ],
       "gaps": [
         "CONFIRM_EACH_TIME proposals are supported; production delegated signing and live DCA execution are not certified."
@@ -2439,6 +2473,7 @@
       ],
       "suites": [
         "app.components.canvas-panel-reveal",
+        "app.components.dashboard.landed",
         "app.e2e.build-entry",
         "app.e2e.canvas-keyboard",
         "app.e2e.global-product-polish",
@@ -3495,6 +3530,8 @@
       "suites": [
         "action-registry.engineering-regression",
         "app.lib.dashboard.data-service",
+        "app.lib.dashboard.data-service-attempts",
+        "app.lib.dashboard.landed-attempts",
         "app.lib.dashboard.run-mapping",
         "app.platform.engineering-continuity",
         "app.platform.parity",
@@ -3548,12 +3585,15 @@
         "apps/reference-dapp/src/mcp/tools.ts"
       ],
       "suites": [
+        "app.mcp.deadline",
+        "app.mcp.deadline.pg",
         "app.mcp.gateway",
         "app.mcp.handoff.workflow.pg",
         "app.mcp.link-integrity.pg",
         "app.mcp.mainnet-only",
         "app.mcp.oauth.foundation",
         "app.mcp.oauth.server.pg",
+        "app.mcp.pix-approval-status",
         "app.platform.engineering-continuity",
         "app.platform.intelligence-parity"
       ],
