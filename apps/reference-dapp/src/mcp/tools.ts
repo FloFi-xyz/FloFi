@@ -54,7 +54,7 @@ import { workflowVisualModel, type WorkflowVisualModel } from '../platform/workf
 import { workflowVisualLayout, workflowVisualText } from '../platform/workflow-visual-layout.ts';
 import { workflowVisualPngOrNull } from '../server/workflow-visual-image.ts';
 import { FLOFI_PRODUCTION_ORIGIN, publicApprovalUrl } from '../platform/navigation.ts';
-import { DeadlineError, isDeadlineError, MCP_TOOL_TIMEOUTS, withinBudget, type DeadlineCode, type RequestBudget } from './deadline.ts';
+import { DeadlineError, isDeadlineError, MCP_TOOL_TIMEOUTS, toolCap, withinBudget, type DeadlineCode, type RequestBudget } from './deadline.ts';
 
 /** BUILD-DEVELOPER-001: the deep links moved to the shared approval service; re-exported for existing importers. */
 export { walletDeepLinks } from '../platform/index.ts';
@@ -270,7 +270,7 @@ export function createFlofiMcpServer(ctx: ToolContext): McpServer {
       let result: CallToolResult, outcome = 'OK';
       try {
         // The whole tool — catalog preparation, runtime reads, presentation — waits at most until the request's tool deadline.
-        result = await withinBudget(ctx.budget, TIMEOUT_CLASS[name] === 'EFFECT_UNKNOWN' ? MCP_TOOL_TIMEOUTS.approvalWrite : MCP_TOOL_TIMEOUTS.default, async () => {
+        result = await withinBudget(ctx.budget, toolCap(ctx.budget, TIMEOUT_CLASS[name] === 'EFFECT_UNKNOWN' ? MCP_TOOL_TIMEOUTS.approvalWrite : MCP_TOOL_TIMEOUTS.default), async () => {
         if (!principalScopes(ctx.principal).includes(scope)) failWith('MCP_INSUFFICIENT_SCOPE');
         // BUILD-RH-002: a strategy naming Robinhood Chain composes against the validated official catalog (where this deployment enables it);
         // BUILD-BASE-001: so does one naming Base (its validated token list).

@@ -160,7 +160,9 @@ timed-out request left no line at all (`mcp.tool` was logged only when a tool fi
   the client's 30 s default). A timeout is never read as “off” or “not found”.
 - `src/mcp/tools.ts`: every tool is bounded; timeouts are classified by what the tool may have done — read-only → `NOT_COMPLETED`; status
   reads → `STATUS_UNKNOWN` (“not evidence that nothing was submitted”); `request_user_approval` / `open_approval_session` → outcome
-  `UNKNOWN`, `automaticRetry: false`, next `get_approval_status`. Nothing is resubmitted after a timeout.
+  `UNKNOWN`, `automaticRetry: false`, no next step that needs an approval id (`next: []`; the guidance says not to request approval again
+  automatically). Each tool's cap (55 s; an approval write 50 s) counts from the request's arrival, with a 5 s floor. Nothing is resubmitted
+  after a timeout.
 - `backend/app.ts`: a read-only preview has an 80 s total deadline (`CLOUD_PREVIEW_TIMEOUT`, logged `flow.preview_timeout`); its storage is
   per call and discarded, so stopping is safe. Once the deadline passes, the abandoned preview cannot start another read on the flow's
   shared, paced transport, so it cannot keep starving the reads of executions (`begin`, status, observation). The developer API sets no
@@ -241,6 +243,7 @@ Observe in Railway: `flow.refused` events carry the code of refusals returned by
 | `mcp.request` logged a client close as 500 / timeout / store outage (admin-analytics, MEDIUM) | a client that left is `CLIENT_CLOSED` (499) whatever answered after it; the gateway stops waiting for the exchange once the client is gone; refusals log their classified `code` | `mcp/gateway-deadline.test.ts` |
 | Unknown wallet result could read “no new transaction was sent” when recording it failed; generic failure claimed nothing was sent; quote-moved reason could be false; a cancellation called a wallet decline; a prepared request called “nothing sent yet” (frontend-ux, 4 × MEDIUM) | report failures keep `SUBMISSION_RESULT_UNKNOWN`; neutral `PUBLIC_OPERATION_FAILED` and quote-moved wording; “The request was cancelled”; “Wallet request prepared — no submission recorded; open the run to check” (EN + PT) | `flofi-conversation.test.ts`, `landed-attempts.test.ts`, `automation-run-status.test.tsx` |
 | Channel discovery needs `GRYLOO_UNIVERSAL_ROUTER` on the web, undocumented; `NEXT_PUBLIC_*` rule contradicted; telemetry opt-out overstated (infrastructure-ci, admin-analytics, MEDIUM) | `docs/deploy/ENVIRONMENT.md` §5e row, the reviewed `NEXT_PUBLIC_FLOFI_JOURNEY_TELEMETRY` exception, already-open tabs and rollback behaviour; `docs/privacy/JOURNEY-TELEMETRY.md` §2/§7 | docs |
+| Follow-up find-and-verify workflow (24 agents; 10 findings, 8 confirmed by two independent skeptics, 2 split): per-tool caps counted from tool start; preview cutoff missed per-chain clients (`chains.rpcs`: Aave supply, transfers, catalog liquidity); an unreadable declined-status run read “not submitted” after the Dashboard read budget ran out (all MEDIUM); stale timeout descriptions (LOW). The developer settle cap and the evidence read (also confirmed) were already fixed above | caps count from the request's arrival (`toolCap`, 5 s floor); `previewTransport` wraps `chains.rpcs`; unreadable declined runs are “Unresolved” (“an earlier confirmed action cannot be ruled out”); comments and §2.8 updated | `mcp/deadline.test.ts`, `backend/preview.test.ts`, `data-service-attempts.test.ts` |
 | LOW fixed along the way | Automations: unread attempts unresolved for declined statuses, landed attempts kept past the 64-attempt window, missing attempts list unknown, unreadable read on Recent proposals; Dashboard attempt reads share a 10 s budget and skip settled runs, chip from the latest attempt; MCP dispose aborts abandoned reads, run/journal read caps, `NOT_COMPLETED` preview steps; backend preview cutoff; developer evidence read; PT `ESTADO` | as listed in §2.6/§2.8 |
 
 **Intentional test change (owner review):** `automation-run-status.test.tsx` asserted “Refused or not submitted — nothing was sent” for runs whose
@@ -267,6 +270,8 @@ transfer-payments and payments-billing (no owned file changed; no approval step;
 - Frontend-ux: Automations still uses one label for every refusal kind and “Confirmed onchain — reconciling” between steps; “Earlier confirmed
   requests stay recorded” after a first request was declined; the public panel shows raw codes for unmapped errors; Simulate/Review say “so nothing
   was sent” after a landed approval (the chat says “nothing new was sent”); PT continuation titles (“Trocar”) read awkwardly; “on-chain”/“onchain”.
+- Follow-up workflow: a created approval whose 5 s presentation read times out is reported UNKNOWN (honest, not wrong); provider HTTP clients
+  (Jupiter build, router providers, catalog loader) are not covered by the preview cutoff (split vote).
 - Earlier reviews: run attribution heuristic (pre-existing; possible cross-requester visibility via `bindRuns`) — follow-up for flofi-workflow /
   flofi-security; the single-step channel LINK path has no open-run guard (pre-existing); a continuation has no SIMULATING phase of its own (message only).
 

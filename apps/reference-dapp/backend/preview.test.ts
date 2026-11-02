@@ -4,7 +4,7 @@ import { createLogger, HttpError, type Database } from '@defi-workflow-engine/cl
 import { createMockedSolanaJupiter, createMockedSolanaWallet } from '@defi-workflow-engine/reference-compiler';
 import type { SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
 import { createSolanaSwapNode } from '../src/domain/jupiter-authoring.ts';
-import { createBackend } from './app.ts';
+import { createBackend, previewTransport } from './app.ts';
 import { PREVIEW_METHODS, previewStorage } from './preview.ts';
 
 const quiet = createLogger({ service: 'test', sink: () => undefined });
@@ -73,3 +73,17 @@ describe('BUILD-MCP-001 read-only flow previews', () => {
     expect(new Set(Object.values(PREVIEW_METHODS))).toEqual(new Set(['simulate', 'prepare']));
   });
 });
+
+describe('BUILD-FLOFI-E2E-RELIABILITY-001 abandoned preview cutoff', () => {
+  it('after the deadline no client of the preview transport starts a read — per-chain clients included', async () => {
+    const calls: string[] = [], rpc = (name: string) => async (method: string) => { calls.push(`${name}:${method}`); return '0x1'; };
+    const abandoned = new AbortController();
+    const deps = previewTransport({ rpc: rpc('main'), chains: { rpcs: { 'eip155:8453': rpc('base'), 'eip155:42161': rpc('arbitrum') } } } as never, abandoned.signal);
+    await deps.rpc('eth_blockNumber', []);
+    await deps.chains!.rpcs['eip155:8453']!('eth_chainId', []);
+    abandoned.abort();
+    for (const read of [deps.rpc, ...Object.values(deps.chains!.rpcs)]) await expect(read('eth_call', [])).rejects.toThrow('CLOUD_PREVIEW_TIMEOUT');
+    expect(calls).toEqual(['main:eth_blockNumber', 'base:eth_chainId']);
+  });
+});
+

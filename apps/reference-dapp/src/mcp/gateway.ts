@@ -16,7 +16,8 @@
  *
  * Deadlines (`deadline.ts`): every request has one budget well below the function limit. Each store read before the exchange, every
  * runtime read and each tool is bounded by it; the forwarded request carries an abort signal (client close, hard deadline), and if the
- * exchange is still running at the hard deadline the gateway answers itself with a classified JSON-RPC error carrying the request id.
+ * exchange is still running at the hard deadline the gateway answers each request id itself: a `tools/call` as a classified tool result
+ * (`isError`), any other method as a JSON-RPC error.
  * Every response names its request id (`x-flofi-request-id`) and every request ends with one `mcp.request` log line.
  */
 import { networkScope } from '../server/network-scope.ts';
@@ -99,8 +100,8 @@ function messagesOf(body: string | null): { readonly methods: string; readonly t
   return { methods, tool, batch: Array.isArray(parsed), requests };
 }
 /**
- * The gateway's own answer when the exchange is still running at the hard deadline: one JSON-RPC error per request id, carrying the
- * request id and what the call may have done (`timeoutResult`: never "nothing was submitted"; an approval request is UNKNOWN).
+ * The gateway's own answer when the exchange is still running at the hard deadline: one answer per request id (a tool result with
+ * `isError` for a `tools/call`, a JSON-RPC error otherwise), carrying the request id and what the call may have done (`timeoutResult`: never "nothing was submitted"; an approval request is UNKNOWN).
  */
 function deadlineResponse(body: string | null, budget: RequestBudget): Response {
   const { requests, batch } = messagesOf(body);

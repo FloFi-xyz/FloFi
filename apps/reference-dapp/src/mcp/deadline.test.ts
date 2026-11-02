@@ -7,7 +7,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { callCloudFlow, CLOUD_API_DEADLINE_EXCEEDED, previewCloudFlow } from '../server/cloud-api-client';
 import { composeStrategy } from '../engine/strategy-engine';
-import { createRequestBudget, DeadlineError, MCP_PLATFORM_LIMIT_MS, MCP_REQUEST_BUDGET_MS, MCP_RESPONSE_MARGIN_MS, withinBudget } from './deadline';
+import { createRequestBudget, DeadlineError, MCP_PLATFORM_LIMIT_MS, MCP_REQUEST_BUDGET_MS, MCP_RESPONSE_MARGIN_MS, MCP_TOOL_TIMEOUTS, toolCap, withinBudget } from './deadline';
 import { credential, gatewayEnv, memoryLogger, session } from './gateway.test-harness';
 import { boundedRuntime, deploymentRuntime, type McpRuntime } from './runtime';
 import { timeoutResult } from './tools';
@@ -208,3 +208,18 @@ describe('what a timed-out tool may say about its effects', () => {
       expect(timeoutResult(tool, 'MCP_REQUEST_TIMEOUT', null)).toMatchObject({ outcome: 'NOT_COMPLETED', retryable: true });
   });
 });
+
+describe('BUILD-FLOFI-E2E-RELIABILITY-001 per-tool caps count from the request arrival', () => {
+  it('the gateway work before a tool comes out of its cap, never below a short floor', () => {
+    let clock = 1_000_000;
+    const budget = createRequestBudget({ now: () => clock });
+    expect(toolCap(budget, MCP_TOOL_TIMEOUTS.approvalWrite)).toBe(50_000);
+    clock += 12_000;   // e.g. a cold OAuth store read before the tool started
+    expect(toolCap(budget, MCP_TOOL_TIMEOUTS.approvalWrite)).toBe(38_000);
+    clock += 60_000;
+    expect(toolCap(budget, MCP_TOOL_TIMEOUTS.default)).toBe(5_000);
+    expect(toolCap(null, MCP_TOOL_TIMEOUTS.default)).toBe(55_000);
+    budget.dispose();
+  });
+});
+

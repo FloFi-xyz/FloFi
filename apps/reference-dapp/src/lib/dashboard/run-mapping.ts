@@ -138,6 +138,9 @@ export function projectDashboardRun(run: DashboardRun, progress: ExecutionLifecy
   } else if (run.attemptsUnavailable && status === 'Not started') {
     // The summary looks not started, but the attempts that would prove it could not be read: fail closed, never "nothing was sent".
     status = 'Unresolved'; message = 'The recorded requests of this run could not be read, so FloFi does not claim that nothing was sent. Refresh history to check again.';
+  } else if (run.attemptsUnavailable && status === 'Transaction not submitted') {
+    // The latest request was declined or not submitted, but whether an earlier one (a token approval) landed could not be read (follow-up review).
+    status = 'Unresolved'; message = 'The latest request was not submitted, but the earlier requests of this run could not be read, so an earlier confirmed action (such as a token approval) cannot be ruled out. Refresh history to check again.';
   }
   const attention: string[] = [];
   if (status === 'Unresolved') attention.push('Execution status unresolved');

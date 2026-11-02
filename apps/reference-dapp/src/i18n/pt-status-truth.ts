@@ -11,6 +11,8 @@ export const portugueseStatusTruth: Readonly<Record<string, string>> = {
   'Only the token approval is confirmed onchain. An approval moves no funds by itself, and the main action has not completed.':
     'Apenas a aprovação do token está confirmada onchain. Uma aprovação não move fundos por si só, e a ação principal não foi concluída.',
   'The request was cancelled': 'A solicitação foi cancelada',
+  'The latest request was not submitted, but the earlier requests of this run could not be read, so an earlier confirmed action (such as a token approval) cannot be ruled out. Refresh history to check again.':
+    'A última solicitação não foi enviada, mas as solicitações anteriores desta execução não puderam ser lidas, então uma ação anterior confirmada (como uma aprovação de token) não pode ser descartada. Atualize o histórico para verificar de novo.',
   'A wallet request is prepared; no submission is recorded yet. Open the run to check it before doing anything else.':
     'Uma solicitação à carteira está preparada; nenhum envio foi registrado ainda. Abra a execução para verificá-la antes de qualquer outra ação.',
   'Wallet request prepared — no submission recorded; open the run to check': 'Solicitação à carteira preparada — nenhum envio registrado; abra a execução para verificar',
