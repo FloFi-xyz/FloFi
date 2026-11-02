@@ -117,12 +117,15 @@ export type SchemaCompatibility = { readonly version: number; readonly applicati
 const FILE = /^(\d{4})_([a-z0-9_]+)\.sql$/;
 const LOCK_ID = 7_340_032_001; // Constant advisory lock key for migration runners.
 
+// BUILD-FLOFI-VERCEL-STORAGE-001: `turbopackIgnore` keeps Next's tracer from treating this runtime-chosen directory as "the whole
+// project": without it every function that imports this package shipped the entire app directory (e2e screenshots, sources,
+// public assets). Serverless functions never call this (they use SHIPPED_MIGRATIONS); the migrate command reads the files on disk.
 export async function loadMigrations(directory = MIGRATIONS_DIRECTORY): Promise<readonly Migration[]> {
-  const files = (await readdir(directory)).filter(file => file.endsWith('.sql')).sort();
+  const files = (await readdir(/*turbopackIgnore: true*/ directory)).filter(file => file.endsWith('.sql')).sort();
   const migrations = await Promise.all(files.map(async (file, index) => {
     const match = FILE.exec(file);
     if (!match || Number(match[1]) !== index + 1) throw new Error('MIGRATION_SEQUENCE_INVALID');
-    const sql = await readFile(`${directory}/${file}`, 'utf8');
+    const sql = await readFile(/*turbopackIgnore: true*/ `${directory}/${file}`, 'utf8');
     return { version: Number(match[1]), name: match[2]!, sql, sha256: createHash('sha256').update(sql).digest('hex') };
   }));
   return Object.freeze(migrations);

@@ -98,6 +98,7 @@ commands:
             set -euo pipefail
             source scripts/ci-observe.sh 'Production build'
             pnpm build
+            python3 scripts/function_traces.py apps/reference-dapp
   bootstrap-anvil:
     description: "The exact approved anvil"
     steps:
