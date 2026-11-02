@@ -154,21 +154,23 @@ export async function cloudPreview<T>(flow: FlowName, args: readonly unknown[], 
  * BUILD-MCP-001: one durable run, or one page of its journal, read as `owner`: `null` when the run is absent or belongs to
  * anyone else (never distinguishable). `null` result in local mode, where runs are not durable.
  */
-export async function cloudRun(runId: string, owner: string, options: { readonly env?: Env; readonly transport?: typeof fetch } = {}):
+export async function cloudRun(runId: string, owner: string, options: { readonly env?: Env; readonly transport?: typeof fetch; readonly timeoutMs?: number } = {}):
   Promise<FlowResult<CloudRun | null> | null> {
   const env = options.env ?? process.env, kind = flowRuntimeKind(env);
   if (kind === 'local') return null;
   if (kind === 'unconfigured') return { ok: false, code: 'CLOUD_RUNTIME_NOT_CONFIGURED' };
-  if (kind === 'remote') return readCloudRun<CloudRun>(runId, owner, { env, ...options.transport ? { transport: options.transport } : {} });
+  if (kind === 'remote') return readCloudRun<CloudRun>(runId, owner, { env, ...options.transport ? { transport: options.transport } : {},
+    ...options.timeoutMs === undefined ? {} : { timeoutMs: options.timeoutMs } });
   try { return { ok: true, value: await (await embeddedRuntime(env)).run(runId, owner) }; }
   catch (error) { return { ok: false, code: classified(error, 'CLOUD_RUNTIME_UNAVAILABLE') }; }
 }
-export async function cloudRunJournal(runId: string, owner: string, after: number | null, limit: number, options: { readonly env?: Env; readonly transport?: typeof fetch } = {}):
+export async function cloudRunJournal(runId: string, owner: string, after: number | null, limit: number, options: { readonly env?: Env; readonly transport?: typeof fetch; readonly timeoutMs?: number } = {}):
   Promise<FlowResult<CloudJournalPage | null> | null> {
   const env = options.env ?? process.env, kind = flowRuntimeKind(env);
   if (kind === 'local') return null;
   if (kind === 'unconfigured') return { ok: false, code: 'CLOUD_RUNTIME_NOT_CONFIGURED' };
-  if (kind === 'remote') return readCloudRun<CloudJournalPage>(runId, owner, { env, journal: { after, limit }, ...options.transport ? { transport: options.transport } : {} });
+  if (kind === 'remote') return readCloudRun<CloudJournalPage>(runId, owner, { env, journal: { after, limit }, ...options.transport ? { transport: options.transport } : {},
+    ...options.timeoutMs === undefined ? {} : { timeoutMs: options.timeoutMs } });
   try { return { ok: true, value: await (await embeddedRuntime(env)).journal(runId, owner, after, limit) }; }
   catch (error) { return { ok: false, code: classified(error, 'CLOUD_RUNTIME_UNAVAILABLE') }; }
 }

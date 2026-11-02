@@ -54,7 +54,7 @@ import { workflowVisualModel, type WorkflowVisualModel } from '../platform/workf
 import { workflowVisualLayout, workflowVisualText } from '../platform/workflow-visual-layout.ts';
 import { workflowVisualPngOrNull } from '../server/workflow-visual-image.ts';
 import { FLOFI_PRODUCTION_ORIGIN, publicApprovalUrl } from '../platform/navigation.ts';
-import { DeadlineError, isDeadlineError, MCP_PLATFORM_LIMIT_MS, withinBudget, type DeadlineCode, type RequestBudget } from './deadline.ts';
+import { DeadlineError, isDeadlineError, MCP_TOOL_TIMEOUTS, withinBudget, type DeadlineCode, type RequestBudget } from './deadline.ts';
 
 /** BUILD-DEVELOPER-001: the deep links moved to the shared approval service; re-exported for existing importers. */
 export { walletDeepLinks } from '../platform/index.ts';
@@ -209,7 +209,8 @@ export function timeoutResult(tool: ToolName, code: string, requestId: string | 
         'Any approval request still needs the owner to review it and confirm in their own wallet; nothing executes from MCP.'
       : 'FloFi did not finish this request in time. Whether the previous approval link was replaced is UNKNOWN. Read get_approval_status for this approvalId ' +
         'before opening another link; do not retry automatically.',
-    next: ['get_approval_status'] };
+    // A timed-out approval request delivered no approvalId, so no status can be read for it: the next step is asking the user.
+    next: tool === 'request_user_approval' ? [] : ['get_approval_status'] };
   if (kind === 'STATUS_READ') return { ok: false, code, ...id, outcome: 'STATUS_UNKNOWN', retryable: true, authority: AUTHORITY,
     message: 'FloFi could not read this status in time. The status is UNKNOWN: this is not evidence that nothing was submitted, that anything failed or that it completed. ' +
       `Read it again with ${tool}.`, next: [tool] };
@@ -269,7 +270,7 @@ export function createFlofiMcpServer(ctx: ToolContext): McpServer {
       let result: CallToolResult, outcome = 'OK';
       try {
         // The whole tool — catalog preparation, runtime reads, presentation — waits at most until the request's tool deadline.
-        result = await withinBudget(ctx.budget, MCP_PLATFORM_LIMIT_MS, async () => {
+        result = await withinBudget(ctx.budget, TIMEOUT_CLASS[name] === 'EFFECT_UNKNOWN' ? MCP_TOOL_TIMEOUTS.approvalWrite : MCP_TOOL_TIMEOUTS.default, async () => {
         if (!principalScopes(ctx.principal).includes(scope)) failWith('MCP_INSUFFICIENT_SCOPE');
         // BUILD-RH-002: a strategy naming Robinhood Chain composes against the validated official catalog (where this deployment enables it);
         // BUILD-BASE-001: so does one naming Base (its validated token list).
@@ -288,7 +289,10 @@ export function createFlofiMcpServer(ctx: ToolContext): McpServer {
           ? { ...publicFields, approvalUrl: publicApprovalUrl(ctx.oauth!.origin, output.approvalId) }
           : output;
         const presented = VISUAL_TOOLS.has(name) && isVisualModel(visible.visual)
-          ? await presentation(visible.visual, visible, name === 'request_user_approval').catch(() => null) : null;
+          // BUILD-FLOFI-E2E-RELIABILITY-001 (MCP review): the picture is optional and comes after an approval may already exist, so it is capped
+          // (5 s) and dropped on timeout — never the result, and never turning a created approval into an UNKNOWN timeout.
+          ? await Promise.race([presentation(visible.visual, visible, name === 'request_user_approval').catch(() => null),
+            new Promise<null>(resolve => { const timer = setTimeout(() => resolve(null), 5_000); timer.unref?.(); })]) : null;
         const meta = { ...privateLinks && typeof approvalUrl === 'string' ? { 'flofi/approval': { approvalUrl, walletLinks } } : {}, ...presented?.meta };
         return { content: [{ type: 'text', text: JSON.stringify(visible) }, ...presented?.content ?? []], structuredContent: visible,
           ...Object.keys(meta).length ? { _meta: meta } : {} } satisfies CallToolResult;

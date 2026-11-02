@@ -248,6 +248,23 @@ describe('BUILD-FLOFI-E2E-RELIABILITY-001 read-only previews are bounded', () =>
     const runs = await t.db.query(`SELECT count(*)::int AS n FROM execution_runs WHERE flow = 'aave-supply' AND created_at > now() - interval '1 minute' AND owner_account = $1`, [SUPPLY_OWNER.toLowerCase()]);
     expect(runs.rows[0]).toEqual({ n: 0 });
   });
+
+  it('an abandoned preview starts no further read on the shared transport once its deadline passed', async () => {
+    const base = supplyModel();
+    let cutoff = Number.POSITIVE_INFINITY, reads = 0, late = 0;
+    // Every read answers, slowly: without the cutoff the abandoned simulation keeps reading the shared transport after its caller left.
+    const slow = { ...base, rpc: async (method: string, params: readonly unknown[]) => {
+      reads += 1; if (Date.now() >= cutoff) late += 1;
+      await new Promise(resolve => setTimeout(resolve, 40));
+      return base.rpc(method, params);
+    } } as unknown as ReturnType<typeof supplyModel>;
+    const d = await deployment({ model: slow, previewTimeoutMs: 100 });
+    expect(await d.backend.previewFlow('aave-supply', [supplyWorkflow, SUPPLY_OWNER])).toEqual({ ok: false, code: 'CLOUD_PREVIEW_TIMEOUT' });
+    cutoff = Date.now();
+    await new Promise(resolve => setTimeout(resolve, 400));
+    expect(reads).toBeGreaterThan(0);
+    expect(late).toBe(0);
+  });
 });
 
 describe('BUILD-CLOUD-001 Aave Supply family on durable cloud state', () => {

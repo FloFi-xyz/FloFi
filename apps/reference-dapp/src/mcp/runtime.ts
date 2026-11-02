@@ -111,8 +111,10 @@ function budgetedDeploymentRuntime(env: Env, budget: RequestBudget): McpRuntime 
     },
     info: async flow => infoOf(fact(await cloudFlow<unknown>(flow, 'info', [], read()))),
     preview: async (flow, args) => checked<unknown>(await cloudPreview(flow, args, { env, transport, timeoutMs: cap(MCP_UPSTREAM_TIMEOUTS.preview), maxAttempts: 1 }) ?? REQUIRED),
-    run: async (runId, owner) => checked<CloudRun | null>(await cloudRun(runId, owner, { env, transport }) ?? REQUIRED),
-    journal: async (runId, owner, after, limit) => checked<CloudJournalPage | null>(await cloudRunJournal(runId, owner, after, limit, { env, transport }) ?? REQUIRED),
+    // The same per-read cap as every other upstream read (never the client's 30 s default, which outlived the tool's own cap).
+    run: async (runId, owner) => checked<CloudRun | null>(await cloudRun(runId, owner, { env, transport, timeoutMs: cap(MCP_UPSTREAM_TIMEOUTS.read) }) ?? REQUIRED),
+    journal: async (runId, owner, after, limit) => checked<CloudJournalPage | null>(await cloudRunJournal(runId, owner, after, limit,
+      { env, transport, timeoutMs: cap(MCP_UPSTREAM_TIMEOUTS.read) }) ?? REQUIRED),
     evidence: async (flow, runId, owner) => checked(await evidenceOf(flow, await cloudFlow(flow, 'status', [runId], { ...read(), principal: owner }))),
     // `cloudRuns` takes no transport: the remote read is made here with the same client, so it carries the deadline too.
     runs: async (flow, owner) => checked<readonly CloudRunSummary[]>(kind === 'remote' ? await listCloudRuns(flow, owner, { env, transport, timeoutMs: cap(MCP_UPSTREAM_TIMEOUTS.read), signal: budget.signal })

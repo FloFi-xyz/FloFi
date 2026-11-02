@@ -76,20 +76,21 @@ export function panelConfig(env: Env): { readonly resourceUri: string; readonly 
   return { resourceUri: PANEL_URI, inFrameProbeHosts: hosts };
 }
 
-type Pending = { readonly id: string | number; readonly tool: ToolName | null };
+type Pending = { readonly id: string | number; readonly tool: ToolName | null; readonly call: boolean };
 /** The JSON-RPC methods of a body (bounded), the tool of a single `tools/call`, and each request id (with its tool) a gateway answer must echo. */
 function messagesOf(body: string | null): { readonly methods: string; readonly tool: string | null; readonly requests: readonly Pending[]; readonly batch: boolean } {
   let parsed: unknown;
   try { parsed = body === null ? null : JSON.parse(body); } catch { parsed = null; }
-  const list = (Array.isArray(parsed) ? parsed : [parsed]).filter((m): m is Record<string, unknown> => !!m && typeof m === 'object').slice(0, 100);
+  // Every message is kept (the 64 KiB body already bounds them): a deadline answer must echo every request id.
+  const list = (Array.isArray(parsed) ? parsed : [parsed]).filter((m): m is Record<string, unknown> => !!m && typeof m === 'object');
   const methods = [...new Set(list.map(m => typeof m.method === 'string' && /^[A-Za-z0-9/_.-]{1,64}$/.test(m.method) ? m.method : null).filter(Boolean))].slice(0, 8).join(',');
   const toolOf = (m: Record<string, unknown>): ToolName | null => {
     const name = m.method === 'tools/call' ? (m.params as { name?: unknown } | undefined)?.name : null;
     return typeof name === 'string' && Object.hasOwn(TOOL_SCOPES, name) ? name as ToolName : null;
   };
   const calls = list.filter(m => m.method === 'tools/call'), tool = calls.length === 1 ? toolOf(calls[0]!) : null;
-  const requests = list.filter(m => typeof m.id === 'string' && m.id.length <= 128 || typeof m.id === 'number' && Number.isFinite(m.id))
-    .map(m => ({ id: m.id as string | number, tool: toolOf(m) }));
+  const requests = list.filter(m => typeof m.id === 'string' || typeof m.id === 'number' && Number.isFinite(m.id))
+    .map(m => ({ id: m.id as string | number, tool: toolOf(m), call: m.method === 'tools/call' }));
   return { methods, tool, batch: Array.isArray(parsed), requests };
 }
 /**
@@ -99,9 +100,14 @@ function messagesOf(body: string | null): { readonly methods: string; readonly t
 function deadlineResponse(body: string | null, budget: RequestBudget): Response {
   const { requests, batch } = messagesOf(body);
   if (!requests.length) return new Response(null, { status: 202, headers: HEADERS });
-  // Each request is classified by its own tool (a non-tool method is a read: it has no effect at all).
-  const answers = requests.map(({ id, tool }) => ({ jsonrpc: '2.0', id, error: { code: -32001, message: 'FloFi MCP request timed out',
-    data: timeoutResult(tool ?? 'get_supported_networks', 'MCP_REQUEST_TIMEOUT', budget.requestId) } }));
+  // Each request is classified by its own tool (a non-tool method is a read: it has no effect at all). BUILD-FLOFI-E2E-RELIABILITY-001 (MCP
+  // review): a `tools/call` is answered as a tool RESULT with `isError` (as the tool itself would), so hosts hand the model the classified
+  // guidance (an approval request's outcome UNKNOWN, no automatic retry) instead of a bare protocol error; other methods keep the JSON-RPC error.
+  const answers = requests.map(({ id, tool, call }) => {
+    const body = timeoutResult(tool ?? 'get_supported_networks', 'MCP_REQUEST_TIMEOUT', budget.requestId);
+    return call ? { jsonrpc: '2.0', id, result: { content: [{ type: 'text', text: JSON.stringify(body) }], structuredContent: body, isError: true } }
+      : { jsonrpc: '2.0', id, error: { code: -32001, message: 'FloFi MCP request timed out', data: body } };
+  });
   return Response.json(batch ? answers : answers[0], { status: 200, headers: HEADERS });
 }
 
@@ -113,8 +119,8 @@ export async function handleMcpRequest(request: Request, options: GatewayOptions
   let response: Response;
   try { response = await serve(request, options, budget, seen); }
   catch (error) {
-    // Never an unanswered request: an unexpected failure is a classified 500 with the request id.
-    seen.outcome = isDeadlineError(error) ? error.code : 'MCP_INTERNAL_ERROR';
+    // Never an unanswered request: an unexpected failure is a classified 500 with the request id (a client that left is logged as such).
+    seen.outcome = isDeadlineError(error) ? error.code : request.signal.aborted ? 'CLIENT_CLOSED' : 'MCP_INTERNAL_ERROR';
     response = reject(isDeadlineError(error) ? 503 : 500, seen.outcome);
   } finally { budget.dispose(); }
   const headers = new Headers(response.headers);
@@ -221,6 +227,9 @@ async function serve(request: Request, options: GatewayOptions, budget: RequestB
   } finally {
     clearTimeout(hardTimer);
     request.signal.removeEventListener('abort', closeForwarded);
-    await handler.close().catch(() => undefined);
+    // Bounded: a handler that waits for a stuck exchange never holds the gateway's own answer (or the function) past its deadline.
+    let closeTimer: ReturnType<typeof setTimeout> | undefined;
+    await Promise.race([handler.close().catch(() => undefined), new Promise<void>(resolve => { closeTimer = setTimeout(resolve, 1_000); })]);
+    clearTimeout(closeTimer);
   }
 }

@@ -801,6 +801,14 @@
     "app.lib.dashboard.landed-attempts": {
       "path": "apps/reference-dapp/src/lib/dashboard/landed-attempts.test.ts",
       "stage": "unit"
+    },
+    "app.mcp.gateway-deadline": {
+      "path": "apps/reference-dapp/src/mcp/gateway-deadline.test.ts",
+      "stage": "unit"
+    },
+    "app.developer.events-sync": {
+      "path": "apps/reference-dapp/src/developer/events-sync.test.ts",
+      "stage": "unit"
     }
   },
   "requiredUnitSuites": [
@@ -848,7 +856,9 @@
     "app.domain.canonical-execution-status",
     "app.domain.journey-metrics",
     "app.app.api.flofi.journey.route",
-    "app.server.journey-telemetry"
+    "app.server.journey-telemetry",
+    "app.mcp.gateway-deadline",
+    "app.developer.events-sync"
   ],
   "modules": [
     {
@@ -2909,7 +2919,8 @@
         "app.developer.sdk.pg",
         "app.developer.webhooks.pg",
         "developer-sdk.client",
-        "developer-sdk.webhooks"
+        "developer-sdk.webhooks",
+        "app.developer.events-sync"
       ],
       "gaps": [
         "Developer credentials are SANDBOX only; real B2B partners and live webhook receivers require acceptance."
@@ -3595,7 +3606,8 @@
         "app.mcp.oauth.server.pg",
         "app.mcp.pix-approval-status",
         "app.platform.engineering-continuity",
-        "app.platform.intelligence-parity"
+        "app.platform.intelligence-parity",
+        "app.mcp.gateway-deadline"
       ],
       "gaps": [
         "External ChatGPT/Claude OAuth and approval acceptance remains manual; local gateway tests do not certify hosted clients."

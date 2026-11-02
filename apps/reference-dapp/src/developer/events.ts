@@ -13,7 +13,7 @@
  *
  * Payloads carry ids, states and evidence facts only: never a wallet, a secret, calldata or a transaction.
  */
-import { sharedRuns, TERMINAL, type EngineRuntime, type HandoffRecord, type HandoffStore, type RunProgress } from '../platform/index.ts';
+import { sharedRunsRead, TERMINAL, type EngineRuntime, type HandoffRecord, type HandoffStore, type RunProgress } from '../platform/index.ts';
 import { developerRequesterRef, type ApprovalBinding, type DeveloperEventType, type DeveloperStore, type NewEvent } from './store.ts';
 
 /** An APPLIED approval keeps being watched for runs this long; after that (or once it ended) it is settled. */
@@ -49,13 +49,15 @@ export async function syncDeveloperApprovals(deps: SyncDeps, filter: SyncFilter,
     const scope = { projectId: binding.projectId, environment: binding.environment };
     const h = await deps.handoffs.forRequester(binding.handoffId, { kind: 'DEVELOPER_PROJECT', ref: developerRequesterRef(scope.projectId, scope.environment) }, deps.now);
     if (!h) { await deps.store.markSynced(binding.handoffId, true, deps.now); continue; }
-    // A runtime failure leaves the runs for the next sweep; the approval's own events are still derived.
-    const runs = await sharedRuns(h, deps.runtime, deps.handoffs).catch(() => null);
+    // A runtime failure leaves the runs for the next sweep; the approval's own events are still derived. BUILD-FLOFI-E2E-RELIABILITY-001: a run
+    // read that failed (or was incomplete) never lets the approval settle, so its run events are synced later instead of being lost.
+    const read = await sharedRunsRead(h, deps.runtime, deps.handoffs).catch(() => undefined), readFailed = read === undefined || read?.complete === false;
+    const runs = read ? read.runs : null;
     const recorded = await deps.store.recordEvents(scope, deriveEvents(binding, h, runs), deps.now);
     const step = h.plan.steps[0];
     for (const event of recorded) if (event.type === 'execution.reconciled')
       await deps.store.incrementUsage(scope, 'execution.reconciled', step ? `${step.network}:${step.protocol}` : '', deps.now);
-    const settled = TERMINAL.includes(h.status) || (h.appliedAt !== null && deps.now.getTime() - h.appliedAt.getTime() > APPLIED_WATCH_MS);
+    const settled = !readFailed && (TERMINAL.includes(h.status) || (h.appliedAt !== null && deps.now.getTime() - h.appliedAt.getTime() > APPLIED_WATCH_MS));
     await deps.store.markSynced(binding.handoffId, settled, deps.now);
   }
   return bindings.length;

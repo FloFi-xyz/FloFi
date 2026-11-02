@@ -41,7 +41,7 @@ describe('request_user_approval past its deadline', () => {
       .callTool('request_user_approval', { strategy: BRIDGE, workflowHash: hashOf(BRIDGE) });
     expect(Date.now() - started).toBeLessThan(8_000);
     expect(late).toMatchObject({ isError: true, output: { ok: false, code: 'MCP_REQUEST_TIMEOUT', outcome: 'UNKNOWN', retryable: false, automaticRetry: false,
-      next: ['get_approval_status'], requestId: expect.stringMatching(/^[0-9a-f-]{36}$/) } });
+      next: [], requestId: expect.stringMatching(/^[0-9a-f-]{36}$/) } });
     expect(late.text).not.toMatch(/apr_|flofi_hs_|approvalUrl/);
     expect(String(late.output.message)).toMatch(/UNKNOWN/);
     // Exactly one write: the deadline neither retried nor repeated it, and the approval really exists (so "nothing was created" would be false).

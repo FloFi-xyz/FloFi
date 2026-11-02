@@ -7,6 +7,7 @@ import { embeddedRuntime, flowRuntimeKind } from '../../server/flow-runtime';
 import { workflowOwner, WORKFLOW_OWNER_HEADER } from '../../domain/saved-workflow';
 import { dashboardRunId, object, optionalText, textValue, toDashboardAttempts, toDashboardRun } from './run-mapping';
 import { attemptDependentStatus } from '../../domain/landed-attempts';
+import { settledWithEvidence } from '../../domain/canonical-execution-status';
 import type { DashboardDetailResponse, DashboardRun, DashboardSnapshot } from './types';
 
 async function connection(expectedAccount: string): Promise<{ connection: DashboardSnapshot['connection']; account: string | null; base: URL | null }> {
@@ -21,7 +22,7 @@ async function connection(expectedAccount: string): Promise<{ connection: Dashbo
     return { connection: base ? 'CONNECTED' : 'NOT_CONFIGURED', account: principal, base };
   } catch { return { connection: 'UNAVAILABLE', account: principal, base: null }; }
 }
-async function cloudGet(base: URL, path: string, account: string): Promise<unknown> {
+async function cloudGet(base: URL, path: string, account: string, signal?: AbortSignal): Promise<unknown> {
   const principalHeader = /^0x/.test(account) ? { [WALLET_PRINCIPAL_HEADER]: account } : { [WORKFLOW_OWNER_HEADER]: `solana:${account}` };
   if (flowRuntimeKind(process.env) === 'embedded') {
     const { backend } = await embeddedRuntime();
@@ -34,7 +35,7 @@ async function cloudGet(base: URL, path: string, account: string): Promise<unkno
     } catch (error) { if ((error as { status?: number }).status === 404) throw Error('RUN_NOT_FOUND', { cause: error }); throw error; }
   }
   const target = new URL(path, base.href.endsWith('/') ? base : new URL(base.href + '/'));
-  const response = await fetch(target, { method: 'GET', cache: 'no-store', redirect: 'error', signal: AbortSignal.timeout(30_000),
+  const response = await fetch(target, { method: 'GET', cache: 'no-store', redirect: 'error', signal: signal ? AbortSignal.any([AbortSignal.timeout(30_000), signal]) : AbortSignal.timeout(30_000),
     headers: { ...process.env.API_AUTH_TOKEN ? { authorization: `Bearer ${process.env.API_AUTH_TOKEN}` } : {}, ...principalHeader } });
   if (response.status === 404) throw new Error('RUN_NOT_FOUND');
   const body: unknown = await response.json();
@@ -47,11 +48,18 @@ async function cloudGet(base: URL, path: string, account: string): Promise<unkno
  * recorded attempts attached; the projection then follows the canonical lifecycle. A read that fails marks the run, so it never reads
  * "nothing was sent". Runs whose summary already carries attempts are not read again.
  */
-async function withAttempts(base: URL, account: string, runs: readonly DashboardRun[]): Promise<DashboardRun[]> {
-  const out = [...runs], pending = out.map((run, index) => ({ run, index })).filter(({ run }) => !run.attempts && attemptDependentStatus(run.status));
+async function withAttempts(base: URL, account: string, runs: readonly DashboardRun[], budgetMs = 10_000): Promise<DashboardRun[]> {
+  // BUILD-FLOFI-E2E-RELIABILITY-001 (workflow review): a run that verified evidence already settled needs no read, and all reads share one
+  // total budget — a hung API marks the rest as unreadable (never "nothing was sent") instead of holding the whole Dashboard.
+  const out = [...runs], pending = out.map((run, index) => ({ run, index }))
+    .filter(({ run }) => !run.attempts && attemptDependentStatus(run.status) && !(settledWithEvidence(run) && !run.needsObservation));
+  const budget = AbortSignal.timeout(budgetMs);
+  const expired = new Promise<never>((_, reject) => { budget.addEventListener('abort', () => reject(new Error('DASHBOARD_ATTEMPT_BUDGET')), { once: true }); });
+  expired.catch(() => undefined);
   for (let i = 0; i < pending.length; i += 5) await Promise.all(pending.slice(i, i + 5).map(async ({ run, index }) => {
     try {
-      const raw = await cloudGet(base, `v1/runs/${encodeURIComponent(run.runId)}`, account);
+      if (budget.aborted) throw new Error('DASHBOARD_ATTEMPT_BUDGET');
+      const raw = await Promise.race([cloudGet(base, `v1/runs/${encodeURIComponent(run.runId)}`, account, budget), expired]);
       // The same owner-scoped record, or nothing: a record of another run or owner never lends its attempts.
       const own = toDashboardRun(raw, account);
       out[index] = own?.runId === run.runId && own.attempts ? { ...run, attempts: own.attempts } : { ...run, attemptsUnavailable: true };
@@ -59,7 +67,7 @@ async function withAttempts(base: URL, account: string, runs: readonly Dashboard
   }));
   return out;
 }
-export async function loadDashboardSnapshot(expectedAccount: string, cursor: string | null = null): Promise<DashboardSnapshot> {
+export async function loadDashboardSnapshot(expectedAccount: string, cursor: string | null = null, options: { readonly attemptBudgetMs?: number } = {}): Promise<DashboardSnapshot> {
   const scope = await connection(expectedAccount);
   const empty: DashboardSnapshot = { connection: scope.connection, account: scope.account, runs: [], hasMore: false };
   if (!scope.base || !scope.account) return empty;
@@ -69,7 +77,7 @@ export async function loadDashboardSnapshot(expectedAccount: string, cursor: str
     const value = await cloudGet(scope.base, `v1/runs?${query}`, scope.account);
     if (!object(value) || !Array.isArray(value.items)) throw new Error('CLOUD_API_UNAVAILABLE');
     const runs = value.items.flatMap(item => { const run = toDashboardRun(item, scope.account!); return run ? [run] : []; });
-    return { ...empty, runs: await withAttempts(scope.base, scope.account, runs), hasMore: Boolean(optionalText(value.next)), next: optionalText(value.next) };
+    return { ...empty, runs: await withAttempts(scope.base, scope.account, runs, options.attemptBudgetMs), hasMore: Boolean(optionalText(value.next)), next: optionalText(value.next) };
   } catch { return { ...empty, connection: 'UNAVAILABLE' }; }
 }
 

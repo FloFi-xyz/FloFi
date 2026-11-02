@@ -68,6 +68,18 @@ const titles: Record<string, string> = { 'aave-supply': 'Aave workflow', 'base-s
   'base-aave': 'Aave workflow', 'arbitrum-aave': 'Aave workflow', 'ethereum-aave': 'Aave workflow', 'lending-composition': 'Lending workflow',
   'solana-devnet-composition': 'Swap + Liquidity workflow', 'pix-payment': 'Payment' };
 
+/**
+ * Only a wallet decline or a cancellation is "declined": a request FloFi refused before the wallet (NOT_SUBMITTED) or one that expired without
+ * executing is said as such. NOT_EXECUTED is also a composition leg never signed (a decline), so only EXPIRED says "expired".
+ */
+function notSubmittedWording(state: string, message: string): { chip: string; message: string } {
+  if (state === 'NOT_SUBMITTED') return { chip: 'The request was not submitted', message };
+  if (state === 'NOT_EXECUTED') return { chip: 'The request was not executed', message: 'This request was not executed. Earlier confirmed actions and costs remain recorded.' };
+  if (state === 'EXPIRED') return { chip: 'The request expired without executing', message: 'This request expired without executing. Earlier confirmed actions and costs remain recorded.' };
+  return { chip: 'Wallet confirmation was declined', message };
+}
+const NOT_SUBMITTED_RUN = ['CANCELLED', 'REJECTED', 'NOT_SUBMITTED', 'NOT_EXECUTED', 'EXPIRED'];
+
 export function projectDashboardRun(run: DashboardRun, progress: ExecutionLifecycle | null = null, title = titles[run.flow] ?? (run.flow.startsWith('crosschain-router-') ? 'Bridge' : 'Financial operation'), current = false): DashboardRunView {
   const result = projectExecutionResult(progress);
   // A recorded unknown wallet or submission result: something may have been sent (the canonical lifecycle's INCONCLUSIVE).
@@ -84,19 +96,9 @@ export function projectDashboardRun(run: DashboardRun, progress: ExecutionLifecy
     status = run.attentionRequired || run.errorCode ? 'Completed with attention' : 'Completed';
     message = 'The run records a reconciled outcome.';
   // BUILD-FLOFI-EXECUTION-PERFORMANCE-001: the same groups as the canonical lifecycle (domain/canonical-execution-status.ts) for statuses flows emit.
-  } else if (['CANCELLED', 'REJECTED', 'NOT_SUBMITTED', 'NOT_EXECUTED', 'EXPIRED'].includes(run.status) && !run.needsObservation) {
+  } else if (NOT_SUBMITTED_RUN.includes(run.status) && !run.needsObservation) {
     status = 'Transaction not submitted'; message = 'This request was recorded as not submitted. Earlier confirmed actions and costs remain recorded.';
-    // Only a wallet decline or a cancellation is "declined": a request FloFi refused before the wallet (NOT_SUBMITTED) or one that expired
-    // without executing is said as such.
-    if (run.status === 'NOT_SUBMITTED') notSubmittedChip = 'The request was not submitted';
-    // NOT_EXECUTED is also a composition leg never signed (a decline), so only EXPIRED says "expired".
-    else if (run.status === 'NOT_EXECUTED') {
-      notSubmittedChip = 'The request was not executed';
-      message = 'This request was not executed. Earlier confirmed actions and costs remain recorded.';
-    } else if (run.status === 'EXPIRED') {
-      notSubmittedChip = 'The request expired without executing';
-      message = 'This request expired without executing. Earlier confirmed actions and costs remain recorded.';
-    }
+    ({ chip: notSubmittedChip, message } = notSubmittedWording(run.status, message));
   } else if (run.status === 'SUBMITTING') {
     status = 'Unresolved'; message = 'A recorded request still needs verification. No transaction is repeated.';
   } else if (['PARTIAL', 'PARTIALLY_COMPLETED'].includes(run.status)) {
@@ -116,7 +118,17 @@ export function projectDashboardRun(run: DashboardRun, progress: ExecutionLifecy
   const landed = landedAttempts(run.attempts);
   if (run.attempts?.length) {
     const lifecycle = canonicalRunLifecycle(run), summary = { status, message };
-    if (!progress) ({ status, message } = fromLifecycle(lifecycle, landed, run, summary));
+    if (!progress) {
+      ({ status, message } = fromLifecycle(lifecycle, landed, run, summary));
+      // BUILD-FLOFI-E2E-RELIABILITY-001 (workflow review): a "not submitted" that only the latest attempt proves (the run still reads SIMULATED
+      // or AUTHORIZED) takes that attempt's wording — an expired or refused request is never called a wallet decline.
+      const latest = run.attempts.at(-1)?.state;
+      if (status === 'Transaction not submitted' && !NOT_SUBMITTED_RUN.includes(run.status) && latest) {
+        const wording = notSubmittedWording(latest, message);
+        notSubmittedChip = wording.chip;
+        if (summary.status !== status) message = wording.message;
+      }
+    }
     // A saved run's projected progress keeps its own truth, except where the attempts prove more: never "Not started" once something was
     // asked or landed, and a run whose only landed request is an approval is not still "in progress" when nothing else is pending.
     else if (status === 'Not started' && lifecycle.status !== 'NOT_STARTED') ({ status, message } = fromLifecycle(lifecycle, landed, run, summary));

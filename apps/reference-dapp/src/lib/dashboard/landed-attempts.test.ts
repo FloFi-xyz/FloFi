@@ -78,6 +78,17 @@ describe('Issue #149: Dashboard landed-attempt truth', () => {
     expect(projectDashboardRun(run('base-aave', 'AUTHORIZED', [attempt('APPROVAL', 'REFUSED')]))).toMatchObject({ status: 'Transaction not submitted', landed: null });
   });
 
+  it('a "not submitted" proven only by the latest attempt takes that attempt\'s wording: never a wallet decline for an expired or refused request', () => {
+    const chip = (state: string) => projectDashboardRun(run('base-swap', 'SIMULATED', [attempt('SWAP', state)]));
+    expect(chip('EXPIRED')).toMatchObject({ status: 'Transaction not submitted', attention: ['The request expired without executing'],
+      message: 'This request expired without executing. Earlier confirmed actions and costs remain recorded.' });
+    expect(chip('NOT_SUBMITTED')).toMatchObject({ status: 'Transaction not submitted', attention: ['The request was not submitted'] });
+    expect(chip('NOT_EXECUTED').attention).toEqual(['The request was not executed']);
+    expect(chip('REJECTED').attention).toEqual(['Wallet confirmation was declined']);
+    // The run's own not-submitted status keeps deciding when it has one.
+    expect(projectDashboardRun(run('base-swap', 'CANCELLED', [attempt('SWAP', 'EXPIRED')])).attention).toEqual(['Wallet confirmation was declined']);
+  });
+
   it('a prepared wallet request awaits the wallet; simulated-only runs with no attempts still say nothing was sent', () => {
     expect(projectDashboardRun(run('base-aave', 'PREPARED', [attempt('APPROVAL', 'PREPARED')]))).toMatchObject({ status: 'In progress', landed: null });
     const simulated = projectDashboardRun(run('base-aave', 'SIMULATED', []));

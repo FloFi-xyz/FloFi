@@ -187,7 +187,9 @@ export function panelMain(settings: PanelSettings, trustedUrl: typeof trustedFlo
     } catch (error) { view.error = error instanceof Error ? error.message : 'PROGRESS_FAILED'; }
     render();
     const runs = Array.isArray(view.progress?.runs) ? view.progress!.runs as Json[] : [];
-    const done = terminal(view.progress?.status) || runs.length > 0 && runs.every(r => r.reconciled === true || r.terminal === true);
+    // BUILD-FLOFI-E2E-RELIABILITY-001: an incomplete run list (a run read failed) is never "done": an unread run may still be in flight.
+    const incomplete = view.progress?.runsComplete === false;
+    const done = !incomplete && (terminal(view.progress?.status) || runs.length > 0 && runs.every(r => r.reconciled === true || r.terminal === true));
     if (!done) schedule(view.opened ? 5_000 : 15_000);
   }
   /** Status and evidence back to the conversation: public facts only (ids, states, environment, bundle hash). */
@@ -200,14 +202,15 @@ export function panelMain(settings: PanelSettings, trustedUrl: typeof trustedFlo
     const runs = (Array.isArray(progress.runs) ? progress.runs as Json[] : []).filter(r => r && typeof r === 'object').map(r => ({
       executionId: token(r.executionId), flow: token(r.flow), status: token(r.status), reconciled: r.reconciled === true,
       terminal: r.terminal === true, evidenceEnvironment: token(r.evidenceEnvironment), evidenceBundleHash: hash(r.evidenceBundleHash), receiptUrl: receipt(r) }));
-    const status = token(progress.status);
-    const summary = JSON.stringify({ status, runs });
+    const status = token(progress.status), runsComplete = progress.runsComplete !== false;
+    const summary = JSON.stringify({ status, runs, runsComplete });
     if (summary === view.reported) return;
     view.reported = summary;
     const lines = [`FloFi approval ${view.approval?.approvalId}: ${String(status)}.`, ...runs.map(r =>
-      `Run ${String(r.executionId)} (${String(r.flow)}): ${String(r.status)}${r.evidenceEnvironment ? `, evidence ${String(r.evidenceEnvironment)} ${String(r.evidenceBundleHash ?? '')}` : ''}.${r.receiptUrl ? ` Receipt: ${r.receiptUrl}` : ''}`)];
+      `Run ${String(r.executionId)} (${String(r.flow)}): ${String(r.status)}${r.evidenceEnvironment ? `, evidence ${String(r.evidenceEnvironment)} ${String(r.evidenceBundleHash ?? '')}` : ''}.${r.receiptUrl ? ` Receipt: ${r.receiptUrl}` : ''}`),
+      ...runsComplete ? [] : ['Some runs of this approval could not be read now: their state is UNKNOWN — this is not evidence that nothing was sent.']];
     void request('ui/update-model-context', { content: [{ type: 'text', text: lines.join(' ') }],
-      structuredContent: { flofiApproval: { approvalId: view.approval?.approvalId, status, runs } } }).catch(() => undefined);
+      structuredContent: { flofiApproval: { approvalId: view.approval?.approvalId, status, runs, runsComplete } } }).catch(() => undefined);
   }
 
   function render() {
@@ -244,6 +247,8 @@ export function panelMain(settings: PanelSettings, trustedUrl: typeof trustedFlo
       }
       root.append(el('h2', 'Execution'), list);
     }
+    // BUILD-FLOFI-E2E-RELIABILITY-001: a run read that failed is said, never shown as the full (or an empty) list.
+    if (view.progress?.runsComplete === false) root.append(el('p', 'Some runs could not be read now: their state is unknown, which is not evidence that nothing was sent. FloFi keeps checking.', 'muted'));
     if (!terminal(status) && status !== 'APPLIED') {
       const actions = el('div', undefined, 'actions');
       if (!signingFrame) actions.append(button('Authorize in chat', () => void connect('chat'), true));

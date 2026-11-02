@@ -105,6 +105,19 @@ describe('canonical workflow preview across surfaces', () => {
     expect(calls).toBe(2);
   });
 
+  it('a step whose read ran out of time is NOT_COMPLETED (never FAILED); the request deadline ends the whole preview', async () => {
+    let calls = 0;
+    const timedOut = { ...blockingRuntime().runtime, preview: async () => ++calls === 1 ? { ok: false as const, code: 'MCP_UPSTREAM_TIMEOUT' }
+      : { ok: false as const, code: 'SWAP_POOL_UNAVAILABLE' } } as McpRuntime;
+    const preview = await simulateWorkflowPreview(timedOut, workflowRequest);
+    expect(preview).toMatchObject({ status: 'INCOMPLETE', steps: [{ index: 0, state: 'NOT_COMPLETED', code: 'MCP_UPSTREAM_TIMEOUT' },
+      { index: 1, state: 'FAILED', code: 'SWAP_POOL_UNAVAILABLE' }] });
+    calls = 0;
+    const ended = { ...blockingRuntime().runtime, preview: async () => { calls++; throw new Error('MCP_REQUEST_TIMEOUT'); } } as McpRuntime;
+    await expect(simulateWorkflowPreview(ended, workflowRequest)).rejects.toThrow('MCP_REQUEST_TIMEOUT');
+    expect(calls).toBe(1);
+  });
+
   it('the MCP caller sends the complete canonical workflow once and receives all safe step previews', async () => {
     let calls = 0;
     const runtime = { ...blockingRuntime().runtime, preview: async () => { calls++; return { ok: true as const, value: quote }; } } as McpRuntime;

@@ -71,4 +71,25 @@ describe('Issue #149: Dashboard list attempt evidence', () => {
     expect(snapshot.runs.every(run => Array.isArray(run.attempts) && !run.attemptsUnavailable)).toBe(true);
     expect(peak).toBeLessThanOrEqual(5);
   });
+
+  it('skips runs whose verified evidence already settles them, and shares one total read budget (a hung API never holds the Dashboard)', async () => {
+    vi.mocked(currentWalletPrincipal).mockResolvedValue(account);
+    vi.mocked(cloudApiBaseUrl).mockReturnValue(new URL('http://127.0.0.1:9999/'));
+    const list = [{ ...summary('settled', 'COMPLETED'), hasEvidence: true }, summary('fast', 'SIMULATED'), summary('hung', 'AUTHORIZED')];
+    const transport = vi.fn().mockImplementation((url: URL) => {
+      if (url.pathname === '/v1/runs') return Promise.resolve(response({ items: list, next: null }));
+      const id = decodeURIComponent(url.pathname.split('/').at(-1)!);
+      // A read that never answers and ignores its abort signal: only the shared budget ends it.
+      return id === 'hung' ? new Promise(() => undefined) : Promise.resolve(response({ ...summary(id, 'SIMULATED'), attempts: [] }));
+    });
+    vi.stubGlobal('fetch', transport);
+    const started = Date.now();
+    const snapshot = await loadDashboardSnapshot(account, null, { attemptBudgetMs: 200 });
+    expect(Date.now() - started).toBeLessThan(5_000);
+    expect(transport.mock.calls.map(([url]) => (url as URL).pathname).sort()).toEqual(['/v1/runs', '/v1/runs/fast', '/v1/runs/hung']);
+    expect(snapshot.runs.map(run => [run.runId, run.attemptsUnavailable ?? false, Array.isArray(run.attempts)])).toEqual([
+      ['settled', false, false], ['fast', false, true], ['hung', true, false]]);
+    const views = Object.fromEntries(dashboardRunIndex(account, snapshot.runs, null).map(view => [view.run.runId, view.status]));
+    expect(views).toMatchObject({ settled: 'Completed', fast: 'Not started', hung: 'Unresolved' });
+  });
 });

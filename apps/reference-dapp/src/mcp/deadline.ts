@@ -27,10 +27,18 @@ export const MCP_UPSTREAM_TIMEOUTS = Object.freeze({
   /** Deployment facts (`mode`, `info`) and owner-scoped status reads. */
   read: 15_000,
   /** One read-only simulation preview (quotes, chain reads, transaction simulation). */
-  preview: 90_000,
+  preview: 45_000,
   /** The gateway's own PostgreSQL work before the MCP exchange (OAuth token, wallet links). */
   store: 20_000,
 });
+
+/**
+ * BUILD-FLOFI-E2E-RELIABILITY-001 (MCP review): per-tool caps inside the request budget. Hosted MCP clients commonly stop waiting for a tool
+ * call after about 60 s; a classified timeout answer (an approval request's outcome UNKNOWN, no automatic retry) only helps if it arrives
+ * before that, so every tool answers by ~55 s and an approval write by ~50 s. Trade-off: a slow preview that would have finished after 45 s
+ * now answers NOT_COMPLETED (retryable) instead of a late success the client would not have received anyway.
+ */
+export const MCP_TOOL_TIMEOUTS = Object.freeze({ approvalWrite: 50_000, default: 55_000 });
 
 export type BudgetEnd = 'DEADLINE' | 'CLIENT_CLOSED';
 export type RequestBudget = {
@@ -73,7 +81,10 @@ export function createRequestBudget(options: { readonly totalMs?: number; readon
   if (parent?.aborted) onParent(); else parent?.addEventListener('abort', onParent, { once: true });
   return { requestId: options.requestId && REQUEST_ID.test(options.requestId) ? options.requestId : randomUUID(), toolDeadline, hardDeadline,
     signal: controller.signal, remaining: () => Math.max(0, toolDeadline - now()), ended: () => ended,
-    dispose: () => { clearTimeout(timer); parent?.removeEventListener('abort', onParent); } };
+    // BUILD-FLOFI-E2E-RELIABILITY-001 (MCP review): the answer is already buffered when the request is disposed, so any read still running
+    // (one its own cap or the gateway's deadline answer left behind) is aborted instead of loading the upstream for nobody. `ended` is not
+    // set: disposing is not a deadline, and nothing classifies the request after it.
+    dispose: () => { clearTimeout(timer); parent?.removeEventListener('abort', onParent); if (!controller.signal.aborted) controller.abort(new DeadlineError('MCP_REQUEST_CANCELLED')); } };
 }
 
 /**

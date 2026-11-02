@@ -25,6 +25,21 @@ export function observeOnly(rpc: Rpc): Rpc {
   return (method, params) => SUBMISSION_METHODS.has(method) ? Promise.reject(new Error('WORKER_SUBMISSION_FORBIDDEN')) : rpc(method, params);
 }
 
+/**
+ * BUILD-FLOFI-E2E-RELIABILITY-001 (MCP review): once a preview's deadline passes, the abandoned preview may not start another read on the
+ * flow's shared, paced transport — so a preview nobody waits for cannot keep starving the reads of executions (begin, status, observe).
+ * Reads already in flight finish on their own; nothing here can submit (the preview transport is observe-only as well).
+ */
+export function untilAborted(rpc: Rpc, signal: AbortSignal): Rpc {
+  return (method, params) => signal.aborted ? Promise.reject(new Error('CLOUD_PREVIEW_TIMEOUT')) : rpc(method, params);
+}
+function previewTransport(deps: FlowDeps, signal: AbortSignal): FlowDeps {
+  const router = deps.router ? { router: { ...deps.router, destinationRpc: untilAborted(deps.router.destinationRpc, signal) } } : {};
+  const universal = deps.universal ? { universal: { ...deps.universal, solanaRpc: untilAborted(deps.universal.solanaRpc, signal),
+    evmRpcs: Object.fromEntries(Object.entries(deps.universal.evmRpcs).map(([chain, rpc]) => [chain, untilAborted(rpc, signal)])) } } : {};
+  return { ...deps, ...router, ...universal, rpc: untilAborted(deps.rpc, signal) };
+}
+
 export type FlowResult = { ok: true; value: unknown } | { ok: false; code: string; correlationId?: string };
 export type BackendOptions = {
   readonly db: Database; readonly env: Readonly<Record<string, string | undefined>>; readonly logger: Logger; readonly tenantId: string;
@@ -147,11 +162,13 @@ export function createBackend(options: BackendOptions) {
       // BUILD-FLOFI-E2E-RELIABILITY-001: a preview reads only (its storage is per call and discarded), so a deadline that stops waiting is safe.
       // Paced public RPC reads with retries could otherwise hold one preview for minutes, past every caller's own deadline (/api/mcp hit 300 s).
       let timer: ReturnType<typeof setTimeout> | undefined;
+      const abandoned = new AbortController(), deps = previewTransport(depsFor(flow, true), abandoned.signal);
       const deadline = new Promise<FlowResult>(resolve => { timer = setTimeout(() => {
+        abandoned.abort();
         logger.warn('flow.preview_timeout', { flow, action: method }); resolve({ ok: false, code: 'CLOUD_PREVIEW_TIMEOUT' });
       }, options.previewTimeoutMs ?? 80_000); });
-      try { return await Promise.race([deadline, (async () => ({ ok: true, value: purpose === 'QUOTE' ? await jupiterQuotePreview(args, depsFor(flow, true))
-        : await definition.create(previewStorage(), depsFor(flow, true), {}).call(method, args) }) as const)()]); }
+      try { return await Promise.race([deadline, (async () => ({ ok: true, value: purpose === 'QUOTE' ? await jupiterQuotePreview(args, deps)
+        : await definition.create(previewStorage(), deps, {}).call(method, args) }) as const)()]); }
       catch (error) {
         if (!(error instanceof Error && CODE.test(error.message))) logger.warn('flow.unclassified_error', { flow, action: method });
         if (flow === 'crosschain-universal') return reportUniversalFailure(error, method, fields => logger.warn('bridge.operation_failed', fields));

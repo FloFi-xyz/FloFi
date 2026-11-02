@@ -185,6 +185,8 @@ describe('a client that goes away stops the upstream work, and a deadline never 
   it('a bounded runtime never turns a timeout into a domain answer', async () => {
     const budget = createRequestBudget({ totalMs: 200, marginMs: 0 }), runtime = boundedRuntime(silentRuntime(), budget);
     expect(await runtime.run(RUN, OWNER)).toEqual({ ok: false, code: 'MCP_REQUEST_TIMEOUT' });
+    // The read's own cap and the budget's timer end at the same instant; under load either fires first. Assert once the budget has ended.
+    if (!budget.signal.aborted) await new Promise(resolve => budget.signal.addEventListener('abort', resolve, { once: true }));
     await expect(runtime.mode('crosschain-router-testnet')).rejects.toMatchObject({ code: 'MCP_REQUEST_TIMEOUT' });
     budget.dispose();
   });
@@ -193,7 +195,8 @@ describe('a client that goes away stops the upstream work, and a deadline never 
 describe('what a timed-out tool may say about its effects', () => {
   it('an approval request that timed out is UNKNOWN, is never retried automatically and never claims that nothing was created', () => {
     const body = timeoutResult('request_user_approval', 'MCP_REQUEST_TIMEOUT', 'req-1');
-    expect(body).toMatchObject({ ok: false, outcome: 'UNKNOWN', retryable: false, automaticRetry: false, next: ['get_approval_status'], requestId: 'req-1' });
+    // BUILD-FLOFI-E2E-RELIABILITY-001: no approvalId was delivered, so the next step is asking the user (not a status read it cannot make).
+    expect(body).toMatchObject({ ok: false, outcome: 'UNKNOWN', retryable: false, automaticRetry: false, next: [], requestId: 'req-1' });
     expect(String(body.message)).toMatch(/UNKNOWN/);
     expect(String(body.message)).toMatch(/do not request approval again automatically/);
     expect(String(body.message)).toMatch(/Do not tell the user that nothing was created/);
