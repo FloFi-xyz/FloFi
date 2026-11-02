@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import { describe, expect, it } from 'vitest';
-import { createJourney, journeyNetworkEnvironment, journeyTotals, parseJourneyEvent, reportJourney, summarizeLatency } from './journey-metrics';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { createJourney, journeyBeaconsEnabled, journeyNetworkEnvironment, journeyTelemetryEnabled, journeyTotals, parseJourneyEvent, reportJourney,
+  summarizeLatency } from './journey-metrics';
+
+afterEach(() => vi.unstubAllEnvs());
 
 describe('BUILD-FLOFI-EXECUTION-PERFORMANCE-001 journey metrics', () => {
   it('measures each stage from marks, keeps the person\'s wallet deliberation out of system latency, and carries no content', () => {
@@ -66,9 +69,39 @@ describe('BUILD-FLOFI-EXECUTION-PERFORMANCE-001 journey metrics', () => {
     const sent: [string, string][] = [];
     const journey = createJourney({ operation: 'bridge', network: 'eip155:42161', clock: (() => { let n = 0; return () => (n += 5); })() });
     journey.mark('intent'); journey.mark('first_quote');
-    expect(reportJourney(journey.event('in_progress'), (url, body) => { sent.push([url, body]); return true; })).toBe(true);
+    expect(reportJourney(journey.event('in_progress'), (url, body) => { sent.push([url, body]); return true; }, true)).toBe(true);
     expect(sent[0]![0]).toBe('/api/flofi/journey');
-    expect(reportJourney(null)).toBe(false);
-    expect(reportJourney(journey.event('in_progress'), () => { throw new Error('blocked'); })).toBe(false);
+    expect(reportJourney(null, () => true, true)).toBe(false);
+    expect(reportJourney(journey.event('in_progress'), () => { throw new Error('blocked'); }, true)).toBe(false);
+  });
+});
+
+describe('Issue #149 journey telemetry is off unless the deployment owner opts in', () => {
+  it('turns on only for an explicit `on`; unset, other conventions and typos stay off', () => {
+    for (const setting of ['on', 'ON', ' On ', 'on\n']) expect(journeyTelemetryEnabled(setting), JSON.stringify(setting)).toBe(true);
+    for (const setting of [undefined, '', ' ', 'off', 'OFF', 'true', '1', 'yes', 'enabled', 'onn', 'o n', 'on,off']) {
+      expect(journeyTelemetryEnabled(setting), JSON.stringify(setting)).toBe(false);
+    }
+  });
+  it('sends nothing from a browser build that did not opt in (no request at all), and sends once it did', () => {
+    const sent: string[] = [];
+    const send = (url: string) => { sent.push(url); return true; };
+    const journey = createJourney({ operation: 'swap', network: 'eip155:8453', clock: (() => { let n = 0; return () => (n += 5); })() });
+    journey.mark('intent'); journey.mark('first_quote');
+    vi.stubEnv('NEXT_PUBLIC_FLOFI_JOURNEY_TELEMETRY', undefined);
+    expect(journeyBeaconsEnabled()).toBe(false);
+    expect(reportJourney(journey.event('in_progress'), send)).toBe(false);
+    for (const setting of ['off', 'true', '1']) {
+      vi.stubEnv('NEXT_PUBLIC_FLOFI_JOURNEY_TELEMETRY', setting);
+      expect(reportJourney(journey.event('in_progress'), send), setting).toBe(false);
+    }
+    // The server's own switch never turns the browser on (and the browser's never turns the server on).
+    vi.stubEnv('NEXT_PUBLIC_FLOFI_JOURNEY_TELEMETRY', undefined);
+    vi.stubEnv('FLOFI_JOURNEY_TELEMETRY', 'on');
+    expect(reportJourney(journey.event('in_progress'), send)).toBe(false);
+    expect(sent).toEqual([]);
+    vi.stubEnv('NEXT_PUBLIC_FLOFI_JOURNEY_TELEMETRY', 'on');
+    expect(reportJourney(journey.event('in_progress'), send)).toBe(true);
+    expect(sent).toEqual(['/api/flofi/journey']);
   });
 });

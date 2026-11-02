@@ -4,10 +4,16 @@
 guard  (PreToolUse, onFailure=block): only for agents named flofi-*. Specialists have
        no shell: every tool except Read is denied, and Read must name a file inside
        the repository that is not reached through .., not in .git, not Git-ignored and
-       not named like a secret. Other agents and the main session are untouched.
+       not named like a secret. The one exception is the harness's report hand-back
+       (SubagentHandback, appended to every subagent in auto mode): it only delivers
+       the specialist's report to the main session, so it is allowed with exactly one
+       non-empty `message`; denying it lost every report. Other agents and the main
+       session are untouched.
 record (lifecycle and Bash results): appends minimal metadata to the Git-ignored
        .claude/flofi-agent-runs/<session>.jsonl. Never stores prompts, commands,
        tool output, transcripts or wallet data; never prints and never blocks.
+       An allowed hand-back is recorded by guard the same way (agent identity and the
+       validated FLOFI_REVIEW_RESULT only): the report is not the last assistant text.
 
 Standard library only, no network. Set FLOFI_AGENT_TELEMETRY=off to disable record.
 """
@@ -28,6 +34,9 @@ RUNS = ".claude/flofi-agent-runs"
 SAFE_ID = re.compile(r"[A-Za-z0-9_-]{1,128}")
 SAFE_AGENT = re.compile(r"[A-Za-z0-9_.:-]{1,64}")
 REVIEW_TOOLS = {"Read"}  # specialists have no shell, search or write tools
+# Claude Code appends this tool to every subagent in auto mode, whatever its `tools`, and then delivers
+# only a report sent through it (plain final text is dropped). It writes nothing and runs nothing.
+HANDBACK_TOOL = "SubagentHandback"
 SENSITIVE_NAMES = {"id_rsa", "id_ed25519", "id_ecdsa", "credentials", "credentials.json", ".credentials.json",
                    "credentials.db", "application_default_credentials.json", ".netrc", "disposable-phrase",
                    ".mode-a", ".public-testnet", "flofi-agent-runs"}
@@ -88,9 +97,19 @@ def guard_reason(event, root=ROOT):
     if not isinstance(agent, str) or not agent.startswith("flofi-"):
         return None
     tool, tool_input = event.get("tool_name"), event.get("tool_input")
+    if tool == HANDBACK_TOOL:
+        return handback_reason(tool_input)
     if tool not in REVIEW_TOOLS or not isinstance(tool_input, dict):
         return f"{tool} is not available to FloFi reviewers, which only Read; ask the main session"
     return read_reason(tool_input.get("file_path"), root)
+
+
+def handback_reason(tool_input):
+    """The report hand-back to the main session: exactly one non-empty text `message`, nothing else."""
+    if (not isinstance(tool_input, dict) or set(tool_input) != {"message"} or not isinstance(tool_input["message"], str)
+            or not tool_input["message"].strip()):
+        return f"{HANDBACK_TOOL} takes exactly one non-empty text message (the report for the main session)"
+    return None
 
 
 def append(session, record, root=ROOT):
@@ -389,6 +408,13 @@ def guard(event, root=ROOT):
     except Exception:
         reason = "the guard could not evaluate this call"
     if not reason:
+        if event.get("tool_name") == HANDBACK_TOOL and str(event.get("agent_type") or "").startswith("flofi-"):
+            try:  # SubagentStop's last assistant text no longer holds the report, so keep its validated trailer here
+                fields = agent_fields(event)
+                append(event.get("session_id"), {"event": "handback", **fields,
+                                                 "review": review_result(fields["agent"], event["tool_input"]["message"])}, root)
+            except Exception:  # Observability must never change the decision.
+                pass
         return None
     try:
         append(event.get("session_id"), {"event": "guard_deny", **agent_fields(event),

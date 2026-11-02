@@ -37,6 +37,9 @@ CLAUDE_RUNS = ".claude/flofi-agent-runs"
 CLAUDE_AGENTS = frozenset(f".claude/agents/{domain}.md" for domain in DOMAINS)
 CLAUDE_FILES = CLAUDE_AGENTS | {CLAUDE_SETTINGS, CLAUDE_HOOK}
 # Specialists have no shell: Read is their only tool. Main runs every command for them.
+# Claude Code (auto mode) appends its report hand-back to every subagent whatever `tools` says, and then delivers only
+# a report sent through it. The guard allows exactly that one extra tool (one non-empty message, no side effects).
+CLAUDE_HANDBACK = "SubagentHandback"
 CLAUDE_FRONTMATTER = {"tools": "Read", "model": "inherit",
                       "disallowedTools": "Agent, Bash, Edit, Write, NotebookEdit, Grep, Glob, WebFetch, WebSearch, mcp__*"}
 _HOOK_ARGS = ["-I", "${CLAUDE_PROJECT_DIR}/" + CLAUDE_HOOK]
@@ -137,7 +140,7 @@ def claude_agent_text(agent):
         "  new maintained files are explicitly owned in coverage.json or reported as unmapped.",
         "- Report findings that belong to another domain to main with that domain ID instead of reviewing it in depth.", "",
         "## How to review", "",
-        "1. Your only tool is Read. You cannot run commands, search, list directories or run tests. Main runs",
+        "1. Your only review tool is Read. You cannot run commands, search, list directories or run tests. Main runs",
         "   `git diff`, `agent_guard.py impact|domain|review`, repository searches and test suites, and gives you",
         "   the base, changed paths, relevant diffs and reports.",
         "2. Read the changed files and the current source they touch (repository paths from main, the impact report",
@@ -149,20 +152,25 @@ def claude_agent_text(agent):
         f"- Read only, no shell. Your definition grants only Read, and the project hook `{CLAUDE_HOOK}` denies",
         "  every other tool and any Read outside the repository, through `..`, into `.git`, of Git-ignored local",
         "  state or of secret-named files for `flofi-*` agents. Report a denial instead of working around it.",
+        f"- The one exception is `{CLAUDE_HANDBACK}`, which Claude Code adds in auto mode to hand your report back to",
+        "  main. It writes and runs nothing; the hook allows it with exactly one non-empty `message`.",
         "- Never edit, stage, commit, push, merge, deploy, change production configuration or credentials, or",
         "  create, sign or broadcast transactions. Never spawn subagents.",
         "- Never read, quote or summarize credentials, private keys, seed phrases, `.env` files or wallet secrets.", "",
         "## Findings contract", "",
-        "Return to main, most severe first:",
+        "Deliver one report to main, most severe first:",
         "- Each finding: severity (critical, high, medium or low), concrete defect, impacted `file:line` or",
         "  symbol, reproduction or test command with its actual result or \"not run\", affected domains and",
         "  evidence limits.",
         "- Coverage gaps and checks you could not perform.",
         "- \"No concrete findings\" when that is the honest result.", "",
-        "End with exactly one final line and nothing after it:", "",
+        "End the report with exactly one final line and nothing after it:", "",
         "FLOFI_REVIEW_RESULT {\"domain\":\"" + name + "\",\"result\":\"<findings|no-findings|blocked>\","
         "\"findings\":<count>,\"highest\":\"<critical|high|medium|low|none>\"}", "",
-        "Use `blocked` when the review could not be completed.", ""])
+        "Use `blocked` when the review could not be completed.", "",
+        f"Delivery: when `{CLAUDE_HANDBACK}` is among your tools, your last step is one call to it with the whole",
+        "report, that final line included, as `message`; only that call reaches main (plain text after it is not",
+        "delivered). Without it, end your final message with the report.", ""])
 
 
 def parse_claude_agent(text):
@@ -432,7 +440,7 @@ def ledger_row(row):
         return None
     version = row.get("v") if type(row.get("v")) is int else 1
     clean = {"event": event, "t": stamp, "v": version}
-    if event in {"subagent_start", "subagent_stop", "guard_deny"}:
+    if event in {"subagent_start", "subagent_stop", "guard_deny", "handback"}:
         agent_id = row.get("agentId")
         clean.update(agent=name(row.get("agent")), agentId=agent_id if isinstance(agent_id, str)
                      and re.fullmatch(r"[A-Za-z0-9_-]{1,128}", agent_id) else None)
@@ -440,7 +448,7 @@ def ledger_row(row):
         if row.get("dirty") not in (True, False, None):
             return None
         clean.update(head=head, dirty=row.get("dirty"))  # None: unknown, never treated as clean
-    if event == "subagent_stop":
+    if event in {"subagent_stop", "handback"}:
         clean["review"] = review_fields(row.get("review"))
     elif event == "guard_deny":
         clean["tool"] = row.get("tool") if row.get("tool") in {"Read", "Grep", "Glob", "Bash"} else "other"
@@ -471,7 +479,7 @@ def ledger_row(row):
                      suites=[s for s in suites if isinstance(s, str) and re.fullmatch(r"[A-Za-z0-9_./@-]{1,220}", s)
                              and safe_path(s)][:20]
                      if isinstance(suites, list) else [])
-    elif event not in {"subagent_start", "session_end"}:
+    elif event not in {"subagent_start", "session_end", "handback"}:
         return None
     return clean
 
@@ -558,6 +566,14 @@ def review_summary(data, plan, runs, skips=None, reports=(), root=ROOT, streams=
                 if str(row.get("agent")).startswith("flofi-"):
                     running.add(key)
                     peak = max(peak, len(running))
+            elif row["event"] == "handback":
+                # The report the specialist delivered to main (SubagentHandback, auto mode). Only the first counts,
+                # as in Claude Code; it completes nothing by itself: SubagentStop still records the reviewed state.
+                if key is None:
+                    key = next((k for k, a in agents.items() if a["session"] == run["session"]
+                                and a["agent"] == row.get("agent") and a["status"] == "started"), None)
+                if key in agents and "handback" not in agents[key]:
+                    agents[key]["handback"] = row.get("review")
             elif row["event"] == "subagent_stop":
                 if key is None:  # match the oldest open start of the same agent in this session
                     key = next((k for k, a in agents.items() if a["session"] == run["session"]
@@ -568,7 +584,9 @@ def review_summary(data, plan, runs, skips=None, reports=(), root=ROOT, streams=
                                                 "startDirty": None})
                 if entry["status"] != "failed":  # a reported termination is never upgraded
                     legacy = row.get("v", 1) < 2  # v2 rows record the stop HEAD; unknown stays unknown
-                    entry.update(status="completed", review=row.get("review"),
+                    # A delivered hand-back is the report main received; plain final text is not delivered then.
+                    review = entry["handback"] if isinstance(entry.get("handback"), dict) else row.get("review")
+                    entry.update(status="completed", review=review,
                                  stop=row.get("head") or (entry["start"] if legacy else None), stopDirty=row.get("dirty"))
                 running.discard(key)
             elif row["event"] == "test":

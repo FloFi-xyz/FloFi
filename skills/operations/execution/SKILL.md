@@ -18,3 +18,5 @@
 - Journey timings are content-free (`domain/journey-metrics.ts`): the person's time in the wallet is reported
   separately from system latency. Percentiles need a genuine sample; label evidence LOCAL, MOCKED, PREVIEW or
   PRODUCTION truthfully.
+- Journey telemetry is off unless the deployment owner opts in (`NEXT_PUBLIC_FLOFI_JOURNEY_TELEMETRY=on` and
+  `FLOFI_JOURNEY_TELEMETRY=on`); its privacy policy is `docs/privacy/JOURNEY-TELEMETRY.md`. Never turn it on in a change.

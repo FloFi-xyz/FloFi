@@ -7,14 +7,14 @@
  * sealed, host-bound cookie is checked cryptographically (no database read), so a forger needs a real account; at most 60 events per account per
  * 10 minutes and 600 per minute, both per server instance (counters live in memory, so N instances admit up to N times as many); a journey id is
  * logged once. One log line (at most about 0.8 KB) per accepted event. The account is used only as an in-memory rate-limit key, an HMAC under a
- * per-process random key: it is never logged or stored, and its window is dropped once it ends. `FLOFI_JOURNEY_TELEMETRY` other than unset or
- * `on` (for example `off` or `disabled`) accepts and drops every event: a misconfigured switch turns logging off, never on. The timings are
+ * per-process random key: it is never logged or stored, and its window is dropped once it ends. Issue #149: off unless the deployment owner
+ * sets `FLOFI_JOURNEY_TELEMETRY=on`; unset, `off` or any other value accepts and drops every event (docs/privacy/JOURNEY-TELEMETRY.md). The timings are
  * still client-reported, so every line and the report say CLIENT_REPORTED: operational signals, never certification or financial evidence.
  * Each line names the deployment that wrote it and the network's registry environment, so a report can refuse mixed or mislabelled logs.
  */
 import { createHmac, randomBytes } from 'node:crypto';
 import { createLogger } from '@defi-workflow-engine/cloud-runtime';
-import { journeyNetworkEnvironment, journeyTotals, parseJourneyEvent } from '../domain/journey-metrics.ts';
+import { journeyNetworkEnvironment, journeyTelemetryEnabled, journeyTotals, parseJourneyEvent } from '../domain/journey-metrics.ts';
 import { deploymentEnvironment } from './deployment.ts';
 import { ACCOUNT_SESSION_COOKIE, readAccountSession } from '../accounts/account-session.ts';
 import { sessionCookieName } from './session-cookie.ts';
@@ -58,7 +58,7 @@ function telemetryRateKeyAccount(request: Request, env: Env, now: Date): string 
 export function createJourneyReceiver(options: { readonly env?: Env; readonly now?: () => number; readonly log?: (fields: Fields) => void;
   readonly account?: (request: Request) => string | null } = {}) {
   const env = options.env ?? process.env, now = options.now ?? Date.now;
-  const setting = env.FLOFI_JOURNEY_TELEMETRY?.trim().toLowerCase(), enabled = !setting || setting === 'on';
+  const enabled = journeyTelemetryEnabled(env.FLOFI_JOURNEY_TELEMETRY);
   const deployment = deploymentEnvironment(env);
   const log = options.log ?? (fields => createLogger({ service: 'flofi-journey' }).info('journey.timing', fields));
   const account = options.account ?? (request => telemetryRateKeyAccount(request, env, new Date(now())));

@@ -52,9 +52,9 @@
       "status": "PENDING_VERIFICATION",
       "reviewedRevision": "acbe70268b8bb985362548e36ac2e76a8ac89631",
       "reviewedDigest": "sha256:bc95cfcb5a392c2f834afd69e21344c8a0da334f752960fe2bd92ed3f1506b2b",
-      "reviewedAt": "2026-11-01",
+      "reviewedAt": "2026-11-02",
       "crossCheckedAgainst": [],
-      "notes": "GET /swap/v2/build parameters, including mode=fast (BETA). The repository states no licence at this revision: FloFi links and summarises it, never copies it."
+      "notes": "GET /swap/v2/build parameters, including mode=fast (BETA). Re-checked 2026-11-02: digest unchanged; SKILL.md matches the parameter table. Pending verification — blocked: jup-ag/docs states no licence at this revision (no LICENSE file) and VERIFIED needs one. FloFi links and summarises it, never copies it."
     },
     {
       "url": "https://raw.githubusercontent.com/jup-ag/docs/acbe70268b8bb985362548e36ac2e76a8ac89631/swap/advanced/reduce-latency.mdx",
@@ -64,9 +64,9 @@
       "status": "PENDING_VERIFICATION",
       "reviewedRevision": "acbe70268b8bb985362548e36ac2e76a8ac89631",
       "reviewedDigest": "sha256:2b1e69d12070221f19b687d5bd0307478a69c7e4c5f34a22b1866198808cf321",
-      "reviewedAt": "2026-11-01",
+      "reviewedAt": "2026-11-02",
       "crossCheckedAgainst": [],
-      "notes": "mode=fast: no route splitting, global priority-fee estimate; trade-offs. The repository states no licence at this revision: FloFi links and summarises it, never copies it."
+      "notes": "mode=fast: no route splitting, global priority-fee estimate; trade-offs. Re-checked 2026-11-02: digest unchanged; SKILL.md matches. Pending verification — blocked: jup-ag/docs states no licence at this revision (no LICENSE file) and VERIFIED needs one. FloFi links and summarises it, never copies it."
     },
     {
       "url": "https://developers.jup.ag/docs/swap/build",
@@ -78,7 +78,7 @@
       "reviewedDigest": null,
       "reviewedAt": null,
       "crossCheckedAgainst": [],
-      "notes": "Published page of the pinned source above; not reachable from the build session."
+      "notes": "Published page of the pinned sources above. Pending verification — blocked: developers.jup.ag is outside this session's allowed network (egress proxy 403 on CONNECT; WebFetch DNS ENOTFOUND), 2026-11-02."
     }
   ],
   "guidance": "SKILL.md",

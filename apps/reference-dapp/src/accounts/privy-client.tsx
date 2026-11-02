@@ -17,15 +17,15 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
 import { PrivyProvider, useCreateWallet, useExportWallet, useImportWallet, useLogin, useLoginWithEmail, useLoginWithOAuth, useLogout, usePrivy,
-  useSignMessage, useSignTransaction, type PrivyClientConfig, type User } from '@privy-io/react-auth';
+  useSignMessage, useSignTransaction, useWallets as useEvmWallets, type PrivyClientConfig, type User } from '@privy-io/react-auth';
 import { defaultSolanaRpcsPlugin, toSolanaWalletConnectors, useCreateWallet as useCreateSolanaWallet, useExportWallet as useExportSolanaWallet,
   useImportWallet as useImportSolanaWallet, useSignMessage as useSignSolanaMessage, useSignTransaction as useSignSolanaTransaction,
   useWallets as useSolanaWallets } from '@privy-io/react-auth/solana';
 import type { PrivyBrowserConfig } from './privy-server';
 import { signerPolicy } from './signer-pages';
 import { usePathname } from 'next/navigation';
-import { createLoginChannel, FloFiAccountsContext as AccountsContext, FloFiPrivyContext as Context, privyErrorCode, Registrar, useFloFiPrivy, type FloFiPrivy, type PrivyEmbedded, type PrivyLoginEvent,
-  type PrivyReview } from './privy-context';
+import { createLoginChannel, FloFiAccountsContext as AccountsContext, FloFiPrivyContext as Context, privyCanSign, privyErrorCode, Registrar, useFloFiPrivy, type FloFiPrivy,
+  type PrivyEmbedded, type PrivyLoginEvent, type PrivyReview } from './privy-context';
 export { currentFloFiPrivy, FloFiPrivyContext, privyErrorCode, useAccountsOffered, useFloFiPrivy, type FloFiPrivy, type PrivyEmbedded, type PrivyEvmTransaction,
   type PrivyLoginEvent, type PrivyReview } from './privy-context';
 import type { WalletEcosystem } from '../wallet/wallet-registry';
@@ -101,6 +101,8 @@ function PrivyBridge({ children }: { children: ReactNode }) {
   const { signMessage: signEvmText } = useSignMessage();
   const { signTransaction: signSolana } = useSignSolanaTransaction();
   const { signMessage: signSolanaText } = useSignSolanaMessage();
+  // Privy's own wallet readiness (issue #149): the EVM embedded wallet's frame and the Solana wallet objects load after `usePrivy().ready`.
+  const { ready: evmWalletsReady } = useEvmWallets();
   const { wallets: connectedSolana, ready: solanaReady } = useSolanaWallets();
   // Only Privy's own embedded Solana wallet (its standard wallet carries `isPrivyWallet`, as Privy's SDK checks): never an external wallet
   // (Phantom, …) connected through Privy, even one holding the same imported key.
@@ -113,9 +115,10 @@ function PrivyBridge({ children }: { children: ReactNode }) {
     const listed = (ecosystem: WalletEcosystem, address: string) => embedded.some(wallet => wallet.ecosystem === ecosystem
       && wallet.address === (ecosystem === 'evm' ? address.toLowerCase() : address));
     const own = (ecosystem: WalletEcosystem, address: string) => listed(ecosystem, address) || fail('FLOFI_WALLET_ACCOUNT_MISMATCH');
-    // Solana signing also needs Privy's Solana wallet object, which loads separately (`useWallets().ready`).
-    const canSign = (ecosystem: WalletEcosystem, address: string) => privy.ready && privy.authenticated && listed(ecosystem, address)
-      && (ecosystem === 'evm' || solanaReady && solanaWallets.some(wallet => wallet.address === address));
+    // Signing needs Privy's own readiness for the wallet's ecosystem, not only its session (`privyCanSign`); Solana also its wallet object.
+    const readiness = { ready: privy.ready, authenticated: privy.authenticated, embedded, evmWalletsReady, solanaWalletsReady: solanaReady,
+      solanaWallets: solanaWallets.map(wallet => wallet.address) };
+    const canSign = (ecosystem: WalletEcosystem, address: string) => privyCanSign(readiness, ecosystem, address);
     const wrap = async <T,>(run: () => Promise<T>, fallback: string): Promise<T> => { try { return await run(); } catch (cause) { throw new Error(privyErrorCode(cause, fallback), { cause }); } };
     return {
       ready: privy.ready, authenticated: privy.ready && privy.authenticated, userId: privy.user?.id ?? null, embedded, canSign,
@@ -152,7 +155,7 @@ function PrivyBridge({ children }: { children: ReactNode }) {
       logout: () => logout().catch(() => undefined),
     };
   }, [privy, oauth, email, login, logout, createEvm, createSolana, importEvm, importSolana, exportEvm, exportSolana, signEvm, signEvmText, signSolana,
-    signSolanaText, solanaWallet, solanaWallets, solanaReady]);
+    signSolanaText, solanaWallet, solanaWallets, solanaReady, evmWalletsReady]);
   return <Context.Provider value={value}><Registrar/>{children}</Context.Provider>;
 }
 

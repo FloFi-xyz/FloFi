@@ -61,6 +61,27 @@ export const useAccountsOffered = () => useContext(AccountsContext);
 export const useFloFiPrivy = () => useContext(Context);
 export { Context as FloFiPrivyContext, AccountsContext as FloFiAccountsContext };
 
+/**
+ * What `canSign` reads (issue #149). `ready` (`usePrivy().ready`) only says Privy's session has loaded; the embedded wallets load after it.
+ * `evmWalletsReady` is Privy's own EVM readiness (`useWallets().ready` of `@privy-io/react-auth`: its wallet frame is up and the
+ * person's embedded EVM wallets are loaded), `solanaWalletsReady` the Solana one (`useWallets().ready` of `/solana`), and `solanaWallets`
+ * the addresses of Privy's own embedded Solana wallet objects.
+ */
+export type PrivySigningReadiness = { readonly ready: boolean; readonly authenticated: boolean; readonly embedded: readonly PrivyEmbedded[];
+  readonly evmWalletsReady: boolean; readonly solanaWalletsReady: boolean; readonly solanaWallets: readonly string[] };
+/**
+ * Whether the page can ask Privy to sign with `address` now: signed in, one of the person's embedded wallets, and Privy itself reports that
+ * ecosystem's wallets ready. A pure function of the current readiness: the provider recomputes it whenever Privy's readiness changes, so it
+ * is never "can sign" before Privy is ready and never stays "not ready" after. It decides only what the page offers; every signature still
+ * goes through the signing gate and Privy's own confirmation screen.
+ */
+export function privyCanSign(state: PrivySigningReadiness, ecosystem: WalletEcosystem, address: string): boolean {
+  if (!state.ready || !state.authenticated) return false;
+  const canonical = ecosystem === 'evm' ? address.toLowerCase() : address;
+  if (!state.embedded.some(wallet => wallet.ecosystem === ecosystem && wallet.address === canonical)) return false;
+  return ecosystem === 'evm' ? state.evmWalletsReady : state.solanaWalletsReady && state.solanaWallets.includes(address);
+}
+
 /** Why this page cannot sign with `address` now: not one of the person's Privy wallets here, or Privy has not finished loading it. */
 export function floFiPrivyWalletIssue(privy: FloFiPrivy | null, ecosystem: WalletEcosystem, address: string): string {
   if (!privy?.ready || !privy.authenticated) return 'FLOFI_WALLET_SIGN_IN_REQUIRED';

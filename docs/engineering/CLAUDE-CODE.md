@@ -1,7 +1,8 @@
 # FloFi engineering specialists in Claude Code
 
 The 19 Claude Code specialists in `.claude/agents/` are read-only reviewers for
-repository changes, with no shell: their only tool is Read. They are development infrastructure, not end-user or runtime
+repository changes, with no shell: their only review tool is Read (plus Claude Code's report hand-back in auto mode; see
+Read-only guard). They are development infrastructure, not end-user or runtime
 transaction agents. They are generated twins of the Codex roles in
 `.codex/agents/` and share one source of truth:
 
@@ -108,8 +109,8 @@ rm -f "$stream"
 
 `.claude/hooks/flofi_agent_hooks.py guard` runs on every PreToolUse (`python3 -I`,
 `onFailure: block`). It ignores the main session and non-FloFi agents. For any agent
-named `flofi-*` it denies every tool except Read, and allows a Read only when the
-path:
+named `flofi-*` it denies every tool except Read and the report hand-back below, and
+allows a Read only when the path:
 
 - is a non-empty file path without `~` or a `..` component as written;
 - resolves (following symlinks) inside the repository;
@@ -117,6 +118,15 @@ path:
   also refuses) and has no secret-like component in the written or resolved path
   (`.env*` except `.env.example`, `*.pem`, `*.key`, `id_rsa`, credentials files,
   `.mode-a`, `.public-testnet`, the agent ledger).
+
+Report hand-back (issue #149): in auto mode Claude Code appends `SubagentHandback` to
+every subagent, whatever its `tools`, and then delivers only a report sent through it
+(plain final text is dropped and the caller is told no report was delivered). The guard
+used to deny it, so every specialist report was lost in auto-mode sessions such as
+Claude Code on the web. It is now the one extra tool a specialist may call, with exactly
+one non-empty text `message` and nothing else; it writes, runs and fetches nothing, so the
+specialists stay Read-only. The frontmatter still grants only Read (`check` refuses
+`tools: Read, SubagentHandback`); `SendMessage` and every other tool stay denied.
 
 There is no command parser and no search: a specialist cannot run anything. Claude
 Code normalizes Read paths before PreToolUse, so the rule applies to the canonical
@@ -148,6 +158,7 @@ and refuses a symlinked ledger directory:
 | `session_start` | source; Git HEAD; SHA-256 prefix of each `flofi-*.md` present (defined) |
 | `subagent_start` / `subagent_stop` | agent name, agent ID, Git HEAD and whether the worktree had uncommitted changes (the reviewed state); validated `FLOFI_REVIEW_RESULT` (result, count, highest severity) or null |
 | `guard_deny` | agent name, agent ID, tool name |
+| `handback` | agent name, agent ID and the hand-back's validated `FLOFI_REVIEW_RESULT` or null (written by `guard` when it allows a `SubagentHandback`; the report text is never stored). `review` uses the first hand-back of a run as that specialist's result, because its last assistant text then holds no trailer; a hand-back alone completes nothing |
 | `test` | gate IDs from a fixed list, run identity per gate (`run-` plus a 12-hex HMAC of the gate, working directory, `cd` target and filtering arguments, keyed by an owner-only `.scope-key` beside the ledger; `legacy` for rows written before identities, `unknown` without a key), pass/fail/unknown, exit code, pipeline flag, agent, repository-relative test file paths |
 | `session_end` | reason |
 
@@ -189,8 +200,12 @@ loopback Messages API: the main session spawns each of the 19 specialists; each 
 a repository file and attempts Bash and Reads outside the repository, escaping
 through `..` and of a secret-named file. The probe checks discovery, exact
 descriptions, that the resolved tool set is exactly Read, system prompts, that Bash
-never runs, guard denials and the ledger. No real model, credentials or external AI service is
-used, so it proves harness wiring, not model judgment or automatic delegation.
+never runs, guard denials and the ledger. A second run in auto mode (the scripted
+model also answers auto mode's action classifier) has each specialist Read and then
+hand its report back: each must resolve to exactly Read and `SubagentHandback`, main
+must receive each report and the ledger each result. No real model, credentials or
+external AI service is used, so it proves harness wiring, not model judgment or
+automatic delegation.
 
 ## Evidence levels
 

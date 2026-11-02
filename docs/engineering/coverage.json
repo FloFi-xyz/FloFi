@@ -46,6 +46,10 @@
       "path": "apps/reference-dapp/src/accounts/privy-client.test.ts",
       "stage": "unit"
     },
+    "app.accounts.privy-bridge": {
+      "path": "apps/reference-dapp/src/accounts/privy-bridge.test.tsx",
+      "stage": "unit"
+    },
     "app.accounts.privy-server": {
       "path": "apps/reference-dapp/src/accounts/privy-server.test.ts",
       "stage": "unit"
@@ -742,6 +746,10 @@
       "path": "apps/reference-dapp/src/domain/journey-metrics.test.ts",
       "stage": "unit"
     },
+    "app.app.api.flofi.journey.route": {
+      "path": "apps/reference-dapp/src/app/api/flofi/journey/route.test.ts",
+      "stage": "unit"
+    },
     "app.server.journey-telemetry": {
       "path": "apps/reference-dapp/src/server/journey-telemetry.test.ts",
       "stage": "unit"
@@ -799,6 +807,7 @@
     "reference-reconciler.evidence",
     "app.accounts.privy-server",
     "app.accounts.privy-client",
+    "app.accounts.privy-bridge",
     "app.accounts.account-csp",
     "app.accounts.wallet-relay",
     "app.app.wallet-session-action",
@@ -806,6 +815,7 @@
     "app.platform.engineering-skills",
     "app.domain.canonical-execution-status",
     "app.domain.journey-metrics",
+    "app.app.api.flofi.journey.route",
     "app.server.journey-telemetry"
   ],
   "modules": [
@@ -6385,6 +6395,7 @@
         "app.accounts.account-session",
         "app.accounts.account-store.pg",
         "app.accounts.oidc",
+        "app.accounts.privy-bridge",
         "app.accounts.privy-client",
         "app.accounts.privy-server",
         "app.accounts.privy-zod",
@@ -6491,11 +6502,13 @@
         "scripts/journey-latency-report.mjs"
       ],
       "suites": [
+        "app.app.api.flofi.journey.route",
         "app.domain.journey-metrics",
         "app.server.journey-telemetry"
       ],
       "gaps": [
-        "No live production sample exists yet: p50/p95 need real journeys in the deployment logs; the report refuses to label MOCKED or LOCAL evidence otherwise."
+        "No live production sample exists yet: p50/p95 need real journeys in the deployment logs; the report refuses to label MOCKED or LOCAL evidence otherwise.",
+        "Off by default (issue #149): a sample exists only after the deployment owner opts in with both switches (docs/privacy/JOURNEY-TELEMETRY.md). The legal basis there is an engineering proposal pending owner/legal review, not a sign-off."
       ]
     }
   ],
