@@ -229,10 +229,7 @@
         "caniuse-lite"
       ],
       "license": "CC-BY-4.0",
-      "parents": [
-        "next"
-      ],
-      "reason": "Browser-support data used by Next.js; CC-BY-4.0 attribution is recorded in THIRD_PARTY_NOTICES.md.",
+      "reason": "Browser-support data used by Next.js and browser tooling; CC-BY-4.0 attribution is recorded in THIRD_PARTY_NOTICES.md and does not depend on which package uses it.",
       "approved_by": "Owner",
       "approved_at": "2026-10-15",
       "record": "docs/builds/BUILD-002-REPORT.md"
@@ -257,11 +254,7 @@
         "lightningcss-win32-x64-msvc"
       ],
       "license": "MPL-2.0",
-      "parents": [
-        "lightningcss",
-        "vite"
-      ],
-      "reason": "Unmodified MPL-2.0 CSS tooling reached only through the Vite/Vitest development toolchain; never shipped in the application bundle.",
+      "reason": "Unmodified MPL-2.0 CSS tooling (Vite/Vitest development toolchain); MPL's file-level obligations do not depend on which package uses the unmodified files.",
       "approved_by": "Owner",
       "approved_at": "2026-10-15",
       "record": "docs/builds/BUILD-001-REPORT.md"

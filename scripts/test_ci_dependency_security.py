@@ -772,6 +772,31 @@ class ReviewHardening(Harness):
         self.install(identity, {"index.js": "const https = require('https');\nObject.keys(process.env).filter(k => /^debug_/i.test(k));\n"})
         self.assertEqual(next(r for r in self.run_gate()["packages"] if r["identity"] == identity)["decision"], ds.PASS)
 
+    def test_dist_tag_dependencies_are_accepted_for_the_same_package(self):
+        self.package("tool-kit@2.0.0")["declared"] = {"tiny-helper": "latest", "pad": "npm:left-pad@latest"}
+        self.package("tool-kit@2.0.0")["deps"]["pad"] = "left-pad@1.3.0"
+        self.assert_pass(self.run_gate())
+        self.package("tool-kit@2.0.0")["deps"]["tiny-helper"] = "left-pad@1.3.0"  # a tag never licenses another package
+        self.assertIn("graph-substitution", {code for _, code, _ in self.findings(self.run_gate())})
+
+    def test_merged_branch_lockfiles_block(self):
+        for setting in ("mergeGitBranchLockfiles: true\n", "mergeGitBranchLockfilesBranchPattern:\n  - main\n"):
+            with self.subTest(setting=setting.split(":")[0]):
+                self.setUp()
+                self.workspace += setting
+                self.assertIn(("<configuration>", "policy-bypass", ds.BLOCK), self.findings(self.run_gate()))
+
+    def test_license_exception_without_parents_follows_new_dependents(self):
+        """A data/tooling license exception (caniuse-lite, lightningcss) is about the license, not who depends on it:
+        a routine new dependent passes. Exceptions that keep `parents` (sharp's LGPL binaries) still return to review."""
+        self.add("cc-data@1.0.0", parent="tool-kit@2.0.0", license="CC-BY-4.0")
+        self.policy["exceptions"].append({"id": "cc-data", "resolves": ["license-review"], "packages": ["cc-data"], "license": "CC-BY-4.0",
+                                          "reason": "Fixture: attribution data used unmodified by any dependent.",
+                                          "approved_by": "Owner", "approved_at": "2026-11-02", "record": "docs/builds/X.md"})
+        self.assert_pass(self.run_gate())
+        self.package("left-pad@1.3.0")["deps"] = {"cc-data": "1.0.0"}
+        self.assert_pass(self.run_gate())
+
     def test_semver_matches_node_semver(self):
         cases = [("1.2.3", "^1.2.0", True), ("2.0.0", "^1.2.0", False), ("0.2.5", "^0.2.3", True), ("0.3.0", "^0.2.3", False),
                  ("0.0.4", "^0.0.3", False), ("1.2.9", "~1.2.3", True), ("1.3.0", "~1.2.3", False), ("2.0.0", "1.x", False),

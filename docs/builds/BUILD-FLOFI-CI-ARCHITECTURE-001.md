@@ -88,12 +88,15 @@ sixth, `@privy-io/api-base`'s undeclared license, is now resolved automatically 
 | `sharp-libvips-lgpl` (10 packages) | license-review | exact license `LGPL-3.0-or-later`; parents `sharp` / `@img/sharp-<platform>`; optional-only; platform-restricted |
 | `sharp-win32-lgpl` (3) | license-review | `Apache-2.0 AND LGPL-3.0-or-later`; parent `sharp`; optional; platform-restricted |
 | `sharp-wasm32-lgpl` (1) | license-review | exact expression; parents the two wasm32 sharp packages; optional |
-| `caniuse-lite-cc-by` | license-review | `CC-BY-4.0`; parent `next` |
-| `lightningcss-mpl` (12) | license-review | `MPL-2.0`; parents `vite` / `lightningcss` |
+| `caniuse-lite-cc-by` | license-review | exact license `CC-BY-4.0` (any dependent: attribution does not depend on who uses the data) |
+| `lightningcss-mpl` (12) | license-review | exact license `MPL-2.0` (any dependent: unmodified files carry the same obligations) |
 
-License exceptions are name-scoped and bound to the exact license expression and role (parents, optional, platform):
-a routine Next.js or sharp bump with the same license and role passes; a license change, a new dependent, or loss of
-optional/platform restriction returns to REVIEW and the CI output names which binding broke. Every other exception is
+License exceptions are name-scoped and bound to the exact license expression, plus the role where the role is what was
+reviewed (sharp's LGPL binaries: their parents, optional-only, platform-restricted). A routine Next.js, sharp or
+browserslist change with the same license and role passes; a license change, or for sharp a new dependent or loss of
+optional/platform restriction, returns to REVIEW and the CI output names which binding broke. (The review's completeness
+critic showed that binding `parents` for CC-BY data and MPL tooling would send any new common dependent of
+caniuse-lite or lightningcss to review, so those two are license-bound only.) Every other exception is
 bound to an exact `name@version` and its sha512 integrity (test `test_identity_exception_is_bound_to_the_reviewed_archive`).
 0BSD, BlueOak-1.0.0 and Unlicense — previously six exact-identity exceptions (`tslib@2.8.1`, `tslib@1.14.1`;
 `minimatch@11.0.3`, `@isaacs/nonrecursive-glob-match@1.0.3`, `lru-cache@11.5.3`; `fast-sha256@1.3.0`), each reviewed
@@ -215,7 +218,7 @@ the static parity tests only.
 
 ## 10. Security regression results (Tests A–R)
 
-`scripts/test_ci_dependency_security.py` (27 tests, synthetic registry and a disposable P-256 key; no network) plus
+`scripts/test_ci_dependency_security.py` (46 tests, synthetic registry and a disposable P-256 key; no network) plus
 additions to `test_ci_optimization.py`, `test_governance_lite.py`, `test_ci_gcp_orchestration.py`:
 
 | Test | Where | Result |
@@ -237,11 +240,13 @@ additions to `test_ci_optimization.py`, `test_governance_lite.py`, `test_ci_gcp_
 | O browser profiles | `test_missing_repeated_failed_or_unplanned_profiles_fail`, `test_a_plan_that_drops_or_repeats_a_profile_refuses_to_run` | FAIL |
 | P cache poisoning | `ArchiveCache.*`, `test_p_caches_hold_only_digest_verified_raw_archives` | poisoned/FIFO/symlink entries rejected; caches hold raw archives only |
 | Q artifact isolation | `test_q_records_of_another_revision_never_certify_this_one`, `test_q_browser_report_of_another_revision_is_rejected` | FAIL |
-| R no release age | `NoReleaseAgeGate.*`, `test_no_release_age_gate_or_waiver_mechanism`, `test_r_publication_age_never_changes_the_decision` | refused in every form |
+| R no release age | `NoReleaseAgeGate.*`, `test_no_release_age_gate_or_waiver_mechanism`, `test_r_publication_age_never_changes_the_decision`, `test_evaluation_time_never_changes_a_decision` | refused in every form; decisions identical 1 minute or 3 years after publication |
+| Review hardening | `ReviewHardening.*` (lockfile edges vs published manifests, peer/meta peers, stray and merged branch lockfiles, typo'd direct dependency, archive LICENSE, prerelease prior, developer-SDK constraint, alias exception, identity-exception integrity binding, change classes, non-SPDX GPL, node-semver cases, CLI exit codes, trusted-publishing switch, dist-tags, parent-free license exceptions); governance structural workspace checks | as specified |
 
 Also verified against the live npm registry (disposable worktrees, nothing pushed):
 
-- Real graph at the base: 505/505 PASS, 505/505 signatures verified, all six migrated exceptions used, 21 s.
+- Real graph at the base: 505/505 PASS, 505/505 signatures verified, 1023 lockfile edges consistent with the published
+  manifests, five exceptions used, `@privy-io/api-base` passing on its archive's Apache-2.0 text, 21 s.
 - Adding `ox@1.8.12` (published 2026-10-27T02:06Z, under 7 days old): old main's frozen config fails with
   `ERR_PNPM_NO_MATURE_MATCHING_VERSION`; this branch resolves it, 9 resolved packages change, the computed inventory is
   514, all PASS, SBOM gate PASS — no governance file edited.
@@ -260,6 +265,12 @@ Also verified against the live npm registry (disposable worktrees, nothing pushe
   and describes risk; it proves nothing about safety. Non-installed platform packages are not scanned.
 - `pnpm audit` reflects advisories known at run time; a later advisory fails the next run of any branch.
 - Typosquat detection is distance-1 against direct dependencies and a short protected list.
+- A dependency declared by dist-tag (`latest`) accepts any release of the same package (the tag's target at lock time is
+  not recorded); that release is still evaluated on its own evidence.
+- Archive license detection needs `node_modules` (CI always installs first); a local run without it reports
+  `license-missing` for packages whose registry metadata declares no license.
+- The workspace and lockfile parser refuses YAML features pnpm never writes (tags, anchors, aliases, merge keys,
+  directives); a hand-written workspace using them fails closed until rewritten plainly.
 - Change classification needs the merge base in Git history (CircleCI usually; Actions' depth-1 checkout does not); it
   is reporting only and never changes a decision.
 - The policy can be changed by a PR like any file; governance refuses weakening shapes, owner review covers the rest.
@@ -276,14 +287,36 @@ Also verified against the live npm registry (disposable worktrees, nothing pushe
 
 ## 13. Specialist review
 
-See §17.
+- **flofi specialists.** `agent_guard.py impact` selected all 19 domains (shared workspace and CI files changed; no file
+  under `apps/` or `packages/` did). flofi-security, flofi-infrastructure-ci and flofi-data-privacy were run (read-only,
+  with base, diff and their `agent_guard.py domain` contracts). None delivered a report: each ended without a handback
+  (three nudges each), so they are recorded as *not completed*, not as passes. The other 16 were not run: their
+  product code is unchanged and their browser profiles still run exactly once (ledger).
+- **Data-privacy question, checked directly.** Shard 3's PostgreSQL profiles share the `certification-checks` server
+  with the `.pg.test.ts` suites: both create uniquely named throwaway databases (`flofi_test_<random>` in
+  `packages/cloud-runtime/test/pg-harness.ts`; `flofi_e2e_<time>_<pid>` in `apps/reference-dapp/playwright.config.ts` /
+  `e2e/cloud-runtime-setup.ts`) and drop them; only transaction-scoped advisory locks are used; no roles, tablespaces or
+  `ALTER SYSTEM`. CircleCI then ran shard 3 green four times.
+- **Adversarial review workflow (replacement, 57 agents).** Six independent finders (supply-chain bypass, engine
+  correctness, SBOM and evidence, CI parity and ledger, performance and cache, tests and docs), deduplication, then
+  perspective-diverse verification (reproduce + skeptic/owner-intent for medium and above), then a completeness critic.
+  - 30 findings confirmed — 3 high (per-branch lockfiles, pnpm 11 audit settings, lockfile edge substitution), 13 medium,
+    14 low. All are fixed in `4c05209`/`95cc7e5`/this commit with regression tests; none was dismissed.
+  - 2 refuted: "routine Next.js/Vite/Playwright upgrades get REVIEW" (the routine releases are past those projects'
+    trusted-publishing switches; nevertheless the underlying false-positive path — generic `Object.keys(process.env)`
+    plus a publisher change — was real and is fixed in `95cc7e5`), and "the evidence artifact exists only on success"
+    (documented).
+  - Critic: 3 findings — parent-bound license exceptions for caniuse-lite/lightningcss (fixed: license-bound only),
+    dist-tag dependency specs (fixed), and the GitHub Governance job needing a system `node` (pre-existing:
+    `test_ci_optimization.py` already ran `node scripts/guarded-release-browser.mjs list` there; documented, unchanged).
+  - No reviewer was allowed to recommend a waiting period, allowlist, count or hash; none of the fixes adds one.
 
 ## 14. Local validation (pinned Node 24.21.0, pnpm 11.22.0)
 
 | Gate | Result |
 | --- | --- |
 | `python3 -m unittest discover -s scripts -p 'test_governance_lite.py'` | 21 tests OK |
-| `python3 -m unittest discover -s scripts -p 'test_ci_*.py'` | 206 tests OK (27 new in `test_ci_dependency_security.py`) |
+| `python3 -m unittest discover -s scripts -p 'test_ci_*.py'` | 225 tests OK (46 in the new `test_ci_dependency_security.py`) |
 | `python3 scripts/governance_lite.py`, `git diff --check` | PASS |
 | `python3 scripts/agent_guard.py check` | PASS (new sources and suite registered in `coverage.json`) |
 | `pnpm check` (typecheck, lint, build, schema drift, unit) | PASS — unit 511 files, 6241 tests passed, 2 skipped (pre-existing env-gated `it.skipIf` in `composition-service.test.ts` and `mode-b-service.test.ts`), 423 s |
@@ -293,21 +326,24 @@ See §17.
 PostgreSQL, Anvil/fork and browser suites need the CI services; they ran only in CircleCI (§15). Local results are not
 certification.
 
-## 15. CI evidence (PR head `721ca0310824555f61ab69ea839002497812b493`)
+## 15. CI evidence
 
-CircleCI workflow `01ec952f-5379-4632-a131-837b6cbd598a`, all green:
+CircleCI certification (`manual-backup-certification`), every run of this PR green on all five status contexts
+(`ci/circleci: governance`, `certification-checks`, `certification-browser-1`, `certification-browser-2`,
+`certification`), each ending in `Certification ledger: PASS (18 required stages over 3 job(s), 50 browser profiles each
+exactly once, all for revision <head>)`:
 
-| Status context | Result |
-| --- | --- |
-| `ci/circleci: governance` | success (48.5 s) |
-| `ci/circleci: certification-checks` | success — dependency security PASS (505 packages, 505/505 signatures, 0 advisories, 6 exceptions used), audit, SBOM (505 computed components), typecheck, lint, schema drift, unit (346 s), PostgreSQL (208 s), fork suites, build, browser shard 3 (11 profiles) |
-| `ci/circleci: certification-browser-1` | success — critical (6 profiles) then shard 1 (16 profiles) |
-| `ci/circleci: certification-browser-2` | success — shard 2 (16 profiles) then composition |
-| `ci/circleci: certification` | success — `Certification ledger: PASS (18 required stages over 3 job(s), 50 browser profiles each exactly once, all for revision 721ca0310824555f61ab69ea839002497812b493)` |
-| `Vercel` | success (the repository's automatic preview integration; no production deployment) |
+| Head | Workflow | Content | Result |
+| --- | --- | --- | --- |
+| `721ca03` | `01ec952f-5379-4632-a131-837b6cbd598a` | implementation + report | green, 1387.3 s |
+| `507e5b8` | `cf71aef6-0625-4bb8-adfc-1e94db710dc2` | measured results (docs) | green, 1380.2 s |
+| `4c05209` | `2a9c4b73-d8e8-4bf4-9776-34a867af7a85` | review round 1 (edges, settings, parser, cache) | green, 1538.8 s |
+| `1b71d0e` | `3e84996b-eea1-43ac-87f5-e3f17c6a37b0` | trusted-publishing fix + after-runs | green, 1425.4 s |
 
-GitHub Actions (`Governance`, `Repository contracts and reference app`) produced no run: no Actions workflow has run
-on this repository since 2026-10-14.
+The dependency gate in CI (e.g. `certification-checks` on `4c05209`): PASS 505/505, 505/505 registry signatures, 0
+advisories, 1023 edges consistent, five exceptions used, 18.9 s. Later heads (critic fixes, this record) are certified
+on the PR itself; their status is in the PR checks. `Vercel` is the repository's automatic preview integration (no
+production deployment). GitHub Actions produced no run: no Actions workflow has run on this repository since 2026-10-14.
 
 ## 16. Acceptance checklist
 
@@ -324,6 +360,17 @@ on this repository since 2026-10-14.
 | Real baseline, critical path, before/after, no fabricated claims | Done (§1, §9) |
 | Isolated branch; tests run; PR open; nothing merged or deployed | Done (designated branch `claude/sleepy-noether-9g1cxy`; PR #151) |
 
-## 17. Review, owner decisions
+## 17. Owner decisions requested
 
-Filled in below.
+1. **Permissive categories.** 0BSD, BlueOak-1.0.0 and Unlicense (six identities previously excepted one by one) plus
+   MIT-0, CC0-1.0 and Zlib are in `licenses.allowed`. Move any of them to `review` if you prefer.
+2. **Name-scoped license exceptions.** caniuse-lite (CC-BY-4.0) and lightningcss (MPL-2.0) pass for any version and any
+   dependent while the license is unchanged; sharp's LGPL binaries also stay bound to their parents and optional,
+   platform-restricted role.
+3. **Archive license detection.** A package with no registry license passes when its archive ships exactly one standard
+   Apache-2.0, MIT or ISC text (this replaced the Privy per-version exception).
+4. **`ignoreScripts: true` in `pnpm-workspace.yaml`.** pnpm 11 no longer reads `.npmrc` `ignore-scripts`, so the
+   repository's intended control was inert for local installs; it is now effective (repository scripts still run).
+5. **External settings unchanged.** Required status checks, branch protection, CircleCI job names and project settings
+   were not touched. Making a `.circleci/config.yml` or policy change require a code-owner review would be a GitHub
+   setting for you to decide.

@@ -1076,21 +1076,29 @@ def _selectors(mapping, label):
     return result
 
 
+_DIST_TAG = re.compile(r"^[A-Za-z][\w.-]*$")
+
+
+def _version_matches(version, spec):
+    """A semver range, or a dist-tag such as `latest` (which resolved to *some* release of the same package when the
+    lockfile was written; the release itself is still evaluated on its own evidence). Other specs (git, URLs, files)
+    never match a registry release."""
+    try:
+        return satisfies(version, spec)
+    except ValueError:
+        return bool(_DIST_TAG.fullmatch(spec)) and not re.match(r"^(?:file|link|git|github|https?|workspace)\b", spec)
+
+
 def _spec_satisfied(name, target, spec):
-    """Does the locked target identity satisfy one declared dependency spec (a range or an npm: alias)?"""
+    """Does the locked target identity satisfy one declared dependency spec (a range, a dist-tag or an npm: alias)?"""
     target_name, target_version = split_identity(target)
     spec = str(spec).strip()
     if spec.startswith("npm:"):
         alias_name, _, alias_range = spec[4:].rpartition("@") if "@" in spec[5:] else (spec[4:], "", "")
         if not alias_name:
             alias_name, alias_range = spec[4:], ""
-        return target_name == alias_name and satisfies(target_version, alias_range or "*")
-    if target_name != name:
-        return False
-    try:
-        return satisfies(target_version, spec)
-    except ValueError:
-        return False
+        return target_name == alias_name and _version_matches(target_version, alias_range or "*")
+    return target_name == name and _version_matches(target_version, spec)
 
 
 def graph_edge_findings(graph, metadata, workspace):
@@ -1202,8 +1210,9 @@ def evaluate(root, *, policy, policy_sha256, graph, metadata, audit, signature_v
         global_findings.append(_finding("policy-bypass", "pnpm-workspace.yaml must keep ignoreScripts: true (pnpm 11 ignores .npmrc ignore-scripts)"))
     if workspace.get("dangerouslyAllowAllBuilds") or workspace.get("onlyBuiltDependencies") or workspace.get("allowBuilds"):
         global_findings.append(_finding("policy-bypass", "pnpm-workspace.yaml enables dependency lifecycle scripts"))
-    lockfile_settings = {"gitBranchLockfile": True, "lockfileDir": None, "useLockfile": False, "lockfile": False,
-                         "sharedWorkspaceLockfile": False, "optional": False}
+    lockfile_settings = {"gitBranchLockfile": True, "mergeGitBranchLockfiles": True, "mergeGitBranchLockfilesBranchPattern": None,
+                         "lockfileDir": None, "useLockfile": False, "lockfile": False, "sharedWorkspaceLockfile": False,
+                         "optional": False}
     for key, forbidden in lockfile_settings.items():
         if key in workspace and (forbidden is None or workspace[key] == forbidden):
             global_findings.append(_finding("policy-bypass", f"pnpm-workspace.yaml {key}: {workspace[key]} changes which lockfile or "

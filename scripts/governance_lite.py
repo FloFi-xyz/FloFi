@@ -35,7 +35,8 @@ RELEASE_AGE_SETTINGS = re.compile(r"(?mi)^\s*['\"]?(?:minimumReleaseAge\w*|minim
 # style cannot hide them). None: forbidden whenever set; any other value: forbidden when equal to it.
 WORKSPACE_FORBIDDEN = {"audit": None, "auditConfig": None, "auditLevel": None, "registry": None, "registries": None,
                        "dangerouslyAllowAllBuilds": None, "onlyBuiltDependencies": None, "allowBuilds": None,
-                       "gitBranchLockfile": None, "lockfileDir": None, "useLockfile": False, "lockfile": False,
+                       "gitBranchLockfile": None, "mergeGitBranchLockfiles": None, "mergeGitBranchLockfilesBranchPattern": None,
+                       "lockfileDir": None, "useLockfile": False, "lockfile": False,
                        "sharedWorkspaceLockfile": False, "optional": False}
 WORKSPACE_REQUIRED = {"minimumReleaseAge": 0, "ignoreScripts": True, "strictPeerDependencies": True, "autoInstallPeers": False}
 
