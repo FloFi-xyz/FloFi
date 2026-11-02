@@ -38,7 +38,7 @@ export type BuildEntryProps = {
  */
 export function BuildEntry({ conversation, workflow, proposal, actions, draft, setDraft, interactive, openBuilder }: BuildEntryProps) {
   const { t: tr, language } = useLocale();
-  const [attempt, setAttempt] = useState<{ before: BuildEntrySnapshot; settled: boolean } | null>(null);
+  const [attempt, setAttempt] = useState<{ before: BuildEntrySnapshot; request: string; settled: boolean } | null>(null);
   const [refused, setRefused] = useState<Extract<BuildEntryOutcome, { kind: 'REFUSED' }> | null>(null);
   const field = useRef<HTMLTextAreaElement>(null);
   const busy = Boolean(attempt && !attempt.settled) || conversation.busy;
@@ -50,13 +50,13 @@ export function BuildEntry({ conversation, workflow, proposal, actions, draft, s
     if (!text || busy || !interactive) return;
     setRefused(null);
     const before = snapshot();
-    setAttempt({ before, settled: false });
-    try { await conversation.submit(text); } finally { setAttempt(current => current?.before === before ? { before, settled: true } : current); }
+    setAttempt({ before, request: text, settled: false });
+    try { await conversation.submit(text); } finally { setAttempt(current => current?.before === before ? { ...current, settled: true } : current); }
   }
   // Read once the conversation has settled, from the stored workflow and FloFi's own reply (never from the request text).
   useEffect(() => {
     if (!attempt?.settled) return;
-    const outcome = buildEntryOutcome(attempt.before, { ...snapshot(), log: conversation.messages });
+    const outcome = buildEntryOutcome(attempt.before, { ...snapshot(), log: conversation.messages }, attempt.request);
     setAttempt(null);
     if (outcome.kind === 'REFUSED') { setRefused(outcome); return; }
     setDraft('');

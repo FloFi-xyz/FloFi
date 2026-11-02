@@ -26,8 +26,8 @@ export const portugueseExecutionUx: Readonly<Record<string, string>> = {
     'Verifique o endereço de destino. Tem de ser um endereço de carteira válido nesta rede, não uma conta de token nem de programa.',
   'This token uses a token feature FloFi cannot verify safely. Nothing was simulated or sent.':
     'Este token usa uma funcionalidade que a FloFi não consegue verificar com segurança. Nada foi simulado nem enviado.',
-  'The token details do not match what is on the network. Check the token in Build and simulate again.':
-    'Os dados do token não correspondem aos da rede. Verifique o token em Construir e simule novamente.',
+  'The token details do not match what is on the network. Check the token on the Canvas and simulate again.':
+    'Os dados do token não correspondem aos da rede. Verifique o token no Canvas e simule novamente.',
   'Check the amount. It is outside what this network or token accepts.': 'Verifique o montante. Está fora do que esta rede ou este token aceita.',
   'Your current debt is lower than this repayment. Reduce the amount and simulate again.': 'A sua dívida atual é inferior a este reembolso. Reduza o montante e simule novamente.',
   'This account is upgraded to a smart account (EIP-7702) whose code FloFi has not verified, and that code could act on funds this workflow sends to it. Use a standard account or a MetaMask Smart Account. Nothing was simulated or sent.':
@@ -40,8 +40,8 @@ export const portugueseExecutionUx: Readonly<Record<string, string>> = {
     'Esta ação não está disponível neste servidor FloFi neste momento. Nada foi simulado nem enviado.',
   'The network rejected this transaction in simulation, so nothing was sent. Check the amounts and your balances, then simulate again.':
     'A rede rejeitou esta transação na simulação, por isso nada foi enviado. Verifique os montantes e os seus saldos e simule novamente.',
-  'FloFi could not complete this simulation, and nothing was sent. Check the workflow in Build, then simulate again.':
-    'A FloFi não conseguiu concluir esta simulação e nada foi enviado. Verifique o fluxo em Construir e simule novamente.',
+  'FloFi could not complete this simulation, and nothing was sent. Check the workflow on the Canvas, then simulate again.':
+    'A FloFi não conseguiu concluir esta simulação e nada foi enviado. Verifique o fluxo no Canvas e simule novamente.',
   'Check the workflow': 'Verifique o fluxo',
   // The one owner action after a simulation.
   'Authorize in wallet': 'Autorizar na carteira',

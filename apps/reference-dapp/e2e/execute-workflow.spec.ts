@@ -22,7 +22,7 @@ test('Execute shows the shared authored workflow without authorizing or inventin
   await expect(graph.locator('.composer-amount')).toHaveText('2.25 USDC');
   await expect(graph.locator('.composer-card')).toContainText('Base');
   await expect(execution.locator('form, input:not([type=range]), [data-mocked-value]')).toHaveCount(0);
-  await expect(execution.getByRole('button', { name: /^(Return to Build|Execute|Execute swap|Authorize|Accept review)$/ })).toHaveCount(0);
+  await expect(execution.getByRole('button', { name: /^(Return to the Canvas|Execute|Execute swap|Authorize|Accept review)$/ })).toHaveCount(0);
   await assertNoFinancialCanvasAction(page);
   await expect(execution.getByRole('link', { name: /Download.*Evidence Bundle/ })).toHaveCount(0);
   expect(await execution.innerText()).not.toMatch(/EXECUTE \/ UNAVAILABLE|Prepare for execution|Mocked|Running|Confirmed|Completed/);

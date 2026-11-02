@@ -110,7 +110,7 @@ for (const theme of ['Light', 'Dark'] as const) {
     await expect(page.locator('.execute-workspace-grid')).toBeVisible();
     await expect(page.locator('.canvas-empty-mascot,img[src*="flofi-droplet-wave"]')).toHaveCount(0);
     await assertNoFinancialCanvasAction(page);
-    await page.getByRole('button', { name: 'Back to Build', exact: true }).click();
+    await page.getByRole('button', { name: 'Back to the Canvas', exact: true }).click();
     await expect(page.locator('.build-flow-surface .composer-card input').first()).toHaveValue('1');
     await expect(page.locator('.canvas-empty')).toHaveCount(0);
     expect(await page.evaluate(() => (window as unknown as { supplyWalletRequests: { method: string }[] }).supplyWalletRequests.filter(request => /send|sign/i.test(request.method)))).toEqual([]);

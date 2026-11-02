@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { isPristineDraft } from './initial-workflow';
+import { lifecycleRequest } from './conversation-lifecycle';
 
 /**
  * BUILD0-UX-001: Build 0, the intent entry before the existing builder (Build 1). It owns no workflow, interpreter or execution state: a request
@@ -41,10 +42,16 @@ export type BuildEntryOutcome =
   /** Nothing changed and nothing is pending: the entry says why, keeping the request editable. */
   | { readonly kind: 'REFUSED'; readonly message: string | null; readonly language: 'EN' | 'PT' | null };
 
-/** Classifies what the existing conversation did with one request typed in Build 0, from the stored workflow and FloFi's own reply. */
-export function buildEntryOutcome(before: BuildEntrySnapshot, after: BuildEntrySnapshot & { readonly log: readonly EntryMessage[] }): BuildEntryOutcome {
+/**
+ * Classifies what the existing conversation did with one request typed in Build 0, from the stored workflow and FloFi's own reply.
+ * BUILD-FLOFI-CHAT-EDITOR-UX-001: an answer to FloFi's open lifecycle question (a workflow or execution confirmation, a continuation, an
+ * unapplied Canvas amount) and a lifecycle request the chat handles itself ("review workflow", "check status", "execute"…) are part of the
+ * conversation, never a refusal: their progress (a simulation, a wallet request) continues in the Editor's chat. `request` is the typed text.
+ */
+export function buildEntryOutcome(before: BuildEntrySnapshot, after: BuildEntrySnapshot & { readonly log: readonly EntryMessage[] }, request = ''): BuildEntryOutcome {
   if (after.workflowId !== before.workflowId || after.revision !== before.revision) return { kind: 'BUILT' };
   if (after.proposal && after.proposal !== before.proposal) return { kind: 'PROPOSED' };
+  if ((before.question && before.question !== 'NEXT_STEP') || lifecycleRequest(request) !== null) return { kind: 'CONVERSATION' };
   const replies = after.log.slice(before.messages).filter(message => message.role !== 'you');
   if (after.question || (after.automation && after.automation !== before.automation)
     || replies.some(message => message.role === 'ai' || message.question || message.review || message.options?.length)) return { kind: 'CONVERSATION' };

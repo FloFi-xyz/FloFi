@@ -88,7 +88,7 @@ describe('footer after Build CTA relocation', () => {
   it('retains footer actions when no simulation canvas is mounted and on Execute', () => {
     const setTab = vi.fn();
     expect(renderToStaticMarkup(createElement(SummaryBar, { tab: 'Simulate', setTab }))).toMatch(/disabled="">Review swap/);
-    expect(renderToStaticMarkup(createElement(SummaryBar, { tab: 'Execute', setTab, simulationActionHost: {} as HTMLDivElement }))).toContain('Back to Build');
+    expect(renderToStaticMarkup(createElement(SummaryBar, { tab: 'Execute', setTab, simulationActionHost: {} as HTMLDivElement }))).toContain('Back to the Canvas');
     expect(createPortal).not.toHaveBeenCalled();
     expect(setTab).not.toHaveBeenCalled();
   });
@@ -139,9 +139,15 @@ describe('Editor sections in the footer', () => {
     expect(setTab).toHaveBeenCalledExactlyOnceWith('Execute');
   });
 
-  it('keeps both sections closed while a Canvas amount is unapplied, as the former tabs were', () => {
+  it('keeps both sections closed while a Canvas amount is unapplied, as the former tabs were, and says why', () => {
+    const html = renderToStaticMarkup(createElement(SummaryBar, { tab: 'Build', setTab: vi.fn(), canvasOwnsAction: true, sections: { disabled: true, incomplete: true } }));
+    expect(html.match(/<button type="button" disabled="" title="Configure the action amount on the Canvas first">View (simulation|execution)<\/button>/g)).toHaveLength(2);
+  });
+
+  it('keeps both sections closed while an /approve proposal gates them, without the amount reason', () => {
     const html = renderToStaticMarkup(createElement(SummaryBar, { tab: 'Build', setTab: vi.fn(), canvasOwnsAction: true, sections: { disabled: true } }));
-    expect(html.match(/<button type="button" disabled="" title="Configure the action amount in Build first">View (simulation|execution)<\/button>/g)).toHaveLength(2);
+    expect(html.match(/<button type="button" disabled="">View (simulation|execution)<\/button>/g)).toHaveLength(2);
+    expect(html).not.toContain('title=');
   });
 
   it('adds no section action where the shell does not ask for one', () => {

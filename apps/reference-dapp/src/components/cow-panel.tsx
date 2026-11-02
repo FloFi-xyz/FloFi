@@ -91,7 +91,7 @@ export function CowPanel({ view }: { view: 'simulate' | 'execute' }) {
           <div key={name}><dt>{name}</dt><dd><code>{tr(value)}</code></dd></div>)}
           <div><dt>{tr("Intent hash")}</dt><dd><code>{tr(compiled.intentHash)}</code></dd></div></dl>
       </details>
-      {view === 'simulate' && <p className="simulate-next">{tr("Review the exact order and fixed CoW provider here, then open Execute to sign. Any provider or execution-kind change needs a fresh quote, simulation, Manifest and signature.")}</p>}
+      {view === 'simulate' && <p className="simulate-next">{tr("Review the exact order and fixed CoW provider here, then open the execution view to sign. Any provider or execution-kind change needs a fresh quote, simulation, Manifest and signature.")}</p>}
       {view === 'execute' && <div className="cow-controls" aria-label={tr("CoW order controls")}>
         {!wallet && <button type="button" onClick={cow.connect} disabled={Boolean(busy)}>{tr("Connect disposable local wallet")}</button>}
         {record.state === 'REVIEWED' && <button type="button" onClick={cow.signAndPost}

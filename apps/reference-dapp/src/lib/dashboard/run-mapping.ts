@@ -173,7 +173,7 @@ export function currentDashboardRun(title: string, progress: ExecutionLifecycle,
       Object.values(progress.evidence.operations).some(op => op.identifiers.length > 0 || op.values.length > 0))), createdAt: null, updatedAt: null };
   const view = projectDashboardRun(run, progress, title, true);
   if (recovery?.contextIssue) view.attention.push(recovery.contextIssue);
-  if (recovery?.action && progress.state !== 'complete') view.attention.push('Check execution status in Execute');
+  if (recovery?.action && progress.state !== 'complete') view.attention.push('Check execution status in the Editor\'s execution view');
   return view;
 }
 

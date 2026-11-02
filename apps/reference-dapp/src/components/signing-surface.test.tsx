@@ -49,7 +49,7 @@ describe('shared chat-first signing surface', () => {
     const data = await solanaTransferReviewFixture(profile); data.authorization.approve = vi.fn(); data.execution.start = vi.fn();
     const html = render(data), record = data.source.kind === 'solana-transfer' ? data.source.state.record! : null;
     for (const value of [data.wallet.account!, record!.review.recipient, record!.review.asset.mint!, '1.5', 'Estimated network fee', 'Recipient token account deposit', 'Authorize in wallet']) expect(html).toContain(value);
-    expect(html).not.toMatch(/mock-read|mock:local|type="checkbox"|Workflow stages|Back to Build|Credentials|beta-notice/);
+    expect(html).not.toMatch(/mock-read|mock:local|type="checkbox"|Workflow stages|Back to the Canvas|Credentials|beta-notice/);
     expect(data.authorization.approve).not.toHaveBeenCalled(); expect(data.execution.start).not.toHaveBeenCalled();
     expect(render(data, 'PT')).toContain('Autorizar na carteira'); expect(render(data, 'PT')).toContain('Destinatário');
   });

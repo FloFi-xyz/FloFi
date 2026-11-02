@@ -36,7 +36,7 @@ for (const theme of ['light', 'dark'] as const) {
       await openEditorSection(page, stage);
       await trigger.click();
       await expect(drawer.locator('[aria-current=page]')).toHaveCount(0);
-      await drawer.getByRole('link', { name: 'Build Workflow', exact: true }).press('Enter');
+      await drawer.getByRole('link', { name: 'Editor', exact: true }).press('Enter');
       await expect(page).toHaveURL('/app');
       await expectEditorSection(page, 'Build');
       await expect(drawer).toBeHidden();
@@ -44,13 +44,13 @@ for (const theme of ['light', 'dark'] as const) {
     }
     for (const [label, path] of [
       ['Dashboard', '/app/dashboard'], ['Credentials', '/app/credentials'], ['Agents', '/app/agents'],
-      ['Passkeys', '/app/passkeys'], ['Build Workflow', '/app'],
+      ['Passkeys', '/app/passkeys'], ['Editor', '/app'],
     ] as const) {
       await trigger.click();
-      expect(await drawer.getByRole('link').allTextContents()).toEqual(['Dashboard', 'Build Workflow', 'Credentials', 'Agents', 'Passkeys']);
+      expect(await drawer.getByRole('link').allTextContents()).toEqual(['Dashboard', 'Chat', 'Editor', 'Credentials', 'Agents', 'Passkeys']);
       await drawer.getByRole('link', { name: label, exact: true }).press('Enter');
       await expect(page).toHaveURL(path); await expect(drawer).toBeHidden();
-      if (label === 'Build Workflow') await expect(page.getByRole('region', { name: 'Workflow canvas', exact: true })).toBeVisible();
+      if (label === 'Editor') await expect(page.getByRole('region', { name: 'Workflow canvas', exact: true })).toBeVisible();
       else if (label === 'Dashboard') await expect(page.getByRole('main', { name: 'Dashboard', exact: true })).toBeVisible();
       else await expect(page.getByRole('heading', { name: label, level: 1, exact: true })).toBeVisible();
       await trigger.press('Enter');

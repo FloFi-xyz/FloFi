@@ -23,7 +23,7 @@ export const portugueseBridgeLiveFix: Readonly<Record<string, string>> = {
     'A sua carteira não autorizou a FloFi para esta conta. Reconecte a carteira e tente de novo.',
   'This wallet cannot send this kind of request. Use another wallet, then try again.': 'Esta carteira não consegue enviar este tipo de pedido. Use outra carteira e tente de novo.',
   'Another request for this workflow is still in progress.': 'Outro pedido deste workflow ainda está em andamento.',
-  'Check this workflow in Simulate before execution.': 'Confira este workflow em Simular antes da execução.',
+  'Check this workflow\'s simulation before execution.': 'Confira a simulação deste workflow antes da execução.',
   'Execution is unavailable for this route.': 'A execução não está disponível para esta rota.',
   'Destination delivery': 'Entrega no destino',
   // The compact financial Review.

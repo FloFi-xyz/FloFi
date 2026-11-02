@@ -81,7 +81,7 @@ test('lending projects the same authored strategy, shared title and links withou
   expect(await graph(page).locator('.react-flow__node').evaluateAll(nodes => nodes.map(node => (node as HTMLElement).style.transform))).toEqual(positions);
   await expect(graph(page).locator('.react-flow__node.selected')).toHaveCount(0);
   await expect(page.locator('.summary-bar')).toHaveAttribute('data-workflow-revision', '1');
-  await graph(page).getByRole('button', { name: 'Back to Build', exact: true }).click();
+  await graph(page).getByRole('button', { name: 'Back to the Canvas', exact: true }).click();
   await expectEditorSection(page, 'Build');
   await expect(page.locator('.build-flow-surface .composer-card.active')).toHaveCount(1);
 });
@@ -106,7 +106,7 @@ test('accepted Build edits refresh Simulate while current diagnostic artifacts a
   await page.evaluate(() => window.history.pushState(null, '', '/app'));
   await expect(details).toHaveCount(0);
   expect(await page.getByRole('main', { name: 'Simulation workspace', exact: true }).innerText()).not.toMatch(/MOCK|SYNTHETIC|Artifact Set|LOCAL/);
-  await graph(page).getByRole('button', { name: 'Back to Build', exact: true }).click();
+  await graph(page).getByRole('button', { name: 'Back to the Canvas', exact: true }).click();
   await openCanvasSettings(page);
   const inspectorAmount = page.getByRole('dialog', { name: 'Action settings', exact: true }).getByLabel('Input amount (USDC)');
   // BUILD-FIX-UX-001: Enter in Advanced Settings applies the amount directly.
@@ -133,7 +133,7 @@ test('empty workflows and supported isolated actions keep the same graph and ori
       await expect(graph(page).locator('.react-flow__node')).toHaveCount(0);
       await expect(graph(page)).toContainText('Add an action to your workflow');
     } else await expect(graph(page).locator('.react-flow__node')).toHaveCount(1);
-    await expect(graph(page).getByRole('button', { name: 'Back to Build', exact: true })).toHaveCount(1);
+    await expect(graph(page).getByRole('button', { name: 'Back to the Canvas', exact: true })).toHaveCount(1);
     await expect(graph(page).locator('.canvas-navigator')).toBeVisible();
   }
 });
@@ -147,7 +147,7 @@ test('desktop/mobile graph keeps approved action order, zoom/fit controls and ca
     await expect(graph(page)).toHaveAttribute('data-viewport', 'fitted');
     await graph(page).scrollIntoViewIfNeeded();
     const actions = graph(page).locator('.simulation-workspace-actions');
-    await expect(actions.locator('button')).toHaveText(['Back to Build', 'Simulate workflow']);
+    await expect(actions.locator('button')).toHaveText(['Back to the Canvas', 'Simulate workflow']);
     const buttons = await actions.locator('button').all();
     const backBox = (await buttons[0]!.boundingBox())!, simulateBox = (await buttons[1]!.boundingBox())!;
     expect(backBox.x + backBox.width + 7).toBeLessThanOrEqual(simulateBox.x);

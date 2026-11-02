@@ -178,7 +178,7 @@ export async function assertNoFinancialCanvasAction(page: Page): Promise<void> {
 
 /** Apply a reviewed authoring proposal through the visible contextual popover. This grants no financial authority. */
 /** BUILD-FLOFI-CONVERSATIONAL-001: FloFi's confirmation that the chat committed a change to the workflow (English or Portuguese). */
-export const CHAT_COMMITTED = /added to your workflow|updated: |removed from your workflow|Prepared for Simulate\. Nothing is removed|Adicionado ao seu workflow|Etapa atualizada|Removido do seu workflow|Preparado para a simulação/;
+export const CHAT_COMMITTED = /added to your workflow|updated: |removed from your workflow|Prepared for simulation\. Nothing is removed|Adicionado ao seu workflow|Etapa atualizada|Removido do seu workflow|Preparado para a simulação/;
 /**
  * BUILD-FLOFI-CONVERSATIONAL-001: a valid chat request is committed to the canonical workflow at once — no proposal to accept — and FloFi confirms
  * in the chat what the stored workflow now holds. Waits for that one new confirmation.

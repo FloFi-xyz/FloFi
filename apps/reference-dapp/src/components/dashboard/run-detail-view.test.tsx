@@ -15,7 +15,7 @@ describe('Run Details reuses the UX-005 execution and evidence truth', () => {
     expect(html).toContain('Run summary'); expect(html).toContain('RECORDED EXECUTION PROOF'); expect(html).toContain('Archive integrity verified');
     expect(html.match(/<details/g)).toHaveLength(1); expect(html).not.toContain('<details open');
     expect(html).toContain('Saved execution record'); expect(html).not.toContain('Current execution record');
-    expect(html).not.toContain('current execution record'); expect(html).not.toContain('Back to Build');
+    expect(html).not.toContain('current execution record'); expect(html).not.toContain('Back to the Canvas');
   });
   it('keeps known actual output separate from the planned amount and only reports recorded costs', () => {
     const html = render();

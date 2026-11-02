@@ -18,7 +18,7 @@ export function projectExecution(props: ExecutionWorkspaceState, now = Date.now(
   const review = projectReview(workflow, context, source, authorization, wallet, now, invalidWorkflow);
   const expiries = [review.expiresAt, execution.expiresAt].filter((value): value is number => value !== null && Number.isFinite(value));
   const expiresAt = expiries.length ? Math.min(...expiries) : null;
-  let status = 'blocked', label = 'Authorization required', message = 'Review this workflow in Simulate before execution.';
+  let status = 'blocked', label = 'Authorization required', message = 'Review this workflow\'s simulation before execution.';
   if (review.status === 'approved' && execution.ready && execution.start) {
     status = 'ready'; label = 'Ready to execute'; message = 'Your reviewed workflow is ready. Execution starts only when you choose to continue.';
   } else if (review.status !== 'ready' && review.status !== 'approved') {
@@ -26,7 +26,7 @@ export function projectExecution(props: ExecutionWorkspaceState, now = Date.now(
     if (review.status === 'invalidated') label = /Network changed/.test(message) ? 'Network changed' : /Wallet changed/.test(message) ? 'Wallet changed' : 'Workflow changed';
     if (review.status === 'blocked' && authorization.accepted && review.label !== 'Connect your wallet') label = 'Execution unavailable';
   }
-  if (review.status === 'approved' && !execution.ready) { label = 'Execution unavailable'; message = execution.reason ?? 'Execution cannot begin with the current wallet or execution state. Check this workflow in Simulate.'; }
+  if (review.status === 'approved' && !execution.ready) { label = 'Execution unavailable'; message = execution.reason ?? 'Execution cannot begin with the current wallet or execution state. Check this workflow\'s simulation.'; }
   if (!authorization.key) {
     status = 'blocked';
     if (review.status !== 'invalidated' && review.label !== 'Connect your wallet') { label = 'Review required'; message = 'Simulate and review this workflow before execution.'; }
@@ -34,7 +34,7 @@ export function projectExecution(props: ExecutionWorkspaceState, now = Date.now(
   if (source.state.busy) { status = 'loading'; label = 'Preparing execution…'; message = 'Checking the workflow and wallet authorization. Complete any open wallet confirmation.'; }
   if (expiresAt !== null && now >= expiresAt || review.status === 'expired') { status = 'blocked'; label = 'Simulation expired'; message = 'Simulate again and review the refreshed workflow before execution.'; }
   if (execution.started) { status = 'started'; label = 'Execution already started'; message = 'A request is already recorded for this workflow. Check its existing execution details before taking another action.'; }
-  if (!review.steps.length) { status = 'empty'; label = 'No workflow ready to execute'; message = 'Create a workflow in Build first.'; }
+  if (!review.steps.length) { status = 'empty'; label = 'No workflow ready to execute'; message = 'Create a workflow in the Editor first.'; }
   return { status, label, message, canExecute: status === 'ready', expiresAt, steps: review.steps,
     bindingValid: review.bindingValid, authorizationMessage: review.message, authorizationLabel: expiresAt !== null && now >= expiresAt ? 'Expired' : review.bindingValid ? 'Reviewed and approved' : review.status === 'ready' ? 'Approval required' : review.label,
     providers: [...new Set(review.steps.map(step => step.provider).filter((provider): provider is string => Boolean(provider)))],

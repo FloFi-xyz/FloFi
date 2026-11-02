@@ -12,14 +12,14 @@ test('Simulate anchors its CTAs inside the canvas beside the zoom controls', asy
   const panel = page.getByRole('region', { name: 'Workflow simulation workspace' });
   const graph = panel.getByRole('region', { name: 'Simulation workflow graph', exact: true });
   const summary = panel.getByRole('complementary', { name: 'Simulation Summary', exact: true });
-  const returnToBuild = graph.getByRole('button', { name: 'Back to Build', exact: true });
+  const returnToBuild = graph.getByRole('button', { name: 'Back to the Canvas', exact: true });
   const reviewSwap = summary.getByRole('button', { name: 'Review swap', exact: true });
   const technical = panel.locator('.simulation-technical');
   await expect(graph).toBeVisible();
   await expect(panel.locator('.canvas-head').getByRole('heading', { name: 'ESPARTACUS', exact: true })).toBeVisible();
   await expect(panel.locator('.canvas-head')).not.toContainText(/mock|read-only|synthetic/i);
   await expect(panel.locator('.canvas-head').getByRole('heading', { name: 'Graph', exact: true })).toHaveCount(0);
-  await expect(page.getByRole('button', { name: 'Back to Build', exact: true })).toHaveCount(1);
+  await expect(page.getByRole('button', { name: 'Back to the Canvas', exact: true })).toHaveCount(1);
   await expect(page.getByRole('button', { name: 'Review swap', exact: true })).toHaveCount(0);
   await expect(reviewSwap).toHaveCount(0);
   await expect(page.locator('.summary-bar').getByRole('button', { name: 'Review swap', exact: true })).toHaveCount(0);
@@ -28,7 +28,7 @@ test('Simulate anchors its CTAs inside the canvas beside the zoom controls', asy
   await expect(panel.locator(':scope > .simulate-note, :scope > .simulate-details-toggle')).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'Show technical details', exact: true })).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'Hide technical details', exact: true })).toHaveCount(0);
-  await expect(page.getByText('Add a Base swap in Build before generating mocked artifacts.', { exact: true })).toBeHidden();
+  await expect(page.getByText('Add a Base swap in the Editor before generating mocked artifacts.', { exact: true })).toBeHidden();
   await expect(technical).toHaveCount(0);
   await expect(page.getByRole('region', { name: 'Base read-only observation' })).toHaveCount(0);
   await expect(page.getByRole('region', { name: 'Local fork Mode A simulation' })).toHaveCount(0);

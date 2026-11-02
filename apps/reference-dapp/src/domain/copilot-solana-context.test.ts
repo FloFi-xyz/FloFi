@@ -181,7 +181,7 @@ describe('managing a FloFi position from chat', () => {
   it('needs a connected Solana Devnet wallet and only manages positions FloFi opened', () => {
     const session = new CopilotSession();
     expect(session.say('remove 50% of my liquidity', intent.position('DECREASE', '50'))).toMatchObject({ kind: 'UNSUPPORTED',
-      text: 'Connect a Solana Devnet wallet first (Simulate stage) so Flofi can find your positions. Nothing changed.' });
+      text: 'Connect a Solana Devnet wallet first (in the Editor\'s simulation view) so Flofi can find your positions. Nothing changed.' });
     session.verified = verified();
     expect(session.say('remove 50% of my liquidity', intent.position('DECREASE', '50'))).toMatchObject({ kind: 'UNSUPPORTED',
       text: 'Flofi found no active position it opened for this wallet on the Orca SOL/devUSDC pool. Nothing changed.' });

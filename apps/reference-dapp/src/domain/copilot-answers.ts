@@ -226,8 +226,8 @@ export function answerQuestion(topic: CopilotQuestionTopic, step: WorkflowStep |
       : 'Mocked artifacts are current: synthetic fixture data, not a live quote or a financial simulation.')
       : s.status === 'STALE' ? (pt ? 'Os artefatos simulados ficaram desatualizados porque o fluxo mudou ou expirou.' : 'The mocked artifacts are stale: the workflow changed or they expired.')
       : (pt ? 'Ainda não há resultado de simulação para este fluxo. Rode Simulate primeiro.' : 'There is no simulation result for this workflow yet. Run Simulate first.');
-    return s.status === 'CURRENT' ? (pt ? 'Existe uma simulação atual para esta revisão. Os números dela aparecem na aba Simulate; o Copilot informa apenas o status.'
-      : 'A current simulation exists for this revision. Its figures are in the Simulate tab; the Copilot reports only its status.')
+    return s.status === 'CURRENT' ? (pt ? 'Existe uma simulação atual para esta revisão. Os números dela aparecem na simulação do Editor; o Copilot informa apenas o status.'
+      : 'A current simulation exists for this revision. Its figures are in the Editor\'s simulation view; the Copilot reports only its status.')
       : s.status === 'STALE' ? (pt ? 'A última simulação ficou desatualizada porque o fluxo mudou. Simule de novo.' : 'The last simulation is stale because the workflow changed. Simulate again.')
       : (pt ? 'Ainda não há resultado de simulação para este fluxo. Rode Simulate primeiro.' : 'There is no simulation result for this workflow yet. Run Simulate first.');
   };
@@ -291,7 +291,7 @@ export function answerQuestion(topic: CopilotQuestionTopic, step: WorkflowStep |
     case 'CAPABILITIES': return answer(m.capabilities);
     case 'MARKET_DATA': return answer(pt ? 'O Flofi não tem preços ao vivo, APY, saldos, preço de gas, tempo de bridge nem health factor neste espaço de trabalho, e o Copilot nunca estima esses valores.'
       : 'Flofi has no live prices, APY, balances, gas prices, bridge times or health factors in this workspace, and the Copilot never estimates them.',
-      [pt ? 'Cotações e resultados simulados aparecem apenas em Simulate e Review, vindos dos provedores do próprio fluxo.' : 'Quotes and simulated outcomes appear only in Simulate and Review, from the flow\'s own providers.']);
+      [pt ? 'Cotações e resultados simulados aparecem apenas na simulação e na Review, vindos dos provedores do próprio fluxo.' : 'Quotes and simulated outcomes appear only in the simulation and Review, from the flow\'s own providers.']);
     case 'OTHER': return answer(pt ? 'O Copilot responde perguntas sobre os passos deste fluxo, protocolos, redes, approvals, Manifest, status da simulação, bloqueios e falhas.'
       : 'The Copilot answers questions about this workflow\'s steps, protocols, networks, approvals, Manifest, simulation status, blockers and failure handling.');
   }

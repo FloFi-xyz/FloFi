@@ -104,7 +104,7 @@ export function ReviewWorkspace(props: ReviewWorkspaceProps) {
         <section className="review-section" aria-label={tr("Authorization preview")}><h2>{tr("You are authorizing")}</h2><ul className="review-authorization-preview">{review.preview.map((line, index) => <li key={index}><ReviewTokenAmount value={line}/></li>)}</ul>
           {realFundsTemplate(review.manifest?.owner.chainId) && <p className="review-caption review-real-funds">{tr(...realFundsTemplate(review.manifest?.owner.chainId)!)}</p>}
           {expiresAt !== null && <p className="review-caption">{tr("Valid until ")}<time dateTime={new Date(expiresAt).toISOString()}>{tr(new Date(expiresAt).toLocaleString())}</time></p>}
-          <p className="review-caption"><button type="button" className="simulation-back" onClick={backToBuild}>{tr("Edit in Build")}</button>{tr(" to change any action or limit.")}</p>
+          <p className="review-caption"><button type="button" className="simulation-back" onClick={backToBuild}>{tr("Edit on the Canvas")}</button>{tr(" to change any action or limit.")}</p>
           <p className="review-caption">{tr("Changing the workflow, wallet, network or authorization limits requires a fresh Review. An expired simulation must be run again.")}</p>
           {review.manifest?.enforcement === 'NOT_ENFORCED' && <p className="review-caption">{tr("FloFi checks these limits before requesting execution. The chain enforces the signed transaction fields; the Manifest itself is not enforced by an on-chain contract.")}</p>}
         </section>

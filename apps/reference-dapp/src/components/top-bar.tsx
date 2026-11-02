@@ -94,7 +94,7 @@ export function TopBar({ tab, setTab, pathname, engineering = false, compact = f
   const evmTitle = build009.account ? `${provider?.name ?? 'EVM'} · ${build009.account} · ${chainName(build009.chainId)}` : undefined;
   const editor = (WORKFLOW_STAGES as readonly ProductSection[]).includes(tab);
   return <header className={`top-bar${compact ? ' top-bar-compact' : ''}`}>
-    <div className="brand">{!compact && <NavigationDrawer pathname={pathname ?? null} section={tab === BUILD_ENTRY ? 'Build' : tab} onBuild={() => setTab('Build')}
+    <div className="brand">{!compact && <NavigationDrawer pathname={pathname ?? null} section={tab === BUILD_ENTRY ? 'Chat' : tab} onBuild={() => setTab('Build')} onChat={entry ? () => setTab(BUILD_ENTRY) : undefined}
       onDisconnect={disconnect} disconnectDisabled={disconnectDisabled}/>}<FloFiLogo/></div>
     {!compact && <nav aria-label={tr("Workflow stages")} className="tabs"><button type="button" onClick={() => setTab('Dashboard')} aria-current={!secondaryWorkspace && tab === 'Dashboard' ? 'page' : undefined} className={!secondaryWorkspace && tab === 'Dashboard' ? 'selected' : ''}>{tr("Dashboard")}</button>
       {/* BUILD-FLOFI-CHAT-EDITOR-UX-001: Dashboard | Chat | Editor, unnumbered. The Editor is current on each of its sections (Canvas, simulation and

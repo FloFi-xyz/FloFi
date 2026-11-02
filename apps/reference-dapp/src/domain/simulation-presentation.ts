@@ -67,8 +67,8 @@ export type SimulationPresentation = {
 
 /** Labels and visual emphasis only. The existing projection remains the readiness source. */
 export function simulationStatusPresentation(view: SimulationPresentation, invalidWorkflow = false, busy?: boolean | string | null) {
-  if (invalidWorkflow) return { label: 'Check workflow', message: 'Check the workflow configuration in Build before continuing.', tone: 'blocked' };
-  if (!view.steps.length && view.status !== 'blocked') return { label: 'No workflow', message: 'Create a workflow in Build first.', tone: 'neutral' };
+  if (invalidWorkflow) return { label: 'Check workflow', message: 'Check the workflow configuration on the Canvas before continuing.', tone: 'blocked' };
+  if (!view.steps.length && view.status !== 'blocked') return { label: 'No workflow', message: 'Create a workflow in the Editor first.', tone: 'neutral' };
   if (view.message === 'Updating the simulation…') return { label: typeof busy === 'string' && /review/i.test(busy) ? 'Preparing authorization…' : 'Simulating workflow…', message: 'Checking the current workflow before continuing.', tone: 'neutral' };
   if (view.message === 'Run a simulation to see the expected result.') return { label: 'No simulation yet', message: 'Run a simulation to see expected execution.', tone: 'neutral' };
   if (/expired/i.test(view.message)) return { label: 'Simulation expired', message: 'Simulate again to refresh the result before authorization.', tone: 'blocked' };
@@ -139,7 +139,7 @@ export function simulationError(error: string): string {
   if (/WALLET_SELECTION_REQUIRED|_WALLET_REQUIRED$|WALLET_NOT_CONNECTED|OWNER_REQUIRED|WALLET_PROOF_REQUIRED/i.test(error)) return 'Connect the wallet that will sign this workflow, then simulate again.';
   if (/RECIPIENT_(?:REQUIRED|INVALID|NOT_EOA|NOT_WALLET|IS_TOKEN_ACCOUNT|IS_PROGRAM|OFF_CURVE|IS_SENDER|UNSUPPORTED)/i.test(error)) return 'Check the destination address. It must be a valid wallet address on this network, not a token or program account.';
   if (/EXTENSION/i.test(error)) return 'This token uses a token feature FloFi cannot verify safely. Nothing was simulated or sent.';
-  if (/MINT_(?:MISMATCH|NOT_FOUND|INVALID)|DECIMALS_MISMATCH|TOKEN_(?:METADATA|IDENTITY|PROGRAM)_MISMATCH|ASSET_IDENTITY|TOKEN_ACCOUNT_(?:MISMATCH|FROZEN)/i.test(error)) return 'The token details do not match what is on the network. Check the token in Build and simulate again.';
+  if (/MINT_(?:MISMATCH|NOT_FOUND|INVALID)|DECIMALS_MISMATCH|TOKEN_(?:METADATA|IDENTITY|PROGRAM)_MISMATCH|ASSET_IDENTITY|TOKEN_ACCOUNT_(?:MISMATCH|FROZEN)/i.test(error)) return 'The token details do not match what is on the network. Check the token on the Canvas and simulate again.';
   if (/AMOUNT_(?:TOO_SMALL|OUT_OF_RANGE|INVALID|BELOW_RENT)|BELOW_RENT_EXEMPT/i.test(error)) return 'Check the amount. It is outside what this network or token accepts.';
   if (/PARTIAL_DEBT_REQUIRED|NO_DEBT|DEBT_TOO_LOW/i.test(error)) return 'Your current debt is lower than this repayment. Reduce the amount and simulate again.';
   // HOTFIX-WORKFLOW-CONCURRENCY-001: no wallet-wide block remains; these refusals concern one transaction identity only.
@@ -152,13 +152,13 @@ export function simulationError(error: string): string {
   if (/TRANSFER_OWNER_NOT_EOA/i.test(error)) return 'Transfers need a standard wallet account. This account carries smart-account code (a contract wallet, or an EIP-7702 upgrade such as a MetaMask Smart Account), which FloFi does not use for transfers yet. Nothing was simulated or sent.';
   if (/OWNER_NOT_EOA/i.test(error)) return 'This address is a smart contract wallet (for example a Safe), so it cannot sign this transaction itself. Use a standard account or a MetaMask Smart Account. Nothing was simulated or sent.';
   if (/EXECUTION_NOT_ENABLED|NETWORK_UNAVAILABLE|NETWORK_UNSUPPORTED|PROFILE_UNSUPPORTED|_NOT_ENABLED$/i.test(error)) return 'This action is not available on this FloFi server right now. Nothing was simulated or sent.';
-  if (/NO_ROUTE|ROUTE_UNAVAILABLE|ROUTE_REFUSED|UNSUPPORTED/i.test(error)) return 'A route is not available for this workflow. Check its tokens and networks in Build.';
+  if (/NO_ROUTE|ROUTE_UNAVAILABLE|ROUTE_REFUSED|UNSUPPORTED/i.test(error)) return 'A route is not available for this workflow. Check its tokens and networks on the Canvas.';
   if (/APPROVAL|ALLOWANCE/i.test(error)) return 'The required token approval could not be verified. Simulate again before continuing.';
   if (/CAPACITY_EXCEEDED|INSUFFICIENT_COLLATERAL|NO_COLLATERAL|BORROW_CAPACITY|COLLATERAL_REQUIRED|RESERVE_(PAUSED|INACTIVE|FROZEN|UNAVAILABLE)|LIQUIDITY_(UNAVAILABLE|INSUFFICIENT)|INSUFFICIENT_LIQUIDITY/i.test(error)) return 'The available collateral or liquidity cannot support this action.';
   if (/WRONG_CHAIN|WRONG_CLUSTER|WRONG_WALLET|WRONG_OWNER|WALLET_MISMATCH/i.test(error)) return 'Reconnect the wallet used for this workflow and simulate again.';
   if (/REJECTED|CANCELLED|USER_REFUSAL/i.test(error)) return 'The wallet request was cancelled. Try again when ready.';
   if (/SIMULATION_FAILED|SIMULATION_UNEXPECTED|SIMULATED_[A-Z_]*MISMATCH|SIMULATED_[A-Z_]*BELOW|SIMULATION_INVALID/i.test(error)) return 'The network rejected this transaction in simulation, so nothing was sent. Check the amounts and your balances, then simulate again.';
-  return 'FloFi could not complete this simulation, and nothing was sent. Check the workflow in Build, then simulate again.';
+  return 'FloFi could not complete this simulation, and nothing was sent. Check the workflow on the Canvas, then simulate again.';
 }
 const iso = (value: string) => Date.parse(value);
 const seconds = (value: string | number) => Number(value) * 1000;

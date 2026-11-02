@@ -164,7 +164,7 @@ async function expectCleanNewWorkflow(page: Page, owner: Awaited<ReturnType<type
   await openEditorSection(page, 'Build');
 }
 
-test('UX-003/UX-004: completed run — locked CTAs, Return to Build keeps the workflow, Create new workflow starts clean', async ({ page, request, networkGuard }) => {
+test('UX-003/UX-004: completed run — locked CTAs, Return to the Canvas keeps the workflow, Create new workflow starts clean', async ({ page, request, networkGuard }) => {
   const errors: string[] = []; page.on('pageerror', error => errors.push(error.message));
   const owner = await setup(page, request);
   await simulateAndExecute(page, owner);
@@ -175,10 +175,10 @@ test('UX-003/UX-004: completed run — locked CTAs, Return to Build keeps the wo
   await owner.confirm();
   await expect(summary(page)).toContainText('Execution completed'); await expect(processing(page)).toHaveCount(0);
   const create = createNew(page);
-  await expect(create).toBeVisible(); await expect(summary(page).getByRole('button', { name: 'Return to Build', exact: true })).toBeVisible();
+  await expect(create).toBeVisible(); await expect(summary(page).getByRole('button', { name: 'Return to the Canvas', exact: true })).toBeVisible();
   // Return to Build keeps editing the same workflow; the result stays available.
   const authored = await readWorkflowIr(page);
-  await summary(page).getByRole('button', { name: 'Return to Build', exact: true }).click();
+  await summary(page).getByRole('button', { name: 'Return to the Canvas', exact: true }).click();
   await expectEditorSection(page, 'Build');
   expect(await readWorkflowIr(page)).toBe(authored); await expect(page.locator('.build-canvas-head .revision')).toHaveText('1 action');
   // The old workflow's conversation must not survive a new workflow (BUILD-FLOFI-CONVERSATIONAL-001: the chat reports the recorded result and

@@ -32,7 +32,7 @@ for (const theme of ['light', 'dark'] as const) {
     expect(await trigger.getAttribute('aria-controls')).toBe(await drawer.getAttribute('id'));
     for (const label of ['Credentials', 'Agents', 'Passkeys']) {
       await trigger.click(); await expect(drawer).toBeVisible();
-      expect(await drawer.getByRole('link').allTextContents()).toEqual(['Dashboard', 'Build Workflow', 'Credentials', 'Agents', 'Passkeys']);
+      expect(await drawer.getByRole('link').allTextContents()).toEqual(['Dashboard', 'Chat', 'Editor', 'Credentials', 'Agents', 'Passkeys']);
       await drawer.getByRole('link', { name: label, exact: true }).click();
       await expect(page).toHaveURL(`/app/${label.toLowerCase()}`);
       await expect(page.getByRole('heading', { name: label, level: 1 })).toBeVisible();
@@ -49,7 +49,9 @@ for (const theme of ['light', 'dark'] as const) {
     await trigger.press('Enter');
     await expect(drawer.getByRole('link', { name: 'Dashboard', exact: true })).toBeFocused();
     await page.keyboard.press('Tab');
-    await expect(drawer.getByRole('link', { name: 'Build Workflow', exact: true })).toBeFocused();
+    await expect(drawer.getByRole('link', { name: 'Chat', exact: true })).toBeFocused();
+    await page.keyboard.press('Tab');
+    await expect(drawer.getByRole('link', { name: 'Editor', exact: true })).toBeFocused();
     await page.keyboard.press('Tab');
     await expect(drawer.getByRole('link', { name: 'Credentials', exact: true })).toBeFocused();
     await page.keyboard.press('Tab');
@@ -99,7 +101,7 @@ for (const theme of ['light', 'dark'] as const) {
         expect(900 - drawerBox.y).toBeGreaterThan(400);
         expect(width - drawerBox.width).toBeGreaterThan(30);
         expect(await drawer.evaluate(element => element.scrollHeight <= element.clientHeight)).toBe(true);
-        for (const label of ['Dashboard', 'Build Workflow', 'Credentials', 'Agents', 'Passkeys']) await expect(drawer.getByRole('link', { name: label, exact: true })).toBeInViewport();
+        for (const label of ['Dashboard', 'Chat', 'Editor', 'Credentials', 'Agents', 'Passkeys']) await expect(drawer.getByRole('link', { name: label, exact: true })).toBeInViewport();
         await expect(drawer.getByRole('button', { name: 'Logout', exact: true })).toBeInViewport();
         await expect(drawer.locator('[aria-current=page]')).toHaveCount(stage === 'Build' || stage === 'Dashboard' ? 1 : 0);
         await expect(trigger).toBeInViewport();

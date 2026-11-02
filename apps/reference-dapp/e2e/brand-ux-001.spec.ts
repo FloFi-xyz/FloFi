@@ -66,7 +66,7 @@ for (const width of [320, 375, 390, 430]) {
     expect(poolBox.width).toBeGreaterThanOrEqual(44);
     expect(poolBox.height).toBeGreaterThanOrEqual(44);
     expect(poolBox.x + poolBox.width).toBeLessThanOrEqual(width);
-    const shortcuts = page.getByRole('navigation', { name: 'Build workspace navigation' });
+    const shortcuts = page.getByRole('navigation', { name: 'Editor navigation' });
     await shortcuts.getByRole('button', { name: 'Copilot', exact: true }).click();
     const input = page.getByLabel('Describe your flow');
     await expect(input).toBeFocused();

@@ -53,7 +53,7 @@ describe('product Review workspace', () => {
     expect(html).not.toContain('<details open');
     expect(main).toContain('No transaction is submitted');
     expect(main).toContain('Manifest itself is not enforced by an on-chain contract');
-    expect(main).not.toContain('Back to Simulate');
+    expect(main).not.toContain('Back to simulation');
     expect(main).toContain('Approve &amp; Continue');
   });
   it('keeps composed actions in order and sends editing back to Build', () => {
@@ -61,7 +61,7 @@ describe('product Review workspace', () => {
     const html = primary(render(p));
     expect(html.indexOf('Supply ·')).toBeLessThan(html.indexOf('Borrow ·'));
     expect(html.indexOf('Borrow ·')).toBeLessThan(html.indexOf('Swap ·'));
-    expect(html).toContain('Edit in Build'); expect(html).toContain('Review required again');
+    expect(html).toContain('Edit on the Canvas'); expect(html).toContain('Review required again');
   });
   it.each(['exact', 'bounded', 'unlimited'] as const)('shows %s token approval honestly with the original asset colors', kind => {
     const p = props(), asset = p.context.assets.USDC.asset; if (!('address' in asset)) throw Error('fixture');
@@ -97,7 +97,7 @@ describe('product Review workspace', () => {
   it('editing and refreshing stay explicit and approval does not navigate to Execute', () => {
     const p = props(), approve = vi.fn(); p.authorization.approve = approve;
     render(p);
-    clicks.get('Edit in Build')!();
+    clicks.get('Edit on the Canvas')!();
     expect(p.backToBuild).toHaveBeenCalledOnce();
     expect(approve).not.toHaveBeenCalled();
     clicks.get('Approve & Continue')!(); expect(approve).toHaveBeenCalledOnce();

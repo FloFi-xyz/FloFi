@@ -23,7 +23,7 @@ export type ExecuteWorkspaceProps = ExecutionWorkspaceState & {
    * provider references and evidence stay in the Dashboard (and the timeline keeps each step's transaction links).
    */
   technicalDetails?: ReactNode;
-  /** UX-004: start a clean workflow; offered only after a final result. "Return to Build" keeps editing this workflow. */
+  /** UX-004: start a clean workflow; offered only after a final result. "Return to the Canvas" keeps editing this workflow. */
   startNewWorkflow?: () => void;
   /** BUILD0-UX-001: opens the Dashboard, where the run's full record is kept. */
   openDashboard?: () => void;
@@ -70,7 +70,7 @@ export function ExecuteWorkspace(props: ExecuteWorkspaceProps) {
         {!live && view.warnings.length > 0 && <ul className="simulation-warnings" aria-label={tr("Execution blockers")}>{view.warnings.map((warning, index) => <li key={index} className="simulation-warning-blocking"><span className="simulation-warning-label">{tr("Blocking")}</span>{tr(warning.message)}</li>)}</ul>}
         {authorization.accepted && view.prompt && !execution.started && !requesting && <section className="execute-next" aria-label={tr("Next confirmation")}><h3>{tr("What happens next")}</h3><p>{tr(view.prompt)}</p><p>{tr("Only the next authorized request starts. Further wallet confirmations remain separate.")}</p></section>}
   </>;
-  const back = <button type="button" className="simulation-back" onClick={result || view.status === 'empty' ? backToBuild : backToSimulate}>{tr(result ? 'Return to Build' : view.status === 'empty' ? 'Create a workflow in Build' : view.label === 'Simulation expired' ? 'Simulate again' : 'Back to Simulate')}</button>;
+  const back = <button type="button" className="simulation-back" onClick={result || view.status === 'empty' ? backToBuild : backToSimulate}>{tr(result ? 'Return to the Canvas' : view.status === 'empty' ? 'Create a workflow in the Editor' : view.label === 'Simulation expired' ? 'Simulate again' : 'Back to simulation')}</button>;
   const navigationNote = live && live.state !== 'complete' && live.steps.some(step => step.operations.some(operation => operation.hash || operation.intent && ['posted', 'settling', 'partial'].includes(operation.state))) && <p className="execution-context execution-navigation-note">{tr("Leaving this view does not cancel submitted requests.")}</p>;
   const executionSummary = <>
       <aside className={`execution-summary panel${result ? ' execution-result-summary' : ''}`} aria-label={tr(result ? 'Execution result summary' : 'Execution Summary')}>
@@ -121,7 +121,7 @@ export function ExecuteWorkspace(props: ExecuteWorkspaceProps) {
   </section>;
   return <section className="execute-workspace" aria-label={tr("Workflow execution workspace")}>
     <div className={`execute-workspace-grid${detailsOnly ? ' stage-grid-single' : ''}`}>
-      {live ? <ExecutionTimeline progress={live} result={result} workflowName={workflowName} backToBuild={backToBuild} checkingOperation={verifying && !recovery?.recordOnly ? recovery?.operationId ?? null : null} primaryAction={props.primaryAction ?? <><button type="button" className="simulation-back" onClick={backToBuild}>{tr("Back to Build")}</button><CanvasLifecycleAction {...props} controls={controls}/></>}/> : <SimulateWorkflowCanvas workflowName={workflowName} stage="execute" primaryAction={props.primaryAction ?? <><button type="button" className="simulation-back" onClick={backToBuild}>{tr("Back to Build")}</button><CanvasLifecycleAction {...props} controls={controls}/></>}/>}
+      {live ? <ExecutionTimeline progress={live} result={result} workflowName={workflowName} backToBuild={backToBuild} checkingOperation={verifying && !recovery?.recordOnly ? recovery?.operationId ?? null : null} primaryAction={props.primaryAction ?? <><button type="button" className="simulation-back" onClick={backToBuild}>{tr("Back to the Canvas")}</button><CanvasLifecycleAction {...props} controls={controls}/></>}/> : <SimulateWorkflowCanvas workflowName={workflowName} stage="execute" primaryAction={props.primaryAction ?? <><button type="button" className="simulation-back" onClick={backToBuild}>{tr("Back to the Canvas")}</button><CanvasLifecycleAction {...props} controls={controls}/></>}/>}
       {!detailsOnly && executionSummary}
     </div>
     {detailsOnly && statusPanel}

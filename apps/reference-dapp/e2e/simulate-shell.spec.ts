@@ -16,7 +16,7 @@ test('Simulate and Execute open directly on existing content without a workspace
   await expect(execution.locator(':scope > :first-child')).toHaveAttribute('aria-label', 'Workflow execution workspace');
   await expect(execution.getByRole('region', { name: 'Execution workflow graph', exact: true })).toBeVisible();
   await expect(execution.locator('.stage-empty, .unavailable')).toHaveCount(0);
-  await expect(execution.getByRole('button', { name: 'Return to Build', exact: true })).toHaveCount(0);
+  await expect(execution.getByRole('button', { name: 'Return to the Canvas', exact: true })).toHaveCount(0);
   await expect(execution.getByRole('region', { name: 'Execute unavailable', exact: true })).toHaveCount(0);
   await assertNoFinancialCanvasAction(page);
   await openEditorSection(page, 'Simulate');

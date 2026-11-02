@@ -153,7 +153,7 @@ for (const theme of ['light', 'dark']) test(`${theme} plan, brand icons and resp
   const iconSize = await page.locator('.execution-summary img.brand-icon').evaluate(image => ({ width: image.getBoundingClientRect().width, height: image.getBoundingClientRect().height, filter: getComputedStyle(image).filter }));
   expect(iconSize).toEqual({ width: 18, height: 18, filter: 'none' });
   const canvas = page.locator('.simulation-workflow-canvas');
-  await expect(canvas.getByRole('button', { name: 'Back to Build', exact: true })).toBeVisible();
+  await expect(canvas.getByRole('button', { name: 'Back to the Canvas', exact: true })).toBeVisible();
   await expect(canvas.getByRole('button', { name: 'Execute workflow', exact: true })).toBeVisible();
   await expect(page.locator('.execution-summary').getByRole('button', { name: 'Execute workflow', exact: true })).toHaveCount(0);
   const ctaStyle = await page.getByRole('button', { name: 'Execute workflow', exact: true }).evaluate(button => ({ height: button.getBoundingClientRect().height, radius: getComputedStyle(button).borderRadius }));
@@ -184,7 +184,7 @@ for (const theme of ['light', 'dark']) test(`${theme} plan, brand icons and resp
     await expect(page.getByRole('button', { name: 'Execute workflow', exact: true })).toBeEnabled();
     const boxes = await canvas.evaluate(element => {
       const rect = (el: Element) => { const r = el.getBoundingClientRect(); return { left: r.left, right: r.right, top: r.top, bottom: r.bottom }; };
-      const back = [...element.querySelectorAll('button')].find(b => b.textContent === 'Back to Build')!;
+      const back = [...element.querySelectorAll('button')].find(b => b.textContent === 'Back to the Canvas')!;
       const execute = [...element.querySelectorAll('button')].find(b => b.textContent === 'Execute workflow')!;
       return { back: rect(back), execute: rect(execute), surface: rect(element.querySelector('.flow-surface')!), controls: rect(element.querySelector('.canvas-navigator')!), footer: rect(element.querySelector('.canvas-foot')!), attribution: rect(element.querySelector('.react-flow__attribution')!) };
     });
@@ -197,7 +197,7 @@ for (const theme of ['light', 'dark']) test(`${theme} plan, brand icons and resp
   }
   await page.setViewportSize({ width: 1280, height: 900 });
   await page.screenshot({ path: `.tmp/ux005e-canvas-${theme}.png`, fullPage: true });
-  await page.getByRole('button', { name: 'Back to Build', exact: true }).click();
+  await page.getByRole('button', { name: 'Back to the Canvas', exact: true }).click();
   expect((await page.evaluate(() => window.flofiExecuteAcceptance.counts())).edited).toBe(1);
   expect((await page.evaluate(() => window.flofiExecuteAcceptance.counts())).executed).toBe(0);
 });
@@ -252,9 +252,9 @@ test('the real shell preserves Build and embedded Review while Execute stays rea
   }
   await page.setViewportSize({ width: 1440, height: 900 });
   expect(await page.evaluate(() => (window as unknown as { executeWorkspaceRequests: string[] }).executeWorkspaceRequests.filter(method => /send|sign/i.test(method)))).toEqual([]);
-  await page.getByRole('button', { name: 'Back to Simulate', exact: true }).click(); await expect(page.locator('#simulation-review')).toBeVisible();
+  await page.getByRole('button', { name: 'Back to simulation', exact: true }).click(); await expect(page.locator('#simulation-review')).toBeVisible();
   await page.setViewportSize({ width: 320, height: 900 }); await expectStageNavigationFits(page);
-  await page.getByRole('button', { name: 'Back to Build', exact: true }).click();
+  await page.getByRole('button', { name: 'Back to the Canvas', exact: true }).click();
   await expectStageNavigationFits(page);
   await expect(page.locator('.build-flow-surface .composer-card')).toBeVisible();
   await expect(page.getByRole('textbox', { name: 'Source amount (USDC)', exact: true })).toHaveValue('2.5');
@@ -283,7 +283,7 @@ test('approval, submitted action and confirmation remain ordered with explicit c
   await page.evaluate(() => window.flofiExecuteAcceptance.lifecycle('swap-confirmed')); await expect(plan).toContainText('Confirmed');
   await expect(page.locator('.execution-summary')).toContainText('1 of 1');
   await expect(page.locator('.execution-summary')).toContainText('Execution completed');
-  await expect(page.getByRole('button', { name: 'Return to Build', exact: true })).toBeEnabled();
+  await expect(page.getByRole('button', { name: 'Return to the Canvas', exact: true })).toBeEnabled();
 });
 test('failure, uncertainty and restored execution never regain the initial Execute CTA', async ({ page }) => {
   for (const state of ['failed', 'uncertain', 'restored'] as const) {
@@ -488,7 +488,7 @@ test('safe status checks and continuation each have one primary action', async (
   await expect(summary.getByRole('button', { name: 'Checking status…', exact: true })).toBeDisabled();
   await expect(summary.locator('button.primary')).toHaveCount(1);
   await page.evaluate(() => window.flofiExecuteAcceptance.finishCheck());
-  await expect(summary.getByRole('button', { name: 'Return to Build', exact: true })).toHaveClass('primary');
+  await expect(summary.getByRole('button', { name: 'Return to the Canvas', exact: true })).toHaveClass('primary');
   await page.evaluate(() => { window.flofiExecuteAcceptance.transition('valid'); window.flofiExecuteAcceptance.lifecycle('approval-confirmed'); });
   await expect(summary.locator('button.primary')).toHaveCount(1);
   await expect(summary.getByRole('button', { name: 'Continue to swap', exact: true })).toHaveClass('primary');

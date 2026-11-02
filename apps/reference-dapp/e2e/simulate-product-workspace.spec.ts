@@ -42,7 +42,7 @@ test.afterEach(async ({ page }) => {
   expect(await page.evaluate(() => (window as unknown as { simulationWalletRequests: string[] }).simulationWalletRequests.filter(method => /sign|send/i.test(method)))).toEqual([]);
 });
 
-test('current workflow, read-only cards, honest summary and Back to Build', async ({ page }) => {
+test('current workflow, read-only cards, honest summary and Back to the Canvas', async ({ page }) => {
   await page.getByRole('button', { name: 'Add swap', exact: true }).click();
   await configureCanvasAction(page, '2.5');
   await page.getByRole('button', { name: 'Rename workflow', exact: true }).click();
@@ -87,7 +87,7 @@ test('current workflow, read-only cards, honest summary and Back to Build', asyn
   await page.keyboard.press('Delete'); await page.keyboard.press('Control+z');
   await expect(graph(page).locator('.react-flow__node')).toHaveAttribute('style', position!);
   await expect(page.locator('.summary-bar')).toHaveAttribute('data-workflow-revision', revision!);
-  await graph(page).getByRole('button', { name: 'Back to Build', exact: true }).click();
+  await graph(page).getByRole('button', { name: 'Back to the Canvas', exact: true }).click();
   await expectEditorSection(page, 'Build');
   await expect(buildCard.getByRole('button', { name: 'Action settings', exact: true })).toBeVisible();
   expect(await cardStyle(buildCard)).toEqual(style);
@@ -123,12 +123,12 @@ test('light/dark reuse Build surfaces and preserve token/network brand colors', 
       const actionsBox = (await graph(page).locator('.simulation-canvas-actions').boundingBox())!;
       const controlsBox = (await graph(page).locator('.canvas-navigator').boundingBox())!;
       const cardBox = (await graph(page).locator('.composer-card').boundingBox())!;
-      await expect(graph(page).locator('.simulation-workspace-actions button')).toHaveText(['Back to Build', 'Simulate workflow']);
-      const backBox = (await graph(page).getByRole('button', { name: 'Back to Build', exact: true }).boundingBox())!;
+      await expect(graph(page).locator('.simulation-workspace-actions button')).toHaveText(['Back to the Canvas', 'Simulate workflow']);
+      const backBox = (await graph(page).getByRole('button', { name: 'Back to the Canvas', exact: true }).boundingBox())!;
       const simulateBox = (await graph(page).getByRole('button', { name: 'Simulate workflow', exact: true }).boundingBox())!;
       expect(backBox.x + backBox.width + 7).toBeLessThanOrEqual(simulateBox.x);
       expect(backBox.y).toBeCloseTo(simulateBox.y);
-      await expect(summary(page).getByRole('button', { name: 'Back to Build', exact: true })).toHaveCount(0);
+      await expect(summary(page).getByRole('button', { name: 'Back to the Canvas', exact: true })).toHaveCount(0);
       expect(actionsBox.x).toBeGreaterThan(canvasBox.x);
       expect(actionsBox.y).toBeGreaterThan(canvasBox.y);
       expect(canvasBox.x + canvasBox.width - actionsBox.x - actionsBox.width).toBeCloseTo(12, 1);
@@ -142,7 +142,7 @@ test('light/dark reuse Build surfaces and preserve token/network brand colors', 
     await page.setViewportSize({ width: 1440, height: 900 });
     backgrounds.push(await summary(page).evaluate(element => getComputedStyle(element).backgroundColor));
     await page.screenshot({ path: `.tmp/ux004d-${theme.toLowerCase()}.png`, fullPage: true });
-    await graph(page).getByRole('button', { name: 'Back to Build', exact: true }).click();
+    await graph(page).getByRole('button', { name: 'Back to the Canvas', exact: true }).click();
   }
   expect(backgrounds[0]).not.toBe(backgrounds[1]);
 });
@@ -177,7 +177,7 @@ test('empty workflow stays empty and mocked diagnostics never fill the primary s
   await expect(graph(page).locator('.react-flow__node')).toHaveCount(0);
   for (const name of ['Slippage', 'Price impact', 'Workflow network']) await expect(row(page, name)).toHaveText('—');
   for (const name of ['Fees', 'Route', 'Expected result']) await expect(summary(page).getByRole('region', { name, exact: true }).locator('.simulation-empty-value')).toHaveText('—');
-  await graph(page).getByRole('button', { name: 'Back to Build', exact: true }).click();
+  await graph(page).getByRole('button', { name: 'Back to the Canvas', exact: true }).click();
   await page.getByRole('button', { name: 'Add swap', exact: true }).click();
   await configureCanvasAction(page, '1');
   await openEditorSection(page, 'Simulate');

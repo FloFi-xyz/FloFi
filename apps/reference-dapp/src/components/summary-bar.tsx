@@ -20,11 +20,12 @@ import { useSolanaLiquidity } from '../state/solana-liquidity-store';
 
 /**
  * `sections` (BUILD-FLOFI-CHAT-EDITOR-UX-001): Simulate and Execute are no longer top-level tabs; the Editor's footer opens its simulation/Review
- * and execution sections instead, with the same availability the tabs had (closed while a Canvas amount is unapplied). Navigation only: each
+ * and execution sections instead, closed whenever the shell refuses those sections (a Canvas amount is unapplied — `incomplete`, which names
+ * the reason — or an /approve proposal is not loaded for the proven wallet yet). Navigation only: each
  * section keeps its own simulation, Review, wallet and execution gates, and nothing here simulates, accepts, signs or submits.
  */
 export function SummaryBar({ tab, setTab, simulationActionHost, reviewAvailable, focusReview, canvasOwnsAction, sections }: { canvasOwnsAction?: boolean; tab: Tab; setTab: (value: Tab) => void; simulationActionHost?: HTMLDivElement | null; reviewAvailable?: boolean; focusReview?: () => void;
-  sections?: { readonly disabled: boolean } }) {
+  sections?: { readonly disabled: boolean; readonly incomplete?: boolean } }) {
   const { t: tr } = useLocale();
   const { state, actionSetup } = useWorkflow();
   const { info, prepared, retired, verifyError, verified } = useModeA();
@@ -61,14 +62,14 @@ export function SummaryBar({ tab, setTab, simulationActionHost, reviewAvailable,
       : publicPath ? <button type="button" onClick={() => setTab('Simulate')}>{tr("Back to simulation")}</button>
       : modeB.info?.available ? <button type="button" onClick={() => setTab('Simulate')}>{tr("Back to simulation")}</button>
       : prepared && info?.available ? <button type="button" onClick={() => setTab('Simulate')}>{tr("Back to simulation")}</button>
-      : <button type="button" onClick={() => setTab('Build')}>{tr("Back to Build")}</button>;
+      : <button type="button" onClick={() => setTab('Build')}>{tr("Back to the Canvas")}</button>;
   return <footer className="summary-bar" data-workflow-revision={state.workflow.revision}>
     <div><span className="eyebrow">{tr("WORKFLOW")}</span><strong>{tr(actionCount)} {tr(actionCount === 1 ? 'action' : 'actions')}</strong></div>
     {/* Relocate the existing action without duplicating its review gates or handler. */}
     {tr(tab === 'Simulate' && simulationActionHost ? createPortal(action, simulationActionHost) : action)}
     {sections && <div className="summary-sections" role="group" aria-label={tr('Editor sections')}>
-      {tab !== 'Simulate' && <button type="button" onClick={() => setTab('Simulate')} disabled={sections.disabled} title={tr(sections.disabled ? 'Configure the action amount in Build first' : undefined)}>{tr('View simulation')}</button>}
-      {tab !== 'Execute' && <button type="button" onClick={() => setTab('Execute')} disabled={sections.disabled} title={tr(sections.disabled ? 'Configure the action amount in Build first' : undefined)}>{tr('View execution')}</button>}
+      {tab !== 'Simulate' && <button type="button" onClick={() => setTab('Simulate')} disabled={sections.disabled} title={tr(sections.disabled && sections.incomplete ? 'Configure the action amount on the Canvas first' : undefined)}>{tr('View simulation')}</button>}
+      {tab !== 'Execute' && <button type="button" onClick={() => setTab('Execute')} disabled={sections.disabled} title={tr(sections.disabled && sections.incomplete ? 'Configure the action amount on the Canvas first' : undefined)}>{tr('View execution')}</button>}
     </div>}
   </footer>;
 }

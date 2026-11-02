@@ -87,7 +87,7 @@ export function useExecutionControls(props: ExecutionControlsState) {
     const refuse = (issue: string) => { setStartIssue(issue); return { started: false, issue }; };
     setStartIssue(null);
     if (authorizeLock.current || requestLock.current || checkLock.current || verifying || recovery?.contextIssue)
-      return refuse(recovery?.contextIssue ? 'Check this workflow in Simulate before execution.' : 'Another request for this workflow is still in progress.');
+      return refuse(recovery?.contextIssue ? 'Check this workflow\'s simulation before execution.' : 'Another request for this workflow is still in progress.');
     const now = Date.now(), review = projectReview(current.workflow, current.context, current.source, current.authorization, current.wallet, now, current.invalidWorkflow);
     if (review.status === 'approved') {
       if (live?.state === 'active' && canContinueExecution(current, now)) { request(true); after?.(); return { started: true, issue: null }; }

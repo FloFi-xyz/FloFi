@@ -217,6 +217,21 @@ describe('product shell rendering', () => {
     expect(props.section).toBe('Execute');
     props.onBuild();
     expect(setTab).toHaveBeenCalledExactlyOnceWith('Build');
+    expect(props.onChat).toBeUndefined();
+    expect(wallet.reset).not.toHaveBeenCalled();
+    expect(wallet.connect).not.toHaveBeenCalled();
+  });
+
+  // BUILD-FLOFI-CHAT-EDITOR-UX-001: the drawer agrees with the top bar: Chat where the entry is offered, current on it.
+  it('gives the drawer the Chat entry and section where the top bar offers Chat', () => {
+    const setTab = vi.fn();
+    renderToStaticMarkup(createElement(TopBar, { tab: BUILD_ENTRY, pathname: '/app', setTab, entry: true }));
+    const props = vi.mocked(NavigationDrawer).mock.calls.at(-1)![0];
+    expect(props.section).toBe('Chat');
+    props.onChat?.();
+    expect(setTab).toHaveBeenCalledExactlyOnceWith(BUILD_ENTRY);
+    props.onBuild();
+    expect(setTab).toHaveBeenLastCalledWith('Build');
     expect(wallet.reset).not.toHaveBeenCalled();
     expect(wallet.connect).not.toHaveBeenCalled();
   });

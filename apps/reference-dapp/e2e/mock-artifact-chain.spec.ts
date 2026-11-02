@@ -241,7 +241,7 @@ test('ineligible workflows cannot generate; zero outputs carry a blocking findin
   await open(page);
   await tab(page, 'Simulate');
   await expect(panel(page).getByRole('button', { name: 'Generate mocked artifacts for revision 0' })).toBeDisabled();
-  await expect(panel(page)).toContainText('Add a Base swap in Build before generating mocked artifacts.');
+  await expect(panel(page)).toContainText('Add a Base swap in the Editor before generating mocked artifacts.');
   await tab(page, 'Build');
   await apply(page, 'swap 2 USDC to WETH on Base slippage 301 bps');
   await tab(page, 'Simulate');
@@ -282,7 +282,7 @@ test('mocked numbers stay labelled and execution stays unavailable after generat
   await tab(page, 'Execute');
   await assertNoFinancialCanvasAction(page);
   await expect(page.getByRole('region', { name: 'Workflow execution workspace' })).toContainText('Connect the wallet that will authorize this workflow.');
-  await expect(page.getByRole('button', { name: 'Back to Simulate', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Back to simulation', exact: true })).toBeVisible();
   await expect(page.getByText('Simulation: CURRENT', { exact: true })).toHaveCount(0);
 });
 
