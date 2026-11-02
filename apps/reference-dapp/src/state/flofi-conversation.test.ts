@@ -427,7 +427,7 @@ const approvalLanded = { started: true, restored: false, local: false, matchesWo
   steps: [{ id: 'swap', number: 1, action: 'Swap', operations: [op('approval', 'Approve USDC', 'confirmed', true), op('swap', 'Swap', 'waiting', false)] }] };
 (approvalLanded as unknown as { active: unknown }).active = approvalLanded.steps[0];
 describe('BUILD-FLOFI-E2E-RELIABILITY-001 continuation after a landed approval', () => {
-  async function executedWithLandedApproval(canContinue: boolean) {
+  async function executedWithLandedApproval(canContinue: boolean, ownerBound = false) {
     await say('swap 10 USDC to WETH on Base Sepolia slippage 100 bps');
     await say('Review workflow');
     reviewedPatch = reviewed(); lifecycle(reviewedPatch); render();
@@ -438,6 +438,10 @@ describe('BUILD-FLOFI-E2E-RELIABILITY-001 continuation after a landed approval',
     controls.request = vi.fn(() => { (controls as Record<string, unknown>).requesting = true; });
     // The durable record: the approval is confirmed on-chain, the swap was never requested.
     reviewedPatch = { ...reviewedPatch, authorization: { ...reviewedPatch.authorization!, accepted: true }, progress: approvalLanded as unknown as ConversationBridge['progress'] };
+    if (ownerBound) {
+      const state = reviewedPatch.source!.state as unknown as { run: { quote: Record<string, unknown> } };
+      reviewedPatch = { ...reviewedPatch, source: { ...reviewedPatch.source!, state: { ...state, run: { ...state.run, quote: { ...state.run.quote, ownerReview: { account: reviewOwner, step: 'approval' } } } } } as unknown as SimulationSource };
+    }
     lifecycle(reviewedPatch); bridge = { ...bridge, controls: { ...bridge.controls, canContinue } as ConversationBridge['controls'] };
     render(); await flush(); return render();
   }
@@ -472,7 +476,7 @@ describe('BUILD-FLOFI-E2E-RELIABILITY-001 continuation after a landed approval',
     // The Review expired while the approval confirmed: no Continue is offered; FloFi prepares the swap's own fresh Review (read-only).
     vi.setSystemTime(reviewNow + 200_000); lifecycle(reviewedPatch); bridge = { ...bridge, controls: { ...bridge.controls, canContinue: false } as ConversationBridge['controls'] };
     render(); await flush(); let chat = render();
-    expect(chat.messages.some(message => message.text === 'Your earlier confirmed request stays in place, and nothing new was sent. The reviewed quote is no longer valid. I am getting a fresh quote for the next request now; you confirm it before your wallet is asked.')).toBe(true);
+    expect(chat.messages.some(message => message.text === 'Your earlier confirmed request stays in place, and nothing new was sent. The reviewed quote expired before the next request could start. I am getting a fresh quote for the next request now; you confirm it before your wallet is asked.')).toBe(true);
     expect(simulate).toHaveBeenCalledTimes(2);
     vi.setSystemTime(reviewNow);
     reviewedPatch = { ...requoted('25000000000000000', '24875000000000000'), progress: approvalLanded as unknown as ConversationBridge['progress'] }; lifecycle(reviewedPatch); render(); await flush(); chat = render();
@@ -529,6 +533,45 @@ describe('BUILD-FLOFI-E2E-RELIABILITY-001 continuation after a landed approval',
     expect(aboutNextRequest('The workflow changed before your wallet was asked, so nothing was sent. Review it again.')).toBe('The workflow changed before your wallet was asked, so this request was not sent. Review it again.');
     expect(aboutNextRequest('Nothing was simulated or sent.')).toBe('Nothing new was simulated or sent.');
     expect(aboutNextRequest('A rede recusou, então nada foi enviado.')).toBe('A rede recusou, então nada novo foi enviado.');
+  });
+  const withRun = (patch: Record<string, unknown>) => {
+    const state = reviewedPatch.source!.state as unknown as { run: Record<string, unknown> };
+    reviewedPatch = { ...reviewedPatch, source: { ...reviewedPatch.source!, state: { ...state, run: { ...state.run, ...patch } } } as unknown as SimulationSource };
+  };
+  it('owner-bound networks: no Continue that cannot succeed — the swap gets its own fresh Review at once, with one question', async () => {
+    let chat = await executedWithLandedApproval(true, true);
+    expect(chat.messages.some(message => /Continue to your wallet\?$/.test(message.text))).toBe(false);
+    expect(last(chat).text).toMatch(/^Approve USDC is confirmed on-chain\. An approval only allows the spend; it is not the action itself\. Swap is a new transaction from your wallet/);
+    expect(simulate).toHaveBeenCalledTimes(2);
+    reviewedPatch = { ...requoted('25000000000000000', '24875000000000000'), progress: approvalLanded as unknown as ConversationBridge['progress'] }; lifecycle(reviewedPatch); render(); await flush(); chat = render();
+    expect(last(chat).question).toBe('Accept this updated quote and continue to your wallet for this request?');
+  });
+  it('an open Continue whose quote expires is retired; a continuation started here is re-quoted once, saying the quote expired', async () => {
+    let chat = await executedWithLandedApproval(true);
+    expect(chat.question).toBe('CONFIRM_CONTINUE');
+    vi.setSystemTime(reviewNow + 200_000); lifecycle(reviewedPatch); bridge = { ...bridge, controls: { ...bridge.controls, canContinue: false } as ConversationBridge['controls'] };
+    render(); await flush(); render(); await flush(); chat = render();
+    expect(chat.messages.some(message => /The reviewed quote expired before the next request could start\. I am getting a fresh quote/.test(message.text))).toBe(true);
+    expect(simulate).toHaveBeenCalledTimes(2);
+  });
+  it('another wallet\'s run is never continued from this wallet: FloFi says so and reviews a separate run with both confirmations', async () => {
+    await executedWithLandedApproval(false);
+    withRun({ attempts: [{ step: 'approval', state: 'CONFIRMED', account: '0x2222222222222222222222222222222222222222' }] });
+    vi.setSystemTime(reviewNow + 200_000); lifecycle(reviewedPatch);
+    bridge = { ...bridge, controls: { ...bridge.controls, canContinue: false } as ConversationBridge['controls'] };
+    let chat = await say('Review workflow');
+    expect(chat.messages.some(message => /^This run's earlier request came from another wallet \(0x2222…2222\)/.test(message.text))).toBe(true);
+    vi.setSystemTime(reviewNow);
+    reviewedPatch = { ...reviewed(), progress: approvalLanded as unknown as ConversationBridge['progress'] }; withRun({ attempts: [{ account: '0x2222222222222222222222222222222222222222' }] });
+    lifecycle(reviewedPatch); render(); await flush(); chat = render();
+    expect(chat.question).not.toBe('CONFIRM_CONTINUE_REVIEW');
+  });
+  it('PT answers: every offered and common typed answer is classified', async () => {
+    const { classifyAnswer } = await import('../domain/conversation-lifecycle');
+    for (const text of ['Aceitar e continuar', 'sim aceito', 'sim, aceitar e continuar', 'Continuar', 'continuar para a carteira', 'yes, accept and continue'])
+      expect(classifyAnswer(text, 'CONFIRM_CONTINUE_REVIEW'), text).toBe('YES');
+    for (const text of ['Agora não', 'não agora', 'Não']) expect(classifyAnswer(text, 'CONFIRM_CONTINUE'), text).toBe('NO');
+    expect(classifyAnswer('continuar para a carteira', 'CONFIRM_CONTINUE')).toBe('YES');
   });
   it('PT: the same continuation in Portuguese', async () => {
     const chat = await executedWithLandedApproval(true);
