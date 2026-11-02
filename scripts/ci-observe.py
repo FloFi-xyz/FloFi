@@ -5,16 +5,30 @@ import argparse
 import json
 import os
 from pathlib import Path
+import re
 import subprocess
 import time
 import uuid
 
 # Every certification stage (the `source scripts/ci-observe.sh '<label>'` labels in .circleci/config.yml and
 # .github/workflows/contracts.yml) must have completed successfully in some job before certification passes.
-REQUIRED_STAGES = ('Toolchain bootstrap', 'Toolchain identity', 'Frozen dependency install', 'Dependency integrity license and age',
+REQUIRED_STAGES = ('Toolchain bootstrap', 'Toolchain identity', 'Frozen dependency install', 'Dependency security policy',
                    'Dependency audit', 'Typecheck', 'Lint', 'Production build', 'Schema drift', 'Unit and contract tests', 'PostgreSQL',
                    'Anvil bootstrap', 'Anvil and offline forks', 'Browser bootstrap', 'Critical browser regressions',
                    'Guarded browser suites', 'Composition fork and browser', 'SBOM')
+
+
+def revision():
+    """The commit this job certifies; every ledger record is bound to it (an artifact of another commit never counts)."""
+    for variable in ('FLOFI_CI_REVISION', 'CIRCLE_SHA1', 'GITHUB_SHA'):
+        if re.fullmatch(r'[0-9a-f]{40}', os.environ.get(variable, '')):
+            return os.environ[variable]
+    try:
+        value = subprocess.run(['git', 'rev-parse', 'HEAD'], cwd=Path(__file__).resolve().parents[1], capture_output=True,
+                               text=True, timeout=30).stdout.strip()
+    except (OSError, subprocess.SubprocessError):
+        value = ''
+    return value if re.fullmatch(r'[0-9a-f]{40}', value) else 'UNKNOWN'
 
 
 def resources():
@@ -36,7 +50,7 @@ def root():
 
 def begin(name):
     identity = uuid.uuid4().hex
-    record = {'name': name, 'job': os.environ.get('CIRCLE_JOB') or os.environ.get('GITHUB_JOB') or 'local',
+    record = {'name': name, 'job': os.environ.get('CIRCLE_JOB') or os.environ.get('GITHUB_JOB') or 'local', 'revision': revision(),
               'start': time.monotonic(), 'before': resources(), 'outcome': 'incomplete'}
     (root() / (identity + '.json')).write_text(json.dumps(record))
     return identity
@@ -109,13 +123,19 @@ def browser_lines():
 
 
 def verify(base):
-    """Fail closed unless every required stage and every planned browser profile passed (each profile exactly once)."""
+    """Fail closed unless every required stage and every planned browser profile passed (each profile exactly once), all
+    recorded for the revision being certified."""
     errors = []
+    current = revision()
+    if current == 'UNKNOWN':
+        errors.append('the certified revision is unknown')
     stages = [json.loads(path.read_text()) for path in sorted(base.glob('*.json'))]
     for row in stages:
         if row.get('outcome') != 'success' or 'duration' not in row:
             errors.append(f"stage {row.get('name')!r} in job {row.get('job')!r} did not succeed: {row.get('outcome')}")
-    passed = {row['name'] for row in stages if row.get('outcome') == 'success'}
+        if row.get('revision') != current:
+            errors.append(f"stage {row.get('name')!r} in job {row.get('job')!r} belongs to revision {row.get('revision')!r}, not {current}")
+    passed = {row['name'] for row in stages if row.get('outcome') == 'success' and row.get('revision') == current}
     errors += [f'required stage never ran: {name}' for name in REQUIRED_STAGES if name not in passed]
     plan = json.loads(subprocess.run(['node', 'scripts/guarded-release-browser.mjs', 'list'], cwd=Path(__file__).resolve().parents[1],
                                      check=True, capture_output=True, text=True).stdout)
@@ -127,6 +147,9 @@ def verify(base):
             continue
         if report.get('status') != 'PASS':
             errors.append(f"browser run {report['label']} did not pass: {report.get('status')}")
+        if report.get('revision') != current:
+            errors.append(f"browser run {report.get('label')} belongs to revision {report.get('revision')!r}, not {current}")
+            continue
         for row in report['profiles']:
             if row['status'] != 'PASS':
                 errors.append(f"browser profile {row['name']} ({report['label']}): {row['status']}")
@@ -143,7 +166,7 @@ def verify(base):
         return 1
     profiles = sum(len(names) for names in expected.values())
     print(f'Certification ledger: PASS ({len(REQUIRED_STAGES)} required stages over {len({row["job"] for row in stages})} job(s), '
-          f'{profiles} browser profiles each exactly once)', flush=True)
+          f'{profiles} browser profiles each exactly once, all for revision {current})', flush=True)
     return 0
 
 

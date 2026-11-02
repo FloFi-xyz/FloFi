@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """Local safety checks. The human owner authorizes repository changes by PR review."""
 
-import datetime
 import json
 import os
 from pathlib import Path
@@ -27,140 +26,71 @@ AUTO_MERGE = re.compile(
 )
 GOVERNANCE = ".github/workflows/governance.yml"
 CONTRACTS = ".github/workflows/contracts.yml"
-AGE_WAIVER = "docs/security/COLOSSEUM-DEPENDENCY-AGE-WAIVER.json"
-AGE_POLICY = "docs/security/DEPENDENCY-AGE-POLICY.md"
-# Exact owner-approved temporary release-age exceptions only (policy: docs/security/DEPENDENCY-AGE-POLICY.md). Adding a package
-# requires an exact identity here, the same identity in pnpm-workspace.yaml minimumReleaseAgeExclude (same order) and matching
-# metadata — never ranges, globs or a lower minimumReleaseAge. Entries after the two legacy ones also carry a category, the reviewed
-# tarball's integrity and its registry publication time; --verify-dependencies binds both to the lockfile and the registry.
-APPROVED_AGE_WAIVERS = (
-    {
-        "package": "source-map-js", "version": "1.2.2", "advisories": ["GHSA-68fv-2mgg-jv7q"],
-        "reason": "HIGH security advisory remediation required for Colosseum release",
-        "approved_by": "Owner", "temporary": True,
-        "removal_condition": "Remove after Colosseum delivery completion once normal dependency-age eligibility is no longer needed",
-    },
-    {
-        "package": "fast-uri", "version": "3.1.9",
-        "advisories": [
-            "GHSA-w74x-v6f9-j3xg", "GHSA-wjr9-j795-jxcr", "GHSA-xhq7-xmqj-769h", "GHSA-333x-w4r6-6crp",
-        ],
-        "reason": "Official npm security patch for four fast-uri advisories that fail the Dependency audit on main and block BUILD-FLOFI-MAINNET-PRODUCT-001 certification; owner-authorized emergency release-age exception until normal 7-day eligibility at 2026-10-26T23:05:26Z",
-        "approved_by": "Owner", "temporary": True, "approved_at": "2026-10-25T00:20:00Z",
-        "published_at": "2026-10-19T23:05:26Z",
-        "integrity": "sha512-hS/0Wt3Ya043oKXs0sIxrMpKQITXhMLIrVAKKXi4gozGC9v7YRWVnXIZzjNPTO02M9BdxLCWqK1yRXgNziVyJQ==",
-        "removal_condition": "Remove fast-uri@3.1.9 from minimumReleaseAgeExclude and from this waiver list after 2026-10-26T23:05:26Z when the package reaches normal minimumReleaseAge eligibility",
-    },
-    {
-        "package": "minimatch", "version": "11.0.3", "category": "security-fix", "advisories": ["GHSA-g3hv-75wg-m249"],
-        "reason": "Official fix for GHSA-g3hv-75wg-m249 (minimatch < 11.0.1, moderate), which fails the Dependency audit on main; ESLint's three consumers move to it by exact override",
-        "approved_by": "Owner", "temporary": True, "approved_at": "2026-10-31",
-        "approval": "Owner override on PR #143 (2026-10-31): resolve the release-age gate for minimatch@11.0.3 and @isaacs/nonrecursive-glob-match@1.0.3",
-        "published_at": "2026-10-28T20:00:34.713Z", "eligible_at": "2026-11-04T20:00:34.713Z",
-        "integrity": "sha512-iny/40PEGkNJQ5/Pv6z3nm6FbRAby32GeZRjCUJk2WnNDbgPSTcdI+DDvLqsgBdD4cD5sMtMheqPPnehCCa8Nw==",
-        "review": "docs/security/DEPENDENCY-AGE-POLICY.md",
-        "removal_condition": "Remove from minimumReleaseAgeExclude and from this waiver list once eligible (2026-11-04T20:00:34.713Z)",
-    },
-    {
-        "package": "@isaacs/nonrecursive-glob-match", "version": "1.0.3", "category": "security-fix", "advisories": ["GHSA-g3hv-75wg-m249"],
-        "required_by": "minimatch@11.0.3",
-        "reason": "Runtime dependency of the minimatch@11.0.3 security fix (same author and license); no install scripts, no I/O",
-        "approved_by": "Owner", "temporary": True, "approved_at": "2026-10-31",
-        "approval": "Owner override on PR #143 (2026-10-31): resolve the release-age gate for minimatch@11.0.3 and @isaacs/nonrecursive-glob-match@1.0.3",
-        "published_at": "2026-10-28T19:50:48.349Z", "eligible_at": "2026-11-04T19:50:48.349Z",
-        "integrity": "sha512-SI7kyKHq4XXDRozw+r9GlRZkia1ZkFrpLW98r2IC2Bpr8YkFGE3fvjzmxCG0x78A++69HmDNrDvSMYBZmHGpKA==",
-        "review": "docs/security/DEPENDENCY-AGE-POLICY.md",
-        "removal_condition": "Remove from minimumReleaseAgeExclude and from this waiver list once eligible (2026-11-04T19:50:48.349Z)",
-    },
-)
-# Waivers that predate the category/integrity schema; they stay exactly as approved.
-LEGACY_AGE_WAIVERS = frozenset({"source-map-js@1.2.2", "fast-uri@3.1.9"})
-AGE_WAIVER_CATEGORIES = ("security-fix", "reviewed-dependency")
-_AGE_WAIVER_FIELDS = frozenset({"package", "version", "category", "reason", "approved_by", "temporary", "approved_at", "approval",
-                                "published_at", "eligible_at", "integrity", "review", "removal_condition"})
-_AGE_WAIVER_OPTIONAL = frozenset({"advisories", "required_by"})
-_EXACT_IDENTITY = re.compile(r"^(?:@[a-z0-9][a-z0-9._-]*/)?[a-z0-9][a-z0-9._-]*@[0-9]+\.[0-9]+\.[0-9]+$")
-_GHSA = re.compile(r"^GHSA(?:-[23456789cfghjmpqrvwx]{4}){3}$")
-_SRI = re.compile(r"^sha512-[A-Za-z0-9+/]{86}==$")
-_RELEASE_AGE = datetime.timedelta(minutes=10080)
+DEPENDENCY_POLICY = "docs/security/dependency-policy.json"
+SBOM_SCRIPT = "scripts/ci-sbom.sh"
+# BUILD-FLOFI-CI-ARCHITECTURE-001 (owner decision): no time-based installation restriction. pnpm 11 applies a 1440-minute
+# default when minimumReleaseAge is unset, so the workspace sets 0 explicitly; waivers no longer exist.
+RELEASE_AGE_SETTINGS = re.compile(r"(?mi)^\s*['\"]?(?:minimumReleaseAge\w*|minimum-release-age[\w-]*)['\"]?\s*[:=]")
+# pnpm 11 settings that would silently weaken dependency security (checked on the parsed workspace, so quoting or flow
+# style cannot hide them). None: forbidden whenever set; any other value: forbidden when equal to it.
+WORKSPACE_FORBIDDEN = {"audit": None, "auditConfig": None, "auditLevel": None, "registry": None, "registries": None,
+                       "dangerouslyAllowAllBuilds": None, "onlyBuiltDependencies": None, "allowBuilds": None,
+                       "gitBranchLockfile": None, "mergeGitBranchLockfiles": None, "mergeGitBranchLockfilesBranchPattern": None,
+                       "lockfileDir": None, "useLockfile": False, "lockfile": False,
+                       "sharedWorkspaceLockfile": False, "optional": False}
+WORKSPACE_REQUIRED = {"minimumReleaseAge": 0, "ignoreScripts": True, "strictPeerDependencies": True, "autoInstallPeers": False}
 
 
-def _instant(value):
-    if not isinstance(value, str) or not re.fullmatch(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?Z", value):
-        return None
+def dependency_policy_errors(files):
+    """The policy must exist, parse and keep its mandatory invariants (dependency_security.policy_errors)."""
+    from dependency_security import policy_errors
     try:
-        return datetime.datetime.fromisoformat(value.replace("Z", "+00:00"))
-    except ValueError:
-        return None
-
-
-def age_waiver_entry_errors(entry, files):
-    """Schema of one non-legacy waiver: exact, categorized, evidenced, integrity-bound, owner-approved and temporary."""
-    identity = f"{entry.get('package')}@{entry.get('version')}"
-    if identity in LEGACY_AGE_WAIVERS:
-        return []
-    keys = set(entry)
-    if not _AGE_WAIVER_FIELDS <= keys or not keys <= _AGE_WAIVER_FIELDS | _AGE_WAIVER_OPTIONAL:
-        return [f"Dependency age waiver fields incomplete or unknown: {identity}"]
-    errors = []
-    if not _EXACT_IDENTITY.fullmatch(identity):
-        errors.append(f"Dependency age waiver is not an exact identity: {identity}")
-    if entry["category"] not in AGE_WAIVER_CATEGORIES:
-        errors.append(f"Dependency age waiver category invalid: {identity}")
-    advisories = entry.get("advisories", [])
-    if not isinstance(advisories, list) or not all(isinstance(item, str) and _GHSA.fullmatch(item) for item in advisories):
-        errors.append(f"Dependency age waiver advisories invalid: {identity}")
-    elif entry["category"] == "security-fix" and not advisories:
-        errors.append(f"Security-fix age waiver names no advisory: {identity}")
-    if "required_by" in entry and not (isinstance(entry["required_by"], str) and _EXACT_IDENTITY.fullmatch(entry["required_by"])):
-        errors.append(f"Dependency age waiver required_by invalid: {identity}")
-    if not isinstance(entry["integrity"], str) or not _SRI.fullmatch(entry["integrity"]):
-        errors.append(f"Dependency age waiver integrity invalid: {identity}")
-    published, eligible = _instant(entry["published_at"]), _instant(entry["eligible_at"])
-    if published is None or eligible is None or eligible - published != _RELEASE_AGE:
-        errors.append(f"Dependency age waiver publication/eligibility times invalid: {identity}")
-    if not isinstance(entry["approved_at"], str) or not re.fullmatch(r"\d{4}-\d{2}-\d{2}(?:T\d{2}:\d{2}:\d{2}Z)?", entry["approved_at"]):
-        errors.append(f"Dependency age waiver approval date invalid: {identity}")
-    review = entry["review"].split("#", 1)[0] if isinstance(entry["review"], str) else ""
-    if not review or not files.get(review):
-        errors.append(f"Dependency age waiver review document missing: {identity}")
-    for field in ("reason", "approval", "removal_condition"):
-        if not isinstance(entry[field], str) or len(entry[field].strip()) < 20:
-            errors.append(f"Dependency age waiver {field} missing: {identity}")
-    return errors
-
-
-def dependency_age_waivers(files):
-    """Validate pnpm's existing exception setting; never interpret ranges/globs."""
-    workspace = files.get("pnpm-workspace.yaml", "")
-    blocks = re.findall(r"(?m)^minimumReleaseAgeExclude:[^\n]*\n(?:[ \t]+[^\n]*\n)*", workspace)
-    if not blocks:
-        return set(), []
-    if len(blocks) != 1:
-        return set(), ["Dependency age waiver must appear once as an exact identity list"]
-    # A scoped identity is quoted in YAML ('@scope/name@1.2.3'); the quotes are syntax, not part of the identity.
-    listed = [re.sub(r"^'(.*)'$|^\"(.*)\"$", lambda m: m.group(1) or m.group(2), item.strip())
-              for item in re.findall(r"(?m)^[ \t]+- (.+)$", blocks[0])]
-    expected_idents = [f"{w['package']}@{w['version']}" for w in APPROVED_AGE_WAIVERS]
-    if listed != expected_idents or any(not _EXACT_IDENTITY.fullmatch(item) for item in listed):
-        return set(), ["Dependency age waiver must list only the exact owner-approved identities in order"]
-    try:
-        document = json.loads(files.get(AGE_WAIVER, ""))
+        policy = json.loads(files.get(DEPENDENCY_POLICY, ""))
     except (ValueError, TypeError):
-        return set(), ["Missing or invalid owner-approved dependency age waiver metadata"]
-    waivers = document.get("waivers") if isinstance(document, dict) else None
-    if not isinstance(waivers, list) or waivers != list(APPROVED_AGE_WAIVERS):
-        return set(), ["Dependency age waiver metadata differs from exact temporary owner approval"]
-    if any(entry.get("temporary") is not True or entry.get("approved_by") != "Owner" for entry in waivers):
-        return set(), ["Dependency age waiver metadata differs from exact temporary owner approval"]
-    schema = [error for entry in waivers for error in age_waiver_entry_errors(entry, files)]
-    if schema:
-        return set(), schema
-    return {(entry["package"], entry["version"]) for entry in APPROVED_AGE_WAIVERS}, []
+        return [f"{DEPENDENCY_POLICY}: missing or invalid dependency security policy"]
+    return [f"{DEPENDENCY_POLICY}: {error}" for error in policy_errors(policy)]
 
 
-def dependency_release_age_allowed(name, version, published, cutoff, waivers):
-    return published <= cutoff or (name, version) in waivers
+def workspace_settings(files):
+    """pnpm-workspace.yaml parsed with the dependency engine's fail-closed YAML subset (tags, anchors, merges refused)."""
+    from dependency_security import parse_yaml
+    try:
+        settings = parse_yaml(files.get("pnpm-workspace.yaml", ""))
+    except ValueError as exc:
+        return None, [f"pnpm-workspace.yaml: unsupported YAML ({exc})"]
+    if not isinstance(settings, dict):
+        return None, ["pnpm-workspace.yaml: not a mapping"]
+    return settings, []
+
+
+def release_age_errors(files):
+    """Test R: no release-age gate, waiver list or hidden pnpm default may come back; no setting may silence advisories,
+    switch lockfiles, enable dependency scripts or change the registry."""
+    errors = []
+    workspace = files.get("pnpm-workspace.yaml", "")
+    settings, parse_errors = workspace_settings(files)
+    errors.extend(parse_errors)
+    if workspace.splitlines().count("minimumReleaseAge: 0") != 1 or len(RELEASE_AGE_SETTINGS.findall(workspace)) != 1:
+        errors.append("pnpm-workspace.yaml: minimumReleaseAge must be exactly 0 (no release-age gate or waiver list)")
+    if RELEASE_AGE_SETTINGS.search(files.get(".npmrc", "")):
+        errors.append(".npmrc: release-age settings are not allowed")
+    if settings is not None:
+        for key, value in WORKSPACE_REQUIRED.items():
+            if settings.get(key) != value or type(settings.get(key)) is not type(value):
+                errors.append(f"pnpm-workspace.yaml: {key} must be {str(value).lower()}")
+        for key, forbidden in WORKSPACE_FORBIDDEN.items():
+            if key in settings and (forbidden is None or settings[key] == forbidden):
+                errors.append(f"pnpm-workspace.yaml: {key} bypasses dependency security (advisories, lockfile, scripts or registry)")
+        if any(key.lower().startswith("minimumreleaseage") and key != "minimumReleaseAge" for key in settings):
+            errors.append("pnpm-workspace.yaml: release-age waivers are not allowed")
+    npmrc = {}
+    for line in files.get(".npmrc", "").splitlines():
+        if "=" in line and not line.strip().startswith(("#", ";")):
+            key, value = line.split("=", 1)
+            npmrc[key.strip().strip("'\"").strip()] = value.strip().strip("'\"").strip()
+    if npmrc.get("registry") != "https://registry.npmjs.org/" or any(key.endswith(":registry") for key in npmrc):
+        errors.append(".npmrc: only https://registry.npmjs.org/ may be configured")
+    return errors
 
 
 def secret_errors(path, body):
@@ -190,13 +120,14 @@ def control_errors(files):
     errors = []
     required = (GOVERNANCE, CONTRACTS, "scripts/guarded-release-browser.mjs", "scripts/governance_lite.py",
                 "scripts/test_governance_lite.py", "CLAUDE.md", "docs/SCOPE_GUARD.md",
-                "scripts/bootstrap-ci.py", "pnpm-lock.yaml", "pnpm-workspace.yaml")
+                "scripts/bootstrap-ci.py", "pnpm-lock.yaml", "pnpm-workspace.yaml", DEPENDENCY_POLICY,
+                "scripts/dependency_security.py", "scripts/sbom_verify.py", SBOM_SCRIPT)
     errors.extend("Missing safety control: " + path for path in required if not files.get(path))
     for path, commands in {
         GOVERNANCE: ("python3 -m unittest discover -s scripts -p 'test_governance_lite.py'",
                      "python3 scripts/governance_lite.py", "git diff --check", "git diff --check HEAD^1 HEAD"),
         CONTRACTS: ("python3 scripts/bootstrap-ci.py", "pnpm install --frozen-lockfile --ignore-scripts",
-                    "python3 scripts/bootstrap-ci.py --verify-dependencies", "pnpm typecheck", "pnpm lint",
+                    "python3 scripts/dependency_security.py verify", "bash scripts/ci-sbom.sh", "pnpm typecheck", "pnpm lint",
                     "pnpm build", "pnpm schemas:check", "python3 scripts/agent_guard.py check",
                     'pnpm test --reporter=default --reporter=json --outputFile="$RUNNER_TEMP/flofi-agent-unit.json"',
                     'python3 scripts/agent_guard.py verify-results "$RUNNER_TEMP/flofi-agent-unit.json"', "pnpm test:anvil",
@@ -256,10 +187,24 @@ def control_errors(files):
     for line in ("ignore-scripts=true", "engine-strict=true", "strict-peer-dependencies=true", "auto-install-peers=false"):
         if line not in files.get(".npmrc", "").splitlines():
             errors.append(".npmrc: dependency control missing: " + line)
-    for line in ("minimumReleaseAge: 10080", "strictPeerDependencies: true", "autoInstallPeers: false"):
+    if "registry=https://registry.npmjs.org/" not in files.get(".npmrc", "").splitlines():
+        errors.append(".npmrc: dependency control missing: registry=https://registry.npmjs.org/")
+    for line in ("strictPeerDependencies: true", "autoInstallPeers: false"):
         if line not in files.get("pnpm-workspace.yaml", "").splitlines():
             errors.append("pnpm-workspace.yaml: dependency control missing: " + line)
-    errors.extend(dependency_age_waivers(files)[1])
+    errors.extend(release_age_errors(files))
+    errors.extend(f"{path}: only the root pnpm-lock.yaml may define the installed graph" for path in files
+                  if re.fullmatch(r"(?:.*/)?pnpm-lock(?:\.[^/]+)?\.yaml", path) and path != "pnpm-lock.yaml")
+    errors.extend(dependency_policy_errors(files))
+    # The one SBOM gate every CI provider calls: it must generate, validate and fail fast.
+    sbom = files.get(SBOM_SCRIPT, "")
+    for line in ("set -euo pipefail",
+                 'pnpm sbom --sbom-format cyclonedx --sbom-spec-version 1.6 --lockfile-only --out "$flofi_sbom"',
+                 'python3 scripts/sbom_verify.py "$flofi_sbom" "$RUNNER_TEMP/flofi-dependency-evidence.json"'):
+        if line not in sbom.splitlines():
+            errors.append(f"{SBOM_SCRIPT}: required line missing: {line}")
+    if re.search(r"(?m)\|\|\s*(?:true|exit\s+0|:)|^\s*(?:set\s+\+e|exit\s+0)\b", sbom):
+        errors.append(f"{SBOM_SCRIPT}: ignored failure")
     return errors
 
 

@@ -1,7 +1,6 @@
 """Acceptance and negative safety cases for owner-controlled governance."""
 
 import json
-import datetime
 import os
 from pathlib import Path
 import subprocess
@@ -9,8 +8,8 @@ import sys
 import tempfile
 import unittest
 
-from governance_lite import (AGE_POLICY, AGE_WAIVER, APPROVED_AGE_WAIVERS, CONTRACTS, GOVERNANCE, LEGACY_AGE_WAIVERS, control_errors,
-                             secret_errors, validate, age_waiver_entry_errors, dependency_age_waivers, dependency_release_age_allowed)
+from governance_lite import (CONTRACTS, DEPENDENCY_POLICY, GOVERNANCE, SBOM_SCRIPT, control_errors, release_age_errors, secret_errors,
+                             validate)
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -18,12 +17,9 @@ ROOT = Path(__file__).resolve().parents[1]
 def safety_files():
     paths = [GOVERNANCE, CONTRACTS, "scripts/guarded-release-browser.mjs", "scripts/governance_lite.py", "scripts/test_governance_lite.py",
              "scripts/bootstrap-ci.py", "CLAUDE.md", "docs/SCOPE_GUARD.md", "package.json",
-             "pnpm-lock.yaml", "pnpm-workspace.yaml", ".npmrc",
+             "pnpm-lock.yaml", "pnpm-workspace.yaml", ".npmrc", DEPENDENCY_POLICY, SBOM_SCRIPT,
+             "scripts/dependency_security.py", "scripts/sbom_verify.py",
              "LICENSES/Apache-2.0.txt", "LICENSES/AGPL-3.0-only.txt"]
-    if (ROOT / AGE_WAIVER).is_file():
-        paths.append(AGE_WAIVER)
-    if (ROOT / AGE_POLICY).is_file():
-        paths.append(AGE_POLICY)
     return {path: (ROOT / path).read_text() for path in paths}
 
 
@@ -159,7 +155,7 @@ class GovernanceLite(unittest.TestCase):
                         'pnpm test --reporter=default --reporter=json --outputFile="$RUNNER_TEMP/flofi-agent-unit.json"',
                         'python3 scripts/agent_guard.py verify-results "$RUNNER_TEMP/flofi-agent-unit.json"',
                         "pnpm install --frozen-lockfile --ignore-scripts", "pnpm audit --audit-level low",
-                        "python3 scripts/bootstrap-ci.py --verify-dependencies",
+                        "python3 scripts/dependency_security.py verify", "bash scripts/ci-sbom.sh",
                         "node scripts/guarded-release-browser.mjs critical",
                         "node scripts/guarded-release-browser.mjs extended",
                         "node scripts/guarded-release-browser.mjs composition"):
@@ -167,9 +163,10 @@ class GovernanceLite(unittest.TestCase):
             files[CONTRACTS] = files[CONTRACTS].replace("          " + command + "\n", "")
             self.assertTrue(control_errors(files), command)
         contracts = self.files[CONTRACTS]
-        for marker in ("verifyTranscriptDocument", "verifyLiquidityTranscript", "verifyCompositionTranscript",
-                       "pnpm sbom --sbom-format cyclonedx", "--lockfile-only"):
+        for marker in ("verifyTranscriptDocument", "verifyLiquidityTranscript", "verifyCompositionTranscript"):
             self.assertIn(marker, contracts)
+        for marker in ("pnpm sbom --sbom-format cyclonedx", "--lockfile-only", "python3 scripts/sbom_verify.py"):
+            self.assertIn(marker, self.files[SBOM_SCRIPT])
         browser = self.files["scripts/guarded-release-browser.mjs"]
         for marker in ("'playwright', 'test'", "release-provenance.spec.ts", "release-fork-provenance.spec.ts",
                        "release-composition-provenance.spec.ts", "release-financial-provenance.spec.ts",
@@ -192,10 +189,11 @@ class GovernanceLite(unittest.TestCase):
             files = dict(self.files)
             files["package.json"] = json.dumps(manifest)
             self.assertTrue(control_errors(files))
-        for path, line in ((".npmrc", "ignore-scripts=true"), ("pnpm-workspace.yaml", "minimumReleaseAge: 10080")):
+        for path, line in ((".npmrc", "ignore-scripts=true"), (".npmrc", "registry=https://registry.npmjs.org/"),
+                           ("pnpm-workspace.yaml", "strictPeerDependencies: true"), ("pnpm-workspace.yaml", "minimumReleaseAge: 0")):
             files = dict(self.files)
             files[path] = files[path].replace(line, "")
-            self.assertTrue(control_errors(files))
+            self.assertTrue(control_errors(files), line)
 
     def test_license_copy_mismatch_fails(self):
         self.files["packages/example/package.json"] = json.dumps({"license": "Apache-2.0"})
@@ -211,110 +209,49 @@ class GovernanceLite(unittest.TestCase):
         self.assertTrue(fetches[0].endswith('fetch --depth=2 origin "$REVISION"'))
         self.assertNotIn("SCOPE_BASE", body)
 
-    def test_exact_temporary_security_age_waiver(self):
-        waivers, errors = dependency_age_waivers(self.files)
-        self.assertEqual(errors, [])
-        self.assertEqual(waivers, {(w["package"], w["version"]) for w in APPROVED_AGE_WAIVERS})
-        # The earlier owner-approved exceptions stay; the minimatch security fix and its new dependency are added exactly.
-        for identity in (("source-map-js", "1.2.2"), ("fast-uri", "3.1.9"), ("minimatch", "11.0.3"), ("@isaacs/nonrecursive-glob-match", "1.0.3")):
-            self.assertIn(identity, waivers)
-        cutoff = datetime.datetime(2026, 9, 30, tzinfo=datetime.timezone.utc)
-        young = cutoff + datetime.timedelta(days=1)
-        for name, version, expected in (("source-map-js", "1.2.2", True), ("fast-uri", "3.1.9", True),
-                ("minimatch", "11.0.3", True), ("@isaacs/nonrecursive-glob-match", "1.0.3", True),
-                ("source-map-js", "1.2.1", False), ("source-map-js", "1.2.3", False),
-                ("fast-uri", "3.1.8", False), ("fast-uri", "3.1.10", False),
-                ("minimatch", "11.0.2", False), ("minimatch", "11.0.4", False), ("minimatch", "10.2.6", False),
-                ("@isaacs/nonrecursive-glob-match", "1.0.2", False), ("nonrecursive-glob-match", "1.0.3", False),
-                ("another-package", "1.2.2", False), ("sharp", "0.35.5", False)):
-            with self.subTest(name=name, version=version):
-                self.assertEqual(dependency_release_age_allowed(name, version, young, cutoff, waivers), expected)
-        # The seven-day boundary remains inclusive, with no waiver for mature sharp.
-        for name, version in (("sharp", "0.35.5"), ("another-package", "1.2.2")):
-            self.assertTrue(dependency_release_age_allowed(name, version, cutoff, cutoff, waivers))
-            self.assertFalse(dependency_release_age_allowed(name, version,
-                cutoff + datetime.timedelta(microseconds=1), cutoff, waivers))
-
-    def test_age_waiver_minimum_age_itself_is_unchanged(self):
+    def test_no_release_age_gate_or_waiver_mechanism(self):
+        self.assertEqual(release_age_errors(self.files), [])
         workspace = self.files["pnpm-workspace.yaml"]
-        self.assertIn("\nminimumReleaseAge: 10080\n", workspace)
-        self.assertEqual(workspace.count("minimumReleaseAge:"), 1)
-        files = dict(self.files)
-        files["pnpm-workspace.yaml"] = workspace.replace("minimumReleaseAge: 10080", "minimumReleaseAge: 1440")
-        self.assertTrue(validate(files, "codex/future-product"))
+        self.assertEqual(workspace.splitlines().count("minimumReleaseAge: 0"), 1)
+        for label, body in (("restored seven days", workspace.replace("minimumReleaseAge: 0", "minimumReleaseAge: 10080")),
+                            ("shorter gate", workspace.replace("minimumReleaseAge: 0", "minimumReleaseAge: 60")),
+                            ("pnpm's hidden 1440-minute default", workspace.replace("minimumReleaseAge: 0\n", "")),
+                            ("waiver list", workspace + "minimumReleaseAgeExclude:\n  - left-pad@1.3.0\n")):
+            with self.subTest(change=label):
+                files = {**self.files, "pnpm-workspace.yaml": body}
+                self.assertTrue(control_errors(files))
+        self.assertFalse((ROOT / "docs/security/COLOSSEUM-DEPENDENCY-AGE-WAIVER.json").exists())
 
-    def test_broad_or_undocumented_age_waivers_fail(self):
-        base_exclude = ("minimumReleaseAgeExclude:\n  - source-map-js@1.2.2\n  - fast-uri@3.1.9\n  - minimatch@11.0.3\n"
-                        "  - '@isaacs/nonrecursive-glob-match@1.0.3'\n")
-        self.assertIn(base_exclude, self.files["pnpm-workspace.yaml"])
-        for spec in ("source-map-js", "source-map-js@*", "source-map-js@>=1.2.2",
-                     "source-map-js@1.2.1", "source-map-js@1.2.3", "sharp@0.35.5", "fast-uri@3.1.8",
-                     "source-map-js@1.2.2\n  - sharp@0.35.5",
-                     "fast-uri@3.1.9\n  - source-map-js@1.2.2",  # wrong order
-                     "source-map-js@1.2.2\n  - fast-uri@3.1.9",  # the new exceptions missing
-                     "source-map-js@1.2.2\n  - fast-uri@3.1.9\n  - minimatch@11.0.3",
-                     "source-map-js@1.2.2\n  - fast-uri@3.1.9\n  - minimatch@11.0.3\n  - '@isaacs/nonrecursive-glob-match@*'",
-                     "source-map-js@1.2.2\n  - fast-uri@3.1.9\n  - minimatch@^11.0.3\n  - '@isaacs/nonrecursive-glob-match@1.0.3'",
-                     "source-map-js@1.2.2\n  - fast-uri@3.1.9\n  - minimatch\n  - '@isaacs/nonrecursive-glob-match@1.0.3'",
-                     "source-map-js@1.2.2\n  - fast-uri@3.1.9\n  - minimatch@11.0.3\n  - '@isaacs/*'"):
-            files = dict(self.files)
-            files["pnpm-workspace.yaml"] = files["pnpm-workspace.yaml"].replace(base_exclude, "minimumReleaseAgeExclude:\n  - " + spec + "\n")
-            self.assertTrue(dependency_age_waivers(files)[1], spec)
+    def test_dependency_policy_cannot_weaken_itself(self):
+        policy = json.loads(self.files[DEPENDENCY_POLICY])
+        for label, mutate in (("release age", lambda p: p["release_age"].update(minimum_minutes=10080)),
+                              ("advisories", lambda p: p["vulnerabilities"].update(block_at_or_above="critical")),
+                              ("signatures", lambda p: p["registry_signatures"].update(required=False)),
+                              ("exception for a vulnerability", lambda p: p["exceptions"][0].update(resolves=["vulnerability"])),
+                              ("GPL allowed", lambda p: p["licenses"]["allowed"].append("GPL-3.0-only"))):
+            with self.subTest(weakening=label):
+                weakened = json.loads(json.dumps(policy))
+                mutate(weakened)
+                self.assertTrue(control_errors({**self.files, DEPENDENCY_POLICY: json.dumps(weakened)}))
         files = dict(self.files)
-        metadata = json.loads(files[AGE_WAIVER])
-        metadata["waivers"][0]["temporary"] = False
-        files[AGE_WAIVER] = json.dumps(metadata)
-        self.assertTrue(dependency_age_waivers(files)[1])
-        files = dict(self.files)
-        metadata = json.loads(files[AGE_WAIVER])
-        metadata["waivers"][1]["approved_by"] = "Other"
-        files[AGE_WAIVER] = json.dumps(metadata)
-        self.assertTrue(dependency_age_waivers(files)[1])
-        files = dict(self.files)
-        metadata = json.loads(files[AGE_WAIVER])
-        metadata["waivers"][1]["version"] = "3.1.8"
-        files[AGE_WAIVER] = json.dumps(metadata)
-        self.assertTrue(dependency_age_waivers(files)[1])
-        files = dict(self.files)
-        del files[AGE_WAIVER]
-        self.assertTrue(dependency_age_waivers(files)[1])
+        del files[DEPENDENCY_POLICY]
+        self.assertTrue(control_errors(files))
 
-    def test_new_age_waivers_need_category_evidence_and_exact_binding(self):
-        new = [dict(entry) for entry in APPROVED_AGE_WAIVERS if f"{entry['package']}@{entry['version']}" not in LEGACY_AGE_WAIVERS]
-        self.assertEqual([f"{entry['package']}@{entry['version']}" for entry in new], ["minimatch@11.0.3", "@isaacs/nonrecursive-glob-match@1.0.3"])
-        for entry in new:
-            self.assertEqual(age_waiver_entry_errors(entry, self.files), [])
-        base = new[0]
-        broken = {
-            "missing integrity": {k: v for k, v in base.items() if k != "integrity"},
-            "unknown field": {**base, "expires": "never"},
-            "category": {**base, "category": "convenience"},
-            "no advisory": {**base, "advisories": []},
-            "bad advisory": {**base, "advisories": ["CVE-2026-0001"]},
-            "integrity format": {**base, "integrity": "sha256-abc"},
-            "eligibility shortened": {**base, "eligible_at": "2026-10-29T20:00:34.713Z"},
-            "eligibility missing time": {**base, "published_at": "2026-10-28"},
-            "range identity": {**base, "version": "^11.0.3"},
-            "glob identity": {**base, "package": "@isaacs/*"},
-            "required_by range": {**base, "required_by": "minimatch@^11"},
-            "review missing": {**base, "review": "docs/security/NOT-A-REVIEW.md"},
-            "approval missing": {**base, "approval": ""},
-            "approval date": {**base, "approved_at": "yesterday"},
-        }
-        for label, entry in broken.items():
-            with self.subTest(label=label):
-                self.assertTrue(age_waiver_entry_errors(entry, self.files))
-        # A reviewed product dependency needs its review document but no advisory.
-        reviewed = {k: v for k, v in base.items() if k != "advisories"}
-        reviewed["category"] = "reviewed-dependency"
-        self.assertEqual(age_waiver_entry_errors(reviewed, self.files), [])
-        # The metadata must stay identical to the approved list, so schema changes there fail as a whole.
-        files = dict(self.files)
-        metadata = json.loads(files[AGE_WAIVER])
-        metadata["waivers"][2]["integrity"] = "sha512-" + "A" * 86 + "=="
-        files[AGE_WAIVER] = json.dumps(metadata)
-        self.assertTrue(dependency_age_waivers(files)[1])
+    def test_shared_sbom_gate_cannot_be_disabled(self):
+        script = self.files[SBOM_SCRIPT]
+        for label, body in (("validator removed", script.replace("python3 scripts/sbom_verify.py", "echo")),
+                            ("failure ignored", script.replace('"$RUNNER_TEMP/flofi-dependency-evidence.json"',
+                                                               '"$RUNNER_TEMP/flofi-dependency-evidence.json" || true')),
+                            ("fail fast off", script.replace("set -euo pipefail", "set +e")),
+                            ("early exit", script.replace("pnpm sbom", "exit 0\npnpm sbom"))):
+            with self.subTest(bypass=label):
+                self.assertTrue(control_errors({**self.files, SBOM_SCRIPT: body}))
 
+    def test_workspace_advisory_ignores_and_build_allowances_fail(self):
+        for addition in ("auditConfig:\n  ignoreGhsas:\n    - GHSA-aaaa-bbbb-cccc\n", "onlyBuiltDependencies:\n  - esbuild\n",
+                         "dangerouslyAllowAllBuilds: true\n", "registry: https://mirror.example/\n"):
+            with self.subTest(addition=addition.split(":")[0]):
+                self.assertTrue(control_errors({**self.files, "pnpm-workspace.yaml": self.files["pnpm-workspace.yaml"] + addition}))
 
 if __name__ == "__main__":
     unittest.main()

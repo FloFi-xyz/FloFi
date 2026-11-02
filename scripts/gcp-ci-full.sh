@@ -97,14 +97,14 @@ export PATH="$toolbin:$PATH"
   pnpm install --frozen-lockfile --ignore-scripts
 )
 (
-  source scripts/ci-observe.sh 'Dependency integrity license and age'
-  python3 scripts/bootstrap-ci.py --verify-dependencies
+  source scripts/ci-observe.sh 'Dependency security policy'
+  python3 scripts/dependency_security.py verify
 )
 (
   source scripts/ci-observe.sh 'Dependency audit'
   pnpm audit --audit-level low
 )
-bash .circleci/scripts/ci-sbom.sh
+bash scripts/ci-sbom.sh
 (
   source scripts/ci-observe.sh 'Production build'
   pnpm build

@@ -89,7 +89,8 @@ automation, privileged workflow changes, dependency control removal, disabled
 test scripts and incorrect package license copies.
 
 Local validation: self-tests, current-tree governance check, frozen offline
-installation, `pnpm check`, registry integrity/license/release-age verification,
+installation, `pnpm check`, registry integrity/license verification (release-age
+verification was retired by DEC-0057; see the dependency security policy),
 dependency audit and whitespace checks. The normal current-head GitHub CI runs
 on the delivery branch/PR; its result belongs in the PR. No skipped check is a
 pass. The sandboxed build could not read a TypeScript subprocess result; the

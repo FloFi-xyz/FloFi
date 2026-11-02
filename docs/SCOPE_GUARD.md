@@ -19,8 +19,10 @@ PR review and ordinary CI protect the resulting change.
 
 - Do not expose secrets, credentials, private keys or seed phrases. Documented
   placeholders and generated non-secret test fixtures are allowed.
-- Preserve lockfile integrity, the approved package manager/toolchain, dependency
-  verification, license obligations, release-age/peer controls and security audits.
+- Preserve lockfile integrity, the approved package manager/toolchain, the automatic
+  dependency security policy (`docs/security/dependency-policy.json`), license
+  obligations, peer controls and security audits. There is no release-age gate
+  (DEC-0057); routine dependency changes that pass the policy need no approval.
 - Preserve typecheck, lint, build, schema compatibility, unit and relevant browser
   tests. Do not delete failing tests or silently bypass security checks to get
   green CI. Explain intentional changes to safety controls in the PR.
