@@ -6,6 +6,7 @@
  * anything; execution happens only in FloFi with the owner's wallet.
  */
 import type { ChannelLanguage } from './config.ts';
+import { LANDED_LABELS_PT } from '../../domain/landed-attempts.ts';
 
 /** `0x1234…abcd` for every address or hash in a channel text. */
 export const shorten = (text: string) => text.replace(/0x([0-9a-fA-F]{4})[0-9a-fA-F]{32,60}([0-9a-fA-F]{4})(?![0-9a-fA-F])/g, '0x$1…$2');
@@ -19,7 +20,9 @@ export type PreviewNote = { readonly kind: 'PASSED'; readonly provenance: string
 export type ReadyFacts = { readonly lines: readonly string[]; readonly networks: readonly string[]; readonly fundsClass: 'TEST_FUNDS' | 'REAL_FUNDS';
   readonly notes: readonly string[]; readonly preview: PreviewNote; readonly intendedWallet: string | null; readonly aiInterpreted: boolean; readonly expiresMinutes: number };
 export type RunLine = { readonly status: string; readonly reconciled: boolean; readonly terminal: boolean; readonly errorCode: string | null;
-  readonly evidenceEnvironment: string | null; readonly evidenceOutcome: string | null; readonly evidenceBundleHash: string | null; readonly receiptUrl?: string | null };
+  readonly evidenceEnvironment: string | null; readonly evidenceOutcome: string | null; readonly evidenceBundleHash: string | null; readonly receiptUrl?: string | null;
+  /** BUILD-FLOFI-E2E-RELIABILITY-001: only a token approval of this run is confirmed onchain (the label of what landed). */
+  readonly landed?: string | null };
 
 /** Pre-submission records are created by preparation, without a wallet request or any movement of funds. */
 const RUN_EN: Readonly<Record<string, string>> = {
@@ -67,7 +70,9 @@ const EN = {
   approval: (status: string, expires: string) => APPROVAL_EN[status]?.(expires) ?? `Proposal: ${status}.`,
   notShared: 'The wallet owner has not shared run status with this chat (it can be turned on in FloFi).',
   noRuns: 'No simulation or execution record is available from this proposal yet.',
+  runsUnknown: 'Some run records of this proposal could not be read right now, so their status is unknown — this is not evidence that nothing was sent. Send STATUS again in a moment.',
   run: (r: RunLine) => r.reconciled ? `Execution reconciled ✅ · evidence: ${r.evidenceEnvironment ?? 'unknown'} · outcome: ${r.evidenceOutcome ?? 'unknown'}${r.evidenceBundleHash ? ` · bundle ${shorten(r.evidenceBundleHash)}` : ''}${r.receiptUrl ? `\nReceipt: ${r.receiptUrl}` : ''}`
+    : r.landed ? `${r.landed}. The token approval is confirmed onchain, but it moves no funds by itself; the main action has not completed. Continue or check it in FloFi.`
     : r.terminal ? `Workflow ended without verified execution (${r.errorCode ?? r.status}). See FloFi for details.`
       : RUN_EN[r.status] ?? `Workflow status: ${r.status}. No verified execution receipt is available yet.`,
   loaded: 'Your proposal is loaded in FloFi for the connected wallet. Loading it does not authorize or submit a transaction. Check FloFi for the current workflow status.',
@@ -163,7 +168,9 @@ const PT: Copy = {
   approval: (status, expires) => APPROVAL_PT[status]?.(expires) ?? `Proposta: ${status}.`,
   notShared: 'O dono da carteira não compartilhou o status das execuções com esta conversa (dá para ativar no FloFi).',
   noRuns: 'Ainda não há registro de simulação ou execução disponível para esta proposta.',
+  runsUnknown: 'Alguns registros de execução desta proposta não puderam ser lidos agora, então o status deles é desconhecido — isso não é prova de que nada foi enviado. Envie STATUS de novo em instantes.',
   run: r => r.reconciled ? `Execução reconciliada ✅ · evidência: ${r.evidenceEnvironment ?? 'desconhecida'} · resultado: ${r.evidenceOutcome ?? 'desconhecido'}${r.evidenceBundleHash ? ` · bundle ${shorten(r.evidenceBundleHash)}` : ''}${r.receiptUrl ? `\nRecibo: ${r.receiptUrl}` : ''}`
+    : r.landed ? `${LANDED_LABELS_PT[r.landed] ?? r.landed}. A aprovação do token está confirmada na rede, mas sozinha não movimenta fundos; a ação principal não foi concluída. Continue ou verifique no FloFi.`
     : r.terminal ? `Workflow terminou sem execução verificada (${r.errorCode ?? r.status}). Veja os detalhes no FloFi.`
       : RUN_PT[r.status] ?? `Estado do workflow: ${r.status}. Ainda não há recibo de execução verificado.`,
   loaded: 'Sua proposta foi carregada no FloFi para a carteira conectada. Carregá-la não autoriza nem envia uma transação. Confira o estado atual do workflow no FloFi.',

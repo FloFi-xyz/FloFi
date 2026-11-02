@@ -40,6 +40,8 @@ export function statusReplies(language: ChannelLanguage, found: { readonly hando
   }
   if (progress.status === 'APPLIED') {
     if (!progress.runsVisible) lines.push(m.notShared);
+    // BUILD-FLOFI-E2E-RELIABILITY-001: a failed run read is never "no record" — the runs read so far are listed, then the unknown remainder.
+    else if (progress.runsComplete === false) lines.push(...progress.runs.map(m.run), m.runsUnknown);
     else if (!progress.runs.length) lines.push(m.noRuns);
     else lines.push(...progress.runs.map(m.run));
   }
@@ -63,10 +65,11 @@ export function plannedNotifications(language: ChannelLanguage, handoff: Handoff
   for (const run of progress.runs) {
     const id = createHash('sha256').update(run.executionId).digest('hex').slice(0, 16);
     // Preparation creates a run too. Keep its notice distinct so it cannot consume a later authorization/submission notice.
-    if (!run.terminal) due.push({ key: `notify:${handoff.handoffId}:run:${id}:state:${run.status.toLowerCase()}`, text: shorten(m.run(run)) });
+    if (!run.terminal) due.push({ key: `notify:${handoff.handoffId}:run:${id}:state:${run.status.toLowerCase()}${run.landed ? ':approval-landed' : ''}`, text: shorten(m.run(run)) });
     else due.push({ key: `notify:${handoff.handoffId}:run:${id}:${run.reconciled ? 'reconciled' : 'ended'}`, text: shorten(m.run(run)) });
   }
-  return { due, done: progress.runs.length > 0 && progress.runs.every(r => r.terminal) };
+  // An incomplete run read never ends the follow-up (an unread run may still be in flight).
+  return { due, done: progress.runsComplete !== false && progress.runs.length > 0 && progress.runs.every(r => r.terminal) };
 }
 
 /**

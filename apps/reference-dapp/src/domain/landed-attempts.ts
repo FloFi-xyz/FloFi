@@ -50,3 +50,12 @@ const ATTEMPT_DEPENDENT = new Set(['DRAFT', 'PREPARED', 'SIMULATED', 'AUTHORIZED
   'EXPIRED', 'CONFIRMED', 'COMPLETED', 'SETTLED', 'FAILED', 'REVERTED', 'PARTIAL', 'PARTIALLY_COMPLETED', 'EXECUTING', 'PAUSED', 'PRODUCING', 'BOUND', 'CONSUMING',
   'RECOVERY_REQUIRED']);
 export const attemptDependentStatus = (status: string) => ATTEMPT_DEPENDENT.has(status);
+/** The Portuguese of every approval-only label (shared by the PT catalog and Channel Core, which may not import the i18n layer). */
+export const LANDED_LABELS_PT: Readonly<Record<string, string>> = {
+  'Approval confirmed · main action not sent': 'Aprovação confirmada · ação principal não enviada',
+  'Approval confirmed · main action awaiting wallet confirmation': 'Aprovação confirmada · ação principal aguardando confirmação na carteira',
+  'Approval confirmed · main action not submitted': 'Aprovação confirmada · ação principal não submetida',
+  'Approval confirmed · main action pending confirmation': 'Aprovação confirmada · ação principal aguardando confirmação',
+  'Approval confirmed · main action failed': 'Aprovação confirmada · a ação principal falhou',
+  'Approval confirmed · main action unresolved': 'Aprovação confirmada · estado da ação principal não resolvido',
+};

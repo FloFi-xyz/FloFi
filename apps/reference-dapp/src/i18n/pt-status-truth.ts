@@ -1,17 +1,13 @@
 // SPDX-License-Identifier: AGPL-3.0-only
+import { LANDED_LABELS_PT } from '../domain/landed-attempts.ts';
 /**
  * Issue #149 (financial truth): the Dashboard's landed-attempt indicator and the Automations History's run phases (simulation, refusal,
  * submission, onchain confirmation, reconciliation). Only new keys: shared wording keeps its existing translation.
  */
 export const portugueseStatusTruth: Readonly<Record<string, string>> = {
+  ...LANDED_LABELS_PT,
   // Dashboard: what landed onchain, from the run's recorded attempts.
   'Landed onchain': 'Confirmado onchain',
-  'Approval confirmed · main action not sent': 'Aprovação confirmada · ação principal não enviada',
-  'Approval confirmed · main action awaiting wallet confirmation': 'Aprovação confirmada · ação principal aguardando confirmação na carteira',
-  'Approval confirmed · main action not submitted': 'Aprovação confirmada · ação principal não submetida',
-  'Approval confirmed · main action pending confirmation': 'Aprovação confirmada · ação principal aguardando confirmação',
-  'Approval confirmed · main action failed': 'Aprovação confirmada · a ação principal falhou',
-  'Approval confirmed · main action unresolved': 'Aprovação confirmada · estado da ação principal não resolvido',
   'Confirmed onchain · workflow outcome not reconciled yet': 'Confirmada onchain · resultado do workflow ainda não reconciliado',
   'Earlier actions confirmed onchain · a later action is not complete': 'Ações anteriores confirmadas onchain · uma ação posterior não foi concluída',
   'Only the token approval is confirmed onchain. An approval moves no funds by itself, and the main action has not completed.':
@@ -23,6 +19,8 @@ export const portugueseStatusTruth: Readonly<Record<string, string>> = {
     'Não foi possível ler as solicitações registradas desta execução, por isso a FloFi não afirma que nada foi enviado. Atualize o histórico para verificar novamente.',
   // Automations History: one run started from a proposal, by what its records prove.
   'Intention only — not simulated or sent yet': 'Apenas a intenção — ainda não simulada nem enviada',
+  'Run status could not be read now — not evidence that nothing was sent': 'O status das execuções não pôde ser lido agora — não é prova de que nada foi enviado',
+  'No run of this exact proposal recorded yet': 'Ainda não há execução registrada desta proposta exata',
   'Simulated only — nothing was sent': 'Apenas simulada — nada foi enviado',
   'Reviewed only — nothing was sent': 'Apenas revisada — nada foi enviado',
   'Awaiting your wallet confirmation — nothing sent yet': 'Aguardando a confirmação na sua carteira — nada enviado ainda',

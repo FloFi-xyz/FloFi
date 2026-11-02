@@ -6,7 +6,7 @@ import { WALLET_PRINCIPAL_HEADER, normalizePrincipal } from '../../server/run-ow
 import { embeddedRuntime, flowRuntimeKind } from '../../server/flow-runtime';
 import { workflowOwner, WORKFLOW_OWNER_HEADER } from '../../domain/saved-workflow';
 import { dashboardRunId, object, optionalText, textValue, toDashboardAttempts, toDashboardRun } from './run-mapping';
-import { attemptDependentStatus } from './landed-attempts';
+import { attemptDependentStatus } from '../../domain/landed-attempts';
 import type { DashboardDetailResponse, DashboardRun, DashboardSnapshot } from './types';
 
 async function connection(expectedAccount: string): Promise<{ connection: DashboardSnapshot['connection']; account: string | null; base: URL | null }> {

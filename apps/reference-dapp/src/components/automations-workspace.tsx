@@ -210,7 +210,8 @@ export function HistoryPanel({ history, onClose }: { history: RuleHistoryView; o
     <h3>{t('Proposals')}</h3>
     {history.occurrences.length ? <ul className="automation-history-list">{history.occurrences.map(o => <li key={o.occurrenceId}>
       <When iso={o.dueAt} zone={zone}/> · {t(OCCURRENCE_LABEL[o.state] ?? o.state)}{o.outcome && OUTCOME_LABEL[o.outcome] && o.outcome !== 'APPROVAL_APPLIED' ? <> · {t(OUTCOME_LABEL[o.outcome])}</> : null}
-      {o.approval?.status === 'APPLIED' && o.approval.runs.length === 0 && <> · {t('Intention only — not simulated or sent yet')}</>}
+      {o.approval?.status === 'APPLIED' && o.approval.runsComplete === false && <> · {t('Run status could not be read now — not evidence that nothing was sent')}</>}
+      {o.approval?.status === 'APPLIED' && o.approval.runsComplete !== false && o.approval.runs.length === 0 && <> · {t('No run of this exact proposal recorded yet')}</>}
       {o.approval?.runs.map(r => <span key={r.executionId}> · {t(automationRunLabel(r))}
         {r.evidenceEnvironment && <> ({t('evidence')}: {r.evidenceEnvironment})</>} · <a href={`/app/dashboard/runs/${encodeURIComponent(r.executionId)}`}>{t('Open run')}</a></span>)}
     </li>)}</ul> : <p className="muted">{t('No proposals yet.')}</p>}

@@ -54,3 +54,24 @@ describe.each(['EN', 'PT'] as const)('truthful channel lifecycle (%s)', language
     expect(plannedNotifications(language, { ...handoff, shareStatus: false }, progress).due).toEqual([]);
   });
 });
+
+describe('BUILD-FLOFI-E2E-RELIABILITY-001 channel status follows the run evidence', () => {
+  it('an incomplete run read is said as unknown (never "no record") and keeps notifications open', () => {
+    for (const language of ['EN', 'PT'] as const) {
+      const unknown = { ...progress, runs: [], runsComplete: false } as unknown as Parameters<typeof plannedNotifications>[2];
+      const text = statusReplies(language, { handoff, progress: unknown })[0]!.text;
+      expect(text, language).toMatch(language === 'EN' ? /not evidence that nothing was sent/ : /não é prova de que nada foi enviado/);
+      expect(text, language).not.toMatch(/No simulation or execution record|Ainda não há registro/);
+      const partial = { ...progress, runs: [{ ...run, terminal: true, status: 'REJECTED', errorCode: 'X' }], runsComplete: false } as unknown as Parameters<typeof plannedNotifications>[2];
+      expect(plannedNotifications(language, handoff, partial).done, language).toBe(false);
+    }
+  });
+  it('a run whose only landed request is its token approval is never read as "nothing submitted" or as the action', () => {
+    const landed = { ...progress, runs: [{ ...run, status: 'AUTHORIZED', terminal: false, reconciled: false, landed: 'Approval confirmed · main action not sent' }] } as unknown as Parameters<typeof plannedNotifications>[2];
+    const en = statusReplies('EN', { handoff, progress: landed })[0]!.text, pt = statusReplies('PT', { handoff, progress: landed })[0]!.text;
+    expect(en).toContain('Approval confirmed · main action not sent. The token approval is confirmed onchain, but it moves no funds by itself');
+    expect(en).not.toContain('Wallet authorization is still required before submission');
+    expect(pt).toContain('Aprovação confirmada');
+    expect(plannedNotifications('EN', handoff, landed).due.at(-1)!.key).toMatch(/:approval-landed$/);
+  });
+});

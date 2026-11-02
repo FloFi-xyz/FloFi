@@ -22,8 +22,14 @@ describe('Issue #149: Automations History run phases', () => {
   it('a simulated or reviewed-only run says nothing was sent, never an execution', () => {
     for (const status of ['SIMULATED', 'QUOTED', 'PREPARED']) expect(automationRunLabel(view(status, []))).toBe('Simulated only — nothing was sent');
     expect(automationRunLabel(view('AUTHORIZED', []))).toBe('Reviewed only — nothing was sent');
-    // Without readable attempts the summary alone still says it.
-    expect(automationRunLabel(view('SIMULATED'))).toBe('Simulated only — nothing was sent');
+    // BUILD-FLOFI-E2E-RELIABILITY-001: attempts that could not be read never prove that nothing was sent (as on the Dashboard).
+    expect(automationRunLabel(view('SIMULATED'))).toBe('Status unresolved — no transaction is repeated');
+    expect(automationRunLabel(view('AUTHORIZED'))).toBe('Status unresolved — no transaction is repeated');
+  });
+  it('an approval-only run keeps an attention label when the run is divergent or unresolved', () => {
+    const landed = [a('APPROVAL', 'CONFIRMED', { transactionHash: hash })];
+    expect(automationRunLabel(view('CONFIRMED', landed))).toBe('Approval confirmed · main action not sent');
+    expect(automationRunLabel(view('DIVERGENT', landed, { errorCode: 'RECONCILIATION_MISMATCH' }))).not.toMatch(/^Approval confirmed/);
   });
   it('a refused, cancelled, expired or never-submitted request is a refusal: nothing was sent', () => {
     for (const status of ['CANCELLED', 'REJECTED', 'NOT_SUBMITTED', 'EXPIRED', 'NOT_EXECUTED']) expect(automationRunLabel(view(status)), status).toBe('Refused or not submitted — nothing was sent');
@@ -57,7 +63,8 @@ describe('Issue #149: Automations History run phases', () => {
     }
   });
   it('every History and Dashboard status-truth label has a Portuguese translation that keeps no English sentence', () => {
-    const labels = [...AUTOMATION_RUN_LABELS, 'Intention only — not simulated or sent yet', 'Approval confirmed · main action not sent', 'Approval confirmed · main action not submitted',
+    const labels = [...AUTOMATION_RUN_LABELS, 'Intention only — not simulated or sent yet', 'Run status could not be read now — not evidence that nothing was sent',
+      'No run of this exact proposal recorded yet', 'Approval confirmed · main action not sent', 'Approval confirmed · main action not submitted',
       'Approval confirmed · main action awaiting wallet confirmation', 'Approval confirmed · main action pending confirmation', 'Approval confirmed · main action failed',
       'Approval confirmed · main action unresolved', 'Landed onchain'];
     for (const label of labels) {
@@ -71,14 +78,17 @@ describe('Issue #149: Automations History run phases', () => {
   it('renders the History with the run phase instead of "Owner executed — reconciling", and an applied proposal with no run as intention only', () => {
     const occurrence = (id: string, runs: RunView[]): OccurrenceView => ({ occurrenceId: id, ruleId: 'aut-1', ruleName: 'Daily ETH', kind: 'SCHEDULE', state: 'COMPLETED',
       dueAt: '2026-11-01T10:00:00.000Z', expiresAt: '2026-11-01T11:00:00.000Z', action: null, observations: [], outcome: 'APPROVAL_APPLIED', decidedAt: null,
-      approval: { status: 'APPLIED', runs }, notifications: [] });
+      approval: { status: 'APPLIED', runs, runsComplete: id !== 'occ-4' }, notifications: [] });
     const history = { rule: { name: 'Daily ETH', timezone: 'UTC' }, entries: [], occurrences: [occurrence('occ-1', [view('SIMULATED', [])]),
-      occurrence('occ-2', [view('REJECTED', [], { executionId: 'bas-' + '1'.repeat(24) })]), occurrence('occ-3', [])] } as unknown as RuleHistoryView;
+      occurrence('occ-2', [view('REJECTED', [], { executionId: 'bas-' + '1'.repeat(24) })]), occurrence('occ-3', []), occurrence('occ-4', [])] } as unknown as RuleHistoryView;
     const html = renderToStaticMarkup(<HistoryPanel history={history} onClose={() => undefined}/>);
     expect(html).not.toContain('Owner executed');
     expect(html).toContain('Simulated only — nothing was sent');
     expect(html).toContain('Refused or not submitted — nothing was sent');
-    expect(html).toContain('Intention only — not simulated or sent yet');
+    // A complete read with no run of this exact proposal, and (BUILD-FLOFI-E2E-RELIABILITY-001) a run read that failed: never "intention only".
+    expect(html).toContain('No run of this exact proposal recorded yet');
+    expect(html).toContain('Run status could not be read now — not evidence that nothing was sent');
+    expect(html).not.toContain('Intention only');
   });
 });
 

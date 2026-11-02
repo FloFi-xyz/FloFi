@@ -5,7 +5,7 @@ import type { ExecutionRecovery } from '../../domain/execution-recovery';
 import { projectExecutionResult } from '../../domain/execution-result';
 import { shellChainLabel } from '../../domain/product-shell';
 import { canonicalRunLifecycle, recordedResultUnknown, settledWithEvidence, type CanonicalLifecycle } from '../../domain/canonical-execution-status';
-import { landedAttempts, type LandedEvidence } from './landed-attempts';
+import { landedAttempts, type LandedEvidence } from '../../domain/landed-attempts';
 import type { DashboardAttempt, DashboardRun, DashboardRunView, DashboardStatus } from './types';
 
 export const dashboardRunId = (value: unknown): value is string => typeof value === 'string' && /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(value);

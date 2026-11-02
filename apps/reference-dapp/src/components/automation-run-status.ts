@@ -12,7 +12,7 @@
  * (The intention — a proposal opened or loaded with no run yet — is the occurrence's own label.) Display only: no automation decision reads it.
  */
 import { canonicalRunLifecycle } from '../domain/canonical-execution-status';
-import { landedAttempts } from '../lib/dashboard/landed-attempts';
+import { landedAttempts } from '../domain/landed-attempts';
 import type { RunView } from '../automations/views';
 
 const SIMULATED = new Set(['DRAFT', 'QUOTED', 'PREPARED', 'SIMULATED']);
@@ -21,11 +21,13 @@ export function automationRunLabel(run: Pick<RunView, 'status' | 'reconciled' | 
   if (run.reconciled) return 'Execution reconciled';
   const lifecycle = canonicalRunLifecycle({ status: run.status, errorCode: run.errorCode, needsObservation: run.needsObservation === true,
     hasEvidence: run.evidenceBundleHash !== null, ...run.attempts ? { attempts: run.attempts } : {} });
-  // An approval that landed is never the main action, and never "nothing was sent".
+  // An approval that landed is never the main action, and never "nothing was sent" — but an uncertain, divergent or still-submitted state
+  // keeps its own (attention) label (BUILD-FLOFI-E2E-RELIABILITY-001 workflow review).
   const landed = landedAttempts(run.attempts);
-  if (landed.approvalOnly && !lifecycle.completed) return landed.label!;
+  if (landed.approvalOnly && ['CONFIRMED_ONCHAIN', 'PARTIALLY_COMPLETED', 'AUTHORIZATION_PENDING'].includes(lifecycle.status)) return landed.label!;
   switch (lifecycle.status) {
-    case 'NOT_STARTED': return SIMULATED.has(run.status) ? 'Simulated only — nothing was sent' : 'Reviewed only — nothing was sent';
+    // Attempts that could not be read never prove that nothing was sent (the Dashboard fails closed the same way).
+    case 'NOT_STARTED': return run.attempts === null ? 'Status unresolved — no transaction is repeated' : SIMULATED.has(run.status) ? 'Simulated only — nothing was sent' : 'Reviewed only — nothing was sent';
     case 'AUTHORIZATION_PENDING': return 'Awaiting your wallet confirmation — nothing sent yet';
     case 'REJECTED': return 'Refused or not submitted — nothing was sent';
     case 'SUBMITTED': return 'Submitted — awaiting confirmation';

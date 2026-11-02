@@ -35,6 +35,7 @@ export { walletDeepLinks } from './wallet-links.ts';
 import { walletDeepLinks } from './wallet-links.ts';
 import { APPROVAL_SECRET_FORMAT } from './approval-link-format.ts';
 import { trustedFlofiUrl } from './navigation.ts';
+import { landedAttempts, type AttemptFacts } from '../domain/landed-attempts.ts';
 
 export const HANDOFF_SECONDS = 900;
 export const CLAIM_SECONDS = 600;
@@ -232,7 +233,12 @@ function reviewedWorkflows(record: unknown): unknown[] {
 }
 export type RunProgress = { readonly executionId: string; readonly flow: string; readonly status: string; readonly reconciled: boolean; readonly terminal: boolean;
   readonly errorCode: string | null; readonly evidenceEnvironment: string | null; readonly evidenceOutcome: string | null; readonly evidenceBundleHash: string | null;
-  readonly updatedAt: string; readonly receiptUrl?: string | null };
+  readonly updatedAt: string; readonly receiptUrl?: string | null;
+  /**
+   * BUILD-FLOFI-E2E-RELIABILITY-001: what landed when only a token approval of the run is confirmed onchain (e.g. "Approval confirmed · main
+   * action not sent"), from the run's own recorded attempts — so no surface reads the run's raw status as "nothing submitted" or as the action.
+   */
+  readonly landed?: string | null };
 /**
  * The runs started from an APPLIED handoff whose owner chose to share them: runs of the claimant wallet, on the plan's flow, created
  * after the claim, whose reviewed workflow hashes EXACTLY to the handoff's workflow hash (an edited strategy is not this proposal).
@@ -263,7 +269,9 @@ export async function sharedRunsRead(h: HandoffRecord, runtime: EngineRuntime, h
     const reconciled = !run.value.needsObservation && run.value.errorCode === null && Boolean(evidence?.bundleHash && evidence.environment &&
       (evidence.outcome === 'RECONCILED' && ['RECONCILED', 'COMPLETED'].includes(run.value.status)
         || run.value.flow === 'pix-payment' && evidence.outcome === 'PAYMENT_SETTLED' && run.value.status === 'PAYMENT_SETTLED'));
+    const landed = reconciled ? null : landedAttempts(Array.isArray(run.value.attempts) ? run.value.attempts as readonly AttemptFacts[] : []);
     out.push({ executionId: run.value.runId, flow: run.value.flow, status: run.value.status, reconciled, errorCode: run.value.errorCode,
+      ...landed?.approvalOnly && landed.label ? { landed: landed.label } : {},
       terminal: !run.value.needsObservation && (reconciled || run.value.errorCode !== null), evidenceEnvironment: evidence?.environment ?? null,
       evidenceOutcome: evidence?.outcome ?? null, evidenceBundleHash: evidence?.bundleHash ?? null, updatedAt: run.value.updatedAt });
   }

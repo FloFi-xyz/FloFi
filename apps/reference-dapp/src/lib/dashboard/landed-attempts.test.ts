@@ -5,7 +5,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import { canonicalRunLifecycle } from '../../domain/canonical-execution-status';
-import { landedAttempts } from './landed-attempts';
+import { landedAttempts } from '../../domain/landed-attempts';
 import { projectDashboardRun } from './run-mapping';
 import { projectDashboardRecord } from './record-projection';
 import type { DashboardAttempt, DashboardRun, DashboardRunDetail } from './types';

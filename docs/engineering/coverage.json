@@ -782,10 +782,6 @@
       "path": "apps/reference-dapp/src/mcp/pix-approval-status.test.ts",
       "stage": "unit"
     },
-    "app.lib.dashboard.landed-attempts": {
-      "path": "apps/reference-dapp/src/lib/dashboard/landed-attempts.test.ts",
-      "stage": "unit"
-    },
     "app.lib.dashboard.data-service-attempts": {
       "path": "apps/reference-dapp/src/lib/dashboard/data-service-attempts.test.ts",
       "stage": "unit"
@@ -800,6 +796,10 @@
     },
     "app.channels.route-discovery": {
       "path": "apps/reference-dapp/src/channels/route-discovery.test.ts",
+      "stage": "unit"
+    },
+    "app.lib.dashboard.landed-attempts": {
+      "path": "apps/reference-dapp/src/lib/dashboard/landed-attempts.test.ts",
       "stage": "unit"
     }
   },
@@ -3339,7 +3339,8 @@
         "apps/reference-dapp/src/domain/workflow-sequence.ts",
         "apps/reference-dapp/src/domain/workflow-steps.ts",
         "apps/reference-dapp/src/domain/canonical-execution-status.ts",
-        "apps/reference-dapp/src/domain/observation-schedule.ts"
+        "apps/reference-dapp/src/domain/observation-schedule.ts",
+        "apps/reference-dapp/src/domain/landed-attempts.ts"
       ],
       "suites": [
         "action-registry.engineering-regression",
@@ -3521,7 +3522,6 @@
       "sharedFinancialCore": false,
       "sources": [
         "apps/reference-dapp/src/lib/dashboard/data-service.ts",
-        "apps/reference-dapp/src/lib/dashboard/landed-attempts.ts",
         "apps/reference-dapp/src/lib/dashboard/record-projection.ts",
         "apps/reference-dapp/src/lib/dashboard/routes.ts",
         "apps/reference-dapp/src/lib/dashboard/run-mapping.ts",
