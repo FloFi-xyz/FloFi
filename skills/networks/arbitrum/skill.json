@@ -48,9 +48,9 @@
       "status": "PENDING_VERIFICATION",
       "reviewedRevision": "17a932287914386857e397df6b4eaba9ce09f96d",
       "reviewedDigest": "sha256:e185303987f4e211b886a80f1e80d8cdd93055a632f0ef870b1259f90fc30250",
-      "reviewedAt": "2026-11-01",
+      "reviewedAt": "2026-11-02",
       "crossCheckedAgainst": [],
-      "notes": "Nitro gas: L2 execution plus L1 posting cost in the estimate. The repository states no licence at this revision: FloFi links and summarises it, never copies it."
+      "notes": "Nitro gas: L2 execution plus L1 posting cost in the estimate. Re-checked 2026-11-02: digest unchanged; SKILL.md consistent. Pending verification — blocked: OffchainLabs/arbitrum-docs states no licence at this revision (no LICENSE file) and VERIFIED needs one. FloFi links and summarises it, never copies it."
     },
     {
       "url": "https://raw.githubusercontent.com/OffchainLabs/arbitrum-docs/17a932287914386857e397df6b4eaba9ce09f96d/content/docs/how-arbitrum-works/reference/finality-and-reorgs.mdx",
@@ -60,9 +60,9 @@
       "status": "PENDING_VERIFICATION",
       "reviewedRevision": "17a932287914386857e397df6b4eaba9ce09f96d",
       "reviewedDigest": "sha256:624822ce7cd4e7ad04076463cd6e6bbfe32ef8ce4dd1cc1b7c0f98752334bf7a",
-      "reviewedAt": "2026-11-01",
+      "reviewedAt": "2026-11-02",
       "crossCheckedAgainst": [],
-      "notes": "Sequencer soft finality versus L1 finality. The repository states no licence at this revision: FloFi links and summarises it, never copies it."
+      "notes": "Sequencer soft finality versus L1 finality. Re-checked 2026-11-02: digest unchanged; SKILL.md consistent. Pending verification — blocked: OffchainLabs/arbitrum-docs states no licence at this revision (no LICENSE file) and VERIFIED needs one. FloFi links and summarises it, never copies it."
     },
     {
       "url": "https://raw.githubusercontent.com/OffchainLabs/arbitrum-docs/17a932287914386857e397df6b4eaba9ce09f96d/content/docs/arbitrum-essentials/arbitrum-vs-ethereum/block-numbers-and-time.mdx",
@@ -72,9 +72,9 @@
       "status": "PENDING_VERIFICATION",
       "reviewedRevision": "17a932287914386857e397df6b4eaba9ce09f96d",
       "reviewedDigest": "sha256:885177f4e7a409a9619526c764824091cc8fd59315e5f8bc3bce18b095bf780c",
-      "reviewedAt": "2026-11-01",
+      "reviewedAt": "2026-11-02",
       "crossCheckedAgainst": [],
-      "notes": "block.number semantics on Arbitrum. The repository states no licence at this revision: FloFi links and summarises it, never copies it."
+      "notes": "block.number semantics on Arbitrum. Re-checked 2026-11-02: digest unchanged; SKILL.md consistent. Pending verification — blocked: OffchainLabs/arbitrum-docs states no licence at this revision (no LICENSE file) and VERIFIED needs one. FloFi links and summarises it, never copies it."
     },
     {
       "url": "https://docs.arbitrum.io/",
@@ -86,7 +86,7 @@
       "reviewedDigest": null,
       "reviewedAt": null,
       "crossCheckedAgainst": [],
-      "notes": "Official site; not reachable from the build session network. Verify, pin and record before relying on it."
+      "notes": "Official site. Pending verification — blocked: docs.arbitrum.io is outside this session's allowed network (egress proxy 403 on CONNECT; WebFetch DNS ENOTFOUND), 2026-11-02. Verify, pin and record before relying on it."
     },
     {
       "url": "https://skills.rest/skill/arbitrum-defi-guide",
@@ -97,11 +97,8 @@
       "reviewedRevision": null,
       "reviewedDigest": null,
       "reviewedAt": null,
-      "crossCheckedAgainst": [
-        "https://raw.githubusercontent.com/OffchainLabs/arbitrum-docs/17a932287914386857e397df6b4eaba9ce09f96d/content/docs/how-arbitrum-works/deep-dives/gas-and-fees.mdx",
-        "https://raw.githubusercontent.com/OffchainLabs/arbitrum-docs/17a932287914386857e397df6b4eaba9ce09f96d/content/docs/how-arbitrum-works/reference/finality-and-reorgs.mdx"
-      ],
-      "notes": "Third-party guide named by the owner. Not official and not reachable from the build session; never loaded as guidance until every claim is cross-checked against the official Arbitrum documentation listed here."
+      "crossCheckedAgainst": [],
+      "notes": "Third-party guide named by the owner; never guidance by itself. Pending verification — blocked: skills.rest is outside this session's allowed network (egress proxy 403 on CONNECT; WebFetch DNS ENOTFOUND), 2026-11-02. Never read, so nothing is cross-checked yet; each claim must be checked against this skill's official Offchain Labs sources once they are VERIFIED."
     }
   ],
   "guidance": "SKILL.md",

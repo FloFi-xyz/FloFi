@@ -24,7 +24,7 @@ import { channelHost, channelRuntime, type ChannelHost } from './runtime.ts';
 import { channelLearning } from './learning-runtime.ts';
 import { channelVisualRenderer } from './visuals.ts';
 import { authoringCatalogPreparer } from '../server/authoring-catalogs.ts';
-import { channelCopilotToolkit } from '../server/channel-copilot-toolkit.ts';
+import { channelRouteToolkit } from './route-discovery.ts';
 import { copilotMetricsEnabled, persistCopilotInterpretation, persistCopilotTurn, recordCopilotMetrics } from '../server/copilot-metrics-store.ts';
 
 type Env = Readonly<Record<string, string | undefined>>;
@@ -59,7 +59,7 @@ export async function handleChannelDispatch(request: Request, options: ChannelOp
   // BUILD-ADMIN-001: each channel's service interprets with that channel's Copilot settings scope.
   const interpreterFor = (channel: string) => options.interpreter !== undefined ? options.interpreter
     : channelInterpreter(env, { enabled: core.copilot, live: channelLiveCopilot(env, channel === 'WHATSAPP' ? 'WHATSAPP' : 'TELEGRAM', host),
-      toolkit: channelCopilotToolkit(env), metrics: async record => {
+      toolkit: channelRouteToolkit(env), metrics: async record => {
         if (copilotMetricsEnabled(env, record.mode)) await recordCopilotMetrics(() => persistCopilotInterpretation(host, record, now()));
       } });
   const services = new Map([...providers.adapters.values()].map(adapter => [adapter.channel, createChannelService({ core, store, log, now, platform, adapter,

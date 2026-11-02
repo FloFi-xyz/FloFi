@@ -9,6 +9,10 @@
  *
  * Metric names avoid the shared logger's redacted key words (`authorization`, `signature`, `token`, …): a redacted value would silently never
  * reach the report (`createLogger` replaces it with "[REDACTED]").
+ *
+ * Issue #149 (LGPD first, GDPR too): journey telemetry is OFF unless the deployment owner opts in, separately for the browser
+ * (`NEXT_PUBLIC_FLOFI_JOURNEY_TELEMETRY=on`, inlined at build time: without it no browser sends anything) and for the server
+ * (`FLOFI_JOURNEY_TELEMETRY=on`: without it `/api/flofi/journey` reads and logs nothing). Policy: docs/privacy/JOURNEY-TELEMETRY.md.
  */
 import { NETWORKS } from './network-registry';
 export const JOURNEY_MARKS = Object.freeze(['intent', 'first_quote', 'best_quote', 'review_requested', 'review_ready', 'authorize_clicked', 'wallet_open',
@@ -128,9 +132,23 @@ export function summarizeLatency(samples: readonly number[], minimum = 20):
   return { count: values.length, p50: rank(0.5), p95: rank(0.95) };
 }
 
-/** Sends a finished journey without delaying anything (a beacon to the same origin); a browser without beacons simply reports nothing. */
+/**
+ * The deployment owner's explicit opt-in: only `on` (any case, surrounding spaces ignored) turns journey telemetry on. Unset, empty, `off`,
+ * `true`, `1`, a typo or anything else keeps it off, so a missing or misconfigured switch never collects.
+ */
+export function journeyTelemetryEnabled(setting: string | undefined): boolean {
+  return typeof setting === 'string' && setting.trim().toLowerCase() === 'on';
+}
+/** Whether this browser build may send journey timings at all (`NEXT_PUBLIC_FLOFI_JOURNEY_TELEMETRY=on`, inlined by Next.js at build time). */
+export const journeyBeaconsEnabled = () => journeyTelemetryEnabled(process.env.NEXT_PUBLIC_FLOFI_JOURNEY_TELEMETRY);
+
+/**
+ * Sends a finished journey without delaying anything (a beacon to the same origin); a browser without beacons simply reports nothing. Nothing
+ * is sent unless the deployment opted in (`journeyBeaconsEnabled`): with telemetry off the browser makes no request at all.
+ */
 export function reportJourney(event: JourneyEvent | null, send: (url: string, body: string) => boolean = (url, body) =>
-  typeof navigator !== 'undefined' && typeof navigator.sendBeacon === 'function' ? navigator.sendBeacon(url, new Blob([body], { type: 'application/json' })) : false): boolean {
-  if (!event) return false;
+  typeof navigator !== 'undefined' && typeof navigator.sendBeacon === 'function' ? navigator.sendBeacon(url, new Blob([body], { type: 'application/json' })) : false,
+enabled: boolean = journeyBeaconsEnabled()): boolean {
+  if (!event || !enabled) return false;
   try { return send('/api/flofi/journey', JSON.stringify(event)); } catch { return false; }
 }

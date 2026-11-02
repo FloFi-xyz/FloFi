@@ -123,16 +123,59 @@ describe('Arbitrum swaps on the shared owner runtime', () => {
     expect(s.load(run.quote.executionId).attempts).toEqual([]);
     expect((await swapService({ path }).begin(run.quote.executionId, owner)).attempt.state).toBe('PREPARED');
   });
+  // BUILD-FLOFI-E2E-RELIABILITY-001: a quote below the reviewed minimum is material; ordinary movement inside the reviewed bounds is not (next test).
   it.each(['quote', 'allowance', 'nonce', 'fee', 'expiry'] as const)('invalidates stale Review when %s changes', async change => {
     const s = swapService(), run = await s.prepare(swap(), owner); s.review(run.quote.executionId, run.quote.manifestHash);
-    if (change === 'quote') chain.addPool(UNI.usdc, UNI.weth, { fee: 500, liquidity: 10n ** 20n, rate: { [UNI.usdc]: 5n * 10n ** 26n } });
+    // −2.5% on a 0.5% slippage Review: the reviewed route now quotes below the reviewed minimum.
+    if (change === 'quote') chain.addPool(UNI.usdc, UNI.weth, { fee: 500, liquidity: 10n ** 20n, rate: { [UNI.usdc]: 39n * 10n ** 25n } });
     if (change === 'allowance') chain.state.allowances.set(`${UNI.usdc}:${owner}:${UNI.router}`, 1n);
     if (change === 'nonce') chain.state.nonces.set(owner, 1);
     if (change === 'fee') chain.state.gasPrice *= 3n;
     if (change === 'expiry') now += 61_000;
-    await expect(s.begin(run.quote.executionId, owner)).rejects.toThrow(/REVIEW_REQUIRED/);
+    await expect(s.begin(run.quote.executionId, owner)).rejects.toThrow(change === 'quote' ? 'QUOTE_CHANGED_REVIEW_REQUIRED' : /REVIEW_REQUIRED/);
     expect(s.load(run.quote.executionId).reviewedManifestHash).toBeNull();
     expect(s.load(run.quote.executionId).attempts).toHaveLength(0);
+  });
+  it.each([['a better price inside half the band (+0.2%)', 4008n * 10n ** 23n], ['a small decline inside the slippage (−0.25%)', 399n * 10n ** 24n],
+    ['a gas price 1 wei higher (still under the reviewed fee ceiling)', 4n * 10n ** 26n]] as const)(
+    'keeps the Review and signs exactly the reviewed swap after %s', async (_label, rate) => {
+      // Allowance already in place: the reviewed transaction is the swap itself, whose calldata carries the reviewed route, minimum and deadline.
+      chain.state.allowances.set(`${UNI.usdc}:${owner}:${UNI.router}`, 10_000_000n);
+      const s = swapService(), run = await s.prepare(swap(), owner), id = run.quote.executionId;
+      expect(run.quote.ownerReview?.step).toBe('swap');
+      s.review(id, run.quote.manifestHash);
+      chain.addPool(UNI.usdc, UNI.weth, { fee: 500, liquidity: 10n ** 20n, rate: { [UNI.usdc]: rate } });
+      if (_label.startsWith('a gas price')) chain.state.gasPrice += 1n;
+      const begun = await s.begin(id, owner);
+      expect(begun.tx).toEqual(run.quote.ownerReview!.transaction);
+      expect(begun.attempt).toMatchObject({ step: 'swap', manifestHash: run.quote.manifestHash, authorizedMinimumOutput: run.quote.minimumOut });
+      expect(s.load(id)).toMatchObject({ reviewedManifestHash: run.quote.manifestHash, quote: { manifestHash: run.quote.manifestHash } });
+    });
+  it('BUILD-FLOFI-E2E-RELIABILITY-001: a better price beyond half the slippage band (+25%) is material; the presentable quote is owner-bound and signable', async () => {
+    chain.state.allowances.set(`${UNI.usdc}:${owner}:${UNI.router}`, 10_000_000n);
+    const s = swapService(), run = await s.prepare(swap(), owner), id = run.quote.executionId;
+    s.review(id, run.quote.manifestHash);
+    chain.addPool(UNI.usdc, UNI.weth, { fee: 500, liquidity: 10n ** 20n, rate: { [UNI.usdc]: 5n * 10n ** 26n } });
+    await expect(s.begin(id, owner)).rejects.toThrow('QUOTE_CHANGED_REVIEW_REQUIRED');
+    const presented = s.load(id).quote;
+    expect(s.load(id)).toMatchObject({ reviewedManifestHash: null, attempts: [] });
+    expect(presented.ownerReview).toMatchObject({ account: owner, step: 'swap', deadline: Math.floor(Date.parse(presented.expiresAt) / 1000) });
+    expect(BigInt(presented.minimumOut)).toBe(BigInt(presented.expectedOut) * BigInt(10_000 - presented.slippageBps) / 10_000n);
+    s.review(id, presented.manifestHash);
+    expect((await s.begin(id, owner)).tx).toEqual(presented.ownerReview!.transaction);
+  });
+  it('BUILD-FLOFI-E2E-RELIABILITY-001: a best-tier switch keeps the Review on the reviewed tier; the reviewed tier no longer quoting is material', async () => {
+    chain.state.allowances.set(`${UNI.usdc}:${owner}:${UNI.router}`, 10_000_000n);
+    const s = swapService(), run = await s.prepare(swap(), owner), id = run.quote.executionId;
+    s.review(id, run.quote.manifestHash);
+    // A better 0.30% pool appears: the reviewed 0.05% route still quotes the same, so the reviewed transaction is signed unchanged.
+    chain.addPool(UNI.usdc, UNI.weth, { fee: 3000, liquidity: 10n ** 20n, rate: { [UNI.usdc]: 41n * 10n ** 25n } });
+    expect((await s.begin(id, owner)).tx).toEqual(run.quote.ownerReview!.transaction);
+    const t = swapService(), other = await t.prepare(swap(), owner), next = other.quote.executionId;
+    t.review(next, other.quote.manifestHash);
+    expect(other.quote.fee).toBe(3000);
+    chain.addPool(UNI.usdc, UNI.weth, { fee: 3000, liquidity: 0n, rate: { [UNI.usdc]: 41n * 10n ** 25n } });
+    await expect(t.begin(next, owner)).rejects.toThrow('QUOTE_CHANGED_REVIEW_REQUIRED');
   });
   it('approves exactly the input, refreshes, reviews the deadline-bound swap, restarts, and reconciles MOCKED fees', async () => {
     const path = dir(), s = swapService({ path }), prepared = await s.prepare(swap(), owner), id = prepared.quote.executionId;

@@ -29,6 +29,7 @@ function RunCard({ view, openRun, history }: { view: DashboardRunView; openRun(r
     <div className="dashboard-run-heading"><div className="dashboard-run-title"><span className="dashboard-run-icon"><DashboardIcon kind="activity"/></span><h3 title={view.title}>{view.current ? view.title : tr(view.title)}</h3></div><DashboardStatusBadge status={view.status}/></div>
     <p className="dashboard-run-message">{tr(view.message)}</p>
     <div className="dashboard-run-facts">
+      {view.landed && <span className="dashboard-run-landed">{tr(view.landed)}</span>}
       {view.total !== null && <span>{tr(view.completed)}{tr(" of ")}{tr(view.total)} {tr(view.total === 1 ? 'step' : 'steps')}{tr(" confirmed")}</span>}
       {view.networks.length > 0 && <span>{tr(view.networks.join(' → '))}</span>}
       {view.progress?.local && <span>{tr("Local execution")}</span>}

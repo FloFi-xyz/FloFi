@@ -50,6 +50,12 @@ export type PendingQuestion =
   | { readonly kind: 'CONFIRM_EXECUTION'; readonly binding: ReviewBinding }
   /** The next never-attempted wallet request of a run already authorized (e.g. the swap after a confirmed approval). */
   | { readonly kind: 'CONFIRM_CONTINUE'; readonly binding: ReviewBinding; readonly runKey: string | null; readonly fingerprint: string }
+  /**
+   * BUILD-FLOFI-E2E-RELIABILITY-001: a fresh Review of the remaining request of a run whose earlier request already landed (the swap after its
+   * confirmed approval, once the reviewed quote expired or moved materially). One explicit answer accepts this Review and opens the wallet; the
+   * workflow itself was already confirmed, and the binding is checked again at the answer exactly as for CONFIRM_EXECUTION.
+   */
+  | { readonly kind: 'CONFIRM_CONTINUE_REVIEW'; readonly binding: ReviewBinding; readonly runKey: string | null }
   /** BUILD-FLOFI-CHAT-E2E-FIX-002: a Canvas card has a typed amount that was never applied; apply it (YES) or discard it (NO) before the Review. */
   | { readonly kind: 'RESOLVE_EDIT'; readonly nodeId: string; readonly workflowId: string; readonly revision: number };
 export type Answer = 'YES' | 'NO' | 'UNCLEAR';
@@ -90,7 +96,7 @@ export function bindingIssue(binding: ReviewBinding, view: LifecycleView, now = 
 // ── Deterministic answers (never the model) ─────────────────────────────────────────────────────────────────────────────────────────────
 const normalize = (text: string) => text.normalize('NFC').trim().toLowerCase().replace(/[“”"'’]/g, '').replace(/[.!]+$/, '').replace(/\s*,\s*/g, ' ').replace(/\s+/g, ' ');
 const pattern = (words: readonly string[]) => new RegExp(`^(?:${words.join('|')})$`);
-const NO_WORDS = pattern(['no', 'nope', 'not now', 'not yet', 'cancel', 'stop', 'wait', 'dont', 'do not', 'no thanks', 'não', 'nao', 'agora não', 'agora nao', 'ainda não',
+const NO_WORDS = pattern(['no', 'nope', 'not now', 'not yet', 'cancel', 'stop', 'wait', 'dont', 'do not', 'no thanks', 'não', 'nao', 'agora não', 'agora nao', 'não agora', 'nao agora', 'ainda não',
   'ainda nao', 'cancelar', 'cancela', 'parar', 'pare', 'espera', 'espere', 'não obrigado', 'nao obrigado']);
 const CONFIRM_WORKFLOW = pattern(['yes', 'yes please', 'confirm', 'i confirm', 'confirmed', 'yes confirm', 'yes i confirm', 'confirm workflow', 'confirm the workflow',
   'confirm this workflow', 'confirm my workflow', 'yes confirm the workflow', 'yes confirm this workflow', 'sim', 'confirmo', 'eu confirmo', 'sim confirmo', 'confirmar',
@@ -99,7 +105,10 @@ const CONFIRM_EXECUTION = pattern(['yes', 'yes please', 'yes execute', 'yes exec
   'execute it', 'execute now', 'execute the workflow', 'execute this workflow', 'execute my workflow', 'yes run it', 'run it', 'run it now', 'sim', 'sim executar',
   'sim executa', 'sim execute', 'executar', 'executa', 'executar agora', 'execute agora', 'pode executar', 'sim pode executar', 'executar workflow', 'executar o workflow',
   'executar o fluxo', 'sim executar agora']);
-const CONTINUE = pattern(['yes', 'yes please', 'continue', 'yes continue', 'continue to wallet', 'yes continue to wallet', 'sim', 'continuar', 'sim continuar', 'continua', 'pode continuar']);
+const CONTINUE = pattern(['yes', 'yes please', 'continue', 'yes continue', 'continue to wallet', 'continue to my wallet', 'yes continue to wallet', 'sim', 'continuar', 'sim continuar',
+  'continua', 'pode continuar', 'continuar para a carteira', 'sim continuar para a carteira']);
+const ACCEPT_CONTINUE = pattern(['accept and continue', 'yes accept and continue', 'accept', 'yes accept', 'accept it', 'accept the updated quote', 'aceitar e continuar',
+  'sim aceitar e continuar', 'aceitar', 'sim aceitar', 'aceito', 'sim aceito']);
 const APPLY_EDIT = pattern(['yes', 'yes please', 'apply', 'apply it', 'apply the edit', 'apply the amount', 'yes apply', 'yes apply it', 'use it', 'sim', 'aplicar', 'aplica',
   'aplicar a edição', 'aplicar a edicao', 'aplicar o montante', 'sim aplicar', 'sim aplica', 'usar']);
 const DISCARD_EDIT = pattern(['discard', 'discard it', 'discard the edit', 'discard edit', 'no discard', 'drop it', 'descartar', 'descarta', 'descartar a edição',
@@ -122,13 +131,14 @@ const STATUS_REQUEST = pattern(['status', 'check status', 'execution status', 'w
   'verificar status', 'ver status', 'status da execução', 'status da execucao', 'verificar execução', 'verificar execucao', 'atualizar status']);
 const UNDO_REQUEST = pattern(['undo', 'undo that', 'undo this change', 'undo last change', 'desfazer', 'desfaz', 'desfazer isso', 'desfazer esta alteração', 'desfazer esta alteracao',
   'desfazer última alteração', 'desfazer ultima alteracao']);
-const PT_LIFECYCLE = /\b(?:sim|não|nao|confirmo|confirmar|executar|executa|revisar|revise|simular|adicionar|outra|cancelar|verificar|desfazer|continuar|agora|fluxo|aplicar|aplica|descartar|descarta|novamente|cotação|cotacao|rota|tentar)\b/;
+const PT_LIFECYCLE = /\b(?:sim|não|nao|confirmo|confirmar|executar|executa|revisar|revise|simular|adicionar|outra|cancelar|verificar|desfazer|continuar|agora|fluxo|aplicar|aplica|descartar|descarta|novamente|cotação|cotacao|rota|tentar|aceitar|aceito)\b/;
 
 /** An explicit answer to FloFi's open question. Anything else — extra content, an edit, a hedge — is UNCLEAR and changes nothing. */
 export function classifyAnswer(text: string, question: PendingQuestion['kind']): Answer {
   const value = normalize(text);
   if (question === 'RESOLVE_EDIT') return DISCARD_EDIT.test(value) ? 'NO' : APPLY_EDIT.test(value) ? 'YES' : NO_WORDS.test(value) ? 'NO' : 'UNCLEAR';
   if (NO_WORDS.test(value)) return 'NO';
+  if (question === 'CONFIRM_CONTINUE_REVIEW') return ACCEPT_CONTINUE.test(value) || CONTINUE.test(value) || CONFIRM_EXECUTION.test(value) ? 'YES' : 'UNCLEAR';
   const yes = question === 'CONFIRM_WORKFLOW' ? CONFIRM_WORKFLOW : question === 'CONFIRM_EXECUTION' ? CONFIRM_EXECUTION : question === 'CONFIRM_CONTINUE' ? CONTINUE : null;
   return yes?.test(value) ? 'YES' : 'UNCLEAR';
 }
@@ -141,11 +151,10 @@ export function lifecycleRequest(text: string): 'REVIEW' | 'REFRESH' | 'ROUTE' |
 /** The language of a short lifecycle message (PT words decide), else the interface language. */
 export function answerLanguage(text: string, fallback: ConversationLanguage): ConversationLanguage {
   const value = normalize(text);
-  return PT_LIFECYCLE.test(value) ? 'PT' : /\b(?:yes|no|confirm|execute|review|simulate|add|another|cancel|status|undo|continue|run|apply|discard|refresh|quote|route|retry|again)\b/.test(value) ? 'EN' : fallback;
+  return PT_LIFECYCLE.test(value) ? 'PT' : /\b(?:yes|no|confirm|execute|review|simulate|add|another|cancel|status|undo|continue|run|apply|discard|refresh|quote|route|retry|again|accept)\b/.test(value) ? 'EN' : fallback;
 }
 
 // ── Phase ───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-const IN_FLIGHT = ['preparing', 'submitting', 'submitted', 'pending', 'signed', 'posted', 'settling', 'partial'];
 /** The conceptual chat state, read from FloFi's open question and the existing records (execution first: it is the financial truth). */
 export function conversationPhase(view: LifecycleView, question: PendingQuestion | null, draftOpen: boolean, now = Date.now()): ConversationPhase {
   const live = currentExecution(view.progress);
@@ -155,12 +164,14 @@ export function conversationPhase(view: LifecycleView, question: PendingQuestion
     if (live.state === 'uncertain') return 'UNCERTAIN';
     if (live.state === 'complete') return 'COMPLETED';
     if (live.state === 'attention') return projectExecutionResult(live)?.label === 'Execution partially completed' ? 'PARTIAL' : 'FAILED';
-    if (question?.kind === 'CONFIRM_CONTINUE') return 'AWAITING_EXECUTION_CONFIRMATION';
-    if (live.busy || operations.some(operation => ['submitted', 'pending', 'settling', 'partial'].includes(operation.state))) return 'RECONCILING';
-    if (operations.some(operation => IN_FLIGHT.includes(operation.state))) return 'EXECUTING';
+    if (question?.kind === 'CONFIRM_CONTINUE' || question?.kind === 'CONFIRM_CONTINUE_REVIEW') return 'AWAITING_EXECUTION_CONFIRMATION';
+    // BUILD-FLOFI-E2E-RELIABILITY-001: reconciling means a submitted request is being observed. A runtime that is merely busy (preparing the next
+    // request, re-quoting) is not reconciling anything: announcing it as such repeated "0 of 1 actions completed" after every Continue.
+    // A posted order (CoW) and a broadcasting transaction (a Solana signature in flight) are observed too.
+    if (operations.some(operation => ['submitted', 'pending', 'settling', 'partial', 'posted', 'submitting'].includes(operation.state))) return 'RECONCILING';
     return 'EXECUTING';
   }
-  if (question?.kind === 'CONFIRM_EXECUTION') return 'AWAITING_EXECUTION_CONFIRMATION';
+  if (question?.kind === 'CONFIRM_EXECUTION' || question?.kind === 'CONFIRM_CONTINUE_REVIEW') return 'AWAITING_EXECUTION_CONFIRMATION';
   if (question?.kind === 'CONFIRM_WORKFLOW') return 'AWAITING_WORKFLOW_CONFIRMATION';
   if (view.source.state.busy) return 'SIMULATING';
   if (draftOpen) return 'AWAITING_MISSING_FIELDS';
@@ -240,6 +251,18 @@ export function payableCosts(fees: readonly SimulationLine[]) {
  * expired). Nothing was sent; the chat re-quotes and asks for a fresh Review instead of offering the dead one again.
  */
 export const QUOTE_MOVED = /ROUTE_CHANGED|QUOTE_CHANGED|REQUOTE|STATE_CHANGED|GAS_CHANGED|REVIEW_EXPIRED|QUOTE_EXPIRED|STOCK_MULTIPLIER_CHANGED/;
+/**
+ * BUILD-FLOFI-E2E-RELIABILITY-001: why the next request of a run with a confirmed earlier request cannot start under its Review, in words that
+ * describe that request only (the generic reasons say "nothing was sent", which is false for the run once its approval landed). Null: the
+ * chat's generic continuation wording applies.
+ */
+export function continuationReason(code: string): string | null {
+  if (/STOCK_MULTIPLIER_CHANGED/.test(code)) return 'A corporate action changed the shares per token since your Review.';
+  if (/REVIEW_EXPIRED|QUOTE_EXPIRED/.test(code)) return 'The reviewed quote expired before the next request could start.';
+  if (/QUOTE_CHANGED|ROUTE_CHANGED|REQUOTE/.test(code)) return 'The quote moved outside the bounds of your Review.';
+  if (/STATE_CHANGED|GAS_CHANGED/.test(code)) return 'Your wallet’s on-chain state or the network fee changed since the Review (for example its next transaction number, allowance or the fee ceiling).';
+  return null;
+}
 /** What a fresh Review changed against the previous one of the same workflow revision: every step figure and cost line, by label (values as shown). */
 export function reviewChanges(previous: ConversationReview, next: ConversationReview): readonly { readonly label: string; readonly before: string; readonly after: string }[] {
   const changes: { label: string; before: string; after: string }[] = [];
@@ -288,6 +311,33 @@ export type ConversationExecution = {
   /** BUILD-FLOFI-CHAT-E2E-FIX-002: the sequence step this run executes, and how many steps the workflow has (null: not a sequence). */
   readonly sequenceStep: { readonly current: number; readonly total: number; readonly action: string; readonly completed: number } | null;
 };
+/**
+ * BUILD-FLOFI-E2E-RELIABILITY-001: what already landed and what comes next in the current run, read from the durable record's operations (never
+ * from chat state): the last confirmed wallet request, whether it was a token approval (which is never the action itself), and the first wallet
+ * request not attempted yet. Null when the run has no confirmed request followed by an unattempted one.
+ */
+export function executionContinuation(view: Pick<LifecycleView, 'progress'>): { readonly done: string; readonly approval: boolean; readonly next: string;
+  /** The run and its next wallet request: a stable identity for “this continuation” (never the record's whole fingerprint). */
+  readonly key: string } | null {
+  const live = currentExecution(view.progress);
+  if (!live) return null;
+  const operations = live.steps.flatMap(step => step.operations).filter(operation => operation.wallet);
+  const next = operations.findIndex(operation => operation.state === 'waiting');
+  const done = next > 0 ? operations.slice(0, next).reverse().find(operation => operation.state === 'confirmed') : undefined;
+  // A token approval (never a delegated-wallet permission step, which is also flagged as an approval) is named as an approval.
+  return done && next > 0 ? { done: done.title, approval: done.approval && /^Approve\b/.test(done.title), next: operations[next]!.title, key: `${live.runKey}:${operations[next]!.id}` } : null;
+}
+/** Whether the current Review of the view has expired (the chat then says the quote expired, not merely that it is no longer valid). */
+export const reviewExpired = (view: LifecycleView, now = Date.now()) => review(view, now).status === 'expired';
+/**
+ * BUILD-FLOFI-E2E-RELIABILITY-001: a reason shown about the NEXT request of a run whose earlier request landed. The shared reasons say “nothing
+ * was sent”, true for that request but false for the run; here they say “nothing new”. Applied after translation (English and Portuguese).
+ */
+export function aboutNextRequest(text: string): string {
+  return text.replace(/ ?Earlier confirmed requests stay recorded\./g, '').replace(/ ?Os pedidos já confirmados continuam registrados\./g, '')
+    .replace(/\bso nothing was sent\b/g, 'so this request was not sent').replace(/\b([Nn])othing was (simulated or |signed or )?sent\b/g, '$1othing new was $2sent')
+    .replace(/\b([Nn])ada foi (simulado nem |assinado nem )?enviado\b/g, '$1ada novo foi $2enviado');
+}
 export function conversationExecution(view: LifecycleView): ConversationExecution | null {
   const live = currentExecution(view.progress);
   if (!live) return null;

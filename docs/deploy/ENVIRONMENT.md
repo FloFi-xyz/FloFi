@@ -3,8 +3,9 @@
 Bridge recovery read failover (`FIX-BRIDGE-RECOVERY-CAIO-001`): directed and Universal EVM bridges accept optional server-only comma-separated HTTPS `GRYLOO_BASE_FALLBACK_RPC_URLS`, `GRYLOO_ARBITRUM_FALLBACK_RPC_URLS`, `GRYLOO_ETHEREUM_FALLBACK_RPC_URLS` and `GRYLOO_ROBINHOOD_FALLBACK_RPC_URLS`. Their normal primary override remains authoritative. The existing `GRYLOO_ALCHEMY_API_KEY`, when configured, supplies an independent Base/Arbitrum/Ethereum path, including historical reads. At most four distinct paths are accepted, each chain-bound and limited to a 3-second read transport timeout. Credentials never reach the browser or logs. Outages and pruned historical state can use a configured fallback; reverts and wrong-chain answers are refused. No financial execution gate or production variable is changed by this build.
 
 Every variable the reference app, the backend and the build read, per environment. Values are supplied by the hosting platform or
-your own shell; none is committed. **No variable is `NEXT_PUBLIC_*`, and none may be**: everything below is read on the server,
-and the browser only talks to its own origin plus, for Credentials → Add card, Mercado Pago's three Secure Fields origins (CSP
+your own shell; none is committed. **No variable is `NEXT_PUBLIC_*`, and none may be**, with one reviewed exception:
+`NEXT_PUBLIC_FLOFI_JOURNEY_TELEMETRY` (§5k), a non-secret on/off switch inlined into the browser build (issue #149). Everything else below is
+read on the server, and the browser only talks to its own origin plus, for Credentials → Add card, Mercado Pago's three Secure Fields origins (CSP
 `connect-src 'self' https://api.mercadopago.com https://api-static.mercadopago.com https://secure-fields.mercadopago.com`).
 
 Columns: **Dev** = local `next dev`/`next start` on WSL; **CI** = the GitHub Actions suites; **Preview** = a Vercel Preview
@@ -209,6 +210,7 @@ closed). All server-only, never `NEXT_PUBLIC_*`. Guides: [TELEGRAM.md](TELEGRAM.
 | `FLOFI_CHANNEL_HANDOFF_TEST_FUNDS` | `enabled`/`disabled`: test-funds proposals may be handed to their owner | no | optional | optional | `enabled` |
 | `FLOFI_CHANNEL_HANDOFF_MAINNET_NETWORKS` | mainnet ids a channel proposal may be handed over on | no | **leave empty** | **leave empty** | empty: mainnet refused by policy |
 | `FLOFI_CHANNEL_DISPATCH_TOKEN_SHA256` | SHA-256 hex of the scheduler bearer for `/api/channels/dispatch` and `/api/channels/health` (Vercel Cron: the digest of `CRON_SECRET`; `channels-admin.ts dispatch-token` creates both) | digest only | recommended | **required** for retries and status without an open page | unset: both endpoints `404` |
+| `GRYLOO_UNIVERSAL_ROUTER` | (shared with §3) cross-network route discovery in channels (`find_routes`, `get_quote`) follows the web's own gate (BUILD-FLOFI-E2E-RELIABILITY-001): `live` → available; unset/`off` → `UNIVERSAL_ROUTER_NOT_ENABLED`; `harness` → closed. Channel Core runs on the **web** deployment, so with a remote API (`API_BASE_URL`) it must also be set **here** — the API's value is not visible to it. Other channel tools are unaffected. | no | as the API | `live` where the router is live | unset (off) |
 
 **Telegram** (the live provider; a plain bot, no Mini App)
 
@@ -343,24 +345,25 @@ closes.
 
 ## 5k. Execution performance (BUILD-FLOFI-EXECUTION-PERFORMANCE-001)
 
-All optional; none is required in Production or Preview. Unset is not "the previous behaviour" for all three:
-`GRYLOO_RPC_READ_PROFILE` unset keeps the previous one-at-a-time pacing, but unset `GRYLOO_DEPLOYMENT_FACT_CACHE` turns the new
-deployment-fact cache on, and unset `FLOFI_JOURNEY_TELEMETRY` turns the new journey timing log on. Set them to `off` to opt out.
+All optional; none is required in Production or Preview. `GRYLOO_RPC_READ_PROFILE` unset keeps the previous one-at-a-time pacing;
+unset `GRYLOO_DEPLOYMENT_FACT_CACHE` turns the deployment-fact cache on (`off` opts out). Journey telemetry is **off** unless the
+deployment owner opts in with both `NEXT_PUBLIC_FLOFI_JOURNEY_TELEMETRY=on` and `FLOFI_JOURNEY_TELEMETRY=on` (issue #149).
 
 | Variable | Where | Default | Effect |
 | --- | --- | --- | --- |
 | `GRYLOO_RPC_READ_PROFILE` | web + API | unset (paced: one read at a time, 250 ms apart) | `dedicated`: operator-configured RPC endpoints (`GRYLOO_<NETWORK>_RPC_URL`, router fallback URLs, the keyed Alchemy URL) run up to 6 reads at once, 25 ms apart. Never applies to a public default endpoint. Set it only when those endpoints are keyed providers with capacity for parallel reads. |
 | `GRYLOO_DEPLOYMENT_FACT_CACHE` | web + API | on for live mainnets (10-minute lifetime, per server instance) | `off`: re-verify every immutable deployment fact (pinned contract code, router/quoter immutables, pool immutables) on every Uniswap catalog quote. A fact is cached only after the same-block check; an EIP-7702 delegation is never cached. Economic state (balances, allowances, liquidity, prices, nonces, fees) is always read fresh either way. |
-| `FLOFI_JOURNEY_TELEMETRY` | web | on | Unset or `on` logs; any other value (`off`, `disabled`, a typo) makes `/api/flofi/journey` accept and drop every event, so a misconfigured switch turns logging off, never on. See below. |
+| `FLOFI_JOURNEY_TELEMETRY` | web | off | Only `on` logs. Unset or any other value (`off`, `true`, a typo): `/api/flofi/journey` answers 204 and reads and logs nothing, so a missing or misconfigured switch never collects. See below. |
+| `NEXT_PUBLIC_FLOFI_JOURNEY_TELEMETRY` | web (build) | off | Only `on` lets browsers send journey timings; inlined at build time (redeploy to change). Anything else: no request is made **by new bundles** — tabs still running an earlier bundle keep sending until they reload; `FLOFI_JOURNEY_TELEMETRY` is what stops FloFi's logging. |
 
-`/api/flofi/journey` logs one content-free line per finished journey (`journey.timing`, labelled `CLIENT_REPORTED`) to the existing structured
+With both switches on, `/api/flofi/journey` logs one content-free line per finished journey (`journey.timing`, labelled `CLIENT_REPORTED`) to the existing structured
 log stream: no table, no address, amount, hash, signature, chat text, account or session identifier. It accepts only same-origin posts from a
 signed-in FloFi session. That session cookie is checked cryptographically only (MAC, host, expiry): to keep a database read off every beacon it
 skips the account store's revocation check, so a session revoked by sign-out-everywhere or account deletion can keep sending rate-bounded,
 content-free timings until its cookie expires; the account is used only as an in-memory rate key and is never logged, so erasure is unaffected.
 Bounds per server instance: 60 events per account per 10 minutes, 600 per minute overall, 4 KiB per body, each journey id logged once. The
-line's retention is the log platform's; no legal basis or retention period specific to this stream is recorded yet (owner/counsel decision,
-as for the content-free learning statistics in `docs/security/LEARNING-PRIVACY.md`). `node scripts/journey-latency-report.mjs --environment
+line's retention is the log platform's. Purpose, proposed legal basis (LGPD art. 7 IX / GDPR art. 6(1)(f), pending owner and legal
+review), retention, deletion, access and the prerequisites before opting in: [docs/privacy/JOURNEY-TELEMETRY.md](../privacy/JOURNEY-TELEMETRY.md). `node scripts/journey-latency-report.mjs --environment
 <label>` turns these lines into p50/p95 (at least 20 samples per group) and refuses lines written by another deployment.
 
 Release order for this build: deploy the API (Railway) before the web (Vercel). A newer web against an older API still

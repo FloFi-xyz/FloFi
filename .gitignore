@@ -153,6 +153,8 @@ vite.config.ts.timestamp-*
 
 # BUILD-002 browser test output
 apps/reference-dapp/test-results/
+# Screenshots some browser specs write for local inspection (BUILD0-UX-001 and later); never tracked
+apps/reference-dapp/.tmp/
 
 # BUILD-003F local-fork Mode A runtime, owner journals and secret files (never tracked)
 .mode-a/

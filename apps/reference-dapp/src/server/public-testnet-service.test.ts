@@ -158,11 +158,36 @@ describe('public testnet execution boundary', () => {
     stale.advance(61_000);
     await expect(stale.service.begin(first.quote.executionId, account)).rejects.toThrow('QUOTE_EXPIRED_REVIEW_REQUIRED');
     expect(stale.service.load(first.quote.executionId).reviewedManifestHash).toBeNull();
+    // BUILD-FLOFI-E2E-RELIABILITY-001: material = the reviewed route now quotes below the reviewed minimum (here 0.5% slippage on 1e15).
     const changed = fixture(); const second = await changed.service.prepare(workflow());
     changed.service.review(second.quote.executionId, second.quote.manifestHash);
-    changed.changeQuote(2_000_000_000_000_000n);
+    changed.changeQuote(BigInt(second.quote.minimumOut) - 1n);
     await expect(changed.service.begin(second.quote.executionId, account)).rejects.toThrow('QUOTE_CHANGED_REVIEW_REQUIRED');
-    expect(changed.service.load(second.quote.executionId).attempts).toHaveLength(0);
+    expect(changed.service.load(second.quote.executionId)).toMatchObject({ attempts: [], reviewedManifestHash: null });
+  });
+  it('keeps the Review when the quote moves inside the reviewed bounds and signs the reviewed minimum', async () => {
+    // Inside the bounds: a better price within half the 0.5% band, a small decline, and exactly the reviewed minimum.
+    for (const out of [1_002_000_000_000_000n, 996_000_000_000_000n, 995_000_000_000_000n]) {
+      const moved = fixture(); const run = await moved.service.prepare(workflow());
+      moved.service.review(run.quote.executionId, run.quote.manifestHash);
+      moved.changeQuote(out);
+      const begun = await moved.service.begin(run.quote.executionId, account);
+      // The transaction carries the REVIEWED minimum, never the fresh quote's (better or worse) one.
+      expect(begun.attempt).toMatchObject({ manifestHash: run.quote.manifestHash, authorizedMinimumOutput: run.quote.minimumOut });
+      expect(begun.tx.data).toContain(BigInt(run.quote.minimumOut).toString(16).padStart(64, '0'));
+      expect(moved.service.load(run.quote.executionId).reviewedManifestHash).toBe(run.quote.manifestHash);
+    }
+  });
+  it('BUILD-FLOFI-E2E-RELIABILITY-001: a price far above the Review (+100%) and a request with under 15 s left to sign are material', async () => {
+    const better = fixture(); const run = await better.service.prepare(workflow());
+    better.service.review(run.quote.executionId, run.quote.manifestHash);
+    better.changeQuote(2_000_000_000_000_000n);
+    await expect(better.service.begin(run.quote.executionId, account)).rejects.toThrow('QUOTE_CHANGED_REVIEW_REQUIRED');
+    const late = fixture(); const second = await late.service.prepare(workflow());
+    late.service.review(second.quote.executionId, second.quote.manifestHash);
+    late.advance(Date.parse(second.quote.expiresAt) - Date.parse(second.quote.observedAt) - 10_000);
+    await expect(late.service.begin(second.quote.executionId, account)).rejects.toThrow('QUOTE_EXPIRED_REVIEW_REQUIRED');
+    expect(late.service.load(second.quote.executionId).attempts).toHaveLength(0);
   });
   it('persists the attempt before send, blocks duplication, and reconciles a public receipt', async () => {
     const f = fixture();

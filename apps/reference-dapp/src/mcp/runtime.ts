@@ -13,9 +13,10 @@
  */
 import type { FlowName } from '../../backend/flows.ts';
 import type { DelegationFacts } from '../workflow-runs/authorization-plan.ts';
-import type { CloudRunSummary } from '../server/cloud-api-client.ts';
+import { CLOUD_API_DEADLINE_EXCEEDED, listCloudRuns, type CloudRunSummary } from '../server/cloud-api-client.ts';
 import { cloudFlow, cloudFlowMode, cloudPreview, cloudRun, cloudRunJournal, cloudRuns, flowRuntimeKind, type CloudJournalPage, type CloudRun, type EmbeddedRuntime,
   type FlowRuntimeKind, type FlowRuntimeMode } from '../server/flow-runtime.ts';
+import { budgetTransport, DeadlineError, isDeadlineError, MCP_UPSTREAM_TIMEOUTS, withinBudget, type RequestBudget } from './deadline.ts';
 
 type Env = Readonly<Record<string, string | undefined>>;
 export type Result<T> = { readonly ok: true; readonly value: T } | { readonly ok: false; readonly code: string };
@@ -67,8 +68,13 @@ const infoOf = (result: { ok: boolean; value?: unknown } | null) => {
     ...(Array.isArray(value.networks) && value.networks.every(n => typeof n === 'string') ? { networks: value.networks as string[] } : {}) } : null;
 };
 
-/** The deployment's runtime through the existing selection (`flow-runtime.ts`). */
-export function deploymentRuntime(env: Env = process.env): McpRuntime {
+/**
+ * The deployment's runtime through the existing selection (`flow-runtime.ts`). With a request `budget` (the MCP gateway always passes
+ * one) every remote call carries the budget's signal and bounded attempts, and the whole runtime is wrapped in `boundedRuntime`;
+ * without one the behaviour is unchanged for the other surfaces that share this runtime.
+ */
+export function deploymentRuntime(env: Env = process.env, budget?: RequestBudget): McpRuntime {
+  if (budget) return boundedRuntime(budgetedDeploymentRuntime(env, budget), budget);
   return {
     kind: flowRuntimeKind(env),
     mode: flow => cloudFlowMode(flow, env),
@@ -81,6 +87,82 @@ export function deploymentRuntime(env: Env = process.env): McpRuntime {
     record: async (flow, runId, owner) => await cloudFlow<unknown>(flow, 'status', [runId], { env, principal: owner }) ?? REQUIRED,
     sequences: async () => (await import('../workflow-runs/facts.ts')).sequenceFacts(env),
   };
+}
+
+/**
+ * MCP: the remote runtime's calls with the request's deadline. Reads (deployment facts, status, owner-scoped runs) get one short attempt
+ * cap and at most two attempts; a preview gets one attempt (a second attempt after a slow preview could only end past the budget).
+ * The remote client stops retrying once the budget ends, and every fetch is aborted with it (`budgetTransport`).
+ */
+function budgetedDeploymentRuntime(env: Env, budget: RequestBudget): McpRuntime {
+  const transport = budgetTransport(budget), kind = flowRuntimeKind(env);
+  const cap = (ms: number) => Math.max(1, Math.min(ms, budget.remaining()));
+  const read = () => ({ env, transport, timeoutMs: cap(MCP_UPSTREAM_TIMEOUTS.read), maxAttempts: 2 });
+  const ended = () => new DeadlineError(budget.ended() === 'CLIENT_CLOSED' ? 'MCP_REQUEST_CANCELLED' : 'MCP_REQUEST_TIMEOUT');
+  /** The remote client's deadline answer, as the gateway's code (never a domain failure such as "not found" or "off"). */
+  const checked = <T>(result: Result<T>): Result<T> => !result.ok && result.code === CLOUD_API_DEADLINE_EXCEEDED ? { ok: false, code: ended().code } : result;
+  const fact = <T>(result: Result<T> | null): Result<T> | null => { if (result && !result.ok && result.code === CLOUD_API_DEADLINE_EXCEEDED) throw ended(); return result; };
+  return {
+    kind,
+    // Same fail-closed reading as `cloudFlowMode` (any runtime failure is `off`), except that a deadline is never read as `off`.
+    mode: async flow => {
+      const result = fact(await cloudFlow<unknown>(flow, 'mode', [], read()));
+      return result === null ? null : result.ok && (result.value === 'live' || result.value === 'harness') ? result.value : 'off';
+    },
+    info: async flow => infoOf(fact(await cloudFlow<unknown>(flow, 'info', [], read()))),
+    preview: async (flow, args) => checked<unknown>(await cloudPreview(flow, args, { env, transport, timeoutMs: cap(MCP_UPSTREAM_TIMEOUTS.preview), maxAttempts: 1 }) ?? REQUIRED),
+    // The same per-read cap as every other upstream read (never the client's 30 s default, which outlived the tool's own cap).
+    run: async (runId, owner) => checked<CloudRun | null>(await cloudRun(runId, owner, { env, transport, timeoutMs: cap(MCP_UPSTREAM_TIMEOUTS.read) }) ?? REQUIRED),
+    journal: async (runId, owner, after, limit) => checked<CloudJournalPage | null>(await cloudRunJournal(runId, owner, after, limit,
+      { env, transport, timeoutMs: cap(MCP_UPSTREAM_TIMEOUTS.read) }) ?? REQUIRED),
+    evidence: async (flow, runId, owner) => checked(await evidenceOf(flow, await cloudFlow(flow, 'status', [runId], { ...read(), principal: owner }))),
+    // `cloudRuns` takes no transport: the remote read is made here with the same client, so it carries the deadline too.
+    runs: async (flow, owner) => checked<readonly CloudRunSummary[]>(kind === 'remote' ? await listCloudRuns(flow, owner, { env, transport, timeoutMs: cap(MCP_UPSTREAM_TIMEOUTS.read), signal: budget.signal })
+      : await cloudRuns(flow, owner, env) ?? REQUIRED),
+    record: async (flow, runId, owner) => checked<unknown>(await cloudFlow<unknown>(flow, 'status', [runId], { ...read(), principal: owner }) ?? REQUIRED),
+    sequences: async () => (await import('../workflow-runs/facts.ts')).sequenceFacts(env),
+  };
+}
+
+/** The classified code of a runtime call the budget cut short. */
+const timedOut = (error: unknown): Result<never> => ({ ok: false, code: isDeadlineError(error) ? error.code : 'MCP_UPSTREAM_TIMEOUT' });
+/**
+ * Any runtime (remote, embedded, a test's) with every call bounded by the request budget and its per-operation cap. An embedded call
+ * cannot be cancelled: the wrapper stops WAITING for it (its result, if any, is discarded); embedded previews and reads are read-only
+ * and observe-only, so nothing durable depends on that late result. A `Result` method that times out returns the classified code; a
+ * deployment fact (`mode`, `info`, `sequences`) throws it, so no caller can read a timeout as "off" or "not enabled".
+ */
+export function boundedRuntime(runtime: McpRuntime, budget: RequestBudget): McpRuntime {
+  const { read, preview } = MCP_UPSTREAM_TIMEOUTS;
+  const bounded = <T>(capMs: number, call: () => Promise<Result<T>>): Promise<Result<T>> => withinBudget(budget, capMs, call).catch(error => {
+    if (isDeadlineError(error)) return timedOut(error);
+    throw error;
+  });
+  return {
+    kind: runtime.kind,
+    mode: flow => withinBudget(budget, read, () => runtime.mode(flow)),
+    ...runtime.info ? { info: (flow: FlowName) => withinBudget(budget, read, () => runtime.info!(flow)) } : {},
+    preview: (flow, args) => bounded(preview, () => runtime.preview(flow, args)),
+    run: (runId, owner) => bounded(read, () => runtime.run(runId, owner)),
+    journal: (runId, owner, after, limit) => bounded(read, () => runtime.journal(runId, owner, after, limit)),
+    evidence: (flow, runId, owner) => bounded(read, () => runtime.evidence(flow, runId, owner)),
+    ...runtime.runs ? { runs: (flow: FlowName, owner: string) => bounded(read, () => runtime.runs!(flow, owner)) } : {},
+    ...runtime.record ? { record: (flow: FlowName, runId: string, owner: string) => bounded(read, () => runtime.record!(flow, runId, owner)) } : {},
+    ...runtime.sequences ? { sequences: () => withinBudget(budget, read, () => runtime.sequences!()) } : {},
+  };
+}
+
+/**
+ * The same runtime, remembering the first failed owner-scoped read (`runs`, `run`, `record`). A status view built from it can then say
+ * that its run list is INCOMPLETE instead of presenting a read failure (a timeout above all) as "no runs".
+ */
+export function observeRuntime(runtime: McpRuntime): { readonly runtime: McpRuntime; readonly failure: () => string | null } {
+  let failure: string | null = null;
+  const seen = <T>(result: Result<T>): Result<T> => { if (!result.ok) failure ??= result.code; return result; };
+  return { failure: () => failure, runtime: { ...runtime,
+    run: async (runId, owner) => seen(await runtime.run(runId, owner)),
+    ...runtime.runs ? { runs: async (flow: FlowName, owner: string) => seen(await runtime.runs!(flow, owner)) } : {},
+    ...runtime.record ? { record: async (flow: FlowName, runId: string, owner: string) => seen(await runtime.record!(flow, runId, owner)) } : {} } };
 }
 
 /** An embedded runtime instance, e.g. one built with MOCKED seams in tests: the same calls `flow-runtime.ts` makes in embedded mode. */

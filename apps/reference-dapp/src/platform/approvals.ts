@@ -35,6 +35,7 @@ export { walletDeepLinks } from './wallet-links.ts';
 import { walletDeepLinks } from './wallet-links.ts';
 import { APPROVAL_SECRET_FORMAT } from './approval-link-format.ts';
 import { trustedFlofiUrl } from './navigation.ts';
+import { landedAttempts, type AttemptFacts } from '../domain/landed-attempts.ts';
 
 export const HANDOFF_SECONDS = 900;
 export const CLAIM_SECONDS = 600;
@@ -128,6 +129,9 @@ export async function requestApproval(deps: ApprovalDeps, requester: ApprovalReq
   if (!await deps.allow(requestBucket(requester), deps.rules.rate[0], deps.rules.rate[1], deps.now)) return { ok: false, code: 'HANDOFF_RATE_LIMITED' } satisfies Failure;
   // Bounded retention, opportunistically (handoffs older than 30 days).
   if (Math.random() < 0.02) await deps.handoffs.purge(deps.now).catch(() => undefined);
+  // BUILD-FLOFI-E2E-RELIABILITY-001 (MCP review): every read happens BEFORE the approval is written, so nothing after `create` can fail (or time
+  // out) and turn a committed approval into what reads as "nothing created".
+  const delegation = sequence ? (await deps.runtime.sequences?.())?.delegation ?? null : null;
   const { secret, digest } = mintApprovalSecret(deps.scheme), handoffId = newId('apr'), expiresAt = new Date(deps.now.getTime() + deps.rules.handoffSeconds * 1000);
   // A sequence's handoff holds the whole canonical workflow (v2 strategy, sequence hash, SEQUENTIAL plan); its run starts at the claim.
   const stored = sequence ? { strategy: workflow.strategy, workflowHash: workflow.workflowHash } : { strategy: composition.strategy, workflowHash: composition.workflowHash };
@@ -143,7 +147,7 @@ export async function requestApproval(deps: ApprovalDeps, requester: ApprovalReq
     walletNamespace: planNamespace(gates.plan), walletNamespaces: planNamespaces(gates.plan), gates: gateView(gates),
     summary: sequence ? workflow.steps.map((c, i) => `${i + 1}. ${c.summary}`).join('\n') : composition.summary,
     // BUILD-CHAT-E2E-001: before anything executes, how many authorizations each mode needs (the owner's own grants decide the rest in FloFi).
-    ...sequence ? { authorizationPlan: authorizationPlan(workflow, gates, (await deps.runtime.sequences?.())?.delegation ?? null) } : {},
+    ...sequence ? { authorizationPlan: authorizationPlan(workflow, gates, delegation) } : {},
     // What FloFi's flow still requires of the owner before anything can be signed (cleared by the fresh simulation and Review).
     preExecution } };
 }
@@ -232,53 +236,105 @@ function reviewedWorkflows(record: unknown): unknown[] {
 }
 export type RunProgress = { readonly executionId: string; readonly flow: string; readonly status: string; readonly reconciled: boolean; readonly terminal: boolean;
   readonly errorCode: string | null; readonly evidenceEnvironment: string | null; readonly evidenceOutcome: string | null; readonly evidenceBundleHash: string | null;
-  readonly updatedAt: string; readonly receiptUrl?: string | null };
+  readonly updatedAt: string; readonly receiptUrl?: string | null;
+  /**
+   * BUILD-FLOFI-E2E-RELIABILITY-001: what of an unreconciled run is confirmed onchain (e.g. "Approval confirmed · main action not sent",
+   * "Earlier actions confirmed onchain · a later action is not complete"), from the run's own recorded attempts — so no surface reads the run's
+   * raw status (SIMULATED after a refreshed Review, CONFIRMED of an approval) as "nothing submitted" or as the completed action.
+   */
+  readonly landed?: string | null };
 /**
  * The runs started from an APPLIED handoff whose owner chose to share them: runs of the claimant wallet, on the plan's flow, created
  * after the claim, whose reviewed workflow hashes EXACTLY to the handoff's workflow hash (an edited strategy is not this proposal).
  * Everything is read server-side as the owner; only public facts leave (ids, states, evidence environment and bundle hash).
  */
-export async function sharedRuns(h: HandoffRecord, runtime: EngineRuntime, handoffs: HandoffStore): Promise<readonly RunProgress[] | null> {
+/**
+ * BUILD-FLOFI-E2E-RELIABILITY-001: the shared runs and whether every read that decides them answered. A listing or run/record read that
+ * failed makes the list INCOMPLETE: before, it returned an empty list, which every surface showed as "no runs" (as if nothing was sent).
+ */
+export type SharedRunsRead = {
+  readonly runs: readonly RunProgress[]; readonly complete: boolean;
+  /**
+   * BUILD-FLOFI-E2E-RELIABILITY-001 (automations review): runs of the wallet on this flow after the claim were left unexamined (more than the
+   * examined window, or a full listing page): a run of this approval may exist among them, so an empty list is never "no run".
+   */
+  readonly truncated: boolean };
+/** Unbound candidates examined per read: the oldest after the claim (an approval's own run usually starts right after it is applied) and the newest. */
+const CANDIDATES_OLDEST = 4, CANDIDATES_NEWEST = 4, BOUND_READS = 16, LISTING_PAGE = 25;
+export async function sharedRunsRead(h: HandoffRecord, runtime: EngineRuntime, handoffs: HandoffStore): Promise<SharedRunsRead | null> {
   if (h.status !== 'APPLIED' || !h.shareStatus || !h.claimed || !h.claimedAt || !h.plan.flow || !runtime.runs || !runtime.record) return null;
   const flow = h.plan.flow, owner = h.claimed.address, listed = await runtime.runs(flow, owner);
-  if (!listed.ok) return [];
-  const candidates = listed.value.filter(r => Date.parse(r.updatedAt) >= h.claimedAt!.getTime() - 1_000).slice(0, 8);
+  if (!listed.ok) return { runs: [], complete: false, truncated: false };
+  // Runs already bound to this approval are its own: they are always read again (whatever newer runs the wallet made since), so a run that
+  // executed is never dropped from the window by later activity. Unbound runs after the claim are examined in a bounded window.
+  const afterClaim = listed.value.filter(r => Date.parse(r.updatedAt) >= h.claimedAt!.getTime() - 1_000), bound = h.runIds.slice(-BOUND_READS);
+  const unbound = afterClaim.filter(r => !h.runIds.includes(r.runId)).map(r => r.runId);
+  const window = unbound.length <= CANDIDATES_OLDEST + CANDIDATES_NEWEST ? unbound
+    : [...unbound.slice(0, CANDIDATES_NEWEST), ...unbound.slice(-CANDIDATES_OLDEST)];
+  const truncated = h.runIds.length > BOUND_READS || unbound.length > window.length
+    || listed.value.length >= LISTING_PAGE && afterClaim.length === listed.value.length;
   const out: RunProgress[] = [];
-  for (const candidate of candidates) {
-    const run = await runtime.run(candidate.runId, owner);
-    if (!run.ok || !run.value || Date.parse(run.value.createdAt) < h.claimedAt.getTime() - 1_000) continue;
-    const record = await runtime.record(flow, candidate.runId, owner);
-    if (!record.ok || !reviewedWorkflows(record.value).some(w => { try { return semanticWorkflowHash(w as Workflow) === h.workflowHash; } catch { return false; } })) continue;
+  let complete = true;
+  for (const runId of [...bound, ...window]) {
+    const run = await runtime.run(runId, owner);
+    if (!run.ok) { complete = false; continue; }
+    if (!run.value || Date.parse(run.value.createdAt) < h.claimedAt.getTime() - 1_000) continue;
+    const record = await runtime.record(flow, runId, owner);
+    if (!record.ok) { complete = false; continue; }
+    if (!reviewedWorkflows(record.value).some(w => { try { return semanticWorkflowHash(w as Workflow) === h.workflowHash; } catch { return false; } })) continue;
     let evidence: { environment: string; outcome: string; bundleHash: string } | null = null;
-    if (run.value.hasEvidence) { const e = await runtime.evidence(flow, candidate.runId, owner); if (e.ok && e.value) evidence = { environment: e.value.environment, outcome: e.value.outcome, bundleHash: e.value.bundleHash }; }
+    if (run.value.hasEvidence) {
+      const e = await runtime.evidence(flow, runId, owner);
+      if (e.ok && e.value) evidence = { environment: e.value.environment, outcome: e.value.outcome, bundleHash: e.value.bundleHash };
+      // A run with evidence whose evidence could not be read is not "unreconciled": its outcome is unknown, and the read is incomplete.
+      else if (!e.ok) complete = false;
+    }
     // A read-model flag is not reconciliation. Read the flow's independently reconciled evidence as the owner;
     // absent, failed or divergent evidence must never produce an execution receipt, even if the summary is ahead.
     const reconciled = !run.value.needsObservation && run.value.errorCode === null && Boolean(evidence?.bundleHash && evidence.environment &&
       (evidence.outcome === 'RECONCILED' && ['RECONCILED', 'COMPLETED'].includes(run.value.status)
         || run.value.flow === 'pix-payment' && evidence.outcome === 'PAYMENT_SETTLED' && run.value.status === 'PAYMENT_SETTLED'));
+    const landed = reconciled ? null : landedAttempts(Array.isArray(run.value.attempts) ? run.value.attempts as readonly AttemptFacts[] : []);
     out.push({ executionId: run.value.runId, flow: run.value.flow, status: run.value.status, reconciled, errorCode: run.value.errorCode,
+      ...landed?.label ? { landed: landed.label } : {},
       terminal: !run.value.needsObservation && (reconciled || run.value.errorCode !== null), evidenceEnvironment: evidence?.environment ?? null,
       evidenceOutcome: evidence?.outcome ?? null, evidenceBundleHash: evidence?.bundleHash ?? null, updatedAt: run.value.updatedAt });
   }
   const known = new Set(h.runIds), fresh = out.map(r => r.executionId).filter(id => !known.has(id));
   if (fresh.length) await handoffs.bindRuns(h.handoffId, fresh);
-  return out;
+  // Newest first, as the listing orders them (bound runs are read first, but are not listed first).
+  out.sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt));
+  return { runs: out, complete, truncated };
+}
+/** The shared runs, or null when not shared. An incomplete read fails as CLOUD_RUNTIME_UNAVAILABLE (never an empty "no runs" list). */
+export async function sharedRuns(h: HandoffRecord, runtime: EngineRuntime, handoffs: HandoffStore): Promise<readonly RunProgress[] | null> {
+  const read = await sharedRunsRead(h, runtime, handoffs);
+  if (read && !read.complete) throw new Error('CLOUD_RUNTIME_UNAVAILABLE');
+  return read?.runs ?? null;
 }
 /**
  * The approval's status for its requester, with the shared runs when the owner shares them. BUILD-CHAT-E2E-001: a multi-step approval also
  * carries its workflow run (`runs`): every step's state always, and its transactions, amounts and evidence only when the owner shares status.
  */
 export type ApprovalProgress = ReturnType<typeof approvalStatus> & { readonly runs: readonly (RunProgress & { readonly receiptUrl?: string | null })[];
-  readonly runsVisible: boolean; readonly workflowRun: RunView | null; readonly note: string | null };
+  readonly runsVisible: boolean; readonly workflowRun: RunView | null; readonly note: string | null;
+  /** BUILD-FLOFI-E2E-RELIABILITY-001: present (false) only when a run read failed: the listed runs are then not all of them. */
+  readonly runsComplete?: false; readonly runsReadError?: string;
+  /** Present (true) only when no run of this approval was found but older runs of the wallet were not examined: never read as "no run". */
+  readonly runsTruncated?: true };
 export async function approvalProgress(h: HandoffRecord, runtime: EngineRuntime, handoffs: HandoffStore, origin?: string,
   workflowRuns?: Pick<WorkflowRunStore, 'byHandoff' | 'steps'> | null): Promise<ApprovalProgress> {
   const run = h.plan.kind === 'SEQUENTIAL' && workflowRuns ? await workflowRuns.byHandoff(h.handoffId) : null;
   const workflowRun = run && workflowRuns ? await runView({ store: workflowRuns }, run, { outcomes: h.shareStatus, origin: origin ?? null }) : null;
   if (h.plan.kind === 'SEQUENTIAL') return { ...approvalStatus(h), runs: [], runsVisible: h.shareStatus, workflowRun,
     note: run ? null : h.status === 'PENDING' ? 'Waiting for the owner to open the approval and prove their wallets.' : null };
-  const shared = await sharedRuns(h, runtime, handoffs);
+  const shared = await sharedRunsRead(h, runtime, handoffs);
   // A receipt link grants no read access: the existing Dashboard still requires the execution owner's authenticated wallet.
-  const runs = shared?.map(run => origin ? { ...run, receiptUrl: run.reconciled ? `${origin}/app/dashboard/runs/${encodeURIComponent(run.executionId)}` : null } : run);
+  const runs = shared?.runs.map(run => origin ? { ...run, receiptUrl: run.reconciled ? `${origin}/app/dashboard/runs/${encodeURIComponent(run.executionId)}` : null } : run);
   return { ...approvalStatus(h), runs: runs ?? [], runsVisible: shared !== null, workflowRun: null,
-    note: h.status === 'APPLIED' && !h.shareStatus ? 'The owner has not shared the status of runs started from this proposal.' : null };
+    ...shared && !shared.complete ? { runsComplete: false as const, runsReadError: 'RUNS_READ_FAILED' } : {},
+    ...shared?.truncated && !shared.runs.length ? { runsTruncated: true as const } : {},
+    note: shared && !shared.complete ? 'Some runs of this approval could not be read now; their state is UNKNOWN (not "not started"). Read the status again.'
+      : shared?.truncated && !shared.runs.length ? 'Only the wallet\'s most recent runs were checked; a run of this approval may be among older ones. Open FloFi to check the runs.'
+      : h.status === 'APPLIED' && !h.shareStatus ? 'The owner has not shared the status of runs started from this proposal.' : null };
 }

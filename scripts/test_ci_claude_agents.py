@@ -65,6 +65,26 @@ class ReadOnlyGuard(Repository):
             with self.subTest(tool=tool):
                 self.assertIn("not available to FloFi reviewers", self.guard(tool, command="git status", file_path="src/a.ts"))
 
+    def test_the_report_hand_back_is_the_one_extra_tool_and_carries_only_a_message(self):
+        # Claude Code appends SubagentHandback to every subagent in auto mode and then delivers only a report sent
+        # through it: denying it lost every specialist report (issue #149). It writes and runs nothing.
+        report = 'No concrete findings.\nFLOFI_REVIEW_RESULT {"domain":"flofi-swap","result":"no-findings","findings":0,"highest":"none"}'
+        self.assertIsNone(self.guard("SubagentHandback", message=report))
+        self.assertIsNone(self.guard("SubagentHandback", agent="flofi-security", message="x"))
+        for tool_input in [{}, {"message": ""}, {"message": " \n "}, {"message": 5}, {"message": None},
+                           {"message": "report", "file_path": "src/a.ts"}, {"message": "report", "command": "git push"},
+                           {"report": "x"}]:
+            with self.subTest(tool_input=tool_input):
+                self.assertIn("exactly one non-empty text message", self.guard("SubagentHandback", **tool_input))
+        for tool_input in [None, [], "report"]:
+            with self.subTest(tool_input=tool_input):
+                self.assertIsNotNone(hooks.guard_reason({"agent_type": "flofi-swap", "tool_name": "SubagentHandback",
+                                                         "tool_input": tool_input}, self.root))
+        # Only that exact tool name: look-alikes stay denied.
+        for tool in ["subagenthandback", "SubagentHandback ", "SubagentHandbackV2", "SendMessage"]:
+            with self.subTest(tool=tool):
+                self.assertIn("not available to FloFi reviewers", self.guard(tool, message=report))
+
     def test_read_is_allowed_for_repository_files(self):
         for path in [str(self.root / "src/a.ts"), "src/a.ts", "CLAUDE.md", ".env.example", str(self.root / "src"),
                      str(self.root / "src" / "." / "a.ts")]:
@@ -113,6 +133,8 @@ class ReadOnlyGuard(Repository):
         self.assertIn("FloFi read-only review guard", decision["permissionDecisionReason"])
         allowed = run({"tool_name": "Bash", "tool_input": {"command": "git push"}})
         self.assertEqual((allowed.returncode, allowed.stdout), (0, ""))
+        handback = run({"agent_type": "flofi-security", "tool_name": "SubagentHandback", "tool_input": {"message": "report"}})
+        self.assertEqual((handback.returncode, handback.stdout), (0, ""))
 
     def test_cli_denies_malformed_input_explicitly(self):
         for body in ["", "{broken", "[]"]:
@@ -366,6 +388,32 @@ class LifecycleLedger(Repository):
                          [("guard_deny", "flofi-security", "Read"), ("guard_deny", "flofi-security", "other")])
         self.assertNotIn("SECRET", (self.root / hooks.RUNS / f"{SESSION}.jsonl").read_text())
         self.assertIsNone(hooks.guard({"session_id": SESSION, "tool_name": "Edit", "tool_input": {}}, self.root))
+
+    def test_a_delivered_hand_back_records_only_identity_and_its_validated_result(self):
+        secret = "seed phrase abandon ability able about above absent absorb abstract absurd abuse access accident"
+        report = (f"Finding quotes {secret} and src/a.ts:1.\nFLOFI_REVIEW_RESULT "
+                  '{"domain":"flofi-security","result":"findings","findings":1,"highest":"medium"}')
+        event = {"session_id": SESSION, "agent_type": "flofi-security", "agent_id": "a1", "cwd": str(self.root),
+                 "tool_name": "SubagentHandback", "tool_input": {"message": report}}
+        self.assertIsNone(hooks.guard(event, self.root))
+        rows = self.ledger()
+        self.assertEqual(rows[0]["event"], "handback")
+        self.assertEqual(set(rows[0]), {"v", "t", "event", "agent", "agentId", "review"})
+        self.assertEqual(rows[0]["review"], {"result": "findings", "findings": 1, "highest": "medium"})
+        raw = (self.root / hooks.RUNS / f"{SESSION}.jsonl").read_text()
+        for leaked in [secret, "src/a.ts", "Finding quotes"]:
+            self.assertNotIn(leaked, raw)
+        # Another domain's trailer is never promoted; a refused hand-back and other agents' hand-backs write no row.
+        self.assertIsNone(hooks.guard({**event, "tool_input": {"message": report.replace("flofi-security", "flofi-swap")}}, self.root))
+        self.assertIsNone(self.ledger()[1]["review"])
+        self.assertIsNotNone(hooks.guard({**event, "tool_input": {"message": ""}}, self.root))
+        self.assertIsNone(hooks.guard({**event, "agent_type": "general-purpose"}, self.root))
+        self.assertEqual([row["event"] for row in self.ledger()], ["handback", "handback", "guard_deny"])
+        # A ledger that cannot be written never turns the allowed hand-back into a denial.
+        (self.root / hooks.RUNS / f"{SESSION}.jsonl").unlink()
+        (self.root / hooks.RUNS / f"{SESSION}.jsonl").symlink_to(self.outside / "secret.txt")
+        self.assertIsNone(hooks.guard(event, self.root))
+        self.assertEqual((self.outside / "secret.txt").read_text(), "outside\n")
 
     def test_record_cli_never_blocks_or_prints(self):
         env = {**os.environ, "FLOFI_AGENT_TELEMETRY": "off"}

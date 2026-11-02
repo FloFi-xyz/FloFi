@@ -71,7 +71,9 @@ async function executeStep(page: Page, owner: Awaited<ReturnType<typeof setup>>,
   await pick(page, 'Yes, execute');
   await expect.poll(owner.requested).toBe(before + 1);
   await owner.confirm();
-  await expect(flofi(page)).toContainText('The previous wallet request is confirmed.', { timeout: 30_000 });
+  // BUILD-FLOFI-E2E-RELIABILITY-001: FloFi names what landed (an approval is never the swap) and what has not been sent yet.
+  await expect(flofi(page)).toContainText(/Approve \w+ is confirmed on-chain\. An approval only allows the spend; it is not the action itself\./, { timeout: 30_000 });
+  await expect(flofi(page)).toContainText('Swap has not been sent yet and needs its own confirmation in your wallet. Continue to your wallet?');
   await pick(page, 'Continue');
   await expect.poll(owner.requested).toBe(before + 2);
   await owner.confirm();

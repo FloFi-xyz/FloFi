@@ -6,7 +6,8 @@
 import { handleMcpRequest, type GatewayLogger } from '../../../mcp/gateway';
 
 export const dynamic = 'force-dynamic';
-// A simulation preview may wait on paced public RPC reads and provider quotes, as the DApp's own Simulate does.
+// The platform limit. Every request answers well before it: the gateway's request budget (`src/mcp/deadline.ts`, 150 s) bounds each
+// store, runtime and provider read and each tool, and the gateway answers by itself at its hard deadline. Never raise this to hide a hang.
 export const maxDuration = 300;
 
 let logger: Promise<GatewayLogger> | null = null;

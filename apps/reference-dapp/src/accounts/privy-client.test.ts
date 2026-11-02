@@ -8,6 +8,7 @@ import { describe, expect, it } from 'vitest';
 import { ARBITRUM_ONE, ETHEREUM_MAINNET, ROBINHOOD_CHAIN_MAINNET } from '@defi-workflow-engine/action-registry';
 import { embeddedWallets, floFiPrivyConfig, PRIVY_EVM_CHAINS, privyErrorCode, privyOwnSolanaWallets, signerDocument } from './privy-client';
 import { signerPolicy } from './signer-pages';
+import { floFiPrivyWalletIssue, privyCanSign, type FloFiPrivy, type PrivySigningReadiness } from './privy-context';
 import { PRIVY_CONNECT_SOURCES } from './privy-hosts';
 
 describe('FloFi’s Privy configuration', () => {
@@ -74,6 +75,34 @@ describe('Privy login events', () => {
     off();
     channel.emit({ wasAlreadyAuthenticated: false });
     expect(first).toHaveLength(2);
+  });
+});
+
+describe('When FloFi may ask Privy to sign (issue #149)', () => {
+  const evm = '0xABCDEF0123456789ABCDEF0123456789ABCDEF01', solana = '7EcDhSYGxXyscszYEp35KHN8vvw3svAuLKTzXwCFLtV';
+  const state = (patch: Partial<PrivySigningReadiness> = {}): PrivySigningReadiness => ({ ready: true, authenticated: true,
+    embedded: [{ ecosystem: 'evm', address: evm.toLowerCase(), imported: false }, { ecosystem: 'solana', address: solana, imported: true }],
+    evmWalletsReady: true, solanaWalletsReady: true, solanaWallets: [solana], ...patch });
+  it('needs Privy’s own EVM wallet readiness, not only its session, and follows it both ways', () => {
+    expect(privyCanSign(state({ evmWalletsReady: false }), 'evm', evm)).toBe(false);
+    expect(floFiPrivyWalletIssue({ ...state({ evmWalletsReady: false }) } as unknown as FloFiPrivy, 'evm', evm)).toBe('FLOFI_WALLET_NOT_READY');
+    expect(privyCanSign(state(), 'evm', evm)).toBe(true);
+    expect(privyCanSign(state(), 'evm', evm.toLowerCase())).toBe(true);
+    // EVM readiness never stands in for Solana's, nor the reverse.
+    expect(privyCanSign(state({ evmWalletsReady: false }), 'solana', solana)).toBe(true);
+    expect(privyCanSign(state({ solanaWalletsReady: false }), 'evm', evm)).toBe(true);
+  });
+  it('still needs the session, a wallet of the person’s own and, for Solana, Privy’s wallet object', () => {
+    for (const patch of [{ ready: false }, { authenticated: false }, { embedded: [] }] as const) {
+      expect(privyCanSign(state(patch), 'evm', evm), JSON.stringify(patch)).toBe(false);
+      expect(privyCanSign(state(patch), 'solana', solana), JSON.stringify(patch)).toBe(false);
+    }
+    expect(privyCanSign(state(), 'evm', '0x' + '1'.repeat(40))).toBe(false);
+    expect(privyCanSign(state(), 'evm', solana)).toBe(false);
+    expect(privyCanSign(state({ solanaWalletsReady: false }), 'solana', solana)).toBe(false);
+    expect(privyCanSign(state({ solanaWallets: [] }), 'solana', solana)).toBe(false);
+    // Solana addresses are case-sensitive: never canonicalised like EVM ones.
+    expect(privyCanSign(state(), 'solana', solana.toLowerCase())).toBe(false);
   });
 });
 

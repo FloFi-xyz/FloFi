@@ -27,7 +27,7 @@ import { channelHost, channelRuntime, type ChannelHost } from './runtime.ts';
 import { channelLearning } from './learning-runtime.ts';
 import { channelVisualRenderer } from './visuals.ts';
 import { authoringCatalogPreparer } from '../server/authoring-catalogs.ts';
-import { channelCopilotToolkit } from '../server/channel-copilot-toolkit.ts';
+import { channelRouteToolkit } from './route-discovery.ts';
 import { copilotMetricsEnabled, persistCopilotInterpretation, persistCopilotTurn, recordCopilotMetrics } from '../server/copilot-metrics-store.ts';
 
 type Env = Readonly<Record<string, string | undefined>>;
@@ -113,7 +113,7 @@ export async function handleChannelWebhook(route: ChannelRoute, request: Request
   const service = createChannelService({ core, store, log, now, platform, previewTimeoutMs: options.previewTimeoutMs ?? 60_000, adapter: provider.adapter,
     interpreter: options.interpreter !== undefined ? options.interpreter
       : channelInterpreter(env, { enabled: core.copilot, live: channelLiveCopilot(env, route === 'whatsapp' ? 'WHATSAPP' : 'TELEGRAM', host),
-        toolkit: channelCopilotToolkit(env), metrics: async record => {
+        toolkit: channelRouteToolkit(env), metrics: async record => {
           if (copilotMetricsEnabled(env, record.mode)) await recordCopilotMetrics(() => persistCopilotInterpretation(host, record, now()));
         } }), subscriptions: channelSubscriptions(env, host),
     metrics: async record => {

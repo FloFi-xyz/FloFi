@@ -57,7 +57,7 @@ export async function simulatePreview(runtime: EngineRuntime, request: PreviewRe
 }
 
 export type WorkflowStepPreview = { readonly index: number; readonly workflowHash: string; readonly flow: string | null;
-  readonly state: 'SIMULATED' | 'AWAITING_PRODUCER_SETTLEMENT' | 'FAILED'; readonly code: string | null;
+  readonly state: 'SIMULATED' | 'AWAITING_PRODUCER_SETTLEMENT' | 'NOT_COMPLETED' | 'FAILED'; readonly code: string | null;
   readonly amountFrom: readonly number[]; readonly simulationSubject: string | null; readonly subjectSource: 'REQUEST' | 'PUBLIC_QUOTE_SUBJECT' | 'NONE';
   readonly view: SimulationView | null };
 /**
@@ -84,9 +84,13 @@ export async function simulateWorkflowPreview(runtime: EngineRuntime, request: P
     } catch (cause) {
       const code = cause instanceof PlatformRefusal || cause instanceof Error && /^[A-Z][A-Z0-9_]{2,80}$/.test(cause.message) ? (cause as Error).message : 'SIMULATION_UNAVAILABLE';
       if (code === 'SIMULATION_BUSY' || code === 'SIMULATION_RATE_LIMITED') return refuse(code);
+      // The whole request's deadline (or its client leaving) ends the preview: the caller answers it, no later step is started.
+      if (code === 'MCP_REQUEST_TIMEOUT' || code === 'MCP_REQUEST_CANCELLED') throw cause;
       const awaiting = dependencies.length > 0 && /INSUFFICIENT|BALANCE|NO_COLLATERAL|COLLATERAL_REQUIRED/.test(code);
+      // BUILD-FLOFI-E2E-RELIABILITY-001 (MCP review): a step whose read ran out of time did not fail — it did not finish.
+      const unfinished = /^(MCP_UPSTREAM_TIMEOUT|CLOUD_PREVIEW_TIMEOUT|CLOUD_API_DEADLINE_EXCEEDED)$/.test(code);
       steps.push({ index, workflowHash: composition.workflowHash, flow: 'flow' in plan ? plan.flow : null,
-        state: awaiting ? 'AWAITING_PRODUCER_SETTLEMENT' : 'FAILED', code, amountFrom: dependencies,
+        state: awaiting ? 'AWAITING_PRODUCER_SETTLEMENT' : unfinished ? 'NOT_COMPLETED' : 'FAILED', code, amountFrom: dependencies,
         simulationSubject: subjectSource === 'NONE' ? null : subject, subjectSource, view: null });
     }
   }

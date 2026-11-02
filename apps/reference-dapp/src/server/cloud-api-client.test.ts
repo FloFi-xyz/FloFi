@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { describe, expect, it, vi } from 'vitest';
-import { callCloudFlow, cloudApiBaseUrl, previewCloudFlow } from './cloud-api-client';
+import { callCloudFlow, cloudApiBaseUrl, CloudDeadlineError, listCloudRuns, previewCloudFlow, readCloudRun } from './cloud-api-client';
 
 const env = { API_BASE_URL: 'https://api.flofi.example', API_AUTH_TOKEN: 'server-only-token' };
 const json = (status: number, body: unknown) => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
@@ -61,5 +61,20 @@ describe('BUILD-CLOUD-001 BFF forwarding client', () => {
     await callCloudFlow('robinhood-transfer', 'status', ['rhx-1'], { env, transport: read, sleep: noSleep });
     expect(statusCalls[0]!['idempotency-key']).toBeUndefined();
     expect(await callCloudFlow('x', 'status', [], { env: {}, sleep: noSleep })).toEqual({ ok: false, code: 'CLOUD_API_NOT_CONFIGURED' });
+  });
+  it('a caller deadline ends every read with CLOUD_API_DEADLINE_EXCEEDED, never as "not found" and never retried', async () => {
+    const ended = AbortSignal.abort(), transport = vi.fn<typeof fetch>();
+    const deadline = { ok: false, code: 'CLOUD_API_DEADLINE_EXCEEDED' };
+    expect(await readCloudRun('rhx-1', '0xabc', { env, transport, signal: ended })).toEqual(deadline);
+    expect(await listCloudRuns('robinhood-transfer', '0xabc', { env, transport, signal: ended })).toEqual(deadline);
+    expect(await previewCloudFlow('aave-supply', [], { env, transport, signal: ended, sleep: noSleep })).toEqual(deadline);
+    expect(transport).not.toHaveBeenCalled();
+    // A transport that reports the caller's deadline (the MCP budget transport) is not retried either.
+    const deadlineTransport = vi.fn<typeof fetch>().mockRejectedValue(new CloudDeadlineError());
+    expect(await callCloudFlow('robinhood-transfer', 'status', ['rhx-1'], { env, transport: deadlineTransport, sleep: noSleep })).toEqual(deadline);
+    expect(await readCloudRun('rhx-1', '0xabc', { env, transport: deadlineTransport })).toEqual(deadline);
+    expect(deadlineTransport).toHaveBeenCalledTimes(2);
+    // Without a deadline, a lost read is still the plain unavailable answer (unchanged).
+    expect(await readCloudRun('rhx-1', '0xabc', { env, transport: vi.fn<typeof fetch>().mockRejectedValue(new TypeError('reset')) })).toEqual({ ok: false, code: 'CLOUD_API_UNAVAILABLE' });
   });
 });

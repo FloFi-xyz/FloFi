@@ -40,13 +40,27 @@ function unwrap<T>(result: { ok: true; value: T } | { ok: false; code: string })
   if (!result.ok) throw new Error(result.code);
   return result.value;
 }
+/**
+ * BUILD-FLOFI-E2E-RELIABILITY-001: the store keeps the runtime's CODE (as every other runtime store does), never its English sentence. The chat
+ * and the Simulate/Review projections classify codes (`simulationError`, `QUOTE_MOVED`); a sentence matched none of them, so every Base swap
+ * refusal — QUOTE_CHANGED_REVIEW_REQUIRED included — reached the owner as "FloFi could not complete this simulation". Unclassified causes keep a
+ * stable code of their own.
+ */
+export function publicSwapErrorCode(error: unknown): string {
+  const code = error instanceof Error ? error.message : '';
+  return /^[A-Z][A-Z0-9_]{2,80}$/.test(code) ? code : 'PUBLIC_OPERATION_FAILED';
+}
+/** The engineering panel's own sentence for a public swap code (the chat and Review surfaces use `simulationError`). */
+export function publicSwapMessage(code: string): string {
+  return message(new Error(code));
+}
 function message(error: unknown): string {
   const code = error instanceof Error ? error.message : '';
   const floFi = code.startsWith('FLOFI_WALLET_') ? floFiWalletMessage(code) : null;
   if (floFi) return floFi;
   const messages: Record<string, string> = {
     // BUILD-FLOFI-EXECUTION-PERFORMANCE-001: the wallet states the swap raises itself, in words instead of their codes.
-    WALLET_AUTHORIZATION_REJECTED: 'You declined the request in your wallet. Nothing was signed or sent.',
+    WALLET_AUTHORIZATION_REJECTED: 'You declined the request in your wallet. It was not signed or sent.',
     WRONG_WALLET_CHAIN: 'Your wallet is on another network. Switch it to the network of this swap, then authorize again. Nothing was sent.',
     SUBMISSION_RESULT_UNKNOWN: 'Your wallet did not confirm whether it sent the transaction. FloFi keeps checking the network; do not send it again.',
     // The attempt is recorded as unresolved (Simulate stays closed until it is), so this names what happened, not a step the page cannot offer.
@@ -72,7 +86,8 @@ function message(error: unknown): string {
     QUOTE_CHANGED_REVIEW_REQUIRED: 'The quote changed. Review the updated amounts before executing.',
     QUOTE_EXPIRED_REVIEW_REQUIRED: 'Quote expired. Review a fresh quote.',
     REVIEW_EXPIRED: 'Quote expired. Simulate again.', REVIEW_REQUIRED: 'Review the current swap first.',
-    INSUFFICIENT_INPUT: 'Insufficient test token balance.', INSUFFICIENT_TEST_ETH: 'Insufficient test ETH for network fees on this network.',
+    INSUFFICIENT_INPUT: 'Your input token balance is too low for this swap. This request was not sent.',
+    PUBLIC_OPERATION_FAILED: 'This request could not be completed. Check its status before trying again.', INSUFFICIENT_TEST_ETH: 'Insufficient test ETH for network fees on this network.',
     POOL_UNUSABLE: 'The selected pool is unavailable. Try again later.', POOL_FACTORY_MISMATCH: 'The selected pool could not be verified.',
     WRONG_PROVIDER_CHAIN: 'The provider is not on the reviewed network.', PUBLIC_NETWORK_UNAVAILABLE: 'This network is not enabled on this app instance.',
     ATTEMPT_ALREADY_ACTIVE: 'A transaction is already in progress. Check its result before trying again.',
@@ -84,7 +99,7 @@ function message(error: unknown): string {
     OWNER_NOT_EOA: 'This address is a smart contract wallet (for example a Safe), so it cannot sign this transaction itself. Use a standard account or a MetaMask Smart Account. Nothing was simulated or sent.',
     OWNER_DELEGATION_UNVERIFIED: 'This account is upgraded to a smart account (EIP-7702) whose code FloFi has not verified, and that code could act on funds this workflow sends to it. Use a standard account or a MetaMask Smart Account. Nothing was simulated or sent.',
   };
-  return messages[code] ?? (code.startsWith('PUBLIC_') ? 'The public testnet request could not be completed. Try again.' : code || 'Could not continue. Try again.');
+  return messages[code] ?? (code.startsWith('PUBLIC_') ? 'This request could not be completed. Try again.' : code || 'Could not continue. Try again.');
 }
 /** FloFi Wallet's own code when it refused before any signing activity existed (EIP-1193 4100 with a proven pre-signature code). */
 export function floFiRefusal(error: unknown): string | null {
@@ -136,7 +151,8 @@ export function PublicTestnetProvider({ children }: { children: ReactNode }) {
   const guarded = useCallback((label: string, action: () => Promise<void>) => {
     if (busyRef.current) return;
     const epoch = ++operationEpoch.current; busyRef.current = true; setBusy(label); setError(null);
-    action().catch(cause => setError(message(cause))).finally(() => { if (operationEpoch.current === epoch) { busyRef.current = false; setBusy(null); } });
+    // BUILD-FLOFI-E2E-RELIABILITY-001: a late failure of an older operation (its tail outlives its busy flag) never overwrites a newer one's.
+    action().catch(cause => { if (operationEpoch.current === epoch) setError(publicSwapErrorCode(cause)); }).finally(() => { if (operationEpoch.current === epoch) { busyRef.current = false; setBusy(null); } });
   }, []);
   useEffect(() => {
     let cancelled = false;
@@ -274,7 +290,10 @@ export function PublicTestnetProvider({ children }: { children: ReactNode }) {
     }); }
     catch (cause) {
       journey.mark('user_decision'); finish(rejected(cause) ? 'rejected' : 'inconclusive');
-      acceptCurrent(unwrap(await publicReport(run.quote.executionId, attempt.attemptId, { kind: rejected(cause) ? 'REJECTED' : 'UNKNOWN' })));
+      // BUILD-FLOFI-E2E-RELIABILITY-001 (frontend review): the wallet's answer decides what is said, even when recording it fails — an unknown
+      // result is never turned into a generic failure ("nothing was sent") by a report that could not be saved.
+      try { acceptCurrent(unwrap(await publicReport(run.quote.executionId, attempt.attemptId, { kind: rejected(cause) ? 'REJECTED' : 'UNKNOWN' }))); }
+      catch (reportError) { if (!rejected(cause) && !floFiRefusal(cause)) throw new Error('SUBMISSION_RESULT_UNKNOWN', { cause: reportError }); }
       const refusal = floFiRefusal(cause);
       if (refusal) throw new Error(refusal, { cause });
       if (rejected(cause)) throw new Error('WALLET_AUTHORIZATION_REJECTED', { cause });
@@ -284,12 +303,18 @@ export function PublicTestnetProvider({ children }: { children: ReactNode }) {
     journey.mark('user_decision');
     if (typeof hash !== 'string' || !/^0x[0-9a-fA-F]{64}$/.test(hash)) {
       finish('inconclusive');
-      acceptCurrent(unwrap(await publicReport(run.quote.executionId, attempt.attemptId, { kind: 'UNKNOWN' })));
+      try { acceptCurrent(unwrap(await publicReport(run.quote.executionId, attempt.attemptId, { kind: 'UNKNOWN' }))); }
+      catch (reportError) { throw new Error('SUBMISSION_RESULT_UNKNOWN', { cause: reportError }); }
       throw new Error('SUBMISSION_RESULT_UNKNOWN');
     }
     const txHash = hash.toLowerCase();
     localStorage.setItem(KEY + ':' + attempt.attemptId, txHash);
-    acceptCurrent(unwrap(await publicReport(run.quote.executionId, attempt.attemptId, { kind: 'HASH', txHash })));
+    // BUILD-FLOFI-E2E-RELIABILITY-001: once the wallet returned a hash, a failure to record or follow it is never "nothing was sent": the hash is
+    // kept for recovery and the outcome is unknown until observed (a classified engine answer such as a reconciliation mismatch keeps its code).
+    const afterHash = (cause: unknown) => { const code = publicSwapErrorCode(cause);
+      return /^(PUBLIC_OPERATION_FAILED|CLOUD_API_.*|.*_UNAVAILABLE|.*TIMEOUT.*)$/.test(code) ? new Error('SUBMISSION_RESULT_UNKNOWN', { cause }) : cause; };
+    try { acceptCurrent(unwrap(await publicReport(run.quote.executionId, attempt.attemptId, { kind: 'HASH', txHash }))); }
+    catch (cause) { finish('inconclusive'); throw afterHash(cause); }
     // The wallet sent it and returned its hash: for this flow submission and the hash are the same moment.
     journey.mark('submission'); journey.mark('hash');
     try {
@@ -304,7 +329,7 @@ export function PublicTestnetProvider({ children }: { children: ReactNode }) {
       { active: () => mountedRef.current });
       const state = followed.value?.attempts.at(-1)?.state;
       finish(state === 'REVERTED' ? 'failed' : state === 'UNKNOWN' ? 'inconclusive' : followed.value?.outcome ? 'reconciled' : 'in_progress');
-    } catch (cause) { finish('in_progress'); throw cause; }
+    } catch (cause) { finish('in_progress'); throw afterHash(cause); }
   }), [guarded, run, retired, wallet]);
   const signing = Boolean(signingAttempt && run?.attempts.some(attempt => attempt.attemptId === signingAttempt));
   return <Context.Provider value={{ available, catalogAvailable, chainAvailable, availabilityKnown: availability.known, run, recoveryOnly, retired, busy, signing, error,

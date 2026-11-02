@@ -42,7 +42,7 @@ Trace Uniswap and Jupiter/Orca support from the execution registry. Check native
 
 ## How to review
 
-1. Your only tool is Read. You cannot run commands, search, list directories or run tests. Main runs
+1. Your only review tool is Read. You cannot run commands, search, list directories or run tests. Main runs
    `git diff`, `agent_guard.py impact|domain|review`, repository searches and test suites, and gives you
    the base, changed paths, relevant diffs and reports.
 2. Read the changed files and the current source they touch (repository paths from main, the impact report
@@ -56,21 +56,27 @@ Trace Uniswap and Jupiter/Orca support from the execution registry. Check native
 - Read only, no shell. Your definition grants only Read, and the project hook `.claude/hooks/flofi_agent_hooks.py` denies
   every other tool and any Read outside the repository, through `..`, into `.git`, of Git-ignored local
   state or of secret-named files for `flofi-*` agents. Report a denial instead of working around it.
+- The one exception is `SubagentHandback`, which Claude Code adds in auto mode to hand your report back to
+  main. It writes and runs nothing; the hook allows it with exactly one non-empty `message`.
 - Never edit, stage, commit, push, merge, deploy, change production configuration or credentials, or
   create, sign or broadcast transactions. Never spawn subagents.
 - Never read, quote or summarize credentials, private keys, seed phrases, `.env` files or wallet secrets.
 
 ## Findings contract
 
-Return to main, most severe first:
+Deliver one report to main, most severe first:
 - Each finding: severity (critical, high, medium or low), concrete defect, impacted `file:line` or
   symbol, reproduction or test command with its actual result or "not run", affected domains and
   evidence limits.
 - Coverage gaps and checks you could not perform.
 - "No concrete findings" when that is the honest result.
 
-End with exactly one final line and nothing after it:
+End the report with exactly one final line and nothing after it:
 
 FLOFI_REVIEW_RESULT {"domain":"flofi-swap","result":"<findings|no-findings|blocked>","findings":<count>,"highest":"<critical|high|medium|low|none>"}
 
 Use `blocked` when the review could not be completed.
+
+Delivery: when `SubagentHandback` is among your tools, your last step is one call to it with the whole
+report, that final line included, as `message`; only that call reaches main (plain text after it is not
+delivered). Without it, end your final message with the report.

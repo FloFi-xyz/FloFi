@@ -20,7 +20,7 @@ import type { Database } from '@defi-workflow-engine/cloud-runtime';
 import { savedWorkflowHash } from '../domain/saved-workflow.ts';
 import { composeWorkflowBound, NETWORKS } from '../engine/strategy-engine';
 import type { StrategySpec } from '../engine/strategy-spec';
-import { evaluateWorkflowGates, requestApproval, sharedRuns, type EngineRuntime, type HandoffRecord, type HandoffStore, type WindowLimit } from '../platform/index.ts';
+import { evaluateWorkflowGates, requestApproval, sharedRunsRead, type EngineRuntime, type HandoffRecord, type HandoffStore, type WindowLimit } from '../platform/index.ts';
 import { createSavedWorkflowStore } from '../server/saved-workflow-store.ts';
 import { networkScope } from '../server/network-scope.ts';
 import { automationApprovalScheme, automationRequester, AUTOMATION_HANDOFF_RULES, ruleScope, sameOwner } from './approval.ts';
@@ -37,6 +37,7 @@ import { nextSlotAfter } from './schedule.ts';
 import { MAX_RULES_PER_OWNER, OPEN_OCCURRENCE, type AutomationStore, type EvaluationRecord, type OccurrenceRecord, type Owner, type RuleRecord } from './store.ts';
 import { createLinkCode, ownerBucket, targetsOf, unlinkOwner } from './subscriptions.ts';
 import { conditionThreshold, OBSERVED_ASSETS, type ObservedAsset } from './trigger.ts';
+import { onceEachRun, recordedRunFacts } from './run-facts.ts';
 import type { ActionView, CapabilityView, HistoryEntryView, LinkCodeView, ObservationView, OccurrenceView, OpenedView, OverviewView, RuleHistoryView, RuleView,
   RouteCapability } from './views.ts';
 
@@ -144,9 +145,17 @@ export function createAutomationService(deps: ServiceDeps) {
         if (h.status === 'APPLIED' && o.state === 'APPROVAL_CREATED') await store.completeApproval(o.occurrenceId, h.handoffId, deps.now()).catch(() => false);
         // The viewer IS the owner (a verified session) and the claim policy only lets the owner's wallet claim: reading the owner's own runs
         // needs no sharing choice. Runs of any other wallet are never read.
-        const owned = h.claimed && sameOwner(o.owner, h.claimed) ? await sharedRuns({ ...h, shareStatus: true } as HandoffRecord, deps.runtime, deps.handoffs).catch(() => null) : null;
-        approval = { status: h.status, runs: (owned ?? []).map(r => ({ executionId: r.executionId, status: r.status, reconciled: r.reconciled, terminal: r.terminal,
-          errorCode: r.errorCode, evidenceEnvironment: r.evidenceEnvironment, evidenceOutcome: r.evidenceOutcome, evidenceBundleHash: r.evidenceBundleHash })) };
+        const claimant = h.claimed && sameOwner(o.owner, h.claimed) ? h.claimed.address : null, reads = onceEachRun(deps.runtime);
+        // BUILD-FLOFI-E2E-RELIABILITY-001 (workflow review): a failed run read is INCOMPLETE — never turned back into "no runs" (it read as
+        // "Intention only — not simulated or sent yet" for a proposal whose swap may have executed).
+        const read = claimant ? await sharedRunsRead({ ...h, shareStatus: true } as HandoffRecord, reads, deps.handoffs).catch(() => ({ runs: [], complete: false, truncated: false })) : null;
+        const owned = read?.runs ?? null;
+        // Issue #149: each run's own recorded attempts (from the same read), so the History never calls a simulation or a refusal an execution.
+        // An applied proposal whose runs this deployment could not read at all (no run reads, no claim time) is incomplete, never "no run".
+        const applied = h.status === 'APPLIED' && claimant !== null;
+        approval = { status: h.status, runsComplete: !applied || (read !== null && read.complete), ...applied && read?.truncated ? { runsTruncated: true } : {}, runs: await Promise.all((owned ?? []).map(async r => ({ executionId: r.executionId, status: r.status, reconciled: r.reconciled,
+          terminal: r.terminal, errorCode: r.errorCode, evidenceEnvironment: r.evidenceEnvironment, evidenceOutcome: r.evidenceOutcome, evidenceBundleHash: r.evidenceBundleHash,
+          ...await recordedRunFacts(reads, r.executionId, claimant!) }))) };
       }
     }
     const state = approval?.status === 'APPLIED' && o.state === 'APPROVAL_CREATED' ? 'COMPLETED' : o.state;

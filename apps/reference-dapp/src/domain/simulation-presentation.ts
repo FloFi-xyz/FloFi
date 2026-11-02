@@ -23,6 +23,7 @@ import { composerActions, composerSummary } from './composer-presentation';
 import { quoteDecimals } from './public-testnet-swap';
 import { resolveNetworkAsset } from './asset-catalogs';
 import { flofiFeeAmount } from '../server/universal-router/fee-obligation.ts';
+import { floFiWalletMessage } from '../wallet/flofi-signing';
 
 /** 0.1% of the route input, for Review disclosure (obligation; not collected here). */
 const flofiFeeUnits = (inputAmount: string): string => flofiFeeAmount(inputAmount);
@@ -108,13 +109,21 @@ const providerNames: Record<string, string> = {
 export const simulationProvider = (id: string) => providerNames[id] ?? null;
 /** Only known error meanings reach the primary UI; never echo provider responses or validation paths. */
 export function simulationError(error: string): string {
+  // BUILD-FLOFI-E2E-RELIABILITY-001: FloFi Wallet (Privy) refusals keep their own sentence, as on the Canvas.
+  const floFiWallet = /^FLOFI_WALLET_/.test(error) ? floFiWalletMessage(error) : null;
+  if (floFiWallet) return floFiWallet;
   if (/INSUFFICIENT.*(ETH|SOL|NATIVE|GAS)|INSUFFICIENT_GAS/i.test(error)) return 'Add funds for the network fee, then simulate again.';
   if (/INSUFFICIENT|BALANCE_TOO_LOW|exceeds.*balance/i.test(error)) return 'Your available balance is too low for this workflow.';
   if (/HEALTH_FACTOR|UNSAFE_HEALTH|UNSAFE_POSITION/i.test(error)) return 'This action would leave the lending position below its required safety limit.';
   // BUILD-FLOFI-BRIDGE-LIVE-FIX-003: a refusal at the execution boundary names what happened instead of the generic fallback below.
-  if (/SUBMISSION_UNKNOWN|OBSERVE_EXISTING|DEPOSIT_MAY_EXIST/i.test(error)) return 'Your wallet may already have sent this request. FloFi never sends it again; it keeps checking the network for its result.';
+  if (/SUBMISSION_UNKNOWN|SUBMISSION_RESULT_UNKNOWN|OBSERVE_EXISTING|DEPOSIT_MAY_EXIST|RELAYED_EXECUTION_PENDING/i.test(error)) return 'Your wallet may already have sent this request. FloFi never sends it again; it keeps checking the network for its result.';
   if (/ROUTE_REVALIDATION_UNAVAILABLE/i.test(error)) return 'FloFi could not re-check the route with the provider just before your wallet request, so nothing was sent. Try again in a moment.';
   if (/ROUTE_CHANGED|QUOTE_CHANGED|REQUOTE|STATE_CHANGED|GAS_CHANGED|REVIEW_CHANGED|STOCK_MULTIPLIER_CHANGED/i.test(error)) return 'The provider quote or the on-chain state changed after your Review, so nothing was sent. Get a fresh quote and review it again.';
+  // BUILD-FLOFI-E2E-RELIABILITY-001: the swap engine's own refusals at the execution boundary (they reached the owner as the generic fallback).
+  if (/RECONCILIATION_MISMATCH|DIVERGENT/i.test(error)) return 'The observed on-chain result does not match the reviewed bounds, so FloFi stopped and keeps this run for review. Nothing is retried automatically.';
+  if (/WALLET_AUTHORIZATION_REJECTED/i.test(error)) return 'You declined this request in your wallet, so it was not signed or sent. Earlier confirmed requests stay recorded.';
+  if (/WALLET_NOT_FOUND|WALLET_CONNECTION_REJECTED/i.test(error)) return 'Connect the wallet that will sign this workflow, then simulate again.';
+  if (/OWNER_REVIEW_MISMATCH/i.test(error)) return 'The connected wallet is not the wallet this Review was prepared for, so nothing was sent. Reconnect that wallet, or simulate again with this one.';
   if (/HANDOFF_NOT_AUTHORIZED/i.test(error)) return 'The reviewed request was no longer authorized when FloFi was about to open your wallet, so nothing was sent. Review it again.';
   if (/NONCE_MISMATCH|NONCE_CHANGED/i.test(error)) return 'Another transaction from this wallet took the next transaction slot (nonce), so nothing was sent. Review it again.';
   if (/SEMANTIC_REVISION_CHANGED|SEMANTIC_EDIT|TRANSACTION_ARTIFACT_CHANGED/i.test(error)) return 'The workflow or its reviewed transaction changed before your wallet was asked, so nothing was sent. Review it again.';
@@ -122,6 +131,9 @@ export function simulationError(error: string): string {
   if (/WALLET_UNAUTHORIZED/i.test(error)) return 'Your wallet did not authorize FloFi for this account. Reconnect the wallet, then try again.';
   if (/WALLET_METHOD_UNSUPPORTED/i.test(error)) return 'This wallet cannot send this kind of request. Use another wallet, then try again.';
   if (/EXPIRED|STALE|quote.*expired/i.test(error)) return 'This result has expired. Refresh the simulation before continuing.';
+  // Issue #149 (quoter): a read the network never answered is not a missing pool, and a missing pool is not an outage.
+  if (/PUBLIC_RPC_UNAVAILABLE|RPC_HISTORY_UNAVAILABLE/i.test(error)) return 'The network did not answer FloFi\'s reads, so nothing was simulated or sent. This is not a liquidity problem; try again shortly.';
+  if (/POOL_UNUSABLE|NO_LIQUID_POOL/i.test(error)) return 'No pool for this pair has usable liquidity for this amount right now, so nothing was simulated or sent. Try a smaller amount or another pair.';
   if (/SERVICE_UNAVAILABLE|STORAGE_NOT_CONFIGURED|RPC_(?:ERROR|RATE_LIMITED|UNAVAILABLE)|_OFF$|_RATE_LIMITED$/i.test(error)) return 'Simulation is currently unavailable. Try again before continuing.';
   // BUILD-SOLANA-TRANSFER-UX-001: specific meanings before the broad route and fallback messages (nothing here echoes provider text).
   if (/WALLET_SELECTION_REQUIRED|_WALLET_REQUIRED$|WALLET_NOT_CONNECTED|OWNER_REQUIRED|WALLET_PROOF_REQUIRED/i.test(error)) return 'Connect the wallet that will sign this workflow, then simulate again.';
@@ -132,7 +144,7 @@ export function simulationError(error: string): string {
   if (/PARTIAL_DEBT_REQUIRED|NO_DEBT|DEBT_TOO_LOW/i.test(error)) return 'Your current debt is lower than this repayment. Reduce the amount and simulate again.';
   // HOTFIX-WORKFLOW-CONCURRENCY-001: no wallet-wide block remains; these refusals concern one transaction identity only.
   if (/DUPLICATE_TRANSACTION/i.test(error)) return 'This exact transaction is already handled by another FloFi execution, which keeps tracking it. Simulate again for a fresh, separate transaction.';
-  if (/EXISTING_ATTEMPT|ATTEMPT_ACTIVE/i.test(error)) return 'This execution already has a transaction, and FloFi keeps tracking it; it is never sent twice. Simulate again to start a separate execution.';
+  if (/EXISTING_ATTEMPT|ATTEMPT_ACTIVE|ATTEMPT_ALREADY_ACTIVE|ALREADY_ATTEMPTED/i.test(error)) return 'This execution already has a transaction, and FloFi keeps tracking it; it is never sent twice. Simulate again to start a separate execution.';
   if (/NONCE_IN_USE|NONCE_ALREADY_RESERVED/i.test(error)) return 'An earlier request from this wallet is still waiting in your wallet, or its result is still being checked, and it holds the next transaction slot (nonce). Confirm or reject it in your wallet; FloFi keeps tracking it. Then simulate again.';
   if (/DEPOSIT_IDENTITY_IN_FLIGHT/i.test(error)) return 'This exact deposit (the same quote) is already handled by another FloFi execution, which keeps tracking it. Get a new route for a separate deposit.';
   // BUILD-FLOFI-WALLET-UX-EXECUTION-FIX-001: account-specific owner refusals. MetaMask Smart Accounts (EIP-7702, reviewed delegate) swap normally.

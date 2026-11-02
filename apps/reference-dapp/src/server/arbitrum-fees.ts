@@ -6,6 +6,9 @@ import type { Rpc } from './public-testnet-service.ts';
 export const nitroGasLimit = (estimatedGas: bigint) =>
   (estimatedGas * BigInt(ARBITRUM_ONE_TRANSFER.gasLimitMarginPercent) + 99n) / 100n;
 export const nitroMaxFeePerGas = (gasPrice: bigint) => gasPrice * BigInt(ARBITRUM_ONE_TRANSFER.maxFeeMultiplier);
+/** BUILD-FLOFI-E2E-RELIABILITY-001: whether a fresh gas price still fits the reviewed transaction's own fee ceiling (its `maxFeePerGas`). */
+export const nitroFeeWithinCeiling = (freshMaxFeePerGas: bigint, reviewedMaxFeePerGas: bigint) =>
+  freshMaxFeePerGas <= reviewedMaxFeePerGas * BigInt(ARBITRUM_ONE_TRANSFER.maxFeeMultiplier);
 
 /** The existing Router's NodeInterface estimate, shared with sequential liquidity simulation.
  * Approvals may not exist yet, so eth_estimateGas cannot estimate the later mint. Simulation supplies execution gas;

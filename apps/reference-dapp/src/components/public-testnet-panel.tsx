@@ -2,7 +2,7 @@
 'use client';
 import { useLocale } from '../i18n/locale';
 
-import { usePublicTestnet } from '../state/public-testnet-store';
+import { publicSwapMessage, usePublicTestnet } from '../state/public-testnet-store';
 import { useBuild009Wallet } from '../state/build009-wallet-store';
 import { useWorkflow } from '../state/workflow-store';
 import { BASE_SEPOLIA, quoteDecimals, swapProfile } from '../domain/public-testnet-swap';
@@ -36,7 +36,7 @@ export function PublicTestnetPanel({ view }: { view: 'simulate' | 'execute' }) {
       <p className="muted">{tr("Get a current quote from the public pool before reviewing the swap.")}</p></div>
       <button type="button" onClick={flow.simulate} disabled={Boolean(busy) || !flow.available || Boolean(last && ['PREPARED','HASH','PENDING','UNKNOWN'].includes(last.state))}>{tr("Simulate")}</button></div>
     {!flow.available && <p role="status">{tr(mainnet ? '{0} is not enabled on this app instance.' : 'Public testnet recording is not enabled on this app instance.', network)}</p>}
-    {busy && <p role="status">{tr(busy)}…</p>}{error && <p role="alert">{tr(error)}</p>}
+    {busy && <p role="status">{tr(busy)}…</p>}{error && <p role="alert">{tr(publicSwapMessage(error))}</p>}
     {quote && !flow.retired && <div className="step-card" aria-label={tr("Live swap quote")}><h3>{tr("Current quote")}</h3>
       <dl className="step-facts"><div><dt>{tr("You pay")}</dt><dd className="numeric">{tr(pay(quote, quote.amountIn))}</dd></div>
         <div><dt>{tr("Expected")}</dt><dd className="numeric">{tr(get(quote, quote.expectedOut))}</dd></div>
@@ -74,7 +74,7 @@ export function PublicTestnetPanel({ view }: { view: 'simulate' | 'execute' }) {
     {mainnet && <p role="note">{tr("Real funds: your wallet signs and sends this transaction on {0}. Flofi never signs for you.", network)}</p>}
     {flow.retired && <p role="alert">{tr("This swap changed. Simulate it again.")}</p>}
     {expired && <p role="status">{tr("Quote expired. Simulate again.")}</p>}
-    {error && <p role="alert">{tr(error)}</p>}{busy && <p role="status">{tr(busy)}…</p>}
+    {error && <p role="alert">{tr(publicSwapMessage(error))}</p>}{busy && <p role="status">{tr(busy)}…</p>}
     {wallet.account && wallet.chainId !== profile.chainHex && <div><p role="status">{tr("Switch your wallet to ")}{network}{tr(" to continue.")}</p>
       <button type="button" onClick={flow.switchNetwork} disabled={Boolean(busy)}>{tr("Switch to ")}{network}</button></div>}
     {last?.state === 'REVERTED' && <p role="alert">{tr(last.step === 'approval' ? 'Token approval reverted.' : 'The swap reverted.')} <a href={`${profile.explorer}${last.txHash}`} target="_blank" rel="noopener noreferrer">{tr("View transaction")}</a></p>}

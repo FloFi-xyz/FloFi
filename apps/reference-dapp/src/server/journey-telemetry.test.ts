@@ -10,13 +10,15 @@ const event = () => {
   journey.mark('intent'); journey.mark('first_quote'); journey.mark('wallet_open'); journey.mark('user_decision');
   return journey.event('in_progress')!;
 };
+// Issue #149: the receiver logs only after the deployment owner's explicit opt-in.
+const ON = { FLOFI_JOURNEY_TELEMETRY: 'on' };
 const post = (body: string, headers: Record<string, string> = { 'sec-fetch-site': 'same-origin' }) =>
   new Request('https://flofi.xyz/api/flofi/journey', { method: 'POST', body, headers: { 'content-type': 'application/json', ...headers } });
 
 describe('BUILD-FLOFI-EXECUTION-PERFORMANCE-001 journey receiver', () => {
   it('logs exactly the closed, content-free fields of a same-origin event', async () => {
     const logged: Record<string, unknown>[] = [];
-    const receive = createJourneyReceiver({ env: {}, account: () => 'acct-1', log: fields => logged.push(fields) });
+    const receive = createJourneyReceiver({ env: ON, account: () => 'acct-1', log: fields => logged.push(fields) });
     expect((await receive(post(JSON.stringify(event())))).status).toBe(204);
     expect(Object.keys(logged[0]!).sort()).toEqual(['deployment', 'evidence', 'intent_to_first_quote_ms', 'journey_id', 'network', 'network_environment', 'operation',
       'outcome', 'provider', 'system_ms', 'user_ms', 'wallet', 'wallet_open_to_user_decision_ms']);
@@ -25,7 +27,7 @@ describe('BUILD-FLOFI-EXECUTION-PERFORMANCE-001 journey receiver', () => {
   });
   it('recomputes the totals from the accepted metrics (never the client\'s figures; null, not 0, when unmeasured) and logs a journey once', async () => {
     const logged: Record<string, unknown>[] = [];
-    const receive = createJourneyReceiver({ env: { VERCEL_ENV: 'preview' }, account: () => 'acct-1', log: fields => logged.push(fields) });
+    const receive = createJourneyReceiver({ env: { ...ON, VERCEL_ENV: 'preview' }, account: () => 'acct-1', log: fields => logged.push(fields) });
     const inflated = { ...event(), userMs: 9_999, systemMs: 1 };
     expect((await receive(post(JSON.stringify(inflated)))).status).toBe(204);
     expect(logged[0]).toMatchObject({ user_ms: 250, system_ms: 250, deployment: 'preview' });
@@ -40,7 +42,7 @@ describe('BUILD-FLOFI-EXECUTION-PERFORMANCE-001 journey receiver', () => {
   it('writes every journey metric as a number through the real logger (no metric name is caught by its redaction)', async () => {
     const { createLogger } = await import('@defi-workflow-engine/cloud-runtime');
     const lines: string[] = [];
-    const receive = createJourneyReceiver({ env: {}, account: () => 'acct-1', log: fields => createLogger({ service: 'flofi-journey', sink: line => lines.push(line) }).info('journey.timing', fields) });
+    const receive = createJourneyReceiver({ env: ON, account: () => 'acct-1', log: fields => createLogger({ service: 'flofi-journey', sink: line => lines.push(line) }).info('journey.timing', fields) });
     let n = 0;
     const journey = createJourney({ operation: 'swap', network: 'eip155:8453', provider: 'Uniswap V3', wallet: 'external', clock: () => (n += 100) });
     for (const mark of JOURNEY_MARKS) journey.mark(mark);
@@ -52,7 +54,7 @@ describe('BUILD-FLOFI-EXECUTION-PERFORMANCE-001 journey receiver', () => {
     expect(lines[0]).not.toContain('REDACTED');
   });
   it('refuses cross-site posts, oversized or malformed bodies and anything outside the schema; can be turned off; is rate-bounded', async () => {
-    const logged: unknown[] = [], receive = createJourneyReceiver({ env: {}, account: () => 'acct-1', log: fields => logged.push(fields) });
+    const logged: unknown[] = [], receive = createJourneyReceiver({ env: ON, account: () => 'acct-1', log: fields => logged.push(fields) });
     expect((await receive(post(JSON.stringify(event()), { 'sec-fetch-site': 'cross-site' }))).status).toBe(403);
     expect((await receive(post(JSON.stringify(event()), { origin: 'https://evil.example' }))).status).toBe(403);
     expect((await receive(post(JSON.stringify(event()), { origin: 'https://flofi.xyz' }))).status).toBe(204);
@@ -63,8 +65,8 @@ describe('BUILD-FLOFI-EXECUTION-PERFORMANCE-001 journey receiver', () => {
     expect((await receive(post('{not json'))).status).toBe(400);
     expect((await receive(post(JSON.stringify({ ...event(), chat: 'swap my savings' })))).status).toBe(400);
     expect(logged).toHaveLength(1);
-    // Fails closed: anything other than unset or `on` turns logging off (a typo or another convention never leaves it on).
-    for (const setting of ['off', 'OFF', ' off ', 'disabled', 'false', '0']) {
+    // Fails closed and is off by default: only `on` logs (unset, a typo or another convention never turns it on).
+    for (const setting of [undefined, '', 'off', 'OFF', ' off ', 'disabled', 'false', '0', 'true', '1']) {
       const off = createJourneyReceiver({ env: { FLOFI_JOURNEY_TELEMETRY: setting }, account: () => 'acct-1', log: fields => logged.push(fields) });
       expect((await off(post(JSON.stringify(event())))).status, setting).toBe(204);
     }
@@ -74,7 +76,7 @@ describe('BUILD-FLOFI-EXECUTION-PERFORMANCE-001 journey receiver', () => {
     expect(logged).toHaveLength(2);
     let now = 0, sender = 0;
     // The process bound: many distinct accounts (each within its own bound) still cannot exceed 600 events a minute.
-    const bounded = createJourneyReceiver({ env: {}, now: () => now, account: () => `acct-${sender++}`, log: () => undefined });
+    const bounded = createJourneyReceiver({ env: ON, now: () => now, account: () => `acct-${sender++}`, log: () => undefined });
     const statuses: number[] = [];
     for (let i = 0; i < 601; i++) statuses.push((await bounded(post(JSON.stringify(event())))).status);
     expect(statuses.at(-1)).toBe(429);
@@ -98,7 +100,7 @@ describe('BUILD-FLOFI-EXECUTION-PERFORMANCE-001 latency report over the existing
     // The report reads exactly the metrics the receiver writes (no drift between the two lists).
     expect([...METRICS]).toEqual([...JOURNEY_METRICS.map(([metric]) => metric), 'user_ms', 'system_ms']);
     const lines: string[] = [];
-    const receive = createJourneyReceiver({ env: {}, account: () => 'acct-1', log: fields => createLogger({ service: 'flofi-journey', sink: line => lines.push(line) }).info('journey.timing', fields) });
+    const receive = createJourneyReceiver({ env: ON, account: () => 'acct-1', log: fields => createLogger({ service: 'flofi-journey', sink: line => lines.push(line) }).info('journey.timing', fields) });
     for (let i = 0; i < 25; i++) await receive(post(JSON.stringify(event())));
     lines.push('not json');
     const report = summarize(lines, { environment: 'MOCKED' });
@@ -145,7 +147,7 @@ describe('BUILD-FLOFI-EXECUTION-PERFORMANCE-001 latency report over the existing
 });
 
 describe('BUILD-FLOFI-EXECUTION-PERFORMANCE-001 journey receiver abuse bounds', () => {
-  const env = { FLOFI_SESSION_SECRET: 'journey-test-secret-0123456789abcdef0123456789abcdef' };
+  const env = { ...ON, FLOFI_SESSION_SECRET: 'journey-test-secret-0123456789abcdef0123456789abcdef' };
   const T0 = Date.parse('2026-11-01T12:00:00.000Z');
   const cookieFor = (accountId: string, at = T0) => sealAccountSession(env, { accountId, sessionId: 'a'.repeat(32), method: 'google',
     authenticatedAt: Math.floor(at / 1000), expiresAt: Math.floor(at / 1000) + 3_600 }, 'flofi.xyz', new Date(at));
@@ -168,7 +170,7 @@ describe('BUILD-FLOFI-EXECUTION-PERFORMANCE-001 journey receiver abuse bounds', 
   });
   it('bounds each account separately, so one sender cannot crowd out everyone else', async () => {
     let now = T0;
-    const receive = createJourneyReceiver({ env: {}, now: () => now, account: request => request.headers.get('x-test-account'), log: () => undefined });
+    const receive = createJourneyReceiver({ env: ON, now: () => now, account: request => request.headers.get('x-test-account'), log: () => undefined });
     const from = (account: string) => receive(post(JSON.stringify(event()), { 'sec-fetch-site': 'same-origin', 'x-test-account': account }));
     const statuses: number[] = [];
     for (let i = 0; i < 61; i++) statuses.push((await from('noisy')).status);

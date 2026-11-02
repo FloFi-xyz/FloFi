@@ -25,12 +25,34 @@ export function observeOnly(rpc: Rpc): Rpc {
   return (method, params) => SUBMISSION_METHODS.has(method) ? Promise.reject(new Error('WORKER_SUBMISSION_FORBIDDEN')) : rpc(method, params);
 }
 
+/**
+ * BUILD-FLOFI-E2E-RELIABILITY-001 (MCP review): once a preview's deadline passes, the abandoned preview may not start another read on the
+ * flow's shared, paced transport — so a preview nobody waits for cannot keep starving the reads of executions (begin, status, observe).
+ * Reads already in flight finish on their own; nothing here can submit (the preview transport is observe-only as well).
+ */
+export function untilAborted(rpc: Rpc, signal: AbortSignal): Rpc {
+  return (method, params) => signal.aborted ? Promise.reject(new Error('CLOUD_PREVIEW_TIMEOUT')) : rpc(method, params);
+}
+export function previewTransport(deps: FlowDeps, signal: AbortSignal): FlowDeps {
+  const router = deps.router ? { router: { ...deps.router, destinationRpc: untilAborted(deps.router.destinationRpc, signal) } } : {};
+  const universal = deps.universal ? { universal: { ...deps.universal, solanaRpc: untilAborted(deps.universal.solanaRpc, signal),
+    evmRpcs: Object.fromEntries(Object.entries(deps.universal.evmRpcs).map(([chain, rpc]) => [chain, untilAborted(rpc, signal)])) } } : {};
+  // Per-chain read clients (Aave supply, transfers, catalog liquidity) share the same paced transports (follow-up review).
+  const chains = deps.chains ? { chains: { ...deps.chains, rpcs: Object.fromEntries(Object.entries(deps.chains.rpcs).map(([chain, rpc]) => [chain, untilAborted(rpc, signal)])) } } : {};
+  return { ...deps, ...router, ...universal, ...chains, rpc: untilAborted(deps.rpc, signal) };
+}
+
 export type FlowResult = { ok: true; value: unknown } | { ok: false; code: string; correlationId?: string };
 export type BackendOptions = {
   readonly db: Database; readonly env: Readonly<Record<string, string | undefined>>; readonly logger: Logger; readonly tenantId: string;
   readonly holderId: string; readonly evidenceStore: EvidenceStore | null;
   /** Test seam: loopback MOCKED chains replace the network clients. Never used by the deployed entry point. */
   readonly rpc?: Partial<Record<FlowName, Rpc>>; readonly http?: JupiterHttp; readonly leaseTtlMs?: number; readonly busyRetries?: number;
+  /**
+   * BUILD-FLOFI-E2E-RELIABILITY-001: a read-only preview's total deadline (default 80 s). The developer API sets no preview cap of its own and
+   * relies on it; MCP (45 s) and channels (≤ 60 s) stop waiting earlier. After it, the abandoned preview starts no further read.
+   */
+  readonly previewTimeoutMs?: number;
   /** Test seam (BUILD-ROUTER-001): the MOCKED destination chain and providers used with `rpc['crosschain-router']`. */
   readonly router?: FlowDeps['router'];
   /** Test seam (BUILD-JOURNEY-001): per-flow MOCKED destination chains when both Router networks run in one test. */
@@ -118,6 +140,9 @@ export function createBackend(options: BackendOptions) {
           if (code === definition.busyCode && attempt < (options.busyRetries ?? 12)) { await new Promise(resolve => setTimeout(resolve, Math.min(1_000, 100 * 2 ** attempt))); continue; }
           if (!(error instanceof Error && CODE.test(error.message))) logger.warn('flow.unclassified_error', { flow, action: method, run_id: runId });
           if (flow === 'crosschain-universal') return reportUniversalFailure(error, method, fields => logger.warn('bridge.operation_failed', fields));
+          // BUILD-FLOFI-E2E-RELIABILITY-001: a refusal is an HTTP 200 with `{ ok: false, code }`, so `flow.call` alone logged it as "ok" and the
+          // 2026-11-01 Base swap refusals were invisible in production logs. The classified code only (never arguments, accounts or amounts).
+          logger.info('flow.refused', { flow, action: method, run_id: runId, code });
           return { ok: false, code } as const;
         }
       }
@@ -139,13 +164,22 @@ export function createBackend(options: BackendOptions) {
     const refusal = mode === 'live' ? testNetworkPreviewRefusal(flow, scopeEnv) : null;
     if (refusal) return { ok: false, code: refusal };
     return withSpan(logger, 'flow.preview', { flow, action: method }, async () => {
-      try { return { ok: true, value: purpose === 'QUOTE' ? await jupiterQuotePreview(args, depsFor(flow, true))
-        : await definition.create(previewStorage(), depsFor(flow, true), {}).call(method, args) } as const; }
+      // BUILD-FLOFI-E2E-RELIABILITY-001: a preview reads only (its storage is per call and discarded), so a deadline that stops waiting is safe.
+      // Paced public RPC reads with retries could otherwise hold one preview for minutes, past every caller's own deadline (/api/mcp hit 300 s).
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const abandoned = new AbortController(), deps = previewTransport(depsFor(flow, true), abandoned.signal);
+      const deadline = new Promise<FlowResult>(resolve => { timer = setTimeout(() => {
+        abandoned.abort();
+        logger.warn('flow.preview_timeout', { flow, action: method }); resolve({ ok: false, code: 'CLOUD_PREVIEW_TIMEOUT' });
+      }, options.previewTimeoutMs ?? 80_000); });
+      try { return await Promise.race([deadline, (async () => ({ ok: true, value: purpose === 'QUOTE' ? await jupiterQuotePreview(args, deps)
+        : await definition.create(previewStorage(), deps, {}).call(method, args) }) as const)()]); }
       catch (error) {
         if (!(error instanceof Error && CODE.test(error.message))) logger.warn('flow.unclassified_error', { flow, action: method });
         if (flow === 'crosschain-universal') return reportUniversalFailure(error, method, fields => logger.warn('bridge.operation_failed', fields));
         return { ok: false, code: error instanceof Error && CODE.test(error.message) ? error.message : definition.unavailableCode } as const;
       }
+      finally { clearTimeout(timer); }
     });
   }
 

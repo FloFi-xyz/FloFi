@@ -46,6 +46,10 @@
       "path": "apps/reference-dapp/src/accounts/privy-client.test.ts",
       "stage": "unit"
     },
+    "app.accounts.privy-bridge": {
+      "path": "apps/reference-dapp/src/accounts/privy-bridge.test.tsx",
+      "stage": "unit"
+    },
     "app.accounts.privy-server": {
       "path": "apps/reference-dapp/src/accounts/privy-server.test.ts",
       "stage": "unit"
@@ -750,6 +754,10 @@
       "path": "apps/reference-dapp/src/domain/journey-metrics.test.ts",
       "stage": "unit"
     },
+    "app.app.api.flofi.journey.route": {
+      "path": "apps/reference-dapp/src/app/api/flofi/journey/route.test.ts",
+      "stage": "unit"
+    },
     "app.server.journey-telemetry": {
       "path": "apps/reference-dapp/src/server/journey-telemetry.test.ts",
       "stage": "unit"
@@ -769,6 +777,46 @@
     "scripts.test_ci_dependency_security": {
       "path": "scripts/test_ci_dependency_security.py",
       "stage": "governance"
+    },
+    "app.mcp.deadline": {
+      "path": "apps/reference-dapp/src/mcp/deadline.test.ts",
+      "stage": "unit"
+    },
+    "app.mcp.deadline.pg": {
+      "path": "apps/reference-dapp/src/mcp/deadline.pg.test.ts",
+      "stage": "postgres"
+    },
+    "app.mcp.pix-approval-status": {
+      "path": "apps/reference-dapp/src/mcp/pix-approval-status.test.ts",
+      "stage": "unit"
+    },
+    "app.lib.dashboard.data-service-attempts": {
+      "path": "apps/reference-dapp/src/lib/dashboard/data-service-attempts.test.ts",
+      "stage": "unit"
+    },
+    "app.components.dashboard.landed": {
+      "path": "apps/reference-dapp/src/components/dashboard/dashboard-landed.test.tsx",
+      "stage": "unit"
+    },
+    "app.components.automation-run-status": {
+      "path": "apps/reference-dapp/src/components/automation-run-status.test.tsx",
+      "stage": "unit"
+    },
+    "app.channels.route-discovery": {
+      "path": "apps/reference-dapp/src/channels/route-discovery.test.ts",
+      "stage": "unit"
+    },
+    "app.lib.dashboard.landed-attempts": {
+      "path": "apps/reference-dapp/src/lib/dashboard/landed-attempts.test.ts",
+      "stage": "unit"
+    },
+    "app.mcp.gateway-deadline": {
+      "path": "apps/reference-dapp/src/mcp/gateway-deadline.test.ts",
+      "stage": "unit"
+    },
+    "app.developer.events-sync": {
+      "path": "apps/reference-dapp/src/developer/events-sync.test.ts",
+      "stage": "unit"
     }
   },
   "requiredUnitSuites": [
@@ -807,6 +855,7 @@
     "reference-reconciler.evidence",
     "app.accounts.privy-server",
     "app.accounts.privy-client",
+    "app.accounts.privy-bridge",
     "app.accounts.account-csp",
     "app.accounts.wallet-relay",
     "app.app.wallet-session-action",
@@ -814,7 +863,10 @@
     "app.platform.engineering-skills",
     "app.domain.canonical-execution-status",
     "app.domain.journey-metrics",
-    "app.server.journey-telemetry"
+    "app.app.api.flofi.journey.route",
+    "app.server.journey-telemetry",
+    "app.mcp.gateway-deadline",
+    "app.developer.events-sync"
   ],
   "modules": [
     {
@@ -1025,7 +1077,7 @@
         "reference-compiler.orca-mainnet-liquidity"
       ],
       "gaps": [
-        "Public-wallet execution and live price/provider changes need separate acceptance; favorable requotes remain owned by open PR #137.",
+        "Public-wallet execution and live price/provider changes need separate acceptance; execution-boundary quote movement within the reviewed bounds is covered offline by BUILD-FLOFI-E2E-RELIABILITY-001 (superseding draft PR #137), not by mainnet evidence.",
         "Mapped fork suites include existing owner-gated cases that may skip; a successful stage is not proof those optional cases ran."
       ]
     },
@@ -1620,7 +1672,7 @@
         "reference-compiler.orca-mainnet-liquidity"
       ],
       "gaps": [
-        "Public-wallet execution and live price/provider changes need separate acceptance; favorable requotes remain owned by open PR #137.",
+        "Public-wallet execution and live price/provider changes need separate acceptance; execution-boundary quote movement within the reviewed bounds is covered offline by BUILD-FLOFI-E2E-RELIABILITY-001 (superseding draft PR #137), not by mainnet evidence.",
         "Mapped fork suites include existing owner-gated cases that may skip; a successful stage is not proof those optional cases ran."
       ]
     },
@@ -1760,6 +1812,7 @@
         "apps/reference-dapp/src/automations/operations.ts",
         "apps/reference-dapp/src/automations/pg-store.ts",
         "apps/reference-dapp/src/automations/price-source.ts",
+        "apps/reference-dapp/src/automations/run-facts.ts",
         "apps/reference-dapp/src/automations/runtime.ts",
         "apps/reference-dapp/src/automations/schedule.ts",
         "apps/reference-dapp/src/automations/service.ts",
@@ -1997,6 +2050,7 @@
         "apps/reference-dapp/src/channels/learning-runtime.ts",
         "apps/reference-dapp/src/channels/providers.ts",
         "apps/reference-dapp/src/channels/registry.ts",
+        "apps/reference-dapp/src/channels/route-discovery.ts",
         "apps/reference-dapp/src/channels/route-logger.ts",
         "apps/reference-dapp/src/channels/runtime.ts",
         "apps/reference-dapp/src/channels/subscriptions.ts",
@@ -2020,6 +2074,7 @@
         "app.channels.core.conversation",
         "app.channels.core.delivery",
         "app.channels.core.workflow",
+        "app.channels.route-discovery",
         "app.channels.telegram.learning.pg",
         "app.channels.telegram.workflow.pg",
         "app.channels.whatsapp.journey.pg",
@@ -2199,6 +2254,7 @@
       ],
       "sharedFinancialCore": false,
       "sources": [
+        "apps/reference-dapp/src/components/automation-run-status.ts",
         "apps/reference-dapp/src/components/automations-workspace.tsx",
         "apps/reference-dapp/src/components/canvas-automation.tsx",
         "apps/reference-dapp/src/components/copilot-automation-proposal.tsx",
@@ -2210,7 +2266,8 @@
         "app.automations.remote.pg",
         "app.automations.schedule",
         "app.automations.scheduler.pg",
-        "app.backend.automation-production.pg"
+        "app.backend.automation-production.pg",
+        "app.components.automation-run-status"
       ],
       "gaps": [
         "CONFIRM_EACH_TIME proposals are supported; production delegated signing and live DCA execution are not certified."
@@ -2434,6 +2491,7 @@
       ],
       "suites": [
         "app.components.canvas-panel-reveal",
+        "app.components.dashboard.landed",
         "app.e2e.build-entry",
         "app.e2e.canvas-keyboard",
         "app.e2e.global-product-polish",
@@ -2622,7 +2680,7 @@
         "reference-compiler.orca-mainnet-liquidity"
       ],
       "gaps": [
-        "Public-wallet execution and live price/provider changes need separate acceptance; favorable requotes remain owned by open PR #137.",
+        "Public-wallet execution and live price/provider changes need separate acceptance; execution-boundary quote movement within the reviewed bounds is covered offline by BUILD-FLOFI-E2E-RELIABILITY-001 (superseding draft PR #137), not by mainnet evidence.",
         "Mapped fork suites include existing owner-gated cases that may skip; a successful stage is not proof those optional cases ran."
       ]
     },
@@ -2869,7 +2927,8 @@
         "app.developer.sdk.pg",
         "app.developer.webhooks.pg",
         "developer-sdk.client",
-        "developer-sdk.webhooks"
+        "developer-sdk.webhooks",
+        "app.developer.events-sync"
       ],
       "gaps": [
         "Developer credentials are SANDBOX only; real B2B partners and live webhook receivers require acceptance."
@@ -3174,7 +3233,7 @@
         "reference-compiler.orca-mainnet-liquidity"
       ],
       "gaps": [
-        "Public-wallet execution and live price/provider changes need separate acceptance; favorable requotes remain owned by open PR #137.",
+        "Public-wallet execution and live price/provider changes need separate acceptance; execution-boundary quote movement within the reviewed bounds is covered offline by BUILD-FLOFI-E2E-RELIABILITY-001 (superseding draft PR #137), not by mainnet evidence.",
         "Mapped fork suites include existing owner-gated cases that may skip; a successful stage is not proof those optional cases ran."
       ]
     },
@@ -3299,7 +3358,8 @@
         "apps/reference-dapp/src/domain/workflow-sequence.ts",
         "apps/reference-dapp/src/domain/workflow-steps.ts",
         "apps/reference-dapp/src/domain/canonical-execution-status.ts",
-        "apps/reference-dapp/src/domain/observation-schedule.ts"
+        "apps/reference-dapp/src/domain/observation-schedule.ts",
+        "apps/reference-dapp/src/domain/landed-attempts.ts"
       ],
       "suites": [
         "action-registry.engineering-regression",
@@ -3390,6 +3450,7 @@
         "apps/reference-dapp/src/i18n/pt-cross-chain.ts",
         "apps/reference-dapp/src/i18n/pt-delegation.ts",
         "apps/reference-dapp/src/i18n/pt-domain.ts",
+        "apps/reference-dapp/src/i18n/pt-e2e-reliability.ts",
         "apps/reference-dapp/src/i18n/pt-execution-ux.ts",
         "apps/reference-dapp/src/i18n/pt-financial-execution.ts",
         "apps/reference-dapp/src/i18n/pt-learning.ts",
@@ -3406,6 +3467,7 @@
         "apps/reference-dapp/src/i18n/pt-simulation.ts",
         "apps/reference-dapp/src/i18n/pt-solana-composition.ts",
         "apps/reference-dapp/src/i18n/pt-solana-mainnet.ts",
+        "apps/reference-dapp/src/i18n/pt-status-truth.ts",
         "apps/reference-dapp/src/i18n/pt-universal-bridge.ts",
         "apps/reference-dapp/src/i18n/pt-wallets.ts",
         "apps/reference-dapp/src/i18n/pt-workflow-runs.ts",
@@ -3487,6 +3549,8 @@
       "suites": [
         "action-registry.engineering-regression",
         "app.lib.dashboard.data-service",
+        "app.lib.dashboard.data-service-attempts",
+        "app.lib.dashboard.landed-attempts",
         "app.lib.dashboard.run-mapping",
         "app.platform.engineering-continuity",
         "app.platform.parity",
@@ -3517,6 +3581,7 @@
         "apps/reference-dapp/src/mcp/app/panel.ts",
         "apps/reference-dapp/src/mcp/approval-profile.ts",
         "apps/reference-dapp/src/mcp/config.ts",
+        "apps/reference-dapp/src/mcp/deadline.ts",
         "apps/reference-dapp/src/mcp/execution.ts",
         "apps/reference-dapp/src/mcp/gateway.ts",
         "apps/reference-dapp/src/mcp/handoff/links.ts",
@@ -3533,19 +3598,24 @@
         "apps/reference-dapp/src/mcp/oauth/server.ts",
         "apps/reference-dapp/src/mcp/oauth/state.ts",
         "apps/reference-dapp/src/mcp/oauth/store.ts",
+        "apps/reference-dapp/src/mcp/pix-approval-status.ts",
         "apps/reference-dapp/src/mcp/runtime.ts",
         "apps/reference-dapp/src/mcp/simulation.ts",
         "apps/reference-dapp/src/mcp/tools.ts"
       ],
       "suites": [
+        "app.mcp.deadline",
+        "app.mcp.deadline.pg",
         "app.mcp.gateway",
         "app.mcp.handoff.workflow.pg",
         "app.mcp.link-integrity.pg",
         "app.mcp.mainnet-only",
         "app.mcp.oauth.foundation",
         "app.mcp.oauth.server.pg",
+        "app.mcp.pix-approval-status",
         "app.platform.engineering-continuity",
-        "app.platform.intelligence-parity"
+        "app.platform.intelligence-parity",
+        "app.mcp.gateway-deadline"
       ],
       "gaps": [
         "External ChatGPT/Claude OAuth and approval acceptance remains manual; local gateway tests do not certify hosted clients."
@@ -4314,7 +4384,7 @@
         "reference-compiler.orca-mainnet-liquidity"
       ],
       "gaps": [
-        "Public-wallet execution and live price/provider changes need separate acceptance; favorable requotes remain owned by open PR #137.",
+        "Public-wallet execution and live price/provider changes need separate acceptance; execution-boundary quote movement within the reviewed bounds is covered offline by BUILD-FLOFI-E2E-RELIABILITY-001 (superseding draft PR #137), not by mainnet evidence.",
         "Mapped fork suites include existing owner-gated cases that may skip; a successful stage is not proof those optional cases ran."
       ]
     },
@@ -4558,7 +4628,7 @@
         "reference-compiler.orca-mainnet-liquidity"
       ],
       "gaps": [
-        "Public-wallet execution and live price/provider changes need separate acceptance; favorable requotes remain owned by open PR #137.",
+        "Public-wallet execution and live price/provider changes need separate acceptance; execution-boundary quote movement within the reviewed bounds is covered offline by BUILD-FLOFI-E2E-RELIABILITY-001 (superseding draft PR #137), not by mainnet evidence.",
         "Mapped fork suites include existing owner-gated cases that may skip; a successful stage is not proof those optional cases ran."
       ]
     },
@@ -4817,7 +4887,7 @@
         "reference-compiler.orca-mainnet-liquidity"
       ],
       "gaps": [
-        "Public-wallet execution and live price/provider changes need separate acceptance; favorable requotes remain owned by open PR #137.",
+        "Public-wallet execution and live price/provider changes need separate acceptance; execution-boundary quote movement within the reviewed bounds is covered offline by BUILD-FLOFI-E2E-RELIABILITY-001 (superseding draft PR #137), not by mainnet evidence.",
         "Mapped fork suites include existing owner-gated cases that may skip; a successful stage is not proof those optional cases ran."
       ]
     },
@@ -5023,7 +5093,7 @@
         "reference-compiler.orca-mainnet-liquidity"
       ],
       "gaps": [
-        "Public-wallet execution and live price/provider changes need separate acceptance; favorable requotes remain owned by open PR #137.",
+        "Public-wallet execution and live price/provider changes need separate acceptance; execution-boundary quote movement within the reviewed bounds is covered offline by BUILD-FLOFI-E2E-RELIABILITY-001 (superseding draft PR #137), not by mainnet evidence.",
         "Mapped fork suites include existing owner-gated cases that may skip; a successful stage is not proof those optional cases ran."
       ]
     },
@@ -5499,7 +5569,7 @@
         "reference-compiler.orca-mainnet-liquidity"
       ],
       "gaps": [
-        "Public-wallet execution and live price/provider changes need separate acceptance; favorable requotes remain owned by open PR #137.",
+        "Public-wallet execution and live price/provider changes need separate acceptance; execution-boundary quote movement within the reviewed bounds is covered offline by BUILD-FLOFI-E2E-RELIABILITY-001 (superseding draft PR #137), not by mainnet evidence.",
         "Mapped fork suites include existing owner-gated cases that may skip; a successful stage is not proof those optional cases ran."
       ]
     },
@@ -5787,7 +5857,7 @@
         "reference-compiler.orca-mainnet-liquidity"
       ],
       "gaps": [
-        "Public-wallet execution and live price/provider changes need separate acceptance; favorable requotes remain owned by open PR #137.",
+        "Public-wallet execution and live price/provider changes need separate acceptance; execution-boundary quote movement within the reviewed bounds is covered offline by BUILD-FLOFI-E2E-RELIABILITY-001 (superseding draft PR #137), not by mainnet evidence.",
         "Mapped fork suites include existing owner-gated cases that may skip; a successful stage is not proof those optional cases ran."
       ]
     },
@@ -6137,7 +6207,7 @@
         "reference-compiler.orca-mainnet-liquidity"
       ],
       "gaps": [
-        "Public-wallet execution and live price/provider changes need separate acceptance; favorable requotes remain owned by open PR #137.",
+        "Public-wallet execution and live price/provider changes need separate acceptance; execution-boundary quote movement within the reviewed bounds is covered offline by BUILD-FLOFI-E2E-RELIABILITY-001 (superseding draft PR #137), not by mainnet evidence.",
         "Mapped fork suites include existing owner-gated cases that may skip; a successful stage is not proof those optional cases ran."
       ]
     },
@@ -6397,6 +6467,7 @@
         "app.accounts.account-session",
         "app.accounts.account-store.pg",
         "app.accounts.oidc",
+        "app.accounts.privy-bridge",
         "app.accounts.privy-client",
         "app.accounts.privy-server",
         "app.accounts.privy-zod",
@@ -6503,11 +6574,13 @@
         "scripts/journey-latency-report.mjs"
       ],
       "suites": [
+        "app.app.api.flofi.journey.route",
         "app.domain.journey-metrics",
         "app.server.journey-telemetry"
       ],
       "gaps": [
-        "No live production sample exists yet: p50/p95 need real journeys in the deployment logs; the report refuses to label MOCKED or LOCAL evidence otherwise."
+        "No live production sample exists yet: p50/p95 need real journeys in the deployment logs; the report refuses to label MOCKED or LOCAL evidence otherwise.",
+        "Off by default (issue #149): a sample exists only after the deployment owner opts in with both switches (docs/privacy/JOURNEY-TELEMETRY.md). The legal basis there is an engineering proposal pending owner/legal review, not a sign-off."
       ]
     }
   ],

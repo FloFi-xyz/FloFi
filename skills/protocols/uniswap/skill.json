@@ -78,9 +78,9 @@
       "status": "VERIFIED",
       "reviewedRevision": "1c7597d73be0e9a3a4e44aa75b8fb212b40ea136",
       "reviewedDigest": "sha256:af164a943cb8ac94ac89b80044f6752e57f75f5310fc7e4037dac6262ee6963a",
-      "reviewedAt": "2026-11-01",
+      "reviewedAt": "2026-11-02",
       "crossCheckedAgainst": [],
-      "notes": "Trading API routingPreference BEST_PRICE and FASTEST."
+      "notes": "Trading API routingPreference BEST_PRICE and FASTEST (FASTEST skips UniswapX private liquidity). Re-verified 2026-11-02: digest unchanged, MIT LICENSE present at this revision, SKILL.md claims match the text."
     },
     {
       "url": "https://raw.githubusercontent.com/Uniswap/v3-periphery/24ccf014fe7f81d74a14c1689d6fdf123f280e45/contracts/lens/QuoterV2.sol",
@@ -90,9 +90,9 @@
       "status": "VERIFIED",
       "reviewedRevision": "24ccf014fe7f81d74a14c1689d6fdf123f280e45",
       "reviewedDigest": "sha256:7c0a974a98e224b1ec63158bad6c13c73a659dec669dead1fd99a0b0d85418a6",
-      "reviewedAt": "2026-11-01",
+      "reviewedAt": "2026-11-02",
       "crossCheckedAgainst": [],
-      "notes": "QuoterV2 quoteExactInputSingle: simulates the swap, catches its own callback revert and returns the amounts."
+      "notes": "QuoterV2 quoteExactInputSingle: simulates the swap, catches its own callback revert and returns the amounts. Re-verified 2026-11-02: digest unchanged, SPDX GPL-2.0-or-later header, SKILL.md claims match the code."
     },
     {
       "url": "https://developers.uniswap.org/docs/trading/swapping-api/concepts/swap-routing",
@@ -104,7 +104,7 @@
       "reviewedDigest": null,
       "reviewedAt": null,
       "crossCheckedAgainst": [],
-      "notes": "Published page of the pinned source above; not reachable from the build session."
+      "notes": "Published page of the pinned source above. Pending verification — blocked: developers.uniswap.org is outside this session's allowed network (egress proxy 403 on CONNECT; WebFetch DNS ENOTFOUND), 2026-11-02."
     }
   ],
   "guidance": "SKILL.md",

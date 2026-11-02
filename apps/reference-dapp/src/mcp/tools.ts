@@ -47,12 +47,14 @@ import { MCP_HANDOFF_RULES, mcpApprovalLinkScheme } from './approval-profile.ts'
 import { readHandoffPolicy, workflowPlan, type HandoffPolicy } from './execution.ts';
 import type { McpScope, OAuthConfig } from './oauth/config.ts';
 import type { McpState } from './oauth/state.ts';
-import type { McpRuntime } from './runtime.ts';
+import { observeRuntime, type McpRuntime } from './runtime.ts';
+import { isPixApproval, pixApprovalProgress } from './pix-approval-status.ts';
 import { assertSafeOutput, strategyFlow } from './simulation.ts';
 import { workflowVisualModel, type WorkflowVisualModel } from '../platform/workflow-visual.ts';
 import { workflowVisualLayout, workflowVisualText } from '../platform/workflow-visual-layout.ts';
 import { workflowVisualPngOrNull } from '../server/workflow-visual-image.ts';
 import { FLOFI_PRODUCTION_ORIGIN, publicApprovalUrl } from '../platform/navigation.ts';
+import { DeadlineError, isDeadlineError, MCP_TOOL_TIMEOUTS, toolCap, withinBudget, type DeadlineCode, type RequestBudget } from './deadline.ts';
 
 /** BUILD-DEVELOPER-001: the deep links moved to the shared approval service; re-exported for existing importers. */
 export { walletDeepLinks } from '../platform/index.ts';
@@ -170,7 +172,9 @@ export type ToolContext = { readonly principal: McpPrincipal; readonly runtime: 
   /** BUILD-MCP-002: the in-chat MCP App panel attached to request_user_approval, when enabled. */
   readonly ui?: { readonly resourceUri: string; readonly inFrameProbeHosts: readonly string[] } | null;
   /** BUILD-FLOFI-MAINNET-PRODUCT-001: the deployment's network scope (default: this server's, `server/network-scope.ts`). */
-  readonly scope?: NetworkScope };
+  readonly scope?: NetworkScope;
+  /** The request's deadline (`deadline.ts`): a tool stops waiting at its tool deadline and answers with a classified timeout. */
+  readonly budget?: RequestBudget };
 type Output = Record<string, unknown>;
 const CODE = /^[A-Z][A-Z0-9_]{2,80}$/;
 // BUILD-DEVELOPER-001: the engine operations live in the shared platform (`src/platform`); this file is the MCP surface over them.
@@ -182,6 +186,37 @@ const mcpCode = (code: string) => Object.hasOwn(MCP_CODES, code) ? MCP_CODES[cod
 const AUTHORITY = 'NONE: this result authorizes nothing. Only the owner, in the FloFi app, can review the Strategy Manifest and sign with their own wallet.';
 
 const DEFAULT_POLICY = readHandoffPolicy({});
+
+/**
+ * What a tool that ran out of time may say about its effects. A timeout only means FloFi stopped waiting:
+ *   READ_ONLY        the tool has no durable effect at all (discovery, authoring, preview): its answer is simply missing
+ *   STATUS_READ      it reads an execution or approval: the STATUS is unknown — never "nothing was submitted", "failed" or "done"
+ *   EFFECT_UNKNOWN   it may have written an approval request or replaced an approval link: the outcome is UNKNOWN, and it is
+ *                    never repeated automatically (a duplicate approval still needs the owner's own wallet; nothing executes from MCP)
+ */
+type TimeoutClass = 'READ_ONLY' | 'STATUS_READ' | 'EFFECT_UNKNOWN';
+const TIMEOUT_CLASS: Readonly<Partial<Record<ToolName, TimeoutClass>>> = Object.freeze({ get_execution_status: 'STATUS_READ', get_evidence: 'STATUS_READ',
+  get_approval_status: 'STATUS_READ', get_execution_progress: 'STATUS_READ', request_user_approval: 'EFFECT_UNKNOWN', open_approval_session: 'EFFECT_UNKNOWN' });
+const DEADLINE_CODES: ReadonlySet<string> = new Set<DeadlineCode>(['MCP_REQUEST_TIMEOUT', 'MCP_UPSTREAM_TIMEOUT', 'MCP_REQUEST_CANCELLED']);
+const TIMEOUT_CODES = new Set([...DEADLINE_CODES, 'CLOUD_API_DEADLINE_EXCEEDED', 'CLOUD_PREVIEW_TIMEOUT']);
+/** The classified answer of a tool that ran out of time (`code`: the request's or one upstream read's deadline). */
+export function timeoutResult(tool: ToolName, code: string, requestId: string | null): Output {
+  const kind = TIMEOUT_CLASS[tool] ?? 'READ_ONLY', id = requestId ? { requestId } : {};
+  if (kind === 'EFFECT_UNKNOWN') return { ok: false, code, ...id, outcome: 'UNKNOWN', retryable: false, automaticRetry: false, authority: AUTHORITY,
+    message: tool === 'request_user_approval'
+      ? 'FloFi did not finish this request in time. Whether an approval request was created is UNKNOWN. Do not tell the user that nothing was created, ' +
+        'and do not request approval again automatically: ask the user first (a new request for the same workflow supersedes an older pending one). ' +
+        'Any approval request still needs the owner to review it and confirm in their own wallet; nothing executes from MCP.'
+      : 'FloFi did not finish this request in time. Whether the previous approval link was replaced is UNKNOWN. Read get_approval_status for this approvalId ' +
+        'before opening another link; do not retry automatically.',
+    // A timed-out approval request delivered no approvalId, so no status can be read for it: the next step is asking the user.
+    next: tool === 'request_user_approval' ? [] : ['get_approval_status'] };
+  if (kind === 'STATUS_READ') return { ok: false, code, ...id, outcome: 'STATUS_UNKNOWN', retryable: true, authority: AUTHORITY,
+    message: 'FloFi could not read this status in time. The status is UNKNOWN: this is not evidence that nothing was submitted, that anything failed or that it completed. ' +
+      `Read it again with ${tool}.`, next: [tool] };
+  return { ok: false, code, ...id, outcome: 'NOT_COMPLETED', retryable: true, authority: AUTHORITY,
+    message: 'FloFi did not finish this read-only request in time. This tool never signs, submits or approves anything; call it again for its result.' };
+}
 /** The tools whose result presents a workflow to a person (BUILD-WORKFLOW-VISUAL-PRESENTATION-001). */
 const VISUAL_TOOLS: ReadonlySet<ToolName> = new Set(['compose_strategy', 'request_user_approval']);
 const isVisualModel = (value: unknown): value is WorkflowVisualModel => !!value && typeof value === 'object' && (value as WorkflowVisualModel).version === 1
@@ -217,8 +252,12 @@ export function createFlofiMcpServer(ctx: ToolContext): McpServer {
   const deploymentInstructions = ctx.oauth && ctx.oauth.origin !== FLOFI_PRODUCTION_ORIGIN
     ? ` This is a deliberately configured non-production FloFi environment at ${ctx.oauth.origin}; its MCP endpoint is ${ctx.oauth.resource}. ` +
       'Preserve the exact URLs returned by its tools for this preview; do not substitute the production origin into its OAuth or approval flow.' : '';
+  // One stateless server per request can never deliver a list-changed notification, so it does not claim to: a 2026-07-28
+  // `subscriptions/listen` is then acknowledged and completed at once instead of holding an SSE stream open until the platform kills it.
+  const panel = Boolean(ctx.principal.kind === 'mcp-oauth' && ctx.state && ctx.oauth && ctx.ui);
   const server = new McpServer({ name: 'flofi', title: 'FloFi', version: MCP_SERVER_VERSION },
-    { instructions: MCP_INSTRUCTIONS + deploymentInstructions + (scope === 'ENGINEERING' ? '' : MCP_MAINNET_INSTRUCTIONS) });
+    { instructions: MCP_INSTRUCTIONS + deploymentInstructions + (scope === 'ENGINEERING' ? '' : MCP_MAINNET_INSTRUCTIONS),
+      capabilities: { tools: { listChanged: false }, ...panel ? { resources: { listChanged: false } } : {} } });
   const now = ctx.now ?? (() => performance.now());
   const register = <S extends TSchema>(name: ToolName, title: string, description: string, schema: S, annotations: ToolAnnotations,
     run: (args: Static<S>) => Promise<Output> | Output, toolMeta: Record<string, unknown> = {}) => {
@@ -230,6 +269,8 @@ export function createFlofiMcpServer(ctx: ToolContext): McpServer {
       const started = now();
       let result: CallToolResult, outcome = 'OK';
       try {
+        // The whole tool — catalog preparation, runtime reads, presentation — waits at most until the request's tool deadline.
+        result = await withinBudget(ctx.budget, toolCap(ctx.budget, TIMEOUT_CLASS[name] === 'EFFECT_UNKNOWN' ? MCP_TOOL_TIMEOUTS.approvalWrite : MCP_TOOL_TIMEOUTS.default), async () => {
         if (!principalScopes(ctx.principal).includes(scope)) failWith('MCP_INSUFFICIENT_SCOPE');
         // BUILD-RH-002: a strategy naming Robinhood Chain composes against the validated official catalog (where this deployment enables it);
         // BUILD-BASE-001: so does one naming Base (its validated token list).
@@ -248,14 +289,29 @@ export function createFlofiMcpServer(ctx: ToolContext): McpServer {
           ? { ...publicFields, approvalUrl: publicApprovalUrl(ctx.oauth!.origin, output.approvalId) }
           : output;
         const presented = VISUAL_TOOLS.has(name) && isVisualModel(visible.visual)
-          ? await presentation(visible.visual, visible, name === 'request_user_approval').catch(() => null) : null;
+          // BUILD-FLOFI-E2E-RELIABILITY-001 (MCP review): the picture is optional and comes after an approval may already exist, so it is capped
+          // (5 s) and dropped on timeout — never the result, and never turning a created approval into an UNKNOWN timeout.
+          ? await Promise.race([presentation(visible.visual, visible, name === 'request_user_approval').catch(() => null),
+            new Promise<null>(resolve => { const timer = setTimeout(() => resolve(null), 5_000); timer.unref?.(); })]) : null;
         const meta = { ...privateLinks && typeof approvalUrl === 'string' ? { 'flofi/approval': { approvalUrl, walletLinks } } : {}, ...presented?.meta };
-        result = { content: [{ type: 'text', text: JSON.stringify(visible) }, ...presented?.content ?? []], structuredContent: visible,
-          ...Object.keys(meta).length ? { _meta: meta } : {} };
+        return { content: [{ type: 'text', text: JSON.stringify(visible) }, ...presented?.content ?? []], structuredContent: visible,
+          ...Object.keys(meta).length ? { _meta: meta } : {} } satisfies CallToolResult;
+        });
       } catch (error) {
         outcome = error instanceof Error && CODE.test(error.message) ? mcpCode(error.message) : 'MCP_INTERNAL_ERROR';
-        const body = { ok: false, code: outcome, ...error instanceof PlatformRefusal ? error.extra : {} };
-        result = { content: [{ type: 'text', text: JSON.stringify(body) }], structuredContent: body, isError: true };
+        // Once the request's budget has ended, whatever failed is reported as the timeout it is, with what the tool may have done.
+        const ended = ctx.budget?.ended();
+        if (ended || isDeadlineError(error) || TIMEOUT_CODES.has(outcome)) {
+          // The gateway's own codes pass through (a bounded read may report the request's deadline a moment before its timer fires);
+          // a remote client's deadline or preview timeout is an upstream timeout.
+          outcome = ended === 'CLIENT_CLOSED' ? 'MCP_REQUEST_CANCELLED' : ended === 'DEADLINE' ? 'MCP_REQUEST_TIMEOUT' : isDeadlineError(error) ? error.code
+            : DEADLINE_CODES.has(outcome) ? outcome : 'MCP_UPSTREAM_TIMEOUT';
+          const body = timeoutResult(name, outcome, ctx.budget?.requestId ?? null);
+          result = { content: [{ type: 'text', text: JSON.stringify(body) }], structuredContent: body, isError: true };
+        } else {
+          const body = { ok: false, code: outcome, ...error instanceof PlatformRefusal ? error.extra : {} };
+          result = { content: [{ type: 'text', text: JSON.stringify(body) }], structuredContent: body, isError: true };
+        }
       }
       ctx.onTool?.({ tool: name, outcome, durationMs: Math.round(now() - started) });
       return result;
@@ -455,6 +511,21 @@ function registerApprovalTools(ctx: ToolContext, register: Register) {
     allow: (bucket, limit, windowSeconds, now) => state.oauth.allow(bucket, limit, windowSeconds, now), runtime: ctx.runtime, policy: ctx.policy ?? DEFAULT_POLICY,
     rules: MCP_HANDOFF_RULES, now: new Date() });
   const owned = (approvalId: string) => approvalForRequester(state.handoffs, requester, approvalId, new Date());
+  /**
+   * One of this requester's approvals with its runs (only when the owner shares them). A Pix approval lists its durably bound Pix runs
+   * (issue #149, `pix-approval-status.ts`). A run read that failed makes the list INCOMPLETE — said explicitly, never shown as "no runs".
+   */
+  const progress = async (approvalId: string) => {
+    const h = await owned(approvalId), observed = observeRuntime(ctx.runtime);
+    const value = isPixApproval(h) ? await pixApprovalProgress(h, observed.runtime, oauth.origin)
+      : await approvalProgress(h, observed.runtime, state.handoffs, oauth.origin, state.workflowRuns);
+    const failure = observed.failure();
+    // The request's own deadline (or a client that left) during a run read: the whole status is UNKNOWN (STATUS_UNKNOWN timeout result).
+    if (failure === 'MCP_REQUEST_TIMEOUT' || failure === 'MCP_REQUEST_CANCELLED') throw new DeadlineError(failure);
+    if (!failure || !value.runsVisible || 'runsComplete' in value) return value;
+    return { ...value, runsComplete: false, runsReadError: failure,
+      note: 'Some runs of this approval could not be read now; their state is UNKNOWN (not "not started"). Read get_approval_status again.' };
+  };
   const ui = ctx.ui ?? null, appOnly = { ui: { visibility: ['app'] } };
 
   register('request_user_approval', 'Request the owner\'s approval', 'Request approval for the exact composed strategy and workflowHash. The MCP App can present the existing signing surface inside chat when the host and wallet support it. ' +
@@ -480,13 +551,12 @@ function registerApprovalTools(ctx: ToolContext, register: Register) {
     '`workflowRun`: every step\'s state, the next action (e.g. OWNER_SIGNS_STEP: share the approvalUrl again), and — when the owner shares status — each step\'s ' +
     'transaction hashes, explorer links, reconciled amounts and evidence; HALTED means partially completed. Poll this tool when asked; no callback or push is promised. ' +
     'It never reveals the claiming wallet or authorizes anything.', ApprovalSchemas.byId, { ...pure, idempotentHint: false },
-  async args => ({ ok: true, ...await approvalProgress(await owned(args.approvalId), ctx.runtime, state.handoffs, oauth.origin, state.workflowRuns) }));
+  async args => ({ ok: true, ...await progress(args.approvalId) }));
 
   register('open_approval_session', 'Open FloFi approval', 'App-only: a fresh, short-lived FloFi link for this approval (for the signing window or a wallet ' +
     'in-app browser). The link only shows the proposal; it authorizes nothing.', ApprovalSchemas.byId, { readOnlyHint: false, destructiveHint: false,
     idempotentHint: false, openWorldHint: false }, async args => ({ ok: true, ...await openApprovalSession(deps(), requester, args.approvalId) }), appOnly);
 
   register('get_execution_progress', 'Execution progress', 'App-only: the approval\'s state and, when its owner shares it, the status of the runs started from it.',
-    ApprovalSchemas.byId, { ...pure, idempotentHint: false }, async args => ({ ok: true, ...await approvalProgress(await owned(args.approvalId), ctx.runtime, state.handoffs, oauth.origin,
-      state.workflowRuns) }), appOnly);
+    ApprovalSchemas.byId, { ...pure, idempotentHint: false }, async args => ({ ok: true, ...await progress(args.approvalId) }), appOnly);
 }

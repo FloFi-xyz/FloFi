@@ -33,6 +33,19 @@ export type ConversationCopy = {
   readonly walletNotReady: string; readonly walletNotReadyToContinue: string;
   readonly quoteMoved: (reason: string) => string; readonly quoteChanges: (changes: string) => string; readonly quoteUnchanged: string;
   readonly confirmUpdated: string; readonly anotherRoute: string; readonly refreshing: string;
+  /**
+   * BUILD-FLOFI-E2E-RELIABILITY-001: the continuation of a run whose earlier wallet request already landed (e.g. the swap after its confirmed
+   * approval). It names what is confirmed and what has not been sent, and never says "nothing was sent" about the run as a whole.
+   */
+  readonly continueAfter: (done: string, next: string, approval: boolean) => string;
+  readonly continuationRequote: (reason: string | null) => string; readonly continuationReview: (next: string) => string;
+  readonly continuationQuestion: string; readonly continueFailed: (reason: string) => string;
+  /** The answer that accepts a fresh continuation Review (distinct from the plain Continue of an already accepted one). */
+  readonly continueAccept: string;
+  /** Owner-bound networks: the swap after a landed approval is a new transaction from the wallet, with its own fresh Review. */
+  readonly ownerBoundNext: (done: string, next: string) => string;
+  readonly continuationRefreshing: (next: string) => string; readonly otherWallet: (wallet: string) => string;
+  readonly checkThenContinue: string; readonly reviewToContinue: string; readonly quoteStillValid: string;
 };
 const en: ConversationCopy = {
   added: (action, detail) => `${action} added to your workflow: ${detail}.`,
@@ -111,6 +124,16 @@ const en: ConversationCopy = {
   confirmUpdated: 'Do you confirm the updated workflow?',
   anotherRoute: 'FloFi asks the provider policy configured on this action again (the Bridge card\'s routing). To force a single provider, change the routing on the card; FloFi never switches providers by itself.',
   refreshing: 'Getting a fresh quote and simulation. Nothing is signed or sent.',
+  continueAfter: (done, next, approval) => `${done} is confirmed on-chain.${approval ? ' An approval only allows the spend; it is not the action itself.' : ''} ${next} has not been sent yet and needs its own confirmation in your wallet. Continue to your wallet?`,
+  continuationRequote: reason => `Your earlier confirmed request stays in place, and nothing new was sent.${reason ? ` ${reason}` : ' The reviewed quote is no longer valid.'} I am getting a fresh quote for the next request now; you confirm it before your wallet is asked.`,
+  continuationReview: next => `Here is the fresh quote for ${next}, which has not been sent yet. Your earlier confirmed request stays in place and is not repeated. Amounts are estimates from this simulation, not executed results.`,
+  continuationQuestion: 'Accept this updated quote and continue to your wallet for this request?', continueAccept: 'Accept and continue',
+  ownerBoundNext: (done, next) => `${done} is confirmed on-chain. An approval only allows the spend; it is not the action itself. ${next} is a new transaction from your wallet, so FloFi is preparing its own fresh Review now (read-only); you confirm it before your wallet is asked.`,
+  continuationRefreshing: next => `Getting a fresh quote for ${next}. Nothing is signed or sent.`,
+  otherWallet: wallet => `This run's earlier request came from another wallet (${wallet}). Connect that wallet to continue it, or review the workflow with this wallet to start a separate swap.`,
+  checkThenContinue: 'Check the status, then continue again.', reviewToContinue: 'Review the workflow again to continue.',
+  quoteStillValid: 'The reviewed quote is still valid for the next request. Answer Continue when you are ready.',
+  continueFailed: reason => `The next wallet request did not start, so nothing new was sent. Earlier confirmed requests stay recorded. ${reason}`,
 };
 const pt: ConversationCopy = {
   added: (action, detail) => `Adicionado ao seu workflow: ${action} · ${detail}.`,
@@ -189,5 +212,15 @@ const pt: ConversationCopy = {
   confirmUpdated: 'Você confirma o workflow atualizado?',
   anotherRoute: 'A FloFi consulta de novo a política de provedores configurada nesta ação (o roteamento do card de Bridge). Para forçar um único provedor, altere o roteamento no card; a FloFi nunca troca de provedor sozinha.',
   refreshing: 'Buscando uma nova cotação e simulação. Nada é assinado nem enviado.',
+  continueAfter: (done, next, approval) => `${done}: confirmado na rede.${approval ? ' Uma aprovação apenas autoriza o gasto; não é a ação em si.' : ''} ${next}: ainda não enviado, precisa da sua própria confirmação na carteira. Continuar para a carteira?`,
+  continuationRequote: reason => `O seu pedido anterior já confirmado continua válido, e nada novo foi enviado.${reason ? ` ${reason}` : ' A cotação revisada já não é válida.'} Estou buscando uma nova cotação para o próximo pedido; você a confirma antes de a carteira ser chamada.`,
+  continuationReview: next => `Esta é a nova cotação para ${next}, que ainda não foi enviado. O seu pedido anterior já confirmado continua válido e não é repetido. Os montantes são estimativas desta simulação, não resultados executados.`,
+  continuationQuestion: 'Aceitar esta cotação atualizada e continuar para a carteira com este pedido?', continueAccept: 'Aceitar e continuar',
+  ownerBoundNext: (done, next) => `${done}: confirmado na rede. Uma aprovação apenas autoriza o gasto; não é a ação em si. ${next} é uma nova transação da sua carteira, então a FloFi está preparando a revisão própria dela agora (somente leitura); você a confirma antes de a carteira ser chamada.`,
+  continuationRefreshing: next => `Buscando uma nova cotação para ${next}. Nada é assinado nem enviado.`,
+  otherWallet: wallet => `O pedido anterior desta execução veio de outra carteira (${wallet}). Conecte essa carteira para continuá-la, ou revise o workflow com esta carteira para iniciar uma troca separada.`,
+  checkThenContinue: 'Verifique o status e depois continue de novo.', reviewToContinue: 'Revise o workflow de novo para continuar.',
+  quoteStillValid: 'A cotação revisada ainda é válida para o próximo pedido. Responda Continuar quando quiser.',
+  continueFailed: reason => `O próximo pedido na carteira não começou, então nada novo foi enviado. Os pedidos já confirmados continuam registrados. ${reason}`,
 };
 export const conversationCopy = (language: ConversationLanguage): ConversationCopy => language === 'PT' ? pt : en;
