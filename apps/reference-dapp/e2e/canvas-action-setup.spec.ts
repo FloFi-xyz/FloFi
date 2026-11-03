@@ -62,7 +62,10 @@ for (const action of ['swap', 'bridge'] as const) test(`${action} starts unconfi
     expect(node.inputs.find(field => field.kind === 'QUANTITY')?.value.amount).toBe('2500000');
   } else {
     // Router workflows use their existing dedicated diagnostics. Its editor and Simulate are both canonical readers.
-    await expect(page.getByRole('form', { name: 'Edit cross-chain bridge', exact: true }).getByLabel('Cross-chain amount (USDC)', { exact: true })).toHaveValue('2.5');
+    // BUILD-FLOFI-UX-FIX-003: the bridge's settings are its compact options (recipient, routing, slippage); the amount is edited on the card.
+    const options = page.getByRole('form', { name: 'Edit cross-chain bridge', exact: true });
+    await expect(options.getByLabel('Cross-chain recipient', { exact: true })).toBeAttached();
+    await expect(options.getByLabel('Cross-chain amount (USDC)', { exact: true })).toHaveCount(0);
   }
   await expect(source).toHaveValue('2.5');
   // Authoring enables stage inspection; this supply-only harness cannot simulate Swap/Router.

@@ -11,7 +11,7 @@ import type { Command } from '../domain/commands';
 import type { CanvasAction } from '../domain/canvas-authoring';
 import { ActionIcon } from './action-icon';
 import { TokenBrandIcon, NetworkBrandIcon } from './brand-icon';
-import { useEffect, useId, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useId, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { PoolPriceRange, usePoolPriceRange, type PoolPricePreset } from './pool-price-range';
 import { TokenAmountInput } from './token-amount-input';
 import { usePoolContributionInputs } from './canvas-card-inputs';
@@ -287,33 +287,48 @@ function PoolPricePanel({ strategy, onSelect, onCollapse }: { strategy: PoolPric
     </fieldset>;
 }
 
+/**
+ * BUILD-FLOFI-UX-FIX-003: the number's length, so CSS sizes it to fit its column on one line (`globals.css`, `--amount-chars`). Presentation only:
+ * the value itself is never rounded or shortened here; a value too long even at the smallest size is clipped with its full text on hover.
+ */
+const amountFit = (value: string): CSSProperties => ({ ['--amount-chars' as string]: String(Math.max(value.length, 5)) });
 /** Display priority is shared by all value boxes in the card; token inputs keep their denomination. */
-function ValueBox({ amount, token, network, source, label, hint, editor, inputLabel, equity, picker, fiatFirst, onFiatFirstChange, readOnly = false, invalid = false, usd }: { usd?: UsdLine; invalid?: boolean; readOnly?: boolean; amount?: string | undefined; token: string; network: string; source?: boolean; label?: string; hint: string; editor?: (Pick<CanvasAmountEditor, 'value' | 'formId' | 'onChange'> & { onEscape?: () => void }) | undefined; inputLabel?: string; equity?: { symbol: string; onToggle(): void; expanded: boolean; controls: string }; picker?: TokenPickerControl; fiatFirst: boolean; onFiatFirstChange: (fiatFirst: boolean) => void }) {
+function ValueBox({ amount, token, network, source, label, hint, editor, inputLabel, equity, picker, fiatFirst, onFiatFirstChange, readOnly = false, invalid = false, usd, loading = false }: { usd?: UsdLine; invalid?: boolean; readOnly?: boolean; loading?: boolean; amount?: string | undefined; token: string; network: string; source?: boolean; label?: string; hint: string; editor?: (Pick<CanvasAmountEditor, 'value' | 'formId' | 'onChange'> & { onEscape?: () => void }) | undefined; inputLabel?: string; equity?: { symbol: string; onToggle(): void; expanded: boolean; controls: string }; picker?: TokenPickerControl; fiatFirst: boolean; onFiatFirstChange: (fiatFirst: boolean) => void }) {
   const { t: tr } = useLocale();
+  // BUILD-FLOFI-UX-FIX-003: a quote on its way is a quiet, fixed-size placeholder (never "Calculating…" text that wraps and resizes the card); the
+  // full value of a long amount stays available on hover and to assistive technology while the box keeps one line.
+  // One persistent polite live region per value: assistive technology hears "Calculating estimate…" and then the amount when it arrives.
+  const shown = (value: string | undefined, fallback: string) => <span className="composer-amount-live" aria-live="polite" aria-busy={loading && !value ? true : undefined}>
+    {loading && !value
+      ? <span className="composer-amount-value composer-amount-loading"><span className="composer-amount-skeleton" aria-hidden="true"/><span className="sr-only">{tr('Calculating estimate…')}</span></span>
+      : <span className="composer-amount-value" style={amountFit(value ?? fallback)} title={value ?? undefined}>{tr(value ?? fallback)}</span>}
+  </span>;
   if (readOnly) return <span className={`numeric composer-amount-box ${source ? 'composer-amount' : 'composer-destination-box'}`}
     role="group" aria-label={tr(label ?? (source ? 'Source amount' : 'Destination amount'))} data-symbolic={!amount || undefined} title={tr(hint)}>
-    <span className="composer-value-column"><span className="composer-amount-value">{tr(amount ?? '—')}</span></span>{tr(' ')}
+    <span className="composer-value-column">{shown(amount, '—')}</span>{tr(' ')}
     <TokenChip symbol={token} network={network.replace(/ \(\d+\)$/, '').replace('Robinhood Chain Testnet', 'Robinhood Chain')}/>
   </span>;
   // BUILD-FIX-UX-001: USD first is offered only when a verified USD estimate exists; otherwise the line says why there is none.
   const usdFirst = fiatFirst && usd?.kind === 'value';
   const tokenValue = editor ? <TokenAmountInput className={`composer-token-value ${usdFirst ? 'composer-fiat-value' : 'composer-amount-value'}`}
     aria-label={tr(inputLabel ?? `Source amount (${token})`)} inputMode="decimal" autoComplete="off" spellCheck={false} maxLength={80}
-    form={editor.formId} value={editor.value} style={usdFirst ? { width: `${Math.max(editor.value.length, 1)}ch` } : undefined}
+    form={editor.formId} value={editor.value} style={usdFirst ? { width: `${Math.max(editor.value.length, 1)}ch` } : amountFit(editor.value)}
     aria-invalid={invalid || undefined} onValueChange={editor.onChange}
     onKeyDown={event => { event.stopPropagation(); if (event.key === 'Escape' && editor.onEscape) { event.preventDefault(); editor.onEscape(); } }}/>
-    : <span className={usdFirst ? 'composer-fiat-value' : 'composer-amount-value'}>{tr(amount ?? '0')}</span>;
+    : usdFirst ? <span className="composer-fiat-value">{tr(amount ?? '0')}</span> : shown(amount, '0');
   return <span className={`numeric composer-amount-box nodrag nopan ${source ? 'composer-amount' : 'composer-destination-box'}`}
     role="group" aria-label={tr(label ?? (source ? 'Source amount' : 'Destination amount (unquoted placeholder)'))}
     data-symbolic={!amount || undefined} title={tr(hint)}>
     <span className="composer-value-column">
       <span className="composer-value-line">
-        {usdFirst ? <button type="button" className="composer-primary-fiat" aria-label={tr("Show token amount first")} title={tr(usd.title)} onClick={() => onFiatFirstChange(false)}>{tr(usd.text)}</button> : tokenValue}
+        {usdFirst ? <button type="button" className="composer-primary-fiat" style={amountFit(usd.text)} aria-label={tr("Show token amount first")} title={tr(usd.title)} onClick={() => onFiatFirstChange(false)}>{tr(usd.text)}</button> : tokenValue}
       </span>
       {usdFirst ? <span className="composer-token-subline">{editor ? <>{tr(tokenValue)}<span>{tr(token)}</span></>
         : <span>{tr(amount ?? '0')} {tr(token)}</span>}</span>
         : usd?.kind === 'value' ? <button type="button" className="composer-fiat-value" data-usd="value" aria-label={tr("Show USD value first")} title={tr(usd.title)} onClick={() => onFiatFirstChange(true)}>{tr(usd.text)}</button>
-        : <span className="composer-fiat-value" data-usd={usd?.kind ?? 'unavailable'} title={tr(usd?.title ?? 'No verified USD price is available for this asset right now.')}>{tr(usd?.text ?? 'USD price unavailable')}</span>}
+        // BUILD-FLOFI-UX-FIX-003: no USD figure, no words: the line keeps its height (no layout shift) and says nothing that adds no value.
+        : usd?.kind === 'test-token' ? <span className="composer-fiat-value" data-usd="test-token" title={tr(usd.title)}>{tr(usd.text)}</span>
+        : <span className="composer-fiat-value" data-usd={usd?.kind ?? 'unavailable'} aria-hidden="true"/>}
     </span>
     {equity ? <EquityPill equity={equity.symbol} onToggle={equity.onToggle} expanded={equity.expanded} controls={equity.controls}/> : picker ? <TokenPill symbol={token} network={network} picker={picker}/> : <TokenChip symbol={token} network={network}/>}
   </span>;
@@ -353,7 +368,6 @@ export function ComposerCard({ data: card }: { data: ComposerCardData }) {
   const quote = useLiveQuote(['Swap', 'Stocks', 'Bridge'].includes(card.summary.action) ? card.estimateWorkflow : undefined,
     card.estimateNodeId ?? '', quoteOwner, card.summary.action === 'Bridge' ? quoteDestination : undefined);
   const estimate = quote.status === 'ready' ? quote.estimate : null;
-  const discovery = estimate?.bridge?.discovery ?? (quote.status === 'unavailable' ? quote.discovery : undefined);
   const usdState = { status: quote.status === 'calculating' ? 'pending' as const : estimate ? 'ready' as const : 'none' as const,
     mocked: estimate?.usd?.evidence === 'MOCKED', ...(estimate?.usd ? { observedAt: estimate.usd.observedAt } : {}) };
   const [amountError, setAmountError] = useState<string | null>(null);
@@ -442,13 +456,16 @@ export function ComposerCard({ data: card }: { data: ComposerCardData }) {
           {amountParts ? <ValueBox readOnly source amount={amountParts[1]} token={amountParts[2]!} network={sourceNetwork} hint={card.summary.amount} fiatFirst={false} onFiatFirstChange={setFiatFirst}/>
             : <span className="numeric composer-amount">{tr(card.summary.amount)}</span>}
           {pairDestination && <><span className="composer-value-arrow" aria-hidden="true">↓</span><ValueBox readOnly token={pairDestination} network={destinationNetwork}
-            {...estimate ? { amount: estimate.expected } : {}} hint={estimate ? 'Approximate read-only output; simulate before review' : 'Output estimate unavailable'} fiatFirst={false} onFiatFirstChange={setFiatFirst}/></>}
+            {...estimate ? { amount: estimate.expected } : {}} loading={quote.status === 'calculating'} hint={estimate ? 'Estimated output; simulate before review' : 'Output estimate unavailable'} fiatFirst={false} onFiatFirstChange={setFiatFirst}/></>}
         </div>}
         {/* BUILD-FLOFI-WALLET-UX-EXECUTION-FIX-001 (P0-07): the Simulate plan shows the same shared live quote as Build, or why there is none. */}
-        {/* No quote note where no quote is asked for (the Execute plan shows reviewed amounts elsewhere), never a bare "unavailable". */}
-        {pairDestination && (card.estimateWorkflow || quote.status !== 'idle') && <span className="composer-quote-note" aria-live="polite" title={quote.status === 'unavailable' && quote.code ? [quote.code, quote.correlationId].filter(Boolean).join(' · ') : undefined}>{tr(estimate ? `Approximate · ${estimate.provider} · Simulate before review`
-          : quote.status === 'calculating' ? 'Calculating estimate…' : quote.status === 'unavailable' ? buildEstimateFailureMessage(quote.code ?? 'ESTIMATE_UNAVAILABLE') : 'Estimate unavailable')}
-          {quote.status === 'unavailable' && buildEstimateFailureReference(quote.code) && <> <small className="composer-quote-reference">{tr('Reference {0}', buildEstimateFailureReference(quote.code)!)}</small></>}</span>}
+        {/* BUILD-FLOFI-UX-FIX-003: only a quote that could not be produced is explained, in plain words; provider names, quality labels and "calculating"
+            text stay off the card (the destination box shows the estimate or a quiet placeholder). Fees, the chosen route and risks are shown at Review. */}
+        {pairDestination && quote.status === 'unavailable' && <span className="composer-quote-note" role="status" title={quote.code ? [quote.code, quote.correlationId].filter(Boolean).join(' · ') : undefined}>
+          {tr(buildEstimateFailureMessage(quote.code ?? 'ESTIMATE_UNAVAILABLE'))}
+          {buildEstimateFailureReference(quote.code) && <> <small className="composer-quote-reference">{tr('Reference {0}', buildEstimateFailureReference(quote.code)!)}</small></>}</span>}
+        {/* A route FloFi can only quote (not execute) is never shown as if it could run: one plain sentence, no provider jargon. */}
+        {pairDestination && estimate?.bridge?.execution === 'QUOTE_ONLY' && <span className="composer-quote-note" role="status">{tr('Estimate only: FloFi cannot execute this route yet.')}</span>}
       </>        : amountBox ? <AmountContainer className="composer-amount-form nodrag nopan"
         onKeyDown={event => event.stopPropagation()}
         onSubmit={event => { event.preventDefault(); commitAmount(); }}
@@ -462,22 +479,19 @@ export function ComposerCard({ data: card }: { data: ComposerCardData }) {
         <ValueBox source amount={amountParts?.[1]} token={amountParts?.[2] ?? pairSource ?? '—'} {...stocksCard ? { label: 'Stocks amount', inputLabel: `Stocks amount (${amountParts?.[2] ?? pairSource ?? 'USDG'})` } : {}}
           network={sourceNetwork} editor={editor && directCommit && editor.changed && editor.onCancel ? { ...editor, onEscape: () => { setAmountError(null); editor.onCancel!(); } } : editor} invalid={Boolean(amountError)} {...stocksCard ? {} : { picker: picker('source') }} hint={editor ? 'Enter the source amount' : card.summary.amount} fiatFirst={fiatFirst} onFiatFirstChange={setFiatFirst}
           usd={usdLine(sourceNetwork, estimate?.usd?.input, usdState)}/>
-        <ValueBox amount={estimate?.expected ?? (quote.status === 'calculating' ? 'Calculating…' : '—')} token={pairDestination ?? '—'} network={destinationNetwork}
+        <ValueBox amount={estimate?.expected ?? (quote.status === 'calculating' ? undefined : '—')} loading={quote.status === 'calculating' && !estimate} token={pairDestination ?? '—'} network={destinationNetwork}
           {...card.stocks ? { equity: { symbol: card.stocks.equity, onToggle: () => { setStocksPanelOpen(open => !open); setTokenPanel(null); }, expanded: stocksPanelOpen, controls: stocksPanelId } } : { picker: picker('destination') }}
-          hint="Approximate read-only output; simulate before review" fiatFirst={fiatFirst} onFiatFirstChange={setFiatFirst}
+          hint="Estimated output; simulate before review" fiatFirst={fiatFirst} onFiatFirstChange={setFiatFirst}
           usd={usdLine(destinationNetwork, estimate?.usd?.output, usdState)}/>
         </ValuePair>
-        <span className="composer-quote-note" title={quote.status === 'unavailable' && quote.code ? [quote.code, quote.correlationId].filter(Boolean).join(' · ') : undefined}>{card.networkSelection?.valid === false ? tr('Choose matching networks') : <>{!amountParts && <>{tr(card.summary.amount)} · </>}{tr(estimate ? `Approximate · ${estimate.provider} · Simulate before review` : quote.status === 'calculating' ? 'Calculating estimate…' : quote.status === 'unavailable' ? buildEstimateFailureMessage(quote.code ?? 'ESTIMATE_UNAVAILABLE') : 'Estimate unavailable')}</>}
-          {quote.status === 'unavailable' && buildEstimateFailureReference(quote.code) && <> <small className="composer-quote-reference">{tr('Reference {0}', buildEstimateFailureReference(quote.code)!)}</small></>}</span>
-        {estimate?.bridge && <span className="composer-quote-note">{tr(estimate.bridge.execution === 'QUOTE_ONLY'
-          ? 'Live quote only · execution is not validated' : 'Builder verified · simulation and Review still required')}</span>}
-        {discovery && <details className="nodrag nopan"><summary>{tr('Provider estimates')}</summary><ul aria-label={tr('Provider estimates')}>
-          {discovery.candidates.map((candidate, index) => <li key={`${candidate.provider}-${index}`} title={candidate.reason ?? undefined}>
-            {candidate.provider} · {tr(({ EXECUTABLE: 'Builder verified · simulation and Review still required', LIVE_QUOTE: 'Live quote only', BELOW_MINIMUM: 'Below provider minimum',
-              ABOVE_MAXIMUM: 'Above provider maximum', INSUFFICIENT_LIQUIDITY: 'Insufficient liquidity', TEMPORARILY_UNAVAILABLE: 'Temporarily unavailable',
-              NO_ROUTE: 'No route', SUPPORTED_BY_PROVIDER: 'Supported, no quote', INTERNAL_ERROR: 'Internal quote error' } as const)[candidate.status])}
-          </li>)}
-        </ul></details>}
+        {/* BUILD-FLOFI-UX-FIX-003: the card says only what the owner must act on — mismatched networks, or why no estimate could be produced — in plain
+            words. Provider names, "approximate", builder/quote-only labels and the provider candidate list stay internal; Review shows the route and fees. */}
+        {(card.networkSelection?.valid === false || quote.status === 'unavailable') && <span className="composer-quote-note" role="status"
+          title={quote.status === 'unavailable' && quote.code ? [quote.code, quote.correlationId].filter(Boolean).join(' · ') : undefined}>
+          {card.networkSelection?.valid === false ? tr('Choose matching networks') : tr(buildEstimateFailureMessage(quote.status === 'unavailable' ? quote.code ?? 'ESTIMATE_UNAVAILABLE' : 'ESTIMATE_UNAVAILABLE'))}
+          {card.networkSelection?.valid !== false && quote.status === 'unavailable' && buildEstimateFailureReference(quote.code) && <> <small className="composer-quote-reference">{tr('Reference {0}', buildEstimateFailureReference(quote.code)!)}</small></>}</span>}
+        {card.networkSelection?.valid !== false && estimate?.bridge?.execution === 'QUOTE_ONLY' && <span className="composer-quote-note" role="status">{tr('Estimate only: FloFi cannot execute this route yet.')}</span>}
+        {!amountParts && card.networkSelection?.valid !== false && quote.status !== 'unavailable' && card.summary.amount && <span className="composer-quote-note">{tr(card.summary.amount)}</span>}
         {editor?.changed && (directCommit ? <div className="composer-amount-actions composer-amount-direct">
           <span className="composer-amount-hint">{tr("Press Enter to apply")}</span>
           {editor.onCancel && <button type="button" className="composer-amount-cancel" onClick={() => { setAmountError(null); editor.onCancel!(); }}>{tr("Cancel")}</button>}

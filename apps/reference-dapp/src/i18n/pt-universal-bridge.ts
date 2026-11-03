@@ -109,7 +109,10 @@ export const portugueseUniversalBridge: Readonly<Record<string, string>> = {
     'A execução pelo dono não está ativada neste servidor. A descoberta de rotas, as cotações, a simulação e a Revisão continuam só de leitura.',
   'Connect your Solana wallet first.': 'Ligue primeiro a sua carteira Solana.',
   'Connect your wallet on the destination network, or enter a recipient address in the bridge.': 'Ligue a sua carteira na rede de destino, ou indique um endereço de destinatário na bridge.',
-  'Switch your wallet to the source network.': 'Mude a sua carteira para a rede de origem.', 'Select the wallet account shown in Review.': 'Selecione a conta da carteira mostrada na Revisão.',
+  'Switch your wallet to the source network.': 'Mude a sua carteira para a rede de origem.',
+  'Estimate only: FloFi cannot execute this route yet.': 'Apenas estimativa: o FloFi ainda não consegue executar esta rota.',
+  'No route FloFi can execute is available for this bridge and amount right now.': 'Não há agora uma rota que o FloFi consiga executar para esta bridge e este montante.',
+  'Your wallet would use a different transaction number. Let pending transactions confirm first. Nothing was sent.': 'A sua carteira usaria outro número de transação. Espere as transações pendentes confirmarem primeiro. Nada foi enviado.', 'Select the wallet account shown in Review.': 'Selecione a conta da carteira mostrada na Revisão.',
   'Accept the current Review first.': 'Aceite primeiro a Revisão atual.', 'This Review expired. Get a fresh route and review again.': 'Esta Revisão expirou. Obtenha uma nova rota e reveja de novo.',
   'The provider no longer offers the reviewed route. Your authorization was cleared and nothing was sent. Get a fresh route, then review it.':
     'O fornecedor já não oferece a rota revista. A sua autorização foi limpa e nada foi enviado. Obtenha uma nova rota e depois reveja-a.',

@@ -232,13 +232,18 @@ export function createAccountStore(db: Database, tenantId: string) {
       if (!holder) fail('ACCOUNT_IDENTITY_LINKED_ELSEWHERE');
     },
     async account(accountId: string): Promise<AccountRecord | null> {
-      const account = (await db.query<{ onboarding: string; wallet_provider: string | null; wallet_organization: string | null; wallet_user: string | null;
-        wallet_login: string | null; created_at: Date }>('SELECT * FROM flofi_accounts WHERE tenant_id=$1 AND account_id=$2', [tenantId, accountId])).rows[0];
+      // BUILD-FLOFI-UX-FIX-003: the account row, its identities and its wallets are three independent reads of the same account: asked together
+      // (one round trip of latency instead of three on every sign-in and account page). Each is scoped by tenant and account id as before.
+      const [accountRows, identityRows, wallets] = await Promise.all([
+        db.query<{ onboarding: string; wallet_provider: string | null; wallet_organization: string | null; wallet_user: string | null;
+          wallet_login: string | null; created_at: Date }>('SELECT * FROM flofi_accounts WHERE tenant_id=$1 AND account_id=$2', [tenantId, accountId]),
+        db.query<{ kind: string; subject: string; label: string | null }>(`SELECT kind, subject, label FROM flofi_account_identities
+          WHERE tenant_id=$1 AND account_id=$2 ORDER BY created_at, kind`, [tenantId, accountId]),
+        store.wallets(accountId)]);
+      const account = accountRows.rows[0];
       if (!account) return null;
-      const identities = (await db.query<{ kind: string; subject: string; label: string | null }>(`SELECT kind, subject, label FROM flofi_account_identities
-        WHERE tenant_id=$1 AND account_id=$2 ORDER BY created_at, kind`, [tenantId, accountId])).rows
-        .map(row => ({ kind: KIND_OF[row.kind]!, label: row.label ?? row.subject }));
-      return { accountId, onboarding: account.onboarding.toLowerCase() as Onboarding, identities, wallets: await store.wallets(accountId), createdAt: iso(account.created_at),
+      const identities = identityRows.rows.map(row => ({ kind: KIND_OF[row.kind]!, label: row.label ?? row.subject }));
+      return { accountId, onboarding: account.onboarding.toLowerCase() as Onboarding, identities, wallets, createdAt: iso(account.created_at),
         organization: account.wallet_provider === LEGACY_MANAGED_PROVIDER && account.wallet_organization && account.wallet_user && account.wallet_login
           ? { provider: 'turnkey', organization: account.wallet_organization, user: account.wallet_user, login: account.wallet_login.toLowerCase() as ManagedLogin } : null };
     },

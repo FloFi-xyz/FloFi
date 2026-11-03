@@ -309,6 +309,36 @@ test('Web3 Wallet sign-in through Privy: the proven wallet is the account’s si
   expect(await query("SELECT 1 FROM flofi_account_wallets WHERE address=$1 AND provider='privy'", [address])).toEqual([]);
 });
 
+test('BUILD-FLOFI-UX-FIX-003: Settings opens with its final rows and size — My account when signed in, Sign in otherwise — and never reflows', async ({ page, context }) => {
+  await setup(page, { google: 'e2e-menu' });
+  await googleSignIn(page);
+  await expect(page).toHaveURL(/\/(app|onboarding\/wallets)$/);
+  await page.goto('/app');
+  const settings = page.getByRole('button', { name: 'Settings', exact: true }), menu = page.getByRole('group', { name: 'Settings options', exact: true });
+  const openAndMeasure = async () => {
+    await settings.click();
+    await expect(menu).toBeVisible();
+    const opened = (await menu.boundingBox())!;
+    // The account row exists from the first frame (a placeholder until the shared, prefetched session check answers); nothing is added later.
+    expect(await menu.locator('.header-settings-pending, a[href="/app/credentials"], a[href="/login"]').count()).toBe(1);
+    await page.waitForTimeout(1500);
+    const settled = (await menu.boundingBox())!;
+    expect(settled).toEqual(opened);
+    return settled;
+  };
+  const signedIn = await openAndMeasure();
+  await expect(menu.getByRole('link', { name: 'My account', exact: true })).toBeVisible();
+  await expect(menu.getByRole('link', { name: 'Sign in', exact: true })).toHaveCount(0);
+  await settings.press('Escape');
+  // Signed out (cookie gone): the same menu says Sign in, at the same fixed width.
+  await context.clearCookies({ name: 'flofi_account_session' });
+  await page.reload();
+  const signedOut = await openAndMeasure();
+  await expect(menu.getByRole('link', { name: 'Sign in', exact: true })).toBeVisible();
+  await expect(menu.getByRole('link', { name: 'My account', exact: true })).toHaveCount(0);
+  expect(signedOut.width).toBe(signedIn.width);
+});
+
 test('Disconnect revokes the session, logs out of Privy and lands on /login; Back and a reload never sign anyone in again', async ({ page, context }) => {
   await setup(page, { google: 'e2e-ana' });
   await googleSignIn(page);

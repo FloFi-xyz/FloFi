@@ -14,6 +14,7 @@ import { parsePrivacyNotice, PRIVACY_NOTICE_COOKIE } from '../../domain/privacy-
 import { FloFiPrivyProvider } from '../../accounts/privy-client';
 import { privyBrowserConfig } from '../../accounts/privy-server';
 import { SessionGuard } from '../../components/account/session-guard';
+import { learningConfig, sessionAdaptation } from '../../learning/config';
 import '@xyflow/react/dist/style.css';
 import '../globals.css';
 
@@ -29,7 +30,9 @@ export default async function ProductLayout({ children }: { children: ReactNode 
   const jar = await cookies();
   const configured = copilotConfig(process.env).mode;
   const bootstrap = { walletHint: parseWalletHint(jar.get(WALLET_HINT_COOKIE)?.value), copilotMode: configured,
-    privacyNotice: parsePrivacyNotice(jar.get(PRIVACY_NOTICE_COOKIE)?.value) ?? 'UNANSWERED' as const };
+    privacyNotice: parsePrivacyNotice(jar.get(PRIVACY_NOTICE_COOKIE)?.value) ?? 'UNANSWERED' as const,
+    // BUILD-FLOFI-UX-FIX-003: what `learningAvailability()` returns, known with the page instead of asked when Settings first opens.
+    learningTier: learningConfig(process.env).enabled ? 'ENABLED' as const : sessionAdaptation(process.env) ? 'SESSION' as const : 'OFF' as const };
   // BUILD-FLOFI-PRIVY-UX-001: the person's Privy wallets sign here (with Privy's own confirmation), and Disconnect logs out of Privy. The page
   // runs under the proxy's nonce policy (account-csp.ts productPagePolicy): Next.js puts the nonce on its own scripts.
   return <LocaleProvider initialLanguage={parseLanguage(jar.get(LANGUAGE_COOKIE)?.value) ?? 'EN'}>

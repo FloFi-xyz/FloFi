@@ -57,7 +57,9 @@ for (const action of ['swap', 'bridge'] as const) test(`${action} applies a vali
   await expect(page.getByRole('button', { name: 'Simulate workflow', exact: true })).toBeDisabled();
   await expect(editorSectionAction(page, 'Simulate')).toBeEnabled();
   await openCanvasSettings(page);
-  await expect(page.getByRole('dialog', { name: 'Action settings', exact: true }).getByLabel(action === 'swap' ? 'Input amount (USDC)' : 'Cross-chain amount (USDC)', { exact: true })).toHaveValue('3');
+  // BUILD-FLOFI-UX-FIX-003: a bridge's settings hold only recipient, routing and slippage; its amount (3) is the card's.
+  if (action === 'swap') await expect(page.getByRole('dialog', { name: 'Action settings', exact: true }).getByLabel('Input amount (USDC)', { exact: true })).toHaveValue('3');
+  else await expect(page.getByRole('dialog', { name: 'Action settings', exact: true }).getByLabel('Cross-chain amount (USDC)', { exact: true })).toHaveCount(0);
   await settings.click();
   await openEditorSection(page, 'Simulate');
   await expect(page.locator('.simulate-flow-surface .composer-amount')).toHaveText('3 USDC');

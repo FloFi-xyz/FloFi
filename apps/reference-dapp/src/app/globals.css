@@ -336,7 +336,8 @@
 .header-settings-control{position:relative;flex:none}
 .header-settings{width:40px;height:40px;padding:0;display:grid;place-items:center;border:1px solid var(--line);border-radius:8px;background:var(--paper);color:var(--muted)}
 .header-settings:hover,.header-settings[aria-expanded=true]{background:var(--soft);color:var(--ink)}
-.header-settings-menu{position:absolute;z-index:20;top:calc(100% + 8px);right:0;width:max-content;min-width:0;padding:6px;border:1px solid var(--line);border-radius:9px;background:var(--paper);box-shadow:0 8px 24px rgba(24,59,104,.12)}
+/* BUILD-FLOFI-UX-FIX-003: a fixed width, so neither language nor a row arriving changes the menu's size while it is open. */
+.header-settings-menu{position:absolute;z-index:20;top:calc(100% + 8px);right:0;width:232px;max-width:calc(100vw - 24px);min-width:0;padding:6px;border:1px solid var(--line);border-radius:9px;background:var(--paper);box-shadow:0 8px 24px rgba(24,59,104,.12)}
 .header-settings-menu button{display:block;width:100%;min-height:36px;padding:8px 10px;border:0;border-radius:5px;background:transparent;text-align:left;color:var(--muted);font-size:12px}
 .header-settings-menu button:disabled{opacity:1;cursor:default}
 .header-settings-row{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:5px 4px;color:var(--muted);font-size:12px}
@@ -354,6 +355,8 @@
 .header-settings-separator{margin:5px 4px;border:0;border-top:1px solid var(--line)}
 .header-settings-menu .header-settings-action{display:flex;align-items:center;gap:8px}
 .header-settings-action svg{flex:none}
+.header-settings-pending{display:flex;align-items:center;gap:8px;min-height:36px;padding:8px 10px;color:var(--muted);cursor:default}
+.header-settings-skeleton{display:block;width:84px;height:10px;border-radius:4px;background:var(--line)}
 .header-settings-menu .header-settings-action:hover:not(:disabled){background:var(--soft);color:var(--ink)}
 .shell-network-row{grid-column:1/-1;display:flex;align-items:center;gap:8px 16px;flex-wrap:wrap;min-width:0;padding:10px 0;border-top:1px solid var(--line);font-size:12px;line-height:1.5;color:var(--muted)}
 .shell-network-row:empty{display:none}.network-mismatch{color:var(--amber)}
@@ -400,6 +403,10 @@
 .action-settings-popover select{min-height:40px;border:1px solid var(--line);border-radius:6px;padding:0 10px;background:var(--paper);color:var(--ink);font:inherit}
 .build-flow-surface .canvas-primary-action{right:12px;bottom:24px}
 .canvas-primary-action{position:absolute;z-index:5;right:56px;bottom:12px}
+/* BUILD-FLOFI-UX-FIX-003: the Canvas call to action and its notes never block the cards beneath them (hover, connect, drag): only its controls
+   take the pointer. A note over a card is read-only text; the card under it stays fully usable. */
+.build-flow-surface .canvas-primary-action,.build-flow-surface .canvas-primary-action .canvas-lifecycle-control{pointer-events:none}
+.build-flow-surface .canvas-primary-action :is(button,a,input,select,textarea,summary,label,[role="button"],[tabindex]){pointer-events:auto}
 .canvas-primary-action button{min-height:44px;padding:10px 16px;border:1px solid var(--primary);border-radius:9px;background:var(--primary);color:var(--on-accent);font-weight:600;box-shadow:0 5px 18px rgba(24,59,104,.2)}
 .canvas-primary-action button:hover{filter:brightness(.96)}
 .build-flow-surface .canvas-primary-action button{animation:build-cta-pulse 3.6s ease-in-out infinite}
@@ -475,10 +482,19 @@
 .build-flow-surface .composer-selected svg{flex:none}
 .build-flow-surface .composer-selected:hover{color:var(--blue)}
 .build-flow-surface .composer-amount-box{display:flex;align-items:center;gap:6px;min-height:58px;margin:4px 0;padding:8px 10px;border:1px solid var(--accent-line);border-radius:7px;background:var(--blue-soft)}
-.composer-value-column{flex:1;min-width:0;display:flex;flex-direction:column;gap:1px}
-.composer-value-line{display:flex;align-items:center;gap:5px}
-.composer-amount-box .composer-amount-value{min-width:0;font-family:var(--font-ibm-plex-mono),monospace;font-size:22px;font-weight:500;letter-spacing:normal;line-height:1.15;overflow-wrap:anywhere}
+/* BUILD-FLOFI-UX-FIX-003: an amount never breaks between its digits. The value column is a size container; the number is sized to fit it on one line
+   from its own length (--amount-chars, a monospace digit is ~0.6em), between 12px and 22px, and keeps a fixed line box so a quote arriving never
+   resizes the card. A value too long even at 12px is clipped with an ellipsis; its full text is the element's title. */
+.composer-value-column{flex:1;min-width:0;display:flex;flex-direction:column;gap:1px;container-type:inline-size}
+.composer-value-line{display:flex;align-items:center;gap:5px;min-height:26px}
+.composer-amount-box .composer-amount-value{display:block;min-width:0;max-width:100%;font-family:var(--font-ibm-plex-mono),monospace;font-size:clamp(12px,calc(100cqi / (var(--amount-chars,6) * .62)),22px);font-weight:500;letter-spacing:normal;line-height:26px;height:26px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;overflow-wrap:normal;word-break:keep-all}
+.composer-amount-live{display:block;flex:1;min-width:0;max-width:100%}
+.composer-amount-box .composer-amount-loading{display:flex;align-items:center;flex:1;width:100%;min-width:0}
+.composer-amount-skeleton{display:block;flex:none;width:64px;max-width:100%;height:12px;border-radius:4px;background:linear-gradient(90deg,var(--line) 0%,var(--soft) 50%,var(--line) 100%);background-size:200% 100%;animation:composer-amount-skeleton 1.4s ease-in-out infinite}
+@keyframes composer-amount-skeleton{0%{background-position:100% 0}100%{background-position:-100% 0}}
+@media(prefers-reduced-motion:reduce){.composer-amount-skeleton{animation:none}}
 .composer-fiat-value{font-size:10px;font-weight:400;line-height:1.3;color:var(--muted)}
+.composer-fiat-value:empty{display:block;min-height:13px}
 .composer-token-chip{flex:none;margin-left:auto;display:inline-flex;align-items:center;gap:5px;min-height:34px;padding:4px 9px 4px 5px;border:1px solid var(--accent-line);border-radius:999px;background:var(--paper);color:var(--blue)}
 .composer-amount-box .composer-amount-token{font-size:12px;font-weight:600}
 .composer-token-avatar{position:relative;flex:none;width:22px;height:22px;border-radius:50%;display:grid;grid-template-columns:minmax(0,1fr);grid-template-rows:minmax(0,1fr);place-items:center;background:transparent;font-size:11px;font-weight:600}
@@ -570,8 +586,10 @@
 .composer-value-line .composer-token-value{flex:1;height:26px}
 .composer-value-column button{padding:0;border:0;background:transparent;color:inherit;font-family:inherit;text-align:left}
 .composer-value-column button.composer-fiat-value{color:var(--muted);text-decoration:none}
-.composer-primary-fiat{min-width:0;font-family:var(--font-ibm-plex-mono),monospace;font-size:20px;font-weight:500;letter-spacing:normal;line-height:1.15;white-space:normal;overflow-wrap:anywhere}
-.composer-token-subline{display:flex;align-items:center;gap:3px;font-size:10px;line-height:1.3;color:var(--muted)}
+/* BUILD-FLOFI-UX-FIX-003: USD-first values and the lines under amounts never break between digits either (sized to fit, ellipsis past 12px). */
+.composer-primary-fiat{min-width:0;max-width:100%;font-family:var(--font-ibm-plex-mono),monospace;font-size:clamp(12px,calc(100cqi / (var(--amount-chars,8) * .62)),20px);font-weight:500;letter-spacing:normal;line-height:1.15;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;overflow-wrap:normal}
+.composer-token-subline{display:flex;align-items:center;gap:3px;font-size:10px;line-height:1.3;color:var(--muted);white-space:nowrap;overflow:hidden;min-width:0}
+.composer-value-column .composer-fiat-value{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;overflow-wrap:normal;max-width:100%}
 .composer-token-subline input{flex:none;max-width:calc(100% - 32px);height:14px;font-size:10px;text-align:left}
 .composer-network-badge{position:absolute;bottom:-3px;right:-3px;width:14px;height:14px;display:grid;place-items:center;border:1px solid var(--paper);border-radius:50%;background:transparent;font:9px var(--font-outfit),sans-serif}
 .composer-amount-actions{display:flex;flex-wrap:nowrap;gap:4px;align-items:center}

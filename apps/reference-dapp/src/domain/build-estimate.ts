@@ -70,6 +70,8 @@ export function buildEstimateFailureMessage(code: string): string {
   if (/QUOTE_EXPIRED/.test(code)) return 'This quote expired. Request a fresh estimate.';
   if (/CONFIGURATION|NOT_CONFIGURED/.test(code)) return 'Quote service is not configured. Contact support.';
   if (/TIMEOUT/.test(code)) return 'The quote request timed out. Try again.';
+  // BUILD-FLOFI-UX-FIX-003: a bridge without a route FloFi can run says so in bridge words (not the swap's "liquid pool").
+  if (/NO_EXECUTABLE_ROUTE|BRIDGE_NO_ROUTE|UNIVERSAL_NO_ROUTE/.test(code)) return 'No route FloFi can execute is available for this bridge and amount right now.';
   if (/NO_POOL|NO_ROUTE|LIQUIDITY|POOL_UNUSABLE/.test(code)) return 'No liquid pool is available for this pair and amount.';
   if (/NOT_ENABLED/.test(code)) return 'Quotes are not enabled for this network.';
   if (code !== 'ESTIMATE_UNAVAILABLE' && /UNAVAILABLE|HTTP_|RATE_LIMIT/.test(code)) return 'The quote provider or network is unavailable. Try again shortly.';

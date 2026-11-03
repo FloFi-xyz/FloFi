@@ -54,7 +54,8 @@ const MESSAGES: Readonly<Record<string, string>> = {
   UNIVERSAL_EXECUTION_NOT_ENABLED: 'Owner execution is not enabled on this server. Route discovery, quotes, simulation and Review remain read-only.',
   UNIVERSAL_WALLET_REQUIRED: 'Connect your wallet first.', UNIVERSAL_SOLANA_WALLET_REQUIRED: 'Connect your Solana wallet first.',
   UNIVERSAL_DESTINATION_WALLET_REQUIRED: 'Connect your wallet on the destination network, or enter a recipient address in the bridge.',
-  UNIVERSAL_WRONG_CHAIN: 'Switch your wallet to the source network.', UNIVERSAL_WRONG_OWNER: 'Select the wallet account shown in Review.',
+  UNIVERSAL_WRONG_CHAIN: 'Switch your wallet to the source network.',
+  UNIVERSAL_WALLET_NONCE_MISMATCH: 'Your wallet would use a different transaction number. Let pending transactions confirm first. Nothing was sent.', UNIVERSAL_WRONG_OWNER: 'Select the wallet account shown in Review.',
   UNIVERSAL_REVIEW_REQUIRED: 'Accept the current Review first.', UNIVERSAL_REVIEW_EXPIRED: 'This Review expired. Get a fresh route and review again.',
   ROUTE_CHANGED: 'The provider no longer offers the reviewed route. Your authorization was cleared and nothing was sent. Get a fresh route, then review it.',
   UNIVERSAL_REQUOTE_REQUIRED: 'A fresh route and Review are required before you can authorize again.',
@@ -125,10 +126,14 @@ function UniversalAssetPicker({ networkKey, value, onChange, label, inputLabel }
   </div>;
 }
 
-/** Canvas form for the universal bridge node (create, or edit an existing one). */
-export function UniversalBridgeForm({ nodeId, onDone }: { nodeId?: string; onDone?: () => void }) {
+/**
+ * Canvas form for the universal bridge node (create, or edit an existing one). BUILD-FLOFI-UX-FIX-003: `options` is the card's compact settings for
+ * an existing bridge — only what the card does not edit itself (recipient, routing, slippage), with no protocol text. Every other parameter (networks,
+ * assets, amount) is carried unchanged into the same validated SET_UNIVERSAL_BRIDGE command; the card and the chat edit those.
+ */
+export function UniversalBridgeForm({ nodeId, onDone, options = false }: { nodeId?: string; onDone?: () => void; options?: boolean }) {
   const { t: tr } = useLocale();
-  const { state, propose } = useWorkflow();
+  const { state, propose, amountInputs = {} } = useWorkflow();
   const node = state.workflow.nodes.find(n => n.nodeId === nodeId), existing = node ? universalBridgeDetails(node) : null;
   const [input, setInput] = useState<UniversalBridgeInput>(existing ? universalInputOf(existing)
     : { source: 'solana', destination: 'base', inputAsset: 'USDC', outputAsset: 'USDC', amount: '', recipient: '', slippage: UNIVERSAL_BRIDGE_DEFAULT_SLIPPAGE, routing: 'BEST' });
@@ -146,13 +151,17 @@ export function UniversalBridgeForm({ nodeId, onDone }: { nodeId?: string; onDon
   function submit(event: FormEvent) {
     event.preventDefault();
     try {
-      createUniversalBridgeFromInput(nodeId ?? 'node-preview', input); setError('');
-      propose(nodeId ? { type: 'SET_UNIVERSAL_BRIDGE', nodeId, input, source: 'CANVAS', baseRevision: state.workflow.revision }
-        : { type: 'ADD_UNIVERSAL_BRIDGE', input, source: 'CANVAS', baseRevision: state.workflow.revision });
+      // BUILD-FLOFI-UX-FIX-003: the compact options propose the amount the card shows (its draft, as the Router form does), never a hidden older one.
+      const proposed = options && nodeId && amountInputs[nodeId] !== undefined ? { ...input, amount: amountInputs[nodeId]! } : input;
+      createUniversalBridgeFromInput(nodeId ?? 'node-preview', proposed); setError('');
+      propose(nodeId ? { type: 'SET_UNIVERSAL_BRIDGE', nodeId, input: proposed, source: 'CANVAS', baseRevision: state.workflow.revision }
+        : { type: 'ADD_UNIVERSAL_BRIDGE', input: proposed, source: 'CANVAS', baseRevision: state.workflow.revision });
       onDone?.();
     } catch (cause) { setError(cause instanceof Error ? cause.message : 'UNIVERSAL_BRIDGE_INPUT_INVALID'); }
   }
-  return <form className="inspector-fields universal-bridge-form" aria-label={tr(nodeId ? 'Edit universal bridge' : 'Create universal bridge')} onSubmit={submit}>
+  const compact = options && Boolean(nodeId);
+  return <form className={`inspector-fields universal-bridge-form${compact ? ' bridge-options-form' : ''}`} aria-label={tr(nodeId ? 'Edit universal bridge' : 'Create universal bridge')} onSubmit={submit}>
+    {!compact && <>
     <p className="muted">{tr('Universal Cross-chain Router · any FloFi mainnet to any other · real funds. Routes are discovered live; the one you authorize is shown at Review.')}</p>
     <label>{tr('Source network')}<select aria-label={tr('Universal bridge source network')} value={input.source} onChange={e => set({ source: e.target.value as UniversalNetworkKey })}>
       {UNIVERSAL_BRIDGE_NETWORKS.map(n => <option key={n.key} value={n.key}>{n.label}</option>)}</select></label>
@@ -165,13 +174,15 @@ export function UniversalBridgeForm({ nodeId, onDone }: { nodeId?: string; onDon
       label={tr('Destination asset')} inputLabel={tr('Universal bridge destination asset')}/>
     <small>{tr('Any catalog asset by symbol or name, or a contract / mint written as address@decimals (identity verified on chain at Simulate). A valid asset does not guarantee a route.')}</small>
     <label>{tr('Amount')}<TokenAmountInput aria-label={tr('Universal bridge amount')} maxLength={40} value={input.amount} onValueChange={amount => set({ amount })}/></label>
+    </>}
     <label>{tr('Recipient')}<input aria-label={tr('Universal bridge recipient')} autoComplete="off" spellCheck={false} maxLength={80} value={input.recipient}
       placeholder={tr(cross ? 'Your connected destination wallet' : 'Your connected wallet')} onChange={e => set({ recipient: e.target.value })}/></label>
     <label>{tr('Routing')}<select aria-label={tr('Universal bridge routing')} value={input.routing} onChange={e => set({ routing: e.target.value as UniversalBridgeRouting })}>
       {(Object.keys(UNIVERSAL_BRIDGE_ROUTING_LABEL) as UniversalBridgeRouting[]).map(k => <option key={k} value={k}>{tr(UNIVERSAL_BRIDGE_ROUTING_LABEL[k])}</option>)}</select></label>
     <label>{tr('Slippage (bps)')}<input aria-label={tr('Universal bridge slippage (bps)')} inputMode="numeric" autoComplete="off" maxLength={3} value={input.slippage}
       onChange={e => set({ slippage: e.target.value })}/></label>
-    <small>{tr('Shown as')} {formatSlippage(input.slippage)}. {tr('The guaranteed minimum you receive is fixed in the reviewed provider order. Provider fees are listed at Review. FloFi records a 0.1% fee obligation on each completed workflow; collection is not settled on-chain yet.')}</small>
+    {compact ? <small>{tr('Shown as')} {formatSlippage(input.slippage)}.</small>
+      : <small>{tr('Shown as')} {formatSlippage(input.slippage)}. {tr('The guaranteed minimum you receive is fixed in the reviewed provider order. Provider fees are listed at Review. FloFi records a 0.1% fee obligation on each completed workflow; collection is not settled on-chain yet.')}</small>}
     {error && <p role="alert">{tr(MESSAGES[error] ?? error)}</p>}
     <button type="submit">{tr(nodeId ? 'Review bridge change' : 'Review bridge proposal')}</button>
     {onDone && <button type="button" className="quiet" onClick={onDone}>{tr('Cancel')}</button>}

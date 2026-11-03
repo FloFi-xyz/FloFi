@@ -36,8 +36,10 @@ test('floating Stocks action creates a Supply-style editable card without connec
   await expect(card.locator('.composer-metadata')).toHaveText('Robinhood');
   await expect(card.locator('.composer-amount-box')).toHaveCount(1);
   await expect(card.getByRole('textbox', { name: 'Stocks amount (USDG)', exact: true })).toHaveValue('0');
-  // BUILD-FIX-UX-001: USDG has no verified USD feed here, so the card says so instead of showing a number.
-  await expect(card.locator('.composer-fiat-value')).toHaveText('USD price unavailable');
+  // BUILD-FIX-UX-001: USDG has no verified USD feed here, so the card shows no number. BUILD-FLOFI-UX-FIX-003: and no filler text either; the
+  // line keeps its height.
+  await expect(card.locator('.composer-fiat-value')).toHaveText('');
+  await expect(card.locator('.composer-fiat-value')).toHaveAttribute('data-usd', 'unavailable');
   await expect(card.getByRole('button', { name: 'Select stock', exact: true })).toHaveAttribute('aria-expanded', 'false');
   await expect(card.getByRole('img', { name: 'Robinhood', exact: true })).toBeVisible();
   await expect(card.getByRole('img', { name: 'Robinhood Chain network', exact: true })).toBeVisible();

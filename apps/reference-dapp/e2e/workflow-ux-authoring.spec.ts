@@ -208,17 +208,20 @@ test.describe('UX-007 fast live quote feedback', () => {
     await page.clock.pauseAt(await page.evaluate(() => Date.now()) + 1000);
     const t0 = Date.now();
     await input.pressSequentially('100', { delay: 40 });
-    await expect(destination).toContainText('Calculating…'); const calculating = Date.now() - t0;
-    await expect(card.locator('.composer-quote-note')).toContainText('Calculating estimate…');
+    // BUILD-FLOFI-UX-FIX-003: a quiet, fixed-size placeholder (announced to assistive technology) instead of "Calculating…" text.
+    await expect(destination.locator('.composer-amount-live[aria-busy="true"] .composer-amount-loading')).toBeVisible(); const calculating = Date.now() - t0;
+    await expect(destination.locator('.composer-amount-loading')).toContainText('Calculating estimate…');
+    await expect(card.locator('.composer-quote-note')).toHaveCount(0);
     expect(seen).toHaveLength(0);
     await page.clock.runFor(200);
     await page.clock.resume();
     await expect(destination).toContainText('0.04'); const shown = Date.now() - t0;
     expect(seen.map(amountOf)).toEqual(['100000000']); const requested = seen[0]!.at - t0;
     test.info().annotations.push({ type: 'mocked timing (ms)', description: `${network}: calculating ${calculating}, request ${requested}, estimate ${shown} (controlled 200 ms debounce; 200 ms replay delay)` });
-    await expect(card.locator('.composer-quote-note')).toContainText('Approximate · Uniswap V3 · Simulate before review');
+    await expect(card).not.toContainText(/Approximate|Simulate before review/);
+    await expect(card.locator('.composer-quote-note')).toHaveCount(0);
     // A newer amount supersedes a slower older answer; the older one never overwrites it.
-    await input.fill('10'); await expect(destination).toContainText('Calculating…');
+    await input.fill('10'); await expect(destination.locator('.composer-amount-loading')).toBeVisible();
     await expect.poll(() => seen.length).toBe(2); await input.fill('1000');
     await expect(destination).toContainText('0.4'); await page.waitForTimeout(900); await expect(destination).toContainText('0.4'); await expect(destination).not.toContainText('9.99');
     expect(seen.map(amountOf)).toEqual(['100000000', '10000000', '1000000000']);
@@ -226,6 +229,41 @@ test.describe('UX-007 fast live quote feedback', () => {
     await expect(revision(page)).toHaveAttribute('data-workflow-revision', '0');
     await expect(page.getByRole('complementary', { name: 'Simulation Summary' })).toHaveCount(0);
     await expectEditorSection(page, 'Build');
+    await assertPassiveWallet(page); networkGuard.assertClean();
+  });
+
+  test('BUILD-FLOFI-UX-FIX-003: amounts stay on one line and the card keeps its size while a quote arrives (desktop and mobile)', async ({ page, networkGuard }) => {
+    await replayQuotes(page, () => ({ delayMs: 300, expected: '1.549809' }));
+    await open(page);
+    await page.getByRole('button', { name: 'Add swap', exact: true }).click();
+    const card = cards(page).first(); await chooseNetwork(page, card, 'Arbitrum One');
+    const input = card.getByRole('textbox', { name: 'Source amount (USDC)', exact: true });
+    const destination = card.getByRole('group', { name: 'Destination amount (unquoted placeholder)', exact: true });
+    for (const width of [1440, 390]) {
+      await page.setViewportSize({ width, height: 900 });
+      await input.fill(width === 1440 ? '0.997401' : '0.00065');
+      await expect(destination.locator('.composer-amount-loading')).toBeVisible();
+      const pending = (await card.boundingBox())!;
+      await expect(destination.locator('.composer-amount-value')).toHaveText('1.549809');
+      const settled = (await card.boundingBox())!;
+      // The quote's arrival never resizes the card (the placeholder holds the value's line).
+      expect(Math.abs(settled.height - pending.height)).toBeLessThan(1);
+      expect(Math.abs(settled.width - pending.width)).toBeLessThan(1);
+      for (const value of [card.locator('.composer-amount .composer-amount-value'), destination.locator('.composer-amount-value')]) {
+        const geometry = await value.evaluate(element => { const style = getComputedStyle(element), box = element.getBoundingClientRect();
+          return { height: box.height, lineHeight: parseFloat(style.lineHeight), whiteSpace: style.whiteSpace, fontSize: parseFloat(style.fontSize),
+            clipped: element.scrollWidth > element.clientWidth + 1 }; });
+        // One line, never broken between digits, readable, and the whole value visible (no clipping at these lengths).
+        expect(geometry.height).toBeLessThanOrEqual(geometry.lineHeight + 1);
+        expect(geometry.whiteSpace).toBe('nowrap');
+        expect(geometry.fontSize).toBeGreaterThanOrEqual(12);
+        expect(geometry.clipped).toBe(false);
+      }
+      // The exact value is never rounded for display.
+      await expect(input).toHaveValue(width === 1440 ? '0.997401' : '0.00065');
+      await expect(destination.locator('.composer-amount-value')).toHaveAttribute('title', '1.549809');
+    }
+    await expect(card).not.toContainText(/Approximate|Provider estimates|Builder verified|Live quote only|USD price unavailable|Calculating…/);
     await assertPassiveWallet(page); networkGuard.assertClean();
   });
 
@@ -250,7 +288,7 @@ test.describe('UX-007 fast live quote feedback', () => {
     const card = cards(page).filter({ hasText: 'Robinhood' }).first();
     const input = card.getByRole('textbox', { name: /^Stocks amount/ });
     await input.pressSequentially('10', { delay: 30 });
-    await expect(card.locator('.composer-quote-note')).toContainText(/Calculating estimate…|Approximate · Uniswap V3/);
+    await expect(card).not.toContainText(/Approximate|Uniswap V3 ·/);
     await expect(card.getByRole('group', { name: 'Destination amount (unquoted placeholder)', exact: true })).toContainText('0.026');
     expect(seen).toHaveLength(1); expect(seen[0]!.body.workflow.nodes.some(node => node.chainId === 'eip155:4663')).toBe(true);
     await expect(revision(page)).toHaveAttribute('data-workflow-revision', '0');

@@ -146,11 +146,12 @@ test('a verified USD estimate is shown as an approximation (MOCKED here, labelle
   await card.getByRole('textbox', { name: 'Source amount (USDC)', exact: true }).fill('2.5');
   await expect(destination.locator('.composer-amount-value')).toHaveText('0.000794');
   // USDC has no verified feed (no number); the WETH estimate carries its approximate USD value and provenance.
-  await expect(source.locator('.composer-fiat-value')).toHaveText('USD price unavailable');
+  await expect(source.locator('.composer-fiat-value')).toHaveText('');
   const usd = destination.getByRole('button', { name: 'Show USD value first', exact: true });
   await expect(usd).toHaveText('≈ $2.49 · test price');
   await expect(usd).toHaveAttribute('title', /Estimated from the verified test \(MOCKED\) USD price.*Not a quote\./);
-  await expect(card.locator('.composer-quote-note')).toContainText('Approximate · Uniswap V3 · Simulate before review');
+  await expect(card.locator('.composer-quote-note')).toHaveCount(0);
+  await expect(card).not.toContainText(/Approximate|Simulate before review/);
   await usd.click();
   await expect(destination.locator('.composer-primary-fiat')).toHaveText('≈ $2.49 · test price');
   await expect(destination.locator('.composer-token-subline')).toHaveText('0.000794 WETH');
