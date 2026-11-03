@@ -3381,6 +3381,7 @@
         "apps/reference-dapp/src/domain/build009-run.ts",
         "apps/reference-dapp/src/domain/canvas-action-setup.ts",
         "apps/reference-dapp/src/domain/canvas-authoring.ts",
+        "apps/reference-dapp/src/domain/canvas-card-summary.ts",
         "apps/reference-dapp/src/domain/canvas-connect.ts",
         "apps/reference-dapp/src/domain/canvas-keyboard.ts",
         "apps/reference-dapp/src/domain/canvas-layout.ts",
@@ -3536,7 +3537,8 @@
         "apps/reference-dapp/src/i18n/pt-workflow-runs.ts",
         "apps/reference-dapp/src/i18n/pt.ts",
         "apps/reference-dapp/src/i18n/pt-chat-dashboard.ts",
-        "apps/reference-dapp/src/i18n/pt-portfolio.ts"
+        "apps/reference-dapp/src/i18n/pt-portfolio.ts",
+        "apps/reference-dapp/src/i18n/pt-builder-canvas.ts"
       ],
       "suites": [
         "app.e2e.canvas-keyboard",

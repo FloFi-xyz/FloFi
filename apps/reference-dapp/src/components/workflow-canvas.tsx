@@ -44,7 +44,8 @@ import { actionReviewValue } from '../domain/canvas-action-setup';
 import { SimulateWorkflowCanvas } from './simulate-workflow-canvas';
 import { composerActions, composerSummary, composerNodeState, composerConnections, singleAmountProposalTarget } from '../domain/composer-presentation';
 import { canDeleteCanvasEdge, canDeleteCanvasNode, isTextEntry } from '../domain/canvas-keyboard';
-import { canvasPosition, defaultCanvasPosition, readToolboxMode, saveToolboxMode, type ToolboxMode } from '../domain/canvas-layout';
+import { CANVAS_CLEARANCE, defaultCanvasPosition, shownCanvasPositions, readToolboxMode, saveToolboxMode, type ToolboxMode } from '../domain/canvas-layout';
+import { canvasCardParams } from '../domain/canvas-card-summary';
 import { canvasMarquee, marqueeIntersects } from '../domain/canvas-marquee';
 import { planCanvasDuplicate } from '../domain/editor-history';
 import type { Workflow } from '../domain/initial-workflow';
@@ -101,6 +102,9 @@ function WorkflowCard({ data }: NodeProps) {
   </div>;
 }
 const nodeTypes = { workflow: WorkflowCard };
+/** BUILD-FLOFI-BUILDER-UX-002: an edge label is a small rounded tag on the card surface colour, shared by the Build and Simulate canvases. */
+export const CANVAS_EDGE_LABEL = { labelStyle: { fontSize: 10, fontWeight: 500, fill: 'var(--edge-label)' }, labelShowBg: true,
+  labelBgStyle: { fill: 'var(--paper)', stroke: 'var(--line)', strokeWidth: 1 }, labelBgPadding: [6, 3] as [number, number], labelBgBorderRadius: 6 } as const;
 const COMPOSER_FIT_PADDING = { top: '32px', bottom: '90px', left: '32px', right: '32px' } as const;
 /** One fit per canonical insertion, after React Flow has measured the committed nodes.
  * Draft proposals, parameter edits, connections and layout changes cannot arm it.
@@ -563,16 +567,20 @@ function BuildCanvas({ environment, selectedId, select, openSettings, settingsId
     };
     const proposalTarget = pending?.authoringId ?? (pending ? singleAmountProposalTarget(workflow, pending.command) : null);
     const contextualTarget = pending?.command.source === 'CHAT' ? proposalTarget ?? poolProposalTarget(pending.command) : null;
+    // BUILD-FLOFI-BUILDER-UX-002: a step the chat or a proposal just added sits beside the step it consumes, or in the next free slot (layout only).
+    const setupPosition = actionSetup ? canvasLayout[actionSetup.id] : undefined;
+    const positions = shownCanvasPositions(composerActions(workflow), canvasLayout, { lending: isLendingComposition(workflow), occupied: setupPosition ? [setupPosition] : [] });
     const projected: Node[] = composerActions(workflow).map((node, index) => ({
     id: node.nodeId, type: 'workflow',
     ariaLabel: `Step ${index + 1}: ${composerSummary(workflow, node, context).action}`,
-    position: canvasLayout[node.nodeId] ? canvasPosition(canvasLayout, node, index) :
-      isLendingComposition(workflow) ? { x: 180, y: 35 + index * 230 } : canvasPosition(canvasLayout, node, index),
+    position: positions[node.nodeId]!,
     selected: selectedIds.includes(node.nodeId) || selectedId === node.nodeId,
     data: { composer: true, connectable: true, ...(['asset.swap.exact-input', 'asset.bridge'].includes(node.actionType) ? liveQuoteTarget(node.nodeId) : { estimateNodeId: node.nodeId }), estimateOwner: node.chainId.startsWith('solana:') ? estimateOwner : wallet.account,
       estimateEvmOwner: wallet.account, estimateSolanaOwner: estimateOwner,
       contextualProposal: contextualTarget === node.nodeId, onOpenSettings: () => { selectNodes([node.nodeId], node.nodeId); openSettings?.(node.nodeId); }, settingsOpen: settingsId === node.nodeId, step: index + 1, selected: selectedId === node.nodeId,
       vertical: isLendingComposition(workflow), summary: selectedSummary(composerSummary(workflow, node, context), cryptoSelections[node.nodeId]),
+      // The rows read the saved step: hidden while a network, pair or route draft on this card could change them.
+      ...(cryptoSelections[node.nodeId] || bridgeNetworkInputs[node.nodeId] ? {} : { params: canvasCardParams(node) }),
       ...(cryptoSelectionOf(node) ? { actionSelection: actionSelection(node.nodeId, cryptoSelections[node.nodeId] ?? cryptoSelectionOf(node)!, canSelectCryptoAssets(node, workflow)) } : {}),
       ...(composerSummary(workflow, node, context).action === 'Stocks' && (cryptoSelections[node.nodeId] ?? cryptoSelectionOf(node)) ? { stocks: stocksData(node.nodeId, cryptoSelections[node.nodeId] ?? cryptoSelectionOf(node)!, canSelectCryptoAssets(node, workflow)) } : {}),
       ...(routerDetails(node) ? {
@@ -656,18 +664,21 @@ function BuildCanvas({ environment, selectedId, select, openSettings, settingsId
       return previous?.measured ? { ...node, measured: previous.measured } : node;
     }));
   }, [projectedNodes, setNodes]);
+  // Only the workflow's own links are drawn (composerConnections); BUILD-FLOFI-BUILDER-UX-002: as thin curves with a small arrow and a short label
+  // that fits between cards ("Then" for a link that only orders two steps; a link that passes a value keeps its own). The full label names the edge.
   const edges = useMemo(() => composerConnections(workflow).map(edge => ({ ...edge,
-    sourceHandle: 'output', targetHandle: 'input', type: 'smoothstep', animated: false,
-    markerEnd: { type: MarkerType.ArrowClosed, width: 18, height: 18, color: selectedEdge?.from === edge.source && selectedEdge?.to === edge.target ? 'var(--edge-active)' : 'var(--edge-line)' },
+    label: tr(edge.label === 'After previous step' ? 'Then' : edge.label), ariaLabel: tr(edge.label === 'After previous step' ? 'Then: after the previous step' : edge.label),
+    sourceHandle: 'output', targetHandle: 'input', type: 'default', animated: false,
+    markerEnd: { type: MarkerType.ArrowClosed, width: 11, height: 11, color: selectedEdge?.from === edge.source && selectedEdge?.to === edge.target ? 'var(--edge-active)' : 'var(--edge-line)' },
     selected: selectedEdge?.from === edge.source && selectedEdge?.to === edge.target,
-    style: { stroke: selectedEdge?.from === edge.source && selectedEdge?.to === edge.target ? 'var(--edge-active)' : 'var(--edge-line)', strokeWidth: selectedEdge?.from === edge.source && selectedEdge?.to === edge.target ? 2.5 : 1.5 },
-    labelStyle: { fontSize: 10, fill: 'var(--edge-label)' }, labelBgStyle: { fill: 'var(--page)' },
-  })), [workflow, selectedEdge]);
+    style: { stroke: selectedEdge?.from === edge.source && selectedEdge?.to === edge.target ? 'var(--edge-active)' : 'var(--edge-line)', strokeWidth: selectedEdge?.from === edge.source && selectedEdge?.to === edge.target ? 2 : 1.5 },
+    ...CANVAS_EDGE_LABEL,
+  })), [workflow, selectedEdge, tr]);
   function addAction(action: CanvasAction | 'stocks') {
     if (actionSetup) { selectNodes([actionSetup.id], actionSetup.id); setFeedback('Configure this action before adding another.'); return; }
     if (action === 'stocks') {
       let slot = projectedNodes.length, position = defaultCanvasPosition(slot);
-      while (nodes.some(node => Math.abs(node.position.x - position.x) < 220 && Math.abs(node.position.y - position.y) < 140)) position = defaultCanvasPosition(++slot);
+      while (nodes.some(node => Math.abs(node.position.x - position.x) < CANVAS_CLEARANCE.x && Math.abs(node.position.y - position.y) < CANVAS_CLEARANCE.y)) position = defaultCanvasPosition(++slot);
       const id = startStocksSetup(position);
       selectNodes([id], id); setFeedback('');
       return;
@@ -676,7 +687,7 @@ function BuildCanvas({ environment, selectedId, select, openSettings, settingsId
       if (['supply', 'borrow', 'repay'].includes(action) && !wallet.account) { setFeedback('Connect your wallet to set the beneficiary before adding this action.'); return; }
       let slot = composerActions(workflow).length;
       let position = defaultCanvasPosition(slot);
-      while (nodes.some(node => Math.abs(node.position.x - position.x) < 220 && Math.abs(node.position.y - position.y) < 140)) position = defaultCanvasPosition(++slot);
+      while (nodes.some(node => Math.abs(node.position.x - position.x) < CANVAS_CLEARANCE.x && Math.abs(node.position.y - position.y) < CANVAS_CLEARANCE.y)) position = defaultCanvasPosition(++slot);
       const id = startActionSetup(action, position, wallet.account ?? undefined);
       selectNodes([id], id); setFeedback(''); return;
     }
@@ -696,7 +707,7 @@ function BuildCanvas({ environment, selectedId, select, openSettings, settingsId
     const nodeId = added.nodeId;
     let slot = projectedNodes.length;
     let position = defaultCanvasPosition(slot);
-    while (nodes.some(node => Math.abs(node.position.x - position.x) < 220 && Math.abs(node.position.y - position.y) < 140)) {
+    while (nodes.some(node => Math.abs(node.position.x - position.x) < CANVAS_CLEARANCE.x && Math.abs(node.position.y - position.y) < CANVAS_CLEARANCE.y)) {
       slot += 1;
       position = defaultCanvasPosition(slot);
     }

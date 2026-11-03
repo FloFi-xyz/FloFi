@@ -4,7 +4,9 @@ import { baseAssetRegistry, referenceRegistry } from '@defi-workflow-engine/acti
 import { createReviewContext } from '@defi-workflow-engine/reference-linter';
 import { amountOf, type Command } from './commands';
 import { deletableCanvasNodes } from './canvas-keyboard';
-import { editorHistoryReducer, templateEditorHistory, planCanvasDuplicate, type EditorHistory } from './editor-history';
+import { editorHistoryReducer, initialEditorHistory, templateEditorHistory, planCanvasDuplicate, type EditorHistory } from './editor-history';
+import { composerActions } from './composer-presentation';
+import { CANVAS_COLUMN, defaultCanvasPosition, shownCanvasPositions } from './canvas-layout';
 import { createAuthoredLending } from './lending-authoring';
 
 const context = createReviewContext({ registryId: referenceRegistry.registryId,
@@ -132,5 +134,35 @@ describe('canvas edit history', () => {
     state = edit(state, { type: 'CONNECT', from: 'node-002', to: 'node-003', source: 'CANVAS' });
     state = edit(state, { type: 'LOCK', nodeId: 'node-003', locked: true, source: 'CANVAS' });
     expect(deletableCanvasNodes(state.editor.workflow, ['node-002', 'node-003'])).toEqual(['node-002', 'node-003']);
+  });
+
+  // BUILD-FLOFI-BUILDER-UX-002: a card is pinned where it is drawn whenever the layout changes, so no untouched card ever moves.
+  const swap = (state: EditorHistory) => edit(state, { type: 'ADD_SWAP', direction: 'USDC_TO_WETH', amount: '1', slippage: '50', source: 'CHAT' } as EditInput);
+  const drawn = (state: EditorHistory) => shownCanvasPositions(composerActions(state.editor.workflow), state.layout);
+  it('pins a step the chat added (no position) where it is first drawn, and a linked step beside the step it consumes', () => {
+    let state = swap(initialEditorHistory());
+    const [first] = composerActions(state.editor.workflow);
+    expect(state.layout[first!.nodeId]).toMatchObject(defaultCanvasPosition(0));
+    state = swap(state);
+    const [, second] = composerActions(state.editor.workflow);
+    state = edit(state, { type: 'CONNECT', from: first!.nodeId, to: second!.nodeId, source: 'CANVAS' });
+    expect(state.layout[second!.nodeId]).toMatchObject(defaultCanvasPosition(1));
+    expect(state.layout[second!.nodeId]!.x - state.layout[first!.nodeId]!.x).toBe(CANVAS_COLUMN);
+  });
+  it('never moves an untouched card when another card is moved, duplicated or set up', () => {
+    // A restored workflow has no stored places: every card is drawn from the flow placement.
+    let state = editorHistoryReducer(swap(swap(initialEditorHistory())), { type: 'LOAD_LAYOUT', layout: {} });
+    const [first, second] = composerActions(state.editor.workflow), before = drawn(state);
+    state = editorHistoryReducer(state, { type: 'MOVE', positions: { [first!.nodeId]: { x: before[second!.nodeId]!.x + 20, y: before[second!.nodeId]!.y + 10 } } });
+    expect(drawn(state)[second!.nodeId]).toEqual(before[second!.nodeId]);
+    state = editorHistoryReducer(state, { type: 'LOAD_LAYOUT', layout: {} });
+    state = editorHistoryReducer(state, { type: 'DUPLICATE', nodeIds: [first!.nodeId], context });
+    expect(drawn(state)[first!.nodeId]).toEqual(before[first!.nodeId]);
+    expect(drawn(state)[second!.nodeId]).toEqual(before[second!.nodeId]);
+    state = editorHistoryReducer(state, { type: 'UNDO' });
+    state = editorHistoryReducer(state, { type: 'START_ACTION_SETUP', action: 'swap', position: defaultCanvasPosition(0) });
+    expect(drawn(state)[first!.nodeId]).toEqual(before[first!.nodeId]);
+    state = editorHistoryReducer(state, { type: 'REMOVE_ACTION_SETUP' });
+    expect(drawn(state)).toEqual(before);
   });
 });

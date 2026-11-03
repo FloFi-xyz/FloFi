@@ -6,7 +6,7 @@ import { useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'reac
 import { ReactFlow, Background, MarkerType, getNodesBounds, getViewportForBounds, useReactFlow, useStore, useStoreApi, useUpdateNodeInternals, type Node, type NodeProps, type ReactFlowState } from '@xyflow/react';
 import { isLendingComposition } from '@defi-workflow-engine/workflow-contracts';
 import { composerActions, composerConnections, composerSummary } from '../domain/composer-presentation';
-import { canvasPosition } from '../domain/canvas-layout';
+import { shownCanvasPositions } from '../domain/canvas-layout';
 import { useWorkflow } from '../state/workflow-store';
 import { useEstimateOwners } from '../state/estimate-owners';
 import { ComposerCard, type ComposerCardData } from './composer-card';
@@ -52,26 +52,30 @@ function InspectionViewport({ onState }: { onState: (value: 'pending' | 'fitted'
 
 export function SimulateWorkflowCanvas({ workflowName, primaryAction, stage = 'simulate' }: { workflowName: string; primaryAction?: ReactNode; stage?: 'simulate' | 'execute' }) {
   const { t: tr } = useLocale();
-  const { state, context, canvasLayout, reviewError } = useWorkflow();
+  const { state, context, canvasLayout, reviewError, actionSetup } = useWorkflow();
   const workflow = state.workflow;
   const actions = composerActions(workflow);
   const incomplete = Boolean(reviewError);
   const lending = isLendingComposition(workflow);
   // BUILD-FLOFI-WALLET-UX-EXECUTION-FIX-001 (P0-07): swap and bridge steps show the same shared live quote as Build (display only).
   const { evm: evmAccount, solana: solanaAccount } = useEstimateOwners();
+  // BUILD-FLOFI-BUILDER-UX-002: the same flow placement as the Build Canvas, so a step keeps its place between Create and Simulate.
+  const positions = useMemo(() => {
+    const setup = actionSetup ? canvasLayout?.[actionSetup.id] : undefined;
+    return shownCanvasPositions(composerActions(workflow), canvasLayout ?? {}, { lending: isLendingComposition(workflow), occupied: setup ? [setup] : [] });
+  }, [workflow, canvasLayout, actionSetup]);
   const nodes = useMemo<Node[]>(() => incomplete ? [] : composerActions(workflow).map((node, index) => ({
     id: node.nodeId, type: 'workflow', ariaLabel: `Step ${index + 1}: ${composerSummary(workflow, node, context).action}`,
-    position: canvasLayout?.[node.nodeId] ? canvasPosition(canvasLayout, node, index) :
-      lending ? { x: 180, y: 35 + index * 230 } : canvasPosition(canvasLayout ?? {}, node, index),
+    position: positions[node.nodeId]!,
     data: { composer: true, inspection: true, step: index + 1, selected: false, vertical: lending,
       summary: composerSummary(workflow, node, context),
       // Simulate only: the Execute plan shows the reviewed amounts, never a newer approximate quote beside them.
       ...stage === 'simulate' && ['asset.swap.exact-input', 'asset.bridge'].includes(node.actionType) ? { estimateWorkflow: workflow, estimateNodeId: node.nodeId,
         estimateOwner: node.chainId.startsWith('solana:') ? solanaAccount : evmAccount, estimateEvmOwner: evmAccount, estimateSolanaOwner: solanaAccount } : {} },
-  })), [workflow, context, canvasLayout, incomplete, lending, evmAccount, solanaAccount, stage]);
+  })), [workflow, context, positions, incomplete, lending, evmAccount, solanaAccount, stage]);
   const edges = useMemo(() => incomplete ? [] : composerConnections(workflow).map(({ id, source, target }) => ({
-    id, source, target, type: 'smoothstep', animated: false,
-    markerEnd: { type: MarkerType.ArrowClosed, width: 18, height: 18, color: 'var(--edge-line)' },
+    id, source, target, type: 'default', animated: false,
+    markerEnd: { type: MarkerType.ArrowClosed, width: 11, height: 11, color: 'var(--edge-line)' },
     style: { stroke: 'var(--edge-line)', strokeWidth: 1.5 },
   })), [workflow, incomplete]);
   const [viewport, setViewport] = useState<'pending' | 'fitted'>('pending');
