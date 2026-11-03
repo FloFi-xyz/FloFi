@@ -183,4 +183,3 @@ and hydration still need production telemetry.
    and one-line layout; nothing is rounded. Regression: `workflow-ux-authoring` "exact value on a touch screen" (390 px, touch):
    clipped one-line value, tap open/close, tap elsewhere, keyboard, bubble on screen, card size unchanged, short value not a button.
 3. **MetaMask** documented as partially investigated (P0-3 status), not as resolved.
-
