@@ -174,12 +174,19 @@ and hydration still need production telemetry.
    The Portuguese Copilot note said FloFi charged no fee on the bridge; it now says, like English, that a 0.1% fee obligation is
    recorded for each completed bridge and is not charged now (`copilot-messages.ts`). The Canvas "Real funds" note now also says it is
    not charged (EN and PT), and the universal Review's "FloFi fee (0.1% obligation)" line and note, which had no Portuguese text, are
-   translated. Copy only: `fee-obligation.ts`, the obligation record and accounting are unchanged; nothing is collected.
-   Regression: `i18n/flofi-fee-copy.test.ts` (both notes; every universal Review/panel fee sentence has PT text stating recorded and
-   not charged; the old "não cobra taxa" sentence cannot return).
+   translated. The other universal fee sentences said "not collected / not settled on-chain yet", which can read as if the fee might
+   be charged elsewhere; all now say "not charged at this time", and their Portuguese is Brazilian Portuguese like the rest of the
+   product. Copy only: `fee-obligation.ts`, the obligation record and accounting are unchanged; nothing is collected. Routes without
+   an obligation keep "Not charged". Regression: `i18n/flofi-fee-copy.test.ts` (both notes; every universal Review/panel fee sentence
+   has PT text stating recorded and not charged; one wording; the old "não cobra taxa" sentence cannot return).
 2. **Exact value by touch.** A card value clipped to one line (measured, `scrollWidth > clientWidth`) becomes a disclosure
    (`role=button`, `aria-expanded`): tap, click, Enter or Space shows the exact value and token in a bubble over the card; a second tap,
-   Escape (focus returns) or a tap elsewhere closes it; a new quote closes it. Values that fit stay plain text. The card keeps its size
-   and one-line layout; nothing is rounded. Regression: `workflow-ux-authoring` "exact value on a touch screen" (390 px, touch):
-   clipped one-line value, tap open/close, tap elsewhere, keyboard, bubble on screen, card size unchanged, short value not a button.
+   Escape (handled on the value and bubble only; focus returns), a tap elsewhere or focus moving on (Tab) closes it; a new quote closes
+   it and it never reopens by itself. Clipping is measured before paint. Values that fit stay plain text with their title. The USD-first
+   token sub-line, which cut digits off with no ellipsis, now ends in an ellipsis and opens the same way. Keys on the value never reach
+   the canvas; the value has the app's focus ring; the bubble has a dark-theme surface. The card keeps its size and one-line layout;
+   nothing is rounded. Regressions: `workflow-ux-authoring` "exact value on a touch screen" (390 px, touch: clipped one-line value, tap
+   open/close, tap elsewhere, Enter/Space/Escape, Tab closes, a new quote closes, bubble on screen, card size unchanged, no duplicate
+   title, short value not a button) and `build-fix-ux` (USD-first sub-line: ellipsis, token visible, exact value on click, Escape).
+   A flofi-frontend-ux review of this follow-up found 2 medium and 6 low issues; all were fixed as above.
 3. **MetaMask** documented as partially investigated (P0-3 status), not as resolved.

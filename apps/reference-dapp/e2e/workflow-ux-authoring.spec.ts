@@ -299,9 +299,18 @@ test.describe('UX-007 fast live quote feedback', () => {
       await value.tap(); await expect(exact).toHaveCount(0); await expect(value).toHaveAttribute('aria-expanded', 'false');
       await value.tap(); await expect(exact).toBeVisible();
       await card.locator('.composer-action-title').tap(); await expect(exact).toHaveCount(0);
-      // Keyboard: Enter opens, Escape closes and returns focus to the value.
+      // The bubble replaces the hover title (no duplicate tooltip or name).
+      await expect(value).not.toHaveAttribute('title', /./);
+      // Keyboard: Enter opens, Escape closes and returns focus to the value; Space opens too.
       await value.focus(); await page.keyboard.press('Enter'); await expect(exact).toHaveText(`${LONG} ${token}`);
       await page.keyboard.press('Escape'); await expect(exact).toHaveCount(0); await expect(value).toBeFocused();
+      await page.keyboard.press(' '); await expect(exact).toBeVisible();
+      // Focus moving on (Tab) closes it, so it never covers the next control.
+      await page.keyboard.press('Tab'); await expect(exact).toHaveCount(0); await expect(value).not.toBeFocused();
+      // A new quote closes it and it does not reopen by itself, even when the new quote has the same value.
+      await value.tap(); await expect(exact).toBeVisible();
+      await card.getByRole('textbox', { name: 'Source amount (USDC)', exact: true }).fill('251');
+      await expect(value).toHaveAttribute('aria-expanded', 'false'); await expect(exact).toHaveCount(0);
       // A value that fits stays plain text.
       await card.getByRole('textbox', { name: 'Source amount (USDC)', exact: true }).fill('1');
       await expect(destination.locator('.composer-amount-value')).toHaveText('0.04');

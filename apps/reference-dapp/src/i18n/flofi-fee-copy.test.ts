@@ -13,10 +13,10 @@ import { translate } from './locale';
 const source = (path: string) => readFileSync(fileURLToPath(new URL(path, import.meta.url)), 'utf8');
 /** The universal surfaces' fee sentences, as they appear in the product source (Review line, Canvas panel). */
 const FEE_SENTENCES = [
-  '0.1% of the completed workflow input. Recorded as an obligation when the run reconciles; not collected on-chain yet. Waived if the workflow fails or refunds.',
-  'The guaranteed minimum you receive is fixed in the reviewed provider order. Provider fees are listed at Review. FloFi records a 0.1% fee obligation on each completed workflow; collection is not settled on-chain yet.',
+  '0.1% of the completed workflow input. Recorded as an obligation when the run reconciles; not charged at this time. Waived if the workflow fails or refunds.',
+  'The guaranteed minimum you receive is fixed in the reviewed provider order. Provider fees are listed at Review. FloFi records a 0.1% fee obligation on each completed workflow; it is not charged at this time.',
   'Real funds. FloFi never signs: your source wallet signs every transaction after your Review. FloFi records a 0.1% fee obligation when the workflow completes; it is not charged at this time. Provider fees are shown below.',
-  '0.1% of the completed workflow input — obligation recorded at reconciliation; not collected on-chain yet.',
+  '0.1% of the completed workflow input — obligation recorded at reconciliation; not charged at this time.',
 ] as const;
 
 describe('BUILD-FLOFI-UX-FIX-003 FloFi fee disclosure (EN/PT parity)', () => {
@@ -40,8 +40,11 @@ describe('BUILD-FLOFI-UX-FIX-003 FloFi fee disclosure (EN/PT parity)', () => {
       const pt = translate('PT', sentence);
       expect(pt, sentence).not.toBe(sentence);
       expect(pt, sentence).toContain('0,1%');
-      expect(pt, sentence).toMatch(/regist/i);
-      expect(pt, sentence).toMatch(/ainda não|não é cobrada/i);
+      expect(pt, sentence).toMatch(/registr/i);
+      expect(pt, sentence).toMatch(/não é cobrada neste momento/);
+      expect(sentence).toMatch(/not charged at this time/);
+      // One wording: never "not collected / settled on-chain" (which reads as if it might be charged elsewhere).
+      expect(`${sentence} ${pt}`).not.toMatch(/on-chain/);
     }
     expect(product).toContain("'FloFi fee (0.1% obligation)'");
     expect(translate('PT', 'FloFi fee (0.1% obligation)')).toBe('Taxa do FloFi (obrigação de 0,1%)');

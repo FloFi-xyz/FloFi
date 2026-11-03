@@ -39,8 +39,8 @@ export const portugueseUniversalBridge: Readonly<Record<string, string>> = {
   'Universal bridge amount': 'Montante da bridge universal', 'Universal bridge recipient': 'Destinatário da bridge universal',
   'Your connected destination wallet': 'A sua carteira de destino ligada', 'Universal bridge routing': 'Encaminhamento da bridge universal',
   'Universal bridge slippage (bps)': 'Desvio da bridge universal (bps)',
-  'The guaranteed minimum you receive is fixed in the reviewed provider order. Provider fees are listed at Review. FloFi records a 0.1% fee obligation on each completed workflow; collection is not settled on-chain yet.':
-    'O mínimo garantido que recebe fica fixado na ordem do fornecedor que reviu. As taxas do fornecedor são listadas na Revisão. O FloFi regista uma obrigação de taxa de 0,1% em cada workflow concluído; a cobrança ainda não é liquidada on-chain.',
+  'The guaranteed minimum you receive is fixed in the reviewed provider order. Provider fees are listed at Review. FloFi records a 0.1% fee obligation on each completed workflow; it is not charged at this time.':
+    'O mínimo garantido que você recebe fica fixado na ordem do provedor que você revisou. As taxas do provedor aparecem na Revisão. O FloFi registra uma obrigação de taxa de 0,1% em cada workflow concluído; ela não é cobrada neste momento.',
   'Automatic: the executable route with the highest guaranteed minimum': 'Automático: a rota executável com o maior mínimo garantido',
   'Relay only': 'Só Relay', 'LI.FI only (quotes; execution not available yet)': 'Só LI.FI (cotações; execução ainda indisponível)',
   'Mayan only (quotes; execution not available yet)': 'Só Mayan (cotações; execução ainda indisponível)', 'Across only (certified Router pairs)': 'Só Across (pares certificados do Router)',
@@ -72,7 +72,7 @@ export const portugueseUniversalBridge: Readonly<Record<string, string>> = {
   'Universal cross-chain bridge': 'Bridge cross-chain universal', 'Simulate universal bridge': 'Simular bridge universal', 'Review universal bridge': 'Rever bridge universal',
   'from': 'de', ', receiving': ', recebendo',
   'Real funds. FloFi never signs: your source wallet signs every transaction after your Review. FloFi records a 0.1% fee obligation when the workflow completes; it is not charged at this time. Provider fees are shown below.':
-    'Fundos reais. O FloFi nunca assina: a sua carteira de origem assina cada transação depois da sua Revisão. O FloFi regista uma obrigação de taxa de 0,1% quando o workflow conclui; ela não é cobrada neste momento. As taxas do fornecedor são mostradas abaixo.',
+    'Fundos reais. O FloFi nunca assina: sua carteira de origem assina cada transação depois da sua Revisão. O FloFi registra uma obrigação de taxa de 0,1% quando o workflow é concluído; ela não é cobrada neste momento. As taxas do provedor aparecem abaixo.',
   'Source wallet:': 'Carteira de origem:', 'destination wallet:': 'carteira de destino:', 'Connect wallets': 'Ligar carteiras',
   'Sign in with source wallet': 'Iniciar sessão com a carteira de origem', 'Switch wallet to the source network': 'Mudar a carteira para a rede de origem',
   'order': 'ordem', 'Selection': 'Seleção', 'selected': 'selecionada', 'available': 'disponível', 'not executable': 'não executável', 'refused': 'recusada',
@@ -82,10 +82,10 @@ export const portugueseUniversalBridge: Readonly<Record<string, string>> = {
   'FloFi fee': 'Taxa do FloFi',
   // BUILD-FLOFI-UX-FIX-003: the universal Review's FloFi fee line (simulation-presentation.ts) had no Portuguese text.
   'FloFi fee (0.1% obligation)': 'Taxa do FloFi (obrigação de 0,1%)',
-  '0.1% of the completed workflow input. Recorded as an obligation when the run reconciles; not collected on-chain yet. Waived if the workflow fails or refunds.':
-    '0,1% do valor de entrada do workflow concluído. Registrada como obrigação quando a execução é reconciliada; ainda não é cobrada on-chain. Dispensada se o workflow falhar ou for reembolsado.',
-  '0.1% of the completed workflow input — obligation recorded at reconciliation; not collected on-chain yet.':
-    '0,1% do input do workflow concluído — obrigação registada na reconciliação; ainda não cobrada on-chain.',
+  '0.1% of the completed workflow input. Recorded as an obligation when the run reconciles; not charged at this time. Waived if the workflow fails or refunds.':
+    '0,1% do valor de entrada do workflow concluído. Registrada como obrigação quando a execução é reconciliada; não é cobrada neste momento. Dispensada se o workflow falhar ou for reembolsado.',
+  '0.1% of the completed workflow input — obligation recorded at reconciliation; not charged at this time.':
+    '0,1% do valor de entrada do workflow concluído — obrigação registrada na reconciliação; não é cobrada neste momento.',
   'after the deposit confirms (provider estimate)': 'após a confirmação do depósito (estimativa do fornecedor)',
   'Signatures': 'Assinaturas', 'wallet signature on the source network': 'assinatura da carteira na rede de origem',
   'wallet signatures on the source network (an exact approval, then the deposit)': 'assinaturas da carteira na rede de origem (uma aprovação exata e depois o depósito)',

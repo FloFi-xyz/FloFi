@@ -11,7 +11,7 @@ import type { Command } from '../domain/commands';
 import type { CanvasAction } from '../domain/canvas-authoring';
 import { ActionIcon } from './action-icon';
 import { TokenBrandIcon, NetworkBrandIcon } from './brand-icon';
-import { useEffect, useId, useRef, useState, type CSSProperties, type ReactNode } from 'react';
+import { useEffect, useId, useLayoutEffect, useRef, useState, type CSSProperties, type FocusEvent, type KeyboardEvent, type ReactNode } from 'react';
 import { PoolPriceRange, usePoolPriceRange, type PoolPricePreset } from './pool-price-range';
 import { TokenAmountInput } from './token-amount-input';
 import { usePoolContributionInputs } from './canvas-card-inputs';
@@ -294,53 +294,69 @@ function PoolPricePanel({ strategy, onSelect, onCollapse }: { strategy: PoolPric
 const amountFit = (value: string): CSSProperties => ({ ['--amount-chars' as string]: String(Math.max(value.length, 5)) });
 /**
  * BUILD-FLOFI-UX-FIX-003: one card value. A quote on its way is a quiet, fixed-size placeholder (never "Calculating…" text that wraps and resizes
- * the card); one persistent polite live region per value, so assistive technology hears "Calculating estimate…" and then the amount. A value too
- * long for its column even at the smallest size is clipped with an ellipsis; hover (title) does not exist on touch screens, so a clipped value
- * becomes a disclosure: a tap, click, Enter or Space shows the exact value and its token over the card, and a second tap, Escape or a tap
- * elsewhere hides it. Values that fit stay plain text. Presentation only: the value is never rounded or shortened.
+ * the card); one persistent polite live region per primary value, so assistive technology hears "Calculating estimate…" and then the amount. A
+ * value too long for its column even at the smallest size is clipped with an ellipsis; hover (title) does not exist on touch screens, so a clipped
+ * value becomes a disclosure: a tap, click, Enter or Space shows the exact value and its token over the card; a second tap, Escape, a tap
+ * elsewhere, focus leaving it, or a new value hides it. Values that fit stay plain text (with the title). Clipping is measured before paint, so the
+ * interactive state and the inserted value reach assistive technology together. Presentation only: the value is never rounded or shortened.
  */
-function CardAmount({ value, fallback, token, loading }: { value: string | undefined; fallback: string; token: string; loading: boolean }) {
+function CardAmount({ value, fallback, token, loading, live = true, className = 'composer-amount-value', fit = true }: { value: string | undefined; fallback: string; token: string; loading: boolean; live?: boolean; className?: string; fit?: boolean }) {
   const { t: tr } = useLocale();
   const shownRef = useRef<HTMLSpanElement>(null), exactRef = useRef<HTMLSpanElement>(null), exactId = useId();
-  const [clipped, setClipped] = useState(false), [open, setOpen] = useState(false);
+  const [clipped, setClipped] = useState(false), [openFor, setOpenFor] = useState<string | null>(null);
   const pending = loading && !value;
-  useEffect(() => {
+  useLayoutEffect(() => {
     const element = shownRef.current;
-    setOpen(false);
-    if (!element || !value) { setClipped(false); return; }
+    // No value (a quote on its way): nothing to disclose, and the bubble stays closed when the next quote arrives, even with the same value.
+    if (!element || !value) { setClipped(false); setOpenFor(null); return; }
     const measure = () => setClipped(element.scrollWidth > element.clientWidth + 1);
     measure();
     if (typeof ResizeObserver === 'undefined') return;
     const observer = new ResizeObserver(measure); observer.observe(element);
     return () => observer.disconnect();
   }, [value, pending]);
+  const expandable = clipped && !!value;
+  // Open for one exact value only: a new quote or a value that now fits closes it, and it never reopens by itself.
+  const open = expandable && openFor === value;
   useEffect(() => {
     if (!open) return;
     const outside = (event: PointerEvent) => {
       const target = event.target instanceof Node ? event.target : null;
       if (!target || shownRef.current?.contains(target) || exactRef.current?.contains(target)) return;
-      setOpen(false);
+      setOpenFor(null);
     };
-    const escape = (event: KeyboardEvent) => { if (event.key === 'Escape') { setOpen(false); shownRef.current?.focus(); } };
-    document.addEventListener('pointerdown', outside, true); document.addEventListener('keydown', escape);
-    return () => { document.removeEventListener('pointerdown', outside, true); document.removeEventListener('keydown', escape); };
+    document.addEventListener('pointerdown', outside, true);
+    return () => document.removeEventListener('pointerdown', outside, true);
   }, [open]);
-  const expandable = clipped && !!value;
-  const toggle = () => setOpen(current => !current);
+  const toggle = () => setOpenFor(current => current === value ? null : value ?? null);
+  const close = (refocus: boolean) => { setOpenFor(null); if (refocus) shownRef.current?.focus(); };
+  // Focus moving anywhere but the value or its bubble closes it (Tab never leaves it covering the next control).
+  const leave = (event: FocusEvent) => {
+    const next = event.relatedTarget;
+    if (next instanceof Node && (shownRef.current?.contains(next) || exactRef.current?.contains(next))) return;
+    setOpenFor(null);
+  };
+  // Keys stay with the value (as with the token pills): Escape closes here and never reaches the canvas or a page-level handler.
+  const keys = (event: KeyboardEvent, own: boolean) => {
+    event.stopPropagation();
+    if (event.key === 'Escape' && open) { event.preventDefault(); close(true); }
+    else if (own && (event.key === 'Enter' || event.key === ' ')) { event.preventDefault(); toggle(); }
+  };
+  const shown = pending
+    ? <span className={`${className} composer-amount-loading`}><span className="composer-amount-skeleton" aria-hidden="true"/><span className="sr-only">{tr('Calculating estimate…')}</span></span>
+    : <span ref={shownRef} className={`${className}${expandable ? ' nodrag nopan' : ''}`} style={fit ? amountFit(value ?? fallback) : undefined}
+      title={expandable ? undefined : value ?? undefined} data-clipped={expandable || undefined} role={expandable ? 'button' : undefined}
+      tabIndex={expandable ? 0 : undefined} aria-expanded={expandable ? open : undefined} aria-controls={open ? exactId : undefined}
+      onClick={expandable ? event => { event.stopPropagation(); toggle(); } : undefined}
+      onKeyDown={expandable ? event => keys(event, true) : undefined} onBlur={open ? leave : undefined}>
+      {tr(value ?? fallback)}
+    </span>;
   return <>
-    <span className="composer-amount-live" aria-live="polite" aria-busy={pending ? true : undefined}>
-      {pending
-        ? <span className="composer-amount-value composer-amount-loading"><span className="composer-amount-skeleton" aria-hidden="true"/><span className="sr-only">{tr('Calculating estimate…')}</span></span>
-        : <span ref={shownRef} className={`composer-amount-value${expandable ? ' nodrag nopan' : ''}`} style={amountFit(value ?? fallback)} title={value ?? undefined}
-          data-clipped={expandable || undefined} role={expandable ? 'button' : undefined} tabIndex={expandable ? 0 : undefined}
-          aria-expanded={expandable ? open : undefined} aria-controls={expandable && open ? exactId : undefined}
-          onClick={expandable ? event => { event.stopPropagation(); toggle(); } : undefined}
-          onKeyDown={expandable ? event => { if (event.key !== 'Enter' && event.key !== ' ') return; event.preventDefault(); event.stopPropagation(); toggle(); } : undefined}>
-          {tr(value ?? fallback)}
-        </span>}
-    </span>
-    {expandable && open && <span ref={exactRef} id={exactId} className="composer-amount-exact nodrag nopan" role="note" aria-label={tr('Exact amount')}
-      onClick={event => event.stopPropagation()}>{value} {token}</span>}
+    {live ? <span className="composer-amount-live" aria-live="polite" aria-busy={pending ? true : undefined}>{shown}</span> : shown}
+    {open && <span ref={exactRef} id={exactId} className="composer-amount-exact nodrag nopan" role="note" aria-label={tr('Exact amount')} tabIndex={-1}
+      onClick={event => event.stopPropagation()} onKeyDown={event => keys(event, false)} onBlur={leave}>
+      {value} <span className="composer-amount-exact-token">{token}</span>
+    </span>}
   </>;
 }
 /** Display priority is shared by all value boxes in the card; token inputs keep their denomination. */
@@ -369,7 +385,8 @@ function ValueBox({ amount, token, network, source, label, hint, editor, inputLa
         {usdFirst ? <button type="button" className="composer-primary-fiat" style={amountFit(usd.text)} aria-label={tr("Show token amount first")} title={tr(usd.title)} onClick={() => onFiatFirstChange(false)}>{tr(usd.text)}</button> : tokenValue}
       </span>
       {usdFirst ? <span className="composer-token-subline">{editor ? <>{tr(tokenValue)}<span>{tr(token)}</span></>
-        : <span>{tr(amount ?? '0')} {tr(token)}</span>}</span>
+        // BUILD-FLOFI-UX-FIX-003: a token amount too long for the sub-line is clipped with an ellipsis and opens like the primary value.
+        : <><CardAmount value={amount} fallback="0" token={token} loading={false} live={false} className="composer-subline-amount" fit={false}/>{' '}<span className="composer-subline-token">{tr(token)}</span></>}</span>
         : usd?.kind === 'value' ? <button type="button" className="composer-fiat-value" data-usd="value" aria-label={tr("Show USD value first")} title={tr(usd.title)} onClick={() => onFiatFirstChange(true)}>{tr(usd.text)}</button>
         // BUILD-FLOFI-UX-FIX-003: no USD figure, no words: the line keeps its height (no layout shift) and says nothing that adds no value.
         : usd?.kind === 'test-token' ? <span className="composer-fiat-value" data-usd="test-token" title={tr(usd.title)}>{tr(usd.text)}</span>
