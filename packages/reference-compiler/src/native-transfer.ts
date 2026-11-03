@@ -10,7 +10,8 @@
  *
  * BUILD-BASE-001: Base mainnet on the same engine. An OP Stack profile (`l1DataFee`) also pays a separate L1 data fee: the Review binds
  * its upper bound from the GasPriceOracle predeploy (`getL1FeeUpperBound`) into the fee budget, and the wallet request carries the
- * network's suggested priority fee. Profiles without an L1 data fee keep their Reviews and transactions byte-identical.
+ * network's suggested priority fee. BUILD-FLOFI-UX-FIX-003: Ethereum mainnet (L1) also offers the suggested priority fee (a zero-tip L1 request is
+ * refused or never mined). Arbitrum Nitro/Orbit profiles and the engineering Ethereum Sepolia profile keep their Reviews and transactions byte-identical.
  */
 import { nativeTransferProfile, transferAllowsRecipients, transferAllowsContractRecipients, transferAllowsTokens, transferEnvironment, transferL1FeeOracle, type NativeTransferProfile } from '@defi-workflow-engine/action-registry';
 export { ROBINHOOD_TESTNET_TRANSFER, ETHEREUM_SEPOLIA_TRANSFER, ROBINHOOD_MAINNET_TRANSFER, NATIVE_TRANSFER_PROFILES, nativeTransferProfile,
@@ -20,7 +21,7 @@ import { readTransferNode, supplyAddress, hashSupplyValue, TRANSFER_ACTION, type
 import { rpcRecord, rpcHex, rpcUint, rpcHash, supplyHex, supplyHash, supplyArtifactHash } from './supply.js';
 
 export type TransferRpc = (method: string, params: readonly unknown[]) => Promise<unknown>;
-/** The exact request a wallet receives. The wallet assigns the nonce; it must equal the reviewed nonce. The priority fee is 0 except on OP Stack profiles. */
+/** The exact request a wallet receives. The wallet assigns the nonce; it must equal the reviewed nonce. The priority fee is 0 except on OP Stack and Ethereum mainnet. */
 export type NativeTransferTransaction = { from: string; to: string; value: string; data: string; chainId: string;
   gas: string; maxFeePerGas: string; maxPriorityFeePerGas: string };
 /** BUILD-RH-002: the token side of an ERC-20 transfer Review (absent on native transfers). */
@@ -106,12 +107,19 @@ export function transferToken(workflow: SemanticWorkflow): TokenRef | null {
   const { read } = transferFields(workflow);
   return read.kind === 'TOKEN' ? { address: read.fields.token.address, officialId: read.fields.token.officialId } : null;
 }
+/**
+ * BUILD-FLOFI-UX-FIX-003: whether a profile's transaction offers a priority fee. Ethereum mainnet (L1) needs one: a zero-tip transaction is refused or
+ * left unmined by L1 nodes and builders (MetaMask then reports it "not found on network after timeout"). Nitro and Orbit chains ignore the tip; the
+ * engineering-only Ethereum Sepolia profile keeps its certified request unchanged.
+ */
+const mainnetL1 = (profile: NativeTransferProfile) => profile.settlement === 'L1' && transferEnvironment(profile) === 'MAINNET';
+const transferCarriesTip = (profile: NativeTransferProfile) => transferL1FeeOracle(profile) !== null || mainnetL1(profile);
 /** The exact transaction for the connected owner: a native value transfer, or the token's `transfer(recipient, amount)`. */
 export function compileNativeTransfer(workflow: SemanticWorkflow, accountInput: string, gasLimit: string, maxFeePerGas: string, maxPriorityFeePerGas = '0'): NativeTransferTransaction {
   const { read, profile } = transferFields(workflow), owner = supplyAddress(accountInput);
   const recipient = read.fields.recipient === 'CONNECTED_OWNER' ? owner : supplyAddress(read.fields.recipient);
-  // Only an OP Stack profile carries a priority fee; every other profile's request stays exactly as reviewed before.
-  const priority = transferL1FeeOracle(profile) ? supplyHex(maxPriorityFeePerGas) : '0x0';
+  // An OP Stack or an L1 (Ethereum) profile carries a priority fee; Arbitrum Nitro / Orbit ignore it and keep 0, exactly as reviewed before.
+  const priority = transferCarriesTip(profile) ? supplyHex(maxPriorityFeePerGas) : '0x0';
   if (read.kind === 'TOKEN') return { from: owner, to: read.fields.token.address, value: '0x0', data: transferData(recipient, read.fields.amount),
     chainId: profile.chainHex, gas: supplyHex(gasLimit), maxFeePerGas: supplyHex(maxFeePerGas), maxPriorityFeePerGas: priority };
   return { from: owner, to: recipient, value: supplyHex(read.fields.amount), data: '0x', chainId: profile.chainHex,
@@ -176,9 +184,11 @@ export async function simulateNativeTransfer(workflow: SemanticWorkflow, account
   if (gasPrice <= 0n) throw new Error('TRANSFER_GAS_PRICE_INVALID');
   const gasLimit = (gas * BigInt(profile.gasLimitMarginPercent) + 99n) / 100n;
   const maxFeePerGas = (gasPrice > baseFee ? gasPrice : baseFee) * BigInt(profile.maxFeeMultiplier);
-  // OP Stack (Base): the owner also pays an L1 data fee, bounded here, and the request offers the network's suggested priority fee.
+  // OP Stack (Base): the owner also pays an L1 data fee, bounded here. OP Stack and Ethereum mainnet requests offer the network's suggested priority fee.
   const l1Fee = await l1FeeUpperBound(rpc, profile, transactionPreview.data, tag);
-  const suggested = transferL1FeeOracle(profile) ? rpcUint(await rpc('eth_maxPriorityFeePerGas', [])) : 0n;
+  const suggested = transferCarriesTip(profile) ? rpcUint(await rpc('eth_maxPriorityFeePerGas', [])) : 0n;
+  // An L1 transaction without a tip is not prepared at all (fail closed before Review rather than hand the wallet an unminable request).
+  if (mainnetL1(profile) && suggested <= 0n) throw new Error('TRANSFER_GAS_PRICE_INVALID');
   const priority = suggested > maxFeePerGas ? maxFeePerGas : suggested;
   const expectedFee = gas * gasPrice + l1Fee, feeBudget = gasLimit * maxFeePerGas + l1Fee;
   if (balance < value + feeBudget) throw new Error(insufficient);

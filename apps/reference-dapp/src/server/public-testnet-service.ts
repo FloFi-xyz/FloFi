@@ -12,7 +12,7 @@ import { readNotAnswered } from './public-testnet-rpc.ts';
 import { createHash, randomBytes } from 'node:crypto';
 import { closeSync, existsSync, fsyncSync, mkdirSync, openSync, readFileSync, readdirSync, renameSync, unlinkSync, writeFileSync } from 'node:fs';
 import { isAbsolute, join } from 'node:path';
-import { baseAssetRegistry, catalogAsset, referenceRegistry, resolveWorkflowCapability, uniswapV3PoolAddress, type AssetCatalog, type CanonicalAsset } from '@defi-workflow-engine/action-registry';
+import { ARBITRUM_ONE, baseAssetRegistry, catalogAsset, referenceRegistry, resolveWorkflowCapability, uniswapV3PoolAddress, type AssetCatalog, type CanonicalAsset } from '@defi-workflow-engine/action-registry';
 import { createBaseSepoliaReviewContext, createReviewContext, reviewContextForChain, validateAuthoringWorkflow } from '@defi-workflow-engine/reference-linter';
 import { encodeNativeSwap, encodeSwap, encodeWethDeposit, encodeWethWithdraw, erc7710, ownerAccountCode, toHex } from '@defi-workflow-engine/reference-compiler';
 import { catalogSwapKind, hashArtifactBytes, isCatalogSwapNode, isReferencePairSwap, readCatalogSwapNode, type CatalogAssetRef, type CatalogSwapFields, type EvidenceBundle, type SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
@@ -1023,11 +1023,15 @@ async function bindSwapOwner(q: PublicQuote, rpc: Rpc, ownerValue: string, expir
   const nativeIn = q.native === 'INPUT' || q.conversion === 'WRAP', allowanceRead = needsAllowance(q);
   // BUILD-FLOFI-EXECUTION-PERFORMANCE-001: the owner's native balance at the pinned block is read once (it was read twice for native ETH in).
   const nativeAt = rpc('eth_getBalance', [account, at]).then(quantity);
-  const [nonce, pending, allowed, input, native, gasPrice, code] = await Promise.all([
+  // BUILD-FLOFI-UX-FIX-003: only Arbitrum Nitro ignores the priority fee. Ethereum L1 (the other owner-bound swap network) needs a real tip: a
+  // zero-tip transaction is refused or left unmined by L1 nodes and builders, which MetaMask then reports as "not found on network after timeout".
+  const nitro = P.chainId === ARBITRUM_ONE.chainId;
+  const [nonce, pending, allowed, input, native, gasPrice, code, suggestedTip] = await Promise.all([
     rpc('eth_getTransactionCount', [account, at]).then(quantity), rpc('eth_getTransactionCount', [account, 'pending']).then(quantity),
     allowanceRead ? rpc('eth_call', [{ to: q.inputToken, data: allowanceData(account, P) }, at]).then(quantity) : Promise.resolve(BigInt(q.amountIn)),
     nativeIn ? nativeAt : rpc('eth_call', [{ to: q.inputToken, data: balanceData(account) }, at]).then(quantity),
     nativeAt, rpc('eth_gasPrice', []).then(quantity), rpc('eth_getCode', [account, at]),
+    nitro ? Promise.resolve(0n) : rpc('eth_maxPriorityFeePerGas', []).then(quantity),
   ]);
   // BUILD-FLOFI-WALLET-UX-EXECUTION-FIX-001: an EIP-7702 delegated EOA (MetaMask Smart Account) still signs and originates this ordinary
   // transaction with its own key; the exact-call simulation and gas estimate below run with its delegate code at the pinned block. Only a
@@ -1050,13 +1054,18 @@ async function bindSwapOwner(q: PublicQuote, rpc: Rpc, ownerValue: string, expir
       step === 'approval' && simulation !== '0x' && simulation !== '0x' + word(1n)) fail('SWAP_SIMULATION_INVALID');
   const gas = quantity(await rpc('eth_estimateGas', [call, at]));
   if (gas < 21_000n || gas > 30_000_000n || gasPrice <= 0n || gasPrice >= 1n << 128n) fail('SWAP_FEE_INVALID');
-  // Nitro: estimate includes posting gas. No separate OP Stack l1Fee, no quoter-only gas estimate.
+  // Nitro: estimate includes posting gas. No separate OP Stack l1Fee, no quoter-only gas estimate. The fee ceiling (and so the reviewed budget) is the
+  // same on both networks; on L1 the tip is the node's suggestion, bounded by that ceiling (the effective price never exceeds the reviewed ceiling).
   const gasLimit = nitroGasLimit(gas), maxFee = nitroMaxFeePerGas(gasPrice), budget = gasLimit * maxFee;
+  // A fresh Review needs a usable tip. The re-bind at Execute (`reviewedBudgetWei`) only checks what changed: the reviewed transaction, whose tip was
+  // checked at Review, is the one sent, so a momentary tip reading never retires a valid Review (it is bounded to the ceiling for the comparison).
+  const tip = nitro ? 0n : reviewedBudgetWei !== undefined ? (suggestedTip < 1n ? 1n : suggestedTip > maxFee ? maxFee : suggestedTip) : suggestedTip;
+  if (!nitro && (tip <= 0n || tip > maxFee)) fail('SWAP_FEE_INVALID');
   // Native ETH in must cover the amount AND the network fee ceiling (the wallet pays both from the same balance). BUILD-FLOFI-E2E-RELIABILITY-001:
   // re-binding a reviewed transaction checks the budget that transaction actually carries (its reviewed gas limit × fee ceiling).
   if (native < (reviewedBudgetWei ?? budget) + BigInt(call.value)) fail(native < BigInt(call.value) ? 'INSUFFICIENT_INPUT' : 'INSUFFICIENT_GAS_FUNDS');
   const transaction: Tx = { ...call, chainId: P.chainHex, nonce: '0x' + pending.toString(16), gas: '0x' + gasLimit.toString(16),
-    maxFeePerGas: '0x' + maxFee.toString(16), maxPriorityFeePerGas: '0x0' };
+    maxFeePerGas: '0x' + maxFee.toString(16), maxPriorityFeePerGas: '0x' + tip.toString(16) };
   const ownerReview: SwapOwnerReview = { account, router: P.router, nonce: pending.toString(), step, allowance: allowed.toString(), transaction,
     gasEstimate: gas.toString(), maxFeePerGas: maxFee.toString(), feeBudgetWei: budget.toString(), deadline, simulationDigest: digest(simulation),
     ...delegation ? { delegation } : {} };
@@ -1076,7 +1085,9 @@ function ownerReviewChanged(before: SwapOwnerReview, after: SwapOwnerReview): bo
     // BUILD-FLOFI-E2E-RELIABILITY-001: the reviewed transaction carries its own fee ceiling (`maxFeePerGas`, a multiple of the Review-time gas
     // price); only a fresh gas price above that ceiling changes what can be signed. Comparing the two ceilings retired an Ethereum Review on
     // any 1-wei base-fee rise between Review and Execute.
-    BigInt(after.gasEstimate) > BigInt(before.transaction.gas) || !nitroFeeWithinCeiling(BigInt(after.maxFeePerGas), BigInt(before.maxFeePerGas));
+    BigInt(after.gasEstimate) > BigInt(before.transaction.gas) || !nitroFeeWithinCeiling(BigInt(after.maxFeePerGas), BigInt(before.maxFeePerGas)) ||
+    // BUILD-FLOFI-UX-FIX-003: a Review made before L1 tips were offered (a zero tip on a network that needs one) is never sent: it needs a new Review.
+    (BigInt(before.transaction.maxPriorityFeePerGas ?? '0x0') === 0n && BigInt(after.transaction.maxPriorityFeePerGas ?? '0x0') > 0n);
 }
 
 /** Shared verified read path. It has no persistence, Review or transaction submission port. */
@@ -1298,6 +1309,8 @@ function createPublicTestnetCore(rpcFor: (profile: SwapProfile) => Rpc, now: () 
     return holder !== null && (holder.id !== attempt.executionId || holder.attemptId !== attempt.attemptId);
   };
   /** The first block from which this run could have had the attempt's exact call executed (its earliest attempt of that same transaction). */
+  /** BUILD-FLOFI-UX-FIX-003: how long a recorded hash may lack a receipt before FloFi checks whether its nonce was used by a replacement. */
+  const REPLACEMENT_CHECK_AFTER_MS = 30_000;
   const sameCallFrom = (run: PublicRun, attempt: PublicAttempt) =>
     Math.min(...run.attempts.filter(a => canonical(a.tx) === canonical(attempt.tx)).map(a => a.preBlock), attempt.preBlock);
   async function observe(id: string): Promise<PublicRun> {
@@ -1330,7 +1343,24 @@ function createPublicTestnetCore(rpcFor: (profile: SwapProfile) => Rpc, now: () 
         const P = profileOf(run.quote.chainId), rpc = rpcFor(P);
         if (quantity(await rpc('eth_chainId', [])) !== BigInt(P.chainId)) fail('WRONG_PROVIDER_CHAIN');
         const raw = await rpc('eth_getTransactionReceipt', [attempt.txHash]);
-        if (raw === null) return await save({ ...run, attempts: run.attempts.map(a => a.attemptId === attempt.attemptId ? { ...a, state: 'PENDING' } : a) });
+        if (raw === null) {
+          // BUILD-FLOFI-UX-FIX-003: a recorded hash with no receipt is pending — never failed, never sent again. Once the reviewed nonce has been
+          // used on chain by another transaction, though, that hash can never land: the existing nonce discovery adopts the same reviewed call under
+          // its new hash (a wallet speed-up) or records that a different transaction used the nonce (a cancel), instead of staying pending forever.
+          // Owner-bound reviews only, not for a reviewed delegation (a relayed submission leaves the owner nonce to the owner's other transactions),
+          // and only once the submission is old enough for the wallet to have replaced it.
+          const review = run.quote.ownerReview, submitted = Date.parse(attempt.submittedAt ?? attempt.createdAt);
+          if (review && review.delegation !== DELEGATOR_IMPL && attempt.tx.nonce !== undefined && now().getTime() - submitted >= REPLACEMENT_CHECK_AFTER_MS) {
+            const found = await discoverTransferByNonce({ nonce: BigInt(attempt.tx.nonce).toString(), transaction: { ...attempt.tx, maxFeePerGas: attempt.tx.maxFeePerGas!,
+              maxPriorityFeePerGas: attempt.tx.maxPriorityFeePerGas! }, preparedAtBlock: attempt.preBlock, transactionHash: null }, rpc);
+            if (found.consumed && found.hash && found.hash !== attempt.txHash) {
+              if (found.mismatch) return save({ ...run, divergence: 'NONCE_CONSUMED_BY_DIFFERENT_TRANSACTION' });
+              const replaced: PublicAttempt = { ...attempt, state: 'HASH', txHash: found.hash };
+              return save({ ...run, attempts: run.attempts.map(a => a.attemptId === attempt.attemptId ? replaced : a) });
+            }
+          }
+          return await save({ ...run, attempts: run.attempts.map(a => a.attemptId === attempt.attemptId ? { ...a, state: 'PENDING' } : a) });
+        }
         if (!isObject(raw)) fail('RECEIPT_INVALID');
         const tx = await rpc('eth_getTransactionByHash', [attempt.txHash]);
         let verified: Awaited<ReturnType<typeof verifyOwnerSubmission>>;

@@ -244,6 +244,10 @@ export function UniversalRouterProvider({ children }: { children: ReactNode }) {
       if (tx.from !== current.owner || tx.chainId !== chain || !src.calls.some(c => c.to === tx.to && c.data === tx.data && BigInt(c.value) === BigInt(tx.value)))
         throw new Error('UNIVERSAL_TRANSACTION_ARTIFACT_CHANGED');
       await validateSession();
+      // BUILD-FLOFI-UX-FIX-003 (as the Router does): the wallet's own view of the next transaction number must be the reviewed one. A request the
+      // wallet would queue behind another (or a wallet RPC that disagrees with FloFi's) is stopped before signing, never sent with a clashing nonce.
+      const walletNonce = await request('eth_getTransactionCount', [current.owner, 'pending']);
+      if (typeof walletNonce !== 'string' || !/^0x[0-9a-fA-F]+$/.test(walletNonce) || BigInt(walletNonce) !== BigInt(tx.nonce)) throw new Error('UNIVERSAL_WALLET_NONCE_MISMATCH');
       acceptCurrent(unwrap(await universalHandoff(id)));
       setSigning(true); diagnostic.invoked = true;
       let hash: unknown;

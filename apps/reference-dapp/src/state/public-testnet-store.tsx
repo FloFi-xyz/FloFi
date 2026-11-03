@@ -83,6 +83,7 @@ function message(error: unknown): string {
     STOCK_MULTIPLIER_MISMATCH: 'The Robinhood registry and the chain disagree on the shares per token. Nothing was prepared.',
     CATALOG_ASSET_IDENTITY_CHANGED: 'The official asset registry no longer matches this workflow\'s asset. Build it again.',
     STOCK_TOKEN_NOT_ACQUIRABLE: 'This Stock Token is not tradable now.', INSUFFICIENT_GAS_FUNDS: 'Insufficient ETH for network fees on this network.',
+    SWAP_FEE_INVALID: 'The network did not return a usable fee right now. Nothing was sent; simulate again shortly.',
     QUOTE_CHANGED_REVIEW_REQUIRED: 'The quote changed. Review the updated amounts before executing.',
     QUOTE_EXPIRED_REVIEW_REQUIRED: 'Quote expired. Review a fresh quote.',
     REVIEW_EXPIRED: 'Quote expired. Simulate again.', REVIEW_REQUIRED: 'Review the current swap first.',

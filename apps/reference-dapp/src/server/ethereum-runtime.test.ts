@@ -98,6 +98,92 @@ describe('Ethereum swaps on the shared owner runtime', () => {
     const begun = await s.begin(run.quote.executionId, recipient);
     expect(begun.tx).toMatchObject({ from: recipient, chainId: '0x1', to: UNI.usdc });
   });
+  it('BUILD-FLOFI-UX-FIX-003: the reviewed L1 transaction carries the node’s suggested priority fee, never 0, within the reviewed fee ceiling', async () => {
+    // A zero-tip transaction is refused or left unmined on Ethereum L1 (MetaMask: "not found on network after timeout"). Arbitrum Nitro alone ignores it.
+    const s = swapService(), run = await s.prepare(swap(), owner), tx = run.quote.ownerReview!.transaction;
+    expect(BigInt(tx.maxPriorityFeePerGas!)).toBe(1_000_000n);
+    expect(BigInt(tx.maxPriorityFeePerGas!)).toBeLessThanOrEqual(BigInt(tx.maxFeePerGas!));
+    expect(run.quote.ownerReview!.feeBudgetWei).toBe((BigInt(tx.gas) * BigInt(tx.maxFeePerGas!)).toString());
+    s.review(run.quote.executionId, run.quote.manifestHash);
+    expect((await s.begin(run.quote.executionId, owner)).tx).toEqual(tx);
+  });
+  it('BUILD-FLOFI-UX-FIX-003: a broadcast transaction with no receipt yet, and receipt reads that time out, stay pending; it confirms once mined', async () => {
+    // MetaMask may say "not found on network after timeout" while the network has simply not included the transaction yet. FloFi never turns a
+    // missing receipt or a read timeout into a failure, never sends again, and confirms the same hash once a block includes it.
+    const path = dir(), s = swapService({ path }), prepared = await s.prepare(swap(), owner), id = prepared.quote.executionId;
+    s.review(id, prepared.quote.manifestHash);
+    const approve = await s.begin(id, owner), hash = chain.queue(approve.tx);
+    s.report(id, approve.attempt.attemptId, { kind: 'HASH', txHash: hash });
+    for (let read = 0; read < 3; read++) {
+      const pending = await s.observe(id);
+      expect(pending.attempts).toHaveLength(1);
+      expect(pending.attempts[0]).toMatchObject({ state: 'PENDING', txHash: hash, receipt: null });
+      expect(pending.outcome).toBeNull();
+    }
+    const rpc = chain.rpc;
+    chain.rpc = async (method: string, params: readonly unknown[]) => {
+      if (method === 'eth_getTransactionReceipt' || method === 'eth_getTransactionByHash') throw new Error('RPC_TIMEOUT');
+      return rpc(method, params);
+    };
+    // A new instance (another serverless invocation) observes during the outage.
+    await expect(swapService({ path }).observe(id)).rejects.toThrow('RPC_TIMEOUT');
+    const afterTimeout = await swapService({ path }).load(id);
+    expect(afterTimeout.attempts).toHaveLength(1);
+    expect(afterTimeout.attempts[0]).toMatchObject({ state: 'PENDING', txHash: hash });
+    expect(afterTimeout.outcome).toBeNull();
+    chain.rpc = rpc;
+    expect(chain.mineQueued()).toEqual([hash]);
+    const confirmed = await swapService({ path }).observe(id);
+    expect(confirmed.attempts).toHaveLength(1);
+    expect(confirmed.attempts[0]).toMatchObject({ state: 'CONFIRMED', txHash: hash });
+  });
+  it('BUILD-FLOFI-UX-FIX-003: a recorded hash replaced by the wallet (speed-up) is followed to the transaction that used the reviewed nonce', async () => {
+    const path = dir(), s = swapService({ path }), prepared = await s.prepare(swap(), owner), id = prepared.quote.executionId;
+    s.review(id, prepared.quote.manifestHash);
+    const approve = await s.begin(id, owner), dropped = '0x' + 'ab'.repeat(32);
+    s.report(id, approve.attempt.attemptId, { kind: 'HASH', txHash: dropped });
+    expect((await s.observe(id)).attempts[0]).toMatchObject({ state: 'PENDING', txHash: dropped });
+    // The same reviewed call lands under another hash; before the waiting period FloFi keeps waiting for the recorded one.
+    const landed = chain.apply(approve.tx);
+    expect((await s.observe(id)).attempts[0]).toMatchObject({ state: 'PENDING', txHash: dropped });
+    now += 31_000;
+    expect((await swapService({ path }).observe(id)).attempts[0]).toMatchObject({ state: 'HASH', txHash: landed });
+    const confirmed = await swapService({ path }).observe(id);
+    expect(confirmed.attempts).toHaveLength(1);
+    expect(confirmed.attempts[0]).toMatchObject({ state: 'CONFIRMED', txHash: landed });
+    expect(confirmed.divergence ?? null).toBeNull();
+  });
+  it('BUILD-FLOFI-UX-FIX-003: a reviewed nonce used by a different transaction (a cancel) is recorded as such, never as a failure and never resent', async () => {
+    const s = swapService(), prepared = await s.prepare(swap(), owner), id = prepared.quote.executionId;
+    s.review(id, prepared.quote.manifestHash);
+    const approve = await s.begin(id, owner);
+    s.report(id, approve.attempt.attemptId, { kind: 'HASH', txHash: '0x' + 'cd'.repeat(32) });
+    // The owner uses that nonce for something else: an ERC-20 transfer of 1 unit to another address.
+    chain.apply({ from: owner, to: UNI.usdc, value: '0x0', data: '0xa9059cbb' + recipient.slice(2).padStart(64, '0') + (1n).toString(16).padStart(64, '0') });
+    now += 31_000;
+    const run = await s.observe(id);
+    expect(run.divergence).toBe('NONCE_CONSUMED_BY_DIFFERENT_TRANSACTION');
+    expect(run.attempts).toHaveLength(1);
+    expect(run.outcome).toBeNull();
+  });
+  it('BUILD-FLOFI-UX-FIX-003: a momentary tip reading at Execute never retires a valid Review; the reviewed transaction is sent', async () => {
+    const s = swapService(), run = await s.prepare(swap(), owner), reviewed = run.quote.ownerReview!.transaction;
+    s.review(run.quote.executionId, run.quote.manifestHash);
+    const rpc = chain.rpc;
+    chain.rpc = async (method: string, params: readonly unknown[]) => method === 'eth_maxPriorityFeePerGas' ? '0x0' : rpc(method, params);
+    expect((await s.begin(run.quote.executionId, owner)).tx).toEqual(reviewed);
+  });
+  it('BUILD-FLOFI-UX-FIX-003: a suggested tip above the reviewed fee ceiling is refused at Review, never clamped into a fresh Review', async () => {
+    const rpc = chain.rpc;
+    chain.rpc = async (method: string, params: readonly unknown[]) => method === 'eth_maxPriorityFeePerGas' ? '0x' + (10n ** 30n).toString(16) : rpc(method, params);
+    await expect(swapService().prepare(swap(), owner)).rejects.toThrow('SWAP_FEE_INVALID');
+    chain.rpc = rpc;
+  });
+  it('BUILD-FLOFI-UX-FIX-003: a node that suggests no tip fails closed before any Review instead of preparing an unminable transaction', async () => {
+    const rpc = chain.rpc;
+    chain.rpc = async (method: string, params: readonly unknown[]) => method === 'eth_maxPriorityFeePerGas' ? '0x0' : rpc(method, params);
+    await expect(swapService().prepare(swap(), owner)).rejects.toThrow('SWAP_FEE_INVALID');
+  });
   it.each([['USDC', 'WETH', '10000000'], ['WETH', 'USDC', '10000000000000000']])('quotes %s → %s with chain-bound identities', async (input, output, amount) => {
     const run = await swapService().prepare(swap(input, output, amount), owner);
     expect(run.quote).toMatchObject({ chainId: 1, inputToken: asset(input).address, outputToken: asset(output).address, amountIn: amount,
@@ -381,6 +467,13 @@ describe('Ethereum native and ERC20 transfers', () => {
     const run = await transferService().simulate(native(), owner);
     expect(run.review).toMatchObject({ gasEstimate: '120000', gasLimit: '180000', expectedFee: '1200000000000', feeBudget: '3600000000000' });
     expect(reads.join('\n')).not.toMatch(/420000000000000000000000000000000000000f|f1c7a58b/);
+  });
+  it.each(['native', 'token'] as const)('BUILD-FLOFI-UX-FIX-003: the reviewed %s transfer offers the node’s suggested L1 tip, never 0', async kind => {
+    const run = await transferService().simulate(kind === 'native' ? native() : token(), owner), tx = run.review.transaction;
+    expect(BigInt(tx.maxPriorityFeePerGas)).toBe(1_000_000n);
+    expect(BigInt(tx.maxPriorityFeePerGas)).toBeLessThanOrEqual(BigInt(tx.maxFeePerGas));
+    // The budget the owner reviews is unchanged: the gas limit at the fee ceiling.
+    expect(run.review).toMatchObject({ feeBudget: (BigInt(tx.gas) * BigInt(tx.maxFeePerGas)).toString() });
   });
   it.each(['native', 'token'] as const)('requires fresh Review when gas estimate exceeds reviewed %s bounds', async kind => {
     let increased = false;
