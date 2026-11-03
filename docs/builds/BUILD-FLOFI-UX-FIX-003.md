@@ -2,7 +2,8 @@
 
 Owner request: fix production problems in Chat, Editor, Bridge, MetaMask, Login and Settings without weakening financial validation,
 signing protections or security, without production changes, migrations, new variables or real-money transactions. Branch
-`claude/friendly-lovelace-mbwtlq`; one PR; no merge or deploy.
+`claude/friendly-lovelace-mbwtlq`; one PR. The owner later authorized merging and deploying (Vercel, Railway) only once every
+mandatory check is green (see "Owner follow-up" below).
 
 ## P0-1 — No test network in any public option
 
@@ -54,11 +55,16 @@ destination-asset-only changes, wrong-unit answers, "up to", ambiguous amounts, 
 
 ## P0-3 — MetaMask "Transaction 66 failed! Transaction not found on network after timeout"
 
+**Status: partially investigated — not resolved.** The original MetaMask notification has not been reproduced, and no production
+record of "Transaction 66" was available. The defects below are real and fixed, and they are consistent with the symptom, but nothing
+here proves they caused this notification. The issue stays open until the owner's evidence (checklist below) confirms or rules out
+each hypothesis.
+
 **What the code does (verified).** Injected wallets get exactly one `eth_sendTransaction` per Execute click; FloFi never broadcasts
 a MetaMask transaction itself; the durable attempt and nonce reservation fence duplicates; a missing receipt is PENDING/UNCERTAIN and
 no read timeout becomes FAILED; "Confirmed" requires a receipt with status 1 verified by FloFi's own RPC.
 
-**Defects found and fixed.**
+**Defects found and fixed (possible contributors, not a confirmed cause).**
 1. Ethereum mainnet swaps (owner-bound Review) were built with `maxPriorityFeePerGas: 0x0` and Arbitrum's Nitro fee policy
    (`public-testnet-service.ts` `bindSwapOwner`). Ethereum mainnet transfers also carried a zero tip
    (`reference-compiler/native-transfer.ts` offered a tip only on OP Stack). An L1 transaction without a tip is refused by node
@@ -153,10 +159,28 @@ and hydration still need production telemetry.
 
 ## Limitations and follow-ups
 
-- The MetaMask notification is not reproduced; see the evidence checklist above. Fee overrun after a user speed-up stays a recorded
-  bounds divergence (unchanged policy, owner decision).
+- MetaMask: partially investigated, not resolved. The notification is not reproduced and its cause is not confirmed; see the status
+  and evidence checklist in P0-3. Fee overrun after a user speed-up stays a recorded bounds divergence (unchanged policy, owner
+  decision).
 - Transfers and supply do not yet adopt a replacement hash the way swaps now do; the public swap store has no wallet-side nonce check.
-- Long amounts beyond ~11 characters are clipped with the full value in the title (not focusable on touch); Review shows exact values.
+- Long amounts beyond ~11 characters are clipped on the card; the exact value opens on tap or keyboard (owner follow-up below) and
+  Review shows exact values. The USD-first sub-line is not a disclosure: tapping the USD figure switches back to the token amount.
 - Channels show at most four buttons, so Robinhood Chain is typed rather than tapped in the source question.
-- Pre-existing, not changed: the PT universal-bridge funds note says FloFi charges no fee while EN records a 0.1% fee obligation —
-  needs an owner copy decision.
+- The PT universal-bridge Canvas panel strings keep their European-Portuguese wording ("regista"); their meaning matches EN.
+
+## Owner follow-up (same PR)
+
+1. **FloFi fee copy, EN/PT.** Owner policy: the 0.1% fee is recorded on completed universal bridges and is not charged at this time.
+   The Portuguese Copilot note said FloFi charged no fee on the bridge; it now says, like English, that a 0.1% fee obligation is
+   recorded for each completed bridge and is not charged now (`copilot-messages.ts`). The Canvas "Real funds" note now also says it is
+   not charged (EN and PT), and the universal Review's "FloFi fee (0.1% obligation)" line and note, which had no Portuguese text, are
+   translated. Copy only: `fee-obligation.ts`, the obligation record and accounting are unchanged; nothing is collected.
+   Regression: `i18n/flofi-fee-copy.test.ts` (both notes; every universal Review/panel fee sentence has PT text stating recorded and
+   not charged; the old "não cobra taxa" sentence cannot return).
+2. **Exact value by touch.** A card value clipped to one line (measured, `scrollWidth > clientWidth`) becomes a disclosure
+   (`role=button`, `aria-expanded`): tap, click, Enter or Space shows the exact value and token in a bubble over the card; a second tap,
+   Escape (focus returns) or a tap elsewhere closes it; a new quote closes it. Values that fit stay plain text. The card keeps its size
+   and one-line layout; nothing is rounded. Regression: `workflow-ux-authoring` "exact value on a touch screen" (390 px, touch):
+   clipped one-line value, tap open/close, tap elsewhere, keyboard, bubble on screen, card size unchanged, short value not a button.
+3. **MetaMask** documented as partially investigated (P0-3 status), not as resolved.
+

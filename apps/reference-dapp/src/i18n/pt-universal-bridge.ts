@@ -71,8 +71,8 @@ export const portugueseUniversalBridge: Readonly<Record<string, string>> = {
   // Panel, Review and execution
   'Universal cross-chain bridge': 'Bridge cross-chain universal', 'Simulate universal bridge': 'Simular bridge universal', 'Review universal bridge': 'Rever bridge universal',
   'from': 'de', ', receiving': ', recebendo',
-  'Real funds. FloFi never signs: your source wallet signs every transaction after your Review. FloFi records a 0.1% fee obligation when the workflow completes; provider fees are shown below.':
-    'Fundos reais. O FloFi nunca assina: a sua carteira de origem assina cada transação depois da sua Revisão. O FloFi regista uma obrigação de taxa de 0,1% quando o workflow conclui; as taxas do fornecedor são mostradas abaixo.',
+  'Real funds. FloFi never signs: your source wallet signs every transaction after your Review. FloFi records a 0.1% fee obligation when the workflow completes; it is not charged at this time. Provider fees are shown below.':
+    'Fundos reais. O FloFi nunca assina: a sua carteira de origem assina cada transação depois da sua Revisão. O FloFi regista uma obrigação de taxa de 0,1% quando o workflow conclui; ela não é cobrada neste momento. As taxas do fornecedor são mostradas abaixo.',
   'Source wallet:': 'Carteira de origem:', 'destination wallet:': 'carteira de destino:', 'Connect wallets': 'Ligar carteiras',
   'Sign in with source wallet': 'Iniciar sessão com a carteira de origem', 'Switch wallet to the source network': 'Mudar a carteira para a rede de origem',
   'order': 'ordem', 'Selection': 'Seleção', 'selected': 'selecionada', 'available': 'disponível', 'not executable': 'não executável', 'refused': 'recusada',
@@ -80,6 +80,10 @@ export const portugueseUniversalBridge: Readonly<Record<string, string>> = {
   '— fixed in the provider order; a smaller delivery is a mismatch': '— fixado na ordem do fornecedor; uma entrega menor é uma divergência',
   'Provider fees': 'Taxas do fornecedor', '(included in the quote)': '(incluída na cotação)', '(paid separately)': '(paga à parte)', 'none listed': 'nenhuma listada',
   'FloFi fee': 'Taxa do FloFi',
+  // BUILD-FLOFI-UX-FIX-003: the universal Review's FloFi fee line (simulation-presentation.ts) had no Portuguese text.
+  'FloFi fee (0.1% obligation)': 'Taxa do FloFi (obrigação de 0,1%)',
+  '0.1% of the completed workflow input. Recorded as an obligation when the run reconciles; not collected on-chain yet. Waived if the workflow fails or refunds.':
+    '0,1% do valor de entrada do workflow concluído. Registrada como obrigação quando a execução é reconciliada; ainda não é cobrada on-chain. Dispensada se o workflow falhar ou for reembolsado.',
   '0.1% of the completed workflow input — obligation recorded at reconciliation; not collected on-chain yet.':
     '0,1% do input do workflow concluído — obrigação registada na reconciliação; ainda não cobrada on-chain.',
   'after the deposit confirms (provider estimate)': 'após a confirmação do depósito (estimativa do fornecedor)',

@@ -254,6 +254,10 @@
       "path": "apps/reference-dapp/src/i18n/catalog.test.ts",
       "stage": "unit"
     },
+    "app.i18n.flofi-fee-copy": {
+      "path": "apps/reference-dapp/src/i18n/flofi-fee-copy.test.ts",
+      "stage": "unit"
+    },
     "app.i18n.locale": {
       "path": "apps/reference-dapp/src/i18n/locale.test.tsx",
       "stage": "unit"
@@ -3539,6 +3543,7 @@
         "app.e2e.global-product-polish",
         "app.e2e.wallet-selector",
         "app.i18n.catalog",
+        "app.i18n.flofi-fee-copy",
         "app.i18n.locale"
       ],
       "gaps": [

@@ -292,17 +292,62 @@ function PoolPricePanel({ strategy, onSelect, onCollapse }: { strategy: PoolPric
  * the value itself is never rounded or shortened here; a value too long even at the smallest size is clipped with its full text on hover.
  */
 const amountFit = (value: string): CSSProperties => ({ ['--amount-chars' as string]: String(Math.max(value.length, 5)) });
+/**
+ * BUILD-FLOFI-UX-FIX-003: one card value. A quote on its way is a quiet, fixed-size placeholder (never "Calculating…" text that wraps and resizes
+ * the card); one persistent polite live region per value, so assistive technology hears "Calculating estimate…" and then the amount. A value too
+ * long for its column even at the smallest size is clipped with an ellipsis; hover (title) does not exist on touch screens, so a clipped value
+ * becomes a disclosure: a tap, click, Enter or Space shows the exact value and its token over the card, and a second tap, Escape or a tap
+ * elsewhere hides it. Values that fit stay plain text. Presentation only: the value is never rounded or shortened.
+ */
+function CardAmount({ value, fallback, token, loading }: { value: string | undefined; fallback: string; token: string; loading: boolean }) {
+  const { t: tr } = useLocale();
+  const shownRef = useRef<HTMLSpanElement>(null), exactRef = useRef<HTMLSpanElement>(null), exactId = useId();
+  const [clipped, setClipped] = useState(false), [open, setOpen] = useState(false);
+  const pending = loading && !value;
+  useEffect(() => {
+    const element = shownRef.current;
+    setOpen(false);
+    if (!element || !value) { setClipped(false); return; }
+    const measure = () => setClipped(element.scrollWidth > element.clientWidth + 1);
+    measure();
+    if (typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(measure); observer.observe(element);
+    return () => observer.disconnect();
+  }, [value, pending]);
+  useEffect(() => {
+    if (!open) return;
+    const outside = (event: PointerEvent) => {
+      const target = event.target instanceof Node ? event.target : null;
+      if (!target || shownRef.current?.contains(target) || exactRef.current?.contains(target)) return;
+      setOpen(false);
+    };
+    const escape = (event: KeyboardEvent) => { if (event.key === 'Escape') { setOpen(false); shownRef.current?.focus(); } };
+    document.addEventListener('pointerdown', outside, true); document.addEventListener('keydown', escape);
+    return () => { document.removeEventListener('pointerdown', outside, true); document.removeEventListener('keydown', escape); };
+  }, [open]);
+  const expandable = clipped && !!value;
+  const toggle = () => setOpen(current => !current);
+  return <>
+    <span className="composer-amount-live" aria-live="polite" aria-busy={pending ? true : undefined}>
+      {pending
+        ? <span className="composer-amount-value composer-amount-loading"><span className="composer-amount-skeleton" aria-hidden="true"/><span className="sr-only">{tr('Calculating estimate…')}</span></span>
+        : <span ref={shownRef} className={`composer-amount-value${expandable ? ' nodrag nopan' : ''}`} style={amountFit(value ?? fallback)} title={value ?? undefined}
+          data-clipped={expandable || undefined} role={expandable ? 'button' : undefined} tabIndex={expandable ? 0 : undefined}
+          aria-expanded={expandable ? open : undefined} aria-controls={expandable && open ? exactId : undefined}
+          onClick={expandable ? event => { event.stopPropagation(); toggle(); } : undefined}
+          onKeyDown={expandable ? event => { if (event.key !== 'Enter' && event.key !== ' ') return; event.preventDefault(); event.stopPropagation(); toggle(); } : undefined}>
+          {tr(value ?? fallback)}
+        </span>}
+    </span>
+    {expandable && open && <span ref={exactRef} id={exactId} className="composer-amount-exact nodrag nopan" role="note" aria-label={tr('Exact amount')}
+      onClick={event => event.stopPropagation()}>{value} {token}</span>}
+  </>;
+}
 /** Display priority is shared by all value boxes in the card; token inputs keep their denomination. */
 function ValueBox({ amount, token, network, source, label, hint, editor, inputLabel, equity, picker, fiatFirst, onFiatFirstChange, readOnly = false, invalid = false, usd, loading = false }: { usd?: UsdLine; invalid?: boolean; readOnly?: boolean; loading?: boolean; amount?: string | undefined; token: string; network: string; source?: boolean; label?: string; hint: string; editor?: (Pick<CanvasAmountEditor, 'value' | 'formId' | 'onChange'> & { onEscape?: () => void }) | undefined; inputLabel?: string; equity?: { symbol: string; onToggle(): void; expanded: boolean; controls: string }; picker?: TokenPickerControl; fiatFirst: boolean; onFiatFirstChange: (fiatFirst: boolean) => void }) {
   const { t: tr } = useLocale();
-  // BUILD-FLOFI-UX-FIX-003: a quote on its way is a quiet, fixed-size placeholder (never "Calculating…" text that wraps and resizes the card); the
-  // full value of a long amount stays available on hover and to assistive technology while the box keeps one line.
-  // One persistent polite live region per value: assistive technology hears "Calculating estimate…" and then the amount when it arrives.
-  const shown = (value: string | undefined, fallback: string) => <span className="composer-amount-live" aria-live="polite" aria-busy={loading && !value ? true : undefined}>
-    {loading && !value
-      ? <span className="composer-amount-value composer-amount-loading"><span className="composer-amount-skeleton" aria-hidden="true"/><span className="sr-only">{tr('Calculating estimate…')}</span></span>
-      : <span className="composer-amount-value" style={amountFit(value ?? fallback)} title={value ?? undefined}>{tr(value ?? fallback)}</span>}
-  </span>;
+  // BUILD-FLOFI-UX-FIX-003: the box keeps one line; a clipped value's exact text opens on tap, click or keyboard (CardAmount).
+  const shown = (value: string | undefined, fallback: string) => <CardAmount value={value} fallback={fallback} token={token} loading={loading}/>;
   if (readOnly) return <span className={`numeric composer-amount-box ${source ? 'composer-amount' : 'composer-destination-box'}`}
     role="group" aria-label={tr(label ?? (source ? 'Source amount' : 'Destination amount'))} data-symbolic={!amount || undefined} title={tr(hint)}>
     <span className="composer-value-column">{shown(amount, '—')}</span>{tr(' ')}

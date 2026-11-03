@@ -267,6 +267,51 @@ test.describe('UX-007 fast live quote feedback', () => {
     await assertPassiveWallet(page); networkGuard.assertClean();
   });
 
+  test.describe('BUILD-FLOFI-UX-FIX-003 exact value on a touch screen', () => {
+    // The guarded fixture sets a desktop viewport on its own context; touch input comes from `use`, the phone width from setViewportSize.
+    test.use({ hasTouch: true });
+    test('a long amount clipped to one line opens its exact value on tap or keyboard, without resizing the card', async ({ page, networkGuard }) => {
+      const LONG = '0.123456789012345678';
+      await replayQuotes(page, (_index, seen) => ({ delayMs: 20, expected: amountOf(seen) === '1000000' ? '0.04' : LONG }));
+      await page.setViewportSize({ width: 390, height: 844 });
+      await open(page);
+      await page.getByRole('button', { name: 'Add swap', exact: true }).click();
+      const card = cards(page).first(); await chooseNetwork(page, card, 'Arbitrum One');
+      await card.getByRole('textbox', { name: 'Source amount (USDC)', exact: true }).fill('250');
+      const destination = card.getByRole('group', { name: 'Destination amount (unquoted placeholder)', exact: true });
+      // Clipped on one line, so it is a disclosure; its accessible name is the whole, unrounded value.
+      const value = destination.getByRole('button', { name: LONG, exact: true });
+      await expect(value).toHaveAttribute('aria-expanded', 'false');
+      expect(await value.evaluate(element => ({ clipped: element.scrollWidth > element.clientWidth + 1, oneLine: element.getBoundingClientRect().height <= parseFloat(getComputedStyle(element).lineHeight) + 1 })))
+        .toEqual({ clipped: true, oneLine: true });
+      const token = (await destination.locator('.composer-token-chip, .composer-token-pill').first().innerText()).trim().split(/\s+/)[0]!;
+      const before = (await card.boundingBox())!;
+      const exact = page.getByRole('note', { name: 'Exact amount', exact: true });
+      // Tap opens the exact value over the card (fully on screen); the card keeps its size.
+      await value.tap();
+      await expect(value).toHaveAttribute('aria-expanded', 'true');
+      await expect(exact).toHaveText(`${LONG} ${token}`);
+      const bubble = (await exact.boundingBox())!;
+      expect(bubble.x).toBeGreaterThanOrEqual(0); expect(bubble.x + bubble.width).toBeLessThanOrEqual(390);
+      const during = (await card.boundingBox())!;
+      expect(Math.abs(during.height - before.height)).toBeLessThan(1); expect(Math.abs(during.width - before.width)).toBeLessThan(1);
+      // A second tap closes it; a tap elsewhere closes it.
+      await value.tap(); await expect(exact).toHaveCount(0); await expect(value).toHaveAttribute('aria-expanded', 'false');
+      await value.tap(); await expect(exact).toBeVisible();
+      await card.locator('.composer-action-title').tap(); await expect(exact).toHaveCount(0);
+      // Keyboard: Enter opens, Escape closes and returns focus to the value.
+      await value.focus(); await page.keyboard.press('Enter'); await expect(exact).toHaveText(`${LONG} ${token}`);
+      await page.keyboard.press('Escape'); await expect(exact).toHaveCount(0); await expect(value).toBeFocused();
+      // A value that fits stays plain text.
+      await card.getByRole('textbox', { name: 'Source amount (USDC)', exact: true }).fill('1');
+      await expect(destination.locator('.composer-amount-value')).toHaveText('0.04');
+      await expect(destination.getByRole('button', { name: '0.04', exact: true })).toHaveCount(0);
+      // Authoring only: nothing was applied, simulated or signed.
+      await expect(revision(page)).toHaveAttribute('data-workflow-revision', '0');
+      await assertPassiveWallet(page); networkGuard.assertClean();
+    });
+  });
+
   test('an unavailable route says Quote unavailable and never keeps another amount\'s quote', async ({ page, networkGuard }) => {
     await replayQuotes(page, (_index, s) => ({ delayMs: 20, expected: amountOf(s) === '7000000' ? null : '0.002' }));
     await open(page);

@@ -245,7 +245,7 @@ export function UniversalBridgePanel({ view }: { view: 'simulate' | 'execute' })
   return <section className="panel" aria-label={tr('Universal cross-chain bridge')}>
     <h2>{tr(view === 'simulate' ? 'Simulate universal bridge' : 'Review universal bridge')}</h2>
     {d && <p>{tr('Bridge')} {d.amount} {d.inputSymbol} {tr('from')} {d.sourceLabel} {tr('to')} {d.destinationLabel}{tr(', receiving')} {d.outputSymbol}.</p>}
-    <p role="note">{tr('Real funds. FloFi never signs: your source wallet signs every transaction after your Review. FloFi records a 0.1% fee obligation when the workflow completes; provider fees are shown below.')}</p>
+    <p role="note">{tr('Real funds. FloFi never signs: your source wallet signs every transaction after your Review. FloFi records a 0.1% fee obligation when the workflow completes; it is not charged at this time. Provider fees are shown below.')}</p>
     {!router.available && <p role="status">{tr(MESSAGES.UNIVERSAL_ROUTER_NOT_ENABLED!)}</p>}
     {router.retired && <p role="alert">{tr('The workflow changed. Prior authorization is invalid. Simulate the current bridge again.')}</p>}
     {router.recovered && record && <p role="status">{tr('Recovered run')} {record.id}{tr('. Its state comes from the server; nothing is resent automatically.')}</p>}
