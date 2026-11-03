@@ -37,7 +37,7 @@ import { uniswapLiquidityDetails } from '../domain/uniswap-liquidity-authoring';
 import { RouterForm } from './router-panel';
 import { UniversalBridgeForm } from './universal-bridge-panel';
 import { universalBridgeDetails } from '../domain/universal-bridge-authoring';
-import { routerDetails, ROUTER_NETWORK_OPTIONS } from '../domain/router-authoring';
+import { routerDetails } from '../domain/router-authoring';
 import { canEditCanvasAmount, setupSummary } from '../domain/canvas-action-setup';
 import { supplyReviewFormId, poolReviewFormId } from './composer-card';
 import { usePoolContributionInputs } from './canvas-card-inputs';
@@ -95,7 +95,8 @@ export function ActionSettingsPopover({ selectedId, select, open, close }: { sel
       const canvas = surface!.getBoundingClientRect();
       const x = Math.max(canvas.left + 8, 8), y = Math.max(canvas.top + 8, 8);
       const width = Math.max(1, Math.min(canvas.right - 8, window.innerWidth - 8) - x), height = Math.max(1, Math.min(canvas.bottom - 8, window.innerHeight - 8) - y);
-      const obstacles = [...surface!.querySelectorAll<HTMLElement>('.canvas-navigator, .canvas-primary-action, .floating-toolbox')].map(element => element.getBoundingClientRect());
+      // BUILD-FLOFI-UX-FIX-003: a pending proposal's Review button is never covered by a card's settings either.
+      const obstacles = [...surface!.querySelectorAll<HTMLElement>('.canvas-navigator, .canvas-primary-action, .floating-toolbox, .proposal-artifact')].map(element => element.getBoundingClientRect());
       const size = { width: Math.min(review!.offsetWidth, width), height: Math.min(review!.scrollHeight, height) }, cardBox = card.getBoundingClientRect();
       const placed = proposalReviewPosition(cardBox, size, { x, y, width, height }, obstacles);
       // The settings never cover what lies below them — the Canvas controls (Simulate/Authorize, zoom, toolbox) or their own card and its Review
@@ -244,7 +245,7 @@ function CanonicalArtifactInspector({ selectedId, select }: InspectorProps) {
   const orcaPosition = node ? solanaLiquidityDetails(node) : null;
   const uniPosition = node ? uniswapLiquidityDetails(node) : null;
   const routed = node ? routerDetails(node) : null, universalBridge = node ? universalBridgeDetails(node) : null;
-  const label = node?.actionType === 'borrow' && !lending ? 'Borrow' : node?.actionType === 'repay' ? 'Repay' : node?.actionType === 'withdraw' ? 'Withdraw' : node?.actionType === 'asset.transfer' ? 'Send' : lending ? (node?.nodeId==='lending-supply'?'Aave Supply':node?.nodeId==='lending-borrow'?'Aave Borrow':'Uniswap Swap') : supply ? 'Supply' : solana ? 'Swap' : orcaPosition || uniPosition ? 'Liquidity position' : routed ? 'Cross-chain bridge' : cross && node ? 'Cross-chain liquidity' : swap ? 'Swap' : bridge ? 'Bridge' : liquidity ? 'Pool' : template && node ? node.actionType.slice(5).replace(/^./, letter => letter.toUpperCase()) : 'Action';
+  const label = node?.actionType === 'borrow' && !lending ? 'Borrow' : node?.actionType === 'repay' ? 'Repay' : node?.actionType === 'withdraw' ? 'Withdraw' : node?.actionType === 'asset.transfer' ? 'Send' : lending ? (node?.nodeId==='lending-supply'?'Aave Supply':node?.nodeId==='lending-borrow'?'Aave Borrow':'Uniswap Swap') : supply ? 'Supply' : solana ? 'Swap' : orcaPosition || uniPosition ? 'Liquidity position' : routed || universalBridge ? 'Bridge' : cross && node ? 'Cross-chain liquidity' : swap ? 'Swap' : bridge ? 'Bridge' : liquidity ? 'Pool' : template && node ? node.actionType.slice(5).replace(/^./, letter => letter.toUpperCase()) : 'Action';
   const canonicalSummary = node ? composerSummary(state.workflow, node, context) : setup ? setupSummary(setup, context) : null;
   const networks = node ? bridgeNetworkInputs[node.nodeId] : undefined;
   const selectedSummary = canonicalSummary && node && cryptoSelections[node.nodeId] ? { ...canonicalSummary, chain: selection!.network, provider: cryptoProfile(selection!)!.provider } : canonicalSummary;
@@ -254,7 +255,7 @@ function CanonicalArtifactInspector({ selectedId, select }: InspectorProps) {
   if (!node && !setup) return null;
   return <section className="inspector-body" aria-label={tr(setup ? `${setupSummary(setup, context).action} settings` : `${label} settings`)}>
     <h2>{tr(setup ? `${setupSummary(setup, context).action} settings` : node ? `${label} settings` : 'Settings')}</h2>
-    {summary && <p className="composer-editor-context">{tr(summary.action)} · {tr(summary.provider)} · {tr(summary.chain)} · {tr(displayAmount)}</p>}
+    {summary && !routed && !universalBridge && <p className="composer-editor-context">{tr(summary.action)} · {tr(summary.provider)} · {tr(summary.chain)} · {tr(displayAmount)}</p>}
     {validation && validation.findings.length > 0 && <div className="composer-findings" aria-label={tr("Selected action checks")}>
       {validation.findings.map(finding => <p key={`${finding.code}:${finding.field}`}><span aria-hidden="true">⚠ </span>{tr(finding.message)}</p>)}
     </div>}
@@ -284,8 +285,9 @@ function CanonicalArtifactInspector({ selectedId, select }: InspectorProps) {
       </form>}
       {cryptoSwap && selection && <SlippageField value={slippage} current={Number(cryptoSwap.slippage)} error={slippageError} onChange={value => { setSlippageError(''); setSlippage(value); }}
         onSubmit={event => applySlippage(event, bps => ({ type: 'SET_CRYPTO_ACTION', nodeId: node.nodeId, input: { ...cryptoSwap, slippage: bps }, source: 'CANVAS', baseRevision: state.workflow.revision }))}/>}
-      {universalBridge && <><p className="muted">{universalBridge.sourceLabel} {universalBridge.inputSymbol} → {universalBridge.destinationLabel} {universalBridge.outputSymbol}{tr(' through the universal Cross-chain Router · real funds · a fresh route, simulation and Review are required after changes.')}</p><UniversalBridgeForm key={node!.nodeId + ':' + state.workflow.revision} nodeId={node!.nodeId}/></>}
-      {routed && <><p className="muted">{tr(routed.source)}{tr(` ${routed.token} → `)}{tr(ROUTER_NETWORK_OPTIONS[routed.network].destinationLabel)}{tr(` ${routed.destinationToken} through the Cross-chain Router · `)}{tr(routed.network === 'testnet' ? 'test USDC' : 'real funds')}{tr(" · a fresh route, simulation and Review are required after changes.")}</p><RouterForm key={node.nodeId + ':' + state.workflow.revision} nodeId={node.nodeId}/></>}
+      {/* BUILD-FLOFI-UX-FIX-003: a bridge's settings are only what its card does not edit (recipient, routing, slippage), without protocol text. */}
+      {universalBridge && <UniversalBridgeForm options key={node!.nodeId + ':' + state.workflow.revision} nodeId={node!.nodeId}/>}
+      {routed && <RouterForm options key={node.nodeId + ':' + state.workflow.revision} nodeId={node.nodeId}/>}
       {uniPosition && !cryptoSelections[node.nodeId] && <><p className="muted">{tr(uniPosition.network)}{tr(" USDC / WETH via ")}{tr(uniPosition.provider)}{tr(" · fee 0.05% · test tokens · simulate against the live pool. Changes require review.")}</p><UniswapLiquidityForm key={node.nodeId + ':' + state.workflow.revision} nodeId={node.nodeId} reviewFormId={poolReviewFormId(node.nodeId)}/></>}
       {orcaPosition && !cryptoSelections[node.nodeId] && <><p className="muted">{tr(orcaPosition.network)}{tr(orcaPosition.network === 'Solana Devnet' ? " SOL / devUSDC via " : " SOL / USDC via ")}{tr(orcaPosition.provider)}{tr(orcaPosition.network === 'Solana Devnet' ? " · valueless test tokens · simulate against the live pool. Changes require review." : " · real funds · simulate against the live pool. Changes require review.")}</p><SolanaLiquidityForm key={node.nodeId + ':' + state.workflow.revision} nodeId={node.nodeId} reviewFormId={poolReviewFormId(node.nodeId)}/></>}
       {cross && <p className="muted">{tr("Base USDC → Arbitrum USDC → ")}{tr(cross.noSwap ? 'one-sided' : 'calculated partial swap →')}{tr(" Uniswap v3 position. Each boundary requires fresh review and reconciliation.")}</p>}
@@ -307,7 +309,7 @@ function CanonicalArtifactInspector({ selectedId, select }: InspectorProps) {
         if (key === 'weth' || key === 'usdc') contributions.edit(key === 'weth' ? 0 : 1, event.target.value);
         setLiquidityInput(current => ({ ...current, [key]: event.target.value }));
       }}/></label>)}</form>}
-      {!lending && !cross && !swap && !bridge && !liquidity && !template && !supply && !solana && !uniPosition && <p className="muted">{tr("This step is configured through its workflow review.")}</p>}
+      {!lending && !cross && !swap && !bridge && !liquidity && !template && !supply && !solana && !uniPosition && !routed && !universalBridge && <p className="muted">{tr("This step is configured through its workflow review.")}</p>}
       {error && <p role="alert" className="form-error">{tr(error)}{tr(". Check the parameters and try again.")}</p>}
       <div className="inspector-actions">{(swap || template) && <button type="button" onClick={() => dispatch({ type: 'LOCK', nodeId: node.nodeId, locked: !locked, source: 'CANVAS', baseRevision: state.workflow.revision })}>{tr(locked ? 'Unlock amount' : 'Lock amount')}</button>}
         <button type="button" className="quiet" disabled={!deletable} onClick={() => { dispatch({ type: 'REMOVE', nodeId: node.nodeId, source: 'CANVAS', baseRevision: state.workflow.revision }); select(null); }}>{tr("Remove step")}</button></div>

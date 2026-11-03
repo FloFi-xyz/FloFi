@@ -4,10 +4,12 @@ import { useLocale } from '../i18n/locale';
 
 import { useEffect, useId, useRef, useState } from 'react';
 import Link from 'next/link';
+import { usePathname } from 'next/navigation';
 import { learningAvailability } from '../app/learning-action';
-import { accountState, type AccountState } from '../app/account-action';
 import { disconnectToLogin } from '../accounts/disconnect';
-import { useFloFiPrivy } from '../accounts/privy-context';
+import { useAccountsOffered, useFloFiPrivy } from '../accounts/privy-context';
+import { forgetAccountPresence, useAccountPresence } from '../state/account-presence';
+import { useProductBootstrap } from '../state/product-bootstrap';
 
 export function HeaderSettings({ onDisconnect, disconnectDisabled, onSupport }: { onDisconnect: () => void; disconnectDisabled: boolean; onSupport?: () => void }) {
   const { t: tr } = useLocale();
@@ -19,24 +21,38 @@ export function HeaderSettings({ onDisconnect, disconnectDisabled, onSupport }: 
   const toggle = useRef<HTMLButtonElement>(null);
   const themeTransition = useRef<ReturnType<typeof setTimeout> | null>(null);
   const menuId = useId();
-  // BUILD-CHAT-LEARNING-002: Privacy & memory is listed only where the deployment keeps learning data (checked when the menu first opens).
-  const [privacy, setPrivacy] = useState(false), checked = useRef(false);
-  // BUILD-FLOFI-AUTH-WALLETS-001: the FloFi account entry, only where this deployment offers accounts (read when the menu first opens).
-  const [account, setAccount] = useState<AccountState | null>(null);
-  const privy = useFloFiPrivy();
+  // BUILD-CHAT-LEARNING-002: Privacy & memory is listed only where the deployment keeps learning data. BUILD-FLOFI-UX-FIX-003: the product page
+  // states the tier with its first HTML (no request, no row appearing after the menu opens); elsewhere it is read once at idle time.
+  const bootstrapTier = useProductBootstrap().learningTier;
+  const [fetchedTier, setFetchedTier] = useState<'OFF' | 'SESSION' | 'ENABLED' | null>(null);
   useEffect(() => {
-    if (!open || checked.current) return;
-    checked.current = true;
-    void learningAvailability().then(tier => setPrivacy(tier === 'ENABLED'), () => undefined);
-    // Not inside the embedded MCP approval: signing in there would navigate away from the approval.
-    if (window.location.pathname !== '/mcp/approve') void accountState().then(setAccount, () => undefined);
-  }, [open]);
+    if (bootstrapTier !== undefined) return;
+    let live = true;
+    void learningAvailability().then(tier => { if (live) setFetchedTier(tier); }, () => undefined);
+    return () => { live = false; };
+  }, [bootstrapTier]);
+  const privacy = (bootstrapTier ?? fetchedTier) === 'ENABLED';
+  // BUILD-FLOFI-AUTH-WALLETS-001: the FloFi account entry, only where this deployment offers accounts — never inside the embedded MCP approval
+  // (signing in there would navigate away from it). BUILD-FLOFI-UX-FIX-003: its row is part of the menu from the first open (a quiet placeholder
+  // until the shared, prefetched presence arrives), so the menu never changes rows or size while it is open.
+  const privy = useFloFiPrivy(), approval = usePathname() === '/mcp/approve';
+  const offered = useAccountsOffered() && !approval;
+  const { presence, prefetch } = useAccountPresence(offered);
+  // A different Privy user observed in this page (another tab signed in or out) never sees the previous presence: it is forgotten and read again.
+  const seenUser = useRef<string | null>(null);
+  useEffect(() => {
+    if (!privy?.ready) return;
+    const user = privy.userId ?? 'signed-out';
+    if (seenUser.current !== null && seenUser.current !== user) { forgetAccountPresence(); prefetch(); }
+    seenUser.current = user;
+  }, [privy?.ready, privy?.userId, prefetch]);
+  const accountRow = offered && presence?.accounts !== false;
   /**
    * BUILD-FLOFI-WALLET-UX-EXECUTION-FIX-001 (P1-04): one Disconnect replaces "Sign out" + "Disconnect". Signed in, it is the full flow of
    * src/accounts/disconnect.ts (wallet connection closed, FloFi session revoked, Privy logged out, sign-in page) — through the page's own
    * Disconnect when it has one, else directly. Without an account it closes the wallet connection only, as before. Nothing is deleted.
    */
-  const signedIn = Boolean(account?.availability.accounts && account.account);
+  const signedIn = Boolean(offered && presence?.accounts && presence.signedIn);
   async function disconnect() { if (signedIn && disconnectDisabled) await disconnectToLogin(privy); else onDisconnect(); }
   const languageDescriptionId = useId(), themeDescriptionId = useId(), disconnectDescriptionId = useId();
   useEffect(() => {
@@ -80,7 +96,7 @@ export function HeaderSettings({ onDisconnect, disconnectDisabled, onSupport }: 
   return <div className="header-settings-control" ref={container}
     onBlur={event => { if (!event.currentTarget.contains(event.relatedTarget)) setOpen(false); }}>
     <button ref={toggle} type="button" className="header-settings" aria-label={tr("Settings")} title={tr("Settings")}
-      aria-expanded={open} aria-controls={open ? menuId : undefined} onClick={() => setOpen(value => !value)}>
+      aria-expanded={open} aria-controls={open ? menuId : undefined} onPointerEnter={prefetch} onFocus={prefetch} onClick={() => { prefetch(); setOpen(value => !value); }}>
       <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m10 3-.5 3-2 1.2L4.7 6l-2 3.5 2.3 2v1l-2.3 2 2 3.5 2.8-1.2 2 1.2.5 3h4l.5-3 2-1.2 2.8 1.2 2-3.5-2.3-2v-1l2.3-2-2-3.5-2.8 1.2-2-1.2-.5-3Z"/><circle cx="12" cy="12" r="3"/></svg>
     </button>
     {open && <div className="header-settings-menu" id={menuId} role="group" aria-label={tr("Settings options")}>
@@ -106,7 +122,9 @@ export function HeaderSettings({ onDisconnect, disconnectDisabled, onSupport }: 
         <span id={themeDescriptionId} className="sr-only">{tr("Current theme: ")}{tr(theme === 'dark' ? 'Dark' : 'Light')}</span>
       </div>
       <hr className="header-settings-separator"/>
-      {account?.availability.accounts && (account.account ? <>
+      {accountRow && (presence === null ? <span className="header-settings-action header-settings-pending" role="status">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></svg><span className="header-settings-skeleton" aria-hidden="true"/><span className="sr-only">{tr("Checking your FloFi session…")}</span>
+        </span> : presence.signedIn ? <>
         <Link href="/app/credentials" className="header-settings-action" onClick={() => setOpen(false)}>
           <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></svg><span>{tr("My account")}</span>
         </Link></> : /* A full page load: sign-in runs under its own nonce policy (src/accounts/account-csp.ts), never this page's. */ <a href="/login" className="header-settings-action" onClick={() => setOpen(false)}>

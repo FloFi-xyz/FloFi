@@ -294,14 +294,17 @@ const SYMBOL_TEXT = 'The token exactly as the user wrote it: its symbol (USDC, W
   'Coinbase Wrapped BTC), without words such as stock, shares, ações or token; ETH for ether. OTHER only if the user described a token without naming it ' +
   '("that car company"); null if not named. Never translate a name into a symbol the user did not write: Flofi resolves names and symbols in the network\'s official catalog.';
 const nullableSymbol = nullableString(SYMBOL_TEXT);
+// BUILD-FLOFI-UX-FIX-003: a swap's or bridge's amount is what the user sends. "Bridge ETH to 1 USDC" states an amount to receive: amount stays null.
+const SENT_AMOUNT_TEXT = 'The amount of the source asset the user SENDS, exactly as written in the current request, digits with "." as decimal separator. ' +
+  'A number written for the destination asset ("to 1 USDC", "receive 1 USDC", "por 1 USDC") is what the user wants to receive, never this amount: use null then.';
 const actionSchemasV2 = [
   object({ type: constant('SWAP'), network: nullableChoice(COPILOT_V2_NETWORKS, NETWORK_V2_TEXT), inputAsset: nullableSymbol, outputAsset: nullableSymbol,
-    amount: nullableString(AMOUNT_TEXT), slippageBps: nullableString(SLIPPAGE_TEXT) }),
+    amount: nullableString(SENT_AMOUNT_TEXT), slippageBps: nullableString(SLIPPAGE_TEXT) }),
   object({ type: constant('TRANSFER'), network: nullableChoice(COPILOT_V2_NETWORKS, NETWORK_V2_TEXT), asset: nullableSymbol, amount: nullableString(AMOUNT_TEXT),
     recipient: nullableString('The recipient wallet the user typed: EVM 0x address or case-sensitive Solana base58 public key. Solana requires an explicit recipient; null if missing.') }),
   object({ type: constant('BRIDGE'), sourceNetwork: nullableChoice(COPILOT_V2_NETWORKS, NETWORK_V2_TEXT), destinationNetwork: nullableChoice(COPILOT_V2_NETWORKS, NETWORK_V2_TEXT),
     asset: nullableSymbol, outputAsset: nullableString('Destination token exactly as the user named it, including "para WETH na Arbitrum" or "to WETH on Arbitrum". Null only when no destination token was stated. ' + SYMBOL_TEXT),
-    amount: nullableString(AMOUNT_TEXT), slippageBps: nullableString(SLIPPAGE_TEXT),
+    amount: nullableString(SENT_AMOUNT_TEXT), slippageBps: nullableString(SLIPPAGE_TEXT),
     routing: nullableChoice(COPILOT_V2_ROUTING, 'Provider preference only when explicitly named; null otherwise.'),
     recipient: nullableString('Destination wallet exactly as typed: EVM 0x address or case-sensitive Solana base58 public key; null if not stated.') }),
   object({ type: choice(COPILOT_LENDING_TYPES, 'Aave V3 operation.'), protocol: constant('AAVE_V3'), network: nullableChoice(COPILOT_V2_NETWORKS, NETWORK_V2_TEXT),

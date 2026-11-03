@@ -19,7 +19,7 @@ import { solanaTransferProfileFor } from './solana-transfer-authoring';
 import { copilotNetworksFor, lendingOffers, routeLabels, type StrategyAction } from './authoring-capabilities';
 import type { PendingAgentCapability } from './agent-rollout';
 import { solanaDisplayCatalogLoaded } from './solana-asset-catalog';
-import { explicitInputAsset, explicitOutputAsset, groundExplicitAssets } from './copilot-asset-intent';
+import { destinationAmounts, explicitInputAsset, explicitOutputAsset, groundExplicitAssets, withoutDestinationAmounts, type DestinationAmount } from './copilot-asset-intent';
 import { resolveAssetReference } from './asset-catalogs';
 import { COPILOT_NETWORK_IDS, copilotNetworksMentioned, catalogNetworkOfChatName, networkIdentity, networkOfCopilot, type CopilotNetworkId } from './network-registry';
 import { routerNetworksOf } from './router-authoring';
@@ -27,7 +27,7 @@ import { checkRecipient } from './recipient-address';
 import { defaultUniversalOutput, resolveUniversalAsset, universalAssetReference, universalChatSentence, UNIVERSAL_CANVAS_LABEL, universalCanvasPair, type UniversalBridgeRouting } from './universal-bridge-authoring';
 import { isSolanaPublicKey, UNIVERSAL_NETWORKS, type UniversalNetworkKey } from '@defi-workflow-engine/workflow-contracts';
 import { lexiconAssets, lexiconNamedNetworkIds, lexiconNetworks, targetEnvironment, type LexiconEntry } from './copilot-lexicon';
-import { fiatCandidates, fiatReference } from './intelligence/asset-resolution';
+import { fiatCandidates, fiatReference, lookupAsset } from './intelligence/asset-resolution';
 import { activeNetworkScope, TEST_NETWORK_NOT_AVAILABLE } from './network-scope';
 import { intelligenceCopy } from './intelligence/copy';
 
@@ -96,7 +96,12 @@ export type Grounding = { readonly text: string; readonly carried: ReadonlySet<C
    * BUILD-FLOFI-INTELLIGENCE-001: false for the steps of a goal plan. Their assets were grounded per goal field; a role read from the whole message
    * ("to Aave", "receive SOL") describes the goal, not each step, so it must not overwrite a step's own planned asset.
    */
-  readonly explicitAssets?: boolean };
+  readonly explicitAssets?: boolean;
+  /**
+   * BUILD-FLOFI-UX-FIX-003: the request is a new action (not an edit or repeat of a step), so an amount written after "to"/"receive" ("bridge ETH to
+   * 1 USDC") is what the user wants to receive. Absent: no destination-amount reading (edits, V1, goal steps).
+   */
+  readonly receiving?: boolean };
 const NOTHING_CARRIED: ReadonlySet<CarriedField> = new Set();
 
 type Network = Exclude<CopilotNetwork, 'OTHER'>;
@@ -451,6 +456,8 @@ function planRoute(a: CopilotBridgeAction, g: Grounding): Plan {
   const side = (value: CopilotNetwork | null): Network | null | 'OTHER' => value === null ? null : value === 'OTHER' ? 'OTHER' : named.includes(value) ? value : null;
   const source = side(a.sourceNetwork), destination = side(a.destinationNetwork);
   if (source === 'OTHER' || destination === 'OTHER') return refuse(m.routerRoutesAll(routeLabels()));
+  // BUILD-FLOFI-UX-FIX-003: in the public product an unnamed side is asked among every mainnet (the universal bridge's question), whichever source.
+  if (publicScope() && (source === null || destination === null)) return planUniversalBridge(a, g);
   const touching = EXTENDED_ROUTES.filter(r => (source === null || r.src === source) && (destination === null || r.dst === destination) &&
     (source !== null || destination !== null || named.includes(r.src) || named.includes(r.dst)));
   const options = touching.map(r => `${r.option.sourceLabel} → ${r.option.destinationLabel}`);
@@ -511,6 +518,13 @@ function planUniversalBridge(a: CopilotBridgeAction, g: Grounding): Plan {
   const missing: CopilotMissingField[] = [...(a.amount === null ? ['amount' as const] : []), ...(a.asset === null ? ['asset' as const] : []),
     ...(source === null ? ['sourceNetwork' as const] : []), ...(destination === null ? ['destinationNetwork' as const] : [])];
   const known = source ?? destination;
+  // BUILD-FLOFI-UX-FIX-003: the public product asks one network side at a time, offering only the mainnets the universal bridge serves (a button then
+  // answers exactly that side); the asset and the amount follow. Whether a live route exists between the two is decided at Simulate, never here.
+  if (publicScope() && (source === null || destination === null)) {
+    const offered = labelsAll.filter(label => known === null || label !== UNIVERSAL_NETWORKS[UNIVERSAL_OF[known]!].name);
+    if (source === null) ask(['sourceNetwork'], m.bridgeSourceQuestion(a.asset && a.asset !== 'OTHER' ? assetLabel(a.asset, null) : null), offered);
+    ask(['destinationNetwork'], m.bridgeDestinationQuestion(UNIVERSAL_NETWORKS[UNIVERSAL_OF[source!]!].name), offered);
+  }
   if (missing.length) ask(missing, stillNeeds(m, missing, 'bridge'), source === null || destination === null
     ? labelsAll.filter(label => known === null || label !== UNIVERSAL_NETWORKS[UNIVERSAL_OF[known]!].name) : []);
   if (source === destination) return ask(['destinationNetwork'], m.universalSameNetwork, labelsAll.filter(label => label !== UNIVERSAL_NETWORKS[UNIVERSAL_OF[source!]!].name));
@@ -564,7 +578,7 @@ function planUniversalBridge(a: CopilotBridgeAction, g: Grounding): Plan {
 const UNIVERSAL_MAXIMUM_SLIPPAGE_BPS = 300;
 
 function planBridge(a: CopilotBridgeAction, g: Grounding): Plan {
-  if (g.policy.catalog && g.explicitAssets !== false) a = groundExplicitAssets(a, g.latest ?? g.text, g.lexicon) as CopilotBridgeAction;
+  if (g.policy.catalog && g.explicitAssets !== false) a = groundExplicitAssets(a, g.latest ?? g.text, g.lexicon, g.receiving === true) as CopilotBridgeAction;
   if (g.policy.catalog && a.outputAsset && a.destinationNetwork && a.destinationNetwork !== 'OTHER' && !g.carried.has('outputAsset')) {
     if (isCatalogNetwork(a.destinationNetwork) && !a.outputAsset.includes('@')) catalogToken(a.outputAsset, a.destinationNetwork, g, 'bridge', 'outputAsset', 'ANY');
     else needAsset(a.outputAsset, g, 'bridge', 'outputAsset');
@@ -583,10 +597,19 @@ function planBridge(a: CopilotBridgeAction, g: Grounding): Plan {
     if (inFamily.length) return 'CONFLICT';
     return MAINNETS.has(value) ? null : value;
   };
-  const pairs = [ROUTER_NETWORK_OPTIONS.testnet, ROUTER_NETWORK_OPTIONS.mainnet].map(option => `${option.sourceLabel} → ${option.destinationLabel}`);
+  // BUILD-FLOFI-UX-FIX-003: the public product never offers the engineering test-network pair (Base Sepolia → Arbitrum Sepolia).
+  const pairs = (publicScope() ? [ROUTER_NETWORK_OPTIONS.mainnet] : [ROUTER_NETWORK_OPTIONS.testnet, ROUTER_NETWORK_OPTIONS.mainnet])
+    .map(option => `${option.sourceLabel} → ${option.destinationLabel}`);
   let source = side(a.sourceNetwork, 'base'), destination = side(a.destinationNetwork, 'arbitrum');
   if (source === 'OTHER' || destination === 'OTHER') refuse(g.policy.catalog ? m.routerRoutesAll(routeLabels()) : m.routerRoutes);
   if (source === 'CONFLICT' || destination === 'CONFLICT') ask(['sourceNetwork', 'destinationNetwork'], m.whichRoute, pairs);
+  // An unnamed side is asked among every mainnet the bridge serves (not only the Router's Base → Arbitrum One pair); the certified Router still
+  // authors Base → Arbitrum One USDC once both sides are named.
+  if (publicScope() && g.policy.catalog && (source === null || destination === null)) {
+    // A side the user did name (read from their words even when the model left it out) is kept: only the unnamed side is asked.
+    const named = (value: typeof source): value is Network => value !== null && value !== 'OTHER' && value !== 'CONFLICT';
+    return planUniversalBridge({ ...a, ...named(source) ? { sourceNetwork: source } : {}, ...named(destination) ? { destinationNetwork: destination } : {} }, g);
+  }
   // V1: a test-network pair may complete itself; a mainnet side never implies the other one. V2 asks instead.
   if (g.policy.networkDefaults && source === null && destination === 'ARBITRUM_SEPOLIA') { source = 'BASE_SEPOLIA'; notes.push(m.routerSourceNote); }
   if (g.policy.networkDefaults && destination === null && source === 'BASE_SEPOLIA') { destination = 'ARBITRUM_SEPOLIA'; notes.push(m.routerDestinationNote); }
@@ -900,14 +923,52 @@ function planComposition(actions: readonly CopilotAction[], g: Grounding, wallet
     `${owners.length ? ' owner ' + owners[0] : ''}`, expect: 'AUTHOR_LENDING', notes };
 }
 
-const ROUTER_RANGES = (['testnet', 'mainnet'] as const).map(network => {
+/** BUILD-FLOFI-UX-FIX-003: the Router amount ranges of the networks in scope (the public product names the mainnet route only). */
+const routerRanges = () => (publicScope() ? ['mainnet'] as const : ['testnet', 'mainnet'] as const).map(network => {
   const option = ROUTER_NETWORK_OPTIONS[network], decimals = option.pair.source.decimals;
   return `${option.sourceLabel} → ${option.destinationLabel} ${formatTokenAmount(option.pair.minimumAmount, decimals)}–${formatTokenAmount(option.pair.maximumAmount, decimals)} USDC`;
 }).join('; ');
 /** A closed rejection code with deterministic copy; unknown codes are named, never explained by the model. */
 export function copilotRejection(code: string, language: CopilotLanguage = 'EN'): Extract<CopilotOutcome, { kind: 'REJECTED' }> {
   const m = copilotCopy(language);
-  return { kind: 'REJECTED', code, message: m.rejection[code] ?? (code === 'ROUTER_AMOUNT_OUT_OF_RANGE' ? m.routerAmountRange(ROUTER_RANGES) : m.rejectedCode(code)) };
+  return { kind: 'REJECTED', code, message: m.rejection[code] ?? (code === 'ROUTER_AMOUNT_OUT_OF_RANGE' ? m.routerAmountRange(routerRanges()) : m.rejectedCode(code)) };
+}
+
+const publicScope = () => activeNetworkScope() === 'PUBLIC_MAINNET';
+/** A written asset as the network's catalog spells it ("eth" → ETH on Base); as written when the network or the asset is not known. */
+function assetLabel(value: string, network: CopilotNetwork | null | undefined): string {
+  const found = network && network !== 'OTHER' ? lookupAsset(networkOfCopilot(network).key, value) : null;
+  if (found?.kind === 'FOUND') return found.identity.symbol;
+  return /^[a-z]{2,6}$/.test(value) ? value.toUpperCase() : value;
+}
+/** BUILD-FLOFI-UX-FIX-003: the amount a single bridge or swap request says the user wants to receive, from the request's own words. */
+function receivedAmount(action: CopilotAction, g: Grounding): DestinationAmount | null {
+  if (g.policy.catalog !== true || g.explicitAssets === false || g.receiving !== true || (action.type !== 'BRIDGE' && action.type !== 'SWAP')) return null;
+  return destinationAmounts(g.text, sentAsset(action)).at(-1) ?? null;
+}
+const sentAsset = (action: CopilotAction): string | null => action.type === 'SWAP' ? action.inputAsset : action.type === 'LIQUIDITY' ? null : action.asset;
+function exactInputNote(wanted: DestinationAmount, action: CopilotAction, g: Grounding): string {
+  const output = action.type === 'BRIDGE' ? action.outputAsset ?? null : action.type === 'SWAP' ? action.outputAsset : null;
+  const network = action.type === 'BRIDGE' ? action.destinationNetwork : action.type === 'SWAP' ? action.network : null;
+  // The token the user settled on ("usdc" after FloFi asked what "usd" meant), else the one written with the amount.
+  const asset = output && output !== 'OTHER' && !fiatReference(output) ? output : wanted.asset;
+  // A number with one reading is shown canonically; one with several ("1,000") exactly as written, never a reading FloFi chose.
+  const readings = amountReadings(wanted.written);
+  return copyOf(g).exactInputNote(readings.length === 1 ? readings[0]! : wanted.written, assetLabel(asset, network));
+}
+/**
+ * The amount question of a bridge or swap names the asset sent ("How much ETH would you like to send?") once everything else is known (public
+ * product), and is preceded by the exact-input explanation when the request stated an amount to receive.
+ */
+function amountQuestion(outcome: CopilotOutcome, action: CopilotAction, wanted: DestinationAmount | null, g: Grounding): CopilotOutcome {
+  if (outcome.kind !== 'CLARIFICATION' || !outcome.missing.includes('amount') || (action.type !== 'BRIDGE' && action.type !== 'SWAP')) return outcome;
+  const m = copyOf(g), sent = action.type === 'BRIDGE' ? action.asset : action.inputAsset, network = action.type === 'BRIDGE' ? action.sourceNetwork : action.network;
+  let question = outcome.question;
+  // Only FloFi's generic "still needs the amount" question is reworded; an ambiguity or not-found question keeps its own explanation.
+  const subject = action.type === 'SWAP' ? 'swap' : 'bridge';
+  if (publicScope() && outcome.missing.length === 1 && sent && sent !== 'OTHER' && !fiatReference(sent) && outcome.question === stillNeeds(m, ['amount'], subject))
+    question = m.howMuchToSend(assetLabel(sent, network), subject);
+  return { ...outcome, question: wanted ? `${exactInputNote(wanted, action, g)} ${question}` : question };
 }
 
 /**
@@ -919,11 +980,22 @@ export function planCopilotActions(actions: readonly CopilotAction[], compositio
   try {
     for (const candidate of actions) { testNetworkGuard(candidate, g); fiatGuard(candidate, g); }
     if (composition) return { kind: 'PLAN', plan: planComposition(actions, g, wallet) };
-    const action = g.policy.catalog && g.explicitAssets !== false ? groundExplicitAssets(actions[0]!, g.latest ?? g.text, g.lexicon) : actions[0]!;
+    let action = g.policy.catalog && g.explicitAssets !== false ? groundExplicitAssets(actions[0]!, g.latest ?? g.text, g.lexicon, g.receiving === true) : actions[0]!;
     fiatGuard(action, g);
     if (g.policy.catalog && action.type === 'LIQUIDITY' && action.funding === 'SWAP_OUTPUT') return { kind: 'PLAN', plan: planSolanaComposition(null, action, g) };
-    return { kind: 'PLAN', plan: action.type === 'SWAP' ? planSwap(action, g) : action.type === 'BRIDGE' ? planBridge(action, g)
-      : action.type === 'LIQUIDITY' ? planLiquidity(action, g) : action.type === 'TRANSFER' ? planTransfer(action, g) : planLending(action, g, wallet) };
+    // BUILD-FLOFI-UX-FIX-003: "bridge ETH to 1 USDC" states what the user wants to receive. That number is never the amount sent (every provider
+    // FloFi uses quotes the amount sent), so FloFi asks for the amount to send and says why it cannot target the received amount exactly.
+    const wanted = receivedAmount(action, g);
+    if (wanted && (action.type === 'BRIDGE' || action.type === 'SWAP') && action.amount !== null && !g.carried.has('amount') &&
+      !groundedAmount(withoutDestinationAmounts(g.text, sentAsset(action)), action.amount)) action = { ...action, amount: null };
+    try {
+      const plan = action.type === 'SWAP' ? planSwap(action, g) : action.type === 'BRIDGE' ? planBridge(action, g)
+        : action.type === 'LIQUIDITY' ? planLiquidity(action, g) : action.type === 'TRANSFER' ? planTransfer(action, g) : planLending(action, g, wallet);
+      return { kind: 'PLAN', plan: wanted ? { ...plan, notes: [exactInputNote(wanted, action, g), ...plan.notes] } : plan };
+    } catch (stop) {
+      if (stop instanceof Stop) throw new Stop(amountQuestion(stop.outcome, action, wanted, g));
+      throw stop;
+    }
   } catch (cause) {
     if (cause instanceof Stop) return cause.outcome as Exclude<CopilotOutcome, { kind: 'PROPOSAL' }>;
     return copilotRejection('COPILOT_CONVERSION_FAILED', g.policy.language);

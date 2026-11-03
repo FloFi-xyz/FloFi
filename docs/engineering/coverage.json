@@ -118,6 +118,10 @@
       "path": "apps/reference-dapp/src/channels/core/conversation.test.ts",
       "stage": "unit"
     },
+    "app.channels.core.conversation-mainnet": {
+      "path": "apps/reference-dapp/src/channels/core/conversation-mainnet.test.ts",
+      "stage": "unit"
+    },
     "app.channels.core.delivery": {
       "path": "apps/reference-dapp/src/channels/core/delivery.test.ts",
       "stage": "unit"
@@ -202,6 +206,10 @@
       "path": "apps/reference-dapp/src/domain/copilot-conversation.test.ts",
       "stage": "unit"
     },
+    "app.domain.copilot-mainnet-bridge": {
+      "path": "apps/reference-dapp/src/domain/copilot-mainnet-bridge.test.ts",
+      "stage": "unit"
+    },
     "app.domain.intelligence": {
       "path": "apps/reference-dapp/src/domain/intelligence/intelligence.test.ts",
       "stage": "unit"
@@ -244,6 +252,10 @@
     },
     "app.i18n.catalog": {
       "path": "apps/reference-dapp/src/i18n/catalog.test.ts",
+      "stage": "unit"
+    },
+    "app.i18n.flofi-fee-copy": {
+      "path": "apps/reference-dapp/src/i18n/flofi-fee-copy.test.ts",
       "stage": "unit"
     },
     "app.i18n.locale": {
@@ -322,6 +334,10 @@
       "path": "apps/reference-dapp/src/server/base-swap.test.ts",
       "stage": "unit"
     },
+    "app.server.ethereum-runtime": {
+      "path": "apps/reference-dapp/src/server/ethereum-runtime.test.ts",
+      "stage": "unit"
+    },
     "app.server.build-estimate-production": {
       "path": "apps/reference-dapp/src/server/build-estimate-production.test.ts",
       "stage": "unit"
@@ -392,6 +408,10 @@
     },
     "app.state.account-wallet-autoconnect": {
       "path": "apps/reference-dapp/src/state/account-wallet-autoconnect.test.ts",
+      "stage": "unit"
+    },
+    "app.state.account-presence": {
+      "path": "apps/reference-dapp/src/state/account-presence.test.ts",
       "stage": "unit"
     },
     "app.state.flofi-conversation": {
@@ -2099,6 +2119,7 @@
         "apps/reference-dapp/src/channels/whatsapp/webhook.ts"
       ],
       "suites": [
+        "app.channels.core.conversation-mainnet",
         "app.channels.core.approval",
         "app.channels.core.conversation",
         "app.channels.core.delivery",
@@ -3111,6 +3132,7 @@
         "apps/reference-dapp/src/domain/privacy-notice.ts"
       ],
       "suites": [
+        "app.domain.copilot-mainnet-bridge",
         "app.domain.build-entry",
         "app.domain.copilot-context",
         "app.domain.copilot-conversation",
@@ -3521,6 +3543,7 @@
         "app.e2e.global-product-polish",
         "app.e2e.wallet-selector",
         "app.i18n.catalog",
+        "app.i18n.flofi-fee-copy",
         "app.i18n.locale"
       ],
       "gaps": [
@@ -5729,6 +5752,7 @@
         "apps/reference-dapp/src/server/workflow-visual-image.ts"
       ],
       "suites": [
+        "app.server.ethereum-runtime",
         "action-registry.engineering-regression",
         "app.platform.engineering-continuity",
         "app.platform.parity",
@@ -5988,6 +6012,7 @@
       ],
       "sharedFinancialCore": false,
       "sources": [
+        "apps/reference-dapp/src/state/account-presence.ts",
         "apps/reference-dapp/src/state/build-estimate.ts",
         "apps/reference-dapp/src/state/build009-wallet-store.tsx",
         "apps/reference-dapp/src/state/capability-store.tsx",
@@ -6005,6 +6030,7 @@
         "apps/reference-dapp/src/state/workflow-store.tsx"
       ],
       "suites": [
+        "app.state.account-presence",
         "action-registry.engineering-regression",
         "app.platform.engineering-continuity",
         "app.platform.parity",

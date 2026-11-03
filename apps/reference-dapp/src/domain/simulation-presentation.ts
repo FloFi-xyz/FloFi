@@ -299,7 +299,7 @@ export function projectSimulation(workflow: Workflow, context: ReviewContext, so
       fee('Maximum network fee', q.feePolicy.networkFeeUpperBound, q.feePolicy.networkFeeDecimals, q.feePolicy.networkFeeSymbol, 'Paid on the source network, separate from the route.', 'CEILING');
       for (const f of route.fees) if (f.included && BigInt(f.amount) > 0n) fee(f.label, f.amount, f.decimals, f.symbol, 'Included in the quoted output.', 'INCLUDED');
       fee('FloFi fee (0.1% obligation)', flofiFeeUnits(route.inputAmount), route.inputToken.decimals, route.inputToken.symbol,
-        '0.1% of the completed workflow input. Recorded as an obligation when the run reconciles; not collected on-chain yet. Waived if the workflow fails or refunds.', 'OBLIGATION');
+        '0.1% of the completed workflow input. Recorded as an obligation when the run reconciles; not charged at this time. Waived if the workflow fails or refunds.', 'OBLIGATION');
       approvals(q.source.ecosystem === 'EVM' && q.source.approvals.some(a => a.required));
       if (q.authorizations.sourceSignatures > 1) warn('info', 'This bridge needs two wallet signatures on the source network: an exact approval, then the deposit.');
       warn('attention', 'Destination delivery is guaranteed by the provider order and proven on chain after it lands. The simulation checks the source transaction; delivery and refunds are not simulated.');

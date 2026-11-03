@@ -18,7 +18,8 @@ for (const action of ['swap', 'bridge', 'pool', 'Stocks', 'supply', 'borrow', 'r
     // BUILD-FIX-UX-001: no verified USD price applies here (valueless test tokens, or an asset without a verified feed): every line says
     // so, and the USD-first mode is offered only for a real USD value (see build-fix-ux.spec.ts). Nothing here edits an amount.
     await expect(boxes.locator('.composer-fiat-value')).toHaveCount(await boxes.count());
-    for (const text of await boxes.locator('.composer-fiat-value').allInnerTexts()) expect(text).toMatch(/^(Test token · no USD value|USD price unavailable|Estimating USD…)$/);
+    // BUILD-FLOFI-UX-FIX-003: a line with no USD figure stays empty (its height reserved) instead of saying "USD price unavailable".
+    for (const text of await boxes.locator('.composer-fiat-value').allInnerTexts()) expect(text).toMatch(/^(Test token · no USD value|)$/);
     await expect(card.getByRole('button', { name: 'Show USD value first', exact: true })).toHaveCount(0);
     await expect(boxes.locator('.composer-primary-fiat, .composer-token-subline')).toHaveCount(0);
     expect(await boxes.locator('input').evaluateAll(elements => elements.map(element => (element as HTMLInputElement).value))).toEqual(inputs);

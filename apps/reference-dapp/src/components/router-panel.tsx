@@ -41,8 +41,12 @@ const bound = (units: string, decimals: number) => formatTokenAmount(units, deci
 const explorerTx = (network: RouterNetwork, chain: 'source' | 'destination', hash: string) =>
   (chain === 'source' ? ROUTER_NETWORK_OPTIONS[network].profile.source.explorer : ROUTER_NETWORK_OPTIONS[network].profile.destination.explorer) + 'tx/' + hash;
 
-/** Canvas form for the canonical cross-chain bridge node (USDC → USDC, or USDC ⇄ USDG with Robinhood Chain, through the Cross-chain Router). */
-export function RouterForm({ nodeId, onDone, network: initialNetwork }: { nodeId?: string; onDone?: () => void; network?: RouterNetwork }) {
+/**
+ * Canvas form for the canonical cross-chain bridge node (USDC → USDC, or USDC ⇄ USDG with Robinhood Chain, through the Cross-chain Router).
+ * BUILD-FLOFI-UX-FIX-003: `options` is the card's compact settings for an existing bridge (recipient, routing, slippage) without protocol text; the
+ * route, token and amount stay as authored (the card and the chat edit them) and go unchanged into the same validated SET_ROUTER_BRIDGE command.
+ */
+export function RouterForm({ nodeId, onDone, network: initialNetwork, options = false }: { nodeId?: string; onDone?: () => void; network?: RouterNetwork; options?: boolean }) {
   const { t: tr } = useLocale();
   const { walletEnvironment } = useExecutionEnvironment();
   const { state, propose, amountInputs = {}, bridgeNetworkInputs = {}, editCanvasAmount, editBridgeNetworks } = useWorkflow();
@@ -82,8 +86,11 @@ export function RouterForm({ nodeId, onDone, network: initialNetwork }: { nodeId
       onDone?.();
     } catch (cause) { setError(cause instanceof Error ? cause.message : 'ROUTER_INPUT_INVALID'); }
   }
-  return <form className="inspector-fields" aria-label={tr(nodeId ? 'Edit cross-chain bridge' : network === 'testnet' ? 'Create testnet cross-chain bridge' : 'Create cross-chain bridge')} onSubmit={submit}>
-    <p className="muted">{tr(!network ? 'Connect a wallet on a supported network to configure Bridge.' : network === 'testnet' ? 'Cross-chain Router · Base Sepolia → Arbitrum Sepolia · test USDC → USDC. No real funds; any wallet can use it. A route is chosen and shown at Review.'
+  const compact = options && Boolean(nodeId);
+  // The card's draft networks that are not a certified Router pair are never replaced by another route behind these compact options.
+  const draftUncertified = compact && Boolean(nodeId && bridgeNetworkInputs[nodeId]) && !routed;
+  return <form className={`inspector-fields${compact ? ' bridge-options-form' : ''}`} aria-label={tr(nodeId ? 'Edit cross-chain bridge' : network === 'testnet' ? 'Create testnet cross-chain bridge' : 'Create cross-chain bridge')} onSubmit={submit}>
+    {compact ? !network && <p className="muted">{tr('Connect a wallet on a supported network to configure Bridge.')}</p> : <><p className="muted">{tr(!network ? 'Connect a wallet on a supported network to configure Bridge.' : network === 'testnet' ? 'Cross-chain Router · Base Sepolia → Arbitrum Sepolia · test USDC → USDC. No real funds; any wallet can use it. A route is chosen and shown at Review.'
       : `Cross-chain Router · ${option!.sourceLabel} → ${option!.destinationLabel} · ${option!.pair.source.symbol} → ${option!.pair.destination.symbol}. Real funds on mainnet; a route is chosen and shown at Review.`)}</p>
     <label>{tr("Network")}<select aria-label={tr("Cross-chain network")} value={environment ?? ''} disabled>
       <option value={environment ?? ''}>{tr(environment === 'mainnet' ? 'Mainnet (real funds)' : environment === 'testnet' ? 'Testnet (test USDC)' : 'Network')}</option></select></label>
@@ -93,16 +100,17 @@ export function RouterForm({ nodeId, onDone, network: initialNetwork }: { nodeId
       onChange={e => set({ destination: e.target.value as RouterDestination })}>{(choices?.destinations ?? [option?.destination ?? '']).map(destination =>
         <option key={destination} value={destination}>{tr(destination === 'Arbitrum' ? 'Arbitrum One' : destination || 'Network')}</option>)}</select></label>
     <label>{tr("Token")}<select aria-label={tr("Cross-chain token")} value={fields.token} disabled={!option}><option value={fields.token}>{tr(`${fields.token} → ${option?.pair.destination.symbol ?? fields.token}`)}</option></select></label>
-    <label>{tr(`Amount (${fields.token})`)}<TokenAmountInput aria-label={tr(`Cross-chain amount (${fields.token})`)} maxLength={40} value={fields.amount} onValueChange={amount => set({ amount })}/></label>
+    <label>{tr(`Amount (${fields.token})`)}<TokenAmountInput aria-label={tr(`Cross-chain amount (${fields.token})`)} maxLength={40} value={fields.amount} onValueChange={amount => set({ amount })}/></label></>}
     <label>{tr("Recipient")}{tr(network ? ` on ${l.dstShort}` : '')}<input aria-label={tr("Cross-chain recipient")} autoComplete="off" spellCheck={false} maxLength={42} placeholder={tr("Your connected wallet")} value={input.recipient}
       onChange={e => set({ recipient: e.target.value })}/></label>
     <label>{tr("Routing")}<select aria-label={tr("Cross-chain routing policy")} value={input.routing} onChange={e => set({ routing: e.target.value as RouterRouting })}>
       {(Object.keys(ROUTER_ROUTING_LABEL) as RouterRouting[]).map(k => <option key={k} value={k}>{tr(ROUTER_ROUTING_LABEL[k])}</option>)}</select></label>
     <label>{tr("Slippage (bps)")}<input aria-label={tr("Cross-chain slippage (bps)")} inputMode="numeric" autoComplete="off" maxLength={4} value={input.slippage} onChange={e => set({ slippage: e.target.value })}/></label>
-    {network && option && <small>{tr(network === 'testnet' ? 'Between 0.5 and 5 test USDC per bridge (the testnet relayer has little liquidity).' : network === 'mainnet' ? 'Maximum 100 USDC per bridge in this release.'
+    {!compact && network && option && <small>{tr(network === 'testnet' ? 'Between 0.5 and 5 test USDC per bridge (the testnet relayer has little liquidity).' : network === 'mainnet' ? 'Maximum 100 USDC per bridge in this release.'
       : `Between ${bound(option.pair.minimumAmount, option.pair.source.decimals)} and ${bound(option.pair.maximumAmount, option.pair.source.decimals)} ${option.pair.source.symbol} per bridge in this release.`)}{tr(" The minimum you receive is fixed in the reviewed deposit.")}</small>}
     {error && <p role="alert">{tr(error)}</p>}
-    <button type="submit" disabled={!network}>{tr(nodeId ? 'Review bridge change' : 'Review bridge proposal')}</button>
+    {draftUncertified && <p className="muted">{tr('Choose matching networks')}</p>}
+    <button type="submit" disabled={!network || draftUncertified}>{tr(nodeId ? 'Review bridge change' : 'Review bridge proposal')}</button>
     {onDone && <button type="button" className="quiet" onClick={onDone}>{tr("Cancel")}</button>}
   </form>;
 }

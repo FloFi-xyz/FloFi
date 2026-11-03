@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 /** BUILD-CHAT-LEARNING-001/002: the Copilot's Privacy & memory page (Settings), Portuguese (Brazil). */
 export const portugueseLearning: Readonly<Record<string, string>> = {
-  'Privacy & memory': 'Privacidade e memória',
+  'Privacy & memory': 'Privacidade e memória', 'Checking your FloFi session…': 'Verificando sua sessão FloFi…',
   'What FloFi keeps about the words you use with the Copilot, and your choices. Nothing here changes a workflow, an approval or a signature.':
     'O que o FloFi guarda sobre as palavras que você usa com o Copilot, e as suas escolhas. Nada aqui altera um workflow, uma aprovação ou uma assinatura.',
   'FloFi keeps nothing about how you write: the Copilot adapts to your words within a conversation only.':

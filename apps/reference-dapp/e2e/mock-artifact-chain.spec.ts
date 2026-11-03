@@ -125,7 +125,8 @@ test('semantic edits invalidate; presentation, dismissal, no-op and stale propos
   expect(await panel(page).evaluate(element => (element as HTMLDetailsElement).open)).toBe(true);
   // BUILD-FLOFI-WALLET-UX-EXECUTION-FIX-001 (P0-07): Simulate cards show the live quote state. The page clock is paused, so the quote's debounce
   // timer never fires and no estimate request is sent: the card deterministically shows its pending state in the snapshot.
-  await expect(page.locator('.simulation-workflow-canvas .composer-quote-note').filter({ hasText: 'Calculating estimate…' }).first()).toBeVisible();
+  // BUILD-FLOFI-UX-FIX-003: the pending state is the destination's quiet placeholder (no "Calculating" text on the card).
+  await expect(page.locator('.simulation-workflow-canvas .composer-amount-live[aria-busy="true"] .composer-amount-loading').first()).toBeVisible();
   await expect(page).toHaveScreenshot('simulate-current.png', { fullPage: true, ...hashMask(page) });
   await readIr(page);
   await tab(page, 'Execute');
@@ -202,7 +203,8 @@ test('expiry is detected on tab resume and on access without any timer firing (R
   expect(await panel(page).evaluate(element => (element as HTMLDetailsElement).open)).toBe(true);
   // BUILD-FLOFI-WALLET-UX-EXECUTION-FIX-001 (P0-07): Simulate cards show the live quote state. The page clock is paused, so the quote's debounce
   // timer never fires and no estimate request is sent: the card deterministically shows its pending state in the snapshot.
-  await expect(page.locator('.simulation-workflow-canvas .composer-quote-note').filter({ hasText: 'Calculating estimate…' }).first()).toBeVisible();
+  // BUILD-FLOFI-UX-FIX-003: the pending state is the destination's quiet placeholder (no "Calculating" text on the card).
+  await expect(page.locator('.simulation-workflow-canvas .composer-amount-live[aria-busy="true"] .composer-amount-loading').first()).toBeVisible();
   await expect(page).toHaveScreenshot('simulate-expired.png', { fullPage: true, ...hashMask(page) });
 
   await panel(page).getByRole('button', { name: 'Generate mocked artifacts for revision 1' }).click();

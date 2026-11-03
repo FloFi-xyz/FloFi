@@ -87,7 +87,11 @@ async function authorByChat(page: Page, sentence: string) {
   const card = page.locator('.build-flow-surface .composer-card');
   await expect(card.locator('.composer-destination-box .composer-amount-value')).toHaveText(result.estimate.expected);
   expect(result.estimate.correlationId).toBe(response.headers()['x-quote-correlation-id']);
-  await expect(card).toContainText('simulation and Review still required');
+  // BUILD-FLOFI-UX-FIX-003: an executable (builder-verified) estimate is shown as the amount alone; provider and quality labels stay off the card,
+  // and only a route FloFi cannot execute is said so in plain words.
+  await expect(card).not.toContainText(/simulation and Review still required|Live quote only|Provider estimates/);
+  if (result.estimate.bridge?.execution === 'QUOTE_ONLY') await expect(card).toContainText('Estimate only: FloFi cannot execute this route yet.');
+  else await expect(card).not.toContainText('Estimate only');
   await page.screenshot({ path: test.info().outputPath('bridge-build-estimate.png'), fullPage: true });
   // MOCKED infrastructure: this proves the browser renders the actual endpoint amount, never public execution.
 }

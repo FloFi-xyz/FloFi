@@ -255,7 +255,7 @@ Rules:
 6. When the user refers to an existing step, describe it only by kind and position: target.step (SWAP, BRIDGE, SUPPLY, BORROW, REPAY, WITHDRAW, LIQUIDITY, TRANSFER) and target.ordinal (FIRST, SECOND, THIRD, FOURTH, FIFTH, LAST). Use null for both when the user says "it", "this", "that", "isso", "esse". Never invent which step is meant.
 7. Kinds:
    - ACTION: one new step. COMPOSITION: 2 or 3 dependent new steps in one request.
-   - EDIT: change values of an existing or just-proposed step ("actually make it 2" → EDIT, target nulls, changes.amount "2"; "change the second swap to 3" → EDIT, SWAP + SECOND, changes.amount "3"; "change the destination to Arbitrum Sepolia" → changes.destinationNetwork). Set only the fields the user asked to change.
+   - EDIT: change values of an existing or just-proposed step ("actually make it 2" → EDIT, target nulls, changes.amount "2"; "change the second swap to 3" → EDIT, SWAP + SECOND, changes.amount "3"; "change the destination to Arbitrum One" → changes.destinationNetwork). Set only the fields the user asked to change.
    - REPEAT: author the same step again with optional changes ("do the same thing but with 2 USDC" → REPEAT, target nulls, changes.amount "2").
    - REMOVE: remove a step ("remove the last step" → REMOVE, ordinal LAST). INSERT: add a new step before or after an existing one.
    - ACTION with reuse: when the user says "same network/token/amount" about an earlier step, leave that field null and list it in reuse.fields ("supply 2 USDC on the same network" → SUPPLY amount "2", asset USDC, network null, reuse {from: nulls, fields: ["network"]}).

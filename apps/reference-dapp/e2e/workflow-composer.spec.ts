@@ -269,15 +269,16 @@ test('Swap and Bridge source/destination boxes select the existing editor, prese
     await expect(card.locator('.composer-amount-box')).toHaveCount(2);
     await expect(destination.locator('.composer-amount-value')).toHaveText('0');
     await expect(destination).toHaveAttribute('data-symbolic');
-    await expect(card.locator('.composer-quote-note')).toHaveText('Estimate unavailable');
+    await expect(card.locator('.composer-quote-note')).toHaveCount(0);
     await expect(destination.locator('.composer-amount-token')).toHaveText(action === 'swap' ? 'WETH' : 'USDC');
     const sourceBox = (await amount.boundingBox())!, destinationBox = (await destination.boundingBox())!;
     expect(destinationBox.y).toBeGreaterThanOrEqual(sourceBox.y + sourceBox.height + 3);
     expect(destinationBox.width).toBe(sourceBox.width);
     for (const valueBox of [amount, destination]) {
       // BUILD-FIX-UX-001: without a verified USD price the line states why (never a fabricated number).
-      await expect(valueBox.locator('.composer-fiat-value')).toHaveText(/^(Test token · no USD value|USD price unavailable)$/);
-      await expect(valueBox.locator('.composer-fiat-value')).toHaveAttribute('title', /no market value|No verified USD price/);
+      // BUILD-FLOFI-UX-FIX-003: no figure, no filler words (the line keeps its height); a test token still says it has no market value.
+      await expect(valueBox.locator('.composer-fiat-value')).toHaveText(/^(Test token · no USD value|)$/);
+      if (await valueBox.locator('.composer-fiat-value').innerText()) await expect(valueBox.locator('.composer-fiat-value')).toHaveAttribute('title', /no market value/);
       await expect(valueBox.locator('.composer-token-avatar')).toBeVisible();
       const value = (await valueBox.locator('.composer-value-column').boundingBox())!;
       const token = (await valueBox.locator('.composer-token-pill').boundingBox())!;

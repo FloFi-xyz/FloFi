@@ -11,7 +11,7 @@
  * There is no user-facing switch between the two. Nothing here grants authority: a mainnet network still needs a fresh simulation, the
  * owner's Review and the owner's wallet signature, and the deployment's own enablement still decides which mainnet actions run.
  */
-import { familyCounterpart, networkIdentity, type NetworkIdentity } from './network-registry';
+import { copilotNetworksMentioned, familyCounterpart, networkIdentity, networkOfCopilot, type NetworkIdentity } from './network-registry';
 
 export type NetworkScope = 'PUBLIC_MAINNET' | 'ENGINEERING';
 /** The refusal every surface reports for a test network in the public product. */
@@ -57,6 +57,17 @@ const LOCAL_CHAINS = new Set(['mock:local', 'eip155:31337']);
 export function isTestNetwork(value: string | null | undefined): boolean {
   return networkIdentity(value)?.environment === 'TESTNET';
 }
+const TEST_WORDING = /\b(?:sepolia|devnet|testnets?|test\s?net(?:works?)?|redes?\s+de\s+teste)\b/i;
+/** BUILD-FLOFI-UX-FIX-003: whether display text (a button, a model's question or explanation) names a test network, by name or registry mention. */
+export function mentionsTestNetwork(text: string): boolean {
+  return TEST_WORDING.test(text) || copilotNetworksMentioned(text).some(id => networkOfCopilot(id).environment === 'TESTNET');
+}
+/**
+ * BUILD-FLOFI-UX-FIX-003: display text as the public product may show it — null when it names a test network (a model's option or prose, or an
+ * engineering string), so the surface shows FloFi's own mainnet wording instead. Engineering certification keeps every text.
+ */
+export const publicText = (text: string | null, scope: NetworkScope = activeNetworkScope()): string | null =>
+  text !== null && scope === 'PUBLIC_MAINNET' && mentionsTestNetwork(text) ? null : text;
 /** Whether `value` may be authored, simulated, reviewed or executed in `scope`. Unknown networks are left to the capability registries. */
 export function networkAllowed(value: string | null | undefined, scope: NetworkScope): boolean {
   return scope === 'ENGINEERING' || !isTestNetwork(value);

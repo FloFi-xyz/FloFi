@@ -128,7 +128,9 @@ for (const action of ['swap', 'bridge'] as const) test(`${action} has quiet edit
   const gear = card.getByRole('button', { name: 'Action settings', exact: true });
   await gear.focus(); await page.keyboard.press('Enter');
   await expect(toggle).toHaveAttribute('aria-expanded', 'true');
-  await expect(panel.getByLabel(action === 'swap' ? 'Input amount (USDC)' : 'Cross-chain amount (USDC)', { exact: true })).toHaveValue('2.5');
+  // BUILD-FLOFI-UX-FIX-003: a bridge's settings hold only what its card does not edit (the amount stays on the card).
+  if (action === 'swap') await expect(panel.getByLabel('Input amount (USDC)', { exact: true })).toHaveValue('2.5');
+  else { await expect(panel.getByLabel('Cross-chain recipient', { exact: true })).toBeVisible(); await expect(panel.getByLabel('Cross-chain amount (USDC)', { exact: true })).toHaveCount(0); }
 });
 
 for (const action of ['swap', 'bridge'] as const) test(`${action} shows why there is no USD value on test tokens, in both boxes, without changing amounts`, async ({ page }) => {
@@ -150,11 +152,13 @@ for (const action of ['swap', 'bridge'] as const) test(`${action} shows why ther
     await expect(card.getByRole('button', { name: /Show (USD value|token amount) first/ })).toHaveCount(0);
     await expect(revision).toHaveAttribute('data-workflow-revision', '1');
     await checkTokenPills(card);
-    await expect(card.locator('.composer-quote-note')).toHaveText('Estimate unavailable');
+    // BUILD-FLOFI-UX-FIX-003: no quote was asked for (valueless test tokens): the card says nothing about it.
+    await expect(card.locator('.composer-quote-note')).toHaveCount(0);
     expect(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth)).toBe(false);
   }
   await openCanvasSettings(page);
-  await expect(page.getByRole('dialog', { name: 'Action settings', exact: true }).getByLabel(action === 'swap' ? 'Input amount (USDC)' : 'Cross-chain amount (USDC)', { exact: true })).toHaveValue('2.5');
+  if (action === 'swap') await expect(page.getByRole('dialog', { name: 'Action settings', exact: true }).getByLabel('Input amount (USDC)', { exact: true })).toHaveValue('2.5');
+  else await expect(page.getByRole('dialog', { name: 'Action settings', exact: true }).getByLabel('Cross-chain routing policy', { exact: true })).toBeVisible();
   await expect(card.getByRole('button', { name: 'Review amount', exact: true })).toHaveCount(0);
   await openEditorSection(page, 'Simulate');
   await expect(page.locator('.simulate-flow-surface .composer-amount')).toHaveText('2.5 USDC');

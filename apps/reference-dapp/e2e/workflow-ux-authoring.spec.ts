@@ -208,17 +208,20 @@ test.describe('UX-007 fast live quote feedback', () => {
     await page.clock.pauseAt(await page.evaluate(() => Date.now()) + 1000);
     const t0 = Date.now();
     await input.pressSequentially('100', { delay: 40 });
-    await expect(destination).toContainText('Calculating…'); const calculating = Date.now() - t0;
-    await expect(card.locator('.composer-quote-note')).toContainText('Calculating estimate…');
+    // BUILD-FLOFI-UX-FIX-003: a quiet, fixed-size placeholder (announced to assistive technology) instead of "Calculating…" text.
+    await expect(destination.locator('.composer-amount-live[aria-busy="true"] .composer-amount-loading')).toBeVisible(); const calculating = Date.now() - t0;
+    await expect(destination.locator('.composer-amount-loading')).toContainText('Calculating estimate…');
+    await expect(card.locator('.composer-quote-note')).toHaveCount(0);
     expect(seen).toHaveLength(0);
     await page.clock.runFor(200);
     await page.clock.resume();
     await expect(destination).toContainText('0.04'); const shown = Date.now() - t0;
     expect(seen.map(amountOf)).toEqual(['100000000']); const requested = seen[0]!.at - t0;
     test.info().annotations.push({ type: 'mocked timing (ms)', description: `${network}: calculating ${calculating}, request ${requested}, estimate ${shown} (controlled 200 ms debounce; 200 ms replay delay)` });
-    await expect(card.locator('.composer-quote-note')).toContainText('Approximate · Uniswap V3 · Simulate before review');
+    await expect(card).not.toContainText(/Approximate|Simulate before review/);
+    await expect(card.locator('.composer-quote-note')).toHaveCount(0);
     // A newer amount supersedes a slower older answer; the older one never overwrites it.
-    await input.fill('10'); await expect(destination).toContainText('Calculating…');
+    await input.fill('10'); await expect(destination.locator('.composer-amount-loading')).toBeVisible();
     await expect.poll(() => seen.length).toBe(2); await input.fill('1000');
     await expect(destination).toContainText('0.4'); await page.waitForTimeout(900); await expect(destination).toContainText('0.4'); await expect(destination).not.toContainText('9.99');
     expect(seen.map(amountOf)).toEqual(['100000000', '10000000', '1000000000']);
@@ -227,6 +230,95 @@ test.describe('UX-007 fast live quote feedback', () => {
     await expect(page.getByRole('complementary', { name: 'Simulation Summary' })).toHaveCount(0);
     await expectEditorSection(page, 'Build');
     await assertPassiveWallet(page); networkGuard.assertClean();
+  });
+
+  test('BUILD-FLOFI-UX-FIX-003: amounts stay on one line and the card keeps its size while a quote arrives (desktop and mobile)', async ({ page, networkGuard }) => {
+    await replayQuotes(page, () => ({ delayMs: 300, expected: '1.549809' }));
+    await open(page);
+    await page.getByRole('button', { name: 'Add swap', exact: true }).click();
+    const card = cards(page).first(); await chooseNetwork(page, card, 'Arbitrum One');
+    const input = card.getByRole('textbox', { name: 'Source amount (USDC)', exact: true });
+    const destination = card.getByRole('group', { name: 'Destination amount (unquoted placeholder)', exact: true });
+    for (const width of [1440, 390]) {
+      await page.setViewportSize({ width, height: 900 });
+      await input.fill(width === 1440 ? '0.997401' : '0.00065');
+      await expect(destination.locator('.composer-amount-loading')).toBeVisible();
+      const pending = (await card.boundingBox())!;
+      await expect(destination.locator('.composer-amount-value')).toHaveText('1.549809');
+      const settled = (await card.boundingBox())!;
+      // The quote's arrival never resizes the card (the placeholder holds the value's line).
+      expect(Math.abs(settled.height - pending.height)).toBeLessThan(1);
+      expect(Math.abs(settled.width - pending.width)).toBeLessThan(1);
+      for (const value of [card.locator('.composer-amount .composer-amount-value'), destination.locator('.composer-amount-value')]) {
+        const geometry = await value.evaluate(element => { const style = getComputedStyle(element), box = element.getBoundingClientRect();
+          return { height: box.height, lineHeight: parseFloat(style.lineHeight), whiteSpace: style.whiteSpace, fontSize: parseFloat(style.fontSize),
+            clipped: element.scrollWidth > element.clientWidth + 1 }; });
+        // One line, never broken between digits, readable, and the whole value visible (no clipping at these lengths).
+        expect(geometry.height).toBeLessThanOrEqual(geometry.lineHeight + 1);
+        expect(geometry.whiteSpace).toBe('nowrap');
+        expect(geometry.fontSize).toBeGreaterThanOrEqual(12);
+        expect(geometry.clipped).toBe(false);
+      }
+      // The exact value is never rounded for display.
+      await expect(input).toHaveValue(width === 1440 ? '0.997401' : '0.00065');
+      await expect(destination.locator('.composer-amount-value')).toHaveAttribute('title', '1.549809');
+    }
+    await expect(card).not.toContainText(/Approximate|Provider estimates|Builder verified|Live quote only|USD price unavailable|Calculating…/);
+    await assertPassiveWallet(page); networkGuard.assertClean();
+  });
+
+  test.describe('BUILD-FLOFI-UX-FIX-003 exact value on a touch screen', () => {
+    // The guarded fixture sets a desktop viewport on its own context; touch input comes from `use`, the phone width from setViewportSize.
+    test.use({ hasTouch: true });
+    test('a long amount clipped to one line opens its exact value on tap or keyboard, without resizing the card', async ({ page, networkGuard }) => {
+      const LONG = '0.123456789012345678';
+      await replayQuotes(page, (_index, seen) => ({ delayMs: 20, expected: amountOf(seen) === '1000000' ? '0.04' : LONG }));
+      await page.setViewportSize({ width: 390, height: 844 });
+      await open(page);
+      await page.getByRole('button', { name: 'Add swap', exact: true }).click();
+      const card = cards(page).first(); await chooseNetwork(page, card, 'Arbitrum One');
+      await card.getByRole('textbox', { name: 'Source amount (USDC)', exact: true }).fill('250');
+      const destination = card.getByRole('group', { name: 'Destination amount (unquoted placeholder)', exact: true });
+      // Clipped on one line, so it is a disclosure; its accessible name is the whole, unrounded value.
+      const value = destination.getByRole('button', { name: LONG, exact: true });
+      await expect(value).toHaveAttribute('aria-expanded', 'false');
+      expect(await value.evaluate(element => ({ clipped: element.scrollWidth > element.clientWidth + 1, oneLine: element.getBoundingClientRect().height <= parseFloat(getComputedStyle(element).lineHeight) + 1 })))
+        .toEqual({ clipped: true, oneLine: true });
+      const token = (await destination.locator('.composer-token-chip, .composer-token-pill').first().innerText()).trim().split(/\s+/)[0]!;
+      const before = (await card.boundingBox())!;
+      const exact = page.getByRole('note', { name: 'Exact amount', exact: true });
+      // Tap opens the exact value over the card (fully on screen); the card keeps its size.
+      await value.tap();
+      await expect(value).toHaveAttribute('aria-expanded', 'true');
+      await expect(exact).toHaveText(`${LONG} ${token}`);
+      const bubble = (await exact.boundingBox())!;
+      expect(bubble.x).toBeGreaterThanOrEqual(0); expect(bubble.x + bubble.width).toBeLessThanOrEqual(390);
+      const during = (await card.boundingBox())!;
+      expect(Math.abs(during.height - before.height)).toBeLessThan(1); expect(Math.abs(during.width - before.width)).toBeLessThan(1);
+      // A second tap closes it; a tap elsewhere closes it.
+      await value.tap(); await expect(exact).toHaveCount(0); await expect(value).toHaveAttribute('aria-expanded', 'false');
+      await value.tap(); await expect(exact).toBeVisible();
+      await card.locator('.composer-action-title').tap(); await expect(exact).toHaveCount(0);
+      // The bubble replaces the hover title (no duplicate tooltip or name).
+      await expect(value).not.toHaveAttribute('title', /./);
+      // Keyboard: Enter opens, Escape closes and returns focus to the value; Space opens too.
+      await value.focus(); await page.keyboard.press('Enter'); await expect(exact).toHaveText(`${LONG} ${token}`);
+      await page.keyboard.press('Escape'); await expect(exact).toHaveCount(0); await expect(value).toBeFocused();
+      await page.keyboard.press(' '); await expect(exact).toBeVisible();
+      // Focus moving on (Tab) closes it, so it never covers the next control.
+      await page.keyboard.press('Tab'); await expect(exact).toHaveCount(0); await expect(value).not.toBeFocused();
+      // A new quote closes it and it does not reopen by itself, even when the new quote has the same value.
+      await value.tap(); await expect(exact).toBeVisible();
+      await card.getByRole('textbox', { name: 'Source amount (USDC)', exact: true }).fill('251');
+      await expect(value).toHaveAttribute('aria-expanded', 'false'); await expect(exact).toHaveCount(0);
+      // A value that fits stays plain text.
+      await card.getByRole('textbox', { name: 'Source amount (USDC)', exact: true }).fill('1');
+      await expect(destination.locator('.composer-amount-value')).toHaveText('0.04');
+      await expect(destination.getByRole('button', { name: '0.04', exact: true })).toHaveCount(0);
+      // Authoring only: nothing was applied, simulated or signed.
+      await expect(revision(page)).toHaveAttribute('data-workflow-revision', '0');
+      await assertPassiveWallet(page); networkGuard.assertClean();
+    });
   });
 
   test('an unavailable route says Quote unavailable and never keeps another amount\'s quote', async ({ page, networkGuard }) => {
@@ -250,7 +342,7 @@ test.describe('UX-007 fast live quote feedback', () => {
     const card = cards(page).filter({ hasText: 'Robinhood' }).first();
     const input = card.getByRole('textbox', { name: /^Stocks amount/ });
     await input.pressSequentially('10', { delay: 30 });
-    await expect(card.locator('.composer-quote-note')).toContainText(/Calculating estimate…|Approximate · Uniswap V3/);
+    await expect(card).not.toContainText(/Approximate|Uniswap V3 ·/);
     await expect(card.getByRole('group', { name: 'Destination amount (unquoted placeholder)', exact: true })).toContainText('0.026');
     expect(seen).toHaveLength(1); expect(seen[0]!.body.workflow.nodes.some(node => node.chainId === 'eip155:4663')).toBe(true);
     await expect(revision(page)).toHaveAttribute('data-workflow-revision', '0');

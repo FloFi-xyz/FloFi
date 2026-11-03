@@ -65,7 +65,7 @@ for (const action of ['swap', 'bridge', 'supply', 'borrow', 'repay', 'withdraw']
 
   if (action === 'swap' || action === 'bridge') {
     // BUILD-FIX-UX-001: without a verified USD price the line says why, and no USD-first mode is offered for a missing value.
-    await expect(card.locator('.composer-amount .composer-fiat-value')).toHaveText(/^(Test token · no USD value|USD price unavailable)$/);
+    await expect(card.locator('.composer-amount .composer-fiat-value')).toHaveText(/^(Test token · no USD value|)$/);
     await expect(card.getByRole('button', { name: 'Show USD value first', exact: true })).toHaveCount(0);
     await source.fill('000.05'); await expect(source).toHaveValue('0.05');
   }

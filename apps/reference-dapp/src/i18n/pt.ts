@@ -210,6 +210,7 @@ export const portuguese: Readonly<Record<string, string>> = {
   'The wallet request was cancelled. Try again when ready.': 'O pedido à carteira foi cancelado. Tente novamente quando estiver pronto.',
   'Estimate unavailable': 'Estimativa indisponível', 'Output estimate unavailable': 'Estimativa de saída indisponível',
   'Approximate read-only output; simulate before review': 'Saída aproximada apenas para consulta; simule antes da revisão',
+  'Estimated output; simulate before review': 'Saída estimada; simule antes da revisão',
   'Approximate · {0} · Simulate before review': 'Aproximado · {0} · Simule antes da revisão',
   'Review & Authorization': 'Revisão e autorização', 'AUTHORIZATION': 'AUTORIZAÇÃO', 'Authorization': 'Autorização',
   'Execution limits': 'Limites de execução', 'Permissions': 'Permissões', 'Token approvals': 'Aprovações de tokens',

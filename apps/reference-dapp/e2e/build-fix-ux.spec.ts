@@ -125,13 +125,13 @@ test('handles stay easy to target when the Canvas is zoomed out', async ({ page,
 });
 
 /** A MOCKED estimate for exactly the requested snapshot, as the live-quote endpoint would answer with a verified price source. */
-function mockedEstimate(usd: { input: string | null; output: string | null }) {
+function mockedEstimate(usd: { input: string | null; output: string | null }, expected = '0.000794') {
   return async (route: Route) => {
     const body = route.request().postDataJSON() as { workflow: { nodes: { nodeId: string; chainId: string }[] }; nodeId: string };
     const swap = body.workflow.nodes.find(item => item.nodeId === body.nodeId)!;
     await route.fulfill({ json: { ok: true, estimate: {
       workflowHash: hashArtifactBytes('semantic-workflow', new TextEncoder().encode(JSON.stringify(body.workflow))), nodeId: body.nodeId, chain: swap.chainId,
-      provider: 'Uniswap V3', expected: '0.000794', minimum: '0.00078606', symbol: 'WETH', slippageBps: 100, expiresAt: new Date(Date.now() + 60_000).toISOString(),
+      provider: 'Uniswap V3', expected, minimum: expected === '0.000794' ? '0.00078606' : expected, symbol: 'WETH', slippageBps: 100, expiresAt: new Date(Date.now() + 60_000).toISOString(),
       usd: { ...usd, source: 'FIXTURE', evidence: 'MOCKED', observedAt: new Date().toISOString() } } } });
   };
 }
@@ -146,11 +146,12 @@ test('a verified USD estimate is shown as an approximation (MOCKED here, labelle
   await card.getByRole('textbox', { name: 'Source amount (USDC)', exact: true }).fill('2.5');
   await expect(destination.locator('.composer-amount-value')).toHaveText('0.000794');
   // USDC has no verified feed (no number); the WETH estimate carries its approximate USD value and provenance.
-  await expect(source.locator('.composer-fiat-value')).toHaveText('USD price unavailable');
+  await expect(source.locator('.composer-fiat-value')).toHaveText('');
   const usd = destination.getByRole('button', { name: 'Show USD value first', exact: true });
   await expect(usd).toHaveText('≈ $2.49 · test price');
   await expect(usd).toHaveAttribute('title', /Estimated from the verified test \(MOCKED\) USD price.*Not a quote\./);
-  await expect(card.locator('.composer-quote-note')).toContainText('Approximate · Uniswap V3 · Simulate before review');
+  await expect(card.locator('.composer-quote-note')).toHaveCount(0);
+  await expect(card).not.toContainText(/Approximate|Simulate before review/);
   await usd.click();
   await expect(destination.locator('.composer-primary-fiat')).toHaveText('≈ $2.49 · test price');
   await expect(destination.locator('.composer-token-subline')).toHaveText('0.000794 WETH');
@@ -160,6 +161,29 @@ test('a verified USD estimate is shown as an approximation (MOCKED here, labelle
   await expect(page.locator('.summary-bar')).toHaveAttribute('data-workflow-revision', '0');
   await destination.getByRole('button', { name: 'Show token amount first', exact: true }).click();
   await expect(destination.locator('.composer-amount-value')).toHaveText('0.000794');
+  networkGuard.assertClean();
+});
+
+test('BUILD-FLOFI-UX-FIX-003: with USD first, a token amount too long for the sub-line is clipped with an ellipsis and opens its exact value', async ({ page, networkGuard }) => {
+  const LONG = '0.000794123456789012';
+  await installPassiveWallet(page, '0x2105');
+  await page.route('**/api/build-estimate', mockedEstimate({ input: null, output: '2.49' }, LONG));
+  await openBuilder(page);
+  await page.getByRole('button', { name: 'Add swap', exact: true }).click();
+  const card = page.locator('.build-flow-surface .composer-card'), destination = card.locator('.composer-destination-box');
+  await card.getByRole('textbox', { name: 'Source amount (USDC)', exact: true }).fill('2.5');
+  await destination.getByRole('button', { name: 'Show USD value first', exact: true }).click();
+  const subline = destination.locator('.composer-token-subline');
+  // The whole value is in the DOM (never shortened); on screen it ends in an ellipsis, with the token kept visible.
+  await expect(subline).toHaveText(`${LONG} WETH`);
+  expect(await subline.locator('.composer-subline-amount').evaluate(element => ({ clipped: element.scrollWidth > element.clientWidth + 1, overflow: getComputedStyle(element).textOverflow })))
+    .toEqual({ clipped: true, overflow: 'ellipsis' });
+  const [line, symbol] = [(await subline.boundingBox())!, (await subline.locator('.composer-subline-token').boundingBox())!];
+  expect(symbol.x + symbol.width).toBeLessThanOrEqual(line.x + line.width + 0.5);
+  const value = subline.getByRole('button', { name: LONG, exact: true }), exact = page.getByRole('note', { name: 'Exact amount', exact: true });
+  await value.click(); await expect(exact).toHaveText(`${LONG} WETH`);
+  await page.keyboard.press('Escape'); await expect(exact).toHaveCount(0); await expect(value).toBeFocused();
+  await expect(page.locator('.summary-bar')).toHaveAttribute('data-workflow-revision', '0');
   networkGuard.assertClean();
 });
 

@@ -56,6 +56,19 @@ export async function accountState(): Promise<AccountState> {
 }
 
 /**
+ * BUILD-FLOFI-UX-FIX-003: what the header's Settings menu needs — whether this deployment offers accounts and whether this browser holds a valid
+ * FloFi session — from one verified-session read. No account data (identities, emails, wallets) leaves the server for it; pages that show the
+ * account keep using `accountState`.
+ */
+export type AccountPresence = { readonly accounts: boolean; readonly signedIn: boolean };
+export async function accountPresence(): Promise<AccountPresence> {
+  let h: AccountHost | null;
+  try { h = await accountHost(); } catch { h = null; }
+  if (!h) return { accounts: false, signedIn: false };
+  return { accounts: true, signedIn: await currentAccountSession(h) !== null };
+}
+
+/**
  * Completes a Privy sign-in (Google, email code or Web3 wallet): the server verifies the access token and reads the Privy user itself,
  * signs in to that person's one FloFi account and sets the session cookie. Returns where to continue.
  */
