@@ -105,6 +105,13 @@ const EN = {
     : `The contract or mint reference ${asset} is invalid on ${network}.`,
   universalAssetUnknown: (asset: string, network: string) => `${asset} is not an asset Flofi knows on ${network}. Name its symbol, or write its contract or mint as address@decimals.`,
   universalOutputQuestion: (network: string) => `Which asset do you want to receive on ${network}?`,
+  // BUILD-FLOFI-UX-FIX-003: one question per missing bridge side (mainnets only), the amount asked in the asset sent, and why a received amount is not targeted.
+  bridgeSourceQuestion: (asset: string | null) => asset ? `Which network are you bridging ${asset} from?` : 'Which network are you bridging from?',
+  bridgeDestinationQuestion: (source: string) => `From ${source}. Which network should it arrive on?`,
+  howMuchToSend: (asset: string, subject: 'bridge' | 'swap') => subject === 'swap' ? `How much ${asset} would you like to swap?` : `How much ${asset} would you like to send?`,
+  amountUnitMismatch: (unit: string, asset: string) => `That amount is in ${unit}, but this step sends ${asset}. How much ${asset}?`,
+  exactInputNote: (amount: string, asset: string) => `You asked to receive ${amount} ${asset}. FloFi prepares this from the amount you send, so it cannot guarantee exactly ` +
+    `${amount} ${asset}: Simulate shows the estimated amount you would receive, after fees.`,
   universalDefaultOutputNote: (asset: string, network: string) => `You receive ${asset} on ${network} (no destination asset named; say, for example, "receive SOL" to choose another).`,
   universalBestRoutingNote: 'Routing: best — every provider is asked, and the executable route with the highest guaranteed minimum is chosen and shown at Review.',
   universalDestinationWalletNote: (ecosystem: string) => `Recipient: the ${ecosystem} wallet you connect in the Flofi app, bound at Review.`,
@@ -330,6 +337,12 @@ const PT: CopilotCopy = {
     : `A referência de contrato ou mint ${asset} é inválida na ${network}.`,
   universalAssetUnknown: (asset, network) => `${asset} não é um ativo que o Flofi conhece na ${network}. Informe o símbolo, ou escreva o contrato ou mint como endereço@decimais.`,
   universalOutputQuestion: network => `Qual ativo você quer receber na ${network}?`,
+  bridgeSourceQuestion: asset => asset ? `De qual rede você quer enviar ${asset}?` : 'De qual rede você quer enviar?',
+  bridgeDestinationQuestion: source => `Saindo da ${source}. Para qual rede você quer enviar?`,
+  howMuchToSend: (asset, subject) => subject === 'swap' ? `Quanto ${asset} você quer trocar?` : `Quanto ${asset} você quer enviar?`,
+  amountUnitMismatch: (unit, asset) => `Esse valor está em ${unit}, mas este passo envia ${asset}. Quanto ${asset}?`,
+  exactInputNote: (amount, asset) => `Você pediu para receber ${amount} ${asset}. O FloFi prepara a operação a partir do valor que você envia, então não consegue garantir ` +
+    `exatamente ${amount} ${asset}: o Simulate mostra a estimativa que você receberia, já com as taxas.`,
   universalDefaultOutputNote: (asset, network) => `Você recebe ${asset} na ${network} (nenhum ativo de destino informado; diga, por exemplo, "receber SOL" para escolher outro).`,
   universalBestRoutingNote: 'Roteamento: melhor rota — todos os fornecedores são consultados, e a rota executável com o maior mínimo garantido é escolhida e mostrada na Review.',
   universalDestinationWalletNote: ecosystem => `Destinatário: a carteira ${ecosystem} que você conectar no app Flofi, definida na Review.`,

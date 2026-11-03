@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import { activeNetworkScope, introducedTestNetworks, testNetworkMessage } from './network-scope';
+import { activeNetworkScope, introducedTestNetworks, publicText, testNetworkMessage } from './network-scope';
 import { groundAutomationDraft } from './copilot-automation';
 import type { AutomationInput } from './copilot-automation';
 import type { ReviewContext } from '@defi-workflow-engine/reference-linter';
@@ -22,6 +22,7 @@ import { answerDraftField, mergeDraftIntent, validatedDraftFields, type DraftFie
 import { canonicalSymbol } from './asset-catalogs';
 import { networkIdentity, networkOfCopilot } from './network-registry';
 import { UNIVERSAL_NETWORKS } from '@defi-workflow-engine/workflow-contracts';
+import { defaultUniversalOutput } from './universal-bridge-authoring';
 import { ROUTER_NETWORK_OPTIONS } from './router-authoring';
 import { COPILOT_TRANSCRIPT, COPILOT_V2_LIMITS, isCopilotIntentError, parseCopilotIntentV2, type CopilotChanges, type CopilotGoal, type CopilotIntentV2, type CopilotOrdinal,
   type CopilotQuestionTopic, type CopilotReuseField, type CopilotTarget } from './copilot-intent-v2';
@@ -35,6 +36,7 @@ import { learningCopy, MEMORY_NO, MEMORY_YES, refusalFor, suggestionNote, target
 import { lintWorkflow } from '@defi-workflow-engine/reference-linter';
 import { workflowSequence } from './workflow-sequence';
 import { networkCapabilityProfile } from './intelligence/capability-api';
+import { lookupAsset } from './intelligence/asset-resolution';
 import { intelligenceCopy } from './intelligence/copy';
 import { planGoal, type Goal, type GoalField, type GoalPlan, type GoalStep } from './intelligence/goal-planner';
 import { contextCard, contextKey, operationalState, type CopilotContextCard } from './intelligence/operational-state';
@@ -629,6 +631,12 @@ function applyChanges(base: Base, changes: CopilotChanges): Applied {
   let actions = base.actions.map(action => ({ ...action })) as CopilotAction[];
   const set = (index: number, key: string, value: unknown) => { actions = actions.map((item, at) => at === index ? { ...item, [key]: value } as CopilotAction : item); };
   const drop = (...fields: CarriedField[]) => fields.forEach(field => carried.delete(field));
+  // A token moved with its side to another network: carried by symbol, or dropped (and asked again) when it cannot be named portably.
+  const move = (index: number, key: string, field: CarriedField, network: CopilotNetwork | null, value: string | null | undefined) => {
+    const moved = portableAsset(network, value);
+    set(index, key, moved ?? null);
+    if (moved === null) drop(field);
+  };
   const entries = (Object.keys(changes) as (keyof CopilotChanges)[]).filter(key => key === 'deposits' ? changes.deposits.length > 0 : key === 'lower' || key === 'upper' ? false
     : changes[key] !== null && changes[key] !== undefined);
   for (const key of entries) {
@@ -649,12 +657,23 @@ function applyChanges(base: Base, changes: CopilotChanges): Applied {
         if (type === 'COMPOSITION') set(2, 'slippageBps', changes.slippageBps); else if (type === 'SWAP' || type === 'BRIDGE' || type === 'LIQUIDITY') set(0, 'slippageBps', changes.slippageBps);
         else return fail();
         drop('slippage'); break;
+      // BUILD-FLOFI-UX-FIX-003: a side that moves to another network carries its token by symbol (a carried identity is that old chain's contract).
       case 'network':
-        if (type === 'BRIDGE') { set(0, 'sourceNetwork', changes.network); drop('sourceNetwork'); }
-        else if (type === 'COMPOSITION') return fail();
-        else { set(0, 'network', changes.network); drop('network'); }
+        if (type === 'COMPOSITION') return fail();
+        if (action.type === 'BRIDGE') { move(0, 'asset', 'asset', action.sourceNetwork, action.asset); set(0, 'sourceNetwork', changes.network); drop('sourceNetwork'); }
+        else {
+          if (action.type === 'SWAP') { move(0, 'inputAsset', 'inputAsset', action.network, action.inputAsset); move(0, 'outputAsset', 'outputAsset', action.network, action.outputAsset); }
+          else if (action.type !== 'LIQUIDITY') move(0, 'asset', 'asset', action.network, action.asset);
+          set(0, 'network', changes.network); drop('network');
+        }
         break;
-      case 'destinationNetwork': if (type !== 'BRIDGE') return fail(); set(0, 'destinationNetwork', changes.destinationNetwork); drop('destinationNetwork'); break;
+      case 'destinationNetwork': {
+        if (action.type !== 'BRIDGE') return fail();
+        // A destination token FloFi chose by default (or the old chain's native coin) is not the user's choice: the new network's default applies, stated.
+        if (action.outputAsset && impliedOutput(action)) { set(0, 'outputAsset', null); drop('outputAsset'); }
+        else if (action.outputAsset) move(0, 'outputAsset', 'outputAsset', action.destinationNetwork, action.outputAsset);
+        set(0, 'destinationNetwork', changes.destinationNetwork); drop('destinationNetwork'); break;
+      }
       case 'inputAsset': case 'outputAsset':
         if (type === 'SWAP') { set(0, key, changes[key]); drop(key); }
         else if (type === 'BRIDGE') { const field = key === 'outputAsset' ? 'outputAsset' : 'asset'; set(0, field, changes[key]); drop(field); }
@@ -688,6 +707,29 @@ function applyChanges(base: Base, changes: CopilotChanges): Applied {
     changed.push(key);
   }
   return { ok: true, base: { ...base, actions }, carried, changed };
+}
+/**
+ * BUILD-FLOFI-UX-FIX-003: a token reference carried from `network` as that network's catalog symbol ("0xaf88…@6" on Arbitrum One → USDC), so the
+ * planner resolves it again in the new network's own registry (and asks when it is ambiguous there). Unchanged when it cannot be read.
+ */
+function portableAsset(network: CopilotNetwork | null, value: string | null | undefined): string | null | undefined {
+  if (!value || !network || network === 'OTHER') return value;
+  const found = lookupAsset(networkOfCopilot(network).key, value);
+  if (found.kind === 'FOUND' && found.identity.symbol !== 'TOKEN') return found.identity.symbol;
+  // A plain symbol is resolved again on the new network; a contract or mint FloFi cannot name is never carried to another chain (null: asked again).
+  return /^[A-Za-z][A-Za-z0-9.]{0,15}$/.test(value) ? value : null;
+}
+/** BUILD-FLOFI-UX-FIX-003: whether a bridge's destination token is what FloFi would choose by default for its pair, or the destination's native coin. */
+function impliedOutput(action: Extract<CopilotAction, { type: 'BRIDGE' }>): boolean {
+  const key = (network: CopilotNetwork | null) => network && network !== 'OTHER' ? Object.values(UNIVERSAL_NETWORKS).find(n => n.chain === networkOfCopilot(network).chain)?.key ?? null : null;
+  const from = action.sourceNetwork, to = action.destinationNetwork, src = key(from), dst = key(to);
+  if (!src || !dst || !from || from === 'OTHER' || !to || to === 'OTHER' || !action.asset || !action.outputAsset || action.asset === 'OTHER' || action.outputAsset === 'OTHER') return false;
+  const output = lookupAsset(networkOfCopilot(to).key, action.outputAsset);
+  if (output.kind !== 'FOUND') return false;
+  if (output.identity.native) return true;
+  const input = lookupAsset(networkOfCopilot(from).key, action.asset);
+  if (input.kind !== 'FOUND') return false;
+  try { return defaultUniversalOutput(src, input.identity.symbol, dst).toUpperCase() === output.identity.symbol.toUpperCase(); } catch { return false; }
 }
 /** Values the user asked to reuse ("the same network"), copied from the resolved step into fields the user left unstated. */
 function applyReuse(action: CopilotAction, from: Base, fields: readonly CopilotReuseField[]): { readonly action: CopilotAction; readonly carried: Set<CarriedField> } {
@@ -744,8 +786,10 @@ function actionFills(intent: CopilotIntentV2, missing: readonly string[], option
       }
       if (action.type === 'LIQUIDITY') {
         const pool = [en.poolOptions, pt.poolOptions].map(list => list.map(normalize).indexOf(normalize(label))).find(index => index >= 0);
-        if (pool !== undefined) return pool === 0 ? { protocol: 'UNISWAP_V3', network: 'BASE_SEPOLIA' } : pool === 2 ? { protocol: 'UNISWAP_V3', network: 'ETHEREUM_SEPOLIA' }
-          : { protocol: 'ORCA', network: 'SOLANA_DEVNET' };
+        // BUILD-FLOFI-UX-FIX-003: each button authors on the network it names (the public product's buttons name mainnets).
+        const mainnet = activeNetworkScope() === 'PUBLIC_MAINNET';
+        if (pool !== undefined) return pool === 0 ? { protocol: 'UNISWAP_V3', network: mainnet ? 'BASE' : 'BASE_SEPOLIA' }
+          : pool === 2 ? { protocol: 'UNISWAP_V3', network: mainnet ? 'ETHEREUM' : 'ETHEREUM_SEPOLIA' } : { protocol: 'ORCA', network: mainnet ? 'SOLANA' : 'SOLANA_DEVNET' };
       }
       if (networks.length === 1 && networks[0] && missing.includes('network')) return { network: networks[0] };
       const assetField = missing.filter(field => ['asset', 'inputAsset', 'outputAsset'].includes(field));
@@ -762,6 +806,16 @@ function bareAmount(text: string): string | null {
   const readings = match ? amountReadings(match[1]!) : [];
   return readings.length === 1 && /^(0|[1-9][0-9]*)(\.[0-9]+)?$/.test(readings[0]!) && readings[0]!.length <= COPILOT_LIMITS.maxValueLength ? readings[0]! : null;
 }
+/** The asset unit written after a bare amount ("1 USDC" → USDC), or null when none is written. */
+const amountUnit = (text: string): string | null => /^\s*\d+(?:[.,]\d+)*\s*(usdc|weth|eth|sol|usdt|devusdc)\s*[.!]?\s*$/i.exec(text)?.[1]?.toUpperCase() ?? null;
+/** The asset an open single action sends (bridge/transfer/lending asset, swap input), or null. */
+function sentAssetOf(intent: CopilotIntentV2): string | null {
+  if (intent.kind !== 'ACTION') return null;
+  const action = intent.action;
+  const sent = action.type === 'SWAP' ? action.inputAsset : action.type === 'LIQUIDITY' ? null : action.asset;
+  return sent && sent !== 'OTHER' ? sent : null;
+}
+const displayAsset = (asset: string) => /^[a-z]{2,6}$/.test(asset) ? asset.toUpperCase() : asset;
 /** A bare amount that answers Flofi's question for one pool token's maximum becomes that deposit of the request's liquidity step. */
 function patchDeposit(intent: CopilotIntentV2, asset: 'SOL' | 'devUSDC', maxAmount: string): CopilotIntentV2 {
   const add = (action: CopilotAction): CopilotAction => action.type !== 'LIQUIDITY' ? action
@@ -839,6 +893,9 @@ export function startTurn(current: CopilotConversation, raw: string, env: Copilo
     const filled = answerDraftField(draft.intent, draft.expected ?? [], picked);
     if (filled && !draft.options.some(o => normalize(o.label) === normalize(picked))) return { kind: 'LOCAL', ...withLearning(tallied(resolveIntent(filled, answeredDraft(state, filled, picked), env, null, draft.extras ?? {}), env), env, ['CLARIFICATION_ANSWERED']) };
     const option = draft.options.find(item => normalize(item.label) === normalize(picked));
+    // BUILD-FLOFI-UX-FIX-003: "1 USDC" never answers "How much ETH…?": an amount written in another asset than the one sent is asked again.
+    const unit = !option && draft.amountFill ? amountUnit(text) : null, sent = sentAssetOf(draft.intent);
+    if (unit && sent && unit !== sent.toUpperCase()) return { kind: 'LOCAL', ...question(withUser(state, text), m, m.amountUnitMismatch(unit, displayAsset(sent)), [], draft) };
     const amount = !option && (draft.amountFill || draft.depositFill) ? bareAmount(text) : null;
     if (option || amount) {
       if (contextChange(draft.snapshot, snapshotOf(env))) return { kind: 'LOCAL', ...failed(closeSegment(state), m, m.draftStale) };
@@ -905,12 +962,13 @@ function resolveIntent(intent: CopilotIntentV2, state: CopilotConversation, env:
     }
 
     // PR B: a short, contextual reason; the full capability list is only the answer to a CAPABILITIES question.
-    case 'UNSUPPORTED': return refused(state, m, safeCopilotProse(intent.reason) ?? m.cannotAuthor);
+    case 'UNSUPPORTED': return refused(state, m, publicText(safeCopilotProse(intent.reason)) ?? m.cannotAuthor);
     case 'GOAL': return resolveGoal(intent, state, env, extras);
     case 'POSITION': return resolvePosition(intent, state, env, extras);
     case 'CLARIFICATION_REQUIRED': {
-      const text = safeCopilotProse(intent.question) ?? m.stillNeeds(m.subject.request, intent.missing.filter(field => field !== 'target').map(field => m.field[field as keyof typeof m.field]));
-      return question(state, m, text, intent.options.flatMap(option => safeCopilotProse(option) ?? []),
+      const text = publicText(safeCopilotProse(intent.question)) ?? m.stillNeeds(m.subject.request, intent.missing.filter(field => field !== 'target').map(field => m.field[field as keyof typeof m.field]));
+      // BUILD-FLOFI-UX-FIX-003: an option the model wrote that names a test network is never offered in the public product.
+      return question(state, m, text, intent.options.flatMap(option => publicText(safeCopilotProse(option)) ?? []),
         { intent: state.draft?.intent ?? intent, expected: intent.missing.map(field => field === 'asset' && state.draft?.expected?.length === 1 ? state.draft.expected[0]! : field), options: [], amountFill: false, snapshot: snapshotOf(env), ...state.draft?.extras ? { extras: state.draft.extras } : {} });
     }
     case 'QUESTION': {
@@ -924,7 +982,7 @@ function resolveIntent(intent: CopilotIntentV2, state: CopilotConversation, env:
       // explanation (grounded by the server in the tool facts it read) is shown apart from FloFi's own answer, labelled as such.
       const answer = (intent.topic === 'CAPABILITIES' || intent.topic === 'NETWORKS' ? scopedCapabilities(state.segment.at(-1) ?? '', language) : null)
         ?? answerQuestion(intent.topic, step, env.facts, language);
-      const prose = intent.answer ? safeCopilotProse(intent.answer) : null;
+      const prose = intent.answer ? publicText(safeCopilotProse(intent.answer)) : null;
       const value = reply('ANSWER', answer.text, { notes: [...prose ? [intelligenceCopy(language).explanation(prose)] : [], ...answer.notes], topic: intent.topic });
       if (state.draft) return { reply: value, next: { ...state, segment: state.segment.slice(0, -1), transcript: bounded([...state.transcript, { role: 'assistant', text: m.answered(intent.topic) }]) } };
       return terminal(state, value, m.answered(intent.topic));
@@ -1096,7 +1154,7 @@ function resolveGoal(intent: Extract<CopilotIntentV2, { kind: 'GOAL' }>, state: 
   const carried = new Set<string>((extras.carried ?? []).map(String));
   const goal = groundedGoal(intent.goal, text, carried), grounded: Extract<CopilotIntentV2, { kind: 'GOAL' }> = { ...intent, goal };
   const plan = planGoal(plannerGoal(goal), activeNetworkScope());
-  const prose = intent.answer ? safeCopilotProse(intent.answer) : null, explained = prose ? [c.explanation(prose)] : [];
+  const prose = intent.answer ? publicText(safeCopilotProse(intent.answer)) : null, explained = prose ? [c.explanation(prose)] : [];
   switch (plan.kind) {
     case 'NEEDS': {
       const expected = [plan.field === 'cap' ? 'cap' : GOAL_DRAFT_FIELD[plan.field]] as DraftField[];
@@ -1257,8 +1315,10 @@ function author(intent: CopilotIntentV2, actions: readonly CopilotAction[], comp
   const lexicon = lexiconOf(state, env);
   const grounding: Grounding = { text: segmentText(state), carried, policy: { language, networkDefaults: false, catalog: true, ...env.agentRollout ? { agentRollout: env.agentRollout } : {} },
     latest: state.segment.at(-1) ?? '',
-    solana: { price: env.verified?.orcaPrice?.price ?? null, swap }, ...lexicon.length ? { lexicon } : {}, ...extras.planned ? { explicitAssets: false } : {} };
-  if (!composition && !extras.planned) actions = actions.map(a => groundExplicitAssets(a, grounding.latest ?? grounding.text, lexicon));
+    solana: { price: env.verified?.orcaPrice?.price ?? null, swap }, ...lexicon.length ? { lexicon } : {}, ...extras.planned ? { explicitAssets: false } : {},
+    // BUILD-FLOFI-UX-FIX-003: only a new single action reads "to 1 USDC" as an amount to receive; an edit's "to 4 USDC" is its new amount.
+    ...intent.kind === 'ACTION' && !composition ? { receiving: true } : {} };
+  if (!composition && !extras.planned) actions = actions.map(a => groundExplicitAssets(a, grounding.latest ?? grounding.text, lexicon, grounding.receiving === true));
   const draftIntent: CopilotIntentV2 = intent.kind === 'ACTION' ? { ...intent, action: actions[0]! } : intent.kind === 'COMPOSITION' ? { ...intent, actions } : intent;
   const planned = planCopilotActions(actions, composition, grounding, env.wallet);
   if (planned.kind !== 'PLAN') return stopped(planned, draftIntent, state, env, m, { ...extras, carried: [...carried], ...swap ? { swap } : {} });
@@ -1295,7 +1355,7 @@ function stopped(outcome: Exclude<CopilotOutcome, { kind: 'PROPOSAL' }>, intent:
   // Flofi's question for the other pool token's maximum (a position funded by a swap's output) is answered by a bare amount.
   const otherToken = outcome.deposit;
   // BUILD-CHAT-LEARNING-001: a glossary suggestion for a mainnet only puts that option first, with a note; the user still picks.
-  const suggested = withSuggestion(state, env, outcome.options, intent.language);
+  const suggested = withSuggestion(state, env, outcome.options.filter(option => publicText(option) !== null), intent.language);
   const draft: Draft = { intent, expected: outcome.missing, validated: validatedDraftFields(intent, segmentText(state)), options: actionFills(intent, outcome.missing, suggested.options), snapshot: snapshotOf(env), extras,
     amountFill: intent.kind === 'ACTION' && outcome.missing.includes('amount') && intent.action.type !== 'LIQUIDITY',
     ...otherToken && outcome.missing.includes('amount') ? { depositFill: otherToken } : {}, ...suggested.suggestion ? { suggestion: suggested.suggestion } : {} };
