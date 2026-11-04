@@ -3,7 +3,7 @@ import { test, expect } from './fixtures';
 import { installSupplyWallet, setSupplyWalletChain } from './supply-fixtures';
 import { configureCanvasAction } from './composer-authoring-fixtures';
 import type { Page } from '@playwright/test';
-import { openBuilder } from './build-entry-navigation';
+import { openBuilder, useToolbarRail } from './build-entry-navigation';
 
 // BUILD-RH-002: the Stocks amount names the asset it spends (USDG on Robinhood Chain): its field is "Stocks amount (USDG)".
 const cards = (page: Page) => page.locator('.build-flow-surface .composer-card');
@@ -18,7 +18,7 @@ async function workflowJson(page: Page) {
 
 test('floating Stocks action creates a Supply-style editable card without connecting a wallet', async ({ page }) => {
   await openBuilder(page);
-  await page.getByRole('button', { name: 'Undock toolbar', exact: true }).click();
+  await useToolbarRail(page);
   const toolbox = page.locator('.floating-toolbox');
   const stocks = toolbox.getByRole('button', { name: 'Stocks', exact: true });
   await expect(stocks).toHaveAttribute('title', 'Stocks');

@@ -1933,3 +1933,24 @@ button.wallet-option .wallet-option-status{border-color:var(--accent-line);backg
 .dashboard-records-counts li{flex:1 1 200px;padding:14px 16px;border:1px solid var(--line);border-radius:10px;color:var(--muted);font-size:13px}
 .dashboard-records-counts strong{display:block;font-size:22px;color:var(--ink);font-variant-numeric:tabular-nums}
 @media(max-width:480px){.workflows-section,.dashboard-records-summary{padding:18px}}
+/* BUILD-FLOFI-BUILDER-UX-002: compact Build step cards (icon tile, one-line flow, summary rows) and quiet links. Presentation only: every class,
+   control, handle and editing surface stays; the Simulate inspection card keeps its own rules. Colours come from the existing tokens (both themes). */
+.build-flow-surface .composer-card{position:relative;width:236px;gap:6px;padding:12px 14px;border:1px solid var(--line);border-radius:14px;background:var(--paper);box-shadow:0 1px 2px rgba(4,27,61,.04),0 6px 18px rgba(4,27,61,.06)}
+.build-flow-surface .react-flow__node:hover .composer-card:not(.active){border-color:var(--accent-border)}
+.build-flow-surface .composer-card.active{border-color:var(--blue);box-shadow:0 0 0 1px var(--blue),0 6px 18px rgba(4,27,61,.08)}
+.build-flow-surface .composer-card[data-state="invalid"],.build-flow-surface .react-flow__node:hover .composer-card[data-state="invalid"]{border-color:var(--red)}
+.build-flow-surface .composer-card .composer-action-title{gap:8px;margin-bottom:0;font-size:15px;line-height:1.25}
+.build-flow-surface .composer-action-title svg{order:-1;box-sizing:content-box;width:15px;height:15px;padding:5px;border-radius:8px;background:var(--blue-soft);color:var(--blue)}
+.build-flow-surface .composer-card-state,.build-flow-surface .composer-warning{border-radius:999px;padding:2px 8px;font-size:10px;font-weight:600}
+.build-flow-surface .composer-operation{display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow:hidden;font-size:12px;font-weight:600;line-height:1.35;color:var(--ink);overflow-wrap:anywhere}
+.build-flow-surface .composer-amount-box{min-height:54px;padding:7px 10px;border-radius:10px}
+.build-flow-surface .composer-params{display:grid;gap:3px;margin:2px 0 0;padding:0}
+.build-flow-surface .composer-param{display:flex;align-items:baseline;justify-content:space-between;gap:8px;font-size:11px;line-height:1.35}
+.build-flow-surface .composer-param dt{color:var(--muted);font-weight:400}
+.build-flow-surface .composer-param dd{margin:0;color:var(--ink);font-size:11px;font-weight:500;overflow-wrap:normal;white-space:nowrap}
+.build-flow-surface .composer-selected{padding-top:8px}
+/* Handles stay small and quiet until the card is hovered or selected; their larger hit area (above) is unchanged, so linking stays easy. */
+.build-flow-surface .composer-card .react-flow__handle{width:9px;height:9px;border-width:2px;background:var(--edge-line)}
+/* :not(.connectingto) keeps BUILD-FIX-UX-001's drop-target cue: an input the workflow refuses stays red while a link is drawn onto it. */
+.build-flow-surface .react-flow__node:hover .composer-card .react-flow__handle:not(.connectingto),.build-flow-surface .composer-card.active .react-flow__handle:not(.connectingto),.build-flow-surface .react-flow:has(.react-flow__connection-path) .composer-card .react-flow__handle:not(.connectingto){background:var(--blue)}
+@media(prefers-reduced-motion:no-preference){.build-flow-surface .composer-card{transition:border-color 140ms ease,box-shadow 140ms ease}}

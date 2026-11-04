@@ -9,6 +9,8 @@ import { createCrossChainLiquidityWorkflow } from '../domain/cross-chain-liquidi
 import { composerActions, composerConnections, composerSummary } from '../domain/composer-presentation';
 import { WorkflowCanvas } from './workflow-canvas';
 import { SimulateWorkflowCanvas } from './simulate-workflow-canvas';
+/** BUILD-FLOFI-BUILDER-UX-002: a card title renders its step number in a circle; its text is still "N. Action". */
+const titled = (html: string) => html.replace(/<span class="composer-step-number">(\d+)<\/span><span class="composer-step-dot">\. <\/span><span class="composer-action-name">([^<]+)<\/span>/g, '$1. $2');
 
 const fixture = vi.hoisted(() => ({ store: null as unknown as ReturnType<typeof import('../state/workflow-store').useWorkflow>, graph: {} as Record<string, unknown> }));
 vi.mock('../state/workflow-store', () => ({ useWorkflow: () => fixture.store }));
@@ -46,12 +48,12 @@ describe('UX-004A read-only product workflow in Simulate', () => {
     const node = composerActions(fixture.store.state.workflow)[0]!;
     const summary = composerSummary(fixture.store.state.workflow, node, fixture.store.context);
     const html = render();
-    expect(html).toContain('flow-card composer-card'); expect(html).toContain(`1. ${summary.action}`);
+    expect(html).toContain('flow-card composer-card'); expect(titled(html)).toContain(`1. ${summary.action}`);
     expect(html).toContain('composer-action-title');
     for (const value of [summary.action, summary.provider.replace(/Cross-chain Router/g, 'Router'), summary.chain]) expect(html).toContain(value);
     const amounts = summary.liquidityValues?.map(value => value.amount) ?? [summary.amount.split(' ')[0]!];
     for (const amount of amounts) expect(html).toContain(`>${amount}<`);
-    expect(html).not.toMatch(/<form|<input|Select to edit|Editing in Selected Action|Advanced Settings|<button|composer-fiat-value|composer-card-state|Expected |Minimum |MOCK|LOCAL|SYNTHETIC|Confirmed|Authorized|Success|health factor/i);
+    expect(html).not.toMatch(/<form|<input|Select to edit|Editing in Selected Action|Advanced Settings|<button|composer-fiat-value|composer-card-state|composer-status|Expected |Minimum |MOCK|LOCAL|SYNTHETIC|Confirmed|Authorized|Success|health factor/i);
   });
 
   it('preserves lending order, linkage and current authored amounts without inferred simulation results', () => {

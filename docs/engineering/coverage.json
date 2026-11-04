@@ -861,6 +861,18 @@
     "app.components.dashboard.portfolio-widget": {
       "path": "apps/reference-dapp/src/components/dashboard/portfolio-widget.test.tsx",
       "stage": "unit"
+    },
+    "app.e2e.editor-redesign": {
+      "path": "apps/reference-dapp/e2e/editor-redesign.spec.ts",
+      "stage": "browser"
+    },
+    "app.domain.editor-overview": {
+      "path": "apps/reference-dapp/src/domain/editor-overview.test.ts",
+      "stage": "unit"
+    },
+    "app.components.editor-stepper": {
+      "path": "apps/reference-dapp/src/components/editor-stepper.test.tsx",
+      "stage": "unit"
     }
   },
   "requiredUnitSuites": [
@@ -1505,7 +1517,8 @@
         "apps/reference-dapp/src/app/privacy/page.tsx",
         "apps/reference-dapp/src/app/privacy/privacy.module.css",
         "apps/reference-dapp/src/app/how-it-works/page.tsx",
-        "apps/reference-dapp/src/app/developers/page.tsx"
+        "apps/reference-dapp/src/app/developers/page.tsx",
+        "apps/reference-dapp/src/app/editor.css"
       ],
       "suites": [
         "app.e2e.canvas-keyboard",
@@ -1513,7 +1526,8 @@
         "app.e2e.wallet-selector",
         "app.i18n.catalog",
         "app.i18n.locale",
-        "app.e2e.site"
+        "app.e2e.site",
+        "app.e2e.editor-redesign"
       ],
       "gaps": [
         "Browser profiles cover selected journeys; full accessibility audit, device matrix and language completeness remain acceptance gaps."
@@ -2520,7 +2534,10 @@
         "apps/reference-dapp/src/components/site/site-language.ts",
         "apps/reference-dapp/src/components/site/site-preferences.tsx",
         "apps/reference-dapp/src/components/site/site-shell.tsx",
-        "apps/reference-dapp/src/components/site/site.module.css"
+        "apps/reference-dapp/src/components/site/site.module.css",
+        "apps/reference-dapp/src/components/editor-overview-panel.tsx",
+        "apps/reference-dapp/src/components/canvas-edge-style.ts",
+        "apps/reference-dapp/src/components/editor-stepper.tsx"
       ],
       "suites": [
         "app.components.canvas-panel-reveal",
@@ -2532,7 +2549,10 @@
         "app.i18n.catalog",
         "app.i18n.locale",
         "app.components.dashboard.portfolio-widget",
-        "app.e2e.site"
+        "app.e2e.site",
+        "app.components.editor-stepper",
+        "app.domain.editor-overview",
+        "app.e2e.editor-redesign"
       ],
       "gaps": [
         "Browser profiles cover selected journeys; full accessibility audit, device matrix and language completeness remain acceptance gaps."
@@ -3359,6 +3379,8 @@
         "apps/reference-dapp/src/domain/build009-run.ts",
         "apps/reference-dapp/src/domain/canvas-action-setup.ts",
         "apps/reference-dapp/src/domain/canvas-authoring.ts",
+        "apps/reference-dapp/src/domain/canvas-card-summary.ts",
+        "apps/reference-dapp/src/domain/editor-overview.ts",
         "apps/reference-dapp/src/domain/canvas-connect.ts",
         "apps/reference-dapp/src/domain/canvas-keyboard.ts",
         "apps/reference-dapp/src/domain/canvas-layout.ts",
@@ -3412,7 +3434,8 @@
         "workflow-contracts.revision-state",
         "app.domain.canonical-execution-status",
         "app.domain.observation-schedule",
-        "app.domain.wallet-portfolio"
+        "app.domain.wallet-portfolio",
+        "app.domain.editor-overview"
       ],
       "gaps": [
         "Mapped suites are representative boundary tests, not exhaustive path or public execution coverage.",
@@ -3514,7 +3537,8 @@
         "apps/reference-dapp/src/i18n/pt-workflow-runs.ts",
         "apps/reference-dapp/src/i18n/pt.ts",
         "apps/reference-dapp/src/i18n/pt-chat-dashboard.ts",
-        "apps/reference-dapp/src/i18n/pt-portfolio.ts"
+        "apps/reference-dapp/src/i18n/pt-portfolio.ts",
+        "apps/reference-dapp/src/i18n/pt-builder-canvas.ts"
       ],
       "suites": [
         "app.e2e.canvas-keyboard",

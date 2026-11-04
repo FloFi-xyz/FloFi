@@ -17,6 +17,8 @@ import { SessionGuard } from '../../components/account/session-guard';
 import { learningConfig, sessionAdaptation } from '../../learning/config';
 import '@xyflow/react/dist/style.css';
 import '../globals.css';
+// BUILD-FLOFI-BUILDER-UX-002: the Editor (stepper, workflow header, rail, cards, FloFi summary, footer), after the shared product styles.
+import '../editor.css';
 
 /**
  * One persistent workspace for /app, its deep links, /approve and /connections.
