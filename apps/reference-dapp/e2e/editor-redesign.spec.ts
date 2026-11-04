@@ -57,6 +57,11 @@ test('header, cards, FloFi summary and footer state only the real workflow; Show
   await expect(summary.getByRole('listitem')).toHaveCount(2);
   await expect(summary.locator('.editor-overview-attention')).toContainText('Step 2 needs attention');
   await expect(summary.locator('.editor-overview-attention')).toContainText('Check this step’s slippage limit.');
+  // The pill shares the card foot with Settings and never covers it (once laid over it, CI's font metrics hid the control's centre).
+  for (const node of await page.locator('.build-flow-surface .react-flow__node').all()) {
+    const pill = (await node.locator('.composer-status').boundingBox())!, settings = (await node.getByRole('button', { name: 'Action settings', exact: true }).boundingBox())!;
+    expect(pill.x >= settings.x + settings.width || pill.x + pill.width <= settings.x || pill.y >= settings.y + settings.height || pill.y + pill.height <= settings.y).toBe(true);
+  }
   await expect(footer.locator('.summary-notice')).toContainText('1 step needs attention');
   // Show step selects that card and moves focus to it; nothing in the workflow changes.
   const before = await readWorkflowIr(page);

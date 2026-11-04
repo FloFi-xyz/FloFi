@@ -24,8 +24,11 @@
 @media(min-width:801px){.main.build-workspace{padding-top:14px}}
 .main.workflow-workspace.build-workspace,.main.workflow-workspace.build-workspace[data-workspace-toolbox]{--workspace-panel-width:320px;--workspace-gap:16px;--workspace-radius:20px;--workspace-header-height:auto}
 @media(min-width:801px){
-  .main.workflow-workspace.build-workspace,.main.workflow-workspace.build-workspace[data-workspace-toolbox]{--workspace-height:clamp(560px,calc(100svh - 330px),980px)}
+  .main.workflow-workspace.build-workspace,.main.workflow-workspace.build-workspace[data-workspace-toolbox]{--workspace-height:clamp(560px,calc(100svh - 300px),980px)}
   .main.workflow-workspace.build-workspace:has(.lending-canvas){--workspace-height:820px}
+  /* The rail (now the desktop default) used a fixed 760 px Canvas; it follows the window too, so the Canvas ends above the sticky footer. */
+  .main.workflow-workspace.build-workspace .build-grid:has(.floating-toolbox)>.canvas:not(.lending-canvas),
+  .main.workflow-workspace.build-workspace .build-grid:has(.floating-toolbox)>.copilot{height:var(--workspace-height)}
 }
 .build-workspace .canvas{border-color:var(--fx-line);border-radius:20px;box-shadow:0 1px 2px var(--fx-shadow)}
 .build-workspace .canvas-foot{padding:8px 16px;font-size:11px;color:var(--fx-muted)}
@@ -82,7 +85,9 @@
 .composer-step-dot{font-size:0;letter-spacing:0}
 .composer-action-name{min-width:0;color:var(--fx-ink);overflow-wrap:anywhere}
 .build-flow-surface .composer-action-title svg{order:0;box-sizing:border-box;flex:none;width:15px;height:15px;padding:0;border-radius:0;background:transparent;color:var(--fx-muted)}
-.build-flow-surface .composer-card>.composer-status{position:absolute;right:14px;bottom:13px}
+/* The status pill shares the card foot with Settings (never laid over it, so no part of the control is covered). */
+.build-flow-surface .composer-foot{display:flex;align-items:center;gap:8px;margin-top:auto;padding-top:6px;border-top:1px solid var(--fx-line)}
+.build-flow-surface .composer-foot>.composer-selected{flex:1 1 auto;width:auto;min-width:0;margin-top:0;padding-top:0;border-top:0}
 .composer-status{display:inline-flex;align-items:center;gap:5px;flex:none;height:22px;padding:0 8px;border:1px solid var(--fx-line);border-radius:999px;background:var(--fx-soft);color:var(--fx-muted);font-size:11px;font-weight:500;line-height:1;white-space:nowrap}
 .composer-status-dot{width:6px;height:6px;border-radius:50%;background:currentColor}
 .composer-status[data-card-status="configured"]{border-color:color-mix(in srgb,var(--fx-blue) 28%,var(--fx-line));background:color-mix(in srgb,var(--fx-blue) 6%,var(--fx-paper));color:var(--fx-blue)}
