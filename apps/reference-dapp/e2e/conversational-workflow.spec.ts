@@ -256,9 +256,10 @@ for (const viewport of [{ width: 1440, height: 1000 }, { width: 390, height: 844
   await expect(flofi(page)).toContainText('Nada foi assinado nem enviado.');
   expect(owner.requested()).toBe(0);
   // The chat stays usable on every stage, and the layout never scrolls sideways.
-  // BUILD-FLOFI-CHAT-EDITOR-UX-001: Simulate is the Editor's simulation section, opened from the Editor's footer ("Ver simulação").
+  // BUILD-FLOFI-CHAT-EDITOR-UX-001: Simulate is the Editor's simulation section. BUILD-FLOFI-BUILDER-UX-002: it opens from the Editor's
+  // Criar → Simular → Executar stepper, which replaced the footer's section buttons with the same target.
   await page.locator('nav.tabs button', { hasText: 'Editor' }).click();
-  await page.locator('footer.summary-bar button', { hasText: 'Ver simulação' }).click();
+  await page.getByRole('navigation', { name: 'Etapas do editor' }).getByRole('button', { name: 'Simular', exact: true }).click();
   await expect(page.locator('.stage-with-chat #mock-prompt')).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(0);
   networkGuard.assertClean();
