@@ -104,6 +104,7 @@ test.describe('BUILD-AUTOMATION-002 delegated execution (MOCKED loopback chains,
     // 5. One workflow across both domains, in "Automatic within limits"; FloFi resolves every step's Credential before creating anything.
     await page.goto('/app/automations');
     const workspace = page.getByRole('region', { name: 'Automations', exact: true });
+    await workspace.getByRole('button', { name: /Recurring buy/ }).click();
     await workspace.getByRole('radio', { name: 'Automatic within limits', exact: true }).check();
     const form = workspace.getByRole('form', { name: 'Create an automatic workflow', exact: true });
     await form.getByRole('textbox', { name: 'Name', exact: true }).fill('Weekly cross-chain');

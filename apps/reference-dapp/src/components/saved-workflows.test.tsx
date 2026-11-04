@@ -21,7 +21,7 @@ describe('Your workflows secondary workspace presentation', () => {
     const savedSection = html.slice(html.indexOf('workflows-saved'), html.indexOf('</details>'));
     expect(savedSection).not.toContain('My saved name'); expect(html).toContain('Workflows you executed are listed with their records below.');
     // It stays reopenable (and can be archived) from the executed workflows of the library, once.
-    expect(html).toContain('Executed workflows in your library'); expect(html.match(/My saved name/g)).toHaveLength(1);
+    expect(html).toContain('Executed workflows in your library'); expect(html.match(/<span>My saved name<\/span>/g)).toHaveLength(1);
     for (const value of ['RECONCILED', 'latest-run', 'View run', 'Evidence available']) expect(html).not.toContain(value);
   });
   it('keeps an executed-only identity out of Saved workflows without inventing a saved name', () => {
@@ -43,6 +43,16 @@ describe('Your workflows secondary workspace presentation', () => {
     const workspace = renderToStaticMarkup(<LocaleProvider initialLanguage={language}><SecondaryProductWorkspace workspace="workflows" workflows={{ list: { items: [{ ...row, name: 'Save workflow' }], hasMore: false }, busy: false, error: null, open: vi.fn(), refresh: vi.fn() }}/></LocaleProvider>);
     expect(workspace).toContain(`<h1>${label}</h1>`); expect(workspace).toContain('<span>Save workflow</span>'); expect(workspace).not.toContain('navigation-drawer');
     expect(secondaryWorkspaceRoute('/app/workflows/')?.id).toBe('workflows');
+  });
+  it('offers a shared refresh control and keeps saved ownership actions in a collapsed menu', () => {
+    const html = renderToStaticMarkup(<YourWorkflows list={{ items: [row], hasMore: false }} open={vi.fn()} refresh={vi.fn()} changeHistory={vi.fn()}/>);
+    expect(html).toContain('aria-label="Refresh workflows"');
+    expect(html).toContain('aria-label="More workflow actions"');
+    expect(html).toMatch(/role="group"[^>]*hidden=""/);
+    expect(html).toContain('aria-label="Archive workflow"'); expect(html).toContain('aria-label="Delete workflow"');
+    expect(html).toContain('Delete permanently?');
+    const unavailable = renderToStaticMarkup(<YourWorkflows list={{ items: [row], hasMore: false }} error="WALLET_SESSION_REQUIRED"/>);
+    expect(unavailable).not.toContain('My saved name');
   });
   it('puts loading, retry and empty states in the workspace', () => {
     expect(render({ items: [], hasMore: false })).toContain('Build a workflow and save it from the Canvas; it will appear here.');

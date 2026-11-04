@@ -8,13 +8,39 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { WorkflowOwner } from '../domain/saved-workflow';
 import { automationAvailability, automationOperation, remoteApproval, remoteAutomationApproval } from './automation-operation';
+import { historyPrincipals } from './history-principals';
+import { currentWalletPrincipals } from './session-principal';
+
+vi.mock('./history-principals', () => ({ historyPrincipals: vi.fn() }));
+vi.mock('./session-principal', () => ({ currentWalletPrincipals: vi.fn() }));
 
 const evm: WorkflowOwner = { namespace: 'eip155', address: '0x' + 'a'.repeat(40) };
 const solana: WorkflowOwner = { namespace: 'solana', address: 'So11111111111111111111111111111111111111112' };
 const REMOTE = { API_BASE_URL: 'https://api.flofi.example/', API_AUTH_TOKEN: 'api-token' };
-const reply = (body: unknown, status = 200) => vi.fn().mockResolvedValue(Response.json(body, { status }));
+const reply = (body: unknown, status = 200) => vi.fn().mockImplementation(async () => Response.json(body, { status }));
 
 describe('BUILD-AUTOMATION-001 Automations BFF on the remote runtime', () => {
+  it.each([evm, solana])('reuses a verified account wallet for management without promoting it to approval authority %j', async owner => {
+    const transport = reply({ ok: true, value: { rules: [] } });
+    vi.mocked(historyPrincipals).mockResolvedValue([owner]);
+    vi.mocked(currentWalletPrincipals).mockResolvedValue([]);
+    expect(await automationOperation('overview', [], owner, { env: REMOTE, transport })).toMatchObject({ ok: true });
+    expect(await automationOperation('create', [{ name: 'Draft' }], owner, { env: REMOTE, transport })).toMatchObject({ ok: true });
+    expect((transport.mock.calls[0] as [URL, RequestInit])[1].headers).toHaveProperty('x-flofi-workflow-owner', `${owner.namespace}:${owner.address}`);
+    transport.mockClear();
+    await remoteApproval('claim', ['flofi_auhs_' + 'A'.repeat(43), false], { env: REMOTE, transport });
+    expect((transport.mock.calls[0] as [URL, RequestInit])[1].headers).not.toHaveProperty('x-flofi-wallet-principals');
+  });
+
+  it('rechecks the verified owner on every operation, including revoked sessions, removed wallets and account switches', async () => {
+    const transport = reply({ ok: true, value: { rules: [] } });
+    vi.mocked(historyPrincipals).mockResolvedValueOnce([evm]).mockResolvedValueOnce([]).mockResolvedValueOnce([solana]);
+    expect(await automationOperation('overview', [], evm, { env: REMOTE, transport })).toMatchObject({ ok: true });
+    expect(await automationOperation('create', [{}], evm, { env: REMOTE, transport })).toEqual({ ok: false, code: 'WALLET_SESSION_REQUIRED' });
+    expect(await automationOperation('overview', [], evm, { env: REMOTE, transport })).toEqual({ ok: false, code: 'WALLET_SESSION_REQUIRED' });
+    expect(transport).toHaveBeenCalledOnce();
+  });
+
   it.each([evm, solana])('never forwards an unproven owner %j (no transport call)', async owner => {
     const transport = reply({ ok: true, value: null });
     expect(await automationOperation('overview', [], owner, { principals: async () => [], env: REMOTE, transport })).toEqual({ ok: false, code: 'WALLET_SESSION_REQUIRED' });

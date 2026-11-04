@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 import type { Page } from '@playwright/test';
 
 // Exercise the actual Dashboard components with explicit read-only browser fixtures.
-let bundle: string;
+let bundle: string, bundleCss: string;
 const errors = new WeakMap<Page, string[]>();
 test.beforeAll(async () => {
   const compiled = '../node_modules/next/dist/compiled/';
@@ -17,7 +17,9 @@ test.beforeAll(async () => {
     define: { 'process.env.NODE_ENV': '"production"', __dirname: '"/"', global: 'globalThis' },
     build: { write: false, minify: false, rolldownOptions: { transform: { inject: { Buffer: ['buffer', 'Buffer'], process: 'process' } } },
       lib: { entry: fileURLToPath(new URL('../src/test-utils/dashboard-acceptance-harness.tsx', import.meta.url)), name: 'FloFiDashboardAcceptance', formats: ['iife'] } } });
-  const entry = (Array.isArray(result) ? result : [result]).flatMap(output => 'output' in output ? output.output : []).find(output => output.type === 'chunk' && output.isEntry);
+  const outputs = (Array.isArray(result) ? result : [result]).flatMap(output => 'output' in output ? output.output : []);
+  const entry = outputs.find(output => output.type === 'chunk' && output.isEntry);
+  bundleCss = outputs.filter(output => output.type === 'asset' && output.fileName.endsWith('.css')).map(output => output.type === 'asset' ? String(output.source) : '').join('\n');
   if (!entry || entry.type !== 'chunk') throw new Error('Dashboard acceptance bundle missing');
   bundle = entry.code;
 });
@@ -26,10 +28,13 @@ test.beforeEach(async ({ page }) => {
   page.on('pageerror', error => found.push(error.message));
   await page.goto('/app/dashboard');
   await expect(page.getByRole('heading', { name: 'Your execution workspace' })).toBeVisible();
-  const styles = await page.locator('head link[rel="stylesheet"]').evaluateAll(links => links.map(link => link.outerHTML).join(''));
+  await expect.poll(() => page.locator('.main').evaluate(element => getComputedStyle(element).paddingLeft)).not.toBe('0px');
+  const fontClasses = await page.locator('html').getAttribute('class');
+  const styles = await page.locator('link[rel="stylesheet"]').evaluateAll(links => links.map(link => link.outerHTML).join(''));
   await page.route('**/__ux006b-acceptance.js', route => route.fulfill({ contentType: 'application/javascript', body: bundle }));
-  await page.route('**/__ux006b-acceptance', route => route.fulfill({ contentType: 'text/html', body: `<!doctype html><html data-theme="light"><head><meta charset="utf-8">${styles}</head><body><main class="main"><div id="acceptance-root"></div></main><script src="/__ux006b-acceptance.js"></script></body></html>` }));
+  await page.route('**/__ux006b-acceptance', route => route.fulfill({ contentType: 'text/html', body: `<!doctype html><html class="${fontClasses ?? ''}" data-theme="light"><head><meta charset="utf-8">${styles}</head><body><div class="app-shell"><main class="main"><div id="acceptance-root"></div></main></div><script src="/__ux006b-acceptance.js"></script></body></html>` }));
   await page.goto('/__ux006b-acceptance');
+  await page.addStyleTag({ content: bundleCss });
   await page.evaluate(() => (window as unknown as { FloFiDashboardAcceptance: { mount(element: HTMLElement): void } }).FloFiDashboardAcceptance.mount(document.getElementById('acceptance-root')!));
   await expect(page.locator('.dashboard-current')).toBeVisible();
 });
@@ -37,7 +42,11 @@ test.afterEach(({ page }) => { expect(errors.get(page)).toEqual([]); });
 
 test('current execution and saved cards retain status, evidence and distinct review actions', async ({ page }) => {
   const current = page.getByRole('region', { name: 'Current execution', exact: true });
-  await expect(current).toContainText('Unresolved'); await expect(current).toContainText('0 of 1 step confirmed');
+  await expect(current).toContainText('Unresolved');
+  await expect(current.locator('.dashboard-run-message')).toBeHidden();
+  await current.getByRole('button', { name: /^Show details for / }).click();
+  await expect(current.locator('.dashboard-run-message')).toBeVisible();
+  await expect(current).toContainText('0 of 1 step confirmed');
   // BUILD-FLOFI-CHAT-E2E-DASHBOARD-UX-001: the Dashboard summarizes the records; the history itself is in Your workflows.
   const summary = page.getByRole('region', { name: 'Workflow records', exact: true });
   await expect(summary).toContainText('3 records need attention'); await expect(summary).toContainText('1 executed record');
@@ -54,6 +63,7 @@ test('current execution and saved cards retain status, evidence and distinct rev
   const history = page.getByRole('region', { name: 'Executed and history', exact: true }), attention = page.getByRole('region', { name: 'Needs attention', exact: true });
   await expect(history.locator('.dashboard-run-list>li')).toHaveCount(1);
   await expect(attention.locator('.dashboard-run-list>li')).toHaveCount(3);
+  for (const row of await attention.locator('.dashboard-run-card').all()) await row.getByRole('button', { name: /^Show details for / }).click();
   await expect(attention).toContainText('Execution status unresolved');
   await expect(attention).toContainText('Review the incomplete action');
   await expect(page.locator('.dashboard-run-list>.dashboard-run-card')).toHaveCount(0);
@@ -74,8 +84,14 @@ test('loading, verification and unavailable history preserve the current executi
   await page.evaluate(() => window.flofiDashboardAcceptance.view('records'));
   for (const mode of ['loading', 'verify', 'unavailable', 'not-configured', 'current-only'] as const) {
     await page.evaluate(value => window.flofiDashboardAcceptance.mode(value), mode);
+    const disclosure = page.locator('.workflows-attention').getByRole('button', { name: /^Show details for / });
+    if (await disclosure.count()) await disclosure.click();
+    await expect(page.locator('.workflows-attention .dashboard-run-message')).toBeVisible();
     await expect(page.locator('.workflows-attention')).toContainText('Execution status unresolved');
-    await expect(page.getByRole('heading', { name: 'No workflows executed yet', exact: true })).toHaveCount(0);
+    if (mode === 'current-only') {
+      await expect(page.getByRole('heading', { name: 'No workflows executed yet', exact: true })).toBeVisible();
+      await expect(page.locator('.dashboard-history-empty')).toContainText('Records that need attention are listed below.');
+    } else await expect(page.getByRole('heading', { name: 'No workflows executed yet', exact: true })).toHaveCount(0);
   }
   await page.evaluate(() => window.flofiDashboardAcceptance.view('dashboard'));
   await page.evaluate(() => window.flofiDashboardAcceptance.mode('verify'));

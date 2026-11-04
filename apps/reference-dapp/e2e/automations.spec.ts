@@ -44,17 +44,32 @@ test.describe('BUILD-AUTOMATION-001 Automations (fixture prices, test clock, loo
     const workspace = await proveOwner(page, owner.address);
 
     // 1–3. Create the weekly DCA; it is ACTIVE and asks before every execution.
+    await expect(form(page)).toHaveCount(0);
+    await workspace.screenshot({ path: '/tmp/flofi-ux004-automations-landing.png' });
+    await workspace.getByRole('button', { name: /Recurring buy/ }).click();
     const f = form(page);
+    await expect(f.getByRole('heading', { name: 'What do you want to do?', exact: true })).toBeVisible();
+    await expect(f.getByRole('button', { name: 'Create automation', exact: true })).toHaveCount(0);
     await f.getByRole('textbox', { name: 'Name', exact: true }).fill('Weekly ETH');
+    await f.getByLabel('Network', { exact: true }).selectOption('base-sepolia');
+    await f.getByRole('textbox', { name: 'Amount (USDC)', exact: true }).fill('50');
+    await f.getByRole('button', { name: 'Continue', exact: true }).click();
+    await expect(f.getByRole('heading', { name: 'When should it happen?', exact: true })).toBeVisible();
     await f.getByLabel('Day', { exact: true }).selectOption('1');
     await f.getByLabel('Time', { exact: true }).fill('09:00');
     await f.getByRole('combobox', { name: 'Time zone', exact: true }).fill('Europe/Lisbon');
-    await f.getByLabel('Network', { exact: true }).selectOption('base-sepolia');
-    await f.getByRole('textbox', { name: 'Amount (USDC)', exact: true }).fill('50');
+    await f.getByRole('button', { name: 'Continue', exact: true }).click();
+    await expect(f.getByRole('heading', { name: 'Review and authorize', exact: true })).toBeVisible();
+    await expect(f).toContainText('Every Monday at 09:00 (Europe/Lisbon)');
+    await expect(f).toContainText('Prepare 50 USDC → WETH on Base Sepolia');
+    await expect(f).toContainText('Max per execution50');
+    await expect(f).toContainText('Slippage (bps)100');
     await expect(f).toContainText('Execution: Ask me before every execution');
+    await f.screenshot({ path: '/tmp/flofi-ux004-automations-review.png' });
     await f.getByRole('button', { name: 'Create automation', exact: true }).click();
     const card = workspace.getByRole('article', { name: 'Automation Weekly ETH', exact: true });
     await expect(card).toContainText('Active');
+    await card.getByText('Details and management', { exact: true }).click();
     await expect(card).toContainText('Every Monday at 09:00 (Europe/Lisbon)');
     await expect(card).toContainText('Prepare 50 USDC → WETH on Base Sepolia');
     await expect(card).toContainText('Max 50 per execution');
@@ -150,21 +165,29 @@ test.describe('BUILD-AUTOMATION-001 Automations (fixture prices, test clock, loo
     const owner = createTestWallet();
     await installJourneyWallet(page, [owner], { chain: '0x14a34' });
     const workspace = await proveOwner(page, owner.address);
+    await workspace.getByRole('button', { name: /Recurring buy/ }).click();
     const f = form(page);
     // BTC can be watched, but FloFi has no BTC swap route: nothing is substituted and nothing can be created.
     await f.getByLabel('Asset', { exact: true }).selectOption('BTC');
     await expect(f).toContainText('FloFi has no BTC swap route yet');
-    await expect(f.getByRole('button', { name: 'Create automation', exact: true })).toBeDisabled();
-    await f.getByLabel('Asset', { exact: true }).selectOption('ETH');
-
-    await f.getByRole('radio', { name: 'Price trigger', exact: true }).check();
+    await expect(f.getByRole('button', { name: 'Continue', exact: true })).toBeDisabled();
+    await expect(f.getByRole('button', { name: 'Create automation', exact: true })).toHaveCount(0);
+    await workspace.getByRole('button', { name: 'Close', exact: true }).click();
+    await workspace.getByRole('button', { name: /Price trigger/ }).click();
     await f.getByRole('textbox', { name: 'Name', exact: true }).fill('ETH dip');
+    await f.getByLabel('Watched asset', { exact: true }).selectOption('ETH');
+    await f.getByRole('textbox', { name: 'Amount (USDC)', exact: true }).fill('100');
+    await f.getByRole('button', { name: 'Continue', exact: true }).click();
     await f.getByLabel('Condition', { exact: true }).selectOption('PRICE_BELOW');
     await f.getByRole('textbox', { name: 'Threshold (USD)', exact: true }).fill('3000');
     await f.getByRole('combobox', { name: 'Time zone', exact: true }).fill('Europe/Lisbon');
-    await f.getByRole('textbox', { name: 'Amount (USDC)', exact: true }).fill('100');
+    await f.getByRole('button', { name: 'Continue', exact: true }).click();
+    await expect(f.getByRole('heading', { name: 'Review and authorize', exact: true })).toBeVisible();
+    await expect(f).toContainText('Price falls below $3000');
+    await expect(f).toContainText('Prepare 100 USDC → WETH on Base Sepolia');
     await f.getByRole('button', { name: 'Create automation', exact: true }).click();
     const card = workspace.getByRole('article', { name: 'Automation ETH dip', exact: true });
+    await card.getByText('Details and management', { exact: true }).click();
     await expect(card).toContainText('If ETH falls below $3,000 · checked every 15 min');
     const rule = await ruleOf(owner.address, 'ETH dip');
 
@@ -194,4 +217,28 @@ test.describe('BUILD-AUTOMATION-001 Automations (fixture prices, test clock, loo
     expect((await walletRequests(page)).filter(m => SIGNING.includes(m))).toEqual([]);
     networkGuard.assertClean();
   });
+
+  test('a proven wallet reuses its session on navigation and reload; Create with FloFi Chat opens the primary chat entry without signing', async ({ page, networkGuard }) => {
+    const owner = createTestWallet();
+    await installJourneyWallet(page, [owner], { chain: '0x14a34' });
+    await proveOwner(page, owner.address);
+    expect((await walletRequests(page)).filter(m => m === 'personal_sign')).toHaveLength(1);
+    await page.goto('/app/dashboard');
+    await page.goto('/app/automations');
+    const workspace = page.getByRole('region', { name: 'Automations', exact: true });
+    await expect(workspace.getByRole('heading', { name: 'Create an automation', exact: true })).toBeVisible();
+    await expect(workspace).toContainText('Wallet session verified');
+    await expect(workspace.getByRole('button', { name: 'Connect wallet and prove ownership', exact: true })).toHaveCount(0);
+    expect((await walletRequests(page)).filter(m => SIGNING.includes(m) || m === 'personal_sign')).toEqual([]);
+    await page.reload();
+    await expect(workspace.getByRole('heading', { name: 'Create an automation', exact: true })).toBeVisible();
+    await expect(workspace.getByRole('button', { name: 'Connect wallet and prove ownership', exact: true })).toHaveCount(0);
+    expect((await walletRequests(page)).filter(m => SIGNING.includes(m) || m === 'personal_sign')).toEqual([]);
+    await workspace.getByRole('button', { name: 'Create with FloFi Chat', exact: true }).click();
+    await expect(page.getByRole('navigation', { name: 'Workflow stages', exact: true }).getByRole('button', { name: 'Chat', exact: true })).toHaveAttribute('aria-current', 'page');
+    await expect(page.locator('#build-entry-request')).toBeVisible();
+    expect((await walletRequests(page)).filter(m => SIGNING.includes(m) || m === 'personal_sign')).toEqual([]);
+    networkGuard.assertClean();
+  });
+
 });

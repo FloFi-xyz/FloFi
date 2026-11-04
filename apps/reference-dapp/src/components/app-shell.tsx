@@ -476,7 +476,7 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
       records: secondaryRoute.id === 'workflows' && owner ? <DashboardWorkspace mode="records" workflowName={workflowName} progress={executionProgress} recovery={executionProgress.recovery}
         wallet={{ ...reviewBinding.wallet, account: owner.address }} context={context} runId={null} build={() => setTab('Build')} execute={() => setTab('Execute')} navigate={navigate ?? (() => undefined)}
         openWorkflow={{ names: new Map(library.list?.items.map(item => [item.workflowId, item.name] as const) ?? []), open: id => { void reopenWorkflow(id); } }} signInPrompt={library.error === 'WALLET_SESSION_REQUIRED'}/> : undefined }}
-      automations={{ owner, proof, onPropose: command => { propose(command); setTab('Build'); },
+      automations={{ owner, proof, openChat: () => setTab(BUILD_ENTRY), onPropose: command => { propose(command); setTab('Build'); },
         canvas: automateCanvas ? { workflow: state.workflow, name: workflowName, dismiss: () => setAutomateCanvas(false) } : null }}/>
 </main>
   </div>;

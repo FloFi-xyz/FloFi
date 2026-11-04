@@ -25,7 +25,8 @@ test.beforeEach(async ({ page }) => {
   const found: string[] = []; errors.set(page, found); page.on('pageerror', error => found.push(error.message));
   await page.goto('/app/dashboard');
   await expect(page.getByRole('heading', { name: 'Your execution workspace' })).toBeVisible();
-  const styles = await page.locator('head link[rel="stylesheet"]').evaluateAll(links => links.map(link => link.outerHTML).join(''));
+  await expect.poll(() => page.locator('.main').evaluate(element => getComputedStyle(element).paddingLeft)).not.toBe('0px');
+  const styles = await page.locator('link[rel="stylesheet"]').evaluateAll(links => links.map(link => link.outerHTML).join(''));
   const fontClasses = await page.locator('html').getAttribute('class');
   await page.route('**/__ux006c-acceptance.js', route => route.fulfill({ contentType: 'application/javascript', body: bundle }));
   await page.route('**/__ux006c-acceptance', route => route.fulfill({ contentType: 'text/html', body: `<!doctype html><html class="${fontClasses ?? ''}" data-theme="light"><head><meta charset="utf-8">${styles}</head><body><div class="app-shell"><main class="main"><div id="acceptance-root"></div></main></div><script src="/__ux006c-acceptance.js"></script></body></html>` }));

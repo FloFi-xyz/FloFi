@@ -1,11 +1,14 @@
 // SPDX-License-Identifier: AGPL-3.0-only
+'use client';
 
 import { useLocale } from '../../i18n/locale';
 // Activity/attention structure adapted from the delivery; the canonical shell owns all controls.
 import type { DashboardConnection, DashboardRunView } from '../../lib/dashboard/types';
 import { DashboardStatusBadge } from './dashboard-status';
 import { HistoryActions, type HistoryChange } from '../history-actions';
-import type { ReactNode } from 'react';
+import { useId, useState, type ReactNode } from 'react';
+import rows from '../workflow-records.module.css';
+import { ActionIcon } from '../action-icon';
 
 export function DashboardIcon({ kind }: { kind: 'activity' | 'wallet' | 'attention' | 'history' | 'check' }) {
   return <svg className="dashboard-icon" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -28,26 +31,42 @@ function RunCard({ view, openRun, history, attention = false, openWorkflow }: { 
   history?: { change(runId: string): HistoryChange; changed(runId: string, disposition: 'DELETED' | 'ARCHIVED'): void } | undefined;
   attention?: boolean; openWorkflow?: OpenWorkflow | undefined }) {
   const { t: tr, language } = useLocale();
-  const updated = dateLabel(view.run.updatedAt, language);
-  return <article className={`dashboard-run-card${view.current ? ' dashboard-run-current' : ''}`}>
-    <div className="dashboard-run-heading"><div className="dashboard-run-title"><span className="dashboard-run-icon"><DashboardIcon kind="activity"/></span><h3 title={view.title}>{view.current ? view.title : tr(view.title)}</h3></div><DashboardStatusBadge status={view.status}/></div>
-    <p className="dashboard-run-message">{tr(view.message)}</p>
-    {attention && view.attention.length > 0 && <ul className="dashboard-run-attention">{view.attention.map(message => <li key={message}>{tr(message)}</li>)}</ul>}
-    <div className="dashboard-run-facts">
-      {view.landed && <span className="dashboard-run-landed">{tr(view.landed)}</span>}
-      {view.total !== null && <span>{tr(view.completed)}{tr(" of ")}{tr(view.total)} {tr(view.total === 1 ? 'step' : 'steps')}{tr(" confirmed")}</span>}
-      {view.networks.length > 0 && <span>{tr(view.networks.join(' → '))}</span>}
-      {view.progress?.local && <span>{tr("Local execution")}</span>}
+  const updated = dateLabel(view.run.updatedAt, language), detailsId = useId();
+  const [expanded, setExpanded] = useState(false);
+  const name = openWorkflow?.names.get(view.run.workflowId);
+  const flow = view.run.flow;
+  const action = /crosschain|bridge/.test(flow) ? 'bridge' : /swap|jupiter|cow/.test(flow) ? 'swap'
+    : /supply/.test(flow) ? 'supply' : /withdraw/.test(flow) ? 'withdraw' : /repay/.test(flow) ? 'repay'
+      : /borrow/.test(flow) ? 'borrow' : /transfer/.test(flow) ? 'transfer' : 'action';
+  return <article className={`dashboard-run-card ${rows.record}${view.current ? ' dashboard-run-current' : ''}`}>
+    <div className={rows.row}>
+      <span className="dashboard-run-icon"><ActionIcon action={action}/></span>
+      <h3 className={rows.name}><button type="button" className={rows.title} aria-expanded={expanded} aria-controls={detailsId} onClick={() => setExpanded(value => !value)}
+        aria-label={tr(expanded ? 'Hide details for {0}' : 'Show details for {0}', name ?? (view.current ? view.title : tr(view.title)))}>
+        <span title={name ?? view.title}>{name ?? (view.current ? view.title : tr(view.title))}</span><span aria-hidden="true" className={rows.chevron}>{expanded ? '⌃' : '⌄'}</span>
+      </button></h3>
+      {updated ? <time className={rows.date} dateTime={view.run.updatedAt!}>{tr(updated)}</time> : <span className={rows.date}/>}
+      <DashboardStatusBadge status={view.status}/>
+      <a className={`dashboard-run-link ${rows.view}`} href={`/app/dashboard/runs/${encodeURIComponent(view.run.runId)}`} onClick={event => { if (!event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey) { event.preventDefault(); openRun(view.run.runId); } }} aria-label={tr(`View ${view.title} run ${view.run.runId}`)}>{tr(view.current ? 'View current run' : 'View run')}<span aria-hidden="true">→</span></a>
+      {history && <HistoryActions key={`${view.run.ownerAccount}:${view.run.runId}`} kind="execution" change={history.change(view.run.runId)} changed={disposition => history.changed(view.run.runId, disposition)}/>}
     </div>
-    <div className="dashboard-run-footer"><div className="dashboard-run-records">
-      {view.recovered && <span className="dashboard-record-tag dashboard-record-info">{tr("Recovered")}</span>}
-      {view.reconciled && <span className="dashboard-record-tag dashboard-record-info">{tr("Reconciled")}</span>}
-      {view.run.hasEvidence && <span className="dashboard-record-tag">{tr("Evidence available")}</span>}
-      {updated && <time dateTime={view.run.updatedAt!}>{tr(updated)}</time>}
-    </div><a className="dashboard-run-link" href={`/app/dashboard/runs/${encodeURIComponent(view.run.runId)}`} onClick={event => { if (!event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey) { event.preventDefault(); openRun(view.run.runId); } }} aria-label={tr(`View ${view.title} run ${view.run.runId}`)}>{tr(view.current ? 'View current run' : 'View run')} <span aria-hidden="true">→</span></a></div>
-    {openWorkflow?.names.has(view.run.workflowId) && <button type="button" className="quiet dashboard-run-open-workflow" onClick={() => openWorkflow.open(view.run.workflowId)}>
-      {openWorkflow.names.get(view.run.workflowId) ? tr('Open workflow: {0}', openWorkflow.names.get(view.run.workflowId)!) : tr('Open workflow')}</button>}
-    {history && <HistoryActions key={`${view.run.ownerAccount}:${view.run.runId}`} kind="execution" change={history.change(view.run.runId)} changed={disposition => history.changed(view.run.runId, disposition)}/>}
+    <div id={detailsId} className={rows.details} hidden={!expanded}>
+      <p className="dashboard-run-message">{tr(view.message)}</p>
+      {attention && view.attention.length > 0 && <ul className="dashboard-run-attention">{view.attention.map(message => <li key={message}>{tr(message)}</li>)}</ul>}
+      <div className="dashboard-run-facts">
+        {view.landed && <span className="dashboard-run-landed">{tr(view.landed)}</span>}
+        {view.total !== null && <span>{tr(view.completed)}{tr(" of ")}{tr(view.total)} {tr(view.total === 1 ? 'step' : 'steps')}{tr(" confirmed")}</span>}
+        {view.networks.length > 0 && <span>{tr(view.networks.join(' → '))}</span>}
+        {view.progress?.local && <span>{tr("Local execution")}</span>}
+      </div>
+      <div className="dashboard-run-records">
+        {view.recovered && <span className="dashboard-record-tag dashboard-record-info">{tr("Recovered")}</span>}
+        {view.reconciled && <span className="dashboard-record-tag dashboard-record-info">{tr("Reconciled")}</span>}
+        {view.run.hasEvidence && <span className="dashboard-record-tag">{tr("Evidence available")}</span>}
+      </div>
+      {openWorkflow?.names.has(view.run.workflowId) && <button type="button" className="workspace-action dashboard-run-open-workflow" onClick={() => openWorkflow.open(view.run.workflowId)}>
+        {name ? tr('Open workflow: {0}', name) : tr('Open workflow')}</button>}
+    </div>
   </article>;
 }
 
@@ -76,20 +95,20 @@ export function DashboardView({ account, connection, runs, hasMore, loading, bui
   const evmAccount = Boolean(account && /^0x[0-9a-f]{40}$/i.test(account));
   const notices = <>
     {loading && <p className="dashboard-notice dashboard-loading" role="status"><DashboardIcon kind="history"/>{tr("Loading execution history…")}</p>}
-    {!loading && connection === 'SIGN_IN_REQUIRED' && (signInPrompt ? null : <section className="dashboard-notice dashboard-source-notice" role="status"><span className="dashboard-notice-icon"><DashboardIcon kind="wallet"/></span><div><strong>{tr("Verify this wallet to view saved execution history.")}</strong><p>{tr("This wallet is not held by a FloFi account you are signed in to, so FloFi asks for its one-time verification message. It does not authorize a transaction.")}</p></div>{evmAccount ? <button type="button" onClick={verify} disabled={verifying}>{tr(verifying ? 'Waiting for wallet…' : 'Verify wallet for history')}</button>
-      : openRecords && <button type="button" onClick={openRecords}>{tr('Open Your workflows')}</button>}</section>)}
+    {!loading && connection === 'SIGN_IN_REQUIRED' && (signInPrompt ? null : <section className="dashboard-notice dashboard-source-notice" role="status"><span className="dashboard-notice-icon"><DashboardIcon kind="wallet"/></span><div><strong>{tr("Verify this wallet to view saved execution history.")}</strong><p>{tr("This wallet is not held by a FloFi account you are signed in to, so FloFi asks for its one-time verification message. It does not authorize a transaction.")}</p></div>{evmAccount ? <button type="button" className="workspace-action" onClick={verify} disabled={verifying}>{tr(verifying ? 'Waiting for wallet…' : 'Verify wallet for history')}</button>
+      : openRecords && <button type="button" className="workspace-action" onClick={openRecords}>{tr('Open Your workflows')}</button>}</section>)}
     {!loading && connection === 'NOT_CONFIGURED' && <section className="dashboard-notice dashboard-source-notice" role="status"><span className="dashboard-notice-icon"><DashboardIcon kind="history"/></span><div><strong>{tr("Saved history is unavailable in this environment")}</strong><p>{tr("Saved execution history is not available in this environment. Any current execution remains visible below.")}</p></div></section>}
-    {!loading && connection === 'UNAVAILABLE' && <section className="dashboard-notice dashboard-source-notice" role="status"><span className="dashboard-notice-icon"><DashboardIcon kind="history"/></span><div><strong>{tr("Execution history temporarily unavailable.")}</strong><p>{tr("Saved history could not be loaded. Any current execution remains visible below.")}</p></div><button type="button" onClick={refresh}>{tr("Refresh history")}</button></section>}
+    {!loading && connection === 'UNAVAILABLE' && <section className="dashboard-notice dashboard-source-notice" role="status"><span className="dashboard-notice-icon"><DashboardIcon kind="history"/></span><div><strong>{tr("Execution history temporarily unavailable.")}</strong><p>{tr("Saved history could not be loaded. Any current execution remains visible below.")}</p></div><button type="button" className="workspace-action" onClick={refresh}>{tr("Refresh history")}</button></section>}
     {verificationIssue && <p className="dashboard-notice dashboard-verification-issue" role="alert">{tr(verificationIssue)}</p>}
   </>;
   if (mode === 'records') return <div className="workflow-records">
     {!account ? null : !loading && connection === 'SIGN_IN_REQUIRED' && signInPrompt ? <p className="muted workflows-records-pending" role="status">{tr('Your executed history and the records that need attention appear here once this wallet is verified above.')}</p> : <>
       {notices}
-      <section className="panel workflows-section dashboard-activity" aria-labelledby="workflows-history"><div className="dashboard-section-heading"><div><h2 id="workflows-history">{tr("Executed and history")}</h2><p>{tr("Workflows you executed and the results recorded for them.")}</p></div>{connection === 'CONNECTED' && <button type="button" onClick={refresh} disabled={loading}>{tr("Refresh history")}</button>}</div>
+      <section className="panel workflows-section dashboard-activity" aria-labelledby="workflows-history"><div className="dashboard-section-heading"><div><h2 id="workflows-history">{tr("Executed and history")}</h2><p>{tr("Workflows you executed and the results recorded for them.")}</p></div>{connection === 'CONNECTED' && <button type="button" className="workspace-action" onClick={refresh} disabled={loading}>{tr("Refresh history")}</button>}</div>
         {executed.length ? <ol className="dashboard-run-list">{executed.map(view => <li key={view.run.runId}><RunCard view={view} openRun={openRun} history={history} openWorkflow={openWorkflow}/></li>)}</ol>
           : loading ? <div className="dashboard-list-loading" aria-hidden="true"><span/><span/><span/></div>
-          : <div className="dashboard-empty dashboard-history-empty"><span className="dashboard-empty-icon"><DashboardIcon kind="history"/></span><h3>{tr(connection === 'CONNECTED' ? 'No workflows executed yet' : 'Saved records are not available yet')}</h3><p>{tr(connection === 'CONNECTED' ? attention.length ? 'Records that need attention are listed below. Executed results will appear here.' : 'Build your first workflow to see its execution history here.' : 'Executed workflows will appear here when their records are available.')}</p>{connection === 'CONNECTED' && !runs.length && <button type="button" onClick={build}>{tr("Build workflow")}</button>}</div>}
-        {hasMore && loadMore && <button type="button" onClick={loadMore} disabled={loadingMore}>{tr(loadingMore ? 'Loading execution history…' : 'Load more history')}</button>}
+          : <div className="dashboard-empty dashboard-history-empty"><span className="dashboard-empty-icon"><DashboardIcon kind="history"/></span><h3>{tr(connection === 'CONNECTED' ? 'No workflows executed yet' : 'Saved records are not available yet')}</h3><p>{tr(connection === 'CONNECTED' ? attention.length ? 'Records that need attention are listed below. Executed results will appear here.' : 'Build your first workflow to see its execution history here.' : 'Executed workflows will appear here when their records are available.')}</p>{connection === 'CONNECTED' && !runs.length && <button type="button" className="workspace-action" onClick={build}>{tr("Build workflow")}</button>}</div>}
+        {hasMore && loadMore && <button type="button" className="workspace-action" onClick={loadMore} disabled={loadingMore}>{tr(loadingMore ? 'Loading execution history…' : 'Load more history')}</button>}
         {pageIssue && <p role="status">{tr(pageIssue)}</p>}
       </section>
       <section className={`panel workflows-section workflows-attention${attention.length ? ' dashboard-attention-required' : ''}`} aria-labelledby="dashboard-attention"><div className="dashboard-section-heading"><div className="dashboard-attention-heading"><DashboardIcon kind="attention"/><h2 id="dashboard-attention">{tr("Needs attention")}</h2></div>{attention.length > 0 && <span className="dashboard-attention-count" aria-label={tr(`${attention.length} available ${attention.length === 1 ? 'run needs' : 'runs need'} attention`)}>{tr(attention.length)}</span>}</div>
@@ -105,7 +124,7 @@ export function DashboardView({ account, connection, runs, hasMore, loading, bui
       {portfolio}
       {notices}
       {current.length > 0 && <section className="dashboard-current" aria-labelledby="dashboard-current"><div className="dashboard-section-heading"><div><p className="eyebrow">{tr("FROM THIS WORKSPACE")}</p><h2 id="dashboard-current">{tr("Current execution")}</h2></div><span className="dashboard-read-only">{tr("Read-only overview")}</span></div>{current.map(view => <RunCard key={view.run.runId} view={view} openRun={openRun} history={history}/>)}</section>}
-      <section className={`panel dashboard-records-summary${attention.length ? ' dashboard-attention-required' : ''}`} aria-labelledby="dashboard-records"><div className="dashboard-section-heading"><div><h2 id="dashboard-records">{tr("Workflow records")}</h2><p>{tr("Saved workflows, executed history and records that need attention live in Your workflows.")}</p></div>{openRecords && <button type="button" onClick={openRecords}>{tr("Open Your workflows")}</button>}</div>
+      <section className={`panel dashboard-records-summary${attention.length ? ' dashboard-attention-required' : ''}`} aria-labelledby="dashboard-records"><div className="dashboard-section-heading"><div><h2 id="dashboard-records">{tr("Workflow records")}</h2><p>{tr("Saved workflows, executed history and records that need attention live in Your workflows.")}</p></div>{openRecords && <button type="button" className="workspace-action" onClick={openRecords}>{tr("Open Your workflows")}</button>}</div>
         {connection === 'CONNECTED' && !loading && <ul className="dashboard-records-counts">
           <li><strong>{tr(attention.length)}{hasMore ? '+' : ''}</strong> {tr(attention.length === 1 && !hasMore ? 'record needs attention' : 'records need attention')}</li>
           <li><strong>{tr(executed.length)}{hasMore ? '+' : ''}</strong> {tr(executed.length === 1 && !hasMore ? 'executed record' : 'executed records')}</li>

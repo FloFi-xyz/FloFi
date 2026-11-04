@@ -873,6 +873,18 @@
     "app.components.editor-stepper": {
       "path": "apps/reference-dapp/src/components/editor-stepper.test.tsx",
       "stage": "unit"
+    },
+    "app.components.automations-workspace": {
+      "path": "apps/reference-dapp/src/components/automations-workspace.test.tsx",
+      "stage": "unit"
+    },
+    "app.components.copilot-automation-proposal": {
+      "path": "apps/reference-dapp/src/components/copilot-automation-proposal.test.tsx",
+      "stage": "unit"
+    },
+    "app.e2e.portfolio-ux004": {
+      "path": "apps/reference-dapp/e2e/portfolio-ux004.spec.ts",
+      "stage": "browser"
     }
   },
   "requiredUnitSuites": [
@@ -922,7 +934,9 @@
     "app.app.api.flofi.journey.route",
     "app.server.journey-telemetry",
     "app.mcp.gateway-deadline",
-    "app.developer.events-sync"
+    "app.developer.events-sync",
+    "app.components.automations-workspace",
+    "app.components.copilot-automation-proposal"
   ],
   "modules": [
     {
@@ -2327,7 +2341,9 @@
         "app.automations.schedule",
         "app.automations.scheduler.pg",
         "app.backend.automation-production.pg",
-        "app.components.automation-run-status"
+        "app.components.automation-run-status",
+        "app.components.automations-workspace",
+        "app.components.copilot-automation-proposal"
       ],
       "gaps": [
         "CONFIRM_EACH_TIME proposals are supported; production delegated signing and live DCA execution are not certified."
@@ -2537,7 +2553,8 @@
         "apps/reference-dapp/src/components/site/site.module.css",
         "apps/reference-dapp/src/components/editor-overview-panel.tsx",
         "apps/reference-dapp/src/components/canvas-edge-style.ts",
-        "apps/reference-dapp/src/components/editor-stepper.tsx"
+        "apps/reference-dapp/src/components/editor-stepper.tsx",
+        "apps/reference-dapp/src/components/workflow-records.module.css"
       ],
       "suites": [
         "app.components.canvas-panel-reveal",
@@ -2552,7 +2569,8 @@
         "app.e2e.site",
         "app.components.editor-stepper",
         "app.domain.editor-overview",
-        "app.e2e.editor-redesign"
+        "app.e2e.editor-redesign",
+        "app.e2e.portfolio-ux004"
       ],
       "gaps": [
         "Browser profiles cover selected journeys; full accessibility audit, device matrix and language completeness remain acceptance gaps."

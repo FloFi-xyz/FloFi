@@ -33,13 +33,13 @@ export function parseAutomationDraft(raw: unknown): AutomationDraft {
 }
 const s = COPILOT_V1_PARTS.schema;
 export const AUTOMATION_DRAFT_SCHEMA = s.object({
-  kind: s.choice(['SCHEDULED_DCA', 'PRICE_TRIGGER', 'DAILY_WATCH'], 'Daily recurring trade, price crossing, or daily read-only watch.'),
+  kind: s.choice(['SCHEDULED_DCA', 'PRICE_TRIGGER', 'DAILY_WATCH'], 'Daily or weekly recurring trade, price crossing, or scheduled read-only watch.'),
   asset: s.nullableChoice(['ETH', 'SOL', 'BTC', 'OTHER'], 'Observed/traded asset explicitly named; null if absent.'),
   side: s.nullableChoice(['BUY', 'SELL'], 'Buy or sell only if stated; null for watch.'),
   network: s.nullableChoice(COPILOT_NETWORKS, 'Exact named network; null if absent. Never infer a mainnet.'),
   amount: s.nullableString('Exact input amount stated, decimal digits; null if missing.'),
   spendAsset: s.nullableChoice(['USDC', 'DEVUSDC', 'ETH', 'WETH', 'SOL', 'OTHER'], 'Token the amount spends; null if missing.'),
-  time: s.nullableString('Explicit daily time in HH:mm (9h = 09:00); null if absent.'),
+  time: s.nullableString('Explicit schedule time in HH:mm (9h = 09:00); null if absent.'),
   condition: s.nullableChoice(['PRICE_BELOW', 'PRICE_ABOVE', 'PERCENT_DROP', 'PERCENT_RISE'], 'Explicit price direction, or a percentage fall/rise; null otherwise.'),
   threshold: s.nullableString('Explicit USD threshold, or for a percentage move the USD reference price the user stated ("from $3000"); normalized decimal; null if absent. Never the current price.'),
   percent: s.nullableString('Percentage of a stated price move ("drops 5%" = "5"); null otherwise.'),
@@ -47,6 +47,26 @@ export const AUTOMATION_DRAFT_SCHEMA = s.object({
 export type AutomationGrounding = { kind: 'PROPOSAL'; input: AutomationInput } | { kind: 'CLARIFICATION'; message: string; missing: readonly import('./copilot-draft').DraftField[] } | { kind: 'UNSUPPORTED'; message: string };
 const NETWORK = { ETHEREUM: 'ethereum', BASE: 'base', BASE_SEPOLIA: 'base-sepolia', ETHEREUM_SEPOLIA: 'ethereum-sepolia', SOLANA: 'solana', SOLANA_DEVNET: 'solana-devnet' } as const;
 const DAILY = /\b(?:daily|every day|each day|todos os dias|todo dia|diariamente)\b/i;
+const WEEKLY = /(?<![\w-])(?:weekly|every week|each week|once a week|semanalmente|toda(?:s)? (?:as )?semanas?|a cada semana|uma vez por semana)\b/i;
+// Frequency and weekday come only from the user's words, never from an inferred model value.
+const WEEKDAY_PATTERNS = [
+  /\b(?:every|each)\s+monday\b|\b(?:toda(?:s)?|cada)\s+segunda(?:-feira)?\b/i,
+  /\b(?:every|each)\s+tuesday\b|\b(?:toda(?:s)?|cada)\s+terça(?:-feira)?\b/i,
+  /\b(?:every|each)\s+wednesday\b|\b(?:toda(?:s)?|cada)\s+quarta(?:-feira)?\b/i,
+  /\b(?:every|each)\s+thursday\b|\b(?:toda(?:s)?|cada)\s+quinta(?:-feira)?\b/i,
+  /\b(?:every|each)\s+friday\b|\b(?:toda(?:s)?|cada)\s+sexta(?:-feira)?\b/i,
+  /\b(?:every|each)\s+saturday\b|\b(?:todo(?:s)?|cada)\s+sábado\b/i,
+  /\b(?:every|each)\s+sunday\b|\b(?:todo(?:s)?|cada)\s+domingo\b/i,
+];
+const WEEKDAY_ANSWERS = [
+  /^(?:monday|segunda(?:-feira)?)[.!]?$/i,
+  /^(?:tuesday|terça(?:-feira)?)[.!]?$/i,
+  /^(?:wednesday|quarta(?:-feira)?)[.!]?$/i,
+  /^(?:thursday|quinta(?:-feira)?)[.!]?$/i,
+  /^(?:friday|sexta(?:-feira)?)[.!]?$/i,
+  /^(?:saturday|sábado)[.!]?$/i,
+  /^(?:sunday|domingo)[.!]?$/i,
+];
 const BUY = /\b(?:buy|purchase|compr\w*)\b/i, SELL = /\b(?:sell|vend\w*)\b/i;
 const BELOW = /\b(?:below|under|abaixo|menos de)\b/i, ABOVE = /\b(?:above|over|acima|mais de)\b/i;
 const DROP = /\b(?:drops?|dropped|falls?|fell|declines?|cai|cair|caiu|desce|descer|desceu)\b/i, RISE = /\b(?:rises?|rose|climbs?|gains?|sobe|subir|subiu)\b/i;
@@ -56,7 +76,15 @@ export function groundAutomationDraft(raw: AutomationDraft, text: string, timezo
   const ask = (message: string, ...missing: import('./copilot-draft').DraftField[]): AutomationGrounding => ({ kind: 'CLARIFICATION', message, missing });
   const refuse = (message: string): AutomationGrounding => ({ kind: 'UNSUPPORTED', message });
   if (!raw.asset || raw.asset === 'OTHER' || !new RegExp(`\\b${raw.asset}\\b`, 'i').test(text)) return ask('Which asset should this automation watch or trade?', 'asset');
-  if (raw.kind !== 'PRICE_TRIGGER' && !DAILY.test(text)) return ask('Should this automation repeat every day?', 'schedule');
+  const recurringDays = WEEKDAY_PATTERNS.flatMap((pattern, i) => pattern.test(text) ? [i + 1] : []);
+  // A short weekday answer fills only an explicitly weekly active request. A one-time date or an arbitrary weekday mention
+  // never becomes a recurring schedule. The conversation retains its clarification answers on separate lines.
+  const lines = text.split('\n').map(line => line.trim());
+  const answeredDays = WEEKLY.test(text) ? WEEKDAY_ANSWERS.flatMap((pattern, i) => lines.some(line => pattern.test(line)) ? [i + 1] : []) : [];
+  const weekdays = recurringDays.length ? recurringDays : answeredDays;
+  const daily = DAILY.test(text);
+  const mentionedDays = [/\bmonday\b|\bsegundas?(?:-feiras?)?\b/i, /\btuesday\b|\bterças?(?:-feiras?)?\b/i, /\bwednesday\b|\bquartas?(?:-feiras?)?\b/i, /\bthursday\b|\bquintas?(?:-feiras?)?\b/i, /\bfriday\b|\bsextas?(?:-feiras?)?\b/i, /\bsaturday\b|\bsábados?\b/i, /\bsunday\b|\bdomingos?\b/i].filter(pattern => pattern.test(text));
+  if (raw.kind !== 'PRICE_TRIGGER' && ((!daily && weekdays.length !== 1) || mentionedDays.length > 1 || (daily && weekdays.length > 0))) return ask('Should this automation repeat daily or on which weekday?', 'schedule');
   const watch = raw.kind === 'DAILY_WATCH';
   if (watch && (!/\b(?:watch|check|monitor|verifica\w*|acompanha\w*)\b/i.test(text) || BUY.test(text) || SELL.test(text))) return ask('Should FloFi only check the asset, or prepare a trade?', 'kind');
   if (!watch && (!raw.side || !(raw.side === 'BUY' ? BUY : SELL).test(text))) return ask('Should FloFi prepare a buy or a sell?', 'side');
@@ -73,11 +101,11 @@ export function groundAutomationDraft(raw: AutomationDraft, text: string, timezo
     const expected = raw.side === 'BUY' ? network === 'solana-devnet' ? 'DEVUSDC' : 'USDC' : raw.asset === 'ETH' ? ['ETH', 'WETH'] : ['SOL'];
     if (!(Array.isArray(expected) ? expected.includes(raw.spendAsset) : expected === raw.spendAsset)) return refuse('The input asset does not match this automation route.');
   }
-  const schedule = { frequency: 'DAILY' as const, weekday: null, time: raw.time ?? '', timezone };
+  const schedule = { frequency: daily ? 'DAILY' as const : 'WEEKLY' as const, weekday: daily ? null : weekdays[0]!, time: raw.time ?? '', timezone };
   if (raw.kind !== 'PRICE_TRIGGER') {
     const times = [...text.matchAll(/(?:\bat\s*|às?\s*|as\s*)(\d{1,2})(?::([0-5]\d)|h(?:([0-5]\d))?)?/gi)];
     const bareTime = /(?:^|\n)(\d{1,2})(?::([0-5]\d)|h)?[.!]?(?:$|\n)/.exec(text);
-    if (!raw.time || !(bareTime && `${bareTime[1]!.padStart(2, '0')}:${bareTime[2] ?? '00'}` === raw.time) && !times.some(m => `${m[1]!.padStart(2, '0')}:${m[2] ?? m[3] ?? '00'}` === raw.time)) return ask('At what time should FloFi check this every day?', 'time');
+    if (!raw.time || !(bareTime && `${bareTime[1]!.padStart(2, '0')}:${bareTime[2] ?? '00'}` === raw.time) && !times.some(m => `${m[1]!.padStart(2, '0')}:${m[2] ?? m[3] ?? '00'}` === raw.time)) return ask('At what time should FloFi check this routine?', 'time');
   }
   const percentMove = raw.kind === 'PRICE_TRIGGER' && (raw.condition === 'PERCENT_DROP' || raw.condition === 'PERCENT_RISE');
   if (percentMove) {

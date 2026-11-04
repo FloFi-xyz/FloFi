@@ -7,7 +7,7 @@ import type { Page } from '@playwright/test';
 
 // Mount explicit presentation fixtures below the real shell. The shared Settings control
 // changes the real theme; no fixture writes to production history or connects a wallet.
-let bundle: string;
+let bundle: string, bundleCss: string;
 const errors = new WeakMap<Page, string[]>();
 test.beforeAll(async () => {
   const compiled = '../node_modules/next/dist/compiled/', aliases: Record<string, string> = {};
@@ -18,7 +18,9 @@ test.beforeAll(async () => {
     define: { 'process.env.NODE_ENV': '"production"', __dirname: '"/"', global: 'globalThis' },
     build: { write: false, minify: false, rolldownOptions: { transform: { inject: { Buffer: ['buffer', 'Buffer'], process: 'process' } } },
       lib: { entry: fileURLToPath(new URL('../src/test-utils/dashboard-theme-acceptance-harness.tsx', import.meta.url)), name: 'FloFiDashboardThemeAcceptance', formats: ['iife'] } } });
-  const entry = (Array.isArray(result) ? result : [result]).flatMap(output => 'output' in output ? output.output : []).find(output => output.type === 'chunk' && output.isEntry);
+  const outputs = (Array.isArray(result) ? result : [result]).flatMap(output => 'output' in output ? output.output : []);
+  const entry = outputs.find(output => output.type === 'chunk' && output.isEntry);
+  bundleCss = outputs.filter(output => output.type === 'asset' && output.fileName.endsWith('.css')).map(output => output.type === 'asset' ? String(output.source) : '').join('\n');
   if (!entry || entry.type !== 'chunk') throw new Error('Dashboard theme acceptance bundle missing');
   bundle = entry.code;
 });
@@ -51,6 +53,7 @@ test.beforeEach(async ({ page }) => {
   // Wait for shell hydration through its existing interactive control before mounting.
   await theme(page, 'light');
   await page.route('**/__ux006d-acceptance.js', route => route.fulfill({ contentType: 'application/javascript', body: bundle }));
+  await page.addStyleTag({ content: bundleCss });
   await page.addScriptTag({ url: '/__ux006d-acceptance.js' });
   await fixture(page, 'Dashboard');
 });
@@ -121,6 +124,8 @@ for (const value of ['light', 'dark'] as const) {
     await page.evaluate(() => window.flofiDashboardAcceptance.view('records'));
     await expect(index.locator('.workflows-attention .dashboard-run-list>li')).toHaveCount(3);
     await expect(index.locator('.workflows-attention')).toContainText('Execution status unresolved');
+    for (const row of await index.locator('.dashboard-run-card').all()) await row.getByRole('button', { name: /^Show details for / }).click();
+    await expect(index.locator('.workflows-attention .dashboard-run-message').first()).toBeVisible();
     const checks = await index.locator('.dashboard-status,.dashboard-run-message,.dashboard-run-facts,.dashboard-run-records').evaluateAll(elements => {
       const canvas = document.createElement('canvas'); canvas.width = canvas.height = 1;
       const context = canvas.getContext('2d')!;
@@ -207,7 +212,7 @@ for (const value of ['light', 'dark'] as const) {
     await page.evaluate(() => window.flofiDashboardAcceptance.view('dashboard'));
     await page.evaluate(() => { window.flofiDashboardAcceptance.mode('history'); window.flofiDashboardAcceptance.longTitle(); });
     await noOverflow(page);
-    expect(await workspace(page).locator('.dashboard-run-current h3').evaluate(element => element.getAttribute('title') === element.textContent && element.getBoundingClientRect().height <= parseFloat(getComputedStyle(element).lineHeight) * 3 + 1)).toBe(true);
+    expect(await workspace(page).locator('.dashboard-run-current h3 button > span[title]').evaluate(element => element.getAttribute('title') === element.textContent && element.getBoundingClientRect().height <= parseFloat(getComputedStyle(element).lineHeight) + 1)).toBe(true);
     await page.screenshot({ style: 'nextjs-portal{display:none}', path: `.tmp/ux006d-dashboard-${value}-320.png`, fullPage: true });
     await fixture(page, 'Details');
     for (const mode of ['completed', 'partial', 'unresolved', 'bridge-completed', 'cow-pending', 'legacy', 'not-found', 'unavailable'] as const) {

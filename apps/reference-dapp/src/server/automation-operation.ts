@@ -3,7 +3,8 @@
  * BUILD-AUTOMATION-001: the BFF boundary of the Automations workspace and of automation approval links — the saved-workflow pattern
  * (`workflow-persistence.ts`):
  *
- *   - the owner the browser names is only a selection hint: it must be a wallet THIS request proved (HttpOnly session cookies);
+ *   - the owner the browser names is only a selection hint: it must be proven in this browser or held by this request's verified,
+ *     unexpired and unrevoked FloFi account session. These operations manage proposals, never financial authorization;
  *   - embedded runtime: the operation runs here, on this deployment's PostgreSQL (`automations/operations.ts`);
  *   - remote runtime (production: Vercel → Railway API): it is forwarded to `POST /v1/automations/:method` with the API bearer and the
  *     verified owner in `x-flofi-workflow-owner`; an automation approval link (and PR #72's recovery of an applied proposal by its id) to
@@ -15,6 +16,7 @@ import { randomUUID } from 'node:crypto';
 import { cloudApiBaseUrl, type FlowResult } from './cloud-api-client.ts';
 import { flowRuntimeKind } from './flow-runtime.ts';
 import { currentWalletPrincipals, type WalletPrincipal } from './session-principal.ts';
+import { historyPrincipals } from './history-principals.ts';
 import { workflowOwner, WORKFLOW_OWNER_HEADER, type WorkflowOwner } from '../domain/saved-workflow.ts';
 import { APPROVAL_PRINCIPALS_HEADER } from '../automations/api-headers.ts';
 import { readAutomationConfig } from '../automations/config.ts';
@@ -41,11 +43,11 @@ async function forward<T>(env: Env, transport: typeof fetch, path: string, heade
   return { ok: false, code: unavailable };
 }
 
-/** One owner operation for `expected`, which must be a wallet this request proved. */
+/** Manage proposals for a verified wallet. Approvals and delegation keep their separate cryptographic proof boundaries. */
 export async function automationOperation<T>(method: AutomationOperation, args: readonly unknown[], expected: WorkflowOwner, seams: Seams = {}): Promise<FlowResult<T>> {
   try {
     if (!isAutomationOperation(method) || !expected || !workflowOwner(`${expected.namespace}:${expected.address}`)) return { ok: false, code: 'WALLET_SESSION_REQUIRED' };
-    const principal = (await (seams.principals ?? currentWalletPrincipals)()).find(p => p.namespace === expected.namespace && p.address === expected.address);
+    const principal = (await (seams.principals ?? historyPrincipals)()).find(p => p.namespace === expected.namespace && p.address === expected.address);
     if (!principal) return { ok: false, code: 'WALLET_SESSION_REQUIRED' };
     const owner = { namespace: principal.namespace, address: principal.address }, env = seams.env ?? process.env, kind = flowRuntimeKind(env);
     if (kind === 'remote') return await forward<T>(env, seams.transport ?? fetch, `v1/automations/${method}`, { [WORKFLOW_OWNER_HEADER]: `${owner.namespace}:${owner.address}`,

@@ -1954,3 +1954,44 @@ button.wallet-option .wallet-option-status{border-color:var(--accent-line);backg
 /* :not(.connectingto) keeps BUILD-FIX-UX-001's drop-target cue: an input the workflow refuses stays red while a link is drawn onto it. */
 .build-flow-surface .react-flow__node:hover .composer-card .react-flow__handle:not(.connectingto),.build-flow-surface .composer-card.active .react-flow__handle:not(.connectingto),.build-flow-surface .react-flow:has(.react-flow__connection-path) .composer-card .react-flow__handle:not(.connectingto){background:var(--blue)}
 @media(prefers-reduced-motion:no-preference){.build-flow-surface .composer-card{transition:border-color 140ms ease,box-shadow 140ms ease}}
+
+/* UX 004: routines use the same quiet surfaces and blue controls as the portfolio and records. */
+.app-shell .workspace-action{display:inline-flex;align-items:center;justify-content:center;gap:7px;min-height:36px;padding:7px 12px;border:1px solid var(--line);border-radius:9px;background:var(--paper);color:var(--ink);font:500 13px var(--font-outfit),sans-serif;cursor:pointer;text-decoration:none}
+.app-shell .workspace-action:not(.primary-action):not(.workspace-action-danger):hover:enabled{background:var(--soft)}
+.app-shell .workspace-action.workspace-action-danger{border-color:var(--danger-line);background:var(--danger-soft);color:var(--red)}
+.app-shell .workspace-action:disabled{opacity:.55;cursor:default}
+.app-shell :is(.workspace-action,.automation-choice,summary):focus-visible{outline:2px solid var(--blue);outline-offset:3px}
+.automations{max-width:1180px;margin-inline:auto}
+.automations .secondary-workspace-heading{margin-bottom:24px}
+.automation-session{display:inline-flex;align-items:center;gap:6px;padding:5px 9px;margin-top:10px;border-radius:999px;background:var(--soft);font-size:12px;color:var(--muted)}
+.automation-choices{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px}
+.automation-choice{display:flex;align-items:flex-start;flex-direction:column;gap:10px;min-height:180px;padding:22px;text-align:left;border:1px solid var(--line);border-radius:16px;background:var(--paper);color:var(--ink);cursor:pointer;box-shadow:0 3px 12px rgb(16 50 100 / 3%)}
+.automation-choice strong{font-size:17px;font-weight:600}
+.automation-choice>span:last-child{font-size:13px;line-height:1.5;color:var(--muted)}
+.automation-choice:enabled:hover{border-color:var(--blue);background:var(--blue-soft)}
+.automation-choice:disabled{cursor:default;background:var(--soft);box-shadow:none}
+.automation-choice-icon{display:grid;place-items:center;width:36px;height:36px;border-radius:11px;background:var(--blue-soft);color:var(--blue);font-size:24px}
+.automation-choice:disabled .automation-choice-icon{background:var(--paper);color:var(--muted)}
+.automation-chat-entry{display:flex;align-items:center;flex-wrap:wrap;gap:12px;margin-top:16px;font-size:13px}
+.automation-stepper{display:flex;align-items:center;gap:24px;list-style:none;margin:0;padding:0 0 18px;border-bottom:1px solid var(--line);color:var(--muted);font-size:13px}
+.automation-stepper li{display:flex;align-items:center;gap:8px}
+.automation-stepper li>span{display:grid;place-items:center;width:27px;height:27px;border-radius:50%;background:var(--soft)}
+.automation-stepper li[aria-current]{color:var(--blue);font-weight:600}
+.automation-stepper li[aria-current]>span{background:var(--blue);color:var(--on-accent)}
+.automation-guided{max-width:900px;border-radius:16px;box-shadow:0 4px 18px rgb(16 50 100 / 3%)}
+.automation-guided h3{margin:0;font-size:21px;font-weight:500}
+.automation-guided h3:focus{outline:none}
+.automation-guided .automation-row-actions{justify-content:flex-end;margin-top:0}
+.automation-advanced,.automation-availability,.automation-notification-settings{font-size:13px;color:var(--muted)}
+:is(.automation-advanced,.automation-availability,.automation-record-details,.automation-notification-settings)>summary{cursor:pointer;padding:12px 0;color:var(--ink)}
+.automation-advanced .automation-grid{padding:12px 0}
+.automation-review-summary{border:1px solid var(--line);border-radius:12px;background:var(--soft);padding:16px;font-size:14px}
+.automation-review-summary p{margin:8px 0 0;line-height:1.5;overflow-wrap:anywhere}
+.automation-record{padding:16px 20px}
+.automation-record-summary{display:flex;align-items:center;flex-wrap:wrap;gap:12px;font-size:12px;color:var(--muted)}
+.automation-record-summary p{font-size:13px;color:var(--ink);margin:10px 0}
+.automation-record-details{border-top:1px solid var(--line);font-size:13px}
+.automation-record-details .automation-facts{margin-top:8px}
+.automation-list{gap:10px}
+.automation-notification-settings{border-top:1px solid var(--line)}
+@media(max-width:700px){.automation-choices{grid-template-columns:1fr}.automation-choice{min-height:0;padding:18px}.automation-stepper{gap:16px}.automation-stepper li{gap:5px}.automation-record{padding:14px}.automation-record-summary{gap:6px}}

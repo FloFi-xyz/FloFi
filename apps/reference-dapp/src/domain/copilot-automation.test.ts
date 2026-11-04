@@ -22,7 +22,7 @@ describe('Copilot Automation interpretation and grounding', () => {
     expect(result.input).not.toHaveProperty('executionMode');
   });
   it('does not infer Ethereum Mainnet from an absent network or testnet wording', () => {
-    for (const text of ['Buy 10 USDC of ETH every day at 9:00.', 'Buy 10 USDC of ETH every day at 9:00 on Ethereum testnet.']) {
+    for (const text of ['Buy 10 USDC of ETH on Base every Monday and Tuesday at 09:00.', 'Compre 10 USDC de ETH na Base toda segunda e terça às 9h.', 'Buy 10 USDC of ETH every day at 9:00.', 'Buy 10 USDC of ETH every day at 9:00 on Ethereum testnet.']) {
       expect(groundAutomationDraft(draft({ network: 'ETHEREUM' }), text, 'UTC').kind).toBe('CLARIFICATION');
     }
   });
@@ -33,6 +33,53 @@ describe('Copilot Automation interpretation and grounding', () => {
     expect(result.input).toMatchObject({ kind: 'SCHEDULED_DCA', schedule: { frequency: 'DAILY', time: '09:00', timezone: 'Europe/Lisbon' }, action: { kind: 'ROUTE', network: 'base-sepolia', amount: '10', side: 'BUY' }, limits: { maxAmountPerExecution: '10' } });
     expect(validateAutomationInput(result.input, Date.now()).ok).toBe(true);
     expect(result.input).not.toHaveProperty('executionMode');
+  });
+  it.each([
+    'Buy 10 USDC worth of ETH on Base every Monday at 09:00.',
+    'Compre 10 USDC de ETH na Base toda segunda-feira às 9h.',
+  ])('grounds weekly schedules only from the user’s explicit words: %s', text => {
+    const result = groundAutomationDraft(draft({ network: 'BASE' }), text, 'America/Sao_Paulo');
+    expect(result).toMatchObject({ kind: 'PROPOSAL', input: { schedule: { frequency: 'WEEKLY', weekday: 1, time: '09:00', timezone: 'America/Sao_Paulo' }, action: { network: 'base', amount: '10' } } });
+    if (result.kind === 'PROPOSAL') expect(validateAutomationInput(result.input, Date.now()).ok).toBe(true);
+  });
+  it('asks for the missing weekly time and refuses ambiguous multiple schedules', () => {
+    expect(groundAutomationDraft(draft({ network: 'BASE', time: null }), 'Buy 10 USDC worth of ETH on Base every Monday.', 'UTC')).toMatchObject({ kind: 'CLARIFICATION', missing: ['time'] });
+    for (const text of ['Buy 10 USDC of ETH on Base every Monday and every Tuesday at 09:00.', 'Buy 10 USDC of ETH on Base every day and every Monday at 09:00.']) {
+      expect(groundAutomationDraft(draft({ network: 'BASE' }), text, 'UTC')).toMatchObject({ kind: 'CLARIFICATION', missing: ['schedule'] });
+    }
+  });
+  it.each([
+    ['EN', 'Buy 10 USDC of ETH on Base every week at 09:00.', 'Monday.'],
+    ['PT', 'Compre 10 USDC de ETH na Base toda semana às 9h.', 'Segunda-feira.'],
+  ] as const)('retains an explicitly weekly request through a bare weekday clarification (%s)', (language, text, answer) => {
+    const session = new CopilotSession(), workflow = session.workflow;
+    const intent = { version: '2', language, kind: 'AUTOMATION', draft: draft({ network: 'BASE' }) };
+    expect(session.say(text, intent)).toMatchObject({ kind: 'CLARIFICATION' });
+    const result = session.say(answer, intent);
+    expect(result).toMatchObject({ kind: 'AUTOMATION_PROPOSAL', automation: {
+      schedule: { frequency: 'WEEKLY', weekday: 1, time: '09:00' }, action: { network: 'base', amount: '10' },
+    } });
+    expect(session.workflow).toBe(workflow); expect(session.pending).toBeNull();
+    expect(result?.automation).not.toHaveProperty('executionMode');
+  });
+  it('keeps the chosen weekday when the next clarification fills a missing time', () => {
+    const session = new CopilotSession();
+    const intent = { version: '2', language: 'EN', kind: 'AUTOMATION', draft: draft({ network: 'BASE', time: null }) };
+    expect(session.say('Buy 10 USDC of ETH on Base every week.', intent)).toMatchObject({ kind: 'CLARIFICATION' });
+    expect(session.say('Monday', intent)).toMatchObject({ kind: 'CLARIFICATION', text: 'At what time should FloFi check this routine?' });
+    expect(session.say('09:00')).toMatchObject({ kind: 'AUTOMATION_PROPOSAL', automation: {
+      schedule: { frequency: 'WEEKLY', weekday: 1, time: '09:00' },
+    } });
+  });
+  it.each([
+    'Buy 10 USDC of ETH on Base weekly at 09:00.\nMonday and Tuesday.',
+    'Compre 10 USDC de ETH na Base toda semana às 9h.\nSegunda e terça.',
+    'Buy 10 USDC of ETH on Base on Monday at 09:00.',
+    'Buy 10 USDC of ETH on Base every other week at 09:00.\nMonday.',
+    'Buy 10 USDC of ETH on Base bi-weekly at 09:00.\nMonday.',
+    'Buy 10 USDC of ETH on Base weekly except Monday at 09:00.',
+  ])('does not invent or narrow a recurring schedule from unsupported wording: %s', text => {
+    expect(groundAutomationDraft(draft({ network: 'BASE' }), text, 'UTC')).toMatchObject({ kind: 'CLARIFICATION', missing: ['schedule'] });
   });
   it.each([
     ['If ETH falls below $3000, prepare a buy of 50 USDC on Base Sepolia.', 'PRICE_BELOW', 'BUY', '50', 'USDC', '3000'],

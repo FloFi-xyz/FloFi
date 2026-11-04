@@ -1,6 +1,13 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 /** BUILD-FLOFI-CHAT-E2E-DASHBOARD-UX-001: history access, Privacy & Memory consent, the workflows hub and the Dashboard. */
 export const portugueseChatDashboard: Readonly<Record<string, string>> = {
+  'More execution actions': 'Mais ações da execução',
+  'More workflow actions': 'Mais ações do workflow',
+  'View': 'Ver',
+  'Record actions': 'Ações do registro',
+  'Show details for {0}': 'Mostrar detalhes de {0}',
+  'Hide details for {0}': 'Ocultar detalhes de {0}',
+  'Refresh workflows': 'Atualizar workflows',
   'This wallet is not held by a FloFi account you are signed in to, so FloFi asks for its one-time verification message. It does not authorize a transaction.':
     'Esta carteira não pertence a uma conta FloFi conectada, por isso a FloFi pede a sua mensagem de verificação única. Ela não autoriza nenhuma transação.',
   'This wallet is not held by a FloFi account you are signed in to. Verify it once to save and reopen its workflows; this signs a message only and never moves funds.':

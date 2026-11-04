@@ -8,7 +8,7 @@ import { reviewOwner } from '../src/test-utils/review-fixture';
 
 // The real workspace, projections and shell run against explicit, isolated deferred reads.
 // Server reads and wallet signing are replaced only in this browser fixture bundle.
-let bundle: string;
+let bundle: string, bundleCss: string;
 const other = '0x' + '2'.repeat(40), errors = new WeakMap<Page, string[]>();
 test.beforeAll(async () => {
   const compiled = '../node_modules/next/dist/compiled/', aliases: Record<string, string> = {};
@@ -31,7 +31,9 @@ test.beforeAll(async () => {
     define: { 'process.env.NODE_ENV': '"production"', __dirname: '"/"', global: 'globalThis' },
     build: { write: false, minify: false, rolldownOptions: { transform: { inject: { Buffer: ['buffer', 'Buffer'], process: 'process' } } },
       lib: { entry: fileURLToPath(new URL('../src/test-utils/dashboard-workspace-acceptance-harness.tsx', import.meta.url)), name: 'FloFiFinalDashboardAcceptance', formats: ['iife'] } } });
-  const entry = (Array.isArray(result) ? result : [result]).flatMap(output => 'output' in output ? output.output : []).find(output => output.type === 'chunk' && output.isEntry);
+  const outputs = (Array.isArray(result) ? result : [result]).flatMap(output => 'output' in output ? output.output : []);
+  const entry = outputs.find(output => output.type === 'chunk' && output.isEntry);
+  bundleCss = outputs.filter(output => output.type === 'asset' && output.fileName.endsWith('.css')).map(output => output.type === 'asset' ? String(output.source) : '').join('\n');
   if (!entry || entry.type !== 'chunk') throw new Error('Final Dashboard acceptance bundle missing');
   bundle = entry.code;
 });
@@ -60,6 +62,7 @@ test.beforeEach(async ({ page }) => {
   const found: string[] = []; errors.set(page, found); page.on('pageerror', error => found.push(error.message));
   await page.goto('/app/dashboard'); await theme(page, 'light');
   await page.route('**/__ux006e-acceptance.js', route => route.fulfill({ contentType: 'application/javascript', body: bundle }));
+  await page.addStyleTag({ content: bundleCss });
   await page.addScriptTag({ url: '/__ux006e-acceptance.js' }); await mount(page); await reads(page, 1);
 });
 test.afterEach(({ page }) => { expect(errors.get(page)).toEqual([]); });
