@@ -8,6 +8,7 @@
  * (1024–65535), and never one of the suites' own loopback harness or fork ports.
  */
 import { PRIVACY_NOTICE_COOKIE, PRIVACY_NOTICE_VERSION } from '../src/domain/privacy-notice.ts';
+import { LANGUAGE_COOKIE, type Language } from '../src/i18n/language.ts';
 
 export const E2E_DEFAULT_APP_PORT = 3000;
 /** Loopback ports the browser suites already bind (MOCKED harnesses, synthetic and replayed forks). */
@@ -50,4 +51,17 @@ export function answeredPrivacyNotice(origin: string = E2E_APP_ORIGIN) {
   const url = new URL(origin);
   return { cookies: [{ name: PRIVACY_NOTICE_COOKIE, value: `${PRIVACY_NOTICE_VERSION}.NOT_NOW`, domain: url.hostname, path: '/', expires: -1, httpOnly: false,
     secure: url.protocol === 'https:', sameSite: 'Lax' as const }], origins: [] };
+}
+
+/**
+ * BUILD-FLOFI-SITE-001: a visitor with no saved language now gets Portuguese (`DEFAULT_LANGUAGE`). The suites, written against the English
+ * interface, visit as a returning visitor who saved English: the product's own `flofi_language` preference, exactly what Preferences writes.
+ * The default-language tests start from `answeredPrivacyNotice` alone, and a suite that needs Portuguese still sets it the way a visitor does.
+ */
+export function returningVisitor(origin: string = E2E_APP_ORIGIN, language: Language | null = 'EN') {
+  const state = answeredPrivacyNotice(origin);
+  if (!language) return state;
+  const url = new URL(origin);
+  return { ...state, cookies: [...state.cookies, { name: LANGUAGE_COOKIE, value: language, domain: url.hostname, path: '/', expires: -1, httpOnly: false,
+    secure: url.protocol === 'https:', sameSite: 'Lax' as const }] };
 }

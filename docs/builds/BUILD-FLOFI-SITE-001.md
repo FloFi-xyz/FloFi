@@ -71,9 +71,16 @@ Where a board states something the product does not do, the product wins; everyt
   at 320 px; otherwise phones keep the boards' own proportions.
 - `<h1>` and the Docs hero keep a space before their line break so assistive technology reads "DeFi do jeito que você fala."
 
-Known, unchanged: without a saved preference the site is Portuguese (as the previous landing) while sign-in and /app keep their English default;
-whether they should default to Portuguese too is an owner decision. The root document's server-rendered `lang` stays "en" until hydration (the
-site's own wrapper carries `lang="pt-BR"`), because the root layout serves every route.
+**Default language (owner decision, 2026-11-04).** A visitor with no saved preference gets Portuguese on the site, sign-in and /app.
+- One `DEFAULT_LANGUAGE = 'PT'` (`i18n/language.ts`) is read by the root layout, the account, product and wallet groups, and the site.
+- The root document's server-rendered `lang` follows the preference (`pt` / `en`) from the first paint.
+- A saved preference always wins, whether it is in the cookie, or only in storage (the provider and the site restore it). Existing English and
+  Portuguese choices are therefore unchanged, and the default is never written as anyone's preference.
+- The browser suites were written against the English interface, so they visit as a returning visitor who saved English
+  (`returningVisitor` in `e2e/app-origin.ts`: the same `flofi_language` cookie Preferences writes). The site's tests and the new-visitor
+  tests of `brand-ux-001` and `beta-ui` start without it.
+- `site.spec.ts` checks Portuguese on all three surfaces for a new visitor, English kept from the cookie and from storage, Portuguese kept,
+  and that nothing is saved for a new visitor.
 
 ## Removed (no longer routed)
 

@@ -13,7 +13,7 @@ import { createECDH, randomBytes, randomUUID } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
-import { E2E_APP_ORIGIN, E2E_APP_PORT, e2eNetworkScopeEnv, answeredPrivacyNotice } from './e2e/app-origin';
+import { E2E_APP_ORIGIN, E2E_APP_PORT, e2eNetworkScopeEnv, returningVisitor } from './e2e/app-origin';
 
 const cache = process.env.BUILD002_BROWSER_CACHE;
 if (!cache || basename(cache) !== 'chromium_headless_shell-1243') throw Error('VERIFIED_BROWSER_1243_REQUIRED');
@@ -60,7 +60,7 @@ if (!jupiterJournal.startsWith(join(tmpdir(), 'gryloo-build014-')) || !baseJourn
 export default defineConfig({
   testDir: './e2e', testMatch: 'auth-wallets.spec.ts', workers: 1, fullyParallel: false, retries: 0,
   timeout: 90_000, expect: { timeout: 15_000 }, reporter: 'list', globalSetup: './e2e/cloud-runtime-setup.ts',
-  use: { baseURL: E2E_APP_ORIGIN, storageState: answeredPrivacyNotice(E2E_APP_ORIGIN), browserName: 'chromium', headless: true, launchOptions: { executablePath },
+  use: { baseURL: E2E_APP_ORIGIN, storageState: returningVisitor(E2E_APP_ORIGIN), browserName: 'chromium', headless: true, launchOptions: { executablePath },
     serviceWorkers: 'block', trace: 'off', screenshot: 'only-on-failure', video: 'off' },
   webServer: [
     { command: 'node e2e/account-harness.ts', url: `${ACCOUNT_HARNESS_ORIGIN}/health`, reuseExistingServer: false, timeout: 30_000,

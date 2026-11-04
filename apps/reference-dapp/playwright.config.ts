@@ -6,7 +6,7 @@ import { spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { createHash, randomBytes } from 'node:crypto';
 import { E2E_APP_ORIGIN, E2E_APP_PORT, e2eNetworkScopeEnv } from './e2e/app-origin';
-import { answeredPrivacyNotice } from './e2e/app-origin';
+import { returningVisitor } from './e2e/app-origin';
 import { E2E_CARD_ORIGIN } from './e2e/app-origin';
 import { MCP_E2E_INVITE } from './e2e/mcp-constants';
 import { SERVER_ONLY_WOOVI_APP_ID } from './e2e/card-provider-fixtures';
@@ -253,7 +253,7 @@ export default defineConfig({
   expect: { timeout: 10_000, toHaveScreenshot: { animations: 'disabled', caret: 'hide', maxDiffPixels: 0 } },
   reporter: 'list',
   use: {
-    baseURL: E2E_APP_ORIGIN, storageState: answeredPrivacyNotice(E2E_APP_ORIGIN),
+    baseURL: E2E_APP_ORIGIN, storageState: returningVisitor(E2E_APP_ORIGIN),
     browserName: 'chromium',
     headless: true,
     launchOptions: { executablePath },

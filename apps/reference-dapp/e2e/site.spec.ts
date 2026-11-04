@@ -7,9 +7,12 @@ import { test as base, expect, type Page } from '@playwright/test';
 import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { DOCS } from '../src/components/site/docs-content';
+import { answeredPrivacyNotice } from './app-origin';
 import { DEVELOPER_ENDPOINTS } from '../src/components/site/site-copy';
 
+// The site's tests start as a new visitor (no saved language: Portuguese); the configs' shared state saves English for the other suites.
 const test = base.extend<{ guard: string[] }>({
+  storageState: async ({ baseURL }, use) => { await use(answeredPrivacyNotice(baseURL!)); },
   guard: [async ({ context, baseURL, page }, use) => {
     const unexpected: string[] = [], errors: string[] = [];
     await context.route('**/*', async route => {
@@ -117,6 +120,41 @@ test('the language preference is the product’s own: English everywhere, then b
   await expect(page.getByRole('radio', { name: 'English' })).toBeFocused();
   await page.keyboard.press('Escape');
   await expect(page.getByRole('button', { name: 'Preferences' })).toBeFocused();
+});
+
+test('a new visitor gets Portuguese on the site, sign-in and /app; saved English is kept; nothing is saved for them', async ({ page, context, baseURL }) => {
+  const h1 = page.getByRole('heading', { level: 1 });
+  await page.goto('/');
+  await expect(h1).toHaveText('DeFi do jeito que você fala.');
+  await page.goto('/login');
+  await expect(page.getByRole('link', { name: 'Explorar o construtor sem conta', exact: true })).toBeVisible();
+  await expect(page.locator('html')).toHaveAttribute('lang', 'pt');
+  await page.goto('/app');
+  await expect(page.getByRole('button', { name: 'Prefere o editor? Montar manualmente', exact: true })).toBeVisible();
+  await expect(page.locator('html')).toHaveAttribute('lang', 'pt');
+  // The default is not written as anyone's preference.
+  expect((await context.cookies()).filter(cookie => cookie.name === 'flofi_language')).toEqual([]);
+  expect(await page.evaluate(() => localStorage.getItem('flofi.language'))).toBeNull();
+  // An existing visitor's saved English is kept everywhere, from the first paint.
+  await context.addCookies([{ name: 'flofi_language', value: 'EN', url: new URL('/', baseURL).href }]);
+  for (const [path, locator] of [['/', h1], ['/login', page.getByRole('link', { name: 'Explore the builder without an account', exact: true })],
+    ['/app', page.getByRole('button', { name: 'Prefer the editor? Build manually', exact: true })]] as const) {
+    const response = await page.goto(path);
+    expect(await response!.text(), path).toMatch(/<html lang="en"/);
+    await expect(locator).toBeVisible();
+  }
+  // English kept only in storage (its cookie expired) is followed too, on the site and in /app.
+  await context.clearCookies({ name: 'flofi_language' });
+  await page.evaluate(() => localStorage.setItem('flofi.language', 'EN'));
+  await page.goto('/');
+  await expect(h1).toHaveText('DeFi the way you talk.');
+  await page.goto('/app');
+  await expect(page.getByRole('button', { name: 'Prefer the editor? Build manually', exact: true })).toBeVisible();
+  // A saved Portuguese preference is kept as well.
+  await context.addCookies([{ name: 'flofi_language', value: 'PT', url: new URL('/', baseURL).href }]);
+  await page.evaluate(() => localStorage.setItem('flofi.language', 'PT'));
+  await page.goto('/login');
+  await expect(page.getByRole('link', { name: 'Explorar o construtor sem conta', exact: true })).toBeVisible();
 });
 
 test('confirming the Portuguese shown by default saves it, so sign-in follows', async ({ page }) => {

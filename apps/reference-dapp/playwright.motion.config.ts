@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { defineConfig } from '@playwright/test';
-import { answeredPrivacyNotice } from './e2e/app-origin';
+import { returningVisitor } from './e2e/app-origin';
 import { join } from 'node:path';
 
 // Dedicated read-only landing checks. No chain fixtures, wallets or application providers.
@@ -12,7 +12,7 @@ export default defineConfig({
   workers: 1, retries: 0, timeout: 30_000, reporter: 'list',
   outputDir: 'test-results/motion',
   use: {
-    baseURL: origin, storageState: answeredPrivacyNotice(origin), browserName: 'chromium', viewport: { width: 1440, height: 900 },
+    baseURL: origin, storageState: returningVisitor(origin), browserName: 'chromium', viewport: { width: 1440, height: 900 },
     reducedMotion: 'no-preference', serviceWorkers: 'block',
     launchOptions: cache ? { executablePath: join(cache, 'chrome-headless-shell-linux64/chrome-headless-shell') } : {},
     trace: 'off', screenshot: 'only-on-failure', video: 'off',

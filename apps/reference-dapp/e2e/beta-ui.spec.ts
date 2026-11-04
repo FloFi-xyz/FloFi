@@ -9,6 +9,9 @@ const betaNoticePt = 'FloFi Beta Mainnet — Operações com fundos reais estão
 
 // BUILD-FLOFI-SITE-001: the owner-approved site replaced Landing 07. Its header CTA ("Entrar" / "Open") opens the sign-in entry (PR #143); the
 // /app notice below is unchanged.
+// A new visitor (no saved language) gets Portuguese; the visitor's English choice then follows into sign-in and /app.
+test.describe('as a new visitor', () => {
+test.use({ savedLanguage: null });
 test('the landing header CTA opens sign-in and the builder stays reachable without an account', async ({ page }) => {
   await page.goto('/');
   const header = page.locator('header');
@@ -21,6 +24,7 @@ test('the landing header CTA opens sign-in and the builder stays reachable witho
   await expect(page).toHaveURL('/login');
   await page.getByRole('link', { name: 'Explore the builder without an account', exact: true }).click();
   await expect(page).toHaveURL('/app');
+});
 });
 
 // BUILD-FLOFI-PRODUCT-UX-001: restore the yellow Beta Mainnet notice under the header (real funds enabled, review before signing).

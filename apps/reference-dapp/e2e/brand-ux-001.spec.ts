@@ -8,6 +8,9 @@ async function noOverflow(page: import('@playwright/test').Page) {
   await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
 }
 
+// A new visitor (no saved language) gets Portuguese first; the other suites visit with English saved.
+test.describe('as a new visitor', () => {
+test.use({ savedLanguage: null });
 for (const width of widths) {
   // BUILD-FLOFI-SITE-001: `/` is the owner-approved site (Portuguese first). "Entrar / Open" opens sign-in, from where the builder stays reachable
   // without an account, and the language the visitor chooses there is the product's own preference.
@@ -54,6 +57,7 @@ for (const width of widths) {
     expect(errors).toEqual([]);
   });
 }
+});
 
 for (const width of [320, 375, 390, 430]) {
   test(`touch controls, proposal and wallet dismissal at ${width}px`, async ({ page }) => {
