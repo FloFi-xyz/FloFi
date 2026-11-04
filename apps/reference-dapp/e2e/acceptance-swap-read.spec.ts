@@ -54,7 +54,7 @@ for (const [network, chain] of [['Base Sepolia', '0x14a34'], ['Ethereum Sepolia'
     expect(before).not.toContain('eth_sendTransaction');
     await page.getByRole('button', { name: 'Settings', exact: true }).click();
     await page.getByRole('switch', { name: 'Language', exact: true }).click(); await page.keyboard.press('Escape');
-    await expect(page.locator('html')).toHaveAttribute('lang', 'pt');
+    await expect(page.locator('html')).toHaveAttribute('lang', 'pt-BR');
     await expect(primary.getByRole('button', { name: 'Autorizar na carteira', exact: true })).toBeEnabled();
     expect(await walletRequests(page)).toEqual(before);
     await expect(page.locator('.summary-bar')).toHaveAttribute('data-workflow-revision', revision!);

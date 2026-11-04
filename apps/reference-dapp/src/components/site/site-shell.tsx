@@ -4,7 +4,7 @@ import Link from 'next/link';
 import type { ReactNode } from 'react';
 import { SITE_COPY, SITE_LINKS } from './site-copy';
 import type { SiteLanguage } from './site-language';
-import { SiteDocumentLanguage, SitePreferences } from './site-preferences';
+import { SitePreferences } from './site-preferences';
 import styles from './site.module.css';
 
 export type SitePage = 'home' | 'how' | 'developers' | 'docs';
@@ -31,7 +31,6 @@ const SOCIAL = [
 export function SiteShell({ language, page, guide = false, skipTo = 'conteudo', children }: { language: SiteLanguage; page: SitePage; guide?: boolean; skipTo?: string; children: ReactNode }) {
   const t = SITE_COPY[language];
   return <div className={styles.site} lang={t.lang} data-site-page={page}>
-    <SiteDocumentLanguage lang={t.lang}/>
     <a className={styles.skip} href={`#${skipTo}`}>{t.skip}</a>
     <header className={styles.header}>
       <Brand label={t.header.home} size="header"/>

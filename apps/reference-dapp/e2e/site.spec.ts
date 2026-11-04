@@ -128,10 +128,10 @@ test('a new visitor gets Portuguese on the site, sign-in and /app; saved English
   await expect(h1).toHaveText('DeFi do jeito que você fala.');
   await page.goto('/login');
   await expect(page.getByRole('link', { name: 'Explorar o construtor sem conta', exact: true })).toBeVisible();
-  await expect(page.locator('html')).toHaveAttribute('lang', 'pt');
+  await expect(page.locator('html')).toHaveAttribute('lang', 'pt-BR');
   await page.goto('/app');
   await expect(page.getByRole('button', { name: 'Prefere o editor? Montar manualmente', exact: true })).toBeVisible();
-  await expect(page.locator('html')).toHaveAttribute('lang', 'pt');
+  await expect(page.locator('html')).toHaveAttribute('lang', 'pt-BR');
   // The default is not written as anyone's preference.
   expect((await context.cookies()).filter(cookie => cookie.name === 'flofi_language')).toEqual([]);
   expect(await page.evaluate(() => localStorage.getItem('flofi.language'))).toBeNull();
@@ -155,6 +155,16 @@ test('a new visitor gets Portuguese on the site, sign-in and /app; saved English
   await page.evaluate(() => localStorage.setItem('flofi.language', 'PT'));
   await page.goto('/login');
   await expect(page.getByRole('link', { name: 'Explorar o construtor sem conta', exact: true })).toBeVisible();
+});
+
+test('the document language is right from the first byte; the embedded MCP surface keeps English', async ({ page }) => {
+  // A new visitor's documents: Brazilian Portuguese on the site, sign-in and the product; English on the MCP surface a chat host embeds.
+  for (const [path, lang] of [['/', 'pt-BR'], ['/docs/simulation', 'pt-BR'], ['/how-it-works', 'pt-BR'], ['/login', 'pt-BR'], ['/app', 'pt-BR'],
+    ['/approve', 'pt-BR'], ['/mcp/approve', 'en']] as const) {
+    const response = await page.request.get(path);
+    expect(response.status(), path).toBe(200);
+    expect(await response.text(), path).toContain(`<html lang="${lang}"`);
+  }
 });
 
 test('confirming the Portuguese shown by default saves it, so sign-in follows', async ({ page }) => {

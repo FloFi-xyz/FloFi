@@ -182,7 +182,7 @@ test('Save → Your workflows → exact Canvas restoration; grouped executions, 
   await stage(page, 'Build');
   const requests = await walletRequests(page);
   await page.getByRole('button', { name: 'Settings', exact: true }).click(); await page.getByRole('switch', { name: 'Language', exact: true }).click();
-  await expect(page.locator('html')).toHaveAttribute('lang', 'pt'); await page.keyboard.press('Escape');
+  await expect(page.locator('html')).toHaveAttribute('lang', 'pt-BR'); await page.keyboard.press('Escape');
   library = await libraryWorkspace(page, 'PT');
   await expect(library.getByRole('button', { name: `Abrir fluxo: ${name}`, exact: true })).toHaveCount(2);
   await expect(page.getByRole('group', { name: 'Ligação da carteira' })).toContainText(A.address.slice(0, 6));

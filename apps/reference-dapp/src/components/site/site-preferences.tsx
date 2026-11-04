@@ -10,12 +10,6 @@ import styles from './site.module.css';
  * BUILD-FLOFI-SITE-001: the header's "Preferences" (⋯) control. It sets the product's one shared language preference (the same cookie and storage
  * /app and sign-in read) and re-renders the page in that language. Language is the only preference the site offers.
  */
-/** The document's language follows the page (Portuguese by default), after the shared provider's own mount effect. */
-export function SiteDocumentLanguage({ lang }: { lang: string }) {
-  useEffect(() => { const frame = requestAnimationFrame(() => { document.documentElement.lang = lang; }); return () => cancelAnimationFrame(frame); }, [lang]);
-  return null;
-}
-
 export function SitePreferences({ language, labels }: { language: SiteLanguage; labels: { preferences: string; language: string; portuguese: string; english: string } }) {
   const { setLanguage } = useLocale();
   const router = useRouter();
