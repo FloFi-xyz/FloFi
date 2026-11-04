@@ -2,19 +2,24 @@
 
 ## Workflow channel trademark artwork
 
-The landing workflow illustration includes unmodified official OpenAI, Claude,
-WhatsApp and Telegram SVG marks. These remain their owners' trademarks and are
-excluded from the repository's source-code licenses. They identify possible
-entry points, without claiming endorsement or live production acceptance.
-Exact official sources, package members, usage terms and SHA-256 checksums are
-recorded in the [channel asset register](apps/reference-dapp/public/brand/channels/sources.md)
+The repository keeps unmodified official OpenAI, Claude, WhatsApp and Telegram
+SVG marks (the former landing's workflow illustration, retired by
+BUILD-FLOFI-SITE-001; the Claude and OpenAI marks still identify the product's
+connectors). These remain their owners' trademarks and are excluded from the
+repository's source-code licenses. They identify possible entry points, without
+claiming endorsement or live production acceptance. Exact official sources,
+package members, usage terms and SHA-256 checksums are recorded in the
+[channel asset register](apps/reference-dapp/public/brand/channels/sources.md)
 and [provider asset register](apps/reference-dapp/public/brand/providers/sources.md).
+The official X, Discord and LinkedIn marks the former footer used stay recorded
+in the [community link register](apps/reference-dapp/public/brand/social/sources.md).
 
-The landing and footer community links use unmodified official X, Discord and
-LinkedIn marks plus the Telegram mark above. They remain their owners'
-trademarks, are excluded from the repository's source-code licenses and imply
-no endorsement. Sources and SHA-256 checksums are recorded in the
-[community link register](apps/reference-dapp/public/brand/social/sources.md).
+BUILD-FLOFI-SITE-001: the public site's footer links to FloFi's own X, Discord,
+LinkedIn and Telegram accounts with small monochrome glyphs of those marks, as
+drawn in the owner-approved site design (inline SVG in
+`apps/reference-dapp/src/components/site/site-shell.tsx`). They remain their
+owners' trademarks, are excluded from the repository's source-code licenses and
+imply no endorsement.
 
 BUILD-FLOFI-AUTH-WALLETS-001: the sign-in screen shows the Google "G" and Apple
 marks on their own sign-in buttons, as inline SVG drawn to each provider's

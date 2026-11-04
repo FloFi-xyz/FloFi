@@ -9,36 +9,36 @@ async function noOverflow(page: import('@playwright/test').Page) {
 }
 
 for (const width of widths) {
-  // BUILD-FLOFI-LANDING07-README-001: `/` is Caio's Landing 07 (Portuguese first). Its product-entry links open sign-in (PR #143), from
-  // where the builder stays reachable without an account. The previous landing's sections, story and diagram are no longer routed.
+  // BUILD-FLOFI-SITE-001: `/` is the owner-approved site (Portuguese first). "Entrar / Open" opens sign-in, from where the builder stays reachable
+  // without an account, and the language the visitor chooses there is the product's own preference.
   test(`landing, keyboard navigation and product entry at ${width}px`, async ({ page }) => {
     await page.setViewportSize({ width, height: 900 });
     const errors: string[] = [];
     page.on('pageerror', error => errors.push(error.message));
     await page.goto('/');
-    await expect(page.getByRole('heading', { level: 1 })).toHaveText('FLOFI');
+    await expect(page.getByRole('heading', { level: 1 })).toHaveText('DeFi do jeito que você fala.');
     await expect(page.locator('.app-shell')).toHaveCount(0);
     await expect(page.getByRole('button', { name: 'Authorize workflow', exact: true })).toHaveCount(0);
-    expect(await page.locator('main section[id]').evaluateAll(items => items.map(item => item.id))).toEqual(['inicio', 'como-funciona', 'possibilidades', 'faq']);
+    expect(await page.locator('main section[id]').evaluateAll(items => items.map(item => item.id))).toEqual(['top', 'exemplos', 'como-funciona', 'seguranca', 'canais', 'entrar']);
     await expect(page.locator('main')).not.toContainText(/devnet|testnet|sepolia|mock|sandbox|synthetic|simulated.only|test.funds/i);
     await expect(page.locator('a[href*="cluster=devnet"]')).toHaveCount(0);
+    // The site's artwork loads lazily; ask every image to load now, then require each to have decoded.
     await page.locator('main img').evaluateAll(images => images.forEach(img => { (img as HTMLImageElement).loading = 'eager'; }));
     await expect.poll(() => page.locator('main img').evaluateAll(images => images
       .filter(img => !(img as HTMLImageElement).complete || (img as HTMLImageElement).naturalWidth === 0)
       .map(img => img.getAttribute('src')))).toEqual([]);
     await expect(page.getByRole('link', { name: 'Docs', exact: true }).first()).toHaveAttribute('href', '/docs');
     await page.keyboard.press('Tab');
-    await expect(page.getByRole('link', { name: 'Pular para o conteúdo' })).toBeFocused();
+    await expect(page.getByRole('link', { name: 'Ir para o conteúdo' })).toBeFocused();
     await page.keyboard.press('Enter');
-    await expect(page.locator('#main')).toBeFocused();
+    await expect(page.locator('#conteudo')).toBeFocused();
     await noOverflow(page);
-    await page.getByRole('button', { name: 'EN', exact: true }).click();
+    await page.getByRole('button', { name: 'Preferências', exact: true }).click();
+    await page.getByRole('radio', { name: 'English', exact: true }).check();
     await expect(page.locator('html')).toHaveAttribute('lang', 'en');
     await page.reload();
-    await expect(page.getByRole('heading', { name: 'From conversation to strategy.' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Try an example.' })).toBeVisible();
     await expect(page.locator('main')).not.toContainText(/devnet|testnet|sepolia|mock|sandbox|synthetic|test.funds/i);
-    await page.getByRole('button', { name: 'PT', exact: true }).click();
-    await expect(page.locator('html')).toHaveAttribute('lang', 'pt-BR');
     const entry = page.locator('header a[href="/login"]');
     await expect(entry).toBeVisible();
     await entry.click();
@@ -123,11 +123,11 @@ for (const width of [320, 375, 390, 430]) {
   });
 }
 
-test('reduced motion shows every Landing 07 block at once, without pinning', async ({ page }) => {
+// BUILD-FLOFI-SITE-001: the approved site has no scroll-driven motion; every section is visible and nothing is pinned.
+test('the landing shows every section at once, without pinning', async ({ page }) => {
   await page.goto('/');
-  for (const block of await page.locator('[data-landing07-reveal]').all()) expect(await block.evaluate(element => getComputedStyle(element).opacity)).toBe('1');
+  for (const section of await page.locator('main section').all()) expect(await section.evaluate(element => getComputedStyle(element).opacity)).toBe('1');
   expect(await page.locator('main').evaluate(element => [...element.querySelectorAll('*')].filter(item => getComputedStyle(item).position === 'sticky').length)).toBe(0);
-  await expect(page.locator('[data-demo-stage]')).toHaveAttribute('data-demo-stage', '6');
 });
 
 test('desktop workflow showcase uses the actual builder', async ({ page }) => {
@@ -138,12 +138,12 @@ test('desktop workflow showcase uses the actual builder', async ({ page }) => {
   if (process.env.FLOFI_BRAND_EVIDENCE) await page.screenshot({ path: 'e2e/visual-evidence/build-brand-ux-001/after-build-1440.png', fullPage: true });
 });
 
-test('Landing 07 scrolls naturally through its sections with motion allowed', async ({ page }) => {
+test('the landing scrolls naturally through its sections with motion allowed', async ({ page }) => {
   await page.emulateMedia({ reducedMotion: 'no-preference' });
   await page.goto('/');
   for (const width of [1440, 390]) {
     await page.setViewportSize({ width, height: 900 });
-    for (const id of ['como-funciona', 'possibilidades', 'faq']) {
+    for (const id of ['exemplos', 'como-funciona', 'seguranca', 'canais', 'entrar']) {
       await page.locator(`#${id}`).scrollIntoViewIfNeeded();
       await expect(page.locator(`#${id}`)).toBeInViewport();
     }
@@ -160,7 +160,7 @@ test('all migrated product routes remain accessible and sensitive routes retain 
     expect(response?.status()).toBe(200);
     await expect(page.locator('.app-shell')).toBeVisible();
     await expect(page.getByRole('navigation', { name: 'Workflow stages' })).toBeVisible();
-    await expect(page.getByRole('heading', { level: 1, name: 'FLOFI', exact: true })).toHaveCount(0);
+    await expect(page.getByRole('heading', { level: 1, name: 'DeFi do jeito que você fala.', exact: true })).toHaveCount(0);
   }
   for (const path of ['/approve', '/connections']) {
     const response = (await page.goto(path))!;

@@ -158,10 +158,6 @@
       "path": "apps/reference-dapp/src/components/account/sign-in.test.tsx",
       "stage": "unit"
     },
-    "app.config.landing07-fonts": {
-      "path": "apps/reference-dapp/src/config/landing07-fonts.test.ts",
-      "stage": "unit"
-    },
     "app.config.product": {
       "path": "apps/reference-dapp/src/config/product.test.ts",
       "stage": "unit"
@@ -240,10 +236,6 @@
     },
     "app.e2e.global-product-polish": {
       "path": "apps/reference-dapp/e2e/global-product-polish.spec.ts",
-      "stage": "browser"
-    },
-    "app.e2e.landing07": {
-      "path": "apps/reference-dapp/e2e/landing07.spec.ts",
       "stage": "browser"
     },
     "app.e2e.wallet-selector": {
@@ -848,6 +840,10 @@
     },
     "app.e2e.privacy-notice": {
       "path": "apps/reference-dapp/e2e/privacy-notice.spec.ts",
+      "stage": "browser"
+    },
+    "app.e2e.site": {
+      "path": "apps/reference-dapp/e2e/site.spec.ts",
       "stage": "browser"
     },
     "app.server.wallet-portfolio": {
@@ -1504,20 +1500,20 @@
         "apps/reference-dapp/src/app/docs/page.tsx",
         "apps/reference-dapp/src/app/fonts.css",
         "apps/reference-dapp/src/app/globals.css",
-        "apps/reference-dapp/src/app/landing07-fonts.css",
         "apps/reference-dapp/src/app/layout.tsx",
         "apps/reference-dapp/src/app/page.tsx",
         "apps/reference-dapp/src/app/privacy/page.tsx",
-        "apps/reference-dapp/src/app/privacy/privacy.module.css"
+        "apps/reference-dapp/src/app/privacy/privacy.module.css",
+        "apps/reference-dapp/src/app/how-it-works/page.tsx",
+        "apps/reference-dapp/src/app/developers/page.tsx"
       ],
       "suites": [
-        "app.config.landing07-fonts",
         "app.e2e.canvas-keyboard",
         "app.e2e.global-product-polish",
-        "app.e2e.landing07",
         "app.e2e.wallet-selector",
         "app.i18n.catalog",
-        "app.i18n.locale"
+        "app.i18n.locale",
+        "app.e2e.site"
       ],
       "gaps": [
         "Browser profiles cover selected journeys; full accessibility audit, device matrix and language completeness remain acceptance gaps."
@@ -2396,7 +2392,6 @@
         "apps/reference-dapp/src/components/copilot-ai.tsx",
         "apps/reference-dapp/src/components/copilot-panel.tsx",
         "apps/reference-dapp/src/components/flofi-avatar.tsx",
-        "apps/reference-dapp/src/components/marketing/conversation-demo.tsx",
         "apps/reference-dapp/src/components/proposal-review-position.ts",
         "apps/reference-dapp/src/components/proposal-review.tsx"
       ],
@@ -2474,12 +2469,6 @@
         "apps/reference-dapp/src/components/dashboard/dashboard-workspace.tsx",
         "apps/reference-dapp/src/components/dashboard/run-detail-view.tsx",
         "apps/reference-dapp/src/components/dashboard/run-evidence.tsx",
-        "apps/reference-dapp/src/components/docs/article.tsx",
-        "apps/reference-dapp/src/components/docs/content.ts",
-        "apps/reference-dapp/src/components/docs/docs-mascot.module.css",
-        "apps/reference-dapp/src/components/docs/docs-mascot.tsx",
-        "apps/reference-dapp/src/components/docs/docs-shell.tsx",
-        "apps/reference-dapp/src/components/docs/docs.module.css",
         "apps/reference-dapp/src/components/embedded-approval.tsx",
         "apps/reference-dapp/src/components/execute-workspace.tsx",
         "apps/reference-dapp/src/components/execution-concurrency-notes.tsx",
@@ -2493,28 +2482,6 @@
         "apps/reference-dapp/src/components/history-actions.module.css",
         "apps/reference-dapp/src/components/history-actions.tsx",
         "apps/reference-dapp/src/components/manifest-review.tsx",
-        "apps/reference-dapp/src/components/marketing/assistant-onboarding.tsx",
-        "apps/reference-dapp/src/components/marketing/connected-flow.tsx",
-        "apps/reference-dapp/src/components/marketing/crypto-visuals.tsx",
-        "apps/reference-dapp/src/components/marketing/demo-timeline.ts",
-        "apps/reference-dapp/src/components/marketing/earth-atmosphere.tsx",
-        "apps/reference-dapp/src/components/marketing/flofi-mascot.tsx",
-        "apps/reference-dapp/src/components/marketing/landing-copy.ts",
-        "apps/reference-dapp/src/components/marketing/landing-motion.tsx",
-        "apps/reference-dapp/src/components/marketing/landing.module.css",
-        "apps/reference-dapp/src/components/marketing/landing07-copy.ts",
-        "apps/reference-dapp/src/components/marketing/landing07-demo.tsx",
-        "apps/reference-dapp/src/components/marketing/landing07-page.tsx",
-        "apps/reference-dapp/src/components/marketing/landing07.module.css",
-        "apps/reference-dapp/src/components/marketing/mascot-animations.ts",
-        "apps/reference-dapp/src/components/marketing/mascot-journey.tsx",
-        "apps/reference-dapp/src/components/marketing/mascot-motion.module.css",
-        "apps/reference-dapp/src/components/marketing/page.tsx",
-        "apps/reference-dapp/src/components/marketing/scripted-steps.ts",
-        "apps/reference-dapp/src/components/marketing/social-links.tsx",
-        "apps/reference-dapp/src/components/marketing/supported-networks.tsx",
-        "apps/reference-dapp/src/components/marketing/workflow-channel-icon.tsx",
-        "apps/reference-dapp/src/components/marketing/workflow-story.tsx",
         "apps/reference-dapp/src/components/mobile-build-navigation.tsx",
         "apps/reference-dapp/src/components/navigation-drawer.tsx",
         "apps/reference-dapp/src/components/observation-panel.tsx",
@@ -2542,7 +2509,18 @@
         "apps/reference-dapp/src/components/workflow-name.tsx",
         "apps/reference-dapp/src/components/workflow-run-panel.tsx",
         "apps/reference-dapp/src/components/dashboard/portfolio-widget.tsx",
-        "apps/reference-dapp/src/components/dashboard/portfolio-widget.module.css"
+        "apps/reference-dapp/src/components/dashboard/portfolio-widget.module.css",
+        "apps/reference-dapp/src/components/site/developers-page.tsx",
+        "apps/reference-dapp/src/components/site/docs-content.ts",
+        "apps/reference-dapp/src/components/site/docs-pages.tsx",
+        "apps/reference-dapp/src/components/site/docs-sidebar.tsx",
+        "apps/reference-dapp/src/components/site/home-page.tsx",
+        "apps/reference-dapp/src/components/site/how-it-works-page.tsx",
+        "apps/reference-dapp/src/components/site/site-copy.ts",
+        "apps/reference-dapp/src/components/site/site-language.ts",
+        "apps/reference-dapp/src/components/site/site-preferences.tsx",
+        "apps/reference-dapp/src/components/site/site-shell.tsx",
+        "apps/reference-dapp/src/components/site/site.module.css"
       ],
       "suites": [
         "app.components.canvas-panel-reveal",
@@ -2550,11 +2528,11 @@
         "app.e2e.build-entry",
         "app.e2e.canvas-keyboard",
         "app.e2e.global-product-polish",
-        "app.e2e.landing07",
         "app.e2e.wallet-selector",
         "app.i18n.catalog",
         "app.i18n.locale",
-        "app.components.dashboard.portfolio-widget"
+        "app.components.dashboard.portfolio-widget",
+        "app.e2e.site"
       ],
       "gaps": [
         "Browser profiles cover selected journeys; full accessibility audit, device matrix and language completeness remain acceptance gaps."
@@ -4194,31 +4172,27 @@
         "apps/reference-dapp/public/fonts/ibm-plex-mono-c6f09ee0e0a24b7c.woff2",
         "apps/reference-dapp/public/fonts/ibm-plex-mono-d524dc8ff6dbf7ed.woff2",
         "apps/reference-dapp/public/fonts/ibm-plex-mono-f1050dc5317b4343.woff2",
-        "apps/reference-dapp/public/fonts/landing07/Anton.OFL.txt",
-        "apps/reference-dapp/public/fonts/landing07/anton-23aab0b2692a0c89.woff2",
-        "apps/reference-dapp/public/fonts/landing07/anton-889f979804fc6c2d.woff2",
-        "apps/reference-dapp/public/fonts/landing07/anton-ae1a8ac1c2899a66.woff2",
-        "apps/reference-dapp/public/fonts/landing07/manifest.json",
         "apps/reference-dapp/public/fonts/manifest.json",
         "apps/reference-dapp/public/fonts/outfit-92684e4acde79ef0.woff2",
         "apps/reference-dapp/public/fonts/outfit-9e38b3f1575daba3.woff2",
         "apps/reference-dapp/public/gryloo-logo.png",
-        "apps/reference-dapp/public/landing07/bubble-reference-v2.png",
-        "apps/reference-dapp/public/landing07/clock.webp",
-        "apps/reference-dapp/public/landing07/mascot-reference-v2.png",
-        "apps/reference-dapp/public/landing07/ribbon-reference-v2.png",
-        "apps/reference-dapp/public/landing07/strategy-sculpture.png",
-        "apps/reference-dapp/public/landing07/swap-sculpture.png",
-        "apps/reference-dapp/public/landing07/transfer-sculpture.png"
+        "apps/reference-dapp/public/brand/site/flofi-mark-on-dark.svg",
+        "apps/reference-dapp/public/brand/site/flofi-mark.svg",
+        "apps/reference-dapp/public/brand/site/flofi-wordmark-on-dark.svg",
+        "apps/reference-dapp/public/brand/site/flofi-wordmark.svg",
+        "apps/reference-dapp/public/brand/site/mascot-check.svg",
+        "apps/reference-dapp/public/brand/site/mascot-cheer.svg",
+        "apps/reference-dapp/public/brand/site/mascot-coin.svg",
+        "apps/reference-dapp/public/brand/site/mascot-search.svg",
+        "apps/reference-dapp/public/brand/site/mascot-wave.svg"
       ],
       "suites": [
-        "app.config.landing07-fonts",
         "app.e2e.canvas-keyboard",
         "app.e2e.global-product-polish",
-        "app.e2e.landing07",
         "app.e2e.wallet-selector",
         "app.i18n.catalog",
-        "app.i18n.locale"
+        "app.i18n.locale",
+        "app.e2e.site"
       ],
       "gaps": [
         "Browser profiles cover selected journeys; full accessibility audit, device matrix and language completeness remain acceptance gaps.",
