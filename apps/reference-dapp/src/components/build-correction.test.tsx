@@ -13,6 +13,8 @@ import { createCrossChainLiquidityWorkflow } from '../domain/cross-chain-liquidi
 import { createSolanaSwapNode } from '../domain/jupiter-authoring';
 import { createSolanaLiquidityNode } from '../domain/solana-liquidity-authoring';
 import { composerSummary, composerConnections, composerNodeState, supplyProposalTarget } from '../domain/composer-presentation';
+/** BUILD-FLOFI-BUILDER-UX-002: a card title renders its step number in a circle; its text is still "N. Action". */
+const titled = (html: string) => html.replace(/<span class="composer-step-number">(\d+)<\/span><span class="composer-step-dot">\. <\/span><span class="composer-action-name">([^<]+)<\/span>/g, '$1. $2');
 
 const fixture = vi.hoisted(() => ({ store: null as unknown as ReturnType<typeof import('../state/workflow-store').useWorkflow> }));
 vi.mock('../state/workflow-store', () => ({ useWorkflow: () => fixture.store }));
@@ -113,13 +115,13 @@ describe('corrected Build workspace presentation', () => {
     expect(fixture.store.addCanvasCommand).not.toHaveBeenCalled();
   });
 
-  it('renders the supplied primary action inside the graph without triggering authoring or navigation', () => {
+  // BUILD-FLOFI-BUILDER-UX-002 (owner-approved brief): the Canvas lifecycle control lives once in the Editor footer (summary-bar.test.tsx); the Build
+  // Canvas hosts none, so it can never be duplicated, and rendering the Canvas triggers no authoring or navigation.
+  it('hosts no lifecycle control in the Build graph and triggers no authoring on render', () => {
     setWorkflow();
-    const navigate = vi.fn();
-    const html = renderToStaticMarkup(createElement(WorkflowCanvas, { selectedId: null, select: vi.fn(),
-      primaryAction: createElement('button', { type: 'button', onClick: navigate }, 'Simular Fees') }));
-    expect(html).toMatch(/aria-label="Workflow graph"[\s\S]*?<div class="canvas-primary-action"><button type="button">Simular Fees<\/button><\/div><\/div><div class="canvas-foot"/);
-    expect(navigate).not.toHaveBeenCalled();
+    const html = renderToStaticMarkup(createElement(WorkflowCanvas, { selectedId: null, select: vi.fn() }));
+    expect(html).toMatch(/aria-label="Workflow graph"/);
+    expect(html).not.toMatch(/canvas-primary-action|data-lifecycle-action/);
     expect(fixture.store.dispatch).not.toHaveBeenCalled();
     expect(fixture.store.addCanvasCommand).not.toHaveBeenCalled();
   });
@@ -136,8 +138,11 @@ describe('corrected Build workspace presentation', () => {
     expect(canvas).not.toContain('Advanced Settings');
     expect(canvas).toMatch(/<button type="button" class="composer-selected nodrag nopan" aria-haspopup="dialog" aria-expanded="false" aria-label="Action settings"[^>]*>Settings\s*<svg/);
     const name = action[0]!.toUpperCase() + action.slice(1);
-    expect(canvas).toMatch(new RegExp(`class="composer-action-title"><span>1\\. ${name}</span><svg[^>]*aria-hidden="true"[^>]*>[\\s\\S]*?</svg></strong>`));
-    expect(canvas).not.toMatch(/Step 1|Configured/);
+    expect(canvas).toMatch(new RegExp(`class="composer-action-title"><span class="composer-step-number">1</span><span class="composer-step-dot">\\. </span><span class="composer-action-name">${name}</span><svg[^>]*aria-hidden="true"[^>]*>[\\s\\S]*?</svg></strong>`));
+    expect(titled(canvas)).toContain(`1. ${name}`);
+    // BUILD-FLOFI-BUILDER-UX-002 (owner-approved brief): one discreet status per card, from the review and the Canvas drafts only.
+    expect(canvas.match(/class="composer-status" data-card-status="(draft|configured|attention)"/g)).toHaveLength(1);
+    expect(canvas).not.toMatch(/Step 1|Simulated|Approved|Ready to execute/);
     expect(canvas).toContain('USDC');
     expect(canvas).not.toMatch(/<form|role="dialog"|MOCK ACTION|Template.*no execution/i);
     expect(canvas.match(/class="numeric composer-amount-box/g)).toHaveLength(1);
@@ -266,7 +271,7 @@ describe('UX-002 canonical composer projections', () => {
       stocks: { equity: 'AAPL', onEquityChange: vi.fn() },
       amountEditor: { value: '0', changed: false, canApply: false, onChange: vi.fn(), onReview: () => null, onApply: vi.fn() },
     } }));
-    expect(html).toContain('1. Stocks'); expect(html).toContain('Uniswap'); expect(html).toContain('Robinhood Chain');
+    expect(titled(html)).toContain('1. Stocks'); expect(html).toContain('Uniswap'); expect(html).toContain('Robinhood Chain');
     expect(html).toContain('data-relationship="directional"');
     expect(html.match(/class="numeric composer-amount-box/g)).toHaveLength(2);
     expect(html).toContain('aria-label="Stocks amount (USDG)"'); expect(html).toContain('value="0"');
@@ -291,7 +296,7 @@ describe('UX-002 canonical composer projections', () => {
     ]);
     const canvas = renderToStaticMarkup(createElement(WorkflowCanvas, { selectedId: 'lending-borrow', select: vi.fn() }));
     expect(canvas.match(/composer-card active/g)).toHaveLength(1);
-    expect(canvas).toContain('1. Supply'); expect(canvas).toContain('2. Borrow'); expect(canvas).toContain('3. Swap');
+    expect(titled(canvas)).toContain('1. Supply'); expect(titled(canvas)).toContain('2. Borrow'); expect(titled(canvas)).toContain('3. Swap');
     expect(canvas).not.toMatch(/Completed|Runtime:|Confirmed|<form/);
     const inspector = renderToStaticMarkup(createElement(ActionSettingsContent, { selectedId: 'lending-borrow', select: vi.fn() }));
     expect(inspector).not.toContain('Advanced Settings');
@@ -318,6 +323,9 @@ describe('UX-002 canonical composer projections', () => {
     const canvas = renderToStaticMarkup(createElement(WorkflowCanvas, { selectedId: node.nodeId, select: vi.fn() }));
     expect(canvas).not.toContain('data-state="warning"'); expect(canvas).not.toContain('Check settings');
     expect(canvas).not.toMatch(/composer-card-state|composer-warning|composer-value-edit/);
+    // BUILD-FLOFI-BUILDER-UX-002 (owner-approved brief): the card's one discreet status now names the review's warning (no "⚠"/"Check settings" tags).
+    expect(state.message).toBe('Review the prototype slippage limit.');
+    expect(canvas).toContain('class="composer-status" data-card-status="attention" title="Check this step’s slippage limit."');
     const inspector = renderToStaticMarkup(createElement(ActionSettingsContent, { selectedId: node.nodeId, select: vi.fn() }));
     expect(inspector).toContain('Selected action checks'); expect(inspector).toContain(state.message);
     const missingSlippage = { ...fixture.store.state.workflow, nodes: fixture.store.state.workflow.nodes.map(item => item.nodeId === node.nodeId ? { ...item, userConstraints: item.userConstraints.filter(constraint => constraint.kind !== 'MAXIMUM_SLIPPAGE_BPS') } : item) };

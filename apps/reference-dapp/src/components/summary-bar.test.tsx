@@ -109,48 +109,44 @@ function footerButtons(props: Parameters<typeof SummaryBar>[0]) {
   walk(tree);
   return buttons;
 }
-// BUILD-FLOFI-CHAT-EDITOR-UX-001: Simulate and Execute are no longer top-level tabs; the Editor's footer opens those sections instead.
-describe('Editor sections in the footer', () => {
-  it('opens the simulation and execution sections from the Canvas without any lifecycle action', () => {
-    const setTab = vi.fn();
-    const props = { tab: 'Build' as const, setTab, canvasOwnsAction: true, sections: { disabled: false } };
+// BUILD-FLOFI-BUILDER-UX-002 (owner-approved Editor brief): the Editor's Create → Simulate → Execute stepper now opens the sections (editor-stepper.test.tsx);
+// the footer states the count and the workflow's real notices and hosts the existing Canvas lifecycle control, once.
+const step = (nodeId: string, n: number, kind: 'draft' | 'configured' | 'attention', detail = '') =>
+  ({ nodeId, step: n, action: 'Swap', flow: 'USDC → WETH', status: { kind, label: kind === 'attention' ? 'Needs attention' : kind === 'draft' ? 'Draft' : 'Configured', detail } });
+const overview = (fields: Partial<Parameters<typeof SummaryBar>[0]['overview'] & object> = {}) =>
+  ({ count: 1, steps: [step('a', 1, 'configured')], networks: ['Base'], state: 'configured' as const, attention: [], drafts: 0, invalid: false, ...fields });
+describe('Editor footer', () => {
+  it('no longer repeats the stepper: no section buttons on the Canvas or the simulation section', () => {
+    for (const tab of ['Build', 'Simulate'] as const) expect(renderToStaticMarkup(createElement(SummaryBar, { tab, setTab: vi.fn(), canvasOwnsAction: true }))).not.toMatch(/summary-sections|View simulation|View execution/);
+  });
+
+  it('hosts the existing Canvas lifecycle control once, on the Canvas only, keeping its wrapper class', () => {
+    const control = createElement('button', { type: 'button', className: 'primary', 'data-lifecycle-action': 'simulate' }, 'Simulate workflow');
+    const html = renderToStaticMarkup(createElement(SummaryBar, { tab: 'Build', setTab: vi.fn(), canvasOwnsAction: true, primaryAction: control, overview: overview() }));
+    expect(html.match(/data-lifecycle-action="simulate"/g)).toHaveLength(1);
+    expect(html).toContain('<div class="canvas-primary-action summary-primary-action"><button type="button" class="primary" data-lifecycle-action="simulate">Simulate workflow</button></div>');
+    expect(html).toContain('class="summary-bar editor-bar"');
+    expect(renderToStaticMarkup(createElement(SummaryBar, { tab: 'Simulate', setTab: vi.fn(), canvasOwnsAction: true, primaryAction: control }))).not.toContain('data-lifecycle-action');
+  });
+
+  it('states only real notices: steps that need attention, unapplied changes, or none', () => {
+    const showStep = vi.fn();
+    const props = { tab: 'Build' as const, setTab: vi.fn(), canvasOwnsAction: true, showStep,
+      overview: overview({ state: 'attention', steps: [step('a', 1, 'configured'), step('b', 2, 'attention', 'Slippage is elevated.')], attention: [step('b', 2, 'attention', 'Slippage is elevated.')] }) };
     const html = renderToStaticMarkup(createElement(SummaryBar, props));
-    expect(html).toContain('<div class="summary-sections" role="group" aria-label="Editor sections"><button type="button">View simulation</button><button type="button">View execution</button></div>');
-    expect(html).not.toMatch(/class="primary"|Review|Authorize|Back to/);
-    expect(setTab).not.toHaveBeenCalled();
-    const [simulation, execution] = footerButtons(props);
-    expect(simulation?.props.children).toBe('View simulation'); simulation!.props.onClick();
-    expect(setTab).toHaveBeenLastCalledWith('Simulate');
-    expect(execution?.props.children).toBe('View execution'); execution!.props.onClick();
-    expect(setTab).toHaveBeenLastCalledWith('Execute');
-    expect(setTab).toHaveBeenCalledTimes(2);
-    expect(createPortal).not.toHaveBeenCalled();
-  });
-
-  it('offers only the execution section from the simulation section, beside no Review action of its own', () => {
-    const setTab = vi.fn();
-    const props = { tab: 'Simulate' as const, setTab, canvasOwnsAction: true, sections: { disabled: false } };
-    const html = renderToStaticMarkup(createElement(SummaryBar, props));
-    expect(html).toContain('<div class="summary-sections" role="group" aria-label="Editor sections"><button type="button">View execution</button></div>');
-    expect(html).not.toMatch(/View simulation|Review swap|class="primary"/);
-    const buttons = footerButtons(props);
-    expect(buttons.map(button => button.props.children)).toEqual(['View execution']);
-    buttons[0]!.props.onClick();
-    expect(setTab).toHaveBeenCalledExactlyOnceWith('Execute');
-  });
-
-  it('keeps both sections closed while a Canvas amount is unapplied, as the former tabs were, and says why', () => {
-    const html = renderToStaticMarkup(createElement(SummaryBar, { tab: 'Build', setTab: vi.fn(), canvasOwnsAction: true, sections: { disabled: true, incomplete: true } }));
-    expect(html.match(/<button type="button" disabled="" title="Configure the action amount on the Canvas first">View (simulation|execution)<\/button>/g)).toHaveLength(2);
-  });
-
-  it('keeps both sections closed while an /approve proposal gates them, without the amount reason', () => {
-    const html = renderToStaticMarkup(createElement(SummaryBar, { tab: 'Build', setTab: vi.fn(), canvasOwnsAction: true, sections: { disabled: true } }));
-    expect(html.match(/<button type="button" disabled="">View (simulation|execution)<\/button>/g)).toHaveLength(2);
-    expect(html).not.toContain('title=');
-  });
-
-  it('adds no section action where the shell does not ask for one', () => {
-    expect(renderToStaticMarkup(createElement(SummaryBar, { tab: 'Build', setTab: vi.fn(), canvasOwnsAction: true }))).not.toMatch(/summary-sections|<button/);
+    expect(html).toContain('1 step needs attention'); expect(html).toContain('Step 2: Slippage is elevated.');
+    const [show] = footerButtons(props);
+    expect(show?.props.children).toBe('Show step'); show!.props.onClick();
+    expect(showStep).toHaveBeenCalledExactlyOnceWith('b');
+    expect(renderToStaticMarkup(createElement(SummaryBar, { ...props, overview: overview({ state: 'draft', drafts: 2 }) }))).toContain('2 changes not applied yet');
+    expect(renderToStaticMarkup(createElement(SummaryBar, { ...props, overview: overview() }))).toContain('No step warnings');
+    // Simulate closed for a reason its control states: the footer claims nothing about warnings.
+    expect(renderToStaticMarkup(createElement(SummaryBar, { ...props, overview: overview(), simulationBlocked: true }))).not.toContain('summary-notice');
+    // One live region: attention is announced, an unapplied change is read on demand.
+    expect(html).toContain('<p class="summary-notice" data-notice="attention" role="status">');
+    expect(renderToStaticMarkup(createElement(SummaryBar, { ...props, overview: overview({ state: 'draft', drafts: 1 }) }))).not.toContain('role="status"');
+    expect(renderToStaticMarkup(createElement(SummaryBar, { ...props, overview: overview({ state: 'empty', count: 0, steps: [] }) }))).not.toContain('summary-notice');
+    // A notice never claims a simulation, an approval or an executable transaction.
+    expect(html).not.toMatch(/Simulated|Approved|Ready to execute/);
   });
 });

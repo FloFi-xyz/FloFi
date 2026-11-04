@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { test, expect, installPassiveWallet, assertPassiveWallet, sendChatCommand, openSimulationDetails, readWorkflowIr } from './fixtures';
 import type { Page } from '@playwright/test';
-import { continueToBuilder, openBuilder, openEditorSection, reloadBuilder } from './build-entry-navigation';
+import { continueToBuilder, openBuilder, openEditorSection, reloadBuilder, useToolbarRail } from './build-entry-navigation';
 
 test.beforeEach(async ({ page }) => { await installPassiveWallet(page); });
 test.afterEach(async ({ page }) => { await assertPassiveWallet(page); });
@@ -155,20 +155,23 @@ test('toolbox mode is presentation-only and persists across Build navigation', a
   const graph = page.getByRole('region', { name: 'Workflow graph' });
   const original = await graph.locator('.react-flow__node').count();
   const revisionBeforeSwitch = await page.locator('.summary-bar').getAttribute('data-workflow-revision');
-  await expect(page.getByRole('button', { name: 'Undock toolbar' })).toHaveAttribute('aria-pressed', 'false');
-  await page.getByRole('button', { name: 'Undock toolbar' }).click();
+  // BUILD-FLOFI-BUILDER-UX-002 (owner-approved brief): the vertical rail is the default; docking is the owner's remembered choice.
+  await expect(page.getByRole('button', { name: 'Dock toolbar' })).toHaveAttribute('aria-pressed', 'true');
   await expect(graph.locator('.floating-toolbox')).toBeVisible();
-  await expect(graph.getByRole('button', { name: 'Add swap' })).toBeVisible();
+  await expect(graph.locator('.floating-toolbox').getByRole('button', { name: 'Add swap' })).toBeVisible();
+  await page.getByRole('button', { name: 'Dock toolbar' }).click();
+  await expect(graph.locator('.floating-toolbox')).toHaveCount(0);
+  await expect(page.locator('.canvas-head').getByRole('button', { name: 'Add swap' })).toBeVisible();
   await expect(graph.locator('.react-flow__node')).toHaveCount(original);
   await expect(page.locator('.summary-bar')).toHaveAttribute('data-workflow-revision', revisionBeforeSwitch!);
   await addFromToolbox(page, 'swap');
   await openEditorSection(page, 'Simulate');
   await openEditorSection(page, 'Build');
-  await expect(page.getByRole('button', { name: 'Dock toolbar' })).toHaveAttribute('aria-pressed', 'true');
-  await expect(graph.locator('.floating-toolbox')).toBeVisible();
-  await page.getByRole('button', { name: 'Dock toolbar' }).click();
+  await expect(page.getByRole('button', { name: 'Undock toolbar' })).toHaveAttribute('aria-pressed', 'false');
   await expect(graph.locator('.floating-toolbox')).toHaveCount(0);
-  await expect(page.locator('.canvas-head').getByRole('button', { name: 'Add swap' })).toBeVisible();
+  await page.getByRole('button', { name: 'Undock toolbar' }).click();
+  await expect(graph.locator('.floating-toolbox')).toBeVisible();
+  await expect(graph.locator('.canvas-utility-dock').getByRole('button', { name: 'Undo', exact: true })).toBeVisible();
   await expect(page.getByText('Technical workflow details')).toHaveCount(0);
   await expect(page.getByText('Demo assistant')).toHaveCount(0);
   await expect(page.getByText('Demo mode', { exact: true })).toHaveCount(0);
@@ -197,7 +200,7 @@ test('floating toolbox keeps a clickable gutter from viewport controls', async (
   for (const width of [1280, 390]) {
     await page.setViewportSize({ width, height: 844 });
     await openBuilder(page);
-    await page.getByRole('button', { name: 'Undock toolbar' }).click();
+    await useToolbarRail(page);
     const graph = page.getByRole('region', { name: 'Workflow graph' });
     const toolbox = await graph.locator('.floating-toolbox').boundingBox();
     const controls = await graph.locator('.canvas-navigator').boundingBox();
@@ -281,7 +284,7 @@ test('drag keeps node mounted and cyclic connections leave semantic edges unchan
   await expect(page.locator('.summary-bar')).toHaveAttribute('data-workflow-revision', String(Number(revision) + 1));
   const connectedIr = await readWorkflowIr(page);
   await connect(page, 'node-003', 'node-002');
-  await page.getByRole('button', { name: 'Undock toolbar' }).click();
+  await page.getByRole('button', { name: 'Dock toolbar' }).click();
   await expect(page.locator('.react-flow__edge')).toHaveCount(1);
   expect(await readWorkflowIr(page)).toBe(connectedIr);
   await expect(page.locator('.summary-bar')).toHaveAttribute('data-workflow-revision', String(Number(revision) + 1));
@@ -334,10 +337,13 @@ test('the first toolbar action waits for initialization and survives preference 
   await continueToBuilder(page);
   await expect(page.getByLabel('Describe your flow')).toBeEnabled();
   await expect(undock).toBeVisible();
-  await page.getByRole('button', { name: 'Undock toolbar' }).click();
+  // The rail is the default; the owner's docked choice is restored after a reload.
   await expect(page.locator('.floating-toolbox')).toBeVisible();
+  await page.getByRole('button', { name: 'Dock toolbar' }).click();
+  await expect(page.locator('.floating-toolbox')).toHaveCount(0);
   await reloadBuilder(page);
-  await expect(page.locator('.floating-toolbox')).toBeVisible();
+  await expect(page.locator('.floating-toolbox')).toHaveCount(0);
+  await expect(page.locator('.canvas-head').getByRole('button', { name: 'Undock toolbar' })).toBeVisible();
   await expect(page.locator('.summary-bar')).toHaveAttribute('data-workflow-revision', '0');
   await expect(page.locator('.react-flow__node')).toHaveCount(0);
 });
@@ -345,10 +351,17 @@ test('the first toolbar action waits for initialization and survives preference 
 test('floating toolbox stays inside a narrow editor without page overflow', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await openBuilder(page);
-  await page.getByRole('button', { name: 'Undock toolbar' }).click();
+  await useToolbarRail(page);
   const graph = page.getByRole('region', { name: 'Workflow graph' });
   await expect(graph.locator('.floating-toolbox')).toBeVisible();
-  await expect(graph.locator('.floating-toolbox button')).toHaveCount(15);
+  // BUILD-FLOFI-BUILDER-UX-002: the step actions fill the rail; the utilities (duplicate, undo, redo, delete, dock) have their own small toolbar.
+  await expect(graph.locator('.floating-toolbox button')).toHaveCount(11);
+  await expect(graph.locator('.canvas-utility-dock button')).toHaveCount(5);
+  for (const box of [await graph.locator('.floating-toolbox').boundingBox(), await graph.locator('.canvas-utility-dock').boundingBox()]) {
+    const surface = (await graph.boundingBox())!;
+    expect(box!.x).toBeGreaterThanOrEqual(surface.x); expect(box!.x + box!.width).toBeLessThanOrEqual(surface.x + surface.width);
+    expect(box!.y + box!.height).toBeLessThanOrEqual(surface.y + surface.height);
+  }
   await expect(graph.getByRole('button', { name: 'Add send', exact: true })).toBeVisible();
   await expect(graph.getByRole('button', { name: 'Privacy', exact: true })).toBeDisabled();
   await expect(graph.getByRole('button', { name: 'Add repay', exact: true })).toBeVisible();

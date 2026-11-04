@@ -26,6 +26,8 @@ import { AssetSearch } from './asset-search';
 import { useRevealPanel } from './canvas-panel-reveal';
 import { ProposalReviewArtifact } from './proposal-review';
 import { usdLine, type UsdLine } from '../domain/usd-estimate';
+import { canvasCardFlow, shortRecipient, type CanvasCardParam } from '../domain/canvas-card-summary';
+import type { CardStatus } from '../domain/editor-overview';
 
 export type CanvasAmountEditor = { value: string; changed: boolean; canApply: boolean; formId?: string; onChange(value: string): void; onReview(): string | null; onApply(): void; onCancel?: () => void;
   /**
@@ -418,6 +420,11 @@ export type ComposerCardData = {
   onOpenSettings?: () => void;
   /** BUILD-FLOFI-CONVERSATIONAL-001: this card's settings popover is open. */
   settingsOpen?: boolean;
+  /** BUILD-FLOFI-BUILDER-UX-002: key facts the step itself holds (`canvasCardParams`), shown as the card's summary rows. Drafts have none. */
+  params?: readonly CanvasCardParam[];
+  /** BUILD-FLOFI-BUILDER-UX-002 (owner-approved brief): the card's discreet status (`canvasCardStatus`: draft, configured or needs attention), from the
+   * workflow's review and the Canvas drafts only. "Configured" is not simulated, approved or executable. Inspection cards have none. */
+  cardStatus?: CardStatus;
 } & ({ inspection: true } | { inspection?: false; validation: ReturnType<typeof composerNodeState> });
 
 /** Shared UX-002 card; inspection has no authoring or simulation-result status. */
@@ -502,14 +509,22 @@ export function ComposerCard({ data: card }: { data: ComposerCardData }) {
   // Authored actions keep their configured assets; draft Swap exposes its existing supported directions.
   const tokenOptions = tokenPanel && tokenSymbol ? card.actionSelection?.tokens[tokenPanel] ?? card.tokenSelection?.[tokenPanel] ?? [tokenSymbol] : [];
   const AmountContainer = editor ? 'form' : 'div';
-  const content = <div className={`flow-card composer-card ${card.selected ? 'active' : ''}`} data-state={card.inspection || quietAmount ? undefined : card.validation.tone}>
+  // BUILD-FLOFI-BUILDER-UX-002: the card's one-line flow (`USDC → WETH`, `USDC · Base → Arbitrum`), read from the values the card shows. A Send
+  // names its recipient only when the To field holds a valid one. Liquidity cards have none: their two value boxes already name both assets.
+  const recipientLabel = !card.recipient ? null : card.recipient.ownerOnly || (card.recipient.status === 'valid' && !card.recipient.value) ? tr('Your connected wallet')
+    : card.recipient.status === 'valid' ? shortRecipient(card.recipient.value) : null;
+  const flow = card.inspection || poolCard ? null : canvasCardFlow(card.summary, recipientLabel);
+  // BUILD-FLOFI-BUILDER-UX-002: one discreet status per authoring card (replacing the former "⚠ status" / "Check settings" tags), read from the
+  // workflow's review and the Canvas drafts. The step number sits in a circle; the title's text stays "N. Action" for assistive technology.
+  const status = card.inspection ? undefined : card.cardStatus;
+  const content = <div className={`flow-card composer-card ${card.selected ? 'active' : ''}`} data-state={card.inspection || quietAmount ? undefined : card.validation.tone} data-card-status={status?.kind}>
       <Handle id="input" type="target" position={card.vertical ? Position.Top : Position.Left} isConnectable={!card.inspection && Boolean(card.connectable)}/>
-      <strong className="composer-action-title"><span>{tr(card.step)}. {tr(card.summary.action)}</span><ActionIcon action={actionIcons[card.summary.action] ?? 'action'}/></strong>
-      {!card.inspection && !quietAmount && card.validation.status !== 'Configured' && <span className="composer-card-state" title={tr(card.validation.message)}>{tr(card.validation.tone !== 'neutral' && '⚠ ')}{tr(card.validation.status === 'Draft' ? 'Check settings' : card.validation.status)}</span>}
+      <strong className="composer-action-title"><span className="composer-step-number">{tr(card.step)}</span><span className="composer-step-dot">. </span><span className="composer-action-name">{tr(card.summary.action)}</span><ActionIcon action={actionIcons[card.summary.action] ?? 'action'}/></strong>
       {poolCard ? <PoolProviderSelector provider={card.summary.provider} chain={card.summary.chain}/> : <span className="composer-metadata">
         <span className="composer-provider">{tr(card.summary.provider.replace(/Cross-chain Router/g, 'Router') || 'Provider not specified')}</span>
         {!bridgeCard && <>{tr(' · ')}<span className="composer-chain">{tr(card.summary.chain)}</span></>}
       </span>}
+      {flow && <span className="composer-operation" title={tr(flow)}>{tr(flow)}</span>}
       {card.inspection ? <>
         {card.summary.liquidityValues ? <ValuePair relationship="contribution">
           {card.summary.liquidityValues.map((value, index) => <ValueBox key={value.token} readOnly source={index === 0} amount={value.amount} token={value.token} network={sourceNetwork}
@@ -591,11 +606,20 @@ export function ComposerCard({ data: card }: { data: ComposerCardData }) {
             : <button type="button" className="composer-amount-apply" disabled={!card.poolProposal.canApply || (poolRange.edited && !poolRange.reviewCurrent)} onClick={() => { card.poolProposal!.onApply(); poolRange.reset(); }}>{tr("Apply")}</button>}
         </div>}
       </div>}
-      {!card.inspection && !quietAmount && card.validation.message && <span className="composer-warning" title={tr(card.validation.message)}>{tr("Check settings")}</span>}
       {card.summary.risk && <span className="flow-card-risk">{tr(card.summary.risk)}</span>}
-      {!card.inspection && <button type="button" className="composer-selected nodrag nopan" aria-haspopup="dialog" aria-expanded={Boolean(card.settingsOpen)} aria-label={tr("Action settings")}
-        onClick={event => { event.stopPropagation(); card.onOpenSettings?.(); }} title={tr("Open this action's settings")}>{tr("Settings ")}<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m10 3-.5 3-2 1.2L4.7 6l-2 3.5 2.3 2v1l-2.3 2 2 3.5 2.8-1.2 2 1.2.5 3h4l.5-3 2-1.2 2.8 1.2 2-3.5-2.3-2v-1l2.3-2-2-3.5-2.8 1.2-2-1.2-.5-3Z"/><circle cx="12" cy="12" r="3"/></svg>
-      </button>}
+      {/* BUILD-FLOFI-BUILDER-UX-002: compact summary rows, only for facts the step holds (configured maximum slippage, liquidity fee tier).
+          Nothing estimated, quoted or inferred is shown here; quotes stay in the value boxes and fees and routes at Review. */}
+      {!card.inspection && card.params?.length ? <dl className="composer-params">
+        {card.params.map(param => <div key={param.key} className="composer-param">
+          <dt>{tr(param.key === 'slippage' ? 'Max slippage' : 'Fee tier')}</dt><dd className="numeric">{param.value}</dd>
+        </div>)}
+      </dl> : null}
+      {(status || !card.inspection) && <div className="composer-foot">
+        {!card.inspection && <button type="button" className="composer-selected nodrag nopan" aria-haspopup="dialog" aria-expanded={Boolean(card.settingsOpen)} aria-label={tr("Action settings")}
+          onClick={event => { event.stopPropagation(); card.onOpenSettings?.(); }} title={tr("Open this action's settings")}>{tr("Settings ")}<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m10 3-.5 3-2 1.2L4.7 6l-2 3.5 2.3 2v1l-2.3 2 2 3.5 2.8-1.2 2 1.2.5 3h4l.5-3 2-1.2 2.8 1.2 2-3.5-2.3-2v-1l2.3-2-2-3.5-2.8 1.2-2-1.2-.5-3Z"/><circle cx="12" cy="12" r="3"/></svg>
+        </button>}
+        {status && <span className="composer-status" data-card-status={status.kind} title={status.kind === 'attention' ? tr(status.detail) : undefined}><span className="composer-status-dot" aria-hidden="true"/>{tr(status.label)}<span className="sr-only">{`: ${tr(status.detail)}`}</span></span>}
+      </div>}
       <Handle id="output" type="source" position={card.vertical ? Position.Bottom : Position.Right} isConnectable={!card.inspection && Boolean(card.connectable)}/>
     </div>;
   // BUILD-BASE-001: on an official-catalog network the editable picker also searches the whole validated catalog (swaps and pools: ERC-20s).

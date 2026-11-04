@@ -16,8 +16,10 @@ import { FloFiAvatar, UserAvatar } from './flofi-avatar';
  * this panel can render beside any stage without losing it. Suggested answers appear only on FloFi's latest message: an older button can never
  * answer a newer question.
  */
-export function CopilotPanel({ conversation, interactive = true, owner = null, proof }: { conversation: FlofiConversation; interactive?: boolean; owner?: WorkflowOwner | null;
-  proof?: ReturnType<typeof useWalletProof> }) {
+export function CopilotPanel({ conversation, interactive = true, owner = null, proof, overview }: { conversation: FlofiConversation; interactive?: boolean; owner?: WorkflowOwner | null;
+  proof?: ReturnType<typeof useWalletProof>;
+  /** BUILD-FLOFI-BUILDER-UX-002: the Editor's live workflow summary (Canvas only), above the unchanged conversation and composer. */
+  overview?: ReactNode }) {
   const { t: tr, language } = useLocale();
   const { copilot, messages, busy, input, setInput, send } = conversation;
   const log = useFollowLatest(copilot.enabled || conversation.direct, messages.length, busy);
@@ -36,6 +38,7 @@ export function CopilotPanel({ conversation, interactive = true, owner = null, p
     {you ? <>{bubble}<UserAvatar/></> : <><FloFiAvatar/>{bubble}</>}</div>;
   return <aside className="copilot panel" aria-label={tr("FloFi Assistant")} data-conversation-phase={conversation.phase ?? undefined}>
     <div className="copilot-head"><h2 className="assistant-title"><FloFiAvatar size="title"/><span>{tr("FloFi Assistant")}</span></h2></div>
+    {overview}
     <div ref={log} className="chat-messages" role="log" aria-live="polite" aria-label={tr("Conversation")}>{messages.map((message, index) => {
       const options = message === last && message.role !== 'you' ? message.options : undefined;
       return row(message.role === 'you', message.id, <div className={`message ${message.role === 'flofi' ? 'system flofi' : message.role}`}>

@@ -12,7 +12,7 @@ import { routerDetails } from './router-authoring';
 import type { UniswapLiquidityInput } from './uniswap-liquidity-authoring';
 import { defaultPoolRange, validCryptoSelection, canSelectCryptoAssets, cryptoInputOf, type CryptoSelection, type CryptoSelections } from './crypto-action-picker';
 import { actionReviewValue } from './canvas-action-setup';
-import { canvasPosition, type CanvasLayout } from './canvas-layout';
+import { defaultCanvasPosition, shownCanvasPositions, type CanvasLayout } from './canvas-layout';
 import { editorReducer, initialEditor, templateEditor, type EditorState } from './editor';
 import { freeze, type Workflow } from './initial-workflow';
 import { canEditCanvasAmount, canvasAmountCommand, amountCommandTarget, bridgeSetupNetworks, CANVAS_BRIDGE_NETWORK_OPTIONS, type CanvasActionSetup, type CanvasAmountInputs, type CanvasBridgeNetworks, type CanvasBridgeNetworkInputs, type CanvasRecipientInputs } from './canvas-action-setup';
@@ -88,13 +88,25 @@ export function planCanvasDuplicate(workflow: Workflow, layout: CanvasLayout, no
   const duplicateLayout = { ...layout };
   for (const [index, node] of sources.entries()) {
     const sourcePosition = layout[node.nodeId]?.actionType === node.actionType
-      ? layout[node.nodeId]! : { x: 85 + (workflow.nodes.indexOf(node) % 3) * 270,
-        y: 90 + Math.floor(workflow.nodes.indexOf(node) / 3) * 190, actionType: node.actionType };
+      ? layout[node.nodeId]! : { ...defaultCanvasPosition(workflow.nodes.indexOf(node)), actionType: node.actionType };
     duplicateLayout[ids[index]!] = { ...sourcePosition, x: sourcePosition.x + 36, y: sourcePosition.y + 36 };
   }
   return { workflow: freeze(candidate), layout: duplicateLayout, ids };
 }
 
+/**
+ * BUILD-FLOFI-BUILDER-UX-002: the layout with every shown card pinned where the Canvas draws it (`shownCanvasPositions`, the same inputs as the
+ * render). A card without a stored place is placed relative to the others, so any layout change pins first: committing, moving, duplicating or
+ * setting up one card never moves a card the owner did not touch. Layout only; the workflow is not read for anything else.
+ */
+function pinnedLayout(workflow: Workflow, layout: CanvasLayout, setupId: string | null | undefined): CanvasLayout {
+  const shown = workflowDependencyOrder(workflow.nodes).filter(node => !node.actionType.startsWith('mock-'));
+  const setup = setupId ? layout[setupId] : undefined;
+  const positions = shownCanvasPositions(shown, layout, { lending: isLendingComposition(workflow), occupied: setup ? [setup] : [] });
+  const pinned = { ...layout };
+  for (const node of shown) if (pinned[node.nodeId]?.actionType !== node.actionType) pinned[node.nodeId] = { ...positions[node.nodeId]!, actionType: node.actionType };
+  return pinned;
+}
 export function editorHistoryReducer(state: EditorHistory, action: HistoryAction): EditorHistory {
   if (action.type === 'START_ACTION_SETUP') {
     // Configure one new action at a time so the existing canonical sequence never changes on acceptance.
@@ -109,7 +121,7 @@ export function editorHistoryReducer(state: EditorHistory, action: HistoryAction
       actionSetup = { id, action: action.action, amount: '0', beneficiary: action.beneficiary! };
     else actionSetup = { id, action: action.action, amount: '0' };
     return { ...state, actionSetup, setupSerial: state.setupSerial + 1,
-      layout: { ...state.layout, [id]: { ...action.position, actionType: action.action === 'swap' ? 'asset.swap.exact-input' : action.action === 'bridge' ? 'asset.bridge' : action.action } },
+      layout: { ...pinnedLayout(state.editor.workflow, state.layout, null), [id]: { ...action.position, actionType: action.action === 'swap' ? 'asset.swap.exact-input' : action.action === 'bridge' ? 'asset.bridge' : action.action } },
       past: [...state.past, snapshot(state)], future: [] };
   }
   if (action.type === 'START_STOCKS_SETUP') {
@@ -117,7 +129,7 @@ export function editorHistoryReducer(state: EditorHistory, action: HistoryAction
     const id = `action-setup-${state.setupSerial + 1}`;
     const actionSetup: CanvasActionSetup = { id, action: 'swap', amount: '0', stocks: true,
       cryptoSelection: { action: 'swap', network: ROBINHOOD_NETWORK, from: 'USDG', to: featuredStockSymbols()[0]! } };
-    return { ...state, actionSetup, setupSerial: state.setupSerial + 1, layout: { ...state.layout, [id]: { ...action.position, actionType: 'asset.swap.exact-input' } },
+    return { ...state, actionSetup, setupSerial: state.setupSerial + 1, layout: { ...pinnedLayout(state.editor.workflow, state.layout, null), [id]: { ...action.position, actionType: 'asset.swap.exact-input' } },
       past: [...state.past, snapshot(state)], future: [] };
   }
   if (action.type === 'EDIT_CRYPTO_SELECTION') {
@@ -191,7 +203,7 @@ export function editorHistoryReducer(state: EditorHistory, action: HistoryAction
   }
   if (action.type === 'REMOVE_ACTION_SETUP') {
     if (!state.actionSetup) return state;
-    const layout = { ...state.layout }; delete layout[state.actionSetup.id];
+    const layout = pinnedLayout(state.editor.workflow, state.layout, state.actionSetup.id); delete layout[state.actionSetup.id];
     return { ...state, actionSetup: null, layout, past: [...state.past, snapshot(state)], future: [] };
   }
   // An external proposal is composed on the initial draft. Only an untouched draft (revision 0) takes that draft's identity, so the
@@ -234,7 +246,7 @@ export function editorHistoryReducer(state: EditorHistory, action: HistoryAction
   if (action.type === 'LOAD_LAYOUT') return { ...state, layout: action.layout };
   if (action.type === 'DUPLICATE') {
     if (state.actionSetup || Object.keys(state.amountInputs).length) return state;
-    const result = planCanvasDuplicate(state.editor.workflow, state.layout, action.nodeIds, action.context);
+    const result = planCanvasDuplicate(state.editor.workflow, pinnedLayout(state.editor.workflow, state.layout, null), action.nodeIds, action.context);
     return result ? { ...state, editor: { workflow: result.workflow, error: null }, layout: result.layout,
       past: [...state.past, snapshot(state)], future: [] } : state;
   }
@@ -253,7 +265,7 @@ export function editorHistoryReducer(state: EditorHistory, action: HistoryAction
       future: action.type === 'REDO' ? state.future.slice(0, -1) : [...state.future, current] };
   }
   if (action.type === 'MOVE') {
-    const layout = { ...state.layout };
+    const layout = pinnedLayout(state.editor.workflow, state.layout, state.actionSetup?.id);
     let changed = false;
     for (const [id, position] of Object.entries(action.positions)) {
       const node = state.editor.workflow.nodes.find(item => item.nodeId === id) ?? (state.actionSetup?.id === id
@@ -316,15 +328,15 @@ export function editorHistoryReducer(state: EditorHistory, action: HistoryAction
   }
   const actionSetup = state.actionSetup?.id === action.authoringId ? null : state.actionSetup;
   if (editor.workflow === state.editor.workflow && actionSetup === state.actionSetup && Object.keys(amountInputs).length === Object.keys(state.amountInputs).length) return { ...state, editor };
-  let layout = { ...state.layout };
-  workflowDependencyOrder(state.editor.workflow.nodes).filter(n => !n.actionType.startsWith('mock-')).forEach((node, index) => {
-    if (!layout[node.nodeId]) layout[node.nodeId] = { ...(isLendingComposition(state.editor.workflow) ? { x: 180, y: 35 + index * 230 } : canvasPosition({}, node, index)), actionType: node.actionType };
-  });
+  // BUILD-FLOFI-BUILDER-UX-002: every card stays where the Canvas drew it, before and after this commit (`pinnedLayout`).
+  let layout = pinnedLayout(state.editor.workflow, state.layout, state.actionSetup?.id);
   const position = action.position ?? (state.actionSetup && state.actionSetup.id === action.authoringId ? state.layout[state.actionSetup.id] : undefined);
   if (position) {
     const added = editor.workflow.nodes.find(node => !state.editor.workflow.nodes.some(previous => previous.nodeId === node.nodeId));
     if (added) layout = { ...layout, [added.nodeId]: { ...position, actionType: added.actionType } };
   }
   if (state.actionSetup && !actionSetup) { const nextLayout = { ...layout }; delete nextLayout[state.actionSetup.id]; layout = nextLayout; }
+  // A step the chat or a proposal added (no position given) is pinned where it is first drawn: beside the step it consumes, or the next free slot.
+  layout = pinnedLayout(editor.workflow, layout, actionSetup?.id);
   return { ...state, editor, layout, actionSetup, amountInputs, bridgeNetworkInputs, cryptoSelections, recipientInputs, past: [...state.past, snapshot(state)], future: [] };
 }

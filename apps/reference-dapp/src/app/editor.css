@@ -1,0 +1,182 @@
+/* SPDX-License-Identifier: AGPL-3.0-only */
+/* BUILD-FLOFI-BUILDER-UX-002 (owner-approved Editor brief, part 2): the Artifact's tokens — palette (#041B3D ink, #2343D9 blue, #4B5B73 muted,
+   #D9E2EC line, #F5F8FB soft, #C9D2F8 lavender), Outfit with IBM Plex Mono for small meta labels, pill radii and numbered circles — for the Editor:
+   Create → Simulate → Execute stepper, a Canvas that takes the space, the workflow header (name, networks, real state), the vertical tool rail,
+   compact cards with a numbered circle and one discreet status, a compact FloFi panel with the live workflow summary, and a footer with the count,
+   real notices and the Simulate control. Presentation only; dark theme keeps the approved graphite palette through the same tokens. */
+.app-shell{--fx-ink:#041B3D;--fx-blue:#2343D9;--fx-fill:#2343D9;--fx-muted:#4B5B73;--fx-line:#D9E2EC;--fx-soft:#F5F8FB;--fx-lavender:#C9D2F8;--fx-paper:#FFFFFF;
+  --fx-warn:#8A5A00;--fx-warn-soft:#FFF5DE;--fx-warn-line:#F0D9A8;--fx-shadow:rgba(4,27,61,.07);--fx-mono:var(--font-ibm-plex-mono),ui-monospace,monospace}
+:root[data-theme="dark"] .app-shell{--fx-ink:var(--text-primary);--fx-blue:var(--accent);--fx-muted:var(--text-secondary);--fx-line:var(--border);--fx-soft:var(--surface-raised);
+  --fx-lavender:var(--accent-soft);--fx-paper:var(--surface);--fx-warn:var(--warning-text);--fx-warn-soft:var(--warning-surface);--fx-warn-line:#5b4521;--fx-shadow:rgba(0,0,0,.24)}
+/* Stepper */
+.editor-steps-row{width:100%;max-width:1720px;margin:0 auto;padding:14px 20px 0;display:flex;justify-content:center}
+.editor-stepper ol{display:flex;align-items:center;margin:0;padding:0;list-style:none}
+.editor-stepper li{display:flex;align-items:center}
+.editor-stepper-line{width:44px;height:2px;margin:0 6px;border-radius:2px;background:var(--fx-line)}
+.editor-stepper button{display:inline-flex;align-items:center;gap:10px;min-height:44px;padding:4px 16px 4px 5px;border:1px solid transparent;border-radius:999px;background:transparent;color:var(--fx-muted);font:inherit;font-size:15px;font-weight:600;cursor:pointer}
+.editor-stepper-number{display:grid;place-items:center;flex:none;width:32px;height:32px;border:1px solid var(--fx-line);border-radius:50%;background:var(--fx-paper);color:var(--fx-muted);font-size:14px;font-weight:700;line-height:1}
+.editor-stepper button[aria-current="step"]{border-color:var(--fx-line);background:var(--fx-paper);color:var(--fx-ink);box-shadow:0 1px 2px var(--fx-shadow)}
+.editor-stepper button[aria-current="step"] .editor-stepper-number{border-color:var(--fx-fill);background:var(--fx-fill);color:#fff}
+.editor-stepper button:hover:not(:disabled):not([aria-current]){background:var(--fx-soft);color:var(--fx-ink)}
+.editor-stepper button:disabled{opacity:.55;cursor:not-allowed}
+.editor-stepper button:focus-visible{outline:2px solid var(--fx-blue);outline-offset:2px}
+/* Canvas takes the space; the FloFi panel is compact. */
+@media(min-width:801px){.main.build-workspace{padding-top:14px}}
+.main.workflow-workspace.build-workspace,.main.workflow-workspace.build-workspace[data-workspace-toolbox]{--workspace-panel-width:320px;--workspace-gap:16px;--workspace-radius:20px;--workspace-header-height:auto}
+@media(min-width:801px){
+  .main.workflow-workspace.build-workspace,.main.workflow-workspace.build-workspace[data-workspace-toolbox]{--workspace-height:clamp(560px,calc(100svh - 300px),980px)}
+  .main.workflow-workspace.build-workspace:has(.lending-canvas){--workspace-height:820px}
+  /* The rail (now the desktop default) used a fixed 760 px Canvas; it follows the window too, so the Canvas ends above the sticky footer. */
+  .main.workflow-workspace.build-workspace .build-grid:has(.floating-toolbox)>.canvas:not(.lending-canvas),
+  .main.workflow-workspace.build-workspace .build-grid:has(.floating-toolbox)>.copilot{height:var(--workspace-height)}
+}
+.build-workspace .canvas{border-color:var(--fx-line);border-radius:20px;box-shadow:0 1px 2px var(--fx-shadow)}
+.build-workspace .canvas-foot{padding:8px 16px;font-size:11px;color:var(--fx-muted)}
+/* Workflow header: editable name, networks and the real state. */
+.build-workspace .build-canvas-head{display:flex;flex-direction:column;align-items:stretch;gap:10px;padding:12px 16px;border-bottom:1px solid var(--fx-line)}
+.canvas-head-main{display:flex;align-items:center;flex-wrap:wrap;gap:8px 14px;min-width:0}
+.canvas-head-main .canvas-name{flex:0 1 auto;min-width:0}
+.build-workspace .canvas-head-main .canvas-name h2{font-size:18px;font-weight:600;letter-spacing:-.01em;color:var(--fx-ink);overflow-wrap:anywhere}
+.canvas-head-meta{display:flex;align-items:center;flex-wrap:wrap;gap:8px;min-width:0;flex:1 1 auto}
+.editor-network-chips{display:flex;flex-wrap:wrap;gap:6px;margin:0;padding:0;list-style:none}
+.editor-network-chips li{display:inline-flex;align-items:center;gap:6px;height:28px;padding:0 11px 0 4px;border:1px solid var(--fx-line);border-radius:999px;background:var(--fx-paper);color:var(--fx-ink);font-size:12.5px;font-weight:500;white-space:nowrap}
+.editor-network-icon{display:grid;place-items:center;width:20px;height:20px;border-radius:50%;overflow:hidden}
+.editor-network-icon :is(svg,img){width:20px;height:20px}
+.editor-state-pill{display:inline-flex;align-items:center;gap:6px;height:28px;padding:0 11px;border:1px solid var(--fx-line);border-radius:999px;background:var(--fx-soft);color:var(--fx-muted);font-family:var(--fx-mono);font-size:12px;font-weight:500;white-space:nowrap}
+.editor-state-pill::before{content:'';width:7px;height:7px;border-radius:50%;background:currentColor}
+.editor-state-pill[data-editor-state="configured"]{border-color:color-mix(in srgb,var(--fx-blue) 30%,var(--fx-line));background:color-mix(in srgb,var(--fx-blue) 7%,var(--fx-paper));color:var(--fx-blue)}
+.editor-state-pill[data-editor-state="attention"]{border-color:var(--fx-warn-line);background:var(--fx-warn-soft);color:var(--fx-warn)}
+.editor-state-pill[data-editor-state="draft"]{border-style:dashed}
+.canvas-head-meta{flex:0 1 auto}
+.build-workspace .canvas-head-main .revision{margin-left:auto;padding:0;border:0;background:none;font-family:var(--fx-mono);font-size:12px;color:var(--fx-muted);white-space:nowrap}
+/* Docked tool row (an owner's choice): wraps instead of overflowing, in every language. */
+.build-workspace .build-canvas-head .canvas-toolbar-row{flex-wrap:wrap}
+.build-workspace .build-canvas-head .canvas-toolbar-row .canvas-toolbox{flex:1 1 100%;flex-wrap:wrap;row-gap:2px}
+.build-workspace .build-canvas-head .canvas-toolbar-row .canvas-primary-tools{flex:1 1 auto;flex-wrap:wrap;overflow:visible;justify-content:flex-start}
+.build-workspace .build-canvas-head .canvas-toolbar-row .canvas-utility-tools{flex-wrap:wrap}
+/* Vertical tool rail (default). */
+.build-flow-surface .floating-toolbox{left:12px;top:12px;max-height:calc(100% - 24px);padding:6px;border-color:var(--fx-line);border-radius:16px;background:var(--fx-paper);box-shadow:0 6px 20px var(--fx-shadow)}
+.build-flow-surface .floating-toolbox .canvas-toolbox button{width:40px;height:40px;border-radius:11px}
+.build-flow-surface .floating-toolbox .canvas-toolbox button:hover:not(:disabled),.build-flow-surface .floating-toolbox .canvas-toolbox button:focus-visible{border-color:transparent;background:var(--fx-soft)}
+.build-flow-surface .floating-toolbox .canvas-toolbox button svg{color:var(--fx-blue)}
+.build-flow-surface .floating-toolbox .toolbox-mode-toggle{margin-top:2px;border-color:transparent;background:transparent;color:var(--fx-muted)}
+.build-flow-surface .floating-toolbox .canvas-toolbox button{width:38px;height:38px;min-height:38px}
+/* The utilities' own small toolbar, top right of the Canvas (rail mode). */
+.build-flow-surface .canvas-utility-dock{position:absolute;z-index:5;top:12px;right:12px;display:flex;align-items:center;margin:0;padding:4px;border:1px solid var(--fx-line);border-radius:14px;background:var(--fx-paper);box-shadow:0 6px 20px var(--fx-shadow)}
+.build-flow-surface .canvas-utility-dock .canvas-utility-tools{display:flex;align-items:center;gap:2px;padding:0}
+.build-flow-surface .canvas-utility-dock button{width:36px;height:36px;min-height:36px;padding:0;justify-content:center;border-radius:10px}
+.build-flow-surface .canvas-utility-dock button span{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap}
+.build-flow-surface .canvas-utility-dock .toolbox-divider{display:none}
+.build-flow-surface .canvas-utility-dock .toolbox-mode-toggle{border-color:transparent;background:transparent}
+.build-workspace .canvas-feedback{margin:0;padding:8px 16px;border-bottom:1px solid var(--fx-line);background:var(--fx-soft);color:var(--fx-ink);font-size:13px}
+/* Zoom controls (engine min/max), bottom right. */
+.build-flow-surface .react-flow__panel.canvas-navigator.bottom.right{left:auto;right:12px;transform:none;bottom:16px}
+.react-flow__panel.canvas-navigator[data-steps]{width:248px}
+.react-flow__panel.canvas-navigator[data-steps][data-compact="true"]{width:228px;bottom:16px}
+.react-flow__panel.canvas-navigator[data-steps][data-narrow="true"]{width:148px}
+.react-flow__panel.canvas-navigator[data-steps][data-narrow="true"] .canvas-navigator-step{display:none}
+.canvas-navigator-step{width:28px}
+.canvas-navigator button:disabled{opacity:.4;cursor:default;background:transparent}
+/* Compact step card: a numbered circle, the action and one discreet status. */
+.build-flow-surface .composer-card{width:248px;gap:8px;padding:14px;border-color:var(--fx-line);border-radius:18px;background:var(--fx-paper);box-shadow:0 1px 2px var(--fx-shadow),0 8px 22px var(--fx-shadow)}
+.build-flow-surface .composer-card.active{border-color:var(--fx-fill);box-shadow:0 0 0 1px var(--fx-fill),0 8px 22px var(--fx-shadow)}
+.build-flow-surface .composer-card .composer-action-title{display:flex;align-items:center;gap:8px;min-width:0;margin:0;font-size:15px;font-weight:600;line-height:1.25;color:var(--fx-ink)}
+.composer-step-number{display:inline-grid;place-items:center;flex:none;width:26px;height:26px;border-radius:50%;background:var(--fx-fill);color:#fff;font-size:13px;font-weight:700;line-height:1;font-variant-numeric:tabular-nums}
+.composer-step-dot{font-size:0;letter-spacing:0}
+.composer-action-name{min-width:0;color:var(--fx-ink);overflow-wrap:anywhere}
+.build-flow-surface .composer-action-title svg{order:0;box-sizing:border-box;flex:none;width:15px;height:15px;padding:0;border-radius:0;background:transparent;color:var(--fx-muted)}
+/* The status pill shares the card foot with Settings (never laid over it, so no part of the control is covered). */
+.build-flow-surface .composer-foot{display:flex;align-items:center;gap:8px;margin-top:auto;padding-top:6px;border-top:1px solid var(--fx-line)}
+.build-flow-surface .composer-foot>.composer-selected{flex:1 1 auto;width:auto;min-width:0;margin-top:0;padding-top:0;border-top:0}
+.composer-status{display:inline-flex;align-items:center;gap:5px;flex:none;height:22px;padding:0 8px;border:1px solid var(--fx-line);border-radius:999px;background:var(--fx-soft);color:var(--fx-muted);font-size:11px;font-weight:500;line-height:1;white-space:nowrap}
+.composer-status-dot{width:6px;height:6px;border-radius:50%;background:currentColor}
+.composer-status[data-card-status="configured"]{border-color:color-mix(in srgb,var(--fx-blue) 28%,var(--fx-line));background:color-mix(in srgb,var(--fx-blue) 6%,var(--fx-paper));color:var(--fx-blue)}
+.composer-status[data-card-status="attention"]{border-color:var(--fx-warn-line);background:var(--fx-warn-soft);color:var(--fx-warn)}
+.composer-status[data-card-status="draft"]{border-style:dashed}
+.build-flow-surface .composer-metadata{font-size:12px;color:var(--fx-muted)}
+.build-flow-surface .composer-provider{color:var(--fx-ink);font-weight:600}
+.build-flow-surface .composer-operation{font-size:12.5px;color:var(--fx-ink)}
+.build-flow-surface .composer-amount-box{border-radius:12px}
+.build-flow-surface .composer-param dt,.build-flow-surface .composer-param dd{font-family:var(--fx-mono);font-size:11px}
+.build-flow-surface .composer-selected{border-top-color:var(--fx-line);color:var(--fx-blue)}
+/* FloFi panel: compact head, then the live summary above the unchanged conversation. */
+.build-workspace .copilot{border-color:var(--fx-line);border-radius:20px;overflow:hidden}
+.build-workspace .copilot-head{padding:12px 16px}
+.build-workspace .copilot-head .assistant-title{font-size:15px;color:var(--fx-ink)}
+.editor-overview{display:grid;gap:10px;margin:0 12px 4px;padding:12px;border:1px solid var(--fx-line);border-radius:16px;background:var(--fx-soft);flex:none}
+.editor-overview-head{display:flex;align-items:center;justify-content:space-between;gap:8px}
+.editor-overview-head h3{margin:0;font-size:13px;font-weight:600;color:var(--fx-ink)}
+.editor-overview .editor-state-pill{height:24px;padding:0 9px;font-size:11px}
+.editor-overview-steps{display:grid;gap:2px;max-height:156px;margin:0;padding:0;overflow:auto;list-style:none}
+.editor-overview-steps button{display:flex;align-items:center;gap:8px;width:100%;min-height:40px;padding:4px 6px;border:0;border-radius:10px;background:transparent;color:var(--fx-ink);font:inherit;text-align:left;cursor:pointer}
+.editor-overview-steps button:hover{background:var(--fx-paper)}
+.editor-overview-steps button:focus-visible{outline:2px solid var(--fx-blue);outline-offset:1px}
+.editor-step-number{display:grid;place-items:center;flex:none;width:22px;height:22px;border-radius:50%;background:var(--fx-fill);color:#fff;font-size:11.5px;font-weight:700;line-height:1}
+.editor-overview-step-text{display:flex;flex-direction:column;flex:1;min-width:0}
+.editor-overview-step-action{font-size:13px;font-weight:600}
+.editor-overview-step-flow{overflow:hidden;color:var(--fx-muted);font-size:11.5px;text-overflow:ellipsis;white-space:nowrap}
+.editor-card-status{flex:none;padding:2px 7px;border:1px solid var(--fx-line);border-radius:999px;background:var(--fx-paper);color:var(--fx-muted);font-size:10.5px;font-weight:500;white-space:nowrap}
+.editor-card-status[data-card-status="configured"]{color:var(--fx-blue)}
+.editor-card-status[data-card-status="attention"]{border-color:var(--fx-warn-line);background:var(--fx-warn-soft);color:var(--fx-warn)}
+.editor-card-status[data-card-status="draft"]{border-style:dashed}
+.editor-overview-networks{display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 8px;margin:0;color:var(--fx-ink);font-size:12.5px}
+.editor-overview-networks .eyebrow{margin:0;color:var(--fx-muted);font-family:var(--fx-mono);font-size:11px;letter-spacing:0;text-transform:none}
+.editor-overview-empty{margin:0;color:var(--fx-muted);font-size:12.5px;line-height:1.5}
+.editor-overview-attention{display:flex;align-items:center;gap:8px;margin:0;padding:10px;border:1px solid var(--fx-warn-line);border-radius:12px;background:var(--fx-warn-soft);color:var(--fx-ink);font-size:12px;line-height:1.4}
+.editor-overview-attention p{display:grid;flex:1;gap:2px;min-width:0;margin:0;overflow-wrap:anywhere}
+.editor-overview-attention strong{color:var(--fx-warn)}
+.editor-overview-attention button{flex:none;min-height:32px;padding:0 12px;border:1px solid var(--fx-line);border-radius:999px;background:var(--fx-paper);color:var(--fx-ink);font:inherit;font-size:12px;font-weight:600;cursor:pointer}
+/* Footer: count, real notices and the Canvas lifecycle control (moved here, not duplicated). */
+.summary-bar.editor-bar{min-height:68px;padding:12px 28px;gap:16px;border-top-color:var(--fx-line);box-shadow:0 -6px 18px var(--fx-shadow)}
+.summary-bar.editor-bar .summary-count{flex:none}
+.summary-bar.editor-bar .summary-count .eyebrow{font-family:var(--fx-mono);letter-spacing:.08em}
+.summary-notice{display:flex;flex:1;align-items:center;gap:10px;min-width:0;margin:0;color:var(--fx-muted);font-size:13px;line-height:1.4}
+.summary-notice>span{min-width:0;overflow-wrap:anywhere}
+.summary-notice[data-notice="attention"]{color:var(--fx-ink)}
+.summary-notice[data-notice="attention"] strong{color:var(--fx-warn)}
+.summary-notice-icon{display:grid;place-items:center;flex:none;width:22px;height:22px;border-radius:50%;background:var(--fx-warn-soft);color:var(--fx-warn);font-size:12px;font-weight:700}
+.summary-notice-detail{color:var(--fx-muted)}
+.summary-bar .summary-notice .summary-notice-show:not(:disabled){flex:none;min-height:34px;padding:0 14px;border:1px solid var(--fx-line);border-radius:999px;background:var(--fx-paper);color:var(--fx-ink);font-size:12.5px}
+.summary-bar .canvas-primary-action.summary-primary-action{position:static;flex:none;margin-left:auto}
+/* The control's own notes (sequence step, why Simulate is closed) stack to the left of its button. */
+.summary-bar .summary-primary-action .canvas-lifecycle-control{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;column-gap:12px;row-gap:2px;max-width:min(640px,52vw)}
+.summary-bar .summary-primary-action .canvas-lifecycle-control>*{grid-column:1;min-width:0}
+.summary-bar .summary-primary-action .canvas-lifecycle-control>button{grid-column:2;grid-row:1 / span 4}
+.summary-bar .summary-primary-action .canvas-lifecycle-control :is(p,[role="status"]){max-width:none;margin:0;padding:0;color:var(--fx-muted);font-size:12px;line-height:1.4;text-align:right;overflow-wrap:anywhere}
+.summary-bar .summary-primary-action .canvas-sequence-note{border:0;background:none}
+.summary-bar .summary-primary-action button[data-lifecycle-action]{min-height:46px;padding:0 24px;border-radius:999px;font-size:15px}
+.summary-bar .summary-primary-action button[data-lifecycle-action]:not(:disabled){animation:build-cta-pulse 3.6s ease-in-out infinite}
+.summary-bar .summary-primary-action button[data-lifecycle-action]:is(:hover,:focus){animation:none}
+.summary-bar .summary-primary-action button[data-lifecycle-action]:disabled{opacity:.55;box-shadow:none}
+@media(prefers-reduced-motion:reduce){.summary-bar .summary-primary-action button[data-lifecycle-action]:not(:disabled){animation:none}}
+/* The footer, and the one Simulate control in it, stays in reach at every width (it no longer sits inside the Canvas). */
+.summary-bar.editor-bar{position:sticky;bottom:0;z-index:20;padding-bottom:max(12px,env(safe-area-inset-bottom))}
+/* Touch screens: every Editor control keeps a 44 px target. */
+@media(pointer:coarse){
+  .build-flow-surface .floating-toolbox .canvas-toolbox button,.build-flow-surface .canvas-utility-dock button{width:44px;height:44px;min-height:44px}
+  .summary-bar .summary-notice .summary-notice-show:not(:disabled),.editor-overview-attention button,.editor-overview-steps button{min-height:44px}
+}
+/* On a phone the docked row is the default; the tools appear once the remembered layout is known (no rail flash before it). */
+@media(max-width:700px){.build-workspace .canvas[data-toolbox-ready="false"] :is(.floating-toolbox,.canvas-utility-dock,.canvas-toolbar-row){visibility:hidden}}
+@media(max-width:1100px){
+  .main.workflow-workspace.build-workspace .build-grid>.copilot{height:auto;min-height:420px;max-height:640px}
+}
+@media(max-width:370px){
+  /* Narrow phones: only the current step keeps its visible label (the others keep it for assistive technology). */
+  .editor-stepper li:not([data-step-state="current"]) .editor-stepper-label{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap}
+  .editor-stepper li:not([data-step-state="current"]) button{padding:4px 8px}
+}
+@media(max-width:700px){
+  .editor-steps-row{padding:10px 12px 0}
+  .editor-stepper-line{width:14px;margin:0 2px}
+  .editor-stepper button{gap:6px;padding:4px 10px 4px 4px;font-size:13.5px}
+  .editor-stepper-number{width:28px;height:28px;font-size:13px}
+  .build-workspace .canvas-head-main .canvas-name h2{font-size:16px}
+  .summary-bar.editor-bar{padding:10px 12px;gap:8px 12px;flex-wrap:wrap}
+  .summary-bar.editor-bar .summary-notice{order:3;flex:1 1 100%;font-size:12px}
+  .summary-bar .canvas-primary-action.summary-primary-action{flex:1 1 100%;min-width:0;margin-left:0}
+  .summary-bar .summary-primary-action .canvas-lifecycle-control{max-width:none;width:100%}
+  .summary-bar .summary-primary-action .canvas-lifecycle-control :is(p,[role="status"]){max-width:100%;overflow-wrap:anywhere}
+  .summary-bar .summary-primary-action button[data-lifecycle-action]{min-height:44px;padding:0 18px;font-size:14px}
+  .summary-bar.editor-bar .summary-notice{max-height:3.6em;overflow:hidden}
+}

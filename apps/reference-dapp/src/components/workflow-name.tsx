@@ -6,7 +6,8 @@ import { useEffect, useRef, useState } from 'react';
 
 /** Session identity only: renaming does not edit the canonical workflow or its revision. */
 /** UX-002: `onAutomate` is the existing "Automate this workflow" action, offered here beside rename/save. */
-export function WorkflowName({ name, rename, onSave, onAutomate }: { name: string; rename: (name: string) => void; onSave?: (() => void) | undefined; onAutomate?: (() => void) | undefined }) {
+/** BUILD-FLOFI-BUILDER-UX-002: `shownName` presents the untouched default name in the interface language; renaming still edits `name` itself. */
+export function WorkflowName({ name, shownName = name, rename, onSave, onAutomate }: { name: string; shownName?: string; rename: (name: string) => void; onSave?: (() => void) | undefined; onAutomate?: (() => void) | undefined }) {
   const { t: tr } = useLocale();
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(name);
@@ -16,7 +17,8 @@ export function WorkflowName({ name, rename, onSave, onAutomate }: { name: strin
     if (editing) { input.current?.focus(); input.current?.select(); }
   }, [editing]);
   function confirm() {
-    if (!cancelled.current && draft.trim()) rename(draft.trim());
+    // Opening the field and leaving it unchanged keeps the name (a translated default is never stored by accident).
+    if (!cancelled.current && draft.trim() && draft.trim() !== shownName) rename(draft.trim());
     setEditing(false);
   }
   return <div className="canvas-name">
@@ -30,8 +32,8 @@ export function WorkflowName({ name, rename, onSave, onAutomate }: { name: strin
           else confirm();
         }
       }}/>
-      : <><h2>{name}</h2><button type="button" className="workflow-rename" aria-label={tr("Rename workflow")} title={tr("Rename workflow")}
-        onClick={() => { cancelled.current = false; setDraft(name); setEditing(true); }}>
+      : <><h2>{shownName}</h2><button type="button" className="workflow-rename" aria-label={tr("Rename workflow")} title={tr("Rename workflow")}
+        onClick={() => { cancelled.current = false; setDraft(shownName); setEditing(true); }}>
         <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m15 5 4 4M4 20l4-1L20 7a2.8 2.8 0 0 0-4-4L4 15v5Z"/></svg>
       </button></>}
     {onSave && <button type="button" className="workflow-save" aria-label={tr("Save workflow")} title={tr("Save workflow")} onClick={onSave}>

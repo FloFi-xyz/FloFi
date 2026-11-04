@@ -850,6 +850,10 @@
       "path": "apps/reference-dapp/e2e/privacy-notice.spec.ts",
       "stage": "browser"
     },
+    "app.e2e.editor-redesign": {
+      "path": "apps/reference-dapp/e2e/editor-redesign.spec.ts",
+      "stage": "browser"
+    },
     "app.server.wallet-portfolio": {
       "path": "apps/reference-dapp/src/server/wallet-portfolio.test.ts",
       "stage": "unit"
@@ -862,8 +866,16 @@
       "path": "apps/reference-dapp/src/domain/wallet-portfolio.test.ts",
       "stage": "unit"
     },
+    "app.domain.editor-overview": {
+      "path": "apps/reference-dapp/src/domain/editor-overview.test.ts",
+      "stage": "unit"
+    },
     "app.components.dashboard.portfolio-widget": {
       "path": "apps/reference-dapp/src/components/dashboard/portfolio-widget.test.tsx",
+      "stage": "unit"
+    },
+    "app.components.editor-stepper": {
+      "path": "apps/reference-dapp/src/components/editor-stepper.test.tsx",
       "stage": "unit"
     }
   },
@@ -1504,6 +1516,7 @@
         "apps/reference-dapp/src/app/docs/page.tsx",
         "apps/reference-dapp/src/app/fonts.css",
         "apps/reference-dapp/src/app/globals.css",
+        "apps/reference-dapp/src/app/editor.css",
         "apps/reference-dapp/src/app/landing07-fonts.css",
         "apps/reference-dapp/src/app/layout.tsx",
         "apps/reference-dapp/src/app/page.tsx",
@@ -1517,7 +1530,8 @@
         "app.e2e.landing07",
         "app.e2e.wallet-selector",
         "app.i18n.catalog",
-        "app.i18n.locale"
+        "app.i18n.locale",
+        "app.e2e.editor-redesign"
       ],
       "gaps": [
         "Browser profiles cover selected journeys; full accessibility audit, device matrix and language completeness remain acceptance gaps."
@@ -2465,6 +2479,9 @@
         "apps/reference-dapp/src/components/canvas-navigator.tsx",
         "apps/reference-dapp/src/components/canvas-panel-reveal.tsx",
         "apps/reference-dapp/src/components/composer-card.tsx",
+        "apps/reference-dapp/src/components/editor-overview-panel.tsx",
+        "apps/reference-dapp/src/components/canvas-edge-style.ts",
+        "apps/reference-dapp/src/components/editor-stepper.tsx",
         "apps/reference-dapp/src/components/composition-panel.tsx",
         "apps/reference-dapp/src/components/connections-panel.tsx",
         "apps/reference-dapp/src/components/crypto-pool-form.tsx",
@@ -2554,7 +2571,10 @@
         "app.e2e.wallet-selector",
         "app.i18n.catalog",
         "app.i18n.locale",
-        "app.components.dashboard.portfolio-widget"
+        "app.components.dashboard.portfolio-widget",
+        "app.components.editor-stepper",
+        "app.domain.editor-overview",
+        "app.e2e.editor-redesign"
       ],
       "gaps": [
         "Browser profiles cover selected journeys; full accessibility audit, device matrix and language completeness remain acceptance gaps."
@@ -3381,6 +3401,8 @@
         "apps/reference-dapp/src/domain/build009-run.ts",
         "apps/reference-dapp/src/domain/canvas-action-setup.ts",
         "apps/reference-dapp/src/domain/canvas-authoring.ts",
+        "apps/reference-dapp/src/domain/canvas-card-summary.ts",
+        "apps/reference-dapp/src/domain/editor-overview.ts",
         "apps/reference-dapp/src/domain/canvas-connect.ts",
         "apps/reference-dapp/src/domain/canvas-keyboard.ts",
         "apps/reference-dapp/src/domain/canvas-layout.ts",
@@ -3434,7 +3456,8 @@
         "workflow-contracts.revision-state",
         "app.domain.canonical-execution-status",
         "app.domain.observation-schedule",
-        "app.domain.wallet-portfolio"
+        "app.domain.wallet-portfolio",
+        "app.domain.editor-overview"
       ],
       "gaps": [
         "Mapped suites are representative boundary tests, not exhaustive path or public execution coverage.",
@@ -3536,7 +3559,8 @@
         "apps/reference-dapp/src/i18n/pt-workflow-runs.ts",
         "apps/reference-dapp/src/i18n/pt.ts",
         "apps/reference-dapp/src/i18n/pt-chat-dashboard.ts",
-        "apps/reference-dapp/src/i18n/pt-portfolio.ts"
+        "apps/reference-dapp/src/i18n/pt-portfolio.ts",
+        "apps/reference-dapp/src/i18n/pt-builder-canvas.ts"
       ],
       "suites": [
         "app.e2e.canvas-keyboard",

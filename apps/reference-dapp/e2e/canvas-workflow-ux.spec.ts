@@ -4,7 +4,7 @@ import type { Page } from '@playwright/test';
 import { test, expect, installPassiveWallet, assertPassiveWallet, readWorkflowIr, sendChatCommand } from './fixtures';
 import { replayProviderLogos } from './asset-logo-replay';
 import { workflowOrder, type SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
-import { openBuilder } from './build-entry-navigation';
+import { continueToBuilder, openBuilder, useDockedToolbar, useToolbarRail } from './build-entry-navigation';
 const cards = (page: Page) => page.locator('.build-flow-surface .react-flow__node');
 const viewport = (page: Page) => page.locator('.build-flow-surface .react-flow__viewport');
 const ir = async (page: Page) => JSON.parse(await readWorkflowIr(page)) as SemanticWorkflow;
@@ -41,60 +41,57 @@ async function connect(page: Page, source: string, target: string) {
   await expect.poll(async () => (await ir(page)).nodes.find(n => n.nodeId === target)?.dependencies).toContain(source);
 }
 
-for (const width of [1440, 1536, 1920]) test(`UX-008 all desktop toolbar controls fit at ${width}px`, async ({ page, networkGuard }, testInfo) => {
-  await page.setViewportSize({ width, height: 1080 }); await open(page);
-  const toolbar = page.getByRole('toolbar', { name: 'Canvas tools' });
+/** Every button of a toolbar is visible, hit-testable at its centre, inside the toolbar and the graph, and the toolbar never scrolls. */
+async function toolbarGeometry(page: Page, name: string) {
+  const toolbar = page.getByRole('toolbar', { name, exact: true }), graph = page.locator('.build-flow-surface');
+  const surface = (await graph.boundingBox())!;
   const geometry = await toolbar.evaluate(element => {
     const bounds = element.getBoundingClientRect();
-    return { left: bounds.left, right: bounds.right, scroll: element.scrollWidth - element.clientWidth,
+    return { left: bounds.left, right: bounds.right, top: bounds.top, bottom: bounds.bottom, scrollX: element.scrollWidth - element.clientWidth, scrollY: element.scrollHeight - element.clientHeight,
       buttons: [...element.querySelectorAll('button')].map(b => { const r = b.getBoundingClientRect(), label = b.querySelector('span')?.getBoundingClientRect();
-        return { hit: document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2)?.closest('button') === b, text: b.textContent?.trim(), x: r.x, y: r.y, right: r.right, bottom: r.bottom, width: r.width, labelWidth: label?.width }; }) };
+        return { hit: document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2)?.closest('button') === b, name: b.getAttribute('aria-label'), text: b.textContent?.trim(), x: r.x, y: r.y, right: r.right, bottom: r.bottom, width: r.width, labelWidth: label?.width ?? 0 }; }) };
   });
-  const labels = ['Swap','Bridge','Pool / Liquidity','Supply','Lending','Borrow','Repay','Withdraw','Send','Stocks','Privacy','Duplicate','Undo','Redo','Delete'];
-  expect(geometry.buttons.filter(b => labels.includes(b.text ?? '')).map(b => b.text)).toHaveLength(15);
-  for (const [index, button] of geometry.buttons.entries()) {
-    expect(button.hit).toBe(true);
+  for (const button of geometry.buttons) {
+    expect(button.hit, button.name ?? '').toBe(true); expect(button.width).toBeGreaterThan(18);
     expect(button.x).toBeGreaterThanOrEqual(geometry.left - 1); expect(button.right).toBeLessThanOrEqual(geometry.right + 1);
-    expect(button.y).toBeCloseTo(geometry.buttons[0]!.y, 0); expect(button.width).toBeGreaterThan(18);
-    if (index) expect(button.x).toBeGreaterThanOrEqual(geometry.buttons[index - 1]!.right - 1);
-    if (labels.includes(button.text ?? '')) expect(button.labelWidth).toBeGreaterThan(12);
+    expect(button.y).toBeGreaterThanOrEqual(geometry.top - 1); expect(button.bottom).toBeLessThanOrEqual(geometry.bottom + 1);
   }
-  expect(geometry.scroll).toBeLessThanOrEqual(1);
-  expect(await toolbar.locator('.canvas-primary-tools').evaluate(e => e.scrollWidth - e.clientWidth)).toBeLessThanOrEqual(1);
-  // Compare the former left-packed layout with distribution in the action region only.
-  const distribution = await toolbar.evaluate(element => {
-    const actions = element.querySelector<HTMLElement>('.canvas-primary-tools')!;
-    const measure = () => {
-      const bounds = actions.getBoundingClientRect();
-      const buttons = [...actions.querySelectorAll('button')].map(button => {
-        const r = button.getBoundingClientRect(); return { x: r.x, right: r.right, width: r.width, height: r.height };
-      });
-      const controls = [...element.querySelectorAll('.canvas-utility-tools button'), element.parentElement!.querySelector('.revision')!]
-        .map(control => { const r = control.getBoundingClientRect(); return { x: r.x, y: r.y, width: r.width, height: r.height }; });
-      return { left: bounds.left, right: bounds.right, buttons, controls };
-    };
-    const distributed = measure();
-    actions.style.justifyContent = 'flex-start';
-    const packed = measure();
-    actions.style.removeProperty('justify-content');
-    return { distributed, packed };
-  });
-  const { distributed, packed } = distribution;
-  expect(distributed.controls).toEqual(packed.controls);
-  expect(distributed.buttons.map(b => [b.width, b.height])).toEqual(packed.buttons.map(b => [b.width, b.height]));
-  expect(distributed.buttons).toHaveLength(11);
-  expect(geometry.buttons.slice(0, 11).map(b => b.text)).toEqual(labels.slice(0, 11));
-  const gaps = distributed.buttons.slice(1).map((button, index) => button.x - distributed.buttons[index]!.right);
-  expect(Math.max(...gaps) - Math.min(...gaps)).toBeLessThanOrEqual(1);
-  expect(distributed.buttons[0]!.x).toBeCloseTo(distributed.left, 0);
-  expect(distributed.buttons.at(-1)!.right).toBeCloseTo(distributed.right, 0);
-  expect(packed.right - packed.buttons.at(-1)!.right).toBeGreaterThan(1);
-  expect(await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)).toBeLessThanOrEqual(1);
-  await testInfo.attach(`toolbar-distribution-${width}px`, { body: await toolbar.screenshot(), contentType: 'image/png' });
+  expect(geometry.scrollX).toBeLessThanOrEqual(1); expect(geometry.scrollY).toBeLessThanOrEqual(1);
+  return { ...geometry, surface };
+}
+
+// BUILD-FLOFI-BUILDER-UX-002 (owner-approved Editor brief): the step actions live in the vertical rail by default and the utilities in their own small
+// toolbar; the docked row (an owner's choice) wraps instead of overflowing, in English and in Portuguese (it used to overflow in Portuguese).
+for (const width of [1440, 1536, 1920]) test(`UX-008 every Canvas tool fits — rail by default, docked row in EN and PT — at ${width}px`, async ({ page, networkGuard }, testInfo) => {
+  await page.setViewportSize({ width, height: 1080 }); await open(page);
+  const actions = ['Swap','Bridge','Pool / Liquidity','Supply','Lending','Borrow','Repay','Withdraw','Send','Stocks','Privacy'];
+  const rail = await toolbarGeometry(page, 'Canvas tools');
+  expect(rail.buttons.map(b => b.text)).toEqual(actions);
+  // One column inside the graph.
+  for (const button of rail.buttons) expect(button.x).toBeCloseTo(rail.buttons[0]!.x, 0);
+  expect(rail.left).toBeGreaterThanOrEqual(rail.surface.x); expect(rail.bottom).toBeLessThanOrEqual(rail.surface.y + rail.surface.height + 1);
+  const utilities = await toolbarGeometry(page, 'Workflow utilities');
+  expect(utilities.buttons.map(b => b.name)).toEqual(['Duplicate selection', 'Undo', 'Redo', 'Delete', 'Dock toolbar']);
+  expect(utilities.left).toBeGreaterThan(rail.right); expect(utilities.right).toBeLessThanOrEqual(rail.surface.x + rail.surface.width + 1);
+  await testInfo.attach(`toolbar-rail-${width}px`, { body: await page.locator('.build-flow-surface').screenshot(), contentType: 'image/png' });
+  for (const language of ['EN', 'PT'] as const) {
+    if (language === 'PT') { await page.evaluate(() => localStorage.setItem('flofi.language', 'PT')); await page.reload(); await continueToBuilder(page); }
+    await useDockedToolbar(page);
+    const docked = await toolbarGeometry(page, language === 'PT' ? 'Ferramentas do Canvas' : 'Canvas tools');
+    expect(docked.buttons).toHaveLength(16);
+    // Every labelled control shows its whole label.
+    for (const button of docked.buttons.slice(0, 15)) expect(button.labelWidth, button.text ?? '').toBeGreaterThan(12);
+    for (const [index, button] of docked.buttons.entries()) if (index && button.y === docked.buttons[index - 1]!.y) expect(button.x).toBeGreaterThanOrEqual(docked.buttons[index - 1]!.right - 1);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)).toBeLessThanOrEqual(1);
+    await testInfo.attach(`toolbar-docked-${language}-${width}px`, { body: await page.locator('.build-canvas-head').screenshot(), contentType: 'image/png' });
+    await useToolbarRail(page);
+  }
+  await page.evaluate(() => localStorage.setItem('flofi.language', 'EN')); await page.reload(); await continueToBuilder(page);
+  const toolbar = page.getByRole('toolbar', { name: 'Canvas tools' });
   // Privacy is the existing unavailable action; fit does not enable an unimplemented financial capability.
   await expect(toolbar.getByRole('button', { name: 'Privacy', exact: true })).toBeDisabled();
   await toolbar.getByRole('button', { name: 'Add swap', exact: true }).click(); await expect(cards(page)).toHaveCount(1);
-  await toolbar.getByRole('button', { name: 'Delete', exact: true }).click(); await expect(cards(page)).toHaveCount(0);
+  await page.getByRole('toolbar', { name: 'Workflow utilities' }).getByRole('button', { name: 'Delete', exact: true }).click(); await expect(cards(page)).toHaveCount(0);
   await assertPassiveWallet(page); networkGuard.assertClean();
 });
 

@@ -35,16 +35,19 @@ export async function reloadBuilder(page: Page): Promise<void> {
 export const stagesNavigation = (page: Page) => page.getByRole('navigation', { name: 'Workflow stages' });
 export const EDITOR_SECTION_WORKSPACES = { Build: 'Workflow workspace', Simulate: 'Simulation workspace', Execute: 'Execution workspace' } as const;
 export type EditorSection = keyof typeof EDITOR_SECTION_WORKSPACES;
-const EDITOR_SECTION_ACTIONS = { Simulate: 'View simulation', Execute: 'View execution' } as const;
+/** BUILD-FLOFI-BUILDER-UX-002 (owner-approved Editor brief): the Editor's Create → Simulate → Execute stepper opens its sections (it replaced the
+ * footer's "View simulation" / "View execution", with the same targets and the same refusal). */
+const EDITOR_SECTION_ACTIONS = { Simulate: /^(Simulate|Simular)$/, Execute: /^(Execute|Executar)$/ } as const;
 export const editorTab = (page: Page) => stagesNavigation(page).getByRole('button', { name: 'Editor', exact: true });
 export const chatTab = (page: Page) => stagesNavigation(page).getByRole('button', { name: 'Chat', exact: true });
 export const editorSectionWorkspace = (page: Page, section: EditorSection) => page.getByRole('main', { name: EDITOR_SECTION_WORKSPACES[section], exact: true });
-/** The Editor footer's control for a section (offered on the Canvas, and for execution on the simulation section). */
+export const editorSteps = (page: Page) => page.getByRole('navigation', { name: /^(Editor steps|Etapas do editor)$/ });
+/** The Editor stepper's control for a section (shown on every Editor section). */
 export const editorSectionAction = (page: Page, section: Exclude<EditorSection, 'Build'>) =>
-  page.locator('footer.summary-bar').getByRole('button', { name: EDITOR_SECTION_ACTIONS[section], exact: true });
+  editorSteps(page).getByRole('button', { name: EDITOR_SECTION_ACTIONS[section] });
 /**
  * Opens an Editor section the way an owner does where the former Simulate or Execute tab was clicked: the Editor tab opens the Canvas; the
- * footer opens the simulation or execution section. Nothing is simulated, accepted or signed by this navigation.
+ * stepper opens the simulation or execution section. Nothing is simulated, accepted or signed by this navigation.
  */
 export async function openEditorSection(page: Page, section: EditorSection): Promise<void> {
   if (section === 'Build') { await editorTab(page).click(); return; }
@@ -67,4 +70,25 @@ export async function openProductSection(page: Page, section: ProductSection): P
 export async function expectProductSection(page: Page, section: ProductSection): Promise<void> {
   if (section === 'Dashboard') await expect(stagesNavigation(page).getByRole('button', { name: 'Dashboard', exact: true })).toHaveAttribute('aria-current', 'page');
   else await expectEditorSection(page, section);
+}
+
+/**
+ * BUILD-FLOFI-BUILDER-UX-002 (owner-approved Editor brief): the vertical tool rail is the Canvas's default; an owner may dock the toolbar instead
+ * (a remembered layout preference). These put the Canvas in the named layout whatever was remembered (presentation only).
+ */
+export async function useToolbarRail(page: Page): Promise<void> {
+  // The toggle is always shown (docked row or rail): wait for it, then read the layout from its own name, and end on a positive check.
+  const toggle = page.locator('.build-flow-surface, .build-canvas-head').locator('.toolbox-mode-toggle').first();
+  await expect(toggle).toBeVisible();
+  if ((await toggle.getAttribute('aria-pressed')) !== 'true') await toggle.click();
+  await expect(page.locator('.build-flow-surface .floating-toolbox')).toBeVisible();
+  await expect(page.locator('.toolbox-mode-toggle')).toHaveAttribute('aria-pressed', 'true');
+}
+export async function useDockedToolbar(page: Page): Promise<void> {
+  const toggle = page.locator('.build-flow-surface, .build-canvas-head').locator('.toolbox-mode-toggle').first();
+  await expect(toggle).toBeVisible();
+  if ((await toggle.getAttribute('aria-pressed')) === 'true') await toggle.click();
+  await expect(page.locator('.toolbox-mode-toggle')).toHaveAttribute('aria-pressed', 'false');
+  await expect(page.locator('.build-flow-surface .floating-toolbox')).toHaveCount(0);
+  await expect(page.locator('.build-canvas-head .canvas-toolbar-row')).toBeVisible();
 }
