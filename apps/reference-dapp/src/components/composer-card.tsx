@@ -614,10 +614,12 @@ export function ComposerCard({ data: card }: { data: ComposerCardData }) {
           <dt>{tr(param.key === 'slippage' ? 'Max slippage' : 'Fee tier')}</dt><dd className="numeric">{param.value}</dd>
         </div>)}
       </dl> : null}
-      {status && <span className="composer-status" data-card-status={status.kind} title={status.kind === 'attention' ? tr(status.detail) : undefined}><span className="composer-status-dot" aria-hidden="true"/>{tr(status.label)}<span className="sr-only">{`: ${tr(status.detail)}`}</span></span>}
-      {!card.inspection && <button type="button" className="composer-selected nodrag nopan" aria-haspopup="dialog" aria-expanded={Boolean(card.settingsOpen)} aria-label={tr("Action settings")}
-        onClick={event => { event.stopPropagation(); card.onOpenSettings?.(); }} title={tr("Open this action's settings")}>{tr("Settings ")}<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m10 3-.5 3-2 1.2L4.7 6l-2 3.5 2.3 2v1l-2.3 2 2 3.5 2.8-1.2 2 1.2.5 3h4l.5-3 2-1.2 2.8 1.2 2-3.5-2.3-2v-1l2.3-2-2-3.5-2.8 1.2-2-1.2-.5-3Z"/><circle cx="12" cy="12" r="3"/></svg>
-      </button>}
+      {(status || !card.inspection) && <div className="composer-foot">
+        {!card.inspection && <button type="button" className="composer-selected nodrag nopan" aria-haspopup="dialog" aria-expanded={Boolean(card.settingsOpen)} aria-label={tr("Action settings")}
+          onClick={event => { event.stopPropagation(); card.onOpenSettings?.(); }} title={tr("Open this action's settings")}>{tr("Settings ")}<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m10 3-.5 3-2 1.2L4.7 6l-2 3.5 2.3 2v1l-2.3 2 2 3.5 2.8-1.2 2 1.2.5 3h4l.5-3 2-1.2 2.8 1.2 2-3.5-2.3-2v-1l2.3-2-2-3.5-2.8 1.2-2-1.2-.5-3Z"/><circle cx="12" cy="12" r="3"/></svg>
+        </button>}
+        {status && <span className="composer-status" data-card-status={status.kind} title={status.kind === 'attention' ? tr(status.detail) : undefined}><span className="composer-status-dot" aria-hidden="true"/>{tr(status.label)}<span className="sr-only">{`: ${tr(status.detail)}`}</span></span>}
+      </div>}
       <Handle id="output" type="source" position={card.vertical ? Position.Bottom : Position.Right} isConnectable={!card.inspection && Boolean(card.connectable)}/>
     </div>;
   // BUILD-BASE-001: on an official-catalog network the editable picker also searches the whole validated catalog (swaps and pools: ERC-20s).

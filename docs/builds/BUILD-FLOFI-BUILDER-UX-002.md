@@ -133,3 +133,44 @@ Not changed (documented): the stepper explains a closed step through `title`, ex
 Pixel baselines are intentionally not regenerated in this commit: the owner validates the visual first, and they must be rendered in the CI
 image. Affected: `visual-shell` (build/simulate/execute), `swap-authoring` (chat-committed, review-blocked), `base-observation`
 (observation-recorded) and `mock-artifact-chain` (two). Evidence: `apps/reference-dapp/e2e/visual-evidence/build-flofi-builder-ux-002/part-2/`.
+
+## Part 3: after the owner's approval, the CI baselines and two layout fixes
+
+The owner approved the visual of part 2 (2026-11-04). Two defects surfaced while rendering it in CircleCI's environment, and both are fixed:
+
+- **The card's status pill covered part of Settings.** The pill was laid over the card foot, and under the CI image's font metrics it sat over
+  the center of the "Action settings" control: `mock-artifact-chain` › "ineligible workflows…" could not click it. The pill and Settings now
+  share one foot row (`.composer-foot`). The pill never overlaps the control, and `editor-redesign.spec.ts` asserts that for every card.
+- **The Canvas ran under the sticky footer.** An older rule fixes the Canvas at 760 px whenever the vertical rail is on, and the rail is now
+  the desktop default. So the window-fitted height never applied, and at 1440×900 the footer hid the zoom controls and the Canvas notes.
+  - In rail mode, the Build Canvas and the FloFi panel now follow `clamp(560px, 100svh − 300px, 980px)`. At 1440×900 the Editor fits the window
+    with nothing under the footer (document height 900; notes end at 785 and the footer starts at 829).
+  - The toolbox mode is a Build attribute only (`data-workspace-toolbox` is set on Build), so Simulate and Execute keep their own heights.
+
+**Baselines regenerated in CircleCI's rendering environment.** There is no Docker daemon here, so the environment was rebuilt as follows:
+- The CI image `cimg/node:24.21.0-browsers` was pulled from Docker Hub layer by layer and every digest checked: index
+  `sha256:7e52dee8e595…`, linux/amd64 manifest `sha256:87f34dbe9005…`, the same digests as earlier builds. It was unpacked into a root
+  filesystem (Ubuntu 24.04.4, the image's own fonts).
+- The approved headless shell 1243 came from `scripts/bootstrap-playwright.py`: 119,809,080 bytes, SHA-256 `a9da0288…`, Chrome for Testing
+  153.0.8010.12. It ran inside that root filesystem through `chroot` as `BUILD002_BROWSER_CACHE`; no repository file changed for this.
+- Settings were CircleCI's own: `CI=true`, port 3100, and the runner's `GRYLOO_MODE_A_E2E=synthetic`.
+
+Steps, in order:
+1. **Fidelity check first.** Unchanged `main` (`1814b2c`) passed all 23 tests of `visual-shell`, `swap-authoring`, `base-observation` and
+   `mock-artifact-chain` in this environment, with `maxDiffPixels: 0`. The same tests fail by 1–4 % in this container's plain browser.
+2. The branch, before any update, failed exactly the 7 screenshot assertions, plus the click above, which was fixed first.
+3. `--update-snapshots=changed` rewrote 10 baselines and no others: `visual-shell` build/simulate/execute, `swap-authoring`
+   chat-committed/review-blocked, `base-observation` observation-recorded/observation-expired, and `mock-artifact-chain`
+   simulate-current/simulate-invalidated/simulate-expired. Three of them sit after a test's first failing assertion, so CI had never reached them.
+4. Every diff was inspected. The changes are the approved ones:
+   - the Create · Simulate · Execute stepper (+58 px on Simulate and Execute)
+   - the Editor header with network chips and the real state
+   - the rail and utility dock
+   - numbered circles and the status pill
+   - the FloFi summary
+   - the footer without section buttons, with the single Simulate control on Build
+   - the fitted Canvas
+   With the stepper offset removed, nothing else moves. Hash masks are unchanged.
+5. All four specs then passed in that environment without update flags.
+
+No screenshot assertion, threshold or required check was changed or skipped.
