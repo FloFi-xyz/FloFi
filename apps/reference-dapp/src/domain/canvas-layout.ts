@@ -81,9 +81,17 @@ export function saveCanvasLayout(workflowId: string, layout: CanvasLayout) {
 
 export type ToolboxMode = 'top' | 'floating';
 const toolboxModeKey = 'gryloo:toolbox-mode';
+/** BUILD-FLOFI-BUILDER-UX-002 (owner-approved brief): on a desktop Canvas the vertical rail ('floating') is the default home of the tools; on a phone
+ * (≤700 px) the docked row stays the default, so every tool keeps its 44 px touch target. An owner's own choice is remembered everywhere.
+ * Layout preference only. */
+export const NARROW_TOOLBOX_QUERY = '(max-width: 700px)';
 export function readToolboxMode(): ToolboxMode {
-  try { return localStorage.getItem(toolboxModeKey) === 'floating' ? 'floating' : 'top'; }
-  catch { return 'top'; }
+  try {
+    const stored = localStorage.getItem(toolboxModeKey);
+    if (stored === 'top' || stored === 'floating') return stored;
+  } catch { /* storage is optional */ }
+  try { return window.matchMedia(NARROW_TOOLBOX_QUERY).matches ? 'top' : 'floating'; }
+  catch { return 'floating'; }
 }
 export function saveToolboxMode(mode: ToolboxMode): void {
   try { localStorage.setItem(toolboxModeKey, mode); } catch { /* storage is optional */ }

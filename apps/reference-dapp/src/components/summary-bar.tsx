@@ -4,6 +4,8 @@ import { swapProfile } from '../domain/public-testnet-swap';
 import { useLocale } from '../i18n/locale';
 
 import { createPortal } from 'react-dom';
+import type { ReactNode } from 'react';
+import type { EditorOverview } from '../domain/editor-overview';
 import { useModeA } from '../state/mode-a-store';
 import { useModeB } from '../state/mode-b-store';
 import { usePublicTestnet } from '../state/public-testnet-store';
@@ -19,13 +21,19 @@ import { useJupiter } from '../state/jupiter-store';
 import { useSolanaLiquidity } from '../state/solana-liquidity-store';
 
 /**
- * `sections` (BUILD-FLOFI-CHAT-EDITOR-UX-001): Simulate and Execute are no longer top-level tabs; the Editor's footer opens its simulation/Review
- * and execution sections instead, closed whenever the shell refuses those sections (a Canvas amount is unapplied — `incomplete`, which names
- * the reason — or an /approve proposal is not loaded for the proven wallet yet). Navigation only: each
- * section keeps its own simulation, Review, wallet and execution gates, and nothing here simulates, accepts, signs or submits.
+ * `sections` (BUILD-FLOFI-CHAT-EDITOR-UX-001): Simulate and Execute are no longer top-level tabs. BUILD-FLOFI-BUILDER-UX-002: the Editor's
+ * Create → Simulate → Execute stepper (`EditorStepper`) now opens those sections with the same targets and the same refusal, so the footer no longer
+ * repeats them. Navigation only: each section keeps its own simulation, Review, wallet and execution gates, and nothing here simulates, accepts,
+ * signs or submits.
+ *
+ * BUILD-FLOFI-BUILDER-UX-002 (owner-approved Editor brief): on the Canvas the footer states the step count, the workflow's real notices (steps whose
+ * review reports something to fix, unapplied changes) and hosts the Canvas lifecycle control (`primaryAction`: the existing Simulate / Authorize /
+ * Continue control and its handlers, moved here from the Canvas corner — rendered once, never duplicated; its wrapper keeps `canvas-primary-action`).
  */
-export function SummaryBar({ tab, setTab, simulationActionHost, reviewAvailable, focusReview, canvasOwnsAction, sections }: { canvasOwnsAction?: boolean; tab: Tab; setTab: (value: Tab) => void; simulationActionHost?: HTMLDivElement | null; reviewAvailable?: boolean; focusReview?: () => void;
-  sections?: { readonly disabled: boolean; readonly incomplete?: boolean } }) {
+export function SummaryBar({ tab, setTab, simulationActionHost, reviewAvailable, focusReview, canvasOwnsAction, primaryAction, overview, showStep, simulationBlocked = false }: { canvasOwnsAction?: boolean; tab: Tab; setTab: (value: Tab) => void; simulationActionHost?: HTMLDivElement | null; reviewAvailable?: boolean; focusReview?: () => void;
+  primaryAction?: ReactNode; overview?: EditorOverview; showStep?: (nodeId: string) => void;
+  /** Simulate is closed for a reason its control states; the footer then claims nothing about warnings. */
+  simulationBlocked?: boolean }) {
   const { t: tr } = useLocale();
   const { state, actionSetup } = useWorkflow();
   const { info, prepared, retired, verifyError, verified } = useModeA();
@@ -63,13 +71,24 @@ export function SummaryBar({ tab, setTab, simulationActionHost, reviewAvailable,
       : modeB.info?.available ? <button type="button" onClick={() => setTab('Simulate')}>{tr("Back to simulation")}</button>
       : prepared && info?.available ? <button type="button" onClick={() => setTab('Simulate')}>{tr("Back to simulation")}</button>
       : <button type="button" onClick={() => setTab('Build')}>{tr("Back to the Canvas")}</button>;
-  return <footer className="summary-bar" data-workflow-revision={state.workflow.revision}>
-    <div><span className="eyebrow">{tr("WORKFLOW")}</span><strong>{tr(actionCount)} {tr(actionCount === 1 ? 'action' : 'actions')}</strong></div>
+  // BUILD-FLOFI-BUILDER-UX-002: the footer is the Editor's one live region for these notices (attention and a refused edit are announced; an
+  // unapplied change and "no step warnings" are read on demand).
+  const first = overview?.attention[0];
+  const notice = tab !== 'Build' || !overview ? null
+    : first ? <p className="summary-notice" data-notice="attention" role="status">
+        <span className="summary-notice-icon" aria-hidden="true">!</span>
+        <span><strong>{tr(overview.attention.length === 1 ? '1 step needs attention' : '{0} steps need attention', overview.attention.length)}</strong>{' '}<span className="summary-notice-detail">{tr('Step {0}: {1}', first.step, tr(first.status.detail))}</span></span>
+        {showStep && <button type="button" className="quiet summary-notice-show" onClick={() => showStep(first.nodeId)}>{tr('Show step')}</button>}
+      </p>
+    : overview.invalid ? <p className="summary-notice" data-notice="attention" role="status"><span className="summary-notice-icon" aria-hidden="true">!</span><strong>{tr('Edit not applied')}</strong></p>
+    : overview.drafts ? <p className="summary-notice" data-notice="draft">{tr(overview.drafts === 1 ? '1 change not applied yet' : '{0} changes not applied yet', overview.drafts)}</p>
+    : overview.state === 'configured' && !simulationBlocked ? <p className="summary-notice" data-notice="none">{tr('No step warnings')}</p>
+    : null;
+  return <footer className={`summary-bar${tab === 'Build' && primaryAction ? ' editor-bar' : ''}`} data-workflow-revision={state.workflow.revision}>
+    <div className="summary-count"><span className="eyebrow">{tr("WORKFLOW")}</span><strong>{tr(actionCount)} {tr(actionCount === 1 ? 'action' : 'actions')}</strong></div>
+    {notice}
     {/* Relocate the existing action without duplicating its review gates or handler. */}
     {tr(tab === 'Simulate' && simulationActionHost ? createPortal(action, simulationActionHost) : action)}
-    {sections && <div className="summary-sections" role="group" aria-label={tr('Editor sections')}>
-      {tab !== 'Simulate' && <button type="button" onClick={() => setTab('Simulate')} disabled={sections.disabled} title={tr(sections.disabled && sections.incomplete ? 'Configure the action amount on the Canvas first' : undefined)}>{tr('View simulation')}</button>}
-      {tab !== 'Execute' && <button type="button" onClick={() => setTab('Execute')} disabled={sections.disabled} title={tr(sections.disabled && sections.incomplete ? 'Configure the action amount on the Canvas first' : undefined)}>{tr('View execution')}</button>}
-    </div>}
+    {tab === 'Build' && primaryAction && <div className="canvas-primary-action summary-primary-action">{primaryAction}</div>}
   </footer>;
 }

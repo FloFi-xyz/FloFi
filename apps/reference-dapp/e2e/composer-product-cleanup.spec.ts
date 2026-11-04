@@ -3,7 +3,7 @@ import { test, expect } from './fixtures';
 import { installSupplyWallet, setSupplyWalletChain } from './supply-fixtures';
 import { configureCanvasAction, configureCanvasPool, openCanvasSettings } from './composer-authoring-fixtures';
 import type { Locator } from '@playwright/test';
-import { editorSectionAction, openBuilder, openEditorSection } from './build-entry-navigation';
+import { editorSectionAction, openBuilder, openEditorSection, useToolbarRail } from './build-entry-navigation';
 
 async function checkTokenPills(card: Locator) {
   for (const pill of await card.locator('.composer-amount-box > .composer-token-chip').all()) {
@@ -315,7 +315,7 @@ test('Supply edits inline with one shared editor value and validates through its
 
 test('floating toolbox exposes the existing guarded Delete action alongside every tool', async ({ page }) => {
   await openBuilder(page);
-  await page.getByRole('button', { name: 'Undock toolbar', exact: true }).click();
+  await useToolbarRail(page);
   const toolbox = page.locator('.floating-toolbox');
   const remove = toolbox.getByRole('button', { name: 'Delete', exact: true });
   await expect(remove).toBeDisabled();

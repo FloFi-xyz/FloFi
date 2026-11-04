@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { test, expect } from './fixtures';
 import { installSupplyWallet } from './supply-fixtures';
-import { openBuilder, openEditorSection } from './build-entry-navigation';
+import { openBuilder, openEditorSection, useToolbarRail } from './build-entry-navigation';
 
 test('workflow naming confirms inline, cancels without clearing selection and survives navigation', async ({ page }) => {
   await installSupplyWallet(page);
@@ -50,7 +50,7 @@ test('Privacy is a disabled affordance in both toolbar positions and never autho
   await openBuilder(page);
   const toolbar = page.getByRole('toolbar', { name: 'Canvas tools', exact: true });
   for (const floating of [false, true]) {
-    if (floating) await page.getByRole('button', { name: 'Undock toolbar', exact: true }).click();
+    if (floating) await useToolbarRail(page);
     const privacy = toolbar.getByRole('button', { name: 'Privacy', exact: true });
     await expect(privacy).toBeDisabled();
     await expect(privacy).toHaveAttribute('title', 'Privacy · not available yet');

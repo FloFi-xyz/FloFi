@@ -4,7 +4,7 @@ import { selectSettingsTheme } from './settings-fixtures';
 import type { Locator } from '@playwright/test';
 import { installSupplyWallet } from './supply-fixtures';
 import { configureCanvasAction } from './composer-authoring-fixtures';
-import { expectEditorSection, openBuilder, openEditorSection } from './build-entry-navigation';
+import { expectEditorSection, openBuilder, openEditorSection, useToolbarRail } from './build-entry-navigation';
 
 type Box = { x: number; y: number; width: number; height: number };
 const overlap = (a: Box, b: Box) => a.x < b.x + b.width && a.x + a.width > b.x && a.y < b.y + b.height && a.y + a.height > b.y;
@@ -120,7 +120,7 @@ for (const theme of ['Light', 'Dark'] as const) {
     await installSupplyWallet(page); await openBuilder(page); await expect(page.locator('.build009-wallet-info')).toBeVisible();
     const settings = page.getByRole('button', { name: 'Settings', exact: true });
     await settings.click(); await selectSettingsTheme(page, theme); await settings.press('Escape');
-    await page.getByRole('button', { name: 'Undock toolbar', exact: true }).click();
+    await useToolbarRail(page);
     const canvas = page.locator('.build-grid>.canvas');
     for (const width of [320, 375, 768, 1024, 1440]) {
       await page.setViewportSize({ width, height: 900 });

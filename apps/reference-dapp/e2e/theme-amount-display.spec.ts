@@ -2,7 +2,7 @@
 import { test, expect } from './fixtures';
 import { selectSettingsTheme } from './settings-fixtures';
 import { installSupplyWallet } from './supply-fixtures';
-import { openBuilder, reloadBuilder } from './build-entry-navigation';
+import { openBuilder, reloadBuilder, useToolbarRail } from './build-entry-navigation';
 
 for (const action of ['swap', 'bridge', 'pool', 'Stocks', 'supply', 'borrow', 'repay', 'withdraw']) {
   test(`${action} explains the missing USD value on every line, without a USD-first mode or a changed amount`, async ({ page }) => {
@@ -33,7 +33,7 @@ test('theme defaults to light, covers product surfaces, persists and returns to 
   await page.emulateMedia({ colorScheme: 'dark' });
   await openBuilder(page);
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'light');
-  await page.getByRole('button', { name: 'Undock toolbar', exact: true }).click();
+  await useToolbarRail(page);
   await page.getByRole('button', { name: 'Stocks', exact: true }).click();
   const card = page.locator('.composer-card');
   await card.getByRole('textbox', { name: 'Stocks amount', exact: true }).fill('12.5');

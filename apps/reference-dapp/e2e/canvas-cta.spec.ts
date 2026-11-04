@@ -4,7 +4,9 @@ import { installSupplyWallet, SUPPLY_OWNER } from './supply-fixtures';
 import { configureCanvasAction } from './composer-authoring-fixtures';
 import { expectEditorSection, openBuilder, openEditorSection } from './build-entry-navigation';
 
-test('Build CTA floats inside the wider canvas without colliding with existing controls', async ({ page }) => {
+// BUILD-FLOFI-BUILDER-UX-002 (owner-approved Editor brief): the Canvas takes the space, the FloFi panel is compact, and the Canvas lifecycle control
+// (Simulate) moved from the Canvas corner to the Editor footer, rendered once with its own handler; Simulate and Execute open from the stepper.
+test('the Build CTA lives once in the Editor footer, beside the real notices, and the Canvas takes the space', async ({ page }) => {
   await installSupplyWallet(page);
   await openBuilder(page);
   // Supply binds the connected owner as beneficiary: wait for the wallet's passive reconnect before adding it.
@@ -12,40 +14,37 @@ test('Build CTA floats inside the wider canvas without colliding with existing c
   await page.getByRole('button', { name: 'Add supply', exact: true }).click();
   const canvas = page.getByRole('region', { name: 'Workflow canvas', exact: true });
   const graph = page.getByRole('region', { name: 'Workflow graph', exact: true });
-  const cta = graph.getByRole('button', { name: 'Simulate workflow', exact: true });
+  const footer = page.locator('footer.summary-bar');
+  const cta = footer.locator('.canvas-primary-action').getByRole('button', { name: 'Simulate workflow', exact: true });
   await expect(page.getByRole('button', { name: 'Continue to Simulate', exact: true })).toHaveCount(0);
-  // BUILD-FLOFI-CHAT-EDITOR-UX-001: the footer only opens the Editor's sections; it has no lifecycle action of its own.
-  await expect(page.locator('.summary-bar button')).toHaveText(['View simulation', 'View execution']);
-  await expect(page.locator('.summary-bar button.primary, .summary-bar button[data-lifecycle-action]')).toHaveCount(0);
-  for (const floating of [false, true]) {
-    if (floating) await page.getByRole('button', { name: 'Undock toolbar', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Simulate workflow', exact: true })).toHaveCount(1);
+  await expect(graph.locator('.canvas-primary-action')).toHaveCount(0);
+  await expect(footer.locator('button[data-lifecycle-action]')).toHaveCount(1);
+  await expect(footer.getByRole('button', { name: /^View (simulation|execution)$/ })).toHaveCount(0);
+  await expect(page.getByRole('navigation', { name: 'Editor steps', exact: true }).getByRole('button')).toHaveText(['1Create', '2Simulate', '3Execute']);
+  for (const docked of [false, true]) {
+    if (docked) await page.getByRole('button', { name: 'Dock toolbar', exact: true }).click();
     for (const width of [1920, 1440, 390]) {
       await page.setViewportSize({ width, height: 900 });
       await expect(cta).toBeVisible();
-      const graphBox = (await graph.boundingBox())!;
-      const ctaBox = (await cta.boundingBox())!;
-      const controlsBox = (await graph.locator('.canvas-navigator').boundingBox())!;
-      await expect.poll(async () => {
-        const surface = (await graph.boundingBox())!, button = (await cta.boundingBox())!;
-        return Math.abs(surface.y + surface.height - button.y - button.height - 24);
-      }).toBeLessThan(1);
-      expect(Math.abs(graphBox.x + graphBox.width - ctaBox.x - ctaBox.width - 12)).toBeLessThan(1);
-      expect(ctaBox.x).toBeGreaterThanOrEqual(graphBox.x);
-      expect(controlsBox.x + controlsBox.width <= ctaBox.x || controlsBox.y + controlsBox.height <= ctaBox.y).toBe(true);
-      expect(controlsBox.y).toBeGreaterThan(graphBox.y);
-      await expect.poll(async () => (await canvas.boundingBox())!.height).toBe(floating ? 760 : width <= 800 ? 820 : 590);
-      const nodeBox = (await graph.locator('.flow-card').boundingBox())!;
-      expect(ctaBox.x >= nodeBox.x + nodeBox.width || ctaBox.y >= nodeBox.y + nodeBox.height ||
-        ctaBox.x + ctaBox.width <= nodeBox.x || ctaBox.y + ctaBox.height <= nodeBox.y).toBe(true);
-      if (floating) {
-        const toolboxBox = (await graph.locator('.floating-toolbox').boundingBox())!;
-        expect(ctaBox.x).toBeGreaterThanOrEqual(toolboxBox.x + toolboxBox.width);
+      const graphBox = (await graph.boundingBox())!, footerBox = (await footer.boundingBox())!, ctaBox = (await cta.boundingBox())!;
+      expect(ctaBox.y).toBeGreaterThanOrEqual(footerBox.y); expect(ctaBox.y + ctaBox.height).toBeLessThanOrEqual(footerBox.y + footerBox.height + 1);
+      expect(ctaBox.x + ctaBox.width).toBeLessThanOrEqual(width);
+      const nodeBox = (await graph.locator('.flow-card').boundingBox())!, controlsBox = (await graph.locator('.canvas-navigator').boundingBox())!;
+      expect(controlsBox.y + controlsBox.height).toBeLessThanOrEqual(graphBox.y + graphBox.height + 1);
+      if (!docked) {
+        const rail = (await graph.locator('.floating-toolbox').boundingBox())!;
+        expect(rail.x).toBeGreaterThanOrEqual(graphBox.x); expect(rail.y + rail.height).toBeLessThanOrEqual(graphBox.y + graphBox.height + 1);
+        expect(nodeBox.x).toBeGreaterThanOrEqual(rail.x + rail.width);
       }
-      if (width > 800) {
+      if (width > 1100) {
         expect(await page.locator('main').evaluate(element => getComputedStyle(element).paddingLeft)).toBe('20px');
-        const assistantBox = (await page.getByRole('complementary', { name: 'FloFi Assistant' }).boundingBox())!;
-        expect(assistantBox.width).toBe(340);
-        expect(assistantBox.x).toBeGreaterThanOrEqual((await canvas.boundingBox())!.x + (await canvas.boundingBox())!.width);
+        const assistantBox = (await page.getByRole('complementary', { name: 'FloFi Assistant' }).boundingBox())!, canvasBox = (await canvas.boundingBox())!;
+        expect(assistantBox.width).toBe(320);
+        expect(assistantBox.x).toBeGreaterThanOrEqual(canvasBox.x + canvasBox.width);
+        // The Canvas fills the viewport above the footer (a 900 px window leaves it at least 560 px tall).
+        expect(canvasBox.height).toBeGreaterThanOrEqual(560);
+        expect(canvasBox.width).toBeGreaterThan(assistantBox.width * 2);
       }
       if (width === 1920) expect((await page.locator('main').boundingBox())!.width).toBe(1720);
       // BUILD-FLOFI-CONVERSATIONAL-001: no settings panel below the canvas (a card's settings open anchored to it, only on request).
@@ -53,6 +52,7 @@ test('Build CTA floats inside the wider canvas without colliding with existing c
       expect(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth)).toBe(false);
     }
   }
+  await page.setViewportSize({ width: 1440, height: 900 });
   await configureCanvasAction(page, '1');
   await page.emulateMedia({ reducedMotion: 'no-preference' });
   await expect.poll(() => cta.evaluate(element => getComputedStyle(element).animationName)).toBe('build-cta-pulse');
@@ -78,14 +78,14 @@ test('Canvas simulation runs the shared Supply lifecycle with one guarded Review
   await expect(page.locator('.build009-wallet-info')).toHaveAttribute('title', new RegExp(SUPPLY_OWNER, 'i'));
   await page.getByRole('button', { name: 'Add supply', exact: true }).click();
   await configureCanvasAction(page, '1');
-  await page.getByRole('region', { name: 'Workflow graph', exact: true }).getByRole('button', { name: 'Simulate workflow', exact: true }).click();
+  await page.locator('footer.summary-bar').getByRole('button', { name: 'Simulate workflow', exact: true }).click();
   await expectEditorSection(page, 'Simulate');
   const primary = page.getByRole('region', { name: 'Simulation workflow graph', exact: true }).locator('.canvas-primary-action');
   await expect(primary.getByRole('button', { name: 'Authorize in wallet', exact: true })).toBeDisabled();
   await expect(page.getByRole('button', { name: 'Authorize in wallet', exact: true })).toHaveCount(1);
   await expect(page.getByRole('button', { name: 'Simulate Supply', exact: true })).toHaveCount(0);
-  await expect(page.locator('.summary-bar button')).toHaveText(['View execution']);
-  await expect(page.locator('.summary-bar button.primary, .summary-bar button[data-lifecycle-action]')).toHaveCount(0);
+  // The simulation section's footer has no lifecycle control or section button of its own (the stepper opens Execute).
+  await expect(page.locator('.summary-bar button')).toHaveCount(0);
   await expect(page.locator('.summary-bar')).toHaveAttribute('data-workflow-revision', '1');
   await expect(page.getByRole('button', { name: 'Simulate workflow', exact: true })).toHaveCount(0);
   await openEditorSection(page, 'Build');

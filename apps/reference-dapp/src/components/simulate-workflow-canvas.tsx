@@ -12,6 +12,7 @@ import { useEstimateOwners } from '../state/estimate-owners';
 import { ComposerCard, type ComposerCardData } from './composer-card';
 import { DarkSpotlight } from './dark-spotlight';
 import { CANVAS_GESTURES, CanvasNavigator } from './canvas-navigator';
+import { CANVAS_EDGE_LABEL, edgeAccessibleLabel, edgeLabel } from './canvas-edge-style';
 
 const FIT_PADDING = { top: '32px', bottom: '136px', left: '32px', right: '32px' } as const;
 function InspectionCard({ data }: NodeProps) { return <ComposerCard data={data as ComposerCardData}/>; }
@@ -65,22 +66,23 @@ export function SimulateWorkflowCanvas({ workflowName, primaryAction, stage = 's
     return shownCanvasPositions(composerActions(workflow), canvasLayout ?? {}, { lending: isLendingComposition(workflow), occupied: setup ? [setup] : [] });
   }, [workflow, canvasLayout, actionSetup]);
   const nodes = useMemo<Node[]>(() => incomplete ? [] : composerActions(workflow).map((node, index) => ({
-    id: node.nodeId, type: 'workflow', ariaLabel: `Step ${index + 1}: ${composerSummary(workflow, node, context).action}`,
+    id: node.nodeId, type: 'workflow', ariaLabel: tr('Step {0}: {1}', index + 1, tr(composerSummary(workflow, node, context).action)),
     position: positions[node.nodeId]!,
     data: { composer: true, inspection: true, step: index + 1, selected: false, vertical: lending,
       summary: composerSummary(workflow, node, context),
       // Simulate only: the Execute plan shows the reviewed amounts, never a newer approximate quote beside them.
       ...stage === 'simulate' && ['asset.swap.exact-input', 'asset.bridge'].includes(node.actionType) ? { estimateWorkflow: workflow, estimateNodeId: node.nodeId,
         estimateOwner: node.chainId.startsWith('solana:') ? solanaAccount : evmAccount, estimateEvmOwner: evmAccount, estimateSolanaOwner: solanaAccount } : {} },
-  })), [workflow, context, positions, incomplete, lending, evmAccount, solanaAccount, stage]);
-  const edges = useMemo(() => incomplete ? [] : composerConnections(workflow).map(({ id, source, target }) => ({
-    id, source, target, type: 'default', animated: false,
+  })), [workflow, context, positions, incomplete, lending, evmAccount, solanaAccount, stage, tr]);
+  // BUILD-FLOFI-BUILDER-UX-002: the same link labels as the Build Canvas, so a link reads the same between Create and Simulate.
+  const edges = useMemo(() => incomplete ? [] : composerConnections(workflow).map(({ id, source, target, label }) => ({
+    id, source, target, type: 'default', animated: false, label: tr(edgeLabel(label)), ariaLabel: tr(edgeAccessibleLabel(label)),
     markerEnd: { type: MarkerType.ArrowClosed, width: 11, height: 11, color: 'var(--edge-line)' },
-    style: { stroke: 'var(--edge-line)', strokeWidth: 1.5 },
-  })), [workflow, incomplete]);
+    style: { stroke: 'var(--edge-line)', strokeWidth: 1.5 }, ...CANVAS_EDGE_LABEL,
+  })), [workflow, incomplete, tr]);
   const [viewport, setViewport] = useState<'pending' | 'fitted'>('pending');
   return <section className={`canvas simulate-canvas simulation-workflow-canvas panel ${lending ? 'simulation-lending-canvas' : ''}`} aria-label={tr(stage === 'execute' ? 'Execution plan' : 'Workflow simulation')}>
-    <div className="canvas-head"><div><h2>{workflowName}</h2></div><span className="revision">{tr(actions.length)} {tr(actions.length === 1 ? 'action' : 'actions')}</span></div>
+    <div className="canvas-head"><div><h2>{workflowName === 'Your Workflow' ? tr('Your Workflow') : workflowName}</h2></div><span className="revision">{tr(actions.length)} {tr(actions.length === 1 ? 'action' : 'actions')}</span></div>
     <div className="flow-surface simulate-flow-surface" role="region" aria-label={tr(stage === 'execute' ? 'Execution workflow graph' : 'Simulation workflow graph')} data-viewport={viewport}>
       <ReactFlow nodes={nodes} edges={edges} nodeTypes={nodeTypes} minZoom={0.35} maxZoom={1.4}
         nodesDraggable={false} nodesConnectable={false} elementsSelectable={false} nodesFocusable={false} edgesFocusable={false}
