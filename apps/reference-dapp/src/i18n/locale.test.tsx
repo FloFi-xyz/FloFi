@@ -2,7 +2,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { HookHarness } from '../test-utils/hook-harness';
-import { LocaleProvider, LANGUAGE_KEY, translate, useLocale } from './locale';
+import { DEFAULT_LANGUAGE, LocaleProvider, LANGUAGE_KEY, parseLanguage, translate, useLocale } from './locale';
+import { defaultLanguageFor, documentLanguage } from './language';
+import { EMBEDDED_APPROVAL_PATH } from '../server/embedded-approval';
 import { portuguese } from './pt';
 import { YourWorkflows } from '../components/saved-workflows';
 import { WorkflowProvider, useWorkflow } from '../state/workflow-store';
@@ -27,7 +29,7 @@ describe('locale preference and workflow isolation', () => {
   it('switches PT/EN, persists the choice and updates the document language', () => {
     expect(render()).toContain('Save workflow');
     locale.setLanguage('PT'); expect(render()).toContain('Guardar fluxo');
-    expect(storage.get(LANGUAGE_KEY)).toBe('PT'); expect(document.documentElement.lang).toBe('pt');
+    expect(storage.get(LANGUAGE_KEY)).toBe('PT'); expect(document.documentElement.lang).toBe('pt-BR');
     locale.setLanguage('EN'); expect(render()).toContain('Save workflow');
     expect(storage.get(LANGUAGE_KEY)).toBe('EN'); expect(document.documentElement.lang).toBe('en');
   });
@@ -61,5 +63,18 @@ describe('locale preference and workflow isolation', () => {
     expect(translate('PT', '  Save workflow  ')).toBe('  Guardar fluxo  ');
     // BUILD-BASE-001: a catalog network's name is a template value, not a catalog entry per network.
     expect(translate('PT', 'Base tokens are unavailable right now. Try again in a moment.')).toBe('Os tokens da Base estão indisponíveis no momento. Tente novamente em instantes.');
+  });
+
+  // Owner decision (BUILD-FLOFI-SITE-001): Portuguese for a visitor with no saved preference; a saved one is read as is (layouts use `??`).
+  it('defaults to Portuguese only when no preference is saved', () => {
+    expect(DEFAULT_LANGUAGE).toBe('PT');
+    expect(parseLanguage('EN') ?? DEFAULT_LANGUAGE).toBe('EN');
+    expect(parseLanguage('PT') ?? DEFAULT_LANGUAGE).toBe('PT');
+    for (const missing of [undefined, null, '', 'en', 'fr']) expect(parseLanguage(missing) ?? DEFAULT_LANGUAGE).toBe('PT');
+    expect([documentLanguage('PT'), documentLanguage('EN')]).toEqual(['pt-BR', 'en']);
+    // The site, sign-in and /app default to Portuguese; only the MCP surface embedded in a chat host keeps English (no preference reaches it).
+    for (const path of ['/', '/docs', '/docs/simulation', '/login', '/onboarding/wallets', '/app', '/app/dashboard', '/approve', '/connections', '/walletx', null]) expect(defaultLanguageFor(path), String(path)).toBe('PT');
+    // Outside the decision: the MCP surface embedded in a chat host, FloFi Wallet's own host and the English-only admin console.
+    for (const path of [EMBEDDED_APPROVAL_PATH, '/wallet', '/wallet/export', '/admin', '/admin/access']) expect(defaultLanguageFor(path), path).toBe('EN');
   });
 });

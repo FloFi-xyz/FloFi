@@ -11,7 +11,7 @@ import { readChannelCoreConfig } from '../channels/core/config.ts';
 import { channelCopy } from '../channels/core/copy.ts';
 import { plannedNotifications } from '../channels/core/status.ts';
 import { WHATSAPP_POLICY_CLEARANCE } from '../channels/whatsapp/config.ts';
-import { articles } from '../components/docs/content';
+import { DOCS, type DocInline } from '../components/site/docs-content';
 import type { HandoffRecord } from './handoff-store.ts';
 import { IN_CHAT_EXECUTION, SURFACE_CAPABILITIES } from './channel-capabilities.ts';
 
@@ -57,13 +57,23 @@ describe('BUILD-FLOFI-UX-UI-002 conversational capability matrix', () => {
     expect(IN_CHAT_EXECUTION).toBe('HOST_AND_WALLET_DEPENDENT');
   });
 
-  it('is published in the MCP integration guide, row for row', () => {
-    const article = articles.find(a => a.slug === 'mcp-integrations')!;
-    const section = article.sections.find(s => s.id === 'in-chat')!;
-    const tables = section.blocks.filter(b => b.type === 'table');
-    expect(tables).toHaveLength(1);
-    const rows = (tables[0] as { rows: string[][] }).rows;
-    expect(rows.map(r => r[0])).toEqual(SURFACE_CAPABILITIES.map(s => s.name));
-    for (const [i, s] of SURFACE_CAPABILITIES.entries()) expect(rows[i]).toEqual([s.name, s.compose, s.simulation, s.progress, s.signing, s.coverage]);
+  // BUILD-FLOFI-SITE-001: the approved site's MCP guide presents the same matrix as one card per surface (English is the source text).
+  it('is published in the MCP integration guide, surface for surface', () => {
+    const page = DOCS.EN.pages.find(a => a.slug === 'mcp-integrations')!;
+    const section = page.sections.find(s => s.id === 'in-chat')!;
+    const blocks = section.blocks.filter(b => b.kind === 'cards');
+    expect(blocks).toHaveLength(1);
+    const text = (parts: readonly DocInline[]) => parts.map(part => typeof part === 'string' ? part : 'code' in part ? part.code : 'strong' in part ? part.strong : 'em' in part ? part.em : part.link).join('');
+    const cards = (blocks[0] as Extract<(typeof blocks)[number], { kind: 'cards' }>).cards;
+    expect(cards.map(card => card.title)).toEqual(SURFACE_CAPABILITIES.map(s => s.name));
+    // Each card also states how the surface becomes available, so WhatsApp reads "Not live" (the boards omitted it).
+    for (const [i, s] of SURFACE_CAPABILITIES.entries()) expect(cards[i]!.rows.map(row => text(row.text))).toEqual([s.compose, s.simulation, s.progress, s.signing, s.coverage, s.activation]);
+    // Portuguese carries one card per surface too, in the same order, with the same availability.
+    const pt = DOCS.PT.pages.find(a => a.slug === 'mcp-integrations')!.sections.find(s => s.id === 'in-chat')!.blocks.filter(b => b.kind === 'cards');
+    expect(pt).toHaveLength(1);
+    const ptCards = (pt[0] as Extract<(typeof pt)[number], { kind: 'cards' }>).cards;
+    expect(ptCards.map(card => card.title)).toEqual(SURFACE_CAPABILITIES.map(s => s.name));
+    expect(ptCards.map(card => card.rows.length)).toEqual(SURFACE_CAPABILITIES.map(() => 6));
+    expect(text(ptCards.find(card => card.title === 'WhatsApp')!.rows.at(-1)!.text)).toMatch(/^Ainda não está no ar/);
   });
 });

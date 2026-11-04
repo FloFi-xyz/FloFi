@@ -6,7 +6,7 @@ import { spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { createHash, randomBytes } from 'node:crypto';
 import { E2E_APP_ORIGIN, E2E_APP_PORT, e2eNetworkScopeEnv } from './e2e/app-origin';
-import { answeredPrivacyNotice } from './e2e/app-origin';
+import { returningVisitor } from './e2e/app-origin';
 import { E2E_CARD_ORIGIN } from './e2e/app-origin';
 import { MCP_E2E_INVITE } from './e2e/mcp-constants';
 import { SERVER_ONLY_WOOVI_APP_ID } from './e2e/card-provider-fixtures';
@@ -236,14 +236,11 @@ if (copilot !== undefined && copilot !== 'off' && copilot !== 'replay') throw ne
 //  - the other six: every one of their tests already failed on `main` cbf340e before this build (2026-10-24 baseline run), for
 //    reasons unrelated to it (typography, picker contents, layout and focus).
 // Rewriting them is a separate decision (BUILD-FLOFI-MAINNET-PRODUCT-001 report, §8).
-// BUILD-FLOFI-LANDING07-README-001: retired with the landing they describe. `/` now renders Caio's Landing 07, so the previous
-// landing's sections are no longer routed: its community links, MCP card, conversation demo and mascot journey (ux-ui-002-landing),
-// section layout and Earth closing (landing-structure, earth-footer), mascot motion (brand-motion-001), connected-infrastructure
-// diagram (brand-visual-refinement) and three-phase story (workflow-story). Landing 07 is covered by landing07.spec.ts; the old
-// landing's entry, Docs and sign-in assertions moved there and into brand-ux-001, beta-ui, native-docs and auth-wallets.
-const RETIRED_LANDING_SPECS = ['ux-ui-002-landing', 'landing-structure', 'earth-footer', 'brand-motion-001', 'brand-visual-refinement', 'workflow-story'];
+// BUILD-FLOFI-SITE-001: the owner-approved site replaced Landing 07 at `/` and the previous Docs; the specs that described those removed pages
+// were removed with them. The site is covered by site.spec.ts; the entry, Docs and sign-in assertions live there and in brand-ux-001, beta-ui
+// and auth-wallets.
 const RETIRED_SPECS = ['wallet-environment', 'brand-icon-colors', 'bridge-network-picker', 'crypto-action-picker', 'global-product-polish',
-  'header-controls', 'product-typography-logo', ...RETIRED_LANDING_SPECS].map(name => `**/${name}.spec.ts`);
+  'header-controls', 'product-typography-logo'].map(name => `**/${name}.spec.ts`);
 
 export default defineConfig({
   testDir: './e2e',
@@ -256,7 +253,7 @@ export default defineConfig({
   expect: { timeout: 10_000, toHaveScreenshot: { animations: 'disabled', caret: 'hide', maxDiffPixels: 0 } },
   reporter: 'list',
   use: {
-    baseURL: E2E_APP_ORIGIN, storageState: answeredPrivacyNotice(E2E_APP_ORIGIN),
+    baseURL: E2E_APP_ORIGIN, storageState: returningVisitor(E2E_APP_ORIGIN),
     browserName: 'chromium',
     headless: true,
     launchOptions: { executablePath },

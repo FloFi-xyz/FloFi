@@ -1,14 +1,14 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import type { ReactNode } from 'react';
 import { randomUUID } from 'node:crypto';
-import { cookies } from 'next/headers';
+import { cookies, headers } from 'next/headers';
 import { connection } from 'next/server';
 import { engineeringUiAllowed } from '../../server/engineering-ui';
 import { networkScope } from '../../server/network-scope';
 import { copilotConfig } from '../../server/copilot-service';
 import { ProductWorkspace } from '../../components/product-workspace';
 import { LocaleProvider } from '../../i18n/locale';
-import { LANGUAGE_COOKIE, parseLanguage } from '../../i18n/language';
+import { LANGUAGE_COOKIE, defaultLanguageFor, parseLanguage } from '../../i18n/language';
 import { parseWalletHint, WALLET_HINT_COOKIE } from '../../wallet/wallet-hint';
 import { parsePrivacyNotice, PRIVACY_NOTICE_COOKIE } from '../../domain/privacy-notice';
 import { FloFiPrivyProvider } from '../../accounts/privy-client';
@@ -37,7 +37,7 @@ export default async function ProductLayout({ children }: { children: ReactNode 
     learningTier: learningConfig(process.env).enabled ? 'ENABLED' as const : sessionAdaptation(process.env) ? 'SESSION' as const : 'OFF' as const };
   // BUILD-FLOFI-PRIVY-UX-001: the person's Privy wallets sign here (with Privy's own confirmation), and Disconnect logs out of Privy. The page
   // runs under the proxy's nonce policy (account-csp.ts productPagePolicy): Next.js puts the nonce on its own scripts.
-  return <LocaleProvider initialLanguage={parseLanguage(jar.get(LANGUAGE_COOKIE)?.value) ?? 'EN'}>
+  return <LocaleProvider initialLanguage={parseLanguage(jar.get(LANGUAGE_COOKIE)?.value) ?? defaultLanguageFor((await headers()).get('x-flofi-pathname'))}>
     <FloFiPrivyProvider config={privyBrowserConfig(process.env)} accounts={Boolean(process.env.DATABASE_URL)}><SessionGuard/>
       <ProductWorkspace initialWorkflowId={initialWorkflowId} engineeringEnabled={await engineeringUiAllowed()} networkScope={networkScope()} bootstrap={bootstrap}/>{children}
     </FloFiPrivyProvider>

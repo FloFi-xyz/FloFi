@@ -7,19 +7,24 @@ const retiredNotice = "FloFi is currently in beta testing. Do not use real funds
 const betaNotice = 'FloFi Beta Mainnet — Real funds are enabled. Review every transaction before signing.';
 const betaNoticePt = 'FloFi Beta Mainnet — Operações com fundos reais estão habilitadas. Revise cada transação antes de assinar.';
 
-// BUILD-FLOFI-LANDING07-README-001: Caio's Landing 07 replaced the landing whose header CTA was the yellow "Launch Beta FloFi". Its header
-// CTA keeps the package's own text and style; only its destination is the sign-in entry (PR #143). The /app notice below is unchanged.
+// BUILD-FLOFI-SITE-001: the owner-approved site replaced Landing 07. Its header CTA ("Entrar" / "Open") opens the sign-in entry (PR #143); the
+// /app notice below is unchanged.
+// A new visitor (no saved language) gets Portuguese; the visitor's English choice then follows into sign-in and /app.
+test.describe('as a new visitor', () => {
+test.use({ savedLanguage: null });
 test('the landing header CTA opens sign-in and the builder stays reachable without an account', async ({ page }) => {
   await page.goto('/');
   const header = page.locator('header');
-  const cta = header.getByRole('link', { name: 'Começar com FloFi', exact: true });
+  const cta = header.getByRole('link', { name: 'Entrar', exact: true });
   await expect(cta).toHaveAttribute('href', '/login');
-  await page.getByRole('button', { name: 'EN', exact: true }).click();
-  await expect(header.getByRole('link', { name: 'Start with FloFi', exact: true })).toHaveAttribute('href', '/login');
-  await header.getByRole('link', { name: 'Start with FloFi', exact: true }).click();
+  await page.getByRole('button', { name: 'Preferências', exact: true }).click();
+  await page.getByRole('radio', { name: 'English', exact: true }).check();
+  await expect(header.getByRole('link', { name: 'Open', exact: true })).toHaveAttribute('href', '/login');
+  await header.getByRole('link', { name: 'Open', exact: true }).click();
   await expect(page).toHaveURL('/login');
   await page.getByRole('link', { name: 'Explore the builder without an account', exact: true }).click();
   await expect(page).toHaveURL('/app');
+});
 });
 
 // BUILD-FLOFI-PRODUCT-UX-001: restore the yellow Beta Mainnet notice under the header (real funds enabled, review before signing).

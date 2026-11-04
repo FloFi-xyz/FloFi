@@ -2,9 +2,9 @@
 'use client';
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { portuguese } from './pt';
-import { LANGUAGE_COOKIE, LANGUAGE_KEY, parseLanguage, type Language } from './language';
+import { LANGUAGE_COOKIE, LANGUAGE_KEY, documentLanguage, parseLanguage, type Language } from './language';
 export type { Language } from './language';
-export { LANGUAGE_COOKIE, LANGUAGE_KEY, parseLanguage } from './language';
+export { DEFAULT_LANGUAGE, LANGUAGE_COOKIE, LANGUAGE_KEY, parseLanguage } from './language';
 function rememberLanguageCookie(language: Language) {
   try {
     const secure = window.location.protocol === 'https:' ? '; Secure' : '';
@@ -33,7 +33,7 @@ const Context = createContext(defaults);
 export function LocaleProvider({ children, initialLanguage = 'EN' }: { children: ReactNode; initialLanguage?: Language }) {
   const [language, setLanguageState] = useState<Language>(initialLanguage);
   useEffect(() => { try { const saved = parseLanguage(localStorage.getItem(LANGUAGE_KEY)); if (saved) { setLanguageState(saved); rememberLanguageCookie(saved); } } catch { /* Optional preference storage. */ } }, []);
-  useEffect(() => { document.documentElement.lang = language === 'PT' ? 'pt' : 'en'; }, [language]);
+  useEffect(() => { document.documentElement.lang = documentLanguage(language); }, [language]);
   const value = useMemo(() => ({ language, setLanguage: (next: Language) => {
     setLanguageState(next); try { localStorage.setItem(LANGUAGE_KEY, next); } catch { /* Still applies this visit. */ } rememberLanguageCookie(next);
   }, t: <T,>(input: T, ...parameters: readonly (string | number)[]) => translate(language, input, ...parameters) }), [language]);

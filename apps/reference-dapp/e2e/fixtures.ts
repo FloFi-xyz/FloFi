@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { test as base, expect, type BrowserContext, type Locator, type Page } from '@playwright/test';
-import { answeredPrivacyNotice, E2E_APP_ORIGIN as APP_ORIGIN, E2E_CARD_ORIGIN } from './app-origin';
+import { returningVisitor, E2E_APP_ORIGIN as APP_ORIGIN, E2E_CARD_ORIGIN } from './app-origin';
+import type { Language } from '../src/i18n/language';
 import { openEditorSection } from './build-entry-navigation';
 
 export const SYNTHETIC_GUARD_URL = 'https://example.invalid/gryloo-guard-self-test';
@@ -11,12 +12,14 @@ const guards = new WeakMap<BrowserContext, Guard>();
 const ALLOWED_ORIGINS: ReadonlySet<string> = new Set([APP_ORIGIN, ...process.env.GRYLOO_CARD_E2E === 'MOCKED_LOOPBACK_ONLY' ? [E2E_CARD_ORIGIN] : []]);
 
 function guardedTest(negativeSelfTest: boolean) {
-  return base.extend<{ context: BrowserContext; page: Page; networkGuard: Guard }>({
-    context: async ({ browser }, use) => {
+  // `savedLanguage`: the visitor's saved language (English by default); `null` is a new visitor, who gets the product default (Portuguese).
+  return base.extend<{ savedLanguage: Language | null; context: BrowserContext; page: Page; networkGuard: Guard }>({
+    savedLanguage: ['EN', { option: true }],
+    context: async ({ browser, savedLanguage }, use) => {
       const context = await browser.newContext({
         baseURL: APP_ORIGIN,
         serviceWorkers: 'block', bypassCSP: negativeSelfTest, viewport: { width: 1440, height: 900 },
-        colorScheme: 'light', reducedMotion: 'reduce', locale: 'en-US', storageState: answeredPrivacyNotice(APP_ORIGIN),
+        colorScheme: 'light', reducedMotion: 'reduce', locale: 'en-US', storageState: returningVisitor(APP_ORIGIN, savedLanguage),
       });
       const unexpected: string[] = [];
       const guard: Guard = {
