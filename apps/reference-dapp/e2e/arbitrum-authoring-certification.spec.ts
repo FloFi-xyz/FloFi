@@ -53,8 +53,17 @@ for (const c of cases.filter(c => ['Swap', 'Native Transfer', 'Supply'].includes
   await assertPassiveWallet(page); networkGuard.assertClean();
 });
 
+// BUILD AAVE-V3-EXPANSION-001: every listed reserve of the Arbitrum Aave V3 market is authorable; WETH is no longer refused.
+test('a registered non-USDC Aave reserve is authored from Chat: Please supply 1 WETH to Aave on Arbitrum', async ({ page, networkGuard }) => {
+  await replayProviderLogos(page); await installPassiveWallet(page, '0xa4b1'); await openBuilder(page);
+  await page.locator('#mock-prompt').fill('Please supply 1 WETH to Aave on Arbitrum'); await page.getByRole('button', { name: 'Send', exact: true }).click();
+  const answer = page.getByRole('log', { name: 'Conversation' }).locator('.message.ai').last();
+  await expect(answer).toContainText('Supply added to your workflow: 1 WETH'); await expect(answer).toContainText('Aave V3');
+  await expect(answer).not.toContainText(/COPILOT_|ASSET_|SUPPLY_|UNISWAP_/);
+  await assertPassiveWallet(page); networkGuard.assertClean();
+});
+
 for (const [text, explanation] of [
-  ['Please supply 1 WETH to Aave on Arbitrum', 'USDC'],
   ['Please repay all 10 USDC debt on Arbitrum', 'partial'],
   ['Provide liquidity for USDC and WETH on Arbitrum', 'maximum amounts'],
   ['Please provide 10 USDC and 0.005 WETH liquidity on Arbitrum fee 0.02%', 'registered fee tiers'],

@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { AAVE_V3_ADDRESS_BOOK, AAVE_V3_ADDRESS_BOOK_COMMIT, type AaveAddressBookReserve } from './aave-v3-reserves.generated.js';
 /** Existing engine scope, shared by capability wording and deterministic authoring. Amounts still require live debt/balance preflight. */
 export const AAVE_V3_AMOUNT_POLICY = Object.freeze({ repay: 'PARTIAL_ONLY', withdraw: 'PARTIAL_ONLY' } as const);
 /** Verified from Aave's current DAO address book and interface; only this runtime profile. */
@@ -96,16 +97,90 @@ export const AAVE_V3_ETHEREUM = Object.freeze({
   officialSource: 'https://github.com/aave-dao/aave-address-book/blob/main/src/AaveV3Ethereum.sol',
   l1DataFee: false, environment: 'MAINNET', poolRevision: 11, ownerBeneficiary: true, validateSupplyCap: true,
 } as const);
-export type AaveLendingProfile = typeof AAVE_V3_BASE_SEPOLIA | typeof AAVE_V3_ETHEREUM_SEPOLIA | typeof AAVE_V3_BASE | typeof AAVE_V3_ARBITRUM | typeof AAVE_V3_ETHEREUM;
-/** One verified asset per network. Profiles are chosen by the authored or reviewed chain, never by symbol. */
-export const AAVE_V3_LENDING_PROFILES: readonly AaveLendingProfile[] = Object.freeze([AAVE_V3_BASE_SEPOLIA, AAVE_V3_ETHEREUM_SEPOLIA, AAVE_V3_BASE, AAVE_V3_ARBITRUM, AAVE_V3_ETHEREUM]);
+/**
+ * BUILD AAVE-V3-EXPANSION-001: every reserve of the Ethereum, Base and Arbitrum One Aave V3 Core markets.
+ *
+ * A mainnet reserve profile is the market's verified market-level profile above (Pool, PoolAddressesProvider, AaveOracle, pool implementation
+ * pin and revision where recorded, explorer, network-cost model) with that reserve's identity from the pinned official address book
+ * (`aave-v3-reserves.generated.ts`): reserve id, underlying, decimals, aToken and variable-debt token. The verified native-USDC profiles are the
+ * same frozen objects as before, unchanged. Every other reserve is owner-beneficiary only and always checks its supply cap. A reserve is
+ * identified by chain + Pool + underlying address + decimals, never by symbol: the symbol is a display label (and an authoring alias).
+ * Listing here is not availability: active/frozen/paused, caps, liquidity, collateral and oracle state are read on chain at Simulate and
+ * again immediately before every wallet request, and any mismatch with this identity fails closed.
+ */
+type MainnetMarketProfile = typeof AAVE_V3_BASE | typeof AAVE_V3_ARBITRUM | typeof AAVE_V3_ETHEREUM;
+type ReserveIdentity = { readonly asset: string; readonly decimals: number; readonly symbol: string; readonly reserveId: number; readonly aToken: string;
+  readonly variableDebtToken: string; readonly officialSource: string };
+/** A non-USDC mainnet reserve: the market's profile, that reserve's identity, owner-only beneficiary and an exact supply-cap check. */
+export type AaveReserveProfile<M extends MainnetMarketProfile = MainnetMarketProfile> = Readonly<Omit<M, keyof ReserveIdentity> & ReserveIdentity & {
+  /** The address-book key (an authoring alias; e.g. `USDCn` for Arbitrum native USDC). */ readonly addressBookKey: string;
+  /** The reserve's price source registered in the AaveOracle at the snapshot commit; discovery compares `getSourceOfAsset` with it. */ readonly priceSource: string;
+  /** A market whose verified profile records no implementation pin (Base): the address-book Pool implementation, checked at every state read. */
+  readonly pinnedImplementation?: string;
+  readonly ownerBeneficiary: true; readonly validateSupplyCap: true }>;
+/** Display labels where the address-book key is not the token's symbol. The label is never an identity. */
+const RESERVE_LABELS: Readonly<Record<string, string>> = Object.freeze({ USDCn: 'USDC', USDCe: 'USDC.e', ONE_INCH: '1INCH', BTCb: 'BTC.b' });
+export const aaveReserveLabel = (key: string): string => RESERVE_LABELS[key] ?? (key.startsWith('PT_') ? key.replaceAll('_', '-') : key);
+const MAINNET_MARKETS: readonly MainnetMarketProfile[] = [AAVE_V3_ETHEREUM, AAVE_V3_BASE, AAVE_V3_ARBITRUM];
+function reserveProfiles(market: MainnetMarketProfile): readonly (MainnetMarketProfile | AaveReserveProfile)[] {
+  const book = AAVE_V3_ADDRESS_BOOK.find(item => item.chain === market.chain);
+  // The snapshot must describe exactly the verified market (same Pool, provider and oracle) or the registry refuses to load.
+  if (!book || book.pool !== market.pool || book.provider !== market.provider || book.oracle !== market.oracle ||
+      ('poolImplementation' in market && book.poolImplementation !== market.poolImplementation)) throw new Error('AAVE_ADDRESS_BOOK_MARKET_MISMATCH');
+  const verified = book.reserves.find(reserve => reserve.underlying === market.asset);
+  if (!verified || verified.id !== market.reserveId || verified.decimals !== market.decimals || verified.aToken !== market.aToken ||
+      verified.variableDebtToken !== market.variableDebtToken) throw new Error('AAVE_ADDRESS_BOOK_RESERVE_MISMATCH');
+  // Labels are display names and authoring aliases: within one market they must never name two reserves.
+  const labels = book.reserves.map(reserve => reserve.underlying === market.asset ? market.symbol : aaveReserveLabel(reserve.key)).map(label => label.toLowerCase());
+  if (new Set(labels).size !== labels.length) throw new Error('AAVE_ADDRESS_BOOK_LABEL_DUPLICATE');
+  return Object.freeze(book.reserves.map((reserve: AaveAddressBookReserve) => reserve.underlying === market.asset ? market : Object.freeze({
+    ...market, asset: reserve.underlying, decimals: reserve.decimals, symbol: aaveReserveLabel(reserve.key), reserveId: reserve.id, aToken: reserve.aToken,
+    variableDebtToken: reserve.variableDebtToken, addressBookKey: reserve.key, priceSource: reserve.oracle,
+    ...'poolImplementation' in market ? {} : { pinnedImplementation: book.poolImplementation },
+    officialSource: `https://github.com/aave-dao/aave-address-book/blob/${AAVE_V3_ADDRESS_BOOK_COMMIT}/src/ts/${book.library}.ts`,
+    ownerBeneficiary: true as const, validateSupplyCap: true as const,
+  }) as AaveReserveProfile));
+}
+export type AaveLendingProfile = typeof AAVE_V3_BASE_SEPOLIA | typeof AAVE_V3_ETHEREUM_SEPOLIA | MainnetMarketProfile | AaveReserveProfile;
+/** One Aave V3 market: its verified Pool and every listed reserve profile (the native-USDC profile first). */
+export type AaveMarket = { readonly network: MainnetMarketProfile['network']; readonly chain: MainnetMarketProfile['chain']; readonly chainId: number;
+  readonly pool: string; readonly provider: string; readonly oracle: string; readonly dataProvider: string; readonly wethGateway: string;
+  readonly primary: MainnetMarketProfile; readonly reserves: readonly AaveLendingProfile[]; readonly source: string };
+export const AAVE_V3_MARKETS: readonly AaveMarket[] = Object.freeze(MAINNET_MARKETS.map(market => {
+  const book = AAVE_V3_ADDRESS_BOOK.find(item => item.chain === market.chain)!, reserves = reserveProfiles(market);
+  return Object.freeze({ network: market.network, chain: market.chain, chainId: market.chainId, pool: market.pool, provider: market.provider, oracle: market.oracle,
+    dataProvider: book.dataProvider, wethGateway: book.wethGateway, primary: market,
+    reserves: Object.freeze([market, ...reserves.filter(reserve => reserve !== market)]),
+    source: `https://github.com/aave-dao/aave-address-book/tree/${AAVE_V3_ADDRESS_BOOK_COMMIT}/src/ts/${book.library}.ts` });
+}));
+/**
+ * Every registered reserve profile. The testnet profiles keep one verified asset each; each mainnet market lists all its reserves, its native
+ * USDC profile first. Profiles are chosen by the authored or reviewed chain AND underlying address, never by symbol.
+ */
+export const AAVE_V3_LENDING_PROFILES: readonly AaveLendingProfile[] = Object.freeze([AAVE_V3_BASE_SEPOLIA, AAVE_V3_ETHEREUM_SEPOLIA,
+  ...[AAVE_V3_BASE, AAVE_V3_ARBITRUM, AAVE_V3_ETHEREUM].flatMap(market => AAVE_V3_MARKETS.find(item => item.chain === market.chain)!.reserves)]);
 /** The deployment environment of a lending profile (the testnet profiles predate the field). */
 export const aaveEnvironment = (profile: AaveLendingProfile): 'PUBLIC_TESTNET' | 'MAINNET' => 'environment' in profile ? profile.environment : 'PUBLIC_TESTNET';
+/**
+ * The chain's MARKET profile (its first registered reserve: native USDC on a mainnet, the one test asset on a testnet). Use it only for
+ * market-level facts (Pool, provider, RPC, explorer, network cost); a reserve is resolved with `aaveReserveProfile(chain, asset)`.
+ */
 export function aaveLendingProfile(chain: string): AaveLendingProfile {
   const profile = AAVE_V3_LENDING_PROFILES.find(item => item.chain === chain);
   if (!profile) throw new Error('AAVE_PROFILE_UNSUPPORTED');
   return profile;
 }
+/** Every registered reserve of a chain's market (empty when Aave is not registered there). */
+export const aaveMarketReserves = (chain: string): readonly AaveLendingProfile[] => AAVE_V3_LENDING_PROFILES.filter(item => item.chain === chain);
+/** The reserve profile for an exact chain + underlying address (and decimals, when given). Never resolved by symbol. */
+export function aaveReserveProfile(chain: string, asset: string, decimals?: number): AaveLendingProfile {
+  const address = typeof asset === 'string' ? asset.toLowerCase() : '';
+  const profile = AAVE_V3_LENDING_PROFILES.find(item => item.chain === chain && item.asset === address);
+  if (!profile || (decimals !== undefined && profile.decimals !== decimals)) throw new Error('AAVE_PROFILE_UNSUPPORTED');
+  return profile;
+}
+/** True for a reserve listed beyond a market's original single verified asset. */
+export const isAaveExpansionReserve = (profile: AaveLendingProfile): profile is AaveReserveProfile => 'addressBookKey' in profile;
 /** Rejects anything other than one of the frozen registered profiles (for example an object built by a caller). */
 export function assertAaveLendingProfile(value: unknown): AaveLendingProfile {
   if (!AAVE_V3_LENDING_PROFILES.some(profile => profile === value)) throw new Error('AAVE_PROFILE_UNSUPPORTED');

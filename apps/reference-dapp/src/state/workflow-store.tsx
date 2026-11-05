@@ -20,6 +20,10 @@ import { browserFailureMessage, initialObservationState, observationReducer, rec
 import { actionReviewValue } from '../domain/canvas-action-setup';
 import { createCryptoActionNode, type CryptoActionInput, type CryptoSelection, type CryptoSelections } from '../domain/crypto-action-picker';
 import { boundAmount, boundProjection, compositionWorkflow, fundingAllocations, sequenceOrder, stepNodeKey, validCompletions, workflowSequence, type CompletedStep, type SequenceStep, type WorkflowSequence } from '../domain/workflow-sequence';
+import { proveCompletions, SEQUENCE_RUN_STORAGE_KEY, storedCompletions, type StoredCompletion } from '../domain/sequence-restore';
+import { publicStatus } from '../app/public-testnet-action';
+import { supplyStatus } from '../app/supply-action';
+import { jupiterStatus } from '../app/jupiter-action';
 
 type Pending = { valid: boolean; command: Command; diff: readonly string[]; review: ReviewResult | null; authoringId?: string; authoringAmount?: string };
 type Store = { restorationEpoch: number; state: EditorState; dispatch: Dispatch<Command>; context: ReviewContext;
@@ -78,19 +82,29 @@ type Store = { restorationEpoch: number; state: EditorState; dispatch: Dispatch<
    */
   runtimeWorkflow: Workflow; sequence: SequenceView | null;
   /** Records that the sequence's current step reconciled (from its own durable record); the next step becomes the runtime workflow. */
-  completeSequenceStep(index: number, completion: { readonly received: string | null; readonly runKey: string | null }): void;
+  completeSequenceStep(index: number, completion: StepCompletion): void;
+  /**
+   * BUILD AAVE-V3-EXPANSION-001: after a refresh the sequence's completed steps are re-proven from their runtimes' records. While that check runs,
+   * or when a record could not be read, the next step is withheld (`status`, 1-based `step`): it may already have run. `retry` checks again;
+   * `discard` drops the unverifiable record on the owner's explicit choice, after which that step is offered as not yet run.
+   */
+  sequenceRestore: SequenceRestore | null;
   /**
    * BUILD-FLOFI-CHAT-E2E-DASHBOARD-UX-001: records that a one-action workflow's own run is final and every action of it reconciled (its durable
    * record). An action the owner adds afterwards makes the workflow a sequence whose first step is this executed action: only the new step is
    * simulated, reviewed and signed. Changing the executed action itself, or anything before it, starts over (`validCompletions`).
    */
-  recordExecutedAction(completion: { readonly received: string | null; readonly runKey: string | null }): void;
+  recordExecutedAction(completion: StepCompletion): void;
   /**
    * Actions of this workflow that already executed this visit and still describe it exactly (`executed`), and how many of them the current
    * runtime workflow skips as completed steps (`carried`). `executed > carried` means the next Review covers an executed action again.
    */
   executedActions: { readonly executed: number; readonly carried: number };
   chain: ChainState; eligibility: Eligibility; generateArtifacts(): void; refreshArtifacts(): void; accessCheck(): void };
+/** A step's own reconciled run: delivered amount, durable run id, runtime and the wallet that executed it (from its record). */
+export type StepCompletion = { readonly received: string | null; readonly runKey: string | null; readonly kind?: string; readonly owner?: string | null };
+export type SequenceRestore = { readonly status: 'CHECKING' | 'UNVERIFIED'; readonly step: number; retry(): void; discard(): void };
+type RestoreState = { readonly workflowId: string; readonly status: 'CHECKING' | 'UNVERIFIED'; readonly pointers: readonly StoredCompletion[]; readonly proven: number };
 /** The sequence as the shell, chat and Review present it. `cursor` is the step its runtime serves now; `finished` once every step reconciled. */
 export type SequenceView = { readonly steps: WorkflowSequence['steps']; readonly cursor: number; readonly current: SequenceStep; readonly completed: readonly CompletedStep[];
   /** The amount a funded current step spends (native units), or null when it spends its authored amount. */ readonly bound: string | null;
@@ -102,6 +116,12 @@ export type ChatCommit = { readonly ok: true; readonly before: Workflow; readonl
 const Context = createContext<Store | null>(null);
 const testNetworksIntroduced = (before: Parameters<typeof introducedTestNetworks>[0], after: Parameters<typeof introducedTestNetworks>[1]) =>
   introducedTestNetworks(before, after, activeNetworkScope());
+
+/** A sequence step's durable record, read back from its own runtime by run id (BUILD AAVE-V3-EXPANSION-001). Null when unreadable. */
+async function readSequenceRecord(kind: string, runKey: string): Promise<unknown> {
+  const result = kind === 'public' ? await publicStatus(runKey) : kind === 'supply' ? await supplyStatus(runKey) : kind === 'solana-swap' ? await jupiterStatus(runKey) : null;
+  return result && result.ok ? result.value : null;
+}
 
 export function WorkflowProvider({ children, initialContext, initialWorkflowId = 'workflow-local' }: { children: ReactNode; initialContext: unknown; initialWorkflowId?: string }) {
   const [history, dispatchHistory] = useReducer(editorHistoryReducer, undefined, () => {
@@ -193,17 +213,67 @@ export function WorkflowProvider({ children, initialContext, initialWorkflowId =
       : currentStep.funding.some(f => completed[f.fundedBy]?.received === '0') || producerDelivery === '0' ? 'NOTHING_DELIVERED'
       : boundWorkflow === null ? 'BOUND_REFUSED' : null } : null;
   const sequenceRef = useRef({ sequence, completed, workflow: state.workflow }); sequenceRef.current = { sequence, completed, workflow: state.workflow };
-  const completeSequenceStep = useCallback((index: number, completion: { readonly received: string | null; readonly runKey: string | null }) => {
+  // BUILD AAVE-V3-EXPANSION-001: completed steps survive a refresh. Only pointers (node, runtime, run id) are stored; on reload each step counts
+  // again only after its runtime's durable record proves it (`proveCompletions`), so a completed financial action is never offered twice. While
+  // that check runs, or when a record cannot be read, the step it covers is withheld (`sequenceRestore`), never offered as new.
+  const [restore, setRestore] = useState<RestoreState | null>(null);
+  const restoreRef = useRef(restore); restoreRef.current = restore;
+  useEffect(() => {
+    if (!sequenceRun.workflowId || !sequenceRun.completed.some(done => done.kind && done.runKey)) return;
+    // Pointers still being re-proven are kept as they are: a partial proof never shortens what storage remembers.
+    if (restoreRef.current?.workflowId === sequenceRun.workflowId) return;
+    const stored = { workflowId: sequenceRun.workflowId, completed: sequenceRun.completed.filter(done => done.kind && done.runKey)
+      .map(done => ({ nodeId: done.nodeId, node: done.node, kind: done.kind, runKey: done.runKey, received: done.received })) };
+    try { localStorage.setItem(SEQUENCE_RUN_STORAGE_KEY + sequenceRun.workflowId, JSON.stringify(stored)); } catch { /* storage is optional; the step stays done this visit */ }
+  }, [sequenceRun]);
+  const proveStored = useCallback((workflowId: string, pointers: readonly StoredCompletion[], isCancelled: () => boolean) => {
+    const { sequence: current, workflow } = sequenceRef.current;
+    if (!current || workflow.workflowId !== workflowId) return;
+    setRestore({ workflowId, status: 'CHECKING', pointers, proven: 0 });
+    const settle = (proven: readonly CompletedStep[], unreadable: boolean) => {
+      // A check that outlived its workflow (another one is open now) changes nothing.
+      if (isCancelled() || sequenceRef.current.workflow.workflowId !== workflowId) return;
+      if (proven.length) setSequenceRun(run => run.workflowId === workflowId && run.completed.length > proven.length ? run : { workflowId, completed: proven });
+      setRestore(unreadable ? { workflowId, status: 'UNVERIFIED', pointers, proven: proven.length } : null);
+    };
+    void proveCompletions(pointers, workflow, current, readSequenceRecord).then(({ proven, unreadable }) => settle(proven, unreadable), () => settle([], true));
+  }, []);
+  useEffect(() => {
+    const workflowId = state.workflow.workflowId;
+    if (!sequenceRef.current.sequence || sequenceRef.current.completed.length) return;
+    let pointers: ReturnType<typeof storedCompletions>;
+    try { pointers = storedCompletions(JSON.parse(localStorage.getItem(SEQUENCE_RUN_STORAGE_KEY + workflowId) ?? 'null'), workflowId); } catch { return; }
+    if (!pointers.length) return;
+    let cancelled = false;
+    proveStored(workflowId, pointers, () => cancelled);
+    return () => { cancelled = true; setRestore(current => current?.workflowId === workflowId && current.status === 'CHECKING' ? null : current); };
+  }, [state.workflow.workflowId, sequence === null, proveStored]);
+  const sequenceRestore = useMemo((): SequenceRestore | null => {
+    if (!restore || restore.workflowId !== state.workflow.workflowId || !sequence) return null;
+    // The step the unproven pointer covers is withheld only while it still describes that step (an edited step is a new action).
+    const index = completed.length, pointer = restore.pointers[index], step = sequence.steps[index], node = step && state.workflow.nodes.find(item => item.nodeId === step.nodeId);
+    if (!pointer || !step || !node || pointer.nodeId !== step.nodeId || pointer.node !== stepNodeKey(node)) return null;
+    return { status: restore.status, step: index + 1,
+      retry: () => { if (restoreRef.current?.status === 'UNVERIFIED') proveStored(restore.workflowId, restore.pointers, () => false); },
+      discard: () => {
+        const current = restoreRef.current;
+        if (!current || current.status !== 'UNVERIFIED') return;
+        try { localStorage.setItem(SEQUENCE_RUN_STORAGE_KEY + current.workflowId, JSON.stringify({ workflowId: current.workflowId, completed: current.pointers.slice(0, current.proven) })); } catch { /* storage is optional */ }
+        setRestore(null);
+      } };
+  }, [restore, state.workflow, sequence, completed, proveStored]);
+  const completeSequenceStep = useCallback((index: number, completion: StepCompletion) => {
     const { sequence, completed, workflow } = sequenceRef.current, step = sequence?.steps[index], node = step && workflow.nodes.find(item => item.nodeId === step.nodeId);
     if (!step || !node || index !== completed.length) return;
     setSequenceRun({ workflowId: workflow.workflowId, completed: [...completed, { nodeId: step.nodeId, node: stepNodeKey(node), received: completion.received, runKey: completion.runKey,
-      allocations: fundingAllocations(step, completed) }] });
+      ...completion.kind ? { kind: completion.kind } : {}, ...completion.owner ? { owner: completion.owner } : {}, allocations: fundingAllocations(step, completed) }] });
   }, []);
-  const recordExecutedAction = useCallback((completion: { readonly received: string | null; readonly runKey: string | null }) => {
+  const recordExecutedAction = useCallback((completion: StepCompletion) => {
     const { sequence, workflow } = sequenceRef.current, actions = sequenceOrder(workflow), node = actions[0];
     // A sequence records its own steps; a composition runtime executes its workflow as a whole and is never split into steps.
     if (sequence || actions.length !== 1 || !node || compositionWorkflow(workflow)) return;
-    const done: CompletedStep = { nodeId: node.nodeId, node: stepNodeKey(node), received: completion.received, runKey: completion.runKey, allocations: [] };
+    const done: CompletedStep = { nodeId: node.nodeId, node: stepNodeKey(node), received: completion.received, runKey: completion.runKey, ...completion.kind ? { kind: completion.kind } : {},
+      ...completion.owner ? { owner: completion.owner } : {}, allocations: [] };
     setSequenceRun(run => {
       // The same executed run already heads this workflow's history: keep every later step (an undone and redone addition), only learning a
       // delivery its record proves now.
@@ -400,7 +470,7 @@ export function WorkflowProvider({ children, initialContext, initialWorkflowId =
     startActionSetup, startStocksSetup, editCanvasAmount, editPoolSetup, editSwapSetupDirection, cancelCanvasAmount, reviewCanvasAmount, commitCanvasAmount, removeActionSetup,
     recipientInputs: history.recipientInputs, editCanvasRecipient,
     canRedo: history.future.length > 0, undo, redo, moveCanvasNodes, addCanvasCommand, duplicateCanvasNodes,
-    pending, propose, applyProposal, dismissProposal: () => setPending(null), commitChatCommand, undoChatCommit, stagedPosition, ...reviewState, runtimeWorkflow, sequence: sequenceView, completeSequenceStep, recordExecutedAction, executedActions,
+    pending, propose, applyProposal, dismissProposal: () => setPending(null), commitChatCommand, undoChatCommit, stagedPosition, ...reviewState, runtimeWorkflow, sequence: sequenceView, sequenceRestore, completeSequenceStep, recordExecutedAction, executedActions,
     chain, eligibility, generateArtifacts, refreshArtifacts, accessCheck }}>
     <BaseObservationProvider>{children}</BaseObservationProvider>
   </Context.Provider>;

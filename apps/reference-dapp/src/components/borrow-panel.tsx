@@ -3,8 +3,9 @@
 import { useLocale } from '../i18n/locale';
 
 import { TokenAmountInput } from './token-amount-input';
+import { LendingReserveStatus, reserveOptionLabel, useAaveReserves } from './lending-reserve-status';
 import { useState, type FormEvent } from 'react';
-import { createAuthoredBorrow, borrowDetails, lendingCopy, lendingNetworkView, lendingView, LENDING_NETWORKS, type LendingNetwork, type SupplyInput } from '../domain/supply-authoring';
+import { createAuthoredBorrow, borrowDetails, lendingCopy, lendingNetworkView, lendingView, LENDING_NETWORKS, lendingReservesFor, lendingAssetFor, lendingNodeAsset, type LendingNetwork, type SupplyInput } from '../domain/supply-authoring';
 import { useWorkflow } from '../state/workflow-store';
 import { useBuild009Wallet } from '../state/build009-wallet-store';
 import { useSupply } from '../state/supply-store';
@@ -18,7 +19,11 @@ export function BorrowAuthoringForm({nodeId,onDone,direct=false,reviewFormId}:{n
   const node=state.workflow.nodes.find(n=>n.nodeId===nodeId),existing=node?borrowDetails(node as Parameters<typeof borrowDetails>[0]):null;
   const [localAmount,setAmount]=useState(existing?.amount??'0.01'),[error,setError]=useState('');
   const amount = reviewFormId && nodeId ? amountInputs[nodeId] ?? existing?.amount ?? localAmount : localAmount;
-  const [network,setNetwork]=useState<LendingNetwork>(existing?.network??'Base Sepolia'),shown=lendingNetworkView(network),asset=shown.asset;
+  const [network,setNetworkState]=useState<LendingNetwork>(existing?.network??'Base Sepolia'),[chosenAsset,setAsset]=useState<string>(existing?.asset??lendingAssetFor(existing?.network??'Base Sepolia'));
+  // BUILD AAVE-V3-EXPANSION-001: the network selects its Aave market; the asset is one of that market's registered reserves (never another network's).
+  const asset=lendingReservesFor(network).some(reserve=>reserve.symbol===chosenAsset)?chosenAsset:lendingAssetFor(network),shown=lendingNetworkView(network,asset);
+  const setNetwork=(next:LendingNetwork)=>{setNetworkState(next);setAsset(lendingAssetFor(next));};
+  const live=useAaveReserves(network,wallet.account??null);
   function submit(event:FormEvent){event.preventDefault();try{
     const input:SupplyInput={network,asset,amount,beneficiary:wallet.account??existing?.beneficiary??''};
     createAuthoredBorrow(nodeId??'node-preview',input);
@@ -28,7 +33,8 @@ export function BorrowAuthoringForm({nodeId,onDone,direct=false,reviewFormId}:{n
   return <form id={reviewFormId} className="inspector-fields" aria-label={tr(nodeId?'Edit Borrow':'Create Borrow')} onSubmit={submit}>
     <strong>{tr("Borrow from Aave V3")}</strong>
     <label>{tr("Borrow network")}<select aria-label={tr("Borrow network")} value={network} onChange={e=>setNetwork(e.target.value as LendingNetwork)}>{LENDING_NETWORKS.map(n=><option key={n}>{tr(n)}</option>)}</select></label>
-    <label>{tr("Borrow asset")}<select aria-label={tr("Borrow asset")} value={asset} onChange={()=>undefined}><option>{tr(asset)}</option></select></label>
+    <label>{tr("Borrow asset")}<select aria-label={tr("Borrow asset")} value={asset} onChange={e=>setAsset(e.target.value)}>{lendingReservesFor(network).map(reserve=>{const option=reserveOptionLabel(reserve,live,'borrow',tr,network);return <option key={reserve.asset} value={reserve.symbol} disabled={option.disabled&&reserve.symbol!==asset}>{option.label}</option>;})}</select></label>
+    <LendingReserveStatus live={live} asset={asset} kind="borrow"/>
     <label>{tr("Borrow amount (")}{tr(asset)})<TokenAmountInput aria-label={tr(`Borrow amount (${asset})`)} value={amount} maxLength={80} onValueChange={value=>{setError('');if(reviewFormId&&nodeId)editCanvasAmount(nodeId,value);else setAmount(value);}}/></label>
     {!wallet.account&&!existing&&<button type="button" onClick={()=>void wallet.connect()}>{tr("Connect borrower wallet")}</button>}
     <p>{tr("Variable rate. Your connected wallet receives ")}{tr(asset)}{tr(" and takes on the debt.")}</p>
@@ -37,7 +43,10 @@ export function BorrowAuthoringForm({nodeId,onDone,direct=false,reviewFormId}:{n
   </form>;
 }
 const messages:Record<string,string>={
-  BORROW_INSUFFICIENT_COLLATERAL:'No sufficient collateral was found.',BORROW_COLLATERAL_NOT_ENABLED:'Your supplied USDC must be enabled as collateral in Aave before Borrow. Flofi will not enable it automatically.',
+  BORROW_INSUFFICIENT_COLLATERAL:'No sufficient collateral was found.',BORROW_COLLATERAL_NOT_ENABLED:'At least one supplied asset must be enabled as collateral in Aave before Borrow. Flofi will not enable it automatically.',
+  BORROW_ISOLATION_MODE_UNSUPPORTED:'Your Aave account is in isolation mode. Flofi does not borrow against isolated collateral yet.',BORROW_SILOED_CONFLICT:'This reserve uses siloed borrowing and cannot be combined with your other Aave debt.',
+  BORROW_STATE_UNSUPPORTED:'This Aave account state is not supported (for example E-Mode). No transaction was prepared.',BORROW_POSITION_UNVERIFIED:'One of your Aave positions could not be verified against the registered market. No transaction was prepared.',
+  BORROW_CAP_EXCEEDED:'This reserve has reached its borrow cap. No transaction was prepared.',
   BORROW_ABOVE_CAPACITY:'The amount exceeds your available borrow capacity.',BORROW_UNSAFE_HEALTH_FACTOR:'This borrow would leave health factor below Flofi’s minimum of 2.0. Reduce the amount.',
   SUPPLY_RESERVE_UNAVAILABLE:'This Aave reserve is currently unavailable.',
   BORROW_RESERVE_UNAVAILABLE:'Borrowing is currently unavailable for this reserve.',BORROW_INSUFFICIENT_LIQUIDITY:'Aave does not have enough available USDC.',BORROW_AUTHORIZATION_STALE:'The reviewed collateral, debt or price changed. Simulate and review again.',
@@ -50,7 +59,7 @@ export function BorrowPanel({view}:{view:'simulate'|'execute'}){
   const { t: tr } = useLocale();
   const {state}=useWorkflow(),run=useSupply(),wallet=useBuild009Wallet();
   const node=state.workflow.nodes.find(n=>n.actionType==='borrow'),fields=node?borrowDetails(node as Parameters<typeof borrowDetails>[0]):null;
-  const record=run.record?.review.borrow?run.record:null,review=record?.review,risk=review?.state.borrow,shown=lendingView(review?.chain??node?.chainId);
+  const record=run.record?.review.borrow?run.record:null,review=record?.review,risk=review?.state.borrow,shown=lendingView(review?.chain??node?.chainId,review?.asset??(node?lendingNodeAsset(node as Parameters<typeof lendingNodeAsset>[0]):null));
   const pending=record?.notSubmitted?undefined:record?.attempts.find(a=>!a.reconciled),info=run.error??record?.error;
   const observation=record?.observations.at(-1) as BorrowObservation|undefined;
   return <section className="panel" aria-label={tr("Aave Borrow")}><h2>{tr(view==='simulate'?'Simulate Borrow':record?.evidence?'Borrow result':'Review Borrow')}</h2>
@@ -76,7 +85,7 @@ export function BorrowPanel({view}:{view:'simulate'|'execute'}){
       {record?.evidence&&observation?.postPosition?.borrow&&<><p>{tr("Borrow independently reconciled. Wallet increased by ")}{tr(human(observation.walletDelta!,shown.decimals))} {tr(shown.asset)}{tr("; debt is ")}{tr(human(observation.postPosition.borrow.debt,shown.decimals))} {tr(shown.asset)}{tr("; health factor is ")}{tr(hf(observation.postPosition.borrow.healthFactor))}.</p>
         <a download="flofi-aave-borrow-evidence.json" href={'data:application/json;charset=utf-8,'+encodeURIComponent(JSON.stringify(record.evidence,null,2))}>{tr("Download Evidence Bundle")}</a></>}
     </>}
-    {info&&<p role="status">{tr(lendingCopy(messages[info]??'Borrow needs attention. Inspect technical details and observe any existing transaction.',shown))}</p>}
+    {info&&<p role="status">{lendingCopy(messages[info]??'Borrow needs attention. Inspect technical details and observe any existing transaction.',shown,tr)}</p>}
     <details><summary>{tr("Show technical details")}</summary><pre>{JSON.stringify({error:info,review,attempts:record?.attempts,observations:record?.observations,walletDiagnostic:record?.walletDiagnostic,environment:record?.evidence?.bundle.environment},null,2)}</pre></details>
   </section>;
 }

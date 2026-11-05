@@ -75,7 +75,7 @@ const Swap = Type.Object({
 }, strict);
 const Lending = (action: 'supply' | 'borrow' | 'repay', who: string) => Type.Object({
   version: Type.Optional(Version), action: Type.Literal(action),
-  network: enumOf(['base-sepolia', 'ethereum-sepolia', 'base', 'arbitrum-one', 'ethereum'] as const, 'Aave V3 network: base-sepolia lends test USDC, ethereum-sepolia lends test WBTC, base and arbitrum-one lend native USDC (real funds).'),
+  network: enumOf(['base-sepolia', 'ethereum-sepolia', 'base', 'arbitrum-one', 'ethereum'] as const, 'Aave V3 network: base-sepolia lends test USDC, ethereum-sepolia lends test WBTC; base, arbitrum-one and ethereum lend every listed reserve of their Aave V3 Core market (real funds; asset by its reserve symbol, availability checked on chain at Simulate).'),
   asset: CatalogSymbol,
   amount: Decimal('Amount as a decimal string.'),
   beneficiary: EvmAddress(who),
@@ -182,7 +182,7 @@ const PublicSwap = Type.Object({
 }, strict);
 const PublicLending = (action: 'supply' | 'borrow' | 'repay', who: string) => Type.Object({
   version: Type.Optional(Version), action: Type.Literal(action),
-  network: enumOf(PUBLIC_EVM_LENDING, 'Aave V3 network (real funds): native USDC on base, arbitrum-one and ethereum.'),
+  network: enumOf(PUBLIC_EVM_LENDING, 'Aave V3 network (real funds): every listed reserve of the Aave V3 Core market on base, arbitrum-one and ethereum (asset by its reserve symbol; availability checked on chain at Simulate).'),
   asset: CatalogSymbol,
   amount: Decimal('Amount as a decimal string.'),
   beneficiary: EvmAddress(who),

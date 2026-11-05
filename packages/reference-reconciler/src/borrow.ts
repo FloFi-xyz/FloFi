@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import { lendingProfile, reserveBits, readBorrowState, compileBorrowCalls, borrowHealthFactor, BORROW_MINIMUM_HEALTH_FACTOR,
+import { lendingProfile, reserveBits, readBorrowState, accountReconciliation, assertAccountTotals, positionIdentity, compileBorrowCalls, borrowHealthFactor, BORROW_MINIMUM_HEALTH_FACTOR,
   supplyHex, supplyWord, supplyTopic, supplyHash, supplyArtifactHash, rpcUint, rpcRecord, rpcHash, SUPPLY_METAMASK,
   type AaveLendingProfile, type SupplyReview, type SupplyState, type SupplyRpc } from '@defi-workflow-engine/reference-compiler';
 import { hashJournalBytes, type EvidenceBundle, type ExecutionJournal } from '@defi-workflow-engine/workflow-contracts';
@@ -13,22 +13,29 @@ export function verifyBorrowEffects(amount:string,pre:SupplyState,post:SupplySta
   if(walletDelta!==BigInt(amount))throw new Error('BORROW_WALLET_BALANCE_MISMATCH');
   const debt=verifySupplyPosition(amount,{scaledPosition:a.scaledDebt,position:a.debt,index:a.debtIndex},{scaledPosition:b.scaledDebt,position:b.debt,index:b.debtIndex});
   const debtDelta=BigInt(b.debt)-BigInt(a.debt);
-  if(debtDelta<=0n||a.reserveConfiguration!==b.reserveConfiguration||BigInt(b.userConfiguration)!==(BigInt(a.userConfiguration)|borrowing)||a.eMode!==b.eMode||a.codeHash!==b.codeHash||a.variableDebtToken!==b.variableDebtToken)throw new Error('BORROW_DEBT_MISMATCH');
-  // Existing debt accrues legitimately. The scaled principal check above remains exact within ray rounding.
-  const expectedBase=((BigInt(b.debt)-BigInt(a.debt))*BigInt(b.price))/scale;
-  if(abs(BigInt(b.debtBase)-BigInt(a.debtBase)-expectedBase)>2n+BigInt(a.debtBase)/1000n)throw new Error('BORROW_ACCOUNT_DEBT_MISMATCH');
-  if(abs(BigInt(b.collateralBase)-BigInt(a.collateralBase))>2n+BigInt(a.collateralBase)/1000n||a.liquidationThresholdBps!==b.liquidationThresholdBps||a.ltvBps!==b.ltvBps||abs(BigInt(b.price)-BigInt(a.price))>BigInt(a.price)/1000n)throw new Error('BORROW_COLLATERAL_MISMATCH');
+  if(debtDelta<=0n||a.reserveConfiguration!==b.reserveConfiguration||BigInt(b.userConfiguration)!==(BigInt(a.userConfiguration)|borrowing)||a.eMode!==b.eMode||a.codeHash!==b.codeHash||a.variableDebtToken!==b.variableDebtToken||positionIdentity(a)!==positionIdentity(b))throw new Error('BORROW_DEBT_MISMATCH');
+  const accountMode=accountReconciliation(profile,a,b);
+  if(accountMode){
+    // BUILD AAVE-V3-EXPANSION-001: Aave's aggregates at each block equal the independent recomputation from that block's verified positions.
+    try{assertAccountTotals(pre.position,a,profile);assertAccountTotals(post.position,b,profile);}catch{throw new Error('BORROW_ACCOUNT_DEBT_MISMATCH');}
+  }else{
+    // Existing debt accrues legitimately. The scaled principal check above remains exact within ray rounding.
+    const expectedBase=((BigInt(b.debt)-BigInt(a.debt))*BigInt(b.price))/scale;
+    if(abs(BigInt(b.debtBase)-BigInt(a.debtBase)-expectedBase)>2n+BigInt(a.debtBase)/1000n)throw new Error('BORROW_ACCOUNT_DEBT_MISMATCH');
+    if(abs(BigInt(b.collateralBase)-BigInt(a.collateralBase))>2n+BigInt(a.collateralBase)/1000n||a.liquidationThresholdBps!==b.liquidationThresholdBps||a.ltvBps!==b.ltvBps||abs(BigInt(b.price)-BigInt(a.price))>BigInt(a.price)/1000n)throw new Error('BORROW_COLLATERAL_MISMATCH');
+  }
   const expected=BigInt(borrowHealthFactor(b.collateralBase,b.liquidationThresholdBps,b.debtBase));
   if(BigInt(b.healthFactor)<BORROW_MINIMUM_HEALTH_FACTOR||abs(BigInt(b.healthFactor)-expected)>expected/1000000n+1n)throw new Error('BORROW_HEALTH_FACTOR_MISMATCH');
   const expectedCapacity=(BigInt(b.collateralBase)*BigInt(b.ltvBps)+5000n)/10000n-BigInt(b.debtBase);
-  if(abs(BigInt(b.availableBorrowBase)-(expectedCapacity>0n?expectedCapacity:0n))>2n||BigInt(b.availableBorrowBase)>=BigInt(a.availableBorrowBase))throw new Error('BORROW_CAPACITY_MISMATCH');
+  // Capacity always shrinks for a fixed price; in account mode a collateral price move in the same block may offset it, so only consistency is required.
+  if(abs(BigInt(b.availableBorrowBase)-(expectedCapacity>0n?expectedCapacity:0n))>2n||!accountMode&&BigInt(b.availableBorrowBase)>=BigInt(a.availableBorrowBase))throw new Error('BORROW_CAPACITY_MISMATCH');
   return {walletDelta:walletDelta.toString(),debtDelta:debtDelta.toString(),...debt,preHealthFactor:a.healthFactor,postHealthFactor:b.healthFactor};
 }
 export async function reconcileBorrowAttempt(review:SupplyReview,attempt:SupplyChainAttempt,rpc:SupplyRpc):Promise<BorrowObservation> {
   const base:BorrowObservation={verdict:'INCONCLUSIVE',reason:'TRANSACTION_NOT_OBSERVED',transaction:null,receipt:null,prePosition:null,postPosition:null,delta:null,scaledDelta:null,cost:null};
   if(!attempt.transactionHash)return base;
   try{
-    const p=lendingProfile(review.chain,'BORROW_WRONG_CHAIN');
+    const p=lendingProfile(review.chain,'BORROW_WRONG_CHAIN',review.asset);
     if(rpcUint(await rpc('eth_chainId',[]))!==BigInt(p.chainId))throw new Error('BORROW_WRONG_CHAIN');
     const [txValue,receiptValue]=await Promise.all([rpc('eth_getTransactionByHash',[attempt.transactionHash]),rpc('eth_getTransactionReceipt',[attempt.transactionHash])]);
     if(!txValue||!receiptValue)return base;
@@ -66,7 +73,7 @@ export async function reconcileBorrowAttempt(review:SupplyReview,attempt:SupplyC
 export function buildBorrowEvidence(input:{id:string;review:SupplyReview;journal:ExecutionJournal;provenance:'PUBLIC_TESTNET'|'PUBLIC_MAINNET'|'MOCKED';ownerInitiated:boolean;observations:SupplyObservation[]}):{bundle:EvidenceBundle;bundleHash:string;publicExecution:unknown;artifacts:unknown} {
   const o=input.observations.at(-1) as BorrowObservation|undefined,r=input.review;
   if(!r.borrow||!o||o.verdict!=='RECONCILED'||!o.prePosition?.borrow||!o.postPosition?.borrow||!o.transaction||!o.receipt||!o.borrowEvent||!input.ownerInitiated)throw new Error('BORROW_EVIDENCE_NOT_RECONCILED');
-  const p=lendingProfile(r.chain,'BORROW_EVIDENCE_NOT_RECONCILED'),effects=verifyBorrowEffects(r.amount,o.prePosition,o.postPosition,p);
+  const p=lendingProfile(r.chain,'BORROW_EVIDENCE_NOT_RECONCILED',r.asset),effects=verifyBorrowEffects(r.amount,o.prePosition,o.postPosition,p);
   const publicExecution={network:p.network,chainId:p.chainId,owner:r.account,pool:p.pool,borrowedAsset:p.asset,amount:r.amount,rateMode:2,beneficiary:r.beneficiary,variableDebtToken:p.variableDebtToken,
     borrowTransactionHash:o.receipt.transactionHash,transactionEnvelope:o.walletEnvelope??{kind:'DIRECT',sender:o.transaction.from,to:o.transaction.to,nonce:rpcUint(o.transaction.nonce).toString()},block:o.postPosition.block,gasUsed:rpcUint(o.receipt.gasUsed).toString(),transactionCost:o.cost,
     preWalletBalance:o.prePosition.balance,postWalletBalance:o.postPosition.balance,walletDelta:effects.walletDelta,preDebt:o.prePosition.borrow.debt,postDebt:o.postPosition.borrow.debt,debtDelta:effects.debtDelta,principalDebtDelta:effects.delta,

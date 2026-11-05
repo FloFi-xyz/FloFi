@@ -3,8 +3,9 @@
 import { useLocale } from '../i18n/locale';
 
 import { TokenAmountInput } from './token-amount-input';
+import { LendingReserveStatus, reserveOptionLabel, useAaveReserves } from './lending-reserve-status';
 import { useState, type FormEvent } from 'react';
-import { createAuthoredRepay, repayDetails, lendingCopy, lendingNetworkView, lendingView, LENDING_NETWORKS, type LendingNetwork, type SupplyInput } from '../domain/supply-authoring';
+import { createAuthoredRepay, repayDetails, lendingCopy, lendingNetworkView, lendingView, LENDING_NETWORKS, lendingReservesFor, lendingAssetFor, lendingNodeAsset, type LendingNetwork, type SupplyInput } from '../domain/supply-authoring';
 import { useWorkflow } from '../state/workflow-store';
 import { useBuild009Wallet } from '../state/build009-wallet-store';
 import { useSupply } from '../state/supply-store';
@@ -18,7 +19,11 @@ export function RepayAuthoringForm({nodeId,onDone,direct=false,reviewFormId}:{no
   const node=state.workflow.nodes.find(n=>n.nodeId===nodeId),existing=node?repayDetails(node as Parameters<typeof repayDetails>[0]):null;
   const [localAmount,setAmount]=useState(existing?.amount??'0.005'),[error,setError]=useState('');
   const amount = reviewFormId && nodeId ? amountInputs[nodeId] ?? existing?.amount ?? localAmount : localAmount;
-  const [network,setNetwork]=useState<LendingNetwork>(existing?.network??'Base Sepolia'),shown=lendingNetworkView(network),asset=shown.asset;
+  const [network,setNetworkState]=useState<LendingNetwork>(existing?.network??'Base Sepolia'),[chosenAsset,setAsset]=useState<string>(existing?.asset??lendingAssetFor(existing?.network??'Base Sepolia'));
+  // BUILD AAVE-V3-EXPANSION-001: the network selects its Aave market; the asset is one of that market's registered reserves (never another network's).
+  const asset=lendingReservesFor(network).some(reserve=>reserve.symbol===chosenAsset)?chosenAsset:lendingAssetFor(network),shown=lendingNetworkView(network,asset);
+  const setNetwork=(next:LendingNetwork)=>{setNetworkState(next);setAsset(lendingAssetFor(next));};
+  const live=useAaveReserves(network,wallet.account??null);
   function submit(event:FormEvent){event.preventDefault();try{
     const input:SupplyInput={network,asset,amount,beneficiary:wallet.account??existing?.beneficiary??''};
     createAuthoredRepay(nodeId??'node-preview',input);
@@ -28,7 +33,8 @@ export function RepayAuthoringForm({nodeId,onDone,direct=false,reviewFormId}:{no
   return <form id={reviewFormId} className="inspector-fields" aria-label={tr(nodeId?'Edit Repay':'Create Repay')} onSubmit={submit}>
     <strong>{tr("Repay to Aave V3")}</strong>
     <label>{tr("Repay network")}<select aria-label={tr("Repay network")} value={network} onChange={e=>setNetwork(e.target.value as LendingNetwork)}>{LENDING_NETWORKS.map(n=><option key={n}>{tr(n)}</option>)}</select></label>
-    <label>{tr("Repay asset")}<select aria-label={tr("Repay asset")} value={asset} onChange={()=>undefined}><option>{tr(asset)}</option></select></label>
+    <label>{tr("Repay asset")}<select aria-label={tr("Repay asset")} value={asset} onChange={e=>setAsset(e.target.value)}>{lendingReservesFor(network).map(reserve=>{const option=reserveOptionLabel(reserve,live,'repay',tr,network);return <option key={reserve.asset} value={reserve.symbol} disabled={option.disabled&&reserve.symbol!==asset}>{option.label}</option>;})}</select></label>
+    <LendingReserveStatus live={live} asset={asset} kind="repay"/>
     <label>{tr("Repay amount (")}{tr(asset)})<TokenAmountInput aria-label={tr(`Repay amount (${asset})`)} value={amount} maxLength={80} onValueChange={value=>{setError('');if(reviewFormId&&nodeId)editCanvasAmount(nodeId,value);else setAmount(value);}}/></label>
     <label>{tr("Debt mode")}<select aria-label={tr("Debt mode")} value="Variable (2)" onChange={()=>undefined}><option>{tr("Variable (2)")}</option></select></label>
     {!wallet.account&&!existing&&<button type="button" onClick={()=>void wallet.connect()}>{tr("Connect owner wallet")}</button>}
@@ -37,11 +43,11 @@ export function RepayAuthoringForm({nodeId,onDone,direct=false,reviewFormId}:{no
     {onDone&&<button type="button" className="quiet" onClick={onDone}>{tr("Cancel")}</button>}
   </form>;
 }
-const messages:Record<string,string>={REPAY_PARTIAL_DEBT_REQUIRED:'Current variable debt must exceed the partial repayment amount.',SUPPLY_INSUFFICIENT_USDC:'Your wallet does not have enough USDC for this repayment.',REPAY_AUTHORIZATION_STALE:'The reviewed debt, collateral or price changed. Simulate and review again.',SUPPLY_AUTHORIZATION_STALE:'Review expired or the wallet state changed. Prepare a fresh review.',SUPPLY_WRONG_CHAIN:'Switch your wallet to Base Sepolia.',SUPPLY_WRONG_ACCOUNT:'Select the owner wallet shown in Review.',SUPPLY_INSUFFICIENT_ETH:'The owner wallet needs Base Sepolia ETH for gas.',SUPPLY_RPC_RATE_LIMITED:'The public provider is busy. Try the read again.',SUPPLY_TRANSACTION_NOT_OBSERVED:'The existing transaction is not visible yet. Observe it again.',SUPPLY_OBSERVATION_BOUND_REACHED:'The bounded search ended. Preserve this record and observe the existing transaction.',SUPPLY_APPROVAL_REJECTED:'The approval request was declined.',SUPPLY_REJECTED:'The Repay request was declined.',AWAITING_CONFIRMATIONS:'Waiting for network confirmations.'};
+const messages:Record<string,string>={SUPPLY_ALLOWANCE_RESET_REQUIRED:'This token refuses to change a non-zero allowance directly. Reset its allowance for the Aave Pool to zero in your wallet first; no transaction was prepared.',REPAY_PARTIAL_DEBT_REQUIRED:'Current variable debt must exceed the partial repayment amount.',SUPPLY_INSUFFICIENT_USDC:'Your wallet does not have enough USDC for this repayment.',REPAY_AUTHORIZATION_STALE:'The reviewed debt, collateral or price changed. Simulate and review again.',SUPPLY_AUTHORIZATION_STALE:'Review expired or the wallet state changed. Prepare a fresh review.',SUPPLY_WRONG_CHAIN:'Switch your wallet to Base Sepolia.',SUPPLY_WRONG_ACCOUNT:'Select the owner wallet shown in Review.',SUPPLY_INSUFFICIENT_ETH:'The owner wallet needs Base Sepolia ETH for gas.',SUPPLY_RPC_RATE_LIMITED:'The public provider is busy. Try the read again.',SUPPLY_TRANSACTION_NOT_OBSERVED:'The existing transaction is not visible yet. Observe it again.',SUPPLY_OBSERVATION_BOUND_REACHED:'The bounded search ended. Preserve this record and observe the existing transaction.',SUPPLY_APPROVAL_REJECTED:'The approval request was declined.',SUPPLY_REJECTED:'The Repay request was declined.',AWAITING_CONFIRMATIONS:'Waiting for network confirmations.'};
 export function RepayPanel({view}:{view:'simulate'|'execute'}){
   const { t: tr } = useLocale();
   const {state}=useWorkflow(),run=useSupply(),wallet=useBuild009Wallet(),record=run.record?.review.repay?run.record:null,review=record?.review,risk=review?.state.borrow;
-  const node=state.workflow.nodes.find(n=>n.actionType==='repay'),fields=node?repayDetails(node as Parameters<typeof repayDetails>[0]):null,shown=lendingView(review?.chain??node?.chainId);
+  const node=state.workflow.nodes.find(n=>n.actionType==='repay'),fields=node?repayDetails(node as Parameters<typeof repayDetails>[0]):null,shown=lendingView(review?.chain??node?.chainId,review?.asset??(node?lendingNodeAsset(node as Parameters<typeof lendingNodeAsset>[0]):null));
   const pending=record?.notSubmitted?undefined:record?.attempts.find(a=>!a.reconciled),approval=record?.attempts.find(a=>a.step==='APPROVAL'&&a.reconciled);
   const info=run.error??record?.error,observation=record?.observations.at(-1) as RepayObservation|undefined;
   const reobserveApproval=record?.verdict==='DIVERGENT'&&record.error==='SUPPLY_RPC_INVALID'&&record.attempts.length===1&&pending?.step==='APPROVAL'&&pending.state==='RECONCILIATION_REQUIRED'&&observation?.transaction?.blockHash===null;
@@ -69,7 +75,7 @@ export function RepayPanel({view}:{view:'simulate'|'execute'}){
       {record?.attempts.length&&!record.evidence?<a download="flofi-aave-repay-execution-record.json" href={'data:application/json;charset=utf-8,'+encodeURIComponent(JSON.stringify(record,null,2))}>{tr("Download execution record")}</a>:null}
       {record?.evidence&&observation?.postPosition?.borrow&&<><p>{tr("Repay independently reconciled. Wallet paid exactly ")}{tr(human(review!.amount,shown.decimals))} {tr(shown.asset)}{tr("; variable debt is ")}{tr(human(observation.postPosition.borrow.debt,shown.decimals))} {tr(shown.asset)}{tr("; health factor is ")}{tr(hf(observation.postPosition.borrow.healthFactor))}{tr(". Collateral is unchanged.")}</p><a download="flofi-aave-repay-evidence.json" href={'data:application/json;charset=utf-8,'+encodeURIComponent(JSON.stringify(record.evidence,null,2))}>{tr("Download Evidence Bundle")}</a></>}
     </>}
-    {info&&<p role="status">{tr(lendingCopy(messages[info]??'Repay needs attention. Inspect technical details and observe any existing transaction.',shown))}</p>}
+    {info&&<p role="status">{lendingCopy(messages[info]??'Repay needs attention. Inspect technical details and observe any existing transaction.',shown,tr)}</p>}
     <details><summary>{tr("Show technical details")}</summary><pre>{JSON.stringify({error:info,review,attempts:record?.attempts,observations:record?.observations,walletDiagnostic:record?.walletDiagnostic,environment:record?.evidence?.bundle.environment},null,2)}</pre></details>
   </section>;
 }

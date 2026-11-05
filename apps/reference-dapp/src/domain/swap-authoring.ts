@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
+import { ownDeclaration } from './node-declaration';
 import type { Workflow } from './initial-workflow';
 import type { SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
 import { createReviewContext, type ReviewContext, type Symbol } from '@defi-workflow-engine/reference-linter';
@@ -86,6 +87,7 @@ export function createSwapNode(nodeId: string, direction: Direction, humanAmount
   };
 }
 export function swapDetails(node: Workflow['nodes'][number], context: ReviewContext) {
+  node = ownDeclaration(node);
   if (node.actionType !== SWAP_ACTION) return null;
   const amount = node.inputs.find(p => p.name === 'amount-in');
   const out = node.inputs.find(p => p.name === 'asset-out');

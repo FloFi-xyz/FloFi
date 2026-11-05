@@ -1,34 +1,59 @@
 // SPDX-License-Identifier: AGPL-3.0-only
+import { ownDeclaration } from './node-declaration';
 import { createSupplyNode, readSupplyNode, createBorrowNode, readBorrowNode, createRepayNode, readRepayNode, createWithdrawNode, readWithdrawNode, type SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
 import { AAVE_V3_BASE_SEPOLIA, AAVE_V3_LENDING_PROFILES, type AaveLendingProfile } from '@defi-workflow-engine/action-registry';
 import type { SupplyReview } from '@defi-workflow-engine/reference-compiler';
-import { authoringAssetSymbol } from './asset-catalogs';
+import { resolveAssetReference } from './asset-catalogs';
 import { networkIdentity } from './network-registry';
 /**
- * Aave V3 authoring for each registered lending profile: Base Sepolia USDC and (BUILD-ETHEREUM-001) Ethereum Sepolia WBTC.
- * The named network selects the profile, and the asset must be that profile's one verified asset. A symbol never selects
- * an asset on its own, so "USDC on Ethereum Sepolia" is refused rather than mapped to another network's USDC.
+ * Aave V3 authoring for each registered lending profile: Base Sepolia USDC, Ethereum Sepolia WBTC and (BUILD AAVE-V3-EXPANSION-001) every
+ * listed reserve of the Ethereum, Base and Arbitrum One mainnet markets. The named network selects the market; the asset selects one of
+ * that market's reserves by its exact identity. A written symbol is resolved within that one market only — to the reserve whose label it is
+ * or, on official-catalog networks, to the catalog asset whose address is a reserve — and both must agree, so a symbol never reaches another
+ * network ("USDC on Ethereum Sepolia" is refused, not mapped to another network's USDC) and never picks one of two different tokens.
  */
 export type LendingNetwork = AaveLendingProfile['network'];
 export type LendingAsset = AaveLendingProfile['symbol'];
 export type SupplyInput={network:LendingNetwork;asset:LendingAsset;amount:string;beneficiary:string};
-export const LENDING_NETWORKS: readonly LendingNetwork[] = Object.freeze(AAVE_V3_LENDING_PROFILES.map(profile => profile.network));
-/** The profile for an authored network and asset pair; any other pair is unsupported. */
+export const LENDING_NETWORKS: readonly LendingNetwork[] = Object.freeze([...new Set(AAVE_V3_LENDING_PROFILES.map(profile => profile.network))]);
+/** Every registered reserve of a lending network (its market), the original verified asset first. */
+export const lendingReservesFor = (network: string): readonly AaveLendingProfile[] => AAVE_V3_LENDING_PROFILES.filter(item => item.network === network);
+const ADDRESS = /^0x[0-9a-fA-F]{40}$/;
+/** The profile for an authored network and asset (exact address, reserve label, or official catalog asset); any other pair is unsupported. */
 export function lendingProfileFor(network: string, asset: string, code = 'SUPPLY_DEPLOYMENT_UNSUPPORTED'): AaveLendingProfile {
-  const profile = AAVE_V3_LENDING_PROFILES.find(item => item.network === network);
+  const reserves = lendingReservesFor(network);
+  if (!reserves.length || typeof asset !== 'string' || !asset.trim() || asset.length > 120) throw new Error(code);
+  const text = asset.trim();
+  if (ADDRESS.test(text)) return reserves.find(item => item.asset === text.toLowerCase()) ?? (() => { throw new Error(code); })();
+  const wanted = text.toLowerCase();
+  const byLabel = reserves.filter(item => item.symbol.toLowerCase() === wanted || ('addressBookKey' in item && item.addressBookKey.toLowerCase() === wanted));
+  let byCatalog: AaveLendingProfile | null = null;
+  if (networkIdentity(network)?.catalog) {
+    try {
+      const resolved = resolveAssetReference(reserves[0]!.chain, text);
+      if (resolved.kind === 'AMBIGUOUS') throw new Error(code);
+      if (resolved.kind === 'FOUND' && resolved.asset.address)
+        byCatalog = reserves.find(item => item.asset === resolved.asset.address!.toLowerCase() && item.decimals === resolved.asset.decimals) ?? null;
+      // The catalog names a different token than every reserve: never substitute a reserve that only shares its label.
+      if (resolved.kind === 'FOUND' && !byCatalog && byLabel.length) throw new Error(code);
+    } catch (cause) { if (cause instanceof Error && cause.message === code) throw cause; }
+  }
+  if (byLabel.length > 1 || (byLabel[0] && byCatalog && byLabel[0] !== byCatalog)) throw new Error(code);
+  const profile = byLabel[0] ?? byCatalog;
   if (!profile) throw new Error(code);
-  let symbol: string;
-  try { symbol = networkIdentity(network)?.catalog ? authoringAssetSymbol(profile.chain, asset) : asset.toUpperCase(); }
-  catch { throw new Error(code); }
-  if (profile.symbol !== symbol) throw new Error(code);
   return profile;
 }
-/** The one verified Aave asset of a lending network. */
+/** The default (original verified) Aave asset of a lending network: the first reserve of its market. */
 export function lendingAssetFor(network:LendingNetwork):LendingAsset{
-  const profile=AAVE_V3_LENDING_PROFILES.find(item=>item.network===network);if(!profile)throw new Error('SUPPLY_DEPLOYMENT_UNSUPPORTED');return profile.symbol;
+  const profile=lendingReservesFor(network)[0];if(!profile)throw new Error('SUPPLY_DEPLOYMENT_UNSUPPORTED');return profile.symbol;
 }
-/** The profile of an authored node's chain, or null when no lending profile serves it. */
+/** The market profile serving a chain (its first reserve), or null when no lending profile serves it. Market-level facts only. */
 export function lendingProfileOfChain(chain: string): AaveLendingProfile | null { return AAVE_V3_LENDING_PROFILES.find(item => item.chain === chain) ?? null; }
+/** The exact reserve profile of a chain and asset address, or null. */
+export function lendingProfileOfReserve(chain: string, asset: string | null | undefined): AaveLendingProfile | null {
+  const address = typeof asset === 'string' ? asset.toLowerCase() : '';
+  return AAVE_V3_LENDING_PROFILES.find(item => item.chain === chain && item.asset === address) ?? null;
+}
 /** Exact decimal amount in the asset's smallest unit; never more fractional digits than the asset has. */
 export function parseLendingAmount(value:string,decimals:number):string {
   const pattern=new RegExp(`^(0|[1-9][0-9]*)(?:\\.[0-9]{1,${decimals}})?$`);
@@ -43,8 +68,9 @@ export function formatLendingAmount(units:string|bigint,decimals:number):string 
   return `${amount/scale}${amount%scale?'.'+(amount%scale).toString().padStart(decimals,'0').replace(/0+$/,''):''}`;
 }
 const assetOf=(profile:AaveLendingProfile)=>({chainId:profile.chain,address:profile.asset,decimals:profile.decimals});
-function details(fields:{chain:string;amount:string}):{network:LendingNetwork;asset:LendingAsset;amount:string}|null{
-  const profile=lendingProfileOfChain(fields.chain);
+function details(fields:{chain:string;amount:string;asset:{address?:string}}):{network:LendingNetwork;asset:LendingAsset;amount:string}|null{
+  // The node's own reserve (chain + address) supplies the label and decimals; never the market's first reserve.
+  const profile=lendingProfileOfReserve(fields.chain,fields.asset.address);
   return profile?{network:profile.network,asset:profile.symbol,amount:formatLendingAmount(fields.amount,profile.decimals)}:null;
 }
 export function createAuthoredSupply(nodeId:string,input:SupplyInput):SemanticWorkflow['nodes'][number]{
@@ -52,6 +78,7 @@ export function createAuthoredSupply(nodeId:string,input:SupplyInput):SemanticWo
   return createSupplyNode(nodeId,{chain:profile.chain,asset:assetOf(profile),amount:parseLendingAmount(input.amount,profile.decimals),beneficiary:input.beneficiary});
 }
 export function supplyDetails(node:SemanticWorkflow['nodes'][number]):SupplyInput|null{
+  node = ownDeclaration(node);
   if(node.actionType!=='supply')return null;
   const fields=readSupplyNode(node),shown=details(fields);
   return shown&&{...shown,beneficiary:fields.beneficiary};
@@ -85,6 +112,7 @@ export function createAuthoredBorrow(nodeId:string,input:SupplyInput):SemanticWo
   return createBorrowNode(nodeId,{chain:profile.chain,asset:assetOf(profile),amount:parseLendingAmount(input.amount,profile.decimals),beneficiary:input.beneficiary,interestRateMode:2});
 }
 export function borrowDetails(node:SemanticWorkflow['nodes'][number]):SupplyInput|null{
+  node = ownDeclaration(node);
   if(node.actionType!=='borrow')return null;
   // A composition Borrow (Supply → Borrow → Swap) is not a standalone declaration: it has no standalone details.
   let fields:ReturnType<typeof readBorrowNode>;try{fields=readBorrowNode(node);}catch{return null;}
@@ -97,6 +125,7 @@ export function createAuthoredRepay(nodeId:string,input:SupplyInput):SemanticWor
   return createRepayNode(nodeId,{chain:profile.chain,asset:assetOf(profile),amount:parseLendingAmount(input.amount,profile.decimals),beneficiary:input.beneficiary,interestRateMode:2});
 }
 export function repayDetails(node:SemanticWorkflow['nodes'][number]):SupplyInput|null{
+  node = ownDeclaration(node);
   if(node.actionType!=='repay')return null;
   const fields=readRepayNode(node),shown=details(fields);
   return shown&&{...shown,beneficiary:fields.beneficiary};
@@ -109,6 +138,7 @@ export function createAuthoredWithdraw(nodeId:string,input:WithdrawInput):Semant
   return createWithdrawNode(nodeId,{chain:profile.chain,asset:assetOf(profile),amount:parseLendingAmount(input.amount,profile.decimals),recipient:input.recipient});
 }
 export function withdrawDetails(node:SemanticWorkflow['nodes'][number]):WithdrawInput|null{
+  node = ownDeclaration(node);
   if(node.actionType!=='withdraw')return null;
   const fields=readWithdrawNode(node),shown=details(fields);
   return shown&&{...shown,recipient:fields.recipient};
@@ -118,12 +148,35 @@ export function lendingAmountLabel(node:SemanticWorkflow['nodes'][number]):strin
   const value=withdrawDetails(node)??repayDetails(node)??borrowDetails(node)??supplyDetails(node);
   return value&&`${value.amount} ${value.asset} · ${value.network}`;
 }
-/** Display facts of the profile serving a chain (the reviewed or authored one). Before anything is authored the panels describe Base Sepolia, as before. */
+/** Display facts of the reserve being authored or reviewed. Before anything is authored the panels describe Base Sepolia, as before. */
 export type LendingView={network:LendingNetwork;asset:LendingAsset;decimals:number;explorer:string;chainHex:AaveLendingProfile['chainHex'];collateralBit:bigint};
 const viewOf=(profile:AaveLendingProfile):LendingView=>({network:profile.network,asset:profile.symbol,decimals:profile.decimals,explorer:profile.explorer,chainHex:profile.chainHex,
   collateralBit:2n<<(2n*BigInt(profile.reserveId))});
-export function lendingView(chain:string|null|undefined):LendingView{return viewOf((chain?lendingProfileOfChain(chain):null)??AAVE_V3_BASE_SEPOLIA);}
-/** Display facts of a lending network chosen in an authoring form. */
-export function lendingNetworkView(network:LendingNetwork):LendingView{return viewOf(lendingProfileFor(network,lendingAssetFor(network)));}
+/** The reviewed or authored reserve (chain + asset address); a chain without an asset shows its market's first reserve. */
+export function lendingView(chain:string|null|undefined,asset?:string|null):LendingView{
+  return viewOf((chain?lendingProfileOfReserve(chain,asset)??(asset?null:lendingProfileOfChain(chain)):null)??AAVE_V3_BASE_SEPOLIA);
+}
+/** Display facts of a lending network and asset chosen in an authoring form (the network's first reserve when no asset is chosen). */
+export function lendingNetworkView(network:LendingNetwork,asset?:string):LendingView{
+  // Display only: the registry entry the form selected (never a catalog lookup that may refuse); authoring still resolves through `lendingProfileFor`.
+  const reserves=lendingReservesFor(network),wanted=asset??lendingAssetFor(network);
+  return viewOf(reserves.find(reserve=>reserve.symbol===wanted)??reserves[0]??AAVE_V3_BASE_SEPOLIA);
+}
+/** Whether a form may author this registry reserve: its label resolves to exactly this reserve (a label the token list names differently is refused). */
+export function lendingSelectable(network:string,reserve:{readonly symbol:string;readonly asset:string}):boolean{
+  try{return lendingProfileFor(network,reserve.symbol).asset===reserve.asset;}catch{return false;}
+}
+/** The reserve asset address of an authored lending node (null for any other node). */
+export function lendingNodeAsset(node:SemanticWorkflow['nodes'][number]):string|null{
+  node = ownDeclaration(node);
+  try{
+    const fields=node.actionType==='supply'?readSupplyNode(node):node.actionType==='borrow'?readBorrowNode(node):node.actionType==='repay'?readRepayNode(node):node.actionType==='withdraw'?readWithdrawNode(node):null;
+    return fields?.asset.address??null;
+  }catch{return null;}
+}
 /** Panel copy is written for Base Sepolia USDC; the shown profile's network and asset are substituted. Display text only. */
-export function lendingCopy(text:string,view:LendingView):string{return text.replaceAll('Base Sepolia',view.network).replaceAll('USDC',view.asset);}
+export function lendingCopy(text:string,view:LendingView,tr:(value:string)=>string=value=>value):string{
+  // A mainnet reserve holds real funds: never "Aave test" wording. The fixed sentence is translated first, then the network and asset are named.
+  const copy=/Sepolia/.test(view.network)?text:text.replaceAll('the Aave test asset','this asset').replaceAll('Aave test ','');
+  return tr(copy).replaceAll('Base Sepolia',view.network).replaceAll('USDC',view.asset);
+}

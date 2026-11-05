@@ -39,6 +39,10 @@ import { networkCapabilityProfile } from './intelligence/capability-api';
 import { lookupAsset } from './intelligence/asset-resolution';
 import { intelligenceCopy } from './intelligence/copy';
 import { planGoal, type Goal, type GoalField, type GoalPlan, type GoalStep } from './intelligence/goal-planner';
+import { lendingOffers } from './authoring-capabilities';
+import { formatAssetAmount } from '@defi-workflow-engine/action-registry';
+import { resolveNetworkAsset } from './asset-catalogs';
+import { lendingProfileOfReserve } from './supply-authoring';
 import { contextCard, contextKey, operationalState, type CopilotContextCard } from './intelligence/operational-state';
 import { groundedProse } from './intelligence/grounding';
 import { actionDiff, ADAPTATION_LIMITS, clarifiedAdaptation, confirmedAdaptation, correctionAdaptation, correctionCue, fieldsOfAction, inferredUse, mergeAdaptations, messageLanguage,
@@ -1153,7 +1157,12 @@ function resolveGoal(intent: Extract<CopilotIntentV2, { kind: 'GOAL' }>, state: 
   const language = intent.language, m = copilotCopy(language), c = intelligenceCopy(language), text = segmentText(state);
   const carried = new Set<string>((extras.carried ?? []).map(String));
   const goal = groundedGoal(intent.goal, text, carried), grounded: Extract<CopilotIntentV2, { kind: 'GOAL' }> = { ...intent, goal };
-  const plan = planGoal(plannerGoal(goal), activeNetworkScope());
+  // BUILD AAVE-V3-EXPANSION-001: a reserve to supply that the model named but the user's words do not ground (for example a full token name)
+  // is asked for — never replaced by the asset the user already holds.
+  const droppedTarget = goal.target.use === 'SUPPLY' && intent.goal.target.asset !== null && goal.target.asset === null;
+  const plan: GoalPlan = droppedTarget ? { kind: 'NEEDS', field: 'targetAsset', options: [...new Set(lendingOffers()
+    .filter(offer => goal.target.network === null || offer.network.copilot === goal.target.network).map(offer => offer.asset))].slice(0, COPILOT_LIMITS.maxOptions) }
+    : planGoal(plannerGoal(goal), activeNetworkScope());
   const prose = intent.answer ? publicText(safeCopilotProse(intent.answer)) : null, explained = prose ? [c.explanation(prose)] : [];
   switch (plan.kind) {
     case 'NEEDS': {
@@ -1209,6 +1218,17 @@ function authorSequence(intent: CopilotIntentV2, plan: Extract<GoalPlan, { kind:
   const offset = (sequence?.steps.length ?? 0) - steps.length;
   if (!sequence || added.length !== steps.length || plan?.steps.some((step, index) => step.fundedBy !== null && added[index]!.fundedBy !== step.fundedBy + offset)) {
     return refused(state, m, m.compositionUnsupported);
+  }
+  // BUILD AAVE-V3-EXPANSION-001: a step funded by a conversion of another asset whose cap repeats the earlier step's number ("swap 100 USDC to WETH
+  // then supply it", read as 100 WETH) is a copied number, not the user's cap: FloFi says so instead of proposing it.
+  for (const [index, step] of added.entries()) {
+    const producer = step.fundedBy === null ? null : sequence.steps[step.fundedBy];
+    if (!plan && producer?.input && step.input && producer.input.address !== step.input.address &&
+        formatAssetAmount(step.input.amount, step.input.decimals) === formatAssetAmount(producer.input.amount, producer.input.decimals)) {
+      const label = (asset: { chainId: string; address: string | null }) => resolveNetworkAsset(asset.chainId, asset.address ? { address: asset.address } : { symbol: 'ETH' })?.symbol
+        ?? lendingProfileOfReserve(asset.chainId, asset.address)?.symbol ?? '';
+      return refused(state, m, c.capCopied(offset + index + 1, formatAssetAmount(step.input.amount, step.input.decimals), label(step.input), label(producer.input)));
+    }
   }
   const listed = sentences.map((sentence, index) => c.goalStep(index + 1, sentence));
   return propose(state, env, command, sentences.join(' then '), [c.goalIntro(steps.length), ...listed, c.sequenceInterpreted].join(' '), [...notes, ...stepNotes], m.subject.request);

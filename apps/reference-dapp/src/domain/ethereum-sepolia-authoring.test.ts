@@ -30,7 +30,10 @@ describe('Ethereum Sepolia Aave authoring', () => {
     expect(() => createAuthoredSupply('n', { ...wbtc, asset: 'USDC' })).toThrow('SUPPLY_DEPLOYMENT_UNSUPPORTED');
     expect(() => createAuthoredBorrow('n', { ...wbtc, network: 'Base Sepolia' })).toThrow('BORROW_DEPLOYMENT_UNSUPPORTED');
     expect(() => createAuthoredSupply('n', { ...wbtc, network: 'Ethereum Mainnet' as SupplyInput['network'] })).toThrow('SUPPLY_DEPLOYMENT_UNSUPPORTED');
-    expect(() => createAuthoredSupply('n', { ...wbtc, network: 'Ethereum' as SupplyInput['network'] })).toThrow('SUPPLY_DEPLOYMENT_UNSUPPORTED');
+    // BUILD AAVE-V3-EXPANSION-001: "Ethereum" is the mainnet market, whose WBTC reserve is a different chain and token than Sepolia's.
+    const mainnet = createAuthoredSupply('n', { ...wbtc, network: 'Ethereum' as SupplyInput['network'] });
+    expect(mainnet.chainId).toBe('eip155:1');
+    expect((mainnet.userConstraints[0] as unknown as { quantity: { asset: unknown } }).quantity.asset).toEqual({ chainId: 'eip155:1', address: '0x2260fac5e5542a773aa44fbcfedf7c193bc2c599', decimals: 8 });
   });
   it.each([['0.000000001', 8], ['1.0000001', 6], ['0', 8], ['-1', 8], ['1e2', 8]])('rejects %s at %i decimals', (value, decimals) =>
     expect(() => parseLendingAmount(value, decimals)).toThrow('SUPPLY_AMOUNT_INVALID'));
@@ -55,9 +58,10 @@ describe('Ethereum Sepolia Aave authoring', () => {
     const workflow = initialEditor().workflow;
     expect(() => parseLocalCommand('supply 1 USDC to Aave on Ethereum Sepolia', workflow, context, owner)).toThrow('SUPPLY_DEPLOYMENT_UNSUPPORTED');
     expect(() => parseLocalCommand('supply 1 WBTC to Aave on Base Sepolia', workflow, context, owner)).toThrow('SUPPLY_DEPLOYMENT_UNSUPPORTED');
-    // "Ethereum" alone, or Mainnet, is never accepted as an Aave network.
-    for (const text of ['supply 0.001 WBTC to Aave on Ethereum', 'supply 0.001 WBTC to Aave on Ethereum Mainnet', 'supply 0.001 WBTC to Aave on Sepolia'])
-      expect(() => parseLocalCommand(text, workflow, context, owner)).toThrow();
+    // "Ethereum" is the mainnet market (BUILD AAVE-V3-EXPANSION-001), never Ethereum Sepolia; unknown network names stay refused.
+    expect(parseLocalCommand('supply 0.001 WBTC to Aave on Ethereum', workflow, context, owner)).toMatchObject({ type: 'ADD_SUPPLY', input: { network: 'Ethereum', asset: 'WBTC' } });
+    expect(parseLocalCommand('supply 0.001 WBTC to Aave on Ethereum Mainnet', workflow, context, owner)).toMatchObject({ type: 'ADD_SUPPLY', input: { network: 'Ethereum', asset: 'WBTC' } });
+    expect(() => parseLocalCommand('supply 0.001 WBTC to Aave on Sepolia', workflow, context, owner)).toThrow();
     expect(commandIsValid({ type: 'ADD_SUPPLY', input: { ...wbtc, asset: 'USDC' }, source: 'CHAT', baseRevision: 0 })).toBe(false);
   });
 });

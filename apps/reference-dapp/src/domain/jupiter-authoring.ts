@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
+import { ownDeclaration } from './node-declaration';
 import { createExactInputSwapNode, readExactInputSwap, type SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
 import { DEFAULT_SLIPPAGE } from './slippage-policy';
 import { JUPITER_SOLANA_MAINNET, ORCA_WHIRLPOOLS_DEVNET, SOLANA_MAINNET_TOKENS, solanaSwapRuntime, solanaTokenOn, type SolanaDevnetTokenSymbol,
@@ -50,6 +51,7 @@ export function createSolanaSwapNode(nodeId: string, input: SolanaSwapInput): Se
     protocols: [runtime.protocol], maximumAmount });
 }
 export function solanaSwapDetails(node: SemanticWorkflow['nodes'][number] | { readonly actionType: string; readonly chainId: string }): SolanaSwapInput | null {
+  node = ownDeclaration(node);
   if (node.actionType !== 'asset.swap.exact-input' || !node.chainId.startsWith('solana:')) return null;
   try {
     const fields = readExactInputSwap(node as SemanticWorkflow['nodes'][number]);

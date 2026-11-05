@@ -3,11 +3,12 @@
 import { useLocale } from '../i18n/locale';
 
 import { useState, type FormEvent } from 'react';
-import { createAuthoredSupply, supplyDetails, lendingAssetFor, lendingCopy, lendingView, LENDING_NETWORKS, type LendingNetwork, type SupplyInput } from '../domain/supply-authoring';
+import { createAuthoredSupply, supplyDetails, lendingAssetFor, lendingCopy, lendingView, LENDING_NETWORKS, lendingReservesFor, lendingNodeAsset, type LendingNetwork, type SupplyInput } from '../domain/supply-authoring';
 import { useWorkflow } from '../state/workflow-store';
 import { useBuild009Wallet } from '../state/build009-wallet-store';
 import { useSupply } from '../state/supply-store';
 import { TokenAmountInput } from './token-amount-input';
+import { LendingReserveStatus, reserveOptionLabel, useAaveReserves } from './lending-reserve-status';
 import { PendingExecutionNote } from './execution-concurrency-notes';
 export function SupplyAuthoringForm({nodeId,onDone,direct=false,reviewFormId}:{nodeId?:string;onDone?:()=>void;direct?:boolean;reviewFormId?:string}){
   const { t: tr } = useLocale();
@@ -17,16 +18,26 @@ export function SupplyAuthoringForm({nodeId,onDone,direct=false,reviewFormId}:{n
   const [localAmount,setAmount]=useState(existing?.amount??'1'),[beneficiary,setBeneficiary]=useState(existing?.beneficiary??wallet.account??''),[error,setError]=useState('');
   const amount = reviewFormId && nodeId ? amountInputs[nodeId] ?? existing?.amount ?? localAmount : localAmount;
   // The network selects its one verified Aave asset; the asset is never chosen by symbol.
-  const [network,setNetwork]=useState<LendingNetwork>(existing?.network??'Base Sepolia'),asset=lendingAssetFor(network);
+  const [network,setNetworkState]=useState<LendingNetwork>(existing?.network??'Base Sepolia'),[chosenAsset,setAsset]=useState<string>(existing?.asset??lendingAssetFor(existing?.network??'Base Sepolia'));
+  // BUILD AAVE-V3-EXPANSION-001: the network selects its Aave market; the asset is one of that market's registered reserves (never another network's).
+  const asset=lendingReservesFor(network).some(reserve=>reserve.symbol===chosenAsset)?chosenAsset:lendingAssetFor(network);
+  const setNetwork=(next:LendingNetwork)=>{setNetworkState(next);setAsset(lendingAssetFor(next));};
+  const live=useAaveReserves(network,wallet.account??null);
   function submit(event:FormEvent){event.preventDefault();try{
     const input:SupplyInput={network,asset,amount,beneficiary:beneficiary||wallet.account||''};createAuthoredSupply(nodeId??'node-preview',input);
     const command=nodeId?{type:'SET_SUPPLY' as const,nodeId,input,source:'CANVAS' as const,baseRevision:state.workflow.revision}:{type:'ADD_SUPPLY' as const,input,source:'CANVAS' as const,baseRevision:state.workflow.revision};
     if(direct)dispatch(command);else propose(command);onDone?.();
-  }catch(cause){setError(cause instanceof Error?cause.message:'SUPPLY_INPUT_INVALID');}}
+  }catch(cause){
+    // The form names what to fix, never a raw error code.
+    const code=cause instanceof Error?cause.message:'',decimals=lendingReservesFor(network).find(reserve=>reserve.symbol===asset)?.decimals??6;
+    setError(/AMOUNT/.test(code)?tr('Enter a positive {0} amount with at most {1} decimal places.',asset,String(decimals)):/BENEFICIARY|ADDRESS/.test(code)?tr('Enter a valid beneficiary wallet address.')
+      :/DEPLOYMENT|ASSET/.test(code)?tr('This reserve cannot be authored here: its name conflicts with the token list.'):tr('Check the Supply network, asset, amount and beneficiary.'));
+  }}
   return <form id={reviewFormId} className="inspector-fields" aria-label={tr(nodeId?'Edit Supply':'Create Supply')} onSubmit={submit}>
     <strong>{tr("Supply to Aave V3")}</strong>
     <label>{tr("Supply network")}<select aria-label={tr("Supply network")} value={network} onChange={e=>setNetwork(e.target.value as LendingNetwork)}>{LENDING_NETWORKS.map(n=><option key={n}>{tr(n)}</option>)}</select></label>
-    <label>{tr("Supply asset")}<select aria-label={tr("Supply asset")} value={asset} onChange={()=>undefined}><option>{tr(asset)}</option></select></label>
+    <label>{tr("Supply asset")}<select aria-label={tr("Supply asset")} value={asset} onChange={e=>setAsset(e.target.value)}>{lendingReservesFor(network).map(reserve=>{const option=reserveOptionLabel(reserve,live,'supply',tr,network);return <option key={reserve.asset} value={reserve.symbol} disabled={option.disabled&&reserve.symbol!==asset}>{option.label}</option>;})}</select></label>
+    <LendingReserveStatus live={live} asset={asset} kind="supply"/>
     <label>{tr("Supply amount (")}{tr(asset)})<TokenAmountInput aria-label={tr(`Supply amount (${asset})`)} value={amount} maxLength={80} onValueChange={value=>{setError('');if(reviewFormId&&nodeId)editCanvasAmount(nodeId,value);else setAmount(value);}}/></label>
     <label>{tr("Supply beneficiary")}<input aria-label={tr("Supply beneficiary")} autoComplete="off" value={beneficiary||wallet.account||''} maxLength={42} onChange={e=>setBeneficiary(e.target.value)}/></label>
     {error&&<p role="alert">{tr(error)}</p>}{!reviewFormId&&<button type="submit">{tr(nodeId?'Review Supply change':direct?'Add Supply':'Review Supply proposal')}</button>}
@@ -34,7 +45,7 @@ export function SupplyAuthoringForm({nodeId,onDone,direct=false,reviewFormId}:{n
   </form>;
 }
 function formatUnits(value:string,decimals:number){const units=BigInt(value),scale=10n**BigInt(decimals);const fraction=(units%scale).toString().padStart(decimals,'0').replace(/0+$/,'');return (units/scale).toString()+(fraction?'.'+fraction:'');}
-const messages:Record<string,string>={ETHEREUM_MAINNET_NOT_ENABLED:'Ethereum Mainnet lending is not enabled on this server.',SUPPLY_CAP_EXCEEDED:'This reserve has insufficient supply-cap headroom. No transaction was prepared. Simulate and review again later.',SUPPLY_WALLET_REQUEST_REFUSED:'The wallet provider refused the transaction request before submission. No transaction was sent. Inspect the provider error under technical details before reviewing again.',SUPPLY_WALLET_NOT_SUBMITTED:'No transaction was requested from your wallet. Prepare a fresh review to retry safely.',SUPPLY_WALLET_NONCE_MISMATCH:'The wallet provider reports a different pending nonce than Base Sepolia. No transaction was requested. Refresh the wallet connection before reviewing again.',SUPPLY_WALLET_NONCE_RESPONSE_INVALID:'The wallet provider returned an invalid nonce. No transaction was requested.',SUPPLY_RPC_ERROR_BEFORE_WALLET_SUBMISSION:'The wallet provider read failed before any transaction request. No transaction was submitted; review again after restoring the connection.',SUPPLY_WALLET_PROVIDER_CHANGED:'The injected wallet provider changed. No transaction was requested. Review again using the current wallet.',SUPPLY_SEMANTIC_REVISION_CHANGED:'The workflow changed before the wallet request. Review the current Supply again.',SUPPLY_INSUFFICIENT_USDC:'Your wallet needs more Aave test USDC for this Supply.',SUPPLY_INSUFFICIENT_ASSET:'Your wallet needs more of the Aave test asset for this Supply.',SUPPLY_NETWORK_UNAVAILABLE:'This network is not enabled in this deployment. No transaction was requested.',SUPPLY_INSUFFICIENT_ETH:'Your wallet needs more Base Sepolia ETH for gas.',
+const messages:Record<string,string>={SUPPLY_ALLOWANCE_RESET_REQUIRED:'This token refuses to change a non-zero allowance directly. Reset its allowance for the Aave Pool to zero in your wallet first; no transaction was prepared.',ETHEREUM_MAINNET_NOT_ENABLED:'Ethereum Mainnet lending is not enabled on this server.',SUPPLY_CAP_EXCEEDED:'This reserve has insufficient supply-cap headroom. No transaction was prepared. Simulate and review again later.',SUPPLY_WALLET_REQUEST_REFUSED:'The wallet provider refused the transaction request before submission. No transaction was sent. Inspect the provider error under technical details before reviewing again.',SUPPLY_WALLET_NOT_SUBMITTED:'No transaction was requested from your wallet. Prepare a fresh review to retry safely.',SUPPLY_WALLET_NONCE_MISMATCH:'The wallet provider reports a different pending nonce than Base Sepolia. No transaction was requested. Refresh the wallet connection before reviewing again.',SUPPLY_WALLET_NONCE_RESPONSE_INVALID:'The wallet provider returned an invalid nonce. No transaction was requested.',SUPPLY_RPC_ERROR_BEFORE_WALLET_SUBMISSION:'The wallet provider read failed before any transaction request. No transaction was submitted; review again after restoring the connection.',SUPPLY_WALLET_PROVIDER_CHANGED:'The injected wallet provider changed. No transaction was requested. Review again using the current wallet.',SUPPLY_SEMANTIC_REVISION_CHANGED:'The workflow changed before the wallet request. Review the current Supply again.',SUPPLY_INSUFFICIENT_USDC:'Your wallet needs more Aave test USDC for this Supply.',SUPPLY_INSUFFICIENT_ASSET:'Your wallet needs more of the Aave test asset for this Supply.',SUPPLY_NETWORK_UNAVAILABLE:'This network is not enabled in this deployment. No transaction was requested.',SUPPLY_INSUFFICIENT_ETH:'Your wallet needs more Base Sepolia ETH for gas.',
   SUPPLY_WRONG_CHAIN:'Switch your wallet to Base Sepolia before executing.',SUPPLY_WRONG_ACCOUNT:'Select the wallet account shown in Review.',SUPPLY_APPROVAL_REJECTED:'Approval was declined. No Supply was sent.',
   SUPPLY_REJECTED:'Supply was declined. Any completed approval is preserved.',SUPPLY_RPC_RATE_LIMITED:'The network provider is busy. Try the read again.',
   SUPPLY_TRANSACTION_NOT_OBSERVED:'The existing transaction is not visible yet. Observe it again; Flofi will not send another.',AWAITING_CONFIRMATIONS:'Waiting for network confirmations.',
@@ -44,7 +55,7 @@ export function SupplyPanel({view}:{view:'simulate'|'execute'}){
   const { t: tr } = useLocale();
   const {state}=useWorkflow(),supply=useSupply(),wallet=useBuild009Wallet();
   const node=state.workflow.nodes.find(n=>n.actionType==='supply'),fields=node?supplyDetails(node as Parameters<typeof supplyDetails>[0]):null;
-  const record=supply.record,review=record?.review,shown=lendingView(review?.chain??node?.chainId);
+  const record=supply.record,review=record?.review,shown=lendingView(review?.chain??node?.chainId,review?.asset??(node?lendingNodeAsset(node as Parameters<typeof lendingNodeAsset>[0]):null));
   const pending=record?.notSubmitted?undefined:record?.attempts.find(a=>!a.reconciled&&!record.approvalProof),approval=record?.attempts.find(a=>a.step==='APPROVAL');
   const canExecute=Boolean(record?.authorization&&!supply.retired&&!pending&&record.verdict==='PENDING');
   const info=supply.error??record?.error;
@@ -53,7 +64,7 @@ export function SupplyPanel({view}:{view:'simulate'|'execute'}){
     <p>{tr("Beneficiary: ")}<span>{tr(fields?.beneficiary??review?.beneficiary)}</span></p>
     {supply.retired&&<p role="alert">{tr("The workflow changed. Prior authorization is invalid. Observe any existing transaction before starting a new execution.")}</p>}
     {view==='simulate'?<>
-      <p>{tr(lendingCopy('Your injected wallet must hold Aave test USDC and Base Sepolia ETH for gas.',shown))}</p>
+      <p>{lendingCopy('Your injected wallet must hold Aave test USDC and Base Sepolia ETH for gas.',shown,tr)}</p>
       <button type="button" disabled={supply.busy} onClick={()=>void supply.simulate()}>{tr("Simulate Supply")}</button><PendingExecutionNote pending={Boolean(pending)}/>
       {review&&!supply.retired&&<><p>{tr("Approval required: ")}{tr(review.approvalRequired?'Yes — approve exactly this Supply amount.':'No — existing allowance is sufficient.')}</p>
         <p>{tr("Estimated maximum network cost: ")}{tr(formatUnits(review.manifest.gasBudgets[0]?.maximumAmount??'0',18))}{tr(" ETH.")}</p></>}
@@ -70,7 +81,7 @@ export function SupplyPanel({view}:{view:'simulate'|'execute'}){
         <button type="button" disabled={supply.busy} onClick={()=>void supply.recoverReview()}>{tr("Prepare fresh review")}</button></>}
       {record?.evidence&&<><p>{tr("Supply independently reconciled. Position increased by ")}{tr(formatUnits(record.observations.at(-1)?.delta??'0',shown.decimals))} {tr(shown.asset)}.</p><a download="flofi-aave-supply-evidence.json" href={'data:application/json;charset=utf-8,'+encodeURIComponent(JSON.stringify(record.evidence,null,2))}>{tr("Download Evidence Bundle")}</a></>}
     </>}
-    {info&&<p role="status">{tr(lendingCopy(messages[info]??'Execution needs attention. Inspect technical details and observe any existing transaction.',shown))}</p>}
+    {info&&<p role="status">{lendingCopy(messages[info]??'Execution needs attention. Inspect technical details and observe any existing transaction.',shown,tr)}</p>}
     <details><summary>{tr("Show technical details")}</summary><pre>{JSON.stringify({error:info,submissionError:record?.submissionError,walletDiagnostic:record?.walletDiagnostic,notSubmitted:record?.notSubmitted,absence:record?.absence,recoveryOf:record?.recoveryOf,review,attempts:record?.attempts,observations:record?.observations,verdict:record?.verdict,environment:record?.evidence?.bundle.environment},null,2)}</pre></details>
   </section>;
 }

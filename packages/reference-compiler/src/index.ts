@@ -56,6 +56,7 @@ export * from './lighthouse-mock.js';
 export * from './jupiter.js';
 export * from './jupiter-mock.js';
 export * from './borrow.js';
+export * from './aave-reserves.js';
 export * from './orca-whirlpool.js';
 export * from './orca-mock.js';
 

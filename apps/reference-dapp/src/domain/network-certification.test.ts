@@ -122,7 +122,8 @@ describe('changing environment re-networks a step only within its own family', (
     [{ action: 'pool', network: 'Solana Devnet', from: 'SOL', to: 'devUSDC' }, 'mainnet', { action: 'pool', network: 'Solana', from: 'SOL', to: 'USDC' }],
     [{ action: 'pool', network: 'Solana', from: 'SOL', to: 'USDC' }, 'testnet', { action: 'pool', network: 'Solana Devnet', from: 'SOL', to: 'devUSDC' }],
     [{ action: 'supply', network: 'Base Sepolia', from: 'USDC' }, 'mainnet', { action: 'supply', network: 'Base', from: 'USDC' }],
-    [{ action: 'supply', network: 'Ethereum Sepolia', from: 'WBTC' }, 'mainnet', null],
+    // BUILD AAVE-V3-EXPANSION-001: Ethereum mainnet now lists a WBTC reserve, so the family counterpart exists (its own chain and token).
+    [{ action: 'supply', network: 'Ethereum Sepolia', from: 'WBTC' }, 'mainnet', { action: 'supply', network: 'Ethereum', from: 'WBTC' }],
     [{ action: 'transfer', network: 'Robinhood Chain Testnet', from: 'ETH' }, 'mainnet', { action: 'transfer', network: 'Robinhood Chain', from: 'ETH' }],
     [{ action: 'transfer', network: 'Base', from: 'ETH' }, 'testnet', null],
   ];

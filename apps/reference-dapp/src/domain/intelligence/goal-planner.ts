@@ -111,7 +111,7 @@ export function planGoal(goal: Goal, scope: NetworkScope): GoalPlan {
   // Supplying: where the market is comes first (its options are Aave V3's own networks for that asset); then where the user holds the asset.
   if (goal.target.use === 'SUPPLY' && !to && !from) {
     const offers = lending.filter(offer => same(offer.asset, goal.target.asset ?? goal.source.asset));
-    if (offers.length) return { kind: 'NEEDS', field: 'targetNetwork', options: offers.map(offer => offer.network.name) };
+    if (offers.length) return { kind: 'NEEDS', field: 'targetNetwork', options: [...new Set(offers.map(offer => offer.network.name))] };
   }
   if (!from) return { kind: 'NEEDS', field: 'sourceNetwork', options: to ? [to.network.name, ...startNetworks(scope).filter(name => name !== to.network.name)].slice(0, 5) : startNetworks(scope) };
   const target = to?.network ?? null;
@@ -119,10 +119,10 @@ export function planGoal(goal: Goal, scope: NetworkScope): GoalPlan {
   if (goal.target.use === 'SUPPLY') {
     const wanted = targetAsset ?? goal.source.asset;
     const offers = lending.filter(offer => same(offer.asset, wanted));
-    if (!offers.length) return { kind: 'UNSUPPORTED', code: 'LENDING_ASSET_NOT_SUPPORTED', network: null, options: [...new Set(lending.map(offer => `${offer.asset} · ${offer.network.name}`))], alternatives: [] };
-    if (!target) return { kind: 'NEEDS', field: 'targetNetwork', options: offers.map(offer => offer.network.name) };
+    if (!offers.length) return { kind: 'UNSUPPORTED', code: 'LENDING_ASSET_NOT_SUPPORTED', network: null, options: [...new Set(lending.map(offer => `${offer.asset} · ${offer.network.name}`))].slice(0, 8), alternatives: [] };
+    if (!target) return { kind: 'NEEDS', field: 'targetNetwork', options: [...new Set(offers.map(offer => offer.network.name))] };
     const offer = offers.find(item => item.network === target);
-    if (!offer) return { kind: 'UNSUPPORTED', code: 'LENDING_NOT_ON_NETWORK', network: target.name, options: offers.map(item => item.network.name), alternatives: [] };
+    if (!offer) return { kind: 'UNSUPPORTED', code: 'LENDING_NOT_ON_NETWORK', network: target.name, options: [...new Set(offers.map(item => item.network.name))], alternatives: [] };
     targetAsset = offer.asset;
   }
   if (!target) return { kind: 'NEEDS', field: 'targetNetwork', options: [from.network.name, ...startNetworks(scope).filter(name => name !== from.network.name)].slice(0, 5) };
@@ -158,7 +158,7 @@ export function planGoal(goal: Goal, scope: NetworkScope): GoalPlan {
     if (certified && both && !best) alternatives.push({ code: 'UNIVERSAL_BEST', network: target.key });
   }
   if (supplying) {
-    if (capabilityGap(scope, 'supply', target.key)) return { kind: 'UNSUPPORTED', code: 'LENDING_NOT_ON_NETWORK', network: target.name, options: lending.map(offer => offer.network.name), alternatives: [] };
+    if (capabilityGap(scope, 'supply', target.key)) return { kind: 'UNSUPPORTED', code: 'LENDING_NOT_ON_NETWORK', network: target.name, options: [...new Set(lending.map(offer => offer.network.name))], alternatives: [] };
     const funded = steps.length ? steps.length - 1 : null;
     // The same asset arrives (a bridge delivers at most what it sends): the user's own amount is the cap. Another asset needs the user's cap.
     const sameAsset = same(targetAsset, goal.source.asset);

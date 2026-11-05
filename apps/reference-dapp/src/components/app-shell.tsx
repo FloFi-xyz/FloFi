@@ -4,6 +4,8 @@ import { simulationUnavailableReason } from '../domain/simulation-unavailable';
 import { refreshBridgeAfterApproval } from '../domain/bridge-review-recovery';
 import { selectOwnerRuntime, type OwnerRuntimeSignals } from '../domain/runtime-selection';
 import { DELIVERY_READABLE, deliveredByRecord, SEQUENCE_RUNTIMES, sequenceOrder, stepAssets } from '../domain/workflow-sequence';
+import { ownerByRecord } from '../domain/sequence-restore';
+import { shortAddress } from '../accounts/account-model';
 import { presentSequence, sequenceFundingMessage, sequenceUnservedMessage, sequenceUnsupportedMessage } from '../domain/sequence-presentation';
 import { composerActions, composerSummary } from '../domain/composer-presentation';
 import { setupSummary } from '../domain/canvas-action-setup';
@@ -127,7 +129,7 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
   // Server HTML is visible before handlers and initial canvas preferences are ready.
   const [interactive, setInteractive] = useState(false);
   useEffect(() => { setInteractive(true); }, []);
-  const { state, context, reviewError, authoringIncomplete, restoreWorkflow, restorationEpoch, propose, createNewWorkflow, newWorkflow, runtimeWorkflow, sequence, completeSequenceStep,
+  const { state, context, reviewError, authoringIncomplete, restoreWorkflow, restorationEpoch, propose, createNewWorkflow, newWorkflow, runtimeWorkflow, sequence, sequenceRestore, completeSequenceStep,
     recordExecutedAction, executedActions, amountInputs, actionSetup, commitCanvasAmount, cancelCanvasAmount, removeActionSetup, pending: proposal, canvasRestoring,
     review: workflowReview, cryptoSelections = {}, bridgeNetworkInputs = {}, recipientInputs = {} } = useWorkflow();
   // BUILD-FLOFI-CHAT-E2E-FIX-002: every runtime path below serves `runtimeWorkflow` — the canonical workflow, or the current step of a sequence of
@@ -242,7 +244,16 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
     : kind === 'router' ? routerState.available : true);
   const unservedStep = sequence && !unsupportedStep ? sequence.steps.find((step, index) => index >= sequence.cursor && !stepServed(sequenceKinds[index] ?? null, step.chainId)) ?? null : null;
   const runtimeChecking = sequence ? sequence.steps.some((_, index) => index >= sequence.cursor && !stepKnown(sequenceKinds[index] ?? null)) : !stepKnown(runtime.kind);
-  const sequenceIssue = !sequence ? null : unsupportedStep ? sequenceUnsupportedMessage(state.workflow, context, unsupportedStep, language === 'PT' ? 'PT' : 'EN')
+  // BUILD AAVE-V3-EXPANSION-001: after a refresh, a step whose earlier run is still being re-proven (or whose record could not be read) is never
+  // offered as new; and a step that spends an earlier step's delivery continues only with the wallet that received it (its record's owner).
+  const fundingOwner = sequence && !sequence.finished ? sequence.current.funding.map(funding => sequence.completed[funding.fundedBy]?.owner).find(Boolean) ?? null : null;
+  const continuingWallet = fundingOwner?.startsWith('0x') ? connectedWallet.account?.toLowerCase() ?? null : solanaSession?.account.address ?? null;
+  const sequenceIssue = !sequence ? null : sequenceRestore ? sequenceRestore.status === 'CHECKING'
+      ? tr('Checking which steps of this workflow already ran before continuing. Nothing can be simulated or signed until this finishes.')
+      : tr('Step {0} may already have run: FloFi could not read its execution record to confirm it. It is not offered again until it is confirmed.', sequenceRestore.step)
+    : fundingOwner && continuingWallet && continuingWallet !== fundingOwner
+      ? tr('Step {0} spends what an earlier step delivered to wallet {1}. Connect that wallet to continue; nothing was simulated or sent.', sequence.cursor + 1, shortAddress(fundingOwner))
+    : unsupportedStep ? sequenceUnsupportedMessage(state.workflow, context, unsupportedStep, language === 'PT' ? 'PT' : 'EN')
     : unservedStep ? sequenceUnservedMessage(state.workflow, context, unservedStep, language === 'PT' ? 'PT' : 'EN')
     : sequenceFundingMessage(sequence, language === 'PT' ? 'PT' : 'EN');
   const { universalPath, routerPath, solanaTransferPath, transferPath, lendingPath, withdrawPath, repayPath, borrowPath, supplyPath, uniswapLiquidityPath,
@@ -322,10 +333,11 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
   const stepDelivered = stepDone && sequence ? deliveredByRecord(simulationSource.kind, stepRecord, sequence.current.output) : null;
   const awaitingDelivery = stepDone && Boolean(sequence?.steps.some(step => step.funding.some(f => f.fundedBy === sequence.cursor))) && DELIVERY_READABLE.includes(simulationSource.kind) && stepDelivered === null;
   const stepRunKey = liveStep?.runKey ?? null;
+  const stepOwner = stepDone || (!sequence && liveStep?.state === 'complete') ? ownerByRecord(simulationSource.kind, stepRecord) : null;
   useEffect(() => {
     if (!sequence || !stepDone || awaitingDelivery) return;
-    completeSequenceStep(sequence.cursor, { received: stepDelivered, runKey: stepRunKey });
-  }, [sequence?.cursor, stepDone, awaitingDelivery, stepDelivered, stepRunKey, completeSequenceStep]);
+    completeSequenceStep(sequence.cursor, { received: stepDelivered, runKey: stepRunKey, kind: simulationSource.kind, owner: stepOwner });
+  }, [sequence?.cursor, stepDone, awaitingDelivery, stepDelivered, stepRunKey, completeSequenceStep, simulationSource.kind, stepOwner]);
   // BUILD-FLOFI-CHAT-E2E-DASHBOARD-UX-001: a one-action workflow whose own run is final and reconciled (same rule as a sequence step) is kept as
   // an executed first step, so the owner can keep building it: an action added afterwards is its own next step, never a repeat of this one.
   const soleAction = !sequence ? sequenceOrder(state.workflow) : [];
@@ -333,8 +345,8 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
     liveStep.state === 'complete' && isFinalExecutionResult(liveStep));
   const actionDelivered = actionDone ? deliveredByRecord(simulationSource.kind, stepRecord, stepAssets(soleAction[0]!).output) : null;
   useEffect(() => {
-    if (actionDone) recordExecutedAction({ received: actionDelivered, runKey: stepRunKey });
-  }, [actionDone, actionDelivered, stepRunKey, recordExecutedAction]);
+    if (actionDone) recordExecutedAction({ received: actionDelivered, runKey: stepRunKey, kind: simulationSource.kind, owner: stepOwner });
+  }, [actionDone, actionDelivered, stepRunKey, recordExecutedAction, simulationSource.kind, stepOwner]);
   const sequencePresentation = sequence ? { ...presentSequence(state.workflow, context, sequence), issue: sequenceIssue, awaitingDelivery } : null;
   // Every runtime surface names the step it serves, so a step's simulation or Review never reads as the whole workflow's.
   const sequenceNote = sequencePresentation ? sequencePresentation.finished ? tr('All {0} steps of this workflow are completed and reconciled.', sequencePresentation.total)
@@ -412,7 +424,15 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
     unsupported: testNetworkWorkflow || simulationSource.kind === 'unavailable', walletRequired: !signer || Boolean(approvalGate || autoPrepare && !approvalWallet),
     providerUnavailable: 'available' in simulationSource.state && simulationSource.state.available === false || 'info' in simulationSource.state && simulationSource.state.info?.available === false,
     error: simulationSource.state.error, staleQuote: lifecycleControls.view.expiresAt !== null && Date.now() >= lifecycleControls.view.expiresAt }) : null);
-  const simulateAction = walletIssue ? <div className="canvas-lifecycle-control"><p role="status">{walletIssue}</p><button type="button" onClick={() => void walletConnection.connect()}>{tr('Use another wallet')}</button></div>
+  const simulateAction = sequenceRestore ? <div className="canvas-lifecycle-control sequence-restore-control">
+      <p role="status">{sequenceIssue}</p>
+      {sequenceRestore.status === 'UNVERIFIED' && <>
+        <button type="button" onClick={sequenceRestore.retry}>{tr('Check again')}</button>
+        <p className="sequence-restore-warning">{tr('Only if your wallet history shows that step {0} did not run:', sequenceRestore.step)}</p>
+        <button type="button" className="secondary" onClick={sequenceRestore.discard}>{tr('Forget this record and offer step {0} again', sequenceRestore.step)}</button>
+      </>}
+    </div>
+    : walletIssue ? <div className="canvas-lifecycle-control"><p role="status">{walletIssue}</p><button type="button" onClick={() => void walletConnection.connect()}>{tr('Use another wallet')}</button></div>
     : networkAction ? <div className="canvas-lifecycle-control"><button type="button" disabled={networkAction.disabled} onClick={networkAction.request}>{networkAction.label}</button>{walletConnection.error && <p role="status">{tr(walletConnection.error)}</p>}</div> : <CanvasLifecycleAction {...lifecycleState} controls={lifecycleControls} workflowName={workflowName}
     simulationDisabled={simulationDisabled || !actionable} simulationReason={simulationReason} sequenceNote={sequenceNote}
     simulate={() => { setTab('Simulate'); return simulateAgain(); }} onExecute={() => setTab('Execute')}/>;

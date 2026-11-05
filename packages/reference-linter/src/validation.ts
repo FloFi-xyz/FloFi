@@ -138,7 +138,10 @@ export function validateAuthoringWorkflow(input: unknown, context: ReviewContext
         || node.requiredAuthorizationClass !== 'MODE_A' || node.failurePolicy !== 'ABORT'
         || node.adapterConstraints.adapters.length !== 0 || !(node.adapterConstraints.protocols.length === 1 && node.adapterConstraints.protocols[0] === 'uniswap') &&
         !(node.adapterConstraints.protocols.length === 2 && node.adapterConstraints.protocols[0] === 'uniswap' &&
-          node.adapterConstraints.protocols[1] === 'cow-protocol') || node.dependencies.length !== 0) fail('INVALID_SWAP_DECLARATION');
+          node.adapterConstraints.protocols[1] === 'cow-protocol')) fail('INVALID_SWAP_DECLARATION');
+    // BUILD AAVE-V3-EXPANSION-001: a swap may follow another step by ORDERING only (auto-connected sequences, a Canvas link; every dependency
+    // was checked above to name another node). Its ports stay literal quantities below, so no value ever flows through that link.
+    if (node.dependencies.some(parent => nodes.get(parent)?.actionType.startsWith('mock-'))) fail('INVALID_SWAP_DECLARATION');
     if (node.inputs.length !== 2 || !hasKeys(Object.fromEntries(node.inputs.map(p => [p.name, p])), ['amount-in', 'asset-out'])) fail('INVALID_SWAP_PORTS');
     const amount = node.inputs.find(p => p.name === 'amount-in');
     const assetOut = node.inputs.find(p => p.name === 'asset-out');

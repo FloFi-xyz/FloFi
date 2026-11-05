@@ -32,7 +32,9 @@ describe('one network per crypto action', () => {
   // BUILD-BASE-001 (intentional change): Base mainnet USDC (real funds) joins the two test deployments.
   it.each(['supply', 'borrow', 'repay', 'withdraw'] as const)('%s exposes the pinned Aave deployments', action => {
     expect(cryptoNetworks(action, 'testnet').map(profile => [profile.network, profile.tokens])).toEqual([['Base Sepolia', ['USDC']], ['Ethereum Sepolia', ['WBTC']]]);
-    expect(cryptoNetworks(action, 'mainnet').map(profile => [profile.network, profile.tokens])).toEqual([['Base', ['USDC']], ['Arbitrum One', ['USDC']], ['Ethereum', ['USDC']]]);
+    // BUILD AAVE-V3-EXPANSION-001: each mainnet market lists every registered reserve, its original verified USDC first.
+    expect(cryptoNetworks(action, 'mainnet').map(profile => [profile.network, profile.tokens.length, profile.tokens[0]])).toEqual([['Base', 15, 'USDC'], ['Arbitrum One', 20, 'USDC'], ['Ethereum', 67, 'USDC']]);
+    expect(cryptoNetworks(action, 'mainnet').find(profile => profile.network === 'Base')?.tokens).toEqual(expect.arrayContaining(['WETH', 'cbBTC', 'GHO', 'USDbC']));
     const base = createCryptoActionNode('base', input(action, 'Base'));
     expect(base.chainId).toBe('eip155:8453');
     expect(cryptoInputOf(base)?.selection).toEqual(selectCryptoNetwork(action, 'Base'));

@@ -16,7 +16,7 @@
  */
 import { AAVE_V3_AMOUNT_POLICY } from '@defi-workflow-engine/action-registry';
 import { UNIVERSAL_NETWORKS } from '@defi-workflow-engine/workflow-contracts';
-import { AUTHORING_CAPABILITIES, type AuthoringCapability } from '../authoring-capabilities';
+import { AUTHORING_CAPABILITIES, type AuthoringCapability, lendingOffers } from '../authoring-capabilities';
 import { declaredNetworkSymbols, officialCatalogLoaded } from '../asset-catalogs';
 import { agentRolloutAllows, pendingAgentCapability } from '../agent-rollout';
 import { NETWORKS, networkIdentity, type NetworkIdentity } from '../network-registry';
@@ -69,6 +69,9 @@ function eligibility(scope: NetworkScope, action: StrategyAction, network: strin
     execute: Boolean(row?.ownerWalletExecutionImplemented), demonstratedEvidence: row?.demonstratedEvidence ?? 'NONE_DEMONSTRATED', deployment: 'DECIDED_BY_RUNTIME_AT_REVIEW' };
 }
 function assetsOf(scope: NetworkScope, network: NetworkIdentity, action: StrategyAction, capabilities: readonly AuthoringCapability[]): ActionAssets {
+  // BUILD AAVE-V3-EXPANSION-001: Aave lists every registered reserve of the network's market, not only its canonical example's asset.
+  if (action === 'supply' || action === 'borrow' || action === 'repay' || action === 'withdraw')
+    return { kind: 'LISTED', symbols: [...new Set(lendingOffers(action).filter(offer => offer.network === network).map(offer => offer.asset))] };
   const bound = [...new Set(capabilities.filter(capability => capability.asset !== null).map(capability => capability.asset!))];
   if (bound.length && action !== 'transfer') return { kind: 'LISTED', symbols: bound };
   if (network.catalog && (action === 'swap' || action === 'add_liquidity' || action === 'transfer'))

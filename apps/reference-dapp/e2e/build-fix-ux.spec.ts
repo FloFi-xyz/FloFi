@@ -41,6 +41,17 @@ async function addSwap(page: Page, amount: string) {
 async function twoSwaps(page: Page) {
   await installPassiveWallet(page); await openBuilder(page);
   await addSwap(page, '1'); await addSwap(page, '2');
+  // BUILD AAVE-V3-EXPANSION-001: the second step is linked to the first automatically; these tests author that link by hand, so the
+  // automatic link is removed first through the same edge selection and Delete an owner uses.
+  const edge = page.locator('.build-flow-surface .react-flow__edge[data-id="node-002-node-003"]');
+  await expect(edge).toBeVisible();
+  const point = await edge.locator('.react-flow__edge-interaction').evaluate((path: SVGPathElement) => {
+    const at = path.getPointAtLength(path.getTotalLength() / 2), m = path.getScreenCTM()!;
+    return { x: at.x * m.a + at.y * m.c + m.e, y: at.x * m.b + at.y * m.d + m.f };
+  });
+  await page.mouse.click(point.x, point.y); await page.keyboard.press('Delete');
+  await expect(edge).toHaveCount(0);
+  await expect.poll(() => dependencies(page, 'node-003')).toEqual([]);
   const title = (await node(page, 'node-002').locator('.composer-action-title').boundingBox())!;
   await page.mouse.move(title.x + 10, title.y + 10); await page.mouse.down();
   await page.mouse.move(title.x - 80, title.y + 60, { steps: 20 }); await page.mouse.up();

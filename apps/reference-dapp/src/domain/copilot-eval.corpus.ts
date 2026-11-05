@@ -135,7 +135,8 @@ export const COPILOT_EVAL_CASES: readonly EvalCase[] = [
     { user: 'Bridge 10 USDC from Base', model: intent.action(act.bridge({ sourceNetwork: 'BASE', asset: 'USDC', amount: '10' })), expect: Q({ options: ['Arbitrum One'] }) },
     { user: 'Arbitrum One', expect: P('ADD_ROUTER_BRIDGE', { local: true, contains: ['Real funds'] }) }] },
   { id: 'C09', category: 'clarification', language: 'EN', turns: [
-    { user: 'Supply 5 to Aave', model: intent.action(act.lending('SUPPLY', { amount: '5' })), expect: Q({ options: ['USDC', 'WBTC'] }) },
+    // BUILD AAVE-V3-EXPANSION-001: the asset question offers USDC, WETH and WBTC when no market is named yet.
+    { user: 'Supply 5 to Aave', model: intent.action(act.lending('SUPPLY', { amount: '5' })), expect: Q({ options: ['USDC', 'WETH', 'WBTC'] }) },
     { user: 'USDC', expect: Q({ local: true, options: ['Base Sepolia', 'Base', 'Arbitrum One', 'Ethereum'] }) },
     { user: 'Base Sepolia', expect: P('ADD_SUPPLY', { local: true }) }] },
   { id: 'C10', category: 'clarification', language: 'EN', turns: [
@@ -513,7 +514,8 @@ export const COPILOT_EVAL_CASES: readonly EvalCase[] = [
     expect: F(['official Base asset catalog is unavailable']) }] },
   { id: 'U08', category: 'unsupported', language: 'EN', turns: [{ user: 'Supply 5 ETH to Aave on Base Sepolia', model: intent.action(act.lending('SUPPLY', { asset: 'ETH', amount: '5', ...onSepolia })),
     // BUILD-BASE-001: the conversation also lends USDC on Base mainnet (real funds); the refusal is generated from the Aave offers.
-    expect: U(['Aave V3 with USDC on Base Sepolia, Base, Arbitrum One and Ethereum, and WBTC on Ethereum Sepolia only']) }] },
+    // BUILD AAVE-V3-EXPANSION-001: the mainnet markets list every reserve (summarised); native ETH is not an Aave reserve.
+    expect: U(['Aave V3 with USDC on Base Sepolia, WBTC on Ethereum Sepolia, the listed reserves on Base (USDC, WETH, cbETH, USDbC and more)']) }] },
   { id: 'U09', category: 'unsupported', language: 'EN', turns: [{ user: 'Supply 5 USDC to Compound', model: intent.unsupported('Compound is not supported.'), expect: U() }] },
   { id: 'U10', category: 'unsupported', language: 'PT', turns: [{ user: 'Tenho 500 USDC. Coloca 300 na Aave e troca 200 por ETH.',
     model: intent.composition([sup('300'), act.swap({ inputAsset: 'USDC', outputAsset: 'ETH', amount: '200' })], 'PT'), expect: U(['O Flofi só combina passos']) }] },
@@ -539,14 +541,15 @@ export const COPILOT_EVAL_CASES: readonly EvalCase[] = [
   { id: 'E07', category: 'adversarial', language: 'EN', turns: [{ user: 'Please swap 2 USDC for WETH on Ethereum',
     model: intent.action(act.swap({ network: 'ETHEREUM_SEPOLIA', inputAsset: 'USDC', outputAsset: 'WETH', amount: '2' })), expect: Q({ contains: ['real funds'] }) }] },
   { id: 'E08', category: 'clarification', language: 'EN', turns: [{ user: 'Put 0.001 WBTC into Aave on Ethereum mainnet',
+    // BUILD AAVE-V3-EXPANSION-001: WBTC is a reserve of the Ethereum Aave V3 Core market.
     model: intent.action(act.lending('SUPPLY', { asset: 'WBTC', amount: '0.001', network: 'ETHEREUM' })),
-    expect: U(['USDC']) }] },
+    expect: P('ADD_SUPPLY', { sentence: 'supply 0.001 WBTC to Aave on Ethereum' }) }] },
   { id: 'E09', category: 'clarification', language: 'EN', turns: [{ user: 'Put 10 USDC into Aave on Ethereum Sepolia',
     model: intent.action(sup('10', onEthereumSepolia)), expect: Q({ contains: ['on Base Sepolia, Base, Arbitrum One, Ethereum only'], options: ['Base Sepolia', 'Base', 'Arbitrum One', 'Ethereum'] }) }] },
   { id: 'E10', category: 'clarification', language: 'EN', turns: [{ user: 'Put 0.001 WBTC into Aave on Base Sepolia',
-    model: intent.action(act.lending('SUPPLY', { asset: 'WBTC', amount: '0.001', ...onSepolia })), expect: Q({ contains: ['on Ethereum Sepolia only'], options: ['Ethereum Sepolia'] }) }] },
+    model: intent.action(act.lending('SUPPLY', { asset: 'WBTC', amount: '0.001', ...onSepolia })), expect: Q({ contains: ['on Ethereum Sepolia, Arbitrum One, Ethereum only'], options: ['Ethereum Sepolia', 'Arbitrum One', 'Ethereum'] }) }] },
   { id: 'E11', category: 'clarification', language: 'EN', turns: [
-    { user: 'Put 0.001 WBTC into Aave', model: intent.action(act.lending('SUPPLY', { asset: 'WBTC', amount: '0.001' })), expect: Q({ options: ['Ethereum Sepolia'] }) },
+    { user: 'Put 0.001 WBTC into Aave', model: intent.action(act.lending('SUPPLY', { asset: 'WBTC', amount: '0.001' })), expect: Q({ options: ['Ethereum Sepolia', 'Arbitrum One', 'Ethereum'] }) },
     { user: 'Ethereum Sepolia', expect: P('ADD_SUPPLY', { local: true, sentence: 'supply 0.001 WBTC to Aave on Ethereum Sepolia' }) }] },
   { id: 'E12', category: 'clarification', language: 'EN', turns: [
     { user: 'Provide Uniswap liquidity with up to 10 USDC and 0.005 WETH between 2000 and 4000 USDC per WETH', model: intent.action(act.liquidity({ protocol: 'UNISWAP_V3',
@@ -557,7 +560,8 @@ export const COPILOT_EVAL_CASES: readonly EvalCase[] = [
   { id: 'E13', category: 'language', language: 'PT', turns: [{ user: 'Faz swap de 2 USDC para WETH na Ethereum',
     model: intent.action(act.swap({ network: 'ETHEREUM', inputAsset: 'USDC', outputAsset: 'WETH', amount: '2' }), 'PT'), expect: P('ADD_CRYPTO_ACTION', { sentence: 'swap 2 USDC to WETH on Ethereum slippage 100 bps' }) }] },
   { id: 'E14', category: 'unsupported', language: 'EN', turns: [{ user: 'Supply 1 WETH to Aave on Ethereum Sepolia',
-    model: intent.action(act.lending('SUPPLY', { asset: 'WETH', amount: '1', ...onEthereumSepolia })), expect: Q({ options: ['Base Sepolia', 'Base', 'Arbitrum One', 'Ethereum'] }) }] },
+    // BUILD AAVE-V3-EXPANSION-001: WETH is lent on the three mainnet markets, never on a test network.
+    model: intent.action(act.lending('SUPPLY', { asset: 'WETH', amount: '1', ...onEthereumSepolia })), expect: Q({ options: ['Base', 'Arbitrum One', 'Ethereum'] }) }] },
 
   // ── Stale context and failures ─────────────────────────────────────────────────────────────────────────────────────
   { id: 'Z01', category: 'race', language: 'EN', setup: [FIXTURE.supply], turns: [{ user: 'make it 2', model: intent.edit({ amount: '2' }), race: canvasAddRead,

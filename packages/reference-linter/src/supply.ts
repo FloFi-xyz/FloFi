@@ -8,8 +8,8 @@ export function validateSupplyWorkflow(workflow: SemanticWorkflow) {
       workflow.resourceEdges.some(e => e.fromNodeId === nodes[0]?.nodeId || e.toNodeId === nodes[0]?.nodeId) ||
       workflow.nodes.some(n => n.dependencies.includes(nodes[0]?.nodeId ?? ''))) throw new Error('SUPPLY_ISOLATED_ONLY');
   const fields = action === 'withdraw' ? readWithdrawNode(nodes[0]!) : action === 'repay' ? readRepayNode(nodes[0]!) : action === 'borrow' ? readBorrowNode(nodes[0]!) : readSupplyNode(nodes[0]!);
-  // The authored chain selects the profile; the asset must be that profile's exact asset (chain + address + decimals).
-  const profile = AAVE_V3_LENDING_PROFILES.find(item => item.chain === fields.chain);
+  // The authored chain AND exact asset (chain + address + decimals) select one registered reserve profile (BUILD AAVE-V3-EXPANSION-001).
+  const profile = AAVE_V3_LENDING_PROFILES.find(item => item.chain === fields.chain && item.asset === fields.asset.address);
   if (!profile || fields.asset.chainId !== profile.chain || fields.asset.address !== profile.asset || fields.asset.decimals !== profile.decimals)
     throw new Error('SUPPLY_DEPLOYMENT_UNSUPPORTED');
   return fields;

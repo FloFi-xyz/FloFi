@@ -83,7 +83,7 @@ export function createSupplyHarness(p=AAVE_V3_BASE_SEPOLIA){
       return {number:supplyHex(n),hash:hash(n+1000),parentHash:hash(n+999),transactions:tag==='pending'?[]:transactions.filter(t=>Number(BigInt(t.blockNumber))===n).map(t=>params[1]?t:t.hash)};
     }
     if(method==='eth_getCode')return '0x60016000';
-    if(method==='eth_getStorageAt'&&params[0]===p.pool&&params[1]==='0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc'&&'poolImplementation' in p)return word(p.poolImplementation);
+    if(method==='eth_getStorageAt'&&params[0]===p.pool&&params[1]==='0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc'&&('poolImplementation' in p||'pinnedImplementation' in p))return word(p.poolImplementation??p.pinnedImplementation);
     if(method==='eth_getBalance')return supplyHex(at(params[1]).nativeBalance);
     if(method==='eth_getTransactionCount')return supplyHex(at(params[1]).nonce);
     if(method==='eth_gasPrice')return supplyHex(1_000_000n);

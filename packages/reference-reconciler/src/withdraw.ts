@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import { lendingProfile,reserveBits,readWithdrawState,compileWithdrawCalls,estimateWithdraw,borrowHealthFactor,supplyHex,supplyWord,supplyTopic,supplyHash,supplyArtifactHash,rpcUint,rpcRecord,rpcHash,SUPPLY_METAMASK,type AaveLendingProfile,type SupplyReview,type SupplyState,type SupplyRpc } from '@defi-workflow-engine/reference-compiler';
+import { lendingProfile,reserveBits,assertAccountTotals,accountReconciliation,positionIdentity,readWithdrawState,compileWithdrawCalls,estimateWithdraw,borrowHealthFactor,supplyHex,supplyWord,supplyTopic,supplyHash,supplyArtifactHash,rpcUint,rpcRecord,rpcHash,SUPPLY_METAMASK,type AaveLendingProfile,type SupplyReview,type SupplyState,type SupplyRpc } from '@defi-workflow-engine/reference-compiler';
 import { hashJournalBytes,type EvidenceBundle,type ExecutionJournal } from '@defi-workflow-engine/workflow-contracts';
 import { lendingTransactionCost, verifySupplyWalletEnvelope,logMatches,addressTopic,type SupplyChainAttempt,type SupplyObservation } from './supply.js';
 import { verifyRepayOwnerSignature,type RepayOwnerProof } from './repay.js';
@@ -14,10 +14,20 @@ export function verifyWithdrawEffects(amount:string,pre:SupplyState,post:SupplyS
   if(burn<=0n||BigInt(post.scaledPosition)<=0n||burn!==nearest&&burn!==ceil||abs(normalized-n)>bound||abs(BigInt(pre.position)-(BigInt(pre.scaledPosition)*BigInt(pre.index)+ray/2n)/ray)>1n||abs(BigInt(post.position)-(BigInt(post.scaledPosition)*index+ray/2n)/ray)>1n||BigInt(post.position)>=BigInt(pre.position))throw new Error('WITHDRAW_COLLATERAL_INDEX_MISMATCH');
   const walletDelta=BigInt(post.balance)-BigInt(pre.balance);
   if(walletDelta!==n||pre.allowance!==post.allowance)throw new Error('WITHDRAW_WALLET_BALANCE_MISMATCH');
-  for(const k of ['scaledDebt','reserveConfiguration','userConfiguration','ltvBps','liquidationThresholdBps','eMode','codeHash','variableDebtToken','baseCurrencyUnit'] as const)if(a[k]!==b[k])throw new Error('WITHDRAW_CONFIGURATION_OR_DEBT_MISMATCH');
+  const accountMode=accountReconciliation(profile,a,b);
+  // Withdrawing collateral changes the account-weighted LTV and threshold by design; account mode proves them at each block instead.
+  for(const k of ['scaledDebt','reserveConfiguration','userConfiguration','eMode','codeHash','variableDebtToken','baseCurrencyUnit',...accountMode?[]:['ltvBps','liquidationThresholdBps'] as const] as const)if(a[k]!==b[k])throw new Error('WITHDRAW_CONFIGURATION_OR_DEBT_MISMATCH');
   const debtIndex=BigInt(b.debtIndex),oldIndex=BigInt(a.debtIndex);
   if(debtIndex<oldIndex||debtIndex-oldIndex>oldIndex/1000n+2n||abs(BigInt(b.debt)-(BigInt(b.scaledDebt)*debtIndex+ray/2n)/ray)>1n||abs(BigInt(a.debt)-(BigInt(a.scaledDebt)*oldIndex+ray/2n)/ray)>1n||BigInt(b.debt)<BigInt(a.debt))throw new Error('WITHDRAW_DEBT_INTEREST_MISMATCH');
-  if(abs(BigInt(b.price)-BigInt(a.price))>BigInt(a.price)/1000n||abs(BigInt(b.collateralBase)-BigInt(post.position)*BigInt(b.price)/scale)>2n||abs(BigInt(a.collateralBase)-BigInt(pre.position)*BigInt(a.price)/scale)>2n||abs(BigInt(b.debtBase)-BigInt(b.debt)*BigInt(b.price)/scale)>2n)throw new Error('WITHDRAW_ACCOUNT_MISMATCH');
+  if(positionIdentity(a)!==positionIdentity(b))throw new Error('WITHDRAW_ACCOUNT_MISMATCH');
+  // Account mode (BUILD AAVE-V3-EXPANSION-001) proves the aggregates from every verified position at each block.
+  if(accountMode){try{assertAccountTotals(pre.position,a,profile);assertAccountTotals(post.position,b,profile);}catch{throw new Error('WITHDRAW_ACCOUNT_MISMATCH');}}
+  else{
+    // A reserve supplied without collateral contributes nothing to the account's collateral.
+    const collateral=Boolean(BigInt(b.userConfiguration)&reserveBits(profile).collateral);
+    if(abs(BigInt(b.price)-BigInt(a.price))>BigInt(a.price)/1000n||abs(BigInt(b.collateralBase)-(collateral?BigInt(post.position)*BigInt(b.price)/scale:0n))>2n||
+        abs(BigInt(a.collateralBase)-(collateral?BigInt(pre.position)*BigInt(a.price)/scale:0n))>2n||abs(BigInt(b.debtBase)-BigInt(b.debt)*BigInt(b.price)/scale)>2n)throw new Error('WITHDRAW_ACCOUNT_MISMATCH');
+  }
   const health=BigInt(borrowHealthFactor(b.collateralBase,b.liquidationThresholdBps,b.debtBase));
   if(BigInt(b.healthFactor)<2n*10n**18n||abs(BigInt(b.healthFactor)-health)>health/1000000n+1n)throw new Error('WITHDRAW_HEALTH_FACTOR_MISMATCH');
   estimateWithdraw(amount,pre,profile);
@@ -48,7 +58,7 @@ export async function reconcileWithdrawAttempt(review:SupplyReview,attempt:Suppl
   const base:WithdrawObservation={verdict:'INCONCLUSIVE',reason:'TRANSACTION_NOT_OBSERVED',transaction:null,receipt:null,prePosition:null,postPosition:null,delta:null,scaledDelta:null,cost:null};
   if(!attempt.transactionHash)return base;
   try{
-    const p=lendingProfile(review.chain,'WITHDRAW_WRONG_CHAIN');
+    const p=lendingProfile(review.chain,'WITHDRAW_WRONG_CHAIN',review.asset);
     if(rpcUint(await rpc('eth_chainId',[]))!==BigInt(p.chainId))throw new Error('WITHDRAW_WRONG_CHAIN');
     const [txValue,receiptValue]=await Promise.all([rpc('eth_getTransactionByHash',[attempt.transactionHash]),rpc('eth_getTransactionReceipt',[attempt.transactionHash])]);
     if(!txValue||!receiptValue)return base;
@@ -95,7 +105,7 @@ export async function reconcileWithdrawAttempt(review:SupplyReview,attempt:Suppl
 export function buildWithdrawEvidence(input:{id:string;review:SupplyReview;journal:ExecutionJournal;provenance:'PUBLIC_TESTNET'|'PUBLIC_MAINNET'|'MOCKED';ownerInitiated:boolean;observations:SupplyObservation[]}){
   const r=input.review,o=input.observations.at(-1) as WithdrawObservation|undefined;
   if(!r.withdraw||!o||o.verdict!=='RECONCILED'||!o.prePosition?.borrow||!o.postPosition?.borrow||!o.transaction||!o.receipt||!o.withdrawEvent||!(o.ownerAuthorization||o.walletEnvelope)||!input.ownerInitiated)throw new Error('WITHDRAW_EVIDENCE_NOT_RECONCILED');
-  const p=lendingProfile(r.chain,'WITHDRAW_EVIDENCE_NOT_RECONCILED'),effects=verifyWithdrawEffects(r.amount,o.prePosition,o.postPosition,p);
+  const p=lendingProfile(r.chain,'WITHDRAW_EVIDENCE_NOT_RECONCILED',r.asset),effects=verifyWithdrawEffects(r.amount,o.prePosition,o.postPosition,p);
   const publicExecution={network:p.network,chainId:p.chainId,owner:r.account,recipient:r.beneficiary,pool:p.pool,asset:p.asset,aToken:p.aToken,amount:r.amount,withdrawTransactionHash:o.receipt.transactionHash,ownerAuthorization:o.ownerAuthorization??o.walletEnvelope,block:o.postPosition.block,transactionCost:o.cost,totalNetworkCost:o.cost,...effects,prePosition:o.prePosition,postPosition:o.postPosition,observations:input.observations,provenance:input.provenance,ownerInitiated:true};
   const head=hashJournalBytes(new TextEncoder().encode(JSON.stringify(input.journal))).at(-1);if(!head)throw new Error('WITHDRAW_JOURNAL_EMPTY');
   const asset={chainId:p.chain,address:p.asset,decimals:p.decimals};

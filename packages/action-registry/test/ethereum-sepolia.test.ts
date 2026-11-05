@@ -49,7 +49,10 @@ describe('Ethereum Sepolia assets', () => {
 describe('Aave V3 lending profiles', () => {
   it('select by CAIP-2 chain: Base Sepolia USDC (reserve 0) and Ethereum Sepolia WBTC (reserve 3, 8 decimals)', () => {
     // BUILD-BASE-001 appends Base mainnet (USDC); the testnet profiles keep their order and identity.
-    expect(AAVE_V3_LENDING_PROFILES).toEqual([AAVE_V3_BASE_SEPOLIA, AAVE_V3_ETHEREUM_SEPOLIA, AAVE_V3_BASE, AAVE_V3_ARBITRUM, AAVE_V3_ETHEREUM]);
+    // BUILD AAVE-V3-EXPANSION-001: each mainnet market lists all its reserves after its verified native-USDC profile; the testnets are unchanged.
+    expect(AAVE_V3_LENDING_PROFILES.slice(0, 2)).toEqual([AAVE_V3_BASE_SEPOLIA, AAVE_V3_ETHEREUM_SEPOLIA]);
+    expect([...new Set(AAVE_V3_LENDING_PROFILES.map(profile => profile.chain))]).toEqual([AAVE_V3_BASE_SEPOLIA, AAVE_V3_ETHEREUM_SEPOLIA, AAVE_V3_BASE, AAVE_V3_ARBITRUM, AAVE_V3_ETHEREUM].map(p => p.chain));
+    for (const legacy of [AAVE_V3_BASE, AAVE_V3_ARBITRUM, AAVE_V3_ETHEREUM]) expect(AAVE_V3_LENDING_PROFILES.find(profile => profile.chain === legacy.chain)).toBe(legacy);
     expect(aaveLendingProfile('eip155:84532')).toBe(AAVE_V3_BASE_SEPOLIA);
     expect(aaveLendingProfile(ETH)).toBe(AAVE_V3_ETHEREUM_SEPOLIA);
     expect(AAVE_V3_BASE_SEPOLIA).toMatchObject({ reserveId: 0, decimals: 6, symbol: 'USDC', l1DataFee: true });

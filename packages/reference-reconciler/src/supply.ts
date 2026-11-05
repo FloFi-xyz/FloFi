@@ -82,7 +82,7 @@ export async function verifySupplyWalletEnvelope(review:Pick<SupplyReview,'accou
 }
 /** Chain-correct paid cost within the frozen per-call envelope. Nitro includes posting gas in gasUsed. */
 export function lendingTransactionCost(review:SupplyReview,tx:Record<string,unknown>,receipt:Record<string,unknown>,index:number):string {
-  const profile=lendingProfile(review.chain,'SUPPLY_WRONG_CHAIN');
+  const profile=lendingProfile(review.chain,'SUPPLY_WRONG_CHAIN',review.asset);
   if ((receipt.l1Fee===undefined)===profile.l1DataFee || profile.chainId===42161 &&
       tx.maxPriorityFeePerGas!==undefined && rpcUint(tx.maxPriorityFeePerGas)!==0n) throw new Error('SUPPLY_NETWORK_COST_MISMATCH');
   const l1=profile.l1DataFee?rpcUint(receipt.l1Fee):0n,buffer=profile.l1DataFee?10_000_000_000_000n:0n;
@@ -99,7 +99,7 @@ export async function reconcileSupplyAttempt(review: SupplyReview, attempt: Supp
   if (!attempt.transactionHash) return base;
   try {
     // The reviewed chain selects the deployment; the RPC and the reviewed transaction must both be on it.
-    const profile=lendingProfile(review.chain,'SUPPLY_WRONG_CHAIN');
+    const profile=lendingProfile(review.chain,'SUPPLY_WRONG_CHAIN',review.asset);
     if (rpcUint(await rpc('eth_chainId',[]))!==BigInt(profile.chainId)||attempt.transaction.chainId!==profile.chainHex) throw new Error('SUPPLY_WRONG_CHAIN');
     const [txValue,receiptValue]=await Promise.all([rpc('eth_getTransactionByHash',[attempt.transactionHash]),rpc('eth_getTransactionReceipt',[attempt.transactionHash])]);
     if (!txValue || !receiptValue) return base;
@@ -156,7 +156,7 @@ export function buildSupplyEvidence(input:{id:string;review:SupplyReview;journal
   const supply=input.observations.at(-1), approval=input.approval??(input.review.approvalRequired?input.observations.find(o=>o.verdict==='RECONCILED'):null);
   if (!supply||supply.verdict!=='RECONCILED'||!supply.prePosition||!supply.postPosition||!supply.receipt||!supply.transaction||
       (input.review.approvalRequired&&approval?.verdict!=='RECONCILED') || !input.ownerInitiated) throw new Error('SUPPLY_EVIDENCE_NOT_RECONCILED');
-  const profile=lendingProfile(input.review.chain,'SUPPLY_EVIDENCE_NOT_RECONCILED');
+  const profile=lendingProfile(input.review.chain,'SUPPLY_EVIDENCE_NOT_RECONCILED',input.review.asset);
   const publicExecution={network:profile.network,chainId:profile.chainId,explorer:profile.explorer,officialSource:profile.officialSource,
     account:input.review.account,beneficiary:input.review.beneficiary,pool:profile.pool,token:profile.asset,aToken:profile.aToken,amount:input.review.amount,
     approvalTransactionHash:approval?.receipt?.transactionHash??null,approvalNonce:approval?.walletEnvelope?.relayNonce??(approval?.transaction?rpcUint(approval.transaction.nonce).toString():null),approvalBlock:approval?.receipt?Number(rpcUint(approval.receipt.blockNumber)):null,approvalEnvelope:approval?.walletEnvelope??null,supplyNonce:supply.walletEnvelope?.relayNonce??rpcUint(supply.transaction.nonce).toString(),supplyEnvelope:supply.walletEnvelope??null,supplyTransactionHash:supply.receipt.transactionHash,

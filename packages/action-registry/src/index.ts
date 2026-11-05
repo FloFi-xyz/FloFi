@@ -218,6 +218,7 @@ export function checkActionCompatibility(
 }
 
 export * from './aave-v3-testnet.js';
+export * from './aave-v3-reserves.generated.js';
 export * from './orca-liquidity-devnet.js';
 export * from './orca-liquidity-mainnet.js';
 export * from './orca-liquidity-profiles.js';

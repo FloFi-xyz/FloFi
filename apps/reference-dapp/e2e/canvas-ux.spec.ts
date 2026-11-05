@@ -101,6 +101,20 @@ test('dragging updates stored layout, survives editor changes and Build navigati
   const position = await returned.evaluate(element => getComputedStyle(element).transform);
   expect(Number(position.match(/matrix\([^,]+,[^,]+,[^,]+,[^,]+, ([^,]+)/)?.[1])).toBeCloseTo(saved.x, 2);
 });
+/**
+ * BUILD AAVE-V3-EXPANSION-001: a step added after another is linked to it automatically. Tests that author or inspect their own links first
+ * remove that automatic link through the same edge selection and Delete an owner uses.
+ */
+async function removeAutoLink(page: Page, source: string, target: string) {
+  const edge = page.locator(`.build-flow-surface .react-flow__edge[data-id="${source}-${target}"]`);
+  await expect(edge).toBeVisible();
+  const point = await edge.locator('.react-flow__edge-interaction').evaluate((path: SVGPathElement) => {
+    const at = path.getPointAtLength(path.getTotalLength() / 2), m = path.getScreenCTM()!;
+    return { x: at.x * m.a + at.y * m.c + m.e, y: at.x * m.b + at.y * m.d + m.f };
+  });
+  await page.mouse.click(point.x, point.y); await page.keyboard.press('Delete');
+  await expect(edge).toHaveCount(0);
+}
 test('node and edge selection, deletion, text entry and composition guards', async ({ page }) => {
   await openBuilder(page);
   await addFromToolbox(page, 'swap');
@@ -125,6 +139,7 @@ test('node and edge selection, deletion, text entry and composition guards', asy
   const replacement = await addFromToolbox(page, 'swap');
   const targetId = await replacement.getAttribute('data-id');
   if (!targetId) throw new Error('Replacement node missing');
+  await removeAutoLink(page, sourceId, targetId);
   const revision = await page.locator('.summary-bar').getAttribute('data-workflow-revision');
   await connect(page, sourceId, targetId);
   await expect(page.locator('.react-flow__edge')).toHaveCount(1);
@@ -181,6 +196,7 @@ test('duplicate selection copies independent swaps in one undoable edit', async 
   await addFromToolbox(page, 'swap');
   await addFromToolbox(page, 'swap');
   await addFromToolbox(page, 'swap');
+  await removeAutoLink(page, 'node-003', 'node-004'); await removeAutoLink(page, 'node-002', 'node-003');
   await page.locator('.react-flow__node[data-id="node-002"] .composer-action-title').click();
   await page.locator('.react-flow__node[data-id="node-003"] .composer-action-title').click({ modifiers: ['Shift'] });
   await page.getByRole('button', { name: 'Duplicate selection' }).click();
@@ -263,6 +279,7 @@ test('drag keeps node mounted and cyclic connections leave semantic edges unchan
   await openBuilder(page);
   await addFromToolbox(page, 'swap');
   await addFromToolbox(page, 'swap');
+  await removeAutoLink(page, 'node-002', 'node-003');
   // Move the left card away from its neighbour so both real handles stay reachable.
   const node = page.locator('.react-flow__node[data-id="node-002"]');
   await node.evaluate(element => { (window as unknown as { draggedNode?: Element }).draggedNode = element; });

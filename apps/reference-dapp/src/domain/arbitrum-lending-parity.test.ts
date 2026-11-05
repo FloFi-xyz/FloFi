@@ -40,14 +40,18 @@ describe('Arbitrum canonical lending authoring parity',()=>{
     const result=await client.callTool('compose_strategy',{strategy});expect(result.isError).toBe(false);expect(result.output).toMatchObject({ok:true,workflowHash:composed.workflowHash});
     expect(previewPlan(strategy)).toEqual({flow:'arbitrum-aave',subject:'EVM'});expect(strategyFlow(strategy)).toBe('arbitrum-aave');
   });
-  it('all actions derive support from the registered one-reserve profile, with no demonstrated public execution',()=>{
+  // BUILD AAVE-V3-EXPANSION-001: every registered reserve of the Arbitrum market (USDC first); no other network or token is reachable.
+  it('all actions derive support from the registered Arbitrum reserves, with no demonstrated public execution',()=>{
     for(const action of ['supply','borrow','repay','withdraw'] as const){
-      expect(lendingOffers(action).find(offer=>offer.network.chain==='eip155:42161')?.asset).toBe('USDC');
+      const arbitrum=lendingOffers(action).filter(offer=>offer.network.chain==='eip155:42161').map(offer=>offer.asset);
+      expect(arbitrum[0]).toBe('USDC');expect(arbitrum).toHaveLength(20);expect(arbitrum).toEqual(expect.arrayContaining(['WETH','WBTC','ARB','USDC.e','GHO']));
       expect(capabilityNetworks(action).some(n=>n.key==='arbitrum-one')).toBe(true);
       expect(codeCapabilities('ENGINEERING').find(c=>c.network==='arbitrum-one'&&c.action===action)).toMatchObject({ownerWalletExecutionImplemented:true,demonstratedEvidence:null});
     }
-    expect(()=>lendingProfileFor('Arbitrum One','WBTC')).toThrow('UNSUPPORTED');
+    expect(lendingProfileFor('Arbitrum One','WBTC')).toMatchObject({asset:'0x2f2a2543b76a4166549f7aab2e75bef0aefc5b0f',decimals:8});
+    expect(()=>lendingProfileFor('Arbitrum One','cbBTC')).toThrow('UNSUPPORTED');
     expect(()=>lendingProfileFor('Arbitrum Sepolia','USDC')).toThrow('UNSUPPORTED');
-    expect(composeStrategy({action:'borrow',network:'arbitrum-one',asset:'WBTC',amount:'1',beneficiary:'0x'+'1'.repeat(40)})).toMatchObject({ok:false});
+    expect(composeStrategy({action:'borrow',network:'arbitrum-one',asset:'WBTC',amount:'1',beneficiary:'0x'+'1'.repeat(40)})).toMatchObject({ok:true});
+    expect(composeStrategy({action:'borrow',network:'arbitrum-one',asset:'cbBTC',amount:'1',beneficiary:'0x'+'1'.repeat(40)})).toMatchObject({ok:false});
   });
 });
