@@ -3898,7 +3898,8 @@
       ],
       "sharedFinancialCore": false,
       "sources": [
-        "scripts/router-readonly-preflight.mjs"
+        "scripts/router-readonly-preflight.mjs",
+        "scripts/workflow-grant-mainnet-probe.mjs"
       ],
       "suites": [
         "app.server.router-service",
