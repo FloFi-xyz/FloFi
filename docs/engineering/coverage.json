@@ -889,6 +889,30 @@
     "app.components.site.typing-text": {
       "path": "apps/reference-dapp/src/components/site/typing-text.test.ts",
       "stage": "unit"
+    },
+    "app.editor.approval": {
+      "path": "apps/reference-dapp/src/editor/approval.test.ts",
+      "stage": "unit"
+    },
+    "app.editor.workflow-strategy": {
+      "path": "apps/reference-dapp/src/editor/workflow-strategy.test.ts",
+      "stage": "unit"
+    },
+    "app.editor.editor-run.pg": {
+      "path": "apps/reference-dapp/src/editor/editor-run.pg.test.ts",
+      "stage": "postgres"
+    },
+    "app.domain.editor-run": {
+      "path": "apps/reference-dapp/src/domain/editor-run.test.ts",
+      "stage": "unit"
+    },
+    "app.e2e.editor-workflow-run": {
+      "path": "apps/reference-dapp/e2e/editor-workflow-run.spec.ts",
+      "stage": "browser"
+    },
+    "cloud-runtime.editor-requester-migration.pg": {
+      "path": "packages/cloud-runtime/test/editor-requester-migration.pg.test.ts",
+      "stage": "postgres"
     }
   },
   "requiredUnitSuites": [
@@ -2196,7 +2220,8 @@
         "packages/cloud-runtime/migrations/0015_workflow_runs.sql",
         "packages/cloud-runtime/migrations/0016_owner_history_purge.sql",
         "packages/cloud-runtime/migrations/0017_copilot_metrics.sql",
-        "packages/cloud-runtime/src/owner-history.ts"
+        "packages/cloud-runtime/src/owner-history.ts",
+        "packages/cloud-runtime/migrations/0021_editor_requester.sql"
       ],
       "suites": [
         "app.learning.automatic",
@@ -2205,7 +2230,8 @@
         "cloud-runtime.copilot-metrics-migration.pg",
         "cloud-runtime.forward-compatibility.pg",
         "cloud-runtime.migration-manifest",
-        "cloud-runtime.tenancy.pg"
+        "cloud-runtime.tenancy.pg",
+        "cloud-runtime.editor-requester-migration.pg"
       ],
       "gaps": [
         "Disposable PostgreSQL does not establish hosted Neon operational compatibility, retention operations or legal LGPD compliance."
@@ -2564,7 +2590,8 @@
         "apps/reference-dapp/src/components/editor-overview-panel.tsx",
         "apps/reference-dapp/src/components/canvas-edge-style.ts",
         "apps/reference-dapp/src/components/editor-stepper.tsx",
-        "apps/reference-dapp/src/components/workflow-records.module.css"
+        "apps/reference-dapp/src/components/workflow-records.module.css",
+        "apps/reference-dapp/src/components/editor-run-action.tsx"
       ],
       "suites": [
         "app.components.canvas-panel-reveal",
@@ -2581,7 +2608,8 @@
         "app.components.editor-stepper",
         "app.domain.editor-overview",
         "app.e2e.editor-redesign",
-        "app.e2e.portfolio-ux004"
+        "app.e2e.portfolio-ux004",
+        "app.e2e.editor-workflow-run"
       ],
       "gaps": [
         "Browser profiles cover selected journeys; full accessibility audit, device matrix and language completeness remain acceptance gaps."
@@ -3456,7 +3484,8 @@
         "apps/reference-dapp/src/domain/landed-attempts.ts",
         "apps/reference-dapp/src/domain/wallet-portfolio.ts",
         "apps/reference-dapp/src/domain/node-declaration.ts",
-        "apps/reference-dapp/src/domain/sequence-restore.ts"
+        "apps/reference-dapp/src/domain/sequence-restore.ts",
+        "apps/reference-dapp/src/domain/editor-run.ts"
       ],
       "suites": [
         "action-registry.engineering-regression",
@@ -3471,11 +3500,41 @@
         "app.domain.canonical-execution-status",
         "app.domain.observation-schedule",
         "app.domain.wallet-portfolio",
-        "app.domain.editor-overview"
+        "app.domain.editor-overview",
+        "app.domain.editor-run"
       ],
       "gaps": [
         "Mapped suites are representative boundary tests, not exhaustive path or public execution coverage.",
         "Mapped fork suites include existing owner-gated cases that may skip; a successful stage is not proof those optional cases ran."
+      ]
+    },
+    {
+      "id": "editor--workflow",
+      "primary": "flofi-workflow",
+      "dependencies": [
+        "flofi-data-privacy",
+        "flofi-frontend-ux",
+        "flofi-security",
+        "flofi-wallet-execution"
+      ],
+      "sharedFinancialCore": true,
+      "sources": [
+        "apps/reference-dapp/src/app/editor-run-action.ts",
+        "apps/reference-dapp/src/editor/approval.ts",
+        "apps/reference-dapp/src/editor/link-format.ts",
+        "apps/reference-dapp/src/editor/workflow-strategy.ts"
+      ],
+      "suites": [
+        "app.e2e.editor-workflow-run",
+        "app.editor.approval",
+        "app.editor.editor-run.pg",
+        "app.editor.workflow-strategy",
+        "app.workflow-runs.confirm-run.pg",
+        "cloud-runtime.editor-requester-migration.pg"
+      ],
+      "gaps": [
+        "The browser suite certifies the Editor's \"Run workflow\" on loopback with a passive wallet up to the pending EDITOR_SESSION approval on /approve; the claim by an account wallet and the run to completion are certified on disposable PostgreSQL with MOCKED owner flow runs (editor-run.pg), never as a public execution.",
+        "A Canvas step whose canonical IR the engine does not reproduce exactly (or that no authoring command expresses) is refused, never approximated; such workflows keep the step-by-step Editor path."
       ]
     },
     {
@@ -3575,7 +3634,8 @@
         "apps/reference-dapp/src/i18n/pt-chat-dashboard.ts",
         "apps/reference-dapp/src/i18n/pt-portfolio.ts",
         "apps/reference-dapp/src/i18n/pt-builder-canvas.ts",
-        "apps/reference-dapp/src/i18n/pt-aave-expansion.ts"
+        "apps/reference-dapp/src/i18n/pt-aave-expansion.ts",
+        "apps/reference-dapp/src/i18n/pt-editor-runs.ts"
       ],
       "suites": [
         "app.e2e.canvas-keyboard",

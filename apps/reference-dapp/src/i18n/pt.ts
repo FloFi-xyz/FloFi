@@ -40,11 +40,14 @@ import { portugueseWallet } from './pt-wallet';
 import { portuguesePrivy } from './pt-privy';
 import { portugueseBuilderCanvas } from './pt-builder-canvas';
 import { portugueseAaveExpansion } from './pt-aave-expansion';
+import { portugueseEditorRuns } from './pt-editor-runs';
 /** English source messages are stable presentation keys. Technical identifiers never enter this catalog. */
 export const portuguese: Readonly<Record<string, string>> = {
   // BUILD-FLOFI-BUILDER-UX-002: new keys only, first so every existing translation of a shared word still wins.
   ...portugueseBuilderCanvas,
   ...portugueseAaveExpansion,
+  // BUILD-FLOFI-UNIVERSAL-SINGLE-AUTH-MAINNET-001: the Editor's "Run workflow" (new keys only).
+  ...portugueseEditorRuns,
   // BUILD-FLOFI-CHAT-E2E-DASHBOARD-UX-001: the wallet portfolio widget, first so every existing translation of a shared word still wins.
   ...portuguesePortfolio,
   // BUILD-FLOFI-E2E-RELIABILITY-001 (#149): new keys only, first so every existing translation still wins.

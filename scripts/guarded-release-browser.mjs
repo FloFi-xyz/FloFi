@@ -111,7 +111,9 @@ const definitions = [
     FLOFI_SWAP_READ_E2E: 'MOCKED_LOOPBACK_ONLY', FLOFI_SWAP_EXECUTION_E2E: 'MOCKED_LOOPBACK_ONLY', TEST_DATABASE_URL: process.env.TEST_DATABASE_URL ?? 'postgres://flofi@127.0.0.1:5432/postgres' }],
   // BUILD-CHAT-E2E-001: a two-step workflow from an MCP request, one approval, each step signed on /approve after the previous one reconciled,
   // on the same MCP harness and synthetic loopback swap RPC with workflow runs enabled (confirm each step; no delegated signer exists here).
-  ['approve-workflow-run', ['approve-workflow-run.spec.ts'], { GRYLOO_MCP_E2E: 'EMBEDDED_LOOPBACK_ONLY', GRYLOO_CLOUD_RUNTIME_E2E: 'EMBEDDED_LOOPBACK_ONLY',
+  // BUILD-FLOFI-UNIVERSAL-SINGLE-AUTH-MAINNET-001: the same harness also certifies the Editor's "Run workflow" (a simulated multi-step Canvas
+  // workflow of a signed-in account starts that same run on /approve; a passive wallet is never asked for anything).
+  ['approve-workflow-run', ['approve-workflow-run.spec.ts', 'editor-workflow-run.spec.ts'], { GRYLOO_MCP_E2E: 'EMBEDDED_LOOPBACK_ONLY', GRYLOO_CLOUD_RUNTIME_E2E: 'EMBEDDED_LOOPBACK_ONLY',
     FLOFI_SWAP_READ_E2E: 'MOCKED_LOOPBACK_ONLY', FLOFI_SWAP_EXECUTION_E2E: 'MOCKED_LOOPBACK_ONLY', FLOFI_WORKFLOW_RUNS: 'enabled',
     TEST_DATABASE_URL: process.env.TEST_DATABASE_URL ?? 'postgres://flofi@127.0.0.1:5432/postgres' }],
   // BUILD-CROSSCHAIN-UNIVERSAL-001: the universal Cross-chain Router (Solana ⇄ EVM mainnets, Canvas card, chat, Review, one owner signature, verified

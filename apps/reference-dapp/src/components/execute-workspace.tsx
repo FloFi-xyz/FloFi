@@ -28,6 +28,11 @@ export type ExecuteWorkspaceProps = ExecutionWorkspaceState & {
   /** BUILD0-UX-001: opens the Dashboard, where the run's full record is kept. */
   openDashboard?: () => void;
   /**
+   * BUILD-FLOFI-UNIVERSAL-SINGLE-AUTH-MAINNET-001: "Run workflow" — a multi-step Canvas workflow starts the shared workflow run on `/approve`
+   * (shown under the status, beside the step-by-step path). It never asks the wallet for anything here.
+   */
+  workflowRun?: ReactNode;
+  /**
    * BUILD-FLOFI-CHAT-E2E-FIX-002: the public chat-first workspace, where the chat presents progress and reconciliation, so there is no third column
    * beside the chat. BUILD0-UX-001: the status, what needs the owner's action and the navigation stay visible under the timeline (no "Result
    * details" disclosure); wallet, network and cost details are in the Dashboard.
@@ -97,6 +102,7 @@ export function ExecuteWorkspace(props: ExecuteWorkspaceProps) {
         </dl>
         {live?.active && <section className="execute-next" aria-label={tr("Current step")}><h3>{tr(result ? 'Needs attention' : 'Current step')}</h3><p>{tr(live.active.number)}. {tr(live.active.action)}</p><p>{tr([live.active.provider, live.active.network].filter(Boolean).join(' · '))}</p><p>{tr(live.active.label)}</p></section>}
         {notices}
+        {!live && props.workflowRun}
         <div className="execute-actions simulation-workspace-actions">
           {stageActions}
           {back}
@@ -112,6 +118,7 @@ export function ExecuteWorkspace(props: ExecuteWorkspaceProps) {
     {live && <p className="execution-status-progress">{result ? <>{tr(result.countLabel)} · <span className="numeric">{tr(result.completed)}{tr(" of ")}{tr(result.total)}</span></>
       : tr('{0} of {1} steps confirmed', live.completed, live.steps.length)}</p>}
     {notices}
+    {!live && props.workflowRun}
     <div className="execute-actions simulation-workspace-actions execution-status-actions">
       {stageActions}
       {back}

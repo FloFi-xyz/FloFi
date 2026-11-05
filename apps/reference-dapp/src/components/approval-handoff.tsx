@@ -24,6 +24,7 @@ import { createPortal } from 'react-dom';
 import { approvalHandoffPreview, approvalHandoffView, claimApprovalHandoff, markApprovalApplied, openBrowserApprovalHandoff, resumeApprovalHandoff, setApprovalSharing } from '../app/approve-action';
 import { DEVELOPER_LINK_PREFIX } from '../developer/link-format';
 import { AUTOMATION_LINK_PREFIX } from '../automations/link-format';
+import { EDITOR_LINK_PREFIX } from '../editor/link-format';
 import type { ApprovalPreview } from '../platform/approve';
 import { APPROVAL_SECRET_FORMAT } from '../platform/approval-link-format';
 import { walletDeepLinks } from '../platform/wallet-links';
@@ -52,6 +53,7 @@ const CLAIM_TEXT: Record<string, string> = {
   CHANNEL_INTENDED_WALLET_MISMATCH: 'This proposal was prepared for another wallet. Connect the wallet it names to load it.',
   HANDOFF_ALREADY_CLAIMED: 'Another wallet already opened this proposal. Ask for a new proposal.',
   AUTOMATION_OWNER_MISMATCH: 'This automation belongs to another wallet. Connect the wallet that owns it.',
+  EDITOR_WALLET_NOT_IN_ACCOUNT: 'This wallet does not belong to the FloFi account that started this workflow. Connect one of that account\'s wallets.',
 };
 function unwrap<T>(result: { ok: true; value: T } | { ok: false; code: string }): T { if (!result.ok) throw new Error(result.code); return result.value; }
 /**
@@ -283,13 +285,16 @@ export function ApprovalHandoff({ slot = null, surface = 'canvas', onSurfaceChan
   const fromApp = view ? view.requesterKind === 'DEVELOPER_PROJECT' : secret?.startsWith(DEVELOPER_LINK_PREFIX) === true;
   // BUILD-AUTOMATION-001: a proposal the owner's own automation prepared, opened from FloFi → Automations.
   const fromAutomation = view ? view.requesterKind === 'AUTOMATION_RULE' : secret?.startsWith(AUTOMATION_LINK_PREFIX) === true;
+  // BUILD-FLOFI-UNIVERSAL-SINGLE-AUTH-MAINNET-001: a workflow the owner started from their own Editor ("Run workflow").
+  const fromEditor = view ? view.requesterKind === 'EDITOR_SESSION' : secret?.startsWith(EDITOR_LINK_PREFIX) === true;
   // An automation's proposal is opened from inside FloFi (Automations) and keeps the Canvas presentation.
   useEffect(() => { if (fromAutomation && surface === 'signing') onSurfaceChange?.('canvas'); }, [fromAutomation, surface, onSurfaceChange]);
   if (closed) return <McpRouteState label="Approval" title="Approval closed" description={fromAutomation
     ? 'Closing this page grants no transaction authority. While the proposal is still waiting for you, open it again from FloFi → Automations.'
     : 'Return to the conversation that sent you here. Closing this page grants no transaction authority. You can reopen an unused link; ask for a new link if it has expired.'}/>;
   if (!resolved) return <McpRouteState label="Approval" title={tr("Opening your approval")} loading
-    description={fromAutomation ? 'Getting the proposal your automation prepared…' : fromApp ? 'Getting the proposal from the app that sent you this link…' : 'Getting the proposal from your connected assistant…'}/>;
+    description={fromAutomation ? 'Getting the proposal your automation prepared…' : fromEditor ? 'Getting the workflow you started in the Editor…'
+      : fromApp ? 'Getting the proposal from the app that sent you this link…' : 'Getting the proposal from your connected assistant…'}/>;
   if (!view && error && /^APPROVAL_(EXPIRED|REVOKED|SUPERSEDED|STALE)$/.test(error)) return <McpRouteState label="Approval"
     title="This approval is no longer available" description={fromAutomation ? 'Open the proposal again from FloFi → Automations if it is still waiting for you.'
       : 'Return to the conversation that sent this link and ask for a new proposal.'}/>;
@@ -310,6 +315,7 @@ export function ApprovalHandoff({ slot = null, surface = 'canvas', onSurfaceChan
   }
   if (!available) return <McpRouteState label="Approval" title={tr("This approval is no longer available")}
     description={fromAutomation ? 'Open the proposal again from FloFi → Automations if it is still waiting for you.'
+      : fromEditor ? 'Start the workflow again from the FloFi Editor if it is still on your Canvas.'
       : fromApp ? 'Ask the app that sent this link to prepare a new FloFi approval link.' : 'Ask your connected assistant to prepare a new FloFi approval link.'}/>;
   if (!slot) return null;
   const real = view.fundsClass === 'REAL_FUNDS', shown = error;
@@ -365,12 +371,13 @@ export function ApprovalHandoff({ slot = null, surface = 'canvas', onSurfaceChan
     {otherNamespace && !claimed && <p className="muted">{tr('This workflow uses an EVM wallet and a Solana wallet: both must be proven before it starts.')}</p>}
     {view.workflowRun && <WorkflowRunPanel claim={view.workflowRun} approvalId={view.approvalId} secret={secret && SECRET.test(secret) ? secret : null}
       onProposal={onRunProposal} onError={setError}/>}
-    {!fromAutomation && <label className="approval-share"><input type="checkbox" disabled={busy || Boolean(recovery)} checked={claimed ? view.statusShared : share === true}
+    {!fromAutomation && !fromEditor && <label className="approval-share"><input type="checkbox" disabled={busy || Boolean(recovery)} checked={claimed ? view.statusShared : share === true}
       onChange={e => toggleShare(e.target.checked)}/>{tr("Share status and evidence with {0}", view.clientName)}</label>}
     <details className="approval-details"><summary>{tr('Proposal details')}</summary>
       {facts}
       <p className="muted approval-ai">{view.requesterKind === 'DEVELOPER_PROJECT'
         ? tr("Created by {0}, a third-party app registered with FloFi, not by FloFi. It is not financial advice; you decide, and only your wallet can sign.", view.clientName)
+        : fromEditor ? tr('Started by you from the FloFi Editor. It is not financial advice; you decide, and only your wallet can sign.')
         : tr("Proposed with an AI assistant from your conversation. It is not financial advice; you decide, and only your wallet can sign.")}</p>
       {(view.summary || view.explanation.length > 0) && <details><summary>{tr('Technical explanation')}</summary>
         {view.summary && <p className="approval-summary">{tr(view.summary)}</p>}
