@@ -145,8 +145,6 @@ function ExecutionCredentialsPanel({ access }: { access: DelegationAccess }) {
   const { overview, code, refresh } = useOverview(owner, proven), { busy, run, messages } = useRunner(refresh);
   const solanaProof = useWalletProof(owner ? 'solana' : null);
   const [network, setNetwork] = useState<'base-sepolia' | 'ethereum-sepolia' | 'solana-devnet' | 'arbitrum-one'>('base-sepolia'), [cap, setCap] = useState('100'), [calls, setCalls] = useState('40');
-  // BUILD-FLOFI-SINGLE-AUTH-WORKFLOW-UX-001: Aave V3 limits per call (Arbitrum One, only where this deployment opted it in).
-  const [supplyCap, setSupplyCap] = useState('0.01'), [borrowCap, setBorrowCap] = useState('5');
   const [amount, setAmount] = useState('20'), [expires, setExpires] = useState(plusMonths(3));
   // PR #76: a wallet signature obtained under one wallet authority epoch is submitted only under that same epoch.
   const epoch = useWalletAuthorityEpoch(), shared = useJupiter().session;
@@ -166,7 +164,6 @@ function ExecutionCredentialsPanel({ access }: { access: DelegationAccess }) {
       const input = solana ? { mechanism: 'SOLANA_SPL_DELEGATE_V1', walletAddress, network, tokens: [{ symbol: 'devUSDC', amount }], expiresAt: `${expires}T23:59:00Z`,
         passkeyId: passkey.passkeyId, label: 'Solana wallet' }
         : { mechanism: 'EVM_ERC7710_METAMASK_V1_3', walletAddress, network, pairs: [{ input: 'USDC', output: 'WETH', perCallCap: cap }], maxCalls: Number(calls),
-          ...network === 'arbitrum-one' ? { aave: { supply: [{ asset: 'WETH', perCallCap: supplyCap }], borrow: [{ asset: 'USDC', perCallCap: borrowCap }] } } : {},
           expiresAt: `${expires}T23:59:00Z`, passkeyId: passkey.passkeyId, label: 'EVM wallet' };
       const prepared = await credentialPrepare(owner!, input);
       if (!prepared.ok) return prepared;
@@ -204,11 +201,7 @@ function ExecutionCredentialsPanel({ access }: { access: DelegationAccess }) {
         </> : <>
           <label className="automation-field"><span>{t('USDC per call (max)')}</span><input inputMode="decimal" aria-label={t('USDC per call')} value={cap} onChange={e => setCap(e.currentTarget.value.trim())}/></label>
           <label className="automation-field"><span>{t('Number of calls')}</span><input inputMode="numeric" aria-label={t('Number of calls')} value={calls} onChange={e => setCalls(e.currentTarget.value.trim())}/></label>
-          {network === 'arbitrum-one' && <>
-            <p className="muted">{t('Real funds on Arbitrum One. Your wallet must be a MetaMask smart account. FloFi may supply to and borrow from Aave V3 for this wallet only, at a variable rate, and stops before any Borrow that would leave your health factor below 2.0.')}</p>
-            <label className="automation-field"><span>{t('Aave supply WETH per call (max)')}</span><input inputMode="decimal" aria-label={t('Aave supply WETH per call')} value={supplyCap} onChange={e => setSupplyCap(e.currentTarget.value.trim())}/></label>
-            <label className="automation-field"><span>{t('Aave borrow USDC per call (max)')}</span><input inputMode="decimal" aria-label={t('Aave borrow USDC per call')} value={borrowCap} onChange={e => setBorrowCap(e.currentTarget.value.trim())}/></label>
-          </>}
+          {network === 'arbitrum-one' && <p className="muted">{t('Real funds on Arbitrum One. Your wallet must be a MetaMask smart account. Aave Supply and Borrow are never part of a Credential: a workflow run authorizes them once, with exact amounts.')}</p>}
         </>}
         <label className="automation-field"><span>{t('Expires on')}</span><input type="date" aria-label={t('Credential expires on')} value={expires} onChange={e => setExpires(e.currentTarget.value)}/></label>
         {/* A Solana Credential needs that wallet proven first: the button waits for the proof, so a click can never race it. */}

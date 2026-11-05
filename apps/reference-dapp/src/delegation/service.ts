@@ -33,7 +33,7 @@ import { ENGINE_VERSION } from '../platform/index.ts';
 import { b64url, fromB64url, rpIdOf, verifyAssertion, verifyRegistration } from '../passkeys/webauthn.ts';
 import { ADAPTERS, passkeyAnchor } from './adapters.ts';
 import { resolveAuthorityGraph, scopeHash, type EvmClassScope, type GrantScope, type StepBinding } from './authority.ts';
-import { delegationAavePool, delegationAaveReserve, delegationSwapProfile } from './profiles.ts';
+import { delegationAavePool, delegationSwapProfile } from './profiles.ts';
 import { ENFORCEMENT, stepCapability } from './capabilities.ts';
 import { digestBytes } from './canonical.ts';
 import type { ChainTransport } from './chains.ts';
@@ -283,19 +283,10 @@ export function createDelegationService(deps: DelegationServiceDeps) {
         const profile = delegationSwapProfile(chain, config.mainnetChains) ?? refuse('CREDENTIAL_NETWORK_UNSUPPORTED');
         const token = (s: 'USDC' | 'WETH') => s === 'USDC' ? profile.usdc : profile.weth;
         if (input.pairs.some(p => p.input === p.output) || new Set(input.pairs.map(p => `${p.input}>${p.output}`)).size !== input.pairs.length) refuse('CREDENTIAL_SCOPE_INVALID');
-        // BUILD-FLOFI-SINGLE-AUTH-WORKFLOW-UX-001: an Aave scope names the network's registered market and its registered reserves only.
-        let aave: EvmClassScope['aave'];
-        if (input.aave && (input.aave.supply.length || input.aave.borrow.length)) {
-          const pool = delegationAavePool(chain, config.mainnetChains) ?? refuse('CREDENTIAL_NETWORK_UNSUPPORTED');
-          const entries = (list: readonly { asset: 'USDC' | 'WETH'; perCallCap: string }[]) => {
-            if (new Set(list.map(x => x.asset)).size !== list.length) refuse('CREDENTIAL_SCOPE_INVALID');
-            return list.map(x => {
-              const reserve = delegationAaveReserve(chain, pool!, token(x.asset)) ?? refuse('CREDENTIAL_SCOPE_INVALID');
-              return { asset: reserve!.asset, perCallCap: nativeUnits(x.perCallCap, reserve!.decimals, 'CREDENTIAL_SCOPE_INVALID').toString() };
-            });
-          };
-          aave = { pool: pool!, supply: entries(input.aave.supply), borrow: entries(input.aave.borrow) };
-        }
+        // BUILD-FLOFI-UNIVERSAL-SINGLE-AUTH-MAINNET-001: Aave Supply and Borrow are never part of a reusable Credential (a class grant cannot pin
+        // a Borrow amount on-chain): a workflow run authorizes them once, with exact amounts (workflow-grants.ts).
+        if (input.aave && (input.aave.supply.length || input.aave.borrow.length)) refuse('CREDENTIAL_AAVE_REQUIRES_WORKFLOW_GRANT');
+        const aave: EvmClassScope['aave'] = undefined;
         scope = { mechanism: input.mechanism, chain, router: profile.router, maxCalls: input.maxCalls, validFrom, expiresAt,
           pairs: input.pairs.map(p => ({ tokenIn: token(p.input), tokenOut: token(p.output), perCallInputCap: nativeUnits(p.perCallCap, p.input === 'USDC' ? 6 : 18, 'CREDENTIAL_SCOPE_INVALID').toString() })),
           ...aave ? { aave } : {} };
