@@ -706,7 +706,7 @@ database consumer before 0020 is applied, followed by §14 for 0021. Otherwise u
 
 | Base | Certified forward migration | SHA-256 |
 | --- | --- | --- |
-| 0020 `workflow_grants` (`5ad470b3…0dcd`) | 0021 `editor_requester` | `b1553211809fa2b4002b01b922fae86a80b7370e343960a3589041fc73c70b10` |
+| 0020 `workflow_grants` (`5ad470b3…0dcd`) | 0021 `editor_requester` | `69abf25db7b5ebf80d2ea3ec459d88319213b0256a73c6ecf98d3b20a3a4e4a3` |
 
 Migration 0021 (BUILD-FLOFI-UNIVERSAL-SINGLE-AUTH-MAINNET-001) widens two CHECK constraints and does nothing else: no table, column, index,
 function, trigger or row is added, changed or removed.

@@ -25,5 +25,5 @@ export const portugueseEditorRuns: Readonly<Record<string, string>> = {
   'This wallet does not belong to the FloFi account that started this workflow. Connect one of that account\'s wallets.':
     'Esta carteira não pertence à conta FloFi que iniciou este fluxo. Conecte uma das carteiras dessa conta.',
   'Getting the workflow you started in the Editor…': 'Obtendo o fluxo que você iniciou no Editor…',
-  'Start the workflow again from the FloFi Editor if it is still on your Canvas.': 'Inicie o fluxo de novo a partir do Editor do FloFi se ele ainda estiver no seu Canvas.',
+  'Build the workflow again in the FloFi Editor and choose Run workflow.': 'Monte o fluxo de novo no Editor do FloFi e escolha Executar fluxo.',
 };

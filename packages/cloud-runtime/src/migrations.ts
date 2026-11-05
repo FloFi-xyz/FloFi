@@ -49,7 +49,7 @@ export const SHIPPED_MIGRATIONS: readonly MigrationIdentity[] = Object.freeze([
   { version: 19, name: 'privy_accounts', sha256: 'aea36e602ba918a195d4bd110fda3b29459816fb76c25e0ddfdd29099847cab6' },
   { version: 20, name: 'workflow_grants', sha256: '5ad470b3e4d3a4695fb6764ac39870d4d1c8870a9bf34101638934afb2bc0dcd' },
   // BUILD-FLOFI-UNIVERSAL-SINGLE-AUTH-MAINNET-001: widens the two requester-kind CHECKs for EDITOR_SESSION (additive, no data change).
-  { version: 21, name: 'editor_requester', sha256: 'b1553211809fa2b4002b01b922fae86a80b7370e343960a3589041fc73c70b10' },
+  { version: 21, name: 'editor_requester', sha256: '69abf25db7b5ebf80d2ea3ec459d88319213b0256a73c6ecf98d3b20a3a4e4a3' },
 ].map(migration => Object.freeze(migration)));
 
 /**

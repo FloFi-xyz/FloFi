@@ -315,7 +315,7 @@ export function ApprovalHandoff({ slot = null, surface = 'canvas', onSurfaceChan
   }
   if (!available) return <McpRouteState label="Approval" title={tr("This approval is no longer available")}
     description={fromAutomation ? 'Open the proposal again from FloFi → Automations if it is still waiting for you.'
-      : fromEditor ? 'Start the workflow again from the FloFi Editor if it is still on your Canvas.'
+      : fromEditor ? 'Build the workflow again in the FloFi Editor and choose Run workflow.'
       : fromApp ? 'Ask the app that sent this link to prepare a new FloFi approval link.' : 'Ask your connected assistant to prepare a new FloFi approval link.'}/>;
   if (!slot) return null;
   const real = view.fundsClass === 'REAL_FUNDS', shown = error;

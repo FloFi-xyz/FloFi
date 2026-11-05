@@ -4,9 +4,9 @@
 -- EDITOR_SESSION, the signed-in FloFi account that hands its own Canvas workflow to the same workflow-run flow chats, MCP clients and
 -- channels use. Its requester_id is the account id (it fits 0006's requester_id rule); like every non-MCP requester it carries no MCP
 -- account or grant (0006's mcp_handoffs_requester_identity rule applies unchanged). A requester is never authority: claiming still needs a
--- proven wallet of that account, then a fresh simulation, the Strategy Manifest Review and the owner's own wallet signature or passkey.
+-- proven wallet of that account, then a fresh simulation, the Strategy Manifest Review and the owner's own wallet signature.
 -- Additive only: two CHECK constraints are widened, exactly as 0010 widened the first one. No table, column, index, function, trigger or row is
--- added, changed or removed, and every row valid under 0019 is valid under this migration unchanged.
+-- added, changed or removed, and every row valid under 0020 is valid under this migration unchanged.
 SET LOCAL lock_timeout = '5s';
 
 ALTER TABLE mcp_handoffs
