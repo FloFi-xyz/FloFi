@@ -885,6 +885,10 @@
     "app.e2e.portfolio-ux004": {
       "path": "apps/reference-dapp/e2e/portfolio-ux004.spec.ts",
       "stage": "browser"
+    },
+    "app.components.site.typing-text": {
+      "path": "apps/reference-dapp/src/components/site/typing-text.test.ts",
+      "stage": "unit"
     }
   },
   "requiredUnitSuites": [
@@ -1534,6 +1538,7 @@
         "apps/reference-dapp/src/app/privacy/privacy.module.css",
         "apps/reference-dapp/src/app/how-it-works/page.tsx",
         "apps/reference-dapp/src/app/developers/page.tsx",
+        "apps/reference-dapp/src/app/faq/page.tsx",
         "apps/reference-dapp/src/app/editor.css"
       ],
       "suites": [
@@ -2546,6 +2551,7 @@
         "apps/reference-dapp/src/components/site/docs-content.ts",
         "apps/reference-dapp/src/components/site/docs-pages.tsx",
         "apps/reference-dapp/src/components/site/docs-sidebar.tsx",
+        "apps/reference-dapp/src/components/site/faq-page.tsx",
         "apps/reference-dapp/src/components/site/home-page.tsx",
         "apps/reference-dapp/src/components/site/how-it-works-page.tsx",
         "apps/reference-dapp/src/components/site/site-copy.ts",
@@ -2553,6 +2559,7 @@
         "apps/reference-dapp/src/components/site/site-preferences.tsx",
         "apps/reference-dapp/src/components/site/site-shell.tsx",
         "apps/reference-dapp/src/components/site/site.module.css",
+        "apps/reference-dapp/src/components/site/typing-text.tsx",
         "apps/reference-dapp/src/components/editor-overview-panel.tsx",
         "apps/reference-dapp/src/components/canvas-edge-style.ts",
         "apps/reference-dapp/src/components/editor-stepper.tsx",
@@ -2569,6 +2576,7 @@
         "app.i18n.locale",
         "app.components.dashboard.portfolio-widget",
         "app.e2e.site",
+        "app.components.site.typing-text",
         "app.components.editor-stepper",
         "app.domain.editor-overview",
         "app.e2e.editor-redesign",
