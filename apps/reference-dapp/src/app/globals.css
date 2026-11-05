@@ -1001,7 +1001,7 @@
 .copilot .proposal :is(p,li){font-size:14px;line-height:1.5}
 
 /* One floating navigator shares React Flow's viewport in every workspace stage. */
-.react-flow__panel.canvas-navigator{z-index:5;bottom:var(--canvas-cta-bottom,24px);margin:0;width:224px;max-width:calc(100% - 24px);height:38px;display:flex;align-items:center;gap:4px;padding:4px 6px;border:1px solid var(--line);border-radius:999px;background:var(--paper);box-shadow:0 3px 12px rgb(24 59 104 / .1);color:var(--muted);cursor:default}
+.react-flow__panel.canvas-navigator,.canvas-navigator-embedded{z-index:5;bottom:var(--canvas-cta-bottom,24px);margin:0;width:224px;max-width:calc(100% - 24px);height:38px;display:flex;align-items:center;gap:4px;padding:4px 6px;border:1px solid var(--line);border-radius:999px;background:var(--paper);box-shadow:0 3px 12px rgb(24 59 104 / .1);color:var(--muted);cursor:default}
 .react-flow__panel.canvas-navigator.bottom.center{left:50%;right:auto;transform:translateX(-50%)}
 .canvas-navigator[data-compact="true"]{width:200px;bottom:calc(var(--canvas-cta-bottom,24px) + var(--canvas-cta-height,44px) + var(--canvas-controls-gap,14px))}
 .canvas-navigator[data-narrow="true"]{width:148px}
@@ -2024,3 +2024,19 @@ button.wallet-option .wallet-option-status{border-color:var(--accent-line);backg
 .automation-list{gap:10px}
 .automation-notification-settings{border-top:1px solid var(--line)}
 @media(max-width:700px){.automation-choices{grid-template-columns:1fr}.automation-choice{min-height:0;padding:18px}.automation-stepper{gap:16px}.automation-stepper li{gap:5px}.automation-record{padding:14px}.automation-record-summary{gap:6px}}
+
+/* BUILD-FLOFI-SINGLE-AUTH-WORKFLOW-UX-001: the Simulate/Execute plan's bottom controls are one group laid out by the flow — the Canvas navigator
+   on its own centred line, then Back to the Canvas immediately left of the primary action, bottom-right. Nothing is offset against another
+   control, so no canvas width, locale, theme or step note can make them overlap. Notes take their own line above the buttons and, like the
+   Build CTA's notes, never take the pointer from a card beneath them. */
+.react-flow__panel.simulation-canvas-controls{left:0;right:0;bottom:0;margin:0;padding:0 var(--canvas-cta-right,12px) var(--canvas-cta-bottom,24px);
+  display:flex;flex-direction:column;align-items:stretch;gap:var(--canvas-controls-gap,14px);pointer-events:none}
+.react-flow__panel.simulation-canvas-controls .canvas-navigator-embedded{position:relative;top:auto;bottom:auto;align-self:center;flex:none;pointer-events:auto}
+.react-flow__panel.simulation-canvas-controls .canvas-primary-action{position:static;right:auto;bottom:auto;align-self:flex-end;width:auto;max-width:100%;
+  margin:0;display:grid;grid-template-columns:repeat(2,auto);justify-content:end;align-items:end;column-gap:var(--canvas-action-gap,8px);row-gap:8px;pointer-events:none}
+.react-flow__panel.simulation-canvas-controls .canvas-primary-action :is(button,a,input,select,textarea,summary,label,[role="button"],[tabindex]){pointer-events:auto}
+/* The Simulate wrapper and the lifecycle control add no box of their own here: Back and the primary action share the bottom row, and every note
+   (step note, wallet notice, reason) spans its own row above them, right-aligned. */
+.react-flow__panel.simulation-canvas-controls :is(.simulation-workspace-actions,.canvas-lifecycle-control){display:contents}
+.react-flow__panel.simulation-canvas-controls .canvas-lifecycle-control>:not(button,span){order:-1;grid-column:1/-1;justify-self:end;max-width:min(100%,420px);margin:0;text-align:right}
+.react-flow__panel.simulation-canvas-controls .simulation-back{flex:none}

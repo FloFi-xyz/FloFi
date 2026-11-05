@@ -130,7 +130,8 @@ for (const theme of ['light', 'dark'] as const) {
         expect(box.width).toBe(graphBox.width < 400 ? 148 : compact ? 200 : 224);
         expect(box.x + box.width / 2).toBeCloseTo(graphBox.x + graphBox.width / 2, 1);
         expect(box.height).toBe(38);
-        expect(graphBox.y + graphBox.height - box.y - box.height).toBe(compact ? 82 : 24);
+        // BUILD-FLOFI-SINGLE-AUTH-WORKFLOW-UX-001: on the Simulate/Execute plan the navigator always has its own line above the actions.
+        expect(graphBox.y + graphBox.height - box.y - box.height).toBe(compact || stage !== 'Build' ? 82 : 24);
         expect(box.x).toBeGreaterThan(graphBox.x); expect(box.x + box.width).toBeLessThan(graphBox.x + graphBox.width);
         const cta = (await graph.locator('.canvas-primary-action').boundingBox())!;
         expect(box.x + box.width <= cta.x || box.y + box.height <= cta.y || box.x >= cta.x + cta.width || box.y >= cta.y + cta.height).toBe(true);

@@ -22,7 +22,8 @@ const definitions = [
     'cross-chain-liquidity.spec.ts', 'execution-capabilities.spec.ts', 'interface-honesty.spec.ts', 'mock-artifact-chain.spec.ts',
     'network-isolation.spec.ts', 'public-testnet.spec.ts', 'robinhood-network.spec.ts', 'swap-authoring.spec.ts', 'visual-shell.spec.ts', 'credentials.spec.ts',
     'build-fix-ux.spec.ts', 'beta-ui.spec.ts', 'site.spec.ts', 'build-entry.spec.ts', 'privacy-notice.spec.ts', 'editor-redesign.spec.ts',
-    'portfolio-ux004.spec.ts', 'dashboard-productization.spec.ts', 'dashboard-theme-states.spec.ts', 'dashboard-run-details.spec.ts'], {}],
+    'portfolio-ux004.spec.ts', 'dashboard-productization.spec.ts', 'dashboard-theme-states.spec.ts', 'dashboard-run-details.spec.ts',
+    'simulate-canvas-controls.spec.ts'], {}],
   ['review-execute-recovery-components', ['simulate-review-acceptance.spec.ts', 'execute-product-workspace.spec.ts', 'execute-workflow.spec.ts'], {}],
   // Direct chat signing and optional Canvas, with no application server, RPC, wallet or database; requests are intercepted by the spec.
   ['solana-transfer-ux', ['--config', 'playwright.transfer-ux.config.ts'], {}],
