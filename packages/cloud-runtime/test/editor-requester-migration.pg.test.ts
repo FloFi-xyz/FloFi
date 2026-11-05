@@ -35,7 +35,7 @@ describe('Editor requester additive migration (0022)', () => {
   it('widens exactly the two requester-kind checks, keeps every earlier row and column, and stores EDITOR_SESSION handoffs and runs', async () => {
     const t = await createTestDatabase({ migrated: false });
     try {
-      // Pinned to schema 21 so later migrations do not change this test.
+      // Pinned to schema 22 so later migrations do not change this test.
       const all = (await loadMigrations()).slice(0, 22), base = all.slice(0, 21);
       expect(all[21]).toMatchObject({ version: 22, name: 'editor_requester', sha256: SHIPPED_MIGRATIONS[21]!.sha256 });
       await migrate(t.db, base);

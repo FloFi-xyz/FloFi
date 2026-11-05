@@ -721,7 +721,7 @@ to accommodate an older binary.
 
 | Base | Certified forward migration | SHA-256 |
 | --- | --- | --- |
-| 0020 `flight_flofi` (`a7ce1f42…2892`) | 0021 `workflow_grants` | `7abb0187c40a93ef251c7e8d91e779abb38b261fe59bcb74b9d221f022e9256a` |
+| 0020 `flight_flofi` (`a7ce1f42…2892`) | 0021 `workflow_grants` | `07a789dc1b6fb10c2fe46430342845946fbc1f06e176cbbab78102d66ed044a7` |
 
 Migration 0021 (BUILD-FLOFI-UNIVERSAL-SINGLE-AUTH-MAINNET-001) is additive and changes no row:
 - `credential_grants.passkey_id` drops NOT NULL, under a new CHECK `credential_grants_passkey_or_workflow_grant`. A grant may lack a passkey
@@ -738,15 +738,20 @@ A build without 0021 runs unchanged on schema 21:
   - its grant mapper turns a NULL `passkey_id` into a string, which its passkey checks never match (`GRANT_PASSKEY_MISMATCH`, fail closed);
   - its executor refuses a revision without a passkey (`AUTHORIZATION_NOT_ACTIVE`).
 
-**Release order.** The certificate row above goes into a release whose newest shipped migration is 0020. That release is deployed to every
-database consumer before 0021 is applied, followed by §16 for 0022. Otherwise use the coordinated window in
-`docs/deploy/SINGLE-AUTH-MAINNET-ACTIVATION.md` §5. No production migration or release was performed during engineering.
+**Locks.** `SET LOCAL lock_timeout = '5s'`. `DROP NOT NULL` and the two `ADD CONSTRAINT`s take short ACCESS EXCLUSIVE locks on `credential_grants`
+and `delegated_authorization_revisions`. The CHECK validation scans each table once; both are small and touched only by delegated execution. A
+concurrent long transaction makes the migration fail after 5 s and retry; it never makes delegated reads wait longer.
+
+**Release order (one certificate for 0021 and 0022).** This build ships 0021 and 0022 together, and `migrate` applies every pending migration in one
+pre-deploy. So Release A is one certificate, `{ base: 0020 flight_flofi, migrations: [0021 workflow_grants, 0022 editor_requester] }`, with the exact
+bytes of both. It goes into a release from main whose newest shipped migration is 0020, and that release is deployed to every database consumer
+before this build migrates. Without Release A there is no application rollback once 0021/0022 are applied: the previous commit refuses schema 22.
 
 ## 16. Certificate 0022_editor_requester
 
 | Base | Certified forward migration | SHA-256 |
 | --- | --- | --- |
-| 0021 `workflow_grants` (`7abb0187…256a`) | 0022 `editor_requester` | `f5b05c8bd32bf70bfa95e2b6ecc075b909f604334a13188c1651c2bd31e16d43` |
+| 0021 `workflow_grants` (`07a789dc…44a7`) | 0022 `editor_requester` | `f5b05c8bd32bf70bfa95e2b6ecc075b909f604334a13188c1651c2bd31e16d43` |
 
 Migration 0022 (BUILD-FLOFI-UNIVERSAL-SINGLE-AUTH-MAINNET-001) widens two CHECK constraints and does nothing else: no table, column, index,
 function, trigger or row is added, changed or removed.
@@ -772,7 +777,4 @@ A build without 0022 runs unchanged on schema 22, including on rows written by a
 rows, the 0006 identity rule and 0015's immutability still refusing unsafe rows, and atomic rollback. The exact SQL is also kept as
 `packages/cloud-runtime/test/fixtures/0022_editor_requester.sql`.
 
-**Release order.** Certificate first, as for 0018 and 0019: the `CERTIFIED_FORWARD_MIGRATIONS` entry for this migration names the shipped 0021 as
-its `base`, which is only known once 0021's bytes are final. It must be added (`base`: 0021's identity, `migrations`: the row above, `assessment`:
-this section) to a release whose newest shipped migration is 0021, deployed to every database consumer before 0022 is applied. No production
-migration or release was performed during engineering.
+**Release order.** Covered by the single certificate of §15 (0021 and 0022 together, base 0020). No production migration or release was performed during engineering.
