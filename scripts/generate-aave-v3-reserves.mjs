@@ -32,7 +32,7 @@ const from = fromIndex >= 0 ? args[fromIndex + 1] : null;
 async function source(library) {
   if (from) return readFile(join(from, `${library}.ts`), 'utf8');
   const url = `https://raw.githubusercontent.com/aave-dao/aave-address-book/${COMMIT}/src/ts/${library}.ts`;
-  const response = await fetch(url);
+  const response = await globalThis.fetch(url);
   if (!response.ok) throw new Error(`ADDRESS_BOOK_UNAVAILABLE ${library} ${response.status}`);
   const text = await response.text();
   if (text.length > 1_000_000) throw new Error(`ADDRESS_BOOK_TOO_LARGE ${library}`);

@@ -3,6 +3,7 @@
 import { useLocale } from '../i18n/locale';
 
 import { TokenAmountInput } from './token-amount-input';
+import { LendingReserveStatus, reserveOptionLabel, useAaveReserves } from './lending-reserve-status';
 import { useState, type FormEvent } from 'react';
 import { createAuthoredRepay, repayDetails, lendingCopy, lendingNetworkView, lendingView, LENDING_NETWORKS, lendingReservesFor, lendingAssetFor, lendingNodeAsset, type LendingNetwork, type SupplyInput } from '../domain/supply-authoring';
 import { useWorkflow } from '../state/workflow-store';
@@ -22,6 +23,7 @@ export function RepayAuthoringForm({nodeId,onDone,direct=false,reviewFormId}:{no
   // BUILD AAVE-V3-EXPANSION-001: the network selects its Aave market; the asset is one of that market's registered reserves (never another network's).
   const asset=lendingReservesFor(network).some(reserve=>reserve.symbol===chosenAsset)?chosenAsset:lendingAssetFor(network),shown=lendingNetworkView(network,asset);
   const setNetwork=(next:LendingNetwork)=>{setNetworkState(next);setAsset(lendingAssetFor(next));};
+  const live=useAaveReserves(network,wallet.account??null);
   function submit(event:FormEvent){event.preventDefault();try{
     const input:SupplyInput={network,asset,amount,beneficiary:wallet.account??existing?.beneficiary??''};
     createAuthoredRepay(nodeId??'node-preview',input);
@@ -31,7 +33,8 @@ export function RepayAuthoringForm({nodeId,onDone,direct=false,reviewFormId}:{no
   return <form id={reviewFormId} className="inspector-fields" aria-label={tr(nodeId?'Edit Repay':'Create Repay')} onSubmit={submit}>
     <strong>{tr("Repay to Aave V3")}</strong>
     <label>{tr("Repay network")}<select aria-label={tr("Repay network")} value={network} onChange={e=>setNetwork(e.target.value as LendingNetwork)}>{LENDING_NETWORKS.map(n=><option key={n}>{tr(n)}</option>)}</select></label>
-    <label>{tr("Repay asset")}<select aria-label={tr("Repay asset")} value={asset} onChange={e=>setAsset(e.target.value)}>{lendingReservesFor(network).map(reserve=><option key={reserve.asset} value={reserve.symbol}>{reserve.symbol}</option>)}</select></label>
+    <label>{tr("Repay asset")}<select aria-label={tr("Repay asset")} value={asset} onChange={e=>setAsset(e.target.value)}>{lendingReservesFor(network).map(reserve=>{const option=reserveOptionLabel(reserve.symbol,live,'repay',tr);return <option key={reserve.asset} value={reserve.symbol} disabled={option.disabled&&reserve.symbol!==asset}>{option.label}</option>;})}</select></label>
+    <LendingReserveStatus live={live} asset={asset} kind="repay"/>
     <label>{tr("Repay amount (")}{tr(asset)})<TokenAmountInput aria-label={tr(`Repay amount (${asset})`)} value={amount} maxLength={80} onValueChange={value=>{setError('');if(reviewFormId&&nodeId)editCanvasAmount(nodeId,value);else setAmount(value);}}/></label>
     <label>{tr("Debt mode")}<select aria-label={tr("Debt mode")} value="Variable (2)" onChange={()=>undefined}><option>{tr("Variable (2)")}</option></select></label>
     {!wallet.account&&!existing&&<button type="button" onClick={()=>void wallet.connect()}>{tr("Connect owner wallet")}</button>}

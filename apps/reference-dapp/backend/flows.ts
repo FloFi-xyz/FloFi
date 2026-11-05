@@ -249,6 +249,8 @@ function supplyFlow(name: 'aave-supply' | 'base-aave' | 'arbitrum-aave' | 'ether
     walletFailure: { mutates: true, validate: shape(id(SUPPLY_ID), diagnostic) },
     walletTrace: { mutates: true, validate: shape(id(SUPPLY_ID), diagnostic) },
     handoff: { mutates: true, validate: optionalShape(2, id(SUPPLY_ID), step, v => typeof v === 'boolean') },
+    // BUILD AAVE-V3-EXPANSION-001: the live reserve catalog of this mainnet market (read-only display information), optionally for one owner.
+    ...network ? { reserves: { mutates: false, validate: optionalShape(1, v => v === network.chain, account) } } : {},
   },
   transport: network ? (mode, env) => ({ rpc: createCatalogLendingReadRpc(network, mode === 'harness', env) })
     : (mode, env) => { const rpcs = createLendingReadRpcs(mode === 'harness', env); return { rpc: rpcs['eip155:84532'], chains: { rpcs } }; },
@@ -268,6 +270,7 @@ function supplyFlow(name: 'aave-supply' | 'base-aave' | 'arbitrum-aave' | 'ether
       walletFailure: ([i, d]) => s.walletFailure(i as string, d as SupplyWalletDiagnostic),
       walletTrace: ([i, d]) => s.walletTrace(i as string, d as SupplyWalletDiagnostic),
       handoff: ([i, st, managed]) => s.handoff(i as string, st as Parameters<typeof s.handoff>[1], managed === true),
+      reserves: ([chain, owner]) => s.reserves(chain as string, owner as string | undefined),
     };
     return { call: (method, args) => table[method]!(args), load: runId => s.load(runId), observe: runId => s.observe(runId) };
   },

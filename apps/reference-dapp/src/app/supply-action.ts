@@ -5,7 +5,8 @@ import { createSupplyService, type SupplyWalletDiagnostic, type SupplyService } 
 import { join } from 'node:path';
 import { createCatalogLendingReadRpc, createLendingReadRpcs } from '../server/supply-rpc';
 import { cloudFlow } from '../server/flow-runtime';
-import { catalogNetworkOfRun, catalogNetworkOfWorkflow, localCatalogNetworkMode, type CatalogNetworkRuntime } from '../server/catalog-networks';
+import { catalogNetworkOfChain, catalogNetworkOfRun, catalogNetworkOfWorkflow, localCatalogNetworkMode, type CatalogNetworkRuntime } from '../server/catalog-networks';
+import type { AaveMarketCatalog } from '@defi-workflow-engine/reference-compiler';
 let service:SupplyService|null=null;
 function current():SupplyService {
   const harness=process.env.GRYLOO_SUPPLY_HARNESS==='MOCKED_LOOPBACK_ONLY';
@@ -56,3 +57,15 @@ export async function supplyWalletFailure(id:string,diagnostic:SupplyWalletDiagn
 export async function supplyWalletTrace(id:string,diagnostic:SupplyWalletDiagnostic){return run('walletTrace',[id,diagnostic],service=>service.walletTrace(id,diagnostic));}
 
 export async function supplyHandoff(id:string,step:'APPROVAL'|'SUPPLY'|'BORROW'|'REPAY'|'WITHDRAW',walletManagedNonce=false){return run('handoff',[id,step,walletManagedNonce],service=>service.handoff(id,step,walletManagedNonce));}
+
+/**
+ * BUILD AAVE-V3-EXPANSION-001: the live reserve catalog of one Aave mainnet market (status, caps, liquidity, informational APY and, with an
+ * owner, balances and account aggregates). Read-only: it prepares and authorizes nothing; Simulate re-reads everything it relies on.
+ */
+export async function supplyReserves(chain:string,account?:string):Promise<{ok:true;value:AaveMarketCatalog}|{ok:false;code:string}>{
+  const network=catalogNetworkOfChain(chain);
+  if(!network?.flows.lending||(account!==undefined&&!/^0x[0-9a-fA-F]{40}$/.test(account)))return{ok:false,code:'SUPPLY_NETWORK_UNAVAILABLE'};
+  const args=account===undefined?[chain]:[chain,account];
+  const cloud=await cloudFlow<AaveMarketCatalog>(network.flows.lending,'reserves',args);if(cloud)return cloud;
+  try{return{ok:true,value:await catalog(network).reserves(chain,account)};}catch(cause){const code=cause instanceof Error?cause.message:'';return{ok:false,code:/^[A-Z][A-Z0-9_]{2,80}$/.test(code)?code:'SUPPLY_SERVICE_UNAVAILABLE'};}
+}

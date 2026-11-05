@@ -8,6 +8,7 @@ import { useWorkflow } from '../state/workflow-store';
 import { useBuild009Wallet } from '../state/build009-wallet-store';
 import { useSupply } from '../state/supply-store';
 import { TokenAmountInput } from './token-amount-input';
+import { LendingReserveStatus, reserveOptionLabel, useAaveReserves } from './lending-reserve-status';
 import { PendingExecutionNote } from './execution-concurrency-notes';
 export function SupplyAuthoringForm({nodeId,onDone,direct=false,reviewFormId}:{nodeId?:string;onDone?:()=>void;direct?:boolean;reviewFormId?:string}){
   const { t: tr } = useLocale();
@@ -21,6 +22,7 @@ export function SupplyAuthoringForm({nodeId,onDone,direct=false,reviewFormId}:{n
   // BUILD AAVE-V3-EXPANSION-001: the network selects its Aave market; the asset is one of that market's registered reserves (never another network's).
   const asset=lendingReservesFor(network).some(reserve=>reserve.symbol===chosenAsset)?chosenAsset:lendingAssetFor(network);
   const setNetwork=(next:LendingNetwork)=>{setNetworkState(next);setAsset(lendingAssetFor(next));};
+  const live=useAaveReserves(network,wallet.account??null);
   function submit(event:FormEvent){event.preventDefault();try{
     const input:SupplyInput={network,asset,amount,beneficiary:beneficiary||wallet.account||''};createAuthoredSupply(nodeId??'node-preview',input);
     const command=nodeId?{type:'SET_SUPPLY' as const,nodeId,input,source:'CANVAS' as const,baseRevision:state.workflow.revision}:{type:'ADD_SUPPLY' as const,input,source:'CANVAS' as const,baseRevision:state.workflow.revision};
@@ -29,7 +31,8 @@ export function SupplyAuthoringForm({nodeId,onDone,direct=false,reviewFormId}:{n
   return <form id={reviewFormId} className="inspector-fields" aria-label={tr(nodeId?'Edit Supply':'Create Supply')} onSubmit={submit}>
     <strong>{tr("Supply to Aave V3")}</strong>
     <label>{tr("Supply network")}<select aria-label={tr("Supply network")} value={network} onChange={e=>setNetwork(e.target.value as LendingNetwork)}>{LENDING_NETWORKS.map(n=><option key={n}>{tr(n)}</option>)}</select></label>
-    <label>{tr("Supply asset")}<select aria-label={tr("Supply asset")} value={asset} onChange={e=>setAsset(e.target.value)}>{lendingReservesFor(network).map(reserve=><option key={reserve.asset} value={reserve.symbol}>{reserve.symbol}</option>)}</select></label>
+    <label>{tr("Supply asset")}<select aria-label={tr("Supply asset")} value={asset} onChange={e=>setAsset(e.target.value)}>{lendingReservesFor(network).map(reserve=>{const option=reserveOptionLabel(reserve.symbol,live,'supply',tr);return <option key={reserve.asset} value={reserve.symbol} disabled={option.disabled&&reserve.symbol!==asset}>{option.label}</option>;})}</select></label>
+    <LendingReserveStatus live={live} asset={asset} kind="supply"/>
     <label>{tr("Supply amount (")}{tr(asset)})<TokenAmountInput aria-label={tr(`Supply amount (${asset})`)} value={amount} maxLength={80} onValueChange={value=>{setError('');if(reviewFormId&&nodeId)editCanvasAmount(nodeId,value);else setAmount(value);}}/></label>
     <label>{tr("Supply beneficiary")}<input aria-label={tr("Supply beneficiary")} autoComplete="off" value={beneficiary||wallet.account||''} maxLength={42} onChange={e=>setBeneficiary(e.target.value)}/></label>
     {error&&<p role="alert">{tr(error)}</p>}{!reviewFormId&&<button type="submit">{tr(nodeId?'Review Supply change':direct?'Add Supply':'Review Supply proposal')}</button>}

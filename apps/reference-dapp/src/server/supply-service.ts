@@ -2,10 +2,10 @@
 import { randomBytes } from 'node:crypto';
 import { isAbsolute } from 'node:path';
 import { validateAuthoringWorkflow, createBaseSepoliaReviewContext } from '@defi-workflow-engine/reference-linter';
-import { simulateSupply, assertSupplyReview, readSupplyState, readBorrowState, readWithdrawState, readSupplyLatestNonce, lendingProfile, rpcHash, supplyHex, supplyHash, AAVE_V3_BASE_SEPOLIA, type SupplyRpc, type SupplyReview } from '@defi-workflow-engine/reference-compiler';
+import { discoverAaveReserves, type AaveMarketCatalog, simulateSupply, assertSupplyReview, readSupplyState, readBorrowState, readWithdrawState, readSupplyLatestNonce, lendingProfile, rpcHash, supplyHex, supplyHash, AAVE_V3_BASE_SEPOLIA, type SupplyRpc, type SupplyReview } from '@defi-workflow-engine/reference-compiler';
 import { createSupplyRun, prepareSupplyAttempt, supplyTransition, discoverSupplyTransaction, validateSupplyRun, createFileExecutionStorage,
   reserveEconomicIntentIn, logMissing, utf8, SUPPLY_RUN_ID, type ExecutionStorage, type SupplyRun, type SupplyAttempt } from '@defi-workflow-engine/reference-executor';
-import { aaveEnvironment } from '@defi-workflow-engine/action-registry';
+import { aaveEnvironment, AAVE_V3_MARKETS } from '@defi-workflow-engine/action-registry';
 import { catalogNetworkOfChain } from './catalog-networks.ts';
 import { nitroGasLimit, nitroMaxFeePerGas } from './arbitrum-fees.ts';
 import { reconcileSupplyAttempt, buildSupplyEvidence, type SupplyObservation } from '@defi-workflow-engine/reference-reconciler';
@@ -106,8 +106,20 @@ export function createSupplyService(input:{rpc:SupplyRpc;rpcs?:Readonly<Partial<
     if(proof.verdict!=='RECONCILED'||!record.review.repay&&!proof.walletEnvelope||proof.receipt?.transactionHash!==link.hash)throw new Error('SUPPLY_APPROVAL_PROOF_STALE');
     return proof;
   }
+  // BUILD AAVE-V3-EXPANSION-001: the live reserve catalog of this service's mainnet market, read-only and briefly cached per owner.
+  const reserveCache=new Map<string,{at:number;value:Promise<AaveMarketCatalog>}>();
   return {
     load,
+    /** Live reserve availability, balances and account aggregates for the pickers. Read-only display information; never an authorization. */
+    async reserves(chain:string,account?:string):Promise<AaveMarketCatalog>{
+      if(!AAVE_V3_MARKETS.some(market=>market.chain===chain)||catalogNetworkOfChain(chain)?.prefixes.lending!==idPrefix)throw new Error('SUPPLY_NETWORK_UNAVAILABLE');
+      const owner=account===undefined?'':account.toLowerCase(),key=`${chain}|${owner}`,now=Date.now(),hit=reserveCache.get(key);
+      if(hit&&now-hit.at<15_000)return hit.value;
+      const value=discoverAaveReserves(rpcFor(chain),chain,account);
+      reserveCache.set(key,{at:now,value});if(reserveCache.size>256)reserveCache.delete(reserveCache.keys().next().value!);
+      value.catch(()=>reserveCache.delete(key));
+      return value;
+    },
     async simulate(workflowInput:unknown,account:string):Promise<SupplyRecord>{
       const workflow=validateAuthoringWorkflow(workflowInput,createBaseSepoliaReviewContext());
       const node=workflow.nodes.find(n=>['supply','borrow','repay','withdraw'].includes(n.actionType)),chain=node?.chainId;

@@ -3,6 +3,7 @@
 import { useLocale } from '../i18n/locale';
 
 import { TokenAmountInput } from './token-amount-input';
+import { LendingReserveStatus, reserveOptionLabel, useAaveReserves } from './lending-reserve-status';
 import { useState,type FormEvent } from 'react';
 import { createAuthoredWithdraw, withdrawDetails, lendingCopy, lendingNetworkView, lendingView, LENDING_NETWORKS, lendingReservesFor, lendingAssetFor, lendingNodeAsset, type LendingNetwork, type WithdrawInput } from '../domain/supply-authoring';
 import { useBuild009Wallet } from '../state/build009-wallet-store';
@@ -15,12 +16,14 @@ const hf=(value:string)=>BigInt(value)===(1n<<256n)-1n?'No debt (∞)':human(val
 export function WithdrawAuthoringForm({nodeId,onDone,direct=false,reviewFormId}:{nodeId?:string;onDone?:()=>void;direct?:boolean;reviewFormId?:string}){
   const { t: tr } = useLocale();
   const {state,propose,dispatch,amountInputs={},editCanvasAmount}=useWorkflow(),node=state.workflow.nodes.find(n=>n.nodeId===nodeId),existing=node?withdrawDetails(node as Parameters<typeof withdrawDetails>[0]):null;
+  const wallet=useBuild009Wallet();
   const [localAmount,setAmount]=useState(existing?.amount??'0.1'),[error,setError]=useState('');
   const amount = reviewFormId && nodeId ? amountInputs[nodeId] ?? existing?.amount ?? localAmount : localAmount;
   const [network,setNetworkState]=useState<LendingNetwork>(existing?.network??'Base Sepolia'),[chosenAsset,setAsset]=useState<string>(existing?.asset??lendingAssetFor(existing?.network??'Base Sepolia'));
   // BUILD AAVE-V3-EXPANSION-001: the network selects its Aave market; the asset is one of that market's registered reserves (never another network's).
   const asset=lendingReservesFor(network).some(reserve=>reserve.symbol===chosenAsset)?chosenAsset:lendingAssetFor(network),shown=lendingNetworkView(network,asset);
   const setNetwork=(next:LendingNetwork)=>{setNetworkState(next);setAsset(lendingAssetFor(next));};
+  const live=useAaveReserves(network,wallet.account??null);
   function submit(event:FormEvent){event.preventDefault();try{
     const input:WithdrawInput={network,asset,amount,recipient:'CONNECTED_OWNER'};createAuthoredWithdraw(nodeId??'node-preview',input);
     const command=nodeId?{type:'SET_WITHDRAW' as const,nodeId,input,source:'CANVAS' as const,baseRevision:state.workflow.revision}:{type:'ADD_WITHDRAW' as const,input,source:'CANVAS' as const,baseRevision:state.workflow.revision};
@@ -28,7 +31,8 @@ export function WithdrawAuthoringForm({nodeId,onDone,direct=false,reviewFormId}:
   }catch{setError(`Enter an exact positive partial ${asset} amount with at most ${shown.decimals===6?'six':shown.decimals} decimal places.`);}}
   return <form id={reviewFormId} className="inspector-fields" aria-label={tr(nodeId?'Edit Withdraw':'Create Withdraw')} onSubmit={submit}><strong>{tr("Withdraw from Aave V3")}</strong>
     <label>{tr("Withdraw network")}<select aria-label={tr("Withdraw network")} value={network} onChange={e=>setNetwork(e.target.value as LendingNetwork)}>{LENDING_NETWORKS.map(n=><option key={n}>{tr(n)}</option>)}</select></label>
-    <label>{tr("Withdraw asset")}<select aria-label={tr("Withdraw asset")} value={asset} onChange={e=>setAsset(e.target.value)}>{lendingReservesFor(network).map(reserve=><option key={reserve.asset} value={reserve.symbol}>{reserve.symbol}</option>)}</select></label>
+    <label>{tr("Withdraw asset")}<select aria-label={tr("Withdraw asset")} value={asset} onChange={e=>setAsset(e.target.value)}>{lendingReservesFor(network).map(reserve=>{const option=reserveOptionLabel(reserve.symbol,live,'withdraw',tr);return <option key={reserve.asset} value={reserve.symbol} disabled={option.disabled&&reserve.symbol!==asset}>{option.label}</option>;})}</select></label>
+    <LendingReserveStatus live={live} asset={asset} kind="withdraw"/>
     <label>{tr("Withdraw amount (")}{tr(asset)})<TokenAmountInput aria-label={tr(`Withdraw amount (${asset})`)} value={amount} maxLength={80} onValueChange={value=>{setError('');if(reviewFormId&&nodeId)editCanvasAmount(nodeId,value);else setAmount(value);}}/></label>
     <p>{tr("Recipient: your connected owner wallet, bound at Review. Partial withdrawal only.")}</p>{error&&<p role="alert">{tr(error)}</p>}
     {!reviewFormId&&<button type="submit">{tr(nodeId?'Review Withdraw change':direct?'Add Withdraw':'Review Withdraw proposal')}</button>}{onDone&&<button type="button" className="quiet" onClick={onDone}>{tr("Cancel")}</button>}

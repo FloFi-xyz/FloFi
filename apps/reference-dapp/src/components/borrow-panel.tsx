@@ -3,6 +3,7 @@
 import { useLocale } from '../i18n/locale';
 
 import { TokenAmountInput } from './token-amount-input';
+import { LendingReserveStatus, reserveOptionLabel, useAaveReserves } from './lending-reserve-status';
 import { useState, type FormEvent } from 'react';
 import { createAuthoredBorrow, borrowDetails, lendingCopy, lendingNetworkView, lendingView, LENDING_NETWORKS, lendingReservesFor, lendingAssetFor, lendingNodeAsset, type LendingNetwork, type SupplyInput } from '../domain/supply-authoring';
 import { useWorkflow } from '../state/workflow-store';
@@ -22,6 +23,7 @@ export function BorrowAuthoringForm({nodeId,onDone,direct=false,reviewFormId}:{n
   // BUILD AAVE-V3-EXPANSION-001: the network selects its Aave market; the asset is one of that market's registered reserves (never another network's).
   const asset=lendingReservesFor(network).some(reserve=>reserve.symbol===chosenAsset)?chosenAsset:lendingAssetFor(network),shown=lendingNetworkView(network,asset);
   const setNetwork=(next:LendingNetwork)=>{setNetworkState(next);setAsset(lendingAssetFor(next));};
+  const live=useAaveReserves(network,wallet.account??null);
   function submit(event:FormEvent){event.preventDefault();try{
     const input:SupplyInput={network,asset,amount,beneficiary:wallet.account??existing?.beneficiary??''};
     createAuthoredBorrow(nodeId??'node-preview',input);
@@ -31,7 +33,8 @@ export function BorrowAuthoringForm({nodeId,onDone,direct=false,reviewFormId}:{n
   return <form id={reviewFormId} className="inspector-fields" aria-label={tr(nodeId?'Edit Borrow':'Create Borrow')} onSubmit={submit}>
     <strong>{tr("Borrow from Aave V3")}</strong>
     <label>{tr("Borrow network")}<select aria-label={tr("Borrow network")} value={network} onChange={e=>setNetwork(e.target.value as LendingNetwork)}>{LENDING_NETWORKS.map(n=><option key={n}>{tr(n)}</option>)}</select></label>
-    <label>{tr("Borrow asset")}<select aria-label={tr("Borrow asset")} value={asset} onChange={e=>setAsset(e.target.value)}>{lendingReservesFor(network).map(reserve=><option key={reserve.asset} value={reserve.symbol}>{reserve.symbol}</option>)}</select></label>
+    <label>{tr("Borrow asset")}<select aria-label={tr("Borrow asset")} value={asset} onChange={e=>setAsset(e.target.value)}>{lendingReservesFor(network).map(reserve=>{const option=reserveOptionLabel(reserve.symbol,live,'borrow',tr);return <option key={reserve.asset} value={reserve.symbol} disabled={option.disabled&&reserve.symbol!==asset}>{option.label}</option>;})}</select></label>
+    <LendingReserveStatus live={live} asset={asset} kind="borrow"/>
     <label>{tr("Borrow amount (")}{tr(asset)})<TokenAmountInput aria-label={tr(`Borrow amount (${asset})`)} value={amount} maxLength={80} onValueChange={value=>{setError('');if(reviewFormId&&nodeId)editCanvasAmount(nodeId,value);else setAmount(value);}}/></label>
     {!wallet.account&&!existing&&<button type="button" onClick={()=>void wallet.connect()}>{tr("Connect borrower wallet")}</button>}
     <p>{tr("Variable rate. Your connected wallet receives ")}{tr(asset)}{tr(" and takes on the debt.")}</p>
