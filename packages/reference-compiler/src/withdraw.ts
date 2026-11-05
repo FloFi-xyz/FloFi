@@ -11,16 +11,16 @@ export function estimateWithdraw(amount:string,state:SupplyState,profile:AaveLen
   if(!b)throw new Error('WITHDRAW_STATE_INVALID');
   const cfg=BigInt(b.reserveConfiguration),index=BigInt(state.index),scaled=BigInt(state.scaledPosition),price=BigInt(b.price);
   const collateralEnabled=Boolean(BigInt(b.userConfiguration)&collateral),multi=Boolean(b.positions);
-  // A single-reserve account withdraws collateral of this one reserve, exactly as before. A multi-reserve account (BUILD AAVE-V3-EXPANSION-001)
-  // may withdraw any supplied reserve; a reserve not used as collateral does not change the health factor.
-  if(b.variableDebtToken!==p.variableDebtToken||BigInt(b.baseCurrencyUnit)!==100000000n||BigInt(b.eMode)!==0n||(!multi&&(BigInt(b.userConfiguration)&~mask))||(!multi&&!collateralEnabled)||price<=0n||index<ray||BigInt(b.debtIndex)<ray||((cfg>>48n)&255n)!==decimals||(cfg>>212n)&((1n<<40n)-1n))throw new Error('WITHDRAW_STATE_UNSUPPORTED');
+  // BUILD AAVE-V3-EXPANSION-001: any supplied reserve can be withdrawn — collateral or not, isolated or not — so every Supply FloFi accepts has an
+  // exit. A reserve not used as collateral does not change the health factor; collateral is checked against FloFi's 2.0 minimum below.
+  if(b.variableDebtToken!==p.variableDebtToken||BigInt(b.baseCurrencyUnit)!==100000000n||BigInt(b.eMode)!==0n||(!multi&&(BigInt(b.userConfiguration)&~mask))||price<=0n||index<ray||BigInt(b.debtIndex)<ray||((cfg>>48n)&255n)!==decimals)throw new Error('WITHDRAW_STATE_UNSUPPORTED');
   if(multi)assertAccountPositions(b,p,'WITHDRAW_STATE_UNSUPPORTED');
   // Frozen reserves still allow Withdraw (Aave semantics); inactive or paused ones do not.
   if(!((cfg>>56n)&1n)||((cfg>>60n)&1n))throw new Error('WITHDRAW_RESERVE_UNAVAILABLE');
   const health=BigInt(borrowHealthFactor(b.collateralBase,b.liquidationThresholdBps,b.debtBase));
   if(abs(BigInt(b.healthFactor)-health)>health/1000000n+1n||abs(BigInt(state.position)-(scaled*index+ray/2n)/ray)>1n||abs(BigInt(b.debt)-(BigInt(b.scaledDebt)*BigInt(b.debtIndex)+ray/2n)/ray)>1n)throw new Error('WITHDRAW_STATE_INCONSISTENT');
   if(multi){try{assertAccountTotals(state.position,b,p);}catch{throw new Error('WITHDRAW_STATE_INCONSISTENT');}}
-  else if(abs(BigInt(b.collateralBase)-BigInt(state.position)*price/scale)>2n||abs(BigInt(b.debtBase)-BigInt(b.debt)*price/scale)>2n)throw new Error('WITHDRAW_STATE_INCONSISTENT');
+  else if(abs(BigInt(b.collateralBase)-(collateralEnabled?BigInt(state.position)*price/scale:0n))>2n||abs(BigInt(b.debtBase)-BigInt(b.debt)*price/scale)>2n)throw new Error('WITHDRAW_STATE_INCONSISTENT');
   // Current Aave rounds shares up on burn; legacy rounds nearest. Preview uses
   // the larger burn and rounds remaining collateral down, debt base up.
   const burn=(n*ray+index-1n)/index;
@@ -28,14 +28,14 @@ export function estimateWithdraw(amount:string,state:SupplyState,profile:AaveLen
   if(BigInt(b.liquidity)<n)throw new Error('WITHDRAW_INSUFFICIENT_LIQUIDITY');
   const collateralAfter=(scaled-burn)*index/ray,ownAfterBase=collateralAfter*price/scale;
   let collateralAfterBase:bigint,threshold:bigint,debtBase:bigint;
-  if(!multi){collateralAfterBase=ownAfterBase;threshold=BigInt(b.liquidationThresholdBps);debtBase=(BigInt(b.debt)*price+scale-1n)/scale;}
+  if(!multi){collateralAfterBase=collateralEnabled?ownAfterBase:0n;threshold=BigInt(b.liquidationThresholdBps);debtBase=(BigInt(b.debt)*price+scale-1n)/scale;}
   else{
     const others=otherAccountBases(b),ownThreshold=reserveFlags(cfg).liquidationThreshold,ownBase=collateralEnabled&&ownThreshold!==0n?ownAfterBase:0n;
     collateralAfterBase=others.collateralBase+ownBase;
     threshold=collateralAfterBase?(others.weightedThreshold+ownBase*ownThreshold)/collateralAfterBase:0n;
     debtBase=(BigInt(b.debt)*price+scale-1n)/scale+others.debtBase;
   }
-  const healthFactorAfter=multi&&!collateralEnabled?b.healthFactor:borrowHealthFactor(collateralAfterBase.toString(),threshold.toString(),debtBase.toString());
+  const healthFactorAfter=!collateralEnabled?b.healthFactor:borrowHealthFactor(collateralAfterBase.toString(),threshold.toString(),debtBase.toString());
   if(BigInt(b.healthFactor)<BORROW_MINIMUM_HEALTH_FACTOR||BigInt(healthFactorAfter)<BORROW_MINIMUM_HEALTH_FACTOR)throw new Error('WITHDRAW_UNSAFE_HEALTH_FACTOR');
   return {collateralAfter:collateralAfter.toString(),collateralAfterBase:collateralAfterBase.toString(),healthFactorAfter,walletAfter:(BigInt(state.balance)+n).toString()};
 }

@@ -251,6 +251,22 @@ describe('Honest unsupported scope and stable historical hashes', () => {
     expect(reply).toMatchObject({ kind: 'PROPOSAL', sentence: `supply 1 ${asset} to Aave on Arbitrum One` });
     expect(reply.text).not.toMatch(/ASSET_|SUPPLY_|COPILOT_/); expect((await mcp().callTool('compose_strategy', { strategy })).isError).toBe(false);
   });
+  // BUILD AAVE-V3-EXPANSION-001 (security review): a shorter reserve label written only inside a longer one never grounds that shorter reserve.
+  it('"USDC.e" never becomes native USDC: the reserve the user wrote wins over a model that said USDC', () => {
+    for (const modelAsset of ['USDC', 'USDC.e']) {
+      const { reply } = natural('Supply 500 USDC.e to Aave on Arbitrum', act.lending('SUPPLY', { network: 'ARBITRUM', asset: modelAsset, amount: '500' }));
+      expect(reply).toMatchObject({ kind: 'PROPOSAL', sentence: 'supply 500 USDC.e to Aave on Arbitrum One', command: { input: { asset: 'USDC.e' } } });
+    }
+    // Both written: the plain label stands on its own and keeps its own reserve.
+    expect(natural('Supply 500 USDC to Aave on Arbitrum, not USDC.e', act.lending('SUPPLY', { network: 'ARBITRUM', asset: 'USDC', amount: '500' })).reply)
+      .toMatchObject({ kind: 'PROPOSAL', sentence: 'supply 500 USDC to Aave on Arbitrum One' });
+  });
+  it('"PT-USDe-5FEB2026" never becomes the USDe reserve', () => {
+    const { reply } = natural('Supply 10 PT-USDe-5FEB2026 to Aave on Ethereum', act.lending('SUPPLY', { network: 'ETHEREUM', asset: 'USDe', amount: '10' }));
+    expect(reply.kind === 'PROPOSAL' ? reply.sentence : reply.kind).not.toBe('supply 10 USDe to Aave on Ethereum');
+    if (reply.kind === 'PROPOSAL') expect(reply.sentence).toBe('supply 10 PT-USDe-5FEB2026 to Aave on Ethereum');
+    else expect(reply.command).toBeUndefined();
+  });
   it('an Arbitrum token that is not an Aave reserve stays refused', async () => {
     const strategy = { action: 'supply', network: 'arbitrum-one', asset: 'cbBTC', amount: '1', beneficiary: CERTIFICATION_OWNER };
     expect(composeStrategy(strategy).ok).toBe(false);

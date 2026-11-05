@@ -119,6 +119,16 @@ describe('BUILD AAVE-V3-EXPANSION-001 multi-reserve accounts', () => {
     const state = account({ supplied: 10n ** 18n, collateral: false, debt: 0n, price: 3000n * 10n ** 8n, config: WETH_CONFIG }, [usdcBoth]);
     expect(estimateWithdraw('400000000000000000', state, WETH)).toMatchObject({ healthFactorAfter: state.borrow!.healthFactor, collateralAfter: '600000000000000000' });
   });
+  it('every accepted Supply has an exit: a reserve supplied without collateral, or an isolated reserve, can be withdrawn (lending review)', () => {
+    // Single-reserve account, WETH supplied but not enabled as collateral (e.g. Aave did not enable it automatically): HF stays unchanged.
+    const plain = account({ supplied: 10n ** 18n, collateral: false, debt: 0n, price: 3000n * 10n ** 8n, config: WETH_CONFIG }, []);
+    expect(plain.borrow).toMatchObject({ collateralBase: '0', userConfiguration: '0', healthFactor: UINT_MAX });
+    expect(estimateWithdraw('400000000000000000', plain, WETH)).toMatchObject({ collateralAfter: '600000000000000000', collateralAfterBase: '0', healthFactorAfter: UINT_MAX });
+    // An isolated reserve (debt ceiling) used as collateral: withdrawable while the health factor stays above FloFi's minimum.
+    const isolatedConfig = config({ ltv: 8000n, lt: 8300n, decimals: 18, debtCeiling: 1_000_000n });
+    const isolated = account({ supplied: 10n ** 18n, collateral: true, debt: 0n, price: 3000n * 10n ** 8n, config: isolatedConfig }, []);
+    expect(estimateWithdraw('500000000000000000', isolated, WETH)).toMatchObject({ collateralAfter: '500000000000000000' });
+  });
   it('compiles exact calls for the authored reserve and refuses a chain-only or foreign-asset resolution', () => {
     const flow = (asset: { chainId: string; address: string; decimals: number }): SemanticWorkflow => ({ schemaVersion: '1.0.0', workflowId: 'w', revision: 0,
       nodes: [createSupplyNode('s', { chain: 'eip155:8453', asset, amount: '1000', beneficiary: OWNER })], resourceEdges: [] });

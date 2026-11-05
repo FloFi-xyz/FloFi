@@ -138,7 +138,7 @@ function reduceEditor(state: EditorState, command: Command, context?: ReviewCont
       if (command.type === 'SET_SOLANA_LIQUIDITY') {
         const old = current.nodes.find(n => n.nodeId === id)!, source = readConcentratedLiquiditySource(old as never).source, producer = current.nodes.find(n => n.nodeId === source?.nodeId);
         // A bound position stays bound to its swap output; its token side follows the swap, never the edit.
-        replacement = source && producer ? bindCompositionConsumer(replacement, producer) : { ...replacement, dependencies: [...old.dependencies] };
+        replacement = source && producer ? bindCompositionConsumer(replacement, ownDeclaration(producer)) : { ...replacement, dependencies: [...old.dependencies] };
       }
       if (command.type === 'SET_SOLANA_LIQUIDITY' && JSON.stringify(replacement) === JSON.stringify(current.nodes.find(n => n.nodeId === id))) return { workflow: current, error: null };
       const workflow = { ...current, revision: current.revision + 1, nodes: command.type === 'ADD_SOLANA_LIQUIDITY' ? [...current.nodes, replacement] : current.nodes.map(n => n.nodeId === id ? replacement : n) };
@@ -304,7 +304,7 @@ function reduceEditor(state: EditorState, command: Command, context?: ReviewCont
       // BUILD AAVE-V3-EXPANSION-001: connecting a registered composition pair that is already linked only by order (auto-connect) upgrades that
       // link to the pair's typed binding, exactly as connecting the unlinked pair would. Any other existing link stays as it is.
       const plain = ownDeclaration(target), from = nodes.find(n => n.nodeId === command.from)!;
-      if (plain === target || target.dependencies.length !== 1 || from.actionType.startsWith('mock-') || !compositionBindingFor(from, plain)) return { workflow: current, error: null };
+      if (plain === target || target.dependencies.length !== 1 || from.actionType.startsWith('mock-') || !compositionBindingFor(ownDeclaration(from), plain)) return { workflow: current, error: null };
       nodes = nodes.map(n => n.nodeId === command.to ? plain : n);
       target = plain;
     }
@@ -320,8 +320,9 @@ function reduceEditor(state: EditorState, command: Command, context?: ReviewCont
     if (mockLink && target.inputs.some(input => input.name === 'source')) return reject('INPUT_ALREADY_CONNECTED');
     // A registered composition pair links typed: the position's maximum for the swapped token becomes min(cap, the swap's
     // actual reconciled output). Any other link stays an ordering dependency, as before.
-    const composition = !mockLink && !target.dependencies.length && !target.inputs.some(input => input.kind === 'OUTPUT_REFERENCE') ? compositionBindingFor(producer, target) : null;
-    const bound = composition ? bindCompositionConsumer(target, producer) : null;
+    // The producer's own declaration: an ordering link of its own (auto-connect after an earlier step) never hides a registered pair.
+    const composition = !mockLink && !target.dependencies.length && !target.inputs.some(input => input.kind === 'OUTPUT_REFERENCE') ? compositionBindingFor(ownDeclaration(producer), target) : null;
+    const bound = composition ? bindCompositionConsumer(target, ownDeclaration(producer)) : null;
     nodes = nodes.map(n => n.nodeId === command.to ? bound ?? { ...n, dependencies: [...n.dependencies, command.from],
       inputs: mockLink ? [...n.inputs, { name: 'source' as const, kind: 'OUTPUT_REFERENCE' as const,
         value: { nodeId: command.from, outputId: 'result' } }] : n.inputs,
@@ -437,8 +438,11 @@ function applyCanvasRemoval(current: Workflow, plan: CanvasRemoval) {
 function connectedSteps(workflow: Workflow, ids: readonly string[]): Set<string> {
   const links = new Map<string, Set<string>>(workflow.nodes.map(node => [node.nodeId, new Set<string>()]));
   const link = (a: string, b: string) => { links.get(a)?.add(b); links.get(b)?.add(a); };
+  // BUILD AAVE-V3-EXPANSION-001: a plain ordering link (an auto-connected sequence) is not a composition; only a workflow that holds a typed
+  // composition (resource edges) or a step consuming another's output joins steps through their dependencies.
+  const typedGraph = workflow.resourceEdges.length > 0;
   for (const node of workflow.nodes) {
-    for (const parent of node.dependencies) link(node.nodeId, parent);
+    if (typedGraph || node.inputs.some(input => input.kind === 'OUTPUT_REFERENCE')) for (const parent of node.dependencies) link(node.nodeId, parent);
     for (const input of node.inputs) if (input.kind === 'OUTPUT_REFERENCE') link(node.nodeId, input.value.nodeId);
   }
   for (const edge of workflow.resourceEdges) link(edge.fromNodeId, edge.toNodeId);
@@ -475,9 +479,9 @@ function rebindConsumers(workflow: Workflow, producer: Workflow['nodes'][number]
   const nodes = workflow.nodes.map(node => {
     if (!boundTo(node, producer.nodeId)) return node;
     resourceEdges = resourceEdges.filter(edge => !(edge.fromNodeId === producer.nodeId && edge.toNodeId === node.nodeId));
-    const isolated = unbindCompositionConsumer(node), match = compositionBindingFor(producer, isolated);
+    const isolated = unbindCompositionConsumer(node), match = compositionBindingFor(ownDeclaration(producer), isolated);
     if (!match) return { ...isolated, dependencies: [producer.nodeId] };
-    const bound = bindCompositionConsumer(isolated, producer);
+    const bound = bindCompositionConsumer(isolated, ownDeclaration(producer));
     resourceEdges.push({ fromNodeId: producer.nodeId, outputId: match.binding.producer.outputId, toNodeId: node.nodeId, inputName: bound.inputs.at(-1)!.name });
     return bound;
   });

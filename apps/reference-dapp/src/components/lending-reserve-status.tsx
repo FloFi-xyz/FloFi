@@ -22,6 +22,7 @@ export const RESERVE_REASON_TEXT: Readonly<Record<AaveReserveReason, string>> = 
   ORACLE_UNAVAILABLE: 'The price oracle did not answer for this reserve.', ISOLATED_RESERVE_UNSUPPORTED: 'Flofi does not borrow isolated reserves yet.',
   RESERVE_IDENTITY_MISMATCH: 'This reserve does not match its verified registration.', NOT_LISTED_ON_CHAIN: 'This reserve is not listed by the market.',
   ACCOUNT_EMODE_UNSUPPORTED: 'Your Aave account uses E-Mode, which Flofi does not support yet.',
+  ACCOUNT_STATE_UNKNOWN: 'Your Aave account state could not be read right now; Simulate checks it on chain.',
 });
 /** The live catalog of the market serving `network` (null for a network without a mainnet Aave market). */
 export function useAaveReserves(network: string, account: string | null): { readonly catalog: AaveMarketCatalog | null; readonly failed: boolean; readonly loading: boolean } | null {
@@ -54,10 +55,12 @@ export function LendingReserveStatus({ live, asset, kind }: { readonly live: Ret
   const { t: tr } = useLocale();
   if (!live) return null;
   if (live.loading) return <p className="reserve-status" role="status">{tr('Reading the live Aave reserve…')}</p>;
+  // Labels are unique per market (the registry refuses to load otherwise), so the chosen label names exactly one reserve address.
   const status = live.catalog?.reserves.find(reserve => reserve.symbol === asset);
   if (!status) return <p className="reserve-status" role="status">{tr('Live reserve status is unavailable right now; Simulate checks it on chain.')}</p>;
   const blocker = reserveBlocker(status, kind), account = live.catalog?.account, amount = (value: string) => `${formatLendingAmount(value, status.decimals)} ${status.symbol}`;
-  return <div className="reserve-status" role="status" data-reserve={status.asset} data-available={blocker ? 'false' : 'true'}>
+  return <div className="reserve-status" role="status" data-reserve={status.asset} data-available={blocker ? 'false' : 'true'} data-provenance={live.catalog?.provenance ?? 'UNKNOWN'}>
+    {live.catalog?.provenance === 'MOCKED' && <p>{tr('Test fixture data (MOCKED): not a live market read.')}</p>}
     {blocker && <p role="alert">{tr(RESERVE_REASON_TEXT[blocker])}</p>}
     {status.wallet && <p>{tr('Wallet: {0} · Supplied: {1} · Debt: {2}', amount(status.wallet.balance), amount(status.wallet.supplied), amount(status.wallet.debt))}</p>}
     {(kind === 'supply' || kind === 'withdraw') && <p>{tr(status.collateralEligible ? 'Can be used as collateral (LTV {0}%).' : 'Not usable as collateral.', String(status.ltvBps / 100))}</p>}
@@ -74,5 +77,5 @@ export function reserveOptionLabel(symbol: string, live: ReturnType<typeof useAa
 const UNAVAILABLE_SHORT: Readonly<Record<AaveReserveReason, string>> = Object.freeze({
   RESERVE_INACTIVE: 'inactive', RESERVE_PAUSED: 'paused', RESERVE_FROZEN: 'frozen', SUPPLY_CAP_REACHED: 'supply cap reached', BORROWING_DISABLED: 'borrowing disabled',
   BORROW_CAP_REACHED: 'borrow cap reached', NO_LIQUIDITY: 'no liquidity', ORACLE_UNAVAILABLE: 'no oracle price', ISOLATED_RESERVE_UNSUPPORTED: 'isolated',
-  RESERVE_IDENTITY_MISMATCH: 'unverified', NOT_LISTED_ON_CHAIN: 'not listed', ACCOUNT_EMODE_UNSUPPORTED: 'E-Mode account',
+  RESERVE_IDENTITY_MISMATCH: 'unverified', NOT_LISTED_ON_CHAIN: 'not listed', ACCOUNT_EMODE_UNSUPPORTED: 'E-Mode account', ACCOUNT_STATE_UNKNOWN: 'account state unknown',
 });

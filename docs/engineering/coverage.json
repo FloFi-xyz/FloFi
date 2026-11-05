@@ -3442,7 +3442,8 @@
         "apps/reference-dapp/src/domain/observation-schedule.ts",
         "apps/reference-dapp/src/domain/landed-attempts.ts",
         "apps/reference-dapp/src/domain/wallet-portfolio.ts",
-        "apps/reference-dapp/src/domain/node-declaration.ts"
+        "apps/reference-dapp/src/domain/node-declaration.ts",
+        "apps/reference-dapp/src/domain/sequence-restore.ts"
       ],
       "suites": [
         "action-registry.engineering-regression",

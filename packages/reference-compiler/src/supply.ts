@@ -89,6 +89,17 @@ export async function readSupplyState(rpc: SupplyRpc, profileInput: AaveLendingP
         rpcUint(oracle) !== BigInt(profile.oracle) || rpcHex(oracleCode).length < 4 ||
         rpcUint(implementation) !== BigInt(profile.poolImplementation) || rpcHex(implementationCode).length < 4) throw new Error('SUPPLY_DEPLOYMENT_MISMATCH');
     codes.push(provider,revision,oracle,oracleCode,implementation,implementationCode);
+  } else if ('pinnedImplementation' in profile && profile.pinnedImplementation) {
+    // BUILD AAVE-V3-EXPANSION-001: the Base expansion reserves pin the address-book Pool implementation (ERC-1967 slot), the provider and the
+    // oracle at every read, so an upgrade between Simulate and the wallet request is never missed. (No revision is pinned: none was verified.)
+    const [provider, oracle, oracleCode, implementation] = await Promise.all([call(profile.pool, supplyCall('ADDRESSES_PROVIDER()')),
+      call(profile.provider, supplyCall('getPriceOracle()')), rpc('eth_getCode',[profile.oracle,tag]),
+      rpc('eth_getStorageAt',[profile.pool,'0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc',tag])]);
+    if (rpcUint(provider) !== BigInt(profile.provider) || rpcUint(oracle) !== BigInt(profile.oracle) || rpcHex(oracleCode).length < 4 ||
+        rpcUint(implementation) !== BigInt(profile.pinnedImplementation)) throw new Error('SUPPLY_DEPLOYMENT_MISMATCH');
+    const implementationCode = await rpc('eth_getCode',[profile.pinnedImplementation,tag]);
+    if (rpcHex(implementationCode).length < 4) throw new Error('SUPPLY_DEPLOYMENT_MISMATCH');
+    codes.push(provider,oracle,oracleCode,implementation,implementationCode);
   }
   // Aave cap accounting includes accrued-to-treasury scaled supply, not only minted aToken balances.
   const supplyCapUsage = 'validateSupplyCap' in profile ? ((rpcUint(await call(profile.aToken, supplyCall('scaledTotalSupply()'))) +
@@ -112,13 +123,19 @@ export type SupplyFeePolicy = { gasLimit: (estimate:bigint)=>bigint; maxFeePerGa
 const defaultFeePolicy:SupplyFeePolicy={gasLimit:gas=>(gas*150n+99n)/100n,maxFeePerGas:price=>price*2n};
 async function simulateSupplyWithAllowanceOverride(rpc: SupplyRpc, profile: AaveLendingProfile, transactions: SupplyTransaction[], state: SupplyState, amount: string, fees:SupplyFeePolicy): Promise<{gasLimits:string[];observation:unknown}> {
   const tag=supplyHex(state.block), approval=transactions.length===2?transactions[0]:null, supply=transactions.at(-1)!;
+  let approvalReturn:'true'|'NO_RETURN_DATA'|null=null;
   let override:Record<string,unknown>|null=null;
   if(approval){
     // First simulate the exact approval against real token code. The ERC-20 must return true.
     // Most ERC-20s return true; some (e.g. Ethereum USDT) return no data. A revert or any other value fails. The exact allowance is
     // then proven by the override below and again on chain after the approval.
-    const approved=await rpc('eth_call',[{from:approval.from,to:approval.to,data:approval.data,value:approval.value},tag]);
+    let approved:unknown;
+    try{approved=await rpc('eth_call',[{from:approval.from,to:approval.to,data:approval.data,value:approval.value},tag]);}
+    // Some tokens (e.g. Ethereum USDT) refuse to change a non-zero allowance to another non-zero value: say so instead of a generic failure.
+    // Only a JSON-RPC error answer (the call reverted) is read that way; transport failures keep their own codes.
+    catch(cause){if(BigInt(state.allowance)>0n&&cause instanceof Error&&cause.message==='SUPPLY_RPC_RESPONSE_INVALID')throw new Error('SUPPLY_ALLOWANCE_RESET_REQUIRED',{cause});throw cause;}
     if(approved!=='0x'&&rpcUint(approved)!==1n)throw new Error('SUPPLY_APPROVAL_SIMULATION_FAILED');
+    approvalReturn=approved==='0x'?'NO_RETURN_DATA':'true';
     // Bounded mapping discovery, with unique markers, followed by proof of ONE exact storage key.
     const candidates=Array.from({length:16},(_,i)=>allowanceSlot(profile,state.account,BigInt(i)));
     const stateDiff=Object.fromEntries(candidates.map((slot,i)=>[slot,'0x'+supplyWord(BigInt(i+1))]));
@@ -143,7 +160,7 @@ async function simulateSupplyWithAllowanceOverride(rpc: SupplyRpc, profile: Aave
   if(approval){const gas=rpcUint(await rpc('eth_estimateGas',[calls[0],tag]));if(gas<=0n)throw new Error('SUPPLY_GAS_INVALID');gasLimits.push(fees.gasLimit(gas).toString());}
   const gas=rpcUint(await rpc('eth_estimateGas',[{from:supply.from,to:supply.to,data:supply.data,value:supply.value},tag,...override?[override]:[]]));
   if(gas<=0n||gas>1_000_000n)throw new Error('SUPPLY_GAS_INVALID');gasLimits.push(fees.gasLimit(gas).toString());
-  return {gasLimits,observation:{method:'eth_call',approvalResult:approval?'true':null,allowanceOverride:override,supplyResult:result}};
+  return {gasLimits,observation:{method:'eth_call',approvalResult:approval?approvalReturn:null,allowanceOverride:override,supplyResult:result}};
 }
 export type SupplyReview = { withdraw?: { expectedPostHealthFactor:string; collateralAfter:string; collateralAfterBase:string; walletAfter:string }; repay?: { interestRateMode:2; expectedPostHealthFactor:string; debtAfterBase:string; debtAfter:string }; borrow?: { interestRateMode:2; expectedPostHealthFactor:string; debtAfterBase:string }; format: 'gryloo.supply-review.v1'; workflow: SemanticWorkflow; account: string; beneficiary: string; amount: string;
   pool: string; asset: string; aToken: string; chain: string; approvalRequired: boolean; allowance: string; state: SupplyState;
@@ -180,7 +197,8 @@ export async function simulateSupply(workflow: SemanticWorkflow, accountInput: s
   compileSupplyCalls(workflow,account,'0');
   const state = await (withdrawing ? readWithdrawState : borrowing || repaying || 'ownerBeneficiary' in profile ? readBorrowState : readSupplyState)(rpc,profile,account,fields.beneficiary);
   if (!borrowing && !repaying && !withdrawing) assertSupplyCap(profile, state, fields.amount);
-  if (!repaying && !withdrawing && reserveFlags(state.reserveConfiguration ?? '0').frozen) throw new Error(borrowing ? 'BORROW_RESERVE_UNAVAILABLE' : 'SUPPLY_RESERVE_UNAVAILABLE');
+  // A missing configuration is never read as "not frozen": Supply and Borrow need the reserve's current bits.
+  if (!repaying && !withdrawing && (state.reserveConfiguration === undefined || reserveFlags(state.reserveConfiguration).frozen)) throw new Error(borrowing ? 'BORROW_RESERVE_UNAVAILABLE' : 'SUPPLY_RESERVE_UNAVAILABLE');
   const estimate = borrowing ? estimateBorrow(fields.amount,state.borrow!,profile) : null;
   const repayment = repaying ? estimateRepay(fields.amount,state.borrow!,profile) : null;
   const withdrawal = withdrawing ? estimateWithdraw(fields.amount,state,profile) : null;
@@ -250,7 +268,7 @@ export function assertSupplyReview(review: SupplyReview, workflow: SemanticWorkf
       (!approvalConfirmed && ((!review.borrow && state.allowance !== review.allowance) || state.nonce !== review.state.nonce)) ||
       (approvalConfirmed && state.allowance !== review.amount) || !review.borrow && !review.withdraw && BigInt(state.balance) < BigInt(review.amount)) throw new Error('SUPPLY_AUTHORIZATION_STALE');
   if (!review.borrow && !review.repay && !review.withdraw) assertSupplyCap(profile, state, review.amount);
-  if (!review.repay && !review.withdraw && reserveFlags(state.reserveConfiguration ?? '0').frozen) throw new Error('SUPPLY_AUTHORIZATION_STALE');
+  if (!review.repay && !review.withdraw && (state.reserveConfiguration === undefined || reserveFlags(state.reserveConfiguration).frozen)) throw new Error('SUPPLY_AUTHORIZATION_STALE');
   if ('ownerBeneficiary' in profile && !review.borrow && !review.repay && !review.withdraw) {
     if (!state.borrow || !review.state.borrow) throw new Error('SUPPLY_AUTHORIZATION_STALE');
     for (const key of ['userConfiguration','eMode','scaledDebt','reserveConfiguration','codeHash'] as const)

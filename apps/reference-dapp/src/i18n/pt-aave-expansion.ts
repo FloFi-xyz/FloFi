@@ -12,6 +12,8 @@ export const portugueseAaveExpansion: Readonly<Record<string, string>> = Object.
   'One of your Aave positions could not be verified against the registered market. No transaction was prepared.':
     'Uma das suas posições na Aave não pôde ser verificada no mercado registrado. Nenhuma transação foi preparada.',
   'This reserve has reached its borrow cap. No transaction was prepared.': 'Esta reserva atingiu o limite de empréstimo. Nenhuma transação foi preparada.',
+  'This token refuses to change a non-zero allowance directly. Reset its allowance for the Aave Pool to zero in your wallet first; no transaction was prepared.':
+    'Este token não permite alterar diretamente uma permissão diferente de zero. Primeiro zere na sua carteira a permissão para o Pool da Aave; nenhuma transação foi preparada.',
   // Live reserve status (lending-reserve-status.tsx).
   'Reading the live Aave reserve…': 'Lendo a reserva Aave ao vivo…',
   'Live reserve status is unavailable right now; Simulate checks it on chain.': 'O status ao vivo da reserva está indisponível agora; o Simulate o verifica na rede.',
@@ -33,6 +35,9 @@ export const portugueseAaveExpansion: Readonly<Record<string, string>> = Object.
   'This reserve does not match its verified registration.': 'Esta reserva não corresponde ao seu registro verificado.',
   'This reserve is not listed by the market.': 'Esta reserva não está listada pelo mercado.',
   'Your Aave account uses E-Mode, which Flofi does not support yet.': 'Sua conta Aave usa E-Mode, que o Flofi ainda não suporta.',
+  'Your Aave account state could not be read right now; Simulate checks it on chain.': 'O estado da sua conta Aave não pôde ser lido agora; o Simulate o verifica na rede.',
+  'Test fixture data (MOCKED): not a live market read.': 'Dados de teste (MOCKED): não é uma leitura do mercado ao vivo.',
+  'account state unknown': 'estado da conta desconhecido',
   'inactive': 'inativa', 'paused': 'pausada', 'frozen': 'congelada', 'supply cap reached': 'limite de depósito atingido', 'borrowing disabled': 'empréstimo desativado',
   'borrow cap reached': 'limite de empréstimo atingido', 'no liquidity': 'sem liquidez', 'no oracle price': 'sem preço do oráculo', 'isolated': 'isolada',
   'unverified': 'não verificada', 'not listed': 'não listada', 'E-Mode account': 'conta em E-Mode',

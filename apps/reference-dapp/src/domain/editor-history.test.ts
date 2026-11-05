@@ -166,3 +166,16 @@ describe('canvas edit history', () => {
     expect(drawn(state)).toEqual(before);
   });
 });
+
+describe('BUILD AAVE-V3-EXPANSION-001 duplicate of auto-linked steps', () => {
+  it('duplicates a swap that auto-connect linked after an earlier swap; the copy keeps only links among the copies', () => {
+    let state = initialEditorHistory();
+    for (let i = 0; i < 2; i++) state = edit(state, { type: 'ADD_SWAP', direction: 'USDC_TO_WETH', amount: String(i + 1), slippage: '50', source: 'CANVAS' } as EditInput);
+    const [first, second] = state.editor.workflow.nodes.filter(n => n.actionType === 'asset.swap.exact-input');
+    expect(second!.dependencies).toEqual([first!.nodeId]);
+    const plan = planCanvasDuplicate(state.editor.workflow, state.layout, [second!.nodeId], context);
+    expect(plan).not.toBeNull();
+    const copy = plan!.workflow.nodes.at(-1)!;
+    expect(copy.dependencies).toEqual([]);
+  });
+});

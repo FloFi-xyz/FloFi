@@ -59,6 +59,26 @@ describe('Canvas authoring of Solana Devnet Swap → Orca liquidity', () => {
     expect(upgraded.workflow.resourceEdges).toEqual(manual.workflow.resourceEdges);
     expect(isBoundComposition(upgraded.workflow)).toBe(true);
   });
+  it('BUILD AAVE-V3-EXPANSION-001 (workflow review): a swap auto-linked after an earlier step still binds its output to a position', () => {
+    // swap → swap (auto-linked) → position (auto-linked): connecting the second swap to the position forms the typed binding.
+    let state = apply(initialEditor(), { type: 'ADD_SOLANA_SWAP', input: swap });
+    const first = state.workflow.nodes.at(-1)!.nodeId;
+    state = apply(state, { type: 'ADD_SOLANA_SWAP', input: { ...swap, amount: '0.2' } });
+    const second = state.workflow.nodes.at(-1)!.nodeId;
+    expect(state.workflow.nodes.find(n => n.nodeId === second)!.dependencies).toEqual([first]);
+    state = apply(state, { type: 'ADD_SOLANA_LIQUIDITY', input: position });
+    const pool = state.workflow.nodes.at(-1)!.nodeId;
+    const linked = apply(state, { type: 'CONNECT', from: second, to: pool });
+    expect(linked.workflow.resourceEdges).toEqual([{ fromNodeId: second, outputId: 'amount-out', toNodeId: pool, inputName: 'amount1-source' }]);
+    expect(linked.workflow.nodes.find(n => n.nodeId === second)!.dependencies).toEqual([first]);
+    // The chat's composition command from that same second swap binds as well.
+    const viaChat = apply(apply(apply(initialEditor(), { type: 'ADD_SOLANA_SWAP', input: swap }), { type: 'ADD_SOLANA_SWAP', input: { ...swap, amount: '0.2' } }),
+      { type: 'ADD_SOLANA_COMPOSITION', swap: null, from: second, liquidity: position });
+    expect(viaChat.workflow.resourceEdges).toHaveLength(1);
+    expect(viaChat.workflow.resourceEdges[0]).toMatchObject({ fromNodeId: second, outputId: 'amount-out' });
+    // With an extra step the pair is authorable but, as before, not an executable bound composition on its own.
+    expect(isBoundComposition(linked.workflow)).toBe(false);
+  });
   it('keeps a reverse link an ordering dependency, reported as not executable', () => {
     const { state, swapId, poolId } = built();
     const reverse = apply(state, { type: 'CONNECT', from: poolId, to: swapId });

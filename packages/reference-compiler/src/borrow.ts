@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import { AAVE_V3_LENDING_PROFILES, aaveEnvironment, assertAaveLendingProfile, type AaveLendingProfile } from '@defi-workflow-engine/action-registry';
+import { AAVE_V3_LENDING_PROFILES, aaveEnvironment, assertAaveLendingProfile, isAaveExpansionReserve, type AaveLendingProfile } from '@defi-workflow-engine/action-registry';
 import { readBorrowNode, supplyAddress, type SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
 import { readSupplyState, supplyCall, supplyHex, rpcUint, rpcHex, rpcHash, rpcRecord, supplyHash, lendingProfile, reserveBits, type SupplyRpc, type SupplyState, type SupplyTransaction } from './supply.js';
 export const BORROW_MINIMUM_HEALTH_FACTOR = 2n * 10n ** 18n;
@@ -205,5 +205,14 @@ export function assertBorrowFresh(amount:string,before:BorrowState,after:BorrowS
   if(abs(BigInt(a.healthFactorAfter)-BigInt(b.healthFactorAfter))>BigInt(a.healthFactorAfter)/1000n)throw new Error('BORROW_AUTHORIZATION_STALE');
 }
 
+/** The other positions' reserves and collateral/debt flags only (reconciliation: a block's own governance change is not this transaction's). */
+export const positionIdentity=(state:BorrowState):string=>JSON.stringify((state.positions??[]).map(p=>[p.reserveId,p.asset,p.collateral,p.borrowing]));
+/**
+ * Reconciliation mode of a lending effect. The original native-USDC single-reserve profiles keep their exact pre/post drift checks. Every
+ * other reserve, and any multi-reserve account, proves Aave's aggregates independently at each block instead: account-weighted LTV and
+ * liquidation threshold, collateral and debt values legitimately move with oracle prices and collateral mix, so they are recomputed from
+ * the verified positions rather than compared across blocks.
+ */
+export const accountReconciliation=(profile:AaveLendingProfile,pre:BorrowState,post:BorrowState):boolean=>Boolean(pre.positions||post.positions)||isAaveExpansionReserve(assertAaveLendingProfile(profile));
 /** The identity and flags of an account's other positions (a review stays valid only while they are the same reserves and configurations). */
 export const positionShape=(state:BorrowState):string=>JSON.stringify((state.positions??[]).map(p=>[p.reserveId,p.asset,p.collateral,p.borrowing,p.reserveConfiguration]));

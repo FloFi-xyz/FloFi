@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
+import { ownDeclaration } from './node-declaration';
 import { ROBINHOOD_NETWORK, featuredStockSymbols } from './asset-catalogs';
 import { createBaseSepoliaReviewContext, validateWorkflowDraft, type ReviewContext } from '@defi-workflow-engine/reference-linter';
 import { validateSavedWorkflow } from './saved-workflow';
@@ -63,7 +64,8 @@ export function planCanvasDuplicate(workflow: Workflow, layout: CanvasLayout, no
   const selected = new Set(nodeIds);
   const sources = workflow.nodes.filter(node => selected.has(node.nodeId) &&
     (node.actionType.startsWith('mock-') || (node.actionType === 'asset.swap.exact-input' &&
-      !node.dependencies.length && !node.inputs.some(input => input.kind === 'OUTPUT_REFERENCE'))));
+      // An ordering link after an earlier step (auto-connect) is not part of the swap; the copy keeps only links among the copies.
+      !ownDeclaration(node).dependencies.length && !node.inputs.some(input => input.kind === 'OUTPUT_REFERENCE'))));
   if (!sources.length || workflow.nodes.length + sources.length > 1024 || workflow.revision === Number.MAX_SAFE_INTEGER) return null;
   const next = Math.max(9000000000000000, ...workflow.nodes.flatMap(node => /^node-\d{3,16}$/.test(node.nodeId)
     ? [Number(node.nodeId.slice(5))] : []));

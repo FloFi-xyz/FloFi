@@ -108,6 +108,8 @@ export function createSupplyService(input:{rpc:SupplyRpc;rpcs?:Readonly<Partial<
   }
   // BUILD AAVE-V3-EXPANSION-001: the live reserve catalog of this service's mainnet market, read-only and briefly cached per owner.
   const reserveCache=new Map<string,{at:number;value:Promise<AaveMarketCatalog>}>();
+  // At most two uncached catalog reads in flight per service: the market's read client also serves Simulate, Review and preflight.
+  let reservesInFlight=0;
   return {
     load,
     /** Live reserve availability, balances and account aggregates for the pickers. Read-only display information; never an authorization. */
@@ -115,9 +117,12 @@ export function createSupplyService(input:{rpc:SupplyRpc;rpcs?:Readonly<Partial<
       if(!AAVE_V3_MARKETS.some(market=>market.chain===chain)||catalogNetworkOfChain(chain)?.prefixes.lending!==idPrefix)throw new Error('SUPPLY_NETWORK_UNAVAILABLE');
       const owner=account===undefined?'':account.toLowerCase(),key=`${chain}|${owner}`,now=Date.now(),hit=reserveCache.get(key);
       if(hit&&now-hit.at<15_000)return hit.value;
-      const value=discoverAaveReserves(rpcFor(chain),chain,account);
+      if(reservesInFlight>=2)throw new Error('SUPPLY_RPC_RATE_LIMITED');
+      reservesInFlight++;
+      const provenance=input.provenance==='MOCKED'?'MOCKED' as const:'PUBLIC_MAINNET' as const;
+      const value=discoverAaveReserves(rpcFor(chain),chain,account).then(catalog=>({...catalog,provenance}));
       reserveCache.set(key,{at:now,value});if(reserveCache.size>256)reserveCache.delete(reserveCache.keys().next().value!);
-      value.catch(()=>reserveCache.delete(key));
+      value.catch(()=>reserveCache.delete(key)).finally(()=>{reservesInFlight--;});
       return value;
     },
     async simulate(workflowInput:unknown,account:string):Promise<SupplyRecord>{

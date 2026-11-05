@@ -324,8 +324,8 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
   const stepRunKey = liveStep?.runKey ?? null;
   useEffect(() => {
     if (!sequence || !stepDone || awaitingDelivery) return;
-    completeSequenceStep(sequence.cursor, { received: stepDelivered, runKey: stepRunKey });
-  }, [sequence?.cursor, stepDone, awaitingDelivery, stepDelivered, stepRunKey, completeSequenceStep]);
+    completeSequenceStep(sequence.cursor, { received: stepDelivered, runKey: stepRunKey, kind: simulationSource.kind });
+  }, [sequence?.cursor, stepDone, awaitingDelivery, stepDelivered, stepRunKey, completeSequenceStep, simulationSource.kind]);
   // BUILD-FLOFI-CHAT-E2E-DASHBOARD-UX-001: a one-action workflow whose own run is final and reconciled (same rule as a sequence step) is kept as
   // an executed first step, so the owner can keep building it: an action added afterwards is its own next step, never a repeat of this one.
   const soleAction = !sequence ? sequenceOrder(state.workflow) : [];
@@ -333,8 +333,8 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
     liveStep.state === 'complete' && isFinalExecutionResult(liveStep));
   const actionDelivered = actionDone ? deliveredByRecord(simulationSource.kind, stepRecord, stepAssets(soleAction[0]!).output) : null;
   useEffect(() => {
-    if (actionDone) recordExecutedAction({ received: actionDelivered, runKey: stepRunKey });
-  }, [actionDone, actionDelivered, stepRunKey, recordExecutedAction]);
+    if (actionDone) recordExecutedAction({ received: actionDelivered, runKey: stepRunKey, kind: simulationSource.kind });
+  }, [actionDone, actionDelivered, stepRunKey, recordExecutedAction, simulationSource.kind]);
   const sequencePresentation = sequence ? { ...presentSequence(state.workflow, context, sequence), issue: sequenceIssue, awaitingDelivery } : null;
   // Every runtime surface names the step it serves, so a step's simulation or Review never reads as the whole workflow's.
   const sequenceNote = sequencePresentation ? sequencePresentation.finished ? tr('All {0} steps of this workflow are completed and reconciled.', sequencePresentation.total)

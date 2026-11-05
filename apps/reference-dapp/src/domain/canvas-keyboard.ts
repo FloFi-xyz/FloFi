@@ -19,7 +19,8 @@ export function canDeleteCanvasNode(workflow: Workflow, nodeId: string | null): 
 /**
  * The exact effect of deleting `selectedIds`: the selected steps; dependants that read a deleted step's output and cannot stand alone
  * (`cascaded`, removed with it and reported to the owner); and bound composition consumers that return to their isolated form (`unbound`).
- * Steps that only depended on a deleted step's ordering keep their own values and lose that link.
+ * Steps that only depended on a deleted step's ordering keep their own values; the editor re-links them to the deleted step's own predecessors
+ * (A → B → C, delete B: A → C, BUILD AAVE-V3-EXPANSION-001), so a sequence stays in order.
  */
 export type CanvasRemoval = { readonly removed: readonly string[]; readonly cascaded: readonly string[]; readonly unbound: readonly string[] };
 export function planCanvasRemoval(workflow: Workflow, selectedIds: readonly string[]): CanvasRemoval | null {

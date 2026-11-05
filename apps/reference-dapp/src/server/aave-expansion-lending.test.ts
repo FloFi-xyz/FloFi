@@ -41,9 +41,10 @@ function reserve(p: AaveLendingProfile, config?: (base: bigint) => bigint): Mode
   model.history.set(model.state.block, { ...model.state });
   return model;
 }
-async function fixture(p: AaveLendingProfile, test: (f: { model: Model; service: ReturnType<typeof createSupplyService> }) => Promise<void>, config?: (base: bigint) => bigint) {
+async function fixture(p: AaveLendingProfile, test: (f: { model: Model; service: ReturnType<typeof createSupplyService> }) => Promise<void>, config?: (base: bigint) => bigint,
+  decorate: (rpc: Rpc) => Rpc = rpc => rpc) {
   const dir = await mkdtemp(join(tmpdir(), 'aave-expansion-')), model = reserve(p, config);
-  const service = createSupplyService({ rpc: async () => { throw new Error('SUPPLY_NETWORK_UNAVAILABLE'); }, rpcs: { [p.chain]: model.rpc }, journalDir: dir,
+  const service = createSupplyService({ rpc: async () => { throw new Error('SUPPLY_NETWORK_UNAVAILABLE'); }, rpcs: { [p.chain]: decorate(model.rpc) }, journalDir: dir,
     provenance: 'MOCKED', idPrefix: PREFIX[p.chain]!, executionEnabled: true });
   try { await test({ model, service }); } finally { await rm(dir, { recursive: true, force: true }); }
 }
@@ -102,6 +103,32 @@ describe('BUILD AAVE-V3-EXPANSION-001 non-USDC reserves (MOCKED loopback)', () =
     await execute(service, model, workflow(CBBTC_BASE, 'supply', '500000000'));
     await expect(service.simulate(workflow(CBBTC_BASE, 'borrow', '200000000'), OWNER)).rejects.toThrow('BORROW_CAP_EXCEEDED');
   }, base => (base & ~(((1n << 36n) - 1n) << 80n)) | (1n << 80n)));
+  it('names the reset an allowance-sensitive token needs instead of a generic failure (USDT-style approve)', async () => {
+    // The token reverts approve(non-zero) while its current allowance is non-zero, as Ethereum USDT does; the RPC answers a JSON-RPC error.
+    const usdtLike = (rpc: Rpc): Rpc => async (method, params) => {
+      const call = params[0] as { to?: string; data?: string } | undefined;
+      if (method === 'eth_call' && params.length === 2 && call?.to === WETH_BASE.asset && call.data?.startsWith(supplyCall('approve(address,uint256)').slice(0, 10)))
+        throw new Error('SUPPLY_RPC_RESPONSE_INVALID');
+      return rpc(method, params);
+    };
+    await fixture(WETH_BASE, async ({ model, service }) => {
+      model.state.allowance = 1n; model.history.set(model.state.block, { ...model.state });
+      await expect(service.simulate(workflow(WETH_BASE, 'supply', String(10n ** 15n)), OWNER)).rejects.toThrow('SUPPLY_ALLOWANCE_RESET_REQUIRED');
+    }, undefined, usdtLike);
+  });
+  it('pins the Base Pool implementation for the expansion reserves: an upgraded implementation fails closed', async () => {
+    expect('pinnedImplementation' in WETH_BASE && WETH_BASE.pinnedImplementation).toMatch(/^0x[0-9a-f]{40}$/);
+    expect('pinnedImplementation' in AAVE_V3_BASE).toBe(false);
+    const upgraded = (rpc: Rpc): Rpc => async (method, params) => method === 'eth_getStorageAt' ? '0x' + '0'.repeat(24) + 'b'.repeat(40) : rpc(method, params);
+    await fixture(WETH_BASE, async ({ service }) => {
+      await expect(service.simulate(workflow(WETH_BASE, 'supply', '1000'), OWNER)).rejects.toThrow('SUPPLY_DEPLOYMENT_MISMATCH');
+    }, undefined, upgraded);
+  });
+  it('withdraws a supply that is not enabled as collateral (Aave did not enable it automatically) with the health factor unchanged', async () => fixture(WBTC_ARBITRUM, async ({ model, service }) => {
+    model.state.userConfig = 0n; model.history.set(model.state.block, { ...model.state });
+    const run = await execute(service, model, workflow(WBTC_ARBITRUM, 'withdraw', '10000'));
+    expect([run.verdict, run.review.withdraw?.expectedPostHealthFactor]).toEqual(['RECONCILED', ((1n << 256n) - 1n).toString()]);
+  }));
   it('never resolves a reserve by symbol alone: a workflow naming another chain\'s WETH is refused', async () => fixture(WETH_BASE, async ({ service }) => {
     const foreign = workflow(WETH_BASE, 'supply', '1000');
     const node = foreign.nodes[0]!;

@@ -18,13 +18,16 @@ export function validateWorkflowDraft(input: unknown, context: ReviewContext): S
     // complete, valid composition; every other step is checked on its own below, as before.
     const consumer = typed.length === 1 && workflow.resourceEdges.length === 1 ? typed[0]! : null;
     const producer = consumer ? workflow.nodes.find(node => node.nodeId === consumer.dependencies[0]) : undefined;
-    const pair = consumer && producer ? { ...workflow, nodes: [producer, consumer], resourceEdges: workflow.resourceEdges } : null;
+    // BUILD AAVE-V3-EXPANSION-001: the pair is checked alone, so a producer's pure ordering link to an earlier step outside it (auto-connect) is
+    // set aside; a producer that itself consumes an output keeps its links and is judged as it is.
+    const ownProducer = producer && !producer.inputs.some(p => p.kind === 'OUTPUT_REFERENCE') ? { ...producer, dependencies: [] } : producer;
+    const pair = consumer && producer && ownProducer ? { ...workflow, nodes: [ownProducer, consumer], resourceEdges: workflow.resourceEdges } : null;
     if (workflow.resourceEdges.length || typed.length) {
       if (!pair || !isBoundComposition(pair)) throw original;
       validateAuthoringWorkflow(pair, reviewContextForChain(producer!.chainId, context));
     }
     for (const node of workflow.nodes) {
-      if (pair?.nodes.includes(node)) continue;
+      if (pair && (node === consumer || node === producer)) continue;
       validateAuthoringWorkflow({ ...workflow, nodes: [{ ...node, dependencies: [] }], resourceEdges: [] }, reviewContextForChain(node.chainId, node.chainId === 'eip155:8453' ? createReviewContext({ ...context, assets: baseAssetRegistry }) : context));
     }
     return workflow;

@@ -114,7 +114,9 @@ type ReserveIdentity = { readonly asset: string; readonly decimals: number; read
 /** A non-USDC mainnet reserve: the market's profile, that reserve's identity, owner-only beneficiary and an exact supply-cap check. */
 export type AaveReserveProfile<M extends MainnetMarketProfile = MainnetMarketProfile> = Readonly<Omit<M, keyof ReserveIdentity> & ReserveIdentity & {
   /** The address-book key (an authoring alias; e.g. `USDCn` for Arbitrum native USDC). */ readonly addressBookKey: string;
-  /** The reserve's price source registered in the AaveOracle (`getSourceOfAsset`), re-read on chain by discovery. */ readonly priceSource: string;
+  /** The reserve's price source registered in the AaveOracle at the snapshot commit; discovery compares `getSourceOfAsset` with it. */ readonly priceSource: string;
+  /** A market whose verified profile records no implementation pin (Base): the address-book Pool implementation, checked at every state read. */
+  readonly pinnedImplementation?: string;
   readonly ownerBeneficiary: true; readonly validateSupplyCap: true }>;
 /** Display labels where the address-book key is not the token's symbol. The label is never an identity. */
 const RESERVE_LABELS: Readonly<Record<string, string>> = Object.freeze({ USDCn: 'USDC', USDCe: 'USDC.e', ONE_INCH: '1INCH', BTCb: 'BTC.b' });
@@ -128,9 +130,13 @@ function reserveProfiles(market: MainnetMarketProfile): readonly (MainnetMarketP
   const verified = book.reserves.find(reserve => reserve.underlying === market.asset);
   if (!verified || verified.id !== market.reserveId || verified.decimals !== market.decimals || verified.aToken !== market.aToken ||
       verified.variableDebtToken !== market.variableDebtToken) throw new Error('AAVE_ADDRESS_BOOK_RESERVE_MISMATCH');
+  // Labels are display names and authoring aliases: within one market they must never name two reserves.
+  const labels = book.reserves.map(reserve => reserve.underlying === market.asset ? market.symbol : aaveReserveLabel(reserve.key)).map(label => label.toLowerCase());
+  if (new Set(labels).size !== labels.length) throw new Error('AAVE_ADDRESS_BOOK_LABEL_DUPLICATE');
   return Object.freeze(book.reserves.map((reserve: AaveAddressBookReserve) => reserve.underlying === market.asset ? market : Object.freeze({
     ...market, asset: reserve.underlying, decimals: reserve.decimals, symbol: aaveReserveLabel(reserve.key), reserveId: reserve.id, aToken: reserve.aToken,
     variableDebtToken: reserve.variableDebtToken, addressBookKey: reserve.key, priceSource: reserve.oracle,
+    ...'poolImplementation' in market ? {} : { pinnedImplementation: book.poolImplementation },
     officialSource: `https://github.com/aave-dao/aave-address-book/blob/${AAVE_V3_ADDRESS_BOOK_COMMIT}/src/ts/${book.library}.ts`,
     ownerBeneficiary: true as const, validateSupplyCap: true as const,
   }) as AaveReserveProfile));

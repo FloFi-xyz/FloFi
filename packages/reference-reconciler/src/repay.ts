@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { secp256k1 } from '@noble/curves/secp256k1.js';
 import { keccak_256 } from '@noble/hashes/sha3.js';
-import { lendingProfile, reserveBits, readBorrowState, assertAccountTotals, positionShape, compileRepayCalls, borrowHealthFactor, supplyHex, supplyWord,
+import { lendingProfile, reserveBits, readBorrowState, assertAccountTotals, accountReconciliation, positionIdentity, compileRepayCalls, borrowHealthFactor, supplyHex, supplyWord,
   supplyTopic, supplyHash, supplyArtifactHash, rpcUint, rpcRecord, rpcHash, rpcHex, SUPPLY_METAMASK,
   rlpEncode, rlpInteger, fromHex, toHex, type AaveLendingProfile, type RlpValue, type SupplyReview, type SupplyState, type SupplyRpc } from '@defi-workflow-engine/reference-compiler';
 import { hashJournalBytes, type EvidenceBundle, type ExecutionJournal } from '@defi-workflow-engine/workflow-contracts';
@@ -35,17 +35,18 @@ export function verifyRepayEffects(amount:string,pre:SupplyState,post:SupplyStat
   if(burn!==floor&&burn!==nearest)throw new Error('REPAY_DEBT_ROUNDING_MISMATCH');
   if(index<BigInt(a.debtIndex)||index<ray||burn<=0n||debtDelta>=0n||BigInt(b.debt)<=0n||abs(normalized-n)>bound||
     abs(BigInt(a.debt)-(BigInt(a.scaledDebt)*BigInt(a.debtIndex)+ray/2n)/ray)>1n||abs(BigInt(b.debt)-(BigInt(b.scaledDebt)*index+ray/2n)/ray)>1n)throw new Error('REPAY_DEBT_INDEX_MISMATCH');
-  if(pre.scaledPosition!==post.scaledPosition||a.userConfiguration!==b.userConfiguration||a.reserveConfiguration!==b.reserveConfiguration||a.ltvBps!==b.ltvBps||a.liquidationThresholdBps!==b.liquidationThresholdBps||a.eMode!==b.eMode||a.codeHash!==b.codeHash||a.variableDebtToken!==b.variableDebtToken)throw new Error('REPAY_COLLATERAL_MISMATCH');
-  if(abs(BigInt(b.price)-BigInt(a.price))>BigInt(a.price)/1000n||abs(BigInt(b.collateralBase)-BigInt(a.collateralBase))>BigInt(a.collateralBase)/1000n+2n)throw new Error('REPAY_COLLATERAL_MISMATCH');
+  const accountMode=accountReconciliation(profile,a,b);
+  if(pre.scaledPosition!==post.scaledPosition||a.userConfiguration!==b.userConfiguration||a.reserveConfiguration!==b.reserveConfiguration||a.eMode!==b.eMode||a.codeHash!==b.codeHash||a.variableDebtToken!==b.variableDebtToken||positionIdentity(a)!==positionIdentity(b))throw new Error('REPAY_COLLATERAL_MISMATCH');
+  // The original single-reserve profiles keep their exact drift checks; account mode proves the aggregates at each block below.
+  if(!accountMode&&(a.ltvBps!==b.ltvBps||a.liquidationThresholdBps!==b.liquidationThresholdBps||abs(BigInt(b.price)-BigInt(a.price))>BigInt(a.price)/1000n||abs(BigInt(b.collateralBase)-BigInt(a.collateralBase))>BigInt(a.collateralBase)/1000n+2n))throw new Error('REPAY_COLLATERAL_MISMATCH');
   const allowance=BigInt(pre.allowance),expectedAllowance=allowance===(1n<<256n)-1n?allowance:allowance-n;
   if(allowance<n||BigInt(post.allowance)!==expectedAllowance)throw new Error('REPAY_ALLOWANCE_MISMATCH');
-  // A multi-reserve account (BUILD AAVE-V3-EXPANSION-001) proves its aggregates from every verified position at the same block.
-  if(positionShape(a)!==positionShape(b))throw new Error('REPAY_ACCOUNT_DEBT_MISMATCH');
-  if(b.positions){try{assertAccountTotals(post.position,b,profile);}catch{throw new Error('REPAY_ACCOUNT_DEBT_MISMATCH');}}
-  else if(abs(BigInt(b.debtBase)-BigInt(b.debt)*BigInt(b.price)/scale)>2n)throw new Error('REPAY_ACCOUNT_DEBT_MISMATCH');
-  if(BigInt(b.debtBase)>=BigInt(a.debtBase))throw new Error('REPAY_ACCOUNT_DEBT_MISMATCH');
+  // Account mode (BUILD AAVE-V3-EXPANSION-001): Aave's aggregates at each block equal the recomputation from that block's verified positions.
+  if(accountMode){try{assertAccountTotals(pre.position,a,profile);assertAccountTotals(post.position,b,profile);}catch{throw new Error('REPAY_ACCOUNT_DEBT_MISMATCH');}}
+  else if(abs(BigInt(b.debtBase)-BigInt(b.debt)*BigInt(b.price)/scale)>2n||BigInt(b.debtBase)>=BigInt(a.debtBase))throw new Error('REPAY_ACCOUNT_DEBT_MISMATCH');
   const health=BigInt(borrowHealthFactor(b.collateralBase,b.liquidationThresholdBps,b.debtBase));
-  if(BigInt(b.healthFactor)<=BigInt(a.healthFactor)||abs(BigInt(b.healthFactor)-health)>health/1000000n+1n)throw new Error('REPAY_HEALTH_FACTOR_MISMATCH');
+  // With fixed prices a repayment always raises the health factor; in account mode other reserves' prices may move in the same block.
+  if(!accountMode&&BigInt(b.healthFactor)<=BigInt(a.healthFactor)||abs(BigInt(b.healthFactor)-health)>health/1000000n+1n)throw new Error('REPAY_HEALTH_FACTOR_MISMATCH');
   return {walletDelta:walletDelta.toString(),debtDelta:debtDelta.toString(),normalizedRepayment:normalized.toString(),roundingBound:bound.toString(),delta:normalized.toString(),scaledDelta:burn.toString()};
 }
 function assertOwnerTransfers(p:AaveLendingProfile,logs:unknown[],owner:string,amount:string,approval:boolean):void {

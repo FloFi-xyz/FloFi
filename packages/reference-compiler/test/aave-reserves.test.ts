@@ -1,14 +1,15 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 /** BUILD AAVE-V3-EXPANSION-001: live Aave reserve discovery against a scripted read-only Base market (no network). */
 import { describe, expect, it } from 'vitest';
-import { AAVE_V3_MARKETS } from '@defi-workflow-engine/action-registry';
+import { AAVE_V3_ADDRESS_BOOK, AAVE_V3_MARKETS } from '@defi-workflow-engine/action-registry';
 import { aaveRateApyPercent, discoverAaveReserves, MULTICALL3, supplyCall, supplySelector, supplyWord, type SupplyRpc } from '../src/index.js';
 
 const market = AAVE_V3_MARKETS.find(m => m.chain === 'eip155:8453')!;
 const OWNER = '0x' + '3'.repeat(40), RAY = 10n ** 27n;
-type Reserve = { config: bigint; listed?: boolean; id?: number; aToken?: string; price?: bigint; liquidity?: bigint; scaledSupply?: bigint; debt?: bigint; liquidityRate?: bigint };
+type Reserve = { config: bigint; listed?: boolean; id?: number; aToken?: string; price?: bigint; liquidity?: bigint; scaledSupply?: bigint; debt?: bigint; liquidityRate?: bigint; source?: string };
+const book = AAVE_V3_ADDRESS_BOOK.find(b => b.chain === 'eip155:8453')!;
 const config = (decimals: number, extra = 0n) => 7500n | (7800n << 16n) | (BigInt(decimals) << 48n) | (1n << 56n) | (1n << 58n) | extra;
-function harness(reserves: Map<string, Reserve>, options: { multicall: boolean; extraListed?: string[] }) {
+function harness(reserves: Map<string, Reserve>, options: { multicall: boolean; extraListed?: string[]; failEMode?: boolean }) {
   const calls: string[] = [];
   const answer = (to: string, data: string): string | null => {
     const word = (v: bigint | string) => '0x' + supplyWord(v);
@@ -30,13 +31,14 @@ function harness(reserves: Map<string, Reserve>, options: { multicall: boolean; 
       if (to === profile.variableDebtToken && data === supplyCall('totalSupply()')) return word(r.debt ?? 0n);
       if (to === profile.asset && data === supplyCall('balanceOf(address)', profile.aToken)) return word(r.liquidity ?? 10n ** 24n);
       if (to === market.oracle && data === supplyCall('getAssetPrice(address)', profile.asset)) return word(r.price ?? 100000000n);
+      if (to === market.oracle && data === supplyCall('getSourceOfAsset(address)', profile.asset)) return word(r.source ?? book.reserves.find(b => b.underlying === profile.asset)!.oracle);
       if (to === profile.asset && data === supplyCall('balanceOf(address)', OWNER)) return word(7n);
       if (to === profile.aToken && data === supplyCall('balanceOf(address)', OWNER)) return word(5n);
       if (to === profile.variableDebtToken && data === supplyCall('balanceOf(address)', OWNER)) return word(0n);
     }
     if (to === market.pool && data === supplyCall('getUserAccountData(address)', OWNER)) return '0x' + [100n, 0n, 75n, 7800n, 7500n, (1n << 256n) - 1n].map(v => supplyWord(v)).join('');
     if (to === market.pool && data === supplyCall('getUserConfiguration(address)', OWNER)) return word(2n << 8n);
-    if (to === market.pool && data === supplyCall('getUserEMode(address)', OWNER)) return word(0n);
+    if (to === market.pool && data === supplyCall('getUserEMode(address)', OWNER)) return options.failEMode ? null : word(0n);
     return null;
   };
   const rpc: SupplyRpc = async (method, params) => {
@@ -97,6 +99,15 @@ describe('BUILD AAVE-V3-EXPANSION-001 Aave reserve discovery', () => {
     expect(catalog.reserves.find(r => r.symbol === 'WETH')).toMatchObject({ verified: false, supply: { reason: 'RESERVE_IDENTITY_MISMATCH' } });
     expect(catalog.reserves.find(r => r.symbol === 'USDC')).toMatchObject({ supply: { reason: 'SUPPLY_CAP_REACHED' }, borrow: { reason: 'BORROW_CAP_REACHED' } });
     expect(catalog.account).toBeUndefined();
+  });
+  it('reports an oracle source that differs from the snapshot and never guesses an unreadable account state', async () => {
+    const reserves = new Map<string, Reserve>([[usdc.asset, { config: config(6) }], [weth.asset, { config: config(18), source: '0x' + '7'.repeat(40) }]]);
+    const catalog = await discoverAaveReserves(harness(reserves, { multicall: true, failEMode: true }).rpc, 'eip155:8453', OWNER);
+    expect(catalog.reserves.find(r => r.symbol === 'USDC')?.priceSourceMatches).toBe(true);
+    expect(catalog.reserves.find(r => r.symbol === 'WETH')?.priceSourceMatches).toBe(false);
+    // The E-Mode read failed: no account summary, and Borrow is not claimed available for this owner.
+    expect(catalog.account).toBeUndefined();
+    expect(catalog.reserves.find(r => r.symbol === 'USDC')).toMatchObject({ supply: { available: true }, borrow: { available: false, reason: 'ACCOUNT_STATE_UNKNOWN' } });
   });
   it('fails closed on another chain or market', async () => {
     const { rpc } = harness(new Map(), { multicall: true });

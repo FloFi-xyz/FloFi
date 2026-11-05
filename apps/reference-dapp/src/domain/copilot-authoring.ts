@@ -699,10 +699,18 @@ function lendingNetworks(asset: CopilotAsset | null, g: Grounding): Network[] {
   return [...new Set(lendingOffers().filter(offer => (asset === null || offer.asset === asset) && offer.network.copilot !== null && actionNetworks('supply', g).includes(offer.network.copilot))
     .map(offer => offer.network.copilot as Network))];
 }
+/** A reserve label written as a whole token: never as part of a longer label ("USDC" inside "USDC.e", "USDe" inside "PT-USDe-5FEB2026"). */
+const reserveLabelWritten = (text: string, label: string) => new RegExp(`(?<![A-Za-z0-9._-])${escapeRegExp(label)}(?![A-Za-z0-9._-])`, 'i').test(text);
+/** Other reserve labels of the same market that contain `asset` and that the user wrote in full (for example USDC.e when the model said USDC). */
+function longerReservesWritten(asset: string, network: Network, g: Grounding): string[] {
+  const wanted = asset.toLowerCase();
+  return lendingReservesFor(COPILOT_NETWORK_LABEL[network]).map(reserve => reserve.symbol)
+    .filter(label => label.toLowerCase() !== wanted && label.toLowerCase().includes(wanted) && reserveLabelWritten(g.text, label));
+}
 /** The Aave reserve of `network`'s market the user named by its label (grounded in their words or carried), or null. Identity, not symbol. */
 function aaveReserveNamed(value: CopilotAsset | null, network: Network, g: Grounding): string | null {
   if (value === null || value === 'OTHER') return null;
-  if (!g.carried.has('asset') && !symbolNamed(g.text, value) && !(legacyAsset(value) && assetNamed(g.text, value))) return null;
+  if (!g.carried.has('asset') && !reserveLabelWritten(g.text, value) && !(legacyAsset(value) && assetNamed(g.text, value))) return null;
   try { return lendingProfileFor(COPILOT_NETWORK_LABEL[network], value).symbol; } catch { return null; }
 }
 function planLending(a: CopilotLendingAction, g: Grounding, wallet: string | null): Plan {
@@ -733,6 +741,10 @@ function planLending(a: CopilotLendingAction, g: Grounding, wallet: string | nul
     ?? (catalog ? catalogToken(a.asset, network, g, subject, 'asset', 'ERC20', notes).asset.symbol : needAsset(a.asset, g, subject, 'asset'));
   if (!lendingOffers(subject).some(offer => offer.network.copilot === network && offer.asset === asset))
     refuse(g.policy.catalog ? m.aaveOnlyCatalog : m.aaveOnly);
+  // BUILD AAVE-V3-EXPANSION-001: the user's words name a longer reserve of this market that contains the model's asset (USDC.e vs USDC,
+  // PT-USDe-… vs USDe) and never the asset on its own: FloFi asks which reserve instead of choosing one.
+  const longer = g.carried.has('asset') ? [] : longerReservesWritten(asset, network, g);
+  if (longer.length && !reserveLabelWritten(g.text, asset)) ask(['asset'], m.tokenNotFound(asset), [asset, ...longer]);
   const amount = amountOf(a.amount, g, subject), on = COPILOT_NETWORK_LABEL[network];
   if (MAINNETS.has(network)) notes.push(m.catalogFundsNote(on));
   if (a.type === 'WITHDRAW') {
