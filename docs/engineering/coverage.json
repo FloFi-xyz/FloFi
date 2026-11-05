@@ -889,6 +889,22 @@
     "app.components.site.typing-text": {
       "path": "apps/reference-dapp/src/components/site/typing-text.test.ts",
       "stage": "unit"
+    },
+    "app.flight.campaign": {
+      "path": "apps/reference-dapp/src/flight/campaign.test.ts",
+      "stage": "unit"
+    },
+    "app.flight.store.pg": {
+      "path": "apps/reference-dapp/src/flight/store.pg.test.ts",
+      "stage": "postgres"
+    },
+    "cloud-runtime.flight-flofi-migration.pg": {
+      "path": "packages/cloud-runtime/test/flight-flofi-migration.pg.test.ts",
+      "stage": "postgres"
+    },
+    "app.e2e.flight": {
+      "path": "apps/reference-dapp/e2e/board.spec.ts",
+      "stage": "browser"
     }
   },
   "requiredUnitSuites": [
@@ -6704,6 +6720,85 @@
         "No live production sample exists yet: p50/p95 need real journeys in the deployment logs; the report refuses to label MOCKED or LOCAL evidence otherwise.",
         "Off by default (issue #149): a sample exists only after the deployment owner opts in with both switches (docs/privacy/JOURNEY-TELEMETRY.md). The legal basis there is an engineering proposal pending owner/legal review, not a sign-off."
       ]
+    },
+    {
+      "id": "flight--frontend-ux",
+      "primary": "flofi-frontend-ux",
+      "dependencies": [
+        "flofi-data-privacy",
+        "flofi-security",
+        "flofi-workflow"
+      ],
+      "sharedFinancialCore": false,
+      "sources": [
+        "apps/reference-dapp/playwright.flight.config.ts",
+        "apps/reference-dapp/public/brand/flight/flofi-logo-on-blue.svg",
+        "apps/reference-dapp/public/brand/flight/flofi-logo.svg",
+        "apps/reference-dapp/public/brand/flight/gota-captain.svg",
+        "apps/reference-dapp/public/brand/flight/gota-card.svg",
+        "apps/reference-dapp/public/brand/flight/gota-safety.svg",
+        "apps/reference-dapp/public/brand/flight/gota-standby.svg",
+        "apps/reference-dapp/public/brand/flight/gota-welcome.svg",
+        "apps/reference-dapp/public/brand/flight/gota-wink.svg",
+        "apps/reference-dapp/public/brand/flight/seal-founding.svg",
+        "apps/reference-dapp/src/app/board/opengraph-image.alt.txt",
+        "apps/reference-dapp/src/app/board/opengraph-image.png",
+        "apps/reference-dapp/src/app/board/page.tsx",
+        "apps/reference-dapp/src/components/flight/board-experience.tsx",
+        "apps/reference-dapp/src/components/flight/board-page.tsx",
+        "apps/reference-dapp/src/components/flight/boarding-pass.tsx",
+        "apps/reference-dapp/src/components/flight/flight-copy.ts",
+        "apps/reference-dapp/src/components/flight/flight.module.css",
+        "apps/reference-dapp/src/components/flight/language-switch.tsx",
+        "apps/reference-dapp/src/flight/app-boarding.tsx",
+        "apps/reference-dapp/src/i18n/pt-flight.ts"
+      ],
+      "suites": [
+        "app.flight.campaign",
+        "app.e2e.flight"
+      ],
+      "gaps": [
+        "Browser profiles cover selected journeys; full accessibility audit, device matrix and language completeness remain acceptance gaps. The Portuguese /board copy is a translation of English-only boards, pending team review."
+      ]
+    },
+    {
+      "id": "flight--data-privacy",
+      "primary": "flofi-data-privacy",
+      "dependencies": [
+        "flofi-frontend-ux",
+        "flofi-security",
+        "flofi-workflow"
+      ],
+      "sharedFinancialCore": false,
+      "sources": [
+        "apps/reference-dapp/backend/flight-admin.ts",
+        "apps/reference-dapp/src/app/api/board/board/route.ts",
+        "apps/reference-dapp/src/app/api/board/event/route.ts",
+        "apps/reference-dapp/src/app/api/board/handle/route.ts",
+        "apps/reference-dapp/src/app/api/board/invite/route.ts",
+        "apps/reference-dapp/src/app/api/board/list/route.ts",
+        "apps/reference-dapp/src/app/api/board/pass/route.ts",
+        "apps/reference-dapp/src/app/api/board/state/route.ts",
+        "apps/reference-dapp/src/flight/campaign.ts",
+        "apps/reference-dapp/src/flight/host.ts",
+        "apps/reference-dapp/src/flight/http.ts",
+        "apps/reference-dapp/src/flight/rate-limit-client.ts",
+        "apps/reference-dapp/src/flight/simulation-evidence.ts",
+        "apps/reference-dapp/src/flight/simulation-record.ts",
+        "apps/reference-dapp/src/flight/store.ts",
+        "apps/reference-dapp/src/instrumentation-node.ts",
+        "apps/reference-dapp/src/instrumentation.ts",
+        "packages/cloud-runtime/migrations/0020_flight_flofi.sql"
+      ],
+      "suites": [
+        "app.flight.campaign",
+        "app.flight.store.pg",
+        "cloud-runtime.flight-flofi-migration.pg",
+        "app.e2e.flight"
+      ],
+      "gaps": [
+        "Email deliverability is outside the product (FloFi sends no email; the team exports groups) and joining has no confirmation step (any address can be submitted; the team's first email is where a person can object). The exact public list counter can hint whether a submitted address was new. X handles are self-declared. Production rate and abuse behaviour is not measured by tests; browser funnel events are limited per instance."
+      ]
     }
   ],
   "requiredPostgresSuites": [
@@ -6735,6 +6830,8 @@
     "cloud-runtime.forward-compatibility.pg",
     "cloud-runtime.storage.pg",
     "cloud-runtime.tenancy.pg",
-    "app.accounts.account-store-schema19.pg"
+    "app.accounts.account-store-schema19.pg",
+    "app.flight.store.pg",
+    "cloud-runtime.flight-flofi-migration.pg"
   ]
 }
