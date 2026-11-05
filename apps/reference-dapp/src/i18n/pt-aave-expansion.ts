@@ -70,8 +70,8 @@ export const portugueseAaveExpansion: Readonly<Record<string, string>> = Object.
   'Connect a wallet to see your balances and positions.': 'Conecte uma carteira para ver seus saldos e posições.',
   'Test network: reserves are listed from the registry; Simulate reads their state.': 'Rede de teste: as reservas vêm do registro; o Simulate lê o estado delas.',
   'This step spends the {0} delivered by step {1}.': 'Esta etapa usa o {0} entregue pela etapa {1}.',
-  'Step {0} delivers {1}: with {2} this step is no longer funded by it and needs its own {2}. Review the change before applying it.':
-    'A etapa {0} entrega {1}: com {2}, esta etapa deixa de ser financiada por ela e precisa do seu próprio {2}. Revise a mudança antes de aplicá-la.',
+  'Step {0} delivers {1} on {2}: with {3} on {4} this step is no longer funded by it and needs its own {3}. Review the change before applying it.':
+    'A etapa {0} entrega {1} na {2}: com {3} na {4}, esta etapa deixa de ser financiada por ela e precisa do seu próprio {3}. Revise a mudança antes de aplicá-la.',
   'Search {0} Aave reserves': 'Buscar reservas Aave na {0}',
   'Search by symbol or address…': 'Buscar por símbolo ou endereço…',
   'Choose an Aave reserve on {0}': 'Escolha uma reserva Aave na {0}',
@@ -85,19 +85,21 @@ export const portugueseAaveExpansion: Readonly<Record<string, string>> = Object.
   'No reserve can be borrowed on {0} right now.': 'Nenhuma reserva pode ser tomada emprestada na {0} agora.',
   'You have no Aave debt on {0}.': 'Você não tem dívida na Aave na {0}.',
   'You have no Aave supplied position on {0}.': 'Você não tem posição depositada na Aave na {0}.',
-  'APY {0}%': 'APY {0}%', 'Wallet {0}': 'Carteira {0}', 'Available {0}': 'Disponível {0}', 'Debt {0}': 'Dívida {0}', 'Supplied {0}': 'Depositado {0}',
+  'APY {0}%': 'APY {0}%', 'Wallet {0}': 'Carteira {0}', 'Pool liquidity {0}': 'Liquidez do pool {0}', 'Debt {0}': 'Dívida {0}', 'Supplied {0}': 'Depositado {0}',
   'Inactive': 'Inativa', 'Frozen': 'Congelada', 'Supply cap reached': 'Limite de depósito atingido', 'Borrowing disabled': 'Empréstimo desativado',
   'Borrow cap reached': 'Limite de empréstimo atingido', 'No liquidity': 'Sem liquidez', 'No oracle price': 'Sem preço do oráculo', 'Isolated reserve': 'Reserva isolada',
   'Not listed': 'Não listada', 'Account state unknown': 'Estado da conta desconhecido',
   'Name conflicts with the token list': 'Nome conflita com a lista de tokens', 'No debt to repay': 'Sem dívida para pagar', 'Nothing supplied': 'Nada depositado',
   '0 in wallet': '0 na carteira', 'Needs collateral first': 'Precisa de colateral primeiro', 'No borrowing capacity now': 'Sem capacidade de empréstimo agora',
   'Health factor below 2': 'Fator de saúde abaixo de 2', 'Live status unavailable': 'Status ao vivo indisponível',
+  'Opened by an earlier step': 'Aberta por uma etapa anterior', 'Isolation-mode account': 'Conta em modo de isolamento',
+  'Siloed borrowing conflict': 'Conflito de empréstimo isolado (siloed)',
   'This reserve label names a different token in the network token list, so it cannot be chosen by name.':
     'O nome desta reserva corresponde a outro token na lista de tokens da rede, então ela não pode ser escolhida pelo nome.',
   'You have no debt in this reserve to repay.': 'Você não tem dívida nesta reserva para pagar.',
   'You have no supplied position in this reserve to withdraw.': 'Você não tem posição depositada nesta reserva para sacar.',
-  'Step {0} delivers {1}: this step will no longer be funded by it. Review and apply the change.':
-    'A etapa {0} entrega {1}: esta etapa deixará de ser financiada por ela. Revise e aplique a mudança.',
+  'Step {0} delivers {1} on {2}: this step will no longer be funded by it. Review and apply the change.':
+    'A etapa {0} entrega {1} na {2}: esta etapa deixará de ser financiada por ela. Revise e aplique a mudança.',
   'Funded by step {0}: spends the {1} it delivers.': 'Financiada pela etapa {0}: usa o {1} que ela entrega.',
   '{0} on {1}: enter the amount in {0} on the card, then review and apply the change. A new Simulation and Review follow.':
     '{0} na {1}: informe o valor em {0} no card e depois revise e aplique a mudança. Uma nova Simulação e Revisão vêm em seguida.',

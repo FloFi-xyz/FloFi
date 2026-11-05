@@ -410,7 +410,7 @@ export type ComposerCardData = {
     /** BUILD AAVE-V3-CARD-CATALOG-FIX-001: a lending card's registry reserve (its exact address) and, when editable, its live catalog picker. */
     assetAddress?: string; lending?: LendingPickerData };
   /** BUILD AAVE-V3-CARD-CATALOG-FIX-001: the earlier step whose delivered output this step spends (a sequence such as Swap → Supply). */
-  funding?: { readonly step: number; readonly symbol: string; readonly changed: boolean };
+  funding?: { readonly step: number; readonly symbol: string; readonly network: string; readonly changed: boolean };
   composer: true; step: number; selected: boolean; vertical: boolean;
   summary: ReturnType<typeof composerSummary>;
   estimateWorkflow?: SemanticWorkflow; estimateNodeId?: string; estimateOwner?: string | null;
@@ -594,7 +594,7 @@ export function ComposerCard({ data: card }: { data: ComposerCardData }) {
       </ValuePair> : !card.inspection && ['Supply', 'Borrow', 'Repay', 'Withdraw', 'Send'].includes(card.summary.action) && (amountParts || editor)
         ? <><ValueBox source fiatFirst={fiatFirst} onFiatFirstChange={setFiatFirst} usd={usdLine(sourceNetwork, null, { status: 'none' })} amount={amountParts?.[1]} token={amountParts?.[2] ?? 'USDC'} tokenAddress={card.actionSelection?.assetAddress} network={sourceNetwork} picker={picker('source')} editor={editor} hint={editor ? 'Enter the source amount' : card.summary.amount}/>
           {card.funding && <span className="composer-quote-note composer-funding-note" role="status" data-changed={card.funding.changed || undefined}>{card.funding.changed
-            ? tr('Step {0} delivers {1}: this step will no longer be funded by it. Review and apply the change.', card.funding.step, card.funding.symbol)
+            ? tr('Step {0} delivers {1} on {2}: this step will no longer be funded by it. Review and apply the change.', card.funding.step, card.funding.symbol, card.funding.network)
             : tr('Funded by step {0}: spends the {1} it delivers.', card.funding.step, card.funding.symbol)}</span>}</>
         : <span className="numeric composer-amount">{tr(card.summary.amount)}</span>}
       {!card.inspection && card.recipient && <RecipientField recipient={card.recipient} formId={card.supplyProposal?.formId}/>}

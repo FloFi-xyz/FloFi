@@ -12,20 +12,25 @@ import { TokenBrandIcon } from './brand-icon';
 import { RESERVE_REASON_TEXT, useAaveReserves } from './lending-reserve-status';
 import { hiddenCardReserves, lendingCardCatalog, visibleCardReserves, type CardReserveEntry, type CardReserveNote, type CardReserveReason, type LendingKind } from '../domain/lending-card-catalog';
 
-export type LendingPickerFunding = { readonly step: number; readonly symbol: string };
+/** The earlier step funding the card's saved step, with the saved step's own network and reserve label. */
+export type LendingPickerFunding = { readonly step: number; readonly symbol: string; readonly network: string };
 export type LendingPickerData = { readonly kind: LendingKind; readonly account: string | null;
   /** The card's market by its registry network name ("Base"), never the card's display label ("Base (8453)"). */ readonly network: string;
-  /** The earlier step whose delivered output this card's committed step spends (Swap → Supply), if any. */ readonly funded?: LendingPickerFunding | null };
+  /** The earlier step whose delivered output this card's committed step spends (Swap → Supply), if any. */ readonly funded?: LendingPickerFunding | null;
+  /** Reserves (underlying addresses) whose position an earlier step of this workflow opens: Withdraw after its Supply, Repay after its Borrow. */
+  readonly opened?: readonly string[] };
 
 const SHORT_REASON: Readonly<Record<CardReserveReason, string>> = Object.freeze({
   RESERVE_INACTIVE: 'Inactive', RESERVE_PAUSED: 'Paused', RESERVE_FROZEN: 'Frozen', SUPPLY_CAP_REACHED: 'Supply cap reached', BORROWING_DISABLED: 'Borrowing disabled',
   BORROW_CAP_REACHED: 'Borrow cap reached', NO_LIQUIDITY: 'No liquidity', ORACLE_UNAVAILABLE: 'No oracle price', ISOLATED_RESERVE_UNSUPPORTED: 'Isolated reserve',
   RESERVE_IDENTITY_MISMATCH: 'Unverified', NOT_LISTED_ON_CHAIN: 'Not listed', ACCOUNT_EMODE_UNSUPPORTED: 'E-Mode account', ACCOUNT_STATE_UNKNOWN: 'Account state unknown',
   LABEL_CONFLICT: 'Name conflicts with the token list', NO_DEBT: 'No debt to repay', NO_SUPPLY: 'Nothing supplied',
+  ACCOUNT_ISOLATION_MODE: 'Isolation-mode account', SILOED_BORROWING_CONFLICT: 'Siloed borrowing conflict',
 });
 const NOTE_TEXT: Readonly<Record<CardReserveNote, string>> = Object.freeze({
   NO_WALLET_BALANCE: '0 in wallet', NO_COLLATERAL: 'Needs collateral first', NO_BORROW_CAPACITY: 'No borrowing capacity now',
   HEALTH_FACTOR_BELOW_MINIMUM: 'Health factor below 2', ACCOUNT_STATE_UNKNOWN: 'Account state unknown', STATUS_UNKNOWN: 'Live status unavailable',
+  OPENED_BY_EARLIER_STEP: 'Opened by an earlier step',
 });
 const TOGGLE: Readonly<Record<LendingKind, string>> = Object.freeze({
   supply: 'Show assets with 0 balance', borrow: "Show reserves you can't borrow now", repay: 'Show reserves without debt', withdraw: 'Show reserves without a supplied position',
@@ -50,7 +55,8 @@ function figures(entry: CardReserveEntry, kind: LendingKind, tr: (value: string,
   const amount = (units: string | undefined) => units === undefined ? null : `${compactLendingAmount(units, entry.decimals)} ${entry.symbol}`;
   const apy = entry.apyPercent === undefined ? null : tr('APY {0}%', entry.apyPercent.toFixed(2));
   const parts = kind === 'supply' ? [entry.walletBalance !== undefined ? tr('Wallet {0}', amount(entry.walletBalance)!) : null, apy]
-    : kind === 'borrow' ? [apy, entry.available !== undefined ? tr('Available {0}', amount(entry.available)!) : null, entry.debt && entry.debt !== '0' ? tr('Debt {0}', amount(entry.debt)!) : null]
+    // The pool's liquidity bounds every Borrow; the owner's own limit (capacity, health factor 2) is checked by Simulate.
+    : kind === 'borrow' ? [apy, entry.available !== undefined ? tr('Pool liquidity {0}', amount(entry.available)!) : null, entry.debt && entry.debt !== '0' ? tr('Debt {0}', amount(entry.debt)!) : null]
     : kind === 'repay' ? [entry.debt !== undefined ? tr('Debt {0}', amount(entry.debt)!) : null, entry.walletBalance !== undefined ? tr('Wallet {0}', amount(entry.walletBalance)!) : null]
     : [entry.supplied !== undefined ? tr('Supplied {0}', amount(entry.supplied)!) : null, apy];
   const shown = parts.filter((part): part is string => Boolean(part));
@@ -62,11 +68,18 @@ export function LendingReservePicker({ selected, data, onSelect }: { readonly se
   const { t: tr } = useLocale();
   const name = useId(), searchId = useId();
   const live = useAaveReserves(network, data.account);
-  const catalog = useMemo(() => lendingCardCatalog(data.kind, network, live), [data.kind, network, live]);
+  const opened = useMemo(() => new Set(data.opened ?? []), [data.opened]);
+  const catalog = useMemo(() => lendingCardCatalog(data.kind, network, live, { opened }), [data.kind, network, live, opened]);
   const [showAll, setShowAll] = useState(false);
   const [query, setQuery] = useState('');
+  // The reserve selected when the picker opened stays in view, so moving the selection (keyboard or pointer) never hides where it started.
+  const [pinned] = useState(() => new Set([selected]));
+  const search = useRef<HTMLInputElement>(null);
   const hidden = hiddenCardReserves(catalog);
-  const options = visibleCardReserves(catalog, { showAll, query, selected });
+  // While the market is read, only the current reserve is listed: the list never narrows or re-sorts under the pointer when the read arrives.
+  const options = catalog.state === 'LOADING' && !query ? catalog.entries.filter(entry => entry.symbol === selected)
+    : visibleCardReserves(catalog, { showAll, query, selected, pinned });
+  const retryable = !/_NOT_ENABLED$/.test(live?.code ?? '');
   const primaryCount = catalog.entries.filter(entry => entry.primary).length;
   const funded = data.funded ?? null;
   // Like the other token pickers, opening the list focuses the current reserve (keyboard users continue from the selection).
@@ -76,17 +89,19 @@ export function LendingReservePicker({ selected, data, onSelect }: { readonly se
     <div className="lending-card-picker-status" role="status">
       {catalog.state === 'LOADING' && <p>{tr('Reading the {0} Aave market…', network)}</p>}
       {catalog.state === 'UNAVAILABLE' && <p>{tr(REASON_CODES[live?.code ?? ''] ?? 'Live {0} market data is unavailable right now. You can still choose a reserve; Simulate checks it on chain.', network)}
-        {' '}<button type="button" className="lending-card-picker-retry" onClick={() => live?.retry()}>{tr('Try again')}</button></p>}
+        {/* Retrying cannot enable a market the deployment has switched off. Focus moves to the search field, which stays while the market is read. */}
+        {retryable && <>{' '}<button type="button" className="lending-card-picker-retry" onClick={() => { search.current?.focus(); live?.retry(); }}>{tr('Try again')}</button></>}</p>}
       {catalog.state === 'LIVE' && catalog.provenance === 'MOCKED' && <p>{tr('Test fixture data (MOCKED): not a live market read.')}</p>}
       {catalog.state === 'LIVE' && !data.account && data.kind !== 'borrow' && <p>{tr('Connect a wallet to see your balances and positions.')}</p>}
       {catalog.state === 'NONE' && <p>{tr('Test network: reserves are listed from the registry; Simulate reads their state.')}</p>}
     </div>
-    {funded && <p className="lending-card-picker-funding" data-changed={selected !== funded.symbol || undefined}>{selected === funded.symbol
-      ? tr('This step spends the {0} delivered by step {1}.', funded.symbol, funded.step)
-      : tr('Step {0} delivers {1}: with {2} this step is no longer funded by it and needs its own {2}. Review the change before applying it.', funded.step, funded.symbol, selected)}</p>}
+    {funded && (selected === funded.symbol && network === funded.network
+      ? <p className="lending-card-picker-funding">{tr('This step spends the {0} delivered by step {1}.', funded.symbol, funded.step)}</p>
+      : <p className="lending-card-picker-funding" data-changed>{tr('Step {0} delivers {1} on {2}: with {3} on {4} this step is no longer funded by it and needs its own {3}. Review the change before applying it.',
+        funded.step, funded.symbol, funded.network, selected, network)}</p>)}
     <label className="lending-card-picker-search" htmlFor={searchId}>
       <span className="sr-only">{tr('Search {0} Aave reserves', network)}</span>
-      <input id={searchId} type="search" autoComplete="off" spellCheck={false} maxLength={64} value={query} placeholder={tr('Search by symbol or address…')}
+      <input ref={search} id={searchId} type="search" autoComplete="off" spellCheck={false} maxLength={64} value={query} placeholder={tr('Search by symbol or address…')}
         onChange={event => setQuery(event.target.value)}/>
     </label>
     {!query && catalog.state === 'LIVE' && primaryCount === 0 && (catalog.walletKnown || data.kind === 'borrow') && <p className="muted lending-card-picker-empty">{tr(EMPTY[data.kind], network)}</p>}
@@ -121,4 +136,6 @@ export function LendingReservePicker({ selected, data, onSelect }: { readonly se
 }
 const RESERVE_TEXT: Readonly<Partial<Record<CardReserveReason, string>>> = Object.freeze({ ...RESERVE_REASON_TEXT,
   LABEL_CONFLICT: 'This reserve label names a different token in the network token list, so it cannot be chosen by name.',
-  NO_DEBT: 'You have no debt in this reserve to repay.', NO_SUPPLY: 'You have no supplied position in this reserve to withdraw.' });
+  NO_DEBT: 'You have no debt in this reserve to repay.', NO_SUPPLY: 'You have no supplied position in this reserve to withdraw.',
+  ACCOUNT_ISOLATION_MODE: 'Your Aave account is in isolation mode. Flofi does not borrow against isolated collateral yet.',
+  SILOED_BORROWING_CONFLICT: 'This reserve uses siloed borrowing and cannot be combined with your other Aave debt.' });

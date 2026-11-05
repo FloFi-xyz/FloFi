@@ -5875,6 +5875,7 @@
       ],
       "sharedFinancialCore": false,
       "sources": [
+        "apps/reference-dapp/src/state/aave-reserve-reads.ts",
         "apps/reference-dapp/src/state/lending-store.tsx",
         "apps/reference-dapp/src/state/supply-store.tsx"
       ],

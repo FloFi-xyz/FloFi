@@ -911,7 +911,7 @@
 .lending-card-picker-status:empty{display:none}
 .lending-card-picker-status p,.lending-card-picker-funding,.lending-card-picker-empty{margin:0 8px;color:var(--muted);font-size:11px;line-height:1.35;white-space:normal}
 .lending-card-picker-funding{padding:5px 8px;margin:0;border:1px solid var(--accent-line);border-radius:6px;background:var(--paper);color:var(--ink)}
-.lending-card-picker-funding[data-changed]{border-color:var(--warning-border);background:var(--warning-paper);color:var(--warning-text)}
+.lending-card-picker-funding[data-changed]{border-color:var(--warning-border);background:var(--warning-paper);color:var(--amber)}
 .lending-card-picker-retry{padding:0;border:0;background:none;color:var(--blue);font:inherit;font-weight:600;text-decoration:underline;cursor:pointer}
 .lending-card-picker-search{display:block;margin:0}
 .lending-card-picker-search input{width:100%;min-width:0;padding:6px 8px;border:1px solid var(--accent-line);border-radius:6px;background:var(--paper);color:var(--ink);font:inherit;font-size:12px}
@@ -923,10 +923,10 @@
 .lending-card-option-detail:empty{display:none}
 .lending-card-option[data-disabled]{cursor:not-allowed;opacity:.62}
 .lending-card-option[data-disabled]:hover{background:transparent}
-.lending-card-option[data-reason] .lending-card-option-detail{color:var(--warning-text)}
+.lending-card-option[data-reason] .lending-card-option-detail{color:var(--amber)}
 .lending-card-picker-toggle{display:flex;align-items:center;gap:6px;margin:0 8px 2px;color:var(--ink);font-size:11px;cursor:pointer}
 .lending-card-picker-toggle input{margin:0;accent-color:var(--blue)}
-.composer-funding-note[data-changed]{color:var(--warning-text)}
+.composer-funding-note[data-changed]{color:var(--amber)}
 /* Leave room for row borders and focus rings inside the light picker. */
 :root:not([data-theme="dark"]) .composer-bridge-picker{padding:8px}
 :root:not([data-theme="dark"]) .composer-bridge-picker-columns{gap:8px}

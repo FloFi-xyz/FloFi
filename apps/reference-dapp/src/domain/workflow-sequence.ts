@@ -64,10 +64,13 @@ export function stepAssets(node: Node): Pick<SequenceStep, 'input' | 'output' | 
   const spent = limits.length === 1 ? assetOf(limits[0]!.quantity.asset) : null, amount = limits.length === 1 ? limits[0]!.quantity.amount : null;
   const out = node.inputs.find(input => input.name === 'asset-out' && input.kind === 'ASSET');
   const recipient = node.inputs.find(input => input.name === 'recipient')?.value;
-  const inputs = limits.flatMap(limit => { const asset = assetOf(limit.quantity.asset), units = limit.quantity.amount;
+  // Borrow and Withdraw deliver their asset to the owner and spend nothing from the wallet: their MAXIMUM_INPUT bounds the amount drawn from
+  // Aave, so it is never funded by (nor capped at) an earlier step's delivery (BUILD AAVE-V3-CARD-CATALOG-FIX-001).
+  const draws = node.actionType === 'withdraw' || node.actionType === 'borrow';
+  const inputs = draws ? [] : limits.flatMap(limit => { const asset = assetOf(limit.quantity.asset), units = limit.quantity.amount;
     return asset && typeof units === 'string' && UNITS.test(units) ? [{ ...asset, amount: units }] : []; });
-  const lendingOutput = node.actionType === 'withdraw' || node.actionType === 'borrow' ? spent : null;
-  return { input: spent && typeof amount === 'string' && UNITS.test(amount) ? { ...spent, amount } : null, inputs, output: assetOf(out?.value) ?? lendingOutput,
+  const lendingOutput = draws ? spent : null;
+  return { input: !draws && spent && typeof amount === 'string' && UNITS.test(amount) ? { ...spent, amount } : null, inputs, output: assetOf(out?.value) ?? lendingOutput,
     ownerReceives: recipient === undefined || recipient === 'CONNECTED_OWNER' || recipient === 'CONNECTED_DESTINATION_WALLET' };
 }
 /** Financial actions in the Canvas order (`composerActions`: dependency order, else the order they were authored in). */

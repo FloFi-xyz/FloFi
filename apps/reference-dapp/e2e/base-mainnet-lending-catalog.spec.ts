@@ -239,10 +239,20 @@ test('Swap USDC → WETH → Supply WETH: auto-connected, funded by the swap, an
   // Choosing another asset is flagged before anything changes; applying it is a new revision that keeps the order but ends the funding.
   const again = await openReserves(page, supply);
   await expect(again.locator('.lending-card-picker-funding')).toHaveText('This step spends the WETH delivered by step 1.');
-  await option(again, 'USDC').click();
-  await expect(again.locator('.lending-card-picker-funding')).toContainText('Step 1 delivers WETH: with USDC this step is no longer funded by it');
+  // The same label on another network is another asset: Arbitrum One WETH is not what the Base swap delivers.
+  const networks = page.getByRole('region', { name: 'Action network picker', exact: true });
+  await networks.getByRole('button', { name: 'Arbitrum One', exact: true }).click();
+  const moved = page.getByRole('region', { name: 'Source token picker', exact: true });
+  await expect(moved.locator('.lending-card-picker-funding')).toContainText('Step 1 delivers WETH on Base: with WETH on Arbitrum One this step is no longer funded by it');
+  await expect(supply.locator('.composer-funding-note')).toContainText('Step 1 delivers WETH on Base: this step will no longer be funded by it.');
+  await networks.getByRole('button', { name: 'Base', exact: true }).click();
+  const back = page.getByRole('region', { name: 'Source token picker', exact: true });
+  await expect(back.locator('.lending-card-picker-funding')).toHaveText('This step spends the WETH delivered by step 1.');
+  await expect(supply.locator('.composer-funding-note')).toHaveText('Funded by step 1: spends the WETH it delivers.');
+  await option(back, 'USDC').click();
+  await expect(back.locator('.lending-card-picker-funding')).toContainText('Step 1 delivers WETH on Base: with USDC on Base this step is no longer funded by it');
   await closePicker(page);
-  await expect(supply.locator('.composer-funding-note')).toContainText('Step 1 delivers WETH: this step will no longer be funded by it.');
+  await expect(supply.locator('.composer-funding-note')).toContainText('Step 1 delivers WETH on Base: this step will no longer be funded by it.');
   await expect(revision).toHaveAttribute('data-workflow-revision', '2');
   await supply.getByRole('textbox', { name: 'Source amount (USDC)', exact: true }).fill('25');
   await supply.getByRole('button', { name: 'Review Supply change', exact: true }).click();

@@ -10,7 +10,7 @@ import { useEffect, useState } from 'react';
 import { AAVE_V3_MARKETS } from '@defi-workflow-engine/action-registry';
 import type { AaveMarketCatalog, AaveReserveReason, AaveReserveStatus } from '@defi-workflow-engine/reference-compiler';
 import { useLocale } from '../i18n/locale';
-import { supplyReserves } from '../app/supply-action';
+import { readAaveReserves, useAaveReadGeneration, type ReserveRead } from '../state/aave-reserve-reads';
 import { formatLendingAmount, lendingSelectable } from '../domain/supply-authoring';
 
 export type LendingKind = 'supply' | 'borrow' | 'repay' | 'withdraw';
@@ -24,37 +24,21 @@ export const RESERVE_REASON_TEXT: Readonly<Record<AaveReserveReason, string>> = 
   ACCOUNT_EMODE_UNSUPPORTED: 'Your Aave account uses E-Mode, which Flofi does not support yet.',
   ACCOUNT_STATE_UNKNOWN: 'Your Aave account state could not be read right now; Simulate checks it on chain.',
 });
-type ReserveRead = { readonly catalog: AaveMarketCatalog | null; readonly failed: boolean; readonly code: string | null };
-/**
- * BUILD AAVE-V3-CARD-CATALOG-FIX-001: one shared read per market and owner for every card and form on the page (the server paces public RPCs
- * and refuses more than two uncached reads at once). A successful read is reused for 30 s; a failure is never cached, and "Try again" reads anew.
- */
-const READS = new Map<string, { readonly at: number; readonly read: Promise<ReserveRead> }>();
-const READ_TTL_MS = 30_000;
-function readReserves(chain: string, account: string | null, fresh: boolean): Promise<ReserveRead> {
-  const key = `${chain}|${account ?? ''}`, cached = READS.get(key);
-  if (!fresh && cached && Date.now() - cached.at < READ_TTL_MS) return cached.read;
-  const read = supplyReserves(chain, account ?? undefined).then(result => result.ok ? { catalog: result.value, failed: false, code: null } : { catalog: null, failed: true, code: result.code },
-    () => ({ catalog: null, failed: true, code: null }));
-  READS.set(key, { at: Date.now(), read });
-  void read.then(result => { if (result.failed && READS.get(key)?.read === read) READS.delete(key); });
-  return read;
-}
-/** Reads already shared by the page are dropped (after the owner's own transaction, a market or position read must be fresh). */
-export function forgetAaveReserves(): void { READS.clear(); }
 /** The live catalog of the market serving `network` (null for a network without a mainnet Aave market). */
 export function useAaveReserves(network: string, account: string | null, enabled = true): { readonly catalog: AaveMarketCatalog | null; readonly failed: boolean; readonly loading: boolean; readonly code: string | null; retry(): void } | null {
   const market = AAVE_V3_MARKETS.find(item => item.network === network), key = `${market?.chain ?? ''}|${account ?? ''}`;
-  const [state, setState] = useState<{ key: string; attempt: number } & ReserveRead | null>(null);
+  const [state, setState] = useState<{ key: string; round: string } & ReserveRead | null>(null);
   const [attempt, setAttempt] = useState(0);
+  // A forgotten read (the owner's own transaction executed) is read again by every mounted reader.
+  const generation = useAaveReadGeneration(), round = `${attempt}:${generation}`;
   useEffect(() => {
     if (!market || !enabled) return;
     let live = true;
-    readReserves(market.chain, account, attempt > 0).then(result => { if (live) setState({ key, attempt, ...result }); });
+    readAaveReserves(market.chain, account, attempt > 0).then(result => { if (live) setState({ key, round, ...result }); });
     return () => { live = false; };
-  }, [market, account, key, enabled, attempt]);
+  }, [market, account, key, enabled, attempt, round]);
   if (!market) return null;
-  const current = state?.key === key && state.attempt === attempt ? state : null;
+  const current = state?.key === key && state.round === round ? state : null;
   return { catalog: current?.catalog ?? null, failed: current?.failed ?? false, loading: !current, code: current?.code ?? null, retry: () => setAttempt(value => value + 1) };
 }
 /** The reason a reserve cannot be used for `kind` now (Repay and Withdraw stay open on a frozen reserve), or null. */

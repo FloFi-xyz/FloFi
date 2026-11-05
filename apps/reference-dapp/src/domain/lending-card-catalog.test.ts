@@ -10,13 +10,13 @@ import { AAVE_V3_LENDING_PROFILES } from '@defi-workflow-engine/action-registry'
 import type { AaveMarketCatalog, AaveReserveStatus } from '@defi-workflow-engine/reference-compiler';
 import { lintWorkflow } from '@defi-workflow-engine/reference-linter';
 import { cryptoInputOf, cryptoNetworks, cryptoReviewContext, cryptoSelectionOf, createCryptoActionNode, selectCryptoNetwork, selectCryptoToken, canSelectCryptoAssets, type CryptoAction } from './crypto-action-picker';
-import { hiddenCardReserves, lendingCardCatalog, visibleCardReserves, type LendingKind } from './lending-card-catalog';
+import { hiddenCardReserves, lendingCardCatalog, lendingCardFunding, visibleCardReserves, type LendingKind } from './lending-card-catalog';
 import { editorHistoryReducer, initialEditorHistory } from './editor-history';
 import { editorReducer } from './editor';
 import { canvasAmountCommand, actionReviewValue } from './canvas-action-setup';
 import { lendingNodeAsset, lendingReservesFor } from './supply-authoring';
 import { validateSavedWorkflow } from './saved-workflow';
-import { workflowSequence } from './workflow-sequence';
+import { stepAssets, workflowSequence } from './workflow-sequence';
 import { setActiveNetworkScope } from './network-scope';
 import { registerFixtureCatalogs, resetNetworkCatalogs } from './intelligence/intelligence.test-harness';
 import { CopilotSession, act, intent } from './copilot-session.test-harness';
@@ -161,11 +161,14 @@ describe('per-action card catalogs (MOCKED market read)', () => {
     const frozenDebt = lendingCardCatalog('repay', 'Base', live(market('Base', { EURC: { frozen: true, ...wallet('5', '0', '7') } })));
     expect(frozenDebt.entries.find(entry => entry.symbol === 'EURC')).toMatchObject({ selectable: true, reason: null });
   });
-  it('an E-Mode account closes every action (Simulate refuses it); an unreadable account state is only a note', () => {
-    for (const kind of LENDING) {
-      const catalog = lendingCardCatalog(kind, 'Base', live(market('Base', { USDC: wallet('1', '1', '1') }, { eMode: '1' })));
-      expect(catalog.entries.find(entry => entry.symbol === 'USDC'), kind).toMatchObject({ selectable: false, reason: 'ACCOUNT_EMODE_UNSUPPORTED' });
-    }
+  it('an E-Mode account closes what Simulate refuses (every Borrow/Repay/Withdraw, an owner-beneficiary Supply); an unreadable state is only a note', () => {
+    const eMode = market('Base', { USDC: wallet('1', '1', '1'), WETH: wallet('1', '1', '1') }, { eMode: '1' });
+    for (const kind of ['borrow', 'repay', 'withdraw'] as const)
+      expect(lendingCardCatalog(kind, 'Base', live(eMode)).entries.find(entry => entry.symbol === 'USDC'), kind).toMatchObject({ selectable: false, reason: 'ACCOUNT_EMODE_UNSUPPORTED' });
+    // Base USDC Supply may name another beneficiary and reads only the reserve (readSupplyState): E-Mode does not close it. WETH (owner-only) is closed.
+    const supply = lendingCardCatalog('supply', 'Base', live(eMode));
+    expect(supply.entries.find(entry => entry.symbol === 'USDC')).toMatchObject({ selectable: true, reason: null });
+    expect(supply.entries.find(entry => entry.symbol === 'WETH')).toMatchObject({ selectable: false, reason: 'ACCOUNT_EMODE_UNSUPPORTED' });
     const unknown = lendingCardCatalog('borrow', 'Base', live(market('Base', { WETH: { borrow: { available: false, reason: 'ACCOUNT_STATE_UNKNOWN' } } })));
     expect(unknown.entries.find(entry => entry.symbol === 'WETH')).toMatchObject({ selectable: true, reason: null, notes: expect.arrayContaining(['ACCOUNT_STATE_UNKNOWN']) });
   });
@@ -280,6 +283,51 @@ describe('Swap USDC → WETH (Base) → Supply WETH keeps its order and funding 
     expect(edited.dependencies).toEqual([swap!.nodeId]);
     expect(cryptoSelectionOf(edited)?.from).toBe('USDC');
     expect(workflowSequence(history.editor.workflow, candidate => lintWorkflow(candidate, s.context))!.steps[1]!.fundedBy).toBeNull();
+  });
+});
+
+describe('review findings: account-level Borrow refusals, positions opened earlier in the workflow, funding by network', () => {
+  it('Borrow mirrors Simulate\'s isolation-mode and siloed-borrowing refusals; Repay/Withdraw close without an oracle price', () => {
+    const isolated = lendingCardCatalog('borrow', 'Base', live(market('Base', { USDC: { isolated: true, ...wallet('0', '100000000', '0', true) } })));
+    expect(isolated.entries.find(entry => entry.symbol === 'WETH')).toMatchObject({ selectable: false, reason: 'ACCOUNT_ISOLATION_MODE' });
+    // A second enabled collateral leaves isolation mode.
+    const twoCollaterals = lendingCardCatalog('borrow', 'Base', live(market('Base', { USDC: { isolated: true, ...wallet('0', '1', '0', true) }, WETH: wallet('0', '1', '0', true) })));
+    expect(twoCollaterals.entries.find(entry => entry.symbol === 'GHO')).toMatchObject({ selectable: true });
+    const siloedTarget = lendingCardCatalog('borrow', 'Base', live(market('Base', { GHO: { siloed: true }, WETH: wallet('0', '0', '5') })));
+    expect(siloedTarget.entries.find(entry => entry.symbol === 'GHO')).toMatchObject({ selectable: false, reason: 'SILOED_BORROWING_CONFLICT' });
+    expect(siloedTarget.entries.find(entry => entry.symbol === 'WETH')).toMatchObject({ selectable: true });
+    const siloedDebt = lendingCardCatalog('borrow', 'Base', live(market('Base', { GHO: { siloed: true, ...wallet('0', '0', '5') } })));
+    expect(siloedDebt.entries.find(entry => entry.symbol === 'USDC')).toMatchObject({ selectable: false, reason: 'SILOED_BORROWING_CONFLICT' });
+    for (const kind of ['repay', 'withdraw'] as const)
+      expect(lendingCardCatalog(kind, 'Base', live(market('Base', { WETH: { price: '0', ...wallet('5', '5', '5') } }))).entries.find(entry => entry.symbol === 'WETH'), kind)
+        .toMatchObject({ selectable: false, reason: 'ORACLE_UNAVAILABLE' });
+  });
+  it('Withdraw after a Supply (and Repay after a Borrow) of the same reserve in this workflow keeps that reserve selectable', () => {
+    const weth = reserve('Base', 'WETH').asset;
+    const withdraw = lendingCardCatalog('withdraw', 'Base', live(market('Base')), { opened: new Set([weth]) });
+    expect(withdraw.entries[0]).toMatchObject({ symbol: 'WETH', selectable: true, primary: true, notes: ['OPENED_BY_EARLIER_STEP'] });
+    expect(withdraw.entries.find(entry => entry.symbol === 'USDC')).toMatchObject({ selectable: false, reason: 'NO_SUPPLY' });
+    const repay = lendingCardCatalog('repay', 'Base', live(market('Base')), { opened: new Set([weth]) });
+    expect(repay.entries.find(entry => entry.symbol === 'WETH')).toMatchObject({ selectable: true, notes: ['OPENED_BY_EARLIER_STEP'] });
+  });
+  it('a funded step\'s draft is flagged when it changes network under the same label, not only when the label changes', () => {
+    const sequence = { steps: [{ nodeId: 'swap', fundedBy: null }, { nodeId: 'supply', fundedBy: 0 }] };
+    const saved = { action: 'supply' as const, network: 'Base', from: 'WETH' };
+    expect(lendingCardFunding(sequence, 'supply', ['swap', 'supply'], saved)).toEqual({ step: 1, symbol: 'WETH', network: 'Base', changed: false });
+    expect(lendingCardFunding(sequence, 'supply', ['swap', 'supply'], saved, saved)?.changed).toBe(false);
+    expect(lendingCardFunding(sequence, 'supply', ['swap', 'supply'], saved, { ...saved, network: 'Arbitrum One' })?.changed).toBe(true);
+    expect(lendingCardFunding(sequence, 'supply', ['swap', 'supply'], saved, { ...saved, from: 'USDC' })?.changed).toBe(true);
+    expect(lendingCardFunding(sequence, 'swap', ['swap', 'supply'], saved)).toBeNull();
+    expect(lendingCardFunding(null, 'supply', ['swap', 'supply'], saved)).toBeNull();
+  });
+  it('Borrow and Withdraw draw from Aave and spend nothing from the wallet: never funded by, nor capped at, an earlier delivery', () => {
+    for (const action of ['borrow', 'withdraw'] as const) {
+      const assets = stepAssets(node(action, 'Base', 'USDC', '1000'));
+      expect(assets.inputs, action).toEqual([]);
+      expect(assets.input, action).toBeNull();
+      expect(assets.output, action).toEqual({ chainId: 'eip155:8453', address: reserve('Base', 'USDC').asset, decimals: 6 });
+    }
+    expect(stepAssets(node('repay', 'Base', 'USDC', '5')).inputs).toEqual([{ chainId: 'eip155:8453', address: reserve('Base', 'USDC').asset, decimals: 6, amount: '5000000' }]);
   });
 });
 

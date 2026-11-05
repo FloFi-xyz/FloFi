@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 'use client';
+import type { SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
 import { useLocale } from '../i18n/locale';
 
 import Image from 'next/image';
@@ -10,7 +11,8 @@ import {lendingDetails,lendingCanvasEdges} from '../domain/lending-authoring';
 import {useBuild009Wallet} from '../state/build009-wallet-store';
 import { transferCardLabel, transferDetails } from '../domain/robinhood-transfer-authoring';
 import { checkRecipient, recipientPolicy } from '../domain/recipient-address';
-import { lendingAmountLabel, lendingReservesFor } from '../domain/supply-authoring';
+import { lendingAmountLabel, lendingNodeAsset, lendingReservesFor } from '../domain/supply-authoring';
+import { lendingCardFunding } from '../domain/lending-card-catalog';
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { ReactFlow, getNodesBounds, Background, Handle, Position, useNodesInitialized, useNodesState, useReactFlow, useStore, useStoreApi, useUpdateNodeInternals, type Node, type NodeChange, type NodeProps, type ReactFlowState, type FinalConnectionState, MarkerType } from '@xyflow/react';
 import { MOCKED_CHAIN_PROFILE, type Symbol } from '@defi-workflow-engine/reference-linter';
@@ -518,17 +520,25 @@ function BuildCanvas({ environment, selectedId, select, openSettings, settingsId
         // opens its market's live per-action Aave catalog in its own token picker. A card fixed by a composition keeps its single asset.
         ...(lendingAction(selection.action) ? (() => {
           const reserve = lendingReservesFor(selection.network).find(item => item.symbol === selection.from);
-          return { ...(reserve ? { assetAddress: reserve.asset } : {}), ...(editable && valid ? { lending: { kind: selection.action, network: selection.network, account: wallet.account ?? null, funded: fundingOf(id) } } : {}) };
+          const funded = fundingOf(id, selection);
+          return { ...(reserve ? { assetAddress: reserve.asset } : {}), ...(editable && valid ? { lending: { kind: selection.action, network: selection.network,
+            account: wallet.account ?? null, opened: openedBefore(id, selection.action), ...(funded ? { funded } : {}) } } : {}) };
         })() : {}),
       };
     };
     // BUILD AAVE-V3-CARD-CATALOG-FIX-001: a step that spends an earlier step's delivered output (a sequence such as Swap USDC → WETH → Supply WETH)
-    // says so on its card. The link is the sequence runtime's exact asset identity of the saved steps, so a draft that changes the asset is flagged.
+    // says so on its card. The link is the sequence runtime's exact asset identity of the saved steps; a draft that changes the network or the
+    // reserve (even under the same label) is flagged before it is reviewed.
     const canvasSteps = composerActions(workflow).map(node => node.nodeId);
-    function fundingOf(id: string): { step: number; symbol: string } | null {
-      const step = sequence?.steps.find(item => item.nodeId === id), producer = step && step.fundedBy !== null ? sequence!.steps[step.fundedBy] : undefined;
-      const consumer = workflow.nodes.find(node => node.nodeId === id), saved = consumer ? cryptoSelectionOf(consumer) : null;
-      return producer && saved ? { step: canvasSteps.indexOf(producer.nodeId) + 1, symbol: saved.from } : null;
+    function fundingOf(id: string, draft?: CryptoSelection) {
+      const consumer = workflow.nodes.find(node => node.nodeId === id);
+      return lendingCardFunding(sequence, id, canvasSteps, consumer ? cryptoSelectionOf(consumer) : null, draft);
+    }
+    // Positions an earlier step of this workflow opens on the same chain (Withdraw after its Supply, Repay after its Borrow): open when this step runs.
+    function openedBefore(id: string, kind: CryptoAction): readonly string[] {
+      const opening = kind === 'withdraw' ? 'supply' : kind === 'repay' ? 'borrow' : null, index = canvasSteps.indexOf(id);
+      const earlier = composerActions(workflow).slice(0, index < 0 ? undefined : index);
+      return opening ? earlier.filter(node => node.actionType === opening).map(node => lendingNodeAsset(node as SemanticWorkflow['nodes'][number])).filter((asset): asset is string => Boolean(asset)) : [];
     }
     // BUILD-RH-002: the Stocks card edits the destination Stock Token of its Robinhood Chain swap (featured shortcut or search result).
     const stocksData = (id: string, selection: CryptoSelection, editable = true) => ({ equity: selection.to ?? '',
@@ -647,8 +657,7 @@ function BuildCanvas({ environment, selectedId, select, openSettings, settingsId
         onApply: applyProposal,
       } } : {}),
       ...(node.actionType === 'asset.transfer' && nodeRecipient(node) ? { recipient: nodeRecipient(node)! } : {}),
-      ...(lendingAction(node.actionType as CryptoAction) && fundingOf(node.nodeId) ? { funding: { ...fundingOf(node.nodeId)!,
-        changed: Boolean(cryptoSelections[node.nodeId] && cryptoSelections[node.nodeId]!.from !== fundingOf(node.nodeId)!.symbol) } } : {}),
+      ...(lendingAction(node.actionType as CryptoAction) && fundingOf(node.nodeId, cryptoSelections[node.nodeId]) ? { funding: fundingOf(node.nodeId, cryptoSelections[node.nodeId])! } : {}),
       ...(['supply', 'borrow', 'repay', 'withdraw', 'asset.transfer'].includes(node.actionType) ? { supplyProposal: {
         formId: supplyReviewFormId(node.nodeId), reviewLabel: `Review ${composerSummary(workflow, node, context).action} change`, canReview: selectedId === node.nodeId,
         hasProposal: Boolean(pending && proposalTarget === node.nodeId),
