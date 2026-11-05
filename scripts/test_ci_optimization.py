@@ -477,7 +477,8 @@ MAIN_PROFILES = {
     "arbitrum-authoring-certification": (["--config","playwright.arbitrum-authoring.config.ts"], {}),
     "workflow-ux-authoring": (["--config","playwright.workflow-ux.config.ts"], {}),
     "canvas-workflow-ux": (["--config","playwright.canvas-workflow-ux.config.ts","canvas-workflow-ux.spec.ts"], {}),
-    "base-mainnet-authoring": (["base-mainnet-authoring.spec.ts"], {"GRYLOO_BASE_MAINNET_E2E":"MOCKED_LOOPBACK_ONLY","FLOFI_COPILOT":"replay"}),
+    # BUILD AAVE-V3-CARD-CATALOG-FIX-001 (intentional change): the same harness profile also certifies the lending card's Aave reserve catalog.
+    "base-mainnet-authoring": (["base-mainnet-authoring.spec.ts","base-mainnet-lending-catalog.spec.ts"], {"GRYLOO_BASE_MAINNET_E2E":"MOCKED_LOOPBACK_ONLY","FLOFI_COPILOT":"replay"}),
     "uniswap-provenance": (["release-financial-provenance.spec.ts"], {"FLOFI_RELEASE_PROVENANCE_PROFILE":"uniswap","GRYLOO_UNISWAP_LIQUIDITY_E2E":"MOCKED_LOOPBACK_ONLY"}),
     "router-provenance": (["release-financial-provenance.spec.ts"], {"FLOFI_RELEASE_PROVENANCE_PROFILE":"router","GRYLOO_ROUTER_E2E":"MOCKED_LOOPBACK_ONLY"}),
     "journey-provenance": (["release-financial-provenance.spec.ts"], {"FLOFI_RELEASE_PROVENANCE_PROFILE":"journey","GRYLOO_ROUTER_TESTNET_E2E":"MOCKED_LOOPBACK_ONLY"}),

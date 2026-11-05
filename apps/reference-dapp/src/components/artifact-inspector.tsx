@@ -241,6 +241,7 @@ function CanonicalArtifactInspector({ selectedId, select }: InspectorProps) {
     catch (cause) { setError(cause instanceof Error ? cause.message : 'Invalid composition'); }
   }
   const supply = node?.actionType === 'supply';
+  const lendingDraft = node && !lending && ['supply', 'borrow', 'repay', 'withdraw'].includes(node.actionType) ? cryptoSelections[node.nodeId] : undefined;
   const solana = node ? solanaSwapDetails(node) : null;
   const orcaPosition = node ? solanaLiquidityDetails(node) : null;
   const uniPosition = node ? uniswapLiquidityDetails(node) : null;
@@ -273,11 +274,18 @@ function CanonicalArtifactInspector({ selectedId, select }: InspectorProps) {
     </form>}
     {node ? <>
       {node.actionType==='asset.transfer'&&!selection&&<RobinhoodTransferAuthoringForm key={node.nodeId+':'+state.workflow.revision} nodeId={node.nodeId}/>}
-      {node.actionType==='withdraw'&&<WithdrawAuthoringForm key={node.nodeId+':'+state.workflow.revision} nodeId={node.nodeId} reviewFormId={supplyReviewFormId(node.nodeId)}/>}
-      {node.actionType==='repay'&&<RepayAuthoringForm key={node.nodeId+':'+state.workflow.revision} nodeId={node.nodeId} reviewFormId={supplyReviewFormId(node.nodeId)}/>}
+      {/* BUILD AAVE-V3-CARD-CATALOG-FIX-001: a reserve or network chosen in the card's own picker is a Canvas draft. The card's Review submits it
+          as one SET_CRYPTO_ACTION proposal (the new reserve's registry identity and the amount typed for it); the settings forms below edit
+          the saved reserve and would propose the old one. */}
+      {lendingDraft && <form id={supplyReviewFormId(node.nodeId)} className="inspector-form" aria-label={tr(`Review ${label} change`)} onSubmit={event => { event.preventDefault(); setError(reviewCanvasAmount(node.nodeId) ?? ''); }}>
+        <p className="muted">{tr('{0} on {1}: enter the amount in {0} on the card, then review and apply the change. A new Simulation and Review follow.', lendingDraft.from, lendingDraft.network)}</p>
+        {error && <p role="alert">{tr(error)}</p>}
+      </form>}
+      {!lendingDraft&&node.actionType==='withdraw'&&<WithdrawAuthoringForm key={node.nodeId+':'+state.workflow.revision} nodeId={node.nodeId} reviewFormId={supplyReviewFormId(node.nodeId)}/>}
+      {!lendingDraft&&node.actionType==='repay'&&<RepayAuthoringForm key={node.nodeId+':'+state.workflow.revision} nodeId={node.nodeId} reviewFormId={supplyReviewFormId(node.nodeId)}/>}
       {lending&&<LendingNodeEditor key={`${node.nodeId}:${state.workflow.revision}`} nodeId={node.nodeId} {...(supply || node.actionType === 'borrow' ? { reviewFormId: supplyReviewFormId(node.nodeId) } : {})}/>}
-      {!lending&&node.actionType==='borrow'&&<BorrowAuthoringForm key={node.nodeId+':'+state.workflow.revision} nodeId={node.nodeId} reviewFormId={supplyReviewFormId(node.nodeId)}/>}
-      {!lending && supply && <SupplyAuthoringForm key={node.nodeId + ':' + state.workflow.revision} nodeId={node.nodeId} reviewFormId={supplyReviewFormId(node.nodeId)}/>}
+      {!lending&&!lendingDraft&&node.actionType==='borrow'&&<BorrowAuthoringForm key={node.nodeId+':'+state.workflow.revision} nodeId={node.nodeId} reviewFormId={supplyReviewFormId(node.nodeId)}/>}
+      {!lending && !lendingDraft && supply && <SupplyAuthoringForm key={node.nodeId + ':' + state.workflow.revision} nodeId={node.nodeId} reviewFormId={supplyReviewFormId(node.nodeId)}/>}
       {solana && !cryptoSwap && <><p className="muted">{tr(solana.network)} {tr(solana.from)} → {tr(solana.to)}{tr(" via ")}{tr(solanaSwapLabels(solana.network).provider)}{tr(solanaSwapLabels(solana.network).testTokens ? ' · valueless test tokens' : '')}{tr(" · simulate for a live quote. Changes require review.")}</p><SolanaSwapForm key={node.nodeId + ':' + state.workflow.revision} nodeId={node.nodeId}/></>}
       {cryptoSwap && selection && <form className="inspector-form" aria-label={tr("Swap amount")} onSubmit={event => { event.preventDefault(); setError(commitCanvasAmount(node.nodeId) ?? ''); }}>
         <label>{tr("Input amount (")}{tr(selection.from)})<TokenAmountInput value={amountInputs[node.nodeId] ?? cryptoSwap.amount} aria-invalid={Boolean(error) || undefined} onValueChange={value => { setError(''); editCanvasAmount(node.nodeId, value); }}/></label>

@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 'use client';
+import type { SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
 import { useLocale } from '../i18n/locale';
 
 import Image from 'next/image';
@@ -10,7 +11,8 @@ import {lendingDetails,lendingCanvasEdges} from '../domain/lending-authoring';
 import {useBuild009Wallet} from '../state/build009-wallet-store';
 import { transferCardLabel, transferDetails } from '../domain/robinhood-transfer-authoring';
 import { checkRecipient, recipientPolicy } from '../domain/recipient-address';
-import { lendingAmountLabel } from '../domain/supply-authoring';
+import { lendingAmountLabel, lendingNodeAsset, lendingReservesFor } from '../domain/supply-authoring';
+import { lendingCardFunding } from '../domain/lending-card-catalog';
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { ReactFlow, getNodesBounds, Background, Handle, Position, useNodesInitialized, useNodesState, useReactFlow, useStore, useStoreApi, useUpdateNodeInternals, type Node, type NodeChange, type NodeProps, type ReactFlowState, type FinalConnectionState, MarkerType } from '@xyflow/react';
 import { MOCKED_CHAIN_PROFILE, type Symbol } from '@defi-workflow-engine/reference-linter';
@@ -39,7 +41,7 @@ import { universalCanvasPair, universalKeyOfCanvasLabel, universalFeaturedAssets
 import { ActionIcon } from './action-icon';
 import { ensureNetworkCatalog, useNetworkCatalog } from '../state/asset-catalog-store';
 import { CATALOG_NETWORK_IDENTITIES } from '../domain/network-registry';
-import { counterpartSelection, invertCryptoSelection, cryptoNetworks, cryptoSelectionOf, cryptoProfile, cryptoTokenOptions, selectCryptoNetwork, selectCryptoToken, canSelectCryptoAssets, type CryptoSelection, type CryptoAction } from '../domain/crypto-action-picker';
+import { counterpartSelection, invertCryptoSelection, cryptoNetworks, cryptoSelectionOf, cryptoProfile, cryptoTokenOptions, selectCryptoNetwork, selectCryptoToken, canSelectCryptoAssets, lendingAction, type CryptoSelection, type CryptoAction } from '../domain/crypto-action-picker';
 import { actionReviewValue } from '../domain/canvas-action-setup';
 import { SimulateWorkflowCanvas } from './simulate-workflow-canvas';
 import { composerActions, composerSummary, composerNodeState, composerConnections, singleAmountProposalTarget } from '../domain/composer-presentation';
@@ -311,7 +313,7 @@ export function WorkflowCanvas(props: BuildCanvasProps | { mode: 'simulate'; wor
 function BuildCanvas({ environment, selectedId, select, openSettings, settingsId = null, workflowName = 'Your Workflow', renameWorkflow = () => {}, onSave, estimateOwner, onToolboxModeChange, onAutomate, overview }: BuildCanvasProps) {
   const { t: tr } = useLocale();
   const { state, dispatch, context, canvasLayout, canUndo, canRedo, undo, redo, moveCanvasNodes, addCanvasCommand, duplicateCanvasNodes, propose, review,
-    actionSetup = null, amountInputs = {}, bridgeNetworkInputs = {}, cryptoSelections = {}, recipientInputs = {}, editCanvasRecipient, editCryptoSelection, startActionSetup, startStocksSetup, editCanvasAmount, editSwapSetupDirection, editBridgeNetworks, cancelCanvasAmount, reviewCanvasAmount, commitCanvasAmount, removeActionSetup, pending, applyProposal, dismissProposal } = useWorkflow();
+    sequence = null, actionSetup = null, amountInputs = {}, bridgeNetworkInputs = {}, cryptoSelections = {}, recipientInputs = {}, editCanvasRecipient, editCryptoSelection, startActionSetup, startStocksSetup, editCanvasAmount, editSwapSetupDirection, editBridgeNetworks, cancelCanvasAmount, reviewCanvasAmount, commitCanvasAmount, removeActionSetup, pending, applyProposal, dismissProposal } = useWorkflow();
   const workflow: Workflow = state.workflow;
   const wallet=useBuild009Wallet();
   // BUILD-RH-002: catalog-network assets resolve from the official catalog; load it whenever the Canvas shows an action on that network
@@ -514,8 +516,30 @@ function BuildCanvas({ environment, selectedId, select, openSettings, settingsId
         onToken: (side: 'source' | 'destination', token: string) => { if (editable) editCryptoSelection(id, selectCryptoToken(selection, side, token)); },
         // BUILD-SOLANA-MAINNET-001 (requirement C): the arrow exchanges From and To as a draft (the old estimate is dropped and the draft re-quoted).
         ...(editable && invertCryptoSelection(selection) ? { onInvert: () => { const inverted = invertCryptoSelection(selection); if (inverted) editCryptoSelection(id, inverted); } } : {}),
+        // BUILD AAVE-V3-CARD-CATALOG-FIX-001: a lending card names its registry reserve (exact address, for its icon) and, when it may be edited,
+        // opens its market's live per-action Aave catalog in its own token picker. A card fixed by a composition keeps its single asset.
+        ...(lendingAction(selection.action) ? (() => {
+          const reserve = lendingReservesFor(selection.network).find(item => item.symbol === selection.from);
+          const funded = fundingOf(id, selection);
+          return { ...(reserve ? { assetAddress: reserve.asset } : {}), ...(editable && valid ? { lending: { kind: selection.action, network: selection.network,
+            account: wallet.account ?? null, opened: openedBefore(id, selection.action), ...(funded ? { funded } : {}) } } : {}) };
+        })() : {}),
       };
     };
+    // BUILD AAVE-V3-CARD-CATALOG-FIX-001: a step that spends an earlier step's delivered output (a sequence such as Swap USDC → WETH → Supply WETH)
+    // says so on its card. The link is the sequence runtime's exact asset identity of the saved steps; a draft that changes the network or the
+    // reserve (even under the same label) is flagged before it is reviewed.
+    const canvasSteps = composerActions(workflow).map(node => node.nodeId);
+    function fundingOf(id: string, draft?: CryptoSelection) {
+      const consumer = workflow.nodes.find(node => node.nodeId === id);
+      return lendingCardFunding(sequence, id, canvasSteps, consumer ? cryptoSelectionOf(consumer) : null, draft);
+    }
+    // Positions an earlier step of this workflow opens on the same chain (Withdraw after its Supply, Repay after its Borrow): open when this step runs.
+    function openedBefore(id: string, kind: CryptoAction): readonly string[] {
+      const opening = kind === 'withdraw' ? 'supply' : kind === 'repay' ? 'borrow' : null, index = canvasSteps.indexOf(id);
+      const earlier = composerActions(workflow).slice(0, index < 0 ? undefined : index);
+      return opening ? earlier.filter(node => node.actionType === opening).map(node => lendingNodeAsset(node as SemanticWorkflow['nodes'][number])).filter((asset): asset is string => Boolean(asset)) : [];
+    }
     // BUILD-RH-002: the Stocks card edits the destination Stock Token of its Robinhood Chain swap (featured shortcut or search result).
     const stocksData = (id: string, selection: CryptoSelection, editable = true) => ({ equity: selection.to ?? '',
       onEquityChange: (symbol: string) => { if (editable && symbol !== selection.to) { try { editCryptoSelection(id, selectCryptoToken(selection, 'destination', symbol)); } catch { /* not in the current catalog */ } } } });
@@ -633,6 +657,7 @@ function BuildCanvas({ environment, selectedId, select, openSettings, settingsId
         onApply: applyProposal,
       } } : {}),
       ...(node.actionType === 'asset.transfer' && nodeRecipient(node) ? { recipient: nodeRecipient(node)! } : {}),
+      ...(lendingAction(node.actionType as CryptoAction) && fundingOf(node.nodeId, cryptoSelections[node.nodeId]) ? { funding: fundingOf(node.nodeId, cryptoSelections[node.nodeId])! } : {}),
       ...(['supply', 'borrow', 'repay', 'withdraw', 'asset.transfer'].includes(node.actionType) ? { supplyProposal: {
         formId: supplyReviewFormId(node.nodeId), reviewLabel: `Review ${composerSummary(workflow, node, context).action} change`, canReview: selectedId === node.nodeId,
         hasProposal: Boolean(pending && proposalTarget === node.nodeId),
@@ -690,7 +715,7 @@ function BuildCanvas({ environment, selectedId, select, openSettings, settingsId
             : actionSetup.cryptoSelection && actionSelection(actionSetup.id, actionSetup.cryptoSelection).valid ? null : 'Choose a network available for the connected wallet.' } } : {}),
       } });
     return projected;
-  }, [environment, state, workflow, actionSetup, amountInputs, bridgeNetworkInputs, cryptoSelections, recipientInputs, editCanvasRecipient, editCryptoSelection, wallet.account, estimateOwner, selectedId, selectedIds, context, canvasLayout, review, editCanvasAmount, editSwapSetupDirection, editBridgeNetworks, reviewCanvasAmount, commitCanvasAmount, cancelCanvasAmount, openSettings, settingsId, pending, applyProposal, catalog.version, tr]);
+  }, [environment, state, workflow, sequence, actionSetup, amountInputs, bridgeNetworkInputs, cryptoSelections, recipientInputs, editCanvasRecipient, editCryptoSelection, wallet.account, estimateOwner, selectedId, selectedIds, context, canvasLayout, review, editCanvasAmount, editSwapSetupDirection, editBridgeNetworks, reviewCanvasAmount, commitCanvasAmount, cancelCanvasAmount, openSettings, settingsId, pending, applyProposal, catalog.version, tr]);
   // Live pointer positions stay in React Flow state; layout is committed on release.
   const [nodes, setNodes, onNodesChange] = useNodesState<Node>(projectedNodes);
   useLayoutEffect(() => {

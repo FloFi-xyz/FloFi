@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 'use client';
+import { forgetAaveReserves } from './aave-reserve-reads';
 import { routerDetails } from '../domain/router-authoring';
 import { createContext, useCallback, useContext, useEffect, useReducer, useRef, useState, useMemo, type Dispatch, type ReactNode } from 'react';
 import { BaseObservationError, createReviewContext, lintWorkflow, reviewContextForChain, type ReviewContext, type ReviewResult } from '@defi-workflow-engine/reference-linter';
@@ -265,6 +266,8 @@ export function WorkflowProvider({ children, initialContext, initialWorkflowId =
   const completeSequenceStep = useCallback((index: number, completion: StepCompletion) => {
     const { sequence, completed, workflow } = sequenceRef.current, step = sequence?.steps[index], node = step && workflow.nodes.find(item => item.nodeId === step.nodeId);
     if (!step || !node || index !== completed.length) return;
+    // An executed step changed the owner's balances or Aave positions: no card shows the market read from before it.
+    forgetAaveReserves();
     setSequenceRun({ workflowId: workflow.workflowId, completed: [...completed, { nodeId: step.nodeId, node: stepNodeKey(node), received: completion.received, runKey: completion.runKey,
       ...completion.kind ? { kind: completion.kind } : {}, ...completion.owner ? { owner: completion.owner } : {}, allocations: fundingAllocations(step, completed) }] });
   }, []);
@@ -272,6 +275,7 @@ export function WorkflowProvider({ children, initialContext, initialWorkflowId =
     const { sequence, workflow } = sequenceRef.current, actions = sequenceOrder(workflow), node = actions[0];
     // A sequence records its own steps; a composition runtime executes its workflow as a whole and is never split into steps.
     if (sequence || actions.length !== 1 || !node || compositionWorkflow(workflow)) return;
+    forgetAaveReserves();
     const done: CompletedStep = { nodeId: node.nodeId, node: stepNodeKey(node), received: completion.received, runKey: completion.runKey, ...completion.kind ? { kind: completion.kind } : {},
       ...completion.owner ? { owner: completion.owner } : {}, allocations: [] };
     setSequenceRun(run => {

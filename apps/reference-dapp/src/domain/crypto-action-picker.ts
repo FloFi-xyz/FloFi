@@ -9,7 +9,7 @@ import { createSwapNode, swapDetails } from './swap-authoring';
 import { createSolanaSwapNode, solanaSwapDetails, type SolanaSwapInput } from './jupiter-authoring';
 import { createUniswapLiquidityNode, uniswapLiquidityDetails } from './uniswap-liquidity-authoring';
 import { createSolanaLiquidityNode, solanaLiquidityDetails } from './solana-liquidity-authoring';
-import { createAuthoredSupply, createAuthoredBorrow, createAuthoredRepay, createAuthoredWithdraw, supplyDetails, borrowDetails, repayDetails, withdrawDetails, lendingProfileFor, lendingProfileOfReserve, lendingNodeAsset } from './supply-authoring';
+import { createAuthoredSupply, createAuthoredBorrow, createAuthoredRepay, createAuthoredWithdraw, supplyDetails, borrowDetails, repayDetails, withdrawDetails, lendingProfileFor, lendingProfileOfReserve, lendingNodeAsset, lendingReservesFor, lendingSelectable } from './supply-authoring';
 import { BASE_CHAIN, BASE_NETWORK, ROBINHOOD_CHAIN, ROBINHOOD_NETWORK, authoringAssetSymbol, featuredNetworkSymbols, featuredStockSymbols, resolveNetworkAsset } from './asset-catalogs';
 import { CATALOG_SWAP_NETWORKS, catalogSwapDetails, createCatalogSwapAuthoringNode, type CatalogSwapNetwork } from './catalog-swap-authoring';
 import { networkIdentity } from './network-registry';
@@ -45,6 +45,9 @@ const swaps: readonly CryptoPickerProfile[] = [...evm, ...SOLANA_SWAP_RUNTIMES.m
     .map(([network, chain]): CryptoPickerProfile => ({ network, chain, provider: 'Uniswap', get tokens() { return featuredNetworkSymbols(chain); }, catalog: true }))];
 /** Swaps and pools on a catalog network take ERC-20s only (native ETH is wrapped first); transfers may also send ETH. */
 const erc20Only = (action: CryptoAction) => action === 'swap' || action === 'pool';
+/** Aave V3 actions: one reserve of the network's market, identified by the registry (chain + address + decimals), never by the token list. */
+export const lendingAction = (action: CryptoAction): action is 'supply' | 'borrow' | 'repay' | 'withdraw' =>
+  action === 'supply' || action === 'borrow' || action === 'repay' || action === 'withdraw';
 /** A token of a profile: a shortcut, or (catalog networks) any ERC-20 the current catalog resolves. */
 function profileHasToken(profile: CryptoPickerProfile, symbol: string | undefined, action: CryptoAction): boolean {
   if (!symbol) return false;
@@ -77,7 +80,8 @@ const transfers: readonly CryptoPickerProfile[] = Object.entries(TRANSFER_NETWOR
   // BUILD-SOLANA-TRANSFER-UX-001: Solana mainnet-beta (SOL, USDC, USDT, real funds) and Devnet (SOL, devUSDC) on the same Send card.
   .concat(SOLANA_TRANSFER_PROFILES.map(profile => ({ network: profile.network, chain: profile.chain, provider: 'Send', tokens: profile.assets.map(asset => asset.symbol) })));
 // BUILD AAVE-V3-EXPANSION-001: one entry per Aave market, listing every registered reserve (its original verified asset first). Live reserve
-// state (frozen, paused, caps, liquidity, the owner's balance) is shown by the Canvas from `/lending/reserves`; Simulate re-reads it.
+// state (frozen, paused, caps, liquidity, the owner's positions) is read by the card picker through `supplyReserves` and only orders and
+// explains the options (`lending-card-catalog.ts`); Simulate re-reads it and refuses fail-closed.
 const lending: readonly CryptoPickerProfile[] = [...new Set(AAVE_V3_LENDING_PROFILES.map(profile => profile.network))].map(network => {
   const reserves = AAVE_V3_LENDING_PROFILES.filter(profile => profile.network === network);
   return { network, chain: reserves[0]!.chain, provider: 'Aave V3', tokens: reserves.map(profile => profile.symbol) };
@@ -160,6 +164,13 @@ export function selectCryptoToken(selection: CryptoSelection, side: 'source' | '
   if (!found || (!cryptoTokenOptions(selection, side).includes(token) && !(searchable && profileHasToken(found, token, selection.action))))
     throw new Error('ACTION_TOKEN_UNSUPPORTED');
   if (selection.action === 'transfer' && found.catalog && side === 'source') return { ...selection, from: token };
+  // BUILD AAVE-V3-CARD-CATALOG-FIX-001: a lending card selects one registered reserve of its market (its only asset). The label must name exactly
+  // that reserve (a label the token list resolves to another token is refused), so the authored node carries the registry's address and decimals.
+  if (lendingAction(selection.action)) {
+    const reserve = side === 'source' ? lendingReservesFor(selection.network).find(item => item.symbol === token) : undefined;
+    if (!reserve || !lendingSelectable(selection.network, reserve)) throw new Error('ACTION_TOKEN_UNSUPPORTED');
+    return { ...selection, from: reserve.symbol };
+  }
   if (!erc20Only(selection.action) || (selection.action === 'pool' && !found.catalog)) return selection;
   const profile = found;
   const next = side === 'source' ? { ...selection, from: token } : { ...selection, to: token };
@@ -189,8 +200,9 @@ export function cryptoSelectionOf(node: Node): CryptoSelection | null {
   if (uniswapLiquidityDetails(node) || solanaLiquidityDetails(node)) return selectCryptoNetwork('pool', network);
   if (['supply', 'borrow', 'repay', 'withdraw', 'transfer'].includes(node.actionType) && AAVE_V3_LENDING_PROFILES.some(profile => profile.chain === node.chainId)) {
     // The node's own reserve (chain + address), never the market's first token.
+    // A reserve that is not registered on this market is never shown (or re-picked) as the market's first token: the card stays fixed.
     const selection = selectCryptoNetwork(node.actionType as CryptoAction, network), reserve = lendingProfileOfReserve(node.chainId, lendingNodeAsset(node as SemanticWorkflow['nodes'][number]));
-    return reserve ? { ...selection, from: reserve.symbol } : selection;
+    return reserve && reserve.network === network ? { ...selection, from: reserve.symbol } : null;
   }
   return null;
 }
@@ -217,7 +229,9 @@ export function defaultPoolRange(network: string): { readonly rangeUnit: 'TICK';
 export function createCryptoActionNode(id: string, input: CryptoActionInput): SemanticWorkflow['nodes'][number] {
   const { amount, slippage } = input;
   const identity = networkIdentity(input.selection.network);
-  const selection = identity?.catalog ? { ...input.selection, from: authoringAssetSymbol(identity.chain, input.selection.from),
+  // A lending reserve is resolved by `lendingProfileFor` (registry identity, cross-checked against the token list); the token list's own
+  // label for that address is never substituted for the reserve's label.
+  const selection = identity?.catalog && !lendingAction(input.selection.action) ? { ...input.selection, from: authoringAssetSymbol(identity.chain, input.selection.from),
     ...input.selection.to === undefined ? {} : { to: authoringAssetSymbol(identity.chain, input.selection.to) } } : input.selection;
   if (!validCryptoSelection(selection)) throw new Error('ACTION_ASSETS_UNSUPPORTED');
   if (selection.action === 'swap') {

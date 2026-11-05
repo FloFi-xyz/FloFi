@@ -5,7 +5,7 @@
   "type": "module",
   "license": "AGPL-3.0-only",
   "scripts": {
-    "build": "NEXT_TELEMETRY_DISABLED=1 PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 next build",
+    "build": "NEXT_TELEMETRY_DISABLED=1 PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 NODE_OPTIONS=--max-old-space-size=4096 next build",
     "dev": "NEXT_TELEMETRY_DISABLED=1 PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 next dev --hostname 127.0.0.1",
     "start": "NEXT_TELEMETRY_DISABLED=1 PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 next start --hostname 127.0.0.1",
     "typecheck": "NEXT_TELEMETRY_DISABLED=1 next typegen && NODE_OPTIONS=--max-old-space-size=4096 tsc --noEmit",

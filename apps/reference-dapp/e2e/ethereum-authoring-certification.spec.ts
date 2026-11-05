@@ -87,6 +87,6 @@ test('the existing generic network picker offers Ethereum and chain-bound pinned
   await expect(ethereum).toBeVisible(); await ethereum.click(); await expect(ethereum).toHaveAttribute('aria-pressed', 'true');
   const picker = page.getByRole('region', { name: 'Destination token picker', exact: true });
   for (const symbol of ['USDC', 'WETH']) await expect(picker.getByRole('radio', { name: symbol, exact: true })).toHaveCount(1);
-  await expect(ethereum.locator('img')).toHaveAttribute('src', '/brand/crypto/ethereum.svg');
+  await expect(ethereum.locator('img')).toHaveAttribute('src', '/brand/crypto/ethereum-network.svg');
   await expectReviewedImagesOnly(page); await assertPassiveWallet(page); networkGuard.assertClean();
 });

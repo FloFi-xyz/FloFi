@@ -14,23 +14,27 @@
  *   then `/rpc` answers 503 and every read fails closed, so a suite that never starts it (Base authoring) sees what it saw before there was one.
  *   `mine` adds empty blocks (confirmations) and `sent` reports how many raw transactions it accepted. The auth-wallets suite uses it for
  *   FloFi Wallet's MOCKED Base mainnet signing journey.
+ * - Aave V3 (base-mainnet-aave.ts): once the chain is started, `/rpc` also answers the MOCKED Aave V3 Base market's reads (every registered
+ *   reserve; Multicall3 deployed) for the Canvas lending cards' live reserve catalog. `POST /__harness/aave` patches that market and its MOCKED
+ *   account (the patch format is documented there) and `GET /__harness/aave` reports it; a chain `reset` restores its defaults.
+ *
+ * `node e2e/base-mainnet-serve.ts` serves it on 127.0.0.1:8562 (playwright.config.ts); a test may run `createBaseMainnetHarness()` in-process.
  */
 import { readFileSync } from 'node:fs';
-import { createServer } from 'node:http';
+import { createServer, type Server } from 'node:http';
 import { erc7710 } from '@defi-workflow-engine/reference-compiler';
 import { createRobinhoodMockChain } from '../src/server/robinhood-mainnet.test-harness.ts';
 import { baseCatalog } from '../src/server/base-mainnet.test-harness.ts';
+import { createBaseAaveMarket } from './base-mainnet-aave.ts';
 
 const LIST = readFileSync(new URL('../../../packages/action-registry/test/fixtures/base-token-list-fixture.json', import.meta.url), 'utf8');
-let mode: 'ok' | 'unavailable' | 'slow' = 'ok', reads = 0;
 const BASE_CHAIN_ID = 8453n, ADDRESS = /^0x[0-9a-f]{40}$/;
 const hex = (value: bigint) => `0x${value.toString(16)}`;
 const newChain = () => createRobinhoodMockChain(baseCatalog(), { now: Date.now, network: 'base' });
-let chain: ReturnType<typeof newChain> | null = null, accepted = 0;
 const rpcError = (message: string) => Object.assign(new Error(message), { rpc: -32000 });
 
 /** A node's acceptance rules for one raw transaction, then inclusion in a new block under the transaction's own hash. */
-async function sendRawTransaction(chain: ReturnType<typeof newChain>, raw: unknown): Promise<string> {
+async function sendRawTransaction(chain: ReturnType<typeof newChain>, raw: unknown, counter: { accepted: number }): Promise<string> {
   let decoded: ReturnType<typeof erc7710.decodeSignedEip1559>;
   try { decoded = erc7710.decodeSignedEip1559(String(raw)); } catch { throw rpcError('invalid transaction'); }
   const { tx } = decoded, from = decoded.from.toLowerCase(), hash = decoded.hash.toLowerCase();
@@ -46,7 +50,7 @@ async function sendRawTransaction(chain: ReturnType<typeof newChain>, raw: unkno
   chain.state.transactions.delete(mocked); chain.state.receipts.delete(mocked);
   chain.state.transactions.set(hash, { ...included, hash, maxPriorityFeePerGas: hex(tx.maxPriorityFeePerGas) });
   chain.state.receipts.set(hash, { ...receipt, transactionHash: hash });
-  accepted += 1;
+  counter.accepted += 1;
   return hash;
 }
 async function read(request: AsyncIterable<unknown>): Promise<string> {
@@ -55,56 +59,72 @@ async function read(request: AsyncIterable<unknown>): Promise<string> {
   return body;
 }
 
-createServer(async (request, response) => {
-  const url = new URL(request.url ?? '/', 'http://127.0.0.1:8562');
-  const json = (status: number, value: unknown) => response.writeHead(status, { 'content-type': 'application/json' }).end(JSON.stringify(value));
-  if (request.method === 'POST' && url.pathname === '/__harness/token-list') {
-    const next = (JSON.parse(await read(request) || '{}') as { mode?: unknown }).mode;
-    if (next !== 'ok' && next !== 'unavailable' && next !== 'slow') { response.writeHead(400).end(); return; }
-    mode = next; reads = 0;
-    json(200, { mode });
-    return;
-  }
-  if (request.method === 'GET' && url.pathname === '/__harness/token-list') { json(200, { mode, reads }); return; }
-  if (request.method === 'GET' && url.pathname === '/token-list') {
-    reads += 1;
-    if (mode === 'unavailable') { response.writeHead(503, { 'content-type': 'text/plain' }).end('MOCKED token list unavailable'); return; }
-    if (mode === 'slow') await new Promise(resolve => setTimeout(resolve, 1_500));
-    response.writeHead(200, { 'content-type': 'application/json', 'content-length': Buffer.byteLength(LIST) }).end(LIST);
-    return;
-  }
-  if (request.method === 'POST' && url.pathname === '/__harness/chain') {
-    try {
-      const control = JSON.parse(await read(request) || '{}') as { action?: unknown; owner?: unknown; wei?: unknown; blocks?: unknown };
-      if (control.action === 'reset') {
-        chain = newChain(); accepted = 0;
-        if (control.owner !== undefined) {
-          if (typeof control.owner !== 'string' || !ADDRESS.test(control.owner) || typeof control.wei !== 'string' || !/^[1-9][0-9]{0,30}$/.test(control.wei)) throw new Error('MOCK_CONTROL_DENIED');
-          chain.fundNative(control.owner, BigInt(control.wei));
-        }
-        json(200, { result: true });
-      } else if (control.action === 'mine' && chain && Number.isSafeInteger(control.blocks) && (control.blocks as number) > 0 && (control.blocks as number) <= 64) {
-        chain.mine(control.blocks as number);
-        json(200, { result: chain.state.head });
-      } else if (control.action === 'sent') json(200, { result: accepted });
-      else throw new Error('MOCK_CONTROL_DENIED');
-    } catch { json(400, { error: 'MOCK_CONTROL_DENIED' }); }
-    return;
-  }
-  if (request.method === 'POST' && url.pathname === '/rpc') {
-    if (!chain) { response.writeHead(503, { 'content-type': 'text/plain' }).end('MOCKED Base chain not started'); return; }
-    let id: unknown = null;
-    try {
-      const call = JSON.parse(await read(request)) as { id?: unknown; method?: unknown; params?: unknown };
-      id = call.id ?? null;
-      const params = Array.isArray(call.params) ? call.params : [];
-      const result = call.method === 'eth_sendRawTransaction' ? await sendRawTransaction(chain, params[0]) : await chain.rpc(String(call.method), params);
-      json(200, { jsonrpc: '2.0', id, result });
-    } catch (cause) {
-      const error = cause as { message?: unknown; rpc?: unknown };
-      json(200, { jsonrpc: '2.0', id, error: { code: typeof error.rpc === 'number' ? error.rpc : -32000, message: String(error.message ?? 'MOCK_RPC_DENIED') } });
+/** The harness server (not yet listening): its own token-list mode, chain and Aave market. */
+export function createBaseMainnetHarness(): Server {
+  let mode: 'ok' | 'unavailable' | 'slow' = 'ok', reads = 0;
+  let chain: ReturnType<typeof newChain> | null = null;
+  const counter = { accepted: 0 }, aave = createBaseAaveMarket();
+  return createServer(async (request, response) => {
+    const url = new URL(request.url ?? '/', 'http://127.0.0.1:8562');
+    const json = (status: number, value: unknown) => response.writeHead(status, { 'content-type': 'application/json' }).end(JSON.stringify(value));
+    if (request.method === 'POST' && url.pathname === '/__harness/token-list') {
+      const next = (JSON.parse(await read(request) || '{}') as { mode?: unknown }).mode;
+      if (next !== 'ok' && next !== 'unavailable' && next !== 'slow') { response.writeHead(400).end(); return; }
+      mode = next; reads = 0;
+      json(200, { mode });
+      return;
     }
-    return;
-  }
-  response.writeHead(200, { 'content-type': 'text/plain' }).end('MOCKED Base mainnet harness');
-}).listen(8562, '127.0.0.1');
+    if (request.method === 'GET' && url.pathname === '/__harness/token-list') { json(200, { mode, reads }); return; }
+    if (request.method === 'GET' && url.pathname === '/token-list') {
+      reads += 1;
+      if (mode === 'unavailable') { response.writeHead(503, { 'content-type': 'text/plain' }).end('MOCKED token list unavailable'); return; }
+      if (mode === 'slow') await new Promise(resolve => setTimeout(resolve, 1_500));
+      response.writeHead(200, { 'content-type': 'application/json', 'content-length': Buffer.byteLength(LIST) }).end(LIST);
+      return;
+    }
+    if (request.method === 'POST' && url.pathname === '/__harness/chain') {
+      try {
+        const control = JSON.parse(await read(request) || '{}') as { action?: unknown; owner?: unknown; wei?: unknown; blocks?: unknown };
+        if (control.action === 'reset') {
+          chain = newChain(); counter.accepted = 0; aave.reset();
+          if (control.owner !== undefined) {
+            if (typeof control.owner !== 'string' || !ADDRESS.test(control.owner) || typeof control.wei !== 'string' || !/^[1-9][0-9]{0,30}$/.test(control.wei)) throw new Error('MOCK_CONTROL_DENIED');
+            chain.fundNative(control.owner, BigInt(control.wei));
+          }
+          json(200, { result: true });
+        } else if (control.action === 'mine' && chain && Number.isSafeInteger(control.blocks) && (control.blocks as number) > 0 && (control.blocks as number) <= 64) {
+          chain.mine(control.blocks as number);
+          json(200, { result: chain.state.head });
+        } else if (control.action === 'sent') json(200, { result: counter.accepted });
+        else throw new Error('MOCK_CONTROL_DENIED');
+      } catch { json(400, { error: 'MOCK_CONTROL_DENIED' }); }
+      return;
+    }
+    if (request.method === 'POST' && url.pathname === '/__harness/aave') {
+      if (!chain) { json(409, { error: 'MOCK_CHAIN_NOT_STARTED' }); return; }
+      try { json(200, { result: aave.control(JSON.parse(await read(request) || '{}')) }); }
+      catch (cause) { json(400, { error: 'MOCK_CONTROL_DENIED', reason: cause instanceof Error ? cause.message : 'MOCK_CONTROL_DENIED' }); }
+      return;
+    }
+    if (request.method === 'GET' && url.pathname === '/__harness/aave') { json(200, { result: aave.summary() }); return; }
+    if (request.method === 'POST' && url.pathname === '/rpc') {
+      if (!chain) { response.writeHead(503, { 'content-type': 'text/plain' }).end('MOCKED Base chain not started'); return; }
+      const live = chain;
+      let id: unknown = null;
+      try {
+        const call = JSON.parse(await read(request)) as { id?: unknown; method?: unknown; params?: unknown };
+        id = call.id ?? null;
+        const params = Array.isArray(call.params) ? call.params : [];
+        const result = call.method === 'eth_sendRawTransaction' ? await sendRawTransaction(live, params[0], counter)
+          : await aave.rpc(String(call.method), params, (method, args) => live.rpc(method, args));
+        json(200, { jsonrpc: '2.0', id, result });
+      } catch (cause) {
+        const error = cause as { message?: unknown; rpc?: unknown };
+        json(200, { jsonrpc: '2.0', id, error: { code: typeof error.rpc === 'number' ? error.rpc : -32000, message: String(error.message ?? 'MOCK_RPC_DENIED') } });
+      }
+      return;
+    }
+    response.writeHead(200, { 'content-type': 'text/plain' }).end('MOCKED Base mainnet harness');
+  });
+}
+if (import.meta.main) createBaseMainnetHarness().listen(8562, '127.0.0.1');

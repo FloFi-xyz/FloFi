@@ -78,7 +78,11 @@ describe('BUILD-ARB-001 shared first-class recognition through shared runtime re
   });
   it('inherits trusted asset presentation and fallback without introducing symbol-based logo discovery', () => {
     registerNetworkCatalog(catalog());
-    expect(assetIdentity({ network: chain, symbol: 'WBTC' }).mark).toMatchObject({ kind: 'logo', src: catalog().assets[4]!.logoUrl });
+    // BUILD AAVE-V3-CARD-CATALOG-FIX-001 (intentional change): WBTC here is the registered Aave V3 reserve at this exact address, so its reviewed
+    // local mark (CC0, sources.md) wins over the provider logo; the catalog still resolves it by address, never by symbol.
+    expect(catalog().assets[4]).toMatchObject({ symbol: 'WBTC' });
+    expect(assetIdentity({ network: chain, symbol: 'WBTC' }).mark).toEqual({ kind: 'image', src: '/brand/crypto/tokens/wbtc.svg' });
+    expect(assetIdentity({ network: chain, symbol: 'WBTC', address: '0x9999999999999999999999999999999999999999' }).mark.kind).toBe('monogram');
     expect(assetIdentity({ network: chain, symbol: 'ARB' }).mark).toMatchObject({ kind: 'monogram', text: 'AR' });
     for (const symbol of ['TSLA', 'cbBTC', 'USDT']) expect(assetIdentity({ network: chain, symbol }).mark.kind).toBe('monogram');
     expect(assetIdentity({ network: chain, symbol: 'USDC' }).mark).toEqual({ kind: 'image', src: '/brand/crypto/usdc.png' });

@@ -153,6 +153,8 @@ export function canvasAmountCommand(state: EditorState, setup: CanvasActionSetup
     const node = state.workflow.nodes.find(item => item.nodeId === id);
     if (!node || !canEditCanvasAmount(node, context, state.workflow) || inputs[id] === undefined) throw new Error('Select an editable action.');
     const amount = inputs[id];
+    // An amount cleared for a new asset (BUILD AAVE-V3-CARD-CATALOG-FIX-001) asks for an amount, never "cannot be combined".
+    if (!amount.trim()) throw new Error('AMOUNT_REQUIRED');
     const base = { nodeId: id, source: 'CANVAS' as const, baseRevision: state.workflow.revision };
     const lending = lendingDetails(state.workflow);
     const router = routerDetails(node), bridge = bridgeDetails(node), supply = lending ? null : supplyDetails(node as Parameters<typeof supplyDetails>[0]), borrow = lending ? null : borrowDetails(node as Parameters<typeof borrowDetails>[0]), repay = repayDetails(node as Parameters<typeof repayDetails>[0]), withdraw = withdrawDetails(node as Parameters<typeof withdrawDetails>[0]);

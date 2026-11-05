@@ -46,14 +46,14 @@ for (const theme of ['Light', 'Dark']) test(`${theme} preserves native token, ba
   await openBuilder(page);
   await page.getByRole('button', { name: 'Add swap', exact: true }).click();
   const from = card.getByRole('button', { name: 'Select source token', exact: true }), to = card.getByRole('button', { name: 'Select destination token', exact: true });
-  const eth = await nativeImage(to.locator('.composer-token-avatar > img'), '/brand/crypto/ethereum.svg');
-  expect(eth).toContain('184,251,246'); expect(eth).toContain('202,179,245');
+  const eth = await nativeImage(to.locator('.composer-token-avatar > img'), '/brand/crypto/tokens/eth.svg');
+  expect(eth).toContain('98,126,234'); expect(eth).toContain('255,255,255');
   await card.getByRole('textbox').fill('2.5');
   await from.click();
   const panel = page.getByRole('region', { name: 'Source asset picker', exact: true });
   await expect(panel.locator('.composer-token-options .composer-network-badge')).toHaveCount(0);
   expect(await nativeImage(panel.locator('.composer-token-avatar[data-token="USDC"] > img'), '/brand/crypto/usdc.png')).toContain('39,117,202');
-  expect(await nativeImage(panel.locator('.composer-token-avatar[data-token="WETH"] > img'), '/brand/crypto/ethereum.svg')).toEqual(eth);
+  expect(await nativeImage(panel.locator('.composer-token-avatar[data-token="WETH"] > img'), '/brand/crypto/tokens/eth.svg')).toEqual(eth);
   expect(await nativeImage(panel.getByRole('button', { name: 'Base', exact: true }).locator('img'), '/brand/crypto/base.svg')).toContain('0,82,255');
   await panel.getByRole('button', { name: 'Solana', exact: true }).click();
   const sol = panel.locator('.composer-token-avatar[data-token="SOL"] > img');
