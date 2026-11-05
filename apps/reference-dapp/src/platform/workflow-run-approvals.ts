@@ -107,6 +107,13 @@ export async function authorizationReviewSequential(deps: WorkflowRunSurface, ru
 export async function authorizeSequential(deps: WorkflowRunSurface, run: RunRecord, wallets: readonly WalletRef[], revision: number, assertion: unknown, base: ApprovalView) {
   assertRunWallets(run, wallets);
   const ops = deps.delegationOps ?? refuse('DELEGATION_NOT_ENABLED');
+  // BUILD-FLOFI-UNIVERSAL-SINGLE-AUTH-MAINNET-001: the requester's policy and the plan are checked again at signing, not only at review (an
+  // operator may have disabled the network since). A retry of an already-delegated run (its first response was lost) is answered by the
+  // idempotent sign, which activates nothing again.
+  if (run.mode !== 'DELEGATED') {
+    const plan = await ownerAuthorizationPlan(deps, run);
+    if (!plan.delegatedSingleAuthorization.available) refuse(plan.delegatedSingleAuthorization.reason ?? 'DELEGATED_AUTHORITY_UNAVAILABLE');
+  }
   await ops.sign(run.owner, run.runId, revision, assertion);
   return proposalOf(deps, run, null, base);
 }

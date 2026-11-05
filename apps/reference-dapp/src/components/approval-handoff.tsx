@@ -52,6 +52,9 @@ const STATUS_TEXT: Record<string, string> = {
 const CLAIM_TEXT: Record<string, string> = {
   CHANNEL_INTENDED_WALLET_MISMATCH: 'This proposal was prepared for another wallet. Connect the wallet it names to load it.',
   HANDOFF_ALREADY_CLAIMED: 'Another wallet already opened this proposal. Ask for a new proposal.',
+  // BUILD-FLOFI-UNIVERSAL-SINGLE-AUTH-MAINNET-001: a run authorization whose answer was lost, and two reviews of one run at once.
+  DELEGATION_OUTCOME_UNKNOWN: 'FloFi did not answer in time. Your authorization may already be active: this page checks the run and finishes on its own, without asking your wallet again.',
+  AUTHORIZATION_REVIEW_IN_PROGRESS: 'This authorization is being prepared in another window. Try again in a moment.',
   AUTOMATION_OWNER_MISMATCH: 'This automation belongs to another wallet. Connect the wallet that owns it.',
   EDITOR_WALLET_NOT_IN_ACCOUNT: 'This wallet does not belong to the FloFi account that started this workflow. Connect one of that account\'s wallets.',
 };

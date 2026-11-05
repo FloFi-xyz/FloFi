@@ -49,9 +49,12 @@ async function ownedRun(runs: WorkflowRunStore | undefined, owner: Owner, proven
   if (!run || run.owner.namespace !== owner.namespace || run.owner.address !== owner.address) throw new Error('WORKFLOW_RUN_NOT_FOUND');
   const wallet = run.wallets.eip155;
   if (!wallet || !proven.some(p => p.namespace === 'eip155' && p.address === wallet)) throw new Error('WALLET_SESSION_REQUIRED');
-  if (pending && (run.state !== 'PENDING' || run.mode !== null)) throw new Error(run.mode === 'CONFIRM_EACH_STEP' ? 'WORKFLOW_RUN_CONFIRM_MODE_CHOSEN' : `WORKFLOW_RUN_${run.state}`);
+  if (pending) assertChoosing(run);
   return { ...run, wallet };
 }
+const assertChoosing = (run: { readonly state: string; readonly mode: string | null }) => {
+  if (run.state !== 'PENDING' || run.mode !== null) throw new Error(run.mode === 'CONFIRM_EACH_STEP' ? 'WORKFLOW_RUN_CONFIRM_MODE_CHOSEN' : `WORKFLOW_RUN_${run.state}`);
+};
 /**
  * Runs one operation for `owner` (the verified principal). Throws a closed code for invalid arguments and every refusal. `runs` (the workflow
  * run store on the same database) serves the run operations; without it they refuse.
@@ -69,7 +72,13 @@ export async function runDelegationOperation(service: DelegationService, owner: 
     case 'workflowRunWalletSign': {
       arity(3);
       if (!Number.isSafeInteger(args[1]) || (args[1] as number) < 1) invalid();
-      const run = await ownedRun(runs, owner, proven, id(args[0], 'wfr'), true);
+      const run = await ownedRun(runs, owner, proven, id(args[0], 'wfr'), false);
+      // A retry after a lost response: a run that is already DELEGATED answers only if this exact revision is the ACTIVE one (the service returns
+      // early); it is never activated twice.
+      if (run.mode === 'DELEGATED') {
+        return service.workflowRunWalletSign(owner, run.runId, args[1] as number, args[2], async () => { throw new Error('WORKFLOW_RUN_DELEGATED'); });
+      }
+      assertChoosing(run);
       return service.workflowRunWalletSign(owner, run.runId, args[1] as number, args[2],
         (tx, authorizationId) => runs!.activateDelegatedWithin(tx, run.runId, authorizationId, DELEGATION_EXECUTE_RUN_KIND));
     }

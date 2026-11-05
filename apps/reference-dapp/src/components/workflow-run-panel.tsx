@@ -51,7 +51,7 @@ export function WorkflowRunPanel({ claim, approvalId, secret, onProposal, onErro
   // Signatures already given (kept so a retry after the one-time smart-account upgrade never asks the wallet again).
   const signed = useRef(new Map<string, string>());
   const [busy, setBusy] = useState(false);
-  const acting = useRef(false);
+  const acting = useRef(false), unknownOutcome = useRef(false);
   const { run, plan } = claim;
   const open = ['PENDING', 'RUNNING', 'ATTENTION', 'HALTED'].includes(run.state);
   // A status poll: the server observes the run (a reconciled step shows at once) but never loads or resolves a step for it.
@@ -66,7 +66,11 @@ export function WorkflowRunPanel({ claim, approvalId, secret, onProposal, onErro
 
   async function act(work: () => Promise<{ ok: true; value: ClaimedProposal } | { ok: false; code: string }>) {
     if (acting.current) return; acting.current = true; setBusy(true);
-    try { const result = await work(); if (result.ok) { setReview(null); onProposal(result.value); } else onError(result.code); }
+    try {
+      const result = await work();
+      if (result.ok) { unknownOutcome.current = false; setReview(null); onProposal(result.value); }
+      else { if (result.code === 'DELEGATION_OUTCOME_UNKNOWN') unknownOutcome.current = true; onError(result.code); }
+    }
     catch (cause) {
       const code = cause instanceof Error && /^(WALLET_[A-Z_]+|EVM_WALLET_NOT_FOUND)$/.test(cause.message) ? cause.message : 'APPROVAL_UNAVAILABLE';
       onError(code);
@@ -87,6 +91,11 @@ export function WorkflowRunPanel({ claim, approvalId, secret, onProposal, onErro
     return authorizeWorkflowRunHandoff(secret, review!.revision, [...signed.current].map(([grantId, signature]) => ({ grantId, signature })));
   });
 
+  // BUILD-FLOFI-UNIVERSAL-SINGLE-AUTH-MAINNET-001: a sign whose answer was lost (timeout) may still have started the run. Once the status poll shows
+  // the run DELEGATED, the same cached signatures are sent once more: the sign is idempotent and the wallet is never asked again.
+  useEffect(() => {
+    if (unknownOutcome.current && run.mode === 'DELEGATED' && review && secret) { unknownOutcome.current = false; void signOnce(); }
+  }, [run.mode]);
   const confirmations = plan.confirmEachStep.walletConfirmationsAtLeast;
   const choosing = run.state === 'PENDING' && run.mode === null;
   const nextStep = run.nextAction === 'OWNER_SIGNS_STEP' && claim.step === null ? run.currentStep + 1 : null;

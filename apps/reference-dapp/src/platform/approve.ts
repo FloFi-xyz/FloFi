@@ -227,14 +227,15 @@ export async function workflowRunResume(surface: ApprovalSurface, approvalId: un
   const c = await runContext(surface, approvalId, wallets);
   return resumeSequential(c.runs, c.run, wallets, c.base);
 }
-/** The Universal Workflow Authorization Review of the run: what the owner's passkey signs ONCE (delegated mode). */
+/** The Universal Workflow Authorization Review of the run: the exact workflow grants the owner's wallet signs ONCE (delegated mode). */
 export async function workflowRunReview(surface: ApprovalSurface, approvalId: unknown, wallets: readonly WalletRef[]) {
   const c = await runContext(surface, approvalId, wallets);
   return authorizationReviewSequential(c.runs, c.run, wallets);
 }
 /**
- * The owner's ONE passkey signature for the whole workflow (delegated mode). The approval link the browser holds is marked APPLIED with it:
- * the proposal now lives in FloFi as this run, so the link cannot be claimed or applied again.
+ * The owner's ONE wallet authorization for the whole workflow (delegated mode: one signed workflow grant per EVM network). The approval link the
+ * browser holds is marked APPLIED with it: the proposal now lives in FloFi as this run, so the link cannot be claimed or applied again. A retry
+ * after a lost answer is idempotent and still applies the link.
  */
 export async function workflowRunAuthorize(surface: ApprovalSurface, secret: unknown, wallets: readonly WalletRef[], revision: unknown, assertion: unknown,
   now = new Date()): Promise<ClaimedProposal> {

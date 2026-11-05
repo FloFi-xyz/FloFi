@@ -2,9 +2,10 @@
 /**
  * BUILD-CHAT-E2E-001: the workflow runs `/approve` serves on this deployment (FLOFI_WORKFLOW_RUNS=enabled; otherwise none and a multi-step
  * approval is refused). The run store lives with the approval handoffs; each step is re-gated with its requester kind's own handoff policy
- * (fail closed for a kind this surface does not serve). Delegated mode is offered only where this surface can perform it: delegation and
- * automations enabled on an embedded runtime (the owner's passkey review and signature run here; the executor runs on the worker). Elsewhere —
- * including every hosted deployment, which has no signer provider — the run offers confirm-each-step only, and says why.
+ * (fail closed for a kind this surface does not serve). Delegated mode is offered only where this surface can perform it: delegation enabled
+ * either on an embedded runtime (the owner's wallet review and signature are verified here) or, BUILD-FLOFI-UNIVERSAL-SINGLE-AUTH-MAINNET-001,
+ * on the remote runtime, where review, sign and revoke are forwarded to the API that holds the executor key (the worker executes). Elsewhere
+ * the run offers confirm-each-step only, and says why.
  */
 import { readAutomationConfig } from '../automations/config.ts';
 import { automationHost } from '../automations/runtime.ts';

@@ -9,7 +9,8 @@ import { describe, expect, it } from 'vitest';
 import { erc7710 } from '@defi-workflow-engine/reference-compiler';
 import { createTestDatabase } from '../../../../packages/cloud-runtime/test/pg-harness.ts';
 import { approvalProgress, claimApproval } from '../platform/index.ts';
-import { authorizationReviewSequential, cancelSequential, ownedRun } from '../platform/workflow-run-approvals.ts';
+import { authorizationReviewSequential, authorizeSequential, cancelSequential, ownedRun } from '../platform/workflow-run-approvals.ts';
+import { readHandoffPolicy } from '../mcp/execution.ts';
 import { workflowRunAuthorize } from '../platform/approve.ts';
 import { delegationOf } from '../delegation/adapters.ts';
 import { workflowRunHarness, type RunHarness } from './workflow-run.test-harness.ts';
@@ -173,10 +174,58 @@ describe('BUILD-FLOFI-UNIVERSAL-SINGLE-AUTH-MAINNET-001 delegated workflow run (
       await runDelegationOperation(h.d.service, h.d.owner, [h.evm], 'workflowRunWalletSign',
         [run.runId, review.revision, [{ grantId: grant.grantId, signature: await h.d.evmOwner.signDigest(grant.digest) }]], h.store);
       expect((await h.store.byId(run.runId))!).toMatchObject({ state: 'RUNNING', mode: 'DELEGATED' });
-      // A second sign is refused (the run is no longer choosing its mode); revocation is the owner's own.
-      await expect(runDelegationOperation(h.d.service, h.d.owner, [h.evm], 'workflowRunWalletSign', [run.runId, review.revision, []], h.store)).rejects.toThrow(/WORKFLOW_RUN_/);
+      // A retried sign of the ACTIVE revision (its first answer was lost, e.g. to a timeout) returns the same result and changes nothing; any other
+      // revision is refused. Revocation is the owner's own.
+      const active = await h.d.store.authorizationForRun(run.runId);
+      expect(await runDelegationOperation(h.d.service, h.d.owner, [h.evm], 'workflowRunWalletSign', [run.runId, review.revision, []], h.store))
+        .toEqual({ authorizationId: active!.authorizationId });
+      expect(await h.d.store.authorizationForRun(run.runId)).toEqual(active);
+      expect((await h.store.byId(run.runId))!).toMatchObject({ state: 'RUNNING', mode: 'DELEGATED' });
+      await expect(runDelegationOperation(h.d.service, h.d.owner, [h.evm], 'workflowRunWalletSign', [run.runId, review.revision + 1, []], h.store))
+        .rejects.toThrow('AUTHORIZATION_ACTIVE');
       await expect(runDelegationOperation(h.d.service, stranger, [stranger], 'workflowRunWalletRevoke', [run.runId], h.store)).rejects.toThrow('WORKFLOW_RUN_NOT_FOUND');
       expect(await runDelegationOperation(h.d.service, h.d.owner, [h.evm], 'workflowRunWalletRevoke', [run.runId], h.store)).toEqual({ revoked: true });
+    } finally { await t.drop(); }
+  });
+
+  it('two overlapping reviews of one run settle on ONE set of grants: the loser fails its own unsigned grants and never leaves a second set signable', async () => {
+    const t = await createTestDatabase();
+    try {
+      const h = await workflowRunHarness(t.db);
+      const approval = await h.request(BOUND);
+      await claim(h, approval.secret);
+      const run = await ownedRun(h.runs, approval.approvalId, [h.evm, h.sol]);
+      const review = () => runDelegationOperation(h.d.service, h.d.owner, [h.evm], 'workflowRunWalletReview', [run.runId], h.store) as Promise<WalletWorkflowReviewView>;
+      const settled = await Promise.allSettled([review(), review(), review()]);
+      for (const r of settled) if (r.status === 'rejected') expect(String(r.reason)).toMatch(/AUTHORIZATION_REVIEW_IN_PROGRESS/);
+      const final = await review(), ids = final.grants.map(g => g.grantId).sort();
+      for (const r of settled) if (r.status === 'fulfilled') {
+        expect(r.value.authorizationId).toBe(final.authorizationId);
+        expect(r.value.grants.map(g => g.grantId).sort()).toEqual(ids);
+      }
+      // Only the winner's grants are still awaiting a signature; every other grant planned by a loser is FAILED (never signable).
+      const pending = (await h.d.store.grants(h.d.owner)).filter(g => g.state === 'PENDING_SIGNATURE').map(g => g.grantId).sort();
+      expect(pending).toEqual(ids);
+      const grant = final.grants[0]!;
+      await runDelegationOperation(h.d.service, h.d.owner, [h.evm], 'workflowRunWalletSign',
+        [run.runId, final.revision, [{ grantId: grant.grantId, signature: await h.d.evmOwner.signDigest(grant.digest) }]], h.store);
+      expect((await h.store.byId(run.runId))!).toMatchObject({ state: 'RUNNING', mode: 'DELEGATED' });
+    } finally { await t.drop(); }
+  });
+
+  it('the requester policy is checked again at signing: a network disabled after the review is never authorized', async () => {
+    const t = await createTestDatabase();
+    try {
+      const h = await workflowRunHarness(t.db);
+      const approval = await h.request(BOUND), claimed = await claim(h, approval.secret);
+      const run = await ownedRun(h.runs, approval.approvalId, [h.evm, h.sol]);
+      const review = await authorizationReviewSequential(h.runs, run, [h.evm, h.sol]), grant = review.grants[0]!;
+      const signatures = [{ grantId: grant.grantId, signature: await h.d.evmOwner.signDigest(grant.digest) }];
+      // The operator turns test funds off for this requester between the review and the signature.
+      const closed = { ...h.runs, policyFor: () => readHandoffPolicy({ FLOFI_MCP_HANDOFF_TEST_FUNDS: 'disabled' }) };
+      await expect(authorizeSequential(closed, run, [h.evm, h.sol], review.revision, signatures, claimed.view)).rejects.toThrow('TEST_FUNDS_HANDOFF_DISABLED_BY_POLICY');
+      expect((await h.store.byId(run.runId))!).toMatchObject({ state: 'PENDING', mode: null });
+      expect((await h.d.store.authorizationForRun(run.runId))!.state).toBe('PENDING_SIGNATURE');
     } finally { await t.drop(); }
   });
 

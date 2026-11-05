@@ -54,7 +54,13 @@ export async function delegationOperation<T>(method: DelegationOperation, args: 
         cache: 'no-store', redirect: 'error', signal: AbortSignal.timeout(30_000), headers: { 'content-type': 'application/json',
           ...env.API_AUTH_TOKEN ? { authorization: `Bearer ${env.API_AUTH_TOKEN}` } : {}, [WORKFLOW_OWNER_HEADER]: `${owner.namespace}:${owner.address}`,
           [APPROVAL_PRINCIPALS_HEADER]: proven.map(p => `${p.namespace}:${p.address}`).join(','),
-          ...IDEMPOTENT_DELEGATION_OPERATIONS.has(method) ? { 'idempotency-key': randomUUID() } : {} }, body: JSON.stringify({ args }) });
+          ...IDEMPOTENT_DELEGATION_OPERATIONS.has(method) ? { 'idempotency-key': randomUUID() } : {} }, body: JSON.stringify({ args }) })
+        .catch((cause: unknown) => {
+          // BUILD-FLOFI-UNIVERSAL-SINGLE-AUTH-MAINNET-001: a request that timed out or lost its connection may still have been applied by the API
+          // (e.g. a run's authorization activated): it is reported as an unknown outcome, never as a failure. A retried run sign is idempotent.
+          const name = (cause as { name?: unknown } | null)?.name;
+          throw new Error(name === 'AbortError' || name === 'TimeoutError' || cause instanceof TypeError ? 'DELEGATION_OUTCOME_UNKNOWN' : 'DELEGATION_UNAVAILABLE');
+        });
       if (response.status === 404) return { ok: false, code: 'DELEGATION_NOT_ENABLED' };
       const body = await response.json().catch(() => null) as { ok?: unknown; value?: unknown; code?: unknown } | null;
       if (body?.ok === true && 'value' in body) return { ok: true, value: body.value as T };

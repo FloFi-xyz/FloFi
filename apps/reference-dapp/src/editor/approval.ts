@@ -22,6 +22,7 @@
 import { hkdfSync } from 'node:crypto';
 import { ACCOUNT_ID } from '../accounts/account-model.ts';
 import { createAccountStore } from '../accounts/account-store.ts';
+import { composeWorkflowBound } from '../engine/strategy-engine.ts';
 import { readHandoffPolicy } from '../mcp/execution.ts';
 import { approvalLinkScheme, HANDOFF_SECONDS, requestApproval, type ApprovalContributor, type ApprovalDeps, type ApprovalLinkScheme, type ApprovalRequester, type ClaimPolicy,
   type HandoffPolicy, type HandoffRules, type RequesterScope, type WalletRef } from '../platform/index.ts';
@@ -117,12 +118,19 @@ export async function startEditorRun(deps: Omit<ApprovalDeps, 'policy' | 'rules'
   if (!ACCOUNT_ID.test(accountId)) return { ok: false, code: 'ACCOUNT_SESSION_REQUIRED' };
   const converted = editorWorkflowStrategy(workflow);
   if (!converted.ok) return converted;
+  // Only a multi-step workflow is handed to a run (a SEQUENTIAL plan needs at least two steps). Checked before anything is stored, so a refusal
+  // never leaves a PENDING approval counting against the account's pending and hourly limits.
+  const composed = composeWorkflowBound(converted.strategy, converted.workflowHash);
+  if (composed.ok && composed.steps.length < 2) return { ok: false, code: 'EDITOR_WORKFLOW_NOT_SEQUENCE' };
   const result = await requestApproval({ ...deps, origin: deps.config.origin, scheme: editorApprovalScheme(deps.config.key), policy: deps.config.policy,
     rules: EDITOR_HANDOFF_RULES }, editorRequester(accountId), converted.strategy, converted.workflowHash);
   if (!result.ok) return { ok: false, code: result.code };
   const value = result.value;
   // Only a multi-step workflow is handed to the run; a one-step plan keeps its own per-flow execution path (never reached: 2..8 steps only).
-  if (value.executionPlan !== 'SEQUENTIAL') return { ok: false, code: 'EDITOR_WORKFLOW_NOT_SEQUENCE' };
+  if (value.executionPlan !== 'SEQUENTIAL') {
+    await deps.handoffs.revokeForRequester(value.approvalId, editorScope(accountId), deps.now).catch(() => null);
+    return { ok: false, code: 'EDITOR_WORKFLOW_NOT_SEQUENCE' };
+  }
   return { ok: true, value: { approvalId: value.approvalId, approvalUrl: value.approvalUrl, expiresAt: value.expiresAt, stepCount: value.steps.length,
     walletNamespaces: value.walletNamespaces, authority: value.authority } };
 }

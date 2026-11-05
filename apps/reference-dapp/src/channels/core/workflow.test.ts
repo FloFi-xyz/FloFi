@@ -122,5 +122,11 @@ describe('BUILD-CHAT-E2E-001 channel workflows', () => {
     const completed = { ...progress as object, workflowRun: { ...run, state: 'COMPLETED', nextAction: 'NONE' } } as never;
     expect(plannedNotifications('PT', handoff, completed, 'https://flofi.test')).toMatchObject({ done: true, due: [{ text: expect.stringContaining('1. Troca') },
       { text: 'Fluxo concluído: todas as etapas reconciliadas ✅' }] });
+    // An approval link that lapsed after its run was authorized never reads as "expired" above the run that is still going; a never-authorized run still does.
+    const lapsed = statusReplies('EN', { handoff, progress: { ...progress as object, status: 'EXPIRED' } as never })[0]!.text;
+    expect(lapsed).toContain('Workflow: running');
+    expect(lapsed).not.toMatch(/expired/i);
+    const unauthorized = statusReplies('EN', { handoff, progress: { ...progress as object, status: 'EXPIRED', workflowRun: { ...run, state: 'PENDING' } } as never })[0]!.text;
+    expect(unauthorized).toMatch(/expired/i);
   });
 });
