@@ -11,7 +11,7 @@ import {TokenAmountInput} from './token-amount-input';
 /** Three inspectors, one canonical IR and the existing AUTHOR_LENDING command. */
 export function LendingNodeEditor({nodeId,reviewFormId}:{nodeId:string;reviewFormId?:string}) {
   const { t: tr } = useLocale();
-  const {state,propose,amountInputs={},editCanvasAmount,reviewCanvasAmount}=useWorkflow(),input=lendingDetails(state.workflow)!;
+  const {state,propose,amountInputs={},editCanvasAmount,commitCanvasAmount}=useWorkflow(),input=lendingDetails(state.workflow)!;
   const supply=nodeId==='lending-supply',borrow=nodeId==='lending-borrow';
   const title=supply?'Aave Supply':borrow?'Aave Borrow':'Uniswap Swap';
   const initial=supply?input.supply:borrow?input.borrow:input.slippage;
@@ -19,7 +19,8 @@ export function LendingNodeEditor({nodeId,reviewFormId}:{nodeId:string;reviewFor
   const value = reviewFormId && (supply || borrow) ? amountInputs[nodeId] ?? initial : localValue;
   function submit(event:FormEvent) {
     event.preventDefault();
-    if (reviewFormId && amountInputs[nodeId] !== undefined) { setError(reviewCanvasAmount(nodeId) ?? ''); return; }
+    // BUILD-FLOFI-SINGLE-AUTH-WORKFLOW-UX-001: an amount draft applies directly, exactly as Enter on the card does.
+    if (reviewFormId && amountInputs[nodeId] !== undefined) { setError(commitCanvasAmount(nodeId) ?? ''); return; }
     // The external card button retains the editor's unchanged-value submit guard.
     if (reviewFormId && value === initial && amountInputs[nodeId] === undefined) return;
     try {propose({type:'AUTHOR_LENDING',input:lendingNodeInput(state.workflow,nodeId,value),source:'CANVAS',baseRevision:state.workflow.revision});setError('');}

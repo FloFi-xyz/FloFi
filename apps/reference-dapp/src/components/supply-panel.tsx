@@ -12,7 +12,7 @@ import { LendingReserveStatus, reserveOptionLabel, useAaveReserves } from './len
 import { PendingExecutionNote } from './execution-concurrency-notes';
 export function SupplyAuthoringForm({nodeId,onDone,direct=false,reviewFormId}:{nodeId?:string;onDone?:()=>void;direct?:boolean;reviewFormId?:string}){
   const { t: tr } = useLocale();
-  const {state,propose,dispatch,amountInputs={},editCanvasAmount}=useWorkflow(),wallet=useBuild009Wallet();
+  const {state,propose,dispatch,amountInputs={},editCanvasAmount,commitCanvasAmount}=useWorkflow(),wallet=useBuild009Wallet();
   const node=state.workflow.nodes.find(n=>n.nodeId===nodeId);
   const existing=node?supplyDetails(node as Parameters<typeof supplyDetails>[0]):null;
   const [localAmount,setAmount]=useState(existing?.amount??'1'),[beneficiary,setBeneficiary]=useState(existing?.beneficiary??wallet.account??''),[error,setError]=useState('');
@@ -23,7 +23,12 @@ export function SupplyAuthoringForm({nodeId,onDone,direct=false,reviewFormId}:{n
   const asset=lendingReservesFor(network).some(reserve=>reserve.symbol===chosenAsset)?chosenAsset:lendingAssetFor(network);
   const setNetwork=(next:LendingNetwork)=>{setNetworkState(next);setAsset(lendingAssetFor(next));};
   const live=useAaveReserves(network,wallet.account??null);
-  function submit(event:FormEvent){event.preventDefault();try{
+  // BUILD-FLOFI-SINGLE-AUTH-WORKFLOW-UX-001: with the network, asset and beneficiary unchanged, Enter applies the amount directly (the card's own rule);
+  // any other change is a reviewed proposal, with this form's own Review button.
+  const fieldsChanged=Boolean(existing&&(network!==existing.network||asset!==existing.asset||(beneficiary||wallet.account||'')!==existing.beneficiary));
+  function submit(event:FormEvent){event.preventDefault();
+    if(reviewFormId&&nodeId&&existing&&!fieldsChanged){if(amountInputs[nodeId]!==undefined)setError(commitCanvasAmount(nodeId)??'');return;}
+    try{
     const input:SupplyInput={network,asset,amount,beneficiary:beneficiary||wallet.account||''};createAuthoredSupply(nodeId??'node-preview',input);
     const command=nodeId?{type:'SET_SUPPLY' as const,nodeId,input,source:'CANVAS' as const,baseRevision:state.workflow.revision}:{type:'ADD_SUPPLY' as const,input,source:'CANVAS' as const,baseRevision:state.workflow.revision};
     if(direct)dispatch(command);else propose(command);onDone?.();
@@ -40,7 +45,7 @@ export function SupplyAuthoringForm({nodeId,onDone,direct=false,reviewFormId}:{n
     <LendingReserveStatus live={live} asset={asset} kind="supply"/>
     <label>{tr("Supply amount (")}{tr(asset)})<TokenAmountInput aria-label={tr(`Supply amount (${asset})`)} value={amount} maxLength={80} onValueChange={value=>{setError('');if(reviewFormId&&nodeId)editCanvasAmount(nodeId,value);else setAmount(value);}}/></label>
     <label>{tr("Supply beneficiary")}<input aria-label={tr("Supply beneficiary")} autoComplete="off" value={beneficiary||wallet.account||''} maxLength={42} onChange={e=>setBeneficiary(e.target.value)}/></label>
-    {error&&<p role="alert">{tr(error)}</p>}{!reviewFormId&&<button type="submit">{tr(nodeId?'Review Supply change':direct?'Add Supply':'Review Supply proposal')}</button>}
+    {error&&<p role="alert">{tr(error)}</p>}{(!reviewFormId||fieldsChanged)&&<button type="submit">{tr(nodeId?'Review Supply change':direct?'Add Supply':'Review Supply proposal')}</button>}
     {onDone&&<button type="button" className="quiet" onClick={onDone}>{tr("Cancel")}</button>}
   </form>;
 }

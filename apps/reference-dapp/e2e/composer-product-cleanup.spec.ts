@@ -516,12 +516,13 @@ test('linked Borrow edits use the existing composition command and keep Supply a
   const amount = borrow.getByRole('textbox', { name: 'Source amount (USDC)', exact: true });
   await borrow.locator('.composer-action-title').click();
   await borrow.getByRole('button', { name: 'Action settings', exact: true }).click();
-  const review = borrow.getByRole('button', { name: 'Review Borrow change', exact: true });
-  const apply = borrow.getByRole('button', { name: 'Apply proposal', exact: true });
-  await amount.fill('0'); await review.click(); await expect(apply).toHaveCount(0);
+  // BUILD-FLOFI-SINGLE-AUTH-WORKFLOW-UX-001: an ordinary amount edit applies on Enter, with no Review/Apply proposal.
+  await expect(borrow.getByRole('button', { name: 'Review Borrow change', exact: true })).toHaveCount(0);
+  const apply = page.getByRole('button', { name: 'Apply proposal', exact: true });
+  await amount.fill('0'); await amount.press('Enter'); await expect(borrow.getByRole('alert')).toBeVisible(); await expect(apply).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'Simulate workflow', exact: true })).toBeDisabled();
   await expect(page.locator('.summary-bar')).toHaveAttribute('data-workflow-revision', '1');
-  await amount.fill('0.02'); await review.click(); await expect(apply).toBeEnabled(); await apply.click();
+  await amount.fill('0.02'); await amount.press('Enter'); await expect(apply).toHaveCount(0);
   await expect(supply.getByRole('textbox', { name: 'Source amount (USDC)', exact: true })).toHaveValue('0.1');
   await expect(swap.locator('.composer-amount .composer-amount-value')).toHaveText('0.02');
   await expect(page.locator('.build-flow-surface .react-flow__edge')).toHaveCount(2);
@@ -529,7 +530,7 @@ test('linked Borrow edits use the existing composition command and keep Supply a
   const settings = page.getByRole('dialog', { name: 'Action settings', exact: true }).getByLabel('Borrow amount USDC', { exact: true });
   await expect(settings).toHaveValue('0.02');
   await settings.fill('0.03'); await expect(amount).toHaveValue('0.03');
-  await settings.fill('0.02'); await review.click(); await expect(apply).toBeEnabled(); await apply.click();
+  await settings.fill('0.02'); await settings.press('Enter'); await expect(apply).toHaveCount(0);
   await expect(swap.locator('.composer-amount .composer-amount-value')).toHaveText('0.02');
   await expect(page.getByRole('button', { name: 'Simulate workflow', exact: true })).toBeEnabled();
   expect(await page.evaluate(() => (window as unknown as { supplyWalletRequests: { method: string }[] }).supplyWalletRequests.filter(request => /send|sign/i.test(request.method)))).toEqual([]);

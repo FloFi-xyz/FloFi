@@ -54,7 +54,7 @@ test('changed public price invalidates Review again at Execute',async({page})=>{
 });
 test('semantic amount edits invalidate Borrow Review',async({page})=>{
   await author(page);await review(page);await openEditorSection(page,'Build');await page.locator('.react-flow__node[data-id="node-002"] .flow-card').click();
-  await openCanvasSettings(page);const form=page.getByRole('form',{name:'Edit Borrow'});await form.getByLabel('Borrow amount (USDC)').fill('0.02');await page.locator('.build-flow-surface .composer-card.active').getByRole('button',{name:'Review Borrow change'}).click();await page.getByRole('button',{name:'Apply proposal'}).click();
+  await openCanvasSettings(page);const form=page.getByRole('form',{name:'Edit Borrow'});await form.getByLabel('Borrow amount (USDC)').fill('0.02');await form.getByLabel('Borrow amount (USDC)').press('Enter');await expect(page.getByRole('button',{name:'Apply proposal'})).toHaveCount(0);
   await openEditorSection(page,'Execute');await expect(page.getByRole('region',{name:'Aave Borrow'})).toContainText('The workflow changed');
   await expect(page.getByRole('region',{name:'Aave Borrow'}).getByRole('button',{name:'Execute',exact:true})).toHaveCount(0);expect(await supplySendCount(page)).toBe(0);
 });

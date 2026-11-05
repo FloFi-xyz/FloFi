@@ -157,10 +157,12 @@ for (const value of ['Light', 'Dark'] as const) test(`${value} keyboard selectio
   const amount = borrow.getByRole('textbox', { name: 'Source amount (USDC)', exact: true });
   const settings = inspector.getByRole('textbox', { name: 'Borrow amount USDC', exact: true });
   await amount.fill('0.02'); await expect(settings).toHaveValue('0.02');
-  await borrow.getByRole('button', { name: 'Review Borrow change', exact: true }).press('Enter');
+  // BUILD-FLOFI-SINGLE-AUTH-WORKFLOW-UX-001: an ordinary amount edit applies on Enter: no Review/Apply proposal, one new revision.
+  await expect(borrow.getByRole('button', { name: 'Review Borrow change', exact: true })).toHaveCount(0);
   await expect(revision).toHaveAttribute('data-workflow-revision', '1');
-  await borrow.getByRole('button', { name: 'Apply proposal', exact: true }).press('Enter');
+  await amount.press('Enter');
   await expect(revision).toHaveAttribute('data-workflow-revision', '2');
+  await expect(page.getByRole('button', { name: 'Apply proposal', exact: true })).toHaveCount(0);
   await expect(swap.locator('.composer-amount .composer-amount-value')).toHaveText('0.02');
   await expect(supply.getByRole('textbox', { name: 'Source amount (USDC)', exact: true })).toHaveValue('0.1');
   await settings.fill('0.03'); await expect(amount).toHaveValue('0.03');

@@ -492,7 +492,10 @@ export function ComposerCard({ data: card }: { data: ComposerCardData }) {
   const [sourceNetwork = 'Network not specified', destinationNetwork = sourceNetwork] = card.summary.chain.split(' → ');
   const editor = card.amountEditor ? { ...card.amountEditor, onChange: (value: string) => { setAmountError(null); card.amountEditor!.onChange(value); } } : undefined;
   // BUILD-FIX-UX-001: an ordinary amount edit applies directly to the editable workflow. A chat (Copilot) proposal keeps its own review.
-  const directCommit = Boolean(editor?.onCommit && !card.contextualProposal);
+  // BUILD-FLOFI-SINGLE-AUTH-WORKFLOW-UX-001: an amount bound to the card's external review form (a Send, an Aave reserve picked on the card, or
+  // a proposal already waiting) is reviewed by the card's own Review button: Enter submits that form, so the card never says "Press Enter to apply".
+  const reviewedByForm = Boolean(editor?.formId && card.supplyProposal);
+  const directCommit = Boolean(editor?.onCommit && !reviewedByForm && !card.contextualProposal);
   function commitAmount() {
     if (!editor?.changed) return;
     if (!directCommit) { setAmountError(editor.onReview()); return; }
@@ -579,7 +582,9 @@ export function ComposerCard({ data: card }: { data: ComposerCardData }) {
         {editor?.changed && (directCommit ? <div className="composer-amount-actions composer-amount-direct">
           <span className="composer-amount-hint">{tr("Press Enter to apply")}</span>
           {editor.onCancel && <button type="button" className="composer-amount-cancel" onClick={() => { setAmountError(null); editor.onCancel!(); }}>{tr("Cancel")}</button>}
-        </div> : <div className="composer-amount-actions">
+        </div> : reviewedByForm && !card.contextualProposal ? editor.onCancel ? <div className="composer-amount-actions">
+          <button type="button" className="composer-amount-cancel" onClick={() => { setAmountError(null); editor.onCancel!(); }}>{tr("Cancel")}</button>
+        </div> : null : <div className="composer-amount-actions">
           <button type="submit" className="composer-amount-review" disabled={card.networkSelection?.valid === false || card.actionSelection?.valid === false}>{tr("Review amount")}</button>
           {card.contextualProposal ? <ProposalReviewArtifact portalFromCard canApply={editor.canApply} onApply={editor.onApply}/>
             : <button type="button" className="composer-amount-apply" disabled={!editor.canApply} onClick={editor.onApply}>{tr("Apply amount")}</button>}

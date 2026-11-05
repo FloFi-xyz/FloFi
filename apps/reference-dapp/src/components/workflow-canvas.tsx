@@ -42,7 +42,7 @@ import { ActionIcon } from './action-icon';
 import { ensureNetworkCatalog, useNetworkCatalog } from '../state/asset-catalog-store';
 import { CATALOG_NETWORK_IDENTITIES } from '../domain/network-registry';
 import { counterpartSelection, invertCryptoSelection, cryptoNetworks, cryptoSelectionOf, cryptoProfile, cryptoTokenOptions, selectCryptoNetwork, selectCryptoToken, canSelectCryptoAssets, lendingAction, type CryptoSelection, type CryptoAction } from '../domain/crypto-action-picker';
-import { actionReviewValue } from '../domain/canvas-action-setup';
+import { actionReviewValue, amountEditNeedsReview } from '../domain/canvas-action-setup';
 import { SimulateWorkflowCanvas } from './simulate-workflow-canvas';
 import { composerActions, composerSummary, composerNodeState, composerConnections, singleAmountProposalTarget } from '../domain/composer-presentation';
 import { canDeleteCanvasEdge, canDeleteCanvasNode, isTextEntry } from '../domain/canvas-keyboard';
@@ -624,6 +624,8 @@ function BuildCanvas({ environment, selectedId, select, openSettings, settingsId
     };
     const proposalTarget = pending?.authoringId ?? (pending ? singleAmountProposalTarget(workflow, pending.command) : null);
     const contextualTarget = pending?.command.source === 'CHAT' ? proposalTarget ?? poolProposalTarget(pending.command) : null;
+    const reviewedAmountEdit = (node: Workflow['nodes'][number]) => amountEditNeedsReview(node.actionType,
+      { reserveDraft: Boolean(cryptoSelections[node.nodeId]), proposalPending: Boolean(pending && proposalTarget === node.nodeId) });
     // BUILD-FLOFI-BUILDER-UX-002: a step the chat or a proposal just added sits beside the step it consumes, or in the next free slot (layout only).
     const setupPosition = actionSetup ? canvasLayout[actionSetup.id] : undefined;
     const positions = shownCanvasPositions(composerActions(workflow), canvasLayout, { lending: isLendingComposition(workflow), occupied: setupPosition ? [setupPosition] : [] });
@@ -658,7 +660,9 @@ function BuildCanvas({ environment, selectedId, select, openSettings, settingsId
       } } : {}),
       ...(node.actionType === 'asset.transfer' && nodeRecipient(node) ? { recipient: nodeRecipient(node)! } : {}),
       ...(lendingAction(node.actionType as CryptoAction) && fundingOf(node.nodeId, cryptoSelections[node.nodeId]) ? { funding: fundingOf(node.nodeId, cryptoSelections[node.nodeId])! } : {}),
-      ...(['supply', 'borrow', 'repay', 'withdraw', 'asset.transfer'].includes(node.actionType) ? { supplyProposal: {
+      // BUILD-FLOFI-SINGLE-AUTH-WORKFLOW-UX-001: an ordinary Aave amount edit applies on Enter (no Review/Apply); a reserve picked on the card,
+      // a waiting (e.g. chat) proposal, or a Send keeps the reviewed proposal and its button.
+      ...(['supply', 'borrow', 'repay', 'withdraw', 'asset.transfer'].includes(node.actionType) && reviewedAmountEdit(node) ? { supplyProposal: {
         formId: supplyReviewFormId(node.nodeId), reviewLabel: `Review ${composerSummary(workflow, node, context).action} change`, canReview: selectedId === node.nodeId,
         hasProposal: Boolean(pending && proposalTarget === node.nodeId),
         canApply: Boolean((!cryptoSelectionOf(node) || actionSelection(node.nodeId, cryptoSelections[node.nodeId] ?? cryptoSelectionOf(node)!).valid) && pending?.valid && proposalTarget === node.nodeId && pending.command.baseRevision === workflow.revision),
@@ -669,7 +673,7 @@ function BuildCanvas({ environment, selectedId, select, openSettings, settingsId
         : composerNodeState(review, node.nodeId),
       cardStatus: canvasCardStatus(composerNodeState(review, node.nodeId), hasCanvasDraft({ amountInputs, cryptoSelections, bridgeNetworkInputs, recipientInputs }, node.nodeId)),
       ...(canEditCanvasAmount(node, context, workflow) ? { amountEditor: {
-        ...(['supply', 'borrow', 'repay', 'withdraw', 'asset.transfer'].includes(node.actionType) ? { formId: supplyReviewFormId(node.nodeId) } : {}),
+        ...(['supply', 'borrow', 'repay', 'withdraw', 'asset.transfer'].includes(node.actionType) && reviewedAmountEdit(node) ? { formId: supplyReviewFormId(node.nodeId) } : {}),
         value: amountInputs[node.nodeId] ?? composerSummary(workflow, node, context).amount.split(' ')[0]!,
         changed: amountInputs[node.nodeId] !== undefined,
         canApply: Boolean((!cryptoSelectionOf(node) || actionSelection(node.nodeId, cryptoSelections[node.nodeId] ?? cryptoSelectionOf(node)!).valid) && (!routerDetails(node) || bridgeSelection(node.nodeId, bridgeNetworkInputs[node.nodeId] ?? routerDetails(node)!).valid) && pending?.valid && pending.authoringId === node.nodeId && pending.authoringAmount === actionReviewValue(null, node.nodeId, amountInputs[node.nodeId], bridgeNetworkInputs[node.nodeId], cryptoSelections[node.nodeId], recipientInputs[node.nodeId]) && pending.command.baseRevision === workflow.revision),

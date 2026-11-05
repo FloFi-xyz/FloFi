@@ -84,7 +84,8 @@ export async function authorSupply(page:Page,amount='10',beneficiary=SUPPLY_OWNE
   const unchanged = await form.getByLabel('Supply amount (USDC)').inputValue() === amount && await form.getByLabel('Supply beneficiary').inputValue() === beneficiary;
   await form.getByLabel('Supply amount (USDC)').fill(amount);await form.getByLabel('Supply beneficiary').fill(beneficiary);
   if (unchanged) return;
-  await page.locator('.build-flow-surface .composer-card.active').getByRole('button',{name:'Review Supply change',exact:true}).click();
+  // BUILD-FLOFI-SINGLE-AUTH-WORKFLOW-UX-001: a changed beneficiary is reviewed through the settings form's own Review button.
+  await form.getByRole('button',{name:'Review Supply change',exact:true}).click();
   await page.getByRole('button',{name:'Apply proposal',exact:true}).click();
 }
 export async function reviewSupply(page:Page){

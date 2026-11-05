@@ -154,7 +154,10 @@ describe('corrected Build workspace presentation', () => {
     expect(canvas).not.toMatch(/composer-destination-box|composer-value-arrow/);
     expect(canvas).not.toContain('Liquidity range view');
     expect(canvas).toMatch(/aria-label="Source amount \(USDC\)"[^>]*value="1"/);
-    expect(canvas).toMatch(/type="submit" form="composer-supply-review-[^"]+"[^>]*>Review (Supply|Borrow|Repay|Withdraw) change<\/button>/);
+    // BUILD-FLOFI-SINGLE-AUTH-WORKFLOW-UX-001: an ordinary amount edit applies on Enter in the card's own form, so the card offers no
+    // Review/Apply proposal and its amount input is not bound to the external review form (a reserve picked on the card still is).
+    expect(canvas).not.toMatch(/Review (Supply|Borrow|Repay|Withdraw) change/);
+    expect(canvas).not.toMatch(/<input[^>]*form="composer-supply-review-/);
     expect(canvas).not.toContain('Apply proposal');
     const inspector = renderToStaticMarkup(createElement(ActionSettingsContent, { selectedId, select: vi.fn() }));
     expect(inspector).toContain(`aria-label="Edit ${name}"`);
