@@ -88,7 +88,7 @@ export const portugueseAaveExpansion: Readonly<Record<string, string>> = Object.
   'APY {0}%': 'APY {0}%', 'Wallet {0}': 'Carteira {0}', 'Available {0}': 'Disponível {0}', 'Debt {0}': 'Dívida {0}', 'Supplied {0}': 'Depositado {0}',
   'Inactive': 'Inativa', 'Frozen': 'Congelada', 'Supply cap reached': 'Limite de depósito atingido', 'Borrowing disabled': 'Empréstimo desativado',
   'Borrow cap reached': 'Limite de empréstimo atingido', 'No liquidity': 'Sem liquidez', 'No oracle price': 'Sem preço do oráculo', 'Isolated reserve': 'Reserva isolada',
-  'Not listed': 'Não listada', 'E-Mode account': 'Conta em E-Mode', 'Account state unknown': 'Estado da conta desconhecido',
+  'Not listed': 'Não listada', 'Account state unknown': 'Estado da conta desconhecido',
   'Name conflicts with the token list': 'Nome conflita com a lista de tokens', 'No debt to repay': 'Sem dívida para pagar', 'Nothing supplied': 'Nada depositado',
   '0 in wallet': '0 na carteira', 'Needs collateral first': 'Precisa de colateral primeiro', 'No borrowing capacity now': 'Sem capacidade de empréstimo agora',
   'Health factor below 2': 'Fator de saúde abaixo de 2', 'Live status unavailable': 'Status ao vivo indisponível',

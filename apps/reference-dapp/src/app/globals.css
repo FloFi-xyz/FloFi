@@ -505,13 +505,21 @@
 .composer-fiat-value:empty{display:block;min-height:13px}
 .composer-token-chip{flex:none;margin-left:auto;display:inline-flex;align-items:center;gap:5px;min-height:34px;padding:4px 9px 4px 5px;border:1px solid var(--accent-line);border-radius:999px;background:var(--paper);color:var(--blue)}
 .composer-amount-box .composer-amount-token{font-size:12px;font-weight:600}
-.composer-token-avatar{position:relative;flex:none;width:22px;height:22px;border-radius:50%;display:grid;grid-template-columns:minmax(0,1fr);grid-template-rows:minmax(0,1fr);place-items:center;background:transparent;font-size:11px;font-weight:600}
+.composer-token-avatar{position:relative;flex:none;width:22px;height:22px;border-radius:50%;display:grid;grid-template-columns:minmax(0,1fr);grid-template-rows:minmax(0,1fr);place-items:center;background:var(--brand-disc);font-size:11px;font-weight:600}
 .composer-token-avatar>.brand-icon{min-width:0;min-height:0;max-width:100%;max-height:100%}
 .brand-icon{display:block;width:100%;height:100%;object-fit:contain;filter:none}
 .brand-icon-fallback{display:grid;place-items:center;width:100%;height:100%;border-radius:50%;background:#e4e4e7;color:#52525b;font:inherit}
 /* BUILD-BASE-001: generated asset and network monograms (no third-party logos); the hue comes from the canonical identity. */
 .brand-mark-monogram{background:hsl(var(--mark-hue,220) 42% 90%);color:hsl(var(--mark-hue,220) 48% 28%);font-weight:650;font-size:.82em;letter-spacing:-.02em;line-height:1;overflow:hidden}
 :root[data-theme="dark"] .brand-mark-monogram{background:hsl(var(--mark-hue,220) 28% 26%);color:hsl(var(--mark-hue,220) 70% 86%)}
+/* AAVE-V3-CARD-CATALOG-FIX-001: token and network marks in Canvas cards and pickers sit in one round, neutral disc in both themes. Each image
+   is scaled whole into its square box (object-fit: contain, never stretched); full-disc marks, square avatars and remote logos are clipped
+   round, and a reviewed transparent glyph (data-shape="glyph") is inset so the circle never cuts it. Remote logos are round everywhere. */
+:root{--brand-disc:#eef1f6}
+:root[data-theme="dark"]{--brand-disc:#2a2f3a}
+.brand-icon[data-mark="logo"]{border-radius:50%}
+:is(.composer-token-avatar,.composer-network-badge,.composer-bridge-network-icon,.composer-stock-mark)>.brand-icon{border-radius:50%}
+:is(.composer-token-avatar,.composer-network-badge,.composer-bridge-network-icon,.composer-stock-mark)>.brand-icon[data-shape="glyph"]{border-radius:0;padding:15%}
 .composer-equity-pill{position:relative;color:var(--blue);font:inherit;cursor:pointer}
 .composer-equity-pill:hover,.composer-equity-pill[aria-expanded="true"]{border-color:var(--accent-border);background:var(--accent-quiet)}
 .composer-robinhood-avatar{background:#ccff00}
@@ -601,7 +609,7 @@
 .composer-subline-token{flex:none}
 .composer-value-column .composer-fiat-value{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;overflow-wrap:normal;max-width:100%}
 .composer-token-subline input{flex:none;max-width:calc(100% - 32px);height:14px;font-size:10px;text-align:left}
-.composer-network-badge{position:absolute;bottom:-3px;right:-3px;width:14px;height:14px;display:grid;place-items:center;border:1px solid var(--paper);border-radius:50%;background:transparent;font:9px var(--font-outfit),sans-serif}
+.composer-network-badge{position:absolute;bottom:-3px;right:-3px;width:14px;height:14px;display:grid;place-items:center;border:1px solid var(--paper);border-radius:50%;background:var(--brand-disc);font:9px var(--font-outfit),sans-serif}
 .composer-amount-actions{display:flex;flex-wrap:nowrap;gap:4px;align-items:center}
 .composer-amount-actions button{flex-shrink:0;white-space:nowrap;padding:3px 5px;min-height:23px;border:1px solid var(--accent-line);border-radius:5px;background:var(--blue-soft);color:var(--blue);font-size:10px;font-weight:600}
 .composer-amount-actions button:disabled{opacity:.45;cursor:not-allowed}
@@ -700,7 +708,7 @@
 .composer-stock-results{display:grid;gap:2px;max-height:216px;margin:0;padding:0;overflow-y:auto;list-style:none;overscroll-behavior:contain}
 .composer-stock-results .composer-stock-option{width:100%;justify-content:flex-start;font-family:inherit;text-align:left;background:transparent}
 .composer-stock-name{overflow:hidden;color:var(--muted);font-weight:500;text-overflow:ellipsis}
-.composer-stock-mark{flex:none;width:18px;height:18px;display:grid;place-items:center}
+.composer-stock-mark{flex:none;width:18px;height:18px;display:grid;place-items:center;border-radius:50%;background:var(--brand-disc)}
 .composer-stock-status{margin:6px 8px;color:var(--muted);font-size:11px;line-height:1.4}
 .composer-stock-retry{margin-left:4px;padding:2px 6px;font-size:11px}
 :root[data-theme="dark"] .composer-stock-search input{background:var(--surface-raised)}
@@ -898,12 +906,33 @@
 .composer-bridge-picker-column+ .composer-bridge-picker-column{border-left:1px solid var(--accent-line);padding-left:6px}
 .composer-bridge-picker-heading{display:block;margin:0 8px 5px;color:var(--muted);font-size:10px;font-weight:600;line-height:1.4;letter-spacing:.03em}
 .composer-bridge-picker .composer-stock-option{min-height:38px;padding-inline:6px}
+/* BUILD AAVE-V3-CARD-CATALOG-FIX-001: a lending card's own Aave reserve catalog (status, funding note, search, options with figures and reasons, toggle). */
+.lending-card-picker{display:grid;gap:6px;min-width:0}
+.lending-card-picker-status:empty{display:none}
+.lending-card-picker-status p,.lending-card-picker-funding,.lending-card-picker-empty{margin:0 8px;color:var(--muted);font-size:11px;line-height:1.35;white-space:normal}
+.lending-card-picker-funding{padding:5px 8px;margin:0;border:1px solid var(--accent-line);border-radius:6px;background:var(--paper);color:var(--ink)}
+.lending-card-picker-funding[data-changed]{border-color:var(--warning-border);background:var(--warning-paper);color:var(--warning-text)}
+.lending-card-picker-retry{padding:0;border:0;background:none;color:var(--blue);font:inherit;font-weight:600;text-decoration:underline;cursor:pointer}
+.lending-card-picker-search{display:block;margin:0}
+.lending-card-picker-search input{width:100%;min-width:0;padding:6px 8px;border:1px solid var(--accent-line);border-radius:6px;background:var(--paper);color:var(--ink);font:inherit;font-size:12px}
+.lending-card-picker-search input:focus-visible{outline:2px solid var(--blue);outline-offset:1px}
+.lending-card-option{white-space:normal}
+.lending-card-option .composer-token-chip{flex:1 1 auto;min-width:0;margin-left:0;white-space:normal}
+.lending-card-option-text{display:grid;min-width:0;line-height:1.25}
+.lending-card-option-detail{color:var(--muted);font-size:10.5px;font-weight:500;white-space:normal;overflow-wrap:anywhere}
+.lending-card-option-detail:empty{display:none}
+.lending-card-option[data-disabled]{cursor:not-allowed;opacity:.62}
+.lending-card-option[data-disabled]:hover{background:transparent}
+.lending-card-option[data-reason] .lending-card-option-detail{color:var(--warning-text)}
+.lending-card-picker-toggle{display:flex;align-items:center;gap:6px;margin:0 8px 2px;color:var(--ink);font-size:11px;cursor:pointer}
+.lending-card-picker-toggle input{margin:0;accent-color:var(--blue)}
+.composer-funding-note[data-changed]{color:var(--warning-text)}
 /* Leave room for row borders and focus rings inside the light picker. */
 :root:not([data-theme="dark"]) .composer-bridge-picker{padding:8px}
 :root:not([data-theme="dark"]) .composer-bridge-picker-columns{gap:8px}
 :root:not([data-theme="dark"]) .composer-bridge-picker-column+ .composer-bridge-picker-column{padding-left:8px}
 :root:not([data-theme="dark"]) .composer-bridge-picker .brand-icon{min-width:0;min-height:0;max-width:100%;max-height:100%}
-.composer-bridge-network-icon{flex:none;display:grid;place-items:center;width:18px;height:18px;border-radius:50%;background:transparent;font-size:10px;font-weight:600;line-height:1}
+.composer-bridge-network-icon{flex:none;display:grid;place-items:center;width:18px;height:18px;border-radius:50%;background:var(--brand-disc);font-size:10px;font-weight:600;line-height:1}
 .composer-network-options .composer-stock-option{font-family:inherit;text-align:left}
 .composer-network-options button{background:transparent}
 .composer-network-options button:disabled{pointer-events:none;color:var(--muted);opacity:1}
@@ -1015,7 +1044,7 @@
 .simulation-result{display:flex;align-items:flex-start;gap:8px;font-size:16px;font-weight:600;line-height:1.5;margin-top:4px;overflow-wrap:anywhere;font-variant-numeric:tabular-nums}
 .simulation-result>span:first-child{color:var(--blue);font-weight:400;flex:none}
 .simulation-token-amount{display:inline-flex;align-items:center;gap:6px;min-width:0;overflow-wrap:anywhere}
-.simulation-summary .brand-icon{width:18px;height:18px;min-width:18px;min-height:18px;flex:none;object-fit:contain;filter:none}
+.simulation-summary :is(.brand-icon,.brand-icon-fallback){width:18px;height:18px;min-width:18px;min-height:18px;flex:none;object-fit:contain;filter:none}
 .simulation-minimum{color:var(--muted);font-size:10px;line-height:1.5;margin:7px 0}
 .simulation-route>li{display:flex;flex-wrap:wrap;justify-content:space-between;gap:5px 10px;font-size:12px;line-height:1.5;padding:6px 0}
 .simulation-route>li>small{flex-basis:100%;color:var(--muted);font-size:11px}
@@ -1084,7 +1113,7 @@
 .review-workspace .simulation-summary-values{margin-top:0;margin-bottom:0}
 .review-workspace button.simulation-back{min-height:38px;padding:8px 12px;border:1px solid var(--line);border-radius:6px;background:var(--paper);color:var(--blue);font-weight:600}
 .review-caption button.simulation-back{min-height:0;padding:0;border:0;background:transparent;text-decoration:underline;text-underline-offset:3px}
-.review-workspace .brand-icon{width:18px;height:18px;flex:none;object-fit:contain}
+.review-workspace :is(.brand-icon,.brand-icon-fallback){width:18px;height:18px;flex:none;object-fit:contain}
 .simulate-workspace .technical-workspace{min-width:0;max-width:100%;overflow-wrap:anywhere}
 .simulate-workspace .technical-workspace pre{max-width:100%;white-space:pre-wrap;overflow-wrap:anywhere}
 .simulate-workspace .technical-workspace summary:focus-visible{outline:2px solid var(--blue);outline-offset:3px;border-radius:4px}
@@ -1159,7 +1188,7 @@
 @media(max-width:900px){.execute-workspace-grid>.execution-plan{padding:20px}}
 
 .execution-step-assets{display:flex;align-items:center;flex-wrap:wrap;gap:6px}
-.execution-step-assets .brand-icon{width:18px;height:18px;flex:none;object-fit:contain}
+.execution-step-assets :is(.brand-icon,.brand-icon-fallback){width:18px;height:18px;flex:none;object-fit:contain}
 .execution-transaction>span[role="status"]{overflow-wrap:anywhere;max-width:100%}
 .execution-state-expired>.execution-step-marker,.execution-operation.execution-state-expired strong{color:var(--amber)}
 

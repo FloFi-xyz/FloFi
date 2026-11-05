@@ -518,7 +518,7 @@ function BuildCanvas({ environment, selectedId, select, openSettings, settingsId
         // opens its market's live per-action Aave catalog in its own token picker. A card fixed by a composition keeps its single asset.
         ...(lendingAction(selection.action) ? (() => {
           const reserve = lendingReservesFor(selection.network).find(item => item.symbol === selection.from);
-          return { ...(reserve ? { assetAddress: reserve.asset } : {}), ...(editable && valid ? { lending: { kind: selection.action, account: wallet.account ?? null, funded: fundingOf(id) } } : {}) };
+          return { ...(reserve ? { assetAddress: reserve.asset } : {}), ...(editable && valid ? { lending: { kind: selection.action, network: selection.network, account: wallet.account ?? null, funded: fundingOf(id) } } : {}) };
         })() : {}),
       };
     };

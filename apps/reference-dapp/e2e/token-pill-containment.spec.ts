@@ -37,7 +37,7 @@ for (const theme of ['Light', 'Dark']) test(`${theme} keeps token icons containe
     await page.getByRole('button', { name: `Add ${action}`, exact: true }).click();
     if (action === 'pool') await configureCanvasPool(page); else await configureCanvasAction(page, '1');
     const buildCard = page.locator('.build-flow-surface .composer-card');
-    await expect(buildCard.locator('.composer-token-avatar[data-token="WETH"] > img')).toHaveAttribute('src', '/brand/crypto/ethereum.svg');
+    await expect(buildCard.locator('.composer-token-avatar[data-token="WETH"] > img')).toHaveAttribute('src', '/brand/crypto/tokens/eth.svg');
     await tokenIconsStayInside(buildCard);
     await expect(buildCard.locator('.composer-network-badge').first()).toBeVisible();
     if (action === 'swap') {

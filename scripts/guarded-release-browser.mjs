@@ -75,7 +75,8 @@ const definitions = [
   ['workflow-ux-authoring', ['--config', 'playwright.workflow-ux.config.ts'], {}],
   // Phase 7B: toolbar geometry, insertion viewport and canonical connections use the same passive-wallet profile.
   ['canvas-workflow-ux', ['--config', 'playwright.canvas-workflow-ux.config.ts', 'canvas-workflow-ux.spec.ts'], {}],
-  ['base-mainnet-authoring', ['base-mainnet-authoring.spec.ts'], { GRYLOO_BASE_MAINNET_E2E: 'MOCKED_LOOPBACK_ONLY', FLOFI_COPILOT: 'replay' }],
+  // BUILD AAVE-V3-CARD-CATALOG-FIX-001: the lending card's own Aave reserve catalog on the MOCKED Base Aave market of the same harness.
+  ['base-mainnet-authoring', ['base-mainnet-authoring.spec.ts', 'aave-card-catalog.spec.ts'], { GRYLOO_BASE_MAINNET_E2E: 'MOCKED_LOOPBACK_ONLY', FLOFI_COPILOT: 'replay' }],
   ['uniswap-provenance', [boundary], { FLOFI_RELEASE_PROVENANCE_PROFILE: 'uniswap', GRYLOO_UNISWAP_LIQUIDITY_E2E: 'MOCKED_LOOPBACK_ONLY' }],
   ['router-provenance', [boundary], { FLOFI_RELEASE_PROVENANCE_PROFILE: 'router', GRYLOO_ROUTER_E2E: 'MOCKED_LOOPBACK_ONLY' }],
   ['journey-provenance', [boundary], { FLOFI_RELEASE_PROVENANCE_PROFILE: 'journey', GRYLOO_ROUTER_TESTNET_E2E: 'MOCKED_LOOPBACK_ONLY' }],

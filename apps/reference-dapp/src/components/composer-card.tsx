@@ -159,7 +159,7 @@ function AssetNetworkPicker({ id, side, symbol, network, tokens, networks, unava
     <div className="composer-bridge-picker-columns">
       <div className="composer-bridge-picker-column" role="region" aria-label={tr(`${sideLabel} token picker`)}>
         <span className="composer-bridge-picker-heading" aria-hidden="true">{tr("Tokens")}</span>
-        {!bridge && (lending ? <LendingReservePicker network={network} selected={symbol} data={lending} onSelect={token => { if (tokens.includes(token)) onTokenChange(token); }}/> : shortcuts)}
+        {!bridge && (lending ? <LendingReservePicker selected={symbol} data={lending} onSelect={token => { if (tokens.includes(token)) onTokenChange(token); }}/> : shortcuts)}
         {search && network !== 'Solana' && <AssetSearch chain={search.chain} selected={selectedReference ?? symbol} accept={search.accept} onSelect={search.onSelect} onSelectAsset={search.identity ? asset => search.onSelect(asset.address ? `${asset.address}@${asset.decimals}` : asset.symbol) : undefined} copy={{
           heading: tr("Search assets"), searchLabel: tr("Search {0} tokens", network), placeholder: tr("Search by symbol or name…"),
           loading: tr("Loading {0} tokens…", network), unavailable: tr("{0} tokens are unavailable right now.", network), retry: tr("Try again"),

@@ -1,72 +1,19 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 /** BUILD AAVE-V3-EXPANSION-001: live Aave reserve discovery against a scripted read-only Base market (no network). */
 import { describe, expect, it } from 'vitest';
-import { AAVE_V3_ADDRESS_BOOK, AAVE_V3_MARKETS } from '@defi-workflow-engine/action-registry';
-import { aaveRateApyPercent, discoverAaveReserves, MULTICALL3, supplyCall, supplySelector, supplyWord, type SupplyRpc } from '../src/index.js';
+import { AAVE_V3_MARKETS } from '@defi-workflow-engine/action-registry';
+import { aaveRateApyPercent, discoverAaveReserves, MULTICALL3 } from '../src/index.js';
+import { createAaveMarketFixture, MAX_UINT256, MULTICALL3_ADDRESS, type AaveFixtureReserve } from './aave-market-fixture.ts';
 
 const market = AAVE_V3_MARKETS.find(m => m.chain === 'eip155:8453')!;
-const OWNER = '0x' + '3'.repeat(40), RAY = 10n ** 27n;
-type Reserve = { config: bigint; listed?: boolean; id?: number; aToken?: string; price?: bigint; liquidity?: bigint; scaledSupply?: bigint; debt?: bigint; liquidityRate?: bigint; source?: string };
-const book = AAVE_V3_ADDRESS_BOOK.find(b => b.chain === 'eip155:8453')!;
+const OWNER = '0x' + '3'.repeat(40);
+type Reserve = AaveFixtureReserve;
 const config = (decimals: number, extra = 0n) => 7500n | (7800n << 16n) | (BigInt(decimals) << 48n) | (1n << 56n) | (1n << 58n) | extra;
+/** The scripted Base market (aave-market-fixture.ts) with one owner: wallet 7, supplied 5, no debt in every scripted reserve; USDC as collateral. */
 function harness(reserves: Map<string, Reserve>, options: { multicall: boolean; extraListed?: string[]; failEMode?: boolean }) {
-  const calls: string[] = [];
-  const answer = (to: string, data: string): string | null => {
-    const word = (v: bigint | string) => '0x' + supplyWord(v);
-    if (to === market.provider && data === supplyCall('getPool()')) return word(market.pool);
-    if (to === market.pool && data === supplyCall('getReservesList()')) {
-      const listed = [...[...reserves].filter(([, r]) => r.listed !== false).map(([a]) => a), ...options.extraListed ?? []];
-      return '0x' + supplyWord(32n) + supplyWord(BigInt(listed.length)) + listed.map(a => supplyWord(a)).join('');
-    }
-    for (const profile of market.reserves) {
-      const r = reserves.get(profile.asset);
-      if (!r) continue;
-      if (to === market.pool && data === supplyCall('getReserveData(address)', profile.asset)) {
-        const w = Array.from({ length: 15 }, () => 0n);
-        w[0] = r.config; w[1] = RAY; w[2] = r.liquidityRate ?? 0n; w[3] = RAY; w[4] = 0n; w[7] = BigInt(r.id ?? profile.reserveId); w[8] = BigInt(r.aToken ?? profile.aToken); w[10] = BigInt(profile.variableDebtToken);
-        return '0x' + w.map(v => supplyWord(v)).join('');
-      }
-      if (to === market.pool && data === supplyCall('getReserveNormalizedIncome(address)', profile.asset)) return word(RAY);
-      if (to === profile.aToken && data === supplyCall('scaledTotalSupply()')) return word(r.scaledSupply ?? 0n);
-      if (to === profile.variableDebtToken && data === supplyCall('totalSupply()')) return word(r.debt ?? 0n);
-      if (to === profile.asset && data === supplyCall('balanceOf(address)', profile.aToken)) return word(r.liquidity ?? 10n ** 24n);
-      if (to === market.oracle && data === supplyCall('getAssetPrice(address)', profile.asset)) return word(r.price ?? 100000000n);
-      if (to === market.oracle && data === supplyCall('getSourceOfAsset(address)', profile.asset)) return word(r.source ?? book.reserves.find(b => b.underlying === profile.asset)!.oracle);
-      if (to === profile.asset && data === supplyCall('balanceOf(address)', OWNER)) return word(7n);
-      if (to === profile.aToken && data === supplyCall('balanceOf(address)', OWNER)) return word(5n);
-      if (to === profile.variableDebtToken && data === supplyCall('balanceOf(address)', OWNER)) return word(0n);
-    }
-    if (to === market.pool && data === supplyCall('getUserAccountData(address)', OWNER)) return '0x' + [100n, 0n, 75n, 7800n, 7500n, (1n << 256n) - 1n].map(v => supplyWord(v)).join('');
-    if (to === market.pool && data === supplyCall('getUserConfiguration(address)', OWNER)) return word(2n << 8n);
-    if (to === market.pool && data === supplyCall('getUserEMode(address)', OWNER)) return options.failEMode ? null : word(0n);
-    return null;
-  };
-  const rpc: SupplyRpc = async (method, params) => {
-    calls.push(method);
-    if (method === 'eth_chainId') return '0x2105';
-    if (method === 'eth_getBlockByNumber') return { number: '0x64', hash: '0x' + 'a'.repeat(64) };
-    if (method === 'eth_getCode') return options.multicall ? '0x60806040' : '0x';
-    if (method !== 'eth_call') throw new Error('unexpected ' + method);
-    const { to, data } = params[0] as { to: string; data: string };
-    if (to === MULTICALL3) {
-      if (!options.multicall || !data.startsWith(supplySelector('aggregate3((address,bool,bytes)[])'))) throw new Error('multicall unavailable');
-      // Decode aggregate3((address,bool,bytes)[]) exactly as ABI-encoded, answer each call, encode (bool,bytes)[].
-      const hex = data.slice(10), at = (o: number) => BigInt('0x' + hex.slice(o * 2, o * 2 + 64));
-      const base = Number(at(0)), n = Number(at(base)), items = base + 32;
-      const answers = Array.from({ length: n }, (_, i) => {
-        const t = items + Number(at(items + 32 * i)), target = '0x' + hex.slice(t * 2 + 24, t * 2 + 64), bytes = t + Number(at(t + 64)), size = Number(at(bytes));
-        return answer(target, '0x' + hex.slice((bytes + 32) * 2, (bytes + 32 + size) * 2));
-      });
-      const tuples = answers.map(a => { const d = (a ?? '0x').slice(2); return supplyWord(a ? 1n : 0n) + supplyWord(64n) + supplyWord(BigInt(d.length / 2)) + d.padEnd(Math.ceil(d.length / 64) * 64, '0'); });
-      let offset = 32n * BigInt(tuples.length);
-      const offsets = tuples.map(t => { const o = offset; offset += BigInt(t.length / 2); return supplyWord(o); });
-      return '0x' + supplyWord(32n) + supplyWord(BigInt(n)) + offsets.join('') + tuples.join('');
-    }
-    const result = answer(to, data);
-    if (result === null) throw new Error('execution reverted');
-    return result;
-  };
-  return { rpc, calls };
+  return createAaveMarketFixture('eip155:8453', { reserves, multicall: options.multicall, extraListed: options.extraListed ?? [],
+    account: { owner: OWNER, defaultPosition: { wallet: 7n, supplied: 5n, debt: 0n }, userConfiguration: 2n << 8n,
+      accountData: [100n, 0n, 75n, 7800n, 7500n, MAX_UINT256], eMode: options.failEMode ? null : 0n } });
 }
 const usdc = market.primary, weth = market.reserves.find(r => r.symbol === 'WETH')!, cbbtc = market.reserves.find(r => r.symbol === 'cbBTC')!, gho = market.reserves.find(r => r.symbol === 'GHO')!;
 
@@ -113,6 +60,9 @@ describe('BUILD AAVE-V3-EXPANSION-001 Aave reserve discovery', () => {
     const { rpc } = harness(new Map(), { multicall: true });
     await expect(discoverAaveReserves(async (m, p) => m === 'eth_chainId' ? '0x1' : rpc(m, p), 'eip155:8453')).rejects.toThrow('SUPPLY_WRONG_CHAIN');
     await expect(discoverAaveReserves(rpc, 'eip155:84532')).rejects.toThrow('AAVE_MARKET_UNSUPPORTED');
+  });
+  it('scripts the same Multicall3 deployment discovery batches through', () => {
+    expect(MULTICALL3_ADDRESS).toBe(MULTICALL3);
   });
   it('reports APY as informational compounding of the current rate', () => {
     expect(aaveRateApyPercent(0n)).toBe(0);

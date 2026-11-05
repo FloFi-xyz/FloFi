@@ -14,6 +14,7 @@ import { hiddenCardReserves, lendingCardCatalog, visibleCardReserves, type CardR
 
 export type LendingPickerFunding = { readonly step: number; readonly symbol: string };
 export type LendingPickerData = { readonly kind: LendingKind; readonly account: string | null;
+  /** The card's market by its registry network name ("Base"), never the card's display label ("Base (8453)"). */ readonly network: string;
   /** The earlier step whose delivered output this card's committed step spends (Swap → Supply), if any. */ readonly funded?: LendingPickerFunding | null };
 
 const SHORT_REASON: Readonly<Record<CardReserveReason, string>> = Object.freeze({
@@ -56,7 +57,8 @@ function figures(entry: CardReserveEntry, kind: LendingKind, tr: (value: string,
   return shown.length ? shown.join(' · ') : null;
 }
 
-export function LendingReservePicker({ network, selected, data, onSelect }: { readonly network: string; readonly selected: string; readonly data: LendingPickerData; onSelect(symbol: string): void }) {
+export function LendingReservePicker({ selected, data, onSelect }: { readonly selected: string; readonly data: LendingPickerData; onSelect(symbol: string): void }) {
+  const network = data.network;
   const { t: tr } = useLocale();
   const name = useId(), searchId = useId();
   const live = useAaveReserves(network, data.account);
@@ -92,7 +94,9 @@ export function LendingReservePicker({ network, selected, data, onSelect }: { re
       <legend className="sr-only">{tr('Choose an Aave reserve on {0}', network)}</legend>
       {options.map(entry => {
         const current = entry.symbol === selected, disabled = !entry.selectable && !current, detail = figures(entry, data.kind, tr);
-        const why = entry.reason ? tr(SHORT_REASON[entry.reason]) : entry.notes.length ? entry.notes.map(note => tr(NOTE_TEXT[note])).join(' · ') : null;
+        // "0 in wallet" only where the wallet figure itself is not shown.
+        const notes = entry.notes.filter(note => note !== 'NO_WALLET_BALANCE' || entry.walletBalance === undefined);
+        const why = entry.reason ? tr(SHORT_REASON[entry.reason]) : notes.length ? notes.map(note => tr(NOTE_TEXT[note])).join(' · ') : null;
         const describedBy = `${name}-${entry.address}`;
         return <label key={entry.address} className="composer-stock-option lending-card-option" data-selected={current || undefined} data-disabled={disabled || undefined}
           data-reserve={entry.address} data-reason={entry.reason ?? undefined} title={entry.reason ? tr(RESERVE_TEXT[entry.reason] ?? SHORT_REASON[entry.reason]) : undefined}>

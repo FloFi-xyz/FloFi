@@ -2592,6 +2592,7 @@
       "sharedFinancialCore": false,
       "sources": [
         "apps/reference-dapp/src/components/borrow-panel.tsx",
+        "apps/reference-dapp/src/components/lending-card-picker.tsx",
         "apps/reference-dapp/src/components/lending-node-editor.tsx",
         "apps/reference-dapp/src/components/lending-panel.tsx",
         "apps/reference-dapp/src/components/lending-reserve-status.tsx",
@@ -3183,6 +3184,7 @@
       "sharedFinancialCore": false,
       "sources": [
         "apps/reference-dapp/src/domain/lending-authoring.ts",
+        "apps/reference-dapp/src/domain/lending-card-catalog.ts",
         "apps/reference-dapp/src/domain/supply-authoring.ts"
       ],
       "suites": [
@@ -4184,8 +4186,21 @@
         "apps/reference-dapp/public/brand/crypto/base.svg",
         "apps/reference-dapp/public/brand/crypto/bitcoin-brand.LICENSE",
         "apps/reference-dapp/public/brand/crypto/bitcoin.svg",
+        "apps/reference-dapp/public/brand/crypto/ethereum-network.svg",
         "apps/reference-dapp/public/brand/crypto/ethereum.svg",
         "apps/reference-dapp/public/brand/crypto/optimism.png",
+        "apps/reference-dapp/public/brand/crypto/tokens/1inch.svg",
+        "apps/reference-dapp/public/brand/crypto/tokens/aave.svg",
+        "apps/reference-dapp/public/brand/crypto/tokens/bal.svg",
+        "apps/reference-dapp/public/brand/crypto/tokens/crv.svg",
+        "apps/reference-dapp/public/brand/crypto/tokens/dai.svg",
+        "apps/reference-dapp/public/brand/crypto/tokens/eth.svg",
+        "apps/reference-dapp/public/brand/crypto/tokens/knc.svg",
+        "apps/reference-dapp/public/brand/crypto/tokens/link.svg",
+        "apps/reference-dapp/public/brand/crypto/tokens/mkr.svg",
+        "apps/reference-dapp/public/brand/crypto/tokens/snx.svg",
+        "apps/reference-dapp/public/brand/crypto/tokens/uni.svg",
+        "apps/reference-dapp/public/brand/crypto/tokens/wbtc.svg",
         "apps/reference-dapp/public/brand/crypto/usdc.png",
         "apps/reference-dapp/public/brand/crypto/usdt.svg",
         "apps/reference-dapp/public/brand/crypto/wbtc.png",
