@@ -27,6 +27,7 @@ import { ModeBProvider, useModeB } from '../state/mode-b-store';
 import { CompositionProvider, useComposition } from '../state/composition-store';
 import { CompositionPanel } from './composition-panel';
 import { useModeA } from '../state/mode-a-store';
+import { FlightBoarding, useFlightDraft } from '../flight/app-boarding';
 import { useWorkflow } from '../state/workflow-store';
 import { useLiquidity } from '../state/liquidity-store';
 import { LiquidityPanel } from './liquidity-panel';
@@ -151,6 +152,8 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
   const [section, setSection] = useState<ProductSection>(() => entryLanding ? BUILD_ENTRY : 'Build');
   const [entryAuto, setEntryAuto] = useState(entryLanding);
   const [entryDraft, setEntryDraft] = useState('');
+  // BUILD-FLOFI-FLIGHT-001: the request typed on /board arrives once as an editable draft in the Build entry (never sent on its own).
+  useFlightDraft(entryLanding ? setEntryDraft : null);
   const dashboardRoute = resolveDashboardRoute(pathname);
   const secondaryRoute = secondaryWorkspaceRoute(pathname);
   const tab = dashboardRoute ? 'Dashboard' : section;
@@ -419,7 +422,9 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
     setWorkflowEpoch(epoch => epoch + 1); setTab('Build');
   }
   // BUILD-FLOFI-PRODUCT-UX-001: informational Beta Mainnet notice only; it gates nothing. Omitted from the compact signing surface.
-  const betaNotice = <p className="beta-notice" role="note">{tr("FloFi Beta Mainnet — Real funds are enabled. Review every transaction before signing.")}</p>;
+  const betaNotice = <><p className="beta-notice" role="note">{tr("FloFi Beta Mainnet — Real funds are enabled. Review every transaction before signing.")}</p>
+    {/* BUILD-FLOFI-FLIGHT-001: after "Board now" on /board, a ready Review asks the server for the person's boarding pass. */}
+    <FlightBoarding readyKey={authorization.ready ? authorization.key : null} workflowId={state.workflow.workflowId}/></>;
   const simulationReason = sequenceIssue ?? (simulationDisabled || !actionable || lifecycleState.invalidWorkflow ? simulationUnavailableReason({ incomplete: Boolean(authoringIncomplete || reviewError || !actionable),
     unsupported: testNetworkWorkflow || simulationSource.kind === 'unavailable', walletRequired: !signer || Boolean(approvalGate || autoPrepare && !approvalWallet),
     providerUnavailable: 'available' in simulationSource.state && simulationSource.state.available === false || 'info' in simulationSource.state && simulationSource.state.info?.available === false,

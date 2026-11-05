@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="66 -34 420 416" role="img" aria-label="Gota comissária com cara de sinto muito, segurando a plaquinha middle seat">
+    <g fill="none" stroke="#FFFFFF" stroke-width="26" stroke-linecap="round" stroke-linejoin="round"><path d="M176 322 V358 H160 M224 322 V358 H240"></path><path d="M116 250 C96 262 88 280 92 298 M284 240 C310 250 340 248 370 232 M370 60 V330"></path><path fill="#FFFFFF" d="M200 60 C236 128 286 176 286 240 a86 86 0 0 1 -172 0 C114 176 164 128 200 60 Z"></path><g transform="rotate(-10 200 112)"><rect fill="#FFFFFF" x="144" y="92" width="112" height="34" rx="12"></rect><rect fill="#FFFFFF" x="132" y="118" width="136" height="20" rx="10"></rect></g><rect fill="#FFFFFF" x="266" y="-16" width="208" height="90" rx="18"></rect></g>
+    <path fill="none" stroke="#041B3D" stroke-linecap="round" stroke-linejoin="round" stroke-width="10" d="M176 322 V358 H160 M224 322 V358 H240"></path>
+    <path fill="none" stroke="#041B3D" stroke-linecap="round" stroke-width="10" d="M370 60 V330"></path>
+    <path fill="#FFFFFF" stroke="#041B3D" stroke-width="10" stroke-linejoin="round" d="M200 60 C236 128 286 176 286 240 a86 86 0 0 1 -172 0 C114 176 164 128 200 60 Z"></path>
+    <path fill="none" stroke="#041B3D" stroke-linecap="round" stroke-linejoin="round" stroke-width="10" d="M116 250 C96 262 88 280 92 298 M284 240 C310 250 340 248 370 232"></path>
+    <rect x="168" y="212" width="12" height="30" rx="6" fill="#041B3D"></rect><rect x="220" y="212" width="12" height="30" rx="6" fill="#041B3D"></rect>
+    <path fill="none" stroke="#041B3D" stroke-linecap="round" stroke-width="7" d="M160 202 L184 190 M240 202 L216 190"></path>
+    <path fill="#041B3D" d="M188 268 h24 a12 12 0 0 0 -24 0 Z"></path>
+    <g transform="rotate(-10 200 112)"><rect x="144" y="92" width="112" height="34" rx="12" fill="#FFFFFF" stroke="#041B3D" stroke-width="10"></rect><rect x="132" y="118" width="136" height="20" rx="10" fill="#2343D9" stroke="#041B3D" stroke-width="10"></rect></g>
+    <rect x="266" y="-16" width="208" height="90" rx="18" fill="#FFFFFF" stroke="#041B3D" stroke-width="8"></rect>
+    <text x="370" y="41" text-anchor="middle" font-family="'IBM Plex Mono',monospace" font-weight="500" font-size="26" letter-spacing="1" fill="#041B3D">MIDDLE SEAT</text>
+  </svg>
