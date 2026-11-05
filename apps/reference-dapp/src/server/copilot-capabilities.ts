@@ -52,8 +52,9 @@ export function copilotSupportsSection(scope: NetworkScope = networkScope()): st
   const catalogLine = (action: StrategyAction) => catalog.filter(network => scoped(scope, action).includes(network));
   const swap = [...plain('swap').map(network => `${join(tokensOf(network, 'swap'))} on ${network.name}`),
     `any two tokens of the official catalog on ${names(catalogLine('swap'))} (for example ${catalogLine('swap').map(network => `${examples(network)} on ${network.name}`).join('; ')})`];
-  const lending = new Map<string, NetworkIdentity[]>();
-  for (const offer of lendingOffers().filter(offer => inScope(scope)(offer.network))) lending.set(offer.asset, [...lending.get(offer.asset) ?? [], offer.network]);
+  // BUILD AAVE-V3-EXPANSION-001: one list per Aave market (every registered reserve; live availability is checked at Simulate).
+  const lending = new Map<NetworkIdentity, string[]>();
+  for (const offer of lendingOffers().filter(offer => inScope(scope)(offer.network))) lending.set(offer.network, [...lending.get(offer.network) ?? [], offer.asset]);
   const pools = plain('add_liquidity').map(network => {
     const pool = network.chain.startsWith('solana:') ? { name: 'Orca', ...COPILOT_POOLS.ORCA,
       ...network.environment === 'MAINNET' ? { quote: 'USDC' } : {} } : { name: 'Uniswap v3', ...COPILOT_POOLS.UNISWAP_V3 };
@@ -72,7 +73,8 @@ export function copilotSupportsSection(scope: NetworkScope = networkScope()): st
     `- BRIDGE (universal Cross-chain Router): any asset Flofi knows, between any two of ${universalNames('EN')} (mainnets, real funds), including Solana in or out; ` +
       'put the source token in asset and the independently requested destination token in outputAsset (null only if unstated), and both networks. ' +
       'Recipient: an explicit 0x address for an EVM destination; for a Solana destination use the exact case-sensitive base58 public key if stated; null otherwise.',
-    `- SUPPLY, BORROW, REPAY, WITHDRAW on Aave V3: ${[...lending].map(([asset, networks]) => `${asset} on ${names(networks)}`).join('; ')}; nothing else. ${lendingAmountScopeText('EN')}`,
+    `- SUPPLY, BORROW, REPAY, WITHDRAW on Aave V3 (asset = one listed reserve of that network's market, by its symbol): ${[...lending].map(([network, assets]) => `${network.name}: ${assets.join(', ')}`).join('; ')}; nothing else. ` +
+      `Native ETH is not a reserve (WETH is). Availability (frozen, paused, caps, liquidity, collateral, health factor) is checked on chain at Simulate. ${lendingAmountScopeText('EN')}`,
     `- LIQUIDITY: ${[...pools, catalogPools].join('; ')}.`,
     '- AUTOMATION: SCHEDULED_DCA, PRICE_TRIGGER (USD below/above), DAILY_WATCH using the existing owner-confirmed Automation domain.',
     '- COMPOSITION: ordered sequences of the registered actions, including swaps, bridges, lending, transfers and liquidity. Each step uses its own verified runtime and fresh review; an earlier delivered token can fund a later step.',

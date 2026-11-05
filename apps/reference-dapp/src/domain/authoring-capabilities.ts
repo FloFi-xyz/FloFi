@@ -13,7 +13,7 @@
  * section from here, so a network or action added to the registries (and its canonical example) is described everywhere at once. Nothing
  * here grants authority or decides deployment enablement: the owner's Review and wallet signature remain the only way anything executes.
  */
-import { AAVE_V3_AMOUNT_POLICY } from '@defi-workflow-engine/action-registry';
+import { AAVE_V3_AMOUNT_POLICY, AAVE_V3_LENDING_PROFILES } from '@defi-workflow-engine/action-registry';
 import { UNIVERSAL_NETWORKS } from '@defi-workflow-engine/workflow-contracts';
 import type { StrategyAction, StrategySpec } from '../engine/strategy-spec';
 export type { StrategyAction };
@@ -52,8 +52,12 @@ export const copilotCapabilityNetworks = (action: StrategyAction, approved?: rea
 export const copilotNetworksFor = (action: StrategyAction, approved?: readonly PendingAgentCapability[]): readonly CopilotNetworkId[] =>
   copilotCapabilityNetworks(action, approved).map(network => network.copilot).filter((id): id is CopilotNetworkId => id !== null);
 /** Aave lending offers: the one asset of each network, in first-example order. */
-export const lendingOffers = (action: 'supply' | 'borrow' | 'repay' | 'withdraw' = 'supply'): readonly { readonly network: NetworkIdentity; readonly asset: string }[] =>
-  scopedCapabilities().filter(capability => capability.action === action && capability.asset !== null).map(capability => ({ network: capability.network, asset: capability.asset! }));
+export const lendingOffers = (action: 'supply' | 'borrow' | 'repay' | 'withdraw' = 'supply'): readonly { readonly network: NetworkIdentity; readonly asset: string }[] => {
+  // BUILD AAVE-V3-EXPANSION-001: every registered reserve of each in-scope Aave network (its market), in registry order. Live availability
+  // (frozen, paused, caps, liquidity) is read at Simulate and shown by the reserve catalog, never assumed from this list.
+  const networks = scopedCapabilities().filter(capability => capability.action === action && capability.asset !== null).map(capability => capability.network);
+  return AAVE_V3_LENDING_PROFILES.flatMap(profile => { const network = networks.find(item => item.chain === profile.chain); return network ? [{ network, asset: profile.symbol }] : []; });
+};
 /** Cross-chain Router routes with their source token. */
 export const bridgeOffers = (): readonly { readonly source: NetworkIdentity; readonly destination: NetworkIdentity; readonly asset: string }[] =>
   scopedCapabilities().filter(capability => capability.action === 'bridge').map(capability => ({ source: capability.network, destination: capability.destination!, asset: capability.asset! }));
@@ -70,10 +74,19 @@ const join = (items: readonly string[], language: Language) => items.length < 2 
 const joinGroups = (groups: readonly string[], language: Language) => groups.length > 1 && groups.some(group => / (?:and|e) /.test(group))
   ? `${groups.slice(0, -1).join(', ')}, ${language === 'PT' ? 'e' : 'and'} ${groups.at(-1)}` : join(groups, language);
 const names = (networks: readonly NetworkIdentity[], language: Language) => join(networks.map(network => network.name), language);
+/** Markets with more listed reserves than this are summarised (count and the first few reserves) rather than listed in full. */
+const LENDING_TEXT_LISTED = 4;
 function lendingText(language: Language, mainnets = true): string {
-  const byAsset = new Map<string, NetworkIdentity[]>();
-  for (const offer of lendingOffers().filter(item => mainnets || item.network.environment !== 'MAINNET')) byAsset.set(offer.asset, [...byAsset.get(offer.asset) ?? [], offer.network]);
-  return joinGroups([...byAsset].map(([asset, networks]) => language === 'PT' ? `${asset} na ${names(networks, 'PT')}` : `${asset} on ${names(networks, 'EN')}`), language);
+  const byAsset = new Map<string, NetworkIdentity[]>(), byNetwork = new Map<NetworkIdentity, string[]>();
+  for (const offer of lendingOffers().filter(item => mainnets || item.network.environment !== 'MAINNET')) byNetwork.set(offer.network, [...byNetwork.get(offer.network) ?? [], offer.asset]);
+  const markets: string[] = [];
+  for (const [network, assets] of byNetwork) {
+    if (assets.length === 1) { byAsset.set(assets[0]!, [...byAsset.get(assets[0]!) ?? [], network]); continue; }
+    const shown = assets.slice(0, LENDING_TEXT_LISTED).join(', ');
+    // No count is stated: the live market decides availability, and the Copilot states only numbers it holds.
+    markets.push(language === 'PT' ? `as reservas listadas na ${network.name} (${shown} e outras)` : `the listed reserves on ${network.name} (${shown} and more)`);
+  }
+  return joinGroups([...[...byAsset].map(([asset, networks]) => language === 'PT' ? `${asset} na ${names(networks, 'PT')}` : `${asset} on ${names(networks, 'EN')}`), ...markets], language);
 }
 const routes = () => bridgeOffers().map(route => `${route.source.name} → ${route.destination.name} (${route.asset})`);
 const compositions = () => scopedCapabilities().filter(capability => capability.action === 'lending_composition');

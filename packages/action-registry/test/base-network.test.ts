@@ -185,7 +185,11 @@ describe('BUILD-BASE-001 Uniswap v3 on Base', () => {
 describe('BUILD-BASE-001 Aave, transfer and router profiles on Base', () => {
   it('binds Aave V3 Base to the verified USDC reserve, chosen by chain, as a mainnet profile', () => {
     expect(aaveLendingProfile('eip155:8453')).toBe(AAVE_V3_BASE);
-    expect(AAVE_V3_LENDING_PROFILES.filter(profile => profile.chain === 'eip155:8453')).toEqual([AAVE_V3_BASE]);
+    // BUILD AAVE-V3-EXPANSION-001: the Base market now lists every reserve; the verified USDC profile stays the same object, first.
+    const base = AAVE_V3_LENDING_PROFILES.filter(profile => profile.chain === 'eip155:8453');
+    expect(base[0]).toBe(AAVE_V3_BASE);
+    expect(base.filter(profile => profile.asset === AAVE_V3_BASE.asset)).toEqual([AAVE_V3_BASE]);
+    expect(base.every(profile => profile.pool === AAVE_V3_BASE.pool && profile.provider === AAVE_V3_BASE.provider)).toBe(true);
     expect(AAVE_V3_BASE).toMatchObject({ pool: '0xa238dd80c259a72e81d7e4664a9801593f98d1c5', provider: '0xe20fcbdbffc4dd138ce8b2e6fbb6cb49777ad64d', reserveId: 4,
       asset: BASE_BASE_ASSETS.assets[1]!.address, decimals: 6, symbol: 'USDC', aToken: '0x4e65fe4dba92790696d040ac24aa414708f5c0ab',
       variableDebtToken: '0x59dca05b6c26dbd64b5381374aaac5cd05644c28', oracle: '0x2cc0fc26ed4563a5ce5e8bdcfe1a2878676ae156', l1DataFee: true, faucet: null });

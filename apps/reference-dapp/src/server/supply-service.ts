@@ -9,7 +9,7 @@ import { aaveEnvironment } from '@defi-workflow-engine/action-registry';
 import { catalogNetworkOfChain } from './catalog-networks.ts';
 import { nitroGasLimit, nitroMaxFeePerGas } from './arbitrum-fees.ts';
 import { reconcileSupplyAttempt, buildSupplyEvidence, type SupplyObservation } from '@defi-workflow-engine/reference-reconciler';
-import type { SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
+import { readBorrowNode, readRepayNode, readSupplyNode, readWithdrawNode, type SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
 export type SupplyWalletDiagnostic = { invoked:boolean; rejectionCode?:number; transaction:Record<string,string>|null; calls:{method:string;submission?:boolean;params:unknown[];result?:unknown;error?:unknown}[]; error:unknown; code:string };
 export type SupplyAbsence = { outcome:'NOT_FOUND'; block:number; latestNonce:string; pendingNonce:string; allowance:string; observedAt:string };
 export type SupplyRecord = SupplyRun & { observations: SupplyObservation[]; evidence: ReturnType<typeof buildSupplyEvidence> | null; error: string | null;
@@ -44,7 +44,8 @@ export function createSupplyService(input:{rpc:SupplyRpc;rpcs?:Readonly<Partial<
   // The authored or reviewed chain selects the Aave profile and its own read client. No chain falls back to another.
   const rpcFor=(chain:string):SupplyRpc=>{const rpc=input.rpcs?.[chain]??(chain===AAVE_V3_BASE_SEPOLIA.chain?input.rpc:undefined);if(!rpc)throw new Error('SUPPLY_NETWORK_UNAVAILABLE');return rpc;};
   const rpcOf=(review:SupplyReview)=>rpcFor(review.chain);
-  const profileOf=(review:SupplyReview)=>lendingProfile(review.chain,'SUPPLY_DEPLOYMENT_UNSUPPORTED');
+  // The reviewed chain AND reserve asset select the profile (BUILD AAVE-V3-EXPANSION-001: a market lists many reserves).
+  const profileOf=(review:SupplyReview)=>lendingProfile(review.chain,'SUPPLY_DEPLOYMENT_UNSUPPORTED',review.asset);
   const readState=(review:SupplyReview,account:string)=>(review.withdraw?readWithdrawState:review.borrow||review.repay||'ownerBeneficiary' in profileOf(review)?readBorrowState:readSupplyState)(rpcOf(review),profileOf(review),account,review.beneficiary);
   const simulate=(workflow:SemanticWorkflow,account:string,rpc:SupplyRpc)=>{
     const chain=workflow.nodes.find(n=>['supply','borrow','repay','withdraw'].includes(n.actionType))?.chainId;
@@ -58,7 +59,7 @@ export function createSupplyService(input:{rpc:SupplyRpc;rpcs?:Readonly<Partial<
     const buffer=profileOf(review).l1DataFee?10_000_000_000_000n:0n;
     if(BigInt(state.nativeBalance)<BigInt(review.gasLimits[index]!)*BigInt(review.gasPrice)+buffer)throw new Error('SUPPLY_INSUFFICIENT_ETH');
   };
-  const readLatestNonce=(review:SupplyReview,account:string)=>readSupplyLatestNonce(rpcOf(review),lendingProfile(review.chain,'SUPPLY_DEPLOYMENT_UNSUPPORTED'),account);
+  const readLatestNonce=(review:SupplyReview,account:string)=>readSupplyLatestNonce(rpcOf(review),profileOf(review),account);
   // Owner nonces are per chain. Base Sepolia keeps its original lease names; any other chain is qualified by its CAIP-2 id.
   const nonceLease=(review:SupplyReview,nonce:string)=>review.chain===AAVE_V3_BASE_SEPOLIA.chain?`${review.account}-${nonce}`:`${review.chain.replace(':','-')}-${review.account}-${nonce}`;
   const text=async(name:string)=>{const bytes=await log.read(name);return bytes===null?null:utf8(bytes);};
@@ -109,10 +110,11 @@ export function createSupplyService(input:{rpc:SupplyRpc;rpcs?:Readonly<Partial<
     load,
     async simulate(workflowInput:unknown,account:string):Promise<SupplyRecord>{
       const workflow=validateAuthoringWorkflow(workflowInput,createBaseSepoliaReviewContext());
-      const chain=workflow.nodes.find(n=>['supply','borrow','repay','withdraw'].includes(n.actionType))?.chainId;
-      if(!chain)throw new Error('SUPPLY_REQUIRED');
-      // The registered catalog namespace binds each mainnet; testnet runs stay in `supply-`.
-      const profile=lendingProfile(chain,'SUPPLY_DEPLOYMENT_UNSUPPORTED');
+      const node=workflow.nodes.find(n=>['supply','borrow','repay','withdraw'].includes(n.actionType)),chain=node?.chainId;
+      if(!node||!chain)throw new Error('SUPPLY_REQUIRED');
+      // The registered catalog namespace binds each mainnet; testnet runs stay in `supply-`. The authored reserve must be registered.
+      const read=node.actionType==='withdraw'?readWithdrawNode:node.actionType==='repay'?readRepayNode:node.actionType==='borrow'?readBorrowNode:readSupplyNode;
+      const profile=lendingProfile(chain,'SUPPLY_DEPLOYMENT_UNSUPPORTED',read(node).asset);
       if((aaveEnvironment(profile)==='MAINNET'?catalogNetworkOfChain(chain)?.prefixes.lending:'supply')!==idPrefix)throw new Error('SUPPLY_NETWORK_UNAVAILABLE');
       const review=await simulate(workflow,account,rpcFor(chain));
       const id=newId();

@@ -4,7 +4,7 @@ import { useLocale } from '../i18n/locale';
 
 import { TokenAmountInput } from './token-amount-input';
 import { useState, type FormEvent } from 'react';
-import { createAuthoredRepay, repayDetails, lendingCopy, lendingNetworkView, lendingView, LENDING_NETWORKS, type LendingNetwork, type SupplyInput } from '../domain/supply-authoring';
+import { createAuthoredRepay, repayDetails, lendingCopy, lendingNetworkView, lendingView, LENDING_NETWORKS, lendingReservesFor, lendingAssetFor, lendingNodeAsset, type LendingNetwork, type SupplyInput } from '../domain/supply-authoring';
 import { useWorkflow } from '../state/workflow-store';
 import { useBuild009Wallet } from '../state/build009-wallet-store';
 import { useSupply } from '../state/supply-store';
@@ -18,7 +18,10 @@ export function RepayAuthoringForm({nodeId,onDone,direct=false,reviewFormId}:{no
   const node=state.workflow.nodes.find(n=>n.nodeId===nodeId),existing=node?repayDetails(node as Parameters<typeof repayDetails>[0]):null;
   const [localAmount,setAmount]=useState(existing?.amount??'0.005'),[error,setError]=useState('');
   const amount = reviewFormId && nodeId ? amountInputs[nodeId] ?? existing?.amount ?? localAmount : localAmount;
-  const [network,setNetwork]=useState<LendingNetwork>(existing?.network??'Base Sepolia'),shown=lendingNetworkView(network),asset=shown.asset;
+  const [network,setNetworkState]=useState<LendingNetwork>(existing?.network??'Base Sepolia'),[chosenAsset,setAsset]=useState<string>(existing?.asset??lendingAssetFor(existing?.network??'Base Sepolia'));
+  // BUILD AAVE-V3-EXPANSION-001: the network selects its Aave market; the asset is one of that market's registered reserves (never another network's).
+  const asset=lendingReservesFor(network).some(reserve=>reserve.symbol===chosenAsset)?chosenAsset:lendingAssetFor(network),shown=lendingNetworkView(network,asset);
+  const setNetwork=(next:LendingNetwork)=>{setNetworkState(next);setAsset(lendingAssetFor(next));};
   function submit(event:FormEvent){event.preventDefault();try{
     const input:SupplyInput={network,asset,amount,beneficiary:wallet.account??existing?.beneficiary??''};
     createAuthoredRepay(nodeId??'node-preview',input);
@@ -28,7 +31,7 @@ export function RepayAuthoringForm({nodeId,onDone,direct=false,reviewFormId}:{no
   return <form id={reviewFormId} className="inspector-fields" aria-label={tr(nodeId?'Edit Repay':'Create Repay')} onSubmit={submit}>
     <strong>{tr("Repay to Aave V3")}</strong>
     <label>{tr("Repay network")}<select aria-label={tr("Repay network")} value={network} onChange={e=>setNetwork(e.target.value as LendingNetwork)}>{LENDING_NETWORKS.map(n=><option key={n}>{tr(n)}</option>)}</select></label>
-    <label>{tr("Repay asset")}<select aria-label={tr("Repay asset")} value={asset} onChange={()=>undefined}><option>{tr(asset)}</option></select></label>
+    <label>{tr("Repay asset")}<select aria-label={tr("Repay asset")} value={asset} onChange={e=>setAsset(e.target.value)}>{lendingReservesFor(network).map(reserve=><option key={reserve.asset} value={reserve.symbol}>{reserve.symbol}</option>)}</select></label>
     <label>{tr("Repay amount (")}{tr(asset)})<TokenAmountInput aria-label={tr(`Repay amount (${asset})`)} value={amount} maxLength={80} onValueChange={value=>{setError('');if(reviewFormId&&nodeId)editCanvasAmount(nodeId,value);else setAmount(value);}}/></label>
     <label>{tr("Debt mode")}<select aria-label={tr("Debt mode")} value="Variable (2)" onChange={()=>undefined}><option>{tr("Variable (2)")}</option></select></label>
     {!wallet.account&&!existing&&<button type="button" onClick={()=>void wallet.connect()}>{tr("Connect owner wallet")}</button>}
@@ -41,7 +44,7 @@ const messages:Record<string,string>={REPAY_PARTIAL_DEBT_REQUIRED:'Current varia
 export function RepayPanel({view}:{view:'simulate'|'execute'}){
   const { t: tr } = useLocale();
   const {state}=useWorkflow(),run=useSupply(),wallet=useBuild009Wallet(),record=run.record?.review.repay?run.record:null,review=record?.review,risk=review?.state.borrow;
-  const node=state.workflow.nodes.find(n=>n.actionType==='repay'),fields=node?repayDetails(node as Parameters<typeof repayDetails>[0]):null,shown=lendingView(review?.chain??node?.chainId);
+  const node=state.workflow.nodes.find(n=>n.actionType==='repay'),fields=node?repayDetails(node as Parameters<typeof repayDetails>[0]):null,shown=lendingView(review?.chain??node?.chainId,review?.asset??(node?lendingNodeAsset(node as Parameters<typeof lendingNodeAsset>[0]):null));
   const pending=record?.notSubmitted?undefined:record?.attempts.find(a=>!a.reconciled),approval=record?.attempts.find(a=>a.step==='APPROVAL'&&a.reconciled);
   const info=run.error??record?.error,observation=record?.observations.at(-1) as RepayObservation|undefined;
   const reobserveApproval=record?.verdict==='DIVERGENT'&&record.error==='SUPPLY_RPC_INVALID'&&record.attempts.length===1&&pending?.step==='APPROVAL'&&pending.state==='RECONCILIATION_REQUIRED'&&observation?.transaction?.blockHash===null;

@@ -17,6 +17,7 @@ import { copilotCopy, type CopilotCopy, type CopilotLanguage, type NetworkSubjec
 import { AAVE_V3_AMOUNT_POLICY, assetDisplayName, solanaTransferAsset, type CanonicalAsset } from '@defi-workflow-engine/action-registry';
 import { solanaTransferProfileFor } from './solana-transfer-authoring';
 import { copilotNetworksFor, lendingOffers, routeLabels, type StrategyAction } from './authoring-capabilities';
+import { lendingProfileFor, lendingReservesFor } from './supply-authoring';
 import type { PendingAgentCapability } from './agent-rollout';
 import { solanaDisplayCatalogLoaded } from './solana-asset-catalog';
 import { destinationAmounts, explicitInputAsset, explicitOutputAsset, groundExplicitAssets, withoutDestinationAmounts, type DestinationAmount } from './copilot-asset-intent';
@@ -694,8 +695,15 @@ function planTransfer(a: CopilotTransferAction, g: Grounding): Plan {
 const LENDING_SUBJECT = { SUPPLY: 'supply', BORROW: 'borrow', REPAY: 'repay', WITHDRAW: 'withdraw' } as const;
 /** BUILD-BASE-001: the Aave networks of an asset, from the shared capability truth (V1: no catalog, hence no real-funds, network). */
 function lendingNetworks(asset: CopilotAsset | null, g: Grounding): Network[] {
-  return lendingOffers().filter(offer => (asset === null || offer.asset === asset) && offer.network.copilot !== null && actionNetworks('supply', g).includes(offer.network.copilot))
-    .map(offer => offer.network.copilot as Network);
+  // A market lists many reserves (BUILD AAVE-V3-EXPANSION-001): each network once, in offer order.
+  return [...new Set(lendingOffers().filter(offer => (asset === null || offer.asset === asset) && offer.network.copilot !== null && actionNetworks('supply', g).includes(offer.network.copilot))
+    .map(offer => offer.network.copilot as Network))];
+}
+/** The Aave reserve of `network`'s market the user named by its label (grounded in their words or carried), or null. Identity, not symbol. */
+function aaveReserveNamed(value: CopilotAsset | null, network: Network, g: Grounding): string | null {
+  if (value === null || value === 'OTHER') return null;
+  if (!g.carried.has('asset') && !symbolNamed(g.text, value) && !(legacyAsset(value) && assetNamed(g.text, value))) return null;
+  try { return lendingProfileFor(COPILOT_NETWORK_LABEL[network], value).symbol; } catch { return null; }
 }
 function planLending(a: CopilotLendingAction, g: Grounding, wallet: string | null): Plan {
   const m = copyOf(g), notes: string[] = [], subject = LENDING_SUBJECT[a.type];
@@ -705,16 +713,24 @@ function planLending(a: CopilotLendingAction, g: Grounding, wallet: string | nul
   const missing: CopilotMissingField[] = [...(a.amount === null ? ['amount' as const] : []), ...(a.asset === null ? ['asset' as const] : [])];
   // BUILD-ETHEREUM-001: each Aave asset has its own deployments (USDC on Base Sepolia — and, BUILD-BASE-001, Base mainnet — WBTC on Ethereum
   // Sepolia), so the asset bounds the network.
-  if (missing.length) ask(missing, stillNeeds(m, missing, subject), !missing.includes('asset') ? [] : a.network === 'ETHEREUM_SEPOLIA' ? ['WBTC']
-    : a.network === 'BASE_SEPOLIA' || a.network === 'BASE' ? ['USDC'] : ['USDC', 'WBTC']);
+  // BUILD AAVE-V3-EXPANSION-001: the asset options are the named market's first reserves (its original verified asset first).
+  const reserveOptions = a.network === null ? ['USDC', 'WETH', 'WBTC'] : lendingReservesFor(COPILOT_NETWORK_LABEL[a.network]).slice(0, 4).map(reserve => reserve.symbol);
+  if (missing.length) ask(missing, stillNeeds(m, missing, subject), !missing.includes('asset') ? [] : reserveOptions.length ? reserveOptions : ['USDC', 'WBTC']);
   const namedCatalog = g.policy.catalog && namedNetworks(g).some(isCatalogNetwork);
-  const supported = lendingNetworks(namedCatalog ? null : a.asset === 'WBTC' ? 'WBTC' : 'USDC', g);
+  // Without a named catalog network, the networks are those whose market lists a reserve with exactly this label (USDC when none does).
+  const wanted = a.asset && a.asset !== 'OTHER' ? lendingOffers().find(offer => offer.asset.toLowerCase() === a.asset!.toLowerCase())?.asset ?? null : null;
+  // When no network this conversation may use lists that reserve, the original default networks answer (and refuse the asset there).
+  const preferred = wanted ? lendingNetworks(wanted, g) : [];
+  const supported = lendingNetworks(namedCatalog ? null : preferred.length ? wanted : a.asset === 'WBTC' ? 'WBTC' : 'USDC', g);
   const network = resolveNetwork(a.network, supported, g, 'aave', notes);
   const catalog = g.policy.catalog && isCatalogNetwork(network);
   // A known unsupported reserve can be refused from protocol profiles even before the token catalog is available.
   const legacy = a.asset === null ? null : legacyAsset(a.asset);
   if (catalog && legacy && !lendingOffers(subject).some(offer => offer.network.copilot === network && offer.asset === legacy)) refuse(m.aaveOnlyCatalog);
-  const asset = catalog ? catalogToken(a.asset, network, g, subject, 'asset', 'ERC20', notes).asset.symbol : needAsset(a.asset, g, subject, 'asset');
+  // The market's own reserve, named by the user (its label, grounded in their words) and identity-checked against the catalog when loaded;
+  // otherwise the official catalog resolves the token, which must then be one of the market's reserves.
+  const asset = (catalog ? aaveReserveNamed(a.asset, network, g) : null)
+    ?? (catalog ? catalogToken(a.asset, network, g, subject, 'asset', 'ERC20', notes).asset.symbol : needAsset(a.asset, g, subject, 'asset'));
   if (!lendingOffers(subject).some(offer => offer.network.copilot === network && offer.asset === asset))
     refuse(g.policy.catalog ? m.aaveOnlyCatalog : m.aaveOnly);
   const amount = amountOf(a.amount, g, subject), on = COPILOT_NETWORK_LABEL[network];

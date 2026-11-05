@@ -124,6 +124,9 @@ export function normalizeStrategy(spec: StrategySpec): { readonly strategy: Stra
     const identity = networkIdentity(network);
     return identity?.catalog ? authoringAssetSymbol(identity.chain, reference) : reference;
   };
+  const reserveSymbol = (network: NetworkId, reference: string) => {
+    try { return lendingProfileFor(NETWORKS[network].label, reference).symbol; } catch { return symbol(network, reference); }
+  };
   const slippage = 'slippageBps' in spec && spec.slippageBps !== undefined ? spec.slippageBps : defaultSlippageBps(spec);
   if (!('slippageBps' in spec && spec.slippageBps !== undefined) && slippage !== null) notes.push(`Default slippage ${formatSlippage(slippage)} applied.`);
   switch (spec.action) {
@@ -152,9 +155,11 @@ export function normalizeStrategy(spec: StrategySpec): { readonly strategy: Stra
         routing: spec.routing ?? 'auto', slippageBps: slippage!, ...spec.recipient === undefined ? {} : { recipient: lower(spec.recipient) } } };
     }
     case 'swap': return { notes, strategy: { version: 1, action: 'swap', network: spec.network, inputAsset: symbol(spec.network, spec.inputAsset), outputAsset: symbol(spec.network, spec.outputAsset), amount: spec.amount, slippageBps: slippage! } };
+    // BUILD AAVE-V3-EXPANSION-001: a lending asset is canonical as its Aave market's reserve label (exact identity, independent of whether the
+    // network's token catalog is loaded); anything that is not a reserve keeps the catalog resolution and its refusals.
     case 'supply': case 'borrow': case 'repay':
-      return { notes, strategy: { version: 1, action: spec.action, network: spec.network, asset: symbol(spec.network, spec.asset), amount: spec.amount, beneficiary: lower(spec.beneficiary) } };
-    case 'withdraw': return { notes, strategy: { version: 1, action: 'withdraw', network: spec.network, asset: symbol(spec.network, spec.asset), amount: spec.amount } };
+      return { notes, strategy: { version: 1, action: spec.action, network: spec.network, asset: reserveSymbol(spec.network, spec.asset), amount: spec.amount, beneficiary: lower(spec.beneficiary) } };
+    case 'withdraw': return { notes, strategy: { version: 1, action: 'withdraw', network: spec.network, asset: reserveSymbol(spec.network, spec.asset), amount: spec.amount } };
     case 'add_liquidity': {
       // BUILD-RH-002: a catalog-network position (Robinhood Chain, BUILD-BASE-001 Base) names its fee tier (default 0.3%); other networks have one pool each.
       const catalog = catalogNetworkName(spec.network) !== null;

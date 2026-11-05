@@ -89,10 +89,12 @@ describe('Arbitrum capability certification matrix — Canvas / exact Chat / nat
       expect(assets.find(asset => asset.symbol === symbol)).toMatchObject({ address: catalog.address, decimals: catalog.decimals });
     }
     expect(assets.find(asset => asset.symbol === 'ETH')).toMatchObject({ address: null, decimals: 18, actions: ['transfer'] });
-    expect(assets.find(asset => asset.symbol === 'ARB')?.actions).toEqual(['add_liquidity', 'swap', 'transfer']);
+    // BUILD AAVE-V3-EXPANSION-001: ARB is also a reserve of the Arbitrum Aave V3 Core market.
+    expect(assets.find(asset => asset.symbol === 'ARB')?.actions).toEqual(['add_liquidity', 'borrow', 'repay', 'supply', 'swap', 'transfer', 'withdraw']);
     resetNetworkCatalogs();
     const unloaded = await mcp().callTool('get_supported_assets', { network: 'arbitrum-one' });
-    expect((unloaded.output.assets as { symbol: string }[]).some(asset => asset.symbol === 'ARB')).toBe(false);
+    // Without the catalog ARB is discovered only as the registered Aave reserve: lending actions, no catalog swap or transfer.
+    expect((unloaded.output.assets as { symbol: string; actions: string[] }[]).find(asset => asset.symbol === 'ARB')?.actions).toEqual(['borrow', 'repay', 'supply', 'withdraw']);
   });
   it('Canvas networks/assets/marks and support text follow the shared profiles and registries', () => {
     for (const action of ['swap', 'transfer', 'pool', 'supply', 'borrow', 'repay', 'withdraw'] as const) {
@@ -101,7 +103,9 @@ describe('Arbitrum capability certification matrix — Canvas / exact Chat / nat
       expect(cryptoProfiles(action).find(p => p.chain === chain)).toMatchObject({ network: 'Arbitrum One' });
       expect(capabilityNetworks(action === 'pool' ? 'add_liquidity' : action).some(n => n.chain === chain)).toBe(true);
     }
-    expect(validCryptoSelection({ action: 'borrow', network: 'Arbitrum One', from: 'WETH' })).toBe(false);
+    // BUILD AAVE-V3-EXPANSION-001: every Arbitrum reserve is selectable; a token that is not a reserve stays unselectable.
+    expect(validCryptoSelection({ action: 'borrow', network: 'Arbitrum One', from: 'WETH' })).toBe(true);
+    expect(validCryptoSelection({ action: 'borrow', network: 'Arbitrum One', from: 'cbBTC' })).toBe(false);
     expect(routerChainChoices('mainnet', 'Base').destinations).toContain('Arbitrum');
     expect(routerChainChoices('mainnet', 'Arbitrum').destinations).toContain('Base');
     expect(routerTokensOf({ source: 'Base', destination: 'Arbitrum' })).toEqual({ token: 'USDC', destinationToken: 'USDC' });
@@ -234,12 +238,23 @@ describe('Honest unsupported scope and stable historical hashes', () => {
     expect(composed.ok && composed.workflow.nodes[0]!.adapterConstraints.adapters[0]!.id).toBe('flofi.router.universal');
     expect((await mcp().callTool('compose_strategy', { strategy })).isError).toBe(false);
   });
-  it.each(['WETH', 'ARB', 'USDC.e', 'WBTC'])('Aave reserve %s is refused, although its asset exists in the catalog', async asset => {
+  // BUILD AAVE-V3-EXPANSION-001: these Arbitrum reserves are now part of the market catalog, each bound to its exact underlying identity.
+  it.each([['WETH', '0x82af49447d8a07e3bd95bd0d56f35241523fbab1', 18], ['ARB', '0x912ce59144191c1204e64559fe8253a0e49e6548', 18],
+    ['USDC.e', '0xff970a61a04b1ca14834a43f5de4533ebddb5cc8', 6], ['WBTC', '0x2f2a2543b76a4166549f7aab2e75bef0aefc5b0f', 8]] as const)('Aave reserve %s composes as its exact Arbitrum reserve', async (asset, address, decimals) => {
     const strategy = { action: 'supply', network: 'arbitrum-one', asset, amount: '1', beneficiary: CERTIFICATION_OWNER };
-    expect(composeStrategy(strategy).ok).toBe(false);
+    const composed = composeStrategy(strategy);
+    expect(composed.ok).toBe(true);
+    const node = composed.ok ? composed.workflow.nodes.find(n => n.actionType === 'supply')! : null;
+    expect(node?.chainId).toBe(chain);
+    expect((node?.userConstraints[0] as unknown as { quantity: { asset: unknown } }).quantity.asset).toEqual({ chainId: chain, address, decimals });
     const { reply } = natural('Supply 1 ' + asset + ' to Aave on Arbitrum', act.lending('SUPPLY', { network: 'ARBITRUM', asset, amount: '1' }));
-    expect(reply.kind).toBe('UNSUPPORTED'); expect(reply.text).toContain('USDC'); expect(reply.command).toBeUndefined();
-    expect(reply.text).not.toMatch(/ASSET_|SUPPLY_|COPILOT_/); expect((await mcp().callTool('compose_strategy', { strategy })).isError).toBe(true);
+    expect(reply).toMatchObject({ kind: 'PROPOSAL', sentence: `supply 1 ${asset} to Aave on Arbitrum One` });
+    expect(reply.text).not.toMatch(/ASSET_|SUPPLY_|COPILOT_/); expect((await mcp().callTool('compose_strategy', { strategy })).isError).toBe(false);
+  });
+  it('an Arbitrum token that is not an Aave reserve stays refused', async () => {
+    const strategy = { action: 'supply', network: 'arbitrum-one', asset: 'cbBTC', amount: '1', beneficiary: CERTIFICATION_OWNER };
+    expect(composeStrategy(strategy).ok).toBe(false);
+    expect((await mcp().callTool('compose_strategy', { strategy })).isError).toBe(true);
   });
   it.each(['REPAY', 'WITHDRAW'])('%s rejects full/max intent, even when the model invents a grounded partial amount', async type => {
     expect(AAVE_V3_AMOUNT_POLICY[type === 'REPAY' ? 'repay' : 'withdraw']).toBe('PARTIAL_ONLY');

@@ -118,7 +118,16 @@ describe('goal planner: registry-driven steps, reasons and honest refusals', () 
       .toEqual({ kind: 'NEEDS', field: 'cap', options: [], step: 1, asset: 'USDC' });
     expect(planGoal(goal({ network: 'base', asset: 'ETH', amount: '0.01' }, { network: 'base', use: 'SUPPLY', asset: 'USDC' }, { cap: '20' }), scope))
       .toMatchObject({ kind: 'PLAN', steps: [{ action: 'swap' }, { action: 'supply', amount: '20', fundedBy: 0 }] });
-    expect(planGoal(goal({ network: 'base', asset: 'WETH', amount: '1' }, { network: 'base', use: 'SUPPLY', asset: 'WETH' }), scope)).toMatchObject({ kind: 'UNSUPPORTED', code: 'LENDING_ASSET_NOT_SUPPORTED' });
+    // BUILD AAVE-V3-EXPANSION-001: WETH is a reserve of the Base market — supplied directly, or after a USDC → WETH swap funded by its actual output.
+    expect(planGoal(goal({ network: 'base', asset: 'WETH', amount: '1' }, { network: 'base', use: 'SUPPLY', asset: 'WETH' }), scope))
+      .toMatchObject({ kind: 'PLAN', steps: [{ action: 'supply', network: 'base', inputAsset: 'WETH', amount: '1', fundedBy: null }] });
+    expect(planGoal(goal({ network: 'base', asset: 'USDC', amount: '100' }, { network: 'base', use: 'SUPPLY', asset: 'WETH' }), scope))
+      .toEqual({ kind: 'NEEDS', field: 'cap', options: [], step: 1, asset: 'WETH' });
+    expect(planGoal(goal({ network: 'base', asset: 'USDC', amount: '100' }, { network: 'base', use: 'SUPPLY', asset: 'WETH' }, { cap: '0.05' }), scope)).toMatchObject({ kind: 'PLAN',
+      steps: [{ action: 'swap', inputAsset: 'USDC', outputAsset: 'WETH', amount: '100', fundedBy: null }, { action: 'supply', inputAsset: 'WETH', amount: '0.05', fundedBy: 0 }],
+      reasons: expect.arrayContaining(['SAME_NETWORK_SWAP', 'FUNDED_BY_PREVIOUS_STEP', 'EACH_STEP_REVIEWED']) });
+    // A token that is not a reserve of any market stays refused.
+    expect(planGoal(goal({ network: 'base', asset: 'USDC', amount: '1' }, { network: 'base', use: 'SUPPLY', asset: 'DEGEN' }), scope)).toMatchObject({ kind: 'UNSUPPORTED', code: 'LENDING_ASSET_NOT_SUPPORTED' });
     expect(planGoal(goal({ network: 'base', asset: 'USDC', amount: '1' }, { network: 'solana', use: 'SUPPLY' }), scope)).toMatchObject({ kind: 'UNSUPPORTED', code: 'LENDING_NOT_ON_NETWORK' });
   });
   it('liquidity retains the goal, asks for position parameters, then composes the conversion and funded position', () => {

@@ -28,7 +28,7 @@ export async function reconcileBorrowAttempt(review:SupplyReview,attempt:SupplyC
   const base:BorrowObservation={verdict:'INCONCLUSIVE',reason:'TRANSACTION_NOT_OBSERVED',transaction:null,receipt:null,prePosition:null,postPosition:null,delta:null,scaledDelta:null,cost:null};
   if(!attempt.transactionHash)return base;
   try{
-    const p=lendingProfile(review.chain,'BORROW_WRONG_CHAIN');
+    const p=lendingProfile(review.chain,'BORROW_WRONG_CHAIN',review.asset);
     if(rpcUint(await rpc('eth_chainId',[]))!==BigInt(p.chainId))throw new Error('BORROW_WRONG_CHAIN');
     const [txValue,receiptValue]=await Promise.all([rpc('eth_getTransactionByHash',[attempt.transactionHash]),rpc('eth_getTransactionReceipt',[attempt.transactionHash])]);
     if(!txValue||!receiptValue)return base;
@@ -66,7 +66,7 @@ export async function reconcileBorrowAttempt(review:SupplyReview,attempt:SupplyC
 export function buildBorrowEvidence(input:{id:string;review:SupplyReview;journal:ExecutionJournal;provenance:'PUBLIC_TESTNET'|'PUBLIC_MAINNET'|'MOCKED';ownerInitiated:boolean;observations:SupplyObservation[]}):{bundle:EvidenceBundle;bundleHash:string;publicExecution:unknown;artifacts:unknown} {
   const o=input.observations.at(-1) as BorrowObservation|undefined,r=input.review;
   if(!r.borrow||!o||o.verdict!=='RECONCILED'||!o.prePosition?.borrow||!o.postPosition?.borrow||!o.transaction||!o.receipt||!o.borrowEvent||!input.ownerInitiated)throw new Error('BORROW_EVIDENCE_NOT_RECONCILED');
-  const p=lendingProfile(r.chain,'BORROW_EVIDENCE_NOT_RECONCILED'),effects=verifyBorrowEffects(r.amount,o.prePosition,o.postPosition,p);
+  const p=lendingProfile(r.chain,'BORROW_EVIDENCE_NOT_RECONCILED',r.asset),effects=verifyBorrowEffects(r.amount,o.prePosition,o.postPosition,p);
   const publicExecution={network:p.network,chainId:p.chainId,owner:r.account,pool:p.pool,borrowedAsset:p.asset,amount:r.amount,rateMode:2,beneficiary:r.beneficiary,variableDebtToken:p.variableDebtToken,
     borrowTransactionHash:o.receipt.transactionHash,transactionEnvelope:o.walletEnvelope??{kind:'DIRECT',sender:o.transaction.from,to:o.transaction.to,nonce:rpcUint(o.transaction.nonce).toString()},block:o.postPosition.block,gasUsed:rpcUint(o.receipt.gasUsed).toString(),transactionCost:o.cost,
     preWalletBalance:o.prePosition.balance,postWalletBalance:o.postPosition.balance,walletDelta:effects.walletDelta,preDebt:o.prePosition.borrow.debt,postDebt:o.postPosition.borrow.debt,debtDelta:effects.debtDelta,principalDebtDelta:effects.delta,

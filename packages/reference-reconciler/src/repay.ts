@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { secp256k1 } from '@noble/curves/secp256k1.js';
 import { keccak_256 } from '@noble/hashes/sha3.js';
-import { lendingProfile, reserveBits, readBorrowState, compileRepayCalls, borrowHealthFactor, supplyHex, supplyWord,
+import { lendingProfile, reserveBits, readBorrowState, assertAccountTotals, positionShape, compileRepayCalls, borrowHealthFactor, supplyHex, supplyWord,
   supplyTopic, supplyHash, supplyArtifactHash, rpcUint, rpcRecord, rpcHash, rpcHex, SUPPLY_METAMASK,
   rlpEncode, rlpInteger, fromHex, toHex, type AaveLendingProfile, type RlpValue, type SupplyReview, type SupplyState, type SupplyRpc } from '@defi-workflow-engine/reference-compiler';
 import { hashJournalBytes, type EvidenceBundle, type ExecutionJournal } from '@defi-workflow-engine/workflow-contracts';
@@ -39,7 +39,11 @@ export function verifyRepayEffects(amount:string,pre:SupplyState,post:SupplyStat
   if(abs(BigInt(b.price)-BigInt(a.price))>BigInt(a.price)/1000n||abs(BigInt(b.collateralBase)-BigInt(a.collateralBase))>BigInt(a.collateralBase)/1000n+2n)throw new Error('REPAY_COLLATERAL_MISMATCH');
   const allowance=BigInt(pre.allowance),expectedAllowance=allowance===(1n<<256n)-1n?allowance:allowance-n;
   if(allowance<n||BigInt(post.allowance)!==expectedAllowance)throw new Error('REPAY_ALLOWANCE_MISMATCH');
-  if(abs(BigInt(b.debtBase)-BigInt(b.debt)*BigInt(b.price)/scale)>2n||BigInt(b.debtBase)>=BigInt(a.debtBase))throw new Error('REPAY_ACCOUNT_DEBT_MISMATCH');
+  // A multi-reserve account (BUILD AAVE-V3-EXPANSION-001) proves its aggregates from every verified position at the same block.
+  if(positionShape(a)!==positionShape(b))throw new Error('REPAY_ACCOUNT_DEBT_MISMATCH');
+  if(b.positions){try{assertAccountTotals(post.position,b,profile);}catch{throw new Error('REPAY_ACCOUNT_DEBT_MISMATCH');}}
+  else if(abs(BigInt(b.debtBase)-BigInt(b.debt)*BigInt(b.price)/scale)>2n)throw new Error('REPAY_ACCOUNT_DEBT_MISMATCH');
+  if(BigInt(b.debtBase)>=BigInt(a.debtBase))throw new Error('REPAY_ACCOUNT_DEBT_MISMATCH');
   const health=BigInt(borrowHealthFactor(b.collateralBase,b.liquidationThresholdBps,b.debtBase));
   if(BigInt(b.healthFactor)<=BigInt(a.healthFactor)||abs(BigInt(b.healthFactor)-health)>health/1000000n+1n)throw new Error('REPAY_HEALTH_FACTOR_MISMATCH');
   return {walletDelta:walletDelta.toString(),debtDelta:debtDelta.toString(),normalizedRepayment:normalized.toString(),roundingBound:bound.toString(),delta:normalized.toString(),scaledDelta:burn.toString()};
@@ -53,7 +57,7 @@ export async function reconcileRepayAttempt(review:SupplyReview,attempt:SupplyCh
   const base:RepayObservation={verdict:'INCONCLUSIVE',reason:'TRANSACTION_NOT_OBSERVED',transaction:null,receipt:null,prePosition:null,postPosition:null,delta:null,scaledDelta:null,cost:null};
   if(!attempt.transactionHash)return base;
   try{
-    const p=lendingProfile(review.chain,'REPAY_WRONG_CHAIN');
+    const p=lendingProfile(review.chain,'REPAY_WRONG_CHAIN',review.asset);
     if(rpcUint(await rpc('eth_chainId',[]))!==BigInt(p.chainId))throw new Error('REPAY_WRONG_CHAIN');
     const [txValue,receiptValue]=await Promise.all([rpc('eth_getTransactionByHash',[attempt.transactionHash]),rpc('eth_getTransactionReceipt',[attempt.transactionHash])]);
     if(!txValue||!receiptValue)return base;
@@ -104,7 +108,7 @@ export function buildRepayEvidence(input:{id:string;review:SupplyReview;journal:
   const o=input.observations.at(-1) as RepayObservation|undefined,r=input.review;
   const approval=(input.approval??input.observations.find(item=>item.reason==='EXACT_REPAY_APPROVAL_VERIFIED')) as RepayObservation|undefined;
   if(!r.repay||!o||o.verdict!=='RECONCILED'||!o.prePosition?.borrow||!o.postPosition?.borrow||!o.transaction||!o.receipt||!o.repayEvent||!(o.ownerAuthorization||o.walletEnvelope)||!input.ownerInitiated||r.approvalRequired&&(!approval?.receipt||approval.verdict!=='RECONCILED'||!(approval.ownerAuthorization||approval.walletEnvelope)))throw new Error('REPAY_EVIDENCE_NOT_RECONCILED');
-  const p=lendingProfile(r.chain,'REPAY_EVIDENCE_NOT_RECONCILED'),effects=verifyRepayEffects(r.amount,o.prePosition,o.postPosition,p);
+  const p=lendingProfile(r.chain,'REPAY_EVIDENCE_NOT_RECONCILED',r.asset),effects=verifyRepayEffects(r.amount,o.prePosition,o.postPosition,p);
   const publicExecution={network:p.network,chainId:p.chainId,owner:r.account,onBehalfOf:r.beneficiary,pool:p.pool,asset:p.asset,amount:r.amount,rateMode:2,variableDebtToken:p.variableDebtToken,approvalTransactionHash:approval?.receipt?.transactionHash??null,approvalOwnerAuthorization:approval?.ownerAuthorization??approval?.walletEnvelope??null,repayTransactionHash:o.receipt.transactionHash,ownerAuthorization:o.ownerAuthorization??o.walletEnvelope,block:o.postPosition.block,gasUsed:rpcUint(o.receipt.gasUsed).toString(),transactionCost:o.cost,totalNetworkCost:(BigInt(o.cost!)+BigInt(approval?.cost??'0')).toString(),preWalletBalance:o.prePosition.balance,postWalletBalance:o.postPosition.balance,preDebt:o.prePosition.borrow.debt,postDebt:o.postPosition.borrow.debt,...effects,preAllowance:o.prePosition.allowance,postAllowance:o.postPosition.allowance,preHealthFactor:o.prePosition.borrow.healthFactor,postHealthFactor:o.postPosition.borrow.healthFactor,prePosition:o.prePosition,postPosition:o.postPosition,repayEvent:o.repayEvent,reconciliationVerdict:o.verdict,explorer:p.explorer,officialSource:p.officialSource,provenance:input.provenance,ownerInitiated:input.ownerInitiated,observations:input.observations,...approval?{approvalObservation:approval}:{}};
   const head=hashJournalBytes(new TextEncoder().encode(JSON.stringify(input.journal))).at(-1);if(!head)throw new Error('REPAY_JOURNAL_EMPTY');
   const asset={chainId:p.chain,address:p.asset,decimals:p.decimals};

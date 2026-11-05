@@ -9,7 +9,7 @@ import { createSwapNode, swapDetails } from './swap-authoring';
 import { createSolanaSwapNode, solanaSwapDetails, type SolanaSwapInput } from './jupiter-authoring';
 import { createUniswapLiquidityNode, uniswapLiquidityDetails } from './uniswap-liquidity-authoring';
 import { createSolanaLiquidityNode, solanaLiquidityDetails } from './solana-liquidity-authoring';
-import { createAuthoredSupply, createAuthoredBorrow, createAuthoredRepay, createAuthoredWithdraw, supplyDetails, borrowDetails, repayDetails, withdrawDetails, lendingProfileFor } from './supply-authoring';
+import { createAuthoredSupply, createAuthoredBorrow, createAuthoredRepay, createAuthoredWithdraw, supplyDetails, borrowDetails, repayDetails, withdrawDetails, lendingProfileFor, lendingProfileOfReserve, lendingNodeAsset } from './supply-authoring';
 import { BASE_CHAIN, BASE_NETWORK, ROBINHOOD_CHAIN, ROBINHOOD_NETWORK, authoringAssetSymbol, featuredNetworkSymbols, featuredStockSymbols, resolveNetworkAsset } from './asset-catalogs';
 import { CATALOG_SWAP_NETWORKS, catalogSwapDetails, createCatalogSwapAuthoringNode, type CatalogSwapNetwork } from './catalog-swap-authoring';
 import { networkIdentity } from './network-registry';
@@ -76,7 +76,12 @@ const transfers: readonly CryptoPickerProfile[] = Object.entries(TRANSFER_NETWOR
   : { network, chain: profile.chain, provider: 'Native transfer', tokens: ['ETH'] })
   // BUILD-SOLANA-TRANSFER-UX-001: Solana mainnet-beta (SOL, USDC, USDT, real funds) and Devnet (SOL, devUSDC) on the same Send card.
   .concat(SOLANA_TRANSFER_PROFILES.map(profile => ({ network: profile.network, chain: profile.chain, provider: 'Send', tokens: profile.assets.map(asset => asset.symbol) })));
-const lending: readonly CryptoPickerProfile[] = AAVE_V3_LENDING_PROFILES.map(profile => ({ network: profile.network, chain: profile.chain, provider: 'Aave V3', tokens: [profile.symbol] }));
+// BUILD AAVE-V3-EXPANSION-001: one entry per Aave market, listing every registered reserve (its original verified asset first). Live reserve
+// state (frozen, paused, caps, liquidity, the owner's balance) is shown by the Canvas from `/lending/reserves`; Simulate re-reads it.
+const lending: readonly CryptoPickerProfile[] = [...new Set(AAVE_V3_LENDING_PROFILES.map(profile => profile.network))].map(network => {
+  const reserves = AAVE_V3_LENDING_PROFILES.filter(profile => profile.network === network);
+  return { network, chain: reserves[0]!.chain, provider: 'Aave V3', tokens: reserves.map(profile => profile.symbol) };
+});
 export function cryptoProfiles(action: CryptoAction): readonly CryptoPickerProfile[] { return action === 'swap' ? swaps : action === 'pool' ? pools : action === 'transfer' ? transfers : lending; }
 export function cryptoNetworks(action: CryptoAction, environment: WalletEnvironment) {
   return cryptoProfiles(action).filter(profile => environment !== 'unknown' && classifyWalletEnvironment(profile.chain) === environment);
@@ -182,7 +187,11 @@ export function cryptoSelectionOf(node: Node): CryptoSelection | null {
   if (catalogPool) return catalogPool.tokenA === 'Token' || catalogPool.tokenB === 'Token' ? null : { action: 'pool', network, from: catalogPool.tokenA, to: catalogPool.tokenB };
   // The BUILD-006 fork-only Base position (`asset.liquidity.uniswap-v3`) is a legacy declaration: the network picker never edits or converts it.
   if (uniswapLiquidityDetails(node) || solanaLiquidityDetails(node)) return selectCryptoNetwork('pool', network);
-  if (['supply', 'borrow', 'repay', 'withdraw', 'transfer'].includes(node.actionType) && AAVE_V3_LENDING_PROFILES.some(profile => profile.chain === node.chainId)) return selectCryptoNetwork(node.actionType as CryptoAction, network);
+  if (['supply', 'borrow', 'repay', 'withdraw', 'transfer'].includes(node.actionType) && AAVE_V3_LENDING_PROFILES.some(profile => profile.chain === node.chainId)) {
+    // The node's own reserve (chain + address), never the market's first token.
+    const selection = selectCryptoNetwork(node.actionType as CryptoAction, network), reserve = lendingProfileOfReserve(node.chainId, lendingNodeAsset(node as SemanticWorkflow['nodes'][number]));
+    return reserve ? { ...selection, from: reserve.symbol } : selection;
+  }
   return null;
 }
 export function canSelectCryptoAssets(node: Node, workflow: Workflow) {

@@ -3,7 +3,7 @@
 import { useLocale } from '../i18n/locale';
 
 import { useState, type FormEvent } from 'react';
-import { createAuthoredSupply, supplyDetails, lendingAssetFor, lendingCopy, lendingView, LENDING_NETWORKS, type LendingNetwork, type SupplyInput } from '../domain/supply-authoring';
+import { createAuthoredSupply, supplyDetails, lendingAssetFor, lendingCopy, lendingView, LENDING_NETWORKS, lendingReservesFor, lendingNodeAsset, type LendingNetwork, type SupplyInput } from '../domain/supply-authoring';
 import { useWorkflow } from '../state/workflow-store';
 import { useBuild009Wallet } from '../state/build009-wallet-store';
 import { useSupply } from '../state/supply-store';
@@ -17,7 +17,10 @@ export function SupplyAuthoringForm({nodeId,onDone,direct=false,reviewFormId}:{n
   const [localAmount,setAmount]=useState(existing?.amount??'1'),[beneficiary,setBeneficiary]=useState(existing?.beneficiary??wallet.account??''),[error,setError]=useState('');
   const amount = reviewFormId && nodeId ? amountInputs[nodeId] ?? existing?.amount ?? localAmount : localAmount;
   // The network selects its one verified Aave asset; the asset is never chosen by symbol.
-  const [network,setNetwork]=useState<LendingNetwork>(existing?.network??'Base Sepolia'),asset=lendingAssetFor(network);
+  const [network,setNetworkState]=useState<LendingNetwork>(existing?.network??'Base Sepolia'),[chosenAsset,setAsset]=useState<string>(existing?.asset??lendingAssetFor(existing?.network??'Base Sepolia'));
+  // BUILD AAVE-V3-EXPANSION-001: the network selects its Aave market; the asset is one of that market's registered reserves (never another network's).
+  const asset=lendingReservesFor(network).some(reserve=>reserve.symbol===chosenAsset)?chosenAsset:lendingAssetFor(network);
+  const setNetwork=(next:LendingNetwork)=>{setNetworkState(next);setAsset(lendingAssetFor(next));};
   function submit(event:FormEvent){event.preventDefault();try{
     const input:SupplyInput={network,asset,amount,beneficiary:beneficiary||wallet.account||''};createAuthoredSupply(nodeId??'node-preview',input);
     const command=nodeId?{type:'SET_SUPPLY' as const,nodeId,input,source:'CANVAS' as const,baseRevision:state.workflow.revision}:{type:'ADD_SUPPLY' as const,input,source:'CANVAS' as const,baseRevision:state.workflow.revision};
@@ -26,7 +29,7 @@ export function SupplyAuthoringForm({nodeId,onDone,direct=false,reviewFormId}:{n
   return <form id={reviewFormId} className="inspector-fields" aria-label={tr(nodeId?'Edit Supply':'Create Supply')} onSubmit={submit}>
     <strong>{tr("Supply to Aave V3")}</strong>
     <label>{tr("Supply network")}<select aria-label={tr("Supply network")} value={network} onChange={e=>setNetwork(e.target.value as LendingNetwork)}>{LENDING_NETWORKS.map(n=><option key={n}>{tr(n)}</option>)}</select></label>
-    <label>{tr("Supply asset")}<select aria-label={tr("Supply asset")} value={asset} onChange={()=>undefined}><option>{tr(asset)}</option></select></label>
+    <label>{tr("Supply asset")}<select aria-label={tr("Supply asset")} value={asset} onChange={e=>setAsset(e.target.value)}>{lendingReservesFor(network).map(reserve=><option key={reserve.asset} value={reserve.symbol}>{reserve.symbol}</option>)}</select></label>
     <label>{tr("Supply amount (")}{tr(asset)})<TokenAmountInput aria-label={tr(`Supply amount (${asset})`)} value={amount} maxLength={80} onValueChange={value=>{setError('');if(reviewFormId&&nodeId)editCanvasAmount(nodeId,value);else setAmount(value);}}/></label>
     <label>{tr("Supply beneficiary")}<input aria-label={tr("Supply beneficiary")} autoComplete="off" value={beneficiary||wallet.account||''} maxLength={42} onChange={e=>setBeneficiary(e.target.value)}/></label>
     {error&&<p role="alert">{tr(error)}</p>}{!reviewFormId&&<button type="submit">{tr(nodeId?'Review Supply change':direct?'Add Supply':'Review Supply proposal')}</button>}
@@ -44,7 +47,7 @@ export function SupplyPanel({view}:{view:'simulate'|'execute'}){
   const { t: tr } = useLocale();
   const {state}=useWorkflow(),supply=useSupply(),wallet=useBuild009Wallet();
   const node=state.workflow.nodes.find(n=>n.actionType==='supply'),fields=node?supplyDetails(node as Parameters<typeof supplyDetails>[0]):null;
-  const record=supply.record,review=record?.review,shown=lendingView(review?.chain??node?.chainId);
+  const record=supply.record,review=record?.review,shown=lendingView(review?.chain??node?.chainId,review?.asset??(node?lendingNodeAsset(node as Parameters<typeof lendingNodeAsset>[0]):null));
   const pending=record?.notSubmitted?undefined:record?.attempts.find(a=>!a.reconciled&&!record.approvalProof),approval=record?.attempts.find(a=>a.step==='APPROVAL');
   const canExecute=Boolean(record?.authorization&&!supply.retired&&!pending&&record.verdict==='PENDING');
   const info=supply.error??record?.error;

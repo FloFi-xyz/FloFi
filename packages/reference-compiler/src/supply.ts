@@ -3,15 +3,23 @@ import { compileWithdrawCalls,estimateWithdraw,assertWithdrawFresh,readWithdrawS
 import { compileRepayCalls, estimateRepay, assertRepayFresh } from './repay.js';
 import { compileBorrowCalls, readBorrowState, estimateBorrow, assertBorrowFresh, type BorrowState } from './borrow.js';
 import { keccak_256 } from '@noble/hashes/sha3.js';
-import { aaveLendingProfile, assertAaveLendingProfile, type AaveLendingProfile } from '@defi-workflow-engine/action-registry';
+import { aaveReserveProfile, assertAaveLendingProfile, type AaveLendingProfile } from '@defi-workflow-engine/action-registry';
+import { reserveFlags } from './borrow.js';
 import { readSupplyNode, readBorrowNode, readRepayNode, readWithdrawNode, supplyAddress, hashArtifactBytes, type SemanticWorkflow,
   hashSupplyValue, type ArtifactSet, type SimulationBundle, type AuthorizationPolicy, type StrategyManifest, type ExecutionPlan } from '@defi-workflow-engine/workflow-contracts';
 export { AAVE_V3_BASE_SEPOLIA, AAVE_V3_ETHEREUM_SEPOLIA, aaveLendingProfile, type AaveLendingProfile } from '@defi-workflow-engine/action-registry';
 export type SupplyRpc = (method: string, params: readonly unknown[]) => Promise<unknown>;
 export type SupplyTransaction = { from: string; to: string; data: string; value: '0x0'; chainId: AaveLendingProfile['chainHex'] };
-/** The registered Aave profile for an authored chain; any other chain fails with the caller's code. */
-export function lendingProfile(chain: string, code: string): AaveLendingProfile {
-  try { return aaveLendingProfile(chain); } catch { throw new Error(code); }
+/**
+ * The registered Aave reserve profile for an authored or reviewed chain AND exact reserve asset (address, plus decimals when given); any
+ * other pair fails with the caller's code. BUILD AAVE-V3-EXPANSION-001: a market lists many reserves, so the chain alone never selects one.
+ */
+export function lendingProfile(chain: string, code: string, asset: string | { readonly address?: string; readonly decimals: number }): AaveLendingProfile {
+  try {
+    if (typeof asset === 'string') return aaveReserveProfile(chain, asset);
+    if (typeof asset?.address !== 'string') throw new Error(code);
+    return aaveReserveProfile(chain, asset.address, asset.decimals);
+  } catch { throw new Error(code); }
 }
 /** User-configuration bits of the profile's reserve (2·id borrowing, 2·id+1 collateral) and its token unit. */
 export function reserveBits(profileInput: AaveLendingProfile): { mask: bigint; borrowing: bigint; collateral: bigint; scale: bigint } {
@@ -66,7 +74,9 @@ export async function readSupplyState(rpc: SupplyRpc, profileInput: AaveLendingP
       BigInt('0x'+reserveHex.slice(8*64,9*64)) !== BigInt(profile.aToken)) throw new Error('SUPPLY_DEPLOYMENT_MISMATCH');
   const config = BigInt('0x'+reserveHex.slice(0,64));
   if (((config >> 48n) & 255n) !== BigInt(profile.decimals) || BigInt('0x'+reserveHex.slice(7*64,8*64)) !== BigInt(profile.reserveId)) throw new Error('SUPPLY_DEPLOYMENT_MISMATCH');
-  if (((config >> 56n) & 1n) !== 1n || ((config >> 57n) & 1n) || ((config >> 60n) & 1n)) throw new Error('SUPPLY_RESERVE_UNAVAILABLE');
+  // Inactive or paused reserves accept nothing. A frozen reserve still serves Repay and Withdraw (Aave semantics), so the operations that a
+  // freeze forbids (Supply, Borrow) refuse it themselves.
+  if (((config >> 56n) & 1n) !== 1n || ((config >> 60n) & 1n)) throw new Error('SUPPLY_RESERVE_UNAVAILABLE');
   if (codes.some(code => rpcHex(code).length < 4) || rpcUint(index) < 10n ** 27n) throw new Error('SUPPLY_DEPLOYMENT_MISMATCH');
   if ('poolRevision' in profile) {
     const [provider, revision, oracle, oracleCode, implementation, implementationCode] = await Promise.all([
@@ -105,7 +115,10 @@ async function simulateSupplyWithAllowanceOverride(rpc: SupplyRpc, profile: Aave
   let override:Record<string,unknown>|null=null;
   if(approval){
     // First simulate the exact approval against real token code. The ERC-20 must return true.
-    if(rpcUint(await rpc('eth_call',[{from:approval.from,to:approval.to,data:approval.data,value:approval.value},tag]))!==1n)throw new Error('SUPPLY_APPROVAL_SIMULATION_FAILED');
+    // Most ERC-20s return true; some (e.g. Ethereum USDT) return no data. A revert or any other value fails. The exact allowance is
+    // then proven by the override below and again on chain after the approval.
+    const approved=await rpc('eth_call',[{from:approval.from,to:approval.to,data:approval.data,value:approval.value},tag]);
+    if(approved!=='0x'&&rpcUint(approved)!==1n)throw new Error('SUPPLY_APPROVAL_SIMULATION_FAILED');
     // Bounded mapping discovery, with unique markers, followed by proof of ONE exact storage key.
     const candidates=Array.from({length:16},(_,i)=>allowanceSlot(profile,state.account,BigInt(i)));
     const stateDiff=Object.fromEntries(candidates.map((slot,i)=>[slot,'0x'+supplyWord(BigInt(i+1))]));
@@ -144,7 +157,7 @@ export function compileSupplyCalls(workflow: SemanticWorkflow, accountInput: str
   if (nodes.length !== 1 || workflow.nodes.some(n => n.actionType !== 'supply' && !n.actionType.startsWith('mock-')) ||
       workflow.resourceEdges.some(e => e.fromNodeId === nodes[0]?.nodeId || e.toNodeId === nodes[0]?.nodeId) ||
       workflow.nodes.some(n => n.dependencies.includes(nodes[0]?.nodeId ?? ''))) throw new Error('SUPPLY_ISOLATED_ONLY');
-  const fields = readSupplyNode(nodes[0]!), profile = lendingProfile(fields.chain, 'SUPPLY_DEPLOYMENT_UNSUPPORTED');
+  const fields = readSupplyNode(nodes[0]!), profile = lendingProfile(fields.chain, 'SUPPLY_DEPLOYMENT_UNSUPPORTED', fields.asset);
   if ('ownerBeneficiary' in profile && fields.beneficiary !== supplyAddress(accountInput)) throw new Error('SUPPLY_BENEFICIARY_MUST_BE_OWNER');
   if (fields.asset.address !== profile.asset || fields.asset.decimals !== profile.decimals || !/^(0|[1-9][0-9]*)$/.test(allowance)) throw new Error('SUPPLY_DEPLOYMENT_UNSUPPORTED');
   const base = { from: supplyAddress(accountInput), value: '0x0' as const, chainId: profile.chainHex };
@@ -163,10 +176,11 @@ export async function simulateSupply(workflow: SemanticWorkflow, accountInput: s
   const authored = withdrawing ? readWithdrawNode(node) : null;
   const fields = authored ? {...authored,beneficiary:supplyAddress(accountInput)} : repaying ? readRepayNode(node) : borrowing ? readBorrowNode(node) : readSupplyNode(node), account = supplyAddress(accountInput);
   // The authored chain selects the deployment; the RPC must then report that chain before any state is read.
-  const profile = lendingProfile(fields.chain, 'SUPPLY_DEPLOYMENT_UNSUPPORTED');
+  const profile = lendingProfile(fields.chain, 'SUPPLY_DEPLOYMENT_UNSUPPORTED', fields.asset);
   compileSupplyCalls(workflow,account,'0');
   const state = await (withdrawing ? readWithdrawState : borrowing || repaying || 'ownerBeneficiary' in profile ? readBorrowState : readSupplyState)(rpc,profile,account,fields.beneficiary);
   if (!borrowing && !repaying && !withdrawing) assertSupplyCap(profile, state, fields.amount);
+  if (!repaying && !withdrawing && reserveFlags(state.reserveConfiguration ?? '0').frozen) throw new Error(borrowing ? 'BORROW_RESERVE_UNAVAILABLE' : 'SUPPLY_RESERVE_UNAVAILABLE');
   const estimate = borrowing ? estimateBorrow(fields.amount,state.borrow!,profile) : null;
   const repayment = repaying ? estimateRepay(fields.amount,state.borrow!,profile) : null;
   const withdrawal = withdrawing ? estimateWithdraw(fields.amount,state,profile) : null;
@@ -219,7 +233,7 @@ export async function simulateSupply(workflow: SemanticWorkflow, accountInput: s
 export function assertSupplyReview(review: SupplyReview, workflow: SemanticWorkflow, account: string, state: SupplyState, now = Date.now(), approvalConfirmed = false): void {
   const {commitment,...content} = review;
   // The reviewed chain selects the deployment and must be the chain the workflow authored.
-  const profile = lendingProfile(review.chain, 'SUPPLY_AUTHORIZATION_INVALID');
+  const profile = lendingProfile(review.chain, 'SUPPLY_AUTHORIZATION_INVALID', review.asset);
   if (!workflow.nodes.some(n=>['supply','borrow','repay','withdraw'].includes(n.actionType)&&n.chainId===profile.chain)) throw new Error('SUPPLY_AUTHORIZATION_INVALID');
   const borrowing=workflow.nodes.some(n=>n.actionType==='borrow'),repaying=workflow.nodes.some(n=>n.actionType==='repay'),withdrawing=workflow.nodes.some(n=>n.actionType==='withdraw');
   if(withdrawing!==Boolean(review.withdraw)||review.withdraw&&(review.borrow||review.repay||review.approvalRequired||review.beneficiary!==review.account))throw new Error('WITHDRAW_AUTHORIZATION_INVALID');
@@ -236,6 +250,7 @@ export function assertSupplyReview(review: SupplyReview, workflow: SemanticWorkf
       (!approvalConfirmed && ((!review.borrow && state.allowance !== review.allowance) || state.nonce !== review.state.nonce)) ||
       (approvalConfirmed && state.allowance !== review.amount) || !review.borrow && !review.withdraw && BigInt(state.balance) < BigInt(review.amount)) throw new Error('SUPPLY_AUTHORIZATION_STALE');
   if (!review.borrow && !review.repay && !review.withdraw) assertSupplyCap(profile, state, review.amount);
+  if (!review.repay && !review.withdraw && reserveFlags(state.reserveConfiguration ?? '0').frozen) throw new Error('SUPPLY_AUTHORIZATION_STALE');
   if ('ownerBeneficiary' in profile && !review.borrow && !review.repay && !review.withdraw) {
     if (!state.borrow || !review.state.borrow) throw new Error('SUPPLY_AUTHORIZATION_STALE');
     for (const key of ['userConfiguration','eMode','scaledDebt','reserveConfiguration','codeHash'] as const)
