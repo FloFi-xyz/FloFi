@@ -16,12 +16,17 @@ import { evmTemplates, serializeDelegation } from './adapters.ts';
 import { resolveAuthorityGraph, scopeHash, type GrantScope, type GrantView, type StepBinding } from './authority.ts';
 import { stepCapability } from './capabilities.ts';
 import { readDelegationConfig } from './config.ts';
-import { driverFor, evmAaveDriver, evmSwapDriver, type StepContext } from './drivers.ts';
+import { BORROW_BROADCAST_WINDOW_MS, driverFor, evmAaveDriver, evmSwapDriver, type StepContext } from './drivers.ts';
+import { ownCallsByGrant } from './executor.ts';
 import { buildManifest, executionSpend } from './manifest.ts';
 import type { GrantRecord } from './pg-store.ts';
 import { stepPolicyViolation } from './policy.ts';
 import { delegationAavePool, delegationAaveReserve } from './profiles.ts';
 import { narrowedStep, workflowRequirement, type StepRequirement } from './steps.ts';
+/** A grant scope without its Aave section (exactOptionalPropertyTypes: the key is omitted, not undefined). */
+function withoutAave<T extends { readonly aave?: unknown }>(scope: T): Omit<T, 'aave'> {
+  return Object.fromEntries(Object.entries(scope).filter(([key]) => key !== 'aave')) as Omit<T, 'aave'>;
+}
 
 const reads = vi.hoisted(() => ({ supply: null as unknown, borrow: null as unknown, estimate: null as unknown, capFull: false }));
 vi.mock('@defi-workflow-engine/reference-compiler', async importOriginal => {
@@ -70,6 +75,7 @@ async function setup(scopeOverride: Partial<Extract<GrantScope, { mechanism: 'EV
 type Setup = Awaited<ReturnType<typeof setup>>;
 
 /** A read-only Arbitrum transport double: the upgraded owner account, fees, the quoter, balances, receipts; broadcasts are recorded. */
+const gas = { estimate: 200_000n, revert: false }, known = new Set<string>();
 function transport(s: Setup, receipts: Map<string, unknown> = new Map(), sent: string[] = []) {
   return { chain: CHAIN, provenance: 'MOCKED' as const, async rpc(method: string, params: readonly unknown[]): Promise<unknown> {
     if (method === 'eth_chainId') return '0xa4b1';
@@ -78,7 +84,8 @@ function transport(s: Setup, receipts: Map<string, unknown> = new Map(), sent: s
     if (method === 'eth_maxPriorityFeePerGas') return '0x1';
     if (method === 'eth_gasPrice') return '0x989680';
     if (method === 'eth_getTransactionReceipt') return receipts.get(params[0] as string) ?? null;
-    if (method === 'eth_getTransactionByHash') return null;
+    if (method === 'eth_getTransactionByHash') return known.has(params[0] as string) ? { hash: params[0] } : null;
+    if (method === 'eth_estimateGas') { if (gas.revert) throw new Error('execution reverted'); return '0x' + gas.estimate.toString(16); }
     if (method === 'eth_sendRawTransaction') { sent.push(params[0] as string); return '0x'; }
     if (method === 'eth_call') {
       const { to, data } = params[0] as { to: string; data: string };
@@ -113,7 +120,7 @@ beforeEach(() => {
   reads.supply = { reserveConfiguration: String(1n << 56n), balance: '3000000000000000', position: '0', block: 100 };
   reads.borrow = { borrow: { debt: '0', healthFactor: (2n ** 256n - 1n).toString() }, balance: '10000000', block: 101 };
   reads.estimate = { borrowValueBase: '100000000', debtAfterBase: '100000000', healthFactorAfter: '2400000000000000000' };
-  reads.capFull = false;
+  reads.capFull = false; gas.estimate = 200_000n; gas.revert = false; known.clear();
 });
 
 describe('capability and deployment opt-in (closed by default)', () => {
@@ -243,5 +250,62 @@ describe('drivers: fresh simulation → grant scope → policy → session signa
     expect(await evmAaveDriver.authorize(ctx, { ...prepared, calls: other })).toBe('GRANT_SCOPE_EXCEEDED');
     // Without the deployment's opt-in no driver serves the step.
     expect(driverFor({ ...ctx, mainnet: [] }, 'PRODUCTION')).toBeNull();
+  });
+});
+
+describe('review fixes: accounting, wallets, caps, gas and the Borrow send window', () => {
+  it('re-verification never counts this execution\'s own submitted calls twice (a grant sized exactly for the workflow finishes it)', async () => {
+    const s = await setup(), graph = resolveAuthorityGraph(s.requirement, [s.view], 'PRODUCTION', NOW.getTime(), undefined, MAINNET);
+    if (!graph.ok) throw new Error('graph');
+    // After the Swap (2 calls) was prepared, `callsUsed` is 2: counted raw it would exhaust maxCalls 5 ...
+    expect(resolveAuthorityGraph(s.requirement, [{ ...s.view, callsUsed: 2 }], 'PRODUCTION', NOW.getTime(), graph.bindings, MAINNET).ok).toBe(false);
+    // ... the executor subtracts the execution's own prepared calls first.
+    const own = ownCallsByGrant([{ grantId: s.view.grantId, submission: { txs: [{}, {}] } }, { grantId: s.view.grantId, submission: null }]);
+    expect(own.get(s.view.grantId)).toBe(2);
+    expect(resolveAuthorityGraph(s.requirement, [{ ...s.view, callsUsed: 2 - own.get(s.view.grantId)! }], 'PRODUCTION', NOW.getTime(), graph.bindings, MAINNET).ok).toBe(true);
+  });
+  it('refuses an Aave step whose beneficiary is not the Credential wallet, and a bound step on another wallet', async () => {
+    const s = await setup(), other = '0x' + '33'.repeat(20);
+    const strategy = { ...s.requirement.steps[2]!.strategy, beneficiary: other } as never;
+    const req = { ...s.requirement, steps: s.requirement.steps.map((step, i) => i === 2 ? { ...step, strategy } : step) };
+    const graph = resolveAuthorityGraph(req, [s.view], 'PRODUCTION', NOW.getTime(), undefined, MAINNET);
+    expect(graph.ok).toBe(false);
+    if (!graph.ok) expect(graph.failures).toContainEqual({ stepIndex: 2, code: 'AAVE_BENEFICIARY_NOT_CREDENTIAL_WALLET' });
+    // The Swap from wallet C funding a Supply from wallet B (the Supply's own Credential) is refused.
+    const swapOnly = { ...s.view, grantId: 'grt_bbbbbbbbbbbbbbbbbbbbbbbbbb', walletAddress: '0x' + '44'.repeat(20) };
+    const split = resolveAuthorityGraph(s.requirement, [{ ...swapOnly, scope: withoutAave(s.scope) }, { ...s.view, scope: { ...s.scope, pairs: [] } }], 'PRODUCTION', NOW.getTime(), undefined, MAINNET);
+    expect(split.ok).toBe(false);
+    if (!split.ok) expect(split.failures).toContainEqual({ stepIndex: 1, code: 'WORKFLOW_BINDING_WALLET_MISMATCH' });
+  });
+  it('delegates Supply only for reserves whose supply cap FloFi verifies (native USDC on Arbitrum is refused)', async () => {
+    const s = await setup(), supply = s.requirement.steps[1]!, usdc = { ...supply, inputs: [{ ...supply.inputs[0]!, address: USDC, decimals: 6, symbol: 'USDC', amount: 1_000_000n }] };
+    expect(stepCapability(supply, 'PRODUCTION', MAINNET)).toMatchObject({ ok: true });
+    expect(stepCapability(usdc, 'PRODUCTION', MAINNET)).toMatchObject({ ok: false, code: 'DELEGATION_ASSET_NOT_SUPPORTED' });
+  });
+  it('refuses a harness together with a mainnet opt-in in engineering scope too', () => {
+    expect(readDelegationConfig({ FLOFI_DELEGATION: 'enabled', FLOFI_PUBLIC_ORIGIN: 'https://flofi.example', FLOFI_NETWORK_SCOPE: 'ENGINEERING_TESTNETS',
+      FLOFI_DELEGATION_MAINNET_CHAINS: CHAIN, FLOFI_DELEGATION_HARNESS: 'MOCKED_LOOPBACK_ONLY', FLOFI_DELEGATION_HARNESS_URL: 'http://127.0.0.1:8560' }))
+      .toMatchObject({ enabled: false, code: 'DELEGATION_CONFIGURATION_INVALID', reason: 'FLOFI_DELEGATION_HARNESS_WITH_MAINNET' });
+  });
+  it('gas comes from the exact redemption\'s estimate (+50%), and a first call that would revert is never signed', async () => {
+    const s = await setup(), ctx = context(s, 2), { prepared } = await evmAaveDriver.simulate(ctx);
+    gas.estimate = 900_000n;
+    const signed = await evmAaveDriver.sign(ctx, json(prepared), keys);
+    expect(D.decodeSignedEip1559((signed.submission.txs as { raw: string }[])[0]!.raw).tx.gasLimit).toBe(1_350_000n);
+    gas.revert = true;
+    await expect(evmAaveDriver.sign(ctx, json(prepared), keys)).rejects.toThrow('SIMULATION_REVERTED');
+  });
+  it('a Borrow is never sent for the first time after its send window; a transaction the chain already knows is still observed', async () => {
+    const s = await setup(), ctx = context(s, 2), { prepared } = await evmAaveDriver.simulate(ctx);
+    expect(prepared.notAfter).toBe(NOW.getTime() + BORROW_BROADCAST_WINDOW_MS);
+    const signed = await evmAaveDriver.sign(ctx, json(prepared), keys), sent: string[] = [];
+    const late = { ...ctx, now: () => new Date(NOW.getTime() + BORROW_BROADCAST_WINDOW_MS + 1), transport: transport(s, new Map(), sent) };
+    await expect(evmAaveDriver.broadcast(late, signed.submission)).rejects.toThrow('SUBMISSION_STALE');
+    expect(sent).toEqual([]);
+    known.add((signed.submission.txs as { hash: string }[])[0]!.hash);
+    await expect(evmAaveDriver.broadcast(late, signed.submission)).resolves.toBeUndefined();
+    expect(sent).toEqual([]);
+    await evmAaveDriver.broadcast({ ...ctx, transport: transport(s, new Map(), sent) }, signed.submission);
+    expect(sent).toHaveLength(1);
   });
 });

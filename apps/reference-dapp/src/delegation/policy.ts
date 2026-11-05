@@ -85,6 +85,8 @@ export function stepPolicyViolation(m: DelegatedAuthorizationManifest, step: Ste
   const need = binding.need;
   if (need.kind === 'EVM_AAVE_V3_SUPPLY' || need.kind === 'EVM_AAVE_V3_BORROW') {
     const s = plan.spend[0];
+    const beneficiary = 'beneficiary' in step.strategy && typeof step.strategy.beneficiary === 'string' ? step.strategy.beneficiary.toLowerCase() : null;
+    if (beneficiary !== binding.walletAddress.toLowerCase()) return 'RECIPIENT_NOT_AUTHORIZED';
     if (!plan.targets.includes(need.pool) || plan.spend.length !== 1 || !s || s.asset !== `${plan.chain}/erc20:${need.asset}` || s.amount > need.amount) return 'GRANT_SCOPE_EXCEEDED';
   } else if (need.kind === 'EVM_UNISWAP_V3_EXACT_INPUT_SINGLE') {
     const s = plan.spend[0];

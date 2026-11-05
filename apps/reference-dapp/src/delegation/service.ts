@@ -26,6 +26,8 @@ import type { AutomationStore, Owner, RuleRecord } from '../automations/store.ts
 import { conditionThreshold, type PriceCondition } from '../automations/trigger.ts';
 import { NETWORKS, composeWorkflowBound } from '../engine/strategy-engine';
 import { NETWORK_CHAINS } from '../engine/capability-catalog';
+import { networkScope } from '../server/network-scope.ts';
+import { TEST_NETWORK_NOT_AVAILABLE } from '../domain/network-scope';
 import type { NetworkId, StrategyInput, StrategySpec } from '../engine/strategy-spec';
 import { ENGINE_VERSION } from '../platform/index.ts';
 import { b64url, fromB64url, rpIdOf, verifyAssertion, verifyRegistration } from '../passkeys/webauthn.ts';
@@ -271,6 +273,8 @@ export function createDelegationService(deps: DelegationServiceDeps) {
       const passkey = await store.passkey(owner, input.passkeyId);
       if (!passkey || passkey.revokedAt) refuse('PASSKEY_REQUIRED');
       const chain = NETWORK_CHAINS[input.network], validFrom = now.toISOString(), expiresAt = new Date(expires).toISOString();
+      // BUILD-FLOFI-SINGLE-AUTH-WORKFLOW-UX-001: the public Mainnet-only product (delegation on only through a mainnet opt-in) enrolls no test network.
+      if (networkScope() !== 'ENGINEERING' && NETWORKS[input.network].class !== 'MAINNET') refuse(TEST_NETWORK_NOT_AVAILABLE);
       let scope: GrantScope;
       if (input.mechanism === 'EVM_ERC7710_METAMASK_V1_3') {
         const profile = delegationSwapProfile(chain, config.mainnetChains) ?? refuse('CREDENTIAL_NETWORK_UNSUPPORTED');

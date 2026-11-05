@@ -533,6 +533,10 @@ export function createPgDelegationStore(db: Database, tenantId: string) {
         [tenantId, step.grant_id])).rows[0];
       if (!g || g.state !== 'ACTIVE') return { ok: false as const, code: g ? `CREDENTIAL_${String(g.state)}` : 'CREDENTIAL_NOT_FOUND' };
       if (date(g.expires_at) <= now) return { ok: false as const, code: 'CREDENTIAL_EXPIRED' };
+      // BUILD-FLOFI-SINGLE-AUTH-WORKFLOW-UX-001: the session signer's nonces are allocated under this grant lock. Bytes signed at nonces another
+      // execution already prepared are refused (never persisted, never sent); the caller signs again at fresh nonces.
+      if (grantUse.nextNonce !== null && g.evm_next_nonce !== null && grantUse.nextNonce - BigInt(grantUse.calls) < BigInt(String(g.evm_next_nonce)))
+        return { ok: false as const, code: 'SUBMISSION_NONCE_CONFLICT' };
       await tx.query(`UPDATE credential_grants SET calls_used = calls_used + $3, evm_next_nonce = coalesce($4, evm_next_nonce), version = version + 1
         WHERE tenant_id = $1 AND grant_id = $2`, [tenantId, step.grant_id, grantUse.calls, grantUse.nextNonce === null ? null : grantUse.nextNonce.toString()]);
       const row = (await tx.query(`UPDATE delegated_execution_steps SET state = 'SUBMISSION_PREPARED', submission = $4::jsonb

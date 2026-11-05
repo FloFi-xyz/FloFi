@@ -33,8 +33,10 @@ export function guarded(chain: string, purpose: TransportPurpose, provenance: Ch
 export function httpRpc(url: string, fetchImpl: typeof fetch = fetch): Rpc {
   let id = 0;
   return async (method, params) => {
+    // A transport failure (timeout, refused connection) is DELEGATION_RPC_UNAVAILABLE: retryable, never a decision about the step.
     const response = await fetchImpl(url, { method: 'POST', redirect: 'error', cache: 'no-store', signal: AbortSignal.timeout(10_000),
-      headers: { 'content-type': 'application/json' }, body: JSON.stringify({ jsonrpc: '2.0', id: ++id, method, params }) });
+      headers: { 'content-type': 'application/json' }, body: JSON.stringify({ jsonrpc: '2.0', id: ++id, method, params }) })
+      .catch(() => { throw new Error('DELEGATION_RPC_UNAVAILABLE'); });
     const body = await response.json().catch(() => null) as { result?: unknown; error?: { message?: unknown } } | null;
     if (!body) throw new Error('DELEGATION_RPC_UNAVAILABLE');
     if (body.error) throw new Error(typeof body.error.message === 'string' ? body.error.message.slice(0, 200) : 'DELEGATION_RPC_ERROR');

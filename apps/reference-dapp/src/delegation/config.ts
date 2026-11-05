@@ -51,6 +51,7 @@ export function readDelegationConfig(env: Env): DelegationConfigResult {
   const hosted = isHostedDeployment(env);
   const harness = env.FLOFI_DELEGATION_HARNESS;
   if (networkScope(env) !== 'ENGINEERING' && harness) return invalid('FLOFI_DELEGATION_HARNESS_PUBLIC_PRODUCT');
+  if (mainnetChains.length && harness) return invalid('FLOFI_DELEGATION_HARNESS_WITH_MAINNET');
   if (harness !== undefined && harness !== '' && harness !== 'MOCKED_LOOPBACK_ONLY') return invalid('FLOFI_DELEGATION_HARNESS');
   const mocked = harness === 'MOCKED_LOOPBACK_ONLY';
   if (mocked && hosted) return invalid('FLOFI_DELEGATION_HARNESS_HOSTED');

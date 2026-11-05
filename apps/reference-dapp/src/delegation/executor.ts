@@ -72,7 +72,18 @@ const planOf = (stored: Readonly<Record<string, unknown>> | null): StepPlan | nu
 };
 
 /** The whole authority chain of one execution (see the module comment). Read-only except grant re-verification bookkeeping. */
-async function verifyAuthorityChain(deps: ExecutorDeps, source: SourceFacts, revision: RevisionRecord): Promise<{ ok: true; chain: Chain } | { ok: false; code: string }> {
+/** Calls this execution has already prepared on each grant (counted in the grant's `callsUsed` when its submission was prepared). */
+export function ownCallsByGrant(steps: readonly Pick<StepRecord, 'grantId' | 'submission'>[]): ReadonlyMap<string, number> {
+  const used = new Map<string, number>();
+  for (const s of steps) {
+    const txs = (s.submission as { txs?: unknown } | null)?.txs;
+    if (Array.isArray(txs)) used.set(s.grantId, (used.get(s.grantId) ?? 0) + txs.length);
+  }
+  return used;
+}
+/** Simulation failures that say nothing about the step (transport, reorg, rate limit): the pass retries instead of stopping the run. */
+export const transientSimulation = (code: string): boolean => code === 'DELEGATION_RPC_UNAVAILABLE' || /_REORG$/.test(code) || /RATE_LIMITED$/.test(code);
+async function verifyAuthorityChain(deps: ExecutorDeps, source: SourceFacts, revision: RevisionRecord, executionId: string | null = null): Promise<{ ok: true; chain: Chain } | { ok: false; code: string }> {
   const now = deps.now(), m = revision.manifest;
   if (revision.state !== 'ACTIVE' || !revision.envelope || !revision.assertion || !revision.passkeyId) return { ok: false, code: 'AUTHORIZATION_NOT_ACTIVE' };
   if (source.workflowHash === null || source.workflowHash !== revision.workflowHash) return { ok: false, code: 'AUTHORIZATION_WORKFLOW_MISMATCH' };
@@ -104,7 +115,11 @@ async function verifyAuthorityChain(deps: ExecutorDeps, source: SourceFacts, rev
     if (!anchoredBy(g, anchor)) return { ok: false, code: 'GRANT_ANCHOR_MISMATCH' };
     grants.set(g.grantId, g);
   }
-  const graph = resolveAuthorityGraph(req.value, [...grants.values()], deps.config.mode, now.getTime(), m.credentials, deps.config.mainnetChains);
+  // BUILD-FLOFI-SINGLE-AUTH-WORKFLOW-UX-001: re-verification after a step was submitted must not count this execution's own calls twice
+  // (they are already in `callsUsed`), or a grant sized exactly for the workflow would stop it after its first step.
+  const own = executionId ? ownCallsByGrant(await deps.store.steps(executionId)) : new Map<string, number>();
+  const graph = resolveAuthorityGraph(req.value, [...grants.values()].map(g => ({ ...g, callsUsed: Math.max(0, g.callsUsed - (own.get(g.grantId) ?? 0)) })),
+    deps.config.mode, now.getTime(), m.credentials, deps.config.mainnetChains);
   if (!graph.ok) return { ok: false, code: graph.failures[0]!.code };
   // Read-only on-chain re-verification of every grant before anything is reserved (external revocation, expiry, account change).
   for (const g of grants.values()) {
@@ -180,7 +195,7 @@ async function drive(deps: ExecutorDeps, start: ExecutionRecord, revision: Revis
   if (['SETTLED', 'BLOCKED', 'FAILED', 'HALTED'].includes(e.state)) return outcome();
 
   // Every pass re-establishes the authority chain (nothing is cached across passes or processes).
-  const verified = await verifyAuthorityChain(deps, source, revision);
+  const verified = await verifyAuthorityChain(deps, source, revision, e.executionId);
   if (e.state === 'QUEUED') {
     if (!verified.ok || revision.revision !== e.revision) { await move('BLOCKED', { code: verified.ok ? 'AUTHORIZATION_REVISION_CHANGED' : verified.code }); return outcome(); }
     if (!await move('AUTHORITY_VERIFIED')) return outcome(PENDING_RETRY_MS);
@@ -249,7 +264,12 @@ async function run(deps: ExecutorDeps, start: ExecutionRecord, verified: Awaited
       const driver = driverFor(ctx, deps.config.mode);
       if (!driver || (deps.drivers && !deps.drivers.includes(driver))) return stopBefore(k, 'DELEGATED_STEP_DRIVER_UNAVAILABLE');
       let simulated: Awaited<ReturnType<StepDriver['simulate']>>;
-      try { simulated = await driver.simulate(ctx); } catch (cause) { return stopBefore(k, codeOf(cause, 'SIMULATION_FAILED')); }
+      try { simulated = await driver.simulate(ctx); } catch (cause) {
+        const code = codeOf(cause, 'SIMULATION_FAILED');
+        // A transport failure or a reorg says nothing about the step: look again (the authorization's own expiry still bounds the run).
+        if (transientSimulation(code)) { log('delegation.simulation_retry', { step: k, code }); return outcome(PENDING_RETRY_MS); }
+        return stopBefore(k, code);
+      }
       const stored = bigintJson({ plan: simulated.plan, prepared: simulated.prepared, driver: driver.id });
       const sim = await deps.store.stepTransition(e.executionId, k, ['PENDING', 'SIMULATED', 'POLICY_VERIFIED'], 'SIMULATED', { plan: stored });
       if (!sim) return outcome(PENDING_RETRY_MS);
@@ -258,9 +278,15 @@ async function run(deps: ExecutorDeps, start: ExecutionRecord, verified: Awaited
       if (violation) return stopBefore(k, violation);
       if (!await deps.store.stepTransition(e.executionId, k, ['SIMULATED'], 'POLICY_VERIFIED', {})) return outcome(PENDING_RETRY_MS);
       let signed: Awaited<ReturnType<StepDriver['sign']>>;
-      try { signed = await driver.sign(ctx, simulated.prepared, deps.signer); } catch (cause) { return stopBefore(k, codeOf(cause, 'SIGNING_FAILED')); }
+      try { signed = await driver.sign(ctx, simulated.prepared, deps.signer); } catch (cause) {
+        const code = codeOf(cause, 'SIGNING_FAILED');
+        if (transientSimulation(code)) { log('delegation.signing_retry', { step: k, code }); return outcome(PENDING_RETRY_MS); }
+        return stopBefore(k, code);
+      }
       const prepared = await deps.store.prepareSubmission(e.executionId, k, bigintJson({ ...signed.submission, driver: driver.id }), { calls: signed.calls, nextNonce: signed.nextNonce },
         deps.now());
+      // Another execution used these nonces first: nothing was persisted or sent, so the next pass signs again at fresh nonces.
+      if (!prepared.ok && prepared.code === 'SUBMISSION_NONCE_CONFLICT') return outcome(PENDING_RETRY_MS);
       if (!prepared.ok) return stopBefore(k, prepared.code);
       step = prepared.step;
       log('delegation.submission_prepared', { step: k });
@@ -274,8 +300,10 @@ async function run(deps: ExecutorDeps, start: ExecutionRecord, verified: Awaited
       let broadcastFailure: unknown = null;
       try { await driver.broadcast(recoveryCtx, step.submission!); } catch (cause) { broadcastFailure = cause; }
       if (broadcastFailure !== null) {
-        await deps.store.stepTransition(e.executionId, k, ['SUBMISSION_PREPARED'], 'UNCERTAIN', { code: codeOf(broadcastFailure, 'SUBMISSION_BROADCAST_FAILED') });
-        await enterUncertain(); return outcome(PENDING_RETRY_MS);
+        const code = codeOf(broadcastFailure, 'SUBMISSION_BROADCAST_FAILED');
+        await deps.store.stepTransition(e.executionId, k, ['SUBMISSION_PREPARED'], 'UNCERTAIN', { code });
+        // BUILD-FLOFI-SINGLE-AUTH-WORKFLOW-UX-001: signed bytes past their send window are never sent; the owner's attention is required.
+        await enterUncertain(code === 'SUBMISSION_STALE'); return outcome(PENDING_RETRY_MS);
       }
       const submitted = await deps.store.stepTransition(e.executionId, k, ['SUBMISSION_PREPARED'], 'SUBMITTED', {});
       if (!submitted) return outcome(PENDING_RETRY_MS);

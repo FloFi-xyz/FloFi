@@ -47,7 +47,10 @@ export function stepCapability(step: StepRequirement, mode: CapabilityMode, main
     const pool = delegationAavePool(step.chain, mainnet), input = step.inputs[0];
     if (!pool || step.adapterId !== 'aave-v3') return refuse('DELEGATION_TEMPLATE_NOT_IMPLEMENTED');
     if (step.inputs.length !== 1 || !input) return refuse('DELEGATION_STEP_SHAPE_UNSUPPORTED');
-    if (!delegationAaveReserve(step.chain, pool, input.address)) return refuse('DELEGATION_ASSET_NOT_SUPPORTED');
+    const reserve = delegationAaveReserve(step.chain, pool, input.address);
+    if (!reserve) return refuse('DELEGATION_ASSET_NOT_SUPPORTED');
+    // A delegated Supply needs the reserve's supply-cap headroom verified before signing (`assertSupplyCap`, profiles with validateSupplyCap).
+    if (step.action === 'supply' && !('validateSupplyCap' in reserve)) return refuse('DELEGATION_ASSET_NOT_SUPPORTED');
     return { ok: true, mechanism: 'EVM_ERC7710_METAMASK_V1_3', evidence: 'IMPLEMENTED',
       need: { kind: step.action === 'supply' ? 'EVM_AAVE_V3_SUPPLY' : 'EVM_AAVE_V3_BORROW', pool, asset: input.address, amount: input.amount } };
   }

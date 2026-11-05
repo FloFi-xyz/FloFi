@@ -97,8 +97,20 @@ export function resolveAuthorityGraph(requirement: WorkflowRequirement, grants: 
       .sort((a, b) => ms(b.scope.expiresAt) - ms(a.scope.expiresAt) || (a.grantId < b.grantId ? -1 : 1));
     const chosen = covering[0];
     if (!chosen) { failures.push({ stepIndex: step.index, code: reasons[0]?.why ?? 'DELEGATED_AUTHORITY_UNAVAILABLE' }); continue; }
+    // BUILD-FLOFI-SINGLE-AUTH-WORKFLOW-UX-001: an Aave step acts on behalf of its Credential's wallet only; a workflow naming another
+    // beneficiary is refused, never silently executed for the grant's wallet.
+    const beneficiary = 'beneficiary' in step.strategy && typeof step.strategy.beneficiary === 'string' ? step.strategy.beneficiary.toLowerCase() : null;
+    if ((capability.need.kind === 'EVM_AAVE_V3_SUPPLY' || capability.need.kind === 'EVM_AAVE_V3_BORROW') && beneficiary !== chosen.walletAddress.toLowerCase()) {
+      failures.push({ stepIndex: step.index, code: 'AAVE_BENEFICIARY_NOT_CREDENTIAL_WALLET' }); continue;
+    }
     bindings.push({ stepIndex: step.index, credentialId: chosen.credentialId, grantId: chosen.grantId, mechanism: chosen.mechanism, chain: chosen.chain,
       walletAddress: chosen.walletAddress, grantCommitment: chosen.commitment!, need: capability.need });
+  }
+  // A step bound to an earlier step's output spends it from the same wallet that received it (never another Credential's wallet).
+  for (const b of requirement.bindings) {
+    const consumer = bindings.find(x => x.stepIndex === b.step), producer = bindings.find(x => x.stepIndex === b.amountFrom);
+    if (consumer && producer && (consumer.walletAddress !== producer.walletAddress || consumer.chain !== producer.chain))
+      failures.push({ stepIndex: b.step, code: 'WORKFLOW_BINDING_WALLET_MISMATCH' });
   }
   // Several steps on one grant consume it together: its call count (EVM) or delegated amount per mint (Solana) must cover all of them.
   for (const grant of grants) {

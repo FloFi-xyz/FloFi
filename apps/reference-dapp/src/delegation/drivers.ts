@@ -79,27 +79,57 @@ function authorizeEvmCalls(ctx: StepContext, prepared: Readonly<Record<string, u
   }
   return null;
 }
-/** Each call as ONE canonical `redeemDelegations` transaction of the grant's session signer, at consecutive nonces (signed, never sent here). */
-async function signEvmCalls(ctx: StepContext, prepared: Readonly<Record<string, unknown>>, signer: SignerUser, chainId: number): Promise<Signed> {
+/** Gas of one redemption: the node's estimate with a 50% margin, never below the historical 600k floor and never above a hard ceiling. */
+const GAS_FLOOR = 600_000n, GAS_CEILING = 5_000_000n;
+/**
+ * Each call as ONE canonical `redeemDelegations` transaction of the grant's session signer, at consecutive nonces (signed, never sent here).
+ * BUILD-FLOFI-SINGLE-AUTH-WORKFLOW-UX-001: each gas limit comes from `eth_estimateGas` (on Arbitrum it includes the parent-chain data cost);
+ * a call that cannot be estimated before its predecessor is mined (the action after its exact approval) uses `dependentGas`.
+ */
+async function signEvmCalls(ctx: StepContext, prepared: Readonly<Record<string, unknown>>, signer: SignerUser, chainId: number, dependentGas = GAS_FLOOR): Promise<Signed> {
   const t = ctx.transport, delegation = delegationOf(ctx.grant.grantPayload?.delegation);
   const chainNonce = BigInt(String(await t.rpc('eth_getTransactionCount', [ctx.grant.sessionAddress, 'pending'])));
   const base = ctx.grant.evmNextNonce !== null && ctx.grant.evmNextNonce > chainNonce ? ctx.grant.evmNextNonce : chainNonce;
   const priority = BigInt(String(await t.rpc('eth_maxPriorityFeePerGas', []))), gasPrice = BigInt(String(await t.rpc('eth_gasPrice', [])));
   const calls = (prepared.calls ?? []) as EvmCall[], txs = [];
   for (const [i, c] of calls.entries()) {
+    const data = D.redeemCalldata(delegation, c.group, { target: c.target, value: 0n, data: c.data });
+    let gasLimit: bigint;
+    try {
+      const estimate = BigInt(String(await t.rpc('eth_estimateGas', [{ from: ctx.grant.sessionAddress, to: F.delegationManager, value: '0x0', data }])));
+      gasLimit = estimate * 3n / 2n > GAS_FLOOR ? estimate * 3n / 2n : GAS_FLOOR;
+    } catch (cause) {
+      // The first call of a step depends on nothing earlier in it: if its exact redemption cannot be estimated it would revert (the enforcers,
+      // the Pool's own checks, the oracle sentinel), so nothing is signed. A transport failure is retryable, never a verdict.
+      if (cause instanceof Error && cause.message === 'DELEGATION_RPC_UNAVAILABLE') throw cause;
+      if (i === 0) fail('SIMULATION_REVERTED');
+      gasLimit = dependentGas;
+    }
+    if (gasLimit > GAS_CEILING) fail('GAS_ESTIMATE_EXCESSIVE');
     const tx: erc7710.Eip1559 = { chainId: BigInt(chainId), nonce: base + BigInt(i), maxPriorityFeePerGas: priority, maxFeePerGas: gasPrice * 2n + priority,
-      gasLimit: 600_000n, to: F.delegationManager, value: 0n, data: D.redeemCalldata(delegation, c.group, { target: c.target, value: 0n, data: c.data }) };
+      gasLimit, to: F.delegationManager, value: 0n, data };
     const sig = await signer.signEvmDigest(ctx.grant.sessionKeyRef, D.bytesOf(D.eip1559SigningHash(tx)));
     const signed = D.signedEip1559(tx, sig.yParity, sig.r, sig.s);
     if (D.decodeSignedEip1559(signed.raw).from !== ctx.grant.sessionAddress) fail('SIGNER_ADDRESS_MISMATCH');
     txs.push({ raw: signed.raw, hash: signed.hash, nonce: tx.nonce.toString(), target: c.target, method: c.method, group: c.group });
   }
   return { submission: { kind: 'EVM_REDEMPTIONS', chainId, from: ctx.grant.sessionAddress, delegationHash: D.delegationHash(delegation), txs,
-    hashes: txs.map(x => x.hash), before: prepared.before, minimum: prepared.minimum }, calls: txs.length, nextNonce: base + BigInt(txs.length) };
+    hashes: txs.map(x => x.hash), before: prepared.before, minimum: prepared.minimum, ...prepared.notAfter === undefined ? {} : { notAfter: prepared.notAfter } },
+    calls: txs.length, nextNonce: base + BigInt(txs.length) };
 }
-/** Broadcasts the persisted signed bytes exactly; a re-broadcast of a known transaction is fine, never a second, different transaction. */
+/**
+ * Broadcasts the persisted signed bytes exactly; a re-broadcast of a known transaction is fine, never a second, different transaction.
+ * BUILD-FLOFI-SINGLE-AUTH-WORKFLOW-UX-001: a submission with `notAfter` (a Borrow, whose safety is its fresh health-factor simulation, not an
+ * on-chain minimum) is never sent for the first time after that instant: SUBMISSION_STALE, and the executor keeps the step UNCERTAIN with
+ * attention. A transaction already known to the chain is never affected.
+ */
 async function broadcastEvm(ctx: StepContext, submission: Readonly<Record<string, unknown>>): Promise<void> {
+  const notAfter = typeof submission.notAfter === 'number' ? submission.notAfter : null;
   for (const tx of (submission.txs ?? []) as { raw: string; hash: string }[]) {
+    if (notAfter !== null && ctx.now().getTime() > notAfter) {
+      if (await ctx.transport.rpc('eth_getTransactionByHash', [tx.hash]).catch(() => null)) continue;
+      fail('SUBMISSION_STALE');
+    }
     try { await ctx.transport.rpc('eth_sendRawTransaction', [tx.raw]); }
     catch (cause) {
       if (await ctx.transport.rpc('eth_getTransactionByHash', [tx.hash]).catch(() => null)) continue;
@@ -152,7 +182,10 @@ export const evmSwapDriver: StepDriver = {
     return { plan, prepared: json({ calls, before: { tokenIn: inBefore, tokenOut: outBefore }, minimum }) };
   },
   async authorize(ctx, prepared) { return authorizeEvmCalls(ctx, prepared); },
-  async sign(ctx, prepared, signer) { return signEvmCalls(ctx, prepared, signer, (delegationSwapProfile(ctx.step.chain, ctx.mainnet) ?? fail('DRIVER_PROFILE_MISSING')).chainId); },
+  async sign(ctx, prepared, signer) {
+    const profile = delegationSwapProfile(ctx.step.chain, ctx.mainnet) ?? fail('DRIVER_PROFILE_MISSING');
+    return signEvmCalls(ctx, prepared, signer, profile.chainId, profile.environment === 'MAINNET' ? MAINNET_DEPENDENT_GAS : GAS_FLOOR);
+  },
   async broadcast(ctx, submission) { return broadcastEvm(ctx, submission); },
   async reconcile(ctx, submission, plan) {
     const t = ctx.transport, owner = ctx.binding.walletAddress, need = ctx.binding.need;
@@ -193,6 +226,10 @@ function aaveReserve(ctx: Pick<StepContext, 'binding' | 'mainnet'>, need: AaveNe
   if (delegationAavePool(ctx.binding.chain, ctx.mainnet) !== need.pool) return fail('DRIVER_PROFILE_MISSING');
   return delegationAaveReserve(ctx.binding.chain, need.pool, need.asset) ?? fail('DRIVER_PROFILE_MISSING');
 }
+/** A Borrow's signed bytes may be sent for the first time only this long after its fresh health-factor simulation (SUBMISSION_STALE after). */
+export const BORROW_BROADCAST_WINDOW_MS = 5 * 60_000;
+/** Gas of an Aave action after its exact approval on a mainnet (not estimable until the approval is mined; L1 data cost included on Arbitrum). */
+const MAINNET_DEPENDENT_GAS = 1_500_000n;
 /** A health factor in WAD as a decimal string (the manifest floor compares decimals); UINT256_MAX (no debt) is "Infinity". */
 const wadDecimal = (wad: bigint): string => wad >= (1n << 255n) ? 'Infinity' : `${wad / 10n ** 18n}.${(wad % 10n ** 18n).toString().padStart(18, '0')}`;
 export const evmAaveDriver: StepDriver = {
@@ -229,10 +266,10 @@ export const evmAaveDriver: StepDriver = {
     const plan: StepPlan = { ...base, actionType: 'borrow', targets: [need.pool], healthFactorAfter: wadDecimal(BigInt(estimate.healthFactorAfter)),
       simulationHash: domainDigest('flofi.delegated-step-simulation.v1', { calls, block: state.block, healthFactorAfter: estimate.healthFactorAfter, at: now }) };
     return { plan, prepared: json({ calls, before: { asset: state.balance, debt: state.borrow!.debt, healthFactor: state.borrow!.healthFactor, block: state.block },
-      healthFactorAfter: estimate.healthFactorAfter }) };
+      healthFactorAfter: estimate.healthFactorAfter, notAfter: now + BORROW_BROADCAST_WINDOW_MS }) };
   },
   async authorize(ctx, prepared) { return authorizeEvmCalls(ctx, prepared); },
-  async sign(ctx, prepared, signer) { return signEvmCalls(ctx, prepared, signer, aaveReserve(ctx, aaveNeed(ctx)).chainId); },
+  async sign(ctx, prepared, signer) { return signEvmCalls(ctx, prepared, signer, aaveReserve(ctx, aaveNeed(ctx)).chainId, MAINNET_DEPENDENT_GAS); },
   async broadcast(ctx, submission) { return broadcastEvm(ctx, submission); },
   async reconcile(ctx, submission) {
     const need = aaveNeed(ctx), reserve = aaveReserve(ctx, need), t = ctx.transport, owner = ctx.binding.walletAddress;
@@ -259,7 +296,7 @@ export const evmAaveDriver: StepDriver = {
     // Exactly the authorized amount arrived in the owner's account from the reserve; the account's health factor after is recorded.
     const drawn = transfers.filter(l => topicAddress(l.topics[1]) === aToken && topicAddress(l.topics[2]) === owner);
     if (drawn.length !== 1 || BigInt(drawn[0]!.data) !== need.amount) fail('RECONCILIATION_MISMATCH');
-    const account = String(await t.rpc('eth_call', [{ to: need.pool, data: D.selectorOf('getUserAccountData(address)') + addr(owner) }, 'latest']));
+    const account = String(await t.rpc('eth_call', [{ to: need.pool, data: D.selectorOf('getUserAccountData(address)') + addr(owner) }, action.blockNumber ?? 'latest']));
     const healthFactor = account.length >= 2 + 6 * 64 ? BigInt('0x' + account.slice(2 + 5 * 64, 2 + 6 * 64)) : null;
     return { status: 'CONFIRMED', spent: [], received: [{ asset: key, amount: need.amount }],
       evidence: { ...evidence, borrowed: need.amount.toString(), interestRateMode: 'VARIABLE', healthFactorAfter: healthFactor === null ? null : wadDecimal(healthFactor) } };
