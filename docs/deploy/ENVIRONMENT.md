@@ -392,6 +392,15 @@ Assets outside these feeds (other tokens, Robinhood Stock Tokens, every Token-20
 balances are shown by each mint's own Scaled UI Amount or Interest-Bearing rules at the cluster time; a mint FloFi cannot interpret is
 listed as unavailable. No migration and no new secret.
 
+## 5m. Flight FloFi campaign (BUILD-FLOFI-FLIGHT-001, `/board`, `/api/board/*`) — release: [RELEASE-FLIGHT-0020.md](RELEASE-FLIGHT-0020.md)
+
+No variable of its own. `/board` needs `DATABASE_URL` with migration 0020 applied (a build shipping 0020 refuses a database still at 19
+for every database-backed feature, not only `/board`: see the release order), the Privy variables of §5j (sign-in for "Board now") and
+`FLOFI_SESSION_SECRET` (it also keys the list form's rate-limit digest of the client's IPv4 address or IPv6 /64, from the platform's
+`x-real-ip`/`x-forwarded-for`; without it, or without an address, a request counts only toward the deployment-wide limit). Simulation
+evidence is recorded by the flow runtime's observer, registered at server start (`src/instrumentation.ts`, Node.js runtime). The campaign
+dates are code (list closes 2026-11-16 23:59 BRT, boarding opens 2026-11-17 09:00 BRT). Operators run `backend/flight-admin.ts`.
+
 ## 6. Platform-provided (read, never set by hand)
 
 `VERCEL` (`1`: hosted), `VERCEL_ENV` (`production`/`preview`/`development`), `VERCEL_GIT_COMMIT_REF` (Preview tenant derivation),
@@ -411,5 +420,7 @@ Mode A, bridge), `GRYLOO_PUBLIC_TESTNET_READ`, `GRYLOO_BASE_OBSERVATION=live`, `
 `_EXECUTOR_KEY_FILE`/`_SMOKE_PROFILE`, `GRYLOO_COMPOSITION_MODE`/`_PROFILE`/`_EXECUTOR_KEY_FILE`/`_ALLOW_MOCKED_UI`/`_SMOKE_PROFILE`,
 `GRYLOO_LIQUIDITY`/`_PROFILE`, `GRYLOO_COW`/`GRYLOO_COW_RUNTIME`, `GRYLOO_BRIDGE`, `FLOFI_DEVELOPER_WEBHOOK_LOOPBACK`, `FLOFI_TELEGRAM_API_BASE` (loopback Bot API double), `GRYLOO_CHANNEL_E2E`, and the
 browser-suite selectors `GRYLOO_*_E2E`,
-`GRYLOO_CLOUD_RUNTIME_E2E`, `FLOFI_E2E_*`, `TEST_DATABASE_URL`, `BUILD002_BROWSER_CACHE`, `GRYLOO_ANVIL_BIN`.
+`GRYLOO_CLOUD_RUNTIME_E2E`, `FLOFI_E2E_*`, `TEST_DATABASE_URL`, `BUILD002_BROWSER_CACHE`, `GRYLOO_ANVIL_BIN`,
+`FLOFI_FLIGHT_CLOCK_HARNESS=MOCKED_LOOPBACK_ONLY` and `FLOFI_FLIGHT_E2E` (BUILD-FLOFI-FLIGHT-001: the /board browser suite's campaign clock, set per
+browser by the `flofi_flight_clock` cookie; ignored on a hosted deployment, where the campaign always reads the real time).
 `GRYLOO_BASE_OBSERVATION=replay` is the one safe value on a deployment (it serves committed recordings).

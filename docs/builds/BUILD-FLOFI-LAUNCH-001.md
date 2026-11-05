@@ -43,7 +43,10 @@ existing `public/brand/site/` SVGs — the five images the boards use are byte-i
   390 px, the implementation does not.
 - Statuses stay the approved conservative ones (Beta · In testing · Coming soon); no metric, counter or capability was added.
 
-## Not built: the Flight FloFi `/board` campaign (Artifact 1)
+## Not built here: the Flight FloFi `/board` campaign (Artifact 1)
+
+> Built afterwards, on the owner's request, in [BUILD-FLOFI-FLIGHT-001](BUILD-FLOFI-FLIGHT-001.md) (a separate PR stacked on this one).
+> The analysis below is kept as it was written for this build.
 
 It conflicts with the approved landing and with the brief: the landing says "Public beta on mainnet" and opens the product directly, while
 `/board` is a **closed beta** whose "Board now" checks a list, an access batch and an invite before entry — an access gate the product does
