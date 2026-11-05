@@ -48,6 +48,11 @@ const sectionsPT: readonly Paragraphs[] = [
     'Sujeito à legislação aplicável, pode pedir acesso, retificação, eliminação, limitação, portabilidade ou opor-se ao tratamento. Para exercer os direitos, utilize o contacto indicado nesta página. Pode reclamar junto da Comissão Nacional de Proteção de Dados (CNPD), em www.cnpd.pt, ou da autoridade competente.',
     'Para deixar de receber mensagens da FloFi no Telegram, envie STOP. O estado da conversa e o endereço para resposta são apagados, mas certos registos técnicos sem conteúdo podem permanecer até ao fim do prazo indicado.'
   ] },
+  { title: 'Campanha Flight FloFi (/board)', id: 'campanha-flight-flofi', paragraphs: [
+    'Lista beta: quando entra na lista em flofi.xyz/board, a FloFi guarda o email que indicou (em minúsculas), o idioma da página e a versão do aviso apresentado, para o beta da FloFi e só para isso: avisar quando o seu grupo embarca e reconhecer a sua conta quando entrar com esse email. Base legal: o seu consentimento, dado ao enviar o formulário, que pode retirar a qualquer momento. Quando o seu grupo embarca, a equipa da FloFi envia-lhe esse aviso pelo serviço de email que utiliza, que trata o endereço só para esse envio. Para limitar abusos do formulário, é guardado durante um dia um resumo com chave (HMAC) da rede do pedido (o endereço IPv4, ou o prefixo /64 de um endereço IPv6) — nunca o próprio endereço.',
+    'Cartão de embarque: quando conclui uma simulação com a sua conta FloFi durante a campanha, a FloFi guarda durante duas horas a prova dessa simulação (identificador da conta, da execução, do fluxo e do fluxo de trabalho, e a rota simulada: redes e passos, nunca valores) e, ao emitir o cartão, guarda a rota (redes e passos, nunca valores), o número de embarque e, se o indicar, o seu @ do X. O seu @ e a sua rota só aparecem no painel público de partidas se o escolher; pode retirar essa escolha a qualquer momento. Os convites guardam qual conta usou cada código. Base legal: a execução da campanha que pediu e, para o painel público, o seu consentimento.',
+    'Conservação e eliminação: as entradas das listas são apagadas no fim do beta ou antes, a seu pedido; o cartão, a prova da simulação e o uso de convites são apagados com a sua conta FloFi. A FloFi guarda ainda contadores diários sem conteúdo (eventos da campanha com códigos fechados, sem identidade, endereço, pedido ou rota) durante 13 meses. A participação na campanha nunca condiciona o uso da FloFi.'
+  ] },
   { title: 'Memória e aprendizado do Copilot', id: 'memoria-copilot', paragraphs: [
     'O Copilot aprende de três formas separadas. (1) Dentro da conversa: quando você responde a uma pergunta do FloFi ou corrige como ele entendeu uma rede, um token ou uma ação, o restante da conversa usa esse entendimento. Isso fica só no estado temporário da conversa (no navegador ou, nos canais, no estado cifrado apagado após 30 minutos) e não é guardado.',
     '(2) Memória individual: quando o operador ativa esta funcionalidade e a base legal aplicável o permite, o FloFi pode guardar, só para essa carteira — uma carteira comprovada no seu navegador ou, com sessão iniciada numa conta FloFi, a única carteira dessa família de redes nessa conta — (ou só para esta conta do Telegram/WhatsApp), o significado de palavras que você usa (por exemplo, “arb sep” para Arbitrum Sepolia) depois de evidência repetida nas suas próprias interações, e o idioma em que costuma escrever. Guardamos a palavra curta, o que ela significa no vocabulário fechado da FloFi, contagens de evidência e as datas, com a identidade apenas como um resumo criptográfico; nunca mensagens, valores, endereços, destinatários, slippage, saldos, assinaturas ou decisões. Um significado aprendido nunca escolhe sozinho uma rede com fundos reais: o FloFi apenas mostra essa opção primeiro e você decide. Carteiras diferentes e contas de chat diferentes nunca são tratadas como a mesma pessoa.',
@@ -58,7 +63,7 @@ const sectionsPT: readonly Paragraphs[] = [
     'O bot apenas prepara propostas. Uma operação exige que o utilizador aceda à FloFi, comprove o controlo da carteira, obtenha uma simulação atualizada, reveja o Strategy Manifest e assine explicitamente na própria carteira. Nenhuma mensagem de Telegram autoriza movimentação de fundos. A partilha do estado de execução de volta ao chat é opcional.'
   ] },
   { title: 'Atualizações', paragraphs: [
-    'Esta informação poderá ser atualizada quando mudarem de forma relevante as funcionalidades ou os tratamentos. Revisão: 1 de novembro de 2026.'
+    'Esta informação poderá ser atualizada quando mudarem de forma relevante as funcionalidades ou os tratamentos. Revisão: 5 de novembro de 2026.'
   ] },
 ];
 const sectionsEN: readonly Paragraphs[] = [
@@ -84,6 +89,11 @@ const sectionsEN: readonly Paragraphs[] = [
     'Subject to applicable law, you may request access, correction, erasure, restriction, portability or object to processing. Use the contact on this page. You may lodge a complaint with the Portuguese data protection authority (CNPD), at www.cnpd.pt, or another competent authority.',
     'Send STOP to stop Telegram messaging. Conversation state and the reply address are erased, but certain content-free technical records may remain until the stated retention deadlines.'
   ] },
+  { title: 'Flight FloFi campaign (/board)', id: 'flight-flofi', paragraphs: [
+    'Beta list: when you join the list at flofi.xyz/board, FloFi stores the email you gave (lower-cased), the page language and the version of the notice shown, for the FloFi beta and only for it: to tell you when your group boards and to recognize your account when you sign in with that email. Legal basis: your consent, given by submitting the form, which you may withdraw at any time. When your group boards, the FloFi team sends you that notice through the email service it uses, which processes your address only to send it. To limit abuse of the form, a keyed digest (HMAC) of the request’s network (the IPv4 address, or the /64 prefix of an IPv6 address) — never the address itself — is kept for one day.',
+    'Boarding pass: when you complete a simulation with your FloFi account during the campaign, FloFi keeps proof of that simulation for two hours (account, run, flow and workflow identifiers, and the simulated route: networks and steps, never amounts) and, when it issues your pass, stores the route (networks and steps, never amounts), your boarding number and, if you give it, your X handle. Your handle and route appear on the public departures board only if you choose it, and you may withdraw that choice at any time. Invites record which account used each code. Legal basis: running the campaign you asked to join and, for the public board, your consent.',
+    'Retention and erasure: list entries are deleted at the end of the beta, or earlier on request; your pass, the simulation proof and invite use are deleted with your FloFi account. FloFi also keeps content-free daily counters (campaign events as closed codes, with no identity, address, request or route) for 13 months. Taking part in the campaign never conditions your use of FloFi.'
+  ] },
   { title: 'Copilot memory and learning', id: 'copilot-memory', paragraphs: [
     'The Copilot learns in three separate ways. (1) Within a conversation: when you answer one of FloFi’s questions or correct how it read a network, token or action, the rest of that conversation uses it. This stays in the conversation’s temporary state only (in your browser or, on channels, in the encrypted state erased after 30 minutes) and is not kept.',
     '(2) Individual memory: when the operator enables it and the applicable legal basis allows it, FloFi may keep, only for that wallet — a wallet you proved in your browser or, when you are signed in to a FloFi account, that account’s only wallet of that network family — (or only for this Telegram/WhatsApp account), what words you use mean (for example “arb sep” for Arbitrum Sepolia) after repeated evidence in your own interactions, and the language you usually write in. We keep the short word, what it means in FloFi’s closed vocabulary, evidence counts and dates, with your identity only as a cryptographic digest; never messages, amounts, addresses, recipients, slippage, balances, signatures or decisions. A learned meaning never selects a real-funds network on its own: FloFi only shows that option first and you decide. Different wallets and different chat accounts are never treated as the same person.',
@@ -94,7 +104,7 @@ const sectionsEN: readonly Paragraphs[] = [
     'The bot only prepares proposals. Any operation requires the user to open FloFi, prove wallet control, obtain a fresh simulation, review the Strategy Manifest and explicitly sign using their own wallet. No Telegram message can authorize a transfer. Sharing execution status with the chat is optional.'
   ] },
   { title: 'Updates', paragraphs: [
-    'This notice may be updated when features or processing change materially. Reviewed 1 November 2026.'
+    'This notice may be updated when features or processing change materially. Reviewed 5 November 2026.'
   ] },
 ];
 function Policy({ lang, heading, sections }: { lang: 'pt' | 'en'; heading: string; sections: readonly Paragraphs[] }) {
@@ -123,7 +133,7 @@ export default function PrivacyPage() {
         <span className={styles.kicker}>FLOFI / PRIVACY & TRUST</span>
         <h1>Privacidade, com clareza.<span>Privacy, made clear.</span></h1>
         <p>Informações sobre o site, o Telegram e os workflows da FloFi. Privacy information for the website, Telegram bot and wallet-controlled workflows.</p>
-        <span className={styles.date}>Atualização / Updated · 1 November 2026</span>
+        <span className={styles.date}>Atualização / Updated · 5 November 2026</span>
       </div>
       <aside className={styles.notice} aria-label="Financial authorization">
         <strong>O Telegram não pode movimentar os seus fundos. / Telegram cannot move your funds.</strong>

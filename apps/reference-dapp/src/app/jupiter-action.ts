@@ -4,7 +4,7 @@ import { JUPITER_SOLANA_MAINNET as profile } from '@defi-workflow-engine/action-
 import type { SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
 import { createJupiterService, type JupiterService, type JupiterWalletDiagnostic } from '../server/jupiter-service';
 import { createSolanaRpc, solanaRpcOverride } from '../server/solana-rpc';
-import { cloudFlow } from '../server/flow-runtime';
+import { cloudFlow } from './cloud-flow';
 import { createJupiterHttp } from '../server/jupiter-http';
 
 let service: JupiterService | null = null;

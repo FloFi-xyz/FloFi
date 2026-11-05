@@ -4,7 +4,7 @@ import { ORCA_WHIRLPOOLS_DEVNET as profile } from '@defi-workflow-engine/action-
 import type { SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
 import { createSolanaDevnetService, type SolanaSwapService, type SolanaSwapWalletDiagnostic } from '../server/jupiter-service';
 import { createSolanaRpc, solanaRpcOverride } from '../server/solana-rpc';
-import { cloudFlow } from '../server/flow-runtime';
+import { cloudFlow } from './cloud-flow';
 
 /**
  * Solana Devnet canonical swap through Orca Whirlpools with valueless test tokens. Simulation and Review are read-only.

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { deploymentEnvironment, deploymentTenant, isHostedDeployment } from './deployment.ts';
-import { cloudFlow, cloudFlowMode, cloudPreview, cloudRuns, flowRuntimeKind } from './flow-runtime.ts';
+import { cloudFlow, cloudFlowMode, cloudPreview, cloudRuns, flowRuntimeKind, observeSimulations } from './flow-runtime.ts';
 import { flowMode } from '../../backend/flows.ts';
 
 const VERCEL_PREVIEW = { VERCEL: '1', VERCEL_ENV: 'preview', VERCEL_GIT_COMMIT_REF: 'claude/build-cloud-parity-001' };
@@ -81,6 +81,38 @@ describe('BUILD-CLOUD-PARITY-001 flow runtime selection', () => {
     expect(String(url)).toBe('https://api.example/v1/flows/crosschain-router-testnet/info');
     expect(init?.headers).toMatchObject({ authorization: `Bearer ${'t'.repeat(40)}`, 'x-flofi-wallet-principal': principal });
     expect(await cloudFlowMode('crosschain-router-testnet', env)).toBe('live');
+  });
+  it('BUILD-FLOFI-FLIGHT-001: the simulation observer sees only successful simulations (simulate, prepare) and never changes, fails or holds the result', async () => {
+    const answer = { ok: true, value: { id: 'run-1', simulated: true } };
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async () => new Response(JSON.stringify(answer), { status: 200 }));
+    const env = { API_BASE_URL: 'https://api.example', API_AUTH_TOKEN: 't'.repeat(40) }, args = [{ workflowId: 'wf' }];
+    const seen: unknown[][] = [];
+    try {
+      observeSimulations(async (...call) => { seen.push(call); });
+      expect(await cloudFlow('jupiter-swap', 'simulate', args, { env })).toEqual(answer);
+      expect(await cloudFlow('jupiter-swap', 'quote', args, { env })).toEqual(answer);
+      expect(await cloudFlow('base-swap', 'prepare', args, { env })).toEqual(answer);
+      expect(await cloudFlow('base-swap', 'review', args, { env })).toEqual(answer);
+      expect(seen).toEqual([[{ flow: 'jupiter-swap', method: 'simulate', args, value: answer.value }, env],
+        [{ flow: 'base-swap', method: 'prepare', args, value: answer.value }, env]]);
+      observeSimulations(() => { throw new Error('sync'); });
+      expect(await cloudFlow('jupiter-swap', 'simulate', args, { env })).toEqual(answer);
+      observeSimulations(async () => { throw new Error('async'); });
+      expect(await cloudFlow('jupiter-swap', 'simulate', args, { env })).toEqual(answer);
+      // A hanging observer holds the simulation for at most two seconds.
+      vi.useFakeTimers();
+      observeSimulations(() => new Promise<void>(() => {}));
+      const pending = cloudFlow('jupiter-swap', 'simulate', args, { env });
+      await vi.advanceTimersByTimeAsync(2_000);
+      expect(await pending).toEqual(answer);
+      // A failed simulation is never observed.
+      vi.useRealTimers();
+      seen.length = 0;
+      observeSimulations(async (...call) => { seen.push(call); });
+      vi.spyOn(globalThis, 'fetch').mockImplementation(async () => new Response(JSON.stringify({ ok: false, code: 'QUOTE_EXPIRED' }), { status: 200 }));
+      expect(await cloudFlow('jupiter-swap', 'simulate', args, { env })).toEqual({ ok: false, code: 'QUOTE_EXPIRED' });
+      expect(seen).toEqual([]);
+    } finally { vi.useRealTimers(); observeSimulations(null); }
   });
   it('an embedded runtime with an unusable configuration fails closed with a classified code', async () => {
     expect(await cloudFlow('aave-supply', 'mode', [], { env: { ...VERCEL_PREVIEW, DATABASE_URL: 'mysql://db/x' } })).toEqual({ ok: false, code: 'DATABASE_URL_REQUIRED' });

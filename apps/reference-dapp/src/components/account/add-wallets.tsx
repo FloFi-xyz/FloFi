@@ -9,6 +9,7 @@
  * Each button is disabled while its operation runs; a refresh, a timeout or a closed tab is recovered on the next visit (the server saves
  * any Privy wallet the account does not list yet). Creating or importing a wallet authorizes no transaction and delegates no permission.
  */
+import { afterOnboardingPath } from '../../flight/app-boarding';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useLocale } from '../../i18n/locale';
 import { savePrivyWallet, setAccountOnboarding, syncPrivyWallets, type AccountState } from '../../app/account-action';
@@ -97,7 +98,8 @@ export function AddWallets({ state }: { state: AccountState }) {
   async function finish(value: 'completed' | 'dismissed') {
     setBusy('save'); setError(null);
     await setAccountOnboarding(value).catch(() => undefined);
-    window.location.assign('/app');
+    // BUILD-FLOFI-FLIGHT-001: after /board's "Board now", onboarding returns there; otherwise /app, as before.
+    window.location.assign(afterOnboardingPath());
   }
 
   const valid = wallets.filter(wallet => isPrivyWallet(wallet) || isLegacyWallet(wallet) || wallet.origin === 'external');

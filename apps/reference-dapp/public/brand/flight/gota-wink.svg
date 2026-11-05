@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 400" role="img" aria-label="Opção D: gota com fone de comissária, piscando e erguendo um cartão de embarque">
+          <g fill="#FFFFFF" stroke="#FFFFFF" stroke-width="26" stroke-linecap="round" stroke-linejoin="round">
+            <path fill="none" d="M176 322 V358 H160 M224 322 V358 H240 M118 252 C98 264 90 282 94 300 M282 238 C312 222 326 192 324 160"></path>
+            <circle cx="324" cy="154" r="11"></circle><circle cx="95" cy="306" r="10"></circle>
+            <path d="M200 60 C236 128 286 176 286 240 a86 86 0 0 1 -172 0 C114 176 164 128 200 60 Z"></path>
+            <g transform="rotate(-10 200 112)"><rect x="144" y="92" width="112" height="34" rx="12"></rect><rect x="132" y="118" width="136" height="20" rx="10"></rect></g>
+            <g transform="rotate(12 348 114)"><rect x="296" y="84" width="104" height="60" rx="8"></rect></g>
+          </g>
+          <path fill="none" stroke="#041B3D" stroke-width="10" stroke-linecap="round" stroke-linejoin="round" d="M176 322 V358 H160 M224 322 V358 H240 M118 252 C98 264 90 282 94 300 M282 238 C312 222 326 192 324 160"></path>
+          <path fill="#FFFFFF" stroke="#041B3D" stroke-width="10" stroke-linejoin="round" d="M200 60 C236 128 286 176 286 240 a86 86 0 0 1 -172 0 C114 176 164 128 200 60 Z"></path>
+          <circle cx="95" cy="306" r="10" fill="#FFFFFF" stroke="#041B3D" stroke-width="8"></circle>
+          <ellipse cx="152" cy="252" rx="12" ry="7" fill="#C9D2F8"></ellipse><ellipse cx="248" cy="252" rx="12" ry="7" fill="#C9D2F8"></ellipse>
+          <path fill="none" stroke="#041B3D" stroke-width="8" stroke-linecap="round" d="M163 230 Q174 218 185 230"></path>
+          <rect x="220" y="212" width="12" height="30" rx="6" fill="#041B3D"></rect>
+          <path fill="#041B3D" d="M184 254 h32 a16 16 0 0 1 -32 0 Z"></path>
+          <path fill="none" stroke="#041B3D" stroke-width="6" stroke-linecap="round" d="M262 142 C284 178 284 232 246 262"></path>
+          <rect x="230" y="254" width="20" height="14" rx="7" fill="#041B3D"></rect>
+          <g transform="rotate(-10 200 112)"><rect x="144" y="92" width="112" height="34" rx="12" fill="#FFFFFF" stroke="#041B3D" stroke-width="10"></rect><rect x="132" y="118" width="136" height="20" rx="10" fill="#2343D9" stroke="#041B3D" stroke-width="10"></rect></g>
+          <g transform="rotate(12 348 114)">
+            <rect x="296" y="84" width="104" height="60" rx="8" fill="#FFFFFF" stroke="#041B3D" stroke-width="7"></rect>
+            <rect x="301" y="89" width="94" height="14" rx="4" fill="#2343D9"></rect>
+            <path fill="none" stroke="#041B3D" stroke-width="4" stroke-linecap="round" stroke-dasharray="1 8" d="M372 108 V138"></path>
+            <text x="312" y="132" font-family="'IBM Plex Mono',monospace" font-weight="500" font-size="18" fill="#041B3D">FLF</text>
+          </g>
+          <circle cx="324" cy="154" r="11" fill="#FFFFFF" stroke="#041B3D" stroke-width="8"></circle>
+          <path fill="#FFFFFF" d="M112 60 C114 76 120 82 136 84 C120 86 114 92 112 108 C110 92 104 86 88 84 C104 82 110 76 112 60 Z"></path>
+        </svg>

@@ -20,6 +20,7 @@ import type { Backend, BackendOptions } from '../../backend/app.ts';
 import type { FlowName } from '../../backend/flows.ts';
 import { callCloudFlow, listCloudRuns, previewCloudFlow, readCloudRun, type CloudRunSummary, type FlowResult } from './cloud-api-client.ts';
 import { isHostedDeployment } from './deployment.ts';
+import { notifySimulation } from './simulation-observer.ts';
 import { serverlessPostgresConfig } from './postgres-config.ts';
 import { testNetworkFlowRefusal, testNetworkPreviewRefusal } from './test-network-flows.ts';
 
@@ -114,10 +115,17 @@ export async function cloudFlow<T>(flow: FlowName, method: string, args: readonl
   if (refusal) return { ok: false, code: refusal };
   if (kind === 'local') return null;
   if (kind === 'unconfigured') return { ok: false, code: 'CLOUD_RUNTIME_NOT_CONFIGURED' };
-  if (kind === 'remote') return callCloudFlow<T>(flow, method, args, { ...options, env, principal });
-  try { return await (await embeddedRuntime(env)).backend.callFlow(flow, method, args, undefined, principal) as FlowResult<T>; }
-  catch (error) { return { ok: false, code: classified(error, 'CLOUD_RUNTIME_UNAVAILABLE') }; }
+  let result: FlowResult<T>;
+  if (kind === 'remote') result = await callCloudFlow<T>(flow, method, args, { ...options, env, principal });
+  else {
+    try { result = await (await embeddedRuntime(env)).backend.callFlow(flow, method, args, undefined, principal) as FlowResult<T>; }
+    catch (error) { return { ok: false, code: classified(error, 'CLOUD_RUNTIME_UNAVAILABLE') }; }
+  }
+  // BUILD-FLOFI-FLIGHT-001: a successful simulation is shown to the simulation observer (`simulation-observer.ts`), which cannot change it.
+  if ((method === 'simulate' || method === 'prepare') && result.ok) await notifySimulation({ flow, method, args, value: result.value }, env);
+  return result;
 }
+
 /** The deployment's enablement of one flow (`null` in local mode). Any runtime failure reads as `off`: fail closed. */
 export async function cloudFlowMode(flow: FlowName, env: Env = process.env, transport?: typeof fetch): Promise<FlowRuntimeMode | null> {
   const result = await cloudFlow<unknown>(flow, 'mode', [], { env, ...transport ? { transport } : {} });
@@ -183,3 +191,4 @@ export async function cloudRuns(flow: FlowName, principal: string, env: Env = pr
   try { return { ok: true, value: (await (await embeddedRuntime(env)).runs(flow, principal)).filter(r => r.ownerAccount === principal && r.flow === flow) }; }
   catch (error) { return { ok: false, code: classified(error, 'CLOUD_RUNTIME_UNAVAILABLE') }; }
 }
+export { observeSimulations, type SimulationCall, type SimulationObserver } from './simulation-observer.ts';
