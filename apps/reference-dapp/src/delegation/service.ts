@@ -33,7 +33,7 @@ import { ENGINE_VERSION } from '../platform/index.ts';
 import { b64url, fromB64url, rpIdOf, verifyAssertion, verifyRegistration } from '../passkeys/webauthn.ts';
 import { ADAPTERS, passkeyAnchor } from './adapters.ts';
 import { resolveAuthorityGraph, scopeHash, type EvmClassScope, type GrantScope, type StepBinding } from './authority.ts';
-import { delegationAavePool, delegationSwapProfile } from './profiles.ts';
+import { delegationAavePool, delegationAaveReserve, delegationSwapProfile } from './profiles.ts';
 import { ENFORCEMENT, stepCapability } from './capabilities.ts';
 import { digestBytes } from './canonical.ts';
 import type { ChainTransport } from './chains.ts';
@@ -47,7 +47,7 @@ import type { DelegationStore, ExecutionRecord, GrantRecord, PasskeyRecord } fro
 import { periodStarts } from './policy.ts';
 import type { SignerAdmin } from './runtime.ts';
 import { assetKey, requirementOf, type WorkflowRequirement } from './steps.ts';
-import { pinnedNeed, planWorkflowGrants, WORKFLOW_GRANT_WINDOW_MS, workflowScopeProblem, type EvmWorkflowScope, type SerialWorkflowCall } from './workflow-grants.ts';
+import { pinnedNeed, planWorkflowGrants, WORKFLOW_GRANT_SIGN_MARGIN_MS, WORKFLOW_GRANT_WINDOW_MS, workflowScopeProblem, type EvmWorkflowScope, type SerialWorkflowCall } from './workflow-grants.ts';
 import type { AuthorizationView, BudgetView, CapabilityRowView, CreatedView, DelegationOverviewView, ExecutionView, GrantView, ManifestView, WalletWorkflowReviewView, PasskeyOptionsView,
   PasskeyView, PreviewView, ReviewView } from './views.ts';
 
@@ -451,7 +451,15 @@ export function createDelegationService(deps: DelegationServiceDeps) {
     async workflowRunAuthorizationReview(owner: Owner, run: { readonly runId: string; readonly strategy: StrategyInput; readonly workflowHash: string;
       readonly validitySeconds: number }): Promise<ReviewView> {
       let a = await store.authorizationForRun(run.runId);
-      if (!a) {
+      // A pending review whose grants are expiring (or failed) is re-planned as a NEW revision with new grants: a stale grant is never signed.
+      let stale = false;
+      if (a && a.state === 'PENDING_SIGNATURE') {
+        const latest = await store.revision(a.authorizationId, a.latestRevision);
+        const ids = [...new Set((latest?.manifest.credentials ?? []).map(c => c.grantId))];
+        const grants = await Promise.all(ids.map(id => store.grant(owner, id)));
+        stale = !ids.length || grants.some(g => !g || g.state === 'FAILED' || g.expiresAt.getTime() - deps.now().getTime() < WORKFLOW_GRANT_SIGN_MARGIN_MS);
+      }
+      if (!a || stale) {
         const composed = composeWorkflowBound(run.strategy, run.workflowHash);
         if (!composed.ok) refuse('WORKFLOW_RUN_STALE');
         const req = requirementOf(composed as Extract<typeof composed, { ok: true }>);
@@ -509,7 +517,15 @@ export function createDelegationService(deps: DelegationServiceDeps) {
       const wallet = run.wallet.toLowerCase();
       if (!/^0x[0-9a-f]{40}$/.test(wallet)) refuse('WALLET_SESSION_REQUIRED');
       let a = await store.authorizationForRun(run.runId);
-      if (!a) {
+      // A pending review whose grants are expiring (or failed) is re-planned as a NEW revision with new grants: a stale grant is never signed.
+      let stale = false;
+      if (a && a.state === 'PENDING_SIGNATURE') {
+        const latest = await store.revision(a.authorizationId, a.latestRevision);
+        const ids = [...new Set((latest?.manifest.credentials ?? []).map(c => c.grantId))];
+        const grants = await Promise.all(ids.map(id => store.grant(owner, id)));
+        stale = !ids.length || grants.some(g => !g || g.state === 'FAILED' || g.expiresAt.getTime() - deps.now().getTime() < WORKFLOW_GRANT_SIGN_MARGIN_MS);
+      }
+      if (!a || stale) {
         const composed = composeWorkflowBound(run.strategy, run.workflowHash);
         if (!composed.ok) refuse('WORKFLOW_RUN_STALE');
         const req = requirementOf(composed as Extract<typeof composed, { ok: true }>);
@@ -541,14 +557,15 @@ export function createDelegationService(deps: DelegationServiceDeps) {
         }
         bindings.sort((x, y) => x.stepIndex - y.stepIndex);
         const spend = executionSpend(requirement), slippage = Math.max(0, ...requirement.steps.map(x => x.slippageBps ?? 0));
-        const authorizationId = deps.newId('dau');
-        const manifest = buildManifest({ owner: ownerKey(owner), authorizationId, revision: 1, now, validFrom, expiresAt, timezone: 'UTC', engineVersion: ENGINE_VERSION,
+        const authorizationId = a?.authorizationId ?? deps.newId('dau'), revision = a ? a.latestRevision + 1 : 1;
+        const manifest = buildManifest({ owner: ownerKey(owner), authorizationId, revision, now, validFrom, expiresAt, timezone: 'UTC', engineVersion: ENGINE_VERSION,
           requirement, bindings, limits: { assets: [...spend.entries()].map(([asset, amount]) => ({ asset, maxPerExecution: amount.toString(),
             budgets: [{ period: 'DAY' as const, amount: amount.toString() }] })), maxExecutionsPerPeriod: { count: 1, period: 'MONTH' }, cooldownSeconds: 0, maxSlippageBps: slippage } });
-        await deps.db.transaction(tx => store.createAuthorization(tx, owner, { authorizationId, workflowRunId: run.runId, strategy: requirement.strategy, manifest,
+        if (a) await store.newRevision(owner, { authorizationId, strategy: requirement.strategy, manifest, manifestHash: manifestHash(manifest), widening: [] }, now);
+        else await deps.db.transaction(tx => store.createAuthorization(tx, owner, { authorizationId, workflowRunId: run.runId, strategy: requirement.strategy, manifest,
           manifestHash: manifestHash(manifest) }, now));
         const envelope = walletWorkflowAuthorization(manifest, { origin: config.passkeyOrigin, tenant: config.tenantId, nonce: randomBytes(16).toString('hex') });
-        await store.prepareReview(owner, authorizationId, 1, envelope, authorizationDigest(envelope), now);
+        await store.prepareReview(owner, authorizationId, revision, envelope, authorizationDigest(envelope), now);
         deps.log('delegation.workflow_wallet_authorization_created', { authorization: authorizationId, steps: requirement.steps.length, chains: chains.length });
         a = (await store.authorizationForRun(run.runId))!;
       }
@@ -560,8 +577,11 @@ export function createDelegationService(deps: DelegationServiceDeps) {
       const requirement = req?.ok ? req.value : null;
       const grants = await Promise.all([...new Set(rev!.manifest.credentials.map(c => c.grantId))].map(id => store.grant(owner, id)));
       const item = (chain: string, call: SerialWorkflowCall) => {
-        const p = delegationSwapProfile(chain, config.mainnetChains);
-        const sym = (token: string) => p ? token === p.usdc ? 'USDC' : token === p.weth ? 'WETH' : token : token, units = (token: string) => sym(token) === 'USDC' ? 6 : 18;
+        // Symbol and decimals from the verified registries (the swap profile's USDC/WETH, else the Aave reserve), never guessed.
+        const p = delegationSwapProfile(chain, config.mainnetChains), pool = delegationAavePool(chain, config.mainnetChains);
+        const reserve = (token: string) => pool ? delegationAaveReserve(chain, pool, token) : null;
+        const sym = (token: string) => p && token === p.usdc ? 'USDC' : p && token === p.weth ? 'WETH' : reserve(token)?.symbol ?? token;
+        const units = (token: string) => p && token === p.usdc ? 6 : p && token === p.weth ? 18 : reserve(token)?.decimals ?? refuse('WORKFLOW_GRANT_ASSET_UNKNOWN');
         if (call.kind === 'ERC20_APPROVE') {
           const spender = delegationAavePool(chain, config.mainnetChains) === call.spender ? 'AAVE_V3_POOL' as const : 'UNISWAP_V3_ROUTER' as const;
           const amount = display(call.amount, units(call.token));
@@ -613,6 +633,8 @@ export function createDelegationService(deps: DelegationServiceDeps) {
       for (const c of rev!.manifest.credentials.filter((c, i, all) => all.findIndex(o => o.grantId === c.grantId) === i)) {
         let grant = await store.grant(owner, c.grantId) ?? refuse('CREDENTIAL_NOT_FOUND');
         if (!('kind' in grant!.scope) || grant!.scope.kind !== 'WORKFLOW' || grant!.scope.workflowRunId !== runId) refuse('WORKFLOW_GRANT_SCOPE_INVALID');
+        // Never activate a grant too close to its expiry: the review is planned again (a new revision) instead.
+        if (grant!.expiresAt.getTime() - deps.now().getTime() < WORKFLOW_GRANT_SIGN_MARGIN_MS) refuse('CREDENTIAL_EXPIRING');
         if (grant!.state === 'PENDING_SIGNATURE') {
           const signature = given.get(c.grantId) ?? refuse('AUTHORIZATION_SIGNATURE_MISSING');
           const transport = deps.transport(grant!.chain, 'owner') ?? refuse('DELEGATION_CHAIN_UNAVAILABLE');

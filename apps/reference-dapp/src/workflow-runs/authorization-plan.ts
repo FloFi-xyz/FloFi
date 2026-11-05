@@ -96,8 +96,14 @@ export function authorizationPlan(workflow: WorkflowComposition, gates: Pick<Gat
     return !producer || !consumer || producer.chain !== consumer.chain || !['swap', 'borrow'].includes(producer.action) || consumer.action === 'borrow';
   }) : undefined;
   const solana = req.ok && req.value.steps.some(s => s.namespace !== 'eip155');
+  // What the grant planner would refuse anyway (delegation/workflow-grants.ts), reported before the owner opens the review.
+  const steep = req.ok && req.value.steps.some(s => s.action === 'swap' && (s.slippageBps ?? 0) > 300);
+  const callsPerChain = new Map<string, number>();
+  if (req.ok) for (const s of req.value.steps) callsPerChain.set(s.chain, (callsPerChain.get(s.chain) ?? 0) + (s.action === 'borrow' ? 1 : 2));
+  const crowded = [...callsPerChain.values()].some(n => n > 16);
   const delegatedReason = runsOff ?? (!delegation ? 'DELEGATION_NOT_ENABLED' : delegation.unavailable) ?? (notCapable ? notCapable.delegation.code ?? 'DELEGATED_AUTHORITY_UNAVAILABLE'
-    : solana ? 'WORKFLOW_GRANT_NAMESPACE_UNSUPPORTED' : inexact ? 'WORKFLOW_BINDING_NOT_EXACT' : gates.enabledByPolicy.reason ?? null);
+    : solana ? 'WORKFLOW_GRANT_NAMESPACE_UNSUPPORTED' : inexact ? 'WORKFLOW_BINDING_NOT_EXACT' : steep ? 'WORKFLOW_SLIPPAGE_UNSUPPORTED'
+    : crowded ? 'WORKFLOW_GRANT_TOO_MANY_CALLS' : gates.enabledByPolicy.reason ?? null);
   const bindingCodes = workflow.bindings.map(b => ({ step: b.step, amountFrom: b.amountFrom, confirmEachStep: 'RECONCILED_RECEIVED_AMOUNT' as const,
     delegated: 'SIGNED_GUARANTEED_MINIMUM' as const }));
   const confirmAvailable = confirmReason === null, delegatedAvailable = delegatedReason === null;

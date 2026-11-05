@@ -24,6 +24,10 @@ export const portugueseWorkflowRuns: Readonly<Record<string, string>> = {
   'A step depends on an amount that cannot be fixed on chain when you sign (for example after a bridge).': 'Uma etapa depende de um valor que não pode ser fixado on-chain quando você assina (por exemplo, após uma ponte).',
   'Solana steps cannot be authorized once yet: confirm each step in your wallet.': 'Etapas na Solana ainda não podem ser autorizadas de uma vez: confirme cada etapa na sua carteira.',
   'This network has no verified delegation framework yet.': 'Esta rede ainda não tem um framework de delegação verificado.',
+  'A swap allows more than 3% slippage, which cannot be authorized once.': 'Uma troca permite mais de 3% de slippage, o que não pode ser autorizado de uma vez.',
+  'This workflow has too many calls on one network to authorize once.': 'Este fluxo tem chamadas demais em uma rede para ser autorizado de uma vez.',
+  'Revoking stops FloFi from starting any further step. Submitted transactions keep being observed. The calls you signed stay valid on chain until they expire (at most one hour); to cancel them on chain at once, revoke them from your wallet in FloFi → Credentials.':
+    'Revogar impede a FloFi de iniciar qualquer outra etapa. As transações enviadas continuam sendo observadas. As chamadas que você assinou continuam válidas on-chain até expirarem (no máximo uma hora); para cancelá-las on-chain imediatamente, revogue-as com sua carteira em FloFi → Credenciais.',
   'Switch this wallet to a MetaMask smart account (one time, in MetaMask), then sign again.': 'Converta esta carteira em uma conta inteligente MetaMask (uma vez, no MetaMask) e assine de novo.',
   'Authorized once with your passkey': 'Autorizado uma vez com a sua passkey', 'You confirm each step in your wallet': 'Você confirma cada etapa na sua carteira',
   'Choose how to authorize this workflow. Each step starts only after the previous one is reconciled on chain.':

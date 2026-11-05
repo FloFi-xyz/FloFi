@@ -123,7 +123,10 @@ export const evmAdapter: AuthorityAdapter = {
     for (const address of used) if (['0x', '0x0'].includes(await codeAt(t, address))) return { ok: false, code: 'DELEGATION_FRAMEWORK_NOT_DEPLOYED' };
     const hash = D.delegationHash(unsigned);
     if (await disabledOnChain(t, hash)) return { ok: false, code: 'DELEGATION_DISABLED' };
-    return { ok: true, commitment: hash, payload: { delegation: serializeDelegation({ ...unsigned, signature: response.signature.toLowerCase() }), delegationHash: hash, chainId },
+    // BUILD-FLOFI-UNIVERSAL-SINGLE-AUTH-MAINNET-001: a recovery byte of 0/1 (some wallets) is stored as 27/28, the form the account's ECDSA check accepts.
+    const raw = response.signature.toLowerCase(), v = parseInt(raw.slice(-2), 16);
+    const signature = v < 27 ? raw.slice(0, -2) + (v + 27).toString(16).padStart(2, '0') : raw;
+    return { ok: true, commitment: hash, payload: { delegation: serializeDelegation({ ...unsigned, signature }), delegationHash: hash, chainId },
       verification: { checks: ['OWNER_SIGNATURE', 'EIP7702_DESIGNATOR', 'FRAMEWORK_CODE', 'NOT_DISABLED'], provenance: t.provenance } };
   },
   async reconcileAuthorityState(grant, t, now) {

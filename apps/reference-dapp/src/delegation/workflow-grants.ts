@@ -35,6 +35,8 @@ export type EvmWorkflowScope = Extract<GrantScope, { readonly kind: 'WORKFLOW' }
 export const isWorkflowScope = (scope: GrantScope): scope is EvmWorkflowScope => 'kind' in scope && scope.kind === 'WORKFLOW';
 /** The longest a workflow grant is valid for (single-chain runs settle in minutes; the run itself expires with its authorization). */
 export const WORKFLOW_GRANT_WINDOW_MS = 60 * 60_000;
+/** A grant closer than this to its expiry is never signed or activated (its review is planned again). */
+export const WORKFLOW_GRANT_SIGN_MARGIN_MS = 15 * 60_000;
 
 export function workflowCallOf(c: SerialWorkflowCall): erc7710.WorkflowCall {
   if (c.kind === 'ERC20_APPROVE') return { kind: c.kind, token: c.token, spender: c.spender, amount: BigInt(c.amount) };
@@ -112,6 +114,8 @@ export async function planWorkflowGrants(requirement: WorkflowRequirement, deps:
       if (!producer || producer.chain !== step.chain || !produced || produced.asset !== key || key !== assetKey(input)) return refuse('WORKFLOW_BINDING_NOT_EXACT');
       amount = produced.amount < BigInt(binding.cap) ? produced.amount : BigInt(binding.cap);
       if (amount <= 0n) return refuse('WORKFLOW_BINDING_NOT_EXACT');
+      // Several consumers of one producer share its guarantee: each takes what the earlier ones left.
+      guaranteed.set(binding.amountFrom, { asset: produced.asset, amount: produced.amount - amount });
     }
     const entry = chains.get(step.chain) ?? { calls: [], steps: [] };
     chains.set(step.chain, entry);
@@ -157,6 +161,7 @@ export async function planWorkflowGrants(requirement: WorkflowRequirement, deps:
 export function workflowScopeProblem(requirement: WorkflowRequirement, scope: EvmWorkflowScope, mode: CapabilityMode, mainnet: readonly string[]): string | null {
   if (scope.maxCalls !== scope.calls.length || !scope.calls.length) return 'WORKFLOW_GRANT_SCOPE_INVALID';
   const used = scope.steps.flatMap(s => s.calls);
+  if (new Set(scope.steps.map(s => s.stepIndex)).size !== scope.steps.length) return 'WORKFLOW_GRANT_SCOPE_INVALID';
   if (new Set(used).size !== used.length || used.length !== scope.calls.length || used.some(i => i < 0 || i >= scope.calls.length)) return 'WORKFLOW_GRANT_SCOPE_INVALID';
   for (const s of scope.steps) {
     const step = requirement.steps[s.stepIndex];
@@ -166,7 +171,8 @@ export function workflowScopeProblem(requirement: WorkflowRequirement, scope: Ev
     const calls = s.calls.map(i => scope.calls[i]!), input = step.inputs[0];
     if (!input || step.inputs.length !== 1) return 'WORKFLOW_GRANT_SCOPE_INVALID';
     const binding = requirement.bindings.find(b => b.step === s.stepIndex);
-    const amountOk = (amount: string) => binding ? BigInt(amount) > 0n && BigInt(amount) <= BigInt(binding.cap) && BigInt(amount) <= producerGuarantee(scope, binding.amountFrom)
+    const amountOk = (amount: string) => binding ? BigInt(amount) > 0n && BigInt(amount) <= BigInt(binding.cap)
+      && BigInt(amount) + consumedBefore(requirement, scope, binding.amountFrom, s.stepIndex) <= producerGuarantee(scope, binding.amountFrom)
       : BigInt(amount) === input.amount;
     const need = capability.need;
     if (need.kind === 'EVM_UNISWAP_V3_EXACT_INPUT_SINGLE') {
@@ -193,6 +199,14 @@ export function workflowScopeProblem(requirement: WorkflowRequirement, scope: Ev
     } else return 'DELEGATION_TEMPLATE_NOT_IMPLEMENTED';
   }
   return null;
+}
+/** What earlier consumers of the same producer already take of its guarantee, from their own pinned amounts. */
+function consumedBefore(requirement: WorkflowRequirement, scope: EvmWorkflowScope, producer: number, consumer: number): bigint {
+  return requirement.bindings.filter(b => b.amountFrom === producer && b.step < consumer).reduce((sum, b) => {
+    const st = scope.steps.find(x => x.stepIndex === b.step), main = st ? scope.calls[st.calls.at(-1)!] : undefined;
+    const taken = main?.kind === 'UNISWAP_V3_EXACT_INPUT_SINGLE' ? BigInt(main.amountIn) : main && 'amount' in main ? BigInt(main.amount) : 0n;
+    return sum + taken;
+  }, 0n);
 }
 /** The on-chain guarantee of a producer step in the same scope: its swap's signed minimum, or its borrow's exact amount (0 when none). */
 function producerGuarantee(scope: EvmWorkflowScope, stepIndex: number): bigint {

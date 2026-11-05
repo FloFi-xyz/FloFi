@@ -202,8 +202,12 @@ export function createPgDelegationStore(db: Database, tenantId: string) {
     insertGrant: (owner: Owner, g: { readonly grantId: string; readonly credentialId: string; readonly chain: string; readonly mechanism: Mechanism;
       readonly scope: GrantScope; readonly scopeHash: string; readonly passkeyId: string | null; readonly sessionKeyRef: string; readonly sessionAddress: string;
       readonly enrollment: Readonly<Record<string, unknown>>; readonly expiresAt: Date }, now: Date) => db.transaction(async tx => {
+      // Reusable Credentials: at most 20 live per owner. BUILD-FLOFI-UNIVERSAL-SINGLE-AUTH-MAINNET-001: workflow grants (one run each, at most
+      // one hour) count only until they expire, in their own bound, so an abandoned review can never lock an owner out.
+      const workflow = (g.scope as { kind?: unknown }).kind === 'WORKFLOW';
       const live = (await tx.query<{ n: number }>(`SELECT count(*)::int AS n FROM credential_grants WHERE tenant_id = $1 AND owner_namespace = $2 AND owner_account = $3
-        AND state IN ('PENDING_SIGNATURE', 'ACTIVE', 'UNCERTAIN')`, [tenantId, owner.namespace, owner.address])).rows[0]!.n;
+        AND state IN ('PENDING_SIGNATURE', 'ACTIVE', 'UNCERTAIN') AND ((scope->>'kind') IS NOT DISTINCT FROM $4) AND ($4::text IS NULL OR expires_at > $5)`,
+      [tenantId, owner.namespace, owner.address, workflow ? 'WORKFLOW' : null, now])).rows[0]!.n;
       if (live >= 20) refuse('CREDENTIAL_GRANT_LIMIT');
       await tx.query(`INSERT INTO credential_grants (tenant_id, grant_id, credential_id, owner_namespace, owner_account, chain, mechanism, state, scope, scope_hash, passkey_id,
           session_key_ref, session_address, enrollment, expires_at, created_at, updated_at)

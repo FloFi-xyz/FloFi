@@ -97,6 +97,29 @@ describe('BUILD-FLOFI-UNIVERSAL-SINGLE-AUTH-MAINNET-001 delegated workflow run (
     } finally { await t.drop(); }
   });
 
+  it('a better price after review never blocks a signed swap; a price below the signed minimum stops the step before anything is sent', async () => {
+    const t = await createTestDatabase();
+    try {
+      const h = await workflowRunHarness(t.db);
+      const approval = await h.request(BOUND);
+      await claim(h, approval.secret);
+      const run = await ownedRun(h.runs, approval.approvalId, [h.evm, h.sol]);
+      const review = await authorizationReviewSequential(h.runs, run, [h.evm, h.sol]), grant = review.grants[0]!;
+      // 5% more WETH per USDC than at review: step 1 (USDC → WETH) gets more than its signed minimum and runs; step 2 (WETH → USDC) now
+      // quotes below ITS signed minimum, so it stops before anything is signed and the WETH rests in the owner's wallet.
+      h.d.evm.control.setPrice(420_000_000_000_000n);
+      await workflowRunAuthorize(h.surface, approval.secret, [h.evm, h.sol], review.revision,
+        [{ grantId: grant.grantId, signature: await h.d.evmOwner.signDigest(grant.digest) }], h.d.now());
+      await h.drain(run.runId);
+      const steps = await h.store.steps(run.runId);
+      expect(steps[0]).toMatchObject({ state: 'RECONCILED' });
+      expect(BigInt(steps[0]!.outcome!.received[0]!.amount)).toBe(4_200_000_000_000_000n);
+      expect(steps[1]!.state).not.toBe('RECONCILED');
+      const execution = (await t.db.query(`SELECT state, code FROM delegated_executions WHERE workflow_run_id = $1`, [run.runId])).rows[0];
+      expect(execution).toMatchObject({ state: 'HALTED', code: 'QUOTE_BELOW_SIGNED_MINIMUM' });
+    } finally { await t.drop(); }
+  });
+
   it('refuses a signature by any other key and never starts the run; the owner\'s own signature still works afterwards', async () => {
     const t = await createTestDatabase();
     try {

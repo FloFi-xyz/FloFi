@@ -75,7 +75,9 @@ export function stepPolicyViolation(m: DelegatedAuthorizationManifest, step: Ste
     const minimum = plan.minimumReceive.find(x => x.asset === r.asset);
     if (!minimum || minimum.amount <= 0n || minimum.amount > r.amount) return 'MINIMUM_OUTPUT_INVALID';
     const floor = (r.amount * BigInt(10_000 - m.limits.maxSlippageBps) + 9_999n) / 10_000n;
-    if (minimum.amount < floor) return 'SLIPPAGE_ABOVE_CAP';
+    // BUILD-FLOFI-UNIVERSAL-SINGLE-AUTH-MAINNET-001: a workflow grant's minimum was fixed when the owner signed and is enforced on-chain (the
+    // router reverts below it); a better price since then must not block the step, and a worse one already failed in the driver.
+    if (!binding.exact && minimum.amount < floor) return 'SLIPPAGE_ABOVE_CAP';
   }
   // The floor binds every step that can lower the account's health factor (Borrow, Withdraw); a swap or a supply cannot.
   if (m.limits.minHealthFactor !== null && ['borrow', 'withdraw'].includes(plan.actionType)

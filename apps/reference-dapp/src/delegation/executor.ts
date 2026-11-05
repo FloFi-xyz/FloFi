@@ -32,7 +32,7 @@ import { compileScope, isWorkflowScope, workflowGrantBindings } from './workflow
 import { digestBytes } from './canonical.ts';
 import type { ChainTransport } from './chains.ts';
 import type { DelegationConfig } from './config.ts';
-import { driverFor, type SignerUser, type StepContext, type StepDriver } from './drivers.ts';
+import { driverFor, fillStaleNonces, type SignerUser, type StepContext, type StepDriver } from './drivers.ts';
 import { authorizationDigest, credentialCommitments, executionSpend, manifestHash, manifestProblem, sameArtifact, type DelegatedAuthorizationManifest } from './manifest.ts';
 import type { DelegationStore, ExecutionRecord, GrantRecord, RevisionRecord, StepRecord } from './pg-store.ts';
 import { periodStarts, reservationViolation, stepPolicyViolation, type StepPlan } from './policy.ts';
@@ -85,7 +85,10 @@ export function ownCallsByGrant(steps: readonly Pick<StepRecord, 'grantId' | 'su
   return used;
 }
 /** Simulation failures that say nothing about the step (transport, reorg, rate limit): the pass retries instead of stopping the run. */
-export const transientSimulation = (code: string): boolean => code === 'DELEGATION_RPC_UNAVAILABLE' || /_REORG$/.test(code) || /RATE_LIMITED$/.test(code);
+export const transientSimulation = (code: string): boolean => code === 'DELEGATION_RPC_UNAVAILABLE' || code === 'SIGNER_KMS_UNAVAILABLE' || /_REORG$/.test(code)
+  || /RATE_LIMITED$/.test(code);
+/** BUILD-FLOFI-UNIVERSAL-SINGLE-AUTH-MAINNET-001: refuse to sign a step this close to its grant's expiry (a two-call step could straddle it). */
+export const GRANT_EXPIRY_MARGIN_MS = 5 * 60_000;
 async function verifyAuthorityChain(deps: ExecutorDeps, source: SourceFacts, revision: RevisionRecord, executionId: string | null = null): Promise<{ ok: true; chain: Chain } | { ok: false; code: string }> {
   const now = deps.now(), m = revision.manifest;
   if (revision.state !== 'ACTIVE' || !revision.envelope || !revision.assertion) return { ok: false, code: 'AUTHORIZATION_NOT_ACTIVE' };
@@ -132,6 +135,8 @@ async function verifyAuthorityChain(deps: ExecutorDeps, source: SourceFacts, rev
     const transport = deps.transport(g.chain);
     if (!transport) return { ok: false, code: 'DELEGATION_CHAIN_UNAVAILABLE' };
     const state = await ADAPTERS[g.mechanism].reconcileAuthorityState(g, transport, now);
+    // A failed chain read says nothing about the grant: retry, never demote it.
+    if (state.state === 'UNCERTAIN' && state.verification.reason === 'CHAIN_READ_FAILED') return { ok: false, code: 'DELEGATION_RPC_UNAVAILABLE' };
     if (state.state !== 'ACTIVE') { await deps.store.reverify(g.grantId, state, now).catch(() => false); return { ok: false, code: `CREDENTIAL_${state.state}` }; }
   }
   return { ok: true, chain: { requirement: req.value, manifest: m, bindings: graph.bindings, grants } };
@@ -177,6 +182,8 @@ async function verifyWalletWorkflowChain(deps: ExecutorDeps, source: SourceFacts
     const transport = deps.transport(g.chain);
     if (!transport) return { ok: false, code: 'DELEGATION_CHAIN_UNAVAILABLE' };
     const state = await ADAPTERS[g.mechanism].reconcileAuthorityState(g, transport, now);
+    // A failed chain read says nothing about the grant: retry, never demote it.
+    if (state.state === 'UNCERTAIN' && state.verification.reason === 'CHAIN_READ_FAILED') return { ok: false, code: 'DELEGATION_RPC_UNAVAILABLE' };
     if (state.state !== 'ACTIVE') { await deps.store.reverify(g.grantId, state, now).catch(() => false); return { ok: false, code: `CREDENTIAL_${state.state}` }; }
   }
   return { ok: true, chain: { requirement: req.value, manifest: m, bindings: graph.bindings, grants } };
@@ -309,6 +316,7 @@ async function run(deps: ExecutorDeps, start: ExecutionRecord, verified: Awaited
     const binding = bound?.ok ? bound.binding : null;
     // Before anything new is submitted the whole chain must still verify (revocation, expiry, edits, external disable).
     if (['PENDING', 'SIMULATED', 'POLICY_VERIFIED'].includes(step.state)) {
+      if (!verified.ok && transientSimulation(verified.code)) { log('delegation.verification_retry', { step: k, code: verified.code }); return outcome(PENDING_RETRY_MS); }
       if (!verified.ok || !pinned) return stopBefore(k, verified.ok ? 'STEP_BINDING_MISSING' : verified.code);
       if (!bound?.ok || !binding) return stopBefore(k, bound && !bound.ok ? bound.code : 'STEP_BINDING_MISSING');
       const ctx: StepContext = { step: bound.step, binding, grant, transport, now: deps.now, mainnet: deps.config.mainnetChains };
@@ -329,6 +337,7 @@ async function run(deps: ExecutorDeps, start: ExecutionRecord, verified: Awaited
       if (violation) return stopBefore(k, violation);
       if (!await deps.store.stepTransition(e.executionId, k, ['SIMULATED'], 'POLICY_VERIFIED', {})) return outcome(PENDING_RETRY_MS);
       let signed: Awaited<ReturnType<StepDriver['sign']>>;
+      if (grant.expiresAt.getTime() - deps.now().getTime() < GRANT_EXPIRY_MARGIN_MS) return stopBefore(k, 'CREDENTIAL_EXPIRING');
       // The executor address may serve several grants (one KMS key): sign from the highest nonce any of them prepared on this chain.
       const shared = grant.mechanism === 'EVM_ERC7710_METAMASK_V1_3' ? await deps.store.sessionNextNonce(grant.chain, grant.sessionAddress) : null;
       const signingCtx: StepContext = shared !== null && (grant.evmNextNonce === null || shared > grant.evmNextNonce) ? { ...ctx, grant: { ...grant, evmNextNonce: shared } } : ctx;
@@ -357,6 +366,10 @@ async function run(deps: ExecutorDeps, start: ExecutionRecord, verified: Awaited
         const code = codeOf(broadcastFailure, 'SUBMISSION_BROADCAST_FAILED');
         await deps.store.stepTransition(e.executionId, k, ['SUBMISSION_PREPARED'], 'UNCERTAIN', { code });
         // BUILD-FLOFI-SINGLE-AUTH-WORKFLOW-UX-001: signed bytes past their send window are never sent; the owner's attention is required.
+        // BUILD-FLOFI-UNIVERSAL-SINGLE-AUTH-MAINNET-001: the executor address is shared, so the never-sent nonces are filled with the executor's
+        // own zero-value self-transactions; once one is mined the stale bytes can never execute, and reconciliation reports the step not executed.
+        if (code === 'SUBMISSION_STALE') await fillStaleNonces(grant, transport, step.submission!, deps.signer, deps.log).catch(cause => log('delegation.nonce_fill_failed', { step: k,
+          code: codeOf(cause, 'NONCE_FILL_FAILED') }));
         await enterUncertain(code === 'SUBMISSION_STALE'); return outcome(PENDING_RETRY_MS);
       }
       const submitted = await deps.store.stepTransition(e.executionId, k, ['SUBMISSION_PREPARED'], 'SUBMITTED', {});

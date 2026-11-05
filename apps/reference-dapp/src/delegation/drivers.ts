@@ -127,6 +127,28 @@ async function signEvmCalls(ctx: StepContext, prepared: Readonly<Record<string, 
     calls: txs.length, nextNonce: base + BigInt(txs.length) };
 }
 /**
+ * BUILD-FLOFI-UNIVERSAL-SINGLE-AUTH-MAINNET-001: for every never-seen transaction of a stale submission, a zero-value self-transaction of the
+ * executor at the same nonce, so the shared executor's later nonces are never stuck behind a gap. It carries no call and no authority; once
+ * it is mined the stale bytes can never execute, and reconciliation reports that call as not executed (`nonceConsumed`).
+ */
+export async function fillStaleNonces(grant: GrantRecord, t: ChainTransport, submission: Readonly<Record<string, unknown>>, signer: SignerUser,
+  log: (event: string, fields: Readonly<Record<string, string | number | boolean | null>>) => void): Promise<void> {
+  if (grant.mechanism !== 'EVM_ERC7710_METAMASK_V1_3') return;
+  const chainId = BigInt(String(submission.chainId)), from = String(submission.from).toLowerCase();
+  if (from !== grant.sessionAddress) return;
+  const priority = BigInt(String(await t.rpc('eth_maxPriorityFeePerGas', []))), gasPrice = BigInt(String(await t.rpc('eth_gasPrice', [])));
+  for (const tx of (submission.txs ?? []) as { hash: string; nonce: string }[]) {
+    if (await t.rpc('eth_getTransactionByHash', [tx.hash]).catch(() => null)) continue;
+    const gasLimit = BigInt(String(await t.rpc('eth_estimateGas', [{ from, to: from, value: '0x0', data: '0x' }]))) * 2n;
+    const filler: erc7710.Eip1559 = { chainId, nonce: BigInt(tx.nonce), maxPriorityFeePerGas: priority, maxFeePerGas: gasPrice * 2n + priority, gasLimit, to: from, value: 0n, data: '0x' };
+    const sig = await signer.signEvmDigest(grant.sessionKeyRef, D.bytesOf(D.eip1559SigningHash(filler)));
+    const signed = D.signedEip1559(filler, sig.yParity, sig.r, sig.s);
+    if (D.decodeSignedEip1559(signed.raw).from !== from) fail('SIGNER_ADDRESS_MISMATCH');
+    await t.rpc('eth_sendRawTransaction', [signed.raw]);
+    log('delegation.nonce_filled', { chain: grant.chain, nonce: tx.nonce, hash: signed.hash });
+  }
+}
+/**
  * Broadcasts the persisted signed bytes exactly; a re-broadcast of a known transaction is fine, never a second, different transaction.
  * BUILD-FLOFI-SINGLE-AUTH-WORKFLOW-UX-001: a submission with `notAfter` (a Borrow, whose safety is its fresh health-factor simulation, not an
  * on-chain minimum) is never sent for the first time after that instant: SUBMISSION_STALE, and the executor keeps the step UNCERTAIN with
@@ -148,11 +170,25 @@ async function broadcastEvm(ctx: StepContext, submission: Readonly<Record<string
 }
 type EvmReceipt = { status?: string; logs?: { address: string; topics: string[]; data: string }[]; blockNumber?: string; hash: string; method: string };
 /** Every receipt of a submission, or null while any is missing (not final yet). */
+/**
+ * BUILD-FLOFI-UNIVERSAL-SINGLE-AUTH-MAINNET-001: whether a never-mined transaction's nonce was already used by another transaction of the
+ * executor (a nonce filler after a stale submission): it can then never execute, which reconciliation reports as a failed (not executed) call.
+ */
+async function nonceConsumed(t: ChainTransport, submission: Readonly<Record<string, unknown>>, tx: { readonly hash: string; readonly nonce?: string }): Promise<boolean> {
+  if (tx.nonce === undefined || typeof submission.from !== 'string') return false;
+  const latest = BigInt(String(await t.rpc('eth_getTransactionCount', [submission.from, 'latest'])));
+  if (latest <= BigInt(tx.nonce)) return false;
+  return (await t.rpc('eth_getTransactionByHash', [tx.hash]).catch(() => 'UNKNOWN')) === null;
+}
 async function evmReceipts(t: ChainTransport, submission: Readonly<Record<string, unknown>>): Promise<EvmReceipt[] | null> {
   const receipts: EvmReceipt[] = [];
-  for (const tx of (submission.txs ?? []) as { hash: string; method: string }[]) {
+  for (const tx of (submission.txs ?? []) as { hash: string; method: string; nonce?: string }[]) {
     const r = await t.rpc('eth_getTransactionReceipt', [tx.hash]) as Omit<EvmReceipt, 'hash' | 'method'> | null;
-    if (!r) return null;
+    if (!r) {
+      if (!await nonceConsumed(t, submission, tx)) return null;
+      receipts.push({ status: '0x0', logs: [], hash: tx.hash, method: tx.method });
+      continue;
+    }
     receipts.push({ ...r, hash: tx.hash, method: tx.method });
   }
   return receipts;
@@ -214,10 +250,14 @@ export const evmSwapDriver: StepDriver = {
   async reconcile(ctx, submission, plan) {
     const t = ctx.transport, owner = ctx.binding.walletAddress, need = ctx.binding.need;
     if (need.kind !== 'EVM_UNISWAP_V3_EXACT_INPUT_SINGLE') return fail('DRIVER_STEP_MISMATCH');
-    const txs = (submission.txs ?? []) as { hash: string; method: string }[], receipts = [];
+    const txs = (submission.txs ?? []) as { hash: string; method: string; nonce?: string }[], receipts = [];
     for (const tx of txs) {
       const r = await t.rpc('eth_getTransactionReceipt', [tx.hash]) as { status?: string; logs?: { address: string; topics: string[]; data: string }[]; blockNumber?: string } | null;
-      if (!r) return { status: 'PENDING', spent: [], received: [], evidence: { pending: tx.hash } };
+      if (!r) {
+        if (!await nonceConsumed(t, submission, tx)) return { status: 'PENDING', spent: [], received: [], evidence: { pending: tx.hash } };
+        receipts.push({ status: '0x0', logs: [], hash: tx.hash, method: tx.method });
+        continue;
+      }
       receipts.push({ ...r, hash: tx.hash, method: tx.method });
     }
     const evidence = { txs: receipts.map(r => ({ hash: r.hash, method: r.method, status: r.status, block: r.blockNumber })), delegationHash: submission.delegationHash,

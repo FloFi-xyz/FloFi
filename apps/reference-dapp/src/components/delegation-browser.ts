@@ -66,9 +66,14 @@ export async function signDelegation(address: string, typedData: unknown): Promi
  */
 export async function signWorkflowGrant(address: string, chainId: number, typedData: unknown): Promise<string> {
   const provider = evmProvider(), hex = '0x' + chainId.toString(16);
-  const current = await provider.request({ method: 'eth_chainId', params: [] });
-  if (typeof current !== 'string' || BigInt(current) !== BigInt(chainId)) await provider.request({ method: 'wallet_switchEthereumChain', params: [{ chainId: hex }] });
-  const signature = await provider.request({ method: 'eth_signTypedData_v4', params: [address, JSON.stringify(typedData)] });
+  const onChain = async () => { const c = await provider.request({ method: 'eth_chainId', params: [] }); return typeof c === 'string' && BigInt(c) === BigInt(chainId); };
+  // A refusal in the wallet (EIP-1193 4001) is the owner's choice, reported as such; nothing was signed.
+  const rejected = (cause: unknown) => (cause as { code?: unknown } | null)?.code === 4001 ? fail('WALLET_REQUEST_REJECTED') : Promise.reject(cause);
+  if (!await onChain()) {
+    await provider.request({ method: 'wallet_switchEthereumChain', params: [{ chainId: hex }] }).catch(rejected);
+    if (!await onChain()) fail('WALLET_WRONG_NETWORK');
+  }
+  const signature = await provider.request({ method: 'eth_signTypedData_v4', params: [address, JSON.stringify(typedData)] }).catch(rejected);
   return typeof signature === 'string' && /^0x[0-9a-fA-F]{130}$/.test(signature) ? signature : fail('WALLET_SIGNATURE_INVALID');
 }
 /** Credential revocation: the owner's own self-call `disableDelegation(delegation)`, sent by the owner's wallet. */

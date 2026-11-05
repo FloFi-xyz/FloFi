@@ -35,6 +35,8 @@ const WHY_NOT_ONCE: Readonly<Record<string, string>> = {
   WORKFLOW_GRANT_NAMESPACE_UNSUPPORTED: 'Solana steps cannot be authorized once yet: confirm each step in your wallet.',
   DELEGATION_FRAMEWORK_NOT_DEPLOYED: 'This network has no verified delegation framework yet.',
   EVM_ACCOUNT_NOT_UPGRADED: 'Switch this wallet to a MetaMask smart account (one time, in MetaMask), then sign again.',
+  WORKFLOW_SLIPPAGE_UNSUPPORTED: 'A swap allows more than 3% slippage, which cannot be authorized once.',
+  WORKFLOW_GRANT_TOO_MANY_CALLS: 'This workflow has too many calls on one network to authorize once.',
   // BUILD-FLOFI-SINGLE-AUTH-WORKFLOW-UX-001: the capability gaps a mainnet workflow can hit, in plain words.
   MAINNET_DELEGATION_DISABLED: 'Delegated execution is not enabled for this network on this FloFi deployment.',
   DELEGATION_TEMPLATE_NOT_IMPLEMENTED: 'One of these steps has no delegated execution yet.',
@@ -65,7 +67,10 @@ export function WorkflowRunPanel({ claim, approvalId, secret, onProposal, onErro
   async function act(work: () => Promise<{ ok: true; value: ClaimedProposal } | { ok: false; code: string }>) {
     if (acting.current) return; acting.current = true; setBusy(true);
     try { const result = await work(); if (result.ok) { setReview(null); onProposal(result.value); } else onError(result.code); }
-    catch { onError('APPROVAL_UNAVAILABLE'); }
+    catch (cause) {
+      const code = cause instanceof Error && /^(WALLET_[A-Z_]+|EVM_WALLET_NOT_FOUND)$/.test(cause.message) ? cause.message : 'APPROVAL_UNAVAILABLE';
+      onError(code);
+    }
     finally { acting.current = false; setBusy(false); }
   }
   async function prepareOnce() {
@@ -147,7 +152,7 @@ export function WorkflowRunPanel({ claim, approvalId, secret, onProposal, onErro
       <button type="button" className="quiet" disabled={busy} onClick={() => void act(() => cancelWorkflowRunHandoff(approvalId))}>{tr('End workflow')}</button>
     </div>}
     {run.mode === 'DELEGATED' && open && <div className="workflow-run-choice">
-      <p>{tr('Revocation stops future delegated steps. Submitted transactions keep being observed.')}</p>
+      <p>{tr('Revoking stops FloFi from starting any further step. Submitted transactions keep being observed. The calls you signed stay valid on chain until they expire (at most one hour); to cancel them on chain at once, revoke them from your wallet in FloFi → Credentials.')}</p>
       <button type="button" className="quiet" disabled={busy} onClick={() => void act(() => cancelWorkflowRunHandoff(approvalId))}>{tr('Revoke workflow authorization')}</button>
     </div>}
     {run.state === 'ATTENTION'  && <p role="status">{tr('A submitted step has no final outcome yet. FloFi keeps observing it and never resubmits it.')}</p>}
