@@ -952,6 +952,7 @@
       "sources": [
         "scripts/cloud-preview-smoke.mjs",
         "scripts/ethereum-sepolia-fork-rehearsal.mjs",
+        "scripts/generate-aave-v3-reserves.mjs",
         "scripts/solana-mainnet-readonly-validation.mjs",
         "scripts/verify-aave-repay.mjs",
         "scripts/verify-aave-withdraw.mjs",
@@ -1031,6 +1032,7 @@
       ],
       "sharedFinancialCore": true,
       "sources": [
+        "packages/action-registry/src/aave-v3-reserves.generated.ts",
         "packages/action-registry/src/aave-v3-testnet.ts",
         "packages/action-registry/src/lending-base-sepolia.ts"
       ],
@@ -2592,6 +2594,7 @@
         "apps/reference-dapp/src/components/borrow-panel.tsx",
         "apps/reference-dapp/src/components/lending-node-editor.tsx",
         "apps/reference-dapp/src/components/lending-panel.tsx",
+        "apps/reference-dapp/src/components/lending-reserve-status.tsx",
         "apps/reference-dapp/src/components/repay-panel.tsx",
         "apps/reference-dapp/src/components/supply-panel.tsx",
         "apps/reference-dapp/src/components/withdraw-panel.tsx"
@@ -3438,7 +3441,8 @@
         "apps/reference-dapp/src/domain/canonical-execution-status.ts",
         "apps/reference-dapp/src/domain/observation-schedule.ts",
         "apps/reference-dapp/src/domain/landed-attempts.ts",
-        "apps/reference-dapp/src/domain/wallet-portfolio.ts"
+        "apps/reference-dapp/src/domain/wallet-portfolio.ts",
+        "apps/reference-dapp/src/domain/node-declaration.ts"
       ],
       "suites": [
         "action-registry.engineering-regression",
@@ -3556,7 +3560,8 @@
         "apps/reference-dapp/src/i18n/pt.ts",
         "apps/reference-dapp/src/i18n/pt-chat-dashboard.ts",
         "apps/reference-dapp/src/i18n/pt-portfolio.ts",
-        "apps/reference-dapp/src/i18n/pt-builder-canvas.ts"
+        "apps/reference-dapp/src/i18n/pt-builder-canvas.ts",
+        "apps/reference-dapp/src/i18n/pt-aave-expansion.ts"
       ],
       "suites": [
         "app.e2e.canvas-keyboard",
@@ -4360,6 +4365,7 @@
       ],
       "sharedFinancialCore": true,
       "sources": [
+        "packages/reference-compiler/src/aave-reserves.ts",
         "packages/reference-compiler/src/borrow.ts",
         "packages/reference-compiler/src/lending-composition.ts",
         "packages/reference-compiler/src/repay.ts",
