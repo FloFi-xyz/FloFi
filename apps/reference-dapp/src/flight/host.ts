@@ -6,6 +6,8 @@
 import { createHmac } from 'node:crypto';
 import { cookies, headers } from 'next/headers';
 import { accountHost, currentAccountSession } from '../accounts/account-host';
+import { ACCOUNT_SESSION_COOKIE } from '../accounts/account-session';
+import { sessionCookieName } from '../server/session-cookie';
 import { isHostedDeployment } from '../server/deployment';
 import { platformStateHost } from '../server/platform-state-host';
 import { normalizeEmail } from './campaign';
@@ -37,6 +39,9 @@ export async function flightNow(env: Env = process.env): Promise<number> {
 /** The signed-in FloFi account and the addresses its identities prove (a Privy-verified email, Google's or Apple's email), or null. */
 export type FlightPerson = { readonly accountId: string; readonly emails: readonly string[] };
 export async function flightPerson(env: Env = process.env): Promise<FlightPerson | null> {
+  // No account cookie, no account: answered before the account host (its database pool) is opened.
+  const jar = await cookies();
+  if (!jar.has(ACCOUNT_SESSION_COOKIE) && !jar.has(sessionCookieName(ACCOUNT_SESSION_COOKIE, true))) return null;
   const host = await accountHost(env).catch(() => null);
   const session = await currentAccountSession(host, env);
   if (!host || !session) return null;

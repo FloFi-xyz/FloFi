@@ -5,7 +5,7 @@ import { isAbsolute, join } from 'node:path';
 import { createPublicTestnetService, publicRecordingEnabled,
   type PublicTestnetService, type PublicRun, type PublicBegin } from '../server/public-testnet-service';
 import { baseSepoliaSwapRpc, ethereumSepoliaSwapRpc } from '../server/public-testnet-rpc';
-import { cloudFlow, cloudFlowMode } from '../server/flow-runtime';
+import { cloudFlow, cloudFlowMode } from './cloud-flow';
 import { CATALOG_NETWORKS, catalogNetworkOfChain, catalogNetworkOfRun, catalogNetworkOfWorkflow, localCatalogNetworkMode, type CatalogNetworkId,
   type CatalogNetworkRuntime } from '../server/catalog-networks';
 

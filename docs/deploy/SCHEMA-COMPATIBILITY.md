@@ -681,7 +681,7 @@ Release order is certificate first, as for 0018: every version-18 database consu
 
 | Base | Certified forward migration | SHA-256 |
 | --- | --- | --- |
-| 0019 `privy_accounts` | 0020 `flight_flofi` | `090dc046b2d937489c943908593fd55c1424fd780ecf51eae5e77119b19fbea6` |
+| 0019 `privy_accounts` | 0020 `flight_flofi` | `a7ce1f42753017de90eede9784a205bcd3b6fa0134b26eecb530dc2e505b2892` |
 
 Migration 0020 (BUILD-FLOFI-FLIGHT-001, the Flight FloFi launch campaign at `/board`) adds eight tenant-scoped tables and nothing else:
 `flight_batches` (boarding groups and their opening time), `flight_list_entries` (the beta list and the next flight's list: a lower-cased
@@ -703,7 +703,9 @@ version-19 build runs, except that deleting a FloFi account (the version-19 acco
 pass and evidence and unlinks its invites, which is the intended erasure. No version-19 query reads or writes a `flight_*` table, so a
 version-19 build runs unchanged on schema 20.
 
-`flight-flofi-migration.pg.test.ts` checks the exact bytes, every pre-existing column, account row, relation, index, trigger and rule
+Evidence. Release A carries the certificate's unit gate (`forward-compatibility.test.ts`: base identity, fixture digest, this anchor) and
+re-activates `backend/schema-compatibility.pg.test.ts` (API and worker across 0020 with live traffic, on the fixture). Release B adds
+`flight-flofi-migration.pg.test.ts`, which checks the exact bytes, every pre-existing column, account row, relation, index, trigger and rule
 unchanged, the eight new tables, a version-19 reader carrying this certificate starting on schema 20 (and refusing it without the
 certificate), a version-19 account deletion succeeding on schema 20 with Flight rows present (pass and evidence deleted, invites
 unlinked), and atomic rollback. `apps/reference-dapp/src/flight/store.pg.test.ts` checks the campaign rules on the real tables, including

@@ -9,7 +9,9 @@
 .page h1,.page h2,.page h3,.page p{margin:0}
 .page a{color:inherit}
 .page :focus-visible{outline:3px solid var(--navy);outline-offset:3px}
-.onDark :focus-visible,.hero :focus-visible,.footer :focus-visible{outline-color:#fff}
+.onDark :focus-visible,.hero :focus-visible,.footer :focus-visible,.header :focus-visible{outline-color:#fff}
+/* Inside the white request pill the outline is navy, so it shows on white. */
+.hero .pill :focus-visible{outline-color:var(--navy)}
 .skip{position:absolute;left:12px;top:-60px;z-index:20;padding:10px 16px;border-radius:999px;background:var(--navy);color:#fff!important;text-decoration:none}
 .skip:focus{top:12px}
 .mono{font-family:var(--mono);font-weight:500}
@@ -34,7 +36,7 @@
 .nav a:hover{text-decoration:underline;text-underline-offset:4px}
 .lang{display:inline-flex;align-items:center;gap:2px;border:2px solid rgba(255,255,255,.5);border-radius:999px;padding:2px;font-family:var(--mono);font-size:15px;
   letter-spacing:.08em}
-.lang button{background:transparent;border:0;color:#fff;font:inherit;letter-spacing:inherit;padding:6px 10px;border-radius:999px;cursor:pointer;opacity:.6;min-height:36px}
+.lang button{background:transparent;border:0;color:#fff;font:inherit;letter-spacing:inherit;padding:6px 10px;border-radius:999px;cursor:pointer;opacity:.8;min-height:36px}
 .lang button[aria-pressed="true"]{opacity:1;background:rgba(255,255,255,.16)}
 /* Hero */
 .hero{position:relative;background:var(--blue);color:#fff;overflow:hidden;min-height:720px;padding:96px var(--gutter) 152px;display:flex;align-items:flex-start;gap:40px}
@@ -50,7 +52,7 @@
 .sparkle{position:absolute;color:#fff;width:40px;height:40px}
 .pill{width:100%;max-width:720px;background:#fff;border-radius:999px;padding:10px 10px 10px 32px;display:flex;align-items:center;gap:16px;box-shadow:0 0 0 6px rgba(4,27,61,.18)}
 .pill input{flex:1;min-width:0;border:0;background:transparent;font:inherit;font-size:20px;color:var(--navy);padding:12px 0}
-.pill input::placeholder{color:#7A8699}
+.pill input::placeholder{color:#5B6880}
 .pill input:focus{outline:none}
 .pill:focus-within{box-shadow:0 0 0 6px rgba(4,27,61,.18),0 0 0 9px #fff}
 .pillTo{font-family:var(--mono);font-weight:500;font-size:15px;letter-spacing:.1em;color:var(--blue);flex:none}
@@ -94,6 +96,10 @@
 .marquee{position:absolute;left:0;right:0;bottom:0;height:56px;background:var(--lavender);overflow:hidden;display:flex;align-items:center}
 .track{display:flex;width:max-content;animation:marquee 60s linear infinite;font-family:var(--mono);font-weight:500;font-size:22px;letter-spacing:.08em;color:var(--navy)}
 .track span{flex:none;white-space:pre}
+.track.paused{animation-play-state:paused}
+.marqueeToggle{position:absolute;right:8px;top:50%;transform:translateY(-50%);z-index:1;width:36px;height:36px;border-radius:999px;border:2px solid var(--navy);
+  background:var(--lavender);color:var(--navy);font:600 14px/1 var(--mono);cursor:pointer;display:inline-flex;align-items:center;justify-content:center}
+.marqueeToggle:focus-visible{outline:3px solid var(--navy);outline-offset:2px}
 @keyframes marquee{from{transform:translateX(0)}to{transform:translateX(-50%)}}
 /* Sections */
 .section{padding:110px var(--gutter);display:flex;flex-direction:column;gap:48px}
@@ -202,27 +208,34 @@
 .passControls>section{flex:1 1 360px;display:flex;flex-direction:column;gap:16px}
 .passControls h2{font-size:28px;font-weight:700;letter-spacing:-.02em}
 .field{display:flex;flex-direction:column;gap:6px;font-size:16px;font-weight:600}
-.field input[type="text"]{min-height:48px;border-radius:14px;border:2px solid var(--track);padding:0 14px;font:inherit;font-weight:400;font-size:18px;max-width:360px}
+.field input[type="text"]{min-height:48px;border-radius:14px;border:2px solid #7D8AA0;padding:0 14px;font:inherit;font-weight:400;font-size:18px;max-width:360px}
 .check{display:flex;gap:10px;align-items:flex-start;font-size:16px;line-height:1.4}
 .check input{width:20px;height:20px;margin-top:2px;accent-color:var(--blue);flex:none}
 .inviteList{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:10px}
 .inviteList li{display:flex;gap:14px;align-items:center;font-family:var(--mono);font-weight:500;font-size:20px;letter-spacing:.06em}
 .inviteList s{color:var(--muted)}
 .muted{color:var(--muted)}
+.departures .muted{color:#A4ABB8}
 .unavailable{padding:40px var(--gutter);background:var(--navy);color:#fff;font-size:18px}
 @media (max-width:1100px){.howArt{display:none}
+  .departuresBoard table{display:none}.departuresList{display:flex}
   .heroArt{position:absolute;right:-24px;bottom:44px;width:150px;height:170px;align-self:auto;z-index:0}
   .heroArt img.mascot{top:0;width:160px}.heroArt .sticker{display:none}
   .hero{padding-bottom:230px}}
 @media (max-width:900px){
   .header{height:auto;padding:16px var(--gutter);flex-wrap:wrap}.nav a{display:none}
-  .hero{min-height:0;padding:44px var(--gutter) 120px}
+  /* Phones: the mascot moves under the text instead of behind it, so it never covers the notice or the counters. */
+  .hero{min-height:0;padding:44px var(--gutter) 64px;flex-direction:column;align-items:stretch;gap:8px}
+  .heroText{min-width:0;max-width:none}.pill input{min-width:0;width:100%}
+  .heroArt{position:relative;right:auto;bottom:auto;align-self:flex-end;width:140px;height:150px}
+  .heroArt img.mascot{width:140px}
+  .pill .btn{white-space:normal;text-align:center}
+  .board .flaps{flex-wrap:wrap;row-gap:4px}
   .pill{flex-wrap:wrap;border-radius:28px;padding:14px 16px}
   .pill .btn{width:100%}
   .section,.founding{padding:72px var(--gutter);gap:32px}
   .departures{padding:64px var(--gutter)}
   .departuresBoard{padding:18px}
-  .departuresBoard table{display:none}.departuresList{display:flex}
   .flap{width:18px;height:28px;font-size:17px}
   .flapBig{width:30px;height:46px;font-size:28px}
   .card{flex-direction:column;transform:rotate(-1.5deg)}

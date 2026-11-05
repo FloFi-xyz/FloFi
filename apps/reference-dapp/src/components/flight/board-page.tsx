@@ -71,7 +71,7 @@ export function BoardPage({ language, state }: { language: 'EN' | 'PT'; state: F
           <h2 className={styles.h2} id="routes-title">{copy.routes.title[0]}<span className={styles.accentBlue}>{copy.routes.title[1]}</span></h2>
         </div>
         <div className={styles.routeGrid}>{copy.routes.items.map(route => <div key={route.id} className={styles.routeCard}>
-          <span className={styles.routeCode}>{route.from} <span aria-hidden="true">→</span><span className={styles.srOnly}>to</span> {route.to}</span>
+          <span className={styles.routeCode}>{route.from} <span aria-hidden="true">→</span><span className={styles.srOnly}>{copy.routeTo}</span> {route.to}</span>
           <p className={styles.routeQuote}>“{route.prompt}”</p>
           <span className={styles.routeMeta}>{route.meta}</span>
           <RouteButton prompt={route.prompt} routeId={route.id} label={copy.routes.use}/>

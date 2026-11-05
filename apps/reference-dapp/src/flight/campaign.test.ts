@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest';
 import type { SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
 import { decideAccess, FLIGHT_BOARDING_OPENS_AT, FLIGHT_LIST_CLOSES_AT, flightPhase, flightRoute, inviteCodeFrom, listFor, normalizeEmail, normalizeHandle,
   normalizeInviteCode, parseClientEvent, passengerSeat, foundingSeat, visibleSteps } from './campaign';
+import { flightClockHarness } from './host';
 import { rateLimitClient } from './rate-limit-client';
 import { simulationRecord } from './simulation-record';
 import { csvCell } from '../../backend/flight-admin';
@@ -73,13 +74,18 @@ describe('BUILD-FLOFI-FLIGHT-001 campaign rules', () => {
     const swap = node('s', 'asset.swap.exact-input', 'eip155:8453', ['uniswap']), bridge = { ...node('b', 'asset.bridge', 'eip155:8453', ['across.direct'], 'eip155:42161'),
       dependencies: ['s'] } as unknown as Node;
     const workflow = { workflowId: 'wf-1', revision: 4, nodes: [bridge, swap] };
-    // A whole composition simulated at once: its steps in dependency order.
-    expect(simulationRecord({ flow: 'crosschain-universal', method: 'simulate', args: [workflow, '0xowner'], value: { id: 'uni-1', status: 'SIMULATED' } }))
-      .toEqual({ flow: 'crosschain-universal', runId: 'uni-1', workflowId: 'wf-1', revision: 4, route: { from: 'BASE', to: 'ARB', stepCount: 2, networkCount: 2,
-        steps: [{ action: 'Swap', detail: 'Uniswap · Base' }, { action: 'Bridge', detail: 'Base → Arbitrum' }] } });
-    // A catalog swap's prepare (its quote and simulation) is keyed by its execution id.
-    expect(simulationRecord({ flow: 'base-swap', method: 'prepare', args: [{ ...workflow, nodes: [swap] }], value: { quote: { executionId: 'bas-' + 'a'.repeat(24) } } }))
-      .toMatchObject({ runId: 'bas-' + 'a'.repeat(24), route: { from: 'BASE', to: 'BASE', stepCount: 1 } });
+    // The one financial step every mainnet service simulates (a mock step beside it is not a step).
+    const step = { ...bridge, dependencies: [] } as unknown as Node, mock = node('m', 'mock-note', 'eip155:8453', []);
+    expect(simulationRecord({ flow: 'crosschain-universal', method: 'simulate', args: [{ ...workflow, nodes: [mock, step] }, '0xowner'], value: { id: 'uni-1', status: 'SIMULATED' } }))
+      .toEqual({ flow: 'crosschain-universal', runId: 'uni-1', workflowId: 'wf-1', revision: 4, route: { from: 'BASE', to: 'ARB', stepCount: 1, networkCount: 2,
+        steps: [{ action: 'Bridge', detail: 'Base → Arbitrum' }] } });
+    // A workflow carrying more than one financial step records nothing: no step the service did not simulate can reach a pass.
+    expect(simulationRecord({ flow: 'crosschain-universal', method: 'simulate', args: [workflow], value: { id: 'uni-2' } })).toBeNull();
+    // A catalog swap's prepare counts once the owner's own preflight is in it (keyed by its execution id), never as a bare quote.
+    const executionId = 'bas-' + 'a'.repeat(24);
+    expect(simulationRecord({ flow: 'base-swap', method: 'prepare', args: [{ ...workflow, nodes: [swap] }], value: { quote: { executionId, ownerReview: { account: '0x1' } } } }))
+      .toMatchObject({ runId: executionId, route: { from: 'BASE', to: 'BASE', stepCount: 1 } });
+    expect(simulationRecord({ flow: 'base-swap', method: 'prepare', args: [{ ...workflow, nodes: [swap] }], value: { quote: { executionId } } })).toBeNull();
     for (const call of [
       { flow: 'base-swap', method: 'quote', args: [workflow], value: { id: 'x' } },
       { flow: 'base-sepolia-swap', method: 'prepare', args: [{ ...workflow, nodes: [node('t', 'asset.swap.exact-input', 'eip155:84532', ['uniswap'])] }], value: { quote: { executionId: 'pub-1' } } },
@@ -88,13 +94,22 @@ describe('BUILD-FLOFI-FLIGHT-001 campaign rules', () => {
       { flow: 'Bad Flow', method: 'simulate', args: [workflow], value: { id: 'x' } },
     ]) expect(simulationRecord(call)).toBeNull();
     // Nothing the browser sent besides the simulated workflow reaches the record (an amount, a label): the route is fixed codes only.
-    expect(JSON.stringify(simulationRecord({ flow: 'crosschain-universal', method: 'simulate', args: [workflow], value: { id: 'u', amount: '123456789' } }))).not.toMatch(/\d{4,}/);
+    expect(JSON.stringify(simulationRecord({ flow: 'crosschain-universal', method: 'simulate', args: [{ ...workflow, nodes: [step] }], value: { id: 'u', amount: '123456789' } })))
+      .not.toMatch(/\d{4,}/);
   });
 
   it('rate-limits a client by its IPv4 address or its IPv6 /64, and writes exported addresses as text', () => {
     expect(['203.0.113.7', '::ffff:203.0.113.7', '2001:db8:1:2::1', '2001:0db8:0001:0002:aaaa:bbbb:cccc:dddd', '[2001:db8::5]:443', 'fe80::1%eth0', 'junk', '']
       .map(rateLimitClient)).toEqual(['203.0.113.7', '203.0.113.7', '2001:db8:1:2::/64', '2001:db8:1:2::/64', '2001:db8:0:0::/64', 'fe80:0:0:0::/64', null, null]);
     expect(['=cmd@x.io', '+1@x.io', '-a@x.io', '@x', 'ana@x.io', 'EN'].map(csvCell)).toEqual(["'=cmd@x.io", "'+1@x.io", "'-a@x.io", "'@x", 'ana@x.io', 'EN']);
+  });
+
+  it('honours the loopback test clock only off hosted deployments', () => {
+    const harness = { FLOFI_FLIGHT_CLOCK_HARNESS: 'MOCKED_LOOPBACK_ONLY' };
+    expect(flightClockHarness(harness)).toBe(true);
+    for (const hosted of [{ VERCEL: '1' }, { RAILWAY_PROJECT_ID: 'p' }, { FLOFI_DEPLOYMENT: 'hosted' }]) expect(flightClockHarness({ ...harness, ...hosted })).toBe(false);
+    expect(flightClockHarness({ FLOFI_FLIGHT_CLOCK_HARNESS: 'on' })).toBe(false);
+    expect(flightClockHarness({})).toBe(false);
   });
 
   it('accepts only the closed browser events', () => {

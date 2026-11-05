@@ -6,7 +6,7 @@
  * closed, 4 not on the list, 5 Founding full — and the person's own pass once issued. "Board now" signs the person in when needed,
  * checks list, group and invite, and opens /app with their request as an editable draft. Nothing here signs, simulates or moves funds.
  */
-import { useCallback, useEffect, useMemo, useState, type FormEvent, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import Link from 'next/link';
 import { FLIGHT_BOARDING_KEY, FLIGHT_DRAFT_KEY, FLIGHT_RETURN_KEY } from '../../flight/app-boarding';
 import type { FlightState } from '../../flight/http';
@@ -55,7 +55,8 @@ function useCountdown(target: number, serverNow: number) {
 function Countdown({ state, copy }: { state: FlightState; copy: FlightCopy }) {
   const [d, h, m] = useCountdown(state.closesAt, state.now), t = copy.finalCall;
   const two = (n: number) => String(Math.min(n, 99)).padStart(2, '0');
-  return <div className={styles.countdown} role="timer" aria-label={`${t.closesIn} ${d} ${t.units[0]} ${h} ${t.units[1]} ${m} ${t.units[2]}`}>
+  const word = (n: number, index: number) => `${n} ${t.unitWords[index]![n === 1 ? 0 : 1]}`;
+  return <div className={styles.countdown} role="timer" aria-label={`${t.closesIn} ${word(d, 0)}, ${word(h, 1)}, ${word(m, 2)}`}>
     {[d, h, m].map((value, index) => <span key={index} className={styles.countGroup} aria-hidden="true">
       <Flaps text={two(value)} big/><span className={styles.countUnit}>{t.units[index]}</span></span>)}
   </div>;
@@ -63,31 +64,37 @@ function Countdown({ state, copy }: { state: FlightState; copy: FlightCopy }) {
 
 /** The list form's notice: what the address is used for, that joining is agreeing to it, and the privacy policy's campaign section. */
 function ListNotice({ copy, language }: { copy: FlightCopy; language: Language }) {
-  return <>{copy.finalCall.notice} {copy.finalCall.consent} <Link href={language === 'PT' ? '/privacy#campanha-flight-flofi' : '/privacy#flight-flofi'}>{copy.finalCall.privacy}</Link>.</>;
+  return <span id="flight-list-notice">{copy.finalCall.notice} {copy.finalCall.consent} <Link href={language === 'PT' ? '/privacy#campanha-flight-flofi' : '/privacy#flight-flofi'}>{copy.finalCall.privacy}</Link>.</span>;
 }
 
 function ListForm({ copy, language, flight, onJoined }: { copy: FlightCopy; language: Language; flight: 'FIRST' | 'NEXT'; onJoined: () => void }) {
   const t = copy.finalCall, [email, setEmail] = useState(''), [busy, setBusy] = useState(false), [error, setError] = useState<string | null>(null);
-  const [done, setDone] = useState(false);
+  const [done, setDone] = useState(false), confirmation = useRef<HTMLParagraphElement>(null);
+  // The confirmation is announced (its live region is already on the page) and takes the focus the removed form had.
+  useEffect(() => { if (done) confirmation.current?.focus(); }, [done]);
   async function submit(event: FormEvent) {
     event.preventDefault();
     setBusy(true); setError(null);
-    const company = (event.currentTarget as HTMLFormElement).elements.namedItem('company') as HTMLInputElement | null;
-    const answer = await post('/api/board/list', { email, language, consent: true, company: company?.value ?? '' });
+    const trap = (event.currentTarget as HTMLFormElement).elements.namedItem('flight-hp') as HTMLInputElement | null;
+    const answer = await post('/api/board/list', { email, language, consent: true, company: trap?.value ?? '' });
     setBusy(false);
     if (answer.ok) { setDone(true); onJoined(); } else setError(errorText(copy, answer.code));
   }
-  if (done) return <p className={styles.status} role="status">{flight === 'FIRST' ? t.joined : copy.gateClosed.joined}</p>;
-  return <form onSubmit={submit} className={styles.personal} noValidate>
-    <div className={styles.pill}>
-      <label className={styles.srOnly} htmlFor="flight-email">{t.emailLabel}</label>
-      <input id="flight-email" type="email" autoComplete="email" inputMode="email" required placeholder={t.email} value={email} onChange={e => setEmail(e.target.value)}/>
-      {/* Left empty by people; filled only by bots. */}
-      <input className={styles.srOnly} type="text" name="company" tabIndex={-1} autoComplete="off" aria-hidden="true"/>
-      <button className={`${styles.btn} ${styles.btnNavy}`} type="submit" disabled={busy}>{flight === 'FIRST' ? t.join : copy.gateClosed.join} <span aria-hidden="true">→</span></button>
-    </div>
-    {error && <p className={styles.error} role="alert">{error}</p>}
-  </form>;
+  return <>
+    {!done && <form onSubmit={submit} className={styles.personal} noValidate>
+      <div className={styles.pill}>
+        <label className={styles.srOnly} htmlFor="flight-email">{t.emailLabel}</label>
+        <input id="flight-email" type="email" autoComplete="email" inputMode="email" required placeholder={t.email} value={email} onChange={e => setEmail(e.target.value)}
+          aria-describedby="flight-list-notice"/>
+        {/* Left empty by people; filled only by bots (a name no browser autofills). */}
+        <input className={styles.srOnly} type="text" name="flight-hp" tabIndex={-1} autoComplete="off" aria-hidden="true"/>
+        <button className={`${styles.btn} ${styles.btnNavy}`} type="submit" disabled={busy} aria-describedby="flight-list-notice">
+          {flight === 'FIRST' ? t.join : copy.gateClosed.join} <span aria-hidden="true">→</span></button>
+      </div>
+      {error && <p className={styles.error} role="alert">{error}</p>}
+    </form>}
+    <p ref={confirmation} tabIndex={-1} className={done ? styles.status : styles.srOnly} role="status">{done ? flight === 'FIRST' ? t.joined : copy.gateClosed.joined : ''}</p>
+  </>;
 }
 
 function InviteForm({ copy, onRedeemed }: { copy: FlightCopy; onRedeemed: (flight: unknown) => void }) {
@@ -108,7 +115,8 @@ function InviteForm({ copy, onRedeemed }: { copy: FlightCopy; onRedeemed: (fligh
     <label className={styles.srOnly} htmlFor="flight-invite">{t.label}</label>
     <input id="flight-invite" autoComplete="off" spellCheck={false} placeholder={t.placeholder} value={code} onChange={e => setCode(e.target.value)} maxLength={16}/>
     <button className={`${styles.btn} ${styles.btnGhost}`} type="submit" disabled={busy || code.trim().length < 11}>{t.use}</button>
-    {message && <p className={message.ok ? styles.status : styles.error} role={message.ok ? 'status' : 'alert'}>{message.text}</p>}
+    <p className={message?.ok ? styles.status : styles.srOnly} role="status">{message?.ok ? message.text : ''}</p>
+    {message && !message.ok && <p className={styles.error} role="alert">{message.text}</p>}
   </form>;
 }
 
@@ -144,7 +152,7 @@ function PassPanel({ pass, invites, copy, onPass }: { pass: FlightPass; invites:
             }}>{t.share}</button>
             <Link className={`${styles.btn} ${styles.btnBlue}`} href="/app">{t.open}</Link>
           </div>
-          {message && <p role="status" className={styles.muted}>{message}</p>}
+          <p role="status" className={message ? styles.muted : styles.srOnly}>{message ?? ''}</p>
         </form>
       </section>
       {invites.length > 0 && <section aria-labelledby="pass-invites-title">
@@ -168,6 +176,18 @@ export function BoardExperience({ initial, language }: { initial: FlightState | 
   const [message, setMessage] = useState<string | null>(null);
   const [showInvite, setShowInvite] = useState(false);
   const [nextJoined, setNextJoined] = useState(false);
+  const [paused, setPaused] = useState(false);
+  const [focusPass, setFocusPass] = useState(false);
+  // When the hero changes to the person's own state, focus its heading so the change is read out (the form they used is gone).
+  const shown = useRef(personal);
+  useEffect(() => {
+    if (shown.current === personal) return;
+    shown.current = personal;
+    if (personal) document.getElementById('flight-hero-title')?.focus();
+  }, [personal]);
+  const pass = state?.me.flight?.pass ?? null;
+  // An already-boarded person's pass is focused once it is on the page.
+  useEffect(() => { if (focusPass && pass) { document.getElementById('pass')?.focus(); setFocusPass(false); } }, [focusPass, pass]);
 
   const refresh = useCallback(async () => {
     try {
@@ -204,7 +224,7 @@ export function BoardExperience({ initial, language }: { initial: FlightState | 
     if (!answer.ok) { setMessage(errorText(copy, answer.code)); return; }
     const flight = answer.flight as { access: FlightAccess };
     if (flight.access.kind === 'eligible') goToApp();
-    else if (flight.access.kind === 'boarded') { await refresh(); document.getElementById('pass')?.focus(); }
+    else if (flight.access.kind === 'boarded') { await refresh(); setFocusPass(true); }
     else setPersonal(flight.access);
   }, [copy, goToApp, refresh]);
 
@@ -223,16 +243,16 @@ export function BoardExperience({ initial, language }: { initial: FlightState | 
     report('board_click');
     const text = prompt.trim();
     if (text) { report('prompt_submit'); storage()?.setItem(FLIGHT_DRAFT_KEY, text.slice(0, 500)); }
+    else storage()?.removeItem(FLIGHT_DRAFT_KEY); // A route picked and then cleared is not carried to /app.
     void checkAccess();
   };
 
   const counters = state?.counters ?? null, phase = state?.phase ?? null;
   const full = counters !== null && counters.foundingLeft === 0;
-  const pass = state?.me.flight?.pass ?? null;
   const marquee = useMemo(() => Array.from({ length: 6 }, () => copy.marquee), [copy]);
 
   let hero: ReactNode;
-  if (!state) hero = <div className={styles.heroText}><p className={styles.status}>{copy.unavailable}</p></div>;
+  if (!state) hero = <div className={styles.heroText}><h1 className={styles.srOnly}>Flight FloFi</h1><p className={styles.status}>{copy.unavailable}</p></div>;
   else if (personal?.kind === 'batch_closed') {
     const t = copy.batch, when = `${brt(personal.opensAt, { month: 'short', day: 'numeric' }, language)} ${language === 'PT' ? 'às' : 'at'} ${clockOf(personal.opensAt)}`;
     hero = <div className={`${styles.heroText} ${styles.onDark}`}>
@@ -242,13 +262,13 @@ export function BoardExperience({ initial, language }: { initial: FlightState | 
         <span className={styles.boardLabel}>{t.opens}</span>
         <Flaps text={`${brt(personal.opensAt, { month: 'short', day: '2-digit' }, 'EN').toUpperCase()} ${brt(personal.opensAt, { hour: '2-digit', minute: '2-digit', hour12: false }, 'EN')}`} cells={13} hi/>
       </div>
-      <h1>{t.title[0]}<span className={styles.accentPeri}>{t.title[1]}</span></h1>
+      <h1 id="flight-hero-title" tabIndex={-1}>{t.title[0]}<span className={styles.accentPeri}>{t.title[1]}</span></h1>
       <p className={styles.heroBody}>{t.body(when)}</p>
       <div className={styles.ctaRow}>
         <a className={`${styles.btn} ${styles.btnBlue}`} download="flight-flofi.ics" href={`data:text/calendar;charset=utf-8,${encodeURIComponent(calendarFile(personal.opensAt, language))}`}>{t.calendar}</a>
       </div>
       <p className={styles.small}>{t.invite} <button type="button" className={styles.linkButton} onClick={() => setShowInvite(true)}>{t.useIt}</button></p>
-      {showInvite && <InviteForm copy={copy} onRedeemed={() => { setPersonal(null); void refresh(); }}/>}
+      {showInvite && <InviteForm key="invite" copy={copy} onRedeemed={() => { setPersonal(null); void refresh(); }}/>}
     </div>;
   } else if (personal?.kind === 'not_listed') {
     const t = copy.notListed;
@@ -258,9 +278,10 @@ export function BoardExperience({ initial, language }: { initial: FlightState | 
         <span className={styles.boardLabel}>{t.labels[0]}</span><Flaps text={t.board[1]} cells={12} hi/>
         <span className={styles.boardLabel}>{t.labels[1]}</span><Flaps text={t.board[2]} cells={12}/>
       </div>
-      <h1>{t.title[0]}<span className={styles.accentPeri}>{t.title[1]}</span></h1>
+      <h1 id="flight-hero-title" tabIndex={-1}>{t.title[0]}<span className={styles.accentPeri}>{t.title[1]}</span></h1>
       <p className={styles.heroBody}>{t.body}</p>
-      {nextJoined ? <p className={styles.status} role="status">{t.joined}</p> : state.me.hasEmail ? <div className={styles.ctaRow}>
+      <p className={nextJoined ? styles.status : styles.srOnly} role="status">{nextJoined ? t.joined : ''}</p>
+      {nextJoined ? null : state.me.hasEmail ? <div className={styles.ctaRow}>
         <button type="button" className={`${styles.btn} ${styles.btnBlue}`} onClick={async () => {
           const answer = await post('/api/board/list', { language, consent: true });
           if (answer.ok) setNextJoined(true); else setMessage(errorText(copy, answer.code));
@@ -272,7 +293,7 @@ export function BoardExperience({ initial, language }: { initial: FlightState | 
       </>}
       <p className={styles.notice}><ListNotice copy={copy} language={language}/></p>
       <p className={styles.small}>{copy.batch.invite} <button type="button" className={styles.linkButton} onClick={() => setShowInvite(true)}>{copy.batch.useIt}</button></p>
-      {showInvite && <InviteForm copy={copy} onRedeemed={() => { setPersonal(null); void refresh(); }}/>}
+      {showInvite && <InviteForm key="invite" copy={copy} onRedeemed={() => { setPersonal(null); void refresh(); }}/>}
       {message && <p className={styles.error} role="alert">{message}</p>}
     </div>;
   } else if (phase === 'FINAL_CALL' || phase === 'GATE_CLOSED') {
@@ -300,13 +321,13 @@ export function BoardExperience({ initial, language }: { initial: FlightState | 
         <input id="flight-prompt" autoComplete="off" maxLength={500} placeholder={full ? copy.foundingFull.placeholder : t.placeholder} value={prompt} onChange={e => setPrompt(e.target.value)}/>
         <button className={`${styles.btn} ${styles.btnNavy}`} type="submit" disabled={busy}>{t.board} <span aria-hidden="true">→</span></button>
       </form>
-      {message && <p className={styles.status} role="status">{message}</p>}
+      <p className={message ? styles.status : styles.srOnly} role="status">{message ?? ''}</p>
       <div className={styles.metaRow}>
         <span className={styles.meta}>{t.counters(number(state.counters.boarded, language))}</span>
         {!full && <><span className={styles.dot} aria-hidden="true"/><span className={`${styles.meta} ${styles.metaSoft}`}>{t.left(number(state.counters.foundingLeft, language))}</span></>}
         {!pass && <><span className={styles.dot} aria-hidden="true"/><button type="button" className={styles.linkButton} onClick={() => setShowInvite(value => !value)}>{t.invite}</button></>}
       </div>
-      {showInvite && !pass && <InviteForm copy={copy} onRedeemed={() => void refresh()}/>}
+      {showInvite && !pass && <InviteForm key="invite" copy={copy} onRedeemed={() => void refresh()}/>}
     </div>;
   }
 
@@ -322,7 +343,12 @@ export function BoardExperience({ initial, language }: { initial: FlightState | 
       {dark && personal?.kind === 'not_listed' && <div className={styles.heroArt} aria-hidden="true">
         <img className={styles.mascot} src="/brand/flight/gota-safety.svg" alt=""/>
       </div>}
-      <div className={styles.marquee} aria-hidden="true"><div className={styles.track}>{marquee.map((text, index) => <span key={index}>{text}</span>)}</div></div>
+      <div className={styles.marquee}>
+        <div className={`${styles.track}${paused ? ` ${styles.paused}` : ''}`} aria-hidden="true">{marquee.map((text, index) => <span key={index}>{text}</span>)}</div>
+        {/* Moving text can be stopped (WCAG 2.2.2); reduced-motion settings stop it already. */}
+        <button type="button" className={styles.marqueeToggle} aria-pressed={paused} aria-label={copy.marqueePause} onClick={() => setPaused(value => !value)}>
+          <span aria-hidden="true">{paused ? '▶' : '❚❚'}</span></button>
+      </div>
     </section>
     {pass && <PassPanel pass={pass} invites={state?.me.flight?.invites ?? []} copy={copy}
       onPass={next => setState(s => s && s.me.flight ? { ...s, me: { ...s.me, flight: { ...s.me.flight, pass: next } } } : s)}/>}

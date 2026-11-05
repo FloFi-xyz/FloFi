@@ -105,8 +105,22 @@ async function signInFromBoard(page: Page, email: string) {
   await page.waitForLoadState('load');
 }
 const hero = (page: Page) => page.locator('#top');
+/**
+ * Nothing sideways at this width: the document does not scroll, and (since the page clips its own overflow) every visible heading,
+ * text, control and split-flap row of the page lies inside the viewport. Decorative art (aria-hidden) may bleed off the edge.
+ */
 async function noOverflow(page: Page) {
   await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  await expect.poll(() => page.evaluate(() => [...document.querySelectorAll('main h1, main h2, main p, main a, main button, main input, main label, main li, main [role="img"], main [role="timer"]')]
+    .filter(element => !element.closest('[aria-hidden="true"]') && element.getClientRects().length > 0)
+    .filter(element => { const box = element.getBoundingClientRect(); return box.width > 1 && (box.left < -1 || box.right > innerWidth + 1); })
+    .map(element => `${element.tagName.toLowerCase()} “${(element.getAttribute('aria-label') ?? element.textContent ?? '').trim().slice(0, 40)}”`))).toEqual([]);
+}
+/** The same page at phone widths (the narrowest supported and a common one). */
+async function fitsPhones(page: Page) {
+  const size = page.viewportSize();
+  for (const width of [320, 360]) { await page.setViewportSize({ width, height: 800 }); await noOverflow(page); }
+  if (size) await page.setViewportSize(size);
 }
 const flaps = (scope: Page | Locator, text: string) => scope.getByRole('img', { name: text, exact: true });
 /** Evidence: a full-page screenshot of each state, kept with the run's results (CircleCI stores them as artifacts). */
@@ -119,7 +133,7 @@ test('a visitor reaches /board in Final call, on mobile and desktop; the beta li
     const response = await page.goto('/board');
     expect(response?.status()).toBe(200);
     await expect(page.getByRole('heading', { level: 1 })).toHaveText('Final call for the beta list.');
-    await expect(page.getByRole('timer')).toHaveAttribute('aria-label', 'List closes in 3 D 11 H 59 M');
+    await expect(page.getByRole('timer')).toHaveAttribute('aria-label', 'List closes in 3 days, 11 hours, 59 minutes');
     await expect(hero(page)).toContainText('0 ON THE LIST');
     await noOverflow(page);
     await shot(page, `state-1-final-call-${width}`);
@@ -162,6 +176,7 @@ test('Gate closed: the approved post’s words, and a new address joins the next
   await expect(page.getByRole('heading', { level: 1 })).toHaveText('Gate closed. Boarding starts tomorrow.');
   await expect(hero(page)).toContainText('9:00 BRT. See you on board.');
   await shot(page, 'gate-closed-1440');
+  await fitsPhones(page);
   await page.getByLabel('Your email').fill(LATE);
   await page.getByRole('button', { name: 'Join the next flight' }).click();
   await expect(page.getByRole('status')).toHaveText('You’re on the list for the next flight.');
@@ -208,6 +223,7 @@ test('a group still closed (state 3) opens at its own time; not on the list (sta
   await expect(hero(page)).toContainText('Your boarding opens Nov 19 at 9:00. We’ll email you the moment it does.');
   await expect(page.getByRole('link', { name: 'Add to calendar' })).toHaveAttribute('href', /^data:text\/calendar/);
   await shot(page, 'state-3-group-closed-1440');
+  await fitsPhones(page);
   // Its group opens: the same person now sees Now boarding.
   await at(context, GROUP_TWO_OPEN);
   await page.reload();
@@ -224,6 +240,7 @@ test('a group still closed (state 3) opens at its own time; not on the list (sta
     await expect(cidPage.getByRole('heading', { level: 1 })).toHaveText('Not on the list. Yet.');
     await expect(flaps(cidPage, 'NOT LISTED')).toBeVisible();
     await shot(cidPage, 'state-4-not-on-the-list-1440');
+    await fitsPhones(cidPage);
     await cidPage.evaluate(() => { (window as unknown as { __opened: string[] }).__opened = []; window.open = (url?: string | URL) => { (window as unknown as { __opened: string[] }).__opened.push(String(url)); return null; }; });
     await cidPage.getByRole('button', { name: 'Share on X' }).click();
     expect((await cidPage.evaluate(() => (window as unknown as { __opened: string[] }).__opened))[0]).toMatch(/^https:\/\/x\.com\/intent\/post\?.*url=https%3A%2F%2Fflofi\.xyz%2Fboard/);
@@ -360,6 +377,7 @@ test('Founding full (state 5): after the 100th seat the banner shows and the nex
   await expect(page.getByRole('heading', { name: 'You’re on board. Middle seat.' })).toBeVisible();
   await expect(flaps(page, '101E')).toBeVisible();
   await shot(page, 'passenger-pass-1440');
+  await fitsPhones(page);
   expect(await query(`SELECT count(founding_seat)::int AS founding, max(boarding_no) AS last FROM flight_passes`)).toEqual([{ founding: 100, last: 101 }]);
   expect(await events('simulation_ok', 'passenger')).toBe(1);
 });
@@ -390,6 +408,13 @@ test('every CTA and link resolves; the campaign posts link to a real page with t
   await page.getByRole('navigation', { name: 'Flight FloFi navigation' }).getByRole('button', { name: 'PT' }).click();
   await expect(page.getByRole('heading', { level: 1 })).toHaveText('Diga para onde você vai.');
   await expect(page.locator('html')).toHaveAttribute('lang', 'pt-BR');
+  // Portuguese is longer: every public state still fits a phone.
+  for (const [clock, title] of [[FINAL_CALL, 'Última chamada'], [GATE_CLOSED, 'Portão fechado'], [BOARDING, 'Diga para onde você vai.']] as const) {
+    await at(context, clock);
+    await page.reload();
+    await expect(page.getByRole('heading', { level: 1 })).toContainText(title);
+    await fitsPhones(page);
+  }
   await page.getByRole('navigation', { name: 'Navegação do Flight FloFi' }).getByRole('button', { name: 'EN' }).click();
   await expect(page.getByRole('heading', { level: 1 })).toHaveText('Say where you’re going.');
   // Sign-in and /app keep working for anyone, whatever their campaign state.

@@ -49,19 +49,28 @@ export function useFlightDraft(setDraft: ((text: string) => void) | null): void 
 export function FlightBoarding({ readyKey, workflowId }: { readyKey: string | null; workflowId: string }) {
   const { t } = useLocale();
   const [issued, setIssued] = useState(false);
+  // In the campaign: "Board now" set the boarding key, or a /board sign-in left onboarding by another exit (its return key is still
+  // there). The server decides eligibility either way. Everyone else: nothing rendered, nothing asked.
+  const [active, setActive] = useState(false);
+  useEffect(() => {
+    const store = storage();
+    setActive(store?.getItem(FLIGHT_BOARDING_KEY) === '1' || (FLIGHT_RETURNS as readonly string[]).includes(store?.getItem(FLIGHT_RETURN_KEY) ?? ''));
+  }, []);
   const asked = useRef<string | null>(null);
   useEffect(() => {
     const store = storage();
-    if (!readyKey || asked.current === readyKey || store?.getItem(FLIGHT_BOARDING_KEY) !== '1') return;
+    if (!active || !readyKey || asked.current === readyKey) return;
     asked.current = readyKey;
+    const done = () => { store?.removeItem(FLIGHT_BOARDING_KEY); store?.removeItem(FLIGHT_RETURN_KEY); };
     void fetch('/api/board/pass', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ workflowId }) })
       .then(response => response.json() as Promise<{ ok: boolean; code?: string }>)
       .then(answer => {
         // Issued (or already issued): done. Not eligible: nothing to retry. Anything else (no recorded simulation yet): the next Review retries.
-        if (answer.ok) { store?.removeItem(FLIGHT_BOARDING_KEY); setIssued(true); }
-        else if (answer.code === 'FLIGHT_NOT_ELIGIBLE') store?.removeItem(FLIGHT_BOARDING_KEY);
+        if (answer.ok) { done(); setIssued(true); }
+        else if (answer.code === 'FLIGHT_NOT_ELIGIBLE') { done(); setActive(false); }
       }).catch(() => { asked.current = null; });
-  }, [readyKey, workflowId]);
-  if (!issued) return null;
-  return <p className="beta-notice" role="status">{t('Your Flight FloFi boarding pass is ready.')} <Link href="/board#pass">{t('See your boarding pass')}</Link></p>;
+  }, [active, readyKey, workflowId]);
+  if (!active && !issued) return null;
+  // The live region is on the page before its text arrives, so the notice is announced.
+  return <p className={issued ? 'beta-notice' : 'sr-only'} role="status">{issued ? <>{t('Your Flight FloFi boarding pass is ready.')} <Link href="/board#pass">{t('See your boarding pass')}</Link></> : null}</p>;
 }

@@ -20,6 +20,7 @@ import type { Backend, BackendOptions } from '../../backend/app.ts';
 import type { FlowName } from '../../backend/flows.ts';
 import { callCloudFlow, listCloudRuns, previewCloudFlow, readCloudRun, type CloudRunSummary, type FlowResult } from './cloud-api-client.ts';
 import { isHostedDeployment } from './deployment.ts';
+import { notifySimulation } from './simulation-observer.ts';
 import { serverlessPostgresConfig } from './postgres-config.ts';
 import { testNetworkFlowRefusal, testNetworkPreviewRefusal } from './test-network-flows.ts';
 
@@ -120,30 +121,11 @@ export async function cloudFlow<T>(flow: FlowName, method: string, args: readonl
     try { result = await (await embeddedRuntime(env)).backend.callFlow(flow, method, args, undefined, principal) as FlowResult<T>; }
     catch (error) { return { ok: false, code: classified(error, 'CLOUD_RUNTIME_UNAVAILABLE') }; }
   }
+  // BUILD-FLOFI-FLIGHT-001: a successful simulation is shown to the simulation observer (`simulation-observer.ts`), which cannot change it.
   if ((method === 'simulate' || method === 'prepare') && result.ok) await notifySimulation({ flow, method, args, value: result.value }, env);
   return result;
 }
 
-/**
- * BUILD-FLOFI-FLIGHT-001: the one observer of successful simulations (`simulate`, and `prepare`, the catalog swaps' quote and
- * simulation) — the Flight FloFi boarding-pass record, registered when the Next.js server starts (`src/instrumentation.ts`), so this
- * runtime imports nothing of the campaign, its accounts or its requests.
- * The observer only reads; whatever it does (throw, reject, hang), the simulation's result is returned unchanged, after at most
- * SIMULATION_OBSERVER_MS. Kept on `globalThis` because the server's start hook and its routes are separate bundles.
- */
-export type SimulationCall = { readonly flow: FlowName; readonly method: string; readonly args: readonly unknown[]; readonly value: unknown };
-export type SimulationObserver = (call: SimulationCall, env: Env) => Promise<void>;
-const SIMULATION_OBSERVER = Symbol.for('flofi.flow-runtime.simulation-observer'), SIMULATION_OBSERVER_MS = 2_000;
-type ObserverSlot = { [SIMULATION_OBSERVER]?: SimulationObserver | null };
-export function observeSimulations(observer: SimulationObserver | null): void { (globalThis as ObserverSlot)[SIMULATION_OBSERVER] = observer; }
-async function notifySimulation(call: SimulationCall, env: Env): Promise<void> {
-  const observer = (globalThis as ObserverSlot)[SIMULATION_OBSERVER];
-  if (!observer) return;
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  try {
-    await Promise.race([observer(call, env), new Promise<void>(resolve => { timer = setTimeout(resolve, SIMULATION_OBSERVER_MS); })]);
-  } catch { /* An observer never affects the simulation. */ } finally { clearTimeout(timer); }
-}
 /** The deployment's enablement of one flow (`null` in local mode). Any runtime failure reads as `off`: fail closed. */
 export async function cloudFlowMode(flow: FlowName, env: Env = process.env, transport?: typeof fetch): Promise<FlowRuntimeMode | null> {
   const result = await cloudFlow<unknown>(flow, 'mode', [], { env, ...transport ? { transport } : {} });
@@ -209,3 +191,4 @@ export async function cloudRuns(flow: FlowName, principal: string, env: Env = pr
   try { return { ok: true, value: (await (await embeddedRuntime(env)).runs(flow, principal)).filter(r => r.ownerAccount === principal && r.flow === flow) }; }
   catch (error) { return { ok: false, code: classified(error, 'CLOUD_RUNTIME_UNAVAILABLE') }; }
 }
+export { observeSimulations, type SimulationCall, type SimulationObserver } from './simulation-observer.ts';

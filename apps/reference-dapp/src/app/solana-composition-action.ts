@@ -7,7 +7,7 @@ import { createSolanaDevnetService } from '../server/jupiter-service';
 import { createOrcaLiquidityService } from '../server/orca-liquidity-service';
 import { createSolanaCompositionService, type SolanaCompositionDiagnostic, type SolanaCompositionService } from '../server/solana-composition-service';
 import { createSolanaRpc, solanaRpcOverride } from '../server/solana-rpc';
-import { cloudFlow } from '../server/flow-runtime';
+import { cloudFlow } from './cloud-flow';
 
 /**
  * Solana Devnet Swap → Orca liquidity (valueless test tokens). Simulation and Reviews are read-only. The swap and the position

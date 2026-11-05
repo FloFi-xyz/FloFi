@@ -154,6 +154,27 @@ describe('BUILD-FLOFI-FLIGHT-001 boarding passes', () => {
       [later])).rejects.toThrow();
   });
 
+  it('boards a list entry once: not again after the account is deleted, nor for a second account with the same address', async () => {
+    await store.joinList({ email: 'once@flofi-test.dev', language: 'EN', flight: 'FIRST', client: null, now: BEFORE });
+    const emails = ['once@flofi-test.dev'], first = await newAccount(), twin = await newAccount();
+    expect((await store.account({ accountId: twin, emails, now: BOARDING })).access).toEqual({ kind: 'eligible', origin: 'LIST' });
+    await simulated(first, 'wf-once', swap);
+    expect(await issue(first, 'wf-once', { emails })).toMatchObject({ ok: true, issued: true, pass: { origin: 'LIST' } });
+    // A second account proving the same address: the entry has boarded.
+    await simulated(twin, 'wf-twin', swap);
+    expect(await issue(twin, 'wf-twin', { emails })).toEqual({ ok: false, code: 'FLIGHT_NOT_ELIGIBLE' });
+    // The holder deletes the account and signs in again with the same address: still nothing, and no number is used.
+    const before = await store.counters();
+    await t.db.query('DELETE FROM flofi_accounts WHERE tenant_id = $1 AND account_id = $2', ['default', first]);
+    const again = await newAccount();
+    expect((await store.account({ accountId: again, emails, now: BOARDING })).access).toEqual({ kind: 'not_listed' });
+    await simulated(again, 'wf-again', swap);
+    expect(await issue(again, 'wf-again', { emails })).toEqual({ ok: false, code: 'FLIGHT_NOT_ELIGIBLE' });
+    expect(await store.counters()).toEqual(before);
+    // The entry itself stays until erasure or the end of the beta (marked boarded, nothing else).
+    expect((await t.db.query(`SELECT boarded_at IS NOT NULL AS boarded FROM flight_list_entries WHERE email = 'once@flofi-test.dev'`)).rows).toEqual([{ boarded: true }]);
+  });
+
   it('gives exactly the 100 Founding seats once each under concurrent boarding; everyone after boards as a passenger', async () => {
     // A fresh issuance (test data): earlier tests' passes and their numbers removed.
     await t.db.query(`DELETE FROM flight_invites WHERE issuer = 'FOUNDING'`);

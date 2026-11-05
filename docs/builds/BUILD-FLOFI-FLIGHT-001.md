@@ -29,8 +29,9 @@ board_click, access_result (list · invite · batch_closed · not_listed), route
 issued only from the server's own record of a successful simulation by that signed-in, eligible account in the last two hours — the run
 and the route the server projected from the workflow it simulated — so a browser can neither forge a pass nor add a step to its route.
 The record is made by the flow runtime's simulation observer (`cloudFlow`, on the embedded and remote runtimes; `simulate` for every flow
-and `prepare` for the catalog swaps on Ethereum, Base, Arbitrum and Robinhood Chain), registered at server start; the observer cannot
-change, fail or hold a simulation for more than two seconds. One pass per account; one entry per email (a repeat is answered exactly like
+and `prepare` for the catalog swaps on Ethereum, Base, Arbitrum and Robinhood Chain once the owner's preflight is in it), which the /app
+server actions register; it records only a workflow of exactly one financial step (every mainnet service simulates one), cannot change,
+fail or hold a simulation for more than two seconds, and logs a fixed outcome code. One pass per account; one entry per email (a repeat is answered exactly like
 a new address); invites are single use, one per account, never one's own. The campaign gates only its own benefit: `/app` stays open
 to everyone.
 
@@ -68,8 +69,10 @@ Read-only reviews of the first version found no blocker; their findings and the 
   unsimulated steps into a pass's route. Now the server records the route it simulated and the pass carries that route; the browser only
   names the workflow in Review.
 - **The flow runtime reached the account host** (the channel boundary suite caught `next/headers`, Privy and Turnkey in the shared workflow
-  renderer's closure), and the hook was unbounded. Now it is an import-free observer slot in `cloudFlow`, registered by
-  `src/instrumentation.ts`, guarded and capped at two seconds (`flow-runtime.test.ts`).
+  renderer's closure), and the hook was unbounded. Now `cloudFlow` calls an import-free observer slot (`server/simulation-observer.ts`),
+  guarded and capped at two seconds (`flow-runtime.test.ts`), which the /app server actions register by importing the flow runtime
+  through `app/cloud-flow.ts`. (A Next.js server-start hook was tried and dropped: its trace is shipped with every function and pulled
+  test fixtures into it, which the function-package gate refuses.)
 - **Seats and invites could be reissued** after an account deletion (and with them three more invites): `flight_issuance` keeps every
   number issued.
 - **The pass lock was taken before eligibility**: ineligible or evidence-less requests are now answered before any lock.
@@ -85,10 +88,22 @@ Read-only reviews of the first version found no blocker; their findings and the 
 - **Release document**: corrected. A build shipping 0020 refuses a schema-19 database for every database feature (and the reverse), so
   Release A is its own PR and Vercel production deploys only after the API has migrated.
 
+A second round (flofi-security re-review, flofi-frontend-ux, flofi-infrastructure-ci) found and fixed: a list entry could board again
+after its account was deleted (entries are now marked boarded); a quote-only `prepare` and multi-step workflows could count as simulations
+(now the owner's preflight and exactly one financial step); concurrent list requests of one client could pass its limit (per-client
+lock); the server-start hook's trace shipped test fixtures with every function (replaced by action-side registration); on phones the
+mascot covered the consent notice; the marquee could not be paused (WCAG 2.2.2); focus and live regions were lost on state changes; an
+invite's confirmation was lost in the group-still-closed state; the consent sentence was not tied to the form; low-contrast colours; a
+/board sign-in that left onboarding by another exit never asked for its pass; and the runbook lacked preconditions, the concrete Vercel
+promotion steps and safe rollback targets.
+
 Open for the owner and team (not decided by engineering): a confirmation step for list addresses (anyone can submit any address; the
 team's first email is where a person can object); whether the exact public "on the list" counter is acceptable (comparing it before and
 after submitting an address can hint that the address was new); invitees who take Founding seats receive 3 invites each (the boards'
-perk), so one list member's invites can chain; plus-addressed aliases are separate list entries.
+perk), so one list member's invites can chain (one entry plus scripted wallet-only accounts could reach all 100 Founding seats); a free
+quote is not enough, but any owner preflight is; plus-addressed aliases are separate list entries; a rotating-IPv6 flood can reach the
+deployment-wide list limit (Vercel's firewall is the platform answer); Post 5's "Boarding starts tomorrow" is shown until 9:00 on the
+day itself; the Discord link in the footer should be a non-expiring invite; the privacy page names CNPD (Portugal) for complaints.
 
 ## Privacy (LGPD/GDPR)
 
@@ -101,9 +116,16 @@ team's email tool is a processor of exported addresses; an export is a new mode-
 
 ## Verification
 
-`store.pg.test.ts` (8, real PostgreSQL: list, duplicates, rate limit, every access state, invites, evidence-bound issuance, 100 seats under
-260 concurrent requests, departures privacy, erasure), `flight-flofi-migration.pg.test.ts` (2), `campaign.test.ts` (6), the `flight` browser
-profile `board.spec.ts` (8, embedded runtime, MOCKED Privy and Jupiter, disposable database: all five states and their transitions, Board
-now → sign-in → onboarding → /app with the draft, the operator CLI, an invite used once, a pass issued by a real simulation, Founding full
-and the passenger pass, every CTA, the posts' link and OG image, EN/PT, /login and /app). Local and loopback evidence only; CircleCI
+`store.pg.test.ts` (12, real PostgreSQL: list and limits including requests without a client digest, every access state, invites,
+evidence-bound issuance, a list entry boarding once (not again after account deletion or for a second account with the same address),
+100 Founding seats under 260 concurrent requests, no reissue after deletion, departures privacy, erasure, retention, tenant isolation),
+`flight-flofi-migration.pg.test.ts` (2), `campaign.test.ts` (9: dates, access, inputs, seats, route projection, the simulation record,
+IPv6 /64 keying, CSV cells, the hosted refusal of the test clock, browser events), `flow-runtime.test.ts` (the observer never changes,
+fails or holds a result), `account-session.test.ts` (return paths), and the `flight` browser profile `board.spec.ts` (8, embedded runtime,
+MOCKED Privy and Jupiter, disposable database: all five states and their transitions at 1440 px and, in English and Portuguese, at 320 and
+360 px with every heading, text, control and split-flap row inside the viewport; Board now → sign-in → onboarding → /app with the draft;
+the operator CLI; an invite used once; a pass issued by a real simulation through the action-side observer; Founding full and the
+passenger pass; every CTA, the posts' link and OG image; /login and /app). Release A's tree also ran `backend/schema-compatibility.pg.test.ts`
+(API and worker across the 0020 fixture) locally. `scripts/function_traces.py` passes (largest function 45.3 MB). Local and loopback
+evidence only on PostgreSQL 16 (CI runs 18.6, where one pre-existing 0015 assertion depends on catalogued NOT NULL constraints); CircleCI
 certifies, and a public Preview of `/board` needs an isolated Preview database (see the release document).

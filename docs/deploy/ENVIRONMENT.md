@@ -398,7 +398,12 @@ No variable of its own. `/board` needs `DATABASE_URL` with migration 0020 applie
 for every database-backed feature, not only `/board`: see the release order), the Privy variables of §5j (sign-in for "Board now") and
 `FLOFI_SESSION_SECRET` (it also keys the list form's rate-limit digest of the client's IPv4 address or IPv6 /64, from the platform's
 `x-real-ip`/`x-forwarded-for`; without it, or without an address, a request counts only toward the deployment-wide limit). Simulation
-evidence is recorded by the flow runtime's observer, registered at server start (`src/instrumentation.ts`, Node.js runtime). The campaign
+evidence is recorded only on the web deployment, by the flow runtime's observer that the /app server actions register
+(`src/app/cloud-flow.ts`); the Railway API and worker never record any (they hold no account session). Runtime logs show
+`flight.observer.registered` once per instance and `flight.evidence` (a fixed outcome code and the flow) for each boarding-phase
+simulation. The list form allows 30 requests per client per hour (mobile carriers share IPv4 addresses) and 3000 per ten minutes for
+the deployment; a rotating-IPv6 flood can still reach the deployment-wide limit, for which Vercel's firewall rate limiting is the
+platform-level answer. The campaign
 dates are code (list closes 2026-11-16 23:59 BRT, boarding opens 2026-11-17 09:00 BRT). Operators run `backend/flight-admin.ts`.
 
 ## 6. Platform-provided (read, never set by hand)

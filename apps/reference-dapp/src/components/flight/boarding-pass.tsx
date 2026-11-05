@@ -28,7 +28,7 @@ export function Flaps({ text, cells, big = false, hi = false, label }: { text: s
 export function FoundingPass({ pass, copy }: { pass: FlightPass; copy: FlightCopy }) {
   const t = copy.pass, { shown, more } = visibleSteps(pass.route);
   return <div className={styles.passStage} aria-labelledby="pass-title">
-    <span className={`${styles.sticker} ${styles.passSticker}`} aria-hidden="true">NOW BOARDING</span>
+    <span className={`${styles.sticker} ${styles.passSticker}`} aria-hidden="true">{copy.boarding.sticker}</span>
     <p className={`${styles.lbl} ${styles.passEyebrow}`} id="pass-title">{t.eyebrowFounding}</p>
     <div className={styles.passWrap}>
       <article className={styles.card} aria-label={`${t.boardingPass}: ${pass.route.from} → ${pass.route.to}, ${t.foundingMember} ${pass.seat}`}>
@@ -74,7 +74,7 @@ export function PassengerPass({ pass, copy }: { pass: FlightPass; copy: FlightCo
     <div className={styles.board}>
       <Flaps text={`${t.standbyBoard[0]} · ${t.standbyBoard[1]}`} big label={`${t.standbyBoard[0]} · ${t.standbyBoard[1]}`}/>
       <div className={styles.standbyRow}>
-        <div><span className={styles.boardLabel}>{t.passenger}</span><Flaps text={pass.handle ? `@${pass.handle}` : '@—'} cells={16} big/></div>
+        <div><span className={styles.boardLabel}>{t.passenger}</span><Flaps text={pass.handle ? `@${pass.handle}` : '@—'} cells={16} big label={pass.handle ? `@${pass.handle}` : t.noHandle}/></div>
         <div><span className={styles.boardLabel}>{t.seat}</span><Flaps text={pass.seat} cells={6} big hi/></div>
       </div>
       <div><span className={styles.boardLabel}>{t.gate}</span><Flaps text={t.youApprove} big/></div>

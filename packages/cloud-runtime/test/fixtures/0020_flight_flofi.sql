@@ -28,6 +28,8 @@ CREATE TABLE flight_list_entries (
   notice text NOT NULL CHECK (notice ~ '^[a-z0-9.-]{1,40}$'),
   batch_no integer,
   joined_at timestamptz NOT NULL DEFAULT clock_timestamp(),
+  -- Set when a pass is issued to an account with this address: an entry boards once, even if that account is later deleted.
+  boarded_at timestamptz,
   PRIMARY KEY (tenant_id, entry_id),
   UNIQUE (tenant_id, email),
   FOREIGN KEY (tenant_id, batch_no) REFERENCES flight_batches (tenant_id, batch_no),

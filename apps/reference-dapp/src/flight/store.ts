@@ -18,8 +18,9 @@ const DAY_MS = 86_400_000;
  * Limits of the public list form: per client digest per hour, and for the whole deployment per ten minutes. A request without a client
  * digest is counted under NO_CLIENT, so it always counts toward the deployment-wide limit (it has no per-client limit of its own).
  */
-export const JOIN_LIMITS = { perClientHour: 10, globalTenMinutes: 3000 } as const;
+export const JOIN_LIMITS = { perClientHour: 30, globalTenMinutes: 3000 } as const; // 30: mobile carriers share one IPv4 among many people (CGNAT).
 export const NO_CLIENT = '0'.repeat(64);
+const JOIN_LOCK_CLASS = 734_003_221; // Advisory lock class (int4): one list request at a time per client digest.
 /** How long each kind of campaign record is kept (the privacy notice's periods). */
 export const FLIGHT_RETENTION = { joinAttemptsMs: DAY_MS, simulationsMs: SIMULATION_EVIDENCE_MS, eventDays: 400 } as const;
 
@@ -73,6 +74,8 @@ export function createFlightStore(host: FlightHost) {
     Promise<{ readonly status: 'JOINED' | 'ALREADY' | 'RATE_LIMITED' | 'BUSY' }> {
     return db.transaction(async tx => {
       const now = at(input.now), client = input.client ?? NO_CLIENT;
+      // Concurrent requests of one client are counted one after another, so none slips past its limit.
+      if (client !== NO_CLIENT) await tx.query('SELECT pg_advisory_xact_lock($1::int, hashtext($2))', [JOIN_LOCK_CLASS, client]);
       await tx.query(`DELETE FROM flight_join_attempts WHERE tenant_id = $1 AND attempted_at < $2::timestamptz - interval '1 day'`, [tenantId, now]);
       const recent = (await tx.query<{ client: string; global: string }>(`SELECT
         count(*) FILTER (WHERE client = $2) AS client,
@@ -96,14 +99,17 @@ export function createFlightStore(host: FlightHost) {
     return rows.map(passOf).map(pass => ({ handle: pass.handle!, from: pass.route.from, to: pass.route.to, steps: pass.route.stepCount, seat: pass.seat }));
   }
 
-  /** The account's place in the campaign: its pass, else what "Board now" answers. `emails` are the account's verified addresses. */
+  /**
+   * The account's place in the campaign: its pass, else what "Board now" answers. `emails` are the account's verified addresses; an
+   * entry that already boarded (with this or another account, since deleted) gives nothing again.
+   */
   async function account(input: { accountId: string; emails: readonly string[]; now: number }, q: Queryable = db): Promise<AccountFlight> {
     const pass = (await q.query<PassRow>(`SELECT ${PASS_COLUMNS} FROM flight_passes WHERE tenant_id = $1 AND account_id = $2`, [tenantId, input.accountId])).rows[0];
     const invite = (await q.query<{ issuer: 'FOUNDING' | 'CREATOR' }>('SELECT issuer FROM flight_invites WHERE tenant_id = $1 AND redeemed_by = $2',
       [tenantId, input.accountId])).rows[0]?.issuer ?? null;
     const entries = input.emails.length ? (await q.query<{ flight: 'FIRST' | 'NEXT'; batch_no: number | null; opens_at: Date | null }>(`SELECT e.flight, e.batch_no, b.opens_at
       FROM flight_list_entries e LEFT JOIN flight_batches b ON b.tenant_id = e.tenant_id AND b.batch_no = e.batch_no
-      WHERE e.tenant_id = $1 AND e.email = ANY($2::text[]) ORDER BY (e.flight = 'FIRST') DESC, b.opens_at ASC NULLS FIRST LIMIT 1`,
+      WHERE e.tenant_id = $1 AND e.email = ANY($2::text[]) AND e.boarded_at IS NULL ORDER BY (e.flight = 'FIRST') DESC, b.opens_at ASC NULLS FIRST LIMIT 1`,
       [tenantId, [...input.emails]])).rows : [];
     const entry = entries[0] ? { flight: entries[0].flight, batch: entries[0].batch_no, opensAt: entries[0].opens_at?.getTime() ?? null } : null;
     const access = decideAccess({ now: input.now, passId: pass?.pass_id ?? null, invite, entry });
@@ -173,6 +179,10 @@ export function createFlightStore(host: FlightHost) {
       if (!evidence) return { ok: false as const, code: 'FLIGHT_SIMULATION_NOT_FOUND' as const };
       const next = { boarding_no: issued.boarded + 1, seat: issued.founding < FOUNDING_SEATS ? issued.founding + 1 : null };
       await tx.query('UPDATE flight_issuance SET boarded = $2, founding = $3 WHERE tenant_id = $1', [tenantId, next.boarding_no, next.seat ?? issued.founding]);
+      // The person's list entries have boarded: deleting this account and signing in again (or another account with the same
+      // address) never boards on them again.
+      if (input.emails.length) await tx.query(`UPDATE flight_list_entries SET boarded_at = $3 WHERE tenant_id = $1 AND email = ANY($2::text[]) AND boarded_at IS NULL`,
+        [tenantId, [...input.emails], at(input.now)]);
       const passId = `flp_${randomBytes(16).toString('hex')}`, origin = state.access.origin;
       const row = (await tx.query<PassRow>(`INSERT INTO flight_passes (tenant_id, pass_id, account_id, origin, boarding_no, founding_seat, handle, public, route,
         run_id, departed_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, $10, $11) RETURNING ${PASS_COLUMNS}`,
