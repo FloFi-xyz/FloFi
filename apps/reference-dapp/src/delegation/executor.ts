@@ -104,7 +104,7 @@ async function verifyAuthorityChain(deps: ExecutorDeps, source: SourceFacts, rev
     if (!anchoredBy(g, anchor)) return { ok: false, code: 'GRANT_ANCHOR_MISMATCH' };
     grants.set(g.grantId, g);
   }
-  const graph = resolveAuthorityGraph(req.value, [...grants.values()], deps.config.mode, now.getTime(), m.credentials);
+  const graph = resolveAuthorityGraph(req.value, [...grants.values()], deps.config.mode, now.getTime(), m.credentials, deps.config.mainnetChains);
   if (!graph.ok) return { ok: false, code: graph.failures[0]!.code };
   // Read-only on-chain re-verification of every grant before anything is reserved (external revocation, expiry, account change).
   for (const g of grants.values()) {
@@ -245,7 +245,7 @@ async function run(deps: ExecutorDeps, start: ExecutionRecord, verified: Awaited
     if (['PENDING', 'SIMULATED', 'POLICY_VERIFIED'].includes(step.state)) {
       if (!verified.ok || !pinned) return stopBefore(k, verified.ok ? 'STEP_BINDING_MISSING' : verified.code);
       if (!bound?.ok || !binding) return stopBefore(k, bound && !bound.ok ? bound.code : 'STEP_BINDING_MISSING');
-      const ctx: StepContext = { step: bound.step, binding, grant, transport, now: deps.now };
+      const ctx: StepContext = { step: bound.step, binding, grant, transport, now: deps.now, mainnet: deps.config.mainnetChains };
       const driver = driverFor(ctx, deps.config.mode);
       if (!driver || (deps.drivers && !deps.drivers.includes(driver))) return stopBefore(k, 'DELEGATED_STEP_DRIVER_UNAVAILABLE');
       let simulated: Awaited<ReturnType<StepDriver['simulate']>>;
@@ -265,7 +265,7 @@ async function run(deps: ExecutorDeps, start: ExecutionRecord, verified: Awaited
       step = prepared.step;
       log('delegation.submission_prepared', { step: k });
     }
-    const ctx: StepContext | null = bound?.ok && binding ? { step: bound.step, binding, grant, transport, now: deps.now } : null;
+    const ctx: StepContext | null = bound?.ok && binding ? { step: bound.step, binding, grant, transport, now: deps.now, mainnet: deps.config.mainnetChains } : null;
     // After a submission is prepared, recovery needs only the persisted plan and submission (authority changes can no longer undo it).
     const recoveryCtx = ctx ?? recoveryContext(step, grant, transport, deps);
     const driver = recoveryCtx ? driverFor(recoveryCtx, deps.config.mode) : null;
@@ -383,10 +383,18 @@ function recoveryContext(step: StepRecord, grant: GrantRecord, transport: ChainT
   if (scope.mechanism === 'EVM_ERC7710_METAMASK_V1_3') {
     const calls = (prepared?.calls ?? []) as { target: string; data: string }[];
     const swap = calls.find(c => c.data.startsWith(erc7710.EXACT_INPUT_SINGLE_METHOD));
-    if (!swap) return null;
-    const words = swap.data.slice(10);
-    need = { kind: 'EVM_UNISWAP_V3_EXACT_INPUT_SINGLE', router: swap.target, tokenIn: '0x' + words.slice(24, 64), tokenOut: '0x' + words.slice(88, 128),
-      amountIn: BigInt('0x' + words.slice(256, 320)) };
+    // BUILD-FLOFI-SINGLE-AUTH-WORKFLOW-UX-001: an Aave step is recovered from its own persisted Pool call (asset @4, amount @36).
+    const aave = calls.find(c => c.data.startsWith(erc7710.AAVE_V3_SUPPLY_METHOD) || c.data.startsWith(erc7710.AAVE_V3_BORROW_METHOD));
+    if (!swap && !aave) return null;
+    if (aave) {
+      const words = aave.data.slice(10);
+      need = { kind: aave.data.startsWith(erc7710.AAVE_V3_SUPPLY_METHOD) ? 'EVM_AAVE_V3_SUPPLY' : 'EVM_AAVE_V3_BORROW', pool: aave.target.toLowerCase(),
+        asset: '0x' + words.slice(24, 64), amount: BigInt('0x' + words.slice(64, 128)) };
+    } else {
+      const words = swap!.data.slice(10);
+      need = { kind: 'EVM_UNISWAP_V3_EXACT_INPUT_SINGLE', router: swap!.target, tokenIn: '0x' + words.slice(24, 64), tokenOut: '0x' + words.slice(88, 128),
+        amountIn: BigInt('0x' + words.slice(256, 320)) };
+    }
   } else {
     const mint = plan.spend[0]?.asset.split('/token:')[1];
     if (!mint) return null;
@@ -394,7 +402,7 @@ function recoveryContext(step: StepRecord, grant: GrantRecord, transport: ChainT
     need = { kind: 'SOLANA_SPL_SPEND', mint, decimals: account?.decimals ?? 0, amount: plan.spend[0]!.amount, programs: plan.targets.filter(t => t !== mint) };
   }
   const output = plan.minimumReceive[0]?.asset.split(/\/(?:erc20|token):/)[1] ?? '';
-  return { grant, transport, now: deps.now,
+  return { grant, transport, now: deps.now, mainnet: deps.config.mainnetChains,
     binding: { stepIndex: step.stepIndex, credentialId: step.credentialId, grantId: step.grantId, mechanism: step.mechanism, chain: step.chain,
       walletAddress: grant.walletAddress, grantCommitment: step.grantCommitment, need },
     step: { index: step.stepIndex, chain: step.chain, outputs: [{ chain: step.chain, address: output, decimals: 0, symbol: '' }], slippageBps: plan.slippageBps,

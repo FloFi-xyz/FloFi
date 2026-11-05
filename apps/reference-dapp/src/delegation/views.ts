@@ -7,6 +7,8 @@
 export type PasskeyView = { readonly passkeyId: string; readonly label: string; readonly credentialId: string; readonly createdAt: string; readonly lastUsedAt: string | null;
   readonly revoked: boolean };
 export type GrantScopeView = { readonly kind: 'EVM'; readonly router: string; readonly pairs: readonly { readonly input: string; readonly output: string; readonly perCallCap: string }[];
+  /** BUILD-FLOFI-SINGLE-AUTH-WORKFLOW-UX-001: the Aave market the grant may Supply to / Borrow from, per asset and per call. */
+  readonly aave?: { readonly pool: string; readonly supply: readonly { readonly asset: string; readonly perCallCap: string }[]; readonly borrow: readonly { readonly asset: string; readonly perCallCap: string; readonly onChainCeiling: string }[] };
   readonly maxCalls: number } | { readonly kind: 'SOLANA'; readonly tokens: readonly { readonly symbol: string; readonly amount: string; readonly tokenAccount: string }[] };
 export type GrantView = { readonly grantId: string; readonly credentialId: string; readonly walletNamespace: 'eip155' | 'solana'; readonly walletAddress: string;
   readonly chain: string; readonly network: string; readonly mechanism: string; readonly state: string; readonly scope: GrantScopeView; readonly sessionAddress: string;

@@ -20,7 +20,8 @@ import { NETWORKS, type WorkflowComposition } from '../engine/strategy-engine';
 import type { Gates } from '../mcp/execution.ts';
 
 /** The deployment's delegated-execution facts (null: delegation is not enabled on this deployment). */
-export type DelegationFacts = { readonly mode: CapabilityMode; readonly unavailable: string | null } | null;
+/** `mainnetChains`: public mainnets the deployment opted into delegated templates (BUILD-FLOFI-SINGLE-AUTH-WORKFLOW-UX-001); absent or empty: none. */
+export type DelegationFacts = { readonly mode: CapabilityMode; readonly unavailable: string | null; readonly mainnetChains?: readonly string[] } | null;
 export type StepAuthorization = {
   readonly index: number; readonly action: string; readonly network: string; readonly flow: string | null;
   readonly ownerExecution: { readonly supported: boolean; readonly enabled: boolean; readonly reason: string | null };
@@ -49,7 +50,7 @@ export function delegableByCode(workflow: WorkflowComposition, delegation: Deleg
   if (delegation.unavailable) return { ok: false, code: delegation.unavailable };
   const req = requirementOf(workflow);
   if (!req.ok) return { ok: false, code: req.code };
-  for (const step of req.value.steps) { const c = stepCapability(step, delegation.mode); if (!c.ok) return { ok: false, code: c.code }; }
+  for (const step of req.value.steps) { const c = stepCapability(step, delegation.mode, delegation.mainnetChains); if (!c.ok) return { ok: false, code: c.code }; }
   return { ok: true, code: null };
 }
 
@@ -58,14 +59,14 @@ export function authorizationPlan(workflow: WorkflowComposition, gates: Pick<Gat
   delegation: DelegationFacts, owner?: { readonly grants: readonly GrantView[]; readonly now: number }): AuthorizationPlan {
   const perStep = gates.supportedByCode.steps;
   const req = requirementOf(workflow);
-  const mode: CapabilityMode = delegation?.mode ?? 'PRODUCTION';
-  const graph = req.ok && owner ? resolveAuthorityGraph(req.value, owner.grants, mode, owner.now) : null;
+  const mode: CapabilityMode = delegation?.mode ?? 'PRODUCTION', mainnet = delegation?.mainnetChains ?? [];
+  const graph = req.ok && owner ? resolveAuthorityGraph(req.value, owner.grants, mode, owner.now, undefined, mainnet) : null;
   const steps: StepAuthorization[] = workflow.steps.map((c, index) => {
     const planStep = gates.plan.steps[index], facts = perStep?.[index];
     const ownerExecution = facts ? { supported: facts.execute, enabled: facts.deploymentEnabled, reason: facts.reason }
       : { supported: gates.supportedByCode.execute, enabled: gates.enabledByDeployment.enabled, reason: gates.supportedByCode.reason ?? gates.enabledByDeployment.reason };
     const requirement = req.ok ? req.value.steps[index] : undefined;
-    const capability = requirement ? stepCapability(requirement, mode) : null;
+    const capability = requirement ? stepCapability(requirement, mode, mainnet) : null;
     const bound = graph?.bindings.find(b => b.stepIndex === index) ?? null, failure = graph && !graph.ok ? graph.failures.find(f => f.stepIndex === index) ?? null : null;
     return { index, action: c.strategy.action, network: planStep?.network ?? '', flow: planStep?.flow ?? null, ownerExecution,
       delegation: { capable: capability?.ok === true, mechanism: capability ? capability.mechanism : null, code: capability ? capability.ok ? null : capability.code
@@ -79,7 +80,7 @@ export function authorizationPlan(workflow: WorkflowComposition, gates: Pick<Gat
   const namespaces = [...new Set(steps.map(s => s.network.startsWith('solana') ? 'solana' as const : 'eip155' as const))].sort();
   // Every distinct chain × mechanism a delegated run needs a grant for (one wallet signature each, once, in Credentials).
   const enrollments = req.ok ? [...new Map(req.value.steps.flatMap(s => {
-    const c = stepCapability(s, mode);
+    const c = stepCapability(s, mode, mainnet);
     return c.mechanism ? [[`${s.chain}|${c.mechanism}`, { chain: s.chain, network: NETWORKS[s.network].label, mechanism: c.mechanism,
       active: owner ? steps[s.index]!.delegation.grantId !== null : null }]] as const : [];
   })).values()] : [];

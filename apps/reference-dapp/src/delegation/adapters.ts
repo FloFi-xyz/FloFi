@@ -49,10 +49,25 @@ export function passkeyAnchor(input: { readonly owner: string; readonly grantId:
 // ── EVM: ERC-7710 / MetaMask Delegation Framework v1.3.0 ───────────────────────────────────────────────────────────────────────
 const chainIdOf = (chain: string) => { const m = /^eip155:([1-9][0-9]{0,18})$/.exec(chain); return m ? Number(m[1]) : fail('DELEGATION_CHAIN_INVALID'); };
 const seconds = (iso: string) => BigInt(Math.floor(Date.parse(iso) / 1000));
+/**
+ * The grant's call templates, in their LogicalOrWrapper group order: swap approvals (spender: the router), swaps, then (BUILD-FLOFI-SINGLE-
+ * AUTH-WORKFLOW-UX-001) Aave approvals (spender: the Pool), supplies and borrows. Drivers find a call's group in this same list.
+ */
 export function evmTemplates(scope: Extract<GrantScope, { mechanism: 'EVM_ERC7710_METAMASK_V1_3' }>): erc7710.CallTemplate[] {
   const approvals = [...new Set(scope.pairs.map(p => p.tokenIn))].map(token => ({ kind: 'ERC20_APPROVE' as const, token, spender: scope.router }));
   const swaps = scope.pairs.map(p => ({ kind: 'UNISWAP_V3_EXACT_INPUT_SINGLE' as const, router: scope.router, tokenIn: p.tokenIn, tokenOut: p.tokenOut, perCallInputCap: BigInt(p.perCallInputCap) }));
-  return [...approvals, ...swaps];
+  const aave = scope.aave;
+  if (!aave) return [...approvals, ...swaps];
+  const aaveApprovals = [...new Set(aave.supply.map(x => x.asset))].map(token => ({ kind: 'ERC20_APPROVE' as const, token, spender: aave.pool }));
+  const supplies = aave.supply.map(x => ({ kind: 'AAVE_V3_SUPPLY' as const, pool: aave.pool, asset: x.asset, perCallCap: BigInt(x.perCallCap) }));
+  const borrows = aave.borrow.map(x => ({ kind: 'AAVE_V3_BORROW' as const, pool: aave.pool, asset: x.asset, perCallCap: BigInt(x.perCallCap) }));
+  return [...approvals, ...swaps, ...aaveApprovals, ...supplies, ...borrows];
+}
+/** The group index of the first template `match` accepts, or GRANT_SCOPE_EXCEEDED (no template of the grant covers that call). */
+export function templateIndex(scope: GrantScope, match: (t: erc7710.CallTemplate) => boolean): number {
+  if (scope.mechanism !== 'EVM_ERC7710_METAMASK_V1_3') return fail('DRIVER_MECHANISM_MISMATCH');
+  const index = evmTemplates(scope).findIndex(match);
+  return index < 0 ? fail('GRANT_SCOPE_EXCEEDED') : index;
 }
 type SerialDelegation = Omit<erc7710.Delegation, 'salt'> & { readonly salt: string };
 export const serializeDelegation = (d: erc7710.Delegation | Omit<erc7710.Delegation, 'signature'>): SerialDelegation | Omit<SerialDelegation, 'signature'> => ({ ...d, salt: d.salt.toString() });

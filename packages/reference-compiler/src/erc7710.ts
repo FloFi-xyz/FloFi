@@ -148,6 +148,12 @@ export const DISABLED_DELEGATION_TOPIC = keccakHex(`DisabledDelegation(bytes32,a
 export const MODE_SINGLE_DEFAULT = '0x' + '0'.repeat(64);
 export const APPROVE_METHOD = '0x095ea7b3';
 export const EXACT_INPUT_SINGLE_METHOD = '0x04e45aaf';
+/** Aave V3 Pool `supply(address asset, uint256 amount, address onBehalfOf, uint16 referralCode)`. */
+export const AAVE_V3_SUPPLY_METHOD = selectorOf('supply(address,uint256,address,uint16)');
+/** Aave V3 Pool `borrow(address asset, uint256 amount, uint256 interestRateMode, uint16 referralCode, address onBehalfOf)`. */
+export const AAVE_V3_BORROW_METHOD = selectorOf('borrow(address,uint256,uint256,uint16,address)');
+/** Aave V3 variable-rate interest mode (the only mode FloFi borrows with). */
+export const AAVE_V3_VARIABLE_RATE = 2n;
 
 export type Caveat = { readonly enforcer: string; readonly terms: string; readonly args: string };
 export type Delegation = { readonly delegate: string; readonly delegator: string; readonly authority: string; readonly caveats: readonly Caveat[];
@@ -239,7 +245,27 @@ export function decodeLogicalOrArgs(argsHex: string): { readonly groupIndex: num
  */
 export type CallTemplate =
   | { readonly kind: 'ERC20_APPROVE'; readonly token: string; readonly spender: string }
-  | { readonly kind: 'UNISWAP_V3_EXACT_INPUT_SINGLE'; readonly router: string; readonly tokenIn: string; readonly tokenOut: string; readonly perCallInputCap: bigint };
+  | { readonly kind: 'UNISWAP_V3_EXACT_INPUT_SINGLE'; readonly router: string; readonly tokenIn: string; readonly tokenOut: string; readonly perCallInputCap: bigint }
+  /**
+   * BUILD-FLOFI-SINGLE-AUTH-WORKFLOW-UX-001: `Pool.supply(asset, amount, onBehalfOf = owner, referralCode = 0)` from the owner's account.
+   * On-chain: target, selector, asset, beneficiary (the owner's own position), no referral, and at most `perCallCap` of the asset leaving the
+   * owner's account per call (ERC20BalanceChangeEnforcer).
+   */
+  | { readonly kind: 'AAVE_V3_SUPPLY'; readonly pool: string; readonly asset: string; readonly perCallCap: bigint }
+  /**
+   * BUILD-FLOFI-SINGLE-AUTH-WORKFLOW-UX-001: `Pool.borrow(asset, amount, 2, 0, onBehalfOf = owner)` from the owner's account. On-chain: target,
+   * selector, asset, VARIABLE rate only, no referral, the debt is the owner's own, the borrowed asset must arrive in the owner's account, and
+   * the amount is below a byte-aligned ceiling (`borrowCeiling(perCallCap)`: its leading calldata bytes are pinned to zero). v1.3.0 has no
+   * "argument ≤ x" enforcer, so the exact cap is the executor's (re-checked against the workflow authorization before every signature).
+   */
+  | { readonly kind: 'AAVE_V3_BORROW'; readonly pool: string; readonly asset: string; readonly perCallCap: bigint };
+/** The smallest power of 256 strictly above `cap`: the on-chain ceiling of a Borrow template (amount < ceiling, enforced by AllowedCalldata). */
+export function borrowCeiling(cap: bigint): bigint {
+  if (cap <= 0n || cap >= 1n << 248n) fail('ERC7710_TEMPLATE_INVALID');
+  let bytes = 1n;
+  while (cap >= 1n << (8n * bytes)) bytes++;
+  return 1n << (8n * bytes);
+}
 export type GrantScope = {
   readonly chainId: number; readonly owner: string; readonly session: string; readonly validAfter: bigint; readonly validBefore: bigint;
   readonly maxCalls: bigint; readonly templates: readonly CallTemplate[]; readonly salt: bigint;
@@ -248,6 +274,20 @@ const addressWord = (value: string) => concat(new Uint8Array(12), bytesOf(evmAdd
 export function templateGroup(template: CallTemplate, owner: string): Caveat[] {
   if (template.kind === 'ERC20_APPROVE') return [terms.allowedTargets([template.token]), terms.allowedMethods([APPROVE_METHOD]),
     terms.allowedCalldata(4, addressWord(template.spender))];
+  if (template.kind === 'AAVE_V3_SUPPLY') {
+    if (template.perCallCap <= 0n) fail('ERC7710_TEMPLATE_INVALID');
+    // supply calldata: asset @4, amount @36, onBehalfOf @68, referralCode @100.
+    return [terms.allowedTargets([template.pool]), terms.allowedMethods([AAVE_V3_SUPPLY_METHOD]), terms.allowedCalldata(4, addressWord(template.asset)),
+      terms.allowedCalldata(68, addressWord(owner)), terms.allowedCalldata(100, word(0n)),
+      terms.erc20BalanceChange(true, template.asset, owner, template.perCallCap)];
+  }
+  if (template.kind === 'AAVE_V3_BORROW') {
+    // borrow calldata: asset @4, amount @36, interestRateMode @68, referralCode @100, onBehalfOf @132. The amount's leading zero bytes bound it.
+    const ceiling = borrowCeiling(template.perCallCap), significant = (ceiling.toString(16).length - 1) / 2;
+    return [terms.allowedTargets([template.pool]), terms.allowedMethods([AAVE_V3_BORROW_METHOD]), terms.allowedCalldata(4, addressWord(template.asset)),
+      terms.allowedCalldata(36, new Uint8Array(32 - significant)), terms.allowedCalldata(68, word(AAVE_V3_VARIABLE_RATE)), terms.allowedCalldata(100, word(0n)),
+      terms.allowedCalldata(132, addressWord(owner)), terms.erc20BalanceChange(false, template.asset, owner, 1n)];
+  }
   if (template.perCallInputCap <= 0n || evmAddress(template.tokenIn) === evmAddress(template.tokenOut)) fail('ERC7710_TEMPLATE_INVALID');
   // IV3SwapRouter.ExactInputSingleParams: tokenIn @4, tokenOut @36, fee @68, recipient @100, amountIn @132, amountOutMinimum @164, sqrtPriceLimitX96 @196.
   return [terms.allowedTargets([template.router]), terms.allowedMethods([EXACT_INPUT_SINGLE_METHOD]), terms.allowedCalldata(4, addressWord(template.tokenIn)),

@@ -14,7 +14,7 @@
  */
 import { createHash, randomBytes } from 'node:crypto';
 import { SOLANA_DEVNET_TOKENS } from '@defi-workflow-engine/action-registry';
-import { associatedTokenAddress, splDelegation } from '@defi-workflow-engine/reference-compiler';
+import { associatedTokenAddress, erc7710, splDelegation } from '@defi-workflow-engine/reference-compiler';
 import type { Database } from '@defi-workflow-engine/cloud-runtime';
 import { routeStrategy } from '../automations/assets.ts';
 import { AMOUNT_SCALE, formatScaled, parseScaled } from '../automations/decimal.ts';
@@ -24,7 +24,6 @@ import { DELEGATION_EXECUTE_RUN_KIND } from './run-source.ts';
 import { assertSchedule, nextSlotAfter, validTimeZone, type Schedule } from '../automations/schedule.ts';
 import type { AutomationStore, Owner, RuleRecord } from '../automations/store.ts';
 import { conditionThreshold, type PriceCondition } from '../automations/trigger.ts';
-import { publicSwapProfile } from '../domain/public-testnet-swap.ts';
 import { NETWORKS, composeWorkflowBound } from '../engine/strategy-engine';
 import { NETWORK_CHAINS } from '../engine/capability-catalog';
 import type { NetworkId, StrategyInput, StrategySpec } from '../engine/strategy-spec';
@@ -32,6 +31,7 @@ import { ENGINE_VERSION } from '../platform/index.ts';
 import { b64url, fromB64url, rpIdOf, verifyAssertion, verifyRegistration } from '../passkeys/webauthn.ts';
 import { ADAPTERS, passkeyAnchor } from './adapters.ts';
 import { resolveAuthorityGraph, scopeHash, type GrantScope, type StepBinding } from './authority.ts';
+import { delegationAavePool, delegationAaveReserve, delegationSwapProfile } from './profiles.ts';
 import { ENFORCEMENT, stepCapability } from './capabilities.ts';
 import { digestBytes } from './canonical.ts';
 import type { ChainTransport } from './chains.ts';
@@ -76,10 +76,14 @@ export function createDelegationService(deps: DelegationServiceDeps) {
     lastUsedAt: p.lastUsedAt?.toISOString() ?? null, revoked: p.revokedAt !== null });
   function grantView(g: GrantRecord): GrantView {
     const s = g.scope, decimals = (mint: string) => s.mechanism === 'SOLANA_SPL_DELEGATE_V1' ? s.accounts.find(a => a.mint === mint)?.decimals ?? 0 : 0;
-    const profile = publicSwapProfile(g.chain), symbol = (token: string) => profile ? token === profile.usdc ? 'USDC' : token === profile.weth ? 'WETH' : token : token;
+    const profile = delegationSwapProfile(g.chain, config.mainnetChains), symbol = (token: string) => profile ? token === profile.usdc ? 'USDC' : token === profile.weth ? 'WETH' : token : token;
+    const units = (token: string) => symbol(token) === 'USDC' ? 6 : 18;
     const scope = s.mechanism === 'EVM_ERC7710_METAMASK_V1_3'
       ? { kind: 'EVM' as const, router: s.router, maxCalls: s.maxCalls, pairs: s.pairs.map(p => ({ input: symbol(p.tokenIn), output: symbol(p.tokenOut),
-          perCallCap: display(p.perCallInputCap, symbol(p.tokenIn) === 'USDC' ? 6 : 18) })) }
+          perCallCap: display(p.perCallInputCap, units(p.tokenIn)) })),
+        ...s.aave ? { aave: { pool: s.aave.pool, supply: s.aave.supply.map(x => ({ asset: symbol(x.asset), perCallCap: display(x.perCallCap, units(x.asset)) })),
+          borrow: s.aave.borrow.map(x => ({ asset: symbol(x.asset), perCallCap: display(x.perCallCap, units(x.asset)),
+            onChainCeiling: display(erc7710.borrowCeiling(BigInt(x.perCallCap)).toString(), units(x.asset)) })) } } : {} }
       : { kind: 'SOLANA' as const, tokens: s.accounts.map(a => ({ symbol: Object.values(SOLANA_DEVNET_TOKENS).find(t => t.mint === a.mint)?.symbol ?? a.mint,
           amount: display(a.amount, decimals(a.mint)), tokenAccount: a.tokenAccount })) };
     return { grantId: g.grantId, credentialId: g.credentialId, walletNamespace: g.walletNamespace, walletAddress: g.walletAddress, chain: g.chain, network: networkLabel(g.chain),
@@ -142,7 +146,7 @@ export function createDelegationService(deps: DelegationServiceDeps) {
       const req = composed.ok ? requirementOf(composed) : null;
       const step = req?.ok ? req.value.steps[0] : null;
       if (!step) continue;
-      const c = stepCapability(step, config.mode);
+      const c = stepCapability(step, config.mode, config.mainnetChains);
       rows.push({ action: step.action, network: networkLabel(step.chain), protocol: step.adapterId ?? 'unknown', delegated: c.ok, mechanism: c.mechanism, reason: c.ok ? null : c.code });
     }
     rows.push({ action: 'bridge', network: 'EVM → Solana', protocol: '—', delegated: false, mechanism: null, reason: 'BRIDGE_ROUTE_UNAVAILABLE' });
@@ -185,16 +189,16 @@ export function createDelegationService(deps: DelegationServiceDeps) {
     v: ReturnType<typeof validated>; bindings: readonly StepBinding[] }> {
     const v = validated(raw), now = deps.now();
     const grants = (await liveGrants(owner)).filter(g => g.owner.namespace === owner.namespace && g.owner.address === owner.address);
-    const graph = resolveAuthorityGraph(v.requirement, grants, config.mode, now.getTime());
+    const graph = resolveAuthorityGraph(v.requirement, grants, config.mode, now.getTime(), undefined, config.mainnetChains);
     const steps = v.requirement.steps.map(s => {
-      const c = stepCapability(s, config.mode), b = graph.bindings.find(x => x.stepIndex === s.index) ?? null;
+      const c = stepCapability(s, config.mode, config.mainnetChains), b = graph.bindings.find(x => x.stepIndex === s.index) ?? null;
       const failure = graph.ok ? null : graph.failures.find(f => f.stepIndex === s.index)?.code ?? null;
       return { index: s.index, network: networkLabel(s.chain), chain: s.chain, label: stepLabel(s.strategy),
         inputs: s.inputs.map(i => ({ asset: assetKey(i), symbol: i.symbol, chain: i.chain, amount: display(i.amount, i.decimals) })),
         capability: { delegated: c.ok, mechanism: c.mechanism, code: c.ok ? null : c.code },
         binding: b ? { credentialId: b.credentialId, grantId: b.grantId, walletAddress: b.walletAddress } : null, failure };
     });
-    const required = graph.ok ? [] : graph.failures.map(f => { const s = v.requirement.steps[f.stepIndex]!, c = stepCapability(s, config.mode);
+    const required = graph.ok ? [] : graph.failures.map(f => { const s = v.requirement.steps[f.stepIndex]!, c = stepCapability(s, config.mode, config.mainnetChains);
       return { stepIndex: f.stepIndex, namespace: s.namespace, network: networkLabel(s.chain), mechanism: c.mechanism, reason: f.code }; });
     let manifest: DelegatedAuthorizationManifest | null = null, problem: string | null = graph.ok ? null : 'DELEGATED_AUTHORITY_UNAVAILABLE';
     if (graph.ok) {
@@ -268,11 +272,25 @@ export function createDelegationService(deps: DelegationServiceDeps) {
       const chain = NETWORK_CHAINS[input.network], validFrom = now.toISOString(), expiresAt = new Date(expires).toISOString();
       let scope: GrantScope;
       if (input.mechanism === 'EVM_ERC7710_METAMASK_V1_3') {
-        const profile = publicSwapProfile(chain) ?? refuse('CREDENTIAL_NETWORK_UNSUPPORTED');
+        const profile = delegationSwapProfile(chain, config.mainnetChains) ?? refuse('CREDENTIAL_NETWORK_UNSUPPORTED');
         const token = (s: 'USDC' | 'WETH') => s === 'USDC' ? profile.usdc : profile.weth;
         if (input.pairs.some(p => p.input === p.output) || new Set(input.pairs.map(p => `${p.input}>${p.output}`)).size !== input.pairs.length) refuse('CREDENTIAL_SCOPE_INVALID');
+        // BUILD-FLOFI-SINGLE-AUTH-WORKFLOW-UX-001: an Aave scope names the network's registered market and its registered reserves only.
+        let aave: Extract<GrantScope, { mechanism: 'EVM_ERC7710_METAMASK_V1_3' }>['aave'];
+        if (input.aave && (input.aave.supply.length || input.aave.borrow.length)) {
+          const pool = delegationAavePool(chain, config.mainnetChains) ?? refuse('CREDENTIAL_NETWORK_UNSUPPORTED');
+          const entries = (list: readonly { asset: 'USDC' | 'WETH'; perCallCap: string }[]) => {
+            if (new Set(list.map(x => x.asset)).size !== list.length) refuse('CREDENTIAL_SCOPE_INVALID');
+            return list.map(x => {
+              const reserve = delegationAaveReserve(chain, pool!, token(x.asset)) ?? refuse('CREDENTIAL_SCOPE_INVALID');
+              return { asset: reserve!.asset, perCallCap: nativeUnits(x.perCallCap, reserve!.decimals, 'CREDENTIAL_SCOPE_INVALID').toString() };
+            });
+          };
+          aave = { pool: pool!, supply: entries(input.aave.supply), borrow: entries(input.aave.borrow) };
+        }
         scope = { mechanism: input.mechanism, chain, router: profile.router, maxCalls: input.maxCalls, validFrom, expiresAt,
-          pairs: input.pairs.map(p => ({ tokenIn: token(p.input), tokenOut: token(p.output), perCallInputCap: nativeUnits(p.perCallCap, p.input === 'USDC' ? 6 : 18, 'CREDENTIAL_SCOPE_INVALID').toString() })) };
+          pairs: input.pairs.map(p => ({ tokenIn: token(p.input), tokenOut: token(p.output), perCallInputCap: nativeUnits(p.perCallCap, p.input === 'USDC' ? 6 : 18, 'CREDENTIAL_SCOPE_INVALID').toString() })),
+          ...aave ? { aave } : {} };
       } else {
         const t = SOLANA_DEVNET_TOKENS.devUSDC;
         scope = { mechanism: input.mechanism, chain, validFrom, expiresAt, accounts: input.tokens.map(tok => ({ mint: t.mint, decimals: t.decimals,
@@ -361,7 +379,7 @@ export function createDelegationService(deps: DelegationServiceDeps) {
       if (!req?.ok) return refuse('AUTHORIZATION_WORKFLOW_MISMATCH');
       // Re-resolve the whole graph now: a grant that lapsed since creation fails here, before the owner signs anything.
       const grants = await store.grants(owner), now = deps.now();
-      const graph = resolveAuthorityGraph(req.value, grants, config.mode, now.getTime(), rev.manifest.credentials);
+      const graph = resolveAuthorityGraph(req.value, grants, config.mode, now.getTime(), rev.manifest.credentials, config.mainnetChains);
       if (!graph.ok) return refuse(graph.failures[0]!.code);
       const passkeyIds = [...new Set(rev.manifest.credentials.map(c => grants.find(g => g.grantId === c.grantId)!.passkeyId))];
       if (passkeyIds.length !== 1) refuse('CREDENTIALS_USE_DIFFERENT_PASSKEYS');
@@ -413,7 +431,7 @@ export function createDelegationService(deps: DelegationServiceDeps) {
       const composed = composeWorkflowBound(rule.binding!.strategy, rule.binding!.workflowHash);
       const req = composed.ok ? requirementOf(composed) : null;
       if (!req?.ok) return refuse('STRATEGY_STALE');
-      const now = deps.now(), graph = resolveAuthorityGraph(req.value, await store.grants(owner), config.mode, now.getTime());
+      const now = deps.now(), graph = resolveAuthorityGraph(req.value, await store.grants(owner), config.mode, now.getTime(), undefined, config.mainnetChains);
       if (!graph.ok) return refuse(graph.failures[0]!.code);
       const pm = previous.manifest;
       const manifest = buildManifest({ owner: pm.owner, authorizationId, revision: a.latestRevision + 1, now, validFrom: now, expiresAt: new Date(pm.expiresAt), timezone: pm.timezone,
@@ -440,7 +458,7 @@ export function createDelegationService(deps: DelegationServiceDeps) {
         const req = requirementOf(composed as Extract<typeof composed, { ok: true }>);
         if (!req.ok) refuse(req.code);
         const requirement = (req as Extract<typeof req, { ok: true }>).value, now = deps.now();
-        const grants = await store.grants(owner), graph = resolveAuthorityGraph(requirement, grants, config.mode, now.getTime());
+        const grants = await store.grants(owner), graph = resolveAuthorityGraph(requirement, grants, config.mode, now.getTime(), undefined, config.mainnetChains);
         if (!graph.ok) refuse(graph.failures[0]!.code);
         if (new Set(graph.bindings.map(b => grants.find(g => g.grantId === b.grantId)!.passkeyId)).size !== 1) refuse('CREDENTIALS_USE_DIFFERENT_PASSKEYS');
         // The cap is the workflow's own slippage, exactly as each step's driver applies it (a step without one gets none), never a looser floor.

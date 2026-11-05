@@ -15,16 +15,23 @@
  *                                    so production delegated signing is BLOCKED (DELEGATED_SIGNER_UNAVAILABLE)
  *   FLOFI_DELEGATED_SIGNER_DIR       local-disposable only: an absolute directory below /tmp
  *   FLOFI_DELEGATED_EXECUTION        enabled: this process runs the delegated executor (needs a signer provider)
+ *   FLOFI_DELEGATION_MAINNET_CHAINS  BUILD-FLOFI-SINGLE-AUTH-WORKFLOW-UX-001: comma-separated public mainnets on which delegated templates may
+ *                                    run (only `eip155:42161`, Arbitrum One, is implemented). Unset (default): every mainnet step stays
+ *                                    MAINNET_DELEGATION_DISABLED. It is the only way delegation is enabled in the public Mainnet-only product,
+ *                                    where it never enables a harness, and signing there still needs a production signer provider.
  */
 import { isHostedDeployment, publicOrigin, deploymentTenant } from '../server/deployment.ts';
 import { networkScope } from '../server/network-scope.ts';
 import type { CapabilityMode } from './capabilities.ts';
+import { MAINNET_DELEGATION_CHAINS } from './profiles.ts';
 
 type Env = Readonly<Record<string, string | undefined>>;
 export type SignerChoice = { readonly kind: 'none' } | { readonly kind: 'memory' } | { readonly kind: 'local-disposable'; readonly directory: string };
 export type DelegationConfig = {
   readonly enabled: true; readonly tenantId: string; readonly mode: CapabilityMode; readonly harnessUrl: string | null;
   readonly rpc: Readonly<Record<string, string>>; readonly passkeyOrigin: string; readonly signer: SignerChoice; readonly executor: boolean; readonly hosted: boolean;
+  /** Public mainnets opted into delegated execution (FLOFI_DELEGATION_MAINNET_CHAINS); empty: none. */
+  readonly mainnetChains: readonly string[];
 };
 export type DelegationConfigResult = DelegationConfig | { readonly enabled: false; readonly code: 'DELEGATION_NOT_ENABLED' | 'DELEGATION_CONFIGURATION_INVALID'; readonly reason?: string };
 const invalid = (reason: string) => ({ enabled: false, code: 'DELEGATION_CONFIGURATION_INVALID', reason } as const);
@@ -34,11 +41,16 @@ export function readDelegationConfig(env: Env): DelegationConfigResult {
   const flag = env.FLOFI_DELEGATION ?? 'disabled';
   if (flag === 'disabled' || flag === '') return { enabled: false, code: 'DELEGATION_NOT_ENABLED' };
   if (flag !== 'enabled') return invalid('FLOFI_DELEGATION');
+  // BUILD-FLOFI-SINGLE-AUTH-WORKFLOW-UX-001: the public mainnets explicitly opted into delegated templates (fail closed on anything else).
+  const mainnetChains = (env.FLOFI_DELEGATION_MAINNET_CHAINS ?? '').split(',').map(chain => chain.trim()).filter(Boolean);
+  if (mainnetChains.some(chain => !MAINNET_DELEGATION_CHAINS.includes(chain)) || new Set(mainnetChains).size !== mainnetChains.length) return invalid('FLOFI_DELEGATION_MAINNET_CHAINS');
   // BUILD-FLOFI-MAINNET-PRODUCT-001: delegated execution exists only on test networks (mainnet delegation is disabled and production custody
-  // does not exist), so the Mainnet-only public product has none; engineering certification keeps it.
-  if (networkScope(env) !== 'ENGINEERING') return { enabled: false, code: 'DELEGATION_NOT_ENABLED', reason: 'MAINNET_ONLY_PRODUCT' };
+  // does not exist), so the Mainnet-only public product has none; engineering certification keeps it. A deployment that explicitly opts a
+  // mainnet into delegated templates (above) gets delegation in the public product too, never with a harness.
+  if (networkScope(env) !== 'ENGINEERING' && !mainnetChains.length) return { enabled: false, code: 'DELEGATION_NOT_ENABLED', reason: 'MAINNET_ONLY_PRODUCT' };
   const hosted = isHostedDeployment(env);
   const harness = env.FLOFI_DELEGATION_HARNESS;
+  if (networkScope(env) !== 'ENGINEERING' && harness) return invalid('FLOFI_DELEGATION_HARNESS_PUBLIC_PRODUCT');
   if (harness !== undefined && harness !== '' && harness !== 'MOCKED_LOOPBACK_ONLY') return invalid('FLOFI_DELEGATION_HARNESS');
   const mocked = harness === 'MOCKED_LOOPBACK_ONLY';
   if (mocked && hosted) return invalid('FLOFI_DELEGATION_HARNESS_HOSTED');
@@ -74,7 +86,7 @@ export function readDelegationConfig(env: Env): DelegationConfigResult {
   if (executor && signer.kind === 'none') return invalid('FLOFI_DELEGATED_EXECUTION_WITHOUT_SIGNER');
   let tenantId: string;
   try { tenantId = deploymentTenant(env); } catch { return invalid('TENANT_ID'); }
-  return { enabled: true, tenantId, mode: mocked ? 'MOCKED_HARNESS' : 'PRODUCTION', harnessUrl, rpc, passkeyOrigin, signer, executor, hosted };
+  return { enabled: true, tenantId, mode: mocked ? 'MOCKED_HARNESS' : 'PRODUCTION', harnessUrl, rpc, passkeyOrigin, signer, executor, hosted, mainnetChains };
 }
 /**
  * Why delegated execution cannot run on this deployment (null: it can). Hosted deployments can never configure a signer (no production

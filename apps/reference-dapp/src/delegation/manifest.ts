@@ -71,6 +71,9 @@ export function buildManifest(input: ManifestInput): DelegatedAuthorizationManif
     const step = r.steps[b.stepIndex]!, k = `${step.chain}|${step.adapterId}`;
     const entry = protocols.get(k) ?? protocols.set(k, { chain: step.chain, adapterId: step.adapterId ?? 'unknown', targets: new Set() }).get(k)!;
     if (b.need.kind === 'EVM_UNISWAP_V3_EXACT_INPUT_SINGLE') { entry.targets.add(b.need.router); entry.targets.add(b.need.tokenIn); }
+    // BUILD-FLOFI-SINGLE-AUTH-WORKFLOW-UX-001: an Aave step touches its Pool, and a Supply also its asset (the exact approval).
+    else if (b.need.kind === 'EVM_AAVE_V3_SUPPLY') { entry.targets.add(b.need.pool); entry.targets.add(b.need.asset); }
+    else if (b.need.kind === 'EVM_AAVE_V3_BORROW') entry.targets.add(b.need.pool);
     else { entry.targets.add(b.need.mint); for (const program of b.need.programs) entry.targets.add(program); }
   }
   const mechanisms = [...new Set(input.bindings.map(b => b.mechanism))].sort();
@@ -88,7 +91,9 @@ export function buildManifest(input: ManifestInput): DelegatedAuthorizationManif
     protocols: [...protocols.values()].map(p => ({ chain: p.chain, adapterId: p.adapterId, targets: [...p.targets].sort() })).sort((a, b) => a.chain < b.chain ? -1 : a.chain > b.chain ? 1 : 0),
     assets, recipients: [...new Set(input.bindings.map(b => `${b.chain}:${b.walletAddress}`))].sort(),
     limits: { maxExecutionsPerPeriod: input.limits.maxExecutionsPerPeriod, cooldownSeconds: input.limits.cooldownSeconds,
-      maxSlippageBps: input.limits.maxSlippageBps, quoteMaxAgeSeconds: QUOTE_MAX_AGE_SECONDS, minHealthFactor: null },
+      maxSlippageBps: input.limits.maxSlippageBps, quoteMaxAgeSeconds: QUOTE_MAX_AGE_SECONDS,
+      // A workflow that borrows carries FloFi's Borrow health-factor floor (2.0, BORROW_MINIMUM_HEALTH_FACTOR) into its authorization.
+      minHealthFactor: r.steps.some(s => s.action === 'borrow') ? '2' : null },
     credentials: input.bindings.map(b => ({ stepIndex: b.stepIndex, credentialId: b.credentialId, grantId: b.grantId, chain: b.chain, mechanism: b.mechanism,
       walletAddress: b.walletAddress, grantCommitment: b.grantCommitment })),
     enforcement,

@@ -13,5 +13,5 @@ import type { SequenceFacts } from '../mcp/runtime.ts';
 type Env = Readonly<Record<string, string | undefined>>;
 export function sequenceFacts(env: Env): SequenceFacts {
   const config = readDelegationConfig(env);
-  return { enabled: env.FLOFI_WORKFLOW_RUNS === 'enabled', delegation: config.enabled ? { mode: config.mode, unavailable: executionAvailability(config) } : null };
+  return { enabled: env.FLOFI_WORKFLOW_RUNS === 'enabled', delegation: config.enabled ? { mode: config.mode, unavailable: executionAvailability(config), mainnetChains: config.mainnetChains } : null };
 }

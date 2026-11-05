@@ -10,7 +10,8 @@
 type Rpc = (method: string, params: readonly unknown[]) => Promise<unknown>;
 export type TransportPurpose = 'read' | 'owner' | 'executor';
 export type ChainTransport = { readonly chain: string; readonly provenance: 'MOCKED' | 'PUBLIC'; readonly rpc: Rpc };
-const EVM_READ = new Set(['eth_chainId', 'eth_blockNumber', 'eth_call', 'eth_getCode', 'eth_getBalance', 'eth_getTransactionCount', 'eth_gasPrice',
+// eth_getStorageAt: the Aave reads pin the Pool implementation (ERC-1967 slot), exactly as the owner-signed lending flows do (read-only).
+const EVM_READ = new Set(['eth_chainId', 'eth_blockNumber', 'eth_call', 'eth_getCode', 'eth_getStorageAt', 'eth_getBalance', 'eth_getTransactionCount', 'eth_gasPrice',
   'eth_maxPriorityFeePerGas', 'eth_estimateGas', 'eth_getBlockByNumber', 'eth_getTransactionReceipt', 'eth_getTransactionByHash']);
 const SOL_READ = new Set(['getLatestBlockhash', 'getAccountInfo', 'getBalance', 'getSignatureStatuses', 'getGenesisHash']);
 export function allowedMethods(chain: string, purpose: TransportPurpose): ReadonlySet<string> {
