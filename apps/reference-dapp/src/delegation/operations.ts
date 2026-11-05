@@ -15,8 +15,11 @@ import { typedId } from '../platform/ids.ts';
 import type { DelegationConfig } from './config.ts';
 import { delegationRuntime, signerAdmin, signerProvider, transportFor, type DelegationSeams } from './runtime.ts';
 import { createDelegationService, type DelegationService } from './service.ts';
+import { DELEGATION_EXECUTE_RUN_KIND } from './run-source.ts';
+import type { WorkflowRunStore } from '../workflow-runs/pg-store.ts';
+import { DELEGATED_AUTHORIZATION_SECONDS } from '../workflow-runs/state-machine.ts';
 
-export const DELEGATION_OPERATIONS = Object.freeze(['overview', 'passkeyOptions', 'passkeyRegister', 'passkeyRevoke', 'credentialPrepare', 'credentialComplete',
+export const DELEGATION_OPERATIONS = Object.freeze(['workflowRunWalletReview', 'workflowRunWalletSign', 'workflowRunWalletRevoke', 'overview', 'passkeyOptions', 'passkeyRegister', 'passkeyRevoke', 'credentialPrepare', 'credentialComplete',
   'credentialRevoke', 'credentialRevocationComplete', 'credentialReverify', 'automationPreview', 'automationCreate', 'authorizationReview', 'authorizationSign',
   'authorizationRevoke', 'authorizationReauthorize', 'executionDetail', 'executionResume'] as const);
 export type DelegationOperation = (typeof DELEGATION_OPERATIONS)[number];
@@ -37,10 +40,45 @@ export function ownerDelegationService(config: DelegationConfig, automationConfi
 
 const invalid = (): never => { throw new Error('DELEGATION_INPUT_INVALID'); };
 const id = (value: unknown, prefix: string) => typeof value === 'string' && new RegExp(`^${prefix}_[a-z2-7]{26}$`).test(value) ? value : invalid();
-/** Runs one operation for `owner` (the verified principal). Throws a closed code for invalid arguments and every refusal. */
-export async function runDelegationOperation(service: DelegationService, owner: Owner, proven: readonly Owner[], method: DelegationOperation, args: readonly unknown[]): Promise<unknown> {
+/**
+ * BUILD-FLOFI-UNIVERSAL-SINGLE-AUTH-MAINNET-001: a run the owner may authorize here — this owner's own run, its EVM wallet one THIS request
+ * proved, still choosing its mode (review/sign) — loaded from the run store, never from the caller's arguments.
+ */
+async function ownedRun(runs: WorkflowRunStore | undefined, owner: Owner, proven: readonly Owner[], runId: string, pending: boolean) {
+  const run = runs ? await runs.byId(runId) : invalid();
+  if (!run || run.owner.namespace !== owner.namespace || run.owner.address !== owner.address) throw new Error('WORKFLOW_RUN_NOT_FOUND');
+  const wallet = run.wallets.eip155;
+  if (!wallet || !proven.some(p => p.namespace === 'eip155' && p.address === wallet)) throw new Error('WALLET_SESSION_REQUIRED');
+  if (pending && (run.state !== 'PENDING' || run.mode !== null)) throw new Error(run.mode === 'CONFIRM_EACH_STEP' ? 'WORKFLOW_RUN_CONFIRM_MODE_CHOSEN' : `WORKFLOW_RUN_${run.state}`);
+  return { ...run, wallet };
+}
+/**
+ * Runs one operation for `owner` (the verified principal). Throws a closed code for invalid arguments and every refusal. `runs` (the workflow
+ * run store on the same database) serves the run operations; without it they refuse.
+ */
+export async function runDelegationOperation(service: DelegationService, owner: Owner, proven: readonly Owner[], method: DelegationOperation, args: readonly unknown[],
+  runs?: WorkflowRunStore): Promise<unknown> {
   const arity = (n: number) => { if (args.length !== n) invalid(); };
   switch (method) {
+    case 'workflowRunWalletReview': {
+      arity(1);
+      const run = await ownedRun(runs, owner, proven, id(args[0], 'wfr'), true);
+      return service.workflowRunWalletReview(owner, { runId: run.runId, strategy: run.strategy, workflowHash: run.workflowHash, validitySeconds: DELEGATED_AUTHORIZATION_SECONDS,
+        wallet: run.wallet });
+    }
+    case 'workflowRunWalletSign': {
+      arity(3);
+      if (!Number.isSafeInteger(args[1]) || (args[1] as number) < 1) invalid();
+      const run = await ownedRun(runs, owner, proven, id(args[0], 'wfr'), true);
+      return service.workflowRunWalletSign(owner, run.runId, args[1] as number, args[2],
+        (tx, authorizationId) => runs!.activateDelegatedWithin(tx, run.runId, authorizationId, DELEGATION_EXECUTE_RUN_KIND));
+    }
+    case 'workflowRunWalletRevoke': {
+      arity(1);
+      const run = await ownedRun(runs, owner, proven, id(args[0], 'wfr'), false);
+      await service.workflowRunAuthorizationRevoke(owner, run.runId);
+      return { revoked: true };
+    }
     case 'overview': arity(0); return service.overview(owner);
     case 'passkeyOptions': arity(0); return service.passkeyOptions(owner);
     case 'passkeyRegister': arity(1); return service.passkeyRegister(owner, args[0]);

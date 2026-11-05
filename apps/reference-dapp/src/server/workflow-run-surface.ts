@@ -20,6 +20,8 @@ import { sequenceFacts } from '../workflow-runs/facts.ts';
 import { createPgWorkflowRunStore } from '../workflow-runs/pg-store.ts';
 import { workflowRunsEnabled } from '../workflow-runs/service.ts';
 import { flowRuntimeKind } from './flow-runtime.ts';
+import { delegationOperation } from './delegation-operation.ts';
+import type { FlowResult } from './cloud-api-client.ts';
 
 type Env = Readonly<Record<string, string | undefined>>;
 const CLOSED: HandoffPolicy = { ok: false, code: 'MCP_HANDOFF_POLICY_INVALID' };
@@ -28,16 +30,30 @@ export async function workflowRunSurface(env: Env, host: ApprovalHost, runtime: 
   profiles: Partial<Readonly<Record<ApprovalRequesterKind, ApprovalKindProfile>>>): Promise<WorkflowRunSurface | null> {
   if (!workflowRunsEnabled(env)) return null;
   const store = createPgWorkflowRunStore(host.db, host.tenantId);
-  const delegation = await delegationParts(env, store);
+  const delegation = await delegationParts(env, store, host);
   return { store, runtime, delegation: delegation?.store ?? null, now: () => new Date(), log: () => undefined,
     policyFor: kind => profiles[kind]?.policy ?? CLOSED, delegationFacts: delegation ? sequenceFacts(env).delegation : null,
     ...delegation ? { grantsOf: (owner: Parameters<typeof delegation.store.grants>[0]) => delegation.store.grants(owner) } : {}, newId: typedId,
     delegationOps: delegation?.ops ?? null };
 }
 
-/** The owner's delegated run operations on this embedded deployment, or null where this surface cannot perform them. */
-async function delegationParts(env: Env, runs: ReturnType<typeof createPgWorkflowRunStore>) {
-  if (flowRuntimeKind(env) === 'remote') return null;
+/**
+ * The owner's delegated run operations, or null where this surface cannot perform them. Embedded: in process. Remote (production):
+ * BUILD-FLOFI-UNIVERSAL-SINGLE-AUTH-MAINNET-001 — forwarded to the Railway API (`delegationOperation`, the request's proven wallets),
+ * which holds the executor key and re-checks that the run is the owner's and its EVM wallet was proven. Reads use this database.
+ */
+async function delegationParts(env: Env, runs: ReturnType<typeof createPgWorkflowRunStore>, approvalHost: ApprovalHost) {
+  if (flowRuntimeKind(env) === 'remote') {
+    const config = readDelegationConfig(env);
+    if (!config.enabled) return null;
+    const unwrap = <T>(result: FlowResult<T>): T => { if (!result.ok) throw new Error(result.code); return result.value; };
+    const ops: RunDelegationOps = {
+      review: async (owner, run) => unwrap(await delegationOperation<Awaited<ReturnType<RunDelegationOps['review']>>>('workflowRunWalletReview', [run.runId], owner)),
+      sign: async (owner, runId, revision, signatures) => unwrap(await delegationOperation<{ authorizationId: string }>('workflowRunWalletSign', [runId, revision, signatures], owner)),
+      revoke: async (owner, runId) => { unwrap(await delegationOperation('workflowRunWalletRevoke', [runId], owner)); },
+    };
+    return { ops, store: createPgDelegationStore(approvalHost.db, approvalHost.tenantId) };
+  }
   const config = readDelegationConfig(env), automations = readAutomationConfig(env);
   if (!config.enabled || !automations.enabled) return null;
   const host = await automationHost(env, automations);

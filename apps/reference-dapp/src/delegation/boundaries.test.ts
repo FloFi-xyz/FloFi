@@ -130,6 +130,13 @@ describe('BUILD-AUTOMATION-002 configuration fails closed', () => {
     ] as const) expect(readDelegationConfig({ ...hosted, ...kms, ...extra }), reason).toMatchObject({ enabled: false, reason });
     expect(readDelegationConfig({ ...base, ...kms, FLOFI_DELEGATION_HARNESS: 'MOCKED_LOOPBACK_ONLY', FLOFI_DELEGATION_HARNESS_URL: 'http://127.0.0.1:8560' }))
       .toMatchObject({ enabled: false, reason: 'FLOFI_DELEGATED_SIGNER_WITH_HARNESS' });
+    // The remote-runtime web tier declares the API's signer; it never signs or executes itself.
+    const web = readDelegationConfig({ ...hosted, API_BASE_URL: 'https://api.flofi.test', FLOFI_DELEGATED_SIGNER: 'remote-api' });
+    expect(web).toMatchObject({ enabled: true, signer: { kind: 'remote-api' }, executor: false });
+    expect(web.enabled && executionAvailability(web)).toBeNull();
+    expect(readDelegationConfig({ ...hosted, FLOFI_DELEGATED_SIGNER: 'remote-api' })).toMatchObject({ enabled: false, reason: 'FLOFI_DELEGATED_SIGNER_REMOTE' });
+    expect(readDelegationConfig({ ...hosted, API_BASE_URL: 'https://api.flofi.test', FLOFI_DELEGATED_SIGNER: 'remote-api', FLOFI_DELEGATED_EXECUTION: 'enabled' }))
+      .toMatchObject({ enabled: false, reason: 'FLOFI_DELEGATED_SIGNER_REMOTE' });
   });
   it('the MOCKED harness is loopback only and local', () => {
     expect(readDelegationConfig({ ...base, FLOFI_DELEGATION_HARNESS: 'MOCKED_LOOPBACK_ONLY', FLOFI_DELEGATION_HARNESS_URL: 'http://evil.example:8560' }))

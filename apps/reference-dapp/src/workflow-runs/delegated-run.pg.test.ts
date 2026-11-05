@@ -13,6 +13,8 @@ import { authorizationReviewSequential, cancelSequential, ownedRun } from '../pl
 import { workflowRunAuthorize } from '../platform/approve.ts';
 import { delegationOf } from '../delegation/adapters.ts';
 import { workflowRunHarness, type RunHarness } from './workflow-run.test-harness.ts';
+import { runDelegationOperation } from '../delegation/operations.ts';
+import type { WalletWorkflowReviewView } from '../delegation/views.ts';
 
 const D = erc7710, F = D.DELEGATION_FRAMEWORK_V1_3;
 const BASE_SWAP = { action: 'swap', network: 'base-sepolia', inputAsset: 'USDC', outputAsset: 'WETH', amount: '10', slippageBps: 50 };
@@ -128,6 +130,30 @@ describe('BUILD-FLOFI-UNIVERSAL-SINGLE-AUTH-MAINNET-001 delegated workflow run (
       const run = await ownedRun(h.runs, approval.approvalId, [h.evm, h.sol]);
       await expect(authorizationReviewSequential(h.runs, run, [h.evm, h.sol])).rejects.toThrow('WORKFLOW_RUN_CONFIRM_MODE_CHOSEN');
       expect(await h.d.store.authorizationForRun(run.runId)).toBeNull();
+    } finally { await t.drop(); }
+  });
+
+  it('the Railway API run operations (production remote runtime) re-check the run owner and the proven wallet before reviewing or signing', async () => {
+    const t = await createTestDatabase();
+    try {
+      const h = await workflowRunHarness(t.db);
+      const approval = await h.request(BOUND);
+      await claim(h, approval.secret);
+      const run = await ownedRun(h.runs, approval.approvalId, [h.evm, h.sol]);
+      const stranger = { namespace: 'eip155' as const, address: '0x' + '77'.repeat(20) };
+      await expect(runDelegationOperation(h.d.service, stranger, [stranger], 'workflowRunWalletReview', [run.runId], h.store)).rejects.toThrow('WORKFLOW_RUN_NOT_FOUND');
+      await expect(runDelegationOperation(h.d.service, h.d.owner, [], 'workflowRunWalletReview', [run.runId], h.store)).rejects.toThrow('WALLET_SESSION_REQUIRED');
+      await expect(runDelegationOperation(h.d.service, h.d.owner, [h.evm], 'workflowRunWalletReview', [run.runId])).rejects.toThrow('DELEGATION_INPUT_INVALID');
+      await expect(runDelegationOperation(h.d.service, h.d.owner, [h.evm], 'workflowRunWalletReview', ['not-a-run'], h.store)).rejects.toThrow('DELEGATION_INPUT_INVALID');
+      const review = await runDelegationOperation(h.d.service, h.d.owner, [h.evm], 'workflowRunWalletReview', [run.runId], h.store) as WalletWorkflowReviewView;
+      const grant = review.grants[0]!;
+      await runDelegationOperation(h.d.service, h.d.owner, [h.evm], 'workflowRunWalletSign',
+        [run.runId, review.revision, [{ grantId: grant.grantId, signature: await h.d.evmOwner.signDigest(grant.digest) }]], h.store);
+      expect((await h.store.byId(run.runId))!).toMatchObject({ state: 'RUNNING', mode: 'DELEGATED' });
+      // A second sign is refused (the run is no longer choosing its mode); revocation is the owner's own.
+      await expect(runDelegationOperation(h.d.service, h.d.owner, [h.evm], 'workflowRunWalletSign', [run.runId, review.revision, []], h.store)).rejects.toThrow(/WORKFLOW_RUN_/);
+      await expect(runDelegationOperation(h.d.service, stranger, [stranger], 'workflowRunWalletRevoke', [run.runId], h.store)).rejects.toThrow('WORKFLOW_RUN_NOT_FOUND');
+      expect(await runDelegationOperation(h.d.service, h.d.owner, [h.evm], 'workflowRunWalletRevoke', [run.runId], h.store)).toEqual({ revoked: true });
     } finally { await t.drop(); }
   });
 

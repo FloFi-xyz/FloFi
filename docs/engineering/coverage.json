@@ -2189,6 +2189,7 @@
         "packages/cloud-runtime/migrations/0009_channel_conversations.sql",
         "packages/cloud-runtime/migrations/0010_automations.sql",
         "packages/cloud-runtime/migrations/0011_delegated_execution.sql",
+        "packages/cloud-runtime/migrations/0020_workflow_grants.sql",
         "packages/cloud-runtime/migrations/0012_admin_control_plane.sql",
         "packages/cloud-runtime/migrations/0013_copilot_learning.sql",
         "packages/cloud-runtime/migrations/0014_learning_automatic.sql",
@@ -2924,6 +2925,7 @@
         "apps/reference-dapp/src/delegation/pg-store.ts",
         "apps/reference-dapp/src/delegation/policy.ts",
         "apps/reference-dapp/src/delegation/profiles.ts",
+        "apps/reference-dapp/src/delegation/workflow-grants.ts",
         "apps/reference-dapp/src/delegation/run-source.ts",
         "apps/reference-dapp/src/delegation/runtime.ts",
         "apps/reference-dapp/src/delegation/service.ts",
@@ -4782,6 +4784,7 @@
       "sources": [
         "packages/reference-executor/src/attempts.ts",
         "packages/reference-executor/src/delegated-signer.ts",
+        "packages/reference-executor/src/kms-signer.ts",
         "packages/reference-executor/src/durable-storage.ts",
         "packages/reference-executor/src/economic-reservation.ts",
         "packages/reference-executor/src/file-store.ts",

@@ -14,6 +14,7 @@
  *                                    `aws-kms` (BUILD-FLOFI-UNIVERSAL-SINGLE-AUTH-MAINNET-001) is the production provider: a non-exportable
  *                                    ECC_SECG_P256K1 key in AWS KMS, never with a harness. `memory` and `local-disposable` are refused on
  *                                    hosted deployments. Without a signer, delegated signing is DELEGATED_SIGNER_UNAVAILABLE.
+ *                                    `remote-api`: a remote-runtime web deployment (API_BASE_URL) whose Railway API and worker hold the signer.
  *   FLOFI_KMS_REGION                 aws-kms only: the key's AWS region (e.g. us-east-1)
  *   FLOFI_KMS_EVM_KEY_ARN            aws-kms only: the key ARN or alias ARN (arn:aws:kms:<region>:<account>:key/<id> | alias/<name>) of
  *                                    the deployment's executor key; its region must equal FLOFI_KMS_REGION. The standard AWS_ACCESS_KEY_ID /
@@ -32,7 +33,9 @@ import { MAINNET_DELEGATION_CHAINS } from './profiles.ts';
 
 type Env = Readonly<Record<string, string | undefined>>;
 export type SignerChoice = { readonly kind: 'none' } | { readonly kind: 'memory' } | { readonly kind: 'local-disposable'; readonly directory: string }
-  | { readonly kind: 'aws-kms'; readonly region: string; readonly evmKeyArn: string };
+  | { readonly kind: 'aws-kms'; readonly region: string; readonly evmKeyArn: string }
+  /** BUILD-FLOFI-UNIVERSAL-SINGLE-AUTH-MAINNET-001: a remote-runtime web deployment whose Railway API and worker hold the signer (this process never signs). */
+  | { readonly kind: 'remote-api' };
 const KMS_KEY_ARN = /^arn:aws:kms:([a-z]{2}(?:-[a-z]+)+-\d):(\d{12}):(?:key\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|alias\/[A-Za-z0-9/_-]{1,250})$/;
 export type DelegationConfig = {
   readonly enabled: true; readonly tenantId: string; readonly mode: CapabilityMode; readonly harnessUrl: string | null;
@@ -96,6 +99,10 @@ export function readDelegationConfig(env: Env): DelegationConfigResult {
     if (!arn || arn[1] !== region) return invalid('FLOFI_KMS_EVM_KEY_ARN');
     if (!env.AWS_ACCESS_KEY_ID || !env.AWS_SECRET_ACCESS_KEY) return invalid('AWS_CREDENTIALS_MISSING');
     signer = { kind: 'aws-kms', region, evmKeyArn };
+  } else if (signerKind === 'remote-api') {
+    // Only a web deployment whose owner operations forward to the Railway API (API_BASE_URL) may say the signer is there; it never executes.
+    if (!env.API_BASE_URL || mocked || env.FLOFI_DELEGATED_EXECUTION === 'enabled') return invalid('FLOFI_DELEGATED_SIGNER_REMOTE');
+    signer = { kind: 'remote-api' };
   } else return invalid('FLOFI_DELEGATED_SIGNER');
   const executor = env.FLOFI_DELEGATED_EXECUTION === 'enabled';
   if (env.FLOFI_DELEGATED_EXECUTION && !['enabled', 'disabled'].includes(env.FLOFI_DELEGATED_EXECUTION)) return invalid('FLOFI_DELEGATED_EXECUTION');

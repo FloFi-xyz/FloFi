@@ -20,6 +20,7 @@ import { APPROVAL_PRINCIPALS_HEADER } from '../automations/api-headers.ts';
 import { readAutomationConfig } from '../automations/config.ts';
 import { automationHost } from '../automations/runtime.ts';
 import { readDelegationConfig } from '../delegation/config.ts';
+import { createPgWorkflowRunStore } from '../workflow-runs/pg-store.ts';
 import { FRESH_SESSION_MS, FRESH_SESSION_OPERATIONS, IDEMPOTENT_DELEGATION_OPERATIONS, isDelegationOperation, ownerDelegationService, runDelegationOperation,
   type DelegationOperation } from '../delegation/operations.ts';
 
@@ -66,7 +67,7 @@ export async function delegationOperation<T>(method: DelegationOperation, args: 
     const host = await automationHost(env, automations);
     if ('code' in host) return { ok: false, code: host.code };
     const service = ownerDelegationService(config, automations, host, () => undefined, now);
-    return { ok: true, value: await runDelegationOperation(service, owner, proven, method, args) as T };
+    return { ok: true, value: await runDelegationOperation(service, owner, proven, method, args, createPgWorkflowRunStore(host.db, host.tenantId)) as T };
   } catch (cause) { return failure(cause); }
 }
 
