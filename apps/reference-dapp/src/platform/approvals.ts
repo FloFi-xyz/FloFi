@@ -52,6 +52,8 @@ export const AUTHORITY_NONE = 'NONE' as const;
  *   DEVELOPER_PROJECT     a developer project (BUILD-DEVELOPER-001, not yet served)
  *   CHANNEL_CONVERSATION  a conversation on a messaging channel (BUILD-CHANNELS-001, not yet served)
  *   AUTOMATION_RULE       an owner's automation rule (BUILD-AUTOMATION-001): its proposals can only be claimed by that owner's wallet
+ *   EDITOR_SESSION        the signed-in FloFi account running its own Canvas workflow (BUILD-FLOFI-UNIVERSAL-SINGLE-AUTH-MAINNET-001); `ref` is the
+ *                         account id and only a wallet that account holds may claim it
  * `context` holds immutable, non-secret facts the kind's claim policy needs on /approve (e.g. an intended wallet); MCP has none.
  */
 export type ApprovalRequester =
@@ -95,7 +97,7 @@ const gateView = (g: Gates) => ({ supportedByCode: g.supportedByCode, enabledByD
   demonstratedEvidence: g.demonstratedEvidence });
 /** Abuse-limit buckets are named per requester (an MCP account's bucket keeps its BUILD-MCP-002 name). */
 const BUCKET_SEGMENT: Readonly<Record<ApprovalRequesterKind, string>> = Object.freeze({ MCP_ACCOUNT: 'account', DEVELOPER_PROJECT: 'project', CHANNEL_CONVERSATION: 'conversation',
-  AUTOMATION_RULE: 'automation' });
+  AUTOMATION_RULE: 'automation', EDITOR_SESSION: 'editor' });
 const requestBucket = (requester: ApprovalRequester) => `handoff:${BUCKET_SEGMENT[requester.kind]}:${requester.ref}`;
 /** A requester the store can persist: a well-formed ref and names, and a small, non-secret context (MCP: none). */
 function requesterValid(requester: ApprovalRequester): boolean {

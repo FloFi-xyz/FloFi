@@ -676,3 +676,38 @@ starting on schema 19 (and refusing it without the certificate).
 Release order is certificate first, as for 0018: every version-18 database consumer must run a build carrying this certificate before
 0019 is applied. No production migration or release was performed during engineering. The release steps are in
 [RELEASE-PRIVY-0019.md](./RELEASE-PRIVY-0019.md).
+
+## 14. Certificate 0021_editor_requester
+
+| Base | Certified forward migration | SHA-256 |
+| --- | --- | --- |
+| 0020 (reserved for a separate change; its identity is fixed when that change lands) | 0021 `editor_requester` | `b1553211809fa2b4002b01b922fae86a80b7370e343960a3589041fc73c70b10` |
+
+Migration 0021 (BUILD-FLOFI-UNIVERSAL-SINGLE-AUTH-MAINNET-001) widens two CHECK constraints and does nothing else: no table, column, index,
+function, trigger or row is added, changed or removed.
+
+- `mcp_handoffs_requester_kind_check` (0006, widened once by 0010) and `workflow_runs_requester_kind_check` (0015's column check) also admit
+  `EDITOR_SESSION`: the signed-in FloFi account handing its own Canvas workflow to the shared workflow-run flow. Its `requester_id` is the
+  account id (`acct_` + 32 hex, within 0006's `requester_id` pattern) and, like every non-MCP requester, it carries no MCP account or grant:
+  `mcp_handoffs_requester_identity` (0006) applies unchanged.
+
+Every row valid under the previous schema is valid under 0021 unchanged, so the `ADD CONSTRAINT` validation scans cannot fail on existing data.
+Each constraint is dropped and re-added in one `ALTER TABLE` statement, inside the migration's single transaction, under `lock_timeout = '5s'`
+(exactly the shape 0010 used for the first constraint): approval and workflow-run writes wait at most for that short transaction.
+
+A build without 0021 runs unchanged on schema 21, including on rows written by a build with it:
+- it never writes `EDITOR_SESSION` (its `APPROVAL_REQUESTER_KINDS` has no such kind), so nothing it writes can violate a widened constraint;
+- an `EDITOR_SESSION` handoff is resolvable only through the Editor's own link scheme (`flofi_edhs_`), which an older build does not register: its
+  `/approve` answers `HANDOFF_NOT_FOUND` for such a link, and a requester-scoped read of another kind never matches the row;
+- a workflow run of an `EDITOR_SESSION` handoff is re-gated with the requester kind's policy, which an older build does not have: its
+  `policyFor` falls back to the closed policy (`MCP_HANDOFF_POLICY_INVALID`), so it loads no further step of such a run (fail closed). Status
+  reads by the run's proven owner still work.
+
+`editor-requester-migration.pg.test.ts` checks the exact bytes, every earlier row and column surviving unchanged, the widened definitions, the new
+rows, the 0006 identity rule and 0015's immutability still refusing unsafe rows, and atomic rollback. The exact SQL is also kept as
+`packages/cloud-runtime/test/fixtures/0021_editor_requester.sql`.
+
+**Release order.** Certificate first, as for 0018 and 0019: the `CERTIFIED_FORWARD_MIGRATIONS` entry for this migration names the shipped 0020 as
+its `base`, which is only known once 0020's bytes are final. It must be added (`base`: 0020's identity, `migrations`: the row above, `assessment`:
+this section) to a release whose newest shipped migration is 0020, deployed to every database consumer before 0021 is applied. No production
+migration or release was performed during engineering.

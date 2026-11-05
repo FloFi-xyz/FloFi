@@ -19,7 +19,9 @@ import type { Database, Queryable, Row } from '@defi-workflow-engine/cloud-runti
 import type { ExecutionPlan } from '../mcp/execution.ts';
 
 // BUILD-AUTOMATION-001: AUTOMATION_RULE (migration 0010) — an owner's automation, proposing to that same owner.
-export const APPROVAL_REQUESTER_KINDS = Object.freeze(['MCP_ACCOUNT', 'DEVELOPER_PROJECT', 'CHANNEL_CONVERSATION', 'AUTOMATION_RULE'] as const);
+// BUILD-FLOFI-UNIVERSAL-SINGLE-AUTH-MAINNET-001: EDITOR_SESSION (migration 0021) — the signed-in FloFi account handing its own Canvas workflow to
+// the shared workflow-run flow; its handoffs can only be claimed by a wallet that account holds.
+export const APPROVAL_REQUESTER_KINDS = Object.freeze(['MCP_ACCOUNT', 'DEVELOPER_PROJECT', 'CHANNEL_CONVERSATION', 'AUTOMATION_RULE', 'EDITOR_SESSION'] as const);
 export type ApprovalRequesterKind = (typeof APPROVAL_REQUESTER_KINDS)[number];
 /** A requester's isolation scope. For an MCP account, `ref` is its account id. */
 export type RequesterScope = { readonly kind: ApprovalRequesterKind; readonly ref: string };
