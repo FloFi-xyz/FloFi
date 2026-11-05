@@ -135,9 +135,9 @@ describe('enforcer model (MOCKED evidence of the v1.3.0 hooks FloFi compiles)', 
   const ctx = (call: d.Call, group: number, extra: Partial<d.ModelContext> = {}): d.ModelVerdict =>
     d.modelBeforeHooks(d.withGroupArgs(signed, group), { redeemer: session.address, call, blockTimestamp: 1_500n, delegationHash: d.delegationHash(unsigned), callCount: 0n, ...extra });
   it('accepts the exact approve and swap groups and reports the balance rule and the counted call', () => {
-    expect(ctx({ target: USDC, value: 0n, data: hex(encodeApprove(ROUTER, 50_000_000n)) }, 0)).toEqual({ ok: true, groupIndex: 0, countsCall: true, balanceRules: [] });
+    expect(ctx({ target: USDC, value: 0n, data: hex(encodeApprove(ROUTER, 50_000_000n)) }, 0)).toEqual({ ok: true, groupIndex: 0, countsCall: true, balanceRules: [], usedIds: [] });
     const swap = ctx(swapCall(owner.address), 1);
-    expect(swap).toEqual({ ok: true, groupIndex: 1, countsCall: true, balanceRules: [{ decrease: true, token: USDC, recipient: owner.address, amount: 50_000_000n }] });
+    expect(swap).toEqual({ ok: true, groupIndex: 1, countsCall: true, balanceRules: [{ decrease: true, token: USDC, recipient: owner.address, amount: 50_000_000n }], usedIds: [] });
     expect(d.modelAfterHook({ decrease: true, token: USDC, recipient: owner.address, amount: 50_000_000n }, 100_000_000n, 50_000_000n)).toEqual({ ok: true });
     expect(d.modelAfterHook({ decrease: true, token: USDC, recipient: owner.address, amount: 50_000_000n }, 100_000_000n, 49_999_999n))
       .toEqual({ ok: false, code: 'ERC20BalanceChangeEnforcer:exceeded-balance-decrease' });
@@ -188,8 +188,8 @@ describe('Aave V3 Supply and Borrow templates', () => {
   it('accepts the exact approval, a Supply on the owner\'s own position and a variable-rate Borrow for the owner', () => {
     expect(run({ target: A_WETH, value: 0n, data: hex(encodeApprove(POOL, 1_000_000_000_000_000n)) }, 0)).toMatchObject({ ok: true, groupIndex: 0 });
     expect(run(supply(1_000_000_000_000_000n), 1)).toEqual({ ok: true, groupIndex: 1, countsCall: true,
-      balanceRules: [{ decrease: true, token: A_WETH, recipient: owner.address, amount: 2_000_000_000_000_000n }] });
-    expect(run(borrow(500_000n), 2)).toEqual({ ok: true, groupIndex: 2, countsCall: true, balanceRules: [{ decrease: false, token: A_USDC, recipient: owner.address, amount: 1n }] });
+      balanceRules: [{ decrease: true, token: A_WETH, recipient: owner.address, amount: 2_000_000_000_000_000n }], usedIds: [] });
+    expect(run(borrow(500_000n), 2)).toEqual({ ok: true, groupIndex: 2, countsCall: true, balanceRules: [{ decrease: false, token: A_USDC, recipient: owner.address, amount: 1n }], usedIds: [] });
     // Up to just below the on-chain ceiling (2^24 - 1 raw USDC ≈ 16.77 USDC); the exact cap (1 USDC) is the executor's.
     expect(run(borrow((1n << 24n) - 1n), 2)).toMatchObject({ ok: true });
     // A Supply that takes more than its cap from the owner's account fails in the after-hook.
