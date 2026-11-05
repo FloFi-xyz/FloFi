@@ -677,11 +677,36 @@ Release order is certificate first, as for 0018: every version-18 database consu
 0019 is applied. No production migration or release was performed during engineering. The release steps are in
 [RELEASE-PRIVY-0019.md](./RELEASE-PRIVY-0019.md).
 
+## 14a. Certificate 0020_workflow_grants
+
+| Base | Certified forward migration | SHA-256 |
+| --- | --- | --- |
+| 0019 `privy_accounts` (`aea36e60…cab6`) | 0020 `workflow_grants` | `5ad470b3e4d3a4695fb6764ac39870d4d1c8870a9bf34101638934afb2bc0dcd` |
+
+Migration 0020 (BUILD-FLOFI-UNIVERSAL-SINGLE-AUTH-MAINNET-001) is additive and changes no row:
+- `credential_grants.passkey_id` drops NOT NULL, under a new CHECK `credential_grants_passkey_or_workflow_grant`. A grant may lack a passkey
+  only when it is an EVM workflow grant (`scope->>'kind' = 'WORKFLOW'`). Every existing grant has a passkey, so the validation scan cannot fail.
+  The 0011 passkey foreign key still applies whenever a passkey is present (MATCH SIMPLE).
+- The 0011 revision CHECK requiring a passkey for a signed revision is found by its definition and replaced by
+  `delegated_authorization_revisions_signed`. That constraint admits exactly the previous rows plus a revision whose envelope and assertion are both of
+  kind `WALLET_WORKFLOW` (the run's authorization is the wallet signature of its workflow grants). A missing definition aborts the migration
+  (`MIGRATION_0020_REVISION_CHECK_NOT_FOUND`).
+
+A build without 0020 runs unchanged on schema 20:
+- It never writes a grant without a passkey or a WALLET_WORKFLOW revision.
+- Reading such rows:
+  - its grant mapper turns a NULL `passkey_id` into a string, which its passkey checks never match (`GRANT_PASSKEY_MISMATCH`, fail closed);
+  - its executor refuses a revision without a passkey (`AUTHORIZATION_NOT_ACTIVE`).
+
+**Release order.** The certificate row above goes into a release whose newest shipped migration is 0019. That release is deployed to every
+database consumer before 0020 is applied, followed by §14 for 0021. Otherwise use the coordinated window in
+`docs/deploy/SINGLE-AUTH-MAINNET-ACTIVATION.md` §5. No production migration or release was performed during engineering.
+
 ## 14. Certificate 0021_editor_requester
 
 | Base | Certified forward migration | SHA-256 |
 | --- | --- | --- |
-| 0020 (reserved for a separate change; its identity is fixed when that change lands) | 0021 `editor_requester` | `b1553211809fa2b4002b01b922fae86a80b7370e343960a3589041fc73c70b10` |
+| 0020 `workflow_grants` (`5ad470b3…0dcd`) | 0021 `editor_requester` | `b1553211809fa2b4002b01b922fae86a80b7370e343960a3589041fc73c70b10` |
 
 Migration 0021 (BUILD-FLOFI-UNIVERSAL-SINGLE-AUTH-MAINNET-001) widens two CHECK constraints and does nothing else: no table, column, index,
 function, trigger or row is added, changed or removed.
