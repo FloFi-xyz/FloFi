@@ -676,3 +676,43 @@ starting on schema 19 (and refusing it without the certificate).
 Release order is certificate first, as for 0018: every version-18 database consumer must run a build carrying this certificate before
 0019 is applied. No production migration or release was performed during engineering. The release steps are in
 [RELEASE-PRIVY-0019.md](./RELEASE-PRIVY-0019.md).
+
+## 14. Certificate 0020_flight_flofi
+
+| Base | Certified forward migration | SHA-256 |
+| --- | --- | --- |
+| 0019 `privy_accounts` | 0020 `flight_flofi` | `a7ce1f42753017de90eede9784a205bcd3b6fa0134b26eecb530dc2e505b2892` |
+
+Migration 0020 (BUILD-FLOFI-FLIGHT-001, the Flight FloFi launch campaign at `/board`) adds eight tenant-scoped tables and nothing else:
+`flight_batches` (boarding groups and their opening time), `flight_list_entries` (the beta list and the next flight's list: a lower-cased
+email, its language and the notice version shown), `flight_join_attempts` (a keyed digest of a client's network, never the address, for
+the list form's rate limit; one day), `flight_passes` (one boarding pass per account; Founding seats 1..100, unique), `flight_invites`
+(single-use invite codes), `flight_issuance` (per tenant, the boarding numbers and Founding seats ever issued, at most 100 Founding; a
+number freed by a deleted account is never reissued), `flight_simulations` (two-hour evidence that an account completed a server-side
+simulation: the run and the route the server projected, never an amount) and `flight_daily_events` (content-free daily counters with
+closed codes). No pre-existing table, column, constraint, function, trigger, rule, index or row is created, changed or removed.
+
+Objects that reference what exists: the new tables reference `tenants (tenant_id)` and `flofi_accounts (tenant_id, account_id)` by
+foreign key (`ON DELETE CASCADE` for an account's pass and simulation evidence; `ON DELETE SET NULL (redeemed_by)` for a redeemed
+invite and `SET NULL (issuer_pass_id)` for the invites a deleted pass gave out — the column-list form needs PostgreSQL 15 or later:
+production Neon runs 18, CI 18.6). Creating them takes a `SHARE ROW EXCLUSIVE` lock on `tenants` and `flofi_accounts` held until the
+migration's transaction commits (milliseconds: the transaction creates empty tables only), under `lock_timeout = '5s'`; meanwhile a
+version-19 write to those two tables (a new tenant, a new account, onboarding or organisation updates, an account deletion) waits.
+PostgreSQL implements the foreign keys with internal triggers on the referenced tables; these change no result of any statement a
+version-19 build runs, except that deleting a FloFi account (the version-19 account deletion) now also deletes that account's Flight
+pass and evidence and unlinks its invites, which is the intended erasure. No version-19 query reads or writes a `flight_*` table, so a
+version-19 build runs unchanged on schema 20.
+
+Evidence. Release A carries the certificate's unit gate (`forward-compatibility.test.ts`: base identity, fixture digest, this anchor) and
+re-activates `backend/schema-compatibility.pg.test.ts` (API and worker across 0020 with live traffic, on the fixture). Release B adds
+`flight-flofi-migration.pg.test.ts`, which checks the exact bytes, every pre-existing column, account row, relation, index, trigger and rule
+unchanged, the eight new tables, a version-19 reader carrying this certificate starting on schema 20 (and refusing it without the
+certificate), a version-19 account deletion succeeding on schema 20 with Flight rows present (pass and evidence deleted, invites
+unlinked), and atomic rollback. `apps/reference-dapp/src/flight/store.pg.test.ts` checks the campaign rules on the real tables, including
+260 concurrent pass requests for 130 accounts producing exactly 100 Founding seats, a deleted holder's seat never reissued, retention and
+tenant isolation.
+
+Release order is certificate first, as for 0018 and 0019: every version-19 database consumer (Vercel production, the Railway API and
+worker) must run a build carrying this certificate (Release A) before 0020 is applied by the Railway pre-deploy migration (Release B).
+No production migration or release was performed during engineering. Rollback keeps the certificate; do not drop the `flight_*` tables
+to accommodate an older binary.
