@@ -5,11 +5,12 @@
  * action, so a successful /app simulation can earn a boarding pass. The flow runtime never imports the campaign, its accounts or its
  * requests; MCP, channels and the Developer API call the runtime directly and record nothing.
  */
-import { recordFlightSimulation } from '../flight/simulation-evidence';
 import { observeSimulations } from '../server/simulation-observer';
 
 const REGISTERED = Symbol.for('flofi.flight.observer.registered');
-observeSimulations(recordFlightSimulation);
+// The record (with the account and request code it needs) loads on the first successful hosted simulation, never when an action module
+// is merely imported (tests and tools import these modules outside a Next.js request).
+observeSimulations(async (call, env) => (await import('../flight/simulation-evidence')).recordFlightSimulation(call, env));
 if (!(globalThis as Record<symbol, unknown>)[REGISTERED]) {
   (globalThis as Record<symbol, unknown>)[REGISTERED] = true;
   // A fixed, content-free line, so a deployment's runtime logs show the observer is in place.
