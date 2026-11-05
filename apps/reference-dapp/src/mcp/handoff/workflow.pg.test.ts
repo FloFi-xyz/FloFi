@@ -75,7 +75,7 @@ describe('BUILD-CHAT-E2E-001 multi-step workflows over MCP (PostgreSQL)', () => 
     expect((await client.callTool('request_user_approval', { strategy: composed.strategy, workflowHash: composed.workflowHash })).output)
       .toMatchObject({ ok: true, executionPlan: 'SEQUENTIAL',
         authorizationPlan: { confirmEachStep: { available: true }, delegatedSingleAuthorization: { available: false, reason: 'DELEGATION_NOT_ENABLED' },
-          bindings: [{ step: 1, amountFrom: 0, confirmEachStep: 'RECONCILED_RECEIVED_AMOUNT', delegated: 'RECONCILED_RECEIVED_AMOUNT' }],
+          bindings: [{ step: 1, amountFrom: 0, confirmEachStep: 'RECONCILED_RECEIVED_AMOUNT', delegated: 'SIGNED_GUARANTEED_MINIMUM' }],
           recommended: 'CONFIRM_EACH_STEP' },
         gates: { supportedByCode: { modes: { confirmEachStep: null, delegated: 'DELEGATION_NOT_ENABLED' } } } });
     expect((await client.callTool('get_capabilities', {})).output).toMatchObject({ stepLists: { sequences: expect.stringContaining('ONE wallet authorization') } });
