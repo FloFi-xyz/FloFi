@@ -35,3 +35,5 @@ export * from './lending-composition.js';
 export * from './native-transfer.js';
 export * from './durable-storage.js';
 export { memorySignerProvider, localDisposableSignerProvider, type DelegatedSignerProvider, type EvmSignature, type SignerNamespace } from './delegated-signer.js';
+export { awsKmsSignerProvider, awsCredentialsFromEnv, sigV4Headers, kmsSignatureToEvm, parseDerEcdsaSignature, secp256k1PublicKeyFromSpki, evmAddressOfPublicKey,
+  type AwsCredentials, type KmsSignerConfig, type KmsAuditEvent } from './kms-signer.js';

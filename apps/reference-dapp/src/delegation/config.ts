@@ -10,9 +10,14 @@
  *   FLOFI_DELEGATION_HARNESS_URL     http://127.0.0.1:<port> (loopback only)
  *   FLOFI_DELEGATION_RPC_<chainId>   per EVM chain read/submit JSON-RPC in production mode (https; e.g. FLOFI_DELEGATION_RPC_84532)
  *   FLOFI_PASSKEY_ORIGIN             the origin passkeys are registered for and assert (default FLOFI_PUBLIC_ORIGIN); its host is the RP id
- *   FLOFI_DELEGATED_SIGNER           none (default) | local-disposable | memory — the session-signer provider of this process. `memory` and
- *                                    `local-disposable` are refused on hosted deployments: production custody (KMS/HSM) is not available,
- *                                    so production delegated signing is BLOCKED (DELEGATED_SIGNER_UNAVAILABLE)
+ *   FLOFI_DELEGATED_SIGNER           none (default) | aws-kms | local-disposable | memory — the session-signer provider of this process.
+ *                                    `aws-kms` (BUILD-FLOFI-UNIVERSAL-SINGLE-AUTH-MAINNET-001) is the production provider: a non-exportable
+ *                                    ECC_SECG_P256K1 key in AWS KMS, never with a harness. `memory` and `local-disposable` are refused on
+ *                                    hosted deployments. Without a signer, delegated signing is DELEGATED_SIGNER_UNAVAILABLE.
+ *   FLOFI_KMS_REGION                 aws-kms only: the key's AWS region (e.g. us-east-1)
+ *   FLOFI_KMS_EVM_KEY_ARN            aws-kms only: the key ARN or alias ARN (arn:aws:kms:<region>:<account>:key/<id> | alias/<name>) of
+ *                                    the deployment's executor key; its region must equal FLOFI_KMS_REGION. The standard AWS_ACCESS_KEY_ID /
+ *                                    AWS_SECRET_ACCESS_KEY (/ AWS_SESSION_TOKEN) secrets must be present; their values are never read here.
  *   FLOFI_DELEGATED_SIGNER_DIR       local-disposable only: an absolute directory below /tmp
  *   FLOFI_DELEGATED_EXECUTION        enabled: this process runs the delegated executor (needs a signer provider)
  *   FLOFI_DELEGATION_MAINNET_CHAINS  BUILD-FLOFI-SINGLE-AUTH-WORKFLOW-UX-001: comma-separated public mainnets on which delegated templates may
@@ -26,7 +31,9 @@ import type { CapabilityMode } from './capabilities.ts';
 import { MAINNET_DELEGATION_CHAINS } from './profiles.ts';
 
 type Env = Readonly<Record<string, string | undefined>>;
-export type SignerChoice = { readonly kind: 'none' } | { readonly kind: 'memory' } | { readonly kind: 'local-disposable'; readonly directory: string };
+export type SignerChoice = { readonly kind: 'none' } | { readonly kind: 'memory' } | { readonly kind: 'local-disposable'; readonly directory: string }
+  | { readonly kind: 'aws-kms'; readonly region: string; readonly evmKeyArn: string };
+const KMS_KEY_ARN = /^arn:aws:kms:([a-z]{2}(?:-[a-z]+)+-\d):(\d{12}):(?:key\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|alias\/[A-Za-z0-9/_-]{1,250})$/;
 export type DelegationConfig = {
   readonly enabled: true; readonly tenantId: string; readonly mode: CapabilityMode; readonly harnessUrl: string | null;
   readonly rpc: Readonly<Record<string, string>>; readonly passkeyOrigin: string; readonly signer: SignerChoice; readonly executor: boolean; readonly hosted: boolean;
@@ -81,6 +88,14 @@ export function readDelegationConfig(env: Env): DelegationConfigResult {
       if (!directory.startsWith('/tmp/') || directory.includes('..')) return invalid('FLOFI_DELEGATED_SIGNER_DIR');
       signer = { kind: 'local-disposable', directory };
     }
+  } else if (signerKind === 'aws-kms') {
+    // Production custody: never together with a harness, the key ARN bound to its region, and the AWS credential secrets present.
+    if (mocked) return invalid('FLOFI_DELEGATED_SIGNER_WITH_HARNESS');
+    const region = env.FLOFI_KMS_REGION ?? '', evmKeyArn = env.FLOFI_KMS_EVM_KEY_ARN ?? '', arn = KMS_KEY_ARN.exec(evmKeyArn);
+    if (!/^[a-z]{2}(?:-[a-z]+)+-\d$/.test(region)) return invalid('FLOFI_KMS_REGION');
+    if (!arn || arn[1] !== region) return invalid('FLOFI_KMS_EVM_KEY_ARN');
+    if (!env.AWS_ACCESS_KEY_ID || !env.AWS_SECRET_ACCESS_KEY) return invalid('AWS_CREDENTIALS_MISSING');
+    signer = { kind: 'aws-kms', region, evmKeyArn };
   } else return invalid('FLOFI_DELEGATED_SIGNER');
   const executor = env.FLOFI_DELEGATED_EXECUTION === 'enabled';
   if (env.FLOFI_DELEGATED_EXECUTION && !['enabled', 'disabled'].includes(env.FLOFI_DELEGATED_EXECUTION)) return invalid('FLOFI_DELEGATED_EXECUTION');
@@ -90,9 +105,8 @@ export function readDelegationConfig(env: Env): DelegationConfigResult {
   return { enabled: true, tenantId, mode: mocked ? 'MOCKED_HARNESS' : 'PRODUCTION', harnessUrl, rpc, passkeyOrigin, signer, executor, hosted, mainnetChains };
 }
 /**
- * Why delegated execution cannot run on this deployment (null: it can). Hosted deployments can never configure a signer (no production
- * custody provider exists), so production delegated signing is always DELEGATED_SIGNER_UNAVAILABLE; a local deployment may rehearse with a
- * disposable signer, and each step still needs a step driver for its chain and mode.
+ * Why delegated execution cannot run on this deployment (null: it can). A hosted deployment signs only with the AWS KMS provider; a local
+ * deployment may rehearse with a disposable signer. Each step still needs a step driver for its chain and mode.
  */
 export function executionAvailability(config: DelegationConfig): string | null {
   return config.signer.kind === 'none' ? 'DELEGATED_SIGNER_UNAVAILABLE' : null;

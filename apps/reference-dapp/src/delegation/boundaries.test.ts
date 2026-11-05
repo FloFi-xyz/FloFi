@@ -110,6 +110,27 @@ describe('BUILD-AUTOMATION-002 configuration fails closed', () => {
     expect(production).toMatchObject({ enabled: true, mode: 'PRODUCTION', signer: { kind: 'none' }, executor: false });
     expect(production.enabled && executionAvailability(production)).toBe('DELEGATED_SIGNER_UNAVAILABLE');
   });
+  it('BUILD-FLOFI-UNIVERSAL-SINGLE-AUTH-MAINNET-001: the AWS KMS signer is the hosted production provider, region-bound and never with a harness', () => {
+    const hosted = { FLOFI_DELEGATION: 'enabled', VERCEL: '1', FLOFI_PUBLIC_ORIGIN: 'https://app.flofi.test', FLOFI_PASSKEY_ORIGIN: 'https://app.flofi.test',
+      FLOFI_DELEGATION_MAINNET_CHAINS: 'eip155:42161' };
+    const kms = { FLOFI_DELEGATED_SIGNER: 'aws-kms', FLOFI_KMS_REGION: 'us-east-1', FLOFI_KMS_EVM_KEY_ARN: 'arn:aws:kms:us-east-1:111122223333:key/1234abcd-12ab-34cd-56ef-1234567890ab',
+      AWS_ACCESS_KEY_ID: 'AKIDEXAMPLE', AWS_SECRET_ACCESS_KEY: 'example' };
+    const ok = readDelegationConfig({ ...hosted, ...kms, FLOFI_DELEGATED_EXECUTION: 'enabled' });
+    expect(ok).toMatchObject({ enabled: true, mode: 'PRODUCTION', hosted: true, executor: true,
+      signer: { kind: 'aws-kms', region: 'us-east-1', evmKeyArn: kms.FLOFI_KMS_EVM_KEY_ARN } });
+    expect(ok.enabled && executionAvailability(ok)).toBeNull();
+    // Credentials never enter the configuration object.
+    expect(JSON.stringify(ok)).not.toMatch(/AKIDEXAMPLE|example"/);
+    for (const [extra, reason] of [
+      [{ FLOFI_KMS_REGION: 'eu-west-1' }, 'FLOFI_KMS_EVM_KEY_ARN'],
+      [{ FLOFI_KMS_REGION: 'nowhere' }, 'FLOFI_KMS_REGION'],
+      [{ FLOFI_KMS_EVM_KEY_ARN: '1234abcd-12ab-34cd-56ef-1234567890ab' }, 'FLOFI_KMS_EVM_KEY_ARN'],
+      [{ AWS_SECRET_ACCESS_KEY: '' }, 'AWS_CREDENTIALS_MISSING'],
+      [{ FLOFI_DELEGATED_SIGNER: 'memory' }, 'FLOFI_DELEGATED_SIGNER_HOSTED'],
+    ] as const) expect(readDelegationConfig({ ...hosted, ...kms, ...extra }), reason).toMatchObject({ enabled: false, reason });
+    expect(readDelegationConfig({ ...base, ...kms, FLOFI_DELEGATION_HARNESS: 'MOCKED_LOOPBACK_ONLY', FLOFI_DELEGATION_HARNESS_URL: 'http://127.0.0.1:8560' }))
+      .toMatchObject({ enabled: false, reason: 'FLOFI_DELEGATED_SIGNER_WITH_HARNESS' });
+  });
   it('the MOCKED harness is loopback only and local', () => {
     expect(readDelegationConfig({ ...base, FLOFI_DELEGATION_HARNESS: 'MOCKED_LOOPBACK_ONLY', FLOFI_DELEGATION_HARNESS_URL: 'http://evil.example:8560' }))
       .toMatchObject({ reason: 'FLOFI_DELEGATION_HARNESS_URL' });
