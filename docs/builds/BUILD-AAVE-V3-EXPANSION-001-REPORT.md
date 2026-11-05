@@ -102,6 +102,30 @@ The capability truth (`lendingOffers`, `get_supported_assets`, the Copilot's "Wh
 registry, so all surfaces list the same reserves. Copilot lending resolves the named reserve from the market itself (no longer
 blocked when a token catalog is not loaded) and states no reserve counts it does not hold. EN and PT-BR strings were added.
 
+### Engineering review outcomes
+
+Specialist reviews (lending, workflow, security; then chat, MCP and frontend with adversarial verification) found defects that all
+failed closed or were display-only; each confirmed one was fixed with a test:
+
+- **Reconciliation of non-USDC reserves and multi-reserve accounts** proves Aave's aggregates independently at each block from that
+  block's verified positions. Account-weighted LTV/threshold and collateral values legitimately change with the collateral mix and
+  oracle prices, so a correct multi-collateral Withdraw or a same-block oracle update is no longer reported DIVERGENT; the target
+  reserve's own effects (wallet delta, scaled principal, allowance, configuration bits) stay exact. The original USDC profiles keep
+  their exact existing checks.
+- **Every accepted Supply has an exit:** a reserve supplied without collateral, or an isolated reserve, can be withdrawn.
+- **Base:** the expansion reserves pin the address-book Pool implementation (ERC-1967 slot), the provider and the oracle at every read.
+- **Approvals:** a token that refuses a non-zero → non-zero allowance change (USDT-style) gets `SUPPLY_ALLOWANCE_RESET_REQUIRED` with
+  owner-facing text; the simulation records the token's actual `approve` return.
+- **Refreshes:** completed sequence steps are kept as pointers (node, runtime, run id) and, after a reload, count again only when the
+  runtime's durable server record proves them final and reconciled for this workflow and node, with the delivered amount recomputed from
+  the record. The swap of a Swap → Supply sequence is therefore not offered again after a refresh (same browser); on another device the
+  runtime starts from the workflow as before.
+- **Copilot:** a reserve label written only inside a longer one (`USDC` in `USDC.e`, `USDe` in `PT-USDe-…`) never grounds it.
+- **Discovery:** concurrent catalog reads are capped; MOCKED harness data is labelled; an unreadable account state is reported as
+  unknown; oracle sources are compared with the snapshot; duplicate reserve labels refuse to load.
+- **Auto-connect:** a swap linked after an earlier step still forms the typed Swap → Orca binding; deleting a step cascades only through
+  typed links; Duplicate works on linked swaps.
+
 ## 2. Tests and evidence
 
 - `packages/action-registry/test/aave-v3-markets.test.ts`: catalog counts, identity, uniqueness, exact-address resolution.
@@ -128,6 +152,10 @@ execution. Intentionally changed expectations of earlier tests (one reserve per 
 - Reserve ids/aTokens come from the pinned address book; a reserve the Pool later drops or re-lists fails closed until the
   snapshot is regenerated. Tokens whose allowance storage cannot be proven by the bounded override fail closed at Simulate.
 - A funded Supply needs an explicit cap (FloFi asks); "all of the swap output" is not a separate mode.
+- Refresh restoration covers the public swap, Aave and Solana swap runtimes in the same browser; Router and universal bridge steps keep the
+  existing in-visit behaviour. The Base Pool revision is not pinned (only its implementation), because no revision could be verified here.
+- Ethereum USDT-style tokens with an existing non-zero allowance need the owner to reset it to zero first (FloFi explains, but does not
+  prepare the reset transaction).
 - The Canvas card token list shows every registered reserve; live disabled states are shown in the lending forms.
 
 ## 4. Deployment
