@@ -13,7 +13,7 @@ import { erc7710 } from '@defi-workflow-engine/reference-compiler';
 import { memorySignerProvider } from '@defi-workflow-engine/reference-executor';
 import { ARBITRUM_MAINNET_SWAP } from '../domain/public-testnet-swap.ts';
 import { evmTemplates, serializeDelegation } from './adapters.ts';
-import { resolveAuthorityGraph, scopeHash, type GrantScope, type GrantView, type StepBinding } from './authority.ts';
+import { resolveAuthorityGraph, scopeHash, type EvmClassScope, type GrantView, type StepBinding } from './authority.ts';
 import { stepCapability } from './capabilities.ts';
 import { readDelegationConfig } from './config.ts';
 import { BORROW_BROADCAST_WINDOW_MS, driverFor, evmAaveDriver, evmSwapDriver, type StepContext } from './drivers.ts';
@@ -49,14 +49,14 @@ const word = (v: bigint) => v.toString(16).padStart(64, '0'), pad = (a: string) 
 const TRANSFER = D.keccakHex('Transfer(address,address,uint256)');
 const json = (v: unknown) => JSON.parse(JSON.stringify(v, (_k, x: unknown) => typeof x === 'bigint' ? x.toString() : x)) as Record<string, unknown>;
 
-async function setup(scopeOverride: Partial<Extract<GrantScope, { mechanism: 'EVM_ERC7710_METAMASK_V1_3' }>> = {}) {
+async function setup(scopeOverride: Partial<EvmClassScope> = {}) {
   const owner = await keys.create('eip155'), session = await keys.create('eip155');
   const strategy = { version: 2, steps: [{ action: 'swap', network: 'arbitrum-one', inputAsset: 'USDC', outputAsset: 'WETH', amount: '3', slippageBps: 50 },
     { action: 'supply', network: 'arbitrum-one', asset: 'WETH', amount: '0.002', beneficiary: owner.address },
     { action: 'borrow', network: 'arbitrum-one', asset: 'USDC', amount: '1', beneficiary: owner.address }], bindings: [{ step: 1, amountFrom: 0 }] };
   const requirement = workflowRequirement(strategy);
   if (!requirement.ok) throw new Error(requirement.code);
-  const scope: Extract<GrantScope, { mechanism: 'EVM_ERC7710_METAMASK_V1_3' }> = { mechanism: 'EVM_ERC7710_METAMASK_V1_3', chain: CHAIN, router: ROUTER,
+  const scope: EvmClassScope = { mechanism: 'EVM_ERC7710_METAMASK_V1_3', chain: CHAIN, router: ROUTER,
     pairs: [{ tokenIn: USDC, tokenOut: WETH, perCallInputCap: '3000000' }], maxCalls: 5, validFrom: '2026-11-05T00:00:00.000Z', expiresAt: '2026-12-05T00:00:00.000Z',
     aave: { pool: POOL, supply: [{ asset: WETH, perCallCap: '2000000000000000' }], borrow: [{ asset: USDC, perCallCap: '1000000' }] }, ...scopeOverride };
   const unsigned = D.compileGrant({ chainId: 42161, owner: owner.address, session: session.address, validAfter: BigInt(Date.parse(scope.validFrom) / 1000) - 1n,
@@ -136,7 +136,7 @@ describe('capability and deployment opt-in (closed by default)', () => {
     const base = { FLOFI_DELEGATION: 'enabled', FLOFI_PUBLIC_ORIGIN: 'https://flofi.example', FLOFI_NETWORK_SCOPE: 'PUBLIC_MAINNET' };
     expect(readDelegationConfig(base)).toMatchObject({ enabled: false, reason: 'MAINNET_ONLY_PRODUCT' });
     expect(readDelegationConfig({ ...base, FLOFI_DELEGATION_MAINNET_CHAINS: 'eip155:42161' })).toMatchObject({ enabled: true, mode: 'PRODUCTION', mainnetChains: [CHAIN], signer: { kind: 'none' } });
-    for (const value of ['eip155:8453', 'eip155:42161,eip155:42161', 'arbitrum']) expect(readDelegationConfig({ ...base, FLOFI_DELEGATION_MAINNET_CHAINS: value }))
+    for (const value of ['eip155:4663', 'eip155:10', 'eip155:42161,eip155:42161', 'arbitrum']) expect(readDelegationConfig({ ...base, FLOFI_DELEGATION_MAINNET_CHAINS: value }))
       .toMatchObject({ enabled: false, code: 'DELEGATION_CONFIGURATION_INVALID', reason: 'FLOFI_DELEGATION_MAINNET_CHAINS' });
     expect(readDelegationConfig({ ...base, FLOFI_DELEGATION_MAINNET_CHAINS: CHAIN, FLOFI_DELEGATION_HARNESS: 'MOCKED_LOOPBACK_ONLY', FLOFI_DELEGATION_HARNESS_URL: 'http://127.0.0.1:8560' }))
       .toMatchObject({ enabled: false, code: 'DELEGATION_CONFIGURATION_INVALID' });

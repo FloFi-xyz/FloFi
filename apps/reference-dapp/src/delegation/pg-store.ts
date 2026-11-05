@@ -69,7 +69,7 @@ const credentialOf = (r: Row): CredentialRecord => ({ credentialId: String(r.cre
 const grantOf = (r: Row): GrantRecord => ({ grantId: String(r.grant_id), credentialId: String(r.credential_id), owner: ownerOf(r),
   walletNamespace: r.wallet_namespace as Namespace, walletAddress: String(r.wallet_address), chain: String(r.chain), mechanism: r.mechanism as Mechanism,
   state: r.state as GrantState, scope: r.scope as GrantScope, scopeHash: String(r.scope_hash), sessionAddress: String(r.session_address), commitment: str(r.commitment),
-  passkeyId: String(r.passkey_id), verifiedAt: maybeDate(r.verified_at)?.toISOString() ?? null, callsUsed: Number(r.calls_used), sessionKeyRef: String(r.session_key_ref),
+  passkeyId: r.passkey_id === null || r.passkey_id === undefined ? null : String(r.passkey_id), verifiedAt: maybeDate(r.verified_at)?.toISOString() ?? null, callsUsed: Number(r.calls_used), sessionKeyRef: String(r.session_key_ref),
   enrollment: r.enrollment as Record<string, unknown>, grantPayload: (r.grant_payload ?? null) as Record<string, unknown> | null,
   verification: (r.verification ?? null) as Record<string, unknown> | null, expiresAt: date(r.expires_at), revocation: (r.revocation ?? null) as Record<string, unknown> | null,
   revocationRequestedAt: maybeDate(r.revocation_requested_at), revokedAt: maybeDate(r.revoked_at), evmNextNonce: r.evm_next_nonce === null ? null : BigInt(String(r.evm_next_nonce)),
@@ -200,7 +200,7 @@ export function createPgDelegationStore(db: Database, tenantId: string) {
         [tenantId, owner.namespace, owner.address])).rows.map(credentialOf);
     },
     insertGrant: (owner: Owner, g: { readonly grantId: string; readonly credentialId: string; readonly chain: string; readonly mechanism: Mechanism;
-      readonly scope: GrantScope; readonly scopeHash: string; readonly passkeyId: string; readonly sessionKeyRef: string; readonly sessionAddress: string;
+      readonly scope: GrantScope; readonly scopeHash: string; readonly passkeyId: string | null; readonly sessionKeyRef: string; readonly sessionAddress: string;
       readonly enrollment: Readonly<Record<string, unknown>>; readonly expiresAt: Date }, now: Date) => db.transaction(async tx => {
       const live = (await tx.query<{ n: number }>(`SELECT count(*)::int AS n FROM credential_grants WHERE tenant_id = $1 AND owner_namespace = $2 AND owner_account = $3
         AND state IN ('PENDING_SIGNATURE', 'ACTIVE', 'UNCERTAIN')`, [tenantId, owner.namespace, owner.address])).rows[0]!.n;
@@ -322,7 +322,9 @@ export function createPgDelegationStore(db: Database, tenantId: string) {
      * The owner's ONE signature activates a revision, atomically: the single-use challenge (= envelope digest) is consumed, the passkey
      * counter advances, the revision becomes ACTIVE (a previous one SUPERSEDED), the lineage ACTIVE, and the rule resumes.
      */
-    activate: (owner: Owner, input: { readonly authorizationId: string; readonly revision: number; readonly digest: string; readonly passkeyId: string;
+    activate: (owner: Owner, input: { readonly authorizationId: string; readonly revision: number; readonly digest: string;
+      /** null: a WALLET_WORKFLOW envelope, whose authorization is the wallet signature of its workflow grants (all ACTIVE in this transaction). */
+      readonly passkeyId: string | null;
       readonly signCount: number; readonly assertion: Readonly<Record<string, unknown>>; readonly ruleResume?: { readonly nextEvaluationAt: Date; readonly scheduleCursor: Date | null };
       /** BUILD-CHAT-E2E-001: the source's own activation, in this same transaction (a workflow run starts its delegated execution). */
       readonly onActivated?: (tx: Queryable, authorization: AuthorizationRecord) => Promise<void> },
@@ -334,11 +336,21 @@ export function createPgDelegationStore(db: Database, tenantId: string) {
       const rev = (await tx.query('SELECT * FROM delegated_authorization_revisions WHERE tenant_id = $1 AND authorization_id = $2 AND revision = $3 FOR UPDATE',
         [tenantId, input.authorizationId, input.revision])).rows[0];
       if (!rev || rev.state !== 'PENDING_SIGNATURE' || rev.envelope_digest !== input.digest) refuse('AUTHORIZATION_NOT_PENDING');
-      if ((await tx.query(`UPDATE passkey_challenges SET consumed_at = $5 WHERE tenant_id = $1 AND challenge_digest = $2 AND owner_namespace = $3 AND owner_account = $4
+      // BUILD-FLOFI-UNIVERSAL-SINGLE-AUTH-MAINNET-001: the two envelope kinds never substitute for each other.
+      const wallet = (rev!.envelope as { kind?: unknown } | null)?.kind === 'WALLET_WORKFLOW';
+      if (wallet !== (input.passkeyId === null)) refuse('AUTHORIZATION_KIND_MISMATCH');
+      if (wallet) {
+        // Every workflow grant the manifest names is this owner's, ACTIVE (its wallet signature verified), a workflow grant of this run.
+        const ids = ((rev!.manifest as DelegatedAuthorizationManifest).credentials ?? []).map(c => c.grantId);
+        const rows = (await tx.query(`SELECT grant_id, state, scope FROM credential_grants WHERE tenant_id = $1 AND owner_namespace = $2 AND owner_account = $3
+          AND grant_id = ANY($4::text[]) FOR SHARE`, [tenantId, owner.namespace, owner.address, [...new Set(ids)]])).rows;
+        if (!ids.length || rows.length !== new Set(ids).size || rows.some(r => r.state !== 'ACTIVE' || (r.scope as { kind?: unknown }).kind !== 'WORKFLOW'
+          || (r.scope as { workflowRunId?: unknown }).workflowRunId !== a!.workflowRunId)) refuse('WORKFLOW_GRANT_NOT_ACTIVE');
+      } else if ((await tx.query(`UPDATE passkey_challenges SET consumed_at = $5 WHERE tenant_id = $1 AND challenge_digest = $2 AND owner_namespace = $3 AND owner_account = $4
           AND purpose = 'AUTHORIZE' AND subject = $6 AND consumed_at IS NULL AND expires_at > $5 RETURNING 1`,
       [tenantId, Buffer.from(input.digest.slice(2), 'hex'), owner.namespace, owner.address, now, `${input.authorizationId}:${input.revision}`])).rowCount !== 1)
         refuse('AUTHORIZATION_CHALLENGE_INVALID');
-      if ((await tx.query(`UPDATE passkey_credentials SET sign_count = $5, last_used_at = $6 WHERE tenant_id = $1 AND passkey_id = $2 AND owner_namespace = $3 AND owner_account = $4
+      if (!wallet && (await tx.query(`UPDATE passkey_credentials SET sign_count = $5, last_used_at = $6 WHERE tenant_id = $1 AND passkey_id = $2 AND owner_namespace = $3 AND owner_account = $4
           AND revoked_at IS NULL AND (sign_count < $5 OR ($5 = 0 AND sign_count = 0)) RETURNING 1`,
       [tenantId, input.passkeyId, owner.namespace, owner.address, input.signCount, now])).rowCount !== 1) refuse('PASSKEY_COUNTER_REPLAY');
       if (a!.activeRevision !== null) await tx.query(`UPDATE delegated_authorization_revisions SET state = 'SUPERSEDED' WHERE tenant_id = $1 AND authorization_id = $2 AND revision = $3`,
@@ -529,14 +541,20 @@ export function createPgDelegationStore(db: Database, tenantId: string) {
       const step = (await tx.query('SELECT * FROM delegated_execution_steps WHERE tenant_id = $1 AND execution_id = $2 AND step_index = $3 FOR UPDATE',
         [tenantId, executionId, stepIndex])).rows[0];
       if (!step || step.state !== 'POLICY_VERIFIED') return { ok: false as const, code: 'STEP_CHANGED' };
-      const g = (await tx.query('SELECT state, calls_used, evm_next_nonce, expires_at FROM credential_grants WHERE tenant_id = $1 AND grant_id = $2 FOR UPDATE',
+      const g = (await tx.query('SELECT state, calls_used, evm_next_nonce, expires_at, chain, session_address FROM credential_grants WHERE tenant_id = $1 AND grant_id = $2 FOR UPDATE',
         [tenantId, step.grant_id])).rows[0];
       if (!g || g.state !== 'ACTIVE') return { ok: false as const, code: g ? `CREDENTIAL_${String(g.state)}` : 'CREDENTIAL_NOT_FOUND' };
       if (date(g.expires_at) <= now) return { ok: false as const, code: 'CREDENTIAL_EXPIRED' };
       // BUILD-FLOFI-SINGLE-AUTH-WORKFLOW-UX-001: the session signer's nonces are allocated under this grant lock. Bytes signed at nonces another
       // execution already prepared are refused (never persisted, never sent); the caller signs again at fresh nonces.
-      if (grantUse.nextNonce !== null && g.evm_next_nonce !== null && grantUse.nextNonce - BigInt(grantUse.calls) < BigInt(String(g.evm_next_nonce)))
-        return { ok: false as const, code: 'SUBMISSION_NONCE_CONFLICT' };
+      // BUILD-FLOFI-UNIVERSAL-SINGLE-AUTH-MAINNET-001: grants may share one executor address (the deployment's KMS key), so nonces are allocated
+      // per (chain, executor) under an advisory lock, against the highest nonce any grant of that executor prepared.
+      if (grantUse.nextNonce !== null) {
+        await tx.query('SELECT pg_advisory_xact_lock(hashtextextended($1, 0))', [`flofi.executor-nonce:${tenantId}:${String(g.chain)}:${String(g.session_address)}`]);
+        const highest = (await tx.query<{ n: string | null }>(`SELECT max(evm_next_nonce)::text AS n FROM credential_grants WHERE tenant_id = $1 AND chain = $2 AND session_address = $3`,
+          [tenantId, g.chain, g.session_address])).rows[0]?.n;
+        if (highest !== null && highest !== undefined && grantUse.nextNonce - BigInt(grantUse.calls) < BigInt(highest)) return { ok: false as const, code: 'SUBMISSION_NONCE_CONFLICT' };
+      }
       await tx.query(`UPDATE credential_grants SET calls_used = calls_used + $3, evm_next_nonce = coalesce($4, evm_next_nonce), version = version + 1
         WHERE tenant_id = $1 AND grant_id = $2`, [tenantId, step.grant_id, grantUse.calls, grantUse.nextNonce === null ? null : grantUse.nextNonce.toString()]);
       const row = (await tx.query(`UPDATE delegated_execution_steps SET state = 'SUBMISSION_PREPARED', submission = $4::jsonb
@@ -545,6 +563,12 @@ export function createPgDelegationStore(db: Database, tenantId: string) {
         detail: { step: stepIndex, hashes: (submission as { hashes?: unknown }).hashes ?? null } });
       return { ok: true as const, step: stepOf(row) };
     }),
+    /** BUILD-FLOFI-UNIVERSAL-SINGLE-AUTH-MAINNET-001: the next nonce any grant of this executor address prepared on `chain` (null: none yet). */
+    async sessionNextNonce(chain: string, sessionAddress: string): Promise<bigint | null> {
+      const n = (await db.query<{ n: string | null }>(`SELECT max(evm_next_nonce)::text AS n FROM credential_grants WHERE tenant_id = $1 AND chain = $2 AND session_address = $3`,
+        [tenantId, chain, sessionAddress])).rows[0]?.n;
+      return n === null || n === undefined ? null : BigInt(n);
+    },
     /** RESERVED → SPENT for what reconciliation proved spent; RELEASED for entries of steps that never submitted. */
     settleBudget: (executionId: string, spent: readonly { readonly stepIndex: number; readonly asset: string; readonly amount: bigint }[],
       release: readonly number[]) => db.transaction(async tx => {

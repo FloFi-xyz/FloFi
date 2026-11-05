@@ -11,14 +11,22 @@
 import { stepCapability, type CapabilityMode, type Mechanism, type TemplateNeed } from './capabilities.ts';
 import { domainDigest } from './canonical.ts';
 import type { Namespace, StepRequirement, WorkflowRequirement } from './steps.ts';
+import type { SerialWorkflowCall } from './workflow-grants.ts';
 
 export type EvmPairScope = { readonly tokenIn: string; readonly tokenOut: string; readonly perCallInputCap: string };
 /** BUILD-FLOFI-SINGLE-AUTH-WORKFLOW-UX-001: the Aave V3 market a grant may Supply to / Borrow from, per asset and per call (native units). */
 export type EvmAaveScope = { readonly pool: string; readonly supply: readonly { readonly asset: string; readonly perCallCap: string }[];
   readonly borrow: readonly { readonly asset: string; readonly perCallCap: string }[] };
 export type GrantScope =
-  | { readonly mechanism: 'EVM_ERC7710_METAMASK_V1_3'; readonly chain: string; readonly router: string; readonly pairs: readonly EvmPairScope[];
+  | { readonly mechanism: 'EVM_ERC7710_METAMASK_V1_3'; readonly kind?: undefined; readonly chain: string; readonly router: string; readonly pairs: readonly EvmPairScope[];
       readonly maxCalls: number; readonly validFrom: string; readonly expiresAt: string; readonly aave?: EvmAaveScope }
+  /**
+   * BUILD-FLOFI-UNIVERSAL-SINGLE-AUTH-MAINNET-001: a workflow grant (`workflow-grants.ts`) — exactly the calls of one workflow run on one chain,
+   * each usable once, signed by the owner's wallet as the run's single authorization. Never reusable by another workflow.
+   */
+  | { readonly mechanism: 'EVM_ERC7710_METAMASK_V1_3'; readonly kind: 'WORKFLOW'; readonly chain: string; readonly workflowRunId: string;
+      readonly calls: readonly SerialWorkflowCall[]; readonly steps: readonly { readonly stepIndex: number; readonly calls: readonly number[] }[];
+      readonly maxCalls: number; readonly validFrom: string; readonly expiresAt: string }
   | { readonly mechanism: 'SOLANA_SPL_DELEGATE_V1'; readonly chain: string;
       readonly accounts: readonly { readonly mint: string; readonly decimals: number; readonly tokenAccount: string; readonly amount: string }[];
       readonly validFrom: string; readonly expiresAt: string };
@@ -27,13 +35,19 @@ export type GrantState = 'PENDING_SIGNATURE' | 'ACTIVE' | 'REVOCATION_REQUESTED'
 export type GrantView = {
   readonly grantId: string; readonly credentialId: string; readonly walletNamespace: Namespace; readonly walletAddress: string;
   readonly chain: string; readonly mechanism: Mechanism; readonly state: GrantState; readonly scope: GrantScope; readonly scopeHash: string;
-  readonly sessionAddress: string; readonly commitment: string | null; readonly passkeyId: string; readonly verifiedAt: string | null;
+  /** The passkey a Credential grant is anchored to; null for a workflow grant (its authorization is the wallet signature itself). */
+  readonly sessionAddress: string; readonly commitment: string | null; readonly passkeyId: string | null; readonly verifiedAt: string | null;
   readonly callsUsed: number;
 };
+/** A reusable Credential (class) scope on EVM: pairs, router and per-call caps (never a workflow grant). */
+export type EvmClassScope = Extract<GrantScope, { readonly mechanism: 'EVM_ERC7710_METAMASK_V1_3'; readonly kind?: undefined }>;
+export const isEvmClassScope = (scope: GrantScope): scope is EvmClassScope => scope.mechanism === 'EVM_ERC7710_METAMASK_V1_3' && scope.kind !== 'WORKFLOW';
 export const scopeHash = (scope: GrantScope): string => domainDigest('flofi.credential-grant-scope.v1', scope);
 
 export type StepBinding = { readonly stepIndex: number; readonly credentialId: string; readonly grantId: string; readonly mechanism: Mechanism;
-  readonly chain: string; readonly walletAddress: string; readonly grantCommitment: string; readonly need: TemplateNeed };
+  readonly chain: string; readonly walletAddress: string; readonly grantCommitment: string; readonly need: TemplateNeed;
+  /** A workflow grant's step: `need` is the exact pinned call (never narrowed; a bound producer must have received at least that much). */
+  readonly exact?: true };
 export type GraphFailure = { readonly stepIndex: number; readonly code: string };
 /** On failure, `bindings` lists the steps that did resolve (for the owner's view only: a partial graph authorizes nothing). */
 export type AuthorityGraph = { readonly ok: true; readonly bindings: readonly StepBinding[] }
@@ -50,6 +64,8 @@ export function grantCoverage(grant: GrantView, step: StepRequirement, need: Tem
   if (now >= ms(grant.scope.expiresAt)) return 'CREDENTIAL_EXPIRED';
   if (grant.chain !== step.chain || grant.walletNamespace !== step.namespace) return 'CREDENTIAL_CHAIN_MISMATCH';
   const scope = grant.scope;
+  // A workflow grant pins one run's exact calls: it never serves another workflow (workflowGrantBindings resolves its own run).
+  if (scope.mechanism === 'EVM_ERC7710_METAMASK_V1_3' && scope.kind === 'WORKFLOW') return 'WORKFLOW_GRANT_NOT_REUSABLE';
   if (need.kind === 'EVM_AAVE_V3_SUPPLY' || need.kind === 'EVM_AAVE_V3_BORROW') {
     if (scope.mechanism !== 'EVM_ERC7710_METAMASK_V1_3') return 'CREDENTIAL_MECHANISM_MISMATCH';
     if (!scope.aave || scope.aave.pool !== need.pool) return 'CREDENTIAL_SCOPE_TARGET';
@@ -90,7 +106,7 @@ export function resolveAuthorityGraph(requirement: WorkflowRequirement, grants: 
     const capability = stepCapability(step, mode, mainnet);
     if (!capability.ok) { failures.push({ stepIndex: step.index, code: capability.code }); continue; }
     const pinned = preferred?.find(p => p.stepIndex === step.index);
-    const candidates = grants.filter(g => g.mechanism === capability.mechanism && (!pinned || g.grantId === pinned.grantId));
+    const candidates = grants.filter(g => g.mechanism === capability.mechanism && !('kind' in g.scope && g.scope.kind === 'WORKFLOW') && (!pinned || g.grantId === pinned.grantId));
     if (pinned && !candidates.length) { failures.push({ stepIndex: step.index, code: 'CREDENTIAL_NOT_FOUND' }); continue; }
     const reasons = candidates.map(g => ({ g, why: grantCoverage(g, step, capability.need, now) }));
     const covering = reasons.filter(r => r.why === null).map(r => r.g)
@@ -117,6 +133,7 @@ export function resolveAuthorityGraph(requirement: WorkflowRequirement, grants: 
     const mine = bindings.filter(b => b.grantId === grant.grantId);
     if (mine.length < 2) continue;
     const scope = grant.scope;
+    if (scope.mechanism === 'EVM_ERC7710_METAMASK_V1_3' && scope.kind === 'WORKFLOW') continue;
     const exceeded = scope.mechanism === 'EVM_ERC7710_METAMASK_V1_3' ? grant.callsUsed + mine.reduce((sum, b) => sum + callsOf(b.need), 0) > scope.maxCalls
       : scope.accounts.some(a => mine.reduce((sum, b) => b.need.kind === 'SOLANA_SPL_SPEND' && b.need.mint === a.mint ? sum + b.need.amount : sum, 0n) > BigInt(a.amount));
     if (exceeded) failures.push({ stepIndex: mine.at(-1)!.stepIndex, code: scope.mechanism === 'EVM_ERC7710_METAMASK_V1_3' ? 'CREDENTIAL_CALLS_EXHAUSTED' : 'CREDENTIAL_SCOPE_AMOUNT' });

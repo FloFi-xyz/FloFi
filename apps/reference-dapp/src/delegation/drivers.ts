@@ -29,6 +29,7 @@ import { MOCKED_SOLANA_LAMPORTS_PER_UNIT, MOCKED_SWAP_PROGRAM, MOCKED_SWAP_VAULT
 import type { GrantRecord } from './pg-store.ts';
 import type { StepPlan } from './policy.ts';
 import type { StepRequirement } from './steps.ts';
+import { isWorkflowScope, pinnedGroup, pinnedSwap } from './workflow-grants.ts';
 
 const D = erc7710, F = D.DELEGATION_FRAMEWORK_V1_3, S = splDelegation;
 const fail = (code: string): never => { throw new Error(code); };
@@ -63,9 +64,17 @@ async function balanceOf(t: ChainTransport, token: string, owner: string): Promi
   return BigInt(String(await t.rpc('eth_call', [{ to: token, data: D.selectorOf('balanceOf(address)') + addr(owner) }, 'latest'])).slice(0, 66));
 }
 /** The LogicalOrWrapper group of a call: the grant's first template (in `evmTemplates` order) that covers it. */
-function groupOf(grant: GrantRecord, kind: 'APPROVE' | 'SWAP', tokenIn: string, tokenOut?: string, spender?: string): number {
+function groupOf(grant: GrantRecord, kind: 'APPROVE' | 'SWAP', tokenIn: string, tokenOut?: string, spender?: string, amount?: bigint): number {
   return templateIndex(grant.scope, t => kind === 'APPROVE' ? t.kind === 'ERC20_APPROVE' && t.token === tokenIn && (spender === undefined || t.spender === spender)
+    && (t.amount === undefined || t.amount === amount)
     : t.kind === 'UNISWAP_V3_EXACT_INPUT_SINGLE' && t.tokenIn === tokenIn && t.tokenOut === tokenOut);
+}
+/**
+ * BUILD-FLOFI-UNIVERSAL-SINGLE-AUTH-MAINNET-001: a call's group — in a workflow grant, the index of the step's own pinned call that equals it
+ * byte for byte (anything else is GRANT_SCOPE_EXCEEDED, never re-planned); in a Credential grant, its class template.
+ */
+function groupFor(ctx: Pick<StepContext, 'grant' | 'step' | 'binding'>, call: { readonly target: string; readonly data: string }, classGroup: () => number): number {
+  return isWorkflowScope(ctx.grant.scope) ? pinnedGroup(ctx.grant.scope, ctx.step.index, ctx.binding.walletAddress, call) : classGroup();
 }
 /** The grant's own on-chain scope (the v1.3.0 enforcer model) admits these exact calls, in order — before anything is signed. */
 function authorizeEvmCalls(ctx: StepContext, prepared: Readonly<Record<string, unknown>>): string | null {
@@ -163,16 +172,31 @@ export const evmSwapDriver: StepDriver = {
     if (BigInt(String(await t.rpc('eth_chainId', []))) !== BigInt(profile.chainId)) fail('WRONG_PROVIDER_CHAIN');
     if (String(await t.rpc('eth_getCode', [owner, 'latest'])).toLowerCase() !== D.DELEGATOR_DESIGNATOR) fail('EVM_ACCOUNT_NOT_UPGRADED');
     if (await balanceOf(t, need.tokenIn, owner) < need.amountIn) fail('INSUFFICIENT_INPUT');
+    // BUILD-FLOFI-UNIVERSAL-SINGLE-AUTH-MAINNET-001: a workflow grant fixed the fee tier and the minimum output when the owner signed; the fresh
+    // quote must still reach that signed minimum (else nothing is sent: the router itself would revert on-chain).
+    const signedSwap = isWorkflowScope(ctx.grant.scope) ? pinnedSwap(ctx.grant.scope, ctx.step.index) ?? fail('GRANT_SCOPE_EXCEEDED') : null;
+    const fee = signedSwap ? signedSwap.fee : profile.fee;
     const raw = String(await t.rpc('eth_call', [{ to: profile.quoter, data: '0xc6a5026a' + addr(need.tokenIn) + addr(need.tokenOut) + word(need.amountIn)
-      + word(BigInt(profile.fee)) + word(0n) }, 'latest']));
+      + word(BigInt(fee)) + word(0n) }, 'latest']));
     const expected = BigInt(raw.slice(0, 66)), slippage = BigInt(ctx.step.slippageBps ?? 0);
     if (expected <= 0n) fail('QUOTE_INVALID');
-    const minimum = (expected * (10_000n - slippage) + 9_999n) / 10_000n;
-    const swapData = D.EXACT_INPUT_SINGLE_METHOD + word(BigInt(need.tokenIn)) + word(BigInt(need.tokenOut)) + word(BigInt(profile.fee)) + addr(owner)
+    let minimum = (expected * (10_000n - slippage) + 9_999n) / 10_000n;
+    if (signedSwap) {
+      minimum = BigInt(signedSwap.amountOutMinimum);
+      if (expected < minimum) fail('QUOTE_BELOW_SIGNED_MINIMUM');
+    }
+    const swapData = D.EXACT_INPUT_SINGLE_METHOD + word(BigInt(need.tokenIn)) + word(BigInt(need.tokenOut)) + word(BigInt(fee)) + addr(owner)
       + word(need.amountIn) + word(minimum) + word(0n);
+    // A Credential's approval is pinned on-chain to its pair's per-call cap; a workflow grant's to the step's exact input.
+    const pair = isWorkflowScope(ctx.grant.scope) || ctx.grant.scope.mechanism !== 'EVM_ERC7710_METAMASK_V1_3' ? null
+      : ctx.grant.scope.pairs.find(p => p.tokenIn === need.tokenIn && p.tokenOut === need.tokenOut) ?? fail('GRANT_SCOPE_EXCEEDED');
+    const approveAmount = pair ? BigInt(pair.perCallInputCap) : need.amountIn;
+    const approveData = D.APPROVE_METHOD + addr(need.router) + word(approveAmount);
     const calls: EvmCall[] = [
-      { target: need.tokenIn, data: D.APPROVE_METHOD + addr(need.router) + word(need.amountIn), group: groupOf(ctx.grant, 'APPROVE', need.tokenIn, undefined, need.router), method: 'approve' },
-      { target: need.router, data: swapData, group: groupOf(ctx.grant, 'SWAP', need.tokenIn, need.tokenOut), method: 'exactInputSingle' }];
+      { target: need.tokenIn, data: approveData, method: 'approve',
+        group: groupFor(ctx, { target: need.tokenIn, data: approveData }, () => groupOf(ctx.grant, 'APPROVE', need.tokenIn, undefined, need.router, approveAmount)) },
+      { target: need.router, data: swapData, method: 'exactInputSingle',
+        group: groupFor(ctx, { target: need.router, data: swapData }, () => groupOf(ctx.grant, 'SWAP', need.tokenIn, need.tokenOut)) }];
     const [inBefore, outBefore] = await Promise.all([balanceOf(t, need.tokenIn, owner), balanceOf(t, need.tokenOut, owner)]);
     const plan: StepPlan = { stepIndex: ctx.step.index, chain: ctx.step.chain, actionType: 'asset.swap.exact-input', adapterId: 'uniswap.v3',
       targets: [need.tokenIn, need.router], spend: [{ asset: evmAsset(ctx.step.chain, need.tokenIn), amount: need.amountIn }],
@@ -250,9 +274,11 @@ export const evmAaveDriver: StepDriver = {
       if (BigInt(state.balance) < need.amount) fail('SUPPLY_INSUFFICIENT_ASSET');
       const calls: EvmCall[] = [
         { target: need.asset, data: D.APPROVE_METHOD + addr(need.pool) + word(need.amount), method: 'approve',
-          group: templateIndex(ctx.grant.scope, x => x.kind === 'ERC20_APPROVE' && x.token === need.asset && x.spender === need.pool) },
+          group: groupFor(ctx, { target: need.asset, data: D.APPROVE_METHOD + addr(need.pool) + word(need.amount) },
+            () => templateIndex(ctx.grant.scope, x => x.kind === 'ERC20_APPROVE' && x.token === need.asset && x.spender === need.pool)) },
         { target: need.pool, data: D.AAVE_V3_SUPPLY_METHOD + addr(need.asset) + word(need.amount) + addr(owner) + word(0n), method: 'supply',
-          group: templateIndex(ctx.grant.scope, x => x.kind === 'AAVE_V3_SUPPLY' && x.asset === need.asset && x.pool === need.pool) }];
+          group: groupFor(ctx, { target: need.pool, data: D.AAVE_V3_SUPPLY_METHOD + addr(need.asset) + word(need.amount) + addr(owner) + word(0n) },
+            () => templateIndex(ctx.grant.scope, x => x.kind === 'AAVE_V3_SUPPLY' && x.asset === need.asset && x.pool === need.pool)) }];
       const plan: StepPlan = { ...base, actionType: 'supply', targets: [need.asset, need.pool], healthFactorAfter: null,
         simulationHash: domainDigest('flofi.delegated-step-simulation.v1', { calls, block: state.block, at: now }) };
       return { plan, prepared: json({ calls, before: { asset: state.balance, position: state.position, block: state.block } }) };
@@ -261,8 +287,9 @@ export const evmAaveDriver: StepDriver = {
     // health factor ≥ 2.0 before and after). Any of them stops the step before anything is signed.
     const state = await readBorrowState(rpc, reserve, owner, owner);
     const estimate = estimateBorrow(amount, state.borrow!, reserve);
-    const calls: EvmCall[] = [{ target: need.pool, data: D.AAVE_V3_BORROW_METHOD + addr(need.asset) + word(need.amount) + word(D.AAVE_V3_VARIABLE_RATE) + word(0n) + addr(owner),
-      method: 'borrow', group: templateIndex(ctx.grant.scope, x => x.kind === 'AAVE_V3_BORROW' && x.asset === need.asset && x.pool === need.pool) }];
+    const borrowData = D.AAVE_V3_BORROW_METHOD + addr(need.asset) + word(need.amount) + word(D.AAVE_V3_VARIABLE_RATE) + word(0n) + addr(owner);
+    const calls: EvmCall[] = [{ target: need.pool, data: borrowData, method: 'borrow',
+      group: groupFor(ctx, { target: need.pool, data: borrowData }, () => templateIndex(ctx.grant.scope, x => x.kind === 'AAVE_V3_BORROW' && x.asset === need.asset && x.pool === need.pool)) }];
     const plan: StepPlan = { ...base, actionType: 'borrow', targets: [need.pool], healthFactorAfter: wadDecimal(BigInt(estimate.healthFactorAfter)),
       simulationHash: domainDigest('flofi.delegated-step-simulation.v1', { calls, block: state.block, healthFactorAfter: estimate.healthFactorAfter, at: now }) };
     return { plan, prepared: json({ calls, before: { asset: state.balance, debt: state.borrow!.debt, healthFactor: state.borrow!.healthFactor, block: state.block },

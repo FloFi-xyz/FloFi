@@ -122,6 +122,8 @@ function GrantCard({ g, owner, busy, run }: { g: GrantView; owner: WorkflowOwner
       g.scope.aave.borrow.map(x => `< ${x.onChainCeiling} ${x.asset}`).join(', ') || '—')}</p>}
     <p>{g.scope.kind === 'EVM' ? t('Uniswap v3 swaps {0}; at most {1} calls ({2} used); recipient: this wallet only', g.scope.pairs.map(p => `${p.input} → ${p.output} ≤ ${p.perCallCap}`).join(', '),
       String(g.scope.maxCalls), String(g.callsUsed))
+      : g.scope.kind === 'EVM_WORKFLOW' ? t('Workflow authorization: exactly {0} calls of one workflow run (steps {1}), each usable once; nothing else', String(g.scope.calls),
+        g.scope.steps.map(x => String(x + 1)).join(', '))
       : t('Spend up to {0} from this wallet’s token account; recipient and program are checked by FloFi, not on-chain', g.scope.tokens.map(x => `${x.amount} ${x.symbol}`).join(', '))}</p>
     <p className="muted">{t('Expires {0}', new Date(g.expiresAt).toLocaleDateString())}{g.verifiedAt ? ` · ${t('verified {0}', new Date(g.verifiedAt).toLocaleString())}` : ''}</p>
     <div className="automation-row-actions">

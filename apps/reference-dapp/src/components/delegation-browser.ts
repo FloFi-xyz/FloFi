@@ -6,7 +6,8 @@
  *   passkeys       `navigator.credentials.create/get` (WebAuthn, ES256, user verification required). The authorization challenge is the
  *                  digest of the Universal Workflow Authorization envelope, so the passkey signs that authorization itself.
  *   EVM wallet     `eth_signTypedData_v4` of the Credential's EIP-712 Delegation (enrollment, once per grant) and the owner's own
- *                  `disableDelegation` self-call (revocation). Never anything per workflow or per execution.
+ *                  `disableDelegation` self-call (revocation); and (BUILD-FLOFI-UNIVERSAL-SINGLE-AUTH-MAINNET-001) a delegated workflow run's ONE
+ *                  authorization: one EIP-712 workflow grant per chain. Never anything per step or per execution.
  *   Solana wallet  `solana:signTransaction` of the Credential's delegation (or revocation) transaction.
  *
  * Nothing here holds a key or stores a credential (no localStorage, no cookies written).
@@ -57,6 +58,18 @@ const evmProvider = (): EvmProvider => chosenEvmProvider() ?? injected() ?? fail
 export async function signDelegation(address: string, typedData: unknown): Promise<string> {
   const signature = await evmProvider().request({ method: 'eth_signTypedData_v4', params: [address, JSON.stringify(typedData)] });
   return typeof signature === 'string' ? signature : fail('WALLET_SIGNATURE_INVALID');
+}
+/**
+ * BUILD-FLOFI-UNIVERSAL-SINGLE-AUTH-MAINNET-001: the run's ONE wallet authorization on one chain — the EIP-712 workflow grant, signed on that
+ * chain (wallets require the typed data's chainId to be the active chain, so the wallet is asked to switch first; the owner may refuse).
+ * The wallet shows the exact delegation; FloFi verifies the signature, the signer and the bytes on the server before anything runs.
+ */
+export async function signWorkflowGrant(address: string, chainId: number, typedData: unknown): Promise<string> {
+  const provider = evmProvider(), hex = '0x' + chainId.toString(16);
+  const current = await provider.request({ method: 'eth_chainId', params: [] });
+  if (typeof current !== 'string' || BigInt(current) !== BigInt(chainId)) await provider.request({ method: 'wallet_switchEthereumChain', params: [{ chainId: hex }] });
+  const signature = await provider.request({ method: 'eth_signTypedData_v4', params: [address, JSON.stringify(typedData)] });
+  return typeof signature === 'string' && /^0x[0-9a-fA-F]{130}$/.test(signature) ? signature : fail('WALLET_SIGNATURE_INVALID');
 }
 /** Credential revocation: the owner's own self-call `disableDelegation(delegation)`, sent by the owner's wallet. */
 export async function sendRevocation(payload: { from: string; to: string; data: string; chainId: number }): Promise<string> {

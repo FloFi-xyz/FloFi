@@ -27,7 +27,12 @@ export type StepCapability = { readonly ok: true; readonly mechanism: Mechanism;
   | { readonly ok: false; readonly code: string; readonly mechanism: Mechanism | null };
 
 const WSOL = 'So11111111111111111111111111111111111111112';
-const MAINNET = new Set(['eip155:1', 'eip155:8453', 'eip155:42161', 'solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp']);
+const MAINNET = new Set(['eip155:1', 'eip155:8453', 'eip155:42161', 'eip155:4663', 'solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp']);
+/**
+ * BUILD-FLOFI-UNIVERSAL-SINGLE-AUTH-MAINNET-001: Robinhood Chain has no MetaMask Delegation Framework v1.3.0 deployment (the framework's own
+ * deployment list names Ethereum, Base, Arbitrum One and others, not 4663) and no verified EIP-7702 support in FloFi's registries.
+ */
+const FRAMEWORK_NOT_DEPLOYED = new Set(['eip155:4663']);
 
 /**
  * The delegated execution capability of one step. `mainnet` lists the public mainnets this deployment opted into
@@ -41,6 +46,7 @@ export function stepCapability(step: StepRequirement, mode: CapabilityMode, main
     // LI.FI calldata is opaque (no fixed-offset recipient); direct Across depositV3 is designable but not compiled yet.
     return refuse(step.strategy.action === 'bridge' && step.strategy.routing === 'across' ? 'DELEGATION_TEMPLATE_NOT_IMPLEMENTED' : 'DELEGATED_TARGET_SCOPE_UNAVAILABLE');
   }
+  if (FRAMEWORK_NOT_DEPLOYED.has(step.chain)) return refuse('DELEGATION_FRAMEWORK_NOT_DEPLOYED');
   if (MAINNET.has(step.chain) && !(evm && mainnet.includes(step.chain))) return refuse('MAINNET_DELEGATION_DISABLED');
   // BUILD-FLOFI-SINGLE-AUTH-WORKFLOW-UX-001: Aave V3 Supply and variable-rate Borrow on an opted-in mainnet market.
   if (evm && (step.action === 'supply' || step.action === 'borrow')) {

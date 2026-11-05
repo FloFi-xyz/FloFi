@@ -252,8 +252,19 @@ export function decodeLogicalOrArgs(argsHex: string): { readonly groupIndex: num
  * target, the selector and every material calldata word, so the least restrictive group is still the intended permission.
  */
 export type CallTemplate =
-  | { readonly kind: 'ERC20_APPROVE'; readonly token: string; readonly spender: string }
-  | { readonly kind: 'UNISWAP_V3_EXACT_INPUT_SINGLE'; readonly router: string; readonly tokenIn: string; readonly tokenOut: string; readonly perCallInputCap: bigint }
+  /**
+   * `approve(spender, amount)`. BUILD-FLOFI-UNIVERSAL-SINGLE-AUTH-MAINNET-001: with `amount` the approved amount is pinned exactly (a Credential's
+   * swap approval is its pair's per-call cap), so a compromised session key can never grant an unlimited or larger allowance.
+   */
+  | { readonly kind: 'ERC20_APPROVE'; readonly token: string; readonly spender: string; readonly amount?: bigint }
+  /**
+   * BUILD-FLOFI-UNIVERSAL-SINGLE-AUTH-MAINNET-001: with `fee` the pool fee tier is pinned and `sqrtPriceLimitX96` must be 0, so a compromised
+   * session key cannot route a Credential's swap through another (thin) pool or a partial-fill price limit. The minimum output of a reusable
+   * Credential swap still cannot be pinned on-chain (it depends on the price at execution): that bound is the per-call input cap, and a
+   * workflow run uses an exact workflow grant (`compileWorkflowGrant`) whose signed calldata includes the minimum output.
+   */
+  | { readonly kind: 'UNISWAP_V3_EXACT_INPUT_SINGLE'; readonly router: string; readonly tokenIn: string; readonly tokenOut: string; readonly perCallInputCap: bigint;
+      readonly fee?: number }
   /**
    * BUILD-FLOFI-SINGLE-AUTH-WORKFLOW-UX-001: `Pool.supply(asset, amount, onBehalfOf = owner, referralCode = 0)` from the owner's account.
    * On-chain: target, selector, asset, beneficiary (the owner's own position), no referral, and at most `perCallCap` of the asset leaving the
@@ -280,8 +291,11 @@ export type GrantScope = {
 };
 const addressWord = (value: string) => concat(new Uint8Array(12), bytesOf(evmAddress(value)));
 export function templateGroup(template: CallTemplate, owner: string): Caveat[] {
-  if (template.kind === 'ERC20_APPROVE') return [terms.allowedTargets([template.token]), terms.allowedMethods([APPROVE_METHOD]),
-    terms.allowedCalldata(4, addressWord(template.spender))];
+  if (template.kind === 'ERC20_APPROVE') {
+    if (template.amount !== undefined && template.amount <= 0n) fail('ERC7710_TEMPLATE_INVALID');
+    return [terms.allowedTargets([template.token]), terms.allowedMethods([APPROVE_METHOD]),
+      terms.allowedCalldata(4, template.amount === undefined ? addressWord(template.spender) : concat(addressWord(template.spender), word(template.amount)))];
+  }
   if (template.kind === 'AAVE_V3_SUPPLY') {
     if (template.perCallCap <= 0n) fail('ERC7710_TEMPLATE_INVALID');
     // supply calldata: asset @4, amount @36, onBehalfOf @68, referralCode @100.
@@ -298,9 +312,11 @@ export function templateGroup(template: CallTemplate, owner: string): Caveat[] {
   }
   if (template.perCallInputCap <= 0n || evmAddress(template.tokenIn) === evmAddress(template.tokenOut)) fail('ERC7710_TEMPLATE_INVALID');
   // IV3SwapRouter.ExactInputSingleParams: tokenIn @4, tokenOut @36, fee @68, recipient @100, amountIn @132, amountOutMinimum @164, sqrtPriceLimitX96 @196.
-  return [terms.allowedTargets([template.router]), terms.allowedMethods([EXACT_INPUT_SINGLE_METHOD]), terms.allowedCalldata(4, addressWord(template.tokenIn)),
-    terms.allowedCalldata(36, addressWord(template.tokenOut)), terms.allowedCalldata(100, addressWord(owner)),
-    terms.erc20BalanceChange(true, template.tokenIn, owner, template.perCallInputCap)];
+  if (template.fee !== undefined && !UNISWAP_V3_FEES.includes(template.fee)) fail('ERC7710_TEMPLATE_INVALID');
+  return [terms.allowedTargets([template.router]), terms.allowedMethods([EXACT_INPUT_SINGLE_METHOD]),
+    ...template.fee === undefined ? [terms.allowedCalldata(4, addressWord(template.tokenIn)), terms.allowedCalldata(36, addressWord(template.tokenOut))]
+      : [terms.allowedCalldata(4, concat(addressWord(template.tokenIn), addressWord(template.tokenOut), word(BigInt(template.fee)))), terms.allowedCalldata(196, word(0n))],
+    terms.allowedCalldata(100, addressWord(owner)), terms.erc20BalanceChange(true, template.tokenIn, owner, template.perCallInputCap)];
 }
 /** The unsigned root delegation of a grant. Top-level caveats bind redeemer, validity, call count and zero native value. */
 export function compileGrant(scope: GrantScope): Omit<Delegation, 'signature'> {

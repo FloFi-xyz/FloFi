@@ -8,6 +8,23 @@ export const portugueseWorkflowRuns: Readonly<Record<string, string>> = {
   'Needs attention': 'Requer atenção', 'Ended': 'Encerrado', 'Expired': 'Expirado',
   'Swap': 'Trocar', 'Bridge': 'Transferir entre redes', 'Supply': 'Depositar', 'Borrow': 'Pedir emprestado', 'Repay': 'Reembolsar', 'Withdraw': 'Levantar',
   'Add liquidity': 'Adicionar liquidez', 'Transfer': 'Transferir', 'Lending composition': 'Composição de empréstimo',
+  // BUILD-FLOFI-UNIVERSAL-SINGLE-AUTH-MAINNET-001: one wallet authorization of exact workflow grants.
+  'Authorized once with your wallet': 'Autorizado uma vez com a sua carteira',
+  'Authorize the whole workflow once ({0} wallet signatures, one per network)': 'Autorizar o fluxo inteiro uma vez ({0} assinaturas da carteira, uma por rede)',
+  'One-time setup: your wallet must be a MetaMask smart account on each network (EIP-7702).': 'Configuração única: sua carteira precisa ser uma conta inteligente MetaMask em cada rede (EIP-7702).',
+  'Your wallet signs exactly these calls, once, on each network. FloFi can execute nothing else with this authorization, each call at most once, until it expires. Your wallet is not asked again.':
+    'Sua carteira assina exatamente estas chamadas, uma vez, em cada rede. A FloFi não pode executar mais nada com esta autorização, cada chamada no máximo uma vez, até ela expirar. Sua carteira não é solicitada de novo.',
+  'executor {0}': 'executor {0}', 'valid until {0}': 'válida até {0}',
+  'Sign once in my wallet': 'Assinar uma vez na minha carteira', 'Sign once in my wallet ({0} networks)': 'Assinar uma vez na minha carteira ({0} redes)',
+  'Approve exactly {0} {1} to the Aave V3 Pool': 'Aprovar exatamente {0} {1} para o Pool do Aave V3',
+  'Approve exactly {0} {1} to the Uniswap v3 router': 'Aprovar exatamente {0} {1} para o roteador do Uniswap v3',
+  'Swap exactly {0} {1} for at least {2} {3} (Uniswap v3, 0.05%)': 'Trocar exatamente {0} {1} por pelo menos {2} {3} (Uniswap v3, 0,05%)',
+  'Supply exactly {0} {1} to Aave V3 for this wallet': 'Depositar exatamente {0} {1} no Aave V3 para esta carteira',
+  'Borrow exactly {0} {1} from Aave V3 at the variable rate, for this wallet': 'Tomar emprestado exatamente {0} {1} do Aave V3 à taxa variável, para esta carteira',
+  'A step depends on an amount that cannot be fixed on chain when you sign (for example after a bridge).': 'Uma etapa depende de um valor que não pode ser fixado on-chain quando você assina (por exemplo, após uma ponte).',
+  'Solana steps cannot be authorized once yet: confirm each step in your wallet.': 'Etapas na Solana ainda não podem ser autorizadas de uma vez: confirme cada etapa na sua carteira.',
+  'This network has no verified delegation framework yet.': 'Esta rede ainda não tem um framework de delegação verificado.',
+  'Switch this wallet to a MetaMask smart account (one time, in MetaMask), then sign again.': 'Converta esta carteira em uma conta inteligente MetaMask (uma vez, no MetaMask) e assine de novo.',
   'Authorized once with your passkey': 'Autorizado uma vez com a sua passkey', 'You confirm each step in your wallet': 'Você confirma cada etapa na sua carteira',
   'Choose how to authorize this workflow. Each step starts only after the previous one is reconciled on chain.':
     'Escolha como autorizar este fluxo. Cada etapa só começa depois de a anterior ser reconciliada na rede.',

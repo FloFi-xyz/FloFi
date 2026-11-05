@@ -20,7 +20,7 @@ import { developerApprovalChanged } from '../developer/dispatch';
 import { applyApproval, claimApproval, openBrowserApproval, previewApproval, resumeApproval, shareApproval, viewApproval, workflowRunAuthorize, workflowRunCancel,
   workflowRunContinue, workflowRunResume, workflowRunReview, workflowRunStart, workflowRunStatus, type ApprovalPreview, type ApprovalView,
   type ApprovalSurface, type ClaimedProposal } from '../platform/index';
-import type { ReviewView } from '../delegation/views';
+import type { WalletWorkflowReviewView } from '../delegation/views';
 import { approvalSurface } from '../server/approval-surface';
 import { remoteApproval, remoteAutomationApproval, remoteAutomationRecovery } from '../server/automation-operation';
 import { currentWalletPrincipals } from '../server/session-principal';
@@ -117,7 +117,7 @@ export async function cancelWorkflowRunHandoff(approvalId: string): Promise<Resu
 /** The owner resumes a halted run whose stopped step submitted nothing. */
 export async function resumeWorkflowRunHandoff(approvalId: string): Promise<Result<ClaimedProposal>> { return runAction((s, w) => workflowRunResume(s, approvalId, w)); }
 /** The Universal Workflow Authorization Review of the run: the envelope the owner's passkey signs ONCE (delegated mode). */
-export async function reviewWorkflowRunAuthorization(approvalId: string): Promise<Result<ReviewView>> { return runAction((s, w) => workflowRunReview(s, approvalId, w)); }
+export async function reviewWorkflowRunAuthorization(approvalId: string): Promise<Result<WalletWorkflowReviewView>> { return runAction((s, w) => workflowRunReview(s, approvalId, w)); }
 /** The owner's ONE passkey signature for the whole workflow; the approval link is marked applied with it. */
 export async function authorizeWorkflowRunHandoff(secret: string, revision: number, assertion: unknown): Promise<Result<ClaimedProposal>> {
   return runAction((s, w) => workflowRunAuthorize(s, secret, w, revision, assertion));

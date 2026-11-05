@@ -41,9 +41,20 @@ describe('BUILD-AUTOMATION-002 on-chain ceiling against a compromised executor (
         + word(500n) + addr(recipient) + word(amountIn) + word(1n) + word(0n) });
       const attacker = '0x' + 'ee'.repeat(20);
       expect(await attack(0, { target: p.usdc, value: 0n, data: D.APPROVE_METHOD + addr(attacker) + word(10n ** 30n) })).toMatchObject({ status: 0, reason: 'AllowedCalldataEnforcer:invalid-calldata' });
-      expect(await attack(0, { target: p.usdc, value: 0n, data: D.APPROVE_METHOD + addr(p.router) + word(500_000_000n) })).toMatchObject({ status: 1 });
+      // BUILD-FLOFI-UNIVERSAL-SINGLE-AUTH-MAINNET-001: the approval amount is pinned to exactly the pair's per-call cap (never unlimited or larger).
+      expect(await attack(0, { target: p.usdc, value: 0n, data: D.APPROVE_METHOD + addr(p.router) + word(500_000_000n) })).toMatchObject({ status: 0,
+        reason: 'AllowedCalldataEnforcer:invalid-calldata' });
+      expect(await attack(0, { target: p.usdc, value: 0n, data: D.APPROVE_METHOD + addr(p.router) + word((1n << 256n) - 1n) })).toMatchObject({ status: 0,
+        reason: 'AllowedCalldataEnforcer:invalid-calldata' });
+      expect(await attack(0, { target: p.usdc, value: 0n, data: D.APPROVE_METHOD + addr(p.router) + word(100_000_000n) })).toMatchObject({ status: 1 });
+      // ... and the swap is pinned to the 0.05% pool with no price limit (no thin pool, no partial-fill limit).
+      const otherTier = swap(100_000_000n, h.evmOwner.address);
+      expect(await attack(1, { ...otherTier, data: otherTier.data.slice(0, 10 + 128) + word(3000n) + otherTier.data.slice(10 + 192) })).toMatchObject({ status: 0,
+        reason: 'AllowedCalldataEnforcer:invalid-calldata' });
+      expect(await attack(1, { ...otherTier, data: otherTier.data.slice(0, -64) + word(1n) })).toMatchObject({ status: 0, reason: 'AllowedCalldataEnforcer:invalid-calldata' });
       expect(await attack(1, swap(100_000_000n, attacker))).toMatchObject({ status: 0, reason: 'AllowedCalldataEnforcer:invalid-calldata' });
-      expect(await attack(1, swap(100_000_001n, h.evmOwner.address))).toMatchObject({ status: 0, reason: 'ERC20BalanceChangeEnforcer:exceeded-balance-decrease' });
+      // More input than the cap: the exact approval stops it first (the router cannot pull it: STF); the balance-change caveat is the second layer.
+      expect(await attack(1, swap(100_000_001n, h.evmOwner.address))).toMatchObject({ status: 0, reason: 'STF' });
       expect(await attack(1, swap(100_000_000n, h.evmOwner.address, '0x' + '12'.repeat(20)))).toMatchObject({ status: 0, reason: 'AllowedCalldataEnforcer:invalid-calldata' });
       expect(await attack(1, { target: p.usdc, value: 0n, data: D.selectorOf('transfer(address,uint256)') + addr(attacker) + word(1n) })).toMatchObject({ status: 0,
         reason: 'AllowedTargetsEnforcer:target-address-not-allowed' });
@@ -73,7 +84,7 @@ describe('BUILD-AUTOMATION-002 on-chain ceiling against a compromised executor (
       const grant = (await h.store.grantById(evmGrant.grantId))!, delegation = delegationOf(grant.grantPayload!.delegation), p = h.evm.control.profile;
       const send = async (n: bigint) => {
         const tx: erc7710.Eip1559 = { chainId: 84532n, nonce: n, maxPriorityFeePerGas: 1n, maxFeePerGas: 2_000_000_000n, gasLimit: 600_000n, to: F.delegationManager, value: 0n,
-          data: D.redeemCalldata(delegation, 0, { target: p.usdc, value: 0n, data: D.APPROVE_METHOD + addr(p.router) + word(1n) }) };
+          data: D.redeemCalldata(delegation, 0, { target: p.usdc, value: 0n, data: D.APPROVE_METHOD + addr(p.router) + word(100_000_000n) }) };
         const sig = await h.signer.signEvmDigest(grant.sessionKeyRef, D.bytesOf(D.eip1559SigningHash(tx)));
         return h.evm.control.receipt(await h.evm.rpc('eth_sendRawTransaction', [D.signedEip1559(tx, sig.yParity, sig.r, sig.s).raw]) as string)!;
       };

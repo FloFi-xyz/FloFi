@@ -5,10 +5,12 @@
  *
  *   CONFIRM_EACH_STEP               every step is an ordinary run of its own flow: a fresh simulation, the Review and the owner's wallet
  *                                   confirmation per step (a flow may ask for more, e.g. a token approval before a swap)
- *   DELEGATED_SINGLE_AUTHORIZATION  ONE passkey assertion over the Universal Workflow Authorization for the whole workflow, after the
- *                                   one-time enrollment of a Credential grant per chain (one wallet signature each, once). Available only when
- *                                   every step is delegation-capable, this deployment can sign delegated steps, and (for a known owner) every
- *                                   step resolves to an ACTIVE grant anchored to one passkey
+ *   DELEGATED_SINGLE_AUTHORIZATION  BUILD-FLOFI-UNIVERSAL-SINGLE-AUTH-MAINNET-001: ONE wallet authorization for the whole workflow — the
+ *                                   owner's EIP-712 signature of one exact workflow grant per EVM chain (`delegation/workflow-grants.ts`): exactly
+ *                                   this run's calls, each usable once, enforced on-chain. No reusable Credential and no passkey. One-time setup:
+ *                                   the wallet's own MetaMask smart-account (EIP-7702) upgrade. Available only when every step is
+ *                                   delegation-capable and EVM, every dependent amount has an on-chain guarantee on the same chain, and this
+ *                                   deployment can sign delegated steps
  *
  * One authorization is not one transaction and not zero gas: each step still submits its own transactions and pays its own network fees.
  * A workflow whose steps are only partly delegable runs in CONFIRM_EACH_STEP; modes are never mixed within one run.
@@ -32,13 +34,16 @@ export type AuthorizationPlan = {
   readonly stepCount: number;
   readonly confirmEachStep: { readonly available: boolean; readonly reason: string | null; readonly walletConfirmationsAtLeast: number;
     readonly walletNamespaces: readonly ('eip155' | 'solana')[] };
-  readonly delegatedSingleAuthorization: { readonly available: boolean; readonly reason: string | null; readonly passkeyAssertions: 1;
+  /** `walletSignatures`: one EIP-712 signature per EVM chain, all requested together before anything executes; `passkeyAssertions`: none. */
+  readonly delegatedSingleAuthorization: { readonly available: boolean; readonly reason: string | null; readonly walletSignatures: number; readonly passkeyAssertions: 0;
+    /** One-time setup per chain: the wallet's MetaMask EIP-7702 smart account (`active` is unknown until the wallet signs). */
     readonly enrollments: readonly { readonly chain: string; readonly network: string; readonly mechanism: Mechanism; readonly active: boolean | null }[];
     readonly ownerKnown: boolean };
   readonly recommended: 'DELEGATED_SINGLE_AUTHORIZATION' | 'CONFIRM_EACH_STEP' | null;
   readonly steps: readonly StepAuthorization[];
   readonly bindings: readonly { readonly step: number; readonly amountFrom: number; readonly confirmEachStep: 'RECONCILED_RECEIVED_AMOUNT';
-    readonly delegated: 'RECONCILED_RECEIVED_AMOUNT' }[];
+    /** Delegated: the producer's on-chain guaranteed output (a swap's signed minimum), fixed when the owner signs; any surplus stays in the wallet. */
+    readonly delegated: 'SIGNED_GUARANTEED_MINIMUM' }[];
   readonly notes: readonly string[];
 };
 /**
@@ -60,7 +65,8 @@ export function authorizationPlan(workflow: WorkflowComposition, gates: Pick<Gat
   const perStep = gates.supportedByCode.steps;
   const req = requirementOf(workflow);
   const mode: CapabilityMode = delegation?.mode ?? 'PRODUCTION', mainnet = delegation?.mainnetChains ?? [];
-  const graph = req.ok && owner ? resolveAuthorityGraph(req.value, owner.grants, mode, owner.now, undefined, mainnet) : null;
+  // Workflow grants are compiled per run at authorization: no owner grant has to exist beforehand.
+  const graph = null as null | ReturnType<typeof resolveAuthorityGraph>;
   const steps: StepAuthorization[] = workflow.steps.map((c, index) => {
     const planStep = gates.plan.steps[index], facts = perStep?.[index];
     const ownerExecution = facts ? { supported: facts.execute, enabled: facts.deploymentEnabled, reason: facts.reason }
@@ -70,7 +76,7 @@ export function authorizationPlan(workflow: WorkflowComposition, gates: Pick<Gat
     const bound = graph?.bindings.find(b => b.stepIndex === index) ?? null, failure = graph && !graph.ok ? graph.failures.find(f => f.stepIndex === index) ?? null : null;
     return { index, action: c.strategy.action, network: planStep?.network ?? '', flow: planStep?.flow ?? null, ownerExecution,
       delegation: { capable: capability?.ok === true, mechanism: capability ? capability.mechanism : null, code: capability ? capability.ok ? null : capability.code
-        : req.ok ? null : req.code, grantId: bound?.grantId ?? null, coverage: owner ? failure?.code ?? (bound ? null : 'DELEGATED_AUTHORITY_UNAVAILABLE') : null } };
+        : req.ok ? null : req.code, grantId: bound?.grantId ?? null, coverage: failure?.code ?? null } };
   });
   // A sequence reports each mode on its own (a delegated-only workflow is supported by code overall, yet not in confirm mode).
   const runsOff = gates.enabledByDeployment.reason === 'WORKFLOW_RUNS_NOT_ENABLED' ? 'WORKFLOW_RUNS_NOT_ENABLED' : null;
@@ -78,26 +84,32 @@ export function authorizationPlan(workflow: WorkflowComposition, gates: Pick<Gat
   const confirmReason = modes ? runsOff ?? modes.confirmEachStep ?? gates.enabledByPolicy.reason
     : gates.supportedByCode.reason ?? gates.enabledByDeployment.reason ?? gates.enabledByPolicy.reason;
   const namespaces = [...new Set(steps.map(s => s.network.startsWith('solana') ? 'solana' as const : 'eip155' as const))].sort();
-  // Every distinct chain × mechanism a delegated run needs a grant for (one wallet signature each, once, in Credentials).
+  // Every distinct chain a delegated run signs one workflow grant on (one-time setup there: the MetaMask EIP-7702 smart account).
   const enrollments = req.ok ? [...new Map(req.value.steps.flatMap(s => {
     const c = stepCapability(s, mode, mainnet);
-    return c.mechanism ? [[`${s.chain}|${c.mechanism}`, { chain: s.chain, network: NETWORKS[s.network].label, mechanism: c.mechanism,
-      active: owner ? steps[s.index]!.delegation.grantId !== null : null }]] as const : [];
+    return c.mechanism ? [[`${s.chain}|${c.mechanism}`, { chain: s.chain, network: NETWORKS[s.network].label, mechanism: c.mechanism, active: null }]] as const : [];
   })).values()] : [];
   const notCapable = steps.find(s => !s.delegation.capable);
-  const passkeys = graph?.ok && owner ? new Set(graph.bindings.map(b => owner.grants.find(g => g.grantId === b.grantId)?.passkeyId)).size : null;
+  // A dependent amount must have an on-chain guarantee on its own chain (a swap's signed minimum or a borrow's exact amount), never an estimate.
+  const inexact = req.ok ? req.value.bindings.find(b => {
+    const producer = req.value.steps[b.amountFrom], consumer = req.value.steps[b.step];
+    return !producer || !consumer || producer.chain !== consumer.chain || !['swap', 'borrow'].includes(producer.action) || consumer.action === 'borrow';
+  }) : undefined;
+  const solana = req.ok && req.value.steps.some(s => s.namespace !== 'eip155');
   const delegatedReason = runsOff ?? (!delegation ? 'DELEGATION_NOT_ENABLED' : delegation.unavailable) ?? (notCapable ? notCapable.delegation.code ?? 'DELEGATED_AUTHORITY_UNAVAILABLE'
-    : gates.enabledByPolicy.reason ?? (graph && !graph.ok ? 'CREDENTIAL_ENROLLMENT_REQUIRED' : passkeys !== null && passkeys > 1 ? 'CREDENTIALS_USE_DIFFERENT_PASSKEYS' : null));
+    : solana ? 'WORKFLOW_GRANT_NAMESPACE_UNSUPPORTED' : inexact ? 'WORKFLOW_BINDING_NOT_EXACT' : gates.enabledByPolicy.reason ?? null);
   const bindingCodes = workflow.bindings.map(b => ({ step: b.step, amountFrom: b.amountFrom, confirmEachStep: 'RECONCILED_RECEIVED_AMOUNT' as const,
-    delegated: 'RECONCILED_RECEIVED_AMOUNT' as const }));
+    delegated: 'SIGNED_GUARANTEED_MINIMUM' as const }));
   const confirmAvailable = confirmReason === null, delegatedAvailable = delegatedReason === null;
   const notes = ['One authorization is not one transaction: every step still submits its own transactions and pays its own network fees.',
     'Each step starts only after the previous step reconciled on chain.'];
   if (namespaces.length > 1) notes.push('This workflow uses an EVM wallet and a Solana wallet: both must be proven before it starts.');
-  if (bindingCodes.length) notes.push('A dependent step spends what an earlier step actually delivered (after reconciliation), capped by its own amount.');
+  if (bindingCodes.length) notes.push('Confirm each step: a dependent step spends what an earlier step actually delivered (after reconciliation), capped by its own amount. '
+    + 'Authorize once: it spends the earlier step\'s signed guaranteed minimum, fixed when you sign; anything received above it stays in your wallet.');
   return { stepCount: workflow.steps.length,
     confirmEachStep: { available: confirmAvailable, reason: confirmReason, walletConfirmationsAtLeast: workflow.steps.length, walletNamespaces: namespaces },
-    delegatedSingleAuthorization: { available: delegatedAvailable, reason: delegatedReason, passkeyAssertions: 1, enrollments, ownerKnown: owner !== undefined },
+    delegatedSingleAuthorization: { available: delegatedAvailable, reason: delegatedReason, walletSignatures: Math.max(1, enrollments.length), passkeyAssertions: 0, enrollments,
+      ownerKnown: owner !== undefined },
     recommended: delegatedAvailable && owner ? 'DELEGATED_SINGLE_AUTHORIZATION' : confirmAvailable ? 'CONFIRM_EACH_STEP' : delegatedAvailable ? 'DELEGATED_SINGLE_AUTHORIZATION' : null,
     steps, bindings: bindingCodes, notes };
 }

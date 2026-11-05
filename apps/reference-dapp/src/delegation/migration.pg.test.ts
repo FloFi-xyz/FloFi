@@ -105,7 +105,7 @@ describe('BUILD-AUTOMATION-002 migration 0011', () => {
       await t.db.query(`INSERT INTO delegated_authorization_revisions (tenant_id, authorization_id, revision, owner_namespace, owner_account, state, strategy, workflow_hash, manifest, manifest_hash)
         VALUES ('default', $1, 1, 'eip155', $2, 'PENDING_SIGNATURE', '{}', $3, '{}', $3)`, [auth, OWNER, '0x' + 'd'.repeat(64)]);
       // ACTIVE needs a signature; a revoked lineage is terminal.
-      await expect(t.db.query(`UPDATE delegated_authorization_revisions SET state = 'ACTIVE' WHERE authorization_id = $1`, [auth])).rejects.toThrow(/delegated_authorization_revisions_check/);
+      await expect(t.db.query(`UPDATE delegated_authorization_revisions SET state = 'ACTIVE' WHERE authorization_id = $1`, [auth])).rejects.toThrow(/delegated_authorization_revisions_signed/);
       const execution = id('dex');
       await t.db.query(`INSERT INTO delegated_executions (tenant_id, execution_id, authorization_id, revision, owner_namespace, owner_account, rule_id, occurrence_id, state, workflow_hash,
         manifest_hash, step_count) VALUES ('default', $1, $2, 1, 'eip155', $3, $4, $5, 'QUEUED', $6, $6, 1)`, [execution, auth, OWNER, rule, occurrence, '0x' + 'd'.repeat(64)]);

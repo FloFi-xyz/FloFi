@@ -13,7 +13,8 @@
  */
 import { createHash } from 'node:crypto';
 import { erc7710, fromBase64, parseTransaction, splDelegation, toBase64, verifyEd25519, base58Encode } from '@defi-workflow-engine/reference-compiler';
-import type { GrantScope } from './authority.ts';
+import { isEvmClassScope, type EvmClassScope, type GrantScope } from './authority.ts';
+import { compileScope, isWorkflowScope } from './workflow-grants.ts';
 import type { Mechanism } from './capabilities.ts';
 import { domainDigest } from './canonical.ts';
 import type { ChainTransport } from './chains.ts';
@@ -50,12 +51,15 @@ export function passkeyAnchor(input: { readonly owner: string; readonly grantId:
 const chainIdOf = (chain: string) => { const m = /^eip155:([1-9][0-9]{0,18})$/.exec(chain); return m ? Number(m[1]) : fail('DELEGATION_CHAIN_INVALID'); };
 const seconds = (iso: string) => BigInt(Math.floor(Date.parse(iso) / 1000));
 /**
- * The grant's call templates, in their LogicalOrWrapper group order: swap approvals (spender: the router), swaps, then (BUILD-FLOFI-SINGLE-
+ * The grant's call templates, in their LogicalOrWrapper group order: swap approvals (spender: the router, one per pair), swaps, then (BUILD-FLOFI-SINGLE-
  * AUTH-WORKFLOW-UX-001) Aave approvals (spender: the Pool), supplies and borrows. Drivers find a call's group in this same list.
  */
-export function evmTemplates(scope: Extract<GrantScope, { mechanism: 'EVM_ERC7710_METAMASK_V1_3' }>): erc7710.CallTemplate[] {
-  const approvals = [...new Set(scope.pairs.map(p => p.tokenIn))].map(token => ({ kind: 'ERC20_APPROVE' as const, token, spender: scope.router }));
-  const swaps = scope.pairs.map(p => ({ kind: 'UNISWAP_V3_EXACT_INPUT_SINGLE' as const, router: scope.router, tokenIn: p.tokenIn, tokenOut: p.tokenOut, perCallInputCap: BigInt(p.perCallInputCap) }));
+export function evmTemplates(scope: EvmClassScope): erc7710.CallTemplate[] {
+  // BUILD-FLOFI-UNIVERSAL-SINGLE-AUTH-MAINNET-001: one approval per pair, pinned to exactly that pair's per-call cap; swaps pinned to the 0.05%
+  // tier with no price limit (the only tier FloFi's delegated swaps use).
+  const approvals = scope.pairs.map(p => ({ kind: 'ERC20_APPROVE' as const, token: p.tokenIn, spender: scope.router, amount: BigInt(p.perCallInputCap) }));
+  const swaps = scope.pairs.map(p => ({ kind: 'UNISWAP_V3_EXACT_INPUT_SINGLE' as const, router: scope.router, tokenIn: p.tokenIn, tokenOut: p.tokenOut,
+    perCallInputCap: BigInt(p.perCallInputCap), fee: 500 }));
   const aave = scope.aave;
   if (!aave) return [...approvals, ...swaps];
   const aaveApprovals = [...new Set(aave.supply.map(x => x.asset))].map(token => ({ kind: 'ERC20_APPROVE' as const, token, spender: aave.pool }));
@@ -65,7 +69,7 @@ export function evmTemplates(scope: Extract<GrantScope, { mechanism: 'EVM_ERC771
 }
 /** The group index of the first template `match` accepts, or GRANT_SCOPE_EXCEEDED (no template of the grant covers that call). */
 export function templateIndex(scope: GrantScope, match: (t: erc7710.CallTemplate) => boolean): number {
-  if (scope.mechanism !== 'EVM_ERC7710_METAMASK_V1_3') return fail('DRIVER_MECHANISM_MISMATCH');
+  if (!isEvmClassScope(scope)) return fail('DRIVER_MECHANISM_MISMATCH');
   const index = evmTemplates(scope).findIndex(match);
   return index < 0 ? fail('GRANT_SCOPE_EXCEEDED') : index;
 }
@@ -91,6 +95,13 @@ export const evmAdapter: AuthorityAdapter = {
     const scope = input.scope;
     if (scope.mechanism !== 'EVM_ERC7710_METAMASK_V1_3' || scope.chain !== input.chain) return fail('CREDENTIAL_SCOPE_INVALID');
     const chainId = chainIdOf(input.chain);
+    // BUILD-FLOFI-UNIVERSAL-SINGLE-AUTH-MAINNET-001: a workflow grant pins its run's exact calls (the salt is its own random anchor).
+    if (isWorkflowScope(scope)) {
+      const delegation = compileScope(scope, input.walletAddress, input.sessionAddress, BigInt(input.anchor));
+      return { kind: 'EVM_EIP712_WORKFLOW_GRANT', chainId, typedData: D.delegationTypedData(chainId, delegation), delegation: serializeDelegation(delegation),
+        digest: D.delegationDigest(chainId, delegation), delegationHash: D.delegationHash(delegation),
+        requires: { account: 'METAMASK_EIP7702_SMART_ACCOUNT', implementation: F.eip7702StatelessDeleGator, delegationManager: F.delegationManager, frameworkVersion: F.version } };
+    }
     // Strictly-after/strictly-before bounds (TimestampEnforcer): usable from validFrom to expiresAt.
     const delegation = D.compileGrant({ chainId, owner: input.walletAddress, session: input.sessionAddress, validAfter: seconds(scope.validFrom) - 1n,
       validBefore: seconds(scope.expiresAt), maxCalls: BigInt(scope.maxCalls), templates: evmTemplates(scope), salt: BigInt(input.anchor) });

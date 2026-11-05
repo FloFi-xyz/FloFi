@@ -114,6 +114,7 @@ export const portugueseDelegation: Readonly<Record<string, string>> = {
     'Registe primeiro uma chave de acesso (Chaves de acesso). Cada Credencial fica associada à chave de acesso que vai autorizar os seus fluxos.',
   'Credential {0} on {1}': 'Credencial {0} na {1}', 'MetaMask delegation (ERC-7710)': 'Delegação MetaMask (ERC-7710)', 'SPL token delegation': 'Delegação de token SPL',
   'Uniswap v3 swaps {0}; at most {1} calls ({2} used); recipient: this wallet only': 'Trocas Uniswap v3 {0}; no máximo {1} chamadas ({2} usadas); destinatário: só esta carteira',
+  'Workflow authorization: exactly {0} calls of one workflow run (steps {1}), each usable once; nothing else': 'Autorização do fluxo: exatamente {0} chamadas de uma execução do fluxo (etapas {1}), cada uma utilizável uma vez; nada além disso',
   'Spend up to {0} from this wallet’s token account; recipient and program are checked by FloFi, not on-chain':
     'Gastar até {0} da conta de token desta carteira; o destinatário e o programa são verificados pelo FloFi, não on-chain',
   'Expires {0}': 'Expira a {0}', 'verified {0}': 'verificada a {0}', 'Verified on-chain.': 'Verificada on-chain.', 'Verify again': 'Verificar de novo',

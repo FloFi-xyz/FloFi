@@ -166,7 +166,22 @@ export type UniversalWorkflowAuthorization = {
   readonly credentials: readonly Omit<ManifestCredential, 'walletAddress'>[];
   readonly chains: readonly string[]; readonly actions: readonly string[];
   readonly validFrom: string; readonly expiresAt: string; readonly passkeyId: string;
+  /**
+   * BUILD-FLOFI-UNIVERSAL-SINGLE-AUTH-MAINNET-001: absent for the passkey envelope above. WALLET_WORKFLOW: no passkey (`passkeyId` is '');
+   * the owner's authorization is the wallet signature of every workflow grant the envelope's `credentials` commit to (each grant's own
+   * delegation hash), verified on the grants themselves.
+   */
+  readonly kind?: 'WALLET_WORKFLOW';
 };
+/** BUILD-FLOFI-UNIVERSAL-SINGLE-AUTH-MAINNET-001: the envelope of a run authorized by wallet-signed workflow grants (no passkey). */
+export function walletWorkflowAuthorization(m: DelegatedAuthorizationManifest, input: { readonly origin: string; readonly tenant: string; readonly nonce: string }):
+  UniversalWorkflowAuthorization {
+  if (!/^[0-9a-f]{32}$/.test(input.nonce)) fail('AUTHORIZATION_NONCE_INVALID');
+  return { type: 'flofi.universal-workflow-authorization', version: 1, kind: 'WALLET_WORKFLOW', environment: { origin: input.origin, rpId: '', tenant: input.tenant },
+    owner: m.owner, authorizationId: m.authorizationId, revision: m.revision, nonce: input.nonce, workflowHash: m.workflow.workflowHash,
+    manifestHash: manifestHash(m), credentials: credentialCommitments(m), chains: m.chains, actions: m.actions,
+    validFrom: m.validFrom, expiresAt: m.expiresAt, passkeyId: '' };
+}
 export function universalAuthorization(m: DelegatedAuthorizationManifest, input: { readonly origin: string; readonly rpId: string; readonly tenant: string;
   readonly nonce: string; readonly passkeyId: string }): UniversalWorkflowAuthorization {
   if (!/^[0-9a-f]{32}$/.test(input.nonce)) fail('AUTHORIZATION_NONCE_INVALID');

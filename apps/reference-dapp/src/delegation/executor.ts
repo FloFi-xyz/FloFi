@@ -28,6 +28,7 @@ import type { AutomationStore } from '../automations/store.ts';
 import { verifyAssertion } from '../passkeys/webauthn.ts';
 import { ADAPTERS, delegationOf, passkeyAnchor } from './adapters.ts';
 import { resolveAuthorityGraph, type StepBinding } from './authority.ts';
+import { compileScope, isWorkflowScope, workflowGrantBindings } from './workflow-grants.ts';
 import { digestBytes } from './canonical.ts';
 import type { ChainTransport } from './chains.ts';
 import type { DelegationConfig } from './config.ts';
@@ -56,7 +57,9 @@ export type ExecutorDeps = {
   readonly workflowRuns?: { readonly byId: (runId: string) => Promise<DelegatedRunSource | null> };
 };
 /** The source's own facts every pass re-checks against the signed revision (the workflow it binds, its strategy and owner). */
-type SourceFacts = { readonly owner: Owner; readonly strategy: unknown; readonly workflowHash: string | null };
+type SourceFacts = { readonly owner: Owner; readonly strategy: unknown; readonly workflowHash: string | null;
+  /** BUILD-FLOFI-UNIVERSAL-SINGLE-AUTH-MAINNET-001: a run source's id (workflow grants must pin exactly this run). */
+  readonly workflowRunId?: string };
 export type ExecutionOutcome = { readonly executionId: string | null; readonly state: ExecutionState | 'SKIPPED'; readonly code: string | null; readonly retryMs: number | null };
 type Chain = { readonly requirement: WorkflowRequirement; readonly manifest: DelegatedAuthorizationManifest; readonly bindings: readonly StepBinding[];
   readonly grants: ReadonlyMap<string, GrantRecord> };
@@ -85,7 +88,10 @@ export function ownCallsByGrant(steps: readonly Pick<StepRecord, 'grantId' | 'su
 export const transientSimulation = (code: string): boolean => code === 'DELEGATION_RPC_UNAVAILABLE' || /_REORG$/.test(code) || /RATE_LIMITED$/.test(code);
 async function verifyAuthorityChain(deps: ExecutorDeps, source: SourceFacts, revision: RevisionRecord, executionId: string | null = null): Promise<{ ok: true; chain: Chain } | { ok: false; code: string }> {
   const now = deps.now(), m = revision.manifest;
-  if (revision.state !== 'ACTIVE' || !revision.envelope || !revision.assertion || !revision.passkeyId) return { ok: false, code: 'AUTHORIZATION_NOT_ACTIVE' };
+  if (revision.state !== 'ACTIVE' || !revision.envelope || !revision.assertion) return { ok: false, code: 'AUTHORIZATION_NOT_ACTIVE' };
+  // BUILD-FLOFI-UNIVERSAL-SINGLE-AUTH-MAINNET-001: a run authorized by wallet-signed workflow grants (no passkey) has its own chain check.
+  if (revision.envelope.kind === 'WALLET_WORKFLOW') return verifyWalletWorkflowChain(deps, source, revision, now);
+  if (!revision.passkeyId) return { ok: false, code: 'AUTHORIZATION_NOT_ACTIVE' };
   if (source.workflowHash === null || source.workflowHash !== revision.workflowHash) return { ok: false, code: 'AUTHORIZATION_WORKFLOW_MISMATCH' };
   const req = workflowRequirement(source.strategy, revision.workflowHash);
   if (!req.ok) return { ok: false, code: req.code === 'STRATEGY_WORKFLOW_HASH_MISMATCH' ? 'AUTHORIZATION_WORKFLOW_MISMATCH' : req.code };
@@ -122,6 +128,51 @@ async function verifyAuthorityChain(deps: ExecutorDeps, source: SourceFacts, rev
     deps.config.mode, now.getTime(), m.credentials, deps.config.mainnetChains);
   if (!graph.ok) return { ok: false, code: graph.failures[0]!.code };
   // Read-only on-chain re-verification of every grant before anything is reserved (external revocation, expiry, account change).
+  for (const g of grants.values()) {
+    const transport = deps.transport(g.chain);
+    if (!transport) return { ok: false, code: 'DELEGATION_CHAIN_UNAVAILABLE' };
+    const state = await ADAPTERS[g.mechanism].reconcileAuthorityState(g, transport, now);
+    if (state.state !== 'ACTIVE') { await deps.store.reverify(g.grantId, state, now).catch(() => false); return { ok: false, code: `CREDENTIAL_${state.state}` }; }
+  }
+  return { ok: true, chain: { requirement: req.value, manifest: m, bindings: graph.bindings, grants } };
+}
+/**
+ * BUILD-FLOFI-UNIVERSAL-SINGLE-AUTH-MAINNET-001: the authority chain of a run authorized by wallet-signed workflow grants. The revision binds
+ * the workflow and manifest (envelope digest); every grant the manifest names is this owner's, pins exactly this run, carries a delegation
+ * that recompiles from its stored scope byte for byte, is signed by the run's wallet, and expresses exactly the workflow
+ * (`workflowGrantBindings` → `workflowScopeProblem`); then every grant re-verifies read-only on its chain (not disabled, not expired, the
+ * account still the MetaMask smart account).
+ */
+async function verifyWalletWorkflowChain(deps: ExecutorDeps, source: SourceFacts, revision: RevisionRecord, now: Date): Promise<{ ok: true; chain: Chain } | { ok: false; code: string }> {
+  const m = revision.manifest, envelope = revision.envelope!;
+  if (source.workflowHash === null || source.workflowHash !== revision.workflowHash || !source.workflowRunId) return { ok: false, code: 'AUTHORIZATION_WORKFLOW_MISMATCH' };
+  const req = workflowRequirement(source.strategy, revision.workflowHash);
+  if (!req.ok) return { ok: false, code: req.code === 'STRATEGY_WORKFLOW_HASH_MISMATCH' ? 'AUTHORIZATION_WORKFLOW_MISMATCH' : req.code };
+  if (manifestHash(m) !== revision.manifestHash || m.revision !== revision.revision || m.authorizationId !== revision.authorizationId) return { ok: false, code: 'MANIFEST_INTEGRITY' };
+  const problem = manifestProblem(m, req.value);
+  if (problem) return { ok: false, code: problem };
+  if (m.owner !== `${source.owner.namespace}:${source.owner.address}`) return { ok: false, code: 'AUTHORIZATION_OWNER_MISMATCH' };
+  if (authorizationDigest(envelope) !== revision.envelopeDigest || envelope.manifestHash !== revision.manifestHash || envelope.workflowHash !== revision.workflowHash
+    || envelope.environment.tenant !== deps.config.tenantId || envelope.owner !== m.owner || !sameArtifact(envelope.credentials, credentialCommitments(m))
+    || (revision.assertion as { kind?: unknown }).kind !== 'WALLET_WORKFLOW') return { ok: false, code: 'AUTHORIZATION_ENVELOPE_MISMATCH' };
+  const grants = new Map<string, GrantRecord>();
+  for (const c of m.credentials) {
+    const g = grants.get(c.grantId) ?? await deps.store.grantById(c.grantId);
+    if (!g || g.owner.namespace !== source.owner.namespace || g.owner.address !== source.owner.address) return { ok: false, code: 'CREDENTIAL_NOT_FOUND' };
+    if (g.commitment !== c.grantCommitment || g.walletAddress !== c.walletAddress) return { ok: false, code: 'GRANT_COMMITMENT_MISMATCH' };
+    if (!isWorkflowScope(g.scope) || g.scope.workflowRunId !== source.workflowRunId || g.passkeyId !== null) return { ok: false, code: 'WORKFLOW_GRANT_SCOPE_INVALID' };
+    try {
+      const d = delegationOf(g.grantPayload?.delegation), chainId = Number(g.chain.slice('eip155:'.length));
+      const compiled = compileScope(g.scope, g.walletAddress, g.sessionAddress, d.salt);
+      if (erc7710.delegationHash(compiled) !== g.commitment || erc7710.delegationHash(d) !== g.commitment
+        || erc7710.recoverDigestSigner(erc7710.delegationDigest(chainId, d), d.signature) !== g.walletAddress) return { ok: false, code: 'GRANT_COMMITMENT_MISMATCH' };
+    } catch { return { ok: false, code: 'GRANT_COMMITMENT_MISMATCH' }; }
+    grants.set(g.grantId, g);
+  }
+  const graph = workflowGrantBindings(req.value, [...grants.values()], deps.config.mode, deps.config.mainnetChains, now.getTime());
+  if (!graph.ok) return { ok: false, code: graph.code };
+  // The stored manifest pinned each step to its grant: the graph must agree with it exactly (never a re-choice).
+  if (graph.bindings.some(b => !m.credentials.some(c => c.stepIndex === b.stepIndex && c.grantId === b.grantId))) return { ok: false, code: 'GRANT_COMMITMENT_MISMATCH' };
   for (const g of grants.values()) {
     const transport = deps.transport(g.chain);
     if (!transport) return { ok: false, code: 'DELEGATION_CHAIN_UNAVAILABLE' };
@@ -179,7 +230,7 @@ export async function executeWorkflowRun(deps: ExecutorDeps, runId: string, auth
   if (!revision) return { executionId: null, state: 'SKIPPED', code: 'AUTHORIZATION_NOT_FOUND', retryMs: null };
   const e = await deps.store.ensureRunExecution({ executionId: deps.newId('dex'), authorizationId, revision: revisionNumber, owner: run.owner, workflowRunId: runId,
     workflowHash: revision.workflowHash, manifestHash: revision.manifestHash, stepCount: revision.manifest.workflow.stepCount }, deps.now());
-  return drive(deps, e, revision, { owner: run.owner, strategy: run.strategy, workflowHash: run.workflowHash });
+  return drive(deps, e, revision, { owner: run.owner, strategy: run.strategy, workflowHash: run.workflowHash, workflowRunId: runId });
 }
 
 async function drive(deps: ExecutorDeps, start: ExecutionRecord, revision: RevisionRecord, source: SourceFacts): Promise<ExecutionOutcome> {
@@ -278,7 +329,10 @@ async function run(deps: ExecutorDeps, start: ExecutionRecord, verified: Awaited
       if (violation) return stopBefore(k, violation);
       if (!await deps.store.stepTransition(e.executionId, k, ['SIMULATED'], 'POLICY_VERIFIED', {})) return outcome(PENDING_RETRY_MS);
       let signed: Awaited<ReturnType<StepDriver['sign']>>;
-      try { signed = await driver.sign(ctx, simulated.prepared, deps.signer); } catch (cause) {
+      // The executor address may serve several grants (one KMS key): sign from the highest nonce any of them prepared on this chain.
+      const shared = grant.mechanism === 'EVM_ERC7710_METAMASK_V1_3' ? await deps.store.sessionNextNonce(grant.chain, grant.sessionAddress) : null;
+      const signingCtx: StepContext = shared !== null && (grant.evmNextNonce === null || shared > grant.evmNextNonce) ? { ...ctx, grant: { ...grant, evmNextNonce: shared } } : ctx;
+      try { signed = await driver.sign(signingCtx, simulated.prepared, deps.signer); } catch (cause) {
         const code = codeOf(cause, 'SIGNING_FAILED');
         if (transientSimulation(code)) { log('delegation.signing_retry', { step: k, code }); return outcome(PENDING_RETRY_MS); }
         return stopBefore(k, code);
@@ -395,7 +449,15 @@ function boundStep(requirement: WorkflowRequirement, k: number, pinned: StepBind
     // Missing exact spend facts reserve the approved cap conservatively.
     return sum + (facts.length ? spent : BigInt(prior.cap));
   }, 0n);
-  const used = boundAmount(b.cap, received > consumed ? received - consumed : 0n);
+  const available = received > consumed ? received - consumed : 0n;
+  // BUILD-FLOFI-UNIVERSAL-SINGLE-AUTH-MAINNET-001: a workflow grant fixed this step's amount when the owner signed (the producer's on-chain
+  // guaranteed minimum, within the cap): it is never narrowed; the producer must have delivered at least that much.
+  if (pinned.exact) {
+    const fixed = pinned.need.kind === 'EVM_UNISWAP_V3_EXACT_INPUT_SINGLE' ? pinned.need.amountIn : 'amount' in pinned.need ? pinned.need.amount : 0n;
+    if (fixed <= 0n || available < fixed) return { ok: false, code: 'WORKFLOW_BINDING_INSUFFICIENT_RECEIVED' };
+    return { ok: true, step: narrowedStep(requirement, k, fixed), binding: pinned };
+  }
+  const used = boundAmount(b.cap, available);
   if (used <= 0n) return { ok: false, code: 'WORKFLOW_BINDING_NOTHING_RECEIVED' };
   const need = pinned.need.kind === 'EVM_UNISWAP_V3_EXACT_INPUT_SINGLE' ? { ...pinned.need, amountIn: used } : { ...pinned.need, amount: used };
   return { ok: true, step: narrowedStep(requirement, k, used), binding: { ...pinned, need } };

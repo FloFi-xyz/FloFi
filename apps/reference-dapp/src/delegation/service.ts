@@ -32,7 +32,7 @@ import type { NetworkId, StrategyInput, StrategySpec } from '../engine/strategy-
 import { ENGINE_VERSION } from '../platform/index.ts';
 import { b64url, fromB64url, rpIdOf, verifyAssertion, verifyRegistration } from '../passkeys/webauthn.ts';
 import { ADAPTERS, passkeyAnchor } from './adapters.ts';
-import { resolveAuthorityGraph, scopeHash, type GrantScope, type StepBinding } from './authority.ts';
+import { resolveAuthorityGraph, scopeHash, type EvmClassScope, type GrantScope, type StepBinding } from './authority.ts';
 import { delegationAavePool, delegationAaveReserve, delegationSwapProfile } from './profiles.ts';
 import { ENFORCEMENT, stepCapability } from './capabilities.ts';
 import { digestBytes } from './canonical.ts';
@@ -41,13 +41,14 @@ import type { DelegationConfig } from './config.ts';
 import { executionAvailability } from './config.ts';
 import { delegatedInputOf } from './automation-source.ts';
 import { isCredentialInput, type CredentialInput, type DelegatedAutomationInput } from './definition.ts';
-import { authorizationDigest, buildManifest, executionSpend, manifestHash, universalAuthorization, wideningOf, type DelegatedAuthorizationManifest,
+import { authorizationDigest, buildManifest, executionSpend, manifestHash, universalAuthorization, walletWorkflowAuthorization, wideningOf, type DelegatedAuthorizationManifest,
   type LimitsInput } from './manifest.ts';
 import type { DelegationStore, ExecutionRecord, GrantRecord, PasskeyRecord } from './pg-store.ts';
 import { periodStarts } from './policy.ts';
 import type { SignerAdmin } from './runtime.ts';
 import { assetKey, requirementOf, type WorkflowRequirement } from './steps.ts';
-import type { AuthorizationView, BudgetView, CapabilityRowView, CreatedView, DelegationOverviewView, ExecutionView, GrantView, ManifestView, PasskeyOptionsView,
+import { pinnedNeed, planWorkflowGrants, WORKFLOW_GRANT_WINDOW_MS, workflowScopeProblem, type EvmWorkflowScope, type SerialWorkflowCall } from './workflow-grants.ts';
+import type { AuthorizationView, BudgetView, CapabilityRowView, CreatedView, DelegationOverviewView, ExecutionView, GrantView, ManifestView, WalletWorkflowReviewView, PasskeyOptionsView,
   PasskeyView, PreviewView, ReviewView } from './views.ts';
 
 export type DelegationServiceDeps = {
@@ -80,7 +81,9 @@ export function createDelegationService(deps: DelegationServiceDeps) {
     const s = g.scope, decimals = (mint: string) => s.mechanism === 'SOLANA_SPL_DELEGATE_V1' ? s.accounts.find(a => a.mint === mint)?.decimals ?? 0 : 0;
     const profile = delegationSwapProfile(g.chain, config.mainnetChains), symbol = (token: string) => profile ? token === profile.usdc ? 'USDC' : token === profile.weth ? 'WETH' : token : token;
     const units = (token: string) => symbol(token) === 'USDC' ? 6 : 18;
-    const scope = s.mechanism === 'EVM_ERC7710_METAMASK_V1_3'
+    const scope = s.mechanism === 'EVM_ERC7710_METAMASK_V1_3' && s.kind === 'WORKFLOW'
+      ? { kind: 'EVM_WORKFLOW' as const, workflowRunId: s.workflowRunId, calls: s.calls.length, steps: s.steps.map(x => x.stepIndex) }
+      : s.mechanism === 'EVM_ERC7710_METAMASK_V1_3'
       ? { kind: 'EVM' as const, router: s.router, maxCalls: s.maxCalls, pairs: s.pairs.map(p => ({ input: symbol(p.tokenIn), output: symbol(p.tokenOut),
           perCallCap: display(p.perCallInputCap, units(p.tokenIn)) })),
         ...s.aave ? { aave: { pool: s.aave.pool, supply: s.aave.supply.map(x => ({ asset: symbol(x.asset), perCallCap: display(x.perCallCap, units(x.asset)) })),
@@ -281,7 +284,7 @@ export function createDelegationService(deps: DelegationServiceDeps) {
         const token = (s: 'USDC' | 'WETH') => s === 'USDC' ? profile.usdc : profile.weth;
         if (input.pairs.some(p => p.input === p.output) || new Set(input.pairs.map(p => `${p.input}>${p.output}`)).size !== input.pairs.length) refuse('CREDENTIAL_SCOPE_INVALID');
         // BUILD-FLOFI-SINGLE-AUTH-WORKFLOW-UX-001: an Aave scope names the network's registered market and its registered reserves only.
-        let aave: Extract<GrantScope, { mechanism: 'EVM_ERC7710_METAMASK_V1_3' }>['aave'];
+        let aave: EvmClassScope['aave'];
         if (input.aave && (input.aave.supply.length || input.aave.borrow.length)) {
           const pool = delegationAavePool(chain, config.mainnetChains) ?? refuse('CREDENTIAL_NETWORK_UNSUPPORTED');
           const entries = (list: readonly { asset: 'USDC' | 'WETH'; perCallCap: string }[]) => {
@@ -503,6 +506,137 @@ export function createDelegationService(deps: DelegationServiceDeps) {
         assertion: clean, onActivated: tx => activateRun(tx, a.authorizationId) }, deps.now());
       deps.log('delegation.workflow_run_authorization_signed', { authorization: a.authorizationId, revision });
       return { authorizationId: a.authorizationId };
+    },
+    /**
+     * BUILD-FLOFI-UNIVERSAL-SINGLE-AUTH-MAINNET-001: the review of a run's ONE wallet authorization — one exact workflow grant per EVM chain
+     * (`workflow-grants.ts`), each compiled from the workflow, the verified registries and a fresh quote, with the deployment's executor as
+     * delegate. Nothing is signed here. A second call returns the same pending grants (never new ones) until they are signed or expire.
+     */
+    async workflowRunWalletReview(owner: Owner, run: { readonly runId: string; readonly strategy: StrategyInput; readonly workflowHash: string;
+      readonly validitySeconds: number; readonly wallet: string }): Promise<WalletWorkflowReviewView> {
+      if (!deps.signer) refuse('DELEGATED_SIGNER_UNAVAILABLE');
+      const wallet = run.wallet.toLowerCase();
+      if (!/^0x[0-9a-f]{40}$/.test(wallet)) refuse('WALLET_SESSION_REQUIRED');
+      let a = await store.authorizationForRun(run.runId);
+      if (!a) {
+        const composed = composeWorkflowBound(run.strategy, run.workflowHash);
+        if (!composed.ok) refuse('WORKFLOW_RUN_STALE');
+        const req = requirementOf(composed as Extract<typeof composed, { ok: true }>);
+        if (!req.ok) refuse(req.code);
+        const requirement = (req as Extract<typeof req, { ok: true }>).value, now = deps.now();
+        const planned = await planWorkflowGrants(requirement, { mode: config.mode, mainnet: config.mainnetChains, wallet: () => wallet,
+          transport: chain => deps.transport(chain, 'read') });
+        if (!planned.ok) refuse(planned.code);
+        const chains = (planned as Extract<typeof planned, { ok: true }>).chains;
+        const validFrom = now, expiresAt = new Date(now.getTime() + Math.min(WORKFLOW_GRANT_WINDOW_MS, run.validitySeconds * 1000));
+        const credential = await store.credential(owner, { namespace: 'eip155', address: wallet }, 'Workflow wallet', () => deps.newId('crd'), now);
+        const bindings: StepBinding[] = [];
+        for (const plan of chains) {
+          const transport = deps.transport(plan.chain, 'owner') ?? refuse('DELEGATION_CHAIN_UNAVAILABLE');
+          const scope: EvmWorkflowScope = { mechanism: 'EVM_ERC7710_METAMASK_V1_3', kind: 'WORKFLOW', chain: plan.chain, workflowRunId: run.runId, calls: plan.calls,
+            steps: plan.steps, maxCalls: plan.calls.length, validFrom: validFrom.toISOString(), expiresAt: expiresAt.toISOString() };
+          const problem = workflowScopeProblem(requirement, scope, config.mode, config.mainnetChains);
+          if (problem) refuse(problem);
+          const grantId = deps.newId('grt'), session = await deps.signer!.create('eip155');
+          let enrollment: Readonly<Record<string, unknown>>;
+          try {
+            enrollment = await ADAPTERS.EVM_ERC7710_METAMASK_V1_3.prepareEnrollment({ grantId, walletAddress: wallet, chain: plan.chain, scope, sessionAddress: session.address,
+              anchor: '0x' + randomBytes(32).toString('hex') }, transport);
+          } catch (cause) { await deps.signer!.destroy(session.ref).catch(() => undefined); throw cause; }
+          await store.insertGrant(owner, { grantId, credentialId: credential.credentialId, chain: plan.chain, mechanism: 'EVM_ERC7710_METAMASK_V1_3', scope,
+            scopeHash: scopeHash(scope), passkeyId: null, sessionKeyRef: session.ref, sessionAddress: session.address, enrollment, expiresAt }, now);
+          for (const step of plan.steps) bindings.push({ stepIndex: step.stepIndex, credentialId: credential.credentialId, grantId, mechanism: 'EVM_ERC7710_METAMASK_V1_3',
+            chain: plan.chain, walletAddress: wallet, grantCommitment: String(enrollment.delegationHash), need: pinnedNeed(scope, step.stepIndex), exact: true });
+        }
+        bindings.sort((x, y) => x.stepIndex - y.stepIndex);
+        const spend = executionSpend(requirement), slippage = Math.max(0, ...requirement.steps.map(x => x.slippageBps ?? 0));
+        const authorizationId = deps.newId('dau');
+        const manifest = buildManifest({ owner: ownerKey(owner), authorizationId, revision: 1, now, validFrom, expiresAt, timezone: 'UTC', engineVersion: ENGINE_VERSION,
+          requirement, bindings, limits: { assets: [...spend.entries()].map(([asset, amount]) => ({ asset, maxPerExecution: amount.toString(),
+            budgets: [{ period: 'DAY' as const, amount: amount.toString() }] })), maxExecutionsPerPeriod: { count: 1, period: 'MONTH' }, cooldownSeconds: 0, maxSlippageBps: slippage } });
+        await deps.db.transaction(tx => store.createAuthorization(tx, owner, { authorizationId, workflowRunId: run.runId, strategy: requirement.strategy, manifest,
+          manifestHash: manifestHash(manifest) }, now));
+        const envelope = walletWorkflowAuthorization(manifest, { origin: config.passkeyOrigin, tenant: config.tenantId, nonce: randomBytes(16).toString('hex') });
+        await store.prepareReview(owner, authorizationId, 1, envelope, authorizationDigest(envelope), now);
+        deps.log('delegation.workflow_wallet_authorization_created', { authorization: authorizationId, steps: requirement.steps.length, chains: chains.length });
+        a = (await store.authorizationForRun(run.runId))!;
+      }
+      if (a.owner.namespace !== owner.namespace || a.owner.address !== owner.address) refuse('AUTHORIZATION_NOT_FOUND');
+      if (a.state !== 'PENDING_SIGNATURE') refuse(`AUTHORIZATION_${a.state}`);
+      const rev = await store.revision(a.authorizationId, a.latestRevision) ?? refuse('AUTHORIZATION_NOT_FOUND');
+      if (rev!.envelope?.kind !== 'WALLET_WORKFLOW' || !rev!.envelopeDigest) refuse('AUTHORIZATION_KIND_MISMATCH');
+      const composed = composeWorkflowBound(rev!.strategy, rev!.workflowHash), req = composed.ok ? requirementOf(composed) : null;
+      const requirement = req?.ok ? req.value : null;
+      const grants = await Promise.all([...new Set(rev!.manifest.credentials.map(c => c.grantId))].map(id => store.grant(owner, id)));
+      const item = (chain: string, call: SerialWorkflowCall) => {
+        const p = delegationSwapProfile(chain, config.mainnetChains);
+        const sym = (token: string) => p ? token === p.usdc ? 'USDC' : token === p.weth ? 'WETH' : token : token, units = (token: string) => sym(token) === 'USDC' ? 6 : 18;
+        if (call.kind === 'ERC20_APPROVE') {
+          const spender = delegationAavePool(chain, config.mainnetChains) === call.spender ? 'AAVE_V3_POOL' as const : 'UNISWAP_V3_ROUTER' as const;
+          const amount = display(call.amount, units(call.token));
+          return { kind: 'APPROVE' as const, amount, symbol: sym(call.token), minimum: null, outputSymbol: null, spender,
+            label: `Approve exactly ${amount} ${sym(call.token)} to ${spender === 'AAVE_V3_POOL' ? 'the Aave V3 Pool' : 'the Uniswap v3 router'}` };
+        }
+        if (call.kind === 'UNISWAP_V3_EXACT_INPUT_SINGLE') {
+          const amount = display(call.amountIn, units(call.tokenIn)), minimum = display(call.amountOutMinimum, units(call.tokenOut));
+          return { kind: 'SWAP' as const, amount, symbol: sym(call.tokenIn), minimum, outputSymbol: sym(call.tokenOut), spender: null,
+            label: `Swap exactly ${amount} ${sym(call.tokenIn)} for at least ${minimum} ${sym(call.tokenOut)} (Uniswap v3, 0.05%)` };
+        }
+        const amount = display(call.amount, units(call.asset));
+        return call.kind === 'AAVE_V3_SUPPLY'
+          ? { kind: 'SUPPLY' as const, amount, symbol: sym(call.asset), minimum: null, outputSymbol: null, spender: null, label: `Supply exactly ${amount} ${sym(call.asset)} to Aave V3 for this wallet` }
+          : { kind: 'BORROW' as const, amount, symbol: sym(call.asset), minimum: null, outputSymbol: null, spender: null,
+            label: `Borrow exactly ${amount} ${sym(call.asset)} from Aave V3 at the variable rate, for this wallet` };
+      };
+      return { authorizationId: a.authorizationId, revision: rev!.revision, envelopeDigest: rev!.envelopeDigest!, manifest: manifestView(rev!.manifest, requirement, 0),
+        expiresAt: rev!.manifest.expiresAt, walletSignatures: grants.length,
+        grants: grants.map(g => {
+          if (!g || !('kind' in g.scope) || g.scope.kind !== 'WORKFLOW') return refuse('WORKFLOW_GRANT_SCOPE_INVALID');
+          const scope = g.scope as EvmWorkflowScope;
+          return { grantId: g.grantId, chain: g.chain, chainId: Number(g.chain.slice('eip155:'.length)), network: networkLabel(g.chain), walletAddress: g.walletAddress,
+            executor: g.sessionAddress, typedData: g.state === 'PENDING_SIGNATURE' ? g.enrollment.typedData : null, digest: String(g.enrollment.digest),
+            delegationHash: String(g.enrollment.delegationHash),
+            validUntil: scope.expiresAt, state: g.state, calls: scope.steps.flatMap(st => st.calls.map(i => ({ stepIndex: st.stepIndex, ...item(g.chain, scope.calls[i]!) }))) };
+        }) };
+    },
+    /**
+     * BUILD-FLOFI-UNIVERSAL-SINGLE-AUTH-MAINNET-001: the owner's ONE authorization of a run — the wallet signature of each chain's workflow
+     * grant. Each signature is verified against the exact grant (signer = the run's wallet, the account's EIP-7702 MetaMask smart account, the
+     * framework deployed, not disabled); then, in one transaction, the revision becomes ACTIVE and the run starts. A wallet that is not yet a
+     * MetaMask smart account keeps the grant pending (EVM_ACCOUNT_NOT_UPGRADED) so the same signature can be retried after the one-time upgrade.
+     */
+    async workflowRunWalletSign(owner: Owner, runId: string, revision: number, signatures: unknown,
+      activateRun: (tx: Parameters<NonNullable<Parameters<DelegationStore['activate']>[1]['onActivated']>>[0], authorizationId: string) => Promise<void>): Promise<{ readonly authorizationId: string }> {
+      const a = await store.authorizationForRun(runId) ?? refuse('AUTHORIZATION_NOT_FOUND');
+      if (a!.owner.namespace !== owner.namespace || a!.owner.address !== owner.address) refuse('AUTHORIZATION_NOT_FOUND');
+      const rev = await store.revision(a!.authorizationId, revision) ?? refuse('AUTHORIZATION_NOT_FOUND');
+      if (rev!.envelope?.kind !== 'WALLET_WORKFLOW' || !rev!.envelopeDigest || a!.latestRevision !== revision) refuse('AUTHORIZATION_NOT_PENDING');
+      if (!Array.isArray(signatures) || signatures.length > 8) refuse('AUTHORIZATION_SIGNATURES_INVALID');
+      const given = new Map<string, string>();
+      for (const item of signatures as unknown[]) {
+        const x = item as { grantId?: unknown; signature?: unknown } | null;
+        if (!x || typeof x.grantId !== 'string' || typeof x.signature !== 'string' || !/^0x[0-9a-fA-F]{130}$/.test(x.signature)) refuse('AUTHORIZATION_SIGNATURES_INVALID');
+        given.set(x!.grantId as string, x!.signature as string);
+      }
+      const verified: { grantId: string; chain: string; delegationHash: string }[] = [];
+      for (const c of rev!.manifest.credentials.filter((c, i, all) => all.findIndex(o => o.grantId === c.grantId) === i)) {
+        let grant = await store.grant(owner, c.grantId) ?? refuse('CREDENTIAL_NOT_FOUND');
+        if (!('kind' in grant!.scope) || grant!.scope.kind !== 'WORKFLOW' || grant!.scope.workflowRunId !== runId) refuse('WORKFLOW_GRANT_SCOPE_INVALID');
+        if (grant!.state === 'PENDING_SIGNATURE') {
+          const signature = given.get(c.grantId) ?? refuse('AUTHORIZATION_SIGNATURE_MISSING');
+          const transport = deps.transport(grant!.chain, 'owner') ?? refuse('DELEGATION_CHAIN_UNAVAILABLE');
+          const result = await ADAPTERS.EVM_ERC7710_METAMASK_V1_3.verifyEnrollment(grant!, { signature }, transport);
+          if (!result.ok && result.retryable) refuse(result.code);
+          grant = await store.settleEnrollment(owner, c.grantId, grant!.version, result, deps.now());
+          if (!result.ok) refuse(result.code);
+        }
+        if (grant!.state !== 'ACTIVE' || grant!.commitment !== c.grantCommitment) refuse('GRANT_COMMITMENT_MISMATCH');
+        verified.push({ grantId: c.grantId, chain: grant!.chain, delegationHash: grant!.commitment! });
+      }
+      await store.activate(owner, { authorizationId: a!.authorizationId, revision, digest: rev!.envelopeDigest!, passkeyId: null, signCount: 0,
+        assertion: { kind: 'WALLET_WORKFLOW', grants: verified }, onActivated: tx => activateRun(tx, a!.authorizationId) }, deps.now());
+      deps.log('delegation.workflow_wallet_authorization_signed', { authorization: a!.authorizationId, revision, chains: verified.length });
+      return { authorizationId: a!.authorizationId };
     },
     /** Revokes a workflow run's authorization: queued steps never execute; in-flight submissions are reconciled, never undone. */
     async workflowRunAuthorizationRevoke(owner: Owner, runId: string): Promise<void> {

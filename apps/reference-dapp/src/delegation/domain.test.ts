@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { describe, expect, it } from 'vitest';
 import { BASE_SEPOLIA } from '../domain/public-testnet-swap.ts';
-import { resolveAuthorityGraph, scopeHash, type GrantView } from './authority.ts';
+import { resolveAuthorityGraph, scopeHash, type EvmClassScope, type GrantView } from './authority.ts';
 import { stepCapability } from './capabilities.ts';
 import { canonicalJson, domainDigest } from './canonical.ts';
 import { authorizationDigest, buildManifest, executionSpend, manifestHash, manifestProblem, universalAuthorization, wideningOf, type DelegatedAuthorizationManifest,
@@ -20,7 +20,7 @@ const USDC_KEY = `eip155:84532/erc20:${BASE_SEPOLIA.usdc}`, DEV_KEY = `${DEVNET}
 
 function evmGrant(overrides: Partial<GrantView> = {}, scope: Partial<Extract<GrantView['scope'], { mechanism: 'EVM_ERC7710_METAMASK_V1_3' }>> = {}): GrantView {
   const s = { mechanism: 'EVM_ERC7710_METAMASK_V1_3' as const, chain: 'eip155:84532', router: BASE_SEPOLIA.router, maxCalls: 40,
-    pairs: [{ tokenIn: BASE_SEPOLIA.usdc, tokenOut: BASE_SEPOLIA.weth, perCallInputCap: '100000000' }], validFrom: '2026-10-01T00:00:00.000Z', expiresAt: '2026-12-31T00:00:00.000Z', ...scope };
+    pairs: [{ tokenIn: BASE_SEPOLIA.usdc, tokenOut: BASE_SEPOLIA.weth, perCallInputCap: '100000000' }], validFrom: '2026-10-01T00:00:00.000Z', expiresAt: '2026-12-31T00:00:00.000Z', ...scope } as EvmClassScope;
   return { grantId: 'grt_evm', credentialId: 'crd_evm', walletNamespace: 'eip155', walletAddress: EVM_OWNER, chain: 'eip155:84532', mechanism: 'EVM_ERC7710_METAMASK_V1_3',
     state: 'ACTIVE', scope: s, scopeHash: scopeHash(s), sessionAddress: '0x' + 'b2'.repeat(20), commitment: '0x' + 'c3'.repeat(32), passkeyId: 'pk_1', verifiedAt: null, callsUsed: 0, ...overrides };
 }

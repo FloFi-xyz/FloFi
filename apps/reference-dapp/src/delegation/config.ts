@@ -21,7 +21,7 @@
  *   FLOFI_DELEGATED_SIGNER_DIR       local-disposable only: an absolute directory below /tmp
  *   FLOFI_DELEGATED_EXECUTION        enabled: this process runs the delegated executor (needs a signer provider)
  *   FLOFI_DELEGATION_MAINNET_CHAINS  BUILD-FLOFI-SINGLE-AUTH-WORKFLOW-UX-001: comma-separated public mainnets on which delegated templates may
- *                                    run (only `eip155:42161`, Arbitrum One, is implemented). Unset (default): every mainnet step stays
+ *                                    run (`eip155:1`, `eip155:8453`, `eip155:42161`: Ethereum, Base, Arbitrum One). Unset (default): every mainnet step stays
  *                                    MAINNET_DELEGATION_DISABLED. It is the only way delegation is enabled in the public Mainnet-only product,
  *                                    where it never enables a harness, and signing there still needs a production signer provider.
  */

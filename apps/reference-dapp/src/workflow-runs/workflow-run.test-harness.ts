@@ -96,8 +96,8 @@ export async function workflowRunHarness(db: Database, options: {
   const runs: WorkflowRunSurface = { store, runtime: flows.runtime, delegation: d.store, now: d.now, log, policyFor: () => policy, delegationFacts: facts,
     grantsOf: owner => d.store.grants(owner as Owner), newId: typedId,
     delegationOps: facts ? {
-      review: (owner, run) => d.service.workflowRunAuthorizationReview(owner as Owner, run as never),
-      sign: (owner, runId, revision, assertion) => d.service.workflowRunAuthorizationSign(owner as Owner, runId, revision, assertion,
+      review: (owner, run) => d.service.workflowRunWalletReview(owner as Owner, run as never),
+      sign: (owner, runId, revision, signatures) => d.service.workflowRunWalletSign(owner as Owner, runId, revision, signatures,
         (tx, authorizationId) => store.activateDelegatedWithin(tx, runId, authorizationId, DELEGATION_EXECUTE_RUN_KIND)),
       revoke: (owner, runId) => d.service.workflowRunAuthorizationRevoke(owner as Owner, runId),
     } : null };
