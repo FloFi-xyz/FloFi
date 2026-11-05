@@ -41,6 +41,23 @@ async function connect(page: Page, source: string, target: string) {
   await expect.poll(async () => (await ir(page)).nodes.find(n => n.nodeId === target)?.dependencies).toContain(source);
 }
 
+/**
+ * BUILD AAVE-V3-EXPANSION-001: a step added after another is linked to it automatically (an ordering dependency). These tests author their own
+ * links, so they first remove that automatic link through the same edge selection and Delete an owner uses.
+ */
+async function disconnect(page: Page, source: string, target: string) {
+  const edge = page.locator(`.build-flow-surface .react-flow__edge[data-id="${source}-${target}"]`);
+  await expect(edge).toBeVisible();
+  // A straight edge has a zero-height box, so it is selected by clicking its midpoint on screen (its 20px interaction stroke).
+  const point = await edge.locator('.react-flow__edge-interaction').evaluate((path: SVGPathElement) => {
+    const at = path.getPointAtLength(path.getTotalLength() / 2), m = path.getScreenCTM()!;
+    return { x: at.x * m.a + at.y * m.c + m.e, y: at.x * m.b + at.y * m.d + m.f };
+  });
+  await page.mouse.click(point.x, point.y); await page.keyboard.press('Delete');
+  await expect(edge).toHaveCount(0);
+  await expect.poll(async () => (await ir(page)).nodes.find(n => n.nodeId === target)?.dependencies).toEqual([]);
+}
+
 /** Every button of a toolbar is visible, hit-testable at its centre, inside the toolbar and the graph, and the toolbar never scrolls. */
 async function toolbarGeometry(page: Page, name: string) {
   const toolbar = page.getByRole('toolbar', { name, exact: true }), graph = page.locator('.build-flow-surface');
@@ -133,6 +150,7 @@ test('UX-010 real handles author Bridge → Swap, preserve layout on reconnect, 
   await say(page, 'Swap 5 USDC for WETH on Base');
   await say(page, 'bridge 5 USDC from Base to Arbitrum'); await visibleCards(page, 2);
   const draft = await ir(page), swap = draft.nodes.find(n => n.actionType === 'asset.swap.exact-input')!, bridge = draft.nodes.find(n => n.actionType === 'asset.bridge')!;
+  await disconnect(page, swap.nodeId, bridge.nodeId);
   const before = await viewport(page).getAttribute('style');
   await connect(page, bridge.nodeId, swap.nodeId);
   expect(workflowOrder(await ir(page)).filter(n => !n.actionType.startsWith('mock-')).map(n => n.nodeId)).toEqual([bridge.nodeId, swap.nodeId]);
@@ -158,7 +176,9 @@ test('UX-009/010 repeated Send cards retain links and the manual viewport throug
   const recipient = '0x3333333333333333333333333333333333333333';
   await say(page, 'Send 5 USDC on Arbitrum to ' + recipient);
   await say(page, 'Send 6 USDC on Arbitrum to ' + recipient); await visibleCards(page, 2);
-  const nodes = (await ir(page)).nodes.filter(n => n.actionType === 'asset.transfer'); expect(nodes).toHaveLength(2);
+  const added = (await ir(page)).nodes.filter(n => n.actionType === 'asset.transfer'); expect(added).toHaveLength(2);
+  await disconnect(page, added[0]!.nodeId, added[1]!.nodeId);
+  const nodes = (await ir(page)).nodes.filter(n => n.actionType === 'asset.transfer');
   const [a, b] = nodes; expect(a!.nodeId).not.toBe(b!.nodeId);
   await connect(page, b!.nodeId, a!.nodeId);
   const slider = page.locator('.build-flow-surface .canvas-navigator-slider'); await slider.focus(); await page.keyboard.press('ArrowDown');
