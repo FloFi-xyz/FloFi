@@ -23,6 +23,7 @@ import { SolanaVerifiedAssetSearch } from './solana-verified-asset-search';
 import { universalKeyOfCanvasLabel } from '../domain/universal-bridge-authoring';
 import { UNIVERSAL_NETWORKS } from '@defi-workflow-engine/workflow-contracts';
 import { AssetSearch } from './asset-search';
+import { LendingReservePicker, type LendingPickerData } from './lending-card-picker';
 import { useRevealPanel } from './canvas-panel-reveal';
 import { ProposalReviewArtifact } from './proposal-review';
 import { usdLine, type UsdLine } from '../domain/usd-estimate';
@@ -68,11 +69,11 @@ function ValuePair({ relationship, className = '', onInvert, children }: { relat
 }
 
 /** `network` adds the network badge; `markNetwork` only binds the token's identity to its network (picker options carry no badge). */
-function TokenChip({ symbol, network, markNetwork }: { symbol: string; network?: string; markNetwork?: string }) {
+function TokenChip({ symbol, network, markNetwork, address }: { symbol: string; network?: string; markNetwork?: string; address?: string | undefined }) {
   const { t: tr } = useLocale();
   return <span className="composer-token-chip">
     <span className="composer-token-avatar" data-token={symbol}>
-      <TokenBrandIcon symbol={symbol} network={network ?? markNetwork}/>
+      <TokenBrandIcon symbol={symbol} network={network ?? markNetwork} address={address}/>
       {network !== undefined && <span className="composer-network-badge" role="img" aria-label={tr(`${network} network`)} title={network}><NetworkBrandIcon network={network}/></span>}
     </span>
     <span className="composer-amount-token">{symbol}</span>
@@ -80,11 +81,11 @@ function TokenChip({ symbol, network, markNetwork }: { symbol: string; network?:
 }
 
 type TokenPickerControl = { label: string; expanded: boolean; controls: string; title?: string; onToggle(trigger: HTMLButtonElement): void };
-function TokenPill({ symbol, network, picker }: { symbol: string; network: string; picker: TokenPickerControl }) {
+function TokenPill({ symbol, network, picker, address }: { symbol: string; network: string; picker: TokenPickerControl; address?: string | undefined }) {
   const { t: tr } = useLocale();
   return <button type="button" className="composer-token-chip composer-equity-pill composer-token-pill nodrag nopan" aria-label={tr(picker.label)} aria-expanded={picker.expanded} aria-controls={picker.controls} title={tr(picker.title)}
     onClick={event => { event.stopPropagation(); picker.onToggle(event.currentTarget); }} onKeyDown={event => event.stopPropagation()}>
-    <TokenChip symbol={symbol} network={network}/>
+    <TokenChip symbol={symbol} network={network} address={address}/>
     <svg viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true"><path d="m3 4 3 3 3-3"/></svg>
   </button>;
 }
@@ -134,10 +135,12 @@ function NetworkPicker({ network, options, unavailable = [], onSelect }: { netwo
   </fieldset>;
 }
 
-function AssetNetworkPicker({ id, side, symbol, network, tokens, networks, unavailable, onTokenChange, onNetworkChange, onCollapse, bridge = false, search, selectedReference }: {
+function AssetNetworkPicker({ id, side, symbol, network, tokens, networks, unavailable, onTokenChange, onNetworkChange, onCollapse, bridge = false, search, selectedReference, lending }: {
   id: string; side: 'source' | 'destination'; symbol: string; network: string; tokens: readonly string[]; networks: readonly string[]; unavailable?: readonly string[] | undefined;
   onTokenChange(symbol: string): void; onNetworkChange(network: string): void; onCollapse(): void;
   bridge?: boolean; selectedReference?: string | undefined;
+  /** BUILD AAVE-V3-CARD-CATALOG-FIX-001: an editable lending card lists its market's live Aave reserve catalog for its action, in the card itself. */
+  lending?: LendingPickerData | undefined;
   /** BUILD-BASE-001: an official-catalog network's search (the whole validated catalog behind the shortcuts). */
   search?: { readonly chain: string; readonly accept: (asset: CanonicalAsset) => boolean; readonly identity?: boolean; onSelect(symbol: string): void } | undefined;
 }) {
@@ -156,7 +159,7 @@ function AssetNetworkPicker({ id, side, symbol, network, tokens, networks, unava
     <div className="composer-bridge-picker-columns">
       <div className="composer-bridge-picker-column" role="region" aria-label={tr(`${sideLabel} token picker`)}>
         <span className="composer-bridge-picker-heading" aria-hidden="true">{tr("Tokens")}</span>
-        {!bridge && shortcuts}
+        {!bridge && (lending ? <LendingReservePicker network={network} selected={symbol} data={lending} onSelect={token => { if (tokens.includes(token)) onTokenChange(token); }}/> : shortcuts)}
         {search && network !== 'Solana' && <AssetSearch chain={search.chain} selected={selectedReference ?? symbol} accept={search.accept} onSelect={search.onSelect} onSelectAsset={search.identity ? asset => search.onSelect(asset.address ? `${asset.address}@${asset.decimals}` : asset.symbol) : undefined} copy={{
           heading: tr("Search assets"), searchLabel: tr("Search {0} tokens", network), placeholder: tr("Search by symbol or name…"),
           loading: tr("Loading {0} tokens…", network), unavailable: tr("{0} tokens are unavailable right now.", network), retry: tr("Try again"),
@@ -362,7 +365,7 @@ function CardAmount({ value, fallback, token, loading, live = true, className = 
   </>;
 }
 /** Display priority is shared by all value boxes in the card; token inputs keep their denomination. */
-function ValueBox({ amount, token, network, source, label, hint, editor, inputLabel, equity, picker, fiatFirst, onFiatFirstChange, readOnly = false, invalid = false, usd, loading = false }: { usd?: UsdLine; invalid?: boolean; readOnly?: boolean; loading?: boolean; amount?: string | undefined; token: string; network: string; source?: boolean; label?: string; hint: string; editor?: (Pick<CanvasAmountEditor, 'value' | 'formId' | 'onChange'> & { onEscape?: () => void }) | undefined; inputLabel?: string; equity?: { symbol: string; onToggle(): void; expanded: boolean; controls: string }; picker?: TokenPickerControl; fiatFirst: boolean; onFiatFirstChange: (fiatFirst: boolean) => void }) {
+function ValueBox({ amount, token, tokenAddress, network, source, label, hint, editor, inputLabel, equity, picker, fiatFirst, onFiatFirstChange, readOnly = false, invalid = false, usd, loading = false }: { tokenAddress?: string | undefined; usd?: UsdLine; invalid?: boolean; readOnly?: boolean; loading?: boolean; amount?: string | undefined; token: string; network: string; source?: boolean; label?: string; hint: string; editor?: (Pick<CanvasAmountEditor, 'value' | 'formId' | 'onChange'> & { onEscape?: () => void }) | undefined; inputLabel?: string; equity?: { symbol: string; onToggle(): void; expanded: boolean; controls: string }; picker?: TokenPickerControl; fiatFirst: boolean; onFiatFirstChange: (fiatFirst: boolean) => void }) {
   const { t: tr } = useLocale();
   // BUILD-FLOFI-UX-FIX-003: the box keeps one line; a clipped value's exact text opens on tap, click or keyboard (CardAmount).
   const shown = (value: string | undefined, fallback: string) => <CardAmount value={value} fallback={fallback} token={token} loading={loading}/>;
@@ -394,7 +397,7 @@ function ValueBox({ amount, token, network, source, label, hint, editor, inputLa
         : usd?.kind === 'test-token' ? <span className="composer-fiat-value" data-usd="test-token" title={tr(usd.title)}>{tr(usd.text)}</span>
         : <span className="composer-fiat-value" data-usd={usd?.kind ?? 'unavailable'} aria-hidden="true"/>}
     </span>
-    {equity ? <EquityPill equity={equity.symbol} onToggle={equity.onToggle} expanded={equity.expanded} controls={equity.controls}/> : picker ? <TokenPill symbol={token} network={network} picker={picker}/> : <TokenChip symbol={token} network={network}/>}
+    {equity ? <EquityPill equity={equity.symbol} onToggle={equity.onToggle} expanded={equity.expanded} controls={equity.controls}/> : picker ? <TokenPill symbol={token} network={network} picker={picker} address={tokenAddress}/> : <TokenChip symbol={token} network={network} address={tokenAddress}/>}
   </span>;
 }
 
@@ -403,7 +406,11 @@ export type ComposerCardData = {
   connectable?: boolean;
   actionSelection?: { selection: CryptoSelection; networks: readonly string[]; valid: boolean; tokens: { source: readonly string[]; destination: readonly string[] }; onNetwork(network: string): void; onToken(side: 'source' | 'destination', token: string): void;
     /** BUILD-SOLANA-MAINNET-001: exchanges From and To (Swap cards only; absent where the reversed pair is unavailable or the step is not editable). */
-    onInvert?: () => void };
+    onInvert?: () => void;
+    /** BUILD AAVE-V3-CARD-CATALOG-FIX-001: a lending card's registry reserve (its exact address) and, when editable, its live catalog picker. */
+    assetAddress?: string; lending?: LendingPickerData };
+  /** BUILD AAVE-V3-CARD-CATALOG-FIX-001: the earlier step whose delivered output this step spends (a sequence such as Swap → Supply). */
+  funding?: { readonly step: number; readonly symbol: string; readonly changed: boolean };
   composer: true; step: number; selected: boolean; vertical: boolean;
   summary: ReturnType<typeof composerSummary>;
   estimateWorkflow?: SemanticWorkflow; estimateNodeId?: string; estimateOwner?: string | null;
@@ -585,7 +592,10 @@ export function ComposerCard({ data: card }: { data: ComposerCardData }) {
         <ValueBox label="Second liquidity asset amount" inputLabel={`Second liquidity amount (${poolValues[1]!.token})`} amount={poolValues[1]!.amount} token={poolValues[1]!.token} network={sourceNetwork} hint="Second liquidity contribution" fiatFirst={fiatFirst} onFiatFirstChange={setFiatFirst} usd={usdLine(sourceNetwork, null, { status: 'none' })}
           picker={picker('destination')} editor={card.poolProposal ? { value: poolValues[1]!.amount, formId: card.poolProposal.formId, onChange: amount => poolContributions.edit(1, amount) } : undefined}/>
       </ValuePair> : !card.inspection && ['Supply', 'Borrow', 'Repay', 'Withdraw', 'Send'].includes(card.summary.action) && (amountParts || editor)
-        ? <ValueBox source fiatFirst={fiatFirst} onFiatFirstChange={setFiatFirst} usd={usdLine(sourceNetwork, null, { status: 'none' })} amount={amountParts?.[1]} token={amountParts?.[2] ?? 'USDC'} network={sourceNetwork} picker={picker('source')} editor={editor} hint={editor ? 'Enter the source amount' : card.summary.amount}/>
+        ? <><ValueBox source fiatFirst={fiatFirst} onFiatFirstChange={setFiatFirst} usd={usdLine(sourceNetwork, null, { status: 'none' })} amount={amountParts?.[1]} token={amountParts?.[2] ?? 'USDC'} tokenAddress={card.actionSelection?.assetAddress} network={sourceNetwork} picker={picker('source')} editor={editor} hint={editor ? 'Enter the source amount' : card.summary.amount}/>
+          {card.funding && <span className="composer-quote-note composer-funding-note" role="status" data-changed={card.funding.changed || undefined}>{card.funding.changed
+            ? tr('Step {0} delivers {1}: this step will no longer be funded by it. Review and apply the change.', card.funding.step, card.funding.symbol)
+            : tr('Funded by step {0}: spends the {1} it delivers.', card.funding.step, card.funding.symbol)}</span>}</>
         : <span className="numeric composer-amount">{tr(card.summary.amount)}</span>}
       {!card.inspection && card.recipient && <RecipientField recipient={card.recipient} formId={card.supplyProposal?.formId}/>}
       {!card.inspection && card.supplyProposal && <div className="composer-amount-actions composer-supply-actions nodrag nopan" onClick={event => event.stopPropagation()}>
@@ -629,7 +639,7 @@ export function ComposerCard({ data: card }: { data: ComposerCardData }) {
     ? { chain: catalogNetwork.chain, accept: (asset: CanonicalAsset) => searchAction === 'transfer' || asset.kind === 'ERC20',
       onSelect: (symbol: string) => card.actionSelection!.onToken(tokenPanel, symbol) } : undefined;
   const tokens = tokenPanel && tokenSymbol && <AssetNetworkPicker key={tokenPanel + tokenNetwork} id={tokenPanelId} side={tokenPanel} symbol={tokenSymbol} network={tokenNetwork}
-    tokens={tokenOptions} networks={card.actionSelection?.networks ?? []} onCollapse={collapseTokens} search={tokenSearch}
+    tokens={tokenOptions} networks={card.actionSelection?.networks ?? []} onCollapse={collapseTokens} search={tokenSearch} lending={tokenPanel === 'source' ? card.actionSelection?.lending : undefined}
     onTokenChange={symbol => { if (card.actionSelection) card.actionSelection.onToken(tokenPanel, symbol); else card.tokenSelection?.onSelect(tokenPanel, symbol); }}
     onNetworkChange={network => { card.actionSelection?.onNetwork(network); setAmountError(null); if (poolCard) poolRange.reset(); }}/>;
   const bridgeKey = universalKeyOfCanvasLabel(bridgeNetwork);

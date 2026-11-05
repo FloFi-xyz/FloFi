@@ -11,7 +11,7 @@ import { universalBridgeDetails, universalAssetResolves, universalKeyOfCanvasLab
 import { universalCanvasNetworks } from './canvas-action-setup';
 import { routerDetails } from './router-authoring';
 import type { UniswapLiquidityInput } from './uniswap-liquidity-authoring';
-import { defaultPoolRange, validCryptoSelection, canSelectCryptoAssets, cryptoInputOf, type CryptoSelection, type CryptoSelections } from './crypto-action-picker';
+import { defaultPoolRange, lendingAction, validCryptoSelection, canSelectCryptoAssets, cryptoInputOf, type CryptoSelection, type CryptoSelections } from './crypto-action-picker';
 import { actionReviewValue } from './canvas-action-setup';
 import { defaultCanvasPosition, shownCanvasPositions, type CanvasLayout } from './canvas-layout';
 import { editorReducer, initialEditor, templateEditor, type EditorState } from './editor';
@@ -143,9 +143,13 @@ export function editorHistoryReducer(state: EditorHistory, action: HistoryAction
     if (JSON.stringify(current) === JSON.stringify(action.selection)) return state;
     const changedNetwork = current?.network !== action.selection.network;
     const poolInput = setup?.action === 'pool' && changedNetwork ? { ...setup.input, ...defaultPoolRange(action.selection.network) } : null;
-    return { ...state, ...(setup ? { actionSetup: { ...setup, cryptoSelection: action.selection, ...(action.beneficiary ? { cryptoBeneficiary: action.beneficiary } : {}), ...(poolInput ? { input: poolInput } : {}) } as CanvasActionSetup } : {
+    // BUILD AAVE-V3-CARD-CATALOG-FIX-001: a lending card that changes its reserve changes the amount's denomination (1000 USDC is not 1000 WETH),
+    // so the amount is entered again for the new asset; it is never carried over and re-read in other units.
+    const previous = current ?? (node ? cryptoInputOf(node)?.selection : undefined);
+    const newAsset = Boolean(previous) && lendingAction(action.selection.action) && previous!.from !== action.selection.from;
+    return { ...state, ...(setup ? { actionSetup: { ...setup, cryptoSelection: action.selection, ...(newAsset ? { amount: '0' } : {}), ...(action.beneficiary ? { cryptoBeneficiary: action.beneficiary } : {}), ...(poolInput ? { input: poolInput } : {}) } as CanvasActionSetup } : {
       cryptoSelections: { ...state.cryptoSelections, [action.id]: action.selection },
-      amountInputs: { ...state.amountInputs, [action.id]: state.amountInputs[action.id] ?? cryptoInputOf(node!)!.amount },
+      amountInputs: { ...state.amountInputs, [action.id]: newAsset ? '' : state.amountInputs[action.id] ?? cryptoInputOf(node!)!.amount },
     }), past: [...state.past, snapshot(state)], future: [] };
   }
   if (action.type === 'EDIT_BRIDGE_NETWORKS') {
