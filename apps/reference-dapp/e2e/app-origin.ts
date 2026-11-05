@@ -54,7 +54,7 @@ export function answeredPrivacyNotice(origin: string = E2E_APP_ORIGIN) {
 }
 
 /**
- * BUILD-FLOFI-SITE-001: a visitor with no saved language now gets Portuguese (`DEFAULT_LANGUAGE`). The suites, written against the English
+ * BUILD-FLOFI-SITE-001: a visitor with no saved language gets the product default (`DEFAULT_LANGUAGE`, English since BUILD-FLOFI-LAUNCH-001). The suites, written against the English
  * interface, visit as a returning visitor who saved English: the product's own `flofi_language` preference, exactly what Preferences writes.
  * The default-language tests start from `answeredPrivacyNotice` alone, and a suite that needs Portuguese still sets it the way a visitor does.
  */

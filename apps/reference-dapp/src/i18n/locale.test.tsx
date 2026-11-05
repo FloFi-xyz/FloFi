@@ -65,16 +65,17 @@ describe('locale preference and workflow isolation', () => {
     expect(translate('PT', 'Base tokens are unavailable right now. Try again in a moment.')).toBe('Os tokens da Base estão indisponíveis no momento. Tente novamente em instantes.');
   });
 
-  // Owner decision (BUILD-FLOFI-SITE-001): Portuguese for a visitor with no saved preference; a saved one is read as is (layouts use `??`).
-  it('defaults to Portuguese only when no preference is saved', () => {
-    expect(DEFAULT_LANGUAGE).toBe('PT');
+  // Team decision (BUILD-FLOFI-LAUNCH-001): English for a visitor with no saved preference; a saved one is read as is (layouts use `??`).
+  it('defaults to English only when no preference is saved, and keeps a saved Portuguese', () => {
+    expect(DEFAULT_LANGUAGE).toBe('EN');
     expect(parseLanguage('EN') ?? DEFAULT_LANGUAGE).toBe('EN');
     expect(parseLanguage('PT') ?? DEFAULT_LANGUAGE).toBe('PT');
-    for (const missing of [undefined, null, '', 'en', 'fr']) expect(parseLanguage(missing) ?? DEFAULT_LANGUAGE).toBe('PT');
+    for (const missing of [undefined, null, '', 'pt', 'fr']) expect(parseLanguage(missing) ?? DEFAULT_LANGUAGE).toBe('EN');
     expect([documentLanguage('PT'), documentLanguage('EN')]).toEqual(['pt-BR', 'en']);
-    // The site, sign-in and /app default to Portuguese; only the MCP surface embedded in a chat host keeps English (no preference reaches it).
-    for (const path of ['/', '/docs', '/docs/simulation', '/login', '/onboarding/wallets', '/app', '/app/dashboard', '/approve', '/connections', '/walletx', null]) expect(defaultLanguageFor(path), String(path)).toBe('PT');
-    // Outside the decision: the MCP surface embedded in a chat host, FloFi Wallet's own host and the English-only admin console.
+    // The landing, the rest of the site, sign-in, onboarding and /app all default to English, so the entry journey never switches language.
+    for (const path of ['/', '/faq', '/docs', '/docs/simulation', '/how-it-works', '/developers', '/login', '/onboarding/wallets', '/app', '/app/dashboard',
+      '/approve', '/connections', '/walletx', null]) expect(defaultLanguageFor(path), String(path)).toBe('EN');
+    // These keep English whatever the product default is: the MCP surface embedded in a chat host, FloFi Wallet's own host and the admin console.
     for (const path of [EMBEDDED_APPROVAL_PATH, '/wallet', '/wallet/export', '/admin', '/admin/access']) expect(defaultLanguageFor(path), path).toBe('EN');
   });
 });

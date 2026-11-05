@@ -13,7 +13,7 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
   // Every HTML document on this origin gets a fresh nonce policy, including public and error pages. Reading the request headers
   // makes their render dynamic so Next.js can attach this request's nonce to its bootstrap and hydration scripts.
   const pathname = (await headers()).get('x-flofi-pathname');
-  // The visitor's saved language, else the product default (Portuguese), from the first paint: the site, sign-in and /app agree.
+  // The visitor's saved language, else the product default (English), from the first paint: the site, sign-in and /app agree.
   const language = parseLanguage((await cookies()).get(LANGUAGE_COOKIE)?.value) ?? defaultLanguageFor(pathname);
   return <html lang={documentLanguage(language)} className="flofi-fonts"><head>
     <link rel="preload" href="/fonts/outfit-92684e4acde79ef0.woff2" as="font" type="font/woff2" crossOrigin="anonymous"/>
