@@ -74,7 +74,9 @@ test('pointer: leaving the card applies a valid Borrow amount; an invalid amount
     await noProposal(page);
   }
   await amount.fill('0.5');
-  await page.locator('.build-flow-surface .react-flow__pane').click({ position: { x: 20, y: 20 } });
+  // Pointer: click empty Canvas well away from the card and the floating tools (the card loses focus without Enter).
+  const pane = page.locator('.build-flow-surface .react-flow__pane'), box = (await pane.boundingBox())!;
+  await page.mouse.click(box.x + box.width * 0.6, box.y + box.height * 0.75);
   await expect(revision(page)).toHaveAttribute('data-workflow-revision', '2');
   await expect(amount).toHaveValue('0.5');
   await noProposal(page);

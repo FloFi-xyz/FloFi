@@ -144,7 +144,10 @@ describe('corrected Build workspace presentation', () => {
     expect(canvas.match(/class="composer-status" data-card-status="(draft|configured|attention)"/g)).toHaveLength(1);
     expect(canvas).not.toMatch(/Step 1|Simulated|Approved|Ready to execute/);
     expect(canvas).toContain('USDC');
-    expect(canvas).not.toMatch(/<form|role="dialog"|MOCK ACTION|Template.*no execution/i);
+    // BUILD-FLOFI-SINGLE-AUTH-WORKFLOW-UX-001: the card's only form is its own amount form (Enter applies), never a dialog or a mock.
+    expect(canvas.match(/<form/g)).toHaveLength(1);
+    expect(canvas).toContain('<form class="composer-amount-form composer-lending-amount-form nodrag nopan"');
+    expect(canvas).not.toMatch(/role="dialog"|MOCK ACTION|Template.*no execution/i);
     expect(canvas.match(/class="numeric composer-amount-box/g)).toHaveLength(1);
     expect(canvas).toContain('class="composer-token-chip"');
     expect(canvas).toContain('aria-label="Base Sepolia network"');
@@ -300,7 +303,8 @@ describe('UX-002 canonical composer projections', () => {
     const canvas = renderToStaticMarkup(createElement(WorkflowCanvas, { selectedId: 'lending-borrow', select: vi.fn() }));
     expect(canvas.match(/composer-card active/g)).toHaveLength(1);
     expect(titled(canvas)).toContain('1. Supply'); expect(titled(canvas)).toContain('2. Borrow'); expect(titled(canvas)).toContain('3. Swap');
-    expect(canvas).not.toMatch(/Completed|Runtime:|Confirmed|<form/);
+    // BUILD-FLOFI-SINGLE-AUTH-WORKFLOW-UX-001: the only forms are the Aave cards' own amount forms (Enter applies an ordinary amount edit).
+    expect(canvas).not.toMatch(/Completed|Runtime:|Confirmed|<form(?! class="composer-amount-form composer-lending-amount-form)/);
     const inspector = renderToStaticMarkup(createElement(ActionSettingsContent, { selectedId: 'lending-borrow', select: vi.fn() }));
     expect(inspector).not.toContain('Advanced Settings');
     expect(inspector).not.toContain('Selected Action · 2. Borrow');

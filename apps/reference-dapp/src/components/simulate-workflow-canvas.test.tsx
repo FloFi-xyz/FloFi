@@ -21,7 +21,7 @@ vi.mock('@xyflow/react', async () => {
       fixture.graph = props;
       return React.createElement('div', { 'data-projected-graph': '' }, props.nodes.map(node => React.createElement(props.nodeTypes.workflow, { key: node.id, data: node.data } as React.Attributes)));
     },
-    Background: () => null, Controls: () => null, Handle: () => null,
+    Background: () => null, Controls: () => null, Handle: () => null, Panel: ({ children }: { children?: React.ReactNode }) => React.createElement('div', null, children),
     Position: { Top: 'top', Bottom: 'bottom', Left: 'left', Right: 'right' }, MarkerType: { ArrowClosed: 'arrowclosed' },
     useStoreApi: () => ({}), useUpdateNodeInternals: () => vi.fn(), useNodesInitialized: () => false, getNodesBounds: vi.fn(), getViewportForBounds: vi.fn(), useReactFlow: () => ({ setViewport: vi.fn() }), useStore: () => '',
   };

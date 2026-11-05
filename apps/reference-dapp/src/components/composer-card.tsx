@@ -501,6 +501,12 @@ export function ComposerCard({ data: card }: { data: ComposerCardData }) {
     if (!directCommit) { setAmountError(editor.onReview()); return; }
     setAmountError(editor.blocked ?? editor.onCommit!());
   }
+  // Leaving this step (pointer or touch: a decimal keypad may have no Enter key) applies a valid draft too; focus within the step,
+  // its pickers or its Canvas node (selecting the card) does not.
+  function commitOnLeave(event: FocusEvent<HTMLElement>) {
+    const next = event.relatedTarget, node = event.currentTarget.closest('.react-flow__node');
+    if (directCommit && editor?.changed && !(next instanceof Node && (poolNodeRef.current?.contains(next) || node?.contains(next)))) commitAmount();
+  }
   function picker(side: 'source' | 'destination'): TokenPickerControl {
     if (bridgeCard) return { label: `Configure ${side} asset`, title: `${side === 'source' ? amountParts?.[2] ?? pairSource : pairDestination} on ${side === 'source' ? sourceNetwork : destinationNetwork}`, expanded: bridgePanel === side, controls: bridgePanelId, onToggle: trigger => {
       bridgeTrigger.current = trigger; setBridgePanel(current => current === side ? null : side); setTokenPanel(null);
@@ -558,10 +564,7 @@ export function ComposerCard({ data: card }: { data: ComposerCardData }) {
         onSubmit={event => { event.preventDefault(); commitAmount(); }}
         // Leaving this step (pointer or touch: a decimal keypad may have no Enter key) applies a valid draft too; focus within the step,
         // its pickers or its Canvas node (selecting the card) does not.
-        onBlur={event => {
-          const next = event.relatedTarget, node = event.currentTarget.closest('.react-flow__node');
-          if (directCommit && editor?.changed && !(next instanceof Node && (poolNodeRef.current?.contains(next) || node?.contains(next)))) commitAmount();
-        }}>
+        onBlur={commitOnLeave}>
         <ValuePair relationship="directional" onInvert={bridgeCard ? card.onInvertBridge : card.summary.action === 'Swap' && !stocksCard ? card.actionSelection?.onInvert : undefined}>
         <ValueBox source amount={amountParts?.[1]} token={amountParts?.[2] ?? pairSource ?? '—'} {...stocksCard ? { label: 'Stocks amount', inputLabel: `Stocks amount (${amountParts?.[2] ?? pairSource ?? 'USDG'})` } : {}}
           network={sourceNetwork} editor={editor && directCommit && editor.changed && editor.onCancel ? { ...editor, onEscape: () => { setAmountError(null); editor.onCancel!(); } } : editor} invalid={Boolean(amountError)} {...stocksCard ? {} : { picker: picker('source') }} hint={editor ? 'Enter the source amount' : card.summary.amount} fiatFirst={fiatFirst} onFiatFirstChange={setFiatFirst}
@@ -597,10 +600,25 @@ export function ComposerCard({ data: card }: { data: ComposerCardData }) {
         <ValueBox label="Second liquidity asset amount" inputLabel={`Second liquidity amount (${poolValues[1]!.token})`} amount={poolValues[1]!.amount} token={poolValues[1]!.token} network={sourceNetwork} hint="Second liquidity contribution" fiatFirst={fiatFirst} onFiatFirstChange={setFiatFirst} usd={usdLine(sourceNetwork, null, { status: 'none' })}
           picker={picker('destination')} editor={card.poolProposal ? { value: poolValues[1]!.amount, formId: card.poolProposal.formId, onChange: amount => poolContributions.edit(1, amount) } : undefined}/>
       </ValuePair> : !card.inspection && ['Supply', 'Borrow', 'Repay', 'Withdraw', 'Send'].includes(card.summary.action) && (amountParts || editor)
-        ? <><ValueBox source fiatFirst={fiatFirst} onFiatFirstChange={setFiatFirst} usd={usdLine(sourceNetwork, null, { status: 'none' })} amount={amountParts?.[1]} token={amountParts?.[2] ?? 'USDC'} tokenAddress={card.actionSelection?.assetAddress} network={sourceNetwork} picker={picker('source')} editor={editor} hint={editor ? 'Enter the source amount' : card.summary.amount}/>
+        ? (() => {
+          const fields = <><ValueBox source fiatFirst={fiatFirst} onFiatFirstChange={setFiatFirst} usd={usdLine(sourceNetwork, null, { status: 'none' })} amount={amountParts?.[1]} token={amountParts?.[2] ?? 'USDC'} tokenAddress={card.actionSelection?.assetAddress} network={sourceNetwork} picker={picker('source')}
+            editor={editor && directCommit && editor.changed && editor.onCancel ? { ...editor, onEscape: () => { setAmountError(null); editor.onCancel!(); } } : editor} invalid={directCommit && Boolean(amountError)} hint={editor ? 'Enter the source amount' : card.summary.amount}/>
           {card.funding && <span className="composer-quote-note composer-funding-note" role="status" data-changed={card.funding.changed || undefined}>{card.funding.changed
             ? tr('Step {0} delivers {1} on {2}: this step will no longer be funded by it. Review and apply the change.', card.funding.step, card.funding.symbol, card.funding.network)
-            : tr('Funded by step {0}: spends the {1} it delivers.', card.funding.step, card.funding.symbol)}</span>}</>
+            : tr('Funded by step {0}: spends the {1} it delivers.', card.funding.step, card.funding.symbol)}</span>}</>;
+          // BUILD-FLOFI-SINGLE-AUTH-WORKFLOW-UX-001: an ordinary Aave amount edit has the card's own form, exactly like Swap and Bridge: Enter (or
+          // leaving the step) applies it directly; a reviewed edit keeps the external review form and its Review button.
+          if (!(editor && directCommit)) return fields;
+          return <form className="composer-amount-form composer-lending-amount-form nodrag nopan" onKeyDown={event => event.stopPropagation()}
+            onSubmit={event => { event.preventDefault(); commitAmount(); }} onBlur={commitOnLeave}>
+            {fields}
+            {editor.changed && <div className="composer-amount-actions composer-amount-direct">
+              <span className="composer-amount-hint">{tr("Press Enter to apply")}</span>
+              {editor.onCancel && <button type="button" className="composer-amount-cancel" onClick={() => { setAmountError(null); editor.onCancel!(); }}>{tr("Cancel")}</button>}
+            </div>}
+            {amountError && <span className="composer-amount-error" role="alert">{tr(amountError)}</span>}
+          </form>;
+        })()
         : <span className="numeric composer-amount">{tr(card.summary.amount)}</span>}
       {!card.inspection && card.recipient && <RecipientField recipient={card.recipient} formId={card.supplyProposal?.formId}/>}
       {!card.inspection && card.supplyProposal && <div className="composer-amount-actions composer-supply-actions nodrag nopan" onClick={event => event.stopPropagation()}>
