@@ -9,7 +9,8 @@
  *                the signing surface loads — its own fresh simulation, Review and wallet signature follow, unchanged
  *   continue     the next step, once the previous one reconciled (also after a reload or in another browser, by approval id + wallet proof)
  *   start        the owner chose to confirm each step
- *   authorize    the owner chose ONE passkey authorization for the whole workflow (BUILD-AUTOMATION-002's Universal Workflow Authorization)
+ *   authorize    the owner chose ONE wallet authorization for the whole workflow: one exact workflow grant per EVM network, signed by the run's
+ *                wallet (BUILD-FLOFI-UNIVERSAL-SINGLE-AUTH-MAINNET-001)
  *   cancel / resume   end a run that never submitted anything (or that halted), or resume a halted step that submitted nothing
  */
 import type { Command } from '../domain/commands';

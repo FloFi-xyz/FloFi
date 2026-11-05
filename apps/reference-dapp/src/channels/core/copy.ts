@@ -130,7 +130,7 @@ const EN = {
   stepsList: (lines: readonly string[]) => lines.length ? `Workflow (${lines.length} step${lines.length === 1 ? '' : 's'}):\n${lines.map((line, i) => `${i + 1}. ${line}`).join('\n')}`
     : 'There are no steps yet. Tell me what you want to do.',
   authorizations: (a: AuthorizationFacts) => [...a.confirm !== null ? [`Authorizations: at least ${a.confirm} wallet confirmations in FloFi — one per step, each after a fresh simulation.`] : [],
-    ...a.once ? ['Or ONE passkey authorization for the whole workflow, if your FloFi Credentials cover every step (FloFi checks when you open it).'] : [],
+    ...a.once ? ['Or authorize the whole workflow ONCE in your wallet: one exact signature per network, after which FloFi runs every step without asking again.'] : [],
     'One authorization is not one transaction: each step pays its own network fees.'],
   workflowRun: (r: RunFacts) => [`Workflow: ${RUN_STATE_EN[r.state] ?? r.state}`, ...r.steps.map(step => `${step.index + 1}. ${ACTION_EN[step.action] ?? step.action} — `
     + `${STEP_STATE_EN[step.state] ?? step.state}${step.transaction ? ` · tx ${shorten(step.transaction)}` : ''}`)].join('\n'),
@@ -228,7 +228,7 @@ const PT: Copy = {
   stepsList: lines => lines.length ? `Fluxo (${lines.length} etapa${lines.length === 1 ? '' : 's'}):\n${lines.map((line, i) => `${i + 1}. ${line}`).join('\n')}`
     : 'Ainda não há etapas. Diga o que você quer fazer.',
   authorizations: a => [...a.confirm !== null ? [`Autorizações: pelo menos ${a.confirm} confirmações na carteira no FloFi — uma por etapa, cada uma depois de uma nova simulação.`] : [],
-    ...a.once ? ['Ou UMA autorização com passkey para o fluxo inteiro, se as suas Credenciais do FloFi cobrirem todas as etapas (o FloFi verifica quando você abrir).'] : [],
+    ...a.once ? ['Ou autorize o fluxo inteiro UMA vez na sua carteira: uma assinatura exata por rede, e depois o FloFi executa cada etapa sem pedir de novo.'] : [],
     'Uma autorização não é uma transação: cada etapa paga as suas próprias taxas de rede.'],
   workflowRun: r => [`Fluxo: ${RUN_STATE_PT[r.state] ?? r.state}`, ...r.steps.map(step => `${step.index + 1}. ${ACTION_PT[step.action] ?? step.action} — `
     + `${STEP_STATE_PT[step.state] ?? step.state}${step.transaction ? ` · tx ${shorten(step.transaction)}` : ''}`)].join('\n'),

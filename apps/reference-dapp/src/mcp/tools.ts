@@ -346,10 +346,11 @@ export function createFlofiMcpServer(ctx: ToolContext): McpServer {
           ...scope === 'ENGINEERING' ? ['supply → borrow → swap on base-sepolia (the lending composition)'] : [],
           'a sequence whose every step has an owner-execution flow, where this deployment runs workflows (request_user_approval says so)'],
         sequences: 'One approval for the whole workflow; the owner confirms each step in their wallet, in order, each after the previous step reconciled. ' +
-          'Where the owner enrolled delegated Credentials and this deployment can sign delegated steps, ONE passkey authorization can cover the whole ' +
-          'workflow instead (request_user_approval reports the authorizations each mode needs). One authorization is not one transaction and not zero gas.',
-        bindings: 'A step may spend what an earlier step actually delivered: {step, amountFrom}; its own amount is then a cap. Resolved from reconciled ' +
-          'received amounts in both confirm-each-step and delegated modes (min(cap, received)).' },
+          'Where every step is delegation-capable on an enabled EVM mainnet and this deployment can sign delegated steps, ONE wallet authorization can cover ' +
+          'the whole workflow instead: the owner signs one exact workflow grant per EVM network (each call exact and usable once), and FloFi executes the ' +
+          'steps without asking again (request_user_approval reports the authorizations each mode needs). One authorization is not one transaction and not zero gas.',
+        bindings: 'A step may spend what an earlier step actually delivered: {step, amountFrom}; its own amount is then a cap. Confirm each step: resolved from ' +
+          'reconciled received amounts (min(cap, received)). Authorize once: the earlier step\'s on-chain guaranteed minimum, fixed when the owner signs.' },
       capabilities: (await capabilityFacts(ctx.runtime, ctx.policy ?? DEFAULT_POLICY, { network: args.network, action: args.action }, scope)).map(({ row: r, flow, mode, previewable,
         previewUnavailableReason, gates }) => {
         return { action: r.action, network: r.network, destinationNetwork: r.destinationNetwork, funds: r.funds, actionTypes: r.actionTypes, adapters: r.adapters,
@@ -534,7 +535,7 @@ function registerApprovalTools(ctx: ToolContext, register: Register) {
     'First call compose_strategy and review_strategy. Quote only this successful tool result\'s public nonsecret approvalUrl verbatim (or show the FloFi panel); ' +
     'never invent an approval URL or ID. If this call fails or is unavailable, disclose it and provide no approval CTA. ' +
     'Mainnet may be disabled by policy. A multi-step workflow is one approval: tell the user how many authorizations `authorizationPlan` reports (one wallet ' +
-    'confirmation per step, or ONE passkey authorization when delegated Credentials cover every step); each step runs only after the previous one reconciled. ' +
+    'confirmation per step, or ONE wallet authorization — one exact signed grant per EVM network — when every step can be delegated); each step runs only after the previous one reconciled. ' +
     'The same approvalUrl reopens the next step for the owner.', SCHEMAS[ctx.scope ?? networkScope()].request,
   { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false }, async args => {
     const result = await requestApproval(deps(), requester, args.strategy, args.workflowHash);
