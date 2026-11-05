@@ -31,7 +31,9 @@ export type AaveReserveStatus = {
   readonly priceSourceMatches: boolean | null;
   /** Current variable rates as APY in percent (informational, variable). */ readonly supplyApyPercent: number; readonly borrowApyPercent: number;
   readonly supply: AaveReserveAvailability; readonly borrow: AaveReserveAvailability;
-  /** The owner's balances; `collateralEnabled` is null when the account configuration could not be read (never guessed). */
+  /** False when a reserve read failed: its zero-valued facts are then unknown, never live values (shown as unavailable; Simulate checks on chain). */
+  readonly complete?: boolean;
+  /** The owner's balances (omitted when they could not be read); `collateralEnabled` is null when the account configuration could not be read (never guessed). */
   readonly wallet?: { readonly balance: string; readonly supplied: string; readonly debt: string; readonly collateralEnabled: boolean | null };
 };
 export type AaveAccountSummary = { readonly collateralBase: string; readonly debtBase: string; readonly availableBorrowBase: string; readonly healthFactor: string;
@@ -171,8 +173,9 @@ function statusOf(profile: AaveLendingProfile, listed: boolean, r: readonly (str
     supplyApyPercent: aaveRateApyPercent(reserve?.[2] ?? 0n), borrowApyPercent: aaveRateApyPercent(reserve?.[4] ?? 0n),
     priceSourceMatches: snapshotSource && address(r[6] ?? null) ? address(r[6] ?? null) === snapshotSource : null,
   };
-  return { ...base, supply: { available: reasonFor('supply', base, 0n) === null, reason: reasonFor('supply', base, 0n) },
+  const complete = Boolean(reserve) && r.slice(1, 6).every(value => value !== null);
+  return { ...base, complete, supply: { available: reasonFor('supply', base, 0n) === null, reason: reasonFor('supply', base, 0n) },
     borrow: { available: reasonFor('borrow', base, eMode) === null, reason: reasonFor('borrow', base, eMode) },
-    ...withAccount ? { wallet: { balance: (uint(r[7] ?? null) ?? 0n).toString(), supplied: (uint(r[8] ?? null) ?? 0n).toString(), debt: (uint(r[9] ?? null) ?? 0n).toString(),
+    ...withAccount && r.slice(7, 10).every(value => value !== null) ? { wallet: { balance: (uint(r[7] ?? null) ?? 0n).toString(), supplied: (uint(r[8] ?? null) ?? 0n).toString(), debt: (uint(r[9] ?? null) ?? 0n).toString(),
       collateralEnabled: userConfiguration === null ? null : Boolean((userConfiguration >> (2n * BigInt(profile.reserveId) + 1n)) & 1n) } } : {} };
 }

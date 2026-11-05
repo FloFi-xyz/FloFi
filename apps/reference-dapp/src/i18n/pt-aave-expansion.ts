@@ -41,4 +41,24 @@ export const portugueseAaveExpansion: Readonly<Record<string, string>> = Object.
   'inactive': 'inativa', 'paused': 'pausada', 'frozen': 'congelada', 'supply cap reached': 'limite de depósito atingido', 'borrowing disabled': 'empréstimo desativado',
   'borrow cap reached': 'limite de empréstimo atingido', 'no liquidity': 'sem liquidez', 'no oracle price': 'sem preço do oráculo', 'isolated': 'isolada',
   'unverified': 'não verificada', 'not listed': 'não listada', 'E-Mode account': 'conta em E-Mode',
+  'Checking which steps of this workflow already ran before continuing. Nothing can be simulated or signed until this finishes.':
+    'Verificando quais etapas deste fluxo já foram executadas antes de continuar. Nada pode ser simulado ou assinado até isso terminar.',
+  'Step {0} may already have run: FloFi could not read its execution record to confirm it. It is not offered again until it is confirmed.':
+    'A etapa {0} pode já ter sido executada: o FloFi não conseguiu ler o registro da execução para confirmar. Ela não é oferecida de novo até ser confirmada.',
+  'Step {0} spends what an earlier step delivered to wallet {1}. Connect that wallet to continue; nothing was simulated or sent.':
+    'A etapa {0} usa o que uma etapa anterior entregou à carteira {1}. Conecte essa carteira para continuar; nada foi simulado ou enviado.',
+  'Check again': 'Verificar novamente',
+  'Only if your wallet history shows that step {0} did not run:': 'Somente se o histórico da sua carteira mostrar que a etapa {0} não foi executada:',
+  'Forget this record and offer step {0} again': 'Esquecer este registro e oferecer a etapa {0} novamente',
+  'name conflicts with the token list': 'nome em conflito com a lista de tokens',
+  'Your injected wallet must hold Aave test USDC and Base Sepolia ETH for gas.': 'Sua carteira injetada precisa ter USDC de teste da Aave e ETH da Base Sepolia para o gás.',
+  'Your injected wallet must hold USDC and Base Sepolia ETH for gas.': 'Sua carteira injetada precisa ter USDC e ETH da Base Sepolia para o gás.',
+  'Your wallet needs more Aave test USDC for this Supply.': 'Sua carteira precisa de mais USDC de teste da Aave para este Supply.',
+  'Your wallet needs more USDC for this Supply.': 'Sua carteira precisa de mais USDC para este Supply.',
+  'Your wallet needs more of the Aave test asset for this Supply.': 'Sua carteira precisa de mais do ativo de teste da Aave para este Supply.',
+  'Your wallet needs more of this asset for this Supply.': 'Sua carteira precisa de mais deste ativo para este Supply.',
+  'Enter a positive {0} amount with at most {1} decimal places.': 'Informe um valor positivo de {0} com no máximo {1} casas decimais.',
+  'Enter a valid beneficiary wallet address.': 'Informe um endereço de carteira beneficiária válido.',
+  'This reserve cannot be authored here: its name conflicts with the token list.': 'Esta reserva não pode ser usada aqui: o nome dela conflita com a lista de tokens.',
+  'Check the Supply network, asset, amount and beneficiary.': 'Verifique a rede, o ativo, o valor e o beneficiário do Supply.',
 });

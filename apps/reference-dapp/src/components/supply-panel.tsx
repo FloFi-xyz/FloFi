@@ -27,11 +27,16 @@ export function SupplyAuthoringForm({nodeId,onDone,direct=false,reviewFormId}:{n
     const input:SupplyInput={network,asset,amount,beneficiary:beneficiary||wallet.account||''};createAuthoredSupply(nodeId??'node-preview',input);
     const command=nodeId?{type:'SET_SUPPLY' as const,nodeId,input,source:'CANVAS' as const,baseRevision:state.workflow.revision}:{type:'ADD_SUPPLY' as const,input,source:'CANVAS' as const,baseRevision:state.workflow.revision};
     if(direct)dispatch(command);else propose(command);onDone?.();
-  }catch(cause){setError(cause instanceof Error?cause.message:'SUPPLY_INPUT_INVALID');}}
+  }catch(cause){
+    // The form names what to fix, never a raw error code.
+    const code=cause instanceof Error?cause.message:'',decimals=lendingReservesFor(network).find(reserve=>reserve.symbol===asset)?.decimals??6;
+    setError(/AMOUNT/.test(code)?tr('Enter a positive {0} amount with at most {1} decimal places.',asset,String(decimals)):/BENEFICIARY|ADDRESS/.test(code)?tr('Enter a valid beneficiary wallet address.')
+      :/DEPLOYMENT|ASSET/.test(code)?tr('This reserve cannot be authored here: its name conflicts with the token list.'):tr('Check the Supply network, asset, amount and beneficiary.'));
+  }}
   return <form id={reviewFormId} className="inspector-fields" aria-label={tr(nodeId?'Edit Supply':'Create Supply')} onSubmit={submit}>
     <strong>{tr("Supply to Aave V3")}</strong>
     <label>{tr("Supply network")}<select aria-label={tr("Supply network")} value={network} onChange={e=>setNetwork(e.target.value as LendingNetwork)}>{LENDING_NETWORKS.map(n=><option key={n}>{tr(n)}</option>)}</select></label>
-    <label>{tr("Supply asset")}<select aria-label={tr("Supply asset")} value={asset} onChange={e=>setAsset(e.target.value)}>{lendingReservesFor(network).map(reserve=>{const option=reserveOptionLabel(reserve.symbol,live,'supply',tr);return <option key={reserve.asset} value={reserve.symbol} disabled={option.disabled&&reserve.symbol!==asset}>{option.label}</option>;})}</select></label>
+    <label>{tr("Supply asset")}<select aria-label={tr("Supply asset")} value={asset} onChange={e=>setAsset(e.target.value)}>{lendingReservesFor(network).map(reserve=>{const option=reserveOptionLabel(reserve,live,'supply',tr,network);return <option key={reserve.asset} value={reserve.symbol} disabled={option.disabled&&reserve.symbol!==asset}>{option.label}</option>;})}</select></label>
     <LendingReserveStatus live={live} asset={asset} kind="supply"/>
     <label>{tr("Supply amount (")}{tr(asset)})<TokenAmountInput aria-label={tr(`Supply amount (${asset})`)} value={amount} maxLength={80} onValueChange={value=>{setError('');if(reviewFormId&&nodeId)editCanvasAmount(nodeId,value);else setAmount(value);}}/></label>
     <label>{tr("Supply beneficiary")}<input aria-label={tr("Supply beneficiary")} autoComplete="off" value={beneficiary||wallet.account||''} maxLength={42} onChange={e=>setBeneficiary(e.target.value)}/></label>
@@ -59,7 +64,7 @@ export function SupplyPanel({view}:{view:'simulate'|'execute'}){
     <p>{tr("Beneficiary: ")}<span>{tr(fields?.beneficiary??review?.beneficiary)}</span></p>
     {supply.retired&&<p role="alert">{tr("The workflow changed. Prior authorization is invalid. Observe any existing transaction before starting a new execution.")}</p>}
     {view==='simulate'?<>
-      <p>{tr(lendingCopy('Your injected wallet must hold Aave test USDC and Base Sepolia ETH for gas.',shown))}</p>
+      <p>{lendingCopy('Your injected wallet must hold Aave test USDC and Base Sepolia ETH for gas.',shown,tr)}</p>
       <button type="button" disabled={supply.busy} onClick={()=>void supply.simulate()}>{tr("Simulate Supply")}</button><PendingExecutionNote pending={Boolean(pending)}/>
       {review&&!supply.retired&&<><p>{tr("Approval required: ")}{tr(review.approvalRequired?'Yes — approve exactly this Supply amount.':'No — existing allowance is sufficient.')}</p>
         <p>{tr("Estimated maximum network cost: ")}{tr(formatUnits(review.manifest.gasBudgets[0]?.maximumAmount??'0',18))}{tr(" ETH.")}</p></>}
@@ -76,7 +81,7 @@ export function SupplyPanel({view}:{view:'simulate'|'execute'}){
         <button type="button" disabled={supply.busy} onClick={()=>void supply.recoverReview()}>{tr("Prepare fresh review")}</button></>}
       {record?.evidence&&<><p>{tr("Supply independently reconciled. Position increased by ")}{tr(formatUnits(record.observations.at(-1)?.delta??'0',shown.decimals))} {tr(shown.asset)}.</p><a download="flofi-aave-supply-evidence.json" href={'data:application/json;charset=utf-8,'+encodeURIComponent(JSON.stringify(record.evidence,null,2))}>{tr("Download Evidence Bundle")}</a></>}
     </>}
-    {info&&<p role="status">{tr(lendingCopy(messages[info]??'Execution needs attention. Inspect technical details and observe any existing transaction.',shown))}</p>}
+    {info&&<p role="status">{lendingCopy(messages[info]??'Execution needs attention. Inspect technical details and observe any existing transaction.',shown,tr)}</p>}
     <details><summary>{tr("Show technical details")}</summary><pre>{JSON.stringify({error:info,submissionError:record?.submissionError,walletDiagnostic:record?.walletDiagnostic,notSubmitted:record?.notSubmitted,absence:record?.absence,recoveryOf:record?.recoveryOf,review,attempts:record?.attempts,observations:record?.observations,verdict:record?.verdict,environment:record?.evidence?.bundle.environment},null,2)}</pre></details>
   </section>;
 }

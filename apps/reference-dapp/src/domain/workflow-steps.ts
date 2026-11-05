@@ -81,7 +81,10 @@ function describe(node: Node, workflow: Workflow, context: ReviewContext): Descr
   if (universal) return { kind: 'BRIDGE', detail: { type: 'UNIVERSAL_BRIDGE', input: universalInputOf(universal) },
     protocol: `Universal Cross-chain Router (${UNIVERSAL_BRIDGE_ROUTING_LABEL[universal.routing]})`, network: `${universal.sourceLabel} → ${universal.destinationLabel}`, testFunds: false };
   // Test funds on the testnet Aave profiles; BUILD-BASE-001 Base mainnet lends real funds.
-  const lendingTestFunds = (input: { network: string; asset: string }) => aaveEnvironment(lendingProfileFor(input.network, input.asset)) !== 'MAINNET';
+  const lendingTestFunds = (input: { network: string; asset: string }) => {
+    // A label the token list resolves differently never crashes the step list; the network alone says whether funds are real.
+    try { return aaveEnvironment(lendingProfileFor(input.network, input.asset)) !== 'MAINNET'; } catch { return /Sepolia/i.test(input.network); }
+  };
   const withdrawn = read(() => withdrawDetails(node as Parameters<typeof withdrawDetails>[0]));
   if (withdrawn) return { kind: 'WITHDRAW', detail: { type: 'AAVE_WITHDRAW', input: withdrawn }, protocol: 'Aave V3', network: withdrawn.network, testFunds: lendingTestFunds(withdrawn) };
   for (const [operation, reader] of [['REPAY', repayDetails], ['BORROW', borrowDetails], ['SUPPLY', supplyDetails]] as const) {

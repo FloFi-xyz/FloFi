@@ -40,24 +40,33 @@ export function completedByRecord(kind: string, record: unknown, workflowId: str
   return final && Boolean(workflow) && workflow!.workflowId === workflowId && Array.isArray(workflow!.nodes) &&
     workflow!.nodes.some(node => isObject(node) && node.nodeId === nodeId);
 }
+/** The wallet that executed a step, from the runtime's own durable record (lower-case EVM address or Solana key); null when not recorded. */
+export function ownerByRecord(kind: string, record: unknown): string | null {
+  if (!isObject(record)) return null;
+  const value = kind === 'public' && Array.isArray(record.attempts) && isObject(record.attempts.at(-1)) ? (record.attempts.at(-1) as Record<string, unknown>).account
+    : kind === 'supply' && isObject(record.review) ? record.review.account : kind === 'solana-swap' && isObject(record.review) ? record.review.owner : null;
+  return typeof value === 'string' && value ? /^0x[0-9a-fA-F]{40}$/.test(value) ? value.toLowerCase() : value : null;
+}
 /**
- * The longest prefix of `stored` that the runtimes' durable records prove for this exact workflow and sequence. Allocations and delivered
- * amounts are recomputed; a delivered amount that differs from the pointer's, or that a later step needs but the record does not prove,
- * stops the restoration there.
+ * The longest prefix of `stored` that the runtimes' durable records prove for this exact workflow and sequence. Allocations, owners and delivered
+ * amounts are recomputed; a delivered amount that differs from the pointer's, or that a later step needs but the record does not prove, stops
+ * the restoration there. `unreadable` is true when it stopped because a record could not be read (retry; never treat the step as new).
  */
-export async function proveCompletions(stored: readonly StoredCompletion[], workflow: Workflow, sequence: WorkflowSequence | null, read: RecordReader): Promise<CompletedStep[]> {
+export async function proveCompletions(stored: readonly StoredCompletion[], workflow: Workflow, sequence: WorkflowSequence | null,
+  read: RecordReader): Promise<{ readonly proven: CompletedStep[]; readonly unreadable: boolean }> {
   const proven: CompletedStep[] = [];
-  if (!sequence) return proven;
+  if (!sequence) return { proven, unreadable: false };
   for (const [index, item] of stored.entries()) {
     const step = sequence.steps[index], node = step && workflow.nodes.find(candidate => candidate.nodeId === step.nodeId);
     if (!step || !node || step.nodeId !== item.nodeId || stepNodeKey(node) !== item.node) break;
     let record: unknown;
-    try { record = await read(item.kind, item.runKey); } catch { break; }
+    try { record = await read(item.kind, item.runKey); } catch { return { proven, unreadable: true }; }
+    if (record === null || record === undefined) return { proven, unreadable: true };
     if (!completedByRecord(item.kind, record, workflow.workflowId, item.nodeId)) break;
-    const received = deliveredByRecord(item.kind, record, step.output);
+    const received = deliveredByRecord(item.kind, record, step.output), owner = ownerByRecord(item.kind, record);
     const funds = sequence.steps.some(later => later.funding.some(funding => funding.fundedBy === index));
     if ((item.received !== null && received !== item.received) || (funds && received === null)) break;
-    proven.push({ nodeId: item.nodeId, node: item.node, received, runKey: item.runKey, kind: item.kind, allocations: fundingAllocations(step, proven) });
+    proven.push({ nodeId: item.nodeId, node: item.node, received, runKey: item.runKey, kind: item.kind, ...owner ? { owner } : {}, allocations: fundingAllocations(step, proven) });
   }
-  return proven;
+  return { proven, unreadable: false };
 }

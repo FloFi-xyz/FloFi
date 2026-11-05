@@ -84,7 +84,7 @@ function lendingText(language: Language, mainnets = true): string {
     if (assets.length === 1) { byAsset.set(assets[0]!, [...byAsset.get(assets[0]!) ?? [], network]); continue; }
     const shown = assets.slice(0, LENDING_TEXT_LISTED).join(', ');
     // No count is stated: the live market decides availability, and the Copilot states only numbers it holds.
-    markets.push(language === 'PT' ? `as reservas listadas na ${network.name} (${shown} e outras)` : `the listed reserves on ${network.name} (${shown} and more)`);
+    markets.push(language === 'PT' ? `reservas listadas na ${network.name} (${shown} e outras)` : `the listed reserves on ${network.name} (${shown} and more)`);
   }
   return joinGroups([...[...byAsset].map(([asset, networks]) => language === 'PT' ? `${asset} na ${names(networks, 'PT')}` : `${asset} on ${names(networks, 'EN')}`), ...markets], language);
 }

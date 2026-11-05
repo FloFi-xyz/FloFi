@@ -5,6 +5,7 @@
  */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { AUTHORING_CAPABILITIES } from '../authoring-capabilities';
+import { lendingReservesFor } from '../supply-authoring';
 import { NETWORKS } from '../network-registry';
 import { setActiveNetworkScope } from '../network-scope';
 import { CopilotSession, act, intent } from '../copilot-session.test-harness';
@@ -55,7 +56,9 @@ describe('Capability API: one registry-driven view per network', () => {
   it('catalog networks report catalog availability; lending binds its registered asset; required parameters come from the strategy schema', () => {
     const base = networkCapabilityProfile('PUBLIC_MAINNET', 'base')!;
     expect(base.actions.find(action => action.action === 'swap')!.assets).toMatchObject({ kind: 'OFFICIAL_CATALOG', loaded: true });
-    expect(base.actions.find(action => action.action === 'supply')!.assets).toEqual({ kind: 'LISTED', symbols: ['USDC'] });
+    // BUILD AAVE-V3-EXPANSION-001: lending lists every registered reserve of the market (from the registry, USDC first), never USDC only.
+    expect(base.actions.find(action => action.action === 'supply')!.assets).toEqual({ kind: 'LISTED', symbols: lendingReservesFor('Base').map(reserve => reserve.symbol) });
+    expect(lendingReservesFor('Base').map(reserve => reserve.symbol).slice(0, 2)).toEqual(['USDC', 'WETH']);
     expect(base.actions.find(action => action.action === 'supply')!.requiredParameters).toEqual(['network', 'asset', 'amount', 'beneficiary']);
     expect(base.actions.find(action => action.action === 'repay')!.limitations).toContain('PARTIAL_AMOUNTS_ONLY');
     expect(networksWith('PUBLIC_MAINNET', 'supply')).toEqual(['Base', 'Arbitrum One', 'Ethereum']);

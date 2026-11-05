@@ -119,7 +119,7 @@ export function planGoal(goal: Goal, scope: NetworkScope): GoalPlan {
   if (goal.target.use === 'SUPPLY') {
     const wanted = targetAsset ?? goal.source.asset;
     const offers = lending.filter(offer => same(offer.asset, wanted));
-    if (!offers.length) return { kind: 'UNSUPPORTED', code: 'LENDING_ASSET_NOT_SUPPORTED', network: null, options: [...new Set(lending.map(offer => `${offer.asset} · ${offer.network.name}`))], alternatives: [] };
+    if (!offers.length) return { kind: 'UNSUPPORTED', code: 'LENDING_ASSET_NOT_SUPPORTED', network: null, options: [...new Set(lending.map(offer => `${offer.asset} · ${offer.network.name}`))].slice(0, 8), alternatives: [] };
     if (!target) return { kind: 'NEEDS', field: 'targetNetwork', options: [...new Set(offers.map(offer => offer.network.name))] };
     const offer = offers.find(item => item.network === target);
     if (!offer) return { kind: 'UNSUPPORTED', code: 'LENDING_NOT_ON_NETWORK', network: target.name, options: [...new Set(offers.map(item => item.network.name))], alternatives: [] };

@@ -33,7 +33,7 @@ export function BorrowAuthoringForm({nodeId,onDone,direct=false,reviewFormId}:{n
   return <form id={reviewFormId} className="inspector-fields" aria-label={tr(nodeId?'Edit Borrow':'Create Borrow')} onSubmit={submit}>
     <strong>{tr("Borrow from Aave V3")}</strong>
     <label>{tr("Borrow network")}<select aria-label={tr("Borrow network")} value={network} onChange={e=>setNetwork(e.target.value as LendingNetwork)}>{LENDING_NETWORKS.map(n=><option key={n}>{tr(n)}</option>)}</select></label>
-    <label>{tr("Borrow asset")}<select aria-label={tr("Borrow asset")} value={asset} onChange={e=>setAsset(e.target.value)}>{lendingReservesFor(network).map(reserve=>{const option=reserveOptionLabel(reserve.symbol,live,'borrow',tr);return <option key={reserve.asset} value={reserve.symbol} disabled={option.disabled&&reserve.symbol!==asset}>{option.label}</option>;})}</select></label>
+    <label>{tr("Borrow asset")}<select aria-label={tr("Borrow asset")} value={asset} onChange={e=>setAsset(e.target.value)}>{lendingReservesFor(network).map(reserve=>{const option=reserveOptionLabel(reserve,live,'borrow',tr,network);return <option key={reserve.asset} value={reserve.symbol} disabled={option.disabled&&reserve.symbol!==asset}>{option.label}</option>;})}</select></label>
     <LendingReserveStatus live={live} asset={asset} kind="borrow"/>
     <label>{tr("Borrow amount (")}{tr(asset)})<TokenAmountInput aria-label={tr(`Borrow amount (${asset})`)} value={amount} maxLength={80} onValueChange={value=>{setError('');if(reviewFormId&&nodeId)editCanvasAmount(nodeId,value);else setAmount(value);}}/></label>
     {!wallet.account&&!existing&&<button type="button" onClick={()=>void wallet.connect()}>{tr("Connect borrower wallet")}</button>}
@@ -85,7 +85,7 @@ export function BorrowPanel({view}:{view:'simulate'|'execute'}){
       {record?.evidence&&observation?.postPosition?.borrow&&<><p>{tr("Borrow independently reconciled. Wallet increased by ")}{tr(human(observation.walletDelta!,shown.decimals))} {tr(shown.asset)}{tr("; debt is ")}{tr(human(observation.postPosition.borrow.debt,shown.decimals))} {tr(shown.asset)}{tr("; health factor is ")}{tr(hf(observation.postPosition.borrow.healthFactor))}.</p>
         <a download="flofi-aave-borrow-evidence.json" href={'data:application/json;charset=utf-8,'+encodeURIComponent(JSON.stringify(record.evidence,null,2))}>{tr("Download Evidence Bundle")}</a></>}
     </>}
-    {info&&<p role="status">{tr(lendingCopy(messages[info]??'Borrow needs attention. Inspect technical details and observe any existing transaction.',shown))}</p>}
+    {info&&<p role="status">{lendingCopy(messages[info]??'Borrow needs attention. Inspect technical details and observe any existing transaction.',shown,tr)}</p>}
     <details><summary>{tr("Show technical details")}</summary><pre>{JSON.stringify({error:info,review,attempts:record?.attempts,observations:record?.observations,walletDiagnostic:record?.walletDiagnostic,environment:record?.evidence?.bundle.environment},null,2)}</pre></details>
   </section>;
 }

@@ -33,7 +33,7 @@ export function RepayAuthoringForm({nodeId,onDone,direct=false,reviewFormId}:{no
   return <form id={reviewFormId} className="inspector-fields" aria-label={tr(nodeId?'Edit Repay':'Create Repay')} onSubmit={submit}>
     <strong>{tr("Repay to Aave V3")}</strong>
     <label>{tr("Repay network")}<select aria-label={tr("Repay network")} value={network} onChange={e=>setNetwork(e.target.value as LendingNetwork)}>{LENDING_NETWORKS.map(n=><option key={n}>{tr(n)}</option>)}</select></label>
-    <label>{tr("Repay asset")}<select aria-label={tr("Repay asset")} value={asset} onChange={e=>setAsset(e.target.value)}>{lendingReservesFor(network).map(reserve=>{const option=reserveOptionLabel(reserve.symbol,live,'repay',tr);return <option key={reserve.asset} value={reserve.symbol} disabled={option.disabled&&reserve.symbol!==asset}>{option.label}</option>;})}</select></label>
+    <label>{tr("Repay asset")}<select aria-label={tr("Repay asset")} value={asset} onChange={e=>setAsset(e.target.value)}>{lendingReservesFor(network).map(reserve=>{const option=reserveOptionLabel(reserve,live,'repay',tr,network);return <option key={reserve.asset} value={reserve.symbol} disabled={option.disabled&&reserve.symbol!==asset}>{option.label}</option>;})}</select></label>
     <LendingReserveStatus live={live} asset={asset} kind="repay"/>
     <label>{tr("Repay amount (")}{tr(asset)})<TokenAmountInput aria-label={tr(`Repay amount (${asset})`)} value={amount} maxLength={80} onValueChange={value=>{setError('');if(reviewFormId&&nodeId)editCanvasAmount(nodeId,value);else setAmount(value);}}/></label>
     <label>{tr("Debt mode")}<select aria-label={tr("Debt mode")} value="Variable (2)" onChange={()=>undefined}><option>{tr("Variable (2)")}</option></select></label>
@@ -75,7 +75,7 @@ export function RepayPanel({view}:{view:'simulate'|'execute'}){
       {record?.attempts.length&&!record.evidence?<a download="flofi-aave-repay-execution-record.json" href={'data:application/json;charset=utf-8,'+encodeURIComponent(JSON.stringify(record,null,2))}>{tr("Download execution record")}</a>:null}
       {record?.evidence&&observation?.postPosition?.borrow&&<><p>{tr("Repay independently reconciled. Wallet paid exactly ")}{tr(human(review!.amount,shown.decimals))} {tr(shown.asset)}{tr("; variable debt is ")}{tr(human(observation.postPosition.borrow.debt,shown.decimals))} {tr(shown.asset)}{tr("; health factor is ")}{tr(hf(observation.postPosition.borrow.healthFactor))}{tr(". Collateral is unchanged.")}</p><a download="flofi-aave-repay-evidence.json" href={'data:application/json;charset=utf-8,'+encodeURIComponent(JSON.stringify(record.evidence,null,2))}>{tr("Download Evidence Bundle")}</a></>}
     </>}
-    {info&&<p role="status">{tr(lendingCopy(messages[info]??'Repay needs attention. Inspect technical details and observe any existing transaction.',shown))}</p>}
+    {info&&<p role="status">{lendingCopy(messages[info]??'Repay needs attention. Inspect technical details and observe any existing transaction.',shown,tr)}</p>}
     <details><summary>{tr("Show technical details")}</summary><pre>{JSON.stringify({error:info,review,attempts:record?.attempts,observations:record?.observations,walletDiagnostic:record?.walletDiagnostic,environment:record?.evidence?.bundle.environment},null,2)}</pre></details>
   </section>;
 }

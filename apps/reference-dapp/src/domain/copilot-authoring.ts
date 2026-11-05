@@ -699,8 +699,11 @@ function lendingNetworks(asset: CopilotAsset | null, g: Grounding): Network[] {
   return [...new Set(lendingOffers().filter(offer => (asset === null || offer.asset === asset) && offer.network.copilot !== null && actionNetworks('supply', g).includes(offer.network.copilot))
     .map(offer => offer.network.copilot as Network))];
 }
-/** A reserve label written as a whole token: never as part of a longer label ("USDC" inside "USDC.e", "USDe" inside "PT-USDe-5FEB2026"). */
-const reserveLabelWritten = (text: string, label: string) => new RegExp(`(?<![A-Za-z0-9._-])${escapeRegExp(label)}(?![A-Za-z0-9._-])`, 'i').test(text);
+/**
+ * A reserve label written as a whole token: never as part of a longer label ("USDC" inside "USDC.e", "USDe" inside "PT-USDe-5FEB2026"). A dot
+ * continues a label only when a letter or digit follows it, so a sentence-final period ("supply 10 GHO.") still names the reserve.
+ */
+const reserveLabelWritten = (text: string, label: string) => new RegExp(`(?<![A-Za-z0-9._-])${escapeRegExp(label)}(?![A-Za-z0-9_-]|\\.[A-Za-z0-9])`, 'i').test(text);
 /** Other reserve labels of the same market that contain `asset` and that the user wrote in full (for example USDC.e when the model said USDC). */
 function longerReservesWritten(asset: string, network: Network, g: Grounding): string[] {
   const wanted = asset.toLowerCase();
@@ -745,6 +748,9 @@ function planLending(a: CopilotLendingAction, g: Grounding, wallet: string | nul
   // PT-USDe-… vs USDe) and never the asset on its own: FloFi asks which reserve instead of choosing one.
   const longer = g.carried.has('asset') ? [] : longerReservesWritten(asset, network, g);
   if (longer.length && !reserveLabelWritten(g.text, asset)) ask(['asset'], m.tokenNotFound(asset), [asset, ...longer]);
+  // Native ETH is never an Aave reserve: "supply my ETH" is not silently turned into WETH (which the wallet may not hold); FloFi asks.
+  if (!g.carried.has('asset') && /^weth$/i.test(asset) && !reserveLabelWritten(g.text, asset) && !/\bwrapped\s+eth(?:er)?\b/i.test(g.text) && /\b(?:eth|ether)\b/i.test(g.text))
+    ask(['asset'], m.aaveNativeEth, ['WETH']);
   const amount = amountOf(a.amount, g, subject), on = COPILOT_NETWORK_LABEL[network];
   if (MAINNETS.has(network)) notes.push(m.catalogFundsNote(on));
   if (a.type === 'WITHDRAW') {

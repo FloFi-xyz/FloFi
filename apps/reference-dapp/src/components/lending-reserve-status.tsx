@@ -11,7 +11,7 @@ import { AAVE_V3_MARKETS } from '@defi-workflow-engine/action-registry';
 import type { AaveMarketCatalog, AaveReserveReason, AaveReserveStatus } from '@defi-workflow-engine/reference-compiler';
 import { useLocale } from '../i18n/locale';
 import { supplyReserves } from '../app/supply-action';
-import { formatLendingAmount } from '../domain/supply-authoring';
+import { formatLendingAmount, lendingSelectable } from '../domain/supply-authoring';
 
 export type LendingKind = 'supply' | 'borrow' | 'repay' | 'withdraw';
 export const RESERVE_REASON_TEXT: Readonly<Record<AaveReserveReason, string>> = Object.freeze({
@@ -51,28 +51,46 @@ export function reserveBlocker(status: AaveReserveStatus | undefined, kind: Lend
 }
 const usd = (base: string) => { const value = BigInt(base); return `$${(value / 100_000_000n).toLocaleString('en-US')}.${(value % 100_000_000n).toString().padStart(8, '0').slice(0, 2)}`; };
 const health = (value: string) => BigInt(value) >= (1n << 255n) ? '∞' : `${BigInt(value) / 10n ** 18n}.${(BigInt(value) % 10n ** 18n).toString().padStart(18, '0').slice(0, 2)}`;
+/**
+ * The live status of the registry reserve labelled `symbol`, matched by its address (a server on another snapshot never lends its status). A
+ * reserve whose reads failed has no live facts (`null`): its zero defaults are never shown as market values.
+ */
+function liveStatus(live: ReturnType<typeof useAaveReserves>, symbol: string): AaveReserveStatus | null {
+  const catalog = live?.catalog, profile = catalog && AAVE_V3_MARKETS.find(market => market.chain === catalog.chain)?.reserves.find(reserve => reserve.symbol === symbol);
+  const status = profile ? catalog.reserves.find(reserve => reserve.asset === profile.asset && reserve.symbol === profile.symbol) : undefined;
+  return status && status.complete !== false ? status : null;
+}
 export function LendingReserveStatus({ live, asset, kind }: { readonly live: ReturnType<typeof useAaveReserves>; readonly asset: string; readonly kind: LendingKind }) {
   const { t: tr } = useLocale();
   if (!live) return null;
-  if (live.loading) return <p className="reserve-status" role="status">{tr('Reading the live Aave reserve…')}</p>;
-  // Labels are unique per market (the registry refuses to load otherwise), so the chosen label names exactly one reserve address.
-  const status = live.catalog?.reserves.find(reserve => reserve.symbol === asset);
-  if (!status) return <p className="reserve-status" role="status">{tr('Live reserve status is unavailable right now; Simulate checks it on chain.')}</p>;
-  const blocker = reserveBlocker(status, kind), account = live.catalog?.account, amount = (value: string) => `${formatLendingAmount(value, status.decimals)} ${status.symbol}`;
-  return <div className="reserve-status" role="status" data-reserve={status.asset} data-available={blocker ? 'false' : 'true'} data-provenance={live.catalog?.provenance ?? 'UNKNOWN'}>
+  const matched = live.loading ? null : liveStatus(live, asset), blocker = matched ? reserveBlocker(matched, kind) : null;
+  // An unlisted or unverified reserve shows only why it cannot be used, none of its figures.
+  const status = matched && matched.listed && matched.verified ? matched : null;
+  const note = blocker === 'ACCOUNT_STATE_UNKNOWN', amount = (value: string) => `${formatLendingAmount(value, status!.decimals)} ${status!.symbol}`, account = live.catalog?.account;
+  // One status region for every state (screen readers announce its updates); a blocker is a separate alert beside it.
+  return <>
+    <div className="reserve-status" role="status" data-reserve={status?.asset ?? ''} data-available={status ? blocker && !note ? 'false' : 'true' : 'unknown'} data-provenance={live.catalog?.provenance ?? 'UNKNOWN'}>
+      {live.loading ? <p>{tr('Reading the live Aave reserve…')}</p> : !status ? <p>{tr('Live reserve status is unavailable right now; Simulate checks it on chain.')}</p> : <>
     {live.catalog?.provenance === 'MOCKED' && <p>{tr('Test fixture data (MOCKED): not a live market read.')}</p>}
-    {blocker && <p role="alert">{tr(RESERVE_REASON_TEXT[blocker])}</p>}
+    {note && <p>{tr(RESERVE_REASON_TEXT.ACCOUNT_STATE_UNKNOWN)}</p>}
     {status.wallet && <p>{tr('Wallet: {0} · Supplied: {1} · Debt: {2}', amount(status.wallet.balance), amount(status.wallet.supplied), amount(status.wallet.debt))}</p>}
     {(kind === 'supply' || kind === 'withdraw') && <p>{tr(status.collateralEligible ? 'Can be used as collateral (LTV {0}%).' : 'Not usable as collateral.', String(status.ltvBps / 100))}</p>}
     <p>{tr(kind === 'borrow' || kind === 'repay' ? 'Variable borrow APY {0}% (informational, changes with the market).' : 'Variable supply APY {0}% (informational, changes with the market).',
       String(kind === 'borrow' || kind === 'repay' ? status.borrowApyPercent : status.supplyApyPercent))}</p>
     {account && (kind === 'borrow' || kind === 'withdraw' || kind === 'repay') && <p>{tr('Borrowing capacity {0} · Health factor {1}', usd(account.availableBorrowBase), health(account.healthFactor))}</p>}
-  </div>;
+      </>}
+    </div>
+    {blocker && !note && <p className="reserve-status-alert" role="alert">{tr(RESERVE_REASON_TEXT[blocker])}</p>}
+  </>;
 }
 /** A reserve option label: its symbol, and why it cannot be used now. */
-export function reserveOptionLabel(symbol: string, live: ReturnType<typeof useAaveReserves>, kind: LendingKind, tr: (value: string) => string): { readonly label: string; readonly disabled: boolean } {
-  const blocker = reserveBlocker(live?.catalog?.reserves.find(reserve => reserve.symbol === symbol), kind);
-  return blocker ? { label: `${symbol} — ${tr(UNAVAILABLE_SHORT[blocker])}`, disabled: true } : { label: symbol, disabled: false };
+export function reserveOptionLabel(reserve: { readonly symbol: string; readonly asset: string }, live: ReturnType<typeof useAaveReserves>, kind: LendingKind, tr: (value: string) => string,
+  network: string): { readonly label: string; readonly disabled: boolean } {
+  const symbol = reserve.symbol;
+  if (!lendingSelectable(network, reserve)) return { label: `${symbol} — ${tr('name conflicts with the token list')}`, disabled: true };
+  const status = liveStatus(live, symbol), blocker = status ? reserveBlocker(status, kind) : null;
+  // An unknown account state is a note (Simulate checks it on chain), never a reason to refuse the option.
+  return blocker && blocker !== 'ACCOUNT_STATE_UNKNOWN' ? { label: `${symbol} — ${tr(UNAVAILABLE_SHORT[blocker])}`, disabled: true } : { label: symbol, disabled: false };
 }
 const UNAVAILABLE_SHORT: Readonly<Record<AaveReserveReason, string>> = Object.freeze({
   RESERVE_INACTIVE: 'inactive', RESERVE_PAUSED: 'paused', RESERVE_FROZEN: 'frozen', SUPPLY_CAP_REACHED: 'supply cap reached', BORROWING_DISABLED: 'borrowing disabled',

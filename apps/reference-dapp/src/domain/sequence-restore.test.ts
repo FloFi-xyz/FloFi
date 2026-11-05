@@ -22,9 +22,10 @@ function composed() {
   return { s, sequence, swapNode };
 }
 /** The public swap runtime's durable record, final and reconciled, for this workflow's swap node. */
+const OWNER = '0x' + '4'.repeat(40);
 const swapRecord = (workflowId: string, nodeId: string, received = '31000000000000000', extra: Record<string, unknown> = {}) => ({
   quote: { executionId: 'exec-0001', chainId: 8453, inputToken: USDC, outputToken: WETH }, workflow: { workflowId, nodes: [{ nodeId }] },
-  outcome: { inputSpent: '100000000', outputReceived: received }, attempts: [], ...extra });
+  outcome: { inputSpent: '100000000', outputReceived: received }, attempts: [{ account: OWNER.toUpperCase().replace('0X', '0x') }], ...extra });
 
 describe('BUILD AAVE-V3-EXPANSION-001 sequence restoration after a refresh', () => {
   it('restores a completed swap from its own reconciled record, recomputing the delivered WETH that funds the Supply', async () => {
@@ -32,16 +33,18 @@ describe('BUILD AAVE-V3-EXPANSION-001 sequence restoration after a refresh', () 
     const stored: StoredCompletion[] = [{ nodeId: swapNode.nodeId, node: stepNodeKey(swapNode), kind: 'public', runKey: 'exec-0001', received: '31000000000000000' }];
     const reads: string[] = [];
     const read: RecordReader = async (kind, runKey) => { reads.push(`${kind}:${runKey}`); return swapRecord(s.workflow.workflowId, swapNode.nodeId); };
-    const proven = await proveCompletions(stored, s.workflow, sequence, read);
-    expect(reads).toEqual(['public:exec-0001']);
-    expect(proven).toEqual([{ nodeId: swapNode.nodeId, node: stepNodeKey(swapNode), received: '31000000000000000', runKey: 'exec-0001', kind: 'public', allocations: [] }]);
+    const { proven, unreadable } = await proveCompletions(stored, s.workflow, sequence, read);
+    expect([reads, unreadable]).toEqual([['public:exec-0001'], false]);
+    expect(proven).toEqual([{ nodeId: swapNode.nodeId, node: stepNodeKey(swapNode), received: '31000000000000000', runKey: 'exec-0001', kind: 'public', owner: OWNER, allocations: [] }]);
     // The runtime then resumes at the Supply: the swap is never offered again.
     expect(validCompletions(sequence, s.workflow, proven)).toHaveLength(1);
   });
   it('never trusts the stored pointer: unreconciled, divergent, foreign, edited or amount-mismatched records restore nothing', async () => {
     const { s, sequence, swapNode } = composed();
     const pointer: StoredCompletion = { nodeId: swapNode.nodeId, node: stepNodeKey(swapNode), kind: 'public', runKey: 'exec-0001', received: '31000000000000000' };
-    const prove = (record: unknown, item = pointer) => proveCompletions([item], s.workflow, sequence, async () => record);
+    const prove = async (record: unknown, item = pointer) => (await proveCompletions([item], s.workflow, sequence, async () => record)).proven;
+    // An unreadable record is reported as such (retry), never as "not done" and never as done.
+    expect(await proveCompletions([pointer], s.workflow, sequence, async () => null)).toEqual({ proven: [], unreadable: true });
     expect(await prove(null)).toEqual([]);
     expect(await prove({ ...swapRecord(s.workflow.workflowId, swapNode.nodeId), outcome: null })).toEqual([]);
     expect(await prove(swapRecord(s.workflow.workflowId, swapNode.nodeId, '31000000000000000', { divergence: 'RECEIPT_MISMATCH' }))).toEqual([]);
@@ -51,8 +54,8 @@ describe('BUILD AAVE-V3-EXPANSION-001 sequence restoration after a refresh', () 
     expect(await prove(swapRecord(s.workflow.workflowId, swapNode.nodeId, '99'))).toEqual([]);
     // A changed swap node no longer matches the pointer.
     expect(await prove(swapRecord(s.workflow.workflowId, swapNode.nodeId), { ...pointer, node: pointer.node.replace('100000000', '200000000') })).toEqual([]);
-    // A reader failure restores nothing.
-    expect(await proveCompletions([pointer], s.workflow, sequence, async () => { throw new Error('SUPPLY_SERVICE_UNAVAILABLE'); })).toEqual([]);
+    // A reader failure restores nothing and asks for a retry.
+    expect(await proveCompletions([pointer], s.workflow, sequence, async () => { throw new Error('SUPPLY_SERVICE_UNAVAILABLE'); })).toEqual({ proven: [], unreadable: true });
   });
   it('parses only well-formed pointers of restorable runtimes for the same workflow', () => {
     const item = { nodeId: 'node-002', node: '{}', kind: 'public', runKey: 'exec-0001', received: '1' };

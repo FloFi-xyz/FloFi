@@ -157,7 +157,15 @@ export function lendingView(chain:string|null|undefined,asset?:string|null):Lend
   return viewOf((chain?lendingProfileOfReserve(chain,asset)??(asset?null:lendingProfileOfChain(chain)):null)??AAVE_V3_BASE_SEPOLIA);
 }
 /** Display facts of a lending network and asset chosen in an authoring form (the network's first reserve when no asset is chosen). */
-export function lendingNetworkView(network:LendingNetwork,asset?:string):LendingView{return viewOf(lendingProfileFor(network,asset??lendingAssetFor(network)));}
+export function lendingNetworkView(network:LendingNetwork,asset?:string):LendingView{
+  // Display only: the registry entry the form selected (never a catalog lookup that may refuse); authoring still resolves through `lendingProfileFor`.
+  const reserves=lendingReservesFor(network),wanted=asset??lendingAssetFor(network);
+  return viewOf(reserves.find(reserve=>reserve.symbol===wanted)??reserves[0]??AAVE_V3_BASE_SEPOLIA);
+}
+/** Whether a form may author this registry reserve: its label resolves to exactly this reserve (a label the token list names differently is refused). */
+export function lendingSelectable(network:string,reserve:{readonly symbol:string;readonly asset:string}):boolean{
+  try{return lendingProfileFor(network,reserve.symbol).asset===reserve.asset;}catch{return false;}
+}
 /** The reserve asset address of an authored lending node (null for any other node). */
 export function lendingNodeAsset(node:SemanticWorkflow['nodes'][number]):string|null{
   node = ownDeclaration(node);
@@ -167,4 +175,8 @@ export function lendingNodeAsset(node:SemanticWorkflow['nodes'][number]):string|
   }catch{return null;}
 }
 /** Panel copy is written for Base Sepolia USDC; the shown profile's network and asset are substituted. Display text only. */
-export function lendingCopy(text:string,view:LendingView):string{return text.replaceAll('Base Sepolia',view.network).replaceAll('USDC',view.asset);}
+export function lendingCopy(text:string,view:LendingView,tr:(value:string)=>string=value=>value):string{
+  // A mainnet reserve holds real funds: never "Aave test" wording. The fixed sentence is translated first, then the network and asset are named.
+  const copy=/Sepolia/.test(view.network)?text:text.replaceAll('the Aave test asset','this asset').replaceAll('Aave test ','');
+  return tr(copy).replaceAll('Base Sepolia',view.network).replaceAll('USDC',view.asset);
+}

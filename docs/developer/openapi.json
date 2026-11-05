@@ -2545,7 +2545,7 @@
                     "type": "string"
                   },
                   "network": {
-                    "description": "Aave V3 network (real funds): every listed reserve of the Aave V3 Core market on base, arbitrum-one and ethereum (asset by symbol or underlying address; availability checked on chain at Simulate).",
+                    "description": "Aave V3 network (real funds): every listed reserve of the Aave V3 Core market on base, arbitrum-one and ethereum (asset by its reserve symbol; availability checked on chain at Simulate).",
                     "anyOf": [
                       {
                         "const": "base",
@@ -2603,7 +2603,7 @@
                     "type": "string"
                   },
                   "network": {
-                    "description": "Aave V3 network (real funds): every listed reserve of the Aave V3 Core market on base, arbitrum-one and ethereum (asset by symbol or underlying address; availability checked on chain at Simulate).",
+                    "description": "Aave V3 network (real funds): every listed reserve of the Aave V3 Core market on base, arbitrum-one and ethereum (asset by its reserve symbol; availability checked on chain at Simulate).",
                     "anyOf": [
                       {
                         "const": "base",
@@ -2661,7 +2661,7 @@
                     "type": "string"
                   },
                   "network": {
-                    "description": "Aave V3 network (real funds): every listed reserve of the Aave V3 Core market on base, arbitrum-one and ethereum (asset by symbol or underlying address; availability checked on chain at Simulate).",
+                    "description": "Aave V3 network (real funds): every listed reserve of the Aave V3 Core market on base, arbitrum-one and ethereum (asset by its reserve symbol; availability checked on chain at Simulate).",
                     "anyOf": [
                       {
                         "const": "base",
@@ -3330,7 +3330,7 @@
                               "type": "string"
                             },
                             "network": {
-                              "description": "Aave V3 network (real funds): every listed reserve of the Aave V3 Core market on base, arbitrum-one and ethereum (asset by symbol or underlying address; availability checked on chain at Simulate).",
+                              "description": "Aave V3 network (real funds): every listed reserve of the Aave V3 Core market on base, arbitrum-one and ethereum (asset by its reserve symbol; availability checked on chain at Simulate).",
                               "anyOf": [
                                 {
                                   "const": "base",
@@ -3388,7 +3388,7 @@
                               "type": "string"
                             },
                             "network": {
-                              "description": "Aave V3 network (real funds): every listed reserve of the Aave V3 Core market on base, arbitrum-one and ethereum (asset by symbol or underlying address; availability checked on chain at Simulate).",
+                              "description": "Aave V3 network (real funds): every listed reserve of the Aave V3 Core market on base, arbitrum-one and ethereum (asset by its reserve symbol; availability checked on chain at Simulate).",
                               "anyOf": [
                                 {
                                   "const": "base",
@@ -3446,7 +3446,7 @@
                               "type": "string"
                             },
                             "network": {
-                              "description": "Aave V3 network (real funds): every listed reserve of the Aave V3 Core market on base, arbitrum-one and ethereum (asset by symbol or underlying address; availability checked on chain at Simulate).",
+                              "description": "Aave V3 network (real funds): every listed reserve of the Aave V3 Core market on base, arbitrum-one and ethereum (asset by its reserve symbol; availability checked on chain at Simulate).",
                               "anyOf": [
                                 {
                                   "const": "base",

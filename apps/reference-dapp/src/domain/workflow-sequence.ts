@@ -44,6 +44,7 @@ export type WorkflowSequence = { readonly steps: readonly SequenceStep[] };
 /** One step that already executed: the exact node it executed and what its reconciled record proves it delivered (null: not provable). */
 export type CompletedStep = { readonly nodeId: string; readonly node: string; readonly received: string | null; readonly runKey: string | null;
   /** The runtime that executed the step (its durable record is read back by `runKey` after a refresh; BUILD AAVE-V3-EXPANSION-001). */ readonly kind?: string;
+  /** The wallet that executed it, from its own record: a later step of the sequence continues only with that wallet. */ readonly owner?: string;
   readonly allocations?: readonly { readonly fundedBy: number; readonly input: SequenceAsset; readonly used: string }[] };
 
 const financial = (workflow: Workflow) => workflow.nodes.filter(node => !node.actionType.startsWith('mock-'));

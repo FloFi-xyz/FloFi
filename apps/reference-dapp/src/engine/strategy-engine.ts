@@ -424,8 +424,16 @@ export function reviewComposition(composed: Composition): StrategyReview {
     message: 'This strategy uses a mainnet: real funds. Nothing executes without the owner\'s Review and wallet signature in the FloFi app.' });
   if ((s.action === 'bridge' || s.action === 'transfer') && s.recipient) findings.push({ level: 'WARNING', code: 'EXPLICIT_RECIPIENT', source: 'STRATEGY', nodeId: null,
     message: `Funds are delivered to ${s.recipient}, not necessarily the signing wallet. Confirm this address belongs to the intended recipient.` });
-  if ((s.action === 'supply' || s.action === 'borrow' || s.action === 'repay') && s.beneficiary) findings.push({ level: 'WARNING', code: 'EXPLICIT_BENEFICIARY', source: 'STRATEGY', nodeId: null,
-    message: `The Aave position of ${s.beneficiary} is affected (onBehalfOf). Confirm it is the intended account; the signer may differ.` });
+  if ((s.action === 'supply' || s.action === 'borrow' || s.action === 'repay') && s.beneficiary) {
+    // BUILD AAVE-V3-EXPANSION-001: Borrow and Repay always act for the signer, and every expansion reserve (and the Ethereum/Arbitrum USDC
+    // profiles) credits only the signer: say so instead of "the signer may differ", so an approval is not claimed by another wallet in vain.
+    let ownerOnly = s.action !== 'supply';
+    try { ownerOnly ||= 'ownerBeneficiary' in lendingProfileFor(NETWORKS[s.network].label, s.asset); } catch { /* the composition itself refuses an unknown reserve */ }
+    findings.push(ownerOnly ? { level: 'WARNING', code: 'BENEFICIARY_MUST_BE_SIGNER', source: 'STRATEGY', nodeId: null,
+      message: `This Aave action credits only the wallet that signs: ${s.beneficiary} must be the wallet that signs in the FloFi app, or Simulate refuses it.` }
+      : { level: 'WARNING', code: 'EXPLICIT_BENEFICIARY', source: 'STRATEGY', nodeId: null,
+        message: `The Aave position of ${s.beneficiary} is affected (onBehalfOf). Confirm it is the intended account; the signer may differ.` });
+  }
   if (s.action === 'lending_composition') findings.push({ level: 'WARNING', code: 'DEBT_REMAINS', source: 'STRATEGY', nodeId: null,
     message: 'Debt remains after the swap. If the swap fails, the borrowed USDC and the debt remain; there is no automatic repayment.' });
   findings.push({ level: 'INFORMATION', code: 'OWNER_APPROVAL_REQUIRED', source: 'STRATEGY', nodeId: null,

@@ -60,6 +60,7 @@ const EN = {
   /** BUILD-FLOFI-CHAT-E2E-FIX-002: ETH and WETH are different assets; a native-ETH swap is refused, never authored as WETH. */
   nativeSwapUnavailable: 'Native ETH swaps, wraps and unwraps run on Base, Arbitrum One, Ethereum and Robinhood Chain through their validated asset catalogs; here FloFi can only swap USDC and WETH (ERC-20 tokens). WETH is a different asset, and FloFi never swaps it in place of ETH.',
   nativeEthNote: 'This swap uses native ETH itself (not WETH): FloFi sends it with the swap, or the router pays you native ETH.',
+  aaveNativeEth: 'Native ETH is not an Aave V3 reserve. Flofi can use WETH (wrapped ETH) instead, which your wallet must hold. Use WETH?',
   wrapNote: 'ETH ⇄ WETH is a 1:1 WETH9 wrap or unwrap on the same network: no pool, no price and no slippage.',
   devnetSwapTokens: 'Solana Devnet swaps support SOL and devUSDC.',
   solanaSwapTokens: 'Solana swaps support SOL, USDC and USDT.',
@@ -295,6 +296,7 @@ const PT: CopilotCopy = {
   wethNote: 'O Flofi faz swap do ERC-20 WETH (ETH embrulhado), não de ETH nativo.',
   nativeSwapUnavailable: 'Swaps, wraps e unwraps de ETH nativo funcionam na Base, Arbitrum One, Ethereum e Robinhood Chain pelos catálogos de ativos validados; aqui a FloFi só troca USDC e WETH (tokens ERC-20). WETH é outro ativo, e a FloFi nunca o troca no lugar de ETH.',
   nativeEthNote: 'Este swap usa o próprio ETH nativo (não WETH): a FloFi o envia junto com o swap, ou o roteador paga você em ETH nativo.',
+  aaveNativeEth: 'ETH nativo não é uma reserva da Aave V3. O Flofi pode usar WETH (ETH encapsulado), que precisa estar na sua carteira. Usar WETH?',
   wrapNote: 'ETH ⇄ WETH é um wrap ou unwrap 1:1 do WETH9 na mesma rede: sem pool, sem preço e sem slippage.',
   devnetSwapTokens: 'Swaps na Solana Devnet aceitam SOL e devUSDC.',
   solanaSwapTokens: 'Swaps na Solana aceitam SOL, USDC e USDT.',
