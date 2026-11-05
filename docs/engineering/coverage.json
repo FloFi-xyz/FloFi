@@ -2923,6 +2923,7 @@
         "apps/reference-dapp/src/delegation/operations.ts",
         "apps/reference-dapp/src/delegation/pg-store.ts",
         "apps/reference-dapp/src/delegation/policy.ts",
+        "apps/reference-dapp/src/delegation/profiles.ts",
         "apps/reference-dapp/src/delegation/run-source.ts",
         "apps/reference-dapp/src/delegation/runtime.ts",
         "apps/reference-dapp/src/delegation/service.ts",

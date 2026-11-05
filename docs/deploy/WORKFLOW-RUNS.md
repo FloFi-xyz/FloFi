@@ -13,6 +13,7 @@ changes.
 | --- | --- | --- |
 | `FLOFI_WORKFLOW_RUNS=enabled` | web (Vercel) **and** worker (Railway) | Sequences are handed off, claimed on `/approve`, observed and reported |
 | `FLOFI_DELEGATION`, `FLOFI_DELEGATED_SIGNER`, `FLOFI_DELEGATED_EXECUTION` | BUILD-AUTOMATION-002 ([AUTOMATIONS.md §8](AUTOMATIONS.md)) | Delegated mode only. Hosted deployments cannot configure a signer provider, so delegated runs are unavailable there (`DELEGATED_SIGNER_UNAVAILABLE`) |
+| `FLOFI_DELEGATION_MAINNET_CHAINS=eip155:42161` | web **and** worker (with `FLOFI_DELEGATION=enabled`) | BUILD-FLOFI-SINGLE-AUTH-WORKFLOW-UX-001. Opts Arbitrum One into delegated templates (Uniswap v3 USDC⇄WETH swap, Aave V3 Supply and variable-rate Borrow). Unset: every mainnet step stays `MAINNET_DELEGATION_DISABLED`. Any other value disables delegation (`DELEGATION_CONFIGURATION_INVALID`). It is the only way delegation is enabled in the public Mainnet-only product, never together with a harness. It does not provide a signer: hosted deployments still report `DELEGATED_SIGNER_UNAVAILABLE` until a production signer provider exists |
 
 Requirements:
 
@@ -83,6 +84,8 @@ The continuation link `/approve#apr_…` is not a secret. It opens only for the 
 ## 5. Not covered
 
 - Owner-signed sequences cannot resolve bound amounts (`DEPENDENT_AMOUNT_SOURCE_NOT_IMPLEMENTED`).
-- Delegated mode covers only BUILD-AUTOMATION-002's delegable steps.
+- Delegated mode covers only BUILD-AUTOMATION-002's delegable steps, plus (BUILD-FLOFI-SINGLE-AUTH-WORKFLOW-UX-001) Arbitrum One USDC⇄WETH
+  swaps and Aave V3 Supply/Borrow where the deployment opted Arbitrum One in. See
+  [the build report](../builds/BUILD-FLOFI-SINGLE-AUTH-WORKFLOW-UX-001-REPORT.md) for the capability matrix and what remains blocked.
 - The Developer API's approval status does not report per-step run progress yet.
 - No FloFi fee is charged.
