@@ -63,11 +63,11 @@ export function reserveReason(status: AaveReserveStatus, kind: LendingKind): Aav
 }
 const valueOf = (amount: bigint, status: AaveReserveStatus) => amount * big(status.price) / 10n ** BigInt(status.decimals);
 
-function entryOf(kind: LendingKind, network: string, profile: AaveLendingProfile, catalog: AaveMarketCatalog | null): CardReserveEntry & { readonly rank: bigint } {
+function entryOf(kind: LendingKind, network: string, profile: AaveLendingProfile, catalog: AaveMarketCatalog | null): { readonly entry: CardReserveEntry; readonly rank: bigint } {
   const identity = { symbol: profile.symbol, chain: profile.chain, network, address: profile.asset, decimals: profile.decimals, reserveId: profile.reserveId };
-  if (!lendingSelectable(network, profile)) return { ...identity, live: false, selectable: false, reason: 'LABEL_CONFLICT', notes: [], primary: false, rank: 0n };
+  if (!lendingSelectable(network, profile)) return { entry: { ...identity, live: false, selectable: false, reason: 'LABEL_CONFLICT', notes: [], primary: false }, rank: 0n };
   const status = liveReserveStatus(catalog, profile), account = catalog?.account ?? null;
-  if (!status) return { ...identity, live: false, selectable: true, reason: null, notes: catalog ? ['STATUS_UNKNOWN'] : [], primary: !catalog?.reserves.some(item => item.wallet), rank: 0n };
+  if (!status) return { entry: { ...identity, live: false, selectable: true, reason: null, notes: catalog ? ['STATUS_UNKNOWN'] : [], primary: !catalog?.reserves.some(item => item.wallet) }, rank: 0n };
   const notes: CardReserveNote[] = [];
   let reason: CardReserveReason | null = reserveReason(status, kind);
   // Simulate refuses an E-Mode account for every lending action, so the catalog never offers one as usable.
@@ -76,7 +76,7 @@ function entryOf(kind: LendingKind, network: string, profile: AaveLendingProfile
   if (reason === 'ACCOUNT_STATE_UNKNOWN') { reason = null; notes.push('ACCOUNT_STATE_UNKNOWN'); }
   const wallet = status.wallet, balance = big(wallet?.balance), supplied = big(wallet?.supplied), debt = big(wallet?.debt);
   const unit = 10n ** BigInt(status.decimals);
-  let primary: boolean, available: bigint | null = null, rank = 0n;
+  let primary: boolean, available: bigint | null, rank = 0n;
   if (kind === 'supply') {
     primary = wallet ? balance > 0n : true; rank = wallet ? valueOf(balance, status) : 0n;
     if (wallet && balance === 0n) notes.push('NO_WALLET_BALANCE');
@@ -101,10 +101,10 @@ function entryOf(kind: LendingKind, network: string, profile: AaveLendingProfile
     available = wallet ? min(supplied, big(status.availableLiquidity)) : null;
     if (account && big(account.debtBase) > 0n && big(account.healthFactor) < MINIMUM_HEALTH_FACTOR) notes.push('HEALTH_FACTOR_BELOW_MINIMUM');
   }
-  return { ...identity, live: true, selectable: reason === null, reason, notes, primary, rank,
+  return { rank, entry: { ...identity, live: true, selectable: reason === null, reason, notes, primary,
     ...wallet ? { walletBalance: wallet.balance, supplied: wallet.supplied, debt: wallet.debt } : {},
     apyPercent: kind === 'borrow' || kind === 'repay' ? status.borrowApyPercent : status.supplyApyPercent,
-    ...available !== null ? { available: available.toString() } : {} };
+    ...available !== null ? { available: available.toString() } : {} } };
 }
 
 /**
@@ -114,10 +114,10 @@ function entryOf(kind: LendingKind, network: string, profile: AaveLendingProfile
  */
 export function lendingCardCatalog(kind: LendingKind, network: string, live: LiveReserveRead): LendingCardCatalog {
   const reserves = lendingReservesFor(network), catalog = live?.catalog && reserves[0] && live.catalog.chain === reserves[0].chain ? live.catalog : null;
-  const entries = reserves.map((profile, order) => ({ ...entryOf(kind, network, profile, catalog), order }));
-  entries.sort((a, b) => Number(b.primary) - Number(a.primary) || (a.primary && b.primary && a.rank !== b.rank ? (b.rank > a.rank ? 1 : -1) : 0) ||
-    Number(b.selectable) - Number(a.selectable) || a.order - b.order);
-  return { kind, network, entries: entries.map(({ rank: _rank, order: _order, ...entry }) => entry),
+  const ranked = reserves.map((profile, order) => ({ ...entryOf(kind, network, profile, catalog), order }));
+  ranked.sort((a, b) => Number(b.entry.primary) - Number(a.entry.primary) || (a.entry.primary && b.entry.primary && a.rank !== b.rank ? (b.rank > a.rank ? 1 : -1) : 0) ||
+    Number(b.entry.selectable) - Number(a.entry.selectable) || a.order - b.order);
+  return { kind, network, entries: ranked.map(item => item.entry),
     state: !live ? 'NONE' : live.loading ? 'LOADING' : catalog ? 'LIVE' : 'UNAVAILABLE', provenance: catalog?.provenance ?? null,
     walletKnown: Boolean(catalog?.reserves.some(item => item.wallet)), account: catalog?.account ?? null, block: catalog?.block ?? null };
 }
