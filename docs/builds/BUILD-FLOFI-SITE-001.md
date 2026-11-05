@@ -7,6 +7,9 @@ FloFi's real routes. No fake capability, invented metric or mock content; login,
 preserved. In Portuguese, bridging is presented as "Levar para outra rede"; technical identifiers (Bridge) are unchanged inside the product.
 Separate branch and PR from the updated `main`; no change to the Canvas (that is PR #157). No deploy, no merge.
 
+> Superseded in part by [BUILD-FLOFI-LAUNCH-001](BUILD-FLOFI-LAUNCH-001.md) (2026-11-05): `/` is now the team-approved launch landing (with
+> `/faq`), and a new visitor gets English, not Portuguese, on the site, sign-in and /app. How it works, For developers and the Docs are unchanged.
+
 ## Source and page correspondence
 
 The shared link's anchor (`#page-dcb81aee8d83`) names no page: the project index (`project/canvas.json`) declares `"pages": []`. The
