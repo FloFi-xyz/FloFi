@@ -18,6 +18,11 @@ export const portugueseWorkflowRuns: Readonly<Record<string, string>> = {
   'This FloFi deployment cannot sign delegated steps.': 'Esta instalação do FloFi não pode assinar etapas delegadas.',
   'Not enabled on this FloFi deployment.': 'Não está ativado nesta instalação do FloFi.',
   'Your Credentials for these networks use different passkeys.': 'As suas Credenciais para estas redes usam passkeys diferentes.',
+  // BUILD-FLOFI-SINGLE-AUTH-WORKFLOW-UX-001
+  'Delegated execution is not enabled for this network on this FloFi deployment.': 'A execução delegada não está ativada para esta rede nesta implantação da FloFi.',
+  'One of these steps has no delegated execution yet.': 'Uma destas etapas ainda não tem execução delegada.',
+  'One of these steps cannot be limited on chain for delegated execution.': 'Uma destas etapas não pode ser limitada on-chain para execução delegada.',
+  'Health factor after Borrow': 'Fator de saúde após o empréstimo', 'at least {0}': 'pelo menos {0}',
   'This browser cannot use a passkey.': 'Este navegador não consegue usar uma passkey.', 'Authorization limits': 'Limites da autorização',
   'Your passkey signs these limits once. FloFi then executes each step within them, without asking your wallet again, and stops at the first step that would exceed them.':
     'A sua passkey assina estes limites uma vez. O FloFi executa depois cada etapa dentro deles, sem voltar a pedir à sua carteira, e para na primeira etapa que os excederia.',

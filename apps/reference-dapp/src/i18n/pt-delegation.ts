@@ -122,6 +122,12 @@ export const portugueseDelegation: Readonly<Record<string, string>> = {
   'Revoke credential': 'Revogar credencial', 'Revoke on-chain with your wallet': 'Revogar on-chain com a sua carteira',
   'Credential enrolled: this wallet can now serve automatic workflows within its limits.': 'Credencial registada: esta carteira pode agora servir fluxos automáticos dentro dos seus limites.',
   'Credential enrolled.': 'Credencial registada.', 'Enroll a wallet for automatic execution': 'Registar uma carteira para execução automática', 'Credential network': 'Rede da credencial',
+  // BUILD-FLOFI-SINGLE-AUTH-WORKFLOW-UX-001
+  'Aave V3 for this wallet only: supply {0}; variable-rate borrow {1} (on-chain ceiling per call: {2})': 'Aave V3 apenas para esta carteira: fornecer {0}; empréstimo a taxa variável {1} (teto on-chain por chamada: {2})',
+  'Real funds on Arbitrum One. Your wallet must be a MetaMask smart account. FloFi may supply to and borrow from Aave V3 for this wallet only, at a variable rate, and stops before any Borrow that would leave your health factor below 2.0.':
+    'Fundos reais na Arbitrum One. A sua carteira tem de ser uma conta inteligente MetaMask. A FloFi pode fornecer ao Aave V3 e pedir emprestado dele apenas para esta carteira, a taxa variável, e para antes de qualquer empréstimo que deixaria o seu fator de saúde abaixo de 2,0.',
+  'Aave supply WETH per call (max)': 'Fornecimento de WETH no Aave por chamada (máx.)', 'Aave supply WETH per call': 'Fornecimento de WETH no Aave por chamada',
+  'Aave borrow USDC per call (max)': 'Empréstimo de USDC no Aave por chamada (máx.)', 'Aave borrow USDC per call': 'Empréstimo de USDC no Aave por chamada',
   'Delegated devUSDC (total)': 'devUSDC delegado (total)', 'Delegated devUSDC': 'devUSDC delegado', 'USDC per call (max)': 'USDC por chamada (máx.)', 'USDC per call': 'USDC por chamada',
   'Number of calls': 'Número de chamadas', 'Credential expires on': 'A credencial expira a', 'Enroll with my wallet': 'Registar com a minha carteira',
 };

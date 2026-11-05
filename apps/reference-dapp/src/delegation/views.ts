@@ -31,7 +31,9 @@ export type ManifestView = { readonly authorizationId: string; readonly revision
     readonly budgets: readonly { readonly period: string; readonly amount: string }[] }[];
   readonly recipients: readonly string[]; readonly maxExecutionsPerPeriod: { readonly count: number; readonly period: string } | null; readonly cooldownSeconds: number;
   readonly maxSlippageBps: number; readonly validFrom: string; readonly expiresAt: string; readonly enforcement: Readonly<Record<string, readonly string[]>>;
-  readonly setupSignatures: number };
+  readonly setupSignatures: number;
+  /** BUILD-FLOFI-SINGLE-AUTH-WORKFLOW-UX-001: the account health factor every Borrow/Withdraw step must keep (null: no such step). */
+  readonly minHealthFactor?: string | null };
 export type ExecutionStepView = { readonly step: number; readonly state: string; readonly chain: string; readonly network: string; readonly credentialId: string; readonly grantId: string;
   readonly mechanism: string; readonly grantCommitment: string; readonly submissions: readonly string[]; readonly spent: readonly AmountView[]; readonly received: readonly AmountView[];
   readonly code: string | null; readonly provenance: string | null };
@@ -46,7 +48,9 @@ export type AuthorizationView = { readonly authorizationId: string; readonly rul
 export type CapabilityRowView = { readonly action: string; readonly network: string; readonly protocol: string; readonly delegated: boolean; readonly mechanism: string | null;
   readonly reason: string | null };
 export type DelegationOverviewView = {
-  readonly availability: { readonly enabled: boolean; readonly mode: 'PRODUCTION' | 'MOCKED_HARNESS' | null; readonly executor: string | null; readonly enrollment: string | null };
+  readonly availability: { readonly enabled: boolean; readonly mode: 'PRODUCTION' | 'MOCKED_HARNESS' | null; readonly executor: string | null; readonly enrollment: string | null;
+    /** BUILD-FLOFI-SINGLE-AUTH-WORKFLOW-UX-001: public mainnets this deployment opted into delegated execution (CAIP-2). */
+    readonly mainnetChains?: readonly string[] };
   readonly passkeys: readonly PasskeyView[]; readonly credentials: readonly CredentialView[]; readonly authorizations: readonly AuthorizationView[];
   readonly executions: readonly ExecutionView[]; readonly capabilities: readonly CapabilityRowView[];
 };

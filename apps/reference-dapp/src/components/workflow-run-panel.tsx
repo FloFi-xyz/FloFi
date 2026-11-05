@@ -32,6 +32,10 @@ const WHY_NOT_ONCE: Readonly<Record<string, string>> = {
   CREDENTIAL_ENROLLMENT_REQUIRED: 'Enroll a Credential for every network of this workflow in FloFi → Automations → Credentials first.',
   DELEGATED_SIGNER_UNAVAILABLE: 'This FloFi deployment cannot sign delegated steps.', DELEGATION_NOT_ENABLED: 'Not enabled on this FloFi deployment.',
   CREDENTIALS_USE_DIFFERENT_PASSKEYS: 'Your Credentials for these networks use different passkeys.',
+  // BUILD-FLOFI-SINGLE-AUTH-WORKFLOW-UX-001: the capability gaps a mainnet workflow can hit, in plain words.
+  MAINNET_DELEGATION_DISABLED: 'Delegated execution is not enabled for this network on this FloFi deployment.',
+  DELEGATION_TEMPLATE_NOT_IMPLEMENTED: 'One of these steps has no delegated execution yet.',
+  DELEGATED_TARGET_SCOPE_UNAVAILABLE: 'One of these steps cannot be limited on chain for delegated execution.',
 };
 const short = (hash: string) => hash.length > 14 ? `${hash.slice(0, 8)}…${hash.slice(-6)}` : hash;
 
@@ -108,6 +112,7 @@ export function WorkflowRunPanel({ claim, approvalId, secret, onProposal, onErro
         <div><dt>{tr('Networks')}</dt><dd>{review.manifest.networks.join(' · ')}</dd></div>
         {review.manifest.assets.filter(a => a.role === 'INPUT').map(a => <div key={a.asset}><dt>{tr('Max {0}', a.symbol)}</dt><dd>{a.maxPerExecution} {a.symbol}</dd></div>)}
         <div><dt>{tr('Max slippage')}</dt><dd>{(review.manifest.maxSlippageBps / 100).toString()}%</dd></div>
+        {review.manifest.minHealthFactor && <div><dt>{tr('Health factor after Borrow')}</dt><dd>{tr('at least {0}', review.manifest.minHealthFactor)}</dd></div>}
         <div><dt>{tr('Valid until')}</dt><dd>{new Date(review.manifest.expiresAt).toLocaleString()}</dd></div>
         <div><dt>{tr('Executions')}</dt><dd>{tr('This workflow, once')}</dd></div>
       </dl>

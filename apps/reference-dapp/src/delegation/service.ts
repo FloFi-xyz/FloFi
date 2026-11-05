@@ -98,7 +98,7 @@ export function createDelegationService(deps: DelegationServiceDeps) {
         network: networkLabel(c.chain), credentialId: c.credentialId, grantId: c.grantId, walletAddress: c.walletAddress, mechanism: c.mechanism })),
       assets: m.assets.map(a => ({ asset: a.asset, symbol: a.symbol, chain: a.chain, role: a.role, maxPerExecution: a.maxPerExecution === null ? null : display(a.maxPerExecution, a.decimals),
         budgets: a.budgets.map(b => ({ period: b.period, amount: display(b.amount, a.decimals) })) })),
-      recipients: m.recipients, maxExecutionsPerPeriod: m.limits.maxExecutionsPerPeriod, cooldownSeconds: m.limits.cooldownSeconds, maxSlippageBps: m.limits.maxSlippageBps,
+      recipients: m.recipients, maxExecutionsPerPeriod: m.limits.maxExecutionsPerPeriod, cooldownSeconds: m.limits.cooldownSeconds, maxSlippageBps: m.limits.maxSlippageBps, minHealthFactor: m.limits.minHealthFactor,
       validFrom: m.validFrom, expiresAt: m.expiresAt, enforcement: m.enforcement, setupSignatures };
   }
   async function budgetView(m: DelegatedAuthorizationManifest): Promise<BudgetView[]> {
@@ -231,7 +231,8 @@ export function createDelegationService(deps: DelegationServiceDeps) {
           revokedAt: a.revokedAt?.toISOString() ?? null, budget: await budgetView(rev.manifest), executions: mine.length,
           lastExecution: mine[0] ? await executionView(mine[0]) : null });
       }
-      return { availability: { enabled: true, mode: config.mode, executor: executionAvailability(config), enrollment: deps.signer ? null : 'DELEGATED_SIGNER_UNAVAILABLE' },
+      return { availability: { enabled: true, mode: config.mode, executor: executionAvailability(config), enrollment: deps.signer ? null : 'DELEGATED_SIGNER_UNAVAILABLE',
+          mainnetChains: config.mainnetChains },
         passkeys: passkeys.map(passkeyView), authorizations: authViews, executions: await Promise.all(executions.map(executionView)), capabilities: capabilityRows(),
         credentials: credentials.map(c => ({ credentialId: c.credentialId, walletNamespace: c.walletNamespace, walletAddress: c.walletAddress, label: c.label,
           grants: grants.filter(g => g.credentialId === c.credentialId).map(grantView) })) };

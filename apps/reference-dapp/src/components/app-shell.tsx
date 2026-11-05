@@ -349,8 +349,10 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
   }, [actionDone, actionDelivered, stepRunKey, recordExecutedAction, simulationSource.kind, stepOwner]);
   const sequencePresentation = sequence ? { ...presentSequence(state.workflow, context, sequence), issue: sequenceIssue, awaitingDelivery } : null;
   // Every runtime surface names the step it serves, so a step's simulation or Review never reads as the whole workflow's.
+  // BUILD-FLOFI-SINGLE-AUTH-WORKFLOW-UX-001: the Editor runs a sequence in the confirm-each-step mode; the note names that mode explicitly
+  // (authorizing a whole workflow once is the delegated mode of a workflow run, never claimed here).
   const sequenceNote = sequencePresentation ? sequencePresentation.finished ? tr('All {0} steps of this workflow are completed and reconciled.', sequencePresentation.total)
-    : tr('Step {0} of {1}: {2}. Each step is simulated, reviewed and signed on its own, in order; this result covers this step only.', sequencePresentation.current, sequencePresentation.total,
+    : tr('Confirm each step · Step {0} of {1}: {2}. Each step is simulated, reviewed and confirmed in your wallet on its own, in order; this result covers this step only.', sequencePresentation.current, sequencePresentation.total,
       tr(sequencePresentation.steps[sequencePresentation.current - 1]?.action ?? 'Action')) : null;
   function openSimulationControls() {
     const details = document.querySelector<HTMLDetailsElement>('.simulation-technical');
