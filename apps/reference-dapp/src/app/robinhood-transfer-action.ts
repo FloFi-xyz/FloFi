@@ -3,7 +3,7 @@
 import type { SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
 import { createRobinhoodTransferService, type RobinhoodTransferService, type TransferWalletDiagnostic } from '../server/robinhood-transfer-service';
 import { nativeTransferReadRpcs } from '../server/robinhood-rpc';
-import { cloudFlow, cloudFlowMode } from '../server/flow-runtime';
+import { cloudFlow, cloudFlowMode } from './cloud-flow';
 import { join } from 'node:path';
 import { CATALOG_NETWORKS, catalogNetworkOfChain, catalogNetworkOfRun, catalogNetworkOfWorkflow, localCatalogNetworkMode, type CatalogNetworkId,
   type CatalogNetworkRuntime } from '../server/catalog-networks';

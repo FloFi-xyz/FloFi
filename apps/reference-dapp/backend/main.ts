@@ -91,6 +91,20 @@ async function main(): Promise<void> {
   const backend = createBackend({ db, env: process.env, logger, tenantId: config.tenantId, holderId: config.workerId, evidenceStore });
   stage = 'flow_modes';
   const modes = Object.fromEntries((Object.keys(FLOWS) as FlowName[]).map(flow => [flow, flowMode(flow, process.env)]));
+  // The worker handles SIGTERM/SIGINT from before it reports `worker.starting`: a stop that arrives while it is still assembling its
+  // queue is the same clean shutdown (exit 0), never a kill by the default signal action (seen on a loaded CI runner, where the stop
+  // landed between this log line and the handler that used to be registered after the queue was built).
+  let workerLoop: { stop(): Promise<void> } | null = null, workerStopRequested = false;
+  if (command === 'worker') {
+    const shutdown = () => {
+      if (workerStopRequested) return;
+      workerStopRequested = true;
+      logger.info('worker.stopping');
+      (workerLoop ? workerLoop.stop() : Promise.resolve()).finally(() => db.close().finally(() => process.exit(0)));
+      setTimeout(() => process.exit(1), 120_000).unref();
+    };
+    process.once('SIGTERM', shutdown); process.once('SIGINT', shutdown);
+  }
   logger.info(`${command}.starting`, { ...schemaFields(schema), tenant_id: config.tenantId, worker_id: config.workerId,
     evidence_store: evidenceStore?.id ?? 'none', flows: JSON.stringify(modes) });
   stage = command;
@@ -157,9 +171,9 @@ async function main(): Promise<void> {
   const worker = createWorker({ queue, handlers, logger, workerId: config.workerId, concurrency: config.workerConcurrency,
     sweep: async () => { try { await sweep(db, { tenantId: config.tenantId }); } finally { await automations?.sweep(); await delegation?.sweep().catch(() => undefined);
       await workflowRuns?.sweep().catch(() => undefined); } } });
-  const shutdown = () => { logger.info('worker.stopping'); worker.stop().finally(() => db.close().finally(() => process.exit(0))); setTimeout(() => process.exit(1), 120_000).unref(); };
-  process.once('SIGTERM', shutdown); process.once('SIGINT', shutdown);
-  await worker.start();
+  workerLoop = worker;
+  // A stop requested while the queue was being assembled is already closing the database: the loop never starts.
+  if (!workerStopRequested) await worker.start();
 }
 
 main().catch(error => {

@@ -6,7 +6,7 @@ import type { SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts'
 import { createFileExecutionStorage } from '@defi-workflow-engine/reference-executor';
 import { createRouterService, ROUTER_RUN_ID, type RouterService, type RouterWalletDiagnostic } from '../server/router-service';
 import { ROUTER_NETWORKS, routerNetworkMode, routerNetworkRuntime, type RouterMode, type RouterNetwork } from '../server/router-runtime';
-import { cloudFlow, cloudFlowMode, cloudRuns } from '../server/flow-runtime';
+import { cloudFlow, cloudFlowMode, cloudRuns } from './cloud-flow';
 import { assertRunOwnership, ROUTER_OWNERSHIP } from '../server/run-ownership';
 import { currentWalletPrincipal } from '../server/session-principal';
 

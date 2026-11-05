@@ -4,7 +4,7 @@ import type { SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts'
 import { createSupplyService, type SupplyWalletDiagnostic, type SupplyService } from '../server/supply-service';
 import { join } from 'node:path';
 import { createCatalogLendingReadRpc, createLendingReadRpcs } from '../server/supply-rpc';
-import { cloudFlow } from '../server/flow-runtime';
+import { cloudFlow } from './cloud-flow';
 import { catalogNetworkOfChain, catalogNetworkOfRun, catalogNetworkOfWorkflow, localCatalogNetworkMode, type CatalogNetworkRuntime } from '../server/catalog-networks';
 import type { AaveMarketCatalog } from '@defi-workflow-engine/reference-compiler';
 let service:SupplyService|null=null;

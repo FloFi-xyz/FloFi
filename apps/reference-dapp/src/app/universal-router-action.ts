@@ -12,7 +12,7 @@ import { readBridgeDiscovery } from '../server/bridge-discovery';
 import { universalRouterMode, universalRouterRuntime, type UniversalRouterMode } from '../server/universal-router/runtime';
 import { evmTokenDecimals } from '../server/universal-router/evm-chain';
 import { solanaMintFacts } from '../server/universal-router/solana-chain';
-import { cloudFlow, cloudFlowMode, cloudRuns } from '../server/flow-runtime';
+import { cloudFlow, cloudFlowMode, cloudRuns } from './cloud-flow';
 import { assertRunOwnership, UNIVERSAL_OWNERSHIP } from '../server/run-ownership';
 import { currentSolanaSession, currentWalletSession } from '../server/session-principal';
 

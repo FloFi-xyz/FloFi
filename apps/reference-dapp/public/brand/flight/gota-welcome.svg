@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 400" role="img" aria-label="Opção A: gota comissária apontando o caminho, mão na cintura, broche de asas">
+          <g fill="#FFFFFF" stroke="#FFFFFF" stroke-width="26" stroke-linecap="round" stroke-linejoin="round">
+            <path fill="none" d="M176 322 V358 H160 M224 322 V358 H240 M118 252 C92 258 90 290 120 292 M282 238 C312 232 336 222 356 206 M368 196 L384 186"></path>
+            <circle cx="362" cy="202" r="11"></circle>
+            <path d="M200 60 C236 128 286 176 286 240 a86 86 0 0 1 -172 0 C114 176 164 128 200 60 Z"></path>
+            <g transform="rotate(-10 200 112)"><rect x="144" y="92" width="112" height="34" rx="12"></rect><rect x="132" y="118" width="136" height="20" rx="10"></rect></g>
+          </g>
+          <path fill="none" stroke="#041B3D" stroke-width="10" stroke-linecap="round" stroke-linejoin="round" d="M176 322 V358 H160 M224 322 V358 H240 M118 252 C92 258 90 290 120 292 M282 238 C312 232 336 222 356 206"></path>
+          <path fill="#FFFFFF" stroke="#041B3D" stroke-width="10" stroke-linejoin="round" d="M200 60 C236 128 286 176 286 240 a86 86 0 0 1 -172 0 C114 176 164 128 200 60 Z"></path>
+          <circle cx="362" cy="202" r="11" fill="#FFFFFF" stroke="#041B3D" stroke-width="8"></circle>
+          <path fill="none" stroke="#041B3D" stroke-width="8" stroke-linecap="round" d="M368 196 L384 186"></path>
+          <ellipse cx="152" cy="252" rx="12" ry="7" fill="#C9D2F8"></ellipse><ellipse cx="248" cy="252" rx="12" ry="7" fill="#C9D2F8"></ellipse>
+          <rect x="168" y="212" width="12" height="30" rx="6" fill="#041B3D"></rect><rect x="220" y="212" width="12" height="30" rx="6" fill="#041B3D"></rect>
+          <path fill="#041B3D" d="M188 256 h24 a12 12 0 0 1 -24 0 Z"></path>
+          <path fill="#FFFFFF" stroke="#041B3D" stroke-width="4" stroke-linejoin="round" d="M224 296 q-12 -9 -22 -3 q8 7 22 7 Z M248 296 q12 -9 22 -3 q-8 7 -22 7 Z"></path>
+          <rect x="224" y="290" width="24" height="12" rx="6" fill="#2343D9" stroke="#041B3D" stroke-width="4"></rect>
+          <g transform="rotate(-10 200 112)"><rect x="144" y="92" width="112" height="34" rx="12" fill="#FFFFFF" stroke="#041B3D" stroke-width="10"></rect><rect x="132" y="118" width="136" height="20" rx="10" fill="#2343D9" stroke="#041B3D" stroke-width="10"></rect></g>
+          <path fill="#FFFFFF" d="M372 120 C374 136 380 142 396 144 C380 146 374 152 372 168 C370 152 364 146 348 144 C364 142 370 136 372 120 Z"></path>
+        </svg>

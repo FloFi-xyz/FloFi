@@ -4,7 +4,7 @@ import { ORCA_WHIRLPOOLS_DEVNET_LIQUIDITY as profile } from '@defi-workflow-engi
 import type { SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
 import { createOrcaLiquidityService, type OrcaLiquidityService, type OrcaLiquidityWalletDiagnostic } from '../server/orca-liquidity-service';
 import { createSolanaRpc, solanaRpcOverride } from '../server/solana-rpc';
-import { cloudFlow } from '../server/flow-runtime';
+import { cloudFlow } from './cloud-flow';
 
 /**
  * BUILD-015 Orca Whirlpools liquidity on Solana Devnet with valueless test tokens. Simulation, Review and Inspect are

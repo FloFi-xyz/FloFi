@@ -4,7 +4,7 @@ import { ORCA_WHIRLPOOLS_MAINNET_LIQUIDITY as profile } from '@defi-workflow-eng
 import type { SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
 import { createOrcaLiquidityService, type OrcaLiquidityService, type OrcaLiquidityWalletDiagnostic } from '../server/orca-liquidity-service';
 import { createSolanaRpc, solanaRpcOverride } from '../server/solana-rpc';
-import { cloudFlow } from '../server/flow-runtime';
+import { cloudFlow } from './cloud-flow';
 
 /**
  * BUILD-SOLANA-MAINNET-001: Orca Whirlpools liquidity on Solana mainnet-beta (SOL/USDC 0.30%, real funds) — the same service and engine as

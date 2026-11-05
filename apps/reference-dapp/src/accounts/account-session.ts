@@ -96,10 +96,14 @@ export function readAccountSession(env: Env, token: string | undefined, now: Dat
 export const freshlyAuthenticated = (session: Pick<AccountSessionToken, 'authenticatedAt'>, now: Date) =>
   seconds(now) - session.authenticatedAt <= ACCOUNT_REAUTH_SECONDS;
 
-/** Only same-origin FloFi paths are accepted as a destination after sign-in (no open redirect). */
+/** Only same-origin FloFi paths are accepted as a destination after sign-in (no open redirect). BUILD-FLOFI-FLIGHT-001: /board too,
+ * so "Board now" returns to the campaign page once the person has signed in. A path whose dot segments (plain or percent-encoded) or
+ * empty segments would resolve somewhere else is refused, so the accepted prefix is the destination. */
 export function safeReturnPath(value: unknown): string {
   if (typeof value !== 'string' || value.length > 200 || !/^\/(?!\/)[A-Za-z0-9/_?=&.%-]*$/.test(value) || value.includes('\\')) return '/app';
-  return /^\/(?:app|onboarding)(?:[/?]|$)/.test(value) ? value : '/app';
+  const path = value.split('?')[0]!;
+  if (path.includes('//') || /%2e/i.test(path) || /(?:^|\/)\.{1,2}(?:\/|$)/.test(path)) return '/app';
+  return /^\/(?:app|onboarding|board)(?:[/?]|$)/.test(value) ? value : '/app';
 }
 
 export function newOidcFlow(provider: OidcProvider, sessionKey: string | null, intent: AccountIntent, returnTo: string, linkSession: AccountSessionToken | null = null): OidcFlow {

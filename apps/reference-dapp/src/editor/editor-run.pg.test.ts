@@ -2,7 +2,7 @@
 /**
  * BUILD-FLOFI-UNIVERSAL-SINGLE-AUTH-MAINNET-001: a multi-step workflow built on the Editor's Canvas starts the SAME workflow run a chat or channel
  * starts, end to end on PostgreSQL: the Editor requester (the signed-in account) → the real approval service (one PENDING handoff, SEQUENTIAL plan,
- * migration 0021's EDITOR_SESSION kind) → `/approve`'s claim by a wallet that account holds → the durable run (requester EDITOR_SESSION) → each step
+ * migration 0022's EDITOR_SESSION kind) → `/approve`'s claim by a wallet that account holds → the durable run (requester EDITOR_SESSION) → each step
  * loaded, executed by the owner and reconciled in order. The owner's flow runs are the isolated flow-runtime test double; evidence is MOCKED and
  * nothing reaches a public network.
  */

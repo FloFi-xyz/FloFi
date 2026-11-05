@@ -4,7 +4,7 @@ import { SOLANA_DEVNET_TRANSFER, SOLANA_MAINNET_TRANSFER } from '@defi-workflow-
 import type { SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
 import { createSolanaTransferService, type SolanaTransferService, type SolanaTransferWalletDiagnostic } from '../server/solana-transfer-service';
 import { createSolanaRpc, solanaRpcOverride } from '../server/solana-rpc';
-import { cloudFlow } from '../server/flow-runtime';
+import { cloudFlow } from './cloud-flow';
 
 /**
  * BUILD-SOLANA-TRANSFER-UX-001: direct transfers to another wallet on Solana mainnet-beta (`solana-transfer`, real funds) and Devnet

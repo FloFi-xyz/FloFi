@@ -17,7 +17,7 @@ DECLARE c text;
 BEGIN
   SELECT conname INTO c FROM pg_constraint
     WHERE conrelid = 'delegated_authorization_revisions'::regclass AND contype = 'c' AND pg_get_constraintdef(oid) LIKE '%passkey_id IS NOT NULL%';
-  IF c IS NULL THEN RAISE EXCEPTION 'MIGRATION_0020_REVISION_CHECK_NOT_FOUND'; END IF;
+  IF c IS NULL THEN RAISE EXCEPTION 'MIGRATION_0021_REVISION_CHECK_NOT_FOUND'; END IF;
   EXECUTE format('ALTER TABLE delegated_authorization_revisions DROP CONSTRAINT %I', c);
 END $$;
 ALTER TABLE delegated_authorization_revisions ADD CONSTRAINT delegated_authorization_revisions_signed CHECK (

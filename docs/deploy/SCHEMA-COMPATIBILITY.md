@@ -677,38 +677,78 @@ Release order is certificate first, as for 0018: every version-18 database consu
 0019 is applied. No production migration or release was performed during engineering. The release steps are in
 [RELEASE-PRIVY-0019.md](./RELEASE-PRIVY-0019.md).
 
-## 14a. Certificate 0020_workflow_grants
+## 14. Certificate 0020_flight_flofi
 
 | Base | Certified forward migration | SHA-256 |
 | --- | --- | --- |
-| 0019 `privy_accounts` (`aea36e60…cab6`) | 0020 `workflow_grants` | `5ad470b3e4d3a4695fb6764ac39870d4d1c8870a9bf34101638934afb2bc0dcd` |
+| 0019 `privy_accounts` | 0020 `flight_flofi` | `a7ce1f42753017de90eede9784a205bcd3b6fa0134b26eecb530dc2e505b2892` |
 
-Migration 0020 (BUILD-FLOFI-UNIVERSAL-SINGLE-AUTH-MAINNET-001) is additive and changes no row:
+Migration 0020 (BUILD-FLOFI-FLIGHT-001, the Flight FloFi launch campaign at `/board`) adds eight tenant-scoped tables and nothing else:
+`flight_batches` (boarding groups and their opening time), `flight_list_entries` (the beta list and the next flight's list: a lower-cased
+email, its language and the notice version shown), `flight_join_attempts` (a keyed digest of a client's network, never the address, for
+the list form's rate limit; one day), `flight_passes` (one boarding pass per account; Founding seats 1..100, unique), `flight_invites`
+(single-use invite codes), `flight_issuance` (per tenant, the boarding numbers and Founding seats ever issued, at most 100 Founding; a
+number freed by a deleted account is never reissued), `flight_simulations` (two-hour evidence that an account completed a server-side
+simulation: the run and the route the server projected, never an amount) and `flight_daily_events` (content-free daily counters with
+closed codes). No pre-existing table, column, constraint, function, trigger, rule, index or row is created, changed or removed.
+
+Objects that reference what exists: the new tables reference `tenants (tenant_id)` and `flofi_accounts (tenant_id, account_id)` by
+foreign key (`ON DELETE CASCADE` for an account's pass and simulation evidence; `ON DELETE SET NULL (redeemed_by)` for a redeemed
+invite and `SET NULL (issuer_pass_id)` for the invites a deleted pass gave out — the column-list form needs PostgreSQL 15 or later:
+production Neon runs 18, CI 18.6). Creating them takes a `SHARE ROW EXCLUSIVE` lock on `tenants` and `flofi_accounts` held until the
+migration's transaction commits (milliseconds: the transaction creates empty tables only), under `lock_timeout = '5s'`; meanwhile a
+version-19 write to those two tables (a new tenant, a new account, onboarding or organisation updates, an account deletion) waits.
+PostgreSQL implements the foreign keys with internal triggers on the referenced tables; these change no result of any statement a
+version-19 build runs, except that deleting a FloFi account (the version-19 account deletion) now also deletes that account's Flight
+pass and evidence and unlinks its invites, which is the intended erasure. No version-19 query reads or writes a `flight_*` table, so a
+version-19 build runs unchanged on schema 20.
+
+Evidence. Release A carries the certificate's unit gate (`forward-compatibility.test.ts`: base identity, fixture digest, this anchor) and
+re-activates `backend/schema-compatibility.pg.test.ts` (API and worker across 0020 with live traffic, on the fixture). Release B adds
+`flight-flofi-migration.pg.test.ts`, which checks the exact bytes, every pre-existing column, account row, relation, index, trigger and rule
+unchanged, the eight new tables, a version-19 reader carrying this certificate starting on schema 20 (and refusing it without the
+certificate), a version-19 account deletion succeeding on schema 20 with Flight rows present (pass and evidence deleted, invites
+unlinked), and atomic rollback. `apps/reference-dapp/src/flight/store.pg.test.ts` checks the campaign rules on the real tables, including
+260 concurrent pass requests for 130 accounts producing exactly 100 Founding seats, a deleted holder's seat never reissued, retention and
+tenant isolation.
+
+Release order is certificate first, as for 0018 and 0019: every version-19 database consumer (Vercel production, the Railway API and
+worker) must run a build carrying this certificate (Release A) before 0020 is applied by the Railway pre-deploy migration (Release B).
+No production migration or release was performed during engineering. Rollback keeps the certificate; do not drop the `flight_*` tables
+to accommodate an older binary.
+
+## 15. Certificate 0021_workflow_grants
+
+| Base | Certified forward migration | SHA-256 |
+| --- | --- | --- |
+| 0020 `flight_flofi` (`a7ce1f42…2892`) | 0021 `workflow_grants` | `7abb0187c40a93ef251c7e8d91e779abb38b261fe59bcb74b9d221f022e9256a` |
+
+Migration 0021 (BUILD-FLOFI-UNIVERSAL-SINGLE-AUTH-MAINNET-001) is additive and changes no row:
 - `credential_grants.passkey_id` drops NOT NULL, under a new CHECK `credential_grants_passkey_or_workflow_grant`. A grant may lack a passkey
   only when it is an EVM workflow grant (`scope->>'kind' = 'WORKFLOW'`). Every existing grant has a passkey, so the validation scan cannot fail.
   The 0011 passkey foreign key still applies whenever a passkey is present (MATCH SIMPLE).
 - The 0011 revision CHECK requiring a passkey for a signed revision is found by its definition and replaced by
   `delegated_authorization_revisions_signed`. That constraint admits exactly the previous rows plus a revision whose envelope and assertion are both of
   kind `WALLET_WORKFLOW` (the run's authorization is the wallet signature of its workflow grants). A missing definition aborts the migration
-  (`MIGRATION_0020_REVISION_CHECK_NOT_FOUND`).
+  (`MIGRATION_0021_REVISION_CHECK_NOT_FOUND`).
 
-A build without 0020 runs unchanged on schema 20:
+A build without 0021 runs unchanged on schema 21:
 - It never writes a grant without a passkey or a WALLET_WORKFLOW revision.
 - Reading such rows:
   - its grant mapper turns a NULL `passkey_id` into a string, which its passkey checks never match (`GRANT_PASSKEY_MISMATCH`, fail closed);
   - its executor refuses a revision without a passkey (`AUTHORIZATION_NOT_ACTIVE`).
 
-**Release order.** The certificate row above goes into a release whose newest shipped migration is 0019. That release is deployed to every
-database consumer before 0020 is applied, followed by §14 for 0021. Otherwise use the coordinated window in
+**Release order.** The certificate row above goes into a release whose newest shipped migration is 0020. That release is deployed to every
+database consumer before 0021 is applied, followed by §16 for 0022. Otherwise use the coordinated window in
 `docs/deploy/SINGLE-AUTH-MAINNET-ACTIVATION.md` §5. No production migration or release was performed during engineering.
 
-## 14. Certificate 0021_editor_requester
+## 16. Certificate 0022_editor_requester
 
 | Base | Certified forward migration | SHA-256 |
 | --- | --- | --- |
-| 0020 `workflow_grants` (`5ad470b3…0dcd`) | 0021 `editor_requester` | `69abf25db7b5ebf80d2ea3ec459d88319213b0256a73c6ecf98d3b20a3a4e4a3` |
+| 0021 `workflow_grants` (`7abb0187…256a`) | 0022 `editor_requester` | `f5b05c8bd32bf70bfa95e2b6ecc075b909f604334a13188c1651c2bd31e16d43` |
 
-Migration 0021 (BUILD-FLOFI-UNIVERSAL-SINGLE-AUTH-MAINNET-001) widens two CHECK constraints and does nothing else: no table, column, index,
+Migration 0022 (BUILD-FLOFI-UNIVERSAL-SINGLE-AUTH-MAINNET-001) widens two CHECK constraints and does nothing else: no table, column, index,
 function, trigger or row is added, changed or removed.
 
 - `mcp_handoffs_requester_kind_check` (0006, widened once by 0010) and `workflow_runs_requester_kind_check` (0015's column check) also admit
@@ -716,11 +756,11 @@ function, trigger or row is added, changed or removed.
   account id (`acct_` + 32 hex, within 0006's `requester_id` pattern) and, like every non-MCP requester, it carries no MCP account or grant:
   `mcp_handoffs_requester_identity` (0006) applies unchanged.
 
-Every row valid under the previous schema is valid under 0021 unchanged, so the `ADD CONSTRAINT` validation scans cannot fail on existing data.
+Every row valid under the previous schema is valid under 0022 unchanged, so the `ADD CONSTRAINT` validation scans cannot fail on existing data.
 Each constraint is dropped and re-added in one `ALTER TABLE` statement, inside the migration's single transaction, under `lock_timeout = '5s'`
 (exactly the shape 0010 used for the first constraint): approval and workflow-run writes wait at most for that short transaction.
 
-A build without 0021 runs unchanged on schema 21, including on rows written by a build with it:
+A build without 0022 runs unchanged on schema 22, including on rows written by a build with it:
 - it never writes `EDITOR_SESSION` (its `APPROVAL_REQUESTER_KINDS` has no such kind), so nothing it writes can violate a widened constraint;
 - an `EDITOR_SESSION` handoff is resolvable only through the Editor's own link scheme (`flofi_edhs_`), which an older build does not register: its
   `/approve` answers `HANDOFF_NOT_FOUND` for such a link, and a requester-scoped read of another kind never matches the row;
@@ -730,9 +770,9 @@ A build without 0021 runs unchanged on schema 21, including on rows written by a
 
 `editor-requester-migration.pg.test.ts` checks the exact bytes, every earlier row and column surviving unchanged, the widened definitions, the new
 rows, the 0006 identity rule and 0015's immutability still refusing unsafe rows, and atomic rollback. The exact SQL is also kept as
-`packages/cloud-runtime/test/fixtures/0021_editor_requester.sql`.
+`packages/cloud-runtime/test/fixtures/0022_editor_requester.sql`.
 
-**Release order.** Certificate first, as for 0018 and 0019: the `CERTIFIED_FORWARD_MIGRATIONS` entry for this migration names the shipped 0020 as
-its `base`, which is only known once 0020's bytes are final. It must be added (`base`: 0020's identity, `migrations`: the row above, `assessment`:
-this section) to a release whose newest shipped migration is 0020, deployed to every database consumer before 0021 is applied. No production
+**Release order.** Certificate first, as for 0018 and 0019: the `CERTIFIED_FORWARD_MIGRATIONS` entry for this migration names the shipped 0021 as
+its `base`, which is only known once 0021's bytes are final. It must be added (`base`: 0021's identity, `migrations`: the row above, `assessment`:
+this section) to a release whose newest shipped migration is 0021, deployed to every database consumer before 0022 is applied. No production
 migration or release was performed during engineering.

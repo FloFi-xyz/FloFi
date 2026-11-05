@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 400" role="img" aria-label="Opção B: gota capitã com quepe de piloto, batendo continência">
+          <g fill="#FFFFFF" stroke="#FFFFFF" stroke-width="26" stroke-linecap="round" stroke-linejoin="round">
+            <path fill="none" d="M176 322 V358 H160 M224 322 V358 H240 M118 252 C98 264 90 282 94 300 M282 236 C318 212 316 162 276 132"></path>
+            <circle cx="270" cy="128" r="11"></circle><circle cx="95" cy="306" r="10"></circle>
+            <path d="M200 60 C236 128 286 176 286 240 a86 86 0 0 1 -172 0 C114 176 164 128 200 60 Z"></path>
+            <path d="M136 108 C140 30 260 30 264 108 Z"></path>
+            <path d="M128 122 C168 146 232 146 272 122 C232 134 168 134 128 122 Z"></path>
+          </g>
+          <path fill="none" stroke="#041B3D" stroke-width="10" stroke-linecap="round" stroke-linejoin="round" d="M176 322 V358 H160 M224 322 V358 H240 M118 252 C98 264 90 282 94 300"></path>
+          <path fill="#FFFFFF" stroke="#041B3D" stroke-width="10" stroke-linejoin="round" d="M200 60 C236 128 286 176 286 240 a86 86 0 0 1 -172 0 C114 176 164 128 200 60 Z"></path>
+          <circle cx="95" cy="306" r="10" fill="#FFFFFF" stroke="#041B3D" stroke-width="8"></circle>
+          <ellipse cx="152" cy="252" rx="12" ry="7" fill="#C9D2F8"></ellipse><ellipse cx="248" cy="252" rx="12" ry="7" fill="#C9D2F8"></ellipse>
+          <path fill="none" stroke="#041B3D" stroke-width="6" stroke-linecap="round" d="M162 200 L184 195 M216 195 L238 200"></path>
+          <rect x="168" y="212" width="12" height="30" rx="6" fill="#041B3D"></rect><rect x="220" y="212" width="12" height="30" rx="6" fill="#041B3D"></rect>
+          <path fill="#041B3D" d="M182 254 h36 a18 18 0 0 1 -36 0 Z"></path>
+          <path fill="#FFFFFF" stroke="#041B3D" stroke-width="4" stroke-linejoin="round" d="M188 296 q-12 -9 -22 -3 q8 7 22 7 Z M212 296 q12 -9 22 -3 q-8 7 -22 7 Z"></path>
+          <rect x="188" y="290" width="24" height="12" rx="6" fill="#2343D9" stroke="#041B3D" stroke-width="4"></rect>
+          <path fill="#FFFFFF" stroke="#041B3D" stroke-width="10" stroke-linejoin="round" d="M136 108 C140 30 260 30 264 108 Z"></path>
+          <rect x="134" y="98" width="132" height="22" rx="6" fill="#2343D9" stroke="#041B3D" stroke-width="8"></rect>
+          <path fill="#041B3D" stroke="#041B3D" stroke-width="6" stroke-linejoin="round" d="M128 122 C168 146 232 146 272 122 C232 134 168 134 128 122 Z"></path>
+          <path fill="none" stroke="#041B3D" stroke-width="5" stroke-linecap="round" d="M190 70 q-14 -8 -26 -2 M210 70 q14 -8 26 -2"></path>
+          <circle cx="200" cy="70" r="9" fill="#C9D2F8" stroke="#041B3D" stroke-width="5"></circle>
+          <path fill="none" stroke="#041B3D" stroke-width="10" stroke-linecap="round" stroke-linejoin="round" d="M282 236 C318 212 316 162 276 132"></path>
+          <circle cx="270" cy="128" r="11" fill="#FFFFFF" stroke="#041B3D" stroke-width="8"></circle>
+        </svg>

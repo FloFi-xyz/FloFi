@@ -60,7 +60,7 @@ function handoff(requester: RequesterScope, strategy: Record<string, unknown> = 
 }
 const MCP: RequesterScope = { kind: 'MCP_ACCOUNT', ref: ACCOUNT }, PROJECT: RequesterScope = { kind: 'DEVELOPER_PROJECT', ref: `${PROJECT_ID}.sandbox` };
 const CONVERSATION: RequesterScope = { kind: 'CHANNEL_CONVERSATION', ref: 'chc_example' };
-// BUILD-FLOFI-UNIVERSAL-SINGLE-AUTH-MAINNET-001 (migration 0021): the signed-in FloFi account running its own Editor workflow.
+// BUILD-FLOFI-UNIVERSAL-SINGLE-AUTH-MAINNET-001 (migration 0022): the signed-in FloFi account running its own Editor workflow.
 const EDITOR: RequesterScope = { kind: 'EDITOR_SESSION', ref: 'acct_' + 'e'.repeat(32) };
 
 describe('BUILD-DEVELOPER-001 generic approval-handoff persistence', () => {

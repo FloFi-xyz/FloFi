@@ -124,7 +124,7 @@ Workflow grant, per chain (`compileWorkflowGrant`, MetaMask v1.3.0 enforcers fro
   - it is still choosing its mode.
 - **Editor → workflow run (implemented):**
   - **Run workflow** (PT: **Executar fluxo**) appears in the Editor's Execute section for a simulated 2–8 step Canvas workflow.
-  - It creates an `EDITOR_SESSION` approval handoff (migration `0021`) from the signed-in FloFi account. The server re-derives every step from the Canvas workflow and requires an exact match with each node.
+  - It creates an `EDITOR_SESSION` approval handoff (migration `0022`) from the signed-in FloFi account. The server re-derives every step from the Canvas workflow and requires an exact match with each node.
   - The Editor workflow then opens on the same `/approve` page, where the owner chooses "Confirm each step" or "Authorize the whole workflow once".
   - Nothing is signed by the button.
 - **MCP and channel copy:** the text now describes authorize-once as one exact wallet-signed grant per EVM network.

@@ -98,14 +98,14 @@ Every value is validated fail-closed at start-up. A malformed value disables del
 
 ## 5. Database (Neon)
 
-This release adds migration `0020_workflow_grants`. It is additive:
+This release adds migration `0021_workflow_grants`. It is additive:
 
 - `credential_grants.passkey_id` becomes nullable for workflow grants only;
 - one revision CHECK is replaced so that a wallet-signed workflow authorization is admitted.
 
-The Editor handoff adds `0021_editor_requester` when it lands. Follow `docs/deploy/SCHEMA-COMPATIBILITY.md`: an application build refuses a database that is ahead of it unless it carries a forward-compatibility certificate for those exact migrations. So either:
+The Editor handoff adds `0022_editor_requester`. Main already ships `0020_flight_flofi`, with its certificate. Follow `docs/deploy/SCHEMA-COMPATIBILITY.md`: an application build refuses a database that is ahead of it unless it carries a forward-compatibility certificate for those exact migrations. So either:
 
-- **Two releases (preferred, no downtime):** Release A adds only the certificate (`CERTIFIED_FORWARD_MIGRATIONS`) for the exact `0020`/`0021` identities. Deploy it to Vercel, API and worker. Then Release B (this PR) migrates through the API pre-deploy step.
+- **Two releases (preferred, no downtime):** Release A adds only the certificate (`CERTIFIED_FORWARD_MIGRATIONS`) for the exact `0021`/`0022` identities. Deploy it to Vercel, API and worker. Then Release B (this PR) migrates through the API pre-deploy step.
 - **Coordinated maintenance window:** deploy the API first (it migrates in pre-deploy), then the worker and Vercel immediately. The previous Vercel build refuses the newer schema until it is replaced.
 
 Before the migration, record the production row counts of `credential_grants` and `delegated_authorization_revisions`. Verify them unchanged afterwards.
@@ -180,4 +180,4 @@ Evidence goes in `docs/builds/BUILD-FLOFI-UNIVERSAL-SINGLE-AUTH-MAINNET-001-REPO
   - grants signed for the old executor stop working at once (the `Redeemer` caveat names the old address);
   - disable the old key and schedule its deletion after the 7-day minimum.
 - **Credential rotation:** create new IAM access keys, update the Railway secrets, redeploy, then delete the old keys.
-- **Application rollback:** redeploy the previous commit on all three services, following §5's certificate rules. Migration `0020` is additive and stays.
+- **Application rollback:** redeploy the previous commit on all three services, following §5's certificate rules. Migrations `0021` and `0022` are additive and stay.

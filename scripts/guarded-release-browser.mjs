@@ -123,6 +123,8 @@ const definitions = [
   // BUILD-FLOFI-AUTH-WALLETS-001: FloFi accounts and FloFi Wallet on its own origin (sign-in, encrypted email codes, unlock, create, import,
   // export) against the MOCKED loopback identity and wallet provider (e2e/account-harness.ts) on a disposable PostgreSQL database.
   ['auth-wallets', ['--config', 'playwright.auth-wallets.config.ts'], { TEST_DATABASE_URL: process.env.TEST_DATABASE_URL ?? 'postgres://flofi@127.0.0.1:5432/postgres' }],
+  // BUILD-FLOFI-FLIGHT-001: /board end to end (beta list, five states, invites, Founding seats, a pass from a real simulation) on the embedded runtime.
+  ['flight', ['--config', 'playwright.flight.config.ts'], { TEST_DATABASE_URL: process.env.TEST_DATABASE_URL ?? 'postgres://flofi@127.0.0.1:5432/postgres' }],
 ];
 const composition = [['composition-provenance', ['release-composition-provenance.spec.ts'], {}]];
 
@@ -145,7 +147,7 @@ const shards = [
     'copilot-solana', 'mcp-embedded-signing', 'swap-read-acceptance', 'workflow-acceptance', 'cow-loopback', 'chat-automations', 'copilot',
     'owner-history', 'mcp-in-chat', 'approve-authorize-journeys', 'execution-continuity'],
   ['journey-provenance', 'lending-provenance', 'cloud-provenance', 'solana-mainnet-network', 'developer-journey', 'base-mainnet-authoring',
-    'canvas-workflow-ux', 'channel-signing', 'automations', 'canvas-automation-ux', 'universal-bridge'],
+    'canvas-workflow-ux', 'channel-signing', 'automations', 'canvas-automation-ux', 'flight', 'universal-bridge'],
 ];
 // Fail closed on any plan drift: every product profile runs in exactly one place, and every name in the plan exists.
 const names = definitions.map(([name]) => name), planned = [...critical, ...shards.flat()];

@@ -3,7 +3,7 @@
 import { isAbsolute } from 'node:path';
 import type { PaymentDraftRequest } from '@defi-workflow-engine/workflow-contracts';
 import { createFileExecutionStorage } from '@defi-workflow-engine/reference-executor';
-import { cloudFlow, cloudFlowMode } from '../server/flow-runtime';
+import { cloudFlow, cloudFlowMode } from './cloud-flow';
 import { createPaymentFlowService, type PaymentFlowService, type PaymentWalletResult } from '../server/payment-flow-service';
 import { paymentMode, paymentRuntime, type PaymentMode } from '../server/payment-runtime';
 import { assertRunOwnership, PAYMENT_OWNERSHIP } from '../server/run-ownership';

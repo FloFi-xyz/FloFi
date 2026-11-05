@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 400" role="img" aria-label="Opção C: gota fazendo a demonstração de segurança, apontando as duas saídas">
+          <g fill="#FFFFFF" stroke="#FFFFFF" stroke-width="26" stroke-linecap="round" stroke-linejoin="round">
+            <path fill="none" d="M176 322 V358 H160 M224 322 V358 H240 M118 246 C92 238 72 226 56 210 M282 246 C308 238 328 226 344 210 M44 198 L28 188 M356 198 L372 188"></path>
+            <circle cx="50" cy="204" r="11"></circle><circle cx="350" cy="204" r="11"></circle>
+            <path d="M200 60 C236 128 286 176 286 240 a86 86 0 0 1 -172 0 C114 176 164 128 200 60 Z"></path>
+            <g transform="rotate(-10 200 112)"><rect x="144" y="92" width="112" height="34" rx="12"></rect><rect x="132" y="118" width="136" height="20" rx="10"></rect></g>
+          </g>
+          <path fill="none" stroke="#041B3D" stroke-width="10" stroke-linecap="round" stroke-linejoin="round" d="M176 322 V358 H160 M224 322 V358 H240 M118 246 C92 238 72 226 56 210 M282 246 C308 238 328 226 344 210"></path>
+          <path fill="#FFFFFF" stroke="#041B3D" stroke-width="10" stroke-linejoin="round" d="M200 60 C236 128 286 176 286 240 a86 86 0 0 1 -172 0 C114 176 164 128 200 60 Z"></path>
+          <circle cx="50" cy="204" r="11" fill="#FFFFFF" stroke="#041B3D" stroke-width="8"></circle><circle cx="350" cy="204" r="11" fill="#FFFFFF" stroke="#041B3D" stroke-width="8"></circle>
+          <path fill="none" stroke="#041B3D" stroke-width="8" stroke-linecap="round" d="M44 198 L28 188 M356 198 L372 188"></path>
+          <path fill="none" stroke="#FFFFFF" stroke-width="5" stroke-linecap="round" stroke-dasharray="2 12" d="M36 156 C20 176 18 196 24 220 M364 156 C380 176 382 196 376 220"></path>
+          <text x="40" y="262" text-anchor="middle" font-family="'IBM Plex Mono',monospace" font-weight="500" font-size="20" letter-spacing="1" fill="#FFFFFF">EXIT</text>
+          <text x="360" y="262" text-anchor="middle" font-family="'IBM Plex Mono',monospace" font-weight="500" font-size="20" letter-spacing="1" fill="#FFFFFF">EXIT</text>
+          <ellipse cx="152" cy="252" rx="12" ry="7" fill="#C9D2F8"></ellipse><ellipse cx="248" cy="252" rx="12" ry="7" fill="#C9D2F8"></ellipse>
+          <rect x="168" y="212" width="12" height="30" rx="6" fill="#041B3D"></rect><rect x="220" y="212" width="12" height="30" rx="6" fill="#041B3D"></rect>
+          <ellipse cx="200" cy="264" rx="11" ry="13" fill="#041B3D"></ellipse>
+          <g transform="rotate(-10 200 112)"><rect x="144" y="92" width="112" height="34" rx="12" fill="#FFFFFF" stroke="#041B3D" stroke-width="10"></rect><rect x="132" y="118" width="136" height="20" rx="10" fill="#2343D9" stroke="#041B3D" stroke-width="10"></rect></g>
+        </svg>

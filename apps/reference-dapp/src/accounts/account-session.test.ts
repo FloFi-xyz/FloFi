@@ -60,7 +60,13 @@ describe('sign-in flow cookies', () => {
     expect(readOidcFlow(env, sealOidcFlow(env, plain, 'flofi.xyz', now), now, 'flofi.xyz')?.linkSession).toBeNull();
   });
   it('only returns to FloFi app paths (no open redirect)', () => {
-    expect(['/app', '/app/credentials', '/onboarding/wallets', '/app?x=1'].map(safeReturnPath)).toEqual(['/app', '/app/credentials', '/onboarding/wallets', '/app?x=1']);
-    expect(['https://evil.example', '//evil.example', '/\\evil', '/docs', '/application', 'javascript:alert(1)', null].map(safeReturnPath)).toEqual(Array(7).fill('/app'));
+    expect(['/app', '/app/credentials', '/onboarding/wallets', '/app?x=1', '/board', '/board?board=1'].map(safeReturnPath))
+      .toEqual(['/app', '/app/credentials', '/onboarding/wallets', '/app?x=1', '/board', '/board?board=1']);
+    expect(['https://evil.example', '//evil.example', '/\\evil', '/docs', '/application', 'javascript:alert(1)', null, '/boarding', '//board', '/board\\x']
+      .map(safeReturnPath)).toEqual(Array(10).fill('/app'));
+    // Dot and empty segments would resolve elsewhere (`/board/../..//evil.example` is `//evil.example` as a path): refused.
+    expect(['/board/../..//evil.example', '/app/..', '/app/../docs', '/board/./x', '/board/%2e%2e/%2E%2E/x', '/app//x', '/board/.']
+      .map(safeReturnPath)).toEqual(Array(7).fill('/app'));
+    expect(['/app/x.y', '/board?next=a.b', '/app/v1.2/x'].map(safeReturnPath)).toEqual(['/app/x.y', '/board?next=a.b', '/app/v1.2/x']);
   });
 });

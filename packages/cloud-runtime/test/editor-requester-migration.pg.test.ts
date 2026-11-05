@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 /**
- * BUILD-FLOFI-UNIVERSAL-SINGLE-AUTH-MAINNET-001: schema 20 → 21 against real disposable PostgreSQL. 0021 only widens the two requester-kind
+ * BUILD-FLOFI-UNIVERSAL-SINGLE-AUTH-MAINNET-001: schema 21 → 22 against real disposable PostgreSQL. 0022 only widens the two requester-kind
  * CHECK constraints (approval handoffs and workflow runs) for EDITOR_SESSION: every earlier row survives byte for byte, no column changes, the
  * new kind is storable with the 0006 identity rule unchanged, and any other kind is still refused.
  */
@@ -31,15 +31,15 @@ const columns = async (db: Database) => (await db.query(`SELECT table_name, colu
 const snapshot = async (db: Database) => ({ handoffs: (await db.query('SELECT * FROM mcp_handoffs ORDER BY handoff_id')).rows,
   runs: (await db.query('SELECT * FROM workflow_runs ORDER BY run_id')).rows });
 
-describe('Editor requester additive migration (0021)', () => {
+describe('Editor requester additive migration (0022)', () => {
   it('widens exactly the two requester-kind checks, keeps every earlier row and column, and stores EDITOR_SESSION handoffs and runs', async () => {
     const t = await createTestDatabase({ migrated: false });
     try {
       // Pinned to schema 21 so later migrations do not change this test.
-      const all = (await loadMigrations()).slice(0, 21), base = all.slice(0, 20);
-      expect(all[20]).toMatchObject({ version: 21, name: 'editor_requester', sha256: SHIPPED_MIGRATIONS[20]!.sha256 });
+      const all = (await loadMigrations()).slice(0, 22), base = all.slice(0, 21);
+      expect(all[21]).toMatchObject({ version: 22, name: 'editor_requester', sha256: SHIPPED_MIGRATIONS[21]!.sha256 });
       await migrate(t.db, base);
-      // Before 0021 the kind is refused by both tables, exactly as any unknown kind.
+      // Before 0022 the kind is refused by both tables, exactly as any unknown kind.
       await expect(handoff(t.db, 'EDITOR_SESSION', ACCOUNT)).rejects.toThrow();
       expect(await definition(t.db, 'mcp_handoffs_requester_kind_check')).toEqual([`CHECK ((requester_kind = ANY (ARRAY[${KINDS}])))`]);
       expect(await definition(t.db, 'workflow_runs_requester_kind_check')).toEqual([`CHECK ((requester_kind = ANY (ARRAY[${KINDS}])))`]);
@@ -48,10 +48,10 @@ describe('Editor requester additive migration (0021)', () => {
       await run(t.db, channel, 'CHANNEL_CONVERSATION', 'cnv_editormigrationtest');
       await handoff(t.db, 'AUTOMATION_RULE', 'aut_' + 'a'.repeat(26));
       const shape = await columns(t.db), rows = await snapshot(t.db);
-      expect(await migrate(t.db, all)).toEqual([21]);
+      expect(await migrate(t.db, all)).toEqual([22]);
       expect(await columns(t.db)).toEqual(shape);
       expect(await snapshot(t.db)).toEqual(rows);
-      expect(await assertSchemaCurrent(t.db, SHIPPED_MIGRATIONS.slice(0, 21))).toBe(21);
+      expect(await assertSchemaCurrent(t.db, SHIPPED_MIGRATIONS.slice(0, 22))).toBe(22);
       expect(await migrate(t.db, all)).toEqual([]);
       const widened = `CHECK ((requester_kind = ANY (ARRAY[${KINDS}, 'EDITOR_SESSION'::text])))`;
       expect(await definition(t.db, 'mcp_handoffs_requester_kind_check')).toEqual([widened]);
@@ -75,11 +75,11 @@ describe('Editor requester additive migration (0021)', () => {
   it('rolls failed DDL back together with its ledger entry', async () => {
     const t = await createTestDatabase({ migrated: false });
     try {
-      const all = await loadMigrations(), next = all[20]!;
-      await migrate(t.db, all.slice(0, 20));
+      const all = await loadMigrations(), next = all[21]!;
+      await migrate(t.db, all.slice(0, 21));
       const sql = next.sql + '\nSELECT missing_editor_migration_test_function();\n';
-      await expect(migrate(t.db, [...all.slice(0, 20), { ...next, sql, sha256: createHash('sha256').update(sql).digest('hex') }])).rejects.toThrow();
-      expect((await t.db.query('SELECT max(version)::int AS version FROM schema_migrations')).rows).toEqual([{ version: 20 }]);
+      await expect(migrate(t.db, [...all.slice(0, 21), { ...next, sql, sha256: createHash('sha256').update(sql).digest('hex') }])).rejects.toThrow();
+      expect((await t.db.query('SELECT max(version)::int AS version FROM schema_migrations')).rows).toEqual([{ version: 21 }]);
       expect(await definition(t.db, 'mcp_handoffs_requester_kind_check')).toEqual([`CHECK ((requester_kind = ANY (ARRAY[${KINDS}])))`]);
       expect(await definition(t.db, 'workflow_runs_requester_kind_check')).toEqual([`CHECK ((requester_kind = ANY (ARRAY[${KINDS}])))`]);
     } finally { await t.drop(); }

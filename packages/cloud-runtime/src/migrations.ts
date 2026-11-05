@@ -47,9 +47,11 @@ export const SHIPPED_MIGRATIONS: readonly MigrationIdentity[] = Object.freeze([
   { version: 17, name: 'copilot_metrics', sha256: 'c20a07de7bb504cbb8d95776796a0e6b412a1130c0539aee3449ceb6f89c45bf' },
   { version: 18, name: 'flofi_accounts', sha256: '0919a57a5af80a1376ada213bb00ac5db79c434ab7a9ff0ebea50e6a9664ae75' },
   { version: 19, name: 'privy_accounts', sha256: 'aea36e602ba918a195d4bd110fda3b29459816fb76c25e0ddfdd29099847cab6' },
-  { version: 20, name: 'workflow_grants', sha256: '5ad470b3e4d3a4695fb6764ac39870d4d1c8870a9bf34101638934afb2bc0dcd' },
+  { version: 20, name: 'flight_flofi', sha256: 'a7ce1f42753017de90eede9784a205bcd3b6fa0134b26eecb530dc2e505b2892' },
+  // BUILD-FLOFI-UNIVERSAL-SINGLE-AUTH-MAINNET-001: workflow grants (wallet-signed, no passkey) and WALLET_WORKFLOW revisions (additive).
+  { version: 21, name: 'workflow_grants', sha256: '7abb0187c40a93ef251c7e8d91e779abb38b261fe59bcb74b9d221f022e9256a' },
   // BUILD-FLOFI-UNIVERSAL-SINGLE-AUTH-MAINNET-001: widens the two requester-kind CHECKs for EDITOR_SESSION (additive, no data change).
-  { version: 21, name: 'editor_requester', sha256: '69abf25db7b5ebf80d2ea3ec459d88319213b0256a73c6ecf98d3b20a3a4e4a3' },
+  { version: 22, name: 'editor_requester', sha256: 'f5b05c8bd32bf70bfa95e2b6ecc075b909f604334a13188c1651c2bd31e16d43' },
 ].map(migration => Object.freeze(migration)));
 
 /**
@@ -67,6 +69,11 @@ export type ForwardCompatibilityCertificate = {
  */
 export const CERTIFIED_FORWARD_MIGRATIONS: readonly ForwardCompatibilityCertificate[] = Object.freeze([
   {
+    // BUILD-FLOFI-FLIGHT-001: eight new flight_* tables (Flight FloFi campaign); nothing on any pre-existing relation, function, trigger or index.
+    base: { version: 19, name: 'privy_accounts', sha256: 'aea36e602ba918a195d4bd110fda3b29459816fb76c25e0ddfdd29099847cab6' },
+    migrations: [{ version: 20, name: 'flight_flofi', sha256: 'a7ce1f42753017de90eede9784a205bcd3b6fa0134b26eecb530dc2e505b2892' }],
+    assessment: 'docs/deploy/SCHEMA-COMPATIBILITY.md#14-certificate-0020_flight_flofi',
+  }, {
     // BUILD-FLOFI-PRIVY-UX-001: widens four 0018 CHECK constraints for Privy identities and Privy-managed wallets (additive, no data change).
     base: { version: 18, name: 'flofi_accounts', sha256: '0919a57a5af80a1376ada213bb00ac5db79c434ab7a9ff0ebea50e6a9664ae75' },
     migrations: [{ version: 19, name: 'privy_accounts', sha256: 'aea36e602ba918a195d4bd110fda3b29459816fb76c25e0ddfdd29099847cab6' }],

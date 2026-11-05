@@ -3,7 +3,7 @@
 import type { SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
 import { createLendingCompositionService, type LendingCompositionService } from '../server/lending-composition-service';
 import { createLendingRpc } from '../server/lending-rpc';
-import { cloudFlow } from '../server/flow-runtime';
+import { cloudFlow } from './cloud-flow';
 let service:LendingCompositionService|null=null;
 function current(){
   if(service)return service;
