@@ -12,7 +12,7 @@ const guards = new WeakMap<BrowserContext, Guard>();
 const ALLOWED_ORIGINS: ReadonlySet<string> = new Set([APP_ORIGIN, ...process.env.GRYLOO_CARD_E2E === 'MOCKED_LOOPBACK_ONLY' ? [E2E_CARD_ORIGIN] : []]);
 
 function guardedTest(negativeSelfTest: boolean) {
-  // `savedLanguage`: the visitor's saved language (English by default); `null` is a new visitor, who gets the product default (Portuguese).
+  // `savedLanguage`: the visitor's saved language (English by default); `null` is a new visitor, who gets the product default (English).
   return base.extend<{ savedLanguage: Language | null; context: BrowserContext; page: Page; networkGuard: Guard }>({
     savedLanguage: ['EN', { option: true }],
     context: async ({ browser, savedLanguage }, use) => {

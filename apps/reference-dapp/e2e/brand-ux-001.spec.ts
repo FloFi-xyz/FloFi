@@ -8,21 +8,21 @@ async function noOverflow(page: import('@playwright/test').Page) {
   await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
 }
 
-// A new visitor (no saved language) gets Portuguese first; the other suites visit with English saved.
+// A new visitor (no saved language) gets English first (BUILD-FLOFI-LAUNCH-001); the other suites visit with English saved.
 test.describe('as a new visitor', () => {
 test.use({ savedLanguage: null });
 for (const width of widths) {
-  // BUILD-FLOFI-SITE-001: `/` is the owner-approved site (Portuguese first). "Entrar / Open" opens sign-in, from where the builder stays reachable
+  // BUILD-FLOFI-LAUNCH-001: `/` is the team-approved launch landing (English first). "Entrar / Open" opens sign-in, from where the builder stays reachable
   // without an account, and the language the visitor chooses there is the product's own preference.
   test(`landing, keyboard navigation and product entry at ${width}px`, async ({ page }) => {
     await page.setViewportSize({ width, height: 900 });
     const errors: string[] = [];
     page.on('pageerror', error => errors.push(error.message));
     await page.goto('/');
-    await expect(page.getByRole('heading', { level: 1 })).toHaveText('DeFi do jeito que você fala.');
+    await expect(page.getByRole('heading', { level: 1, name: 'Tell FloFi: I want to swap, bridge, deposit, add liquidity or transfer.', exact: true })).toBeVisible();
     await expect(page.locator('.app-shell')).toHaveCount(0);
     await expect(page.getByRole('button', { name: 'Authorize workflow', exact: true })).toHaveCount(0);
-    expect(await page.locator('main section[id]').evaluateAll(items => items.map(item => item.id))).toEqual(['top', 'exemplos', 'como-funciona', 'seguranca', 'canais', 'entrar']);
+    expect(await page.locator('main section[id]').evaluateAll(items => items.map(item => item.id))).toEqual(['top', 'dor', 'como-funciona', 'hoje', 'seguranca', 'perguntas', 'entrar']);
     await expect(page.locator('main')).not.toContainText(/devnet|testnet|sepolia|mock|sandbox|synthetic|simulated.only|test.funds/i);
     await expect(page.locator('a[href*="cluster=devnet"]')).toHaveCount(0);
     // The site's artwork loads lazily; ask every image to load now, then require each to have decoded.
@@ -32,15 +32,21 @@ for (const width of widths) {
       .map(img => img.getAttribute('src')))).toEqual([]);
     await expect(page.getByRole('link', { name: 'Docs', exact: true }).first()).toHaveAttribute('href', '/docs');
     await page.keyboard.press('Tab');
-    await expect(page.getByRole('link', { name: 'Ir para o conteúdo' })).toBeFocused();
+    await expect(page.getByRole('link', { name: 'Skip to content' })).toBeFocused();
     await page.keyboard.press('Enter');
     await expect(page.locator('#conteudo')).toBeFocused();
     await noOverflow(page);
+    // Portuguese is one choice away, and the choice is the product's own preference; back to English for the entry below.
+    await page.getByRole('button', { name: 'Preferences', exact: true }).click();
+    await page.getByRole('radio', { name: 'Português', exact: true }).check();
+    await expect(page.locator('html')).toHaveAttribute('lang', 'pt-BR');
+    await page.reload();
+    await expect(page.getByRole('heading', { name: 'O que dá para pedir hoje.' })).toBeVisible();
     await page.getByRole('button', { name: 'Preferências', exact: true }).click();
     await page.getByRole('radio', { name: 'English', exact: true }).check();
     await expect(page.locator('html')).toHaveAttribute('lang', 'en');
     await page.reload();
-    await expect(page.getByRole('heading', { name: 'Try an example.' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'What you can ask for today.' })).toBeVisible();
     await expect(page.locator('main')).not.toContainText(/devnet|testnet|sepolia|mock|sandbox|synthetic|test.funds/i);
     const entry = page.locator('header a[href="/login"]');
     await expect(entry).toBeVisible();
@@ -147,7 +153,7 @@ test('the landing scrolls naturally through its sections with motion allowed', a
   await page.goto('/');
   for (const width of [1440, 390]) {
     await page.setViewportSize({ width, height: 900 });
-    for (const id of ['exemplos', 'como-funciona', 'seguranca', 'canais', 'entrar']) {
+    for (const id of ['dor', 'como-funciona', 'hoje', 'seguranca', 'perguntas', 'entrar']) {
       await page.locator(`#${id}`).scrollIntoViewIfNeeded();
       await expect(page.locator(`#${id}`)).toBeInViewport();
     }
@@ -164,7 +170,7 @@ test('all migrated product routes remain accessible and sensitive routes retain 
     expect(response?.status()).toBe(200);
     await expect(page.locator('.app-shell')).toBeVisible();
     await expect(page.getByRole('navigation', { name: 'Workflow stages' })).toBeVisible();
-    await expect(page.getByRole('heading', { level: 1, name: 'DeFi do jeito que você fala.', exact: true })).toHaveCount(0);
+    await expect(page.getByRole('heading', { level: 1, name: 'Tell FloFi: I want to swap, bridge, deposit, add liquidity or transfer.', exact: true })).toHaveCount(0);
   }
   for (const path of ['/approve', '/connections']) {
     const response = (await page.goto(path))!;

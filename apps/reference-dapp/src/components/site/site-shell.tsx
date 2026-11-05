@@ -7,7 +7,7 @@ import type { SiteLanguage } from './site-language';
 import { SitePreferences } from './site-preferences';
 import styles from './site.module.css';
 
-export type SitePage = 'home' | 'how' | 'developers' | 'docs';
+export type SitePage = 'home' | 'how' | 'developers' | 'docs' | 'faq';
 /** The sign-in entry every "Entrar / Open" control leads to (the builder stays reachable from sign-in without an account). */
 export const SIGN_IN = '/login';
 
@@ -43,11 +43,13 @@ export function SiteShell({ language, page, guide = false, skipTo = 'conteudo', 
     </header>
     <div id="conteudo" tabIndex={-1}>{children}</div>
     <div className={styles.footerWrap}><footer className={styles.footer}>
-      <Brand label={t.header.home} size="footer"/>
+      {/* BUILD-FLOFI-LAUNCH-001: the approved landing's footer adds the line under the brand and the FAQ. */}
+      <div className={styles.footerBrand}><Brand label={t.header.home} size="footer"/><span>{t.footer.tagline}</span></div>
       <nav aria-label={t.footer.nav} className={styles.footerNav}>
         <Link href="/how-it-works">{t.header.how}</Link>
         <Link href="/docs">{t.header.docs}</Link>
         <Link href="/developers" aria-current={page === 'developers' ? 'page' : undefined}>{t.header.developers}</Link>
+        <Link href="/faq" aria-current={page === 'faq' ? 'page' : undefined}>{t.footer.faq}</Link>
       </nav>
       <div className={styles.footerBottom}>
         <p>{t.footer.legal}</p>

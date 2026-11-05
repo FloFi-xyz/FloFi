@@ -7,13 +7,15 @@ export type Language = 'EN' | 'PT';
 export const LANGUAGE_KEY = 'flofi.language';
 export const LANGUAGE_COOKIE = 'flofi_language';
 export const parseLanguage = (value: string | null | undefined): Language | null => value === 'PT' || value === 'EN' ? value : null;
-/** Owner decision (BUILD-FLOFI-SITE-001): a visitor with no saved preference gets Portuguese on the site, sign-in and /app. A saved preference
- * (the cookie above, or the storage key the provider restores) always wins, so existing English and Portuguese choices are unchanged. */
-export const DEFAULT_LANGUAGE: Language = 'PT';
+/** Team decision for the 17 Nov 2026 launch (BUILD-FLOFI-LAUNCH-001, superseding the 4 Nov Portuguese default of BUILD-FLOFI-SITE-001): the
+ * approved landing speaks English by default, and so does the journey it opens (sign-in, onboarding and /app), so a new visitor never switches
+ * language between the landing and the product. A saved preference (the cookie above, or the storage key the provider restores) always wins, so
+ * existing English and Portuguese choices are unchanged, and Portuguese stays one choice away (Preferences on the site, Settings in /app). */
+export const DEFAULT_LANGUAGE: Language = 'EN';
 /**
- * Surfaces outside that decision keep their earlier English default:
- * - the MCP signing surface, embedded in a chat host's frame where FloFi's preference cookie and storage never reach it (switching it would put
- *   every chat user in Portuguese with no way to keep English): EMBEDDED_APPROVAL_PATH in server/embedded-approval.ts, pinned by locale.test.tsx;
+ * Surfaces that keep English whatever the product default is (pinned by locale.test.tsx, so a future change of DEFAULT_LANGUAGE cannot reach them):
+ * - the MCP signing surface, embedded in a chat host's frame where FloFi's preference cookie and storage never reach it:
+ *   EMBEDDED_APPROVAL_PATH in server/embedded-approval.ts;
  * - FloFi Wallet, on its own host, which never sees the product's preference and has its own language switch;
  * - the admin console, written in English only.
  */

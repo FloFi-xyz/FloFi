@@ -9,20 +9,20 @@ const betaNoticePt = 'FloFi Beta Mainnet — Operações com fundos reais estão
 
 // BUILD-FLOFI-SITE-001: the owner-approved site replaced Landing 07. Its header CTA ("Entrar" / "Open") opens the sign-in entry (PR #143); the
 // /app notice below is unchanged.
-// A new visitor (no saved language) gets Portuguese; the visitor's English choice then follows into sign-in and /app.
+// A new visitor (no saved language) gets English (BUILD-FLOFI-LAUNCH-001); the visitor's Portuguese choice then follows into sign-in and /app.
 test.describe('as a new visitor', () => {
 test.use({ savedLanguage: null });
 test('the landing header CTA opens sign-in and the builder stays reachable without an account', async ({ page }) => {
   await page.goto('/');
   const header = page.locator('header');
-  const cta = header.getByRole('link', { name: 'Entrar', exact: true });
+  const cta = header.getByRole('link', { name: 'Open', exact: true });
   await expect(cta).toHaveAttribute('href', '/login');
-  await page.getByRole('button', { name: 'Preferências', exact: true }).click();
-  await page.getByRole('radio', { name: 'English', exact: true }).check();
-  await expect(header.getByRole('link', { name: 'Open', exact: true })).toHaveAttribute('href', '/login');
-  await header.getByRole('link', { name: 'Open', exact: true }).click();
+  await page.getByRole('button', { name: 'Preferences', exact: true }).click();
+  await page.getByRole('radio', { name: 'Português', exact: true }).check();
+  await expect(header.getByRole('link', { name: 'Entrar', exact: true })).toHaveAttribute('href', '/login');
+  await header.getByRole('link', { name: 'Entrar', exact: true }).click();
   await expect(page).toHaveURL('/login');
-  await page.getByRole('link', { name: 'Explore the builder without an account', exact: true }).click();
+  await page.getByRole('link', { name: 'Explorar o construtor sem conta', exact: true }).click();
   await expect(page).toHaveURL('/app');
 });
 });
