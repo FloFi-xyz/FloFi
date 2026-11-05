@@ -669,6 +669,9 @@ export function createDelegationService(deps: DelegationServiceDeps) {
       const e = await store.executionById(executionId);
       if (!e || e.owner.namespace !== owner.namespace || e.owner.address !== owner.address) return refuse('EXECUTION_NOT_FOUND');
       if (e.state !== 'HALTED') refuse(`EXECUTION_${e.state}`);
+      // BUILD-FLOFI-UNIVERSAL-SINGLE-AUTH-MAINNET-001: a resume never skips a step that stopped for good (it would run later steps without it).
+      const stopped = (await store.steps(executionId)).find(st => st.stepIndex >= e.currentStep && ['BLOCKED', 'REVERTED', 'FAILED'].includes(st.state));
+      if (stopped) refuse('EXECUTION_STEP_NOT_RESUMABLE');
       const resumed = await store.transition(executionId, { version: e.version, from: ['HALTED'] }, 'RUNNING', { attention: false, code: null }, deps.now()) ?? refuse('EXECUTION_CHANGED');
       await deps.db.query(`INSERT INTO work_items (tenant_id, kind, dedupe_key, run_id, payload, state, available_at) VALUES ($1, $2, $3, NULL, $4::jsonb, 'READY', now())
         ON CONFLICT (tenant_id, kind, dedupe_key) WHERE state IN ('READY', 'LEASED') DO NOTHING`,

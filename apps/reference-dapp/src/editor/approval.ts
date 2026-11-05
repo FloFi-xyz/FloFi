@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 /**
- * BUILD-FLOFI-UNIVERSAL-SINGLE-AUTH-MAINNET-001: the FloFi Editor on the ONE approval model (`src/platform`, migrations 0006, 0015 and 0021). A
+ * BUILD-FLOFI-UNIVERSAL-SINGLE-AUTH-MAINNET-001: the FloFi Editor on the ONE approval model (`src/platform`, migrations 0006, 0015 and 0022). A
  * multi-step workflow the owner built and simulated on the Canvas starts the SAME workflow run a chat, an MCP client or a channel starts: one
  * approval handoff with a SEQUENTIAL plan, claimed on `/approve`, where the existing run panel offers "Confirm each step" or "Authorize once".
  * The Editor is a first-class `EDITOR_SESSION` requester — never an owner, never authority — that brings only what the shared model asks:

@@ -68,6 +68,10 @@ Every grant's wallet signature is verified on the server before anything runs:
 - **Health-factor floor.** FloFi's 2.0 floor and the fresh Aave reads are checked by the executor. On-chain, Aave itself enforces health factor > 1. The Borrow amount is exact on-chain.
 - **Order of calls.** The grant authorizes a set of exact calls, each once; it does not enforce their order on-chain. A compromised executor could run them out of order, but only the exact calls the owner signed. For example, the exact borrow before the supply succeeds only if the account already has collateral.
 - **Gas.** The executor address pays gas on each chain (§6). The owner's account pays none for delegated steps.
+- **Native USDC Supply on Base and Arbitrum.** It is not delegated: those primary reserve profiles do not carry FloFi's supply-cap validation. WETH and the other expansion reserves are delegated; so is Ethereum USDC. This is unchanged from the reviewed owner-signed profiles and needs an owner decision to widen.
+- **A halted delegated run whose step stopped for good** (blocked or reverted) cannot be resumed. It is refused (`EXECUTION_STEP_NOT_RESUMABLE`) rather than skipping that step; the owner ends it and runs the workflow again.
+- **Tokens needing an allowance reset (Ethereum USDT).** A delegated Supply fails closed at simulation while a non-zero allowance to the Pool remains.
+- **Data retention.** Workflow grants (exact calls, the wallet-signed delegation) and EDITOR_SESSION requester references are kept as financial records under the existing delegated-execution retention. No new purge was added; an expiry/erasure rule is an owner decision.
 
 ## 5. Exact on-chain spending and borrowing protections
 

@@ -554,9 +554,10 @@ export function createPgDelegationStore(db: Database, tenantId: string) {
       // BUILD-FLOFI-UNIVERSAL-SINGLE-AUTH-MAINNET-001: grants may share one executor address (the deployment's KMS key), so nonces are allocated
       // per (chain, executor) under an advisory lock, against the highest nonce any grant of that executor prepared.
       if (grantUse.nextNonce !== null) {
-        await tx.query('SELECT pg_advisory_xact_lock(hashtextextended($1, 0))', [`flofi.executor-nonce:${tenantId}:${String(g.chain)}:${String(g.session_address)}`]);
-        const highest = (await tx.query<{ n: string | null }>(`SELECT max(evm_next_nonce)::text AS n FROM credential_grants WHERE tenant_id = $1 AND chain = $2 AND session_address = $3`,
-          [tenantId, g.chain, g.session_address])).rows[0]?.n;
+        // Keyed on the chain and executor address only: an executor key is never shared across tenants, but if it were, its nonces still are.
+        await tx.query('SELECT pg_advisory_xact_lock(hashtextextended($1, 0))', [`flofi.executor-nonce:${String(g.chain)}:${String(g.session_address)}`]);
+        const highest = (await tx.query<{ n: string | null }>(`SELECT max(evm_next_nonce)::text AS n FROM credential_grants WHERE chain = $1 AND session_address = $2`,
+          [g.chain, g.session_address])).rows[0]?.n;
         if (highest !== null && highest !== undefined && grantUse.nextNonce - BigInt(grantUse.calls) < BigInt(highest)) return { ok: false as const, code: 'SUBMISSION_NONCE_CONFLICT' };
       }
       await tx.query(`UPDATE credential_grants SET calls_used = calls_used + $3, evm_next_nonce = coalesce($4, evm_next_nonce), version = version + 1
@@ -569,8 +570,8 @@ export function createPgDelegationStore(db: Database, tenantId: string) {
     }),
     /** BUILD-FLOFI-UNIVERSAL-SINGLE-AUTH-MAINNET-001: the next nonce any grant of this executor address prepared on `chain` (null: none yet). */
     async sessionNextNonce(chain: string, sessionAddress: string): Promise<bigint | null> {
-      const n = (await db.query<{ n: string | null }>(`SELECT max(evm_next_nonce)::text AS n FROM credential_grants WHERE tenant_id = $1 AND chain = $2 AND session_address = $3`,
-        [tenantId, chain, sessionAddress])).rows[0]?.n;
+      const n = (await db.query<{ n: string | null }>(`SELECT max(evm_next_nonce)::text AS n FROM credential_grants WHERE chain = $1 AND session_address = $2`,
+        [chain, sessionAddress])).rows[0]?.n;
       return n === null || n === undefined ? null : BigInt(n);
     },
     /** RESERVED → SPENT for what reconciliation proved spent; RELEASED for entries of steps that never submitted. */

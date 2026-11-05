@@ -387,7 +387,10 @@ async function run(deps: ExecutorDeps, start: ExecutionRecord, verified: Awaited
       if (r.status === 'PENDING') {
         // Not final yet (or dropped by a node): re-broadcast exactly the persisted bytes — idempotent, never a new transaction — and keep
         // the reservation until reconciliation decides.
-        await driver.broadcast(recoveryCtx, step.submission!).catch(() => undefined);
+        const resent = await driver.broadcast(recoveryCtx, step.submission!).then(() => null, (cause: unknown) => codeOf(cause, 'SUBMISSION_BROADCAST_FAILED'));
+        // A never-mined submission past its send window is never sent again: its nonces are filled on every pass until reconciliation sees them used.
+        if (resent === 'SUBMISSION_STALE') await fillStaleNonces(grant, transport, step.submission!, deps.signer, deps.log).catch(cause => log('delegation.nonce_fill_failed', { step: k,
+          code: codeOf(cause, 'NONCE_FILL_FAILED') }));
         return outcome(PENDING_RETRY_MS);
       }
       const reconciliation = bigintJson({ status: r.status, spent: r.spent, received: r.received, evidence: r.evidence });
