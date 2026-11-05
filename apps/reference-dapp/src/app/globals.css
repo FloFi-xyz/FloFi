@@ -2033,10 +2033,12 @@ button.wallet-option .wallet-option-status{border-color:var(--accent-line);backg
   display:flex;flex-direction:column;align-items:stretch;gap:var(--canvas-controls-gap,14px);pointer-events:none}
 .react-flow__panel.simulation-canvas-controls .canvas-navigator-embedded{position:relative;top:auto;bottom:auto;align-self:center;flex:none;pointer-events:auto}
 .react-flow__panel.simulation-canvas-controls .canvas-primary-action{position:static;right:auto;bottom:auto;align-self:flex-end;width:auto;max-width:100%;
-  margin:0;display:grid;grid-template-columns:repeat(2,auto);justify-content:end;align-items:end;column-gap:var(--canvas-action-gap,8px);row-gap:8px;pointer-events:none}
+  margin:0;display:grid;grid-template-columns:repeat(2,auto);justify-content:end;align-items:stretch;column-gap:var(--canvas-action-gap,8px);row-gap:8px;pointer-events:none}
 .react-flow__panel.simulation-canvas-controls .canvas-primary-action :is(button,a,input,select,textarea,summary,label,[role="button"],[tabindex]){pointer-events:auto}
 /* The Simulate wrapper and the lifecycle control add no box of their own here: Back and the primary action share the bottom row, and every note
    (step note, wallet notice, reason) spans its own row above them, right-aligned. */
 .react-flow__panel.simulation-canvas-controls :is(.simulation-workspace-actions,.canvas-lifecycle-control){display:contents}
 .react-flow__panel.simulation-canvas-controls .canvas-lifecycle-control>:not(button,span){order:-1;grid-column:1/-1;justify-self:end;max-width:min(100%,420px);margin:0;text-align:right}
-.react-flow__panel.simulation-canvas-controls .simulation-back{flex:none}
+/* Back and the primary action share one row height: a label that wraps (a narrow canvas, a wider font or locale) makes both buttons taller
+   together, so their tops and bottoms always line up. */
+.react-flow__panel.simulation-canvas-controls .simulation-back{flex:none;align-self:stretch}
