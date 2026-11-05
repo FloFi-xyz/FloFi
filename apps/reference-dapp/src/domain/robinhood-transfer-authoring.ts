@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
+import { ownDeclaration } from './node-declaration';
 import { createNativeTransferNode, createTokenTransferNode, isSolanaTransferNode, readTransferNode, TRANSFER_ACTION, type SemanticWorkflow, type SolanaTokenProgram } from '@defi-workflow-engine/workflow-contracts';
 import { NATIVE_TRANSFER_PROFILES, ROBINHOOD_TESTNET_TRANSFER, formatAssetAmount, parseAssetAmount, transferAllowsRecipients,
   transferAllowsTokens, type NativeTransferProfile } from '@defi-workflow-engine/action-registry';
@@ -68,6 +69,7 @@ export function createAuthoredTransfer(nodeId: string, input: RobinhoodTransferI
     token: { address: token.address!, decimals: token.decimals, officialId: token.stock?.officialId ?? null } });
 }
 export function transferDetails(node: SemanticWorkflow['nodes'][number]): RobinhoodTransferInput | null {
+  node = ownDeclaration(node);
   if (node.actionType !== TRANSFER_ACTION) return null;
   if (isSolanaTransferNode(node)) {
     const solana = solanaTransferDetails(node);

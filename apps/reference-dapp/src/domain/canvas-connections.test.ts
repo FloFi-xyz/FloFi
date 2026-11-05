@@ -27,7 +27,14 @@ function action(state: EditorState, type: string) {
 }
 function connect(state: EditorState, from: string, to: string) { return apply(state, { type: 'CONNECT', from, to } as Command); }
 function disconnect(state: EditorState, from: string, to: string) { return apply(state, { type: 'DISCONNECT', from, to } as Command); }
-function build(types: string[]) { let state = initialEditor(); for (const type of types) state = action(state, type); return state; }
+/** The automatic sequential links (BUILD AAVE-V3-EXPANSION-001), in creation order. */
+function autoLinks(state: EditorState) { return state.workflow.nodes.flatMap(n => n.dependencies.map(from => [from, n.nodeId] as const)); }
+/** Steps added one after another; `unlinked` removes the automatic links so the manual connection semantics are tested from scratch. */
+function build(types: string[], unlinked = true) {
+  let state = initialEditor(); for (const type of types) state = action(state, type);
+  if (unlinked) for (const [from, to] of autoLinks(state)) state = disconnect(state, from, to);
+  return state;
+}
 function ids(state: EditorState) { return composerActions(state.workflow).map(n => n.nodeId); }
 
 describe('generic canonical workflow connections', () => {
@@ -109,7 +116,8 @@ describe('generic canonical workflow connections', () => {
     artifacts = chainReducer(artifacts, { type: 'GENERATE_SUCCEEDED', currentWorkflow: source,
       record: { chain, review, sourceWorkflow: source, generation: 1, observedAtMs: now, expiresAtMs: now + VALIDITY_MS, monotonicStartMs: 0 } });
     expect(checkChainAccess(artifacts, source, now, 0).ok).toBe(true);
-    const [a, b] = ids(state) as [string, string]; state = connect(state, b, a);
+    // The two steps were linked a → b automatically; reversing that link is the dependency mutation.
+    const [a, b] = ids(state) as [string, string]; state = connect(disconnect(state, a, b), b, a);
     artifacts = chainReducer(artifacts, { type: 'REVISION_ACCEPTED', workflow: state.workflow });
     expect(checkChainAccess(artifacts, state.workflow, now, 0)).toEqual({ ok: false, code: 'ARTIFACTS_STALE' });
   });
@@ -117,5 +125,47 @@ describe('generic canonical workflow connections', () => {
     expect(workflowDependencyOrder([{ nodeId: 'b', dependencies: ['a'] }, { nodeId: 'a', dependencies: [] }]).map(n => n.nodeId)).toEqual(['a', 'b']);
     expect(() => workflowDependencyOrder([{ nodeId: 'a', dependencies: ['missing'] }])).toThrow();
     expect(() => workflowDependencyOrder([{ nodeId: 'a', dependencies: ['a'] }])).toThrow();
+  });
+});
+
+describe('BUILD AAVE-V3-EXPANSION-001 automatic sequential connections', () => {
+  it.each([[['swap', 'transfer']], [['swap', 'swap', 'transfer']], [['supply', 'borrow', 'swap', 'bridge']], [['swap', 'swap', 'swap', 'transfer', 'swap']]])(
+    'links each added step to the previous one: %j', types => {
+      const state = build(types, false), nodes = ids(state);
+      expect(nodes).toHaveLength(types.length);
+      expect(composerConnections(state.workflow).map(e => [e.source, e.target])).toEqual(nodes.slice(1).map((id, i) => [nodes[i], id]));
+      // Ordering links only: no resource edge or output reference is ever created, and each step still reads as its own action.
+      expect(state.workflow.resourceEdges).toEqual([]);
+      expect(state.workflow.nodes.every(n => n.inputs.every(input => input.kind !== 'OUTPUT_REFERENCE'))).toBe(true);
+      expect(workflowSteps(state.workflow, context).map(step => step.nodeId)).toEqual(nodes);
+      // Saved and reopened, the links are the same canonical edges.
+      const restored = validateSavedWorkflow(JSON.parse(JSON.stringify(state.workflow)));
+      expect(composerConnections(restored)).toEqual(composerConnections(state.workflow));
+      expect(savedWorkflowHash(restored)).toBe(savedWorkflowHash(state.workflow as SemanticWorkflow));
+    });
+  it('never touches an existing link, follows a branch from the last step in order and keeps links through edits', () => {
+    let state = build(['swap', 'swap', 'transfer']); const [a, b, c] = ids(state) as [string, string, string];
+    state = connect(connect(state, a, b), a, c);
+    state = action(state, 'swap');
+    const d = ids(state).at(-1)!;
+    expect(state.workflow.nodes.find(n => n.nodeId === b)?.dependencies).toEqual([a]);
+    expect(state.workflow.nodes.find(n => n.nodeId === c)?.dependencies).toEqual([a]);
+    expect(state.workflow.nodes.find(n => n.nodeId === d)?.dependencies).toEqual([workflowDependencyOrder(state.workflow.nodes.filter(n => n.nodeId !== d)).at(-1)!.nodeId]);
+    state = apply(state, { type: 'SET_CRYPTO_ACTION', nodeId: d, input: { selection: selectCryptoNetwork('swap', 'Arbitrum One'), amount: '3', slippage: '50' } } as Command);
+    expect(state.workflow.nodes.find(n => n.nodeId === d)?.dependencies).toHaveLength(1);
+  });
+  it('deleting a middle step keeps the sequence in order (A → B → C, delete B: A → C) and never leaves a dangling link', () => {
+    let state = build(['swap', 'transfer', 'swap'], false); const [a, b, c] = ids(state) as [string, string, string];
+    state = apply(state, { type: 'REMOVE', nodeId: b } as Command);
+    expect(state.workflow.nodes.find(n => n.nodeId === c)?.dependencies).toEqual([a]);
+    expect(ids(state)).toEqual([a, c]);
+    state = apply(state, { type: 'REMOVE', nodeId: a } as Command);
+    expect(state.workflow.nodes.find(n => n.nodeId === c)?.dependencies).toEqual([]);
+  });
+  it('an owner can disconnect, reorder and reconnect automatically linked steps', () => {
+    let state = build(['swap', 'transfer'], false); const [a, b] = ids(state) as [string, string];
+    state = connect(disconnect(state, a, b), b, a);
+    expect(ids(state)).toEqual([b, a]);
+    expect(state.workflow.nodes.find(n => n.nodeId === a)?.dependencies).toEqual([b]);
   });
 });

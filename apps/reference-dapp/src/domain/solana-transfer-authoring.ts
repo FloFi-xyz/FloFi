@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
+import { ownDeclaration } from './node-declaration';
 import { createSolanaTransferNode, isSolanaTransferNode, readSolanaTransferNode, type SemanticWorkflow, type SolanaTokenProgram } from '@defi-workflow-engine/workflow-contracts';
 import { SOLANA_DEVNET_TRANSFER, SOLANA_MAINNET_TRANSFER, solanaTransferAsset, solanaTransferProfile, type SolanaTransferProfile } from '@defi-workflow-engine/action-registry';
 import { formatTokenAmount, parseTokenAmount, type SolanaNetwork } from './jupiter-authoring';
@@ -33,6 +34,7 @@ export function createSolanaTransferNodeFrom(nodeId: string, input: SolanaTransf
   return createSolanaTransferNode(nodeId, { chain: profile.chain, amount: parseTokenAmount(input.amount, decimals), recipient, token: { mint: reference, decimals, program: input.program } });
 }
 export function solanaTransferDetails(node: SemanticWorkflow['nodes'][number] | { readonly actionType: string; readonly chainId: string; readonly adapterConstraints?: unknown }): SolanaTransferDetails | null {
+  node = ownDeclaration(node);
   if (!('adapterConstraints' in node) || !node.adapterConstraints || !isSolanaTransferNode(node as SemanticWorkflow['nodes'][number])) return null;
   try {
     const fields = readSolanaTransferNode({ ...(node as SemanticWorkflow['nodes'][number]), dependencies: [] });

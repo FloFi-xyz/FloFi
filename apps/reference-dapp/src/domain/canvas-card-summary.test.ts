@@ -64,8 +64,11 @@ describe('BUILD-FLOFI-BUILDER-UX-002 Canvas card summary', () => {
   });
 
   it('connects cards only through the workflow’s own dependencies, never by their visual order', () => {
-    const two = apply(apply(initialEditor(), swap), swap);
-    const [first, second] = composerActions(two.workflow);
+    // BUILD AAVE-V3-EXPANSION-001: the second step is linked after the first automatically — a workflow dependency the connection then shows.
+    const auto = apply(apply(initialEditor(), swap), swap);
+    const [first, second] = composerActions(auto.workflow);
+    expect(composerConnections(auto.workflow).map(edge => [edge.source, edge.target])).toEqual([[first!.nodeId, second!.nodeId]]);
+    const two = apply(auto, { type: 'DISCONNECT', from: first!.nodeId, to: second!.nodeId });
     expect(composerConnections(two.workflow)).toEqual([]);
     const linked = apply(two, { type: 'CONNECT', from: first!.nodeId, to: second!.nodeId });
     expect(composerConnections(linked.workflow).map(edge => [edge.source, edge.target])).toEqual([[first!.nodeId, second!.nodeId]]);

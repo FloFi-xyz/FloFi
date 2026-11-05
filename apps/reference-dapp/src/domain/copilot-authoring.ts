@@ -714,7 +714,7 @@ function planLending(a: CopilotLendingAction, g: Grounding, wallet: string | nul
   // BUILD-ETHEREUM-001: each Aave asset has its own deployments (USDC on Base Sepolia — and, BUILD-BASE-001, Base mainnet — WBTC on Ethereum
   // Sepolia), so the asset bounds the network.
   // BUILD AAVE-V3-EXPANSION-001: the asset options are the named market's first reserves (its original verified asset first).
-  const reserveOptions = a.network === null ? ['USDC', 'WETH', 'WBTC'] : lendingReservesFor(COPILOT_NETWORK_LABEL[a.network]).slice(0, 4).map(reserve => reserve.symbol);
+  const reserveOptions = a.network === null || a.network === 'OTHER' ? ['USDC', 'WETH', 'WBTC'] : lendingReservesFor(COPILOT_NETWORK_LABEL[a.network]).slice(0, 4).map(reserve => reserve.symbol);
   if (missing.length) ask(missing, stillNeeds(m, missing, subject), !missing.includes('asset') ? [] : reserveOptions.length ? reserveOptions : ['USDC', 'WBTC']);
   const namedCatalog = g.policy.catalog && namedNetworks(g).some(isCatalogNetwork);
   // Without a named catalog network, the networks are those whose market lists a reserve with exactly this label (USDC when none does).

@@ -19,11 +19,14 @@ function apply(state: EditorState, command: Record<string, unknown>): EditorStat
   return result;
 }
 const attempt = (state: EditorState, command: Record<string, unknown>) => editorReducer(state, { ...command, source: 'CANVAS', baseRevision: state.workflow.revision } as Command, context);
-function built() {
+/** The swap and the position as separate steps. `unlinked` removes the automatic ordering link (BUILD AAVE-V3-EXPANSION-001) first. */
+function built(unlinked = true) {
   let state = apply(initialEditor(), { type: 'ADD_SOLANA_SWAP', input: swap });
   const swapId = state.workflow.nodes.at(-1)!.nodeId;
   state = apply(state, { type: 'ADD_SOLANA_LIQUIDITY', input: position });
-  return { state, swapId, poolId: state.workflow.nodes.at(-1)!.nodeId };
+  const poolId = state.workflow.nodes.at(-1)!.nodeId;
+  if (unlinked) state = apply(state, { type: 'DISCONNECT', from: swapId, to: poolId });
+  return { state, swapId, poolId };
 }
 const capability = (workflow: EditorState['workflow']) => resolveWorkflowCapability(workflow, { environment: 'PUBLIC_TESTNET' });
 
@@ -42,6 +45,19 @@ describe('Canvas authoring of Solana Devnet Swap → Orca liquidity', () => {
     expect(() => validateAuthoringWorkflow(linked.workflow, context)).not.toThrow();
     expect(capability(linked.workflow)).toMatchObject({ executionSupported: true });
     expect(capability(linked.workflow).blockers.map(b => b.code)).not.toContain('COMPOSITION_UNSUPPORTED');
+  });
+  it('BUILD AAVE-V3-EXPANSION-001: the automatic link is ordering only; connecting the pair upgrades it to the same typed binding', () => {
+    const { state, swapId, poolId } = built(false);
+    const pool = state.workflow.nodes.find(n => n.nodeId === poolId)!;
+    expect(pool.dependencies).toEqual([swapId]);
+    expect(pool.inputs.some(input => input.kind === 'OUTPUT_REFERENCE')).toBe(false);
+    expect(state.workflow.resourceEdges).toEqual([]);
+    expect(isBoundComposition(state.workflow)).toBe(false);
+    const upgraded = apply(state, { type: 'CONNECT', from: swapId, to: poolId });
+    const manual = apply(built().state, { type: 'CONNECT', from: swapId, to: poolId });
+    expect(upgraded.workflow.nodes).toEqual(manual.workflow.nodes);
+    expect(upgraded.workflow.resourceEdges).toEqual(manual.workflow.resourceEdges);
+    expect(isBoundComposition(upgraded.workflow)).toBe(true);
   });
   it('keeps a reverse link an ordering dependency, reported as not executable', () => {
     const { state, swapId, poolId } = built();

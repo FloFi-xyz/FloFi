@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
+import { ownDeclaration } from './node-declaration';
 import { createRouterBridgeNode, isRouterBridgeNode, readRouterBridgeNode, routerPair, ROUTER_PAIRS, type RoutingProvider, type SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
 import { ETHEREUM_ROUTER_DEPLOYMENTS, type EthereumRouterNetwork, CROSSCHAIN_ROUTER_ARBITRUM_BASE, CROSSCHAIN_ROUTER_ARBITRUM_ROBINHOOD, CROSSCHAIN_ROUTER_BASE_ARBITRUM, CROSSCHAIN_ROUTER_BASE_ROBINHOOD, CROSSCHAIN_ROUTER_BASE_SEPOLIA_ARBITRUM_SEPOLIA,
   CROSSCHAIN_ROUTER_ROBINHOOD_ARBITRUM, CROSSCHAIN_ROUTER_ROBINHOOD_BASE, type RouterProfile } from '@defi-workflow-engine/action-registry';
@@ -109,6 +110,7 @@ export function createRouterNode(nodeId: string, input: RouterBridgeInput): Sema
 export type RouterDetails = RouterBridgeInput & { units: string; recipientLabel: string; network: RouterNetwork;
   /** The asset delivered on the destination chain (it may differ from the source token: USDC → USDG). */ destinationToken: string };
 export function routerDetails(node: SemanticWorkflow['nodes'][number] | { readonly actionType: string }): RouterDetails | null {
+  node = ownDeclaration(node);
   if (!('adapterConstraints' in node) || !isRouterBridgeNode(node)) return null;
   try {
     const f = readRouterBridgeNode({ ...node, dependencies: [] }), routing = routingOf(f.providers), pair = routerPair(f.sourceChain, f.inputToken, f.destinationChain, f.outputToken);

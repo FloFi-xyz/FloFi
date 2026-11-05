@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
+import { ownDeclaration } from './node-declaration';
 import { CONCENTRATED_LIQUIDITY_ACTION, createConcentratedLiquidityNode, readConcentratedLiquidity, readConcentratedLiquiditySource, type SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
 import { ORCA_WHIRLPOOLS_DEVNET_LIQUIDITY as profile, ORCA_WHIRLPOOLS_MAINNET_LIQUIDITY, orcaLiquidityProfile, type OrcaLiquidityProfile } from '@defi-workflow-engine/action-registry';
 import { orcaAlignPriceRange, orcaPriceFromSqrtPrice, orcaSqrtPriceAtTick } from '@defi-workflow-engine/reference-compiler';
@@ -49,6 +50,7 @@ export type SolanaLiquidityDetails = { network: SolanaLiquidityNetwork;
 /** The bound token's cap that means "100% of the swap output": the Devnet token maximum (the swap output is the real limit). */
 export const fullOutputCap = (token: 0 | 1) => formatTokenAmount(token === 0 ? profile.token0.maximumAmount : profile.token1.maximumAmount, token === 0 ? profile.token0.decimals : profile.token1.decimals);
 export function solanaLiquidityDetails(node: SemanticWorkflow['nodes'][number] | { readonly actionType: string; readonly chainId: string }): SolanaLiquidityDetails | null {
+  node = ownDeclaration(node);
   const runtime = orcaLiquidityProfile(node.chainId);
   if (node.actionType !== CONCENTRATED_LIQUIDITY_ACTION || !runtime) return null;
   try {

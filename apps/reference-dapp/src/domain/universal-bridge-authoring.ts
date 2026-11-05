@@ -9,6 +9,7 @@
  * an unknown or ambiguous asset is refused; a destination asset FloFi chooses by default is stated in the composition notes and shown at
  * Review before anything is authorized.
  */
+import { ownDeclaration } from './node-declaration';
 import { SOLANA_MAINNET_TOKENS } from '@defi-workflow-engine/action-registry';
 import { createUniversalBridgeNode, isSolanaPublicKey, isUniversalBridgeNode, readUniversalBridgeNode, UNIVERSAL_NETWORKS, universalNetworkOfChain, type UniversalAssetRef,
   type UniversalBridgeFields, type UniversalNetworkKey, type UniversalRouteSelection, type UniversalRoutingProvider, type SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
@@ -130,6 +131,7 @@ const routingOf = (fields: UniversalBridgeFields): UniversalBridgeRouting =>
     UNIVERSAL_BRIDGE_ROUTING[k].providers.join() === fields.providers.join()) ?? 'BEST';
 /** Readable details of a universal bridge node (labels, symbols, the decimal amount), or null for any other node. */
 export function universalBridgeDetails(node: SemanticWorkflow['nodes'][number] | { readonly actionType: string }): UniversalBridgeDetails | null {
+  node = ownDeclaration(node);
   if (!('adapterConstraints' in node) || !isUniversalBridgeNode(node)) return null;
   let fields: UniversalBridgeFields;
   try { fields = readUniversalBridgeNode({ ...node, dependencies: [] } as unknown as SemanticWorkflow['nodes'][number]); } catch { return null; }

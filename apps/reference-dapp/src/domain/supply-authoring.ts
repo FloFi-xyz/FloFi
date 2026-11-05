@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
+import { ownDeclaration } from './node-declaration';
 import { createSupplyNode, readSupplyNode, createBorrowNode, readBorrowNode, createRepayNode, readRepayNode, createWithdrawNode, readWithdrawNode, type SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
 import { AAVE_V3_BASE_SEPOLIA, AAVE_V3_LENDING_PROFILES, type AaveLendingProfile } from '@defi-workflow-engine/action-registry';
 import type { SupplyReview } from '@defi-workflow-engine/reference-compiler';
@@ -77,6 +78,7 @@ export function createAuthoredSupply(nodeId:string,input:SupplyInput):SemanticWo
   return createSupplyNode(nodeId,{chain:profile.chain,asset:assetOf(profile),amount:parseLendingAmount(input.amount,profile.decimals),beneficiary:input.beneficiary});
 }
 export function supplyDetails(node:SemanticWorkflow['nodes'][number]):SupplyInput|null{
+  node = ownDeclaration(node);
   if(node.actionType!=='supply')return null;
   const fields=readSupplyNode(node),shown=details(fields);
   return shown&&{...shown,beneficiary:fields.beneficiary};
@@ -110,6 +112,7 @@ export function createAuthoredBorrow(nodeId:string,input:SupplyInput):SemanticWo
   return createBorrowNode(nodeId,{chain:profile.chain,asset:assetOf(profile),amount:parseLendingAmount(input.amount,profile.decimals),beneficiary:input.beneficiary,interestRateMode:2});
 }
 export function borrowDetails(node:SemanticWorkflow['nodes'][number]):SupplyInput|null{
+  node = ownDeclaration(node);
   if(node.actionType!=='borrow')return null;
   // A composition Borrow (Supply → Borrow → Swap) is not a standalone declaration: it has no standalone details.
   let fields:ReturnType<typeof readBorrowNode>;try{fields=readBorrowNode(node);}catch{return null;}
@@ -122,6 +125,7 @@ export function createAuthoredRepay(nodeId:string,input:SupplyInput):SemanticWor
   return createRepayNode(nodeId,{chain:profile.chain,asset:assetOf(profile),amount:parseLendingAmount(input.amount,profile.decimals),beneficiary:input.beneficiary,interestRateMode:2});
 }
 export function repayDetails(node:SemanticWorkflow['nodes'][number]):SupplyInput|null{
+  node = ownDeclaration(node);
   if(node.actionType!=='repay')return null;
   const fields=readRepayNode(node),shown=details(fields);
   return shown&&{...shown,beneficiary:fields.beneficiary};
@@ -134,6 +138,7 @@ export function createAuthoredWithdraw(nodeId:string,input:WithdrawInput):Semant
   return createWithdrawNode(nodeId,{chain:profile.chain,asset:assetOf(profile),amount:parseLendingAmount(input.amount,profile.decimals),recipient:input.recipient});
 }
 export function withdrawDetails(node:SemanticWorkflow['nodes'][number]):WithdrawInput|null{
+  node = ownDeclaration(node);
   if(node.actionType!=='withdraw')return null;
   const fields=readWithdrawNode(node),shown=details(fields);
   return shown&&{...shown,recipient:fields.recipient};
@@ -155,6 +160,7 @@ export function lendingView(chain:string|null|undefined,asset?:string|null):Lend
 export function lendingNetworkView(network:LendingNetwork,asset?:string):LendingView{return viewOf(lendingProfileFor(network,asset??lendingAssetFor(network)));}
 /** The reserve asset address of an authored lending node (null for any other node). */
 export function lendingNodeAsset(node:SemanticWorkflow['nodes'][number]):string|null{
+  node = ownDeclaration(node);
   try{
     const fields=node.actionType==='supply'?readSupplyNode(node):node.actionType==='borrow'?readBorrowNode(node):node.actionType==='repay'?readRepayNode(node):node.actionType==='withdraw'?readWithdrawNode(node):null;
     return fields?.asset.address??null;

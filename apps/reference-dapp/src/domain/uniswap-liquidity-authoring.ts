@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
+import { ownDeclaration } from './node-declaration';
 import { CONCENTRATED_LIQUIDITY_ACTION, createConcentratedLiquidityNode, readConcentratedLiquidity, type SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
 import { UNISWAP_V3_BASE_SEPOLIA_LIQUIDITY, UNISWAP_LIQUIDITY_PROFILES, uniswapLiquidityProfile, type UniswapLiquidityProfile } from '@defi-workflow-engine/action-registry';
 import { validateUniswapLiquidityNode } from '@defi-workflow-engine/reference-linter';
@@ -69,6 +70,7 @@ export type UniswapLiquidityDetails = { network: UniswapLiquidityNetwork; maxUsd
   /** USDC per WETH: the LOWER price comes from tickUpper. */
   lowerPrice: string; upperPrice: string; slippage: string; provider: string; pool: string; feeTier: number };
 export function uniswapLiquidityDetails(node: SemanticWorkflow['nodes'][number] | { readonly actionType: string; readonly chainId: string }): UniswapLiquidityDetails | null {
+  node = ownDeclaration(node);
   const profile = node.actionType === CONCENTRATED_LIQUIDITY_ACTION ? uniswapLiquidityProfile(node.chainId) : null;
   if (!profile) return null;
   const t0 = profile.token0, t1 = profile.token1;

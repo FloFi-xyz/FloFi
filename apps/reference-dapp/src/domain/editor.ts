@@ -13,10 +13,11 @@ import { createBridgeSwapWorkflow } from './bridge-swap-authoring';
 import { createAcrossWorkflow } from './across-authoring';
 import { createCrossChainLiquidityWorkflow } from './cross-chain-liquidity';
 import { canDeleteCanvasEdge, planCanvasRemoval, type CanvasRemoval } from './canvas-keyboard';
-import { bindCompositionConsumer, compositionBindingFor, unbindCompositionConsumer } from '@defi-workflow-engine/action-registry';
-import { readConcentratedLiquiditySource } from '@defi-workflow-engine/workflow-contracts';
+import { bindCompositionConsumer, compositionBindingFor, isBoundComposition, unbindCompositionConsumer } from '@defi-workflow-engine/action-registry';
+import { readConcentratedLiquiditySource, isLendingComposition, workflowDependencyOrder, type SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
 
 import { createAuthoredSupply, createAuthoredBorrow, createAuthoredRepay, createAuthoredWithdraw } from './supply-authoring';
+import { ownDeclaration } from './node-declaration';
 import { createAuthoredTransfer } from './robinhood-transfer-authoring';
 import { createSolanaSwapNode, solanaSwapDetails } from './jupiter-authoring';
 import { createSolanaLiquidityNode, solanaLiquidityDetails } from './solana-liquidity-authoring';
@@ -30,8 +31,38 @@ export const initialEditor = (): EditorState => ({ workflow: initialWorkflow(), 
 /** Engineering fixture editor that starts with the protected mock template at `node-001` (not the product empty canvas). */
 export const templateEditor = (): EditorState => ({ workflow: templateWorkflow(), error: null });
 
-/** One pure reducer for both views. View selection and layout never enter the IR. */
+/**
+ * One pure reducer for both views. View selection and layout never enter the IR.
+ *
+ * BUILD AAVE-V3-EXPANSION-001 (auto-connect): a command that appends exactly one new financial step to a workflow that already has steps
+ * links it after the current last step (in dependency order) with an ORDERING dependency — the same edge a Canvas connection creates, drawn
+ * immediately and persisted with the workflow. Chat, Canvas, MCP and channel proposals all reach this reducer, so they behave identically. It
+ * never creates a resource edge or a typed binding (funding stays the sequence runtime's exact asset-identity rule), never touches an existing
+ * link, and is skipped for fixed compositions and whenever the linked draft would not validate (the step is then added unlinked, as before).
+ */
 export function editorReducer(state: EditorState, command: Command, context?: ReviewContext): EditorState {
+  return autoConnect(state.workflow, reduceEditor(state, command, context), context);
+}
+function autoConnect(before: Workflow, after: EditorState, context?: ReviewContext): EditorState {
+  if (after.error || after.workflow === before) return after;
+  const prior = new Set(before.nodes.map(node => node.nodeId)), added = after.workflow.nodes.filter(node => !prior.has(node.nodeId));
+  if (added.length !== 1) return after;
+  const node = added[0]!, workflow = after.workflow;
+  if (node.actionType.startsWith('mock-') || node.dependencies.length || node.inputs.some(input => input.kind === 'OUTPUT_REFERENCE') || workflow.resourceEdges.length ||
+      isLendingComposition(workflow as unknown as SemanticWorkflow) || isBoundComposition(workflow as unknown as SemanticWorkflow) ||
+      workflow.nodes.some(item => item.nodeId === 'build009-bridge' || item.actionType === 'asset.liquidity.prepare')) return after;
+  const existing = workflow.nodes.filter(item => item.nodeId !== node.nodeId && !item.actionType.startsWith('mock-'));
+  let tail: Workflow['nodes'][number] | undefined;
+  try { tail = (workflowDependencyOrder(existing) as readonly Workflow['nodes'][number][]).at(-1); } catch { return after; }
+  if (!tail) return after;
+  const linked = { ...workflow, nodes: workflow.nodes.map(item => item.nodeId === node.nodeId ? { ...item, dependencies: [tail!.nodeId] } : item) };
+  if (context) {
+    const swapChain = linked.nodes.find(n => n.actionType === SWAP_ACTION && (n.chainId === 'eip155:84532' || n.chainId === 'eip155:11155111'))?.chainId;
+    try { validateWorkflowDraft(linked, swapChain ? reviewContextForChain(swapChain, context) : context); } catch { return after; }
+  }
+  return { workflow: freeze(linked), error: null };
+}
+function reduceEditor(state: EditorState, command: Command, context?: ReviewContext): EditorState {
   const reject = (error: string): EditorState => ({ workflow: state.workflow, error });
   if (!commandIsValid(command)) return reject('INVALID_COMMAND');
   const current = state.workflow;
@@ -127,7 +158,8 @@ export function editorReducer(state: EditorState, command: Command, context?: Re
   }
   if (command.type === 'ADD_SOLANA_COMPOSITION') {
     // Exactly the Canvas path, one reducer step at a time: add the swap (unless it exists), add the position, then link them; the link must bind.
-    const step = (from: EditorState, next: Record<string, unknown>) => editorReducer(from, { ...next, source: command.source, baseRevision: from.workflow.revision } as Command, context);
+    // The raw reducer: this composition binds its own typed link, so no step of it is auto-connected first.
+    const step = (from: EditorState, next: Record<string, unknown>) => reduceEditor(from, { ...next, source: command.source, baseRevision: from.workflow.revision } as Command, context);
     let next: EditorState = { workflow: current, error: null }, producer = command.from;
     if (command.swap) { next = step(next, { type: 'ADD_SOLANA_SWAP', input: command.swap }); producer = next.workflow.nodes.at(-1)!.nodeId; }
     else if (current.nodes.some(node => boundTo(node, command.from!))) return reject('COMPOSITION_PRODUCER_ALREADY_BOUND');
@@ -266,9 +298,16 @@ export function editorReducer(state: EditorState, command: Command, context?: Re
   } else if (command.type === 'CONNECT') {
     if (command.from === command.to || !nodes.some(n => n.nodeId === command.from)
         || !nodes.some(n => n.nodeId === command.to)) return reject('INVALID_CONNECTION');
-    const target = nodes.find(n => n.nodeId === command.to)!;
+    let target = nodes.find(n => n.nodeId === command.to)!;
     if (nodes.find(n => n.nodeId === command.from)!.actionType.startsWith('mock-') !== target.actionType.startsWith('mock-')) return reject('ISOLATED_ACTION_EDGE_UNSUPPORTED');
-    if (target.dependencies.includes(command.from)) return { workflow: current, error: null };
+    if (target.dependencies.includes(command.from)) {
+      // BUILD AAVE-V3-EXPANSION-001: connecting a registered composition pair that is already linked only by order (auto-connect) upgrades that
+      // link to the pair's typed binding, exactly as connecting the unlinked pair would. Any other existing link stays as it is.
+      const plain = ownDeclaration(target), from = nodes.find(n => n.nodeId === command.from)!;
+      if (plain === target || target.dependencies.length !== 1 || from.actionType.startsWith('mock-') || !compositionBindingFor(from, plain)) return { workflow: current, error: null };
+      nodes = nodes.map(n => n.nodeId === command.to ? plain : n);
+      target = plain;
+    }
     const ancestors = (id: string, seen = new Set<string>()): boolean => {
       if (id === command.to) return true;
       if (seen.has(id)) return false;
@@ -375,9 +414,21 @@ export function editorReducer(state: EditorState, command: Command, context?: Re
 /** The graph after a Canvas removal plan: links into removed steps are dropped and unbound consumers return to their isolated form. */
 function applyCanvasRemoval(current: Workflow, plan: CanvasRemoval) {
   const removed = new Set(plan.removed), unbound = new Set(plan.unbound);
+  // BUILD AAVE-V3-EXPANSION-001: an ordering link through a deleted financial step is kept (A → B → C, delete B: A → C), so a sequence stays
+  // in order. Only ordering is inherited: an output reference or resource edge into a deleted step is still dropped.
+  const byId = new Map(current.nodes.map(node => [node.nodeId, node]));
+  const surviving = (id: string, seen = new Set<string>()): string[] => {
+    if (!removed.has(id)) return [id];
+    const node = byId.get(id);
+    if (!node || seen.has(id) || node.actionType.startsWith('mock-')) return [];
+    seen.add(id);
+    return node.dependencies.flatMap(parent => surviving(parent, seen));
+  };
   const nodes = current.nodes.filter(node => !removed.has(node.nodeId)).map(node => {
     const own = unbound.has(node.nodeId) ? unbindCompositionConsumer(node) : node;
-    return { ...own, dependencies: own.dependencies.filter(id => !removed.has(id)),
+    const ordering = own.actionType.startsWith('mock-') || own.inputs.some(input => input.kind === 'OUTPUT_REFERENCE') ? own.dependencies.filter(id => !removed.has(id))
+      : [...new Set(own.dependencies.flatMap(id => surviving(id)))];
+    return { ...own, dependencies: ordering,
       inputs: own.inputs.filter(input => !(input.kind === 'OUTPUT_REFERENCE' && removed.has(input.value.nodeId))) };
   });
   return { nodes, resourceEdges: current.resourceEdges.filter(edge => !removed.has(edge.fromNodeId) && !removed.has(edge.toNodeId)) };

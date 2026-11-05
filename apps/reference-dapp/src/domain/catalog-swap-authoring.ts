@@ -6,6 +6,7 @@
  * native asset fails closed. Base's USDC ⇄ WETH reference pair is not a catalog swap (it keeps its BUILD-002 declaration). Reading a
  * node back resolves its assets by address.
  */
+import { ownDeclaration } from './node-declaration';
 import { formatAssetAmount, parseAssetAmount, type CanonicalAsset } from '@defi-workflow-engine/action-registry';
 import { catalogSwapKind, createCatalogSwapNode, isCatalogSwapNode, readCatalogSwapNode, type CatalogAssetRef, type CatalogSwapKind, type SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
 import { resolveNetworkAsset } from './asset-catalogs';
@@ -47,6 +48,7 @@ export type CatalogSwapDetails = { readonly network: CatalogSwapNetwork; readonl
   /** BUILD-FLOFI-BRIDGE-LIVE-FIX-003: a pool swap, or a WETH9 wrap / unwrap of the network's native ETH. */ readonly kind: CatalogSwapKind };
 /** A canonical catalog swap's display details. Unresolved assets (catalog not loaded) keep a neutral label, never a guess. */
 export function catalogSwapDetails(node: { readonly actionType: string; readonly chainId: string }): CatalogSwapDetails | null {
+  node = ownDeclaration(node);
   if (!isCatalogSwapNode(node)) return null;
   const network = networkOfChain(node.chainId);
   let fields;
