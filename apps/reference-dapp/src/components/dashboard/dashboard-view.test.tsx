@@ -93,6 +93,16 @@ describe('Dashboard foundation inside the canonical shell', () => {
     expect(records({ runs: [projectDashboardRun({ ...row, workflowId: 'unnamed-id' })], openWorkflow: open })).toContain('>Open workflow</button>');
     expect(records({ runs: [projectDashboardRun({ ...row, workflowId: 'another' })], openWorkflow: open })).not.toContain('Open workflow');
   });
+  it('collapses record evidence behind an accessible disclosure and keeps actions in one row', () => {
+    const html = records({ runs: [projectDashboardRun({ ...row, updatedAt: '2026-11-04T12:00:00Z' })], history: { change: () => async () => ({ ok: true, disposition: 'ARCHIVED' }), changed: noop } });
+    expect(html).toContain('aria-expanded="false"'); expect(html).toContain('Show details for Aave workflow');
+    expect(html).toMatch(/hidden=""[\s\S]*Evidence available/);
+    expect(html).toContain('More execution actions'); expect(html).toContain('Record actions');
+    expect(html).toMatch(/role="group"[^>]*hidden=""/);
+    expect(html).toContain('Delete permanently?'); expect(html).toContain('Only records proven to have no financial submission');
+    expect(html).toContain('dateTime="2026-11-04T12:00:00Z"');
+    expect(html).toContain('class="workspace-action"');
+  });
   it.each<[DashboardStatus, string]>([
     ['Completed', 'complete'], ['Completed with attention', 'attention'], ['In progress', 'progress'],
     ['Needs attention', 'attention'], ['Partially completed', 'attention'], ['Failed', 'failed'],

@@ -3,7 +3,7 @@
 import { test, expect, sendChatCommand, openSimulationDetails, proveConnectedEvmWallet, readWorkflowIr } from './fixtures';
 import { CROSSCHAIN_ROUTER_BASE_SEPOLIA_ARBITRUM_SEPOLIA as TESTNET } from '@defi-workflow-engine/action-registry';
 import { createRouterHarness } from './router-harness';
-import type { Page } from '@playwright/test';
+import type { Locator, Page } from '@playwright/test';
 import { createDatabase, createLogger } from '@defi-workflow-engine/cloud-runtime';
 import type { SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
 import { createBackend, type FlowResult } from '../backend/app';
@@ -34,6 +34,19 @@ async function libraryWorkspace(page: Page, language: 'EN' | 'PT' = 'EN') {
   await expect(page).toHaveURL('/app/workflows');
   await expect(page.locator('main').getByRole('heading', { name: label, exact: true })).toBeVisible();
   return page.locator('main').getByRole('region', { name: label, exact: true });
+}
+/** Compact execution rows disclose their existing workflow/reconciliation metadata on request. */
+async function expandRecordedWorkflows(library: Locator, language: 'EN' | 'PT' = 'EN') {
+  const records = library.locator('.dashboard-run-list .dashboard-run-card');
+  await expect(records).toHaveCount(3);
+  for (const record of await records.all()) {
+    const disclosure = record.getByRole('button', { name: language === 'PT' ? /^Mostrar detalhes de / : /^Show details for / });
+    await expect(disclosure).toHaveAttribute('aria-expanded', 'false');
+    await expect(record.locator('.dashboard-run-message')).toBeHidden();
+    await disclosure.click();
+    await expect(record.getByRole('button', { name: language === 'PT' ? /^Ocultar detalhes de / : /^Hide details for / })).toHaveAttribute('aria-expanded', 'true');
+    await expect(record.locator('.dashboard-run-message')).toBeVisible();
+  }
 }
 const ok = <T,>(result: FlowResult): T => { if (!result.ok) throw Error(result.code); return result.value as T; };
 /** Existing owner runtime creates the durable execution fixtures; the only sends go to the MOCKED loopback chain. */
@@ -153,6 +166,7 @@ test('Save → Your workflows → exact Canvas restoration; grouped executions, 
   await expect(library.getByRole('region', { name: 'Executed and history', exact: true }).locator('.dashboard-run-list>li')).toHaveCount(3);
   // The saved workflow ran, so it is listed with its records (reopenable there), not under Saved workflows.
   await expect(library.locator('.workflows-saved')).not.toContainText(name);
+  await expandRecordedWorkflows(library);
   await expect(library.getByRole('button', { name: `Open workflow: ${name}`, exact: true })).toHaveCount(2);
   await page.locator(`a[href="/app/dashboard/runs/${run1}"]`).click();
   await expect(page.locator('main')).toContainText(run1);
@@ -160,6 +174,7 @@ test('Save → Your workflows → exact Canvas restoration; grouped executions, 
   expect(run1).not.toBe(run2);
   await reloadBuilder(page);
   library = await libraryWorkspace(page);
+  await expandRecordedWorkflows(library);
   await expect(library.getByRole('button', { name: `Open workflow: ${name}`, exact: true })).toHaveCount(2);
   await expect(library.getByRole('button', { name: 'Open workflow', exact: true })).toHaveCount(1);
   expect(await library.innerText()).not.toMatch(/RECONCILED|0x[0-9a-f]{40}|crx-/);
@@ -184,6 +199,7 @@ test('Save → Your workflows → exact Canvas restoration; grouped executions, 
   await page.getByRole('button', { name: 'Settings', exact: true }).click(); await page.getByRole('switch', { name: 'Language', exact: true }).click();
   await expect(page.locator('html')).toHaveAttribute('lang', 'pt-BR'); await page.keyboard.press('Escape');
   library = await libraryWorkspace(page, 'PT');
+  await expandRecordedWorkflows(library, 'PT');
   await expect(library.getByRole('button', { name: `Abrir fluxo: ${name}`, exact: true })).toHaveCount(2);
   await expect(page.getByRole('group', { name: 'Ligação da carteira' })).toContainText(A.address.slice(0, 6));
   await library.getByRole('button', { name: `Abrir fluxo: ${name}`, exact: true }).first().click();

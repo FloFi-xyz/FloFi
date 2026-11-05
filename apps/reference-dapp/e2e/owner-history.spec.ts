@@ -73,10 +73,12 @@ async function open(page: Page, wallets: TestWallet[]) {
 test('permanent deletion removes real bytes and stays deleted after refresh, a new session, and wallet changes', async ({ page, browser }) => {
   const owner = createTestWallet(), other = createTestWallet(), id = await seed(owner);
   await open(page, [owner, other]); await expect(card(page, id)).toBeVisible();
+  await card(page, id).getByRole('button', { name: 'More execution actions', exact: true }).click();
   await card(page, id).getByRole('button', { name: 'Delete execution', exact: true }).click();
   const dialog = page.getByRole('dialog', { name: 'Delete permanently?', exact: true });
   await dialog.getByRole('button', { name: 'Cancel', exact: true }).click();
   await expect(card(page, id)).toBeVisible(); expect((await inspect(id)).runs).toBe(1);
+  await card(page, id).getByRole('button', { name: 'More execution actions', exact: true }).click();
   await card(page, id).getByRole('button', { name: 'Delete execution', exact: true }).click();
   await dialog.getByRole('button', { name: 'Delete permanently', exact: true }).click();
   await expect(card(page, id)).toHaveCount(0);
@@ -93,12 +95,41 @@ test('permanent deletion removes real bytes and stays deleted after refresh, a n
   expect(await inspect(id)).toEqual({ runs: 0, segments: 0, purges: 1, archives: 0 });
 });
 
+test('compact rows expose metadata on demand, support keyboard actions and archive without deleting history', async ({ page }) => {
+  const owner = createTestWallet(), id = await seed(owner);
+  await open(page, [owner]);
+  const row = card(page, id), more = row.getByRole('button', { name: 'More execution actions', exact: true });
+  await expect(row).toBeVisible();
+  expect((await row.boundingBox())!.height).toBeLessThan(90);
+  const disclosure = row.getByRole('button', { name: /^Show details for / });
+  await expect(disclosure).toHaveAttribute('aria-expanded', 'false');
+  await expect(row.locator('.dashboard-run-message')).toBeHidden();
+  await disclosure.click();
+  await expect(row.getByRole('button', { name: /^Hide details for / })).toHaveAttribute('aria-expanded', 'true');
+  await expect(row.locator('.dashboard-run-message')).toBeVisible();
+  await row.getByRole('button', { name: /^Hide details for / }).click();
+  await more.focus(); await page.keyboard.press('Enter');
+  await expect(row.getByRole('button', { name: 'Archive execution', exact: true })).toBeFocused();
+  await page.keyboard.press('Escape');
+  await expect(more).toBeFocused();
+  await expect(row.getByRole('button', { name: 'Delete execution', exact: true })).toBeHidden();
+  await page.setViewportSize({ width: 375, height: 844 });
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  await expect(row.getByRole('link', { name: /^View / })).toBeVisible();
+  const before = await inspect(id);
+  await more.click(); await row.getByRole('button', { name: 'Archive execution', exact: true }).click();
+  await expect(row).toHaveCount(0);
+  expect(await inspect(id)).toEqual({ ...before, archives: 1 });
+  expect((await walletRequests(page)).filter(method => /send|signTransaction/i.test(method))).toEqual([]);
+});
+
 test('financial authorization refuses deletion, offers Archive, and preserves the raw history across sessions', async ({ page, browser }) => {
   const owner = createTestWallet(), stranger = createTestWallet(), id = await seed(owner, true);
   const before = await inspect(id); await open(page, [owner, stranger]);
   await switchAccount(page, stranger.address); await signIn(page); await expect(card(page, id)).toHaveCount(0);
   await switchAccount(page, owner.address); await signIn(page);
   await expect(card(page, id)).toBeVisible();
+  await card(page, id).getByRole('button', { name: 'More execution actions', exact: true }).click();
   await card(page, id).getByRole('button', { name: 'Delete execution', exact: true }).click();
   const dialog = page.getByRole('dialog', { name: 'Delete permanently?', exact: true });
   await dialog.getByRole('button', { name: 'Delete permanently', exact: true }).click();
@@ -119,6 +150,7 @@ test('Portuguese confirmation remains usable on a narrow screen and keeps the ca
   const owner = createTestWallet(), id = await seed(owner); await open(page, [owner]);
   await page.evaluate(() => localStorage.setItem('flofi.language', 'PT')); await page.reload();
   await page.setViewportSize({ width: 390, height: 844 });
+  await card(page, id).getByRole('button', { name: 'Mais ações da execução', exact: true }).click();
   await card(page, id).getByRole('button', { name: 'Excluir execução', exact: true }).click();
   const dialog = page.getByRole('dialog', { name: 'Excluir definitivamente?', exact: true });
   await expect(dialog).toBeVisible();

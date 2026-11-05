@@ -50,6 +50,8 @@ const codeOf = (cause: unknown) => cause instanceof Error && /^[A-Z][A-Z0-9_]{2,
 
 export function useWalletProof(namespace: Namespace | null, chain: SolanaWalletChain = defaultProofChain()) {
   const [proven, setProven] = useState<string | null>(null);
+  const [provenNamespace, setProvenNamespace] = useState<Namespace | null>(null);
+  const [expiresAt, setExpiresAt] = useState<number | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   /** BUILD-FLOFI-AUTH-WALLETS-001: the wallet the owner chose for the last proof (display metadata only, never an identity). */
@@ -61,11 +63,35 @@ export function useWalletProof(namespace: Namespace | null, chain: SolanaWalletC
   const embedded = typeof window !== 'undefined' && window.location?.pathname === '/mcp/approve';
   const proofContext: [boolean?] = embedded ? [true] : [];
   const selector = useWalletSelector(), solana = useOptionalJupiter(), evm = useOptionalBuild009Wallet();
+  /** Connection is a selection guard, never ownership proof. A switched wallet immediately stops exposing the previous proof. */
+  const connected = namespace === 'solana' ? solana?.session?.chain === chain ? solana.session.account.address : null : namespace === 'eip155' ? evm?.account ?? null : null;
+  const scope = `${namespace}:${connected ?? ''}:${chain}`, scopeRef = useRef(scope), connectedRef = useRef(connected), epoch = useRef(0);
+  scopeRef.current = scope; connectedRef.current = connected;
+  const matches = (account: string, selected: string | null) => !selected || (namespace === 'eip155' ? account.toLowerCase() === selected.toLowerCase() : account === selected);
   const refresh = useCallback(async () => {
-    const account = namespace === 'solana' ? (await solanaSessionStatus())?.account : namespace === 'eip155' ? (await walletSessionStatus())?.account : null;
-    if (namespaceRef.current === namespace) setProven(account ?? null);
-  }, [namespace]);
-  useEffect(() => { setProven(null); void refresh().catch(() => setProven(null)); }, [refresh]);
+    const current = ++epoch.current;
+    try {
+      const session = namespace === 'solana' ? await solanaSessionStatus() : namespace === 'eip155' ? await walletSessionStatus() : null;
+      if (scopeRef.current !== scope || epoch.current !== current) return;
+      setProven(session?.account ?? null);
+      setProvenNamespace(namespace);
+      const expiry = session?.expiresAt ? Date.parse(session.expiresAt) : NaN;
+      setExpiresAt(Number.isFinite(expiry) ? expiry : null);
+    } catch {
+      if (scopeRef.current === scope && epoch.current === current) { setProven(null); setExpiresAt(null); }
+    }
+  }, [namespace, scope]);
+  useEffect(() => { setProven(null); setExpiresAt(null); void refresh(); }, [refresh]);
+  useEffect(() => {
+    const focused = () => { void refresh(); };
+    window.addEventListener('focus', focused);
+    return () => window.removeEventListener('focus', focused);
+  }, [refresh]);
+  useEffect(() => {
+    if (expiresAt === null) return;
+    const timeout = setTimeout(() => { setProven(null); void refresh(); }, Math.min(Math.max(0, expiresAt - Date.now()), 2_147_483_647));
+    return () => clearTimeout(timeout);
+  }, [expiresAt, refresh]);
   useEffect(() => {
     const changed = (event: Event) => {
       const detail = (event as CustomEvent<{ namespace?: string; origin?: object }>).detail;
@@ -81,15 +107,18 @@ export function useWalletProof(namespace: Namespace | null, chain: SolanaWalletC
   async function run(action: () => Promise<string | null>): Promise<ProofOutcome> {
     if (requestLock.current) return { account: null, error: null, wallet: null }; requestLock.current = true; setBusy(true); setError(null);
     const requestedNamespace = namespace;
+    ++epoch.current;
     walletRef.current = null;
     try {
       const account = await action();
       // BUILD-CHAT-LEARNING-002: a newly proven wallet changes whose Copilot memory applies; the Copilot reloads its learning context.
-      if (account && namespaceRef.current === requestedNamespace) {
-        setProven(account); window.dispatchEvent(new Event(LEARNING_CHANGED));
+      if (account && namespaceRef.current === requestedNamespace && matches(account, connectedRef.current)) {
+        ++epoch.current;
+        setProven(account); setProvenNamespace(requestedNamespace); window.dispatchEvent(new Event(LEARNING_CHANGED));
         window.dispatchEvent(new CustomEvent(WALLET_PROOF_CHANGED, { detail: { namespace: requestedNamespace, origin: origin.current } }));
       }
-      return { account, error: null, wallet: account ? walletRef.current : null };
+      const accepted = account && namespaceRef.current === requestedNamespace && matches(account, connectedRef.current) ? account : null;
+      return { account: accepted, error: null, wallet: accepted ? walletRef.current : null };
     } catch (cause) {
       const code = codeOf(cause);
       if (namespaceRef.current === requestedNamespace) setError(code);
@@ -119,6 +148,7 @@ export function useWalletProof(namespace: Namespace | null, chain: SolanaWalletC
     const signature = await provider.request({ method: 'personal_sign', params: [utf8Hex(message), account] });
     if (typeof signature !== 'string') throw new Error('WALLET_SIGNATURE_INVALID');
     const verified = unwrap(await walletSignIn(account, Number.parseInt(chainId, 16), signature, ...proofContext));
+    if (verified.expiresAt && namespaceRef.current === namespace && matches(verified.account, connectedRef.current)) setExpiresAt(Date.parse(verified.expiresAt));
     if (embedded && (await walletSessionStatus())?.account !== verified.account) throw new Error('EMBEDDED_WALLET_SESSION_UNAVAILABLE');
     return verified.account;
   });
@@ -140,12 +170,13 @@ export function useWalletProof(namespace: Namespace | null, chain: SolanaWalletC
     const { message } = unwrap(await solanaSignInChallenge(session.account.address, ...proofContext));
     const signature = await signSolanaMessage(session, message, 'WALLET');
     const verified = unwrap(await solanaSignIn(session.account.address, signature, ...proofContext));
+    if (verified.expiresAt && namespaceRef.current === namespace && matches(verified.account, connectedRef.current)) setExpiresAt(Date.parse(verified.expiresAt));
     if (embedded && (await solanaSessionStatus())?.account !== verified.account) throw new Error('EMBEDDED_WALLET_SESSION_UNAVAILABLE');
     return verified.account;
   });
   /** The connected operational account of this namespace, if any (connection only: never treated as proof). */
-  const connected = namespace === 'solana' ? solana?.session?.chain === chain ? solana.session.account.address : null : namespace === 'eip155' ? evm?.account ?? null : null;
-  return { proven, busy, error, connected, wallet, proveEvm, proveSolana, refresh };
+  const valid = proven && provenNamespace === namespace && matches(proven, connected) && (expiresAt === null || expiresAt > Date.now()) ? proven : null;
+  return { proven: valid, busy, error, connected, wallet, proveEvm, proveSolana, refresh };
 }
 
 /** The proof buttons for one namespace, or the proven account. */

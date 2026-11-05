@@ -4,6 +4,17 @@
  * "MOCKED" and "EVM" stay as they are. Shared words repeat the existing product translations.
  */
 export const portuguesePortfolio: Readonly<Record<string, string>> = {
+  'Network filter': 'Filtrar por rede', 'All networks': 'Todas as redes',
+  'Portfolio value (priced)': 'Valor do portfólio (com preço)', 'Portfolio value': 'Valor do portfólio',
+  '1 holding has no available valuation.': '1 ativo está sem avaliação disponível.',
+  '{0} holdings have no available valuation.': '{0} ativos estão sem avaliação disponível.',
+  'Verified prices only': 'Somente preços verificados',
+  'Network allocation of priced holdings': 'Distribuição dos ativos com preço por rede',
+  'No priced allocation available.': 'Não há distribuição com preços disponíveis.',
+  'Allocation by network': 'Distribuição por rede', 'Valuation unavailable': 'Avaliação indisponível',
+  'Allocation includes priced holdings only.': 'A distribuição inclui somente ativos com preço.',
+  'Prices observed {0}.': 'Preços observados em {0}.', 'Top holdings': 'Principais ativos', 'View all assets': 'Ver todos os ativos',
+  'Refresh failed. Showing the last available balances; try refreshing again.': 'A atualização falhou. Exibindo os últimos saldos disponíveis; tente atualizar novamente.',
   // Card
   'Wallet portfolio': 'Portfólio da carteira', 'Connect a wallet to see its balances.': 'Conecte uma carteira para ver os saldos dela.',
   'Test data (MOCKED)': 'Dados de teste (MOCKED)', 'Refresh': 'Atualizar', 'Refreshing…': 'Atualizando…', 'Retry': 'Tentar novamente',

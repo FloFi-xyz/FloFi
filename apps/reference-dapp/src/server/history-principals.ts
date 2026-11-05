@@ -12,7 +12,8 @@
  * The browser's address remains an expected-wallet guard only. A wallet that is neither proven here nor held by the signed-in account still
  * needs its own proof, so another person's history is never reachable. Account wallets never apply inside the embedded approval route, whose
  * wallet authority stays isolated. Used for history records and the workflow library; the Copilot's per-wallet memory uses `memoryPrincipals`
- * (one unambiguous wallet per ecosystem). Automations, delegation, approvals and signing keep their own proofs.
+ * (one unambiguous wallet per ecosystem). Automation management and proposal creation reuse this same account boundary; delegation,
+ * approval claims and transaction signing keep their separate wallet proofs. Managing an automation grants no signing authority.
  */
 import { headers } from 'next/headers';
 import { accountHost, currentAccountSession, type AccountHost } from '../accounts/account-host.ts';

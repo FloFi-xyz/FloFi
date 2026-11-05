@@ -1,15 +1,16 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { HookHarness } from '../test-utils/hook-harness';
+import { deferred, HookHarness } from '../test-utils/hook-harness';
 import { useWalletProof, walletProofMessage } from './wallet-proof';
 import type { SolanaSession } from '../wallet/solana-wallet';
 
 const f = vi.hoisted(() => ({ session: null as SolanaSession | null, connectWith: vi.fn(), choose: vi.fn(), signMessage: vi.fn(),
-  challenge: vi.fn(), signIn: vi.fn(), status: vi.fn(), evmConnect: vi.fn(), evmStatus: vi.fn(), shell: true, directConnect: vi.fn(), preference: vi.fn(), switchClusterTo: vi.fn() }));
+  challenge: vi.fn(), signIn: vi.fn(), status: vi.fn(), evmConnect: vi.fn(), evmStatus: vi.fn(), evmAccount: null as string | null,
+  shell: true, directConnect: vi.fn(), preference: vi.fn(), switchClusterTo: vi.fn() }));
 vi.mock('react', async original => ({ ...await original<typeof import('react')>(), ...(await import('../test-utils/hook-harness')).hookMocks }));
 // `shell: false` is a page outside the product shell (`/connections`): no operational wallet sessions are provided there.
 vi.mock('../state/jupiter-store', () => ({ useOptionalJupiter: () => f.shell ? { session: f.session, connectWith: f.connectWith, switchClusterTo: f.switchClusterTo } : null }));
-vi.mock('../state/build009-wallet-store', () => ({ useOptionalBuild009Wallet: () => f.shell ? { account: null, connectWith: f.evmConnect } : null }));
+vi.mock('../state/build009-wallet-store', () => ({ useOptionalBuild009Wallet: () => f.shell ? { account: f.evmAccount, connectWith: f.evmConnect } : null }));
 vi.mock('./wallet-selector', () => ({ useWalletSelector: () => ({ choose: f.choose }) }));
 vi.mock('../wallet/solana-wallet', () => ({ signSolanaMessage: f.signMessage, connectSolanaWallet: f.directConnect }));
 vi.mock('../wallet/wallet-registry', () => ({ updateWalletPreference: f.preference }));
@@ -23,16 +24,64 @@ const session = (chain: SolanaSession['chain']): SolanaSession => ({ chain,
   wallet: { name: 'Solflare', accounts: [], chains: [chain], features: {} } });
 const read = () => host.render(() => useWalletProof('solana', 'solana:mainnet'));
 beforeEach(() => {
-  host = new HookHarness(); vi.resetAllMocks(); vi.stubGlobal('window', new EventTarget()); f.session = null; f.shell = true;
+  host = new HookHarness(); vi.resetAllMocks(); vi.stubGlobal('window', new EventTarget()); f.session = null; f.evmAccount = null; f.shell = true;
   f.status.mockResolvedValue(null); f.evmStatus.mockResolvedValue(null);
   f.challenge.mockResolvedValue({ ok: true, value: { message: 'One-time sign-in challenge' } }); f.signMessage.mockResolvedValue('owner-proof-signature');
   f.signIn.mockResolvedValue({ ok: true, value: { account: owner } });
   // The operational wallet cannot move to the other cluster unless a test says so (it then asks for a wallet choice, as before).
   f.switchClusterTo.mockResolvedValue({ ok: false, code: 'JUPITER_SOLANA_WALLET_REQUIRED' });
 });
-afterEach(() => { host.unmount(); vi.unstubAllGlobals(); });
+afterEach(() => { host.unmount(); vi.useRealTimers(); vi.unstubAllGlobals(); });
 
 describe('approval proof shares the operational wallet session', () => {
+  it('restores a proven EVM wallet case-insensitively, but never authorizes another selected account', async () => {
+    const evm = '0x' + 'a'.repeat(40); f.evmAccount = evm.toUpperCase(); f.evmStatus.mockResolvedValue({ account: evm });
+    const readEvm = () => host.render(() => useWalletProof('eip155'));
+    readEvm(); await Promise.resolve(); await Promise.resolve(); expect(readEvm().proven).toBe(evm);
+    f.evmAccount = '0x' + 'b'.repeat(40); expect(readEvm().proven).toBeNull();
+    await Promise.resolve(); await Promise.resolve(); expect(readEvm().proven).toBeNull();
+    expect(f.choose).not.toHaveBeenCalled(); expect(f.evmConnect).not.toHaveBeenCalled();
+  });
+  it('does not carry a proof into another namespace or accept a signature returned after the selected account changes', async () => {
+    f.session = session('solana:mainnet'); const signing = deferred<{ ok: true; value: { account: string } }>(); f.signIn.mockReturnValueOnce(signing.promise);
+    const pending = read().proveSolana(); await Promise.resolve(); await Promise.resolve(); await Promise.resolve();
+    const other = 'So11111111111111111111111111111111111111112';
+    f.session = { ...session('solana:mainnet'), account: { ...session('solana:mainnet').account, address: other } }; read();
+    signing.resolve({ ok: true, value: { account: owner } });
+    expect((await pending).account).toBeNull(); expect(read().proven).toBeNull();
+    expect(host.render(() => useWalletProof('eip155')).proven).toBeNull();
+  });
+  it('restores the valid server proof without a connection or signature request', async () => {
+    f.session = session('solana:mainnet');
+    f.status.mockResolvedValue({ account: owner, expiresAt: new Date(Date.now() + 60_000).toISOString() });
+    read(); await Promise.resolve(); await Promise.resolve();
+    expect(read().proven).toBe(owner);
+    expect(f.choose).not.toHaveBeenCalled(); expect(f.connectWith).not.toHaveBeenCalled(); expect(f.signMessage).not.toHaveBeenCalled();
+  });
+  it('never restores the previous wallet proof after the connected account changes or an old read finishes late', async () => {
+    const old = deferred<{ account: string } | null>(); f.session = session('solana:mainnet'); f.status.mockReturnValueOnce(old.promise);
+    read();
+    const other = 'So11111111111111111111111111111111111111112';
+    f.session = { ...session('solana:mainnet'), account: { ...session('solana:mainnet').account, address: other } };
+    f.status.mockResolvedValue(null); read(); await Promise.resolve(); await Promise.resolve();
+    old.resolve({ account: owner }); await Promise.resolve(); await Promise.resolve();
+    expect(read().connected).toBe(other); expect(read().proven).toBeNull();
+    expect(f.signMessage).not.toHaveBeenCalled();
+  });
+  it('clears expired proofs and rechecks the server when the page gains focus after logout', async () => {
+    vi.useFakeTimers(); f.session = session('solana:mainnet');
+    f.status.mockResolvedValue({ account: owner, expiresAt: new Date(Date.now() + 1000).toISOString() });
+    read(); await Promise.resolve(); await Promise.resolve(); expect(read().proven).toBe(owner);
+    f.status.mockResolvedValue(null); await vi.advanceTimersByTimeAsync(1000); expect(read().proven).toBeNull();
+    f.status.mockResolvedValue({ account: owner, expiresAt: new Date(Date.now() + 60_000).toISOString() });
+    await read().refresh(); expect(read().proven).toBe(owner);
+    f.status.mockResolvedValue(null); window.dispatchEvent(new Event('focus')); await Promise.resolve(); await Promise.resolve();
+    expect(read().proven).toBeNull(); expect(f.signMessage).not.toHaveBeenCalled();
+  });
+  it('fails closed when rechecking ownership is unavailable', async () => {
+    f.status.mockResolvedValue({ account: owner }); await read().refresh(); expect(read().proven).toBe(owner);
+    f.status.mockRejectedValue(new Error('offline')); await read().refresh(); expect(read().proven).toBeNull();
+  });
   it('proves the already connected mainnet Solana wallet without reconnecting or opening Credentials', async () => {
     f.session = session('solana:mainnet');
     await read().proveSolana();

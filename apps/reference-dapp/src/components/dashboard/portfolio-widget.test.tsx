@@ -61,7 +61,7 @@ beforeEach(() => { host = new HookHarness(); locale.language = 'EN'; });
 afterEach(() => host.unmount());
 
 describe('Dashboard wallet portfolio widget', () => {
-  it('shows a compact priced card that expands into identity, networks and an Assets table', async () => {
+  it('shows a priced portfolio with an accessible network chart and expandable full holdings', async () => {
     const load = loader({ ok: true, portfolio: snapshot() }), props: Props = { evm: OWNER, solana: null, load };
     const loading = view(props);
     expect(loading).toContain('Reading wallet balances…'); expect(loading).not.toMatch(/\$|<table/);
@@ -69,9 +69,9 @@ describe('Dashboard wallet portfolio widget', () => {
     expect(load).toHaveBeenCalledWith({ evm: OWNER, solana: null });
     const compact = view(props);
     expect(compact).toContain('Wallet portfolio'); expect(compact).toContain('Priced holdings'); expect(compact).toContain('≈ $4,500.75');
-    expect(compact).toContain('1 of 2 holdings priced'); expect(compact).toContain('ETH <span class="numeric">100%</span>');
+    expect(compact).toContain('1 of 2 holdings priced'); expect(compact).toContain('Base: 100%'); expect(compact).toContain('aria-label="Allocation by network"');
     expect(compact).toContain('Some networks could not be read.'); expect(compact).toContain('aria-expanded="false"');
-    expect(compact).toContain('aria-controls="dashboard-portfolio-details"'); expect(compact).toContain('Show details');
+    expect(compact).toContain('aria-controls="dashboard-portfolio-details"'); expect(compact).toContain('View all assets');
     expect(compact).not.toContain('<table'); expect(compact).not.toContain('Collapse');
     click(props, disclosure);
     const expanded = view(props);
@@ -80,7 +80,7 @@ describe('Dashboard wallet portfolio widget', () => {
     expect(expanded).toContain('Block 38123456'); expect(expanded).toContain('Unavailable'); expect(expanded).toContain('Not enabled on this deployment: Ethereum, Arbitrum One');
     expect(expanded).toMatch(/<table[^>]*>.*<th scope="col">Asset<\/th><th scope="col">Network<\/th>.*Balance.*Price.*Value/);
     expect(expanded).toContain('1.5</td>'); expect(expanded).toContain('$3,000.50'); expect(expanded).toContain('$4,500.75');
-    expect(expanded).toContain('1,234.56</td>'); expect(expanded).toMatch(/1,234\.56<\/td><td class="[^"]*">—<\/td><td class="[^"]*">—<\/td>/);
+    expect(expanded).toContain('1,234.56</td>'); expect(expanded).toMatch(/1,234\.56<\/td><td class="[^"]*">Unavailable<\/td><td class="[^"]*">Valuation unavailable<\/td>/);
     expect(expanded).toMatch(/Prices: Chainlink USD feeds on Base, observed [^<]*2026[^<]*11:59[^<]* UTC\. Values are estimates, not quotes\./);
     expect(expanded).toContain('Only assets with a verified Chainlink USD feed on this deployment are priced.');
     expect(expanded).toContain('Your FloFi executions are in Your workflows.');
@@ -94,7 +94,7 @@ describe('Dashboard wallet portfolio widget', () => {
     view(props); await settle();
     const compact = view(props);
     expect(compact).toContain('Portfólio da carteira'); expect(compact).toContain('≈ US$ 4.500,75'); expect(compact).toContain('1 de 2 ativos com preço');
-    expect(compact).toContain('Ver detalhes');
+    expect(compact).toContain('Ver todos os ativos');
     click(props, disclosure);
     const expanded = view(props);
     expect(expanded).toContain('Ativos'); expect(expanded).toContain('Saldo'); expect(expanded).toContain('Rede principal'); expect(expanded).toContain('Carteira EVM');
@@ -109,7 +109,7 @@ describe('Dashboard wallet portfolio widget', () => {
     const props: Props = { evm: null, solana: 'So1ana1111111111111111111111111111111111111', load: loader({ ok: true, portfolio: snapshot({ holdings: [SCALED, ODD],
       pricedTotalUsd: null, unpricedCount: 2, accounts: [{ ecosystem: 'solana', address: 'So1ana1111111111111111111111111111111111111' }] }) }) };
     view(props); await settle();
-    expect(view(props)).toContain('4.5 xAAPL · ODD: balance unavailable');
+    expect(view(props)).toContain('4.5 xAAPL'); expect(view(props)).toContain('ODD: balance unavailable');
     click(props, disclosure);
     const expanded = view(props);
     expect(expanded).toMatch(/title="On-chain amount: 3"[^>]*>4\.5<small[^>]*>Scaled by the token multiplier<\/small><\/td>/);
@@ -141,10 +141,10 @@ describe('Dashboard wallet portfolio widget', () => {
       pricedTotalUsd: null, unpricedCount: 2, priceSource: null }) }) };
     view(props); await settle();
     const compact = view(props);
-    expect(compact).toContain('Holdings: 2'); expect(compact).toContain('1,234.56 USDC · 1.5 ETH'); expect(compact).toContain('USD values are unavailable on this deployment.');
+    expect(compact).toContain('Holdings: 2'); expect(compact).toContain('1,234.56 USDC'); expect(compact).toContain('1.5 ETH'); expect(compact).toContain('USD values are unavailable on this deployment.');
     click(props, disclosure);
     const expanded = view(props);
-    expect(expanded).not.toContain('$'); expect(expanded).not.toContain('Priced holdings');
+    expect(expanded).not.toContain('$'); expect(expanded).not.toContain('Portfolio value (priced)');
     expect(expanded).toContain('USD values are unavailable on this deployment.');
   });
   it('labels test data and fixture prices as MOCKED', async () => {
@@ -176,6 +176,46 @@ describe('Dashboard wallet portfolio widget', () => {
     const unavailable = view(down);
     expect(unavailable).toContain('Wallet balances are unavailable right now.'); expect(unavailable).toContain('>Refresh</button>');
     expect(unavailable).not.toContain('No balances found');
+  });
+
+  it('filters real holdings by represented network and recomputes allocation and priced value', async () => {
+    const arb = { ...ETH, networkId: 'arbitrum-one' as const, network: 'Arbitrum One', chain: 'eip155:42161', valueUsd: '1500.25' };
+    const props: Props = { evm: OWNER, solana: null, load: loader({ ok: true, portfolio: snapshot({ holdings: [ETH, arb, USDC],
+      networks: [network('base', 'Base', 'READ'), network('arbitrum-one', 'Arbitrum One', 'READ')], pricedTotalUsd: '6001.00' }) }) };
+    view(props); await settle();
+    expect(view(props)).toContain('≈ $6,001.00'); expect(view(props)).toContain('Base: 75%, Arbitrum One: 25%');
+    const target = host.render(() => find(PortfolioWidget(props), item => item.value === '' && typeof item.onChange === 'function'));
+    expect(target).not.toBeNull();
+    (target!.onChange as (event: unknown) => void)({ currentTarget: { value: 'arbitrum-one' } });
+    const filtered = view(props);
+    expect(filtered).toContain('≈ $1,500.25'); expect(filtered).toContain('Arbitrum One: 100%');
+    expect(filtered).toContain('1 of 1 holdings priced'); expect(filtered).not.toContain('USD Coin');
+    click(props, disclosure);
+    expect(view(props)).not.toContain('USDC');
+  });
+  it('refreshes providers and keeps the previous snapshot explicitly stale if refresh fails', async () => {
+    const load = loader({ ok: true, portfolio: snapshot() }, { ok: false, code: 'PORTFOLIO_UNAVAILABLE' },
+      { ok: true, portfolio: snapshot({ holdings: [{ ...ETH, valueUsd: '6000.00' }], pricedTotalUsd: '6000.00', unpricedCount: 0 }) });
+    const props: Props = { evm: OWNER, solana: null, load };
+    view(props); await settle();
+    click(props, labelled('Refresh'));
+    expect(view(props)).toContain('Refreshing…'); await settle();
+    const stale = view(props);
+    expect(stale).toContain('≈ $4,500.75'); expect(stale).toContain('Refresh failed. Showing the last available balances');
+    click(props, labelled('Refresh')); view(props); await settle();
+    expect(load).toHaveBeenCalledTimes(3); expect(view(props)).toContain('≈ $6,000.00'); expect(view(props)).not.toContain('Refresh failed');
+  });
+  it('orders only priced holdings into the top three and keeps unknown valuations out of allocation', async () => {
+    const holdings = [USDC, ETH, { ...ETH, symbol: 'WETH', address: '0x4200000000000000000000000000000000000006', valueUsd: '200.00' },
+      { ...ETH, symbol: 'SOL', address: 'So11111111111111111111111111111111111111112', networkId: 'solana' as const, network: 'Solana', chain: 'solana:mainnet', valueUsd: '300.00' },
+      { ...ETH, symbol: 'USDT', address: '0x0000000000000000000000000000000000000001', valueUsd: '100.00' }];
+    const props: Props = { evm: OWNER, solana: null, load: loader({ ok: true, portfolio: snapshot({ holdings,
+      networks: [network('base', 'Base', 'READ'), network('solana', 'Solana', 'READ')], pricedTotalUsd: '5100.75' }) }) };
+    view(props); await settle();
+    const html = view(props);
+    expect(html).toContain('4 of 5 holdings priced'); expect(html).toContain('1 holding has no available valuation.');
+    expect(html).toContain('<strong>ETH</strong>'); expect(html).toContain('<strong>SOL</strong>'); expect(html).toContain('<strong>WETH</strong>');
+    expect(html).not.toContain('<strong>USDC</strong>'); expect(html).not.toContain('<strong>USDT</strong>');
   });
   it('asks for a wallet without reading anything, and never shows one wallet’s figures for another', async () => {
     const idle = vi.fn(async (): Promise<WalletPortfolioResult> => ({ ok: true, portfolio: snapshot() }));

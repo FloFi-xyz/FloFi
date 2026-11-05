@@ -1,12 +1,9 @@
 /* SPDX-License-Identifier: AGPL-3.0-only */
 /* Dashboard wallet portfolio. Theme tokens only (globals.css), so light and dark themes both apply. */
-.root { padding: 20px 24px; min-width: 0; display: grid; gap: 14px; overflow-wrap: anywhere;
-  /* The share bar: one blue ramp, largest part strongest, each step validated against the theme's surface; the remainder is gray. */
-  --portfolio-part-1: #1c5cab; --portfolio-part-2: #3987e5; --portfolio-part-3: #86b6ef; --portfolio-part-other: #93a7c4; }
-:global(:root[data-theme="dark"]) .root { --portfolio-part-1: #b7d3f6; --portfolio-part-2: #6da7ec; --portfolio-part-3: #2a78d6; --portfolio-part-other: #5b6270; }
+.root { padding: 26px; min-width: 0; display: grid; gap: 20px; overflow-wrap: anywhere; border-radius: 20px; box-shadow: 0 5px 24px #16396a06; }
 .head { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; min-width: 0; }
 .title { display: flex; align-items: center; gap: 9px; min-width: 0; flex-wrap: wrap; }
-.title h2 { margin: 0; font-size: 16px; line-height: 1.4; }
+.title h2 { margin: 0; font-size: 19px; line-height: 1.4; }
 .mark { flex: none; color: var(--blue); }
 .badge { display: inline-flex; align-items: center; padding: 3px 7px; border: 1px solid var(--warning-line); border-radius: 5px; background: var(--amber-soft);
   color: var(--amber); font-size: 11px; font-weight: 600; line-height: 1.4; }
@@ -27,24 +24,42 @@
 .skeleton span { display: block; height: 12px; border-radius: 6px; background: var(--soft); }
 .skeleton span:first-child { height: 22px; width: 70%; }
 
-/* The compact card: the whole summary is the disclosure button. */
-.root .summary { display: grid; gap: 6px; width: 100%; min-height: 0; padding: 14px 16px; border: 1px solid var(--line); border-radius: 10px;
-  background: var(--soft); color: var(--ink); text-align: left; font: inherit; font-weight: 400; cursor: pointer; }
-.root .summary:hover { border-color: var(--accent-border); background: var(--accent-quiet); }
-.root .summary[aria-expanded="true"] { border-color: var(--accent-line); background: var(--accent-quiet); }
-.label { color: var(--muted); font-size: 12px; font-weight: 600; line-height: 1.5; }
-.total { font-size: 26px; font-weight: 600; letter-spacing: -.02em; line-height: 1.2; color: var(--ink); }
-.top { font-size: 15px; line-height: 1.5; color: var(--ink); }
-.caption, .networksLine { color: var(--muted); font-size: 12px; line-height: 1.5; }
-.warning { color: var(--amber); font-size: 12px; font-weight: 600; line-height: 1.5; }
-.bar { display: flex; gap: 2px; height: 8px; margin-top: 4px; border-radius: 4px; overflow: hidden; }
-.bar > span { min-width: 2px; }
-.legend { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 12px; line-height: 1.5; color: var(--ink); }
-.legend > span { display: inline-flex; align-items: center; gap: 6px; }
-.swatch { width: 8px; height: 8px; border-radius: 2px; flex: none; }
-.hint { display: inline-flex; align-items: center; gap: 6px; margin-top: 2px; color: var(--accent-ink); font-size: 12px; font-weight: 600; }
-.chevron { width: 6px; height: 6px; border-right: 1.5px solid currentColor; border-bottom: 1.5px solid currentColor; transform: rotate(45deg); margin-top: -3px; }
-.summary[aria-expanded="true"] .chevron { transform: rotate(-135deg); margin-top: 3px; }
+/* Portfolio overview: exact priced value, network allocation and compact holdings. */
+.controls { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.filter { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 12px; }
+.filter select { min-height: 36px; padding: 6px 28px 6px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--paper); color: var(--ink); font: inherit; }
+.overview { display: grid; grid-template-columns: minmax(240px, 1.1fr) minmax(180px, .8fr) minmax(220px, 1fr); align-items: center; gap: 26px; }
+.valueCard { align-self: stretch; min-height: 224px; display: flex; flex-direction: column; align-items: flex-start; gap: 10px; padding: 26px; border-radius: 17px;
+  color: #fff; background: linear-gradient(128deg, #1554c8, #155bc0); box-shadow: 0 7px 19px #1760cb1a; }
+.label { color: #fff; font-size: 13px; font-weight: 500; line-height: 1.5; }
+.total { font-size: clamp(28px, 3vw, 42px); font-weight: 650; letter-spacing: -.035em; line-height: 1.15; color: #fff; }
+.caption { color: #f2f6ff; font-size: 12px; line-height: 1.6; }
+.valueFoot { margin-top: auto; padding-top: 15px; font-size: 11px; color: #f2f6ff; }
+.chart { position: relative; width: min(240px, 100%); margin: auto; }
+.donut { display: block; width: 100%; height: auto; }
+.chartCenter { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 5px; pointer-events: none; }
+.chartCenter strong { font-size: 30px; color: var(--ink); letter-spacing: -.03em; }
+.chartCenter > span { max-width: 100px; font-size: 11px; color: var(--muted); text-align: center; }
+.allocation { min-width: 0; }
+.allocation h3, .holdingsHeading h3 { margin: 0; font-size: 14px; font-weight: 600; }
+.allocation ul { list-style: none; display: grid; gap: 14px; margin: 18px 0 0; padding: 0; }
+.allocationLabel { display: flex; align-items: center; gap: 8px; font-size: 12px; }
+.allocationLabel strong { font-weight: 500; }
+.allocationLabel > span:last-child { margin-left: auto; color: var(--muted); font-size: 12px; text-align: right; }
+.networkBar { display: block; height: 5px; margin-top: 7px; background: var(--soft); border-radius: 5px; overflow: hidden; }
+.networkBar > span { display: block; height: 100%; border-radius: inherit; }
+.allocationValue { display: block; margin-top: 4px; color: var(--muted); font-size: 11px; }
+.pricingCoverage { display: grid; gap: 3px; }
+.pricingCoverage .note { font-size: 11px; }
+.holdingsHeading { display: flex; justify-content: space-between; align-items: center; gap: 12px; border-top: 1px solid var(--line); padding-top: 18px; }
+.topHoldings { list-style: none; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin: -8px 0 0; padding: 0; }
+.topHoldings li { display: flex; align-items: center; gap: 10px; min-width: 0; padding: 14px; border: 1px solid var(--line); border-radius: 12px; }
+.holdingIcon { display: grid; place-items: center; width: 30px; height: 30px; flex: none; }
+.holdingIcon :global(.brand-icon), .holdingIcon :global(.brand-icon-fallback) { width: 28px; height: 28px; }
+.holdingName { min-width: 0; }
+.holdingName strong, .holdingValue strong { display: block; font-size: 13px; font-weight: 600; }
+.holdingName small, .holdingValue small { display: block; margin-top: 4px; color: var(--muted); font-size: 11px; line-height: 1.5; }
+.holdingValue { margin-left: auto; text-align: right; min-width: 0; }
 
 /* The expanded view. */
 .details[hidden] { display: none; }
@@ -90,9 +105,18 @@
 
 @media (max-width: 640px) {
   .root { padding: 16px; }
-  .total { font-size: 22px; }
+  .total { font-size: 34px; }
+  .overview { grid-template-columns: 1fr; gap: 22px; }
+  .valueCard { min-height: 200px; padding: 24px; }
+  .chart { width: 220px; }
+  .topHoldings { grid-template-columns: 1fr; }
+  .controls { width: 100%; justify-content: space-between; }
+  .filter { flex-wrap: wrap; }
   .table th, .table td { padding: 8px 10px; }
 }
-@media (prefers-reduced-motion: no-preference) {
-  .root .summary { transition: border-color .15s ease, background-color .15s ease; }
+@media (min-width: 641px) and (max-width: 1100px) {
+  .overview { grid-template-columns: minmax(230px, 1fr) minmax(190px, 1fr); gap: 20px; }
+  .allocation { grid-column: 1 / -1; }
+  .allocation ul { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px 24px; }
+  .topHoldings { grid-template-columns: 1fr; }
 }

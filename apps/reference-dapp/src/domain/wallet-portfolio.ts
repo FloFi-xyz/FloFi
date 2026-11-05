@@ -203,6 +203,37 @@ export function portfolioSummary(portfolio: WalletPortfolio, options: { readonly
     partial: read.filter(network => network.tokens === 'PARTIAL' || network.tokens === 'NATIVE_ONLY'),
     pricedCount: priced.length };
 }
+/** A network filter changes the visible snapshot only; no absent valuation becomes zero. */
+export function portfolioOnNetwork(portfolio: WalletPortfolio, network: PortfolioNetworkId | null): WalletPortfolio {
+  if (network === null) return portfolio;
+  const holdings = portfolio.holdings.filter(holding => holding.networkId === network);
+  return { ...portfolio, holdings, networks: portfolio.networks.filter(item => item.id === network),
+    pricedTotalUsd: sumUsd(holdings.map(holding => holding.valueUsd)),
+    unpricedCount: holdings.filter(holding => holding.valueUsd === null).length };
+}
+export type PortfolioAllocation = PortfolioNetworkSummary & { readonly chain: string; readonly perMille: number | null };
+/**
+ * Priced network shares, using exact cents. Largest-remainder rounding keeps displayed tenths of a percent and the donut at 100%.
+ * An entirely unpriced network has no percentage. Priced balances rounded below one cent cannot form a meaningful allocation.
+ */
+export function portfolioAllocation(portfolio: WalletPortfolio): readonly PortfolioAllocation[] {
+  const summary = portfolioSummary(portfolio), total = usdCents(portfolio.pricedTotalUsd);
+  const entries = summary.byNetwork.map(network => ({ ...network, chain: portfolio.networks.find(item => item.id === network.id)!.chain,
+    perMille: network.valueUsd !== null && total !== null && total > 0n ? perMilleOf(usdCents(network.valueUsd)!, total) : null }));
+  if (total === null || total <= 0n) return entries;
+  const ordered = entries.filter(entry => entry.perMille !== null).map(entry => ({ entry, remainder: usdCents(entry.valueUsd)! * 1000n % total }))
+    .sort((a, b) => a.remainder === b.remainder ? a.entry.id.localeCompare(b.entry.id) : a.remainder > b.remainder ? -1 : 1);
+  const missing = 1000 - ordered.reduce((sum, item) => sum + item.entry.perMille!, 0);
+  for (const item of ordered.slice(0, missing)) item.entry.perMille! += 1;
+  return entries.sort((a, b) => {
+    const left = usdCents(a.valueUsd), right = usdCents(b.valueUsd);
+    return left === right ? a.name.localeCompare(b.name) : left === null ? 1 : right === null ? -1 : left > right ? -1 : 1;
+  });
+}
+/** A share at the same precision as the allocation chart, localized without changing the underlying value. */
+export function formatAllocationShare(perMille: number, language: PortfolioLanguage = 'EN'): string {
+  return `${new Intl.NumberFormat(language === 'PT' ? 'pt-BR' : 'en', { maximumFractionDigits: 1 }).format(perMille / 10)}%`;
+}
 /** The oldest observation time among the prices the portfolio used (null without any priced holding). */
 export function priceObservedAt(portfolio: WalletPortfolio): string | null {
   const times = portfolio.holdings.flatMap(holding => holding.price ? [holding.price.observedAt] : []).sort();

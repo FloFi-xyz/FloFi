@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { describe, expect, it } from 'vitest';
-import { formatObservedAt, formatShare, formatTokenAmount, formatUsdPrice, formatUsdValue, isSolanaAddressText, normalizeEvmAddress, portfolioSummary,
+import { formatObservedAt, formatShare, portfolioAllocation, portfolioOnNetwork, formatAllocationShare, formatTokenAmount, formatUsdPrice, formatUsdValue, isSolanaAddressText, normalizeEvmAddress, portfolioSummary,
   priceObservedAt, shortAddress, sortHoldings, sumUsd, usdCents, type PortfolioHolding, type PortfolioNetwork, type WalletPortfolio } from './wallet-portfolio';
 
 const holding = (symbol: string, units: string, decimals: number, valueUsd: string | null, network: PortfolioHolding['networkId'] = 'base'): PortfolioHolding => ({
@@ -76,6 +76,37 @@ describe('wallet portfolio presentation', () => {
     const summary = portfolioSummary(portfolio([holding('USDC', '1', 6, null)]));
     expect(summary.segments).toEqual([]); expect(summary.other).toBeNull(); expect(summary.pricedCount).toBe(0);
     expect(priceObservedAt(portfolio([holding('USDC', '1', 6, null)]))).toBeNull();
+  });
+
+  it('allocates real priced totals across every represented network, excluding unknown valuations', () => {
+    const value = portfolio([holding('ETH', '1', 18, '600.00'), holding('WETH', '1', 18, '200.00'),
+      holding('SOL', '1', 9, '200.00', 'solana'), holding('UNKNOWN', '1', 6, null, 'robinhood')],
+      [network('base', 'READ'), network('solana', 'READ'), network('robinhood', 'READ')]);
+    expect(portfolioAllocation(value).map(item => [item.id, item.valueUsd, item.perMille])).toEqual([
+      ['base', '800.00', 800], ['solana', '200.00', 200], ['robinhood', null, null],
+    ]);
+    const selected = portfolioOnNetwork(value, 'solana');
+    expect(selected.holdings.map(item => item.symbol)).toEqual(['SOL']); expect(selected.pricedTotalUsd).toBe('200.00');
+    expect(selected.unpricedCount).toBe(0); expect(portfolioAllocation(selected)[0]!.perMille).toBe(1000);
+    const unknown = portfolioOnNetwork(value, 'robinhood'); expect(unknown.pricedTotalUsd).toBeNull(); expect(unknown.unpricedCount).toBe(1);
+    expect(portfolioOnNetwork(value, null)).toBe(value);
+  });
+  it('rounds network shares at one decimal to exactly 100% without losing small values or precision', () => {
+    const value = portfolio([holding('ETH', '1', 18, '0.01'), holding('SOL', '1', 9, '0.01', 'solana'), holding('USDC', '1', 6, '0.01', 'robinhood')],
+      [network('base', 'READ'), network('solana', 'READ'), network('robinhood', 'READ')]);
+    const allocation = portfolioAllocation(value);
+    expect(allocation.map(item => item.perMille).sort()).toEqual([333, 333, 334]);
+    expect(allocation.reduce((sum, item) => sum + item.perMille!, 0)).toBe(1000);
+    expect(formatAllocationShare(334)).toBe('33.4%'); expect(formatAllocationShare(334, 'PT')).toBe('33,4%');
+    const large = portfolio([holding('ETH', '1', 18, '999999999999999999999999999.00'), holding('SOL', '1', 9, '999999999999999999999999999.00', 'solana')]);
+    expect(portfolioAllocation(large).map(item => item.perMille)).toEqual([500, 500]);
+  });
+  it('has no allocation for empty, all unpriced or sub-cent portfolios and never assumes zero', () => {
+    expect(portfolioAllocation(portfolio([]))).toEqual([]);
+    expect(portfolioAllocation(portfolio([holding('ETH', '1', 18, null)]))[0]!.perMille).toBeNull();
+    const tiny = portfolio([holding('ETH', '1', 18, '0.00')]);
+    expect(portfolioAllocation(tiny)[0]!.valueUsd).toBe('0.00'); expect(portfolioAllocation(tiny)[0]!.perMille).toBeNull();
+    expect(portfolioOnNetwork(tiny, 'solana').pricedTotalUsd).toBeNull();
   });
   it('formats observation times in UTC for each language', () => {
     expect(formatObservedAt('2026-11-02T14:03:00.000Z')).toMatch(/Nov.*2026.*2:03.*UTC$/);
