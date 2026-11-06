@@ -144,7 +144,36 @@ Workflow grant, per chain (`compileWorkflowGrant`, MetaMask v1.3.0 enforcers fro
 
 ## 8. CI and end-to-end results
 
-(To be completed at delivery with the exact commit, `pnpm check`, governance, `agent_guard` and CircleCI results.)
+Local evidence (this sandbox, commit `833507f`; Node 24.21.0, pnpm 11.22.0, Anvil 1.8.3, local PostgreSQL 16):
+
+- **`pnpm check`** (typecheck, lint, build, schema drift, unit tests): passed. 556 test files and 6758 tests passed; 2 files and 2 tests skipped, the same as `main`.
+- **PostgreSQL suites** (delegation, workflow runs, platform, Editor, MCP, channels, cloud runtime): passed.
+  - Exception: `forward-compatibility.pg.test.ts` 0015 fails locally only, because it expects PostgreSQL 18's named NOT NULL constraints. It touches migrations up to 0015 only, which are unchanged, and CircleCI (PostgreSQL 18.6) passes it.
+  - `delegated-run.pg.test.ts` 9/9 covers:
+    - one signature for the whole workflow;
+    - a forged signature;
+    - Solana confirm-only;
+    - the remote API operations;
+    - price better or worse than signed;
+    - an idempotent retry and a retry after revocation;
+    - a three-way review race;
+    - a stale re-plan after activation;
+    - the sign-time policy re-check;
+    - revocation.
+- **Browser (guarded profiles, loopback and MOCKED only):**
+  - `critical`: 6/6 profiles passed, including `review-execute-recovery-components` (39/39).
+  - `extended --shard 1/3`: 15/16 profiles passed, including `approve-workflow-run`, `delegated-execution`, `channel-approve` and `workflow-ux-authoring`. In `default-product`, 9 tests fail: screenshot baselines plus two network-reading tests. An unmodified `main` checkout fails exactly the same 9 here, so they come from this sandbox (fonts, no outbound network), not from this change. CircleCI is authoritative for them.
+- **`python3 scripts/governance_lite.py`:** passed. **`agent_guard.py check`:** passed.
+- **`agent_guard.py review --base origin/main`:** reports the honest state:
+  - 8 specialists reviewed earlier commits of this branch: workflow, security, wallet-execution, lending, data-privacy and MCP, plus a final security pass on `5edf4b0..8402dad`.
+  - 11 domains were not invoked: admin-analytics, automations, bridge, channels, chat, developers, frontend-ux, infrastructure-ci, liquidity, payments-billing, protocol-integrations.
+  - Every critical, high and medium finding was fixed. Remaining low findings and coverage gaps are listed in the PR.
+
+CircleCI (certification authority) on PR FloFi-xyz/FloFi#166:
+
+- `5edf4b0`: governance, `certification-checks` (PostgreSQL 18.6, including migrations 0021/0022 and forward compatibility) and browser shard 2 passed.
+- Browser shard 1 failed in `execute-product-workspace` (light/dark): Back to the Canvas sat 14px below Authorize in wallet when the CI font wrapped the label. This was a real defect of WS2's new controls row. `8402dad` fixes it (the row stretches). The fix was reproduced locally by forcing the wrap: 18px before, aligned after.
+- `8402dad`: governance, `certification-checks` and browser shard 2 passed; shard 1 result at delivery is recorded in the PR.
 
 ## 9. Real-mainnet evidence and transaction hashes
 
