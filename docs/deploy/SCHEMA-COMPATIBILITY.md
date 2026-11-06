@@ -716,3 +716,65 @@ Release order is certificate first, as for 0018 and 0019: every version-19 datab
 worker) must run a build carrying this certificate (Release A) before 0020 is applied by the Railway pre-deploy migration (Release B).
 No production migration or release was performed during engineering. Rollback keeps the certificate; do not drop the `flight_*` tables
 to accommodate an older binary.
+
+## 15. Certificate 0021_workflow_grants
+
+| Base | Certified forward migration | SHA-256 |
+| --- | --- | --- |
+| 0020 `flight_flofi` (`a7ce1f42…2892`) | 0021 `workflow_grants` | `07a789dc1b6fb10c2fe46430342845946fbc1f06e176cbbab78102d66ed044a7` |
+
+Migration 0021 (BUILD-FLOFI-UNIVERSAL-SINGLE-AUTH-MAINNET-001) is additive and changes no row:
+- `credential_grants.passkey_id` drops NOT NULL, under a new CHECK `credential_grants_passkey_or_workflow_grant`. A grant may lack a passkey
+  only when it is an EVM workflow grant (`scope->>'kind' = 'WORKFLOW'`). Every existing grant has a passkey, so the validation scan cannot fail.
+  The 0011 passkey foreign key still applies whenever a passkey is present (MATCH SIMPLE).
+- The 0011 revision CHECK requiring a passkey for a signed revision is found by its definition and replaced by
+  `delegated_authorization_revisions_signed`. That constraint admits exactly the previous rows plus a revision whose envelope and assertion are both of
+  kind `WALLET_WORKFLOW` (the run's authorization is the wallet signature of its workflow grants). A missing definition aborts the migration
+  (`MIGRATION_0021_REVISION_CHECK_NOT_FOUND`).
+
+A build without 0021 runs unchanged on schema 21:
+- It never writes a grant without a passkey or a WALLET_WORKFLOW revision.
+- Reading such rows:
+  - its grant mapper turns a NULL `passkey_id` into a string, which its passkey checks never match (`GRANT_PASSKEY_MISMATCH`, fail closed);
+  - its executor refuses a revision without a passkey (`AUTHORIZATION_NOT_ACTIVE`).
+
+**Locks.** `SET LOCAL lock_timeout = '5s'`. `DROP NOT NULL` and the two `ADD CONSTRAINT`s take short ACCESS EXCLUSIVE locks on `credential_grants`
+and `delegated_authorization_revisions`. The CHECK validation scans each table once; both are small and touched only by delegated execution. A
+concurrent long transaction makes the migration fail after 5 s and retry; it never makes delegated reads wait longer.
+
+**Release order (one certificate for 0021 and 0022).** This build ships 0021 and 0022 together, and `migrate` applies every pending migration in one
+pre-deploy. So Release A is one certificate, `{ base: 0020 flight_flofi, migrations: [0021 workflow_grants, 0022 editor_requester] }`, with the exact
+bytes of both. It goes into a release from main whose newest shipped migration is 0020, and that release is deployed to every database consumer
+before this build migrates. Without Release A there is no application rollback once 0021/0022 are applied: the previous commit refuses schema 22.
+
+## 16. Certificate 0022_editor_requester
+
+| Base | Certified forward migration | SHA-256 |
+| --- | --- | --- |
+| 0021 `workflow_grants` (`07a789dc…44a7`) | 0022 `editor_requester` | `f5b05c8bd32bf70bfa95e2b6ecc075b909f604334a13188c1651c2bd31e16d43` |
+
+Migration 0022 (BUILD-FLOFI-UNIVERSAL-SINGLE-AUTH-MAINNET-001) widens two CHECK constraints and does nothing else: no table, column, index,
+function, trigger or row is added, changed or removed.
+
+- `mcp_handoffs_requester_kind_check` (0006, widened once by 0010) and `workflow_runs_requester_kind_check` (0015's column check) also admit
+  `EDITOR_SESSION`: the signed-in FloFi account handing its own Canvas workflow to the shared workflow-run flow. Its `requester_id` is the
+  account id (`acct_` + 32 hex, within 0006's `requester_id` pattern) and, like every non-MCP requester, it carries no MCP account or grant:
+  `mcp_handoffs_requester_identity` (0006) applies unchanged.
+
+Every row valid under the previous schema is valid under 0022 unchanged, so the `ADD CONSTRAINT` validation scans cannot fail on existing data.
+Each constraint is dropped and re-added in one `ALTER TABLE` statement, inside the migration's single transaction, under `lock_timeout = '5s'`
+(exactly the shape 0010 used for the first constraint): approval and workflow-run writes wait at most for that short transaction.
+
+A build without 0022 runs unchanged on schema 22, including on rows written by a build with it:
+- it never writes `EDITOR_SESSION` (its `APPROVAL_REQUESTER_KINDS` has no such kind), so nothing it writes can violate a widened constraint;
+- an `EDITOR_SESSION` handoff is resolvable only through the Editor's own link scheme (`flofi_edhs_`), which an older build does not register: its
+  `/approve` answers `HANDOFF_NOT_FOUND` for such a link, and a requester-scoped read of another kind never matches the row;
+- a workflow run of an `EDITOR_SESSION` handoff is re-gated with the requester kind's policy, which an older build does not have: its
+  `policyFor` falls back to the closed policy (`MCP_HANDOFF_POLICY_INVALID`), so it loads no further step of such a run (fail closed). Status
+  reads by the run's proven owner still work.
+
+`editor-requester-migration.pg.test.ts` checks the exact bytes, every earlier row and column surviving unchanged, the widened definitions, the new
+rows, the 0006 identity rule and 0015's immutability still refusing unsafe rows, and atomic rollback. The exact SQL is also kept as
+`packages/cloud-runtime/test/fixtures/0022_editor_requester.sql`.
+
+**Release order.** Covered by the single certificate of §15 (0021 and 0022 together, base 0020). No production migration or release was performed during engineering.
