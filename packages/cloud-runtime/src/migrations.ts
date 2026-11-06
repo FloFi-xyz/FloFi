@@ -65,6 +65,13 @@ export type ForwardCompatibilityCertificate = {
  */
 export const CERTIFIED_FORWARD_MIGRATIONS: readonly ForwardCompatibilityCertificate[] = Object.freeze([
   {
+    // BUILD-FLOFI-UNIVERSAL-SINGLE-AUTH-MAINNET-001: wallet-signed workflow grants (0021: credential_grants.passkey_id nullable for EVM
+    // workflow grants only, WALLET_WORKFLOW revisions) and the Editor requester kind (0022: two requester-kind CHECKs widened). Additive.
+    base: { version: 20, name: 'flight_flofi', sha256: 'a7ce1f42753017de90eede9784a205bcd3b6fa0134b26eecb530dc2e505b2892' },
+    migrations: [{ version: 21, name: 'workflow_grants', sha256: '07a789dc1b6fb10c2fe46430342845946fbc1f06e176cbbab78102d66ed044a7' },
+      { version: 22, name: 'editor_requester', sha256: 'f5b05c8bd32bf70bfa95e2b6ecc075b909f604334a13188c1651c2bd31e16d43' }],
+    assessment: 'docs/deploy/SCHEMA-COMPATIBILITY.md#15-certificate-0021_workflow_grants',
+  }, {
     // BUILD-FLOFI-FLIGHT-001: eight new flight_* tables (Flight FloFi campaign); nothing on any pre-existing relation, function, trigger or index.
     base: { version: 19, name: 'privy_accounts', sha256: 'aea36e602ba918a195d4bd110fda3b29459816fb76c25e0ddfdd29099847cab6' },
     migrations: [{ version: 20, name: 'flight_flofi', sha256: 'a7ce1f42753017de90eede9784a205bcd3b6fa0134b26eecb530dc2e505b2892' }],
