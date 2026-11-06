@@ -32,7 +32,8 @@ export type RunDelegationOps = {
   readonly review: (owner: WalletRef, run: { readonly runId: string; readonly strategy: unknown; readonly workflowHash: string; readonly validitySeconds: number;
     readonly wallet: string }) => Promise<WalletWorkflowReviewView>;
   /** The wallet signatures of those grants (`[{ grantId, signature }]`): verified, then the run starts. */
-  readonly sign: (owner: WalletRef, runId: string, revision: number, signatures: unknown) => Promise<{ readonly authorizationId: string }>;
+  /** `retryOnly`: the run already left PENDING (a retry after a lost answer) — answered without verifying or storing anything. */
+  readonly sign: (owner: WalletRef, runId: string, revision: number, signatures: unknown, retryOnly?: boolean) => Promise<{ readonly authorizationId: string }>;
   readonly revoke: (owner: WalletRef, runId: string) => Promise<void>;
 };
 export type WorkflowRunSurface = WorkflowRunDeps & { readonly delegationOps?: RunDelegationOps | null };
@@ -114,6 +115,6 @@ export async function authorizeSequential(deps: WorkflowRunSurface, run: RunReco
     const plan = await ownerAuthorizationPlan(deps, run);
     if (!plan.delegatedSingleAuthorization.available) refuse(plan.delegatedSingleAuthorization.reason ?? 'DELEGATED_AUTHORITY_UNAVAILABLE');
   }
-  await ops.sign(run.owner, run.runId, revision, assertion);
+  await ops.sign(run.owner, run.runId, revision, assertion, run.mode === 'DELEGATED');
   return proposalOf(deps, run, null, base);
 }

@@ -97,8 +97,8 @@ export async function workflowRunHarness(db: Database, options: {
     grantsOf: owner => d.store.grants(owner as Owner), newId: typedId,
     delegationOps: facts ? {
       review: (owner, run) => d.service.workflowRunWalletReview(owner as Owner, run as never),
-      sign: (owner, runId, revision, signatures) => d.service.workflowRunWalletSign(owner as Owner, runId, revision, signatures,
-        (tx, authorizationId) => store.activateDelegatedWithin(tx, runId, authorizationId, DELEGATION_EXECUTE_RUN_KIND)),
+      sign: (owner, runId, revision, signatures, retryOnly) => d.service.workflowRunWalletSign(owner as Owner, runId, revision, signatures,
+        (tx, authorizationId) => store.activateDelegatedWithin(tx, runId, authorizationId, DELEGATION_EXECUTE_RUN_KIND), retryOnly === true),
       revoke: (owner, runId) => d.service.workflowRunAuthorizationRevoke(owner as Owner, runId),
     } : null };
   const surface = assembleApprovalSurface([{ scheme, profiles: { CHANNEL_CONVERSATION: { policy } } }], handoffs, flows.runtime, runs);

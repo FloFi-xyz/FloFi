@@ -20,11 +20,16 @@ describe('remote delegation operations (web tier → API)', () => {
     expect(await run(async () => { throw aborted; })).toEqual({ ok: false, code: 'DELEGATION_OUTCOME_UNKNOWN' });
     expect(await run(async () => { throw new TypeError('fetch failed'); })).toEqual({ ok: false, code: 'DELEGATION_OUTCOME_UNKNOWN' });
   });
-  it('keeps the API\'s answers: a value, a closed refusal code, and DELEGATION_UNAVAILABLE for anything unreadable', async () => {
+  it('keeps the API\'s answers: a value, a closed refusal code; an unreadable answer is unknown only for a sign', async () => {
     const answer = (status: number, body: unknown) => async () => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
     expect(await run(answer(200, { ok: true, value: { authorizationId: 'dau_x' } }))).toEqual({ ok: true, value: { authorizationId: 'dau_x' } });
     expect(await run(answer(409, { ok: false, code: 'AUTHORIZATION_ACTIVE' }))).toEqual({ ok: false, code: 'AUTHORIZATION_ACTIVE' });
-    expect(await run(answer(500, { nope: true }))).toEqual({ ok: false, code: 'DELEGATION_UNAVAILABLE' });
     expect(await run(answer(404, {}))).toEqual({ ok: false, code: 'DELEGATION_NOT_ENABLED' });
+    expect(await run(answer(400, { nope: true }))).toEqual({ ok: false, code: 'DELEGATION_UNAVAILABLE' });
+    // A sign whose answer cannot be read (gateway error page, a body cut off) may already be applied: unknown. Other operations stay unavailable.
+    expect(await run(answer(502, { nope: true }))).toEqual({ ok: false, code: 'DELEGATION_OUTCOME_UNKNOWN' });
+    expect(await run(async () => new Response('{"ok":tr', { status: 200 }))).toEqual({ ok: false, code: 'DELEGATION_OUTCOME_UNKNOWN' });
+    const overview = (transport: typeof fetch) => delegationOperation('overview', [], OWNER, { env, sessions, transport });
+    expect(await overview(answer(502, { nope: true }))).toEqual({ ok: false, code: 'DELEGATION_UNAVAILABLE' });
   });
 });

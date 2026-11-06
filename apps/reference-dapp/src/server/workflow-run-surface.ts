@@ -63,8 +63,8 @@ async function delegationParts(env: Env, runs: ReturnType<typeof createPgWorkflo
   const ops: RunDelegationOps = {
     // BUILD-FLOFI-UNIVERSAL-SINGLE-AUTH-MAINNET-001: a run's delegated authorization is the wallet signature of its exact workflow grants.
     review: (owner, run) => service.workflowRunWalletReview(owner, run as Parameters<typeof service.workflowRunWalletReview>[1]),
-    sign: (owner, runId, revision, signatures) => service.workflowRunWalletSign(owner, runId, revision, signatures,
-      (tx, authorizationId) => runs.activateDelegatedWithin(tx, runId, authorizationId, DELEGATION_EXECUTE_RUN_KIND)),
+    sign: (owner, runId, revision, signatures, retryOnly) => service.workflowRunWalletSign(owner, runId, revision, signatures,
+      (tx, authorizationId) => runs.activateDelegatedWithin(tx, runId, authorizationId, DELEGATION_EXECUTE_RUN_KIND), retryOnly === true),
     revoke: (owner, runId) => service.workflowRunAuthorizationRevoke(owner, runId),
   };
   return { ops, store: createPgDelegationStore(host.db, host.tenantId) };

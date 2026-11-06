@@ -131,7 +131,16 @@ Workflow grant, per chain (`compileWorkflowGrant`, MetaMask v1.3.0 enforcers fro
   - It creates an `EDITOR_SESSION` approval handoff (migration `0022`) from the signed-in FloFi account. The server re-derives every step from the Canvas workflow and requires an exact match with each node.
   - The Editor workflow then opens on the same `/approve` page, where the owner chooses "Confirm each step" or "Authorize the whole workflow once".
   - Nothing is signed by the button.
-- **MCP and channel copy:** the text now describes authorize-once as one exact wallet-signed grant per EVM network.
+- **MCP and channel copy:** the text now describes authorize-once as one exact wallet-signed grant per EVM network, possibly after a one-time smart-account upgrade per network.
+  - `review_strategy`, `simulate_strategy` and `request_user_approval` no longer promise a per-step Review in authorize-once mode.
+  - `get_capabilities` adds `delegatedExecution`: the owner's wallet authorizes, FloFi's executor submits inside the signed grant, and there is no per-step review. The public `ownerExecution` literal is unchanged, because the Developer API and SDK contract pin it.
+  - A channel STATUS reply no longer prints "Proposal expired" above a run that was already authorized.
+- **Robustness of the one authorization:**
+  - **Idempotent sign.** A retried sign of the ACTIVE revision (the first answer was lost) returns the same authorization and activates nothing again.
+  - **Timeouts are not failures.** The web tier reports a remote timeout or dropped connection as `DELEGATION_OUTCOME_UNKNOWN`. The `/approve` panel then re-sends the signatures it already holds once the run shows as delegated. The wallet is never asked again, and the approval link is applied.
+  - **Concurrent reviews.** Two reviews of one run at the same time settle on the database constraints; no transaction spans RPC planning. The loser fails its own unsigned grants.
+  - **Policy re-check at signing.** The requester's handoff policy is checked again when the owner signs, not only at review.
+  - **Editor.** The Editor refuses a non-sequence before storing an approval.
 
 ## 8. CI and end-to-end results
 

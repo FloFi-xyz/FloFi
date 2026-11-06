@@ -378,10 +378,13 @@ export function createPgDelegationStore(db: Database, tenantId: string) {
     }),
     /** A new revision (PENDING_SIGNATURE). An ACTIVE lineage stops at once (the old revision is SUPERSEDED, the rule paused) until it is signed. */
     newRevision: (owner: Owner, input: { readonly authorizationId: string; readonly strategy: StrategyInput; readonly manifest: DelegatedAuthorizationManifest;
-      readonly manifestHash: string; readonly widening: readonly string[] }, now: Date) => db.transaction(async tx => {
+      readonly manifestHash: string; readonly widening: readonly string[]; readonly requireState?: 'PENDING_SIGNATURE' }, now: Date) => db.transaction(async tx => {
       const a = await lockAuthorization(tx, input.authorizationId);
       if (!a || a.owner.namespace !== owner.namespace || a.owner.address !== owner.address) refuse('AUTHORIZATION_NOT_FOUND');
       if (a!.state === 'REVOKED' || a!.state === 'EXPIRED') refuse(`AUTHORIZATION_${a!.state}`);
+      // BUILD-FLOFI-UNIVERSAL-SINGLE-AUTH-MAINNET-001: a workflow run's stale review re-plans only a still-unsigned authorization; one that a
+      // concurrent sign just activated is never superseded (checked under the row lock).
+      if (input.requireState && a!.state !== input.requireState) refuse(`AUTHORIZATION_${a!.state}`);
       const revision = a!.latestRevision + 1;
       if (input.manifest.revision !== revision) refuse('AUTHORIZATION_REVISION_STALE');
       await tx.query(`UPDATE delegated_authorization_revisions SET state = 'SUPERSEDED' WHERE tenant_id = $1 AND authorization_id = $2 AND state IN ('ACTIVE', 'PENDING_SIGNATURE')`,

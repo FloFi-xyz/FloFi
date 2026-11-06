@@ -58,13 +58,18 @@ export async function delegationOperation<T>(method: DelegationOperation, args: 
         .catch((cause: unknown) => {
           // BUILD-FLOFI-UNIVERSAL-SINGLE-AUTH-MAINNET-001: a request that timed out or lost its connection may still have been applied by the API
           // (e.g. a run's authorization activated): it is reported as an unknown outcome, never as a failure. A retried run sign is idempotent.
-          const name = (cause as { name?: unknown } | null)?.name;
+          // The failure class only (never a header, URL or secret), so a DNS, TLS or configuration failure is diagnosable.
+          const name = (cause as { name?: unknown } | null)?.name, detail = (cause as { cause?: { code?: unknown } } | null)?.cause?.code;
+          console.warn(JSON.stringify({ event: 'delegation.remote_request_failed', method, error: typeof name === 'string' ? name.slice(0, 40) : 'unknown',
+            cause: typeof detail === 'string' && /^[A-Z0-9_]{1,40}$/.test(detail) ? detail : null }));
           throw new Error(name === 'AbortError' || name === 'TimeoutError' || cause instanceof TypeError ? 'DELEGATION_OUTCOME_UNKNOWN' : 'DELEGATION_UNAVAILABLE');
         });
       if (response.status === 404) return { ok: false, code: 'DELEGATION_NOT_ENABLED' };
       const body = await response.json().catch(() => null) as { ok?: unknown; value?: unknown; code?: unknown } | null;
       if (body?.ok === true && 'value' in body) return { ok: true, value: body.value as T };
-      return { ok: false, code: body?.ok === false && typeof body.code === 'string' && CODE.test(body.code) ? body.code : 'DELEGATION_UNAVAILABLE' };
+      if (body?.ok === false && typeof body.code === 'string' && CODE.test(body.code)) return { ok: false, code: body.code };
+      // A sign whose answer cannot be read (a gateway error page, a body cut off by the timeout) may already be applied: unknown, not failed.
+      return { ok: false, code: method === 'workflowRunWalletSign' && (response.status >= 500 || (response.ok && body === null)) ? 'DELEGATION_OUTCOME_UNKNOWN' : 'DELEGATION_UNAVAILABLE' };
     }
     const automations = readAutomationConfig(env);
     if (!automations.enabled) return { ok: false, code: automations.code };

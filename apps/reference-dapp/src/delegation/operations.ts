@@ -76,7 +76,7 @@ export async function runDelegationOperation(service: DelegationService, owner: 
       // A retry after a lost response: a run that is already DELEGATED answers only if this exact revision is the ACTIVE one (the service returns
       // early); it is never activated twice.
       if (run.mode === 'DELEGATED') {
-        return service.workflowRunWalletSign(owner, run.runId, args[1] as number, args[2], async () => { throw new Error('WORKFLOW_RUN_DELEGATED'); });
+        return service.workflowRunWalletSign(owner, run.runId, args[1] as number, args[2], async () => { throw new Error('WORKFLOW_RUN_DELEGATED'); }, true);
       }
       assertChoosing(run);
       return service.workflowRunWalletSign(owner, run.runId, args[1] as number, args[2],

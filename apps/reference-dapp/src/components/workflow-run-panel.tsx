@@ -51,7 +51,10 @@ export function WorkflowRunPanel({ claim, approvalId, secret, onProposal, onErro
   // Signatures already given (kept so a retry after the one-time smart-account upgrade never asks the wallet again).
   const signed = useRef(new Map<string, string>());
   const [busy, setBusy] = useState(false);
-  const acting = useRef(false), unknownOutcome = useRef(false);
+  const acting = useRef(false);
+  // The exact request whose answer was lost (timeout): only this snapshot is ever re-sent automatically, never a new wallet prompt.
+  type Sent = { readonly revision: number; readonly signatures: readonly { readonly grantId: string; readonly signature: string }[] };
+  const lastSent = useRef<Sent | null>(null), unknownOutcome = useRef<Sent | null>(null);
   const { run, plan } = claim;
   const open = ['PENDING', 'RUNNING', 'ATTENTION', 'HALTED'].includes(run.state);
   // A status poll: the server observes the run (a reconciled step shows at once) but never loads or resolves a step for it.
@@ -68,8 +71,8 @@ export function WorkflowRunPanel({ claim, approvalId, secret, onProposal, onErro
     if (acting.current) return; acting.current = true; setBusy(true);
     try {
       const result = await work();
-      if (result.ok) { unknownOutcome.current = false; setReview(null); onProposal(result.value); }
-      else { if (result.code === 'DELEGATION_OUTCOME_UNKNOWN') unknownOutcome.current = true; onError(result.code); }
+      if (result.ok) { unknownOutcome.current = null; setReview(null); onProposal(result.value); }
+      else { unknownOutcome.current = result.code === 'DELEGATION_OUTCOME_UNKNOWN' ? lastSent.current : null; onError(result.code); }
     }
     catch (cause) {
       const code = cause instanceof Error && /^(WALLET_[A-Z_]+|EVM_WALLET_NOT_FOUND)$/.test(cause.message) ? cause.message : 'APPROVAL_UNAVAILABLE';
@@ -79,6 +82,7 @@ export function WorkflowRunPanel({ claim, approvalId, secret, onProposal, onErro
   }
   async function prepareOnce() {
     if (acting.current) return; acting.current = true; setBusy(true);
+    unknownOutcome.current = null;
     try { const result = await reviewWorkflowRunAuthorization(approvalId); if (result.ok) setReview(result.value); else onError(result.code); }
     catch { onError('APPROVAL_UNAVAILABLE'); }
     finally { acting.current = false; setBusy(false); }
@@ -88,13 +92,17 @@ export function WorkflowRunPanel({ claim, approvalId, secret, onProposal, onErro
     if (!secret) return { ok: false, code: 'APPROVAL_LINK_REQUIRED' };
     for (const grant of review!.grants) if (grant.state === 'PENDING_SIGNATURE' && grant.typedData && !signed.current.has(grant.grantId))
       signed.current.set(grant.grantId, await signWorkflowGrant(grant.walletAddress, grant.chainId, grant.typedData));
-    return authorizeWorkflowRunHandoff(secret, review!.revision, [...signed.current].map(([grantId, signature]) => ({ grantId, signature })));
+    lastSent.current = { revision: review!.revision, signatures: [...signed.current].map(([grantId, signature]) => ({ grantId, signature })) };
+    return authorizeWorkflowRunHandoff(secret, lastSent.current.revision, [...lastSent.current.signatures]);
   });
 
   // BUILD-FLOFI-UNIVERSAL-SINGLE-AUTH-MAINNET-001: a sign whose answer was lost (timeout) may still have started the run. Once the status poll shows
   // the run DELEGATED, the same cached signatures are sent once more: the sign is idempotent and the wallet is never asked again.
   useEffect(() => {
-    if (unknownOutcome.current && run.mode === 'DELEGATED' && review && secret) { unknownOutcome.current = false; void signOnce(); }
+    const sent = unknownOutcome.current;
+    if (!sent || run.mode !== 'DELEGATED' || !secret) return;
+    unknownOutcome.current = null;
+    void act(() => authorizeWorkflowRunHandoff(secret, sent.revision, [...sent.signatures]));
   }, [run.mode]);
   const confirmations = plan.confirmEachStep.walletConfirmationsAtLeast;
   const choosing = run.state === 'PENDING' && run.mode === null;
@@ -145,7 +153,7 @@ export function WorkflowRunPanel({ claim, approvalId, secret, onProposal, onErro
       <div className="approval-actions">
         <button type="button" disabled={busy} onClick={() => void signOnce()}>{review.walletSignatures > 1
           ? tr('Sign once in my wallet ({0} networks)', String(review.walletSignatures)) : tr('Sign once in my wallet')}</button>
-        <button type="button" className="quiet" disabled={busy} onClick={() => setReview(null)}>{tr('Back')}</button>
+        <button type="button" className="quiet" disabled={busy} onClick={() => { unknownOutcome.current = null; setReview(null); }}>{tr('Back')}</button>
       </div>
     </div>}
     {nextStep !== null && <div className="approval-actions">

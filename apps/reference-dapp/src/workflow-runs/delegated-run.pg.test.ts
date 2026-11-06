@@ -182,9 +182,19 @@ describe('BUILD-FLOFI-UNIVERSAL-SINGLE-AUTH-MAINNET-001 delegated workflow run (
       expect(await h.d.store.authorizationForRun(run.runId)).toEqual(active);
       expect((await h.store.byId(run.runId))!).toMatchObject({ state: 'RUNNING', mode: 'DELEGATED' });
       await expect(runDelegationOperation(h.d.service, h.d.owner, [h.evm], 'workflowRunWalletSign', [run.runId, review.revision + 1, []], h.store))
-        .rejects.toThrow('AUTHORIZATION_ACTIVE');
+        .rejects.toThrow('WORKFLOW_RUN_DELEGATED');
+      // A stale review that read PENDING_SIGNATURE before this activation can never supersede the ACTIVE revision (checked under the row lock).
+      const signedRevision = (await h.d.store.revision(active!.authorizationId, review.revision))!;
+      await expect(h.d.store.newRevision(h.d.owner, { authorizationId: active!.authorizationId, strategy: signedRevision.strategy,
+        manifest: { ...signedRevision.manifest, revision: review.revision + 1 }, manifestHash: signedRevision.manifestHash, widening: [], requireState: 'PENDING_SIGNATURE' },
+      h.d.now())).rejects.toThrow('AUTHORIZATION_ACTIVE');
+      expect(await h.d.store.authorizationForRun(run.runId)).toEqual(active);
       await expect(runDelegationOperation(h.d.service, stranger, [stranger], 'workflowRunWalletRevoke', [run.runId], h.store)).rejects.toThrow('WORKFLOW_RUN_NOT_FOUND');
       expect(await runDelegationOperation(h.d.service, h.d.owner, [h.evm], 'workflowRunWalletRevoke', [run.runId], h.store)).toEqual({ revoked: true });
+      // After revocation a retried sign never succeeds and stores nothing.
+      await expect(runDelegationOperation(h.d.service, h.d.owner, [h.evm], 'workflowRunWalletSign', [run.runId, review.revision, []], h.store))
+        .rejects.toThrow('WORKFLOW_RUN_DELEGATED');
+      expect((await h.d.store.authorizationForRun(run.runId))!.state).toBe('REVOKED');
     } finally { await t.drop(); }
   });
 
@@ -204,12 +214,36 @@ describe('BUILD-FLOFI-UNIVERSAL-SINGLE-AUTH-MAINNET-001 delegated workflow run (
         expect(r.value.grants.map(g => g.grantId).sort()).toEqual(ids);
       }
       // Only the winner's grants are still awaiting a signature; every other grant planned by a loser is FAILED (never signable).
-      const pending = (await h.d.store.grants(h.d.owner)).filter(g => g.state === 'PENDING_SIGNATURE').map(g => g.grantId).sort();
+      const all = await h.d.store.grants(h.d.owner);
+      const pending = all.filter(g => g.state === 'PENDING_SIGNATURE').map(g => g.grantId).sort();
       expect(pending).toEqual(ids);
+      // The race branch really ran: at least one overlapping review lost and failed its own grants.
+      expect(all.filter(g => g.state === 'FAILED' && g.verification?.code === 'WORKFLOW_REVIEW_SUPERSEDED').length).toBeGreaterThanOrEqual(1);
       const grant = final.grants[0]!;
       await runDelegationOperation(h.d.service, h.d.owner, [h.evm], 'workflowRunWalletSign',
         [run.runId, final.revision, [{ grantId: grant.grantId, signature: await h.d.evmOwner.signDigest(grant.digest) }]], h.store);
       expect((await h.store.byId(run.runId))!).toMatchObject({ state: 'RUNNING', mode: 'DELEGATED' });
+    } finally { await t.drop(); }
+  });
+
+  it('a sign whose answer was lost: the retry through /approve activates nothing again and applies the approval link', async () => {
+    const t = await createTestDatabase();
+    try {
+      const h = await workflowRunHarness(t.db);
+      const approval = await h.request(BOUND);
+      await claim(h, approval.secret);
+      const run = await ownedRun(h.runs, approval.approvalId, [h.evm, h.sol]);
+      const review = await authorizationReviewSequential(h.runs, run, [h.evm, h.sol]), grant = review.grants[0]!;
+      const signatures = [{ grantId: grant.grantId, signature: await h.d.evmOwner.signDigest(grant.digest) }];
+      // The API applied the sign, but its answer never reached the web tier: the run is DELEGATED, the approval link still only CLAIMED.
+      await runDelegationOperation(h.d.service, h.d.owner, [h.evm], 'workflowRunWalletSign', [run.runId, review.revision, signatures], h.store);
+      const active = await h.d.store.authorizationForRun(run.runId), started = await h.store.byId(run.runId);
+      const scope = { kind: 'CHANNEL_CONVERSATION' as const, ref: h.requester.ref };
+      expect((await h.handoffs.forRequester(approval.approvalId, scope, h.d.now()))!.status).toBe('CLAIMED');
+      await workflowRunAuthorize(h.surface, approval.secret, [h.evm, h.sol], review.revision, signatures, h.d.now());
+      expect((await h.handoffs.forRequester(approval.approvalId, scope, h.d.now()))!.status).toBe('APPLIED');
+      expect(await h.d.store.authorizationForRun(run.runId)).toEqual(active);
+      expect(await h.store.byId(run.runId)).toEqual(started);
     } finally { await t.drop(); }
   });
 

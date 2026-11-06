@@ -540,56 +540,67 @@ export function createDelegationService(deps: DelegationServiceDeps) {
         const validFrom = now, expiresAt = new Date(now.getTime() + Math.min(WORKFLOW_GRANT_WINDOW_MS, run.validitySeconds * 1000));
         const credential = await store.credential(owner, { namespace: 'eip155', address: wallet }, 'Workflow wallet', () => deps.newId('crd'), now);
         const bindings: StepBinding[] = [], inserted: { readonly grantId: string; readonly key: string }[] = [];
-        for (const plan of chains) {
-          const transport = deps.transport(plan.chain, 'owner') ?? refuse('DELEGATION_CHAIN_UNAVAILABLE');
-          const scope: EvmWorkflowScope = { mechanism: 'EVM_ERC7710_METAMASK_V1_3', kind: 'WORKFLOW', chain: plan.chain, workflowRunId: run.runId, calls: plan.calls,
-            steps: plan.steps, maxCalls: plan.calls.length, validFrom: validFrom.toISOString(), expiresAt: expiresAt.toISOString() };
-          const problem = workflowScopeProblem(requirement, scope, config.mode, config.mainnetChains);
-          if (problem) refuse(problem);
-          const grantId = deps.newId('grt'), session = await deps.signer!.create('eip155');
-          let enrollment: Readonly<Record<string, unknown>>;
-          try {
-            enrollment = await ADAPTERS.EVM_ERC7710_METAMASK_V1_3.prepareEnrollment({ grantId, walletAddress: wallet, chain: plan.chain, scope, sessionAddress: session.address,
-              anchor: '0x' + randomBytes(32).toString('hex') }, transport);
-          } catch (cause) { await deps.signer!.destroy(session.ref).catch(() => undefined); throw cause; }
-          await store.insertGrant(owner, { grantId, credentialId: credential.credentialId, chain: plan.chain, mechanism: 'EVM_ERC7710_METAMASK_V1_3', scope,
-            scopeHash: scopeHash(scope), passkeyId: null, sessionKeyRef: session.ref, sessionAddress: session.address, enrollment, expiresAt }, now);
-          inserted.push({ grantId, key: session.ref });
-          for (const step of plan.steps) bindings.push({ stepIndex: step.stepIndex, credentialId: credential.credentialId, grantId, mechanism: 'EVM_ERC7710_METAMASK_V1_3',
-            chain: plan.chain, walletAddress: wallet, grantCommitment: String(enrollment.delegationHash), need: pinnedNeed(scope, step.stepIndex), exact: true });
-        }
-        bindings.sort((x, y) => x.stepIndex - y.stepIndex);
-        const spend = executionSpend(requirement), slippage = Math.max(0, ...requirement.steps.map(x => x.slippageBps ?? 0));
-        const authorizationId = a?.authorizationId ?? deps.newId('dau'), revision = a ? a.latestRevision + 1 : 1;
-        const manifest = buildManifest({ owner: ownerKey(owner), authorizationId, revision, now, validFrom, expiresAt, timezone: 'UTC', engineVersion: ENGINE_VERSION,
-          requirement, bindings, limits: { assets: [...spend.entries()].map(([asset, amount]) => ({ asset, maxPerExecution: amount.toString(),
-            budgets: [{ period: 'DAY' as const, amount: amount.toString() }] })), maxExecutionsPerPeriod: { count: 1, period: 'MONTH' }, cooldownSeconds: 0, maxSlippageBps: slippage } });
-        try {
-          if (a) await store.newRevision(owner, { authorizationId, strategy: requirement.strategy, manifest, manifestHash: manifestHash(manifest), widening: [] }, now);
-          else await deps.db.transaction(tx => store.createAuthorization(tx, owner, { authorizationId, workflowRunId: run.runId, strategy: requirement.strategy, manifest,
-            manifestHash: manifestHash(manifest) }, now));
-        } catch (cause) {
-          // A concurrent review of this run (another tab, a retried request) stored its authorization or revision first (UNIQUE run / revision).
-          // No transaction is held across the RPC planning, so the race is settled here: this call's grants were never shown or signed and are
-          // failed at once (they can never be activated: only a revision's own grants are signed), and the winner's review is returned.
-          const winner = await store.authorizationForRun(run.runId);
-          if (!winner || (a && winner.latestRevision === a.latestRevision)) throw cause;
+        // Grants this call stored but that no prepared revision will ever reference are failed at once (never signable, keys destroyed).
+        const retire = async (code: string) => {
           for (const g of inserted) {
-            const current = await store.grant(owner, g.grantId);
-            if (current?.state === 'PENDING_SIGNATURE') {
-              await store.settleEnrollment(owner, g.grantId, current.version, { ok: false, code: 'WORKFLOW_REVIEW_SUPERSEDED' }, deps.now()).catch(() => undefined);
-            }
+            const current = await store.grant(owner, g.grantId).catch(() => null);
+            if (current?.state === 'PENDING_SIGNATURE') await store.settleEnrollment(owner, g.grantId, current.version, { ok: false, code }, deps.now()).catch(() => undefined);
             await deps.signer!.destroy(g.key).catch(() => undefined);
           }
-          deps.log('delegation.workflow_wallet_review_raced', { authorization: winner.authorizationId, retired: inserted.length });
-          raced = true;
-          a = winner;
-        }
-        if (!raced) {
-          const envelope = walletWorkflowAuthorization(manifest, { origin: config.passkeyOrigin, tenant: config.tenantId, nonce: randomBytes(16).toString('hex') });
-          await store.prepareReview(owner, authorizationId, revision, envelope, authorizationDigest(envelope), now);
-          deps.log('delegation.workflow_wallet_authorization_created', { authorization: authorizationId, steps: requirement.steps.length, chains: chains.length });
-          a = (await store.authorizationForRun(run.runId))!;
+        };
+        try {
+          for (const plan of chains) {
+            const transport = deps.transport(plan.chain, 'owner') ?? refuse('DELEGATION_CHAIN_UNAVAILABLE');
+            const scope: EvmWorkflowScope = { mechanism: 'EVM_ERC7710_METAMASK_V1_3', kind: 'WORKFLOW', chain: plan.chain, workflowRunId: run.runId, calls: plan.calls,
+              steps: plan.steps, maxCalls: plan.calls.length, validFrom: validFrom.toISOString(), expiresAt: expiresAt.toISOString() };
+            const problem = workflowScopeProblem(requirement, scope, config.mode, config.mainnetChains);
+            if (problem) refuse(problem);
+            const grantId = deps.newId('grt'), session = await deps.signer!.create('eip155');
+            let enrollment: Readonly<Record<string, unknown>>;
+            try {
+              enrollment = await ADAPTERS.EVM_ERC7710_METAMASK_V1_3.prepareEnrollment({ grantId, walletAddress: wallet, chain: plan.chain, scope, sessionAddress: session.address,
+                anchor: '0x' + randomBytes(32).toString('hex') }, transport);
+            } catch (cause) { await deps.signer!.destroy(session.ref).catch(() => undefined); throw cause; }
+            await store.insertGrant(owner, { grantId, credentialId: credential.credentialId, chain: plan.chain, mechanism: 'EVM_ERC7710_METAMASK_V1_3', scope,
+              scopeHash: scopeHash(scope), passkeyId: null, sessionKeyRef: session.ref, sessionAddress: session.address, enrollment, expiresAt }, now);
+            inserted.push({ grantId, key: session.ref });
+            for (const step of plan.steps) bindings.push({ stepIndex: step.stepIndex, credentialId: credential.credentialId, grantId, mechanism: 'EVM_ERC7710_METAMASK_V1_3',
+              chain: plan.chain, walletAddress: wallet, grantCommitment: String(enrollment.delegationHash), need: pinnedNeed(scope, step.stepIndex), exact: true });
+          }
+          bindings.sort((x, y) => x.stepIndex - y.stepIndex);
+          const spend = executionSpend(requirement), slippage = Math.max(0, ...requirement.steps.map(x => x.slippageBps ?? 0));
+          const authorizationId = a?.authorizationId ?? deps.newId('dau'), revision = a ? a.latestRevision + 1 : 1;
+          const manifest = buildManifest({ owner: ownerKey(owner), authorizationId, revision, now, validFrom, expiresAt, timezone: 'UTC', engineVersion: ENGINE_VERSION,
+            requirement, bindings, limits: { assets: [...spend.entries()].map(([asset, amount]) => ({ asset, maxPerExecution: amount.toString(),
+              budgets: [{ period: 'DAY' as const, amount: amount.toString() }] })), maxExecutionsPerPeriod: { count: 1, period: 'MONTH' }, cooldownSeconds: 0, maxSlippageBps: slippage } });
+          try {
+            if (a) await store.newRevision(owner, { authorizationId, strategy: requirement.strategy, manifest, manifestHash: manifestHash(manifest), widening: [],
+              requireState: 'PENDING_SIGNATURE' }, now);
+            else await deps.db.transaction(tx => store.createAuthorization(tx, owner, { authorizationId, workflowRunId: run.runId, strategy: requirement.strategy, manifest,
+              manifestHash: manifestHash(manifest) }, now));
+          } catch (cause) {
+            // A concurrent review of this run (another tab, a retried request) stored its authorization or revision first (UNIQUE run / revision).
+            // No transaction is held across the RPC planning, so the race is settled here: this call's grants were never shown or signed and are
+            // failed at once (they can never be activated: only a revision's own grants are signed), and the winner's review is returned.
+            // A stale review that lost to a concurrent sign (the authorization is no longer PENDING_SIGNATURE) is refused, never superseding it.
+            const winner = await store.authorizationForRun(run.runId);
+            if (!winner || (a && winner.latestRevision === a.latestRevision)) throw cause;
+            await retire('WORKFLOW_REVIEW_SUPERSEDED');
+            deps.log('delegation.workflow_wallet_review_raced', { authorization: winner.authorizationId, retired: inserted.length });
+            raced = true;
+            a = winner;
+          }
+          if (!raced) {
+            const envelope = walletWorkflowAuthorization(manifest, { origin: config.passkeyOrigin, tenant: config.tenantId, nonce: randomBytes(16).toString('hex') });
+            await store.prepareReview(owner, authorizationId, revision, envelope, authorizationDigest(envelope), now);
+            deps.log('delegation.workflow_wallet_authorization_created', { authorization: authorizationId, steps: requirement.steps.length, chains: chains.length });
+            a = (await store.authorizationForRun(run.runId))!;
+          }
+        } catch (cause) {
+          // Any failure before this call's revision was prepared (a later chain, the store, a lost race above): its grants are failed, so the
+          // next review plans afresh (a revision whose grants FAILED is stale) and nothing unreviewed is ever signable.
+          if (!raced) await retire('WORKFLOW_REVIEW_FAILED');
+          throw cause;
         }
       }
       if (!a) return refuse('AUTHORIZATION_NOT_FOUND');
@@ -643,12 +654,15 @@ export function createDelegationService(deps: DelegationServiceDeps) {
      * MetaMask smart account keeps the grant pending (EVM_ACCOUNT_NOT_UPGRADED) so the same signature can be retried after the one-time upgrade.
      */
     async workflowRunWalletSign(owner: Owner, runId: string, revision: number, signatures: unknown,
-      activateRun: (tx: Parameters<NonNullable<Parameters<DelegationStore['activate']>[1]['onActivated']>>[0], authorizationId: string) => Promise<void>): Promise<{ readonly authorizationId: string }> {
+      activateRun: (tx: Parameters<NonNullable<Parameters<DelegationStore['activate']>[1]['onActivated']>>[0], authorizationId: string) => Promise<void>,
+      retryOnly = false): Promise<{ readonly authorizationId: string }> {
       const a = await store.authorizationForRun(runId) ?? refuse('AUTHORIZATION_NOT_FOUND');
       if (a!.owner.namespace !== owner.namespace || a!.owner.address !== owner.address) refuse('AUTHORIZATION_NOT_FOUND');
       // A retried sign of a revision that is already ACTIVE (the first response was lost, e.g. to a timeout) returns the same result: the run was
       // activated in the same transaction, so nothing is verified, stored or started again.
       if (a!.state === 'ACTIVE' && a!.activeRevision === revision) return { authorizationId: a!.authorizationId };
+      // A run that already left PENDING (retryOnly) is answered only by that early return: nothing is verified, settled or stored for it.
+      if (retryOnly) refuse('WORKFLOW_RUN_DELEGATED');
       if (a!.state !== 'PENDING_SIGNATURE') refuse(`AUTHORIZATION_${a!.state}`);
       const rev = await store.revision(a!.authorizationId, revision) ?? refuse('AUTHORIZATION_NOT_FOUND');
       if (rev!.envelope?.kind !== 'WALLET_WORKFLOW' || !rev!.envelopeDigest || a!.latestRevision !== revision) refuse('AUTHORIZATION_NOT_PENDING');
