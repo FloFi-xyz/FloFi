@@ -1,8 +1,8 @@
-# One-authorization workflow runs on mainnet: activation, acceptance, rollback
+# One-authorization workflow runs on mainnet: activation, team testing, rollback
 
-BUILD-FLOFI-UNIVERSAL-SINGLE-AUTH-MAINNET-001. This runbook covers turning on delegated ("authorize once") workflow runs for Ethereum (1), Base (8453) and Arbitrum One (42161), and running the real-mainnet acceptance.
+BUILD-FLOFI-UNIVERSAL-SINGLE-AUTH-MAINNET-001. This runbook turns on delegated ("authorize once") workflow runs for Ethereum (1), Base (8453) and Arbitrum One (42161) in the public product, for every eligible signed-in user.
 
-It is a procedure to be approved and executed by the owner. Nothing in this repository provisions cloud resources, changes production variables, deploys, or sends a transaction. Every step marked **[OWNER APPROVAL]** spends money, changes production, or moves real funds.
+The owner authorizes the steps marked **[OWNER]**: they create a paid resource, change production or move real funds. Once authorized, the procedure runs straight through. There is no pilot phase, wallet allowlist, amount cap or acceptance gate before enabling: real-mainnet testing by the team happens in the deployed product, after activation (§7). The protections that stay are the product's own: the exact on-chain grant, the owner's wallet signature, session and ownership checks, simulation and risk checks, reconciliation, replay protection and revocation.
 
 ## 0. What is being activated
 
@@ -27,12 +27,11 @@ It is **not** available for:
 
 Those cases keep "Confirm each step", which is unchanged.
 
-## 1. Preconditions (code)
+## 1. Code release **[OWNER: merge]**
 
-- [ ] The PR is merged by the owner. CircleCI must be green on the merge commit.
-- [ ] Note one commit SHA `R`. Vercel, the Railway API and the Railway Worker must all run exactly `R` (see §6).
+Release A (the 0021/0022 certificate), then Release B (PR 166), as in [RELEASE-SINGLE-AUTH-0021-0022.md](./RELEASE-SINGLE-AUTH-0021-0022.md). CircleCI green on each. All three services deploy `main` automatically; they must then run one commit `R` (§6).
 
-## 2. AWS KMS executor key **[OWNER APPROVAL — paid resource]**
+## 2. AWS KMS executor key **[OWNER — paid resource, about $1 per month plus signing requests]**
 
 1. In the AWS account and region the owner chooses, create one asymmetric key:
    - `KeySpec=ECC_SECG_P256K1`, `KeyUsage=SIGN_VERIFY`, origin `AWS_KMS` (non-exportable);
@@ -47,7 +46,7 @@ Those cases keep "Confirm each step", which is unchanged.
 4. Enable CloudTrail for KMS data events in that region. Every `Sign` call is recorded there. FloFi also logs one `flofi.kms.sign` line per signature (digest, executor address, key ARN, outcome; never a credential).
 5. Read the executor address: run the worker once with the variables of §4 and look for `delegation.worker_enabled`. Or compute it from `GetPublicKey` (keccak of the uncompressed point). Record it as `EXECUTOR`.
 
-## 3. Executor gas **[OWNER APPROVAL — real funds]**
+## 3. Executor gas **[OWNER — real funds]**
 
 The executor sends every redemption, so it pays the gas on each chain.
 
@@ -62,8 +61,8 @@ The executor sends every redemption, so it pays the gas on each chain.
 |---|---|
 | `FLOFI_AUTOMATIONS` | `enabled` (loads the delegation routes) |
 | `FLOFI_DELEGATION` | `enabled` |
-| `FLOFI_DELEGATION_MAINNET_CHAINS` | `eip155:1,eip155:8453,eip155:42161`, or a subset for a staged start |
-| `FLOFI_DELEGATION_RPC_1`, `FLOFI_DELEGATION_RPC_8453`, `FLOFI_DELEGATION_RPC_42161` | keyed HTTPS RPC endpoints |
+| `FLOFI_DELEGATION_MAINNET_CHAINS` | `eip155:1,eip155:8453,eip155:42161` |
+| `FLOFI_DELEGATION_RPC_1`, `FLOFI_DELEGATION_RPC_8453`, `FLOFI_DELEGATION_RPC_42161` | keyed HTTPS RPC endpoints. On Railway they can reference the service's existing `GRYLOO_ALCHEMY_API_KEY` without copying it, e.g. `https://arb-mainnet.g.alchemy.com/v2/${{GRYLOO_ALCHEMY_API_KEY}}` (`eth-mainnet`, `base-mainnet` for the others) |
 | `FLOFI_PUBLIC_ORIGIN` | `https://flofi.xyz` |
 | `FLOFI_DELEGATED_SIGNER` | `aws-kms` |
 | `FLOFI_KMS_REGION` | the key's region |
@@ -98,61 +97,38 @@ Every value is validated fail-closed at start-up. A malformed value disables del
 
 ## 5. Database (Neon)
 
-This release adds migration `0021_workflow_grants`. It is additive:
-
-- `credential_grants.passkey_id` becomes nullable for workflow grants only;
-- one revision CHECK is replaced so that a wallet-signed workflow authorization is admitted.
-
-The Editor handoff adds `0022_editor_requester`. Main already ships `0020_flight_flofi`, with its certificate. Follow `docs/deploy/SCHEMA-COMPATIBILITY.md`: an application build refuses a database that is ahead of it unless it carries a forward-compatibility certificate for those exact migrations. So either:
-
-- **Two releases (required for a rollback path):** Release A adds only one certificate (`CERTIFIED_FORWARD_MIGRATIONS`): base `0020_flight_flofi`, migrations the exact `0021`/`0022` identities. Deploy it to Vercel, API and worker. Then Release B (this PR) migrates through the API pre-deploy step.
-- **Coordinated maintenance window:** deploy the API first (it migrates in pre-deploy), then the worker and Vercel immediately. The previous Vercel build refuses the newer schema until it is replaced.
-
-Before the migration, record the production row counts of `credential_grants` and `delegated_authorization_revisions`. Verify them unchanged afterwards.
+Migrations `0021_workflow_grants` and `0022_editor_requester` are additive (SCHEMA-COMPATIBILITY.md §15–16). They are certified first (Release A) and applied by the Railway API pre-deploy of Release B. The order, checks and rollback targets are in [RELEASE-SINGLE-AUTH-0021-0022.md](./RELEASE-SINGLE-AUTH-0021-0022.md).
 
 ## 6. One release across all services
 
 1. Deploy commit `R` to the Railway API. This runs the migration. Check `/readyz`.
 2. Deploy `R` to the Railway Worker. Check `delegation.worker_enabled` and `workflow_runs` in the start-up logs.
 3. Promote the Vercel Production deployment built from `R`. `/api/flofi/readiness` reports `VERCEL_GIT_COMMIT_SHA = R`.
-4. Compare the three commit SHAs: Vercel readiness, and the Railway deployment metadata for API and worker. Any difference stops the activation.
+4. Compare the three commit SHAs: Vercel readiness, and the Railway deployment metadata for API and worker. Any difference is fixed by redeploying the lagging service before setting the variables of §4.
+5. Check that `flofi.xyz` and `wallet.flofi.xyz` alias the Production deployment built from `R` (Vercel → Domains).
+6. Set the variables of §4 on the three services and redeploy each (a variable change needs a new deployment). The worker logs `delegation.worker_enabled` with the executor address; `/approve` offers "Authorize the whole workflow once" for an eligible run.
 
-## 7. Real-mainnet acceptance **[OWNER APPROVAL — real funds, one run at a time]**
+## 7. Team testing on mainnet (after activation, in the deployed product)
 
-Use a designated acceptance wallet (MetaMask, upgraded to a MetaMask smart account on each network) and small amounts. The owner signs every authorization in the browser. FloFi cannot and does not sign for the owner.
+The team uses `https://flofi.xyz` like any user: their own wallets, their own amounts, any supported workflow. It is not a gate: the feature is already on for everyone eligible. Each user signs their own authorization in their wallet; FloFi never signs for a user. The supported and unsupported cases below are what each user should see:
 
-| # | Network | Workflow | Expected authorizations |
-|---|---|---|---|
-| A1 | Arbitrum One | Swap 3 USDC → WETH → Supply the swap's guaranteed WETH to Aave V3 → Borrow 1 USDC | 1 wallet signature |
-| A2 | Base | Swap USDC → WETH → Supply → Borrow (small) | 1 wallet signature |
-| A3 | Ethereum | Swap USDC → WETH → Supply (two-step; gas is significant on L1) | 1 wallet signature |
-| A4 | Robinhood Chain | not delegable (framework not deployed): run "Confirm each step" for a multi-action workflow and record the refusal reason shown | n per step |
-| A5 | Solana | not delegable: "Confirm each step" for a Jupiter + transfer workflow; record the refusal reason | n per step |
-| A6 | Cross-chain | Base → Arbitrum bridge workflows: not delegable in this release (`WORKFLOW_BINDING_NOT_EXACT` / bridge template). Run "Confirm each step" and record | n per step |
+| Network | Workflow | What the product offers |
+|---|---|---|
+| Arbitrum One, Base, Ethereum | Swap USDC → WETH → Supply the swap's guaranteed WETH to Aave V3 → Borrow USDC (or any prefix of it) | "Authorize the whole workflow once": one wallet signature per network, after the wallet's one-time MetaMask smart-account upgrade |
+| Robinhood Chain | any multi-action workflow | "Confirm each step", with the reason "framework not deployed" |
+| Solana | Jupiter, Orca, transfers | "Confirm each step", with the reason shown |
+| Cross-chain | a bridge followed by a dependent step | "Confirm each step" (`WORKFLOW_BINDING_NOT_EXACT`) |
+| Any | FloFi Wallet (Privy) | "Confirm each step" (no typed-data / EIP-7702 support) |
 
-For each delegated run (A1–A3):
+What to record for each delegated run, so findings can be fixed:
 
-1. Build the workflow in the Editor (or Chat). Simulate it, and open `/approve` from "Run workflow". Choose **Authorize the whole workflow once**.
-2. Before signing, record the review's exact call list and the grant digest. Record the wallet's EIP-712 display.
-3. Sign once. Record the run id, the authorization id and the workflow grant (from `credential_grants.grant_payload`).
-4. Run the read-only adversarial probe against the real contracts:
+- the run id and authorization id (shown on `/approve`), and the number of wallet prompts (one per network is expected);
+- every transaction hash with its explorer link, and the reconciliation shown per step;
+- anything unexpected: a refusal code, a halted or uncertain step (`delegated_executions` with `attention`), a wrong amount.
 
-   ```bash
-   FLOFI_PROBE_RPC_URL=https://<rpc> node scripts/workflow-grant-mainnet-probe.mjs grant.json probe-evidence.json
-   ```
+Optional diagnostic for a grant that looks wrong: `FLOFI_PROBE_RPC_URL=https://<rpc> node scripts/workflow-grant-mainnet-probe.mjs grant.json probe-evidence.json` replays the attack variants against the real enforcers with `eth_call` only; the verdict must be `ON_CHAIN_BOUNDS_HELD`.
 
-   The verdict must be `ON_CHAIN_BOUNDS_HELD`: every attack variant reverts on the real enforcers. The probe uses `eth_call` only.
-5. Let the run complete. Record:
-   - every transaction hash with its receipt (status, block, logs);
-   - wallet balances before and after;
-   - the Aave position (`getUserAccountData`) before and after;
-   - the run's reconciliation (`delegated_execution_steps.reconciliation`).
-
-   Verify independently on the block explorer.
-6. Confirm the wallet was not asked again after the single signature.
-7. Failure path, without risking funds: authorize a run and revoke it before it starts. Nothing is submitted. Separately, let a grant expire unsigned: nothing happens.
-
-Evidence goes in `docs/builds/BUILD-FLOFI-UNIVERSAL-SINGLE-AUTH-MAINNET-001-REPORT.md` §9, with hashes. Mocked or local evidence is never listed there as mainnet evidence.
+Transaction hashes from real runs go in `docs/builds/BUILD-FLOFI-UNIVERSAL-SINGLE-AUTH-MAINNET-001-REPORT.md` §9. Mocked or local evidence is never listed there as mainnet evidence.
 
 ## 8. Monitoring
 
@@ -167,7 +143,7 @@ Evidence goes in `docs/builds/BUILD-FLOFI-UNIVERSAL-SINGLE-AUTH-MAINNET-001-REPO
 
 ## 9. Rollback and emergency revocation
 
-- **Stop new delegated runs:** remove `FLOFI_DELEGATION_MAINNET_CHAINS` (or set a subset) on Vercel, API and worker. Plans report `MAINNET_DELEGATION_DISABLED`; "Confirm each step" stays available.
+- **Stop new delegated runs:** remove `FLOFI_DELEGATION_MAINNET_CHAINS` (or drop one chain from it) on Vercel, API and worker. Plans report `MAINNET_DELEGATION_DISABLED`; "Confirm each step" stays available.
 - **Stop all delegated execution now:** unset `FLOFI_DELEGATED_EXECUTION` on the worker and redeploy.
 - **Kill switch — no FloFi signature at all:** `aws kms disable-key --key-id <arn>`. Every signing attempt fails closed with `SIGNER_KMS_KEY_UNAVAILABLE` and nothing is sent. Re-enable with `enable-key`. Disabling is immediate and reversible.
 - **Owner revocation of one run:**

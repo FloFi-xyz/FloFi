@@ -10,7 +10,7 @@ This report covers the universal single-authorization extension. It reports evid
 
 - **Implemented and tested** means unit tests, PostgreSQL tests, or loopback tests passed in this repository, with MOCKED chain doubles.
 - **Mainnet evidence** means real transactions with hashes on public networks.
-- **No mainnet transaction has been sent by this build.** §9 is empty until the owner-approved acceptance runs (`docs/deploy/SINGLE-AUTH-MAINNET-ACTIVATION.md` §7).
+- **No mainnet transaction has been sent by this build.** §9 is filled from the team's real runs in the deployed product after activation (`docs/deploy/SINGLE-AUTH-MAINNET-ACTIVATION.md` §7).
 
 ## 1. Network-by-network coverage
 
