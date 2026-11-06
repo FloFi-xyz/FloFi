@@ -24,7 +24,7 @@ function claim(patch: Partial<WorkflowRunClaim['run']>, delegated: { available: 
       workflowHash: '0x' + '1'.repeat(64), expiresAt: '2026-10-29T00:00:00.000Z', completedAt: null, createdAt: '2026-10-22T00:00:00.000Z', updatedAt: '2026-10-22T00:00:00.000Z',
       stepsVisible: true, steps: [step(0, 'PENDING'), step(1, 'PENDING')], nextAction: 'OWNER_CHOOSES_MODE', authority: 'NONE', note: null, ...patch },
     plan: { stepCount: 2, confirmEachStep: { available: true, reason: null, walletConfirmationsAtLeast: 2, walletNamespaces: ['eip155'] },
-      delegatedSingleAuthorization: { ...delegated, passkeyAssertions: 1, enrollments: [], ownerKnown: true }, recommended: 'CONFIRM_EACH_STEP', steps: [], bindings: [],
+      delegatedSingleAuthorization: { ...delegated, walletSignatures: 1, passkeyAssertions: 0, enrollments: [], ownerKnown: true }, recommended: 'CONFIRM_EACH_STEP', steps: [], bindings: [],
       notes: ['One authorization is not one transaction: every step still submits its own transactions and pays its own network fees.'] } };
 }
 const render = (c: WorkflowRunClaim, language: Language = 'EN') => renderToStaticMarkup(<LocaleProvider initialLanguage={language}>
@@ -43,9 +43,10 @@ describe('BUILD-CHAT-E2E-001 workflow run panel', () => {
   });
 
   it('says why one authorization is not available instead of offering it', () => {
-    const html = render(claim({}, { available: false, reason: 'CREDENTIAL_ENROLLMENT_REQUIRED' }));
+    const html = render(claim({}, { available: false, reason: 'WORKFLOW_GRANT_NAMESPACE_UNSUPPORTED' }));
     expect(html).not.toContain('Authorize the whole workflow once');
-    expect(html).toContain('Enroll a Credential for every network of this workflow');
+    expect(html).toContain('Solana steps cannot be authorized once yet: confirm each step in your wallet.');
+    expect(render(claim({}, { available: false, reason: 'WORKFLOW_BINDING_NOT_EXACT' }))).toContain('cannot be fixed on chain when you sign');
     expect(render(claim({}, { available: false, reason: 'DELEGATED_SIGNER_UNAVAILABLE' }))).toContain('cannot sign delegated steps');
   });
 

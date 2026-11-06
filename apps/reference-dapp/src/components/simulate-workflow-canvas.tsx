@@ -3,7 +3,7 @@
 import { useLocale } from '../i18n/locale';
 
 import { useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { ReactFlow, Background, MarkerType, getNodesBounds, getViewportForBounds, useReactFlow, useStore, useStoreApi, useUpdateNodeInternals, type Node, type NodeProps, type ReactFlowState } from '@xyflow/react';
+import { ReactFlow, Background, MarkerType, Panel, getNodesBounds, getViewportForBounds, useReactFlow, useStore, useStoreApi, useUpdateNodeInternals, type Node, type NodeProps, type ReactFlowState } from '@xyflow/react';
 import { isLendingComposition } from '@defi-workflow-engine/workflow-contracts';
 import { composerActions, composerConnections, composerSummary } from '../domain/composer-presentation';
 import { shownCanvasPositions } from '../domain/canvas-layout';
@@ -15,11 +15,14 @@ import { CANVAS_GESTURES, CanvasNavigator } from './canvas-navigator';
 import { CANVAS_EDGE_LABEL, edgeAccessibleLabel, edgeLabel } from './canvas-edge-style';
 
 const FIT_PADDING = { top: '32px', bottom: '136px', left: '32px', right: '32px' } as const;
+/** BUILD-FLOFI-SINGLE-AUTH-WORKFLOW-UX-001: the fitted workflow always ends above the bottom controls, whatever their measured height (a step
+ * note can add lines), so no control or note ever sits over a card at fit. */
+const fitPadding = (controlsHeight: number) => ({ ...FIT_PADDING, bottom: `${Math.max(136, Math.ceil(controlsHeight) + 16)}px` as `${number}px` });
 function InspectionCard({ data }: NodeProps) { return <ComposerCard data={data as ComposerCardData}/>; }
 const nodeTypes = { workflow: InspectionCard };
 
 /** Viewport state is presentation only. Nodes, order, links and parameters come from the shared draft. */
-function InspectionViewport({ onState }: { onState: (value: 'pending' | 'fitted') => void }) {
+function InspectionViewport({ onState, padding }: { onState: (value: 'pending' | 'fitted') => void; padding: ReturnType<typeof fitPadding> }) {
   const store = useStoreApi();
   const updateNodeInternals = useUpdateNodeInternals();
   const requestedMeasurement = useRef<string | null>(null);
@@ -43,11 +46,11 @@ function InspectionViewport({ onState }: { onState: (value: 'pending' | 'fitted'
     requestedMeasurement.current = null;
     if (nodes.length) {
       // Set the viewport directly: controlled read-only nodes have no authoring change callback.
-      const viewport = getViewportForBounds(getNodesBounds(nodes), state.width, state.height, 0.35, 1.1, FIT_PADDING);
+      const viewport = getViewportForBounds(getNodesBounds(nodes), state.width, state.height, 0.35, 1.1, padding);
       void setViewport(viewport, { duration: 0 });
     }
     onState('fitted');
-  }, [ready, signature, setViewport, onState, store, updateNodeInternals]);
+  }, [ready, signature, setViewport, onState, store, updateNodeInternals, padding]);
   return null;
 }
 
@@ -81,19 +84,34 @@ export function SimulateWorkflowCanvas({ workflowName, primaryAction, stage = 's
     style: { stroke: 'var(--edge-line)', strokeWidth: 1.5 }, ...CANVAS_EDGE_LABEL,
   })), [workflow, incomplete, tr]);
   const [viewport, setViewport] = useState<'pending' | 'fitted'>('pending');
+  const controls = useRef<HTMLDivElement>(null);
+  const [controlsHeight, setControlsHeight] = useState(0);
+  useLayoutEffect(() => {
+    const element = controls.current;
+    if (!element || typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(() => setControlsHeight(height => Math.abs(height - element.offsetHeight) < 1 ? height : element.offsetHeight));
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, []);
+  const padding = useMemo(() => fitPadding(controlsHeight), [controlsHeight]);
   return <section className={`canvas simulate-canvas simulation-workflow-canvas panel ${lending ? 'simulation-lending-canvas' : ''}`} aria-label={tr(stage === 'execute' ? 'Execution plan' : 'Workflow simulation')}>
     <div className="canvas-head"><div><h2>{workflowName === 'Your Workflow' ? tr('Your Workflow') : workflowName}</h2></div><span className="revision">{tr(actions.length)} {tr(actions.length === 1 ? 'action' : 'actions')}</span></div>
     <div className="flow-surface simulate-flow-surface" role="region" aria-label={tr(stage === 'execute' ? 'Execution workflow graph' : 'Simulation workflow graph')} data-viewport={viewport}>
       <ReactFlow nodes={nodes} edges={edges} nodeTypes={nodeTypes} minZoom={0.35} maxZoom={1.4}
         nodesDraggable={false} nodesConnectable={false} elementsSelectable={false} nodesFocusable={false} edgesFocusable={false}
-        deleteKeyCode={null} fitViewOptions={{ padding: FIT_PADDING }} {...CANVAS_GESTURES}>
-        <InspectionViewport onState={setViewport}/>
+        deleteKeyCode={null} fitViewOptions={{ padding }} {...CANVAS_GESTURES}>
+        <InspectionViewport onState={setViewport} padding={padding}/>
         <Background gap={18} size={1} color="var(--grid)"/>
         <DarkSpotlight/>
-        <CanvasNavigator fitViewOptions={{ padding: FIT_PADDING }} compactBelow={1024}/>
+        {/* BUILD-FLOFI-SINGLE-AUTH-WORKFLOW-UX-001: one bottom control group laid out by the flow, never by offsets against each other: the
+            Canvas navigator on its own centred line, then Back to the Canvas immediately left of the primary action, bottom-right. A step note
+            takes its own line above the buttons, so no width, locale or note can make the navigator and the actions overlap. */}
+        <Panel ref={controls} position="bottom-right" className="simulation-canvas-controls">
+          <CanvasNavigator embedded fitViewOptions={{ padding }} compactBelow={1024}/>
+          {primaryAction && <div className="canvas-primary-action simulation-canvas-actions">{primaryAction}</div>}
+        </Panel>
       </ReactFlow>
       {nodes.length === 0 && <div className="simulation-workflow-empty"><strong>{tr(incomplete ? 'Check your workflow' : 'Add an action to your workflow')}</strong><p>{tr(incomplete ? stage === 'execute' ? 'Complete its configuration on the Canvas before executing.' : 'Complete its configuration on the Canvas before simulating.' : stage === 'execute' ? 'Create a workflow in the Editor first.' : 'Create your strategy on the Canvas, then return here to simulate it.')}</p></div>}
-      {primaryAction && <div className="canvas-primary-action simulation-canvas-actions">{primaryAction}</div>}
     </div>
     <div className="canvas-foot"><span>{tr(stage === 'execute' ? 'Execution plan' : 'Workflow preview')}</span><span>{tr("Configured on the Canvas")}</span></div>
   </section>;

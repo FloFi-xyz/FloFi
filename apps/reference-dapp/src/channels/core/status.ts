@@ -30,10 +30,12 @@ export const continuationUrl = (origin: string, approvalId: string) => `${origin
 export function statusReplies(language: ChannelLanguage, found: { readonly handoff: HandoffRecord; readonly progress: Progress } | null): ChannelReply[] {
   const m = channelCopy(language);
   if (!found) return [text(m.noApproval)];
-  const { progress } = found, lines = [m.approval(progress.status, hhmm(progress.expiresAt))];
+  const { progress } = found, run = progress.workflowRun;
+  // BUILD-FLOFI-UNIVERSAL-SINGLE-AUTH-MAINNET-001: once a run was authorized (it left PENDING), the approval link's own expiry no longer describes the
+  // workflow, so an ended approval is not reported above a live or finished run ("Proposal expired" over "Workflow: running" would contradict it).
+  const lines = run && run.state !== 'PENDING' && ENDED.has(progress.status) ? [] : [m.approval(progress.status, hhmm(progress.expiresAt))];
   // BUILD-CHAT-E2E-001: a multi-step approval reports its run: step states always, transactions only while the owner shares status.
-  if (progress.workflowRun) {
-    const run = progress.workflowRun;
+  if (run) {
     lines.push(m.workflowRun(runFacts(run.stepsVisible ? run : { ...run, steps: run.steps.map(s => ({ ...s, outcome: null })) })));
     if (!run.stepsVisible) lines.push(m.notShared);
     return [text(lines.join('\n'))];

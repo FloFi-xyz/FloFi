@@ -376,7 +376,8 @@ async function simulateWithdrawCall(rpc:SupplyRpc,tx:SupplyTransaction,state:Sup
 }
 
 /** A profile may require a fresh, exact Aave supply-cap observation at simulation and every financial preflight. */
-function assertSupplyCap(profile: AaveLendingProfile, state: SupplyState, amount: string): void {
+/** The reserve's supply cap admits `amount` more (Aave cap accounting); exported for the delegated Supply driver (BUILD-FLOFI-SINGLE-AUTH-WORKFLOW-UX-001). */
+export function assertSupplyCap(profile: AaveLendingProfile, state: SupplyState, amount: string): void {
   if (!('validateSupplyCap' in profile)) return;
   if (state.supplyCapUsage === undefined || state.reserveConfiguration === undefined) throw new Error('SUPPLY_CAP_STATE_UNAVAILABLE');
   const cap = (BigInt(state.reserveConfiguration) >> 116n) & ((1n << 36n) - 1n);

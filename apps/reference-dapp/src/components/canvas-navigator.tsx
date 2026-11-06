@@ -13,8 +13,10 @@ import { Panel, useReactFlow, useStore, type FitViewOptions, type PanelPosition,
 export const CANVAS_GESTURES = Object.freeze({ panOnScroll: true, panOnScrollSpeed: 1, zoomOnScroll: true, zoomOnPinch: true, preventScrolling: true });
 
 /** React Flow owns the viewport, including zoom changes from gestures and automatic fitting.
- * BUILD-FLOFI-BUILDER-UX-002: `steps` adds zoom out / zoom in buttons; every control stays within the engine's own minimum and maximum zoom. */
-export function CanvasNavigator({ fitViewOptions, compactBelow = 800, position = 'bottom-center', steps = false }: { fitViewOptions?: FitViewOptions; compactBelow?: number; position?: PanelPosition; steps?: boolean }) {
+ * BUILD-FLOFI-BUILDER-UX-002: `steps` adds zoom out / zoom in buttons; every control stays within the engine's own minimum and maximum zoom.
+ * BUILD-FLOFI-SINGLE-AUTH-WORKFLOW-UX-001: `embedded` renders the navigator as an ordinary flow element inside a caller's own panel (the
+ * Simulate/Execute plan's bottom controls), so its position comes from layout, never from an offset computed against other controls. */
+export function CanvasNavigator({ fitViewOptions, compactBelow = 800, position = 'bottom-center', steps = false, embedded = false }: { fitViewOptions?: FitViewOptions; compactBelow?: number; position?: PanelPosition; steps?: boolean; embedded?: boolean }) {
   const { t: tr } = useLocale();
   const zoom = useStore((state: ReactFlowState) => state.transform[2]);
   const minZoom = useStore((state: ReactFlowState) => state.minZoom);
@@ -28,7 +30,8 @@ export function CanvasNavigator({ fitViewOptions, compactBelow = 800, position =
   const percentage = `${Math.round(zoom * 100)}%`;
   const progress = (zoom - minZoom) / (maxZoom - minZoom) * 100;
 
-  return <Panel position={position} className="canvas-navigator nodrag nopan nowheel" role="group" aria-label={tr("Canvas navigator")}
+  const Container = embedded ? 'div' : Panel;
+  return <Container {...embedded ? {} : { position }} className={`canvas-navigator nodrag nopan nowheel${embedded ? ' canvas-navigator-embedded' : ''}`} role="group" aria-label={tr("Canvas navigator")}
     data-measured={measured} data-compact={measured && compact} data-narrow={measured && narrow} data-steps={steps || undefined}>
     <button type="button" className="canvas-navigator-fit" aria-label={tr("Fit workflow")} title={tr("Fit workflow")} onClick={() => { void fitView(fitViewOptions); }}>
       <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -45,5 +48,5 @@ export function CanvasNavigator({ fitViewOptions, compactBelow = 800, position =
       onClick={() => { void zoomTo(Math.min(maxZoom, Math.max(minZoom, 1))); }}>{tr(percentage)}</button>
     {steps && <button type="button" className="canvas-navigator-step" aria-label={tr('Zoom in')} title={tr('Zoom in')} disabled={zoom >= maxZoom - 0.001}
       onClick={() => { void zoomIn({ duration: 120 }); }}><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" aria-hidden="true"><path d="M6 12h12M12 6v12"/></svg></button>}
-  </Panel>;
+  </Container>;
 }

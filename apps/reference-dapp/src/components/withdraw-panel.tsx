@@ -15,7 +15,7 @@ const human=(value:string,decimals:number)=>(Number(value)/10**decimals).toLocal
 const hf=(value:string)=>BigInt(value)===(1n<<256n)-1n?'No debt (∞)':human(value,18);
 export function WithdrawAuthoringForm({nodeId,onDone,direct=false,reviewFormId}:{nodeId?:string;onDone?:()=>void;direct?:boolean;reviewFormId?:string}){
   const { t: tr } = useLocale();
-  const {state,propose,dispatch,amountInputs={},editCanvasAmount}=useWorkflow(),node=state.workflow.nodes.find(n=>n.nodeId===nodeId),existing=node?withdrawDetails(node as Parameters<typeof withdrawDetails>[0]):null;
+  const {state,propose,dispatch,amountInputs={},editCanvasAmount,commitCanvasAmount}=useWorkflow(),node=state.workflow.nodes.find(n=>n.nodeId===nodeId),existing=node?withdrawDetails(node as Parameters<typeof withdrawDetails>[0]):null;
   const wallet=useBuild009Wallet();
   const [localAmount,setAmount]=useState(existing?.amount??'0.1'),[error,setError]=useState('');
   const amount = reviewFormId && nodeId ? amountInputs[nodeId] ?? existing?.amount ?? localAmount : localAmount;
@@ -24,7 +24,11 @@ export function WithdrawAuthoringForm({nodeId,onDone,direct=false,reviewFormId}:
   const asset=lendingReservesFor(network).some(reserve=>reserve.symbol===chosenAsset)?chosenAsset:lendingAssetFor(network),shown=lendingNetworkView(network,asset);
   const setNetwork=(next:LendingNetwork)=>{setNetworkState(next);setAsset(lendingAssetFor(next));};
   const live=useAaveReserves(network,wallet.account??null);
-  function submit(event:FormEvent){event.preventDefault();try{
+  // BUILD-FLOFI-SINGLE-AUTH-WORKFLOW-UX-001: with the network and asset unchanged, Enter applies the amount directly; any other change is reviewed.
+  const fieldsChanged=Boolean(existing&&(network!==existing.network||asset!==existing.asset));
+  function submit(event:FormEvent){event.preventDefault();
+    if(reviewFormId&&nodeId&&existing&&!fieldsChanged){if(amountInputs[nodeId]!==undefined)setError(commitCanvasAmount(nodeId)??'');return;}
+    try{
     const input:WithdrawInput={network,asset,amount,recipient:'CONNECTED_OWNER'};createAuthoredWithdraw(nodeId??'node-preview',input);
     const command=nodeId?{type:'SET_WITHDRAW' as const,nodeId,input,source:'CANVAS' as const,baseRevision:state.workflow.revision}:{type:'ADD_WITHDRAW' as const,input,source:'CANVAS' as const,baseRevision:state.workflow.revision};
     if(direct)dispatch(command);else propose(command);onDone?.();
@@ -35,7 +39,7 @@ export function WithdrawAuthoringForm({nodeId,onDone,direct=false,reviewFormId}:
     <LendingReserveStatus live={live} asset={asset} kind="withdraw"/>
     <label>{tr("Withdraw amount (")}{tr(asset)})<TokenAmountInput aria-label={tr(`Withdraw amount (${asset})`)} value={amount} maxLength={80} onValueChange={value=>{setError('');if(reviewFormId&&nodeId)editCanvasAmount(nodeId,value);else setAmount(value);}}/></label>
     <p>{tr("Recipient: your connected owner wallet, bound at Review. Partial withdrawal only.")}</p>{error&&<p role="alert">{tr(error)}</p>}
-    {!reviewFormId&&<button type="submit">{tr(nodeId?'Review Withdraw change':direct?'Add Withdraw':'Review Withdraw proposal')}</button>}{onDone&&<button type="button" className="quiet" onClick={onDone}>{tr("Cancel")}</button>}
+    {(!reviewFormId||fieldsChanged)&&<button type="submit">{tr(nodeId?'Review Withdraw change':direct?'Add Withdraw':'Review Withdraw proposal')}</button>}{onDone&&<button type="button" className="quiet" onClick={onDone}>{tr("Cancel")}</button>}
   </form>;
 }
 const messages:Record<string,string>={WITHDRAW_INSUFFICIENT_COLLATERAL:'Supplied collateral must exceed the exact partial withdrawal.',WITHDRAW_UNSAFE_HEALTH_FACTOR:'Withdrawal would leave an unsafe position. Choose a smaller partial amount.',WITHDRAW_AUTHORIZATION_STALE:'The reviewed collateral, debt or price changed. Simulate and review again.',SUPPLY_AUTHORIZATION_STALE:'Review expired or wallet state changed. Prepare a fresh review.',SUPPLY_WRONG_CHAIN:'Switch your wallet to Base Sepolia.',SUPPLY_WRONG_ACCOUNT:'Select the owner wallet shown in Review.',SUPPLY_INSUFFICIENT_ETH:'The owner wallet needs Base Sepolia ETH for gas.',SUPPLY_RPC_RATE_LIMITED:'The public provider is busy. Try the read again.',SUPPLY_REJECTED:'The Withdraw request was declined.',AWAITING_CONFIRMATIONS:'Waiting for network confirmations.'};

@@ -8,8 +8,8 @@
  * whole cross-domain architecture can be exercised; it never turns a refusal into production support.
  */
 import { splDelegation } from '@defi-workflow-engine/reference-compiler';
-import { publicSwapProfile } from '../domain/public-testnet-swap.ts';
 import { MOCKED_SWAP_PROGRAM } from './harness/constants.ts';
+import { delegationAavePool, delegationAaveReserve, delegationSwapProfile } from './profiles.ts';
 import type { StepRequirement } from './steps.ts';
 
 export const MECHANISMS = ['EVM_ERC7710_METAMASK_V1_3', 'SOLANA_SPL_DELEGATE_V1'] as const;
@@ -18,15 +18,27 @@ export type CapabilityMode = 'PRODUCTION' | 'MOCKED_HARNESS';
 /** The on-chain call class a step needs from its grant (what the grant's caveats/approvals must cover). */
 export type TemplateNeed =
   | { readonly kind: 'EVM_UNISWAP_V3_EXACT_INPUT_SINGLE'; readonly router: string; readonly tokenIn: string; readonly tokenOut: string; readonly amountIn: bigint }
+  /** BUILD-FLOFI-SINGLE-AUTH-WORKFLOW-UX-001: Aave V3 Supply of `amount` of `asset` into the owner's own position (approval + supply). */
+  | { readonly kind: 'EVM_AAVE_V3_SUPPLY'; readonly pool: string; readonly asset: string; readonly amount: bigint }
+  /** BUILD-FLOFI-SINGLE-AUTH-WORKFLOW-UX-001: Aave V3 variable-rate Borrow of `amount` of `asset` against the owner's own collateral. */
+  | { readonly kind: 'EVM_AAVE_V3_BORROW'; readonly pool: string; readonly asset: string; readonly amount: bigint }
   | { readonly kind: 'SOLANA_SPL_SPEND'; readonly mint: string; readonly decimals: number; readonly amount: bigint; readonly programs: readonly string[] };
 export type StepCapability = { readonly ok: true; readonly mechanism: Mechanism; readonly need: TemplateNeed; readonly evidence: 'MOCKED' | 'IMPLEMENTED' }
   | { readonly ok: false; readonly code: string; readonly mechanism: Mechanism | null };
 
 const WSOL = 'So11111111111111111111111111111111111111112';
-const MAINNET = new Set(['eip155:1', 'eip155:8453', 'eip155:42161', 'solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp']);
+const MAINNET = new Set(['eip155:1', 'eip155:8453', 'eip155:42161', 'eip155:4663', 'solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp']);
+/**
+ * BUILD-FLOFI-UNIVERSAL-SINGLE-AUTH-MAINNET-001: Robinhood Chain has no MetaMask Delegation Framework v1.3.0 deployment (the framework's own
+ * deployment list names Ethereum, Base, Arbitrum One and others, not 4663) and no verified EIP-7702 support in FloFi's registries.
+ */
+const FRAMEWORK_NOT_DEPLOYED = new Set(['eip155:4663']);
 
-/** The delegated execution capability of one step. */
-export function stepCapability(step: StepRequirement, mode: CapabilityMode): StepCapability {
+/**
+ * The delegated execution capability of one step. `mainnet` lists the public mainnets this deployment opted into
+ * (FLOFI_DELEGATION_MAINNET_CHAINS); without it every mainnet step is MAINNET_DELEGATION_DISABLED, exactly as before.
+ */
+export function stepCapability(step: StepRequirement, mode: CapabilityMode, mainnet: readonly string[] = []): StepCapability {
   const evm = step.namespace === 'eip155';
   const refuse = (code: string, mechanism: Mechanism | null = evm ? 'EVM_ERC7710_METAMASK_V1_3' : 'SOLANA_SPL_DELEGATE_V1'): StepCapability => ({ ok: false, code, mechanism });
   if (step.action === 'bridge') {
@@ -34,12 +46,25 @@ export function stepCapability(step: StepRequirement, mode: CapabilityMode): Ste
     // LI.FI calldata is opaque (no fixed-offset recipient); direct Across depositV3 is designable but not compiled yet.
     return refuse(step.strategy.action === 'bridge' && step.strategy.routing === 'across' ? 'DELEGATION_TEMPLATE_NOT_IMPLEMENTED' : 'DELEGATED_TARGET_SCOPE_UNAVAILABLE');
   }
-  if (MAINNET.has(step.chain)) return refuse('MAINNET_DELEGATION_DISABLED');
+  if (FRAMEWORK_NOT_DEPLOYED.has(step.chain)) return refuse('DELEGATION_FRAMEWORK_NOT_DEPLOYED');
+  if (MAINNET.has(step.chain) && !(evm && mainnet.includes(step.chain))) return refuse('MAINNET_DELEGATION_DISABLED');
+  // BUILD-FLOFI-SINGLE-AUTH-WORKFLOW-UX-001: Aave V3 Supply and variable-rate Borrow on an opted-in mainnet market.
+  if (evm && (step.action === 'supply' || step.action === 'borrow')) {
+    const pool = delegationAavePool(step.chain, mainnet), input = step.inputs[0];
+    if (!pool || step.adapterId !== 'aave-v3') return refuse('DELEGATION_TEMPLATE_NOT_IMPLEMENTED');
+    if (step.inputs.length !== 1 || !input) return refuse('DELEGATION_STEP_SHAPE_UNSUPPORTED');
+    const reserve = delegationAaveReserve(step.chain, pool, input.address);
+    if (!reserve) return refuse('DELEGATION_ASSET_NOT_SUPPORTED');
+    // A delegated Supply needs the reserve's supply-cap headroom verified before signing (`assertSupplyCap`, profiles with validateSupplyCap).
+    if (step.action === 'supply' && !('validateSupplyCap' in reserve)) return refuse('DELEGATION_ASSET_NOT_SUPPORTED');
+    return { ok: true, mechanism: 'EVM_ERC7710_METAMASK_V1_3', evidence: 'IMPLEMENTED',
+      need: { kind: step.action === 'supply' ? 'EVM_AAVE_V3_SUPPLY' : 'EVM_AAVE_V3_BORROW', pool, asset: input.address, amount: input.amount } };
+  }
   if (step.action !== 'swap') return refuse(step.action === 'add_liquidity' && !evm ? 'OWNER_SIGNER_REQUIRED' : 'DELEGATION_TEMPLATE_NOT_IMPLEMENTED');
   const input = step.inputs[0], output = step.outputs[0];
   if (step.inputs.length !== 1 || step.outputs.length !== 1 || !input || !output) return refuse('DELEGATION_STEP_SHAPE_UNSUPPORTED');
   if (evm) {
-    const profile = publicSwapProfile(step.chain);
+    const profile = delegationSwapProfile(step.chain, mainnet);
     if (!profile || step.adapterId !== 'uniswap.v3') return refuse('DELEGATION_TEMPLATE_NOT_IMPLEMENTED');
     const tokens = [profile.usdc, profile.weth];
     if (!tokens.includes(input.address) || !tokens.includes(output.address) || input.address === output.address) return refuse('DELEGATION_ASSET_NOT_SUPPORTED');
@@ -60,9 +85,10 @@ export type MatrixRow = { readonly action: string; readonly network: string; rea
 export const ENFORCEMENT: Readonly<Record<Mechanism, { readonly onChain: readonly string[]; readonly application: readonly string[] }>> = Object.freeze({
   EVM_ERC7710_METAMASK_V1_3: {
     onChain: ['redeemer = this credential\'s session signer', 'validity window', 'total number of calls', 'no native value', 'target contracts',
-      'function selectors', 'swap recipient = your wallet', 'input and output tokens', 'approval spender', 'maximum input per call'],
+      'function selectors', 'swap recipient = your wallet', 'input and output tokens', 'approval spender', 'maximum input per call',
+      'Aave Supply and Borrow on behalf of your wallet only', 'Aave Borrow at variable rate only', 'Aave Borrow amount below its on-chain ceiling'],
     application: ['period budgets', 'executions per period', 'cooldown', 'slippage cap (beyond the signed minimum output)', 'exact workflow hash',
-      'approval amount', 'fee ceiling'],
+      'approval amount', 'fee ceiling', 'exact Aave Borrow amount', 'Aave health factor floor, liquidity, caps and reserve state from fresh reads'],
   },
   SOLANA_SPL_DELEGATE_V1: {
     onChain: ['delegate = this credential\'s session key', 'total delegated amount per token account'],

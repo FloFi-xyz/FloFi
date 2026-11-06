@@ -13,7 +13,8 @@
  */
 import { createHash } from 'node:crypto';
 import { erc7710, fromBase64, parseTransaction, splDelegation, toBase64, verifyEd25519, base58Encode } from '@defi-workflow-engine/reference-compiler';
-import type { GrantScope } from './authority.ts';
+import { isEvmClassScope, type EvmClassScope, type GrantScope } from './authority.ts';
+import { compileScope, isWorkflowScope } from './workflow-grants.ts';
 import type { Mechanism } from './capabilities.ts';
 import { domainDigest } from './canonical.ts';
 import type { ChainTransport } from './chains.ts';
@@ -49,10 +50,28 @@ export function passkeyAnchor(input: { readonly owner: string; readonly grantId:
 // ── EVM: ERC-7710 / MetaMask Delegation Framework v1.3.0 ───────────────────────────────────────────────────────────────────────
 const chainIdOf = (chain: string) => { const m = /^eip155:([1-9][0-9]{0,18})$/.exec(chain); return m ? Number(m[1]) : fail('DELEGATION_CHAIN_INVALID'); };
 const seconds = (iso: string) => BigInt(Math.floor(Date.parse(iso) / 1000));
-export function evmTemplates(scope: Extract<GrantScope, { mechanism: 'EVM_ERC7710_METAMASK_V1_3' }>): erc7710.CallTemplate[] {
-  const approvals = [...new Set(scope.pairs.map(p => p.tokenIn))].map(token => ({ kind: 'ERC20_APPROVE' as const, token, spender: scope.router }));
-  const swaps = scope.pairs.map(p => ({ kind: 'UNISWAP_V3_EXACT_INPUT_SINGLE' as const, router: scope.router, tokenIn: p.tokenIn, tokenOut: p.tokenOut, perCallInputCap: BigInt(p.perCallInputCap) }));
-  return [...approvals, ...swaps];
+/**
+ * The grant's call templates, in their LogicalOrWrapper group order: swap approvals (spender: the router, one per pair), swaps, then (BUILD-FLOFI-SINGLE-
+ * AUTH-WORKFLOW-UX-001) Aave approvals (spender: the Pool), supplies and borrows. Drivers find a call's group in this same list.
+ */
+export function evmTemplates(scope: EvmClassScope): erc7710.CallTemplate[] {
+  // BUILD-FLOFI-UNIVERSAL-SINGLE-AUTH-MAINNET-001: one approval per pair, pinned to exactly that pair's per-call cap; swaps pinned to the 0.05%
+  // tier with no price limit (the only tier FloFi's delegated swaps use).
+  const approvals = scope.pairs.map(p => ({ kind: 'ERC20_APPROVE' as const, token: p.tokenIn, spender: scope.router, amount: BigInt(p.perCallInputCap) }));
+  const swaps = scope.pairs.map(p => ({ kind: 'UNISWAP_V3_EXACT_INPUT_SINGLE' as const, router: scope.router, tokenIn: p.tokenIn, tokenOut: p.tokenOut,
+    perCallInputCap: BigInt(p.perCallInputCap), fee: 500 }));
+  const aave = scope.aave;
+  if (!aave) return [...approvals, ...swaps];
+  const aaveApprovals = [...new Set(aave.supply.map(x => x.asset))].map(token => ({ kind: 'ERC20_APPROVE' as const, token, spender: aave.pool }));
+  const supplies = aave.supply.map(x => ({ kind: 'AAVE_V3_SUPPLY' as const, pool: aave.pool, asset: x.asset, perCallCap: BigInt(x.perCallCap) }));
+  const borrows = aave.borrow.map(x => ({ kind: 'AAVE_V3_BORROW' as const, pool: aave.pool, asset: x.asset, perCallCap: BigInt(x.perCallCap) }));
+  return [...approvals, ...swaps, ...aaveApprovals, ...supplies, ...borrows];
+}
+/** The group index of the first template `match` accepts, or GRANT_SCOPE_EXCEEDED (no template of the grant covers that call). */
+export function templateIndex(scope: GrantScope, match: (t: erc7710.CallTemplate) => boolean): number {
+  if (!isEvmClassScope(scope)) return fail('DRIVER_MECHANISM_MISMATCH');
+  const index = evmTemplates(scope).findIndex(match);
+  return index < 0 ? fail('GRANT_SCOPE_EXCEEDED') : index;
 }
 type SerialDelegation = Omit<erc7710.Delegation, 'salt'> & { readonly salt: string };
 export const serializeDelegation = (d: erc7710.Delegation | Omit<erc7710.Delegation, 'signature'>): SerialDelegation | Omit<SerialDelegation, 'signature'> => ({ ...d, salt: d.salt.toString() });
@@ -76,6 +95,13 @@ export const evmAdapter: AuthorityAdapter = {
     const scope = input.scope;
     if (scope.mechanism !== 'EVM_ERC7710_METAMASK_V1_3' || scope.chain !== input.chain) return fail('CREDENTIAL_SCOPE_INVALID');
     const chainId = chainIdOf(input.chain);
+    // BUILD-FLOFI-UNIVERSAL-SINGLE-AUTH-MAINNET-001: a workflow grant pins its run's exact calls (the salt is its own random anchor).
+    if (isWorkflowScope(scope)) {
+      const delegation = compileScope(scope, input.walletAddress, input.sessionAddress, BigInt(input.anchor));
+      return { kind: 'EVM_EIP712_WORKFLOW_GRANT', chainId, typedData: D.delegationTypedData(chainId, delegation), delegation: serializeDelegation(delegation),
+        digest: D.delegationDigest(chainId, delegation), delegationHash: D.delegationHash(delegation),
+        requires: { account: 'METAMASK_EIP7702_SMART_ACCOUNT', implementation: F.eip7702StatelessDeleGator, delegationManager: F.delegationManager, frameworkVersion: F.version } };
+    }
     // Strictly-after/strictly-before bounds (TimestampEnforcer): usable from validFrom to expiresAt.
     const delegation = D.compileGrant({ chainId, owner: input.walletAddress, session: input.sessionAddress, validAfter: seconds(scope.validFrom) - 1n,
       validBefore: seconds(scope.expiresAt), maxCalls: BigInt(scope.maxCalls), templates: evmTemplates(scope), salt: BigInt(input.anchor) });
@@ -97,7 +123,10 @@ export const evmAdapter: AuthorityAdapter = {
     for (const address of used) if (['0x', '0x0'].includes(await codeAt(t, address))) return { ok: false, code: 'DELEGATION_FRAMEWORK_NOT_DEPLOYED' };
     const hash = D.delegationHash(unsigned);
     if (await disabledOnChain(t, hash)) return { ok: false, code: 'DELEGATION_DISABLED' };
-    return { ok: true, commitment: hash, payload: { delegation: serializeDelegation({ ...unsigned, signature: response.signature.toLowerCase() }), delegationHash: hash, chainId },
+    // BUILD-FLOFI-UNIVERSAL-SINGLE-AUTH-MAINNET-001: a recovery byte of 0/1 (some wallets) is stored as 27/28, the form the account's ECDSA check accepts.
+    const raw = response.signature.toLowerCase(), v = parseInt(raw.slice(-2), 16);
+    const signature = v < 27 ? raw.slice(0, -2) + (v + 27).toString(16).padStart(2, '0') : raw;
+    return { ok: true, commitment: hash, payload: { delegation: serializeDelegation({ ...unsigned, signature }), delegationHash: hash, chainId },
       verification: { checks: ['OWNER_SIGNATURE', 'EIP7702_DESIGNATOR', 'FRAMEWORK_CODE', 'NOT_DISABLED'], provenance: t.provenance } };
   },
   async reconcileAuthorityState(grant, t, now) {

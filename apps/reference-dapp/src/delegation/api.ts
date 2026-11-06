@@ -16,6 +16,7 @@ import { readAutomationConfig } from '../automations/config.ts';
 import { automationHost } from '../automations/runtime.ts';
 import { readDelegationConfig } from './config.ts';
 import { IDEMPOTENT_DELEGATION_OPERATIONS, isDelegationOperation, ownerDelegationService, runDelegationOperation } from './operations.ts';
+import { createPgWorkflowRunStore } from '../workflow-runs/pg-store.ts';
 
 type Env = Readonly<Record<string, string | undefined>>;
 const CODE = /^[A-Z][A-Z0-9_]{2,80}$/;
@@ -48,7 +49,7 @@ export function delegationApiRoutes(env: Env, deps: DelegationApiDeps): Route[] 
         const host = await automationHost(env, automations, { db: deps.db, tenantId: deps.tenantId });
         if ('code' in host) throw new Error(host.code);
         const service = ownerDelegationService(config, automations, host, (event, fields) => deps.logger.info(event, fields), now);
-        return { ok: true as const, value: await runDelegationOperation(service, owner, proven, method, args) };
+        return { ok: true as const, value: await runDelegationOperation(service, owner, proven, method, args, createPgWorkflowRunStore(deps.db, deps.tenantId)) };
       } catch (error) { return closed(error); }
     };
     if (!IDEMPOTENT_DELEGATION_OPERATIONS.has(method)) return { status: 200, body: await run() };

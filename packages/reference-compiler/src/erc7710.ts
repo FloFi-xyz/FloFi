@@ -121,6 +121,10 @@ export const DELEGATION_FRAMEWORK_V1_3 = Object.freeze({
     allowedMethods: '0x2c21fd0cb9dc8445cb3fb0dc5e7bb0aca01842b5',
     allowedTargets: '0x7f20f61b1f09b08d970938f6fa563634d65c4eeb',
     erc20BalanceChange: '0xcdf6ab796408598cea671d79506d7d48e97a5437',
+    /** BUILD-FLOFI-UNIVERSAL-SINGLE-AUTH-MAINNET-001: the whole calldata of a single call must equal the terms (keccak equality). */
+    exactCalldata: '0x99f2e9bf15ce5ec84685604836f71ab835dbbded',
+    /** BUILD-FLOFI-UNIVERSAL-SINGLE-AUTH-MAINNET-001: a 32-byte id usable once per (caller, delegator) — one workflow call, once, ever. */
+    id: '0xc8b5d93463c893401094cc70e66a206fb5987997',
     limitedCalls: '0x04658b29f6b82ed55274221a06fc97d318e25416',
     logicalOrWrapper: '0xe1302607a3251af54c3a6e69318d6aa07f5eb46c',
     redeemer: '0xe144b0b2618071b4e56f746313528a669c7e65c5',
@@ -148,6 +152,12 @@ export const DISABLED_DELEGATION_TOPIC = keccakHex(`DisabledDelegation(bytes32,a
 export const MODE_SINGLE_DEFAULT = '0x' + '0'.repeat(64);
 export const APPROVE_METHOD = '0x095ea7b3';
 export const EXACT_INPUT_SINGLE_METHOD = '0x04e45aaf';
+/** Aave V3 Pool `supply(address asset, uint256 amount, address onBehalfOf, uint16 referralCode)`. */
+export const AAVE_V3_SUPPLY_METHOD = selectorOf('supply(address,uint256,address,uint16)');
+/** Aave V3 Pool `borrow(address asset, uint256 amount, uint256 interestRateMode, uint16 referralCode, address onBehalfOf)`. */
+export const AAVE_V3_BORROW_METHOD = selectorOf('borrow(address,uint256,uint256,uint16,address)');
+/** Aave V3 variable-rate interest mode (the only mode FloFi borrows with). */
+export const AAVE_V3_VARIABLE_RATE = 2n;
 
 export type Caveat = { readonly enforcer: string; readonly terms: string; readonly args: string };
 export type Delegation = { readonly delegate: string; readonly delegator: string; readonly authority: string; readonly caveats: readonly Caveat[];
@@ -214,6 +224,10 @@ export const terms = Object.freeze({
   /** 73 bytes: decrease flag ‖ token ‖ recipient ‖ amount (maximum decrease, or minimum increase). */
   erc20BalanceChange: (decrease: boolean, token: string, recipient: string, amount: bigint) =>
     caveat(E.erc20BalanceChange, concat(Uint8Array.of(decrease ? 1 : 0), bytesOf(evmAddress(token)), bytesOf(evmAddress(recipient)), word(amount))),
+  /** The exact calldata of the call (any length, including empty for a plain native transfer). */
+  exactCalldata: (data: string) => caveat(E.exactCalldata, bytesOf(data)),
+  /** IdEnforcer: one 32-byte id; the first successful redemption that carries it marks it used for this delegator, forever. */
+  id: (value: bigint) => value >= 0n && value < 1n << 256n ? caveat(E.id, word(value)) : fail('ERC7710_TERMS_INVALID'),
   /** `abi.encode(CaveatGroup[])`, `CaveatGroup { Caveat[] caveats }`. Every group must be a complete, equally safe permission set. */
   logicalOrWrapper: (groups: readonly (readonly Caveat[])[]) => groups.length && groups.every(g => g.length)
     ? caveat(E.logicalOrWrapper, abiEncode([{ array: { tuple: [{ array: CAVEAT_TUPLE }] } }], [groups.map(g => [g.map(c => [c.enforcer, c.terms, c.args])])]))
@@ -238,21 +252,71 @@ export function decodeLogicalOrArgs(argsHex: string): { readonly groupIndex: num
  * target, the selector and every material calldata word, so the least restrictive group is still the intended permission.
  */
 export type CallTemplate =
-  | { readonly kind: 'ERC20_APPROVE'; readonly token: string; readonly spender: string }
-  | { readonly kind: 'UNISWAP_V3_EXACT_INPUT_SINGLE'; readonly router: string; readonly tokenIn: string; readonly tokenOut: string; readonly perCallInputCap: bigint };
+  /**
+   * `approve(spender, amount)`. BUILD-FLOFI-UNIVERSAL-SINGLE-AUTH-MAINNET-001: with `amount` the approved amount is pinned exactly (a Credential's
+   * swap approval is its pair's per-call cap), so a compromised session key can never grant an unlimited or larger allowance.
+   */
+  | { readonly kind: 'ERC20_APPROVE'; readonly token: string; readonly spender: string; readonly amount?: bigint }
+  /**
+   * BUILD-FLOFI-UNIVERSAL-SINGLE-AUTH-MAINNET-001: with `fee` the pool fee tier is pinned and `sqrtPriceLimitX96` must be 0, so a compromised
+   * session key cannot route a Credential's swap through another (thin) pool or a partial-fill price limit. The minimum output of a reusable
+   * Credential swap still cannot be pinned on-chain (it depends on the price at execution): that bound is the per-call input cap, and a
+   * workflow run uses an exact workflow grant (`compileWorkflowGrant`) whose signed calldata includes the minimum output.
+   */
+  | { readonly kind: 'UNISWAP_V3_EXACT_INPUT_SINGLE'; readonly router: string; readonly tokenIn: string; readonly tokenOut: string; readonly perCallInputCap: bigint;
+      readonly fee?: number }
+  /**
+   * BUILD-FLOFI-SINGLE-AUTH-WORKFLOW-UX-001: `Pool.supply(asset, amount, onBehalfOf = owner, referralCode = 0)` from the owner's account.
+   * On-chain: target, selector, asset, beneficiary (the owner's own position), no referral, and at most `perCallCap` of the asset leaving the
+   * owner's account per call (ERC20BalanceChangeEnforcer).
+   */
+  | { readonly kind: 'AAVE_V3_SUPPLY'; readonly pool: string; readonly asset: string; readonly perCallCap: bigint }
+  /**
+   * BUILD-FLOFI-SINGLE-AUTH-WORKFLOW-UX-001: `Pool.borrow(asset, amount, 2, 0, onBehalfOf = owner)` from the owner's account. On-chain: target,
+   * selector, asset, VARIABLE rate only, no referral, the debt is the owner's own, the borrowed asset must arrive in the owner's account, and
+   * the amount is below a byte-aligned ceiling (`borrowCeiling(perCallCap)`: its leading calldata bytes are pinned to zero). v1.3.0 has no
+   * "argument ≤ x" enforcer, so the exact cap is the executor's (re-checked against the workflow authorization before every signature).
+   */
+  | { readonly kind: 'AAVE_V3_BORROW'; readonly pool: string; readonly asset: string; readonly perCallCap: bigint };
+/** The smallest power of 256 strictly above `cap`: the on-chain ceiling of a Borrow template (amount < ceiling, enforced by AllowedCalldata). */
+export function borrowCeiling(cap: bigint): bigint {
+  if (cap <= 0n || cap >= 1n << 248n) fail('ERC7710_TEMPLATE_INVALID');
+  let bytes = 1n;
+  while (cap >= 1n << (8n * bytes)) bytes++;
+  return 1n << (8n * bytes);
+}
 export type GrantScope = {
   readonly chainId: number; readonly owner: string; readonly session: string; readonly validAfter: bigint; readonly validBefore: bigint;
   readonly maxCalls: bigint; readonly templates: readonly CallTemplate[]; readonly salt: bigint;
 };
 const addressWord = (value: string) => concat(new Uint8Array(12), bytesOf(evmAddress(value)));
 export function templateGroup(template: CallTemplate, owner: string): Caveat[] {
-  if (template.kind === 'ERC20_APPROVE') return [terms.allowedTargets([template.token]), terms.allowedMethods([APPROVE_METHOD]),
-    terms.allowedCalldata(4, addressWord(template.spender))];
+  if (template.kind === 'ERC20_APPROVE') {
+    if (template.amount !== undefined && template.amount <= 0n) fail('ERC7710_TEMPLATE_INVALID');
+    return [terms.allowedTargets([template.token]), terms.allowedMethods([APPROVE_METHOD]),
+      terms.allowedCalldata(4, template.amount === undefined ? addressWord(template.spender) : concat(addressWord(template.spender), word(template.amount)))];
+  }
+  if (template.kind === 'AAVE_V3_SUPPLY') {
+    if (template.perCallCap <= 0n) fail('ERC7710_TEMPLATE_INVALID');
+    // supply calldata: asset @4, amount @36, onBehalfOf @68, referralCode @100.
+    return [terms.allowedTargets([template.pool]), terms.allowedMethods([AAVE_V3_SUPPLY_METHOD]), terms.allowedCalldata(4, addressWord(template.asset)),
+      terms.allowedCalldata(68, addressWord(owner)), terms.allowedCalldata(100, word(0n)),
+      terms.erc20BalanceChange(true, template.asset, owner, template.perCallCap)];
+  }
+  if (template.kind === 'AAVE_V3_BORROW') {
+    // borrow calldata: asset @4, amount @36, interestRateMode @68, referralCode @100, onBehalfOf @132. The amount's leading zero bytes bound it.
+    const ceiling = borrowCeiling(template.perCallCap), significant = (ceiling.toString(16).length - 1) / 2;
+    return [terms.allowedTargets([template.pool]), terms.allowedMethods([AAVE_V3_BORROW_METHOD]), terms.allowedCalldata(4, addressWord(template.asset)),
+      terms.allowedCalldata(36, new Uint8Array(32 - significant)), terms.allowedCalldata(68, word(AAVE_V3_VARIABLE_RATE)), terms.allowedCalldata(100, word(0n)),
+      terms.allowedCalldata(132, addressWord(owner)), terms.erc20BalanceChange(false, template.asset, owner, 1n)];
+  }
   if (template.perCallInputCap <= 0n || evmAddress(template.tokenIn) === evmAddress(template.tokenOut)) fail('ERC7710_TEMPLATE_INVALID');
   // IV3SwapRouter.ExactInputSingleParams: tokenIn @4, tokenOut @36, fee @68, recipient @100, amountIn @132, amountOutMinimum @164, sqrtPriceLimitX96 @196.
-  return [terms.allowedTargets([template.router]), terms.allowedMethods([EXACT_INPUT_SINGLE_METHOD]), terms.allowedCalldata(4, addressWord(template.tokenIn)),
-    terms.allowedCalldata(36, addressWord(template.tokenOut)), terms.allowedCalldata(100, addressWord(owner)),
-    terms.erc20BalanceChange(true, template.tokenIn, owner, template.perCallInputCap)];
+  if (template.fee !== undefined && !UNISWAP_V3_FEES.includes(template.fee)) fail('ERC7710_TEMPLATE_INVALID');
+  return [terms.allowedTargets([template.router]), terms.allowedMethods([EXACT_INPUT_SINGLE_METHOD]),
+    ...template.fee === undefined ? [terms.allowedCalldata(4, addressWord(template.tokenIn)), terms.allowedCalldata(36, addressWord(template.tokenOut))]
+      : [terms.allowedCalldata(4, concat(addressWord(template.tokenIn), addressWord(template.tokenOut), word(BigInt(template.fee)))), terms.allowedCalldata(196, word(0n))],
+    terms.allowedCalldata(100, addressWord(owner)), terms.erc20BalanceChange(true, template.tokenIn, owner, template.perCallInputCap)];
 }
 /** The unsigned root delegation of a grant. Top-level caveats bind redeemer, validity, call count and zero native value. */
 export function compileGrant(scope: GrantScope): Omit<Delegation, 'signature'> {
@@ -265,6 +329,115 @@ export function compileGrant(scope: GrantScope): Omit<Delegation, 'signature'> {
     terms.logicalOrWrapper(scope.templates.map(t => templateGroup(t, owner)))] };
 }
 export type Call = { readonly target: string; readonly value: bigint; readonly data: string };
+
+// ── Workflow-scoped grants: exact calls, each usable once (BUILD-FLOFI-UNIVERSAL-SINGLE-AUTH-MAINNET-001) ─────────────────────
+/**
+ * One owner signature per chain authorizes exactly the calls of one immutable workflow on that chain, and nothing else:
+ *
+ *   root caveats       Redeemer(session) · Timestamp(validAfter, validBefore) · LimitedCalls(number of calls) · ValueLte(largest native value)
+ *   one group per call AllowedTargets([target]) · ExactCalldata(the call's whole calldata) · ValueLte(its native value) · Id(its own id)
+ *
+ * Every amount, asset, recipient, beneficiary, rate mode, fee tier and minimum output is part of the exact calldata the owner signed. A
+ * compromised session key can only redeem a subset of these calls, in any order, each at most once (IdEnforcer: an interrupted run can never
+ * reuse a call that already succeeded), before validBefore, and nothing after the owner disables the delegation. The workflow's dependent
+ * amounts are therefore fixed when the owner signs: a step consuming an earlier step's output uses that step's on-chain guaranteed minimum.
+ */
+export type WorkflowCall =
+  | { readonly kind: 'ERC20_APPROVE'; readonly token: string; readonly spender: string; readonly amount: bigint }
+  | { readonly kind: 'ERC20_TRANSFER'; readonly token: string; readonly to: string; readonly amount: bigint }
+  | { readonly kind: 'NATIVE_TRANSFER'; readonly to: string; readonly amount: bigint }
+  /** SwapRouter02 `exactInputSingle`: the output goes to the owner; `amountOutMinimum` is enforced by the router itself. */
+  | { readonly kind: 'UNISWAP_V3_EXACT_INPUT_SINGLE'; readonly router: string; readonly tokenIn: string; readonly tokenOut: string; readonly fee: number;
+      readonly amountIn: bigint; readonly amountOutMinimum: bigint }
+  /** Aave V3 `supply(asset, amount, owner, 0)`. */
+  | { readonly kind: 'AAVE_V3_SUPPLY'; readonly pool: string; readonly asset: string; readonly amount: bigint }
+  /** Aave V3 `borrow(asset, amount, 2 (variable), 0, owner)`: the exact amount, the owner's own debt, the asset paid to the owner. */
+  | { readonly kind: 'AAVE_V3_BORROW'; readonly pool: string; readonly asset: string; readonly amount: bigint }
+  /** Aave V3 `repay(asset, amount, 2 (variable), owner)`: the owner's own variable debt. */
+  | { readonly kind: 'AAVE_V3_REPAY'; readonly pool: string; readonly asset: string; readonly amount: bigint }
+  /** Aave V3 `withdraw(asset, amount, owner)`: back to the owner's own account. */
+  | { readonly kind: 'AAVE_V3_WITHDRAW'; readonly pool: string; readonly asset: string; readonly amount: bigint };
+export const ERC20_TRANSFER_METHOD = selectorOf('transfer(address,uint256)');
+/** Aave V3 Pool `repay(address asset, uint256 amount, uint256 interestRateMode, address onBehalfOf)`. */
+export const AAVE_V3_REPAY_METHOD = selectorOf('repay(address,uint256,uint256,address)');
+/** Aave V3 Pool `withdraw(address asset, uint256 amount, address to)`. */
+export const AAVE_V3_WITHDRAW_METHOD = selectorOf('withdraw(address,uint256,address)');
+/** The Uniswap v3 fee tiers a workflow swap may name. */
+export const UNISWAP_V3_FEES: readonly number[] = Object.freeze([100, 500, 3000, 10000]);
+/** The longest window a workflow grant may be valid for (the product chooses a much shorter one). */
+export const WORKFLOW_GRANT_MAX_WINDOW_SECONDS = 7n * 24n * 3600n;
+export const WORKFLOW_GRANT_MAX_CALLS = 16;
+const UINT256_MAX = (1n << 256n) - 1n;
+const exactAmount = (value: bigint) => value > 0n && value < UINT256_MAX ? value : fail('ERC7710_WORKFLOW_CALL_INVALID');
+const callHex = (selector: string, ...parts: readonly Uint8Array[]) => selector + hexOf(concat(...parts)).slice(2);
+/** The exact single call one workflow call is, from the owner's account (the bytes ExactCalldata pins). */
+export function workflowCallData(call: WorkflowCall, owner: string): Call {
+  const o = evmAddress(owner);
+  switch (call.kind) {
+    case 'ERC20_APPROVE': return { target: evmAddress(call.token), value: 0n, data: callHex(APPROVE_METHOD, addressWord(call.spender), word(exactAmount(call.amount))) };
+    case 'ERC20_TRANSFER': return { target: evmAddress(call.token), value: 0n, data: callHex(ERC20_TRANSFER_METHOD, addressWord(call.to), word(exactAmount(call.amount))) };
+    case 'NATIVE_TRANSFER': return { target: evmAddress(call.to), value: exactAmount(call.amount), data: '0x' };
+    case 'UNISWAP_V3_EXACT_INPUT_SINGLE': {
+      if (!UNISWAP_V3_FEES.includes(call.fee) || evmAddress(call.tokenIn) === evmAddress(call.tokenOut) || call.amountOutMinimum <= 0n || call.amountOutMinimum >= UINT256_MAX)
+        fail('ERC7710_WORKFLOW_CALL_INVALID');
+      // IV3SwapRouter.ExactInputSingleParams: tokenIn, tokenOut, fee, recipient, amountIn, amountOutMinimum, sqrtPriceLimitX96 (0: no limit).
+      return { target: evmAddress(call.router), value: 0n, data: callHex(EXACT_INPUT_SINGLE_METHOD, addressWord(call.tokenIn), addressWord(call.tokenOut),
+        word(BigInt(call.fee)), addressWord(o), word(exactAmount(call.amountIn)), word(call.amountOutMinimum), word(0n)) };
+    }
+    case 'AAVE_V3_SUPPLY': return { target: evmAddress(call.pool), value: 0n,
+      data: callHex(AAVE_V3_SUPPLY_METHOD, addressWord(call.asset), word(exactAmount(call.amount)), addressWord(o), word(0n)) };
+    case 'AAVE_V3_BORROW': return { target: evmAddress(call.pool), value: 0n,
+      data: callHex(AAVE_V3_BORROW_METHOD, addressWord(call.asset), word(exactAmount(call.amount)), word(AAVE_V3_VARIABLE_RATE), word(0n), addressWord(o)) };
+    case 'AAVE_V3_REPAY': return { target: evmAddress(call.pool), value: 0n,
+      data: callHex(AAVE_V3_REPAY_METHOD, addressWord(call.asset), word(exactAmount(call.amount)), word(AAVE_V3_VARIABLE_RATE), addressWord(o)) };
+    case 'AAVE_V3_WITHDRAW': return { target: evmAddress(call.pool), value: 0n,
+      data: callHex(AAVE_V3_WITHDRAW_METHOD, addressWord(call.asset), word(exactAmount(call.amount)), addressWord(o)) };
+    default: return fail('ERC7710_WORKFLOW_CALL_INVALID');
+  }
+}
+/** The IdEnforcer id of call `index` of one workflow grant: unique per chain, owner and grant salt (never reused across grants). */
+export function workflowCallId(chainId: number, owner: string, salt: bigint, index: number): bigint {
+  return BigInt(keccakHex(abiEncode(['bytes32', 'uint256', 'address', 'uint256', 'uint256'],
+    [keccakHex('flofi.workflow-call.v1'), BigInt(chainId), evmAddress(owner), salt, BigInt(index)])));
+}
+export type WorkflowGrantScope = {
+  readonly chainId: number; readonly owner: string; readonly session: string; readonly validAfter: bigint; readonly validBefore: bigint;
+  readonly calls: readonly WorkflowCall[]; readonly salt: bigint;
+};
+/** The unsigned root delegation of a workflow grant (see WorkflowCall). */
+export function compileWorkflowGrant(scope: WorkflowGrantScope): Omit<Delegation, 'signature'> {
+  if (!Number.isSafeInteger(scope.chainId) || scope.chainId <= 0 || !scope.calls.length || scope.calls.length > WORKFLOW_GRANT_MAX_CALLS
+    || scope.validAfter < 0n || scope.validBefore <= scope.validAfter || scope.validBefore - scope.validAfter > WORKFLOW_GRANT_MAX_WINDOW_SECONDS
+    || scope.salt < 0n || scope.salt > UINT256_MAX) fail('ERC7710_SCOPE_INVALID');
+  const owner = evmAddress(scope.owner), session = evmAddress(scope.session);
+  if (owner === session) fail('ERC7710_SCOPE_INVALID');
+  const calls = scope.calls.map(c => workflowCallData(c, owner));
+  const maxValue = calls.reduce((m, c) => c.value > m ? c.value : m, 0n);
+  const groups = calls.map((c, i) => [terms.allowedTargets([c.target]), terms.exactCalldata(c.data), terms.valueLte(c.value),
+    terms.id(workflowCallId(scope.chainId, owner, scope.salt, i))]);
+  return { delegate: session, delegator: owner, authority: ROOT_AUTHORITY, salt: scope.salt, caveats: [terms.redeemer([session]),
+    terms.timestamp(scope.validAfter, scope.validBefore), terms.limitedCalls(BigInt(calls.length)), terms.valueLte(maxValue), terms.logicalOrWrapper(groups)] };
+}
+/**
+ * The exact calls a delegation authorizes when it has the workflow-grant shape, else null: what an owner's wallet signature actually
+ * permits, read back from the caveats alone (for display, verification and the adversarial probe), never from FloFi's own records.
+ */
+export function workflowGrantCalls(d: Omit<Delegation, 'signature'>): readonly (Call & { readonly id: bigint })[] | null {
+  const [redeemer, timestamp, limited, value, or, ...rest] = d.caveats;
+  if (rest.length || !redeemer || redeemer.enforcer !== E.redeemer || timestamp?.enforcer !== E.timestamp || limited?.enforcer !== E.limitedCalls
+    || value?.enforcer !== E.valueLte || or?.enforcer !== E.logicalOrWrapper) return null;
+  let groups: Caveat[][];
+  try { groups = decodeLogicalOrTerms(or.terms); } catch { return null; }
+  if (BigInt(limited.terms) !== BigInt(groups.length)) return null;
+  const out: (Call & { id: bigint })[] = [];
+  for (const g of groups) {
+    const [targets, exact, lte, id, ...more] = g;
+    if (more.length || targets?.enforcer !== E.allowedTargets || exact?.enforcer !== E.exactCalldata || lte?.enforcer !== E.valueLte || id?.enforcer !== E.id) return null;
+    if (bytesOf(targets.terms).length !== 20 || bytesOf(lte.terms).length !== 32 || bytesOf(id.terms).length !== 32) return null;
+    out.push({ target: hexOf(bytesOf(targets.terms)), value: BigInt(lte.terms), data: exact.terms, id: BigInt(id.terms) });
+  }
+  return out;
+}
 /** `ExecutionLib.encodeSingle`: target ‖ value ‖ calldata, packed. */
 export const encodeSingleExecution = (call: Call): string => hexOf(concat(bytesOf(evmAddress(call.target)), word(call.value), bytesOf(call.data)));
 export function decodeSingleExecution(packed: string): Call {
@@ -313,13 +486,23 @@ export type ModelContext = {
   readonly redeemer: string; readonly call: Call; readonly blockTimestamp: bigint; readonly delegationHash: string;
   /** Calls already counted for this delegation by LimitedCallsEnforcer. */
   readonly callCount: bigint;
+  /**
+   * IdEnforcer state: the ids already used, keyed `${caller}:${delegator}:${id}` where caller is `manager` (a root caveat) or `wrapper` (a caveat
+   * inside LogicalOrWrapper, whose hooks the wrapper calls). Absent ⇒ no id has been used.
+   */
+  readonly usedIds?: ReadonlySet<string>;
+  /** The delegator (IdEnforcer keys ids per delegator); absent ⇒ ids are keyed with an empty delegator. */
+  readonly delegator?: string;
 };
 export type BalanceRule = { readonly decrease: boolean; readonly token: string; readonly recipient: string; readonly amount: bigint };
-export type ModelVerdict = { readonly ok: true; readonly groupIndex: number | null; readonly countsCall: boolean; readonly balanceRules: readonly BalanceRule[] }
+export type ModelVerdict = { readonly ok: true; readonly groupIndex: number | null; readonly countsCall: boolean; readonly balanceRules: readonly BalanceRule[];
+  /** IdEnforcer keys this redemption marks used when it succeeds (see ModelContext.usedIds). */
+  readonly usedIds: readonly string[] }
   | { readonly ok: false; readonly code: string };
-function checkCaveat(c: Caveat, ctx: ModelContext): { ok: true; countsCall: boolean; balanceRules: BalanceRule[]; groupIndex: number | null } | { ok: false; code: string } {
+type CaveatResult = { ok: true; countsCall: boolean; balanceRules: BalanceRule[]; groupIndex: number | null; usedIds: string[] } | { ok: false; code: string };
+function checkCaveat(c: Caveat, ctx: ModelContext, caller: 'manager' | 'wrapper' = 'manager'): CaveatResult {
   const t = bytesOf(c.terms), data = bytesOf(ctx.call.data);
-  const pass = { ok: true as const, countsCall: false, balanceRules: [] as BalanceRule[], groupIndex: null };
+  const pass: CaveatResult = { ok: true, countsCall: false, balanceRules: [], groupIndex: null, usedIds: [] };
   const addresses = (bytes: Uint8Array) => bytes.length && bytes.length % 20 === 0 ? Array.from({ length: bytes.length / 20 }, (_, i) => hexOf(bytes.subarray(i * 20, i * 20 + 20))) : null;
   switch (c.enforcer) {
     case E.allowedTargets: { const list = addresses(t); return !list ? { ok: false, code: 'AllowedTargetsEnforcer:invalid-terms-length' }
@@ -349,6 +532,12 @@ function checkCaveat(c: Caveat, ctx: ModelContext): { ok: true; countsCall: bool
       : ctx.callCount + 1n <= BigInt(hexOf(t)) ? { ...pass, countsCall: true } : { ok: false, code: 'LimitedCallsEnforcer:limit-exceeded' };
     case E.redeemer: { const list = addresses(t); return !list ? { ok: false, code: 'RedeemerEnforcer:invalid-terms-length' }
       : list.includes(evmAddress(ctx.redeemer)) ? pass : { ok: false, code: 'RedeemerEnforcer:unauthorized-redeemer' }; }
+    case E.exactCalldata: return keccakHex(t) === keccakHex(data) ? pass : { ok: false, code: 'ExactCalldataEnforcer:invalid-calldata' };
+    case E.id: {
+      if (t.length !== 32) return { ok: false, code: 'IdEnforcer:invalid-terms-length' };
+      const key = `${caller}:${ctx.delegator ? evmAddress(ctx.delegator) : ''}:${BigInt(hexOf(t)).toString()}`;
+      return ctx.usedIds?.has(key) ? { ok: false, code: 'IdEnforcer:id-already-used' } : { ...pass, usedIds: [key] };
+    }
     case E.erc20BalanceChange: {
       if (t.length !== 73) return { ok: false, code: 'ERC20BalanceChangeEnforcer:invalid-terms-length' };
       return { ...pass, balanceRules: [{ decrease: t[0] !== 0, token: hexOf(t.subarray(1, 21)), recipient: hexOf(t.subarray(21, 41)), amount: BigInt(hexOf(t.subarray(41))) }] };
@@ -359,11 +548,13 @@ function checkCaveat(c: Caveat, ctx: ModelContext): { ok: true; countsCall: bool
       const group = groups[selected.groupIndex];
       if (!group) return { ok: false, code: 'LogicalOrWrapperEnforcer:invalid-group-index' };
       if (selected.caveatArgs.length !== group.length) return { ok: false, code: 'LogicalOrWrapperEnforcer:invalid-caveat-args-length' };
-      const results = group.map((inner, i) => checkCaveat({ ...inner, args: selected.caveatArgs[i]! }, ctx));
+      const results = group.map((inner, i) => checkCaveat({ ...inner, args: selected.caveatArgs[i]! }, ctx, 'wrapper'));
       const failed = results.find(r => !r.ok);
       if (failed && !failed.ok) return failed;
-      const ok = results as { ok: true; countsCall: boolean; balanceRules: BalanceRule[] }[];
-      return { ok: true, countsCall: ok.some(r => r.countsCall), balanceRules: ok.flatMap(r => r.balanceRules), groupIndex: selected.groupIndex };
+      const ok = results as Extract<CaveatResult, { ok: true }>[];
+      // A LimitedCalls caveat inside the wrapper counts under the wrapper's own key, not the manager's: not modelled (FloFi never nests one).
+      if (group.some(inner => inner.enforcer === E.limitedCalls)) return { ok: false, code: 'ENFORCER_NOT_MODELED' };
+      return { ok: true, countsCall: false, balanceRules: ok.flatMap(r => r.balanceRules), groupIndex: selected.groupIndex, usedIds: ok.flatMap(r => r.usedIds) };
     }
     default: return { ok: false, code: 'ENFORCER_NOT_MODELED' };
   }
@@ -375,16 +566,22 @@ function checkCaveat(c: Caveat, ctx: ModelContext): { ok: true; countsCall: bool
  */
 export function modelBeforeHooks(d: Delegation, ctx: ModelContext): ModelVerdict {
   let countsCall = false, groupIndex: number | null = null;
-  const balanceRules: BalanceRule[] = [];
+  const balanceRules: BalanceRule[] = [], usedIds: string[] = [];
+  const context: ModelContext = { ...ctx, delegator: ctx.delegator ?? d.delegator };
   for (const c of d.caveats) {
-    const r = checkCaveat(c, ctx);
+    const r = checkCaveat(c, context);
     if (!r.ok) return r;
-    countsCall ||= r.countsCall; balanceRules.push(...r.balanceRules); groupIndex = r.groupIndex ?? groupIndex;
+    countsCall ||= r.countsCall; balanceRules.push(...r.balanceRules); usedIds.push(...r.usedIds); groupIndex = r.groupIndex ?? groupIndex;
   }
-  return { ok: true, groupIndex, countsCall, balanceRules };
+  return { ok: true, groupIndex, countsCall, balanceRules, usedIds };
 }
-/** ERC20BalanceChangeEnforcer after-hook: `balance >= before - amount` (decrease) or `balance >= before + amount` (increase). */
+/**
+ * ERC20BalanceChangeEnforcer after-hook: `balance >= before - amount` (decrease) or `balance >= before + amount` (increase). Solidity 0.8 checked
+ * arithmetic: a decrease rule whose `amount` exceeds the balance cached before the call reverts with Panic(0x11) whatever the call did — a
+ * per-call cap above the owner's balance can never be redeemed.
+ */
 export function modelAfterHook(rule: BalanceRule, before: bigint, after: bigint): { readonly ok: true } | { readonly ok: false; readonly code: string } {
+  if (rule.decrease && rule.amount > before) return { ok: false, code: 'Panic(0x11)' };
   if (rule.decrease) return after >= before - rule.amount ? { ok: true } : { ok: false, code: 'ERC20BalanceChangeEnforcer:exceeded-balance-decrease' };
   return after >= before + rule.amount ? { ok: true } : { ok: false, code: 'ERC20BalanceChangeEnforcer:insufficient-balance-increase' };
 }

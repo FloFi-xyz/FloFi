@@ -74,8 +74,13 @@ export type DelegatedTrigger = Static<typeof Trigger>;
 
 export const CredentialInputSchema = Type.Union([
   Type.Object({ mechanism: Type.Literal('EVM_ERC7710_METAMASK_V1_3'), walletAddress: Type.String({ pattern: '^0x[0-9a-f]{40}$' }),
-    network: literalUnion(['base-sepolia', 'ethereum-sepolia'] as const),
+    // BUILD-FLOFI-SINGLE-AUTH-WORKFLOW-UX-001: Arbitrum One only where the deployment opted it into delegated templates (checked by the service).
+    network: literalUnion(['base-sepolia', 'ethereum-sepolia', 'arbitrum-one'] as const),
     pairs: Type.Array(Type.Object({ input: literalUnion(['USDC', 'WETH'] as const), output: literalUnion(['USDC', 'WETH'] as const), perCallCap: Decimal }, strict), { minItems: 1, maxItems: 2 }),
+    /** Aave V3 Supply / variable-rate Borrow of the network's registered market, per asset and per call. */
+    aave: Type.Optional(Type.Object({
+      supply: Type.Array(Type.Object({ asset: literalUnion(['USDC', 'WETH'] as const), perCallCap: Decimal }, strict), { maxItems: 2 }),
+      borrow: Type.Array(Type.Object({ asset: literalUnion(['USDC', 'WETH'] as const), perCallCap: Decimal }, strict), { maxItems: 2 }) }, strict)),
     maxCalls: Type.Integer({ minimum: 2, maximum: 1000 }), expiresAt: Iso, passkeyId: Type.String({ pattern: '^psk_[a-z2-7]{26}$' }),
     label: Type.String({ minLength: 1, maxLength: 40 }) }, strict),
   Type.Object({ mechanism: Type.Literal('SOLANA_SPL_DELEGATE_V1'), walletAddress: Type.String({ pattern: '^[1-9A-HJ-NP-Za-km-z]{32,44}$' }),

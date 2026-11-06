@@ -15,7 +15,7 @@ function human(value:string,decimals:number):string {return (Number(value)/10**d
 function hf(value:string):string {return BigInt(value)===(1n<<256n)-1n?'No debt (∞)':human(value,18);}
 export function BorrowAuthoringForm({nodeId,onDone,direct=false,reviewFormId}:{nodeId?:string;onDone?:()=>void;direct?:boolean;reviewFormId?:string}){
   const { t: tr } = useLocale();
-  const {state,propose,dispatch,amountInputs={},editCanvasAmount}=useWorkflow(),wallet=useBuild009Wallet();
+  const {state,propose,dispatch,amountInputs={},editCanvasAmount,commitCanvasAmount}=useWorkflow(),wallet=useBuild009Wallet();
   const node=state.workflow.nodes.find(n=>n.nodeId===nodeId),existing=node?borrowDetails(node as Parameters<typeof borrowDetails>[0]):null;
   const [localAmount,setAmount]=useState(existing?.amount??'0.01'),[error,setError]=useState('');
   const amount = reviewFormId && nodeId ? amountInputs[nodeId] ?? existing?.amount ?? localAmount : localAmount;
@@ -24,7 +24,11 @@ export function BorrowAuthoringForm({nodeId,onDone,direct=false,reviewFormId}:{n
   const asset=lendingReservesFor(network).some(reserve=>reserve.symbol===chosenAsset)?chosenAsset:lendingAssetFor(network),shown=lendingNetworkView(network,asset);
   const setNetwork=(next:LendingNetwork)=>{setNetworkState(next);setAsset(lendingAssetFor(next));};
   const live=useAaveReserves(network,wallet.account??null);
-  function submit(event:FormEvent){event.preventDefault();try{
+  // BUILD-FLOFI-SINGLE-AUTH-WORKFLOW-UX-001: with the network and asset unchanged, Enter applies the amount directly; any other change is reviewed.
+  const fieldsChanged=Boolean(existing&&(network!==existing.network||asset!==existing.asset));
+  function submit(event:FormEvent){event.preventDefault();
+    if(reviewFormId&&nodeId&&existing&&!fieldsChanged){if(amountInputs[nodeId]!==undefined)setError(commitCanvasAmount(nodeId)??'');return;}
+    try{
     const input:SupplyInput={network,asset,amount,beneficiary:wallet.account??existing?.beneficiary??''};
     createAuthoredBorrow(nodeId??'node-preview',input);
     const command=nodeId?{type:'SET_BORROW' as const,nodeId,input,source:'CANVAS' as const,baseRevision:state.workflow.revision}:{type:'ADD_BORROW' as const,input,source:'CANVAS' as const,baseRevision:state.workflow.revision};
@@ -38,7 +42,7 @@ export function BorrowAuthoringForm({nodeId,onDone,direct=false,reviewFormId}:{n
     <label>{tr("Borrow amount (")}{tr(asset)})<TokenAmountInput aria-label={tr(`Borrow amount (${asset})`)} value={amount} maxLength={80} onValueChange={value=>{setError('');if(reviewFormId&&nodeId)editCanvasAmount(nodeId,value);else setAmount(value);}}/></label>
     {!wallet.account&&!existing&&<button type="button" onClick={()=>void wallet.connect()}>{tr("Connect borrower wallet")}</button>}
     <p>{tr("Variable rate. Your connected wallet receives ")}{tr(asset)}{tr(" and takes on the debt.")}</p>
-    {error&&<p role="alert">{tr(error)}</p>} { !reviewFormId && <button type="submit" disabled={!wallet.account&&!existing}>{tr(nodeId?'Review Borrow change':direct?'Add Borrow':'Review Borrow proposal')}</button>}
+    {error&&<p role="alert">{tr(error)}</p>} { (!reviewFormId||fieldsChanged) && <button type="submit" disabled={!wallet.account&&!existing}>{tr(nodeId?'Review Borrow change':direct?'Add Borrow':'Review Borrow proposal')}</button>}
     {onDone&&<button type="button" className="quiet" onClick={onDone}>{tr("Cancel")}</button>}
   </form>;
 }

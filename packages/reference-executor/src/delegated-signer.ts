@@ -8,8 +8,8 @@
  *                     and public-testnet operation only; the application refuses it on hosted deployments. NOT production custody.
  *   memory            keys in this process's memory (unit tests and loopback harnesses only).
  *
- * A production provider (non-exportable keys in a KMS/HSM, per-grant isolation, audited use) does not exist in this repository; the
- * application reports production delegated signing as unavailable rather than using either provider in its place.
+ * The production provider (BUILD-FLOFI-UNIVERSAL-SINGLE-AUTH-MAINNET-001) is `awsKmsSignerProvider` (kms-signer.ts): a non-exportable
+ * AWS KMS secp256k1 key with audited use. Hosted deployments refuse both providers here.
  */
 import { randomBytes } from 'node:crypto';
 import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
@@ -22,9 +22,9 @@ import { base58Encode } from '@defi-workflow-engine/reference-compiler';
 export type SignerNamespace = 'eip155' | 'solana';
 export type EvmSignature = { readonly yParity: 0 | 1; readonly r: bigint; readonly s: bigint };
 export interface DelegatedSignerProvider {
-  readonly id: 'local-disposable' | 'memory';
-  /** Whether this provider is acceptable custody for real funds. Neither implementation here is. */
-  readonly production: false;
+  readonly id: 'local-disposable' | 'memory' | 'aws-kms';
+  /** Whether this provider is acceptable custody for real funds: only the AWS KMS provider (kms-signer.ts) is; the two here are not. */
+  readonly production: boolean;
   readonly create: (namespace: SignerNamespace) => Promise<{ readonly ref: string; readonly address: string }>;
   readonly address: (ref: string) => Promise<string>;
   readonly signEvmDigest: (ref: string, digest: Uint8Array) => Promise<EvmSignature>;
@@ -51,7 +51,7 @@ function signSolana(key: Key, message: Uint8Array): Uint8Array {
   return ed25519.sign(message, key.secret);
 }
 const REF = /^(local-disposable|memory):[a-f0-9]{32}$/;
-const refOf = (id: DelegatedSignerProvider['id']) => `${id}:${randomBytes(16).toString('hex')}`;
+const refOf = (id: 'local-disposable' | 'memory') => `${id}:${randomBytes(16).toString('hex')}`;
 
 export function memorySignerProvider(): DelegatedSignerProvider {
   const keys = new Map<string, Key>();

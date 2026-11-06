@@ -117,8 +117,13 @@ function GrantCard({ g, owner, busy, run }: { g: GrantView; owner: WorkflowOwner
   return <li className="automation-card delegation-grant" aria-label={t('Credential {0} on {1}', short(g.walletAddress), g.network)} data-state={g.state}>
     <header className="automation-card-head"><div><h3>{g.network} · {short(g.walletAddress)}</h3><p>{t(g.mechanism === 'EVM_ERC7710_METAMASK_V1_3' ? 'MetaMask delegation (ERC-7710)' : 'SPL token delegation')}</p></div>
       <span className="automation-badge" data-state={g.state}>{t(STATE[g.state] ?? g.state)}</span></header>
+    {g.scope.kind === 'EVM' && g.scope.aave && <p>{t('Aave V3 for this wallet only: supply {0}; variable-rate borrow {1} (on-chain ceiling per call: {2})',
+      g.scope.aave.supply.map(x => `${x.asset} ≤ ${x.perCallCap}`).join(', ') || '—', g.scope.aave.borrow.map(x => `${x.asset} ≤ ${x.perCallCap}`).join(', ') || '—',
+      g.scope.aave.borrow.map(x => `< ${x.onChainCeiling} ${x.asset}`).join(', ') || '—')}</p>}
     <p>{g.scope.kind === 'EVM' ? t('Uniswap v3 swaps {0}; at most {1} calls ({2} used); recipient: this wallet only', g.scope.pairs.map(p => `${p.input} → ${p.output} ≤ ${p.perCallCap}`).join(', '),
       String(g.scope.maxCalls), String(g.callsUsed))
+      : g.scope.kind === 'EVM_WORKFLOW' ? t('Workflow authorization: exactly {0} calls of one workflow run (steps {1}), each usable once; nothing else', String(g.scope.calls),
+        g.scope.steps.map(x => String(x + 1)).join(', '))
       : t('Spend up to {0} from this wallet’s token account; recipient and program are checked by FloFi, not on-chain', g.scope.tokens.map(x => `${x.amount} ${x.symbol}`).join(', '))}</p>
     <p className="muted">{t('Expires {0}', new Date(g.expiresAt).toLocaleDateString())}{g.verifiedAt ? ` · ${t('verified {0}', new Date(g.verifiedAt).toLocaleString())}` : ''}</p>
     <div className="automation-row-actions">
@@ -139,7 +144,7 @@ function ExecutionCredentialsPanel({ access }: { access: DelegationAccess }) {
   const { t } = useLocale(), owner = access.owner, proven = Boolean(owner && access.proof.proven === owner.address);
   const { overview, code, refresh } = useOverview(owner, proven), { busy, run, messages } = useRunner(refresh);
   const solanaProof = useWalletProof(owner ? 'solana' : null);
-  const [network, setNetwork] = useState<'base-sepolia' | 'ethereum-sepolia' | 'solana-devnet'>('base-sepolia'), [cap, setCap] = useState('100'), [calls, setCalls] = useState('40');
+  const [network, setNetwork] = useState<'base-sepolia' | 'ethereum-sepolia' | 'solana-devnet' | 'arbitrum-one'>('base-sepolia'), [cap, setCap] = useState('100'), [calls, setCalls] = useState('40');
   const [amount, setAmount] = useState('20'), [expires, setExpires] = useState(plusMonths(3));
   // PR #76: a wallet signature obtained under one wallet authority epoch is submitted only under that same epoch.
   const epoch = useWalletAuthorityEpoch(), shared = useJupiter().session;
@@ -188,13 +193,15 @@ function ExecutionCredentialsPanel({ access }: { access: DelegationAccess }) {
         onClick={() => void run(async () => { const r = await credentialComplete(owner, pending.grantId, { signature: pending.signature }); if (r.ok) setPending(null); return r; }, 'Credential enrolled.')}>{t('Verify again')}</button></div>}
       <form className="automation-form" aria-label={t('Enroll a wallet for automatic execution')} onSubmit={event => void enroll(event)}>
         <label className="automation-field"><span>{t('Network')}</span><select aria-label={t('Credential network')} value={network} onChange={e => setNetwork(e.currentTarget.value as typeof network)}>
-          <option value="base-sepolia">Base Sepolia</option><option value="ethereum-sepolia">Ethereum Sepolia</option><option value="solana-devnet">Solana Devnet</option></select></label>
+          <option value="base-sepolia">Base Sepolia</option><option value="ethereum-sepolia">Ethereum Sepolia</option><option value="solana-devnet">Solana Devnet</option>
+          {overview?.availability.mainnetChains?.includes('eip155:42161') && <option value="arbitrum-one">Arbitrum One</option>}</select></label>
         {network === 'solana-devnet' ? <>
           {!solanaProof.proven && <WalletProof namespace="solana" proof={solanaProof}/>}
           <label className="automation-field"><span>{t('Delegated devUSDC (total)')}</span><input inputMode="decimal" aria-label={t('Delegated devUSDC')} value={amount} onChange={e => setAmount(e.currentTarget.value.trim())}/></label>
         </> : <>
           <label className="automation-field"><span>{t('USDC per call (max)')}</span><input inputMode="decimal" aria-label={t('USDC per call')} value={cap} onChange={e => setCap(e.currentTarget.value.trim())}/></label>
           <label className="automation-field"><span>{t('Number of calls')}</span><input inputMode="numeric" aria-label={t('Number of calls')} value={calls} onChange={e => setCalls(e.currentTarget.value.trim())}/></label>
+          {network === 'arbitrum-one' && <p className="muted">{t('Real funds on Arbitrum One. Your wallet must be a MetaMask smart account. Aave Supply and Borrow are never part of a Credential: a workflow run authorizes them once, with exact amounts.')}</p>}
         </>}
         <label className="automation-field"><span>{t('Expires on')}</span><input type="date" aria-label={t('Credential expires on')} value={expires} onChange={e => setExpires(e.currentTarget.value)}/></label>
         {/* A Solana Credential needs that wallet proven first: the button waits for the proof, so a click can never race it. */}

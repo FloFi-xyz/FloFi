@@ -28,10 +28,11 @@ import type { AutomationStore } from '../automations/store.ts';
 import { verifyAssertion } from '../passkeys/webauthn.ts';
 import { ADAPTERS, delegationOf, passkeyAnchor } from './adapters.ts';
 import { resolveAuthorityGraph, type StepBinding } from './authority.ts';
+import { compileScope, isWorkflowScope, workflowGrantBindings } from './workflow-grants.ts';
 import { digestBytes } from './canonical.ts';
 import type { ChainTransport } from './chains.ts';
 import type { DelegationConfig } from './config.ts';
-import { driverFor, type SignerUser, type StepContext, type StepDriver } from './drivers.ts';
+import { driverFor, fillStaleNonces, type SignerUser, type StepContext, type StepDriver } from './drivers.ts';
 import { authorizationDigest, credentialCommitments, executionSpend, manifestHash, manifestProblem, sameArtifact, type DelegatedAuthorizationManifest } from './manifest.ts';
 import type { DelegationStore, ExecutionRecord, GrantRecord, RevisionRecord, StepRecord } from './pg-store.ts';
 import { periodStarts, reservationViolation, stepPolicyViolation, type StepPlan } from './policy.ts';
@@ -56,7 +57,9 @@ export type ExecutorDeps = {
   readonly workflowRuns?: { readonly byId: (runId: string) => Promise<DelegatedRunSource | null> };
 };
 /** The source's own facts every pass re-checks against the signed revision (the workflow it binds, its strategy and owner). */
-type SourceFacts = { readonly owner: Owner; readonly strategy: unknown; readonly workflowHash: string | null };
+type SourceFacts = { readonly owner: Owner; readonly strategy: unknown; readonly workflowHash: string | null;
+  /** BUILD-FLOFI-UNIVERSAL-SINGLE-AUTH-MAINNET-001: a run source's id (workflow grants must pin exactly this run). */
+  readonly workflowRunId?: string };
 export type ExecutionOutcome = { readonly executionId: string | null; readonly state: ExecutionState | 'SKIPPED'; readonly code: string | null; readonly retryMs: number | null };
 type Chain = { readonly requirement: WorkflowRequirement; readonly manifest: DelegatedAuthorizationManifest; readonly bindings: readonly StepBinding[];
   readonly grants: ReadonlyMap<string, GrantRecord> };
@@ -72,9 +75,26 @@ const planOf = (stored: Readonly<Record<string, unknown>> | null): StepPlan | nu
 };
 
 /** The whole authority chain of one execution (see the module comment). Read-only except grant re-verification bookkeeping. */
-async function verifyAuthorityChain(deps: ExecutorDeps, source: SourceFacts, revision: RevisionRecord): Promise<{ ok: true; chain: Chain } | { ok: false; code: string }> {
+/** Calls this execution has already prepared on each grant (counted in the grant's `callsUsed` when its submission was prepared). */
+export function ownCallsByGrant(steps: readonly Pick<StepRecord, 'grantId' | 'submission'>[]): ReadonlyMap<string, number> {
+  const used = new Map<string, number>();
+  for (const s of steps) {
+    const txs = (s.submission as { txs?: unknown } | null)?.txs;
+    if (Array.isArray(txs)) used.set(s.grantId, (used.get(s.grantId) ?? 0) + txs.length);
+  }
+  return used;
+}
+/** Simulation failures that say nothing about the step (transport, reorg, rate limit): the pass retries instead of stopping the run. */
+export const transientSimulation = (code: string): boolean => code === 'DELEGATION_RPC_UNAVAILABLE' || code === 'SIGNER_KMS_UNAVAILABLE' || /_REORG$/.test(code)
+  || /RATE_LIMITED$/.test(code);
+/** BUILD-FLOFI-UNIVERSAL-SINGLE-AUTH-MAINNET-001: refuse to sign a step this close to its grant's expiry (a two-call step could straddle it). */
+export const GRANT_EXPIRY_MARGIN_MS = 5 * 60_000;
+async function verifyAuthorityChain(deps: ExecutorDeps, source: SourceFacts, revision: RevisionRecord, executionId: string | null = null): Promise<{ ok: true; chain: Chain } | { ok: false; code: string }> {
   const now = deps.now(), m = revision.manifest;
-  if (revision.state !== 'ACTIVE' || !revision.envelope || !revision.assertion || !revision.passkeyId) return { ok: false, code: 'AUTHORIZATION_NOT_ACTIVE' };
+  if (revision.state !== 'ACTIVE' || !revision.envelope || !revision.assertion) return { ok: false, code: 'AUTHORIZATION_NOT_ACTIVE' };
+  // BUILD-FLOFI-UNIVERSAL-SINGLE-AUTH-MAINNET-001: a run authorized by wallet-signed workflow grants (no passkey) has its own chain check.
+  if (revision.envelope.kind === 'WALLET_WORKFLOW') return verifyWalletWorkflowChain(deps, source, revision, now);
+  if (!revision.passkeyId) return { ok: false, code: 'AUTHORIZATION_NOT_ACTIVE' };
   if (source.workflowHash === null || source.workflowHash !== revision.workflowHash) return { ok: false, code: 'AUTHORIZATION_WORKFLOW_MISMATCH' };
   const req = workflowRequirement(source.strategy, revision.workflowHash);
   if (!req.ok) return { ok: false, code: req.code === 'STRATEGY_WORKFLOW_HASH_MISMATCH' ? 'AUTHORIZATION_WORKFLOW_MISMATCH' : req.code };
@@ -104,13 +124,66 @@ async function verifyAuthorityChain(deps: ExecutorDeps, source: SourceFacts, rev
     if (!anchoredBy(g, anchor)) return { ok: false, code: 'GRANT_ANCHOR_MISMATCH' };
     grants.set(g.grantId, g);
   }
-  const graph = resolveAuthorityGraph(req.value, [...grants.values()], deps.config.mode, now.getTime(), m.credentials);
+  // BUILD-FLOFI-SINGLE-AUTH-WORKFLOW-UX-001: re-verification after a step was submitted must not count this execution's own calls twice
+  // (they are already in `callsUsed`), or a grant sized exactly for the workflow would stop it after its first step.
+  const own = executionId ? ownCallsByGrant(await deps.store.steps(executionId)) : new Map<string, number>();
+  const graph = resolveAuthorityGraph(req.value, [...grants.values()].map(g => ({ ...g, callsUsed: Math.max(0, g.callsUsed - (own.get(g.grantId) ?? 0)) })),
+    deps.config.mode, now.getTime(), m.credentials, deps.config.mainnetChains);
   if (!graph.ok) return { ok: false, code: graph.failures[0]!.code };
   // Read-only on-chain re-verification of every grant before anything is reserved (external revocation, expiry, account change).
   for (const g of grants.values()) {
     const transport = deps.transport(g.chain);
     if (!transport) return { ok: false, code: 'DELEGATION_CHAIN_UNAVAILABLE' };
     const state = await ADAPTERS[g.mechanism].reconcileAuthorityState(g, transport, now);
+    // A failed chain read says nothing about the grant: retry, never demote it.
+    if (state.state === 'UNCERTAIN' && state.verification.reason === 'CHAIN_READ_FAILED') return { ok: false, code: 'DELEGATION_RPC_UNAVAILABLE' };
+    if (state.state !== 'ACTIVE') { await deps.store.reverify(g.grantId, state, now).catch(() => false); return { ok: false, code: `CREDENTIAL_${state.state}` }; }
+  }
+  return { ok: true, chain: { requirement: req.value, manifest: m, bindings: graph.bindings, grants } };
+}
+/**
+ * BUILD-FLOFI-UNIVERSAL-SINGLE-AUTH-MAINNET-001: the authority chain of a run authorized by wallet-signed workflow grants. The revision binds
+ * the workflow and manifest (envelope digest); every grant the manifest names is this owner's, pins exactly this run, carries a delegation
+ * that recompiles from its stored scope byte for byte, is signed by the run's wallet, and expresses exactly the workflow
+ * (`workflowGrantBindings` → `workflowScopeProblem`); then every grant re-verifies read-only on its chain (not disabled, not expired, the
+ * account still the MetaMask smart account).
+ */
+async function verifyWalletWorkflowChain(deps: ExecutorDeps, source: SourceFacts, revision: RevisionRecord, now: Date): Promise<{ ok: true; chain: Chain } | { ok: false; code: string }> {
+  const m = revision.manifest, envelope = revision.envelope!;
+  if (source.workflowHash === null || source.workflowHash !== revision.workflowHash || !source.workflowRunId) return { ok: false, code: 'AUTHORIZATION_WORKFLOW_MISMATCH' };
+  const req = workflowRequirement(source.strategy, revision.workflowHash);
+  if (!req.ok) return { ok: false, code: req.code === 'STRATEGY_WORKFLOW_HASH_MISMATCH' ? 'AUTHORIZATION_WORKFLOW_MISMATCH' : req.code };
+  if (manifestHash(m) !== revision.manifestHash || m.revision !== revision.revision || m.authorizationId !== revision.authorizationId) return { ok: false, code: 'MANIFEST_INTEGRITY' };
+  const problem = manifestProblem(m, req.value);
+  if (problem) return { ok: false, code: problem };
+  if (m.owner !== `${source.owner.namespace}:${source.owner.address}`) return { ok: false, code: 'AUTHORIZATION_OWNER_MISMATCH' };
+  if (authorizationDigest(envelope) !== revision.envelopeDigest || envelope.manifestHash !== revision.manifestHash || envelope.workflowHash !== revision.workflowHash
+    || envelope.environment.tenant !== deps.config.tenantId || envelope.owner !== m.owner || !sameArtifact(envelope.credentials, credentialCommitments(m))
+    || (revision.assertion as { kind?: unknown }).kind !== 'WALLET_WORKFLOW') return { ok: false, code: 'AUTHORIZATION_ENVELOPE_MISMATCH' };
+  const grants = new Map<string, GrantRecord>();
+  for (const c of m.credentials) {
+    const g = grants.get(c.grantId) ?? await deps.store.grantById(c.grantId);
+    if (!g || g.owner.namespace !== source.owner.namespace || g.owner.address !== source.owner.address) return { ok: false, code: 'CREDENTIAL_NOT_FOUND' };
+    if (g.commitment !== c.grantCommitment || g.walletAddress !== c.walletAddress) return { ok: false, code: 'GRANT_COMMITMENT_MISMATCH' };
+    if (!isWorkflowScope(g.scope) || g.scope.workflowRunId !== source.workflowRunId || g.passkeyId !== null) return { ok: false, code: 'WORKFLOW_GRANT_SCOPE_INVALID' };
+    try {
+      const d = delegationOf(g.grantPayload?.delegation), chainId = Number(g.chain.slice('eip155:'.length));
+      const compiled = compileScope(g.scope, g.walletAddress, g.sessionAddress, d.salt);
+      if (erc7710.delegationHash(compiled) !== g.commitment || erc7710.delegationHash(d) !== g.commitment
+        || erc7710.recoverDigestSigner(erc7710.delegationDigest(chainId, d), d.signature) !== g.walletAddress) return { ok: false, code: 'GRANT_COMMITMENT_MISMATCH' };
+    } catch { return { ok: false, code: 'GRANT_COMMITMENT_MISMATCH' }; }
+    grants.set(g.grantId, g);
+  }
+  const graph = workflowGrantBindings(req.value, [...grants.values()], deps.config.mode, deps.config.mainnetChains, now.getTime());
+  if (!graph.ok) return { ok: false, code: graph.code };
+  // The stored manifest pinned each step to its grant: the graph must agree with it exactly (never a re-choice).
+  if (graph.bindings.some(b => !m.credentials.some(c => c.stepIndex === b.stepIndex && c.grantId === b.grantId))) return { ok: false, code: 'GRANT_COMMITMENT_MISMATCH' };
+  for (const g of grants.values()) {
+    const transport = deps.transport(g.chain);
+    if (!transport) return { ok: false, code: 'DELEGATION_CHAIN_UNAVAILABLE' };
+    const state = await ADAPTERS[g.mechanism].reconcileAuthorityState(g, transport, now);
+    // A failed chain read says nothing about the grant: retry, never demote it.
+    if (state.state === 'UNCERTAIN' && state.verification.reason === 'CHAIN_READ_FAILED') return { ok: false, code: 'DELEGATION_RPC_UNAVAILABLE' };
     if (state.state !== 'ACTIVE') { await deps.store.reverify(g.grantId, state, now).catch(() => false); return { ok: false, code: `CREDENTIAL_${state.state}` }; }
   }
   return { ok: true, chain: { requirement: req.value, manifest: m, bindings: graph.bindings, grants } };
@@ -164,7 +237,7 @@ export async function executeWorkflowRun(deps: ExecutorDeps, runId: string, auth
   if (!revision) return { executionId: null, state: 'SKIPPED', code: 'AUTHORIZATION_NOT_FOUND', retryMs: null };
   const e = await deps.store.ensureRunExecution({ executionId: deps.newId('dex'), authorizationId, revision: revisionNumber, owner: run.owner, workflowRunId: runId,
     workflowHash: revision.workflowHash, manifestHash: revision.manifestHash, stepCount: revision.manifest.workflow.stepCount }, deps.now());
-  return drive(deps, e, revision, { owner: run.owner, strategy: run.strategy, workflowHash: run.workflowHash });
+  return drive(deps, e, revision, { owner: run.owner, strategy: run.strategy, workflowHash: run.workflowHash, workflowRunId: runId });
 }
 
 async function drive(deps: ExecutorDeps, start: ExecutionRecord, revision: RevisionRecord, source: SourceFacts): Promise<ExecutionOutcome> {
@@ -180,7 +253,7 @@ async function drive(deps: ExecutorDeps, start: ExecutionRecord, revision: Revis
   if (['SETTLED', 'BLOCKED', 'FAILED', 'HALTED'].includes(e.state)) return outcome();
 
   // Every pass re-establishes the authority chain (nothing is cached across passes or processes).
-  const verified = await verifyAuthorityChain(deps, source, revision);
+  const verified = await verifyAuthorityChain(deps, source, revision, e.executionId);
   if (e.state === 'QUEUED') {
     if (!verified.ok || revision.revision !== e.revision) { await move('BLOCKED', { code: verified.ok ? 'AUTHORIZATION_REVISION_CHANGED' : verified.code }); return outcome(); }
     if (!await move('AUTHORITY_VERIFIED')) return outcome(PENDING_RETRY_MS);
@@ -243,13 +316,19 @@ async function run(deps: ExecutorDeps, start: ExecutionRecord, verified: Awaited
     const binding = bound?.ok ? bound.binding : null;
     // Before anything new is submitted the whole chain must still verify (revocation, expiry, edits, external disable).
     if (['PENDING', 'SIMULATED', 'POLICY_VERIFIED'].includes(step.state)) {
+      if (!verified.ok && transientSimulation(verified.code)) { log('delegation.verification_retry', { step: k, code: verified.code }); return outcome(PENDING_RETRY_MS); }
       if (!verified.ok || !pinned) return stopBefore(k, verified.ok ? 'STEP_BINDING_MISSING' : verified.code);
       if (!bound?.ok || !binding) return stopBefore(k, bound && !bound.ok ? bound.code : 'STEP_BINDING_MISSING');
-      const ctx: StepContext = { step: bound.step, binding, grant, transport, now: deps.now };
+      const ctx: StepContext = { step: bound.step, binding, grant, transport, now: deps.now, mainnet: deps.config.mainnetChains };
       const driver = driverFor(ctx, deps.config.mode);
       if (!driver || (deps.drivers && !deps.drivers.includes(driver))) return stopBefore(k, 'DELEGATED_STEP_DRIVER_UNAVAILABLE');
       let simulated: Awaited<ReturnType<StepDriver['simulate']>>;
-      try { simulated = await driver.simulate(ctx); } catch (cause) { return stopBefore(k, codeOf(cause, 'SIMULATION_FAILED')); }
+      try { simulated = await driver.simulate(ctx); } catch (cause) {
+        const code = codeOf(cause, 'SIMULATION_FAILED');
+        // A transport failure or a reorg says nothing about the step: look again (the authorization's own expiry still bounds the run).
+        if (transientSimulation(code)) { log('delegation.simulation_retry', { step: k, code }); return outcome(PENDING_RETRY_MS); }
+        return stopBefore(k, code);
+      }
       const stored = bigintJson({ plan: simulated.plan, prepared: simulated.prepared, driver: driver.id });
       const sim = await deps.store.stepTransition(e.executionId, k, ['PENDING', 'SIMULATED', 'POLICY_VERIFIED'], 'SIMULATED', { plan: stored });
       if (!sim) return outcome(PENDING_RETRY_MS);
@@ -258,14 +337,24 @@ async function run(deps: ExecutorDeps, start: ExecutionRecord, verified: Awaited
       if (violation) return stopBefore(k, violation);
       if (!await deps.store.stepTransition(e.executionId, k, ['SIMULATED'], 'POLICY_VERIFIED', {})) return outcome(PENDING_RETRY_MS);
       let signed: Awaited<ReturnType<StepDriver['sign']>>;
-      try { signed = await driver.sign(ctx, simulated.prepared, deps.signer); } catch (cause) { return stopBefore(k, codeOf(cause, 'SIGNING_FAILED')); }
+      if (grant.expiresAt.getTime() - deps.now().getTime() < GRANT_EXPIRY_MARGIN_MS) return stopBefore(k, 'CREDENTIAL_EXPIRING');
+      // The executor address may serve several grants (one KMS key): sign from the highest nonce any of them prepared on this chain.
+      const shared = grant.mechanism === 'EVM_ERC7710_METAMASK_V1_3' ? await deps.store.sessionNextNonce(grant.chain, grant.sessionAddress) : null;
+      const signingCtx: StepContext = shared !== null && (grant.evmNextNonce === null || shared > grant.evmNextNonce) ? { ...ctx, grant: { ...grant, evmNextNonce: shared } } : ctx;
+      try { signed = await driver.sign(signingCtx, simulated.prepared, deps.signer); } catch (cause) {
+        const code = codeOf(cause, 'SIGNING_FAILED');
+        if (transientSimulation(code)) { log('delegation.signing_retry', { step: k, code }); return outcome(PENDING_RETRY_MS); }
+        return stopBefore(k, code);
+      }
       const prepared = await deps.store.prepareSubmission(e.executionId, k, bigintJson({ ...signed.submission, driver: driver.id }), { calls: signed.calls, nextNonce: signed.nextNonce },
         deps.now());
+      // Another execution used these nonces first: nothing was persisted or sent, so the next pass signs again at fresh nonces.
+      if (!prepared.ok && prepared.code === 'SUBMISSION_NONCE_CONFLICT') return outcome(PENDING_RETRY_MS);
       if (!prepared.ok) return stopBefore(k, prepared.code);
       step = prepared.step;
       log('delegation.submission_prepared', { step: k });
     }
-    const ctx: StepContext | null = bound?.ok && binding ? { step: bound.step, binding, grant, transport, now: deps.now } : null;
+    const ctx: StepContext | null = bound?.ok && binding ? { step: bound.step, binding, grant, transport, now: deps.now, mainnet: deps.config.mainnetChains } : null;
     // After a submission is prepared, recovery needs only the persisted plan and submission (authority changes can no longer undo it).
     const recoveryCtx = ctx ?? recoveryContext(step, grant, transport, deps);
     const driver = recoveryCtx ? driverFor(recoveryCtx, deps.config.mode) : null;
@@ -274,8 +363,14 @@ async function run(deps: ExecutorDeps, start: ExecutionRecord, verified: Awaited
       let broadcastFailure: unknown = null;
       try { await driver.broadcast(recoveryCtx, step.submission!); } catch (cause) { broadcastFailure = cause; }
       if (broadcastFailure !== null) {
-        await deps.store.stepTransition(e.executionId, k, ['SUBMISSION_PREPARED'], 'UNCERTAIN', { code: codeOf(broadcastFailure, 'SUBMISSION_BROADCAST_FAILED') });
-        await enterUncertain(); return outcome(PENDING_RETRY_MS);
+        const code = codeOf(broadcastFailure, 'SUBMISSION_BROADCAST_FAILED');
+        await deps.store.stepTransition(e.executionId, k, ['SUBMISSION_PREPARED'], 'UNCERTAIN', { code });
+        // BUILD-FLOFI-SINGLE-AUTH-WORKFLOW-UX-001: signed bytes past their send window are never sent; the owner's attention is required.
+        // BUILD-FLOFI-UNIVERSAL-SINGLE-AUTH-MAINNET-001: the executor address is shared, so the never-sent nonces are filled with the executor's
+        // own zero-value self-transactions; once one is mined the stale bytes can never execute, and reconciliation reports the step not executed.
+        if (code === 'SUBMISSION_STALE') await fillStaleNonces(grant, transport, step.submission!, deps.signer, deps.log).catch(cause => log('delegation.nonce_fill_failed', { step: k,
+          code: codeOf(cause, 'NONCE_FILL_FAILED') }));
+        await enterUncertain(code === 'SUBMISSION_STALE'); return outcome(PENDING_RETRY_MS);
       }
       const submitted = await deps.store.stepTransition(e.executionId, k, ['SUBMISSION_PREPARED'], 'SUBMITTED', {});
       if (!submitted) return outcome(PENDING_RETRY_MS);
@@ -292,7 +387,10 @@ async function run(deps: ExecutorDeps, start: ExecutionRecord, verified: Awaited
       if (r.status === 'PENDING') {
         // Not final yet (or dropped by a node): re-broadcast exactly the persisted bytes — idempotent, never a new transaction — and keep
         // the reservation until reconciliation decides.
-        await driver.broadcast(recoveryCtx, step.submission!).catch(() => undefined);
+        const resent = await driver.broadcast(recoveryCtx, step.submission!).then(() => null, (cause: unknown) => codeOf(cause, 'SUBMISSION_BROADCAST_FAILED'));
+        // A never-mined submission past its send window is never sent again: its nonces are filled on every pass until reconciliation sees them used.
+        if (resent === 'SUBMISSION_STALE') await fillStaleNonces(grant, transport, step.submission!, deps.signer, deps.log).catch(cause => log('delegation.nonce_fill_failed', { step: k,
+          code: codeOf(cause, 'NONCE_FILL_FAILED') }));
         return outcome(PENDING_RETRY_MS);
       }
       const reconciliation = bigintJson({ status: r.status, spent: r.spent, received: r.received, evidence: r.evidence });
@@ -367,7 +465,15 @@ function boundStep(requirement: WorkflowRequirement, k: number, pinned: StepBind
     // Missing exact spend facts reserve the approved cap conservatively.
     return sum + (facts.length ? spent : BigInt(prior.cap));
   }, 0n);
-  const used = boundAmount(b.cap, received > consumed ? received - consumed : 0n);
+  const available = received > consumed ? received - consumed : 0n;
+  // BUILD-FLOFI-UNIVERSAL-SINGLE-AUTH-MAINNET-001: a workflow grant fixed this step's amount when the owner signed (the producer's on-chain
+  // guaranteed minimum, within the cap): it is never narrowed; the producer must have delivered at least that much.
+  if (pinned.exact) {
+    const fixed = pinned.need.kind === 'EVM_UNISWAP_V3_EXACT_INPUT_SINGLE' ? pinned.need.amountIn : 'amount' in pinned.need ? pinned.need.amount : 0n;
+    if (fixed <= 0n || available < fixed) return { ok: false, code: 'WORKFLOW_BINDING_INSUFFICIENT_RECEIVED' };
+    return { ok: true, step: narrowedStep(requirement, k, fixed), binding: pinned };
+  }
+  const used = boundAmount(b.cap, available);
   if (used <= 0n) return { ok: false, code: 'WORKFLOW_BINDING_NOTHING_RECEIVED' };
   const need = pinned.need.kind === 'EVM_UNISWAP_V3_EXACT_INPUT_SINGLE' ? { ...pinned.need, amountIn: used } : { ...pinned.need, amount: used };
   return { ok: true, step: narrowedStep(requirement, k, used), binding: { ...pinned, need } };
@@ -383,10 +489,18 @@ function recoveryContext(step: StepRecord, grant: GrantRecord, transport: ChainT
   if (scope.mechanism === 'EVM_ERC7710_METAMASK_V1_3') {
     const calls = (prepared?.calls ?? []) as { target: string; data: string }[];
     const swap = calls.find(c => c.data.startsWith(erc7710.EXACT_INPUT_SINGLE_METHOD));
-    if (!swap) return null;
-    const words = swap.data.slice(10);
-    need = { kind: 'EVM_UNISWAP_V3_EXACT_INPUT_SINGLE', router: swap.target, tokenIn: '0x' + words.slice(24, 64), tokenOut: '0x' + words.slice(88, 128),
-      amountIn: BigInt('0x' + words.slice(256, 320)) };
+    // BUILD-FLOFI-SINGLE-AUTH-WORKFLOW-UX-001: an Aave step is recovered from its own persisted Pool call (asset @4, amount @36).
+    const aave = calls.find(c => c.data.startsWith(erc7710.AAVE_V3_SUPPLY_METHOD) || c.data.startsWith(erc7710.AAVE_V3_BORROW_METHOD));
+    if (!swap && !aave) return null;
+    if (aave) {
+      const words = aave.data.slice(10);
+      need = { kind: aave.data.startsWith(erc7710.AAVE_V3_SUPPLY_METHOD) ? 'EVM_AAVE_V3_SUPPLY' : 'EVM_AAVE_V3_BORROW', pool: aave.target.toLowerCase(),
+        asset: '0x' + words.slice(24, 64), amount: BigInt('0x' + words.slice(64, 128)) };
+    } else {
+      const words = swap!.data.slice(10);
+      need = { kind: 'EVM_UNISWAP_V3_EXACT_INPUT_SINGLE', router: swap!.target, tokenIn: '0x' + words.slice(24, 64), tokenOut: '0x' + words.slice(88, 128),
+        amountIn: BigInt('0x' + words.slice(256, 320)) };
+    }
   } else {
     const mint = plan.spend[0]?.asset.split('/token:')[1];
     if (!mint) return null;
@@ -394,7 +508,7 @@ function recoveryContext(step: StepRecord, grant: GrantRecord, transport: ChainT
     need = { kind: 'SOLANA_SPL_SPEND', mint, decimals: account?.decimals ?? 0, amount: plan.spend[0]!.amount, programs: plan.targets.filter(t => t !== mint) };
   }
   const output = plan.minimumReceive[0]?.asset.split(/\/(?:erc20|token):/)[1] ?? '';
-  return { grant, transport, now: deps.now,
+  return { grant, transport, now: deps.now, mainnet: deps.config.mainnetChains,
     binding: { stepIndex: step.stepIndex, credentialId: step.credentialId, grantId: step.grantId, mechanism: step.mechanism, chain: step.chain,
       walletAddress: grant.walletAddress, grantCommitment: step.grantCommitment, need },
     step: { index: step.stepIndex, chain: step.chain, outputs: [{ chain: step.chain, address: output, decimals: 0, symbol: '' }], slippageBps: plan.slippageBps,

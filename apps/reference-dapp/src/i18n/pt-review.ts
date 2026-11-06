@@ -50,6 +50,9 @@ export const portugueseReview: Readonly<Record<string, string>> = {
   'This request is': 'Este pedido está', '. Ask for a new proposal.': '. Peça uma nova proposta.',
   'FloFi cannot hand this proposal to a wallet on this deployment now (': 'FloFi não pode enviar esta proposta à carteira nesta instalação agora (',
   'Another wallet already opened this proposal. Ask for a new proposal.': 'Outra carteira já abriu esta proposta. Peça uma nova proposta.',
+  'FloFi did not answer in time. Your authorization may already be active: this page checks the run and finishes on its own, without asking your wallet again.':
+    'O FloFi não respondeu a tempo. Sua autorização pode já estar ativa: esta página verifica a execução e conclui sozinha, sem pedir à sua carteira de novo.',
+  'This authorization is being prepared in another window. Try again in a moment.': 'Esta autorização está sendo preparada em outra janela. Tente novamente em instantes.',
   '1. Prove which wallet you are': '1. Verificar a titularidade da carteira', 'This signs a sign-in message only. It authorizes no transaction and moves no funds.': 'Assina apenas uma mensagem de início de sessão. Não autoriza transações nem move fundos.',
   '2. Load the proposal into FloFi': '2. Carregar a proposta no FloFi', 'Share the status and evidence of runs started from this proposal with': 'Partilhar o estado e as evidências das execuções iniciadas com esta proposta com',
   'Load proposal': 'Carregar proposta', '3. Add it to your workflow': '3. Adicionar ao seu fluxo', 'Add to my workflow': 'Adicionar ao meu fluxo', 'Ready for your review.': 'Pronto para revisão.',

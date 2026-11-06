@@ -5,11 +5,13 @@
  * handler, sweep) is `executor-runtime.ts`, which owner operations never import.
  *
  * Signer capabilities are split by role: owner operations receive only `SignerAdmin` (create a session key for a new grant, read its address,
- * destroy it on revocation) and can never sign; only the executor receives `SignerUser`. A production provider (KMS/HSM with that split
- * enforced by key policy) does not exist yet — `none` is the production default and delegated execution reports itself unavailable.
+ * destroy it on revocation) and can never sign; only the executor receives `SignerUser`. In production the provider is AWS KMS
+ * (BUILD-FLOFI-UNIVERSAL-SINGLE-AUTH-MAINNET-001), where the same split is also enforced by IAM: the API's credentials allow only
+ * kms:GetPublicKey and the worker's kms:Sign on the one key ARN. `none` remains the default.
  */
 import type { Database } from '@defi-workflow-engine/cloud-runtime';
-import { localDisposableSignerProvider, memorySignerProvider, type DelegatedSignerProvider } from '@defi-workflow-engine/reference-executor';
+import { awsCredentialsFromEnv, awsKmsSignerProvider, localDisposableSignerProvider, memorySignerProvider, type AwsCredentials,
+  type DelegatedSignerProvider } from '@defi-workflow-engine/reference-executor';
 import { DELEGATION_EXECUTE_KIND } from '../automations/pg-store.ts';
 import { DELEGATION_EXECUTE_RUN_KIND } from './run-source.ts';
 import { guarded, httpRpc, type ChainTransport, type TransportPurpose } from './chains.ts';
@@ -20,17 +22,29 @@ type Rpc = (method: string, params: readonly unknown[]) => Promise<unknown>;
 export type SignerAdmin = Pick<DelegatedSignerProvider, 'id' | 'create' | 'address' | 'destroy'>;
 export type SignerUser = Pick<DelegatedSignerProvider, 'signEvmDigest' | 'signSolanaMessage'>;
 export type DelegationHost = { readonly db: Database; readonly tenantId: string };
-export type DelegationSeams = { readonly rpc?: (chain: string) => Rpc | null; readonly fetch?: typeof fetch; readonly signer?: DelegatedSignerProvider; readonly now?: () => Date };
+export type DelegationSeams = { readonly rpc?: (chain: string) => Rpc | null; readonly fetch?: typeof fetch; readonly signer?: DelegatedSignerProvider; readonly now?: () => Date;
+  /** The AWS credentials of the KMS provider (default: the standard AWS variables of this process, read per request). */
+  readonly awsCredentials?: () => AwsCredentials };
 export const DELEGATION_WORK_KINDS = Object.freeze([DELEGATION_EXECUTE_KIND, DELEGATION_EXECUTE_RUN_KIND] as const);
 
 let memory: DelegatedSignerProvider | null = null;
+const kms = new Map<string, DelegatedSignerProvider>();
 /** This process's signer provider, or null (`none`). The memory provider is one per process (loopback tests on a single server). */
 export function signerProvider(config: DelegationConfig, seams: DelegationSeams = {}): DelegatedSignerProvider | null {
   if (seams.signer) return seams.signer;
   if (config.signer.kind === 'memory') return memory ??= memorySignerProvider();
   if (config.signer.kind === 'local-disposable') return localDisposableSignerProvider(config.signer.directory);
+  if (config.signer.kind === 'aws-kms') {
+    const { region, evmKeyArn } = config.signer, credentials = seams.awsCredentials ?? (() => awsCredentialsFromEnv(process.env));
+    if (seams.awsCredentials || seams.fetch) return awsKmsSignerProvider({ region, evmKeyArn, credentials, ...(seams.fetch ? { fetch: seams.fetch } : {}), audit: kmsAudit });
+    let provider = kms.get(evmKeyArn);
+    if (!provider) kms.set(evmKeyArn, provider = awsKmsSignerProvider({ region, evmKeyArn, credentials, audit: kmsAudit }));
+    return provider;
+  }
   return null;
 }
+/** One structured line per KMS signature (digest, executor address, key ARN; never a credential), alongside CloudTrail's own record. */
+const kmsAudit = (event: object) => { console.info(JSON.stringify(event)); };
 export const signerAdmin = (provider: DelegatedSignerProvider): SignerAdmin => ({ id: provider.id, create: provider.create, address: provider.address, destroy: provider.destroy });
 export const signerUser = (provider: DelegatedSignerProvider): SignerUser => ({ signEvmDigest: provider.signEvmDigest, signSolanaMessage: provider.signSolanaMessage });
 

@@ -22,7 +22,8 @@ const definitions = [
     'cross-chain-liquidity.spec.ts', 'execution-capabilities.spec.ts', 'interface-honesty.spec.ts', 'mock-artifact-chain.spec.ts',
     'network-isolation.spec.ts', 'public-testnet.spec.ts', 'robinhood-network.spec.ts', 'swap-authoring.spec.ts', 'visual-shell.spec.ts', 'credentials.spec.ts',
     'build-fix-ux.spec.ts', 'beta-ui.spec.ts', 'site.spec.ts', 'build-entry.spec.ts', 'privacy-notice.spec.ts', 'editor-redesign.spec.ts',
-    'portfolio-ux004.spec.ts', 'dashboard-productization.spec.ts', 'dashboard-theme-states.spec.ts', 'dashboard-run-details.spec.ts'], {}],
+    'portfolio-ux004.spec.ts', 'dashboard-productization.spec.ts', 'dashboard-theme-states.spec.ts', 'dashboard-run-details.spec.ts',
+    'simulate-canvas-controls.spec.ts'], {}],
   ['review-execute-recovery-components', ['simulate-review-acceptance.spec.ts', 'execute-product-workspace.spec.ts', 'execute-workflow.spec.ts'], {}],
   // Direct chat signing and optional Canvas, with no application server, RPC, wallet or database; requests are intercepted by the spec.
   ['solana-transfer-ux', ['--config', 'playwright.transfer-ux.config.ts'], {}],
@@ -110,7 +111,9 @@ const definitions = [
     FLOFI_SWAP_READ_E2E: 'MOCKED_LOOPBACK_ONLY', FLOFI_SWAP_EXECUTION_E2E: 'MOCKED_LOOPBACK_ONLY', TEST_DATABASE_URL: process.env.TEST_DATABASE_URL ?? 'postgres://flofi@127.0.0.1:5432/postgres' }],
   // BUILD-CHAT-E2E-001: a two-step workflow from an MCP request, one approval, each step signed on /approve after the previous one reconciled,
   // on the same MCP harness and synthetic loopback swap RPC with workflow runs enabled (confirm each step; no delegated signer exists here).
-  ['approve-workflow-run', ['approve-workflow-run.spec.ts'], { GRYLOO_MCP_E2E: 'EMBEDDED_LOOPBACK_ONLY', GRYLOO_CLOUD_RUNTIME_E2E: 'EMBEDDED_LOOPBACK_ONLY',
+  // BUILD-FLOFI-UNIVERSAL-SINGLE-AUTH-MAINNET-001: the same harness also certifies the Editor's "Run workflow" (a simulated multi-step Canvas
+  // workflow of a signed-in account starts that same run on /approve; a passive wallet is never asked for anything).
+  ['approve-workflow-run', ['approve-workflow-run.spec.ts', 'editor-workflow-run.spec.ts'], { GRYLOO_MCP_E2E: 'EMBEDDED_LOOPBACK_ONLY', GRYLOO_CLOUD_RUNTIME_E2E: 'EMBEDDED_LOOPBACK_ONLY',
     FLOFI_SWAP_READ_E2E: 'MOCKED_LOOPBACK_ONLY', FLOFI_SWAP_EXECUTION_E2E: 'MOCKED_LOOPBACK_ONLY', FLOFI_WORKFLOW_RUNS: 'enabled',
     TEST_DATABASE_URL: process.env.TEST_DATABASE_URL ?? 'postgres://flofi@127.0.0.1:5432/postgres' }],
   // BUILD-CROSSCHAIN-UNIVERSAL-001: the universal Cross-chain Router (Solana ⇄ EVM mainnets, Canvas card, chat, Review, one owner signature, verified

@@ -42,7 +42,8 @@ const store = (tenant = 'default'): HandoffStore => {
 const schemes: Record<RequesterScope['kind'], ApprovalLinkScheme> = { MCP_ACCOUNT: approvalLinkScheme('flofi_hs_', randomBytes(32), ['MCP_ACCOUNT']),
   DEVELOPER_PROJECT: approvalLinkScheme('flofi_dhs_', randomBytes(32), ['DEVELOPER_PROJECT']),
   CHANNEL_CONVERSATION: approvalLinkScheme('flofi_chs_', randomBytes(32), ['CHANNEL_CONVERSATION']),
-  AUTOMATION_RULE: approvalLinkScheme('flofi_auhs_', randomBytes(32), ['AUTOMATION_RULE']) };
+  AUTOMATION_RULE: approvalLinkScheme('flofi_auhs_', randomBytes(32), ['AUTOMATION_RULE']),
+  EDITOR_SESSION: approvalLinkScheme('flofi_edhs_', randomBytes(32), ['EDITOR_SESSION']) };
 const BRIDGE = { action: 'bridge', sourceNetwork: 'base-sepolia', destinationNetwork: 'arbitrum-sepolia', asset: 'USDC', amount: '5' };
 const OPEN: HandoffCreateRules = { maxPending: 10, supersedeSameWorkflow: false };
 const evm = (n: number): WalletRef => ({ namespace: 'eip155', address: '0x' + String(n).repeat(40).slice(0, 40) });
@@ -59,16 +60,19 @@ function handoff(requester: RequesterScope, strategy: Record<string, unknown> = 
 }
 const MCP: RequesterScope = { kind: 'MCP_ACCOUNT', ref: ACCOUNT }, PROJECT: RequesterScope = { kind: 'DEVELOPER_PROJECT', ref: `${PROJECT_ID}.sandbox` };
 const CONVERSATION: RequesterScope = { kind: 'CHANNEL_CONVERSATION', ref: 'chc_example' };
+// BUILD-FLOFI-UNIVERSAL-SINGLE-AUTH-MAINNET-001 (migration 0022): the signed-in FloFi account running its own Editor workflow.
+const EDITOR: RequesterScope = { kind: 'EDITOR_SESSION', ref: 'acct_' + 'e'.repeat(32) };
 
 describe('BUILD-DEVELOPER-001 generic approval-handoff persistence', () => {
   it('stores every requester kind in one model: MCP keeps its account and grant, the others carry only their own identity', async () => {
-    const created = [MCP, PROJECT, CONVERSATION].map(r => ({ r, h: handoff(r, { ...BRIDGE, amount: '1.1' }, r.kind === 'CHANNEL_CONVERSATION' ? { intendedWallet: evm(1) } : {}) }));
+    const created = [MCP, PROJECT, CONVERSATION, EDITOR].map(r => ({ r, h: handoff(r, { ...BRIDGE, amount: '1.1' }, r.kind === 'CHANNEL_CONVERSATION' ? { intendedWallet: evm(1) } : {}) }));
     for (const { h } of created) expect(await store().create(h.value, new Date(), OPEN)).toEqual({ ok: true });
     const rows = (await t.db.query(`SELECT handoff_id, requester_kind, requester_id, requester_ref, requester_context, account_id, grant_id FROM mcp_handoffs
       WHERE handoff_id = ANY($1) ORDER BY requester_kind`, [created.map(c => c.h.value.handoffId)])).rows;
     expect(rows.map(r => [r.requester_kind, r.requester_id, r.requester_ref, r.requester_context, r.account_id, r.grant_id])).toEqual([
       ['CHANNEL_CONVERSATION', 'chc_example', 'chc_example', { intendedWallet: evm(1) }, null, null],
       ['DEVELOPER_PROJECT', PROJECT.ref, PROJECT.ref, { strategyId: expect.stringMatching(/^str_[a-z2-7]{26}$/) }, null, null],
+      ['EDITOR_SESSION', EDITOR.ref, EDITOR.ref, {}, null, null],
       ['MCP_ACCOUNT', null, ACCOUNT, {}, ACCOUNT, GRANT]]);
     for (const { r, h } of created) {
       const found = await store().forRequester(h.value.handoffId, r, new Date());

@@ -98,7 +98,7 @@ test('Swap → Swap funded by the first: each step simulated, confirmed, signed 
   await expect(review).toContainText('This workflow runs as 2 separate wallet transactions');
   await expectEditorSection(page, 'Build');
   // The Canvas action names the step it serves: a step's result never reads as the whole workflow's.
-  await expect(page.locator('.canvas-sequence-note')).toContainText('Step 1 of 2: Swap. Each step is simulated, reviewed and signed on its own, in order; this result covers this step only.');
+  await expect(page.locator('.canvas-sequence-note')).toContainText('Confirm each step · Step 1 of 2: Swap. Each step is simulated, reviewed and confirmed in your wallet on its own, in order; this result covers this step only.');
   expect(owner.requested()).toBe(0);
   await executeStep(page, owner, 1, 2);
   // Step 1 reconciled: FloFi says what it delivered and simulates step 2 by itself (read-only), bound to that delivery.

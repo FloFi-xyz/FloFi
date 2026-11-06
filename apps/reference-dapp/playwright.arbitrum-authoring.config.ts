@@ -13,7 +13,7 @@ const gateNames = ['GRYLOO_ARBITRUM_MAINNET', 'GRYLOO_ARBITRUM_OWNER_EXECUTION',
   'GRYLOO_ROUTER', 'GRYLOO_ROUTER_OWNER_EXECUTION', 'GRYLOO_ROBINHOOD_MAINNET', 'GRYLOO_ROBINHOOD_OWNER_EXECUTION'];
 for (const name of gateNames) if (process.env[name]) throw Error('AUTHORING_CERTIFICATION_REQUIRES_GATES_OFF');
 export default defineConfig({
-  testDir: './e2e', testMatch: 'arbitrum-authoring-certification.spec.ts', workers: 1, fullyParallel: false, retries: 0,
+  testDir: './e2e', testMatch: ['arbitrum-authoring-certification.spec.ts', 'canvas-lending-amount-enter.spec.ts'], workers: 1, fullyParallel: false, retries: 0,
   timeout: 30_000, expect: { timeout: 10_000 }, reporter: 'list',
   use: { baseURL: E2E_APP_ORIGIN, storageState: returningVisitor(E2E_APP_ORIGIN), browserName: 'chromium', headless: true, launchOptions: { executablePath },
     serviceWorkers: 'block', trace: 'off', screenshot: 'only-on-failure', video: 'off' },

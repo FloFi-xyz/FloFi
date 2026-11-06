@@ -144,7 +144,10 @@ describe('corrected Build workspace presentation', () => {
     expect(canvas.match(/class="composer-status" data-card-status="(draft|configured|attention)"/g)).toHaveLength(1);
     expect(canvas).not.toMatch(/Step 1|Simulated|Approved|Ready to execute/);
     expect(canvas).toContain('USDC');
-    expect(canvas).not.toMatch(/<form|role="dialog"|MOCK ACTION|Template.*no execution/i);
+    // BUILD-FLOFI-SINGLE-AUTH-WORKFLOW-UX-001: the card's only form is its own amount form (Enter applies), never a dialog or a mock.
+    expect(canvas.match(/<form/g)).toHaveLength(1);
+    expect(canvas).toContain('<form class="composer-amount-form composer-lending-amount-form nodrag nopan"');
+    expect(canvas).not.toMatch(/role="dialog"|MOCK ACTION|Template.*no execution/i);
     expect(canvas.match(/class="numeric composer-amount-box/g)).toHaveLength(1);
     expect(canvas).toContain('class="composer-token-chip"');
     expect(canvas).toContain('aria-label="Base Sepolia network"');
@@ -154,7 +157,10 @@ describe('corrected Build workspace presentation', () => {
     expect(canvas).not.toMatch(/composer-destination-box|composer-value-arrow/);
     expect(canvas).not.toContain('Liquidity range view');
     expect(canvas).toMatch(/aria-label="Source amount \(USDC\)"[^>]*value="1"/);
-    expect(canvas).toMatch(/type="submit" form="composer-supply-review-[^"]+"[^>]*>Review (Supply|Borrow|Repay|Withdraw) change<\/button>/);
+    // BUILD-FLOFI-SINGLE-AUTH-WORKFLOW-UX-001: an ordinary amount edit applies on Enter in the card's own form, so the card offers no
+    // Review/Apply proposal and its amount input is not bound to the external review form (a reserve picked on the card still is).
+    expect(canvas).not.toMatch(/Review (Supply|Borrow|Repay|Withdraw) change/);
+    expect(canvas).not.toMatch(/<input[^>]*form="composer-supply-review-/);
     expect(canvas).not.toContain('Apply proposal');
     const inspector = renderToStaticMarkup(createElement(ActionSettingsContent, { selectedId, select: vi.fn() }));
     expect(inspector).toContain(`aria-label="Edit ${name}"`);
@@ -297,7 +303,8 @@ describe('UX-002 canonical composer projections', () => {
     const canvas = renderToStaticMarkup(createElement(WorkflowCanvas, { selectedId: 'lending-borrow', select: vi.fn() }));
     expect(canvas.match(/composer-card active/g)).toHaveLength(1);
     expect(titled(canvas)).toContain('1. Supply'); expect(titled(canvas)).toContain('2. Borrow'); expect(titled(canvas)).toContain('3. Swap');
-    expect(canvas).not.toMatch(/Completed|Runtime:|Confirmed|<form/);
+    // BUILD-FLOFI-SINGLE-AUTH-WORKFLOW-UX-001: the only forms are the Aave cards' own amount forms (Enter applies an ordinary amount edit).
+    expect(canvas).not.toMatch(/Completed|Runtime:|Confirmed|<form(?! class="composer-amount-form composer-lending-amount-form)/);
     const inspector = renderToStaticMarkup(createElement(ActionSettingsContent, { selectedId: 'lending-borrow', select: vi.fn() }));
     expect(inspector).not.toContain('Advanced Settings');
     expect(inspector).not.toContain('Selected Action · 2. Borrow');

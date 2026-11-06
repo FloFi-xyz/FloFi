@@ -7,10 +7,14 @@
 export type PasskeyView = { readonly passkeyId: string; readonly label: string; readonly credentialId: string; readonly createdAt: string; readonly lastUsedAt: string | null;
   readonly revoked: boolean };
 export type GrantScopeView = { readonly kind: 'EVM'; readonly router: string; readonly pairs: readonly { readonly input: string; readonly output: string; readonly perCallCap: string }[];
-  readonly maxCalls: number } | { readonly kind: 'SOLANA'; readonly tokens: readonly { readonly symbol: string; readonly amount: string; readonly tokenAccount: string }[] };
+  /** BUILD-FLOFI-SINGLE-AUTH-WORKFLOW-UX-001: the Aave market the grant may Supply to / Borrow from, per asset and per call. */
+  readonly aave?: { readonly pool: string; readonly supply: readonly { readonly asset: string; readonly perCallCap: string }[]; readonly borrow: readonly { readonly asset: string; readonly perCallCap: string; readonly onChainCeiling: string }[] };
+  readonly maxCalls: number } | { readonly kind: 'SOLANA'; readonly tokens: readonly { readonly symbol: string; readonly amount: string; readonly tokenAccount: string }[] }
+  /** BUILD-FLOFI-UNIVERSAL-SINGLE-AUTH-MAINNET-001: a workflow grant — the exact calls of one run on one chain. */
+  | { readonly kind: 'EVM_WORKFLOW'; readonly workflowRunId: string; readonly calls: number; readonly steps: readonly number[] };
 export type GrantView = { readonly grantId: string; readonly credentialId: string; readonly walletNamespace: 'eip155' | 'solana'; readonly walletAddress: string;
   readonly chain: string; readonly network: string; readonly mechanism: string; readonly state: string; readonly scope: GrantScopeView; readonly sessionAddress: string;
-  readonly commitment: string | null; readonly passkeyId: string; readonly verifiedAt: string | null; readonly validFrom: string; readonly expiresAt: string; readonly callsUsed: number;
+  readonly commitment: string | null; readonly passkeyId: string | null; readonly verifiedAt: string | null; readonly validFrom: string; readonly expiresAt: string; readonly callsUsed: number;
   /** Only while PENDING_SIGNATURE: what the wallet must sign to enroll. */
   readonly enrollment: Readonly<Record<string, unknown>> | null;
   /** Only while REVOCATION_REQUESTED: what the wallet must sign/send to revoke on-chain. */
@@ -29,7 +33,9 @@ export type ManifestView = { readonly authorizationId: string; readonly revision
     readonly budgets: readonly { readonly period: string; readonly amount: string }[] }[];
   readonly recipients: readonly string[]; readonly maxExecutionsPerPeriod: { readonly count: number; readonly period: string } | null; readonly cooldownSeconds: number;
   readonly maxSlippageBps: number; readonly validFrom: string; readonly expiresAt: string; readonly enforcement: Readonly<Record<string, readonly string[]>>;
-  readonly setupSignatures: number };
+  readonly setupSignatures: number;
+  /** BUILD-FLOFI-SINGLE-AUTH-WORKFLOW-UX-001: the account health factor every Borrow/Withdraw step must keep (null: no such step). */
+  readonly minHealthFactor?: string | null };
 export type ExecutionStepView = { readonly step: number; readonly state: string; readonly chain: string; readonly network: string; readonly credentialId: string; readonly grantId: string;
   readonly mechanism: string; readonly grantCommitment: string; readonly submissions: readonly string[]; readonly spent: readonly AmountView[]; readonly received: readonly AmountView[];
   readonly code: string | null; readonly provenance: string | null };
@@ -44,7 +50,9 @@ export type AuthorizationView = { readonly authorizationId: string; readonly rul
 export type CapabilityRowView = { readonly action: string; readonly network: string; readonly protocol: string; readonly delegated: boolean; readonly mechanism: string | null;
   readonly reason: string | null };
 export type DelegationOverviewView = {
-  readonly availability: { readonly enabled: boolean; readonly mode: 'PRODUCTION' | 'MOCKED_HARNESS' | null; readonly executor: string | null; readonly enrollment: string | null };
+  readonly availability: { readonly enabled: boolean; readonly mode: 'PRODUCTION' | 'MOCKED_HARNESS' | null; readonly executor: string | null; readonly enrollment: string | null;
+    /** BUILD-FLOFI-SINGLE-AUTH-WORKFLOW-UX-001: public mainnets this deployment opted into delegated execution (CAIP-2). */
+    readonly mainnetChains?: readonly string[] };
   readonly passkeys: readonly PasskeyView[]; readonly credentials: readonly CredentialView[]; readonly authorizations: readonly AuthorizationView[];
   readonly executions: readonly ExecutionView[]; readonly capabilities: readonly CapabilityRowView[];
 };
@@ -60,3 +68,17 @@ export type ReviewView = { readonly authorizationId: string; readonly revision: 
 export type CreatedView = { readonly ruleId: string; readonly authorizationId: string; readonly manifest: ManifestView };
 export type PasskeyOptionsView = { readonly challenge: string; readonly rpId: string; readonly rpName: string; readonly userId: string; readonly userName: string;
   readonly excludeCredentials: readonly string[]; readonly timeoutMs: number };
+
+/**
+ * BUILD-FLOFI-UNIVERSAL-SINGLE-AUTH-MAINNET-001: what the owner reviews and signs for a run authorized by workflow grants — one EIP-712 workflow
+ * grant per chain (eth_signTypedData_v4 on that chain), whose exact calls are listed for review. No passkey is involved.
+ */
+export type WalletWorkflowReviewView = {
+  readonly authorizationId: string; readonly revision: number; readonly envelopeDigest: string; readonly manifest: ManifestView; readonly expiresAt: string;
+  readonly walletSignatures: number;
+  readonly grants: readonly { readonly grantId: string; readonly chain: string; readonly chainId: number; readonly network: string; readonly walletAddress: string;
+    readonly executor: string; readonly typedData: unknown; readonly digest: string; readonly delegationHash: string; readonly validUntil: string; readonly state: string;
+    /** Each exact call, structured for localized display (`label` is the English sentence for channels and logs). */
+    readonly calls: readonly { readonly stepIndex: number; readonly kind: 'APPROVE' | 'SWAP' | 'SUPPLY' | 'BORROW'; readonly amount: string; readonly symbol: string;
+      readonly minimum: string | null; readonly outputSymbol: string | null; readonly spender: 'UNISWAP_V3_ROUTER' | 'AAVE_V3_POOL' | null; readonly label: string }[] }[];
+};

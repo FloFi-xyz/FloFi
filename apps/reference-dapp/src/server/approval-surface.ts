@@ -3,7 +3,8 @@
  * BUILD-DEVELOPER-001: the approval surface (`/approve`) this deployment serves — which requester kinds, how their approval links
  * resolve, and the shared handoff store and runtime behind them. Every FloFi surface that hands proposals to their owners registers
  * one contributor below: MCP (while its OAuth server is enabled), the Developer API (while it is enabled) and the conversational
- * channels (BUILD-CHANNELS-001, while a channel is enabled) and automations (BUILD-AUTOMATION-001, while they are enabled);
+ * channels (BUILD-CHANNELS-001, while a channel is enabled), automations (BUILD-AUTOMATION-001, while they are enabled) and the Editor
+ * (BUILD-FLOFI-UNIVERSAL-SINGLE-AUTH-MAINNET-001, the signed-in account's own multi-step Canvas workflow, while workflow runs are enabled);
  * none adds a second approval page, store, secret format or claim path. With no contributor enabled, /approve answers
  * APPROVALS_NOT_ENABLED; without durable PostgreSQL state it answers APPROVAL_STORE_UNAVAILABLE (never memory, a file or /tmp).
  */
@@ -11,6 +12,7 @@ import { automationApprovalContributor } from '../automations/approval.ts';
 import { channelApprovalContributor } from '../channels/approval-profile.ts';
 import { mcpApprovalContributor } from '../mcp/approval-profile.ts';
 import { developerApprovalContributor } from '../developer/approval-profile.ts';
+import { editorApprovalContributor } from '../editor/approval.ts';
 import { assembleApprovalSurface, createPgHandoffStore, deploymentEngineRuntime, type ApprovalContributor, type ApprovalHost, type ApprovalSurface, type CookieReader,
   type EngineRuntime } from '../platform/index.ts';
 import { platformStateHost } from './platform-state-host.ts';
@@ -19,7 +21,8 @@ import { workflowRunSurface } from './workflow-run-surface.ts';
 type Env = Readonly<Record<string, string | undefined>>;
 /** The enabled contributors, in registration order. */
 export function approvalContributors(env: Env): readonly ApprovalContributor[] {
-  return [mcpApprovalContributor(env), developerApprovalContributor(env), channelApprovalContributor(env), automationApprovalContributor(env)].filter((c): c is ApprovalContributor => c !== null);
+  return [mcpApprovalContributor(env), developerApprovalContributor(env), channelApprovalContributor(env), automationApprovalContributor(env), editorApprovalContributor(env)]
+    .filter((c): c is ApprovalContributor => c !== null);
 }
 async function approvalHost(env: Env): Promise<ApprovalHost> {
   try { return await platformStateHost(env); }

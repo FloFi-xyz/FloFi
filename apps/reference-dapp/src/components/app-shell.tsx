@@ -53,6 +53,9 @@ import { MobileBuildNavigation } from './mobile-build-navigation';
 import { ExecutionPanel } from './execution-panel';
 import { ModeBPanel } from './mode-b-panel';
 import { ExecuteWorkspace } from './execute-workspace';
+import { EditorRunAction } from './editor-run-action';
+import { projectCanvasAction } from '../domain/canvas-lifecycle';
+import { editorRunReadiness } from '../domain/editor-run';
 import { useExecutionLifecycle } from '../state/execution-lifecycle';
 import { useExecutionStart } from '../state/execution-start';
 import { restoredLocalExecutionKind } from '../domain/execution-recovery';
@@ -352,8 +355,10 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
   }, [actionDone, actionDelivered, stepRunKey, recordExecutedAction, simulationSource.kind, stepOwner]);
   const sequencePresentation = sequence ? { ...presentSequence(state.workflow, context, sequence), issue: sequenceIssue, awaitingDelivery } : null;
   // Every runtime surface names the step it serves, so a step's simulation or Review never reads as the whole workflow's.
+  // BUILD-FLOFI-SINGLE-AUTH-WORKFLOW-UX-001: the Editor runs a sequence in the confirm-each-step mode; the note names that mode explicitly
+  // (authorizing a whole workflow once is the delegated mode of a workflow run, never claimed here).
   const sequenceNote = sequencePresentation ? sequencePresentation.finished ? tr('All {0} steps of this workflow are completed and reconciled.', sequencePresentation.total)
-    : tr('Step {0} of {1}: {2}. Each step is simulated, reviewed and signed on its own, in order; this result covers this step only.', sequencePresentation.current, sequencePresentation.total,
+    : tr('Confirm each step · Step {0} of {1}: {2}. Each step is simulated, reviewed and confirmed in your wallet on its own, in order; this result covers this step only.', sequencePresentation.current, sequencePresentation.total,
       tr(sequencePresentation.steps[sequencePresentation.current - 1]?.action ?? 'Action')) : null;
   function openSimulationControls() {
     const details = document.querySelector<HTMLDetailsElement>('.simulation-technical');
@@ -399,6 +404,20 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
     wallet: reviewBinding.wallet, execution: executionStart, progress: executionProgress, recovery: executionProgress.recovery,
     invalidWorkflow: Boolean(reviewError || authoringIncomplete || approvalGate || testNetworkWorkflow || walletIssue || autoPrepare && !approvalWallet) };
   const lifecycleControls = useExecutionControls(lifecycleState);
+  // BUILD-FLOFI-UNIVERSAL-SINGLE-AUTH-MAINNET-001: "Run workflow" — a multi-step Canvas workflow that has not started here, valid and simulated at its
+  // current revision, starts the shared workflow run on /approve (the server re-reads and re-gates it). The revision whose simulation last made it
+  // ready is kept so an edit after the simulation says so; an open proposal on /approve and the signing surface never offer it.
+  const canvasAction = projectCanvasAction(lifecycleControls.current, lifecycleControls);
+  const runSimulated = Boolean(sequence) && (canvasAction.kind === 'approve' || canvasAction.kind === 'execute');
+  const [runSimulation, setRunSimulation] = useState<{ readonly workflowId: string; readonly revision: number } | null>(null);
+  useEffect(() => { if (runSimulated) setRunSimulation({ workflowId: state.workflow.workflowId, revision: state.workflow.revision }); },
+    [runSimulated, state.workflow.workflowId, state.workflow.revision]);
+  const editorRun = editorRunReadiness({
+    sequence: sequence && !approvalSlot && !autoPrepare && surface === 'workspace' ? { steps: sequence.steps.length, cursor: sequence.cursor, completed: sequence.completed.length,
+      finished: sequence.finished } : null,
+    restoring: Boolean(sequenceRestore), started: Boolean(currentExecution(executionProgress)) || executionProgress.started || executionStart.started,
+    invalid: Boolean(lifecycleState.invalidWorkflow || state.error), issue: sequenceIssue, lifecycle: canvasAction.kind, busy: Boolean(simulationSource.state.busy),
+    revision: state.workflow.revision, simulatedRevision: runSimulation?.workflowId === state.workflow.workflowId ? runSimulation.revision : null });
   // A proposal opened from a chat, MCP client or channel prepares its own fresh, read-only simulation as soon as it is loaded for that signer:
   // once per workflow revision and signer, never during or after a recorded run of this workflow, never retried automatically, and nothing is
   // accepted or signed. BUILD-CHAT-E2E-001: the final run of another workflow (the previous step of a multi-step run) does not count.
@@ -540,6 +559,7 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
     {/* BUILD-FLOFI-CONVERSATIONAL-001: on Simulate and Execute the same conversation continues beside the stage (complementary to main). */}
     {wrapStage(<main id="workspace" className={`main workflow-workspace${tab === 'Build' ? ' build-workspace' : ''}`} data-workspace-toolbox={tab === 'Build' ? workspaceToolboxMode : undefined} tabIndex={-1} aria-label={tr(tab === 'Build' ? 'Workflow workspace' : tab === 'Simulate' ? 'Simulation workspace' : 'Execution workspace')}>
       {tab === 'Execute' ? <ExecuteWorkspace detailsOnly={chatFirst} controls={lifecycleControls} primaryAction={simulateAction} workflowName={workflowName} workflow={runtimeWorkflow} context={context} source={simulationSource} authorization={authorization} wallet={reviewBinding.wallet} execution={executionStart} progress={executionProgress} recovery={executionProgress.recovery} invalidWorkflow={Boolean(reviewError || authoringIncomplete)} backToBuild={() => setTab('Build')} backToSimulate={() => setTab('Simulate')} startNewWorkflow={startNewWorkflow} openDashboard={() => setTab('Dashboard')}
+        workflowRun={editorRun.offered ? <EditorRunAction workflow={state.workflow} readiness={editorRun} steps={sequence?.steps.length ?? 0}/> : undefined}
         technicalDetails={engineering && (executionStart.started || executionProgress.started || recoveryPath || localCowIntent) ? stageContent : undefined}/> : tab === 'Simulate' ?
         <SimulateWorkspace detailsOnly={chatFirst} sequenceNote={sequenceNote} workflowName={workflowName} returnToBuild={() => setTab('Build')} simulationSource={simulationSource} simulationReason={simulationReason} review={embeddedReview} simulateAction={simulateAction}>
           {engineering && <details className="shell-details technical-workspace simulation-technical"><summary>{tr('View technical details')}</summary><ReviewTechnicalDetails authorization={authorization}/>{stageContent}</details>}

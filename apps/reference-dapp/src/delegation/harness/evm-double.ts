@@ -27,7 +27,7 @@ export type EvmDouble = ReturnType<typeof createEvmDouble>;
 export function createEvmDouble(chainId: number, clock: () => number = () => Math.floor(Date.now() / 1000)) {
   const profile: PublicSwapProfile = publicSwapProfile(chainId) ?? (() => { throw new EvmDoubleError('PROFILE_REQUIRED'); })();
   const balances = new Map<string, bigint>(), allowances = new Map<string, bigint>(), code = new Map<string, string>(), nonces = new Map<string, bigint>();
-  const native = new Map<string, bigint>(), disabled = new Set<string>(), callCounts = new Map<string, bigint>();
+  const native = new Map<string, bigint>(), disabled = new Set<string>(), callCounts = new Map<string, bigint>(), usedIds = new Set<string>();
   const receipts = new Map<string, Receipt>(), txs = new Map<string, Tx>();
   const pool = profile.pool;
   let block = 100, wethPerUsdc = 400_000_000_000_000n, dropNext = false, sends = 0;
@@ -67,7 +67,7 @@ export function createEvmDouble(chainId: number, clock: () => number = () => Mat
   function redeem(sender: string, data: string): Receipt['logs'] {
     const r = D.decodeRedeemCalldata(data), logs: Receipt['logs'] = [];
     // Snapshot for atomicity: any failure reverts every effect of this transaction.
-    const snapshot = { balances: new Map(balances), allowances: new Map(allowances), callCounts: new Map(callCounts) };
+    const snapshot = { balances: new Map(balances), allowances: new Map(allowances), callCounts: new Map(callCounts), usedIds: new Set(usedIds) };
     try {
       r.contexts.forEach((context, i) => {
         const chain = D.decodePermissionContext(context);
@@ -82,10 +82,11 @@ export function createEvmDouble(chainId: number, clock: () => number = () => Mat
         if (d.authority !== D.ROOT_AUTHORITY) fail('InvalidAuthority');
         if (r.modes[i] !== D.MODE_SINGLE_DEFAULT) fail('MODE_NOT_MODELED');
         const call = D.decodeSingleExecution(r.executions[i]!);
-        const verdict = D.modelBeforeHooks(d, { redeemer: sender, call, blockTimestamp: BigInt(clock()), delegationHash: hash, callCount: callCounts.get(hash) ?? 0n });
+        const verdict = D.modelBeforeHooks(d, { redeemer: sender, call, blockTimestamp: BigInt(clock()), delegationHash: hash, callCount: callCounts.get(hash) ?? 0n, usedIds });
         if (!verdict.ok) throw new EvmDoubleError(verdict.code);
         const before = verdict.balanceRules.map(rule => bal(rule.token, rule.recipient));
         if (verdict.countsCall) callCounts.set(hash, (callCounts.get(hash) ?? 0n) + 1n);
+        verdict.usedIds.forEach(id => usedIds.add(id));
         logs.push(...execute(lower(d.delegator), call));
         verdict.balanceRules.forEach((rule, k) => { const after = D.modelAfterHook(rule, before[k]!, bal(rule.token, rule.recipient)); if (!after.ok) fail(after.code); });
         logs.push({ address: F.delegationManager, topics: [D.REDEEMED_DELEGATION_TOPIC, topic(lower(d.delegator)), topic(lower(sender))], data: '0x' });
@@ -95,6 +96,7 @@ export function createEvmDouble(chainId: number, clock: () => number = () => Mat
       balances.clear(); snapshot.balances.forEach((v, k) => balances.set(k, v));
       allowances.clear(); snapshot.allowances.forEach((v, k) => allowances.set(k, v));
       callCounts.clear(); snapshot.callCounts.forEach((v, k) => callCounts.set(k, v));
+      usedIds.clear(); snapshot.usedIds.forEach(v => usedIds.add(v));
       throw cause;
     }
   }

@@ -75,13 +75,22 @@ export function stepPolicyViolation(m: DelegatedAuthorizationManifest, step: Ste
     const minimum = plan.minimumReceive.find(x => x.asset === r.asset);
     if (!minimum || minimum.amount <= 0n || minimum.amount > r.amount) return 'MINIMUM_OUTPUT_INVALID';
     const floor = (r.amount * BigInt(10_000 - m.limits.maxSlippageBps) + 9_999n) / 10_000n;
-    if (minimum.amount < floor) return 'SLIPPAGE_ABOVE_CAP';
+    // BUILD-FLOFI-UNIVERSAL-SINGLE-AUTH-MAINNET-001: a workflow grant's minimum was fixed when the owner signed and is enforced on-chain (the
+    // router reverts below it); a better price since then must not block the step, and a worse one already failed in the driver.
+    if (!binding.exact && minimum.amount < floor) return 'SLIPPAGE_ABOVE_CAP';
   }
-  if (m.limits.minHealthFactor !== null && (plan.healthFactorAfter === null || Number(plan.healthFactorAfter) < Number(m.limits.minHealthFactor)))
+  // The floor binds every step that can lower the account's health factor (Borrow, Withdraw); a swap or a supply cannot.
+  if (m.limits.minHealthFactor !== null && ['borrow', 'withdraw'].includes(plan.actionType)
+    && (plan.healthFactorAfter === null || !(Number(plan.healthFactorAfter) >= Number(m.limits.minHealthFactor))))
     return 'HEALTH_FACTOR_BELOW_FLOOR';
   // The grant itself must cover what this plan asks of it (the on-chain ceiling, re-checked off-chain before signing).
   const need = binding.need;
-  if (need.kind === 'EVM_UNISWAP_V3_EXACT_INPUT_SINGLE') {
+  if (need.kind === 'EVM_AAVE_V3_SUPPLY' || need.kind === 'EVM_AAVE_V3_BORROW') {
+    const s = plan.spend[0];
+    const beneficiary = 'beneficiary' in step.strategy && typeof step.strategy.beneficiary === 'string' ? step.strategy.beneficiary.toLowerCase() : null;
+    if (beneficiary !== binding.walletAddress.toLowerCase()) return 'RECIPIENT_NOT_AUTHORIZED';
+    if (!plan.targets.includes(need.pool) || plan.spend.length !== 1 || !s || s.asset !== `${plan.chain}/erc20:${need.asset}` || s.amount > need.amount) return 'GRANT_SCOPE_EXCEEDED';
+  } else if (need.kind === 'EVM_UNISWAP_V3_EXACT_INPUT_SINGLE') {
     const s = plan.spend[0];
     if (!plan.targets.includes(need.router) || !s || s.asset !== `${plan.chain}/erc20:${need.tokenIn}` || s.amount > need.amountIn) return 'GRANT_SCOPE_EXCEEDED';
   } else {

@@ -10,7 +10,8 @@
 type Rpc = (method: string, params: readonly unknown[]) => Promise<unknown>;
 export type TransportPurpose = 'read' | 'owner' | 'executor';
 export type ChainTransport = { readonly chain: string; readonly provenance: 'MOCKED' | 'PUBLIC'; readonly rpc: Rpc };
-const EVM_READ = new Set(['eth_chainId', 'eth_blockNumber', 'eth_call', 'eth_getCode', 'eth_getBalance', 'eth_getTransactionCount', 'eth_gasPrice',
+// eth_getStorageAt: the Aave reads pin the Pool implementation (ERC-1967 slot), exactly as the owner-signed lending flows do (read-only).
+const EVM_READ = new Set(['eth_chainId', 'eth_blockNumber', 'eth_call', 'eth_getCode', 'eth_getStorageAt', 'eth_getBalance', 'eth_getTransactionCount', 'eth_gasPrice',
   'eth_maxPriorityFeePerGas', 'eth_estimateGas', 'eth_getBlockByNumber', 'eth_getTransactionReceipt', 'eth_getTransactionByHash']);
 const SOL_READ = new Set(['getLatestBlockhash', 'getAccountInfo', 'getBalance', 'getSignatureStatuses', 'getGenesisHash']);
 export function allowedMethods(chain: string, purpose: TransportPurpose): ReadonlySet<string> {
@@ -32,8 +33,10 @@ export function guarded(chain: string, purpose: TransportPurpose, provenance: Ch
 export function httpRpc(url: string, fetchImpl: typeof fetch = fetch): Rpc {
   let id = 0;
   return async (method, params) => {
+    // A transport failure (timeout, refused connection) is DELEGATION_RPC_UNAVAILABLE: retryable, never a decision about the step.
     const response = await fetchImpl(url, { method: 'POST', redirect: 'error', cache: 'no-store', signal: AbortSignal.timeout(10_000),
-      headers: { 'content-type': 'application/json' }, body: JSON.stringify({ jsonrpc: '2.0', id: ++id, method, params }) });
+      headers: { 'content-type': 'application/json' }, body: JSON.stringify({ jsonrpc: '2.0', id: ++id, method, params }) })
+      .catch(() => { throw new Error('DELEGATION_RPC_UNAVAILABLE'); });
     const body = await response.json().catch(() => null) as { result?: unknown; error?: { message?: unknown } } | null;
     if (!body) throw new Error('DELEGATION_RPC_UNAVAILABLE');
     if (body.error) throw new Error(typeof body.error.message === 'string' ? body.error.message.slice(0, 200) : 'DELEGATION_RPC_ERROR');

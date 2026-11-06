@@ -97,18 +97,19 @@ test('connected lending steps select one editor, update linked summaries after a
   const inlineSupply = supplyCard.getByRole('textbox', { name: 'Source amount (USDC)', exact: true });
   const supplyBefore = await inlineSupply.inputValue();
   const beforeSupplyEdit = await page.locator('.summary-bar').getAttribute('data-workflow-revision');
-  await supplyCard.getByRole('button', { name: 'Review Supply change', exact: true }).click();
-  await expect(supplyCard.getByRole('button', { name: 'Apply proposal', exact: true })).toHaveCount(0);
+  // BUILD-FLOFI-SINGLE-AUTH-WORKFLOW-UX-001: an ordinary amount edit has no Review/Apply proposal; Enter applies it as one new revision.
+  await expect(supplyCard.getByRole('button', { name: 'Review Supply change', exact: true })).toHaveCount(0);
   await expect(page.getByRole('region', { name: 'Workflow edit review' })).toHaveCount(0);
   await expect(page.locator('.summary-bar')).toHaveAttribute('data-workflow-revision', beforeSupplyEdit!);
   await inlineSupply.click(); await inlineSupply.fill('0.2');
   await expect(inspector(page).getByLabel('Supply amount USDC', { exact: true })).toHaveValue('0.2');
-  await supplyCard.getByRole('button', { name: 'Review Supply change', exact: true }).click();
-  await expect(inlineSupply).toHaveValue('0.2');
+  // A draft is not the workflow until Enter.
   await expect(page.locator('.summary-bar')).toHaveAttribute('data-workflow-revision', beforeSupplyEdit!);
   expect(supplyBefore).not.toBe('0.2');
-  await expect(page.getByRole('region', { name: 'Workflow edit review' }).getByRole('button', { name: 'Apply proposal', exact: true })).toHaveCount(0);
-  await supplyCard.getByRole('button', { name: 'Apply proposal', exact: true }).click();
+  await inlineSupply.press('Enter');
+  await expect(page.locator('.summary-bar')).toHaveAttribute('data-workflow-revision', String(Number(beforeSupplyEdit) + 1));
+  await expect(page.getByRole('button', { name: 'Apply proposal', exact: true })).toHaveCount(0);
+  await expect(page.getByRole('region', { name: 'Workflow edit review' })).toHaveCount(0);
   await expect(inlineSupply).toHaveValue('0.2');
   await expect(page.locator('.build-flow-surface .react-flow__edge')).toHaveCount(2);
   for (const [id, number, form] of [
@@ -123,10 +124,12 @@ test('connected lending steps select one editor, update linked summaries after a
   await step(page, 'lending-borrow').click();
   const beforeBorrowRevision = await page.locator('.summary-bar').getAttribute('data-workflow-revision');
   await inspector(page).getByLabel('Borrow amount USDC').fill('0.025');
-  await step(page, 'lending-borrow').getByRole('button', { name: 'Review Borrow change', exact: true }).click();
   await expect(page.locator('.summary-bar')).toHaveAttribute('data-workflow-revision', beforeBorrowRevision!);
   await expect(step(page, 'lending-swap').locator('.composer-amount .composer-amount-value')).toHaveText('0.01');
-  await page.getByRole('button', { name: 'Apply proposal' }).click();
+  // Enter in the settings field applies the amount exactly as Enter on the card does (no proposal).
+  await inspector(page).getByLabel('Borrow amount USDC').press('Enter');
+  await expect(page.locator('.summary-bar')).toHaveAttribute('data-workflow-revision', String(Number(beforeBorrowRevision) + 1));
+  await expect(page.getByRole('button', { name: 'Apply proposal' })).toHaveCount(0);
   await expect(step(page, 'lending-borrow').getByRole('textbox', { name: 'Source amount (USDC)', exact: true })).toHaveValue('0.025');
   await expect(step(page, 'lending-swap').locator('.composer-amount .composer-amount-value')).toHaveText('0.025');
   await expect(step(page, 'lending-swap').locator('.composer-amount-token').first()).toHaveText('USDC');

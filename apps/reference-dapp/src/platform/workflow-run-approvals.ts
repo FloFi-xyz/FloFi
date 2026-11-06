@@ -9,13 +9,14 @@
  *                the signing surface loads — its own fresh simulation, Review and wallet signature follow, unchanged
  *   continue     the next step, once the previous one reconciled (also after a reload or in another browser, by approval id + wallet proof)
  *   start        the owner chose to confirm each step
- *   authorize    the owner chose ONE passkey authorization for the whole workflow (BUILD-AUTOMATION-002's Universal Workflow Authorization)
+ *   authorize    the owner chose ONE wallet authorization for the whole workflow: one exact workflow grant per EVM network, signed by the run's
+ *                wallet (BUILD-FLOFI-UNIVERSAL-SINGLE-AUTH-MAINNET-001)
  *   cancel / resume   end a run that never submitted anything (or that halted), or resume a halted step that submitted nothing
  */
 import type { Command } from '../domain/commands';
 import type { Workflow } from '../domain/initial-workflow';
 import type { WorkflowComposition } from '../engine/strategy-engine';
-import type { ReviewView } from '../delegation/views.ts';
+import type { WalletWorkflowReviewView } from '../delegation/views.ts';
 import type { AuthorizationPlan } from '../workflow-runs/authorization-plan.ts';
 import type { RunRecord } from '../workflow-runs/pg-store.ts';
 import { assertRunWallets, cancelRun, currentStep, ensureForClaim, observeRun, ownerAuthorizationPlan, resumeRun, runView, startConfirm, type RunView, type StepProposal,
@@ -27,8 +28,12 @@ import { refuse } from './refusal.ts';
 
 /** The delegated half of a run's authorization (the delegation service's run operations), where delegation is enabled. */
 export type RunDelegationOps = {
-  readonly review: (owner: WalletRef, run: { readonly runId: string; readonly strategy: unknown; readonly workflowHash: string; readonly validitySeconds: number }) => Promise<ReviewView>;
-  readonly sign: (owner: WalletRef, runId: string, revision: number, assertion: unknown) => Promise<{ readonly authorizationId: string }>;
+  /** BUILD-FLOFI-UNIVERSAL-SINGLE-AUTH-MAINNET-001: the run's exact workflow grants (one per EVM chain) for the run's own EVM wallet. */
+  readonly review: (owner: WalletRef, run: { readonly runId: string; readonly strategy: unknown; readonly workflowHash: string; readonly validitySeconds: number;
+    readonly wallet: string }) => Promise<WalletWorkflowReviewView>;
+  /** The wallet signatures of those grants (`[{ grantId, signature }]`): verified, then the run starts. */
+  /** `retryOnly`: the run already left PENDING (a retry after a lost answer) — answered without verifying or storing anything. */
+  readonly sign: (owner: WalletRef, runId: string, revision: number, signatures: unknown, retryOnly?: boolean) => Promise<{ readonly authorizationId: string }>;
   readonly revoke: (owner: WalletRef, runId: string) => Promise<void>;
 };
 export type WorkflowRunSurface = WorkflowRunDeps & { readonly delegationOps?: RunDelegationOps | null };
@@ -89,19 +94,27 @@ export async function resumeSequential(deps: WorkflowRunSurface, run: RunRecord,
   const resumed = await resumeRun(deps, run, wallets);
   return proposalOf(deps, resumed, await currentStep(deps, resumed, wallets), base);
 }
-/** The Universal Workflow Authorization Review of this run (delegated mode): the envelope the owner's passkey signs ONCE. */
-export async function authorizationReviewSequential(deps: WorkflowRunSurface, run: RunRecord, wallets: readonly WalletRef[]): Promise<ReviewView> {
+/** The run's ONE authorization Review (delegated mode): the exact workflow grants the owner's wallet signs, one per EVM network. */
+export async function authorizationReviewSequential(deps: WorkflowRunSurface, run: RunRecord, wallets: readonly WalletRef[]): Promise<WalletWorkflowReviewView> {
   assertRunWallets(run, wallets);
   if (run.state !== 'PENDING' || run.mode !== null) refuse(run.mode === 'CONFIRM_EACH_STEP' ? 'WORKFLOW_RUN_CONFIRM_MODE_CHOSEN' : `WORKFLOW_RUN_${run.state}`);
   const plan = await ownerAuthorizationPlan(deps, run);
   if (!plan.delegatedSingleAuthorization.available) refuse(plan.delegatedSingleAuthorization.reason ?? 'DELEGATED_AUTHORITY_UNAVAILABLE');
   const ops = deps.delegationOps ?? refuse('DELEGATION_NOT_ENABLED');
-  return ops.review(run.owner, { runId: run.runId, strategy: run.strategy, workflowHash: run.workflowHash, validitySeconds: DELEGATED_AUTHORIZATION_SECONDS });
+  const wallet = run.wallets.eip155 ?? refuse('WALLET_SESSION_REQUIRED');
+  return ops.review(run.owner, { runId: run.runId, strategy: run.strategy, workflowHash: run.workflowHash, validitySeconds: DELEGATED_AUTHORIZATION_SECONDS, wallet });
 }
-/** The owner's ONE passkey signature: the run becomes DELEGATED and its execution starts, with no further signature of any kind. */
+/** The owner's ONE authorization (the wallet signatures of the run's workflow grants): the run becomes DELEGATED and starts, with no further signature. */
 export async function authorizeSequential(deps: WorkflowRunSurface, run: RunRecord, wallets: readonly WalletRef[], revision: number, assertion: unknown, base: ApprovalView) {
   assertRunWallets(run, wallets);
   const ops = deps.delegationOps ?? refuse('DELEGATION_NOT_ENABLED');
-  await ops.sign(run.owner, run.runId, revision, assertion);
+  // BUILD-FLOFI-UNIVERSAL-SINGLE-AUTH-MAINNET-001: the requester's policy and the plan are checked again at signing, not only at review (an
+  // operator may have disabled the network since). A retry of an already-delegated run (its first response was lost) is answered by the
+  // idempotent sign, which activates nothing again.
+  if (run.mode !== 'DELEGATED') {
+    const plan = await ownerAuthorizationPlan(deps, run);
+    if (!plan.delegatedSingleAuthorization.available) refuse(plan.delegatedSingleAuthorization.reason ?? 'DELEGATED_AUTHORITY_UNAVAILABLE');
+  }
+  await ops.sign(run.owner, run.runId, revision, assertion, run.mode === 'DELEGATED');
   return proposalOf(deps, run, null, base);
 }

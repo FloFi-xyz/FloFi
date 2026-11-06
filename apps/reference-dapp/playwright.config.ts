@@ -225,6 +225,13 @@ const delegationServerEnv = delegationHarness ? { FLOFI_DELEGATION: 'enabled', F
   FLOFI_DELEGATED_SIGNER_DIR: process.env.FLOFI_E2E_DELEGATED_SIGNER_DIR!, FLOFI_DELEGATED_EXECUTION: 'enabled',
   FLOFI_DELEGATION_DISPATCH_TOKEN_SHA256: createHash('sha256').update(process.env.FLOFI_E2E_DELEGATION_DISPATCH_TOKEN!).digest('hex') } : {};
 
+// BUILD-FLOFI-UNIVERSAL-SINGLE-AUTH-MAINNET-001: workflow runs on an embedded loopback runtime also serve the Editor's "Run workflow", whose requester is
+// the signed-in FloFi account: a per-run session secret (generated here in memory, never written; workers inherit it) seals the account session the
+// spec leaves, and approval links point to this app's own loopback origin.
+const workflowRunsHarness = process.env.FLOFI_WORKFLOW_RUNS === 'enabled' && (cloudRuntime || mcpHarness);
+if (workflowRunsHarness) process.env.FLOFI_E2E_SESSION_SECRET ??= randomBytes(32).toString('hex');
+const workflowRunsServerEnv = workflowRunsHarness ? { FLOFI_SESSION_SECRET: process.env.FLOFI_E2E_SESSION_SECRET!, FLOFI_PUBLIC_ORIGIN: E2E_APP_ORIGIN } : {};
+
 // BUILD-COPILOT-001: the Copilot runs in browser tests only on committed replay answers; a live model is never called from tests.
 const copilot = process.env.FLOFI_COPILOT;
 if (copilot !== undefined && copilot !== 'off' && copilot !== 'replay') throw new Error('Copilot E2E permits only FLOFI_COPILOT=replay');
@@ -318,7 +325,7 @@ export default defineConfig({
       ...(learningHarness ? { DATABASE_URL: process.env.FLOFI_E2E_DATABASE_URL!, FLOFI_LEARNING: 'enabled', FLOFI_LEARNING_SECRET: randomBytes(32).toString('hex'),
         FLOFI_LEARNING_AUTOMATIC: 'consent' } : {}),
       ...mcpServerEnv, ...swapReadEnv,
-      ...channelServerEnv, ...automationServerEnv, ...delegationServerEnv,
+      ...channelServerEnv, ...automationServerEnv, ...delegationServerEnv, ...workflowRunsServerEnv,
       GRYLOO_MODE_A: 'fork', GRYLOO_MODE_A_PROFILE: join(runtime, 'profile.json'), GRYLOO_MODE_A_JOURNAL: join(runtime, 'journal') },
   }],
 });

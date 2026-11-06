@@ -135,9 +135,9 @@ describe('enforcer model (MOCKED evidence of the v1.3.0 hooks FloFi compiles)', 
   const ctx = (call: d.Call, group: number, extra: Partial<d.ModelContext> = {}): d.ModelVerdict =>
     d.modelBeforeHooks(d.withGroupArgs(signed, group), { redeemer: session.address, call, blockTimestamp: 1_500n, delegationHash: d.delegationHash(unsigned), callCount: 0n, ...extra });
   it('accepts the exact approve and swap groups and reports the balance rule and the counted call', () => {
-    expect(ctx({ target: USDC, value: 0n, data: hex(encodeApprove(ROUTER, 50_000_000n)) }, 0)).toEqual({ ok: true, groupIndex: 0, countsCall: true, balanceRules: [] });
+    expect(ctx({ target: USDC, value: 0n, data: hex(encodeApprove(ROUTER, 50_000_000n)) }, 0)).toEqual({ ok: true, groupIndex: 0, countsCall: true, balanceRules: [], usedIds: [] });
     const swap = ctx(swapCall(owner.address), 1);
-    expect(swap).toEqual({ ok: true, groupIndex: 1, countsCall: true, balanceRules: [{ decrease: true, token: USDC, recipient: owner.address, amount: 50_000_000n }] });
+    expect(swap).toEqual({ ok: true, groupIndex: 1, countsCall: true, balanceRules: [{ decrease: true, token: USDC, recipient: owner.address, amount: 50_000_000n }], usedIds: [] });
     expect(d.modelAfterHook({ decrease: true, token: USDC, recipient: owner.address, amount: 50_000_000n }, 100_000_000n, 50_000_000n)).toEqual({ ok: true });
     expect(d.modelAfterHook({ decrease: true, token: USDC, recipient: owner.address, amount: 50_000_000n }, 100_000_000n, 49_999_999n))
       .toEqual({ ok: false, code: 'ERC20BalanceChangeEnforcer:exceeded-balance-decrease' });
@@ -162,5 +162,62 @@ describe('enforcer model (MOCKED evidence of the v1.3.0 hooks FloFi compiles)', 
     const foreign = { ...signed, caveats: [...signed.caveats, { enforcer: '0x' + '44'.repeat(20), terms: '0x', args: '0x' }] };
     expect(d.modelBeforeHooks(d.withGroupArgs(foreign, 1), { redeemer: session.address, call: swapCall(owner.address), blockTimestamp: 1_500n, delegationHash: '0x', callCount: 0n }))
       .toEqual({ ok: false, code: 'ENFORCER_NOT_MODELED' });
+  });
+});
+
+// BUILD-FLOFI-SINGLE-AUTH-WORKFLOW-UX-001: Aave V3 Supply and Borrow as scoped ERC-7710 call templates (Arbitrum One addresses from the
+// registry; the model is MOCKED evidence of the v1.3.0 hooks, the addresses are identities only — nothing is called here).
+describe('Aave V3 Supply and Borrow templates', () => {
+  const POOL = '0x794a61358d6845594f94dc1db02a252b5b4814ad', A_WETH = '0x82af49447d8a07e3bd95bd0d56f35241523fbab1', A_USDC = '0xaf88d065e77c8cc2239327c5edb3a432268e5831';
+  const owner = key(), session = key();
+  const templates: d.CallTemplate[] = [{ kind: 'ERC20_APPROVE', token: A_WETH, spender: POOL },
+    { kind: 'AAVE_V3_SUPPLY', pool: POOL, asset: A_WETH, perCallCap: 2_000_000_000_000_000n }, { kind: 'AAVE_V3_BORROW', pool: POOL, asset: A_USDC, perCallCap: 1_000_000n }];
+  const unsigned = d.compileGrant({ chainId: 42161, owner: owner.address, session: session.address, validAfter: 1_000n, validBefore: 2_000_000_000n, maxCalls: 6n, salt: 9n, templates });
+  const signed = { ...unsigned, signature: '0x' };
+  const run = (call: d.Call, group: number, extra: Partial<d.ModelContext> = {}) => d.modelBeforeHooks(d.withGroupArgs(signed, group),
+    { redeemer: session.address, call, blockTimestamp: 1_500n, delegationHash: d.delegationHash(unsigned), callCount: 0n, ...extra });
+  const supply = (amount: bigint, onBehalfOf = owner.address, asset = A_WETH, referral = 0n): d.Call => ({ target: POOL, value: 0n,
+    data: d.AAVE_V3_SUPPLY_METHOD + hex(d.abiEncode(['address', 'uint256', 'address', 'uint256'], [asset, amount, onBehalfOf, referral])).slice(2) });
+  const borrow = (amount: bigint, mode = 2n, onBehalfOf = owner.address, asset = A_USDC, referral = 0n): d.Call => ({ target: POOL, value: 0n,
+    data: d.AAVE_V3_BORROW_METHOD + hex(d.abiEncode(['address', 'uint256', 'uint256', 'uint256', 'address'], [asset, amount, mode, referral, onBehalfOf])).slice(2) });
+  it('pins the Pool selectors and the byte-aligned Borrow ceiling', () => {
+    expect(d.AAVE_V3_SUPPLY_METHOD).toBe('0x617ba037'); expect(d.AAVE_V3_BORROW_METHOD).toBe('0xa415bcad');
+    expect(d.borrowCeiling(1_000_000n)).toBe(1n << 24n); expect(d.borrowCeiling(255n)).toBe(256n); expect(d.borrowCeiling(256n)).toBe(1n << 16n);
+    expect(() => d.borrowCeiling(0n)).toThrow('ERC7710_TEMPLATE_INVALID');
+  });
+  it('accepts the exact approval, a Supply on the owner\'s own position and a variable-rate Borrow for the owner', () => {
+    expect(run({ target: A_WETH, value: 0n, data: hex(encodeApprove(POOL, 1_000_000_000_000_000n)) }, 0)).toMatchObject({ ok: true, groupIndex: 0 });
+    expect(run(supply(1_000_000_000_000_000n), 1)).toEqual({ ok: true, groupIndex: 1, countsCall: true,
+      balanceRules: [{ decrease: true, token: A_WETH, recipient: owner.address, amount: 2_000_000_000_000_000n }], usedIds: [] });
+    expect(run(borrow(500_000n), 2)).toEqual({ ok: true, groupIndex: 2, countsCall: true, balanceRules: [{ decrease: false, token: A_USDC, recipient: owner.address, amount: 1n }], usedIds: [] });
+    // Up to just below the on-chain ceiling (2^24 - 1 raw USDC ≈ 16.77 USDC); the exact cap (1 USDC) is the executor's.
+    expect(run(borrow((1n << 24n) - 1n), 2)).toMatchObject({ ok: true });
+    // A Supply that takes more than its cap from the owner's account fails in the after-hook.
+    expect(d.modelAfterHook({ decrease: true, token: A_WETH, recipient: owner.address, amount: 2_000_000_000_000_000n }, 5n * 10n ** 18n, 5n * 10n ** 18n - 2_000_000_000_000_001n))
+      .toEqual({ ok: false, code: 'ERC20BalanceChangeEnforcer:exceeded-balance-decrease' });
+    // A Borrow whose asset does not reach the owner fails in the after-hook.
+    expect(d.modelAfterHook({ decrease: false, token: A_USDC, recipient: owner.address, amount: 1n }, 7n, 7n)).toEqual({ ok: false, code: 'ERC20BalanceChangeEnforcer:insufficient-balance-increase' });
+  });
+  it.each([
+    ['a Supply for someone else', () => run(supply(1n, key().address), 1)],
+    ['a Supply of another asset', () => run(supply(1n, owner.address, A_USDC), 1)],
+    ['a Supply with a referral code', () => run(supply(1n, owner.address, A_WETH, 1n), 1)],
+    ['a stable-rate Borrow', () => run(borrow(1n, 1n), 2)],
+    ['a Borrow at or above the ceiling', () => run(borrow(1n << 24n), 2)],
+    ['a Borrow whose debt is someone else\'s', () => run(borrow(1n, 2n, key().address), 2)],
+    ['a Borrow of another asset', () => run(borrow(1n, 2n, owner.address, A_WETH), 2)],
+    ['a Borrow with a referral code', () => run(borrow(1n, 2n, owner.address, A_USDC, 7n), 2)],
+  ])('refuses %s (calldata)', (_name, call) => { expect(call()).toEqual({ ok: false, code: 'AllowedCalldataEnforcer:invalid-calldata' }); });
+  it.each([
+    ['a Borrow through the Supply group', () => run(borrow(1n), 1), 'AllowedMethodsEnforcer:method-not-allowed'],
+    ['a withdraw from the Pool', () => run({ target: POOL, value: 0n, data: d.selectorOf('withdraw(address,uint256,address)') + '00'.repeat(96) }, 2), 'AllowedMethodsEnforcer:method-not-allowed'],
+    ['another redeemer', () => run(borrow(1n), 2, { redeemer: key().address }), 'RedeemerEnforcer:unauthorized-redeemer'],
+    ['after expiry', () => run(borrow(1n), 2, { blockTimestamp: 2_000_000_000n }), 'TimestampEnforcer:expired-delegation'],
+    ['call count exhausted', () => run(supply(1n), 1, { callCount: 6n }), 'LimitedCallsEnforcer:limit-exceeded'],
+    ['native value', () => run({ ...supply(1n), value: 1n }, 1), 'ValueLteEnforcer:value-too-high'],
+  ])('refuses %s', (_name, call, code) => { expect(call()).toEqual({ ok: false, code }); });
+  it('refuses unsafe Aave templates', () => {
+    expect(() => d.templateGroup({ kind: 'AAVE_V3_SUPPLY', pool: POOL, asset: A_WETH, perCallCap: 0n }, owner.address)).toThrow('ERC7710_TEMPLATE_INVALID');
+    expect(() => d.templateGroup({ kind: 'AAVE_V3_BORROW', pool: POOL, asset: A_USDC, perCallCap: 0n }, owner.address)).toThrow('ERC7710_TEMPLATE_INVALID');
   });
 });

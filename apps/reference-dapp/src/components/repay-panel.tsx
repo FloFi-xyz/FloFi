@@ -15,7 +15,7 @@ const human=(value:string,decimals:number)=>(Number(value)/10**decimals).toLocal
 const hf=(value:string)=>BigInt(value)===(1n<<256n)-1n?'No debt (∞)':human(value,18);
 export function RepayAuthoringForm({nodeId,onDone,direct=false,reviewFormId}:{nodeId?:string;onDone?:()=>void;direct?:boolean;reviewFormId?:string}){
   const { t: tr } = useLocale();
-  const {state,propose,dispatch,amountInputs={},editCanvasAmount}=useWorkflow(),wallet=useBuild009Wallet();
+  const {state,propose,dispatch,amountInputs={},editCanvasAmount,commitCanvasAmount}=useWorkflow(),wallet=useBuild009Wallet();
   const node=state.workflow.nodes.find(n=>n.nodeId===nodeId),existing=node?repayDetails(node as Parameters<typeof repayDetails>[0]):null;
   const [localAmount,setAmount]=useState(existing?.amount??'0.005'),[error,setError]=useState('');
   const amount = reviewFormId && nodeId ? amountInputs[nodeId] ?? existing?.amount ?? localAmount : localAmount;
@@ -24,7 +24,11 @@ export function RepayAuthoringForm({nodeId,onDone,direct=false,reviewFormId}:{no
   const asset=lendingReservesFor(network).some(reserve=>reserve.symbol===chosenAsset)?chosenAsset:lendingAssetFor(network),shown=lendingNetworkView(network,asset);
   const setNetwork=(next:LendingNetwork)=>{setNetworkState(next);setAsset(lendingAssetFor(next));};
   const live=useAaveReserves(network,wallet.account??null);
-  function submit(event:FormEvent){event.preventDefault();try{
+  // BUILD-FLOFI-SINGLE-AUTH-WORKFLOW-UX-001: with the network and asset unchanged, Enter applies the amount directly; any other change is reviewed.
+  const fieldsChanged=Boolean(existing&&(network!==existing.network||asset!==existing.asset));
+  function submit(event:FormEvent){event.preventDefault();
+    if(reviewFormId&&nodeId&&existing&&!fieldsChanged){if(amountInputs[nodeId]!==undefined)setError(commitCanvasAmount(nodeId)??'');return;}
+    try{
     const input:SupplyInput={network,asset,amount,beneficiary:wallet.account??existing?.beneficiary??''};
     createAuthoredRepay(nodeId??'node-preview',input);
     const command=nodeId?{type:'SET_REPAY' as const,nodeId,input,source:'CANVAS' as const,baseRevision:state.workflow.revision}:{type:'ADD_REPAY' as const,input,source:'CANVAS' as const,baseRevision:state.workflow.revision};
@@ -39,7 +43,7 @@ export function RepayAuthoringForm({nodeId,onDone,direct=false,reviewFormId}:{no
     <label>{tr("Debt mode")}<select aria-label={tr("Debt mode")} value="Variable (2)" onChange={()=>undefined}><option>{tr("Variable (2)")}</option></select></label>
     {!wallet.account&&!existing&&<button type="button" onClick={()=>void wallet.connect()}>{tr("Connect owner wallet")}</button>}
     <p>{tr("Your connected wallet pays ")}{tr(asset)}{tr(" to reduce its own variable debt.")}</p>
-    {error&&<p role="alert">{tr(error)}</p>} { !reviewFormId && <button type="submit" disabled={!wallet.account&&!existing}>{tr(nodeId?'Review Repay change':direct?'Add Repay':'Review Repay proposal')}</button>}
+    {error&&<p role="alert">{tr(error)}</p>} { (!reviewFormId||fieldsChanged) && <button type="submit" disabled={!wallet.account&&!existing}>{tr(nodeId?'Review Repay change':direct?'Add Repay':'Review Repay proposal')}</button>}
     {onDone&&<button type="button" className="quiet" onClick={onDone}>{tr("Cancel")}</button>}
   </form>;
 }

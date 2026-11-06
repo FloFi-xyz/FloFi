@@ -116,6 +116,20 @@ export function canvasAuthoringIncomplete(setup: CanvasActionSetup | null, input
   return setup !== null || Object.keys(inputs).length > 0;
 }
 
+/** BUILD-FLOFI-SINGLE-AUTH-WORKFLOW-UX-001: the Aave cards whose ordinary amount edit applies on Enter, exactly like Swap and Bridge. */
+export const DIRECT_AMOUNT_LENDING_ACTIONS: readonly string[] = Object.freeze(['supply', 'borrow', 'repay', 'withdraw']);
+/**
+ * Whether a Canvas card's amount edit needs a reviewed proposal instead of applying on Enter (`commitCanvasAmount`). A Send always does (its
+ * destination is part of the edit). An Aave card does only when its reserve or network was changed on the card (a different asset: never a
+ * silent re-denomination) or when a proposal for it is already waiting (externally proposed, e.g. by the chat). An ordinary Supply, Borrow,
+ * Repay or Withdraw amount edit applies directly: one COMMAND through the history guard, a new workflow revision, and therefore a stale
+ * Simulation, Review and authorization. Nothing is signed or sent, and no wallet is asked.
+ */
+export function amountEditNeedsReview(actionType: string, edit: { readonly reserveDraft: boolean; readonly proposalPending: boolean }): boolean {
+  if (!DIRECT_AMOUNT_LENDING_ACTIONS.includes(actionType)) return actionType === 'asset.transfer';
+  return edit.reserveDraft || edit.proposalPending;
+}
+
 export function canEditCanvasAmount(node: Workflow['nodes'][number], context: ReviewContext, workflow?: Workflow) {
   if (node.lockedParameters.length) return false;
   if (workflow && canSelectCryptoAssets(node, workflow)) return true;

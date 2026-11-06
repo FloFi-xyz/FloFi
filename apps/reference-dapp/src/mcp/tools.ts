@@ -335,6 +335,10 @@ export function createFlofiMcpServer(ctx: ToolContext): McpServer {
     const origin = ctx.oauth?.origin ?? FLOFI_PRODUCTION_ORIGIN;
     return { ok: true, navigation: { websiteUrl: origin, mcpEndpoint: `${origin}/api/mcp`, productionWebsiteUrl: FLOFI_PRODUCTION_ORIGIN },
       runtime: ctx.runtime.kind, mcpExecution: 'NOT_AVAILABLE', ownerExecution: 'IN_FLOFI_WITH_THE_OWNER_WALLET_ONLY',
+      delegatedExecution: { authorizedBy: 'OWNER_WALLET_SIGNED_EXACT_WORKFLOW_GRANT', submittedBy: 'FLOFI_EXECUTOR_KEY_WITHIN_THE_SIGNED_GRANT',
+        perStepReview: false, note: 'Authorize once (only where request_user_approval reports it available): the owner\'s wallet signs one exact grant per EVM ' +
+          'network, possibly after a one-time smart-account upgrade per network; FloFi\'s executor then submits each step inside that grant with no further ' +
+          'review. Confirm each step: a fresh simulation, Review and wallet confirmation before every step.' },
       conversationExecution: { surface: ctx.ui ? 'MCP_APP_EMBEDDED_SIGNING' : 'MCP_APP_UNAVAILABLE',
         signer: 'USER_WALLET_REQUIRED', hostAndWalletVerified: false, canvasRequired: false,
         toolAuthority: 'mcpExecution NOT_AVAILABLE means model tools have no signing or submission authority; wallet-driven MCP Apps use the existing financial runtime.',
@@ -346,10 +350,11 @@ export function createFlofiMcpServer(ctx: ToolContext): McpServer {
           ...scope === 'ENGINEERING' ? ['supply → borrow → swap on base-sepolia (the lending composition)'] : [],
           'a sequence whose every step has an owner-execution flow, where this deployment runs workflows (request_user_approval says so)'],
         sequences: 'One approval for the whole workflow; the owner confirms each step in their wallet, in order, each after the previous step reconciled. ' +
-          'Where the owner enrolled delegated Credentials and this deployment can sign delegated steps, ONE passkey authorization can cover the whole ' +
-          'workflow instead (request_user_approval reports the authorizations each mode needs). One authorization is not one transaction and not zero gas.',
-        bindings: 'A step may spend what an earlier step actually delivered: {step, amountFrom}; its own amount is then a cap. Resolved from reconciled ' +
-          'received amounts in both confirm-each-step and delegated modes (min(cap, received)).' },
+          'Where every step is delegation-capable on an enabled EVM mainnet and this deployment can sign delegated steps, ONE wallet authorization can cover ' +
+          'the whole workflow instead: the owner signs one exact workflow grant per EVM network (each call exact and usable once), and FloFi executes the ' +
+          'steps without asking again (request_user_approval reports the authorizations each mode needs). One authorization is not one transaction and not zero gas.',
+        bindings: 'A step may spend what an earlier step actually delivered: {step, amountFrom}; its own amount is then a cap. Confirm each step: resolved from ' +
+          'reconciled received amounts (min(cap, received)). Authorize once: the earlier step\'s on-chain guaranteed minimum, fixed when the owner signs.' },
       capabilities: (await capabilityFacts(ctx.runtime, ctx.policy ?? DEFAULT_POLICY, { network: args.network, action: args.action }, scope)).map(({ row: r, flow, mode, previewable,
         previewUnavailableReason, gates }) => {
         return { action: r.action, network: r.network, destinationNetwork: r.destinationNetwork, funds: r.funds, actionTypes: r.actionTypes, adapters: r.adapters,
@@ -429,7 +434,9 @@ export function createFlofiMcpServer(ctx: ToolContext): McpServer {
       const plan = workflowPlan(w);
       return { ok: true, workflowHash: w.workflowHash, reviewKind: 'DETERMINISTIC_STRATEGY_REVIEW', authority: AUTHORITY, stepCount: w.steps.length,
         summary: reviewed.summary, executionPlan: { kind: plan.kind, reason: plan.reason, mode: 'STEP_BY_STEP' }, workflowSteps: reviewed.steps,
-        nextSteps: ['Each step gets a fresh simulation and the owner\'s Review in FloFi before it runs, in order, after the previous step reconciled.'] };
+        nextSteps: ['Steps run in order, each after the previous step reconciled. Confirm each step: every step gets a fresh simulation and the owner\'s Review ' +
+          'and wallet confirmation before it runs. Authorize once (where request_user_approval reports it available): the owner reviews and signs one exact ' +
+          'grant per EVM network up front, and FloFi then submits every step inside it with no further review.'] };
     }
     const c = w.steps[0]!, review = reviewed.steps[0]!, flow = strategyFlow(c.strategy);
     const mode = flow ? await ctx.runtime.mode(flow) : null;
@@ -455,7 +462,8 @@ export function createFlofiMcpServer(ctx: ToolContext): McpServer {
         subjectRole: 'SIMULATION_SUBJECT_ONLY_NOT_AN_OWNER_OR_AUTHORIZATION', authority: AUTHORITY,
         notes: ['Each step uses its own provider simulation against the current chain state.',
           'Dependent balances arrive only after earlier steps reconcile; an awaiting step is explicitly incomplete.',
-          'FloFi re-simulates each actual received amount and presents its Strategy Manifest before the wallet signs.'] };
+          'Confirm each step: FloFi re-simulates each actual received amount and presents its Strategy Manifest before the wallet signs that step.',
+          'Authorize once: a dependent step spends the earlier step\'s on-chain guaranteed minimum fixed in the signed grant, with no per-step review.'] };
     }
     const { composition: c, plan, view, simulationSubject } = await simulatePreview(ctx.runtime, args, { scope, ...account && state
       ? { budget: () => state.oauth.allow(`simulate:account:${account}`, SIMULATIONS_PER_ACCOUNT_HOUR, 3_600, new Date()) } : {} });
@@ -534,7 +542,8 @@ function registerApprovalTools(ctx: ToolContext, register: Register) {
     'First call compose_strategy and review_strategy. Quote only this successful tool result\'s public nonsecret approvalUrl verbatim (or show the FloFi panel); ' +
     'never invent an approval URL or ID. If this call fails or is unavailable, disclose it and provide no approval CTA. ' +
     'Mainnet may be disabled by policy. A multi-step workflow is one approval: tell the user how many authorizations `authorizationPlan` reports (one wallet ' +
-    'confirmation per step, or ONE passkey authorization when delegated Credentials cover every step); each step runs only after the previous one reconciled. ' +
+    'confirmation per step, or ONE wallet authorization — one exact signed grant per EVM network, possibly after a one-time smart-account upgrade per network — ' +
+    'when every step can be delegated; FloFi\'s executor then submits each step with no further review); each step runs only after the previous one reconciled. ' +
     'The same approvalUrl reopens the next step for the owner.', SCHEMAS[ctx.scope ?? networkScope()].request,
   { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false }, async args => {
     const result = await requestApproval(deps(), requester, args.strategy, args.workflowHash);
@@ -542,7 +551,7 @@ function registerApprovalTools(ctx: ToolContext, register: Register) {
     // The picture of exactly the workflow the handoff holds: the same canonical composition, bound to the same hash.
     const visual = workflowVisualModel(composeWorkflowOrRefuse(args.strategy, result.value.workflowHash, ctx.scope ?? networkScope()));
     return { ok: true, ...result.value, visual, message: 'Use the FloFi MCP App to authorize in chat when your host and wallet support it. Connect your wallet, check the fresh simulation and choose Authorize in wallet. ' +
-      'Confirm the exact transaction in your wallet. Opening the FloFi signing link is an optional external fallback, not in-chat completion. Canvas is optional. Nothing is executed until chain confirmation and reconciliation. Retrieve get_approval_status for shared status and the verified receipt URL.' };
+      'Confirm each step: confirm each exact transaction in your wallet. Authorize once: sign the exact workflow grant shown (one per network). Opening the FloFi signing link is an optional external fallback, not in-chat completion. Canvas is optional. Nothing is executed until chain confirmation and reconciliation. Retrieve get_approval_status for shared status and the verified receipt URL.' };
   }, ui ? { ui: { resourceUri: ui.resourceUri }, 'openai/outputTemplate': ui.resourceUri, 'openai/toolInvocation/invoking': 'Preparing approval…',
     'openai/toolInvocation/invoked': 'Approval ready' } : {});
 

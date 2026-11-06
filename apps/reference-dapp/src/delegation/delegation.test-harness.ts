@@ -59,7 +59,7 @@ export async function delegationHarness(db: Database, options: { readonly start?
   const tenantId = options.tenantId ?? 'default';
   let clock = options.start ?? new Date('2026-10-12T07:00:00.000Z');
   const now = () => new Date(clock.getTime());
-  const config: DelegationConfig = { enabled: true, tenantId, mode: 'MOCKED_HARNESS', harnessUrl: 'http://127.0.0.1:1', rpc: {}, passkeyOrigin: ORIGIN,
+  const config: DelegationConfig = { enabled: true, tenantId, mode: 'MOCKED_HARNESS', harnessUrl: 'http://127.0.0.1:1', rpc: {}, passkeyOrigin: ORIGIN, mainnetChains: [],
     signer: { kind: 'memory' }, executor: true, hosted: false };
   const evm = createEvmDouble(84532, () => Math.floor(clock.getTime() / 1000)), sol = createSolanaDouble();
   const intercept: { evm?: (method: string, params: readonly unknown[]) => Promise<unknown> | undefined } = {};

@@ -114,6 +114,8 @@ export const portugueseDelegation: Readonly<Record<string, string>> = {
     'Registe primeiro uma chave de acesso (Chaves de acesso). Cada Credencial fica associada à chave de acesso que vai autorizar os seus fluxos.',
   'Credential {0} on {1}': 'Credencial {0} na {1}', 'MetaMask delegation (ERC-7710)': 'Delegação MetaMask (ERC-7710)', 'SPL token delegation': 'Delegação de token SPL',
   'Uniswap v3 swaps {0}; at most {1} calls ({2} used); recipient: this wallet only': 'Trocas Uniswap v3 {0}; no máximo {1} chamadas ({2} usadas); destinatário: só esta carteira',
+  'Real funds on Arbitrum One. Your wallet must be a MetaMask smart account. Aave Supply and Borrow are never part of a Credential: a workflow run authorizes them once, with exact amounts.': 'Fundos reais na Arbitrum One. Sua carteira precisa ser uma conta inteligente MetaMask. Depósito e Empréstimo no Aave nunca fazem parte de uma Credencial: uma execução de fluxo os autoriza uma vez, com valores exatos.',
+  'Workflow authorization: exactly {0} calls of one workflow run (steps {1}), each usable once; nothing else': 'Autorização do fluxo: exatamente {0} chamadas de uma execução do fluxo (etapas {1}), cada uma utilizável uma vez; nada além disso',
   'Spend up to {0} from this wallet’s token account; recipient and program are checked by FloFi, not on-chain':
     'Gastar até {0} da conta de token desta carteira; o destinatário e o programa são verificados pelo FloFi, não on-chain',
   'Expires {0}': 'Expira a {0}', 'verified {0}': 'verificada a {0}', 'Verified on-chain.': 'Verificada on-chain.', 'Verify again': 'Verificar de novo',
@@ -122,6 +124,8 @@ export const portugueseDelegation: Readonly<Record<string, string>> = {
   'Revoke credential': 'Revogar credencial', 'Revoke on-chain with your wallet': 'Revogar on-chain com a sua carteira',
   'Credential enrolled: this wallet can now serve automatic workflows within its limits.': 'Credencial registada: esta carteira pode agora servir fluxos automáticos dentro dos seus limites.',
   'Credential enrolled.': 'Credencial registada.', 'Enroll a wallet for automatic execution': 'Registar uma carteira para execução automática', 'Credential network': 'Rede da credencial',
+  // BUILD-FLOFI-SINGLE-AUTH-WORKFLOW-UX-001
+  'Aave V3 for this wallet only: supply {0}; variable-rate borrow {1} (on-chain ceiling per call: {2})': 'Aave V3 apenas para esta carteira: fornecer {0}; empréstimo a taxa variável {1} (teto on-chain por chamada: {2})',
   'Delegated devUSDC (total)': 'devUSDC delegado (total)', 'Delegated devUSDC': 'devUSDC delegado', 'USDC per call (max)': 'USDC por chamada (máx.)', 'USDC per call': 'USDC por chamada',
   'Number of calls': 'Número de chamadas', 'Credential expires on': 'A credencial expira a', 'Enroll with my wallet': 'Registar com a minha carteira',
 };

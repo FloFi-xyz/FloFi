@@ -27,14 +27,16 @@ async function planOf(input: unknown, sequences: boolean, delegation: Delegation
 const MOCKED: DelegationFacts = { mode: 'MOCKED_HARNESS', unavailable: null };
 
 describe('BUILD-CHAT-E2E-001 authorization plan', () => {
-  it('counts one wallet confirmation per step (at least) in confirm mode, and one passkey assertion for a delegable workflow', async () => {
+  it('counts one wallet confirmation per step (at least) in confirm mode; one wallet authorization per EVM network, never with a Solana step', async () => {
     const plan = await planOf({ version: 2, steps: [BASE_SEPOLIA_SWAP, SOLANA_DEVNET_SWAP] }, true, MOCKED);
+    // BUILD-FLOFI-UNIVERSAL-SINGLE-AUTH-MAINNET-001: Solana has no secure single-authorization mechanism (SPL delegation cannot pin recipients).
     expect(plan).toMatchObject({ stepCount: 2,
       confirmEachStep: { available: true, reason: null, walletConfirmationsAtLeast: 2, walletNamespaces: ['eip155', 'solana'] },
-      delegatedSingleAuthorization: { available: true, reason: null, passkeyAssertions: 1, ownerKnown: false,
-        enrollments: [{ chain: 'eip155:84532', mechanism: 'EVM_ERC7710_METAMASK_V1_3', active: null }, { mechanism: 'SOLANA_SPL_DELEGATE_V1', active: null }] },
-      // Without the owner's grants FloFi cannot say one authorization suffices: the owner's own Credentials decide it in FloFi.
+      delegatedSingleAuthorization: { available: false, reason: 'WORKFLOW_GRANT_NAMESPACE_UNSUPPORTED', passkeyAssertions: 0, ownerKnown: false },
       recommended: 'CONFIRM_EACH_STEP' });
+    const evmOnly = await planOf({ version: 2, steps: [BASE_SEPOLIA_SWAP, { ...BASE_SEPOLIA_SWAP, inputAsset: 'WETH', outputAsset: 'USDC', amount: '0.001' }] }, true, MOCKED);
+    expect(evmOnly.delegatedSingleAuthorization).toMatchObject({ available: true, reason: null, walletSignatures: 1, passkeyAssertions: 0,
+      enrollments: [{ chain: 'eip155:84532', mechanism: 'EVM_ERC7710_METAMASK_V1_3', active: null }] });
     expect(plan.notes[0]).toMatch(/not one transaction/);
     expect(plan.notes).toContain('This workflow uses an EVM wallet and a Solana wallet: both must be proven before it starts.');
   });
@@ -71,7 +73,7 @@ describe('BUILD-CHAT-E2E-001 authorization plan', () => {
     const bound = { version: 2, steps: [BASE_SEPOLIA_SWAP, { ...BASE_SEPOLIA_SWAP, inputAsset: 'WETH', outputAsset: 'USDC', amount: '1' }], bindings: [{ step: 1, amountFrom: 0 }] };
     expect(await planOf(bound, true, MOCKED)).toMatchObject({ confirmEachStep: { available: true, reason: null },
       delegatedSingleAuthorization: { available: true }, bindings: [{ step: 1, amountFrom: 0, confirmEachStep: 'RECONCILED_RECEIVED_AMOUNT',
-        delegated: 'RECONCILED_RECEIVED_AMOUNT' }] });
+        delegated: 'SIGNED_GUARANTEED_MINIMUM' }] });
     expect(await planOf(bound, true, null)).toMatchObject({ confirmEachStep: { available: true }, delegatedSingleAuthorization: { available: false },
       recommended: 'CONFIRM_EACH_STEP' });
   });
