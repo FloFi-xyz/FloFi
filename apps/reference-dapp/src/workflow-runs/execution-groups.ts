@@ -163,34 +163,36 @@ export function planExecutionGroups(requirement: WorkflowRequirement, facts: Use
       const evm = profile.eip155;
       const atomic = evm?.atomic[chain] ?? null;
       const canBatch = chainEnabled && allBuildable && (atomic === 'supported' || atomic === 'ready');
-      const canUserOp = chainEnabled && allBuildable && evm?.wallet === 'INJECTED' && evm.typedData && facts.bundlerChains.includes(chain) && (atomic === 'supported' || atomic === 'ready');
+      // A user operation needs the account to ALREADY be a smart account (`supported`): a typed-data signature cannot upgrade it, and an
+      // operation signed for a plain account is only refused by the bundler after the delivery landed.
+      const canUserOp = chainEnabled && allBuildable && evm?.wallet === 'INJECTED' && evm.typedData && facts.bundlerChains.includes(chain) && atomic === 'supported';
       if (awaitsDelivery !== null) {
         if (canUserOp) strategy = 'EVM_USER_OPERATION';
         else {
           if (chainEnabled && allBuildable) downgrades.push(!facts.bundlerChains.includes(chain) ? 'USER_OPERATION_BUNDLER_UNAVAILABLE'
-            : evm?.wallet !== 'INJECTED' || !evm.typedData ? 'WALLET_TYPED_DATA_USER_OPERATION_UNSUPPORTED' : 'EVM_SMART_ACCOUNT_UNAVAILABLE');
+            : evm?.wallet !== 'INJECTED' || !evm.typedData ? 'WALLET_TYPED_DATA_USER_OPERATION_UNSUPPORTED' : 'EVM_SMART_ACCOUNT_REQUIRED');
           strategy = canBatch ? 'EVM_WALLET_BATCH' : 'EVM_OWNER_STEP'; signing = 'WHEN_DUE';
         }
       } else if (canBatch) strategy = 'EVM_WALLET_BATCH';
       else { if (chainEnabled && allBuildable) downgrades.push(atomic === 'unsupported' ? 'WALLET_ATOMIC_BATCH_UNSUPPORTED' : 'WALLET_ATOMIC_BATCH_UNKNOWN'); strategy = 'EVM_OWNER_STEP'; }
-      if ((strategy === 'EVM_WALLET_BATCH' && atomic === 'ready') || strategy === 'EVM_USER_OPERATION' && atomic === 'ready') setup.push('EVM_SMART_ACCOUNT_UPGRADE');
+      if (strategy === 'EVM_WALLET_BATCH' && atomic === 'ready') setup.push('EVM_SMART_ACCOUNT_UPGRADE');
     } else {
       const sol = profile.solana;
       const canSignAll = chainEnabled && allBuildable && sol?.signMultiple === true;
+      // Durable nonces (SOLANA_DURABLE_NONCE) are not offered in this build (ADR-0008): FloFi's Solana builders need the input balance to
+      // simulate the exact message, which a post-delivery group does not have yet. Such a group is signed when due (one more interaction).
       if (awaitsDelivery !== null) {
-        if (canSignAll && facts.solanaNonceAccounts) {
-          strategy = 'SOLANA_DURABLE_NONCE';
-          if ((sol?.nonceAccounts ?? 0) < members.length) setup.push('SOLANA_NONCE_ACCOUNTS');
-        } else {
-          if (canSignAll) downgrades.push('SOLANA_NONCE_ACCOUNTS_DISABLED');
-          strategy = canSignAll ? 'SOLANA_SIGN_ALL' : 'SOLANA_OWNER_STEP'; signing = 'WHEN_DUE';
-        }
+        if (canSignAll) downgrades.push('SOLANA_DURABLE_NONCE_NOT_OFFERED');
+        strategy = canSignAll ? 'SOLANA_SIGN_ALL' : 'SOLANA_OWNER_STEP'; signing = 'WHEN_DUE';
       } else strategy = canSignAll ? 'SOLANA_SIGN_ALL' : 'SOLANA_OWNER_STEP';
       if (chainEnabled && allBuildable && !canSignAll) downgrades.push('SOLANA_MULTI_SIGN_UNSUPPORTED');
     }
     const ownerStep = strategy === 'EVM_OWNER_STEP' || strategy === 'SOLANA_OWNER_STEP';
     // An owner step is its flow's own confirmation(s): at least one per step (a token approval may add one more, which the flow shows).
     if (ownerStep) signing = 'WHEN_DUE';
+    // Only the first group, or a user operation (relayed by FloFi when due), is signed upfront. A later wallet batch is SENT by the wallet when
+    // the owner confirms (it would run before the groups ahead of it) and a Solana blockhash lives about a minute: both are signed when due.
+    if (first.index > 0 && (strategy === 'EVM_WALLET_BATCH' || strategy === 'SOLANA_SIGN_ALL')) signing = 'WHEN_DUE';
     const steps: GroupStep[] = members.map(m => {
       const b = bindingOf(m.index);
       const sameGroup = b !== null && b.amountFrom >= first.index;
@@ -203,7 +205,6 @@ export function planExecutionGroups(requirement: WorkflowRequirement, facts: Use
     if (signing === 'UPFRONT' && steps.some(s => s.amount === 'RECONCILED_ACTUAL')) {
       downgrades.push('WORKFLOW_BINDING_RESOLVED_WHEN_DUE'); signing = 'WHEN_DUE';
       if (strategy === 'EVM_USER_OPERATION') strategy = profile.eip155?.atomic[chain] === 'supported' || profile.eip155?.atomic[chain] === 'ready' ? 'EVM_WALLET_BATCH' : 'EVM_OWNER_STEP';
-      if (strategy === 'SOLANA_DURABLE_NONCE') { strategy = 'SOLANA_SIGN_ALL'; setup.splice(setup.indexOf('SOLANA_NONCE_ACCOUNTS'), 1); }
     }
     const interactions = ownerStep ? members.length : 1;
     groups.push({ index: groups.length, namespace, chain, steps, stepFrom: first.index, stepTo: members.at(-1)!.index, strategy, signing, awaitsDelivery,

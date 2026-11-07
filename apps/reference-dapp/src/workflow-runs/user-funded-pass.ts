@@ -6,7 +6,8 @@
  *
  *   owner-step group      exactly the confirm-each-step rules for its step (its own flow, the owner's wallet confirms, observed and reconciled)
  *   PLANNED               waits for its owner (signed when due, or upfront at the start): nothing is ever prepared or signed by FloFi
- *   PREPARED              waits for the owner's wallet; past its validity it is EXPIRED and prepared again on request
+ *   PREPARED              waits for the owner's wallet; past its validity it is EXPIRED and prepared again on request — except a wallet batch,
+ *                         which the wallet itself sends when the owner confirms: it is never dropped silently (a late answer is still taken)
  *   AUTHORIZED            wallet batch: the wallet already sent it; FloFi waits for the hashes the owner's browser reports.
  *                         user operation: due when the previous group reconciled; simulated by the bundler, then relayed (owner-paid).
  *                         Solana: every signature is recorded, then each transaction is sent after its predecessor confirmed.
@@ -17,9 +18,11 @@
  */
 import { composeWorkflowBound, type WorkflowComposition } from '../engine/strategy-engine';
 import { boundStrategy } from '../engine/workflow-bindings';
-import { advanceSolanaSubmission, reconcileEvmGroup, reconcileSolanaGroup, solanaSubmission, submitUserOperation, type Prepared, type Reconciled, type UserFundedDeps } from '../user-funded/groups.ts';
+import { assetKey } from '../delegation/steps.ts';
+import { advanceSolanaSubmission, checkUserOperation, reconcileEvmGroup, reconcileSolanaGroup, relayUserOperation, solanaSubmission, type Prepared, type Reconciled,
+  type UserFundedDeps } from '../user-funded/groups.ts';
 import type { EvmGroupCalls } from '../user-funded/evm-calls.ts';
-import type { GroupRecord, RunRecord, RunStepRecord, StepOutcome, WorkflowRunStore } from './pg-store.ts';
+import type { BoundResolution, GroupRecord, RunRecord, RunStepRecord, StepOutcome, WorkflowRunStore } from './pg-store.ts';
 import { ADVANCE_RETRY_MS, TERMINAL_RUN, type RunState } from './state-machine.ts';
 
 export type Pass = { readonly state: RunState; readonly code: string | null; readonly retryMs: number | null; readonly progressed: boolean };
@@ -62,7 +65,9 @@ export async function userFundedPass(deps: UserFundedPassDeps, run: RunRecord): 
   switch (g.state) {
     case 'PLANNED': return settled(run, OWNER_WAIT_MS, false, 'OWNER_SIGNS_GROUP');
     case 'PREPARED':
-      if (g.validUntil && g.validUntil <= now) {
+      // A wallet batch may already be on its way: the wallet sends it the moment the owner confirms, whenever that is. It stays PREPARED (its
+      // late answer is accepted; a new preparation keeps the same EIP-5792 id) instead of being dropped and offered again as new.
+      if (g.validUntil && g.validUntil <= now && g.strategy !== 'EVM_WALLET_BATCH') {
         const expired = await deps.store.groupTransition(run.runId, g.groupIndex, ['PREPARED'], 'EXPIRED', { code: 'USER_FUNDED_PREPARED_EXPIRED' });
         if (expired) await deps.store.groupTransition(run.runId, g.groupIndex, ['EXPIRED'], 'PLANNED', { prepared: null, validUntil: null, code: null });
         return { ...settled(run, OWNER_WAIT_MS, false, 'OWNER_SIGNS_GROUP'), progressed: expired !== null };
@@ -83,15 +88,19 @@ async function authorizedGroup(deps: UserFundedPassDeps, run: RunRecord, g: Grou
     const submitted = await deps.store.groupTransition(run.runId, g.groupIndex, ['AUTHORIZED'], 'SUBMITTED', { submission: solanaSubmission(authorization, deps.now()) });
     return { ...settled(run, 1_000), progressed: submitted !== null };
   }
-  // EVM_USER_OPERATION, due now (its previous group reconciled, which for a delayed group means the delivery reconciled).
-  const r = await submitUserOperation(deps.userFunded, prepared, authorization, g.feePayer);
+  // EVM_USER_OPERATION, due now (its previous group reconciled, which for a delayed group means the delivery reconciled). The due-time
+  // simulation runs first (nothing is relayed if it refuses); then the submission is RECORDED, and only the one process whose write won
+  // relays it — a status poll and the worker can never both send, and a lost relay is resent by reconciliation (same signed bytes).
+  const r = await checkUserOperation(deps.userFunded, prepared, authorization, g.feePayer);
   if (!r.ok) {
     if (TRANSIENT.has(r.code)) return settled(run, SUBMIT_RETRY_MS, false, r.code);
     return block(r.code);
   }
   const submitted = await deps.store.groupTransition(run.runId, g.groupIndex, ['AUTHORIZED'], 'SUBMITTED', { submission: r.value });
-  deps.log('workflow_run.user_operation_relayed', { run: run.runId, group: g.groupIndex });
-  return { ...settled(run, SUBMIT_RETRY_MS), progressed: submitted !== null };
+  if (!submitted) return { ...settled(run, SUBMIT_RETRY_MS), progressed: true };
+  const relayed = await relayUserOperation(deps.userFunded, prepared, authorization);
+  deps.log(relayed.ok ? 'workflow_run.user_operation_relayed' : 'workflow_run.user_operation_relay_retry', { run: run.runId, group: g.groupIndex, code: relayed.ok ? null : relayed.code });
+  return { ...settled(run, SUBMIT_RETRY_MS), progressed: true };
 }
 
 async function submittedGroup(deps: UserFundedPassDeps, run: RunRecord, g: GroupRecord, steps: readonly RunStepRecord[]): Promise<Pass> {
@@ -105,7 +114,7 @@ async function submittedGroup(deps: UserFundedPassDeps, run: RunRecord, g: Group
       if (step.state === 'EXPIRED' || step.state === 'FAILED') r = await reconcileSolanaGroup(deps.userFunded, prepared, { ...submission, hashes: (submission.hashes as string[]).slice(0, step.index! + (step.state === 'FAILED' ? 1 : 0)) },
         g.chain, g.feePayer).then(x => x.status === 'RECONCILED' ? { status: 'FAILED' as const, code: step.code!, gasPaid: x.gasPaid, transactions: x.transactions, steps: x.steps } : x);
       else r = await reconcileSolanaGroup(deps.userFunded, prepared, submission, g.chain, g.feePayer);
-    } else r = await reconcileEvmGroup(deps.userFunded, prepared, submission);
+    } else r = await reconcileEvmGroup(deps.userFunded, prepared, submission, g.authorization);
   } catch (cause) {
     const code = cause instanceof Error && /^[A-Z][A-Z0-9_]{2,80}$/.test(cause.message) ? cause.message : 'RECONCILIATION_FAILED';
     if (g.state === 'SUBMITTED') await deps.store.groupTransition(run.runId, g.groupIndex, ['SUBMITTED'], 'UNCERTAIN', { code });
@@ -130,10 +139,22 @@ async function submittedGroup(deps: UserFundedPassDeps, run: RunRecord, g: Group
     const sol = (prepared.transactions as readonly { stepIndex: number; spend: { amount: string } }[] | undefined)?.find(t => t.stepIndex === index);
     return sol?.spend.amount ?? null;
   };
+  // A grouped step bound to an earlier output records what it was signed to spend from it, exactly as a confirm-mode step does: a later
+  // consumer of the same delivery (in a later group or confirmed step by step) is funded only by what is left of it.
+  const receivedOf = (producer: number, asset: string) => [...steps[producer]?.outcome?.received ?? [], ...facts.find(f => f.stepIndex === producer)?.received ?? []]
+    .filter(x => x.asset === asset).reduce((sum, x) => sum + BigInt(x.amount), 0n);
+  const boundOf = (index: number): BoundResolution | null => {
+    const spent = spentOf(index), all = composed.bindings.filter(b => b.step === index);
+    if (!spent || !all.length) return null;
+    const resolutions = all.map(b => ({ amountFrom: b.amountFrom, asset: b.asset, cap: b.cap,
+      received: receivedOf(b.amountFrom, assetKey({ chain: b.asset.chainId, address: b.asset.address })).toString(), used: spent }));
+    return { ...resolutions[0]!, ...resolutions.length > 1 ? { additional: resolutions.slice(1) } : {} };
+  };
   for (let i = g.stepFrom; i <= g.stepTo; i++) {
     const done = facts.some(f => f.stepIndex === i);
     const strategy = executedStrategy(composed, i, spentOf(i)), alone = composeWorkflowBound(strategy, undefined);
-    const resolved = alone.ok ? { strategy, workflowHash: alone.workflowHash } : {};
+    const bound = steps[i]!.bound ? null : boundOf(i);
+    const resolved = { ...alone.ok ? { strategy, workflowHash: alone.workflowHash } : {}, ...bound ? { bound } : {} };
     if (r.status === 'RECONCILED' || done)
       await deps.store.stepTransition(run.runId, i, ['DELEGATED', 'UNCERTAIN'], 'RECONCILED', { outcome: outcomeOf(i, 'RECONCILED'), code: null, ...resolved });
     else if (steps[i]!.state === 'DELEGATED' || steps[i]!.state === 'UNCERTAIN')

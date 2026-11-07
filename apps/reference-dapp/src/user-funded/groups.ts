@@ -17,6 +17,7 @@
  */
 import { erc4337, eip5792, fromBase64, parseMessageV0, parseTransaction, simulateJupiterSwap, simulateSolanaTransfer, verifySignedJupiterTransaction,
   verifySignedSolanaTransfer, type JupiterHttp, type JupiterReview, type LookupTables, type SolanaRpc, type SolanaTransferReview } from '@defi-workflow-engine/reference-compiler';
+import { createHash } from 'node:crypto';
 import type { ChainTransport } from '../delegation/chains.ts';
 import { assetKey, type WorkflowRequirement } from '../delegation/steps.ts';
 import type { WorkflowComposition } from '../engine/strategy-engine';
@@ -62,6 +63,10 @@ async function feeFacts(t: ChainTransport, owner: string) {
   const [priority, gasPrice, balance] = await Promise.all([t.rpc('eth_maxPriorityFeePerGas', []), t.rpc('eth_gasPrice', []), t.rpc('eth_getBalance', [owner, 'latest'])]);
   return { priority: big(priority), gasPrice: big(gasPrice), balance: big(balance) };
 }
+/** The app-provided EIP-5792 batch id of one group of one run (stable across preparations). */
+export const walletBatchId = (runId: string, groupIndex: number) => '0x' + createHash('sha256').update(`flofi:user-funded-batch:${runId}:${groupIndex}`).digest('hex');
+/** A well-formed 65-byte ECDSA signature that recovers to nobody's account: bundler estimation validates without reverting on length. */
+const ESTIMATION_SIGNATURE = '0x' + 'ff'.repeat(32) + '7f' + 'ff'.repeat(31) + '1c';
 const nativeSpend = (group: EvmGroupCalls) => group.calls.reduce((sum, c) => c.kind === 'NATIVE_TRANSFER' ? sum + BigInt(c.amount) : sum, 0n);
 
 async function prepareWalletBatch(deps: UserFundedDeps, requirement: WorkflowRequirement, g: GroupInput, guaranteed: ReadonlyMap<number, AssetAmountFact>): Promise<Result<Prepared>> {
@@ -79,8 +84,12 @@ async function prepareWalletBatch(deps: UserFundedDeps, requirement: WorkflowReq
   const maxFeePerGas = fees.gasPrice * 2n + fees.priority, maxCost = gas * maxFeePerGas;
   // Financial isolation: the owner's own native balance must cover the fee ceiling plus any native value sent; nobody else's ever does.
   if (fees.balance < maxCost + nativeSpend(group)) return no('USER_FUNDED_INSUFFICIENT_NATIVE_BALANCE');
-  const request = eip5792.sendCallsRequest(group.chainId, group.owner, calls);
-  return ok({ kind: 'EVM_WALLET_BATCH', chainId: group.chainId, owner: group.owner, group, request,
+  // One id per group, the same for every preparation of it: a wallet that honours EIP-5792 ids refuses to execute the group twice (a retry
+  // after a lost answer, a reload, a re-preparation after expiry) and lets the owner's browser read the first batch back instead.
+  const request = eip5792.sendCallsRequest(group.chainId, group.owner, calls, walletBatchId(g.runId, g.groupIndex));
+  // Receipts older than this preparation can never reconcile this group (an old owner transaction is not this batch).
+  const fromBlock = big(await t.rpc('eth_blockNumber', [])).toString();
+  return ok({ kind: 'EVM_WALLET_BATCH', chainId: group.chainId, owner: group.owner, group, request, fromBlock,
     fee: { payer: group.owner, unit: 'wei', estimatedGas: gas.toString(), maxFeePerGas: maxFeePerGas.toString(), maxCost: maxCost.toString(), estimated: true } });
 }
 
@@ -92,10 +101,12 @@ async function prepareUserOperation(deps: UserFundedDeps, requirement: WorkflowR
   const built = await buildEvmGroupCalls(requirement, g.stepFrom, g.stepTo, { chains: deps.chains, owner: g.feePayer, transport: deps.evm, guaranteed });
   if (!built.ok) return no(built.code, built.stepIndex);
   const group = built.value, callData = erc4337.batchCallData(evmCallsOf(group));
-  // The account must be (or become, inside an earlier batch of this run) the owner's MetaMask EIP-7702 smart account.
+  // The account must already BE the owner's MetaMask EIP-7702 smart account: a typed-data signature cannot upgrade an account, so an operation
+  // signed for a plain account would only be refused by the bundler after the delivery landed (the group is then a wallet batch, when due).
   const code = String(await t.rpc('eth_getCode', [group.owner, 'latest'])).toLowerCase();
   const upgraded = code === '0xef0100' + erc4337.DELEGATOR_IMPLEMENTATION.slice(2).toLowerCase();
-  if (!upgraded && code !== '0x') return no('EVM_ACCOUNT_DELEGATED_ELSEWHERE');
+  if (code !== '0x' && !upgraded) return no('EVM_ACCOUNT_DELEGATED_ELSEWHERE');
+  if (!upgraded) return no('EVM_SMART_ACCOUNT_REQUIRED');
   const key = erc4337.nonceKeyOf(`${g.runId}:g${g.groupIndex}`);
   const sequence = erc4337.decodeGetNonce(await t.rpc('eth_call', [{ to: erc4337.ENTRY_POINT_V0_7, data: erc4337.getNonceCall(group.owner, key) }, 'latest']));
   const nonce = erc4337.userOpNonce(key, sequence);
@@ -104,8 +115,9 @@ async function prepareUserOperation(deps: UserFundedDeps, requirement: WorkflowR
   let limits = { verificationGasLimit: USER_OP_FALLBACK.verificationGasLimit, callGasLimit: USER_OP_FALLBACK.perCallGas * BigInt(group.calls.length),
     preVerificationGas: USER_OP_FALLBACK.preVerificationGas };
   // A delayed group cannot be simulated before its delivery: it is signed with conservative limits and simulated by the bundler when due.
-  if (upgraded && !delayed) {
-    const draft = erc4337.packedUserOperation({ sender: group.owner, nonce, callData, gas: { ...limits, maxFeePerGas, maxPriorityFeePerGas: fees.priority } });
+  if (!delayed) {
+    const draft = { ...erc4337.packedUserOperation({ sender: group.owner, nonce, callData, gas: { ...limits, maxFeePerGas, maxPriorityFeePerGas: fees.priority } }),
+      signature: ESTIMATION_SIGNATURE };
     try { const e = await bundler.estimate(draft); limits = { verificationGasLimit: e.verificationGasLimit * 12n / 10n, callGasLimit: e.callGasLimit * 12n / 10n,
       preVerificationGas: e.preVerificationGas * 11n / 10n }; }
     catch (cause) { return no(codeOf(cause, 'USER_OPERATION_SIMULATION_FAILED')); }
@@ -117,7 +129,7 @@ async function prepareUserOperation(deps: UserFundedDeps, requirement: WorkflowR
   if (!delayed && fees.balance < maxCost + nativeSpend(group)) return no('USER_FUNDED_INSUFFICIENT_NATIVE_BALANCE');
   return ok({ kind: 'EVM_USER_OPERATION', chainId: group.chainId, owner: group.owner, group, upgraded,
     op: serialOp(op), userOpHash: erc4337.userOpHash(op, group.chainId), typedData: erc4337.delegatorUserOpTypedData(group.chainId, op),
-    fee: { payer: group.owner, unit: 'wei', maxFeePerGas: maxFeePerGas.toString(), maxCost: maxCost.toString(), estimated: !delayed && upgraded } });
+    fee: { payer: group.owner, unit: 'wei', maxFeePerGas: maxFeePerGas.toString(), maxCost: maxCost.toString(), estimated: !delayed } });
 }
 export type SerialOp = { readonly sender: string; readonly nonce: string; readonly callData: string; readonly accountGasLimits: string; readonly preVerificationGas: string;
   readonly gasFees: string };
@@ -212,18 +224,33 @@ export function authorizeGroup(prepared: Prepared, answer: OwnerAnswer, owner: s
 }
 
 // ── Submission ────────────────────────────────────────────────────────────────────────────────────────────────────────────
-/** Relays an AUTHORIZED user operation (simulated by the bundler first: a failing one is never sent, so it costs the owner nothing). */
-export async function submitUserOperation(deps: UserFundedDeps, prepared: Prepared, authorization: Readonly<Record<string, unknown>>, owner: string): Promise<Result<Readonly<Record<string, unknown>>>> {
+/**
+ * Due-time simulation of an AUTHORIZED user operation, BEFORE anything is relayed: the bundler validates and simulates the exact signed
+ * operation, and what it needs must fit the gas words the owner signed (they cannot change without a new signature). A refusal here sends
+ * nothing and costs the owner nothing. Returns the submission record to write (the EntryPoint hash is FloFi's own computation).
+ */
+export async function checkUserOperation(deps: UserFundedDeps, prepared: Prepared, authorization: Readonly<Record<string, unknown>>, owner: string): Promise<Result<Readonly<Record<string, unknown>>>> {
   const chain = `eip155:${String(prepared.chainId)}`, bundler = deps.bundler(chain);
   if (!bundler) return no('USER_OPERATION_BUNDLER_UNAVAILABLE');
   const op = opOf(prepared.op as SerialOp, String(authorization.signature));
   assertUserFundedSubmission({ kind: 'EVM_USER_OPERATION', feePayer: op.sender, ownerWallet: owner, sponsorship: op.paymasterAndData });
   try {
-    // Due-time simulation: the bundler validates and simulates the exact signed operation; a revert or a too-low fee is a refusal, not a send.
-    await bundler.estimate(op);
-    const hash = await bundler.send(op);
-    return ok({ kind: 'EVM_USER_OPERATION', userOpHash: hash, hashes: [], submittedAt: deps.now().toISOString() });
+    const need = await bundler.estimate(op);
+    const [verificationGasLimit, callGasLimit] = erc4337.unpackUints(op.accountGasLimits);
+    if (need.verificationGasLimit > verificationGasLimit || need.callGasLimit > callGasLimit || need.preVerificationGas > op.preVerificationGas)
+      return no('USER_OPERATION_GAS_LIMIT_TOO_LOW');
   } catch (cause) { return no(codeOf(cause, 'USER_OPERATION_REJECTED')); }
+  return ok({ kind: 'EVM_USER_OPERATION', userOpHash: erc4337.userOpHash(op, Number(prepared.chainId)), hashes: [], submittedAt: deps.now().toISOString() });
+}
+/**
+ * Relays the owner-signed operation to the bundler. Called only after its submission was recorded (exactly one process won that write), and
+ * again by reconciliation while neither the chain nor the bundler knows it: the same signed bytes, so a resend can never be a second operation.
+ */
+export async function relayUserOperation(deps: UserFundedDeps, prepared: Prepared, authorization: Readonly<Record<string, unknown>>): Promise<Result<string>> {
+  const bundler = deps.bundler(`eip155:${String(prepared.chainId)}`);
+  if (!bundler) return no('USER_OPERATION_BUNDLER_UNAVAILABLE');
+  try { return ok(await bundler.send(opOf(prepared.op as SerialOp, String(authorization.signature)))); }
+  catch (cause) { return no(codeOf(cause, 'USER_OPERATION_REJECTED')); }
 }
 /** The Solana submission record: every signature is known before anything is sent (the first signature of each owner-signed transaction). */
 export function solanaSubmission(authorization: Readonly<Record<string, unknown>>, now: Date): Readonly<Record<string, unknown>> {
@@ -302,16 +329,25 @@ export async function reconcileSolanaGroup(deps: UserFundedDeps, prepared: Prepa
   return { status: 'RECONCILED', steps, gasPaid: { payer: owner, amount: fee.toString(), unit: 'lamports', source: 'SOLANA_META' }, transactions: [...signatures] };
 }
 /** Reconciles an EVM group from the chain (wallet batch: the reported hashes; user operation: the bundler's bundle transaction, re-read). */
-export async function reconcileEvmGroup(deps: UserFundedDeps, prepared: Prepared, submission: Readonly<Record<string, unknown>>): Promise<Reconciled> {
+export async function reconcileEvmGroup(deps: UserFundedDeps, prepared: Prepared, submission: Readonly<Record<string, unknown>>,
+  authorization: Readonly<Record<string, unknown>> | null = null): Promise<Reconciled> {
   const group = prepared.group as EvmGroupCalls, t = deps.evm(group.chain);
   if (!t) return { status: 'PENDING' };
   if (prepared.kind === 'EVM_WALLET_BATCH') {
-    const r = await reconcileWalletBatch(t, group, (submission.hashes ?? []) as string[]);
+    const r = await reconcileWalletBatch(t, group, (submission.hashes ?? []) as string[], typeof prepared.fromBlock === 'string' ? prepared.fromBlock : null);
     return r.status === 'PENDING' ? r : r.status === 'RECONCILED' ? { status: 'RECONCILED', steps: r.steps, gasPaid: r.gasPaid, transactions: r.transactions }
       : { status: 'FAILED', code: r.code, gasPaid: r.gasPaid, transactions: r.transactions };
   }
   const bundler = deps.bundler(group.chain), userOpHash = String(submission.userOpHash);
   const receipt = bundler ? await bundler.receipt(userOpHash).catch(() => null) : null;
+  // Recorded but unknown to the bundler and not mined (the relay after the record never happened, or the bundler dropped it): the SAME
+  // signed operation is relayed again. Its nonce key admits it once, so this can never execute a second operation.
+  if (!receipt && bundler && authorization && await bundler.known(userOpHash).then(k => !k, () => false)) {
+    const resent = await relayUserOperation(deps, prepared, authorization);
+    if (!resent.ok && !['USER_OPERATION_BUNDLER_UNAVAILABLE', 'USER_OPERATION_FEE_TOO_LOW', 'USER_OPERATION_NONCE_INVALID'].includes(resent.code))
+      return { status: 'FAILED', code: resent.code, gasPaid: null, transactions: [] };
+    return { status: 'PENDING' };
+  }
   const r = await reconcileUserOperation(t, group, userOpHash, receipt?.transactionHash ?? null);
   return r.status === 'PENDING' ? r : r.status === 'RECONCILED' ? { status: 'RECONCILED', steps: r.steps, gasPaid: r.gasPaid, transactions: r.transactions }
     : { status: 'FAILED', code: r.code, gasPaid: r.gasPaid, transactions: r.transactions };

@@ -67,6 +67,9 @@ describe('BUILD-FLOFI-UNIVERSAL-WORKFLOW-002 user-funded workflow run (PostgreSQ
         transactions: [{ hash }] });
       // The second swap spent exactly the guaranteed minimum; the owner got USDC back; nothing came from or went to a FloFi account.
       expect(run.steps[1]!.outcome!.spent).toEqual([{ asset: `${BASE_SEPOLIA}/erc20:${h.d.evm.control.profile.weth}`, amount: minimum }]);
+      // The bound step records what it was signed to spend from its producer, as a confirm-mode step does: any later consumer of the same
+      // output is funded only by what is left of it (never by the owner's unrelated balance).
+      expect(run.steps[1]!.bound).toMatchObject({ amountFrom: 0, used: minimum });
       expect(h.d.evm.control.balance('USDC', h.d.evmOwner.address)).toBeLessThan(usdcBefore);
       expect(h.d.evm.control.sends()).toBe(0);
       expect((await t.db.query('SELECT count(*)::int AS n FROM credential_grants')).rows).toEqual([{ n: 0 }]);
@@ -92,7 +95,7 @@ describe('BUILD-FLOFI-UNIVERSAL-WORKFLOW-002 user-funded workflow run (PostgreSQ
     } finally { await t.drop(); }
   });
 
-  it('a wallet that executes anything but the prepared calls (an extra outflow to another recipient) never reconciles', async () => {
+  it('a wallet that executes anything but the prepared calls (an extra outflow, a redirected recipient) never reconciles', async () => {
     const t = await createTestDatabase();
     try {
       const { h, approval } = await setup(t);
@@ -103,7 +106,8 @@ describe('BUILD-FLOFI-UNIVERSAL-WORKFLOW-002 user-funded workflow run (PostgreSQ
       const tampered = h.d.evm.control.walletBatch(h.d.evmOwner.address, [...evmCallsOf(group), drain]);
       await workflowRunUserFundedAuthorize(h.surface, approval.approvalId, [h.evm, h.sol], 0, { kind: 'EVM_WALLET_BATCH', batchId: 'batch-2' });
       const after = await workflowRunUserFundedReport(h.surface, approval.approvalId, [h.evm, h.sol], 0, [tampered]);
-      expect(after.view.workflowRun!.run).toMatchObject({ state: 'FAILED', code: 'RECONCILIATION_UNEXPECTED_OWNER_OUTFLOW' });
+      // The batch's own transaction carries a call nobody prepared: it never reconciles (before even reading its logs).
+      expect(after.view.workflowRun!.run).toMatchObject({ state: 'FAILED', code: 'RECONCILIATION_CALLS_MISMATCH' });
     } finally { await t.drop(); }
   });
 
@@ -142,7 +146,7 @@ describe('BUILD-FLOFI-UNIVERSAL-WORKFLOW-002 user-funded workflow run (PostgreSQ
     } finally { await t.drop(); }
   });
 
-  it('only the run\'s own wallets can start, prepare or authorize; an expired preparation is never authorized; a retried answer changes nothing', async () => {
+  it('only the run\'s own wallets can start, prepare or authorize; a wallet batch answered late is still taken, under one id; a retried answer changes nothing', async () => {
     const t = await createTestDatabase();
     try {
       const { h, approval } = await setup(t);
@@ -150,12 +154,22 @@ describe('BUILD-FLOFI-UNIVERSAL-WORKFLOW-002 user-funded workflow run (PostgreSQ
       await expect(workflowRunUserFundedStart(h.surface, approval.approvalId, [stranger], METAMASK)).rejects.toThrow('WORKFLOW_RUN_NOT_FOUND');
       await workflowRunUserFundedStart(h.surface, approval.approvalId, [h.evm, h.sol], METAMASK);
       await expect(workflowRunUserFundedPrepare(h.surface, approval.approvalId, [stranger], 0)).rejects.toThrow('WORKFLOW_RUN_NOT_FOUND');
-      await workflowRunUserFundedPrepare(h.surface, approval.approvalId, [h.evm, h.sol], 0);
-      // Past its validity (fresh quotes), a preparation is never authorized: it must be prepared again with fresh facts.
+      const first = await workflowRunUserFundedPrepare(h.surface, approval.approvalId, [h.evm, h.sol], 0);
+      const id = (first.prepared as unknown as { request: { id: string } }).request.id;
+      expect(id).toMatch(/^0x[0-9a-f]{64}$/);
+      // The wallet sends a batch the moment the owner confirms, whenever that is: past the preparation's validity the group is NOT dropped
+      // (the worker leaves it PREPARED), and a new preparation keeps the SAME EIP-5792 id, so a wallet refuses to run the group twice.
       h.d.advance(11 * 60_000);
-      await expect(workflowRunUserFundedAuthorize(h.surface, approval.approvalId, [h.evm, h.sol], 0, { kind: 'EVM_WALLET_BATCH', batchId: 'late' }))
-        .rejects.toThrow('USER_FUNDED_PREPARED_EXPIRED');
-      await workflowRunUserFundedPrepare(h.surface, approval.approvalId, [h.evm, h.sol], 0);
+      const run0 = await ownedRun(h.runs, approval.approvalId, [h.evm, h.sol]);
+      await h.drain(run0.runId);
+      expect((await h.store.groups(run0.runId))[0]).toMatchObject({ state: 'PREPARED' });
+      // The owner cannot end the run while that batch may still be confirmed in the wallet... until its window passed.
+      const refreshed = await workflowRunUserFundedPrepare(h.surface, approval.approvalId, [h.evm, h.sol], 0);
+      expect((refreshed.prepared as unknown as { request: { id: string } }).request.id).toBe(id);
+      const live = await ownedRun(h.runs, approval.approvalId, [h.evm, h.sol]);
+      await expect(h.store.cancel(live.runId, live.version, 'OWNER_CANCELLED', h.d.now())).rejects.toThrow('WORKFLOW_RUN_GROUP_IN_FLIGHT');
+      // ... and its late answer is taken (the chain decides at reconciliation), never refused as expired.
+      h.d.advance(11 * 60_000);
       await workflowRunUserFundedAuthorize(h.surface, approval.approvalId, [h.evm, h.sol], 0, { kind: 'EVM_WALLET_BATCH', batchId: 'batch-4' });
       const again = await workflowRunUserFundedAuthorize(h.surface, approval.approvalId, [h.evm, h.sol], 0, { kind: 'EVM_WALLET_BATCH', batchId: 'other' });
       expect(again.view.workflowRun!.run.groups[0]).toMatchObject({ state: 'AUTHORIZED', batchId: 'batch-4' });

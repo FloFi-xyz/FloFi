@@ -8,7 +8,7 @@
  * `erc7710` enforcer MODEL (not the bytecode) before and after the call — plus the owner's own `disableDelegation` self-call. A refused
  * redemption mines as a reverted transaction (status 0, no effect but the nonce), like the real manager. Evidence from it is MOCKED.
  */
-import { erc7710 } from '@defi-workflow-engine/reference-compiler';
+import { erc4337, erc7710 } from '@defi-workflow-engine/reference-compiler';
 import { publicSwapProfile, type PublicSwapProfile } from '../../domain/public-testnet-swap.ts';
 
 const D = erc7710, F = D.DELEGATION_FRAMEWORK_V1_3;
@@ -201,7 +201,8 @@ export function createEvmDouble(chainId: number, clock: () => number = () => Mat
       nonces.set(sender, n + 1n);
       const hash = D.keccakHex(`batch:${sender}:${n}:${calls.map(c => c.data).join('')}`);
       const snapshot = { balances: new Map(balances), allowances: new Map(allowances) };
-      return mine(hash, sender, lower(owner), '0x', n, () => {
+      // The transaction a 7702 wallet sends: a self-call `execute(batch)` carrying exactly these calls (reconciliation decodes it).
+      return mine(hash, sender, lower(owner), erc4337.batchCallData(calls), n, () => {
         try { return calls.flatMap(c => execute(lower(owner), c)); }
         catch (cause) { balances.clear(); snapshot.balances.forEach((v, k) => balances.set(k, v)); allowances.clear(); snapshot.allowances.forEach((v, k) => allowances.set(k, v)); throw cause; }
       });

@@ -16,7 +16,7 @@ import { useEffect, useRef, useState } from 'react';
 import { authorizeUserFundedGroup, authorizeWorkflowRunHandoff, cancelWorkflowRunHandoff, continueWorkflowRunHandoff, prepareUserFundedGroup, reportUserFundedBatch,
   resumeWorkflowRunHandoff, reviewWorkflowRunAuthorization, startUserFundedWorkflowRun, startWorkflowRunHandoff, workflowRunStatusHandoff } from '../app/approve-action';
 import type { eip5792 } from '@defi-workflow-engine/reference-compiler';
-import { sendWalletBatch, signSolanaGroup, signUserOperation, walletBatchHashes, walletProfile } from './user-funded-browser';
+import { revokeUserOperation, sendWalletBatch, signSolanaGroup, signUserOperation, walletBatchHashes, walletProfile } from './user-funded-browser';
 import { chosenEvmProvider, injected } from '../wallet/evm-discovery';
 import type { WalletWorkflowReviewView } from '../delegation/views';
 import { canEndWorkflow } from '../workflow-runs/state-machine';
@@ -126,15 +126,13 @@ export function WorkflowRunPanel({ claim, approvalId, secret, onProposal, onErro
     if (!prepared.ok) return prepared;
     const p = prepared.value.prepared as unknown as Record<string, unknown>;
     if (p.kind === 'EVM_WALLET_BATCH') {
-      const batchId = await sendWalletBatch(p.request as eip5792.SendCallsRequest);
+      const request = p.request as eip5792.SendCallsRequest;
+      // The group's batch may already be in the wallet (a reload, a lost answer, an earlier preparation): it is read back by its id, never sent again.
+      const known = request.id ? await walletBatchHashes(request.id).then(() => true, () => false) : false;
+      const batchId = known ? request.id! : await sendWalletBatch(request);
       const authorized = await authorizeUserFundedGroup(approvalId, index, { kind: 'EVM_WALLET_BATCH', batchId });
       if (!authorized.ok) return authorized;
-      for (let i = 0; i < 40; i++) {
-        const done = await walletBatchHashes(batchId).catch(() => null);
-        if (done?.hashes.length) return reportUserFundedBatch(approvalId, index, [...done.hashes]);
-        await new Promise(resolve => setTimeout(resolve, 3_000));
-      }
-      return authorized;
+      return followBatch(index, batchId, authorized);
     }
     if (p.kind === 'EVM_USER_OPERATION') {
       const signature = await signUserOperation(prepared.value.feePayer, Number(p.chainId), p.typedData);
@@ -146,10 +144,21 @@ export function WorkflowRunPanel({ claim, approvalId, secret, onProposal, onErro
     }
     return { ok: false as const, code: 'USER_FUNDED_GROUP_NOT_PREPARABLE' };
   });
+  /** Waits for the wallet to settle the batch and reports it: its transactions, or that it failed off chain (nothing was sent). */
+  async function followBatch<T>(index: number, batchId: string, pending: T) {
+    for (let i = 0; i < 40; i++) {
+      const done = await walletBatchHashes(batchId).catch(() => null);
+      if (done?.hashes.length) return reportUserFundedBatch(approvalId, index, [...done.hashes]);
+      if (done?.failed) return reportUserFundedBatch(approvalId, index, [], true);
+      await new Promise(resolve => setTimeout(resolve, 3_000));
+    }
+    return pending;
+  }
   /** A batch the wallet already sent (e.g. after a reload): its hashes are read back from the wallet and reported. */
   const recoverBatch = (index: number, batchId: string) => act(async () => {
     const done = await walletBatchHashes(batchId);
-    return done?.hashes.length ? reportUserFundedBatch(approvalId, index, [...done.hashes]) : workflowRunStatusHandoff(approvalId);
+    return done?.hashes.length ? reportUserFundedBatch(approvalId, index, [...done.hashes]) : done?.failed ? reportUserFundedBatch(approvalId, index, [], true)
+      : workflowRunStatusHandoff(approvalId);
   });
   const currentGroup = run.groups?.find(g => g.steps[0] <= run.currentStep && run.currentStep <= g.steps[1]) ?? null;
   const userFundedCount = plan.userFunded?.interactions ? plan.userFunded.interactions.upfront + plan.userFunded.interactions.whenDue : 0;
@@ -239,11 +248,25 @@ export function WorkflowRunPanel({ claim, approvalId, secret, onProposal, onErro
       <button type="button" disabled={busy} onClick={() => void authorizeGroup(currentGroup.index)}>
         {tr('Authorize steps {0}–{1} now', String(currentGroup.steps[0] + 1), String(currentGroup.steps[1] + 1))}</button>
     </div>}
-    {run.mode === 'USER_FUNDED' && open && (run.groups ?? []).filter(g => g.signing === 'UPFRONT' && g.state === 'PLANNED' && g.index !== currentGroup?.index).map(g =>
+    {/* Only a user operation can be signed before it is due (FloFi relays it when due); a wallet batch would be sent at once, out of order. */}
+    {run.mode === 'USER_FUNDED' && open && (run.groups ?? []).filter(g => g.signing === 'UPFRONT' && g.strategy === 'EVM_USER_OPERATION' && g.state === 'PLANNED'
+      && g.index !== currentGroup?.index).map(g =>
       <div key={g.index} className="approval-actions">
         <button type="button" className="secondary" disabled={busy} onClick={() => void authorizeGroup(g.index)}>
           {tr('Sign steps {0}–{1} now; FloFi relays them when they are due', String(g.steps[0] + 1), String(g.steps[1] + 1))}</button>
       </div>)}
+    {/* A user operation the owner signed that FloFi never relayed stays valid on chain (its delegator has no expiry) until the owner uses its nonce key. */}
+    {run.mode === 'USER_FUNDED' && !['RUNNING', 'ATTENTION'].includes(run.state) && (run.groups ?? []).filter(g => g.strategy === 'EVM_USER_OPERATION' && g.signed
+      && !['SUBMITTED', 'UNCERTAIN', 'RECONCILED'].includes(g.state)).map(g => <div key={`revoke-${g.index}`} className="workflow-run-choice">
+      <p role="note">{tr('You signed steps {0}–{1} as an operation FloFi did not relay. It stays valid until you cancel it with one transaction from your own wallet.',
+        String(g.steps[0] + 1), String(g.steps[1] + 1))}</p>
+      <div className="approval-actions">
+        <button type="button" className="secondary" disabled={busy} onClick={() => void act(async () => {
+          await revokeUserOperation(g.feePayer, Number(g.chain.slice('eip155:'.length)), run.workflowRunId, g.index);
+          return workflowRunStatusHandoff(approvalId);
+        })}>{tr('Cancel the signed operation in my wallet')}</button>
+      </div>
+    </div>)}
     {run.mode === 'USER_FUNDED' && run.nextAction === 'OWNER_CONFIRMS_BATCH' && currentGroup?.batchId && <div className="approval-actions">
       <button type="button" className="secondary" disabled={busy} onClick={() => void recoverBatch(currentGroup.index, currentGroup.batchId!)}>{tr('Check my wallet for the batch')}</button>
     </div>}

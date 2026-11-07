@@ -12,7 +12,7 @@
  *   user operation `eth_signTypedData_v4` of the owner's own ERC-4337 operation (MetaMask EIP7702StatelessDeleGator domain)
  *   Solana         one `solana:signTransaction` request for every transaction of the group
  */
-import { eip5792 } from '@defi-workflow-engine/reference-compiler';
+import { eip5792, erc4337 } from '@defi-workflow-engine/reference-compiler';
 import { chosenEvmProvider, evmWalletIdentity, injected, isFloFiWalletKey, type EvmProvider } from '../wallet/evm-discovery';
 import { connectSolanaWallet, signAllWithSolanaWallet } from '../wallet/solana-wallet';
 import { walletPreference } from '../wallet/wallet-registry';
@@ -47,7 +47,11 @@ export async function walletProfile(evmAddress: string | null, chains: readonly 
   return { ...eip155 ? { eip155 } : {}, ...solana ? { solana } : {} };
 }
 
-/** Sends the prepared atomic batch from the owner's own account; returns the wallet's batch id (the wallet signs, sends and pays). */
+/**
+ * Sends the prepared atomic batch from the owner's own account; returns the wallet's batch id (the wallet signs, sends and pays). The request
+ * carries the group's own EIP-5792 id: a wallet that already has that batch refuses it as a duplicate (5720), which means it was SENT before —
+ * its id is returned so it is read back, never sent twice.
+ */
 export async function sendWalletBatch(request: eip5792.SendCallsRequest): Promise<string> {
   const provider = evmProvider();
   const chainId = BigInt(request.chainId);
@@ -57,14 +61,30 @@ export async function sendWalletBatch(request: eip5792.SendCallsRequest): Promis
     if (!await onChain()) fail('WALLET_WRONG_NETWORK');
   }
   // Exactly the prepared request: atomic required, no capabilities (FloFi never asks for a paymaster or sponsorship).
-  const answer = await provider.request({ method: 'wallet_sendCalls', params: [{ ...request, calls: request.calls.map(c => ({ ...c })) }] }).catch(rejected);
+  const answer = await provider.request({ method: 'wallet_sendCalls', params: [{ ...request, calls: request.calls.map(c => ({ ...c })) }] })
+    .catch(cause => request.id && (cause as { code?: unknown } | null)?.code === eip5792.DUPLICATE_ID ? request.id : rejected(cause));
   return eip5792.sendCallsId(answer);
 }
-/** The transaction hashes of a batch once the wallet reports it final (null while pending). Only the hashes are used; the chain decides. */
+/**
+ * The transaction hashes of a batch once the wallet reports it final (null while pending). Only the hashes are used; the chain decides.
+ * Throws when the wallet does not know the id (EIP-5792 5730): nothing was sent under it.
+ */
 export async function walletBatchHashes(batchId: string): Promise<{ readonly hashes: readonly string[]; readonly failed: boolean } | null> {
   const status = eip5792.callsStatus(await evmProvider().request({ method: 'wallet_getCallsStatus', params: [batchId] }));
   if (status.status === 'PENDING' || status.status === 'UNKNOWN') return null;
   return { hashes: status.receipts.map(r => r.transactionHash), failed: status.status !== 'CONFIRMED' };
+}
+/**
+ * The owner revokes a user operation they signed that FloFi never relayed: their own wallet sends `EntryPoint.incrementNonce(key)` for that
+ * group's nonce key (the owner confirms and pays). Afterwards the signed operation can never execute. Returns the transaction hash.
+ */
+export async function revokeUserOperation(owner: string, chainId: number, runId: string, groupIndex: number): Promise<string> {
+  const provider = evmProvider(), chain = '0x' + chainId.toString(16);
+  const current = await provider.request({ method: 'eth_chainId', params: [] });
+  if (typeof current !== 'string' || BigInt(current) !== BigInt(chainId)) await provider.request({ method: 'wallet_switchEthereumChain', params: [{ chainId: chain }] }).catch(rejected);
+  const hash = await provider.request({ method: 'eth_sendTransaction', params: [{ from: owner, to: erc4337.ENTRY_POINT_V0_7,
+    data: erc4337.incrementNonceCall(erc4337.nonceKeyOf(`${runId}:g${groupIndex}`)) }] }).catch(rejected);
+  return typeof hash === 'string' && /^0x[0-9a-fA-F]{64}$/.test(hash) ? hash : fail('WALLET_RESPONSE_INVALID');
 }
 /** The owner signs their own user operation's EIP-712 typed data on its chain (no transaction is sent by the wallet). */
 export async function signUserOperation(address: string, chainId: number, typedData: unknown): Promise<string> {

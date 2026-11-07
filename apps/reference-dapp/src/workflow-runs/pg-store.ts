@@ -171,7 +171,7 @@ export function createPgWorkflowRunStore(db: Database, tenantId: string) {
       });
     },
     /** Cancellation and skipping are atomic under the same run lock used by step loading and delegated activation. */
-    cancel: (runId: string, version: number, code: string) => db.transaction(async tx => {
+    cancel: (runId: string, version: number, code: string, now: Date = new Date()) => db.transaction(async tx => {
       const run = await lockRun(tx, runId) ?? refuse('WORKFLOW_RUN_NOT_FOUND');
       if (run.version !== version) refuse('WORKFLOW_RUN_CHANGED');
       if (!['PENDING', 'RUNNING', 'HALTED'].includes(run.state)) refuse(`WORKFLOW_RUN_${run.state}`);
@@ -184,6 +184,8 @@ export function createPgWorkflowRunStore(db: Database, tenantId: string) {
       if (run.mode === 'USER_FUNDED') {
         const groups = (await tx.query('SELECT * FROM workflow_run_groups WHERE tenant_id = $1 AND run_id = $2 ORDER BY group_index FOR UPDATE', [tenantId, runId])).rows.map(groupOf);
         if (groups.some(g => ['AUTHORIZED', 'SUBMITTED', 'UNCERTAIN'].includes(g.state))) refuse('WORKFLOW_RUN_GROUP_IN_FLIGHT');
+        // A wallet batch the owner's wallet may be confirming right now would execute after the run ended: wait until its window passed.
+        if (groups.some(g => g.state === 'PREPARED' && g.strategy === 'EVM_WALLET_BATCH' && g.validUntil && g.validUntil > now)) refuse('WORKFLOW_RUN_GROUP_IN_FLIGHT');
         for (const g of groups) if (['PLANNED', 'PREPARED', 'EXPIRED', 'BLOCKED'].includes(g.state)) {
           await tx.query(`UPDATE workflow_run_groups SET state = 'SKIPPED', code = $4, version = version + 1 WHERE tenant_id = $1 AND run_id = $2 AND group_index = $3`,
             [tenantId, runId, g.groupIndex, code]);

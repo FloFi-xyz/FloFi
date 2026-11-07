@@ -75,8 +75,23 @@ describe('BUILD-FLOFI-UNIVERSAL-WORKFLOW-002 execution groups', () => {
       ['solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp', 'SOLANA_SIGN_ALL', 'WHEN_DUE', 1, 2, 3]]);
     // The Solana swap spends what the bridge actually delivered (reconciled), never an estimate; it is signed when the delivery landed.
     expect(p.groups[2]!.steps[0]).toMatchObject({ amount: 'RECONCILED_ACTUAL', boundTo: 1 });
-    expect(p.groups[2]!.downgrades).toContain('WORKFLOW_BINDING_RESOLVED_WHEN_DUE');
+    // Durable nonces are not offered in this build (ADR-0008): a post-delivery Solana group is signed when due, and says why.
+    expect(p.groups[2]!.downgrades).toContain('SOLANA_DURABLE_NONCE_NOT_OFFERED');
     expect(p.interactions).toMatchObject({ upfront: 1, whenDue: 2, perNamespace: { eip155: 2, solana: 1 }, single: false });
+    // Even a delayed Solana group with no dependency on the delivery, on a deployment that would allow nonce accounts, is signed when due.
+    const free = plan({ version: 2, steps: [bridge, SOL_SEND] }, METAMASK, { ...ALL, solanaNonceAccounts: true });
+    expect(free.groups.map(g => [g.strategy, g.signing])).toEqual([['EVM_OWNER_STEP', 'WHEN_DUE'], ['SOLANA_SIGN_ALL', 'WHEN_DUE']]);
+  });
+
+  it('only the first group or a user operation is signed upfront: a later wallet batch would be SENT at once, out of order', () => {
+    const p = plan({ version: 2, steps: [SWAP_BASE, { ...SWAP_BASE, network: 'arbitrum-one' }] }, METAMASK);
+    expect(p.groups.map(g => [g.chain, g.strategy, g.signing])).toEqual([['eip155:8453', 'EVM_WALLET_BATCH', 'UPFRONT'], ['eip155:42161', 'EVM_WALLET_BATCH', 'WHEN_DUE']]);
+    // A user operation needs an account that is ALREADY a smart account: `ready` (upgrade on first batch) cannot sign one.
+    const bridge = { action: 'bridge', sourceNetwork: 'arbitrum-one', destinationNetwork: 'base', asset: 'USDC', amount: '5' };
+    const ready = { ...METAMASK, eip155: { ...METAMASK.eip155!, atomic: { 'eip155:8453': 'ready' as const, 'eip155:42161': 'ready' as const } } };
+    const delayed = plan({ version: 2, steps: [bridge, SEND_BASE] }, ready);
+    expect(delayed.groups[1]).toMatchObject({ strategy: 'EVM_WALLET_BATCH', signing: 'WHEN_DUE' });
+    expect(delayed.groups[1]!.downgrades).toContain('EVM_SMART_ACCOUNT_REQUIRED');
   });
 
   it('Solana: independent steps share one sign-all prompt; a step spending an earlier step\'s output starts its own group, signed when due', () => {
@@ -93,7 +108,7 @@ describe('BUILD-FLOFI-UNIVERSAL-WORKFLOW-002 execution groups', () => {
   it('summarizes honestly: network switches, setup prompts and the meaning of "single"', () => {
     const p = plan({ version: 2, steps: [SWAP_BASE, { ...SWAP_BASE, network: 'arbitrum-one' }] }, METAMASK);
     expect(p.groups.map(g => g.chain)).toEqual(['eip155:8453', 'eip155:42161']);
-    expect(p.interactions).toMatchObject({ upfront: 2, networkSwitches: 1, single: false });
+    expect(p.interactions).toMatchObject({ upfront: 1, whenDue: 1, networkSwitches: 1, single: false });
     expect(summarize([{ ...p.groups[0]!, setup: ['SOLANA_NONCE_ACCOUNTS'] }]).single).toBe(false);
     // Without a wallet profile the plan says it assumed the supported wallet families' documented capabilities.
     expect(plan({ version: 2, steps: [SWAP_BASE, SEND_BASE] }).groups[0]!.downgrades).toContain('WALLET_CAPABILITIES_ASSUMED');

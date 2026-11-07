@@ -130,7 +130,7 @@ export async function observeRun(deps: WorkflowRunDeps, run: RunRecord, wallets:
 /** The owner ends a run that cannot continue (HALTED), or one that never submitted anything; remaining steps are SKIPPED. */
 export async function cancelRun(deps: WorkflowRunDeps, run: RunRecord, wallets: readonly WalletRef[], code = 'OWNER_CANCELLED'): Promise<RunRecord> {
   assertRunWallets(run, wallets);
-  return deps.store.cancel(run.runId, run.version, code);
+  return deps.store.cancel(run.runId, run.version, code, deps.now());
 }
 
 /** The owner resumes a HALTED run whose stopped step submitted nothing (e.g. a flow that was disabled is enabled again). */
@@ -220,20 +220,29 @@ export async function prepareUserFundedGroup(deps: WorkflowRunDeps, run: RunReco
   if (g.state !== 'PLANNED') refuse(`WORKFLOW_RUN_GROUP_${g.state}`);
   const due = run.currentStep === g.stepFrom;
   if (g.signing === 'WHEN_DUE' && !due) refuse('WORKFLOW_RUN_GROUP_NOT_DUE');
+  // Only a user operation can be signed before it is due: FloFi relays it itself, when due. A wallet batch is SENT by the wallet the moment the
+  // owner confirms (it would run out of order), and a Solana transaction's blockhash would expire long before its turn.
+  if (!due && g.strategy !== 'EVM_USER_OPERATION') refuse('WORKFLOW_RUN_GROUP_NOT_DUE');
   const fresh = composeWorkflowBound(run.strategy, run.workflowHash);
   if (!fresh.ok) return refuse('WORKFLOW_RUN_STALE');
   const composed: WorkflowComposition = fresh;
   // Bound steps of a due group: their amounts are resolved now from reconciled facts, and Solana steps are re-composed with them.
   const guaranteed = new Map<number, AssetAmountFact>();
+  // One delivery funds its consumers in this group IN ORDER: each takes min(cap, what is left), never the whole delivery again (EVM builders
+  // draw down the `guaranteed` seed themselves; Solana steps are re-composed here with their share).
+  const allocated = new Map<string, bigint>();
   let composition = composed;
-  for (const b of composed.bindings.filter(b => b.step >= g.stepFrom && b.step <= g.stepTo && b.amountFrom < g.stepFrom)) {
+  for (const b of composed.bindings.filter(b => b.step >= g.stepFrom && b.step <= g.stepTo && b.amountFrom < g.stepFrom).sort((x, y) => x.step - y.step)) {
     if (!due) refuse('WORKFLOW_BINDING_RESOLVED_WHEN_DUE');
-    const asset = assetKey({ chain: b.asset.chainId, address: b.asset.address });
-    const available = reconciledAvailable(steps, b.amountFrom, asset, b.step);
+    const asset = assetKey({ chain: b.asset.chainId, address: b.asset.address }), share = `${b.amountFrom}:${asset}`;
+    const available = reconciledAvailable(steps, b.amountFrom, asset, g.stepFrom);
     if (available <= 0n) refuse('WORKFLOW_BINDING_NOTHING_RECEIVED');
-    guaranteed.set(b.amountFrom, { asset, amount: available.toString() });
+    if (!guaranteed.has(b.amountFrom)) guaranteed.set(b.amountFrom, { asset, amount: available.toString() });
     if (g.namespace === 'solana') {
-      const used = available < BigInt(b.cap) ? available : BigInt(b.cap);
+      const left = available - (allocated.get(share) ?? 0n);
+      if (left <= 0n) refuse('WORKFLOW_BINDING_NOTHING_RECEIVED');
+      const used = left < BigInt(b.cap) ? left : BigInt(b.cap);
+      allocated.set(share, (allocated.get(share) ?? 0n) + used);
       const alone = composeWorkflowBound(boundStrategy(composed.steps[b.step]!.strategy, used, b.asset.decimals, b.inputAsset), undefined);
       if (!alone.ok || alone.steps.length !== 1) return refuse('WORKFLOW_STEP_STALE');
       composition = { ...composition, steps: composition.steps.map((c, i) => i === b.step ? alone.steps[0]! : c) };
@@ -259,7 +268,9 @@ export async function authorizeUserFundedGroup(deps: WorkflowRunDeps, run: RunRe
   // A retried answer for a group already authorized (its first response was lost) changes nothing.
   if (['AUTHORIZED', 'SUBMITTED', 'UNCERTAIN', 'RECONCILED'].includes(g.state)) return (await deps.store.byId(run.runId))!;
   if (g.state !== 'PREPARED') refuse(`WORKFLOW_RUN_GROUP_${g.state}`);
-  if (!g.validUntil || g.validUntil <= deps.now()) refuse('USER_FUNDED_PREPARED_EXPIRED');
+  // A wallet batch's answer arrives AFTER the wallet sent it: refusing a late one would only lose track of a batch already on chain (the chain
+  // decides at reconciliation). Every other artifact is still unsigned or unsent here, so its validity window applies.
+  if (g.strategy !== 'EVM_WALLET_BATCH' && (!g.validUntil || g.validUntil <= deps.now())) refuse('USER_FUNDED_PREPARED_EXPIRED');
   const verified = authorizeGroup(g.prepared as Prepared, answer, g.feePayer, deps.now());
   if (!verified.ok) return refuse(verified.code);
   const authorized = await deps.store.groupTransition(run.runId, groupIndex, ['PREPARED'], 'AUTHORIZED', { authorization: verified.value }, 'GROUP_AUTHORIZED');
@@ -267,12 +278,29 @@ export async function authorizeUserFundedGroup(deps: WorkflowRunDeps, run: RunRe
   await advanceRun(runnerDeps(deps), run.runId);
   return (await deps.store.byId(run.runId))!;
 }
-/** The owner's browser reports the transactions of a wallet batch (from `wallet_getCallsStatus`): only the hashes are taken; the chain decides. */
-export async function reportUserFundedBatch(deps: WorkflowRunDeps, run: RunRecord, wallets: readonly WalletRef[], groupIndex: number, hashes: readonly string[]): Promise<RunRecord> {
+/**
+ * The owner's browser reports the transactions of a wallet batch (from `wallet_getCallsStatus`): only the hashes are taken; the chain decides.
+ * `notSent`: the wallet reported the batch failed OFF chain (EIP-5792 status 400, no receipt): nothing was sent, so the group stops before
+ * anything ran (BLOCKED) and the owner decides (end the run, or resume it).
+ */
+export async function reportUserFundedBatch(deps: WorkflowRunDeps, run: RunRecord, wallets: readonly WalletRef[], groupIndex: number, hashes: readonly string[],
+  notSent = false): Promise<RunRecord> {
   assertRunWallets(run, wallets);
-  if (!Array.isArray(hashes) || !hashes.length || hashes.length > 8 || hashes.some(h => typeof h !== 'string' || !/^0x[0-9a-f]{64}$/.test(h.toLowerCase()))) refuse('EIP5792_RESPONSE_INVALID');
-  const g = (await deps.store.groups(run.runId))[groupIndex] ?? refuse('WORKFLOW_RUN_GROUP_NOT_FOUND');
+  const groups = await deps.store.groups(run.runId);
+  const g = groups[groupIndex] ?? refuse('WORKFLOW_RUN_GROUP_NOT_FOUND');
   if (g.strategy !== 'EVM_WALLET_BATCH') refuse('WORKFLOW_RUN_GROUP_NOT_BATCH');
+  if (notSent === true) {
+    if (g.state !== 'AUTHORIZED') refuse(`WORKFLOW_RUN_GROUP_${g.state}`);
+    await deps.store.groupTransition(run.runId, groupIndex, ['AUTHORIZED'], 'BLOCKED', { code: 'EIP5792_BATCH_NOT_SENT' });
+    for (let i = g.stepFrom; i <= g.stepTo; i++) await deps.store.stepTransition(run.runId, i, ['DELEGATED'], 'BLOCKED', { code: 'EIP5792_BATCH_NOT_SENT' });
+    const partial = (await deps.store.steps(run.runId)).some(s => s.stepIndex < g.stepFrom && s.state === 'RECONCILED');
+    await deps.store.transition(run.runId, { version: run.version, from: ['RUNNING', 'ATTENTION'] }, partial ? 'HALTED' : 'FAILED', { code: 'EIP5792_BATCH_NOT_SENT' });
+    return (await deps.store.byId(run.runId))!;
+  }
+  if (!Array.isArray(hashes) || !hashes.length || hashes.length > 8 || hashes.some(h => typeof h !== 'string' || !/^0x[0-9a-f]{64}$/.test(h.toLowerCase()))) refuse('EIP5792_RESPONSE_INVALID');
+  // A transaction already counted for another group of this run can never reconcile this one.
+  const used = new Set(groups.filter(x => x.groupIndex !== groupIndex).flatMap(x => (x.submission as { hashes?: string[] } | null)?.hashes ?? []));
+  if (hashes.some(h => used.has(h.toLowerCase()))) refuse('EIP5792_RESPONSE_INVALID');
   if (g.state === 'AUTHORIZED') await deps.store.groupTransition(run.runId, groupIndex, ['AUTHORIZED'], 'SUBMITTED', { submission: { kind: 'EVM_WALLET_BATCH',
     batchId: String(g.authorization?.batchId ?? ''), hashes: hashes.map(h => h.toLowerCase()), submittedAt: deps.now().toISOString() } });
   else if (g.state !== 'SUBMITTED' && g.state !== 'UNCERTAIN' && g.state !== 'RECONCILED') refuse(`WORKFLOW_RUN_GROUP_${g.state}`);
@@ -305,7 +333,9 @@ export type RunGroupView = { readonly index: number; readonly chain: string; rea
   readonly gasPaid: { readonly amount: string; readonly unit: string; readonly payer: string } | null;
   readonly transactions: readonly { readonly chain: string; readonly hash: string; readonly explorerUrl: string | null }[];
   /** A wallet batch's id (the owner's own wallet's handle, to read its receipts back after a reload); null otherwise. */
-  readonly batchId: string | null };
+  readonly batchId: string | null;
+  /** Whether the owner already signed/answered this group (a signed user operation stays valid on chain until its nonce key is used). */
+  readonly signed: boolean };
 
 /**
  * The public status of a run. `outcomes` false (a requester the owner did not share status with) keeps every step's state but withholds its
@@ -319,11 +349,14 @@ export async function runView(deps: { readonly store: Pick<WorkflowRunStore, 'st
     const paid = (g.outcome as { gasPaid?: { amount: string; unit: string; payer: string } } | null)?.gasPaid ?? null;
     const hashes = options.outcomes ? ((g.outcome as { transactions?: string[] } | null)?.transactions ?? (g.submission as { hashes?: string[] } | null)?.hashes ?? []) : [];
     return { index: g.groupIndex, chain: g.chain, strategy: g.strategy, signing: g.signing, steps: [g.stepFrom, g.stepTo] as const, state: g.state, awaitsDelivery: g.awaitsDelivery,
-      code: g.code, validUntil: g.validUntil?.toISOString() ?? null, feePayer: g.feePayer,
-      maxFee: fee?.maxCost && fee.unit ? { amount: fee.maxCost, unit: fee.unit, estimated: fee.estimated !== false } : null,
+      // A requester the owner did not share status with sees that the owner's wallet pays, never which wallet (nor its batch id or fees).
+      code: g.code, validUntil: g.validUntil?.toISOString() ?? null, feePayer: options.outcomes ? g.feePayer : 'OWNER_WALLET',
+      maxFee: options.outcomes && fee?.maxCost && fee.unit ? { amount: fee.maxCost, unit: fee.unit, estimated: fee.estimated !== false } : null,
       gasPaid: options.outcomes && paid ? { amount: paid.amount, unit: paid.unit, payer: paid.payer } : null,
       transactions: hashes.map(hash => ({ chain: g.chain, hash, explorerUrl: executionExplorer(g.chain, hash, false) })),
-      batchId: g.strategy === 'EVM_WALLET_BATCH' && typeof g.authorization?.batchId === 'string' ? g.authorization.batchId : null };
+      batchId: options.outcomes && g.strategy === 'EVM_WALLET_BATCH' ? typeof g.authorization?.batchId === 'string' ? g.authorization.batchId
+        : g.state === 'PREPARED' ? String((g.prepared as { request?: { id?: string } } | null)?.request?.id ?? '') || null : null : null,
+      signed: g.authorization !== null };
   });
   const composed = composeWorkflowBound(run.strategy, run.workflowHash);
   const views: RunStepView[] = steps.map(s => {

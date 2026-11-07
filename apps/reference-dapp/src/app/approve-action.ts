@@ -136,8 +136,8 @@ export async function authorizeUserFundedGroup(approvalId: string, groupIndex: n
   return runAction((s, w) => workflowRunUserFundedAuthorize(s, approvalId, w, groupIndex, answer));
 }
 /** The transaction hashes of a wallet batch (from `wallet_getCallsStatus`); FloFi re-reads every receipt from the chain. */
-export async function reportUserFundedBatch(approvalId: string, groupIndex: number, hashes: string[]): Promise<Result<ClaimedProposal>> {
-  return runAction((s, w) => workflowRunUserFundedReport(s, approvalId, w, groupIndex, hashes));
+export async function reportUserFundedBatch(approvalId: string, groupIndex: number, hashes: string[], notSent = false): Promise<Result<ClaimedProposal>> {
+  return runAction((s, w) => workflowRunUserFundedReport(s, approvalId, w, groupIndex, hashes, notSent === true));
 }
 /** The Universal Workflow Authorization Review of the run: the envelope the owner's passkey signs ONCE (delegated mode). */
 export async function reviewWorkflowRunAuthorization(approvalId: string): Promise<Result<WalletWorkflowReviewView>> { return runAction((s, w) => workflowRunReview(s, approvalId, w)); }

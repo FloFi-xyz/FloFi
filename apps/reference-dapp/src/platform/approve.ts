@@ -298,10 +298,15 @@ export async function workflowRunUserFundedAuthorize(surface: ApprovalSurface, a
   const c = await runContext(surface, approvalId, wallets);
   return userFundedAuthorizeSequential(c.runs, c.run, wallets, groupIndexOf(groupIndex), ownerAnswerOf(answer), c.base);
 }
-/** The transaction hashes of a wallet batch, as the owner's wallet reported them (the chain decides the outcome). */
-export async function workflowRunUserFundedReport(surface: ApprovalSurface, approvalId: unknown, wallets: readonly WalletRef[], groupIndex: unknown, hashes: unknown): Promise<ClaimedProposal> {
+/**
+ * The transaction hashes of a wallet batch, as the owner's wallet reported them (the chain decides the outcome); `notSent` true when the wallet
+ * reported the batch failed off chain (nothing was sent).
+ */
+export async function workflowRunUserFundedReport(surface: ApprovalSurface, approvalId: unknown, wallets: readonly WalletRef[], groupIndex: unknown, hashes: unknown,
+  notSent: unknown = false): Promise<ClaimedProposal> {
   const c = await runContext(surface, approvalId, wallets);
-  return userFundedReportSequential(c.runs, c.run, wallets, groupIndexOf(groupIndex), Array.isArray(hashes) ? hashes as string[] : refuse('EIP5792_RESPONSE_INVALID'), c.base);
+  return userFundedReportSequential(c.runs, c.run, wallets, groupIndexOf(groupIndex), Array.isArray(hashes) ? hashes as string[] : refuse('EIP5792_RESPONSE_INVALID'), c.base,
+    notSent === true);
 }
 
 /** The claimant turns status sharing with the requester on or off. */

@@ -54,7 +54,7 @@ describe('configuration', () => {
     FLOFI_DELEGATION_RPC_8453: 'https://rpc.example/base' };
   it('reads a complete configuration, with the delegation RPC as the read fallback', () => {
     expect(readUserFundedConfig(base)).toMatchObject({ enabled: true, chains: ['eip155:8453', 'solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp'], bundlers: { 'eip155:8453': 'https://bundler.example/base' },
-      rpc: { 'eip155:8453': 'https://rpc.example/base' }, solanaNonceAccounts: true });
+      rpc: { 'eip155:8453': 'https://rpc.example/base' }, solanaNonceAccounts: false });
     expect(readUserFundedConfig({})).toEqual({ enabled: false, code: 'USER_FUNDED_NOT_ENABLED' });
   });
   it('fails closed on every malformed value', () => {

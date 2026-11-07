@@ -19,12 +19,19 @@ function fail(code: string): never { throw new Error(code); }
 export const SEND_CALLS_VERSION = '2.0.0';
 const DATA = /^0x(?:[0-9a-f]{2})*$/, HASH = /^0x[0-9a-f]{64}$/;
 const hex = (value: bigint) => '0x' + value.toString(16);
-export type SendCallsRequest = { readonly version: typeof SEND_CALLS_VERSION; readonly chainId: string; readonly from: string; readonly atomicRequired: true;
+export type SendCallsRequest = { readonly version: typeof SEND_CALLS_VERSION; readonly id?: string; readonly chainId: string; readonly from: string; readonly atomicRequired: true;
   readonly calls: readonly { readonly to: string; readonly value: string; readonly data: string }[] };
-/** The `wallet_sendCalls` parameter for the workflow's exact calls on `chainId`: atomic required, no capabilities (no sponsorship) requested. */
-export function sendCallsRequest(chainId: number, from: string, calls: readonly Call[]): SendCallsRequest {
+/** EIP-5792 error codes FloFi acts on: the app-provided `id` is already used (the batch exists), and the wallet does not know an id. */
+export const DUPLICATE_ID = 5720, UNKNOWN_BUNDLE_ID = 5730;
+/**
+ * The `wallet_sendCalls` parameter for the workflow's exact calls on `chainId`: atomic required, no capabilities (no sponsorship) requested.
+ * `id` is the app-provided batch identifier (EIP-5792: the wallet uses it and rejects a second batch with the same id, error 5720), so
+ * the same group asked twice — a retry, a reload, a late answer — can never execute twice in a wallet that honours it.
+ */
+export function sendCallsRequest(chainId: number, from: string, calls: readonly Call[], id?: string): SendCallsRequest {
   if (!Number.isSafeInteger(chainId) || chainId <= 0 || !calls.length || calls.length > 16) fail('EIP5792_REQUEST_INVALID');
-  return { version: SEND_CALLS_VERSION, chainId: hex(BigInt(chainId)), from: evmAddress(from), atomicRequired: true,
+  if (id !== undefined && !HASH.test(id)) fail('EIP5792_REQUEST_INVALID');
+  return { version: SEND_CALLS_VERSION, ...id ? { id } : {}, chainId: hex(BigInt(chainId)), from: evmAddress(from), atomicRequired: true,
     calls: calls.map(c => typeof c.data === 'string' && DATA.test(c.data.toLowerCase()) && c.value >= 0n
       ? { to: evmAddress(c.target), value: hex(c.value), data: c.data.toLowerCase() } : fail('EIP5792_REQUEST_INVALID')) };
 }

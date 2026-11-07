@@ -190,6 +190,14 @@ export const GET_NONCE_SELECTOR = selectorOf('getNonce(address,uint192)');
 export function getNonceCall(sender: string, key: bigint): string {
   return GET_NONCE_SELECTOR + hexOf(abiEncode(['address', 'uint256'], [evmAddress(sender), uint(key, UINT192_MAX, 'ERC4337_NONCE_INVALID')])).slice(2);
 }
+export const INCREMENT_NONCE_SELECTOR = selectorOf('incrementNonce(uint192)');
+/**
+ * `EntryPoint.incrementNonce(key)` call data: sent by the OWNER's own account (their wallet confirms and pays), it consumes the key's next
+ * sequence, so an operation signed for that key can never execute any more. The owner's revocation of a signed, unrelayed operation.
+ */
+export function incrementNonceCall(key: bigint): string {
+  return INCREMENT_NONCE_SELECTOR + hexOf(abiEncode(['uint256'], [uint(key, UINT192_MAX, 'ERC4337_NONCE_INVALID')])).slice(2);
+}
 export function decodeGetNonce(result: unknown): bigint {
   const [nonce] = abiDecode(['uint256'], bytesOf(data(result, 'ERC4337_RPC_INVALID'))) as [bigint];
   return nonce;

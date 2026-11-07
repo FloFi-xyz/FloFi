@@ -136,7 +136,8 @@ export async function userFundedAuthorizeSequential(deps: WorkflowRunSurface, ru
   const moved = await authorizeUserFundedGroup(deps, run, wallets, groupIndex, answer);
   return proposalOf(deps, moved, null, base);
 }
-export async function userFundedReportSequential(deps: WorkflowRunSurface, run: RunRecord, wallets: readonly WalletRef[], groupIndex: number, hashes: readonly string[], base: ApprovalView) {
-  const moved = await reportUserFundedBatch(deps, run, wallets, groupIndex, hashes);
+export async function userFundedReportSequential(deps: WorkflowRunSurface, run: RunRecord, wallets: readonly WalletRef[], groupIndex: number, hashes: readonly string[], base: ApprovalView,
+  notSent = false) {
+  const moved = await reportUserFundedBatch(deps, run, wallets, groupIndex, hashes, notSent);
   return proposalOf(deps, moved, null, base);
 }

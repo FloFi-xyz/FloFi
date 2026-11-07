@@ -3,7 +3,8 @@
  * BUILD-FLOFI-UNIVERSAL-WORKFLOW-002: reconciliation of one user-funded EVM group from the CHAIN (never from a wallet's or bundler's claim).
  *
  *   wallet batch     every receipt the owner's wallet reported is re-read from the chain: status success, `from` = the owner (the fee payer,
- *                    S1), gas paid = gasUsed × effectiveGasPrice
+ *                    S1), mined after the group was prepared, and the transactions carry EXACTLY the prepared calls (an EIP-7702
+ *                    `execute(batch)` self-call decoded, or one transaction per call); gas paid = gasUsed × effectiveGasPrice
  *   user operation   the bundle transaction's receipt must carry exactly one `UserOperationEvent` of this operation's hash with sender = the
  *                    owner and paymaster = 0 (no sponsor, S1); gas paid = its `actualGasCost`, charged by the EntryPoint to the owner's
  *                    account (the bundler that sent the transaction is repaid from it)
@@ -15,7 +16,7 @@
 import { erc4337 } from '@defi-workflow-engine/reference-compiler';
 import type { ChainTransport } from '../delegation/chains.ts';
 import { assetKey } from '../delegation/steps.ts';
-import type { EvmGroupCalls, UserCall } from './evm-calls.ts';
+import { evmCallsOf, type EvmGroupCalls, type UserCall } from './evm-calls.ts';
 import type { GasPaidFact } from './gas-payer.ts';
 
 export const TRANSFER_TOPIC = '0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef';
@@ -31,7 +32,9 @@ export type GroupReconciliation =
 
 const topicAddress = (topic: string | undefined) => topic ? ('0x' + topic.slice(-40)).toLowerCase() : '';
 const quantity = (value: unknown) => typeof value === 'string' && /^0x[0-9a-fA-F]+$/.test(value) ? BigInt(value) : 0n;
-type Leg = { readonly step: number; readonly token: string; readonly direction: 'OUT' | 'IN'; readonly amount: bigint | null; readonly minimum: bigint | null; filled: bigint | null };
+/** `counterparty`: the only account an outflow may go to (an ERC-20 transfer's recipient), null when the protocol decides (pool, aToken). */
+type Leg = { readonly step: number; readonly token: string; readonly direction: 'OUT' | 'IN'; readonly amount: bigint | null; readonly minimum: bigint | null;
+  readonly counterparty?: string; filled: bigint | null };
 
 /** The ERC-20 legs each call of the group must produce for the owner, in execution order. Native value transfers produce no log. */
 function expectedLegs(group: EvmGroupCalls): Leg[] {
@@ -42,7 +45,8 @@ function expectedLegs(group: EvmGroupCalls): Leg[] {
       { step: step.stepIndex, token: c.tokenOut.toLowerCase(), direction: 'IN', amount: null, minimum: BigInt(c.amountOutMinimum), filled: null });
     else if (c.kind === 'AAVE_V3_SUPPLY') legs.push({ step: step.stepIndex, token: c.asset.toLowerCase(), direction: 'OUT', amount: BigInt(c.amount), minimum: null, filled: null });
     else if (c.kind === 'AAVE_V3_BORROW') legs.push({ step: step.stepIndex, token: c.asset.toLowerCase(), direction: 'IN', amount: BigInt(c.amount), minimum: null, filled: null });
-    else if (c.kind === 'ERC20_TRANSFER' && c.to.toLowerCase() !== group.owner) legs.push({ step: step.stepIndex, token: c.token.toLowerCase(), direction: 'OUT', amount: BigInt(c.amount), minimum: null, filled: null });
+    else if (c.kind === 'ERC20_TRANSFER' && c.to.toLowerCase() !== group.owner) legs.push({ step: step.stepIndex, token: c.token.toLowerCase(), direction: 'OUT', amount: BigInt(c.amount), minimum: null,
+      counterparty: c.to.toLowerCase(), filled: null });
   }
   return legs;
 }
@@ -56,7 +60,8 @@ export function attributeLegs(group: EvmGroupCalls, logs: readonly Log[]): { rea
     if (from === to) continue;
     const direction = from === owner ? 'OUT' : to === owner ? 'IN' : null;
     if (!direction) continue;
-    const leg = legs.find(l => l.filled === null && l.token === token && l.direction === direction);
+    // A transfer redirected to anyone but its prepared recipient matches no leg: an unexpected owner outflow, never a reconciled step.
+    const leg = legs.find(l => l.filled === null && l.token === token && l.direction === direction && (!l.counterparty || l.counterparty === to));
     if (!leg) { if (direction === 'OUT') return { ok: false, code: 'RECONCILIATION_UNEXPECTED_OWNER_OUTFLOW' }; continue; }
     leg.filled = value;
   }
@@ -82,8 +87,33 @@ export function attributeLegs(group: EvmGroupCalls, logs: readonly Log[]): { rea
   return { ok: true, steps };
 }
 
-/** Reconciles a wallet batch from the receipts of the transaction hashes the wallet reported (re-read from the chain). */
-export async function reconcileWalletBatch(t: ChainTransport, group: EvmGroupCalls, hashes: readonly string[]): Promise<GroupReconciliation> {
+type EvmTransaction = { readonly to?: string | null; readonly input?: string; readonly value?: string };
+const word = (hex: string) => hex.replace(/^0x/, '').toLowerCase().padStart(64, '0');
+/**
+ * Whether the batch's transactions carry exactly the prepared calls, in order. An EIP-7702 self-call is decoded (`execute(batch)`); a wallet
+ * that sends one transaction per call is compared field by field. A self-call FloFi cannot decode must still contain every call's target,
+ * value and calldata (a redirected recipient or amount is inside the calldata, so it cannot match).
+ */
+export function batchCarriesCalls(owner: string, txs: readonly EvmTransaction[], prepared: readonly { target: string; value: bigint; data: string }[]): boolean {
+  const sent: { target: string; value: bigint; data: string }[] = [];
+  const opaque: string[] = [];
+  for (const tx of txs) {
+    const to = String(tx.to ?? '').toLowerCase(), input = String(tx.input ?? '0x').toLowerCase();
+    if (to === owner) {
+      try { sent.push(...erc4337.decodeBatchCallData(input).map(c => ({ target: c.target.toLowerCase(), value: c.value, data: c.data.toLowerCase() }))); }
+      catch { opaque.push(input); }
+    } else sent.push({ target: to, value: quantity(tx.value), data: input });
+  }
+  const want = prepared.map(c => ({ target: c.target.toLowerCase(), value: c.value, data: c.data.toLowerCase() }));
+  if (!opaque.length) return sent.length === want.length && sent.every((c, i) => c.target === want[i]!.target && c.value === want[i]!.value && c.data === want[i]!.data);
+  const all = opaque.join('');
+  return want.every(c => all.includes(word(c.target)) && (c.value === 0n || all.includes(word(c.value.toString(16)))) && (c.data === '0x' || all.includes(c.data.slice(2))));
+}
+/**
+ * Reconciles a wallet batch from the receipts of the transaction hashes the wallet reported (re-read from the chain). `fromBlock`: the block
+ * at preparation — an older transaction of the owner is not this batch.
+ */
+export async function reconcileWalletBatch(t: ChainTransport, group: EvmGroupCalls, hashes: readonly string[], fromBlock: string | null = null): Promise<GroupReconciliation> {
   if (!hashes.length) return { status: 'PENDING' };
   const receipts: EvmReceipt[] = [];
   for (const hash of hashes) {
@@ -97,6 +127,16 @@ export async function reconcileWalletBatch(t: ChainTransport, group: EvmGroupCal
     if (String(r.from ?? '').toLowerCase() !== group.owner) return { status: 'MISMATCH', code: 'GAS_PAYER_NOT_OWNER', gasPaid: null, transactions: [...hashes] };
     gas += quantity(r.gasUsed) * quantity(r.effectiveGasPrice);
   }
+  if (fromBlock !== null && receipts.some(r => quantity(r.blockNumber) < BigInt(fromBlock)))
+    return { status: 'MISMATCH', code: 'RECONCILIATION_TRANSACTION_BEFORE_PREPARATION', gasPaid: null, transactions: [...hashes] };
+  const txs: EvmTransaction[] = [];
+  for (const hash of hashes) {
+    const tx = await t.rpc('eth_getTransactionByHash', [hash]) as EvmTransaction | null;
+    if (!tx) return { status: 'PENDING' };
+    txs.push(tx);
+  }
+  if (!batchCarriesCalls(group.owner, txs, evmCallsOf(group)))
+    return { status: 'MISMATCH', code: 'RECONCILIATION_CALLS_MISMATCH', gasPaid: null, transactions: [...hashes] };
   const gasPaid: GasPaidFact = { payer: group.owner, amount: gas.toString(), unit: 'wei', source: 'RECEIPT' };
   if (receipts.some(r => r.status !== '0x1')) return { status: 'REVERTED', code: 'SUBMISSION_REVERTED', gasPaid, transactions: [...hashes] };
   const attributed = attributeLegs(group, receipts.flatMap(r => r.logs ?? []));
@@ -117,7 +157,9 @@ export async function reconcileUserOperation(t: ChainTransport, group: EvmGroupC
   if (!event.success) return { status: 'REVERTED', code: 'USER_OPERATION_REVERTED', gasPaid, transactions: [transactionHash] };
   // Only the logs of this operation's execution: those before its own UserOperationEvent and after the previous one in the bundle.
   const logs = r.logs ?? [];
-  const at = logs.findIndex(l => l.topics[0]?.toLowerCase() === erc4337.USER_OPERATION_EVENT_TOPIC && l.topics[1]?.toLowerCase() === userOpHash.toLowerCase());
+  // The EntryPoint's own event only: another operation of the same bundle could emit a look-alike log carrying this public hash.
+  const at = logs.findIndex(l => l.address.toLowerCase() === erc4337.ENTRY_POINT_V0_7 && l.topics[0]?.toLowerCase() === erc4337.USER_OPERATION_EVENT_TOPIC
+    && l.topics[1]?.toLowerCase() === userOpHash.toLowerCase());
   const previous = logs.slice(0, at).map((l, i) => l.topics[0]?.toLowerCase() === erc4337.USER_OPERATION_EVENT_TOPIC ? i : -1).filter(i => i >= 0).at(-1) ?? -1;
   const attributed = attributeLegs(group, logs.slice(previous + 1, at));
   if (!attributed.ok) return { status: 'MISMATCH', code: attributed.code, gasPaid, transactions: [transactionHash] };

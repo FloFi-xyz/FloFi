@@ -12,7 +12,8 @@
  *                                 operations (delayed EVM steps then ask the owner's wallet when they are due); wallet batches need none.
  *   FLOFI_USER_FUNDED_RPC_<id>    per EVM chain read JSON-RPC (https) for account code, EntryPoint nonces, receipts and balances; falls back
  *                                 to FLOFI_DELEGATION_RPC_<id>. Solana reads use the owner flows' own cluster RPC.
- *   FLOFI_SOLANA_NONCE_ACCOUNTS   enabled | disabled (default enabled): offer owner-controlled durable nonce accounts for delayed Solana steps.
+ *   FLOFI_SOLANA_NONCE_ACCOUNTS   enabled | disabled (default disabled): reserved. No product path offers durable nonces in this build (ADR-0008):
+ *                                 a delayed Solana group is signed when due whatever this says.
  */
 import { isHostedDeployment } from '../server/deployment.ts';
 
@@ -48,7 +49,7 @@ export function readUserFundedConfig(env: Env): UserFundedConfigResult {
   const rpc = { ...fallback, ...own };
   // A bundler without a read RPC for its chain cannot reconcile: refused rather than half-configured.
   for (const chain of Object.keys(bundlers)) if (!rpc[chain]) return invalid(`FLOFI_USER_FUNDED_RPC_${chain.slice('eip155:'.length)}`);
-  const nonce = env.FLOFI_SOLANA_NONCE_ACCOUNTS ?? 'enabled';
+  const nonce = env.FLOFI_SOLANA_NONCE_ACCOUNTS ?? 'disabled';
   if (nonce !== 'enabled' && nonce !== 'disabled') return invalid('FLOFI_SOLANA_NONCE_ACCOUNTS');
   return { enabled: true, chains, bundlers, rpc, solanaNonceAccounts: nonce === 'enabled', hosted: isHostedDeployment(env) };
 }

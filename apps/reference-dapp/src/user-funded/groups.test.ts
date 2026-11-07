@@ -11,7 +11,7 @@ import { composeWorkflow, type WorkflowComposition } from '../engine/strategy-en
 import { evmWallet } from '../delegation/delegation.test-harness.ts';
 import type { ChainTransport } from '../delegation/chains.ts';
 import type { BundlerClient } from './bundler.ts';
-import { advanceSolanaSubmission, authorizeGroup, opOf, prepareGroup, reconcileEvmGroup, reconcileSolanaGroup, solanaOwnerDeltas, submitUserOperation,
+import { advanceSolanaSubmission, authorizeGroup, checkUserOperation, opOf, prepareGroup, reconcileEvmGroup, reconcileSolanaGroup, relayUserOperation, solanaOwnerDeltas,
   type Prepared, type SerialOp, type UserFundedDeps } from './groups.ts';
 import { assertUserFundedSubmission, GAS_PAYER_CODES } from './gas-payer.ts';
 import { TRANSFER_TOPIC } from './evm-reconcile.ts';
@@ -28,10 +28,10 @@ function compose(input: unknown): { composition: WorkflowComposition; requiremen
   return { composition: c, requirement: r.value };
 }
 /** A loopback Base RPC: an upgraded owner account (the MetaMask 7702 delegator), EntryPoint nonce 0, fees, a balance, and stored receipts. */
-function chain(owner: string, balance: bigint, receipts: Map<string, unknown>): ChainTransport {
+function chain(owner: string, balance: bigint, receipts: Map<string, unknown>, upgraded = true): ChainTransport {
   return { chain: BASE, provenance: 'MOCKED', rpc: async (method, params) => {
     switch (method) {
-      case 'eth_getCode': return String(params[0]).toLowerCase() === owner ? '0xef0100' + erc4337.DELEGATOR_IMPLEMENTATION.slice(2) : '0x';
+      case 'eth_getCode': return upgraded && String(params[0]).toLowerCase() === owner ? '0xef0100' + erc4337.DELEGATOR_IMPLEMENTATION.slice(2) : '0x';
       case 'eth_call': return word(0n);
       case 'eth_maxPriorityFeePerGas': return '0x5f5e100';
       case 'eth_gasPrice': return '0x3b9aca00';
@@ -42,11 +42,11 @@ function chain(owner: string, balance: bigint, receipts: Map<string, unknown>): 
     }
   } };
 }
-function bundler(sent: erc4337.PackedUserOperation[], receipt: () => erc4337.BundlerReceipt | null): BundlerClient {
+function bundler(sent: erc4337.PackedUserOperation[], receipt: () => erc4337.BundlerReceipt | null, opts: { need?: bigint; known?: () => boolean } = {}): BundlerClient {
   return { chainId: 8453, verify: async () => undefined,
-    estimate: async () => ({ verificationGasLimit: 100_000n, callGasLimit: 200_000n, preVerificationGas: 60_000n }),
+    estimate: async () => ({ verificationGasLimit: 100_000n, callGasLimit: opts.need ?? 200_000n, preVerificationGas: 60_000n }),
     send: async op => { erc4337.assertUserFundedOperation(op); sent.push(op); return erc4337.userOpHash(op, 8453); },
-    receipt: async () => receipt(), known: async () => true };
+    receipt: async () => receipt(), known: async () => opts.known?.() ?? true };
 }
 const TWO_TRANSFERS = { version: 2, steps: [
   { action: 'transfer', network: 'base', asset: 'USDC', amount: '1', recipient: '0x' + '2'.repeat(40) },
@@ -77,9 +77,12 @@ describe('BUILD-FLOFI-UNIVERSAL-WORKFLOW-002 owner user operation (ERC-4337 v0.7
     const signature = await owner.signDigest(erc4337.delegatorUserOpDigest(8453, op));
     const authorization = authorizeGroup(p, { kind: 'EVM_USER_OPERATION', signature }, address, deps.now());
     if (!authorization.ok) throw new Error(authorization.code);
-    // Relayed exactly once, unchanged, with the owner's signature; the bundler's hash must be FloFi's own.
-    const submitted = await submitUserOperation(deps, p, authorization.value, address);
+    // The due-time check simulates and returns the submission record (FloFi's own hash) WITHOUT relaying: the record is written first, then
+    // only the writer relays — exactly once, unchanged, with the owner's signature.
+    const submitted = await checkUserOperation(deps, p, authorization.value, address);
     if (!submitted.ok) throw new Error(submitted.code);
+    expect(sent).toHaveLength(0);
+    expect(await relayUserOperation(deps, p, authorization.value)).toEqual({ ok: true, value: p.userOpHash });
     expect(sent).toHaveLength(1);
     expect(sent[0]).toMatchObject({ sender: address, paymasterAndData: '0x', initCode: '0x', signature: signature.toLowerCase() });
     expect(submitted.value.userOpHash).toBe(p.userOpHash);
@@ -124,6 +127,38 @@ describe('BUILD-FLOFI-UNIVERSAL-WORKFLOW-002 owner user operation (ERC-4337 v0.7
     expect(await reconcileEvmGroup(deps(10n ** 18n), p, { userOpHash: p.userOpHash })).toMatchObject({ status: 'FAILED', code: 'GAS_SPONSORSHIP_REFUSED' });
     receipts.set(txHash, { transactionHash: txHash, status: '0x1', logs: [eventWith(stranger.address.toLowerCase(), '0x' + '0'.repeat(40))] });
     expect(await reconcileEvmGroup(deps(10n ** 18n), p, { userOpHash: p.userOpHash })).toMatchObject({ status: 'FAILED', code: 'GAS_PAYER_NOT_OWNER' });
+  });
+
+  it('never prepares an operation for a plain account, refuses one whose signed gas words are too low, and resends a recorded one the bundler lost', async () => {
+    const owner = await evmWallet(), address = owner.address.toLowerCase(), receipts = new Map<string, unknown>(), sent: erc4337.PackedUserOperation[] = [];
+    let need = 200_000n, known = true;
+    const deps = (upgraded = true): UserFundedDeps => ({ chains: [BASE], evm: () => chain(address, 10n ** 18n, receipts, upgraded),
+      bundler: () => bundler(sent, () => null, { need, known: () => known }), solana: null, jupiter: null, now: () => new Date('2026-11-07T10:00:00Z') });
+    const { composition, requirement } = compose(TWO_TRANSFERS);
+    const g = { runId: 'wfr_' + 'c'.repeat(26), groupIndex: 1, strategy: 'EVM_USER_OPERATION' as const, chain: BASE, feePayer: address, stepFrom: 0, stepTo: 1 };
+    // A typed-data signature cannot upgrade an account: a plain account never gets an operation to sign.
+    expect(await prepareGroup(deps(false), composition, requirement, g)).toMatchObject({ ok: false, code: 'EVM_SMART_ACCOUNT_REQUIRED' });
+    const prepared = await prepareGroup(deps(), composition, requirement, g);
+    if (!prepared.ok) throw new Error(prepared.code);
+    const p = prepared.value.prepared as Prepared & { op: SerialOp; userOpHash: string };
+    const signature = await owner.signDigest(erc4337.delegatorUserOpDigest(8453, opOf(p.op)));
+    const authorization = authorizeGroup(p, { kind: 'EVM_USER_OPERATION', signature }, address, new Date());
+    if (!authorization.ok) throw new Error(authorization.code);
+    // When due, the bundler needs more call gas than the owner signed: refused before anything is relayed (the words cannot change unsigned).
+    need = 10n ** 9n;
+    expect(await checkUserOperation(deps(), p, authorization.value, address)).toMatchObject({ ok: false, code: 'USER_OPERATION_GAS_LIMIT_TOO_LOW' });
+    expect(sent).toHaveLength(0);
+    // Recorded, then the relay was lost: neither the chain nor the bundler knows it, so reconciliation relays the SAME signed operation.
+    need = 200_000n; known = false;
+    const record = await checkUserOperation(deps(), p, authorization.value, address);
+    if (!record.ok) throw new Error(record.code);
+    expect(await reconcileEvmGroup(deps(), p, record.value, authorization.value)).toEqual({ status: 'PENDING' });
+    expect(sent).toHaveLength(1);
+    expect(erc4337.userOpHash(sent[0]!, 8453)).toBe(p.userOpHash);
+    // Known to the bundler: nothing is resent.
+    known = true;
+    expect(await reconcileEvmGroup(deps(), p, record.value, authorization.value)).toEqual({ status: 'PENDING' });
+    expect(sent).toHaveLength(1);
   });
 });
 
