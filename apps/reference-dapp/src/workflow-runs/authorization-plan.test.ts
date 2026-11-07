@@ -42,7 +42,9 @@ describe('BUILD-CHAT-E2E-001 authorization plan', () => {
     const evmOnly = await planOf({ version: 2, steps: [BASE_SEPOLIA_SWAP, { ...BASE_SEPOLIA_SWAP, inputAsset: 'WETH', outputAsset: 'USDC', amount: '0.001' }] }, true, MOCKED);
     expect(evmOnly.delegatedSingleAuthorization).toMatchObject({ available: false, reason: EXECUTOR_FUNDED_GAS_RETIRED });
     expect(plan.notes[0]).toMatch(/Your own wallet pays every network fee/);
-    expect(plan.notes.join(' ')).toMatch(/not one transaction/);
+    // Without user-funded groups on offer, the notes describe confirm mode only (no group or batch wording).
+    expect(plan.notes).toContain('Each step starts only after the previous step reconciled on chain.');
+    expect(plan.notes.join(' ')).not.toMatch(/group|batch/);
     expect(plan.notes).toContain('This workflow uses an EVM wallet and a Solana wallet: both must be proven before it starts.');
   });
 

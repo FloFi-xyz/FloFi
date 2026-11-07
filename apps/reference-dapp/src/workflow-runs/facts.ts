@@ -9,9 +9,13 @@
  */
 import { executionAvailability, readDelegationConfig } from '../delegation/config.ts';
 import type { SequenceFacts } from '../mcp/runtime.ts';
+import { userFundedFactsOf } from '../user-funded/runtime.ts';
 
 type Env = Readonly<Record<string, string | undefined>>;
 export function sequenceFacts(env: Env): SequenceFacts {
   const config = readDelegationConfig(env);
-  return { enabled: env.FLOFI_WORKFLOW_RUNS === 'enabled', delegation: config.enabled ? { mode: config.mode, unavailable: executionAvailability(config), mainnetChains: config.mainnetChains } : null };
+  // The same user-funded facts the approval page plans with, so MCP, channels and /approve describe the same choice (wallets assumed until /approve).
+  const userFunded = userFundedFactsOf(env);
+  return { enabled: env.FLOFI_WORKFLOW_RUNS === 'enabled', delegation: config.enabled ? { mode: config.mode, unavailable: executionAvailability(config), mainnetChains: config.mainnetChains } : null,
+    userFunded: userFunded.enabled ? userFunded : null };
 }

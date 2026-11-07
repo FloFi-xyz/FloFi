@@ -115,12 +115,15 @@ export function authorizationPlan(workflow: WorkflowComposition, gates: Pick<Gat
   const userFundedAvailable = userFundedReason === null && groupsPlan !== null;
   // Recommended: fewer wallet interactions than confirming each step (never claimed when it is not fewer).
   const fewer = groupsPlan !== null && groupsPlan.interactions.upfront + groupsPlan.interactions.whenDue < workflow.steps.length;
+  // The notes describe the modes actually offered: group wording only where user-funded groups are available here.
   const notes = ['Your own wallet pays every network fee; FloFi never pays, advances or reimburses gas.',
-    'One wallet interaction is not one transaction: a batch executes several steps in one transaction on one network; each network needs its own wallet authorization.',
-    'Each group starts only after the previous one reconciled on chain.'];
+    ...userFundedAvailable ? ['One wallet interaction is not one transaction: a batch executes several steps in one transaction on one network; each network needs its own wallet authorization.',
+      'Each group starts only after the previous one reconciled on chain.'] : ['Each step starts only after the previous step reconciled on chain.']];
   if (namespaces.length > 1) notes.push('This workflow uses an EVM wallet and a Solana wallet: both must be proven before it starts.');
-  if (bindingCodes.length) notes.push('A dependent step in the same group spends the earlier step\'s signed guaranteed minimum, fixed when you sign (anything above it stays in your wallet); '
-    + 'a dependent step in a later group spends what was actually delivered after reconciliation, capped by its own amount, and is signed when it becomes due.');
+  if (bindingCodes.length) notes.push(userFundedAvailable
+    ? 'A dependent step in the same group spends the earlier step\'s signed guaranteed minimum, fixed when you sign (anything above it stays in your wallet); '
+      + 'a dependent step in a later group spends what was actually delivered after reconciliation, capped by its own amount, and is signed when it becomes due.'
+    : 'A dependent step spends what an earlier step actually delivered (after reconciliation), capped by its own amount.');
   return { stepCount: workflow.steps.length,
     confirmEachStep: { available: confirmAvailable, reason: confirmReason, walletConfirmationsAtLeast: workflow.steps.length, walletNamespaces: namespaces },
     delegatedSingleAuthorization: { available: delegatedAvailable, reason: delegatedReason, walletSignatures: Math.max(1, enrollments.length), passkeyAssertions: 0, enrollments,

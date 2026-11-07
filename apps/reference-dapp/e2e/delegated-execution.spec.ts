@@ -60,7 +60,7 @@ test.describe('BUILD-FLOFI-UNIVERSAL-WORKFLOW-002 retired executor-funded automa
     // Credentials: the retirement reason replaces the enrollment form.
     await page.goto('/app/credentials');
     const execution = page.getByRole('region', { name: 'Automatic execution', exact: true });
-    await expect(execution).toContainText(RETIRED);
+    await expect(execution).toContainText('Enrollment is retired: FloFi no longer executes from its own account and never pays your network fees. Existing Credentials can still be revoked.');
     await expect(execution.getByRole('form', { name: 'Enroll a wallet for automatic execution', exact: true })).toHaveCount(0);
     await expect(execution.getByRole('button', { name: 'Enroll with my wallet', exact: true })).toHaveCount(0);
     expect(await signing()).toEqual([]);

@@ -193,11 +193,11 @@ function RuleCard({ rule, busy, run, owner, onHistory }: { rule: RuleView; busy:
     </dl>
     {rule.attention && <p className="automation-attention" role="status">{t(rule.attention === 'WORKFLOW_CHANGED' ? 'The saved workflow changed after this automation was created. FloFi proposes nothing until you rebind it to the current version.'
       : 'This action no longer reproduces with FloFi’s current engine. FloFi proposes nothing until you rebind it.')}
-      {rule.executionMode === 'DELEGATED_WITH_LIMITS' ? <> {t('Re-authorize it under Automatic within limits.')}</>
+      {rule.executionMode === 'DELEGATED_WITH_LIMITS' ? <> {t(DELEGATION_ERROR_TEXT.EXECUTOR_FUNDED_GAS_RETIRED!)}</>
         : <button type="button" className="workspace-action" disabled={busy} onClick={() => void run(() => rebindAutomation(owner, rule.ruleId, rule.version), 'Automation rebound.')}>{t('Rebind')}</button>}</p>}
     <div className="automation-row-actions">
       {rule.state === 'ACTIVE' && <button type="button" className="workspace-action" disabled={busy} onClick={() => state('PAUSE', 'Automation paused.')}>{t('Pause')}</button>}
-      {rule.state === 'PAUSED' && <button type="button" className="workspace-action" disabled={busy} onClick={() => state('RESUME', 'Automation resumed.')}>{t('Resume')}</button>}
+      {rule.state === 'PAUSED' && rule.executionMode !== 'DELEGATED_WITH_LIMITS' && <button type="button" className="workspace-action" disabled={busy} onClick={() => state('RESUME', 'Automation resumed.')}>{t('Resume')}</button>}
       {rule.state !== 'ARCHIVED' && <button type="button" className="workspace-action" disabled={busy} onClick={() => state('ARCHIVE', 'Automation archived.')}>{t('Archive')}</button>}
       <button type="button" className="workspace-action" onClick={onHistory}>{t('History')}</button>
     </div></details>
@@ -482,7 +482,7 @@ export function AutomationsWorkspace({ owner: ownerProp, proof, onPropose, openC
                       : <><div className="delegation-mode" role="radiogroup" aria-label={t('Execution')}>
                         <label><input type="radio" name="automation-mode" checked={mode === 'CONFIRM'} onChange={() => setMode('CONFIRM')}/> {t('Ask every time')}</label>
                         <label><input type="radio" name="automation-mode" checked={mode === 'DELEGATED'} disabled={!proven || !delegationReady || Boolean(delegationBlocked) || creating === 'DAILY_WATCH'} onChange={() => setMode('DELEGATED')}/> {t('Automatic within limits')}</label>
-                      </div>{(!delegationReady || delegationBlocked) && <p className="muted">{t(delegationBlocked && DELEGATION_ERROR_TEXT[delegationBlocked] ? DELEGATION_ERROR_TEXT[delegationBlocked] : 'Automatic execution requires a supported bounded authorization and executor. It is unavailable for this session or deployment.')}</p>}
+                      </div><p className="muted">{t(DELEGATION_ERROR_TEXT.EXECUTOR_FUNDED_GAS_RETIRED!)}</p>
                         {mode === 'DELEGATED' && proven && delegationReady && !delegationBlocked ? <DelegatedCreate owner={owner} busy={busy} run={run} onReview={setReview}/>
                           : <CreateForm key={`${ownerKey}:${creating}`} capabilities={overview.capabilities} owner={owner} busy={busy} run={run} onCreated={() => setCreating(null)} initialStep={creationStep} onStepChange={setCreationStep} onDraftChange={setCreationDraft} initial={{ kind: creating, ...(creating === 'PRICE_TRIGGER' && !overview.capabilities.routes.some(r => r.executable) ? { source: 'NONE' as const } : {}), ...creationDraft }}/>}</>}
                   </>}

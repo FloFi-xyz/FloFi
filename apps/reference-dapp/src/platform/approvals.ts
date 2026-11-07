@@ -133,7 +133,8 @@ export async function requestApproval(deps: ApprovalDeps, requester: ApprovalReq
   if (Math.random() < 0.02) await deps.handoffs.purge(deps.now).catch(() => undefined);
   // BUILD-FLOFI-E2E-RELIABILITY-001 (MCP review): every read happens BEFORE the approval is written, so nothing after `create` can fail (or time
   // out) and turn a committed approval into what reads as "nothing created".
-  const delegation = sequence ? (await deps.runtime.sequences?.())?.delegation ?? null : null;
+  const sequenceFacts = sequence ? await deps.runtime.sequences?.() ?? null : null;
+  const delegation = sequenceFacts?.delegation ?? null, userFundedFacts = sequenceFacts?.userFunded ?? null;
   const { secret, digest } = mintApprovalSecret(deps.scheme), handoffId = newId('apr'), expiresAt = new Date(deps.now.getTime() + deps.rules.handoffSeconds * 1000);
   // A sequence's handoff holds the whole canonical workflow (v2 strategy, sequence hash, SEQUENTIAL plan); its run starts at the claim.
   const stored = sequence ? { strategy: workflow.strategy, workflowHash: workflow.workflowHash } : { strategy: composition.strategy, workflowHash: composition.workflowHash };
@@ -149,7 +150,8 @@ export async function requestApproval(deps: ApprovalDeps, requester: ApprovalReq
     walletNamespace: planNamespace(gates.plan), walletNamespaces: planNamespaces(gates.plan), gates: gateView(gates),
     summary: sequence ? workflow.steps.map((c, i) => `${i + 1}. ${c.summary}`).join('\n') : composition.summary,
     // BUILD-CHAT-E2E-001: before anything executes, how many authorizations each mode needs (the owner's own grants decide the rest in FloFi).
-    ...sequence ? { authorizationPlan: authorizationPlan(workflow, gates, delegation) } : {},
+    // BUILD-FLOFI-UNIVERSAL-WORKFLOW-002: the same user-funded plan /approve offers (wallet capabilities assumed until the owner's browser reports them).
+    ...sequence ? { authorizationPlan: authorizationPlan(workflow, gates, delegation, undefined, userFundedFacts ? { facts: userFundedFacts } : undefined) } : {},
     // What FloFi's flow still requires of the owner before anything can be signed (cleared by the fresh simulation and Review).
     preExecution } };
 }

@@ -51,7 +51,7 @@ export type SequentialProposal = { readonly view: ApprovalView & { readonly work
 async function proposalOf(deps: WorkflowRunSurface, run: RunRecord, step: StepProposal | null, base: ApprovalView): Promise<SequentialProposal> {
   const fresh = await deps.store.byId(run.runId) ?? run;
   const network = step ? step.strategy.action === 'bridge' ? step.strategy.sourceNetwork : step.strategy.network : null;
-  const workflowRun: WorkflowRunClaim = { run: await runView(deps, fresh, { outcomes: true }), plan: await ownerAuthorizationPlan(deps, fresh),
+  const workflowRun: WorkflowRunClaim = { run: await runView(deps, fresh, { outcomes: true, owner: true }), plan: await ownerAuthorizationPlan(deps, fresh),
     step: step ? { index: step.stepIndex, count: step.stepCount } : null,
     stepWallet: network ? fresh.wallets[network.startsWith('solana') ? 'solana' : 'eip155'] ?? null : null };
   return { view: { ...base, workflowRun }, command: step?.composition.command ?? null, workflow: step?.composition.workflow ?? null,

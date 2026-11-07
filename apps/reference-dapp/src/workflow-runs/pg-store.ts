@@ -14,7 +14,7 @@
 import type { Database, Queryable, Row } from '@defi-workflow-engine/cloud-runtime';
 import type { StrategyInput, StrategySpec } from '../engine/strategy-spec';
 import type { ApprovalRequesterKind, RequesterScope, WalletRef } from '../platform/handoff-store.ts';
-import { WORKFLOW_RUN_ADVANCE_KIND, canEndWorkflow, type RunMode, type RunState, type StepState } from './state-machine.ts';
+import { WORKFLOW_RUN_ADVANCE_KIND, canEndWorkflow, groupInFlight, type RunMode, type RunState, type StepState } from './state-machine.ts';
 import type { ExecutionGroup, GroupStrategy, SigningTime } from './execution-groups.ts';
 
 export type WalletSet = Readonly<Partial<Record<WalletRef['namespace'], string>>>;
@@ -183,11 +183,9 @@ export function createPgWorkflowRunStore(db: Database, tenantId: string) {
       // BUILD-FLOFI-UNIVERSAL-WORKFLOW-002: a user-funded run ends only while no group may be in flight (signed but not reconciled).
       if (run.mode === 'USER_FUNDED') {
         const groups = (await tx.query('SELECT * FROM workflow_run_groups WHERE tenant_id = $1 AND run_id = $2 ORDER BY group_index FOR UPDATE', [tenantId, runId])).rows.map(groupOf);
-        // In flight: anything submitted, and a wallet batch the wallet already sent. A user operation or signed Solana transactions FloFi has
-        // not relayed are not: ending the run skips them (FloFi never relays them; the owner is shown how to revoke a signed operation).
-        if (groups.some(g => ['SUBMITTED', 'UNCERTAIN'].includes(g.state) || (g.state === 'AUTHORIZED' && g.strategy === 'EVM_WALLET_BATCH'))) refuse('WORKFLOW_RUN_GROUP_IN_FLIGHT');
-        // A wallet batch the owner's wallet may be confirming right now would execute after the run ended: wait until its window passed.
-        if (groups.some(g => g.state === 'PREPARED' && g.strategy === 'EVM_WALLET_BATCH' && g.validUntil && g.validUntil > now)) refuse('WORKFLOW_RUN_GROUP_IN_FLIGHT');
+        // The same rule the owner's "End workflow" uses (`groupInFlight`): FloFi never relays a skipped user operation or Solana signature, and
+        // the owner is shown how to revoke a signed operation.
+        if (groups.some(g => groupInFlight(g, now))) refuse('WORKFLOW_RUN_GROUP_IN_FLIGHT');
         for (const g of groups) if (['PLANNED', 'PREPARED', 'EXPIRED', 'BLOCKED', 'AUTHORIZED'].includes(g.state)) {
           await tx.query(`UPDATE workflow_run_groups SET state = 'SKIPPED', code = $4, version = version + 1 WHERE tenant_id = $1 AND run_id = $2 AND group_index = $3`,
             [tenantId, runId, g.groupIndex, code]);

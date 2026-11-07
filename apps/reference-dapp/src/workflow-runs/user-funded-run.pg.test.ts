@@ -64,7 +64,7 @@ describe('BUILD-FLOFI-UNIVERSAL-WORKFLOW-002 user-funded workflow run (PostgreSQ
       expect(run.steps.map(s => [s.state, s.outcome?.kind])).toEqual([['RECONCILED', 'USER_FUNDED_GROUP'], ['RECONCILED', 'USER_FUNDED_GROUP']]);
       // Gas: paid by the owner's own wallet, from the receipt (gasUsed × effectiveGasPrice).
       expect(run.groups[0]).toMatchObject({ state: 'RECONCILED', gasPaid: { payer: h.d.evmOwner.address.toLowerCase(), unit: 'wei', amount: (200_000n * 1_000_000_000n).toString() },
-        transactions: [{ hash }] });
+        submissions: [{ hash }] });
       // The second swap spent exactly the guaranteed minimum; the owner got USDC back; nothing came from or went to a FloFi account.
       expect(run.steps[1]!.outcome!.spent).toEqual([{ asset: `${BASE_SEPOLIA}/erc20:${h.d.evm.control.profile.weth}`, amount: minimum }]);
       // The bound step records what it was signed to spend from its producer, as a confirm-mode step does: any later consumer of the same

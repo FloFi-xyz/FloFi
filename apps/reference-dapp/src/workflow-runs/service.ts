@@ -344,8 +344,9 @@ export type RunGroupView = { readonly index: number; readonly chain: string; rea
   readonly maxFee: { readonly amount: string; readonly unit: string; readonly estimated: boolean } | null;
   /** Network fees actually paid, from the chain (null until reconciled). */
   readonly gasPaid: { readonly amount: string; readonly unit: string; readonly payer: string } | null;
-  readonly transactions: readonly { readonly chain: string; readonly hash: string; readonly explorerUrl: string | null }[];
-  /** A wallet batch's id (the owner's own wallet's handle, to read its receipts back after a reload); null otherwise. */
+  /** Transactions of the group (public hashes / signatures only, never bytes): what was sent and reconciled. Named like a step's `submissions`. */
+  readonly submissions: readonly { readonly chain: string; readonly hash: string; readonly explorerUrl: string | null }[];
+  /** A wallet batch's id (the owner's own wallet's handle, to read its receipts back after a reload); the owner's own view only, else null. */
   readonly batchId: string | null;
   /** Whether the owner already signed/answered this group (a signed user operation stays valid on chain until its nonce key is used). */
   readonly signed: boolean };
@@ -354,20 +355,34 @@ export type RunGroupView = { readonly index: number; readonly chain: string; rea
  * The public status of a run. `outcomes` false (a requester the owner did not share status with) keeps every step's state but withholds its
  * transactions, amounts and evidence. Nothing returned is a key, calldata or a signature, and nothing here authorizes anything.
  */
-export async function runView(deps: { readonly store: Pick<WorkflowRunStore, 'steps' | 'groups'> }, run: RunRecord, options: { readonly outcomes: boolean; readonly origin?: string | null }): Promise<RunView> {
+/**
+ * `owner`: the run's proven owner (the approval page). Any other reader is a requester: it never sees the owner's wallet address, batch id or
+ * fee figures, even when the owner shares status (which shares step states, transaction hashes, amounts and evidence).
+ */
+export async function runView(deps: { readonly store: Pick<WorkflowRunStore, 'steps' | 'groups'> }, run: RunRecord, options: { readonly outcomes: boolean; readonly origin?: string | null;
+  readonly owner?: boolean }): Promise<RunView> {
+  const owner = options.owner === true;
   const steps = await deps.store.steps(run.runId);
   const groupRecords = run.mode === 'USER_FUNDED' ? await deps.store.groups(run.runId) : [];
   const groups: RunGroupView[] = groupRecords.map(g => {
     const fee = (g.prepared as { fee?: { maxCost?: string; unit?: string; estimated?: boolean } } | null)?.fee;
     const paid = (g.outcome as { gasPaid?: { amount: string; unit: string; payer: string } } | null)?.gasPaid ?? null;
-    const hashes = options.outcomes ? ((g.outcome as { transactions?: string[] } | null)?.transactions ?? (g.submission as { hashes?: string[] } | null)?.hashes ?? []) : [];
+    // Reconciled transactions first; before that, what was sent (a Solana group's signatures are known before sending: listed only once reconciled).
+    // An owner-step group's outcome lists its steps' own {chain, hash} records; a relayed group lists hashes on its own chain.
+    const recorded = (g.outcome as { transactions?: readonly unknown[] } | null)?.transactions
+      ?? (g.strategy === 'SOLANA_SIGN_ALL' ? [] : (g.submission as { hashes?: readonly unknown[] } | null)?.hashes ?? []);
+    const submissions = !options.outcomes ? [] : recorded.flatMap(t => {
+      const entry = typeof t === 'string' ? { chain: g.chain, hash: t } : t && typeof t === 'object' && typeof (t as { hash?: unknown }).hash === 'string'
+        ? { chain: typeof (t as { chain?: unknown }).chain === 'string' ? (t as { chain: string }).chain : g.chain, hash: (t as { hash: string }).hash } : null;
+      return entry ? [{ ...entry, explorerUrl: executionExplorer(entry.chain, entry.hash, false) }] : [];
+    });
     return { index: g.groupIndex, chain: g.chain, strategy: g.strategy, signing: g.signing, steps: [g.stepFrom, g.stepTo] as const, state: g.state, awaitsDelivery: g.awaitsDelivery,
-      // A requester the owner did not share status with sees that the owner's wallet pays, never which wallet (nor its batch id or fees).
-      code: g.code, validUntil: g.validUntil?.toISOString() ?? null, feePayer: options.outcomes ? g.feePayer : 'OWNER_WALLET',
-      maxFee: options.outcomes && fee?.maxCost && fee.unit ? { amount: fee.maxCost, unit: fee.unit, estimated: fee.estimated !== false } : null,
-      gasPaid: options.outcomes && paid ? { amount: paid.amount, unit: paid.unit, payer: paid.payer } : null,
-      transactions: hashes.map(hash => ({ chain: g.chain, hash, explorerUrl: executionExplorer(g.chain, hash, false) })),
-      batchId: options.outcomes && g.strategy === 'EVM_WALLET_BATCH' ? typeof g.authorization?.batchId === 'string' ? g.authorization.batchId
+      // Requesters see that the owner's wallet pays, never which wallet, its batch id or its fees; shared status adds hashes and the gas amount.
+      code: g.code, validUntil: g.validUntil?.toISOString() ?? null, feePayer: owner ? g.feePayer : 'OWNER_WALLET',
+      maxFee: owner && fee?.maxCost && fee.unit ? { amount: fee.maxCost, unit: fee.unit, estimated: fee.estimated !== false } : null,
+      gasPaid: options.outcomes && paid ? { amount: paid.amount, unit: paid.unit, payer: owner ? paid.payer : 'OWNER_WALLET' } : null,
+      submissions,
+      batchId: owner && g.strategy === 'EVM_WALLET_BATCH' ? typeof g.authorization?.batchId === 'string' ? g.authorization.batchId
         : g.state === 'PREPARED' ? String((g.prepared as { request?: { id?: string } } | null)?.request?.id ?? '') || null : null : null,
       signed: g.authorization !== null };
   });
@@ -379,7 +394,8 @@ export async function runView(deps: { readonly store: Pick<WorkflowRunStore, 'st
       spent: s.outcome.spent, received: s.outcome.received,
       receiptUrl: options.origin && s.outcome.kind === 'OWNER_RUN' && s.state === 'RECONCILED' ? `${options.origin}/app/dashboard/runs/${encodeURIComponent(s.outcome.executionId)}` : null } : null;
     return { index: s.stepIndex, action: composed.ok ? composed.steps[s.stepIndex]?.strategy.action ?? 'unknown' : 'unknown', state: s.state, flow: s.flow,
-      stepWorkflowHash: s.workflowHash, code: s.code, bound: options.outcomes ? s.bound : null, outcome };
+      // A bound step's own hash encodes the amount it resolved to: withheld with the amounts when status is not shared.
+      stepWorkflowHash: options.outcomes || !s.bound ? s.workflowHash : null, code: s.code, bound: options.outcomes ? s.bound : null, outcome };
   });
   const current = steps[run.currentStep];
   // A confirm-mode step whose predecessor reconciled is the owner's to sign (it is resolved when they open it); one in flight waits for its chain.

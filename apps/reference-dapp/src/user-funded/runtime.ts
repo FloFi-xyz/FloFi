@@ -17,6 +17,17 @@ import type { UserFundedDeps } from './groups.ts';
 type Env = Readonly<Record<string, string | undefined>>;
 export type UserFundedRuntime = { readonly facts: UserFundedFacts; readonly deps: UserFundedDeps | null };
 
+/**
+ * The deployment's user-funded facts only (no transport is created): the same chains the runtime below serves — Solana when enabled, an EVM
+ * chain only with a read RPC, a bundler chain only with both. Used where a plan is described (MCP, channels) without executing anything.
+ */
+export function userFundedFactsOf(env: Env): UserFundedFacts {
+  const config = readUserFundedConfig(env);
+  if (!config.enabled) return { enabled: false, code: config.code, chains: [], bundlerChains: [], solanaNonceAccounts: false };
+  const chains = config.chains.filter(c => c.startsWith('solana:') || Boolean(config.rpc[c]));
+  return { enabled: true, code: null, chains, bundlerChains: Object.keys(config.bundlers).filter(c => chains.includes(c) && c.startsWith('eip155:')),
+    solanaNonceAccounts: config.solanaNonceAccounts };
+}
 /** The deployment's user-funded facts and transports. Disabled or misconfigured: facts say why, and there are no transports at all. */
 export function userFundedRuntime(env: Env, fetchImpl: typeof fetch = fetch): UserFundedRuntime {
   const config = readUserFundedConfig(env);
