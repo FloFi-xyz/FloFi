@@ -16,6 +16,16 @@ read (Neon SQL `SELECT`s, Railway logs).
 | Financial isolation / fee preview | Fee ceiling computed from live fee data and shown per group with its payer; preparation refused when the owner's own balance cannot cover it (`USER_FUNDED_INSUFFICIENT_NATIVE_BALANCE`); no shared nonce or balance (each owner's own account; user operations use a nonce key per group) | `user-funded-run.pg.test.ts` (isolation case), `groups.test.ts` (insufficient balance, 1,000 submissions across users) |
 | KMS role | Retained, not deleted, no role in user execution; runbook §5 removes `kms:Sign` and says never fund the executor | ADR-0008, runbook |
 
+Gas payer by network (who pays, and how it is checked):
+
+| Network | Payer | Mechanism and check |
+|---|---|---|
+| Ethereum, Base, Arbitrum One | the owner's own account | wallet batch: the owner's wallet sends and pays (receipt `from` = owner); user operation: the owner's account prefunds the EntryPoint, a bundler only transmits (`UserOperationEvent` sender = owner, paymaster = 0); own-flow steps: the owner's wallet |
+| Robinhood Chain (4663) | the owner's own account | wallet batch for transfers when the wallet reports `atomic`, otherwise each step's own flow; no user operations (no bundler) |
+| Solana | the owner's own wallet | fee payer = static key 0 of every message, asserted before any relay; FloFi relays owner-signed bytes only |
+| Bridges (Relay / Across / LI.FI) | the owner, on the source chain | the bridge step's own owner-signed flow |
+| FloFi / the KMS executor | **never** | executor cannot send; product boundary refuses executor-paid authority; DB refuses a group whose fee payer is not the run's wallet |
+
 Production facts (read-only, 2026-11-07): delegation was configured on Railway (owner report: `delegation.worker_enabled`, KMS signing
 validated) but **never used**: zero credential grants, delegated authorizations, executions or delegation work items; the two automation rules
 are `CONFIRM_EACH_TIME` and paused. Retiring the executor disrupts no record, workflow or automation.
@@ -74,7 +84,30 @@ one interaction authorizes everything.
 
 ## 5. Test and CI evidence
 
-(Filled in below from this session's runs; CircleCI remains the certification authority.)
+All local, on loopback/MOCKED infrastructure (PostgreSQL 16.15 locally; CircleCI uses 18.6). CircleCI remains the certification authority
+and runs on the PR.
+
+| Gate | Result |
+|---|---|
+| `pnpm check` (typecheck, lint, build, schema drift, unit) | **pass** — 564 files, 6 804 tests passed (2 files / 2 tests skipped by the suite itself) |
+| `pnpm test:postgres` | 96 files pass, **1 known environmental failure**, 1 skipped; 610 tests pass, 1 fails, 3 skipped. The failure is `forward-compatibility.pg.test.ts` › 0015 on a v14 database: it expects PostgreSQL 18's *named* NOT NULL constraints and this container runs PG 16; the file is untouched by this build (CI runs PG 18.6). |
+| Browser profiles (headless shell 1243, Anvil 1.8.3 checksum-verified, loopback only) | `delegated-execution` 3/3 (rewritten as the retirement proof), `approve-workflow-run` 2/2, `approve-authorize-journeys` 3/3, `automations` 3/3, `canvas-automation-ux` 18/18, `chat-automations` 8/8. The rest of the extended browser suite was not run locally (CircleCI). |
+| `python3 scripts/governance_lite.py` + unittests | pass (2 897 files) + 21 tests OK |
+| `python3 scripts/agent_guard.py check` | PASS (19 domains, 169 modules) |
+| Specialist reviews (read-only) | flofi-security, flofi-wallet-execution, flofi-workflow, flofi-data-privacy, flofi-bridge (findings verified; every real one fixed with a regression test, see ADR-0008 "After the specialist review"); second batch flofi-mcp, flofi-automations, flofi-frontend-ux — see below |
+| CircleCI | runs on the PR (none yet for this branch). For reference, main's latest pipeline (the PR #166 merge) already failed in `manual-backup-certification` › `certification-browser-1` (extended browser shard 1/3) before this branch existed. |
+
+Key new or rewritten suites: `workflow-runs/execution-groups.test.ts`, `authorization-plan.test.ts`, `user-funded-run.pg.test.ts` (E2E wallet
+batch, foreign payer, exact-calls mismatch, revert, isolation, late answer under one id, resume, signed group never replaced, FloFi Wallet
+multi-step owner group, mixed batch + bridge, user-op signer), `user-funded/groups.test.ts` (user operation lifecycle incl. plain account
+refused, gas words too low, record-then-relay and resend; Solana sign-all preparation; Solana submission order; 1 000-submission isolation),
+`user-funded-groups-migration.pg.test.ts` (bytes, earlier rows, widened checks, fee-payer rule, freeze of signed groups, code grammar,
+rollback), `received-amounts.test.ts`, `editor/chat-canvas-parity.test.ts`, the delegation refusal proofs and `e2e/delegated-execution.spec.ts`.
+
+Intentional test changes (each explained in its commit for owner review): executor/adversarial/compatibility/delegated-run suites and the
+`delegated-execution` browser profile now prove the retirement (they proved FloFi-paid execution); the MCP handoff test expects
+`EXECUTOR_FUNDED_GAS_RETIRED`; planner/migration/user-funded expectations changed with the review fixes. No test was skipped or deleted to
+pass.
 
 ## 6. Deployment requirements
 
@@ -83,4 +116,11 @@ KMS: keep, remove `kms:Sign`, never fund. Rollback: `FLOFI_USER_FUNDED_EXECUTION
 
 ## 7. Go / No-Go
 
-See the final section after CI.
+- **Merge (owner review):** GO once CircleCI is green on the PR — the build is complete on its three objectives at the MOCKED/loopback
+  evidence level, with every verified review finding fixed.
+- **Deploy with `FLOFI_USER_FUNDED_EXECUTION` unset (default off):** GO after Release A. This retires the FloFi-funded executor (never used in
+  production: zero delegated rows) and changes nothing for confirm-each-step runs or owner-confirmed automations.
+- **Enable user-funded execution in production:** **NO-GO until** (1) Release A, then this build, deployed to Vercel and both Railway services;
+  (2) `kms:Sign` removed from the worker role (key kept); (3) an owner-run, small real-funds verification per runbook §7 on each wallet ×
+  chain to be offered (MetaMask batch on Base/Ethereum/Arbitrum; Phantom/Solflare sign-all; a Base → Solana bridge then a group when due),
+  with hashes, gas paid and payer recorded here. Until then every claim above is MOCKED evidence, not mainnet verification.

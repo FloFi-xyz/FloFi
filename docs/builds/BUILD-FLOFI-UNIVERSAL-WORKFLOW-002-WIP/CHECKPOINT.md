@@ -2,6 +2,10 @@
 
 ## 0. Current state (session 2, 2026-11-07) — READ THIS FIRST
 
+**Update (end of session 2):** build complete at MOCKED evidence level; specialist reviews done and every verified finding fixed (ADR-0008
+"After the specialist review"; report §4–§5); Release A amended (`RELEASE A (amended)` commit re-pins 0023 `aea46318…594e`); gates and
+browser profiles listed in the report §5; PR opened against main — next: CircleCI on the PR, owner review, then runbook §2–§7.
+
 Implemented, committed and pushed on `claude/friendly-lamport-r1z0ac` (see `git log 3bdfe07..HEAD`):
 - **Release A** certificate (base 0022 → 0023) as its own first commit; **migration 0023** (`USER_FUNDED` mode, `workflow_run_groups`,
   DB-checked fee payer = run wallet) + PostgreSQL suite; SCHEMA-COMPATIBILITY §17.
