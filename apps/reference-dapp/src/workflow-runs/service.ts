@@ -136,6 +136,7 @@ export async function cancelRun(deps: WorkflowRunDeps, run: RunRecord, wallets: 
 /** The owner resumes a HALTED run whose stopped step submitted nothing (e.g. a flow that was disabled is enabled again). */
 export async function resumeRun(deps: WorkflowRunDeps, run: RunRecord, wallets: readonly WalletRef[]): Promise<RunRecord> {
   assertRunWallets(run, wallets);
+  if (run.state === 'HALTED' && run.mode === 'USER_FUNDED') return resumeUserFunded(deps, run);
   if (run.state !== 'HALTED' || run.mode !== 'CONFIRM_EACH_STEP') refuse(`WORKFLOW_RUN_${run.state}`);
   if (run.expiresAt <= deps.now()) refuse('WORKFLOW_RUN_EXPIRED');
   const step = (await deps.store.steps(run.runId))[run.currentStep];
@@ -148,6 +149,26 @@ export async function resumeRun(deps: WorkflowRunDeps, run: RunRecord, wallets: 
 }
 
 // ── BUILD-FLOFI-UNIVERSAL-WORKFLOW-002: user-funded execution groups ─────────────────────────────────────────────────────────
+/**
+ * A user-funded run halted at a group that was stopped BEFORE anything was sent (a refused due-time simulation, a delivery below what was
+ * signed, an expired preparation): the group is planned again to be signed when due with the actual facts — a user operation becomes a
+ * wallet batch the owner confirms then — and its steps wait again. Nothing already signed is reused.
+ */
+async function resumeUserFunded(deps: WorkflowRunDeps, run: RunRecord): Promise<RunRecord> {
+  if (run.expiresAt <= deps.now()) refuse('WORKFLOW_RUN_EXPIRED');
+  const g = (await deps.store.groups(run.runId)).find(x => x.stepFrom <= run.currentStep && run.currentStep <= x.stepTo);
+  if (!g || g.state !== 'BLOCKED') refuse('WORKFLOW_RUN_NOT_RESUMABLE');
+  if (!await deps.store.transition(run.runId, { version: run.version, from: ['HALTED'] }, 'RUNNING', { code: null }, 'RUN_RESUMED')) refuse('WORKFLOW_RUN_CHANGED');
+  const strategy = g!.strategy === 'EVM_USER_OPERATION' ? 'EVM_WALLET_BATCH' as const : g!.strategy === 'SOLANA_DURABLE_NONCE' ? 'SOLANA_SIGN_ALL' as const : g!.strategy;
+  await deps.store.groupTransition(run.runId, g!.groupIndex, ['BLOCKED'], 'PLANNED', { strategy, signing: 'WHEN_DUE', prepared: null, authorization: null, validUntil: null, code: null },
+    'GROUP_RESUMED');
+  for (let i = g!.stepFrom; i <= g!.stepTo; i++) {
+    const moved = await deps.store.stepTransition(run.runId, i, ['BLOCKED'], 'PENDING', { code: null }, 'STEP_RESUMED');
+    if (moved) await deps.store.stepTransition(run.runId, i, ['PENDING'], 'DELEGATED', {});
+  }
+  await advanceRun(runnerDeps(deps), run.runId);
+  return (await deps.store.byId(run.runId))!;
+}
 const userFundedBuildable = (facts: UserFundedFacts) => (st: Parameters<typeof evmStepBuildable>[0]) => st.namespace === 'solana' || evmStepBuildable(st, facts.chains) === null;
 /**
  * The owner chose user-funded execution with the wallets their browser reported (EIP-5792 capabilities, Wallet Standard features): the run's

@@ -168,6 +168,55 @@ describe('BUILD-FLOFI-UNIVERSAL-WORKFLOW-002 user-funded workflow run (PostgreSQ
     } finally { await t.drop(); }
   });
 
+  it('a group stopped before anything was sent can be resumed: planned again, signed when due with fresh facts; nothing signed before is reused', async () => {
+    const t = await createTestDatabase();
+    try {
+      const { h, approval } = await setup(t);
+      await workflowRunUserFundedStart(h.surface, approval.approvalId, [h.evm, h.sol], METAMASK);
+      await workflowRunUserFundedPrepare(h.surface, approval.approvalId, [h.evm, h.sol], 0);
+      let run = await ownedRun(h.runs, approval.approvalId, [h.evm, h.sol]);
+      // As the runner does when a due-time check refuses a group (nothing sent): the group BLOCKED, its steps BLOCKED, the run FAILED/HALTED.
+      await h.store.groupTransition(run.runId, 0, ['PREPARED'], 'BLOCKED', { code: 'USER_OPERATION_SIMULATION_FAILED' });
+      for (const i of [0, 1]) await h.store.stepTransition(run.runId, i, ['DELEGATED'], 'BLOCKED', { code: 'USER_OPERATION_SIMULATION_FAILED' });
+      run = (await h.store.transition(run.runId, { version: run.version, from: ['RUNNING'] }, 'HALTED', { code: 'USER_OPERATION_SIMULATION_FAILED' }))!;
+      const { resumeSequential } = await import('../platform/workflow-run-approvals.ts');
+      const resumed = await resumeSequential(h.runs, run, [h.evm, h.sol], (await claim(h, approval.secret).catch(() => null))?.view ?? ({} as never));
+      expect(resumed.view.workflowRun!.run).toMatchObject({ state: 'RUNNING', nextAction: 'OWNER_SIGNS_GROUP',
+        groups: [{ state: 'PLANNED', strategy: 'EVM_WALLET_BATCH', signing: 'WHEN_DUE', code: null, maxFee: null }] });
+      expect((await h.store.steps(run.runId)).map(s => s.state)).toEqual(['DELEGATED', 'DELEGATED']);
+      // Prepared again from fresh chain facts (the old preparation was discarded).
+      expect((await workflowRunUserFundedPrepare(h.surface, approval.approvalId, [h.evm, h.sol], 0)).prepared.kind).toBe('EVM_WALLET_BATCH');
+    } finally { await t.drop(); }
+  });
+
+  it('a mixed run: a wallet batch group, then a bridge through its own flow (owner-step group); every group ends reconciled', async () => {
+    const t = await createTestDatabase();
+    try {
+      const h = await workflowRunHarness(t.db, { userFundedChains: [BASE_SEPOLIA], flows: ['base-sepolia-swap', 'crosschain-router-testnet'] });
+      h.d.evm.control.fundNative(h.d.evmOwner.address, 10n ** 18n);
+      const BRIDGE = { action: 'bridge', sourceNetwork: 'base-sepolia', destinationNetwork: 'arbitrum-sepolia', asset: 'USDC', amount: '5' };
+      const approval = await h.request({ version: 2, steps: [BASE_SWAP, BRIDGE] });
+      await claim(h, approval.secret);
+      const started = await workflowRunUserFundedStart(h.surface, approval.approvalId, [h.evm, h.sol], METAMASK);
+      expect(started.view.workflowRun!.run.groups.map(g => [g.strategy, g.steps])).toEqual([['EVM_WALLET_BATCH', [0, 0]], ['EVM_OWNER_STEP', [1, 1]]]);
+      const prepared = await workflowRunUserFundedPrepare(h.surface, approval.approvalId, [h.evm, h.sol], 0);
+      const hash = h.d.evm.control.walletBatch(h.d.evmOwner.address, evmCallsOf((prepared.prepared as unknown as { group: EvmGroupCalls }).group));
+      await workflowRunUserFundedAuthorize(h.surface, approval.approvalId, [h.evm, h.sol], 0, { kind: 'EVM_WALLET_BATCH', batchId: 'batch-mixed' });
+      await workflowRunUserFundedReport(h.surface, approval.approvalId, [h.evm, h.sol], 0, [hash]);
+      // The bridge is the owner's to confirm through its own flow, exactly as in confirm-each-step mode.
+      const { workflowRunContinue } = await import('../platform/approve.ts');
+      const loaded = await workflowRunContinue(h.surface, approval.approvalId, [h.evm, h.sol]);
+      expect(loaded.view.workflowRun!.step).toEqual({ index: 1, count: 2 });
+      expect(loaded.view.workflowRun!.run.nextAction).toBe('WAITING_FOR_RECONCILIATION');
+      h.flows.ownerExecutes('crosschain-router-testnet', h.evm.address, loaded.workflow, 'RECONCILED');
+      await h.drain();
+      const run = await ownedRun(h.runs, approval.approvalId, [h.evm, h.sol]);
+      expect(run).toMatchObject({ state: 'COMPLETED', mode: 'USER_FUNDED' });
+      expect((await h.store.groups(run.runId)).map(g => g.state)).toEqual(['RECONCILED', 'RECONCILED']);
+      expect((await h.store.steps(run.runId)).map(s => [s.state, s.outcome?.kind])).toEqual([['RECONCILED', 'USER_FUNDED_GROUP'], ['RECONCILED', 'OWNER_RUN']]);
+    } finally { await t.drop(); }
+  });
+
   it('a user-operation answer signed by any key but the owner\'s is refused against the frozen operation (S6: exact artifact, exact signer)', async () => {
     const t = await createTestDatabase();
     try {

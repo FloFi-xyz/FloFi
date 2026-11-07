@@ -23,6 +23,7 @@ export const portugueseUserFunded: Readonly<Record<string, string>> = {
   'Network fees paid: {0}': 'Taxas de rede pagas: {0}',
   'Authorize steps {0}–{1} now': 'Autorizar as etapas {0}–{1} agora',
   'Check my wallet for the batch': 'Verificar o lote na minha carteira',
+  'Sign steps {0}–{1} now; FloFi relays them when they are due': 'Assinar as etapas {0}–{1} agora; a FloFi as encaminha quando chegar a vez',
   // Authorization plan notes (shown on the approval page and in chat).
   'Your own wallet pays every network fee; FloFi never pays, advances or reimburses gas.': 'A sua própria carteira paga todas as taxas de rede; a FloFi nunca paga, adianta nem reembolsa gás.',
   'One wallet interaction is not one transaction: a batch executes several steps in one transaction on one network; each network needs its own wallet authorization.':

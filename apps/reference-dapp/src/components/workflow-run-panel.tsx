@@ -239,6 +239,11 @@ export function WorkflowRunPanel({ claim, approvalId, secret, onProposal, onErro
       <button type="button" disabled={busy} onClick={() => void authorizeGroup(currentGroup.index)}>
         {tr('Authorize steps {0}–{1} now', String(currentGroup.steps[0] + 1), String(currentGroup.steps[1] + 1))}</button>
     </div>}
+    {run.mode === 'USER_FUNDED' && open && (run.groups ?? []).filter(g => g.signing === 'UPFRONT' && g.state === 'PLANNED' && g.index !== currentGroup?.index).map(g =>
+      <div key={g.index} className="approval-actions">
+        <button type="button" className="secondary" disabled={busy} onClick={() => void authorizeGroup(g.index)}>
+          {tr('Sign steps {0}–{1} now; FloFi relays them when they are due', String(g.steps[0] + 1), String(g.steps[1] + 1))}</button>
+      </div>)}
     {run.mode === 'USER_FUNDED' && run.nextAction === 'OWNER_CONFIRMS_BATCH' && currentGroup?.batchId && <div className="approval-actions">
       <button type="button" className="secondary" disabled={busy} onClick={() => void recoverBatch(currentGroup.index, currentGroup.batchId!)}>{tr('Check my wallet for the batch')}</button>
     </div>}

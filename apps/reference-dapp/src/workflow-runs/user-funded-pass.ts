@@ -42,17 +42,13 @@ function executedStrategy(composed: WorkflowComposition, index: number, spent: s
 }
 
 export async function userFundedPass(deps: UserFundedPassDeps, run: RunRecord): Promise<Pass> {
-  if (TERMINAL_RUN.includes(run.state) || run.state === 'HALTED' || run.state === 'PENDING') return settled(run);
+  if (run.state === 'PENDING' || run.state === 'CANCELLED' || run.state === 'EXPIRED') return settled(run);
+  await syncOwnerGroups(deps, run.runId);
   const groups = await deps.store.groups(run.runId), steps = await deps.store.steps(run.runId);
+  if (TERMINAL_RUN.includes(run.state) || run.state === 'HALTED') return settled(run);
   const k = run.currentStep, g = groups.find(x => x.stepFrom <= k && k <= x.stepTo);
   if (!g) return settled(run);
-  if (ownerStep(g)) {
-    // Bookkeeping only: an owner-step group is RECONCILED/FAILED with its step (whose own flow carries the evidence).
-    const step = steps[g.stepFrom]!;
-    if (g.state === 'PLANNED' && (step.state === 'RECONCILED' || step.state === 'FAILED') && step.outcome)
-      await deps.store.groupTransition(run.runId, g.groupIndex, ['PLANNED'], step.state, { outcome: { status: step.state, transactions: step.outcome.transactions, steps: [k] } });
-    return deps.confirmPass(run);
-  }
+  if (ownerStep(g)) { const pass = await deps.confirmPass(run); await syncOwnerGroups(deps, run.runId); return pass; }
   const now = deps.now();
   const block = async (code: string): Promise<Pass> => {
     await deps.store.groupTransition(run.runId, g.groupIndex, ['PLANNED', 'PREPARED', 'AUTHORIZED'], 'BLOCKED', { code });
@@ -157,6 +153,16 @@ async function submittedGroup(deps: UserFundedPassDeps, run: RunRecord, g: Group
   return moved ? settled(moved) : { ...settled(fresh), progressed: true };
 }
 
+/** Bookkeeping only: an owner-step group becomes RECONCILED/FAILED with its step (whose own flow carries the evidence), whenever that happened. */
+async function syncOwnerGroups(deps: UserFundedPassDeps, runId: string): Promise<void> {
+  const groups = await deps.store.groups(runId), steps = await deps.store.steps(runId);
+  for (const og of groups.filter(x => ownerStep(x) && x.state === 'PLANNED')) {
+    const step = steps[og.stepFrom];
+    if (step && (step.state === 'RECONCILED' || step.state === 'FAILED') && step.outcome)
+      await deps.store.groupTransition(runId, og.groupIndex, ['PLANNED'], step.state, { outcome: { status: step.state, transactions: step.outcome.transactions,
+        steps: [og.stepFrom] } });
+  }
+}
 /** A reconciled group: the run moves past its last step, or completes (written once). */
 async function afterGroup(deps: UserFundedPassDeps, run: RunRecord, g: GroupRecord): Promise<Pass> {
   if (run.currentStep > g.stepTo) return settled(run);
