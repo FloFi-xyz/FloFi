@@ -38,13 +38,15 @@ const hashes = (attempts: readonly unknown[]) => attempts.map(a => (a as Attempt
 
 /** Observes one owner-signed step. `chain` is the step's CAIP-2 chain (for the public transaction facts). */
 export async function observeOwnerStep(runtime: EngineRuntime, input: { readonly flow: string; readonly wallet: string; readonly workflowHash: string;
-  readonly claimedAt: Date; readonly chain: string; readonly now: Date }): Promise<StepVerdict> {
+  readonly claimedAt: Date; readonly chain: string; readonly now: Date;
+  /** BUILD-FLOFI-UNIVERSAL-WORKFLOW-002: the run's own wallets by namespace — a bridge delivery to any other recipient funds no later step. */
+  readonly ownerWallets?: Readonly<Partial<Record<'eip155' | 'solana', string>>> }): Promise<StepVerdict> {
   if (!runtime.runs || !runtime.record) return { verdict: 'UNAVAILABLE', code: 'WORKFLOW_RUN_OBSERVATION_UNAVAILABLE' };
   const flow = input.flow as FlowName, since = input.claimedAt.getTime() - 1_000;
   const listed = await runtime.runs(flow, input.wallet);
   if (!listed.ok) return { verdict: 'UNAVAILABLE', code: listed.code };
   const candidates = listed.value.filter(r => r.flow === flow && Date.parse(r.updatedAt) >= since).slice(0, MAX_CANDIDATES);
-  type Seen = { runId: string; createdAt: number; status: string; errorCode: string | null; needsObservation: boolean; submitted: readonly string[];
+  type Seen = { refunded: boolean; runId: string; createdAt: number; status: string; errorCode: string | null; needsObservation: boolean; submitted: readonly string[];
     evidence: { environment: string; outcome: string; bundleHash: string } | null; spent: StepOutcome['spent']; received: StepOutcome['received'] };
   const seen: Seen[] = [];
   for (const candidate of candidates) {
@@ -61,9 +63,14 @@ export async function observeOwnerStep(runtime: EngineRuntime, input: { readonly
       if (e.value) evidence = { environment: e.value.environment, outcome: e.value.outcome, bundleHash: e.value.bundleHash };
     }
     const amounts = amountsFromOwnerRecord(record.value);
-    seen.push({ runId: run.value.runId, createdAt: Date.parse(run.value.createdAt), status: run.value.status, errorCode: run.value.errorCode,
+    const verdict = record.value && typeof record.value === 'object' ? (record.value as { verdict?: unknown }).verdict : undefined;
+    // A delivery to someone other than the run's own wallet on that network is not the owner's to spend in a later step.
+    const ownerOfDestination = amounts.recipientChain && input.ownerWallets ? input.ownerWallets[amounts.recipientChain.startsWith('solana:') ? 'solana' : 'eip155'] : undefined;
+    const foreign = amounts.recipient !== undefined && ownerOfDestination !== undefined
+      && (amounts.recipientChain?.startsWith('solana:') ? amounts.recipient !== ownerOfDestination : amounts.recipient.toLowerCase() !== ownerOfDestination.toLowerCase());
+    seen.push({ refunded: verdict === 'REFUNDED', runId: run.value.runId, createdAt: Date.parse(run.value.createdAt), status: run.value.status, errorCode: run.value.errorCode,
       needsObservation: run.value.needsObservation, submitted: hashes(Array.isArray(run.value.attempts) ? run.value.attempts : []), evidence,
-      spent: amounts.spent, received: amounts.received });
+      spent: amounts.spent, received: foreign ? [] : amounts.received });
   }
   seen.sort((a, b) => a.createdAt - b.createdAt || (a.runId < b.runId ? -1 : 1));
   const outcomeOf = (s: Seen): StepOutcome => ({ kind: 'OWNER_RUN', executionId: s.runId, flow: input.flow, status: s.status,
@@ -74,6 +81,9 @@ export async function observeOwnerStep(runtime: EngineRuntime, input: { readonly
   if (reconciled.length) return { verdict: 'RECONCILED', outcome: outcomeOf(reconciled[0]!), duplicates: reconciled.slice(1).map(s => s.runId) };
   const pending = seen.find(s => s.needsObservation);
   if (pending) return { verdict: 'UNCERTAIN', executionId: pending.runId, code: 'STEP_OUTCOME_PENDING' };
+  // BUILD-FLOFI-UNIVERSAL-WORKFLOW-002: a bridge whose provider refunded the deposit delivered nothing: the step failed (it is never left open).
+  const refunded = seen.find(s => s.refunded && !s.needsObservation && s.submitted.length > 0);
+  if (refunded) return { verdict: 'FAILED', outcome: outcomeOf(refunded), code: 'BRIDGE_REFUNDED' };
   // A run that failed AFTER submitting something reconciled as a failure: irreversible (fees were paid), never retried by the run.
   const failed = seen.find(s => s.errorCode !== null && s.submitted.length > 0);
   if (failed) return { verdict: 'FAILED', outcome: outcomeOf(failed), code: failed.errorCode! };

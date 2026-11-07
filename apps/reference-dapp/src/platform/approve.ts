@@ -23,8 +23,7 @@ import { approvalView, CLAIM_SECONDS, openApprovalSession, planNamespace, planNa
 import { authorizationReviewSequential, authorizeSequential, cancelSequential, claimSequential, continueSequential, ownedRun, resumeSequential, startSequential,
   statusSequential, type WorkflowRunClaim, type WorkflowRunSurface, userFundedAuthorizeSequential, userFundedPrepareSequential, userFundedReportSequential,
   userFundedStartSequential } from './workflow-run-approvals.ts';
-import type { WalletProfile } from '../workflow-runs/execution-groups.ts';
-import type { OwnerAnswer } from '../user-funded/groups.ts';
+import type { OwnerAnswer, WalletProfile } from '../workflow-runs/execution-groups.ts';
 import type { ApprovalRequesterKind, HandoffRecord, HandoffStore, RequesterScope, WalletRef } from './handoff-store.ts';
 import { refuse } from './refusal.ts';
 

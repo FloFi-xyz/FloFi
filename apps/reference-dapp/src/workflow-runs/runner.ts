@@ -152,7 +152,7 @@ async function confirmPass(deps: RunnerDeps, run: RunRecord): Promise<Pass> {
       const network = networkOf(step.strategy!), wallet = run.wallets[namespaceOf(network)];
       if (!wallet) return { ...settled(run, ADVANCE_RETRY_MS), code: 'WORKFLOW_RUN_WALLET_MISSING' };
       const verdict = await observeOwnerStep(deps.runtime, { flow: step.flow!, wallet, workflowHash: step.workflowHash!, claimedAt: step.claimedAt!,
-        chain: NETWORK_CHAINS[network], now });
+        chain: NETWORK_CHAINS[network], now, ownerWallets: run.wallets });
       if (verdict.verdict === 'UNAVAILABLE') return { ...settled(run, ADVANCE_RETRY_MS), code: verdict.code };
       // Nothing submitted yet: the owner may still be reviewing or signing; look again a little later.
       if (verdict.verdict === 'OPEN') return settled(run, OPEN_RECHECK_MS);

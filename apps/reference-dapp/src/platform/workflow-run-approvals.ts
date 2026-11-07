@@ -21,8 +21,7 @@ import type { AuthorizationPlan } from '../workflow-runs/authorization-plan.ts';
 import type { RunRecord } from '../workflow-runs/pg-store.ts';
 import { assertRunWallets, authorizeUserFundedGroup, cancelRun, currentStep, ensureForClaim, observeRun, ownerAuthorizationPlan, prepareUserFundedGroup, reportUserFundedBatch,
   resumeRun, runView, startConfirm, startUserFunded, type PreparedGroupView, type RunView, type StepProposal, type WorkflowRunDeps } from '../workflow-runs/service.ts';
-import type { WalletProfile } from '../workflow-runs/execution-groups.ts';
-import type { OwnerAnswer } from '../user-funded/groups.ts';
+import type { OwnerAnswer, WalletProfile } from '../workflow-runs/execution-groups.ts';
 import { DELEGATED_AUTHORIZATION_SECONDS } from '../workflow-runs/state-machine.ts';
 import type { ApprovalView } from './approvals.ts';
 import type { HandoffRecord, WalletRef } from './handoff-store.ts';

@@ -20,7 +20,7 @@ import { erc4337, eip5792, fromBase64, parseMessageV0, parseTransaction, simulat
 import type { ChainTransport } from '../delegation/chains.ts';
 import { assetKey, type WorkflowRequirement } from '../delegation/steps.ts';
 import type { WorkflowComposition } from '../engine/strategy-engine';
-import type { GroupStrategy } from '../workflow-runs/execution-groups.ts';
+import type { GroupStrategy, OwnerAnswer } from '../workflow-runs/execution-groups.ts';
 import type { BundlerClient } from './bundler.ts';
 import { buildEvmGroupCalls, DEPENDENT_CALL_GAS, evmCallsOf, type AssetAmountFact, type EvmGroupCalls } from './evm-calls.ts';
 import { reconcileUserOperation, reconcileWalletBatch, type StepFacts } from './evm-reconcile.ts';
@@ -182,8 +182,7 @@ export async function prepareGroup(deps: UserFundedDeps, composition: WorkflowCo
 }
 
 // ── Authorization (what the owner's wallet returned) ──────────────────────────────────────────────────────────────────────
-export type OwnerAnswer = { readonly kind: 'EVM_WALLET_BATCH'; readonly batchId: string } | { readonly kind: 'EVM_USER_OPERATION'; readonly signature: string }
-  | { readonly kind: 'SOLANA_SIGN_ALL'; readonly transactions: readonly string[] };
+export type { OwnerAnswer } from '../workflow-runs/execution-groups.ts';
 /** Verifies the owner's answer against the frozen prepared artifact (never against anything the browser sends back as "the artifact"). */
 export function authorizeGroup(prepared: Prepared, answer: OwnerAnswer, owner: string, now: Date): Result<Readonly<Record<string, unknown>>> {
   if (answer.kind !== prepared.kind) return no('USER_FUNDED_AUTHORIZATION_KIND_MISMATCH');

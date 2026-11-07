@@ -24,7 +24,9 @@ const tokenAddress = (token: Record<string, unknown>): string | null =>
 const listAmounts = (v: unknown): FlowAmount[] | null => Array.isArray(v) && v.every(x => isObject(x) && typeof x.asset === 'string' && units(x.amount))
   ? v.map(x => ({ asset: String((x as FlowAmount).asset), amount: String((x as FlowAmount).amount) })) : null;
 
-export function amountsFromOwnerRecord(record: unknown): { readonly spent: readonly FlowAmount[]; readonly received: readonly FlowAmount[] } {
+/** BUILD-FLOFI-UNIVERSAL-WORKFLOW-002: a bridge delivery also names its recipient (and the destination chain) so a run can verify it is its own wallet. */
+export type OwnerAmounts = { readonly spent: readonly FlowAmount[]; readonly received: readonly FlowAmount[]; readonly recipient?: string; readonly recipientChain?: string | null };
+export function amountsFromOwnerRecord(record: unknown): OwnerAmounts {
   if (!isObject(record)) return { spent: [], received: [] };
   // Explicit binding facts (flow projectors / test harness): preferred when present.
   const explicitReceived = listAmounts(record.receivedAmounts), explicitSpent = listAmounts(record.spentAmounts);
@@ -53,8 +55,11 @@ export function amountsFromOwnerRecord(record: unknown): { readonly spent: reado
       received: [{ asset: assetKey({ chain, address: output }), amount: received }],
       spent: input && spent ? [{ asset: assetKey({ chain, address: input }), amount: spent }] : [] };
   }
-  // Universal bridge: destination delivery amount + route token identities.
-  if (typeof record.received === 'string' && units(record.received) && isObject(record.review) && isObject(record.review.route)) {
+  // Universal bridge: destination delivery amount + route token identities. BUILD-FLOFI-UNIVERSAL-WORKFLOW-002: only a delivery the flow
+  // reconciled counts (a DIVERGENT, FAILED or REFUNDED record delivered nothing a later step may spend), and the delivery's recipient is
+  // reported so the run can refuse a delivery to anyone but its own wallet of the destination network.
+  if (typeof record.received === 'string' && units(record.received) && isObject(record.review) && isObject(record.review.route)
+    && (record.verdict === undefined || record.verdict === 'RECONCILED')) {
     const route = record.review.route, out = isObject(route.outputToken) ? route.outputToken : null, inn = isObject(route.inputToken) ? route.inputToken : null;
     const received: FlowAmount[] = [];
     const spent: FlowAmount[] = [];
@@ -66,7 +71,8 @@ export function amountsFromOwnerRecord(record: unknown): { readonly spent: reado
       const address = tokenAddress(inn);
       if (address) spent.push({ asset: assetKey({ chain: route.sourceChain, address }), amount: route.inputAmount });
     }
-    return { spent, received };
+    const recipient = typeof record.review.recipient === 'string' ? record.review.recipient : null;
+    return { spent, received, ...recipient ? { recipient, recipientChain: typeof route.destinationChain === 'string' ? route.destinationChain : null } : {} };
   }
   // Jupiter / Solana swap: evidence carries the reconciled output.
   if (isObject(record.evidence)) {

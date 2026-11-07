@@ -73,6 +73,9 @@ export type WalletProfile = {
     /** Owner-controlled durable nonce accounts already initialized for this wallet (FloFi reads them on chain). */
     readonly nonceAccounts: number };
 };
+/** What the owner's wallet returned for a prepared group (verified server-side against the frozen artifact before it is used). */
+export type OwnerAnswer = { readonly kind: 'EVM_WALLET_BATCH'; readonly batchId: string } | { readonly kind: 'EVM_USER_OPERATION'; readonly signature: string }
+  | { readonly kind: 'SOLANA_SIGN_ALL'; readonly transactions: readonly string[] };
 export type GroupStep = { readonly index: number; readonly action: string; readonly amount: AmountBasis; readonly boundTo: number | null };
 export type ExecutionGroup = {
   readonly index: number; readonly namespace: Namespace; readonly chain: string; readonly steps: readonly GroupStep[];
