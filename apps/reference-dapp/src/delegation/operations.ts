@@ -59,9 +59,17 @@ const assertChoosing = (run: { readonly state: string; readonly mode: string | n
  * Runs one operation for `owner` (the verified principal). Throws a closed code for invalid arguments and every refusal. `runs` (the workflow
  * run store on the same database) serves the run operations; without it they refuse.
  */
+/**
+ * BUILD-FLOFI-UNIVERSAL-WORKFLOW-002, invariant S1: the operations that would create NEW delegated authority for FloFi's executor — whose
+ * session address sends and pays for every redemption — are refused at this product boundary (embedded BFF and Railway API alike) with
+ * EXECUTOR_FUNDED_GAS_RETIRED. Reading, revoking and ending existing authority stays available, so nothing already signed is stranded.
+ */
+export const EXECUTOR_FUNDED_OPERATIONS: ReadonlySet<DelegationOperation> = new Set(['workflowRunWalletReview', 'workflowRunWalletSign', 'credentialPrepare',
+  'credentialComplete', 'automationCreate', 'authorizationReview', 'authorizationSign', 'authorizationReauthorize', 'executionResume']);
 export async function runDelegationOperation(service: DelegationService, owner: Owner, proven: readonly Owner[], method: DelegationOperation, args: readonly unknown[],
   runs?: WorkflowRunStore): Promise<unknown> {
   const arity = (n: number) => { if (args.length !== n) invalid(); };
+  if (EXECUTOR_FUNDED_OPERATIONS.has(method)) throw new Error('EXECUTOR_FUNDED_GAS_RETIRED');
   switch (method) {
     case 'workflowRunWalletReview': {
       arity(1);

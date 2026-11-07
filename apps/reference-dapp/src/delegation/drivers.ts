@@ -126,28 +126,10 @@ async function signEvmCalls(ctx: StepContext, prepared: Readonly<Record<string, 
     hashes: txs.map(x => x.hash), before: prepared.before, minimum: prepared.minimum, ...prepared.notAfter === undefined ? {} : { notAfter: prepared.notAfter } },
     calls: txs.length, nextNonce: base + BigInt(txs.length) };
 }
-/**
- * BUILD-FLOFI-UNIVERSAL-SINGLE-AUTH-MAINNET-001: for every never-seen transaction of a stale submission, a zero-value self-transaction of the
- * executor at the same nonce, so the shared executor's later nonces are never stuck behind a gap. It carries no call and no authority; once
- * it is mined the stale bytes can never execute, and reconciliation reports that call as not executed (`nonceConsumed`).
+/*
+ * BUILD-FLOFI-UNIVERSAL-WORKFLOW-002 (S1): `fillStaleNonces` (PR #166) — executor-signed, executor-paid zero-value self-transactions that filled
+ * the shared executor's nonce gaps — is removed. The executor no longer sends anything (see `chains.ts`, `executor.ts executorGasRefusal`).
  */
-export async function fillStaleNonces(grant: GrantRecord, t: ChainTransport, submission: Readonly<Record<string, unknown>>, signer: SignerUser,
-  log: (event: string, fields: Readonly<Record<string, string | number | boolean | null>>) => void): Promise<void> {
-  if (grant.mechanism !== 'EVM_ERC7710_METAMASK_V1_3') return;
-  const chainId = BigInt(String(submission.chainId)), from = String(submission.from).toLowerCase();
-  if (from !== grant.sessionAddress) return;
-  const priority = BigInt(String(await t.rpc('eth_maxPriorityFeePerGas', []))), gasPrice = BigInt(String(await t.rpc('eth_gasPrice', [])));
-  for (const tx of (submission.txs ?? []) as { hash: string; nonce: string }[]) {
-    if (await t.rpc('eth_getTransactionByHash', [tx.hash]).catch(() => null)) continue;
-    const gasLimit = BigInt(String(await t.rpc('eth_estimateGas', [{ from, to: from, value: '0x0', data: '0x' }]))) * 2n;
-    const filler: erc7710.Eip1559 = { chainId, nonce: BigInt(tx.nonce), maxPriorityFeePerGas: priority, maxFeePerGas: gasPrice * 2n + priority, gasLimit, to: from, value: 0n, data: '0x' };
-    const sig = await signer.signEvmDigest(grant.sessionKeyRef, D.bytesOf(D.eip1559SigningHash(filler)));
-    const signed = D.signedEip1559(filler, sig.yParity, sig.r, sig.s);
-    if (D.decodeSignedEip1559(signed.raw).from !== from) fail('SIGNER_ADDRESS_MISMATCH');
-    await t.rpc('eth_sendRawTransaction', [signed.raw]);
-    log('delegation.nonce_filled', { chain: grant.chain, nonce: tx.nonce, hash: signed.hash });
-  }
-}
 /**
  * Broadcasts the persisted signed bytes exactly; a re-broadcast of a known transaction is fine, never a second, different transaction.
  * BUILD-FLOFI-SINGLE-AUTH-WORKFLOW-UX-001: a submission with `notAfter` (a Borrow, whose safety is its fresh health-factor simulation, not an

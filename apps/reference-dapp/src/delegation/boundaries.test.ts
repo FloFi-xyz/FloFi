@@ -68,13 +68,18 @@ describe('BUILD-AUTOMATION-002 delegated-authority boundary', () => {
     for (const file of reached) expect(code(file), file).not.toMatch(SIGNS);
   });
 
-  it('reaches chains only through the guarded transports; read and owner purposes cannot broadcast a session-signed EVM transaction', () => {
+  it('reaches chains only through the guarded transports; no purpose can broadcast a session-signed transaction (S1: FloFi never funds gas)', () => {
     for (const file of SOURCES.filter(f => !f.endsWith('chains.ts'))) expect(code(file), file).not.toMatch(/\bfetch\(/);
     expect(allowedMethods('eip155:84532', 'read').has('eth_sendRawTransaction')).toBe(false);
     expect(allowedMethods('eip155:84532', 'owner').has('eth_sendRawTransaction')).toBe(false);
-    expect(allowedMethods('eip155:84532', 'executor').has('eth_sendRawTransaction')).toBe(true);
+    // BUILD-FLOFI-UNIVERSAL-WORKFLOW-002 (intentional safety change): the executor transport lost its send methods. A session-signed
+    // transaction is paid by a FloFi-controlled address, so it can never leave the process.
+    for (const chain of ['eip155:1', 'eip155:8453', 'eip155:42161', 'eip155:4663', 'eip155:84532', 'solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp']) {
+      expect(allowedMethods(chain, 'executor').has('eth_sendRawTransaction')).toBe(false);
+      expect(allowedMethods(chain, 'executor').has('sendTransaction')).toBe(false);
+    }
     expect(allowedMethods('solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1', 'read').has('sendTransaction')).toBe(false);
-    // Solana `owner` broadcasts transactions the OWNER signed (enrollment, revocation); session-signed ones go only through `executor`.
+    // Solana `owner` broadcasts transactions the OWNER signed (enrollment, revocation) — the owner is their fee payer.
     expect(allowedMethods('solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1', 'owner').has('sendTransaction')).toBe(true);
     for (const purpose of ['read', 'owner', 'executor'] as const) for (const forbidden of ['eth_sendTransaction', 'eth_sign', 'personal_sign', 'eth_signTypedData_v4', 'debug_traceCall'])
       expect(allowedMethods('eip155:84532', purpose).has(forbidden)).toBe(false);
