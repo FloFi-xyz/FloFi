@@ -40,8 +40,8 @@ logged `delegation.worker_enabled` and that KMS signing was validated. So the ex
 
 | Wallet / chain | Mechanism (strategy) | Gas payer | Tx sender | Signer | Interactions | Validity / revocation | Dynamic amounts | On-chain enforcement | Production dependencies |
 |---|---|---|---|---|---|---|---|---|---|
-| MetaMask (EIP-5792 `atomic` supported/ready) on Ethereum, Base, Arbitrum One | `EVM_WALLET_BATCH` — `wallet_sendCalls` atomic, no capabilities | owner account | owner account (the wallet sends) | owner | 1 per group (+ the wallet's own one-time 7702 upgrade inside the same confirmation when `ready`) | sent at once; quotes honoured 10 min | in-group: signed minimum | exact calls; router `amountOutMinimum`; atomic revert | wallet support; `FLOFI_USER_FUNDED_RPC_<id>` for reconciliation |
-| MetaMask, a group that waits for a delivery, no binding to it | `EVM_USER_OPERATION` — ERC-4337 v0.7 op of the owner's own `EIP7702StatelessDeleGator` account, EIP-712 signed | owner account (EntryPoint prefund) | a bundler (transmits only; repaid from the owner's prefund) | owner | 1 typed-data signature, upfront | no on-chain expiry in that delegator; FloFi relays only while the run is open and only when due; owner revokes by using the nonce key (`EntryPoint.incrementNonce`) from their account | exact authored amounts only | exact calls; nonce key per group (exactly once); signed gas words = maximum charge | `FLOFI_BUNDLER_RPC_<id>` (v0.7, verified chain + EntryPoint); an upgraded account |
+| MetaMask (EIP-5792 `atomic` supported/ready) on Ethereum, Base, Arbitrum One | `EVM_WALLET_BATCH` — `wallet_sendCalls` atomic, no capabilities, with the group's own app-provided EIP-5792 `id` | owner account | owner account (the wallet sends) | owner | 1 per group (+ the wallet's own one-time 7702 upgrade inside the same confirmation when `ready`); only the FIRST group is signed upfront — a later batch is signed when due (the wallet sends it the moment the owner confirms) | sent at once; quotes honoured 10 min, but a late answer is still taken (never dropped); the same id for every preparation, so a wallet that honours ids cannot run the group twice | in-group: signed minimum | exact calls (reconciled from transactions mined after preparation that carry exactly the prepared calls; transfers to the prepared recipient); router `amountOutMinimum`; atomic revert | wallet support; `FLOFI_USER_FUNDED_RPC_<id>` for reconciliation |
+| MetaMask, a group that waits for a delivery, no binding to it, account ALREADY a MetaMask smart account (`atomic: supported`) | `EVM_USER_OPERATION` — ERC-4337 v0.7 op of the owner's own `EIP7702StatelessDeleGator` account, EIP-712 signed | owner account (EntryPoint prefund) | a bundler (transmits only; repaid from the owner's prefund) | owner | 1 typed-data signature, upfront | no on-chain expiry in that delegator; FloFi relays only while the run is open and only when due, after a due-time simulation that must fit the signed gas words; the submission is recorded before the one relay; the owner revokes an unrelayed one from the panel (`EntryPoint.incrementNonce(key)` from their own wallet) | exact authored amounts only | exact calls; nonce key per group (exactly once); signed gas words = maximum charge | `FLOFI_BUNDLER_RPC_<id>` (v0.7, verified chain + EntryPoint); an already-upgraded account (a typed-data signature cannot upgrade one) |
 | MetaMask, a group bound to a delivery | `EVM_WALLET_BATCH` signed **when due** | owner | owner | owner | 1, when the delivery reconciled | as above | reconciled actual, capped | as above | as above |
 | Any injected EVM wallet without atomic batching | `EVM_OWNER_STEP` (the step's own flow) | owner | owner | owner | ≥ 1 per step | per step | reconciled actual | per flow | none new |
 | FloFi Wallet (Privy embedded) EVM | `EVM_OWNER_STEP` | owner | owner (FloFi broadcasts the owner-signed tx) | owner (Privy screen) | ≥ 1 per step | per step | reconciled actual | per flow | none new |
@@ -64,11 +64,22 @@ Rejected or deferred, with reasons:
 - **Bridges inside a batch** — the universal router's verifier accepts only direct transactions (or the retired DelegationManager path) and
   its quotes live ≤ 120 s; bridges stay in their own flow (their delivery observation, refund and recovery logic is unchanged).
 
+## After the specialist review (same PR)
+
+Five read-only specialist reviews (security, wallet execution, workflow, data/privacy, bridge) found real defects in the first version;
+fixed before delivery: a later wallet batch could be signed early (and so SENT out of order); a late or retried batch answer could lead to a
+second batch; grouped steps did not record what they spent from a delivery; the user operation relay could race; durable nonces were selected
+by default; a signed group could be re-planned (now refused by the database and the service — **something the owner signed is never
+replaced**; the owner ends the run and revokes a signed operation from their own wallet); multi-step owner-step groups finished early;
+requesters without shared status saw the owner's wallet. Each has a regression test. See the completion report §4–§5.
+
 ## What "one authorization" means here (S10)
 
 The review counts interactions per wallet and network and never rounds down: one group = one wallet interaction on one chain; a workflow on
 two chains needs at least two; a Solana group is one request even if the wallet shows several prompts; network switches and one-time setup
-are listed. `single: true` only when exactly one interaction authorizes everything. An EVM signature never authorizes a Solana transaction.
+are listed. A step through its own flow (a bridge, a FloFi Wallet step) counts at least one (a token approval may add one): the plan then
+says `atLeast` and never `single`. `single: true` only when exactly one interaction authorizes everything. An EVM signature never authorizes
+a Solana transaction.
 
 ## Consequences
 

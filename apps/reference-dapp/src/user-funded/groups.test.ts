@@ -162,6 +162,36 @@ describe('BUILD-FLOFI-UNIVERSAL-WORKFLOW-002 owner user operation (ERC-4337 v0.7
   });
 });
 
+describe('BUILD-FLOFI-UNIVERSAL-WORKFLOW-002 Solana sign-all preparation (MOCKED mainnet transfer chain)', () => {
+  it('prepares one exact, simulated transaction per step with the owner as fee payer; only the owner\'s signatures of exactly those messages are taken', async () => {
+    const { createMockedSolanaTransferChain, createMockedSolanaWallet, parseMessageV0, parseTransaction, fromBase64 } = await import('@defi-workflow-engine/reference-compiler');
+    const chain = createMockedSolanaTransferChain(), wallet = createMockedSolanaWallet(), stranger = createMockedSolanaWallet();
+    chain.fundWallet(wallet.owner, 2_000_000_000n);
+    const deps: UserFundedDeps = { chains: [SOLANA], evm: () => null, bundler: () => null, jupiter: null, solana: chain.rpc, now: () => new Date('2026-11-07T10:00:00Z') };
+    const send = (recipient: string, amount: string) => ({ action: 'transfer', network: 'solana', asset: 'SOL', amount, recipient });
+    const a = createMockedSolanaWallet().owner, b = createMockedSolanaWallet().owner;
+    const { composition, requirement } = compose({ version: 2, steps: [send(a, '0.01'), send(b, '0.02')] });
+    const g = { runId: 'wfr_' + 'd'.repeat(26), groupIndex: 0, strategy: 'SOLANA_SIGN_ALL' as const, chain: SOLANA, feePayer: wallet.owner, stepFrom: 0, stepTo: 1 };
+    const prepared = await prepareGroup(deps, composition, requirement, g);
+    if (!prepared.ok) throw new Error(prepared.code);
+    const p = prepared.value.prepared as Prepared & { transactions: { stepIndex: number; message: string; unsignedTransaction: string; spend: { amount: string } }[]; fee: { payer: string } };
+    expect(p.transactions.map(t => [t.stepIndex, t.spend.amount])).toEqual([[0, '10000000'], [1, '20000000']]);
+    expect(p.fee.payer).toBe(wallet.owner);
+    // S1: static key 0 (the fee payer) of every message is the owner.
+    for (const t of p.transactions) expect(parseMessageV0(fromBase64(t.message)).staticKeys[0]).toBe(wallet.owner);
+    // The owner's signatures of exactly those messages are accepted; anyone else's are not.
+    const signed = p.transactions.map(t => wallet.sign(t.unsignedTransaction));
+    expect(authorizeGroup(p, { kind: 'SOLANA_SIGN_ALL', transactions: signed }, wallet.owner, deps.now())).toMatchObject({ ok: true });
+    expect(parseTransaction(fromBase64(signed[0]!, 2048)).signatures).toHaveLength(1);
+    const foreign = p.transactions.map(t => stranger.sign(t.unsignedTransaction));
+    expect(authorizeGroup(p, { kind: 'SOLANA_SIGN_ALL', transactions: foreign }, wallet.owner, deps.now())).toMatchObject({ ok: false });
+    expect(authorizeGroup(p, { kind: 'SOLANA_SIGN_ALL', transactions: signed.slice(0, 1) }, wallet.owner, deps.now())).toMatchObject({ ok: false, code: 'SOLANA_SIGNED_COUNT_MISMATCH' });
+    // Two byte-identical transfers would carry ONE signature (the chain runs it once): refused before anything is signed.
+    const twice = compose({ version: 2, steps: [send(a, '0.01'), send(a, '0.01')] });
+    expect(await prepareGroup(deps, twice.composition, twice.requirement, g)).toMatchObject({ ok: false, code: 'SOLANA_GROUP_DUPLICATE_TRANSACTION' });
+  });
+});
+
 describe('BUILD-FLOFI-UNIVERSAL-WORKFLOW-002 Solana group submission and reconciliation', () => {
   const owner = '9xQeWvG816bUx9EPjHmaT23yvVM2ZWbrrpZb9PusVFin', other = '7Np41oeYqPefeNQEHSv1UDhYrehxin3NStELsSKCT4K2';
   const USDC_SOL = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';

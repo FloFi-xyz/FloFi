@@ -33,11 +33,13 @@ are `CONFIRM_EACH_TIME` and paused. Retiring the executor disrupts no record, wo
 ## 3. Objective C — minimum wallet authorization
 
 Per wallet and chain (counts are honest; see the matrix): MetaMask — 1 interaction per same-chain group (atomic batch; the 7702 upgrade, if
-needed, inside the same confirmation) and 1 typed-data signature upfront for a delayed group without a dependency on the delivery;
+needed, inside the same confirmation; only the first group upfront, later batches when due) and 1 typed-data signature upfront for a delayed
+group without a dependency on the delivery (account already a MetaMask smart account);
 Phantom/Solflare — 1 request per Solana group of independent steps; FloFi Wallet (Privy) — one confirmation per step (Privy offers no
 batching or one-prompt multi-sign; its 7702 signing is headless and never used). Cross-chain: at least one interaction per network; groups
-that spend a delivery are signed when it lands. The plan recommends user-funded groups only when they need fewer interactions than
-confirming each step, and `single: true` only when exactly one interaction authorizes everything.
+that spend a delivery are signed when it lands. A step through its own flow (bridge, FloFi Wallet) counts as a minimum (`atLeast`, "at least N").
+The plan recommends user-funded groups only when they need fewer interactions than confirming each step, and `single: true` only when exactly
+one interaction authorizes everything.
 
 ## 4. Genuine limitations (not hidden)
 
@@ -51,7 +53,24 @@ confirming each step, and `single: true` only when exactly one interaction autho
 - **Robinhood Chain**: no bundler / user operations; swaps and liquidity via their own flows.
 - **No percentage / "remaining" vocabulary** beyond the consumer's cap.
 - `EVM_USER_OPERATION` uses MetaMask's `EIP7702StatelessDeleGator`, which has no on-chain validity window: FloFi relays only while the run
-  is open and only when due; revocation is the owner's own `EntryPoint.incrementNonce(key)` from their account.
+  is open and only when due; a signed operation FloFi never relayed stays valid until the owner revokes it (panel: "Cancel the signed
+  operation in my wallet" = `EntryPoint.incrementNonce(key)` from their own wallet). Its signature is stored (append-only) while it can still
+  execute; redaction after the nonce is used is not implemented.
+- **Wallet-batch duplicate protection depends on the wallet honouring the app-provided EIP-5792 `id`** (error 5720). FloFi additionally never
+  drops a prepared batch, takes a late answer, reads a known id back instead of sending, and refuses to end a run while a batch may be in
+  the owner's wallet; a request left open in the wallet past its window and confirmed after the owner ended the run would still execute
+  from the owner's own wallet without being recorded.
+- **Something the owner signed is never replaced**: a signed group that stops (e.g. a batch the wallet reports failed off chain) cannot be
+  resumed; the owner ends the run and starts a new one.
+- **Delivery to another wallet**: a bridge whose recipient is not the run's own wallet reconciles with nothing received for the run; a
+  dependent step stops with `WORKFLOW_BINDING_NOTHING_RECEIVED` (no dedicated code yet). The EVM ↔ Solana matrix row is not certifiable by a
+  per-pair ledger key until mainnet evidence exists.
+- **Fees on OP-stack L2s (Base)**: gas paid is `gasUsed × effectiveGasPrice`; the L1 data fee is not added (understated); the fee ceiling
+  check uses the same L2 figures.
+- **Solana**: a group with two byte-identical transactions is refused at preparation (`SOLANA_GROUP_DUPLICATE_TRANSACTION`; one signature
+  would execute once); the `prepared` bound is 256 KiB.
+- **Crash consistency**: group, step and run moves are separate compare-and-set writes (each idempotent); a crash between them can leave a
+  run RUNNING with a stopped group until the owner ends it.
 
 ## 5. Test and CI evidence
 

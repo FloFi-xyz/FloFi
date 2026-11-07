@@ -20,8 +20,8 @@ Steps marked **[OWNER]** change production, create a paid resource or move real 
 1. Confirm production is at schema 22 and the constraint names 0023 replaces exist:
    ```sql
    SELECT version, name FROM schema_migrations ORDER BY version DESC LIMIT 1;           -- 22 editor_requester
-   SELECT conname FROM pg_constraint WHERE conrelid = 'workflow_runs'::regclass
-     AND conname IN ('workflow_runs_mode_check', 'workflow_runs_check3');              -- both rows
+   SELECT conname, pg_get_constraintdef(oid) FROM pg_constraint WHERE conrelid = 'workflow_runs'::regclass
+     AND conname IN ('workflow_runs_mode_check', 'workflow_runs_check3');              -- both rows; keep both definitions (rollback §8)
    ```
    (Verified read-only on 2026-11-07: both present with the 0015 definitions.)
 2. Confirm nothing depends on the executor:
@@ -97,13 +97,31 @@ Record the transaction hashes, gas paid and payer in `docs/builds/BUILD-FLOFI-UN
 
 - **Feature off (no deploy):** set `FLOFI_USER_FUNDED_EXECUTION=disabled`. New runs offer confirm-each-step only. Open USER_FUNDED runs then
   report `USER_FUNDED_NOT_ENABLED` and wait (nothing is relayed); their owners can still read status, and runs with nothing in flight can be ended.
-- **Application rollback (after Release A was deployed):** redeploy the previous commit on all three services. The v22 build serves schema
-  23 (certificate) and never acts on a USER_FUNDED run (it neither loads, relays nor cancels a grouped step). The delegated executor of that
+- **Application rollback:** redeploy the **Release A deployment** (main with the two Release A commits) on all three services — never a commit
+  older than Release A, which refuses schema 23 (`MIGRATION_HISTORY_MISMATCH`). That build serves schema 23 (certificate) and never acts on a
+  USER_FUNDED run (it neither loads, relays nor cancels a grouped step). A signed user operation of an open run stays valid on chain: tell its
+  owner to revoke it (the panel's "Cancel the signed operation in my wallet") before or after the rollback. The delegated executor of that
   build would again be able to send — keep `FLOFI_DELEGATED_EXECUTION` unset / `FLOFI_DELEGATED_SIGNER=none` and `kms:Sign` removed so the
   rollback cannot resurrect FloFi-funded gas.
-- **Schema:** 0023 is never reverted in normal operation (additive). Emergency reversal (last resort, only with no USER_FUNDED rows):
-  `DROP TABLE workflow_run_groups; DROP FUNCTION workflow_run_group_insert(), workflow_run_group_transition();` then restore the two
-  0015 constraint definitions and delete ledger row 23 — and only with a build that ships ≤ 22.
+- **Schema:** 0023 is never reverted in normal operation (additive). Emergency reversal is a last resort, run only by the owner, only with a
+  build that ships ≤ 22 deployed everywhere, as ONE transaction that refuses itself while any user-funded row exists (not exercised in CI —
+  review it against the production catalog first):
+  ```sql
+  BEGIN;
+  SET LOCAL lock_timeout = '5s';
+  DO $$ BEGIN
+    IF EXISTS (SELECT 1 FROM workflow_runs WHERE mode = 'USER_FUNDED') OR EXISTS (SELECT 1 FROM workflow_run_groups) THEN
+      RAISE EXCEPTION 'ROLLBACK_REFUSED_USER_FUNDED_ROWS_EXIST';
+    END IF;
+  END $$;
+  DROP TABLE workflow_run_groups;
+  DROP FUNCTION workflow_run_group_insert(), workflow_run_group_transition();
+  ALTER TABLE workflow_runs DROP CONSTRAINT workflow_runs_mode_check, ADD CONSTRAINT workflow_runs_mode_check CHECK (<0015 definition>);
+  ALTER TABLE workflow_runs DROP CONSTRAINT workflow_runs_check3, ADD CONSTRAINT workflow_runs_check3 CHECK (<0015 definition>);
+  DELETE FROM schema_migrations WHERE version = 23;
+  COMMIT;
+  ```
+  The two `<0015 definition>` placeholders are the exact `pg_get_constraintdef` texts captured in pre-flight §1 (verified 2026-11-07).
 
 ## 9. Monitoring
 

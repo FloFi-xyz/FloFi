@@ -171,6 +171,8 @@ async function prepareSolanaSignAll(deps: UserFundedDeps, composition: WorkflowC
     // S1: the fee payer of every transaction (static key 0 of its message) is the owner.
     assertUserFundedSubmission({ kind: 'SOLANA_TRANSACTION', feePayer: parseMessageV0(fromBase64(last.message)).staticKeys[0] ?? '', ownerWallet: g.feePayer });
   }
+  // Two byte-identical messages would carry one signature: the chain runs it once while reconciliation would count it twice.
+  if (new Set(txs.map(x => x.messageHash)).size !== txs.length) return no('SOLANA_GROUP_DUPLICATE_TRANSACTION', txs.at(-1)!.stepIndex);
   const fee = txs.reduce((sum, x) => sum + BigInt(x.estimatedFeeLamports), 0n);
   return ok({ kind: 'SOLANA_SIGN_ALL', owner: g.feePayer, transactions: txs, fee: { payer: g.feePayer, unit: 'lamports', maxCost: fee.toString(), estimated: true },
     lastValidBlockHeight: Math.min(...txs.map(x => x.lastValidBlockHeight)) });

@@ -13,12 +13,12 @@ Every row: the owner's own wallet pays the network fee (S1). "Interactions" are 
 
 | Wallet | Actions batched in one group | Mechanism | Interactions | Status |
 |---|---|---|---|---|
-| MetaMask (EIP-5792 `atomic: supported`) | Uniswap v3 USDC⇄WETH (0.05%), Aave V3 supply / borrow (registered reserves), ERC-20 / native transfers; in-group dependent amounts at the signed minimum | `EVM_WALLET_BATCH` | 1 per group | Tested (MOCKED, PostgreSQL E2E); mainnet unverified |
+| MetaMask (EIP-5792 `atomic: supported`) | Uniswap v3 USDC⇄WETH (0.05%), Aave V3 supply / borrow (registered reserves), ERC-20 / native transfers; in-group dependent amounts at the signed minimum | `EVM_WALLET_BATCH` (the group's own EIP-5792 `id`; a known id is read back, never sent twice) | 1 per group; the first group upfront, every later batch when due | Tested (MOCKED, PostgreSQL E2E incl. late answer, same id, exact-calls reconciliation); mainnet unverified; whether a wallet honours the app-provided `id` (EIP-5792 error 5720) is the wallet's |
 | MetaMask (`atomic: ready`) | same | `EVM_WALLET_BATCH` (+ MetaMask's own 7702 upgrade inside the same confirmation) | 1 per group (setup shown) | Tested (planner); wallet prompt behaviour not exercised in CI |
-| MetaMask, group waiting for a bridge delivery, no dependency on it | same | `EVM_USER_OPERATION` (owner's 7702 account, EIP-712, bundler, no paymaster) | 1 signature upfront | Tested (unit: prepare, owner-only signature, bundler simulation + relay, UserOperationEvent reconciliation); needs `FLOFI_BUNDLER_RPC_<id>`; mainnet unverified |
+| MetaMask, group waiting for a bridge delivery, no dependency on it, account already a MetaMask smart account (`atomic: supported`) | same | `EVM_USER_OPERATION` (owner's 7702 account, EIP-712, bundler, no paymaster) | 1 signature upfront | Tested (unit: prepare, owner-only signature, plain account refused, due-time simulation within the signed gas words, record-then-relay, resend of a lost relay, UserOperationEvent reconciliation); needs `FLOFI_BUNDLER_RPC_<id>`; mainnet unverified. A signed, unrelayed operation stays valid until the owner revokes it (panel button: `EntryPoint.incrementNonce` from their wallet) |
 | MetaMask, group spending a bridge delivery | same | `EVM_WALLET_BATCH` signed when due (reconciled actual amount) | 1 when due | Tested (planner, binding resolution) |
 | Other injected wallets (no `atomic`) | — | `EVM_OWNER_STEP` (each step's own flow) | ≥ 1 per step | Existing flows, unchanged |
-| FloFi Wallet (Privy) | — | `EVM_OWNER_STEP` | ≥ 1 per step | Unsupported for batching: Privy's embedded provider has no `wallet_sendCalls`; its 7702 authorization is headless only (never used); Privy smart wallets need a dashboard change + `permissionless` and a different account |
+| FloFi Wallet (Privy) | — | `EVM_OWNER_STEP` (one owner-step group per same-chain run; it finishes only when every step reconciled) | ≥ 1 per step (`atLeast`) | Unsupported for batching: Privy's embedded provider has no `wallet_sendCalls`; its 7702 authorization is headless only (never used); Privy smart wallets need a dashboard change + `permissionless` and a different account |
 
 Other EVM actions (Uniswap pairs other than USDC/WETH, catalog swaps, liquidity, repay, withdraw, bridges) run as their own group through
 their existing flows (`USER_FUNDED_ACTION_NOT_BUILDABLE:<ACTION>`), user-paid, one confirmation per step.
@@ -38,7 +38,8 @@ their existing flows (`USER_FUNDED_ACTION_NOT_BUILDABLE:<ACTION>`), user-paid, o
 | Phantom / Solflare (Wallet Standard) | consecutive independent SOL/SPL transfers and Jupiter swaps | `SOLANA_SIGN_ALL` | 1 request (the wallet may show one prompt per transaction) | Tested (unit: ordered submission, blockhash expiry, fee-payer refusal, owner deltas); mainnet unverified |
 | Phantom / Solflare | a step spending an earlier in-group output | new group, `SOLANA_SIGN_ALL` when due | +1 when due | Tested (planner) |
 | FloFi Wallet (Privy) | — | `SOLANA_OWNER_STEP` | 1 per transaction | Privy shows one screen per transaction (verified in the installed SDK) |
-| Any | post-bridge groups signed upfront (durable nonces) | — | — | Not offered: builders need the input balance to simulate the exact message; signed when due instead |
+| Any | post-bridge groups signed upfront (durable nonces) | — | — | Not offered (never selected; `FLOFI_SOLANA_NONCE_ACCOUNTS` defaults to disabled): builders need the input balance to simulate the exact message; signed when due instead |
+| Phantom / Solflare | a later Solana group (not the first) | `SOLANA_SIGN_ALL` when due | 1 when due | A blockhash lives about a minute: only the first group is signed upfront |
 | Any | Orca liquidity | own flow | per step | Existing flow |
 
 ## Cross-chain (Relay via the universal router; Across / LI.FI via the certified router)
@@ -47,7 +48,9 @@ their existing flows (`USER_FUNDED_ACTION_NOT_BUILDABLE:<ACTION>`), user-paid, o
 |---|---|
 | EVM ↔ EVM, EVM → Solana, Solana → EVM (all 20 directed pairs of the five mainnets) | Executed by the existing owner-signed bridge flows (user-paid); in a USER_FUNDED run the bridge is its own group. The next group spends the **reconciled delivery** (verdict RECONCILED, recipient = the run's own wallet), signed when due. MOCKED end to end; read-only quotes 40/40 executable (2026-10-25); no mainnet transaction recorded. |
 | Bridge inside a batch / user operation | Unsupported: the bridge flow's verifier accepts direct owner transactions only and its quotes live ≤ 120 s |
-| Refunded / divergent bridge | The step FAILS (`BRIDGE_REFUNDED`) and funds nothing later |
+| Refunded / divergent bridge | The step FAILS (`BRIDGE_REFUNDED`) and funds nothing later; any non-RECONCILED universal record reports nothing received |
+| Delivery to another wallet | Reconciled with nothing received for the run: a dependent step stops (`WORKFLOW_BINDING_NOTHING_RECEIVED`; no dedicated code yet) |
+| Matrix certification | The `bridge-evm-solana` row is not certifiable by a per-pair ledger key until mainnet evidence exists (per-pair rows needed then) |
 
 ## Chat ↔ Canvas
 
