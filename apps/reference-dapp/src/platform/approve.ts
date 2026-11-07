@@ -126,7 +126,9 @@ export async function viewApproval(surface: ApprovalSurface, secret: unknown, wa
 }
 
 /** BUILD-FLOFI-UX-UI-002: what FloFi needs to show an open proposal on its normal Canvas before the owner proves a wallet. */
-export type ApprovalPreview = { readonly approvalId: string; readonly workflow: Workflow; readonly workflowHash: string };
+export type ApprovalPreview = { readonly approvalId: string; readonly workflow: Workflow; readonly workflowHash: string;
+  /** BUILD-FLOFI-UNIVERSAL-WORKFLOW-002: a multi-step proposal's canonical strategy (what the requester composed), so the whole workflow can open in the Canvas. */
+  readonly sequence?: { readonly strategy: unknown; readonly workflowHash: string; readonly stepCount: number } };
 /**
  * The canonical workflow of an open (PENDING) proposal, for whoever holds its secret — the cards FloFi shows on the Canvas while the
  * owner connects a wallet. It is re-composed now and must reproduce the stored hash under the current deployment and policy (as `view`
@@ -140,7 +142,8 @@ export async function previewApproval(surface: ApprovalSurface, secret: unknown,
   if (h.status !== 'PENDING') return refuse(h.status === 'CLAIMED' || h.status === 'APPLIED' ? 'APPROVAL_PREVIEW_CLAIMED' : `APPROVAL_${h.status}`);
   const verified = await verifyHandoff(h, surface.runtime, profile.policy);
   if (!verified.ok) return refuse(verified.code);
-  return { approvalId: h.handoffId, workflow: verified.composition.workflow, workflowHash: verified.composition.workflowHash };
+  return { approvalId: h.handoffId, workflow: verified.composition.workflow, workflowHash: verified.composition.workflowHash,
+    ...verified.workflow.steps.length > 1 ? { sequence: { strategy: verified.workflow.strategy, workflowHash: verified.workflow.workflowHash, stepCount: verified.workflow.steps.length } } : {} };
 }
 
 /**
