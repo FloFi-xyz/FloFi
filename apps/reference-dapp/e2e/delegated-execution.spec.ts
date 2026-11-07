@@ -41,8 +41,11 @@ async function provenOwner(page: Page) {
   await page.goto('/app/passkeys');
   // BUILD-SOLANA-TRANSFER-UX-001: the sign-in reuses the EVM wallet already connected in this browser (no selector).
   await proveConnectedEvmWallet(page, page.locator('body'), owner.address);
+  // Proven: the passkey form appears only for a verified owner (the proof must finish before the next navigation).
+  await expect(page.getByRole('region', { name: 'Passkeys', exact: true }).getByRole('textbox', { name: 'Passkey name', exact: true })).toBeVisible();
+  // The wallet's request log is per page: every page after the sign-in must ask the wallet to sign nothing at all.
   const signing = async () => (await evmWalletRequests(page)).filter(m => SIGNING_METHODS.includes(m));
-  return { owner, signing, sends: await chainControl<Sends>('MOCK_sends'), signedBefore: await signing() };
+  return { owner, signing, sends: await chainControl<Sends>('MOCK_sends') };
 }
 
 test.describe('BUILD-FLOFI-UNIVERSAL-WORKFLOW-002 retired executor-funded automation (MOCKED loopback chains, delegation configured)', () => {
@@ -52,7 +55,7 @@ test.describe('BUILD-FLOFI-UNIVERSAL-WORKFLOW-002 retired executor-funded automa
     test.setTimeout(120_000);
     const errors: string[] = [];
     page.on('pageerror', e => errors.push(e.message));
-    const { owner, signing, sends, signedBefore } = await provenOwner(page);
+    const { owner, signing, sends } = await provenOwner(page);
 
     // Credentials: the retirement reason replaces the enrollment form.
     await page.goto('/app/credentials');
@@ -60,6 +63,7 @@ test.describe('BUILD-FLOFI-UNIVERSAL-WORKFLOW-002 retired executor-funded automa
     await expect(execution).toContainText(RETIRED);
     await expect(execution.getByRole('form', { name: 'Enroll a wallet for automatic execution', exact: true })).toHaveCount(0);
     await expect(execution.getByRole('button', { name: 'Enroll with my wallet', exact: true })).toHaveCount(0);
+    expect(await signing()).toEqual([]);
 
     // Automations: "Automatic within limits" is visible, disabled, and says why; "Ask every time" is the choice.
     await page.goto('/app/automations');
@@ -71,7 +75,7 @@ test.describe('BUILD-FLOFI-UNIVERSAL-WORKFLOW-002 retired executor-funded automa
     await expect(workspace).toContainText(RETIRED);
     await expect(workspace.getByRole('form', { name: 'Create an automatic workflow', exact: true })).toHaveCount(0);
 
-    expect(await signing()).toEqual(signedBefore);
+    expect(await signing()).toEqual([]);
     expect(await chainControl<Sends>('MOCK_sends')).toEqual(sends);
     expect(await delegatedRows(owner.address)).toEqual({ rules: 0, grants: 0, authorizations: 0, executions: 0 });
     expect(errors).toEqual([]);
@@ -82,7 +86,7 @@ test.describe('BUILD-FLOFI-UNIVERSAL-WORKFLOW-002 retired executor-funded automa
     test.setTimeout(120_000);
     const errors: string[] = [];
     page.on('pageerror', e => errors.push(e.message));
-    const { owner, signing, sends, signedBefore } = await provenOwner(page);
+    const { owner, signing, sends } = await provenOwner(page);
 
     // The committed replay is the AI's typed reading of this message: a PRICE_TRIGGER draft with no mode, limit, expiry or Credential.
     await openBuilder(page);
@@ -96,7 +100,7 @@ test.describe('BUILD-FLOFI-UNIVERSAL-WORKFLOW-002 retired executor-funded automa
     await expect(mode).toContainText(RETIRED);
     await expect(proposal.getByRole('button', { name: 'Check credentials and limits', exact: true })).toHaveCount(0);
 
-    expect(await signing()).toEqual(signedBefore);
+    expect(await signing()).toEqual([]);
     expect(await chainControl<Sends>('MOCK_sends')).toEqual(sends);
     expect(await delegatedRows(owner.address)).toEqual({ rules: 0, grants: 0, authorizations: 0, executions: 0 });
     expect(errors).toEqual([]);
@@ -106,7 +110,7 @@ test.describe('BUILD-FLOFI-UNIVERSAL-WORKFLOW-002 retired executor-funded automa
     test.setTimeout(120_000);
     const errors: string[] = [];
     page.on('pageerror', e => errors.push(e.message));
-    const { owner, signing, sends, signedBefore } = await provenOwner(page);
+    const { owner, signing, sends } = await provenOwner(page);
 
     // The owner authors a two-step workflow on the Canvas (FloFi's deterministic grammar, applied through the normal proposal review).
     await openBuilder(page);
@@ -126,7 +130,7 @@ test.describe('BUILD-FLOFI-UNIVERSAL-WORKFLOW-002 retired executor-funded automa
     await expect(panel).toContainText('Ask every time runs one-step workflows. This workflow has 2 steps: run it from the Canvas, where your own wallet confirms and pays for each step.');
     await expect(panel.getByRole('button', { name: 'Check credentials and limits', exact: true })).toHaveCount(0);
 
-    expect(await signing()).toEqual(signedBefore);
+    expect(await signing()).toEqual([]);
     expect(await chainControl<Sends>('MOCK_sends')).toEqual(sends);
     expect(await delegatedRows(owner.address)).toEqual({ rules: 0, grants: 0, authorizations: 0, executions: 0 });
     expect(errors).toEqual([]);
