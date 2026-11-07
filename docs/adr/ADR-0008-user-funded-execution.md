@@ -71,7 +71,10 @@ fixed before delivery: a later wallet batch could be signed early (and so SENT o
 second batch; grouped steps did not record what they spent from a delivery; the user operation relay could race; durable nonces were selected
 by default; a signed group could be re-planned (now refused by the database and the service — **something the owner signed is never
 replaced**; the owner ends the run and revokes a signed operation from their own wallet); multi-step owner-step groups finished early;
-requesters without shared status saw the owner's wallet. Each has a regression test. See the completion report §4–§5.
+requesters without shared status saw the owner's wallet. Each has a regression test. A second batch (MCP, automations, approval UX) found
+that MCP status of a user-funded run failed the output guard (a `transactions` key; now `submissions`), that MCP/channels planned without
+the user-funded facts, that channels called grouped steps "authorized" before signing, retired-mode wording in MCP tool texts, and UI that
+offered actions the server refuses; all fixed. See the completion report §4–§5.
 
 ## What "one authorization" means here (S10)
 

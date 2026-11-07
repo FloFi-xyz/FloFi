@@ -81,6 +81,11 @@ one interaction authorizes everything.
   would execute once); the `prepared` bound is 256 KiB.
 - **Crash consistency**: group, step and run moves are separate compare-and-set writes (each idempotent); a crash between them can leave a
   run RUNNING with a stopped group until the owner ends it.
+- **An AUTHORIZED wallet batch** reconciles only from the hashes the owner's browser reports (`wallet_getCallsStatus` by its id); a wallet
+  that can no longer answer for that id (another device, a reinstall) leaves the run waiting, and ending it is refused while it may be in flight.
+- **Legacy delegated records** (none in production): an existing delegated rule can be paused/archived but never resumed; a legacy
+  UNCERTAIN delegated execution keeps reconciling as pending (the executor cannot rebroadcast) — no final state is forced.
+- **Passkey registration** stays available although every use of a passkey (delegated authorization) is retired — an owner decision.
 
 ## 5. Test and CI evidence
 
@@ -89,12 +94,12 @@ and runs on the PR.
 
 | Gate | Result |
 |---|---|
-| `pnpm check` (typecheck, lint, build, schema drift, unit) | **pass** — 564 files, 6 804 tests passed (2 files / 2 tests skipped by the suite itself) |
-| `pnpm test:postgres` | 96 files pass, **1 known environmental failure**, 1 skipped; 610 tests pass, 1 fails, 3 skipped. The failure is `forward-compatibility.pg.test.ts` › 0015 on a v14 database: it expects PostgreSQL 18's *named* NOT NULL constraints and this container runs PG 16; the file is untouched by this build (CI runs PG 18.6). |
-| Browser profiles (headless shell 1243, Anvil 1.8.3 checksum-verified, loopback only) | `delegated-execution` 3/3 (rewritten as the retirement proof), `approve-workflow-run` 2/2, `approve-authorize-journeys` 3/3, `automations` 3/3, `canvas-automation-ux` 18/18, `chat-automations` 8/8. The rest of the extended browser suite was not run locally (CircleCI). |
+| `pnpm check` (typecheck, lint, build, schema drift, unit) | **pass** on the final code — 565 files, 6 808 tests passed (2 files / 2 tests skipped by the suite itself) |
+| `pnpm test:postgres` (final code) | 96 files pass, **1 known environmental failure**, 1 skipped; 610 tests pass, 1 fails, 3 skipped. The failure is `forward-compatibility.pg.test.ts` › 0015 on a v14 database: it expects PostgreSQL 18's *named* NOT NULL constraints and this container runs PG 16; the file is untouched by this build (CI runs PG 18.6). |
+| Browser profiles (headless shell 1243, Anvil 1.8.3 checksum-verified, loopback only) | On the final code: `delegated-execution` 3/3 (rewritten as the retirement proof), `approve-workflow-run` 2/2, `approve-authorize-journeys` 3/3, `automations` 3/3, `canvas-automation-ux` 18/18, `chat-automations` 8/8, `mcp-in-chat` 26/26, `channel-approve` 3/3. The rest of the extended browser suite was not run locally (CircleCI). |
 | `python3 scripts/governance_lite.py` + unittests | pass (2 897 files) + 21 tests OK |
 | `python3 scripts/agent_guard.py check` | PASS (19 domains, 169 modules) |
-| Specialist reviews (read-only) | flofi-security, flofi-wallet-execution, flofi-workflow, flofi-data-privacy, flofi-bridge (findings verified; every real one fixed with a regression test, see ADR-0008 "After the specialist review"); second batch flofi-mcp, flofi-automations, flofi-frontend-ux — see below |
+| Specialist reviews (read-only, 8 of 19 domains) | Batch 1: flofi-security, flofi-wallet-execution, flofi-workflow, flofi-data-privacy, flofi-bridge. Batch 2: flofi-mcp, flofi-automations, flofi-frontend-ux. Findings were verified against the code; every real defect was fixed (regression tests where testable); one security claim was refuted (resume of a halted user-funded run was already dispatched). Low findings left open are listed in §4. The other 11 domains were selected only through shared modules (compiler, i18n, platform) and were not reviewed separately. |
 | CircleCI | runs on the PR (none yet for this branch). For reference, main's latest pipeline (the PR #166 merge) already failed in `manual-backup-certification` › `certification-browser-1` (extended browser shard 1/3) before this branch existed. |
 
 Key new or rewritten suites: `workflow-runs/execution-groups.test.ts`, `authorization-plan.test.ts`, `user-funded-run.pg.test.ts` (E2E wallet

@@ -79,10 +79,11 @@ Railway/Vercel secret, never in the repository.
 
 ## 6. Verification after deploy (no real funds needed)
 
-1. `/approve` of a 2-step same-chain workflow on an enabled chain shows **"Pay the fees from my own wallet, in one wallet interaction"** and
-   never "Authorize the whole workflow once".
+1. `/approve` of a 2-step same-chain workflow on an enabled chain shows **"Authorize in groups with my own wallet (at least 1 wallet
+   interactions)"** (wallet capabilities are assumed until the owner's browser reports them) and never "Authorize the whole workflow once".
 2. MCP `request_user_approval` / `get_approval_status`: the plan's `delegatedSingleAuthorization.reason` is `EXECUTOR_FUNDED_GAS_RETIRED`;
-   `userFunded.feePayer` is `OWNER_WALLET`.
+   `userFunded.available` matches what `/approve` offers and `userFunded.feePayer` is `OWNER_WALLET`; status of a user-funded run returns
+   `workflowRun.groups` (never the owner's wallet, batch id or fees to a requester).
 3. Worker logs: `workflow_run.advanced` items; no `delegation.*` sends.
 4. Database: `SELECT mode, state, count(*) FROM workflow_runs GROUP BY 1, 2;` — new user-funded runs appear as `USER_FUNDED`.
 
