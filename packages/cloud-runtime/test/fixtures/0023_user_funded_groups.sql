@@ -41,15 +41,17 @@ CREATE TABLE workflow_run_groups (
   -- The bridge step whose reconciled delivery on this chain this group waits for (null: none).
   awaits_delivery integer CHECK (awaits_delivery IS NULL OR awaits_delivery BETWEEN 0 AND 7),
   state text NOT NULL CHECK (state IN ('PLANNED', 'PREPARED', 'AUTHORIZED', 'SUBMITTED', 'RECONCILED', 'FAILED', 'UNCERTAIN', 'BLOCKED', 'SKIPPED', 'EXPIRED')),
-  -- What FloFi built for the owner to sign: exact calls / unsigned transactions / typed data, amounts, quotes and the fee estimate.
-  prepared jsonb CHECK (prepared IS NULL OR (jsonb_typeof(prepared) = 'object' AND octet_length(prepared::text) <= 65536)),
+  -- What FloFi built for the owner to sign: exact calls / unsigned transactions / typed data, amounts, quotes and the fee estimate
+  -- (a Solana group keeps each transaction's address lookup tables for verification, hence the larger bound).
+  prepared jsonb CHECK (prepared IS NULL OR (jsonb_typeof(prepared) = 'object' AND octet_length(prepared::text) <= 262144)),
   -- What the owner's wallet returned: a wallet batch id, a user operation signature, signed Solana transactions (never a key).
   owner_authorization jsonb CHECK (owner_authorization IS NULL OR (jsonb_typeof(owner_authorization) = 'object' AND octet_length(owner_authorization::text) <= 65536)),
   -- Public submission facts: transaction hashes / signatures, the user operation hash, when.
   submission jsonb CHECK (submission IS NULL OR (jsonb_typeof(submission) = 'object' AND octet_length(submission::text) <= 16384)),
   -- Reconciled facts: receipts, gas actually paid and by whom, spent/received per step.
   outcome jsonb CHECK (outcome IS NULL OR (jsonb_typeof(outcome) = 'object' AND octet_length(outcome::text) <= 16384)),
-  code text CHECK (code IS NULL OR code ~ '^[A-Z][A-Z0-9_:]{2,100}$'),
+  -- The same code grammar as workflow_runs / workflow_run_steps / workflow_run_events (a group code is copied to them in one transaction).
+  code text CHECK (code IS NULL OR code ~ '^[A-Z][A-Z0-9_]{2,80}$'),
   valid_until timestamptz,
   version bigint NOT NULL DEFAULT 1 CHECK (version >= 1),
   created_at timestamptz NOT NULL DEFAULT now(),
@@ -94,10 +96,12 @@ BEGIN
      OR NEW.namespace IS DISTINCT FROM OLD.namespace OR NEW.chain IS DISTINCT FROM OLD.chain OR NEW.fee_payer IS DISTINCT FROM OLD.fee_payer
      OR NEW.step_from IS DISTINCT FROM OLD.step_from OR NEW.step_to IS DISTINCT FROM OLD.step_to OR NEW.awaits_delivery IS DISTINCT FROM OLD.awaits_delivery
      OR NEW.created_at IS DISTINCT FROM OLD.created_at OR NEW.version <= OLD.version
-     -- What was signed is frozen once authorized: the prepared artifact, the strategy and the owner's authorization.
-     OR (OLD.state IN ('AUTHORIZED', 'SUBMITTED', 'UNCERTAIN', 'RECONCILED', 'FAILED')
+     -- What was signed is frozen once authorized, in EVERY later state (BLOCKED and SKIPPED included): the prepared artifact, the strategy and
+     -- the owner's authorization. A signed group is never planned again: a signed user operation or a sent batch stays valid on chain, so a
+     -- replacement could execute the same steps twice.
+     OR ((OLD.owner_authorization IS NOT NULL OR OLD.state IN ('AUTHORIZED', 'SUBMITTED', 'UNCERTAIN', 'RECONCILED', 'FAILED'))
          AND (NEW.prepared IS DISTINCT FROM OLD.prepared OR NEW.owner_authorization IS DISTINCT FROM OLD.owner_authorization
-           OR NEW.strategy IS DISTINCT FROM OLD.strategy OR NEW.signing IS DISTINCT FROM OLD.signing))
+           OR NEW.strategy IS DISTINCT FROM OLD.strategy OR NEW.signing IS DISTINCT FROM OLD.signing OR NEW.state = 'PLANNED'))
      -- A submission is written once and never rewritten (a re-broadcast sends exactly these bytes, never new ones).
      OR (OLD.submission IS NOT NULL AND NEW.submission IS DISTINCT FROM OLD.submission) THEN
     RAISE EXCEPTION 'WORKFLOW_RUN_GROUP_IMMUTABLE' USING ERRCODE = 'integrity_constraint_violation';

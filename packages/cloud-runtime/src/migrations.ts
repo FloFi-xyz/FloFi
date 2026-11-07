@@ -72,7 +72,7 @@ export const CERTIFIED_FORWARD_MIGRATIONS: readonly ForwardCompatibilityCertific
     // BUILD-FLOFI-UNIVERSAL-WORKFLOW-002 (Release A): the v22 build keeps working on a database with 0023 — two workflow_runs CHECKs widened
     // (USER_FUNDED mode, without a delegated authorization) and a new workflow_run_groups table with its own functions and triggers.
     base: { version: 22, name: 'editor_requester', sha256: 'f5b05c8bd32bf70bfa95e2b6ecc075b909f604334a13188c1651c2bd31e16d43' },
-    migrations: [{ version: 23, name: 'user_funded_groups', sha256: 'f9b7cfd389ea9d340165eec47d617ef3832ed38a269208a451040da196331371' }],
+    migrations: [{ version: 23, name: 'user_funded_groups', sha256: 'aea46318eee01184af97a814bb88a19dd0a1ad60e9b64b6079de39d7a6b7594e' }],
     assessment: 'docs/deploy/SCHEMA-COMPATIBILITY.md#17-certificate-0023_user_funded_groups',
   }, {
     // BUILD-FLOFI-UNIVERSAL-SINGLE-AUTH-MAINNET-001: wallet-signed workflow grants (0021: credential_grants.passkey_id nullable for EVM

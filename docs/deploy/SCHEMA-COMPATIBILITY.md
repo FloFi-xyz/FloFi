@@ -783,7 +783,7 @@ rows, the 0006 identity rule and 0015's immutability still refusing unsafe rows,
 
 | Base | Certified forward migration | SHA-256 |
 | --- | --- | --- |
-| 0022 `editor_requester` (`f5b05c8b…6d43`) | 0023 `user_funded_groups` | `f9b7cfd389ea9d340165eec47d617ef3832ed38a269208a451040da196331371` |
+| 0022 `editor_requester` (`f5b05c8b…6d43`) | 0023 `user_funded_groups` | `aea46318eee01184af97a814bb88a19dd0a1ad60e9b64b6079de39d7a6b7594e` |
 
 Migration 0023 (BUILD-FLOFI-UNIVERSAL-WORKFLOW-002) is additive and changes no row:
 - `workflow_runs_mode_check` (0015's column check) also admits `USER_FUNDED`: a run whose execution groups the owner's own wallet authorizes
@@ -793,7 +793,8 @@ Migration 0023 (BUILD-FLOFI-UNIVERSAL-WORKFLOW-002) is additive and changes no r
 - New table `workflow_run_groups` (FK to `workflow_runs`), its index `workflow_run_groups_due`, two new functions with their triggers
   (`workflow_run_group_insert`: the run must be USER_FUNDED and every group's `fee_payer` must equal the run's own wallet of that namespace,
   else `GAS_PAYER_NOT_OWNER`; `workflow_run_group_transition`: identity, fee payer and step range frozen, what the owner signed frozen once
-  authorized, a submission written once, closed transitions) and the existing 0015 `workflow_run_append_only()` reused as its no-delete trigger.
+  authorized and in every later state — a group holding an owner authorization is never planned again — a submission written once, closed
+  transitions) and the existing 0015 `workflow_run_append_only()` reused as its no-delete trigger. Group codes use 0015's code grammar.
 - Grouped steps reuse 0015's existing step state `DELEGATED` and its existing transitions. `workflow_run_steps`, its trigger and every other
   pre-existing function, trigger and index are unchanged.
 
@@ -817,6 +818,7 @@ SQL is also kept as `packages/cloud-runtime/test/fixtures/0023_user_funded_group
 
 **Release order.** Release A is the certificate `{ base: 0022 editor_requester, migrations: [0023 user_funded_groups] }` with the exact bytes,
 released from main (newest shipped migration 0022) and deployed to every database consumer (Vercel, Railway API, Railway worker) before this build
-migrates. It is the first commit of this build's branch so it can be cherry-picked on its own. Without Release A there is no application rollback
+migrates. It is two commits of this build's branch, `RELEASE A: schema 0023 compatibility certificate` and `RELEASE A (amended): …` (the reviewed
+0023 bytes), which touch only the certificate, its fixture and this section, so they can be cherry-picked on their own, in order. Without Release A there is no application rollback
 once 0023 is applied: the previous commit refuses schema 23 (`MIGRATION_HISTORY_MISMATCH`). No production migration or release was performed
 during engineering.
