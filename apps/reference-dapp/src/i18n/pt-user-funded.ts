@@ -2,6 +2,10 @@
 /** BUILD-FLOFI-UNIVERSAL-WORKFLOW-002: user-funded execution groups on the approval page — the owner's own wallet authorizes and pays. */
 export const portugueseUserFunded: Readonly<Record<string, string>> = {
   'FloFi no longer executes steps from its own account: your own wallet pays every fee.': 'A FloFi não executa mais etapas a partir da própria conta: a sua carteira paga todas as taxas.',
+  'Ask every time runs one-step workflows. This workflow has {0} steps: run it from the Canvas, where your own wallet confirms and pays for each step.':
+    'Perguntar sempre executa fluxos de uma etapa. Este fluxo tem {0} etapas: execute-o a partir do Canvas, onde a sua própria carteira confirma e paga cada etapa.',
+  'Automatic execution is retired: it ran from FloFi\'s account, and FloFi never pays your network fees. Choose "Ask every time": your own wallet confirms and pays.':
+    'A execução automática foi desativada: ela rodava a partir da conta da FloFi, e a FloFi nunca paga as suas taxas de rede. Escolha "Perguntar sempre": a sua própria carteira confirma e paga.',
   'One wallet confirmation (atomic batch)': 'Uma confirmação na carteira (lote atômico)',
   'One signature now; FloFi relays it when due': 'Uma assinatura agora; a FloFi a encaminha quando chegar a vez',
   'One wallet confirmation per step': 'Uma confirmação na carteira por etapa',

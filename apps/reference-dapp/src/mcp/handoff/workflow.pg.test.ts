@@ -44,7 +44,9 @@ describe('BUILD-CHAT-E2E-001 multi-step workflows over MCP (PostgreSQL)', () => 
     const out = requested.output as Record<string, unknown>;
     expect(out).toMatchObject({ ok: true, executionPlan: 'SEQUENTIAL', authority: 'NONE', walletNamespaces: ['eip155'],
       authorizationPlan: { stepCount: 2, confirmEachStep: { available: true, walletConfirmationsAtLeast: 2 },
-        delegatedSingleAuthorization: { available: false, reason: 'DELEGATION_NOT_ENABLED' }, recommended: 'CONFIRM_EACH_STEP' } });
+        // BUILD-FLOFI-UNIVERSAL-WORKFLOW-002 (ADR-0008): the executor-funded mode is retired on every deployment, so its reason is the
+        // retirement — no longer whether this deployment configured delegation (was DELEGATION_NOT_ENABLED).
+        delegatedSingleAuthorization: { available: false, reason: 'EXECUTOR_FUNDED_GAS_RETIRED' }, recommended: 'CONFIRM_EACH_STEP' } });
     // The model sees a non-secret pointer; the secret link travels only in the UI-only metadata.
     expect(requested.text).not.toContain('flofi_hs_');
     const secret = decodeURIComponent(new URL(String((requested.meta['flofi/approval'] as { approvalUrl: string }).approvalUrl)).hash.slice(1));
@@ -67,17 +69,17 @@ describe('BUILD-CHAT-E2E-001 multi-step workflows over MCP (PostgreSQL)', () => 
     expect(JSON.stringify(status)).not.toContain(OWNER.address);
   });
 
-  it('a bound workflow is SEQUENTIAL for confirm-each-step (received amounts); delegated stays unavailable without a signer', async () => {
+  it('a bound workflow is SEQUENTIAL for confirm-each-step (received amounts); delegated stays retired (EXECUTOR_FUNDED_GAS_RETIRED)', async () => {
     const { client } = await consumer();
     const bound = { version: 2, steps: [SWAP, { ...SWAP, inputAsset: 'WETH', outputAsset: 'USDC', amount: '0.001' }], bindings: [{ step: 1, amountFrom: 0 }] };
     const composed = (await client.callTool('compose_strategy', { strategy: bound })).output as Record<string, unknown>;
     expect(composed).toMatchObject({ ok: true, executionPlan: { kind: 'SEQUENTIAL', reason: null, bindings: [{ step: 1, amountFrom: 0 }] } });
     expect((await client.callTool('request_user_approval', { strategy: composed.strategy, workflowHash: composed.workflowHash })).output)
       .toMatchObject({ ok: true, executionPlan: 'SEQUENTIAL',
-        authorizationPlan: { confirmEachStep: { available: true }, delegatedSingleAuthorization: { available: false, reason: 'DELEGATION_NOT_ENABLED' },
+        authorizationPlan: { confirmEachStep: { available: true }, delegatedSingleAuthorization: { available: false, reason: 'EXECUTOR_FUNDED_GAS_RETIRED' },
           bindings: [{ step: 1, amountFrom: 0, confirmEachStep: 'RECONCILED_RECEIVED_AMOUNT', delegated: 'SIGNED_GUARANTEED_MINIMUM' }],
           recommended: 'CONFIRM_EACH_STEP' },
-        gates: { supportedByCode: { modes: { confirmEachStep: null, delegated: 'DELEGATION_NOT_ENABLED' } } } });
+        gates: { supportedByCode: { modes: { confirmEachStep: null, delegated: 'EXECUTOR_FUNDED_GAS_RETIRED' } } } });
     expect((await client.callTool('get_capabilities', {})).output).toMatchObject({ stepLists: { sequences: expect.stringContaining('ONE wallet authorization') } });
   });
 });

@@ -12,7 +12,7 @@ import { createPgAutomationStore } from '../automations/pg-store.ts';
 import type { AutomationHost } from '../automations/runtime.ts';
 import type { Owner } from '../automations/store.ts';
 import { typedId } from '../platform/ids.ts';
-import type { DelegationConfig } from './config.ts';
+import { EXECUTOR_FUNDED_GAS_RETIRED, type DelegationConfig } from './config.ts';
 import { delegationRuntime, signerAdmin, signerProvider, transportFor, type DelegationSeams } from './runtime.ts';
 import { createDelegationService, type DelegationService } from './service.ts';
 import { DELEGATION_EXECUTE_RUN_KIND } from './run-source.ts';
@@ -69,7 +69,7 @@ export const EXECUTOR_FUNDED_OPERATIONS: ReadonlySet<DelegationOperation> = new 
 export async function runDelegationOperation(service: DelegationService, owner: Owner, proven: readonly Owner[], method: DelegationOperation, args: readonly unknown[],
   runs?: WorkflowRunStore): Promise<unknown> {
   const arity = (n: number) => { if (args.length !== n) invalid(); };
-  if (EXECUTOR_FUNDED_OPERATIONS.has(method)) throw new Error('EXECUTOR_FUNDED_GAS_RETIRED');
+  if (EXECUTOR_FUNDED_OPERATIONS.has(method)) throw new Error(EXECUTOR_FUNDED_GAS_RETIRED);
   switch (method) {
     case 'workflowRunWalletReview': {
       arity(1);

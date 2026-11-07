@@ -29,6 +29,8 @@ export const DELEGATION_ERROR_TEXT: Readonly<Record<string, string>> = {
   AUTHORIZATION_NOT_PENDING: 'This authorization changed. Review it again.', AUTHORIZATION_CHALLENGE_INVALID: 'This review expired. Review it again.',
   PASSKEY_COUNTER_REPLAY: 'This passkey response was already used.', WALLET_AUTHORITY_CHANGED: 'Your wallet changed during this request. Nothing was submitted. Start again.', DELEGATED_AUTHORIZATION_REQUIRED: 'Sign the authorization before this automation can run.',
   DELEGATED_REAUTHORIZATION_REQUIRED: 'Re-authorize this automation to change its workflow.',
+  // BUILD-FLOFI-UNIVERSAL-WORKFLOW-002 (S1): FloFi's executor paid every step's gas; it is retired. Owner-confirmed automations are unchanged.
+  EXECUTOR_FUNDED_GAS_RETIRED: 'Automatic execution is retired: it ran from FloFi\'s account, and FloFi never pays your network fees. Choose "Ask every time": your own wallet confirms and pays.',
 };
 const REASON_TEXT: Readonly<Record<string, string>> = {
   DELEGATED_AUTHORITY_UNAVAILABLE: 'no enrolled Credential for this network', CREDENTIAL_SCOPE_AMOUNT: 'the Credential\'s per-call cap is too low',

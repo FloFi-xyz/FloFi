@@ -38,7 +38,7 @@ import { ENFORCEMENT, stepCapability } from './capabilities.ts';
 import { digestBytes } from './canonical.ts';
 import type { ChainTransport } from './chains.ts';
 import type { DelegationConfig } from './config.ts';
-import { executionAvailability } from './config.ts';
+import { EXECUTOR_FUNDED_GAS_RETIRED, executionAvailability } from './config.ts';
 import { delegatedInputOf } from './automation-source.ts';
 import { isCredentialInput, type CredentialInput, type DelegatedAutomationInput } from './definition.ts';
 import { authorizationDigest, buildManifest, executionSpend, manifestHash, universalAuthorization, walletWorkflowAuthorization, wideningOf, type DelegatedAuthorizationManifest,
@@ -236,7 +236,10 @@ export function createDelegationService(deps: DelegationServiceDeps) {
           revokedAt: a.revokedAt?.toISOString() ?? null, budget: await budgetView(rev.manifest), executions: mine.length,
           lastExecution: mine[0] ? await executionView(mine[0]) : null });
       }
-      return { availability: { enabled: true, mode: config.mode, executor: executionAvailability(config), enrollment: deps.signer ? null : 'DELEGATED_SIGNER_UNAVAILABLE',
+      // BUILD-FLOFI-UNIVERSAL-WORKFLOW-002 (ADR-0008, S1): the executor paid every step's gas, so it is retired whatever the configuration
+      // says. Every surface shows "Automatic within limits" unavailable with this reason instead of offering a choice that fails later
+      // (executionAvailability still reports a configuration fault first). Reading, revoking and ending existing authority stay available.
+      return { availability: { enabled: true, mode: config.mode, executor: executionAvailability(config) ?? EXECUTOR_FUNDED_GAS_RETIRED, enrollment: EXECUTOR_FUNDED_GAS_RETIRED,
           mainnetChains: config.mainnetChains },
         passkeys: passkeys.map(passkeyView), authorizations: authViews, executions: await Promise.all(executions.map(executionView)), capabilities: capabilityRows(),
         credentials: credentials.map(c => ({ credentialId: c.credentialId, walletNamespace: c.walletNamespace, walletAddress: c.walletAddress, label: c.label,
