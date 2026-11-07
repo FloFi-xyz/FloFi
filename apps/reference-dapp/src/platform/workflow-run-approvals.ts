@@ -19,8 +19,10 @@ import type { WorkflowComposition } from '../engine/strategy-engine';
 import type { WalletWorkflowReviewView } from '../delegation/views.ts';
 import type { AuthorizationPlan } from '../workflow-runs/authorization-plan.ts';
 import type { RunRecord } from '../workflow-runs/pg-store.ts';
-import { assertRunWallets, cancelRun, currentStep, ensureForClaim, observeRun, ownerAuthorizationPlan, resumeRun, runView, startConfirm, type RunView, type StepProposal,
-  type WorkflowRunDeps } from '../workflow-runs/service.ts';
+import { assertRunWallets, authorizeUserFundedGroup, cancelRun, currentStep, ensureForClaim, observeRun, ownerAuthorizationPlan, prepareUserFundedGroup, reportUserFundedBatch,
+  resumeRun, runView, startConfirm, startUserFunded, type PreparedGroupView, type RunView, type StepProposal, type WorkflowRunDeps } from '../workflow-runs/service.ts';
+import type { WalletProfile } from '../workflow-runs/execution-groups.ts';
+import type { OwnerAnswer } from '../user-funded/groups.ts';
 import { DELEGATED_AUTHORIZATION_SECONDS } from '../workflow-runs/state-machine.ts';
 import type { ApprovalView } from './approvals.ts';
 import type { HandoffRecord, WalletRef } from './handoff-store.ts';
@@ -62,7 +64,9 @@ export async function claimSequential(deps: WorkflowRunSurface, h: HandoffRecord
   let run = await ensureForClaim(deps, h, workflow, wallets);
   if (run.state === 'PENDING' && run.mode === null) {
     const plan = await ownerAuthorizationPlan(deps, run);
-    if (!plan.delegatedSingleAuthorization.available && plan.confirmEachStep.available) run = await startConfirm(deps, run, wallets);
+    // BUILD-FLOFI-UNIVERSAL-WORKFLOW-002: the run starts at once only when confirming each step is the owner's only real choice (user-funded
+    // groups that would need fewer wallet interactions leave the choice to the owner).
+    if (plan.confirmEachStep.available && plan.recommended !== 'USER_FUNDED') run = await startConfirm(deps, run, wallets);
   }
   return proposalOf(deps, run, await currentStep(deps, run, wallets), base);
 }
@@ -117,4 +121,23 @@ export async function authorizeSequential(deps: WorkflowRunSurface, run: RunReco
   }
   await ops.sign(run.owner, run.runId, revision, assertion, run.mode === 'DELEGATED');
   return proposalOf(deps, run, null, base);
+}
+
+// ── BUILD-FLOFI-UNIVERSAL-WORKFLOW-002: user-funded execution groups (the owner's own wallet authorizes and pays) ────────────────
+/** The owner chose user-funded execution: the groups are planned for the wallets their browser reported, then the run starts. */
+export async function userFundedStartSequential(deps: WorkflowRunSurface, run: RunRecord, wallets: readonly WalletRef[], profile: WalletProfile, base: ApprovalView) {
+  const started = await startUserFunded(deps, run, wallets, profile);
+  return proposalOf(deps, started, await currentStep(deps, started, wallets), base);
+}
+/** What the owner's wallet signs for one group (exact calls, typed data or Solana transactions, with the fee ceiling and its payer). */
+export async function userFundedPrepareSequential(deps: WorkflowRunSurface, run: RunRecord, wallets: readonly WalletRef[], groupIndex: number): Promise<PreparedGroupView> {
+  return prepareUserFundedGroup(deps, run, wallets, groupIndex);
+}
+export async function userFundedAuthorizeSequential(deps: WorkflowRunSurface, run: RunRecord, wallets: readonly WalletRef[], groupIndex: number, answer: OwnerAnswer, base: ApprovalView) {
+  const moved = await authorizeUserFundedGroup(deps, run, wallets, groupIndex, answer);
+  return proposalOf(deps, moved, null, base);
+}
+export async function userFundedReportSequential(deps: WorkflowRunSurface, run: RunRecord, wallets: readonly WalletRef[], groupIndex: number, hashes: readonly string[], base: ApprovalView) {
+  const moved = await reportUserFundedBatch(deps, run, wallets, groupIndex, hashes);
+  return proposalOf(deps, moved, null, base);
 }

@@ -28,7 +28,7 @@ export const channelApprovalScheme = (keys: ChannelKeys): ApprovalLinkScheme => 
 export type ChannelPlatform = { readonly origin: string; readonly scheme: ApprovalLinkScheme; readonly handoffs: HandoffStore; readonly allow: WindowLimit;
   readonly runtime: EngineRuntime; readonly policy: Extract<HandoffPolicy, { ok: true }>;
   /** BUILD-CHAT-E2E-001: the runs of multi-step approvals (status and notifications), where the deployment runs workflows. */
-  readonly workflowRuns?: Pick<WorkflowRunStore, 'byHandoff' | 'steps'> | null };
+  readonly workflowRuns?: Pick<WorkflowRunStore, 'byHandoff' | 'steps' | 'groups'> | null };
 /** The requester of one conversation: its id isolates its handoffs; the intended wallet is immutable, non-secret claim context. */
 export function channelRequester(source: { readonly clientId: string; readonly displayName: string }, conversationId: string, intendedWallet: WalletRef | null): ApprovalRequester {
   return { kind: 'CHANNEL_CONVERSATION', ref: conversationId, clientId: source.clientId, displayName: source.displayName, context: intendedWallet ? { intendedWallet } : {} };

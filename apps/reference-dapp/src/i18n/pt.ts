@@ -23,6 +23,7 @@ import { portugueseSolanaMainnet } from './pt-solana-mainnet';
 import { portugueseLearning } from './pt-learning';
 import { portugueseExecutionUx } from './pt-execution-ux';
 import { portugueseWorkflowRuns } from './pt-workflow-runs';
+import { portugueseUserFunded } from './pt-user-funded';
 import { portugueseMainnetProduct } from './pt-mainnet-product';
 import { portugueseConcurrency } from './pt-concurrency';
 import { portugueseUniversalBridge } from './pt-universal-bridge';
@@ -74,6 +75,7 @@ export const portuguese: Readonly<Record<string, string>> = {
   ...portugueseLearning,
   ...portugueseExecutionUx,
   ...portugueseWorkflowRuns,
+  ...portugueseUserFunded,
   ...portugueseConversation,
   ...portugueseChatE2eFix,
   ...portugueseE2eReliability,

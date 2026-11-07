@@ -14,7 +14,10 @@
  *   the run mirrors its ONE delegated execution: each executor step's reconciliation becomes the run step's public outcome; SETTLED →
  *   COMPLETED; BLOCKED → FAILED; HALTED → HALTED; UNCERTAIN → ATTENTION. The executor alone signs and submits.
  *
- * Nothing here signs, submits, retries a submission or chooses a wallet. Bound amounts are resolved only from reconciled facts.
+ * USER_FUNDED (BUILD-FLOFI-UNIVERSAL-WORKFLOW-002, `user-funded-pass.ts`)
+ *   execution groups the owner's own wallet authorizes and pays for; owner-step groups follow the confirm-each-step rules above.
+ *
+ * Nothing here signs, chooses a wallet or retries a submission with different bytes. Bound amounts are resolved only from reconciled facts.
  */
 import type { NetworkId, StrategySpec } from '../engine/strategy-spec';
 import { composeWorkflowBound, type WorkflowComposition } from '../engine/strategy-engine';
@@ -27,6 +30,8 @@ import type { McpRuntime as EngineRuntime } from '../mcp/runtime.ts';
 import { observeOwnerStep } from './observe.ts';
 import type { BoundResolution, RunRecord, RunStepRecord, StepOutcome, WorkflowRunStore } from './pg-store.ts';
 import { ADVANCE_RETRY_MS, TERMINAL_RUN, type RunState } from './state-machine.ts';
+import { userFundedPass } from './user-funded-pass.ts';
+import type { UserFundedDeps } from '../user-funded/groups.ts';
 
 export type RunnerDeps = {
   readonly store: WorkflowRunStore; readonly runtime: EngineRuntime;
@@ -37,6 +42,8 @@ export type RunnerDeps = {
   readonly policyFor: (run: RunRecord) => HandoffPolicy | null;
   /** Delegated executions (null where delegation is not enabled; a DELEGATED run then waits and reports it). */
   readonly delegation: Pick<DelegationStore, 'executionForRun' | 'steps'> | null;
+  /** BUILD-FLOFI-UNIVERSAL-WORKFLOW-002: user-funded group transports (null where not enabled; a USER_FUNDED run then waits and reports it). */
+  readonly userFunded?: UserFundedDeps | null;
   readonly now: () => Date;
   readonly log: (event: string, fields: Readonly<Record<string, string | number | boolean | null>>) => void;
 };
@@ -55,7 +62,10 @@ export async function advanceRun(deps: RunnerDeps, runId: string): Promise<Advan
   for (let pass = 0; pass < MAX_PASSES; pass++) {
     const run = await deps.store.byId(runId);
     if (!run) return last;
-    const result = run.mode === 'DELEGATED' ? await delegatedPass(deps, run) : await confirmPass(deps, run);
+    const result = run.mode === 'DELEGATED' ? await delegatedPass(deps, run)
+      : run.mode === 'USER_FUNDED' ? await userFundedPass({ store: deps.store, userFunded: deps.userFunded ?? null, now: deps.now, log: deps.log,
+        confirmPass: r => confirmPass(deps, r) }, run)
+      : await confirmPass(deps, run);
     last = { runId, state: result.state, code: result.code, retryMs: result.retryMs };
     if (!result.progressed) return last;
   }

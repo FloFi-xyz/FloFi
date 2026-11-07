@@ -20,6 +20,8 @@ import { developerApprovalChanged } from '../developer/dispatch';
 import { applyApproval, claimApproval, openBrowserApproval, previewApproval, resumeApproval, shareApproval, viewApproval, workflowRunAuthorize, workflowRunCancel,
   workflowRunContinue, workflowRunResume, workflowRunReview, workflowRunStart, workflowRunStatus, type ApprovalPreview, type ApprovalView,
   type ApprovalSurface, type ClaimedProposal } from '../platform/index';
+import { workflowRunUserFundedAuthorize, workflowRunUserFundedPrepare, workflowRunUserFundedReport, workflowRunUserFundedStart } from '../platform/approve';
+import type { PreparedGroupView } from '../workflow-runs/service';
 import type { WalletWorkflowReviewView } from '../delegation/views';
 import { approvalSurface } from '../server/approval-surface';
 import { remoteApproval, remoteAutomationApproval, remoteAutomationRecovery } from '../server/automation-operation';
@@ -116,6 +118,22 @@ export async function startWorkflowRunHandoff(approvalId: string): Promise<Resul
 export async function cancelWorkflowRunHandoff(approvalId: string): Promise<Result<ClaimedProposal>> { return runAction((s, w) => workflowRunCancel(s, approvalId, w)); }
 /** The owner resumes a halted run whose stopped step submitted nothing. */
 export async function resumeWorkflowRunHandoff(approvalId: string): Promise<Result<ClaimedProposal>> { return runAction((s, w) => workflowRunResume(s, approvalId, w)); }
+/** BUILD-FLOFI-UNIVERSAL-WORKFLOW-002: the owner chose user-funded execution groups for the wallets this browser reported. */
+export async function startUserFundedWorkflowRun(approvalId: string, profile: unknown): Promise<Result<ClaimedProposal>> {
+  return runAction((s, w) => workflowRunUserFundedStart(s, approvalId, w, profile));
+}
+/** What the owner's wallet signs for one execution group now. */
+export async function prepareUserFundedGroup(approvalId: string, groupIndex: number): Promise<Result<PreparedGroupView>> {
+  return runAction((s, w) => workflowRunUserFundedPrepare(s, approvalId, w, groupIndex));
+}
+/** The owner's wallet answer for one prepared group (batch id, user-operation signature or signed Solana transactions). */
+export async function authorizeUserFundedGroup(approvalId: string, groupIndex: number, answer: unknown): Promise<Result<ClaimedProposal>> {
+  return runAction((s, w) => workflowRunUserFundedAuthorize(s, approvalId, w, groupIndex, answer));
+}
+/** The transaction hashes of a wallet batch (from `wallet_getCallsStatus`); FloFi re-reads every receipt from the chain. */
+export async function reportUserFundedBatch(approvalId: string, groupIndex: number, hashes: string[]): Promise<Result<ClaimedProposal>> {
+  return runAction((s, w) => workflowRunUserFundedReport(s, approvalId, w, groupIndex, hashes));
+}
 /** The Universal Workflow Authorization Review of the run: the envelope the owner's passkey signs ONCE (delegated mode). */
 export async function reviewWorkflowRunAuthorization(approvalId: string): Promise<Result<WalletWorkflowReviewView>> { return runAction((s, w) => workflowRunReview(s, approvalId, w)); }
 /** The owner's ONE passkey signature for the whole workflow; the approval link is marked applied with it. */

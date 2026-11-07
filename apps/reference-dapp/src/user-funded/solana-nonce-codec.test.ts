@@ -9,8 +9,8 @@ import { base58Encode, publicKeyBytes, serializeMessageV0, u64Bytes } from '@def
 
 const OWNER = '9xQeWvG816bUx9EPjHmaT23yvVM2ZWbrrpZb9PusVFin', NONCE = '4Nd1mBQtrMJVYVfKf2PJy9NZaZdQiw6SzgfKHqeXHzsf', OTHER = 'So11111111111111111111111111111111111111112';
 const signer = (a: string) => createNoopSigner(address(a));
-const bytes = (i: { data: ReadonlyArray<number> | Uint8Array }) => Array.from(i.data as Uint8Array);
-const metas = (i: { accounts?: readonly { address: string; role: number }[] }) => (i.accounts ?? []).map(a => ({ pubkey: String(a.address), isSigner: a.role >= 2, isWritable: a.role % 2 === 1 }));
+const bytes = (i: { readonly data?: ArrayLike<number> }) => Array.from(i.data ?? []);
+const metas = (i: { readonly accounts?: readonly { readonly address: string; readonly role: number }[] }) => (i.accounts ?? []).map(a => ({ pubkey: String(a.address), isSigner: a.role >= 2, isWritable: a.role % 2 === 1 }));
 
 describe('System program nonce instructions', () => {
   it('encode exactly as the generated codecs', () => {

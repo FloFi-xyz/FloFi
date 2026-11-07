@@ -325,7 +325,7 @@ export type ApprovalProgress = ReturnType<typeof approvalStatus> & { readonly ru
   /** Present (true) only when no run of this approval was found but older runs of the wallet were not examined: never read as "no run". */
   readonly runsTruncated?: true };
 export async function approvalProgress(h: HandoffRecord, runtime: EngineRuntime, handoffs: HandoffStore, origin?: string,
-  workflowRuns?: Pick<WorkflowRunStore, 'byHandoff' | 'steps'> | null): Promise<ApprovalProgress> {
+  workflowRuns?: Pick<WorkflowRunStore, 'byHandoff' | 'steps' | 'groups'> | null): Promise<ApprovalProgress> {
   const run = h.plan.kind === 'SEQUENTIAL' && workflowRuns ? await workflowRuns.byHandoff(h.handoffId) : null;
   const workflowRun = run && workflowRuns ? await runView({ store: workflowRuns }, run, { outcomes: h.shareStatus, origin: origin ?? null }) : null;
   if (h.plan.kind === 'SEQUENTIAL') return { ...approvalStatus(h), runs: [], runsVisible: h.shareStatus, workflowRun,

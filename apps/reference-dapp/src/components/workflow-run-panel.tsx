@@ -13,8 +13,11 @@
  * every wallet signature and confirmation stays the owner's own, and FloFi re-verifies each of them on the server.
  */
 import { useEffect, useRef, useState } from 'react';
-import { authorizeWorkflowRunHandoff, cancelWorkflowRunHandoff, continueWorkflowRunHandoff, resumeWorkflowRunHandoff, reviewWorkflowRunAuthorization,
-  startWorkflowRunHandoff, workflowRunStatusHandoff } from '../app/approve-action';
+import { authorizeUserFundedGroup, authorizeWorkflowRunHandoff, cancelWorkflowRunHandoff, continueWorkflowRunHandoff, prepareUserFundedGroup, reportUserFundedBatch,
+  resumeWorkflowRunHandoff, reviewWorkflowRunAuthorization, startUserFundedWorkflowRun, startWorkflowRunHandoff, workflowRunStatusHandoff } from '../app/approve-action';
+import type { eip5792 } from '@defi-workflow-engine/reference-compiler';
+import { sendWalletBatch, signSolanaGroup, signUserOperation, walletBatchHashes, walletProfile } from './user-funded-browser';
+import { chosenEvmProvider, injected } from '../wallet/evm-discovery';
 import type { WalletWorkflowReviewView } from '../delegation/views';
 import { canEndWorkflow } from '../workflow-runs/state-machine';
 import { useLocale } from '../i18n/locale';
@@ -41,7 +44,19 @@ const WHY_NOT_ONCE: Readonly<Record<string, string>> = {
   MAINNET_DELEGATION_DISABLED: 'Delegated execution is not enabled for this network on this FloFi deployment.',
   DELEGATION_TEMPLATE_NOT_IMPLEMENTED: 'One of these steps has no delegated execution yet.',
   DELEGATED_TARGET_SCOPE_UNAVAILABLE: 'One of these steps cannot be limited on chain for delegated execution.',
+  // BUILD-FLOFI-UNIVERSAL-WORKFLOW-002
+  EXECUTOR_FUNDED_GAS_RETIRED: 'FloFi no longer executes steps from its own account: your own wallet pays every fee.',
 };
+/** BUILD-FLOFI-UNIVERSAL-WORKFLOW-002: how each execution group is authorized, in plain words. */
+const GROUP_HOW: Readonly<Record<string, string>> = { EVM_WALLET_BATCH: 'One wallet confirmation (atomic batch)', EVM_USER_OPERATION: 'One signature now; FloFi relays it when due',
+  EVM_OWNER_STEP: 'One wallet confirmation per step', SOLANA_SIGN_ALL: 'One Solana signing request for every transaction', SOLANA_DURABLE_NONCE: 'One Solana signing request now',
+  SOLANA_OWNER_STEP: 'One Solana prompt per step' };
+const GROUP_STATE: Readonly<Record<string, string>> = { PLANNED: 'Planned', PREPARED: 'Prepared', AUTHORIZED: 'Authorized', SUBMITTED: 'Submitted', RECONCILED: 'Reconciled',
+  FAILED: 'Failed', UNCERTAIN: 'Outcome pending', BLOCKED: 'Stopped before submission', SKIPPED: 'Not run', EXPIRED: 'Expired' };
+const NETWORK: Readonly<Record<string, string>> = { 'eip155:1': 'Ethereum', 'eip155:8453': 'Base', 'eip155:42161': 'Arbitrum One', 'eip155:4663': 'Robinhood Chain',
+  'solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp': 'Solana' };
+const units = (amount: string, unit: string) => { const d = unit === 'lamports' ? 9 : 18, v = BigInt(amount), whole = v / 10n ** BigInt(d), frac = (v % 10n ** BigInt(d)).toString().padStart(d, '0').slice(0, 6).replace(/0+$/, '');
+  return `${whole}${frac ? '.' + frac : ''} ${unit === 'lamports' ? 'SOL' : 'ETH'}`; };
 const short = (hash: string) => hash.length > 14 ? `${hash.slice(0, 8)}…${hash.slice(-6)}` : hash;
 
 export function WorkflowRunPanel({ claim, approvalId, secret, onProposal, onError }: { claim: WorkflowRunClaim; approvalId: string; secret: string | null;
@@ -96,6 +111,49 @@ export function WorkflowRunPanel({ claim, approvalId, secret, onProposal, onErro
     return authorizeWorkflowRunHandoff(secret, lastSent.current.revision, [...lastSent.current.signatures]);
   });
 
+  // BUILD-FLOFI-UNIVERSAL-WORKFLOW-002: user-funded execution groups — the owner's own wallets authorize (and, for a batch, send) and pay.
+  const evmAddress = async () => { const p = chosenEvmProvider() ?? injected(); const a = p ? await p.request({ method: 'eth_accounts', params: [] }) : null;
+    return Array.isArray(a) && typeof a[0] === 'string' ? a[0].toLowerCase() : null; };
+  const startUserFunded = () => act(async () => {
+    const chains = [...new Set(plan.userFunded.groups.map(g => g.chain))];
+    const profile = await walletProfile(plan.confirmEachStep.walletNamespaces.includes('eip155') ? await evmAddress() : null, chains,
+      plan.confirmEachStep.walletNamespaces.includes('solana'));
+    return startUserFundedWorkflowRun(approvalId, profile);
+  });
+  /** Prepares one group on the server, asks the owner's wallet for exactly that, and relays the answer (verified by the server). */
+  const authorizeGroup = (index: number) => act(async () => {
+    const prepared = await prepareUserFundedGroup(approvalId, index);
+    if (!prepared.ok) return prepared;
+    const p = prepared.value.prepared as unknown as Record<string, unknown>;
+    if (p.kind === 'EVM_WALLET_BATCH') {
+      const batchId = await sendWalletBatch(p.request as eip5792.SendCallsRequest);
+      const authorized = await authorizeUserFundedGroup(approvalId, index, { kind: 'EVM_WALLET_BATCH', batchId });
+      if (!authorized.ok) return authorized;
+      for (let i = 0; i < 40; i++) {
+        const done = await walletBatchHashes(batchId).catch(() => null);
+        if (done?.hashes.length) return reportUserFundedBatch(approvalId, index, [...done.hashes]);
+        await new Promise(resolve => setTimeout(resolve, 3_000));
+      }
+      return authorized;
+    }
+    if (p.kind === 'EVM_USER_OPERATION') {
+      const signature = await signUserOperation(prepared.value.feePayer, Number(p.chainId), p.typedData);
+      return authorizeUserFundedGroup(approvalId, index, { kind: 'EVM_USER_OPERATION', signature });
+    }
+    if (p.kind === 'SOLANA_SIGN_ALL') {
+      const txs = (p.transactions as { unsignedTransaction: string }[]).map(t => t.unsignedTransaction);
+      return authorizeUserFundedGroup(approvalId, index, { kind: 'SOLANA_SIGN_ALL', transactions: await signSolanaGroup(prepared.value.feePayer, txs) });
+    }
+    return { ok: false as const, code: 'USER_FUNDED_GROUP_NOT_PREPARABLE' };
+  });
+  /** A batch the wallet already sent (e.g. after a reload): its hashes are read back from the wallet and reported. */
+  const recoverBatch = (index: number, batchId: string) => act(async () => {
+    const done = await walletBatchHashes(batchId);
+    return done?.hashes.length ? reportUserFundedBatch(approvalId, index, [...done.hashes]) : workflowRunStatusHandoff(approvalId);
+  });
+  const currentGroup = run.groups?.find(g => g.steps[0] <= run.currentStep && run.currentStep <= g.steps[1]) ?? null;
+  const userFundedCount = plan.userFunded?.interactions ? plan.userFunded.interactions.upfront + plan.userFunded.interactions.whenDue : 0;
+
   // BUILD-FLOFI-UNIVERSAL-SINGLE-AUTH-MAINNET-001: a sign whose answer was lost (timeout) may still have started the run. Once the status poll shows
   // the run DELEGATED, the same cached signatures are sent once more: the sign is idempotent and the wallet is never asked again.
   useEffect(() => {
@@ -111,7 +169,8 @@ export function WorkflowRunPanel({ claim, approvalId, secret, onProposal, onErro
     <div className="workflow-run-head">
       <strong>{tr('{0}-step workflow', String(run.stepCount))}</strong>
       <span className="status-badge info">{tr(RUN_STATE[run.state] ?? run.state)}</span>
-      {run.mode && <span className="muted">{tr(run.mode === 'DELEGATED' ? 'Authorized once with your wallet' : 'You confirm each step in your wallet')}</span>}
+      {run.mode && <span className="muted">{tr(run.mode === 'DELEGATED' ? 'Authorized once with your wallet' : run.mode === 'USER_FUNDED'
+        ? 'You authorize each group with your own wallet' : 'You confirm each step in your wallet')}</span>}
     </div>
     <ol className="workflow-run-steps">
       {run.steps.map(step => <li key={step.index} data-step-state={step.state} aria-current={step.index === run.currentStep && open ? 'step' : undefined}>
@@ -127,12 +186,22 @@ export function WorkflowRunPanel({ claim, approvalId, secret, onProposal, onErro
       <div className="approval-actions">
         {plan.confirmEachStep.available && <button type="button" className="secondary" disabled={busy} onClick={() => void act(() => startWorkflowRunHandoff(approvalId))}>
           {tr('Confirm each step in my wallet ({0} confirmations at least)', String(confirmations))}</button>}
+        {plan.userFunded?.available && <button type="button" disabled={busy} onClick={() => void startUserFunded()}>
+          {userFundedCount === 1 ? tr('Pay the fees from my own wallet, in one wallet interaction')
+            : tr('Pay the fees from my own wallet, in {0} wallet interactions', String(userFundedCount))}</button>}
         {plan.delegatedSingleAuthorization.available && !review && <button type="button" disabled={busy} onClick={() => void prepareOnce()}>
           {plan.delegatedSingleAuthorization.walletSignatures > 1
             ? tr('Authorize the whole workflow once ({0} wallet signatures, one per network)', String(plan.delegatedSingleAuthorization.walletSignatures))
             : tr('Authorize the whole workflow once')}</button>}
       </div>
-      {!plan.delegatedSingleAuthorization.available && plan.delegatedSingleAuthorization.reason &&
+      {plan.userFunded?.available && <ol className="workflow-run-groups" aria-label={tr('Execution groups')}>
+        {plan.userFunded.groups.map(g => <li key={g.index}>{tr('Steps {0}–{1} on {2}', String(g.stepFrom + 1), String(g.stepTo + 1), NETWORK[g.chain] ?? g.chain)}
+          {' · '}{tr(GROUP_HOW[g.strategy] ?? g.strategy)}{' · '}{tr(g.signing === 'UPFRONT' ? 'signed now' : 'signed when it becomes due')}
+          {g.awaitsDelivery !== null && <> · {tr('waits for the delivery of step {0}', String(g.awaitsDelivery + 1))}</>}
+          {g.setup.includes('EVM_SMART_ACCOUNT_UPGRADE') && <> · {tr('your wallet upgrades this account inside the same confirmation (one time)')}</>}</li>)}
+      </ol>}
+      {plan.userFunded?.available && <p className="muted">{tr('Your wallet pays every network fee. FloFi never pays, advances or reimburses gas.')}</p>}
+      {!plan.delegatedSingleAuthorization.available && plan.delegatedSingleAuthorization.reason && plan.delegatedSingleAuthorization.reason !== 'EXECUTOR_FUNDED_GAS_RETIRED' &&
         <p className="muted">{tr('Authorizing once is not available here.')} {tr(WHY_NOT_ONCE[plan.delegatedSingleAuthorization.reason] ?? plan.delegatedSingleAuthorization.reason)}</p>}
       {plan.delegatedSingleAuthorization.available && <p className="muted">{tr('One-time setup: your wallet must be a MetaMask smart account on each network (EIP-7702).')}</p>}
     </div>}
@@ -155,6 +224,23 @@ export function WorkflowRunPanel({ claim, approvalId, secret, onProposal, onErro
           ? tr('Sign once in my wallet ({0} networks)', String(review.walletSignatures)) : tr('Sign once in my wallet')}</button>
         <button type="button" className="quiet" disabled={busy} onClick={() => { unknownOutcome.current = null; setReview(null); }}>{tr('Back')}</button>
       </div>
+    </div>}
+    {run.mode === 'USER_FUNDED' && <ol className="workflow-run-groups" aria-label={tr('Execution groups')}>
+      {(run.groups ?? []).map(g => <li key={g.index} data-group-state={g.state}>
+        <span>{tr('Steps {0}–{1} on {2}', String(g.steps[0] + 1), String(g.steps[1] + 1), NETWORK[g.chain] ?? g.chain)} · {tr(GROUP_HOW[g.strategy] ?? g.strategy)}</span>
+        <span className="workflow-run-state">{tr(GROUP_STATE[g.state] ?? g.state)}</span>
+        <span className="muted">{tr('Fees paid by {0}', short(g.feePayer))}</span>
+        {g.maxFee && !g.gasPaid && <span className="muted">{tr('At most {0} in network fees', units(g.maxFee.amount, g.maxFee.unit))}</span>}
+        {g.gasPaid && <span className="muted">{tr('Network fees paid: {0}', units(g.gasPaid.amount, g.gasPaid.unit))}</span>}
+        {g.transactions.map(tx => tx.explorerUrl ? <a key={tx.hash} href={tx.explorerUrl} target="_blank" rel="noreferrer"><code>{short(tx.hash)}</code></a> : <code key={tx.hash}>{short(tx.hash)}</code>)}
+      </li>)}
+    </ol>}
+    {run.mode === 'USER_FUNDED' && run.nextAction === 'OWNER_SIGNS_GROUP' && currentGroup && <div className="approval-actions">
+      <button type="button" disabled={busy} onClick={() => void authorizeGroup(currentGroup.index)}>
+        {tr('Authorize steps {0}–{1} now', String(currentGroup.steps[0] + 1), String(currentGroup.steps[1] + 1))}</button>
+    </div>}
+    {run.mode === 'USER_FUNDED' && run.nextAction === 'OWNER_CONFIRMS_BATCH' && currentGroup?.batchId && <div className="approval-actions">
+      <button type="button" className="secondary" disabled={busy} onClick={() => void recoverBatch(currentGroup.index, currentGroup.batchId!)}>{tr('Check my wallet for the batch')}</button>
     </div>}
     {nextStep !== null && <div className="approval-actions">
       <button type="button" disabled={busy} onClick={() => void act(() => continueWorkflowRunHandoff(approvalId))}>{tr('Continue to step {0}', String(nextStep))}</button>
