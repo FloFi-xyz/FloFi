@@ -1,0 +1,360 @@
+{
+ "subsystem": "workflow-ir-engine",
+ "summary": "The canonical representation is the v1 `semantic-workflow` artifact (packages/workflow-contracts/src/semantic-workflow.ts:9-44): a list of nodes (nodeId, actionType, actionSchemaVersion '1.0.0', CAIP-2 chainId, requiredCapabilities, adapterConstraints{adapters,protocols}, typed `inputs`, `expectedOutputs`, `dependencies`, `userConstraints`, failurePolicy, requiredAuthorizationClass, lockedParameters, editableBounds) plus `resourceEdges` {fromNodeId,outputId,toNodeId,inputName}; it is validated by Ajv + checkWorkflow (schemas.ts:104-178, 311-353), canonicalised and hashed with the frozen DWE-HASH domain framing (canonical.ts:50-81, 127-146, 157-216). Every action kind is a closed declaration: a `createXNode` builds the node and `readXNode` re-creates it from the read fields and refuses any byte difference (swap.ts:67-105, supply.ts:118-145, borrow.ts, repay.ts, withdraw.ts, native-transfer.ts, solana-transfer.ts:34-64, router.ts:41-95, universal-router.ts:67-125, liquidity.ts:47-131, catalog-swap.ts). Amounts in the IR are authored exact native-unit strings (QUANTITY input + a MAXIMUM_INPUT constraint + optional editableBounds); `expectedOutputs.minimumAmount` is hard-coded '0' on every public action (swap.ts:78, router.ts:62, universal-router.ts:91), so the IR carries no estimated/guaranteed/actual triple—expected/minimum/adverse only appear post-quote in QuoteStateArtifact.outputBounds (quote-state.ts:255-260), SimulationBundle.outputs/propagatedOutputs (simulation.ts:15-28) and route models (router.ts:118, universal-router.ts:157), and \"actual\" only in EvidenceBundle.reconciliation (evidence-bundle.ts:106-112) or the workflow-run StepOutcome.received/spent + BoundResolution{cap,received,used} (apps/reference-dapp/src/workflow-runs/pg-store.ts:21-29). Dependent amounts exist in two unreconciled forms: (1) in the IR, an `OUTPUT_REFERENCE` input + resourceEdge (common.ts:154-158, schemas.ts:127-136), used only by three closed graphs (Base Sepolia lending composition lending-composition.ts:26-31, the registered Solana Devnet Orca swap→liquidity composition-bindings.ts:25-31/67-85, legacy LI.FI bridge→swap and BUILD-011C cross-chain liquidity in reference-linter) and rejected elsewhere (linter SWAP_EDGE_UNSUPPORTED validation.ts:191,200; every runtime `*_ISOLATED_ONLY`, e.g. universal-router.ts:121-125); (2) outside the IR, index-based bindings `{step, amountFrom}` on the v2 step-list StrategySpec (strategy-spec.ts:145-156, workflow-bindings.ts:86-107) resolved at run time as min(cap, reconciled received) (runner.ts:97-122, delegation/executor.ts:455-480), and on the Canvas an implicit funding link derived by exact asset identity between ordered single-node projections (domain/workflow-sequence.ts:94-114, 139-158). Chat/MCP composition (strategy-engine.ts:311-326) turns a StrategySpec into the DApp's own editor Command and runs `editorReducer` from the empty editor so each step is byte-identical to Canvas chat authoring (tested strategy-engine.test.ts:35+, robinhood-composition.test.ts:32-40); but a multi-step v2 workflow is N isolated one-node IRs whose \"workflow hash\" is a separate sha256 over the ordered step hashes (+bindings) using JSON.stringify (strategy-engine.ts:352-356, 368-389), whereas the Canvas holds one SemanticWorkflow with ordering `dependencies` edges (editor.ts:298-331) hashed by semanticWorkflowHash (strategy-engine.ts:56-58)—so Chat and Canvas do not share one canonical multi-step workflow today. Solana is already in the same node schema (chainId `solana:<genesis>`, native asset {nativeId:'SOL'}): Jupiter swap via createExactInputSwapNode (domain/jupiter-authoring.ts:49), System/SPL transfer (solana-transfer.ts), Orca liquidity (createConcentratedLiquidityNode), and the universal bridge with Solana source or destination (universal-router.ts:67-95, 142-148, 252-266), but the capability registry blocks any multi-node workflow containing a Solana node unless it is the registered Devnet composition (action-registry/src/execution-capabilities.ts:246-250), the ExecutionPlan has only DIRECT_TRANSACTION|SIGNED_INTENT kinds (execution-plan.ts:19-30), and delegated single-authorization refuses Solana and cross-chain bindings (authorization-plan.ts:94-105). The capability catalog is computed, never hand-written: STRATEGY_EXAMPLES are composed through the real reducer and `resolveWorkflowCapability` is run on the resulting IR (capability-catalog.ts:117-133), then certificationMatrix joins flows/web runtimes/ledger evidence (certification-matrix.ts:134-161) and mainnetProductMatrix retires every test-network row (mainnet-product-matrix.ts:26-37); both matrices are committed JSON enforced by tests (certification-matrix.test.ts:206-211, mainnet-product-matrix.test.ts:160-166). Mainnet-only enforcement lives in the public schema branches (strategy-spec.ts:24-30, 165-241), `composeWorkflowOrRefuse`/`validateStrategy` (platform/strategy.ts:31-38, 55-63), domain/network-scope.ts (scopeOfEnv 26-29, introducedTestNetworks 90-94, workflowAllowed 96) and server/network-scope.ts:13-15 (hosted deployments can never opt into ENGINEERING). The compiler consumes one isolated node per artifact chain: read*Node → quote/artifact-set/simulation/policy/manifest/plan (universal-artifacts.ts:38+, crosschain-router.ts:254+, supply.ts:169+, solana-transfer.ts:32-35), with StrategyManifest.executor hard-coded null and enforcement 'NOT_ENFORCED' (manifest.ts:11-20); the delegated path instead compiles per-chain ERC-7710 workflow grants (delegation/workflow-grants.ts:50-53) that the KMS session signer redeems with its own EIP-1559 transactions (delegation/drivers.ts:98-125)—the gas-paying sender PR #166 must retire. Untracked, uncommitted BUILD-…-002 codecs already exist in the working tree (packages/reference-compiler/src/eip5792.ts, erc4337.ts, test/erc4337.test.ts, index.ts:84-85) but nothing in workflow-contracts or the engine references them yet.",
+ "keyFiles": [
+  {
+   "path": "/home/user/FloFi/packages/workflow-contracts/src/semantic-workflow.ts",
+   "role": "Canonical IR schema: WorkflowNodeSchema (9-31) and SemanticWorkflowSchema with nodes + resourceEdges (33-44).",
+   "keySymbols": "WorkflowNodeSchema, SemanticWorkflowSchema, SemanticWorkflow"
+  },
+  {
+   "path": "/home/user/FloFi/packages/workflow-contracts/src/common.ts",
+   "role": "Shared primitives: ChainIdSchema (35, CAIP-2 incl. solana:), NativeUnitsSchema (50-57), AssetSchema token|native (82-93), ParameterSchema union incl. OUTPUT_REFERENCE (123-159), OutputSchema (161-165), ConstraintSchema MAXIMUM_INPUT|MINIMUM_OUTPUT|MAXIMUM_SLIPPAGE_BPS (166-179), EditableBoundSchema (180-185), FailurePolicySchema (186-194), AuthorizationClassSchema NONE|MODE_A|MODE_B|MODE_C (70-75), ExecutionKindSchema (76-79), EnforcementSchema literal NOT_ENFORCED (80), RuntimeStateSchema (268-296).",
+   "keySymbols": "ParameterSchema, AssetSchema, ConstraintSchema, OutputReferenceSchema, SpendLimitSchema, BudgetSchema"
+  },
+  {
+   "path": "/home/user/FloFi/packages/workflow-contracts/src/canonical.ts",
+   "role": "Hashing: HASH_DOMAINS (50-66) and frozen HASH_FIELDS per artifact (71-81); DWE-HASH preimage framing (127-146); projectArtifact deterministic sorting of nodes/edges/inputs (157-212); hashArtifactValue (214-216); hashModeBPermission (245-257).",
+   "keySymbols": "HASH_FIELDS, hashPreimage, hashData, projectArtifact, hashArtifactValue, canonicalJson"
+  },
+  {
+   "path": "/home/user/FloFi/packages/workflow-contracts/src/schemas.ts",
+   "role": "Ajv validation + semantic invariants: checkWorkflow (104-178) requires OUTPUT_REFERENCE inputs to declare a dependency (127-136), permits cross-chain expectedOutputs only for router/universal/legacy bridge nodes (137-159), and edge/input matching (161-177); checkSharedInvariants uint256/decimals/limits (254-309); validateArtifact (311-353).",
+   "keySymbols": "validateArtifact, artifactSchemas, ArtifactKind, ArtifactByKind"
+  },
+  {
+   "path": "/home/user/FloFi/packages/workflow-contracts/src/execution-plan.ts",
+   "role": "ExecutionPlan artifact: segments per chainId with steps of executionKind DIRECT_TRANSACTION(payloadHash) | SIGNED_INTENT(intentHash) (19-37). The only place a new execution kind (UserOperation, wallet_sendCalls batch, pre-signed tx, Solana signed tx) could be typed.",
+   "keySymbols": "ExecutionStepSchema, ExecutionPlanSchema"
+  },
+  {
+   "path": "/home/user/FloFi/packages/workflow-contracts/src/strategy-manifest.ts",
+   "role": "StrategyManifest artifact: owner, executor Account|null (16), authorizationMode, spendLimits/gasBudgets/feeBudgets, providers, recovery, enforcement (9-30).",
+   "keySymbols": "StrategyManifestSchema"
+  },
+  {
+   "path": "/home/user/FloFi/packages/workflow-contracts/src/authorization-policy.ts",
+   "role": "AuthorizationPolicy artifact with allowlists, budgetReservation (implementation NOT_IMPLEMENTED literal, 15-19), spendLimits, gasBudgets, feeBudgets, checkpointRules.",
+   "keySymbols": "AuthorizationPolicySchema"
+  },
+  {
+   "path": "/home/user/FloFi/packages/workflow-contracts/src/enforcement-matrix.ts",
+   "role": "EnforcementMatrix is pinned to the fork profile: authorizationMode MODE_A, executionChainId eip155:31337, sourceChainId eip155:8453, payloadProfile EVM_EIP1559_UNSIGNED_V1, chainId 31337, APPROVE|EXACT_INPUT_SINGLE arguments only (33-81).",
+   "keySymbols": "EnforcementMatrixSchema"
+  },
+  {
+   "path": "/home/user/FloFi/packages/workflow-contracts/src/quote-state.ts",
+   "role": "QuoteStateArtifact: chainPosition BLOCK|SLOT (16-19), outputBounds {expected, minimum, adverse} (34-39) — the only typed estimated/guaranteed representation; fees/gas quantities.",
+   "keySymbols": "QuoteStateArtifactSchema"
+  },
+  {
+   "path": "/home/user/FloFi/packages/workflow-contracts/src/state-transitions.ts",
+   "role": "Journal state tables at workflow/segment/step/attempt levels and assertTransition (1-75); attempt states include SUBMISSION_RESULT_UNKNOWN, PARTIALLY_FILLED, SETTLED, REFUND_PENDING.",
+   "keySymbols": "STATE_TRANSITIONS, INITIAL_STATES, assertTransition"
+  },
+  {
+   "path": "/home/user/FloFi/packages/workflow-contracts/src/workflow-order.ts",
+   "role": "Deterministic topological order over node.dependencies (6-19); array order and Canvas coordinates are not sequencing authority.",
+   "keySymbols": "workflowDependencyOrder, workflowOrder"
+  },
+  {
+   "path": "/home/user/FloFi/packages/workflow-contracts/src/revision.ts",
+   "role": "nextRevision optimistic-concurrency rule (8-17).",
+   "keySymbols": "nextRevision, RevisionConflictError"
+  },
+  {
+   "path": "/home/user/FloFi/packages/workflow-contracts/src/swap.ts",
+   "role": "Chain-neutral exact-input swap node (EVM Uniswap/CoW and Solana Jupiter/Orca share it): inputs amount-in QUANTITY + asset-out ASSET, expectedOutputs amount-out minimumAmount '0' (78), MAXIMUM_INPUT + MAXIMUM_SLIPPAGE_BPS constraints, editableBounds amount-in (67-85); closed reader (88-105).",
+   "keySymbols": "EXACT_INPUT_SWAP_ACTION, createExactInputSwapNode, readExactInputSwap"
+  },
+  {
+   "path": "/home/user/FloFi/packages/workflow-contracts/src/supply.ts",
+   "role": "Aave V3 supply node (actionType 'supply', adapter aave-v3, beneficiary ACCOUNT) and closed reader by re-creation (118-145); borrow.ts/repay.ts/withdraw.ts derive from it (withdraw refuses MAX uint 71; repay refuses MAX 92; withdraw recipient is IDENTIFIER CONNECTED_OWNER).",
+   "keySymbols": "createSupplyNode, readSupplyNode, createBorrowNode, createRepayNode, createWithdrawNode"
+  },
+  {
+   "path": "/home/user/FloFi/packages/workflow-contracts/src/native-transfer.ts",
+   "role": "asset.transfer action with adapters evm.native-transfer / evm.token-transfer; recipient IDENTIFIER CONNECTED_OWNER or ACCOUNT (30-37); closed readers (53-60, 71-79).",
+   "keySymbols": "TRANSFER_ACTION, createNativeTransferNode, createTokenTransferNode, readTransferNode"
+  },
+  {
+   "path": "/home/user/FloFi/packages/workflow-contracts/src/solana-transfer.ts",
+   "role": "Same asset.transfer action on Solana: adapters solana.system-transfer / solana.spl-transfer, native {nativeId:'SOL',decimals:9}, token-program IDENTIFIER port, u64 amount bound, explicit base58 recipient (34-44); closed reader (46-64).",
+   "keySymbols": "createSolanaTransferNode, readSolanaTransferNode, isSolanaTransferNode"
+  },
+  {
+   "path": "/home/user/FloFi/packages/workflow-contracts/src/liquidity.ts",
+   "role": "asset.liquidity.concentrated node (Uniswap v3 or Orca by protocol) with amount0/1 max/min, tick range, fee tier (47-82); bindConcentratedLiquidityNode adds the single OUTPUT_REFERENCE source port for the registered composition (116-131).",
+   "keySymbols": "createConcentratedLiquidityNode, readConcentratedLiquidity, bindConcentratedLiquidityNode, readConcentratedLiquiditySource"
+  },
+  {
+   "path": "/home/user/FloFi/packages/workflow-contracts/src/bridge.ts",
+   "role": "Legacy BUILD bridge constants (Base→Optimism) and bridge journal states (8-49).",
+   "keySymbols": "BRIDGE_ACTION, BridgeState, validateBridgeJournal"
+  },
+  {
+   "path": "/home/user/FloFi/packages/workflow-contracts/src/router.ts",
+   "role": "Certified Cross-chain Router (adapter flofi.router, fixed ROUTER_PAIRS): asset.bridge node with asset-out on the destination chain, recipient CONNECTED_OWNER|ACCOUNT (41-66), closed reader preserving older editable bounds (70-95); CanonicalRoute model with expectedOutput/minimumOutput (115-125), canonicalizeRoute (141-199), routeCommitment (201-203), compareRoutes REQUOTE|EXACT (216-247), providerFeeDrift (257-264), ROUTER_PHASES lifecycle (276-295).",
+   "keySymbols": "createRouterBridgeNode, readRouterBridgeNode, CanonicalRoute, routeCommitment, compareRoutes, ROUTER_PHASE_TRANSITIONS"
+  },
+  {
+   "path": "/home/user/FloFi/packages/workflow-contracts/src/universal-router.ts",
+   "role": "Universal router (adapter flofi.router.universal) across the five mainnets incl. Solana: UniversalAssetRef NATIVE|TOKEN (36), recipient CONNECTED_OWNER | CONNECTED_DESTINATION_WALLET | address (42, 76-83), route-selection IDENTIFIER port (89-90), u64/u256 ceilings (65); validateUniversalBridgeWorkflow forces an isolated single node (121-125); UniversalRoute with source EVM{approval,deposit} | SOLANA{instruction} (142-148), RELAY_V2 order (150-152), destination.additionalAuthorization 'NONE' (162); canonicalizeUniversalRoute (192-286), universalRouteCommitment (288-290), compareUniversalRoutes (302-346).",
+   "keySymbols": "createUniversalBridgeNode, readUniversalBridgeNode, validateUniversalBridgeWorkflow, UniversalRoute, canonicalizeUniversalRoute, compareUniversalRoutes"
+  },
+  {
+   "path": "/home/user/FloFi/packages/workflow-contracts/src/universal-router-networks.ts",
+   "role": "Identity of the five FloFi mainnets (solana, base, arbitrum-one, ethereum, robinhood) with ecosystem, native asset and provider chain ids (32-48); SOLANA_MAINNET (31); 20 directed pairs (53-54); base58/EVM canonical address helpers (69-103).",
+   "keySymbols": "UNIVERSAL_NETWORKS, universalNetworkOfChain, canonicalUniversalAddress, isSolanaPublicKey, UNIVERSAL_ROUTING_PROVIDERS"
+  },
+  {
+   "path": "/home/user/FloFi/packages/workflow-contracts/src/lending-composition.ts",
+   "role": "The one IR-level typed composition on the public contract: supply → borrow (expectedOutputs borrowed-amount) → swap whose amount-in is an OUTPUT_REFERENCE + resourceEdge (17-32); closed reader (33-46). Base Sepolia only.",
+   "keySymbols": "createLendingCompositionWorkflow, readLendingComposition, isLendingComposition"
+  },
+  {
+   "path": "/home/user/FloFi/packages/workflow-contracts/src/index.ts",
+   "role": "Package surface: hashArtifactBytes (32-35), hashJournalBytes, and re-exports of every action module (42-60).",
+   "keySymbols": "hashArtifactBytes, hashJournalBytes"
+  },
+  {
+   "path": "/home/user/FloFi/apps/reference-dapp/src/engine/strategy-engine.ts",
+   "role": "Server-safe deterministic facade: NETWORKS (61-66), isUniversalBridgeSpec (88-96), normalizeStrategy (121-199), build spec→Command (209-296), composeStrategy (311-326), composeBound (329-333), workflowSequenceHash (352-356), collapseLending (359-367), composeWorkflow v2 step list + bindings (368-389), reviewComposition (411-442).",
+   "keySymbols": "composeStrategy, composeWorkflow, composeWorkflowBound, workflowSequenceHash, semanticWorkflowHash, reviewComposition, Composition, WorkflowComposition"
+  },
+  {
+   "path": "/home/user/FloFi/apps/reference-dapp/src/engine/strategy-spec.ts",
+   "role": "Typed StrategySpec contract: NETWORK_IDS/TEST_NETWORK_IDS/PUBLIC_NETWORK_IDS (18-26), STRATEGY_ACTIONS (27-30), per-action branches (54-130), v2 StrategyWorkflow + WorkflowBindingSchema {step, amountFrom} (140-161), PUBLIC_* mainnet-only branches (169-241), Ajv issue reporting (243-291).",
+   "keySymbols": "StrategySpecSchema, StrategyWorkflowSchema, WorkflowBindingSchema, PublicStrategyInputSchema, isStrategySpec, isStrategyWorkflow, strategyRequiredFields"
+  },
+  {
+   "path": "/home/user/FloFi/apps/reference-dapp/src/engine/workflow-bindings.ts",
+   "role": "Typed inter-step amount bindings: CONSUMERS/PRODUCERS (32-33), identity() with native ETH/SOL marker addresses (35-40), stepInputs/stepOutput read MAXIMUM_INPUT and asset-out from each step's IR (45-81), validateBindings exact-identity (86-107), boundAmount=min(cap,received) (113-117), boundStrategy rewrites the consumer's decimal amount (125-132).",
+   "keySymbols": "validateBindings, canonicalBindings, boundAmount, boundStrategy, decimalOf, WorkflowBinding"
+  },
+  {
+   "path": "/home/user/FloFi/apps/reference-dapp/src/engine/capability-catalog.ts",
+   "role": "Discovery derived from registries: NETWORK_CHAINS (24-30), strategyInScope (33-34), supportedNetworks by scope (45-48), supportedAssets (91-101), codeCapabilities composes each STRATEGY_EXAMPLE and resolves the registry on the real IR (117-133).",
+   "keySymbols": "codeCapabilities, supportedNetworks, supportedAssets, NETWORK_CHAINS, strategyInScope"
+  },
+  {
+   "path": "/home/user/FloFi/apps/reference-dapp/src/engine/certification-matrix.ts",
+   "role": "network×action×protocol×channel certification: rows per example with flow (strategyFlow), web runtime (selectOwnerRuntime), channels, ledger evidence, status (134-154); hand-listed OTHER_ROWS incl. 'sequence-delegated-single-authorization' claiming no production delegated signer (124-127) and 'bridge-evm-solana' = BRIDGE_ROUTE_UNAVAILABLE (128-131).",
+   "keySymbols": "certificationMatrix, CertificationRow, OTHER_ROWS"
+  },
+  {
+   "path": "/home/user/FloFi/apps/reference-dapp/src/engine/mainnet-product-matrix.ts",
+   "role": "Public matrix: mainnet rows, per-step rows forced REAL_FUNDS, test-network rows retired read-only (26-37).",
+   "keySymbols": "mainnetProductMatrix"
+  },
+  {
+   "path": "/home/user/FloFi/apps/reference-dapp/src/engine/strategy-examples.ts",
+   "role": "One composable example per action × network (75-138); drives capability-catalog and certification-matrix.",
+   "keySymbols": "STRATEGY_EXAMPLES"
+  },
+  {
+   "path": "/home/user/FloFi/apps/reference-dapp/src/domain/workflow-sequence.ts",
+   "role": "Canvas-side multi-step execution model: stepAssets (62-75), sequenceOrder via workflowDependencyOrder (77-80), stepProjection to a one-node workflow (82-84), compositionWorkflow excludes any resourceEdges (86-89), workflowSequence derives funding by exact asset identity (94-114), SEQUENCE_RUNTIMES/DELIVERY_READABLE (119-121), boundAmount/availableFunding (139-158), boundProjection re-authors the amount through the card command (164-192), deliveredByRecord per runtime record (195-224).",
+   "keySymbols": "workflowSequence, boundAmount, boundProjection, deliveredByRecord, compositionWorkflow, stepProjection"
+  },
+  {
+   "path": "/home/user/FloFi/apps/reference-dapp/src/domain/editor.ts",
+   "role": "Canvas reducer: CONNECT adds an ordering `dependencies` edge, or an OUTPUT_REFERENCE+resourceEdge only for mock links or a registered composition pair (298-331); DISCONNECT (332-338); removal rules (430-435).",
+   "keySymbols": "editorReducer, initialEditor"
+  },
+  {
+   "path": "/home/user/FloFi/apps/reference-dapp/src/domain/workflow-steps.ts",
+   "role": "Typed read-only step descriptions from the IR through each *Details reader (62-134); StepKind/StepDetail union (24-52).",
+   "keySymbols": "workflowSteps, WorkflowStep, StepDetail"
+  },
+  {
+   "path": "/home/user/FloFi/packages/action-registry/src/execution-capabilities.ts",
+   "role": "Execution capability registry: environments/dimensions/evidence (11-15), blocker codes (16-20), registry rows per action×adapter×chain×environment (60-156; MAINNET rows for Base/Arbitrum/Ethereum/Robinhood/Solana), selectedAdapter (175-195), resolveNodeCapability (204-230), resolveWorkflowCapability incl. Solana COMPOSITION_UNSUPPORTED for any multi-node Solana workflow outside the registered Devnet composition (232-276).",
+   "keySymbols": "executionCapabilityRegistry, resolveNodeCapability, resolveWorkflowCapability, CapabilityBlockerCode"
+  },
+  {
+   "path": "/home/user/FloFi/packages/action-registry/src/composition-bindings.ts",
+   "role": "Registry of IR-typed bound compositions: only SOLANA_DEVNET_SWAP_LIQUIDITY (25-31); readBoundComposition closed-shape check (67-85).",
+   "keySymbols": "COMPOSITION_BINDINGS, compositionBindingFor, readBoundComposition, isBoundComposition"
+  },
+  {
+   "path": "/home/user/FloFi/packages/reference-linter/src/validation.ts",
+   "role": "Authoring linter dispatch (100-112) and graph rules: resource edges touching swaps/liquidity fail SWAP_EDGE_UNSUPPORTED (191, 200); OUTPUT_REFERENCE must match edges/dependencies (192-203).",
+   "keySymbols": "validateAuthoringWorkflow"
+  },
+  {
+   "path": "/home/user/FloFi/packages/reference-linter/src/workflow-draft.ts",
+   "role": "Draft validation: ordering-only dependencies are allowed by validating each node alone; a single typed link must be a registered bound composition (12-35).",
+   "keySymbols": "validateWorkflowDraft"
+  },
+  {
+   "path": "/home/user/FloFi/apps/reference-dapp/src/platform/strategy.ts",
+   "role": "Shared compose/validate/review for MCP, Developer API, channels; refuses TEST_NETWORK_NOT_AVAILABLE in PUBLIC_MAINNET scope (18-38, 55-63); reviewWorkflow per step (68-73).",
+   "keySymbols": "composeWorkflowOrRefuse, composeSingleStep, validateStrategy, reviewWorkflow, strategyTestNetworks"
+  },
+  {
+   "path": "/home/user/FloFi/apps/reference-dapp/src/domain/network-scope.ts",
+   "role": "Mainnet-only policy shared by every surface: scopeOfEnv (26-29), activeNetworkScope (36-41), isTestNetwork (57-59), introducedTestNetworks (90-94), workflowAllowed (96), mainnetCounterpart (98-101).",
+   "keySymbols": "NetworkScope, scopeOfEnv, workflowAllowed, introducedTestNetworks, TEST_NETWORK_NOT_AVAILABLE"
+  },
+  {
+   "path": "/home/user/FloFi/apps/reference-dapp/src/server/network-scope.ts",
+   "role": "Server scope: ENGINEERING only on a non-hosted server with FLOFI_NETWORK_SCOPE=ENGINEERING_TESTNETS (13-15).",
+   "keySymbols": "networkScope"
+  },
+  {
+   "path": "/home/user/FloFi/apps/reference-dapp/src/mcp/execution.ts",
+   "role": "Chat-side ExecutionPlan (flow-based, distinct from the v1 artifact): PlanStep/ExecutionPlan kinds SINGLE_FLOW|COMPOSITE_FLOW|SEQUENTIAL|NOT_EXECUTABLE (84-97), executionPlan (104-119), workflowPlan (128-135), Gates (140-148), policyGate (151-162), evaluateGates (165+).",
+   "keySymbols": "executionPlan, workflowPlan, evaluateGates, Gates, HandoffPolicy"
+  },
+  {
+   "path": "/home/user/FloFi/apps/reference-dapp/src/mcp/simulation.ts",
+   "role": "previewPlan maps a spec to its backend flow and simulation subject EVM|SOLANA|NONE (26-65); strategyFlow (67+).",
+   "keySymbols": "previewPlan, strategyFlow"
+  },
+  {
+   "path": "/home/user/FloFi/apps/reference-dapp/src/workflow-runs/authorization-plan.ts",
+   "role": "Counts authorizations per mode before execution: CONFIRM_EACH_STEP walletConfirmationsAtLeast=steps.length (116), DELEGATED walletSignatures=max(1, EVM chains) with EIP-7702 enrollment active:null (88-91, 117), refuses Solana / cross-chain or non-swap/borrow bindings / steep slippage / >16 calls per chain (94-106), bindings labelled RECONCILED_RECEIVED_AMOUNT vs SIGNED_GUARANTEED_MINIMUM (44-46, 107-108).",
+   "keySymbols": "authorizationPlan, delegableByCode, AuthorizationPlan"
+  },
+  {
+   "path": "/home/user/FloFi/apps/reference-dapp/src/workflow-runs/runner.ts",
+   "role": "Sequential run: re-composes step k bound to run.workflowHash (91), requires k-1 RECONCILED (93), resolves bindings from producer.outcome.received minus earlier consumers' reserved/spent (97-122), re-composes the step alone and re-checks gates (126-130), then READY→AWAITING_OWNER→RECONCILED via observeOwnerStep (141-163); delegated mirror (194-220).",
+   "keySymbols": "advanceRun, confirmPass, delegatedPass, resolvedStrategy"
+  },
+  {
+   "path": "/home/user/FloFi/apps/reference-dapp/src/workflow-runs/pg-store.ts",
+   "role": "Durable run facts: BoundResolution {amountFrom, asset, cap, received, used, additional} (21-23), StepOutcome spent/received (25-29).",
+   "keySymbols": "BoundResolution, StepOutcome, RunRecord, RunStepRecord"
+  },
+  {
+   "path": "/home/user/FloFi/apps/reference-dapp/src/workflow-runs/state-machine.ts",
+   "role": "Run/step state machines and RUN_MODES CONFIRM_EACH_STEP|DELEGATED (17-40).",
+   "keySymbols": "RUN_STATES, STEP_STATES, RUN_MODES"
+  },
+  {
+   "path": "/home/user/FloFi/apps/reference-dapp/src/delegation/steps.ts",
+   "role": "StepRequirement derived from each step's IR (MAXIMUM_INPUT → inputs, ASSET inputs → outputs, chain/namespace) (20-68); narrowedStep (80-84); requirementOf (92-101).",
+   "keySymbols": "requirementOf, workflowRequirement, StepRequirement, assetKey"
+  },
+  {
+   "path": "/home/user/FloFi/apps/reference-dapp/src/delegation/capabilities.ts",
+   "role": "Delegation mechanisms EVM_ERC7710_METAMASK_V1_3 | SOLANA_SPL_DELEGATE_V1 (15), stepCapability: bridges refused, Robinhood framework not deployed, Aave supply/borrow and USDC/WETH Uniswap swaps only, Solana only in MOCKED_HARNESS (41-80).",
+   "keySymbols": "stepCapability, MECHANISMS, TemplateNeed"
+  },
+  {
+   "path": "/home/user/FloFi/apps/reference-dapp/src/delegation/workflow-grants.ts",
+   "role": "One EIP-712 workflow grant per EVM chain compiled from the requirement (50-53); bindings use the producer's on-chain guaranteed output, cross-chain refused (12-14).",
+   "keySymbols": "compileScope, pinnedCall, pinnedGroup, planWorkflowGrants"
+  },
+  {
+   "path": "/home/user/FloFi/apps/reference-dapp/src/delegation/drivers.ts",
+   "role": "Executor signs EIP-1559 redeemDelegations txs from ctx.grant.sessionAddress (the KMS session signer) with its own gas (98-125) — the gas-paying executor objective A must remove.",
+   "keySymbols": "signEvmCalls"
+  },
+  {
+   "path": "/home/user/FloFi/apps/reference-dapp/src/delegation/executor.ts",
+   "role": "Delegated bound-amount resolution: pinned exact amounts never narrowed (469-475) else min(cap, available) (476-479).",
+   "keySymbols": "(bound step resolution at 455-480)"
+  },
+  {
+   "path": "/home/user/FloFi/packages/reference-compiler/src/policy.ts",
+   "role": "CompileContext for the fork Uniswap swap chain (6-15) and compilePolicy with spendLimits/gasBudgets/feeBudgets (31-60); manifest.ts compiles StrategyManifest with executor: null (11-20); execution-plan.ts emits a single fork segment with approve+swap DIRECT_TRANSACTION steps (7-22).",
+   "keySymbols": "CompileContext, compilePolicy, compileManifest, compileExecutionPlan"
+  },
+  {
+   "path": "/home/user/FloFi/packages/reference-compiler/src/universal-artifacts.ts",
+   "role": "Universal bridge artifact chain from one isolated node + reviewed UniversalRoute: payload hashes for EVM calls or the Solana message hash (45-47), quote with outputBounds expected/minimum/adverse (74-75), uncertainty CROSS_CHAIN_SETTLEMENT_NOT_SIMULATED (50-51).",
+   "keySymbols": "compileUniversalArtifacts, UniversalArtifactInput, UniversalSourcePayload"
+  },
+  {
+   "path": "/home/user/FloFi/packages/reference-compiler/src/crosschain-router.ts",
+   "role": "Certified router artifact chain (254-300+): quote/artifact-set/simulation with propagatedOutputs [] and failurePaths residual input.",
+   "keySymbols": "compileRouterArtifacts"
+  },
+  {
+   "path": "/home/user/FloFi/packages/reference-compiler/src/index.ts",
+   "role": "Compiler surface; lines 84-85 (uncommitted) export the new erc4337 and eip5792 namespaces; untracked src/eip5792.ts and src/erc4337.ts carry BUILD-FLOFI-UNIVERSAL-WORKFLOW-002 headers.",
+   "keySymbols": "erc7710, erc4337, eip5792, splDelegation"
+  }
+ ],
+ "flows": [
+  "Chat/MCP single-step composition: composeStrategy(input) (strategy-engine.ts:311) → isStrategySpec Ajv (strategy-spec.ts:264) → normalizeStrategy applies defaults/symbol canonicalisation (strategy-engine.ts:121-199) → build(spec) picks the Canvas Command (ADD_UNIVERSAL_BRIDGE / ADD_ROUTER_BRIDGE / ADD_SWAP / ADD_SOLANA_SWAP / ADD_SUPPLY … / ADD_RH_TRANSFER) and runs the authoring `check` first for exact refusal codes (209-296) → editorReducer(initialEditor(), command, dappReviewContext()) (319) → Workflow revision 1 → semanticWorkflowHash = hashArtifactBytes('semantic-workflow', JSON) (56-58) → workflowSteps/describeProposal/summarize (321-324) → Composition {strategy, command, workflow, workflowHash, steps, fundsClass}.",
+  "Chat/MCP multi-step (v2) composition: composeWorkflow (strategy-engine.ts:368) → isStrategyInput → if bindings present never collapse, else collapseLending to Base Sepolia lending_composition (359-367, 372-373) → composeStrategy per step (375-379) → validateBindings against each step's own IR: consumer MAXIMUM_INPUT asset == producer asset-out/withdrawn asset by chainId+address+decimals (workflow-bindings.ts:86-107) → workflowSequenceHash = sha256(JSON.stringify({contract:'flofi-strategy-workflow',version:2,steps:[hashes],bindings?})) (352-356) → WorkflowComposition {steps: Composition[], bindings, workflowHash}. No single SemanticWorkflow is produced for the sequence.",
+  "Canvas composition: editorReducer CONNECT (domain/editor.ts:298-331): same-kind check (302), cycle check (311-317); a registered composition pair (compositionBindingFor, composition-bindings.ts:48-56) is bound typed via bindCompositionConsumer + resourceEdge (324-331); any other financial link becomes an ordering `dependencies` entry only (326). validateWorkflowDraft then validates each node alone (reference-linter/src/workflow-draft.ts:29-32). Execution: workflowSequence (workflow-sequence.ts:94-114) orders by workflowDependencyOrder, lints each one-node projection (82-84, 100), derives `fundedBy` by exact asset identity (103-109); at run time boundAmount(step, completed) = min(authored, delivered − earlier allocations) (139-158) and boundProjection re-authors the amount through canvasAmountCommand (164-192); delivered amounts are read from each runtime's reconciled record by kind (195-224).",
+  "Hashing/canonical form: hashArtifactBytes(kind, bytes) (workflow-contracts/src/index.ts:32-35) → parseArtifactBytes raw ingress → hashArtifactValue → projectArtifact: validateArtifact then sort nodes by nodeId, edges by JSON, node arrays by name (canonical.ts:157-212) → select HASH_FIELDS (71-81) → canonicalJson (JCS) → hashPreimage 'DWE-HASH' + version byte + domain + length (127-142) → sha256 (144-146).",
+  "Schema/semantic validation of a workflow: validateArtifact('semantic-workflow') (schemas.ts:311-353) → Ajv closed objects → checkSharedInvariants (uint256 bounds, asset decimals consistency, min≤max) (254-309) → checkWorkflow: unique ids, acyclic dependencies, locked/editable parameter consistency, OUTPUT_REFERENCE must reference an existing expectedOutput and declare the dependency (127-136), expectedOutput chain may differ from node chain only for router/universal/legacy bridge nodes (137-159), each resourceEdge must match an OUTPUT_REFERENCE input (161-177).",
+  "Capability discovery: codeCapabilities(scope) (capability-catalog.ts:117-133) → for each STRATEGY_EXAMPLE composeStrategy → resolveWorkflowCapability(workflow, {environment: NETWORKS[network].environment}) (execution-capabilities.ts:232-276) → per node resolveNodeCapability: definedActions (45) → selectedAdapter (175-195) → registry row match by actionType/adapter/chain/environment (211-218) → blockers → executionSupported requires every financial node EXECUTE and no COMPOSITION_UNSUPPORTED (246-252) → CodeCapability {supportedByCode, ownerWalletExecutionImplemented, demonstratedEvidence, registryEnvironments} → certificationMatrix joins strategyFlow (mcp/simulation.ts:67), selectOwnerRuntime, agentRolloutAllows and ledger/live-verification JSON (certification-matrix.ts:136-154) → mainnetProductMatrix splits rows/perStepRows/retired by networkIdentity environment (mainnet-product-matrix.ts:26-37) → both written to docs/builds/*.json and compared byte-for-byte in tests.",
+  "Deterministic review: reviewComposition (strategy-engine.ts:411-442) → lintWorkflow findings → resolveWorkflowCapability blockers mapped to BLOCK unless an owner-step code (405, 418-421) → strategy warnings REAL_FUNDS / EXPLICIT_RECIPIENT / BENEFICIARY_MUST_BE_SIGNER / DEBT_REMAINS → always OWNER_APPROVAL_REQUIRED information.",
+  "Mainnet-only gate: public schemas only list mainnets (strategy-spec.ts:169-241) → composeWorkflowOrRefuse/validateStrategy compute strategyTestNetworks over every step's network/sourceNetwork/destinationNetwork and refuse TEST_NETWORK_NOT_AVAILABLE with mainnetOnly issues unless scope is ENGINEERING (platform/strategy.ts:18-38, 55-63) → networkScope reads env, hosted deployments always PUBLIC_MAINNET (server/network-scope.ts:13-15) → the Canvas editor refuses proposals that introduce test networks via introducedTestNetworks (domain/network-scope.ts:90-94; call site in editor not read) → discovery lists mainnets only (capability-catalog.ts:44-48).",
+  "Chat execution planning and run: executionPlan(composition) picks the backend flow per step (mcp/execution.ts:104-119) → workflowPlan marks a step list SEQUENTIAL or NOT_EXECUTABLE (128-135) → evaluateGates (supportedByCode/enabledByDeployment/enabledByPolicy/handoff, 165+) → authorizationPlan computes confirm-each-step vs delegated counts and reasons (authorization-plan.ts:63-121) → workflow run advanceRun (runner.ts:53-60): step k PENDING → re-compose bound to run.workflowHash (91) → bindings resolved from producer.outcome.received per assetKey minus earlier consumers' reserved/spent (97-122) → boundStrategy → compose alone, evaluateGates + handoffFindings (126-130) → READY with {flow, strategy, workflowHash, bound} (133-134) → owner opens /approve → AWAITING_OWNER → observeOwnerStep verdict RECONCILED/FAILED/UNCERTAIN (144-162) → afterReconciled advances or COMPLETED (170-176).",
+  "Delegated (single-authorization) run today: requirementOf reads each step's IR into StepRequirement (delegation/steps.ts:44-68) → stepCapability per step (capabilities.ts:41-80) → planWorkflowGrants / compileScope → erc7710.compileWorkflowGrant per EVM chain, owner signs EIP-712 (workflow-grants.ts:50-53) → executor resolves bound step: pinned exact amount from the signed grant (executor.ts:471-475) or min(cap, available) (476-479) → signEvmCalls builds EIP-1559 redeemDelegations transactions from the grant's session signer address with eth_estimateGas-derived gasLimit and the signer's own nonce (drivers.ts:98-125) — the executor EOA is the gas payer.",
+  "Compiler consumption: every compiler reads one isolated canonical node through its closed reader and refuses graphs: universal bridge validateUniversalBridgeWorkflow (universal-router.ts:121-125) → compileUniversalArtifacts(workflow, route, payload) (universal-artifacts.ts:38+); certified router (reference-linter crosschain-router.ts:10 ROUTER_ISOLATED_ONLY) → compileRouterArtifacts (crosschain-router.ts:254+); Aave supply/borrow/repay/withdraw compileXCalls require a single node with no edges (supply.ts:169-175, borrow.ts:187-189, repay.ts:31-33, withdraw.ts:52-54); native/Solana transfers (native-transfer.ts:118/97, solana-transfer.ts:32-35); CoW (cow.ts:105-116); the fork Uniswap chain uses a hand-built CompileContext (policy.ts:6-15) → compilePolicy → compileManifest (executor:null) → compileExecutionPlan (one segment, approve+swap DIRECT_TRANSACTION) → compileEnforcementMatrix. Only lending-composition (compileLendingCalls lending-composition.ts:104) and the Solana Devnet composition (solana-composition.ts) consume a multi-node IR."
+ ],
+ "extensionPoints": [
+  "New action kind: add create/read pair in packages/workflow-contracts/src (closed-declaration pattern, e.g. solana-transfer.ts:34-64), export in index.ts:42-60, add registry rows via add(...) and definedActions/adapterVersions/selectedAdapter (action-registry/src/execution-capabilities.ts:45-59, 175-195), add a StrategySpec branch to BRANCHES and PUBLIC_BRANCHES (strategy-spec.ts:127-130, 221-223), extend normalizeStrategy and build switches (strategy-engine.ts:121-199, 209-296), add a STRATEGY_EXAMPLES row (strategy-examples.ts), a describe() reader in workflow-steps.ts:62-120, a previewPlan flow (mcp/simulation.ts:26-65) and a linter dispatch branch (reference-linter/src/validation.ts:100-112).",
+  "Parameter and constraint vocabularies: ParameterSchema union (common.ts:123-159) and ConstraintSchema (166-179) are the places to add e.g. a percentage / balance-fraction / previous-output amount kind; OutputSchema (161-165) is where expected vs guaranteed amounts would be typed; any change alters hashes because HASH_FIELDS and schemaVersion '1.0.0' are frozen (canonical.ts:71-81, common.ts:15-24) and the committed schemas/v1/*.schema.json + tests/compatibility/v1/*.json must move with it.",
+  "Dependent amounts in the IR: OUTPUT_REFERENCE + resourceEdges (schemas.ts:127-136, 161-177) with linter gates in validation.ts:187-203 and workflow-draft.ts:16-28; registered compositions in COMPOSITION_BINDINGS (composition-bindings.ts:31) and the Canvas CONNECT hook compositionBindingFor (editor.ts:324); runtime isolation checks `*_ISOLATED_ONLY` in each compiler/linter would need relaxing per action.",
+  "Dependent amounts outside the IR: CONSUMERS/PRODUCERS sets and identity() (workflow-bindings.ts:32-40), validateBindings (86-107), boundStrategy (125-132), WorkflowBindingSchema (strategy-spec.ts:145-149); Canvas counterparts stepAssets (workflow-sequence.ts:62-75), DELIVERY_READABLE/deliveredByRecord (119-121, 195-224); run resolution runner.ts:97-122 and executor.ts:455-480; BoundResolution/StepOutcome shapes (workflow-runs/pg-store.ts:21-29).",
+  "Execution kinds and segments: ExecutionStepSchema union DIRECT_TRANSACTION|SIGNED_INTENT and per-chain segments (execution-plan.ts:7-37) and ExecutionKindSchema (common.ts:76-79) — add USER_OPERATION / WALLET_CALL_BATCH / PRESIGNED_TRANSACTION / SOLANA_SIGNED_TRANSACTION kinds here; StrategyManifest.executor Account|null and authorizationMode (strategy-manifest.ts:16-17) — add a gas-payer/authorization-strategy field here; AuthorizationPolicy.gasBudgets (authorization-policy.ts:19).",
+  "Authorization strategy and counting: AuthorizationPlan type and mode reasons (authorization-plan.ts:33-48, 104-108, 115-121), RUN_MODES (workflow-runs/state-machine.ts:21-22), delegation MECHANISMS and stepCapability (delegation/capabilities.ts:15, 41-80), workflow-grants plan (workflow-grants.ts:95), drivers signEvmCalls (drivers.ts:98-125) — the KMS gas-payer gate belongs here.",
+  "New wallet-funded codecs already staged: packages/reference-compiler/src/eip5792.ts (sendCallsRequest 25-30, atomicRequired, no paymaster) and erc4337.ts (ENTRY_POINT_V0_7, account-domain EIP-712 digest), exported at index.ts:84-85 (uncommitted); nothing in workflow-contracts/engine consumes them yet.",
+  "Capability honesty surfaces: executionCapabilityRegistry rows (execution-capabilities.ts:60-156), certification OTHER_ROWS (certification-matrix.ts:98-132), docs/builds/*CERTIFICATION-MATRIX.json and *CAPABILITY-MATRIX.json regenerated with FLOFI_WRITE_CERTIFICATION_MATRIX=1 / FLOFI_WRITE_MAINNET_MATRIX=1 (tests at certification-matrix.test.ts:206-211, mainnet-product-matrix.test.ts:160-166).",
+  "Mainnet-only: PUBLIC_NETWORK_IDS/TEST_NETWORK_IDS (strategy-spec.ts:24-26), PUBLIC_* schema branches (169-241), scopeOfEnv/networkScope (domain/network-scope.ts:26-29, server/network-scope.ts:13-15), strategyTestNetworks (platform/strategy.ts:18-29).",
+  "Universal networks: UNIVERSAL_NETWORKS / UNIVERSAL_DIRECTED_PAIRS / UNIVERSAL_ROUTING_PROVIDERS (universal-router-networks.ts:11-54) and the NETWORK_IDS ↔ chain map NETWORK_CHAINS (capability-catalog.ts:24-30)."
+ ],
+ "dataModel": [
+  "SemanticWorkflow v1 (packages/workflow-contracts/src/semantic-workflow.ts:9-44; JSON schema packages/workflow-contracts/schemas/v1/semantic-workflow.schema.json; fixture tests/compatibility/v1/semantic-workflow.json): {schemaVersion:'1.0.0', workflowId, revision, nodes[], resourceEdges[]}; node.inputs: Parameter = QUANTITY{asset,amount}|ACCOUNT|ASSET|IDENTIFIER|INTEGER|BOOLEAN|OUTPUT_REFERENCE{nodeId,outputId} (common.ts:123-159); expectedOutputs {outputId, asset, minimumAmount} (161-165); userConstraints MAXIMUM_INPUT|MINIMUM_OUTPUT|MAXIMUM_SLIPPAGE_BPS (166-179); requiredAuthorizationClass NONE|MODE_A|MODE_B|MODE_C (70-75).",
+  "Asset = {chainId, address, decimals} | {chainId, nativeId, decimals} (common.ts:82-93); ChainIdSchema CAIP-2 pattern accepting eip155:* and solana:* (35); amounts are NativeUnitsSchema decimal strings ≤78 chars (50-57), checked ≤ uint256 (schemas.ts:262-263); Solana amounts additionally ≤ u64 in solana-transfer.ts:20-27 and universal-router.ts:27,65.",
+  "Action kinds in the IR (actionType / adapter / protocols): asset.swap.exact-input (uniswap | cow-protocol | jupiter | orca-whirlpools | weth9; catalog swaps catalog-swap.ts:13-41), supply|borrow|repay|withdraw (aave-v3), asset.transfer (evm.native-transfer | evm.token-transfer | solana.system-transfer | solana.spl-transfer), asset.bridge (flofi.router with ROUTER_PAIRS | flofi.router.universal over 5 mainnets | legacy lifi.rest/across.direct), asset.liquidity.concentrated (uniswap-v3 | orca-whirlpools) and legacy asset.liquidity.uniswap-v3 / asset.liquidity.prepare, mock-* templates (execution-capabilities.ts:44-45). Per-network MAINNET rows: Base (swap, liquidity, transfer, aave supply/borrow/repay/withdraw, router, universal, weth9), Arbitrum One (swap, transfer, liquidity, aave, router, universal, weth9), Ethereum (swap, transfer, router, liquidity, aave, universal, weth9), Robinhood 4663 (swap, liquidity, transfer, router, universal, weth9; no Aave), Solana mainnet (jupiter swap, system/spl transfer, orca liquidity, universal bridge) (execution-capabilities.ts:81-156).",
+  "Amount semantics on a node: authored exact `amount` (QUANTITY) duplicated as MAXIMUM_INPUT cap; editableBounds min/max (swap.ts:83, router.ts:65, universal-router.ts:94); expectedOutputs.minimumAmount '0' everywhere except lending borrow 'borrowed-amount' = borrowAmount (lending-composition.ts:26). Estimated/guaranteed: CanonicalRoute.expectedOutput/minimumOutput (router.ts:118), UniversalRoute.expectedOutput/minimumOutput with minimum ≥ expected×(1−slippage) (universal-router.ts:157, 204), QuoteStateArtifact.outputBounds {expected, minimum, adverse} (quote-state.ts:34-39), SimulationBundle.outputs + propagatedOutputs + failurePaths.residualAssets (simulation.ts:15-33). Actual: EvidenceBundle.outcome CONFIRMED_NOT_RECONCILED|RECONCILED|INCONCLUSIVE|DIVERGENT and reconciliation.balances/differences (evidence-bundle.ts:100-112); workflow-run StepOutcome.spent/received [{asset: assetKey, amount}] (workflow-runs/pg-store.ts:25-29) and BoundResolution {cap, received, used, additional?} (21-23).",
+  "StrategySpec v1 / StrategyWorkflow v2 (apps/reference-dapp/src/engine/strategy-spec.ts:54-161): decimal-string amounts (37), NETWORK_IDS incl. test ids (18), bridge sourceNetwork/destinationNetwork/asset/outputAsset/routing/slippageBps/recipient (54-68), transfer with Solana decimals/tokenProgram (115-126), v2 {version:2, steps[1..8], bindings?[{step 1..7, amountFrom 0..6}]} (140-157); public mirror PublicStrategyInputSchema (240-241).",
+  "WorkflowBinding (workflow-bindings.ts:23-28): {step, amountFrom, asset:{chainId,address,decimals}, cap (native units), inputAsset? (liquidity maxAmounts key)}; native ETH keyed 0xeeee…, native SOL keyed by the wrapped-SOL mint (35-40).",
+  "Canvas SequenceStep (domain/workflow-sequence.ts:31-48): {index, nodeId, chainId, input{asset,amount}|null, output|null, ownerReceives, fundedBy|null, funding[], projection: one-node Workflow}; CompletedStep {nodeId, node (JSON key), received|null, runKey, kind, owner, allocations[]}.",
+  "ExecutionPlan v1 artifact (execution-plan.ts:7-37): segments[{segmentId, chainId, dependencies, steps[{stepId,nodeId,chainId,adapter,dependencies,requiredAuthorizationClass, executionKind DIRECT_TRANSACTION payloadHash | SIGNED_INTENT intentHash}]}], checkpointIds, enforcement 'NOT_ENFORCED'; chat-side ExecutionPlan (mcp/execution.ts:95-97) is a different flow-based type {kind SINGLE_FLOW|COMPOSITE_FLOW|SEQUENTIAL|NOT_EXECUTABLE, flow, steps: PlanStep[], networks, fundsClass}.",
+  "StrategyManifest (strategy-manifest.ts:9-30): {semanticWorkflowHash, artifactSetHash, simulationHash, policyHash, authorizationMode, owner: Account, executor: Account|null, expiresAt, nonce, spendLimits, maximumSlippageBps, gasBudgets, feeBudgets, providers FIXED|AUTHORIZED_SET, recovery, enforcement}; AuthorizationPolicy (authorization-policy.ts) adds allowlists, budgetReservation (implementation 'NOT_IMPLEMENTED' literal), oracle/accountRisk/checkpoint rules.",
+  "EnforcementMatrix (enforcement-matrix.ts:33-81): fixed to evidenceEnvironment FORK_REPRODUCED, executionChainId eip155:31337, sourceChainId eip155:8453, payloads EVM_EIP1559_UNSIGNED_V1 chainId 31337 with APPROVE|EXACT_INPUT_SINGLE arguments, limit locations EXACT_SIGNED_PAYLOAD|APPLICATION_GATEWAY|INTENT_PROTOCOL|SMART_ACCOUNT_MODULE_OR_GUARD|PROTOCOL_VERIFIER|MONITOR_ONLY|NOT_ENFORCED.",
+  "Journal/state: ExecutionJournal entries at workflow|segment|step|attempt levels with RuntimeStateSchema (execution-journal.ts:7-37; state-transitions.ts:3-75); router phases (router.ts:276-295); legacy bridge states (bridge.ts:8-13); workflow-run RUN_STATES/STEP_STATES/RUN_MODES (workflow-runs/state-machine.ts:17-22, mirrored by migration 0015 triggers per its header; migration not read).",
+  "Universal network identity (universal-router-networks.ts:23-48): key, chain, ecosystem EVM|SOLANA, evmChainId|null, native {nativeId ETH|SOL, decimals}, provider ids (relay/lifi/mayan/across); UNIVERSAL_QUOTE_SUBJECTS public read-only addresses (64)."
+ ],
+ "gaps": [
+  "(A) No gas-payer / authorization-strategy concept in the canonical artifacts: StrategyManifest.executor is Account|null and compileManifest hard-codes executor:null (strategy-manifest.ts:16, reference-compiler/src/manifest.ts:15); ExecutionPlan steps know only DIRECT_TRANSACTION|SIGNED_INTENT (execution-plan.ts:19-30), so a user-signed ERC-4337 UserOperation, an EIP-5792 wallet_sendCalls batch, a pre-signed exact transaction or a Solana signAllTransactions group cannot be expressed as a planned step; EnforcementMatrix is fixed to the fork/EIP-1559 profile (enforcement-matrix.ts:34-61).",
+  "(A) The delegated path's gas payer is the KMS session signer: drivers.ts:98-125 builds EIP-1559 `redeemDelegations` transactions from ctx.grant.sessionAddress with its own nonce/gas; authorization-plan.ts:110 states only that 'every step … pays its own network fees' without saying who; there is no IR/plan field or test asserting the owner account is the sender. The new eip5792.ts/erc4337.ts codecs (untracked) are not yet wired into capabilities.ts MECHANISMS (15), authorizationPlan modes (authorization-plan.ts:33-48) or RUN_MODES (state-machine.ts:21-22).",
+  "(A/honesty) certification-matrix OTHER_ROWS 'sequence-delegated-single-authorization' still says 'Production has no delegated signer provider (KMS/HSM)' (certification-matrix.ts:124-127) although the AWS KMS executor signer landed (git cd7508d, PR #163/#166); 'bridge-evm-solana' claims BRIDGE_ROUTE_UNAVAILABLE (128-131) although the universal router registers Solana mainnet rows (execution-capabilities.ts:155-156) and composes EVM→Solana (universal-bridge.test.ts:30-35). Both committed matrix JSONs will need regeneration.",
+  "(B) No single canonical multi-step workflow shared by Chat and Canvas: composeWorkflow yields N isolated single-node IRs plus a separate sequence hash computed with JSON.stringify over step hashes + bindings (strategy-engine.ts:352-356, 368-389), while the Canvas holds one SemanticWorkflow with ordering `dependencies` (editor.ts:326) hashed by semanticWorkflowHash (56-58) and derives funding implicitly by asset identity (workflow-sequence.ts:103-109); the two are bridged only by per-step projections (workflow-sequence.ts:82-84) and compositionWorkflow() excludes any workflow with resourceEdges from the sequence path (86-89). A given multi-step graph therefore has different hashes and binding semantics in Chat vs Canvas.",
+  "(B) IR-level dependent amounts (OUTPUT_REFERENCE + resourceEdges) are accepted by the schema (schemas.ts:127-136) but rejected for every public action: linter SWAP_EDGE_UNSUPPORTED on any edge touching a swap or liquidity node (validation.ts:191, 200), draft validation allows a typed link only for a registered bound composition (workflow-draft.ts:25-27), the registry has exactly one composition (Solana Devnet Orca, composition-bindings.ts:31) and every compiler/linter enforces `*_ISOLATED_ONLY` (universal-router.ts:121-125, reference-linter crosschain-router.ts:10, borrow.ts:189, supply.ts:175, native-transfer.ts:97, solana-transfer.ts:35, cow.ts:116). The only multi-node graphs with typed edges are test-network or legacy (lending-composition Base Sepolia, LI.FI bridge→swap Base→Arbitrum linter bridge-swap.ts, BUILD-011C cross-chain liquidity).",
+  "(B) No `previous.output.amount`-style expression: bindings are positional {step, amountFrom} (strategy-spec.ts:145-149) resolved at execution to min(cap, received) (workflow-bindings.ts:113-117); there is no estimated/guaranteed/actual triple on a step — only string codes RECONCILED_RECEIVED_AMOUNT vs SIGNED_GUARANTEED_MINIMUM in the authorization plan (authorization-plan.ts:44-46) — and expectedOutputs.minimumAmount is always '0' (swap.ts:78, router.ts:62, universal-router.ts:91) so the simulation's propagatedOutputs are empty for every public chain (crosschain-router.ts:297; universal-artifacts similar).",
+  "(B) Cross-chain dependent amounts: a bridge producer binds only through asset-out on the destination chain by exact identity (workflow-bindings.ts:41, 75-78, 98); the run resolves received from producer.outcome.received (runner.ts:104-105) and the Canvas from deliveredByRecord 'universal'/'router' verdict RECONCILED (workflow-sequence.ts:205-213) — two separate 'actual' readers; delegated mode refuses any cross-chain binding (authorization-plan.ts:94-97, 105 WORKFLOW_BINDING_NOT_EXACT; workflow-grants.ts:12-14), and chat observation of settlement (workflow-runs/observe.ts) was not read.",
+  "(B) Percentage / remaining-balance bindings do not exist: ParameterSchema (common.ts:123-159) and ConstraintSchema (166-179) have no fractional or balance kinds; StrategySpec amounts are absolute decimals (strategy-spec.ts:37); withdraw/repay refuse MAX-uint 'all' semantics (withdraw.ts:71, repay.ts:92); the Copilot's 'remaining tokens' resolves to an absolute amount from a reconciled execution before authoring (domain/copilot-conversation.ts:1021-1035) — grep found no percentage/remaining concept in workflow-contracts, engine or workflow-runs.",
+  "(B) Solana in the same IR is representable but not composable: resolveWorkflowCapability adds COMPOSITION_UNSUPPORTED to any workflow with >1 financial node that contains a Solana node unless it is the registered Devnet composition (execution-capabilities.ts:246-250); Solana swaps in StrategySpec are limited to enumerated symbols (strategy-engine.ts:234-237 'as never'); Orca liquidity cannot be previewed server-side (mcp/simulation.ts:61); delegation refuses Solana (capabilities.ts:74-79; authorization-plan.ts:98, 105); ExecutionPlan has no Solana execution kind and universal-artifacts hashes a Solana message as a DIRECT_TRANSACTION payload (universal-artifacts.ts:47).",
+  "(B) Chat/Canvas parity gaps: the v2 step list collapses supply→borrow→swap into lending_composition only on Base Sepolia (strategy-engine.ts:359-367), which the public product does not offer (strategy-spec.ts:29-30), so no mainnet lending composition exists; Canvas multi-step runs require each one-node projection to pass the linter alone (workflow-sequence.ts:100) and exclude positions/Solana composition runtimes from sequences (119).",
+  "(C) Interaction counting is coarse and partly unknown: confirmEachStep.walletConfirmationsAtLeast = steps.length (authorization-plan.ts:116) ignores per-flow approvals; delegated walletSignatures = max(1, EVM chains) with a one-time EIP-7702 enrollment whose `active` is null until signing (88-91, 117); there is no count for ERC-20 approvals, EIP-7702 authorization transactions, Solana signAll groups or per-chain batches, no per-chain execution group in the chat ExecutionPlan (mcp/execution.ts:95-97), and the v1 artifact's per-chain segments (execution-plan.ts:22-29) are not produced for sequences.",
+  "(C) No 'collect every authorization upfront' model: the runner advances step k only after step k−1 is RECONCILED (runner.ts:93) and each step is re-composed/re-gated then (126-130); grants are per EVM chain only (workflow-grants.ts:3-6); Solana never participates (authorization-plan.ts:98)."
+ ],
+ "testsAndHarnesses": [
+  "packages/workflow-contracts/test/contracts.test.ts — validates every v1 artifact fixture from tests/compatibility/v1/*.json (semantic-workflow.json, execution-plan.json, strategy-manifest.json, hash-vectors.json …) through raw ingress, Ajv and hashing (lines 1-30); canonical.test.ts checks DWE-HASH byte vectors (12-25); router.test.ts, swap.test.ts, supply.test.ts, native-transfer.test.ts, liquidity.test.ts, catalog-swap.test.ts, enforcement-matrix.test.ts, revision-state.test.ts, invalidation.test.ts, raw-json.test.ts, bridge.test.ts, payment.test.ts, mode-b-composition-permission.test.ts (listed; bodies not read). No universal-router or solana-transfer test file exists in that package — those are covered from apps/reference-dapp/src/engine/universal-bridge.test.ts and packages/reference-compiler/test (not read).",
+  "apps/reference-dapp/src/engine/strategy-engine.test.ts — `dappChat(sentence)` parity helper runs parseLocalCommand + editorReducer from initialEditor (13-18) and asserts byte-identical IR to composeStrategy for every example (35+); robinhood-composition.test.ts — `chat()` helper plus registerNetworkCatalog(officialCatalog()) / baseCatalog harnesses from src/server/*-mainnet.test-harness.ts (22-33); workflow-bindings.test.ts — binding validation, hash coverage, boundStrategy/boundAmount; universal-bridge.test.ts — readUniversalBridgeNode on composed IR and previewPlan; capability-catalog.test.ts, certification-matrix.test.ts and mainnet-product-matrix.test.ts (regenerate committed JSON with FLOFI_WRITE_CERTIFICATION_MATRIX=1 / FLOFI_WRITE_MAINNET_MATRIX=1).",
+  "apps/reference-dapp/src/mcp/step-list.test.ts — McpRuntime stub `runtime(sequences)` (24-29) with gateway.test-harness credential/session; workflow-runs/authorization-plan.test.ts — `runtime(sequences, delegation)` + planOf (18-26), MOCKED DelegationFacts; workflow-runs/workflow-run.test-harness.ts and confirm-run.pg.test.ts (Postgres); domain/workflow-sequence.test.ts and domain/intelligence/swap-supply-composition.test.ts exercise boundAmount/boundProjection/deliveredByRecord with CompletedStep fixtures.",
+  "apps/reference-dapp/src/delegation/delegation.test-harness.ts, harness/evm-double.ts (DelegationManager.redeemDelegations double) and harness/constants.ts (MOCKED_SWAP_PROGRAM) for delegated executor tests; packages/reference-compiler/test/erc7710-workflow.test.ts (compileWorkflowGrant vectors) and the untracked test/erc4337.test.ts.",
+  "apps/reference-dapp/src/channels/core/strategy.test.ts compares platform composeWorkflowOrRefuse with mcp composeWorkflow for every example (98); channels/core/workflow.test.ts; platform/mainnet-only.test.ts (not read) and domain/copilot-universal-bridge.test.ts use workflowPlan over composed workflows.",
+  "docs/engineering/coverage.json lists the engine modules (3578-3583) and workflow-contracts suites (633-640) for the reviewer specialists; `pnpm check` includes the schema-drift gate over packages/workflow-contracts/schemas/v1."
+ ],
+ "risks": [
+  "Hash stability: any change to node shape or HASH_FIELDS (canonical.ts:71-81), or to a create*Node output, changes semanticWorkflowHash and breaks every closed-declaration reader (router.ts:93, universal-router.ts:117, supply.ts:142-143 …), saved workflows, runs bound by composeBound STRATEGY_WORKFLOW_HASH_MISMATCH (strategy-engine.ts:329-333) and runner WORKFLOW_RUN_STALE (runner.ts:91-92), and signed ERC-7710 grants whose scope is re-derived from the workflow (workflow-grants.ts:15-16).",
+  "The v2 sequence hash uses JSON.stringify, not canonicalJson (strategy-engine.ts:355); adding fields to bindings or reordering keys silently changes hashes of existing step lists.",
+  "schemas/v1/*.schema.json and tests/compatibility/v1 fixtures are frozen v1 contracts; new artifact kinds or fields need either a schemaVersion bump or new artifacts, and the schema-drift gate in `pnpm check` will fail otherwise.",
+  "Capability honesty is test-enforced: certification/mainnet matrices are committed JSON compared byte-for-byte; registry rows claim 'owner wallet only' for every MAINNET path and evidenceMaturity null — a new user-funded mechanism must be added as rows, never implied.",
+  "Two independent 'actual delivered' readers (Canvas deliveredByRecord vs workflow-run observe/outcome) can diverge; any new reconciliation for cross-chain or Solana must feed both or unify them.",
+  "The working tree already contains uncommitted BUILD-…-002 compiler files (packages/reference-compiler/src/eip5792.ts, erc4337.ts, test/erc4337.test.ts, index.ts:84-85) from a parallel task; the architect should assume they exist and avoid conflicting edits.",
+  "Mainnet-only enforcement spans schema, platform and domain layers; any new network/action must be added to PUBLIC_* branches and STRATEGY_EXAMPLES or it is invisible to discovery and refused by public surfaces."
+ ],
+ "openQuestions": [
+  "Should the next build make the Chat v2 step list produce one canonical SemanticWorkflow (dependencies + OUTPUT_REFERENCE/resourceEdges) shared with the Canvas, or keep per-step isolated IRs and move the binding/amount semantics into a new artifact? Either path changes hashes; what is the migration policy for existing runs, grants and saved workflows?",
+  "Where should estimated/guaranteed/actual be typed — on expectedOutputs (currently minimumAmount '0'), on bindings, or in a new per-step 'amount resolution' artifact consumed by both runner.ts and workflow-sequence.ts?",
+  "How should percentage / remaining-balance be represented given closed declarations (new Parameter kind with resolution at Review, or a resolution-time binding like the Copilot's reconciled 'remaining')?",
+  "Will new execution kinds (UserOperation, wallet_sendCalls batch, pre-signed tx, Solana signed group) be added to the v1 ExecutionPlan union (schemaVersion bump) or to a separate execution-group artifact, and will StrategyManifest gain an explicit gas-payer/authorization-strategy field (executor is null today)?",
+  "How is cross-chain settlement observed on the chat side (apps/reference-dapp/src/workflow-runs/observe.ts and backend/flows.ts were not read) and can one reconciliation reader serve both Canvas and Chat?",
+  "Should certification OTHER_ROWS (delegated signer, EVM→Solana bridge) be regenerated or removed in this build, and which committed matrices must change?",
+  "Not read in this pass: domain/commands.ts body, domain/universal-bridge-authoring.ts, reference-compiler erc7710.ts/universal-relay.ts bodies, packages/cloud-runtime/migrations, backend/*.pg.test.ts — anything they encode about authorization counts or gas is unverified here."
+ ]
+}

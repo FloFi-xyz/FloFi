@@ -1,0 +1,291 @@
+{
+ "subsystem": "delegation-executor-kms",
+ "summary": "The delegated execution stack (BUILD-AUTOMATION-002 → BUILD-FLOFI-UNIVERSAL-SINGLE-AUTH-MAINNET-001, PR #166) is a generic, PostgreSQL-fenced executor (apps/reference-dapp/src/delegation/executor.ts) that drives one `delegated_executions` row per source — an automation occurrence (`executeOccurrence`) or a conversational workflow run (`executeWorkflowRun`) — through QUEUED → AUTHORITY_VERIFIED → RESERVED → RUNNING → SETTLED, with each step going PENDING → SIMULATED → POLICY_VERIFIED → SUBMISSION_PREPARED → SUBMITTED → RECONCILED via a per-mechanism StepDriver (drivers.ts). Authority is an ERC-7710 delegation (MetaMask Delegation Framework v1.3.0) signed by the owner's EIP-7702 MetaMask smart account, in two shapes: a reusable class-scoped Credential grant (passkey-anchored, authorized per workflow by ONE WebAuthn assertion over a UniversalWorkflowAuthorization envelope) or, for workflow runs, an exact \"workflow grant\" per EVM chain (ExactCalldata + IdEnforcer per call, Redeemer = the executor, signed with eth_signTypedData_v4; no passkey) compiled in workflow-grants.ts. In EVERY EVM path the on-chain sender and gas payer is the executor session address: `signEvmCalls` (drivers.ts:98-128) builds EIP-1559 transactions with `from = ctx.grant.sessionAddress`, `to = DelegationManager`, signs the digest with `SignerUser.signEvmDigest` (AWS KMS in production, kms-signer.ts:171-184) and broadcasts via `eth_sendRawTransaction` on the 'executor' transport (chains.ts:22, drivers.ts:164); the runbook (docs/deploy/SINGLE-AUTH-MAINNET-ACTIVATION.md:49-54) explicitly says \"The executor sends every redemption, so it pays the gas on each chain\" and asks the owner to fund EXECUTOR with ETH. The Solana path exists only as a MOCKED harness driver whose fee payer is also the session key (drivers.ts:416); the KMS provider refuses Solana signing (kms-signer.ts:185) and `stepCapability` refuses production Solana (capabilities.ts:76). Nonces for the shared KMS address are allocated per (chain, sessionAddress) under `pg_advisory_xact_lock` inside `prepareSubmission` (pg-store.ts:559-567), seeded from `max(evm_next_nonce)` across grants (`sessionNextNonce`, pg-store.ts:575-579; executor.ts:342-343) and `eth_getTransactionCount(session,'pending')` (drivers.ts:100-101); stale never-sent submissions are neutralized with executor-paid zero-value self-transactions (`fillStaleNonces`, drivers.ts:134-150). Reconciliation is receipt-based: the last receipt must carry exactly one `RedeemedDelegation(owner, sessionAddress)` log plus the exact ERC-20 Transfer legs (drivers.ts:196-200, 270-280, 353-369); never-mined txs whose nonce was consumed are reported as failed calls (`nonceConsumed`, drivers.ts:177-182). A workflow run mirrors its one execution in workflow-runs/runner.ts:194-232 (SETTLED→COMPLETED etc.). Configuration is fail-closed in config.ts: FLOFI_DELEGATION, FLOFI_DELEGATED_SIGNER (none|aws-kms|local-disposable|memory|remote-api), FLOFI_DELEGATED_EXECUTION, FLOFI_DELEGATION_MAINNET_CHAINS, FLOFI_DELEGATION_RPC_<id>, FLOFI_KMS_REGION/FLOFI_KMS_EVM_KEY_ARN; the signing half (`SignerUser`) is handed only to the executor worker (executor-runtime.ts:16-23), enforced by boundaries.test.ts. Nothing in this subsystem implements EIP-5792 wallet_sendCalls, ERC-4337 UserOperations, pre-signed user transactions or Solana signAllTransactions/durable nonces (greps over apps/reference-dapp/src and packages found no such code paths outside a provider test list and i18n copy), and no \"gas payer must be the user\" invariant exists anywhere in the delegated path; the only gas-payer evidence in the codebase is the owner-signed public flows' `receipt.gasPayer` / OWNER_SUBMISSION_RELAYED_FEE_PAID_BY_RELAYER finding (server/public-testnet-service.ts:1499,1573), which the delegated drivers' evidence does not record.",
+ "keyFiles": [
+  {
+   "path": "/home/user/FloFi/apps/reference-dapp/src/delegation/executor.ts",
+   "role": "The generic delegated execution state machine: authority chain verification (passkey or WALLET_WORKFLOW), budget reservation, per-step simulate→policy→authorize→sign→prepare→broadcast→reconcile loop, bound-amount narrowing, evidence.",
+   "keySymbols": "executeOccurrence (207-222), executeWorkflowRun (229-241), drive (243-284), run (286-446), verifyAuthorityChain (92-143), verifyWalletWorkflowChain (151-190), boundStep (451-480), recoveryContext (483-516), ownCallsByGrant (79-86), transientSimulation (88-89), GRANT_EXPIRY_MARGIN_MS (91), ExecutorDeps (49-58)"
+  },
+  {
+   "path": "/home/user/FloFi/apps/reference-dapp/src/delegation/drivers.ts",
+   "role": "Step drivers: build the exact calls, check the ERC-7710 enforcer model, SIGN EIP-1559 redemptions from the executor address (gas payer), broadcast raw txs, fill stale nonces, reconcile from receipts.",
+   "keySymbols": "StepDriver (43-53), signEvmCalls (98-128), fillStaleNonces (134-150), broadcastEvm (157-170), nonceConsumed (177-182), evmReceipts (183-195), assertRedeemed (197-200), authorizeEvmCalls (80-90), evmSwapDriver (201-282), evmAaveDriver (299-371), solanaFixtureDriver (381-440), DRIVERS/driverFor (441-444), GAS_FLOOR/GAS_CEILING (92), MAINNET_DEPENDENT_GAS (296), BORROW_BROADCAST_WINDOW_MS (294)"
+  },
+  {
+   "path": "/home/user/FloFi/apps/reference-dapp/src/delegation/workflow-grants.ts",
+   "role": "Workflow grants (PR #166): plan one exact ERC-7710 grant per EVM chain (approve+swap, approve+supply, borrow) with guaranteed-minimum bindings; verify a stored scope re-derives from the workflow; map steps to pinned calls.",
+   "keySymbols": "compileScope (50-53), pinnedCall/pinnedGroup/pinnedNeed/pinnedSwap (55-78), planWorkflowGrants (95-152), workflowScopeProblem (161-202), workflowGrantBindings (221-245), WORKFLOW_GRANT_WINDOW_MS (37), WORKFLOW_GRANT_SIGN_MARGIN_MS (39)"
+  },
+  {
+   "path": "/home/user/FloFi/apps/reference-dapp/src/delegation/service.ts",
+   "role": "Owner operations (never sign): passkeys, Credential enrollment/revocation, automation preview/create/review/sign, workflow-run passkey review/sign, workflow-run WALLET review (compiles grants with the executor as delegate) and sign (verifies EIP-712 signatures, activates the run).",
+   "keySymbols": "credentialPrepare (268-310), credentialComplete (311-322), automationCreate (351-370), authorizationReview (372-396), authorizationSign (398-417), workflowRunAuthorizationReview (451-485), workflowRunAuthorizationSign (490-508), workflowRunWalletReview (516-649), workflowRunWalletSign (656-697), executionResume (712-725)"
+  },
+  {
+   "path": "/home/user/FloFi/apps/reference-dapp/src/delegation/pg-store.ts",
+   "role": "Durable state and concurrency: row-lock order authorization→execution→grant, budget reservation, compare-and-set transitions, prepareSubmission with per-(chain,executor) advisory-locked nonce allocation.",
+   "keySymbols": "activate (329-378), newRevision (380-401), revoke (406-420), ensureExecution (443-451), ensureRunExecution (453-462), transition (484-497), reserve (502-524), stepTransition (526-533), prepareSubmission (539-573), sessionNextNonce (575-579), settleBudget (581-587), openExecutions (589-592), GrantRecord (36-39), StepRecord (56-59)"
+  },
+  {
+   "path": "/home/user/FloFi/apps/reference-dapp/src/delegation/config.ts",
+   "role": "Fail-closed configuration of delegation, signer provider, executor role and mainnet opt-in.",
+   "keySymbols": "readDelegationConfig (50-113), executionAvailability (118-120), SignerChoice (35-38), DelegationConfig (40-45)"
+  },
+  {
+   "path": "/home/user/FloFi/apps/reference-dapp/src/delegation/runtime.ts",
+   "role": "Shared wiring: signer provider selection (memory/local-disposable/aws-kms), SignerAdmin vs SignerUser split, guarded transports by purpose.",
+   "keySymbols": "signerProvider (33-45), signerAdmin/signerUser (48-49), transportFor (52-58), delegationRuntime (62-64), DELEGATION_WORK_KINDS (28)"
+  },
+  {
+   "path": "/home/user/FloFi/apps/reference-dapp/src/delegation/executor-runtime.ts",
+   "role": "The ONLY place the signing half is handed to code; work handlers for delegation.execute and delegation.execute-run; sweep (expire, re-arm).",
+   "keySymbols": "executorDeps (16-23), delegationHandlers (27-49), sweepDelegation (52-66)"
+  },
+  {
+   "path": "/home/user/FloFi/apps/reference-dapp/src/delegation/chains.ts",
+   "role": "Closed JSON-RPC method allowlists per transport purpose (read/owner/executor); only 'executor' may eth_sendRawTransaction.",
+   "keySymbols": "allowedMethods (17-23), guarded (25-31), httpRpc (33-45), EVM_READ/SOL_READ (14-16)"
+  },
+  {
+   "path": "/home/user/FloFi/apps/reference-dapp/src/delegation/adapters.ts",
+   "role": "Authority adapters per mechanism: prepare/verify enrollment (EIP-712 delegation or Solana ApproveChecked), read-only re-verification, revocation.",
+   "keySymbols": "evmAdapter (92-153), solanaAdapter (177-238), evmTemplates (57-69), templateIndex (71-75), delegationOf (78-84), passkeyAnchor (44-48), ADAPTERS (239)"
+  },
+  {
+   "path": "/home/user/FloFi/apps/reference-dapp/src/delegation/authority.ts",
+   "role": "Grant scopes (class Credential, WORKFLOW, Solana SPL), coverage and deterministic authority graph for Credential grants.",
+   "keySymbols": "GrantScope (20-32), GrantView (35-41), StepBinding (47-50), grantCoverage (60-94), resolveAuthorityGraph (102-142), callsOf (58)"
+  },
+  {
+   "path": "/home/user/FloFi/apps/reference-dapp/src/delegation/capabilities.ts",
+   "role": "Which steps are delegable by which mechanism/template (swap USDC⇄WETH, Aave supply/borrow on opted-in mainnets; Solana only MOCKED).",
+   "keySymbols": "stepCapability (41-80), TemplateNeed (19-25), ENFORCEMENT (85-97), MAINNET/FRAMEWORK_NOT_DEPLOYED (30-35)"
+  },
+  {
+   "path": "/home/user/FloFi/apps/reference-dapp/src/delegation/policy.ts",
+   "role": "Pure deterministic gates: reservation (budgets/cooldown/count) and per-step policy vs manifest and grant need, sender-agnostic.",
+   "keySymbols": "reservationViolation (22-35), stepPolicyViolation (52-101), StepPlan (38-50)"
+  },
+  {
+   "path": "/home/user/FloFi/apps/reference-dapp/src/delegation/manifest.ts",
+   "role": "DelegatedAuthorizationManifest and the two envelope kinds (passkey, WALLET_WORKFLOW).",
+   "keySymbols": "buildManifest (58-103), manifestProblem (106-130), wideningOf (133-158), walletWorkflowAuthorization (177-184), universalAuthorization (185-192), authorizationDigest (196)"
+  },
+  {
+   "path": "/home/user/FloFi/apps/reference-dapp/src/delegation/state-machine.ts",
+   "role": "Execution and step state tables (mirrored by migration 0011 triggers).",
+   "keySymbols": "EXECUTION_STATES (16), STEP_STATES (18), canMoveExecution/canMoveStep (40-41), MAYBE_SUBMITTED (44)"
+  },
+  {
+   "path": "/home/user/FloFi/apps/reference-dapp/src/delegation/steps.ts",
+   "role": "Step requirements derived from the canonical composition (inputs, outputs, bindings, chains).",
+   "keySymbols": "workflowRequirement (87-91), requirementOf (92-101), narrowedStep (80-84), assetKey (17-18)"
+  },
+  {
+   "path": "/home/user/FloFi/apps/reference-dapp/src/delegation/operations.ts",
+   "role": "Closed owner-operation contract shared by embedded BFF and Railway API; run operations load the run and require the proven EVM wallet.",
+   "keySymbols": "DELEGATION_OPERATIONS (22-24), ownerDelegationService (32-39), ownedRun (47-54), runDelegationOperation (62-113)"
+  },
+  {
+   "path": "/home/user/FloFi/apps/reference-dapp/src/delegation/api.ts",
+   "role": "Railway API route POST /v1/delegation/:method (owner ops only).",
+   "keySymbols": "delegationApiRoutes (30-66)"
+  },
+  {
+   "path": "/home/user/FloFi/apps/reference-dapp/src/delegation/http.ts",
+   "role": "Optional local drain /api/delegation/dispatch (never hosted).",
+   "keySymbols": "handleDelegationDispatch (24-48)"
+  },
+  {
+   "path": "/home/user/FloFi/apps/reference-dapp/src/delegation/worker.ts",
+   "role": "Executor parts for the worker process.",
+   "keySymbols": "delegationWorkerParts (16-25)"
+  },
+  {
+   "path": "/home/user/FloFi/apps/reference-dapp/src/delegation/profiles.ts",
+   "role": "Registry-backed swap/Aave profiles per delegable chain.",
+   "keySymbols": "MAINNET_DELEGATION_CHAINS (21), delegationSwapProfile (28-38), delegationAavePool (40-44), delegationAaveReserve (46-48)"
+  },
+  {
+   "path": "/home/user/FloFi/apps/reference-dapp/src/delegation/run-source.ts",
+   "role": "Work kind and id pattern of run-sourced executions.",
+   "keySymbols": "DELEGATION_EXECUTE_RUN_KIND (6), WORKFLOW_RUN_ID (7)"
+  },
+  {
+   "path": "/home/user/FloFi/apps/reference-dapp/src/delegation/automation-source.ts",
+   "role": "Canonical AutomationInput / Canvas workflow → DelegatedAutomationInput.",
+   "keySymbols": "delegatedSourceFromAutomation (27-42), delegatedSourceFromWorkflow (45-53), delegatedInputOf (56-60)"
+  },
+  {
+   "path": "/home/user/FloFi/apps/reference-dapp/src/delegation/definition.ts",
+   "role": "TypeBox schemas for delegated inputs and CredentialInput.",
+   "keySymbols": "DelegatedAutomationInputSchema (44-50), CredentialInputSchema (75-89)"
+  },
+  {
+   "path": "/home/user/FloFi/apps/reference-dapp/src/delegation/views.ts",
+   "role": "Client-safe views, including the wallet workflow review view.",
+   "keySymbols": "WalletWorkflowReviewView (76-84), ExecutionView (42-46)"
+  },
+  {
+   "path": "/home/user/FloFi/packages/reference-executor/src/kms-signer.ts",
+   "role": "Production signer: AWS KMS secp256k1 over SigV4 JSON API; digest→DER→EVM signature; Solana refused.",
+   "keySymbols": "awsKmsSignerProvider (139-189), kmsSignatureToEvm (98-110), sigV4Headers (42-60), awsCredentialsFromEnv (191-195), kmsError (132-138)"
+  },
+  {
+   "path": "/home/user/FloFi/packages/reference-executor/src/delegated-signer.ts",
+   "role": "DelegatedSignerProvider interface and the memory / local-disposable providers (non-production).",
+   "keySymbols": "DelegatedSignerProvider (24-33), memorySignerProvider (56-67), localDisposableSignerProvider (70-94)"
+  },
+  {
+   "path": "/home/user/FloFi/packages/reference-compiler/src/erc7710.ts",
+   "role": "ERC-7710 codec: framework v1.3.0 addresses, delegation hashing/typed data, caveat terms, class and workflow grant compilation, redeem calldata, enforcer model, EIP-1559 encoding.",
+   "keySymbols": "DELEGATION_FRAMEWORK_V1_3 (115-135), DELEGATOR_DESIGNATOR (139), compileGrant (322), compileWorkflowGrant (408-420), workflowCallData (374-397), workflowCallId (399-402), redeemCalldata (461-464), withGroupArgs (450-453), modelBeforeHooks (567), Eip1559/eip1559SigningHash/signedEip1559/decodeSignedEip1559 (590-615), WORKFLOW_GRANT_MAX_CALLS (369)"
+  },
+  {
+   "path": "/home/user/FloFi/apps/reference-dapp/backend/delegation-worker.ts",
+   "role": "Railway worker loader (FLOFI_DELEGATED_EXECUTION=enabled).",
+   "keySymbols": "loadDelegationWorker (12-16)"
+  },
+  {
+   "path": "/home/user/FloFi/apps/reference-dapp/backend/delegation-api.ts",
+   "role": "Railway API loader (FLOFI_DELEGATION=enabled).",
+   "keySymbols": "loadDelegationApi (11-15)"
+  },
+  {
+   "path": "/home/user/FloFi/apps/reference-dapp/backend/main.ts",
+   "role": "Wires delegation API routes (122-125) and worker handlers/sweep (147-172).",
+   "keySymbols": "lines 122-125, 147-172"
+  },
+  {
+   "path": "/home/user/FloFi/apps/reference-dapp/src/workflow-runs/pg-store.ts",
+   "role": "Run store: delegated activation inside the authorization transaction; confirm-mode revokes unsigned authorizations.",
+   "keySymbols": "activateDelegatedWithin (196-207), startConfirm (173-191)"
+  },
+  {
+   "path": "/home/user/FloFi/apps/reference-dapp/src/workflow-runs/runner.ts",
+   "role": "Mirrors the delegated execution into run/step states.",
+   "keySymbols": "delegatedPass (194-232)"
+  },
+  {
+   "path": "/home/user/FloFi/apps/reference-dapp/src/workflow-runs/authorization-plan.ts",
+   "role": "Counts authorizations per mode (walletSignatures = chains, passkeyAssertions 0) and states that every step still pays its own gas.",
+   "keySymbols": "authorizationPlan (63-121), delegableByCode (53-60)"
+  },
+  {
+   "path": "/home/user/FloFi/apps/reference-dapp/src/server/workflow-run-surface.ts",
+   "role": "Chat/Canvas /approve surface: review/sign/revoke delegated run ops, embedded or forwarded to the API.",
+   "keySymbols": "delegationParts (46-71)"
+  },
+  {
+   "path": "/home/user/FloFi/apps/reference-dapp/src/server/delegation-operation.ts",
+   "role": "BFF boundary: proven wallets, remote forwarding with DELEGATION_OUTCOME_UNKNOWN semantics.",
+   "keySymbols": "delegationOperation (41-83), delegationAvailability (86-99)"
+  },
+  {
+   "path": "/home/user/FloFi/apps/reference-dapp/src/components/delegation-browser.ts",
+   "role": "Browser signing: passkeys, eth_signTypedData_v4 of delegations/workflow grants (wallet_switchEthereumChain first), owner revocation via eth_sendTransaction, Solana signTransaction.",
+   "keySymbols": "signWorkflowGrant (67-78), signDelegation (58-61), sendRevocation (80-84), signSolanaWith (90-96)"
+  },
+  {
+   "path": "/home/user/FloFi/apps/reference-dapp/src/automations/pg-store.ts",
+   "role": "DELEGATED occurrences enqueue delegation.execute in the evaluator's transaction.",
+   "keySymbols": "DELEGATION_EXECUTE_KIND (60), occurrence insert + work item (259-272)"
+  },
+  {
+   "path": "/home/user/FloFi/packages/cloud-runtime/migrations/0011_delegated_execution.sql",
+   "role": "Tables credential_grants (165-196; session_address 178, evm_next_nonce 185), delegated_execution_steps (382-403) and immutability/transition triggers (198-230, 404-430).",
+   "keySymbols": "credential_grant_transition, delegated_step_transition, delegated_budget_entries"
+  },
+  {
+   "path": "/home/user/FloFi/packages/cloud-runtime/migrations/0021_workflow_grants.sql",
+   "role": "passkey_id nullable for WORKFLOW scope grants; revision CHECK admits WALLET_WORKFLOW envelopes.",
+   "keySymbols": "credential_grants_passkey_or_workflow_grant (12-13), delegated_authorization_revisions_signed (25-28)"
+  },
+  {
+   "path": "/home/user/FloFi/docs/deploy/SINGLE-AUTH-MAINNET-ACTIVATION.md",
+   "role": "Runbook stating the executor pays gas and must be funded with ETH (§3, lines 49-54).",
+   "keySymbols": "§3 Executor gas"
+  }
+ ],
+ "flows": [
+  "WORKFLOW-RUN WALLET AUTHORIZATION (PR #166, one wallet signature per EVM chain): Chat/Canvas /approve → server/workflow-run-surface.ts:52-53 or :65-67 → delegation-operation.ts:41-83 (proven wallets; remote: POST /v1/delegation/workflowRunWalletReview, api.ts:32-65) → operations.ts:66-71 ownedRun (run.wallets.eip155 must be proven) → service.ts:516-649 workflowRunWalletReview: composeWorkflowBound → requirementOf (steps.ts:92) → planWorkflowGrants (workflow-grants.ts:95-152; fresh quote via quoteExactInputSingle on the 'read' transport, guaranteed-minimum bindings) → per chain: workflowScopeProblem (161-202) → deps.signer.create('eip155') (KMS: returns the ONE shared executor address, kms-signer.ts:166-169) → evmAdapter.prepareEnrollment (adapters.ts:99-103: compileScope → compileWorkflowGrant erc7710.ts:408-420 with delegate=session, Redeemer=[session], Timestamp, LimitedCalls, ValueLte, LogicalOrWrapper of [AllowedTargets, ExactCalldata, ValueLte, Id] per call) → store.insertGrant (pg-store.ts:202-219, passkeyId null) → buildManifest (manifest.ts:58) → createAuthorization/newRevision → walletWorkflowAuthorization envelope → prepareReview. Browser: delegation-browser.ts:67-78 signWorkflowGrant (wallet_switchEthereumChain, eth_signTypedData_v4). Then workflowRunWalletSign (service.ts:656-697): verifyEnrollment per grant (adapters.ts:112-131: recover signer == wallet, eth_chainId, code==DELEGATOR_DESIGNATOR, enforcers deployed, not disabled) → settleEnrollment ACTIVE → store.activate (pg-store.ts:329-378, wallet branch 346-352) → onActivated = runs.activateDelegatedWithin (workflow-runs/pg-store.ts:196-207: run RUNNING/DELEGATED, steps DELEGATED, INSERT work_items kind delegation.execute-run).",
+  "AUTOMATION (Credential) AUTHORIZATION: service.automationCreate (351-370: preview → resolveAuthorityGraph authority.ts:102 → buildManifest → createRule + createAuthorization) → authorizationReview (372-396: universalAuthorization envelope, single-use passkey challenge) → authorizationSign (398-417: verifyAssertion → store.activate with ruleResume). Evaluator later inserts a DELEGATED occurrence and a delegation.execute work item in one transaction (automations/pg-store.ts:259-272).",
+  "EXECUTOR WORKER STARTUP: backend/main.ts:150-154 → backend/delegation-worker.ts:12-16 → delegation/worker.ts:16-25 (readDelegationConfig; tenant match) → executor-runtime.ts:16-23 executorDeps (requires config.executor && signerProvider; builds signerUser(provider) and transportFor(...,'executor')) → delegationHandlers (27-49) registered for 'delegation.execute' and 'delegation.execute-run'; sweep (52-66) expires authorizations/grants and re-arms idle non-HALTED executions.",
+  "EXECUTION PASS (executor.ts): handler → executeOccurrence (207-222: occurrence DELEGATED, rule DELEGATED_WITH_LIMITS, ensureExecution keyed (authorization, occurrence)) or executeWorkflowRun (229-241: run.mode==='DELEGATED', authorization.workflowRunId===runId, ensureRunExecution keyed workflow_run_id) → drive (243-284): verifyAuthorityChain (92-143) or verifyWalletWorkflowChain (151-190: manifest/envelope integrity, every grant recompiles byte-for-byte from scope and recovers to the wallet, workflowGrantBindings, then reconcileAuthorityState read-only: disabledDelegations + designator) → QUEUED→AUTHORITY_VERIFIED → store.reserve under the authorization row lock with reservationViolation (policy.ts:22) → RESERVED → RUNNING(currentStep 0) → run (286-446).",
+  "STEP LOOP (executor.ts:304-415): grant + 'executor' transport → pinned binding; boundStep (451-480: dependent amount = min(cap, producer reconciled received), or exact pinned amount for workflow grants) → driverFor (drivers.ts:442) → driver.simulate (swap: chainId, eth_getCode==DELEGATOR_DESIGNATOR, balanceOf, QuoterV2 quote, signed minimum check for workflow grants, exact approve+exactInputSingle calls with recipient=owner; Aave: readSupplyState/readBorrowState rules) → stepTransition SIMULATED(plan) → stepPolicyViolation (policy.ts:52-101) ?? driver.authorize (authorizeEvmCalls: modelBeforeHooks with redeemer=sessionAddress) → POLICY_VERIFIED → expiry margin (GRANT_EXPIRY_MARGIN_MS) → shared nonce lookup store.sessionNextNonce (342-343) → driver.sign = signEvmCalls (drivers.ts:98-128: nonce base = max(grant.evmNextNonce, eth_getTransactionCount(session,'pending')); fees from eth_maxPriorityFeePerGas/eth_gasPrice; gasLimit = eth_estimateGas*1.5 ≥ 600k ≤ 5M, dependent call uses 1.5M on mainnet; per call: redeemCalldata → Eip1559{from implicit = session, to = DelegationManager} → signer.signEvmDigest(grant.sessionKeyRef, digest) [KMS Sign] → signedEip1559; recovered from must equal sessionAddress) → store.prepareSubmission (pg-store.ts:539-573: authorization ACTIVE at revision, step POLICY_VERIFIED, grant ACTIVE & unexpired, pg_advisory_xact_lock('flofi.executor-nonce:<chain>:<session>'), max(evm_next_nonce) conflict check → SUBMISSION_NONCE_CONFLICT, calls_used += n, evm_next_nonce = next, step SUBMISSION_PREPARED with the exact signed bytes committed BEFORE broadcast) → driver.broadcast = broadcastEvm (157-170: notAfter window → SUBMISSION_STALE; eth_sendRawTransaction; known-hash tolerance; nonce error → SUBMISSION_NONCE_CONFLICT) → SUBMITTED → driver.reconcile (swap 250-281 / aave 341-370: eth_getTransactionReceipt per tx or nonceConsumed; status 0x1; exactly one RedeemedDelegation(owner, session) at DelegationManager; Transfer legs; spent==amountIn, received>=minimum) → RECONCILED(reconciliation) → next step; after all: settleEarlier → SETTLED with evidence (evidenceOf 435-445, evidenceLevel MOCKED | PUBLIC_UNVERIFIED).",
+  "FAILURE/RECOVERY: broadcast failure → step UNCERTAIN, execution UNCERTAIN (enterUncertain 426), SUBMISSION_STALE triggers fillStaleNonces (drivers.ts:134-150: executor-signed, executor-paid zero-value self-tx at each never-seen nonce); PENDING reconcile re-broadcasts the persisted bytes only (390-394); REVERTED → settleBudget(spent)+release → FAILED or HALTED(attention) if an earlier step reconciled; owner executionResume (service.ts:712-725) HALTED→RUNNING and re-enqueues; sweep re-arms idle executions (executor-runtime.ts:57-63).",
+  "RUN MIRROR: workflow-runs/runner.ts:194-232 delegatedPass reads delegation.executionForRun + steps and maps RECONCILED/REVERTED/UNCERTAIN/BLOCKED to run step states, SETTLED→COMPLETED, BLOCKED→FAILED, HALTED→HALTED, UNCERTAIN→ATTENTION; resolvedStrategy (190-191) rebinds the step strategy from the executor plan's spend.",
+  "CREDENTIAL ENROLLMENT (owner-signed, owner pays if any gas): credentialPrepare (service.ts:268-310: proven wallet, passkey, scope from profiles, signer.create, passkeyAnchor salt, adapter.prepareEnrollment) → browser signDelegation (EIP-712, no gas) or Solana signSolanaWith (owner-signed ApproveChecked tx, broadcast by FloFi over the 'owner' transport adapters.ts:168-175, owner is fee payer) → credentialComplete (311-322). Revocation: EVM owner self-call disableDelegation sent by the owner's wallet (delegation-browser.ts:80-84, eth_sendTransaction) → credentialRevocationComplete reads disabledDelegations.",
+  "SOLANA DELEGATED (MOCKED only): capabilities.ts:74-79 admits SOLANA_SPL_SPEND only in MOCKED_HARNESS; solanaFixtureDriver.sign (drivers.ts:408-421) compiles a v0 message with fee payer = grant.sessionAddress and signs with signer.signSolanaMessage; broadcast via 'executor' sendTransaction; reconcile via getSignatureStatuses + balances. Production: kms-signer.ts:185 SIGNER_NAMESPACE_UNAVAILABLE; stepCapability returns SOLANA_DELEGATED_BUILDER_NOT_IMPLEMENTED."
+ ],
+ "dataModel": [
+  "credential_grants (migration 0011:165-196): grant_id, credential_id, owner, chain, mechanism IN (EVM_ERC7710_METAMASK_V1_3, SOLANA_SPL_DELEGATE_V1), state IN (PENDING_SIGNATURE, ACTIVE, REVOCATION_REQUESTED, REVOKED, EXPIRED, UNCERTAIN, FAILED), scope jsonb (class: router/pairs/maxCalls/aave; WORKFLOW: kind='WORKFLOW', workflowRunId, calls[], steps[], maxCalls), scope_hash, passkey_id (nullable since 0021 only for WORKFLOW scope), session_key_ref (UNIQUE per tenant; KMS ref 'aws-kms:evm.<hex>'), session_address (the executor EOA; shared for KMS), enrollment/grant_payload (signed delegation), commitment (delegationHash), calls_used, evm_next_nonce (executor nonce high-water mark per grant), expires_at, revocation, version. Trigger credential_grant_transition (0011:198-230) forbids backward nonce/calls and invalid state moves.",
+  "delegated_authorizations (+0015:171-182 workflow_run_id, CHECK rule_id XOR workflow_run_id, UNIQUE (tenant, workflow_run_id)); states PENDING_SIGNATURE | ACTIVE | REVOKED | EXPIRED; active_revision/latest_revision (pg-store.ts:40-45).",
+  "delegated_authorization_revisions: state PENDING_SIGNATURE | ACTIVE | SUPERSEDED | REVOKED | EXPIRED; strategy, workflow_hash, manifest, manifest_hash, widening, envelope (kind undefined = passkey, 'WALLET_WORKFLOW' = wallet grants), envelope_digest, passkey_id, assertion ({kind:'WALLET_WORKFLOW', grants:[{grantId, chain, delegationHash}]} for wallet runs), signed_at; CHECK delegated_authorization_revisions_signed (0021:25-28).",
+  "delegated_executions: execution_id, authorization_id, revision, rule_id/occurrence_id or workflow_run_id (0015:179-182), state QUEUED|AUTHORITY_VERIFIED|RESERVED|RUNNING|SETTLED|BLOCKED|UNCERTAIN|HALTED|FAILED (state-machine.ts:16, triggers 0011:~360-380), code, current_step, step_count, attention, evidence, version, reserved_at, settled_at.",
+  "delegated_execution_steps (0011:382-403): step_index 0..7, state PENDING|SIMULATED|POLICY_VERIFIED|SUBMISSION_PREPARED|SUBMITTED|RECONCILED|BLOCKED|UNCERTAIN|REVERTED, credential_id, grant_id, mechanism, chain, grant_commitment, plan jsonb ({plan: StepPlan, prepared: {calls[], before, minimum, notAfter?}, driver}), submission jsonb (EVM: {kind:'EVM_REDEMPTIONS', chainId, from: sessionAddress, delegationHash, txs:[{raw, hash, nonce, target, method, group}], hashes, before, minimum, notAfter?}; Solana: {kind:'SOLANA_TRANSACTION', wire, signature, hashes, before, minimum, tokenAccount}), reconciliation jsonb ({status, spent[], received[], evidence:{txs, delegationHash, redeemer, provenance}}), code, attempts. Trigger delegated_step_transition (0011:404-430): submission immutable once set; terminal states frozen.",
+  "delegated_budget_entries: per (execution, step, asset) reserved_amount/spent_amount, state RESERVED|SPENT|RELEASED, day/week/month starts (0011:~432-445; pg-store.ts:60-61).",
+  "passkey_credentials / passkey_challenges (purpose REGISTER|AUTHORIZE, single-use), execution_credentials (owner wallet per namespace), delegated_events (audit).",
+  "work_items kinds: 'delegation.execute' {occurrenceId, authorizationId} (automations/pg-store.ts:60,270-272) and 'delegation.execute-run' {workflowRunId, authorizationId} (run-source.ts:6; workflow-runs/pg-store.ts:203-205); dedupe_key = occurrenceId / runId.",
+  "workflow_runs: mode RUN_MODES ['CONFIRM_EACH_STEP','DELEGATED'] (workflow-runs/state-machine.ts:21-22), authorization_id, DELEGATED_AUTHORIZATION_SECONDS = 24h (state-machine.ts:50); run steps get state DELEGATED on activation.",
+  "Types: GrantScope/GrantView/StepBinding (authority.ts:20-50), TemplateNeed (capabilities.ts:19-25), StepPlan (policy.ts:38-50), Signed/Reconciled (drivers.ts:40-42), DelegatedAuthorizationManifest/UniversalWorkflowAuthorization (manifest.ts:22-34, 161-175), SerialWorkflowCall/EvmWorkflowScope (workflow-grants.ts:29-35), DelegatedSignerProvider (delegated-signer.ts:24-33), Eip1559 (erc7710.ts:590-591)."
+ ],
+ "extensionPoints": [
+  "StepDriver interface + DRIVERS registry (drivers.ts:43-53, 441-444): adding a submission mechanism = a new driver (simulate/authorize/sign/broadcast/reconcile); the executor is generic and dispatches by `supports`. A user-funded driver would implement `sign` as 'retrieve pre-signed user artifact' and `broadcast` as 'relay to bundler / observe wallet batch'.",
+  "Submission JSON `kind` discriminator (drivers.ts:125 'EVM_REDEMPTIONS', 419 'SOLANA_TRANSACTION'); recoveryContext (executor.ts:483-516) and evidenceOf (435-445) read `submission.hashes` / `txs` generically — new kinds (e.g. user operations, wallet batches) plug in here and in the steps table CHECK (0011:400).",
+  "ChainTransport purposes (chains.ts:11, 17-23): closed method allowlists per purpose; a 'bundler' purpose (eth_sendUserOperation, eth_estimateUserOperationGas, eth_getUserOperationReceipt, eth_supportedEntryPoints) and/or wallet_getCallsStatus polling would be added here, and `eth_sendRawTransaction` can be removed from 'executor' to fail-close executor-paid sends.",
+  "SignerUser / SignerAdmin split (runtime.ts:22-23, 48-49; executor-runtime.ts:16-23): the single hand-off of signing capability; a gas-payer gate can be enforced by what `executorDeps` is allowed to build (e.g. no SignerUser for EVM).",
+  "DelegatedSignerProvider.create(namespace) (delegated-signer.ts:28; kms-signer.ts:166-169) decides the delegate/session address used in compileWorkflowGrant (workflow-grants.ts:50-53) and compileGrant (adapters.ts:106-107).",
+  "prepareSubmission (pg-store.ts:539-573): the one transaction that commits signed bytes and allocates executor nonces — natural fail-closed checkpoint for a `submission.from === grant.wallet_address` / `kind !== 'EVM_REDEMPTIONS'` invariant, plus a DB trigger on delegated_execution_steps.submission.",
+  "stepCapability (capabilities.ts:41-80) and ENFORCEMENT matrix (85-97): mechanism/template registry; new mechanisms (e.g. EVM_USER_OPERATION_V07, EVM_WALLET_SENDCALLS, SOLANA_OWNER_PRESIGNED) are declared here and in MECHANISMS (15) + migration CHECKs (0011:172, 389).",
+  "ADAPTERS registry (adapters.ts:239) keyed by Mechanism: enrollment/verification/revocation per mechanism.",
+  "workflow-grants planWorkflowGrants/workflowScopeProblem (95-152, 161-202) and erc7710.workflowCallData (374-397): the exact-call planner with guaranteed-minimum bindings; reusable as the 'exact calls to pre-sign' planner for UserOperations/wallet batches (WorkflowCall already covers approve/transfer/native/swap/supply/borrow/repay/withdraw).",
+  "stepPolicyViolation (policy.ts:52-101) is sender-agnostic (checks chain, targets, amounts, recipient=wallet, slippage, HF, grant need) — reusable unchanged for user-signed submissions.",
+  "Config flags (config.ts:50-113): FLOFI_DELEGATION, FLOFI_DELEGATION_HARNESS/_URL, FLOFI_DELEGATION_RPC_<id>, FLOFI_PASSKEY_ORIGIN, FLOFI_DELEGATED_SIGNER, FLOFI_KMS_REGION, FLOFI_KMS_EVM_KEY_ARN, AWS_* presence, FLOFI_DELEGATED_SIGNER_DIR, FLOFI_DELEGATED_EXECUTION, FLOFI_DELEGATION_MAINNET_CHAINS (+ FLOFI_DELEGATION_DISPATCH_TOKEN_SHA256 http.ts:27, FLOFI_AUTOMATION_TEST_CLOCK, FLOFI_AUTOMATIONS, FLOFI_WORKFLOW_RUNS, API_BASE_URL for remote-api). New per-chain bundler/EntryPoint settings and a gas-payer mode flag would be parsed here with the same invalid()-fail-closed pattern.",
+  "DELEGATION_OPERATIONS closed contract (operations.ts:22-24) and RunDelegationOps (workflow-run-surface.ts:51-69): where new owner operations (e.g. submit pre-signed UserOps / wallet batch ids) are added for both Chat and Canvas.",
+  "AuthorizationPlan (workflow-runs/authorization-plan.ts:33-48, 115-120): the interaction-count surface (walletSignatures per chain, passkeyAssertions, enrollments) consumed by Chat/Canvas copy; objective (C) honest counting plugs in here.",
+  "Browser signing (components/delegation-browser.ts:56-96): EIP-1193 provider access point for eth_signTypedData_v4 / eth_sendTransaction / Solana signTransaction; wallet_sendCalls / signAllTransactions would be added beside signWorkflowGrant.",
+  "Work handlers (executor-runtime.ts:27-49) and sweep (52-66): new work kinds (e.g. relay/observe user submissions) register here; DELEGATION_WORK_KINDS (runtime.ts:28)."
+ ],
+ "gaps": [
+  "(A) GAS PAYER: every EVM delegated submission is sent and paid by the executor EOA: signEvmCalls builds txs for the session address (drivers.ts:100-123), `eth_estimateGas` is run with `from: ctx.grant.sessionAddress` (108), and the runbook §3 instructs funding EXECUTOR with ETH (docs/deploy/SINGLE-AUTH-MAINNET-ACTIVATION.md:49-54). No code path lets the user pay gas for a delegated step; no gas-payer invariant, check, or evidence exists in executor.ts/drivers.ts/pg-store.ts.",
+  "(A) Nonce-fill transactions are executor-paid too (fillStaleNonces drivers.ts:134-150, invoked executor.ts:371-373, 392-393): removing the executor sender removes this mechanism and its reconciliation twin `nonceConsumed` (177-182).",
+  "(A) The ERC-7710 design makes the executor the required caller: Redeemer caveat = [session] and delegate = session (erc7710.ts:418; adapters.ts:106-107), enforcer model checks `redeemer: ctx.grant.sessionAddress` (drivers.ts:85), reconciliation demands RedeemedDelegation(owner, session) (197-200, 271-272, 354). A user-signed UserOperation/wallet batch would have the user's own account as sender executing the calls directly, so the delegation-to-executor becomes unnecessary for those paths; the existing on-chain guarantees (ExactCalldata/IdEnforcer once-only, LimitedCalls, Timestamp) would have to be re-established by the pre-signed artifact itself (fixed calldata, EntryPoint 2D nonces, validUntil) — none of that exists.",
+  "(A) No EIP-5792 / ERC-4337 / pre-signed-user-tx / bundler code anywhere in the delegated stack or packages (greps: only wallet/flofi-evm-provider.test.ts:60 lists 'wallet_sendCalls' as a forbidden method; no EntryPoint address, UserOperation packing, eth_sendUserOperation, or bundler transport). chains.ts allowlists have no bundler methods.",
+  "(A) KMS provider is EVM-only and its only purpose is signing executor transactions (kms-signer.ts:171-184) plus providing the delegate address (166-169); boundaries.test.ts:52-54 pins that only drivers.ts/executor-runtime.ts sign — any change to who signs must update that test.",
+  "(B) Solana is not first-class: production Solana delegation refused (capabilities.ts:76 SOLANA_DELEGATED_BUILDER_NOT_IMPLEMENTED; kms-signer.ts:185); only the MOCKED fixture driver exists and it makes the session key the fee payer (drivers.ts:416). planWorkflowGrants refuses non-eip155 (workflow-grants.ts:102 WORKFLOW_GRANT_NAMESPACE_UNSUPPORTED) and authorization-plan.ts:98,105 reports WORKFLOW_GRANT_NAMESPACE_UNSUPPORTED for any Solana step. No signAllTransactions or durable-nonce code in apps/reference-dapp/src or packages (only an i18n string pt-wallet.ts:111 and a comment in state/lending-store.tsx:47).",
+  "(B) Cross-chain dependent amounts: bridge steps are refused for delegation (capabilities.ts:44-48 BRIDGE_ROUTE_UNAVAILABLE / DELEGATION_TEMPLATE_NOT_IMPLEMENTED / DELEGATED_TARGET_SCOPE_UNAVAILABLE); bindings across chains are refused (workflow-grants.ts:114 WORKFLOW_BINDING_NOT_EXACT; authority.ts:126-130 and workflow-grants.ts:240-243 WORKFLOW_BINDING_WALLET_MISMATCH; authorization-plan.ts:94-97). The Credential path narrows `previous.output.amount` only from the producer's reconciled `received` on the same chain and wallet (executor.ts:451-480); workflow grants fix it to the signed guaranteed minimum (workflow-grants.ts:108-119). No reconciliation of a bridge delivery on a destination chain feeds a delegated consumer.",
+  "(B) Step shape limits: inputs.length === 1 (capabilities.ts:55,65; workflow-grants.ts:106), max 4 steps in DelegatedAutomationInput (definition.ts:47) and step_index 0..7 in the DB (0011:385), WORKFLOW_GRANT_MAX_CALLS = 16 per chain (erc7710.ts:369); only USDC⇄WETH swaps at the 0.05% tier (profiles.ts:33-35) and registered Aave reserves; Credential schema limits networks to base-sepolia/ethereum-sepolia/arbitrum-one and solana-devnet (definition.ts:78,87).",
+  "(C) Interaction counting: authorization-plan.ts:117 reports walletSignatures = max(1, chains) and passkeyAssertions 0 but never counts the one-time EIP-7702 upgrade (enrollments[].active is always null, line 90) nor wallet_switchEthereumChain prompts (delegation-browser.ts:73), and its notes (110-111) state each step pays its own network fees — honest for today, but no model exists for user-paid batches/UserOps per chain or Solana signAllTransactions.",
+  "(C) Workflow grants are collected per chain upfront (service.ts:552-569, signatures verified 677-692) which already matches 'one authorization per chain', but the signed artifact authorizes the EXECUTOR to redeem, not the user to pay; the review view exposes `executor: g.sessionAddress` (service.ts:645) as the delegate.",
+  "Evidence honesty: delegated reconciliation evidence records `redeemer` and provenance (drivers.ts:263-264, 345-346) but not gasPayer/gasCostWei; the owner-signed public flows do (server/public-testnet-service.ts:1499, 1573 OWNER_SUBMISSION_RELAYED_FEE_PAID_BY_RELAYER; domain/execution-evidence.ts:111). `evidenceLevel` is at most PUBLIC_UNVERIFIED (executor.ts:441).",
+  "State-machine coupling: SUBMISSION_PREPARED semantics (exact signed bytes persisted before broadcast, re-broadcast only) assume FloFi holds the signed bytes; for wallet_sendCalls the wallet broadcasts (FloFi only learns a batch id), so the step would need a new pre-broadcast/observe state or a different `submission` contract; the DB CHECK (0011:400) requires `submission` non-null from SUBMISSION_PREPARED on.",
+  "Config: FLOFI_DELEGATED_EXECUTION requires a signer (config.ts:109 FLOFI_DELEGATED_EXECUTION_WITHOUT_SIGNER) — a relay-only executor (no signing) is currently impossible to configure; executionAvailability (118-120) equates 'no signer' with 'cannot execute'."
+ ],
+ "testsAndHarnesses": [
+  "/home/user/FloFi/apps/reference-dapp/src/delegation/delegation.test-harness.ts (delegationHarness: disposable loopback PostgreSQL + MOCKED EVM/Solana doubles + memory signer + in-memory owner wallets evmWallet()/solanaWallet() signing EIP-712 digests and Solana messages + software passkey; registerPasskey/enrollEvm/enrollSolana/authorize/trigger/drain; `intercept.evm` RPC hook; controllable clock).",
+  "/home/user/FloFi/apps/reference-dapp/src/delegation/harness/evm-double.ts (createEvmDouble: MOCKED chain with ERC-20 balances/allowances, Uniswap-like router/quoter, EIP-7702 designators, DelegationManager.redeemDelegations with the erc7710 enforcer model, nonces/receipts/txs, control.upgrade/fund) and harness/solana-double.ts (SPL token accounts, ApproveChecked/Revoke, fixture swap program), harness/constants.ts.",
+  "/home/user/FloFi/apps/reference-dapp/src/delegation/executor.pg.test.ts (budget limits, revocation races, crash/recovery re-broadcast, reverted swap, rebind, duplicate delivery, expiry), adversarial.pg.test.ts (compromised session key vs on-chain ceiling; 10 concurrent reservations; passkey replay), aave-delegation.test.ts (mainnet opt-in, Swap→Supply→Borrow drivers, gas estimate +50%, Borrow send window, re-verification accounting), workflow-grants.test.ts (guaranteed-minimum bindings, scope validity), erc7710-vector.test.ts (real Base Sepolia redemption vector), boundaries.test.ts (import-closure signing boundary, transport allowlists, config fail-closed incl. KMS), credentials.pg.test.ts, migration.pg.test.ts, compatibility.pg.test.ts, domain.test.ts, automation-source.test.ts.",
+  "/home/user/FloFi/apps/reference-dapp/src/workflow-runs/workflow-run.test-harness.ts and delegated-run.pg.test.ts (run activation through workflowRunWalletReview/Sign with activateDelegatedWithin; runner mirroring), cancel-run.pg.test.ts, authorization-plan.test.ts.",
+  "/home/user/FloFi/apps/reference-dapp/backend/worker-signals.pg.test.ts and cloud-execution.pg.test.ts (worker wiring), src/server/delegation-operation.test.ts (BFF/remote forwarding, DELEGATION_OUTCOME_UNKNOWN).",
+  "Signer doubles: packages/reference-executor/src/delegated-signer.ts memorySignerProvider / localDisposableSignerProvider; kms-signer.ts supports `endpoint` + `loopbackForTests` + injected `fetch` for a loopback KMS double (config 124-127).",
+  "Owner-signed flow harnesses with gasPayer evidence patterns: src/server/public-testnet-service.ts (receipt.gasPayer 1499, relayed-fee finding 1573) and arbitrum-runtime.test.ts:546-641 (DELEGATED_SINGLE submissionKind with relayer gasPayer) — reusable model for honest gas-payer evidence."
+ ],
+ "risks": [
+  "Removing the executor as sender invalidates the whole ERC-7710 redemption model (Redeemer/delegate = executor): a half-migration where workflow grants are still collected but user-funded submission is used would leave signed delegations that authorize the executor address for nothing, or worse, both paths live. Decide explicitly whether ERC-7710 grants survive (e.g. only for scheduled automations) or are retired for runs.",
+  "Fail-closed gating must be enforced below the driver layer (prepareSubmission / chains.ts allowlist / DB trigger), because executor.ts is generic and will happily persist and broadcast any `submission` a driver returns.",
+  "Pre-signed exact user artifacts (UserOps, EIP-1559 txs) fix calldata at signing: dependent amounts must stay 'signed guaranteed minimum' (workflow-grants.ts:108-119) or use on-chain balance-reading helpers; estimated amounts cannot be pre-signed honestly. Pre-signed raw EIP-1559 txs from the user EOA also freeze fees and sequential nonces and are fragile under fee spikes or any intervening user tx.",
+  "Nonce model: the advisory-lock allocation (pg-store.ts:559-565) is keyed on the executor; user-signed UserOps need EntryPoint 2D nonce keys per chain and reconciliation via eth_getUserOperationReceipt; wallet_sendCalls needs wallet_getCallsStatus polling with the wallet as broadcaster — reconciliation's RedeemedDelegation assertion (drivers.ts:197-200) must be replaced per kind.",
+  "KMS key remains funded with ETH per the runbook; after the change the balance and the Sign permission become attack surface with no purpose — rotation/decommission steps and the `delegation.worker_enabled` executor-address logging need revisiting.",
+  "boundaries.test.ts, migration CHECK constraints (mechanism/state enums, submission non-null), and schema-compatibility certificates (docs/deploy/RELEASE-SINGLE-AUTH-0021-0022.md) will all break on new mechanisms/kinds — expect a migration 0023 and certificate updates.",
+  "Solana first-class needs a production signer path for the owner only (signAllTransactions in the browser); any server-side Solana key (KMS Ed25519) would recreate the gas-payer problem; durable nonces require nonce accounts the user funds and a nonce-advance reconciliation."
+ ],
+ "openQuestions": [
+  "Should ERC-7710 workflow grants be retired entirely for workflow runs (user account executes the batch itself) or kept with a non-executor delegate (e.g. delegate = the user's own account for self-redemption is meaningless) — which MetaMask smart-account surface (EIP-7702 stateless delegator) exposes ERC-4337 validateUserOp for user-signed UserOps, and which EntryPoint version (v0.7/v0.8) is deployed on Ethereum/Base/Arbitrum? Not verified in this repo (no EntryPoint constants exist).",
+  "For wallet_sendCalls batches the wallet broadcasts: what does FloFi persist at SUBMISSION_PREPARED (only the batch id?) and how is 'exact bytes committed before broadcast' preserved? Does the existing step trigger (0011:404-430) need a new pre-broadcast state?",
+  "Scheduled automations (DELEGATED_WITH_LIMITS occurrences at future times) cannot be pre-signed with fixed calldata unless amounts are fixed at authorization; is user-funded execution for automations in scope, or do automations keep ERC-7710 with a different (non-gas-paying) model, e.g. paymaster-less? (The build says 'every user pays their own gas'; a sponsoring executor is excluded.)",
+  "Which Solana wallets in FloFi's registry support signAllTransactions and durable nonces (apps/reference-dapp/src/wallet/solana-wallet.ts was not read)?",
+  "Did not read: src/workflow-runs/service.ts in full, src/mcp/* and src/channels/* entry points that construct the run before /approve, packages/reference-compiler/src/spl-delegation.ts and solana.ts (durable-nonce support unknown), docs/deploy/RELEASE-SINGLE-AUTH-0021-0022.md, scripts/workflow-grant-mainnet-probe.mjs."
+ ]
+}

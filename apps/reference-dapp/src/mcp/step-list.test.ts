@@ -76,7 +76,8 @@ describe('BUILD-MCP-002 step-list contract', () => {
     const gates = await evaluateWorkflowGates(w, runtime(), readHandoffPolicy({}));
     expect(gates).toMatchObject({ handoff: { allowed: false, reason: 'WORKFLOW_RUNS_NOT_ENABLED' }, supportedByCode: { execute: true, plan: 'SEQUENTIAL',
       steps: [{ index: 0, execute: true, deploymentEnabled: true }, { index: 1, execute: true, deploymentEnabled: true }],
-      modes: { confirmEachStep: null, delegated: 'DELEGATION_NOT_ENABLED' } }, enabledByDeployment: { enabled: false, reason: 'WORKFLOW_RUNS_NOT_ENABLED' },
+      // BUILD-FLOFI-UNIVERSAL-WORKFLOW-002: the executor-funded delegated mode is retired on every deployment (S1).
+      modes: { confirmEachStep: null, delegated: 'EXECUTOR_FUNDED_GAS_RETIRED' } }, enabledByDeployment: { enabled: false, reason: 'WORKFLOW_RUNS_NOT_ENABLED' },
       enabledByPolicy: { enabled: true } });
     expect(await evaluateWorkflowGates(w, runtime(true), readHandoffPolicy({}))).toMatchObject({ handoff: { allowed: true, reason: null } });
     const mixed = await evaluateWorkflowGates(workflow({ version: 2, steps: [BRIDGE, SOLANA] }), runtime(), readHandoffPolicy({}));

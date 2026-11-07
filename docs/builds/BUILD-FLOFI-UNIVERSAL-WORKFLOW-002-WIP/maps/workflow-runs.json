@@ -1,0 +1,362 @@
+{
+ "subsystem": "workflow-runs",
+ "summary": "A workflow run (table workflow_runs, migration 0015) is the server-side sequencer for ONE approved multi-step workflow: it is created once per SEQUENTIAL approval handoff when the owner claims it on /approve with a proven wallet for every namespace the workflow uses (eip155 and/or solana), binds those wallets and the canonical strategy+hash immutably, and then executes steps strictly in order, each only after the previous step is RECONCILED. Two mutually exclusive modes exist: CONFIRM_EACH_STEP, where every step is re-composed alone, re-gated, and loaded into the ordinary single-step signing surface so the owner's own wallet signs and the BROWSER submits (EVM eth_sendTransaction from the injected/FloFi provider; Solana wallet-standard signTransaction with the server broadcasting the signed bytes), after which the flow's `report`/`submit` endpoint records the hash and the run learns it by reading the flow's durable run record as the step's wallet (observe.ts); and DELEGATED, where the owner signs one EIP-712 ERC-7710 \"workflow grant\" per EVM chain (MetaMask Delegation Framework v1.3, EIP-7702 smart account required) and the BUILD-AUTOMATION-002 executor on the Railway worker signs `redeemDelegations` transactions from a shared KMS session EOA that pays all gas. The authorization plan (authorization-plan.ts) is a pure function of the composed workflow, the gates (mcp/execution.ts), the deployment's delegation facts and the owner's grants; it reports per-mode availability with closed reason codes (WORKFLOW_RUNS_NOT_ENABLED, DELEGATION_NOT_ENABLED, DELEGATED_SIGNER_UNAVAILABLE, WORKFLOW_GRANT_NAMESPACE_UNSUPPORTED for any Solana step, WORKFLOW_BINDING_NOT_EXACT for cross-chain or non swap/borrow producers, WORKFLOW_SLIPPAGE_UNSUPPORTED >3%, WORKFLOW_GRANT_TOO_MANY_CALLS >16, plus stepCapability codes such as DELEGATION_FRAMEWORK_NOT_DEPLOYED for Robinhood Chain, MAINNET_DELEGATION_DISABLED, DELEGATED_TARGET_SCOPE_UNAVAILABLE for bridges); EVM_ACCOUNT_NOT_UPGRADED and FLOFI_WALLET_METHOD_UNSUPPORTED arise at signing time (adapters.verifyEnrollment / the Privy FloFi Wallet provider), not in the plan. Dependent amounts are typed bindings `{step, amountFrom}` on one exact asset identity; in confirm mode the runner resolves min(cap, producer.reconciled received − earlier consumers' spend) from the producer step's stored outcome (received-amounts.ts adapts each flow's record shape, including the universal bridge's destination delivery), rewrites the consumer step's strategy, and the step gets a new per-step workflow hash; in delegated mode the amount is fixed at signing to the producer's signed minimum output and never narrowed. Advancement is a deduplicated durable work item (`workflow-run.advance`) driven by `advanceRun`, which is idempotent compare-and-set over DB-trigger-enforced state machines; the worker observes and mirrors but can never make a step READY (it has no requester policy), so the owner must return to /approve (continue) to load each confirm-mode step. The HTTP surface is Next.js server actions in app/approve-action.ts over platform/approve.ts (status/continue/start/cancel/resume/review/authorize), with delegated review/sign/revoke forwarded on the remote runtime to POST /v1/delegation/:method on the Railway API. Chat surfaces (MCP get_approval_status, channels) and the Editor (EDITOR_SESSION requester, migration 0022) all converge on the same handoff → run → /approve path and read the same RunView. There is no EIP-5792, ERC-4337 UserOperation, user-signed EIP-7702, Solana signAllTransactions or durable-nonce code anywhere in the repository (grep returned only evidence JSON), the Canvas keeps a separate client-side sequence model (state/workflow-store.tsx) that is not the server run, and the run data model has no notion of execution groups, gas payer, or estimated/guaranteed/actual amount triads.",
+ "keyFiles": [
+  {
+   "path": "/home/user/FloFi/apps/reference-dapp/src/workflow-runs/service.ts",
+   "role": "Run operations every surface shares: create-on-claim, mode start, current step loading, observe, cancel, resume, public RunView",
+   "keySymbols": "workflowRunsEnabled:31, WorkflowRunDeps:33-39, assertRunWallets:44-47, ensureForClaim:50-62, ownerAuthorizationPlan:65-71, startConfirm:74-81, StepProposal:83-84, currentStep:89-108 (READY→AWAITING_OWNER at 102, advanceLater 5s at 106), observeRun:114-118, cancelRun:121-124, resumeRun:127-138, RunStepView/RunView:140-152 (nextAction union at 151), runView:158-181"
+  },
+  {
+   "path": "/home/user/FloFi/apps/reference-dapp/src/workflow-runs/runner.ts",
+   "role": "advanceRun: idempotent CAS state advancement; confirmPass (owner-signed) and delegatedPass (mirrors delegated execution)",
+   "keySymbols": "RunnerDeps:31-42 (policyFor null on worker:34-37), advanceRun:53-63 (MAX_PASSES 16), stopBefore:69-76, confirmPass:78-167 (binding resolution 97-122, policy gate 123-124, re-gate 126-130, wallet namespace 131-132, READY 133-136, observe 141-163), afterReconciled:170-176, delegatedOutcome:179-186, resolvedStrategy:187-192, delegatedPass:194-232 (state map 222-223, SKIPPED on FAILED 226-227)"
+  },
+  {
+   "path": "/home/user/FloFi/apps/reference-dapp/src/workflow-runs/authorization-plan.ts",
+   "role": "Pure authorization plan: per-mode availability, counts, enrollments, binding semantics, reason codes",
+   "keySymbols": "DelegationFacts:26, StepAuthorization:27-32, AuthorizationPlan:33-48, delegableByCode:53-60, authorizationPlan:63-121 (confirmReason 84-85, namespaces 86, enrollments per chain|mechanism 88-91, inexact binding rule 94-97, solana 98, steep 100, callsPerChain/crowded 101-103, delegatedReason chain 104-106, counts 116-117, recommended 119)"
+  },
+  {
+   "path": "/home/user/FloFi/apps/reference-dapp/src/workflow-runs/state-machine.ts",
+   "role": "Run/step/mode state machines, terminal sets, windows, work kind",
+   "keySymbols": "RUN_STATES:16, STEP_STATES:18, RUN_MODES:20 ['CONFIRM_EACH_STEP','DELEGATED'], RUN/STEP transition tables:23-38, canMoveRun/canMoveStep:39-40, TERMINAL_RUN:41, MAYBE_SUBMITTED:44, CONFIRM_RUN_SECONDS 7d:47, DELEGATED_AUTHORIZATION_SECONDS 24h:49, ADVANCE_RETRY_MS 20s:51, WORKFLOW_RUN_ADVANCE_KIND:52, canEndWorkflow:55-58"
+  },
+  {
+   "path": "/home/user/FloFi/apps/reference-dapp/src/workflow-runs/pg-store.ts",
+   "role": "PostgreSQL run store: create-once per handoff, CAS transitions under run row lock, mode-choice transactions, work-item enqueue",
+   "keySymbols": "WalletSet:19, BoundResolution:21-23, StepOutcome:25-30 (kind OWNER_RUN|DELEGATED_STEP, transactions, evidence, spent, received), RunRecord:31-35, RunStepRecord:36-39, create:82-95, byHandoff:100, forOwner:105, transition:120-132, stepTransition:134-150 (locks run, refuses CANCELLED), cancel:152-168, startConfirm:173-191 (revokes unsigned delegated auth 178-185), activateDelegatedWithin:196-207 (enqueues delegation.execute-run + advance), advanceLater:209, openWithoutWork:211-215"
+  },
+  {
+   "path": "/home/user/FloFi/apps/reference-dapp/src/workflow-runs/observe.ts",
+   "role": "Owner-signed step observation: reads the step's flow runs as the step's wallet and yields RECONCILED/UNCERTAIN/FAILED/OPEN/UNAVAILABLE",
+   "keySymbols": "StepVerdict:24-28, reviewedWorkflows:33-36, observeOwnerStep:40-82 (candidates since claimedAt-1s:43-46, exact semanticWorkflowHash match:56, evidence read:58-62, amounts:63, reconciled rule:72-73, duplicates:74, pending:75-76, failed-after-submit:78-79)"
+  },
+  {
+   "path": "/home/user/FloFi/apps/reference-dapp/src/workflow-runs/received-amounts.ts",
+   "role": "Adapters from each flow's durable record shape to canonical spent/received asset-keyed amounts for bindings",
+   "keySymbols": "amountsFromOwnerRecord:109-195 (explicit receivedAmounts/spentAmounts 112-113, Solana review/observations 115-127, EVM quote+outcome 128-137, universal bridge record.received+route 139-152, Jupiter evidence 154-169, public EVM swap quote+observation 171-183, Router destination 185-193)"
+  },
+  {
+   "path": "/home/user/FloFi/apps/reference-dapp/src/workflow-runs/worker.ts",
+   "role": "Work handler for workflow-run.advance (policyFor null) and the sweep (expire PENDING, re-arm open runs)",
+   "keySymbols": "WORKFLOW_RUN_WORK_KINDS:17, workflowRunHandlers:20-30, sweepWorkflowRuns:33-40, workflowRunWorkerParts:43-49"
+  },
+  {
+   "path": "/home/user/FloFi/apps/reference-dapp/src/workflow-runs/facts.ts",
+   "role": "Deployment facts: FLOFI_WORKFLOW_RUNS + delegation config → SequenceFacts",
+   "keySymbols": "sequenceFacts:14-17"
+  },
+  {
+   "path": "/home/user/FloFi/apps/reference-dapp/backend/workflow-run-worker.ts",
+   "role": "Railway worker loader: builds embedded MCP runtime with owner-scoped run readers and installs the advance handler",
+   "keySymbols": "loadWorkflowRunWorker:12-18 (embeddedMcpRuntime + ownerRunReaders:16)"
+  },
+  {
+   "path": "/home/user/FloFi/apps/reference-dapp/backend/main.ts",
+   "role": "Process entry: api loads delegation routes; worker loads delegation executor + workflow-run handlers and merges handler registry",
+   "keySymbols": "delegation api load:123-125, delegation worker:149-155, workflow runs worker:159-164, handlers merge:165, sweep chain:172-173"
+  },
+  {
+   "path": "/home/user/FloFi/apps/reference-dapp/src/platform/workflow-run-approvals.ts",
+   "role": "/approve operations for a sequence: claim/status/continue/start/cancel/resume/review/authorize; RunDelegationOps seam",
+   "keySymbols": "RunDelegationOps:30-38, WorkflowRunSurface:39, WorkflowRunClaim:44-45 (stepWallet), SequentialProposal:47-48, proposalOf:50-58, claimSequential:61-68 (auto-start confirm when delegated unavailable 63-66), ownedRun:70-75, statusSequential:77, continueSequential:81, startSequential:84, cancelSequential:88-92 (DELEGATED → revoke), resumeSequential:93, authorizationReviewSequential:98-106, authorizeSequential:108-120"
+  },
+  {
+   "path": "/home/user/FloFi/apps/reference-dapp/src/platform/approve.ts",
+   "role": "Approval surface: claim/apply/view/resume plus the workflowRun* functions the server actions call",
+   "keySymbols": "resumeApproval SEQUENTIAL branch:102-105, viewApproval run status:116-123, claimApproval:148-167 (all namespaces proven 154, claimSequential 164), applyApproval SEQUENTIAL branch:178-185 (step must be AWAITING_OWNER with exact hash 181), runContext:196-204 (forRunOwner), workflowRunStatus:206, workflowRunContinue:211, workflowRunStart:216, workflowRunCancel:221, workflowRunResume:226, workflowRunReview:231, workflowRunAuthorize:240-249 (marks link APPLIED 247), shareApproval:252"
+  },
+  {
+   "path": "/home/user/FloFi/apps/reference-dapp/src/app/approve-action.ts",
+   "role": "The HTTP surface: Next.js 'use server' actions over /approve (cookies → proven wallets)",
+   "keySymbols": "claimApprovalHandoff:79-84, markApprovalApplied:90-95, workflowRunStatusHandoff:110, continueWorkflowRunHandoff:112, startWorkflowRunHandoff:114, cancelWorkflowRunHandoff:116, resumeWorkflowRunHandoff:118, reviewWorkflowRunAuthorization:120, authorizeWorkflowRunHandoff:122-124"
+  },
+  {
+   "path": "/home/user/FloFi/apps/reference-dapp/src/server/workflow-run-surface.ts",
+   "role": "Builds WorkflowRunSurface per request; chooses embedded vs remote delegation ops",
+   "keySymbols": "workflowRunSurface:30-39 (policyFor per requester kind, CLOSED fallback 28), delegationParts:46-71 (remote → delegationOperation forwarding 47-57; embedded → ownerDelegationService 58-70)"
+  },
+  {
+   "path": "/home/user/FloFi/apps/reference-dapp/src/server/delegation-operation.ts",
+   "role": "BFF boundary: proven wallets from HttpOnly cookies, remote POST to Railway API or in-process operation",
+   "keySymbols": "delegationOperation:112-154 (remote fetch 122-144, headers x-flofi-workflow-owner/x-flofi-wallet-principals 126-127, DELEGATION_OUTCOME_UNKNOWN 136/143), delegationAvailability:157-170"
+  },
+  {
+   "path": "/home/user/FloFi/apps/reference-dapp/src/delegation/operations.ts",
+   "role": "Closed list of owner delegation operations incl. run ops; owner/proven checks",
+   "keySymbols": "DELEGATION_OPERATIONS:192-195, ownedRun:217-224 (EVM wallet must be proven), assertChoosing:225-227, runDelegationOperation:232-283 (workflowRunWalletReview 236-241, workflowRunWalletSign 242-254, workflowRunWalletRevoke 255-260)"
+  },
+  {
+   "path": "/home/user/FloFi/apps/reference-dapp/src/delegation/api.ts",
+   "role": "Railway API route POST /v1/delegation/:method",
+   "keySymbols": "delegationApiRoutes:30-66 (pattern 32, availability 34-37, owner/proven headers 39-42, idempotency 55-64)"
+  },
+  {
+   "path": "/home/user/FloFi/apps/reference-dapp/src/delegation/service.ts",
+   "role": "Delegation service: run wallet review (plans grants, creates session keys), wallet sign (verifies EIP-712 signatures, activates run), revoke",
+   "keySymbols": "workflowRunAuthorizationReview (passkey path, legacy):451-485, workflowRunAuthorizationSign:490-508, workflowRunWalletReview:516-648 (stale re-plan 523-529, planWorkflowGrants 536, credential 541, per-chain grant + signer.create 553-568, race settlement 581-592, review view 616-647), workflowRunWalletSign:656-697 (retry idempotency 663-665, verifyEnrollment 685, settleEnrollment 687, activate+onActivated 693-694), workflowRunAuthorizationRevoke:699-703"
+  },
+  {
+   "path": "/home/user/FloFi/apps/reference-dapp/src/delegation/workflow-grants.ts",
+   "role": "Per-chain exact-call grant planning/verification for delegated runs; the existing per-chain grouping notion",
+   "keySymbols": "SerialWorkflowCall:29-33, EvmWorkflowScope:34, WORKFLOW_GRANT_WINDOW_MS 1h:37, WORKFLOW_GRANT_SIGN_MARGIN_MS:39, compileScope:50-53, pinnedGroup:58-62, ChainPlan:88, planWorkflowGrants:95-152 (namespace refusal 102, binding exactness 111-119, quote+minimum 128-136, borrow never bound 144, max calls 149), workflowScopeProblem:161-202, workflowGrantBindings:221-245"
+  },
+  {
+   "path": "/home/user/FloFi/apps/reference-dapp/src/delegation/capabilities.ts",
+   "role": "Per-step delegation capability matrix and mechanism list",
+   "keySymbols": "MECHANISMS:15, CapabilityMode:17, TemplateNeed:19-25, MAINNET:30, FRAMEWORK_NOT_DEPLOYED {eip155:4663}:35, stepCapability:41-80 (bridge refusals 44-48, framework 49, mainnet opt-in 50, Aave 52-62, swap 63-73, Solana 75-79)"
+  },
+  {
+   "path": "/home/user/FloFi/apps/reference-dapp/src/delegation/steps.ts",
+   "role": "StepRequirement derivation from canonical IR (inputs/outputs/chain/namespace), narrowing for bound steps",
+   "keySymbols": "assetKey:114-115, StepRequirement:117-127, WorkflowRequirement:128-131, stepOf:141-165, narrowedStep:177-181, requirementOf:189-198"
+  },
+  {
+   "path": "/home/user/FloFi/apps/reference-dapp/src/delegation/config.ts",
+   "role": "Delegation configuration incl. signer kinds (aws-kms, remote-api) and mainnet opt-in",
+   "keySymbols": "SignerChoice:233-236, readDelegationConfig:248-311 (mainnetChains 253-254, MAINNET_ONLY_PRODUCT 258, aws-kms 292-299, remote-api 300-303), executionAvailability:316-318"
+  },
+  {
+   "path": "/home/user/FloFi/apps/reference-dapp/src/delegation/adapters.ts",
+   "role": "ERC-7710 adapter: prepareEnrollment (typed data), verifyEnrollment (signer, EIP-7702 designator, framework code)",
+   "keySymbols": "prepareEnrollment workflow branch:99-104, verifyEnrollment:112-131 (ENROLLMENT_SIGNER_MISMATCH 118, EVM_ACCOUNT_NOT_UPGRADED retryable 120, DELEGATION_FRAMEWORK_NOT_DEPLOYED 123, DELEGATION_DISABLED 125)"
+  },
+  {
+   "path": "/home/user/FloFi/apps/reference-dapp/src/delegation/drivers.ts",
+   "role": "Step drivers: executor-signed EVM redemptions (gas paid by session EOA), broadcast, receipts, swap driver",
+   "keySymbols": "signEvmCalls:98-128 (from = grant.sessionAddress, to = delegationManager, eth_estimateGas 108, signer.signEvmDigest 120), fillStaleNonces:134-150 (executor-funded nonce fillers, eth_sendRawTransaction 147), broadcastEvm:157-170, evmReceipts:183-195, evmSwapDriver:201+ (EVM_ACCOUNT_NOT_UPGRADED 209, QUOTE_BELOW_SIGNED_MINIMUM 222)"
+  },
+  {
+   "path": "/home/user/FloFi/apps/reference-dapp/src/delegation/executor.ts",
+   "role": "Delegated executor state machine; run-sourced executions; binding narrowing against reconciled producer facts",
+   "keySymbols": "DelegatedRunSource:46-47, ExecutorDeps:49-58, verifyAuthorityChain:92-96, verifyWalletWorkflowChain:151-189, executeWorkflowRun:229-240, drive:243-284, run loop:304-360 (boundStep 315, simulate 326, sessionNextNonce 342, sign 344, prepareSubmission 349), boundStep:451-480 (exact pinned → WORKFLOW_BINDING_INSUFFICIENT_RECEIVED 471-474), recoveryContext:483+"
+  },
+  {
+   "path": "/home/user/FloFi/apps/reference-dapp/src/delegation/executor-runtime.ts",
+   "role": "Executor wiring: SignerUser handed only here; delegation.execute-run handler; sweep",
+   "keySymbols": "executorDeps:23-30, delegationHandlers:34-56 (DELEGATION_EXECUTE_RUN_KIND 46-54), sweepDelegation:59-73"
+  },
+  {
+   "path": "/home/user/FloFi/apps/reference-dapp/src/delegation/runtime.ts",
+   "role": "Signer provider selection (memory/local/aws-kms), admin vs user split, transport purposes",
+   "keySymbols": "SignerAdmin/SignerUser:22-23, DELEGATION_WORK_KINDS:28, signerProvider:33-45, transportFor:52-58"
+  },
+  {
+   "path": "/home/user/FloFi/apps/reference-dapp/src/delegation/chains.ts",
+   "role": "Closed JSON-RPC method allowlists by transport purpose",
+   "keySymbols": "TransportPurpose:11, allowedMethods:17-23 (owner purpose on EVM = read only, no eth_sendRawTransaction:21), guarded:25-31, httpRpc:33-45"
+  },
+  {
+   "path": "/home/user/FloFi/apps/reference-dapp/src/delegation/authority.ts",
+   "role": "GrantScope/GrantView types (WORKFLOW scope kind), StepBinding, reusable-credential graph resolution",
+   "keySymbols": "GrantScope:20-32, GrantView:35-41, StepBinding:47-50 (exact flag), grantCoverage:60-94, resolveAuthorityGraph:102-142"
+  },
+  {
+   "path": "/home/user/FloFi/apps/reference-dapp/src/delegation/run-source.ts",
+   "role": "Work kind for run-sourced delegated executions",
+   "keySymbols": "DELEGATION_EXECUTE_RUN_KIND:6, WORKFLOW_RUN_ID:7"
+  },
+  {
+   "path": "/home/user/FloFi/apps/reference-dapp/src/delegation/pg-store.ts",
+   "role": "Delegation store records and run-execution lookups",
+   "keySymbols": "AuthorizationRecord:42-45, RevisionRecord:47-50, ExecutionRecord:52-55, StepRecord:56-59, activate onActivated:334/374, ensureRunExecution:455-462, executionForRun:463-466, steps:473-475"
+  },
+  {
+   "path": "/home/user/FloFi/apps/reference-dapp/src/mcp/execution.ts",
+   "role": "Gates: supportedByCode/enabledByDeployment/enabledByPolicy, execution plan kinds, sequence modes",
+   "keySymbols": "ENGINE_VERSION:31, FLOWS_WITH_EXECUTION_SWITCH:33-49, handoffFindings:61-65, HandoffPolicy/readHandoffPolicy:67-82, ExecutionPlan kinds:95-97, executionPlan:104-119, workflowPlan:128-135, SequenceModes:139, Gates:140-148, policyGate:151-162, evaluateGates:165-191, evaluateWorkflowGates:199-218"
+  },
+  {
+   "path": "/home/user/FloFi/apps/reference-dapp/src/engine/workflow-bindings.ts",
+   "role": "Typed amount bindings between v2 steps (one exact asset per consumer)",
+   "keySymbols": "WorkflowBindingInput:23, WorkflowBinding:26-28, CONSUMERS/PRODUCERS:32-33, stepInputs:45-61, stepOutput:69-81, validateBindings:86-107, boundAmount:113-117, decimalOf:119-123, boundStrategy:125-132"
+  },
+  {
+   "path": "/home/user/FloFi/apps/reference-dapp/src/platform/approvals.ts",
+   "role": "Handoff creation/verification, namespaces, approvalProgress (what MCP/channels read)",
+   "keySymbols": "planNamespace:89-91, planNamespaces:92-93, verifyHandoff:190, approvalView:209, ClaimedProposal:231, approvalProgress:327-341 (runView with outcomes = shareStatus 330)"
+  },
+  {
+   "path": "/home/user/FloFi/apps/reference-dapp/src/platform/handoff-store.ts",
+   "role": "mcp_handoffs records (plan jsonb, claimed wallet, shareStatus) and run-owner lookup",
+   "keySymbols": "HandoffRecord:33-45, forClaimant:71/173, forRunOwner:76/178-180 (plan->>'kind'='SEQUENTIAL')"
+  },
+  {
+   "path": "/home/user/FloFi/apps/reference-dapp/src/editor/approval.ts",
+   "role": "Editor (Canvas) as EDITOR_SESSION requester starting the same run path",
+   "keySymbols": "readEditorRunConfig:52-65, editorApprovalContributor:95-105, startEditorRun:116-136 (requires ≥2 steps 123-124, SEQUENTIAL only 130-133)"
+  },
+  {
+   "path": "/home/user/FloFi/apps/reference-dapp/src/components/workflow-run-panel.tsx",
+   "role": "Browser run panel: mode choice, one-time grant signing per chain, continue/resume/cancel, status poll",
+   "keySymbols": "WHY_NOT_ONCE codes:31-44, status poll 15s:61-68, prepareOnce:83-89, signOnce:91-97 (signWorkflowGrant per PENDING_SIGNATURE grant), lost-answer retry:101-106, choice UI:125-138, continue:159-161, resume:162-167, end:168-170, revoke:171-174"
+  },
+  {
+   "path": "/home/user/FloFi/apps/reference-dapp/src/components/approval-handoff.tsx",
+   "role": "/approve handoff UI: dual wallet proofs, claim → restoreWorkflow, apply (hash check), run panel mount",
+   "keySymbols": "proof/secondProof:118-121, apply effect:199-208, claim:218-228 (stepWallet 223), onRunProposal:230-233, WorkflowRunPanel mount:375"
+  },
+  {
+   "path": "/home/user/FloFi/apps/reference-dapp/src/components/delegation-browser.ts",
+   "role": "Browser signing helpers for grants (eth_signTypedData_v4 after wallet_switchEthereumChain)",
+   "keySymbols": "signWorkflowGrant:66-77, sendRevocation:79-83 (owner eth_sendTransaction), signSolanaWith:89-95"
+  },
+  {
+   "path": "/home/user/FloFi/apps/reference-dapp/src/state/universal-router-store.tsx",
+   "role": "Representative owner-signed flow store: EVM browser submission and Solana sign-then-server-submit",
+   "keySymbols": "executeEvm:213-285 (begin 240, nonce check 249-250, handoff 251, eth_sendTransaction 256, report HASH 263, UNKNOWN report 258), executeSolana:286-310 (signWithSolanaWallet 297, universalSubmit 309)"
+  },
+  {
+   "path": "/home/user/FloFi/apps/reference-dapp/backend/flows.ts",
+   "role": "Flow registry (FLOWS[flow].methods/evidence): report/submit endpoints the browser calls; status/evidence the run observes",
+   "keySymbols": "report/submit method declarations at 175,244,324,374,453,685,760,830-831,909,971; crosschain-universal methods 820-834 (report 829, submit 830, status 833)"
+  },
+  {
+   "path": "/home/user/FloFi/apps/reference-dapp/src/server/flow-runtime.ts",
+   "role": "Owner-scoped run readers the worker and embedded runtime use",
+   "keySymbols": "EmbeddedRuntime:44-45, ownerRunReaders:79-86 (listRuns 25 per flow/owner:82)"
+  },
+  {
+   "path": "/home/user/FloFi/apps/reference-dapp/src/mcp/runtime.ts",
+   "role": "McpRuntime contract (mode/info/run/runs/record/evidence/sequences) used by gates and observation",
+   "keySymbols": "McpRuntime:24-51, SequenceFacts:52, deploymentRuntime:76-90, embeddedMcpRuntime:169-185"
+  },
+  {
+   "path": "/home/user/FloFi/apps/reference-dapp/src/state/workflow-store.tsx",
+   "role": "Client-side Canvas sequence model (separate from server runs): runtimeWorkflow, completed steps, localStorage restore",
+   "keySymbols": "Store.runtimeWorkflow/sequence:80-85, completeSequenceStep:87, sequenceRestore:93, recordExecutedAction:99, SequenceView:111-114, readSequenceRecord:123-126 (only public/supply/solana-swap), sequenceRun/cursor/bound:204-217, localStorage persist:229, proveStored:231-243"
+  },
+  {
+   "path": "/home/user/FloFi/apps/reference-dapp/src/wallet/flofi-evm-provider.ts",
+   "role": "FloFi Wallet (Privy) EIP-1193 provider: only eth_sendTransaction bound to a reviewed run; other methods unsupported",
+   "keySymbols": "FLOFI_EVM_CHAINS:34, FloFiProviderError:38-41, unsupported 4200 FLOFI_WALLET_METHOD_UNSUPPORTED:43, sendTransaction:76+"
+  },
+  {
+   "path": "/home/user/FloFi/apps/reference-dapp/src/wallet/flofi-privy-signer.ts",
+   "role": "Server-side Privy signer: evm/solana sign tx or message only",
+   "keySymbols": "default → FLOFI_WALLET_METHOD_UNSUPPORTED:75"
+  },
+  {
+   "path": "/home/user/FloFi/apps/reference-dapp/src/wallet/solana-wallet.ts",
+   "role": "Wallet-standard Solana session: single signTransaction feature only",
+   "keySymbols": "SignFeature:13, feature detection:57,100,121, signWithSolanaWallet:173-175"
+  },
+  {
+   "path": "/home/user/FloFi/packages/cloud-runtime/migrations/0015_workflow_runs.sql",
+   "role": "Schema: workflow_runs, workflow_run_steps, workflow_run_events, triggers; delegated_* source columns",
+   "keySymbols": "workflow_runs:19-56, workflow_run_transition trigger:61-89, workflow_run_steps:92-116, step trigger:117-144, events:147-167, delegated_authorizations/executions workflow_run_id:170-199"
+  },
+  {
+   "path": "/home/user/FloFi/packages/cloud-runtime/migrations/0021_workflow_grants.sql",
+   "role": "Workflow grants without passkey; WALLET_WORKFLOW revisions",
+   "keySymbols": "credential_grants passkey nullable + CHECK:10-12, revisions signed CHECK:216-227"
+  },
+  {
+   "path": "/home/user/FloFi/packages/cloud-runtime/migrations/0022_editor_requester.sql",
+   "role": "EDITOR_SESSION requester kind on mcp_handoffs and workflow_runs",
+   "keySymbols": "CHECK widenings:239-247"
+  },
+  {
+   "path": "/home/user/FloFi/packages/reference-compiler/src/erc7710.ts",
+   "role": "ERC-7710 compiler: workflow grant compilation and redeem calldata (not read in full)",
+   "keySymbols": "WORKFLOW_GRANT_MAX_CALLS=16:369, compileWorkflowGrant:408, redeemCalldata:461"
+  }
+ ],
+ "flows": [
+  "REQUEST → HANDOFF (any requester). A v2 multi-step strategy is composed (composeWorkflowBound) and gated by evaluateWorkflowGates (mcp/execution.ts:199-218): workflowPlan marks it SEQUENTIAL only when every step has an owner-execution flow (128-135); confirm/delegated modes are computed per step (206-209) and delegableByCode (authorization-plan.ts:53-60) decides code-level delegability. requestApproval stores ONE PENDING mcp_handoffs row with plan.kind='SEQUENTIAL' (platform/approvals.ts, not fully read) and returns an approvalUrl with the secret in the fragment; the Editor does the same via startEditorRun (editor/approval.ts:116-136), MCP via request_user_approval (mcp/tools.ts:554), channels via their runtime (channels/runtime.ts:37).",
+  "CLAIM ON /approve → RUN CREATED. Browser proves EVM and/or Solana wallets (approval-handoff.tsx:118-121), server action claimApprovalHandoff (approve-action.ts:79-84) → claimApproval (approve.ts:148-167): requires workflowRuns surface (153) and a proven wallet for EVERY namespace of the plan (154), re-verifies the hash/policy, claims the handoff row, then claimSequential (workflow-run-approvals.ts:61-68) → ensureForClaim (service.ts:50-62) binds wallets per namespace (53) and store.create inserts workflow_runs + N PENDING steps once per handoff (pg-store.ts:82-95; UNIQUE(tenant_id,handoff_id) 0015:47). ownerAuthorizationPlan (service.ts:65-71) computes the plan with the owner's grants; if delegated is unavailable and confirm is available the run auto-starts in CONFIRM_EACH_STEP (workflow-run-approvals.ts:63-66). currentStep (service.ts:89-108) is returned as a single-step proposal (command/workflow/workflowHash) plus stepWallet (workflow-run-approvals.ts:50-58); the browser restoreWorkflow()s it into the editor (approval-handoff.tsx:218-233).",
+  "MODE CHOICE: CONFIRM. startWorkflowRunHandoff (approve-action.ts:114) → workflowRunStart (approve.ts:216) → startSequential → startConfirm (service.ts:74-81) checks plan.confirmEachStep.available then store.startConfirm (pg-store.ts:173-191): under FOR UPDATE, PENDING+mode null required, expiry checked, any non-REVOKED delegated_authorizations for the run are REVOKED (178-185), run → RUNNING/CONFIRM_EACH_STEP, MODE_CHOSEN event, advance work item enqueued (189). advanceRun then readies step 0 (runner.ts:89-136) and currentStep loads it (READY→AWAITING_OWNER with claimedAt, service.ts:102).",
+  "MODE CHOICE: DELEGATED (PR #166 path). reviewWorkflowRunAuthorization (approve-action.ts:120) → workflowRunReview (approve.ts:231) → authorizationReviewSequential (workflow-run-approvals.ts:98-106; refuses unless PENDING/mode null and plan.delegatedSingleAuthorization.available) → RunDelegationOps.review → embedded: service.workflowRunWalletReview (delegation/service.ts:516-648) / remote: delegationOperation('workflowRunWalletReview') (server/delegation-operation.ts:112-154) → POST /v1/delegation/workflowRunWalletReview (delegation/api.ts:32-54) → runDelegationOperation (operations.ts:236-241, ownedRun 217-224 requires the run's eip155 wallet among proven). The service plans exact calls per chain with fresh quotes (planWorkflowGrants, workflow-grants.ts:95-152), creates one KMS session key per chain (service.ts:553-566 signer.create), inserts PENDING_SIGNATURE grants with scope kind WORKFLOW (authority.ts:27-29) and a WALLET_WORKFLOW envelope revision (service.ts:594-596), and returns typedData per grant (616-647). Browser signOnce (workflow-run-panel.tsx:91-97) calls signWorkflowGrant per chain (delegation-browser.ts:66-77: wallet_switchEthereumChain then eth_signTypedData_v4) → authorizeWorkflowRunHandoff (approve-action.ts:122) → workflowRunAuthorize (approve.ts:240-249) → authorizeSequential (workflow-run-approvals.ts:108-120, re-checks the plan/policy) → ops.sign → service.workflowRunWalletSign (service.ts:656-697): verifies each signature via ADAPTERS.EVM_ERC7710_METAMASK_V1_3.verifyEnrollment (adapters.ts:112-131: recover signer, eth_chainId, eth_getCode == EIP-7702 designator else EVM_ACCOUNT_NOT_UPGRADED retryable, enforcer code present else DELEGATION_FRAMEWORK_NOT_DEPLOYED, not disabled), then store.activate with onActivated → activateDelegatedWithin (pg-store.ts:196-207): run → RUNNING/DELEGATED with authorization_id, all PENDING steps → DELEGATED, enqueues delegation.execute-run {workflowRunId, authorizationId} and the advance item. The approval link is marked APPLIED (approve.ts:247). A lost answer is retried idempotently (panel 101-106; service 663-665; operations 248-250).",
+  "CONFIRM MODE PER-STEP OWNER SIGNING (who submits, how the server learns the hash). After currentStep marks the step AWAITING_OWNER, the browser's apply effect (approval-handoff.tsx:199-208) calls markApprovalApplied → applyApproval SEQUENTIAL branch (approve.ts:178-185): the editor workflow must hash exactly to the AWAITING_OWNER step's workflowHash. The owner then uses the step's own flow panel/store: simulate → Review → begin (durable attempt + nonce) → handoff → the BROWSER calls provider.request('eth_sendTransaction') on the injected or FloFi provider (e.g. universal-router-store.tsx:256; also supply-store:130, uniswap-liquidity-store:159, router-store:274, lending-store:83, mode-b-store:101, public-testnet-store:288, robinhood-transfer-store:123) — the owner's wallet pays gas — and reports the hash to the flow's `report` endpoint (universal-router-store.tsx:263 universalReport {kind:'HASH', hash, attemptId}; backend/flows.ts report methods e.g. 829). For Solana the browser signs with wallet-standard solana:signTransaction (universal-router-store.tsx:297; wallet/solana-wallet.ts:173-175) and the SERVER broadcasts via the flow's `submit` method (universal-router-store.tsx:309; flows.ts:830). The run never receives the hash directly: observeOwnerStep (observe.ts:40-82) reads runtime.runs(flow, wallet) → runtime.run → runtime.record(status) → runtime.evidence as the step's wallet, keeps runs created after claimedAt−1s whose reviewed workflow hashes to the step's resolved hash (56), takes attempts[].transactionHash (37,65), and returns RECONCILED only for an error-free fully observed run with RECONCILED evidence and a bundle hash (72-74); spent/received come from amountsFromOwnerRecord (received-amounts.ts:109-195). The runner writes the StepOutcome (kind OWNER_RUN) on RECONCILED/FAILED (runner.ts:155,160).",
+  "ADVANCEMENT LOOP. advanceRun (runner.ts:53-63) re-reads the run each pass (max 16) and dispatches on run.mode (58). confirmPass (78-167): PENDING run → EXPIRED after window (82); step PENDING → re-compose whole workflow (91), require previous RECONCILED (93), resolve bindings from producer outcome.received minus earlier consumers' reserved/spent (97-122) → boundStrategy, require policyFor(run) non-null (123-124; worker returns null so the step stays PENDING until the owner continues through the web tier), re-compose the step alone and re-run evaluateGates + handoffFindings (126-130), require the run's wallet for the step's namespace (131-132), then READY with flow/strategy/workflowHash/bound (133-136); READY → only expiry re-checked every 5 min (138-140); AWAITING_OWNER/UNCERTAIN → observeOwnerStep (141-163): OPEN → recheck in 60 s, UNCERTAIN → step UNCERTAIN + run ATTENTION, FAILED → step FAILED + run HALTED (if any earlier RECONCILED) else FAILED, RECONCILED → afterReconciled (170-176) advances currentStep or COMPLETED (completed_at written once). The work item is `workflow-run.advance` (pg-store.ts:67-70 dedupe per run), handled by workflowRunHandlers (worker.ts:20-30; RETRY with retryMs or DONE) on the Railway worker (backend/main.ts:159-165, workflow-run-worker.ts:12-18) and also driven inline by every owner action (service.ts:79,92,116,136); sweepWorkflowRuns expires PENDING runs and re-arms open runs lacking an item (worker.ts:33-40).",
+  "DELEGATED EXECUTION + MIRROR. Worker handler delegation.execute-run (executor-runtime.ts:46-54) → executeWorkflowRun (executor.ts:229-240: run must be DELEGATED under this authorization; ensureRunExecution one row per run pg-store.ts:455-462) → drive (243-284): verifyWalletWorkflowChain (151-189) re-derives the requirement from the run's strategy, checks manifest/envelope, each grant's commitment == compileScope hash and signer == wallet (169-174), workflowGrantBindings (workflow-grants.ts:221-245), and re-verifies every grant on chain; budget reservation; then run loop (304-360): boundStep (451-480) narrows a bound step to the pinned exact amount and refuses if the producer delivered less (WORKFLOW_BINDING_INSUFFICIENT_RECEIVED), driver.simulate (evmSwapDriver drivers.ts:201+: EVM_ACCOUNT_NOT_UPGRADED check 209, QUOTE_BELOW_SIGNED_MINIMUM 222), policy + driver.authorize, then driver.sign → signEvmCalls (drivers.ts:98-128) builds EIP-1559 txs FROM grant.sessionAddress (the shared KMS executor EOA) TO delegationManager with redeemCalldata, gas from eth_estimateGas, signed by signer.signEvmDigest(sessionKeyRef) → prepareSubmission (349) → broadcastEvm eth_sendRawTransaction (157-170) → reconcile. The executor EOA pays all gas (docs/builds/BUILD-FLOFI-UNIVERSAL-SINGLE-AUTH-MAINNET-001-REPORT.md:70) and also funds nonce fillers (fillStaleNonces 134-150). delegatedPass (runner.ts:194-232) mirrors delegated_execution_steps into workflow_run_steps (RECONCILED/FAILED/UNCERTAIN/BLOCKED) with delegatedOutcome (179-186, kind DELEGATED_STEP, evidence MOCKED|PUBLIC_UNVERIFIED) and maps execution state SETTLED→COMPLETED, BLOCKED→FAILED (+SKIPPED steps), FAILED→HALTED/FAILED, HALTED→HALTED, UNCERTAIN→ATTENTION (222-227).",
+  "CANCEL / RESUME / RECOVERY. Cancel: cancelWorkflowRunHandoff → workflowRunCancel (approve.ts:221) → cancelSequential (workflow-run-approvals.ts:88-92): DELEGATED runs are stopped by ops.revoke (service.ts:699-703 → store.revoke OWNER_REVOKED; the executor then BLOCKs with AUTHORIZATION_NOT_ACTIVE and the mirror makes the run FAILED with SKIPPED/BLOCKED steps, delegated-run.pg.test.ts:266-282); otherwise cancelRun → store.cancel (pg-store.ts:152-168) under the run lock: version must match, state PENDING/RUNNING/HALTED, canEndWorkflow (state-machine.ts:55-58) refuses when any step is AWAITING_OWNER/UNCERTAIN/DELEGATED, PENDING/READY/BLOCKED steps → SKIPPED. Resume: workflowRunResume → resumeRun (service.ts:127-138): HALTED + CONFIRM_EACH_STEP + not expired + current step BLOCKED → run RUNNING, step → READY (if it had a resolved strategy) else PENDING (re-gated from scratch), then advance. Recovery: a reload/other browser uses resumeApprovalHandoff → resumeApproval SEQUENTIAL branch (approve.ts:102-105) or workflowRunContinue by approvalId + wallet proof (runContext uses handoffs.forRunOwner 196-204); the DB triggers (0015:61-89,117-144) refuse backwards moves and mutation of bound facts; delegated recovery re-broadcasts persisted bytes only (executor.ts:359-375, drivers.ts:157-170) and sweepDelegation re-arms crashed executions (executor-runtime.ts:59-73).",
+  "STATUS TO CHAT SURFACES. MCP get_approval_status (mcp/tools.ts:529,558-560) and channels call approvalProgress (platform/approvals.ts:327-341) which returns runView (service.ts:158-181) with outcomes only when the owner shared status (h.shareStatus); nextAction OWNER_CHOOSES_MODE / OWNER_SIGNS_STEP / WAITING_FOR_RECONCILIATION / OWNER_DECIDES / NONE (172-174); the browser panel polls workflowRunStatusHandoff every 15 s (workflow-run-panel.tsx:61-68) which observes like the worker but never readies/loads a step (service.ts:114-118)."
+ ],
+ "extensionPoints": [
+  "Run mode: RUN_MODES in state-machine.ts:20 (['CONFIRM_EACH_STEP','DELEGATED']) + DB CHECK on workflow_runs.mode (0015:35) and the mode/authorization_id co-constraint (0015:53-54) + runner dispatch `run.mode === 'DELEGATED' ? delegatedPass : confirmPass` (runner.ts:58) + mode-choice transactions store.startConfirm / activateDelegatedWithin (pg-store.ts:173-207). A new strategy (wallet batch, user-signed UserOp, pre-signed Solana) needs a new mode value or a per-step/per-group strategy column, a new pass in runner.ts, and a new activation transaction.",
+  "Step states: STEP_STATES / STEP table (state-machine.ts:18,31-38), DB CHECK + trigger (0015:96,117-144) and per-state column requirements (0015:112-115: strategy for READY/AWAITING_OWNER/RECONCILED; flow+claimed_at for AWAITING_OWNER; outcome for RECONCILED). A 'PRESIGNED'/'BATCHED' state must be added here and in TERMINAL_STEP/MAYBE_SUBMITTED (state-machine.ts:42-44) and canEndWorkflow (55-58).",
+  "AuthorizationPlan contract (authorization-plan.ts:33-48): confirmEachStep/delegatedSingleAuthorization/recommended union; the computation at 104-121 is the single place counts and reasons are produced; consumers: workflow-run-approvals.ts:63-66 (auto-start rule), authorizationReviewSequential/authorizeSequential (98-120), workflow-run-panel.tsx:107-138 (choice UI + WHY_NOT_ONCE 31-44), MCP request_user_approval output (mcp/handoff/workflow.pg.test.ts:45-47 shows the shape), pt-workflow-runs i18n (coverage.json:3649).",
+  "Gates/sequence modes: SequenceModes (mcp/execution.ts:139) and evaluateWorkflowGates (199-218) decide which modes code/deployment allow; delegableByCode (authorization-plan.ts:53-60) is the hook for a new code-level capability check; stepCapability + MECHANISMS (capabilities.ts:15,41-80) is where a new mechanism (e.g. EVM_USER_UNSIGNED_4337, EVM_EIP5792_BATCH, SOLANA_PRESIGNED) would be declared; FRAMEWORK_NOT_DEPLOYED/MAINNET sets (30,35).",
+  "Per-chain grouping already exists only for delegated grants: ChainPlan (workflow-grants.ts:88) built by planWorkflowGrants (120-123, calls grouped by step.chain) and enrollments per `chain|mechanism` in the plan (authorization-plan.ts:88-91). A general 'execution group' (per chain, per wallet namespace, ordered by bindings) would generalize this; runner.ts has none (strict single-step order at 93).",
+  "RunDelegationOps seam (workflow-run-approvals.ts:30-38) + WorkflowRunSurface (39) + server/workflow-run-surface.ts delegationParts (46-71, embedded vs remote) + DELEGATION_OPERATIONS closed list and switch (operations.ts:192-195, 235-282) + API regex (delegation/api.ts:32) + BFF forwarding delegationOperation (server/delegation-operation.ts:112-154): new owner operations (e.g. 'workflowRunBatchPrepare', 'workflowRunUserOpReview') plug in here.",
+  "HTTP surface: app/approve-action.ts (runAction helper 106-108) and platform/approve.ts workflowRun* (206-249) are thin; new routes follow the same pattern (approvalId + proven wallets, or secret for link-applying actions).",
+  "Step loading contract: StepProposal (service.ts:83-84) returns composition.command/workflow for the single-step signing surface; currentStep (89-108) is the only code that moves READY→AWAITING_OWNER and sets claimedAt (the observation window start). A batch strategy would need a multi-step proposal shape and a different claim marker.",
+  "Owner-step observation: observeOwnerStep verdicts (observe.ts:24-28) and the exact-hash filter (56); StepOutcome (pg-store.ts:25-30) has transactions/evidence/spent/received but no fee/gas-payer/sender field; received-amounts.ts adapters (109-195) are the per-flow record-shape plug-in for amounts (add new flow shapes there).",
+  "Bindings: WorkflowBindingInput `{step, amountFrom}` (workflow-bindings.ts:23), CONSUMERS/PRODUCERS sets (32-33), validateBindings asset-identity rule (86-107), boundStrategy (125-132), BoundResolution stored per step (pg-store.ts:21-23, DB column bound 0015:100-101); delegated exactness rules in authorization-plan.ts:94-97 and workflow-grants.ts:111-119,144; executor boundStep (executor.ts:451-480).",
+  "Wallet set per namespace: workflow_runs.wallets jsonb (0015:30), WalletSet (pg-store.ts:19), assertRunWallets (service.ts:44-47), planNamespaces (approvals.ts:92-93), namespaceOf (runner.ts:49), stepWallet (workflow-run-approvals.ts:44-45,55), ownedRun requiring eip155 for delegation ops (operations.ts:217-224).",
+  "Signer and transport split: SignerAdmin/SignerUser (delegation/runtime.ts:22-23,48-49), signerProvider kinds (33-45), TransportPurpose allowlists (chains.ts:11,17-23: 'owner' purpose on EVM has NO send method — a server-side broadcast of a user-signed EVM tx/UserOp needs a new purpose or bundler client), ChainTransport provenance (12).",
+  "Work kinds/handlers registry: WORKFLOW_RUN_ADVANCE_KIND (state-machine.ts:52), DELEGATION_EXECUTE_RUN_KIND (run-source.ts:6), handler merge in backend/main.ts:165, dedupe-key enqueue pattern (pg-store.ts:67-70, 203-205); a 'workflow-run.submit-presigned' kind would be registered the same way.",
+  "Browser submission layer: each flow store owns its eth_sendTransaction call (list in flows above) wrapped by watchWalletResponse and per-flow begin/handoff/report; FloFi Wallet provider accepts only eth_sendTransaction bound to a reviewed run (flofi-evm-provider.ts:11-13,43) and Privy signer only evm/solana tx+message (flofi-privy-signer.ts:75); Solana wallet-standard feature detection requires only solana:signTransaction (solana-wallet.ts:57,100). An EIP-5792 wallet_sendCalls or signAllTransactions path has no shared entry point yet; delegation-browser.ts (66-77) is the one shared typed-data signing helper.",
+  "Requester kinds: ApprovalRequesterKind CHECKs (0015:23 widened by 0022:239-247), BUCKET_SEGMENT (approvals.ts:98-99), ApprovalContribution/profiles (approve.ts:40-49); the Editor contributor (editor/approval.ts:95-105) shows how a surface plugs in.",
+  "Windows: CONFIRM_RUN_SECONDS 7d / DELEGATED_AUTHORIZATION_SECONDS 24h (state-machine.ts:47,49), WORKFLOW_GRANT_WINDOW_MS 1h / SIGN_MARGIN 15m (workflow-grants.ts:37,39), GRANT_EXPIRY_MARGIN_MS 5m (executor.ts:91) — pre-signed delayed steps need their own validity model (Solana blockhash expiry is ~60–90 s; durable nonces are the only way to pre-sign).",
+  "Public view: RunView/RunStepView (service.ts:140-152) and runView (158-181) — gas payer, execution group, per-chain authorization status and estimated/guaranteed/actual amounts would be surfaced here for MCP/channels/panel."
+ ],
+ "gaps": [
+  "(A) Executor pays gas: delegated steps are EIP-1559 transactions FROM grant.sessionAddress (the shared AWS-KMS EOA) to the DelegationManager, gas from eth_estimateGas, signed with signer.signEvmDigest(sessionKeyRef) (drivers.ts:98-128) and broadcast by the executor transport (157-170); nonce fillers are also executor-funded (134-150); documented at docs/builds/BUILD-FLOFI-UNIVERSAL-SINGLE-AUTH-MAINNET-001-REPORT.md:70 ('The executor address pays gas on each chain'). Nothing in the run model records who paid gas (StepOutcome pg-store.ts:25-30; RunView service.ts:140-152).",
+  "(A) No user-funded batch/UserOp code exists: a repo-wide case-insensitive grep for 5792/wallet_sendCalls/4337/UserOperation/paymaster/bundler/signAllTransactions/durable nonce matched only evidence JSON and a comment (scripts/verify-live-evidence.mjs:11). The only EIP-7702 use is the MetaMask delegator designator check (adapters.ts:120; drivers.ts:209) — the user's 7702 account is used as a DELEGATOR, never as a UserOperation sender paying its own prefund.",
+  "(A) Wallet capability: FloFi Wallet (Privy) refuses typed-data and 7702 authorizations (FLOFI_WALLET_METHOD_UNSUPPORTED, flofi-evm-provider.ts:43, flofi-privy-signer.ts:75; report §: docs/builds/...REPORT.md:48), so delegated mode is MetaMask-only; a user-funded strategy for FloFi Wallet must use plain eth_sendTransaction per step (today's confirm mode) unless the Privy signer gains typed-data/7702 signing.",
+  "(A) Transport purposes: chains.ts:21 gives the 'owner' purpose no send method on EVM, and the Railway API never submits (delegation/api.ts:9; delegation-worker.ts:21 WORKER_SUBMISSION_FORBIDDEN for flow services) — there is no server path to relay a user-signed EVM transaction or UserOperation to a bundler.",
+  "(B) Solana is second-class for single authorization: WORKFLOW_GRANT_NAMESPACE_UNSUPPORTED for any Solana step (authorization-plan.ts:98,105; workflow-grants.ts:102); Solana delegated swaps exist only in MOCKED_HARNESS (capabilities.ts:76-79, NATIVE_SOL_NOT_DELEGABLE 75; SOLANA_DELEGATED_BUILDER_NOT_IMPLEMENTED in PRODUCTION, authorization-plan.test.ts:52). Confirm mode handles Solana steps as separate flow runs signed via single solana:signTransaction (solana-wallet.ts:173-175); no signAllTransactions feature is requested (FEATURES flofi-solana-wallet.ts:27) and no durable-nonce account handling exists.",
+  "(B) Cross-chain: bridges are never delegable (capabilities.ts:44-48 DELEGATED_TARGET_SCOPE_UNAVAILABLE / DELEGATION_TEMPLATE_NOT_IMPLEMENTED / BRIDGE_ROUTE_UNAVAILABLE) and cross-chain bindings are refused for delegated mode (WORKFLOW_BINDING_NOT_EXACT, authorization-plan.ts:94-97, workflow-grants.ts:114); confirm mode does resolve a bridge's delivered amount from the universal flow record (received-amounts.ts:139-152) and the Router (185-193), proven by confirm-run.pg.test.ts:285-333 with MOCKED flows only. There is no 'estimated / guaranteed / actual' triad: BoundResolution stores cap/received/used (pg-store.ts:21-23); the plan exposes only RECONCILED_RECEIVED_AMOUNT vs SIGNED_GUARANTEED_MINIMUM labels (authorization-plan.ts:44-46).",
+  "(B) Binding language: dependencies are `{step, amountFrom}` on exactly one asset identity that the consumer spends and the producer delivers (workflow-bindings.ts:23,86-107); there is no `previous.output.amount`-style reference, no multi-output producers, and add_liquidity consumers bind one maxAmounts key (28,53-59). Step count is capped at 2..8 (0015:34, current_step ≤7).",
+  "(B) Chat vs Canvas parity: the Canvas keeps its own client-side sequence model (state/workflow-store.tsx:80-114, 204-217) with completions persisted in localStorage and re-proven only against public/supply/solana-swap statuses (123-126, 229-243); this is NOT the server workflow_runs record. The Editor reaches the server run only by handing off (editor/approval.ts:116-136 → /approve), after which the run's strategy/hash are immutable (0015:66) and any re-composition drift is WORKFLOW_RUN_STALE (service.ts:67; runner.ts:92) — unexecuted steps cannot be edited in place on a server run.",
+  "(B) Worker cannot progress confirm-mode steps: policyFor is null on the worker (worker.ts:46; runner.ts:34-37,123-124), so each step becomes READY only when the owner continues in the web tier (service.ts:92) — incompatible with 'pre-signed delayed steps' unless the requester policy is bound into the run at claim.",
+  "(C) Interaction counting is coarse: confirm mode reports walletConfirmationsAtLeast = steps.length (authorization-plan.ts:116) ignoring per-step token approvals (a note only, 6-7) and chain switches; delegated reports walletSignatures = max(1, enrollments.length) (117) and does not count the one-time EIP-7702 upgrade (enrollment.active is always null, 40,90) nor the wallet_switchEthereumChain prompts (delegation-browser.ts:72-75). No per-chain upfront collection exists for confirm mode; Solana never has an upfront authorization.",
+  "(C) No execution groups: steps run strictly one after another (runner.ts:93) and each confirm-mode step is a full simulate→Review→sign→submit cycle of its own flow (runner.ts:6-12; confirm-run.pg.test.ts:79-115); independent same-chain steps cannot be batched into one wallet interaction.",
+  "Mode is global per run (authorization-plan.ts:16 'modes are never mixed'; 0015:53-54), so a workflow with EVM (delegable) + Solana steps falls entirely to confirm mode (delegated-run.pg.test.ts:146-158).",
+  "Evidence levels for delegated steps are MOCKED|PUBLIC_UNVERIFIED only (runner.ts:184); owner-run outcomes carry the flow's evidence environment (observe.ts:61). Public mainnet delegated execution has no recorded evidence in this repo (report §8 lists activation as owner-approval-pending, REPORT.md:119)."
+ ],
+ "testsAndHarnesses": [
+  "/home/user/FloFi/apps/reference-dapp/src/workflow-runs/workflow-run.test-harness.ts — ownerFlowRuntime (39-79): a McpRuntime test double recording owner flow runs (ownerExecutes with RECONCILED/PENDING/REVERTED/REFUSED_BEFORE_SUBMISSION outcomes and explicit receivedAmounts/spentAmounts 61-72; reconcile 74-77); workflowRunHarness (83-129): real approval service + run store + runner + delegation harness on a disposable PostgreSQL, request() (110-116), drain() running the real worker loop for both work kinds (118-128), CHANNEL_CONVERSATION requester, policyEnv for mainnet networks.",
+  "/home/user/FloFi/apps/reference-dapp/src/delegation/delegation.test-harness.ts (not read; used via harness.d): loopback EVM/Solana chain doubles with control.setPrice/balance/receipt, evmOwner.signDigest, signer.create/signEvmDigest, store/service.",
+  "/home/user/FloFi/apps/reference-dapp/src/delegation/harness/evm-double.ts — loopback EVM JSON-RPC double handling eth_sendRawTransaction (146).",
+  "/home/user/FloFi/packages/cloud-runtime/test/pg-harness (createTestDatabase/t.drop) — disposable database per test.",
+  "/home/user/FloFi/apps/reference-dapp/src/workflow-runs/confirm-run.pg.test.ts — confirm mode end to end: multi-consumer conservation (32-50), swap→liquidity binding (51-77), EVM→Solana two-wallet run (79-115), poll vs continue semantics (117-141), status withholding (143-155), UNCERTAIN/ATTENTION (157-174), halt/cancel/resume (176-222), concurrency + single run per handoff (224-243), WORKFLOW_RUNS_NOT_ENABLED (245-253), bound min(cap,received) (255-283), Swap→Bridge→Swap cross-chain bindings (285-333).",
+  "/home/user/FloFi/apps/reference-dapp/src/workflow-runs/cancel-run.pg.test.ts — atomic cancellation, wallet mismatch codes, serialization against step loading, in-flight refusal (149-203).",
+  "/home/user/FloFi/apps/reference-dapp/src/workflow-runs/delegated-run.pg.test.ts — wallet-signed grants: one signature per chain, exact pinned calls, replay refused on chain (30-99); signed-minimum halting (101-122); forged signature (124-144); Solana refusal (146-158); Railway API run ops + idempotent sign + revoke (160-199); review race (201-227); lost-answer retry (229-248); policy re-check at signing (250-264); revoke before execution (266-282).",
+  "/home/user/FloFi/apps/reference-dapp/src/workflow-runs/authorization-plan.test.ts — plan counts/reasons with a minimal McpRuntime stub (18-26).",
+  "/home/user/FloFi/apps/reference-dapp/src/workflow-runs/migration.pg.test.ts (not read) — 0015 schema behaviour.",
+  "/home/user/FloFi/apps/reference-dapp/src/mcp/handoff/workflow.pg.test.ts — MCP tools over a sequence (compose/request/get_approval_status) with ownerFlowRuntime (27-34).",
+  "/home/user/FloFi/apps/reference-dapp/src/channels/telegram/workflow.pg.test.ts (not read) — channel surface over runs.",
+  "/home/user/FloFi/apps/reference-dapp/src/components/workflow-run-panel.test.tsx — panel rendering of plan reasons.",
+  "/home/user/FloFi/apps/reference-dapp/src/delegation/workflow-grants.test.ts, executor.pg.test.ts, aave-delegation.test.ts, credentials.pg.test.ts, adversarial.pg.test.ts, boundaries.test.ts (signer/executor import boundaries) — delegated-side suites.",
+  "/home/user/FloFi/apps/reference-dapp/src/server/universal-router/service.test.ts and universal.test-harness.ts — flow-level begin/report/observe/submit with a Relay mock (72-103) reusable for bridge reconciliation tests.",
+  "docs/engineering/coverage.json domain 'workflow-runs--workflow' (6525-6559) lists the owned files and suites app.workflow-runs.* (441-450)."
+ ],
+ "dataModel": [
+  "workflow_runs (0015:19-56): tenant_id, run_id 'wfr_' base32, handoff_id (FK mcp_handoffs, UNIQUE per tenant), requester_kind ∈ {MCP_ACCOUNT, DEVELOPER_PROJECT, CHANNEL_CONVERSATION, AUTOMATION_RULE, EDITOR_SESSION (0022)}, requester_ref, owner_namespace/owner_account (eip155 0x40hex | solana base58), wallets jsonb {namespace→address} ≤512B, strategy jsonb ≤16KB, workflow_hash 0x64hex, engine_version, step_count 2..8, mode NULL|CONFIRM_EACH_STEP|DELEGATED, state ∈ {PENDING,RUNNING,COMPLETED,HALTED,FAILED,ATTENTION,CANCELLED,EXPIRED}, current_step 0..7 (monotonic), authorization_id 'dau_' (required iff DELEGATED), code, completed_at (iff COMPLETED, written once), expires_at, version (CAS), created/updated. Trigger workflow_run_transition (61-89) freezes identity/strategy/hash/wallets, mode and authorization once set, refuses terminal updates and invalid transitions. Mirrored in TS: RunRecord pg-store.ts:31-35, RUN table state-machine.ts:23-29.",
+  "workflow_run_steps (0015:92-116): PK (tenant, run_id, step_index 0..7), state ∈ {PENDING,READY,AWAITING_OWNER,DELEGATED,RECONCILED,FAILED,UNCERTAIN,SKIPPED,BLOCKED}, flow (owner flow name), strategy jsonb + workflow_hash (written once when READY; CHECK both-or-neither 112; required for READY/AWAITING_OWNER/RECONCILED 113), bound jsonb {amountFrom, asset{chainId,address,decimals}, cap, received, used, additional[]} (100-101; TS BoundResolution pg-store.ts:21-23), claimed_at (required for AWAITING_OWNER 114 — start of the observation window), outcome jsonb {kind OWNER_RUN|DELEGATED_STEP, executionId, flow, status, transactions[{chain,hash}], evidence{environment,outcome,bundleHash}|null, spent[], received[], observedAt} (105; TS StepOutcome 25-30; required for RECONCILED 115), code, version. Trigger (117-144) freezes strategy/hash/flow/bound/claimed_at once set and enforces the STEP table (state-machine.ts:31-38).",
+  "workflow_run_events (0015:147-167): append-only audit (kind, code, detail ≤4KB, step_index); kinds used: RUN_CREATED, MODE_CHOSEN, RUN_STATE, STEP_STATE, STEP_LOADED, STEP_RESUMED, RUN_RESUMED, RUN_STEP_ADVANCED, RUN_COMPLETED, RUN_DELEGATED_STATE, RUN_CANCELLED (pg-store.ts various).",
+  "work_items (cloud-runtime, not read): kind 'workflow-run.advance' with dedupe_key = run_id and payload {runId} (pg-store.ts:67-70); kind 'delegation.execute-run' with payload {workflowRunId, authorizationId} (203-205); partial unique on (tenant, kind, dedupe_key) WHERE state IN (READY, LEASED).",
+  "delegated_authorizations / delegated_executions (0015:170-199): rule_id/occurrence_id nullable, workflow_run_id nullable with exclusive-source CHECKs, UNIQUE (tenant, workflow_run_id) on authorizations, one execution per run (184), FK to workflow_runs incl. owner (174-175), source immutable trigger (188-199). delegated_executions.state ∈ QUEUED/AUTHORITY_VERIFIED/RESERVED/RUNNING/SETTLED/BLOCKED/HALTED/UNCERTAIN/FAILED (executor.ts header; TS ExecutionRecord pg-store.ts:52-55); delegated_execution_steps: state PENDING/SIMULATED/POLICY_VERIFIED/SUBMISSION_PREPARED/SUBMITTED/UNCERTAIN/RECONCILED/REVERTED/BLOCKED, plan, submission {kind EVM_REDEMPTIONS, chainId, from=sessionAddress, txs[{raw,hash,nonce,...}], hashes}, reconciliation {spent, received, evidence.provenance} (TS StepRecord 56-59; drivers.ts:125-127).",
+  "credential_grants (0011 + 0021:10-12): passkey_id nullable only for mechanism EVM_ERC7710_METAMASK_V1_3 with scope.kind='WORKFLOW'; scope jsonb WORKFLOW = {mechanism, kind:'WORKFLOW', chain, workflowRunId, calls: SerialWorkflowCall[], steps[{stepIndex, calls[]}], maxCalls, validFrom, expiresAt} (authority.ts:27-29; workflow-grants.ts:29-33); session_key_ref/session_address (the KMS executor key per grant), enrollment {typedData, digest, delegationHash}, grant_payload {delegation(signed)}, commitment = delegation hash, state PENDING_SIGNATURE/ACTIVE/REVOCATION_REQUESTED/REVOKED/EXPIRED/UNCERTAIN/FAILED (authority.ts:33).",
+  "delegated_authorization_revisions (0021:216-227): signed revisions need a passkey OR envelope.kind='WALLET_WORKFLOW' with assertion.kind='WALLET_WORKFLOW' ({kind, grants[{grantId, chain, delegationHash}]}, service.ts:693-694); manifest limits for a run: per-asset maxPerExecution = spend, 1 execution/month, slippage = max step slippage (service.ts:571-575).",
+  "mcp_handoffs (0005/0006/0010/0022; handoff-store.ts:33-45): plan jsonb (ExecutionPlan kind SINGLE_FLOW|COMPOSITE_FLOW|SEQUENTIAL|NOT_EXECUTABLE with steps[{index, action, network, destinationNetwork, flow, workflowHash}], networks, fundsClass — mcp/execution.ts:84-97), status PENDING/CLAIMED/APPLIED/..., claimed_namespace/address (the primary namespace's wallet), share_status, run_ids.",
+  "Canonical workflow input for runs: StrategyInput v2 {version:2, steps: StrategySpec[], bindings?: [{step, amountFrom}]} (engine/strategy-spec, workflow-bindings.ts:23,109-110); WorkflowComposition {steps[{strategy, workflow, workflowHash, command}], bindings: WorkflowBinding[], workflowHash, fundsClass} (engine/strategy-engine, used throughout).",
+  "Client-side only: SEQUENCE_RUN_STORAGE_KEY+workflowId in localStorage holding {workflowId, completed[{nodeId,node,kind,runKey,received}]} (workflow-store.tsx:226-230) — not a server record."
+ ],
+ "risks": [
+  "Changing who submits delegated steps touches the executor nonce bookkeeping (sessionNextNonce executor.ts:342; evmNextNonce; fillStaleNonces drivers.ts:134-150) and the SUBMISSION_PREPARED recovery contract (executor.ts:359-375) that assumes persisted raw bytes signed by the session key; a user-funded path cannot reuse this recovery without a new persisted artifact type.",
+  "The confirm-mode observation window keys on claimed_at and an exact per-step semantic hash (observe.ts:43-56); any batch or pre-signed strategy that submits several steps from one interaction breaks the one-run-per-step, created-after-claim assumption and the duplicate-run reporting (74).",
+  "DB triggers freeze a step's strategy/hash/bound once written (0015:121-124) and the run's strategy forever (66); 'edit unexecuted steps' on a server run requires a new run or a new mutable projection, not an UPDATE.",
+  "Cancellation refuses while any step is AWAITING_OWNER/UNCERTAIN/DELEGATED (canEndWorkflow); pre-signed but not yet broadcast steps would need a new 'maybe submitted' classification (MAYBE_SUBMITTED state-machine.ts:44) or they can be neither cancelled nor safely resumed.",
+  "Delegated grants are valid ≤1 h (workflow-grants.ts:37) while confirm runs live 7 days (state-machine.ts:47); mixing per-chain strategies in one run needs a unified expiry/attention model, and the runner's `expiresAt` checks (runner.ts:82,94,139) assume one window.",
+  "The worker never readies steps (policy unknown), so any server-driven submission of user pre-signed transactions after a cross-chain wait must carry the requester policy durably or be refused; today's defense is explicit (runner.ts:34-37).",
+  "Amount binding correctness depends on the per-flow record adapters (received-amounts.ts) that match on asset keys; a new chain/flow without an adapter silently yields no received amount → WORKFLOW_BINDING_NOTHING_RECEIVED (runner.ts:118) and halts the run.",
+  "Remote-runtime delegated operations traverse Vercel BFF → Railway API with DELEGATION_OUTCOME_UNKNOWN handling (server/delegation-operation.ts:130-143); new operations must keep the idempotent-retry contract (service.ts:663-665; operations.ts:248-250) or lost answers will double-activate.",
+  "FloFi Wallet (Privy) cannot sign typed data or 7702 authorizations; building 4337/7702 UserOps for it is blocked at the signer boundary (flofi-privy-signer.ts:75), not in the run layer.",
+  "The Canvas sequence store (workflow-store.tsx) and the server run can disagree after a refresh (localStorage pointers re-proven only for three runtimes, 123-126); unifying them changes core editor state semantics (runtimeWorkflow 212)."
+ ],
+ "openQuestions": [
+  "Who is the Solana fee payer in the existing flows' `begin` transactions (universal-router/solana-chain.ts, jupiter-service.ts, solana-transfer-service.ts were not read)? The server broadcasts owner-signed bytes via `submit`; it should be verified that the owner account is the fee payer and that no FloFi key co-signs.",
+  "Does packages/cloud-runtime's work_items table allow per-kind handler concurrency limits needed for a 'submit pre-signed group' kind, and what are its lease/visibility semantics? (not read)",
+  "What does `backend/flows.ts` FLOWS[flow].evidence derive for each owner flow, and which record fields carry gas/fee facts, if any? (only the universal entry's method table was read, 820-860)",
+  "Is the MetaMask Delegation Framework redemption path (`redeemDelegations` from the session EOA) the only way the existing grants can be redeemed, or could the owner's own 7702 account execute the pinned calls itself (self-paid) under the same signed delegation? Depends on erc7710.ts caveats (redeemer enforcer per ENFORCEMENT list capabilities.ts:86) — the compiler was not read.",
+  "How do channels (telegram) render nextAction and per-step wallets today (channels/telegram/workflow.pg.test.ts not read)? Needed for honest interaction counting in chat.",
+  "What does the Editor's `editorWorkflowStrategy` (editor/workflow-strategy.ts, not read) accept — does it already carry bindings from Canvas edges, and can it express Solana/cross-chain steps the Chat composer can?",
+  "Is there an existing per-user gas balance/estimate surface (wallet-portfolio.ts, arbitrum-fees.ts not read) that a 'user pays gas' plan could reuse for honest fee previews?",
+  "Migration policy: 0015's CHECK on step_count 2..8 and current_step ≤7 — is widening it (for grouped multi-chain workflows) acceptable under docs/deploy/SCHEMA-COMPATIBILITY.md certificates (not read)?"
+ ]
+}

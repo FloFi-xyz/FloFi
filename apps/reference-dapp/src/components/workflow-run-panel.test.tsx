@@ -22,9 +22,11 @@ function claim(patch: Partial<WorkflowRunClaim['run']>, delegated: { available: 
   return { step: null, stepWallet: null,
     run: { workflowRunId: 'wfr_' + 'a'.repeat(26), approvalId: 'apr_' + 'a'.repeat(26), state: 'PENDING', mode: null, stepCount: 2, currentStep: 0, code: null,
       workflowHash: '0x' + '1'.repeat(64), expiresAt: '2026-10-29T00:00:00.000Z', completedAt: null, createdAt: '2026-10-22T00:00:00.000Z', updatedAt: '2026-10-22T00:00:00.000Z',
-      stepsVisible: true, steps: [step(0, 'PENDING'), step(1, 'PENDING')], nextAction: 'OWNER_CHOOSES_MODE', authority: 'NONE', note: null, ...patch },
+      stepsVisible: true, steps: [step(0, 'PENDING'), step(1, 'PENDING')], nextAction: 'OWNER_CHOOSES_MODE', groups: [], authority: 'NONE', note: null, ...patch },
     plan: { stepCount: 2, confirmEachStep: { available: true, reason: null, walletConfirmationsAtLeast: 2, walletNamespaces: ['eip155'] },
-      delegatedSingleAuthorization: { ...delegated, walletSignatures: 1, passkeyAssertions: 0, enrollments: [], ownerKnown: true }, recommended: 'CONFIRM_EACH_STEP', steps: [], bindings: [],
+      delegatedSingleAuthorization: { ...delegated, walletSignatures: 1, passkeyAssertions: 0, enrollments: [], ownerKnown: true },
+      userFunded: { available: false, reason: 'USER_FUNDED_NOT_ENABLED', groups: [], interactions: null, feePayer: 'OWNER_WALLET', wallets: 'ASSUMED' },
+      recommended: 'CONFIRM_EACH_STEP', steps: [], bindings: [],
       notes: ['One authorization is not one transaction: every step still submits its own transactions and pays its own network fees.'] } };
 }
 const render = (c: WorkflowRunClaim, language: Language = 'EN') => renderToStaticMarkup(<LocaleProvider initialLanguage={language}>

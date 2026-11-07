@@ -21,7 +21,9 @@ import type { McpRuntime as EngineRuntime } from '../mcp/runtime.ts';
 import { resolveApprovalSecret, type ApprovalLinkScheme } from './approval-links.ts';
 import { approvalView, CLAIM_SECONDS, openApprovalSession, planNamespace, planNamespaces, verifyHandoff, type ApprovalView, type ClaimedProposal } from './approvals.ts';
 import { authorizationReviewSequential, authorizeSequential, cancelSequential, claimSequential, continueSequential, ownedRun, resumeSequential, startSequential,
-  statusSequential, type WorkflowRunClaim, type WorkflowRunSurface } from './workflow-run-approvals.ts';
+  statusSequential, type WorkflowRunClaim, type WorkflowRunSurface, userFundedAuthorizeSequential, userFundedPrepareSequential, userFundedReportSequential,
+  userFundedStartSequential } from './workflow-run-approvals.ts';
+import type { OwnerAnswer, WalletProfile } from '../workflow-runs/execution-groups.ts';
 import type { ApprovalRequesterKind, HandoffRecord, HandoffStore, RequesterScope, WalletRef } from './handoff-store.ts';
 import { refuse } from './refusal.ts';
 
@@ -124,7 +126,9 @@ export async function viewApproval(surface: ApprovalSurface, secret: unknown, wa
 }
 
 /** BUILD-FLOFI-UX-UI-002: what FloFi needs to show an open proposal on its normal Canvas before the owner proves a wallet. */
-export type ApprovalPreview = { readonly approvalId: string; readonly workflow: Workflow; readonly workflowHash: string };
+export type ApprovalPreview = { readonly approvalId: string; readonly workflow: Workflow; readonly workflowHash: string;
+  /** BUILD-FLOFI-UNIVERSAL-WORKFLOW-002: a multi-step proposal's canonical strategy (what the requester composed), so the whole workflow can open in the Canvas. */
+  readonly sequence?: { readonly strategy: unknown; readonly workflowHash: string; readonly stepCount: number } };
 /**
  * The canonical workflow of an open (PENDING) proposal, for whoever holds its secret — the cards FloFi shows on the Canvas while the
  * owner connects a wallet. It is re-composed now and must reproduce the stored hash under the current deployment and policy (as `view`
@@ -138,7 +142,8 @@ export async function previewApproval(surface: ApprovalSurface, secret: unknown,
   if (h.status !== 'PENDING') return refuse(h.status === 'CLAIMED' || h.status === 'APPLIED' ? 'APPROVAL_PREVIEW_CLAIMED' : `APPROVAL_${h.status}`);
   const verified = await verifyHandoff(h, surface.runtime, profile.policy);
   if (!verified.ok) return refuse(verified.code);
-  return { approvalId: h.handoffId, workflow: verified.composition.workflow, workflowHash: verified.composition.workflowHash };
+  return { approvalId: h.handoffId, workflow: verified.composition.workflow, workflowHash: verified.composition.workflowHash,
+    ...verified.workflow.steps.length > 1 ? { sequence: { strategy: verified.workflow.strategy, workflowHash: verified.workflow.workflowHash, stepCount: verified.workflow.steps.length } } : {} };
 }
 
 /**
@@ -246,6 +251,62 @@ export async function workflowRunAuthorize(surface: ApprovalSurface, secret: unk
   const authorized = await authorizeSequential(c.runs, c.run, wallets, revision, assertion, c.base);
   await surface.handoffs.apply(digest, claimantOf(h, wallets), now, kinds);
   return authorized;
+}
+
+// ── BUILD-FLOFI-UNIVERSAL-WORKFLOW-002: user-funded execution groups ─────────────────────────────────────────────────────────
+const CHAIN = /^(eip155:[1-9][0-9]{0,18}|solana:[1-9A-HJ-NP-Za-km-z]{32})$/;
+/** The wallet capabilities the browser reported (EIP-5792 `atomic` per chain, Wallet Standard multi-sign): parsed strictly; they only choose the interaction. */
+export function walletProfileOf(value: unknown): WalletProfile {
+  const v = value && typeof value === 'object' ? value as Record<string, unknown> : refuse('WALLET_PROFILE_INVALID');
+  let eip155: WalletProfile['eip155'] | null = null, solana: WalletProfile['solana'] | null = null;
+  if (v.eip155 !== undefined && v.eip155 !== null) {
+    const e = typeof v.eip155 === 'object' ? v.eip155 as Record<string, unknown> : refuse('WALLET_PROFILE_INVALID');
+    const atomic: Record<string, 'supported' | 'ready' | 'unsupported'> = {};
+    for (const [chain, status] of Object.entries(e.atomic && typeof e.atomic === 'object' ? e.atomic as Record<string, unknown> : {}))
+      if (CHAIN.test(chain) && chain.startsWith('eip155:') && (status === 'supported' || status === 'ready' || status === 'unsupported')) atomic[chain] = status;
+    eip155 = { wallet: e.wallet === 'FLOFI_WALLET' ? 'FLOFI_WALLET' : 'INJECTED', atomic: e.wallet === 'FLOFI_WALLET' ? {} : atomic, typedData: e.typedData === true };
+  }
+  if (v.solana !== undefined && v.solana !== null) {
+    const so = typeof v.solana === 'object' ? v.solana as Record<string, unknown> : refuse('WALLET_PROFILE_INVALID');
+    const nonce = typeof so.nonceAccounts === 'number' && Number.isInteger(so.nonceAccounts) && so.nonceAccounts >= 0 && so.nonceAccounts <= 8 ? so.nonceAccounts : 0;
+    // FloFi Wallet (Privy) shows one confirmation per Solana transaction: never reported as signing several in one prompt.
+    solana = { wallet: so.wallet === 'FLOFI_WALLET' ? 'FLOFI_WALLET' : 'WALLET_STANDARD', signMultiple: so.signMultiple === true && so.wallet !== 'FLOFI_WALLET', nonceAccounts: nonce };
+  }
+  return { ...eip155 ? { eip155 } : {}, ...solana ? { solana } : {} };
+}
+const groupIndexOf = (value: unknown): number => typeof value === 'number' && Number.isInteger(value) && value >= 0 && value <= 7 ? value : refuse('WORKFLOW_RUN_GROUP_NOT_FOUND');
+function ownerAnswerOf(value: unknown): OwnerAnswer {
+  const v = value && typeof value === 'object' ? value as Record<string, unknown> : refuse('USER_FUNDED_AUTHORIZATION_INVALID');
+  if (v.kind === 'EVM_WALLET_BATCH' && typeof v.batchId === 'string' && v.batchId.length <= 256) return { kind: v.kind, batchId: v.batchId };
+  if (v.kind === 'EVM_USER_OPERATION' && typeof v.signature === 'string' && v.signature.length <= 140) return { kind: v.kind, signature: v.signature };
+  if (v.kind === 'SOLANA_SIGN_ALL' && Array.isArray(v.transactions) && v.transactions.length >= 1 && v.transactions.length <= 8
+    && v.transactions.every(t => typeof t === 'string' && t.length <= 2_048)) return { kind: v.kind, transactions: v.transactions as string[] };
+  return refuse('USER_FUNDED_AUTHORIZATION_INVALID');
+}
+/** The owner chose user-funded execution groups for these wallets (their own wallets pay every fee). */
+export async function workflowRunUserFundedStart(surface: ApprovalSurface, approvalId: unknown, wallets: readonly WalletRef[], profile: unknown): Promise<ClaimedProposal> {
+  const c = await runContext(surface, approvalId, wallets);
+  return userFundedStartSequential(c.runs, c.run, wallets, walletProfileOf(profile), c.base);
+}
+/** What the owner's wallet signs for one group now (exact calls / typed data / Solana transactions, the fee ceiling and its payer). */
+export async function workflowRunUserFundedPrepare(surface: ApprovalSurface, approvalId: unknown, wallets: readonly WalletRef[], groupIndex: unknown) {
+  const c = await runContext(surface, approvalId, wallets);
+  return userFundedPrepareSequential(c.runs, c.run, wallets, groupIndexOf(groupIndex));
+}
+/** The owner's wallet answer for one prepared group, verified against what FloFi prepared. */
+export async function workflowRunUserFundedAuthorize(surface: ApprovalSurface, approvalId: unknown, wallets: readonly WalletRef[], groupIndex: unknown, answer: unknown): Promise<ClaimedProposal> {
+  const c = await runContext(surface, approvalId, wallets);
+  return userFundedAuthorizeSequential(c.runs, c.run, wallets, groupIndexOf(groupIndex), ownerAnswerOf(answer), c.base);
+}
+/**
+ * The transaction hashes of a wallet batch, as the owner's wallet reported them (the chain decides the outcome); `notSent` true when the wallet
+ * reported the batch failed off chain (nothing was sent).
+ */
+export async function workflowRunUserFundedReport(surface: ApprovalSurface, approvalId: unknown, wallets: readonly WalletRef[], groupIndex: unknown, hashes: unknown,
+  notSent: unknown = false): Promise<ClaimedProposal> {
+  const c = await runContext(surface, approvalId, wallets);
+  return userFundedReportSequential(c.runs, c.run, wallets, groupIndexOf(groupIndex), Array.isArray(hashes) ? hashes as string[] : refuse('EIP5792_RESPONSE_INVALID'), c.base,
+    notSent === true);
 }
 
 /** The claimant turns status sharing with the requester on or off. */

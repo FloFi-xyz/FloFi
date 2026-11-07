@@ -57,6 +57,16 @@ const CLAIM_TEXT: Record<string, string> = {
   AUTHORIZATION_REVIEW_IN_PROGRESS: 'This authorization is being prepared in another window. Try again in a moment.',
   AUTOMATION_OWNER_MISMATCH: 'This automation belongs to another wallet. Connect the wallet that owns it.',
   EDITOR_WALLET_NOT_IN_ACCOUNT: 'This wallet does not belong to the FloFi account that started this workflow. Connect one of that account\'s wallets.',
+  // BUILD-FLOFI-UNIVERSAL-WORKFLOW-002: user-funded groups, in plain words (never a raw code).
+  USER_FUNDED_INSUFFICIENT_NATIVE_BALANCE: 'Your wallet does not hold enough of this network\'s native token to pay the fees of this group. Add funds to your own wallet, then try again.',
+  WORKFLOW_RUN_GROUP_IN_FLIGHT: 'A group of this workflow may still be executing from your wallet. Wait until it is reconciled, then try again.',
+  WORKFLOW_RUN_GROUP_SIGNED: 'Something you already signed for this step is never replaced: end this workflow and start a new one.',
+  WORKFLOW_RUN_GROUP_NOT_DUE: 'This group can be authorized only when it becomes due, after the previous group reconciled.',
+  USER_FUNDED_PREPARED_EXPIRED: 'This preparation expired. Authorize again to get fresh quotes.',
+  EVM_SMART_ACCOUNT_REQUIRED: 'This group needs your wallet to already be a MetaMask smart account on this network.',
+  WALLET_WRONG_NETWORK: 'Switch your wallet to the network of this group, then try again.',
+  WALLET_REQUEST_REJECTED: 'The request was rejected in your wallet. Nothing was signed.',
+  SOLANA_WALLET_SESSION_REQUIRED: 'Connect the Solana wallet of this workflow (the one you proved), then try again.',
 };
 function unwrap<T>(result: { ok: true; value: T } | { ok: false; code: string }): T { if (!result.ok) throw new Error(result.code); return result.value; }
 /**

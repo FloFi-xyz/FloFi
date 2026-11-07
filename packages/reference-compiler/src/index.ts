@@ -81,3 +81,6 @@ export * from './universal-artifacts.js';
 // BUILD-AUTOMATION-002: delegated-authority codecs (namespaced: their helpers are not part of the flat profile API).
 export * as erc7710 from './erc7710.js';
 export * as splDelegation from './spl-delegation.js';
+export * as erc4337 from './erc4337.js';
+export * as eip5792 from './eip5792.js';
+export * as solanaNonce from './solana-nonce.js';

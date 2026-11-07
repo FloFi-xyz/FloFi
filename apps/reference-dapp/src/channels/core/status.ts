@@ -21,8 +21,17 @@ export const ENDED = new Set(['EXPIRED', 'SUPERSEDED', 'REVOKED', 'STALE']);
 /** BUILD-CHAT-E2E-001: a run the conversation can still hear about (a halted one may resume). */
 export const OPEN_RUN = new Set(['PENDING', 'RUNNING', 'ATTENTION', 'HALTED']);
 type WorkflowRunProgress = NonNullable<Progress['workflowRun']>;
+/**
+ * BUILD-FLOFI-UNIVERSAL-WORKFLOW-002: in a user-funded run a grouped step is DELEGATED from the start (its group, not FloFi, holds it): it reads
+ * "waiting for your wallet" until the owner's wallet answered for its group, then "signed in your wallet" — never "authorized" before that.
+ */
+const stepState = (run: WorkflowRunProgress, step: WorkflowRunProgress['steps'][number]) => {
+  if (run.mode !== 'USER_FUNDED' || step.state !== 'DELEGATED') return step.state;
+  const group = (run.groups ?? []).find(g => g.steps[0] <= step.index && step.index <= g.steps[1]);
+  return group?.signed ? 'GROUP_SIGNED' : 'GROUP_WAITING';
+};
 const runFacts = (run: WorkflowRunProgress): RunFacts => ({ state: run.state,
-  steps: run.steps.map(step => ({ index: step.index, action: step.action, state: step.state, transaction: step.outcome?.submissions[0]?.hash ?? null })) });
+  steps: run.steps.map(step => ({ index: step.index, action: step.action, state: stepState(run, step), transaction: step.outcome?.submissions[0]?.hash ?? null })) });
 /** The non-secret continuation link of a multi-step approval: only the run owner's proven wallet can open it. */
 export const continuationUrl = (origin: string, approvalId: string) => `${origin}/approve#${approvalId}`;
 
@@ -91,6 +100,9 @@ function workflowNotifications(language: ChannelLanguage, handoff: HandoffRecord
     due.push({ key: key(`step:${step.index}:${step.state.toLowerCase()}`), text: shorten(m.workflowRun(runFacts({ ...run, steps: [step] }))) });
   if (run.nextAction === 'OWNER_SIGNS_STEP' && run.currentStep > 0 && origin)
     due.push({ key: key(`ready:${run.currentStep}`), text: m.stepReady(run.currentStep + 1, continuationUrl(origin, handoff.handoffId)) });
+  // A later user-funded group that became due (e.g. after a bridge delivered) is announced like a step: the owner's wallet signs it in FloFi.
+  if (run.nextAction === 'OWNER_SIGNS_GROUP' && run.currentStep > 0 && origin)
+    due.push({ key: key(`ready-group:${run.currentStep}`), text: m.stepReady(run.currentStep + 1, continuationUrl(origin, handoff.handoffId)) });
   if (run.state === 'COMPLETED') due.push({ key: key('done'), text: m.runDone });
   else if (run.state === 'HALTED') due.push({ key: key('halted'), text: m.runHalted });
   else if (run.state === 'ATTENTION') due.push({ key: key('attention'), text: m.runAttention });

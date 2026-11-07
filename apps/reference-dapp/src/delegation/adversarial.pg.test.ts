@@ -158,9 +158,10 @@ describe('BUILD-AUTOMATION-002 passkey binding and replay (PostgreSQL)', () => {
       await expect(h.service.authorizationSign(h.owner, created.authorizationId, review.revision, assertion)).rejects.toThrow();
       // A challenge for another subject, another purpose or another owner is not consumable.
       expect(await h.store.consumeChallenge(null, h.owner, 'AUTHORIZE', fromB64url(review.challenge), `${created.authorizationId}:1`, h.now())).toBe(false);
-      // The executor re-verifies the stored assertion: the authorization stays verifiable without any new signature.
+      // The executor re-verifies the stored assertion (the authority chain still verifies without any new signature); BUILD-FLOFI-UNIVERSAL-
+      // WORKFLOW-002 (S1): the step itself then stops before simulation, because the executor would pay its gas.
       await h.trigger(created.ruleId); await h.drain();
-      expect((await h.store.executions(h.owner, { limit: 1 }))[0]!.state).toBe('SETTLED');
+      expect((await h.store.executions(h.owner, { limit: 1 }))[0]).toMatchObject({ state: 'BLOCKED', code: 'EXECUTOR_GAS_PAYER_REFUSED' });
     } finally { await t.drop(); }
   });
 });

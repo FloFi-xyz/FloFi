@@ -225,10 +225,9 @@ export function createAutomationService(deps: ServiceDeps) {
 
     async setState(owner: Owner, ruleId: string, expectedVersion: number, action: 'PAUSE' | 'RESUME' | 'ARCHIVE'): Promise<RuleView> {
       const now = deps.now(), current = await store.getRule(owner, ruleId) ?? refuse('AUTOMATION_NOT_FOUND');
-      if (action === 'RESUME' && current.executionMode === 'DELEGATED_WITH_LIMITS') {
-        const blocked = deps.delegatedResumeGuard ? await deps.delegatedResumeGuard(current) : 'DELEGATED_AUTHORIZATION_REQUIRED';
-        if (blocked) refuse(blocked);
-      }
+      // BUILD-FLOFI-UNIVERSAL-WORKFLOW-002 (S1): FloFi's delegated executor is retired, so a delegated rule never resumes — it would only queue
+      // occurrences the executor always refuses. Pausing and archiving it stay available; owner-confirmed rules are unchanged.
+      if (action === 'RESUME' && current.executionMode === 'DELEGATED_WITH_LIMITS') refuse('EXECUTOR_FUNDED_GAS_RETIRED');
       const schedule = current.definition.schedule;
       const resume = action === 'RESUME' ? { nextEvaluationAt: schedule ? new Date(nextSlotAfter(schedule, now.getTime()).at) : now, scheduleCursor: schedule ? now : null } : undefined;
       const rule = await store.setState(owner, ruleId, expectedVersion, action === 'PAUSE' ? 'PAUSED' : action === 'RESUME' ? 'ACTIVE' : 'ARCHIVED', now, resume);

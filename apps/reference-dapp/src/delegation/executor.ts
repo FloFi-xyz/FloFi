@@ -32,7 +32,8 @@ import { compileScope, isWorkflowScope, workflowGrantBindings } from './workflow
 import { digestBytes } from './canonical.ts';
 import type { ChainTransport } from './chains.ts';
 import type { DelegationConfig } from './config.ts';
-import { driverFor, fillStaleNonces, type SignerUser, type StepContext, type StepDriver } from './drivers.ts';
+import { driverFor, type SignerUser, type StepContext, type StepDriver } from './drivers.ts';
+import { assertUserFundedSubmission } from '../user-funded/gas-payer.ts';
 import { authorizationDigest, credentialCommitments, executionSpend, manifestHash, manifestProblem, sameArtifact, type DelegatedAuthorizationManifest } from './manifest.ts';
 import type { DelegationStore, ExecutionRecord, GrantRecord, RevisionRecord, StepRecord } from './pg-store.ts';
 import { periodStarts, reservationViolation, stepPolicyViolation, type StepPlan } from './policy.ts';
@@ -89,6 +90,18 @@ export const transientSimulation = (code: string): boolean => code === 'DELEGATI
   || /RATE_LIMITED$/.test(code);
 /** BUILD-FLOFI-UNIVERSAL-SINGLE-AUTH-MAINNET-001: refuse to sign a step this close to its grant's expiry (a two-call step could straddle it). */
 export const GRANT_EXPIRY_MARGIN_MS = 5 * 60_000;
+/**
+ * BUILD-FLOFI-UNIVERSAL-WORKFLOW-002, invariant S1 (user-funded gas): the closed refusal for any submission the delegated executor would make.
+ * Its drivers sign from the grant's session address (`signEvmCalls`, the Solana fixture driver), the account that pays the fees — a
+ * FloFi-controlled key, never the owner. Null would mean the owner pays, which no executor driver does.
+ */
+export function executorGasRefusal(grant: Pick<GrantRecord, 'chain' | 'sessionAddress' | 'walletAddress'>): string | null {
+  try {
+    assertUserFundedSubmission({ kind: grant.chain.startsWith('solana:') ? 'SOLANA_TRANSACTION' : 'EVM_TRANSACTION', feePayer: grant.sessionAddress,
+      ownerWallet: grant.walletAddress, flofiControlled: [grant.sessionAddress] });
+    return null;
+  } catch (cause) { return cause instanceof Error ? cause.message : 'EXECUTOR_GAS_PAYER_REFUSED'; }
+}
 async function verifyAuthorityChain(deps: ExecutorDeps, source: SourceFacts, revision: RevisionRecord, executionId: string | null = null): Promise<{ ok: true; chain: Chain } | { ok: false; code: string }> {
   const now = deps.now(), m = revision.manifest;
   if (revision.state !== 'ACTIVE' || !revision.envelope || !revision.assertion) return { ok: false, code: 'AUTHORIZATION_NOT_ACTIVE' };
@@ -322,6 +335,10 @@ async function run(deps: ExecutorDeps, start: ExecutionRecord, verified: Awaited
       const ctx: StepContext = { step: bound.step, binding, grant, transport, now: deps.now, mainnet: deps.config.mainnetChains };
       const driver = driverFor(ctx, deps.config.mode);
       if (!driver || (deps.drivers && !deps.drivers.includes(driver))) return stopBefore(k, 'DELEGATED_STEP_DRIVER_UNAVAILABLE');
+      // BUILD-FLOFI-UNIVERSAL-WORKFLOW-002, invariant S1: every executor submission is sent from the grant's session signer (the shared AWS KMS
+      // address in production), which would pay its network fees. FloFi never funds user gas, so nothing is simulated, signed or sent here.
+      const refusal = executorGasRefusal(grant);
+      if (refusal) { log('delegation.executor_gas_refused', { step: k, code: refusal }); return stopBefore(k, refusal); }
       let simulated: Awaited<ReturnType<StepDriver['simulate']>>;
       try { simulated = await driver.simulate(ctx); } catch (cause) {
         const code = codeOf(cause, 'SIMULATION_FAILED');
@@ -366,11 +383,9 @@ async function run(deps: ExecutorDeps, start: ExecutionRecord, verified: Awaited
         const code = codeOf(broadcastFailure, 'SUBMISSION_BROADCAST_FAILED');
         await deps.store.stepTransition(e.executionId, k, ['SUBMISSION_PREPARED'], 'UNCERTAIN', { code });
         // BUILD-FLOFI-SINGLE-AUTH-WORKFLOW-UX-001: signed bytes past their send window are never sent; the owner's attention is required.
-        // BUILD-FLOFI-UNIVERSAL-SINGLE-AUTH-MAINNET-001: the executor address is shared, so the never-sent nonces are filled with the executor's
-        // own zero-value self-transactions; once one is mined the stale bytes can never execute, and reconciliation reports the step not executed.
-        if (code === 'SUBMISSION_STALE') await fillStaleNonces(grant, transport, step.submission!, deps.signer, deps.log).catch(cause => log('delegation.nonce_fill_failed', { step: k,
-          code: codeOf(cause, 'NONCE_FILL_FAILED') }));
-        await enterUncertain(code === 'SUBMISSION_STALE'); return outcome(PENDING_RETRY_MS);
+        // BUILD-FLOFI-UNIVERSAL-WORKFLOW-002 (S1): the executor-paid nonce fillers of PR #166 are retired — the executor sends nothing, so a
+        // persisted legacy submission stays UNCERTAIN and is only observed (the `executor` transport has no send method).
+        await enterUncertain(code === 'SUBMISSION_STALE' || code === 'DELEGATION_RPC_METHOD_FORBIDDEN'); return outcome(PENDING_RETRY_MS);
       }
       const submitted = await deps.store.stepTransition(e.executionId, k, ['SUBMISSION_PREPARED'], 'SUBMITTED', {});
       if (!submitted) return outcome(PENDING_RETRY_MS);
@@ -388,9 +403,7 @@ async function run(deps: ExecutorDeps, start: ExecutionRecord, verified: Awaited
         // Not final yet (or dropped by a node): re-broadcast exactly the persisted bytes — idempotent, never a new transaction — and keep
         // the reservation until reconciliation decides.
         const resent = await driver.broadcast(recoveryCtx, step.submission!).then(() => null, (cause: unknown) => codeOf(cause, 'SUBMISSION_BROADCAST_FAILED'));
-        // A never-mined submission past its send window is never sent again: its nonces are filled on every pass until reconciliation sees them used.
-        if (resent === 'SUBMISSION_STALE') await fillStaleNonces(grant, transport, step.submission!, deps.signer, deps.log).catch(cause => log('delegation.nonce_fill_failed', { step: k,
-          code: codeOf(cause, 'NONCE_FILL_FAILED') }));
+        if (resent) log('delegation.rebroadcast_refused', { step: k, code: resent });
         return outcome(PENDING_RETRY_MS);
       }
       const reconciliation = bigintJson({ status: r.status, spent: r.spent, received: r.received, evidence: r.evidence });

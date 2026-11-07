@@ -96,6 +96,23 @@ describe('BUILD-CHAT-E2E-001 channel workflows', () => {
     expect(canonicalWorkflow([supply(owner) as never, decided.command!])).toMatchObject({ ok: false });
   });
 
+  it('BUILD-FLOFI-UNIVERSAL-WORKFLOW-002: a user-funded run never reads "authorized" before the owner\'s wallet answered; a group that became due is announced', () => {
+    const handoff = { handoffId: 'apr_' + 'b'.repeat(26), shareStatus: true } as HandoffRecord;
+    const step = (index: number, state: string) => ({ index, action: 'swap', state, flow: null, stepWorkflowHash: null, code: null, bound: null, outcome: null });
+    const groupOf = (index: number, steps: readonly [number, number], signed: boolean) => ({ index, chain: 'eip155:8453', strategy: 'EVM_WALLET_BATCH', signing: 'WHEN_DUE', steps,
+      state: signed ? 'AUTHORIZED' : 'PLANNED', awaitsDelivery: null, code: null, validUntil: null, feePayer: 'OWNER_WALLET', maxFee: null, gasPaid: null, submissions: [], batchId: null, signed });
+    const run = { workflowRunId: 'wfr_' + 'b'.repeat(26), approvalId: handoff.handoffId, state: 'RUNNING', mode: 'USER_FUNDED', stepCount: 3, currentStep: 1, code: null,
+      workflowHash: '0x' + '1'.repeat(64), expiresAt: '', completedAt: null, createdAt: '', updatedAt: '', stepsVisible: true, nextAction: 'OWNER_SIGNS_GROUP', authority: 'NONE', note: null,
+      steps: [step(0, 'RECONCILED'), step(1, 'DELEGATED'), step(2, 'DELEGATED')], groups: [groupOf(0, [0, 0], true), groupOf(1, [1, 1], false), groupOf(2, [2, 2], true)] };
+    const progress = { status: 'APPLIED', expiresAt: '2026-10-22T10:00:00.000Z', runs: [], runsVisible: true, workflowRun: run, note: null } as never;
+    const status = statusReplies('EN', { handoff, progress })[0]!.text;
+    expect(status).toContain('2. Swap — waiting for your wallet');
+    expect(status).toContain('3. Swap — signed in your wallet');
+    expect(status).not.toContain('authorized');
+    expect(statusReplies('PT', { handoff, progress })[0]!.text).toContain('2. Troca — aguardando a sua carteira');
+    expect(plannedNotifications('EN', handoff, progress, 'https://flofi.test').due.map(n => n.key)).toContain(`notify:${handoff.handoffId}:wfr:ready-group:1`);
+  });
+
   it('reports the run from durable state: step states always, transactions only when shared; notifications once each, with the continuation link', () => {
     const handoff = { handoffId: 'apr_' + 'a'.repeat(26), shareStatus: true } as HandoffRecord;
     const tx = '0x' + 'ab'.repeat(32);

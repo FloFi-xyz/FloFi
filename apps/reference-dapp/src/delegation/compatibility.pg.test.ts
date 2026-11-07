@@ -14,7 +14,10 @@ import { delegationHarness } from './delegation.test-harness.ts';
 
 const D = erc7710;
 describe('BUILD-AUTOMATION-002 executor redemptions are what FloFi\'s public flows already reconcile (PostgreSQL, MOCKED chain)', () => {
-  it('verifyOwnerSubmission accepts both delegated calls (approval and swap) as the owner\'s DELEGATED_SINGLE submissions', async () => {
+  // BUILD-FLOFI-UNIVERSAL-WORKFLOW-002 (intentional safety change): the executor no longer produces a redemption — its session key would pay
+  // the gas (S1). What remains to reconcile from it is nothing: no submission, no transaction. verifyOwnerSubmission's DELEGATED_SINGLE branch
+  // for relayed public-flow submissions is unchanged and covered by its own suites.
+  it('an executor redemption never exists any more: the step holds no submission and the chain saw no executor transaction', async () => {
     const t = await createTestDatabase();
     try {
       const h = await delegationHarness(t.db);
@@ -23,17 +26,12 @@ describe('BUILD-AUTOMATION-002 executor redemptions are what FloFi\'s public flo
       const { created } = await h.authorize(h.multichainInput({}, false));
       await h.trigger(created.ruleId); await h.drain();
       const [execution] = await h.store.executions(h.owner, { limit: 1 });
-      expect(execution!.state).toBe('SETTLED');
+      expect(execution).toMatchObject({ state: 'BLOCKED', code: 'EXECUTOR_GAS_PAYER_REFUSED' });
       const [step] = await h.store.steps(execution!.executionId);
-      const prepared = (step!.plan!.prepared as { calls: { target: string; data: string }[] }).calls;
-      const txs = (step!.submission!.txs as { hash: string }[]);
-      for (const [i, tx] of txs.entries()) {
-        const raw = await h.evm.rpc('eth_getTransactionReceipt', [tx.hash]) as Record<string, unknown>;
-        const object = await h.evm.rpc('eth_getTransactionByHash', [tx.hash]);
-        const verified = await verifyOwnerSubmission(h.evm.rpc, { txHash: tx.hash, account: h.evmOwner.address, target: prepared[i]!.target, data: prepared[i]!.data,
-          preBlock: Number(BigInt(String(raw.blockNumber))) - 1 }, object, raw, 84532, true);
-        expect(verified).toMatchObject({ direct: false, delegated: true, delegationDepth: 1, status: 1, txTo: D.DELEGATION_FRAMEWORK_V1_3.delegationManager });
-      }
+      expect(step).toMatchObject({ state: 'BLOCKED', submission: null });
+      expect(h.evm.control.sends()).toBe(0);
+      expect(typeof verifyOwnerSubmission).toBe('function');
+      expect(D.DELEGATION_FRAMEWORK_V1_3.delegationManager).toMatch(/^0x[0-9a-f]{40}$/);
     } finally { await t.drop(); }
   });
 });

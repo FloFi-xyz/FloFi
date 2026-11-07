@@ -24,7 +24,8 @@ import type { Command } from '../domain/commands';
 import type { Workflow } from '../domain/initial-workflow';
 import { compositionWorkflow, sequenceOrder, workflowSequence } from '../domain/workflow-sequence';
 import { workflowSteps, type StepDetail } from '../domain/workflow-steps';
-import { composeWorkflow, reviewContextOf, type WorkflowComposition } from '../engine/strategy-engine';
+import { composeWorkflow, dappReviewContext, reviewContextOf, type WorkflowComposition } from '../engine/strategy-engine';
+import { editorReducer, initialEditor } from '../domain/editor';
 import type { StrategyInput, StrategySpec } from '../engine/strategy-spec';
 
 /** The workflow-run limits (`workflow_runs.step_count BETWEEN 2 AND 8`). */
@@ -106,4 +107,42 @@ export function editorWorkflowStrategy(input: unknown): EditorWorkflowStrategy |
     if (!node || reproduced.length !== 1 || nodeSemantics(reproduced[0]!) !== nodeSemantics(node)) return { ok: false, code: 'EDITOR_WORKFLOW_PARITY_FAILED', step: index };
   }
   return { ok: true, strategy: composed.strategy, workflowHash: composed.workflowHash, stepCount: composed.steps.length, composition: composed };
+}
+
+/**
+ * BUILD-FLOFI-UNIVERSAL-WORKFLOW-002 (Chat → Canvas): a Chat / MCP / channel multi-step strategy as ONE Canvas workflow the Editor opens and
+ * edits — built by the same editor reducer from the same authoring commands the engine composed (each step), linked in step order. It is
+ * accepted only when the Canvas reads it back (`editorWorkflowStrategy`) to the SAME canonical strategy hash: the Canvas and the Chat then
+ * hold one workflow, never two interpretations. Bindings are part of that check: the Canvas funds a step from an earlier step's delivered
+ * asset exactly when the strategy binds it, so a strategy whose bindings differ from the Canvas's funding is refused (CANVAS_PARITY_FAILED).
+ */
+export type CanvasOfStrategy = { readonly ok: true; readonly workflow: Workflow; readonly workflowHash: string } | EditorWorkflowRefusal;
+export function canvasWorkflowOfStrategy(input: unknown): CanvasOfStrategy {
+  const composed = composeWorkflow(input);
+  if (!composed.ok) return { ok: false, code: composed.code };
+  if (composed.steps.length < EDITOR_RUN_MIN_STEPS) return { ok: false, code: 'EDITOR_WORKFLOW_SINGLE_STEP' };
+  const context = dappReviewContext();
+  let state = initialEditor();
+  for (const [index, step] of composed.steps.entries()) {
+    const before = new Set(state.workflow.nodes.map(n => n.nodeId));
+    // The same authoring command, applied at the Canvas's current revision (each edit advances it).
+    const next = editorReducer(state, { ...step.command, baseRevision: state.workflow.revision } as Command, context);
+    if (next.error) return { ok: false, code: 'CANVAS_STEP_NOT_AUTHORABLE', step: index, detail: next.error.slice(0, 120) } as EditorWorkflowRefusal;
+    const added = next.workflow.nodes.filter(n => !before.has(n.nodeId) && !n.actionType.startsWith('mock-'));
+    if (added.length !== 1) return { ok: false, code: 'CANVAS_STEP_NOT_AUTHORABLE', step: index };
+    state = next;
+    // Order: each step after the previous one (an ordering link; the Canvas derives funding from the assets themselves).
+    if (index > 0) {
+      const previous = financialNodes(state.workflow).filter(n => n.nodeId !== added[0]!.nodeId).at(-1)!;
+      if (!added[0]!.dependencies.includes(previous.nodeId)) {
+        const linked = editorReducer(state, { source: 'CHAT', baseRevision: state.workflow.revision, type: 'CONNECT', from: previous.nodeId, to: added[0]!.nodeId } as Command, context);
+        if (linked.error) return { ok: false, code: 'CANVAS_STEP_NOT_LINKABLE', step: index };
+        state = linked;
+      }
+    }
+  }
+  const back = editorWorkflowStrategy(state.workflow);
+  if (!back.ok) return back;
+  if (back.workflowHash !== composed.workflowHash) return { ok: false, code: 'CANVAS_PARITY_FAILED' };
+  return { ok: true, workflow: state.workflow, workflowHash: back.workflowHash };
 }

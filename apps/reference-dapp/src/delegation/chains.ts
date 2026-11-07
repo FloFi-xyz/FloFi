@@ -5,7 +5,9 @@
  *
  *   read      verification of enrollments, grants and revocations (EVM `eth_call`/`eth_getCode`/…, Solana account reads)
  *   owner     read + broadcasting a transaction the OWNER signed (a Solana delegation or revocation) — never a session signature
- *   executor  read + broadcasting a transaction a SESSION SIGNER signed (the delegated executor only)
+ *   executor  read only. BUILD-FLOFI-UNIVERSAL-WORKFLOW-002 (invariant S1, user-funded gas): a transaction a SESSION SIGNER signs is paid by
+ *             that FloFi-controlled address, so the executor can no longer broadcast anything (no `eth_sendRawTransaction`, no Solana
+ *             `sendTransaction`). User-funded execution relays only what the owner signed, through `src/user-funded` (fee payer = owner).
  */
 type Rpc = (method: string, params: readonly unknown[]) => Promise<unknown>;
 export type TransportPurpose = 'read' | 'owner' | 'executor';
@@ -19,7 +21,8 @@ export function allowedMethods(chain: string, purpose: TransportPurpose): Readon
   const read = evm ? EVM_READ : SOL_READ;
   if (purpose === 'read') return read;
   if (purpose === 'owner') return evm ? read : new Set([...read, 'sendTransaction']);
-  return new Set([...read, evm ? 'eth_sendRawTransaction' : 'sendTransaction']);
+  // `executor`: S1 — no send method at all (a session-signed transaction would be FloFi-funded).
+  return read;
 }
 /** Wraps `inner` so only `purpose`'s methods reach it (DELEGATION_RPC_METHOD_FORBIDDEN otherwise). */
 export function guarded(chain: string, purpose: TransportPurpose, provenance: ChainTransport['provenance'], inner: Rpc): ChainTransport {

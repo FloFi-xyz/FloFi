@@ -83,15 +83,21 @@ const OTHER_ROWS: readonly (Omit<CertificationRow, 'liveEvidence' | 'status' | '
   { id: 'sequence-bound-amounts-confirm-mode', action: 'sequence_bound_amounts', network: 'any (per step)', destinationNetwork: null, funds: 'TEST_FUNDS',
     protocols: ['per step'], flow: 'workflow-run', webRuntime: 'per step', ownerWalletExecutionImplemented: true,
     channels: { canvas: false, approve: true, copilot: false, mcp: true, telegram: true, whatsapp: 'POLICY_BLOCKED', developerApi: true }, agentRollout: null,
-    registryEvidence: null, implemented: true, why: 'Confirm-each-step and delegated modes resolve min(cap, reconciled received) from the producer step (BUILD-CROSSCHAIN-UNIVERSAL-001).' },
+    registryEvidence: null, implemented: true, why: 'Confirm-each-step steps and later user-funded groups resolve min(cap, reconciled received) from the producer step (BUILD-CROSSCHAIN-UNIVERSAL-001); a same-group dependent step spends the producer\'s signed guaranteed minimum (BUILD-FLOFI-UNIVERSAL-WORKFLOW-002).' },
   { id: 'sequence-delegated-single-authorization', action: 'sequence_delegated', network: 'base-sepolia, ethereum-sepolia (Uniswap swaps only)', destinationNetwork: null, funds: 'TEST_FUNDS',
     protocols: ['uniswap.v3'], flow: null, webRuntime: null, ownerWalletExecutionImplemented: false,
     channels: { canvas: false, approve: false, copilot: false, mcp: false, telegram: false, whatsapp: 'POLICY_BLOCKED', developerApi: false }, agentRollout: null,
-    registryEvidence: 'MOCKED', implemented: false, why: 'Production has no delegated signer provider (KMS/HSM): DELEGATED_SIGNER_UNAVAILABLE on every hosted deployment.' },
+    registryEvidence: 'MOCKED', implemented: false, why: 'EXECUTOR_FUNDED_GAS_RETIRED: the delegated executor (a FloFi-controlled KMS address) sent and paid for every step; retired by BUILD-FLOFI-UNIVERSAL-WORKFLOW-002 (invariant S1, FloFi never funds user gas) and never offered.' },
+  // BUILD-FLOFI-UNIVERSAL-WORKFLOW-002: execution groups the owner's own wallet authorizes and pays for (migration 0023).
+  { id: 'sequence-user-funded-groups', action: 'sequence_user_funded', network: 'ethereum, base, arbitrum-one (EIP-5792 batches: USDC⇄WETH Uniswap v3, Aave V3 supply/borrow, transfers); robinhood (transfers); solana (sign-all: transfers, Jupiter swaps); any other step through its own flow',
+    destinationNetwork: null, funds: 'REAL_FUNDS', protocols: ['eip-5792', 'erc-4337 v0.7 (owner account, no paymaster)', 'wallet-standard solana:signTransaction'], flow: 'workflow-run',
+    webRuntime: 'per group', ownerWalletExecutionImplemented: true,
+    channels: { canvas: false, approve: true, copilot: false, mcp: true, telegram: true, whatsapp: 'POLICY_BLOCKED', developerApi: false }, agentRollout: null,
+    registryEvidence: 'MOCKED', implemented: true, why: 'User-funded execution groups: one wallet interaction per group, the owner\'s wallet pays every fee (S1); off unless FLOFI_USER_FUNDED_EXECUTION=enabled; MOCKED end-to-end only — no owner-signed mainnet execution recorded.' },
   { id: 'bridge-evm-solana', action: 'bridge', network: 'any EVM network', destinationNetwork: 'solana', funds: 'REAL_FUNDS',
-    protocols: [], flow: null, webRuntime: null, ownerWalletExecutionImplemented: false,
-    channels: { canvas: false, approve: false, copilot: false, mcp: false, telegram: false, whatsapp: 'POLICY_BLOCKED', developerApi: false }, agentRollout: null,
-    registryEvidence: null, implemented: false, why: 'BRIDGE_ROUTE_UNAVAILABLE: no EVM ↔ Solana route exists.' },
+    protocols: ['relay-depository'], flow: 'crosschain-universal', webRuntime: 'universal', ownerWalletExecutionImplemented: true,
+    channels: { canvas: true, approve: true, copilot: true, mcp: true, telegram: true, whatsapp: 'POLICY_BLOCKED', developerApi: false }, agentRollout: null,
+    registryEvidence: 'MOCKED', implemented: true, why: 'Owner-signed, owner-paid Relay deposits through the universal router (flow crosschain-universal) for every EVM ↔ Solana pair; MOCKED end-to-end and read-only quotes only — no mainnet transaction recorded.' },
 ];
 
 export function certificationMatrix(ledger: Ledger, verification: LiveVerification): readonly CertificationRow[] {
