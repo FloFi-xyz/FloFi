@@ -342,7 +342,7 @@ export async function runView(deps: { readonly store: Pick<WorkflowRunStore, 'st
   const nextAction = run.state === 'PENDING' ? 'OWNER_CHOOSES_MODE' : run.state === 'HALTED' ? 'OWNER_DECIDES'
     : ['RUNNING', 'ATTENTION'].includes(run.state)
       ? (run.mode === 'CONFIRM_EACH_STEP' || (run.mode === 'USER_FUNDED' && ownerGroup)) && (current?.state === 'READY' || current?.state === 'PENDING') ? 'OWNER_SIGNS_STEP'
-        : run.mode === 'USER_FUNDED' && group && ['PLANNED', 'PREPARED'].includes(group.state) ? 'OWNER_SIGNS_GROUP'
+        : run.mode === 'USER_FUNDED' && group && !ownerGroup && ['PLANNED', 'PREPARED'].includes(group.state) ? 'OWNER_SIGNS_GROUP'
           : run.mode === 'USER_FUNDED' && group?.state === 'AUTHORIZED' && group.strategy === 'EVM_WALLET_BATCH' ? 'OWNER_CONFIRMS_BATCH'
             : 'WAITING_FOR_RECONCILIATION' : 'NONE';
   const note = !options.outcomes ? 'The owner has not shared the transactions and evidence of this workflow with this conversation.'

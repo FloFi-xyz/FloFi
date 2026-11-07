@@ -195,10 +195,12 @@ describe('BUILD-FLOFI-UNIVERSAL-WORKFLOW-002 user-funded workflow run (PostgreSQ
       const h = await workflowRunHarness(t.db, { userFundedChains: [BASE_SEPOLIA], flows: ['base-sepolia-swap', 'crosschain-router-testnet'] });
       h.d.evm.control.fundNative(h.d.evmOwner.address, 10n ** 18n);
       const BRIDGE = { action: 'bridge', sourceNetwork: 'base-sepolia', destinationNetwork: 'arbitrum-sepolia', asset: 'USDC', amount: '5' };
-      const approval = await h.request({ version: 2, steps: [BASE_SWAP, BRIDGE] });
-      await claim(h, approval.secret);
+      // Two swaps (one batch) then a bridge (its own flow): 2 wallet interactions for 3 steps, so user-funded groups are offered.
+      const approval = await h.request({ version: 2, steps: [BASE_SWAP, { ...BASE_SWAP, amount: '2' }, BRIDGE] });
+      const claimed = await claim(h, approval.secret);
+      expect(claimed.view.workflowRun!.plan).toMatchObject({ recommended: 'USER_FUNDED', userFunded: { interactions: { upfront: 1, whenDue: 1 } } });
       const started = await workflowRunUserFundedStart(h.surface, approval.approvalId, [h.evm, h.sol], METAMASK);
-      expect(started.view.workflowRun!.run.groups.map(g => [g.strategy, g.steps])).toEqual([['EVM_WALLET_BATCH', [0, 0]], ['EVM_OWNER_STEP', [1, 1]]]);
+      expect(started.view.workflowRun!.run.groups.map(g => [g.strategy, g.steps])).toEqual([['EVM_WALLET_BATCH', [0, 1]], ['EVM_OWNER_STEP', [2, 2]]]);
       const prepared = await workflowRunUserFundedPrepare(h.surface, approval.approvalId, [h.evm, h.sol], 0);
       const hash = h.d.evm.control.walletBatch(h.d.evmOwner.address, evmCallsOf((prepared.prepared as unknown as { group: EvmGroupCalls }).group));
       await workflowRunUserFundedAuthorize(h.surface, approval.approvalId, [h.evm, h.sol], 0, { kind: 'EVM_WALLET_BATCH', batchId: 'batch-mixed' });
@@ -206,14 +208,15 @@ describe('BUILD-FLOFI-UNIVERSAL-WORKFLOW-002 user-funded workflow run (PostgreSQ
       // The bridge is the owner's to confirm through its own flow, exactly as in confirm-each-step mode.
       const { workflowRunContinue } = await import('../platform/approve.ts');
       const loaded = await workflowRunContinue(h.surface, approval.approvalId, [h.evm, h.sol]);
-      expect(loaded.view.workflowRun!.step).toEqual({ index: 1, count: 2 });
+      expect(loaded.view.workflowRun!.step).toEqual({ index: 2, count: 3 });
       expect(loaded.view.workflowRun!.run.nextAction).toBe('WAITING_FOR_RECONCILIATION');
       h.flows.ownerExecutes('crosschain-router-testnet', h.evm.address, loaded.workflow, 'RECONCILED');
       await h.drain();
       const run = await ownedRun(h.runs, approval.approvalId, [h.evm, h.sol]);
       expect(run).toMatchObject({ state: 'COMPLETED', mode: 'USER_FUNDED' });
       expect((await h.store.groups(run.runId)).map(g => g.state)).toEqual(['RECONCILED', 'RECONCILED']);
-      expect((await h.store.steps(run.runId)).map(s => [s.state, s.outcome?.kind])).toEqual([['RECONCILED', 'USER_FUNDED_GROUP'], ['RECONCILED', 'OWNER_RUN']]);
+      expect((await h.store.steps(run.runId)).map(s => [s.state, s.outcome?.kind])).toEqual([['RECONCILED', 'USER_FUNDED_GROUP'], ['RECONCILED', 'USER_FUNDED_GROUP'],
+        ['RECONCILED', 'OWNER_RUN']]);
     } finally { await t.drop(); }
   });
 
