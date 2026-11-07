@@ -181,6 +181,33 @@ export async function signWithSolanaWallet(session: SolanaSession, unsignedTrans
   return bytesToBase64(new Uint8Array(signed.buffer, signed.byteOffset, signed.byteLength).slice());
 }
 
+/**
+ * BUILD-FLOFI-UNIVERSAL-WORKFLOW-002: the owner signs several transactions of one execution group in ONE Wallet Standard request
+ * (`solana:signTransaction` accepts several inputs). Whether the wallet shows one prompt or one per transaction is the wallet's own behaviour;
+ * FloFi makes exactly one request. Every result must be a transaction of at most 1232 bytes; the server verifies each against its reviewed
+ * message and the owner's signature before anything is sent. A wallet answering with another count is refused.
+ */
+export async function signAllWithSolanaWallet(session: SolanaSession, unsignedTransactions: readonly string[], prefix = 'USER_FUNDED', assertCurrent?: () => void): Promise<string[]> {
+  if (!unsignedTransactions.length || unsignedTransactions.length > 8) throw new Error(`${prefix}_SOLANA_GROUP_INVALID`);
+  if (unsignedTransactions.length === 1) return [await signWithSolanaWallet(session, unsignedTransactions[0]!, prefix, assertCurrent)];
+  const assertProvider = () => {
+    if (invalidatedSessions.has(session) || !registeredWallets().includes(session.wallet)) throw new Error(`${prefix}_WALLET_CHANGED`);
+  };
+  assertProvider();
+  assertCurrent?.();
+  const feature = session.wallet.features['solana:signTransaction'] as SignFeature | undefined;
+  if (!feature) throw new Error(`${prefix}_SOLANA_WALLET_REQUIRED`);
+  const results = await feature.signTransaction(...unsignedTransactions.map(tx => ({ account: session.account, transaction: base64ToBytes(tx), chain: session.chain })));
+  assertProvider();
+  assertCurrent?.();
+  if (!Array.isArray(results) || results.length !== unsignedTransactions.length) throw new Error(`${prefix}_WALLET_RESPONSE_INVALID`);
+  return results.map(result => {
+    const signed = result?.signedTransaction as unknown;
+    if (!ArrayBuffer.isView(signed) || signed.byteLength > 1232) throw new Error(`${prefix}_WALLET_RESPONSE_INVALID`);
+    return bytesToBase64(new Uint8Array(signed.buffer, signed.byteOffset, signed.byteLength).slice());
+  });
+}
+
 type SignMessageFeature = { signMessage(...inputs: { account: SolanaWalletAccount; message: Uint8Array }[]): Promise<readonly { signedMessage: Uint8Array; signature: Uint8Array }[]> };
 /** BUILD-MCP-002: whether the connected wallet can prove control with Sign-In With Solana (`solana:signMessage`). */
 export const canSignSolanaMessage = (session: SolanaSession) => 'solana:signMessage' in session.wallet.features;

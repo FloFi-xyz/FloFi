@@ -6,6 +6,8 @@
  * the test records the owner's flow runs (as FloFi's flows would after the owner's wallet signature) so the runner's observation, ordering and
  * recovery can be exercised without a browser wallet. Evidence from it is MOCKED; nothing here reaches a public network.
  */
+import { guarded } from '../delegation/chains.ts';
+import type { UserFundedDeps } from '../user-funded/groups.ts';
 import { randomBytes } from 'node:crypto';
 import { createPostgresWorkQueue, createWorker, type Database, type Logger } from '@defi-workflow-engine/cloud-runtime';
 import type { FlowName } from '../../backend/flows.ts';
@@ -84,6 +86,8 @@ export async function workflowRunHarness(db: Database, options: {
   readonly flows?: readonly FlowName[]; readonly sequences?: boolean; readonly delegation?: boolean;
   /** Handoff policy env (e.g. mainnet networks for Swap→Bridge→Swap). Defaults to test-funds only. */
   readonly policyEnv?: Readonly<Record<string, string | undefined>>;
+  /** BUILD-FLOFI-UNIVERSAL-WORKFLOW-002: user-funded execution on the MOCKED chain double for these chains (default: not enabled). */
+  readonly userFundedChains?: readonly string[];
 } = {}) {
   const d = await delegationHarness(db);
   const facts: DelegationFacts = options.delegation === false ? null : { mode: 'MOCKED_HARNESS', unavailable: null };
@@ -93,7 +97,12 @@ export async function workflowRunHarness(db: Database, options: {
   const policy = readHandoffPolicy(options.policyEnv ?? {});
   const lines: string[] = [];
   const log = (event: string, fields: Readonly<Record<string, unknown>>) => { lines.push(JSON.stringify({ event, ...fields })); };
+  const ufChains = options.userFundedChains ?? null;
+  const userFundedFacts = ufChains ? { enabled: true, code: null, chains: ufChains, bundlerChains: [], solanaNonceAccounts: false } : undefined;
+  const userFunded: UserFundedDeps | null = ufChains ? { chains: ufChains, now: d.now, bundler: () => null, solana: null, jupiter: null,
+    evm: chain => { const rpc = ufChains.includes(chain) ? d.rpc(chain) : null; return rpc ? guarded(chain, 'read', 'MOCKED', rpc) : null; } } : null;
   const runs: WorkflowRunSurface = { store, runtime: flows.runtime, delegation: d.store, now: d.now, log, policyFor: () => policy, delegationFacts: facts,
+    ...userFundedFacts ? { userFundedFacts } : {}, userFunded,
     grantsOf: owner => d.store.grants(owner as Owner), newId: typedId,
     delegationOps: facts ? {
       review: (owner, run) => d.service.workflowRunWalletReview(owner as Owner, run as never),
@@ -118,12 +127,12 @@ export async function workflowRunHarness(db: Database, options: {
   async function drain(runId?: string): Promise<number> {
     const queue = createPostgresWorkQueue({ db, ownerId: 'run-test-worker', tenantId: d.tenantId });
     const handlers = { ...delegationHandlers(d.deps as never), ...workflowRunHandlers({ store, runtime: flows.runtime, delegation: d.store, policyFor: () => null, now: d.now,
-      log }) };
+      log, userFunded }) };
     const worker = createWorker({ queue: { ...queue, claim: limit => queue.claim(limit, [DELEGATION_EXECUTE_RUN_KIND, WORKFLOW_RUN_ADVANCE_KIND]) }, handlers, logger: silent,
       workerId: 'run-test-worker', concurrency: 4 });
     let total = 0;
     for (;;) { const n = await worker.drainOnce(); total += n; if (n === 0) break; }
-    if (runId) await advanceRun({ store, runtime: flows.runtime, delegation: d.store, policyFor: () => null, now: d.now, log }, runId);
+    if (runId) await advanceRun({ store, runtime: flows.runtime, delegation: d.store, policyFor: () => null, now: d.now, log, userFunded }, runId);
     return total;
   }
   return { d, flows, handoffs, store, runs, surface, requester, deps, evm, sol, request, drain, lines, policy };

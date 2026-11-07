@@ -115,6 +115,8 @@ export function readDelegationConfig(env: Env): DelegationConfigResult {
  * Why delegated execution cannot run on this deployment (null: it can). A hosted deployment signs only with the AWS KMS provider; a local
  * deployment may rehearse with a disposable signer. Each step still needs a step driver for its chain and mode.
  */
+/** BUILD-FLOFI-UNIVERSAL-WORKFLOW-002 (ADR-0008, S1): the executor-funded path is retired; new executor-paid authority is refused with this code. */
+export const EXECUTOR_FUNDED_GAS_RETIRED = 'EXECUTOR_FUNDED_GAS_RETIRED';
 export function executionAvailability(config: DelegationConfig): string | null {
   return config.signer.kind === 'none' ? 'DELEGATED_SIGNER_UNAVAILABLE' : null;
 }

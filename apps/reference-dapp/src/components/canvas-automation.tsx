@@ -62,10 +62,12 @@ export function CanvasAutomation({ canvas, owner, delegationReady, delegationBlo
       <div className="delegation-mode" role="radiogroup" aria-label={t('Execution')}>
         <label><input type="radio" name="canvas-automation-mode" checked={mode === 'CONFIRM'} onChange={() => setMode('CONFIRM')}/> {t('Ask every time')}</label>
         <label><input type="radio" name="canvas-automation-mode" checked={mode === 'DELEGATED'} disabled={!delegationReady || Boolean(delegationBlocked)} onChange={() => setMode('DELEGATED')}/> {t('Automatic within limits')}</label>
-        {delegationReady && delegationBlocked && <p className="muted">{t(DELEGATION_ERROR_TEXT[delegationBlocked] ?? delegationBlocked)}</p>}
+        {/* BUILD-FLOFI-UNIVERSAL-WORKFLOW-002: retired on every deployment, whatever this one configures (S1). */}
+        <p className="muted">{t(DELEGATION_ERROR_TEXT.EXECUTOR_FUNDED_GAS_RETIRED!)}</p>
       </div>
       {mode === 'CONFIRM' ? steps.steps.length === 1 ? confirm(steps.steps[0]!.route)
-        : <p className="muted">{t('Ask every time runs one-step workflows. This workflow has {0} steps, so it can only run automatically within limits.', String(steps.steps.length))}</p>
+        // BUILD-FLOFI-UNIVERSAL-WORKFLOW-002 (S1): automatic execution is retired, so a multi-step workflow runs from the Canvas instead.
+        : <p className="muted">{t('Ask every time runs one-step workflows. This workflow has {0} steps: run it from the Canvas, where your own wallet confirms and pays for each step.', String(steps.steps.length))}</p>
         : <div className="automation-form delegation-form">
           <p className="muted">{t('Execution: Automatic within limits — FloFi executes each occurrence without asking you again, inside the limits you sign once.')}</p>
           <label className="automation-field"><span>{t('Name')}</span><input aria-label={t('Name')} value={name} maxLength={80} onChange={e => setName(e.currentTarget.value)}/></label>

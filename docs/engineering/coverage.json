@@ -34,6 +34,10 @@
       "path": "apps/reference-dapp/src/accounts/account-session.test.ts",
       "stage": "unit"
     },
+    "app.accounts.account-store-schema19.pg": {
+      "path": "apps/reference-dapp/src/accounts/account-store-schema19.pg.test.ts",
+      "stage": "postgres"
+    },
     "app.accounts.account-store.pg": {
       "path": "apps/reference-dapp/src/accounts/account-store.pg.test.ts",
       "stage": "postgres"
@@ -42,12 +46,12 @@
       "path": "apps/reference-dapp/src/accounts/oidc.test.ts",
       "stage": "unit"
     },
-    "app.accounts.privy-client": {
-      "path": "apps/reference-dapp/src/accounts/privy-client.test.ts",
-      "stage": "unit"
-    },
     "app.accounts.privy-bridge": {
       "path": "apps/reference-dapp/src/accounts/privy-bridge.test.tsx",
+      "stage": "unit"
+    },
+    "app.accounts.privy-client": {
+      "path": "apps/reference-dapp/src/accounts/privy-client.test.ts",
       "stage": "unit"
     },
     "app.accounts.privy-server": {
@@ -60,6 +64,22 @@
     },
     "app.accounts.turnkey-server": {
       "path": "apps/reference-dapp/src/accounts/turnkey-server.test.ts",
+      "stage": "unit"
+    },
+    "app.accounts.wallet-origin": {
+      "path": "apps/reference-dapp/src/accounts/wallet-origin.test.ts",
+      "stage": "unit"
+    },
+    "app.accounts.wallet-relay": {
+      "path": "apps/reference-dapp/src/accounts/wallet-relay.test.ts",
+      "stage": "unit"
+    },
+    "app.accounts.wallet-service.pg": {
+      "path": "apps/reference-dapp/src/accounts/wallet-service.pg.test.ts",
+      "stage": "postgres"
+    },
+    "app.accounts.wallet-session": {
+      "path": "apps/reference-dapp/src/accounts/wallet-session.test.ts",
       "stage": "unit"
     },
     "app.admin.analytics.workflows": {
@@ -77,6 +97,18 @@
     "app.admin.settings.pg": {
       "path": "apps/reference-dapp/src/admin/settings.pg.test.ts",
       "stage": "postgres"
+    },
+    "app.app.api.flofi.journey.route": {
+      "path": "apps/reference-dapp/src/app/api/flofi/journey/route.test.ts",
+      "stage": "unit"
+    },
+    "app.app.flofi-wallet-signing": {
+      "path": "apps/reference-dapp/src/app/flofi-wallet-signing.test.ts",
+      "stage": "unit"
+    },
+    "app.app.wallet-session-action": {
+      "path": "apps/reference-dapp/src/app/wallet-session-action.test.ts",
+      "stage": "unit"
     },
     "app.automations.boundaries": {
       "path": "apps/reference-dapp/src/automations/boundaries.test.ts",
@@ -130,6 +162,10 @@
       "path": "apps/reference-dapp/src/channels/core/workflow.test.ts",
       "stage": "unit"
     },
+    "app.channels.route-discovery": {
+      "path": "apps/reference-dapp/src/channels/route-discovery.test.ts",
+      "stage": "unit"
+    },
     "app.channels.telegram.learning.pg": {
       "path": "apps/reference-dapp/src/channels/telegram/learning.pg.test.ts",
       "stage": "postgres"
@@ -158,6 +194,42 @@
       "path": "apps/reference-dapp/src/components/account/sign-in.test.tsx",
       "stage": "unit"
     },
+    "app.components.automation-run-status": {
+      "path": "apps/reference-dapp/src/components/automation-run-status.test.tsx",
+      "stage": "unit"
+    },
+    "app.components.automations-workspace": {
+      "path": "apps/reference-dapp/src/components/automations-workspace.test.tsx",
+      "stage": "unit"
+    },
+    "app.components.canvas-panel-reveal": {
+      "path": "apps/reference-dapp/src/components/canvas-panel-reveal.test.ts",
+      "stage": "unit"
+    },
+    "app.components.copilot-automation-proposal": {
+      "path": "apps/reference-dapp/src/components/copilot-automation-proposal.test.tsx",
+      "stage": "unit"
+    },
+    "app.components.dashboard.landed": {
+      "path": "apps/reference-dapp/src/components/dashboard/dashboard-landed.test.tsx",
+      "stage": "unit"
+    },
+    "app.components.dashboard.portfolio-widget": {
+      "path": "apps/reference-dapp/src/components/dashboard/portfolio-widget.test.tsx",
+      "stage": "unit"
+    },
+    "app.components.editor-stepper": {
+      "path": "apps/reference-dapp/src/components/editor-stepper.test.tsx",
+      "stage": "unit"
+    },
+    "app.components.flofi-wallet-continue": {
+      "path": "apps/reference-dapp/src/components/flofi-wallet-continue.test.tsx",
+      "stage": "unit"
+    },
+    "app.components.site.typing-text": {
+      "path": "apps/reference-dapp/src/components/site/typing-text.test.ts",
+      "stage": "unit"
+    },
     "app.config.product": {
       "path": "apps/reference-dapp/src/config/product.test.ts",
       "stage": "unit"
@@ -178,6 +250,10 @@
       "path": "apps/reference-dapp/src/developer/engine.pg.test.ts",
       "stage": "postgres"
     },
+    "app.developer.events-sync": {
+      "path": "apps/reference-dapp/src/developer/events-sync.test.ts",
+      "stage": "unit"
+    },
     "app.developer.openapi": {
       "path": "apps/reference-dapp/src/developer/openapi.test.ts",
       "stage": "unit"
@@ -194,6 +270,10 @@
       "path": "apps/reference-dapp/src/domain/build-entry.test.ts",
       "stage": "unit"
     },
+    "app.domain.canonical-execution-status": {
+      "path": "apps/reference-dapp/src/domain/canonical-execution-status.test.ts",
+      "stage": "unit"
+    },
     "app.domain.copilot-context": {
       "path": "apps/reference-dapp/src/domain/copilot-context.test.ts",
       "stage": "unit"
@@ -206,6 +286,14 @@
       "path": "apps/reference-dapp/src/domain/copilot-mainnet-bridge.test.ts",
       "stage": "unit"
     },
+    "app.domain.editor-overview": {
+      "path": "apps/reference-dapp/src/domain/editor-overview.test.ts",
+      "stage": "unit"
+    },
+    "app.domain.editor-run": {
+      "path": "apps/reference-dapp/src/domain/editor-run.test.ts",
+      "stage": "unit"
+    },
     "app.domain.intelligence": {
       "path": "apps/reference-dapp/src/domain/intelligence/intelligence.test.ts",
       "stage": "unit"
@@ -214,8 +302,24 @@
       "path": "apps/reference-dapp/src/domain/intelligence/conversation-regression.test.ts",
       "stage": "unit"
     },
+    "app.domain.journey-metrics": {
+      "path": "apps/reference-dapp/src/domain/journey-metrics.test.ts",
+      "stage": "unit"
+    },
+    "app.domain.observation-schedule": {
+      "path": "apps/reference-dapp/src/domain/observation-schedule.test.ts",
+      "stage": "unit"
+    },
+    "app.domain.privacy-notice": {
+      "path": "apps/reference-dapp/src/domain/privacy-notice.test.ts",
+      "stage": "unit"
+    },
     "app.domain.wallet-inventory": {
       "path": "apps/reference-dapp/src/domain/wallet-inventory.test.ts",
+      "stage": "unit"
+    },
+    "app.domain.wallet-portfolio": {
+      "path": "apps/reference-dapp/src/domain/wallet-portfolio.test.ts",
       "stage": "unit"
     },
     "app.e2e.auth-wallets": {
@@ -234,13 +338,61 @@
       "path": "apps/reference-dapp/e2e/chat-assistant.spec.ts",
       "stage": "browser"
     },
+    "app.e2e.editor-redesign": {
+      "path": "apps/reference-dapp/e2e/editor-redesign.spec.ts",
+      "stage": "browser"
+    },
+    "app.e2e.editor-workflow-run": {
+      "path": "apps/reference-dapp/e2e/editor-workflow-run.spec.ts",
+      "stage": "browser"
+    },
+    "app.e2e.flight": {
+      "path": "apps/reference-dapp/e2e/board.spec.ts",
+      "stage": "browser"
+    },
     "app.e2e.global-product-polish": {
       "path": "apps/reference-dapp/e2e/global-product-polish.spec.ts",
+      "stage": "browser"
+    },
+    "app.e2e.portfolio-ux004": {
+      "path": "apps/reference-dapp/e2e/portfolio-ux004.spec.ts",
+      "stage": "browser"
+    },
+    "app.e2e.privacy-notice": {
+      "path": "apps/reference-dapp/e2e/privacy-notice.spec.ts",
+      "stage": "browser"
+    },
+    "app.e2e.site": {
+      "path": "apps/reference-dapp/e2e/site.spec.ts",
       "stage": "browser"
     },
     "app.e2e.wallet-selector": {
       "path": "apps/reference-dapp/e2e/wallet-selector.spec.ts",
       "stage": "browser"
+    },
+    "app.editor.approval": {
+      "path": "apps/reference-dapp/src/editor/approval.test.ts",
+      "stage": "unit"
+    },
+    "app.editor.chat-canvas-parity": {
+      "path": "apps/reference-dapp/src/editor/chat-canvas-parity.test.ts",
+      "stage": "unit"
+    },
+    "app.editor.editor-run.pg": {
+      "path": "apps/reference-dapp/src/editor/editor-run.pg.test.ts",
+      "stage": "postgres"
+    },
+    "app.editor.workflow-strategy": {
+      "path": "apps/reference-dapp/src/editor/workflow-strategy.test.ts",
+      "stage": "unit"
+    },
+    "app.flight.campaign": {
+      "path": "apps/reference-dapp/src/flight/campaign.test.ts",
+      "stage": "unit"
+    },
+    "app.flight.store.pg": {
+      "path": "apps/reference-dapp/src/flight/store.pg.test.ts",
+      "stage": "postgres"
     },
     "app.i18n.catalog": {
       "path": "apps/reference-dapp/src/i18n/catalog.test.ts",
@@ -270,12 +422,32 @@
       "path": "apps/reference-dapp/src/lib/dashboard/data-service.test.ts",
       "stage": "unit"
     },
+    "app.lib.dashboard.data-service-attempts": {
+      "path": "apps/reference-dapp/src/lib/dashboard/data-service-attempts.test.ts",
+      "stage": "unit"
+    },
+    "app.lib.dashboard.landed-attempts": {
+      "path": "apps/reference-dapp/src/lib/dashboard/landed-attempts.test.ts",
+      "stage": "unit"
+    },
     "app.lib.dashboard.run-mapping": {
       "path": "apps/reference-dapp/src/lib/dashboard/run-mapping.test.ts",
       "stage": "unit"
     },
+    "app.mcp.deadline": {
+      "path": "apps/reference-dapp/src/mcp/deadline.test.ts",
+      "stage": "unit"
+    },
+    "app.mcp.deadline.pg": {
+      "path": "apps/reference-dapp/src/mcp/deadline.pg.test.ts",
+      "stage": "postgres"
+    },
     "app.mcp.gateway": {
       "path": "apps/reference-dapp/src/mcp/gateway.test.ts",
+      "stage": "unit"
+    },
+    "app.mcp.gateway-deadline": {
+      "path": "apps/reference-dapp/src/mcp/gateway-deadline.test.ts",
       "stage": "unit"
     },
     "app.mcp.handoff.workflow.pg": {
@@ -298,6 +470,10 @@
       "path": "apps/reference-dapp/src/mcp/oauth/server.pg.test.ts",
       "stage": "postgres"
     },
+    "app.mcp.pix-approval-status": {
+      "path": "apps/reference-dapp/src/mcp/pix-approval-status.test.ts",
+      "stage": "unit"
+    },
     "app.passkeys.webauthn": {
       "path": "apps/reference-dapp/src/passkeys/webauthn.test.ts",
       "stage": "unit"
@@ -308,6 +484,10 @@
     },
     "app.platform.engineering-continuity": {
       "path": "apps/reference-dapp/src/platform/engineering-continuity.test.ts",
+      "stage": "unit"
+    },
+    "app.platform.engineering-skills": {
+      "path": "apps/reference-dapp/src/platform/engineering-skills.test.ts",
       "stage": "unit"
     },
     "app.platform.intelligence-parity": {
@@ -324,10 +504,6 @@
     },
     "app.server.base-swap": {
       "path": "apps/reference-dapp/src/server/base-swap.test.ts",
-      "stage": "unit"
-    },
-    "app.server.ethereum-runtime": {
-      "path": "apps/reference-dapp/src/server/ethereum-runtime.test.ts",
       "stage": "unit"
     },
     "app.server.build-estimate-production": {
@@ -358,8 +534,28 @@
       "path": "apps/reference-dapp/src/server/embedded-approval.test.ts",
       "stage": "unit"
     },
+    "app.server.ethereum-runtime": {
+      "path": "apps/reference-dapp/src/server/ethereum-runtime.test.ts",
+      "stage": "unit"
+    },
+    "app.server.history-principals": {
+      "path": "apps/reference-dapp/src/server/history-principals.test.ts",
+      "stage": "unit"
+    },
+    "app.server.journey-telemetry": {
+      "path": "apps/reference-dapp/src/server/journey-telemetry.test.ts",
+      "stage": "unit"
+    },
     "app.server.lending-composition-service": {
       "path": "apps/reference-dapp/src/server/lending-composition-service.test.ts",
+      "stage": "unit"
+    },
+    "app.server.managed-signing": {
+      "path": "apps/reference-dapp/src/server/managed-signing.test.ts",
+      "stage": "unit"
+    },
+    "app.server.managed-wallet-evm": {
+      "path": "apps/reference-dapp/src/server/managed-wallet-evm.test.ts",
       "stage": "unit"
     },
     "app.server.mercado-pago-card-provider": {
@@ -382,8 +578,16 @@
       "path": "apps/reference-dapp/src/server/router-service.test.ts",
       "stage": "unit"
     },
+    "app.server.solana-token-amount": {
+      "path": "apps/reference-dapp/src/server/solana-token-amount.test.ts",
+      "stage": "unit"
+    },
     "app.server.solana-transfer-service": {
       "path": "apps/reference-dapp/src/server/solana-transfer-service.test.ts",
+      "stage": "unit"
+    },
+    "app.server.universal-router.discovery": {
+      "path": "apps/reference-dapp/src/server/universal-router/discovery.test.ts",
       "stage": "unit"
     },
     "app.server.universal-router.fee-obligation": {
@@ -394,16 +598,20 @@
       "path": "apps/reference-dapp/src/server/universal-router/service.test.ts",
       "stage": "unit"
     },
+    "app.server.wallet-portfolio": {
+      "path": "apps/reference-dapp/src/server/wallet-portfolio.test.ts",
+      "stage": "unit"
+    },
     "app.server.woovi-pix-adapter": {
       "path": "apps/reference-dapp/src/server/woovi-pix-adapter.test.ts",
       "stage": "unit"
     },
-    "app.state.account-wallet-autoconnect": {
-      "path": "apps/reference-dapp/src/state/account-wallet-autoconnect.test.ts",
-      "stage": "unit"
-    },
     "app.state.account-presence": {
       "path": "apps/reference-dapp/src/state/account-presence.test.ts",
+      "stage": "unit"
+    },
+    "app.state.account-wallet-autoconnect": {
+      "path": "apps/reference-dapp/src/state/account-wallet-autoconnect.test.ts",
       "stage": "unit"
     },
     "app.state.flofi-conversation": {
@@ -422,12 +630,96 @@
       "path": "apps/reference-dapp/src/state/wallet-synchronization.test.tsx",
       "stage": "unit"
     },
+    "app.user-funded.bundler": {
+      "path": "apps/reference-dapp/src/user-funded/bundler.test.ts",
+      "stage": "unit"
+    },
+    "app.user-funded.groups": {
+      "path": "apps/reference-dapp/src/user-funded/groups.test.ts",
+      "stage": "unit"
+    },
+    "app.user-funded.solana-nonce-codec": {
+      "path": "apps/reference-dapp/src/user-funded/solana-nonce-codec.test.ts",
+      "stage": "unit"
+    },
+    "app.wallet-app.arming": {
+      "path": "apps/reference-dapp/src/wallet-app/arming.test.ts",
+      "stage": "unit"
+    },
+    "app.wallet-app.boundaries": {
+      "path": "apps/reference-dapp/src/wallet-app/boundaries.test.ts",
+      "stage": "unit"
+    },
+    "app.wallet-app.channel": {
+      "path": "apps/reference-dapp/src/wallet-app/channel.test.ts",
+      "stage": "unit"
+    },
+    "app.wallet-app.email-unlock": {
+      "path": "apps/reference-dapp/src/wallet-app/email-unlock.test.ts",
+      "stage": "unit"
+    },
+    "app.wallet-app.oidc-wait": {
+      "path": "apps/reference-dapp/src/wallet-app/oidc-wait.test.ts",
+      "stage": "unit"
+    },
+    "app.wallet-app.protocol": {
+      "path": "apps/reference-dapp/src/wallet-app/protocol.test.ts",
+      "stage": "unit"
+    },
+    "app.wallet-app.provider-client": {
+      "path": "apps/reference-dapp/src/wallet-app/provider-client.test.ts",
+      "stage": "unit"
+    },
+    "app.wallet-app.wallet-api": {
+      "path": "apps/reference-dapp/src/wallet-app/wallet-api.test.ts",
+      "stage": "unit"
+    },
+    "app.wallet-app.wallet-app": {
+      "path": "apps/reference-dapp/src/wallet-app/wallet-app.test.tsx",
+      "stage": "unit"
+    },
+    "app.wallet-app.wallet-i18n": {
+      "path": "apps/reference-dapp/src/wallet-app/wallet-i18n.test.ts",
+      "stage": "unit"
+    },
+    "app.wallet-app.wallet-render": {
+      "path": "apps/reference-dapp/src/wallet-app/wallet-render.test.tsx",
+      "stage": "unit"
+    },
     "app.wallet.eip1193": {
       "path": "apps/reference-dapp/src/wallet/eip1193.test.ts",
       "stage": "unit"
     },
     "app.wallet.evm-signed-transaction": {
       "path": "apps/reference-dapp/src/wallet/evm-signed-transaction.test.ts",
+      "stage": "unit"
+    },
+    "app.wallet.flofi-discovery": {
+      "path": "apps/reference-dapp/src/wallet/flofi-discovery.test.ts",
+      "stage": "unit"
+    },
+    "app.wallet.flofi-evm-provider": {
+      "path": "apps/reference-dapp/src/wallet/flofi-evm-provider.test.ts",
+      "stage": "unit"
+    },
+    "app.wallet.flofi-privy-signer": {
+      "path": "apps/reference-dapp/src/wallet/flofi-privy-signer.test.ts",
+      "stage": "unit"
+    },
+    "app.wallet.flofi-signing": {
+      "path": "apps/reference-dapp/src/wallet/flofi-signing.test.ts",
+      "stage": "unit"
+    },
+    "app.wallet.flofi-solana-wallet": {
+      "path": "apps/reference-dapp/src/wallet/flofi-solana-wallet.test.ts",
+      "stage": "unit"
+    },
+    "app.wallet.flofi-wallet-channel": {
+      "path": "apps/reference-dapp/src/wallet/flofi-wallet-channel.test.ts",
+      "stage": "unit"
+    },
+    "app.wallet.flofi-wallet-sync": {
+      "path": "apps/reference-dapp/src/wallet/flofi-wallet-sync.test.ts",
       "stage": "unit"
     },
     "app.wallet.sign-in-wallet": {
@@ -450,6 +742,22 @@
       "path": "apps/reference-dapp/src/workflow-runs/confirm-run.pg.test.ts",
       "stage": "postgres"
     },
+    "app.workflow-runs.delegated-run.pg": {
+      "path": "apps/reference-dapp/src/workflow-runs/delegated-run.pg.test.ts",
+      "stage": "postgres"
+    },
+    "app.workflow-runs.execution-groups": {
+      "path": "apps/reference-dapp/src/workflow-runs/execution-groups.test.ts",
+      "stage": "unit"
+    },
+    "app.workflow-runs.received-amounts": {
+      "path": "apps/reference-dapp/src/workflow-runs/received-amounts.test.ts",
+      "stage": "unit"
+    },
+    "app.workflow-runs.user-funded-run.pg": {
+      "path": "apps/reference-dapp/src/workflow-runs/user-funded-run.pg.test.ts",
+      "stage": "postgres"
+    },
     "cloud-runtime.copilot-metrics-migration.pg": {
       "path": "packages/cloud-runtime/test/copilot-metrics-migration.pg.test.ts",
       "stage": "postgres"
@@ -458,9 +766,17 @@
       "path": "packages/cloud-runtime/test/dispatch.pg.test.ts",
       "stage": "postgres"
     },
+    "cloud-runtime.editor-requester-migration.pg": {
+      "path": "packages/cloud-runtime/test/editor-requester-migration.pg.test.ts",
+      "stage": "postgres"
+    },
     "cloud-runtime.evidence-telemetry": {
       "path": "packages/cloud-runtime/test/evidence-telemetry.test.ts",
       "stage": "unit"
+    },
+    "cloud-runtime.flight-flofi-migration.pg": {
+      "path": "packages/cloud-runtime/test/flight-flofi-migration.pg.test.ts",
+      "stage": "postgres"
     },
     "cloud-runtime.flofi-accounts-migration.pg": {
       "path": "packages/cloud-runtime/test/flofi-accounts-migration.pg.test.ts",
@@ -486,6 +802,10 @@
       "path": "packages/cloud-runtime/test/tenancy.pg.test.ts",
       "stage": "postgres"
     },
+    "cloud-runtime.user-funded-groups-migration.pg": {
+      "path": "packages/cloud-runtime/test/user-funded-groups-migration.pg.test.ts",
+      "stage": "postgres"
+    },
     "developer-sdk.client": {
       "path": "packages/developer-sdk/test/client.test.ts",
       "stage": "unit"
@@ -509,6 +829,10 @@
     "reference-compiler.compile.fork": {
       "path": "packages/reference-compiler/test/compile.fork.test.ts",
       "stage": "fork"
+    },
+    "reference-compiler.erc4337": {
+      "path": "packages/reference-compiler/test/erc4337.test.ts",
+      "stage": "unit"
     },
     "reference-compiler.jupiter": {
       "path": "packages/reference-compiler/test/jupiter.test.ts",
@@ -540,6 +864,10 @@
     },
     "reference-compiler.simulation": {
       "path": "packages/reference-compiler/test/simulation.test.ts",
+      "stage": "unit"
+    },
+    "reference-compiler.solana-nonce": {
+      "path": "packages/reference-compiler/test/solana-nonce.test.ts",
       "stage": "unit"
     },
     "reference-compiler.solana-transfer": {
@@ -606,6 +934,10 @@
       "path": "scripts/test_ci_claude_agents.py",
       "stage": "governance"
     },
+    "scripts.test_ci_dependency_security": {
+      "path": "scripts/test_ci_dependency_security.py",
+      "stage": "governance"
+    },
     "scripts.test_ci_function_traces": {
       "path": "scripts/test_ci_function_traces.py",
       "stage": "governance"
@@ -616,6 +948,10 @@
     },
     "scripts.test_ci_optimization": {
       "path": "scripts/test_ci_optimization.py",
+      "stage": "governance"
+    },
+    "scripts.test_ci_skill_registry": {
+      "path": "scripts/test_ci_skill_registry.py",
       "stage": "governance"
     },
     "scripts.test_ci_source_snapshot": {
@@ -637,298 +973,6 @@
     "workflow-contracts.revision-state": {
       "path": "packages/workflow-contracts/test/revision-state.test.ts",
       "stage": "unit"
-    },
-    "app.accounts.wallet-relay": {
-      "path": "apps/reference-dapp/src/accounts/wallet-relay.test.ts",
-      "stage": "unit"
-    },
-    "app.accounts.wallet-service.pg": {
-      "path": "apps/reference-dapp/src/accounts/wallet-service.pg.test.ts",
-      "stage": "postgres"
-    },
-    "app.accounts.wallet-session": {
-      "path": "apps/reference-dapp/src/accounts/wallet-session.test.ts",
-      "stage": "unit"
-    },
-    "app.app.flofi-wallet-signing": {
-      "path": "apps/reference-dapp/src/app/flofi-wallet-signing.test.ts",
-      "stage": "unit"
-    },
-    "app.server.managed-signing": {
-      "path": "apps/reference-dapp/src/server/managed-signing.test.ts",
-      "stage": "unit"
-    },
-    "app.wallet-app.arming": {
-      "path": "apps/reference-dapp/src/wallet-app/arming.test.ts",
-      "stage": "unit"
-    },
-    "app.wallet-app.boundaries": {
-      "path": "apps/reference-dapp/src/wallet-app/boundaries.test.ts",
-      "stage": "unit"
-    },
-    "app.wallet-app.channel": {
-      "path": "apps/reference-dapp/src/wallet-app/channel.test.ts",
-      "stage": "unit"
-    },
-    "app.wallet-app.email-unlock": {
-      "path": "apps/reference-dapp/src/wallet-app/email-unlock.test.ts",
-      "stage": "unit"
-    },
-    "app.wallet-app.oidc-wait": {
-      "path": "apps/reference-dapp/src/wallet-app/oidc-wait.test.ts",
-      "stage": "unit"
-    },
-    "app.wallet-app.protocol": {
-      "path": "apps/reference-dapp/src/wallet-app/protocol.test.ts",
-      "stage": "unit"
-    },
-    "app.wallet-app.provider-client": {
-      "path": "apps/reference-dapp/src/wallet-app/provider-client.test.ts",
-      "stage": "unit"
-    },
-    "app.wallet-app.wallet-api": {
-      "path": "apps/reference-dapp/src/wallet-app/wallet-api.test.ts",
-      "stage": "unit"
-    },
-    "app.wallet-app.wallet-i18n": {
-      "path": "apps/reference-dapp/src/wallet-app/wallet-i18n.test.ts",
-      "stage": "unit"
-    },
-    "app.wallet.flofi-discovery": {
-      "path": "apps/reference-dapp/src/wallet/flofi-discovery.test.ts",
-      "stage": "unit"
-    },
-    "app.wallet.flofi-evm-provider": {
-      "path": "apps/reference-dapp/src/wallet/flofi-evm-provider.test.ts",
-      "stage": "unit"
-    },
-    "app.wallet.flofi-privy-signer": {
-      "path": "apps/reference-dapp/src/wallet/flofi-privy-signer.test.ts",
-      "stage": "unit"
-    },
-    "app.wallet.flofi-signing": {
-      "path": "apps/reference-dapp/src/wallet/flofi-signing.test.ts",
-      "stage": "unit"
-    },
-    "app.wallet.flofi-solana-wallet": {
-      "path": "apps/reference-dapp/src/wallet/flofi-solana-wallet.test.ts",
-      "stage": "unit"
-    },
-    "app.wallet.flofi-wallet-channel": {
-      "path": "apps/reference-dapp/src/wallet/flofi-wallet-channel.test.ts",
-      "stage": "unit"
-    },
-    "app.wallet.flofi-wallet-sync": {
-      "path": "apps/reference-dapp/src/wallet/flofi-wallet-sync.test.ts",
-      "stage": "unit"
-    },
-    "app.accounts.wallet-origin": {
-      "path": "apps/reference-dapp/src/accounts/wallet-origin.test.ts",
-      "stage": "unit"
-    },
-    "app.app.wallet-session-action": {
-      "path": "apps/reference-dapp/src/app/wallet-session-action.test.ts",
-      "stage": "unit"
-    },
-    "app.wallet-app.wallet-app": {
-      "path": "apps/reference-dapp/src/wallet-app/wallet-app.test.tsx",
-      "stage": "unit"
-    },
-    "app.wallet-app.wallet-render": {
-      "path": "apps/reference-dapp/src/wallet-app/wallet-render.test.tsx",
-      "stage": "unit"
-    },
-    "app.server.managed-wallet-evm": {
-      "path": "apps/reference-dapp/src/server/managed-wallet-evm.test.ts",
-      "stage": "unit"
-    },
-    "app.components.flofi-wallet-continue": {
-      "path": "apps/reference-dapp/src/components/flofi-wallet-continue.test.tsx",
-      "stage": "unit"
-    },
-    "app.components.canvas-panel-reveal": {
-      "path": "apps/reference-dapp/src/components/canvas-panel-reveal.test.ts",
-      "stage": "unit"
-    },
-    "app.accounts.account-store-schema19.pg": {
-      "path": "apps/reference-dapp/src/accounts/account-store-schema19.pg.test.ts",
-      "stage": "postgres"
-    },
-    "scripts.test_ci_skill_registry": {
-      "path": "scripts/test_ci_skill_registry.py",
-      "stage": "governance"
-    },
-    "app.platform.engineering-skills": {
-      "path": "apps/reference-dapp/src/platform/engineering-skills.test.ts",
-      "stage": "unit"
-    },
-    "app.domain.journey-metrics": {
-      "path": "apps/reference-dapp/src/domain/journey-metrics.test.ts",
-      "stage": "unit"
-    },
-    "app.app.api.flofi.journey.route": {
-      "path": "apps/reference-dapp/src/app/api/flofi/journey/route.test.ts",
-      "stage": "unit"
-    },
-    "app.server.journey-telemetry": {
-      "path": "apps/reference-dapp/src/server/journey-telemetry.test.ts",
-      "stage": "unit"
-    },
-    "app.domain.canonical-execution-status": {
-      "path": "apps/reference-dapp/src/domain/canonical-execution-status.test.ts",
-      "stage": "unit"
-    },
-    "app.domain.observation-schedule": {
-      "path": "apps/reference-dapp/src/domain/observation-schedule.test.ts",
-      "stage": "unit"
-    },
-    "app.server.universal-router.discovery": {
-      "path": "apps/reference-dapp/src/server/universal-router/discovery.test.ts",
-      "stage": "unit"
-    },
-    "scripts.test_ci_dependency_security": {
-      "path": "scripts/test_ci_dependency_security.py",
-      "stage": "governance"
-    },
-    "app.mcp.deadline": {
-      "path": "apps/reference-dapp/src/mcp/deadline.test.ts",
-      "stage": "unit"
-    },
-    "app.mcp.deadline.pg": {
-      "path": "apps/reference-dapp/src/mcp/deadline.pg.test.ts",
-      "stage": "postgres"
-    },
-    "app.mcp.pix-approval-status": {
-      "path": "apps/reference-dapp/src/mcp/pix-approval-status.test.ts",
-      "stage": "unit"
-    },
-    "app.lib.dashboard.data-service-attempts": {
-      "path": "apps/reference-dapp/src/lib/dashboard/data-service-attempts.test.ts",
-      "stage": "unit"
-    },
-    "app.components.dashboard.landed": {
-      "path": "apps/reference-dapp/src/components/dashboard/dashboard-landed.test.tsx",
-      "stage": "unit"
-    },
-    "app.components.automation-run-status": {
-      "path": "apps/reference-dapp/src/components/automation-run-status.test.tsx",
-      "stage": "unit"
-    },
-    "app.channels.route-discovery": {
-      "path": "apps/reference-dapp/src/channels/route-discovery.test.ts",
-      "stage": "unit"
-    },
-    "app.lib.dashboard.landed-attempts": {
-      "path": "apps/reference-dapp/src/lib/dashboard/landed-attempts.test.ts",
-      "stage": "unit"
-    },
-    "app.mcp.gateway-deadline": {
-      "path": "apps/reference-dapp/src/mcp/gateway-deadline.test.ts",
-      "stage": "unit"
-    },
-    "app.developer.events-sync": {
-      "path": "apps/reference-dapp/src/developer/events-sync.test.ts",
-      "stage": "unit"
-    },
-    "app.server.history-principals": {
-      "path": "apps/reference-dapp/src/server/history-principals.test.ts",
-      "stage": "unit"
-    },
-    "app.domain.privacy-notice": {
-      "path": "apps/reference-dapp/src/domain/privacy-notice.test.ts",
-      "stage": "unit"
-    },
-    "app.e2e.privacy-notice": {
-      "path": "apps/reference-dapp/e2e/privacy-notice.spec.ts",
-      "stage": "browser"
-    },
-    "app.e2e.site": {
-      "path": "apps/reference-dapp/e2e/site.spec.ts",
-      "stage": "browser"
-    },
-    "app.server.wallet-portfolio": {
-      "path": "apps/reference-dapp/src/server/wallet-portfolio.test.ts",
-      "stage": "unit"
-    },
-    "app.server.solana-token-amount": {
-      "path": "apps/reference-dapp/src/server/solana-token-amount.test.ts",
-      "stage": "unit"
-    },
-    "app.domain.wallet-portfolio": {
-      "path": "apps/reference-dapp/src/domain/wallet-portfolio.test.ts",
-      "stage": "unit"
-    },
-    "app.components.dashboard.portfolio-widget": {
-      "path": "apps/reference-dapp/src/components/dashboard/portfolio-widget.test.tsx",
-      "stage": "unit"
-    },
-    "app.e2e.editor-redesign": {
-      "path": "apps/reference-dapp/e2e/editor-redesign.spec.ts",
-      "stage": "browser"
-    },
-    "app.domain.editor-overview": {
-      "path": "apps/reference-dapp/src/domain/editor-overview.test.ts",
-      "stage": "unit"
-    },
-    "app.components.editor-stepper": {
-      "path": "apps/reference-dapp/src/components/editor-stepper.test.tsx",
-      "stage": "unit"
-    },
-    "app.components.automations-workspace": {
-      "path": "apps/reference-dapp/src/components/automations-workspace.test.tsx",
-      "stage": "unit"
-    },
-    "app.components.copilot-automation-proposal": {
-      "path": "apps/reference-dapp/src/components/copilot-automation-proposal.test.tsx",
-      "stage": "unit"
-    },
-    "app.e2e.portfolio-ux004": {
-      "path": "apps/reference-dapp/e2e/portfolio-ux004.spec.ts",
-      "stage": "browser"
-    },
-    "app.components.site.typing-text": {
-      "path": "apps/reference-dapp/src/components/site/typing-text.test.ts",
-      "stage": "unit"
-    },
-    "app.editor.approval": {
-      "path": "apps/reference-dapp/src/editor/approval.test.ts",
-      "stage": "unit"
-    },
-    "app.editor.workflow-strategy": {
-      "path": "apps/reference-dapp/src/editor/workflow-strategy.test.ts",
-      "stage": "unit"
-    },
-    "app.editor.editor-run.pg": {
-      "path": "apps/reference-dapp/src/editor/editor-run.pg.test.ts",
-      "stage": "postgres"
-    },
-    "app.domain.editor-run": {
-      "path": "apps/reference-dapp/src/domain/editor-run.test.ts",
-      "stage": "unit"
-    },
-    "app.e2e.editor-workflow-run": {
-      "path": "apps/reference-dapp/e2e/editor-workflow-run.spec.ts",
-      "stage": "browser"
-    },
-    "cloud-runtime.editor-requester-migration.pg": {
-      "path": "packages/cloud-runtime/test/editor-requester-migration.pg.test.ts",
-      "stage": "postgres"
-    },
-    "app.flight.campaign": {
-      "path": "apps/reference-dapp/src/flight/campaign.test.ts",
-      "stage": "unit"
-    },
-    "app.flight.store.pg": {
-      "path": "apps/reference-dapp/src/flight/store.pg.test.ts",
-      "stage": "postgres"
-    },
-    "cloud-runtime.flight-flofi-migration.pg": {
-      "path": "packages/cloud-runtime/test/flight-flofi-migration.pg.test.ts",
-      "stage": "postgres"
-    },
-    "app.e2e.flight": {
-      "path": "apps/reference-dapp/e2e/board.spec.ts",
-      "stage": "browser"
     }
   },
   "requiredUnitSuites": [
@@ -954,6 +998,7 @@
     "app.domain.intelligence",
     "app.domain.intelligence.conversation-regression",
     "app.domain.journey-metrics",
+    "app.editor.chat-canvas-parity",
     "app.flight.campaign",
     "app.i18n.catalog",
     "app.mcp.gateway-deadline",
@@ -972,12 +1017,19 @@
     "app.state.flofi-conversation",
     "app.state.review-authorization",
     "app.state.wallet-review-continuity",
+    "app.user-funded.bundler",
+    "app.user-funded.groups",
+    "app.user-funded.solana-nonce-codec",
+    "app.workflow-runs.execution-groups",
+    "app.workflow-runs.received-amounts",
     "cloud-runtime.migration-manifest",
     "developer-sdk.webhooks",
     "reference-compiler.bridge",
+    "reference-compiler.erc4337",
     "reference-compiler.native-eth",
     "reference-compiler.review",
     "reference-compiler.simulation",
+    "reference-compiler.solana-nonce",
     "reference-compiler.solana-transfer",
     "reference-executor.bound-composition",
     "reference-executor.cross-chain-liquidity-recovery",
@@ -1012,6 +1064,154 @@
       "suites": [],
       "gaps": [
         "No mapped dedicated deterministic unit suite for these acceptance entry points. Underlying engine/provider tests do not certify the operator scripts or external acceptance; inspect their explicit local/read-only boundaries before use."
+      ]
+    },
+    {
+      "id": "accounts--identity-wallets",
+      "primary": "flofi-security",
+      "dependencies": [
+        "flofi-data-privacy",
+        "flofi-frontend-ux",
+        "flofi-infrastructure-ci",
+        "flofi-wallet-execution"
+      ],
+      "sharedFinancialCore": false,
+      "sources": [
+        "apps/reference-dapp/playwright.auth-wallets.config.ts",
+        "apps/reference-dapp/src/accounts/account-csp.ts",
+        "apps/reference-dapp/src/accounts/signer-pages.ts",
+        "apps/reference-dapp/src/accounts/account-host.ts",
+        "apps/reference-dapp/src/accounts/account-model.ts",
+        "apps/reference-dapp/src/accounts/account-service.ts",
+        "apps/reference-dapp/src/accounts/account-session.ts",
+        "apps/reference-dapp/src/accounts/account-store.ts",
+        "apps/reference-dapp/src/accounts/account-theme.ts",
+        "apps/reference-dapp/src/accounts/disconnect.ts",
+        "apps/reference-dapp/src/accounts/oidc.ts",
+        "apps/reference-dapp/src/accounts/otp-browser.ts",
+        "apps/reference-dapp/src/accounts/privy-client.tsx",
+        "apps/reference-dapp/src/accounts/privy-context.tsx",
+        "apps/reference-dapp/src/accounts/privy-hosts.ts",
+        "apps/reference-dapp/src/accounts/privy-server.ts",
+        "apps/reference-dapp/src/accounts/turnkey-server.ts",
+        "apps/reference-dapp/src/accounts/wallet-host.ts",
+        "apps/reference-dapp/src/accounts/wallet-origin.ts",
+        "apps/reference-dapp/src/accounts/wallet-relay.ts",
+        "apps/reference-dapp/src/accounts/wallet-service.ts",
+        "apps/reference-dapp/src/accounts/wallet-session.ts",
+        "apps/reference-dapp/src/app/(account)/layout.tsx",
+        "apps/reference-dapp/src/app/(account)/login/page.tsx",
+        "apps/reference-dapp/src/app/(account)/onboarding/page.tsx",
+        "apps/reference-dapp/src/app/(account)/onboarding/wallets/import/[ecosystem]/page.tsx",
+        "apps/reference-dapp/src/app/(account)/onboarding/wallets/page.tsx",
+        "apps/reference-dapp/src/app/(wallet)/layout.tsx",
+        "apps/reference-dapp/src/app/(wallet)/wallet/callback/[provider]/route.ts",
+        "apps/reference-dapp/src/app/(wallet)/wallet/done/page.tsx",
+        "apps/reference-dapp/src/app/(wallet)/wallet/page.tsx",
+        "apps/reference-dapp/src/app/account-action.ts",
+        "apps/reference-dapp/src/app/api/wallet/export/route.ts",
+        "apps/reference-dapp/src/app/api/wallet/provider/[...path]/route.ts",
+        "apps/reference-dapp/src/app/api/wallet/session/route.ts",
+        "apps/reference-dapp/src/app/api/wallet/unlock/email/route.ts",
+        "apps/reference-dapp/src/app/api/wallet/unlock/oidc/route.ts",
+        "apps/reference-dapp/src/app/api/wallet/wallets/route.ts",
+        "apps/reference-dapp/src/app/flofi-wallet-action.ts",
+        "apps/reference-dapp/src/app/flofi-wallet-signing.ts",
+        "apps/reference-dapp/src/components/account/account-icons.tsx",
+        "apps/reference-dapp/src/components/account/account-messages.ts",
+        "apps/reference-dapp/src/components/account/account-shell.tsx",
+        "apps/reference-dapp/src/components/account/account-wallets.tsx",
+        "apps/reference-dapp/src/components/account/account.module.css",
+        "apps/reference-dapp/src/components/account/add-wallets.tsx",
+        "apps/reference-dapp/src/components/account/import-wallet.tsx",
+        "apps/reference-dapp/src/components/account/session-guard.tsx",
+        "apps/reference-dapp/src/components/account/sign-in.tsx",
+        "apps/reference-dapp/src/components/flofi-wallet-continue.tsx",
+        "apps/reference-dapp/src/i18n/pt-accounts.ts",
+        "apps/reference-dapp/src/i18n/pt-privy.ts",
+        "apps/reference-dapp/src/i18n/pt-wallet.ts",
+        "apps/reference-dapp/src/server/managed-signing.ts",
+        "apps/reference-dapp/src/server/managed-wallet-evm.ts",
+        "apps/reference-dapp/src/vendor/privy-removed-dependency.ts",
+        "apps/reference-dapp/src/wallet-app/arming.ts",
+        "apps/reference-dapp/src/wallet-app/channel.ts",
+        "apps/reference-dapp/src/wallet-app/email-unlock.ts",
+        "apps/reference-dapp/src/wallet-app/oidc-wait.ts",
+        "apps/reference-dapp/src/wallet-app/operations.tsx",
+        "apps/reference-dapp/src/wallet-app/protocol.ts",
+        "apps/reference-dapp/src/wallet-app/provider-client.ts",
+        "apps/reference-dapp/src/wallet-app/request-parts.tsx",
+        "apps/reference-dapp/src/wallet-app/unlock-panel.tsx",
+        "apps/reference-dapp/src/wallet-app/wallet-api.ts",
+        "apps/reference-dapp/src/wallet-app/wallet-app.tsx",
+        "apps/reference-dapp/src/wallet-app/wallet-done.tsx",
+        "apps/reference-dapp/src/wallet-app/wallet-messages.ts",
+        "apps/reference-dapp/src/wallet-app/wallet-shell.tsx",
+        "apps/reference-dapp/src/wallet-app/wallet.module.css",
+        "apps/reference-dapp/src/wallet/evm-signed-transaction.ts",
+        "apps/reference-dapp/src/wallet/flofi-evm-provider.ts",
+        "apps/reference-dapp/src/wallet/flofi-privy-signer.ts",
+        "apps/reference-dapp/src/wallet/flofi-signing.ts",
+        "apps/reference-dapp/src/wallet/flofi-solana-wallet.ts",
+        "apps/reference-dapp/src/wallet/flofi-wallet-channel.ts",
+        "apps/reference-dapp/src/wallet/flofi-wallet-sync.ts",
+        "packages/cloud-runtime/migrations/0018_flofi_accounts.sql",
+        "packages/cloud-runtime/migrations/0019_privy_accounts.sql",
+        "apps/reference-dapp/src/server/session-cookie.ts"
+      ],
+      "suites": [
+        "app.accounts.account-csp",
+        "app.accounts.account-host",
+        "app.accounts.account-model",
+        "app.accounts.account-service.pg",
+        "app.accounts.account-session",
+        "app.accounts.account-store.pg",
+        "app.accounts.oidc",
+        "app.accounts.privy-bridge",
+        "app.accounts.privy-client",
+        "app.accounts.privy-server",
+        "app.accounts.privy-zod",
+        "app.accounts.turnkey-server",
+        "app.accounts.wallet-origin",
+        "app.accounts.wallet-relay",
+        "app.accounts.wallet-service.pg",
+        "app.accounts.wallet-session",
+        "app.app.flofi-wallet-signing",
+        "app.app.wallet-session-action",
+        "app.components.account.add-wallets",
+        "app.components.account.import-wallet",
+        "app.components.account.sign-in",
+        "app.components.flofi-wallet-continue",
+        "app.e2e.auth-wallets",
+        "app.server.managed-signing",
+        "app.server.managed-wallet-evm",
+        "app.wallet-app.arming",
+        "app.wallet-app.boundaries",
+        "app.wallet-app.channel",
+        "app.wallet-app.email-unlock",
+        "app.wallet-app.oidc-wait",
+        "app.wallet-app.protocol",
+        "app.wallet-app.provider-client",
+        "app.wallet-app.wallet-api",
+        "app.wallet-app.wallet-app",
+        "app.wallet-app.wallet-i18n",
+        "app.wallet-app.wallet-render",
+        "app.wallet.evm-signed-transaction",
+        "app.wallet.flofi-discovery",
+        "app.wallet.flofi-evm-provider",
+        "app.wallet.flofi-privy-signer",
+        "app.wallet.flofi-signing",
+        "app.wallet.flofi-solana-wallet",
+        "app.wallet.flofi-wallet-channel",
+        "app.wallet.flofi-wallet-sync",
+        "cloud-runtime.flofi-accounts-migration.pg",
+        "cloud-runtime.privy-accounts-migration.pg",
+        "app.accounts.account-store-schema19.pg"
+      ],
+      "gaps": [
+        "Live Privy is unverified: the suites verify real ES256 access tokens with the official @privy-io/node SDK against a local key, and the browser suite uses the MOCKED loopback Privy stand-in (e2e/privy-emulator.ts). They certify FloFi's verification, linking, isolation and signing-gate rules, not Privy itself; docs/deploy/LIVE-VERIFICATION-PRIVY.md is the owner's live check.",
+        "Privy's embedded wallet trusts the whole product origin. All product-origin HTML, including public, admin and error pages, carries a nonce script policy; the signer additionally mounts only in a document loaded with its route's policy class. This mitigates injected script but is not a cryptographic restriction on trusted page code or browser extensions. Live Privy and owner device acceptance remain separate.",
+        "Legacy FloFi Wallet (Turnkey) is export-only; its unlock and export remain covered by the wallet-app and wallet-relay suites with the in-process provider stand-in. The owner's read-only production check (docs/deploy/RELEASE-PRIVY-0019.md, 2026-11-01) found 0 Turnkey wallets and 0 Turnkey organizations, so no live account depends on this path."
       ]
     },
     {
@@ -2230,15 +2430,16 @@
         "packages/cloud-runtime/migrations/0009_channel_conversations.sql",
         "packages/cloud-runtime/migrations/0010_automations.sql",
         "packages/cloud-runtime/migrations/0011_delegated_execution.sql",
-        "packages/cloud-runtime/migrations/0021_workflow_grants.sql",
         "packages/cloud-runtime/migrations/0012_admin_control_plane.sql",
         "packages/cloud-runtime/migrations/0013_copilot_learning.sql",
         "packages/cloud-runtime/migrations/0014_learning_automatic.sql",
         "packages/cloud-runtime/migrations/0015_workflow_runs.sql",
         "packages/cloud-runtime/migrations/0016_owner_history_purge.sql",
         "packages/cloud-runtime/migrations/0017_copilot_metrics.sql",
-        "packages/cloud-runtime/src/owner-history.ts",
-        "packages/cloud-runtime/migrations/0022_editor_requester.sql"
+        "packages/cloud-runtime/migrations/0021_workflow_grants.sql",
+        "packages/cloud-runtime/migrations/0022_editor_requester.sql",
+        "packages/cloud-runtime/migrations/0023_user_funded_groups.sql",
+        "packages/cloud-runtime/src/owner-history.ts"
       ],
       "suites": [
         "app.learning.automatic",
@@ -2248,7 +2449,8 @@
         "cloud-runtime.forward-compatibility.pg",
         "cloud-runtime.migration-manifest",
         "cloud-runtime.tenancy.pg",
-        "cloud-runtime.editor-requester-migration.pg"
+        "cloud-runtime.editor-requester-migration.pg",
+        "cloud-runtime.user-funded-groups-migration.pg"
       ],
       "gaps": [
         "Disposable PostgreSQL does not establish hosted Neon operational compatibility, retention operations or legal LGPD compliance."
@@ -2537,6 +2739,7 @@
         "apps/reference-dapp/src/components/build-entry.module.css",
         "apps/reference-dapp/src/components/build-entry.tsx",
         "apps/reference-dapp/src/components/canvas-card-inputs.tsx",
+        "apps/reference-dapp/src/components/canvas-edge-style.ts",
         "apps/reference-dapp/src/components/canvas-lifecycle-action.tsx",
         "apps/reference-dapp/src/components/canvas-navigator.tsx",
         "apps/reference-dapp/src/components/canvas-panel-reveal.tsx",
@@ -2548,8 +2751,13 @@
         "apps/reference-dapp/src/components/dashboard/dashboard-status.tsx",
         "apps/reference-dapp/src/components/dashboard/dashboard-view.tsx",
         "apps/reference-dapp/src/components/dashboard/dashboard-workspace.tsx",
+        "apps/reference-dapp/src/components/dashboard/portfolio-widget.module.css",
+        "apps/reference-dapp/src/components/dashboard/portfolio-widget.tsx",
         "apps/reference-dapp/src/components/dashboard/run-detail-view.tsx",
         "apps/reference-dapp/src/components/dashboard/run-evidence.tsx",
+        "apps/reference-dapp/src/components/editor-overview-panel.tsx",
+        "apps/reference-dapp/src/components/editor-run-action.tsx",
+        "apps/reference-dapp/src/components/editor-stepper.tsx",
         "apps/reference-dapp/src/components/embedded-approval.tsx",
         "apps/reference-dapp/src/components/execute-workspace.tsx",
         "apps/reference-dapp/src/components/execution-concurrency-notes.tsx",
@@ -2577,20 +2785,6 @@
         "apps/reference-dapp/src/components/simulate-workflow-canvas.tsx",
         "apps/reference-dapp/src/components/simulate-workspace.tsx",
         "apps/reference-dapp/src/components/simulation-summary.tsx",
-        "apps/reference-dapp/src/components/solana-composition-panel.tsx",
-        "apps/reference-dapp/src/components/solana-verified-asset-search.tsx",
-        "apps/reference-dapp/src/components/status-badge.tsx",
-        "apps/reference-dapp/src/components/stock-facts.tsx",
-        "apps/reference-dapp/src/components/stocks-settings.tsx",
-        "apps/reference-dapp/src/components/summary-bar.tsx",
-        "apps/reference-dapp/src/components/token-amount-input.tsx",
-        "apps/reference-dapp/src/components/top-bar.tsx",
-        "apps/reference-dapp/src/components/workflow-canvas.tsx",
-        "apps/reference-dapp/src/components/workflow-edit-review.tsx",
-        "apps/reference-dapp/src/components/workflow-name.tsx",
-        "apps/reference-dapp/src/components/workflow-run-panel.tsx",
-        "apps/reference-dapp/src/components/dashboard/portfolio-widget.tsx",
-        "apps/reference-dapp/src/components/dashboard/portfolio-widget.module.css",
         "apps/reference-dapp/src/components/site/developers-page.tsx",
         "apps/reference-dapp/src/components/site/docs-content.ts",
         "apps/reference-dapp/src/components/site/docs-pages.tsx",
@@ -2604,11 +2798,20 @@
         "apps/reference-dapp/src/components/site/site-shell.tsx",
         "apps/reference-dapp/src/components/site/site.module.css",
         "apps/reference-dapp/src/components/site/typing-text.tsx",
-        "apps/reference-dapp/src/components/editor-overview-panel.tsx",
-        "apps/reference-dapp/src/components/canvas-edge-style.ts",
-        "apps/reference-dapp/src/components/editor-stepper.tsx",
+        "apps/reference-dapp/src/components/solana-composition-panel.tsx",
+        "apps/reference-dapp/src/components/solana-verified-asset-search.tsx",
+        "apps/reference-dapp/src/components/status-badge.tsx",
+        "apps/reference-dapp/src/components/stock-facts.tsx",
+        "apps/reference-dapp/src/components/stocks-settings.tsx",
+        "apps/reference-dapp/src/components/summary-bar.tsx",
+        "apps/reference-dapp/src/components/token-amount-input.tsx",
+        "apps/reference-dapp/src/components/top-bar.tsx",
+        "apps/reference-dapp/src/components/user-funded-browser.ts",
+        "apps/reference-dapp/src/components/workflow-canvas.tsx",
+        "apps/reference-dapp/src/components/workflow-edit-review.tsx",
+        "apps/reference-dapp/src/components/workflow-name.tsx",
         "apps/reference-dapp/src/components/workflow-records.module.css",
-        "apps/reference-dapp/src/components/editor-run-action.tsx"
+        "apps/reference-dapp/src/components/workflow-run-panel.tsx"
       ],
       "suites": [
         "app.components.canvas-panel-reveal",
@@ -3547,7 +3750,8 @@
         "app.editor.editor-run.pg",
         "app.editor.workflow-strategy",
         "app.workflow-runs.confirm-run.pg",
-        "cloud-runtime.editor-requester-migration.pg"
+        "cloud-runtime.editor-requester-migration.pg",
+        "app.editor.chat-canvas-parity"
       ],
       "gaps": [
         "The browser suite certifies the Editor's \"Run workflow\" on loopback with a passive wallet up to the pending EDITOR_SESSION approval on /approve; the claim by an account wallet and the run to completion are certified on disposable PostgreSQL with MOCKED owner flow runs (editor-run.pg), never as a public execution.",
@@ -3600,6 +3804,85 @@
       ]
     },
     {
+      "id": "flight--data-privacy",
+      "primary": "flofi-data-privacy",
+      "dependencies": [
+        "flofi-frontend-ux",
+        "flofi-infrastructure-ci",
+        "flofi-security",
+        "flofi-workflow"
+      ],
+      "sharedFinancialCore": false,
+      "sources": [
+        "apps/reference-dapp/backend/flight-admin.ts",
+        "apps/reference-dapp/src/app/api/board/board/route.ts",
+        "apps/reference-dapp/src/app/api/board/event/route.ts",
+        "apps/reference-dapp/src/app/api/board/handle/route.ts",
+        "apps/reference-dapp/src/app/api/board/invite/route.ts",
+        "apps/reference-dapp/src/app/api/board/list/route.ts",
+        "apps/reference-dapp/src/app/api/board/pass/route.ts",
+        "apps/reference-dapp/src/app/api/board/state/route.ts",
+        "apps/reference-dapp/src/app/cloud-flow.ts",
+        "apps/reference-dapp/src/flight/campaign.ts",
+        "apps/reference-dapp/src/flight/host.ts",
+        "apps/reference-dapp/src/flight/http.ts",
+        "apps/reference-dapp/src/flight/rate-limit-client.ts",
+        "apps/reference-dapp/src/flight/simulation-evidence.ts",
+        "apps/reference-dapp/src/flight/simulation-record.ts",
+        "apps/reference-dapp/src/flight/store.ts",
+        "packages/cloud-runtime/migrations/0020_flight_flofi.sql"
+      ],
+      "suites": [
+        "app.flight.campaign",
+        "app.flight.store.pg",
+        "cloud-runtime.flight-flofi-migration.pg",
+        "app.e2e.flight"
+      ],
+      "gaps": [
+        "Email deliverability is outside the product (FloFi sends no email; the team exports groups) and joining has no confirmation step (any address can be submitted; the team's first email is where a person can object). The exact public list counter can hint whether a submitted address was new. X handles are self-declared. Production rate and abuse behaviour is not measured by tests; browser funnel events are limited per instance."
+      ]
+    },
+    {
+      "id": "flight--frontend-ux",
+      "primary": "flofi-frontend-ux",
+      "dependencies": [
+        "flofi-data-privacy",
+        "flofi-security",
+        "flofi-workflow"
+      ],
+      "sharedFinancialCore": false,
+      "sources": [
+        "apps/reference-dapp/playwright.flight.config.ts",
+        "apps/reference-dapp/public/brand/flight/flofi-logo-on-blue.svg",
+        "apps/reference-dapp/public/brand/flight/flofi-logo.svg",
+        "apps/reference-dapp/public/brand/flight/gota-captain.svg",
+        "apps/reference-dapp/public/brand/flight/gota-card.svg",
+        "apps/reference-dapp/public/brand/flight/gota-safety.svg",
+        "apps/reference-dapp/public/brand/flight/gota-standby.svg",
+        "apps/reference-dapp/public/brand/flight/gota-welcome.svg",
+        "apps/reference-dapp/public/brand/flight/gota-wink.svg",
+        "apps/reference-dapp/public/brand/flight/seal-founding.svg",
+        "apps/reference-dapp/src/app/board/opengraph-image.alt.txt",
+        "apps/reference-dapp/src/app/board/opengraph-image.png",
+        "apps/reference-dapp/src/app/board/page.tsx",
+        "apps/reference-dapp/src/components/flight/board-experience.tsx",
+        "apps/reference-dapp/src/components/flight/board-page.tsx",
+        "apps/reference-dapp/src/components/flight/boarding-pass.tsx",
+        "apps/reference-dapp/src/components/flight/flight-copy.ts",
+        "apps/reference-dapp/src/components/flight/flight.module.css",
+        "apps/reference-dapp/src/components/flight/language-switch.tsx",
+        "apps/reference-dapp/src/flight/app-boarding.tsx",
+        "apps/reference-dapp/src/i18n/pt-flight.ts"
+      ],
+      "suites": [
+        "app.flight.campaign",
+        "app.e2e.flight"
+      ],
+      "gaps": [
+        "Browser profiles cover selected journeys; full accessibility audit, device matrix and language completeness remain acceptance gaps. The Portuguese /board copy is a translation of English-only boards, pending team review."
+      ]
+    },
+    {
       "id": "i18n--frontend-ux",
       "primary": "flofi-frontend-ux",
       "dependencies": [
@@ -3613,12 +3896,15 @@
         "apps/reference-dapp/src/i18n/language.ts",
         "apps/reference-dapp/src/i18n/locale.tsx",
         "apps/reference-dapp/src/i18n/preserved-values.ts",
+        "apps/reference-dapp/src/i18n/pt-aave-expansion.ts",
         "apps/reference-dapp/src/i18n/pt-authoring.ts",
         "apps/reference-dapp/src/i18n/pt-automations.ts",
         "apps/reference-dapp/src/i18n/pt-base.ts",
         "apps/reference-dapp/src/i18n/pt-bridge-live-fix.ts",
         "apps/reference-dapp/src/i18n/pt-bridges.ts",
         "apps/reference-dapp/src/i18n/pt-build-entry.ts",
+        "apps/reference-dapp/src/i18n/pt-builder-canvas.ts",
+        "apps/reference-dapp/src/i18n/pt-chat-dashboard.ts",
         "apps/reference-dapp/src/i18n/pt-chat-e2e-fix.ts",
         "apps/reference-dapp/src/i18n/pt-chat-editor.ts",
         "apps/reference-dapp/src/i18n/pt-concurrency.ts",
@@ -3627,6 +3913,7 @@
         "apps/reference-dapp/src/i18n/pt-delegation.ts",
         "apps/reference-dapp/src/i18n/pt-domain.ts",
         "apps/reference-dapp/src/i18n/pt-e2e-reliability.ts",
+        "apps/reference-dapp/src/i18n/pt-editor-runs.ts",
         "apps/reference-dapp/src/i18n/pt-execution-ux.ts",
         "apps/reference-dapp/src/i18n/pt-financial-execution.ts",
         "apps/reference-dapp/src/i18n/pt-learning.ts",
@@ -3637,6 +3924,7 @@
         "apps/reference-dapp/src/i18n/pt-networks.ts",
         "apps/reference-dapp/src/i18n/pt-permissions.ts",
         "apps/reference-dapp/src/i18n/pt-pools.ts",
+        "apps/reference-dapp/src/i18n/pt-portfolio.ts",
         "apps/reference-dapp/src/i18n/pt-product.ts",
         "apps/reference-dapp/src/i18n/pt-review.ts",
         "apps/reference-dapp/src/i18n/pt-robinhood.ts",
@@ -3645,14 +3933,10 @@
         "apps/reference-dapp/src/i18n/pt-solana-mainnet.ts",
         "apps/reference-dapp/src/i18n/pt-status-truth.ts",
         "apps/reference-dapp/src/i18n/pt-universal-bridge.ts",
+        "apps/reference-dapp/src/i18n/pt-user-funded.ts",
         "apps/reference-dapp/src/i18n/pt-wallets.ts",
         "apps/reference-dapp/src/i18n/pt-workflow-runs.ts",
-        "apps/reference-dapp/src/i18n/pt.ts",
-        "apps/reference-dapp/src/i18n/pt-chat-dashboard.ts",
-        "apps/reference-dapp/src/i18n/pt-portfolio.ts",
-        "apps/reference-dapp/src/i18n/pt-builder-canvas.ts",
-        "apps/reference-dapp/src/i18n/pt-aave-expansion.ts",
-        "apps/reference-dapp/src/i18n/pt-editor-runs.ts"
+        "apps/reference-dapp/src/i18n/pt.ts"
       ],
       "suites": [
         "app.e2e.canvas-keyboard",
@@ -3664,6 +3948,32 @@
       ],
       "gaps": [
         "Browser profiles cover selected journeys; full accessibility audit, device matrix and language completeness remain acceptance gaps."
+      ]
+    },
+    {
+      "id": "journey--admin-analytics",
+      "primary": "flofi-admin-analytics",
+      "dependencies": [
+        "flofi-data-privacy",
+        "flofi-frontend-ux",
+        "flofi-security",
+        "flofi-swap",
+        "flofi-wallet-execution"
+      ],
+      "sources": [
+        "apps/reference-dapp/src/domain/journey-metrics.ts",
+        "apps/reference-dapp/src/server/journey-telemetry.ts",
+        "apps/reference-dapp/src/app/api/flofi/journey/route.ts",
+        "scripts/journey-latency-report.mjs"
+      ],
+      "suites": [
+        "app.app.api.flofi.journey.route",
+        "app.domain.journey-metrics",
+        "app.server.journey-telemetry"
+      ],
+      "gaps": [
+        "No live production sample exists yet: p50/p95 need real journeys in the deployment logs; the report refuses to label MOCKED or LOCAL evidence otherwise.",
+        "Off by default (issue #149): a sample exists only after the deployment owner opts in with both switches (docs/privacy/JOURNEY-TELEMETRY.md). The legal basis there is an engineering proposal pending owner/legal review, not a sign-off."
       ]
     },
     {
@@ -4534,10 +4844,13 @@
       "sharedFinancialCore": true,
       "sources": [
         "packages/reference-compiler/src/account-code.ts",
+        "packages/reference-compiler/src/eip5792.ts",
         "packages/reference-compiler/src/enforcement.ts",
+        "packages/reference-compiler/src/erc4337.ts",
         "packages/reference-compiler/src/erc7710.ts",
         "packages/reference-compiler/src/policy.ts",
         "packages/reference-compiler/src/revocation.ts",
+        "packages/reference-compiler/src/solana-nonce.ts",
         "packages/reference-compiler/src/spl-delegation.ts"
       ],
       "suites": [
@@ -4546,7 +4859,9 @@
         "app.mcp.oauth.foundation",
         "app.state.review-authorization",
         "cloud-runtime.tenancy.pg",
-        "reference-compiler.account-code"
+        "reference-compiler.account-code",
+        "reference-compiler.erc4337",
+        "reference-compiler.solana-nonce"
       ],
       "gaps": [
         "Adversarial fixtures and isolation tests are not a penetration test or proof against all attacks."
@@ -5900,6 +6215,49 @@
       ]
     },
     {
+      "id": "skills--protocol-integrations",
+      "primary": "flofi-protocol-integrations",
+      "dependencies": [
+        "flofi-bridge",
+        "flofi-infrastructure-ci",
+        "flofi-lending",
+        "flofi-liquidity",
+        "flofi-security",
+        "flofi-swap",
+        "flofi-wallet-execution",
+        "flofi-workflow"
+      ],
+      "sources": [
+        "skills/networks/arbitrum/skill.json",
+        "skills/networks/base/skill.json",
+        "skills/networks/ethereum/skill.json",
+        "skills/networks/evm-core/skill.json",
+        "skills/networks/solana/skill.json",
+        "skills/operations/bridge/skill.json",
+        "skills/operations/execution/skill.json",
+        "skills/operations/lending/skill.json",
+        "skills/operations/liquidity/skill.json",
+        "skills/operations/swap/skill.json",
+        "skills/protocols/aave/skill.json",
+        "skills/protocols/across/skill.json",
+        "skills/protocols/jupiter/skill.json",
+        "skills/protocols/lifi/skill.json",
+        "skills/protocols/orca/skill.json",
+        "skills/protocols/relay/skill.json",
+        "skills/protocols/uniswap/skill.json",
+        "skills/registry.json",
+        "scripts/skill_registry.py"
+      ],
+      "suites": [
+        "scripts.test_ci_skill_registry",
+        "app.platform.engineering-skills"
+      ],
+      "gaps": [
+        "Eleven official documentation sites (and the third-party Arbitrum guide) were unreachable from the build session: they stay PENDING_VERIFICATION until fetched, reviewed, licensed and pinned. Jupiter and Arbitrum documentation repositories state no licence, so their pinned files are PENDING_VERIFICATION (change detection active).",
+        "Upstream checks run on demand (`skill_registry.py check-upstream --fetch`); no scheduled job runs them."
+      ]
+    },
+    {
       "id": "state--bridge",
       "primary": "flofi-bridge",
       "dependencies": [
@@ -6174,6 +6532,36 @@
       "gaps": [
         "Mapped suites are representative boundary tests, not exhaustive path or public execution coverage.",
         "Mapped fork suites include existing owner-gated cases that may skip; a successful stage is not proof those optional cases ran."
+      ]
+    },
+    {
+      "id": "user-funded--wallet-execution",
+      "primary": "flofi-wallet-execution",
+      "dependencies": [
+        "flofi-bridge",
+        "flofi-security",
+        "flofi-swap",
+        "flofi-transfer-payments",
+        "flofi-workflow"
+      ],
+      "sharedFinancialCore": true,
+      "sources": [
+        "apps/reference-dapp/src/user-funded/bundler.ts",
+        "apps/reference-dapp/src/user-funded/config.ts",
+        "apps/reference-dapp/src/user-funded/evm-calls.ts",
+        "apps/reference-dapp/src/user-funded/evm-reconcile.ts",
+        "apps/reference-dapp/src/user-funded/gas-payer.ts",
+        "apps/reference-dapp/src/user-funded/groups.ts",
+        "apps/reference-dapp/src/user-funded/runtime.ts"
+      ],
+      "suites": [
+        "app.user-funded.groups",
+        "app.user-funded.bundler",
+        "app.user-funded.solana-nonce-codec",
+        "app.workflow-runs.user-funded-run.pg"
+      ],
+      "gaps": [
+        "MOCKED loopback chain doubles and fakes only: no owner-signed mainnet user-funded execution recorded. Real wallet behaviour (MetaMask EIP-5792 atomic batches and 7702 upgrade prompts, Phantom/Solflare multi-input solana:signTransaction prompts) and real bundlers are not exercised in CI."
       ]
     },
     {
@@ -6543,6 +6931,7 @@
       "sharedFinancialCore": true,
       "sources": [
         "apps/reference-dapp/src/workflow-runs/authorization-plan.ts",
+        "apps/reference-dapp/src/workflow-runs/execution-groups.ts",
         "apps/reference-dapp/src/workflow-runs/facts.ts",
         "apps/reference-dapp/src/workflow-runs/observe.ts",
         "apps/reference-dapp/src/workflow-runs/pg-store.ts",
@@ -6550,6 +6939,7 @@
         "apps/reference-dapp/src/workflow-runs/runner.ts",
         "apps/reference-dapp/src/workflow-runs/service.ts",
         "apps/reference-dapp/src/workflow-runs/state-machine.ts",
+        "apps/reference-dapp/src/workflow-runs/user-funded-pass.ts",
         "apps/reference-dapp/src/workflow-runs/worker.ts"
       ],
       "suites": [
@@ -6564,311 +6954,20 @@
         "reference-executor.composition.fork",
         "reference-linter.composition",
         "reference-reconciler.evidence",
-        "workflow-contracts.revision-state"
+        "workflow-contracts.revision-state",
+        "app.workflow-runs.execution-groups",
+        "app.workflow-runs.received-amounts",
+        "app.workflow-runs.user-funded-run.pg",
+        "app.workflow-runs.delegated-run.pg"
       ],
       "gaps": [
         "Mapped suites are representative boundary tests, not exhaustive path or public execution coverage.",
         "Mapped fork suites include existing owner-gated cases that may skip; a successful stage is not proof those optional cases ran."
       ]
-    },
-    {
-      "id": "accounts--identity-wallets",
-      "primary": "flofi-security",
-      "dependencies": [
-        "flofi-data-privacy",
-        "flofi-frontend-ux",
-        "flofi-infrastructure-ci",
-        "flofi-wallet-execution"
-      ],
-      "sharedFinancialCore": false,
-      "sources": [
-        "apps/reference-dapp/playwright.auth-wallets.config.ts",
-        "apps/reference-dapp/src/accounts/account-csp.ts",
-        "apps/reference-dapp/src/accounts/signer-pages.ts",
-        "apps/reference-dapp/src/accounts/account-host.ts",
-        "apps/reference-dapp/src/accounts/account-model.ts",
-        "apps/reference-dapp/src/accounts/account-service.ts",
-        "apps/reference-dapp/src/accounts/account-session.ts",
-        "apps/reference-dapp/src/accounts/account-store.ts",
-        "apps/reference-dapp/src/accounts/account-theme.ts",
-        "apps/reference-dapp/src/accounts/disconnect.ts",
-        "apps/reference-dapp/src/accounts/oidc.ts",
-        "apps/reference-dapp/src/accounts/otp-browser.ts",
-        "apps/reference-dapp/src/accounts/privy-client.tsx",
-        "apps/reference-dapp/src/accounts/privy-context.tsx",
-        "apps/reference-dapp/src/accounts/privy-hosts.ts",
-        "apps/reference-dapp/src/accounts/privy-server.ts",
-        "apps/reference-dapp/src/accounts/turnkey-server.ts",
-        "apps/reference-dapp/src/accounts/wallet-host.ts",
-        "apps/reference-dapp/src/accounts/wallet-origin.ts",
-        "apps/reference-dapp/src/accounts/wallet-relay.ts",
-        "apps/reference-dapp/src/accounts/wallet-service.ts",
-        "apps/reference-dapp/src/accounts/wallet-session.ts",
-        "apps/reference-dapp/src/app/(account)/layout.tsx",
-        "apps/reference-dapp/src/app/(account)/login/page.tsx",
-        "apps/reference-dapp/src/app/(account)/onboarding/page.tsx",
-        "apps/reference-dapp/src/app/(account)/onboarding/wallets/import/[ecosystem]/page.tsx",
-        "apps/reference-dapp/src/app/(account)/onboarding/wallets/page.tsx",
-        "apps/reference-dapp/src/app/(wallet)/layout.tsx",
-        "apps/reference-dapp/src/app/(wallet)/wallet/callback/[provider]/route.ts",
-        "apps/reference-dapp/src/app/(wallet)/wallet/done/page.tsx",
-        "apps/reference-dapp/src/app/(wallet)/wallet/page.tsx",
-        "apps/reference-dapp/src/app/account-action.ts",
-        "apps/reference-dapp/src/app/api/wallet/export/route.ts",
-        "apps/reference-dapp/src/app/api/wallet/provider/[...path]/route.ts",
-        "apps/reference-dapp/src/app/api/wallet/session/route.ts",
-        "apps/reference-dapp/src/app/api/wallet/unlock/email/route.ts",
-        "apps/reference-dapp/src/app/api/wallet/unlock/oidc/route.ts",
-        "apps/reference-dapp/src/app/api/wallet/wallets/route.ts",
-        "apps/reference-dapp/src/app/flofi-wallet-action.ts",
-        "apps/reference-dapp/src/app/flofi-wallet-signing.ts",
-        "apps/reference-dapp/src/components/account/account-icons.tsx",
-        "apps/reference-dapp/src/components/account/account-messages.ts",
-        "apps/reference-dapp/src/components/account/account-shell.tsx",
-        "apps/reference-dapp/src/components/account/account-wallets.tsx",
-        "apps/reference-dapp/src/components/account/account.module.css",
-        "apps/reference-dapp/src/components/account/add-wallets.tsx",
-        "apps/reference-dapp/src/components/account/import-wallet.tsx",
-        "apps/reference-dapp/src/components/account/session-guard.tsx",
-        "apps/reference-dapp/src/components/account/sign-in.tsx",
-        "apps/reference-dapp/src/components/flofi-wallet-continue.tsx",
-        "apps/reference-dapp/src/i18n/pt-accounts.ts",
-        "apps/reference-dapp/src/i18n/pt-privy.ts",
-        "apps/reference-dapp/src/i18n/pt-wallet.ts",
-        "apps/reference-dapp/src/server/managed-signing.ts",
-        "apps/reference-dapp/src/server/managed-wallet-evm.ts",
-        "apps/reference-dapp/src/vendor/privy-removed-dependency.ts",
-        "apps/reference-dapp/src/wallet-app/arming.ts",
-        "apps/reference-dapp/src/wallet-app/channel.ts",
-        "apps/reference-dapp/src/wallet-app/email-unlock.ts",
-        "apps/reference-dapp/src/wallet-app/oidc-wait.ts",
-        "apps/reference-dapp/src/wallet-app/operations.tsx",
-        "apps/reference-dapp/src/wallet-app/protocol.ts",
-        "apps/reference-dapp/src/wallet-app/provider-client.ts",
-        "apps/reference-dapp/src/wallet-app/request-parts.tsx",
-        "apps/reference-dapp/src/wallet-app/unlock-panel.tsx",
-        "apps/reference-dapp/src/wallet-app/wallet-api.ts",
-        "apps/reference-dapp/src/wallet-app/wallet-app.tsx",
-        "apps/reference-dapp/src/wallet-app/wallet-done.tsx",
-        "apps/reference-dapp/src/wallet-app/wallet-messages.ts",
-        "apps/reference-dapp/src/wallet-app/wallet-shell.tsx",
-        "apps/reference-dapp/src/wallet-app/wallet.module.css",
-        "apps/reference-dapp/src/wallet/evm-signed-transaction.ts",
-        "apps/reference-dapp/src/wallet/flofi-evm-provider.ts",
-        "apps/reference-dapp/src/wallet/flofi-privy-signer.ts",
-        "apps/reference-dapp/src/wallet/flofi-signing.ts",
-        "apps/reference-dapp/src/wallet/flofi-solana-wallet.ts",
-        "apps/reference-dapp/src/wallet/flofi-wallet-channel.ts",
-        "apps/reference-dapp/src/wallet/flofi-wallet-sync.ts",
-        "packages/cloud-runtime/migrations/0018_flofi_accounts.sql",
-        "packages/cloud-runtime/migrations/0019_privy_accounts.sql",
-        "apps/reference-dapp/src/server/session-cookie.ts"
-      ],
-      "suites": [
-        "app.accounts.account-csp",
-        "app.accounts.account-host",
-        "app.accounts.account-model",
-        "app.accounts.account-service.pg",
-        "app.accounts.account-session",
-        "app.accounts.account-store.pg",
-        "app.accounts.oidc",
-        "app.accounts.privy-bridge",
-        "app.accounts.privy-client",
-        "app.accounts.privy-server",
-        "app.accounts.privy-zod",
-        "app.accounts.turnkey-server",
-        "app.accounts.wallet-origin",
-        "app.accounts.wallet-relay",
-        "app.accounts.wallet-service.pg",
-        "app.accounts.wallet-session",
-        "app.app.flofi-wallet-signing",
-        "app.app.wallet-session-action",
-        "app.components.account.add-wallets",
-        "app.components.account.import-wallet",
-        "app.components.account.sign-in",
-        "app.components.flofi-wallet-continue",
-        "app.e2e.auth-wallets",
-        "app.server.managed-signing",
-        "app.server.managed-wallet-evm",
-        "app.wallet-app.arming",
-        "app.wallet-app.boundaries",
-        "app.wallet-app.channel",
-        "app.wallet-app.email-unlock",
-        "app.wallet-app.oidc-wait",
-        "app.wallet-app.protocol",
-        "app.wallet-app.provider-client",
-        "app.wallet-app.wallet-api",
-        "app.wallet-app.wallet-app",
-        "app.wallet-app.wallet-i18n",
-        "app.wallet-app.wallet-render",
-        "app.wallet.evm-signed-transaction",
-        "app.wallet.flofi-discovery",
-        "app.wallet.flofi-evm-provider",
-        "app.wallet.flofi-privy-signer",
-        "app.wallet.flofi-signing",
-        "app.wallet.flofi-solana-wallet",
-        "app.wallet.flofi-wallet-channel",
-        "app.wallet.flofi-wallet-sync",
-        "cloud-runtime.flofi-accounts-migration.pg",
-        "cloud-runtime.privy-accounts-migration.pg",
-        "app.accounts.account-store-schema19.pg"
-      ],
-      "gaps": [
-        "Live Privy is unverified: the suites verify real ES256 access tokens with the official @privy-io/node SDK against a local key, and the browser suite uses the MOCKED loopback Privy stand-in (e2e/privy-emulator.ts). They certify FloFi's verification, linking, isolation and signing-gate rules, not Privy itself; docs/deploy/LIVE-VERIFICATION-PRIVY.md is the owner's live check.",
-        "Privy's embedded wallet trusts the whole product origin. All product-origin HTML, including public, admin and error pages, carries a nonce script policy; the signer additionally mounts only in a document loaded with its route's policy class. This mitigates injected script but is not a cryptographic restriction on trusted page code or browser extensions. Live Privy and owner device acceptance remain separate.",
-        "Legacy FloFi Wallet (Turnkey) is export-only; its unlock and export remain covered by the wallet-app and wallet-relay suites with the in-process provider stand-in. The owner's read-only production check (docs/deploy/RELEASE-PRIVY-0019.md, 2026-11-01) found 0 Turnkey wallets and 0 Turnkey organizations, so no live account depends on this path."
-      ]
-    },
-    {
-      "id": "skills--protocol-integrations",
-      "primary": "flofi-protocol-integrations",
-      "dependencies": [
-        "flofi-bridge",
-        "flofi-infrastructure-ci",
-        "flofi-lending",
-        "flofi-liquidity",
-        "flofi-security",
-        "flofi-swap",
-        "flofi-wallet-execution",
-        "flofi-workflow"
-      ],
-      "sources": [
-        "skills/networks/arbitrum/skill.json",
-        "skills/networks/base/skill.json",
-        "skills/networks/ethereum/skill.json",
-        "skills/networks/evm-core/skill.json",
-        "skills/networks/solana/skill.json",
-        "skills/operations/bridge/skill.json",
-        "skills/operations/execution/skill.json",
-        "skills/operations/lending/skill.json",
-        "skills/operations/liquidity/skill.json",
-        "skills/operations/swap/skill.json",
-        "skills/protocols/aave/skill.json",
-        "skills/protocols/across/skill.json",
-        "skills/protocols/jupiter/skill.json",
-        "skills/protocols/lifi/skill.json",
-        "skills/protocols/orca/skill.json",
-        "skills/protocols/relay/skill.json",
-        "skills/protocols/uniswap/skill.json",
-        "skills/registry.json",
-        "scripts/skill_registry.py"
-      ],
-      "suites": [
-        "scripts.test_ci_skill_registry",
-        "app.platform.engineering-skills"
-      ],
-      "gaps": [
-        "Eleven official documentation sites (and the third-party Arbitrum guide) were unreachable from the build session: they stay PENDING_VERIFICATION until fetched, reviewed, licensed and pinned. Jupiter and Arbitrum documentation repositories state no licence, so their pinned files are PENDING_VERIFICATION (change detection active).",
-        "Upstream checks run on demand (`skill_registry.py check-upstream --fetch`); no scheduled job runs them."
-      ]
-    },
-    {
-      "id": "journey--admin-analytics",
-      "primary": "flofi-admin-analytics",
-      "dependencies": [
-        "flofi-data-privacy",
-        "flofi-frontend-ux",
-        "flofi-security",
-        "flofi-swap",
-        "flofi-wallet-execution"
-      ],
-      "sources": [
-        "apps/reference-dapp/src/domain/journey-metrics.ts",
-        "apps/reference-dapp/src/server/journey-telemetry.ts",
-        "apps/reference-dapp/src/app/api/flofi/journey/route.ts",
-        "scripts/journey-latency-report.mjs"
-      ],
-      "suites": [
-        "app.app.api.flofi.journey.route",
-        "app.domain.journey-metrics",
-        "app.server.journey-telemetry"
-      ],
-      "gaps": [
-        "No live production sample exists yet: p50/p95 need real journeys in the deployment logs; the report refuses to label MOCKED or LOCAL evidence otherwise.",
-        "Off by default (issue #149): a sample exists only after the deployment owner opts in with both switches (docs/privacy/JOURNEY-TELEMETRY.md). The legal basis there is an engineering proposal pending owner/legal review, not a sign-off."
-      ]
-    },
-    {
-      "id": "flight--frontend-ux",
-      "primary": "flofi-frontend-ux",
-      "dependencies": [
-        "flofi-data-privacy",
-        "flofi-security",
-        "flofi-workflow"
-      ],
-      "sharedFinancialCore": false,
-      "sources": [
-        "apps/reference-dapp/playwright.flight.config.ts",
-        "apps/reference-dapp/public/brand/flight/flofi-logo-on-blue.svg",
-        "apps/reference-dapp/public/brand/flight/flofi-logo.svg",
-        "apps/reference-dapp/public/brand/flight/gota-captain.svg",
-        "apps/reference-dapp/public/brand/flight/gota-card.svg",
-        "apps/reference-dapp/public/brand/flight/gota-safety.svg",
-        "apps/reference-dapp/public/brand/flight/gota-standby.svg",
-        "apps/reference-dapp/public/brand/flight/gota-welcome.svg",
-        "apps/reference-dapp/public/brand/flight/gota-wink.svg",
-        "apps/reference-dapp/public/brand/flight/seal-founding.svg",
-        "apps/reference-dapp/src/app/board/opengraph-image.alt.txt",
-        "apps/reference-dapp/src/app/board/opengraph-image.png",
-        "apps/reference-dapp/src/app/board/page.tsx",
-        "apps/reference-dapp/src/components/flight/board-experience.tsx",
-        "apps/reference-dapp/src/components/flight/board-page.tsx",
-        "apps/reference-dapp/src/components/flight/boarding-pass.tsx",
-        "apps/reference-dapp/src/components/flight/flight-copy.ts",
-        "apps/reference-dapp/src/components/flight/flight.module.css",
-        "apps/reference-dapp/src/components/flight/language-switch.tsx",
-        "apps/reference-dapp/src/flight/app-boarding.tsx",
-        "apps/reference-dapp/src/i18n/pt-flight.ts"
-      ],
-      "suites": [
-        "app.flight.campaign",
-        "app.e2e.flight"
-      ],
-      "gaps": [
-        "Browser profiles cover selected journeys; full accessibility audit, device matrix and language completeness remain acceptance gaps. The Portuguese /board copy is a translation of English-only boards, pending team review."
-      ]
-    },
-    {
-      "id": "flight--data-privacy",
-      "primary": "flofi-data-privacy",
-      "dependencies": [
-        "flofi-frontend-ux",
-        "flofi-infrastructure-ci",
-        "flofi-security",
-        "flofi-workflow"
-      ],
-      "sharedFinancialCore": false,
-      "sources": [
-        "apps/reference-dapp/backend/flight-admin.ts",
-        "apps/reference-dapp/src/app/api/board/board/route.ts",
-        "apps/reference-dapp/src/app/api/board/event/route.ts",
-        "apps/reference-dapp/src/app/api/board/handle/route.ts",
-        "apps/reference-dapp/src/app/api/board/invite/route.ts",
-        "apps/reference-dapp/src/app/api/board/list/route.ts",
-        "apps/reference-dapp/src/app/api/board/pass/route.ts",
-        "apps/reference-dapp/src/app/api/board/state/route.ts",
-        "apps/reference-dapp/src/app/cloud-flow.ts",
-        "apps/reference-dapp/src/flight/campaign.ts",
-        "apps/reference-dapp/src/flight/host.ts",
-        "apps/reference-dapp/src/flight/http.ts",
-        "apps/reference-dapp/src/flight/rate-limit-client.ts",
-        "apps/reference-dapp/src/flight/simulation-evidence.ts",
-        "apps/reference-dapp/src/flight/simulation-record.ts",
-        "apps/reference-dapp/src/flight/store.ts",
-        "packages/cloud-runtime/migrations/0020_flight_flofi.sql"
-      ],
-      "suites": [
-        "app.flight.campaign",
-        "app.flight.store.pg",
-        "cloud-runtime.flight-flofi-migration.pg",
-        "app.e2e.flight"
-      ],
-      "gaps": [
-        "Email deliverability is outside the product (FloFi sends no email; the team exports groups) and joining has no confirmation step (any address can be submitted; the team's first email is where a person can object). The exact public list counter can hint whether a submitted address was new. X handles are self-declared. Production rate and abuse behaviour is not measured by tests; browser funnel events are limited per instance."
-      ]
     }
   ],
   "requiredPostgresSuites": [
+    "app.accounts.account-store-schema19.pg",
     "app.admin.http.pg",
     "app.admin.settings.pg",
     "app.automations.remote.pg",
@@ -6884,6 +6983,7 @@
     "app.developer.engine.pg",
     "app.developer.sdk.pg",
     "app.developer.webhooks.pg",
+    "app.flight.store.pg",
     "app.learning.automatic.pg",
     "app.learning.learning.pg",
     "app.mcp.handoff.workflow.pg",
@@ -6892,13 +6992,13 @@
     "app.server.copilot-metrics.pg",
     "app.workflow-runs.cancel-run.pg",
     "app.workflow-runs.confirm-run.pg",
+    "app.workflow-runs.user-funded-run.pg",
     "cloud-runtime.copilot-metrics-migration.pg",
     "cloud-runtime.dispatch.pg",
+    "cloud-runtime.flight-flofi-migration.pg",
     "cloud-runtime.forward-compatibility.pg",
     "cloud-runtime.storage.pg",
     "cloud-runtime.tenancy.pg",
-    "app.accounts.account-store-schema19.pg",
-    "app.flight.store.pg",
-    "cloud-runtime.flight-flofi-migration.pg"
+    "cloud-runtime.user-funded-groups-migration.pg"
   ]
 }

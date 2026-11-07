@@ -8,8 +8,7 @@
  * remaining, executions with the Credential and grant of every step, and a prominent Revoke.
  */
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { authorizationReauthorize, authorizationReview, authorizationRevoke, authorizationSign, delegatedAutomationCreate, delegatedAutomationPreview, delegationEnabled, delegationOverview,
-  executionResume } from '../app/delegation-action';
+import { authorizationReview, authorizationRevoke, authorizationSign, delegatedAutomationCreate, delegatedAutomationPreview, delegationEnabled, delegationOverview } from '../app/delegation-action';
 import type { AuthorizationView, DelegationOverviewView, ExecutionView, ManifestView, PreviewView, ReviewView } from '../delegation/views';
 import type { WorkflowOwner } from '../domain/saved-workflow';
 import { useLocale } from '../i18n/locale';
@@ -29,6 +28,8 @@ export const DELEGATION_ERROR_TEXT: Readonly<Record<string, string>> = {
   AUTHORIZATION_NOT_PENDING: 'This authorization changed. Review it again.', AUTHORIZATION_CHALLENGE_INVALID: 'This review expired. Review it again.',
   PASSKEY_COUNTER_REPLAY: 'This passkey response was already used.', WALLET_AUTHORITY_CHANGED: 'Your wallet changed during this request. Nothing was submitted. Start again.', DELEGATED_AUTHORIZATION_REQUIRED: 'Sign the authorization before this automation can run.',
   DELEGATED_REAUTHORIZATION_REQUIRED: 'Re-authorize this automation to change its workflow.',
+  // BUILD-FLOFI-UNIVERSAL-WORKFLOW-002 (S1): FloFi's executor paid every step's gas; it is retired. Owner-confirmed automations are unchanged.
+  EXECUTOR_FUNDED_GAS_RETIRED: 'Automatic execution is retired: it ran from FloFi\'s account, and FloFi never pays your network fees. Choose "Ask every time": your own wallet confirms and pays.',
 };
 const REASON_TEXT: Readonly<Record<string, string>> = {
   DELEGATED_AUTHORITY_UNAVAILABLE: 'no enrolled Credential for this network', CREDENTIAL_SCOPE_AMOUNT: 'the Credential\'s per-call cap is too low',
@@ -258,7 +259,7 @@ export function ScheduleFields({ value, onChange }: { value: ScheduleDraft; onCh
   </div>;
 }
 
-function ExecutionRow({ e, owner, busy, run }: { e: ExecutionView; owner: WorkflowOwner; busy: boolean; run: Run }) {
+function ExecutionRow({ e }: { e: ExecutionView }) {
   const { t } = useLocale();
   return <li className="delegation-execution" data-state={e.state}>
     <span>{new Date(e.createdAt).toLocaleString()} · <strong>{t(STATE_TEXT[e.state] ?? e.state)}</strong>{e.code && e.state !== 'SETTLED' ? ` (${e.code})` : ''}
@@ -266,13 +267,15 @@ function ExecutionRow({ e, owner, busy, run }: { e: ExecutionView; owner: Workfl
     <ul>{e.steps.map(s => <li key={s.step}>{t('Step {0}', String(s.step + 1))} · {s.network} · {t(STATE_TEXT[s.state] ?? s.state)} · {t('Credential {0}, grant {1}', short(s.credentialId), short(s.grantId))}
       {s.spent.map(x => ` · −${x.amount} ${x.symbol}`).join('')}{s.received.map(x => ` · +${x.amount} ${x.symbol}`).join('')}
       {s.submissions.length > 0 && <> · <code title={s.submissions.join(' ')}>{short(s.submissions.at(-1)!)}</code></>}</li>)}</ul>
-    {e.state === 'HALTED' && <button type="button" className="workspace-action" disabled={busy} onClick={() => void run(() => executionResume(owner, e.executionId), 'Resumed. FloFi re-checks every limit before continuing.')}>{t('Resume')}</button>}
+    {/* BUILD-FLOFI-UNIVERSAL-WORKFLOW-002: FloFi's executor is retired, so a halted execution is never resumed by FloFi. */}
+    {e.state === 'HALTED' && <p className="muted" role="note">{t('Automatic execution is retired: finish any remaining step from your own wallet; FloFi will not continue this execution.')}</p>}
   </li>;
 }
 
 /** Status of every delegated authorization of the owner: state, budget, executions, Revoke. */
-export function DelegatedAuthorizations({ overview, owner, busy, run, onReview }: { overview: DelegationOverviewView; owner: WorkflowOwner; busy: boolean; run: Run;
-  onReview: (review: ReviewView) => void }) {
+export function DelegatedAuthorizations({ overview, owner, busy, run }: { overview: DelegationOverviewView; owner: WorkflowOwner; busy: boolean; run: Run;
+  /** Kept for callers; signing or re-authorizing executor-paid authority is retired, so no review is opened from here. */
+  onReview?: (review: ReviewView) => void }) {
   const { t } = useLocale();
   if (!overview.authorizations.length) return <div className="workspace-empty"><p>{t('No automatic workflows yet.')}</p></div>;
   const executionsOf = (a: AuthorizationView) => overview.executions.filter(e => e.authorizationId === a.authorizationId);
@@ -286,13 +289,10 @@ export function DelegatedAuthorizations({ overview, owner, busy, run, onReview }
         <td>{p.reserved}</td><td>{p.remaining}</td></tr>))}</tbody></table>
     <p className="muted">{t('{0} executions', String(a.executions))}{a.signedAt ? ` · ${t('signed {0}', new Date(a.signedAt).toLocaleString())}` : ''}{a.revokedAt ? ` · ${t('revoked {0}', new Date(a.revokedAt).toLocaleString())}` : ''}</p>
     <div className="automation-row-actions">
-      {a.state === 'PENDING_SIGNATURE' && <button type="button" className="workspace-action primary-action" disabled={busy} onClick={() => void run(async () => {
-        const r = await authorizationReview(owner, a.authorizationId); if (r.ok) onReview(r.value); return r; })}>{t('Review and sign')}</button>}
+      {/* Signing or re-authorizing executor-paid authority is retired (EXECUTOR_FUNDED_GAS_RETIRED); revoking stays available. */}
       {(a.state === 'ACTIVE' || a.state === 'PENDING_SIGNATURE') && <button type="button" className="workspace-action workspace-action-danger" disabled={busy}
         onClick={() => void run(() => authorizationRevoke(owner, a.authorizationId), 'Authorization revoked. FloFi will not execute this workflow again.')}>{t('Revoke authorization')}</button>}
-      {a.state === 'ACTIVE' && <button type="button" className="workspace-action" disabled={busy} onClick={() => void run(async () => {
-        const r = await authorizationReauthorize(owner, a.authorizationId); if (r.ok) onReview(r.value); return r; })}>{t('Re-authorize')}</button>}
     </div>
-    {executionsOf(a).length > 0 && <details open><summary>{t('History')}</summary><ul className="delegation-executions">{executionsOf(a).map(e => <ExecutionRow key={e.executionId} e={e} owner={owner} busy={busy} run={run}/>)}</ul></details>}
+    {executionsOf(a).length > 0 && <details open><summary>{t('History')}</summary><ul className="delegation-executions">{executionsOf(a).map(e => <ExecutionRow key={e.executionId} e={e}/>)}</ul></details>}
   </article>)}</div>;
 }

@@ -34,12 +34,20 @@ export type WorkflowRequirement = { readonly workflowHash: string; readonly stra
   readonly bindings: WorkflowComposition['bindings'] };
 
 type Node = Composition['workflow']['nodes'][number];
-type Quantity = { readonly asset: { readonly chainId: string; readonly address?: string; readonly decimals: number }; readonly amount: string };
+type Quantity = { readonly asset: { readonly chainId: string; readonly address?: string; readonly nativeId?: string; readonly decimals: number }; readonly amount: string };
+/**
+ * BUILD-FLOFI-UNIVERSAL-WORKFLOW-002: a native asset (ETH on an EVM chain, SOL on Solana) has no contract; it gets the same internal identity
+ * the typed bindings use (`engine/workflow-bindings.ts`): the 0xeeee… marker for ETH, the wrapped-SOL mint for SOL. Never a transfer target.
+ */
+const NATIVE_IDENTITY = (asset: Quantity['asset']): string | null => asset.nativeId === 'ETH' && asset.chainId.startsWith('eip155:') && asset.decimals === 18
+  ? '0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee' : asset.nativeId === 'SOL' && asset.chainId.startsWith('solana:') && asset.decimals === 9
+    ? 'So11111111111111111111111111111111111111112' : null;
 const SYMBOLS = (s: StrategySpec): readonly string[] => s.action === 'swap' ? [s.inputAsset, s.outputAsset] : s.action === 'bridge' ? ['USDC', 'USDC']
   : s.action === 'add_liquidity' ? Object.keys(s.maxAmounts) : s.action === 'lending_composition' ? ['USDC', 'WETH'] : [s.asset];
 function ref(asset: Quantity['asset'], symbol: string): AssetRef {
-  if (typeof asset.address !== 'string' || !Number.isInteger(asset.decimals)) throw new Error('DELEGATION_STEP_ASSET_INVALID');
-  return { chain: asset.chainId, address: asset.chainId.startsWith('eip155:') ? asset.address.toLowerCase() : asset.address, decimals: asset.decimals, symbol };
+  const address = typeof asset.address === 'string' ? asset.address : NATIVE_IDENTITY(asset);
+  if (typeof address !== 'string' || !Number.isInteger(asset.decimals)) throw new Error('DELEGATION_STEP_ASSET_INVALID');
+  return { chain: asset.chainId, address: asset.chainId.startsWith('eip155:') ? address.toLowerCase() : address, decimals: asset.decimals, symbol };
 }
 function stepOf(composition: Composition, index: number): StepRequirement {
   const strategy = composition.strategy, network = strategyNetwork(strategy), symbols = SYMBOLS(strategy);

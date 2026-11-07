@@ -11,7 +11,7 @@ vi.mock('../app/automation-action', () => ({ automationOverview: f.overview, cre
 vi.mock('../app/workflow-action', () => ({ listWorkflows: async () => ({ ok: true, value: { items: [] } }) }));
 vi.mock('./wallet-proof', () => ({ WalletProof: () => null }));
 vi.mock('./canvas-automation', () => ({ CanvasAutomation: () => null }));
-vi.mock('./delegated-automations', () => ({ useDelegation: () => ({ refresh: vi.fn(), overview: null }), AuthorizationReview: () => null, DelegatedAuthorizations: () => null, DelegatedCreate: () => null, DELEGATION_ERROR_TEXT: {} }));
+vi.mock('./delegated-automations', () => ({ useDelegation: () => ({ refresh: vi.fn(), overview: null }), AuthorizationReview: () => null, DelegatedAuthorizations: () => null, DelegatedCreate: () => null, DELEGATION_ERROR_TEXT: { EXECUTOR_FUNDED_GAS_RETIRED: 'Automatic execution is retired.' } }));
 vi.mock('../i18n/locale', () => ({ useLocale: () => ({ language: 'EN', t: (value: string, ...args: unknown[]) => value.replace(/\{(\d+)\}/g, (_, i) => String(args[Number(i)])) }) }));
 const owner = { namespace: 'eip155' as const, address: '0x' + 'a'.repeat(40) }, other = { ...owner, address: '0x' + 'b'.repeat(40) };
 const capabilities: CapabilityView = { priceSource: 'chainlink', priceEvidence: 'PUBLIC_READ_ONLY', observable: ['ETH'], unavailable: [], routes: [{ asset: 'ETH', network: 'base', networkLabel: 'Base', base: 'WETH', quote: 'USDC', executable: true, reason: null, fundsClass: 'REAL_FUNDS' }] };

@@ -4,6 +4,11 @@
  * handler observes in-flight owner-signed steps through the worker's own flow services (read-only, as the step's wallet) and mirrors delegated
  * executions into their runs; it never signs or submits, and it never makes a step READY (that needs the requester surface's own policy, so it
  * happens when the owner continues in FloFi). The sweep expires runs that never started and re-arms open runs whose work item is missing.
+ *
+ * BUILD-FLOFI-UNIVERSAL-WORKFLOW-002 (reviewed boundary change): for USER_FUNDED runs the worker also RELAYS what the owner's wallet already
+ * signed and is due — an owner-signed ERC-4337 user operation (to a bundler, after its simulation) or owner-signed Solana transactions (fee
+ * payer = owner, asserted before each send) — and reconciles groups from the chain. It holds no signer and can create no transaction; the
+ * flow services keep their observe-only transports.
  */
 import type { Database, Logger, WorkHandler } from '@defi-workflow-engine/cloud-runtime';
 import { createPgDelegationStore } from '../delegation/pg-store.ts';
@@ -11,6 +16,7 @@ import type { McpRuntime as EngineRuntime } from '../mcp/runtime.ts';
 import { createPgWorkflowRunStore, type WorkflowRunStore } from './pg-store.ts';
 import { advanceRun, type RunnerDeps } from './runner.ts';
 import { WORKFLOW_RUN_ADVANCE_KIND } from './state-machine.ts';
+import { userFundedRuntime } from '../user-funded/runtime.ts';
 
 type Env = Readonly<Record<string, string | undefined>>;
 const RUN_ID = /^wfr_[a-z2-7]{26}$/;
@@ -45,6 +51,7 @@ export function workflowRunWorkerParts(env: Env, db: Database, tenantId: string,
   if (env.FLOFI_WORKFLOW_RUNS !== 'enabled') return { disabled: 'WORKFLOW_RUNS_NOT_ENABLED', reason: null };
   const store = createPgWorkflowRunStore(db, tenantId);
   const delegation = env.FLOFI_DELEGATION === 'enabled' ? createPgDelegationStore(db, tenantId) : null;
-  const deps: RunnerDeps = { store, runtime, delegation, policyFor: () => null, now: () => new Date(), log: (event, fields) => logger.info(event, fields) };
+  const deps: RunnerDeps = { store, runtime, delegation, policyFor: () => null, now: () => new Date(), log: (event, fields) => logger.info(event, fields),
+    userFunded: userFundedRuntime(env).deps };
   return { handlers: workflowRunHandlers(deps), sweep: () => sweepWorkflowRuns(store, db, tenantId, new Date()) };
 }

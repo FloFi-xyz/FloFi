@@ -13,6 +13,7 @@
  */
 import type { FlowName } from '../../backend/flows.ts';
 import type { DelegationFacts } from '../workflow-runs/authorization-plan.ts';
+import type { UserFundedFacts } from '../workflow-runs/execution-groups.ts';
 import { CLOUD_API_DEADLINE_EXCEEDED, listCloudRuns, type CloudRunSummary } from '../server/cloud-api-client.ts';
 import { cloudFlow, cloudFlowMode, cloudPreview, cloudRun, cloudRunJournal, cloudRuns, flowRuntimeKind, type CloudJournalPage, type CloudRun, type EmbeddedRuntime,
   type FlowRuntimeKind, type FlowRuntimeMode } from '../server/flow-runtime.ts';
@@ -49,7 +50,8 @@ export type McpRuntime = {
    */
   readonly sequences?: () => Promise<SequenceFacts>;
 };
-export type SequenceFacts = { readonly enabled: boolean; readonly delegation: DelegationFacts };
+/** BUILD-FLOFI-UNIVERSAL-WORKFLOW-002: `userFunded` — the deployment's user-funded execution facts (null where not described). */
+export type SequenceFacts = { readonly enabled: boolean; readonly delegation: DelegationFacts; readonly userFunded?: UserFundedFacts | null };
 
 const REQUIRED: Result<never> = { ok: false, code: 'MCP_CLOUD_RUNTIME_REQUIRED' };
 async function evidenceOf(flow: FlowName, record: Result<unknown> | null): Promise<Result<EvidenceRecord | null>> {

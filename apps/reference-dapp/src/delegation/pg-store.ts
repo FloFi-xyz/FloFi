@@ -552,6 +552,11 @@ export function createPgDelegationStore(db: Database, tenantId: string) {
         [tenantId, step.grant_id])).rows[0];
       if (!g || g.state !== 'ACTIVE') return { ok: false as const, code: g ? `CREDENTIAL_${String(g.state)}` : 'CREDENTIAL_NOT_FOUND' };
       if (date(g.expires_at) <= now) return { ok: false as const, code: 'CREDENTIAL_EXPIRED' };
+      // BUILD-FLOFI-UNIVERSAL-WORKFLOW-002, invariant S1 (defense in depth below every driver): bytes signed by the grant's session signer are
+      // paid by that FloFi-controlled address. They are never persisted, so they can never be broadcast or re-broadcast.
+      const payer = String((submission as { from?: unknown; feePayer?: unknown }).from ?? (submission as { feePayer?: unknown }).feePayer ?? g.session_address);
+      if (payer.toLowerCase() === String(g.session_address).toLowerCase() || ['EVM_REDEMPTIONS', 'SOLANA_TRANSACTION'].includes(String((submission as { kind?: unknown }).kind)))
+        return { ok: false as const, code: 'EXECUTOR_GAS_PAYER_REFUSED' };
       // BUILD-FLOFI-SINGLE-AUTH-WORKFLOW-UX-001: the session signer's nonces are allocated under this grant lock. Bytes signed at nonces another
       // execution already prepared are refused (never persisted, never sent); the caller signs again at fresh nonces.
       // BUILD-FLOFI-UNIVERSAL-SINGLE-AUTH-MAINNET-001: grants may share one executor address (the deployment's KMS key), so nonces are allocated

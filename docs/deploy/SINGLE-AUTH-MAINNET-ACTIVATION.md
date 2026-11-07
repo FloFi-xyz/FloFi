@@ -1,5 +1,10 @@
 # One-authorization workflow runs on mainnet: activation, team testing, rollback
 
+> **Superseded (BUILD-FLOFI-UNIVERSAL-WORKFLOW-002).** The delegated executor described here sent and paid for every step from a
+> FloFi-controlled KMS address. That violates invariant S1 (FloFi never funds user gas) and is retired: the executor can no longer send or
+> pay for anything, and this mode is never offered. **Do not perform §2–§3 (KMS signing, executor gas funding).** Use
+> [USER-FUNDED-EXECUTION.md](./USER-FUNDED-EXECUTION.md) and [ADR-0008](../adr/ADR-0008-user-funded-execution.md). This file is kept as the record of PR #166.
+
 BUILD-FLOFI-UNIVERSAL-SINGLE-AUTH-MAINNET-001. This runbook turns on delegated ("authorize once") workflow runs for Ethereum (1), Base (8453) and Arbitrum One (42161) in the public product, for every eligible signed-in user.
 
 The owner authorizes the steps marked **[OWNER]**: they create a paid resource, change production or move real funds. Once authorized, the procedure runs straight through. There is no pilot phase, wallet allowlist, amount cap or acceptance gate before enabling: real-mainnet testing by the team happens in the deployed product, after activation (§7). The protections that stay are the product's own: the exact on-chain grant, the owner's wallet signature, session and ownership checks, simulation and risk checks, reconciliation, replay protection and revocation.

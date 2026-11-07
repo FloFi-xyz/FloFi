@@ -20,6 +20,7 @@ import type { RunDelegationOps, WorkflowRunSurface } from '../platform/workflow-
 import { sequenceFacts } from '../workflow-runs/facts.ts';
 import { createPgWorkflowRunStore } from '../workflow-runs/pg-store.ts';
 import { workflowRunsEnabled } from '../workflow-runs/service.ts';
+import { userFundedRuntime } from '../user-funded/runtime.ts';
 import { flowRuntimeKind } from './flow-runtime.ts';
 import { delegationOperation } from './delegation-operation.ts';
 import type { FlowResult } from './cloud-api-client.ts';
@@ -32,7 +33,10 @@ export async function workflowRunSurface(env: Env, host: ApprovalHost, runtime: 
   if (!workflowRunsEnabled(env)) return null;
   const store = createPgWorkflowRunStore(host.db, host.tenantId);
   const delegation = await delegationParts(env, store, host);
+  // BUILD-FLOFI-UNIVERSAL-WORKFLOW-002: user-funded execution groups (no signer; the owner's wallets sign and pay).
+  const userFunded = userFundedRuntime(env);
   return { store, runtime, delegation: delegation?.store ?? null, now: () => new Date(), log: () => undefined,
+    userFundedFacts: userFunded.facts, userFunded: userFunded.deps,
     policyFor: kind => profiles[kind]?.policy ?? CLOSED, delegationFacts: delegation ? sequenceFacts(env).delegation : null,
     ...delegation ? { grantsOf: (owner: Parameters<typeof delegation.store.grants>[0]) => delegation.store.grants(owner) } : {}, newId: typedId,
     delegationOps: delegation?.ops ?? null };

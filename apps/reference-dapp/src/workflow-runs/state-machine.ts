@@ -18,7 +18,8 @@ export const RUN_STATES = ['PENDING', 'RUNNING', 'COMPLETED', 'HALTED', 'FAILED'
 export type RunState = (typeof RUN_STATES)[number];
 export const STEP_STATES = ['PENDING', 'READY', 'AWAITING_OWNER', 'DELEGATED', 'RECONCILED', 'FAILED', 'UNCERTAIN', 'SKIPPED', 'BLOCKED'] as const;
 export type StepState = (typeof STEP_STATES)[number];
-export const RUN_MODES = ['CONFIRM_EACH_STEP', 'DELEGATED'] as const;
+/** BUILD-FLOFI-UNIVERSAL-WORKFLOW-002: USER_FUNDED — execution groups authorized by the owner's own wallet, which pays every fee (0023). */
+export const RUN_MODES = ['CONFIRM_EACH_STEP', 'DELEGATED', 'USER_FUNDED'] as const;
 export type RunMode = (typeof RUN_MODES)[number];
 
 const RUN: Readonly<Record<RunState, readonly RunState[]>> = Object.freeze({
@@ -53,7 +54,20 @@ export const ADVANCE_RETRY_MS = 20_000;
 export const WORKFLOW_RUN_ADVANCE_KIND = 'workflow-run.advance';
 
 /** Ending only skips unsubmitted work; reconciled steps and their evidence remain final. */
-export function canEndWorkflow(run: { readonly state: string; readonly mode: string | null }, steps: readonly { readonly state: string }[]): boolean {
-  return run.mode !== 'DELEGATED' && ['PENDING', 'RUNNING', 'HALTED'].includes(run.state) &&
-    !steps.some(step => ['AWAITING_OWNER', 'UNCERTAIN', 'DELEGATED'].includes(step.state));
+/**
+ * BUILD-FLOFI-UNIVERSAL-WORKFLOW-002: whether a user-funded group may be in flight — anything submitted, a wallet batch the wallet already sent,
+ * or a prepared wallet batch the owner's wallet may still be confirming (inside its validity). A user operation or Solana signatures FloFi has
+ * not relayed are not: ending the run skips them. The ONE rule for the store's cancellation and the owner's "End workflow".
+ */
+export function groupInFlight(g: { readonly state: string; readonly strategy: string; readonly validUntil: Date | string | null }, now: Date): boolean {
+  if (g.state === 'SUBMITTED' || g.state === 'UNCERTAIN') return true;
+  if (g.strategy !== 'EVM_WALLET_BATCH') return false;
+  return g.state === 'AUTHORIZED' || (g.state === 'PREPARED' && g.validUntil !== null && new Date(g.validUntil) > now);
+}
+export function canEndWorkflow(run: { readonly state: string; readonly mode: string | null }, steps: readonly { readonly state: string }[],
+  groups: readonly { readonly state: string; readonly strategy: string; readonly validUntil: Date | string | null }[] = [], now: Date = new Date()): boolean {
+  // A user-funded run's DELEGATED steps are grouped steps; whether one may be in flight is decided by its group (`groupInFlight`).
+  const inFlight = run.mode === 'USER_FUNDED' ? ['AWAITING_OWNER', 'UNCERTAIN'] : ['AWAITING_OWNER', 'UNCERTAIN', 'DELEGATED'];
+  return run.mode !== 'DELEGATED' && ['PENDING', 'RUNNING', 'HALTED'].includes(run.state) && !steps.some(step => inFlight.includes(step.state))
+    && !(run.mode === 'USER_FUNDED' && groups.some(g => groupInFlight(g, now)));
 }

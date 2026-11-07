@@ -180,18 +180,21 @@ function ExecutionCredentialsPanel({ access }: { access: DelegationAccess }) {
       return done;
     }, 'Credential enrolled: this wallet can now serve automatic workflows within its limits.');
   }
+  // BUILD-FLOFI-UNIVERSAL-WORKFLOW-002 (S1): enrollment is retired on every deployment (the executor paid every step's gas); existing
+  // Credentials stay listed so the owner can still revoke them.
+  const retired = true;
   return <section className="workspace-section delegation-credentials" aria-labelledby="credentials-execution">
     <div className="workspace-section-heading"><div><h2 id="credentials-execution">{t('Automatic execution')}</h2>
       <span className="workspace-count">{overview?.credentials.reduce((n, c) => n + c.grants.filter(g => g.state === 'ACTIVE').length, 0) ?? 0}</span></div></div>
-    <p className="muted">{t('Enroll a wallet once to let FloFi execute workflows you authorize, inside the limits it signs here. Each enrollment is one wallet signature per network; workflows never ask the wallet again.')}</p>
+    {!retired && <p className="muted">{t('Enroll a wallet once to let FloFi execute workflows you authorize, inside the limits it signs here. Each enrollment is one wallet signature per network; workflows never ask the wallet again.')}</p>}
     {messages}
     {!proven ? <div className="workspace-empty"><p>{t('Verify wallet ownership to manage automatic execution.')}</p><WalletProof namespace={owner.namespace} proof={{ ...access.proof, proven: null }}/></div> : <>
-      {overview?.availability.enrollment && <p className="muted">{t(ERROR_TEXT[overview.availability.enrollment] ?? overview.availability.enrollment)}</p>}
-      {!passkey && <p className="error-banner" role="note">{t('Register a passkey first (Passkeys). Every Credential is bound to the passkey that will authorize your workflows.')}</p>}
+      <p className="muted">{t('Enrollment is retired: FloFi no longer executes from its own account and never pays your network fees. Existing Credentials can still be revoked.')}</p>
+      {!passkey && !retired && <p className="error-banner" role="note">{t('Register a passkey first (Passkeys). Every Credential is bound to the passkey that will authorize your workflows.')}</p>}
       <ul className="automation-list">{(overview?.credentials ?? []).flatMap(c => c.grants).map(g => <GrantCard key={g.grantId} g={g} owner={owner} busy={busy} run={run}/>)}</ul>
       {pending && pendingValid && <div className="approval-actions"><button type="button" className="workspace-action" disabled={busy}
         onClick={() => void run(async () => { const r = await credentialComplete(owner, pending.grantId, { signature: pending.signature }); if (r.ok) setPending(null); return r; }, 'Credential enrolled.')}>{t('Verify again')}</button></div>}
-      <form className="automation-form" aria-label={t('Enroll a wallet for automatic execution')} onSubmit={event => void enroll(event)}>
+      {!retired && <form className="automation-form" aria-label={t('Enroll a wallet for automatic execution')} onSubmit={event => void enroll(event)}>
         <label className="automation-field"><span>{t('Network')}</span><select aria-label={t('Credential network')} value={network} onChange={e => setNetwork(e.currentTarget.value as typeof network)}>
           <option value="base-sepolia">Base Sepolia</option><option value="ethereum-sepolia">Ethereum Sepolia</option><option value="solana-devnet">Solana Devnet</option>
           {overview?.availability.mainnetChains?.includes('eip155:42161') && <option value="arbitrum-one">Arbitrum One</option>}</select></label>
@@ -206,7 +209,7 @@ function ExecutionCredentialsPanel({ access }: { access: DelegationAccess }) {
         <label className="automation-field"><span>{t('Expires on')}</span><input type="date" aria-label={t('Credential expires on')} value={expires} onChange={e => setExpires(e.currentTarget.value)}/></label>
         {/* A Solana Credential needs that wallet proven first: the button waits for the proof, so a click can never race it. */}
         <button type="submit" className="workspace-action primary-action" disabled={busy || !passkey || (network === 'solana-devnet' && (!solanaProof.proven || solanaProof.busy))}>{t('Enroll with my wallet')}</button>
-      </form>
+      </form>}
     </>}
   </section>;
 }
