@@ -203,6 +203,64 @@ describe('BUILD-FLOFI-UNIVERSAL-WORKFLOW-002 user-funded workflow run (PostgreSQ
     } finally { await t.drop(); }
   });
 
+  it('something the owner already signed is never replaced: a signed group that stopped cannot be resumed (the owner ends the run)', async () => {
+    const t = await createTestDatabase();
+    try {
+      const { h, approval } = await setup(t);
+      await workflowRunUserFundedStart(h.surface, approval.approvalId, [h.evm, h.sol], METAMASK);
+      await workflowRunUserFundedPrepare(h.surface, approval.approvalId, [h.evm, h.sol], 0);
+      await workflowRunUserFundedAuthorize(h.surface, approval.approvalId, [h.evm, h.sol], 0, { kind: 'EVM_WALLET_BATCH', batchId: 'batch-signed' });
+      // The wallet reports the batch failed off chain (EIP-5792 status 400): nothing was sent, the group stops before anything ran.
+      const stopped = await workflowRunUserFundedReport(h.surface, approval.approvalId, [h.evm, h.sol], 0, [], true);
+      expect(stopped.view.workflowRun!.run).toMatchObject({ state: 'FAILED', code: 'EIP5792_BATCH_NOT_SENT', groups: [{ state: 'BLOCKED', signed: true }] });
+    } finally { await t.drop(); }
+    // A signed group stopped after earlier work (the run HALTED) is still never re-planned: resume refuses, the owner ends the run.
+    const t2 = await createTestDatabase();
+    try {
+      const { h, approval } = await setup(t2);
+      await workflowRunUserFundedStart(h.surface, approval.approvalId, [h.evm, h.sol], METAMASK);
+      await workflowRunUserFundedPrepare(h.surface, approval.approvalId, [h.evm, h.sol], 0);
+      await workflowRunUserFundedAuthorize(h.surface, approval.approvalId, [h.evm, h.sol], 0, { kind: 'EVM_WALLET_BATCH', batchId: 'batch-signed-2' });
+      let run = await ownedRun(h.runs, approval.approvalId, [h.evm, h.sol]);
+      await h.store.groupTransition(run.runId, 0, ['AUTHORIZED'], 'BLOCKED', { code: 'EIP5792_BATCH_NOT_SENT' });
+      for (const i of [0, 1]) await h.store.stepTransition(run.runId, i, ['DELEGATED'], 'BLOCKED', { code: 'EIP5792_BATCH_NOT_SENT' });
+      run = (await h.store.transition(run.runId, { version: run.version, from: ['RUNNING'] }, 'HALTED', { code: 'EIP5792_BATCH_NOT_SENT' }))!;
+      const { resumeSequential } = await import('../platform/workflow-run-approvals.ts');
+      await expect(resumeSequential(h.runs, run, [h.evm, h.sol], {} as never)).rejects.toThrow('WORKFLOW_RUN_GROUP_SIGNED');
+      expect((await h.store.groups(run.runId))[0]).toMatchObject({ state: 'BLOCKED', strategy: 'EVM_WALLET_BATCH', authorization: { batchId: 'batch-signed-2' } });
+      // Ending the run is allowed (nothing is in flight) and skips the signed group; it is never relayed.
+      const ended = await h.store.cancel(run.runId, run.version, 'OWNER_CANCELLED', h.d.now());
+      expect(ended.state).toBe('CANCELLED');
+      expect((await h.store.groups(run.runId))[0]).toMatchObject({ state: 'SKIPPED' });
+    } finally { await t2.drop(); }
+  });
+
+  it('FloFi Wallet: two same-chain steps form ONE owner-step group that reconciles only when BOTH steps did', async () => {
+    const t = await createTestDatabase();
+    try {
+      const h = await workflowRunHarness(t.db, { userFundedChains: [BASE_SEPOLIA] });
+      const approval = await h.request({ version: 2, steps: [BASE_SWAP, { ...BASE_SWAP, amount: '2' }] });
+      await claim(h, approval.secret);
+      const FLOFI = { eip155: { wallet: 'FLOFI_WALLET', atomic: {}, typedData: true } };
+      const started = await workflowRunUserFundedStart(h.surface, approval.approvalId, [h.evm, h.sol], FLOFI);
+      expect(started.view.workflowRun!.run.groups.map(g => [g.strategy, g.steps])).toEqual([['EVM_OWNER_STEP', [0, 1]]]);
+      const { workflowRunContinue } = await import('../platform/approve.ts');
+      const first = await workflowRunContinue(h.surface, approval.approvalId, [h.evm, h.sol]);
+      h.flows.ownerExecutes('base-sepolia-swap', h.evm.address, first.workflow, 'RECONCILED');
+      await h.drain();
+      let run = await ownedRun(h.runs, approval.approvalId, [h.evm, h.sol]);
+      // Step 1 reconciled, step 2 not yet: the group is NOT finished.
+      expect((await h.store.steps(run.runId)).map(s => s.state)[0]).toBe('RECONCILED');
+      expect((await h.store.groups(run.runId))[0]!.state).toBe('PLANNED');
+      const second = await workflowRunContinue(h.surface, approval.approvalId, [h.evm, h.sol]);
+      h.flows.ownerExecutes('base-sepolia-swap', h.evm.address, second.workflow, 'RECONCILED');
+      await h.drain(run.runId);
+      run = await ownedRun(h.runs, approval.approvalId, [h.evm, h.sol]);
+      expect(run).toMatchObject({ state: 'COMPLETED', mode: 'USER_FUNDED' });
+      expect((await h.store.groups(run.runId))[0]).toMatchObject({ state: 'RECONCILED', outcome: { steps: [0, 1] } });
+    } finally { await t.drop(); }
+  });
+
   it('a mixed run: a wallet batch group, then a bridge through its own flow (owner-step group); every group ends reconciled', async () => {
     const t = await createTestDatabase();
     try {

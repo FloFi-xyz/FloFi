@@ -36,7 +36,8 @@ Steps marked **[OWNER]** change production, create a paid resource or move real 
 
 ## 2. Release A — compatibility certificate **[OWNER: merge + deploy]**
 
-Commit `RELEASE A: schema 0023 compatibility certificate` (first commit of this branch) can be cherry-picked to `main` alone. Deploy it to
+Commits `RELEASE A: schema 0023 compatibility certificate` and `RELEASE A (amended): …` (they touch only the certificate in
+`packages/cloud-runtime/src/migrations.ts`, its fixture and SCHEMA-COMPATIBILITY §17) can be cherry-picked to `main` alone, in that order. Deploy it to
 every database consumer (Vercel, Railway `flofi-api`, Railway `flofi-worker`) **before** any build that applies 0023. Without it, rolling
 back after 0023 is impossible (the previous build refuses schema 23 with `MIGRATION_HISTORY_MISMATCH`).
 

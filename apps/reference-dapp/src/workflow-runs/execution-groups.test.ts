@@ -40,7 +40,7 @@ describe('BUILD-FLOFI-UNIVERSAL-WORKFLOW-002 execution groups', () => {
     expect(p.groups).toHaveLength(1);
     expect(p.groups[0]).toMatchObject({ chain: 'eip155:8453', strategy: 'EVM_WALLET_BATCH', signing: 'UPFRONT', interactions: 1, feePayer: 'OWNER_WALLET', setup: [],
       steps: [{ index: 0, amount: 'EXACT' }, { index: 1, amount: 'GUARANTEED_MINIMUM', boundTo: 0 }, { index: 2, amount: 'EXACT' }], downgrades: [] });
-    expect(p.interactions).toEqual({ upfront: 1, whenDue: 0, perNamespace: { eip155: 1 }, networkSwitches: 0, oneTimeSetup: [], single: true });
+    expect(p.interactions).toEqual({ upfront: 1, whenDue: 0, perNamespace: { eip155: 1 }, networkSwitches: 0, oneTimeSetup: [], single: true, atLeast: false });
     expect(describeGroup(p.groups[0]!)).toMatch(/one wallet confirmation \(atomic batch\).*fees paid by your own wallet/);
   });
 
@@ -78,6 +78,9 @@ describe('BUILD-FLOFI-UNIVERSAL-WORKFLOW-002 execution groups', () => {
     // Durable nonces are not offered in this build (ADR-0008): a post-delivery Solana group is signed when due, and says why.
     expect(p.groups[2]!.downgrades).toContain('SOLANA_DURABLE_NONCE_NOT_OFFERED');
     expect(p.interactions).toMatchObject({ upfront: 1, whenDue: 2, perNamespace: { eip155: 2, solana: 1 }, single: false });
+    // The bridge runs through its own flow (an approval may add a confirmation): every count is a minimum, never rounded down.
+    expect(p.interactions.atLeast).toBe(true);
+    expect(plan({ version: 2, steps: [SWAP_BASE, SEND_BASE] }, METAMASK).interactions).toMatchObject({ upfront: 1, whenDue: 0, single: true, atLeast: false });
     // Even a delayed Solana group with no dependency on the delivery, on a deployment that would allow nonce accounts, is signed when due.
     const free = plan({ version: 2, steps: [bridge, SOL_SEND] }, METAMASK, { ...ALL, solanaNonceAccounts: true });
     expect(free.groups.map(g => [g.strategy, g.signing])).toEqual([['EVM_OWNER_STEP', 'WHEN_DUE'], ['SOLANA_SIGN_ALL', 'WHEN_DUE']]);

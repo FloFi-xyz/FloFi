@@ -91,10 +91,24 @@ describe('User-funded execution groups additive migration (0023)', () => {
       expect(await ok(move(t.db, pending, 0, `state = 'SUBMITTED'`))).toBe(false);
       await move(t.db, pending, 0, `state = 'SUBMITTED', submission = '{"hashes":["0x${'a'.repeat(64)}"]}'`);
       expect(await fails(move(t.db, pending, 0, `submission = '{"hashes":[]}'`))).toBe('WORKFLOW_RUN_GROUP_IMMUTABLE');
-      expect(await fails(move(t.db, pending, 0, `state = 'PLANNED'`))).toBe('WORKFLOW_RUN_GROUP_TRANSITION_INVALID');
+      expect(await fails(move(t.db, pending, 0, `state = 'PLANNED'`))).toBe('WORKFLOW_RUN_GROUP_IMMUTABLE');
       expect(await ok(move(t.db, pending, 0, `state = 'RECONCILED'`))).toBe(false);
       await move(t.db, pending, 0, `state = 'RECONCILED', outcome = '{"status":"RECONCILED"}'`);
       expect(await fails(move(t.db, pending, 0, `code = 'LATER'`))).toBe('WORKFLOW_RUN_GROUP_TERMINAL');
+      // A group stopped BEFORE anything was signed may be planned again; a SIGNED one never (it may still execute on chain): its artifact,
+      // authorization and strategy stay frozen in BLOCKED too, and moving it back to PLANNED is refused.
+      await move(t.db, pending, 1, `state = 'PREPARED', prepared = '{"kind":"SOLANA_SIGN_ALL"}'`);
+      await move(t.db, pending, 1, `state = 'BLOCKED', code = 'SIMULATION_REVERTED'`);
+      await move(t.db, pending, 1, `state = 'PLANNED', prepared = NULL, code = NULL`);
+      await move(t.db, pending, 1, `state = 'PREPARED', prepared = '{"kind":"SOLANA_SIGN_ALL","v":2}'`);
+      await move(t.db, pending, 1, `state = 'AUTHORIZED', owner_authorization = '{"transactions":[]}'`);
+      await move(t.db, pending, 1, `state = 'BLOCKED', code = 'SOLANA_BLOCKHASH_EXPIRED'`);
+      expect(await fails(move(t.db, pending, 1, `state = 'PLANNED', prepared = NULL, owner_authorization = NULL, code = NULL`))).toBe('WORKFLOW_RUN_GROUP_IMMUTABLE');
+      expect(await fails(move(t.db, pending, 1, `state = 'PLANNED'`))).toBe('WORKFLOW_RUN_GROUP_IMMUTABLE');
+      expect(await fails(move(t.db, pending, 1, `strategy = 'SOLANA_OWNER_STEP'`))).toBe('WORKFLOW_RUN_GROUP_IMMUTABLE');
+      // Codes use the runs/steps/events grammar (no ':' detail, at most 81 characters).
+      expect(await ok(move(t.db, pending, 1, `code = 'USER_FUNDED_ACTION_NOT_BUILDABLE:SWAP'`))).toBe(false);
+      await move(t.db, pending, 1, `state = 'SKIPPED', code = 'OWNER_CANCELLED'`);
       // Grouped steps reuse DELEGATED and its 0015 transitions; groups and runs are never deleted.
       await t.db.query(`UPDATE workflow_run_steps SET state = 'DELEGATED', version = version + 1 WHERE run_id = $1 AND step_index = 0`, [pending]);
       expect(await fails(t.db.query('DELETE FROM workflow_run_groups WHERE run_id = $1', [pending]))).toBe('WORKFLOW_RUN_RECORD_APPEND_ONLY');

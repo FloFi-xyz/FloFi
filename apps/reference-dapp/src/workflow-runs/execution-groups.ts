@@ -98,6 +98,8 @@ export type InteractionSummary = {
   /** EVM network changes between consecutive EVM groups (a wallet may ask to confirm each). */
   readonly networkSwitches: number;
   readonly oneTimeSetup: readonly ('EVM_SMART_ACCOUNT_UPGRADE' | 'SOLANA_NONCE_ACCOUNTS')[];
+  /** True when a step runs through its own flow: its count is a minimum (a token approval or a bridge deposit may add a confirmation). */
+  readonly atLeast: boolean;
   /** True only when exactly one wallet interaction (one wallet, one chain) authorizes everything. */
   readonly single: boolean;
 };
@@ -222,9 +224,11 @@ export function summarize(groups: readonly ExecutionGroup[]): InteractionSummary
     if (g.namespace === 'eip155') { if (lastEvmChain && lastEvmChain !== g.chain) networkSwitches++; lastEvmChain = g.chain; }
   }
   const oneTimeSetup = [...new Set(groups.flatMap(g => g.setup))];
-  // One interaction means exactly that: one group, one wallet prompt, no setup prompt of its own (an in-confirmation upgrade is not a prompt).
-  const single = upfront + whenDue === 1 && !oneTimeSetup.includes('SOLANA_NONCE_ACCOUNTS');
-  return { upfront, whenDue, perNamespace, networkSwitches, oneTimeSetup, single };
+  const atLeast = groups.some(g => g.strategy === 'EVM_OWNER_STEP' || g.strategy === 'SOLANA_OWNER_STEP');
+  // One interaction means exactly that: one group, one wallet prompt, no setup prompt of its own (an in-confirmation upgrade is not a prompt),
+  // and no step whose own flow may ask more than once.
+  const single = upfront + whenDue === 1 && !oneTimeSetup.includes('SOLANA_NONCE_ACCOUNTS') && !atLeast;
+  return { upfront, whenDue, perNamespace, networkSwitches, oneTimeSetup, single, atLeast };
 }
 
 /** The groups' public description (MCP, channels, the review): codes only, never a key, calldata or signature. */

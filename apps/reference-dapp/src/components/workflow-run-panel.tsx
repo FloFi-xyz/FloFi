@@ -196,7 +196,8 @@ export function WorkflowRunPanel({ claim, approvalId, secret, onProposal, onErro
         {plan.confirmEachStep.available && <button type="button" className="secondary" disabled={busy} onClick={() => void act(() => startWorkflowRunHandoff(approvalId))}>
           {tr('Confirm each step in my wallet ({0} confirmations at least)', String(confirmations))}</button>}
         {plan.userFunded?.available && <button type="button" disabled={busy} onClick={() => void startUserFunded()}>
-          {userFundedCount === 1 ? tr('Pay the fees from my own wallet, in one wallet interaction')
+          {plan.userFunded.interactions?.atLeast ? tr('Pay the fees from my own wallet, in at least {0} wallet interactions', String(userFundedCount))
+            : userFundedCount === 1 ? tr('Pay the fees from my own wallet, in one wallet interaction')
             : tr('Pay the fees from my own wallet, in {0} wallet interactions', String(userFundedCount))}</button>}
         {plan.delegatedSingleAuthorization.available && !review && <button type="button" disabled={busy} onClick={() => void prepareOnce()}>
           {plan.delegatedSingleAuthorization.walletSignatures > 1

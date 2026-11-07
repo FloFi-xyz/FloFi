@@ -56,7 +56,7 @@ export const WORKFLOW_RUN_ADVANCE_KIND = 'workflow-run.advance';
 /** Ending only skips unsubmitted work; reconciled steps and their evidence remain final. */
 export function canEndWorkflow(run: { readonly state: string; readonly mode: string | null }, steps: readonly { readonly state: string }[]): boolean {
   // BUILD-FLOFI-UNIVERSAL-WORKFLOW-002: a user-funded run's DELEGATED steps are grouped steps; whether one may be in flight is decided by its
-  // group (the store refuses while a group is AUTHORIZED, SUBMITTED or UNCERTAIN).
+  // group (the store refuses while a group is SUBMITTED or UNCERTAIN, or a wallet batch the wallet sent or may still be confirming).
   const inFlight = run.mode === 'USER_FUNDED' ? ['AWAITING_OWNER', 'UNCERTAIN'] : ['AWAITING_OWNER', 'UNCERTAIN', 'DELEGATED'];
   return run.mode !== 'DELEGATED' && ['PENDING', 'RUNNING', 'HALTED'].includes(run.state) && !steps.some(step => inFlight.includes(step.state));
 }

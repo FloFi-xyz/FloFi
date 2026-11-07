@@ -19,6 +19,7 @@ export const portugueseUserFunded: Readonly<Record<string, string>> = {
   'You authorize each group with your own wallet': 'Você autoriza cada grupo com a sua própria carteira',
   'Pay the fees from my own wallet, in one wallet interaction': 'Pagar as taxas com a minha própria carteira, numa única interação da carteira',
   'Pay the fees from my own wallet, in {0} wallet interactions': 'Pagar as taxas com a minha própria carteira, em {0} interações da carteira',
+  'Pay the fees from my own wallet, in at least {0} wallet interactions': 'Pagar as taxas com a minha própria carteira, em pelo menos {0} interações da carteira',
   'Execution groups': 'Grupos de execução',
   'Steps {0}–{1} on {2}': 'Etapas {0}–{1} em {2}',
   'signed now': 'assinado agora', 'signed when it becomes due': 'assinado quando chegar a vez',

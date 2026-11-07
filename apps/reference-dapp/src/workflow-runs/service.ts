@@ -136,8 +136,11 @@ export async function cancelRun(deps: WorkflowRunDeps, run: RunRecord, wallets: 
 /** The owner resumes a HALTED run whose stopped step submitted nothing (e.g. a flow that was disabled is enabled again). */
 export async function resumeRun(deps: WorkflowRunDeps, run: RunRecord, wallets: readonly WalletRef[]): Promise<RunRecord> {
   assertRunWallets(run, wallets);
-  if (run.state === 'HALTED' && run.mode === 'USER_FUNDED') return resumeUserFunded(deps, run);
-  if (run.state !== 'HALTED' || run.mode !== 'CONFIRM_EACH_STEP') refuse(`WORKFLOW_RUN_${run.state}`);
+  // A user-funded run halted at an owner-step group (its step's own flow) resumes exactly as confirm mode; any other group is re-planned.
+  const at = run.mode === 'USER_FUNDED' ? (await deps.store.groups(run.runId)).find(x => x.stepFrom <= run.currentStep && run.currentStep <= x.stepTo) : null;
+  const ownerStepGroup = at?.strategy === 'EVM_OWNER_STEP' || at?.strategy === 'SOLANA_OWNER_STEP';
+  if (run.state === 'HALTED' && run.mode === 'USER_FUNDED' && !ownerStepGroup) return resumeUserFunded(deps, run);
+  if (run.state !== 'HALTED' || (run.mode !== 'CONFIRM_EACH_STEP' && !ownerStepGroup)) refuse(`WORKFLOW_RUN_${run.state}`);
   if (run.expiresAt <= deps.now()) refuse('WORKFLOW_RUN_EXPIRED');
   const step = (await deps.store.steps(run.runId))[run.currentStep];
   if (!step || step.state !== 'BLOCKED') refuse('WORKFLOW_RUN_NOT_RESUMABLE');
@@ -158,6 +161,10 @@ async function resumeUserFunded(deps: WorkflowRunDeps, run: RunRecord): Promise<
   if (run.expiresAt <= deps.now()) refuse('WORKFLOW_RUN_EXPIRED');
   const g = (await deps.store.groups(run.runId)).find(x => x.stepFrom <= run.currentStep && run.currentStep <= x.stepTo);
   if (!g || g.state !== 'BLOCKED') refuse('WORKFLOW_RUN_NOT_RESUMABLE');
+  // Something the owner already signed (a user operation, a batch id, Solana signatures) is never replaced: it may still execute on chain,
+  // and a replacement would run the same steps twice (the database refuses it too). The owner ends the run and, for a user operation,
+  // revokes it from their own wallet.
+  if (g!.authorization) refuse('WORKFLOW_RUN_GROUP_SIGNED');
   if (!await deps.store.transition(run.runId, { version: run.version, from: ['HALTED'] }, 'RUNNING', { code: null }, 'RUN_RESUMED')) refuse('WORKFLOW_RUN_CHANGED');
   const strategy = g!.strategy === 'EVM_USER_OPERATION' ? 'EVM_WALLET_BATCH' as const : g!.strategy === 'SOLANA_DURABLE_NONCE' ? 'SOLANA_SIGN_ALL' as const : g!.strategy;
   await deps.store.groupTransition(run.runId, g!.groupIndex, ['BLOCKED'], 'PLANNED', { strategy, signing: 'WHEN_DUE', prepared: null, authorization: null, validUntil: null, code: null },

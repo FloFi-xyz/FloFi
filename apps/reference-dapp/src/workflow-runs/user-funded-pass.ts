@@ -36,6 +36,8 @@ const OWNER_WAIT_MS = 5 * 60_000, SUBMIT_RETRY_MS = 15_000;
 const TRANSIENT = new Set(['USER_FUNDED_RPC_UNAVAILABLE', 'USER_FUNDED_SOLANA_RPC_UNAVAILABLE', 'USER_OPERATION_BUNDLER_UNAVAILABLE', 'DELEGATION_RPC_UNAVAILABLE',
   'SOLANA_RPC_UNAVAILABLE', 'SOLANA_RPC_RATE_LIMITED']);
 const settled = (run: RunRecord, retryMs: number | null = null, progressed = false, code: string | null = run.code): Pass => ({ state: run.state, code, retryMs, progressed });
+/** A code stored on a group, its steps and its run: the runs/steps/events grammar (a detail after `:` is dropped, never the whole code). */
+const stored = (code: string) => { const head = code.split(':')[0]!; return /^[A-Z][A-Z0-9_]{2,80}$/.test(head) ? head : 'USER_FUNDED_GROUP_REFUSED'; };
 const ownerStep = (g: GroupRecord) => g.strategy === 'EVM_OWNER_STEP' || g.strategy === 'SOLANA_OWNER_STEP';
 
 /** The strategy a grouped step actually executed (its bound amount fixed to what it spent), for its RECONCILED record. */
@@ -53,7 +55,8 @@ export async function userFundedPass(deps: UserFundedPassDeps, run: RunRecord): 
   if (!g) return settled(run);
   if (ownerStep(g)) { const pass = await deps.confirmPass(run); await syncOwnerGroups(deps, run.runId); return pass; }
   const now = deps.now();
-  const block = async (code: string): Promise<Pass> => {
+  const block = async (refusal: string): Promise<Pass> => {
+    const code = stored(refusal);
     await deps.store.groupTransition(run.runId, g.groupIndex, ['PLANNED', 'PREPARED', 'AUTHORIZED'], 'BLOCKED', { code });
     for (let i = g.stepFrom; i <= g.stepTo; i++) await deps.store.stepTransition(run.runId, i, ['DELEGATED'], 'BLOCKED', { code });
     const partial = steps.some(s => s.stepIndex < g.stepFrom && s.state === 'RECONCILED');
@@ -158,7 +161,7 @@ async function submittedGroup(deps: UserFundedPassDeps, run: RunRecord, g: Group
     if (r.status === 'RECONCILED' || done)
       await deps.store.stepTransition(run.runId, i, ['DELEGATED', 'UNCERTAIN'], 'RECONCILED', { outcome: outcomeOf(i, 'RECONCILED'), code: null, ...resolved });
     else if (steps[i]!.state === 'DELEGATED' || steps[i]!.state === 'UNCERTAIN')
-      await deps.store.stepTransition(run.runId, i, ['DELEGATED', 'UNCERTAIN'], 'FAILED', { outcome: outcomeOf(i, 'FAILED'), code: r.status === 'FAILED' ? r.code : null });
+      await deps.store.stepTransition(run.runId, i, ['DELEGATED', 'UNCERTAIN'], 'FAILED', { outcome: outcomeOf(i, 'FAILED'), code: r.status === 'FAILED' ? stored(r.code) : null });
   }
   const groupOutcome = { status: r.status, transactions: r.transactions, gasPaid: r.gasPaid, steps: facts, observedAt };
   if (r.status === 'RECONCILED') {
@@ -166,22 +169,27 @@ async function submittedGroup(deps: UserFundedPassDeps, run: RunRecord, g: Group
     deps.log('workflow_run.group_reconciled', { run: run.runId, group: g.groupIndex, gasPaid: r.gasPaid.amount });
     return afterGroup(deps, (await deps.store.byId(run.runId))!, g);
   }
-  await deps.store.groupTransition(run.runId, g.groupIndex, ['SUBMITTED', 'UNCERTAIN'], 'FAILED', { outcome: groupOutcome, code: r.code });
+  await deps.store.groupTransition(run.runId, g.groupIndex, ['SUBMITTED', 'UNCERTAIN'], 'FAILED', { outcome: groupOutcome, code: stored(r.code) });
   const partial = facts.length > 0 || steps.some(s => s.stepIndex < g.stepFrom && s.state === 'RECONCILED');
   const fresh = (await deps.store.byId(run.runId))!;
-  const moved = await deps.store.transition(run.runId, { version: fresh.version, from: ['RUNNING', 'ATTENTION'] }, partial ? 'HALTED' : 'FAILED', { code: r.code });
+  const moved = await deps.store.transition(run.runId, { version: fresh.version, from: ['RUNNING', 'ATTENTION'] }, partial ? 'HALTED' : 'FAILED', { code: stored(r.code) });
   deps.log('workflow_run.group_failed', { run: run.runId, group: g.groupIndex, code: r.code });
   return moved ? settled(moved) : { ...settled(fresh), progressed: true };
 }
 
-/** Bookkeeping only: an owner-step group becomes RECONCILED/FAILED with its step (whose own flow carries the evidence), whenever that happened. */
+/**
+ * Bookkeeping only: an owner-step group (one or more steps, each through its own flow) becomes FAILED when one of its steps failed, and
+ * RECONCILED only once EVERY step reconciled; its steps' own flows carry the evidence.
+ */
 async function syncOwnerGroups(deps: UserFundedPassDeps, runId: string): Promise<void> {
   const groups = await deps.store.groups(runId), steps = await deps.store.steps(runId);
   for (const og of groups.filter(x => ownerStep(x) && x.state === 'PLANNED')) {
-    const step = steps[og.stepFrom];
-    if (step && (step.state === 'RECONCILED' || step.state === 'FAILED') && step.outcome)
-      await deps.store.groupTransition(runId, og.groupIndex, ['PLANNED'], step.state, { outcome: { status: step.state, transactions: step.outcome.transactions,
-        steps: [og.stepFrom] } });
+    const mine = steps.filter(s => s.stepIndex >= og.stepFrom && s.stepIndex <= og.stepTo);
+    const failed = mine.some(s => s.state === 'FAILED'), all = mine.length === og.stepTo - og.stepFrom + 1 && mine.every(s => s.state === 'RECONCILED' && s.outcome);
+    if (!failed && !all) continue;
+    const state = failed ? 'FAILED' : 'RECONCILED';
+    await deps.store.groupTransition(runId, og.groupIndex, ['PLANNED'], state, { outcome: { status: state,
+      transactions: mine.flatMap(s => s.outcome?.transactions ?? []), steps: mine.filter(s => s.outcome).map(s => s.stepIndex) } });
   }
 }
 /** A reconciled group: the run moves past its last step, or completes (written once). */
