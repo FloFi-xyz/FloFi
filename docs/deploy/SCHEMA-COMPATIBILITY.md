@@ -778,3 +778,45 @@ rows, the 0006 identity rule and 0015's immutability still refusing unsafe rows,
 `packages/cloud-runtime/test/fixtures/0022_editor_requester.sql`.
 
 **Release order.** Covered by the single certificate of §15 (0021 and 0022 together, base 0020). No production migration or release was performed during engineering.
+
+## 17. Certificate 0023_user_funded_groups
+
+| Base | Certified forward migration | SHA-256 |
+| --- | --- | --- |
+| 0022 `editor_requester` (`f5b05c8b…6d43`) | 0023 `user_funded_groups` | `f9b7cfd389ea9d340165eec47d617ef3832ed38a269208a451040da196331371` |
+
+Migration 0023 (BUILD-FLOFI-UNIVERSAL-WORKFLOW-002) is additive and changes no row:
+- `workflow_runs_mode_check` (0015's column check) also admits `USER_FUNDED`: a run whose execution groups the owner's own wallet authorizes
+  and pays for (invariant S1: FloFi never funds user gas).
+- `workflow_runs_check3` (0015's mode/authorization co-constraint, verified by name and definition on the production catalog before release)
+  also admits `mode = 'USER_FUNDED' AND authorization_id IS NULL`: nothing is delegated to FloFi in that mode, so it has no delegated authorization.
+- New table `workflow_run_groups` (FK to `workflow_runs`), its index `workflow_run_groups_due`, two new functions with their triggers
+  (`workflow_run_group_insert`: the run must be USER_FUNDED and every group's `fee_payer` must equal the run's own wallet of that namespace,
+  else `GAS_PAYER_NOT_OWNER`; `workflow_run_group_transition`: identity, fee payer and step range frozen, what the owner signed frozen once
+  authorized, a submission written once, closed transitions) and the existing 0015 `workflow_run_append_only()` reused as its no-delete trigger.
+- Grouped steps reuse 0015's existing step state `DELEGATED` and its existing transitions. `workflow_run_steps`, its trigger and every other
+  pre-existing function, trigger and index are unchanged.
+
+Every row valid under 0022 is valid under 0023 unchanged, so the two `ADD CONSTRAINT` validation scans cannot fail on existing data.
+
+A build without 0023 (v22) runs unchanged on schema 23, including on rows written by a build with it:
+- it never writes `USER_FUNDED` and never reads `workflow_run_groups`, so nothing it writes can violate a widened constraint;
+- its runner treats a `USER_FUNDED` run like confirm mode: a grouped step (state `DELEGATED`) falls through its `default` branch (no move), and
+  its `currentStep` loads a step only for `CONFIRM_EACH_STEP` runs. So a v22 build never loads, signs, relays or submits anything of a
+  user-funded run: the run waits (fail closed) until a build with 0023 serves it again;
+- its cancellation refuses a run with a `DELEGATED` step (`WORKFLOW_RUN_STEP_IN_FLIGHT`), so it cannot end a run whose group may be in flight.
+- Status reads by the run's proven owner still work (`mode` is shown as stored).
+
+**Locks.** `SET LOCAL lock_timeout = '5s'`. Each constraint is dropped and re-added in one `ALTER TABLE` statement inside the migration's single
+transaction (the shape 0010/0022 used): a short ACCESS EXCLUSIVE lock on `workflow_runs`, one validation scan of a small table. The new table is
+created empty.
+
+`user-funded-groups-migration.pg.test.ts` checks the exact bytes, every earlier row surviving unchanged, the widened definitions, a USER_FUNDED run
+with groups, the fee-payer rule refusing any wallet but the run's own, the group transition and immutability rules, and atomic rollback. The exact
+SQL is also kept as `packages/cloud-runtime/test/fixtures/0023_user_funded_groups.sql`.
+
+**Release order.** Release A is the certificate `{ base: 0022 editor_requester, migrations: [0023 user_funded_groups] }` with the exact bytes,
+released from main (newest shipped migration 0022) and deployed to every database consumer (Vercel, Railway API, Railway worker) before this build
+migrates. It is the first commit of this build's branch so it can be cherry-picked on its own. Without Release A there is no application rollback
+once 0023 is applied: the previous commit refuses schema 23 (`MIGRATION_HISTORY_MISMATCH`). No production migration or release was performed
+during engineering.
