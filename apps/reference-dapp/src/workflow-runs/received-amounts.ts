@@ -58,8 +58,10 @@ export function amountsFromOwnerRecord(record: unknown): OwnerAmounts {
   // Universal bridge: destination delivery amount + route token identities. BUILD-FLOFI-UNIVERSAL-WORKFLOW-002: only a delivery the flow
   // reconciled counts (a DIVERGENT, FAILED or REFUNDED record delivered nothing a later step may spend), and the delivery's recipient is
   // reported so the run can refuse a delivery to anyone but its own wallet of the destination network.
-  if (typeof record.received === 'string' && units(record.received) && isObject(record.review) && isObject(record.review.route)
-    && (record.verdict === undefined || record.verdict === 'RECONCILED')) {
+  // A universal-router record always carries its verdict: anything but RECONCILED (pending, divergent, failed, refunded) delivered nothing a
+  // step may count, and must not fall through to an older record shape below that would read its destination amount without a verdict.
+  if (typeof record.received === 'string' && isObject(record.review) && isObject(record.review.route) && record.verdict !== 'RECONCILED') return { spent: [], received: [] };
+  if (typeof record.received === 'string' && units(record.received) && isObject(record.review) && isObject(record.review.route)) {
     const route = record.review.route, out = isObject(route.outputToken) ? route.outputToken : null, inn = isObject(route.inputToken) ? route.inputToken : null;
     const received: FlowAmount[] = [];
     const spent: FlowAmount[] = [];

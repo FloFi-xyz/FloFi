@@ -20,6 +20,10 @@ describe('BUILD-FLOFI-UNIVERSAL-WORKFLOW-002 bridge delivery facts', () => {
   });
   it('a refunded, divergent or failed bridge delivered nothing a later step may spend (never the quote)', () => {
     for (const verdict of ['REFUNDED', 'DIVERGENT', 'FAILED', 'PENDING']) expect(amountsFromOwnerRecord(record({ verdict })).received).toEqual([]);
+    // Never through an older record shape: a pending universal record that also carries a destination amount, or one without a verdict.
+    const destination = { transferAmount: '24848243', chainId: 'eip155:8453', token: '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913' };
+    expect(amountsFromOwnerRecord(record({ verdict: 'PENDING', destination })).received).toEqual([]);
+    expect(amountsFromOwnerRecord(record({ verdict: undefined, destination })).received).toEqual([]);
     // Without a delivery there is nothing to bind, whatever the route's expected or minimum output was.
     expect(amountsFromOwnerRecord(record({ received: null })).received).toEqual([]);
   });

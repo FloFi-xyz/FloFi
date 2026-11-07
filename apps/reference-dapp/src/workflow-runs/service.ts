@@ -197,13 +197,19 @@ export async function startUserFunded(deps: WorkflowRunDeps, run: RunRecord, wal
   await advanceRun(runnerDeps(deps), run.runId);
   return (await deps.store.byId(run.runId))!;
 }
-/** Reconciled facts that fund a group's bound steps: received by each earlier producer, minus what earlier consumers already used. */
+/**
+ * Reconciled facts that fund a group's bound steps: received by the producer, minus what earlier consumers of it used — the SAME rule as
+ * confirm mode (runner.ts): an earlier consumer's approved/signed amount is reserved unless its reconciled record proves it spent less, so
+ * missing spend evidence can never unlock the owner's unrelated balance.
+ */
 function reconciledAvailable(steps: readonly RunStepRecord[], producer: number, asset: string, before: number): bigint {
   const received = (steps[producer]?.outcome?.received ?? []).filter(r => r.asset === asset).reduce((sum, r) => sum + BigInt(r.amount), 0n);
-  const used = steps.filter(s => s.stepIndex > producer && s.stepIndex < before).reduce((sum, s) => {
-    const bound = [s.bound, ...s.bound?.additional ?? []].filter(b => b && b.amountFrom === producer && assetKey({ chain: b.asset.chainId, address: b.asset.address }) === asset);
-    const spent = (s.outcome?.spent ?? []).filter(x => x.asset === asset).reduce((t, x) => t + BigInt(x.amount), 0n);
-    return sum + (bound.length ? spent : 0n);
+  const used = steps.filter(s => s.stepIndex > producer && s.stepIndex < before && s.bound).reduce((sum, s) => {
+    const bound = [s.bound!, ...s.bound!.additional ?? []].filter(b => b.amountFrom === producer && assetKey({ chain: b.asset.chainId, address: b.asset.address }) === asset);
+    if (!bound.length) return sum;
+    const reserved = bound.reduce((t, b) => t + BigInt(b.used), 0n);
+    const facts = (s.outcome?.spent ?? []).filter(x => x.asset === asset), spent = facts.reduce((t, x) => t + BigInt(x.amount), 0n);
+    return sum + (facts.length && spent < reserved ? spent : reserved);
   }, 0n);
   return received > used ? received - used : 0n;
 }
