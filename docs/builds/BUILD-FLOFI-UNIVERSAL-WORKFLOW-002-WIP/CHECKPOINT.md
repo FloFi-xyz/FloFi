@@ -1,4 +1,38 @@
-# BUILD-FLOFI-UNIVERSAL-WORKFLOW-002 — WIP checkpoint (handoff)
+# BUILD-FLOFI-UNIVERSAL-WORKFLOW-002 — checkpoint (handoff)
+
+## 0. Current state (session 2, 2026-11-07) — READ THIS FIRST
+
+Implemented, committed and pushed on `claude/friendly-lamport-r1z0ac` (see `git log 3bdfe07..HEAD`):
+- **Release A** certificate (base 0022 → 0023) as its own first commit; **migration 0023** (`USER_FUNDED` mode, `workflow_run_groups`,
+  DB-checked fee payer = run wallet) + PostgreSQL suite; SCHEMA-COMPATIBILITY §17.
+- **S1 gate**: executor transport has no send method; executor refuses every step before simulation (`EXECUTOR_GAS_PAYER_REFUSED`);
+  `prepareSubmission` refuses session-paid bytes; nonce fillers removed; `operations.ts` refuses new executor-paid authority
+  (`EXECUTOR_FUNDED_GAS_RETIRED`). Executor/adversarial/compatibility/delegated-run suites rewritten as refusal proofs (explained in commits).
+- **User-funded engine**: `workflow-runs/execution-groups.ts` (planner + honest counts), `user-funded/{evm-calls,evm-reconcile,groups,runtime}.ts`,
+  runner `user-funded-pass.ts`, store/service/approve-surface ops (start/prepare/authorize/report), RunView groups, plan `userFunded`
+  section, browser `components/user-funded-browser.ts` (EIP-5792, user-op typed data, Solana sign-all) + run panel + PT copy.
+- **Cross-chain hardening**: bridge deliveries count only when RECONCILED and delivered to the run's own wallet; refunded bridge → FAILED.
+- **Chat ↔ Canvas**: `editor/workflow-strategy.ts canvasWorkflowOfStrategy` (one Canvas workflow, same canonical hash); approval preview uses it.
+- Matrices regenerated (delegated row retired, user-funded row added, EVM↔Solana bridge row corrected); coverage.json mapped (agent_guard check PASS).
+- Docs: `docs/adr/ADR-0008-user-funded-execution.md`, `docs/deploy/USER-FUNDED-EXECUTION.md` (runbook incl. KMS disposition and rollback),
+  `docs/builds/BUILD-FLOFI-UNIVERSAL-WORKFLOW-002-CAPABILITY-MATRIX.md`; PR #166 activation runbook marked superseded.
+
+Production facts verified READ-ONLY (Neon `Flofi` project `wandering-mode-28938220`, default branch): schema at 0022; zero credential
+grants / delegated authorizations / executions / delegation work items ever; 2 automation rules both `CONFIRM_EACH_TIME` + `PAUSED`; 1 run
+`CONFIRM_EACH_STEP/HALTED`; constraint names `workflow_runs_mode_check` and `workflow_runs_check3` present. Delegation was configured on
+Railway (owner report) but never used.
+
+Not done / honest limits: no mainnet transaction; Solana durable-nonce groups not offered (builders need balances to simulate);
+bridges are not batched (own flow); Privy cannot batch (owner-step); no percentage/remaining vocabulary; PG16 locally (CI uses PG18:
+one 0015 forward-compat case expects PG18 named NOT NULL constraints).
+
+Environment for a fresh session: Node 24.21.0 is NOT preinstalled — download from nodejs.org (sha-verified) to `/opt/node24dl`, then
+`corepack enable pnpm`; `pg_ctlcluster 16 main start`; role `flofi` / `TEST_DATABASE_URL=postgres://flofi:flofi-local-test@127.0.0.1:5432/postgres`;
+run vitest from the REPO ROOT (root `vitest.config.ts` sets `FLOFI_NETWORK_SCOPE`); app typecheck needs `NODE_OPTIONS=--max-old-space-size=6144`.
+
+---
+
+## Session 1 checkpoint (historical)
 
 **Status: WORK IN PROGRESS. Nothing here is production-ready, nothing was deployed, no migration exists yet, no mainnet transaction was sent.**
 This checkpoint lets a fresh session continue without the original conversation. Read this file, then the three maps in `maps/`.
