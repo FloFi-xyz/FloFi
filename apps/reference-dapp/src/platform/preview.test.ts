@@ -193,3 +193,34 @@ describe('P0-E: simulation admission waits briefly for a slot instead of refusin
     expect(await waiting).toBe('PREVIEW_DONE');
   });
 });
+
+describe('P0-E review fixes: the admission queue never strands a waiter or exceeds its bound', () => {
+  it('a slot that frees while a queued caller awaits its budget is taken, and later callers are not queued behind it', async () => {
+    process.env.FLOFI_SIMULATION_CONCURRENCY = '1'; process.env.FLOFI_SIMULATION_WAIT_MS = '2000';
+    const r = blockingRuntime();
+    const held = codeOf(simulatePreview(r.runtime, request));
+    await settle();
+    const slowBudget = async () => { r.release(); await new Promise(resolve => setTimeout(resolve, 50)); return true; };
+    const started = Date.now();
+    const b = codeOf(simulatePreview(r.runtime, request, { budget: slowBudget }));
+    expect(await held).toBe('PREVIEW_DONE');
+    expect(await b).toBe('PREVIEW_DONE');
+    expect(await codeOf(simulatePreview(r.runtime, request))).toBe('PREVIEW_DONE');
+    expect(Date.now() - started).toBeLessThan(1_000);
+    expect(r.calls()).toBe(3);
+  });
+  it('callers that pass the waiting check together while awaiting their budgets never exceed 8 waiting', async () => {
+    process.env.FLOFI_SIMULATION_CONCURRENCY = '1'; process.env.FLOFI_SIMULATION_WAIT_MS = '2000';
+    const r = blockingRuntime();
+    const held = codeOf(simulatePreview(r.runtime, request));
+    await settle();
+    const budget = () => new Promise<boolean>(resolve => setTimeout(() => resolve(true), 20));
+    const many = Array.from({ length: 12 }, () => codeOf(simulatePreview(r.runtime, request, { budget })));
+    await settle(); await settle();
+    expect(waitingSimulationCount()).toBe(8);
+    r.release();
+    const codes = await Promise.all([held, ...many]);
+    expect(codes.filter(code => code === 'SIMULATION_BUSY')).toHaveLength(4);
+    expect(codes.filter(code => code === 'PREVIEW_DONE')).toHaveLength(9);
+  });
+});

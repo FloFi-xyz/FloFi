@@ -74,17 +74,19 @@ describe('P0 catalog reliability: an abandoned caller never holds the shared pac
     const read = rpc('eth_call', [], { signal: gone.signal });
     setTimeout(() => gone.abort(), 50);
     await expect(read).rejects.toThrow(/PUBLIC_RPC_UNAVAILABLE|RPC_READ_ABANDONED/);
-    // Six retries would back off for 31.5 s; the abandoned read ends right after its caller leaves.
-    expect(Date.now() - started).toBeLessThan(2_000);
+    // Six retries would back off for 31.5 s, and the first pause alone is 500 ms: the abandoned read ends right after its caller leaves.
+    expect(Date.now() - started).toBeLessThan(400);
     expect(calls).toBeLessThanOrEqual(2);
   });
   it('the node client cancels a read in flight when its caller stops waiting', async () => {
     vi.spyOn(globalThis, 'fetch').mockImplementation(async (_input, init) => new Promise<Response>((_resolve, reject) => {
       init?.signal?.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError')));
     }));
-    const gone = new AbortController();
-    const read = createBaseSepoliaReadRpc('https://fixture.invalid', ['eth_call'])('eth_call', [], { signal: gone.signal });
-    gone.abort();
+    const gone = new AbortController(), started = Date.now();
+    // A client timeout far beyond the test's patience: only the caller's cancellation can end this read quickly.
+    const read = createBaseSepoliaReadRpc('https://fixture.invalid', ['eth_call'], 60_000)('eth_call', [], { signal: gone.signal });
+    setTimeout(() => gone.abort(), 20);
     await expect(read).rejects.toThrow(READ_ABANDONED);
+    expect(Date.now() - started).toBeLessThan(2_000);
   });
 });

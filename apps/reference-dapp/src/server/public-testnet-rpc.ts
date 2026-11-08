@@ -159,20 +159,26 @@ export function pacedReadRpc(rpc: Rpc, options: { minIntervalMs?: number; retrie
 function concurrentPacedRpc(rpc: Rpc, minIntervalMs: number, retries: number, sleep: (ms: number) => Promise<void>, maxInFlight: number): Rpc {
   let last = 0, pausedUntil = 0, active = 0;
   const waiting: (() => void)[] = [];
-  const acquire = async () => {
+  // P0 catalog reliability (review): a read whose caller left never takes a slot or a pacing turn, and a wake-up it received is passed on to the
+  // next waiter, so an abandoned read cannot stall a live one.
+  const acquire = async (context: RpcContext | undefined) => {
     for (;;) {
+      if (abandoned(context)) throw new Error(READ_ABANDONED);
       if (active < maxInFlight) {
         const wait = Math.max(last + minIntervalMs, pausedUntil) - Date.now();
         if (wait <= 0) { active++; last = Date.now(); return; }
-        await sleep(wait);
-      } else await new Promise<void>(resolve => waiting.push(resolve));
+        await backoff(sleep, wait, context);
+      } else {
+        await new Promise<void>(resolve => waiting.push(resolve));
+        if (abandoned(context)) { waiting.shift()?.(); throw new Error(READ_ABANDONED); }
+      }
     }
   };
   const release = () => { active--; waiting.shift()?.(); };
   return async (method, params, context) => {
     for (let attempt = 0; ; attempt++) {
-      if (abandoned(context)) throw new Error(READ_ABANDONED);
-      await acquire();
+      await acquire(context);
+      // Last moment: the caller may have left while this read was being admitted.
       if (abandoned(context)) { release(); throw new Error(READ_ABANDONED); }
       try { return await rpc(method, params, context); }
       catch (cause) {

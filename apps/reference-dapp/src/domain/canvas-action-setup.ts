@@ -227,7 +227,9 @@ export function canvasAmountCommand(state: EditorState, setup: CanvasActionSetup
       return JSON.stringify({ ...node,
         inputs: node.inputs.map(input => input.name === 'amount-in' && input.kind === 'QUANTITY' ? { ...input, value: { ...input.value, amount: null } } : input),
         userConstraints: node.userConstraints.map(c => c.kind === 'MAXIMUM_INPUT' ? { ...c, quantity: { ...c.quantity, amount: null } } : c),
-        expectedOutputs: node.expectedOutputs.map(output => amountIn && output.minimumAmount === amountIn.value.amount ? { ...output, minimumAmount: 'AMOUNT_IN' } : output) });
+        expectedOutputs: node.expectedOutputs.map(output => amountIn && output.minimumAmount === amountIn.value.amount ? { ...output, minimumAmount: 'AMOUNT_IN' } : output),
+        // The amount's editing ceiling is max(amount, the constructor's constant): amount-derived for a very large amount (review fix).
+        editableBounds: node.editableBounds.map(bound => bound.parameterName === 'amount-in' ? { ...bound, maximumAmount: null } : bound) });
     };
     if (after && after.actionType === 'asset.swap.exact-input' && swapShape(after) !== swapShape(amountOnly.before)) throw new Error('ACTION_EDIT_CHANGES_SETTINGS');
     if (!after || after.chainId !== amountOnly.before.chainId || after.actionType !== amountOnly.before.actionType ||

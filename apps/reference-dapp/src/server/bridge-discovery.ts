@@ -11,9 +11,10 @@ import type { FlowResult } from './cloud-api-client.ts';
  * `window` CONVERSATIONAL (chat tools) closes the discovery window under the tool's own time limit (BUILD-FLOFI-EXECUTION-PERFORMANCE-001).
  */
 export async function readBridgeDiscovery(request: unknown, env: Readonly<Record<string, string | undefined>> = process.env,
-  correlationId?: string, window: 'STANDARD' | 'CONVERSATIONAL' = 'STANDARD'): Promise<FlowResult<DiscoveryResult>> {
+  correlationId?: string, window: 'STANDARD' | 'CONVERSATIONAL' = 'STANDARD', signal?: AbortSignal): Promise<FlowResult<DiscoveryResult>> {
   const parsed = parseDiscoveryRequest(request);
-  const options = { env, principal: null, timeoutMs: 30_000, maxAttempts: 1, ...correlationId ? { correlationId } : {} };
+  // P0 catalog reliability: a superseded Bridge-card estimate stops the BFF's wait and its API request (route discovery is read-only).
+  const options = { env, principal: null, timeoutMs: 30_000, maxAttempts: 1, ...correlationId ? { correlationId } : {}, ...signal ? { signal } : {} };
   let cloud = await cloudFlow<DiscoveryResult>('crosschain-universal', 'discover', window === 'CONVERSATIONAL' ? [request, window] : [request], options);
   // Deploy skew: an API from before the discovery window accepts the request alone. It answers with its own (standard) window, so a slow provider may
   // still reach the tool's limit, but route discovery keeps working while the web build is ahead of the API.

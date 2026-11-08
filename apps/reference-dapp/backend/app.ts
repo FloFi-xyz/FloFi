@@ -170,7 +170,7 @@ export function createBackend(options: BackendOptions) {
    *   dropped by the paced transport instead of being sent;
    * - its deadline is the caller's own (`options.deadlineMs`), never longer than the process limit (`previewTimeoutMs`, default 80 s).
    */
-  const inflightPreviews = new Map<string, { readonly result: Promise<FlowResult>; waiters: number; settled: boolean; readonly abandon: () => void }>();
+  const inflightPreviews = new Map<string, { readonly result: Promise<FlowResult>; waiters: number; settled: boolean; readonly abandon: (code: string) => void }>();
   async function previewFlow(flow: FlowName, args: readonly unknown[], purpose: PreviewPurpose = 'SIMULATION',
     callOptions: { readonly signal?: AbortSignal; readonly deadlineMs?: number } = {}): Promise<FlowResult> {
     if (purpose !== 'SIMULATION' && purpose !== 'QUOTE') return { ok: false, code: 'ARGUMENTS_INVALID' };
@@ -191,6 +191,8 @@ export function createBackend(options: BackendOptions) {
     if (shared) logger.info('flow.preview_coalesced', { flow, action: method, purpose });
     else {
       const abandoned = new AbortController();
+      // Why the computation stopped before answering: every caller left (ABANDONED) or the last one's own deadline passed (TIMEOUT).
+      let stopCode = 'CLOUD_PREVIEW_ABANDONED';
       // The computation runs at most to the process limit; each caller stops waiting at its own deadline, and the computation is abandoned
       // as soon as no caller waits any more (whatever the reason), so a caller that joins later never inherits an earlier caller's deadline.
       const result = withSpan(logger, 'flow.preview', { flow, action: method, purpose }, async (): Promise<FlowResult> => {
@@ -203,7 +205,7 @@ export function createBackend(options: BackendOptions) {
           abandoned.abort();
           logger.warn('flow.preview_timeout', { flow, action: method, deadline_ms: limit });
         }, limit); });
-        const gone = new Promise<FlowResult>(resolve => abandoned.signal.addEventListener('abort', () => resolve({ ok: false, code: 'CLOUD_PREVIEW_ABANDONED' }), { once: true }));
+        const gone = new Promise<FlowResult>(resolve => abandoned.signal.addEventListener('abort', () => resolve({ ok: false, code: stopCode }), { once: true }));
         try {
           // Inside the try: a transport that cannot be built (e.g. an invalid RPC URL) is this preview's classified refusal, never a rejection.
           const deps = previewTransport(depsFor(flow, true), abandoned.signal);
@@ -211,16 +213,17 @@ export function createBackend(options: BackendOptions) {
             : await definition.create(previewStorage(), deps, {}).call(method, args) }) as const)()]);
         }
         catch (error) {
-          if (abandoned.signal.aborted) return { ok: false, code: 'CLOUD_PREVIEW_ABANDONED' };
+          if (abandoned.signal.aborted) return { ok: false, code: stopCode };
           if (!(error instanceof Error && CODE.test(error.message))) logger.warn('flow.unclassified_error', { flow, action: method });
           if (flow === 'crosschain-universal') return reportUniversalFailure(error, method, fields => logger.warn('bridge.operation_failed', fields));
           return { ok: false, code: error instanceof Error && CODE.test(error.message) ? error.message : definition.unavailableCode } as const;
         }
         finally { clearTimeout(timer); }
       });
-      const entry = { result, waiters: 0, settled: false, abandon: () => {
+      const entry = { result, waiters: 0, settled: false, abandon: (code: string) => {
         // Removed at once, so no later caller joins a computation that is being abandoned.
         if (key && inflightPreviews.get(key) === entry) inflightPreviews.delete(key);
+        stopCode = code;
         abandoned.abort();
       } };
       shared = entry;
@@ -242,7 +245,11 @@ export function createBackend(options: BackendOptions) {
         if (left) return;
         left = true; clearTimeout(timer); callOptions.signal?.removeEventListener('abort', onAbort);
         entry.waiters--;
-        if (entry.waiters === 0 && !entry.settled) { logger.info('flow.preview_abandoned', { flow, action: method }); entry.abandon(); }
+        if (entry.waiters === 0 && !entry.settled) {
+          const timedOut = answer?.ok === false && answer.code === 'CLOUD_PREVIEW_TIMEOUT';
+          if (!timedOut) logger.info('flow.preview_abandoned', { flow, action: method });
+          entry.abandon(timedOut ? 'CLOUD_PREVIEW_TIMEOUT' : 'CLOUD_PREVIEW_ABANDONED');
+        }
         resolve(answer ?? { ok: false, code: 'CLOUD_PREVIEW_ABANDONED' });
       };
       const onAbort = () => leave(null);

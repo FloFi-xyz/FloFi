@@ -61,6 +61,24 @@ Two items need owner action outside the code: the Vercel `FLOFI_WORKFLOW_RUNS` g
 - Fixed (swap): the amount-edit guard compares the whole swap node with only the amount fields masked (a WETH9 wrap's 1:1 minimum counts as amount-derived). New cases cover native ETH, a WETH9 wrap, a Base non-reference pair, a Stock Token and the guard's refusal. A quote that arrives after the browser cancelled is never published. Previews that differ in amount, subject or purpose are not shared. The journey metric counts a shared request once (that test fails without the fix).
 - Known, not changed: when a card's own 45 s timeout fires while another card still waits on the same request, the first card shows "timed out" and the second may later show the quote. The next edit or refresh reconciles them.
 
+**Third round: adversarial review workflow over the full diff.** Six independent lenses (async, authority, editor, catalog, claims, tests) each searched the diff. Every finding was then handed to a separate skeptic told to refute it, and a completeness critic reviewed what nobody had examined. 21 findings survived refutation and the critic added 3; after de-duplication, 19 distinct items. All are fixed:
+- **Major:** the simulation admission queue could strand a waiter. If every slot freed while a queued caller awaited its budget (a database round trip for MCP), that caller and everyone after it waited out the full wait and got `SIMULATION_BUSY` while every slot was free. Fixed: slots and the waiting bound are re-checked after the budget, and freed slots are handed out in a dispatch loop. Two tests reproduce the scenario and fail without the fix.
+- **Fixed, cancellation:**
+  - The Aave client now stops between attempts, ends its pause early and cancels its request in flight when abandoned (the earlier report text claimed this before it was true).
+  - The Solana client drops reads queued for an abandoned preview.
+  - On the dedicated-profile pacer, an abandoned waiter neither takes a slot nor swallows the next waiter's wake-up.
+  - Bridge-card estimates forward the browser's cancellation to the BFF's route-discovery call. The API-side discovery itself still runs to completion (it is a flow call, not a preview).
+- **Fixed, logging:**
+  - The API `http.request` span and the web `quote.endpoint` span now see the result, so refusals are logged `refused` there too.
+  - A preview stopped at its caller's deadline is recorded as `CLOUD_PREVIEW_TIMEOUT`, not as abandoned.
+- **Fixed, behaviour and text:**
+  - The amount guard also masks the amount-derived editing ceiling.
+  - A Router → Universal conversion shows the route replacement and the previous amount.
+  - The PT messages name the visible "Definições" button.
+  - The MCP hint follows the field's own action, so a planning goal lists every network.
+  - The env reference now gives the budget order, the `/approve` user-funded RPC exception and Solana's exclusion from the dedicated read profile.
+- **Fixed, tests:** four tests that passed with their fix reverted now fail without it. These are the contention read count, backoff timing, in-flight fetch cancellation and the not-shared previews.
+
 ## D. Performance
 
 | Measurement | Before | After | Source |

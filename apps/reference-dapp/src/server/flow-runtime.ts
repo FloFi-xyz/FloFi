@@ -107,7 +107,9 @@ export function embeddedRuntime(env: Env = process.env): Promise<EmbeddedRuntime
  */
 export async function cloudFlow<T>(flow: FlowName, method: string, args: readonly unknown[],
   options: { readonly principal?: string | null; readonly env?: Env; readonly transport?: typeof fetch;
-    readonly timeoutMs?: number; readonly maxAttempts?: number; readonly correlationId?: string } = {}):
+    readonly timeoutMs?: number; readonly maxAttempts?: number; readonly correlationId?: string;
+    /** P0 catalog reliability: the caller stopped waiting (read-only calls only; a mutating call's outcome is then UNKNOWN, see callCloudFlow). */
+    readonly signal?: AbortSignal } = {}):
   Promise<FlowResult<T> | null> {
   const env = options.env ?? process.env, kind = flowRuntimeKind(env), principal = options.principal ?? null;
   // BUILD-FLOFI-MAINNET-PRODUCT-001: every server action passes here first, whichever runtime then serves it (local services included).

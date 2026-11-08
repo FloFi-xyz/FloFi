@@ -7,7 +7,7 @@ import { editorReducer, type EditorState } from './editor';
 import type { Command } from './commands';
 import { swapDetails } from './swap-authoring';
 import { bridgeDetails } from './bridge-authoring';
-import { universalBridgeDetails } from './universal-bridge-authoring';
+import { UNIVERSAL_BRIDGE_ROUTING_LABEL, universalBridgeDetails } from './universal-bridge-authoring';
 import { liquidityDetails } from '@defi-workflow-engine/reference-linter';
 import { solanaLiquidityDetails } from './solana-liquidity-authoring';
 import { uniswapLiquidityDetails } from './uniswap-liquidity-authoring';
@@ -103,9 +103,12 @@ export function describeProposal(before: EditorState, after: EditorState, comman
   // P0 catalog reliability: a Universal Router bridge (any of the five mainnets, Solana included) is described by its own route. It also matches the
   // legacy reader below, whose text is the BUILD-008 Base → Optimism bridge, so it is checked first.
   const universal = newNode && universalBridgeDetails(newNode), universalBefore = oldNode && universalBridgeDetails(oldNode);
+  // Review fix: a certified Router bridge converted to a Universal Router bridge says so, with its previous amount.
+  const routerBefore = universal && oldNode ? routerDetails(oldNode) : null;
   if (universal) return Object.freeze([`Revision ${before.workflow.revision} → ${after.workflow.revision}`,
     `Node ${newNode?.nodeId}: cross-chain bridge ${universal.sourceLabel} ${universal.inputSymbol} → ${universal.destinationLabel} ${universal.outputSymbol} (Universal Cross-chain Router)`,
-    `Amount: ${universalBefore?.amount ?? 'none'} → ${universal.amount} ${universal.inputSymbol}; slippage ${universal.slippage} bps`,
+    ...routerBefore ? [`Route: the certified Cross-chain Router route is replaced by the Universal Cross-chain Router (${ROUTER_ROUTING_LABEL[routerBefore.routing]} → ${UNIVERSAL_BRIDGE_ROUTING_LABEL[universal.routing]})`] : [],
+    `Amount: ${universalBefore?.amount ?? routerBefore?.amount ?? 'none'} → ${universal.amount} ${universal.inputSymbol}; slippage ${universal.slippage} bps`,
     `Recipient on ${universal.destinationLabel}: ${universal.recipient || 'the connected wallet for that network, bound at Review'}`,
     'Real funds on mainnet. A fresh route, transaction simulation and route-bound Manifest review are required before any wallet request.']);
   const bridge = newNode && bridgeDetails(newNode);

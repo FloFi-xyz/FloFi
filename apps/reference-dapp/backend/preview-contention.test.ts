@@ -55,7 +55,8 @@ describe('P0 catalog reliability: a live quote does not wait for quotes nobody i
     // Deterministic: without cancellation the node served every read of the four superseded quotes plus the live one; with it, only the live
     // quote's reads and at most the few superseded reads already started before the cancellation.
     expect(before.readsAfterAlone).toBe(5 * before.readsAlone);
-    expect(after.readsAfterAlone).toBeLessThan(2 * after.readsAlone);
+    // Review fix: at most the one read already in flight when the superseded quotes were cancelled; queued reads that were not dropped would add ≥ 3.
+    expect(after.readsAfterAlone).toBeLessThanOrEqual(after.readsAlone + 1);
     // Timing (loose, CI-load tolerant): the live quote is faster once the superseded quotes stop holding the queue.
     expect(after.liveMs).toBeLessThan(before.liveMs);
   }, 60_000);

@@ -61,6 +61,11 @@ async function admitSimulation(budget: PreviewOptions['budget'], signal: AbortSi
   if (waitMs === 0 || waitingForSlot.length >= MAX_WAITING_SIMULATIONS) return 'SIMULATION_BUSY';
   if (budget && !await budget()) return 'SIMULATION_RATE_LIMITED';
   if (signal?.aborted) return 'SIMULATION_CANCELLED';
+  // Review fix: the budget await can take a database round trip. Everything seen before it is re-checked after it: a slot that freed meanwhile is
+  // taken at once (nobody would ever hand it to a waiter otherwise), and the waiting bound is enforced on the queue as it is now.
+  const now = simulationAdmission();
+  if (activeSimulations < now.slots && !waitingForSlot.length) { activeSimulations++; return 'GRANTED'; }
+  if (waitingForSlot.length >= MAX_WAITING_SIMULATIONS) return 'SIMULATION_BUSY';
   return new Promise<Admission>(resolve => {
     const leaveQueue = () => { const at = waitingForSlot.indexOf(grant); if (at >= 0) waitingForSlot.splice(at, 1); clearTimeout(timer); signal?.removeEventListener('abort', cancelled); };
     const grant = () => { leaveQueue(); activeSimulations++; resolve('GRANTED'); };
@@ -68,12 +73,17 @@ async function admitSimulation(budget: PreviewOptions['budget'], signal: AbortSi
     const timer = setTimeout(() => { leaveQueue(); resolve('SIMULATION_BUSY'); }, waitMs);
     signal?.addEventListener('abort', cancelled, { once: true });
     waitingForSlot.push(grant);
+    dispatchWaiters();
   });
+}
+/** Hands every free slot to the next waiter (first come, first served): waiters exist only while every slot is taken. */
+function dispatchWaiters(): void {
+  while (activeSimulations < simulationAdmission().slots && waitingForSlot.length) waitingForSlot[0]!();
 }
 function releaseSimulationSlot(): void {
   activeSimulations--;
-  // The next waiter takes the freed slot (first come, first served) when the cap still allows it.
-  if (activeSimulations < simulationAdmission().slots) waitingForSlot.shift()?.();
+  // The next waiters take the freed slots (first come, first served) while the cap allows it.
+  dispatchWaiters();
 }
 
 export type PreviewRequest = { readonly strategy: unknown; readonly workflowHash: string; readonly simulationSubject: string };

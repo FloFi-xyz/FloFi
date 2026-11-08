@@ -14,14 +14,16 @@ export async function POST(request: Request) {
   if (bytes.byteLength > 262_144) return reply(quoteFailure(new Error('ESTIMATE_INVALID'), correlationId), 413);
   try {
     const logger = createLogger({ service: 'flofi-quotes' });
-    return await withSpan(logger, 'quote.endpoint', { correlation_id: correlationId }, async () => {
+    // The span sees the estimate itself (not the HTTP response), so a refused quote is logged `refused` with its code (telemetry.ts).
+    const result = await withSpan(logger, 'quote.endpoint', { correlation_id: correlationId }, async () => {
       // P0 catalog reliability: a browser that cancels (a newer edit superseded this estimate) cancels the API preview behind it too.
       const started = performance.now();
-      const result = await readBuildEstimate(parseJsonBytes(new Uint8Array(bytes)), process.env, { correlationId, signal: request.signal });
-      logger.info('quote.response', { correlation_id: correlationId, status: result.ok ? 'QUOTE_AVAILABLE' : result.code,
-        outcome: result.ok ? 'ok' : request.signal.aborted ? 'cancelled' : 'refused', duration_ms: Math.round(performance.now() - started),
-        ...result.ok ? { provider: result.estimate.provider, chain: result.estimate.chain } : {} });
-      return reply(result);
+      const estimate = await readBuildEstimate(parseJsonBytes(new Uint8Array(bytes)), process.env, { correlationId, signal: request.signal });
+      logger.info('quote.response', { correlation_id: correlationId, status: estimate.ok ? 'QUOTE_AVAILABLE' : estimate.code,
+        outcome: estimate.ok ? 'ok' : request.signal.aborted ? 'cancelled' : 'refused', duration_ms: Math.round(performance.now() - started),
+        ...estimate.ok ? { provider: estimate.estimate.provider, chain: estimate.estimate.chain } : {} });
+      return estimate;
     }, parseTraceparent(`00-${correlationId.replaceAll('-', '')}-0000000000000001-01`));
+    return reply(result);
   } catch { return reply(quoteFailure(new Error('ESTIMATE_INVALID'), correlationId), 400); }
 }

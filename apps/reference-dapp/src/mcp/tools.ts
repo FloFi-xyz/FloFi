@@ -91,11 +91,12 @@ function standard<T>(schema: TSchema, networks: readonly string[] = PUBLIC_NETWO
   // A refused network names the ids its own action accepts (a bridge field: bridge networks; a filter without an action: every network), once.
   const NETWORK_FIELD = /(?:^|\/)(network|sourceNetwork|destinationNetwork|targetNetwork)$/;
   const hintFor = (value: unknown, path: string) => {
-    const segments = path.split('/').filter(Boolean), field = segments.pop()!;
+    const segments = path.split('/').filter(Boolean);
+    segments.pop();
     let parent: unknown = value;
     for (const segment of segments) parent = parent && typeof parent === 'object' ? (parent as Record<string, unknown>)[segment] : undefined;
-    const action = field === 'sourceNetwork' || field === 'destinationNetwork' ? 'bridge'
-      : parent && typeof parent === 'object' ? (parent as { action?: unknown }).action : undefined;
+    // The field's own action (a bridge strategy's source/destination are bridge networks; a planning goal has no action and takes every network).
+    const action = parent && typeof parent === 'object' ? (parent as { action?: unknown }).action : undefined;
     const accepted = action === undefined ? networks : networksFor(action);
     return ` (one of: ${(accepted.length ? accepted : networks).join(', ')})`;
   };

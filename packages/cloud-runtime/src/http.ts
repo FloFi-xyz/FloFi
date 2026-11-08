@@ -71,6 +71,8 @@ export function createHttpServer(options: HttpServerOptions): Server {
         const result = await route.handler({ method, path: url.pathname, query: url.searchParams, headers: request.headers, body, requestId,
           signal: disconnected.signal }, match);
         send(response, result.status, result.body, requestId);
+        // The span sees the answer, so a refusal answered as `{ ok: false, code }` is logged as refused (telemetry.ts), never as ok.
+        return result;
       } catch (error) {
         if (error instanceof HttpError) { send(response, error.status, { ok: false, code: CODE.test(error.message) ? error.message : 'REQUEST_INVALID' }, requestId); throw error; }
         send(response, 500, { ok: false, code: 'INTERNAL_ERROR' }, requestId);

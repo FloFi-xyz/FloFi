@@ -13,7 +13,7 @@ export const portugueseCatalogReliability: Readonly<Record<string, string>> = {
     'Esta ação não pode ser combinada com o fluxo atual. Verifique as configurações dela ou use um fluxo separado.',
   'This workflow already has the maximum number of steps.': 'Este fluxo já tem o número máximo de etapas.',
   'This amount cannot be applied without changing other settings of the action. Your workflow was not changed. Press Cancel to keep the current amount, or open the action’s Settings.':
-    'Este valor não pode ser aplicado sem alterar outras configurações da ação. Seu fluxo não foi alterado. Pressione Cancelar para manter o valor atual ou abra as Configurações da ação.',
+    'Este valor não pode ser aplicado sem alterar outras configurações da ação. Seu fluxo não foi alterado. Pressione Cancelar para manter o valor atual ou abra as Definições da ação.',
   'The swap and its linked step are on different networks. Choose the same network for both.':
     'O swap e a etapa vinculada estão em redes diferentes. Escolha a mesma rede para os dois.',
   'Choose matching bridge networks.': 'Escolha redes compatíveis para a ponte.',
@@ -25,7 +25,7 @@ export const portugueseCatalogReliability: Readonly<Record<string, string>> = {
   'Choose two different assets.': 'Escolha dois ativos diferentes.',
   'Robinhood Stock Tokens are unavailable right now. Try again in a moment.': 'Os Stock Tokens da Robinhood estão indisponíveis no momento. Tente novamente em instantes.',
   'This change could not be applied (reference {0}). Your workflow was not changed. Press Cancel to keep the current amount, or open the action’s Settings.':
-    'Esta alteração não pôde ser aplicada (referência {0}). Seu fluxo não foi alterado. Pressione Cancelar para manter o valor atual ou abra as Configurações da ação.',
+    'Esta alteração não pôde ser aplicada (referência {0}). Seu fluxo não foi alterado. Pressione Cancelar para manter o valor atual ou abra as Definições da ação.',
   'This change could not be applied. Your workflow was not changed. Press Cancel to keep the current amount, or open the action’s Settings.':
-    'Esta alteração não pôde ser aplicada. Seu fluxo não foi alterado. Pressione Cancelar para manter o valor atual ou abra as Configurações da ação.',
+    'Esta alteração não pôde ser aplicada. Seu fluxo não foi alterado. Pressione Cancelar para manter o valor atual ou abra as Definições da ação.',
 };

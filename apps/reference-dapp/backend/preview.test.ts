@@ -133,7 +133,8 @@ describe('P0 catalog reliability: previews nobody waits for never hold the share
       backend.previewFlow('jupiter-swap', [workflowOf('1'), other], 'QUOTE'), backend.previewFlow('jupiter-swap', [workflowOf('1'), owner], 'SIMULATION')]);
     await tick(); open();
     const [one, two, otherSubject] = await answers;
-    expect(previews).toBeGreaterThanOrEqual(3);
+    // Four different requests (amount, subject, purpose): four computations. Sharing any of them would leave fewer.
+    expect(previews).toBeGreaterThanOrEqual(4);
     expect((one as { value: { amount: string } }).value.amount).toBe('1000000');
     expect((two as { value: { amount: string } }).value.amount).toBe('2000000');
     expect(otherSubject).toMatchObject({ ok: true });

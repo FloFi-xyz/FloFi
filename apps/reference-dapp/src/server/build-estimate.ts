@@ -95,7 +95,7 @@ async function readBuildEstimateValue(input: unknown, env: Env = process.env,
     const now = seams.now ?? (() => new Date());
     const workflowHash = hashArtifactBytes('semantic-workflow', new TextEncoder().encode(JSON.stringify(workflow)));
     if (node.actionType === 'asset.bridge') return await readBridgeBuildEstimate(workflow, node.nodeId, workflowHash,
-      typeof owner === 'string' ? owner : null, typeof destinationWallet === 'string' ? destinationWallet : null, env, now, seams.discover, seams.correlationId);
+      typeof owner === 'string' ? owner : null, typeof destinationWallet === 'string' ? destinationWallet : null, env, now, seams.discover, seams.correlationId, seams.signal);
     if (node.actionType !== 'asset.swap.exact-input') throw Error('ESTIMATE_UNSUPPORTED');
     const profile = publicSwapProfile(node.chainId);
     if (isHostedDeployment(env) && (profile || node.chainId === ORCA_WHIRLPOOLS_DEVNET.chain)) throw Error('TEST_NETWORK_NOT_AVAILABLE');
