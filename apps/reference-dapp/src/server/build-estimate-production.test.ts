@@ -52,6 +52,26 @@ function evmSetup(c: typeof networkCases[number], reverse = false, pool = true) 
   return { w, chain, flow, preview, catalog, now };
 }
 
+describe('P0 catalog reliability: a cancelled estimate cancels its preview', () => {
+  it('forwards the browser signal to the API preview and reports a cancelled estimate as cancelled, never as a provider answer', async () => {
+    const s = evmSetup(networkCases[1]), cancelled = new AbortController();
+    const preview = vi.fn(async (_name: FlowName, _args: readonly unknown[], options: Parameters<typeof cloudPreview>[2]) => {
+      expect(options?.signal).toBe(cancelled.signal);
+      cancelled.abort();
+      return { ok: false as const, code: 'CLOUD_API_DEADLINE_EXCEEDED' };
+    });
+    expect(await readBuildEstimate({ workflow: s.w, nodeId: s.w.nodes[0]!.nodeId }, production, { preview, prices: null, signal: cancelled.signal }))
+      .toMatchObject({ ok: false, code: 'ESTIMATE_CANCELLED' });
+    expect(preview).toHaveBeenCalledOnce();
+  });
+  it('a quote that arrives after the browser cancelled is never published as an estimate', async () => {
+    const s = evmSetup(networkCases[1]), cancelled = new AbortController();
+    s.preview.mockImplementationOnce(async (name, args, options) => { const answer = await s.preview.getMockImplementation()!(name, args, options); cancelled.abort(); return answer; });
+    const result = await readBuildEstimate({ workflow: s.w, nodeId: s.w.nodes[0]!.nodeId }, production, { preview: s.preview, prices: null, signal: cancelled.signal });
+    expect(result).toMatchObject({ ok: false, code: 'ESTIMATE_CANCELLED' });
+  });
+});
+
 describe('production Swap quote parity through cloudPreview', () => {
   for (const c of networkCases) for (const reverse of [false, true]) it(`${c.id} ${reverse ? 'WETH → stable' : 'stable → WETH'}: verified runtime quote, 100 bps, no wallet, DB or authority`, async () => {
     const s = evmSetup(c, reverse);

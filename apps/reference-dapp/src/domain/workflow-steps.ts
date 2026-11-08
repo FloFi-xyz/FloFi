@@ -28,7 +28,7 @@ export type StepDetail =
   | { readonly type: 'SOLANA_SWAP'; readonly input: SolanaSwapInput }
   | { readonly type: 'ROUTER'; readonly input: RouterBridgeInput; readonly network: RouterNetwork }
   /** BUILD-CROSSCHAIN-UNIVERSAL-001: the universal bridge (five mainnets, real funds). */
-  | { readonly type: 'UNIVERSAL_BRIDGE'; readonly input: UniversalBridgeInput }
+  | { readonly type: 'UNIVERSAL_BRIDGE'; readonly input: UniversalBridgeInput; readonly inputSymbol?: string; readonly outputSymbol?: string }
   | { readonly type: 'AAVE'; readonly operation: 'SUPPLY' | 'BORROW' | 'REPAY'; readonly input: SupplyInput }
   | { readonly type: 'AAVE_WITHDRAW'; readonly input: WithdrawInput }
   | { readonly type: 'UNISWAP_LIQUIDITY'; readonly input: UniswapLiquidityInput; readonly lowerPrice: string; readonly upperPrice: string }
@@ -78,7 +78,7 @@ function describe(node: Node, workflow: Workflow, context: ReviewContext): Descr
       testFunds: routed.network === 'testnet' };
   }
   const universal = read(() => universalBridgeDetails(node));
-  if (universal) return { kind: 'BRIDGE', detail: { type: 'UNIVERSAL_BRIDGE', input: universalInputOf(universal) },
+  if (universal) return { kind: 'BRIDGE', detail: { type: 'UNIVERSAL_BRIDGE', input: universalInputOf(universal), inputSymbol: universal.inputSymbol, outputSymbol: universal.outputSymbol },
     protocol: `Universal Cross-chain Router (${UNIVERSAL_BRIDGE_ROUTING_LABEL[universal.routing]})`, network: `${universal.sourceLabel} → ${universal.destinationLabel}`, testFunds: false };
   // Test funds on the testnet Aave profiles; BUILD-BASE-001 Base mainnet lends real funds.
   const lendingTestFunds = (input: { network: string; asset: string }) => {

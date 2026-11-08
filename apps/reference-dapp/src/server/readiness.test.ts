@@ -79,3 +79,16 @@ describe('BUILD-CLOUD-PARITY-001 readiness', () => {
     expect(JSON.stringify(report)).not.toContain('api.flofi.example');
   });
 });
+
+describe('P0-F: readiness names this service\'s own multi-step workflow gates', () => {
+  it('reports user-funded execution enabled without workflow runs as ineffective (the 2026-11 production configuration), and never echoes a value', async () => {
+    const userFunded = { FLOFI_USER_FUNDED_EXECUTION: 'enabled', FLOFI_USER_FUNDED_CHAINS: 'eip155:8453', FLOFI_USER_FUNDED_RPC_8453: 'https://base.rpc.example/v2/secret-key' };
+    const off = await readiness({ env: userFunded });
+    expect(off.workflows).toMatchObject({ runs: 'DISABLED', userFunded: 'INEFFECTIVE_WORKFLOW_RUNS_DISABLED', editorRuns: 'EDITOR_RUNS_NOT_ENABLED',
+      simulation: { slots: 4, waitMs: 5_000 } });
+    expect(JSON.stringify(off)).not.toContain('secret-key');
+    const on = await readiness({ env: { ...userFunded, FLOFI_WORKFLOW_RUNS: 'enabled' } });
+    expect(on.workflows).toMatchObject({ runs: 'ENABLED', userFunded: 'ENABLED' });
+    expect((await readiness({ env: {} })).workflows).toMatchObject({ runs: 'DISABLED', userFunded: 'USER_FUNDED_NOT_ENABLED' });
+  });
+});

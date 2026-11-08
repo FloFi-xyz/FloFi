@@ -72,7 +72,8 @@ function assetsOf(scope: NetworkScope, network: NetworkIdentity, action: Strateg
   // BUILD AAVE-V3-EXPANSION-001: Aave lists every registered reserve of the network's market, not only its canonical example's asset.
   if (action === 'supply' || action === 'borrow' || action === 'repay' || action === 'withdraw')
     return { kind: 'LISTED', symbols: [...new Set(lendingOffers(action).filter(offer => offer.network === network).map(offer => offer.asset))] };
-  const bound = [...new Set(capabilities.filter(capability => capability.asset !== null).map(capability => capability.asset!))];
+  // A Universal Router example's asset is an example, not the list of what that route takes: only certified routes bind a listed asset.
+  const bound = [...new Set(capabilities.filter(capability => capability.asset !== null && (capability.action !== 'bridge' || capability.certifiedRoute)).map(capability => capability.asset!))];
   if (bound.length && action !== 'transfer') return { kind: 'LISTED', symbols: bound };
   if (network.catalog && (action === 'swap' || action === 'add_liquidity' || action === 'transfer'))
     return { kind: 'OFFICIAL_CATALOG', loaded: officialCatalogLoaded(network.chain), examples: declaredNetworkSymbols(network.chain).slice(0, 8) };
@@ -100,7 +101,9 @@ export function networkCapabilityProfiles(scope: NetworkScope): readonly Network
       const actions = [...new Set(own.map(capability => capability.action))].map((action): ActionCapability => {
         const ofAction = own.filter(capability => capability.action === action);
         return { action, assets: assetsOf(scope, network, action, ofAction),
-          routes: action === 'bridge' ? ofAction.filter(capability => capability.destination).map(capability => ({ destination: capability.destination!.name, asset: capability.asset ?? '' })) : [],
+          // Certified Cross-chain Router routes only (as documented); the Universal Router's reach is `universalBridge` (P0 catalog reliability review).
+          routes: action === 'bridge' ? ofAction.filter(capability => capability.destination && capability.certifiedRoute)
+            .map(capability => ({ destination: capability.destination!.name, asset: capability.asset ?? '' })) : [],
           requiredParameters: strategyRequiredFields(action), eligibility: eligibility(scope, action, network.key), limitations: limitationsOf(network, action) };
       });
       return { version: CAPABILITY_API_VERSION, key: network.key, name: network.name, environment: network.environment, family: familyOf(network),

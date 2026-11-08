@@ -5,11 +5,13 @@ import { editorReducer, initialEditor } from '../domain/editor';
 import { savedWorkflowHash, validateSavedWorkflow } from '../domain/saved-workflow';
 import type { BuildEstimate, BuildEstimateResult } from '../domain/build-estimate';
 import { deferred, HookHarness } from '../test-utils/hook-harness';
-import { clearLiveQuoteCache, useBuildEstimate, useLiveQuote } from './build-estimate';
+import { clearLiveQuoteCache, sharedEstimate, useBuildEstimate, useLiveQuote } from './build-estimate';
 import { LIVE_QUOTE_DEBOUNCE_MS, BUILD_ESTIMATE_TIMEOUT_MS } from '../domain/build-estimate';
 import { createUniversalBridgeNode, UNIVERSAL_NETWORKS, type SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
 import { bridgeEstimateRequest } from '../domain/bridge-estimate';
 import { parseDiscoveryRequest } from '../server/universal-router/requests';
+vi.mock('../domain/journey-metrics', async original => ({ ...await original<typeof import('../domain/journey-metrics')>(), reportJourney: vi.fn(() => false) }));
+import { reportJourney } from '../domain/journey-metrics';
 vi.mock('react', async original => ({ ...await original<typeof import('react')>(), ...(await import('../test-utils/hook-harness')).hookMocks }));
 const now = new Date('2026-10-08T12:00:00Z');
 const authored = (amount = '2') => validateSavedWorkflow(editorReducer(initialEditor(), { type: 'ADD_TESTNET_SWAP', direction: 'USDC_TO_WETH', amount, slippage: '50', source: 'CANVAS', baseRevision: 0 }, createBaseSepoliaReviewContext()).workflow);
@@ -186,5 +188,59 @@ describe('automatic Bridge estimates (MOCKED)', () => {
     const w = workflow(), estimate = quote(w); transport.mockResolvedValue(response({ ok: true, estimate: { ...estimate, expected: '999999' } }));
     const read = () => host.render(() => useLiveQuote(w, 'bridge'));
     read(); await vi.advanceTimersByTimeAsync(200); expect(read()).toMatchObject({ status: 'unavailable', code: 'ESTIMATE_RESPONSE_MISMATCH' });
+  });
+});
+
+describe('P0 catalog reliability: one in-flight estimate per exact snapshot', () => {
+  it('joins identical requests, keeps the shared request while any caller waits and cancels it only when the last caller leaves', async () => {
+    const pending = deferred<BuildEstimateResult>();
+    let started = 0, sharedSignal: AbortSignal | null = null;
+    const start = (signal: AbortSignal) => { started++; sharedSignal = signal; return pending.promise; };
+    const first = new AbortController(), second = new AbortController(), third = new AbortController();
+    const a = sharedEstimate('scope-1', start, first.signal), b = sharedEstimate('scope-1', start, second.signal);
+    const c = sharedEstimate('scope-2', start, third.signal);
+    expect(started).toBe(2);
+    const scopeOne = sharedSignal;
+    first.abort();
+    await expect(a).rejects.toThrow('cancelled');
+    pending.resolve({ ok: true, estimate: estimate() });
+    await expect(b).resolves.toMatchObject({ ok: true });
+    await expect(c).resolves.toMatchObject({ ok: true });
+    expect((scopeOne as AbortSignal | null)?.aborted).toBe(false);
+    // After it settles, the next request for the same snapshot starts anew (answers are reused only through the expiry-bound cache).
+    const again = new AbortController(), late = sharedEstimate('scope-1', start, again.signal);
+    expect(started).toBe(3);
+    again.abort();
+    await expect(late).rejects.toThrow('cancelled');
+    expect((sharedSignal as AbortSignal | null)?.aborted).toBe(true);
+  });
+  it('sends one request when two cards ask for the same snapshot at once', async () => {
+    const workflow = authored(), value = estimate(workflow), slow = deferred<ReturnType<typeof response>>(); transport.mockReturnValue(slow.promise);
+    const other = new HookHarness();
+    const read = () => host.render(() => useBuildEstimate(workflow, 'node-002', 'owner'));
+    const readOther = () => other.render(() => useBuildEstimate(workflow, 'node-002', 'owner'));
+    read(); readOther(); await vi.advanceTimersByTimeAsync(350);
+    expect(transport).toHaveBeenCalledTimes(1);
+    slow.resolve(response({ ok: true, estimate: value })); await vi.advanceTimersByTimeAsync(0);
+    expect(read()).toEqual(value); expect(readOther()).toEqual(value);
+    expect(transport).toHaveBeenCalledTimes(1);
+    other.unmount();
+  });
+});
+
+describe('P0 review follow-up: the journey metric counts a request once', () => {
+  it('only the card whose request reached the quote service reports intent → first quote', async () => {
+    const journeys = vi.mocked(reportJourney);
+    journeys.mockClear();
+    const workflow = authored(), value = estimate(workflow), slow = deferred<ReturnType<typeof response>>(); transport.mockReturnValue(slow.promise);
+    const other = new HookHarness();
+    const read = () => host.render(() => useBuildEstimate(workflow, 'node-002', 'owner'));
+    const readOther = () => other.render(() => useBuildEstimate(workflow, 'node-002', 'owner'));
+    read(); readOther(); await vi.advanceTimersByTimeAsync(350);
+    slow.resolve(response({ ok: true, estimate: value })); await vi.advanceTimersByTimeAsync(0);
+    expect(read()).toEqual(value); expect(readOther()).toEqual(value);
+    expect(transport).toHaveBeenCalledTimes(1);
+    expect(journeys).toHaveBeenCalledTimes(1);
+    other.unmount();
   });
 });

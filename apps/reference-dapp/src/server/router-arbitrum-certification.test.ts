@@ -26,7 +26,7 @@ function setup(p: RouterProfile, options: RouterHarnessOptions = {}) {
   const h = createRouterHarness({ profile: p, ...options }), dir = mkdtempSync(join(tmpdir(), 'flofi-arb-bridge-')); dirs.push(dir);
   const storage = createFileExecutionStorage(dir, 'ROUTER_BUSY');
   let source = h.baseRpc, destination = h.arbitrumRpc, providers = h.providers;
-  const create = (enabled = true) => createRouterService({ storage, sourceRpc: (...a) => source(...a), destinationRpc: (...a) => destination(...a), providers,
+  const create = (enabled = true) => createRouterService({ storage, sourceRpc: (method, params) => source(method, params), destinationRpc: (method, params) => destination(method, params), providers,
     provenance: 'MOCKED', executionEnabled: enabled, now: h.clock, profile: p, mockedCodePins: h.codePins });
   const s = create();
   const send = async (id: string, w: SemanticWorkflow) => {

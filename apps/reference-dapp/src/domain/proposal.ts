@@ -7,6 +7,7 @@ import { editorReducer, type EditorState } from './editor';
 import type { Command } from './commands';
 import { swapDetails } from './swap-authoring';
 import { bridgeDetails } from './bridge-authoring';
+import { UNIVERSAL_BRIDGE_ROUTING_LABEL, universalBridgeDetails } from './universal-bridge-authoring';
 import { liquidityDetails } from '@defi-workflow-engine/reference-linter';
 import { solanaLiquidityDetails } from './solana-liquidity-authoring';
 import { uniswapLiquidityDetails } from './uniswap-liquidity-authoring';
@@ -99,6 +100,17 @@ export function describeProposal(before: EditorState, after: EditorState, comman
       `Routing: ${ROUTER_ROUTING_LABEL[routed.routing]}`,
       `${routed.network === 'testnet' ? 'Test USDC on public testnets.' : 'Real funds on mainnet.'} A fresh route, transaction simulation and route-bound Manifest review are required before any wallet request.`]);
   }
+  // P0 catalog reliability: a Universal Router bridge (any of the five mainnets, Solana included) is described by its own route. It also matches the
+  // legacy reader below, whose text is the BUILD-008 Base → Optimism bridge, so it is checked first.
+  const universal = newNode && universalBridgeDetails(newNode), universalBefore = oldNode && universalBridgeDetails(oldNode);
+  // Review fix: a certified Router bridge converted to a Universal Router bridge says so, with its previous amount.
+  const routerBefore = universal && oldNode ? routerDetails(oldNode) : null;
+  if (universal) return Object.freeze([`Revision ${before.workflow.revision} → ${after.workflow.revision}`,
+    `Node ${newNode?.nodeId}: cross-chain bridge ${universal.sourceLabel} ${universal.inputSymbol} → ${universal.destinationLabel} ${universal.outputSymbol} (Universal Cross-chain Router)`,
+    ...routerBefore ? [`Route: the certified Cross-chain Router route is replaced by the Universal Cross-chain Router (${ROUTER_ROUTING_LABEL[routerBefore.routing]} → ${UNIVERSAL_BRIDGE_ROUTING_LABEL[universal.routing]})`] : [],
+    `Amount: ${universalBefore?.amount ?? routerBefore?.amount ?? 'none'} → ${universal.amount} ${universal.inputSymbol}; slippage ${universal.slippage} bps`,
+    `Recipient on ${universal.destinationLabel}: ${universal.recipient || 'the connected wallet for that network, bound at Review'}`,
+    'Real funds on mainnet. A fresh route, transaction simulation and route-bound Manifest review are required before any wallet request.']);
   const bridge = newNode && bridgeDetails(newNode);
   if (bridge) return Object.freeze([`Revision ${before.workflow.revision} → ${after.workflow.revision}`,
     `Node ${newNode?.nodeId}: Base → Optimism USDC bridge`,
@@ -119,7 +131,9 @@ export function describeProposal(before: EditorState, after: EditorState, comman
   const oldTransfer=oldNode&&transferDetails(oldNode as Parameters<typeof transferDetails>[0]),newTransfer=newNode&&transferDetails(newNode as Parameters<typeof transferDetails>[0]);
   if(newTransfer&&isSolanaTransferNetwork(newTransfer.network))return [`Send ${newTransfer.amount} ${newTransfer.asset} on ${newTransfer.network}`,`Amount: ${oldTransfer?.amount??'none'} → ${newTransfer.amount}`,
     `Recipient: ${newTransfer.recipient}`,'The exact amount, recipient, network fee and any recipient token account deposit are bound at Review.'];
-  if(newTransfer)return [`Self-transfer test ETH on ${newTransfer.network}`,`Amount: ${oldTransfer?.amount??'none'} → ${newTransfer.amount} ETH`,'Recipient: connected owner bound at Review','Chain execution proof, not a DeFi action'];
+  // P0 catalog reliability: an EVM transfer is described by its own asset and recipient (it was the BUILD-RH-DEMO test-ETH self-transfer text for every asset).
+  if(newTransfer)return [`Send ${newTransfer.amount} ${newTransfer.asset} on ${newTransfer.network}`,`Amount: ${oldTransfer?.amount??'none'} → ${newTransfer.amount} ${newTransfer.asset}`,
+    newTransfer.recipient==='CONNECTED_OWNER'?'Recipient: connected owner bound at Review':`Recipient: ${newTransfer.recipient}`,'The exact amount, recipient and network fee are bound at Review.'];
   const oldWithdraw=oldNode&&withdrawDetails(oldNode as Parameters<typeof withdrawDetails>[0]),newWithdraw=newNode&&withdrawDetails(newNode as Parameters<typeof withdrawDetails>[0]);
   if(newWithdraw)return [`Withdraw from Aave V3 on ${newWithdraw.network}`,`Amount: ${oldWithdraw?.amount??'none'} → ${newWithdraw.amount} ${newWithdraw.asset}`,'Recipient: connected owner bound at Review'];
   const oldSupply = oldNode && (repayDetails(oldNode as Parameters<typeof repayDetails>[0]) ?? borrowDetails(oldNode as Parameters<typeof borrowDetails>[0]) ?? supplyDetails(oldNode as Parameters<typeof supplyDetails>[0]));

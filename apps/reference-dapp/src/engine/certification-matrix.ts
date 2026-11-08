@@ -94,10 +94,8 @@ const OTHER_ROWS: readonly (Omit<CertificationRow, 'liveEvidence' | 'status' | '
     webRuntime: 'per group', ownerWalletExecutionImplemented: true,
     channels: { canvas: false, approve: true, copilot: false, mcp: true, telegram: true, whatsapp: 'POLICY_BLOCKED', developerApi: false }, agentRollout: null,
     registryEvidence: 'MOCKED', implemented: true, why: 'User-funded execution groups: one wallet interaction per group, the owner\'s wallet pays every fee (S1); off unless FLOFI_USER_FUNDED_EXECUTION=enabled; MOCKED end-to-end only — no owner-signed mainnet execution recorded.' },
-  { id: 'bridge-evm-solana', action: 'bridge', network: 'any EVM network', destinationNetwork: 'solana', funds: 'REAL_FUNDS',
-    protocols: ['relay-depository'], flow: 'crosschain-universal', webRuntime: 'universal', ownerWalletExecutionImplemented: true,
-    channels: { canvas: true, approve: true, copilot: true, mcp: true, telegram: true, whatsapp: 'POLICY_BLOCKED', developerApi: false }, agentRollout: null,
-    registryEvidence: 'MOCKED', implemented: true, why: 'Owner-signed, owner-paid Relay deposits through the universal router (flow crosschain-universal) for every EVM ↔ Solana pair; MOCKED end-to-end and read-only quotes only — no mainnet transaction recorded.' },
+  // P0 catalog reliability: the former aggregate `bridge-evm-solana` row is superseded by the eight per-direction Solana ⇄ EVM catalog rows
+  // (strategy-examples.ts), each classified from the registries and the ledger like every other row.
 ];
 
 export function certificationMatrix(ledger: Ledger, verification: LiveVerification): readonly CertificationRow[] {

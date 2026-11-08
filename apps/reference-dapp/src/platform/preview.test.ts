@@ -5,11 +5,12 @@
  * refuses with neutral codes; MCP keeps its historical ones. A caller's budget is consulted after the busy check and before a slot
  * is taken, and a slot is always released.
  */
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { composeStrategy, composeWorkflow } from '../engine/strategy-engine';
 import { credential, gatewayEnv, session } from '../mcp/gateway.test-harness';
 import type { McpRuntime } from '../mcp/runtime';
-import { activeSimulationCount, MAX_CONCURRENT_SIMULATIONS, PlatformRefusal, simulatePreview, simulateWorkflowPreview } from './index.ts';
+import { activeSimulationCount, MAX_CONCURRENT_SIMULATIONS, PlatformRefusal, SIMULATION_SLOT_WAIT_MS, simulationAdmission, simulatePreview, simulateWorkflowPreview,
+  waitingSimulationCount } from './index.ts';
 
 const BRIDGE = { action: 'bridge', sourceNetwork: 'base-sepolia', destinationNetwork: 'arbitrum-sepolia', asset: 'USDC', amount: '5', routing: 'auto' };
 const SUBJECT = '0x' + 'a'.repeat(40);
@@ -28,11 +29,14 @@ function blockingRuntime() {
 }
 const codeOf = async (work: Promise<unknown>) => { try { await work; return 'NO_REFUSAL'; } catch (error) { return error instanceof PlatformRefusal ? error.message : 'UNEXPECTED'; } };
 const settle = () => new Promise(r => setTimeout(r, 25));
-afterEach(() => expect(activeSimulationCount()).toBe(0));
+// These suites pin the strict admission they were written for (2 slots, no wait); the P0-E defaults are tested below.
+beforeEach(() => { process.env.FLOFI_SIMULATION_CONCURRENCY = '2'; process.env.FLOFI_SIMULATION_WAIT_MS = '0'; });
+afterEach(() => { expect(activeSimulationCount()).toBe(0); expect(waitingSimulationCount()).toBe(0);
+  delete process.env.FLOFI_SIMULATION_CONCURRENCY; delete process.env.FLOFI_SIMULATION_WAIT_MS; });
 
 describe('BUILD-DEVELOPER-001 shared simulation preview', () => {
   it('shares one cap between the platform and the MCP tool, in both directions', async () => {
-    expect(MAX_CONCURRENT_SIMULATIONS).toBe(2);
+    expect(simulationAdmission()).toEqual({ slots: 2, waitMs: 0 });
     const first = blockingRuntime(), mcp = session({ env, token: alice.token, runtime: first.runtime });
     const held = [codeOf(simulatePreview(first.runtime, request)), codeOf(simulatePreview(first.runtime, request))];
     await settle();
@@ -128,5 +132,95 @@ describe('canonical workflow preview across surfaces', () => {
       steps: [{ index: 0, state: 'SIMULATED' }, { index: 1, state: 'SIMULATED' }] });
     expect(calls).toBe(2);
     expect(JSON.stringify(result.output)).not.toMatch(/calldata|unsignedTransaction|commitment/);
+  });
+});
+
+describe('P0-E: simulation admission waits briefly for a slot instead of refusing at once', () => {
+  it('defaults to 4 slots and a 5 s wait, configurable within bounds (anything else keeps the default)', () => {
+    expect(simulationAdmission({})).toEqual({ slots: MAX_CONCURRENT_SIMULATIONS, waitMs: SIMULATION_SLOT_WAIT_MS });
+    expect([MAX_CONCURRENT_SIMULATIONS, SIMULATION_SLOT_WAIT_MS]).toEqual([4, 5_000]);
+    expect(simulationAdmission({ FLOFI_SIMULATION_CONCURRENCY: '6', FLOFI_SIMULATION_WAIT_MS: '2000' })).toEqual({ slots: 6, waitMs: 2_000 });
+    for (const bad of ['0', '17', '-1', '2.5', 'many', '']) expect(simulationAdmission({ FLOFI_SIMULATION_CONCURRENCY: bad }).slots).toBe(4);
+    for (const bad of ['15001', '-1', '2.5', 'soon', '']) expect(simulationAdmission({ FLOFI_SIMULATION_WAIT_MS: bad }).waitMs).toBe(5_000);
+  });
+  it('a request that finds every slot taken runs as soon as one frees; its budget is consulted before it queues', async () => {
+    process.env.FLOFI_SIMULATION_WAIT_MS = '2000';
+    const r = blockingRuntime(), budget: string[] = [];
+    const held = [codeOf(simulatePreview(r.runtime, request)), codeOf(simulatePreview(r.runtime, request))];
+    await settle();
+    const third = codeOf(simulatePreview(r.runtime, request, { budget: async () => { budget.push('consulted'); return true; } }));
+    await settle();
+    expect([activeSimulationCount(), waitingSimulationCount(), budget]).toEqual([2, 1, ['consulted']]);
+    r.release();
+    expect(await Promise.all([...held, third])).toEqual(['PREVIEW_DONE', 'PREVIEW_DONE', 'PREVIEW_DONE']);
+    expect(r.calls()).toBe(3);
+  });
+  it('refuses with SIMULATION_BUSY when no slot frees within the wait; a caller whose budget is spent never takes a waiting seat', async () => {
+    process.env.FLOFI_SIMULATION_WAIT_MS = '60';
+    const r = blockingRuntime();
+    const held = [codeOf(simulatePreview(r.runtime, request)), codeOf(simulatePreview(r.runtime, request))];
+    await settle();
+    expect(await codeOf(simulatePreview(r.runtime, request))).toBe('SIMULATION_BUSY');
+    expect(await codeOf(simulatePreview(r.runtime, request, { budget: async () => false }))).toBe('SIMULATION_RATE_LIMITED');
+    expect(waitingSimulationCount()).toBe(0);
+    r.release(); await Promise.all(held);
+  });
+  it('a caller whose request ends while it waits leaves the queue at once, runs nothing and spends nothing more', async () => {
+    process.env.FLOFI_SIMULATION_CONCURRENCY = '1'; process.env.FLOFI_SIMULATION_WAIT_MS = '5000';
+    const r = blockingRuntime(), ended = new AbortController();
+    const held = codeOf(simulatePreview(r.runtime, request));
+    await settle();
+    const waiting = codeOf(simulatePreview(r.runtime, request, { signal: ended.signal }));
+    await settle();
+    expect(waitingSimulationCount()).toBe(1);
+    ended.abort();
+    expect(await waiting).toBe('SIMULATION_CANCELLED');
+    expect(waitingSimulationCount()).toBe(0);
+    r.release();
+    expect(await held).toBe('PREVIEW_DONE');
+    expect(r.calls()).toBe(1);
+    expect(await codeOf(simulatePreview(r.runtime, request, { signal: ended.signal }))).toBe('SIMULATION_CANCELLED');
+  });
+  it('a denied budget releases the slot to the next waiter', async () => {
+    process.env.FLOFI_SIMULATION_CONCURRENCY = '1'; process.env.FLOFI_SIMULATION_WAIT_MS = '2000';
+    const r = blockingRuntime();
+    const denied = codeOf(simulatePreview(r.runtime, request, { budget: async () => { await settle(); return false; } }));
+    const waiting = codeOf(simulatePreview(r.runtime, request));
+    expect(await denied).toBe('SIMULATION_RATE_LIMITED');
+    await settle();
+    expect(activeSimulationCount()).toBe(1);
+    r.release();
+    expect(await waiting).toBe('PREVIEW_DONE');
+  });
+});
+
+describe('P0-E review fixes: the admission queue never strands a waiter or exceeds its bound', () => {
+  it('a slot that frees while a queued caller awaits its budget is taken, and later callers are not queued behind it', async () => {
+    process.env.FLOFI_SIMULATION_CONCURRENCY = '1'; process.env.FLOFI_SIMULATION_WAIT_MS = '2000';
+    const r = blockingRuntime();
+    const held = codeOf(simulatePreview(r.runtime, request));
+    await settle();
+    const slowBudget = async () => { r.release(); await new Promise(resolve => setTimeout(resolve, 50)); return true; };
+    const started = Date.now();
+    const b = codeOf(simulatePreview(r.runtime, request, { budget: slowBudget }));
+    expect(await held).toBe('PREVIEW_DONE');
+    expect(await b).toBe('PREVIEW_DONE');
+    expect(await codeOf(simulatePreview(r.runtime, request))).toBe('PREVIEW_DONE');
+    expect(Date.now() - started).toBeLessThan(1_000);
+    expect(r.calls()).toBe(3);
+  });
+  it('callers that pass the waiting check together while awaiting their budgets never exceed 8 waiting', async () => {
+    process.env.FLOFI_SIMULATION_CONCURRENCY = '1'; process.env.FLOFI_SIMULATION_WAIT_MS = '2000';
+    const r = blockingRuntime();
+    const held = codeOf(simulatePreview(r.runtime, request));
+    await settle();
+    const budget = () => new Promise<boolean>(resolve => setTimeout(() => resolve(true), 20));
+    const many = Array.from({ length: 12 }, () => codeOf(simulatePreview(r.runtime, request, { budget })));
+    await settle(); await settle();
+    expect(waitingSimulationCount()).toBe(8);
+    r.release();
+    const codes = await Promise.all([held, ...many]);
+    expect(codes.filter(code => code === 'SIMULATION_BUSY')).toHaveLength(4);
+    expect(codes.filter(code => code === 'PREVIEW_DONE')).toHaveLength(9);
   });
 });

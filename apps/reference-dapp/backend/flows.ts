@@ -68,7 +68,7 @@ export type FlowName = `crosschain-router-${EthereumRouterNetwork}` | 'robinhood
   | 'crosschain-universal'
   /** BUILD-FLOFI-AUTH-WALLETS-001: FloFi Wallet's EVM reads and attempt-bound broadcast on the four catalog mainnets (no runs of its own). */
   | 'managed-wallet-evm';
-export type Rpc = (method: string, params: readonly unknown[]) => Promise<unknown>;
+export type Rpc = (method: string, params: readonly unknown[], context?: { readonly signal?: AbortSignal }) => Promise<unknown>;
 /** Network transport for one flow. Built from configuration in production; replaced by MOCKED chains in tests. */
 export type FlowDeps = { readonly rpc: Rpc; readonly mode: 'live' | 'harness'; readonly env: Readonly<Record<string, string | undefined>>; readonly http?: JupiterHttp;
   /** BUILD-ROUTER-001: the destination chain and the routing providers (the source chain is `rpc`). */

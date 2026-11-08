@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import { BRIDGE_ACTION, BRIDGE_SOURCE, BRIDGE_DESTINATION, BRIDGE_SOURCE_USDC, BRIDGE_DESTINATION_USDC,
+import { BRIDGE_ACTION, isUniversalBridgeNode, BRIDGE_SOURCE, BRIDGE_DESTINATION, BRIDGE_SOURCE_USDC, BRIDGE_DESTINATION_USDC,
   type SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
 import { parseSlippage } from './swap-authoring';
 import type { Workflow } from './initial-workflow';
@@ -15,7 +15,9 @@ export function parseBridgeAmount(value: string): string {
 }
 export function bridgeDetails(node: Workflow['nodes'][number]): { amount: string; units: string; slippageBps: number } | null {
   // BUILD-ROUTER-001 router nodes have their own details (recipient, routing policy); this reader is for BUILD-008/009/010 bridges.
-  if (node.actionType !== BRIDGE_ACTION || node.adapterConstraints.adapters[0]?.id === 'flofi.router') return null;
+  // P0 catalog reliability: a Universal Router bridge (`flofi.router.universal`, any of the five mainnets) is not one of them either; read as one,
+  // every caller (proposal, chat summary, Canvas title, inspector) described it as the legacy Base → Optimism LI.FI bridge.
+  if (node.actionType !== BRIDGE_ACTION || node.adapterConstraints.adapters[0]?.id === 'flofi.router' || isUniversalBridgeNode(node)) return null;
   const input = node.inputs.find(p => p.name === 'amount-in');
   const slip = node.userConstraints.find(p => p.kind === 'MAXIMUM_SLIPPAGE_BPS');
   if (input?.kind !== 'QUANTITY' || slip?.kind !== 'MAXIMUM_SLIPPAGE_BPS') return null;

@@ -370,6 +370,31 @@ Release order for this build: deploy the API (Railway) before the web (Vercel). 
 works (chat route discovery falls back to the old call shape), but only the newer API applies the conversational
 discovery window. No migration, schema certificate or credential change is required.
 
+## 5k-bis. Catalog reliability: quotes, simulation admission and where each workflow gate is read (P0 catalog reliability)
+
+| Variable | Where | Default | Effect |
+| --- | --- | --- | --- |
+| `GRYLOO_<NETWORK>_RPC_URL` (`ARBITRUM`, `BASE`, `ETHEREUM`, `ROBINHOOD`, `SOLANA`) | **Railway `flofi-api` and `flofi-worker`** as well as Vercel web | the network's public endpoint | In production the web tier forwards quotes, simulation previews and single-flow execution reads to the API (`API_BASE_URL`), so for those the endpoint that matters is the **API's**; a value set only on Vercel does not change them. Exception: `/approve`'s user-funded group execution runs on the web tier and reads Vercel's `FLOFI_USER_FUNDED_RPC_<chainId>` and, for Solana groups, `GRYLOO_SOLANA_RPC_URL`. |
+| `GRYLOO_RPC_READ_PROFILE` | Railway `flofi-api` and `flofi-worker` (and web) | unset (one read at a time, 250 ms apart) | `dedicated` lets the configured **EVM** endpoints above (`ARBITRUM`, `BASE`, `ETHEREUM`, `ROBINHOOD`) take parallel reads (§5k); the Solana client does not read this profile. Set it only after confirming those endpoints are keyed providers with capacity; a public endpoint never gets it. |
+| `FLOFI_SIMULATION_CONCURRENCY` | Vercel web | `4` | Read-only simulation previews in flight per web instance, shared by MCP, Developer API and channels (1–16; anything else keeps the default). |
+| `FLOFI_SIMULATION_WAIT_MS` | Vercel web | `5000` | How long a preview waits for a free slot before `SIMULATION_BUSY` (0–15000; at most 8 waiting). The per-account MCP budget is consulted when a slot is free at once, or before the request queues (so a spent budget never occupies a waiting seat; a queued request that then times out has spent one unit). |
+
+Quote and preview deadlines are coordinated in code, not configured: the browser waits 45 s, the build-estimate route may run 45 s, the BFF waits
+30 s for the API, and the API stops the preview 1.5 s earlier (`x-flofi-deadline-ms`) with `CLOUD_PREVIEW_TIMEOUT`. A browser that cancels (a newer
+edit) cancels the API preview behind it, identical concurrent previews share one computation, and reads queued for an abandoned preview are dropped.
+
+**Multi-step workflow gates are read by each service from its own environment.** `/api/flofi/readiness` reports this web tier's own view under
+`workflows` (`runs`, `userFunded`, `editorRuns`, `simulation`).
+
+| Variable | Vercel web (Editor, Chat, MCP, `/approve`, Developer API) | Railway `flofi-api` | Railway `flofi-worker` |
+| --- | --- | --- | --- |
+| `FLOFI_WORKFLOW_RUNS=enabled` | **required**: without it every multi-step workflow is refused (`WORKFLOW_RUNS_NOT_ENABLED`; Editor `EDITOR_RUNS_NOT_ENABLED`) | not read | required (the runner) |
+| `FLOFI_USER_FUNDED_EXECUTION=enabled` (+ `FLOFI_USER_FUNDED_CHAINS`, `FLOFI_USER_FUNDED_RPC_<chainId>`) | required for user-funded groups; ineffective while `FLOFI_WORKFLOW_RUNS` is off (readiness: `INEFFECTIVE_WORKFLOW_RUNS_DISABLED`) | not read | same values as web |
+| `FLOFI_EDITOR_WORKFLOW_RUNS` | optional (`disabled` turns the Editor's runs off); also needs `DATABASE_URL` and `FLOFI_PUBLIC_ORIGIN` | not read | not read |
+| `TENANT_ID` | identical on all three services | identical | identical |
+
+Scope these to the **Production** environment on Vercel: Preview deployments share the production database (see SCHEMA-COMPATIBILITY.md).
+
 ## 5l. Dashboard wallet portfolio (BUILD-FLOFI-CHAT-E2E-DASHBOARD-UX-001, Dashboard → Wallet portfolio)
 
 A read-only snapshot of the connected wallet's balances: no signer, no submission, nothing persisted. Which networks it reads follows the

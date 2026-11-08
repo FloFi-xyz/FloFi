@@ -40,6 +40,7 @@ import { principalScopes, type McpOAuthPrincipal, type McpPrincipal } from './co
 import { GOAL_PREFERENCES, GOAL_USES, planGoal, type Goal } from '../domain/intelligence/goal-planner';
 import { goalStrategy } from '../domain/intelligence/goal-strategy';
 import { networkIdentity } from '../domain/network-registry';
+import { canonicalNetworkFields } from './network-aliases.ts';
 import type { CopilotLiquidityAction } from '../domain/copilot-intent';
 import { simulateWorkflowPreview } from '../platform/preview.ts';
 import { LEGACY_PANEL_URI, PANEL_MIME, PANEL_URI, panelHtml, panelResourceMeta } from './app/panel.ts';
@@ -83,8 +84,22 @@ export const MCP_MAINNET_INSTRUCTIONS = ' FloFi runs on mainnets only: every str
  * TypeBox + Ajv (the repo's strict schema stack) behind the Standard Schema interface the SDK consumes. Issues name paths and
  * rules only, never values; a `strategy` is reported against its own action's schema rather than every union branch.
  */
-function standard<T>(schema: TSchema): StandardSchemaWithJSON<T, T> {
+function standard<T>(schema: TSchema, networks: readonly string[] = PUBLIC_NETWORK_IDS,
+  networksFor: (action: unknown) => readonly string[] = () => networks): StandardSchemaWithJSON<T, T> {
   const compiled = compileSchema<T>(schema), json = JSON.parse(JSON.stringify(schema)) as Record<string, unknown>;
+  // P0 catalog reliability: a network field naming a network of this scope by its registry name, alias or CAIP-2 id is read as that network's id.
+  // A refused network names the ids its own action accepts (a bridge field: bridge networks; a filter without an action: every network), once.
+  const NETWORK_FIELD = /(?:^|\/)(network|sourceNetwork|destinationNetwork|targetNetwork)$/;
+  const hintFor = (value: unknown, path: string) => {
+    const segments = path.split('/').filter(Boolean);
+    segments.pop();
+    let parent: unknown = value;
+    for (const segment of segments) parent = parent && typeof parent === 'object' ? (parent as Record<string, unknown>)[segment] : undefined;
+    // The field's own action (a bridge strategy's source/destination are bridge networks; a planning goal has no action and takes every network).
+    const action = parent && typeof parent === 'object' ? (parent as { action?: unknown }).action : undefined;
+    const accepted = action === undefined ? networks : networksFor(action);
+    return ` (one of: ${(accepted.length ? accepted : networks).join(', ')})`;
+  };
   const issuesOf = (value: unknown) => {
     const all = compiled.issues(value), strategy = value && typeof value === 'object' ? (value as { strategy?: unknown }).strategy : undefined;
     const inStrategy = (i: { path: string }) => i.path === '/strategy' || i.path.startsWith('/strategy/');
@@ -94,7 +109,16 @@ function standard<T>(schema: TSchema): StandardSchemaWithJSON<T, T> {
     return [...all.filter(i => !inStrategy(i)), ...detailed.length ? detailed : [{ path: '/strategy', rule: 'mainnetOnly' }]];
   };
   return { '~standard': { version: 1, vendor: 'flofi',
-    validate: value => compiled.check(value) ? { value: value as T } : { issues: issuesOf(value).map(i => ({ message: `${i.path} ${i.rule}`, path: i.path.split('/').filter(Boolean) })) },
+    validate: raw => {
+      const value = canonicalNetworkFields(raw, networks);
+      if (compiled.check(value)) return { value: value as T };
+      const hinted = new Set<string>();
+      return { issues: issuesOf(value).map(i => {
+        // A refused network names the accepted ids, so the caller can correct it (values are still never echoed).
+        const hint = NETWORK_FIELD.test(i.path) && /const|anyOf|enum/.test(i.rule) && !hinted.has(i.path) ? (hinted.add(i.path), hintFor(value, i.path)) : '';
+        return { message: `${i.path} ${i.rule}${hint}`, path: i.path.split('/').filter(Boolean) };
+      }) };
+    },
     jsonSchema: { input: () => json, output: () => json } } };
 }
 const strict = { additionalProperties: false } as const;
@@ -259,13 +283,16 @@ export function createFlofiMcpServer(ctx: ToolContext): McpServer {
     { instructions: MCP_INSTRUCTIONS + deploymentInstructions + (scope === 'ENGINEERING' ? '' : MCP_MAINNET_INSTRUCTIONS),
       capabilities: { tools: { listChanged: false }, ...panel ? { resources: { listChanged: false } } : {} } });
   const now = ctx.now ?? (() => performance.now());
+  const scopeNetworks = scope === 'ENGINEERING' ? NETWORK_IDS : PUBLIC_NETWORK_IDS, discovered = supportedNetworks(scope);
+  // The networks discovery advertises for an action (engine/catalog-schema-parity.test.ts proves this equals what the public schema accepts).
+  const networksFor = (action: unknown) => discovered.filter(network => (network.actions as readonly unknown[]).includes(action)).map(network => network.id);
   const register = <S extends TSchema>(name: ToolName, title: string, description: string, schema: S, annotations: ToolAnnotations,
     run: (args: Static<S>) => Promise<Output> | Output, toolMeta: Record<string, unknown> = {}) => {
     const scope = TOOL_SCOPES[name];
     // OAuth clients read `securitySchemes` to know which scope to request before calling (ChatGPT reads the `_meta` mirror).
     const security = ctx.oauth ? { securitySchemes: [{ type: 'oauth2', scopes: [scope] }] } : {};
     const meta = Object.keys(security).length || Object.keys(toolMeta).length ? { _meta: { ...security, ...toolMeta } } : {};
-    server.registerTool(name, { title, description, inputSchema: standard<Static<S>>(schema), annotations: { title, ...annotations }, ...meta }, async (args: Static<S>): Promise<CallToolResult> => {
+    server.registerTool(name, { title, description, inputSchema: standard<Static<S>>(schema, scopeNetworks, networksFor), annotations: { title, ...annotations }, ...meta }, async (args: Static<S>): Promise<CallToolResult> => {
       const started = now();
       let result: CallToolResult, outcome = 'OK';
       try {
@@ -459,7 +486,7 @@ export function createFlofiMcpServer(ctx: ToolContext): McpServer {
     const account = ctx.principal.kind === 'mcp-oauth' ? ctx.principal.accountId : null, state = ctx.state;
     const workflow = composeWorkflowOrRefuse(args.strategy, args.workflowHash, scope);
     if (workflow.steps.length > 1) {
-      const preview = await simulateWorkflowPreview(ctx.runtime, args, { scope, ...account && state
+      const preview = await simulateWorkflowPreview(ctx.runtime, args, { scope, ...ctx.budget ? { signal: ctx.budget.signal } : {}, ...account && state
         ? { budget: () => state.oauth.allow(`simulate:account:${account}`, SIMULATIONS_PER_ACCOUNT_HOUR, 3_600, new Date()) } : {} });
       return { ok: true, kind: 'WORKFLOW_PREVIEW', ...preview, preview: true,
         subjectRole: 'SIMULATION_SUBJECT_ONLY_NOT_AN_OWNER_OR_AUTHORIZATION', authority: AUTHORITY,
@@ -468,7 +495,7 @@ export function createFlofiMcpServer(ctx: ToolContext): McpServer {
           'Confirm each step: FloFi re-simulates each actual received amount and presents its Strategy Manifest before the wallet signs that step.',
           'User-funded groups: a dependent step in the same group spends the earlier step\'s signed guaranteed minimum; in a later group, the reconciled delivery.'] };
     }
-    const { composition: c, plan, view, simulationSubject } = await simulatePreview(ctx.runtime, args, { scope, ...account && state
+    const { composition: c, plan, view, simulationSubject } = await simulatePreview(ctx.runtime, args, { scope, ...ctx.budget ? { signal: ctx.budget.signal } : {}, ...account && state
       ? { budget: () => state.oauth.allow(`simulate:account:${account}`, SIMULATIONS_PER_ACCOUNT_HOUR, 3_600, new Date()) } : {} });
     return { ok: true, workflowHash: c.workflowHash, flow: plan.flow, kind: view.kind, provenance: view.provenance, observedAt: view.observedAt, expiresAt: view.expiresAt,
       simulationSubject, subjectRole: 'SIMULATION_SUBJECT_ONLY_NOT_AN_OWNER_OR_AUTHORIZATION',

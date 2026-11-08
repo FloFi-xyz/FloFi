@@ -8,6 +8,7 @@ import { reportUniversalFailure } from '../src/server/universal-router/failure.t
 import { archiveEvidence, backoffMs, createIdempotencyStore, createPostgresLeaseStore, createPostgresLogStore, createRunQueries, HttpError,
   readVerifiedEvidence, requestHash, withSpan, type Database, type EvidenceStore, type HttpRequest, type HttpResponse, type Logger, type Route,
   type WorkHandler } from '@defi-workflow-engine/cloud-runtime';
+import { createHash } from 'node:crypto';
 import type { ExecutionStorage } from '@defi-workflow-engine/reference-executor';
 import type { JupiterHttp } from '@defi-workflow-engine/reference-compiler';
 import { disabledCode, flowMode, FLOWS, isFlowName, type FlowDeps, type FlowName, type FlowService, type Rpc } from './flows.ts';
@@ -22,7 +23,7 @@ import { createOwnerHistory, type HistoryDisposition, type HistoryKind } from '@
 /** Methods that could put a transaction on any network. Observer (worker) transports reject them unconditionally. */
 const SUBMISSION_METHODS = new Set(['sendTransaction', 'eth_sendRawTransaction', 'eth_sendTransaction']);
 export function observeOnly(rpc: Rpc): Rpc {
-  return (method, params) => SUBMISSION_METHODS.has(method) ? Promise.reject(new Error('WORKER_SUBMISSION_FORBIDDEN')) : rpc(method, params);
+  return (method, params, context) => SUBMISSION_METHODS.has(method) ? Promise.reject(new Error('WORKER_SUBMISSION_FORBIDDEN')) : rpc(method, params, context);
 }
 
 /**
@@ -31,7 +32,10 @@ export function observeOnly(rpc: Rpc): Rpc {
  * Reads already in flight finish on their own; nothing here can submit (the preview transport is observe-only as well).
  */
 export function untilAborted(rpc: Rpc, signal: AbortSignal): Rpc {
-  return (method, params) => signal.aborted ? Promise.reject(new Error('CLOUD_PREVIEW_TIMEOUT')) : rpc(method, params);
+  // P0 catalog reliability: the preview's signal also travels with each read, so a read already queued on the shared paced transport is dropped
+  // when its turn comes (and stops retrying) once the preview is abandoned — not only reads started after the abort.
+  return (method, params, context) => signal.aborted ? Promise.reject(new Error('CLOUD_PREVIEW_TIMEOUT'))
+    : rpc(method, params, { signal: context?.signal ? AbortSignal.any([signal, context.signal]) : signal });
 }
 export function previewTransport(deps: FlowDeps, signal: AbortSignal): FlowDeps {
   const router = deps.router ? { router: { ...deps.router, destinationRpc: untilAborted(deps.router.destinationRpc, signal) } } : {};
@@ -63,6 +67,11 @@ export type BackendOptions = {
   readonly universal?: FlowDeps['universal'];
 };
 const CODE = /^[A-Z][A-Z0-9_]{2,80}$/;
+/**
+ * P0 catalog reliability: the preview caller's remaining budget in milliseconds (100–999999). The API stops the preview at the smaller of this
+ * and its own limit, so it answers with a classified CLOUD_PREVIEW_TIMEOUT while the caller still waits instead of working for nobody.
+ */
+export const PREVIEW_DEADLINE_HEADER = 'x-flofi-deadline-ms';
 
 export function createBackend(options: BackendOptions) {
   const { db, env, logger } = options;
@@ -152,8 +161,18 @@ export function createBackend(options: BackendOptions) {
   /**
    * BUILD-MCP-001: the flow's unchanged simulation on an observe-only transport and a per-call run log (`preview.ts`). It writes
    * nothing durable and binds nothing to the account argument, so no ownership policy applies: there is no run to own.
+   *
+   * P0 catalog reliability (2026-11-07, Arbitrum WETH → USDC): five identical-flow previews started within 12 s each waited 39–48 s on the
+   * flow's one shared, paced read transport (a lone preview takes 3–4 s warm, ~11 s cold), long after the BFF (30 s) had stopped waiting.
+   * Three rules now keep a preview nobody waits for from delaying the one somebody does:
+   * - identical concurrent previews (same flow, purpose and arguments) share ONE computation (a preview persists nothing, so sharing is safe);
+   * - a computation is abandoned as soon as every caller has gone (`options.signal`: the HTTP caller disconnected), and its queued reads are
+   *   dropped by the paced transport instead of being sent;
+   * - its deadline is the caller's own (`options.deadlineMs`), never longer than the process limit (`previewTimeoutMs`, default 80 s).
    */
-  async function previewFlow(flow: FlowName, args: readonly unknown[], purpose: PreviewPurpose = 'SIMULATION'): Promise<FlowResult> {
+  const inflightPreviews = new Map<string, { readonly result: Promise<FlowResult>; waiters: number; settled: boolean; readonly abandon: (code: string) => void }>();
+  async function previewFlow(flow: FlowName, args: readonly unknown[], purpose: PreviewPurpose = 'SIMULATION',
+    callOptions: { readonly signal?: AbortSignal; readonly deadlineMs?: number } = {}): Promise<FlowResult> {
     if (purpose !== 'SIMULATION' && purpose !== 'QUOTE') return { ok: false, code: 'ARGUMENTS_INVALID' };
     if (purpose === 'QUOTE' && flow !== 'jupiter-swap') return { ok: false, code: 'PREVIEW_QUOTE_NOT_AVAILABLE' };
     const definition = FLOWS[flow], method = PREVIEW_METHODS[flow];
@@ -163,23 +182,81 @@ export function createBackend(options: BackendOptions) {
     if (mode === 'off') return { ok: false, code: disabledCode(flow) };
     const refusal = mode === 'live' ? testNetworkPreviewRefusal(flow, scopeEnv) : null;
     if (refusal) return { ok: false, code: refusal };
-    return withSpan(logger, 'flow.preview', { flow, action: method }, async () => {
-      // BUILD-FLOFI-E2E-RELIABILITY-001: a preview reads only (its storage is per call and discarded), so a deadline that stops waiting is safe.
-      // Paced public RPC reads with retries could otherwise hold one preview for minutes, past every caller's own deadline (/api/mcp hit 300 s).
-      let timer: ReturnType<typeof setTimeout> | undefined;
-      const abandoned = new AbortController(), deps = previewTransport(depsFor(flow, true), abandoned.signal);
-      const deadline = new Promise<FlowResult>(resolve => { timer = setTimeout(() => {
+    if (callOptions.signal?.aborted) return { ok: false, code: 'CLOUD_PREVIEW_ABANDONED' };
+    const limit = options.previewTimeoutMs ?? 80_000;
+    const deadlineMs = callOptions.deadlineMs === undefined ? limit : Math.max(1, Math.min(limit, callOptions.deadlineMs));
+    let key: string | null;
+    try { key = `${flow}\0${purpose}\0${createHash('sha256').update(JSON.stringify(args)).digest('hex')}`; } catch { key = null; }
+    let shared = key ? inflightPreviews.get(key) : undefined;
+    if (shared) logger.info('flow.preview_coalesced', { flow, action: method, purpose });
+    else {
+      const abandoned = new AbortController();
+      // Why the computation stopped before answering: every caller left (ABANDONED) or the last one's own deadline passed (TIMEOUT).
+      let stopCode = 'CLOUD_PREVIEW_ABANDONED';
+      // The computation runs at most to the process limit; each caller stops waiting at its own deadline, and the computation is abandoned
+      // as soon as no caller waits any more (whatever the reason), so a caller that joins later never inherits an earlier caller's deadline.
+      const result = withSpan(logger, 'flow.preview', { flow, action: method, purpose }, async (): Promise<FlowResult> => {
+        // BUILD-FLOFI-E2E-RELIABILITY-001: a preview reads only (its storage is per call and discarded), so a deadline that stops waiting is safe.
+        // Paced public RPC reads with retries could otherwise hold one preview for minutes, past every caller's own deadline (/api/mcp hit 300 s).
+        let timer: ReturnType<typeof setTimeout> | undefined;
+        const deadline = new Promise<FlowResult>(resolve => { timer = setTimeout(() => {
+          // Resolved before the abort below, so the race reports the timeout (not the abandonment the abort also signals).
+          resolve({ ok: false, code: 'CLOUD_PREVIEW_TIMEOUT' });
+          abandoned.abort();
+          logger.warn('flow.preview_timeout', { flow, action: method, deadline_ms: limit });
+        }, limit); });
+        const gone = new Promise<FlowResult>(resolve => abandoned.signal.addEventListener('abort', () => resolve({ ok: false, code: stopCode }), { once: true }));
+        try {
+          // Inside the try: a transport that cannot be built (e.g. an invalid RPC URL) is this preview's classified refusal, never a rejection.
+          const deps = previewTransport(depsFor(flow, true), abandoned.signal);
+          return await Promise.race([deadline, gone, (async () => ({ ok: true, value: purpose === 'QUOTE' ? await jupiterQuotePreview(args, deps)
+            : await definition.create(previewStorage(), deps, {}).call(method, args) }) as const)()]);
+        }
+        catch (error) {
+          if (abandoned.signal.aborted) return { ok: false, code: stopCode };
+          if (!(error instanceof Error && CODE.test(error.message))) logger.warn('flow.unclassified_error', { flow, action: method });
+          if (flow === 'crosschain-universal') return reportUniversalFailure(error, method, fields => logger.warn('bridge.operation_failed', fields));
+          return { ok: false, code: error instanceof Error && CODE.test(error.message) ? error.message : definition.unavailableCode } as const;
+        }
+        finally { clearTimeout(timer); }
+      });
+      const entry = { result, waiters: 0, settled: false, abandon: (code: string) => {
+        // Removed at once, so no later caller joins a computation that is being abandoned.
+        if (key && inflightPreviews.get(key) === entry) inflightPreviews.delete(key);
+        stopCode = code;
         abandoned.abort();
-        logger.warn('flow.preview_timeout', { flow, action: method }); resolve({ ok: false, code: 'CLOUD_PREVIEW_TIMEOUT' });
-      }, options.previewTimeoutMs ?? 80_000); });
-      try { return await Promise.race([deadline, (async () => ({ ok: true, value: purpose === 'QUOTE' ? await jupiterQuotePreview(args, deps)
-        : await definition.create(previewStorage(), deps, {}).call(method, args) }) as const)()]); }
-      catch (error) {
-        if (!(error instanceof Error && CODE.test(error.message))) logger.warn('flow.unclassified_error', { flow, action: method });
-        if (flow === 'crosschain-universal') return reportUniversalFailure(error, method, fields => logger.warn('bridge.operation_failed', fields));
-        return { ok: false, code: error instanceof Error && CODE.test(error.message) ? error.message : definition.unavailableCode } as const;
-      }
-      finally { clearTimeout(timer); }
+      } };
+      shared = entry;
+      if (key) inflightPreviews.set(key, entry);
+      const settle = () => { entry.settled = true; if (key && inflightPreviews.get(key) === entry) inflightPreviews.delete(key); };
+      // Both outcomes handled: this bookkeeping can never become an unhandled rejection.
+      result.then(settle, settle);
+    }
+    const entry = shared;
+    entry.waiters++;
+    return new Promise<FlowResult>(resolve => {
+      let left = false;
+      // Each caller stops waiting at its own deadline (the timer fires only after `leave` exists).
+      const timer = setTimeout(() => {
+        logger.warn('flow.preview_timeout', { flow, action: method, deadline_ms: deadlineMs });
+        leave({ ok: false, code: 'CLOUD_PREVIEW_TIMEOUT' });
+      }, deadlineMs);
+      const leave = (answer: FlowResult | null) => {
+        if (left) return;
+        left = true; clearTimeout(timer); callOptions.signal?.removeEventListener('abort', onAbort);
+        entry.waiters--;
+        if (entry.waiters === 0 && !entry.settled) {
+          const timedOut = answer?.ok === false && answer.code === 'CLOUD_PREVIEW_TIMEOUT';
+          if (!timedOut) logger.info('flow.preview_abandoned', { flow, action: method });
+          entry.abandon(timedOut ? 'CLOUD_PREVIEW_TIMEOUT' : 'CLOUD_PREVIEW_ABANDONED');
+        }
+        resolve(answer ?? { ok: false, code: 'CLOUD_PREVIEW_ABANDONED' });
+      };
+      const onAbort = () => leave(null);
+      callOptions.signal?.addEventListener('abort', onAbort, { once: true });
+      // Every caller gets its own copy; a result that cannot be copied is never shared by reference.
+      entry.result.then(value => { let copy: FlowResult; try { copy = structuredClone(value); } catch { copy = { ok: false, code: definition.unavailableCode }; } leave(copy); },
+        () => leave({ ok: false, code: definition.unavailableCode }));
     });
   }
 
@@ -317,7 +394,11 @@ export function createBackend(options: BackendOptions) {
       const body = request.body as { args?: unknown; purpose?: unknown } | null;
       if (!body || typeof body !== 'object' || !Array.isArray(body.args) || Object.keys(body).some(key => !['args', 'purpose'].includes(key)) ||
         body.purpose !== undefined && body.purpose !== 'SIMULATION' && body.purpose !== 'QUOTE') throw new HttpError(400, 'ARGUMENTS_INVALID');
-      return { status: 200, body: await previewFlow(flow, body.args, body.purpose as PreviewPurpose | undefined) };
+      // P0 catalog reliability: the caller's remaining budget (the BFF sends its own attempt timeout) bounds the preview; a disconnect abandons it.
+      const budget = request.headers[PREVIEW_DEADLINE_HEADER];
+      const deadlineMs = typeof budget === 'string' && /^[1-9][0-9]{2,5}$/.test(budget) ? Number(budget) : undefined;
+      return { status: 200, body: await previewFlow(flow, body.args, body.purpose as PreviewPurpose | undefined, {
+        ...request.signal ? { signal: request.signal } : {}, ...deadlineMs === undefined ? {} : { deadlineMs } }) };
     }) },
     { method: 'GET', name: 'runs', pattern: /^\/v1\/runs$/, handler: wrap(async request => {
       const limit = integerParam(request.query.get('limit')), flow = request.query.get('flow');

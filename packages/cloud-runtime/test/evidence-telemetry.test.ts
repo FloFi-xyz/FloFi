@@ -82,4 +82,14 @@ describe('BUILD-CLOUD-001 telemetry', () => {
     expect(parseTraceparent('garbage')).toBeNull();
     expect(formatTraceparent(remote)).toBe('00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01');
   });
+  it('P0 catalog reliability: a classified refusal answered as a value is logged as refused, never as ok', async () => {
+    const lines: Record<string, unknown>[] = [];
+    const logger = createLogger({ service: 'api', sink: line => lines.push(JSON.parse(line) as Record<string, unknown>) });
+    await withSpan(logger, 'flow.preview', { flow: 'arbitrum-swap' }, async () => ({ ok: false, code: 'CLOUD_PREVIEW_TIMEOUT' }));
+    await withSpan(logger, 'http.request', {}, async () => ({ status: 200, body: { ok: false, code: 'POOL_UNUSABLE' } }));
+    await withSpan(logger, 'flow.call', {}, async () => ({ ok: false, code: 'not a code' }));
+    await withSpan(logger, 'flow.call', {}, async () => ({ ok: true, value: { ok: false } }));
+    expect(lines.map(l => [l.event, l.outcome, l.result_code])).toEqual([['flow.preview', 'refused', 'CLOUD_PREVIEW_TIMEOUT'],
+      ['http.request', 'refused', 'POOL_UNUSABLE'], ['flow.call', 'refused', 'UNCLASSIFIED_REFUSAL'], ['flow.call', 'ok', undefined]]);
+  });
 });

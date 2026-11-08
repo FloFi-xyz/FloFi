@@ -21,7 +21,13 @@ import { createFileExecutionStorage, discoverTransferByNonce, utf8, type Executi
 import { BASE_SEPOLIA, NATIVE_ETH, ownerBoundSwapReview, publicSwapProfile, quoteDecimals, swapProfile, type CatalogSwapProfile, type PairSwapProfile, type SwapProfile } from '../domain/public-testnet-swap.ts';
 export { BASE_MAINNET_SWAP, BASE_SEPOLIA, ETHEREUM_SEPOLIA_SWAP, NATIVE_ETH, ROBINHOOD_MAINNET_SWAP, quoteDecimals } from '../domain/public-testnet-swap.ts';
 
-export type Rpc = (method: string, params: readonly unknown[]) => Promise<unknown>;
+/**
+ * P0 catalog reliability: the optional per-call context of a read. `signal` is the caller's deadline or cancellation (an interactive quote
+ * whose browser, BFF or API caller stopped waiting). A paced transport drops a read whose caller is gone before it starts and stops retrying
+ * it, so abandoned work never holds the shared queue that live quotes, Reviews and executions wait on. Reads only; never a submission port.
+ */
+export type RpcContext = { readonly signal?: AbortSignal };
+export type Rpc = (method: string, params: readonly unknown[], context?: RpcContext) => Promise<unknown>;
 type Step = 'approval' | 'swap';
 /** BUILD-FLOFI-BRIDGE-LIVE-FIX-003: `value` is the exact native ETH the reviewed call carries — the amount in of a native-ETH swap or wrap, else 0. */
 type Tx = { readonly chainId: SwapProfile['chainHex']; readonly from: string; readonly to: string;

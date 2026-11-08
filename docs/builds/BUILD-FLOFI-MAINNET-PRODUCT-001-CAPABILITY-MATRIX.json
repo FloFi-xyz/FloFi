@@ -1059,6 +1059,222 @@
       "reason": "Implemented; no owner-signed mainnet execution has ever been recorded."
     },
     {
+      "id": "bridge-solana-base",
+      "action": "bridge",
+      "network": "solana",
+      "destinationNetwork": "base",
+      "funds": "REAL_FUNDS",
+      "protocols": [
+        "flofi.router.universal"
+      ],
+      "flow": "crosschain-universal",
+      "webRuntime": "universal",
+      "ownerWalletExecutionImplemented": true,
+      "channels": {
+        "canvas": true,
+        "approve": true,
+        "copilot": true,
+        "mcp": true,
+        "telegram": true,
+        "whatsapp": "POLICY_BLOCKED",
+        "developerApi": false
+      },
+      "agentRollout": null,
+      "registryEvidence": null,
+      "liveEvidence": [],
+      "status": "IMPLEMENTED_UNCERTIFIED",
+      "reason": "Implemented; no owner-signed mainnet execution has ever been recorded."
+    },
+    {
+      "id": "bridge-base-solana",
+      "action": "bridge",
+      "network": "base",
+      "destinationNetwork": "solana",
+      "funds": "REAL_FUNDS",
+      "protocols": [
+        "flofi.router.universal"
+      ],
+      "flow": "crosschain-universal",
+      "webRuntime": "universal",
+      "ownerWalletExecutionImplemented": true,
+      "channels": {
+        "canvas": true,
+        "approve": true,
+        "copilot": true,
+        "mcp": true,
+        "telegram": true,
+        "whatsapp": "POLICY_BLOCKED",
+        "developerApi": false
+      },
+      "agentRollout": null,
+      "registryEvidence": null,
+      "liveEvidence": [],
+      "status": "IMPLEMENTED_UNCERTIFIED",
+      "reason": "Implemented; no owner-signed mainnet execution has ever been recorded."
+    },
+    {
+      "id": "bridge-solana-arbitrum-one",
+      "action": "bridge",
+      "network": "solana",
+      "destinationNetwork": "arbitrum-one",
+      "funds": "REAL_FUNDS",
+      "protocols": [
+        "flofi.router.universal"
+      ],
+      "flow": "crosschain-universal",
+      "webRuntime": "universal",
+      "ownerWalletExecutionImplemented": true,
+      "channels": {
+        "canvas": true,
+        "approve": true,
+        "copilot": true,
+        "mcp": true,
+        "telegram": true,
+        "whatsapp": "POLICY_BLOCKED",
+        "developerApi": false
+      },
+      "agentRollout": null,
+      "registryEvidence": null,
+      "liveEvidence": [],
+      "status": "IMPLEMENTED_UNCERTIFIED",
+      "reason": "Implemented; no owner-signed mainnet execution has ever been recorded."
+    },
+    {
+      "id": "bridge-arbitrum-one-solana",
+      "action": "bridge",
+      "network": "arbitrum-one",
+      "destinationNetwork": "solana",
+      "funds": "REAL_FUNDS",
+      "protocols": [
+        "flofi.router.universal"
+      ],
+      "flow": "crosschain-universal",
+      "webRuntime": "universal",
+      "ownerWalletExecutionImplemented": true,
+      "channels": {
+        "canvas": true,
+        "approve": true,
+        "copilot": true,
+        "mcp": true,
+        "telegram": true,
+        "whatsapp": "POLICY_BLOCKED",
+        "developerApi": false
+      },
+      "agentRollout": null,
+      "registryEvidence": null,
+      "liveEvidence": [],
+      "status": "IMPLEMENTED_UNCERTIFIED",
+      "reason": "Implemented; no owner-signed mainnet execution has ever been recorded."
+    },
+    {
+      "id": "bridge-solana-ethereum",
+      "action": "bridge",
+      "network": "solana",
+      "destinationNetwork": "ethereum",
+      "funds": "REAL_FUNDS",
+      "protocols": [
+        "flofi.router.universal"
+      ],
+      "flow": "crosschain-universal",
+      "webRuntime": "universal",
+      "ownerWalletExecutionImplemented": true,
+      "channels": {
+        "canvas": true,
+        "approve": true,
+        "copilot": true,
+        "mcp": true,
+        "telegram": true,
+        "whatsapp": "POLICY_BLOCKED",
+        "developerApi": false
+      },
+      "agentRollout": null,
+      "registryEvidence": null,
+      "liveEvidence": [],
+      "status": "IMPLEMENTED_UNCERTIFIED",
+      "reason": "Implemented; no owner-signed mainnet execution has ever been recorded."
+    },
+    {
+      "id": "bridge-ethereum-solana",
+      "action": "bridge",
+      "network": "ethereum",
+      "destinationNetwork": "solana",
+      "funds": "REAL_FUNDS",
+      "protocols": [
+        "flofi.router.universal"
+      ],
+      "flow": "crosschain-universal",
+      "webRuntime": "universal",
+      "ownerWalletExecutionImplemented": true,
+      "channels": {
+        "canvas": true,
+        "approve": true,
+        "copilot": true,
+        "mcp": true,
+        "telegram": true,
+        "whatsapp": "POLICY_BLOCKED",
+        "developerApi": false
+      },
+      "agentRollout": null,
+      "registryEvidence": null,
+      "liveEvidence": [],
+      "status": "IMPLEMENTED_UNCERTIFIED",
+      "reason": "Implemented; no owner-signed mainnet execution has ever been recorded."
+    },
+    {
+      "id": "bridge-solana-robinhood",
+      "action": "bridge",
+      "network": "solana",
+      "destinationNetwork": "robinhood",
+      "funds": "REAL_FUNDS",
+      "protocols": [
+        "flofi.router.universal"
+      ],
+      "flow": "crosschain-universal",
+      "webRuntime": "universal",
+      "ownerWalletExecutionImplemented": true,
+      "channels": {
+        "canvas": true,
+        "approve": true,
+        "copilot": true,
+        "mcp": true,
+        "telegram": true,
+        "whatsapp": "POLICY_BLOCKED",
+        "developerApi": false
+      },
+      "agentRollout": null,
+      "registryEvidence": null,
+      "liveEvidence": [],
+      "status": "IMPLEMENTED_UNCERTIFIED",
+      "reason": "Implemented; no owner-signed mainnet execution has ever been recorded."
+    },
+    {
+      "id": "bridge-robinhood-solana",
+      "action": "bridge",
+      "network": "robinhood",
+      "destinationNetwork": "solana",
+      "funds": "REAL_FUNDS",
+      "protocols": [
+        "flofi.router.universal"
+      ],
+      "flow": "crosschain-universal",
+      "webRuntime": "universal",
+      "ownerWalletExecutionImplemented": true,
+      "channels": {
+        "canvas": true,
+        "approve": true,
+        "copilot": true,
+        "mcp": true,
+        "telegram": true,
+        "whatsapp": "POLICY_BLOCKED",
+        "developerApi": false
+      },
+      "agentRollout": null,
+      "registryEvidence": null,
+      "liveEvidence": [],
+      "status": "IMPLEMENTED_UNCERTIFIED",
+      "reason": "Implemented; no owner-signed mainnet execution has ever been recorded."
+    },
+    {
       "id": "remove-liquidity-solana",
       "action": "remove_liquidity",
       "network": "solana",
@@ -1221,33 +1437,6 @@
       "liveEvidence": [],
       "status": "IMPLEMENTED_UNCERTIFIED",
       "reason": "User-funded execution groups: one wallet interaction per group, the owner's wallet pays every fee (S1); off unless FLOFI_USER_FUNDED_EXECUTION=enabled; MOCKED end-to-end only — no owner-signed mainnet execution recorded."
-    },
-    {
-      "id": "bridge-evm-solana",
-      "action": "bridge",
-      "network": "any EVM network",
-      "destinationNetwork": "solana",
-      "funds": "REAL_FUNDS",
-      "protocols": [
-        "relay-depository"
-      ],
-      "flow": "crosschain-universal",
-      "webRuntime": "universal",
-      "ownerWalletExecutionImplemented": true,
-      "channels": {
-        "canvas": true,
-        "approve": true,
-        "copilot": true,
-        "mcp": true,
-        "telegram": true,
-        "whatsapp": "POLICY_BLOCKED",
-        "developerApi": false
-      },
-      "agentRollout": null,
-      "registryEvidence": "MOCKED",
-      "liveEvidence": [],
-      "status": "IMPLEMENTED_UNCERTIFIED",
-      "reason": "Owner-signed, owner-paid Relay deposits through the universal router (flow crosschain-universal) for every EVM ↔ Solana pair; MOCKED end-to-end and read-only quotes only — no mainnet transaction recorded."
     }
   ],
   "perStepRows": [

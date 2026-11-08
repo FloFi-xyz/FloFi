@@ -34,5 +34,10 @@ export function createSolanaRpc(endpoint: string, loopback: boolean): SolanaRpc 
     }
     throw new Error('SOLANA_RPC_RATE_LIMITED');
   };
-  return (method, params) => { const result = queue.then(() => post(method, params)); queue = result.catch(() => undefined); return result; };
+  // P0 catalog reliability: a read queued for an abandoned preview (its context signal aborted) is dropped when its turn comes, never sent. Only the
+  // preview transport passes a context (backend/app.ts untilAborted); submissions and owner flows never do, so they are unaffected.
+  return (method: string, params: readonly unknown[], context?: { readonly signal?: AbortSignal }) => {
+    const result = queue.then(() => context?.signal?.aborted ? Promise.reject(new Error('RPC_READ_ABANDONED')) : post(method, params));
+    queue = result.catch(() => undefined); return result;
+  };
 }

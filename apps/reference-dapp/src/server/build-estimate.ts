@@ -74,10 +74,17 @@ async function usdOf(prices: PriceSource | null, now: Date, sides: readonly [Quo
   return first && (input || output) ? { input, output, source: first.source, evidence: first.evidence, observedAt: first.observedAt } : null;
 }
 
+/**
+ * P0 catalog reliability: how long the BFF waits for the API's quote preview. The API stops 1.5 s earlier (PREVIEW_DEADLINE_HEADER) and answers
+ * CLOUD_PREVIEW_TIMEOUT; the route (maxDuration 45 s) and the browser (BUILD_ESTIMATE_TIMEOUT_MS) wait longer, so each layer hears the one below.
+ */
+export const CLOUD_QUOTE_TIMEOUT_MS = 30_000;
 /** Adapter/profile selected reads; no execution store, session, Review, signature or submission port. */
 async function readBuildEstimateValue(input: unknown, env: Env = process.env,
   seams: { rpc?: Rpc; http?: ReturnType<typeof createJupiterHttp>; now?: () => Date; catalog?: CatalogSwapRuntime; prices?: PriceSource | null;
-    discover?: typeof readBridgeDiscovery; correlationId?: string; preview?: (flow: FlowName, args: readonly unknown[], options: Parameters<typeof cloudPreview>[2]) => Promise<FlowResult<unknown> | null> } = {}): Promise<BuildEstimateResult> {
+    discover?: typeof readBridgeDiscovery; correlationId?: string; preview?: (flow: FlowName, args: readonly unknown[], options: Parameters<typeof cloudPreview>[2]) => Promise<FlowResult<unknown> | null>;
+    /** P0 catalog reliability: the browser cancelled this estimate (a newer edit superseded it): the API abandons the preview it started. */
+    signal?: AbortSignal } = {}): Promise<BuildEstimateResult> {
   try {
     const prices = () => seams.prices !== undefined ? seams.prices : env === process.env ? processPrices === undefined ? processPrices = deploymentPriceSource(env) : processPrices : deploymentPriceSource(env);
     if (!input || typeof input !== 'object') throw Error('ESTIMATE_INVALID');
@@ -88,7 +95,7 @@ async function readBuildEstimateValue(input: unknown, env: Env = process.env,
     const now = seams.now ?? (() => new Date());
     const workflowHash = hashArtifactBytes('semantic-workflow', new TextEncoder().encode(JSON.stringify(workflow)));
     if (node.actionType === 'asset.bridge') return await readBridgeBuildEstimate(workflow, node.nodeId, workflowHash,
-      typeof owner === 'string' ? owner : null, typeof destinationWallet === 'string' ? destinationWallet : null, env, now, seams.discover, seams.correlationId);
+      typeof owner === 'string' ? owner : null, typeof destinationWallet === 'string' ? destinationWallet : null, env, now, seams.discover, seams.correlationId, seams.signal);
     if (node.actionType !== 'asset.swap.exact-input') throw Error('ESTIMATE_UNSUPPORTED');
     const profile = publicSwapProfile(node.chainId);
     if (isHostedDeployment(env) && (profile || node.chainId === ORCA_WHIRLPOOLS_DEVNET.chain)) throw Error('TEST_NETWORK_NOT_AVAILABLE');
@@ -118,7 +125,8 @@ async function readBuildEstimateValue(input: unknown, env: Env = process.env,
       const subject = typeof owner === 'string' ? owner : UNIVERSAL_QUOTE_SUBJECTS.SOLANA;
       startUsd();
       const preview = await (seams.preview ?? cloudPreview)(flow, catalogNetwork ? [workflow] : [workflow, subject],
-        { env, timeoutMs: 30_000, maxAttempts: 1, ...solanaMainnet ? { purpose: 'QUOTE' as const } : {} });
+        { env, timeoutMs: CLOUD_QUOTE_TIMEOUT_MS, maxAttempts: 1, ...solanaMainnet ? { purpose: 'QUOTE' as const } : {}, ...seams.signal ? { signal: seams.signal } : {} });
+      if (seams.signal?.aborted) return quoteFailure(new Error('ESTIMATE_CANCELLED'), seams.correlationId);
       // A configured hosted runtime never falls back to development transports, even after a failed quote.
       if (preview !== null) {
         if (!preview.ok) return quoteFailure(new Error(preview.code), preview.correlationId);

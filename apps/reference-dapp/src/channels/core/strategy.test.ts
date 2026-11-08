@@ -72,6 +72,15 @@ const SENTENCES: Readonly<Record<string, string>> = {
       'bridge-ethereum-arbitrum': 'bridge 5 USDC from Ethereum to Arbitrum via auto slippage 100 bps',
       'bridge-arbitrum-ethereum': 'bridge 5 USDC from Arbitrum to Ethereum via auto slippage 100 bps',
       'bridge-ethereum-robinhood': 'bridge 5 USDC from Ethereum to Robinhood Chain via auto slippage 100 bps',
+      // P0 catalog reliability: the Universal Router's EVM ⇄ Solana directions, now in the shared catalog.
+      'bridge-solana-base': 'bridge 5 USDC from Solana to Base via best slippage 100 bps',
+      'bridge-base-solana': 'bridge 5 USDC from Base to Solana via best slippage 100 bps',
+      'bridge-solana-arbitrum-one': 'bridge 5 USDC from Solana to Arbitrum via best slippage 100 bps',
+      'bridge-arbitrum-one-solana': 'bridge 5 USDC from Arbitrum to Solana via best slippage 100 bps',
+      'bridge-solana-ethereum': 'bridge 5 USDC from Solana to Ethereum via best slippage 100 bps',
+      'bridge-ethereum-solana': 'bridge 5 USDC from Ethereum to Solana via best slippage 100 bps',
+      'bridge-solana-robinhood': 'bridge 5 USDC from Solana to Robinhood via best slippage 100 bps',
+      'bridge-robinhood-solana': 'bridge 5 USDG from Robinhood to Solana via best slippage 100 bps',
       'bridge-robinhood-ethereum': 'bridge 5 USDG from Robinhood Chain to Ethereum via auto slippage 100 bps',
   'supply-arbitrum': 'supply 1 USDC to Aave on Arbitrum One beneficiary 0x0000000000000000000000000000000000000001',
   'borrow-arbitrum': 'borrow 1 USDC from Aave on Arbitrum One beneficiary 0x0000000000000000000000000000000000000001',
@@ -110,7 +119,7 @@ describe('BUILD-CHANNELS-001 canonical strategy parity', () => {
     const types = new Set(Object.values(SENTENCES).map(s => chat(s).type));
     // BUILD-RH-002: Robinhood Chain catalog swaps and positions (ADD_CRYPTO_ACTION) and transfers (ADD_RH_TRANSFER).
     expect([...types].sort()).toEqual(['ADD_BORROW', 'ADD_CRYPTO_ACTION', 'ADD_ETHEREUM_SEPOLIA_SWAP', 'ADD_REPAY', 'ADD_RH_TRANSFER', 'ADD_ROUTER_BRIDGE', 'ADD_SOLANA_LIQUIDITY',
-      'ADD_SOLANA_SWAP', 'ADD_SUPPLY', 'ADD_SWAP', 'ADD_TESTNET_SWAP', 'ADD_UNISWAP_LIQUIDITY', 'ADD_WITHDRAW', 'AUTHOR_LENDING']);
+      'ADD_SOLANA_SWAP', 'ADD_SUPPLY', 'ADD_SWAP', 'ADD_TESTNET_SWAP', 'ADD_UNISWAP_LIQUIDITY', 'ADD_UNIVERSAL_BRIDGE', 'ADD_WITHDRAW', 'AUTHOR_LENDING']);
     expect(strategyOfCommand({ type: 'ADD', kind: 'read', source: 'CHAT', baseRevision: 0 } as Command)).toBeNull();
     expect(canonicalStrategy({ type: 'REMOVE', nodeId: 'node-002', source: 'CHAT', baseRevision: 0 } as Command)).toEqual({ ok: false, code: 'CHANNEL_COMMAND_NOT_AUTHORING' });
   });

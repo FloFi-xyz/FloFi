@@ -86,3 +86,110 @@ describe('BUILD-FLOFI-E2E-RELIABILITY-001 abandoned preview cutoff', () => {
     expect(calls).toEqual(['main:eth_blockNumber', 'base:eth_chainId']);
   });
 });
+
+describe('P0 catalog reliability: previews nobody waits for never hold the shared transport', () => {
+  const setup = () => {
+    const harness = createMockedSolanaJupiter(), owner = createMockedSolanaWallet().owner, reads: string[] = [];
+    harness.fund(owner, 3_000_000_000n, { USDC: 100_000_000n });
+    let gate: Promise<void> = Promise.resolve(), open: () => void = () => undefined;
+    const hold = () => { gate = new Promise<void>(resolve => { open = resolve; }); };
+    const workflow: SemanticWorkflow = { schemaVersion: '1.0.0', workflowId: 'workflow-preview-coalescing', revision: 1, resourceEdges: [],
+      nodes: [createSolanaSwapNode('node-002', { network: 'Solana', from: 'USDC', to: 'SOL', amount: '1', slippage: '100' })] };
+    const backend = createBackend({ db: untouchable, env: { GRYLOO_JUPITER_HARNESS: 'MOCKED_LOOPBACK_ONLY' }, logger: quiet,
+      tenantId: 'default', holderId: 'test', evidenceStore: null, http: harness.http,
+      rpc: { 'jupiter-swap': async (method, params) => { await gate; reads.push(method); return harness.rpc(method, params); } } });
+    const route = backend.routes.find(r => r.name === 'preview')!, path = '/v1/previews/jupiter-swap';
+    const call = (signal?: AbortSignal, headers: Record<string, string> = {}) => route.handler({ method: 'POST', path, query: new URLSearchParams(), headers,
+      body: { args: [workflow, owner] }, requestId: 'r', ...signal ? { signal } : {} }, route.pattern.exec(path)!).then(r => r.body as { ok: boolean; code?: string; value?: unknown });
+    return { reads, hold, release: () => open(), call };
+  };
+  const tick = () => new Promise(resolve => setTimeout(resolve, 20));
+
+  it('identical concurrent previews share one computation and each caller gets the same answer', async () => {
+    const solo = setup();
+    expect(await solo.call()).toMatchObject({ ok: true });
+    const single = solo.reads.length;
+    const shared = setup();
+    shared.hold();
+    const answers = Promise.all([shared.call(), shared.call(), shared.call()]);
+    await tick(); shared.release();
+    const [a, b, c] = await answers;
+    expect(a).toMatchObject({ ok: true }); expect(b).toEqual(a); expect(c).toEqual(a);
+    expect(b).not.toBe(a);
+    expect(shared.reads.length).toBe(single);
+  });
+
+  it('previews that differ in amount, subject or purpose are never shared', async () => {
+    const harness = createMockedSolanaJupiter(), owner = createMockedSolanaWallet().owner, other = createMockedSolanaWallet().owner;
+    harness.fund(owner, 3_000_000_000n, { USDC: 100_000_000n }); harness.fund(other, 3_000_000_000n, { USDC: 100_000_000n });
+    let open: () => void = () => undefined, previews = 0;
+    const gate = new Promise<void>(resolve => { open = resolve; });
+    const backend = createBackend({ db: untouchable, env: { GRYLOO_JUPITER_HARNESS: 'MOCKED_LOOPBACK_ONLY' }, logger: quiet, tenantId: 'default', holderId: 'test',
+      evidenceStore: null, http: async query => { previews++; await gate; return harness.http(query); },
+      rpc: { 'jupiter-swap': async (method, params) => { await gate; return harness.rpc(method, params); } } });
+    const workflowOf = (amount: string): SemanticWorkflow => ({ schemaVersion: '1.0.0', workflowId: 'workflow-preview-keys', revision: 1, resourceEdges: [],
+      nodes: [createSolanaSwapNode('node-002', { network: 'Solana', from: 'USDC', to: 'SOL', amount, slippage: '100' })] });
+    const answers = Promise.all([backend.previewFlow('jupiter-swap', [workflowOf('1'), owner], 'QUOTE'), backend.previewFlow('jupiter-swap', [workflowOf('2'), owner], 'QUOTE'),
+      backend.previewFlow('jupiter-swap', [workflowOf('1'), other], 'QUOTE'), backend.previewFlow('jupiter-swap', [workflowOf('1'), owner], 'SIMULATION')]);
+    await tick(); open();
+    const [one, two, otherSubject] = await answers;
+    // Four different requests (amount, subject, purpose): four computations. Sharing any of them would leave fewer.
+    expect(previews).toBeGreaterThanOrEqual(4);
+    expect((one as { value: { amount: string } }).value.amount).toBe('1000000');
+    expect((two as { value: { amount: string } }).value.amount).toBe('2000000');
+    expect(otherSubject).toMatchObject({ ok: true });
+  });
+
+  it('a preview every caller has left is abandoned: its queued reads are dropped, and a later identical preview starts afresh', async () => {
+    const s = setup();
+    s.hold();
+    const first = new AbortController(), second = new AbortController();
+    const one = s.call(first.signal), two = s.call(second.signal);
+    await tick();
+    first.abort();
+    await tick();
+    // One caller still waits: the computation continues.
+    second.abort();
+    expect(await one).toEqual({ ok: false, code: 'CLOUD_PREVIEW_ABANDONED' });
+    expect(await two).toEqual({ ok: false, code: 'CLOUD_PREVIEW_ABANDONED' });
+    s.release(); await tick();
+    expect(s.reads.length).toBeLessThanOrEqual(1);
+    expect(await s.call()).toMatchObject({ ok: true });
+  });
+
+  it("stops at the caller's own deadline (x-flofi-deadline-ms) with a classified timeout", async () => {
+    const s = setup();
+    s.hold();
+    const started = Date.now();
+    expect(await s.call(undefined, { 'x-flofi-deadline-ms': '150' })).toEqual({ ok: false, code: 'CLOUD_PREVIEW_TIMEOUT' });
+    expect(Date.now() - started).toBeLessThan(2_000);
+    s.release();
+  });
+});
+
+describe('P0 catalog reliability (review): shared previews stay safe and keep each caller\'s own deadline', () => {
+  it('a transport that cannot be built is a classified refusal for every caller, never an unhandled rejection', async () => {
+    const { composeStrategy } = await import('../src/engine/strategy-engine');
+    const composed = composeStrategy({ action: 'swap', network: 'arbitrum-one', inputAsset: 'WETH', outputAsset: 'USDC', amount: '0.0012' });
+    if (!composed.ok) throw new Error(composed.code);
+    const backend = createBackend({ db: untouchable, env: { GRYLOO_ARBITRUM_MAINNET: 'live', GRYLOO_ARBITRUM_RPC_URL: 'http://plain.example' }, logger: quiet,
+      tenantId: 'default', holderId: 'test', evidenceStore: null });
+    const answers = await Promise.all([backend.previewFlow('arbitrum-swap', [composed.workflow]), backend.previewFlow('arbitrum-swap', [composed.workflow])]);
+    expect(answers).toEqual([{ ok: false, code: 'ARBITRUM_RPC_CONFIGURATION_INVALID' }, { ok: false, code: 'ARBITRUM_RPC_CONFIGURATION_INVALID' }]);
+  });
+  it('a caller that joins with a longer deadline still gets the answer after the first caller\'s deadline passed', async () => {
+    const harness = createMockedSolanaJupiter(), owner = createMockedSolanaWallet().owner;
+    harness.fund(owner, 3_000_000_000n, { USDC: 100_000_000n });
+    let open: () => void = () => undefined;
+    const gate = new Promise<void>(resolve => { open = resolve; });
+    const workflow: SemanticWorkflow = { schemaVersion: '1.0.0', workflowId: 'workflow-preview-deadlines', revision: 1, resourceEdges: [],
+      nodes: [createSolanaSwapNode('node-002', { network: 'Solana', from: 'USDC', to: 'SOL', amount: '1', slippage: '100' })] };
+    const backend = createBackend({ db: untouchable, env: { GRYLOO_JUPITER_HARNESS: 'MOCKED_LOOPBACK_ONLY' }, logger: quiet, tenantId: 'default', holderId: 'test',
+      evidenceStore: null, http: harness.http, rpc: { 'jupiter-swap': async (method, params) => { await gate; return harness.rpc(method, params); } } });
+    const short = backend.previewFlow('jupiter-swap', [workflow, owner], 'SIMULATION', { deadlineMs: 100 });
+    const long = backend.previewFlow('jupiter-swap', [workflow, owner], 'SIMULATION', { deadlineMs: 5_000 });
+    expect(await short).toEqual({ ok: false, code: 'CLOUD_PREVIEW_TIMEOUT' });
+    open();
+    expect(await long).toMatchObject({ ok: true });
+  });
+});

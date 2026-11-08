@@ -9,13 +9,13 @@ import { quoteFailure } from './quote-failure.ts';
 
 export async function readBridgeBuildEstimate(workflow: SemanticWorkflow, nodeId: string, workflowHash: string,
   owner: string | null, destinationWallet: string | null, env: Readonly<Record<string, string | undefined>>,
-  now: () => Date, discover: typeof readBridgeDiscovery = readBridgeDiscovery, correlationId?: string): Promise<BuildEstimateResult> {
+  now: () => Date, discover: typeof readBridgeDiscovery = readBridgeDiscovery, correlationId?: string, signal?: AbortSignal): Promise<BuildEstimateResult> {
   const node = workflow.nodes.find(n => n.nodeId === nodeId);
   const input = node && bridgeEstimateRequest(node, owner, destinationWallet);
   if (!input) return quoteFailure(new Error('ESTIMATE_UNSUPPORTED'), correlationId);
   const request = parseDiscoveryRequest(input);
   let response: Awaited<ReturnType<typeof discover>>;
-  try { response = await discover(input, env, correlationId); }
+  try { response = await discover(input, env, correlationId, 'STANDARD', signal); }
   catch (cause) { return quoteFailure(cause instanceof Error && /^[A-Z][A-Z0-9_]{2,80}$/.test(cause.message) ? cause : new Error('ESTIMATE_INTERNAL_ERROR'), correlationId); }
   if (!response.ok) return quoteFailure(new Error(response.code), correlationId ?? response.correlationId);
   const result = response.value;
