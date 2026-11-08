@@ -2758,6 +2758,7 @@
         "apps/reference-dapp/src/components/editor-overview-panel.tsx",
         "apps/reference-dapp/src/components/editor-run-action.tsx",
         "apps/reference-dapp/src/components/editor-stepper.tsx",
+        "apps/reference-dapp/src/components/editor-workflow-run.tsx",
         "apps/reference-dapp/src/components/embedded-approval.tsx",
         "apps/reference-dapp/src/components/execute-workspace.tsx",
         "apps/reference-dapp/src/components/execution-concurrency-notes.tsx",
@@ -3740,8 +3741,10 @@
       "sharedFinancialCore": true,
       "sources": [
         "apps/reference-dapp/src/app/editor-run-action.ts",
+        "apps/reference-dapp/src/app/editor-workflow-execution-action.ts",
         "apps/reference-dapp/src/editor/approval.ts",
         "apps/reference-dapp/src/editor/link-format.ts",
+        "apps/reference-dapp/src/editor/workflow-execution.ts",
         "apps/reference-dapp/src/editor/workflow-strategy.ts"
       ],
       "suites": [
@@ -3936,6 +3939,7 @@
         "apps/reference-dapp/src/i18n/pt-universal-bridge.ts",
         "apps/reference-dapp/src/i18n/pt-user-funded.ts",
         "apps/reference-dapp/src/i18n/pt-wallets.ts",
+        "apps/reference-dapp/src/i18n/pt-workflow-execution.ts",
         "apps/reference-dapp/src/i18n/pt-workflow-runs.ts",
         "apps/reference-dapp/src/i18n/pt.ts"
       ],
@@ -6548,12 +6552,14 @@
       ],
       "sharedFinancialCore": true,
       "sources": [
+        "apps/reference-dapp/src/user-funded/batch-simulation.ts",
         "apps/reference-dapp/src/user-funded/bundler.ts",
         "apps/reference-dapp/src/user-funded/config.ts",
         "apps/reference-dapp/src/user-funded/evm-calls.ts",
         "apps/reference-dapp/src/user-funded/evm-reconcile.ts",
         "apps/reference-dapp/src/user-funded/gas-payer.ts",
         "apps/reference-dapp/src/user-funded/groups.ts",
+        "apps/reference-dapp/src/user-funded/planned.ts",
         "apps/reference-dapp/src/user-funded/runtime.ts"
       ],
       "suites": [
