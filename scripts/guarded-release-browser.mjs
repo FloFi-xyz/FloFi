@@ -54,7 +54,9 @@ const definitions = [
   // BUILD-FLOFI-MAINNET-PRODUCT-001: the public Mainnet-only product exactly as deployed (no engineering opt-in); every other profile certifies the engines.
   ['solana-mainnet-network', ['solana-mainnet-network.spec.ts'], { GRYLOO_SOLANA_DEVNET_E2E: 'MOCKED_LOOPBACK_ONLY', FLOFI_E2E_NETWORK_SCOPE: 'PUBLIC_MAINNET' }],
   // BUILD-SOLANA-MAINNET-001 PR B: empty Canvas on Launch App, unrestricted card deletion, and the Swap arrow's From/To inversion (MOCKED estimates).
-  ['canvas-corrections', ['canvas-corrections.spec.ts'], {}],
+  // P0 workflow execution: also certifies direct Canvas amount edits (Enter, blur, typing pause; no Review/Apply) on the chat-authored
+  // Arbitrum Swap → Supply → Borrow (passive wallet, replay model; nothing simulated, signed or sent).
+  ['canvas-corrections', ['canvas-corrections.spec.ts', 'canvas-lending-amount-enter.spec.ts'], {}],
   // P0: a wallet that changes the reviewed Solana Devnet swap is refused before broadcast, Execute says why, and Simulate again runs the swap
   // once and the position; a wallet behaving like the captured Phantom (adds a compute-unit price when none is set) signs the reviewed bytes
   // and completes both steps. MOCKED Devnet loopback; only these cases of the diagnostic spec.
