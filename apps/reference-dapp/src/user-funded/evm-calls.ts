@@ -66,7 +66,8 @@ export function callOf(c: UserCall): erc7710.WorkflowCall {
  * (USDC⇄WETH Uniswap v3, the chain's registered Aave V3 market and reserves), opted in per chain here. One delegation-only gate does not apply
  * to a batch the owner's own wallet sends: the static `validateSupplyCap` profile flag (a delegated Supply could not re-check the cap at
  * redemption). A batch's supply cap is proven on chain by its whole-batch simulation before signing (`batch-simulation.ts`), so a registered
- * reserve without the flag (native USDC on Base and Arbitrum One) can be supplied in a batch too.
+ * reserve without the flag (native USDC on Base and Arbitrum One) can be supplied in a batch too. Aave steps are only ever planned into such
+ * simulated wallet batches (a user operation, signed upfront without that simulation, never carries one: `execution-groups.ts`).
  */
 export function userFundedNeed(step: StepRequirement, chains: readonly string[]): ReturnType<typeof stepCapability> {
   const c = stepCapability(step, 'PRODUCTION', chains);

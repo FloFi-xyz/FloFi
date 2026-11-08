@@ -18,7 +18,7 @@ import { composeWorkflowBound } from '../engine/strategy-engine.ts';
 import { evmCallsOf, evmStepBuildable, type EvmGroupCalls } from './evm-calls.ts';
 import { reconcileWalletBatch } from './evm-reconcile.ts';
 import { prepareGroup, reconcileEvmGroup, supersede, type Prepared, type UserFundedDeps } from './groups.ts';
-import type { BatchSimulation } from './batch-simulation.ts';
+import { simulationFailureKind, type BatchSimulation } from './batch-simulation.ts';
 
 const CHAIN = 'eip155:42161', CHAINS = [CHAIN], OWNER = '0x1111111111111111111111111111111111111111';
 const USDC = ARBITRUM_MAINNET_SWAP.usdc, WETH = ARBITRUM_MAINNET_SWAP.weth, ROUTER = ARBITRUM_MAINNET_SWAP.router;
@@ -165,5 +165,12 @@ describe('P0: Arbitrum One Swap → Supply (the swap\'s WETH) → Borrow as ONE 
     let chained: Prepared = first.value.prepared;
     for (let i = 0; i < 12; i++) chained = { ...second.value.prepared, superseded: supersede(chained) };
     expect((chained.superseded as unknown[]).length).toBe(8);
+  });
+
+  it('only a method-level refusal means the RPC cannot simulate; a lagging node is a transient RPC failure', () => {
+    for (const m of ['the method eth_simulateV1 does not exist/is not available', 'Method not found', 'unknown method eth_simulateV1', 'eth_simulateV1 is not supported',
+      'DELEGATION_RPC_METHOD_FORBIDDEN']) expect(simulationFailureKind(m)).toBe('UNSUPPORTED');
+    for (const m of ['header not found', 'block not found', 'unknown block']) expect(simulationFailureKind(m)).toBe('LAGGING');
+    expect(simulationFailureKind('execution reverted')).toBe('OTHER');
   });
 });

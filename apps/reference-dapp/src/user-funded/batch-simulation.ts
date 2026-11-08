@@ -35,8 +35,16 @@ export type BatchSimulationResult = { readonly ok: true; readonly value: BatchSi
 
 /** The Aave Pools a group calls (supply/borrow), lower-case. */
 export const aavePoolsOf = (calls: readonly UserCall[]) => [...new Set(calls.flatMap(c => c.kind === 'AAVE_V3_SUPPLY' || c.kind === 'AAVE_V3_BORROW' ? [c.pool.toLowerCase()] : []))];
-/** A JSON-RPC answer that means "this node does not offer the method" (as opposed to a simulation that ran and failed). */
-const unsupported = (message: string) => /not (?:supported|available|found|exist)|does not exist|unknown method|method not found|unsupported|DELEGATION_RPC_METHOD_FORBIDDEN/i.test(message);
+/**
+ * A JSON-RPC answer that means "this node does not offer the method" (as opposed to a simulation that ran and failed). Method-level refusals
+ * only: a node that lags (a header or block it has not seen yet) is a transient RPC failure, never "this RPC cannot simulate".
+ */
+const lagging = (message: string) => /(?:header|block) (?:not found|unavailable)|unknown block|block not (?:yet )?(?:available|synced)/i.test(message);
+const unsupported = (message: string) => !lagging(message)
+  && /method not found|unknown method|(?:method|eth_simulateV1)[^.]*(?:not supported|unsupported|does not exist|is not available)|DELEGATION_RPC_METHOD_FORBIDDEN/i.test(message);
+
+/** Exposed for tests: the classification of a failed `eth_simulateV1` answer. */
+export const simulationFailureKind = (message: string) => unsupported(message) ? 'UNSUPPORTED' : lagging(message) ? 'LAGGING' : 'OTHER';
 
 export async function simulateWalletBatch(t: ChainTransport, group: EvmGroupCalls, calls: readonly erc7710.Call[]): Promise<BatchSimulationResult> {
   if (calls.length !== group.calls.length || !calls.length) return { ok: false, code: 'USER_FUNDED_SIMULATION_INVALID', callIndex: null };
@@ -45,12 +53,13 @@ export async function simulateWalletBatch(t: ChainTransport, group: EvmGroupCall
     ...pools.map(pool => ({ from: group.owner, to: pool, data: GET_USER_ACCOUNT_DATA + word(group.owner), value: '0x0' }))];
   let raw: unknown, block: string;
   try {
+    // At least this block: the simulation runs on the node's latest state (a node behind a load balancer may not have this exact block yet).
     block = String(await t.rpc('eth_blockNumber', []));
-    raw = await t.rpc('eth_simulateV1', [{ blockStateCalls: [{ calls: sequence }], validation: false, traceTransfers: false, returnFullTransactions: false }, block]);
+    raw = await t.rpc('eth_simulateV1', [{ blockStateCalls: [{ calls: sequence }], validation: false, traceTransfers: false, returnFullTransactions: false }, 'latest']);
   } catch (cause) {
     const message = cause instanceof Error ? cause.message : '';
     if (unsupported(message)) return { ok: false, code: 'USER_FUNDED_SIMULATION_UNAVAILABLE', callIndex: null };
-    return { ok: false, code: message === 'DELEGATION_RPC_UNAVAILABLE' ? 'USER_FUNDED_RPC_UNAVAILABLE' : 'USER_FUNDED_SIMULATION_FAILED', callIndex: null };
+    return { ok: false, code: message === 'DELEGATION_RPC_UNAVAILABLE' || lagging(message) ? 'USER_FUNDED_RPC_UNAVAILABLE' : 'USER_FUNDED_SIMULATION_FAILED', callIndex: null };
   }
   const blocks = Array.isArray(raw) ? raw : null, results = blocks?.length === 1 && blocks[0] && typeof blocks[0] === 'object' ? (blocks[0] as { calls?: unknown }).calls : null;
   if (!Array.isArray(results) || results.length !== sequence.length) return { ok: false, code: 'USER_FUNDED_SIMULATION_INVALID', callIndex: null };

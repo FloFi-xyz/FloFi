@@ -14,7 +14,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import { createTestDatabase } from '../../../../packages/cloud-runtime/test/pg-harness.ts';
-import { claimApproval, workflowRunStatus } from '../platform/index.ts';
+import { claimApproval, workflowRunCancel, workflowRunStatus } from '../platform/index.ts';
 import { workflowRunUserFundedAuthorize, workflowRunUserFundedPrepare, workflowRunUserFundedReport, workflowRunUserFundedStart } from '../platform/approve.ts';
 import { ARBITRUM_MAINNET_SWAP } from '../domain/public-testnet-swap.ts';
 import { createEvmDouble } from '../delegation/harness/evm-double.ts';
@@ -137,6 +137,28 @@ describe('P0: the Editor reviews and authorizes Swap → Supply → Borrow on Ar
       const done = await workflowRunUserFundedReport(h.surface, approval.approvalId, [h.evm, h.sol], 0, [hash]);
       expect(done.view.workflowRun!.run).toMatchObject({ state: 'COMPLETED', groups: [{ state: 'RECONCILED', submissions: [{ hash }] }] });
       expect(done.view.workflowRun!.run.steps[1]!.outcome!.spent).toEqual([{ asset: `${CHAIN}/erc20:${WETH}`, amount: (a.group.calls[1] as { amountOutMinimum: string }).amountOutMinimum }]);
+    } finally { await t.drop(); }
+  });
+
+  it('an Authorize that ended its run before the wallet was asked does not count against the pending-approval limit', async () => {
+    const t = await createTestDatabase();
+    try {
+      const { h, owner } = await setup(t);
+      // The harness requester may have 5 approvals waiting. Five claimed runs, each ended before anything was asked (as a failed Editor
+      // Authorize ends its run), wait for nobody: a sixth request is still accepted.
+      for (let i = 0; i < 5; i++) {
+        const approval = await h.request(strategy(owner));
+        await claimApproval(h.surface, approval.secret, [h.evm, h.sol], true, h.d.now());
+        await workflowRunUserFundedStart(h.surface, approval.approvalId, [h.evm, h.sol], METAMASK);
+        const ended = await workflowRunCancel(h.surface, approval.approvalId, [h.evm, h.sol]);
+        expect(ended.view.workflowRun!.run.state).toBe('CANCELLED');
+      }
+      const sixth = await h.request(strategy(owner));
+      // A claimed run that is still open keeps counting, exactly like an unclaimed approval.
+      await claimApproval(h.surface, sixth.secret, [h.evm, h.sol], true, h.d.now());
+      await workflowRunUserFundedStart(h.surface, sixth.approvalId, [h.evm, h.sol], METAMASK);
+      for (let i = 0; i < 4; i++) await h.request(strategy(owner));
+      await expect(h.request(strategy(owner))).rejects.toThrow('HANDOFF_PENDING_LIMIT');
     } finally { await t.drop(); }
   });
 

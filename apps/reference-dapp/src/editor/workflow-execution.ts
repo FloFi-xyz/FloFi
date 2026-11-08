@@ -143,9 +143,13 @@ export async function reviewEditorExecution(input: { readonly workflow: unknown;
       expected: own?.expected ?? (step.action === 'borrow' && input ? amountOf(input.amount, input) : null), minimum: own?.minimum ?? null,
       recipient: step.action === 'transfer' ? recipientOf(step.strategy as { readonly recipient?: unknown }, step.namespace === 'eip155' ? owner : null) : null };
   });
-  const allGrouped = plan.groups.every(g => GROUPED.includes(g.strategy));
+  // Grouping is offered only when it asks the wallet fewer times than the steps do (the run's own claim applies the same rule: otherwise it
+  // starts confirming each step, and the grouped Authorize could not start).
+  const fewer = plan.interactions.upfront + plan.interactions.whenDue < req.value.steps.length;
+  const everyGroupBatched = plan.groups.every(g => GROUPED.includes(g.strategy)), allGrouped = everyGroupBatched && fewer;
   const mode = !allGrouped ? 'STEP_BY_STEP' : plan.interactions.single ? 'ONE_WALLET_CONFIRMATION' : 'GROUPED';
   return { ok: true, value: { workflowHash: converted.workflowHash, stepCount: req.value.steps.length, owner, reviewedAt: input.now.toISOString(), validUntil, mode, groups, steps,
     counts: counts(plan.groups, preparedCalls, plan.interactions.networkSwitches, plan.interactions.oneTimeSetup),
-    reasons: [...new Set(plan.groups.flatMap(g => g.downgrades))].filter(code => code !== 'WALLET_CAPABILITIES_ASSUMED'), refusal } };
+    reasons: [...new Set([...plan.groups.flatMap(g => g.downgrades), ...everyGroupBatched && !fewer ? ['USER_FUNDED_NOT_FEWER_INTERACTIONS'] : []])].filter(code => code !== 'WALLET_CAPABILITIES_ASSUMED'),
+    refusal } };
 }

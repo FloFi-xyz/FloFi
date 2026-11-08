@@ -478,7 +478,8 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
   const groupedAction = <div className="canvas-lifecycle-control editor-run-control">
     <p className="canvas-sequence-note" role="note">{tr(workflowRunHere.started ? 'This workflow runs as one workflow run: follow it in Execute.'
       : 'All {0} steps are reviewed together and authorized at once where your wallet can batch them.', String(sequence?.steps.length ?? 0))}</p>
-    <button type="button" className="primary" data-lifecycle-action="workflow-run" disabled={['reviewing', 'authorizing', 'proving', 'wallet', 'confirming'].includes(workflowRunHere.phase)}
+    <button type="button" className="primary" data-lifecycle-action="workflow-run"
+      disabled={(!workflowRunHere.started && Boolean(authoringIncomplete)) || ['reviewing', 'authorizing', 'proving', 'wallet', 'confirming'].includes(workflowRunHere.phase)}
       onClick={() => { setTab('Execute'); if (!workflowRunHere.started && !workflowRunHere.review) void workflowRunHere.startReview(); }}>
       {tr(workflowRunHere.started ? 'Open workflow progress' : workflowRunHere.review ? 'Open the workflow review' : 'Review whole workflow')}</button>
   </div>;

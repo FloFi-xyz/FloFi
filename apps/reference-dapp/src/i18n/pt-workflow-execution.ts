@@ -119,6 +119,11 @@ export const portugueseWorkflowExecution: Readonly<Record<string, string>> = {
   'Too many reviews in a short time. Wait a few minutes and review again.': 'Revisões demais em pouco tempo. Aguarde alguns minutos e revise de novo.',
   'An Aave step after a bridge is authorized when the bridge delivery lands, after FloFi simulates it on that state (health factor and supply cap).':
     'Uma etapa da Aave depois de uma ponte é autorizada quando a entrega da ponte chega, depois que a FloFi a simula nesse estado (fator de saúde e limite de fornecimento).',
+  'Grouping would not ask your wallet fewer times for this workflow, so each step is confirmed on its own.':
+    'Agrupar não pediria menos confirmações à sua carteira neste fluxo, então cada etapa é confirmada separadamente.',
+  'Group {0}': 'Grupo {0}', 'Wallet request': 'Pedido à carteira',
+  'Before it, your wallet may ask to switch to {0} if it is on another network and, once per session, to sign FloFi\'s sign-in message (no transaction).':
+    'Antes disso, sua carteira pode pedir para mudar para {0} se estiver em outra rede e, uma vez por sessão, para assinar a mensagem de entrada da FloFi (nenhuma transação).',
   'Load workflow progress': 'Carregar o andamento do fluxo',
   'The prepared wallet request is valid until {0}; the workflow can be ended after that.':
     'O pedido preparado para a carteira vale até {0}; o fluxo pode ser encerrado depois disso.',
