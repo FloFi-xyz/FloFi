@@ -3743,6 +3743,7 @@
         "apps/reference-dapp/src/app/editor-run-action.ts",
         "apps/reference-dapp/src/app/editor-workflow-execution-action.ts",
         "apps/reference-dapp/src/server/editor-catalogs.ts",
+        "apps/reference-dapp/src/editor/authorize-binding.ts",
         "apps/reference-dapp/src/editor/approval.ts",
         "apps/reference-dapp/src/editor/link-format.ts",
         "apps/reference-dapp/src/editor/workflow-execution.ts",
