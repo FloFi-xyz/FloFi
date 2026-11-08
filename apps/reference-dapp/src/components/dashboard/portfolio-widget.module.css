@@ -26,8 +26,30 @@
 
 /* Portfolio overview: exact priced value, network allocation and compact holdings. */
 .controls { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
-.filter { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 12px; }
-.filter select { min-height: 36px; padding: 6px 28px 6px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--paper); color: var(--ink); font: inherit; }
+/* The network filter (BUILD-FLOFI-UX-005): the Dashboard's quiet button as trigger, the header settings menu's surface as its menu. */
+.filter { display: flex; align-items: center; gap: 8px; min-width: 0; color: var(--muted); font-size: 12px; }
+.filterLabel { white-space: nowrap; }
+.filterField { position: relative; min-width: 0; }
+.root .filterButton { display: inline-flex; align-items: center; gap: 8px; width: 200px; max-width: 100%; padding: 6px 10px; text-align: left; cursor: pointer; }
+.root .filterButton[aria-expanded="true"] { border-color: var(--accent-border); background: var(--paper); }
+.root .filterButton:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
+.filterValue { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.filterIcon { display: grid; place-items: center; width: 18px; height: 18px; flex: none; color: var(--muted); }
+.filterIcon :global(.brand-icon), .filterIcon :global(.brand-icon-fallback) { width: 18px; height: 18px; }
+.chevron { flex: none; color: var(--muted); transition: transform .16s ease; }
+.filterButton[aria-expanded="true"] .chevron { transform: rotate(180deg); }
+.filterMenu { position: absolute; z-index: 20; top: calc(100% + 6px); left: 0; min-width: 100%; width: max-content; max-width: min(320px, calc(100vw - 32px)); max-height: 280px; overflow-y: auto; margin: 0; padding: 6px;
+  list-style: none; border: 1px solid var(--line); border-radius: 9px; background: var(--paper); box-shadow: 0 8px 24px rgba(24, 59, 104, .12); }
+.filterMenu:focus { outline: none; }
+.filterMenu:focus-visible { border-color: var(--accent-border); }
+.filterOption { display: flex; align-items: center; gap: 8px; min-height: 36px; padding: 8px 10px; border-radius: 5px; color: var(--ink); font-size: 13px;
+  line-height: 1.4; cursor: pointer; user-select: none; }
+.filterOption[data-active] { background: var(--soft); }
+.filterOption[aria-selected="true"] { color: var(--accent-ink); font-weight: 600; }
+.filterCheck { flex: none; color: var(--blue); }
+:global(:root[data-theme="dark"]) .filterMenu { background: var(--surface-raised); box-shadow: 0 8px 24px rgba(0, 0, 0, .18); }
+:global(:root[data-theme="dark"]) .filterOption[data-active] { background: var(--accent-selected); }
+@media (prefers-reduced-motion: reduce) { .chevron { transition: none; } }
 .overview { display: grid; grid-template-columns: minmax(240px, 1.1fr) minmax(180px, .8fr) minmax(220px, 1fr); align-items: center; gap: 26px; }
 .valueCard { align-self: stretch; min-height: 224px; display: flex; flex-direction: column; align-items: flex-start; gap: 10px; padding: 26px; border-radius: 17px;
   color: #fff; background: linear-gradient(128deg, #1554c8, #155bc0); box-shadow: 0 7px 19px #1760cb1a; }
@@ -71,17 +93,7 @@
 .identity dt { color: var(--muted); font-size: 12px; }
 .identity dd { display: flex; align-items: center; gap: 10px; margin: 0; }
 .identity code { font-size: 13px; }
-.networks { list-style: none; margin: 0 0 8px; padding: 0; display: grid; gap: 8px; }
-.networks li { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px;
-  background: var(--paper); font-size: 13px; line-height: 1.5; }
 .networkIcon { display: grid; place-items: center; width: 18px; height: 18px; flex: none; }
-.networkName { font-weight: 600; }
-.statusRead, .statusUnavailable, .provenance { padding: 2px 7px; border: 1px solid var(--neutral-line); border-radius: 5px; font-size: 11px; font-weight: 600; }
-.statusRead { border-color: var(--accent-line); background: var(--blue-soft); color: var(--accent-ink); }
-.statusUnavailable { border-color: var(--danger-line); background: var(--danger-soft); color: var(--red); }
-.provenance { background: var(--neutral-soft); color: var(--neutral-ink); }
-.position { color: var(--muted); font-size: 12px; }
-.coverage { flex-basis: 100%; color: var(--muted); font-size: 12px; }
 .tableWrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 8px; }
 .table { width: 100%; border-collapse: collapse; font-size: 13px; line-height: 1.5; }
 .table th, .table td { padding: 9px 12px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: middle; white-space: nowrap; }
@@ -111,7 +123,9 @@
   .chart { width: 220px; }
   .topHoldings { grid-template-columns: 1fr; }
   .controls { width: 100%; justify-content: space-between; }
-  .filter { flex-wrap: wrap; }
+  .controls { align-items: flex-end; }
+  .filter { flex: 1; flex-direction: column; align-items: stretch; gap: 4px; }
+  .root .filterButton { width: 100%; }
   .table th, .table td { padding: 8px 10px; }
 }
 @media (min-width: 641px) and (max-width: 1100px) {
