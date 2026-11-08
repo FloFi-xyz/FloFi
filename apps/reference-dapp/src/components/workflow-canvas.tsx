@@ -605,7 +605,7 @@ function BuildCanvas({ environment, selectedId, select, openSettings, settingsId
       const value = typed ?? (canonical && canonical !== 'CONNECTED_OWNER' ? canonical : '');
       return { value, ownerOnly: false, placeholder: typed === undefined && canonical === 'CONNECTED_OWNER' ? 'Your connected wallet' : policy.format.placeholder,
         status: typed === undefined && canonical ? 'valid' : checkRecipient(network, value).ok ? 'valid' : value.trim() ? 'invalid' : 'required',
-        onChange: (next: string) => editCanvasRecipient?.(id, next) };
+        changed: typed !== undefined, onChange: (next: string) => editCanvasRecipient?.(id, next) };
     };
     const nodeRecipient = (node: Workflow['nodes'][number]) => {
       const transfer = transferDetails(node as Parameters<typeof transferDetails>[0]);
@@ -706,13 +706,9 @@ function BuildCanvas({ environment, selectedId, select, openSettings, settingsId
           canReview: selectedId === actionSetup.id,
           canApply: Boolean(Boolean(actionSetup.cryptoSelection && actionSelection(actionSetup.id, actionSetup.cryptoSelection).valid) && pending?.valid && pending.authoringId === actionSetup.id && pending.authoringAmount === actionReviewValue(actionSetup, actionSetup.id, undefined) && pending.command.baseRevision === workflow.revision), onApply: applyProposal } } : {}),
         ...(setupRecipient ? { recipient: setupRecipient } : {}),
-        ...(actionSetup.action !== 'pool' && actionSetup.action !== 'swap' && actionSetup.action !== 'bridge' ? { supplyProposal: {
-          formId: supplyReviewFormId(actionSetup.id), reviewLabel: `Review ${setupSummary(actionSetup, context).action} change`, canReview: selectedId === actionSetup.id,
-          hasProposal: pending?.authoringId === actionSetup.id,
-          canApply: Boolean(Boolean(actionSetup.cryptoSelection && actionSelection(actionSetup.id, actionSetup.cryptoSelection).valid) && pending?.valid && pending.authoringId === actionSetup.id && pending.authoringAmount === actionReviewValue(actionSetup, actionSetup.id, undefined) && pending.command.baseRevision === workflow.revision),
-          onApply: applyProposal,
-        } } : {}),
-        ...(actionSetup.action !== 'pool' ? { amountEditor: { ...(actionSetup.action !== 'swap' && actionSetup.action !== 'bridge' ? { formId: supplyReviewFormId(actionSetup.id) } : {}), value: actionSetup.amount, changed: true, onChange: (value: string) => editCanvasAmount(actionSetup.id, value),
+        // P0 workflow execution: a Supply, Borrow, Repay, Withdraw or Send card just added from the toolbox applies like Swap and Bridge — Enter,
+        // leaving the card or a pause after typing a valid amount — with no Review/Apply proposal (nothing is signed or sent by an edit).
+        ...(actionSetup.action !== 'pool' ? { amountEditor: { value: actionSetup.amount, changed: true, onChange: (value: string) => editCanvasAmount(actionSetup.id, value),
           canApply: Boolean((actionSetup.action === 'bridge' || Boolean(actionSetup.cryptoSelection && actionSelection(actionSetup.id, actionSetup.cryptoSelection).valid)) && (actionSetup.action !== 'bridge' || bridgeSelection(actionSetup.id, bridgeSetupNetworks(actionSetup), true).valid) && pending?.valid && pending.authoringId === actionSetup.id && pending.authoringAmount === actionReviewValue(actionSetup, actionSetup.id, undefined) && pending.command.baseRevision === workflow.revision),
           onReview: () => reviewCanvasAmount(actionSetup.id), onApply: applyProposal, onCommit: () => commitCanvasAmount(actionSetup.id),
           blocked: actionSetup.action === 'bridge' ? bridgeSelection(actionSetup.id, bridgeSetupNetworks(actionSetup), true).valid ? null : 'Choose matching networks.'

@@ -21,6 +21,9 @@ import { networkIdentity } from '../domain/network-registry';
 import type { CryptoSelection } from '../domain/crypto-action-picker';
 import { SolanaVerifiedAssetSearch } from './solana-verified-asset-search';
 import { universalKeyOfCanvasLabel } from '../domain/universal-bridge-authoring';
+import { CANONICAL_TYPED_AMOUNT } from '../domain/canvas-action-setup';
+/** P0 workflow execution: how long a valid typed amount rests before it applies by itself (Enter or leaving the card applies at once). */
+export const AUTO_APPLY_PAUSE_MS = 1_200;
 import { UNIVERSAL_NETWORKS } from '@defi-workflow-engine/workflow-contracts';
 import { AssetSearch } from './asset-search';
 import { LendingReservePicker, type LendingPickerData } from './lending-card-picker';
@@ -106,11 +109,15 @@ function TokenPicker({ symbol, network, options, onChange }: { symbol: string; n
 }
 
 /** UX-001: the Send card's destination, on the card itself. It edits only the draft of the transfer's one canonical `recipient`. */
-export type CardRecipient = { value: string; placeholder: string; ownerOnly: boolean; status: 'valid' | 'required' | 'invalid'; onChange(value: string): void };
-function RecipientField({ recipient, formId }: { recipient: CardRecipient; formId?: string | undefined }) {
+/** `changed`: the owner typed a recipient on this card that is not applied yet (P0 workflow execution: it applies directly, like the amount). */
+export type CardRecipient = { value: string; placeholder: string; ownerOnly: boolean; status: 'valid' | 'required' | 'invalid'; changed?: boolean; onChange(value: string): void };
+function RecipientField({ recipient, formId, onCommit, onLeave }: { recipient: CardRecipient; formId?: string | undefined; onCommit?: (() => void) | undefined;
+  onLeave?: ((event: FocusEvent<HTMLElement>) => void) | undefined }) {
   const { t: tr } = useLocale();
   const id = useId();
-  return <div className="composer-recipient nodrag nopan" onClick={event => event.stopPropagation()} onKeyDown={event => event.stopPropagation()}>
+  // P0 workflow execution: Enter in the To field (or leaving the card) applies the Send like its amount; no Review/Apply proposal.
+  return <div className="composer-recipient nodrag nopan" onClick={event => event.stopPropagation()} onBlur={onLeave}
+    onKeyDown={event => { event.stopPropagation(); if (event.key === 'Enter' && onCommit && !formId) { event.preventDefault(); onCommit(); } }}>
     <label htmlFor={id}>{tr('To')}</label>
     <input id={id} className="composer-recipient-input numeric" type="text" inputMode="text" autoComplete="off" spellCheck={false} maxLength={128}
       value={recipient.value} placeholder={tr(recipient.placeholder)} readOnly={recipient.ownerOnly} form={formId}
@@ -444,7 +451,9 @@ export function ComposerCard({ data: card }: { data: ComposerCardData }) {
   const quote = useLiveQuote(['Swap', 'Stocks', 'Bridge'].includes(card.summary.action) ? card.estimateWorkflow : undefined,
     card.estimateNodeId ?? '', quoteOwner, card.summary.action === 'Bridge' ? quoteDestination : undefined);
   const estimate = quote.status === 'ready' ? quote.estimate : null;
-  const usdState = { status: quote.status === 'calculating' ? 'pending' as const : estimate ? 'ready' as const : 'none' as const,
+  // P0 workflow execution: an expired quote stays on the card, marked as expired, until its fresh answer replaces it (never a silent '—').
+  const expiredEstimate = quote.status === 'expired' ? quote.estimate : null;
+  const usdState ={ status: quote.status === 'calculating' ? 'pending' as const : estimate ? 'ready' as const : 'none' as const,
     mocked: estimate?.usd?.evidence === 'MOCKED', ...(estimate?.usd ? { observedAt: estimate.usd.observedAt } : {}) };
   const [amountError, setAmountError] = useState<string | null>(null);
   const [fiatFirst, setFiatFirst] = useState(false);
@@ -496,8 +505,10 @@ export function ComposerCard({ data: card }: { data: ComposerCardData }) {
   // a proposal already waiting) is reviewed by the card's own Review button: Enter submits that form, so the card never says "Press Enter to apply".
   const reviewedByForm = Boolean(editor?.formId && card.supplyProposal);
   const directCommit = Boolean(editor?.onCommit && !reviewedByForm && !card.contextualProposal);
+  // P0 workflow execution: a Send's typed recipient is part of the same direct edit as its amount.
+  const drafted = Boolean(editor?.changed || card.recipient?.changed);
   function commitAmount() {
-    if (!editor?.changed) return;
+    if (!editor || !drafted) return;
     if (!directCommit) { setAmountError(editor.onReview()); return; }
     setAmountError(editor.blocked ?? editor.onCommit!());
   }
@@ -505,8 +516,17 @@ export function ComposerCard({ data: card }: { data: ComposerCardData }) {
   // its pickers or its Canvas node (selecting the card) does not.
   function commitOnLeave(event: FocusEvent<HTMLElement>) {
     const next = event.relatedTarget, node = event.currentTarget.closest('.react-flow__node');
-    if (directCommit && editor?.changed && !(next instanceof Node && (poolNodeRef.current?.contains(next) || node?.contains(next)))) commitAmount();
+    if (directCommit && drafted && !(next instanceof Node && (poolNodeRef.current?.contains(next) || node?.contains(next)))) commitAmount();
   }
+  // P0 workflow execution: a valid amount the owner stopped typing applies by itself after a short pause (no Enter needed), but only when
+  // applying it cannot change what the field shows (`CANONICAL_TYPED_AMOUNT`): the owner's text and caret are kept and focus stays in place.
+  const autoValue = directCommit && editor?.changed && !card.recipient && CANONICAL_TYPED_AMOUNT.test(editor.value) ? editor.value : null;
+  const commitRef = useRef(commitAmount); commitRef.current = commitAmount;
+  useEffect(() => {
+    if (autoValue === null) return;
+    const timer = setTimeout(() => { if (Number(autoValue) > 0) commitRef.current(); }, AUTO_APPLY_PAUSE_MS);
+    return () => clearTimeout(timer);
+  }, [autoValue]);
   function picker(side: 'source' | 'destination'): TokenPickerControl {
     if (bridgeCard) return { label: `Configure ${side} asset`, title: `${side === 'source' ? amountParts?.[2] ?? pairSource : pairDestination} on ${side === 'source' ? sourceNetwork : destinationNetwork}`, expanded: bridgePanel === side, controls: bridgePanelId, onToggle: trigger => {
       bridgeTrigger.current = trigger; setBridgePanel(current => current === side ? null : side); setTokenPanel(null);
@@ -549,8 +569,9 @@ export function ComposerCard({ data: card }: { data: ComposerCardData }) {
           {amountParts ? <ValueBox readOnly source amount={amountParts[1]} token={amountParts[2]!} network={sourceNetwork} hint={card.summary.amount} fiatFirst={false} onFiatFirstChange={setFiatFirst}/>
             : <span className="numeric composer-amount">{tr(card.summary.amount)}</span>}
           {pairDestination && <><span className="composer-value-arrow" aria-hidden="true">↓</span><ValueBox readOnly token={pairDestination} network={destinationNetwork}
-            {...estimate ? { amount: estimate.expected } : {}} loading={quote.status === 'calculating'} hint={estimate ? 'Estimated output; simulate before review' : 'Output estimate unavailable'} fiatFirst={false} onFiatFirstChange={setFiatFirst}/></>}
+            {...estimate ?? expiredEstimate ? { amount: (estimate ?? expiredEstimate)!.expected } : {}} loading={quote.status === 'calculating'} hint={estimate ? 'Estimated output; simulate before review' : expiredEstimate ? 'Quote expired: updating' : 'Output estimate unavailable'} fiatFirst={false} onFiatFirstChange={setFiatFirst}/></>}
         </div>}
+        {pairDestination && expiredEstimate && <span className="composer-quote-note composer-quote-expired" role="status" data-quote-expired="true">{tr('Quote expired: updating')}</span>}
         {/* BUILD-FLOFI-WALLET-UX-EXECUTION-FIX-001 (P0-07): the Simulate plan shows the same shared live quote as Build, or why there is none. */}
         {/* BUILD-FLOFI-UX-FIX-003: only a quote that could not be produced is explained, in plain words; provider names, quality labels and "calculating"
             text stay off the card (the destination box shows the estimate or a quiet placeholder). Fees, the chosen route and risks are shown at Review. */}
@@ -569,7 +590,7 @@ export function ComposerCard({ data: card }: { data: ComposerCardData }) {
         <ValueBox source amount={amountParts?.[1]} token={amountParts?.[2] ?? pairSource ?? '—'} {...stocksCard ? { label: 'Stocks amount', inputLabel: `Stocks amount (${amountParts?.[2] ?? pairSource ?? 'USDG'})` } : {}}
           network={sourceNetwork} editor={editor && directCommit && editor.changed && editor.onCancel ? { ...editor, onEscape: () => { setAmountError(null); editor.onCancel!(); } } : editor} invalid={Boolean(amountError)} {...stocksCard ? {} : { picker: picker('source') }} hint={editor ? 'Enter the source amount' : card.summary.amount} fiatFirst={fiatFirst} onFiatFirstChange={setFiatFirst}
           usd={usdLine(sourceNetwork, estimate?.usd?.input, usdState)}/>
-        <ValueBox amount={estimate?.expected ?? (quote.status === 'calculating' ? undefined : '—')} loading={quote.status === 'calculating' && !estimate} token={pairDestination ?? '—'} network={destinationNetwork}
+        <ValueBox amount={estimate?.expected ?? expiredEstimate?.expected ?? (quote.status === 'calculating' ? undefined : '—')} loading={quote.status === 'calculating' && !estimate} token={pairDestination ?? '—'} network={destinationNetwork}
           {...card.stocks ? { equity: { symbol: card.stocks.equity, onToggle: () => { setStocksPanelOpen(open => !open); setTokenPanel(null); }, expanded: stocksPanelOpen, controls: stocksPanelId } } : { picker: picker('destination') }}
           hint="Estimated output; simulate before review" fiatFirst={fiatFirst} onFiatFirstChange={setFiatFirst}
           usd={usdLine(destinationNetwork, estimate?.usd?.output, usdState)}/>
@@ -581,6 +602,7 @@ export function ComposerCard({ data: card }: { data: ComposerCardData }) {
           {card.networkSelection?.valid === false ? tr('Choose matching networks') : tr(buildEstimateFailureMessage(quote.status === 'unavailable' ? quote.code ?? 'ESTIMATE_UNAVAILABLE' : 'ESTIMATE_UNAVAILABLE'))}
           {card.networkSelection?.valid !== false && quote.status === 'unavailable' && buildEstimateFailureReference(quote.code) && <> <small className="composer-quote-reference">{tr('Reference {0}', buildEstimateFailureReference(quote.code)!)}</small></>}</span>}
         {card.networkSelection?.valid !== false && estimate?.bridge?.execution === 'QUOTE_ONLY' && <span className="composer-quote-note" role="status">{tr('Estimate only: FloFi cannot execute this route yet.')}</span>}
+        {expiredEstimate && <span className="composer-quote-note composer-quote-expired" role="status" data-quote-expired="true">{tr('Quote expired: updating')}</span>}
         {!amountParts && card.networkSelection?.valid !== false && quote.status !== 'unavailable' && card.summary.amount && <span className="composer-quote-note">{tr(card.summary.amount)}</span>}
         {editor?.changed && (directCommit ? <div className="composer-amount-actions composer-amount-direct">
           <span className="composer-amount-hint">{tr("Press Enter to apply")}</span>
@@ -604,7 +626,7 @@ export function ComposerCard({ data: card }: { data: ComposerCardData }) {
           const fields = <><ValueBox source fiatFirst={fiatFirst} onFiatFirstChange={setFiatFirst} usd={usdLine(sourceNetwork, null, { status: 'none' })} amount={amountParts?.[1]} token={amountParts?.[2] ?? 'USDC'} tokenAddress={card.actionSelection?.assetAddress} network={sourceNetwork} picker={picker('source')}
             editor={editor && directCommit && editor.changed && editor.onCancel ? { ...editor, onEscape: () => { setAmountError(null); editor.onCancel!(); } } : editor} invalid={directCommit && Boolean(amountError)} hint={editor ? 'Enter the source amount' : card.summary.amount}/>
           {card.funding && <span className="composer-quote-note composer-funding-note" role="status" data-changed={card.funding.changed || undefined}>{card.funding.changed
-            ? tr('Step {0} delivers {1} on {2}: this step will no longer be funded by it. Review and apply the change.', card.funding.step, card.funding.symbol, card.funding.network)
+            ? tr('Step {0} delivers {1} on {2}: this step will no longer be funded by it. Press Enter to apply the change.', card.funding.step, card.funding.symbol, card.funding.network)
             : tr('Funded by step {0}: spends the {1} it delivers.', card.funding.step, card.funding.symbol)}</span>}</>;
           // BUILD-FLOFI-SINGLE-AUTH-WORKFLOW-UX-001: an ordinary Aave amount edit has the card's own form, exactly like Swap and Bridge: Enter (or
           // leaving the step) applies it directly; a reviewed edit keeps the external review form and its Review button.
@@ -620,7 +642,8 @@ export function ComposerCard({ data: card }: { data: ComposerCardData }) {
           </form>;
         })()
         : <span className="numeric composer-amount">{tr(card.summary.amount)}</span>}
-      {!card.inspection && card.recipient && <RecipientField recipient={card.recipient} formId={card.supplyProposal?.formId}/>}
+      {!card.inspection && card.recipient && <RecipientField recipient={card.recipient} formId={card.supplyProposal?.formId}
+        onCommit={directCommit ? commitAmount : undefined} onLeave={directCommit ? commitOnLeave : undefined}/>}
       {!card.inspection && card.supplyProposal && <div className="composer-amount-actions composer-supply-actions nodrag nopan" onClick={event => event.stopPropagation()}>
         <button type="submit" form={card.supplyProposal.formId} className="composer-amount-review" title={card.recipient && card.recipient.status !== 'valid' ? tr('Enter the recipient address.') : undefined}
           disabled={!card.supplyProposal.canReview || card.actionSelection?.valid === false || Boolean(card.recipient && card.recipient.status !== 'valid')}>{tr(card.supplyProposal.reviewLabel ?? 'Review Supply change')}</button>

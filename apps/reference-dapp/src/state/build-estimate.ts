@@ -12,7 +12,22 @@ import type { DiscoveryResult } from '../server/universal-router/discovery';
  * provider has no route or answer for exactly that snapshot. Display only: it never simulates, creates Review, authorizes or executes.
  */
 export type LiveQuote = { readonly status: 'idle' } | { readonly status: 'calculating' } | { readonly status: 'ready'; readonly estimate: BuildEstimate }
+  /** P0 workflow execution: the card's last answer for exactly this snapshot passed its expiry. It stays visible, explicitly marked as expired,
+   *  while a fresh quote is requested (only while the page is visible) — never silently replaced by a dash, and never a Review or signing input. */
+  | { readonly status: 'expired'; readonly estimate: BuildEstimate }
   | { readonly status: 'unavailable'; readonly code?: string; readonly correlationId?: string; readonly discovery?: DiscoveryResult };
+/**
+ * P0 workflow execution: what a card's quote depends on — its own node alone (no links, no other steps) at a normalized revision. Editing ANOTHER
+ * card (an Aave amount, a recipient) or any revision bump no longer changes a swap card's snapshot, so its quote is neither re-requested nor
+ * blanked; the server's preview of an identical snapshot is shared too. A node that spends an earlier step's output keeps the whole workflow
+ * (the server refuses to quote an unresolved dependency).
+ */
+export function quoteSnapshot(workflow: SemanticWorkflow, nodeId: string): SemanticWorkflow | undefined {
+  const node = workflow.nodes.find(item => item.nodeId === nodeId);
+  if (!node) return undefined;
+  if (node.inputs.some(input => input.kind === 'OUTPUT_REFERENCE')) return workflow;
+  return { ...workflow, revision: 0, nodes: [{ ...node, dependencies: [] }], resourceEdges: [] };
+}
 // Answers already received, per exact snapshot (workflow hash, node, owner), reused only until the estimate's own expiry so that returning
 // to an amount shows it at once. Never a Review input; a different amount, node, owner, chain or provider is a different key.
 const answered = new Map<string, BuildEstimate>();
@@ -59,10 +74,11 @@ export function sharedEstimate(scope: string, start: (signal: AbortSignal) => Pr
 export function clearLiveQuoteCache(): void { answered.clear(); inflight.clear(); }
 
 export function useLiveQuote(workflow: SemanticWorkflow | undefined, nodeId: string, owner?: string | null, destinationWallet?: string | null): LiveQuote {
-  const serialized = workflow ? JSON.stringify(workflow) : null;
+  const projected = workflow ? quoteSnapshot(workflow, nodeId) : undefined;
+  const serialized = projected ? JSON.stringify(projected) : null;
   // Catalog/layout renders may recreate the preview object. Only changed snapshot contents invalidate its request.
   const snapshot = useMemo(() => serialized ? JSON.parse(serialized) as SemanticWorkflow : undefined, [serialized]);
-  const key = serialized ? hashArtifactBytes('semantic-workflow', new TextEncoder().encode(serialized)) : null;
+  const key = useMemo(() => serialized ? hashArtifactBytes('semantic-workflow', new TextEncoder().encode(serialized)) : null, [serialized]);
   const scope = JSON.stringify([key, nodeId, owner ?? null, destinationWallet ?? null]);
   const node = snapshot?.nodes.find(node => node.nodeId === nodeId);
   const chain = node?.chainId;
@@ -71,6 +87,8 @@ export function useLiveQuote(workflow: SemanticWorkflow | undefined, nodeId: str
     : node?.adapterConstraints.protocols.includes('jupiter') ? 'Jupiter'
       : node?.adapterConstraints.protocols.includes('orca-whirlpools') ? 'Orca Whirlpools' : bridge ? 'Bridge' : null;
   const [result, setResult] = useState<{ key: string; estimate: BuildEstimate | null; failed: boolean; failure?: Extract<BuildEstimateResult, { ok: false }> } | null>(null);
+  // P0 workflow execution: the last answer of THIS snapshot after it expired (shown marked as expired until its fresh answer replaces it).
+  const [expired, setExpired] = useState<{ key: string; estimate: BuildEstimate } | null>(null);
   // Latest request wins: every snapshot takes a new generation; an older answer (even one the transport could not abort) is discarded.
   const generation = useRef(0);
   const [refresh, setRefresh] = useState(0);
@@ -82,8 +100,13 @@ export function useLiveQuote(workflow: SemanticWorkflow | undefined, nodeId: str
     const accept = (estimate: BuildEstimate | null, failed: boolean, failure?: Extract<BuildEstimateResult, { ok: false }>) => {
       if (ticket !== generation.current) return;
       setResult({ key: scope, estimate, failed, ...failure ? { failure } : {} });
-      if (estimate) expire = setTimeout(() => { if (ticket === generation.current) { answered.delete(scope); setResult(null); setRefresh(v => v + 1); } },
-        Math.max(0, Date.parse(estimate.expiresAt) - Date.now()));
+      if (estimate) { setExpired(null); expire = setTimeout(() => {
+        if (ticket !== generation.current) return;
+        answered.delete(scope); setExpired({ key: scope, estimate }); setResult(null);
+        // A fresh quote is requested at once while the page is visible; a hidden tab waits until it is shown again (no background polling).
+        if (typeof document === 'undefined' || document.visibilityState !== 'hidden') setRefresh(v => v + 1);
+        else document.addEventListener('visibilitychange', () => { if (ticket === generation.current) setRefresh(v => v + 1); }, { once: true });
+      }, Math.max(0, Date.parse(estimate.expiresAt) - Date.now())); }
     };
     const known = recalled(scope);
     if (known) { accept(known, false); return () => { clearTimeout(expire); }; }
@@ -113,7 +136,7 @@ export function useLiveQuote(workflow: SemanticWorkflow | undefined, nodeId: str
     return () => { cancel(); clearTimeout(expire); };
   }, [key, scope, snapshot, nodeId, owner, destinationWallet, chain, provider, refresh]);
   if (!quotable) return { status: 'idle' };
-  if (result?.key !== scope) return { status: 'calculating' };
+  if (result?.key !== scope) return expired?.key === scope ? { status: 'expired', estimate: expired.estimate } : { status: 'calculating' };
   return result.estimate ? { status: 'ready', estimate: result.estimate } : result.failed ? { status: 'unavailable', ...result.failure ? { code: result.failure.code, ...result.failure.correlationId ? { correlationId: result.failure.correlationId } : {},
     ...result.failure.discovery ? { discovery: result.failure.discovery } : {} } : {} } : { status: 'idle' };
 }

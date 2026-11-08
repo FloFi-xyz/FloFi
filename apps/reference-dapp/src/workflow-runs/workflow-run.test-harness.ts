@@ -88,6 +88,8 @@ export async function workflowRunHarness(db: Database, options: {
   readonly policyEnv?: Readonly<Record<string, string | undefined>>;
   /** BUILD-FLOFI-UNIVERSAL-WORKFLOW-002: user-funded execution on the MOCKED chain double for these chains (default: not enabled). */
   readonly userFundedChains?: readonly string[];
+  /** P0 workflow execution: another MOCKED chain double for a user-funded chain (e.g. Arbitrum One with an Aave market), instead of the harness's. */
+  readonly userFundedRpc?: (chain: string) => ((method: string, params: readonly unknown[]) => Promise<unknown>) | null;
 } = {}) {
   const d = await delegationHarness(db);
   const facts: DelegationFacts = options.delegation === false ? null : { mode: 'MOCKED_HARNESS', unavailable: null };
@@ -100,7 +102,7 @@ export async function workflowRunHarness(db: Database, options: {
   const ufChains = options.userFundedChains ?? null;
   const userFundedFacts = ufChains ? { enabled: true, code: null, chains: ufChains, bundlerChains: [], solanaNonceAccounts: false } : undefined;
   const userFunded: UserFundedDeps | null = ufChains ? { chains: ufChains, now: d.now, bundler: () => null, solana: null, jupiter: null,
-    evm: chain => { const rpc = ufChains.includes(chain) ? d.rpc(chain) : null; return rpc ? guarded(chain, 'read', 'MOCKED', rpc) : null; } } : null;
+    evm: chain => { const rpc = ufChains.includes(chain) ? options.userFundedRpc?.(chain) ?? d.rpc(chain) : null; return rpc ? guarded(chain, 'read', 'MOCKED', rpc) : null; } } : null;
   const runs: WorkflowRunSurface = { store, runtime: flows.runtime, delegation: d.store, now: d.now, log, policyFor: () => policy, delegationFacts: facts,
     ...userFundedFacts ? { userFundedFacts } : {}, userFunded,
     grantsOf: owner => d.store.grants(owner as Owner), newId: typedId,

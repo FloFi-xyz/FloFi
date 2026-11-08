@@ -54,6 +54,7 @@ import { ExecutionPanel } from './execution-panel';
 import { ModeBPanel } from './mode-b-panel';
 import { ExecuteWorkspace } from './execute-workspace';
 import { EditorRunAction } from './editor-run-action';
+import { EditorWorkflowRunPanel, useEditorWorkflowRun } from './editor-workflow-run';
 import { projectCanvasAction } from '../domain/canvas-lifecycle';
 import { editorRunReadiness } from '../domain/editor-run';
 import { useExecutionLifecycle } from '../state/execution-lifecycle';
@@ -418,6 +419,14 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
     restoring: Boolean(sequenceRestore), started: Boolean(currentExecution(executionProgress)) || executionProgress.started || executionStart.started,
     invalid: Boolean(lifecycleState.invalidWorkflow || state.error), issue: sequenceIssue, lifecycle: canvasAction.kind, busy: Boolean(simulationSource.state.busy),
     revision: state.workflow.revision, simulatedRevision: runSimulation?.workflowId === state.workflow.workflowId ? runSimulation.revision : null });
+  // P0 workflow execution: a multi-step Canvas workflow runs as ONE workflow run, reviewed once and authorized with the lowest-friction mechanism
+  // the owner's wallet really supports (an EIP-5792 atomic batch where it reports one), in place. The per-step sequence stays only as the explicit
+  // fallback when the whole-workflow Review says a step needs its own flow (and why), or when this deployment does not offer it.
+  const localSequenceStarted = Boolean(currentExecution(executionProgress)) || executionProgress.started || executionStart.started
+    || Boolean(sequence && (sequence.cursor > 0 || sequence.completed.length > 0));
+  const workflowRunHere = useEditorWorkflowRun({ workflow: state.workflow, evmAccount: connectedWallet.account,
+    enabled: Boolean(sequence) && !approvalSlot && !autoPrepare && surface === 'workspace' && !sequenceRestore && !localSequenceStarted });
+  const groupedPrimary = workflowRunHere.available && (workflowRunHere.started || !workflowRunHere.review || workflowRunHere.grouped);
   // A proposal opened from a chat, MCP client or channel prepares its own fresh, read-only simulation as soon as it is loaded for that signer:
   // once per workflow revision and signer, never during or after a recorded run of this workflow, never retried automatically, and nothing is
   // accepted or signed. BUILD-CHAT-E2E-001: the final run of another workflow (the previous step of a multi-step run) does not count.
@@ -448,7 +457,14 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
     unsupported: testNetworkWorkflow || simulationSource.kind === 'unavailable', walletRequired: !signer || Boolean(approvalGate || autoPrepare && !approvalWallet),
     providerUnavailable: 'available' in simulationSource.state && simulationSource.state.available === false || 'info' in simulationSource.state && simulationSource.state.info?.available === false,
     error: simulationSource.state.error, staleQuote: lifecycleControls.view.expiresAt !== null && Date.now() >= lifecycleControls.view.expiresAt }) : null);
-  const simulateAction = sequenceRestore ? <div className="canvas-lifecycle-control sequence-restore-control">
+  const groupedAction = <div className="canvas-lifecycle-control editor-run-control">
+    <p className="canvas-sequence-note" role="note">{tr(workflowRunHere.started ? 'This workflow runs as one workflow run: follow it in Execute.'
+      : 'All {0} steps are reviewed together and authorized at once where your wallet can batch them.', String(sequence?.steps.length ?? 0))}</p>
+    <button type="button" className="primary" data-lifecycle-action="workflow-run" disabled={['reviewing', 'authorizing', 'proving', 'wallet', 'confirming'].includes(workflowRunHere.phase)}
+      onClick={() => { setTab('Execute'); if (!workflowRunHere.started && !workflowRunHere.review) void workflowRunHere.startReview(); }}>
+      {tr(workflowRunHere.started ? 'Open workflow progress' : workflowRunHere.review ? 'Open the workflow review' : 'Review whole workflow')}</button>
+  </div>;
+  const simulateAction = groupedPrimary ? groupedAction : sequenceRestore ? <div className="canvas-lifecycle-control sequence-restore-control">
       <p role="status">{sequenceIssue}</p>
       {sequenceRestore.status === 'UNVERIFIED' && <>
         <button type="button" onClick={sequenceRestore.retry}>{tr('Check again')}</button>
@@ -484,7 +500,8 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
     bridge: { workflow: runtimeWorkflow, context, source: simulationSource, authorization, wallet: reviewBinding.wallet, progress: executionProgress,
       invalidWorkflow: lifecycleState.invalidWorkflow, simulate: simulateAgain, controls: lifecycleControls, networkAction, sequence: sequencePresentation,
       pendingEdits, resolveEdit, runtimeChecking, walletNetwork: reviewBinding.wallet.chain ? shellChainLabel(reviewBinding.wallet.chain) : null, networkError: walletConnection.error,
-      simulationBlocked: walletIssue ?? (simulationDisabled || !actionable || lifecycleState.invalidWorkflow ? simulationReason ?? 'Simulation is not available for this workflow.' : null),
+      simulationBlocked: walletIssue ?? (groupedPrimary ? 'This workflow runs as one workflow run: open Execute and choose Review whole workflow, then Authorize workflow.'
+        : simulationDisabled || !actionable || lifecycleState.invalidWorkflow ? simulationReason ?? 'Simulation is not available for this workflow.' : null),
       connectWallet: () => void walletConnection.connect(), startNewWorkflow, executedActions, continuable: Boolean(sequence?.finished) || actionDone } });
   // BUILD-FLOFI-CHAT-E2E-FIX-002: the public chat-first workspace presents the Review and progress in the chat; Simulate and Execute show the canvas
   // beside it, with their summaries in an optional details surface (approval surfaces and the engineering workspace keep their side panels).
@@ -559,7 +576,8 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
     {/* BUILD-FLOFI-CONVERSATIONAL-001: on Simulate and Execute the same conversation continues beside the stage (complementary to main). */}
     {wrapStage(<main id="workspace" className={`main workflow-workspace${tab === 'Build' ? ' build-workspace' : ''}`} data-workspace-toolbox={tab === 'Build' ? workspaceToolboxMode : undefined} tabIndex={-1} aria-label={tr(tab === 'Build' ? 'Workflow workspace' : tab === 'Simulate' ? 'Simulation workspace' : 'Execution workspace')}>
       {tab === 'Execute' ? <ExecuteWorkspace detailsOnly={chatFirst} controls={lifecycleControls} primaryAction={simulateAction} workflowName={workflowName} workflow={runtimeWorkflow} context={context} source={simulationSource} authorization={authorization} wallet={reviewBinding.wallet} execution={executionStart} progress={executionProgress} recovery={executionProgress.recovery} invalidWorkflow={Boolean(reviewError || authoringIncomplete)} backToBuild={() => setTab('Build')} backToSimulate={() => setTab('Simulate')} startNewWorkflow={startNewWorkflow} openDashboard={() => setTab('Dashboard')}
-        workflowRun={editorRun.offered ? <EditorRunAction workflow={state.workflow} readiness={editorRun} steps={sequence?.steps.length ?? 0}/> : undefined}
+        workflowRun={workflowRunHere.available ? <EditorWorkflowRunPanel state={workflowRunHere}/>
+          : editorRun.offered ? <EditorRunAction workflow={state.workflow} readiness={editorRun} steps={sequence?.steps.length ?? 0}/> : undefined}
         technicalDetails={engineering && (executionStart.started || executionProgress.started || recoveryPath || localCowIntent) ? stageContent : undefined}/> : tab === 'Simulate' ?
         <SimulateWorkspace detailsOnly={chatFirst} sequenceNote={sequenceNote} workflowName={workflowName} returnToBuild={() => setTab('Build')} simulationSource={simulationSource} simulationReason={simulationReason} review={embeddedReview} simulateAction={simulateAction}>
           {engineering && <details className="shell-details technical-workspace simulation-technical"><summary>{tr('View technical details')}</summary><ReviewTechnicalDetails authorization={authorization}/>{stageContent}</details>}

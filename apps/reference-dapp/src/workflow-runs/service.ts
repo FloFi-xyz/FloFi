@@ -27,7 +27,8 @@ import { advanceRun, type RunnerDeps } from './runner.ts';
 import { CONFIRM_RUN_SECONDS } from './state-machine.ts';
 import { planExecutionGroups, type UserFundedFacts, type WalletProfile } from './execution-groups.ts';
 import { requirementOf, assetKey } from '../delegation/steps.ts';
-import { evmStepBuildable, type AssetAmountFact } from '../user-funded/evm-calls.ts';
+import { evmStepBuildable, type AssetAmountFact, type EvmGroupCalls } from '../user-funded/evm-calls.ts';
+import { plannedSteps, type PlannedStep } from '../user-funded/planned.ts';
 import { authorizeGroup, prepareGroup, type OwnerAnswer, type Prepared } from '../user-funded/groups.ts';
 import { boundStrategy } from '../engine/workflow-bindings';
 import type { GroupRecord } from './pg-store.ts';
@@ -76,7 +77,7 @@ export async function ownerAuthorizationPlan(deps: WorkflowRunDeps, run: RunReco
   const gates = await evaluateWorkflowGates(workflow, deps.runtime, deps.policyFor(run.requester.kind));
   const grants = deps.delegationFacts && deps.grantsOf ? await deps.grantsOf(run.owner) : null;
   return authorizationPlan(workflow, gates, deps.delegationFacts, grants ? { grants, now: deps.now().getTime() } : undefined,
-    deps.userFundedFacts ? { facts: deps.userFundedFacts, ...wallets ? { wallets } : {} } : undefined);
+    deps.userFundedFacts ? { facts: deps.userFundedFacts, ...wallets ? { wallets } : {}, evmOwner: run.wallets.eip155 ?? null } : undefined);
 }
 
 /** Confirm each step: the run starts (any unsigned delegated authorization of it is revoked) and its first step is resolved. */
@@ -176,7 +177,9 @@ async function resumeUserFunded(deps: WorkflowRunDeps, run: RunRecord): Promise<
   await advanceRun(runnerDeps(deps), run.runId);
   return (await deps.store.byId(run.runId))!;
 }
-const userFundedBuildable = (facts: UserFundedFacts) => (st: Parameters<typeof evmStepBuildable>[0]) => st.namespace === 'solana' || evmStepBuildable(st, facts.chains) === null;
+/** P0 workflow execution: the run's own EVM wallet is known here, so a step whose Aave beneficiary is another account is never grouped. */
+export const userFundedBuildable = (facts: UserFundedFacts, evmOwner?: string | null) => (st: Parameters<typeof evmStepBuildable>[0]) =>
+  st.namespace === 'solana' || evmStepBuildable(st, facts.chains, evmOwner) === null;
 /**
  * The owner chose user-funded execution with the wallets their browser reported (EIP-5792 capabilities, Wallet Standard features): the run's
  * groups are planned for exactly those wallets and stored with the mode, in one transaction (the database checks every group's fee payer is
@@ -191,7 +194,7 @@ export async function startUserFunded(deps: WorkflowRunDeps, run: RunRecord, wal
   if (!composed.ok) return refuse('WORKFLOW_RUN_STALE');
   const req = requirementOf(composed);
   if (!req.ok) return refuse(req.code);
-  const grouped = planExecutionGroups(req.value, facts, profile, userFundedBuildable(facts));
+  const grouped = planExecutionGroups(req.value, facts, profile, userFundedBuildable(facts, run.wallets.eip155));
   if (!grouped.ok) return refuse(grouped.code);
   await deps.store.startUserFunded(run.runId, grouped.groups, deps.now());
   await advanceRun(runnerDeps(deps), run.runId);
@@ -349,7 +352,14 @@ export type RunGroupView = { readonly index: number; readonly chain: string; rea
   /** A wallet batch's id (the owner's own wallet's handle, to read its receipts back after a reload); the owner's own view only, else null. */
   readonly batchId: string | null;
   /** Whether the owner already signed/answered this group (a signed user operation stays valid on chain until its nonce key is used). */
-  readonly signed: boolean };
+  readonly signed: boolean;
+  /**
+   * P0 workflow execution: what the prepared group does, per step, as the owner reads it before (and while) the wallet is asked — what each step
+   * spends, a swap's quoted output and signed minimum, a borrow's exact delivery — plus the whole-batch simulation's Aave health factor after it.
+   * The owner's own view only (a requester never sees amounts it was not shared), null until prepared.
+   */
+  readonly planned: { readonly steps: readonly ({ readonly index: number } & PlannedStep)[]; readonly calls: number; readonly approvals: number;
+    readonly healthFactorAfter: string | null } | null };
 
 /**
  * The public status of a run. `outcomes` false (a requester the owner did not share status with) keeps every step's state but withholds its
@@ -364,6 +374,14 @@ export async function runView(deps: { readonly store: Pick<WorkflowRunStore, 'st
   const owner = options.owner === true;
   const steps = await deps.store.steps(run.runId);
   const groupRecords = run.mode === 'USER_FUNDED' ? await deps.store.groups(run.runId) : [];
+  const composed = composeWorkflowBound(run.strategy, run.workflowHash);
+  const requirement = composed.ok && groupRecords.length ? requirementOf(composed) : null;
+  const plannedOf = (g: GroupRecord): RunGroupView['planned'] => {
+    const p = g.prepared as { group?: EvmGroupCalls; simulation?: { healthFactorAfter?: Readonly<Record<string, string>> } | null } | null;
+    if (!p?.group || !requirement?.ok) return null;
+    return { steps: [...plannedSteps(requirement.value, p.group)].map(([index, values]) => ({ index, ...values })), calls: p.group.calls.length,
+      approvals: p.group.calls.filter(c => c.kind === 'ERC20_APPROVE').length, healthFactorAfter: Object.values(p.simulation?.healthFactorAfter ?? {})[0] ?? null };
+  };
   const groups: RunGroupView[] = groupRecords.map(g => {
     const fee = (g.prepared as { fee?: { maxCost?: string; unit?: string; estimated?: boolean } } | null)?.fee;
     const paid = (g.outcome as { gasPaid?: { amount: string; unit: string; payer: string } } | null)?.gasPaid ?? null;
@@ -384,9 +402,8 @@ export async function runView(deps: { readonly store: Pick<WorkflowRunStore, 'st
       submissions,
       batchId: owner && g.strategy === 'EVM_WALLET_BATCH' ? typeof g.authorization?.batchId === 'string' ? g.authorization.batchId
         : g.state === 'PREPARED' ? String((g.prepared as { request?: { id?: string } } | null)?.request?.id ?? '') || null : null : null,
-      signed: g.authorization !== null };
+      signed: g.authorization !== null, planned: owner ? plannedOf(g) : null };
   });
-  const composed = composeWorkflowBound(run.strategy, run.workflowHash);
   const views: RunStepView[] = steps.map(s => {
     const local = s.outcome?.evidence?.environment === 'MOCKED';
     const outcome = options.outcomes && s.outcome ? { executionId: s.outcome.executionId, kind: s.outcome.kind, status: s.outcome.status, evidence: s.outcome.evidence,

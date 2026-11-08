@@ -69,3 +69,29 @@ describe('chain-bound native-transfer read client', () => {
     await expect(createNativeTransferReadRpc(ETHEREUM_SEPOLIA_TRANSFER, 'harness')('eth_sendRawTransaction', [])).rejects.toThrow('TRANSFER_RPC_METHOD_DENIED');
   });
 });
+
+describe('P0 workflow execution: Aave reads are spaced start-to-start, not paused before every read', () => {
+  it('spaces fast reads by the interval, and adds no extra pause after a read whose own answer already took longer', async () => {
+    vi.useFakeTimers({ now: 0 });
+    try {
+      const starts: number[] = [];
+      let latency = 0;
+      vi.stubGlobal('fetch', async (_url: string, init: { body: string }) => {
+        const { id } = JSON.parse(init.body) as { id: number };
+        starts.push(Date.now());
+        await new Promise(resolve => setTimeout(resolve, latency));
+        return new Response(JSON.stringify({ jsonrpc: '2.0', id, result: '0x1' }), { status: 200 });
+      });
+      const rpc = createSupplyReadRpc(false, AAVE_V3_ETHEREUM_SEPOLIA, undefined, 150);
+      // Fast answers: the endpoint still never sees two starts closer than 150 ms.
+      const fast = Promise.all([rpc('eth_blockNumber', []), rpc('eth_blockNumber', []), rpc('eth_blockNumber', [])]);
+      await vi.advanceTimersByTimeAsync(1_000); await fast;
+      expect(starts.slice(1).map((t, i) => t - starts[i]!)).toEqual([150, 150]);
+      // Slow answers (400 ms each): the next read starts as soon as the previous answer arrived — no fixed 150 ms on top of it.
+      starts.length = 0; latency = 400;
+      const slow = Promise.all([rpc('eth_blockNumber', []), rpc('eth_blockNumber', [])]);
+      await vi.advanceTimersByTimeAsync(2_000); await slow;
+      expect(starts[1]! - starts[0]!).toBe(400);
+    } finally { vi.useRealTimers(); }
+  });
+});

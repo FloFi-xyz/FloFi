@@ -26,6 +26,7 @@ import type { BundlerClient } from './bundler.ts';
 import { buildEvmGroupCalls, DEPENDENT_CALL_GAS, evmCallsOf, type AssetAmountFact, type EvmGroupCalls } from './evm-calls.ts';
 import { reconcileUserOperation, reconcileWalletBatch, type StepFacts } from './evm-reconcile.ts';
 import { assertUserFundedSubmission, type GasPaidFact } from './gas-payer.ts';
+import { simulateWalletBatch, type BatchSimulation } from './batch-simulation.ts';
 
 const WSOL = 'So11111111111111111111111111111111111111112';
 /** How long a prepared EVM group's quotes are honoured before it must be prepared again. */
@@ -75,11 +76,26 @@ async function prepareWalletBatch(deps: UserFundedDeps, requirement: WorkflowReq
   const built = await buildEvmGroupCalls(requirement, g.stepFrom, g.stepTo, { chains: deps.chains, owner: g.feePayer, transport: deps.evm, guaranteed });
   if (!built.ok) return no(built.code, built.stepIndex);
   const group = built.value, calls = evmCallsOf(group);
-  // The first call depends on nothing earlier in the batch: if it cannot be estimated from the owner's account it would revert, so nothing is offered.
-  let firstGas: bigint;
-  try { firstGas = big(await t.rpc('eth_estimateGas', [{ from: group.owner, to: calls[0]!.target, value: hex(calls[0]!.value), data: calls[0]!.data }])); }
-  catch (cause) { return no(codeOf(cause, '') === 'DELEGATION_RPC_UNAVAILABLE' ? 'USER_FUNDED_RPC_UNAVAILABLE' : 'SIMULATION_REVERTED', group.steps[0]?.stepIndex ?? null); }
-  const gas = firstGas + group.calls.slice(1).reduce((sum, c) => sum + DEPENDENT_CALL_GAS[c.kind], 0n) + 30_000n;
+  const stepOfCall = (index: number | null) => index === null ? null : group.steps.find(s => s.calls.includes(index))?.stepIndex ?? null;
+  // P0 workflow execution: the WHOLE batch is simulated in order from the owner's account before anything is offered (every call succeeds, each
+  // swap meets its signed minimum, an Aave borrow leaves a health factor of at least 2.0), and its fee estimate uses each call's simulated gas.
+  const simulated = await simulateWalletBatch(t, group, calls);
+  let gas: bigint, simulation: BatchSimulation | null = null;
+  if (simulated.ok) {
+    simulation = simulated.value;
+    gas = simulated.value.gasUsed.reduce((sum, g) => sum + BigInt(g), 0n) + 30_000n;
+  } else if (simulated.code !== 'USER_FUNDED_SIMULATION_UNAVAILABLE') return no(simulated.code, stepOfCall(simulated.callIndex) ?? group.steps[0]?.stepIndex ?? null);
+  else {
+    // Without a whole-batch simulation on this RPC, a batch whose safety depends on Aave state (health factor, caps, liquidity) is never offered
+    // blind: it is refused with a closed code (the steps then run through their own flows). Swaps and transfers keep the atomic minimum checks.
+    const aave = group.calls.findIndex(c => c.kind === 'AAVE_V3_SUPPLY' || c.kind === 'AAVE_V3_BORROW');
+    if (aave >= 0) return no('USER_FUNDED_SIMULATION_UNAVAILABLE', stepOfCall(aave));
+    // The first call depends on nothing earlier in the batch: if it cannot be estimated from the owner's account it would revert, so nothing is offered.
+    let firstGas: bigint;
+    try { firstGas = big(await t.rpc('eth_estimateGas', [{ from: group.owner, to: calls[0]!.target, value: hex(calls[0]!.value), data: calls[0]!.data }])); }
+    catch (cause) { return no(codeOf(cause, '') === 'DELEGATION_RPC_UNAVAILABLE' ? 'USER_FUNDED_RPC_UNAVAILABLE' : 'SIMULATION_REVERTED', group.steps[0]?.stepIndex ?? null); }
+    gas = firstGas + group.calls.slice(1).reduce((sum, c) => sum + DEPENDENT_CALL_GAS[c.kind], 0n) + 30_000n;
+  }
   const fees = await feeFacts(t, group.owner);
   const maxFeePerGas = fees.gasPrice * 2n + fees.priority, maxCost = gas * maxFeePerGas;
   // Financial isolation: the owner's own native balance must cover the fee ceiling plus any native value sent; nobody else's ever does.
@@ -89,7 +105,7 @@ async function prepareWalletBatch(deps: UserFundedDeps, requirement: WorkflowReq
   const request = eip5792.sendCallsRequest(group.chainId, group.owner, calls, walletBatchId(g.runId, g.groupIndex));
   // Receipts older than this preparation can never reconcile this group (an old owner transaction is not this batch).
   const fromBlock = big(await t.rpc('eth_blockNumber', [])).toString();
-  return ok({ kind: 'EVM_WALLET_BATCH', chainId: group.chainId, owner: group.owner, group, request, fromBlock,
+  return ok({ kind: 'EVM_WALLET_BATCH', chainId: group.chainId, owner: group.owner, group, request, fromBlock, simulation,
     fee: { payer: group.owner, unit: 'wei', estimatedGas: gas.toString(), maxFeePerGas: maxFeePerGas.toString(), maxCost: maxCost.toString(), estimated: true } });
 }
 

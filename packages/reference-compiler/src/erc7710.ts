@@ -374,7 +374,8 @@ const callHex = (selector: string, ...parts: readonly Uint8Array[]) => selector 
 export function workflowCallData(call: WorkflowCall, owner: string): Call {
   const o = evmAddress(owner);
   switch (call.kind) {
-    case 'ERC20_APPROVE': return { target: evmAddress(call.token), value: 0n, data: callHex(APPROVE_METHOD, addressWord(call.spender), word(exactAmount(call.amount))) };
+    // An approval of exactly 0 is a reset (P0 workflow execution: tokens such as Ethereum USDT refuse to change one non-zero allowance into another).
+    case 'ERC20_APPROVE': return { target: evmAddress(call.token), value: 0n, data: callHex(APPROVE_METHOD, addressWord(call.spender), word(call.amount === 0n ? 0n : exactAmount(call.amount))) };
     case 'ERC20_TRANSFER': return { target: evmAddress(call.token), value: 0n, data: callHex(ERC20_TRANSFER_METHOD, addressWord(call.to), word(exactAmount(call.amount))) };
     case 'NATIVE_TRANSFER': return { target: evmAddress(call.to), value: exactAmount(call.amount), data: '0x' };
     case 'UNISWAP_V3_EXACT_INPUT_SINGLE': {

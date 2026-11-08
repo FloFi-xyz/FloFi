@@ -159,7 +159,7 @@ export function ActionSettingsContent(props: InspectorProps) {
 }
 function CanonicalArtifactInspector({ selectedId, select }: InspectorProps) {
   const { t: tr } = useLocale();
-  const { state, dispatch, context, propose, review, actionSetup = null, amountInputs = {}, bridgeNetworkInputs = {}, cryptoSelections = {}, dismissProposal, editCanvasAmount, reviewCanvasAmount, commitCanvasAmount, removeActionSetup } = useWorkflow();
+  const { state, dispatch, context, propose, review, actionSetup = null, amountInputs = {}, bridgeNetworkInputs = {}, cryptoSelections = {}, dismissProposal, editCanvasAmount, commitCanvasAmount, removeActionSetup } = useWorkflow();
   const lending=isLendingComposition(state.workflow);
   const node = state.workflow.nodes.find(item => item.nodeId === selectedId && !item.actionType.startsWith('mock-'));
   const setup = actionSetup?.id === selectedId ? actionSetup : null;
@@ -262,14 +262,16 @@ function CanonicalArtifactInspector({ selectedId, select }: InspectorProps) {
     </div>}
     {setup?.action === 'pool' && !setup.cryptoSelection && <UniswapLiquidityForm key={setup.id} nodeId={setup.id} reviewFormId={poolReviewFormId(setup.id)}/>}
     {(setup?.action === 'pool' && setup.cryptoSelection || node && cryptoSelections[node.nodeId]?.action === 'pool') && <CryptoPoolForm key={`${setup?.id ?? node!.nodeId}:${setup?.cryptoSelection?.network ?? cryptoSelections[node!.nodeId]?.network}`} nodeId={setup?.id ?? node!.nodeId}/>}
-    {node?.actionType === 'asset.transfer' && selection && <form id={supplyReviewFormId(node.nodeId)} onSubmit={event => { event.preventDefault(); setError(reviewCanvasAmount(node.nodeId) ?? ''); }}><p>{tr(recipientPolicy(selection.network).kind === 'ADDRESS' ? SEND_RECIPIENT_NOTE : SELF_TRANSFER_NOTE)}</p>{error && <p role="alert">{tr(error)}</p>}</form>}
+    {/* P0 workflow execution: a Send's amount and recipient apply directly from its card (Enter or leaving it); no Review/Apply proposal. */}
+    {node?.actionType === 'asset.transfer' && selection && <form id={supplyReviewFormId(node.nodeId)} onSubmit={event => { event.preventDefault(); setError(commitCanvasAmount(node.nodeId) ?? ''); }}><p>{tr(recipientPolicy(selection.network).kind === 'ADDRESS' ? SEND_RECIPIENT_NOTE : SELF_TRANSFER_NOTE)}</p>{error && <p role="alert">{tr(error)}</p>}</form>}
     {setup?.action === 'transfer' && <p>{tr(setup.cryptoSelection && recipientPolicy(setup.cryptoSelection.network).kind === 'ADDRESS' ? SEND_RECIPIENT_NOTE : SELF_TRANSFER_NOTE)}</p>}
-    {setup && setup.action !== 'pool' && <form id={setup.action !== 'swap' && setup.action !== 'bridge' ? supplyReviewFormId(setup.id) : undefined} className="inspector-form" aria-label={tr(`Configure ${setupSummary(setup, context).action}`)} onSubmit={event => { event.preventDefault(); setError((setup.action === 'swap' || setup.action === 'bridge' ? commitCanvasAmount(setup.id) : reviewCanvasAmount(setup.id)) ?? ''); }}>
+    {/* P0 workflow execution: every new card (Swap, Bridge, Supply, Borrow, Repay, Withdraw, Send) applies its amount directly on Enter. */}
+    {setup && setup.action !== 'pool' && <form className="inspector-form" aria-label={tr(`Configure ${setupSummary(setup, context).action}`)} onSubmit={event => { event.preventDefault(); setError(commitCanvasAmount(setup.id) ?? ''); }}>
       <label htmlFor="configure-action-amount">{tr("Source amount (")}{tr(setup.cryptoSelection?.from ?? (setup.action === 'swap' ? inputSymbol(setup.direction ?? 'USDC_TO_WETH') : 'USDC'))})</label>
       <TokenAmountInput id="configure-action-amount" value={setup.amount} maxLength={80} onValueChange={value => { setError(''); editCanvasAmount(setup.id, value); }}/>
       <p className="muted">{tr("Enter an amount greater than 0 to configure this action.")}</p>
       {error && <p className="form-error" role="alert">{tr(error)}</p>}
-      <p className="muted">{tr(setup.action === 'swap' || setup.action === 'bridge' ? 'Press Enter to apply the amount.' : 'Review and apply the amount in the card.')}</p>
+      <p className="muted">{tr('Press Enter to apply the amount.')}</p>
       <button type="button" className="quiet" onClick={() => { removeActionSetup(); select(null); }}>{tr("Remove step")}</button>
     </form>}
     {node ? <>
@@ -277,8 +279,8 @@ function CanonicalArtifactInspector({ selectedId, select }: InspectorProps) {
       {/* BUILD AAVE-V3-CARD-CATALOG-FIX-001: a reserve or network chosen in the card's own picker is a Canvas draft. The card's Review submits it
           as one SET_CRYPTO_ACTION proposal (the new reserve's registry identity and the amount typed for it); the settings forms below edit
           the saved reserve and would propose the old one. */}
-      {lendingDraft && <form id={supplyReviewFormId(node.nodeId)} className="inspector-form" aria-label={tr(`Review ${label} change`)} onSubmit={event => { event.preventDefault(); setError(reviewCanvasAmount(node.nodeId) ?? ''); }}>
-        <p className="muted">{tr('{0} on {1}: enter the amount in {0} on the card, then review and apply the change. A new Simulation and Review follow.', lendingDraft.from, lendingDraft.network)}</p>
+      {lendingDraft && <form id={supplyReviewFormId(node.nodeId)} className="inspector-form" aria-label={tr(`Apply ${label} change`)} onSubmit={event => { event.preventDefault(); setError(commitCanvasAmount(node.nodeId) ?? ''); }}>
+        <p className="muted">{tr('{0} on {1}: enter the amount in {0} on the card and press Enter. A new Simulation and Review follow.', lendingDraft.from, lendingDraft.network)}</p>
         {error && <p role="alert">{tr(error)}</p>}
       </form>}
       {!lendingDraft&&node.actionType==='withdraw'&&<WithdrawAuthoringForm key={node.nodeId+':'+state.workflow.revision} nodeId={node.nodeId} reviewFormId={supplyReviewFormId(node.nodeId)}/>}

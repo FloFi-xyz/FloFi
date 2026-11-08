@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { AAVE_V3_ARBITRUM as p, AAVE_V3_BASE, assertAaveLendingProfile, aaveLendingProfile } from '@defi-workflow-engine/action-registry';
 import { createSupplyNode, createBorrowNode, createRepayNode, createWithdrawNode, type SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
-import { assertSupplyReview, supplyCall, supplyHex, type SupplyRpc } from '@defi-workflow-engine/reference-compiler';
+import { allowanceSlot, ALLOWANCE_MAPPING_CANDIDATES, assertSupplyReview, supplyCall, supplyHex, type SupplyRpc } from '@defi-workflow-engine/reference-compiler';
 import { validateSupplyRun } from '@defi-workflow-engine/reference-executor';
 import { createSupplyService, type SupplyRecord } from './supply-service';
 import { CATALOG_NETWORKS, catalogNetworkOfRun } from './catalog-networks';
@@ -205,4 +205,15 @@ describe('Arbitrum shared owner lifecycle, fees and durable recovery',()=>{
     const hash=await model.rpc('MOCK_submit',[begin.transaction]) as string;model.receipts.get(hash)!.l1Fee='0x1';await service.report(run.id,begin.step,{kind:'HASH',hash});
     expect((await service.observe(run.id)).verdict).toBe('DIVERGENT');
   }));
+  // P0 workflow execution (production 2026-11-08: SUPPLY_ALLOWANCE_OVERRIDE_UNVERIFIED on Arbitrum One): an OpenZeppelin upgradeable token keeps its
+  // allowance mapping after Initializable and a 50-slot gap (aeWETH: index 52). The approval-path simulation must find and prove that slot.
+  it.each([['OpenZeppelin upgradeable (aeWETH, index 52)',52n],['OpenZeppelin 5 namespaced (ERC-7201)',0x52c63247e1f47db19d5ce0460030c497f067ca4cebf71ba98eeadabe20bace01n]] as const)(
+    'a Supply needing an approval simulates when the token keeps its allowance mapping in %s storage',async(_layout,index)=>fixture(async({service,model})=>{
+      Object.assign(model.state,{allowanceSlot:allowanceSlot(p,OWNER,index),allowance:0n});model.history.set(model.state.block,{...model.state});
+      expect(ALLOWANCE_MAPPING_CANDIDATES).toContain(index);
+      const run=await service.simulate(workflow('supply'),OWNER);
+      expect(run.review.approvalRequired).toBe(true);
+      expect(run.review.transactions[0]!.data).toBe(supplyCall('approve(address,uint256)',p.pool,BigInt(amounts.supply)));
+      expect(model.transactions).toHaveLength(0);
+    }));
 });
