@@ -4,22 +4,41 @@
  * signed-in person is (their FloFi account and its verified addresses), and the campaign clock.
  */
 import { createHmac } from 'node:crypto';
+import { createLogger } from '@defi-workflow-engine/cloud-runtime';
 import { cookies, headers } from 'next/headers';
 import { accountHost, currentAccountSession } from '../accounts/account-host';
 import { ACCOUNT_SESSION_COOKIE } from '../accounts/account-session';
 import { sessionCookieName } from '../server/session-cookie';
 import { isHostedDeployment } from '../server/deployment';
 import { platformStateHost } from '../server/platform-state-host';
-import { normalizeEmail } from './campaign';
+import { flightCalendarFrom, normalizeEmail, type FlightCalendar } from './campaign';
 import { rateLimitClient } from './rate-limit-client';
 import { createFlightStore, type FlightStore } from './store';
 
 type Env = Readonly<Record<string, string | undefined>>;
 
-/** The campaign store, or null when this deployment has no database (the page then says the campaign is unavailable). */
+/**
+ * The campaign calendar of this deployment, read from its environment on every call (BUILD-FLOFI-UX-005): `FLOFI_FLIGHT_LIST_CLOSES_AT` and
+ * `FLOFI_FLIGHT_BOARDING_OPENS_AT` (ISO 8601 with an offset), else the approved defaults. Nothing about it is fixed at build time. Null
+ * when a set value is refused (fail-closed: the campaign is unavailable), reported once per instance by variable name only.
+ */
+let reportedInvalid = '';
+export function flightCalendar(env: Env = process.env): FlightCalendar | null {
+  const { calendar, invalid } = flightCalendarFrom(env);
+  const key = invalid.join(',');
+  if (key && key !== reportedInvalid) { reportedInvalid = key; createLogger({ service: 'flofi-web' }).warn('flight.calendar_refused', { variables: key }); }
+  return calendar;
+}
+
+/**
+ * The campaign store, bound to this deployment's calendar, or null when the deployment has no database or its calendar was refused (the
+ * page then says the campaign is unavailable).
+ */
 export async function flightStore(env: Env = process.env): Promise<FlightStore | null> {
   if (!env.DATABASE_URL) return null;
-  return createFlightStore(await platformStateHost(env));
+  const calendar = flightCalendar(env);
+  if (!calendar) return null;
+  return createFlightStore(await platformStateHost(env), calendar);
 }
 
 /**

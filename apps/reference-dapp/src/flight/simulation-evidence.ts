@@ -9,7 +9,7 @@
  */
 import { createLogger } from '@defi-workflow-engine/cloud-runtime';
 import { flightPhase } from './campaign';
-import { flightNow, flightPerson, flightStore } from './host';
+import { flightCalendar, flightNow, flightPerson, flightStore } from './host';
 import { simulationRecord, type SimulationCall } from './simulation-record';
 
 type Env = Readonly<Record<string, string | undefined>>;
@@ -22,7 +22,9 @@ export async function recordFlightSimulation(call: SimulationCall, env: Env = pr
   if (!record) return;
   try {
     const now = await flightNow(env);
-    if (flightPhase(now) !== 'BOARDING') return;
+    // A refused calendar (null) means the campaign is unavailable: nothing is recorded.
+    const calendar = flightCalendar(env);
+    if (!calendar || flightPhase(now, calendar) !== 'BOARDING') return;
     const person = await flightPerson(env);
     if (!person) return report('no_session', record.flow);
     const store = await flightStore(env);

@@ -29,8 +29,9 @@ nothing else; it is atomic and expand-only.
 | Where | What | New? |
 | --- | --- | --- |
 | Neon (production database) | Migration 0020, applied by the Railway API pre-deploy (`node apps/reference-dapp/backend/main.ts migrate`) in Release B | Yes (schema only) |
-| Vercel | No new variable. `/board` uses `DATABASE_URL` (already set), `FLOFI_SESSION_SECRET` (already set: it keys the list form's rate-limit digest) and the Privy variables (already set) | No |
+| Vercel | No new required variable. `/board` uses `DATABASE_URL` (already set), `FLOFI_SESSION_SECRET` (already set: it keys the list form's rate-limit digest) and the Privy variables (already set) | No |
 | Vercel | `FLOFI_FLIGHT_CLOCK_HARNESS` must **not** be set (it is a loopback test clock; hosted deployments ignore it anyway) | — |
+| Vercel | Optional `FLOFI_FLIGHT_LIST_CLOSES_AT` / `FLOFI_FLIGHT_BOARDING_OPENS_AT` (ISO 8601 with offset) move the campaign calendar; unset = 11 Nov 23:59 BRT / 12 Nov 9:00 BRT (BUILD-FLOFI-UX-005) | Optional |
 | Railway | No new service. The API pre-deploy migrates; the worker deploys after it (see the release order) | No |
 | Email | FloFi sends no email. "We'll email you the moment it does" is the team's job: export a group with `flight-admin.ts export-batch` and send from the team's own tool | Process |
 
@@ -76,7 +77,8 @@ working Preview needs a Preview-only `DATABASE_URL` for that branch (a new, empt
 database holding non-preview tenants). Both are owner decisions. On such a Preview database, operate with `--preview-branch <branch>`,
 never `--tenant default`: rows written under `default` make it look non-dedicated, and the next Preview build refuses it
 (`PREVIEW_DATABASE_NOT_DEDICATED`). The test clock is refused on every hosted deployment, so a Preview shows the real phase (Final call
-until 16 Nov 23:59 BRT); boarding is first exercised in production on 17 Nov 9:00 BRT. Check its runtime logs then:
+until 11 Nov 23:59 BRT, or `FLOFI_FLIGHT_LIST_CLOSES_AT`); boarding is first exercised in production on 12 Nov 9:00 BRT (or
+`FLOFI_FLIGHT_BOARDING_OPENS_AT`; see ENVIRONMENT.md, "Campaign calendar"). Check its runtime logs then:
 `flight.observer.registered`, and `flight.evidence` with `outcome: recorded` for an eligible person's simulation.
 
 ## Operating the campaign (operator CLI, production `DATABASE_URL`, `--tenant default`)
@@ -84,7 +86,7 @@ until 16 Nov 23:59 BRT); boarding is first exercised in production on 17 Nov 9:0
 | When | Command | Effect |
 | --- | --- | --- |
 | Any time | `stats` | Counters, lists by group, invites and the daily funnel (no address) |
-| Before 17 Nov | `create-batch --batch 2 --opens-at 2026-11-19T09:00:00-03:00` then `assign-batch --batch 2 --count <k>` | Later groups. Entries with no group board when boarding opens (17 Nov, 9:00 BRT) |
+| Before 12 Nov | `create-batch --batch 2 --opens-at 2026-11-19T09:00:00-03:00` then `assign-batch --batch 2 --count <k>` | Later groups. Entries with no group board when boarding opens (12 Nov, 9:00 BRT) |
 | Before a group opens | `export-batch --batch <n> --out <new file>` | Addresses (a new mode-0600 file; values a spreadsheet would read as formulas are written as text) for the team's "your group boards" email. Keep the file only until the email is sent, then delete it; the email tool is a processor of these addresses |
 | Any time | `issue-invites --count <n>` | Invites from the team (origin "creator"), shown once |
 | On request | `erase-email --email <address>` | A data subject's erasure from both lists |
@@ -102,5 +104,5 @@ until 16 Nov 23:59 BRT); boarding is first exercised in production on 17 Nov 9:0
 Keep the certificate; do not drop the `flight_*` tables. To take the campaign down, deploy a build that still ships 0020 but no `/board`
 (or Release A, whose certificate accepts schema 20). The tables stay, unused. Then run `prune` — and, to end the campaign, `purge-lists`
 — from a Release B checkout (Release A has no `flight-admin.ts`), since the page that prunes on its own is gone. The passes stay until
-their accounts are deleted. The campaign has no end date in code: from 17 Nov every eligible person's successful /app simulation is
+their accounts are deleted. The campaign has no end date in code: from 12 Nov (boarding) every eligible person's successful /app simulation is
 recorded (a few queries, capped at two seconds); a build without `src/app/cloud-flow.ts`'s registration ends that.

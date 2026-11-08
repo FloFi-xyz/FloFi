@@ -43,8 +43,8 @@ const test = base.extend<{ guard: string[] }>({
 test.skip(process.env.FLOFI_FLIGHT_E2E !== 'MOCKED_LOOPBACK_ONLY', 'Runs only under playwright.flight.config.ts');
 test.describe.configure({ mode: 'serial' });
 
-const FINAL_CALL = Date.parse('2026-11-13T12:00:00-03:00'), GATE_CLOSED = Date.parse('2026-11-17T02:00:00-03:00');
-const BOARDING = Date.parse('2026-11-17T10:00:00-03:00'), GROUP_TWO_OPEN = Date.parse('2026-11-19T09:30:00-03:00');
+const FINAL_CALL = Date.parse('2026-11-09T12:00:00-03:00'), GATE_CLOSED = Date.parse('2026-11-12T02:00:00-03:00');
+const BOARDING = Date.parse('2026-11-12T10:00:00-03:00'), GROUP_TWO_OPEN = Date.parse('2026-11-19T09:30:00-03:00');
 const run = `${randomBytes(3).toString('hex')}`;
 const ANA = `ana-${run}@flofi-e2e.test`, BEA = `bea-${run}@flofi-e2e.test`, CID = `cid-${run}@flofi-e2e.test`, DAN = `dan-${run}@flofi-e2e.test`;
 const LATE = `late-${run}@flofi-e2e.test`;
@@ -133,7 +133,10 @@ test('a visitor reaches /board in Final call, on mobile and desktop; the beta li
     const response = await page.goto('/board');
     expect(response?.status()).toBe(200);
     await expect(page.getByRole('heading', { level: 1 })).toHaveText('Final call for the beta list.');
-    await expect(page.getByRole('timer')).toHaveAttribute('aria-label', 'List closes in 3 days, 11 hours, 59 minutes');
+    await expect(page.getByRole('timer')).toHaveAttribute('aria-label', 'List closes in 2 days, 11 hours, 59 minutes');
+    // The boarding day is the campaign calendar's (12 Nov 2026, 9:00 BRT), in the hero and the page description.
+    await expect(hero(page)).toContainText('Flight FloFi · Closed beta · Boards Nov 12');
+    await expect(page.locator('meta[name="description"]')).toHaveAttribute('content', /^FloFi boards Nov 12\. /);
     await expect(hero(page)).toContainText('0 ON THE LIST');
     await noOverflow(page);
     await shot(page, `state-1-final-call-${width}`);
@@ -320,7 +323,7 @@ test('a real simulation issues the boarding pass: Founding seat #001, the real r
   await expect(pass).toContainText('Swap');
   await expect(pass).toContainText('Jupiter · Solana');
   await expect(pass).toContainText('1 STEP · 1 NETWORK');
-  await expect(pass).toContainText('17 NOV 2026');
+  await expect(pass).toContainText('12 NOV 2026');
   await expect(page.locator('#pass-invites-title')).toHaveText('Your 3 invites');
   await expect(page.locator('ul li').filter({ hasText: /^FLF-/ })).toHaveCount(3);
   await expect(hero(page)).toContainText('1 BOARDED');
@@ -413,6 +416,7 @@ test('every CTA and link resolves; the campaign posts link to a real page with t
     await at(context, clock);
     await page.reload();
     await expect(page.getByRole('heading', { level: 1 })).toContainText(title);
+    if (clock === FINAL_CALL) await expect(hero(page)).toContainText('Flight FloFi · Beta fechado · Embarca em 12/11');
     await fitsPhones(page);
   }
   await page.getByRole('navigation', { name: 'Navegação do Flight FloFi' }).getByRole('button', { name: 'EN' }).click();
