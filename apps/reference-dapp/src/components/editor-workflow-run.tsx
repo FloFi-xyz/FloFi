@@ -87,6 +87,8 @@ export function useEditorWorkflowRun(input: { readonly workflow: { readonly work
   const offered = useRef<Map<number, ReviewAmount>>(new Map());
   const runRef = useRef<RunView | null>(null);
   const reviewRef = useRef<EditorExecutionReview | null>(null);
+  /** The exact Canvas workflow the Review describes: Authorize starts THIS one (the server refuses any other hash). */
+  const reviewedWorkflow = useRef<unknown>(null);
   const [unrecorded, setUnrecorded] = useState(false);
   const acting = useRef(false);
   const proof = useWalletProof('eip155');
@@ -149,12 +151,12 @@ export function useEditorWorkflowRun(input: { readonly workflow: { readonly work
     if (!evmAccount) throw new Error('EVM_WALLET_REQUIRED');
     setPhase('reviewing'); setUpdated([]);
     // The wallet is asked what it can do on FloFi's EVM mainnets (`wallet_getCapabilities` shows no prompt); the server keeps only this workflow's.
-    const key = currentKey.current;
-    const result = await reviewEditorWorkflow(workflowSnapshot.current, evmAccount, await profileFor(EVM_MAINNETS));
+    const key = currentKey.current, reviewing = workflowSnapshot.current;
+    const result = await reviewEditorWorkflow(reviewing, evmAccount, await profileFor(EVM_MAINNETS));
     // A Review of a revision (or wallet) that changed while it was made describes nothing current: it is dropped, never authorized.
     if (currentKey.current !== key) { setPhase('idle'); return; }
     if (!result.ok) throw new Error(result.code);
-    reviewedFor.current = key; reviewRef.current = result.value; setReview(result.value); setPhase('reviewed');
+    reviewedFor.current = key; reviewRef.current = result.value; reviewedWorkflow.current = reviewing; setReview(result.value); setPhase('reviewed');
   });
   /** Hands a prepared group to the owner's wallet and relays the answer; a batch is then followed until the wallet reports its transactions. */
   async function sendPrepared(id: string, index: number, p: Record<string, unknown>, feePayer: string) {
@@ -238,6 +240,9 @@ export function useEditorWorkflowRun(input: { readonly workflow: { readonly work
       const reviewedSteps = reviewRef.current?.steps ?? [];
       if (planned.steps.some(step => step.recipient && reviewedSteps[step.index]?.recipient?.toLowerCase() !== step.recipient.toLowerCase()))
         throw new Error('EDITOR_EXECUTION_PLAN_CHANGED');
+      // Every minimum the owner accepted is still there, for the same asset (a step whose minimum vanished or changed asset is not what was reviewed).
+      if ([...accepted.current].some(([i, before]) => planned.steps.some(step => step.index === i)
+        && planned.steps.find(step => step.index === i)?.minimum?.asset !== before.asset)) throw new Error('EDITOR_EXECUTION_PLAN_CHANGED');
       const lower = planned.steps.flatMap(step => {
         const before = accepted.current.get(step.index);
         return step.minimum && before && step.minimum.asset === before.asset && BigInt(step.minimum.units) < BigInt(before.units)
@@ -260,14 +265,14 @@ export function useEditorWorkflowRun(input: { readonly workflow: { readonly work
     const profile = await profileFor([...new Set(review.groups.map(g => g.chain))]);
     // Authorize is bound to this Review: the reviewed wallet, workflow and plan of groups (the server refuses anything else).
     const binding = { owner: review.owner, workflowHash: review.workflowHash, groups: review.groups.map(g => ({ strategy: g.strategy, steps: g.steps })) };
-    let result = await authorizeEditorWorkflow(workflowSnapshot.current, profile, binding);
+    let result = await authorizeEditorWorkflow(reviewedWorkflow.current, profile, binding);
     if (!result.ok && result.code === 'EVM_WALLET_PROOF_REQUIRED') {
       // One-time sign-in of this wallet in this browser (EIP-4361 message; it authorizes no transaction), then the same Authorize continues.
       setPhase('proving');
       const proven = await proof.proveEvm();
       if (!proven.account) throw new Error(proven.error ?? 'WALLET_REQUEST_REJECTED');
       setPhase('authorizing');
-      result = await authorizeEditorWorkflow(workflowSnapshot.current, profile, binding);
+      result = await authorizeEditorWorkflow(reviewedWorkflow.current, profile, binding);
     }
     if (!result.ok) throw new Error(result.code);
     const { approvalId: id, proposal, prepared } = result.value;
@@ -458,6 +463,8 @@ export function EditorWorkflowRunPanel({ state }: { state: EditorWorkflowRunStat
           : tr('Quoted at {0}, valid until {1}', fmtTime(review.reviewedAt, language), fmtTime(review.validUntil, language))}</dd></div>}
       </dl>
       <p className="muted">{tr('Your wallet pays every network fee. FloFi never pays, advances or reimburses gas, and never signs or sends for you.')}</p>
+      {review.steps.some(step => step.action === 'swap') && review.groups.some(g => g.strategy === 'EVM_WALLET_BATCH') &&
+        <p className="muted">{tr('The wallet request itself does not expire on chain: confirm it promptly, or reject it and review again. Each swap\'s minimum is fixed when FloFi prepares the request.')}</p>}
     </>}
     {!review && run && <>
       {/* After a reload the Review is not in this tab any more: the run's own progress is shown from the server (amounts as reconciled). */}

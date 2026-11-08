@@ -124,6 +124,8 @@ export const portugueseWorkflowExecution: Readonly<Record<string, string>> = {
   'Group {0}': 'Grupo {0}', 'Wallet request': 'Pedido à carteira',
   'Before it, your wallet may ask to switch to {0} if it is on another network and, once per session, to sign FloFi\'s sign-in message (no transaction).':
     'Antes disso, sua carteira pode pedir para mudar para {0} se estiver em outra rede e, uma vez por sessão, para assinar a mensagem de entrada da FloFi (nenhuma transação).',
+  'The wallet request itself does not expire on chain: confirm it promptly, or reject it and review again. Each swap\'s minimum is fixed when FloFi prepares the request.':
+    'O pedido à carteira não expira sozinho na rede: confirme-o logo, ou recuse-o e revise de novo. O mínimo de cada swap é fixado quando a FloFi prepara o pedido.',
   'Load workflow progress': 'Carregar o andamento do fluxo',
   'The prepared wallet request is valid until {0}; the workflow can be ended after that.':
     'O pedido preparado para a carteira vale até {0}; o fluxo pode ser encerrado depois disso.',
