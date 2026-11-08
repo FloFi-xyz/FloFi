@@ -41,7 +41,7 @@ export const aavePoolsOf = (calls: readonly UserCall[]) => [...new Set(calls.fla
  */
 const lagging = (message: string) => /(?:header|block) (?:not found|unavailable)|unknown block|block not (?:yet )?(?:available|synced)/i.test(message);
 const unsupported = (message: string) => !lagging(message)
-  && /method not found|unknown method|(?:method|eth_simulateV1)[^.]*(?:not supported|unsupported|does not exist|is not available)|DELEGATION_RPC_METHOD_FORBIDDEN/i.test(message);
+  && /method not found|unknown method|unsupported method|(?:method|eth_simulateV1)[^.]*(?:not supported|unsupported|does not exist|is not available)|DELEGATION_RPC_METHOD_FORBIDDEN/i.test(message);
 
 /** Exposed for tests: the classification of a failed `eth_simulateV1` answer. */
 export const simulationFailureKind = (message: string) => unsupported(message) ? 'UNSUPPORTED' : lagging(message) ? 'LAGGING' : 'OTHER';

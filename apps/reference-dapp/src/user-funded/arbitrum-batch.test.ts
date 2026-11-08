@@ -169,8 +169,16 @@ describe('P0: Arbitrum One Swap → Supply (the swap\'s WETH) → Borrow as ONE 
 
   it('only a method-level refusal means the RPC cannot simulate; a lagging node is a transient RPC failure', () => {
     for (const m of ['the method eth_simulateV1 does not exist/is not available', 'Method not found', 'unknown method eth_simulateV1', 'eth_simulateV1 is not supported',
-      'DELEGATION_RPC_METHOD_FORBIDDEN']) expect(simulationFailureKind(m)).toBe('UNSUPPORTED');
+      'Unsupported method: eth_simulateV1 on ARB_MAINNET. See available methods at https://docs.alchemy.com', 'DELEGATION_RPC_METHOD_FORBIDDEN'])
+      expect(simulationFailureKind(m)).toBe('UNSUPPORTED');
     for (const m of ['header not found', 'block not found', 'unknown block']) expect(simulationFailureKind(m)).toBe('LAGGING');
-    expect(simulationFailureKind('execution reverted')).toBe('OTHER');
+    for (const m of ['execution reverted', 'missing trie node 0xab (path ) is not available']) expect(simulationFailureKind(m)).toBe('OTHER');
+  });
+
+  it('a stored user-operation group with an Aave step is refused before anything is built or signed (never signed without its simulation)', async () => {
+    const { deps, requirement } = setup();
+    const r = await prepareGroup(deps, composeWorkflowBound(strategy() as never, undefined) as never, requirement, { runId: 'wfr_test', groupIndex: 0,
+      strategy: 'EVM_USER_OPERATION', chain: CHAIN, feePayer: OWNER, stepFrom: 0, stepTo: 2 });
+    expect(r).toMatchObject({ ok: false, code: 'USER_OPERATION_AAVE_SIGNED_WHEN_DUE', stepIndex: 1 });
   });
 });

@@ -113,6 +113,10 @@ async function prepareUserOperation(deps: UserFundedDeps, requirement: WorkflowR
   delayed: boolean): Promise<Result<Prepared>> {
   const t = deps.evm(g.chain), bundler = deps.bundler(g.chain);
   if (!t) return no('USER_FUNDED_RPC_UNAVAILABLE');
+  // P0: an Aave step is signed only after its exact calls were simulated on the state they run on (health factor ≥ 2.0 after a borrow, the
+  // supply cap): never in a user operation signed upfront. The planner never makes one (execution-groups.ts); a stored group that would is refused.
+  const aaveStep = requirement.steps.slice(g.stepFrom, g.stepTo + 1).find(s => s.action === 'supply' || s.action === 'borrow');
+  if (aaveStep) return no('USER_OPERATION_AAVE_SIGNED_WHEN_DUE', aaveStep.index);
   if (!bundler) return no('USER_OPERATION_BUNDLER_UNAVAILABLE');
   const built = await buildEvmGroupCalls(requirement, g.stepFrom, g.stepTo, { chains: deps.chains, owner: g.feePayer, transport: deps.evm, guaranteed });
   if (!built.ok) return no(built.code, built.stepIndex);
