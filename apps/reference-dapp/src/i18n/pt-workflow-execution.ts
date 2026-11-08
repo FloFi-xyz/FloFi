@@ -144,6 +144,8 @@ export const portugueseWorkflowExecution: Readonly<Record<string, string>> = {
   'Forgetting removes this workflow only from this browser: the run, and anything your wallet already sent, stay. Check your wallet\'s activity first.':
     'Esquecer remove este fluxo apenas deste navegador: a execução, e o que sua carteira já enviou, continuam. Verifique antes a atividade da sua carteira.',
   'Forget this workflow in this browser': 'Esquecer este fluxo neste navegador',
+  'Hide this workflow': 'Ocultar este fluxo',
+  'This is a workflow you authorized earlier, not the one on the Canvas.': 'Este é um fluxo que você autorizou antes, não o que está no Canvas.',
   'Load workflow progress': 'Carregar o andamento do fluxo',
   'The prepared wallet request is valid until {0}; the workflow can be ended after that.':
     'O pedido preparado para a carteira vale até {0}; o fluxo pode ser encerrado depois disso.',
