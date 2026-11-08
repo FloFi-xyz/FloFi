@@ -35,6 +35,11 @@ import type { CardStatus } from '../domain/editor-overview';
 
 export type CanvasAmountEditor = { value: string; changed: boolean; canApply: boolean; formId?: string; onChange(value: string): void; onReview(): string | null; onApply(): void; onCancel?: () => void;
   /**
+   * P0 workflow execution: false for a card just added from the toolbox. Applying it turns the draft card into a new step (a new Canvas node),
+   * which would move focus away while the owner is still typing, so only Enter or leaving the card applies it (never the typing pause).
+   */
+  autoApply?: boolean;
+  /**
    * BUILD-FIX-UX-001: Enter (or leaving the card) applies a valid draft to the editable workflow — no Review/Apply step for an ordinary
    * amount. Returns the validation message; an invalid draft never changes the workflow. Not authorization (see `commitCanvasAmount`).
    */
@@ -520,7 +525,9 @@ export function ComposerCard({ data: card }: { data: ComposerCardData }) {
   }
   // P0 workflow execution: a valid amount the owner stopped typing applies by itself after a short pause (no Enter needed), but only when
   // applying it cannot change what the field shows (`CANONICAL_TYPED_AMOUNT`): the owner's text and caret are kept and focus stays in place.
-  const autoValue = directCommit && editor?.changed && !card.recipient && CANONICAL_TYPED_AMOUNT.test(editor.value) ? editor.value : null;
+  // Never an edit that drops an earlier step's funding of this one (the card asks for Enter for that change, and says so).
+  const autoValue = directCommit && editor?.changed && editor.autoApply !== false && !card.recipient && !card.funding?.changed
+    && CANONICAL_TYPED_AMOUNT.test(editor.value) ? editor.value : null;
   const commitRef = useRef(commitAmount); commitRef.current = commitAmount;
   useEffect(() => {
     if (autoValue === null) return;

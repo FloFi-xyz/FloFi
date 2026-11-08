@@ -4,7 +4,7 @@
  * names stay as they are; placeholders are preserved.
  */
 export const portugueseWorkflowExecution: Readonly<Record<string, string>> = {
-  'This workflow runs as one workflow run: follow it in Execute.': 'Este fluxo roda como uma única execução: acompanhe em Execute.',
+  'This workflow runs as one workflow run: follow it in Execute.': 'Este fluxo roda como uma única execução: acompanhe em Executar.',
   'All {0} steps are reviewed together and authorized at once where your wallet can batch them.':
     'As {0} etapas são revisadas juntas e autorizadas de uma vez quando sua carteira consegue agrupá-las.',
   'Open workflow progress': 'Abrir o progresso do fluxo',
@@ -126,6 +126,13 @@ export const portugueseWorkflowExecution: Readonly<Record<string, string>> = {
     'Antes disso, sua carteira pode pedir para mudar para {0} se estiver em outra rede e, uma vez por sessão, para assinar a mensagem de entrada da FloFi (nenhuma transação).',
   'The wallet request itself does not expire on chain: confirm it promptly, or reject it and review again. Each swap\'s minimum is fixed when FloFi prepares the request.':
     'O pedido à carteira não expira sozinho na rede: confirme-o logo, ou recuse-o e revise de novo. O mínimo de cada swap é fixado quando a FloFi prepara o pedido.',
+  'A workflow you authorized earlier in this browser has not been closed. Its progress, and any batch your wallet already has, are read from FloFi and your wallet.':
+    'Um fluxo que você autorizou antes neste navegador não foi fechado. O andamento dele, e qualquer lote que sua carteira já tenha, são lidos da FloFi e da sua carteira.',
+  'A workflow you authorized earlier in this browser has not been closed.': 'Um fluxo que você autorizou antes neste navegador não foi fechado.',
+  'Show its progress': 'Mostrar o andamento',
+  'FloFi could not complete this request ({0}). What your wallet already has stands: FloFi keeps following it and never sends it again.':
+    'A FloFi não conseguiu concluir este pedido ({0}). O que sua carteira já tem continua valendo: a FloFi continua acompanhando e nunca o envia de novo.',
+  '1 on-chain transaction': '1 transação on-chain', '1 signature': '1 assinatura',
   'Load workflow progress': 'Carregar o andamento do fluxo',
   'The prepared wallet request is valid until {0}; the workflow can be ended after that.':
     'O pedido preparado para a carteira vale até {0}; o fluxo pode ser encerrado depois disso.',
@@ -134,5 +141,5 @@ export const portugueseWorkflowExecution: Readonly<Record<string, string>> = {
   'FloFi cannot prepare this workflow now ({0}). Nothing was sent.': 'A FloFi não consegue preparar este fluxo agora ({0}). Nada foi enviado.',
   'FloFi could not complete this request ({0}). Nothing was sent.': 'A FloFi não conseguiu concluir este pedido ({0}). Nada foi enviado.',
   'This workflow runs as one workflow run: open Execute and choose Review whole workflow, then Authorize workflow.':
-    'Este fluxo roda como uma única execução: abra Execute e escolha Revisar o fluxo inteiro e depois Autorizar fluxo.',
+    'Este fluxo roda como uma única execução: abra Executar e escolha Revisar o fluxo inteiro e depois Autorizar fluxo.',
 };

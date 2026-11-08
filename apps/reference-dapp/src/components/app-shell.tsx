@@ -427,9 +427,9 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
     || Boolean(sequence && (sequence.cursor > 0 || sequence.completed.length > 0));
   const workflowRunHere = useEditorWorkflowRun({ workflow: state.workflow, evmAccount: connectedWallet.account,
     enabled: Boolean(sequence) && !approvalSlot && !autoPrepare && surface === 'workspace' && !sequenceRestore && !localSequenceStarted });
-  // The whole-workflow path is primary until its Review shows it cannot group this workflow, or the Review itself could not be made: then the
-  // Editor's step-by-step path is the honest fallback (a started run always stays primary).
-  const groupedPrimary = workflowRunHere.available && (workflowRunHere.started || workflowRunHere.grouped || (!workflowRunHere.review && !workflowRunHere.reviewFailed));
+  // The whole-workflow path is primary until its Review shows this workflow must run step by step (it cannot be grouped, the RPC cannot simulate
+  // it, or the path cannot run here); a safety refusal keeps it primary, so the workflow is fixed before anything runs (a started run always is).
+  const groupedPrimary = workflowRunHere.available && (workflowRunHere.started || !workflowRunHere.stepByStep);
   // P0 workflow execution (production 2026-11-08, OWNER_STATE_CHANGED_REVIEW_REQUIRED after the USDC approval): on an owner-bound network
   // (Arbitrum One, Ethereum) a swap's Review binds the exact approval transaction, so once THIS run's own approval reconciled the swap needs its own
   // fresh, read-only Review. FloFi prepares it at once — exactly as the chat already does — instead of sending the owner back to "Simulate"; the
@@ -519,7 +519,8 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
     bridge: { workflow: runtimeWorkflow, context, source: simulationSource, authorization, wallet: reviewBinding.wallet, progress: executionProgress,
       invalidWorkflow: lifecycleState.invalidWorkflow, simulate: simulateAgain, controls: lifecycleControls, networkAction, sequence: sequencePresentation,
       pendingEdits, resolveEdit, runtimeChecking, walletNetwork: reviewBinding.wallet.chain ? shellChainLabel(reviewBinding.wallet.chain) : null, networkError: walletConnection.error,
-      simulationBlocked: walletIssue ?? (groupedPrimary ? 'This workflow runs as one workflow run: open Execute and choose Review whole workflow, then Authorize workflow.'
+      simulationBlocked: walletIssue ?? (groupedPrimary ? workflowRunHere.started ? 'This workflow runs as one workflow run: follow it in Execute.'
+        : 'This workflow runs as one workflow run: open Execute and choose Review whole workflow, then Authorize workflow.'
         : simulationDisabled || !actionable || lifecycleState.invalidWorkflow ? simulationReason ?? 'Simulation is not available for this workflow.' : null),
       connectWallet: () => void walletConnection.connect(), startNewWorkflow, executedActions, continuable: Boolean(sequence?.finished) || actionDone } });
   // BUILD-FLOFI-CHAT-E2E-FIX-002: the public chat-first workspace presents the Review and progress in the chat; Simulate and Execute show the canvas
@@ -589,13 +590,18 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
   const wrapStage = (stage: ReactNode) => tab === 'Build' ? stage : <div className="stage-with-chat">{stage}{chat}</div>;
   return <EstimateOwnersContext.Provider value={estimateOwners}><div className="app-shell" inert={!interactive}><a className="skip-link" href="#workspace">{tr("Skip to workspace")}</a><TopBar tab={tab} setTab={setTab} pathname={pathname ?? null} engineering={engineering} entry={entry}/>{betaNotice}
     {approvalSlot && <div className="approval-notice-slot" ref={approvalSlot}/>}
+    {/* P0 workflow execution: after a reload, a whole-workflow run this browser started is offered (never followed silently). */}
+    {workflowRunHere.earlier && tab !== 'Execute' && <div className="editor-run-earlier-notice" role="status">
+      <span>{tr('A workflow you authorized earlier in this browser has not been closed.')}</span>
+      <button type="button" className="secondary" onClick={() => { setTab('Execute'); void workflowRunHere.followEarlier(); }}>{tr('Show its progress')}</button></div>}
     <AutomationInbox owner={owner} proven={Boolean(owner && proof.proven === owner.address)} open={() => navigate?.('/app/automations')}/>
     {/* BUILD-FLOFI-BUILDER-UX-002: Create → Simulate → Execute inside the Editor (the global Dashboard | Chat | Editor navigation is unchanged). */}
     <div className="editor-steps-row"><EditorStepper tab={tab} setTab={setTab} disabled={Boolean(authoringIncomplete || approvalGate)} incomplete={Boolean(authoringIncomplete)}/></div>
     {/* BUILD-FLOFI-CONVERSATIONAL-001: on Simulate and Execute the same conversation continues beside the stage (complementary to main). */}
     {wrapStage(<main id="workspace" className={`main workflow-workspace${tab === 'Build' ? ' build-workspace' : ''}`} data-workspace-toolbox={tab === 'Build' ? workspaceToolboxMode : undefined} tabIndex={-1} aria-label={tr(tab === 'Build' ? 'Workflow workspace' : tab === 'Simulate' ? 'Simulation workspace' : 'Execution workspace')}>
-      {tab === 'Execute' ? <ExecuteWorkspace detailsOnly={chatFirst} controls={lifecycleControls} primaryAction={simulateAction} workflowName={workflowName} workflow={runtimeWorkflow} context={context} source={simulationSource} authorization={authorization} wallet={reviewBinding.wallet} execution={executionStart} progress={executionProgress} recovery={executionProgress.recovery} invalidWorkflow={Boolean(reviewError || authoringIncomplete)} backToBuild={() => setTab('Build')} backToSimulate={() => setTab('Simulate')} startNewWorkflow={startNewWorkflow} openDashboard={() => setTab('Dashboard')}
-        workflowRun={workflowRunHere.available ? <EditorWorkflowRunPanel state={workflowRunHere}/>
+      {tab === 'Execute' ? <ExecuteWorkspace detailsOnly={chatFirst} controls={lifecycleControls} groupedRun={groupedPrimary}
+        primaryAction={groupedPrimary ? <button type="button" className="simulation-back" onClick={() => setTab('Build')}>{tr('Back to the Canvas')}</button> : simulateAction} workflowName={workflowName} workflow={runtimeWorkflow} context={context} source={simulationSource} authorization={authorization} wallet={reviewBinding.wallet} execution={executionStart} progress={executionProgress} recovery={executionProgress.recovery} invalidWorkflow={Boolean(reviewError || authoringIncomplete)} backToBuild={() => setTab('Build')} backToSimulate={() => setTab('Simulate')} startNewWorkflow={startNewWorkflow} openDashboard={() => setTab('Dashboard')}
+        workflowRun={workflowRunHere.visible ? <EditorWorkflowRunPanel state={workflowRunHere}/>
           : editorRun.offered ? <EditorRunAction workflow={state.workflow} readiness={editorRun} steps={sequence?.steps.length ?? 0}/> : undefined}
         technicalDetails={engineering && (executionStart.started || executionProgress.started || recoveryPath || localCowIntent) ? stageContent : undefined}/> : tab === 'Simulate' ?
         <SimulateWorkspace detailsOnly={chatFirst} sequenceNote={sequenceNote} workflowName={workflowName} returnToBuild={() => setTab('Build')} simulationSource={simulationSource} simulationReason={simulationReason} review={embeddedReview} simulateAction={simulateAction}>

@@ -706,9 +706,10 @@ function BuildCanvas({ environment, selectedId, select, openSettings, settingsId
           canReview: selectedId === actionSetup.id,
           canApply: Boolean(Boolean(actionSetup.cryptoSelection && actionSelection(actionSetup.id, actionSetup.cryptoSelection).valid) && pending?.valid && pending.authoringId === actionSetup.id && pending.authoringAmount === actionReviewValue(actionSetup, actionSetup.id, undefined) && pending.command.baseRevision === workflow.revision), onApply: applyProposal } } : {}),
         ...(setupRecipient ? { recipient: setupRecipient } : {}),
-        // P0 workflow execution: a Supply, Borrow, Repay, Withdraw or Send card just added from the toolbox applies like Swap and Bridge — Enter,
-        // leaving the card or a pause after typing a valid amount — with no Review/Apply proposal (nothing is signed or sent by an edit).
-        ...(actionSetup.action !== 'pool' ? { amountEditor: { value: actionSetup.amount, changed: true, onChange: (value: string) => editCanvasAmount(actionSetup.id, value),
+        // P0 workflow execution: a Supply, Borrow, Repay, Withdraw or Send card just added from the toolbox applies like Swap and Bridge — Enter or
+        // leaving the card — with no Review/Apply proposal (nothing is signed or sent by an edit). Not the typing pause: applying turns the draft
+        // into a new step (a new node), which must not happen while the owner is still typing.
+        ...(actionSetup.action !== 'pool' ? { amountEditor: { value: actionSetup.amount, changed: true, autoApply: false, onChange: (value: string) => editCanvasAmount(actionSetup.id, value),
           canApply: Boolean((actionSetup.action === 'bridge' || Boolean(actionSetup.cryptoSelection && actionSelection(actionSetup.id, actionSetup.cryptoSelection).valid)) && (actionSetup.action !== 'bridge' || bridgeSelection(actionSetup.id, bridgeSetupNetworks(actionSetup), true).valid) && pending?.valid && pending.authoringId === actionSetup.id && pending.authoringAmount === actionReviewValue(actionSetup, actionSetup.id, undefined) && pending.command.baseRevision === workflow.revision),
           onReview: () => reviewCanvasAmount(actionSetup.id), onApply: applyProposal, onCommit: () => commitCanvasAmount(actionSetup.id),
           blocked: actionSetup.action === 'bridge' ? bridgeSelection(actionSetup.id, bridgeSetupNetworks(actionSetup), true).valid ? null : 'Choose matching networks.'

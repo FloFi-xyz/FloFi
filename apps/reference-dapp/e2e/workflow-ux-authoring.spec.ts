@@ -227,10 +227,9 @@ test.describe('UX-007 fast live quote feedback', () => {
     await expect.poll(() => seen.length).toBe(2); await input.fill('1000');
     await expect(destination).toContainText('0.4'); await page.waitForTimeout(900); await expect(destination).toContainText('0.4'); await expect(destination).not.toContainText('9.99');
     expect(seen.map(amountOf)).toEqual(['100000000', '10000000', '1000000000']);
-    // P0 workflow execution: the amount the owner stopped typing applies by itself after a short pause (no Enter needed) — the step, never a
-    // simulation, Review or signature. Applying it reuses the same per-step quote (no extra request above).
-    await expect.poll(async () => JSON.stringify(JSON.parse(await readWorkflowIr(page)).nodes[0]?.userConstraints ?? []).match(/"amount":"(\d+)"/)?.[1]).toBe('1000000000');
-    expect(seen.map(amountOf)).toEqual(['100000000', '10000000', '1000000000']);
+    // Estimation only: a card just added from the toolbox is applied by Enter or by leaving it, never by a typing pause (applying it creates a
+    // new step, which must not take focus while the owner types), so the draft is not applied, simulated, reviewed or signed.
+    await expect(revision(page)).toHaveAttribute('data-workflow-revision', '0');
     await expect(page.getByRole('complementary', { name: 'Simulation Summary' })).toHaveCount(0);
     await expectEditorSection(page, 'Build');
     await assertPassiveWallet(page); networkGuard.assertClean();
