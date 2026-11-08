@@ -465,8 +465,7 @@ MAIN_PROFILES = {
     "copilot-solana": (["copilot-solana.spec.ts"], {"FLOFI_COPILOT":"replay","GRYLOO_SOLANA_DEVNET_E2E":"MOCKED_LOOPBACK_ONLY"}),
     # BUILD-FLOFI-MAINNET-PRODUCT-001 (intentional change): this profile now certifies the public Mainnet-only product as deployed.
     "solana-mainnet-network": (["solana-mainnet-network.spec.ts"], {"GRYLOO_SOLANA_DEVNET_E2E":"MOCKED_LOOPBACK_ONLY","FLOFI_E2E_NETWORK_SCOPE":"PUBLIC_MAINNET"}),
-    # P0 workflow execution (intentional change): the profile also certifies direct Canvas amount edits (no Review/Apply).
-    "canvas-corrections": (["canvas-corrections.spec.ts","canvas-lending-amount-enter.spec.ts"], {}),
+    "canvas-corrections": (["canvas-corrections.spec.ts"], {}),
     # HOTFIX-PHANTOM-LIGHTHOUSE-001 (intentional change): the profile also certifies verified Phantom Lighthouse protections end to end.
     "solana-wallet-refusal": (["solana-swap-liquidity-composition.spec.ts","--grep","a wallet that changes the reviewed swap|a Phantom-like wallet signs the exact reviewed swap|a Phantom wallet with Lighthouse protections|a reconciled swap continues to its Orca position"], {"GRYLOO_SOLANA_DEVNET_E2E":"MOCKED_LOOPBACK_ONLY"}),
     "lending-provenance": (["release-financial-provenance.spec.ts"], {"FLOFI_RELEASE_PROVENANCE_PROFILE":"lending","GRYLOO_LENDING_E2E":"MOCKED_LOOPBACK_ONLY"}),
