@@ -84,3 +84,54 @@ test('pointer: leaving the card applies a valid Borrow amount; an invalid amount
   await expect(page.getByRole('button', { name: 'Simulate workflow', exact: true })).toBeVisible();
   await assertPassiveWallet(page); networkGuard.assertClean();
 });
+
+// P0 workflow execution (Scenario A, the owner's production report): in a CONNECTED three-step workflow — Swap USDC → WETH, Supply WETH (funded by
+// the swap), Borrow USDC on Arbitrum One — every amount edit applies directly: Enter (keyboard), leaving the card (pointer) or a pause after
+// typing. No "Review <Action> change" and no "Apply proposal" ever appear; each edit is one new revision of the same steps and links; nothing is
+// simulated, signed or sent.
+test('Scenario A: Swap → Supply WETH → Borrow, edited by Enter, by leaving the card and by a typing pause, never needs Review/Apply', async ({ page, networkGuard }) => {
+  await replayProviderLogos(page); await installPassiveWallet(page, '0xa4b1'); await openBuilder(page);
+  const send = async (prompt: string, added: RegExp) => {
+    await page.locator('#mock-prompt').fill(prompt); await page.getByRole('button', { name: 'Send', exact: true }).click();
+    await expect(page.getByRole('log', { name: 'Conversation' }).locator('.message.ai').last()).toContainText(added);
+  };
+  await send('Please Swap 10 USDC for WETH on Arbitrum', /Swap added to your workflow|Interpreted as/);
+  await send('Please supply 1 WETH to Aave on Arbitrum', /Supply added to your workflow/);
+  await send('Please borrow 20 USDC on Arbitrum', /Borrow added to your workflow/);
+  const ir = async () => JSON.parse(await readWorkflowIr(page)) as Ir;
+  const before = await ir();
+  expect(before.nodes.map(n => n.actionType)).toEqual(['asset.swap.exact-input', 'supply', 'borrow']);
+  const start = Number(await revision(page).getAttribute('data-workflow-revision'));
+  const cards = page.locator('.build-flow-surface .composer-card');
+  const swap = cards.nth(0), supply = cards.nth(1), borrow = cards.nth(2);
+  // The Supply spends the WETH the swap delivers (the sequence funds it), exactly as the owner built it.
+  await expect(supply).toContainText(/Funded by step 1/);
+  await noProposal(page);
+
+  // Supply WETH 1 → 0.0013 + Enter: applied at once.
+  const supplyAmount = supply.getByRole('textbox', { name: 'Source amount (WETH)', exact: true });
+  await supplyAmount.fill('0.0013'); await supplyAmount.press('Enter');
+  await expect(revision(page)).toHaveAttribute('data-workflow-revision', String(start + 1));
+  await expect(supplyAmount).toHaveValue('0.0013');
+  await noProposal(page);
+  // Borrow 20 → 0.8 by leaving the card (pointer, no Enter).
+  const borrowAmount = borrow.getByRole('textbox', { name: 'Source amount (USDC)', exact: true });
+  await borrowAmount.fill('0.8');
+  const pane = page.locator('.build-flow-surface .react-flow__pane'), box = (await pane.boundingBox())!;
+  await page.mouse.click(box.x + box.width * 0.6, box.y + box.height * 0.8);
+  await expect(revision(page)).toHaveAttribute('data-workflow-revision', String(start + 2));
+  await noProposal(page);
+  // Swap 10 → 3: typed and left alone (no Enter, focus stays in the field) applies after a short pause, keeping exactly the typed text.
+  const swapAmount = swap.getByRole('textbox', { name: /Source amount/ }).first();
+  await swapAmount.fill('3');
+  await expect(revision(page)).toHaveAttribute('data-workflow-revision', String(start + 3), { timeout: 5_000 });
+  await expect(swapAmount).toHaveValue('3');
+  await expect(swapAmount).toBeFocused();
+  await noProposal(page);
+
+  // The same three steps and links; only their amounts changed (WETH 18 decimals, USDC 6).
+  const after = await ir();
+  expect(after.nodes.map(n => [n.nodeId, n.actionType, n.dependencies])).toEqual(before.nodes.map(n => [n.nodeId, n.actionType, n.dependencies]));
+  expect(after.nodes.map(n => n.userConstraints.find(c => c.quantity)?.quantity?.amount)).toEqual(['3000000', '1300000000000000', '800000']);
+  await assertPassiveWallet(page); networkGuard.assertClean();
+});

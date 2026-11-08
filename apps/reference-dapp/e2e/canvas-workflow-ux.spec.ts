@@ -187,9 +187,9 @@ test('UX-009/010 repeated Send cards retain links and the manual viewport throug
   await card.locator('.composer-action-title').click();
   await card.getByRole('textbox', { name: 'To', exact: true }).fill('0x4444444444444444444444444444444444444444');
   await card.getByRole('textbox', { name: /Source amount/ }).fill('7');
-  await card.getByRole('button', { name: 'Review Send change', exact: true }).click();
+  // A typed draft is not the workflow until it is applied (P0 workflow execution: Enter applies it directly, no Review/Apply proposal).
   expect((await ir(page)).nodes.filter(n => n.actionType === 'asset.transfer').map(n => ({ ...n, dependencies: [] }))).toEqual(nodes);
-  await card.getByRole('button', { name: 'Apply proposal', exact: true }).click();
+  await card.getByRole('textbox', { name: /Source amount/ }).press('Enter');
   const changed = await ir(page); expect(changed.nodes.find(n => n.nodeId === a!.nodeId)!.dependencies).toEqual([b!.nodeId]);
   expect(changed.nodes.find(n => n.nodeId === b!.nodeId)).toEqual(b);
   await expect(page.locator(`.react-flow__edge[data-id="${b!.nodeId}-${a!.nodeId}"]`)).toBeVisible();

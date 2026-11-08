@@ -61,6 +61,7 @@ import { useExecutionLifecycle } from '../state/execution-lifecycle';
 import { useExecutionStart } from '../state/execution-start';
 import { restoredLocalExecutionKind } from '../domain/execution-recovery';
 import { currentExecution, isFinalExecutionResult } from '../domain/execution-result';
+import { executionContinuation } from '../domain/conversation-lifecycle';
 import { ReviewAuthorizationDetails } from './review-workspace';
 import { workflowBoundAuthorization } from '../domain/review-presentation';
 import { useReviewAuthorization } from '../state/review-authorization';
@@ -427,6 +428,21 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
   const workflowRunHere = useEditorWorkflowRun({ workflow: state.workflow, evmAccount: connectedWallet.account,
     enabled: Boolean(sequence) && !approvalSlot && !autoPrepare && surface === 'workspace' && !sequenceRestore && !localSequenceStarted });
   const groupedPrimary = workflowRunHere.available && (workflowRunHere.started || !workflowRunHere.review || workflowRunHere.grouped);
+  // P0 workflow execution (production 2026-11-08, OWNER_STATE_CHANGED_REVIEW_REQUIRED after the USDC approval): on an owner-bound network
+  // (Arbitrum One, Ethereum) a swap's Review binds the exact approval transaction, so once THIS run's own approval reconciled the swap needs its own
+  // fresh, read-only Review. FloFi prepares it at once — exactly as the chat already does — instead of sending the owner back to "Simulate"; the
+  // Canvas action then reads "Authorize in wallet" for the swap (one click, the wallet's own confirmation). Nothing is signed or sent by it.
+  const continuation = executionContinuation({ progress: executionProgress });
+  const ownerBoundContinuation = Boolean(continuation?.approval && simulationSource.kind === 'public'
+    && (simulationSource.state as { run?: { quote?: { ownerReview?: unknown } } | null }).run?.quote?.ownerReview);
+  const requotedContinuation = useRef<string | null>(null);
+  useEffect(() => {
+    if (!continuation || !ownerBoundContinuation || requotedContinuation.current === continuation.key) return;
+    // "Continue to swap" under the approval's Review can never start an owner-bound swap (its begin is refused): the fresh Review comes first.
+    if (!['continue', 'simulate'].includes(canvasAction.kind) || canvasAction.disabled || simulationSource.state.busy) return;
+    requotedContinuation.current = continuation.key;
+    void simulateAgain();
+  }, [continuation?.key, ownerBoundContinuation, canvasAction.kind, canvasAction.disabled, simulationSource.state.busy]);
   // A proposal opened from a chat, MCP client or channel prepares its own fresh, read-only simulation as soon as it is loaded for that signer:
   // once per workflow revision and signer, never during or after a recorded run of this workflow, never retried automatically, and nothing is
   // accepted or signed. BUILD-CHAT-E2E-001: the final run of another workflow (the previous step of a multi-step run) does not count.

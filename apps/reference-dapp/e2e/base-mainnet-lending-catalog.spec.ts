@@ -103,9 +103,9 @@ test('Supply on Base: the card picker lists the live Base catalog, held assets f
   await closePicker(page);
   await expect(revision).toHaveAttribute('data-workflow-revision', '0');
   const amount = card.getByRole('textbox', { name: 'Source amount (WETH)', exact: true });
-  await amount.fill('0.1');
-  await card.getByRole('button', { name: 'Review Supply change', exact: true }).click();
-  await card.getByRole('button', { name: 'Apply proposal', exact: true }).click();
+  // P0 workflow execution: the new card applies directly on Enter (no Review/Apply proposal).
+  await amount.fill('0.1'); await amount.press('Enter');
+  await expect(card.getByRole('button', { name: 'Review Supply change', exact: true })).toHaveCount(0);
   await expect(revision).toHaveAttribute('data-workflow-revision', '1');
   const applied = await nodeAsset(page, 'supply');
   expect(applied.node.chainId).toBe('eip155:8453');
@@ -122,12 +122,13 @@ test('Supply on Base: the card picker lists the live Base catalog, held assets f
   expect(await page.evaluate(() => (window as unknown as { supplyWalletRequests: { method: string }[] }).supplyWalletRequests.filter(request => /sign|send|switch/i.test(request.method)))).toEqual([]);
 });
 
-test('an authored Supply changes reserve only through its reviewed proposal, as a new revision', async ({ page }) => {
+// P0 workflow execution: a reserve picked on an authored card is the owner's own edit — it applies directly once the amount is entered in the new
+// asset (Enter or leaving the card), as one new revision; it never re-denominates the old amount and never needs a Review/Apply proposal.
+test('an authored Supply changes reserve directly once its amount is entered in the new asset, as a new revision', async ({ page }) => {
   await installSupplyWallet(page, { chain: '0x2105', account: nextOwner() }); await openBuilder(page);
   const card = await addCard(page, 'supply');
-  await card.getByRole('textbox', { name: 'Source amount (USDC)', exact: true }).fill('10');
-  await card.getByRole('button', { name: 'Review Supply change', exact: true }).click();
-  await card.getByRole('button', { name: 'Apply proposal', exact: true }).click();
+  const usdc = card.getByRole('textbox', { name: 'Source amount (USDC)', exact: true });
+  await usdc.fill('10'); await usdc.press('Enter');
   const revision = page.locator('.summary-bar');
   await expect(revision).toHaveAttribute('data-workflow-revision', '1');
   expect((await nodeAsset(page, 'supply')).amount).toEqual({ asset: { chainId: 'eip155:8453', address: BASE_USDC, decimals: 6 }, amount: '10000000' });
@@ -138,12 +139,13 @@ test('an authored Supply changes reserve only through its reviewed proposal, as 
   await expect(revision).toHaveAttribute('data-workflow-revision', '1');
   const amount = card.getByRole('textbox', { name: 'Source amount (WETH)', exact: true });
   await expect(amount).toHaveValue('');
-  await card.getByRole('button', { name: 'Review Supply change', exact: true }).click();
+  // An empty amount in the new asset applies nothing (the step keeps its saved reserve and amount).
+  await amount.press('Enter');
   await expect(revision).toHaveAttribute('data-workflow-revision', '1');
-  await amount.fill('0.05');
-  await card.getByRole('button', { name: 'Review Supply change', exact: true }).click();
-  await card.getByRole('button', { name: 'Apply proposal', exact: true }).click();
+  await amount.fill('0.05'); await amount.press('Enter');
   await expect(revision).toHaveAttribute('data-workflow-revision', '2');
+  await expect(card.getByRole('button', { name: 'Review Supply change', exact: true })).toHaveCount(0);
+  await expect(card.getByRole('button', { name: 'Apply proposal', exact: true })).toHaveCount(0);
   expect((await nodeAsset(page, 'supply')).amount).toEqual({ asset: { chainId: 'eip155:8453', address: BASE_WETH, decimals: 18 }, amount: '50000000000000000' });
 });
 
@@ -213,7 +215,7 @@ test('wallet-balance filtering never removes a supported reserve from discovery:
   await expect(card.locator('.composer-operation')).toHaveText('GHO → Aave V3');
 });
 
-test('Swap USDC → WETH → Supply WETH: auto-connected, funded by the swap, and an asset change is flagged and applied as a new revision', async ({ page }) => {
+test('Swap USDC → WETH → Supply WETH: auto-connected, funded by the swap, and an asset change is flagged and applied directly as a new revision', async ({ page }) => {
   await installSupplyWallet(page, { chain: '0x2105', account: nextOwner() }); await openBuilder(page);
   const swap = await addCard(page, 'swap');
   await expect(swap.locator('.composer-operation')).toHaveText('USDC → WETH');
@@ -226,8 +228,7 @@ test('Swap USDC → WETH → Supply WETH: auto-connected, funded by the swap, an
   await option(picker, 'WETH').click();
   await closePicker(page);
   await supply.getByRole('textbox', { name: 'Source amount (WETH)', exact: true }).fill('0.05');
-  await supply.getByRole('button', { name: 'Review Supply change', exact: true }).click();
-  await supply.getByRole('button', { name: 'Apply proposal', exact: true }).click();
+  await supply.getByRole('textbox', { name: 'Source amount (WETH)', exact: true }).press('Enter');
   await expect(revision).toHaveAttribute('data-workflow-revision', '2');
   // Auto-connected in order (an ordering link, drawn on the Canvas), and the Supply spends the WETH the swap delivers.
   const ir = JSON.parse(await readWorkflowIr(page)) as { nodes: { nodeId: string; actionType: string; dependencies: string[] }[]; resourceEdges: unknown[] };
@@ -255,8 +256,7 @@ test('Swap USDC → WETH → Supply WETH: auto-connected, funded by the swap, an
   await expect(supply.locator('.composer-funding-note')).toContainText('Step 1 delivers WETH on Base: this step will no longer be funded by it.');
   await expect(revision).toHaveAttribute('data-workflow-revision', '2');
   await supply.getByRole('textbox', { name: 'Source amount (USDC)', exact: true }).fill('25');
-  await supply.getByRole('button', { name: 'Review Supply change', exact: true }).click();
-  await supply.getByRole('button', { name: 'Apply proposal', exact: true }).click();
+  await supply.getByRole('textbox', { name: 'Source amount (USDC)', exact: true }).press('Enter');
   await expect(revision).toHaveAttribute('data-workflow-revision', '3');
   const edited = await nodeAsset(page, 'supply');
   expect(edited.node.dependencies).toEqual([swapNode.nodeId]);
@@ -282,8 +282,7 @@ test('the card catalog follows its network: Arbitrum One lists its own reserves 
   await expect(card.locator('.composer-chain')).toHaveText('Arbitrum One');
   await closePicker(page);
   await card.getByRole('textbox', { name: 'Source amount (WETH)', exact: true }).fill('0.2');
-  await card.getByRole('button', { name: 'Review Supply change', exact: true }).click();
-  await card.getByRole('button', { name: 'Apply proposal', exact: true }).click();
+  await card.getByRole('textbox', { name: 'Source amount (WETH)', exact: true }).press('Enter');
   await expect(page.locator('.summary-bar')).toHaveAttribute('data-workflow-revision', '1');
   expect((await nodeAsset(page, 'supply')).amount).toEqual({ asset: { chainId: 'eip155:42161', address: arbitrumWeth, decimals: 18 }, amount: '200000000000000000' });
 });

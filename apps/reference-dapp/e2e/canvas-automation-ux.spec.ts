@@ -15,9 +15,9 @@ for (const action of ['swap', 'bridge', 'supply', 'borrow', 'repay', 'withdraw',
   await page.getByRole('button', { name: action === 'lending' ? 'Add Supply → Borrow → Swap' : action === 'transfer' ? 'Add send' : `Add ${action}`, exact: true }).click();
   const card = page.locator('.build-flow-surface .composer-card').last();
   if (action === 'transfer') {
+    // P0 workflow execution: a Send applies directly on Enter (no Review/Apply proposal).
     await card.getByRole('textbox', { name: 'Source amount (ETH)', exact: true }).fill('0.000001');
-    await card.getByRole('button', { name: 'Review Send change', exact: true }).click();
-    await card.getByRole('button', { name: 'Apply proposal', exact: true }).click();
+    await card.getByRole('textbox', { name: 'Source amount (ETH)', exact: true }).press('Enter');
   } else if (action === 'pool') await configureCanvasPool(page);
   else if (action === 'lending') await applyPendingProposal(page);
   else await configureCanvasAction(page, '1');
@@ -82,9 +82,7 @@ for (const network of ['Robinhood Chain Testnet', 'Ethereum Sepolia']) test(`Can
   await picker.getByRole('button', { name: 'Hide token picker', exact: true }).click();
   const amount = card.getByRole('textbox', { name: 'Source amount (ETH)', exact: true });
   for (const [index, value] of ['0.000001', '0.000002'].entries()) {
-    await amount.fill(value);
-    await card.getByRole('button', { name: 'Review Send change', exact: true }).click();
-    await card.getByRole('button', { name: 'Apply proposal', exact: true }).click();
+    await amount.fill(value); await amount.press('Enter');
     await expect(page.locator('.summary-bar')).toHaveAttribute('data-workflow-revision', String(index + 1));
     await expect(card.getByRole('button', { name: 'Select source token', exact: true })).toHaveAttribute('title', `ETH on ${network} (${network === 'Ethereum Sepolia' ? '11155111' : '46630'})`);
   }
@@ -127,10 +125,11 @@ test('new Send authoring controls and lifecycle copy use Portuguese', async ({ p
   await openBuilder(page);
   await page.getByRole('button', { name: 'Adicionar envio', exact: true }).click();
   const card = page.locator('.build-flow-surface .composer-card');
+  // P0 workflow execution: the Send applies directly on Enter, in Portuguese too (no "Rever alteração" / "Aplicar proposta").
   await card.getByRole('textbox', { name: 'Valor de origem (ETH)', exact: true }).fill('0.000001');
-  await card.getByRole('button', { name: 'Rever alteração do envio', exact: true }).click();
-  await card.getByRole('button', { name: 'Aplicar proposta', exact: true }).click();
+  await card.getByRole('textbox', { name: 'Valor de origem (ETH)', exact: true }).press('Enter');
   await expect(page.locator('.summary-bar')).toHaveAttribute('data-workflow-revision', '1');
+  await expect(card.getByRole('button', { name: 'Aplicar proposta', exact: true })).toHaveCount(0);
   // The explicit network switch (the wallet is on Base Sepolia), then the lifecycle CTA, both in Portuguese.
   await expect(page.locator('.canvas-primary-action button')).toHaveText('Mudar para Robinhood Chain Testnet');
   await page.locator('.canvas-primary-action button').click();
