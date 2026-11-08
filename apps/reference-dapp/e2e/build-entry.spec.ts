@@ -74,6 +74,44 @@ test('suggestion chips only fill editable text; nothing is authored until the ow
   networkGuard.assertClean();
 });
 
+test('the request field grows with its text, has no resize handle, scrolls inside at its limit and still submits', async ({ page, networkGuard }) => {
+  for (const width of [1240, 390]) {
+    await page.setViewportSize({ width, height: 900 });
+    await open(page);
+    const field = request(page), form = page.locator('form[aria-busy]');
+    const size = () => field.evaluate(node => ({ height: node.getBoundingClientRect().height, scroll: node.scrollHeight, client: node.clientHeight,
+      resize: getComputedStyle(node).resize, max: parseFloat(getComputedStyle(node).maxHeight) }));
+    const button = () => create(page).boundingBox();
+    const empty = await size(), buttonBefore = await button();
+    expect(empty.resize).toBe('none');
+    // A short request keeps the one-line composer.
+    await field.fill('Swap 1 USDC');
+    expect((await size()).height).toBe(empty.height);
+    // A longer one grows the field line by line, with nothing hidden.
+    await field.fill('Swap 1 USDC to WETH on Base slippage 50 bps\nthen supply it to Aave\nand keep the rest');
+    const grown = await size();
+    expect(grown.height).toBeGreaterThan(empty.height); expect(grown.scroll).toBeLessThanOrEqual(grown.client + 1);
+    // The button keeps its size while the field grows.
+    expect((await button())!.height).toBeCloseTo(buttonBefore!.height, 0);
+    // Past the limit it stops growing and scrolls inside, without breaking the layout.
+    await field.fill(Array.from({ length: 14 }, (_, line) => `line ${line + 1} of a long request`).join('\n'));
+    const capped = await size();
+    expect(capped.height).toBeCloseTo(capped.max, 0); expect(capped.scroll).toBeGreaterThan(capped.client);
+    await noOverflow(page);
+    await form.screenshot({ path: test.info().outputPath(`build0-request-capped-${width}.png`) });
+    // Cleared, it returns to one line.
+    await field.fill('');
+    expect((await size()).height).toBe(empty.height);
+  }
+  // Submit is unchanged: Enter sends the request (the conversation answers and Build 1 opens).
+  await page.setViewportSize({ width: 1240, height: 871 });
+  await request(page).fill('Swap 1 USDC to WETH on Base slippage 50 bps');
+  await request(page).press('Enter');
+  await expectEditorSection(page, 'Build');
+  await expect(chat(page)).toContainText('Swap added to your workflow: 1 USDC');
+  networkGuard.assertClean();
+});
+
 test('every Build 0 control is reachable with the keyboard and shows its focus', async ({ page, networkGuard }) => {
   await open(page);
   await expect(entry(page)).toBeVisible();

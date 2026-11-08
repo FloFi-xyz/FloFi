@@ -14,6 +14,15 @@ const icons: Record<BuildEntrySuggestion['icon'], ReactNode> = {
   collateral: <path d="m10 3.8 6.2 6.2-6.2 6.2L3.8 10Z"/>,
   multi: <path d="M3.5 5h4.5M12 5h4.5M3.5 10h4.5M12 10h4.5M3.5 15h4.5M12 15h4.5"/>,
 };
+/**
+ * BUILD-FLOFI-UX-005: the request field grows with what is typed, up to the CSS max-height, then scrolls inside; there is no manual
+ * resize handle. Sized on the element itself (synchronously while typing, so no frame shows the old height).
+ */
+function fitHeight(element: HTMLTextAreaElement | null) {
+  if (!element) return;
+  element.style.height = 'auto';
+  element.style.height = `${element.scrollHeight}px`;
+}
 const Icon = ({ children, className }: { children: ReactNode; className?: string | undefined }) =>
   <svg className={className} viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" focusable="false">{children}</svg>;
 
@@ -65,6 +74,20 @@ export function BuildEntry({ conversation, workflow, proposal, actions, draft, s
   }, [attempt]);
   // The request stays editable after a refusal: focus returns to it once the field is enabled again.
   useEffect(() => { if (refused) field.current?.focus(); }, [refused]);
+  // A draft set from outside the field (a suggestion, a cleared request, the one kept from another section) and a new width refit it.
+  useEffect(() => { fitHeight(field.current); }, [draft]);
+  useEffect(() => {
+    const view = globalThis.window, element = field.current;
+    if (!view || !element) return;
+    const refit = () => fitHeight(element);
+    // Any width change of the field (the shell's layout, an embedding frame, a late font) refits it; the window event is the fallback.
+    let width = element.clientWidth;
+    const observer = typeof ResizeObserver === 'function'
+      ? new ResizeObserver(() => { if (element.clientWidth !== width) { width = element.clientWidth; refit(); } }) : null;
+    observer?.observe(element);
+    view.addEventListener('resize', refit);
+    return () => { observer?.disconnect(); view.removeEventListener('resize', refit); };
+  }, []);
 
   function onSubmit(event: FormEvent<HTMLFormElement>) { event.preventDefault(); void submit(); }
   function onKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
@@ -91,7 +114,7 @@ export function BuildEntry({ conversation, workflow, proposal, actions, draft, s
         <textarea ref={field} id="build-entry-request" value={draft} rows={2} maxLength={1024} disabled={busy}
           placeholder={tr('I want to put 2,000 USDC to work on Solana with low risk.')}
           aria-describedby={refusal || refused ? 'build-entry-error' : 'build-entry-hint'}
-          onChange={event => { setDraft(event.target.value); setRefused(null); }} onKeyDown={onKeyDown}/>
+          onChange={event => { fitHeight(event.target); setDraft(event.target.value); setRefused(null); }} onKeyDown={onKeyDown}/>
         <button className={styles.create} type="submit" disabled={!draft.trim() || busy || !interactive}>
           <Icon className={styles.createIcon}><path d="M6 14 14 6M7.5 6H14v6.5"/></Icon>{tr(busy ? 'Preparing…' : 'Create strategy')}
         </button>
