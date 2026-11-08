@@ -87,7 +87,20 @@ for (const width of [320, 390, 768, 1024, 1440, 1920]) test(`Home in English by 
   for (const [index, ask] of (await asks.all()).entries()) await expect(ask).toHaveAttribute('aria-label', `Try it: ${['Swap', 'Change networks', 'Deposit on Aave', 'Add liquidity', 'Transfer'][index]}`);
   await expect(page.locator('#hoje')).toContainText('Buy every FridayComing soon');
   await expect(page.locator('#hoje').getByRole('link', { name: /Buy every Friday/ })).toHaveCount(0);
-  await expect(page.locator('#hoje')).toContainText('Ethereum · Base · Arbitrum · Robinhood Chain · Solana');
+  // BUILD-FLOFI-UX-005: the five networks are their logos, each a link to the network's official homepage (opened in a new tab).
+  const networks = page.getByRole('list', { name: 'On 5 networks' }).getByRole('link');
+  await expect(networks).toHaveCount(5);
+  const homepages = [['Ethereum', 'https://ethereum.org/'], ['Base', 'https://base.org/'], ['Arbitrum', 'https://arbitrum.io/'],
+    ['Robinhood Chain', 'https://robinhood.com/us/en/chain/'], ['Solana', 'https://solana.com/']] as const;
+  for (const [index, [name, href]] of homepages.entries()) {
+    const link = networks.nth(index);
+    await expect(link).toHaveAccessibleName(name); await expect(link).toHaveAttribute('href', href);
+    await expect(link).toHaveAttribute('target', '_blank'); await expect(link).toHaveAttribute('rel', 'noopener noreferrer');
+    expect(await link.locator('img').evaluate(image => (image as HTMLImageElement).complete && (image as HTMLImageElement).naturalWidth > 0)).toBe(true);
+  }
+  await expect(page.locator('#hoje')).not.toContainText('Ethereum · Base');
+  // The tangle's network tags show the networks' logos instead of their names.
+  await expect(page.locator('#dor [data-kind="network"] img')).toHaveCount(3);
   await expect(page.locator('#hoje').getByRole('link', { name: /API and SDK/ })).toHaveAttribute('href', '/developers');
   // The chaos and the wallet prompt are illustrations: hidden from assistive technology, with no control inside.
   for (const illustration of ['#dor [aria-hidden="true"]', '#seguranca [aria-hidden="true"]']) await expect(page.locator(illustration).first().locator('a, button')).toHaveCount(0);

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import Image from 'next/image';
 import Link from 'next/link';
-import { NETWORKS_LINE, SITE_COPY } from './site-copy';
+import { SITE_COPY, SITE_NETWORKS, type SiteNetwork } from './site-copy';
 import type { SiteLanguage } from './site-language';
 import { SIGN_IN, SiteShell } from './site-shell';
 import { FaqList, faqItems } from './faq-page';
@@ -15,6 +15,12 @@ const CHAOS = [
   ['app', 'Jupiter', 430, 262, -7], ['network', 'Solana', 110, 306, 5], ['pending', 'pending', 330, 338, -3], ['app', 'Orca', 8, 372, -2],
   ['confirm', 'confirm', 160, 396, 3],
 ] as const;
+/** A network's logo in its round frame (decorative: the name is the link's or the tag's own label). */
+function NetworkMark({ network }: { network: SiteNetwork }) {
+  return <span className={styles.networkMark} data-glyph={network.glyph || undefined} aria-hidden="true">
+    <img src={network.mark} alt="" width={44} height={44} loading="lazy" decoding="async" draggable={false}/></span>;
+}
+const networkNamed = (name: string) => SITE_NETWORKS.find(network => network.name === name);
 /** The questions the approved landing previews; "See all" opens the full list at /faq. */
 const PREVIEW = ['wallet', 'cost', 'audit', 'stuck'] as const;
 
@@ -68,7 +74,8 @@ export function HomePage({ language }: { language: SiteLanguage }) {
             {CHAOS.map(([kind, label, x, y, r]) => <span key={label} className={styles.chaosTag} data-kind={kind}
               style={{ left: x, top: y, transform: `rotate(${r}deg)` }}>
               {kind === 'app' && <span className={styles.chaosIcon}/>}{(kind === 'error' || kind === 'pending') && <span className={styles.dot}/>}
-              {kind === 'app' || kind === 'network' ? label : t.chaos[label as keyof typeof t.chaos]}
+              {kind === 'network' && networkNamed(label) ? <NetworkMark network={networkNamed(label)!}/>
+                : kind === 'app' || kind === 'network' ? label : t.chaos[label as keyof typeof t.chaos]}
             </span>)}
           </div></div>
         </div>
@@ -104,7 +111,12 @@ export function HomePage({ language }: { language: SiteLanguage }) {
             <span className={styles.askSoon}>{t.soonAsk}<span className={styles.soonTag}>{t.soon}</span></span>
           </div>
           <div className={styles.todayGrid}>
-            <div><span className={styles.mono}>{t.networksLabel}</span><strong className={styles.networkLine}>{NETWORKS_LINE}</strong></div>
+            <div><span id="today-networks" className={styles.mono}>{t.networksLabel}</span>
+              <ul className={styles.networkLogos} aria-labelledby="today-networks">{SITE_NETWORKS.map(network => <li key={network.name}>
+                <a href={network.href} target="_blank" rel="noopener noreferrer" aria-label={network.name} title={network.name} className={styles.networkLink}>
+                  <NetworkMark network={network}/></a>
+              </li>)}</ul>
+            </div>
             <div><span className={styles.mono}>{t.channelsLabel}</span>
               <ul className={styles.channelsInline}>{t.channels.map(([name, status], index) => <li key={name}>
                 {index === 3

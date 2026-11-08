@@ -19,7 +19,7 @@ approved landing (BUILD-FLOFI-LAUNCH-001), without blocking the product. Release
 
 **Data (handoff → implementation).** `on_list` = beta-list entries; `boarded` = passes issued; `founding_left` = 100 − Founding passes;
 `departures[]` = the last 5 passes whose holder chose to show them (handle, route, steps, seat — never an amount); `closes_at` =
-2026-11-16 23:59 BRT; `opens_at` = the person's boarding group. **Events** (content-free daily counters, `flight_daily_events`): list_join,
+2026-11-11 23:59 BRT (moved from 16 Nov by BUILD-FLOFI-UX-005; configurable, see `docs/deploy/ENVIRONMENT.md`); `opens_at` = the person's boarding group. **Events** (content-free daily counters, `flight_daily_events`): list_join,
 board_click, access_result (list · invite · batch_closed · not_listed), route_example_click, prompt_submit, simulation_ok, share_click
 (founding · passenger · not_listed), invite_redeem; origin list · invite · creator.
 
@@ -44,7 +44,7 @@ to everyone.
    (ETH · BASE · ARB · SOL · RH): the whole workflow when FloFi simulates it at once (a composition), the first step when /app runs the
    workflow step by step — the server never sees later steps before they are simulated, so it cannot certify them. Extending a pass's
    route as later steps are simulated is a possible follow-up for the team to decide.
-3. **Boarding groups.** An entry with no group boards when boarding opens (17 Nov, 9:00 BRT); the team creates later groups and assigns
+3. **Boarding groups.** An entry with no group boards when boarding opens (12 Nov, 9:00 BRT; moved from 17 Nov by BUILD-FLOFI-UX-005); the team creates later groups and assigns
    entries in joining order with the operator CLI. The boards define no group sizes or dates beyond the example (Group 3, 19 Nov).
 4. **The night between the list closing and boarding** uses the approved Post 5 ("Gate closed. Boarding starts tomorrow. 9:00 BRT. See
    you on board."); the form then joins the next flight.
@@ -119,7 +119,7 @@ team's email tool is a processor of exported addresses; an export is a new mode-
 `store.pg.test.ts` (12, real PostgreSQL: list and limits including requests without a client digest, every access state, invites,
 evidence-bound issuance, a list entry boarding once (not again after account deletion or for a second account with the same address),
 100 Founding seats under 260 concurrent requests, no reissue after deletion, departures privacy, erasure, retention, tenant isolation),
-`flight-flofi-migration.pg.test.ts` (2), `campaign.test.ts` (9: dates, access, inputs, seats, route projection, the simulation record,
+`flight-flofi-migration.pg.test.ts` (2), `campaign.test.ts` (10: dates, the configurable fail-closed calendar (BUILD-FLOFI-UX-005), access, inputs, seats, route projection, the simulation record,
 IPv6 /64 keying, CSV cells, the hosted refusal of the test clock, browser events), `flow-runtime.test.ts` (the observer never changes,
 fails or holds a result), `account-session.test.ts` (return paths), and the `flight` browser profile `board.spec.ts` (8, embedded runtime,
 MOCKED Privy and Jupiter, disposable database: all five states and their transitions at 1440 px and, in English and Portuguese, at 320 and
