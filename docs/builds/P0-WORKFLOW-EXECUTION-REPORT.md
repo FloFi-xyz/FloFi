@@ -97,9 +97,11 @@ workflow cannot be grouped or the Review fails; the step-by-step path is primary
    - The browser sends `wallet_sendCalls` (atomicRequired; the app-provided id `sha256(runId:group)` makes a resend a readback, never a
      second batch).
    - Then: `authorizeUserFundedGroup` → follow `wallet_getCallsStatus` → reconcile from Transfer logs.
-4. **Persistence and recovery.** The run lives in PostgreSQL. The panel stores `{approvalId}` under `flofi.editor-workflow-run.v1` and polls
-   status every 4 s.
-   - **After a refresh,** it reads the batch back by its known id instead of sending again.
+4. **Persistence and recovery.** The run lives in PostgreSQL. The browser keeps an index of the runs it started under
+   `flofi.editor-workflow-runs.v2`: the approval id, the reviewed workflow hash, the owner, and the batch id the wallet answered with. The
+   panel polls status every 4 s.
+   - **After a refresh,** a page load gives the Canvas a new workflow id. A run from the earlier visit is offered ("Show its progress"), and
+     its batch is read back by its id instead of being sent again.
    - **Due groups** (WHEN_DUE) are prompted in the same panel.
    - **Unknown outcomes** stay `SUBMISSION_RESULT_UNKNOWN` and are **never resubmitted automatically**.
 
