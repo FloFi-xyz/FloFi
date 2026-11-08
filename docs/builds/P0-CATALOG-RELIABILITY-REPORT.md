@@ -171,11 +171,12 @@ and recovery tools. Nothing was changed.
 
 | Gate | Result |
 |---|---|
-| `pnpm check` (typecheck, lint, build, schema drift, unit tests) | see the PR's final comment |
+| `pnpm check` (typecheck, lint, build, schema drift, unit tests) | **pass** locally on Node 24.21.0 / pnpm 11.22.0: 569 test files, 6 873 tests passed, 2 skipped (pre-existing conditional skips) |
 | `python3 scripts/governance_lite.py` | pass |
 | `python3 scripts/agent_guard.py check` | pass (new `src/mcp/network-aliases.ts` mapped in `coverage.json`; `COVERAGE.md` regenerated) |
 | PostgreSQL suites (`*.pg.test.ts`) | **not run**: no PostgreSQL in this sandbox. CircleCI runs them. |
-| Browser (Playwright) | **not run in this session** (see the PR). CircleCI's browser profiles remain the authority. |
+| Browser (Playwright, loopback, pinned headless shell 1243) | **pass**: `playwright.arbitrum-authoring.config.ts` 24/24 (including Canvas Enter-to-apply for Supply/Borrow/Repay/Withdraw) and `playwright.canvas-workflow-ux.config.ts` 21/21 (including "Arbitrum One Swap: one coalesced request, latest amount wins"). The other browser profiles were not run here; CircleCI's browser profiles remain the authority. |
+| Specialist review (`agent_guard.py review`) | flofi-workflow, flofi-security and flofi-mcp reviewed the uncommitted tree, and their findings were fixed (§C). flofi-swap, flofi-bridge and flofi-frontend-ux reviewed commit `e9e7ff5`; see the PR. The other 13 domains the guard selects (by dependency) were not invoked. The guard reports them as unreviewed. |
 | Read-only mainnet checks | Done through the production MCP only, since the sandbox has no RPC egress: Arbitrum WETH→USDC live quote, Ethereum compose, Solana → Base live route (§A). |
 | Signed mainnet execution | **None** by this session. No row is promoted to `LIVE_CERTIFIED`. The six flows with reconciled runs and archived evidence (arbitrum-swap 4, base-swap 2, jupiter-swap 2, crosschain-router 1, crosschain-router-arbitrum-to-base 1, crosschain-universal 1) can be verified by the owner with `get_evidence` and an explorer. A row should be upgraded only for the exact route that evidence proves. |
 
