@@ -22,6 +22,7 @@ import { delegationAavePool, delegationAaveReserve } from '../delegation/profile
 import { workflowRunHarness } from '../workflow-runs/workflow-run.test-harness.ts';
 import { evmCallsOf, type EvmGroupCalls } from '../user-funded/evm-calls.ts';
 import { reviewEditorExecution } from './workflow-execution.ts';
+import { bindingOf, runMatchesBinding } from './authorize-binding.ts';
 import { canvasWorkflowOfStrategy } from './workflow-strategy.ts';
 
 const CHAIN = 'eip155:42161', CHAINS = [CHAIN];
@@ -82,6 +83,10 @@ describe('P0: the Editor reviews and authorizes Swap → Supply → Borrow on Ar
       const started = await workflowRunUserFundedStart(h.surface, approval.approvalId, [h.evm, h.sol], METAMASK);
       expect(started.view.workflowRun!.run).toMatchObject({ state: 'RUNNING', mode: 'USER_FUNDED', nextAction: 'OWNER_SIGNS_GROUP',
         groups: [{ index: 0, strategy: 'EVM_WALLET_BATCH', steps: [0, 2], feePayer: owner }] });
+      // The Authorize binding the Editor sends (the Review's own hash and groups) matches the run it starts, exactly.
+      const binding = bindingOf({ owner, workflowHash: review.workflowHash, groups: review.groups.map(g => ({ strategy: g.strategy, steps: g.steps })) });
+      expect(binding).not.toBeNull();
+      expect(runMatchesBinding(started.view.workflowRun!.run, binding!)).toBe(true);
       const prepared = await workflowRunUserFundedPrepare(h.surface, approval.approvalId, [h.evm, h.sol], 0);
       const p = prepared.prepared as unknown as { group: EvmGroupCalls; request: { atomicRequired: boolean; id: string } };
       // Exactly what the Review showed (same calls, same amounts at an unchanged price), as ONE atomic request with the group's own id.
@@ -123,8 +128,12 @@ describe('P0: the Editor reviews and authorizes Swap → Supply → Borrow on Ar
       const a = first.prepared as unknown as { group: EvmGroupCalls; request: { id: string } };
       // The wallet executes it, but its answer never reaches FloFi (a reload while the wallet prompt was open)…
       const hash = chain.control.walletBatch(owner, evmCallsOf(a.group));
-      // …the preparation expires, the price moves, and the group is prepared again under the SAME id (the wallet would refuse a second batch).
+      // …the preparation expires, a first attempt to prepare it again fails (the owner briefly lacks gas money: the group is back to PLANNED)…
       h.d.advance(11 * 60_000);
+      chain.control.fundNative(owner, 0n);
+      await expect(workflowRunUserFundedPrepare(h.surface, approval.approvalId, [h.evm, h.sol], 0)).rejects.toThrow('USER_FUNDED_INSUFFICIENT_NATIVE_BALANCE');
+      chain.control.fundNative(owner, 10n ** 17n);
+      // …then the price moves and the group is prepared again under the SAME id (the wallet would refuse a second batch).
       chain.control.setPrice(390_000_000_000_000n);
       const second = await workflowRunUserFundedPrepare(h.surface, approval.approvalId, [h.evm, h.sol], 0);
       const b = second.prepared as unknown as { group: EvmGroupCalls; request: { id: string }; superseded: unknown[] };
@@ -136,7 +145,14 @@ describe('P0: the Editor reviews and authorizes Swap → Supply → Borrow on Ar
       await workflowRunUserFundedAuthorize(h.surface, approval.approvalId, [h.evm, h.sol], 0, { kind: 'EVM_WALLET_BATCH', batchId: a.request.id });
       const done = await workflowRunUserFundedReport(h.surface, approval.approvalId, [h.evm, h.sol], 0, [hash]);
       expect(done.view.workflowRun!.run).toMatchObject({ state: 'COMPLETED', groups: [{ state: 'RECONCILED', submissions: [{ hash }] }] });
-      expect(done.view.workflowRun!.run.steps[1]!.outcome!.spent).toEqual([{ asset: `${CHAIN}/erc20:${WETH}`, amount: (a.group.calls[1] as { amountOutMinimum: string }).amountOutMinimum }]);
+      const signedSupply = (a.group.calls[1] as { amountOutMinimum: string }).amountOutMinimum;
+      expect(done.view.workflowRun!.run.steps[1]!.outcome!.spent).toEqual([{ asset: `${CHAIN}/erc20:${WETH}`, amount: signedSupply }]);
+      // The step is recorded with what the batch that ran was signed to spend (never the newer preparation's amount): a later consumer of the
+      // swap's delivery is funded only by what is really left of it.
+      const supplyStep = (await t.db.query<{ bound: { used: string } | null; strategy: { amount: string } }>(
+        'SELECT bound, strategy FROM workflow_run_steps WHERE step_index = 1')).rows[0]!;
+      expect(supplyStep.bound?.used).toBe(signedSupply);
+      expect(supplyStep.strategy.amount).toBe('0.001194');
     } finally { await t.drop(); }
   });
 

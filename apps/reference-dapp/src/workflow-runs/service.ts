@@ -232,9 +232,11 @@ export async function prepareUserFundedGroup(deps: WorkflowRunDeps, run: RunReco
   if (g.state === 'PREPARED' && g.validUntil && g.validUntil > deps.now()) return { groupIndex, strategy: g.strategy, chain: g.chain, feePayer: g.feePayer,
     validUntil: g.validUntil.toISOString(), prepared: g.prepared as Prepared };
   // A wallet batch prepared before keeps every earlier preparation for reconciliation: they share one EIP-5792 id, so the wallet may hold one of them.
-  const superseded = g.strategy === 'EVM_WALLET_BATCH' ? supersede(g.prepared as Prepared | null) : [];
+  const superseded = g.strategy === 'EVM_WALLET_BATCH' && ['PREPARED', 'EXPIRED', 'PLANNED'].includes(g.state) ? supersede(g.prepared as Prepared | null) : [];
   if (g.state === 'PREPARED') g = await deps.store.groupTransition(run.runId, groupIndex, ['PREPARED'], 'EXPIRED', { code: 'USER_FUNDED_PREPARED_EXPIRED' }) ?? refuse('WORKFLOW_RUN_CHANGED');
-  if (g.state === 'EXPIRED') g = await deps.store.groupTransition(run.runId, groupIndex, ['EXPIRED'], 'PLANNED', { prepared: null, validUntil: null, code: null }) ?? refuse('WORKFLOW_RUN_CHANGED');
+  // The earlier preparations stay on the PLANNED group (history only, no artifact): a preparation that fails now must not lose them.
+  if (g.state === 'EXPIRED') g = await deps.store.groupTransition(run.runId, groupIndex, ['EXPIRED'], 'PLANNED',
+    { prepared: superseded.length ? { kind: 'EVM_WALLET_BATCH', superseded } : null, validUntil: null, code: null }) ?? refuse('WORKFLOW_RUN_CHANGED');
   if (g.state !== 'PLANNED') refuse(`WORKFLOW_RUN_GROUP_${g.state}`);
   const due = run.currentStep === g.stepFrom;
   if (g.signing === 'WHEN_DUE' && !due) refuse('WORKFLOW_RUN_GROUP_NOT_DUE');

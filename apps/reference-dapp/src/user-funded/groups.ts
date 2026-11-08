@@ -310,8 +310,11 @@ export async function advanceSolanaSubmission(deps: UserFundedDeps, prepared: Pr
 }
 
 // ── Reconciliation ────────────────────────────────────────────────────────────────────────────────────────────────────────
-export type Reconciled = { readonly status: 'PENDING' } | { readonly status: 'RECONCILED'; readonly steps: readonly StepFacts[]; readonly gasPaid: GasPaidFact; readonly transactions: readonly string[] }
-  | { readonly status: 'FAILED'; readonly code: string; readonly gasPaid: GasPaidFact | null; readonly transactions: readonly string[]; readonly steps?: readonly StepFacts[] };
+/** `group`: an EVM wallet batch reconciled against an EARLIER preparation of the group (the one the wallet sent): what its steps were signed to spend. */
+export type Reconciled = { readonly status: 'PENDING' }
+  | { readonly status: 'RECONCILED'; readonly steps: readonly StepFacts[]; readonly gasPaid: GasPaidFact; readonly transactions: readonly string[]; readonly group?: EvmGroupCalls }
+  | { readonly status: 'FAILED'; readonly code: string; readonly gasPaid: GasPaidFact | null; readonly transactions: readonly string[]; readonly steps?: readonly StepFacts[];
+    readonly group?: EvmGroupCalls };
 type TokenBalance = { readonly accountIndex: number; readonly mint: string; readonly owner?: string; readonly uiTokenAmount: { readonly amount: string } };
 type SolanaTxMeta = { readonly err: unknown; readonly fee: number | string; readonly preBalances: readonly (number | string)[]; readonly postBalances: readonly (number | string)[];
   readonly preTokenBalances?: readonly TokenBalance[]; readonly postTokenBalances?: readonly TokenBalance[] };
@@ -364,11 +367,14 @@ export function supersededWalletBatches(prepared: Prepared | null): readonly { r
   const earlier = Array.isArray(prepared.superseded) ? prepared.superseded as { group: EvmGroupCalls; fromBlock: unknown }[] : [];
   return earlier.filter(e => e && typeof e === 'object' && e.group).map(e => ({ group: e.group, fromBlock: typeof e.fromBlock === 'string' ? e.fromBlock : null }));
 }
-/** The superseded list a new preparation of the same wallet batch group carries: the replaced artifact first, then its own earlier ones. */
+/**
+ * The superseded list a new preparation of the same wallet batch group carries: the replaced artifact first, then its own earlier ones. A
+ * group reset to PLANNED keeps only that history (`{ kind, superseded }`, no artifact of its own) until it is prepared again.
+ */
 export function supersede(previous: Prepared | null): readonly { readonly group: EvmGroupCalls; readonly fromBlock: string | null }[] {
-  if (!previous || previous.kind !== 'EVM_WALLET_BATCH' || !previous.group) return [];
-  return [{ group: previous.group as EvmGroupCalls, fromBlock: typeof previous.fromBlock === 'string' ? previous.fromBlock : null }, ...supersededWalletBatches(previous)]
-    .slice(0, SUPERSEDED_WALLET_BATCH_LIMIT);
+  if (!previous || previous.kind !== 'EVM_WALLET_BATCH') return [];
+  const own = previous.group ? [{ group: previous.group as EvmGroupCalls, fromBlock: typeof previous.fromBlock === 'string' ? previous.fromBlock : null }] : [];
+  return [...own, ...supersededWalletBatches(previous)].slice(0, SUPERSEDED_WALLET_BATCH_LIMIT);
 }
 /** Reconciles an EVM group from the chain (wallet batch: the reported hashes; user operation: the bundler's bundle transaction, re-read). */
 export async function reconcileEvmGroup(deps: UserFundedDeps, prepared: Prepared, submission: Readonly<Record<string, unknown>>,
@@ -377,15 +383,17 @@ export async function reconcileEvmGroup(deps: UserFundedDeps, prepared: Prepared
   if (!t) return { status: 'PENDING' };
   if (prepared.kind === 'EVM_WALLET_BATCH') {
     const hashes = (submission.hashes ?? []) as string[];
-    let r = await reconcileWalletBatch(t, group, hashes, typeof prepared.fromBlock === 'string' ? prepared.fromBlock : null);
+    let r = await reconcileWalletBatch(t, group, hashes, typeof prepared.fromBlock === 'string' ? prepared.fromBlock : null), matched: EvmGroupCalls | null = null;
     // A batch the wallet sent under this group's id BEFORE the group was prepared again (its answer was lost, then the preparation expired)
-    // carries that earlier preparation's calls: it reconciles against the artifact it was sent from, never as a mismatch of the newer one.
+    // carries that earlier preparation's calls: it reconciles against the artifact it was sent from (and is recorded with ITS signed amounts),
+    // never as a mismatch of the newer one.
     for (const earlier of r.status === 'MISMATCH' && SUPERSEDED_MISMATCH.has(r.code) ? supersededWalletBatches(prepared) : []) {
       const again = await reconcileWalletBatch(t, earlier.group, hashes, earlier.fromBlock);
-      if (again.status !== 'MISMATCH' || !SUPERSEDED_MISMATCH.has(again.code)) { r = again; break; }
+      if (again.status !== 'MISMATCH' || !SUPERSEDED_MISMATCH.has(again.code)) { r = again; matched = earlier.group; break; }
     }
-    return r.status === 'PENDING' ? r : r.status === 'RECONCILED' ? { status: 'RECONCILED', steps: r.steps, gasPaid: r.gasPaid, transactions: r.transactions }
-      : { status: 'FAILED', code: r.code, gasPaid: r.gasPaid, transactions: r.transactions };
+    const from = matched ? { group: matched } : {};
+    return r.status === 'PENDING' ? r : r.status === 'RECONCILED' ? { status: 'RECONCILED', steps: r.steps, gasPaid: r.gasPaid, transactions: r.transactions, ...from }
+      : { status: 'FAILED', code: r.code, gasPaid: r.gasPaid, transactions: r.transactions, ...from };
   }
   const bundler = deps.bundler(group.chain), userOpHash = String(submission.userOpHash);
   const receipt = bundler ? await bundler.receipt(userOpHash).catch(() => null) : null;

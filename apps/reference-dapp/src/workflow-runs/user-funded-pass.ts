@@ -137,7 +137,8 @@ async function submittedGroup(deps: UserFundedPassDeps, run: RunRecord, g: Group
       spent: f?.spent ?? [], received: f?.received ?? [], observedAt, ...gasPaid ? { gasPaid } : {} };
   };
   const spentOf = (index: number) => {
-    const group = (prepared as { group?: EvmGroupCalls }).group, stepCalls = group?.steps.find(s => s.stepIndex === index);
+    // The artifact the batch was actually sent from (an earlier preparation, when it reconciled against one), else the group's own.
+    const group = r.group ?? (prepared as { group?: EvmGroupCalls }).group, stepCalls = group?.steps.find(s => s.stepIndex === index);
     if (stepCalls) return stepCalls.spend.amount;
     const sol = (prepared.transactions as readonly { stepIndex: number; spend: { amount: string } }[] | undefined)?.find(t => t.stepIndex === index);
     return sol?.spend.amount ?? null;

@@ -133,6 +133,17 @@ export const portugueseWorkflowExecution: Readonly<Record<string, string>> = {
   'FloFi could not complete this request ({0}). What your wallet already has stands: FloFi keeps following it and never sends it again.':
     'A FloFi não conseguiu concluir este pedido ({0}). O que sua carteira já tem continua valendo: a FloFi continua acompanhando e nunca o envia de novo.',
   '1 on-chain transaction': '1 transação on-chain', '1 signature': '1 assinatura',
+  'Sign in with the wallet that started this workflow to follow it (the sign-in authorizes no transaction).':
+    'Entre com a carteira que iniciou este fluxo para acompanhá-lo (a entrada não autoriza nenhuma transação).',
+  'This workflow was started by another wallet. Connect that wallet to follow it.': 'Este fluxo foi iniciado por outra carteira. Conecte essa carteira para acompanhá-lo.',
+  'Confirm what your wallet will be asked:': 'Confirme o que será pedido à sua carteira:',
+  'Step {0} pays': 'A etapa {0} paga', 'Step {0}: minimum {1}': 'Etapa {0}: mínimo {1}',
+  'Confirm and continue in my wallet': 'Confirmar e continuar na minha carteira',
+  'Your wallet may already have sent this batch. Check your wallet\'s activity before ending the workflow: ending it does not stop a batch already on chain.':
+    'Sua carteira pode já ter enviado este lote. Verifique a atividade da sua carteira antes de encerrar o fluxo: encerrá-lo não interrompe um lote que já está na rede.',
+  'Forgetting removes this workflow only from this browser: the run, and anything your wallet already sent, stay. Check your wallet\'s activity first.':
+    'Esquecer remove este fluxo apenas deste navegador: a execução, e o que sua carteira já enviou, continuam. Verifique antes a atividade da sua carteira.',
+  'Forget this workflow in this browser': 'Esquecer este fluxo neste navegador',
   'Load workflow progress': 'Carregar o andamento do fluxo',
   'The prepared wallet request is valid until {0}; the workflow can be ended after that.':
     'O pedido preparado para a carteira vale até {0}; o fluxo pode ser encerrado depois disso.',
