@@ -248,6 +248,11 @@ frontend-ux. Every major finding was verified in code and fixed, with a test whe
 | Failed Authorize attempts filled the pending-approval limit. | A claimed handoff whose run ended no longer counts (PG test). |
 | User-operation groups with Aave steps skipped the HF and supply-cap simulation (pre-existing). | The planner never makes one, and the builder refuses one: `USER_OPERATION_AAVE_SIGNED_WHEN_DUE`. |
 | Transient node lag was read as "this RPC cannot simulate". | Simulation runs at `latest`. Only method-level refusals mean unsupported. |
+| A brand-new toolbox card applied itself after the typing pause, became a new node and took focus mid-typing. | Toolbox cards apply on Enter or blur only. An edit that drops a step's funding also needs Enter. |
+| A safety refusal (unsafe HF, a swap below its minimum, a reverting call, too little ETH for fees) switched the Editor to step-by-step, so the workflow could run half way. | The grouped panel stays primary and the chat stays blocked until the workflow is fixed. Step-by-step is used only when the workflow cannot be grouped, the RPC cannot simulate, or the path cannot run here. |
+| Execute still showed step-by-step status and "Back to simulation" around the grouped panel. | Hidden while the grouped panel is in use; the canvas button returns to the Canvas. |
+| The run pointer was keyed by the Canvas workflow id, which is new on every page load, so progress and wallet read-back were lost after a reload. | Runs are indexed by approval id. A run from an earlier visit is offered ("Show its progress") on the Canvas and in Execute, and is never followed silently. |
+| Copy: "Nothing was sent" after a batch reached the wallet; count shown on the button; plural forms; untranslated "Execute" in PT. | Fixed. |
 
 Not changed:
 - **No swap deadline.** The batched swap call carries no on-chain deadline; this is a pre-existing call template. The Review now says
@@ -286,6 +291,8 @@ Not changed:
   but not `atomic` fall back to owner steps.
 - **Supply settings form.** A changed beneficiary, network or asset there is still a reviewed proposal; the beneficiary is security
   relevant. The Canvas card applies token and reserve picks directly.
+- **Reload recovery uses browser storage.** Recovery after a reload uses this browser's storage. Another browser, or cleared site data,
+  has no way into the run from the Editor; the run itself stays in PostgreSQL. No owner-facing run list exists for Editor runs yet.
 - **Grouping must ask fewer times.** A workflow whose grouping would not ask the wallet fewer times than its steps uses the step-by-step
   path; for example, one step on each of two networks. The reason is shown.
 - **Wallets that ignore the app id.** For a wallet that ignores the app-provided EIP-5792 id, protection against a second send is the
