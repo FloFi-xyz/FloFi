@@ -55,6 +55,12 @@ Two items need owner action outside the code: the Vercel `FLOFI_WORKFLOW_RUNS` g
 - Fixed: a Canvas amount-only edit is refused (`ACTION_EDIT_CHANGES_SETTINGS`) if rebuilding the action would change anything but the amount (network, adapters, protocols, slippage, pair or range).
 - Not changed, noted: the Developer API still requires canonical network ids (aliases are an MCP convenience). Logs of a shared preview carry the first caller's trace id. A response timestamp can reveal that an identical preview is in flight (needs the exact arguments; low impact).
 
+**Second review batch (flofi-swap, flofi-bridge, flofi-frontend-ux on `e9e7ff5`) and what changed because of it.**
+- Fixed (frontend-ux): every message the Canvas shows on a refused edit now has a Portuguese entry (`i18n/pt-catalog-reliability.ts`), the support reference included as a `{0}` template. A test checks all of them. Messages now name the card's real controls (Cancel, the action's Settings). `UNIVERSAL_*` asset and network codes map to the same messages as the Canvas codes.
+- Fixed (bridge): `bridgeDetails` no longer reads Universal Router nodes, so no caller (proposal, chat summary, Canvas title, inspector) can describe one as the legacy Base → Optimism bridge. The Capability API's `routes` lists only certified Router routes. Asset discovery includes the Solana bridge asset. The aggregate `bridge-evm-solana` row was removed, and evidence is shown per route.
+- Fixed (swap): the amount-edit guard compares the whole swap node with only the amount fields masked (a WETH9 wrap's 1:1 minimum counts as amount-derived). New cases cover native ETH, a WETH9 wrap, a Base non-reference pair, a Stock Token and the guard's refusal. A quote that arrives after the browser cancelled is never published. Previews that differ in amount, subject or purpose are not shared. The journey metric counts a shared request once (that test fails without the fix).
+- Known, not changed: when a card's own 45 s timeout fires while another card still waits on the same request, the first card shows "timed out" and the second may later show the quote. The next edit or refresh reconciles them.
+
 ## D. Performance
 
 | Measurement | Before | After | Source |
@@ -92,71 +98,71 @@ No incorrect value was found among the variables inspected. Values were never re
 ## A. Audit matrix
 
 Generated from the committed capability matrix (`docs/builds/BUILD-FLOFI-MAINNET-PRODUCT-001-CAPABILITY-MATRIX.json`, produced by
-`engine/mainnet-product-matrix.ts` from the code registries), annotated with this session's evidence. It has 54 rows plus the per-step sequence rows:
-50 `IMPLEMENTED_UNCERTIFIED`, 4 `NOT_IMPLEMENTED` (remove liquidity on the four EVM networks), 0 `LIVE_CERTIFIED`. "Code status" is the
-generator's classification. A production record is listed per **flow**, not per route.
+`engine/mainnet-product-matrix.ts` from the code registries), annotated with this session's evidence. It has 53 rows plus the per-step sequence rows:
+49 `IMPLEMENTED_UNCERTIFIED`, 4 `NOT_IMPLEMENTED` (remove liquidity on the four EVM networks), 0 `LIVE_CERTIFIED`. "Code status" is the
+generator's classification. The former aggregate `bridge-evm-solana` row is replaced by the eight per-direction rows. Production execution
+evidence is listed **per route**: the chain ids of each reconciled cross-chain run were read from its log; no address, amount or run id was read.
 
-| Row | Action | Network → destination | Flow (provider) | Channels with a creation/approval path | Code status | Reconciled PUBLIC_MAINNET runs of this row's flow (any route of that flow; archived evidence, not re-verified on chain here) | Evidence gathered in this session | Preview latency, Railway 2026-11-01…08 |
+| Row | Action | Network → destination | Flow (protocols) | Channels with a creation/approval path | Code status | Production execution evidence for this exact route (reconciled, archived evidence; not re-verified on chain here) | Read-only evidence gathered in this session | Preview latency, Railway 2026-11-01…08 |
 |---|---|---|---|---|---|---|---|---|
-| `bridge-base-arbitrum-one` | bridge | base → arbitrum-one | `crosschain-router` (flofi.router) | Editor Chat MCP /approve Telegram | IMPLEMENTED_UNCERTIFIED | 1 run(s) of `crosschain-router` | — | 6.9 s (n=1) |
-| `swap-base` | swap | base | `base-swap` (uniswap.v3) | Editor Chat MCP /approve Telegram | IMPLEMENTED_UNCERTIFIED | 2 run(s) of `base-swap` | — | p50 3.8 s / p95 11.3 s / p99 11.5 s (n=301) |
-| `swap-solana` | swap | solana | `jupiter-swap` (jupiter.swap-v2) | Editor Chat MCP /approve Telegram | IMPLEMENTED_UNCERTIFIED | 2 run(s) of `jupiter-swap` | — | 0.6 s (n=1, QUOTE purpose) |
-| `transfer-solana` | transfer | solana | `solana-transfer` (solana.spl-transfer) | Editor Chat MCP /approve Telegram | IMPLEMENTED_UNCERTIFIED | — | — | — |
-| `add-liquidity-solana` | add_liquidity | solana | `orca-liquidity-mainnet` (orca.whirlpools-mainnet-liquidity) | Editor Chat MCP /approve Telegram | IMPLEMENTED_UNCERTIFIED | — | — | — |
-| `bridge-base-robinhood` | bridge | base → robinhood | `crosschain-router-base-to-robinhood` (flofi.router) | Editor Chat MCP /approve Telegram | IMPLEMENTED_UNCERTIFIED | — | — | — |
-| `bridge-robinhood-base` | bridge | robinhood → base | `crosschain-router-robinhood-to-base` (flofi.router) | Editor Chat MCP /approve Telegram | IMPLEMENTED_UNCERTIFIED | — | — | — |
-| `bridge-arbitrum-robinhood` | bridge | arbitrum-one → robinhood | `crosschain-router-arbitrum-to-robinhood` (flofi.router) | Editor Chat MCP /approve Telegram | IMPLEMENTED_UNCERTIFIED | — | — | — |
-| `bridge-robinhood-arbitrum` | bridge | robinhood → arbitrum-one | `crosschain-router-robinhood-to-arbitrum` (flofi.router) | Editor Chat MCP /approve Telegram | IMPLEMENTED_UNCERTIFIED | — | — | — |
-| `swap-robinhood` | swap | robinhood | `robinhood-swap` (uniswap.v3) | Editor Chat MCP /approve Telegram | IMPLEMENTED_UNCERTIFIED | — | — | — |
-| `add-liquidity-robinhood` | add_liquidity | robinhood | `robinhood-liquidity` (uniswap.v3) | Editor Chat MCP /approve Telegram | IMPLEMENTED_UNCERTIFIED | — | — | — |
-| `transfer-robinhood` | transfer | robinhood | `robinhood-mainnet-transfer` (evm.token-transfer) | Editor Chat MCP /approve Telegram | IMPLEMENTED_UNCERTIFIED | — | — | — |
-| `bridge-arbitrum-base` | bridge | arbitrum-one → base | `crosschain-router-arbitrum-to-base` (flofi.router) | Editor Chat MCP /approve Telegram | IMPLEMENTED_UNCERTIFIED | 1 run(s) of `crosschain-router-arbitrum-to-base` | — | — |
-| `add-liquidity-base` | add_liquidity | base | `base-liquidity` (uniswap.v3) | Editor Chat MCP /approve Telegram | IMPLEMENTED_UNCERTIFIED | — | — | — |
-| `transfer-base` | transfer | base | `base-mainnet-transfer` (evm.token-transfer) | Editor Chat MCP /approve Telegram | IMPLEMENTED_UNCERTIFIED | — | — | — |
-| `supply-base` | supply | base | `base-aave` (aave-v3) | Editor Chat MCP /approve Telegram | IMPLEMENTED_UNCERTIFIED | — | — | 4.9 s (n=1) |
-| `borrow-base` | borrow | base | `base-aave` (aave-v3) | Editor Chat MCP /approve Telegram | IMPLEMENTED_UNCERTIFIED | — | — | — |
-| `repay-base` | repay | base | `base-aave` (aave-v3) | Editor Chat MCP /approve Telegram | IMPLEMENTED_UNCERTIFIED | — | — | — |
-| `withdraw-base` | withdraw | base | `base-aave` (aave-v3) | Editor Chat MCP /approve Telegram | IMPLEMENTED_UNCERTIFIED | — | — | — |
-| `supply-arbitrum` | supply | arbitrum-one | `arbitrum-aave` (aave-v3) | Editor Chat MCP /approve Telegram | IMPLEMENTED_UNCERTIFIED | — | — | — |
-| `borrow-arbitrum` | borrow | arbitrum-one | `arbitrum-aave` (aave-v3) | Editor Chat MCP /approve Telegram | IMPLEMENTED_UNCERTIFIED | — | — | — |
-| `repay-arbitrum` | repay | arbitrum-one | `arbitrum-aave` (aave-v3) | Editor Chat MCP /approve Telegram | IMPLEMENTED_UNCERTIFIED | — | — | — |
-| `withdraw-arbitrum` | withdraw | arbitrum-one | `arbitrum-aave` (aave-v3) | Editor Chat MCP /approve Telegram | IMPLEMENTED_UNCERTIFIED | — | — | — |
-| `swap-arbitrum` | swap | arbitrum-one | `arbitrum-swap` (uniswap.v3) | Editor Chat MCP /approve Telegram | IMPLEMENTED_UNCERTIFIED | 4 run(s) of `arbitrum-swap` | Live quote via MCP simulate 2026-11-08 00:28Z: 0.0012 WETH → 2.682908 USDC (min 2.656078, 0.01% pool, block 522228672) | p50 4.1 s / p95 11.8 s / p99 47.1 s (n=111) |
-| `transfer-arbitrum` | transfer | arbitrum-one | `arbitrum-mainnet-transfer` (evm.token-transfer) | Editor Chat MCP /approve Telegram | IMPLEMENTED_UNCERTIFIED | — | — | — |
-| `add-liquidity-arbitrum` | add_liquidity | arbitrum-one | `arbitrum-liquidity` (uniswap.v3) | Editor Chat MCP /approve Telegram | IMPLEMENTED_UNCERTIFIED | — | — | — |
-| `supply-ethereum` | supply | ethereum | `ethereum-aave` (aave-v3) | Editor Chat MCP /approve Telegram | IMPLEMENTED_UNCERTIFIED | — | — | — |
-| `borrow-ethereum` | borrow | ethereum | `ethereum-aave` (aave-v3) | Editor Chat MCP /approve Telegram | IMPLEMENTED_UNCERTIFIED | — | — | — |
-| `repay-ethereum` | repay | ethereum | `ethereum-aave` (aave-v3) | Editor Chat MCP /approve Telegram | IMPLEMENTED_UNCERTIFIED | — | — | — |
-| `withdraw-ethereum` | withdraw | ethereum | `ethereum-aave` (aave-v3) | Editor Chat MCP /approve Telegram | IMPLEMENTED_UNCERTIFIED | — | — | — |
-| `swap-ethereum` | swap | ethereum | `ethereum-swap` (uniswap.v3) | Editor Chat MCP /approve Telegram | IMPLEMENTED_UNCERTIFIED | — | Live compose OK (`ethereum`); `Ethereum` refused before this fix | — |
-| `transfer-ethereum` | transfer | ethereum | `ethereum-mainnet-transfer` (evm.token-transfer) | Editor Chat MCP /approve Telegram | IMPLEMENTED_UNCERTIFIED | — | — | — |
-| `add-liquidity-ethereum` | add_liquidity | ethereum | `ethereum-liquidity` (uniswap.v3) | Editor Chat MCP /approve Telegram | IMPLEMENTED_UNCERTIFIED | — | — | — |
-| `bridge-ethereum-base` | bridge | ethereum → base | `crosschain-router-ethereum-to-base` (flofi.router) | Editor Chat MCP /approve Telegram | IMPLEMENTED_UNCERTIFIED | — | — | — |
-| `bridge-base-ethereum` | bridge | base → ethereum | `crosschain-router-base-to-ethereum` (flofi.router) | Editor Chat MCP /approve Telegram | IMPLEMENTED_UNCERTIFIED | — | — | — |
-| `bridge-ethereum-arbitrum` | bridge | ethereum → arbitrum-one | `crosschain-router-ethereum-to-arbitrum` (flofi.router) | Editor Chat MCP /approve Telegram | IMPLEMENTED_UNCERTIFIED | — | — | — |
-| `bridge-arbitrum-ethereum` | bridge | arbitrum-one → ethereum | `crosschain-router-arbitrum-to-ethereum` (flofi.router) | Editor Chat MCP /approve Telegram | IMPLEMENTED_UNCERTIFIED | — | — | — |
-| `bridge-ethereum-robinhood` | bridge | ethereum → robinhood | `crosschain-router-ethereum-to-robinhood` (flofi.router) | Editor Chat MCP /approve Telegram | IMPLEMENTED_UNCERTIFIED | — | — | — |
-| `bridge-robinhood-ethereum` | bridge | robinhood → ethereum | `crosschain-router-robinhood-to-ethereum` (flofi.router) | Editor Chat MCP /approve Telegram | IMPLEMENTED_UNCERTIFIED | — | — | — |
-| `bridge-solana-base` | bridge | solana → base | `crosschain-universal` (flofi.router.universal) | Editor Chat MCP /approve Telegram | IMPLEMENTED_UNCERTIFIED | 1 run(s) of `crosschain-universal` | Live route via MCP simulate 2026-11-08 00:32Z: Relay, 5 USDC → 4.977663 (min 4.927887), Solana simulateTransaction slot 466714797 | — |
-| `bridge-base-solana` | bridge | base → solana | `crosschain-universal` (flofi.router.universal) | Editor Chat MCP /approve Telegram | IMPLEMENTED_UNCERTIFIED | 1 run(s) of `crosschain-universal` | — | — |
-| `bridge-solana-arbitrum-one` | bridge | solana → arbitrum-one | `crosschain-universal` (flofi.router.universal) | Editor Chat MCP /approve Telegram | IMPLEMENTED_UNCERTIFIED | 1 run(s) of `crosschain-universal` | — | — |
-| `bridge-arbitrum-one-solana` | bridge | arbitrum-one → solana | `crosschain-universal` (flofi.router.universal) | Editor Chat MCP /approve Telegram | IMPLEMENTED_UNCERTIFIED | 1 run(s) of `crosschain-universal` | — | — |
-| `bridge-solana-ethereum` | bridge | solana → ethereum | `crosschain-universal` (flofi.router.universal) | Editor Chat MCP /approve Telegram | IMPLEMENTED_UNCERTIFIED | 1 run(s) of `crosschain-universal` | — | — |
-| `bridge-ethereum-solana` | bridge | ethereum → solana | `crosschain-universal` (flofi.router.universal) | Editor Chat MCP /approve Telegram | IMPLEMENTED_UNCERTIFIED | 1 run(s) of `crosschain-universal` | — | — |
-| `bridge-solana-robinhood` | bridge | solana → robinhood | `crosschain-universal` (flofi.router.universal) | Editor Chat MCP /approve Telegram | IMPLEMENTED_UNCERTIFIED | 1 run(s) of `crosschain-universal` | — | — |
-| `bridge-robinhood-solana` | bridge | robinhood → solana | `crosschain-universal` (flofi.router.universal) | Editor Chat MCP /approve Telegram | IMPLEMENTED_UNCERTIFIED | 1 run(s) of `crosschain-universal` | — | — |
-| `remove-liquidity-solana` | remove_liquidity | solana | `orca-liquidity-mainnet` (orca.whirlpools-mainnet-liquidity) | Editor | IMPLEMENTED_UNCERTIFIED | — | — | — |
-| `remove-liquidity-base` | remove_liquidity | base | `None` (uniswap.v3) | — | NOT_IMPLEMENTED | — | — | — |
-| `remove-liquidity-arbitrum-one` | remove_liquidity | arbitrum-one | `None` (uniswap.v3) | — | NOT_IMPLEMENTED | — | — | — |
-| `remove-liquidity-ethereum` | remove_liquidity | ethereum | `None` (uniswap.v3) | — | NOT_IMPLEMENTED | — | — | — |
-| `remove-liquidity-robinhood` | remove_liquidity | robinhood | `None` (uniswap.v3) | — | NOT_IMPLEMENTED | — | — | — |
-| `sequence-user-funded-groups` | sequence_user_funded | ethereum, base, arbitrum-one (EIP-5792 batches: USDC⇄WETH Uniswap v3, Aave V3 supply/borrow, transfers); robinhood (transfers); solana (sign-all: transfers, Jupiter swaps); any other step through its own flow | `workflow-run` (eip-5792, erc-4337 v0.7 (owner account, no paymaster), wallet-standard solana:signTransaction) | MCP /approve Telegram | IMPLEMENTED_UNCERTIFIED | — | — | — |
-| `bridge-evm-solana` | bridge | any EVM network → solana | `crosschain-universal` (relay-depository) | Editor Chat MCP /approve Telegram | IMPLEMENTED_UNCERTIFIED | 1 run(s) of `crosschain-universal` | — | — |
-| `sequence-confirm-each-step` | sequence | any (per step) | `workflow-run` (per step) | MCP /approve Telegram DevAPI | IMPLEMENTED_UNCERTIFIED | — | — | — |
-| `sequence-bound-amounts-confirm-mode` | sequence_bound_amounts | any (per step) | `workflow-run` (per step) | MCP /approve Telegram DevAPI | IMPLEMENTED_UNCERTIFIED | — | — | — |
+| `bridge-base-arbitrum-one` | bridge | base → arbitrum-one | `crosschain-router` (flofi.router) | Editor Chat MCP /approve Telegram | IMPLEMENTED_UNCERTIFIED | 2 reconciled runs: 1 via Cross-chain Router (`crosschain-router`), 1 via Universal Router (`crosschain-universal`) | — | 6.9 s (n=1) |
+| `swap-base` | swap | base | `base-swap` (uniswap.v3) | Editor Chat MCP /approve Telegram | IMPLEMENTED_UNCERTIFIED | 2 reconciled runs (`base-swap`) | — | p50 3.8 s / p95 11.3 s / p99 11.5 s (n=301) |
+| `swap-solana` | swap | solana | `jupiter-swap` (jupiter.swap-v2) | Editor Chat MCP /approve Telegram | IMPLEMENTED_UNCERTIFIED | 2 reconciled runs (`jupiter-swap`) | — | 0.6 s (n=1, QUOTE purpose) |
+| `transfer-solana` | transfer | solana | `solana-transfer` (solana.spl-transfer) | Editor Chat MCP /approve Telegram | IMPLEMENTED_UNCERTIFIED | none | — | — |
+| `add-liquidity-solana` | add_liquidity | solana | `orca-liquidity-mainnet` (orca.whirlpools-mainnet-liquidity) | Editor Chat MCP /approve Telegram | IMPLEMENTED_UNCERTIFIED | none | — | — |
+| `bridge-base-robinhood` | bridge | base → robinhood | `crosschain-router-base-to-robinhood` (flofi.router) | Editor Chat MCP /approve Telegram | IMPLEMENTED_UNCERTIFIED | none | — | — |
+| `bridge-robinhood-base` | bridge | robinhood → base | `crosschain-router-robinhood-to-base` (flofi.router) | Editor Chat MCP /approve Telegram | IMPLEMENTED_UNCERTIFIED | none | — | — |
+| `bridge-arbitrum-robinhood` | bridge | arbitrum-one → robinhood | `crosschain-router-arbitrum-to-robinhood` (flofi.router) | Editor Chat MCP /approve Telegram | IMPLEMENTED_UNCERTIFIED | none | — | — |
+| `bridge-robinhood-arbitrum` | bridge | robinhood → arbitrum-one | `crosschain-router-robinhood-to-arbitrum` (flofi.router) | Editor Chat MCP /approve Telegram | IMPLEMENTED_UNCERTIFIED | none | — | — |
+| `swap-robinhood` | swap | robinhood | `robinhood-swap` (uniswap.v3) | Editor Chat MCP /approve Telegram | IMPLEMENTED_UNCERTIFIED | none | — | — |
+| `add-liquidity-robinhood` | add_liquidity | robinhood | `robinhood-liquidity` (uniswap.v3) | Editor Chat MCP /approve Telegram | IMPLEMENTED_UNCERTIFIED | none | — | — |
+| `transfer-robinhood` | transfer | robinhood | `robinhood-mainnet-transfer` (evm.token-transfer) | Editor Chat MCP /approve Telegram | IMPLEMENTED_UNCERTIFIED | none | — | — |
+| `bridge-arbitrum-base` | bridge | arbitrum-one → base | `crosschain-router-arbitrum-to-base` (flofi.router) | Editor Chat MCP /approve Telegram | IMPLEMENTED_UNCERTIFIED | 1 reconciled run (`crosschain-router-arbitrum-to-base`) | — | — |
+| `add-liquidity-base` | add_liquidity | base | `base-liquidity` (uniswap.v3) | Editor Chat MCP /approve Telegram | IMPLEMENTED_UNCERTIFIED | none | — | — |
+| `transfer-base` | transfer | base | `base-mainnet-transfer` (evm.token-transfer) | Editor Chat MCP /approve Telegram | IMPLEMENTED_UNCERTIFIED | none | — | — |
+| `supply-base` | supply | base | `base-aave` (aave-v3) | Editor Chat MCP /approve Telegram | IMPLEMENTED_UNCERTIFIED | none | — | 4.9 s (n=1) |
+| `borrow-base` | borrow | base | `base-aave` (aave-v3) | Editor Chat MCP /approve Telegram | IMPLEMENTED_UNCERTIFIED | none | — | — |
+| `repay-base` | repay | base | `base-aave` (aave-v3) | Editor Chat MCP /approve Telegram | IMPLEMENTED_UNCERTIFIED | none | — | — |
+| `withdraw-base` | withdraw | base | `base-aave` (aave-v3) | Editor Chat MCP /approve Telegram | IMPLEMENTED_UNCERTIFIED | none | — | — |
+| `supply-arbitrum` | supply | arbitrum-one | `arbitrum-aave` (aave-v3) | Editor Chat MCP /approve Telegram | IMPLEMENTED_UNCERTIFIED | none | — | — |
+| `borrow-arbitrum` | borrow | arbitrum-one | `arbitrum-aave` (aave-v3) | Editor Chat MCP /approve Telegram | IMPLEMENTED_UNCERTIFIED | none | — | — |
+| `repay-arbitrum` | repay | arbitrum-one | `arbitrum-aave` (aave-v3) | Editor Chat MCP /approve Telegram | IMPLEMENTED_UNCERTIFIED | none | — | — |
+| `withdraw-arbitrum` | withdraw | arbitrum-one | `arbitrum-aave` (aave-v3) | Editor Chat MCP /approve Telegram | IMPLEMENTED_UNCERTIFIED | none | — | — |
+| `swap-arbitrum` | swap | arbitrum-one | `arbitrum-swap` (uniswap.v3) | Editor Chat MCP /approve Telegram | IMPLEMENTED_UNCERTIFIED | 4 reconciled runs (`arbitrum-swap`) | Live quote via MCP simulate 2026-11-08 00:28Z: 0.0012 WETH → 2.682908 USDC (min 2.656078, 0.01% pool, block 522228672) | p50 4.1 s / p95 11.8 s / p99 47.1 s (n=111) |
+| `transfer-arbitrum` | transfer | arbitrum-one | `arbitrum-mainnet-transfer` (evm.token-transfer) | Editor Chat MCP /approve Telegram | IMPLEMENTED_UNCERTIFIED | none | — | — |
+| `add-liquidity-arbitrum` | add_liquidity | arbitrum-one | `arbitrum-liquidity` (uniswap.v3) | Editor Chat MCP /approve Telegram | IMPLEMENTED_UNCERTIFIED | none | — | — |
+| `supply-ethereum` | supply | ethereum | `ethereum-aave` (aave-v3) | Editor Chat MCP /approve Telegram | IMPLEMENTED_UNCERTIFIED | none | — | — |
+| `borrow-ethereum` | borrow | ethereum | `ethereum-aave` (aave-v3) | Editor Chat MCP /approve Telegram | IMPLEMENTED_UNCERTIFIED | none | — | — |
+| `repay-ethereum` | repay | ethereum | `ethereum-aave` (aave-v3) | Editor Chat MCP /approve Telegram | IMPLEMENTED_UNCERTIFIED | none | — | — |
+| `withdraw-ethereum` | withdraw | ethereum | `ethereum-aave` (aave-v3) | Editor Chat MCP /approve Telegram | IMPLEMENTED_UNCERTIFIED | none | — | — |
+| `swap-ethereum` | swap | ethereum | `ethereum-swap` (uniswap.v3) | Editor Chat MCP /approve Telegram | IMPLEMENTED_UNCERTIFIED | none | Live compose OK (`ethereum`); `Ethereum` was refused before this fix | — |
+| `transfer-ethereum` | transfer | ethereum | `ethereum-mainnet-transfer` (evm.token-transfer) | Editor Chat MCP /approve Telegram | IMPLEMENTED_UNCERTIFIED | none | — | — |
+| `add-liquidity-ethereum` | add_liquidity | ethereum | `ethereum-liquidity` (uniswap.v3) | Editor Chat MCP /approve Telegram | IMPLEMENTED_UNCERTIFIED | none | — | — |
+| `bridge-ethereum-base` | bridge | ethereum → base | `crosschain-router-ethereum-to-base` (flofi.router) | Editor Chat MCP /approve Telegram | IMPLEMENTED_UNCERTIFIED | none | — | — |
+| `bridge-base-ethereum` | bridge | base → ethereum | `crosschain-router-base-to-ethereum` (flofi.router) | Editor Chat MCP /approve Telegram | IMPLEMENTED_UNCERTIFIED | none | — | — |
+| `bridge-ethereum-arbitrum` | bridge | ethereum → arbitrum-one | `crosschain-router-ethereum-to-arbitrum` (flofi.router) | Editor Chat MCP /approve Telegram | IMPLEMENTED_UNCERTIFIED | none | — | — |
+| `bridge-arbitrum-ethereum` | bridge | arbitrum-one → ethereum | `crosschain-router-arbitrum-to-ethereum` (flofi.router) | Editor Chat MCP /approve Telegram | IMPLEMENTED_UNCERTIFIED | none | — | — |
+| `bridge-ethereum-robinhood` | bridge | ethereum → robinhood | `crosschain-router-ethereum-to-robinhood` (flofi.router) | Editor Chat MCP /approve Telegram | IMPLEMENTED_UNCERTIFIED | none | — | — |
+| `bridge-robinhood-ethereum` | bridge | robinhood → ethereum | `crosschain-router-robinhood-to-ethereum` (flofi.router) | Editor Chat MCP /approve Telegram | IMPLEMENTED_UNCERTIFIED | none | — | — |
+| `bridge-solana-base` | bridge | solana → base | `crosschain-universal` (flofi.router.universal) | Editor Chat MCP /approve Telegram | IMPLEMENTED_UNCERTIFIED | none | Live route via MCP simulate 2026-11-08 00:32Z: Relay, 5 USDC → 4.977663 (min 4.927887); Solana simulateTransaction at slot 466714797 | — |
+| `bridge-base-solana` | bridge | base → solana | `crosschain-universal` (flofi.router.universal) | Editor Chat MCP /approve Telegram | IMPLEMENTED_UNCERTIFIED | none | — | — |
+| `bridge-solana-arbitrum-one` | bridge | solana → arbitrum-one | `crosschain-universal` (flofi.router.universal) | Editor Chat MCP /approve Telegram | IMPLEMENTED_UNCERTIFIED | none | — | — |
+| `bridge-arbitrum-one-solana` | bridge | arbitrum-one → solana | `crosschain-universal` (flofi.router.universal) | Editor Chat MCP /approve Telegram | IMPLEMENTED_UNCERTIFIED | none | — | — |
+| `bridge-solana-ethereum` | bridge | solana → ethereum | `crosschain-universal` (flofi.router.universal) | Editor Chat MCP /approve Telegram | IMPLEMENTED_UNCERTIFIED | none | — | — |
+| `bridge-ethereum-solana` | bridge | ethereum → solana | `crosschain-universal` (flofi.router.universal) | Editor Chat MCP /approve Telegram | IMPLEMENTED_UNCERTIFIED | none | — | — |
+| `bridge-solana-robinhood` | bridge | solana → robinhood | `crosschain-universal` (flofi.router.universal) | Editor Chat MCP /approve Telegram | IMPLEMENTED_UNCERTIFIED | none | — | — |
+| `bridge-robinhood-solana` | bridge | robinhood → solana | `crosschain-universal` (flofi.router.universal) | Editor Chat MCP /approve Telegram | IMPLEMENTED_UNCERTIFIED | none | — | — |
+| `remove-liquidity-solana` | remove_liquidity | solana | `orca-liquidity-mainnet` (orca.whirlpools-mainnet-liquidity) | Editor | IMPLEMENTED_UNCERTIFIED | none | — | — |
+| `remove-liquidity-base` | remove_liquidity | base | `None` (uniswap.v3) | — | NOT_IMPLEMENTED | none | — | — |
+| `remove-liquidity-arbitrum-one` | remove_liquidity | arbitrum-one | `None` (uniswap.v3) | — | NOT_IMPLEMENTED | none | — | — |
+| `remove-liquidity-ethereum` | remove_liquidity | ethereum | `None` (uniswap.v3) | — | NOT_IMPLEMENTED | none | — | — |
+| `remove-liquidity-robinhood` | remove_liquidity | robinhood | `None` (uniswap.v3) | — | NOT_IMPLEMENTED | none | — | — |
+| `sequence-user-funded-groups` | sequence_user_funded | ethereum, base, arbitrum-one (EIP-5792 batches: USDC⇄WETH Uniswap v3, Aave V3 supply/borrow, transfers); robinhood (transfers); solana (sign-all: transfers, Jupiter swaps); any other step through its own flow | `workflow-run` (eip-5792, erc-4337 v0.7 (owner account, no paymaster), wallet-standard solana:signTransaction) | MCP /approve Telegram | IMPLEMENTED_UNCERTIFIED | none | — | — |
+| `sequence-confirm-each-step` | sequence | any (per step) | `workflow-run` (per step) | MCP /approve Telegram DevAPI | IMPLEMENTED_UNCERTIFIED | none | — | — |
+| `sequence-bound-amounts-confirm-mode` | sequence_bound_amounts | any (per step) | `workflow-run` (per step) | MCP /approve Telegram DevAPI | IMPLEMENTED_UNCERTIFIED | none | — | — |
 
 **Inventory beyond the advertised rows.**
-- *Universal bridges, EVM ⇄ Solana*: now 8 catalog rows. Compose and Chat produce byte-identical IR. A live route was observed for Solana → Base (Relay); LI.FI and Mayan are reported `NOT_EXECUTABLE` by the router itself, and Across executes only on the certified Router.
+- *Universal bridges, EVM ⇄ Solana*: now 8 catalog rows. Compose and Chat produce byte-identical IR. A live route was observed for Solana → Base (Relay); LI.FI and Mayan are reported `NOT_EXECUTABLE` by the router itself, and Across executes only on the certified Router. **No Solana direction has production execution evidence** (the one reconciled `crosschain-universal` run is Base → Arbitrum One). Robinhood ⇄ Solana (USDG ⇄ USDC) has not been quoted in this session; whether a provider serves it is answered at Simulate. They are listed in discovery as composable and `IMPLEMENTED_UNCERTIFIED`, never as certified routes: `bridgeOffers()` and the Capability API's `routes` keep only certified Cross-chain Router routes.
 - *Remove liquidity*: `NOT_IMPLEMENTED` on Base, Arbitrum One, Ethereum and Robinhood Chain (the generator's status). It is not offered as available.
 - *Workflow sequences, amount bindings, user-funded groups*: implemented. The web tier refuses them in production today because of `FLOFI_WORKFLOW_RUNS` (§E). Bindings resolve from reconciled receipts (confirm-each-step) or signed guaranteed minimums (inside one user-funded group), as `get_capabilities` states.
 - *Automations / DCA, delegated execution*: production `get_capabilities` reports delegated execution retired (`EXECUTOR_FUNDED_GAS_RETIRED`). Automations were not exercised in this session.
@@ -178,7 +184,7 @@ and recovery tools. Nothing was changed.
 | Browser (Playwright, loopback, pinned headless shell 1243) | **pass**: `playwright.arbitrum-authoring.config.ts` 24/24 (including Canvas Enter-to-apply for Supply/Borrow/Repay/Withdraw) and `playwright.canvas-workflow-ux.config.ts` 21/21 (including "Arbitrum One Swap: one coalesced request, latest amount wins"). The other browser profiles were not run here; CircleCI's browser profiles remain the authority. |
 | Specialist review (`agent_guard.py review`) | flofi-workflow, flofi-security and flofi-mcp reviewed the uncommitted tree, and their findings were fixed (§C). flofi-swap, flofi-bridge and flofi-frontend-ux reviewed commit `e9e7ff5`; see the PR. The other 13 domains the guard selects (by dependency) were not invoked. The guard reports them as unreviewed. |
 | Read-only mainnet checks | Done through the production MCP only, since the sandbox has no RPC egress: Arbitrum WETH→USDC live quote, Ethereum compose, Solana → Base live route (§A). |
-| Signed mainnet execution | **None** by this session. No row is promoted to `LIVE_CERTIFIED`. The six flows with reconciled runs and archived evidence (arbitrum-swap 4, base-swap 2, jupiter-swap 2, crosschain-router 1, crosschain-router-arbitrum-to-base 1, crosschain-universal 1) can be verified by the owner with `get_evidence` and an explorer. A row should be upgraded only for the exact route that evidence proves. |
+| Signed mainnet execution | **None** by this session. No row is promoted to `LIVE_CERTIFIED`. Production holds reconciled owner-signed runs with archived evidence for: Arbitrum One swap (4), Base swap (2), Solana swap (2), Base → Arbitrum One bridge (1 Router, 1 Universal) and Arbitrum One → Base bridge (1). The owner can verify them with `get_evidence` and an explorer. A row should be upgraded only for the exact route that evidence proves. |
 
 ## G. Release (after owner approval only)
 

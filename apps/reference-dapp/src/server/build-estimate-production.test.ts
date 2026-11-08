@@ -64,6 +64,12 @@ describe('P0 catalog reliability: a cancelled estimate cancels its preview', () 
       .toMatchObject({ ok: false, code: 'ESTIMATE_CANCELLED' });
     expect(preview).toHaveBeenCalledOnce();
   });
+  it('a quote that arrives after the browser cancelled is never published as an estimate', async () => {
+    const s = evmSetup(networkCases[1]), cancelled = new AbortController();
+    s.preview.mockImplementationOnce(async (name, args, options) => { const answer = await s.preview.getMockImplementation()!(name, args, options); cancelled.abort(); return answer; });
+    const result = await readBuildEstimate({ workflow: s.w, nodeId: s.w.nodes[0]!.nodeId }, production, { preview: s.preview, prices: null, signal: cancelled.signal });
+    expect(result).toMatchObject({ ok: false, code: 'ESTIMATE_CANCELLED' });
+  });
 });
 
 describe('production Swap quote parity through cloudPreview', () => {

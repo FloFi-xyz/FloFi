@@ -93,7 +93,10 @@ export function useLiveQuote(workflow: SemanticWorkflow | undefined, nodeId: str
     const journey = createJourney({ operation: bridge ? 'bridge' : 'swap', network: chain, provider });
     journey.mark('intent');
     // An answer that arrived for this exact snapshot while this card waited out its debounce is used as is (still bound to its own expiry).
+    // Only the card whose request reached the quote service reports the intent → first quote journey (a joined or reused answer is not another one).
+    let sent = false;
     const cancel = requestBuildEstimate(signal => { const ready = recalled(scope); return ready ? Promise.resolve({ ok: true as const, estimate: ready }) : sharedEstimate(scope, async shared => {
+      sent = true;
       const response = await fetch('/api/build-estimate', { method: 'POST', headers: { 'content-type': 'application/json', 'x-quote-correlation-id': correlationId },
         body: JSON.stringify({ workflow: snapshot, nodeId, owner, ...destinationWallet ? { destinationWallet } : {} }), signal: shared });
       const result = await response.json() as BuildEstimateResult;
@@ -104,7 +107,7 @@ export function useLiveQuote(workflow: SemanticWorkflow | undefined, nodeId: str
       const estimate = response.ok && response.estimate.workflowHash === key && response.estimate.nodeId === nodeId && response.estimate.chain === chain &&
         (provider === 'Bridge' || response.estimate.provider === provider) && estimateMatchesNode(response.estimate, snapshot, nodeId) && Date.parse(response.estimate.expiresAt) > Date.now() ? response.estimate : null;
       if (estimate) remember(scope, estimate);
-      if (estimate && ticket === generation.current) { journey.mark('first_quote'); reportJourney(journey.event('in_progress')); }
+      if (estimate && sent && ticket === generation.current) { journey.mark('first_quote'); reportJourney(journey.event('in_progress')); }
       accept(estimate, !estimate, response.ok ? { ok: false, code: 'ESTIMATE_RESPONSE_MISMATCH' } : response);
     });
     return () => { cancel(); clearTimeout(expire); };

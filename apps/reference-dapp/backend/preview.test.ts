@@ -119,6 +119,26 @@ describe('P0 catalog reliability: previews nobody waits for never hold the share
     expect(shared.reads.length).toBe(single);
   });
 
+  it('previews that differ in amount, subject or purpose are never shared', async () => {
+    const harness = createMockedSolanaJupiter(), owner = createMockedSolanaWallet().owner, other = createMockedSolanaWallet().owner;
+    harness.fund(owner, 3_000_000_000n, { USDC: 100_000_000n }); harness.fund(other, 3_000_000_000n, { USDC: 100_000_000n });
+    let open: () => void = () => undefined, previews = 0;
+    const gate = new Promise<void>(resolve => { open = resolve; });
+    const backend = createBackend({ db: untouchable, env: { GRYLOO_JUPITER_HARNESS: 'MOCKED_LOOPBACK_ONLY' }, logger: quiet, tenantId: 'default', holderId: 'test',
+      evidenceStore: null, http: async query => { previews++; await gate; return harness.http(query); },
+      rpc: { 'jupiter-swap': async (method, params) => { await gate; return harness.rpc(method, params); } } });
+    const workflowOf = (amount: string): SemanticWorkflow => ({ schemaVersion: '1.0.0', workflowId: 'workflow-preview-keys', revision: 1, resourceEdges: [],
+      nodes: [createSolanaSwapNode('node-002', { network: 'Solana', from: 'USDC', to: 'SOL', amount, slippage: '100' })] });
+    const answers = Promise.all([backend.previewFlow('jupiter-swap', [workflowOf('1'), owner], 'QUOTE'), backend.previewFlow('jupiter-swap', [workflowOf('2'), owner], 'QUOTE'),
+      backend.previewFlow('jupiter-swap', [workflowOf('1'), other], 'QUOTE'), backend.previewFlow('jupiter-swap', [workflowOf('1'), owner], 'SIMULATION')]);
+    await tick(); open();
+    const [one, two, otherSubject] = await answers;
+    expect(previews).toBeGreaterThanOrEqual(3);
+    expect((one as { value: { amount: string } }).value.amount).toBe('1000000');
+    expect((two as { value: { amount: string } }).value.amount).toBe('2000000');
+    expect(otherSubject).toMatchObject({ ok: true });
+  });
+
   it('a preview every caller has left is abandoned: its queued reads are dropped, and a later identical preview starts afresh', async () => {
     const s = setup();
     s.hold();

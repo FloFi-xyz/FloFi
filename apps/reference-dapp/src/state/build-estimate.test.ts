@@ -10,6 +10,8 @@ import { LIVE_QUOTE_DEBOUNCE_MS, BUILD_ESTIMATE_TIMEOUT_MS } from '../domain/bui
 import { createUniversalBridgeNode, UNIVERSAL_NETWORKS, type SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
 import { bridgeEstimateRequest } from '../domain/bridge-estimate';
 import { parseDiscoveryRequest } from '../server/universal-router/requests';
+vi.mock('../domain/journey-metrics', async original => ({ ...await original<typeof import('../domain/journey-metrics')>(), reportJourney: vi.fn(() => false) }));
+import { reportJourney } from '../domain/journey-metrics';
 vi.mock('react', async original => ({ ...await original<typeof import('react')>(), ...(await import('../test-utils/hook-harness')).hookMocks }));
 const now = new Date('2026-10-08T12:00:00Z');
 const authored = (amount = '2') => validateSavedWorkflow(editorReducer(initialEditor(), { type: 'ADD_TESTNET_SWAP', direction: 'USDC_TO_WETH', amount, slippage: '50', source: 'CANVAS', baseRevision: 0 }, createBaseSepoliaReviewContext()).workflow);
@@ -222,6 +224,23 @@ describe('P0 catalog reliability: one in-flight estimate per exact snapshot', ()
     slow.resolve(response({ ok: true, estimate: value })); await vi.advanceTimersByTimeAsync(0);
     expect(read()).toEqual(value); expect(readOther()).toEqual(value);
     expect(transport).toHaveBeenCalledTimes(1);
+    other.unmount();
+  });
+});
+
+describe('P0 review follow-up: the journey metric counts a request once', () => {
+  it('only the card whose request reached the quote service reports intent → first quote', async () => {
+    const journeys = vi.mocked(reportJourney);
+    journeys.mockClear();
+    const workflow = authored(), value = estimate(workflow), slow = deferred<ReturnType<typeof response>>(); transport.mockReturnValue(slow.promise);
+    const other = new HookHarness();
+    const read = () => host.render(() => useBuildEstimate(workflow, 'node-002', 'owner'));
+    const readOther = () => other.render(() => useBuildEstimate(workflow, 'node-002', 'owner'));
+    read(); readOther(); await vi.advanceTimersByTimeAsync(350);
+    slow.resolve(response({ ok: true, estimate: value })); await vi.advanceTimersByTimeAsync(0);
+    expect(read()).toEqual(value); expect(readOther()).toEqual(value);
+    expect(transport).toHaveBeenCalledTimes(1);
+    expect(journeys).toHaveBeenCalledTimes(1);
     other.unmount();
   });
 });

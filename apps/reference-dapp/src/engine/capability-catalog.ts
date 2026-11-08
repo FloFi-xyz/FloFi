@@ -75,6 +75,13 @@ function assetEntries(): Entry[] {
     out.push({ chain: profile.chain, symbol: t.symbol, address: t.mint, decimals: t.decimals, action: 'add_liquidity', source: `orca-whirlpools-liquidity:${profile.network}` });
   for (const profile of NATIVE_TRANSFER_PROFILES)
     out.push({ chain: profile.chain, symbol: 'ETH', address: null, decimals: 18, action: 'transfer', source: `native-transfer:${profile.network}` });
+  // P0 catalog reliability: the Universal Router's Solana-source bridge rows (their EVM sides are the Router pairs' tokens above), so asset discovery
+  // agrees with capability discovery. Merged by chain and address below, so each asset appears once.
+  for (const { strategy } of STRATEGY_EXAMPLES) {
+    if (strategy.action !== 'bridge' || strategy.sourceNetwork !== 'solana') continue;
+    const token = (SOLANA_MAINNET_TOKENS as Readonly<Record<string, { symbol: string; mint: string; decimals: number }>>)[strategy.asset];
+    if (token) out.push({ chain: SOLANA_MAINNET_CHAIN, symbol: token.symbol, address: token.mint, decimals: token.decimals, action: 'bridge', source: 'crosschain-universal:solana' });
+  }
   // Discover the same currently loaded, validated catalog authoring reads. Without an official source, pinned assets alone
   // remain; no recorded catalog is substituted. Native currencies have transfer support only. Aave and Router membership above
   // remains narrower than catalog membership.

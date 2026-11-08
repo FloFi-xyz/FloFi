@@ -219,6 +219,17 @@ export function canvasAmountCommand(state: EditorState, setup: CanvasActionSetup
     // Anything the input does not carry would be lost on rebuild, so a difference refuses the edit instead of silently changing the action.
     const after = preview.workflow.nodes.find(item => item.nodeId === id), rebuilt = after ? cryptoInputOf(after) : null;
     const settings = (value: CryptoActionInput | null) => value ? JSON.stringify({ ...value, amount: null }) : null;
+    // A swap is compared whole: every field but its exact input amount (and the matching MAXIMUM_INPUT cap) must be byte-identical, so asset
+    // identities (address, decimals, native id, official id), outputs, capabilities, policies and bounds can never be silently rewritten.
+    // A WETH9 wrap/unwrap guarantees exactly its input (1:1), so a minimum equal to the node's own input amount is amount-derived too.
+    const swapShape = (node: Workflow['nodes'][number]) => {
+      const amountIn = node.inputs.find(input => input.name === 'amount-in' && input.kind === 'QUANTITY') as { value: { amount: string } } | undefined;
+      return JSON.stringify({ ...node,
+        inputs: node.inputs.map(input => input.name === 'amount-in' && input.kind === 'QUANTITY' ? { ...input, value: { ...input.value, amount: null } } : input),
+        userConstraints: node.userConstraints.map(c => c.kind === 'MAXIMUM_INPUT' ? { ...c, quantity: { ...c.quantity, amount: null } } : c),
+        expectedOutputs: node.expectedOutputs.map(output => amountIn && output.minimumAmount === amountIn.value.amount ? { ...output, minimumAmount: 'AMOUNT_IN' } : output) });
+    };
+    if (after && after.actionType === 'asset.swap.exact-input' && swapShape(after) !== swapShape(amountOnly.before)) throw new Error('ACTION_EDIT_CHANGES_SETTINGS');
     if (!after || after.chainId !== amountOnly.before.chainId || after.actionType !== amountOnly.before.actionType ||
         JSON.stringify(after.adapterConstraints) !== JSON.stringify(amountOnly.before.adapterConstraints) ||
         JSON.stringify(after.userConstraints.filter(c => c.kind !== 'MAXIMUM_INPUT')) !== JSON.stringify(amountOnly.before.userConstraints.filter(c => c.kind !== 'MAXIMUM_INPUT')) ||
@@ -230,9 +241,16 @@ export function canvasAmountCommand(state: EditorState, setup: CanvasActionSetup
   return command;
 }
 
-/** `network`: the card's network name, when it has one (BUILD-BASE-001: a catalog network names its own token list). */
+/** P0 catalog reliability: what an owner can do when a Canvas edit is refused (the card's Cancel button or Escape, and its Settings button). */
+const KEEP_OR_SETTINGS = 'Your workflow was not changed. Press Cancel to keep the current amount, or open the action\u2019s Settings.';
+/**
+ * `network`: the card's network name, when it has one (BUILD-BASE-001: a catalog network names its own token list). Every message is a catalog key
+ * (`i18n/pt-catalog-reliability.ts`); the one carrying a support reference is the `{0}` template, so its code stays visible in every language.
+ */
 export function canvasAmountMessage(cause: unknown, network?: string | null) {
-  const code = cause instanceof Error ? cause.message : '';
+  const raw = cause instanceof Error ? cause.message : '';
+  // The Universal Router's own asset/network codes carry a `UNIVERSAL_` prefix; they mean the same as the Canvas codes below.
+  const code = raw.startsWith('UNIVERSAL_') ? raw.slice('UNIVERSAL_'.length) : raw;
   if (code === 'TRANSFER_RECIPIENT_REQUIRED') return 'Enter the recipient address.';
   if (code === 'TRANSFER_RECIPIENT_INVALID') return 'Enter a valid recipient address for this network.';
   if (/AMOUNT|PRECISION/.test(code)) return 'Enter a valid amount greater than 0.';
@@ -242,15 +260,15 @@ export function canvasAmountMessage(cause: unknown, network?: string | null) {
   if (code === 'ACTION_REQUIRES_SEPARATE_WORKFLOW' || code === 'COMPOSITION_UNSUPPORTED' || code === 'ONE_LIQUIDITY_POSITION_ONLY' || code === 'POSITION_WORKFLOW_HAS_OTHER_STEPS')
     return 'This action cannot be combined with the current workflow. Check its settings or use a separate workflow.';
   if (code === 'NODE_LIMIT') return 'This workflow already has the maximum number of steps.';
-  if (code === 'ACTION_EDIT_CHANGES_SETTINGS') return 'This amount cannot be applied here without changing other settings of the action. Your workflow was not changed. Edit the action from its menu.';
+  if (code === 'ACTION_EDIT_CHANGES_SETTINGS') return 'This amount cannot be applied without changing other settings of the action. ' + KEEP_OR_SETTINGS;
   if (code === 'SWAP_NETWORK_MISMATCH') return 'The swap and its linked step are on different networks. Choose the same network for both.';
-  if (/^(ASSET_UNKNOWN|ASSET_REFERENCE_AMBIGUOUS|ASSET_ADDRESS_INVALID|ASSET_DECIMALS_MISMATCH|INVALID_ASSET|ACTION_ASSETS_UNSUPPORTED)$/.test(code))
+  if (code === 'ROUTER_PAIR_UNSUPPORTED' || code === 'SAME_NETWORK') return 'Choose matching bridge networks.';
+  if (/^(ASSET_UNKNOWN|ASSET_REFERENCE_AMBIGUOUS|ASSET_ADDRESS_INVALID|ASSET_DECIMALS_MISMATCH|INVALID_ASSET|ACTION_ASSETS_UNSUPPORTED|ASSET_REQUIRED|OUTPUT_ASSET_REQUIRED)$/.test(code))
     return 'This asset is not available for this action on this network. Choose another asset.';
   if (/^(ACTION_NETWORK_UNSUPPORTED|CATALOG_SWAP_NETWORK_UNSUPPORTED)$/.test(code)) return 'This action is not available on this network. Choose another network.';
   if (code === 'SWAP_NATIVE_ASSET_UNSUPPORTED') return 'This swap does not support the native asset on this network. Choose the wrapped asset.';
   if (code === 'INVALID_SLIPPAGE') return 'Enter a valid slippage percentage.';
   if (code === 'LIQUIDITY_RANGE_INVALID') return 'Enter a valid price range: the lower bound must be below the upper bound.';
-  if (code === 'ROUTER_PAIR_UNSUPPORTED') return 'Choose matching bridge networks.';
   if (code === 'ASSET_CATALOG_UNAVAILABLE') {
     const catalog = networkIdentity(network);
     return catalog?.catalog && catalog.name !== ROBINHOOD_NETWORK ? `${catalog.name} tokens are unavailable right now. Try again in a moment.`
@@ -258,8 +276,7 @@ export function canvasAmountMessage(cause: unknown, network?: string | null) {
   }
   if (code === 'INVALID_ASSET_PAIR') return 'Choose two different assets.';
   // Any other code is a defect or an unexpected state, not a composition conflict: say so, with the reference support can trace.
-  return /^[A-Z][A-Z0-9_]{2,80}$/.test(code) ? `This change could not be applied (reference ${code}). Your workflow was not changed. Try again or edit the action from its menu.`
-    : 'This change could not be applied. Your workflow was not changed. Try again or edit the action from its menu.';
+  return /^[A-Z][A-Z0-9_]{2,80}$/.test(raw) ? `This change could not be applied (reference ${raw}). ${KEEP_OR_SETTINGS}` : `This change could not be applied. ${KEEP_OR_SETTINGS}`;
 }
 
 /** Known authoring choices, without manufacturing a temporary canonical action. */
