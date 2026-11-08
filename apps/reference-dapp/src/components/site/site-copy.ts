@@ -300,7 +300,19 @@ const EN: Copy = {
 };
 
 export const SITE_COPY: Readonly<Record<SiteLanguage, Copy>> = { PT, EN };
-export const NETWORKS_LINE = 'Ethereum · Base · Arbitrum · Robinhood Chain · Solana';
+/**
+ * BUILD-FLOFI-UX-005: the five networks the site names, shown as their logos. Each mark is a reviewed local file (sources in
+ * public/brand/crypto/sources.md and public/brand/robinhood-avatar.source.md, never recoloured or cropped beyond a round frame); each
+ * link is the network's own official homepage. `glyph`: a mark without its own disc, drawn inset on white.
+ */
+export const SITE_NETWORKS = [
+  { name: 'Ethereum', mark: '/brand/crypto/ethereum-network.svg', href: 'https://ethereum.org/', glyph: false },
+  { name: 'Base', mark: '/brand/crypto/base.svg', href: 'https://base.org/', glyph: false },
+  { name: 'Arbitrum', mark: '/brand/crypto/arbitrum.png', href: 'https://arbitrum.io/', glyph: false },
+  { name: 'Robinhood Chain', mark: '/brand/robinhood-avatar.jpg', href: 'https://robinhood.com/us/en/chain/', glyph: false },
+  { name: 'Solana', mark: '/brand/crypto/solana.svg', href: 'https://solana.com/', glyph: true },
+] as const;
+export type SiteNetwork = (typeof SITE_NETWORKS)[number];
 /** The real Developer API v1 paths (docs/developer/openapi.json). The approved board showed `…/strategies/:id/preview`; the API names that
  * read-only step `simulate`, so the real path is shown, and the strategy reaches the user only through `POST /approvals`, so that step is shown too. */
 export const DEVELOPER_ENDPOINTS = [['GET', '/api/developer/v1/capabilities'], ['POST', '/api/developer/v1/strategies'], ['POST', '…/strategies/:id/simulate'], ['POST', '…/approvals']] as const;
