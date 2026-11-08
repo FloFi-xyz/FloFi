@@ -256,6 +256,20 @@ frontend-ux. Every major finding was verified in code and fixed, with a test whe
 | The run pointer was keyed by the Canvas workflow id, which is new on every page load, so progress and wallet read-back were lost after a reload. | Runs are indexed by approval id. A run from an earlier visit is offered ("Show its progress") on the Canvas and in Execute, and is never followed silently. |
 | Copy: "Nothing was sent" after a batch reached the wallet; count shown on the button; plural forms; untranslated "Execute" in PT. | Fixed. |
 
+**Second round: adversarial verification of the review fixes.** Three independent reviewers covered the client state machine, server
+binding and safety, and UX integration. Every finding was checked by a skeptic. Confirmed and fixed:
+
+| Finding | Fix |
+|---|---|
+| **Critical:** Authorize always refused. The binding check expected the workflow hash without its `0x` prefix. | The binding is a pure, unit-tested module using the canonical format. The sent workflow is checked before any handoff or run exists, and the PG test binds a real Review to its run. |
+| A batch reconciled against an earlier preparation was recorded with the newer preparation's amounts. | Reconciliation returns the artifact that matched, and the step's strategy and bound spend come from it (PG test). |
+| A failed re-preparation dropped the earlier preparations. | The PLANNED group keeps them (PG test with a failed then successful re-preparation). |
+| A "not found" status after an expired sign-in, or with another wallet, deleted the stored run, so the workflow could be authorized twice. | Kept until it loads (one sign-in, never automatic) or the owner explicitly forgets it in this browser. |
+| After a reload, a due transfer group was refused with no way forward, and minimums passed with nothing to compare. | Anything the owner has not accepted in this tab (minimum or recipient) is shown and confirmed before the wallet is asked. |
+| The answer of `wallet_sendCalls` lost (timeout, unreadable) showed "Nothing was sent" and allowed a re-send. | The request is marked before the wallet is asked. Only a decline, no wallet, or a failed network switch clears it. |
+| Following an earlier visit's run took over the current Canvas workflow. Review and Authorize could appear on surfaces where the path is off. | A followed run is a view that can be hidden; Review and Authorize appear only where this workflow can be reviewed. |
+| Automatic recovery could clear an unseen error or prompt the wallet. Opening another workflow kept the previous run. A failed Review's error never cleared. | Fixed as named. |
+
 Not changed:
 - **No swap deadline.** The batched swap call carries no on-chain deadline; this is a pre-existing call template. The Review now says
   so. Re-encoding the swap with a deadline (SwapRouter02 `multicall(deadline, …)`) is left for a follow-up.
