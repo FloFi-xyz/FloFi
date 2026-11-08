@@ -58,7 +58,7 @@ User-funded execution is off until enabled. Set on **Vercel** (web tier: prepare
 | `FLOFI_WORKFLOW_RUNS` | `enabled` | existing |
 | `FLOFI_USER_FUNDED_EXECUTION` | `enabled` | `disabled` (default) turns the mode off everywhere |
 | `FLOFI_USER_FUNDED_CHAINS` | e.g. `eip155:1,eip155:8453,eip155:42161,eip155:4663,solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp` | CAIP-2 mainnets only; an unknown value disables the feature (`USER_FUNDED_CONFIGURATION_INVALID`) |
-| `FLOFI_USER_FUNDED_RPC_<chainId>` | https read RPC per EVM chain | falls back to `FLOFI_DELEGATION_RPC_<chainId>`; a chain without one is not offered |
+| `FLOFI_USER_FUNDED_RPC_<chainId>` | https read RPC per EVM chain | falls back to `FLOFI_DELEGATION_RPC_<chainId>`; a chain without one is not offered. It must answer `eth_simulateV1` (whole-batch simulation, §10): without it a batch with Aave calls is refused `USER_FUNDED_SIMULATION_UNAVAILABLE` |
 | `FLOFI_BUNDLER_RPC_<chainId>` | https ERC-4337 v0.7 bundler (optional) | only for delayed EVM groups signed upfront; the bundler must serve EntryPoint `0x0000000071727De22E5E9d8BAf0edAc6f37da032` on that chain (verified at first use). A bundler is repaid by the EntryPoint from the **owner's** prefund; it must not be configured with a paymaster |
 | `GRYLOO_SOLANA_RPC_URL`, `JUPITER_API_KEY` | existing | Solana groups |
 
@@ -129,3 +129,30 @@ Record the transaction hashes, gas paid and payer in `docs/builds/BUILD-FLOFI-UN
 - `workflow_run.group_blocked`, `workflow_run.group_failed` (codes: `GAS_PAYER_NOT_OWNER`, `RECONCILIATION_*`, `USER_OPERATION_*`,
   `SOLANA_BLOCKHASH_EXPIRED`), `workflow_run.user_operation_relayed`, `workflow_run.group_reconciled` (with gas paid).
 - A `GAS_PAYER_NOT_OWNER` or `GAS_SPONSORSHIP_REFUSED` is a security signal (someone else paid or sponsored): investigate.
+
+## 10. Editor whole-workflow execution (P0, [report](../builds/P0-WORKFLOW-EXECUTION-REPORT.md))
+
+The Editor now uses these groups in place. A multi-step workflow's primary action is **Review whole workflow** when workflow runs and
+user-funded execution are on. It reads the wallet's EIP-5792 capabilities, plans the groups, prepares group 0 and simulates the whole batch
+read-only. It then shows the expected output and signed minimum of each step, the fee (paid by the owner), the Aave health factor after the
+batch and the exact wallet interactions. **Authorize** sends one `wallet_sendCalls` for each grouped interaction. No new variable,
+secret or migration is needed.
+
+1. **Pre-flight [OWNER, read only].** Check that each `FLOFI_USER_FUNDED_RPC_<chainId>` (Ethereum, Base, Arbitrum One) answers
+   `eth_simulateV1`. Read the URL from the secret store; never paste it into chat or a ticket:
+   ```bash
+   curl -s "$RPC" -H 'content-type: application/json' -d '{"jsonrpc":"2.0","id":1,"method":"eth_simulateV1","params":[{"blockStateCalls":[{"calls":[]}]},"latest"]}'
+   ```
+   A JSON-RPC `result` array means it is supported. A "method not found" error means batches containing Aave calls are refused, and
+   swap/transfer batches use the gas-estimate path.
+2. **Verification after deploy (no funds).**
+   - Sign in on the Editor and author Arbitrum Swap → Supply → Borrow.
+   - The primary CTA reads **Review whole workflow**. The panel lists every step with its expected and minimum amounts, then
+     "One wallet confirmation: one atomic transaction" and the batched-call count for a MetaMask account that reports `atomic`.
+     A wallet without it shows "Confirm each step" with the reason.
+   - Do **not** press Authorize without a deliberate owner decision to spend real funds.
+3. **First real run [OWNER, real funds].** Small amounts, the owner's own wallet, Scenario A from the report. Record the batch id,
+   transaction hash, gas paid by the owner and the health factor after.
+4. **Rollback.** `FLOFI_EDITOR_WORKFLOW_RUNS=disabled` removes the Editor's grouped path, and the Editor falls back to confirming each step.
+   `FLOFI_USER_FUNDED_EXECUTION=disabled` turns groups off everywhere (§8).
+

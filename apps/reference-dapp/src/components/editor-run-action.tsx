@@ -48,7 +48,7 @@ export function EditorRunAction({ workflow, readiness, steps }: { workflow: unkn
     : t('FloFi could not start this workflow run ({0}). Nothing was authorized.', refusal.code) : null;
   return <section className="execute-next editor-run" aria-label={t('Run the whole workflow')}>
     <h3>{t('Run the whole workflow')}</h3>
-    <p>{t('Runs all {0} steps in order on FloFi\'s approval page: confirm each step in your wallet, or authorize the whole workflow once where available. Nothing is signed here.', steps)}</p>
+    <p>{t('Runs all {0} steps in order on FloFi\'s approval page: confirm each step in your wallet, or authorize them in groups with your own wallet where it can batch them. Nothing is signed here.', steps)}</p>
     <button type="button" className="primary editor-run-action" data-editor-run={readiness.ready ? 'ready' : 'blocked'} disabled={!readiness.ready || busy}
       aria-busy={busy || undefined} aria-description={readiness.reason ? t(readiness.reason) : undefined} onClick={() => void run()}>{t(busy ? 'Starting workflow run…' : 'Run workflow')}</button>
     {!readiness.ready && readiness.reason && <p className="muted" role="status">{t(readiness.reason)}</p>}

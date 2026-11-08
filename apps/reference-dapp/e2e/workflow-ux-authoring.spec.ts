@@ -60,7 +60,7 @@ test.describe('UX-001 / UX-005 Send card and destination', () => {
     await expect(to).not.toHaveAttribute('readonly', ''); await expect(to).toHaveValue(''); await expect(to).toHaveAttribute('placeholder', '0x…');
     for (const invalid of ['0x1234', BAD]) {
       await to.fill(invalid); await expect(to).toHaveAttribute('aria-invalid', 'true');
-      await expect(card.getByText('Enter a valid recipient address for this network.', { exact: true })).toBeVisible();
+      await expect(card.locator('.composer-recipient-error')).toHaveText('Enter a valid recipient address for this network.');
       // An invalid destination is never applied: Enter shows why, and the workflow does not change.
       await to.press('Enter'); await expect(revision(page)).toHaveAttribute('data-workflow-revision', '0');
     }
@@ -227,8 +227,10 @@ test.describe('UX-007 fast live quote feedback', () => {
     await expect.poll(() => seen.length).toBe(2); await input.fill('1000');
     await expect(destination).toContainText('0.4'); await page.waitForTimeout(900); await expect(destination).toContainText('0.4'); await expect(destination).not.toContainText('9.99');
     expect(seen.map(amountOf)).toEqual(['100000000', '10000000', '1000000000']);
-    // Estimation only: the draft is not applied, simulated, reviewed or signed.
-    await expect(revision(page)).toHaveAttribute('data-workflow-revision', '0');
+    // P0 workflow execution: the amount the owner stopped typing applies by itself after a short pause (no Enter needed) — the step, never a
+    // simulation, Review or signature. Applying it reuses the same per-step quote (no extra request above).
+    await expect.poll(async () => JSON.stringify(JSON.parse(await readWorkflowIr(page)).nodes[0]?.userConstraints ?? []).match(/"amount":"(\d+)"/)?.[1]).toBe('1000000000');
+    expect(seen.map(amountOf)).toEqual(['100000000', '10000000', '1000000000']);
     await expect(page.getByRole('complementary', { name: 'Simulation Summary' })).toHaveCount(0);
     await expectEditorSection(page, 'Build');
     await assertPassiveWallet(page); networkGuard.assertClean();
