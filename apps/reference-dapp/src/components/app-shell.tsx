@@ -427,7 +427,9 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
     || Boolean(sequence && (sequence.cursor > 0 || sequence.completed.length > 0));
   const workflowRunHere = useEditorWorkflowRun({ workflow: state.workflow, evmAccount: connectedWallet.account,
     enabled: Boolean(sequence) && !approvalSlot && !autoPrepare && surface === 'workspace' && !sequenceRestore && !localSequenceStarted });
-  const groupedPrimary = workflowRunHere.available && (workflowRunHere.started || !workflowRunHere.review || workflowRunHere.grouped);
+  // The whole-workflow path is primary until its Review shows it cannot group this workflow, or the Review itself could not be made: then the
+  // Editor's step-by-step path is the honest fallback (a started run always stays primary).
+  const groupedPrimary = workflowRunHere.available && (workflowRunHere.started || workflowRunHere.grouped || (!workflowRunHere.review && !workflowRunHere.reviewFailed));
   // P0 workflow execution (production 2026-11-08, OWNER_STATE_CHANGED_REVIEW_REQUIRED after the USDC approval): on an owner-bound network
   // (Arbitrum One, Ethereum) a swap's Review binds the exact approval transaction, so once THIS run's own approval reconciled the swap needs its own
   // fresh, read-only Review. FloFi prepares it at once — exactly as the chat already does — instead of sending the owner back to "Simulate"; the

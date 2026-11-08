@@ -27,12 +27,24 @@ import { useLocale } from '../i18n/locale';
 import { sendWalletBatch, signSolanaGroup, signUserOperation, walletBatchHashes, walletProfile } from './user-funded-browser';
 import { useWalletProof } from './wallet-proof';
 
-const STORAGE_KEY = 'flofi.editor-workflow-run.v1';
-type Stored = { readonly workflowId: string; readonly approvalId: string; readonly workflowHash: string; readonly owner: string };
+/** One pointer per Canvas workflow (another workflow's run never replaces it). */
+const STORAGE_PREFIX = 'flofi.editor-workflow-run.v1:';
+/**
+ * `sent`: the batch id the wallet answered `wallet_sendCalls` with, kept the moment it answers — the wallet holds that batch from then on, so
+ * FloFi reads it back and never asks the wallet to send that group again (even a wallet that ignores the app-provided EIP-5792 id).
+ */
+type Stored = { readonly workflowId: string; readonly approvalId: string; readonly workflowHash: string; readonly owner: string;
+  readonly sent?: { readonly group: number; readonly batchId: string } };
 const readStored = (workflowId: string): Stored | null => {
-  try { const v = JSON.parse(localStorage.getItem(STORAGE_KEY) ?? 'null') as Stored | null; return v && v.workflowId === workflowId ? v : null; } catch { return null; }
+  try { const v = JSON.parse(localStorage.getItem(STORAGE_PREFIX + workflowId) ?? 'null') as Stored | null; return v && v.workflowId === workflowId ? v : null; } catch { return null; }
 };
-const writeStored = (value: Stored | null) => { try { if (value) localStorage.setItem(STORAGE_KEY, JSON.stringify(value)); else localStorage.removeItem(STORAGE_KEY); } catch { /* tab only */ } };
+const writeStored = (workflowId: string, value: Stored | null) => {
+  try { if (value) localStorage.setItem(STORAGE_PREFIX + workflowId, JSON.stringify(value)); else localStorage.removeItem(STORAGE_PREFIX + workflowId); } catch { /* tab only */ }
+};
+/** Status refusals after which the stored run no longer exists for this browser; any other refusal keeps the pointer (e.g. a sign-in expired). */
+const FORGOTTEN = /_NOT_FOUND$/;
+/** Whether the wallet knows a batch id (`wallet_getCallsStatus` answers; EIP-5792 5730 or no answer: it does not) and its status if final. */
+const probe = (batchId: string) => walletBatchHashes(batchId).then(result => ({ known: true as const, result }), () => ({ known: false as const, result: null }));
 const CODE = /^[A-Z][A-Z0-9_:]{2,100}$/;
 const codeOf = (cause: unknown) => cause instanceof Error && CODE.test(cause.message) ? cause.message
   : (cause as { code?: unknown } | null)?.code === 4001 ? 'WALLET_REQUEST_REJECTED' : 'EDITOR_EXECUTION_FAILED';
@@ -47,6 +59,10 @@ export type EditorWorkflowRunState = {
   readonly started: boolean;
   /** The whole workflow runs here as wallet-grouped authorization (the review says so); otherwise the Editor keeps its step-by-step path. */
   readonly grouped: boolean;
+  /** A batch this browser handed to the wallet that the run has not recorded yet: it is read back, never sent again, and the run is not ended. */
+  readonly unrecorded: boolean;
+  /** The whole-workflow Review could not be made (e.g. a catalog or RPC refusal): the Editor's step-by-step path stays available. */
+  readonly reviewFailed: boolean;
   startReview(): Promise<void>; authorize(): Promise<void>; confirmUpdate(): Promise<void>; authorizeDue(): Promise<void>; checkWallet(): Promise<void>; end(): Promise<void>;
   dismiss(): void;
 };
@@ -65,12 +81,19 @@ export function useEditorWorkflowRun(input: { readonly workflow: { readonly work
   const [run, setRun] = useState<RunView | null>(null);
   const [approvalId, setApprovalId] = useState<string | null>(null);
   const [updated, setUpdated] = useState<EditorWorkflowRunState['updated']>([]);
-  const pendingSend = useRef<{ approvalId: string; index: number; prepared: Record<string, unknown> } | null>(null);
+  const pendingSend = useRef<{ approvalId: string; index: number } | null>(null);
+  /** The minimum the owner accepted for each step (the reviewed one, or an update they confirmed): the wallet is never asked for less. */
+  const accepted = useRef<Map<number, ReviewAmount>>(new Map());
+  const offered = useRef<Map<number, ReviewAmount>>(new Map());
+  const runRef = useRef<RunView | null>(null);
+  const reviewRef = useRef<EditorExecutionReview | null>(null);
+  const [unrecorded, setUnrecorded] = useState(false);
   const acting = useRef(false);
   const proof = useWalletProof('eip155');
   const workflowSnapshot = useRef<unknown>(workflow);
   workflowSnapshot.current = workflow;
-  useEffect(() => { void editorWorkflowExecutionAvailability().then(r => setAvailable(r.enabled)).catch(() => setAvailable(false)); }, []);
+  // Re-read when the wallet changes (a FloFi sign-in usually comes with it): without an account session the step-by-step path stays primary.
+  useEffect(() => { void editorWorkflowExecutionAvailability().then(r => setAvailable(r.enabled)).catch(() => setAvailable(false)); }, [evmAccount]);
   // A Review describes one workflow revision and one wallet: any edit or wallet change makes it stale (nothing was started).
   const reviewKey = `${workflow.workflowId}:${workflow.revision}:${evmAccount ?? ''}`;
   const reviewedFor = useRef<string | null>(null);
@@ -81,17 +104,26 @@ export function useEditorWorkflowRun(input: { readonly workflow: { readonly work
   const adopt = useCallback((proposal: ClaimedProposal) => {
     const r = proposal.view.workflowRun?.run ?? null;
     if (!r) return;
-    setRun(r);
-    if (!OPEN_RUN.includes(r.state)) { setPhase('done'); writeStored(null); }
-    else if (r.state !== 'PENDING') setPhase(current => current === 'wallet' || current === 'confirming' ? current : 'running');
-  }, []);
+    setRun(r); runRef.current = r;
+    if (!OPEN_RUN.includes(r.state)) { setPhase('done'); writeStored(workflow.workflowId, null); setUnrecorded(false); }
+    // A status poll never hides what the owner is being asked (the wallet prompt, or an updated minimum to confirm).
+    else if (r.state !== 'PENDING') setPhase(current => current === 'wallet' || current === 'confirming' || current === 'confirm-update' ? current : 'running');
+    const sent = readStored(workflow.workflowId)?.sent;
+    setUnrecorded(Boolean(sent && r.groups[sent.group]?.state === 'PREPARED'));
+  }, [workflow.workflowId]);
   // A run of this workflow started earlier (this tab, a reload or another tab): its progress continues here, read from the server.
   useEffect(() => {
     if (!enabled || approvalId) return;
     const stored = readStored(workflow.workflowId);
     if (!stored) return;
     setApprovalId(stored.approvalId);
-    void workflowRunStatusHandoff(stored.approvalId).then(result => { if (result.ok) adopt(result.value); else writeStored(null); }).catch(() => undefined);
+    // Only a run that no longer exists is forgotten; any other refusal (e.g. the wallet sign-in expired) keeps it, so the same workflow is never
+    // authorized a second time while its first run is open.
+    void workflowRunStatusHandoff(stored.approvalId).then(result => {
+      if (result.ok) adopt(result.value);
+      else if (FORGOTTEN.test(result.code)) { writeStored(workflow.workflowId, null); setApprovalId(null); }
+      else setError(result.code);
+    }).catch(() => undefined);
   }, [enabled, workflow.workflowId, approvalId, adopt]);
   // Status poll while the run is open (the server observes the chain exactly as its worker does; nothing is resolved or sent by a poll).
   useEffect(() => {
@@ -105,7 +137,7 @@ export function useEditorWorkflowRun(input: { readonly workflow: { readonly work
 
   async function guard(work: () => Promise<void>) {
     if (acting.current) return; acting.current = true; setError(null);
-    try { await work(); } catch (cause) { setError(codeOf(cause)); setPhase(p => p === 'wallet' || p === 'confirming' ? approvalId ? 'running' : 'reviewed' : p === 'reviewing' ? 'idle' : p === 'authorizing' || p === 'proving' ? 'reviewed' : p); }
+    try { await work(); } catch (cause) { setError(codeOf(cause)); setPhase(p => p === 'wallet' || p === 'confirming' ? 'running' : p === 'reviewing' ? 'idle' : p === 'authorizing' || p === 'proving' ? runRef.current ? 'running' : 'reviewed' : p); }
     finally { acting.current = false; }
   }
   const profileFor = async (chains: readonly string[]) => walletProfile(evmAccount, chains, false);
@@ -116,7 +148,7 @@ export function useEditorWorkflowRun(input: { readonly workflow: { readonly work
     // The wallet is asked what it can do on FloFi's EVM mainnets (`wallet_getCapabilities` shows no prompt); the server keeps only this workflow's.
     const result = await reviewEditorWorkflow(workflowSnapshot.current, evmAccount, await profileFor(EVM_MAINNETS));
     if (!result.ok) throw new Error(result.code);
-    reviewedFor.current = reviewKey; setReview(result.value); setPhase('reviewed');
+    reviewedFor.current = reviewKey; reviewRef.current = result.value; setReview(result.value); setPhase('reviewed');
   });
   /** Hands a prepared group to the owner's wallet and relays the answer; a batch is then followed until the wallet reports its transactions. */
   async function sendPrepared(id: string, index: number, p: Record<string, unknown>, feePayer: string) {
@@ -124,12 +156,15 @@ export function useEditorWorkflowRun(input: { readonly workflow: { readonly work
     if (p.kind === 'EVM_WALLET_BATCH') {
       const request = p.request as eip5792.SendCallsRequest;
       // A batch the wallet already has (a reload, a lost answer) is read back by its id, never sent again.
-      const known = request.id ? await walletBatchHashes(request.id).then(() => true, () => false) : false;
-      const batchId = known ? request.id! : await sendWalletBatch(request);
-      const authorized = await authorizeUserFundedGroup(id, index, { kind: 'EVM_WALLET_BATCH', batchId });
-      if (!authorized.ok) throw new Error(authorized.code);
-      adopt(authorized.value); setPhase('confirming');
-      await followBatch(id, index, batchId);
+      let batchId = await heldBatch(id, index, request.id ?? null);
+      if (!batchId) {
+        batchId = await sendWalletBatch(request);
+        // Kept before anything else can fail: from now on the wallet holds this batch.
+        const stored = readStored(workflow.workflowId);
+        if (stored?.approvalId === id) writeStored(workflow.workflowId, { ...stored, sent: { group: index, batchId } });
+        setUnrecorded(true);
+      }
+      await recordBatch(id, index, batchId);
       return;
     }
     if (p.kind === 'EVM_USER_OPERATION') {
@@ -145,6 +180,24 @@ export function useEditorWorkflowRun(input: { readonly workflow: { readonly work
     }
     throw new Error('USER_FUNDED_GROUP_NOT_PREPARABLE');
   }
+  /**
+   * The batch the wallet already holds for this group, if any: the id it answered with (kept by this browser), then the group's own EIP-5792 id.
+   * A batch this browser handed over that the wallet no longer reports is never sent again (the owner checks the wallet's activity).
+   */
+  async function heldBatch(id: string, index: number, groupId: string | null): Promise<string | null> {
+    const stored = readStored(workflow.workflowId);
+    const mine = stored?.approvalId === id && stored.sent?.group === index ? stored.sent.batchId : null;
+    for (const candidate of [...new Set([mine, groupId].filter((v): v is string => Boolean(v)))]) if ((await probe(candidate)).known) return candidate;
+    if (mine) throw new Error('WALLET_BATCH_SENT_UNRECORDED');
+    return null;
+  }
+  /** The wallet holds the batch: the run records it and follows it. A failure here is never "nothing was sent". */
+  async function recordBatch(id: string, index: number, batchId: string) {
+    const authorized = await authorizeUserFundedGroup(id, index, { kind: 'EVM_WALLET_BATCH', batchId }).catch(() => null);
+    if (!authorized?.ok) throw new Error('WALLET_BATCH_SENT_UNRECORDED');
+    adopt(authorized.value); setPhase('confirming');
+    await followBatch(id, index, batchId);
+  }
   async function followBatch(id: string, index: number, batchId: string) {
     for (let i = 0; i < 60; i++) {
       const done = await walletBatchHashes(batchId).catch(() => null);
@@ -155,84 +208,131 @@ export function useEditorWorkflowRun(input: { readonly workflow: { readonly work
     // Still pending in the wallet: the run keeps observing; "Check my wallet" reads it back later (never a second batch).
     setPhase('running');
   }
-  const minimumsOf = (planned: RunView['groups'][number]['planned']) => new Map((planned?.steps ?? []).flatMap(s => s.minimum ? [[s.index, s.minimum] as const] : []));
+  /**
+   * Prepares a group (or takes the one just prepared) and hands it to the wallet — only after its signed minimums were compared with what the
+   * owner accepted, on EVERY preparation (a re-preparation after expiry quotes again). The comparison fails closed: without the prepared
+   * group's planned values the wallet is not asked. A group whose batch the wallet already holds is read back first, never prepared again.
+   */
+  async function continueGroup(id: string, index: number, given?: { readonly prepared: unknown; readonly feePayer: string; readonly strategy?: string }) {
+    const current = runRef.current?.groups[index];
+    if (!given && current?.strategy === 'EVM_WALLET_BATCH' && current.state === 'PREPARED') {
+      const held = await heldBatch(id, index, current.batchId);
+      if (held) { await recordBatch(id, index, held); return; }
+    }
+    let prepared = given;
+    if (!prepared) { const r = await prepareUserFundedGroup(id, index); if (!r.ok) throw new Error(r.code); prepared = r.value; }
+    const kind = (prepared.prepared as { kind?: string } | null)?.kind;
+    if (kind === 'EVM_WALLET_BATCH') {
+      const fresh = await workflowRunStatusHandoff(id);
+      if (!fresh.ok) throw new Error(fresh.code);
+      adopt(fresh.value);
+      const planned = fresh.value.view.workflowRun?.run.groups[index]?.planned;
+      if (!planned) throw new Error('EDITOR_EXECUTION_PLAN_UNVERIFIED');
+      // A transfer pays exactly the recipient the owner reviewed (the workflow is bound by its hash; this re-checks the prepared call itself).
+      const reviewedSteps = reviewRef.current?.steps ?? [];
+      if (planned.steps.some(step => step.recipient && reviewedSteps[step.index]?.recipient?.toLowerCase() !== step.recipient.toLowerCase()))
+        throw new Error('EDITOR_EXECUTION_PLAN_CHANGED');
+      const lower = planned.steps.flatMap(step => {
+        const before = accepted.current.get(step.index);
+        return step.minimum && before && step.minimum.asset === before.asset && BigInt(step.minimum.units) < BigInt(before.units)
+          ? [{ index: step.index, before, now: step.minimum }] : [];
+      });
+      if (lower.length) {
+        pendingSend.current = { approvalId: id, index };
+        offered.current = new Map(lower.map(l => [l.index, l.now]));
+        setUpdated(lower.map(l => ({ index: l.index, reviewed: l.before.text, now: l.now.text }))); setPhase('confirm-update');
+        return;
+      }
+    }
+    await sendPrepared(id, index, prepared.prepared as Record<string, unknown>, prepared.feePayer);
+  }
 
   const authorize = () => guard(async () => {
     if (!review || !evmAccount) throw new Error('REVIEW_REQUIRED');
     if (review.validUntil && Date.parse(review.validUntil) <= Date.now()) throw new Error('REVIEW_EXPIRED');
     setPhase('authorizing');
     const profile = await profileFor([...new Set(review.groups.map(g => g.chain))]);
-    let result = await authorizeEditorWorkflow(workflowSnapshot.current, profile);
+    // Authorize is bound to this Review: the reviewed wallet, workflow and plan of groups (the server refuses anything else).
+    const binding = { owner: review.owner, workflowHash: review.workflowHash, groups: review.groups.map(g => ({ strategy: g.strategy, steps: g.steps })) };
+    let result = await authorizeEditorWorkflow(workflowSnapshot.current, profile, binding);
     if (!result.ok && result.code === 'EVM_WALLET_PROOF_REQUIRED') {
       // One-time sign-in of this wallet in this browser (EIP-4361 message; it authorizes no transaction), then the same Authorize continues.
       setPhase('proving');
       const proven = await proof.proveEvm();
       if (!proven.account) throw new Error(proven.error ?? 'WALLET_REQUEST_REJECTED');
       setPhase('authorizing');
-      result = await authorizeEditorWorkflow(workflowSnapshot.current, profile);
+      result = await authorizeEditorWorkflow(workflowSnapshot.current, profile, binding);
     }
     if (!result.ok) throw new Error(result.code);
     const { approvalId: id, proposal, prepared } = result.value;
-    setApprovalId(id); writeStored({ workflowId: workflow.workflowId, approvalId: id, workflowHash: review.workflowHash, owner: evmAccount });
+    setApprovalId(id); writeStored(workflow.workflowId, { workflowId: workflow.workflowId, approvalId: id, workflowHash: review.workflowHash, owner: evmAccount });
     adopt(proposal);
     // The wallet is asked for exactly what the owner reviewed, or the owner sees what changed first (a signed minimum below the reviewed one).
-    const fresh = await workflowRunStatusHandoff(id);
-    const planned = fresh.ok ? fresh.value.view.workflowRun?.run.groups[0]?.planned ?? null : null;
-    if (fresh.ok) adopt(fresh.value);
-    const lower = [...minimumsOf(planned)].flatMap(([index, now]) => {
-      const before = review.steps[index]?.minimum;
-      return before && BigInt(now.units) < BigInt(before.units) ? [{ index, reviewed: before.text, now: now.text }] : [];
-    });
-    pendingSend.current = { approvalId: id, index: 0, prepared: prepared.prepared as unknown as Record<string, unknown> };
-    if (lower.length) { setUpdated(lower); setPhase('confirm-update'); return; }
-    await sendPrepared(id, 0, pendingSend.current.prepared, prepared.feePayer);
+    accepted.current = new Map(review.steps.flatMap(step => step.minimum ? [[step.index, step.minimum] as const] : []));
+    await continueGroup(id, 0, prepared as { prepared: unknown; feePayer: string });
   });
   const confirmUpdate = () => guard(async () => {
     const pending = pendingSend.current;
     if (!pending || !evmAccount) throw new Error('REVIEW_REQUIRED');
-    setUpdated([]);
-    // Prepared again from fresh facts if the earlier preparation expired (the same group, the same batch id: never a second batch).
-    const prepared = await prepareUserFundedGroup(pending.approvalId, pending.index);
-    if (!prepared.ok) throw new Error(prepared.code);
-    await sendPrepared(pending.approvalId, pending.index, prepared.value.prepared as unknown as Record<string, unknown>, prepared.value.feePayer);
+    // The owner accepted exactly the minimums shown; anything lower after a new quote is shown again before the wallet is asked.
+    for (const [index, amount] of offered.current) accepted.current.set(index, amount);
+    setUpdated([]); setPhase('authorizing');
+    await continueGroup(pending.approvalId, pending.index);
   });
   /** A later group that became due (or a group the wallet answer was lost for): prepared now and handed to the wallet. */
   const authorizeDue = () => guard(async () => {
     if (!approvalId || !run) throw new Error('WORKFLOW_RUN_NOT_FOUND');
     const group = run.groups.find(g => g.steps[0] <= run.currentStep && run.currentStep <= g.steps[1]);
     if (!group) throw new Error('WORKFLOW_RUN_GROUP_NOT_FOUND');
-    const prepared = await prepareUserFundedGroup(approvalId, group.index);
-    if (!prepared.ok) throw new Error(prepared.code);
-    await sendPrepared(approvalId, group.index, prepared.value.prepared as unknown as Record<string, unknown>, prepared.value.feePayer);
+    setPhase('authorizing');
+    await continueGroup(approvalId, group.index);
   });
-  /** The wallet already has this run's batch (after a reload, a closed tab or a timeout): its transactions are read back and reported. */
+  /** The run's status, signing this wallet in again first when its session expired (the sign-in authorizes no transaction). */
+  async function loadStatus(id: string) {
+    let r = await workflowRunStatusHandoff(id);
+    if (!r.ok && r.code === 'EVM_WALLET_PROOF_REQUIRED') {
+      setPhase('proving');
+      const proven = await proof.proveEvm();
+      if (!proven.account) throw new Error(proven.error ?? 'WALLET_REQUEST_REJECTED');
+      r = await workflowRunStatusHandoff(id);
+    }
+    if (!r.ok) throw new Error(r.code);
+    adopt(r.value); setPhase(p => p === 'proving' ? 'running' : p);
+  }
+  /** The wallet already has this run's batch (after a reload, a closed tab or a lost answer): it is recorded, read back and reported. */
   const checkWallet = useCallback(() => guard(async () => {
-    if (!approvalId || !run) return;
-    const group = run.groups.find(g => g.state === 'AUTHORIZED' && g.batchId) ?? run.groups.find(g => g.state === 'PREPARED' && g.batchId);
-    if (!group?.batchId) { const r = await workflowRunStatusHandoff(approvalId); if (r.ok) adopt(r.value); return; }
-    const done = await walletBatchHashes(group.batchId).catch(() => null);
-    if (done?.hashes.length) {
-      if (group.state === 'PREPARED') { const a = await authorizeUserFundedGroup(approvalId, group.index, { kind: 'EVM_WALLET_BATCH', batchId: group.batchId }); if (a.ok) adopt(a.value); }
-      const r = await reportUserFundedBatch(approvalId, group.index, [...done.hashes]); if (r.ok) adopt(r.value);
-    } else if (done?.failed && group.state === 'AUTHORIZED') { const r = await reportUserFundedBatch(approvalId, group.index, [], true); if (r.ok) adopt(r.value); }
-    else { const r = await workflowRunStatusHandoff(approvalId); if (r.ok) adopt(r.value); }
-  }), [approvalId, run, adopt]);
+    if (!approvalId) return;
+    const current = runRef.current;
+    if (!current) { await loadStatus(approvalId); return; }
+    const group = current.groups.find(g => g.state === 'AUTHORIZED' && g.batchId) ?? current.groups.find(g => g.state === 'PREPARED' && g.strategy === 'EVM_WALLET_BATCH');
+    const held = group ? await heldBatch(approvalId, group.index, group.batchId) : null;
+    if (!group || !held) { await loadStatus(approvalId); return; }
+    if (group.state === 'PREPARED') { await recordBatch(approvalId, group.index, held); return; }
+    const done = await walletBatchHashes(held).catch(() => null);
+    if (done?.hashes.length) { const r = await reportUserFundedBatch(approvalId, group.index, [...done.hashes]); if (r.ok) adopt(r.value); }
+    else if (done?.failed) { const r = await reportUserFundedBatch(approvalId, group.index, [], true); if (r.ok) adopt(r.value); }
+    else await loadStatus(approvalId);
+  }), [approvalId, adopt]);
   // After a reload with a batch in the wallet, its result is read back once, automatically (never sent again).
   const recovered = useRef<string | null>(null);
+  const recoverable = Boolean(run && (run.nextAction === 'OWNER_CONFIRMS_BATCH' || unrecorded
+    || run.groups.some(g => g.state === 'PREPARED' && g.strategy === 'EVM_WALLET_BATCH' && g.batchId)));
   useEffect(() => {
-    if (!approvalId || !run || run.nextAction !== 'OWNER_CONFIRMS_BATCH' || recovered.current === approvalId || phase === 'wallet' || phase === 'confirming') return;
-    recovered.current = approvalId;
+    const key = `${approvalId}:${run?.nextAction}:${run?.currentStep}`;
+    if (!approvalId || !recoverable || recovered.current === key || ['wallet', 'confirming', 'authorizing', 'proving', 'confirm-update'].includes(phase)) return;
+    recovered.current = key;
     void checkWallet();
-  }, [approvalId, run?.nextAction, phase, checkWallet]);
+  }, [approvalId, recoverable, run?.nextAction, run?.currentStep, phase, checkWallet]);
   const end = () => guard(async () => {
     if (!approvalId) return;
     const r = await cancelWorkflowRunHandoff(approvalId);
     if (!r.ok) throw new Error(r.code);
-    adopt(r.value); writeStored(null);
+    adopt(r.value); writeStored(workflow.workflowId, null);
   });
-  const dismiss = () => { setApprovalId(null); setRun(null); setReview(null); setPhase('idle'); setError(null); setUpdated([]); writeStored(null); recovered.current = null; };
+  const dismiss = () => { setApprovalId(null); setRun(null); runRef.current = null; setReview(null); setPhase('idle'); setError(null); setUpdated([]); writeStored(workflow.workflowId, null); recovered.current = null; setUnrecorded(false); };
   const grouped = Boolean(review && review.mode !== 'STEP_BY_STEP' && !review.refusal);
-  return { available: available && enabled, phase, review, error, run, updated, started: Boolean(approvalId), grouped,
+  return { available: available && enabled, phase, review, error, run, updated, started: Boolean(approvalId), grouped, unrecorded,
+    reviewFailed: !review && !approvalId && error !== null,
     startReview: runReview, authorize, confirmUpdate, authorizeDue, checkWallet, end, dismiss };
 }
 
@@ -253,6 +353,7 @@ export const EXECUTION_REASON: Readonly<Record<string, string>> = {
   WORKFLOW_BINDING_RESOLVED_WHEN_DUE: 'A step spends what an earlier step delivers on another network; it is authorized when that delivery lands.',
   USER_OPERATION_BUNDLER_UNAVAILABLE: 'A step after a bridge is authorized when the bridge delivery lands (no relay is configured for signing it earlier).',
   EVM_SMART_ACCOUNT_REQUIRED: 'A step after a bridge is authorized when the bridge delivery lands (your account is not a smart account).',
+  USER_OPERATION_AAVE_SIGNED_WHEN_DUE: 'An Aave step after a bridge is authorized when the bridge delivery lands, after FloFi simulates it on that state (health factor and supply cap).',
   SOLANA_MULTI_SIGN_UNSUPPORTED: 'Your Solana wallet confirms each transaction separately.',
   SOLANA_DURABLE_NONCE_NOT_OFFERED: 'A Solana step after a bridge is signed when the delivery lands (a recent blockhash expires within about a minute).',
 };
@@ -267,7 +368,13 @@ export const EXECUTION_REFUSAL: Readonly<Record<string, string>> = {
   ACCOUNT_SESSION_REQUIRED: 'Sign in to FloFi to run the whole workflow with one wallet confirmation. You can still confirm each step on its own.',
   EVM_WALLET_REQUIRED: 'Connect your wallet to review the whole workflow.',
   REVIEW_EXPIRED: 'The reviewed prices expired. Review the workflow again to refresh them.',
-  WALLET_REQUEST_REJECTED: 'You declined the request in your wallet. Nothing was sent. You can authorize again or end the workflow.',
+  WALLET_REQUEST_REJECTED: 'You declined the request in your wallet. Nothing was sent. You can authorize again; the workflow can be ended once the prepared request expires.',
+  WALLET_BATCH_SENT_UNRECORDED: 'Your wallet already has the batch for these steps, but FloFi has not recorded it yet. Do not send it again: FloFi reads it back from your wallet.',
+  WORKFLOW_RUN_GROUP_IN_FLIGHT: 'A prepared wallet request is still valid, so the workflow cannot be ended yet. Try again after it expires.',
+  EDITOR_EXECUTION_PLAN_UNVERIFIED: 'FloFi could not compare the prepared minimums with your review, so your wallet was not asked. Try again.',
+  EVM_WALLET_PROOF_REQUIRED: 'Sign in with your wallet to follow this workflow. The sign-in authorizes no transaction.',
+  EDITOR_EXECUTION_PLAN_CHANGED: 'The workflow or its plan changed since your review. Nothing was asked from your wallet. Review the whole workflow again.',
+  EDITOR_REVIEW_RATE_LIMITED: 'Too many reviews in a short time. Wait a few minutes and review again.',
   EDITOR_RUNS_NOT_ENABLED: 'Running a whole workflow is not enabled on this FloFi deployment.',
   HANDOFF_RATE_LIMITED: 'Too many workflow runs were started recently. Try again later.',
   HANDOFF_PENDING_LIMIT: 'Too many workflow runs are waiting for you. Finish or end one of them first.',
@@ -293,7 +400,9 @@ export function EditorWorkflowRunPanel({ state }: { state: EditorWorkflowRunStat
   const runStep = (index: number) => run?.steps.find(s => s.index === index) ?? null;
   const plannedOf = (index: number) => run?.groups.flatMap(g => g.planned?.steps ?? []).find(s => s.index === index) ?? null;
   const currentGroup = run?.groups.find(g => g.steps[0] <= run.currentStep && run.currentStep <= g.steps[1]) ?? null;
-  const due = run && run.nextAction === 'OWNER_SIGNS_GROUP' && currentGroup && !['wallet', 'confirming'].includes(phase);
+  const due = run && run.nextAction === 'OWNER_SIGNS_GROUP' && currentGroup && !state.unrecorded && !['wallet', 'confirming', 'authorizing', 'confirm-update'].includes(phase);
+  // A prepared wallet request still valid (the wallet may hold it) or a batch handed to the wallet but not recorded: the run cannot be ended yet.
+  const heldUntil = run?.groups.find(g => g.state === 'PREPARED' && g.strategy === 'EVM_WALLET_BATCH' && g.validUntil && Date.parse(g.validUntil) > now)?.validUntil ?? null;
   const counts = review?.counts;
   return <section className="editor-workflow-run panel" aria-label={tr('Whole workflow')} data-run-phase={phase} data-run-state={run?.state ?? undefined}>
     <h3>{tr(run ? 'Workflow progress' : 'Review the whole workflow')}</h3>
@@ -315,6 +424,8 @@ export function EditorWorkflowRunPanel({ state }: { state: EditorWorkflowRunStat
               {spend && <div><dt>{tr(step.basis === 'GUARANTEED_MINIMUM' ? 'Spends (the minimum step {0} guarantees)' : step.basis === 'RECONCILED_ACTUAL' ? 'Spends (what step {0} delivers, at most)' : 'Spends', String((step.boundTo ?? 0) + 1))}</dt><dd>{spend}</dd></div>}
               {expected && <div><dt>{tr(step.action === 'borrow' ? 'You receive' : 'Expected')}</dt><dd>{expected}</dd></div>}
               {minimum && <div><dt>{tr('Minimum (your slippage limit)')}</dt><dd>{minimum}</dd></div>}
+              {(planned?.recipient ?? step.recipient) && <div><dt>{tr('To')}</dt><dd><code className="editor-run-recipient">{planned?.recipient ?? step.recipient}</code>
+                {(planned?.recipient ?? step.recipient)!.toLowerCase() === review.owner.toLowerCase() ? ` ${tr('(your wallet)')}` : ''}</dd></div>}
               {!expected && step.action === 'swap' && <div><dt>{tr('Expected')}</dt><dd>{tr('Quoted when this step becomes due')}</dd></div>}
               {live?.outcome?.received.map(r => <div key={r.asset}><dt>{tr('Received (reconciled)')}</dt><dd>{receivedText(r, [planned?.expected, step.expected, planned?.spend, step.spend])}</dd></div>)}
             </dl>
@@ -351,15 +462,18 @@ export function EditorWorkflowRunPanel({ state }: { state: EditorWorkflowRunStat
     {phase === 'confirming' && <p role="status">{tr('Waiting for your wallet to report the batch…')}</p>}
     {phase === 'proving' && <p role="status">{tr('Sign the FloFi sign-in message in your wallet (once per session). It authorizes no transaction.')}</p>}
     <div className="approval-actions">
-      {!run && <button type="button" className={review ? 'secondary' : 'primary'} disabled={busy} aria-busy={phase === 'reviewing' || undefined} onClick={() => void state.startReview()}>
+      {!state.started && <button type="button" className={review ? 'secondary' : 'primary'} disabled={busy} aria-busy={phase === 'reviewing' || undefined} onClick={() => void state.startReview()}>
         {tr(phase === 'reviewing' ? 'Reviewing the whole workflow…' : review ? 'Review again' : 'Review whole workflow')}</button>}
-      {review && !run && state.grouped && <button type="button" className="primary editor-run-authorize" disabled={busy || expired} aria-busy={busy || undefined} onClick={() => void state.authorize()}>
+      {state.started && !run && <button type="button" className="primary" disabled={busy} onClick={() => void state.checkWallet()}>{tr('Load workflow progress')}</button>}
+      {review && !state.started && state.grouped && <button type="button" className="primary editor-run-authorize" disabled={busy || expired} aria-busy={busy || undefined} onClick={() => void state.authorize()}>
         {tr(phase === 'authorizing' ? 'Preparing your wallet request…' : review.counts.walletPrompts === 1 && !review.counts.atLeast ? 'Authorize workflow · 1 wallet confirmation' : 'Authorize workflow')}</button>}
       {phase === 'confirm-update' && <button type="button" className="primary" onClick={() => void state.confirmUpdate()}>{tr('Confirm the updated minimums')}</button>}
       {due && <button type="button" className="primary" onClick={() => void state.authorizeDue()}>{tr('Authorize steps {0}–{1} now', String(currentGroup!.steps[0] + 1), String(currentGroup!.steps[1] + 1))}</button>}
-      {run?.nextAction === 'OWNER_CONFIRMS_BATCH' && !['wallet', 'confirming'].includes(phase) && <button type="button" className="secondary" onClick={() => void state.checkWallet()}>{tr('Check my wallet for the batch')}</button>}
-      {run && OPEN_RUN.includes(run.state) && !run.groups.some(g => g.signed && !['RECONCILED', 'FAILED', 'SKIPPED'].includes(g.state)) && !['wallet', 'confirming'].includes(phase) &&
-        <button type="button" className="quiet" onClick={() => void state.end()}>{tr('End workflow')}</button>}
+      {(run?.nextAction === 'OWNER_CONFIRMS_BATCH' || state.unrecorded) && !['wallet', 'confirming'].includes(phase) && <button type="button" className="secondary" onClick={() => void state.checkWallet()}>{tr('Check my wallet for the batch')}</button>}
+      {run && OPEN_RUN.includes(run.state) && !run.groups.some(g => g.signed && !['RECONCILED', 'FAILED', 'SKIPPED'].includes(g.state)) && !['wallet', 'confirming'].includes(phase)
+        && !state.unrecorded && !heldUntil && <button type="button" className="quiet" onClick={() => void state.end()}>{tr('End workflow')}</button>}
+      {run && OPEN_RUN.includes(run.state) && heldUntil && !state.unrecorded && !['wallet', 'confirming'].includes(phase)
+        && <p className="muted">{tr('The prepared wallet request is valid until {0}; the workflow can be ended after that.', fmtTime(heldUntil, language))}</p>}
       {run && !OPEN_RUN.includes(run.state) && <button type="button" className="quiet" onClick={state.dismiss}>{tr('Close')}</button>}
     </div>
   </section>;

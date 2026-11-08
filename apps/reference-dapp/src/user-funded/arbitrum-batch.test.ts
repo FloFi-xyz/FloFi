@@ -17,7 +17,7 @@ import { workflowRequirement } from '../delegation/steps.ts';
 import { composeWorkflowBound } from '../engine/strategy-engine.ts';
 import { evmCallsOf, evmStepBuildable, type EvmGroupCalls } from './evm-calls.ts';
 import { reconcileWalletBatch } from './evm-reconcile.ts';
-import { prepareGroup, type UserFundedDeps } from './groups.ts';
+import { prepareGroup, reconcileEvmGroup, supersede, type Prepared, type UserFundedDeps } from './groups.ts';
 import type { BatchSimulation } from './batch-simulation.ts';
 
 const CHAIN = 'eip155:42161', CHAINS = [CHAIN], OWNER = '0x1111111111111111111111111111111111111111';
@@ -44,7 +44,7 @@ function setup(options: { borrow?: string; simulation?: boolean } = {}) {
   const deps: UserFundedDeps = { chains: CHAINS, evm: c => c === CHAIN ? transport : null, bundler: () => null, solana: null, jupiter: null, now: () => new Date('2026-11-08T21:00:00Z') };
   const prepare = () => prepareGroup(deps, composition, requirement.value, { runId: 'wfr_test', groupIndex: 0, strategy: 'EVM_WALLET_BATCH', chain: CHAIN, feePayer: OWNER,
     stepFrom: 0, stepTo: 2 });
-  return { chain, requirement: requirement.value, transport, prepare };
+  return { chain, requirement: requirement.value, transport, prepare, deps };
 }
 type BatchPrepared = { group: EvmGroupCalls; request: { calls: { to: string; data: string }[]; atomicRequired: boolean }; simulation: BatchSimulation | null;
   fee: { estimatedGas: string; payer: string }; fromBlock: string };
@@ -135,5 +135,35 @@ describe('P0: Arbitrum One Swap → Supply (the swap\'s WETH) → Borrow as ONE 
   it('without eth_simulateV1 on the RPC, a batch that touches Aave is refused with a closed code instead of being signed blind', async () => {
     const { prepare } = setup({ simulation: false });
     expect(await prepare()).toMatchObject({ ok: false, code: 'USER_FUNDED_SIMULATION_UNAVAILABLE', stepIndex: 1 });
+  });
+
+  it('a batch the wallet sent before the group was prepared again (its answer lost, then expired) reconciles against the preparation it came from', async () => {
+    const { chain, prepare, deps } = setup();
+    const first = await prepare();
+    if (!first.ok) throw new Error(first.code);
+    const a = first.value.prepared as unknown as BatchPrepared;
+    // The wallet executes the first preparation; FloFi never learns it (the answer was lost) and, after expiry, prepares the group again
+    // under the SAME EIP-5792 id from a moved price: a new quote, a new signed minimum, so a different artifact.
+    const hash = chain.control.walletBatch(OWNER, evmCallsOf(a.group));
+    chain.control.setPrice(390_000_000_000_000n);
+    const second = await prepare();
+    if (!second.ok) throw new Error(second.code);
+    const b = second.value.prepared as unknown as BatchPrepared;
+    expect((b.group.calls[1] as { amountOutMinimum: string }).amountOutMinimum).not.toBe((a.group.calls[1] as { amountOutMinimum: string }).amountOutMinimum);
+    // Without the earlier preparation, the first batch's transaction would fail the group although every step ran on chain.
+    expect(await reconcileEvmGroup(deps, second.value.prepared, { hashes: [hash] })).toMatchObject({ status: 'FAILED', code: 'RECONCILIATION_CALLS_MISMATCH' });
+    // The re-preparation keeps the replaced artifact; the batch reconciles against it, with the minimums signed then.
+    const kept: Prepared = { ...second.value.prepared, superseded: supersede(first.value.prepared) };
+    const r = await reconcileEvmGroup(deps, kept, { hashes: [hash] });
+    if (r.status !== 'RECONCILED') throw new Error(JSON.stringify(r));
+    expect(r.steps.map(s => s.stepIndex)).toEqual([0, 1, 2]);
+    expect(r.steps[1]!.spent).toEqual([{ asset: `${CHAIN}/erc20:${WETH}`, amount: (a.group.calls[1] as { amountOutMinimum: string }).amountOutMinimum }]);
+    // A transaction that is neither preparation's batch still fails closed.
+    const other = chain.control.walletBatch(OWNER, [erc7710.workflowCallData({ kind: 'ERC20_APPROVE', token: USDC, spender: ROUTER, amount: 1n }, OWNER)]);
+    expect(await reconcileEvmGroup(deps, kept, { hashes: [other] })).toMatchObject({ status: 'FAILED' });
+    // At most a bounded history is kept.
+    let chained: Prepared = first.value.prepared;
+    for (let i = 0; i < 12; i++) chained = { ...second.value.prepared, superseded: supersede(chained) };
+    expect((chained.superseded as unknown[]).length).toBe(8);
   });
 });

@@ -10,7 +10,9 @@ import type { EvmGroupCalls } from './evm-calls.ts';
 
 /** An amount the owner reads: its asset identity (the run's asset key), raw units, decimals, symbol and the formatted value. */
 export type ReviewAmount = { readonly asset: string; readonly units: string; readonly decimals: number; readonly symbol: string; readonly text: string };
-export type PlannedStep = { readonly spend: ReviewAmount | null; readonly expected: ReviewAmount | null; readonly minimum: ReviewAmount | null };
+export type PlannedStep = { readonly spend: ReviewAmount | null; readonly expected: ReviewAmount | null; readonly minimum: ReviewAmount | null;
+  /** A transfer's recipient exactly as the prepared call pays it (lower-case EVM address); null for every other step. */
+  readonly recipient: string | null };
 
 export const amountOf = (units: string | bigint, ref: AssetRef): ReviewAmount =>
   ({ asset: assetKey(ref), units: units.toString(), decimals: ref.decimals, symbol: ref.symbol, text: `${formatAssetAmount(units.toString(), ref.decimals)} ${ref.symbol}` });
@@ -29,7 +31,7 @@ export function plannedSteps(requirement: { readonly steps: readonly StepRequire
     out.set(s.stepIndex, {
       spend: !borrow && spendRef ? amountOf(s.spend.amount, spendRef) : null,
       expected: s.quoted && quotedRef ? amountOf(s.quoted.amount, quotedRef) : borrow && s.guaranteed && guaranteedRef ? amountOf(s.guaranteed.amount, guaranteedRef) : null,
-      minimum: step.action === 'swap' && s.guaranteed && guaranteedRef ? amountOf(s.guaranteed.amount, guaranteedRef) : null });
+      minimum: step.action === 'swap' && s.guaranteed && guaranteedRef ? amountOf(s.guaranteed.amount, guaranteedRef) : null, recipient: s.recipient });
   }
   return out;
 }

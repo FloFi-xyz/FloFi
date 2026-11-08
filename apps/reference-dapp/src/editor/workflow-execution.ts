@@ -31,6 +31,8 @@ export type ReviewStep = {
   readonly spend: ReviewAmount | null; readonly basis: 'EXACT' | 'GUARANTEED_MINIMUM' | 'RECONCILED_ACTUAL'; readonly boundTo: number | null;
   /** A swap's quoted output and its signed minimum; a borrow's exact delivery. Null when quoted only when the step's group is due. */
   readonly expected: ReviewAmount | null; readonly minimum: ReviewAmount | null;
+  /** A transfer's recipient, in full (the authored one, or the owner's own wallet); null for every other action. */
+  readonly recipient: string | null;
 };
 export type ReviewGroup = {
   readonly index: number; readonly chain: string; readonly network: string; readonly strategy: GroupStrategy; readonly steps: readonly [number, number];
@@ -71,6 +73,9 @@ export type EditorExecutionReview = {
 export type ReviewResult = { readonly ok: true; readonly value: EditorExecutionReview } | { readonly ok: false; readonly code: string; readonly step?: number };
 
 const GROUPED: readonly GroupStrategy[] = ['EVM_WALLET_BATCH', 'EVM_USER_OPERATION', 'SOLANA_SIGN_ALL'];
+/** The address a transfer pays: the authored recipient (EVM lower-cased), else the owner's own wallet (exactly as the call builder resolves it). */
+const recipientOf = (strategy: { readonly recipient?: unknown }, owner: string | null) =>
+  typeof strategy.recipient === 'string' && strategy.recipient ? (/^0x[0-9a-fA-F]{40}$/.test(strategy.recipient) ? strategy.recipient.toLowerCase() : strategy.recipient) : owner;
 const PROVIDERS: Readonly<Record<string, string>> = { 'uniswap.v3': 'Uniswap V3', 'aave-v3': 'Aave V3', 'jupiter.swap-v2': 'Jupiter' };
 function counts(groups: readonly ExecutionGroup[], prepared: ReadonlyMap<number, number>, networkSwitches: number, oneTimeSetup: readonly string[]): ReviewCounts {
   let walletPrompts = 0, signatures = 0, transactions = 0, batchedCalls = 0, atLeast = false;
@@ -135,7 +140,8 @@ export async function reviewEditorExecution(input: { readonly workflow: unknown;
     const own = planned.get(step.index), input = step.inputs[0];
     return { index: step.index, action: step.action, network: NETWORKS[step.network].label, chain: step.chain, provider: step.adapterId ? PROVIDERS[step.adapterId] ?? null : null,
       basis, boundTo, spend: own?.spend ?? (input && step.action !== 'borrow' ? amountOf(input.amount, input) : null),
-      expected: own?.expected ?? (step.action === 'borrow' && input ? amountOf(input.amount, input) : null), minimum: own?.minimum ?? null };
+      expected: own?.expected ?? (step.action === 'borrow' && input ? amountOf(input.amount, input) : null), minimum: own?.minimum ?? null,
+      recipient: step.action === 'transfer' ? recipientOf(step.strategy as { readonly recipient?: unknown }, step.namespace === 'eip155' ? owner : null) : null };
   });
   const allGrouped = plan.groups.every(g => GROUPED.includes(g.strategy));
   const mode = !allGrouped ? 'STEP_BY_STEP' : plan.interactions.single ? 'ONE_WALLET_CONFIRMATION' : 'GROUPED';

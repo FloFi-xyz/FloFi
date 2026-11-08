@@ -17,6 +17,9 @@
 import { cookies } from 'next/headers';
 import { accountHost, currentAccountSession } from '../accounts/account-host';
 import { readEditorRunConfig } from '../editor/approval';
+import { prepareCatalogs } from '../server/editor-catalogs';
+import { platformStateHost } from '../server/platform-state-host';
+import { fixedWindow } from '../platform/index';
 import { reviewEditorExecution, type EditorExecutionReview } from '../editor/workflow-execution';
 import { walletProfileOf, workflowRunCancel, workflowRunUserFundedPrepare, workflowRunUserFundedStart, claimApproval, type ClaimedProposal } from '../platform/index';
 import type { PreparedGroupView } from '../workflow-runs/service';
@@ -30,13 +33,31 @@ const CODE = /^[A-Z][A-Z0-9_:]{2,100}$/;
 const failure = (cause: unknown, fallback = 'EDITOR_EXECUTION_FAILED'): { ok: false; code: string } =>
   ({ ok: false, code: cause instanceof Error && CODE.test(cause.message) ? cause.message : fallback });
 const EVM_ADDRESS = /^0x[0-9a-fA-F]{40}$/;
+/** Whole-workflow Reviews per FloFi account (each one reads quotes, allowances and a batch simulation on FloFi's RPC). */
+const REVIEW_LIMIT = 30, REVIEW_WINDOW_SECONDS = 600;
+/** What the owner reviewed, as the Authorize binds it: the wallet, the workflow and the plan of groups (never re-chosen at Authorize). */
+export type ReviewedBinding = { readonly owner: string; readonly workflowHash: string; readonly groups: readonly { readonly strategy: string; readonly steps: readonly [number, number] }[] };
+function bindingOf(value: unknown): ReviewedBinding | null {
+  const v = value && typeof value === 'object' ? value as Record<string, unknown> : null;
+  if (!v || typeof v.owner !== 'string' || !EVM_ADDRESS.test(v.owner) || typeof v.workflowHash !== 'string' || !/^[0-9a-f]{64}$/.test(v.workflowHash)
+    || !Array.isArray(v.groups) || !v.groups.length || v.groups.length > 16) return null;
+  const groups = v.groups.map(g => {
+    const x = g && typeof g === 'object' ? g as Record<string, unknown> : null, steps = x && Array.isArray(x.steps) ? x.steps : null;
+    return x && typeof x.strategy === 'string' && steps && steps.length === 2 && steps.every(n => Number.isSafeInteger(n) && (n as number) >= 0)
+      ? { strategy: x.strategy, steps: [steps[0] as number, steps[1] as number] as const } : null;
+  });
+  return groups.every(Boolean) ? { owner: v.owner.toLowerCase(), workflowHash: v.workflowHash, groups: groups as ReviewedBinding['groups'] } : null;
+}
 
 /** Whether the Editor can run a whole workflow as one run with user-funded grouped authorization on this deployment. */
 export async function editorWorkflowExecutionAvailability(): Promise<{ readonly enabled: boolean; readonly code: string | null }> {
   const env = process.env, editor = readEditorRunConfig(env);
   if (!editor.enabled) return { enabled: false, code: editor.code };
   const facts = userFundedRuntime(env).facts;
-  return facts.enabled ? { enabled: true, code: null } : { enabled: false, code: facts.code ?? 'USER_FUNDED_NOT_ENABLED' };
+  if (!facts.enabled) return { enabled: false, code: facts.code ?? 'USER_FUNDED_NOT_ENABLED' };
+  // Without a FloFi account session the run cannot start: the Editor keeps its step-by-step path primary instead of a Review that would refuse.
+  const accounts = await accountHost(env).catch(() => null);
+  return await currentAccountSession(accounts, env) ? { enabled: true, code: null } : { enabled: false, code: 'ACCOUNT_SESSION_REQUIRED' };
 }
 
 /**
@@ -47,9 +68,14 @@ export async function reviewEditorWorkflow(workflow: unknown, owner: string, pro
   try {
     const env = process.env;
     if (!readEditorRunConfig(env).enabled) return { ok: false, code: 'EDITOR_RUNS_NOT_ENABLED' };
-    const accounts = await accountHost(env).catch(() => null);
-    if (!await currentAccountSession(accounts, env)) return { ok: false, code: 'ACCOUNT_SESSION_REQUIRED' };
+    const accounts = await accountHost(env).catch(() => null), session = await currentAccountSession(accounts, env);
+    if (!session) return { ok: false, code: 'ACCOUNT_SESSION_REQUIRED' };
     if (typeof owner !== 'string' || !EVM_ADDRESS.test(owner)) return { ok: false, code: 'EVM_WALLET_REQUIRED' };
+    const host = await platformStateHost(env);
+    if (!await fixedWindow(host.db, host.tenantId).allow(`editor-review:${session.accountId}`, REVIEW_LIMIT, REVIEW_WINDOW_SECONDS, new Date()))
+      return { ok: false, code: 'EDITOR_REVIEW_RATE_LIMITED' };
+    // The workflow's listed tokens resolve exactly as on the Canvas (the run's own start does the same).
+    await prepareCatalogs(workflow);
     const runtime = userFundedRuntime(env);
     return await reviewEditorExecution({ workflow, owner, profile: walletProfileOf(profile), facts: runtime.facts, deps: runtime.deps, now: new Date() });
   } catch (cause) { return failure(cause); }
@@ -59,15 +85,20 @@ export type EditorAuthorization = { readonly approvalId: string; readonly propos
 /**
  * The owner's Authorize: starts the shared workflow run of this Canvas workflow, claims it for the proven wallet, starts it in user-funded mode
  * for the reported wallet capabilities and prepares its first group. Returns what the owner's wallet is asked next (nothing has been asked yet).
- * EVM_WALLET_PROOF_REQUIRED: this browser has not proven the wallet (the Editor then asks the wallet's sign-in message once and retries).
+ * Bound to what the owner reviewed: the wallet this browser proved must be the reviewed one (EVM_WALLET_PROOF_REQUIRED otherwise: the Editor
+ * asks the reviewed wallet's sign-in message once and retries), and the started run must be the reviewed workflow with the reviewed groups
+ * (EDITOR_EXECUTION_PLAN_CHANGED otherwise; the run is ended before anything is asked).
  */
-export async function authorizeEditorWorkflow(workflow: unknown, profile: unknown): Promise<Result<EditorAuthorization>> {
+export async function authorizeEditorWorkflow(workflow: unknown, profile: unknown, reviewed: unknown): Promise<Result<EditorAuthorization>> {
   let approvalId: string | null = null;
   const jar = await cookies();
   const surface = () => approvalSurface(process.env, name => jar.get(name)?.value);
   try {
     const parsed = walletProfileOf(profile);
-    const wallets = await currentWalletPrincipals();
+    const binding = bindingOf(reviewed);
+    if (!binding) return { ok: false, code: 'REVIEW_REQUIRED' };
+    // Only the reviewed EVM wallet is claimed (another proven EVM wallet of this browser never runs a workflow it did not review).
+    const wallets = (await currentWalletPrincipals()).filter(w => w.namespace !== 'eip155' || w.address.toLowerCase() === binding.owner);
     if (!wallets.some(w => w.namespace === 'eip155')) return { ok: false, code: 'EVM_WALLET_PROOF_REQUIRED' };
     const started = await startEditorWorkflowRun(workflow);
     if (!started.ok) return started;
@@ -80,6 +111,11 @@ export async function authorizeEditorWorkflow(workflow: unknown, profile: unknow
     const first = run?.groups?.[0];
     // The Editor authorizes in place only a run whose first group is one wallet-grouped interaction; anything else is ended, never half-started.
     if (!run || run.mode !== 'USER_FUNDED' || !first || !['EVM_WALLET_BATCH', 'EVM_USER_OPERATION', 'SOLANA_SIGN_ALL'].includes(first.strategy))
+      throw new Error('EDITOR_EXECUTION_PLAN_CHANGED');
+    // Exactly the reviewed workflow and plan: the same canonical workflow hash, the same groups (mechanism and steps) in the same order.
+    const groups = run.groups ?? [];
+    if (run.workflowHash !== binding.workflowHash || groups.length !== binding.groups.length
+      || groups.some((g, i) => g.strategy !== binding.groups[i]!.strategy || g.steps[0] !== binding.groups[i]!.steps[0] || g.steps[1] !== binding.groups[i]!.steps[1]))
       throw new Error('EDITOR_EXECUTION_PLAN_CHANGED');
     const prepared = await workflowRunUserFundedPrepare(s, approvalId, wallets, 0);
     return { ok: true, value: { approvalId, proposal, prepared } };

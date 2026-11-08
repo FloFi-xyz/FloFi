@@ -112,6 +112,34 @@ describe('P0: the Editor reviews and authorizes Swap → Supply → Borrow on Ar
     } finally { await t.drop(); }
   });
 
+  it('a batch sent before its answer was lost still reconciles after the group expired and was prepared again (same EIP-5792 id, no FAILED run)', async () => {
+    const t = await createTestDatabase();
+    try {
+      const { chain, h, owner } = await setup(t);
+      const approval = await h.request(strategy(owner));
+      await claimApproval(h.surface, approval.secret, [h.evm, h.sol], true, h.d.now());
+      await workflowRunUserFundedStart(h.surface, approval.approvalId, [h.evm, h.sol], METAMASK);
+      const first = await workflowRunUserFundedPrepare(h.surface, approval.approvalId, [h.evm, h.sol], 0);
+      const a = first.prepared as unknown as { group: EvmGroupCalls; request: { id: string } };
+      // The wallet executes it, but its answer never reaches FloFi (a reload while the wallet prompt was open)…
+      const hash = chain.control.walletBatch(owner, evmCallsOf(a.group));
+      // …the preparation expires, the price moves, and the group is prepared again under the SAME id (the wallet would refuse a second batch).
+      h.d.advance(11 * 60_000);
+      chain.control.setPrice(390_000_000_000_000n);
+      const second = await workflowRunUserFundedPrepare(h.surface, approval.approvalId, [h.evm, h.sol], 0);
+      const b = second.prepared as unknown as { group: EvmGroupCalls; request: { id: string }; superseded: unknown[] };
+      expect(b.request.id).toBe(a.request.id);
+      expect((b.group.calls[1] as { amountOutMinimum: string }).amountOutMinimum).not.toBe((a.group.calls[1] as { amountOutMinimum: string }).amountOutMinimum);
+      expect(b.superseded).toHaveLength(1);
+      // The owner's browser reads the batch back by its id and reports the FIRST batch's transaction: the run reconciles it against the
+      // preparation it was sent from (its own signed minimums), never as a failed group.
+      await workflowRunUserFundedAuthorize(h.surface, approval.approvalId, [h.evm, h.sol], 0, { kind: 'EVM_WALLET_BATCH', batchId: a.request.id });
+      const done = await workflowRunUserFundedReport(h.surface, approval.approvalId, [h.evm, h.sol], 0, [hash]);
+      expect(done.view.workflowRun!.run).toMatchObject({ state: 'COMPLETED', groups: [{ state: 'RECONCILED', submissions: [{ hash }] }] });
+      expect(done.view.workflowRun!.run.steps[1]!.outcome!.spent).toEqual([{ asset: `${CHAIN}/erc20:${WETH}`, amount: (a.group.calls[1] as { amountOutMinimum: string }).amountOutMinimum }]);
+    } finally { await t.drop(); }
+  });
+
   it('a Borrow that would leave the health factor below 2.0 is shown as a refusal in the Review: nothing is offered to the wallet', async () => {
     const t = await createTestDatabase();
     try {

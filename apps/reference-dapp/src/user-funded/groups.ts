@@ -346,13 +346,40 @@ export async function reconcileSolanaGroup(deps: UserFundedDeps, prepared: Prepa
   }
   return { status: 'RECONCILED', steps, gasPaid: { payer: owner, amount: fee.toString(), unit: 'lamports', source: 'SOLANA_META' }, transactions: [...signatures] };
 }
+/** The mismatches that mean "these transactions are not THIS preparation's calls" (they may be an earlier preparation's, under the same id). */
+const SUPERSEDED_MISMATCH: ReadonlySet<string> = new Set(['RECONCILIATION_CALLS_MISMATCH', 'RECONCILIATION_TRANSACTION_BEFORE_PREPARATION']);
+/** At most this many earlier preparations of one wallet batch are kept for reconciliation. */
+export const SUPERSEDED_WALLET_BATCH_LIMIT = 8;
+/**
+ * The earlier preparations of a wallet batch group, newest first (each one's calls and block). Every preparation of a group shares ONE EIP-5792
+ * id, so when a group is prepared again after expiry the wallet may already hold the batch of an earlier one: reconciliation must still
+ * recognise it (and its signed minimums), so the new artifact keeps them.
+ */
+export function supersededWalletBatches(prepared: Prepared | null): readonly { readonly group: EvmGroupCalls; readonly fromBlock: string | null }[] {
+  if (!prepared || prepared.kind !== 'EVM_WALLET_BATCH') return [];
+  const earlier = Array.isArray(prepared.superseded) ? prepared.superseded as { group: EvmGroupCalls; fromBlock: unknown }[] : [];
+  return earlier.filter(e => e && typeof e === 'object' && e.group).map(e => ({ group: e.group, fromBlock: typeof e.fromBlock === 'string' ? e.fromBlock : null }));
+}
+/** The superseded list a new preparation of the same wallet batch group carries: the replaced artifact first, then its own earlier ones. */
+export function supersede(previous: Prepared | null): readonly { readonly group: EvmGroupCalls; readonly fromBlock: string | null }[] {
+  if (!previous || previous.kind !== 'EVM_WALLET_BATCH' || !previous.group) return [];
+  return [{ group: previous.group as EvmGroupCalls, fromBlock: typeof previous.fromBlock === 'string' ? previous.fromBlock : null }, ...supersededWalletBatches(previous)]
+    .slice(0, SUPERSEDED_WALLET_BATCH_LIMIT);
+}
 /** Reconciles an EVM group from the chain (wallet batch: the reported hashes; user operation: the bundler's bundle transaction, re-read). */
 export async function reconcileEvmGroup(deps: UserFundedDeps, prepared: Prepared, submission: Readonly<Record<string, unknown>>,
   authorization: Readonly<Record<string, unknown>> | null = null): Promise<Reconciled> {
   const group = prepared.group as EvmGroupCalls, t = deps.evm(group.chain);
   if (!t) return { status: 'PENDING' };
   if (prepared.kind === 'EVM_WALLET_BATCH') {
-    const r = await reconcileWalletBatch(t, group, (submission.hashes ?? []) as string[], typeof prepared.fromBlock === 'string' ? prepared.fromBlock : null);
+    const hashes = (submission.hashes ?? []) as string[];
+    let r = await reconcileWalletBatch(t, group, hashes, typeof prepared.fromBlock === 'string' ? prepared.fromBlock : null);
+    // A batch the wallet sent under this group's id BEFORE the group was prepared again (its answer was lost, then the preparation expired)
+    // carries that earlier preparation's calls: it reconciles against the artifact it was sent from, never as a mismatch of the newer one.
+    for (const earlier of r.status === 'MISMATCH' && SUPERSEDED_MISMATCH.has(r.code) ? supersededWalletBatches(prepared) : []) {
+      const again = await reconcileWalletBatch(t, earlier.group, hashes, earlier.fromBlock);
+      if (again.status !== 'MISMATCH' || !SUPERSEDED_MISMATCH.has(again.code)) { r = again; break; }
+    }
     return r.status === 'PENDING' ? r : r.status === 'RECONCILED' ? { status: 'RECONCILED', steps: r.steps, gasPaid: r.gasPaid, transactions: r.transactions }
       : { status: 'FAILED', code: r.code, gasPaid: r.gasPaid, transactions: r.transactions };
   }

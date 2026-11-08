@@ -104,8 +104,24 @@ export const portugueseWorkflowExecution: Readonly<Record<string, string>> = {
     'Entre na FloFi para executar o fluxo inteiro com uma confirmação na carteira. Você ainda pode confirmar cada etapa separadamente.',
   'Connect your wallet to review the whole workflow.': 'Conecte sua carteira para revisar o fluxo inteiro.',
   'The reviewed prices expired. Review the workflow again to refresh them.': 'Os preços revisados expiraram. Revise o fluxo novamente para atualizá-los.',
-  'You declined the request in your wallet. Nothing was sent. You can authorize again or end the workflow.':
-    'Você recusou o pedido na sua carteira. Nada foi enviado. Você pode autorizar novamente ou encerrar o fluxo.',
+  'You declined the request in your wallet. Nothing was sent. You can authorize again; the workflow can be ended once the prepared request expires.':
+    'Você recusou o pedido na sua carteira. Nada foi enviado. Você pode autorizar novamente; o fluxo pode ser encerrado quando o pedido preparado expirar.',
+  'Your wallet already has the batch for these steps, but FloFi has not recorded it yet. Do not send it again: FloFi reads it back from your wallet.':
+    'Sua carteira já tem o lote destas etapas, mas a FloFi ainda não o registrou. Não o envie de novo: a FloFi o lê de volta na sua carteira.',
+  'A prepared wallet request is still valid, so the workflow cannot be ended yet. Try again after it expires.':
+    'Um pedido preparado para a carteira ainda é válido, então o fluxo ainda não pode ser encerrado. Tente de novo depois que ele expirar.',
+  'FloFi could not compare the prepared minimums with your review, so your wallet was not asked. Try again.':
+    'A FloFi não conseguiu comparar os mínimos preparados com a sua revisão, então nada foi pedido à sua carteira. Tente de novo.',
+  'Sign in with your wallet to follow this workflow. The sign-in authorizes no transaction.':
+    'Entre com a sua carteira para acompanhar este fluxo. A entrada não autoriza nenhuma transação.',
+  'The workflow or its plan changed since your review. Nothing was asked from your wallet. Review the whole workflow again.':
+    'O fluxo ou o plano dele mudou desde a sua revisão. Nada foi pedido à sua carteira. Revise o fluxo inteiro de novo.',
+  'Too many reviews in a short time. Wait a few minutes and review again.': 'Revisões demais em pouco tempo. Aguarde alguns minutos e revise de novo.',
+  'An Aave step after a bridge is authorized when the bridge delivery lands, after FloFi simulates it on that state (health factor and supply cap).':
+    'Uma etapa da Aave depois de uma ponte é autorizada quando a entrega da ponte chega, depois que a FloFi a simula nesse estado (fator de saúde e limite de fornecimento).',
+  'Load workflow progress': 'Carregar o andamento do fluxo',
+  'The prepared wallet request is valid until {0}; the workflow can be ended after that.':
+    'O pedido preparado para a carteira vale até {0}; o fluxo pode ser encerrado depois disso.',
   'Too many workflow runs are waiting for you. Finish or end one of them first.': 'Há execuções de fluxo demais aguardando você. Conclua ou encerre uma delas primeiro.',
   'Your wallet cannot batch on this network.': 'Sua carteira não consegue agrupar nesta rede.',
   'FloFi cannot prepare this workflow now ({0}). Nothing was sent.': 'A FloFi não consegue preparar este fluxo agora ({0}). Nada foi enviado.',

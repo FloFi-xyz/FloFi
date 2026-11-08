@@ -29,7 +29,7 @@ import { planExecutionGroups, type UserFundedFacts, type WalletProfile } from '.
 import { requirementOf, assetKey } from '../delegation/steps.ts';
 import { evmStepBuildable, type AssetAmountFact, type EvmGroupCalls } from '../user-funded/evm-calls.ts';
 import { plannedSteps, type PlannedStep } from '../user-funded/planned.ts';
-import { authorizeGroup, prepareGroup, type OwnerAnswer, type Prepared } from '../user-funded/groups.ts';
+import { authorizeGroup, prepareGroup, supersede, type OwnerAnswer, type Prepared } from '../user-funded/groups.ts';
 import { boundStrategy } from '../engine/workflow-bindings';
 import type { GroupRecord } from './pg-store.ts';
 
@@ -231,6 +231,8 @@ export async function prepareUserFundedGroup(deps: WorkflowRunDeps, run: RunReco
   if (g.strategy === 'EVM_OWNER_STEP' || g.strategy === 'SOLANA_OWNER_STEP') refuse('WORKFLOW_RUN_GROUP_OWNER_STEP');
   if (g.state === 'PREPARED' && g.validUntil && g.validUntil > deps.now()) return { groupIndex, strategy: g.strategy, chain: g.chain, feePayer: g.feePayer,
     validUntil: g.validUntil.toISOString(), prepared: g.prepared as Prepared };
+  // A wallet batch prepared before keeps every earlier preparation for reconciliation: they share one EIP-5792 id, so the wallet may hold one of them.
+  const superseded = g.strategy === 'EVM_WALLET_BATCH' ? supersede(g.prepared as Prepared | null) : [];
   if (g.state === 'PREPARED') g = await deps.store.groupTransition(run.runId, groupIndex, ['PREPARED'], 'EXPIRED', { code: 'USER_FUNDED_PREPARED_EXPIRED' }) ?? refuse('WORKFLOW_RUN_CHANGED');
   if (g.state === 'EXPIRED') g = await deps.store.groupTransition(run.runId, groupIndex, ['EXPIRED'], 'PLANNED', { prepared: null, validUntil: null, code: null }) ?? refuse('WORKFLOW_RUN_CHANGED');
   if (g.state !== 'PLANNED') refuse(`WORKFLOW_RUN_GROUP_${g.state}`);
@@ -269,9 +271,10 @@ export async function prepareUserFundedGroup(deps: WorkflowRunDeps, run: RunReco
   const r = await prepareGroup(userFunded, composition, req.value, { runId: run.runId, groupIndex, strategy: g.strategy, chain: g.chain, feePayer: g.feePayer,
     stepFrom: g.stepFrom, stepTo: g.stepTo }, { guaranteed, delayed: g.awaitsDelivery !== null && !due });
   if (!r.ok) return refuse(r.code);
-  const moved = await deps.store.groupTransition(run.runId, groupIndex, ['PLANNED'], 'PREPARED', { prepared: r.value.prepared, validUntil: r.value.validUntil, code: null })
+  const prepared: Prepared = superseded.length ? { ...r.value.prepared, superseded } : r.value.prepared;
+  const moved = await deps.store.groupTransition(run.runId, groupIndex, ['PLANNED'], 'PREPARED', { prepared, validUntil: r.value.validUntil, code: null })
     ?? refuse('WORKFLOW_RUN_CHANGED');
-  return { groupIndex, strategy: moved.strategy, chain: moved.chain, feePayer: moved.feePayer, validUntil: r.value.validUntil.toISOString(), prepared: r.value.prepared };
+  return { groupIndex, strategy: moved.strategy, chain: moved.chain, feePayer: moved.feePayer, validUntil: r.value.validUntil.toISOString(), prepared };
 }
 /**
  * The owner's wallet answered for one PREPARED group: a wallet batch id, a user-operation signature, or the signed Solana transactions. Verified
