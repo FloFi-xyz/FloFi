@@ -71,8 +71,9 @@ groups from the Editor itself.
 **Before.** Build → Simulate (step 1 only) → "Authorize in wallet" (step 1's own runtime) → approval → swap re-Review (RC-2) → back to the
 Canvas for step 2 → Supply simulate refused (RC-3). `wallet_getCapabilities` was never called from the Editor.
 
-**After.** For a multi-step workflow, when workflow runs and user-funded execution are available, the primary CTA is **"Review whole
-workflow"** (`app-shell.tsx` `groupedPrimary`). It opens the Execute stage with `EditorWorkflowRunPanel` (`components/editor-workflow-run.tsx`):
+**After.** For a multi-step workflow, when workflow runs and user-funded execution are available and the owner has a FloFi account
+session, the primary CTA is **"Review whole workflow"** (`app-shell.tsx` `groupedPrimary`). It stays primary until the Review shows the
+workflow cannot be grouped or the Review fails; the step-by-step path is primary then. It opens the Execute stage with `EditorWorkflowRunPanel` (`components/editor-workflow-run.tsx`):
 
 1. **Wallet capabilities.** `walletProfile(evmAccount, EVM_MAINNETS)` calls `wallet_getCapabilities` and records EIP-5792 `atomic` per CAIP-2
    chain.
@@ -192,15 +193,19 @@ Simulate previews took 4.06 s.
 ## H. Tests
 
 **New tests.**
-- `user-funded/arbitrum-batch.test.ts` (6): buildability, 5 calls, simulation and HF, reconcile, allowance skip and reset, unsafe HF, beyond
-  collateral, simulation unavailable.
-- `editor/workflow-execution.pg.test.ts` (3): Review → Authorize → wallet batch → COMPLETED → reload; unsafe-HF refusal; STEP_BY_STEP for
+- `user-funded/arbitrum-batch.test.ts` (9): buildability, 5 calls, simulation and HF, reconcile, allowance skip and reset, unsafe HF, beyond
+  collateral, simulation unavailable; a batch sent from an earlier preparation reconciles after re-preparation; simulation-failure
+  classification (method refusal vs lagging node); a user-operation group with an Aave step is refused.
+- `editor/workflow-execution.pg.test.ts` (5): Review → Authorize → wallet batch → COMPLETED → reload; lost answer → expiry → re-preparation →
+  the first batch still reconciles; ended runs do not count against the pending-approval limit; unsafe-HF refusal; STEP_BY_STEP for
   unsupported atomic.
+- `components/user-funded-browser.test.ts` (3): only EIP-5792 status 400 is reported as "not sent".
+- `workflow-runs/execution-groups.test.ts`: a post-bridge Aave group is a wallet batch signed when due, never an upfront user operation.
 - Regressions in `server/arbitrum-lending.test.ts` (aeWETH index 52, ERC-7201), `server/supply-rpc.test.ts` (spacing) and
   `state/build-estimate.test.ts` (snapshot key, expiry, hidden page, cascade).
 - **Playwright** `e2e/canvas-lending-amount-enter.spec.ts`, **Scenario A**: chat-authored Swap → Supply → Borrow; Supply edited with Enter,
   Borrow on blur, Swap after a typing pause. It asserts no proposal, the revisions and the IR amounts `3000000`, `1300000000000000` and
-  `800000`.
+  `800000`. This spec (from #166) was in no CI profile; it now runs in `canvas-corrections` (mirror updated in `test_ci_optimization.py`).
 
 **Updated specs** (behaviour change, explained for review):
 - Shared fixtures `composer-authoring-fixtures.ts` (`configureCanvasAction`) and `supply-fixtures.ts` (`authorSupply`) now apply lending
@@ -212,10 +217,42 @@ Simulate previews took 4.06 s.
   `composer-product-cleanup`, `crypto-action-picker`, `build-layout` and `build-empty-mascot`. They were not updated; they are listed here
   for the owner.
 
-**Not covered.** There is no browser e2e for the grouped `wallet_sendCalls` journey in the Editor. Its proof is UNIT and PG on the EVM
-double with `eth_simulateV1`.
+**Not covered.** There is no browser e2e for the grouped `wallet_sendCalls` journey in the Editor, including the lost-answer recovery in the
+browser hook. Its proof is UNIT and PG on the EVM double with `eth_simulateV1`, plus code review.
+
+**Local browser results.**
+- **Pass:** `canvas-automation-ux`, `copilot`, `supply-provenance`, `unsafe-lending-simulations`, `review-execute-recovery-components`,
+  `workflow-ux-authoring`, `base-mainnet-authoring`.
+- **`default-product` fails locally on 11 tests, and every one fails identically on unmodified `origin/main` in this sandbox.**
+  - **Screenshot baselines (9):** sandbox fonts. The pixel diffs are identical on `main`.
+  - **`build009` (2):** they need a live LI.FI quote from `li.quest`, which the sandbox cannot reach.
+  - CircleCI is the authority for this profile.
 
 Gate results are recorded in the PR description: `pnpm check`, PostgreSQL suites, governance-lite, `agent_guard review` and CircleCI.
+
+## H.1 Engineering review (specialists) and what changed
+
+Read-only specialist reviews were run per `agent_guard` impact: wallet-execution, security, workflow, lending, swap, protocol-integrations and
+frontend-ux. Every major finding was verified in code and fixed, with a test where one is practical:
+
+| Finding | Fix |
+|---|---|
+| A batch the wallet sent, whose answer was lost, was shown as "Nothing was sent". It could be ended, prepared again, or sent twice by a wallet that ignores the app id. | The browser keeps the id the wallet answered with, per workflow, and reads the batch back before any re-preparation or re-send. Recovery is automatic for PREPARED groups, and End is hidden while the batch may be in the wallet. |
+| Re-preparing an expired batch under the same EIP-5792 id made a batch sent earlier reconcile as FAILED. | The new artifact keeps up to 8 earlier preparations, and reconciliation matches the one the batch came from (unit and PG tests). |
+| Statuses 500 and 600 (chain failure, partial) were reported as "not sent". | Only 400 means not sent. Otherwise receipts are reported, or the batch stays pending (unit test). |
+| The "lower minimum" confirmation could be skipped or hidden by the poll. | It runs on every preparation, fails closed without planned values, and the poll keeps it visible. |
+| The run pointer was deleted on any status refusal, and one global key was shared across workflows. | The pointer is kept unless the run no longer exists, keyed per workflow. Sign-in is retried. |
+| Authorize was not bound to the Review (wallet, workflow, plan). | The reviewed wallet must be the proven one. The frozen reviewed workflow is sent, and the server refuses a different hash or group plan. The Send recipient is shown in full and checked again. |
+| A failed Review locked the step-by-step path. Availability did not require an account session. Reviews had no rate limit and did not register catalogs. | Fixed as named. 30 Reviews per account per 10 minutes. |
+| The claim auto-started confirm-each-step when grouping was not fewer, which orphaned the Editor's run. | The Review offers grouping only when it asks fewer times, the claim's own rule. |
+| Failed Authorize attempts filled the pending-approval limit. | A claimed handoff whose run ended no longer counts (PG test). |
+| User-operation groups with Aave steps skipped the HF and supply-cap simulation (pre-existing). | The planner never makes one, and the builder refuses one: `USER_OPERATION_AAVE_SIGNED_WHEN_DUE`. |
+| Transient node lag was read as "this RPC cannot simulate". | Simulation runs at `latest`. Only method-level refusals mean unsupported. |
+
+Not changed:
+- **No swap deadline.** The batched swap call carries no on-chain deadline; this is a pre-existing call template. The Review now says
+  so. Re-encoding the swap with a deadline (SwapRouter02 `multicall(deadline, …)`) is left for a follow-up.
+- **Count copy.** The wallet-confirmation count now also names a possible network switch and the one-time sign-in message.
 
 ## I. Configuration (names only; no secret read or shown) — **[OWNER]**
 
@@ -249,6 +286,10 @@ Gate results are recorded in the PR description: `pnpm check`, PostgreSQL suites
   but not `atomic` fall back to owner steps.
 - **Supply settings form.** A changed beneficiary, network or asset there is still a reviewed proposal; the beneficiary is security
   relevant. The Canvas card applies token and reserve picks directly.
+- **Grouping must ask fewer times.** A workflow whose grouping would not ask the wallet fewer times than its steps uses the step-by-step
+  path; for example, one step on each of two networks. The reason is shown.
+- **Wallets that ignore the app id.** For a wallet that ignores the app-provided EIP-5792 id, protection against a second send is the
+  id kept in the browser. Clearing site data during the wallet prompt removes it, and the wallet is then the last guard.
 
 ## K. Release — owner only
 
