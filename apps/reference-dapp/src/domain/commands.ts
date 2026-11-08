@@ -19,7 +19,7 @@ import { createSolanaSwapNode, parseSolanaSwapChat, solanaSwapDetails, solanaSwa
 import { createSolanaLiquidityNode, parseSolanaCompositionChat, parseSolanaLiquidityChat, solanaLiquidityDetails, type SolanaLiquidityInput } from './solana-liquidity-authoring';
 import { createUniswapLiquidityNode, parseUniswapLiquidityChat, uniswapLiquidityDetails, type UniswapLiquidityInput } from './uniswap-liquidity-authoring';
 import { createRouterNode, parseRouterChat, routerDetails, ROUTER_ROUTING_LABEL, type RouterBridgeInput } from './router-authoring';
-import { createUniversalBridgeFromInput, parseUniversalChat, type UniversalBridgeInput } from './universal-bridge-authoring';
+import { createUniversalBridgeFromInput, parseUniversalChat, universalBridgeDetails, type UniversalBridgeInput } from './universal-bridge-authoring';
 import { createCryptoActionNode, type CryptoActionInput } from './crypto-action-picker';
 import { DEFAULT_SLIPPAGE } from './slippage-policy';
 import { BASE_CHAIN, authoringAssetSymbol } from './asset-catalogs';
@@ -524,6 +524,10 @@ export function summarize(workflow: Workflow, context?: ReviewContext): string {
     if (supply) return `${node.nodeId}: Supply ${supply.amount} ${supply.asset} to Aave V3 on ${supply.network}, beneficiary ${supply.beneficiary}.`;
     const routed = routerDetails(node);
     if (routed) return `${node.nodeId}: Cross-chain bridge ${routed.amount} ${routed.token} from ${routed.source} to ${routed.destination}${routed.destinationToken !== routed.token ? ` (delivered as ${routed.destinationToken})` : ''}, recipient ${routed.recipientLabel}, ${routed.slippage} bps, routing ${ROUTER_ROUTING_LABEL[routed.routing]}; quote, simulation and route review required.`;
+    // P0 catalog reliability: a Universal Router bridge also matches the legacy reader below (its text is the BUILD-008 Base bridge): checked first.
+    const universal = universalBridgeDetails(node);
+    if (universal) return `${node.nodeId}: Cross-chain bridge ${universal.amount} ${universal.inputSymbol} from ${universal.sourceLabel} to ${universal.destinationLabel}` +
+      `${universal.outputSymbol !== universal.inputSymbol ? ` (delivered as ${universal.outputSymbol})` : ''}, ${universal.slippage} bps; route, simulation and route review required.`;
     const bridge = bridgeDetails(node);
     if (bridge) return `${node.nodeId}: Base to ${node.expectedOutputs[0]?.asset.chainId === 'eip155:42161' ? 'Arbitrum' : 'Optimism'} USDC bridge, ${bridge.amount} USDC, ${bridge.slippageBps} bps, unquoted.`;
     const position = context && liquidityDetails(node, context);

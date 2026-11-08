@@ -4,18 +4,37 @@
  * server actions and the cloud backend. Only allowlisted read methods; no send, sign or wallet method exists.
  */
 import { BASE_SEPOLIA, ETHEREUM_SEPOLIA_SWAP } from '../domain/public-testnet-swap.ts';
-import type { Rpc } from './public-testnet-service.ts';
+import type { Rpc, RpcContext } from './public-testnet-service.ts';
+
+/**
+ * P0 catalog reliability: the code of a read whose caller stopped waiting before it could start (or between its retries). Never sent to a node;
+ * never retried. Distinct from PUBLIC_RPC_UNAVAILABLE: the node was not asked, so this says nothing about its health.
+ */
+export const READ_ABANDONED = 'RPC_READ_ABANDONED';
+const abandoned = (context: RpcContext | undefined) => context?.signal?.aborted === true;
+/** A retry backoff that ends early when the read's caller stops waiting (the loop then drops the read instead of retrying it). */
+function backoff(sleep: (ms: number) => Promise<void>, ms: number, context: RpcContext | undefined): Promise<void> {
+  const signal = context?.signal;
+  if (!signal) return sleep(ms);
+  if (signal.aborted) return Promise.resolve();
+  let done: () => void = () => undefined;
+  const ended = new Promise<void>(resolve => { done = resolve; signal.addEventListener('abort', done, { once: true }); });
+  return Promise.race([sleep(ms), ended]).finally(() => signal.removeEventListener('abort', done));
+}
 
 const SEND_METHODS = new Set(['eth_sendTransaction', 'eth_sendRawTransaction', 'sendTransaction', 'eth_sign', 'eth_signTransaction', 'personal_sign']);
 export function createBaseSepoliaReadRpc(url: string, methods: readonly string[], timeoutMs = 10_000): Rpc {
   if (methods.some(method => SEND_METHODS.has(method))) throw new Error('PUBLIC_RPC_METHOD_DENIED');
   const allowed = new Set(methods);
-  return async (method, params) => {
+  return async (method, params, context) => {
     if (!allowed.has(method)) throw new Error('PUBLIC_RPC_METHOD_DENIED');
+    if (abandoned(context)) throw new Error(READ_ABANDONED);
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), timeoutMs);
+    // The caller's cancellation also ends a read in flight (its answer would be discarded anyway).
+    const signal = context?.signal ? AbortSignal.any([controller.signal, context.signal]) : controller.signal;
     try {
-      const response = await fetch(url, { method: 'POST', cache: 'no-store', signal: controller.signal,
+      const response = await fetch(url, { method: 'POST', cache: 'no-store', signal,
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }) });
       if (!response.ok) throw new Error('PUBLIC_RPC_UNAVAILABLE');
@@ -39,6 +58,7 @@ export function createBaseSepoliaReadRpc(url: string, methods: readonly string[]
       return result.result;
     } catch (cause) {
       if (cause instanceof Error && /^[A-Z_]+$/.test(cause.message)) throw cause;
+      if (abandoned(context)) throw new Error(READ_ABANDONED, { cause });
       throw new Error('PUBLIC_RPC_UNAVAILABLE', { cause });
     } finally { clearTimeout(timeout); }
   };
@@ -62,8 +82,8 @@ export const UNISWAP_LIQUIDITY_RPC_METHODS = Object.freeze(['eth_chainId', 'eth_
   'eth_getBalance', 'eth_getTransactionCount', 'eth_maxPriorityFeePerGas', 'eth_simulateV1', 'eth_getTransactionReceipt', 'eth_getTransactionByHash']);
 /** A read client bound to one chain: any `eth_chainId` for another chain is refused, never followed. */
 export function chainBoundRpc(rpc: Rpc, chainId: number): Rpc {
-  return async (method, params) => {
-    const result = await rpc(method, params);
+  return async (method, params, context) => {
+    const result = await (context ? rpc(method, params, context) : rpc(method, params));
     if (method === 'eth_chainId' && (typeof result !== 'string' || !/^0x[0-9a-fA-F]{1,16}$/.test(result) || BigInt(result) !== BigInt(chainId))) throw new Error('WRONG_PROVIDER_CHAIN');
     return result;
   };
@@ -111,16 +131,19 @@ export function pacedReadRpc(rpc: Rpc, options: { minIntervalMs?: number; retrie
   if (!Number.isSafeInteger(maxInFlight) || maxInFlight < 1 || maxInFlight > 8) throw new Error('RPC_PACING_INVALID');
   if (maxInFlight > 1) return concurrentPacedRpc(rpc, minIntervalMs, retries, sleep, maxInFlight);
   let queue: Promise<unknown> = Promise.resolve(), last = 0;
-  return (method, params) => {
+  return (method, params, context) => {
     const run = queue.then(async () => {
       for (let attempt = 0; ; attempt++) {
+        // P0 catalog reliability: a read whose caller is gone takes no pacing slot and no retry; the next caller's read starts at once.
+        if (abandoned(context)) throw new Error(READ_ABANDONED);
         const wait = last + minIntervalMs - Date.now();
         if (wait > 0) await sleep(wait);
+        if (abandoned(context)) throw new Error(READ_ABANDONED);
         last = Date.now();
-        try { return await rpc(method, params); }
+        try { return await rpc(method, params, context); }
         catch (cause) {
-          if (!(cause instanceof Error && cause.message === 'PUBLIC_RPC_UNAVAILABLE') || attempt >= retries) throw cause;
-          await sleep(500 * 2 ** attempt);
+          if (!(cause instanceof Error && cause.message === 'PUBLIC_RPC_UNAVAILABLE') || attempt >= retries || abandoned(context)) throw cause;
+          await backoff(sleep, 500 * 2 ** attempt, context);
         }
       }
     });
@@ -146,12 +169,14 @@ function concurrentPacedRpc(rpc: Rpc, minIntervalMs: number, retries: number, sl
     }
   };
   const release = () => { active--; waiting.shift()?.(); };
-  return async (method, params) => {
+  return async (method, params, context) => {
     for (let attempt = 0; ; attempt++) {
+      if (abandoned(context)) throw new Error(READ_ABANDONED);
       await acquire();
-      try { return await rpc(method, params); }
+      if (abandoned(context)) { release(); throw new Error(READ_ABANDONED); }
+      try { return await rpc(method, params, context); }
       catch (cause) {
-        if (!(cause instanceof Error && cause.message === 'PUBLIC_RPC_UNAVAILABLE') || attempt >= retries) throw cause;
+        if (!(cause instanceof Error && cause.message === 'PUBLIC_RPC_UNAVAILABLE') || attempt >= retries || abandoned(context)) throw cause;
         pausedUntil = Math.max(pausedUntil, Date.now() + 500 * 2 ** attempt);
       } finally { release(); }
     }

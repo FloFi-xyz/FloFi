@@ -10,7 +10,13 @@ import { createHash, randomUUID, timingSafeEqual } from 'node:crypto';
 import { parseTraceparent, withSpan, type Logger } from './telemetry.js';
 
 export type HttpRequest = { readonly method: string; readonly path: string; readonly query: URLSearchParams;
-  readonly headers: IncomingMessage['headers']; readonly body: unknown; readonly requestId: string };
+  readonly headers: IncomingMessage['headers']; readonly body: unknown; readonly requestId: string;
+  /**
+   * P0 catalog reliability: aborted when the caller disconnects before its response is written (its own deadline passed, or the browser
+   * request it served was cancelled). A read-only handler may stop on it; a mutating handler must not treat it as "not done" (the caller
+   * re-reads status). Optional so handlers built outside this server (tests, the embedded runtime) need not supply one.
+   */
+  readonly signal?: AbortSignal };
 export type HttpResponse = { readonly status: number; readonly body: unknown };
 export type Route = { readonly method: 'GET' | 'POST'; readonly pattern: RegExp; readonly name: string;
   readonly handler: (request: HttpRequest, match: RegExpExecArray) => Promise<HttpResponse> };
@@ -51,6 +57,8 @@ export function createHttpServer(options: HttpServerOptions): Server {
     }
     const route = options.routes.find(r => r.method === method && r.pattern.test(url.pathname));
     const match = route ? route.pattern.exec(url.pathname)! : null;
+    const disconnected = new AbortController();
+    response.once('close', () => { if (!response.writableFinished) disconnected.abort(); });
     void withSpan(options.logger, 'http.request', { http_method: method, http_route: route?.name ?? 'unmatched', request_id: requestId }, async () => {
       try {
         if (expected) {
@@ -60,7 +68,8 @@ export function createHttpServer(options: HttpServerOptions): Server {
         }
         if (!route || !match) throw new HttpError(404, 'NOT_FOUND');
         const body = await readBody(request, limit);
-        const result = await route.handler({ method, path: url.pathname, query: url.searchParams, headers: request.headers, body, requestId }, match);
+        const result = await route.handler({ method, path: url.pathname, query: url.searchParams, headers: request.headers, body, requestId,
+          signal: disconnected.signal }, match);
         send(response, result.status, result.body, requestId);
       } catch (error) {
         if (error instanceof HttpError) { send(response, error.status, { ok: false, code: CODE.test(error.message) ? error.message : 'REQUEST_INVALID' }, requestId); throw error; }

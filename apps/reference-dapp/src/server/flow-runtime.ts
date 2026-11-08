@@ -138,23 +138,30 @@ export async function cloudFlowMode(flow: FlowName, env: Env = process.env, tran
  * local caller must not preview through them (use `FLOFI_RUNTIME=embedded` with a database instead).
  */
 export async function cloudPreview<T>(flow: FlowName, args: readonly unknown[], options: { readonly env?: Env; readonly transport?: typeof fetch;
-  readonly purpose?: 'SIMULATION' | 'QUOTE'; readonly timeoutMs?: number; readonly maxAttempts?: number } = {}): Promise<FlowResult<T> | null> {
+  readonly purpose?: 'SIMULATION' | 'QUOTE'; readonly timeoutMs?: number; readonly maxAttempts?: number;
+  /** P0 catalog reliability: the caller stopped waiting (e.g. the browser cancelled its quote): the API abandons the preview. */
+  readonly signal?: AbortSignal } = {}): Promise<FlowResult<T> | null> {
   const env = options.env ?? process.env, kind = flowRuntimeKind(env);
   const refusal = testNetworkPreviewRefusal(flow, { ...process.env, ...env });
   if (refusal) return { ok: false, code: refusal };
   if (kind === 'local') return null;
   if (kind === 'unconfigured') return { ok: false, code: 'CLOUD_RUNTIME_NOT_CONFIGURED' };
+  // P0 catalog reliability: when this caller stops waiting (its own timeout below, or its caller's signal), the preview it started is cancelled
+  // too, so the API abandons it instead of finishing work nobody will read.
+  const stop = new AbortController();
+  const signal = options.signal ? AbortSignal.any([stop.signal, options.signal]) : stop.signal;
   const read = async (): Promise<FlowResult<T>> => {
     if (kind === 'remote') return previewCloudFlow<T>(flow, args, { env, ...options.transport ? { transport: options.transport } : {},
       ...options.purpose ? { purpose: options.purpose } : {}, ...options.timeoutMs === undefined ? {} : { timeoutMs: options.timeoutMs },
-      ...options.maxAttempts === undefined ? {} : { maxAttempts: options.maxAttempts } });
-    try { return await (await embeddedRuntime(env)).backend.previewFlow(flow, args, options.purpose) as FlowResult<T>; }
+      ...options.maxAttempts === undefined ? {} : { maxAttempts: options.maxAttempts }, signal });
+    try { return await (await embeddedRuntime(env)).backend.previewFlow(flow, args, options.purpose, { signal,
+      ...options.timeoutMs === undefined ? {} : { deadlineMs: options.timeoutMs } }) as FlowResult<T>; }
     catch (error) { return { ok: false, code: classified(error, 'CLOUD_RUNTIME_UNAVAILABLE') }; }
   };
   if (options.timeoutMs === undefined) return read();
   let timer: ReturnType<typeof setTimeout> | undefined;
   try { return await Promise.race([read(), new Promise<FlowResult<T>>(resolve => {
-    timer = setTimeout(() => resolve({ ok: false, code: 'CLOUD_PREVIEW_TIMEOUT' }), options.timeoutMs);
+    timer = setTimeout(() => { stop.abort(); resolve({ ok: false, code: 'CLOUD_PREVIEW_TIMEOUT' }); }, options.timeoutMs);
   })]); } finally { clearTimeout(timer); }
 }
 

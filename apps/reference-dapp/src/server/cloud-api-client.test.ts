@@ -24,6 +24,8 @@ describe('BUILD-CLOUD-001 BFF forwarding client', () => {
     expect(JSON.parse(String(init?.body))).toEqual({ args: ['workflow', 'quote-subject'], purpose: 'QUOTE' });
     expect(init?.headers).not.toHaveProperty('idempotency-key'); expect(init?.headers).not.toHaveProperty('x-flofi-wallet-principal');
     expect(init?.signal).toBeInstanceOf(AbortSignal);
+    // P0 catalog reliability: the API stops 1.5 s before this attempt's own timeout, so the BFF hears a classified CLOUD_PREVIEW_TIMEOUT.
+    expect(init?.headers).toMatchObject({ 'x-flofi-deadline-ms': '28500' });
   });
   it('accepts only https (or loopback http) base URLs without credentials', () => {
     expect(cloudApiBaseUrl({})).toBeNull();

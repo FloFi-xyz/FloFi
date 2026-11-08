@@ -24,13 +24,16 @@ import { activeNetworkScope, networkAllowed } from './network-scope';
 
 export type AuthoringCapability = { readonly action: StrategyAction; readonly network: NetworkIdentity; readonly destination: NetworkIdentity | null;
   /** The example's asset where the action binds one (lending, bridge, transfer, composition); null where any supported pair may be used. */
-  readonly asset: string | null; readonly outputAsset: string | null };
+  readonly asset: string | null; readonly outputAsset: string | null;
+  /** A bridge on the certified Cross-chain Router (its example routes `auto`); the Universal Router's other directions (Solana ⇄ EVM) are not. */
+  readonly certifiedRoute: boolean };
 
 const identity = (key: string): NetworkIdentity => networkIdentity(key) ?? (() => { throw new Error(`CAPABILITY_NETWORK_UNKNOWN ${key}`); })();
 function capabilityOf(strategy: StrategySpec): AuthoringCapability {
-  const s = strategy as StrategySpec & { network?: string; sourceNetwork?: string; destinationNetwork?: string; asset?: string; outputAsset?: string };
+  const s = strategy as StrategySpec & { network?: string; sourceNetwork?: string; destinationNetwork?: string; asset?: string; outputAsset?: string; routing?: string };
   return Object.freeze({ action: strategy.action, network: identity(s.network ?? s.sourceNetwork!), destination: s.destinationNetwork ? identity(s.destinationNetwork) : null,
-    asset: strategy.action === 'swap' || strategy.action === 'add_liquidity' ? null : s.asset ?? null, outputAsset: strategy.action === 'lending_composition' ? s.outputAsset ?? null : null });
+    asset: strategy.action === 'swap' || strategy.action === 'add_liquidity' ? null : s.asset ?? null, outputAsset: strategy.action === 'lending_composition' ? s.outputAsset ?? null : null,
+    certifiedRoute: strategy.action === 'bridge' && s.routing === 'auto' });
 }
 /** Every supported action × network (× destination), in the canonical examples' order. */
 export const AUTHORING_CAPABILITIES: readonly AuthoringCapability[] = Object.freeze(STRATEGY_EXAMPLES.map(example => capabilityOf(example.strategy)));
@@ -60,7 +63,8 @@ export const lendingOffers = (action: 'supply' | 'borrow' | 'repay' | 'withdraw'
 };
 /** Cross-chain Router routes with their source token. */
 export const bridgeOffers = (): readonly { readonly source: NetworkIdentity; readonly destination: NetworkIdentity; readonly asset: string }[] =>
-  scopedCapabilities().filter(capability => capability.action === 'bridge').map(capability => ({ source: capability.network, destination: capability.destination!, asset: capability.asset! }));
+  scopedCapabilities().filter(capability => capability.action === 'bridge' && capability.certifiedRoute)
+    .map(capability => ({ source: capability.network, destination: capability.destination!, asset: capability.asset! }));
 /** Networks whose swaps, transfers and pools take any asset of their validated official catalog. */
 export const catalogCapabilityNetworks = (): readonly NetworkIdentity[] =>
   NETWORKS.filter(network => network.catalog && inScope(network) && (['swap', 'transfer', 'add_liquidity'] as const)

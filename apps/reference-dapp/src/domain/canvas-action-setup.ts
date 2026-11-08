@@ -140,6 +140,8 @@ export function canEditCanvasAmount(node: Workflow['nodes'][number], context: Re
 
 export function canvasAmountCommand(state: EditorState, setup: CanvasActionSetup | null, inputs: CanvasAmountInputs, id: string, context: ReviewContext, bridgeNetworks: CanvasBridgeNetworkInputs = {}, cryptoSelections: CryptoSelections = {}, recipients: CanvasRecipientInputs = {}) {
   let command: Command;
+  /** Set when an amount-only edit is rebuilt from the action's own crypto input: everything but the amount must come back unchanged. */
+  let amountOnly: { readonly before: Workflow['nodes'][number]; readonly input: CryptoActionInput } | null = null;
   if (setup?.id === id) {
     if (setup.cryptoSelection) {
       const input: CryptoActionInput = cryptoSetupInput(setup);
@@ -173,10 +175,18 @@ export function canvasAmountCommand(state: EditorState, setup: CanvasActionSetup
     const lending = lendingDetails(state.workflow);
     const router = routerDetails(node), bridge = bridgeDetails(node), supply = lending ? null : supplyDetails(node as Parameters<typeof supplyDetails>[0]), borrow = lending ? null : borrowDetails(node as Parameters<typeof borrowDetails>[0]), repay = repayDetails(node as Parameters<typeof repayDetails>[0]), withdraw = withdrawDetails(node as Parameters<typeof withdrawDetails>[0]);
     const transfer = transferDetails(node as Parameters<typeof transferDetails>[0]);
-    const cryptoInput = cryptoSelections[id] ? cryptoInputOf(node) : null;
-    command = cryptoInput ? { ...base, type: 'SET_CRYPTO_ACTION', input: { ...cryptoInput, selection: cryptoSelections[id]!, amount,
-      ...(cryptoInput.selection.action === 'pool' && cryptoInput.selection.network !== cryptoSelections[id]!.network ? defaultPoolRange(cryptoSelections[id]!.network) : {}),
-      ...(cryptoInput.selection.action === 'transfer' ? recipientEdit(cryptoSelections[id]!.network, recipients[id]) : {}) } }
+    // P0 catalog reliability (2026-11-07, Arbitrum WETH → USDC 0.0012): an amount-only edit of a catalog or Solana action (no pair or network change
+    // on the card) used to fall through to the legacy SET_SWAP_AMOUNT, which only knows the Base reference pair, and failed with INVALID_SWAP_NODE
+    // ("cannot be combined"). Such an action is edited through its own crypto input: same pair, network and slippage, the new amount only.
+    const own = cryptoInputOf(node);
+    const legacyAmountOnly = !transfer && !(lending && (id === 'lending-supply' || id === 'lending-borrow')) && !borrow && !repay && !withdraw && !supply &&
+      !router && !universalBridgeDetails(node) && !bridge;
+    const selection = cryptoSelections[id] ?? (own && legacyAmountOnly && !swapDetails(node, context) ? own.selection : null);
+    const cryptoInput = selection ? own : null;
+    if (own && !cryptoSelections[id] && selection) amountOnly = { before: node, input: own };
+    command = cryptoInput && selection ? { ...base, type: 'SET_CRYPTO_ACTION', input: { ...cryptoInput, selection, amount,
+      ...(cryptoInput.selection.action === 'pool' && cryptoInput.selection.network !== selection.network ? defaultPoolRange(selection.network) : {}),
+      ...(cryptoInput.selection.action === 'transfer' ? recipientEdit(selection.network, recipients[id]) : {}) } }
       : transfer ? { ...base, type: 'SET_RH_TRANSFER', input: { ...transfer, amount, ...recipientEdit(transfer.network, recipients[id]) } }
       : lending && (id === 'lending-supply' || id === 'lending-borrow')
       ? { type: 'AUTHOR_LENDING', input: lendingNodeInput(state.workflow, id, amount), source: 'CANVAS', baseRevision: state.workflow.revision }
@@ -191,6 +201,8 @@ export function canvasAmountCommand(state: EditorState, setup: CanvasActionSetup
         : { ...base, type: 'SET_SWAP_AMOUNT', amount };
   }
   if (command.type === 'ADD_UNISWAP_LIQUIDITY') createUniswapLiquidityNode('node-preview', command.input);
+  // P0 catalog reliability: an edited catalog action's field error (e.g. more decimals than its asset has) is named, not reduced to INVALID_COMMAND.
+  if (command.type === 'SET_CRYPTO_ACTION') createCryptoActionNode('node-preview', command.input);
   // Surface the existing constructor's field error before the command guard reduces it to INVALID_COMMAND.
   if (command.type === 'ADD_ROUTER_BRIDGE' || command.type === 'SET_ROUTER_BRIDGE') createRouterNode('node-preview', command.input);
   if (command.type === 'SET_BRIDGE') createBridgeNode('node-preview', command.input);
@@ -202,6 +214,16 @@ export function canvasAmountCommand(state: EditorState, setup: CanvasActionSetup
   if (command.type === 'SET_RH_TRANSFER' || command.type === 'ADD_RH_TRANSFER') createAuthoredTransfer('node-preview', command.input);
   const preview = editorReducer(state, command, context);
   if (preview.error) throw new Error(preview.error);
+  if (amountOnly) {
+    // Review guard: an amount-only edit rebuilt from the action's own input must keep its network, adapter, protocols, pair, slippage and range.
+    // Anything the input does not carry would be lost on rebuild, so a difference refuses the edit instead of silently changing the action.
+    const after = preview.workflow.nodes.find(item => item.nodeId === id), rebuilt = after ? cryptoInputOf(after) : null;
+    const settings = (value: CryptoActionInput | null) => value ? JSON.stringify({ ...value, amount: null }) : null;
+    if (!after || after.chainId !== amountOnly.before.chainId || after.actionType !== amountOnly.before.actionType ||
+        JSON.stringify(after.adapterConstraints) !== JSON.stringify(amountOnly.before.adapterConstraints) ||
+        JSON.stringify(after.userConstraints.filter(c => c.kind !== 'MAXIMUM_INPUT')) !== JSON.stringify(amountOnly.before.userConstraints.filter(c => c.kind !== 'MAXIMUM_INPUT')) ||
+        settings(rebuilt) !== settings(amountOnly.input)) throw new Error('ACTION_EDIT_CHANGES_SETTINGS');
+  }
   // An unfinished new card must never silently replace already-authored actions on acceptance.
   if (setup?.id === id && state.workflow.nodes.some(node => !node.actionType.startsWith('mock-') &&
     !preview.workflow.nodes.some(candidate => candidate.nodeId === node.nodeId))) throw new Error('ACTION_REQUIRES_SEPARATE_WORKFLOW');
@@ -214,8 +236,20 @@ export function canvasAmountMessage(cause: unknown, network?: string | null) {
   if (code === 'TRANSFER_RECIPIENT_REQUIRED') return 'Enter the recipient address.';
   if (code === 'TRANSFER_RECIPIENT_INVALID') return 'Enter a valid recipient address for this network.';
   if (/AMOUNT|PRECISION/.test(code)) return 'Enter a valid amount greater than 0.';
+  if (code === 'ACTION_SELECTION_LOCKED') return 'This step cannot change to another kind of action. Remove it and add the new action instead.';
   if (/LOCK|PROTECTED/.test(code)) return 'This amount is protected.';
-  if (/STALE/.test(code)) return 'The workflow changed. Review this amount again.';
+  if (/STALE|BASE_REVISION_CONFLICT/.test(code)) return 'The workflow changed. Review this amount again.';
+  if (code === 'ACTION_REQUIRES_SEPARATE_WORKFLOW' || code === 'COMPOSITION_UNSUPPORTED' || code === 'ONE_LIQUIDITY_POSITION_ONLY' || code === 'POSITION_WORKFLOW_HAS_OTHER_STEPS')
+    return 'This action cannot be combined with the current workflow. Check its settings or use a separate workflow.';
+  if (code === 'NODE_LIMIT') return 'This workflow already has the maximum number of steps.';
+  if (code === 'ACTION_EDIT_CHANGES_SETTINGS') return 'This amount cannot be applied here without changing other settings of the action. Your workflow was not changed. Edit the action from its menu.';
+  if (code === 'SWAP_NETWORK_MISMATCH') return 'The swap and its linked step are on different networks. Choose the same network for both.';
+  if (/^(ASSET_UNKNOWN|ASSET_REFERENCE_AMBIGUOUS|ASSET_ADDRESS_INVALID|ASSET_DECIMALS_MISMATCH|INVALID_ASSET|ACTION_ASSETS_UNSUPPORTED)$/.test(code))
+    return 'This asset is not available for this action on this network. Choose another asset.';
+  if (/^(ACTION_NETWORK_UNSUPPORTED|CATALOG_SWAP_NETWORK_UNSUPPORTED)$/.test(code)) return 'This action is not available on this network. Choose another network.';
+  if (code === 'SWAP_NATIVE_ASSET_UNSUPPORTED') return 'This swap does not support the native asset on this network. Choose the wrapped asset.';
+  if (code === 'INVALID_SLIPPAGE') return 'Enter a valid slippage percentage.';
+  if (code === 'LIQUIDITY_RANGE_INVALID') return 'Enter a valid price range: the lower bound must be below the upper bound.';
   if (code === 'ROUTER_PAIR_UNSUPPORTED') return 'Choose matching bridge networks.';
   if (code === 'ASSET_CATALOG_UNAVAILABLE') {
     const catalog = networkIdentity(network);
@@ -223,7 +257,9 @@ export function canvasAmountMessage(cause: unknown, network?: string | null) {
       : 'Robinhood Stock Tokens are unavailable right now. Try again in a moment.';
   }
   if (code === 'INVALID_ASSET_PAIR') return 'Choose two different assets.';
-  return 'This action cannot be combined with the current workflow. Check its settings or use a separate workflow.';
+  // Any other code is a defect or an unexpected state, not a composition conflict: say so, with the reference support can trace.
+  return /^[A-Z][A-Z0-9_]{2,80}$/.test(code) ? `This change could not be applied (reference ${code}). Your workflow was not changed. Try again or edit the action from its menu.`
+    : 'This change could not be applied. Your workflow was not changed. Try again or edit the action from its menu.';
 }
 
 /** Known authoring choices, without manufacturing a temporary canonical action. */

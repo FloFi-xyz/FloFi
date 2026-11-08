@@ -99,13 +99,17 @@ export async function previewCloudFlow<T>(flow: string, args: readonly unknown[]
   try { base = cloudApiBaseUrl(env); } catch (error) { return { ok: false, code: (error as Error).message }; }
   if (!base) return { ok: false, code: 'CLOUD_API_NOT_CONFIGURED' };
   const target = new URL(`v1/previews/${encodeURIComponent(flow)}`, base.href.endsWith('/') ? base : new URL(base.href + '/'));
-  const attempts = Math.max(1, Math.min(3, options.maxAttempts ?? 3));
+  const attempts = Math.max(1, Math.min(3, options.maxAttempts ?? 3)), timeoutMs = options.timeoutMs ?? 240_000;
+  // P0 catalog reliability: the API stops the preview a little before this attempt's own timeout (backend/app.ts PREVIEW_DEADLINE_HEADER), so a slow
+  // preview comes back as a classified CLOUD_PREVIEW_TIMEOUT while FloFi still waits — never as an anonymous transport failure.
+  const deadline = String(Math.max(100, Math.min(999_999, timeoutMs - Math.min(1_500, Math.floor(timeoutMs / 10)))));
   for (let attempt = 0; attempt < attempts; attempt++) {
     if (signal?.aborted) return DEADLINE;
     let response: Response;
     try {
-      response = await transport(target, { method: 'POST', cache: 'no-store', redirect: 'error', signal: attemptSignal(options.timeoutMs ?? 240_000, signal),
-        headers: { 'content-type': 'application/json', ...currentTraceparent() ? { traceparent: currentTraceparent()! } : {}, ...env.API_AUTH_TOKEN ? { authorization: `Bearer ${env.API_AUTH_TOKEN}` } : {} }, body: JSON.stringify({ args, ...options.purpose ? { purpose: options.purpose } : {} }) });
+      response = await transport(target, { method: 'POST', cache: 'no-store', redirect: 'error', signal: attemptSignal(timeoutMs, signal),
+        headers: { 'content-type': 'application/json', 'x-flofi-deadline-ms': deadline, ...currentTraceparent() ? { traceparent: currentTraceparent()! } : {},
+          ...env.API_AUTH_TOKEN ? { authorization: `Bearer ${env.API_AUTH_TOKEN}` } : {} }, body: JSON.stringify({ args, ...options.purpose ? { purpose: options.purpose } : {} }) });
     } catch (error) {
       if (deadlineEnded(error, signal)) return DEADLINE;
       if (attempt < attempts - 1) { await sleep(500 * 2 ** attempt); continue; }

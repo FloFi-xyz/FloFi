@@ -7,6 +7,7 @@
  */
 import { aaveLendingProfile, AAVE_V3_BASE, AAVE_V3_BASE_SEPOLIA, AAVE_V3_ETHEREUM_SEPOLIA, type AaveLendingProfile } from '@defi-workflow-engine/action-registry';
 import type { SupplyRpc } from '@defi-workflow-engine/reference-compiler';
+import { READ_ABANDONED, readPacingFor } from './public-testnet-rpc.ts';
 
 const methods = new Set(['eth_chainId', 'eth_blockNumber', 'eth_getBlockByNumber', 'eth_getCode', 'eth_getStorageAt', 'eth_call', 'eth_simulateV1',
   'eth_getBalance', 'eth_getTransactionCount', 'eth_estimateGas', 'eth_gasPrice', 'eth_getTransactionByHash', 'eth_getTransactionReceipt']);
@@ -24,7 +25,11 @@ export function supplyRpcUrl(profile: AaveLendingProfile, override: string | und
   if (url.protocol !== 'https:' || url.username || url.password || url.hash) throw new Error('SUPPLY_RPC_CONFIGURATION_INVALID');
   return url.href;
 }
-export function createSupplyReadRpc(harness: boolean, profile: AaveLendingProfile, endpointOverride?: string): SupplyRpc {
+/**
+ * `firstReadDelayMs`: the pause before each read's first attempt (150 ms on public endpoints, measured). P0 catalog reliability: an operator's
+ * dedicated endpoint (`GRYLOO_RPC_READ_PROFILE=dedicated` with a configured override, `readPacingFor`) uses the dedicated profile's spacing.
+ */
+export function createSupplyReadRpc(harness: boolean, profile: AaveLendingProfile, endpointOverride?: string, firstReadDelayMs = 150): SupplyRpc {
   const endpoint = harness ? HARNESS[profile.chain] : supplyRpcUrl(profile, endpointOverride);
   if (!endpoint) throw new Error('SUPPLY_NETWORK_UNAVAILABLE');
   const expectedChain = BigInt(profile.chainId);
@@ -32,7 +37,7 @@ export function createSupplyReadRpc(harness: boolean, profile: AaveLendingProfil
   const read = async (method: string, params: readonly unknown[]) => {
     if (!methods.has(method)) throw new Error('SUPPLY_RPC_METHOD_DENIED');
     for (let attempt = 0; attempt < 3; attempt++) {
-      if (!harness) await new Promise<void>(resolve => setTimeout(resolve, attempt === 0 ? 150 : 500 * attempt));
+      if (!harness) await new Promise<void>(resolve => setTimeout(resolve, attempt === 0 ? firstReadDelayMs : 500 * attempt));
       const response = await fetch(endpoint, { method: 'POST', cache: 'no-store', signal: AbortSignal.timeout(15_000), headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }) });
       const text = await response.text(); if (text.length > 1_048_576) throw new Error('SUPPLY_RPC_RESPONSE_TOO_LARGE');
@@ -49,7 +54,11 @@ export function createSupplyReadRpc(harness: boolean, profile: AaveLendingProfil
     }
     throw new Error('SUPPLY_RPC_RATE_LIMITED');
   };
-  return (method, params) => { const result = queue.then(() => read(method, params)); queue = result.catch(() => undefined); return result; };
+  // P0 catalog reliability: a read whose caller stopped waiting (an abandoned preview) is dropped when its turn comes, never sent.
+  return (method: string, params: readonly unknown[], context?: { readonly signal?: AbortSignal }) => {
+    const result = queue.then(() => context?.signal?.aborted ? Promise.reject(new Error(READ_ABANDONED)) : read(method, params));
+    queue = result.catch(() => undefined); return result;
+  };
 }
 /**
  * One read client per registered Aave profile, each at its profile's public endpoint unless the deployment names an HTTPS
@@ -74,5 +83,5 @@ export function createBaseLendingReadRpc(harness: boolean, env: Readonly<Record<
 export function createCatalogLendingReadRpc(network: { chain: string; id: string }, harness: boolean, env: Readonly<Record<string, string | undefined>> = {}): SupplyRpc {
   const profile = aaveLendingProfile(network.chain);
   const override = network.id === 'base' ? env.GRYLOO_BASE_RPC_URL : network.id === 'ethereum' ? env.GRYLOO_ETHEREUM_RPC_URL : env.GRYLOO_ARBITRUM_RPC_URL;
-  return createSupplyReadRpc(harness, profile, override);
+  return createSupplyReadRpc(harness, profile, override, readPacingFor(env, Boolean(override)).minIntervalMs ?? 150);
 }

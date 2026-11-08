@@ -15,8 +15,11 @@ export async function POST(request: Request) {
   try {
     const logger = createLogger({ service: 'flofi-quotes' });
     return await withSpan(logger, 'quote.endpoint', { correlation_id: correlationId }, async () => {
-      const result = await readBuildEstimate(parseJsonBytes(new Uint8Array(bytes)), process.env, { correlationId });
+      // P0 catalog reliability: a browser that cancels (a newer edit superseded this estimate) cancels the API preview behind it too.
+      const started = performance.now();
+      const result = await readBuildEstimate(parseJsonBytes(new Uint8Array(bytes)), process.env, { correlationId, signal: request.signal });
       logger.info('quote.response', { correlation_id: correlationId, status: result.ok ? 'QUOTE_AVAILABLE' : result.code,
+        outcome: result.ok ? 'ok' : request.signal.aborted ? 'cancelled' : 'refused', duration_ms: Math.round(performance.now() - started),
         ...result.ok ? { provider: result.estimate.provider, chain: result.estimate.chain } : {} });
       return reply(result);
     }, parseTraceparent(`00-${correlationId.replaceAll('-', '')}-0000000000000001-01`));

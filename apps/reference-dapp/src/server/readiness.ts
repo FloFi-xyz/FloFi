@@ -22,6 +22,9 @@ import { solanaRpcOverride } from './solana-rpc.ts';
 import { supplyRpcUrl } from './supply-rpc.ts';
 import { transferRpcUrl } from './robinhood-rpc.ts';
 import { walletSessionKey } from './wallet-session.ts';
+import { readUserFundedConfig } from '../user-funded/config.ts';
+import { readEditorRunConfig } from '../editor/approval.ts';
+import { simulationAdmission } from '../platform/preview.ts';
 
 type Env = Readonly<Record<string, string | undefined>>;
 const CODE = /^[A-Z][A-Z0-9_]{2,80}$/;
@@ -42,6 +45,13 @@ export type Readiness = {
   /** Supported user-facing capabilities that never run on a hosted deployment, with the reason code. */
   readonly localOnly: Readonly<Record<string, string>>;
   readonly networks?: Readonly<Record<string, NetworkStatus>>;
+  /**
+   * P0 catalog reliability (P0-F): THIS service's own multi-step workflow gates. Every web gate (Editor, Chat, MCP, `/approve`, Developer API)
+   * reads the web tier's environment, never the worker's: `FLOFI_WORKFLOW_RUNS=enabled` on the Railway worker alone leaves every multi-step
+   * workflow refused here. Fixed labels and codes only.
+   */
+  readonly workflows: { readonly runs: 'ENABLED' | 'DISABLED'; readonly userFunded: string; readonly editorRuns: string;
+    readonly simulation: { readonly slots: number; readonly waitMs: number } };
 };
 
 type Probe = { readonly name: string; readonly chain: string; readonly kind: 'evm'; readonly chainId: number; readonly url: () => string; readonly override: string | undefined }
@@ -130,11 +140,17 @@ export async function readiness(options: { readonly env?: Env; readonly networks
   if (options.networks) for (const [name, status] of await Promise.all(readinessProbes(env).map(async target => [target.name, await probe(target, fetcher, now)] as const)))
     networks[name] = status;
   const hosted = isHostedDeployment(env);
+  const runs = env.FLOFI_WORKFLOW_RUNS === 'enabled', userFunded = readUserFundedConfig(env);
+  let editorRuns: string;
+  try { const editor = readEditorRunConfig(env); editorRuns = editor.enabled ? 'ENABLED' : editor.code; } catch (error) { editorRuns = code(error, 'EDITOR_RUNS_CONFIGURATION_INVALID'); }
+  const workflows: Readiness['workflows'] = { runs: runs ? 'ENABLED' : 'DISABLED',
+    // User-funded groups run only inside workflow runs: enabled without them is reported as ineffective, never as available.
+    userFunded: userFunded.enabled ? runs ? 'ENABLED' : 'INEFFECTIVE_WORKFLOW_RUNS_DISABLED' : userFunded.code, editorRuns, simulation: simulationAdmission(env) };
   return { service: 'flofi-web', ok: runtime.status === 'READY' || runtime.status === 'LOCAL_DEVELOPMENT', checkedAt: new Date(now()).toISOString(),
     deployment: { environment: deploymentEnvironment(env), hosted, commit: /^[0-9a-f]{7,40}$/.test(env.VERCEL_GIT_COMMIT_SHA ?? '') ? env.VERCEL_GIT_COMMIT_SHA! : null,
       branch: env.VERCEL_GIT_COMMIT_REF && env.VERCEL_GIT_COMMIT_REF.length <= 200 ? env.VERCEL_GIT_COMMIT_REF : null,
       region: /^[a-z0-9]{2,12}$/.test(env.VERCEL_REGION ?? '') ? env.VERCEL_REGION! : null },
-    runtime, session: { status: session }, copilot: { mode: copilotMode }, flows, localOnly: hosted ? LOCAL_ONLY : {}, ...options.networks ? { networks } : {} };
+    runtime, session: { status: session }, copilot: { mode: copilotMode }, flows, localOnly: hosted ? LOCAL_ONLY : {}, ...options.networks ? { networks } : {}, workflows };
 }
 
 /** Per-instance cache (performance only): at most one computation per variant every 15 s, shared by concurrent requests. */

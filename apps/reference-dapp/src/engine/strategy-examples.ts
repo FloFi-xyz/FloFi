@@ -72,4 +72,11 @@ export const STRATEGY_EXAMPLES: readonly { readonly id: string; readonly strateg
   { id: 'bridge-arbitrum-ethereum', strategy: { action: 'bridge', sourceNetwork: 'arbitrum-one', destinationNetwork: 'ethereum', asset: 'USDC', amount: '5', routing: 'auto' } },
   { id: 'bridge-ethereum-robinhood', strategy: { action: 'bridge', sourceNetwork: 'ethereum', destinationNetwork: 'robinhood', asset: 'USDC', amount: '5', routing: 'auto' } },
   { id: 'bridge-robinhood-ethereum', strategy: { action: 'bridge', sourceNetwork: 'robinhood', destinationNetwork: 'ethereum', asset: 'USDG', amount: '5', routing: 'auto' } },
+  // P0 catalog reliability: the Universal Router's EVM ⇄ Solana directions. compose_strategy accepted all 20 directed pairs and production simulated a
+  // Solana → Base USDC route (Relay, 2026-11-08), but discovery listed none of them: the catalog now reports what the engine composes. Whether a
+  // provider route exists for a given amount is still answered at Simulate (UNIVERSAL_NO_ROUTE otherwise); nothing here claims execution evidence.
+  ...(['base', 'arbitrum-one', 'ethereum', 'robinhood'] as const).flatMap(evm => [
+    { id: `bridge-solana-${evm}`, strategy: { action: 'bridge', sourceNetwork: 'solana', destinationNetwork: evm, asset: 'USDC', amount: '5', routing: 'best' } as StrategySpec },
+    { id: `bridge-${evm}-solana`, strategy: { action: 'bridge', sourceNetwork: evm, destinationNetwork: 'solana', asset: evm === 'robinhood' ? 'USDG' : 'USDC', amount: '5', routing: 'best' } as StrategySpec },
+  ]),
 ]);

@@ -83,7 +83,9 @@ function project(s: WorkflowStep, node: Workflow['nodes'][number] | undefined): 
     }
     case 'UNIVERSAL_BRIDGE': return step({ action: 'BRIDGE', provider: d.input.routing === 'BEST' ? 'Best route' : d.input.routing === 'RELAY' ? 'Relay' : d.input.routing === 'LIFI'
       ? 'LI.FI' : d.input.routing === 'MAYAN' ? 'Mayan' : 'Across', network: UNIVERSAL_NETWORKS[d.input.source].name, toNetwork: UNIVERSAL_NETWORKS[d.input.destination].name,
-      amounts: [{ amount: d.input.amount, asset: d.input.inputAsset }], ...d.input.outputAsset !== d.input.inputAsset ? { toAsset: d.input.outputAsset } : {},
+      // P0 catalog reliability: token symbols (USDC), never the IR's `address@decimals` form, when the bridge's catalog names them.
+      amounts: [{ amount: d.input.amount, asset: d.inputSymbol ?? d.input.inputAsset }],
+      ...(d.outputSymbol ?? d.input.outputAsset) !== (d.inputSymbol ?? d.input.inputAsset) ? { toAsset: d.outputSymbol ?? d.input.outputAsset } : {},
       slippageBps: bps(d.input.slippage), account: d.input.recipient ? { role: 'RECIPIENT', address: short(d.input.recipient) } : { role: 'CONNECTED_WALLET' }, testFunds });
     case 'AAVE': return step({ action: d.operation, provider: 'Aave V3', network: d.input.network, amounts: [{ amount: d.input.amount, asset: d.input.asset }],
       account: { role: 'BENEFICIARY', address: short(d.input.beneficiary) }, testFunds });

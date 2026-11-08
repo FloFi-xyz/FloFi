@@ -47,7 +47,10 @@ export function redactFields(fields: LogFields): Record<string, FieldValue> {
 export function createLogger(input: { service: string; sink?: LogSink; fields?: LogFields; now?: () => Date }): Logger {
   const sink = input.sink ?? (line => { process.stdout.write(line + '\n'); });
   const now = input.now ?? (() => new Date());
-  const base = { service: input.service, ...input.fields };
+  // P0 catalog reliability: every line names the deployment that wrote it (the platform's commit, shortened; absent locally) so latency and
+  // refusal metrics can be compared across releases.
+  const deployment = (process.env.RAILWAY_GIT_COMMIT_SHA || process.env.VERCEL_GIT_COMMIT_SHA || '').slice(0, 12) || undefined;
+  const base = { service: input.service, deployment, ...input.fields };
   const write = (severity: 'INFO' | 'WARN' | 'ERROR', event: string, fields: LogFields = {}) => {
     const context = trace.getStore();
     const record = redactFields({ ...base, ...fields });
@@ -72,6 +75,14 @@ export function formatTraceparent(context: TraceContext): string { return `00-${
 export function currentTrace(): TraceContext | null { return trace.getStore() ?? null; }
 export function currentTraceparent(): string | null { const context = trace.getStore(); return context ? formatTraceparent(context) : null; }
 
+/** The classified code of a `{ ok: false, code }` result (a refusal answered as a value, not thrown); null for anything else. */
+function refusalCode(result: unknown): string | null {
+  if (!result || typeof result !== 'object') return null;
+  const value = result as { ok?: unknown; code?: unknown; body?: unknown };
+  if (value.ok === false) return typeof value.code === 'string' && /^[A-Z][A-Z0-9_]{2,80}$/.test(value.code) ? value.code : 'UNCLASSIFIED_REFUSAL';
+  // An HTTP handler's `{ status, body }` whose body is a refusal (the API answers refusals with HTTP 200).
+  return value.body && typeof value.body === 'object' && (value.body as { ok?: unknown }).ok === false ? refusalCode(value.body) : null;
+}
 /** Runs `action` in a child span of the current (or given remote) trace and logs its outcome and duration. */
 export async function withSpan<T>(logger: Logger, name: string, fields: LogFields, action: () => Promise<T>,
   remoteParent?: TraceContext | null): Promise<T> {
@@ -81,7 +92,11 @@ export async function withSpan<T>(logger: Logger, name: string, fields: LogField
     const started = performance.now();
     try {
       const result = await action();
-      logger.info(name, { ...fields, outcome: 'ok', duration_ms: Math.round(performance.now() - started) });
+      // P0 catalog reliability: a classified refusal (`{ ok: false, code }`, an HTTP 200 on the API) is not a success. It is logged as `refused`
+      // with its code, so latency and success metrics never count a failed quote, simulation or execution step as an `ok` operation.
+      const refused = refusalCode(result);
+      logger.info(name, { ...fields, outcome: refused ? 'refused' : 'ok', ...refused ? { result_code: refused } : {},
+        duration_ms: Math.round(performance.now() - started) });
       return result;
     } catch (error) {
       const code = error instanceof Error && /^[A-Z][A-Z0-9_]{2,80}$/.test(error.message) ? error.message : 'UNCLASSIFIED_ERROR';

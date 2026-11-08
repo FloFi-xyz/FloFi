@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, onTestFinished } from 'vitest';
 import { createLogger, type Database } from '@defi-workflow-engine/cloud-runtime';
 import { CROSSCHAIN_ROUTER_BASE_SEPOLIA_ARBITRUM_SEPOLIA as TESTNET } from '@defi-workflow-engine/action-registry';
 import { createMockedSolanaDevnetOrca, createMockedSolanaWallet } from '@defi-workflow-engine/reference-compiler';
@@ -136,6 +136,9 @@ describe('BUILD-MCP-001 simulate_strategy: the flows\' own simulation as a read-
   });
 
   it('caps concurrent previews per instance (best effort) and releases the slot afterwards', async () => {
+    // The strict admission this case was written for (P0-E defaults: 4 slots and a short wait, platform/preview.test.ts).
+    process.env.FLOFI_SIMULATION_CONCURRENCY = '2'; process.env.FLOFI_SIMULATION_WAIT_MS = '0';
+    onTestFinished(() => { delete process.env.FLOFI_SIMULATION_CONCURRENCY; delete process.env.FLOFI_SIMULATION_WAIT_MS; });
     let release!: () => void;
     const gate = new Promise<void>(resolve => { release = resolve; });
     const slow: McpRuntime = { kind: 'embedded', mode: async () => 'harness', run: async () => ({ ok: true, value: null }), journal: async () => ({ ok: true, value: null }),

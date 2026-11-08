@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { FLOWS } from '../../backend/flows.ts';
-import { baseSepoliaSwapRpc, createBaseSepoliaReadRpc } from './public-testnet-rpc.ts';
+import { baseSepoliaSwapRpc, createBaseSepoliaReadRpc, pacedReadRpc, READ_ABANDONED } from './public-testnet-rpc.ts';
+import type { Rpc } from './public-testnet-service.ts';
 
 afterEach(() => { vi.restoreAllMocks(); });
 /** A provider double: answers each POST from `replies` in order (a number is an HTTP status without a body). */
@@ -39,5 +40,51 @@ describe('BUILD-CLOUD-PARITY-001 Base Sepolia read clients on shared serverless 
     await expect(FLOWS['uniswap-liquidity'].transport('live', {}).rpc('eth_call', [])).rejects.toThrow('PUBLIC_RPC_RESPONSE_INVALID');
     expect(hosts).toHaveLength(1);
     expect(() => baseSepoliaSwapRpc('http://plain.example')).toThrow('PUBLIC_RPC_CONFIGURATION_INVALID');
+  });
+});
+
+describe('P0 catalog reliability: an abandoned caller never holds the shared paced queue', () => {
+  const instant = async () => undefined;
+  it.each([1, 3])('drops queued reads whose caller is gone (maxInFlight %i) and serves the next caller at once', async maxInFlight => {
+    const sent: string[] = [];
+    let release: () => void = () => undefined;
+    const slow = new Promise<void>(resolve => { release = resolve; });
+    const node: Rpc = async method => { sent.push(method); if (method === 'first') await slow; return method; };
+    const rpc = pacedReadRpc(node, { minIntervalMs: 0, sleep: instant, maxInFlight });
+    const gone = new AbortController(), other = new AbortController();
+    const first = rpc('first', [], { signal: other.signal });
+    await new Promise(resolve => setTimeout(resolve, 5));
+    expect(sent).toEqual(['first']);
+    const queued = Promise.allSettled([rpc('a', [], { signal: gone.signal }), rpc('b', [], { signal: gone.signal }), rpc('c', [], { signal: gone.signal })]);
+    const live = rpc('live', []);
+    gone.abort(); release();
+    await expect(first).resolves.toBe('first');
+    for (const read of await queued) expect(read).toMatchObject({ status: 'rejected', reason: expect.objectContaining({ message: READ_ABANDONED }) });
+    await expect(live).resolves.toBe('live');
+    // Only reads a caller still waited for were sent (with maxInFlight > 1 some may already have started before the abort).
+    expect(sent.filter(m => m === 'live')).toEqual(['live']);
+    if (maxInFlight === 1) expect(sent).toEqual(['first', 'live']);
+  });
+  it('stops retrying a rate-limited read once its caller is gone, without waiting out the backoff', async () => {
+    let calls = 0;
+    const node: Rpc = async () => { calls++; throw new Error('PUBLIC_RPC_UNAVAILABLE'); };
+    const gone = new AbortController();
+    const rpc = pacedReadRpc(node, { minIntervalMs: 0 });
+    const started = Date.now();
+    const read = rpc('eth_call', [], { signal: gone.signal });
+    setTimeout(() => gone.abort(), 50);
+    await expect(read).rejects.toThrow(/PUBLIC_RPC_UNAVAILABLE|RPC_READ_ABANDONED/);
+    // Six retries would back off for 31.5 s; the abandoned read ends right after its caller leaves.
+    expect(Date.now() - started).toBeLessThan(2_000);
+    expect(calls).toBeLessThanOrEqual(2);
+  });
+  it('the node client cancels a read in flight when its caller stops waiting', async () => {
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (_input, init) => new Promise<Response>((_resolve, reject) => {
+      init?.signal?.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError')));
+    }));
+    const gone = new AbortController();
+    const read = createBaseSepoliaReadRpc('https://fixture.invalid', ['eth_call'])('eth_call', [], { signal: gone.signal });
+    gone.abort();
+    await expect(read).rejects.toThrow(READ_ABANDONED);
   });
 });

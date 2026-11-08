@@ -68,3 +68,62 @@ describe('BUILD-FLOFI-BRIDGE-LIVE-FIX-003: MCP composes native ETH as native ETH
     expect(nodeOf(wrap.output).adapterConstraints.protocols).toEqual(['weth9']);
   });
 });
+
+describe('P0-D: a network named the way discovery names it composes to the same strategy and hash', () => {
+  const ethereumSwap = { action: 'swap', inputAsset: 'WETH', outputAsset: 'USDC', amount: '0.0012' };
+  it('accepts the discovery name, registry aliases and CAIP-2 ids, case-insensitively, and returns the canonical id', async () => {
+    const client = session({ env: publicEnv, token: alice.token });
+    const canonical = await client.callTool('compose_strategy', { strategy: { ...ethereumSwap, network: 'ethereum' } });
+    expect(canonical.isError).toBe(false);
+    const networks = (await client.callTool('get_supported_networks', {})).output.networks as { id: string; name: string; chainId: string }[];
+    const ethereum = networks.find(n => n.id === 'ethereum')!;
+    for (const network of [ethereum.name, ethereum.chainId, 'ETHEREUM', ' Ethereum Mainnet ']) {
+      const composed = await client.callTool('compose_strategy', { strategy: { ...ethereumSwap, network } });
+      expect(composed.isError).toBe(false);
+      expect(composed.output).toMatchObject({ ok: true, strategy: { network: 'ethereum' }, workflowHash: canonical.output.workflowHash });
+    }
+    const bridged = await client.callTool('compose_strategy', { strategy: { action: 'bridge', sourceNetwork: 'Arbitrum', destinationNetwork: 'Robinhood Chain', asset: 'USDC', amount: '5' } });
+    expect(bridged.output).toMatchObject({ ok: true, strategy: { sourceNetwork: 'arbitrum-one', destinationNetwork: 'robinhood' } });
+    const workflow = await client.callTool('compose_strategy', { strategy: { version: 2, steps: [{ ...ethereumSwap, network: 'Ethereum' }, { action: 'transfer', network: 'eip155:1', asset: 'USDC', amount: '1' }] } });
+    expect(workflow.isError).toBe(false);
+    expect((workflow.output.strategy as { steps: { network: string }[] }).steps.map(step => step.network)).toEqual(['ethereum', 'ethereum']);
+    const filtered = await client.callTool('get_capabilities', { network: 'Arbitrum One', action: 'swap' });
+    expect(filtered.isError).toBe(false);
+  });
+  it('never guesses or crosses scopes, and names the accepted ids when it refuses', async () => {
+    const client = session({ env: publicEnv, token: alice.token });
+    for (const network of ['eth', 'mainnet', 'Ethereum Sepolia', 'eip155:11155111', 'base-sepolia']) {
+      const refused = await client.callTool('compose_strategy', { strategy: { ...ethereumSwap, network } });
+      expect(refused.isError).toBe(true);
+    }
+    const refused = await client.callTool('compose_strategy', { strategy: { ...ethereumSwap, network: 'eth' } });
+    const swapNetworks = (await client.callTool('get_supported_networks', {})).output.networks as { id: string; actions: string[] }[];
+    expect(refused.text).toContain(`one of: ${swapNetworks.filter(n => n.actions.includes('swap')).map(n => n.id).join(', ')}`);
+    expect(refused.text.match(/one of:/g)).toHaveLength(1);
+    expect(refused.text).not.toContain('"eth"');
+    // The hint names the networks of the refused field's own action: Aave is not on Solana, so Solana is not offered for a supply.
+    const supply = await client.callTool('compose_strategy', { strategy: { action: 'supply', network: 'solana', asset: 'USDC', amount: '1', beneficiary: '0x' + '1'.repeat(40) } });
+    expect(supply.isError).toBe(true);
+    expect(supply.text).toMatch(/one of: [^)]*ethereum/);
+    expect(supply.text).not.toMatch(/one of: [^)]*solana/);
+  });
+});
+
+describe('P0-D: compose explains what was composed (never another action\'s text)', () => {
+  it('a Solana → Base bridge names Solana, Base and USDC; a mainnet USDC transfer is not described as a test-ETH self-transfer', async () => {
+    const client = session({ env: publicEnv, token: alice.token });
+    const bridge = await client.callTool('compose_strategy', { strategy: { action: 'bridge', sourceNetwork: 'solana', destinationNetwork: 'base', asset: 'USDC', amount: '5' } });
+    expect(bridge.isError).toBe(false);
+    const text = JSON.stringify([bridge.output.summary, bridge.output.explanation]);
+    expect(text).not.toMatch(/Optimism/);
+    expect(text).toContain('Solana'); expect(text).toContain('Base'); expect(text).toContain('USDC');
+    const visual = bridge.output.visual as { steps: { amounts: { asset: string }[]; toAsset: string | null }[] };
+    expect(visual.steps[0]!.amounts[0]!.asset).toBe('USDC');
+    expect(JSON.stringify(visual)).not.toMatch(/@6/);
+    const transfer = await client.callTool('compose_strategy', { strategy: { action: 'transfer', network: 'ethereum', asset: 'USDC', amount: '1' } });
+    expect(transfer.isError).toBe(false);
+    const transferText = JSON.stringify(transfer.output.explanation);
+    expect(transferText).not.toMatch(/test ETH|1 ETH|Chain execution proof/);
+    expect(transferText).toContain('1 USDC');
+  });
+});

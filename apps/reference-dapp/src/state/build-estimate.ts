@@ -26,8 +26,37 @@ function recalled(scope: string): BuildEstimate | null {
   if (estimate && Date.parse(estimate.expiresAt) > Date.now()) return estimate;
   answered.delete(scope); return null;
 }
+/**
+ * P0 catalog reliability: one request per exact snapshot (same scope as `answered`) while it is in flight. Every card, layout or re-render that
+ * asks for the same snapshot joins it instead of sending its own; the request is cancelled (and the server abandons its preview) only when the
+ * last caller has stopped waiting. Different amounts, nodes, owners or chains are different scopes and never share.
+ */
+const inflight = new Map<string, { readonly result: Promise<BuildEstimateResult>; users: number; readonly controller: AbortController }>();
+export function sharedEstimate(scope: string, start: (signal: AbortSignal) => Promise<BuildEstimateResult>, signal: AbortSignal): Promise<BuildEstimateResult> {
+  let entry = inflight.get(scope);
+  if (!entry) {
+    const controller = new AbortController(), created = { result: start(controller.signal), users: 0, controller };
+    inflight.set(scope, created);
+    created.result.then(() => undefined, () => undefined).finally(() => { if (inflight.get(scope) === created) inflight.delete(scope); });
+    entry = created;
+  }
+  const joined = entry;
+  joined.users++;
+  return new Promise<BuildEstimateResult>((resolve, reject) => {
+    let done = false;
+    const finish = () => { if (done) return false; done = true; joined.users--; signal.removeEventListener('abort', cancel); return true; };
+    const cancel = () => {
+      if (!finish()) return;
+      if (joined.users === 0) { joined.controller.abort(); if (inflight.get(scope) === joined) inflight.delete(scope); }
+      reject(new DOMException('The estimate request was cancelled.', 'AbortError'));
+    };
+    if (signal.aborted) { cancel(); return; }
+    signal.addEventListener('abort', cancel, { once: true });
+    joined.result.then(value => { if (finish()) resolve(value); }, error => { if (finish()) reject(error); });
+  });
+}
 /** Test seam: forget every answered snapshot. */
-export function clearLiveQuoteCache(): void { answered.clear(); }
+export function clearLiveQuoteCache(): void { answered.clear(); inflight.clear(); }
 
 export function useLiveQuote(workflow: SemanticWorkflow | undefined, nodeId: string, owner?: string | null, destinationWallet?: string | null): LiveQuote {
   const serialized = workflow ? JSON.stringify(workflow) : null;
@@ -63,14 +92,15 @@ export function useLiveQuote(workflow: SemanticWorkflow | undefined, nodeId: str
     // Its own random id, never the quote correlation id: a journey line must not join the quote's server trace.
     const journey = createJourney({ operation: bridge ? 'bridge' : 'swap', network: chain, provider });
     journey.mark('intent');
-    const cancel = requestBuildEstimate(async signal => {
+    // An answer that arrived for this exact snapshot while this card waited out its debounce is used as is (still bound to its own expiry).
+    const cancel = requestBuildEstimate(signal => { const ready = recalled(scope); return ready ? Promise.resolve({ ok: true as const, estimate: ready }) : sharedEstimate(scope, async shared => {
       const response = await fetch('/api/build-estimate', { method: 'POST', headers: { 'content-type': 'application/json', 'x-quote-correlation-id': correlationId },
-        body: JSON.stringify({ workflow: snapshot, nodeId, owner, ...destinationWallet ? { destinationWallet } : {} }), signal });
+        body: JSON.stringify({ workflow: snapshot, nodeId, owner, ...destinationWallet ? { destinationWallet } : {} }), signal: shared });
       const result = await response.json() as BuildEstimateResult;
       if (!result || typeof result !== 'object' || result.ok !== true && result.ok !== false || result.ok && (!result.estimate || typeof result.estimate !== 'object'))
         return { ok: false, code: 'ESTIMATE_RESPONSE_INVALID', correlationId };
       return response.ok === false && result.ok ? { ok: false, code: 'ESTIMATE_RESPONSE_INVALID', correlationId } : result;
-    }, response => {
+    }, signal); }, response => {
       const estimate = response.ok && response.estimate.workflowHash === key && response.estimate.nodeId === nodeId && response.estimate.chain === chain &&
         (provider === 'Bridge' || response.estimate.provider === provider) && estimateMatchesNode(response.estimate, snapshot, nodeId) && Date.parse(response.estimate.expiresAt) > Date.now() ? response.estimate : null;
       if (estimate) remember(scope, estimate);
