@@ -205,7 +205,7 @@ Simulate previews took 4.06 s.
   `state/build-estimate.test.ts` (snapshot key, expiry, hidden page, cascade).
 - **Playwright** `e2e/canvas-lending-amount-enter.spec.ts`, **Scenario A**: chat-authored Swap → Supply → Borrow; Supply edited with Enter,
   Borrow on blur, Swap after a typing pause. It asserts no proposal, the revisions and the IR amounts `3000000`, `1300000000000000` and
-  `800000`. This spec (from #166) was in no CI profile; it now runs in `canvas-corrections` (mirror updated in `test_ci_optimization.py`).
+  `800000`. CI runs it in the `arbitrum-authoring-certification` profile (`playwright.arbitrum-authoring.config.ts`).
 
 **Updated specs** (behaviour change, explained for review):
 - Shared fixtures `composer-authoring-fixtures.ts` (`configureCanvasAction`) and `supply-fixtures.ts` (`authorSupply`) now apply lending
