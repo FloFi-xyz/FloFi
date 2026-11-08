@@ -7,8 +7,8 @@
  */
 import { randomBytes } from 'node:crypto';
 import type { Database, Queryable } from '@defi-workflow-engine/cloud-runtime';
-import { decideAccess, eventOrigin, FLIGHT_EVENTS, FLIGHT_NOTICE_VERSION, FOUNDING_INVITES, FOUNDING_SEATS, foundingSeat, inviteCodeFrom,
-  passengerSeat, SIMULATION_EVIDENCE_MS, DEPARTURES_SHOWN, type FlightAccess, type FlightEvent, type FlightOrigin, type FlightRoute } from './campaign.ts';
+import { decideAccess, eventOrigin, FLIGHT_DEFAULT_CALENDAR, FLIGHT_EVENTS, FLIGHT_NOTICE_VERSION, FOUNDING_INVITES, FOUNDING_SEATS, foundingSeat, inviteCodeFrom,
+  passengerSeat, SIMULATION_EVIDENCE_MS, DEPARTURES_SHOWN, type FlightAccess, type FlightCalendar, type FlightEvent, type FlightOrigin, type FlightRoute } from './campaign.ts';
 
 export type FlightHost = { readonly db: Database; readonly tenantId: string };
 const at = (ms: number) => new Date(ms).toISOString();
@@ -44,7 +44,8 @@ const passOf = (row: PassRow): FlightPass => ({ passId: row.pass_id, origin: row
   departedAt: row.departed_at.toISOString() });
 const PASS_COLUMNS = 'pass_id, origin, boarding_no, founding_seat, handle, public, route, departed_at';
 
-export function createFlightStore(host: FlightHost) {
+/** `calendar`: the deployment's campaign calendar (`flightCalendar` in host.ts), which decides when the access answers start. */
+export function createFlightStore(host: FlightHost, calendar: FlightCalendar = FLIGHT_DEFAULT_CALENDAR) {
   const { db, tenantId } = host;
 
   /** The public counters: the beta list, and the boarding numbers and Founding seats issued (a deleted account's stay issued). */
@@ -112,7 +113,7 @@ export function createFlightStore(host: FlightHost) {
       WHERE e.tenant_id = $1 AND e.email = ANY($2::text[]) AND e.boarded_at IS NULL ORDER BY (e.flight = 'FIRST') DESC, b.opens_at ASC NULLS FIRST LIMIT 1`,
       [tenantId, [...input.emails]])).rows : [];
     const entry = entries[0] ? { flight: entries[0].flight, batch: entries[0].batch_no, opensAt: entries[0].opens_at?.getTime() ?? null } : null;
-    const access = decideAccess({ now: input.now, passId: pass?.pass_id ?? null, invite, entry });
+    const access = decideAccess({ now: input.now, passId: pass?.pass_id ?? null, invite, entry, calendar });
     const invites = pass?.founding_seat ? (await q.query<{ code: string; redeemed_at: Date | null }>(`SELECT code, redeemed_at FROM flight_invites
       WHERE tenant_id = $1 AND issuer_pass_id = $2 ORDER BY created_at, code`, [tenantId, pass.pass_id])).rows.map(row => ({ code: row.code, redeemed: row.redeemed_at !== null })) : [];
     return { access, pass: pass ? passOf(pass) : null, invites, listed: entry?.flight ?? null };
@@ -274,7 +275,7 @@ export function createFlightStore(host: FlightHost) {
     }));
   }
 
-  return { counters, recordEvent, joinList, departures, account, redeemInvite, recordSimulation, issuePass, setHandle, createBatch, assignBatch,
+  return { calendar, counters, recordEvent, joinList, departures, account, redeemInvite, recordSimulation, issuePass, setHandle, createBatch, assignBatch,
     exportBatch, issueCreatorInvites, eraseEmail, hidePass, purgeLists, stats, prune };
 }
 export type FlightStore = ReturnType<typeof createFlightStore>;

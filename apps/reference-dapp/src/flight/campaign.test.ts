@@ -2,7 +2,7 @@
 /** BUILD-FLOFI-FLIGHT-001: the campaign's rules without a database (phases, access, inputs, invite codes, route and events). */
 import { describe, expect, it } from 'vitest';
 import type { SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
-import { decideAccess, FLIGHT_BOARDING_OPENS_AT, FLIGHT_LIST_CLOSES_AT, flightPhase, flightRoute, inviteCodeFrom, listFor, normalizeEmail, normalizeHandle,
+import { decideAccess, FLIGHT_BOARDING_OPENS_AT, FLIGHT_DEFAULT_CALENDAR, FLIGHT_LIST_CLOSES_AT, flightCalendarFrom, flightPhase, flightRoute, inviteCodeFrom, listFor, normalizeEmail, normalizeHandle,
   normalizeInviteCode, parseClientEvent, passengerSeat, foundingSeat, visibleSteps } from './campaign';
 import { flightClockHarness } from './host';
 import { rateLimitClient } from './rate-limit-client';
@@ -16,12 +16,48 @@ const node = (nodeId: string, actionType: string, chainId: string, protocols: st
   failurePolicy: 'HALT', requiredAuthorizationClass: 'WALLET', lockedParameters: [], editableBounds: [] } as unknown as Node);
 
 describe('BUILD-FLOFI-FLIGHT-001 campaign rules', () => {
-  it('keeps the approved dates: the list closes 16 Nov 23:59 BRT and boarding opens 17 Nov 9:00 BRT', () => {
-    expect(new Date(FLIGHT_LIST_CLOSES_AT).toISOString()).toBe('2026-11-17T02:59:00.000Z');
-    expect(new Date(FLIGHT_BOARDING_OPENS_AT).toISOString()).toBe('2026-11-17T12:00:00.000Z');
-    expect([FLIGHT_LIST_CLOSES_AT - 1, FLIGHT_LIST_CLOSES_AT, FLIGHT_BOARDING_OPENS_AT - 1, FLIGHT_BOARDING_OPENS_AT].map(flightPhase))
+  it('keeps the approved dates: the list closes 11 Nov 23:59 BRT and boarding opens 12 Nov 9:00 BRT', () => {
+    expect(new Date(FLIGHT_LIST_CLOSES_AT).toISOString()).toBe('2026-11-12T02:59:00.000Z');
+    expect(new Date(FLIGHT_BOARDING_OPENS_AT).toISOString()).toBe('2026-11-12T12:00:00.000Z');
+    expect(FLIGHT_DEFAULT_CALENDAR).toEqual({ listClosesAt: FLIGHT_LIST_CLOSES_AT, boardingOpensAt: FLIGHT_BOARDING_OPENS_AT });
+    expect([FLIGHT_LIST_CLOSES_AT - 1, FLIGHT_LIST_CLOSES_AT, FLIGHT_BOARDING_OPENS_AT - 1, FLIGHT_BOARDING_OPENS_AT].map(now => flightPhase(now)))
       .toEqual(['FINAL_CALL', 'GATE_CLOSED', 'GATE_CLOSED', 'BOARDING']);
     expect([listFor('FINAL_CALL'), listFor('GATE_CLOSED'), listFor('BOARDING')]).toEqual(['FIRST', 'NEXT', 'NEXT']);
+  });
+
+  it('reads the calendar from the environment; a refused value closes the campaign instead of falling back to earlier dates', () => {
+    const at = (env: Record<string, string>) => flightCalendarFrom(env);
+    expect(at({})).toEqual({ calendar: FLIGHT_DEFAULT_CALENDAR, invalid: [] });
+    expect(at({ FLOFI_FLIGHT_LIST_CLOSES_AT: '  ', FLOFI_FLIGHT_BOARDING_OPENS_AT: '' })).toEqual({ calendar: FLIGHT_DEFAULT_CALENDAR, invalid: [] });
+    const moved = at({ FLOFI_FLIGHT_LIST_CLOSES_AT: '2026-11-20T23:59:00-03:00', FLOFI_FLIGHT_BOARDING_OPENS_AT: '2026-11-21T12:00:00Z' }).calendar!;
+    expect(moved).toEqual({ listClosesAt: Date.parse('2026-11-21T02:59:00Z'), boardingOpensAt: Date.parse('2026-11-21T12:00:00Z') });
+    expect(at({ FLOFI_FLIGHT_BOARDING_OPENS_AT: '2026-11-12T09:00:00.5+05:30' }).calendar!.boardingOpensAt).toBe(Date.parse('2026-11-12T03:30:00.500Z'));
+    // The phases follow the configured calendar: FINAL_CALL → GATE_CLOSED → BOARDING.
+    expect([moved.listClosesAt - 1, moved.listClosesAt, moved.boardingOpensAt - 1, moved.boardingOpensAt].map(now => flightPhase(now, moved)))
+      .toEqual(['FINAL_CALL', 'GATE_CLOSED', 'GATE_CLOSED', 'BOARDING']);
+    expect(flightPhase(FLIGHT_BOARDING_OPENS_AT, moved)).toBe('FINAL_CALL');
+    // Only one moved: the other keeps the approved instant (a pair that still closes before boarding).
+    expect(at({ FLOFI_FLIGHT_BOARDING_OPENS_AT: '2026-11-13T09:00:00-03:00' }).calendar)
+      .toEqual({ listClosesAt: FLIGHT_LIST_CLOSES_AT, boardingOpensAt: Date.parse('2026-11-13T12:00:00Z') });
+    // A local time, a date alone, anything unparsable or a date the parser would roll over (31 Nov, 30 Feb, 24:00, offset +99:99): refused,
+    // and with it the whole calendar (a mistyped postponement never opens boarding on the earlier default).
+    for (const bad of ['2026-11-12T09:00:00', '2026-11-12', 'tomorrow', '2026-13-40T09:00:00Z', '2026-11-31T09:00:00-03:00', '2026-02-30T09:00:00Z',
+      '2026-11-12T24:00:00Z', '2026-11-12T09:60:00Z', '2026-11-12T09:00:00+99:99', '2026-11-12T09:00:00+15:00'])
+      expect(at({ FLOFI_FLIGHT_BOARDING_OPENS_AT: bad, FLOFI_FLIGHT_LIST_CLOSES_AT: '2026-11-10T23:59:00-03:00' }))
+        .toEqual({ calendar: null, invalid: ['FLOFI_FLIGHT_BOARDING_OPENS_AT'] });
+    expect(at({ FLOFI_FLIGHT_LIST_CLOSES_AT: '2026-02-29T23:59:00Z' })).toEqual({ calendar: null, invalid: ['FLOFI_FLIGHT_LIST_CLOSES_AT'] });
+    // A list that would close after boarding opens is refused as a pair.
+    expect(at({ FLOFI_FLIGHT_LIST_CLOSES_AT: '2026-11-13T00:00:00Z', FLOFI_FLIGHT_BOARDING_OPENS_AT: '2026-11-12T00:00:00Z' }))
+      .toEqual({ calendar: null, invalid: ['FLOFI_FLIGHT_LIST_CLOSES_AT', 'FLOFI_FLIGHT_BOARDING_OPENS_AT'] });
+    // Access answers follow the configured calendar too.
+    expect(decideAccess({ now: FLIGHT_BOARDING_OPENS_AT + 1, passId: null, invite: 'CREATOR', entry: null, calendar: moved }))
+      .toEqual({ kind: 'not_yet', opensAt: moved.boardingOpensAt });
+    expect(decideAccess({ now: moved.boardingOpensAt, passId: null, invite: null, entry: { flight: 'FIRST', batch: null, opensAt: null }, calendar: moved }))
+      .toEqual({ kind: 'eligible', origin: 'LIST' });
+    // A group planned for an earlier calendar boards when boarding opens, never before.
+    const early = { flight: 'FIRST' as const, batch: 2, opensAt: moved.boardingOpensAt - 86_400_000 };
+    expect(decideAccess({ now: moved.boardingOpensAt - 1, passId: null, invite: null, entry: early, calendar: moved }).kind).toBe('not_yet');
+    expect(decideAccess({ now: moved.boardingOpensAt, passId: null, invite: null, entry: early, calendar: moved })).toEqual({ kind: 'eligible', origin: 'LIST' });
   });
 
   it('decides access from the list, the group, invites and an existing pass, and never before boarding', () => {

@@ -40,6 +40,16 @@ test.beforeEach(async ({ page }) => {
 });
 test.afterEach(({ page }) => { expect(errors.get(page)).toEqual([]); });
 const portfolio = (page: Page) => page.locator('#portfolio-acceptance-root');
+/** BUILD-FLOFI-UX-005: the network filter is a FloFi listbox button (not a native select). */
+const filterButton = (page: Page) => portfolio(page).getByRole('button', { name: /^Network filter/ });
+async function chooseNetwork(page: Page, name: string) {
+  await filterButton(page).click();
+  const list = portfolio(page).getByRole('listbox', { name: 'Network filter' });
+  await expect(list).toBeVisible();
+  await list.getByRole('option', { name, exact: true }).click();
+  await expect(list).toHaveCount(0);
+  await expect(filterButton(page)).toHaveAccessibleName(`Network filter ${name}`);
+}
 
 test('real presentation shows partial pricing, all represented networks, exact allocation and a complete assets breakdown', async ({ page }) => {
   const root = portfolio(page);
@@ -56,13 +66,13 @@ test('real presentation shows partial pricing, all represented networks, exact a
   await expect(allocations).not.toContainText('Valuation unavailable');
   await page.evaluate(() => window.flofiPortfolioAcceptance.mode('partial'));
   await expect(root).toContainText('4 of 5 holdings priced');
-  await root.getByLabel('Network filter').selectOption('solana');
+  await chooseNetwork(page, 'Solana');
   await expect(root).toContainText('No verified USD price for these assets.'); await expect(root).not.toContainText('$0');
   await root.getByRole('button', { name: 'View all assets', exact: true }).click();
   await expect(root.getByRole('table')).toContainText('SOL'); await expect(root.getByRole('table')).toContainText('Valuation unavailable');
   await root.getByRole('button', { name: 'Collapse', exact: true }).click();
   await expect(root.getByRole('button', { name: 'View all assets', exact: true })).toBeFocused();
-  await root.getByLabel('Network filter').selectOption('base');
+  await chooseNetwork(page, 'Base');
   await expect(root).toContainText('≈ $2,500.00'); await expect(allocations).toContainText('100%');
   await expect(root).toContainText('1 of 1 holdings priced');
 });
@@ -76,10 +86,52 @@ test('empty, unavailable, single-network and all-unpriced states never fabricate
   await expect(root.getByRole('region', { name: 'Allocation by network' })).toContainText('Valuation unavailable');
   await page.evaluate(() => window.flofiPortfolioAcceptance.mode('single'));
   await expect(root).toContainText('≈ $6,000.00'); await expect(root.getByRole('region', { name: 'Allocation by network' })).toContainText('100%');
-  await expect(root.getByLabel('Network filter')).toHaveCount(0);
+  await expect(filterButton(page)).toHaveCount(0);
   await page.evaluate(() => window.flofiPortfolioAcceptance.mode('failure'));
   await expect(root.getByRole('alert')).toContainText('Wallet balances are unavailable right now.'); await expect(root).not.toContainText('$');
   await expect(root.getByRole('button', { name: 'Retry' })).toBeVisible();
+});
+
+test('the network filter follows the FloFi controls and works by keyboard, outside click and Escape', async ({ page }) => {
+  const root = portfolio(page), button = filterButton(page);
+  await expect(root.locator('select')).toHaveCount(0);
+  await expect(button).toHaveAttribute('aria-haspopup', 'listbox');
+  await expect(button).toHaveAccessibleName('Network filter All networks');
+  // Same height and corner as the Dashboard's other controls (the Refresh button beside it).
+  const refresh = root.getByRole('button', { name: 'Refresh', exact: true });
+  const [own, peer] = await Promise.all([button, refresh].map(item => item.evaluate(node => { const style = getComputedStyle(node);
+    return { height: Math.round(node.getBoundingClientRect().height), radius: style.borderRadius, border: style.borderTopWidth }; })));
+  expect(own).toEqual(peer);
+  // Keyboard: arrows open on the current value and move; Enter chooses; focus returns to the button.
+  await button.focus(); await page.keyboard.press('ArrowDown');
+  const list = root.getByRole('listbox', { name: 'Network filter' });
+  await expect(list).toBeFocused();
+  await expect(list.getByRole('option', { selected: true })).toHaveText('All networks');
+  await page.keyboard.press('End'); await page.keyboard.press('Enter');
+  await expect(list).toHaveCount(0); await expect(button).toBeFocused();
+  await expect(button).toHaveAccessibleName('Network filter Solana');
+  await expect(root).toContainText('No verified USD price for these assets.');
+  // Escape and a click outside close it without changing the value.
+  await page.keyboard.press('Enter'); await expect(list).toBeVisible();
+  await page.keyboard.press('ArrowUp'); await page.keyboard.press('Escape');
+  await expect(list).toHaveCount(0); await expect(button).toBeFocused(); await expect(button).toHaveAccessibleName('Network filter Solana');
+  await button.click(); await expect(list).toBeVisible();
+  await root.getByRole('heading', { name: 'Wallet portfolio' }).click(); await expect(list).toHaveCount(0);
+  await chooseNetwork(page, 'All networks');
+  await expect(root).toContainText('4 of 5 holdings priced');
+  await button.click(); await expect(list).toBeVisible();
+  await root.screenshot({ path: '/tmp/flofi-ux005-network-filter-1440.png' });
+  await page.evaluate(() => { document.documentElement.dataset.theme = 'dark'; });
+  await root.screenshot({ path: '/tmp/flofi-ux005-network-filter-1440-dark.png' });
+  await page.evaluate(() => { document.documentElement.dataset.theme = 'light'; });
+  await page.keyboard.press('Escape');
+  // The open menu stays inside a phone's width.
+  await page.setViewportSize({ width: 320, height: 900 });
+  await button.click(); await expect(list).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  const box = await list.boundingBox(); expect(box!.x).toBeGreaterThanOrEqual(0); expect(box!.x + box!.width).toBeLessThanOrEqual(320);
+  await root.screenshot({ path: '/tmp/flofi-ux005-network-filter-320.png' });
+  await page.keyboard.press('Escape');
 });
 
 test('refresh calls the provider, reports stale data honestly and recovers', async ({ page }) => {

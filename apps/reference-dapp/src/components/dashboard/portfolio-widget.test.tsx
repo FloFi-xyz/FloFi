@@ -77,7 +77,8 @@ describe('Dashboard wallet portfolio widget', () => {
     const expanded = view(props);
     expect(expanded).toContain('aria-expanded="true"'); expect(expanded).toContain('Hide details');
     expect(expanded).toContain('EVM wallet'); expect(expanded).toContain(`title="${OWNER}"`); expect(expanded).toContain('0xabab…abab'); expect(expanded).toContain('Copy address');
-    expect(expanded).toContain('Block 38123456'); expect(expanded).toContain('Unavailable'); expect(expanded).toContain('Not enabled on this deployment: Ethereum, Arbitrum One');
+    // BUILD-FLOFI-UX-005: the expanded view no longer lists the networks read (status, provenance, block): it was noise for the person.
+    expect(expanded).not.toContain('dashboard-portfolio-networks'); expect(expanded).not.toContain('Block 38123456'); expect(expanded).not.toContain('Not enabled on this deployment');
     expect(expanded).toMatch(/<table[^>]*>.*<th scope="col">Asset<\/th><th scope="col">Network<\/th>.*Balance.*Price.*Value/);
     expect(expanded).toContain('1.5</td>'); expect(expanded).toContain('$3,000.50'); expect(expanded).toContain('$4,500.75');
     expect(expanded).toContain('1,234.56</td>'); expect(expanded).toMatch(/1,234\.56<\/td><td class="[^"]*">Unavailable<\/td><td class="[^"]*">Valuation unavailable<\/td>/);
@@ -97,9 +98,9 @@ describe('Dashboard wallet portfolio widget', () => {
     expect(compact).toContain('Ver todos os ativos');
     click(props, disclosure);
     const expanded = view(props);
-    expect(expanded).toContain('Ativos'); expect(expanded).toContain('Saldo'); expect(expanded).toContain('Rede principal'); expect(expanded).toContain('Carteira EVM');
+    expect(expanded).toContain('Ativos'); expect(expanded).toContain('Saldo'); expect(expanded).not.toContain('Rede principal'); expect(expanded).toContain('Carteira EVM');
     expect(expanded).toContain('1.234,56</td>'); expect(expanded).toContain('1,5</td>'); expect(expanded).toContain('Recolher');
-    expect(expanded).toContain('Não habilitadas nesta implantação: Ethereum, Arbitrum One');
+    expect(expanded).not.toContain('Não habilitadas nesta implantação');
   });
   it('shows a balance by the token’s own rules with its raw amount kept apart, and an uninterpretable balance as unavailable, never a number', async () => {
     const SCALED: PortfolioHolding = { ...USDC, networkId: 'solana', network: 'Solana', chain: 'solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp', symbol: 'xAAPL', name: 'Apple xStock',
@@ -184,10 +185,20 @@ describe('Dashboard wallet portfolio widget', () => {
       networks: [network('base', 'Base', 'READ'), network('arbitrum-one', 'Arbitrum One', 'READ')], pricedTotalUsd: '6001.00' }) }) };
     view(props); await settle();
     expect(view(props)).toContain('≈ $6,001.00'); expect(view(props)).toContain('Base: 75%, Arbitrum One: 25%');
-    const target = host.render(() => find(PortfolioWidget(props), item => item.value === '' && typeof item.onChange === 'function'));
-    expect(target).not.toBeNull();
-    (target!.onChange as (event: unknown) => void)({ currentTarget: { value: 'arbitrum-one' } });
+    // A FloFi listbox button, not a native select: closed, it names the filter and its value; open, it lists every represented network.
+    const closed = view(props);
+    expect(closed).not.toContain('<select'); expect(closed).not.toContain('role="listbox"');
+    expect(closed).toMatch(/<button[^>]*aria-haspopup="listbox"[^>]*aria-expanded="false"[^>]*aria-labelledby="dashboard-network-filter-label dashboard-network-filter-button"/);
+    expect(closed).toContain('Network filter'); expect(closed).toContain('All networks');
+    click(props, item => item['aria-haspopup'] === 'listbox');
+    const open = view(props);
+    expect(open).toContain('aria-expanded="true"'); expect(open).toContain('role="listbox"');
+    expect(open.match(/role="option"/g)).toHaveLength(3);
+    expect(open).toMatch(/id="dashboard-network-filter-option-0" role="option"[^>]*aria-selected="true"/);
+    expect(open).toContain('aria-activedescendant="dashboard-network-filter-option-0"');
+    click(props, item => item.role === 'option' && item['data-index'] === 2);
     const filtered = view(props);
+    expect(filtered).not.toContain('role="listbox"'); expect(filtered).toContain('aria-expanded="false"');
     expect(filtered).toContain('≈ $1,500.25'); expect(filtered).toContain('Arbitrum One: 100%');
     expect(filtered).toContain('1 of 1 holdings priced'); expect(filtered).not.toContain('USD Coin');
     click(props, disclosure);

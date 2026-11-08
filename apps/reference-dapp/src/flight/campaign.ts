@@ -3,7 +3,9 @@
  * BUILD-FLOFI-FLIGHT-001: the Flight FloFi launch campaign's rules, as the team-approved Claude Artifact "Flight FloFi" (version
  * 1793892357-f7d9, board "Landing · Handoff para o Alrimar") states them. Pure: no database, no request, no clock of its own.
  *
- * - The beta list closes on 16 Nov 2026 at 23:59 BRT (`closes_at`); boarding starts on 17 Nov 2026 at 9:00 BRT.
+ * - The beta list closes on 11 Nov 2026 at 23:59 BRT (`closes_at`); boarding starts on 12 Nov 2026 at 9:00 BRT (BUILD-FLOFI-UX-005, moved from
+ *   16/17 Nov). Both instants are the campaign calendar (`FlightCalendar`): the defaults below, or the deployment's
+ *   `FLOFI_FLIGHT_LIST_CLOSES_AT` / `FLOFI_FLIGHT_BOARDING_OPENS_AT`, read when a request is served (`flightCalendar`).
  * - "Board now" checks the list, the person's boarding group and invites. A boarded person's first valid simulation issues their boarding
  *   pass ("simulation_ok = cartão emitido"); the first 100 passes are numbered Founding seats (#001–#100, in boarding order), later ones
  *   are passenger passes. A Founding pass carries 3 invites ("bring three people on board, no list needed").
@@ -11,8 +13,9 @@
  */
 import type { SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
 
-export const FLIGHT_LIST_CLOSES_AT = Date.parse('2026-11-16T23:59:00-03:00');
-export const FLIGHT_BOARDING_OPENS_AT = Date.parse('2026-11-17T09:00:00-03:00');
+/** The approved calendar: the list closes 11 Nov 2026 23:59 BRT, boarding opens 12 Nov 2026 9:00 BRT (UTC-3). */
+export const FLIGHT_LIST_CLOSES_AT = Date.parse('2026-11-11T23:59:00-03:00');
+export const FLIGHT_BOARDING_OPENS_AT = Date.parse('2026-11-12T09:00:00-03:00');
 export const FOUNDING_SEATS = 100;
 export const FOUNDING_INVITES = 3;
 /** The privacy notice shown next to the list form (recorded with each entry). */
@@ -22,10 +25,46 @@ export const SIMULATION_EVIDENCE_MS = 2 * 60 * 60 * 1000;
 export const DEPARTURES_SHOWN = 5;
 export const MAX_ROUTE_STEPS_SHOWN = 4;
 
+/** The two instants the campaign turns on (epoch milliseconds): the beta list closing and boarding opening. */
+export type FlightCalendar = { readonly listClosesAt: number; readonly boardingOpensAt: number };
+export const FLIGHT_DEFAULT_CALENDAR: FlightCalendar = Object.freeze({ listClosesAt: FLIGHT_LIST_CLOSES_AT, boardingOpensAt: FLIGHT_BOARDING_OPENS_AT });
+/**
+ * An instant written as ISO 8601 with an explicit offset or Z (e.g. 2026-11-12T09:00:00-03:00): never a local time open to the server's
+ * zone, and never a date the platform parser would roll over (31 Nov, 30 Feb, 24:00). Undefined when unset, null when unreadable.
+ */
+const INSTANT = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2})(?:\.(\d{1,3}))?)?(?:Z|([+-])(\d{2}):(\d{2}))$/;
+function instant(value: string | undefined): number | null | undefined {
+  const text = value?.trim();
+  if (!text) return undefined;
+  const match = INSTANT.exec(text);
+  if (!match) return null;
+  const [year, month, day, hour, minute, second = 0, fraction = '0', sign, offsetHours = 0, offsetMinutes = 0] = match.slice(1)
+    .map((part, index) => part === undefined ? undefined : index === 6 || index === 7 ? part : Number(part)) as [number, number, number, number, number,
+      number | undefined, string | undefined, string | undefined, number | undefined, number | undefined];
+  const daysInMonth = month >= 1 && month <= 12 ? new Date(Date.UTC(year, month, 0)).getUTCDate() : 0;
+  if (day < 1 || day > daysInMonth || hour > 23 || minute > 59 || second > 59 || offsetHours > 14 || offsetMinutes > 59) return null;
+  const offset = (sign === '-' ? -1 : 1) * (offsetHours * 60 + offsetMinutes);
+  return Date.UTC(year, month - 1, day, hour, minute, second, Number(fraction.padEnd(3, '0'))) - offset * 60_000;
+}
+/**
+ * The deployment's campaign calendar. `FLOFI_FLIGHT_LIST_CLOSES_AT` and `FLOFI_FLIGHT_BOARDING_OPENS_AT` (server-only, read on every call,
+ * never inlined into a build) override the approved defaults; an unset variable keeps its default. Fail-closed: a set value that is not
+ * a valid ISO instant with an offset, or a pair whose list would close after boarding opens, gives no calendar at all (`calendar: null`:
+ * the campaign is then unavailable, so a mistyped postponement can never open boarding early). `invalid` names what was refused.
+ */
+export function flightCalendarFrom(env: Readonly<Record<string, string | undefined>>): { readonly calendar: FlightCalendar | null; readonly invalid: readonly string[] } {
+  const closes = instant(env.FLOFI_FLIGHT_LIST_CLOSES_AT), opens = instant(env.FLOFI_FLIGHT_BOARDING_OPENS_AT);
+  const invalid = [...(closes === null ? ['FLOFI_FLIGHT_LIST_CLOSES_AT'] : []), ...(opens === null ? ['FLOFI_FLIGHT_BOARDING_OPENS_AT'] : [])];
+  if (invalid.length) return { calendar: null, invalid };
+  const listClosesAt = closes ?? FLIGHT_LIST_CLOSES_AT, boardingOpensAt = opens ?? FLIGHT_BOARDING_OPENS_AT;
+  if (listClosesAt > boardingOpensAt) return { calendar: null, invalid: ['FLOFI_FLIGHT_LIST_CLOSES_AT', 'FLOFI_FLIGHT_BOARDING_OPENS_AT'] };
+  return { calendar: { listClosesAt, boardingOpensAt }, invalid };
+}
+
 /** FINAL_CALL until the list closes; GATE_CLOSED until boarding; BOARDING after (the approved posts' "Gate closed. Boarding starts tomorrow"). */
 export type FlightPhase = 'FINAL_CALL' | 'GATE_CLOSED' | 'BOARDING';
-export function flightPhase(now: number): FlightPhase {
-  return now < FLIGHT_LIST_CLOSES_AT ? 'FINAL_CALL' : now < FLIGHT_BOARDING_OPENS_AT ? 'GATE_CLOSED' : 'BOARDING';
+export function flightPhase(now: number, calendar: FlightCalendar = FLIGHT_DEFAULT_CALENDAR): FlightPhase {
+  return now < calendar.listClosesAt ? 'FINAL_CALL' : now < calendar.boardingOpensAt ? 'GATE_CLOSED' : 'BOARDING';
 }
 /** The list a new entry joins: the beta list while it is open, the next flight's list afterwards. */
 export const listFor = (phase: FlightPhase): 'FIRST' | 'NEXT' => phase === 'FINAL_CALL' ? 'FIRST' : 'NEXT';
@@ -46,12 +85,15 @@ export const eventOrigin = (origin: FlightOrigin | null): 'list' | 'invite' | 'c
 
 /** The access decision for one account at `now` (BOARDING phase); `entry` is its verified email's beta-list entry, if any. */
 export function decideAccess(input: { readonly now: number; readonly passId: string | null; readonly invite: 'FOUNDING' | 'CREATOR' | null;
-  readonly entry: { readonly flight: 'FIRST' | 'NEXT'; readonly batch: number | null; readonly opensAt: number | null } | null }): FlightAccess {
+  readonly entry: { readonly flight: 'FIRST' | 'NEXT'; readonly batch: number | null; readonly opensAt: number | null } | null;
+  readonly calendar?: FlightCalendar }): FlightAccess {
+  const calendar = input.calendar ?? FLIGHT_DEFAULT_CALENDAR;
   if (input.passId) return { kind: 'boarded', passId: input.passId };
-  if (flightPhase(input.now) !== 'BOARDING') return { kind: 'not_yet', opensAt: FLIGHT_BOARDING_OPENS_AT };
+  if (flightPhase(input.now, calendar) !== 'BOARDING') return { kind: 'not_yet', opensAt: calendar.boardingOpensAt };
   if (input.invite) return { kind: 'eligible', origin: input.invite === 'FOUNDING' ? 'INVITE' : 'CREATOR' };
   if (input.entry?.flight === 'FIRST') {
-    const opensAt = input.entry.opensAt ?? FLIGHT_BOARDING_OPENS_AT;
+    // A group whose recorded opening is earlier than boarding (created for the previous calendar) boards when boarding opens.
+    const opensAt = input.entry.opensAt ?? calendar.boardingOpensAt;
     if (input.now >= opensAt) return { kind: 'eligible', origin: 'LIST' };
     return { kind: 'batch_closed', batch: input.entry.batch ?? 1, opensAt };
   }

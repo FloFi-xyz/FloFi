@@ -419,7 +419,7 @@ listed as unavailable. No migration and no new secret.
 
 ## 5m. Flight FloFi campaign (BUILD-FLOFI-FLIGHT-001, `/board`, `/api/board/*`) — release: [RELEASE-FLIGHT-0020.md](RELEASE-FLIGHT-0020.md)
 
-No variable of its own. `/board` needs `DATABASE_URL` with migration 0020 applied (a build shipping 0020 refuses a database still at 19
+No required variable of its own (two optional calendar variables, below). `/board` needs `DATABASE_URL` with migration 0020 applied (a build shipping 0020 refuses a database still at 19
 for every database-backed feature, not only `/board`: see the release order), the Privy variables of §5j (sign-in for "Board now") and
 `FLOFI_SESSION_SECRET` (it also keys the list form's rate-limit digest of the client's IPv4 address or IPv6 /64, from the platform's
 `x-real-ip`/`x-forwarded-for`; without it, or without an address, a request counts only toward the deployment-wide limit). Simulation
@@ -428,8 +428,23 @@ evidence is recorded only on the web deployment, by the flow runtime's observer 
 `flight.observer.registered` once per instance and `flight.evidence` (a fixed outcome code and the flow) for each boarding-phase
 simulation. The list form allows 30 requests per client per hour (mobile carriers share IPv4 addresses) and 3000 per ten minutes for
 the deployment; a rotating-IPv6 flood can still reach the deployment-wide limit, for which Vercel's firewall rate limiting is the
-platform-level answer. The campaign
-dates are code (list closes 2026-11-16 23:59 BRT, boarding opens 2026-11-17 09:00 BRT). Operators run `backend/flight-admin.ts`.
+platform-level answer. Operators run `backend/flight-admin.ts`.
+
+**Campaign calendar (BUILD-FLOFI-UX-005).** Two optional, server-only variables move the campaign without a code change:
+`FLOFI_FLIGHT_LIST_CLOSES_AT` (the beta list closes: Final call → Gate closed) and `FLOFI_FLIGHT_BOARDING_OPENS_AT` (boarding opens:
+Gate closed → Boarding; also the default opening of entries with no boarding group, and the boarding day the /board copy and its page
+description show). Each is an ISO 8601 instant **with an offset**, e.g. `2026-11-11T23:59:00-03:00` and `2026-11-12T09:00:00-03:00`.
+Unset, the approved calendar applies: list closes **2026-11-11 23:59 BRT**, boarding opens **2026-11-12 09:00 BRT** (UTC-3). They are read
+on every request (never `NEXT_PUBLIC_`, never inlined by the build), so a change needs no new build: it applies to the next deployment or
+restart that picks up the environment (on Vercel, a redeploy of the same commit). Fail-closed: a set value without an offset, that does not
+parse or names an impossible date (31 Nov, 30 Feb, 24:00), or a list closing after boarding opens, refuses the calendar: `/board` and its
+API answer "unavailable" (no list join, access answer, simulation evidence or pass) until it is fixed, and `flight.calendar_refused` is
+logged once per instance with the variable names only. A mistyped postponement therefore never opens boarding on the earlier default.
+Set them on the web deployment (Vercel); the Railway API and worker never decide a phase. Existing list entries, groups and passes are
+unchanged by a calendar move (no migration). Two rules when moving it: keep the approved shape (the list closes the evening before boarding
+opens: the Gate closed copy says "Boarding starts tomorrow"), and never move `FLOFI_FLIGHT_LIST_CLOSES_AT` later once the list has closed
+(addresses that joined in between are on the next flight's list and are not promoted). After a move, run `flight-admin.ts stats` and
+re-run `create-batch` for any boarding group planned against the old dates (a group opening before boarding boards when boarding opens).
 
 ## 6. Platform-provided (read, never set by hand)
 

@@ -4,7 +4,7 @@
  * concerns a person needs their signed-in FloFi account; answers are fixed codes. The list form answers a new and a repeated address
  * the same way. No route can sign, simulate, move funds or grant product access: they read and write the campaign only.
  */
-import { accessResultDetail, FLIGHT_BOARDING_OPENS_AT, FLIGHT_LIST_CLOSES_AT, flightPhase, listFor, normalizeEmail, normalizeHandle,
+import { accessResultDetail, flightPhase, listFor, normalizeEmail, normalizeHandle,
   normalizeInviteCode, parseClientEvent, type FlightOrigin } from './campaign';
 import { clientDigest, flightNow, flightPerson, flightStore } from './host';
 import type { AccountFlight, FlightStore } from './store';
@@ -51,7 +51,8 @@ export async function flightState(): Promise<FlightState | null> {
     const now = await flightNow(), person = await flightPerson();
     if (Date.now() - prunedAt > PRUNE_EVERY_MS) { prunedAt = Date.now(); await store.prune(now).catch(() => { prunedAt = 0; }); }
     const [counters, departures, flight] = await Promise.all([store.counters(), store.departures(), person ? store.account({ ...person, now }) : Promise.resolve(null)]);
-    return { ok: true, now, phase: flightPhase(now), closesAt: FLIGHT_LIST_CLOSES_AT, boardingOpensAt: FLIGHT_BOARDING_OPENS_AT, counters, departures,
+    const calendar = store.calendar;
+    return { ok: true, now, phase: flightPhase(now, calendar), closesAt: calendar.listClosesAt, boardingOpensAt: calendar.boardingOpensAt, counters, departures,
       me: { signedIn: person !== null, hasEmail: (person?.emails.length ?? 0) > 0, flight } };
   } catch { return null; }
 }
@@ -67,7 +68,7 @@ export async function handleJoin(request: Request): Promise<Response> {
   const store = await storeOr503();
   if (store instanceof Response) return store;
   try {
-    const now = await flightNow(), flight = listFor(flightPhase(now));
+    const now = await flightNow(), flight = listFor(flightPhase(now, store.calendar));
     // A filled honeypot gets the same answer as a person and is discarded.
     if (typeof body.company === 'string' && body.company.trim()) return json(200, { ok: true, flight });
     // A signed-in person may join with the address their account verified ("Join the next flight" on the Not-on-the-list state).

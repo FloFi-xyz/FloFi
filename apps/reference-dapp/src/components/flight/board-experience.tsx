@@ -13,7 +13,7 @@ import type { FlightState } from '../../flight/http';
 import type { FlightAccess } from '../../flight/campaign';
 import type { FlightPass, OwnInvite } from '../../flight/store';
 import { Flaps, FoundingPass, PassengerPass } from './boarding-pass';
-import { FLIGHT_COPY, type FlightCopy } from './flight-copy';
+import { boardingDay, brtClock as clockOf, FLIGHT_COPY, type FlightCopy } from './flight-copy';
 import styles from './flight.module.css';
 
 type Language = 'EN' | 'PT';
@@ -30,11 +30,6 @@ const report = (event: string, detail = '') => { void post('/api/board/event', {
 const number = (n: number, language: Language) => n.toLocaleString(language === 'PT' ? 'pt-BR' : 'en-US');
 const brt = (ms: number, options: Intl.DateTimeFormatOptions, language: Language) =>
   new Intl.DateTimeFormat(language === 'PT' ? 'pt-BR' : 'en-US', { timeZone: 'America/Sao_Paulo', ...options }).format(new Date(ms));
-/** "9:00": the approved board's 24-hour Brazilian time, without a leading zero. */
-function clockOf(ms: number): string {
-  const parts = new Intl.DateTimeFormat('en-GB', { timeZone: 'America/Sao_Paulo', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).formatToParts(new Date(ms));
-  return `${Number(parts.find(part => part.type === 'hour')?.value ?? 0)}:${parts.find(part => part.type === 'minute')?.value ?? '00'}`;
-}
 function errorText(copy: FlightCopy, code: string | undefined) {
   return (copy.errors as Record<string, string>)[code ?? ''] ?? copy.errors.generic;
 }
@@ -286,10 +281,10 @@ export function BoardExperience({ initial, language }: { initial: FlightState | 
           const answer = await post('/api/board/list', { language, consent: true });
           if (answer.ok) setNextJoined(true); else setMessage(errorText(copy, answer.code));
         }}>{t.next}</button>
-        <button type="button" className={`${styles.btn} ${styles.btnGhost}`} onClick={() => { report('share_click', 'not_listed'); shareOnX(copy.share.notListed); }}>{t.share}</button>
+        <button type="button" className={`${styles.btn} ${styles.btnGhost}`} onClick={() => { report('share_click', 'not_listed'); shareOnX(copy.share.notListed(boardingDay(state.boardingOpensAt, language))); }}>{t.share}</button>
       </div> : <>
         <ListForm copy={copy} language={language} flight="NEXT" onJoined={() => setNextJoined(true)}/>
-        <button type="button" className={`${styles.btn} ${styles.btnGhost}`} onClick={() => { report('share_click', 'not_listed'); shareOnX(copy.share.notListed); }}>{t.share}</button>
+        <button type="button" className={`${styles.btn} ${styles.btnGhost}`} onClick={() => { report('share_click', 'not_listed'); shareOnX(copy.share.notListed(boardingDay(state.boardingOpensAt, language))); }}>{t.share}</button>
       </>}
       <p className={styles.notice}><ListNotice copy={copy} language={language}/></p>
       <p className={styles.small}>{copy.batch.invite} <button type="button" className={styles.linkButton} onClick={() => setShowInvite(true)}>{copy.batch.useIt}</button></p>
@@ -298,10 +293,13 @@ export function BoardExperience({ initial, language }: { initial: FlightState | 
     </div>;
   } else if (phase === 'FINAL_CALL' || phase === 'GATE_CLOSED') {
     const gate = phase === 'GATE_CLOSED', t = gate ? copy.gateClosed : copy.finalCall;
+    // The boarding day and time come from the deployment's campaign calendar (the server state), never from the copy.
+    const eyebrow = gate ? copy.gateClosed.eyebrow : copy.finalCall.eyebrow(boardingDay(state.boardingOpensAt, language));
+    const body = gate ? copy.gateClosed.body(clockOf(state.boardingOpensAt)) : copy.finalCall.body;
     hero = <div className={styles.heroText}>
-      <span className={`${styles.lbl} ${styles.eyebrow}`}>{t.eyebrow}</span>
+      <span className={`${styles.lbl} ${styles.eyebrow}`}>{eyebrow}</span>
       <h1>{t.title[0]}<span className={styles.accentLight}>{t.title[1]}</span></h1>
-      <p className={styles.heroBody}>{t.body}</p>
+      <p className={styles.heroBody}>{body}</p>
       {!gate && <><span className={`${styles.lbl} ${styles.eyebrow}`}>{copy.finalCall.closesIn}</span><Countdown state={state} copy={copy}/></>}
       <ListForm copy={copy} language={language} flight={gate ? 'NEXT' : 'FIRST'} onJoined={() => { if (!gate) void refresh(); }}/>
       <div className={styles.metaRow}>

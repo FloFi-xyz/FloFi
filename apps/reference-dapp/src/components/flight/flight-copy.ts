@@ -10,18 +10,18 @@ import type { Language } from '../../i18n/language';
 const EN = {
   lang: 'en',
   title: 'Flight FloFi · Say where you’re going · FloFi',
-  description: 'FloFi boards Nov 17. Say where you’re going, FloFi builds the route, you approve. The first 100 get the good seats.',
+  description: (day: string) => `FloFi boards ${day}. Say where you’re going, FloFi builds the route, you approve. The first 100 get the good seats.`,
   nav: { label: 'Flight FloFi navigation', how: 'How it works', founding: 'Founding', routes: 'Routes', home: 'FloFi, home', language: 'Language' },
   marquee: 'NOW BOARDING · DEFI THE WAY YOU TALK · YOU APPROVE · FLOFI.XYZ · ', marqueePause: 'Pause the moving text', routeTo: 'to',
   finalCall: {
-    eyebrow: 'Flight FloFi · Closed beta · Boards Nov 17', title: ['Final call for ', 'the beta list.'],
+    eyebrow: (day: string) => `Flight FloFi · Closed beta · Boards ${day}`, title: ['Final call for ', 'the beta list.'],
     body: 'First boarding goes to the beta list. Say where you’re going, FloFi builds the route, you approve.',
     closesIn: 'List closes in', units: ['D', 'H', 'M'], unitWords: [['day', 'days'], ['hour', 'hours'], ['minute', 'minutes']], email: 'you@email.com', emailLabel: 'Your email', join: 'Join the list',
     onList: (n: string) => `${n} ON THE LIST`, notice: 'We only use your email for the FloFi beta.', consent: 'By joining, you agree to this use under our', privacy: 'Privacy Policy',
     joined: 'You’re on the list. First boarding goes to the beta list.', sticker: 'FINAL CALL',
   },
   gateClosed: {
-    eyebrow: 'Flight FloFi · Gate closed', title: ['Gate closed. ', 'Boarding starts tomorrow.'], body: '9:00 BRT. See you on board.',
+    eyebrow: 'Flight FloFi · Gate closed', title: ['Gate closed. ', 'Boarding starts tomorrow.'], body: (time: string) => `${time} BRT. See you on board.`,
     join: 'Join the next flight', joined: 'You’re on the list for the next flight.', sticker: 'LIST CLOSED',
   },
   boarding: {
@@ -73,7 +73,7 @@ const EN = {
     INVITE_INVALID: 'That invite code does not exist.', INVITE_USED: 'That invite code was already used.', INVITE_OWN: 'You can’t use your own invite.',
     INVITE_ALREADY_HELD: 'You already have an invite.', ALREADY_BOARDED: 'You’re already on board.', FLIGHT_HANDLE_INVALID: 'Use up to 15 letters, digits or underscores.',
     FLIGHT_SIGN_IN_REQUIRED: 'Sign in first.', generic: 'Something went wrong. Try again.' },
-  share: { notListed: 'Not on the list. Yet. Flight FloFi boards Nov 17.', pass: (seat: string, route: string) => `Flight FloFi · ${seat} · ${route} · You approve.` },
+  share: { notListed: (day: string) => `Not on the list. Yet. Flight FloFi boards ${day}.`, pass: (seat: string, route: string) => `Flight FloFi · ${seat} · ${route} · You approve.` },
   unavailable: 'Flight FloFi is not available on this deployment.',
 };
 type Copy = typeof EN;
@@ -81,18 +81,18 @@ type Copy = typeof EN;
 const PT: Copy = {
   lang: 'pt-BR',
   title: 'Flight FloFi · Diga para onde você vai · FloFi',
-  description: 'A FloFi embarca em 17/11. Diga para onde você vai, a FloFi monta a rota, você aprova. Os 100 primeiros ficam com os melhores assentos.',
+  description: (day: string) => `A FloFi embarca em ${day}. Diga para onde você vai, a FloFi monta a rota, você aprova. Os 100 primeiros ficam com os melhores assentos.`,
   nav: { label: 'Navegação do Flight FloFi', how: 'Como funciona', founding: 'Founding', routes: 'Rotas', home: 'FloFi, início', language: 'Idioma' },
   marquee: 'EMBARQUE ABERTO · DEFI DO JEITO QUE VOCÊ FALA · VOCÊ APROVA · FLOFI.XYZ · ', marqueePause: 'Pausar o texto em movimento', routeTo: 'para',
   finalCall: {
-    eyebrow: 'Flight FloFi · Beta fechado · Embarca em 17/11', title: ['Última chamada para ', 'a lista beta.'],
+    eyebrow: (day: string) => `Flight FloFi · Beta fechado · Embarca em ${day}`, title: ['Última chamada para ', 'a lista beta.'],
     body: 'O primeiro embarque é da lista beta. Diga para onde você vai, a FloFi monta a rota, você aprova.',
     closesIn: 'A lista fecha em', units: ['D', 'H', 'M'], unitWords: [['dia', 'dias'], ['hora', 'horas'], ['minuto', 'minutos']], email: 'voce@email.com', emailLabel: 'Seu e-mail', join: 'Entrar na lista',
     onList: (n: string) => `${n} NA LISTA`, notice: 'Usamos seu e-mail só para o beta da FloFi.', consent: 'Ao entrar, você concorda com esse uso, conforme a nossa', privacy: 'Política de Privacidade',
     joined: 'Você está na lista. O primeiro embarque é da lista beta.', sticker: 'ÚLTIMA CHAMADA',
   },
   gateClosed: {
-    eyebrow: 'Flight FloFi · Portão fechado', title: ['Portão fechado. ', 'O embarque começa amanhã.'], body: '9:00 BRT. Nos vemos a bordo.',
+    eyebrow: 'Flight FloFi · Portão fechado', title: ['Portão fechado. ', 'O embarque começa amanhã.'], body: (time: string) => `${time} BRT. Nos vemos a bordo.`,
     join: 'Entrar no próximo voo', joined: 'Você está na lista do próximo voo.', sticker: 'LISTA FECHADA',
   },
   boarding: {
@@ -144,10 +144,23 @@ const PT: Copy = {
     INVITE_INVALID: 'Esse código de convite não existe.', INVITE_USED: 'Esse código de convite já foi usado.', INVITE_OWN: 'Você não pode usar seu próprio convite.',
     INVITE_ALREADY_HELD: 'Você já tem um convite.', ALREADY_BOARDED: 'Você já está a bordo.', FLIGHT_HANDLE_INVALID: 'Use até 15 letras, números ou sublinhados.',
     FLIGHT_SIGN_IN_REQUIRED: 'Entre primeiro.', generic: 'Algo deu errado. Tente de novo.' },
-  share: { notListed: 'Fora da lista. Por enquanto. O Flight FloFi embarca em 17/11.', pass: (seat: string, route: string) => `Flight FloFi · ${seat} · ${route} · Você aprova.` },
+  share: { notListed: (day: string) => `Fora da lista. Por enquanto. O Flight FloFi embarca em ${day}.`, pass: (seat: string, route: string) => `Flight FloFi · ${seat} · ${route} · Você aprova.` },
   unavailable: 'O Flight FloFi não está disponível nesta implantação.',
 };
 
 export type FlightCopy = Copy;
+/**
+ * The boarding day as the copy writes it, on the Brazilian calendar: "Nov 12" in English, "12/11" in Portuguese (BUILD-FLOFI-UX-005: from
+ * the deployment's campaign calendar, never a date written into the copy).
+ */
+export function boardingDay(ms: number, language: Language): string {
+  return new Intl.DateTimeFormat(language === 'PT' ? 'pt-BR' : 'en-US', language === 'PT' ? { timeZone: 'America/Sao_Paulo', day: '2-digit', month: '2-digit' }
+    : { timeZone: 'America/Sao_Paulo', month: 'short', day: 'numeric' }).format(new Date(ms));
+}
+/** "9:00": the approved board's 24-hour Brazilian time, without a leading zero. */
+export function brtClock(ms: number): string {
+  const parts = new Intl.DateTimeFormat('en-GB', { timeZone: 'America/Sao_Paulo', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).formatToParts(new Date(ms));
+  return `${Number(parts.find(part => part.type === 'hour')?.value ?? 0)}:${parts.find(part => part.type === 'minute')?.value ?? '00'}`;
+}
 export const FLIGHT_COPY: Readonly<Record<Language, Copy>> = { EN, PT };
 export const FLIGHT_LINKS = { discord: 'https://discord.gg/36rEhdUa', x: 'https://x.com/FloFi_xyz' } as const;

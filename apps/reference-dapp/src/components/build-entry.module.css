@@ -24,11 +24,13 @@
 .composer{width:min(100%,1070px);min-height:88px;display:flex;align-items:center;gap:19px;padding:8px 8px 8px 26px;border:1px solid var(--entry-field-line);border-radius:23px;background:var(--entry-paper);
   box-shadow:0 14px 38px rgba(28,88,168,.08),0 0 0 5px var(--entry-halo);transition:box-shadow .2s ease,border-color .2s ease}
 .composer:focus-within{border-color:var(--entry-blue);box-shadow:0 14px 38px rgba(28,88,168,.1),0 0 0 4px rgba(35,67,217,.24)}
-.spark{flex:none;width:26px;height:26px;color:#1474ff}
-.composer textarea{flex:1;min-width:0;min-height:58px;max-height:150px;padding:15px 0 8px;border:0;outline:0;resize:vertical;background:transparent;color:var(--entry-ink);font-size:17px;line-height:1.4;text-align:left}
+/* While the field grows, the spark and the button keep their place and size (top and bottom of the one-line composer). */
+.spark{flex:none;align-self:flex-start;margin-top:23px;width:26px;height:26px;color:#1474ff}
+/* BUILD-FLOFI-UX-005: no manual resize handle; the field grows with its text (build-entry.tsx) to max-height, then scrolls inside. */
+.composer textarea{flex:1;min-width:0;min-height:58px;max-height:150px;padding:15px 0 8px;border:0;outline:0;resize:none;overflow-y:auto;overscroll-behavior:contain;background:transparent;color:var(--entry-ink);font-size:17px;line-height:1.4;text-align:left}
 .composer textarea::placeholder{color:var(--entry-muted);opacity:1}
 .composer textarea:disabled{opacity:.7}
-.create{align-self:stretch;flex:none;display:flex;align-items:center;justify-content:center;gap:11px;min-width:213px;min-height:56px;border:0;border-radius:17px;padding:0 20px;background:var(--entry-blue);color:#fff;
+.create{align-self:flex-end;flex:none;display:flex;align-items:center;justify-content:center;gap:11px;min-width:213px;min-height:72px;border:0;border-radius:17px;padding:0 20px;background:var(--entry-blue);color:#fff;
   font-size:16px;font-weight:600;cursor:pointer;box-shadow:0 5px 12px color-mix(in srgb,var(--entry-blue) 22%,transparent);transition:background .2s ease,transform .2s ease,opacity .2s ease}
 .create:not(:disabled):hover{background:var(--entry-blue-hover);transform:translateY(-1px)}
 .create:disabled{cursor:default;opacity:.55;box-shadow:none}

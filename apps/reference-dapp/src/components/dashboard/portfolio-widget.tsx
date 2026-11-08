@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 'use client';
-import { useEffect, useRef, useState, type RefObject } from 'react';
+import { useEffect, useRef, useState, type KeyboardEvent, type RefObject } from 'react';
 import { useLocale } from '../../i18n/locale';
 import { walletPortfolio } from '../../app/portfolio-action';
 import { formatObservedAt, formatAllocationShare, portfolioAllocation, portfolioOnNetwork, formatTokenAmount, formatUsdPrice, formatUsdValue, holdingKey, portfolioSummary, priceObservedAt, shortAddress,
@@ -10,7 +10,7 @@ import styles from './portfolio-widget.module.css';
 
 /**
  * The Dashboard wallet portfolio: a priced value, network allocation and top holdings, expanding in place into the wallet's
- * identity, the networks read and an Assets table. Every figure is a real read (`app/portfolio-action.ts`); no balance, price or total is
+ * identity and an Assets table (BUILD-FLOFI-UX-005: the per-network read list is no longer shown; partial reads stay noted). Every figure is a real read (`app/portfolio-action.ts`); no balance, price or total is
  * ever filled in. Only an Assets view exists: FloFi has no verified source for wallet transactions, DeFi positions or perpetuals.
  */
 const TITLE_ID = 'dashboard-portfolio-title', DETAILS_ID = 'dashboard-portfolio-details';
@@ -58,10 +58,8 @@ export function PortfolioWidget({ evm, solana, load = walletPortfolio }: { evm: 
   return <section className={`panel ${styles.root}`} aria-labelledby={TITLE_ID} aria-busy={loading} data-portfolio={portfolio ? 'ready' : failure ? 'error' : 'loading'}>
     <div className={styles.head}>
       <div className={styles.title}><WalletMark/>{heading}{portfolio?.mocked && <span className={styles.badge}>{tr('Test data (MOCKED)')}</span>}</div>
-      <div className={styles.controls}>{represented.length > 1 && <label className={styles.filter}>{tr('Network filter')}
-        <select value={selectedNetwork ?? ''} onChange={event => setNetworkFilter({ wallet, network: event.currentTarget.value as PortfolioNetworkId || null })}>
-          <option value="">{tr('All networks')}</option>{represented.map(network => <option key={network.id} value={network.id}>{network.name}</option>)}
-        </select></label>}
+      <div className={styles.controls}>{represented.length > 1 && <NetworkFilter networks={represented} value={selectedNetwork}
+        onChange={network => setNetworkFilter({ wallet, network })}/>}
       {portfolio && <button type="button" className={`workspace-action ${styles.refresh}`} onClick={refresh} disabled={loading}>{tr(loading ? 'Refreshing…' : 'Refresh')}</button>}</div>
     </div>
     {portfolio && failure && <p className={styles.note} role="alert">{tr('Refresh failed. Showing the last available balances; try refreshing again.')}</p>}
@@ -75,6 +73,80 @@ export function PortfolioWidget({ evm, solana, load = walletPortfolio }: { evm: 
         <p>{tr('Reading wallet balances…')}</p></div>}
     <span className={styles.srOnly} role="status">{portfolio && loading ? tr('Refreshing wallet balances…') : ''}</span>
   </section>;
+}
+
+function ChevronMark() {
+  return <svg className={styles.chevron} width="14" height="14" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"
+    strokeLinejoin="round" aria-hidden="true" focusable="false"><path d="m5.5 8 4.5 4.5L14.5 8"/></svg>;
+}
+function AllNetworksMark() {
+  return <svg width="16" height="16" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"
+    aria-hidden="true" focusable="false"><path d="m10 3 7 3.8-7 3.8-7-3.8Z"/><path d="m3 10.2 7 3.8 7-3.8M3 13.4l7 3.8 7-3.8"/></svg>;
+}
+/**
+ * BUILD-FLOFI-UX-005: the network filter as a FloFi control (the header settings menu's surface and the Dashboard's quiet button), not
+ * the platform's native select. A listbox button: Enter, Space or the arrow keys open it; arrows, Home and End move; Enter or Space
+ * chooses; Escape or a choice closes it and returns the focus to the button; Tab, a click outside or focus moving elsewhere just closes it.
+ */
+function NetworkFilter({ networks, value, onChange }: { networks: readonly PortfolioNetwork[]; value: PortfolioNetworkId | null; onChange(network: PortfolioNetworkId | null): void }) {
+  const { t: tr } = useLocale();
+  // One portfolio widget per page (as its other fixed ids): the filter's ids are fixed too.
+  const id = 'dashboard-network-filter', labelId = `${id}-label`, buttonId = `${id}-button`, listId = `${id}-list`;
+  const options: readonly { readonly id: PortfolioNetworkId | null; readonly name: string; readonly chain: string | null }[] =
+    [{ id: null, name: tr('All networks'), chain: null }, ...networks.map(network => ({ id: network.id, name: network.name, chain: network.chain }))];
+  const selectedIndex = Math.max(0, options.findIndex(option => option.id === value)), selected = options[selectedIndex]!;
+  const [open, setOpen] = useState(false);
+  const [active, setActive] = useState(selectedIndex);
+  const root = useRef<HTMLDivElement>(null), button = useRef<HTMLButtonElement>(null), list = useRef<HTMLUListElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    list.current?.focus();
+    const page = globalThis.document;
+    if (!page) return;
+    const outside = (event: PointerEvent) => { if (!root.current?.contains(event.target as Node)) setOpen(false); };
+    page.addEventListener('pointerdown', outside);
+    return () => page.removeEventListener('pointerdown', outside);
+  }, [open]);
+  useEffect(() => { if (open) list.current?.querySelector(`[data-index="${active}"]`)?.scrollIntoView?.({ block: 'nearest' }); }, [open, active]);
+  const show = (index: number) => { setActive(index); setOpen(true); };
+  const close = () => { setOpen(false); button.current?.focus(); };
+  const choose = (index: number) => { onChange(options[index]!.id); close(); };
+  function onButtonKey(event: KeyboardEvent<HTMLButtonElement>) {
+    if (event.key === 'ArrowDown' || event.key === 'ArrowUp') { event.preventDefault(); show(selectedIndex); }
+  }
+  function onListKey(event: KeyboardEvent<HTMLUListElement>) {
+    const last = options.length - 1;
+    const move = event.key === 'ArrowDown' ? Math.min(last, active + 1) : event.key === 'ArrowUp' ? Math.max(0, active - 1)
+      : event.key === 'Home' ? 0 : event.key === 'End' ? last : null;
+    if (move !== null) { event.preventDefault(); setActive(move); return; }
+    if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); choose(active); return; }
+    if (event.key === 'Escape') { event.preventDefault(); close(); return; }
+    if (event.key === 'Tab') setOpen(false);
+  }
+  const mark = (option: typeof selected) => <span className={styles.filterIcon} aria-hidden="true">
+    {option.chain ? <NetworkBrandIcon network={option.chain}/> : <AllNetworksMark/>}</span>;
+  return <div className={styles.filter} ref={root}
+    onBlur={event => { if (open && !root.current?.contains(event.relatedTarget as Node | null)) setOpen(false); }}>
+    <span id={labelId} className={styles.filterLabel}>{tr('Network filter')}</span>
+    <div className={styles.filterField}>
+      <button ref={button} id={buttonId} type="button" className={styles.filterButton} aria-haspopup="listbox" aria-expanded={open}
+        aria-controls={open ? listId : undefined} aria-labelledby={`${labelId} ${buttonId}`} onClick={() => open ? setOpen(false) : show(selectedIndex)} onKeyDown={onButtonKey}
+        // A Space that chose an option is released on this button once focus returns: it must not reopen the menu (Firefox clicks on keyup).
+        onKeyUp={event => { if (event.key === ' ') event.preventDefault(); }}>
+        {mark(selected)}<span className={styles.filterValue}>{selected.name}</span><ChevronMark/>
+      </button>
+      {open && <ul ref={list} id={listId} role="listbox" tabIndex={-1} className={styles.filterMenu} aria-labelledby={labelId}
+        aria-activedescendant={`${id}-option-${active}`} onKeyDown={onListKey}>
+        {options.map((option, index) => <li key={option.id ?? 'all'} id={`${id}-option-${index}`} role="option" data-index={index}
+          aria-selected={index === selectedIndex} data-active={index === active || undefined} className={styles.filterOption}
+          onPointerMove={() => setActive(index)} onClick={() => choose(index)}>
+          {mark(option)}<span className={styles.filterValue}>{option.name}</span>
+          {index === selectedIndex && <svg className={styles.filterCheck} width="14" height="14" viewBox="0 0 20 20" fill="none" stroke="currentColor"
+            strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" focusable="false"><path d="m4.5 10.4 3.6 3.6 7.4-8"/></svg>}
+        </li>)}
+      </ul>}
+    </div>
+  </div>;
 }
 
 function PortfolioBody({ portfolio, expanded, copied, summaryButton, toggle, collapse, copy }: {
@@ -170,27 +242,10 @@ function BalanceCell({ holding }: { holding: PortfolioHolding }) {
     {formatTokenAmount(holding.displayUnits, holding.decimals, language)}{note && <small className={styles.basis}>{tr(note)}</small>}</td>;
 }
 
-function NetworkRow({ network }: { network: PortfolioNetwork }) {
-  const { t: tr } = useLocale();
-  const coverage = network.status !== 'READ' ? null : network.tokens === 'NATIVE_ONLY' ? tr('Native balance only: listed token balances could not be read.')
-    : network.tokens === 'PARTIAL' ? network.uncheckedTokens > 0 ? tr('{0} listed tokens were not checked.', network.uncheckedTokens) : tr('Some token balances could not be read.') : null;
-  return <li data-status={network.status}>
-    <span className={styles.networkIcon} aria-hidden="true"><NetworkBrandIcon network={network.chain}/></span>
-    <span className={styles.networkName}>{network.name}</span>
-    <span className={network.status === 'READ' ? styles.statusRead : styles.statusUnavailable} title={network.code ?? undefined}>
-      {tr(network.status === 'READ' ? 'Read' : 'Unavailable')}</span>
-    {network.provenance && <span className={network.provenance === 'MOCKED' ? styles.badge : styles.provenance}>
-      {tr(network.provenance === 'MOCKED' ? 'Test data (MOCKED)' : 'Mainnet')}</span>}
-    {network.block && <span className={`${styles.position} numeric`}>{tr('Block {0}', network.block)}</span>}
-    {network.slot !== null && <span className={`${styles.position} numeric`}>{tr('Slot {0}', network.slot)}</span>}
-    {coverage && <span className={styles.coverage}>{coverage}</span>}
-  </li>;
-}
-
 function PortfolioDetails({ portfolio, copied, copy, collapse }: { portfolio: WalletPortfolio; copied: string | null; copy(address: string): void; collapse(): void }) {
   const { t: tr, language } = useLocale();
   const summary = portfolioSummary(portfolio), pricesAt = formatObservedAt(priceObservedAt(portfolio), language);
-  const updated = formatObservedAt(portfolio.observedAt, language), shown = [...summary.read, ...summary.unavailable];
+  const updated = formatObservedAt(portfolio.observedAt, language);
   const fixture = portfolio.holdings.some(holding => holding.price?.source === 'FIXTURE');
   const priceNote = !summary.holdings.length ? null : !portfolio.priceSource ? tr('USD values are unavailable on this deployment.')
     : portfolio.unpricedCount > 0 ? tr('Only assets with a verified Chainlink USD feed on this deployment are priced. Other assets show no value.') : null;
@@ -200,11 +255,6 @@ function PortfolioDetails({ portfolio, copied, copy, collapse }: { portfolio: Wa
       <dd><code title={account.address}>{shortAddress(account.address)}</code>
         <button type="button" className={styles.copy} onClick={() => copy(account.address)} aria-live="polite">{tr(copied === account.address ? 'Copied' : 'Copy address')}</button></dd>
     </div>)}</dl>
-    <section aria-labelledby="dashboard-portfolio-networks">
-      <h3 id="dashboard-portfolio-networks">{tr('Networks')}</h3>
-      {shown.length > 0 && <ul className={styles.networks}>{shown.map(network => <NetworkRow key={network.id} network={network}/>)}</ul>}
-      {summary.notEnabled.length > 0 && <p className={styles.note}>{tr('Not enabled on this deployment: {0}', summary.notEnabled.map(network => network.name).join(', '))}</p>}
-    </section>
     <section aria-labelledby="dashboard-portfolio-assets">
       <h3 id="dashboard-portfolio-assets">{tr('Assets')}</h3>
       {summary.holdings.length ? <div className={styles.tableWrap} tabIndex={0} role="region" aria-label={tr('Assets')}><table className={styles.table}>
