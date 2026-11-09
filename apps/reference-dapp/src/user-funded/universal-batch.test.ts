@@ -300,3 +300,30 @@ describe('P0 universal execution: a batch with Aave calls and no swap still expi
     expect(reconciled).toMatchObject({ status: 'RECONCILED', steps: [{ stepIndex: 0 }, { stepIndex: 1, received: [{ asset: `${CHAIN}/erc20:${USDC}`, amount: '1000000' }] }] });
   });
 });
+
+describe('P0 universal execution: Base Swap → Supply → Borrow as one batch (the browser e2e chain)', () => {
+  it('prepares the 5 calls (plus the swap deadline), simulates the health factor and reconciles on the Base double', async () => {
+    const { BASE_MAINNET_SWAP } = await import('../domain/public-testnet-swap.ts');
+    const BASE = 'eip155:8453', pool = delegationAavePool(BASE, [BASE])!;
+    const r = (asset: string) => delegationAaveReserve(BASE, pool, asset)!;
+    const reserves = [{ ...r(BASE_MAINNET_SWAP.weth), price: 2_500n * 10n ** 8n, ltvBps: 8_000n, liquidationThresholdBps: 8_300n, decimals: 18 },
+      { ...r(BASE_MAINNET_SWAP.usdc), price: 10n ** 8n, ltvBps: 7_500n, liquidationThresholdBps: 7_800n, decimals: 6 }];
+    const chain = createEvmDouble(8453, () => Math.floor(Date.parse(NOW) / 1000), { profile: BASE_MAINNET_SWAP, aave: { pool, reserves } });
+    chain.control.fundToken(OWNER, BASE_MAINNET_SWAP.usdc, 10_000_000n); chain.control.fundNative(OWNER, 10n ** 17n);
+    const transport = guarded(BASE, 'read', 'MOCKED', chain.rpc);
+    const deps: UserFundedDeps = { chains: [BASE], evm: c => c === BASE ? transport : null, bundler: () => null, solana: null, jupiter: null, now: () => new Date(NOW) };
+    const s = { version: 2, steps: [{ action: 'swap', network: 'base', inputAsset: 'USDC', outputAsset: 'WETH', amount: '3', slippageBps: 50 },
+      { action: 'supply', network: 'base', asset: 'WETH', amount: '0.0013', beneficiary: OWNER },
+      { action: 'borrow', network: 'base', asset: 'USDC', amount: '0.8', beneficiary: OWNER }], bindings: [{ step: 1, amountFrom: 0 }] };
+    const requirement = workflowRequirement(s), composition = composeWorkflowBound(s as never, undefined);
+    if (!requirement.ok || !composition.ok) throw new Error('STRATEGY_INVALID');
+    const prepared = await prepareGroup(deps, composition, requirement.value, { runId: 'wfr_base_aave', groupIndex: 0, strategy: 'EVM_WALLET_BATCH', chain: BASE, feePayer: OWNER,
+      stepFrom: 0, stepTo: 2 });
+    if (!prepared.ok) throw new Error(prepared.code);
+    const p = prepared.value.prepared as unknown as BatchPrepared;
+    expect(p.group.calls.map(c => c.kind)).toEqual(['ERC20_APPROVE', 'UNISWAP_V3_EXACT_INPUT_SINGLE', 'ERC20_APPROVE', 'AAVE_V3_SUPPLY', 'AAVE_V3_BORROW']);
+    expect(BigInt(p.simulation!.healthFactorAfter[pool.toLowerCase()]!)).toBeGreaterThanOrEqual(2n * 10n ** 18n);
+    const hash = chain.control.walletBatch(OWNER, evmCallsOf(p.group));
+    expect((await reconcileWalletBatch(transport, p.group, [hash], p.fromBlock)).status).toBe('RECONCILED');
+  });
+});

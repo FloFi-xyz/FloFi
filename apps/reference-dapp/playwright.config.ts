@@ -232,6 +232,18 @@ const workflowRunsHarness = process.env.FLOFI_WORKFLOW_RUNS === 'enabled' && (cl
 if (workflowRunsHarness) process.env.FLOFI_E2E_SESSION_SECRET ??= randomBytes(32).toString('hex');
 const workflowRunsServerEnv = workflowRunsHarness ? { FLOFI_SESSION_SECRET: process.env.FLOFI_E2E_SESSION_SECRET!, FLOFI_PUBLIC_ORIGIN: E2E_APP_ORIGIN } : {};
 
+// P0 universal execution: user-funded execution groups (the Editor's whole-workflow Review and Authorize, EIP-5792 wallet batches) on the MOCKED
+// loopback Base chain double at https://127.0.0.1:8567 (e2e/user-funded-chain-serve.ts), with the per-run certificate of the read harness. The
+// browser's wallet is the spec's own double; nothing reaches a public network. A read RPC for user-funded groups, a bundler or a delegation RPC
+// inherited from the shell is refused outright (Playwright passes process.env to the app server), and without this harness the feature is off.
+const userFundedHarness = process.env.FLOFI_USER_FUNDED_E2E === 'MOCKED_LOOPBACK_ONLY';
+if (process.env.FLOFI_USER_FUNDED_E2E && !userFundedHarness) throw new Error('User-funded E2E permits only the MOCKED loopback harness');
+if (userFundedHarness && (!swapReadHarness || !baseMainnetHarness || !workflowRunsHarness))
+  throw new Error('User-funded E2E needs the swap-read TLS harness, the Base mainnet harness and workflow runs on the loopback runtime');
+for (const key of Object.keys(process.env)) if (/^FLOFI_(USER_FUNDED_RPC|BUNDLER_RPC|DELEGATION_RPC)_/.test(key)) throw new Error(`Browser E2E refuses an inherited ${key}`);
+const userFundedServerEnv: Record<string, string> = userFundedHarness ? { FLOFI_USER_FUNDED_EXECUTION: 'enabled', FLOFI_USER_FUNDED_CHAINS: 'eip155:8453',
+  FLOFI_USER_FUNDED_RPC_8453: 'https://127.0.0.1:8567/rpc/8453', FLOFI_EDITOR_HANDOFF_MAINNET_NETWORKS: 'base' } : { FLOFI_USER_FUNDED_EXECUTION: 'disabled' };
+
 // BUILD-COPILOT-001: the Copilot runs in browser tests only on committed replay answers; a live model is never called from tests.
 const copilot = process.env.FLOFI_COPILOT;
 if (copilot !== undefined && copilot !== 'off' && copilot !== 'replay') throw new Error('Copilot E2E permits only FLOFI_COPILOT=replay');
@@ -287,7 +299,8 @@ export default defineConfig({
     ...(channelHarness ? [{ command: 'node e2e/telegram-bot-serve.ts', url: 'http://127.0.0.1:8559/__flofi/calls', reuseExistingServer: false, timeout: 30_000 }] : []),
     ...(delegationHarness ? [{ command: 'node e2e/delegation-chain-serve.ts', url: 'http://127.0.0.1:8560', reuseExistingServer: false, timeout: 30_000 }] : []),
     ...(robinhoodMainnetHarness ? [{ command: 'node e2e/robinhood-mainnet-serve.ts', url: 'http://127.0.0.1:8561', reuseExistingServer: false, timeout: 30_000 }] : []),
-    ...(baseMainnetHarness ? [{ command: 'node e2e/base-mainnet-serve.ts', url: 'http://127.0.0.1:8562', reuseExistingServer: false, timeout: 30_000 }] : []), {
+    ...(baseMainnetHarness ? [{ command: 'node e2e/base-mainnet-serve.ts', url: 'http://127.0.0.1:8562', reuseExistingServer: false, timeout: 30_000 }] : []),
+    ...(userFundedHarness ? [{ command: 'node e2e/user-funded-chain-serve.ts', url: 'https://127.0.0.1:8567', ignoreHTTPSErrors: true, reuseExistingServer: false, timeout: 30_000 }] : []), {
     command: modeA === 'synthetic' ? 'node e2e/fork/offline-rehearsal.mjs --serve-synthetic' : 'node e2e/fork/owner-recording.mjs serve-replay',
     url: `http://127.0.0.1:${E2E_PORTS.health}`,
     reuseExistingServer: false,
@@ -325,7 +338,7 @@ export default defineConfig({
       ...(learningHarness ? { DATABASE_URL: process.env.FLOFI_E2E_DATABASE_URL!, FLOFI_LEARNING: 'enabled', FLOFI_LEARNING_SECRET: randomBytes(32).toString('hex'),
         FLOFI_LEARNING_AUTOMATIC: 'consent' } : {}),
       ...mcpServerEnv, ...swapReadEnv,
-      ...channelServerEnv, ...automationServerEnv, ...delegationServerEnv, ...workflowRunsServerEnv,
+      ...channelServerEnv, ...automationServerEnv, ...delegationServerEnv, ...workflowRunsServerEnv, ...userFundedServerEnv,
       GRYLOO_MODE_A: 'fork', GRYLOO_MODE_A_PROFILE: join(runtime, 'profile.json'), GRYLOO_MODE_A_JOURNAL: join(runtime, 'journal') },
   }],
 });
