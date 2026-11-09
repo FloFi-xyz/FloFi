@@ -107,6 +107,23 @@ describe('BUILD-FLOFI-UNIVERSAL-WORKFLOW-002 execution groups', () => {
     }
   });
 
+  it('a swap whose output a later step of its delayed group spends is never a user operation: a wallet batch simulated and signed when due', () => {
+    const toBase = { action: 'bridge', sourceNetwork: 'arbitrum-one', destinationNetwork: 'base', asset: 'USDC', amount: '5' };
+    const sendWeth = { ...SEND_BASE, asset: 'WETH', amount: '0.001' };
+    // Only the whole-batch simulation proves the owner received the swap's full output (a fee-on-transfer token delivers less, and the bound
+    // transfer would spend the owner's other WETH); a user operation signed upfront only ever gets bundler estimates.
+    const bound = plan({ version: 2, steps: [toBase, SWAP_BASE, sendWeth], bindings: [{ step: 2, amountFrom: 1 }] }, METAMASK).groups[1]!;
+    expect(bound).toMatchObject({ strategy: 'EVM_WALLET_BATCH', signing: 'WHEN_DUE', awaitsDelivery: 0, stepFrom: 1, stepTo: 2 });
+    expect(bound.steps[1]).toMatchObject({ amount: 'GUARANTEED_MINIMUM', boundTo: 1 });
+    expect(bound.downgrades).toEqual(['USER_OPERATION_SWAP_OUTPUT_SIGNED_WHEN_DUE']);
+    // The same swap and transfer, unbound (the swap's output stays with the owner): still one typed-data signature upfront.
+    const free = plan({ version: 2, steps: [toBase, SWAP_BASE, sendWeth] }, METAMASK).groups[1]!;
+    expect(free).toMatchObject({ strategy: 'EVM_USER_OPERATION', signing: 'UPFRONT', downgrades: [] });
+    // Without a bundler the group is a wallet batch when due anyway, for that reason alone.
+    const noBundler = plan({ version: 2, steps: [toBase, SWAP_BASE, sendWeth], bindings: [{ step: 2, amountFrom: 1 }] }, METAMASK, { ...ALL, bundlerChains: [] }).groups[1]!;
+    expect(noBundler).toMatchObject({ strategy: 'EVM_WALLET_BATCH', signing: 'WHEN_DUE', downgrades: ['USER_OPERATION_BUNDLER_UNAVAILABLE'] });
+  });
+
   it('Solana: independent steps share one sign-all prompt; a step spending an earlier step\'s output starts its own group, signed when due', () => {
     const independent = plan({ version: 2, steps: [SOL_SWAP, SOL_SEND] }, METAMASK);
     expect(independent.groups.map(g => [g.strategy, g.stepFrom, g.stepTo, g.interactions])).toEqual([['SOLANA_SIGN_ALL', 0, 1, 1]]);

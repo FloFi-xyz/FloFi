@@ -377,3 +377,19 @@ describe('BUILD-FLOFI-UNIVERSAL-WORKFLOW-002 gas isolation at volume', () => {
     expect(accepted).toBe(1000);
   });
 });
+
+describe('P0 review fixes: a swap whose output the group spends is never a user operation signed upfront', () => {
+  it('a stored EVM_USER_OPERATION group [swap → transfer bound to it] is refused at the consuming step before anything is built or estimated', async () => {
+    const owner = await evmWallet(), address = owner.address.toLowerCase();
+    let reads = 0;
+    const deps: UserFundedDeps = { chains: [BASE], evm: () => ({ chain: BASE, purpose: 'read', environment: 'MOCKED', rpc: async () => { reads += 1; throw new Error('NOT_EXPECTED'); } }) as never,
+      bundler: () => null, solana: null, jupiter: null, now: () => new Date('2026-11-07T10:00:00Z') };
+    const { composition, requirement } = compose({ version: 2, steps: [
+      { action: 'swap', network: 'base', inputAsset: 'USDC', outputAsset: 'WETH', amount: '3', slippageBps: 50 },
+      { action: 'transfer', network: 'base', asset: 'WETH', amount: '0.001', recipient: '0x' + '2'.repeat(40) }], bindings: [{ step: 1, amountFrom: 0 }] });
+    expect(requirement.bindings.map(b => [b.step, b.amountFrom])).toEqual([[1, 0]]);
+    const g = { runId: 'wfr_' + 'e'.repeat(26), groupIndex: 1, strategy: 'EVM_USER_OPERATION' as const, chain: BASE, feePayer: address, stepFrom: 0, stepTo: 1 };
+    expect(await prepareGroup(deps, composition, requirement, g)).toMatchObject({ ok: false, code: 'USER_OPERATION_SWAP_OUTPUT_SIGNED_WHEN_DUE', stepIndex: 1 });
+    expect(reads).toBe(0);
+  });
+});

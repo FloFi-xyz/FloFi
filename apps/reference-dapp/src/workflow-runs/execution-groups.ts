@@ -24,7 +24,9 @@
  *                          inside that same confirmation (one-time setup, shown by the wallet).
  *   EVM_USER_OPERATION     an ERC-4337 v0.7 user operation of the owner's own EIP-7702 MetaMask smart account, signed upfront as EIP-712
  *                          typed data (one signature); FloFi relays it through a bundler when due; the EntryPoint charges the gas to the
- *                          owner's account prefund. Needs an upgraded account and a bundler for that chain.
+ *                          owner's account prefund. Needs an upgraded account and a bundler for that chain. Never for a group with an Aave
+ *                          step or a swap whose output a later step of the group spends: those need the whole-batch simulation (a wallet
+ *                          batch, signed when due).
  *   EVM_OWNER_STEP         the step's own flow (simulate → review → wallet confirmation), one or more confirmations per step.
  *   SOLANA_SIGN_ALL        one wallet prompt signs every transaction of the group (Wallet Standard `solana:signTransaction` with several
  *                          inputs); FloFi submits them in order, each after the previous confirmed. Recent blockhashes: submitted at once.
@@ -183,11 +185,16 @@ export function planExecutionGroups(requirement: WorkflowRequirement, facts: Use
       // at least 2.0 after a borrow, the supply cap). A user operation is signed upfront and relayed later, so such a group is a wallet batch
       // prepared, simulated and signed when due instead.
       const aave = members.some(m => AAVE_ACTIONS.has(m.action));
+      // A swap whose output a later step of THIS group spends: only the whole-batch simulation proves the owner received all of that output
+      // (a fee-on-transfer token delivers less, and the bound step would then spend the owner's other balance of it). A user operation gets
+      // bundler estimates at most (a delayed one none), so such a group is a wallet batch simulated and signed when due, like an Aave group.
+      const spentSwap = members.some(m => m.action === 'swap' && requirement.bindings.some(b => b.amountFrom === m.index && members.some(c => c.index === b.step)));
       if (awaitsDelivery !== null) {
-        if (canUserOp && !aave) strategy = 'EVM_USER_OPERATION';
+        if (canUserOp && !aave && !spentSwap) strategy = 'EVM_USER_OPERATION';
         else {
-          if (chainEnabled && allBuildable) downgrades.push(canUserOp ? 'USER_OPERATION_AAVE_SIGNED_WHEN_DUE' : !facts.bundlerChains.includes(chain) ? 'USER_OPERATION_BUNDLER_UNAVAILABLE'
-            : evm?.wallet !== 'INJECTED' || !evm.typedData ? 'WALLET_TYPED_DATA_USER_OPERATION_UNSUPPORTED' : 'EVM_SMART_ACCOUNT_REQUIRED');
+          if (chainEnabled && allBuildable) downgrades.push(...canUserOp ? [...aave ? ['USER_OPERATION_AAVE_SIGNED_WHEN_DUE'] : [],
+            ...spentSwap ? ['USER_OPERATION_SWAP_OUTPUT_SIGNED_WHEN_DUE'] : []] : [!facts.bundlerChains.includes(chain) ? 'USER_OPERATION_BUNDLER_UNAVAILABLE'
+            : evm?.wallet !== 'INJECTED' || !evm.typedData ? 'WALLET_TYPED_DATA_USER_OPERATION_UNSUPPORTED' : 'EVM_SMART_ACCOUNT_REQUIRED']);
           strategy = canBatch ? 'EVM_WALLET_BATCH' : 'EVM_OWNER_STEP'; signing = 'WHEN_DUE';
         }
       } else if (canBatch) strategy = 'EVM_WALLET_BATCH';

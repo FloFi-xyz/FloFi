@@ -142,6 +142,12 @@ async function prepareUserOperation(deps: UserFundedDeps, requirement: WorkflowR
   // supply cap): never in a user operation signed upfront. The planner never makes one (execution-groups.ts); a stored group that would is refused.
   const aaveStep = requirement.steps.slice(g.stepFrom, g.stepTo + 1).find(s => AAVE_ACTIONS.has(s.action));
   if (aaveStep) return no('USER_OPERATION_AAVE_SIGNED_WHEN_DUE', aaveStep.index);
+  // P0 review fix: a swap whose output a later step of this group spends is signed only when due, as a wallet batch whose whole-batch simulation
+  // proves the owner receives that output (a user operation signed upfront has no such proof: a fee-on-transfer token would make the consumer
+  // spend the owner's unrelated balance). The planner never makes one (execution-groups.ts); a stored group that would is refused.
+  const spent = requirement.bindings.find(b => b.step >= g.stepFrom && b.step <= g.stepTo && b.amountFrom >= g.stepFrom && b.amountFrom <= g.stepTo
+    && requirement.steps.find(s => s.index === b.amountFrom)?.action === 'swap');
+  if (spent) return no('USER_OPERATION_SWAP_OUTPUT_SIGNED_WHEN_DUE', spent.step);
   if (!bundler) return no('USER_OPERATION_BUNDLER_UNAVAILABLE');
   const built = await buildEvmGroupCalls(requirement, g.stepFrom, g.stepTo, { chains: deps.chains, owner: g.feePayer, transport: deps.evm, guaranteed });
   if (!built.ok) return no(built.code, built.stepIndex);

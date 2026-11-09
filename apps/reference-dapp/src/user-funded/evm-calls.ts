@@ -38,6 +38,13 @@ import { quoteExactInputSingle } from '../delegation/workflow-grants.ts';
 
 const NATIVE = '0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee';
 const EVM_ADDRESS = /^0x[0-9a-f]{40}$/;
+/**
+ * Whether a failed quote is the chain's own answer that this pool offers nothing: the quoter reverted (geth/Anvil/Erigon "execution
+ * reverted…", Hardhat "…revert…", Nethermind "Reverted …") or quoted zero (`QUOTE_INVALID`). The JSON-RPC client passes only the provider's
+ * error message on (`httpRpc`, not its code 3), so the message is the one signal; a rate limit, a timeout or a malformed answer is not one.
+ */
+const quoteAnsweredNothing = (cause: unknown): boolean =>
+  cause instanceof Error && (cause.message === 'QUOTE_INVALID' || /\brevert(?:ed)?\b/i.test(cause.message));
 /** A user-funded call as persisted (amounts as decimal strings): the delegation templates plus the two transfer kinds. */
 export type UserCall =
   | { readonly kind: 'ERC20_APPROVE'; readonly token: string; readonly spender: string; readonly amount: string }
@@ -345,22 +352,25 @@ export async function buildEvmGroupCalls(requirement: WorkflowRequirement, from:
         if (problem) return refuse(problem);
       }
       // Each candidate tier's canonical pool (CREATE2 from the registered factory) must exist; each existing pool is quoted and the best
-      // output wins — as the owner-signed catalog swap does. A tier whose quote reverts (no liquidity for this size) is skipped.
+      // output wins — as the owner-signed catalog swap does. A tier is skipped only on the chain's own answer about it: no code at its pool
+      // address, or a quote that reverted (no liquidity for this size) or came back zero. Any other failure (a rate limit, a timeout, a
+      // malformed answer) says nothing about that pool: skipping it would silently pick a worse tier, so the build is refused
+      // (USER_FUNDED_RPC_UNAVAILABLE) and a retry quotes every pool again.
       let quoted = 0n, fee = 0;
       for (const tier of need.tiers) {
         // A test pair profile names its one pool; a catalog pair's canonical pool must exist at this tier.
         if (need.factory) {
           const pool = uniswapV3PoolAddress(need.factory, need.poolInitCodeHash, need.tokenIn, need.tokenOut, tier as 100 | 500 | 3000 | 10000);
           let code: unknown;
-          try { code = await t.rpc('eth_getCode', [pool, 'latest']); }
-          catch (cause) { return refuse(cause instanceof Error && cause.message === 'DELEGATION_RPC_UNAVAILABLE' ? 'USER_FUNDED_RPC_UNAVAILABLE' : 'QUOTE_UNAVAILABLE'); }
-          if (typeof code !== 'string' || code === '0x' || code === '0x0') continue;
+          try { code = await t.rpc('eth_getCode', [pool, 'latest']); } catch { return refuse('USER_FUNDED_RPC_UNAVAILABLE'); }
+          if (typeof code !== 'string' || !/^0x[0-9a-fA-F]*$/.test(code)) return refuse('USER_FUNDED_RPC_UNAVAILABLE');
+          if (code === '0x' || code === '0x0') continue;
         }
         let out: bigint;
         try { out = await quoteExactInputSingle(t, need.quoter, need.tokenIn, need.tokenOut, amount, tier); }
         catch (cause) {
-          if (cause instanceof Error && cause.message === 'DELEGATION_RPC_UNAVAILABLE') return refuse('USER_FUNDED_RPC_UNAVAILABLE');
-          continue;
+          if (quoteAnsweredNothing(cause)) continue;
+          return refuse('USER_FUNDED_RPC_UNAVAILABLE');
         }
         if (out > quoted) { quoted = out; fee = tier; }
       }

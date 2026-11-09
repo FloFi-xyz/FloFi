@@ -269,6 +269,54 @@ describe('P0 universal execution: any catalog ERC-20 swap joins a wallet batch, 
     if (!native.ok) throw new Error(native.code);
     expect(evmStepBuildable(native.value.steps[0]!, CHAINS, OWNER)).toBe('USER_FUNDED_NATIVE_SWAP_UNSUPPORTED');
   });
+
+  it('skips a fee tier only on the chain\'s own answer (a revert, a zero quote, no pool); a rate-limited or malformed read refuses, never a worse tier', async () => {
+    const s = { version: 2, steps: [{ action: 'swap', network: 'arbitrum-one', inputAsset: 'USDC', outputAsset: 'WETH', amount: '3', slippageBps: 50 }] };
+    type Rpc = (method: string, params: readonly unknown[]) => Promise<unknown>;
+    /** Pools exist at 0.05% and 0.3%; `rpc` answers every read of the preparation, with the chain double's own answers available as `chain`. */
+    const prepareWith = async (rpc: (method: string, params: readonly unknown[], chain: Rpc) => Promise<unknown>) => {
+      const chain = createEvmDouble(42161, () => Math.floor(Date.parse(NOW) / 1000), { profile: ARBITRUM_MAINNET_SWAP, deployedTiers: [500, 3000] });
+      chain.control.fundToken(OWNER, USDC, 10_000_000n); chain.control.fundNative(OWNER, 10n ** 17n);
+      const transport = guarded(CHAIN, 'read', 'MOCKED', (method, params) => rpc(method, params, chain.rpc));
+      const deps: UserFundedDeps = { chains: CHAINS, evm: c => c === CHAIN ? transport : null, bundler: () => null, solana: null, jupiter: null, now: () => new Date(NOW) };
+      const requirement = workflowRequirement(s), composition = composeWorkflowBound(s as never, undefined);
+      if (!requirement.ok || !composition.ok) throw new Error('STRATEGY_INVALID');
+      return prepareGroup(deps, composition, requirement.value, { runId: 'wfr_quote', groupIndex: 0, strategy: 'EVM_WALLET_BATCH', chain: CHAIN, feePayer: OWNER, stepFrom: 0, stepTo: 0 });
+    };
+    const quoteTier = (method: string, params: readonly unknown[]) => {
+      const data = method === 'eth_call' ? String((params[0] as { data?: unknown }).data) : '';
+      // quoteExactInputSingle((tokenIn, tokenOut, amountIn, fee, sqrtPriceLimitX96)): the fee is the fourth word.
+      return data.startsWith('0xc6a5026a') ? Number(BigInt('0x' + data.slice(10 + 3 * 64, 10 + 4 * 64))) : null;
+    };
+    /** The 0.3% pool quotes 1% less than the 0.05% one, whose quote is answered by `best` instead of the chain. */
+    const quotes = (best: (() => unknown) | null) => async (method: string, params: readonly unknown[], chain: Rpc) => {
+      const tier = quoteTier(method, params);
+      if (tier === 500 && best) return best();
+      if (tier !== 3000) return chain(method, params);
+      const raw = String(await chain(method, params));
+      return '0x' + (BigInt(raw.slice(0, 66)) * 99n / 100n).toString(16).padStart(64, '0') + raw.slice(66);
+    };
+    const feeOf = (r: Awaited<ReturnType<typeof prepareWith>>) => {
+      if (!r.ok) throw new Error(r.code);
+      return ((r.value.prepared as unknown as BatchPrepared).group.calls.at(-1) as { fee: number }).fee;
+    };
+    // Both pools answer: the 0.05% pool's better output wins.
+    expect(feeOf(await prepareWith(quotes(null)))).toBe(500);
+    // The best tier's quote is rate limited (the provider's message passed through): refused, never the 1% worse 0.3% pool.
+    expect(await prepareWith(quotes(() => { throw new Error('over rate limit'); }))).toMatchObject({ ok: false, code: 'USER_FUNDED_RPC_UNAVAILABLE', stepIndex: 0 });
+    // A malformed answer says nothing about the pool either.
+    expect(await prepareWith(quotes(() => null))).toMatchObject({ ok: false, code: 'USER_FUNDED_RPC_UNAVAILABLE', stepIndex: 0 });
+    // The chain itself answered for that pool: it reverted (no liquidity for this size) or quoted nothing. That tier is skipped.
+    for (const revert of ['execution reverted', 'execution reverted: SPL', 'VM Exception while processing transaction: revert'])
+      expect(feeOf(await prepareWith(quotes(() => { throw new Error(revert); })))).toBe(3000);
+    expect(feeOf(await prepareWith(quotes(() => '0x' + '0'.repeat(256))))).toBe(3000);
+    // The pool existence read is held to the same rule: a failed or malformed eth_getCode refuses instead of skipping that tier.
+    const tokens = [USDC, WETH].map(a => a.toLowerCase());
+    const poolCode = (answer: () => unknown) => (method: string, params: readonly unknown[], chain: Rpc) =>
+      method === 'eth_getCode' && !tokens.includes(String(params[0]).toLowerCase()) ? Promise.resolve().then(answer) : chain(method, params);
+    expect(await prepareWith(poolCode(() => { throw new Error('over rate limit'); }))).toMatchObject({ ok: false, code: 'USER_FUNDED_RPC_UNAVAILABLE', stepIndex: 0 });
+    expect(await prepareWith(poolCode(() => null))).toMatchObject({ ok: false, code: 'USER_FUNDED_RPC_UNAVAILABLE', stepIndex: 0 });
+  });
 });
 
 describe('P0 universal execution: a batch with Aave calls and no swap still expires on chain', () => {
