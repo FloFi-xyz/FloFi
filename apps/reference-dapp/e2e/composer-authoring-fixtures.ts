@@ -1,17 +1,14 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import type { Page } from '@playwright/test';
+import { expect, type Page } from '@playwright/test';
 
 /** Explicitly configure fixtures that exercise already-authored workflows. Toolbar creation itself stays unconfigured. */
 export async function configureCanvasAction(page: Page, amount: string) {
   const card = page.locator('.build-flow-surface .composer-card').last();
   const input = card.getByRole('textbox', { name: 'Source amount (USDC)', exact: true });
   await input.fill(amount);
-  const title = await card.locator('.composer-action-title').innerText();
-  const single = ['Supply', 'Borrow', 'Repay', 'Withdraw'].find(action => title.includes(action));
-  // BUILD-FIX-UX-001: an ordinary amount applies on Enter; the lending cards keep their own whole-form Review proposal.
-  if (!single) { await input.press('Enter'); return; }
-  await card.getByRole('button', { name: `Review ${single} change`, exact: true }).click();
-  await card.getByRole('button', { name: 'Apply proposal', exact: true }).click();
+  // P0 workflow execution: every action's amount, the lending cards' included, applies on Enter (no Review/Apply proposal).
+  await input.press('Enter');
+  await expect(card.getByRole('button', { name: 'Apply proposal', exact: true })).toHaveCount(0);
 }
 
 /** Opening settings is an explicit user action, independent of node selection. */

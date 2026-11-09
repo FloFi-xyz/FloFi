@@ -168,10 +168,14 @@ export function planExecutionGroups(requirement: WorkflowRequirement, facts: Use
       // A user operation needs the account to ALREADY be a smart account (`supported`): a typed-data signature cannot upgrade it, and an
       // operation signed for a plain account is only refused by the bundler after the delivery landed.
       const canUserOp = chainEnabled && allBuildable && evm?.wallet === 'INJECTED' && evm.typedData && facts.bundlerChains.includes(chain) && atomic === 'supported';
+      // P0 workflow execution: an Aave step is only ever signed after FloFi simulated its exact calls on the chain state they run on (health factor
+      // at least 2.0 after a borrow, the supply cap). A user operation is signed upfront and relayed later, so such a group is a wallet batch
+      // prepared, simulated and signed when due instead.
+      const aave = members.some(m => m.action === 'supply' || m.action === 'borrow');
       if (awaitsDelivery !== null) {
-        if (canUserOp) strategy = 'EVM_USER_OPERATION';
+        if (canUserOp && !aave) strategy = 'EVM_USER_OPERATION';
         else {
-          if (chainEnabled && allBuildable) downgrades.push(!facts.bundlerChains.includes(chain) ? 'USER_OPERATION_BUNDLER_UNAVAILABLE'
+          if (chainEnabled && allBuildable) downgrades.push(canUserOp ? 'USER_OPERATION_AAVE_SIGNED_WHEN_DUE' : !facts.bundlerChains.includes(chain) ? 'USER_OPERATION_BUNDLER_UNAVAILABLE'
             : evm?.wallet !== 'INJECTED' || !evm.typedData ? 'WALLET_TYPED_DATA_USER_OPERATION_UNSUPPORTED' : 'EVM_SMART_ACCOUNT_REQUIRED');
           strategy = canBatch ? 'EVM_WALLET_BATCH' : 'EVM_OWNER_STEP'; signing = 'WHEN_DUE';
         }

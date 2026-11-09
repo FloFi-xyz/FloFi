@@ -70,9 +70,19 @@ export async function sendWalletBatch(request: eip5792.SendCallsRequest): Promis
  * Throws when the wallet does not know the id (EIP-5792 5730): nothing was sent under it.
  */
 export async function walletBatchHashes(batchId: string): Promise<{ readonly hashes: readonly string[]; readonly failed: boolean } | null> {
-  const status = eip5792.callsStatus(await evmProvider().request({ method: 'wallet_getCallsStatus', params: [batchId] }));
+  return batchOutcome(eip5792.callsStatus(await evmProvider().request({ method: 'wallet_getCallsStatus', params: [batchId] })));
+}
+/**
+ * What a wallet's batch status means for the run. `failed` (reported as "not sent") ONLY for EIP-5792 status 400, the one status that says the
+ * batch was not included on chain. A batch that failed by the chain's rules (500) or landed partially (600) DID reach the chain and the owner
+ * paid for it: its transactions are reported (reconciliation decides what happened), and until the wallet lists them it stays pending —
+ * never reported as not sent.
+ */
+export function batchOutcome(status: eip5792.CallsStatus): { readonly hashes: readonly string[]; readonly failed: boolean } | null {
   if (status.status === 'PENDING' || status.status === 'UNKNOWN') return null;
-  return { hashes: status.receipts.map(r => r.transactionHash), failed: status.status !== 'CONFIRMED' };
+  const hashes = status.receipts.map(r => r.transactionHash);
+  if (hashes.length) return { hashes, failed: false };
+  return status.status === 'OFFCHAIN_FAILURE' ? { hashes: [], failed: true } : null;
 }
 /**
  * The owner revokes a user operation they signed that FloFi never relayed: their own wallet sends `EntryPoint.incrementNonce(key)` for that

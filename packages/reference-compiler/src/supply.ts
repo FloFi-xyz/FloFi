@@ -113,8 +113,17 @@ export async function readSupplyState(rpc: SupplyRpc, profileInput: AaveLendingP
     scaledPosition: rpcUint(scaled).toString(), position: rpcUint(position).toString(), index: rpcUint(index).toString(),
     reserveConfiguration:config.toString(),deploymentHash: supplyHash(codes), observedAt: new Date().toISOString() };
 }
+/**
+ * P0 workflow execution: the storage positions of an ERC-20 `allowance` mapping FloFi probes (each candidate is used only after the read-only
+ * proof below). Plain Solidity tokens declare it in the first slots (WETH9 4, USDC FiatToken 10); OpenZeppelin upgradeable tokens put it after
+ * Initializable and a 50-slot gap (Arbitrum One WETH, aeWETH: index 52, which the former 0..15 scan never reached, so every Arbitrum WETH Supply
+ * needing an approval was refused with SUPPLY_ALLOWANCE_OVERRIDE_UNVERIFIED); OpenZeppelin 5 namespaced storage (ERC-7201 `openzeppelin.storage.ERC20`)
+ * keeps `_allowances` one slot after its base.
+ */
+const ERC7201_ERC20_STORAGE = 0x52c63247e1f47db19d5ce0460030c497f067ca4cebf71ba98eeadabe20bace00n;
+export const ALLOWANCE_MAPPING_CANDIDATES: readonly bigint[] = Object.freeze([...Array.from({ length: 64 }, (_, i) => BigInt(i)), ERC7201_ERC20_STORAGE + 1n]);
 /** OpenZeppelin-style nested allowance mapping. A candidate is used only after on-chain read-only proof. */
-function allowanceSlot(profile: AaveLendingProfile, account: string, slot: bigint): string {
+export function allowanceSlot(profile: AaveLendingProfile, account: string, slot: bigint): string {
   const hashWords = (value: string) => '0x' + Array.from(keccak_256(Uint8Array.from(value.match(/../g)!.map(b => Number.parseInt(b,16)))), b => b.toString(16).padStart(2,'0')).join('');
   const first = hashWords(supplyWord(account)+supplyWord(slot));
   return hashWords(supplyWord(profile.pool)+first.slice(2));
@@ -137,11 +146,11 @@ async function simulateSupplyWithAllowanceOverride(rpc: SupplyRpc, profile: Aave
     if(approved!=='0x'&&rpcUint(approved)!==1n)throw new Error('SUPPLY_APPROVAL_SIMULATION_FAILED');
     approvalReturn=approved==='0x'?'NO_RETURN_DATA':'true';
     // Bounded mapping discovery, with unique markers, followed by proof of ONE exact storage key.
-    const candidates=Array.from({length:16},(_,i)=>allowanceSlot(profile,state.account,BigInt(i)));
+    const candidates=ALLOWANCE_MAPPING_CANDIDATES.map(index=>allowanceSlot(profile,state.account,index));
     const stateDiff=Object.fromEntries(candidates.map((slot,i)=>[slot,'0x'+supplyWord(BigInt(i+1))]));
     const data=supplyCall('allowance(address,address)',state.account,profile.pool);
     const marker=rpcUint(await rpc('eth_call',[{to:profile.asset,data},tag,{[profile.asset]:{stateDiff}}]));
-    if(marker<1n||marker>16n)throw new Error('SUPPLY_ALLOWANCE_OVERRIDE_UNVERIFIED');
+    if(marker<1n||marker>BigInt(candidates.length))throw new Error('SUPPLY_ALLOWANCE_OVERRIDE_UNVERIFIED');
     const slot=candidates[Number(marker)-1]!;
     override={[profile.asset]:{stateDiff:{[slot]:'0x'+supplyWord(BigInt(amount))}}};
     const control='0x1111111111111111111111111111111111111111';

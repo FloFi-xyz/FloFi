@@ -119,16 +119,26 @@ export function canvasAuthoringIncomplete(setup: CanvasActionSetup | null, input
 /** BUILD-FLOFI-SINGLE-AUTH-WORKFLOW-UX-001: the Aave cards whose ordinary amount edit applies on Enter, exactly like Swap and Bridge. */
 export const DIRECT_AMOUNT_LENDING_ACTIONS: readonly string[] = Object.freeze(['supply', 'borrow', 'repay', 'withdraw']);
 /**
- * Whether a Canvas card's amount edit needs a reviewed proposal instead of applying on Enter (`commitCanvasAmount`). A Send always does (its
- * destination is part of the edit). An Aave card does only when its reserve or network was changed on the card (a different asset: never a
- * silent re-denomination) or when a proposal for it is already waiting (externally proposed, e.g. by the chat). An ordinary Supply, Borrow,
- * Repay or Withdraw amount edit applies directly: one COMMAND through the history guard, a new workflow revision, and therefore a stale
- * Simulation, Review and authorization. Nothing is signed or sent, and no wallet is asked.
+ * P0 workflow execution: the Canvas cards whose amount, reserve/network pick and (for a Send) recipient apply directly — Enter, leaving the card,
+ * or a pause after typing — exactly like Swap and Bridge, whether the card was just added from the toolbox or is already a step.
  */
-export function amountEditNeedsReview(actionType: string, edit: { readonly reserveDraft: boolean; readonly proposalPending: boolean }): boolean {
-  if (!DIRECT_AMOUNT_LENDING_ACTIONS.includes(actionType)) return actionType === 'asset.transfer';
-  return edit.reserveDraft || edit.proposalPending;
+export const DIRECT_EDIT_ACTIONS: readonly string[] = Object.freeze([...DIRECT_AMOUNT_LENDING_ACTIONS, 'asset.transfer']);
+/**
+ * Whether a Canvas card's edit needs a reviewed proposal instead of applying directly (`commitCanvasAmount`). P0 workflow execution: only an
+ * EXTERNAL proposal already waiting for this card (one the chat or a channel proposed) keeps its own Review/Apply — the owner's own typing, a
+ * reserve or network picked on the card, and a Send's amount or recipient apply directly. A reserve change cannot re-denominate silently: picking
+ * another asset clears the amount (`editor-history` EDIT_CRYPTO_SELECTION), so the owner types the amount in the new asset before it applies.
+ * Every direct edit is one COMMAND through the history guard: a new workflow revision, a stale Simulation and Review, nothing signed or sent.
+ */
+export function amountEditNeedsReview(_actionType: string, edit: { readonly reserveDraft?: boolean; readonly proposalPending: boolean }): boolean {
+  return edit.proposalPending;
 }
+/**
+ * P0 workflow execution: a typed amount is applied automatically after a pause only when what the owner sees would not change when it is applied
+ * (no leading or trailing zeros, no trailing dot): the field keeps exactly the owner's text and caret. Anything else waits for Enter or leaving
+ * the card. Invalid amounts are never applied (the card shows why).
+ */
+export const CANONICAL_TYPED_AMOUNT = /^(?:0|[1-9][0-9]*)(?:\.[0-9]*[1-9])?$/;
 
 export function canEditCanvasAmount(node: Workflow['nodes'][number], context: ReviewContext, workflow?: Workflow) {
   if (node.lockedParameters.length) return false;

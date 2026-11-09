@@ -141,6 +141,15 @@ export function editorHistoryReducer(state: EditorHistory, action: HistoryAction
     if (setup ? setup.action !== action.selection.action : !node || !canSelectCryptoAssets(node, state.editor.workflow) || cryptoInputOf(node)?.selection.action !== action.selection.action) return state;
     const current = setup?.cryptoSelection ?? state.cryptoSelections[action.id];
     if (JSON.stringify(current) === JSON.stringify(action.selection)) return state;
+    // P0 workflow execution: picking the step's own saved reserve/network again is no edit at all — the draft is dropped (an amount typed meanwhile
+    // stays a draft only if it differs from the saved one), so the card shows the saved step instead of an edit waiting to be applied.
+    const saved = !setup && node ? cryptoInputOf(node) : null;
+    if (saved && JSON.stringify(saved.selection) === JSON.stringify(action.selection)) {
+      const selections = Object.fromEntries(Object.entries(state.cryptoSelections).filter(([id]) => id !== action.id));
+      const { [action.id]: typed, ...inputs } = state.amountInputs;
+      const keep = typed !== undefined && typed !== '' && typed !== saved.amount;
+      return { ...state, cryptoSelections: selections, amountInputs: keep ? { ...inputs, [action.id]: typed } : inputs, past: [...state.past, snapshot(state)], future: [] };
+    }
     const changedNetwork = current?.network !== action.selection.network;
     const poolInput = setup?.action === 'pool' && changedNetwork ? { ...setup.input, ...defaultPoolRange(action.selection.network) } : null;
     // BUILD AAVE-V3-CARD-CATALOG-FIX-001: a lending card that changes its reserve changes the amount's denomination (1000 USDC is not 1000 WETH),

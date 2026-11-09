@@ -4,9 +4,14 @@
  * EIP-5792 wallet batch or the owner's ERC-4337 user operation). Built from the verified registries the owner-signed flows already use and
  * a fresh on-chain quote; never from a label. The owner's account is the sender and fee payer of every call (invariant S1).
  *
- *   swap      approve(router, amountIn) · SwapRouter02.exactInputSingle(tokenIn, tokenOut, fee, OWNER, amountIn, minimumOut, 0)
+ *   swap      [approve(router, amountIn)] · SwapRouter02.exactInputSingle(tokenIn, tokenOut, fee, OWNER, amountIn, minimumOut, 0)
  *             (USDC⇄WETH at 0.05% on Ethereum, Base and Arbitrum One — the registered delegation-grade profiles)
- *   supply    approve(Pool, amount) · Pool.supply(asset, amount, OWNER, 0)   (registered Aave V3 market and reserve with a supply cap check)
+ *   supply    [approve(Pool, amount)] · Pool.supply(asset, amount, OWNER, 0)   (registered Aave V3 market and reserve; its supply cap, liquidity
+ *             and the owner's health factor are proven by the whole-batch simulation before signing, `batch-simulation.ts`)
+ *
+ * P0 workflow execution: an approval is added only when the owner's CURRENT allowance (read now) does not already cover what the batch spends
+ * from that token through that spender — a sufficient existing allowance is never re-approved (or reduced). A non-zero allowance that is too
+ * small is first set to 0 (tokens such as Ethereum USDT refuse to change one non-zero allowance into another).
  *   borrow    Pool.borrow(asset, amount, VARIABLE, 0, OWNER)
  *   transfer  ERC20.transfer(recipient, amount) or a native value transfer to the recipient the owner authored (or the owner itself)
  *
@@ -17,7 +22,7 @@
 import { erc7710 } from '@defi-workflow-engine/reference-compiler';
 import { stepCapability } from '../delegation/capabilities.ts';
 import type { ChainTransport } from '../delegation/chains.ts';
-import { delegationSwapProfile } from '../delegation/profiles.ts';
+import { delegationAavePool, delegationAaveReserve, delegationSwapProfile } from '../delegation/profiles.ts';
 import { assetKey, type StepRequirement, type WorkflowRequirement } from '../delegation/steps.ts';
 import { quoteExactInputSingle } from '../delegation/workflow-grants.ts';
 
@@ -56,19 +61,50 @@ export function callOf(c: UserCall): erc7710.WorkflowCall {
   }
 }
 
-/** Whether FloFi can build this step's exact calls on this deployment (the group planner's per-step check, before any quote). */
-export function evmStepBuildable(step: StepRequirement, chains: readonly string[]): string | null {
+/**
+ * The verified call template of a swap, supply or borrow step for a user-funded batch: the same registries the delegated planner pinned
+ * (USDC⇄WETH Uniswap v3, the chain's registered Aave V3 market and reserves), opted in per chain here. One delegation-only gate does not apply
+ * to a batch the owner's own wallet sends: the static `validateSupplyCap` profile flag (a delegated Supply could not re-check the cap at
+ * redemption). A batch's supply cap is proven on chain by its whole-batch simulation before signing (`batch-simulation.ts`), so a registered
+ * reserve without the flag (native USDC on Base and Arbitrum One) can be supplied in a batch too. Aave steps are only ever planned into such
+ * simulated wallet batches (a user operation, signed upfront without that simulation, never carries one: `execution-groups.ts`).
+ */
+export function userFundedNeed(step: StepRequirement, chains: readonly string[]): ReturnType<typeof stepCapability> {
+  const c = stepCapability(step, 'PRODUCTION', chains);
+  if (c.ok || step.action !== 'supply' || c.code !== 'DELEGATION_ASSET_NOT_SUPPORTED') return c;
+  const pool = delegationAavePool(step.chain, chains), input = step.inputs[0];
+  const reserve = pool && input && step.adapterId === 'aave-v3' ? delegationAaveReserve(step.chain, pool, input.address) : null;
+  return reserve && pool && input ? { ok: true, mechanism: 'EVM_ERC7710_METAMASK_V1_3', evidence: 'IMPLEMENTED',
+    need: { kind: 'EVM_AAVE_V3_SUPPLY', pool, asset: input.address, amount: input.amount } } : c;
+}
+/**
+ * Whether FloFi can build this step's exact calls on this deployment (the group planner's per-step check, before any quote). P0 workflow
+ * execution: every refusal that does not depend on a quote is decided HERE, at planning, so a step that cannot be built is never put in a batch
+ * that would only fail when the owner presses Authorize (slippage above the batch limit, an Aave beneficiary that is not the run's own wallet,
+ * a borrow funded by another step). `owner`: the run's EVM wallet when known.
+ */
+export function evmStepBuildable(step: StepRequirement, chains: readonly string[], owner?: string | null): string | null {
   if (step.namespace !== 'eip155') return 'USER_FUNDED_NAMESPACE_INVALID';
   if (!chains.includes(step.chain)) return 'USER_FUNDED_CHAIN_DISABLED';
   if (step.inputs.length !== 1) return 'USER_FUNDED_STEP_SHAPE_UNSUPPORTED';
   if (step.action === 'transfer') return null;
   if (step.action === 'swap' || step.action === 'supply' || step.action === 'borrow') {
-    // The same verified templates the delegated planner pinned (USDC⇄WETH Uniswap v3, registered Aave V3 reserves), opted in per chain here.
-    const c = stepCapability(step, 'PRODUCTION', chains);
-    return c.ok ? null : c.code;
+    const c = userFundedNeed(step, chains);
+    if (!c.ok) return c.code;
+    if (step.action === 'swap' && (step.slippageBps ?? 0) > MAX_BATCH_SLIPPAGE_BPS) return 'WORKFLOW_SLIPPAGE_UNSUPPORTED';
+    if (step.action !== 'swap' && owner) {
+      const beneficiary = 'beneficiary' in step.strategy && typeof step.strategy.beneficiary === 'string' ? step.strategy.beneficiary.toLowerCase() : null;
+      if (beneficiary !== owner.toLowerCase()) return 'AAVE_BENEFICIARY_NOT_OWNER';
+    }
+    return null;
   }
   return `USER_FUNDED_ACTION_NOT_BUILDABLE:${step.action.toUpperCase()}`;
 }
+/** The widest slippage a batched swap may be signed with (its minimum is fixed in the batch). */
+export const MAX_BATCH_SLIPPAGE_BPS = 300;
+/** `allowance(address,address)` of an ERC-20 (selector). */
+const ALLOWANCE_SELECTOR = '0xdd62ed3e';
+const addressWord = (a: string) => a.toLowerCase().replace(/^0x/, '').padStart(64, '0');
 
 type Deps = { readonly chains: readonly string[]; readonly owner: string; readonly transport: (chain: string) => ChainTransport | null;
   /** Outputs guaranteed before this group (a bridge's signed minimum delivery on this chain), by producer step index. */
@@ -86,6 +122,25 @@ export async function buildEvmGroupCalls(requirement: WorkflowRequirement, from:
   if (!EVM_ADDRESS.test(owner)) return { ok: false, stepIndex: from, code: 'GAS_PAYER_UNKNOWN' };
   const calls: UserCall[] = [], out: GroupStepCalls[] = [];
   const guaranteed = new Map<number, AssetAmountFact>(deps.guaranteed ?? []);
+  // What the owner's existing allowances still cover as the batch spends them, per (token, spender): read once from the chain, then drawn down in
+  // call order. A spend it covers needs no approval; one it does not gets an exact approval (preceded by a reset to 0 when the current allowance
+  // is non-zero), after which the remaining allowance is what that approval leaves (zero once spent).
+  const remaining = new Map<string, bigint>();
+  const approvalsFor = async (token: string, spender: string, amount: bigint): Promise<UserCall[]> => {
+    const k = `${token.toLowerCase()}|${spender.toLowerCase()}`;
+    if (!remaining.has(k)) {
+      const t = deps.transport(chain);
+      if (!t) throw new Error('USER_FUNDED_RPC_UNAVAILABLE');
+      const raw = await t.rpc('eth_call', [{ to: token, data: ALLOWANCE_SELECTOR + addressWord(owner) + addressWord(spender) }, 'latest']);
+      if (typeof raw !== 'string' || !/^0x[0-9a-fA-F]{1,64}$/.test(raw)) throw new Error('USER_FUNDED_ALLOWANCE_UNREADABLE');
+      remaining.set(k, BigInt(raw));
+    }
+    const current = remaining.get(k)!;
+    if (current >= amount) { remaining.set(k, current - amount); return []; }
+    remaining.set(k, 0n);
+    return [...current > 0n ? [{ kind: 'ERC20_APPROVE' as const, token, spender, amount: '0' }] : [],
+      { kind: 'ERC20_APPROVE' as const, token, spender, amount: amount.toString() }];
+  };
   for (const step of steps) {
     const refuse = (code: string) => ({ ok: false as const, stepIndex: step.index, code });
     const problem = evmStepBuildable(step, deps.chains);
@@ -116,7 +171,7 @@ export async function buildEvmGroupCalls(requirement: WorkflowRequirement, from:
       out.push({ stepIndex: step.index, calls: indices, spend, guaranteed: recipient === owner ? spend : null, quoted: null, recipient });
       continue;
     }
-    const c = stepCapability(step, 'PRODUCTION', deps.chains);
+    const c = userFundedNeed(step, deps.chains);
     if (!c.ok) return refuse(c.code);
     const need = c.need;
     if (need.kind === 'EVM_UNISWAP_V3_EXACT_INPUT_SINGLE') {
@@ -124,13 +179,16 @@ export async function buildEvmGroupCalls(requirement: WorkflowRequirement, from:
       const t = deps.transport(step.chain);
       if (!profile || !t) return refuse(!t ? 'USER_FUNDED_RPC_UNAVAILABLE' : 'DRIVER_PROFILE_MISSING');
       const slippage = BigInt(step.slippageBps ?? 0);
-      if (slippage < 0n || slippage > 300n) return refuse('WORKFLOW_SLIPPAGE_UNSUPPORTED');
+      if (slippage < 0n || slippage > BigInt(MAX_BATCH_SLIPPAGE_BPS)) return refuse('WORKFLOW_SLIPPAGE_UNSUPPORTED');
       let quoted: bigint;
       try { quoted = await quoteExactInputSingle(t, profile.quoter, need.tokenIn, need.tokenOut, amount, profile.fee); }
       catch (cause) { return refuse(cause instanceof Error && /^[A-Z][A-Z0-9_]{2,80}$/.test(cause.message) ? cause.message : 'QUOTE_UNAVAILABLE'); }
       const minimum = (quoted * (10_000n - slippage) + 9_999n) / 10_000n;
       if (minimum <= 0n) return refuse('QUOTE_INVALID');
-      const indices = push({ kind: 'ERC20_APPROVE', token: need.tokenIn, spender: profile.router, amount: amount.toString() },
+      let approvals: UserCall[];
+      try { approvals = await approvalsFor(need.tokenIn, profile.router, amount); }
+      catch (cause) { return refuse(cause instanceof Error && /^[A-Z][A-Z0-9_]{2,80}$/.test(cause.message) ? cause.message : 'USER_FUNDED_RPC_UNAVAILABLE'); }
+      const indices = push(...approvals,
         { kind: 'UNISWAP_V3_EXACT_INPUT_SINGLE', router: profile.router, tokenIn: need.tokenIn, tokenOut: need.tokenOut, fee: profile.fee, amountIn: amount.toString(),
           amountOutMinimum: minimum.toString(), quotedAmountOut: quoted.toString() });
       const outKey = assetKey({ chain: step.chain, address: need.tokenOut });
@@ -140,8 +198,10 @@ export async function buildEvmGroupCalls(requirement: WorkflowRequirement, from:
       const beneficiary = 'beneficiary' in step.strategy && typeof step.strategy.beneficiary === 'string' ? step.strategy.beneficiary.toLowerCase() : null;
       if (beneficiary !== owner) return refuse('AAVE_BENEFICIARY_NOT_OWNER');
       if (need.kind === 'EVM_AAVE_V3_SUPPLY') {
-        const indices = push({ kind: 'ERC20_APPROVE', token: need.asset, spender: need.pool, amount: amount.toString() },
-          { kind: 'AAVE_V3_SUPPLY', pool: need.pool, asset: need.asset, amount: amount.toString() });
+        let approvals: UserCall[];
+        try { approvals = await approvalsFor(need.asset, need.pool, amount); }
+        catch (cause) { return refuse(cause instanceof Error && /^[A-Z][A-Z0-9_]{2,80}$/.test(cause.message) ? cause.message : 'USER_FUNDED_RPC_UNAVAILABLE'); }
+        const indices = push(...approvals, { kind: 'AAVE_V3_SUPPLY', pool: need.pool, asset: need.asset, amount: amount.toString() });
         out.push({ stepIndex: step.index, calls: indices, spend, guaranteed: null, quoted: null, recipient: null });
       } else {
         if (binding) return refuse('WORKFLOW_BINDING_NOT_EXACT');

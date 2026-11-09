@@ -33,6 +33,11 @@ export type ExecuteWorkspaceProps = ExecutionWorkspaceState & {
    */
   workflowRun?: ReactNode;
   /**
+   * P0 workflow execution: `workflowRun` is the Editor's whole-workflow execution path for this workflow (review, authorize and progress are in
+   * it). The step-by-step status, authorization row and "Back to simulation" describe a path that is not in use, so they are not shown.
+   */
+  groupedRun?: boolean;
+  /**
    * BUILD-FLOFI-CHAT-E2E-FIX-002: the public chat-first workspace, where the chat presents progress and reconciliation, so there is no third column
    * beside the chat. BUILD0-UX-001: the status, what needs the owner's action and the navigation stay visible under the timeline (no "Result
    * details" disclosure); wallet, network and cost details are in the Dashboard.
@@ -75,12 +80,14 @@ export function ExecuteWorkspace(props: ExecuteWorkspaceProps) {
         {!live && view.warnings.length > 0 && <ul className="simulation-warnings" aria-label={tr("Execution blockers")}>{view.warnings.map((warning, index) => <li key={index} className="simulation-warning-blocking"><span className="simulation-warning-label">{tr("Blocking")}</span>{tr(warning.message)}</li>)}</ul>}
         {authorization.accepted && view.prompt && !execution.started && !requesting && <section className="execute-next" aria-label={tr("Next confirmation")}><h3>{tr("What happens next")}</h3><p>{tr(view.prompt)}</p><p>{tr("Only the next authorized request starts. Further wallet confirmations remain separate.")}</p></section>}
   </>;
-  const back = <button type="button" className="simulation-back" onClick={result || view.status === 'empty' ? backToBuild : backToSimulate}>{tr(result ? 'Return to the Canvas' : view.status === 'empty' ? 'Create a workflow in the Editor' : view.label === 'Simulation expired' ? 'Simulate again' : 'Back to simulation')}</button>;
+  const grouped = Boolean(props.groupedRun && !live);
+  const back = grouped ? <button type="button" className="simulation-back" onClick={backToBuild}>{tr('Return to the Canvas')}</button>
+    : <button type="button" className="simulation-back" onClick={result || view.status === 'empty' ? backToBuild : backToSimulate}>{tr(result ? 'Return to the Canvas' : view.status === 'empty' ? 'Create a workflow in the Editor' : view.label === 'Simulation expired' ? 'Simulate again' : 'Back to simulation')}</button>;
   const navigationNote = live && live.state !== 'complete' && live.steps.some(step => step.operations.some(operation => operation.hash || operation.intent && ['posted', 'settling', 'partial'].includes(operation.state))) && <p className="execution-context execution-navigation-note">{tr("Leaving this view does not cancel submitted requests.")}</p>;
   const executionSummary = <>
       <aside className={`execution-summary panel${result ? ' execution-result-summary' : ''}`} aria-label={tr(result ? 'Execution result summary' : 'Execution Summary')}>
         <h2>{tr(result ? 'Result Summary' : 'Execution Summary')}</h2>
-        {status}
+        {!grouped && status}
         <dl className="simulation-summary-values">
           {result ? <>
             <div className="execution-result-count"><dt>{tr(result.countLabel)}</dt><dd>{tr(result.completed)}{tr(" of ")}{tr(result.total)}</dd></div>
@@ -98,10 +105,10 @@ export function ExecuteWorkspace(props: ExecuteWorkspaceProps) {
           <div><dt>{tr("Actions")}</dt><dd>{tr(live ? `${live.completed} of ${live.steps.length} completed` : view.steps.length)}</dd></div>
           </>}
           {providers.length > 0 && <div><dt>{tr("Providers")}</dt><dd>{tr(providers.join(' · '))}</dd></div>}
-          {!live && <div><dt>{tr("Authorization")}</dt><dd className={['Review required again', 'Approval required', 'Expired'].includes(view.authorizationLabel) ? 'execution-authorization-attention' : undefined}>{tr(view.authorizationLabel)}</dd></div>}
+          {!live && !grouped && <div><dt>{tr("Authorization")}</dt><dd className={['Review required again', 'Approval required', 'Expired'].includes(view.authorizationLabel) ? 'execution-authorization-attention' : undefined}>{tr(view.authorizationLabel)}</dd></div>}
         </dl>
         {live?.active && <section className="execute-next" aria-label={tr("Current step")}><h3>{tr(result ? 'Needs attention' : 'Current step')}</h3><p>{tr(live.active.number)}. {tr(live.active.action)}</p><p>{tr([live.active.provider, live.active.network].filter(Boolean).join(' · '))}</p><p>{tr(live.active.label)}</p></section>}
-        {notices}
+        {!grouped && notices}
         {!live && props.workflowRun}
         <div className="execute-actions simulation-workspace-actions">
           {stageActions}
@@ -113,11 +120,11 @@ export function ExecuteWorkspace(props: ExecuteWorkspaceProps) {
   // BUILD0-UX-001: the chat-first status panel — the run's state and progress, what needs the owner's action, and where to go next. The wallet,
   // network, provider and cost lines of the side summary and the run's technical evidence are in the Dashboard, never duplicated here.
   const statusPanel = <section className={`execution-summary execution-status-panel panel${result ? ' execution-result-summary' : ''}`} aria-label={tr(result ? 'Execution result' : 'Execution status')}>
-    {status}
-    {!live && ['Review required again', 'Approval required', 'Expired'].includes(view.authorizationLabel) && <p className="execution-context execution-authorization-attention" role="status">{tr('Authorization')}: {tr(view.authorizationLabel)}</p>}
+    {!grouped && status}
+    {!live && !grouped && ['Review required again', 'Approval required', 'Expired'].includes(view.authorizationLabel) && <p className="execution-context execution-authorization-attention" role="status">{tr('Authorization')}: {tr(view.authorizationLabel)}</p>}
     {live && <p className="execution-status-progress">{result ? <>{tr(result.countLabel)} · <span className="numeric">{tr(result.completed)}{tr(" of ")}{tr(result.total)}</span></>
       : tr('{0} of {1} steps confirmed', live.completed, live.steps.length)}</p>}
-    {notices}
+    {!grouped && notices}
     {!live && props.workflowRun}
     <div className="execute-actions simulation-workspace-actions execution-status-actions">
       {stageActions}

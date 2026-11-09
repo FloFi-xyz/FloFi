@@ -154,9 +154,9 @@ test('an answer that arrives after a workflow change is discarded', async ({ pag
   await expect(page.getByRole('button', { name: 'Send', exact: true })).toBeDisabled();
   await page.getByRole('button', { name: 'Add supply', exact: true }).click();
   const card = page.locator('.build-flow-surface .composer-card.active');
+  // P0 workflow execution: the Canvas amount applies on Enter (no Review/Apply proposal).
   await card.getByRole('textbox', { name: 'Source amount (USDC)', exact: true }).fill('3');
-  await card.getByRole('button', { name: 'Review Supply change', exact: true }).click();
-  await card.getByRole('button', { name: 'Apply proposal', exact: true }).click();
+  await card.getByRole('textbox', { name: 'Source amount (USDC)', exact: true }).press('Enter');
   await revision(page, 1);
   await expect(copilotSays(page)).toContainText('The workflow changed while Flofi Copilot was interpreting, so nothing was proposed.');
   await expect(proposal(page)).toHaveCount(0);

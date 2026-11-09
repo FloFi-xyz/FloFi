@@ -46,9 +46,10 @@ test.describe('UX-001 / UX-005 Send card and destination', () => {
     await add.click();
     const card = cards(page).first(), to = card.getByRole('textbox', { name: 'To', exact: true });
     await expect(card.locator('.composer-action-title')).toContainText('1. Send');
-    // On a mainnet wallet the new Send already targets a recipient-capable network: an empty destination blocks Review.
+    // On a mainnet wallet the new Send already targets a recipient-capable network. P0 workflow execution: a Send applies directly (Enter in its
+    // amount or To field, or leaving the card) once its destination is valid — there is no Review/Apply proposal for the owner's own edit.
     await expect(to).toBeVisible(); await expect(to).toHaveValue(''); await expect(to).toHaveAttribute('placeholder', '0x…');
-    await expect(card.getByRole('button', { name: 'Review Send change', exact: true })).toBeDisabled();
+    await expect(card.getByRole('button', { name: 'Review Send change', exact: true })).toHaveCount(0);
     await chooseNetwork(page, card, 'Arbitrum One');
     await card.getByRole('button', { name: 'Select source token', exact: true }).click();
     const tokens = page.getByRole('region', { name: 'Source token picker', exact: true });
@@ -56,17 +57,18 @@ test.describe('UX-001 / UX-005 Send card and destination', () => {
     await expect(tokens.getByRole('radio', { name: 'USDC', exact: true })).toBeChecked();
     await page.getByRole('button', { name: 'Hide token picker', exact: true }).click();
     await card.getByRole('textbox', { name: 'Source amount (USDC)', exact: true }).fill('5');
-    const review = card.getByRole('button', { name: 'Review Send change', exact: true });
     await expect(to).not.toHaveAttribute('readonly', ''); await expect(to).toHaveValue(''); await expect(to).toHaveAttribute('placeholder', '0x…');
-    await expect(review).toBeDisabled();
     for (const invalid of ['0x1234', BAD]) {
       await to.fill(invalid); await expect(to).toHaveAttribute('aria-invalid', 'true');
-      await expect(card.getByText('Enter a valid recipient address for this network.', { exact: true })).toBeVisible(); await expect(review).toBeDisabled();
+      await expect(card.locator('.composer-recipient-error')).toHaveText('Enter a valid recipient address for this network.');
+      // An invalid destination is never applied: Enter shows why, and the workflow does not change.
+      await to.press('Enter'); await expect(revision(page)).toHaveAttribute('data-workflow-revision', '0');
     }
-    await to.fill(` ${MIXED} `); await expect(to).not.toHaveAttribute('aria-invalid', 'true'); await expect(review).toBeEnabled();
+    await to.fill(` ${MIXED} `); await expect(to).not.toHaveAttribute('aria-invalid', 'true');
     await expect(revision(page)).toHaveAttribute('data-workflow-revision', '0');
-    await review.click(); await card.getByRole('button', { name: 'Apply proposal', exact: true }).click();
+    await to.press('Enter');
     await expect(revision(page)).toHaveAttribute('data-workflow-revision', '1');
+    await expect(card.getByRole('button', { name: 'Apply proposal', exact: true })).toHaveCount(0);
     const authored = cards(page).first();
     await expect(authored.locator('.composer-action-title')).toContainText('1. Send');
     await expect(authored.getByRole('textbox', { name: 'To', exact: true })).toHaveValue(MIXED.toLowerCase());
@@ -225,7 +227,8 @@ test.describe('UX-007 fast live quote feedback', () => {
     await expect.poll(() => seen.length).toBe(2); await input.fill('1000');
     await expect(destination).toContainText('0.4'); await page.waitForTimeout(900); await expect(destination).toContainText('0.4'); await expect(destination).not.toContainText('9.99');
     expect(seen.map(amountOf)).toEqual(['100000000', '10000000', '1000000000']);
-    // Estimation only: the draft is not applied, simulated, reviewed or signed.
+    // Estimation only: a card just added from the toolbox is applied by Enter or by leaving it, never by a typing pause (applying it creates a
+    // new step, which must not take focus while the owner types), so the draft is not applied, simulated, reviewed or signed.
     await expect(revision(page)).toHaveAttribute('data-workflow-revision', '0');
     await expect(page.getByRole('complementary', { name: 'Simulation Summary' })).toHaveCount(0);
     await expectEditorSection(page, 'Build');

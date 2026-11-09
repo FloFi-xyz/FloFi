@@ -73,10 +73,11 @@ export function SimulateWorkflowCanvas({ workflowName, primaryAction, stage = 's
     position: positions[node.nodeId]!,
     data: { composer: true, inspection: true, step: index + 1, selected: false, vertical: lending,
       summary: composerSummary(workflow, node, context),
-      // Simulate only: the Execute plan shows the reviewed amounts, never a newer approximate quote beside them.
-      ...stage === 'simulate' && ['asset.swap.exact-input', 'asset.bridge'].includes(node.actionType) ? { estimateWorkflow: workflow, estimateNodeId: node.nodeId,
+      // P0 workflow execution: Execute shows the same per-step quote as Create and Simulate (keyed by the step alone, so it is the cached answer,
+      // not a new one), marked as an estimate or as expired — never a blank '—' for a value FloFi already knows. Signing never uses it.
+      ...['asset.swap.exact-input', 'asset.bridge'].includes(node.actionType) ? { estimateWorkflow: workflow, estimateNodeId: node.nodeId,
         estimateOwner: node.chainId.startsWith('solana:') ? solanaAccount : evmAccount, estimateEvmOwner: evmAccount, estimateSolanaOwner: solanaAccount } : {} },
-  })), [workflow, context, positions, incomplete, lending, evmAccount, solanaAccount, stage, tr]);
+  })), [workflow, context, positions, incomplete, lending, evmAccount, solanaAccount, tr]);
   // BUILD-FLOFI-BUILDER-UX-002: the same link labels as the Build Canvas, so a link reads the same between Create and Simulate.
   const edges = useMemo(() => incomplete ? [] : composerConnections(workflow).map(({ id, source, target, label }) => ({
     id, source, target, type: 'default', animated: false, label: tr(edgeLabel(label)), ariaLabel: tr(edgeAccessibleLabel(label)),

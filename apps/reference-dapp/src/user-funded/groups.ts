@@ -26,6 +26,7 @@ import type { BundlerClient } from './bundler.ts';
 import { buildEvmGroupCalls, DEPENDENT_CALL_GAS, evmCallsOf, type AssetAmountFact, type EvmGroupCalls } from './evm-calls.ts';
 import { reconcileUserOperation, reconcileWalletBatch, type StepFacts } from './evm-reconcile.ts';
 import { assertUserFundedSubmission, type GasPaidFact } from './gas-payer.ts';
+import { simulateWalletBatch, type BatchSimulation } from './batch-simulation.ts';
 
 const WSOL = 'So11111111111111111111111111111111111111112';
 /** How long a prepared EVM group's quotes are honoured before it must be prepared again. */
@@ -75,11 +76,26 @@ async function prepareWalletBatch(deps: UserFundedDeps, requirement: WorkflowReq
   const built = await buildEvmGroupCalls(requirement, g.stepFrom, g.stepTo, { chains: deps.chains, owner: g.feePayer, transport: deps.evm, guaranteed });
   if (!built.ok) return no(built.code, built.stepIndex);
   const group = built.value, calls = evmCallsOf(group);
-  // The first call depends on nothing earlier in the batch: if it cannot be estimated from the owner's account it would revert, so nothing is offered.
-  let firstGas: bigint;
-  try { firstGas = big(await t.rpc('eth_estimateGas', [{ from: group.owner, to: calls[0]!.target, value: hex(calls[0]!.value), data: calls[0]!.data }])); }
-  catch (cause) { return no(codeOf(cause, '') === 'DELEGATION_RPC_UNAVAILABLE' ? 'USER_FUNDED_RPC_UNAVAILABLE' : 'SIMULATION_REVERTED', group.steps[0]?.stepIndex ?? null); }
-  const gas = firstGas + group.calls.slice(1).reduce((sum, c) => sum + DEPENDENT_CALL_GAS[c.kind], 0n) + 30_000n;
+  const stepOfCall = (index: number | null) => index === null ? null : group.steps.find(s => s.calls.includes(index))?.stepIndex ?? null;
+  // P0 workflow execution: the WHOLE batch is simulated in order from the owner's account before anything is offered (every call succeeds, each
+  // swap meets its signed minimum, an Aave borrow leaves a health factor of at least 2.0), and its fee estimate uses each call's simulated gas.
+  const simulated = await simulateWalletBatch(t, group, calls);
+  let gas: bigint, simulation: BatchSimulation | null = null;
+  if (simulated.ok) {
+    simulation = simulated.value;
+    gas = simulated.value.gasUsed.reduce((sum, g) => sum + BigInt(g), 0n) + 30_000n;
+  } else if (simulated.code !== 'USER_FUNDED_SIMULATION_UNAVAILABLE') return no(simulated.code, stepOfCall(simulated.callIndex) ?? group.steps[0]?.stepIndex ?? null);
+  else {
+    // Without a whole-batch simulation on this RPC, a batch whose safety depends on Aave state (health factor, caps, liquidity) is never offered
+    // blind: it is refused with a closed code (the steps then run through their own flows). Swaps and transfers keep the atomic minimum checks.
+    const aave = group.calls.findIndex(c => c.kind === 'AAVE_V3_SUPPLY' || c.kind === 'AAVE_V3_BORROW');
+    if (aave >= 0) return no('USER_FUNDED_SIMULATION_UNAVAILABLE', stepOfCall(aave));
+    // The first call depends on nothing earlier in the batch: if it cannot be estimated from the owner's account it would revert, so nothing is offered.
+    let firstGas: bigint;
+    try { firstGas = big(await t.rpc('eth_estimateGas', [{ from: group.owner, to: calls[0]!.target, value: hex(calls[0]!.value), data: calls[0]!.data }])); }
+    catch (cause) { return no(codeOf(cause, '') === 'DELEGATION_RPC_UNAVAILABLE' ? 'USER_FUNDED_RPC_UNAVAILABLE' : 'SIMULATION_REVERTED', group.steps[0]?.stepIndex ?? null); }
+    gas = firstGas + group.calls.slice(1).reduce((sum, c) => sum + DEPENDENT_CALL_GAS[c.kind], 0n) + 30_000n;
+  }
   const fees = await feeFacts(t, group.owner);
   const maxFeePerGas = fees.gasPrice * 2n + fees.priority, maxCost = gas * maxFeePerGas;
   // Financial isolation: the owner's own native balance must cover the fee ceiling plus any native value sent; nobody else's ever does.
@@ -89,7 +105,7 @@ async function prepareWalletBatch(deps: UserFundedDeps, requirement: WorkflowReq
   const request = eip5792.sendCallsRequest(group.chainId, group.owner, calls, walletBatchId(g.runId, g.groupIndex));
   // Receipts older than this preparation can never reconcile this group (an old owner transaction is not this batch).
   const fromBlock = big(await t.rpc('eth_blockNumber', [])).toString();
-  return ok({ kind: 'EVM_WALLET_BATCH', chainId: group.chainId, owner: group.owner, group, request, fromBlock,
+  return ok({ kind: 'EVM_WALLET_BATCH', chainId: group.chainId, owner: group.owner, group, request, fromBlock, simulation,
     fee: { payer: group.owner, unit: 'wei', estimatedGas: gas.toString(), maxFeePerGas: maxFeePerGas.toString(), maxCost: maxCost.toString(), estimated: true } });
 }
 
@@ -97,6 +113,10 @@ async function prepareUserOperation(deps: UserFundedDeps, requirement: WorkflowR
   delayed: boolean): Promise<Result<Prepared>> {
   const t = deps.evm(g.chain), bundler = deps.bundler(g.chain);
   if (!t) return no('USER_FUNDED_RPC_UNAVAILABLE');
+  // P0: an Aave step is signed only after its exact calls were simulated on the state they run on (health factor ≥ 2.0 after a borrow, the
+  // supply cap): never in a user operation signed upfront. The planner never makes one (execution-groups.ts); a stored group that would is refused.
+  const aaveStep = requirement.steps.slice(g.stepFrom, g.stepTo + 1).find(s => s.action === 'supply' || s.action === 'borrow');
+  if (aaveStep) return no('USER_OPERATION_AAVE_SIGNED_WHEN_DUE', aaveStep.index);
   if (!bundler) return no('USER_OPERATION_BUNDLER_UNAVAILABLE');
   const built = await buildEvmGroupCalls(requirement, g.stepFrom, g.stepTo, { chains: deps.chains, owner: g.feePayer, transport: deps.evm, guaranteed });
   if (!built.ok) return no(built.code, built.stepIndex);
@@ -290,8 +310,11 @@ export async function advanceSolanaSubmission(deps: UserFundedDeps, prepared: Pr
 }
 
 // ── Reconciliation ────────────────────────────────────────────────────────────────────────────────────────────────────────
-export type Reconciled = { readonly status: 'PENDING' } | { readonly status: 'RECONCILED'; readonly steps: readonly StepFacts[]; readonly gasPaid: GasPaidFact; readonly transactions: readonly string[] }
-  | { readonly status: 'FAILED'; readonly code: string; readonly gasPaid: GasPaidFact | null; readonly transactions: readonly string[]; readonly steps?: readonly StepFacts[] };
+/** `group`: an EVM wallet batch reconciled against an EARLIER preparation of the group (the one the wallet sent): what its steps were signed to spend. */
+export type Reconciled = { readonly status: 'PENDING' }
+  | { readonly status: 'RECONCILED'; readonly steps: readonly StepFacts[]; readonly gasPaid: GasPaidFact; readonly transactions: readonly string[]; readonly group?: EvmGroupCalls }
+  | { readonly status: 'FAILED'; readonly code: string; readonly gasPaid: GasPaidFact | null; readonly transactions: readonly string[]; readonly steps?: readonly StepFacts[];
+    readonly group?: EvmGroupCalls };
 type TokenBalance = { readonly accountIndex: number; readonly mint: string; readonly owner?: string; readonly uiTokenAmount: { readonly amount: string } };
 type SolanaTxMeta = { readonly err: unknown; readonly fee: number | string; readonly preBalances: readonly (number | string)[]; readonly postBalances: readonly (number | string)[];
   readonly preTokenBalances?: readonly TokenBalance[]; readonly postTokenBalances?: readonly TokenBalance[] };
@@ -330,15 +353,47 @@ export async function reconcileSolanaGroup(deps: UserFundedDeps, prepared: Prepa
   }
   return { status: 'RECONCILED', steps, gasPaid: { payer: owner, amount: fee.toString(), unit: 'lamports', source: 'SOLANA_META' }, transactions: [...signatures] };
 }
+/** The mismatches that mean "these transactions are not THIS preparation's calls" (they may be an earlier preparation's, under the same id). */
+const SUPERSEDED_MISMATCH: ReadonlySet<string> = new Set(['RECONCILIATION_CALLS_MISMATCH', 'RECONCILIATION_TRANSACTION_BEFORE_PREPARATION']);
+/** At most this many earlier preparations of one wallet batch are kept for reconciliation. */
+export const SUPERSEDED_WALLET_BATCH_LIMIT = 8;
+/**
+ * The earlier preparations of a wallet batch group, newest first (each one's calls and block). Every preparation of a group shares ONE EIP-5792
+ * id, so when a group is prepared again after expiry the wallet may already hold the batch of an earlier one: reconciliation must still
+ * recognise it (and its signed minimums), so the new artifact keeps them.
+ */
+export function supersededWalletBatches(prepared: Prepared | null): readonly { readonly group: EvmGroupCalls; readonly fromBlock: string | null }[] {
+  if (!prepared || prepared.kind !== 'EVM_WALLET_BATCH') return [];
+  const earlier = Array.isArray(prepared.superseded) ? prepared.superseded as { group: EvmGroupCalls; fromBlock: unknown }[] : [];
+  return earlier.filter(e => e && typeof e === 'object' && e.group).map(e => ({ group: e.group, fromBlock: typeof e.fromBlock === 'string' ? e.fromBlock : null }));
+}
+/**
+ * The superseded list a new preparation of the same wallet batch group carries: the replaced artifact first, then its own earlier ones. A
+ * group reset to PLANNED keeps only that history (`{ kind, superseded }`, no artifact of its own) until it is prepared again.
+ */
+export function supersede(previous: Prepared | null): readonly { readonly group: EvmGroupCalls; readonly fromBlock: string | null }[] {
+  if (!previous || previous.kind !== 'EVM_WALLET_BATCH') return [];
+  const own = previous.group ? [{ group: previous.group as EvmGroupCalls, fromBlock: typeof previous.fromBlock === 'string' ? previous.fromBlock : null }] : [];
+  return [...own, ...supersededWalletBatches(previous)].slice(0, SUPERSEDED_WALLET_BATCH_LIMIT);
+}
 /** Reconciles an EVM group from the chain (wallet batch: the reported hashes; user operation: the bundler's bundle transaction, re-read). */
 export async function reconcileEvmGroup(deps: UserFundedDeps, prepared: Prepared, submission: Readonly<Record<string, unknown>>,
   authorization: Readonly<Record<string, unknown>> | null = null): Promise<Reconciled> {
   const group = prepared.group as EvmGroupCalls, t = deps.evm(group.chain);
   if (!t) return { status: 'PENDING' };
   if (prepared.kind === 'EVM_WALLET_BATCH') {
-    const r = await reconcileWalletBatch(t, group, (submission.hashes ?? []) as string[], typeof prepared.fromBlock === 'string' ? prepared.fromBlock : null);
-    return r.status === 'PENDING' ? r : r.status === 'RECONCILED' ? { status: 'RECONCILED', steps: r.steps, gasPaid: r.gasPaid, transactions: r.transactions }
-      : { status: 'FAILED', code: r.code, gasPaid: r.gasPaid, transactions: r.transactions };
+    const hashes = (submission.hashes ?? []) as string[];
+    let r = await reconcileWalletBatch(t, group, hashes, typeof prepared.fromBlock === 'string' ? prepared.fromBlock : null), matched: EvmGroupCalls | null = null;
+    // A batch the wallet sent under this group's id BEFORE the group was prepared again (its answer was lost, then the preparation expired)
+    // carries that earlier preparation's calls: it reconciles against the artifact it was sent from (and is recorded with ITS signed amounts),
+    // never as a mismatch of the newer one.
+    for (const earlier of r.status === 'MISMATCH' && SUPERSEDED_MISMATCH.has(r.code) ? supersededWalletBatches(prepared) : []) {
+      const again = await reconcileWalletBatch(t, earlier.group, hashes, earlier.fromBlock);
+      if (again.status !== 'MISMATCH' || !SUPERSEDED_MISMATCH.has(again.code)) { r = again; matched = earlier.group; break; }
+    }
+    const from = matched ? { group: matched } : {};
+    return r.status === 'PENDING' ? r : r.status === 'RECONCILED' ? { status: 'RECONCILED', steps: r.steps, gasPaid: r.gasPaid, transactions: r.transactions, ...from }
+      : { status: 'FAILED', code: r.code, gasPaid: r.gasPaid, transactions: r.transactions, ...from };
   }
   const bundler = deps.bundler(group.chain), userOpHash = String(submission.userOpHash);
   const receipt = bundler ? await bundler.receipt(userOpHash).catch(() => null) : null;

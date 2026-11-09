@@ -18,7 +18,7 @@ import type {SemanticWorkflow} from '@defi-workflow-engine/workflow-contracts';
 import { amountCommandTarget, canvasAmountCommand, canvasAmountMessage, canvasAuthoringIncomplete, type CanvasActionSetup, type CanvasAmountInputs, type CanvasBridgeNetworks, type CanvasBridgeNetworkInputs, type CanvasRecipientInputs } from '../domain/canvas-action-setup';
 import { readBaseQuote } from '../app/observation-action';
 import { browserFailureMessage, initialObservationState, observationReducer, receiveObservation, type ObservationState } from '../domain/base-observation';
-import { actionReviewValue, amountEditNeedsReview, DIRECT_AMOUNT_LENDING_ACTIONS } from '../domain/canvas-action-setup';
+import { actionReviewValue, amountEditNeedsReview, DIRECT_EDIT_ACTIONS } from '../domain/canvas-action-setup';
 import { singleAmountProposalTarget } from '../domain/composer-presentation';
 import { createCryptoActionNode, type CryptoActionInput, type CryptoSelection, type CryptoSelections } from '../domain/crypto-action-picker';
 import { boundAmount, boundProjection, compositionWorkflow, fundingAllocations, sequenceOrder, stepNodeKey, validCompletions, workflowSequence, type CompletedStep, type SequenceStep, type WorkflowSequence } from '../domain/workflow-sequence';
@@ -434,11 +434,11 @@ export function WorkflowProvider({ children, initialContext, initialWorkflowId =
     } catch (cause) { return canvasAmountMessage(cause, (history.cryptoSelections[id] ?? history.actionSetup?.cryptoSelection)?.network); }
   }
   function commitCanvasAmount(id: string) {
-    // BUILD-FLOFI-SINGLE-AUTH-WORKFLOW-UX-001: an Aave amount edit applies directly only when it is an ordinary amount edit. A reserve or network
-    // picked on the card, or a proposal already waiting for this card, is always reviewed — whichever form or key submitted it.
+    // P0 workflow execution: the owner's own edit of a card — amount, reserve/network pick, a Send's recipient — applies directly. Only an EXTERNAL
+    // proposal already waiting for this card (the chat's, which has no authoring card) keeps its own Review/Apply.
     const authored = state.workflow.nodes.find(node => node.nodeId === id);
-    if (authored && DIRECT_AMOUNT_LENDING_ACTIONS.includes(authored.actionType) && amountEditNeedsReview(authored.actionType, { reserveDraft: Boolean(history.cryptoSelections[id]),
-      proposalPending: Boolean(pending && (pending.authoringId ?? singleAmountProposalTarget(state.workflow, pending.command)) === id) })) return reviewCanvasAmount(id);
+    if (authored && DIRECT_EDIT_ACTIONS.includes(authored.actionType) && amountEditNeedsReview(authored.actionType, {
+      proposalPending: Boolean(pending && !pending.authoringId && singleAmountProposalTarget(state.workflow, pending.command) === id) })) return reviewCanvasAmount(id);
     try {
       const command = canvasAmountCommand(state, history.actionSetup, history.amountInputs, id, context, history.bridgeNetworkInputs, history.cryptoSelections, history.recipientInputs);
       const amount = actionReviewValue(history.actionSetup, id, history.amountInputs[id], history.bridgeNetworkInputs[id], history.cryptoSelections[id], history.recipientInputs[id]);

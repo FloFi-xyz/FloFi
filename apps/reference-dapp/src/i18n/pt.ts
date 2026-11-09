@@ -28,6 +28,7 @@ import { portugueseMainnetProduct } from './pt-mainnet-product';
 import { portugueseConcurrency } from './pt-concurrency';
 import { portugueseUniversalBridge } from './pt-universal-bridge';
 import { portugueseCatalogReliability } from './pt-catalog-reliability';
+import { portugueseWorkflowExecution } from './pt-workflow-execution';
 import { portugueseConversation } from './pt-conversation';
 import { portugueseChatE2eFix } from './pt-chat-e2e-fix';
 import { portugueseE2eReliability } from './pt-e2e-reliability';
@@ -47,6 +48,7 @@ import { portugueseFlight } from './pt-flight';
 /** English source messages are stable presentation keys. Technical identifiers never enter this catalog. */
 export const portuguese: Readonly<Record<string, string>> = {
   ...portugueseCatalogReliability,
+  ...portugueseWorkflowExecution,
   // BUILD-FLOFI-BUILDER-UX-002: new keys only, first so every existing translation of a shared word still wins.
   ...portugueseBuilderCanvas,
   ...portugueseAaveExpansion,

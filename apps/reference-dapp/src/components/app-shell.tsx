@@ -54,12 +54,14 @@ import { ExecutionPanel } from './execution-panel';
 import { ModeBPanel } from './mode-b-panel';
 import { ExecuteWorkspace } from './execute-workspace';
 import { EditorRunAction } from './editor-run-action';
+import { EditorWorkflowRunPanel, useEditorWorkflowRun } from './editor-workflow-run';
 import { projectCanvasAction } from '../domain/canvas-lifecycle';
 import { editorRunReadiness } from '../domain/editor-run';
 import { useExecutionLifecycle } from '../state/execution-lifecycle';
 import { useExecutionStart } from '../state/execution-start';
 import { restoredLocalExecutionKind } from '../domain/execution-recovery';
 import { currentExecution, isFinalExecutionResult } from '../domain/execution-result';
+import { executionContinuation } from '../domain/conversation-lifecycle';
 import { ReviewAuthorizationDetails } from './review-workspace';
 import { workflowBoundAuthorization } from '../domain/review-presentation';
 import { useReviewAuthorization } from '../state/review-authorization';
@@ -418,6 +420,31 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
     restoring: Boolean(sequenceRestore), started: Boolean(currentExecution(executionProgress)) || executionProgress.started || executionStart.started,
     invalid: Boolean(lifecycleState.invalidWorkflow || state.error), issue: sequenceIssue, lifecycle: canvasAction.kind, busy: Boolean(simulationSource.state.busy),
     revision: state.workflow.revision, simulatedRevision: runSimulation?.workflowId === state.workflow.workflowId ? runSimulation.revision : null });
+  // P0 workflow execution: a multi-step Canvas workflow runs as ONE workflow run, reviewed once and authorized with the lowest-friction mechanism
+  // the owner's wallet really supports (an EIP-5792 atomic batch where it reports one), in place. The per-step sequence stays only as the explicit
+  // fallback when the whole-workflow Review says a step needs its own flow (and why), or when this deployment does not offer it.
+  const localSequenceStarted = Boolean(currentExecution(executionProgress)) || executionProgress.started || executionStart.started
+    || Boolean(sequence && (sequence.cursor > 0 || sequence.completed.length > 0));
+  const workflowRunHere = useEditorWorkflowRun({ workflow: state.workflow, evmAccount: connectedWallet.account,
+    enabled: Boolean(sequence) && !approvalSlot && !autoPrepare && surface === 'workspace' && !sequenceRestore && !localSequenceStarted });
+  // The whole-workflow path is primary until its Review shows this workflow must run step by step (it cannot be grouped, the RPC cannot simulate
+  // it, or the path cannot run here); a safety refusal keeps it primary, so the workflow is fixed before anything runs (a started run always is).
+  const groupedPrimary = workflowRunHere.available && (workflowRunHere.started || !workflowRunHere.stepByStep);
+  // P0 workflow execution (production 2026-11-08, OWNER_STATE_CHANGED_REVIEW_REQUIRED after the USDC approval): on an owner-bound network
+  // (Arbitrum One, Ethereum) a swap's Review binds the exact approval transaction, so once THIS run's own approval reconciled the swap needs its own
+  // fresh, read-only Review. FloFi prepares it at once — exactly as the chat already does — instead of sending the owner back to "Simulate"; the
+  // Canvas action then reads "Authorize in wallet" for the swap (one click, the wallet's own confirmation). Nothing is signed or sent by it.
+  const continuation = executionContinuation({ progress: executionProgress });
+  const ownerBoundContinuation = Boolean(continuation?.approval && simulationSource.kind === 'public'
+    && (simulationSource.state as { run?: { quote?: { ownerReview?: unknown } } | null }).run?.quote?.ownerReview);
+  const requotedContinuation = useRef<string | null>(null);
+  useEffect(() => {
+    if (!continuation || !ownerBoundContinuation || requotedContinuation.current === continuation.key) return;
+    // "Continue to swap" under the approval's Review can never start an owner-bound swap (its begin is refused): the fresh Review comes first.
+    if (!['continue', 'simulate'].includes(canvasAction.kind) || canvasAction.disabled || simulationSource.state.busy) return;
+    requotedContinuation.current = continuation.key;
+    void simulateAgain();
+  }, [continuation?.key, ownerBoundContinuation, canvasAction.kind, canvasAction.disabled, simulationSource.state.busy]);
   // A proposal opened from a chat, MCP client or channel prepares its own fresh, read-only simulation as soon as it is loaded for that signer:
   // once per workflow revision and signer, never during or after a recorded run of this workflow, never retried automatically, and nothing is
   // accepted or signed. BUILD-CHAT-E2E-001: the final run of another workflow (the previous step of a multi-step run) does not count.
@@ -448,7 +475,15 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
     unsupported: testNetworkWorkflow || simulationSource.kind === 'unavailable', walletRequired: !signer || Boolean(approvalGate || autoPrepare && !approvalWallet),
     providerUnavailable: 'available' in simulationSource.state && simulationSource.state.available === false || 'info' in simulationSource.state && simulationSource.state.info?.available === false,
     error: simulationSource.state.error, staleQuote: lifecycleControls.view.expiresAt !== null && Date.now() >= lifecycleControls.view.expiresAt }) : null);
-  const simulateAction = sequenceRestore ? <div className="canvas-lifecycle-control sequence-restore-control">
+  const groupedAction = <div className="canvas-lifecycle-control editor-run-control">
+    <p className="canvas-sequence-note" role="note">{tr(workflowRunHere.started ? 'This workflow runs as one workflow run: follow it in Execute.'
+      : 'All {0} steps are reviewed together and authorized at once where your wallet can batch them.', String(sequence?.steps.length ?? 0))}</p>
+    <button type="button" className="primary" data-lifecycle-action="workflow-run"
+      disabled={(!workflowRunHere.started && Boolean(authoringIncomplete)) || ['reviewing', 'authorizing', 'proving', 'wallet', 'confirming'].includes(workflowRunHere.phase)}
+      onClick={() => { setTab('Execute'); if (workflowRunHere.canReview && !workflowRunHere.review) void workflowRunHere.startReview(); }}>
+      {tr(workflowRunHere.started || workflowRunHere.following ? 'Open workflow progress' : workflowRunHere.review ? 'Open the workflow review' : 'Review whole workflow')}</button>
+  </div>;
+  const simulateAction = groupedPrimary ? groupedAction : sequenceRestore ? <div className="canvas-lifecycle-control sequence-restore-control">
       <p role="status">{sequenceIssue}</p>
       {sequenceRestore.status === 'UNVERIFIED' && <>
         <button type="button" onClick={sequenceRestore.retry}>{tr('Check again')}</button>
@@ -484,7 +519,9 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
     bridge: { workflow: runtimeWorkflow, context, source: simulationSource, authorization, wallet: reviewBinding.wallet, progress: executionProgress,
       invalidWorkflow: lifecycleState.invalidWorkflow, simulate: simulateAgain, controls: lifecycleControls, networkAction, sequence: sequencePresentation,
       pendingEdits, resolveEdit, runtimeChecking, walletNetwork: reviewBinding.wallet.chain ? shellChainLabel(reviewBinding.wallet.chain) : null, networkError: walletConnection.error,
-      simulationBlocked: walletIssue ?? (simulationDisabled || !actionable || lifecycleState.invalidWorkflow ? simulationReason ?? 'Simulation is not available for this workflow.' : null),
+      simulationBlocked: walletIssue ?? (groupedPrimary ? workflowRunHere.started ? 'This workflow runs as one workflow run: follow it in Execute.'
+        : 'This workflow runs as one workflow run: open Execute and choose Review whole workflow, then Authorize workflow.'
+        : simulationDisabled || !actionable || lifecycleState.invalidWorkflow ? simulationReason ?? 'Simulation is not available for this workflow.' : null),
       connectWallet: () => void walletConnection.connect(), startNewWorkflow, executedActions, continuable: Boolean(sequence?.finished) || actionDone } });
   // BUILD-FLOFI-CHAT-E2E-FIX-002: the public chat-first workspace presents the Review and progress in the chat; Simulate and Execute show the canvas
   // beside it, with their summaries in an optional details surface (approval surfaces and the engineering workspace keep their side panels).
@@ -553,13 +590,19 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
   const wrapStage = (stage: ReactNode) => tab === 'Build' ? stage : <div className="stage-with-chat">{stage}{chat}</div>;
   return <EstimateOwnersContext.Provider value={estimateOwners}><div className="app-shell" inert={!interactive}><a className="skip-link" href="#workspace">{tr("Skip to workspace")}</a><TopBar tab={tab} setTab={setTab} pathname={pathname ?? null} engineering={engineering} entry={entry}/>{betaNotice}
     {approvalSlot && <div className="approval-notice-slot" ref={approvalSlot}/>}
+    {/* P0 workflow execution: after a reload, a whole-workflow run this browser started is offered (never followed silently). */}
+    {workflowRunHere.earlier && tab !== 'Execute' && <div className="editor-run-earlier-notice" role="status">
+      <span>{tr('A workflow you authorized earlier in this browser has not been closed.')}</span>
+      <button type="button" className="secondary" onClick={() => { setTab('Execute'); void workflowRunHere.followEarlier(); }}>{tr('Show its progress')}</button></div>}
     <AutomationInbox owner={owner} proven={Boolean(owner && proof.proven === owner.address)} open={() => navigate?.('/app/automations')}/>
     {/* BUILD-FLOFI-BUILDER-UX-002: Create → Simulate → Execute inside the Editor (the global Dashboard | Chat | Editor navigation is unchanged). */}
     <div className="editor-steps-row"><EditorStepper tab={tab} setTab={setTab} disabled={Boolean(authoringIncomplete || approvalGate)} incomplete={Boolean(authoringIncomplete)}/></div>
     {/* BUILD-FLOFI-CONVERSATIONAL-001: on Simulate and Execute the same conversation continues beside the stage (complementary to main). */}
     {wrapStage(<main id="workspace" className={`main workflow-workspace${tab === 'Build' ? ' build-workspace' : ''}`} data-workspace-toolbox={tab === 'Build' ? workspaceToolboxMode : undefined} tabIndex={-1} aria-label={tr(tab === 'Build' ? 'Workflow workspace' : tab === 'Simulate' ? 'Simulation workspace' : 'Execution workspace')}>
-      {tab === 'Execute' ? <ExecuteWorkspace detailsOnly={chatFirst} controls={lifecycleControls} primaryAction={simulateAction} workflowName={workflowName} workflow={runtimeWorkflow} context={context} source={simulationSource} authorization={authorization} wallet={reviewBinding.wallet} execution={executionStart} progress={executionProgress} recovery={executionProgress.recovery} invalidWorkflow={Boolean(reviewError || authoringIncomplete)} backToBuild={() => setTab('Build')} backToSimulate={() => setTab('Simulate')} startNewWorkflow={startNewWorkflow} openDashboard={() => setTab('Dashboard')}
-        workflowRun={editorRun.offered ? <EditorRunAction workflow={state.workflow} readiness={editorRun} steps={sequence?.steps.length ?? 0}/> : undefined}
+      {tab === 'Execute' ? <ExecuteWorkspace detailsOnly={chatFirst} controls={lifecycleControls} groupedRun={groupedPrimary}
+        primaryAction={groupedPrimary ? <button type="button" className="simulation-back" onClick={() => setTab('Build')}>{tr('Back to the Canvas')}</button> : simulateAction} workflowName={workflowName} workflow={runtimeWorkflow} context={context} source={simulationSource} authorization={authorization} wallet={reviewBinding.wallet} execution={executionStart} progress={executionProgress} recovery={executionProgress.recovery} invalidWorkflow={Boolean(reviewError || authoringIncomplete)} backToBuild={() => setTab('Build')} backToSimulate={() => setTab('Simulate')} startNewWorkflow={startNewWorkflow} openDashboard={() => setTab('Dashboard')}
+        workflowRun={workflowRunHere.visible ? <EditorWorkflowRunPanel state={workflowRunHere}/>
+          : editorRun.offered ? <EditorRunAction workflow={state.workflow} readiness={editorRun} steps={sequence?.steps.length ?? 0}/> : undefined}
         technicalDetails={engineering && (executionStart.started || executionProgress.started || recoveryPath || localCowIntent) ? stageContent : undefined}/> : tab === 'Simulate' ?
         <SimulateWorkspace detailsOnly={chatFirst} sequenceNote={sequenceNote} workflowName={workflowName} returnToBuild={() => setTab('Build')} simulationSource={simulationSource} simulationReason={simulationReason} review={embeddedReview} simulateAction={simulateAction}>
           {engineering && <details className="shell-details technical-workspace simulation-technical"><summary>{tr('View technical details')}</summary><ReviewTechnicalDetails authorization={authorization}/>{stageContent}</details>}

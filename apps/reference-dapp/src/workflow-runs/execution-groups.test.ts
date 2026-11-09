@@ -95,6 +95,16 @@ describe('BUILD-FLOFI-UNIVERSAL-WORKFLOW-002 execution groups', () => {
     const delayed = plan({ version: 2, steps: [bridge, SEND_BASE] }, ready);
     expect(delayed.groups[1]).toMatchObject({ strategy: 'EVM_WALLET_BATCH', signing: 'WHEN_DUE' });
     expect(delayed.groups[1]!.downgrades).toContain('EVM_SMART_ACCOUNT_REQUIRED');
+    // P0: a group that touches Aave after a bridge is never a user operation signed upfront (relayed later without the health-factor and
+    // supply-cap simulation): it is a wallet batch simulated and signed when due, and says why.
+    const toBase = { action: 'bridge', sourceNetwork: 'arbitrum-one', destinationNetwork: 'base', asset: 'USDC', amount: '5' };
+    expect(plan({ version: 2, steps: [toBase, SEND_BASE] }, METAMASK).groups[1]).toMatchObject({ strategy: 'EVM_USER_OPERATION', signing: 'UPFRONT' });
+    const borrow = { action: 'borrow', network: 'base', asset: 'USDC', amount: '1', beneficiary: OWNER };
+    for (const aave of [{ ...SUPPLY_BASE, asset: 'USDC', amount: '1' }, borrow]) {
+      const g = plan({ version: 2, steps: [toBase, aave] }, METAMASK).groups[1]!;
+      expect(g).toMatchObject({ strategy: 'EVM_WALLET_BATCH', signing: 'WHEN_DUE' });
+      expect(g.downgrades).toContain('USER_OPERATION_AAVE_SIGNED_WHEN_DUE');
+    }
   });
 
   it('Solana: independent steps share one sign-all prompt; a step spending an earlier step\'s output starts its own group, signed when due', () => {

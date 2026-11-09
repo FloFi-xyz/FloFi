@@ -74,7 +74,7 @@ export function delegableByCode(...args: [workflow: WorkflowComposition, delegat
 /** The authorization plan of a composed workflow. `grants` (with `now`) are the proven owner's own grants; omit them before a wallet proof. */
 export function authorizationPlan(workflow: WorkflowComposition, gates: Pick<Gates, 'supportedByCode' | 'enabledByDeployment' | 'enabledByPolicy' | 'handoff'> & { readonly plan: { readonly steps: readonly { readonly flow: string | null; readonly network: string; readonly action: string }[] } },
   delegation: DelegationFacts, owner?: { readonly grants: readonly GrantView[]; readonly now: number },
-  userFunded?: { readonly facts: UserFundedFacts; readonly wallets?: WalletProfile }): AuthorizationPlan {
+  userFunded?: { readonly facts: UserFundedFacts; readonly wallets?: WalletProfile; readonly evmOwner?: string | null }): AuthorizationPlan {
   const perStep = gates.supportedByCode.steps;
   const req = requirementOf(workflow);
   const mode: CapabilityMode = delegation?.mode ?? 'PRODUCTION', mainnet = delegation?.mainnetChains ?? [];
@@ -109,7 +109,7 @@ export function authorizationPlan(workflow: WorkflowComposition, gates: Pick<Gat
   const confirmAvailable = confirmReason === null, delegatedAvailable = delegatedReason === null;
   // User-funded groups: every step must pass its own gates exactly as in confirm mode (an owner-step group IS a confirm-mode step).
   const facts = userFunded?.facts ?? null;
-  const grouped = req.ok && facts ? planExecutionGroups(req.value, facts, userFunded?.wallets, st => st.namespace === 'solana' || evmStepBuildable(st, facts.chains) === null) : null;
+  const grouped = req.ok && facts ? planExecutionGroups(req.value, facts, userFunded?.wallets, st => st.namespace === 'solana' || evmStepBuildable(st, facts.chains, userFunded?.evmOwner) === null) : null;
   const userFundedReason = runsOff ?? (!facts ? 'USER_FUNDED_NOT_ENABLED' : !req.ok ? req.code : grouped && !grouped.ok ? grouped.code : confirmReason);
   const groupsPlan = grouped && grouped.ok ? grouped : null;
   const userFundedAvailable = userFundedReason === null && groupsPlan !== null;

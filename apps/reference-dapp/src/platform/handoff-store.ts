@@ -158,8 +158,11 @@ export function createPgHandoffStore(db: Database, tenantId: string): HandoffSto
         AND ((status = 'PENDING' AND expires_at <= $4) OR (status = 'CLAIMED' AND claim_expires_at <= $4))`, [tenantId, h.requester.kind, h.requester.ref, now]);
       if (rules.supersedeSameWorkflow) await tx.query(`UPDATE mcp_handoffs SET status = 'SUPERSEDED', ended_at = $5 WHERE tenant_id = $1 AND requester_kind = $2
         AND requester_ref = $3 AND workflow_hash = $4 AND status = 'PENDING'`, [tenantId, h.requester.kind, h.requester.ref, h.workflowHash, now]);
-      const pending = (await tx.query<{ n: number }>(`SELECT count(*)::int AS n FROM mcp_handoffs WHERE tenant_id = $1 AND requester_kind = $2 AND requester_ref = $3
-        AND status IN ('PENDING', 'CLAIMED')`, [tenantId, h.requester.kind, h.requester.ref])).rows[0]!.n;
+      // Waiting for the owner: unclaimed handoffs, and claimed ones whose workflow run has not ended (a claimed handoff whose run completed,
+      // failed, was cancelled or expired waits for nobody; P0: an Editor Authorize that ended its run before the wallet was asked).
+      const pending = (await tx.query<{ n: number }>(`SELECT count(*)::int AS n FROM mcp_handoffs h WHERE h.tenant_id = $1 AND h.requester_kind = $2 AND h.requester_ref = $3
+        AND (h.status = 'PENDING' OR (h.status = 'CLAIMED' AND NOT EXISTS (SELECT 1 FROM workflow_runs r WHERE r.tenant_id = h.tenant_id
+          AND r.handoff_id = h.handoff_id AND r.state IN ('COMPLETED', 'FAILED', 'CANCELLED', 'EXPIRED'))))`, [tenantId, h.requester.kind, h.requester.ref])).rows[0]!.n;
       if (pending >= rules.maxPending) return { ok: false, code: 'HANDOFF_PENDING_LIMIT' } as const;
       await tx.query(`INSERT INTO mcp_handoffs (tenant_id, handoff_id, requester_kind, requester_id, requester_context, account_id, grant_id, client_id, client_name,
         secret_digest, strategy, workflow_hash, engine_version, network_environment, funds_class, plan, status, expires_at, created_at, updated_at)

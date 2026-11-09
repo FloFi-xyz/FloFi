@@ -76,9 +76,9 @@ export async function resetSupplyHarness(options:Record<string,unknown>={},route
 export async function authorSupply(page:Page,amount='10',beneficiary=SUPPLY_OWNER){
   await openBuilder(page);await page.getByRole('button',{name:'Add supply',exact:true}).click();
   const card=page.locator('.build-flow-surface .composer-card.active');
+  // P0 workflow execution: the new Supply's amount applies on Enter (no Review/Apply proposal).
   await card.getByRole('textbox',{name:'Source amount (USDC)',exact:true}).fill(amount);
-  await card.getByRole('button',{name:'Review Supply change',exact:true}).click();
-  await card.getByRole('button',{name:'Apply proposal',exact:true}).click();
+  await card.getByRole('textbox',{name:'Source amount (USDC)',exact:true}).press('Enter');
   await page.locator('.build-flow-surface .composer-card.active').getByRole('button',{name:'Action settings',exact:true}).click();
   const form=page.getByRole('form',{name:'Edit Supply'});
   const unchanged = await form.getByLabel('Supply amount (USDC)').inputValue() === amount && await form.getByLabel('Supply beneficiary').inputValue() === beneficiary;

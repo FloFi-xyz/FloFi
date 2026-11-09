@@ -26,14 +26,17 @@ export function supplyRpcUrl(profile: AaveLendingProfile, override: string | und
   return url.href;
 }
 /**
- * `firstReadDelayMs`: the pause before each read's first attempt (150 ms on public endpoints, measured). P0 catalog reliability: an operator's
- * dedicated endpoint (`GRYLOO_RPC_READ_PROFILE=dedicated` with a configured override, `readPacingFor`) uses the dedicated profile's spacing.
+ * `firstReadDelayMs`: the minimum spacing between the starts of two reads (150 ms on public endpoints, measured). P0 workflow execution: it is a
+ * spacing since the previous read STARTED, as the paced catalog client does — not a fixed sleep before every read — so a read that waited for its
+ * own slow answer is not followed by another full pause (the endpoint still never sees more than one start per interval). P0 catalog
+ * reliability: an operator's dedicated endpoint (`GRYLOO_RPC_READ_PROFILE=dedicated` with a configured override, `readPacingFor`) uses the
+ * dedicated profile's spacing.
  */
 export function createSupplyReadRpc(harness: boolean, profile: AaveLendingProfile, endpointOverride?: string, firstReadDelayMs = 150): SupplyRpc {
   const endpoint = harness ? HARNESS[profile.chain] : supplyRpcUrl(profile, endpointOverride);
   if (!endpoint) throw new Error('SUPPLY_NETWORK_UNAVAILABLE');
   const expectedChain = BigInt(profile.chainId);
-  let queue: Promise<unknown> = Promise.resolve();
+  let queue: Promise<unknown> = Promise.resolve(), lastStart = -Infinity;
   const read = async (method: string, params: readonly unknown[], gone?: AbortSignal) => {
     if (!methods.has(method)) throw new Error('SUPPLY_RPC_METHOD_DENIED');
     // P0 catalog reliability: a read whose caller stopped waiting (an abandoned preview) stops between attempts, does not sleep out its pause, and
@@ -46,8 +49,10 @@ export function createSupplyReadRpc(harness: boolean, profile: AaveLendingProfil
     });
     for (let attempt = 0; attempt < 3; attempt++) {
       abandoned();
-      if (!harness) await pause(attempt === 0 ? firstReadDelayMs : 500 * attempt);
+      const wait = harness ? 0 : attempt === 0 ? lastStart + firstReadDelayMs - Date.now() : 500 * attempt;
+      if (wait > 0) await pause(wait);
       abandoned();
+      lastStart = Date.now();
       let response: Response;
       try {
         response = await fetch(endpoint, { method: 'POST', cache: 'no-store', signal: gone ? AbortSignal.any([AbortSignal.timeout(15_000), gone]) : AbortSignal.timeout(15_000), headers: { 'content-type': 'application/json' },

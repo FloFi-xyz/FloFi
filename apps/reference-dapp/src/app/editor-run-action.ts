@@ -14,17 +14,10 @@
 import { headers } from 'next/headers';
 import { accountHost, currentAccountSession } from '../accounts/account-host';
 import { readEditorRunConfig, startEditorRun, type EditorRunStarted } from '../editor/approval';
-import { NETWORK_CHAINS } from '../engine/capability-catalog';
-import { NETWORK_IDS } from '../engine/strategy-spec';
-import { prepareNetworkCatalogs } from '../platform/catalogs';
 import { createPgHandoffStore, deploymentEngineRuntime, fixedWindow } from '../platform/index';
-import { arbitrumAuthoringCatalog } from '../server/arbitrum-mainnet';
-import { baseAuthoringCatalog } from '../server/base-mainnet';
 import { EMBEDDED_APPROVAL_PATH } from '../server/embedded-approval';
-import { ethereumAuthoringCatalog } from '../server/ethereum-mainnet';
+import { prepareCatalogs } from '../server/editor-catalogs';
 import { platformStateHost } from '../server/platform-state-host';
-import { robinhoodAuthoringCatalog } from '../server/robinhood-mainnet';
-import { solanaAuthoringCatalog } from '../server/solana-asset-catalog';
 
 type Result<T> = { ok: true; value: T } | { ok: false; code: string; step?: number };
 const CODE = /^[A-Z][A-Z0-9_]{2,80}$/;
@@ -36,18 +29,6 @@ export async function editorWorkflowRunAvailability(): Promise<{ readonly enable
   return { enabled: readEditorRunConfig(process.env).enabled };
 }
 
-/** Registers the official catalogs of the networks the workflow's nodes use, so a listed token resolves exactly as it did on the Canvas. */
-async function prepareCatalogs(workflow: unknown): Promise<void> {
-  const nodes = workflow && typeof workflow === 'object' && Array.isArray((workflow as { nodes?: unknown }).nodes) ? (workflow as { nodes: unknown[] }).nodes : [];
-  const chains = new Set(nodes.slice(0, 64).flatMap(node => node && typeof node === 'object' && typeof (node as { chainId?: unknown }).chainId === 'string'
-    ? [(node as { chainId: string }).chainId] : []));
-  const networks = NETWORK_IDS.filter(id => chains.has(NETWORK_CHAINS[id]));
-  if (!networks.length) return;
-  const env = process.env;
-  await prepareNetworkCatalogs({ version: 2, steps: networks.map(network => ({ network })) }, { solana: () => solanaAuthoringCatalog(env),
-    ethereum: () => ethereumAuthoringCatalog(null, env), robinhood: () => robinhoodAuthoringCatalog(null, env), base: () => baseAuthoringCatalog(null, env),
-    'arbitrum-one': () => arbitrumAuthoringCatalog(null, env) });
-}
 
 /**
  * Starts the workflow run of this account's own multi-step Canvas workflow and returns its approval link (authority NONE). Refusals are closed

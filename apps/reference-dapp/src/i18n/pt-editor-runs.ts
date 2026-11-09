@@ -2,8 +2,8 @@
 /** BUILD-FLOFI-UNIVERSAL-SINGLE-AUTH-MAINNET-001: the Editor's "Run workflow" (the shared workflow run started from the Canvas) and its approval wording. */
 export const portugueseEditorRuns: Readonly<Record<string, string>> = {
   'Run workflow': 'Executar fluxo', 'Run the whole workflow': 'Executar o fluxo inteiro', 'Starting workflow run…': 'Iniciando a execução do fluxo…',
-  'Runs all {0} steps in order on FloFi\'s approval page: confirm each step in your wallet, or authorize the whole workflow once where available. Nothing is signed here.':
-    'Executa as {0} etapas em ordem na página de aprovação do FloFi: confirme cada etapa na sua carteira ou autorize o fluxo inteiro uma vez, quando disponível. Nada é assinado aqui.',
+  'Runs all {0} steps in order on FloFi\'s approval page: confirm each step in your wallet, or authorize them in groups with your own wallet where it can batch them. Nothing is signed here.':
+    'Executa as {0} etapas em ordem na página de aprovação do FloFi: confirme cada etapa na sua carteira ou autorize-as em grupos com a sua própria carteira, quando ela puder agrupá-las. Nada é assinado aqui.',
   'Fix the workflow on the Canvas before running it.': 'Corrija o fluxo no Canvas antes de executá-lo.',
   'Simulate the workflow before running it.': 'Simule o fluxo antes de executá-lo.',
   'The workflow changed after it was simulated. Simulate it again to run it.': 'O fluxo mudou depois de ser simulado. Simule-o de novo para executá-lo.',
