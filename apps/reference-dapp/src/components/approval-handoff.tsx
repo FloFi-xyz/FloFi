@@ -75,6 +75,16 @@ const CLAIM_TEXT: Record<string, string> = {
   CONTRACT_CODE_MISSING: 'A token in this workflow has no contract on this network, so nothing was prepared.',
   USER_FUNDED_DEADLINE_UNAVAILABLE: 'This network has no registered router to give the batch an on-chain expiry, so it is not offered as a batch. Nothing was sent.',
   SOLANA_WALLET_SESSION_REQUIRED: 'Connect the Solana wallet of this workflow (the one you proved), then try again.',
+  // A group's preparation refused by its whole-batch simulation or fee reading: the Editor's words (one translation each). A preparation refusal
+  // names no step, so these never carry a step number.
+  // /approve cannot change the workflow's amounts (the run is bound to its hash): the way forward is the owner's position, Try this step again, or End.
+  BORROW_UNSAFE_HEALTH_FACTOR: 'This Borrow would leave your Aave health factor below 2.0 after the batch, so nothing was sent. Supply more collateral or repay part of your debt from your wallet, then try again, or end the workflow.',
+  WITHDRAW_UNSAFE_HEALTH_FACTOR: 'This Withdraw would leave your Aave health factor below 2.0 after the batch, so nothing was sent. Repay part of your debt or supply more collateral from your wallet, then try again, or end the workflow.',
+  REPAY_PARTIAL_DEBT_REQUIRED: 'This Repay is no longer smaller than your current Aave debt, so it cannot be batched and nothing was sent. Once the workflow shows it stopped, Try this step again runs the Repay through its own flow (it reads your debt again), or end the workflow.',
+  SIMULATION_REVERTED: 'FloFi simulated the whole batch and one of its calls would fail on chain now, so your wallet was not asked. Check the amounts, balances and allowances, then try again.',
+  SWAP_MINIMUM_NOT_MET: 'A swap in this batch would deliver less than its signed minimum now, so your wallet was not asked. Try again for a fresh quote.',
+  USER_FUNDED_SIMULATION_UNAVAILABLE: 'This network’s RPC cannot simulate the whole batch, so it is not offered in one confirmation and nothing was sent. Once the workflow shows it stopped, Try this step again confirms each step through its own flow, or end the workflow.',
+  USER_FUNDED_L1_FEE_UNAVAILABLE: 'FloFi could not read this network\'s data fee, so the batch was not offered. Nothing was sent; try again.',
 };
 function unwrap<T>(result: { ok: true; value: T } | { ok: false; code: string }): T { if (!result.ok) throw new Error(result.code); return result.value; }
 /**

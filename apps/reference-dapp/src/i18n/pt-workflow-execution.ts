@@ -119,6 +119,18 @@ export const portugueseWorkflowExecution: Readonly<Record<string, string>> = {
   'Too many reviews in a short time. Wait a few minutes and review again.': 'Revisões demais em pouco tempo. Aguarde alguns minutos e revise de novo.',
   'An Aave step after a bridge is authorized when the bridge delivery lands, after FloFi simulates it on that state (health factor and supply cap).':
     'Uma etapa da Aave depois de uma ponte é autorizada quando a entrega da ponte chega, depois que a FloFi a simula nesse estado (fator de saúde e limite de fornecimento).',
+  'This Borrow would leave your Aave health factor below 2.0 after the batch, so nothing was sent. Supply more collateral or repay part of your debt from your wallet, then try again, or end the workflow.':
+    'Este Borrow deixaria seu fator de saúde na Aave abaixo de 2,0 depois do lote, então nada foi enviado. Forneça mais garantia ou pague parte da dívida pela sua carteira e tente de novo, ou encerre o fluxo.',
+  'This Withdraw would leave your Aave health factor below 2.0 after the batch, so nothing was sent. Repay part of your debt or supply more collateral from your wallet, then try again, or end the workflow.':
+    'Este Withdraw deixaria seu fator de saúde na Aave abaixo de 2,0 depois do lote, então nada foi enviado. Pague parte da dívida ou forneça mais garantia pela sua carteira e tente de novo, ou encerre o fluxo.',
+  'This Repay is no longer smaller than your current Aave debt, so it cannot be batched and nothing was sent. Once the workflow shows it stopped, Try this step again runs the Repay through its own flow (it reads your debt again), or end the workflow.':
+    'Este Repay não é mais menor que a sua dívida atual na Aave, então não pode entrar no lote e nada foi enviado. Quando o fluxo aparecer como interrompido, Tentar esta etapa de novo executa o Repay pelo próprio fluxo (que lê a dívida de novo), ou encerre o fluxo.',
+  'This network’s RPC cannot simulate the whole batch, so it is not offered in one confirmation and nothing was sent. Once the workflow shows it stopped, Try this step again confirms each step through its own flow, or end the workflow.':
+    'O RPC desta rede não consegue simular o lote inteiro, então ele não é oferecido em uma única confirmação e nada foi enviado. Quando o fluxo aparecer como interrompido, Tentar esta etapa de novo confirma cada etapa pelo próprio fluxo, ou encerre o fluxo.',
+  'A step after a bridge is authorized when the bridge delivery lands (your wallet cannot sign it in advance).':
+    'Uma etapa depois de uma ponte é autorizada quando a entrega da ponte chega (sua carteira não consegue assiná-la antecipadamente).',
+  'A swap after a bridge whose output a later step spends is authorized when the bridge delivery lands, after FloFi simulates the whole batch and proves you receive that output.':
+    'Um swap depois de uma ponte, cuja saída uma etapa seguinte gasta, é autorizado quando a entrega da ponte chega, depois que a FloFi simula o lote inteiro e comprova que você recebe essa saída.',
   'Grouping would not ask your wallet fewer times for this workflow, so each step is confirmed on its own.':
     'Agrupar não pediria menos confirmações à sua carteira neste fluxo, então cada etapa é confirmada separadamente.',
   'Group {0}': 'Grupo {0}', 'Wallet request': 'Pedido à carteira',
@@ -184,4 +196,16 @@ export const portugueseWorkflowExecution: Readonly<Record<string, string>> = {
   'This step (for example a bridge or a liquidity position) runs through its own review and wallet confirmation.': 'Esta etapa (por exemplo, uma bridge ou uma posição de liquidez) passa pela própria revisão e confirmação na carteira.',
   'A swap allows more than 3% slippage, which cannot be fixed in one batch, so it is confirmed on its own. Lower the slippage to batch it.': 'Um swap permite mais de 3% de slippage, o que não pode ser fixado em um lote, então é confirmado sozinho. Reduza o slippage para agrupá-lo.',
   'An Aave step names another account than the connected wallet, so it cannot be batched. Rebuild that step with this wallet.': 'Uma etapa da Aave indica outra conta que não a carteira conectada, então não pode ser agrupada. Recrie essa etapa com esta carteira.',
+  // A run halted before anything was sent (its first group refused for good when due), and refusals that name no step (Editor and /approve).
+  'Stopped: nothing sent': 'Parado: nada enviado', 'Stopped': 'Parado',
+  'Stopped before any step completed. FloFi submits nothing more of this workflow; you decide what happens next.':
+    'Parado antes de qualquer etapa ser concluída. A FloFi não envia mais nada deste fluxo; você decide o que acontece a seguir.',
+  'Stopped before anything was sent: your funds stay in your wallet.': 'Parado antes de qualquer envio: seus fundos continuam na sua carteira.',
+  'You can run each step through its own flow from here, or end the workflow.': 'Daqui, você pode executar cada etapa pelo próprio fluxo dela ou encerrar o fluxo.',
+  'FloFi simulated the whole batch and one of its calls would fail on chain now, so your wallet was not asked. Check the amounts, balances and allowances, then try again.':
+    'A FloFi simulou o lote inteiro e uma das chamadas dele falharia on-chain agora, então nada foi pedido à sua carteira. Verifique os valores, os saldos e os allowances e tente de novo.',
+  'A swap in this batch would deliver less than its signed minimum now, so your wallet was not asked. Try again for a fresh quote.':
+    'Um swap deste lote entregaria menos que o mínimo assinado agora, então nada foi pedido à sua carteira. Tente de novo para obter uma cotação nova.',
+  'its quote expired at {0}: FloFi does not ask your wallet for it again; check your wallet\'s activity, then you can end the workflow':
+    'a cotação expirou às {0}: a FloFi não pede esse lote de novo à sua carteira; verifique a atividade da sua carteira e depois você pode encerrar o fluxo',
 };

@@ -28,7 +28,7 @@ const browser = vi.hoisted(() => ({ send: vi.fn(), hashes: vi.fn() }));
 vi.mock('./user-funded-browser', () => ({ sendWalletBatch: browser.send, walletBatchHashes: browser.hashes, walletProfile: async () => ({}),
   signSolanaGroup: vi.fn(), signUserOperation: vi.fn() }));
 vi.mock('./wallet-proof', () => ({ useWalletProof: () => ({ proveEvm: vi.fn() }) }));
-const { useEditorWorkflowRun, EXECUTION_REFUSAL, reviewOffersStepByStep } = await import('./editor-workflow-run');
+const { useEditorWorkflowRun, EXECUTION_REFUSAL, EXECUTION_REASON, STEP_REFUSAL, reviewOffersStepByStep } = await import('./editor-workflow-run');
 const { translate } = await import('../i18n/locale');
 
 const OWNER = '0x' + 'ab'.repeat(20), APPROVAL = 'apr_' + 'b'.repeat(26), GROUP_ID = '0x' + '12'.repeat(32), ANSWERED = '0x' + '34'.repeat(32), HASH = '0x' + 'ef'.repeat(32);
@@ -166,6 +166,60 @@ describe('Editor batch send: another tab of this browser handing the same group 
   });
 });
 
+describe('Editor batch send: /approve handing the same run\'s group to the wallet (its own record, same origin)', () => {
+  const APPROVE_ATTEMPTS = 'flofi.approve-batch-attempts.v1', KEY = `${APPROVAL}:0`;
+  const fromApprove = (attempts: Record<string, unknown>) => storage.set(APPROVE_ATTEMPTS, JSON.stringify(attempts));
+  it('the batch id the wallet answered /approve with is read back and recorded: the wallet is never asked to send', async () => {
+    fromApprove({ [KEY]: { at: '2026-11-09T00:00:00.000Z', batchId: ANSWERED, nonce: 'approve' } });
+    const recorded = await authorizeOnce();
+    expect(recorded.error).toBeNull();
+    expect(browser.send).not.toHaveBeenCalled();
+    expect(server.authorizeGroup).toHaveBeenCalledWith(APPROVAL, 0, { kind: 'EVM_WALLET_BATCH', batchId: ANSWERED });
+  });
+  it('a /approve request the wallet never answered, whose group id the wallet does not know: never sent again from here', async () => {
+    const record = { [KEY]: { at: '2026-11-09T00:00:00.000Z', nonce: 'approve' } };
+    fromApprove(record);
+    const refused = await authorizeOnce();
+    expect(refused.error).toBe('WALLET_BATCH_SEND_UNCONFIRMED');
+    expect(refused.unrecorded).toBe(true);
+    expect(browser.hashes).toHaveBeenCalledWith(GROUP_ID);
+    expect(browser.send).not.toHaveBeenCalled();
+    expect(server.authorizeGroup).not.toHaveBeenCalled();
+    // /approve's record stays exactly as /approve wrote it (only /approve clears it).
+    expect(JSON.parse(storage.get(APPROVE_ATTEMPTS)!)).toEqual(record);
+  });
+  it('a /approve record written the moment the wallet would be asked stops this request: the wallet is never asked', async () => {
+    for (const [attempt, code] of [[{ at: '2026-11-09T00:00:00.000Z', nonce: 'approve' }, 'WALLET_BATCH_SEND_UNCONFIRMED'],
+      [{ at: '2026-11-09T00:00:00.000Z', batchId: ANSWERED, nonce: 'approve' }, 'WALLET_BATCH_SENT_UNRECORDED']] as const) {
+      hooks.slots = []; storage.clear();
+      browser.send.mockImplementationOnce(sendThen(async onSending => { fromApprove({ [KEY]: attempt }); asked(onSending); return ANSWERED; }));
+      const stopped = await authorizeOnce();
+      expect(stopped.error).toBe(code);
+      expect(stopped.unrecorded).toBe(true);
+    }
+    expect(walletSent).toBe(0);
+    expect(server.authorizeGroup).not.toHaveBeenCalled();
+  });
+  it('a failure proving this send sent nothing keeps the group shown as handed over while /approve\'s record exists', async () => {
+    browser.send.mockImplementationOnce(sendThen(async () => { fromApprove({ [KEY]: { at: '2026-11-09T00:00:00.000Z', nonce: 'approve' } }); throw new Error('WALLET_WRONG_NETWORK'); }));
+    const failed = await authorizeOnce();
+    expect(failed.error).toBe('WALLET_WRONG_NETWORK');
+    expect(failed.unrecorded).toBe(true);
+    expect(walletSent).toBe(0);
+  });
+  it('another group\'s or another run\'s /approve record never holds this group back', async () => {
+    fromApprove({ [`${APPROVAL}:1`]: { at: '2026-11-09T00:00:00.000Z' }, [`apr_${'z'.repeat(26)}:0`]: { at: '2026-11-09T00:00:00.000Z' } });
+    const sent = await authorizeOnce();
+    expect(sent.error).toBeNull();
+    expect(walletSent).toBe(1);
+  });
+  it('reads /approve\'s own store key', () => {
+    const constant = (file: string, name: string) => new RegExp(`const ${name} = '([^']+)';`).exec(readFileSync(new URL(file, import.meta.url), 'utf8'))?.[1];
+    expect(constant('./editor-workflow-run.tsx', 'APPROVE_ATTEMPTS_KEY')).toBe(APPROVE_ATTEMPTS);
+    expect(constant('./workflow-run-panel.tsx', 'BATCH_ATTEMPTS_KEY')).toBe(APPROVE_ATTEMPTS);
+  });
+});
+
 describe('Editor batch send: refusals in plain words', () => {
   const CODES = ['WALLET_ACCOUNT_MISMATCH', 'WALLET_WRONG_NETWORK', 'SIMULATION_SWAP_OUTPUT_SHORT', 'TOKEN_METADATA_MISMATCH', 'CONTRACT_CODE_MISSING',
     'USER_FUNDED_DEADLINE_UNAVAILABLE'];
@@ -177,11 +231,28 @@ describe('Editor batch send: refusals in plain words', () => {
     }
     expect(EXECUTION_REFUSAL.WALLET_ACCOUNT_MISMATCH).toMatch(/locked or another account is selected.*select the account this run belongs to.*nothing was sent/);
   });
+  /** A group preparation's refusals (simulation, Aave risk, fee reading) that both pages show. */
+  const PREPARATION = ['BORROW_UNSAFE_HEALTH_FACTOR', 'WITHDRAW_UNSAFE_HEALTH_FACTOR', 'REPAY_PARTIAL_DEBT_REQUIRED', 'SIMULATION_REVERTED', 'SWAP_MINIMUM_NOT_MET',
+    'USER_FUNDED_SIMULATION_UNAVAILABLE', 'USER_FUNDED_L1_FEE_UNAVAILABLE'];
   it('/approve shows the same words for the codes both surfaces show (one translation each)', () => {
     const source = readFileSync(new URL('./approval-handoff.tsx', import.meta.url), 'utf8');
-    for (const code of [...CODES, 'WALLET_BATCH_SEND_UNCONFIRMED', 'WALLET_BATCH_NOT_SENT']) {
+    // /approve cannot change the workflow's amounts (the run is bound to its hash): where the Editor says "lower the amount", /approve says what
+    // the owner can do there (their position, Try this step again, End). Those codes have their own words, still translated.
+    const approveOwn = new Set(['BORROW_UNSAFE_HEALTH_FACTOR', 'WITHDRAW_UNSAFE_HEALTH_FACTOR', 'REPAY_PARTIAL_DEBT_REQUIRED', 'USER_FUNDED_SIMULATION_UNAVAILABLE']);
+    for (const code of [...CODES, ...PREPARATION, 'WALLET_BATCH_SEND_UNCONFIRMED', 'WALLET_BATCH_NOT_SENT', ...approveOwn]) {
       const text = new RegExp(`\\n  ${code}: '((?:[^'\\\\]|\\\\.)*)',`).exec(source)?.[1]?.replace(/\\(.)/g, '$1');
-      expect(text, code).toBe(EXECUTION_REFUSAL[code]);
+      if (approveOwn.has(code)) {
+        expect(text, code).toEqual(expect.stringContaining('nothing was sent'));
+        expect(text, code).not.toMatch(/Lower the|Withdraw less/);
+      } else expect(text, code).toBe(EXECUTION_REFUSAL[code]);
+      expect(translate('PT', text!), code).not.toBe(text);
+    }
+  });
+  it('a refusal that arrives as a bare code never shows a step number or the code itself; only a Review naming its step does', () => {
+    for (const code of PREPARATION) expect(EXECUTION_REFUSAL[code], code).not.toMatch(/\{\d+\}/);
+    for (const [code, text] of Object.entries(STEP_REFUSAL)) {
+      expect(translate('EN', text, '2'), code).toMatch(/step 2/);
+      expect(translate('PT', text, '2'), code).toMatch(/etapa 2/);
     }
   });
 });
@@ -196,5 +267,16 @@ describe('P0 review fixes: a batch refused for good at Review sends the owner st
     for (const code of ['QUOTE_UNAVAILABLE', 'USER_FUNDED_RPC_UNAVAILABLE', 'SIMULATION_REVERTED'])
       expect(reviewOffersStepByStep({ mode: 'ONE_WALLET_CONFIRMATION', refusal: { code, step: 0 } }), code).toBe(false);
     expect(reviewOffersStepByStep({ mode: 'ONE_WALLET_CONFIRMATION', refusal: null })).toBe(false);
+  });
+});
+
+describe('P0 review fixes: every reason the group planner gives the Editor has words', () => {
+  it('each downgrade the planner can report for a browser-read wallet has EXECUTION_REASON copy (never "Not available for this step")', () => {
+    // workflow-runs/execution-groups.ts: the downgrades pushed for a wallet the browser read (WALLET_CAPABILITIES_ASSUMED is for requesters only).
+    for (const code of ['USER_FUNDED_CHAIN_DISABLED', 'USER_OPERATION_AAVE_SIGNED_WHEN_DUE', 'USER_OPERATION_SWAP_OUTPUT_SIGNED_WHEN_DUE', 'USER_OPERATION_BUNDLER_UNAVAILABLE',
+      'WALLET_TYPED_DATA_USER_OPERATION_UNSUPPORTED', 'EVM_SMART_ACCOUNT_REQUIRED', 'WALLET_ATOMIC_BATCH_UNSUPPORTED', 'WALLET_ATOMIC_BATCH_UNKNOWN',
+      'SOLANA_DURABLE_NONCE_NOT_OFFERED', 'SOLANA_MULTI_SIGN_UNSUPPORTED', 'WORKFLOW_BINDING_RESOLVED_WHEN_DUE']) expect(EXECUTION_REASON[code], code).toEqual(expect.any(String));
+    const planner = readFileSync(new URL('../workflow-runs/execution-groups.ts', import.meta.url), 'utf8');
+    for (const code of ['USER_OPERATION_SWAP_OUTPUT_SIGNED_WHEN_DUE', 'WALLET_TYPED_DATA_USER_OPERATION_UNSUPPORTED']) expect(planner).toContain(`'${code}'`);
   });
 });

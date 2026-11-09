@@ -11,7 +11,9 @@
  *       answer for a group whose (fixed) batch id the wallet does not know is refused without preparing again
  *   B4  another tab of this browser: its attempt found the moment the wallet would be asked stops this tab's request, and a failure that proves
  *       this tab sent nothing never deletes it
+ *   B5  the Editor (same origin) handing the same run's group to the wallet: its record counts as this page's own attempt
  */
+import { readFileSync } from 'node:fs';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ReactElement, ReactNode } from 'react';
 
@@ -223,6 +225,60 @@ describe('B4: another tab of this browser handing the same group to the wallet',
       expect(attempts()).toEqual({ [KEY]: OTHER_TAB });
     }
     expect(walletSent).toBe(0);
+  });
+});
+
+describe('B5: the Editor handing the same run\'s group to the wallet (its own record, same origin)', () => {
+  const EDITOR_RUNS = 'flofi.editor-workflow-runs.v2';
+  const editorRun = (sent: unknown, approvalId = APPROVAL) => ({ workflowId: 'wf-1', approvalId, workflowHash: '0x' + '1'.repeat(64), owner: OWNER.toLowerCase(),
+    revision: 1, at: '2026-11-09T00:00:00.000Z', sent });
+  const fromEditor = (...runs: unknown[]) => storage.set(EDITOR_RUNS, JSON.stringify(runs));
+  it('the batch id the wallet answered the Editor with is recorded as is; nothing is prepared or sent', async () => {
+    fromEditor(editorRun({ group: 0, batchId: ANSWERED, nonce: 'editor' }));
+    server.prepare.mockResolvedValue({ ok: false, code: 'SIMULATION_REVERTED' });
+    expect(await click(claim({}), AUTHORIZE)).toEqual({ proposal: PROPOSAL, error: null });
+    expect(server.prepare).not.toHaveBeenCalled();
+    expect(browser.send).not.toHaveBeenCalled();
+    expect(server.authorize).toHaveBeenCalledWith(APPROVAL, 0, { kind: 'EVM_WALLET_BATCH', batchId: ANSWERED });
+  });
+  it('an Editor request the wallet never answered, for a group whose batch id the wallet does not know: refused, never prepared or sent', async () => {
+    const record = editorRun({ group: 0, batchId: GROUP_ID, attempt: true, nonce: 'editor' });
+    fromEditor(record);
+    expect(await click(claim({}), AUTHORIZE)).toEqual({ proposal: null, error: 'WALLET_BATCH_SEND_UNCONFIRMED' });
+    expect(browser.hashes).toHaveBeenCalledWith(GROUP_ID);
+    expect(server.prepare).not.toHaveBeenCalled();
+    expect(browser.send).not.toHaveBeenCalled();
+    // The Editor's record stays exactly as the Editor wrote it (only the Editor clears it).
+    expect(JSON.parse(storage.get(EDITOR_RUNS)!)).toEqual([record]);
+  });
+  it('the same for a group the run shows no batch id for: prepared, its id asked of the wallet, and refused unless the wallet knows it', async () => {
+    fromEditor(editorRun({ group: 0, batchId: GROUP_ID, attempt: true, nonce: 'editor' }));
+    const planned = claim({ groups: [group({ state: 'PLANNED', batchId: null })] });
+    expect(await click(planned, AUTHORIZE)).toEqual({ proposal: null, error: 'WALLET_BATCH_SEND_UNCONFIRMED' });
+    expect(server.prepare).toHaveBeenCalledTimes(1);
+    expect(browser.send).not.toHaveBeenCalled();
+    browser.hashes.mockResolvedValue({ hashes: [HASH], failed: false });
+    expect(await click(planned, AUTHORIZE)).toEqual({ proposal: PROPOSAL, error: null });
+    expect(server.authorize).toHaveBeenCalledWith(APPROVAL, 0, { kind: 'EVM_WALLET_BATCH', batchId: GROUP_ID });
+    expect(browser.send).not.toHaveBeenCalled();
+  });
+  it('an Editor record written the moment the wallet would be asked stops this request: the wallet is never asked', async () => {
+    browser.send.mockImplementationOnce(sendThen(async onSending => {
+      fromEditor(editorRun({ group: 0, batchId: GROUP_ID, attempt: true, nonce: 'editor' })); asked(onSending); return ANSWERED;
+    }));
+    expect(await click(claim({}), AUTHORIZE)).toEqual({ proposal: null, error: 'WALLET_BATCH_SEND_UNCONFIRMED' });
+    expect(walletSent).toBe(0);
+    expect(server.authorize).not.toHaveBeenCalled();
+  });
+  it('another run\'s or another group\'s Editor record never holds this group back', async () => {
+    fromEditor(editorRun({ group: 1, batchId: GROUP_ID, attempt: true, nonce: 'editor' }), editorRun({ group: 0, batchId: GROUP_ID, attempt: true }, 'apr_' + 'z'.repeat(26)));
+    expect(await click(claim({}), AUTHORIZE)).toEqual({ proposal: PROPOSAL, error: null });
+    expect(walletSent).toBe(1);
+  });
+  it('reads the Editor\'s own store key', () => {
+    const constant = (file: string, name: string) => new RegExp(`const ${name} = '([^']+)';`).exec(readFileSync(new URL(file, import.meta.url), 'utf8'))?.[1];
+    expect(constant('./workflow-run-panel.tsx', 'EDITOR_RUNS_KEY')).toBe(EDITOR_RUNS);
+    expect(constant('./editor-workflow-run.tsx', 'STORAGE_KEY')).toBe(EDITOR_RUNS);
   });
 });
 

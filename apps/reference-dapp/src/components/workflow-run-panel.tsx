@@ -19,7 +19,7 @@ import type { eip5792 } from '@defi-workflow-engine/reference-compiler';
 import { revokeUserOperation, sendWalletBatch, signSolanaGroup, signUserOperation, walletBatchHashes, walletProfile } from './user-funded-browser';
 import { chosenEvmProvider, injected } from '../wallet/evm-discovery';
 import type { WalletWorkflowReviewView } from '../delegation/views';
-import { canEndWorkflow } from '../workflow-runs/state-machine';
+import { canEndWorkflow, haltedAs } from '../workflow-runs/state-machine';
 import { useLocale } from '../i18n/locale';
 import type { ClaimedProposal } from '../platform/approvals';
 import type { WorkflowRunClaim } from '../platform/workflow-run-approvals';
@@ -29,6 +29,9 @@ const STEP_STATE: Readonly<Record<string, string>> = { PENDING: 'Waiting', READY
   RECONCILED: 'Reconciled', FAILED: 'Failed', UNCERTAIN: 'Outcome pending', SKIPPED: 'Not run', BLOCKED: 'Stopped before submission' };
 const RUN_STATE: Readonly<Record<string, string>> = { PENDING: 'Choose how to authorize', RUNNING: 'Running', COMPLETED: 'Completed', HALTED: 'Partially completed',
   FAILED: 'Failed', ATTENTION: 'Needs attention', CANCELLED: 'Ended', EXPIRED: 'Expired' };
+/** How a HALTED run is described: the one rule the Editor and /approve share (workflow-runs/state-machine.ts). */
+export { haltedAs };
+const HALTED_BADGE: Readonly<Record<ReturnType<typeof haltedAs>, string>> = { PARTIAL: 'Partially completed', NOTHING_SENT: 'Stopped: nothing sent', STOPPED: 'Stopped' };
 const ACTION: Readonly<Record<string, string>> = { swap: 'Swap', bridge: 'Bridge', supply: 'Supply', borrow: 'Borrow', repay: 'Repay', withdraw: 'Withdraw',
   add_liquidity: 'Add liquidity', transfer: 'Transfer', lending_composition: 'Lending composition' };
 const WHY_NOT_ONCE: Readonly<Record<string, string>> = {
@@ -84,6 +87,29 @@ function batchAttempts(): Record<string, BatchAttempt> {
 }
 function putBatchAttempt(key: string, value: BatchAttempt | null) {
   try { const all = batchAttempts(); if (value) all[key] = value; else delete all[key]; localStorage.setItem(BATCH_ATTEMPTS_KEY, JSON.stringify(all)); } catch { /* storage unavailable */ }
+}
+/**
+ * The Editor's record of the batch IT handed to the owner's wallet for the same run (`editor-workflow-run.tsx`, `STORAGE_KEY`; same origin, so
+ * the same storage): runs by approval id, each with `sent` = { group, batchId, attempt?, nonce? } — `attempt` while `wallet_sendCalls` has not
+ * answered (its `batchId` is then only the group's own EIP-5792 id, no answer), else the id the wallet answered with. The Editor links here for
+ * the same run, and a wallet that ignores app-provided ids cannot tell either page it already holds a batch: an attempt there is treated
+ * exactly like one of this page's own. Read only (the Editor keeps its record). Anything unreadable as an answer reads as an unanswered attempt.
+ */
+const EDITOR_RUNS_KEY = 'flofi.editor-workflow-runs.v2';
+function editorAttempt(approvalId: string, group: number): BatchAttempt | null {
+  try {
+    const all = JSON.parse(localStorage.getItem(EDITOR_RUNS_KEY) ?? '[]') as unknown;
+    if (!Array.isArray(all)) return null;
+    const sent = (all.find(r => Boolean(r) && (r as { approvalId?: unknown }).approvalId === approvalId) as { sent?: unknown } | undefined)?.sent as
+      { group?: unknown; batchId?: unknown; attempt?: unknown } | null | undefined;
+    if (!sent || typeof sent !== 'object' || sent.group !== group) return null;
+    return sent.attempt === undefined && typeof sent.batchId === 'string' && sent.batchId ? { at: '', batchId: sent.batchId } : { at: '' };
+  } catch { return null; }
+}
+/** This page's attempt for the group, else the Editor's; an answered one (a batch id) first, since it is read back without asking again. */
+function anyAttempt(approvalId: string, group: number): BatchAttempt | null {
+  const own = batchAttempts()[`${approvalId}:${group}`] ?? null, editor = editorAttempt(approvalId, group);
+  return own?.batchId ? own : editor?.batchId ? editor : own ?? editor;
 }
 /** Wallet answers that mean nothing was sent: the attempt is forgotten and the group may be offered again. */
 const NOTHING_SENT: ReadonlySet<string> = new Set(['WALLET_REQUEST_REJECTED', 'WALLET_WRONG_NETWORK', 'EVM_WALLET_NOT_FOUND', 'WALLET_BATCH_NOT_SENT',
@@ -163,8 +189,8 @@ export function WorkflowRunPanel({ claim, approvalId, secret, onProposal, onErro
     // A batch the wallet already holds is reported BEFORE anything is prepared again: once it executed, a fresh preparation's simulation fails
     // (its effects are already on chain) and a refused preparation must never hide the batch the owner sent. The id the wallet answered with
     // (kept by this browser) is recorded as is; else the batch id the run shows for the group (its own EIP-5792 id while it is prepared), if
-    // the wallet knows it. Only then is the group prepared (again).
-    const stored = batchAttempts()[attemptKey] ?? null;
+    // the wallet knows it. Only then is the group prepared (again). An attempt the Editor made for the same run counts as this page's own.
+    const stored = anyAttempt(approvalId, index);
     if (stored?.batchId) return recordBatch(index, attemptKey, stored.batchId);
     if (view?.strategy === 'EVM_WALLET_BATCH' && view.batchId) {
       if (await walletKnows(view.batchId)) return recordBatch(index, attemptKey, view.batchId);
@@ -181,18 +207,19 @@ export function WorkflowRunPanel({ claim, approvalId, secret, onProposal, onErro
       const request = p.request as eip5792.SendCallsRequest;
       // The group's batch may already be in the wallet (a reload, a lost answer, an earlier preparation): it is read back by its id, never sent again.
       const known = request.id ? await walletKnows(request.id) : false;
-      const earlier = batchAttempts()[attemptKey] ?? null;
+      const earlier = anyAttempt(approvalId, index);
       let batchId: string;
       if (known) batchId = request.id!;
       else if (earlier?.batchId) batchId = earlier.batchId;
       else if (earlier) throw new Error('WALLET_BATCH_SEND_UNCONFIRMED');
       else {
         // The attempt is kept the moment the wallet is asked to send (never before: a failed network switch or account check sent nothing).
-        // Re-read then: an attempt found at that moment was written by another tab (none existed above), so this tab never sends the group too.
+        // Re-read then: an attempt found at that moment was written by another tab or the Editor (none existed above), so this tab never sends
+        // the group too.
         const nonce = crypto.randomUUID();
         try {
           batchId = await sendWalletBatch(request, () => {
-            if (batchAttempts()[attemptKey]) throw new Error('WALLET_BATCH_SEND_UNCONFIRMED');
+            if (anyAttempt(approvalId, index)) throw new Error('WALLET_BATCH_SEND_UNCONFIRMED');
             putBatchAttempt(attemptKey, { at: new Date().toISOString(), nonce });
           });
         } catch (cause) {
@@ -258,10 +285,11 @@ export function WorkflowRunPanel({ claim, approvalId, secret, onProposal, onErro
   const confirmations = plan.confirmEachStep.walletConfirmationsAtLeast;
   const choosing = run.state === 'PENDING' && run.mode === null;
   const nextStep = run.nextAction === 'OWNER_SIGNS_STEP' && claim.step === null ? run.currentStep + 1 : null;
+  const halted = run.state === 'HALTED' ? haltedAs(run) : null;
   return <section className="workflow-run" aria-label={tr('Workflow steps')} data-run-state={run.state}>
     <div className="workflow-run-head">
       <strong>{tr('{0}-step workflow', String(run.stepCount))}</strong>
-      <span className="status-badge info">{tr(RUN_STATE[run.state] ?? run.state)}</span>
+      <span className="status-badge info">{tr(halted ? HALTED_BADGE[halted] : RUN_STATE[run.state] ?? run.state)}</span>
       {run.mode && <span className="muted">{tr(run.mode === 'DELEGATED' ? 'Authorized once with your wallet' : run.mode === 'USER_FUNDED'
         ? 'You authorize each group with your own wallet' : 'You confirm each step in your wallet')}</span>}
     </div>
@@ -369,7 +397,10 @@ export function WorkflowRunPanel({ claim, approvalId, secret, onProposal, onErro
       <button type="button" disabled={busy} onClick={() => void act(() => continueWorkflowRunHandoff(approvalId))}>{tr('Continue to step {0}', String(nextStep))}</button>
     </div>}
     {run.state === 'HALTED' && <div className="workflow-run-choice">
-      <p role="status">{tr('Partially completed: the reconciled steps stay done and their funds rest in your wallet. Nothing later was submitted.')}</p>
+      <p role="status">{halted === 'NOTHING_SENT'
+        ? <>{tr('Stopped before anything was sent: your funds stay in your wallet.')}{resumable ? <> {tr('You can run each step through its own flow from here, or end the workflow.')}</> : null}</>
+        : halted === 'STOPPED' ? tr('Stopped before any step completed. FloFi submits nothing more of this workflow; you decide what happens next.')
+        : tr('Partially completed: the reconciled steps stay done and their funds rest in your wallet. Nothing later was submitted.')}</p>
       {resumable ? <div className="approval-actions">
         <button type="button" className="secondary" disabled={busy} onClick={() => void act(() => resumeWorkflowRunHandoff(approvalId))}>{tr('Try this step again')}</button>
       </div> : <p className="muted">{tr('Something you already signed for this step is never replaced: end this workflow and start a new one.')}</p>}
