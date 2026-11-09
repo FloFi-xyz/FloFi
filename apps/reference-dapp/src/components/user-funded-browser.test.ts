@@ -3,9 +3,21 @@
  * P0 workflow execution: what a wallet's EIP-5792 batch status means for the run. Only status 400 (not included on chain) is "nothing was
  * sent"; a batch that failed by the chain's rules (500) or landed partially (600) reached the chain and its owner paid for it.
  */
-import { describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi, type Mock } from 'vitest';
 import { eip5792 } from '@defi-workflow-engine/reference-compiler';
-import { batchOutcome } from './user-funded-browser';
+
+/** The owner's wallet in these tests: an in-process EIP-1193 double (no network). Each test sets how it answers each method. */
+const wallet = vi.hoisted(() => ({ answers: {} as Record<string, (params: unknown[]) => unknown>, log: [] as string[] }));
+vi.mock('../wallet/evm-discovery', () => {
+  const provider = { request: async ({ method, params = [] }: { method: string; params?: unknown[] }) => {
+    wallet.log.push(method);
+    const answer = wallet.answers[method];
+    if (!answer) throw Object.assign(new Error('Method not supported'), { code: 4200 });
+    return answer(params);
+  } };
+  return { chosenEvmProvider: () => provider, injected: () => provider, evmWalletIdentity: () => null, isFloFiWalletKey: () => false };
+});
+const { batchOutcome, sendWalletBatch } = await import('./user-funded-browser');
 
 const HASH = '0x' + 'ab'.repeat(32);
 const status = (code: number, receipts: unknown[] = []) => eip5792.callsStatus({ version: '2.0.0', id: '0x01', chainId: '0xa4b1', status: code, atomic: true, receipts });
@@ -25,5 +37,89 @@ describe('wallet batch status → run report', () => {
     expect(batchOutcome(status(500))).toBeNull();
     expect(batchOutcome(status(600))).toBeNull();
     expect(batchOutcome(status(200))).toBeNull();
+  });
+});
+
+/**
+ * The owner's browser send path: until `wallet_sendCalls` is requested nothing can have been sent, so every failure before it is a closed
+ * "nothing was sent" code and `onSending` (where callers keep their "may have been sent" marker) runs only immediately before that request.
+ */
+describe('sendWalletBatch', () => {
+  const OWNER = '0x' + 'aB'.repeat(20), OTHER = '0x' + 'cd'.repeat(20), ID = '0x' + '12'.repeat(32), BATCH = '0x' + '34'.repeat(32);
+  const request = eip5792.sendCallsRequest(8453, OWNER, [{ target: '0x' + '56'.repeat(20), value: 0n, data: '0x095ea7b3' }], ID);
+  const rpcError = (code: number) => () => { throw Object.assign(new Error(`wallet error ${code}`), { code }); };
+  let onSending: Mock<() => void>;
+  beforeEach(() => {
+    wallet.log.length = 0;
+    // The wallet is on Base, exposes the owner's account (in another letter case) and answers `wallet_sendCalls` with its batch id.
+    wallet.answers = { eth_chainId: () => '0x2105', eth_accounts: () => [OWNER.toUpperCase().replace('0X', '0x')], wallet_sendCalls: () => ({ id: BATCH }) };
+    onSending = vi.fn<() => void>(() => { wallet.log.push('onSending'); });
+  });
+  const sent = () => wallet.log.filter(m => m === 'wallet_sendCalls').length;
+
+  it('asks the wallet once and calls onSending exactly once, immediately before wallet_sendCalls', async () => {
+    await expect(sendWalletBatch(request, onSending)).resolves.toBe(BATCH);
+    expect(onSending).toHaveBeenCalledTimes(1);
+    expect(wallet.log).toEqual(['eth_chainId', 'eth_accounts', 'onSending', 'wallet_sendCalls']);
+  });
+  it('a duplicate id (5720) returns the group\'s own id: the batch was sent before and is read back, never sent twice', async () => {
+    wallet.answers.wallet_sendCalls = rpcError(eip5792.DUPLICATE_ID);
+    await expect(sendWalletBatch(request, onSending)).resolves.toBe(ID);
+    expect(onSending).toHaveBeenCalledTimes(1);
+  });
+  it('refuses with WALLET_ACCOUNT_MISMATCH unless the wallet\'s SELECTED account is the run\'s account; the wallet is never asked to send', async () => {
+    // Another account selected, also while the run's account is connected (a wallet that ignores `from` would send from the selected one);
+    // a locked wallet (no account); an unreadable answer; a failed request.
+    for (const answer of [() => [OTHER], () => [OTHER, OWNER], () => [], () => null, () => [42, OWNER], rpcError(-32603)]) {
+      wallet.answers.eth_accounts = answer;
+      await expect(sendWalletBatch(request, onSending)).rejects.toThrow('WALLET_ACCOUNT_MISMATCH');
+    }
+    expect(sent()).toBe(0);
+    expect(onSending).not.toHaveBeenCalled();
+    // The run's account selected (in any letter case), whatever else is connected: sent.
+    wallet.answers.eth_accounts = () => [OWNER.toLowerCase(), OTHER];
+    await expect(sendWalletBatch(request, onSending)).resolves.toBe(BATCH);
+    expect(sent()).toBe(1);
+  });
+  it('a throw from onSending (another tab handed the group over) propagates unchanged and wallet_sendCalls is never requested', async () => {
+    const refusal = new Error('WALLET_BATCH_SEND_UNCONFIRMED');
+    await expect(sendWalletBatch(request, () => { throw refusal; })).rejects.toBe(refusal);
+    expect(wallet.log).toEqual(['eth_chainId', 'eth_accounts']);
+    expect(sent()).toBe(0);
+  });
+  it('a failed network switch is "nothing was sent" (WALLET_WRONG_NETWORK), never a raw wallet error; onSending never runs', async () => {
+    wallet.answers.eth_chainId = () => '0xa4b1';
+    for (const code of [-32002, -32603, 4902]) {
+      wallet.answers.wallet_switchEthereumChain = rpcError(code);
+      await expect(sendWalletBatch(request, onSending)).rejects.toThrow('WALLET_WRONG_NETWORK');
+    }
+    // The owner's own rejection of the switch keeps its own code.
+    wallet.answers.wallet_switchEthereumChain = rpcError(4001);
+    await expect(sendWalletBatch(request, onSending)).rejects.toThrow('WALLET_REQUEST_REJECTED');
+    // The switch "succeeded" but the wallet is still on another network.
+    wallet.answers.wallet_switchEthereumChain = () => null;
+    await expect(sendWalletBatch(request, onSending)).rejects.toThrow('WALLET_WRONG_NETWORK');
+    // The network cannot be read at all, or reads as garbage.
+    wallet.answers.eth_chainId = rpcError(-32603);
+    await expect(sendWalletBatch(request, onSending)).rejects.toThrow('WALLET_WRONG_NETWORK');
+    wallet.answers.eth_chainId = () => 'not-a-chain';
+    await expect(sendWalletBatch(request, onSending)).rejects.toThrow('WALLET_WRONG_NETWORK');
+    expect(sent()).toBe(0);
+    expect(onSending).not.toHaveBeenCalled();
+  });
+  it('switches the network first when needed, then checks the account, then sends', async () => {
+    let chain = '0xa4b1';
+    wallet.answers.eth_chainId = () => chain;
+    wallet.answers.wallet_switchEthereumChain = () => { chain = '0x2105'; return null; };
+    await expect(sendWalletBatch(request, onSending)).resolves.toBe(BATCH);
+    expect(wallet.log).toEqual(['eth_chainId', 'wallet_switchEthereumChain', 'eth_chainId', 'eth_accounts', 'onSending', 'wallet_sendCalls']);
+  });
+  it('after wallet_sendCalls was requested: a pre-send refusal code is WALLET_BATCH_NOT_SENT, anything else stays "may have been sent"', async () => {
+    wallet.answers.wallet_sendCalls = rpcError(5750);
+    await expect(sendWalletBatch(request, onSending)).rejects.toThrow('WALLET_BATCH_NOT_SENT');
+    wallet.answers.wallet_sendCalls = rpcError(-32603);
+    const raw = await sendWalletBatch(request, onSending).catch((cause: unknown) => cause);
+    expect(raw).toMatchObject({ code: -32603 });
+    expect(onSending).toHaveBeenCalledTimes(2);
   });
 });

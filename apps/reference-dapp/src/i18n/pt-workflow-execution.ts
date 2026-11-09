@@ -171,6 +171,15 @@ export const portugueseWorkflowExecution: Readonly<Record<string, string>> = {
   'This Withdraw would leave your Aave health factor below 2.0 after the batch. Withdraw less or repay part of the debt first.': 'Este Withdraw deixaria seu fator de saúde da Aave abaixo de 2,0 após o lote. Retire menos ou pague parte da dívida antes.',
   'A Repay must be smaller than your current debt (a full repayment is not offered here). Lower the Repay amount.': 'Um Repay precisa ser menor que sua dívida atual (o pagamento total não é oferecido aqui). Reduza o valor do Repay.',
   'Your wallet refused this batch before sending anything (it may not support it on this network). Nothing was sent; you can try again.': 'Sua carteira recusou este lote antes de enviar qualquer coisa (talvez não o suporte nesta rede). Nada foi enviado; você pode tentar de novo.',
+  'Your wallet is locked or another account is selected. Unlock your wallet, select the account this run belongs to, and try again; nothing was sent.':
+    'Sua carteira está bloqueada ou outra conta está selecionada. Desbloqueie a carteira, selecione a conta a que esta execução pertence e tente de novo; nada foi enviado.',
+  'A token in this batch does not deliver the full amount the swap sends (it charges a fee on transfer or changes balances), so it cannot be batched. Nothing was sent.':
+    'Um token deste lote não entrega o valor total que o swap envia (cobra uma taxa na transferência ou altera saldos), então ele não pode ser agrupado. Nada foi enviado.',
+  'A token\'s contract does not match FloFi\'s catalog (its decimals differ on chain), so nothing was prepared.':
+    'O contrato de um token não corresponde ao catálogo da FloFi (os decimais dele diferem on-chain), então nada foi preparado.',
+  'A token in this workflow has no contract on this network, so nothing was prepared.': 'Um token deste fluxo não tem contrato nesta rede, então nada foi preparado.',
+  'This network has no registered router to give the batch an on-chain expiry, so it is not offered as a batch. Nothing was sent.':
+    'Esta rede não tem um roteador registrado para dar ao lote um prazo on-chain, então ele não é oferecido como lote. Nada foi enviado.',
   'FloFi could not read this network\'s data fee, so the batch was not offered. Nothing was sent; try again.': 'A FloFi não conseguiu ler a taxa de dados desta rede, então o lote não foi oferecido. Nada foi enviado; tente de novo.',
   'This step (for example a bridge or a liquidity position) runs through its own review and wallet confirmation.': 'Esta etapa (por exemplo, uma bridge ou uma posição de liquidez) passa pela própria revisão e confirmação na carteira.',
   'A swap allows more than 3% slippage, which cannot be fixed in one batch, so it is confirmed on its own. Lower the slippage to batch it.': 'Um swap permite mais de 3% de slippage, o que não pode ser fixado em um lote, então é confirmado sozinho. Reduza o slippage para agrupá-lo.',

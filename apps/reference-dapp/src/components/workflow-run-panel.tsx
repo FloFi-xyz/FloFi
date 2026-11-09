@@ -67,13 +67,18 @@ const units = (amount: string, unit: string, round: 'down' | 'up' = 'down') => {
 const stepsOf = (tr: (key: string, ...args: string[]) => string, from: number, to: number) => from === to ? tr('Step {0}', String(from + 1)) : tr('Steps {0}–{1}', String(from + 1), String(to + 1));
 const short = (hash: string) => hash.length > 14 ? `${hash.slice(0, 8)}…${hash.slice(-6)}` : hash;
 /**
- * P0 universal execution: the batches this browser handed to the owner's wallet, per approval and group, written BEFORE `wallet_sendCalls` (the
- * Editor's rule, now on /approve too — the page every MCP, channel and chat handoff uses). A wallet that ignores the app-provided EIP-5792 id
- * cannot be asked whether it holds an earlier request, so after a lost answer the group is never sent again from here: the batch id is reused
- * when the wallet answered, else the owner is told to check the wallet (the group can be ended once its preparation expires).
+ * P0 universal execution: the batches this browser handed to the owner's wallet, per approval and group, written immediately before
+ * `wallet_sendCalls` is requested (`sendWalletBatch`'s `onSending`; the Editor's rule, now on /approve too — the page every MCP, channel and chat
+ * handoff uses). Never earlier: a failure before that request (a network switch, the account check) sent nothing and must not leave a marker
+ * that blocks the group for good. A wallet that ignores the app-provided EIP-5792 id cannot be asked whether it holds an earlier request, so
+ * after a lost answer the group is never sent again from here: the batch id is reused when the wallet answered, else the owner is told to
+ * check the wallet (the group can be ended once its preparation expires).
+ * `nonce`: which call wrote the attempt. Another tab of this browser may hand the same group to the wallet between this tab's checks and its
+ * request, so the attempt is re-read the moment the wallet would be asked (one found then is another's: this tab does not send), and an
+ * answer that proves nothing was sent clears only this call's own attempt, never another tab's.
  */
 const BATCH_ATTEMPTS_KEY = 'flofi.approve-batch-attempts.v1';
-type BatchAttempt = { readonly at: string; readonly batchId?: string };
+type BatchAttempt = { readonly at: string; readonly batchId?: string; readonly nonce?: string };
 function batchAttempts(): Record<string, BatchAttempt> {
   try { const v = JSON.parse(localStorage.getItem(BATCH_ATTEMPTS_KEY) ?? '{}') as unknown; return v && typeof v === 'object' ? v as Record<string, BatchAttempt> : {}; } catch { return {}; }
 }
@@ -81,7 +86,10 @@ function putBatchAttempt(key: string, value: BatchAttempt | null) {
   try { const all = batchAttempts(); if (value) all[key] = value; else delete all[key]; localStorage.setItem(BATCH_ATTEMPTS_KEY, JSON.stringify(all)); } catch { /* storage unavailable */ }
 }
 /** Wallet answers that mean nothing was sent: the attempt is forgotten and the group may be offered again. */
-const NOTHING_SENT: ReadonlySet<string> = new Set(['WALLET_REQUEST_REJECTED', 'WALLET_WRONG_NETWORK', 'EVM_WALLET_NOT_FOUND', 'WALLET_BATCH_NOT_SENT']);
+const NOTHING_SENT: ReadonlySet<string> = new Set(['WALLET_REQUEST_REJECTED', 'WALLET_WRONG_NETWORK', 'EVM_WALLET_NOT_FOUND', 'WALLET_BATCH_NOT_SENT',
+  'WALLET_ACCOUNT_MISMATCH']);
+/** Whether the owner's wallet knows a batch id (`wallet_getCallsStatus` answers; EIP-5792 5730 or no answer: it does not). */
+const walletKnows = (batchId: string) => walletBatchHashes(batchId).then(() => true, () => false);
 
 export function WorkflowRunPanel({ claim, approvalId, secret, onProposal, onError }: { claim: WorkflowRunClaim; approvalId: string; secret: string | null;
   onProposal: (proposal: ClaimedProposal) => void; onError: (code: string) => void }) {
@@ -138,6 +146,9 @@ export function WorkflowRunPanel({ claim, approvalId, secret, onProposal, onErro
   });
 
   // BUILD-FLOFI-UNIVERSAL-WORKFLOW-002: user-funded execution groups — the owner's own wallets authorize (and, for a batch, send) and pay.
+  // Capabilities are read for the wallet's selected account (`eth_accounts[0]`): while the owner chooses the mode the run has no groups and no
+  // step wallet yet, so nothing else names the account. That is enough: atomic batching is a property of the wallet, not of one of its
+  // accounts, and the safety guarantee is the send-time check that the selected account IS the run's account (`sendWalletBatch`).
   const evmAddress = async () => { const p = chosenEvmProvider() ?? injected(); const a = p ? await p.request({ method: 'eth_accounts', params: [] }) : null;
     return Array.isArray(a) && typeof a[0] === 'string' ? a[0].toLowerCase() : null; };
   const startUserFunded = () => act(async () => {
@@ -148,29 +159,50 @@ export function WorkflowRunPanel({ claim, approvalId, secret, onProposal, onErro
   });
   /** Prepares one group on the server, asks the owner's wallet for exactly that, and relays the answer (verified by the server). */
   const authorizeGroup = (index: number) => act(async () => {
+    const attemptKey = `${approvalId}:${index}`, view = run.groups?.find(g => g.index === index) ?? null;
+    // A batch the wallet already holds is reported BEFORE anything is prepared again: once it executed, a fresh preparation's simulation fails
+    // (its effects are already on chain) and a refused preparation must never hide the batch the owner sent. The id the wallet answered with
+    // (kept by this browser) is recorded as is; else the batch id the run shows for the group (its own EIP-5792 id while it is prepared), if
+    // the wallet knows it. Only then is the group prepared (again).
+    const stored = batchAttempts()[attemptKey] ?? null;
+    if (stored?.batchId) return recordBatch(index, attemptKey, stored.batchId);
+    if (view?.strategy === 'EVM_WALLET_BATCH' && view.batchId) {
+      if (await walletKnows(view.batchId)) return recordBatch(index, attemptKey, view.batchId);
+      // The wallet was asked and its answer was lost, and it does not know the group's id. That id is fixed per run and group, so preparing
+      // again could not change this answer — it could only fail (e.g. the sent batch made the fresh simulation revert) and hide it.
+      if (stored) throw new Error('WALLET_BATCH_SEND_UNCONFIRMED');
+    }
+    // Otherwise the group is prepared (again). A lost answer still reaches this point only when the run showed no batch id for the group: its
+    // prepared id is then asked of the wallet below before anything is sent.
     const prepared = await prepareUserFundedGroup(approvalId, index);
     if (!prepared.ok) return prepared;
     const p = prepared.value.prepared as unknown as Record<string, unknown>;
     if (p.kind === 'EVM_WALLET_BATCH') {
-      const request = p.request as eip5792.SendCallsRequest, attemptKey = `${approvalId}:${index}`;
+      const request = p.request as eip5792.SendCallsRequest;
       // The group's batch may already be in the wallet (a reload, a lost answer, an earlier preparation): it is read back by its id, never sent again.
-      const known = request.id ? await walletBatchHashes(request.id).then(() => true, () => false) : false;
+      const known = request.id ? await walletKnows(request.id) : false;
       const earlier = batchAttempts()[attemptKey] ?? null;
       let batchId: string;
       if (known) batchId = request.id!;
       else if (earlier?.batchId) batchId = earlier.batchId;
       else if (earlier) throw new Error('WALLET_BATCH_SEND_UNCONFIRMED');
       else {
-        putBatchAttempt(attemptKey, { at: new Date().toISOString() });
-        try { batchId = await sendWalletBatch(request); }
-        catch (cause) { if (cause instanceof Error && NOTHING_SENT.has(cause.message)) putBatchAttempt(attemptKey, null); throw cause; }
-        putBatchAttempt(attemptKey, { at: new Date().toISOString(), batchId });
+        // The attempt is kept the moment the wallet is asked to send (never before: a failed network switch or account check sent nothing).
+        // Re-read then: an attempt found at that moment was written by another tab (none existed above), so this tab never sends the group too.
+        const nonce = crypto.randomUUID();
+        try {
+          batchId = await sendWalletBatch(request, () => {
+            if (batchAttempts()[attemptKey]) throw new Error('WALLET_BATCH_SEND_UNCONFIRMED');
+            putBatchAttempt(attemptKey, { at: new Date().toISOString(), nonce });
+          });
+        } catch (cause) {
+          // Nothing was sent by THIS call: only its own attempt is forgotten (another tab's stays, whatever this call's failure).
+          if (cause instanceof Error && NOTHING_SENT.has(cause.message) && batchAttempts()[attemptKey]?.nonce === nonce) putBatchAttempt(attemptKey, null);
+          throw cause;
+        }
+        putBatchAttempt(attemptKey, { at: new Date().toISOString(), batchId, nonce });
       }
-      const authorized = await authorizeUserFundedGroup(approvalId, index, { kind: 'EVM_WALLET_BATCH', batchId });
-      if (!authorized.ok) return authorized;
-      // The run recorded the batch: from now on the server holds its id (a reload recovers it from there).
-      putBatchAttempt(attemptKey, null);
-      return followBatch(index, batchId, authorized);
+      return recordBatch(index, attemptKey, batchId);
     }
     if (p.kind === 'EVM_USER_OPERATION') {
       const signature = await signUserOperation(prepared.value.feePayer, Number(p.chainId), p.typedData);
@@ -182,6 +214,14 @@ export function WorkflowRunPanel({ claim, approvalId, secret, onProposal, onErro
     }
     return { ok: false as const, code: 'USER_FUNDED_GROUP_NOT_PREPARABLE' };
   });
+  /** The wallet holds the group's batch: the run records its id, then its result is followed and reported. */
+  async function recordBatch(index: number, attemptKey: string, batchId: string) {
+    const authorized = await authorizeUserFundedGroup(approvalId, index, { kind: 'EVM_WALLET_BATCH', batchId });
+    if (!authorized.ok) return authorized;
+    // The run recorded the batch: from now on the server holds its id (a reload recovers it from there).
+    putBatchAttempt(attemptKey, null);
+    return followBatch(index, batchId, authorized);
+  }
   /** Waits for the wallet to settle the batch and reports it: its transactions, or that it failed off chain (nothing was sent). */
   async function followBatch<T>(index: number, batchId: string, pending: T) {
     setWaitingBatch(true);

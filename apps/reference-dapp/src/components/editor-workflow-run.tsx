@@ -37,8 +37,9 @@ import { useWalletProof } from './wallet-proof';
 const STORAGE_KEY = 'flofi.editor-workflow-runs.v2';
 type Stored = { readonly workflowId: string; readonly approvalId: string; readonly workflowHash: string; readonly owner: string; readonly revision: number;
   readonly at: string;
-  /** `attempt`: wallet_sendCalls was called and has not answered (yet) — the wallet may hold the batch under the group's own id. */
-  readonly sent?: { readonly group: number; readonly batchId: string; readonly attempt?: boolean } };
+  /** `attempt`: wallet_sendCalls was called and has not answered (yet) — the wallet may hold the batch under the group's own id. `nonce`:
+   *  which send wrote it, so a send clears only its own attempt, never one another tab of this browser wrote for the same group. */
+  readonly sent?: { readonly group: number; readonly batchId: string; readonly attempt?: boolean; readonly nonce?: string } };
 const STORED_LIMIT = 16;
 const readAll = (): Stored[] => {
   try {
@@ -56,8 +57,18 @@ const FORGOTTEN = /_NOT_FOUND$/;
 /** A Review that failed for a moment (rate limit, RPC): reviewing again is the way forward, not the step-by-step path. */
 const TRANSIENT_REVIEW_FAILURE: ReadonlySet<string> = new Set(['EDITOR_REVIEW_RATE_LIMITED', 'USER_FUNDED_RPC_UNAVAILABLE', 'HANDOFF_RATE_LIMITED',
   'EVM_WALLET_REQUIRED', 'EDITOR_EXECUTION_FAILED']);
-/** Wallet answers that prove nothing was sent: the request was declined, or never made (no wallet, the network switch failed). */
-const NOTHING_SENT: ReadonlySet<string> = new Set(['WALLET_REQUEST_REJECTED', 'WALLET_WRONG_NETWORK', 'EVM_WALLET_NOT_FOUND', 'WALLET_BATCH_NOT_SENT']);
+/**
+ * Review refusals no retry changes that each step's own owner-signed flow handles itself (it re-checks, simulates and reviews its step): the
+ * workflow is offered step by step instead of a batch that can never be prepared (the same codes a due group resumes step by step for).
+ */
+const STEP_BY_STEP_REFUSALS: ReadonlySet<string> = new Set(['USER_FUNDED_SIMULATION_UNAVAILABLE', 'SIMULATION_SWAP_OUTPUT_SHORT', 'USER_FUNDED_DEADLINE_UNAVAILABLE',
+  'TOKEN_METADATA_MISMATCH', 'CONTRACT_CODE_MISSING']);
+/** Whether a whole-workflow Review sends the owner to the step-by-step path: it planned one, or refused the batch for good. */
+export const reviewOffersStepByStep = (review: Pick<EditorExecutionReview, 'mode' | 'refusal'>) =>
+  review.mode === 'STEP_BY_STEP' || (review.refusal !== null && STEP_BY_STEP_REFUSALS.has(review.refusal.code));
+/** Wallet answers that prove nothing was sent: the request was declined, or never made (no wallet, the network switch or account check failed). */
+const NOTHING_SENT: ReadonlySet<string> = new Set(['WALLET_REQUEST_REJECTED', 'WALLET_WRONG_NETWORK', 'EVM_WALLET_NOT_FOUND', 'WALLET_BATCH_NOT_SENT',
+  'WALLET_ACCOUNT_MISMATCH']);
 /** Whether the wallet knows a batch id (`wallet_getCallsStatus` answers; EIP-5792 5730 or no answer: it does not) and its status if final. */
 const probe = (batchId: string) => walletBatchHashes(batchId).then(result => ({ known: true as const, result }), () => ({ known: false as const, result: null }));
 const CODE = /^[A-Z][A-Z0-9_:]{2,100}$/;
@@ -245,22 +256,35 @@ export function useEditorWorkflowRun(input: { readonly workflow: { readonly work
       // A batch the wallet already has (a reload, a lost answer) is read back by its id, never sent again.
       let batchId = await heldBatch(id, index, request.id ?? null);
       if (!batchId) {
-        // Kept BEFORE the wallet is asked: if its answer is lost (a timeout, a reload, an unreadable answer) the wallet may hold the batch, so
-        // FloFi reads it back and never sends this group again. Only an answer that proves nothing was sent clears it.
-        const before = storedRun(id);
-        if (before) putStored({ ...before, sent: { group: index, batchId: request.id ?? '', attempt: true } });
-        setUnrecorded(true);
-        try { batchId = await sendWalletBatch(request); }
+        // Kept the moment the wallet is asked to send (`onSending`, immediately before `wallet_sendCalls`): if its answer is lost (a timeout, a
+        // reload, an unreadable answer) the wallet may hold the batch, so FloFi reads it back and never sends this group again. Never earlier:
+        // a failed network switch or account check sent nothing and must not block the group for good. Only an answer that proves nothing was
+        // sent clears it, and only the attempt this send wrote.
+        const nonce = crypto.randomUUID();
+        const handOver = () => {
+          const before = storedRun(id);
+          // Re-read the moment the wallet would be asked: `heldBatch` found no record for this group, so one now was written by another tab
+          // (it handed the group to the wallet meanwhile). This tab never sends it too; the batch is read back from the wallet instead.
+          if (before?.sent?.group === index) {
+            setUnrecorded(true);
+            throw new Error(before.sent.attempt ? 'WALLET_BATCH_SEND_UNCONFIRMED' : 'WALLET_BATCH_SENT_UNRECORDED');
+          }
+          if (before) putStored({ ...before, sent: { group: index, batchId: request.id ?? '', attempt: true, nonce } });
+          setUnrecorded(true);
+        };
+        try { batchId = await sendWalletBatch(request, handOver); }
         catch (cause) {
           if (NOTHING_SENT.has(codeOf(cause))) {
+            // Only this send's own attempt (none exists when the wallet was never asked to send; another tab's record stays, and so does what
+            // it means: the group may still be in the wallet).
             const now = storedRun(id);
-            if (now) { const { sent: _sent, ...rest } = now; void _sent; putStored(rest); }
-            setUnrecorded(false);
+            if (now?.sent?.nonce === nonce) { const { sent: _sent, ...rest } = now; void _sent; putStored(rest); }
+            setUnrecorded(storedRun(id)?.sent?.group === index);
           }
           throw cause;
         }
         const stored = storedRun(id);
-        if (stored) putStored({ ...stored, sent: { group: index, batchId } });
+        if (stored) putStored({ ...stored, sent: { group: index, batchId, nonce } });
       }
       await recordBatch(id, index, batchId);
       return;
@@ -479,7 +503,7 @@ export function useEditorWorkflowRun(input: { readonly workflow: { readonly work
   return { available: available && enabled, phase, review, error, run, updated, started: ownRun, grouped, unrecorded, following, hide, resume,
     canReview: available && enabled && evmWorkflow && !approvalId,
     visible: available && (enabled || Boolean(approvalId) || Boolean(earlier)), earlier: Boolean(available && earlier && !approvalId), followEarlier,
-    stepByStep: !ownRun && (!evmWorkflow || (review ? review.mode === 'STEP_BY_STEP' || review.refusal?.code === 'USER_FUNDED_SIMULATION_UNAVAILABLE'
+    stepByStep: !ownRun && (!evmWorkflow || (review ? reviewOffersStepByStep(review)
       : error !== null && !following && !TRANSIENT_REVIEW_FAILURE.has(error))),
     unloaded: Boolean(approvalId && !run),
     startReview: runReview, authorize, confirmUpdate, authorizeDue, checkWallet, end, dismiss };
@@ -537,6 +561,13 @@ export const EXECUTION_REFUSAL: Readonly<Record<string, string>> = {
   WITHDRAW_UNSAFE_HEALTH_FACTOR: 'This Withdraw would leave your Aave health factor below 2.0 after the batch. Withdraw less or repay part of the debt first.',
   REPAY_PARTIAL_DEBT_REQUIRED: 'A Repay must be smaller than your current debt (a full repayment is not offered here). Lower the Repay amount.',
   WALLET_BATCH_NOT_SENT: 'Your wallet refused this batch before sending anything (it may not support it on this network). Nothing was sent; you can try again.',
+  WALLET_WRONG_NETWORK: 'Switch your wallet to the network of this group, then try again.',
+  WALLET_ACCOUNT_MISMATCH: 'Your wallet is locked or another account is selected. Unlock your wallet, select the account this run belongs to, and try again; nothing was sent.',
+  // P0 universal execution: what the chain's own contracts say about a token, or what the network lacks, in plain words.
+  SIMULATION_SWAP_OUTPUT_SHORT: 'A token in this batch does not deliver the full amount the swap sends (it charges a fee on transfer or changes balances), so it cannot be batched. Nothing was sent.',
+  TOKEN_METADATA_MISMATCH: 'A token\'s contract does not match FloFi\'s catalog (its decimals differ on chain), so nothing was prepared.',
+  CONTRACT_CODE_MISSING: 'A token in this workflow has no contract on this network, so nothing was prepared.',
+  USER_FUNDED_DEADLINE_UNAVAILABLE: 'This network has no registered router to give the batch an on-chain expiry, so it is not offered as a batch. Nothing was sent.',
   USER_FUNDED_L1_FEE_UNAVAILABLE: 'FloFi could not read this network\'s data fee, so the batch was not offered. Nothing was sent; try again.',
   EDITOR_RUNS_NOT_ENABLED: 'Running a whole workflow is not enabled on this FloFi deployment.',
   HANDOFF_RATE_LIMITED: 'Too many workflow runs were started recently. Try again later.',
