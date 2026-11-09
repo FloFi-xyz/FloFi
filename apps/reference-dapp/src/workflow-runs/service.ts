@@ -167,15 +167,39 @@ async function resumeUserFunded(deps: WorkflowRunDeps, run: RunRecord): Promise<
   // revokes it from their own wallet.
   if (g!.authorization) refuse('WORKFLOW_RUN_GROUP_SIGNED');
   if (!await deps.store.transition(run.runId, { version: run.version, from: ['HALTED'] }, 'RUNNING', { code: null }, 'RUN_RESUMED')) refuse('WORKFLOW_RUN_CHANGED');
-  const strategy = g!.strategy === 'EVM_USER_OPERATION' ? 'EVM_WALLET_BATCH' as const : g!.strategy === 'SOLANA_DURABLE_NONCE' ? 'SOLANA_SIGN_ALL' as const : g!.strategy;
+  // P0 universal execution: a group that can never be prepared as a batch on this deployment (its RPC cannot simulate the Aave calls it needs)
+  // continues through each step's own owner-signed flow — which simulates and reviews every step itself — instead of staying blocked.
+  const ownerSteps = g!.code !== null && STEP_BY_STEP_FALLBACK.has(g!.code);
+  const strategy = ownerSteps ? g!.namespace === 'solana' ? 'SOLANA_OWNER_STEP' as const : 'EVM_OWNER_STEP' as const
+    : g!.strategy === 'EVM_USER_OPERATION' ? 'EVM_WALLET_BATCH' as const : g!.strategy === 'SOLANA_DURABLE_NONCE' ? 'SOLANA_SIGN_ALL' as const : g!.strategy;
   await deps.store.groupTransition(run.runId, g!.groupIndex, ['BLOCKED'], 'PLANNED', { strategy, signing: 'WHEN_DUE', prepared: null, authorization: null, validUntil: null, code: null },
     'GROUP_RESUMED');
   for (let i = g!.stepFrom; i <= g!.stepTo; i++) {
     const moved = await deps.store.stepTransition(run.runId, i, ['BLOCKED'], 'PENDING', { code: null }, 'STEP_RESUMED');
-    if (moved) await deps.store.stepTransition(run.runId, i, ['PENDING'], 'DELEGATED', {});
+    // A grouped step waits for its group; an owner step runs through its own flow from PENDING, exactly as in confirm-each-step mode.
+    if (moved && !ownerSteps) await deps.store.stepTransition(run.runId, i, ['PENDING'], 'DELEGATED', {});
   }
   await advanceRun(runnerDeps(deps), run.runId);
   return (await deps.store.byId(run.runId))!;
+}
+/**
+ * P0 universal execution: refusals of a DUE group that no retry can change (what was delivered, what the deployment's RPC offers, what the
+ * workflow says). After earlier steps executed, such a group is blocked and the run halted at once — the owner resumes or ends it — instead of
+ * the run staying RUNNING (up to its expiry) while every attempt fails again.
+ */
+const PERMANENT_DUE_REFUSALS: ReadonlySet<string> = new Set(['WORKFLOW_BINDING_NOTHING_RECEIVED', 'WORKFLOW_BINDING_NOTHING_GUARANTEED', 'WORKFLOW_BINDING_NOT_EXACT',
+  'USER_FUNDED_SIMULATION_UNAVAILABLE', 'AAVE_BENEFICIARY_NOT_OWNER', 'WORKFLOW_SLIPPAGE_UNSUPPORTED', 'USER_FUNDED_GROUP_TOO_MANY_CALLS', 'USER_FUNDED_CHAIN_DISABLED',
+  'USER_FUNDED_ACTION_NOT_BUILDABLE', 'USER_FUNDED_STEP_SHAPE_UNSUPPORTED', 'DELEGATION_ASSET_NOT_SUPPORTED', 'DELEGATION_TEMPLATE_NOT_IMPLEMENTED']);
+/** Blocked groups that resume through each step's own flow rather than as a batch again. */
+const STEP_BY_STEP_FALLBACK: ReadonlySet<string> = new Set(['USER_FUNDED_SIMULATION_UNAVAILABLE']);
+/** Blocks a due group after a permanent refusal and halts the run (steps already executed keep their facts), then refuses with the code. */
+async function blockDueGroup(deps: WorkflowRunDeps, run: RunRecord, g: GroupRecord, code: string): Promise<never> {
+  const stored = code.split(':')[0]!;
+  await deps.store.groupTransition(run.runId, g.groupIndex, ['PLANNED'], 'BLOCKED', { code: stored });
+  for (let i = g.stepFrom; i <= g.stepTo; i++) await deps.store.stepTransition(run.runId, i, ['DELEGATED'], 'BLOCKED', { code: stored });
+  await deps.store.transition(run.runId, { version: run.version, from: ['RUNNING', 'ATTENTION'] }, 'HALTED', { code: stored });
+  deps.log('workflow_run.group_blocked', { run: run.runId, group: g.groupIndex, code: stored, partial: true });
+  return refuse(code);
 }
 /** P0 workflow execution: the run's own EVM wallet is known here, so a step whose Aave beneficiary is another account is never grouped. */
 export const userFundedBuildable = (facts: UserFundedFacts, evmOwner?: string | null) => (st: Parameters<typeof evmStepBuildable>[0]) =>
@@ -246,6 +270,8 @@ export async function prepareUserFundedGroup(deps: WorkflowRunDeps, run: RunReco
   const fresh = composeWorkflowBound(run.strategy, run.workflowHash);
   if (!fresh.ok) return refuse('WORKFLOW_RUN_STALE');
   const composed: WorkflowComposition = fresh;
+  // Earlier steps already executed: a permanent refusal now halts the run (resume or end), never leaves it waiting on a group that cannot be prepared.
+  const partial = due && steps.some(s => s.stepIndex < g.stepFrom && s.state === 'RECONCILED');
   // Bound steps of a due group: their amounts are resolved now from reconciled facts, and Solana steps are re-composed with them.
   const guaranteed = new Map<number, AssetAmountFact>();
   // One delivery funds its consumers in this group IN ORDER: each takes min(cap, what is left), never the whole delivery again (EVM builders
@@ -256,7 +282,7 @@ export async function prepareUserFundedGroup(deps: WorkflowRunDeps, run: RunReco
     if (!due) refuse('WORKFLOW_BINDING_RESOLVED_WHEN_DUE');
     const asset = assetKey({ chain: b.asset.chainId, address: b.asset.address }), share = `${b.amountFrom}:${asset}`;
     const available = reconciledAvailable(steps, b.amountFrom, asset, g.stepFrom);
-    if (available <= 0n) refuse('WORKFLOW_BINDING_NOTHING_RECEIVED');
+    if (available <= 0n) return partial ? blockDueGroup(deps, run, g, 'WORKFLOW_BINDING_NOTHING_RECEIVED') : refuse('WORKFLOW_BINDING_NOTHING_RECEIVED');
     if (!guaranteed.has(b.amountFrom)) guaranteed.set(b.amountFrom, { asset, amount: available.toString() });
     if (g.namespace === 'solana') {
       const left = available - (allocated.get(share) ?? 0n);
@@ -272,7 +298,7 @@ export async function prepareUserFundedGroup(deps: WorkflowRunDeps, run: RunReco
   if (!req.ok) return refuse(req.code);
   const r = await prepareGroup(userFunded, composition, req.value, { runId: run.runId, groupIndex, strategy: g.strategy, chain: g.chain, feePayer: g.feePayer,
     stepFrom: g.stepFrom, stepTo: g.stepTo }, { guaranteed, delayed: g.awaitsDelivery !== null && !due });
-  if (!r.ok) return refuse(r.code);
+  if (!r.ok) return partial && PERMANENT_DUE_REFUSALS.has(r.code.split(':')[0]!) ? blockDueGroup(deps, run, g, r.code) : refuse(r.code);
   const prepared: Prepared = superseded.length ? { ...r.value.prepared, superseded } : r.value.prepared;
   const moved = await deps.store.groupTransition(run.runId, groupIndex, ['PLANNED'], 'PREPARED', { prepared, validUntil: r.value.validUntil, code: null })
     ?? refuse('WORKFLOW_RUN_CHANGED');
