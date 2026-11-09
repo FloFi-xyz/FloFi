@@ -13,7 +13,7 @@
  * user-funded-chain-serve.ts) and disposable PostgreSQL. The wallet is this spec's double; nothing reaches a public network, nothing is
  * signed with a real key, and none of this is evidence of a mainnet execution.
  */
-import type { Page } from '@playwright/test';
+import { request as apiRequest, type APIRequestContext, type Page } from '@playwright/test';
 import { createDatabase } from '@defi-workflow-engine/cloud-runtime';
 import { createTestWallet } from '../../../packages/reference-reconciler/test/test-wallet';
 import { createAccountStore } from '../src/accounts/account-store';
@@ -32,17 +32,16 @@ const BASE = '0x2105', CHAIN_HARNESS = 'https://127.0.0.1:8567', BASE_HARNESS = 
 const BASE_USDC = '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913', BASE_WETH = '0x4200000000000000000000000000000000000006';
 type SentBatch = { version: string; id?: string; chainId: string; from: string; atomicRequired: boolean; calls: { to: string; data: string; value: string }[]; capabilities?: unknown };
 
+let api: APIRequestContext | null = null;
+test.afterAll(async () => { await api?.dispose(); api = null; });
+/** The chain double's test-only control (loopback only); its per-run certificate is self-signed, as for the other loopback harnesses. */
 async function control<T>(method: string, params: unknown[] = []): Promise<T> {
-  // The loopback double's per-run certificate is not in the test process's trust store: this call reaches 127.0.0.1 only.
-  const { request } = await import('node:https');
-  return new Promise<T>((resolve, reject) => {
-    const body = JSON.stringify({ jsonrpc: '2.0', id: 1, method, params });
-    const call = request(`${CHAIN_HARNESS}/control`, { method: 'POST', rejectUnauthorized: false, headers: { 'content-type': 'application/json' } }, response => {
-      let text = ''; response.on('data', chunk => { text += String(chunk); });
-      response.on('end', () => { const value = JSON.parse(text) as { result?: T; error?: { message: string } }; value.error ? reject(new Error(value.error.message)) : resolve(value.result as T); });
-    });
-    call.on('error', reject); call.end(body);
-  });
+  api ??= await apiRequest.newContext({ ignoreHTTPSErrors: true });
+  const response = await api.post(`${CHAIN_HARNESS}/control`, { data: { jsonrpc: '2.0', id: 1, method, params } });
+  expect(response.ok()).toBe(true);
+  const value = await response.json() as { result?: T; error?: { message: string } };
+  if (value.error) throw new Error(value.error.message);
+  return value.result as T;
 }
 async function query<T>(sql: string, params: unknown[] = []): Promise<T[]> {
   const db = createDatabase({ connectionString: process.env.FLOFI_E2E_DATABASE_URL!, maxConnections: 1 });

@@ -152,7 +152,7 @@ const shards = [
     'copilot-solana', 'mcp-embedded-signing', 'swap-read-acceptance', 'workflow-acceptance', 'cow-loopback', 'chat-automations', 'copilot',
     'owner-history', 'mcp-in-chat', 'approve-authorize-journeys', 'execution-continuity'],
   ['journey-provenance', 'lending-provenance', 'cloud-provenance', 'solana-mainnet-network', 'developer-journey', 'base-mainnet-authoring',
-    'canvas-workflow-ux', 'channel-signing', 'automations', 'canvas-automation-ux', 'flight', 'universal-bridge', 'editor-wallet-batch'],
+    'canvas-workflow-ux', 'channel-signing', 'automations', 'canvas-automation-ux', 'flight', 'editor-wallet-batch', 'universal-bridge'],
 ];
 // Fail closed on any plan drift: every product profile runs in exactly one place, and every name in the plan exists.
 const names = definitions.map(([name]) => name), planned = [...critical, ...shards.flat()];
