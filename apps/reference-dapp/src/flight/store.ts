@@ -4,11 +4,18 @@
  * the tenant's `flight_issuance` row under its row lock, and the tables enforce the limit (seat 1..100, unique; one pass per account), so
  * concurrent boardings never share a seat, never exceed 100, never give an account two passes, and a number freed by a deleted account
  * is never issued again. Errors are fixed codes; nothing here logs personal data.
+ *
+ * BUILD-FLOFI-FLIGHT-LAUNCH-001 (migration 0024): a list entry also reaches an account through a proven access link or code
+ * (`flight_access_claims`), never by an unverified address; each card gets an unguessable public link id; issuing a card or joining a list
+ * enqueues its email in the same transaction (the outbox delivers it, see email/); only a Founding seat earned straight from the beta list
+ * carries invites (`carriesInvites`); and the public state has no aggregate count of people (`foundingOpen` is a yes/no).
  */
 import { randomBytes } from 'node:crypto';
 import type { Database, Queryable } from '@defi-workflow-engine/cloud-runtime';
-import { decideAccess, eventOrigin, FLIGHT_DEFAULT_CALENDAR, FLIGHT_EVENTS, FLIGHT_NOTICE_VERSION, FOUNDING_INVITES, FOUNDING_SEATS, foundingSeat, inviteCodeFrom,
-  passengerSeat, SIMULATION_EVIDENCE_MS, DEPARTURES_SHOWN, type FlightAccess, type FlightCalendar, type FlightEvent, type FlightOrigin, type FlightRoute } from './campaign.ts';
+import { cardPublicIdFrom, carriesInvites, decideAccess, eventOrigin, FLIGHT_DEFAULT_CALENDAR, FLIGHT_EVENTS, FLIGHT_NOTICE_VERSION, FOUNDING_INVITES, FOUNDING_SEATS,
+  foundingSeat, fullCalendar, inviteCodeFrom, passengerSeat, SIMULATION_EVIDENCE_MS, DEPARTURES_SHOWN, type FlightAccess, type FlightCalendar, type FlightEvent,
+  type FlightOrigin, type FlightRoute } from './campaign.ts';
+import { enqueueEmail } from './email/outbox.ts';
 
 export type FlightHost = { readonly db: Database; readonly tenantId: string };
 const at = (ms: number) => new Date(ms).toISOString();
@@ -29,26 +36,37 @@ export type Departure = { readonly handle: string; readonly from: string; readon
 export type FlightPass = {
   readonly passId: string; readonly origin: FlightOrigin; readonly boardingNo: number; readonly foundingSeat: number | null; readonly seat: string;
   readonly handle: string | null; readonly public: boolean; readonly route: FlightRoute; readonly departedAt: string;
+  /** The card's public link id (`/card/{id}`), or null for a card taken down. */
+  readonly publicId: string | null;
 };
+/** The creators' test flight card: never stored, numbered or shared; dated with the official boarding day. */
+export type TestPass = { readonly test: true; readonly route: FlightRoute; readonly departedAt: string; readonly handle: null };
+/** What the public card page shows: no account, address, wallet or invite. */
+export type PublicCard = { readonly publicId: string; readonly founding: boolean; readonly seat: string; readonly handle: string | null; readonly route: FlightRoute;
+  readonly departedAt: string };
 export type OwnInvite = { readonly code: string; readonly redeemed: boolean };
 export type AccountFlight = { readonly access: FlightAccess; readonly pass: FlightPass | null; readonly invites: readonly OwnInvite[];
-  readonly listed: 'FIRST' | 'NEXT' | null };
+  readonly listed: 'FIRST' | 'NEXT' | null; readonly testPass?: TestPass | null };
 export type IssueResult = { readonly ok: true; readonly pass: FlightPass; readonly issued: boolean } | { readonly ok: false; readonly code:
   'FLIGHT_NOT_ELIGIBLE' | 'FLIGHT_SIMULATION_NOT_FOUND' };
 export type RedeemResult = 'REDEEMED' | 'INVITE_INVALID' | 'INVITE_USED' | 'INVITE_OWN' | 'INVITE_ALREADY_HELD' | 'ALREADY_BOARDED';
 
 type PassRow = { pass_id: string; origin: FlightOrigin; boarding_no: number; founding_seat: number | null; handle: string | null; public: boolean;
-  route: FlightRoute; departed_at: Date };
+  route: FlightRoute; departed_at: Date; public_id: string | null; removed_at: Date | null };
 const passOf = (row: PassRow): FlightPass => ({ passId: row.pass_id, origin: row.origin, boardingNo: row.boarding_no, foundingSeat: row.founding_seat,
   seat: row.founding_seat ? foundingSeat(row.founding_seat) : passengerSeat(row.boarding_no), handle: row.handle, public: row.public, route: row.route,
-  departedAt: row.departed_at.toISOString() });
-const PASS_COLUMNS = 'pass_id, origin, boarding_no, founding_seat, handle, public, route, departed_at';
+  departedAt: row.departed_at.toISOString(), publicId: row.removed_at ? null : row.public_id });
+const PASS_COLUMNS = 'pass_id, origin, boarding_no, founding_seat, handle, public, route, departed_at, public_id, removed_at';
+const newPublicId = () => cardPublicIdFrom(randomBytes(12));
 
 /** `calendar`: the deployment's campaign calendar (`flightCalendar` in host.ts), which decides when the access answers start. */
-export function createFlightStore(host: FlightHost, calendar: FlightCalendar = FLIGHT_DEFAULT_CALENDAR) {
-  const { db, tenantId } = host;
+export function createFlightStore(host: FlightHost, given: FlightCalendar = FLIGHT_DEFAULT_CALENDAR) {
+  const { db, tenantId } = host, calendar = fullCalendar(given);
 
-  /** The public counters: the beta list, and the boarding numbers and Founding seats issued (a deleted account's stay issued). */
+  /**
+   * The campaign's totals: the beta list, and the boarding numbers and Founding seats issued (a deleted account's stay issued). OPERATOR
+   * ONLY (flight-admin `stats`): no public page, API, image or email shows an aggregate count of people (team decision, 9 Nov 2026).
+   */
   async function counters(q: Queryable = db): Promise<FlightCounters> {
     const row = (await q.query<{ on_list: string; boarded: string; founding: string }>(`SELECT
       (SELECT count(*) FROM flight_list_entries WHERE tenant_id = $1 AND flight = 'FIRST') AS on_list,
@@ -56,6 +74,11 @@ export function createFlightStore(host: FlightHost, calendar: FlightCalendar = F
       coalesce((SELECT founding FROM flight_issuance WHERE tenant_id = $1), 0) AS founding`, [tenantId])).rows[0]!;
     const foundingTaken = Number(row.founding);
     return { onList: Number(row.on_list), boarded: Number(row.boarded), foundingTaken, foundingLeft: Math.max(0, FOUNDING_SEATS - foundingTaken) };
+  }
+  /** Whether Founding seats are still open: the only public fact about seats (a yes/no, never a number). */
+  async function foundingOpen(q: Queryable = db): Promise<boolean> {
+    const row = (await q.query<{ founding: number }>('SELECT founding FROM flight_issuance WHERE tenant_id = $1', [tenantId])).rows[0];
+    return (row?.founding ?? 0) < FOUNDING_SEATS;
   }
 
   async function recordEvent(event: FlightEvent, detail: string, origin: FlightOrigin | null, now: number, q: Queryable = db): Promise<void> {
@@ -67,9 +90,9 @@ export function createFlightStore(host: FlightHost, calendar: FlightCalendar = F
   }
 
   /**
-   * One person joins a list. A repeated address keeps its first entry, and the route answers both the same way. (The public "on the
-   * list" counter is exact, so comparing it before and after submitting an address can still hint whether that address was new; the
-   * rate limits bound such probing.) `client` is a keyed digest of the request's network address (rate limit only), or null.
+   * One person joins a list. A repeated address keeps its first entry, and the route answers both the same way (no public counter exists to
+   * compare, so nothing reveals whether an address was already listed). A new entry enqueues its email in the same transaction, once: Email 1
+   * (beta list) or Email 5 (next flight). `client` is a keyed digest of the request's network address (rate limit only), or null.
    */
   async function joinList(input: { email: string; language: 'EN' | 'PT'; flight: 'FIRST' | 'NEXT'; client: string | null; now: number }):
     Promise<{ readonly status: 'JOINED' | 'ALREADY' | 'RATE_LIMITED' | 'BUSY' }> {
@@ -86,16 +109,24 @@ export function createFlightStore(host: FlightHost, calendar: FlightCalendar = F
       if (Number(recent.global) >= JOIN_LIMITS.globalTenMinutes) return { status: 'BUSY' as const };
       await tx.query('INSERT INTO flight_join_attempts (tenant_id, client, attempted_at) VALUES ($1, $2, $3)', [tenantId, client, now]);
       // joined_at is the database's own time: the joining order the operator assigns groups by never depends on the campaign clock.
+      const entryId = `fle_${randomBytes(16).toString('hex')}`;
       const inserted = await tx.query(`INSERT INTO flight_list_entries (tenant_id, entry_id, email, flight, language, notice)
         VALUES ($1, $2, $3, $4, $5, $6) ON CONFLICT (tenant_id, email) DO NOTHING`,
-        [tenantId, `fle_${randomBytes(16).toString('hex')}`, input.email, input.flight, input.language, FLIGHT_NOTICE_VERSION]);
-      if (inserted.rowCount) await recordEvent('list_join', input.flight === 'FIRST' ? 'first' : 'next', null, input.now, tx);
+        [tenantId, entryId, input.email, input.flight, input.language, FLIGHT_NOTICE_VERSION]);
+      if (inserted.rowCount) {
+        await recordEvent('list_join', input.flight === 'FIRST' ? 'first' : 'next', null, input.now, tx);
+        await enqueueEmail(tx, tenantId, input.flight === 'FIRST'
+          ? { template: 'LIST_CONFIRMATION', recipient: input.email, language: input.language, trigger: 'list_join', dedupeKey: `list:${entryId}`, notBefore: input.now,
+            expiresAt: calendar.boardingOpensAt, entryId }
+          : { template: 'NEXT_FLIGHT', recipient: input.email, language: input.language, trigger: 'list_join', dedupeKey: `next:${entryId}`, notBefore: input.now,
+            expiresAt: input.now + 7 * DAY_MS, entryId });
+      }
       return { status: inserted.rowCount ? 'JOINED' as const : 'ALREADY' as const };
     });
   }
 
   async function departures(): Promise<Departure[]> {
-    const rows = (await db.query<PassRow>(`SELECT ${PASS_COLUMNS} FROM flight_passes WHERE tenant_id = $1 AND public ORDER BY departed_at DESC, boarding_no DESC
+    const rows = (await db.query<PassRow>(`SELECT ${PASS_COLUMNS} FROM flight_passes WHERE tenant_id = $1 AND public AND removed_at IS NULL ORDER BY departed_at DESC, boarding_no DESC
       LIMIT ${DEPARTURES_SHOWN}`, [tenantId])).rows;
     return rows.map(passOf).map(pass => ({ handle: pass.handle!, from: pass.route.from, to: pass.route.to, steps: pass.route.stepCount, seat: pass.seat }));
   }
@@ -108,15 +139,23 @@ export function createFlightStore(host: FlightHost, calendar: FlightCalendar = F
     const pass = (await q.query<PassRow>(`SELECT ${PASS_COLUMNS} FROM flight_passes WHERE tenant_id = $1 AND account_id = $2`, [tenantId, input.accountId])).rows[0];
     const invite = (await q.query<{ issuer: 'FOUNDING' | 'CREATOR' }>('SELECT issuer FROM flight_invites WHERE tenant_id = $1 AND redeemed_by = $2',
       [tenantId, input.accountId])).rows[0]?.issuer ?? null;
-    const entries = input.emails.length ? (await q.query<{ flight: 'FIRST' | 'NEXT'; batch_no: number | null; opens_at: Date | null }>(`SELECT e.flight, e.batch_no, b.opens_at
+    // The account's verified addresses (FloFi login), or the entry it proved with an access link or code. Never an address merely typed.
+    const entries = (await q.query<{ flight: 'FIRST' | 'NEXT'; batch_no: number | null; opens_at: Date | null }>(`SELECT e.flight, e.batch_no, b.opens_at
       FROM flight_list_entries e LEFT JOIN flight_batches b ON b.tenant_id = e.tenant_id AND b.batch_no = e.batch_no
-      WHERE e.tenant_id = $1 AND e.email = ANY($2::text[]) AND e.boarded_at IS NULL ORDER BY (e.flight = 'FIRST') DESC, b.opens_at ASC NULLS FIRST LIMIT 1`,
-      [tenantId, [...input.emails]])).rows : [];
+      WHERE e.tenant_id = $1 AND (e.email = ANY($2::text[]) OR e.entry_id IN (SELECT entry_id FROM flight_access_claims WHERE tenant_id = $1 AND account_id = $3))
+        AND e.boarded_at IS NULL ORDER BY (e.flight = 'FIRST') DESC, b.opens_at ASC NULLS FIRST LIMIT 1`,
+      [tenantId, [...input.emails], input.accountId])).rows;
     const entry = entries[0] ? { flight: entries[0].flight, batch: entries[0].batch_no, opensAt: entries[0].opens_at?.getTime() ?? null } : null;
     const access = decideAccess({ now: input.now, passId: pass?.pass_id ?? null, invite, entry, calendar });
     const invites = pass?.founding_seat ? (await q.query<{ code: string; redeemed_at: Date | null }>(`SELECT code, redeemed_at FROM flight_invites
       WHERE tenant_id = $1 AND issuer_pass_id = $2 ORDER BY created_at, code`, [tenantId, pass.pass_id])).rows.map(row => ({ code: row.code, redeemed: row.redeemed_at !== null })) : [];
-    return { access, pass: pass ? passOf(pass) : null, invites, listed: entry?.flight ?? null };
+    // A creator's test flight: the card of their latest simulation, marked TEST and dated with the official boarding day. Never stored.
+    let testPass: TestPass | null = null;
+    if (access.kind === 'test_flight') {
+      const evidence = await evidenceOf({ accountId: input.accountId, workflowId: null, now: input.now }, q);
+      if (evidence) testPass = { test: true, route: evidence.route, departedAt: at(calendar.boardingOpensAt), handle: null };
+    }
+    return { access, pass: pass ? passOf(pass) : null, invites, listed: entry?.flight ?? null, testPass };
   }
 
   /** Bind one unused invite to a signed-in account that holds no pass and no invite. Never someone's own Founding invite. */
@@ -182,20 +221,68 @@ export function createFlightStore(host: FlightHost, calendar: FlightCalendar = F
       await tx.query('UPDATE flight_issuance SET boarded = $2, founding = $3 WHERE tenant_id = $1', [tenantId, next.boarding_no, next.seat ?? issued.founding]);
       // The person's list entries have boarded: deleting this account and signing in again (or another account with the same
       // address) never boards on them again.
-      if (input.emails.length) await tx.query(`UPDATE flight_list_entries SET boarded_at = $3 WHERE tenant_id = $1 AND email = ANY($2::text[]) AND boarded_at IS NULL`,
-        [tenantId, [...input.emails], at(input.now)]);
+      await tx.query(`UPDATE flight_list_entries SET boarded_at = $4 WHERE tenant_id = $1 AND boarded_at IS NULL AND (email = ANY($2::text[])
+        OR entry_id IN (SELECT entry_id FROM flight_access_claims WHERE tenant_id = $1 AND account_id = $3))`, [tenantId, [...input.emails], input.accountId, at(input.now)]);
       const passId = `flp_${randomBytes(16).toString('hex')}`, origin = state.access.origin;
       const row = (await tx.query<PassRow>(`INSERT INTO flight_passes (tenant_id, pass_id, account_id, origin, boarding_no, founding_seat, handle, public, route,
-        run_id, departed_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, $10, $11) RETURNING ${PASS_COLUMNS}`,
+        run_id, departed_at, public_id) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, $10, $11, $12) RETURNING ${PASS_COLUMNS}`,
         [tenantId, passId, input.accountId, origin, next.boarding_no, next.seat, input.handle, input.public && input.handle !== null,
-          JSON.stringify(evidence.route), evidence.run_id, at(input.now)])).rows[0]!;
-      if (next.seat !== null) for (let created = 0; created < FOUNDING_INVITES;) {
+          JSON.stringify(evidence.route), evidence.run_id, at(input.now), newPublicId()])).rows[0]!;
+      // Only a Founding seat earned straight from the beta list carries invites: an invited person never gets invites of their own.
+      if (carriesInvites({ foundingSeat: next.seat, origin })) for (let created = 0; created < FOUNDING_INVITES;) {
         created += (await tx.query(`INSERT INTO flight_invites (tenant_id, code, issuer, issuer_pass_id, created_at) VALUES ($1, $2, 'FOUNDING', $3, $4)
           ON CONFLICT (tenant_id, code) DO NOTHING`, [tenantId, inviteCodeFrom(randomBytes(8)), passId, at(input.now)])).rowCount;
       }
       await recordEvent('simulation_ok', next.seat !== null ? 'founding' : 'passenger', origin, input.now, tx);
+      // Email 4a / 4b, once per card, to the address the person proved (their claimed list entry, a verified login address, or the address
+      // their creator invite was sent to). No address, no email: the card stays in the account either way.
+      const recipient = await cardRecipient(tx, input.accountId, input.emails);
+      if (recipient) await enqueueEmail(tx, tenantId, { template: next.seat !== null ? 'CARD_FOUNDING' : 'CARD_PASSENGER', recipient: recipient.email,
+        language: recipient.language, trigger: 'card_issued', dedupeKey: `card:${passId}`, notBefore: input.now, expiresAt: input.now + 7 * DAY_MS, passId });
       return { ok: true as const, pass: passOf(row), issued: true };
     });
+  }
+
+  async function cardRecipient(q: Queryable, accountId: string, emails: readonly string[]): Promise<{ email: string; language: 'EN' | 'PT' } | null> {
+    const claimed = (await q.query<{ email: string; language: 'EN' | 'PT' }>(`SELECT e.email, e.language FROM flight_access_claims c JOIN flight_list_entries e
+      ON e.tenant_id = c.tenant_id AND e.entry_id = c.entry_id WHERE c.tenant_id = $1 AND c.account_id = $2`, [tenantId, accountId])).rows[0];
+    if (claimed) return claimed;
+    if (emails.length) {
+      const listed = (await q.query<{ email: string; language: 'EN' | 'PT' }>(`SELECT email, language FROM flight_list_entries WHERE tenant_id = $1 AND email = ANY($2::text[])
+        ORDER BY (flight = 'FIRST') DESC, joined_at LIMIT 1`, [tenantId, [...emails]])).rows[0];
+      return listed ?? { email: emails[0]!, language: 'EN' };
+    }
+    const invited = (await q.query<{ recipient: string; language: 'EN' | 'PT' | null }>(`SELECT i.recipient, (SELECT m.language FROM flight_emails m WHERE m.tenant_id = i.tenant_id
+      AND m.invite_code = i.code ORDER BY m.created_at LIMIT 1) AS language FROM flight_invites i WHERE i.tenant_id = $1 AND i.redeemed_by = $2 AND i.recipient IS NOT NULL`,
+    [tenantId, accountId])).rows[0];
+    return invited ? { email: invited.recipient, language: invited.language ?? 'EN' } : null;
+  }
+
+  /**
+   * The public card page (`/card/{id}`): the card's own facts only. A card taken down, or of a deleted account, is gone. Older cards (issued
+   * before 0024) get their public id the first time their holder opens /board.
+   */
+  async function publicCard(publicId: string): Promise<PublicCard | null> {
+    if (!/^[a-z2-7]{12}$/.test(publicId)) return null;
+    const row = (await db.query<PassRow>(`SELECT ${PASS_COLUMNS} FROM flight_passes WHERE tenant_id = $1 AND public_id = $2 AND removed_at IS NULL`, [tenantId, publicId])).rows[0];
+    if (!row) return null;
+    const pass = passOf(row);
+    return { publicId, founding: pass.foundingSeat !== null, seat: pass.seat, handle: pass.handle, route: pass.route, departedAt: pass.departedAt };
+  }
+  /** Give a card issued before 0024 its public id (idempotent). */
+  async function ensurePublicId(accountId: string): Promise<FlightPass | null> {
+    await db.query(`UPDATE flight_passes SET public_id = $3 WHERE tenant_id = $1 AND account_id = $2 AND public_id IS NULL AND removed_at IS NULL`,
+      [tenantId, accountId, newPublicId()]);
+    const row = (await db.query<PassRow>(`SELECT ${PASS_COLUMNS} FROM flight_passes WHERE tenant_id = $1 AND account_id = $2`, [tenantId, accountId])).rows[0];
+    return row ? passOf(row) : null;
+  }
+  /** The card and its invites, for its email (by pass id; the outbox renders it at send time). */
+  async function cardForEmail(passId: string): Promise<{ pass: FlightPass; invites: readonly string[] } | null> {
+    const row = (await db.query<PassRow>(`SELECT ${PASS_COLUMNS} FROM flight_passes WHERE tenant_id = $1 AND pass_id = $2 AND removed_at IS NULL`, [tenantId, passId])).rows[0];
+    if (!row || !row.public_id) return null;
+    const invites = (await db.query<{ code: string }>(`SELECT code FROM flight_invites WHERE tenant_id = $1 AND issuer_pass_id = $2 ORDER BY created_at, code`,
+      [tenantId, passId])).rows.map(r => r.code);
+    return { pass: passOf(row), invites };
   }
 
   /** The pass holder's own choice: their X handle and whether it appears on the public departures board. */
@@ -234,17 +321,54 @@ export function createFlightStore(host: FlightHost, calendar: FlightCalendar = F
   }
   /** Erase one address from both lists (a data subject's request). Returns whether an entry existed. */
   async function eraseEmail(email: string): Promise<boolean> {
-    return (await db.query('DELETE FROM flight_list_entries WHERE tenant_id = $1 AND email = $2', [tenantId, email])).rowCount > 0;
+    // The entry, and by cascade its access tokens, sessions, claim and emails; then every other email to the address and its invite addressing.
+    return db.transaction(async tx => {
+      const erased = (await tx.query('DELETE FROM flight_list_entries WHERE tenant_id = $1 AND email = $2', [tenantId, email])).rowCount > 0;
+      const emails = (await tx.query('DELETE FROM flight_emails WHERE tenant_id = $1 AND recipient = $2', [tenantId, email])).rowCount > 0;
+      const invites = (await tx.query('UPDATE flight_invites SET recipient = NULL WHERE tenant_id = $1 AND recipient = $2', [tenantId, email])).rowCount > 0;
+      return erased || emails || invites;
+    });
+  }
+  /**
+   * The team invites one creator (Email 6): a CREATOR invite addressed to `email` (one per address) and its email, sent at `sendAt`. Returns
+   * the code, or the existing one when this address was already invited (never a second invite or a second email).
+   */
+  async function inviteCreator(input: { email: string; language: 'EN' | 'PT'; sendAt: number; now: number }): Promise<{ code: string; created: boolean }> {
+    return db.transaction(async tx => {
+      const existing = (await tx.query<{ code: string }>('SELECT code FROM flight_invites WHERE tenant_id = $1 AND recipient = $2', [tenantId, input.email])).rows[0];
+      if (existing) return { code: existing.code, created: false };
+      let code = '';
+      for (let inserted = 0; !inserted;) {
+        code = inviteCodeFrom(randomBytes(8));
+        inserted = (await tx.query(`INSERT INTO flight_invites (tenant_id, code, issuer, created_at, recipient) VALUES ($1, $2, 'CREATOR', $3, $4) ON CONFLICT DO NOTHING`,
+          [tenantId, code, at(input.now), input.email])).rowCount;
+      }
+      await enqueueEmail(tx, tenantId, { template: 'CREATOR_INVITE', recipient: input.email, language: input.language, trigger: 'creator_invited',
+        dedupeKey: `creator:${code.toLowerCase()}`, notBefore: input.sendAt, expiresAt: calendar.boardingOpensAt, inviteCode: code, batchKey: 'creators' });
+      return { code, created: true };
+    });
+  }
+  /** Take a card's public page down (the person's request or moderation): the page, its images and the departures entry disappear. */
+  async function removeCard(passOrPublicId: string, now: number): Promise<boolean> {
+    return (await db.query(`UPDATE flight_passes SET removed_at = $3, public = false WHERE tenant_id = $1 AND (pass_id = $2 OR public_id = $2) AND removed_at IS NULL`,
+      [tenantId, passOrPublicId, at(now)])).rowCount > 0;
   }
   /** Remove a handle from the public departures board (moderation). */
   async function hidePass(passId: string): Promise<boolean> {
     return (await db.query('UPDATE flight_passes SET handle = NULL, public = false WHERE tenant_id = $1 AND pass_id = $2', [tenantId, passId])).rowCount > 0;
   }
-  /** End of the beta: every list entry (both flights), every join attempt and all simulation evidence are deleted. */
+  /**
+   * End of the beta: every list entry (both flights), every join attempt and all simulation evidence are deleted, with every email of the
+   * outbox, access token, browser session, claim and access attempt (by cascade or here). Unsubscribed-address digests stay (an opt-out
+   * is honored after the lists are gone); boarding cards stay with their accounts.
+   */
   async function purgeLists(): Promise<number> {
     return db.transaction(async tx => {
       await tx.query('DELETE FROM flight_join_attempts WHERE tenant_id = $1', [tenantId]);
       await tx.query('DELETE FROM flight_simulations WHERE tenant_id = $1', [tenantId]);
+      await tx.query('DELETE FROM flight_emails WHERE tenant_id = $1', [tenantId]);
+      await tx.query('DELETE FROM flight_access_attempts WHERE tenant_id = $1', [tenantId]);
+      await tx.query('UPDATE flight_invites SET recipient = NULL WHERE tenant_id = $1 AND recipient IS NOT NULL', [tenantId]);
       return (await tx.query('DELETE FROM flight_list_entries WHERE tenant_id = $1', [tenantId])).rowCount;
     });
   }
@@ -275,7 +399,7 @@ export function createFlightStore(host: FlightHost, calendar: FlightCalendar = F
     }));
   }
 
-  return { calendar, counters, recordEvent, joinList, departures, account, redeemInvite, recordSimulation, issuePass, setHandle, createBatch, assignBatch,
-    exportBatch, issueCreatorInvites, eraseEmail, hidePass, purgeLists, stats, prune };
+  return { calendar, counters, foundingOpen, recordEvent, joinList, departures, account, redeemInvite, recordSimulation, issuePass, setHandle, createBatch, assignBatch,
+    exportBatch, issueCreatorInvites, inviteCreator, eraseEmail, hidePass, removeCard, publicCard, ensurePublicId, cardForEmail, purgeLists, stats, prune };
 }
 export type FlightStore = ReturnType<typeof createFlightStore>;

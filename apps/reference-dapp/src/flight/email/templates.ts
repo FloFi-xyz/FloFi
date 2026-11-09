@@ -1,0 +1,304 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+/**
+ * BUILD-FLOFI-FLIGHT-LAUNCH-001: the seven Flight FloFi emails (1, 2, 3, 4a, 4b, 5, 6) of the team-approved Claude Artifact "Flight FloFi"
+ * (version 1794236006-f919, section 04 "E-mails"), as versioned templates. Pure: the caller supplies every value (nothing is read here).
+ *
+ * - English is the artifact's text, word for word, except where a sentence would promise something the product does not do; each such
+ *   change is listed in `TEMPLATE_DEVIATIONS` for the team (Dayane) to confirm. The artifact gives Portuguese subjects only; the Portuguese
+ *   bodies are a translation in the same tone, to be confirmed by the team.
+ * - HTML is tables with inline styles, at most 600 px wide, images as PNG (Gmail shows no SVG), with a plain-text part. Every value that
+ *   comes from a person (handle) or the database is escaped. No count of people anywhere: only the recipient's own seat number.
+ * - Every email carries the risk footer, the privacy policy link and a one-click unsubscribe (List-Unsubscribe, RFC 8058).
+ * - Dates come from the deployment's campaign calendar, in Brasília time (America/Sao_Paulo), never from a date written here.
+ */
+import type { FlightCalendar } from '../campaign.ts';
+
+export type EmailTemplate = 'LIST_CONFIRMATION' | 'EVE' | 'GROUP_BOARDING' | 'ACCESS_REQUESTED' | 'CARD_FOUNDING' | 'CARD_PASSENGER' | 'NEXT_FLIGHT' | 'CREATOR_INVITE';
+export type EmailLanguage = 'EN' | 'PT';
+/** The version of each template. Bump it whenever its text or layout changes; every outbox row records the version it was enqueued with. */
+export const TEMPLATE_VERSIONS: Readonly<Record<EmailTemplate, number>> = Object.freeze({
+  LIST_CONFIRMATION: 1, EVE: 1, GROUP_BOARDING: 1, ACCESS_REQUESTED: 1, CARD_FOUNDING: 1, CARD_PASSENGER: 1, NEXT_FLIGHT: 1, CREATOR_INVITE: 1,
+});
+/** ESSENTIAL: an access email the person asked for themselves; sent even to an unsubscribed address and while campaign email is paused. */
+export const TEMPLATE_CATEGORY: Readonly<Record<EmailTemplate, 'CAMPAIGN' | 'ESSENTIAL'>> = Object.freeze({
+  LIST_CONFIRMATION: 'CAMPAIGN', EVE: 'CAMPAIGN', GROUP_BOARDING: 'CAMPAIGN', ACCESS_REQUESTED: 'ESSENTIAL', CARD_FOUNDING: 'CAMPAIGN',
+  CARD_PASSENGER: 'CAMPAIGN', NEXT_FLIGHT: 'CAMPAIGN', CREATOR_INVITE: 'CAMPAIGN',
+});
+/** Which approved email each template is (the artifact's numbering). */
+export const TEMPLATE_NUMBER: Readonly<Record<EmailTemplate, string>> = Object.freeze({
+  LIST_CONFIRMATION: '1', EVE: '2', GROUP_BOARDING: '3', ACCESS_REQUESTED: '3 (requested again)', CARD_FOUNDING: '4a', CARD_PASSENGER: '4b',
+  NEXT_FLIGHT: '5', CREATOR_INVITE: '6',
+});
+/** Where the English differs from the approved artifact, and why (each needs the team's confirmation). */
+export const TEMPLATE_DEVIATIONS: readonly string[] = Object.freeze([
+  'Email 2: "and routes have a small limit during the beta" is left out: FloFi has no per-route value limit, and this build adds none (no new barriers to execution).',
+  'Email 3: "This button signs you in with this email" becomes "This button confirms your boarding with this email": the link proves the address and opens the campaign; signing in stays FloFi\'s own login.',
+  'Email 3: the 6-digit code is printed in the email for another device (the artifact sent it on request only); the request path still exists at flofi.xyz/board.',
+  'Email 3: a "Group" line is added when the person has a numbered boarding group.',
+  'Email 6: "Simulation only: nothing is signed or sent" becomes "A simulation is all it takes: you don\'t need to sign or send anything": the product is not restricted for creators, so FloFi cannot promise nothing is signed.',
+  'Emails 4a and 4b show the real card image (the 1200 × 630 card picture) in place of the drawn card block.',
+]);
+
+export type CardView = {
+  readonly founding: boolean; readonly seat: string; readonly handle: string | null; readonly from: string; readonly to: string;
+  readonly stepCount: number; readonly networkCount: number; readonly departedAt: string;
+  readonly publicUrl: string; readonly imageUrl: string; readonly downloadUrl: string;
+};
+export type TemplateInput =
+  | { readonly template: 'LIST_CONFIRMATION' | 'EVE' | 'NEXT_FLIGHT' }
+  | { readonly template: 'GROUP_BOARDING' | 'ACCESS_REQUESTED'; readonly accessUrl: string; readonly code: string; readonly codeMinutes: number;
+      readonly linkHours: number; readonly foundingOpen: boolean; readonly group: number | null }
+  | { readonly template: 'CARD_FOUNDING'; readonly card: CardView; readonly invites: readonly string[]; readonly invitesUrl: string }
+  | { readonly template: 'CARD_PASSENGER'; readonly card: CardView }
+  | { readonly template: 'CREATOR_INVITE'; readonly code: string; readonly briefUrl: string };
+export type EmailContext = {
+  readonly language: EmailLanguage; readonly recipient: string; readonly origin: string; readonly calendar: Required<FlightCalendar>;
+  readonly unsubscribeUrl: string;
+};
+export type RenderedEmail = { readonly subject: string; readonly html: string; readonly text: string; readonly preheader: string };
+
+// Approved palette (artifact design system "flofi"): navy, blue, periwinkle, ground.
+const C = { navy: '#041B3D', blue: '#2343D9', peri: '#93A6FF', soft: '#C9D2F8', ground: '#E9EEF5', panel: '#F5F8FB', line: '#DCE3F0', body: '#3A4658',
+  muted: '#7A8699', label: '#4B5B73', footSoft: '#8EA0C4', white: '#FFFFFF' } as const;
+const SANS = "'Outfit',Helvetica,Arial,sans-serif", MONO = "'IBM Plex Mono',ui-monospace,Menlo,Consolas,monospace";
+
+export const escapeHtml = (value: string) => value.replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[ch]!);
+const e = escapeHtml;
+
+// Dates, in Brasília time.
+const parts = (ms: number, locale: string, options: Intl.DateTimeFormatOptions) =>
+  new Intl.DateTimeFormat(locale, { timeZone: 'America/Sao_Paulo', ...options }).formatToParts(new Date(ms));
+const part = (list: Intl.DateTimeFormatPart[], type: string) => list.find(p => p.type === type)?.value ?? '';
+/** "9:00" (EN) or "9h" / "9h30" (PT). */
+export function clock(ms: number, language: EmailLanguage): string {
+  const list = parts(ms, 'en-GB', { hour: '2-digit', minute: '2-digit', hourCycle: 'h23' });
+  const hour = Number(part(list, 'hour')), minute = part(list, 'minute');
+  return language === 'PT' ? `${hour}h${minute === '00' ? '' : minute}` : `${hour}:${minute}`;
+}
+/** "Thursday, Nov 12" (EN) or "quinta-feira, 12/11" (PT). */
+export function longDay(ms: number, language: EmailLanguage): string {
+  if (language === 'PT') {
+    const list = parts(ms, 'pt-BR', { weekday: 'long', day: '2-digit', month: '2-digit' });
+    return `${part(list, 'weekday')}, ${part(list, 'day')}/${part(list, 'month')}`;
+  }
+  const list = parts(ms, 'en-US', { weekday: 'long', month: 'short', day: 'numeric' });
+  return `${part(list, 'weekday')}, ${part(list, 'month')} ${part(list, 'day')}`;
+}
+/** "Thu, Nov 12" (EN) or "qui, 12/11" (PT). */
+function shortDay(ms: number, language: EmailLanguage): string {
+  if (language === 'PT') {
+    const list = parts(ms, 'pt-BR', { weekday: 'short', day: '2-digit', month: '2-digit' });
+    return `${part(list, 'weekday').replace('.', '')}, ${part(list, 'day')}/${part(list, 'month')}`;
+  }
+  const list = parts(ms, 'en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+  return `${part(list, 'weekday')}, ${part(list, 'month')} ${part(list, 'day')}`;
+}
+/** The flap board's "NOV 12 09:00". */
+export function flapDay(ms: number, withTime = true): string {
+  const list = parts(ms, 'en-US', { month: 'short', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' });
+  return `${part(list, 'month').toUpperCase()} ${part(list, 'day')}${withTime ? ` ${part(list, 'hour')}:${part(list, 'minute')}` : ''}`;
+}
+/** The card's "NOV 12". */
+export const cardDay = (iso: string) => flapDay(Date.parse(iso), false);
+
+// Building blocks.
+const p = (html: string, size = 17) => `<p style="margin:0 0 18px;font-family:${SANS};font-size:${size}px;line-height:1.55;color:${C.body}">${html}</p>`;
+const h1 = (first: string, accent = '') => `<h1 style="margin:0 0 18px;font-family:${SANS};font-weight:700;font-size:36px;line-height:1.05;letter-spacing:-1px;color:${C.navy}">${first}${accent ? `<span style="color:${C.blue}">${accent}</span>` : ''}</h1>`;
+const label = (text: string) => `<div style="font-family:${MONO};font-weight:500;font-size:10px;letter-spacing:1.2px;text-transform:uppercase;color:${C.label};padding:0 0 5px">${e(text)}</div>`;
+/** A flap row: one dark cell per character (tables render in every client, Outlook included). */
+function flaps(text: string, highlight = true): string {
+  const cells = [...text.toUpperCase()].map(ch => `<td style="width:20px;height:30px;background:${C.navy};border-radius:3px;text-align:center;font-family:${MONO};font-weight:500;font-size:17px;color:${ch.trim() && highlight ? C.peri : C.white}">${ch.trim() ? e(ch) : '&nbsp;'}</td>`).join('');
+  return `<table role="presentation" cellpadding="0" cellspacing="2" style="border-collapse:separate" aria-label="${e(text)}"><tr>${cells}</tr></table>`;
+}
+const panel = (rows: string[]) => `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:0 0 18px;background:${C.panel};border:1.5px solid ${C.line};border-radius:16px"><tr><td style="padding:16px 18px">${rows.map((row, index) => `<div style="padding:${index ? '12px' : '0'} 0 0">${row}</div>`).join('')}</td></tr></table>`;
+const button = (href: string, text: string, color: string = C.blue) => `<table role="presentation" cellpadding="0" cellspacing="0" style="margin:0 0 14px"><tr><td style="background:${color};border-radius:999px"><a href="${e(href)}" style="display:inline-block;padding:14px 26px;font-family:${SANS};font-weight:600;font-size:17px;color:${C.white};text-decoration:none">${e(text)}</a></td></tr></table>`;
+const small = (html: string) => `<p style="margin:0 0 18px;font-family:${SANS};font-size:13px;line-height:1.5;color:${C.muted}">${html}</p>`;
+const mono = (text: string, color: string = C.blue) => `<p style="margin:0 0 18px;font-family:${MONO};font-weight:500;font-size:15px;color:${color}">${e(text)}</p>`;
+const list = (items: string[]) => `<table role="presentation" cellpadding="0" cellspacing="0" style="margin:0 0 18px">${items.map(item => `<tr><td style="vertical-align:top;padding:9px 10px 0 0"><div style="width:8px;height:8px;border-radius:8px;background:${C.blue}"></div></td><td style="font-family:${SANS};font-size:16px;line-height:1.5;color:${C.body};padding:0 0 6px">${item}</td></tr>`).join('')}</table>`;
+
+type Pose = 'welcome' | 'captain' | 'safety' | 'wink';
+const POSE_ALT: Record<Pose, string> = { welcome: 'Gota', captain: 'Gota', safety: 'Gota', wink: 'Gota' };
+function layout(ctx: EmailContext, input: { subject: string; preheader: string; band: string; pose: Pose; body: string; reason: string }): string {
+  const t = FOOTER[ctx.language], o = ctx.origin;
+  return `<!doctype html><html lang="${ctx.language === 'PT' ? 'pt-BR' : 'en'}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light only"><title>${e(input.subject)}</title></head>
+<body style="margin:0;padding:0;background:${C.ground}">
+<div style="display:none;max-height:0;overflow:hidden;opacity:0">${e(input.preheader)}</div>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:${C.ground}"><tr><td align="center" style="padding:16px 8px">
+<table role="presentation" width="600" cellpadding="0" cellspacing="0" style="width:100%;max-width:600px;background:${C.white}">
+<tr><td style="background:${C.blue};padding:0">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr>
+    <td style="padding:30px 0 24px 36px;vertical-align:top"><img src="${o}/brand/flight/email/flofi-logo-on-blue.png" width="76" height="28" alt="FloFi" style="display:block;border:0;height:28px;width:76px">
+      <div style="padding-top:62px;font-family:${MONO};font-weight:500;font-size:12px;letter-spacing:1.4px;text-transform:uppercase;color:${C.soft}">${e(input.band)}</div></td>
+    <td align="right" style="padding:14px 20px 6px 0;vertical-align:top;width:170px"><img src="${o}/brand/flight/email/gota-${input.pose}.png" width="150" height="150" alt="${POSE_ALT[input.pose]}" style="display:block;border:0;width:150px;height:150px"></td>
+  </tr></table></td></tr>
+<tr><td style="padding:32px 36px 18px">${input.body}</td></tr>
+<tr><td style="background:${C.navy};padding:24px 36px">
+  <p style="margin:0 0 10px;font-family:${SANS};font-size:13px;line-height:1.5;color:${C.soft}">${e(t.risk)}</p>
+  <p style="margin:0;font-family:${SANS};font-size:12px;line-height:1.5;color:${C.footSoft}">${e(input.reason)} <a href="${e(ctx.unsubscribeUrl)}" style="color:${C.footSoft};text-decoration:underline">${e(t.unsubscribe)}</a> · <a href="${o}/privacy" style="color:${C.footSoft};text-decoration:underline">${e(t.privacy)}</a></p>
+</td></tr></table></td></tr></table></body></html>`;
+}
+const FOOTER = {
+  EN: { risk: 'DeFi involves risk. A simulation does not guarantee price or outcome. FloFi never holds your keys or your funds.', unsubscribe: 'Unsubscribe', privacy: 'Privacy Policy',
+    list: 'You’re getting this because you joined the FloFi beta list at flofi.xyz/board.', invited: 'You’re getting this because the FloFi team invited you to the closed beta.',
+    access: 'You’re getting this because you asked for a boarding link at flofi.xyz/board.' },
+  PT: { risk: 'DeFi envolve riscos. Uma simulação não garante preço nem resultado. A FloFi nunca guarda suas chaves nem seus fundos.', unsubscribe: 'Cancelar inscrição', privacy: 'Política de Privacidade',
+    list: 'Você está recebendo isto porque entrou na lista beta da FloFi em flofi.xyz/board.', invited: 'Você está recebendo isto porque o time da FloFi convidou você para o beta fechado.',
+    access: 'Você está recebendo isto porque pediu um link de embarque em flofi.xyz/board.' },
+} as const;
+
+/** Plain text: the same words, one paragraph per line. */
+function plain(lines: (string | null | false | undefined)[], ctx: EmailContext, reason: string): string {
+  const t = FOOTER[ctx.language];
+  return [...lines.filter((line): line is string => typeof line === 'string'), '—', t.risk, `${reason} ${t.unsubscribe}: ${ctx.unsubscribeUrl}`, `${t.privacy}: ${ctx.origin}/privacy`].join('\n\n') + '\n';
+}
+const share = (card: CardView, language: EmailLanguage) => {
+  const steps = `${card.stepCount} ${card.stepCount === 1 ? 'step' : 'steps'}`;
+  // The approved post text (card handoff), in English on X for both languages: the card itself is English.
+  const text = card.founding ? `I just boarded Flight FloFi ✈️ Founding Member ${card.seat}. ${card.from} → ${card.to} in ${steps}, and I approve every step. @FloFi_xyz`
+    : `I just boarded Flight FloFi ✈️ ${card.from} → ${card.to} in ${steps}, and I approve every step. @FloFi_xyz`;
+  void language;
+  return `https://x.com/intent/post?${new URLSearchParams({ text, url: card.publicUrl })}`;
+};
+export const shareText = share;
+function cardBlock(card: CardView, ctx: EmailContext, heading: string): string {
+  const meta = `${card.founding ? `FOUNDING ${card.seat}` : `SEAT ${card.seat}`} · ${card.stepCount} ${card.stepCount === 1 ? 'STEP' : 'STEPS'} · ${cardDay(card.departedAt)} · YOU APPROVE`;
+  return `<div style="font-family:${MONO};font-weight:500;font-size:11px;letter-spacing:1.3px;text-transform:uppercase;color:${C.blue};padding:0 0 8px">${e(heading)}</div>
+<a href="${e(card.publicUrl)}"><img src="${e(card.imageUrl)}" width="528" alt="${e(`${card.handle ? `@${card.handle} · ` : ''}${card.from} → ${card.to} · ${meta}`)}" style="display:block;width:100%;max-width:528px;height:auto;border:0;border-radius:14px;margin:0 0 10px"></a>
+<p style="margin:0 0 18px;font-family:${MONO};font-weight:500;font-size:12px;letter-spacing:.6px;color:${C.label}">${card.handle ? `@${e(card.handle)} · ` : ''}${e(card.from)} → ${e(card.to)}<br>${e(meta)}</p>
+<table role="presentation" cellpadding="0" cellspacing="0" style="margin:0 0 14px"><tr>
+<td style="background:${C.navy};border-radius:999px"><a href="${e(share(card, ctx.language))}" style="display:inline-block;padding:12px 22px;font-family:${SANS};font-weight:600;font-size:16px;color:${C.white};text-decoration:none">${ctx.language === 'PT' ? 'Compartilhar no X' : 'Share on X'}</a></td><td style="width:10px"></td>
+<td style="background:${C.blue};border-radius:999px"><a href="${e(card.downloadUrl)}" style="display:inline-block;padding:12px 22px;font-family:${SANS};font-weight:600;font-size:16px;color:${C.white};text-decoration:none">${ctx.language === 'PT' ? 'Baixar cartão' : 'Download card'}</a></td>
+</tr></table>`;
+}
+
+/** Render one email. Throws on a template whose inputs are missing (the caller then holds the email, never sends a broken one). */
+export function renderEmail(input: TemplateInput, ctx: EmailContext): RenderedEmail {
+  const PT = ctx.language === 'PT', cal = ctx.calendar, o = ctx.origin;
+  const boardsDay = longDay(cal.boardingOpensAt, ctx.language), boardsAt = clock(cal.boardingOpensAt, ctx.language);
+  const reason = FOOTER[ctx.language];
+  switch (input.template) {
+    case 'LIST_CONFIRMATION': {
+      const subject = PT ? 'Você está na lista beta da FloFi ✈️' : 'You’re on the FloFi beta list ✈️';
+      const preheader = PT ? `Primeiro embarque: ${shortDay(cal.boardingOpensAt, 'PT')}, ${boardsAt} (Brasília).` : `First boarding: ${shortDay(cal.boardingOpensAt, 'EN')}, ${boardsAt} BRT.`;
+      const intro = PT ? `O Flight FloFi embarca na <b>${e(boardsDay)}, às ${e(boardsAt)} (horário de Brasília)</b>, abrindo em grupos. Avisamos por e-mail assim que o seu grupo embarcar.`
+        : `Flight FloFi boards <b>${e(boardsDay)}, at ${e(boardsAt)} BRT</b>, opening in groups. We’ll email you the moment your group boards.`;
+      const ask = PT ? '<b>Até lá: para onde você iria primeiro?</b> Responda este e-mail com a sua rota, com as suas palavras. Algo como:' : '<b>Until then: where would you go first?</b> Reply to this email with your route, in your own words. Something like:';
+      const example = PT ? '“levar meu USDC da Ethereum para a Base e emprestar na Aave”' : '“move my USDC from Ethereum to Base and lend it on Aave”';
+      const read = PT ? 'Lemos todas as respostas, e as rotas mais pedidas definem os primeiros voos.' : 'We read every reply, and the most wanted routes shape the first flights.';
+      const body = h1(PT ? 'Você está na lista.' : 'You’re on the list.') + p(intro)
+        + panel([label(PT ? 'Passageiro' : 'Passenger') + `<div style="font-family:${MONO};font-weight:500;font-size:16px;color:${C.navy}">${e(ctx.recipient)}</div>`,
+          label('Status') + flaps('ON THE LIST'), label(PT ? 'Embarque' : 'Boards') + flaps(flapDay(cal.boardingOpensAt))])
+        + p(ask) + mono(example) + p(read);
+      return { subject, preheader, html: layout(ctx, { subject, preheader, band: 'Flight FloFi · Beta list', pose: 'welcome', body, reason: reason.list }),
+        text: plain([subject, PT ? 'Você está na lista.' : 'You’re on the list.', strip(intro), `${PT ? 'Passageiro' : 'Passenger'}: ${ctx.recipient}`, 'Status: ON THE LIST',
+          `${PT ? 'Embarque' : 'Boards'}: ${flapDay(cal.boardingOpensAt)} BRT`, strip(ask), example, read], ctx, reason.list) };
+    }
+    case 'EVE': {
+      const subject = PT ? `O embarque começa amanhã, às ${boardsAt} ✈️` : `Boarding starts tomorrow, ${boardsAt} BRT ✈️`;
+      const preheader = PT ? 'Os grupos abrem na ordem de inscrição.' : 'Groups open in signup order.';
+      const intro = PT ? `O primeiro grupo embarca na <b>${e(boardsDay)}, às ${e(boardsAt)} (horário de Brasília)</b>. Os grupos abrem na ordem de inscrição, e avisamos por e-mail assim que o seu abrir.`
+        : `The first group boards <b>${e(boardsDay)}, at ${e(boardsAt)} BRT</b>. Groups open in signup order, and we’ll email you the moment yours does.`;
+      const before = PT ? '<b>Antes de embarcar:</b> deixe sua carteira pronta, com um pouco de ETH ou SOL para as taxas de rede. Isto é mainnet, com fundos reais. A FloFi monta a rota e simula, e nada se move até você revisar e assinar na sua própria carteira.'
+        : '<b>Before you board:</b> have your wallet ready, with a little ETH or SOL for network fees. This is mainnet, with real funds. FloFi builds the route and simulates it, and nothing moves until you review and sign in your own wallet.';
+      const body = h1(PT ? 'O embarque começa ' : 'Boarding starts ', PT ? 'amanhã.' : 'tomorrow.') + p(intro)
+        + panel([label(PT ? 'Portão abre' : 'Gate opens') + flaps(flapDay(cal.boardingOpensAt))]) + p(before);
+      return { subject, preheader, html: layout(ctx, { subject, preheader, band: 'Flight FloFi · Final call', pose: 'wink', body, reason: reason.list }),
+        text: plain([subject, strip(intro), `${PT ? 'Portão abre' : 'Gate opens'}: ${flapDay(cal.boardingOpensAt)} BRT`, strip(before)], ctx, reason.list) };
+    }
+    case 'GROUP_BOARDING': case 'ACCESS_REQUESTED': {
+      if (!/^\d{6}$/.test(input.code) || !input.accessUrl.startsWith(`${o}/board/access#t=`)) throw new Error('EMAIL_TEMPLATE_INPUT_INVALID');
+      const subject = PT ? 'Seu grupo está embarcando ✈️' : 'Your group is boarding ✈️';
+      const preheader = PT ? 'Diga para onde você vai. Você aprova cada passo.' : 'Say where you’re going. You approve every step.';
+      const intro = PT ? 'Seu portão está aberto. Diga à FloFi para onde você quer levar suas criptos, veja cada passo simulado e assine só o que você aprovar.'
+        : 'Your gate is open. Tell FloFi where you want your crypto to go, see every step simulated, and sign only what you approve.';
+      const hours = input.linkHours, minutes = input.codeMinutes;
+      const codeLife = minutes >= 120 ? (PT ? `${Math.round(minutes / 60)} horas` : `${Math.round(minutes / 60)} hours`) : (PT ? `${minutes} minutos` : `${minutes} minutes`);
+      const note = PT ? `Este botão confirma o seu embarque com este e-mail, sem senha, uma vez, e vale por ${hours} horas.`
+        : `This button confirms your boarding with this email, no password, once, and works for ${hours} hours.`;
+      const other = PT ? `Em outro aparelho? Em flofi.xyz/board, digite este e-mail e o código acima. O código vale por ${codeLife}, uma vez. Precisa de outro? Digite seu e-mail em flofi.xyz/board e enviamos um código novo.`
+        : `On another device? At flofi.xyz/board, enter this email and the code above. The code works for ${codeLife}, once. Need another? Enter your email at flofi.xyz/board and we’ll send you a new 6-digit code.`;
+      const founding = PT ? 'Os 100 primeiros a embarcar viram <b>Founding Members</b>: um assento numerado, acesso antecipado à FloFi no Claude e no ChatGPT (em breve) e 3 convites.'
+        : 'The first 100 to board become <b>Founding Members</b>: a numbered seat, first access to FloFi in Claude and ChatGPT (coming soon), and 3 invites.';
+      const rows = [label(PT ? 'Portão' : 'Gate') + flaps(PT ? 'ABERTO' : 'OPEN'), ...input.group ? [label(PT ? 'Grupo' : 'Group') + flaps(PT ? `GRUPO ${input.group}` : `GROUP ${input.group}`)] : []];
+      const body = h1(PT ? 'Seu grupo ' : 'Your group ', PT ? 'está embarcando.' : 'is boarding.') + p(intro) + panel(rows)
+        + button(input.accessUrl, PT ? 'Embarcar agora →' : 'Board now →') + small(e(note))
+        + panel([label(PT ? 'Código de 6 dígitos' : '6-digit code') + flaps(input.code)]) + small(e(other))
+        + (input.foundingOpen ? `<div style="border-top:1.5px solid #E2E7EE;padding-top:16px">${p(founding, 16)}</div>` : '');
+      const why = input.template === 'ACCESS_REQUESTED' ? reason.access : reason.list;
+      return { subject, preheader, html: layout(ctx, { subject, preheader, band: 'Flight FloFi · Now boarding', pose: 'welcome', body, reason: why }),
+        text: plain([subject, strip(intro), ...input.group ? [`${PT ? 'Grupo' : 'Group'}: ${input.group}`] : [], `${PT ? 'Embarcar agora' : 'Board now'}: ${input.accessUrl}`, note,
+          `${PT ? 'Código de 6 dígitos' : '6-digit code'}: ${input.code}`, other, input.foundingOpen && strip(founding)], ctx, why) };
+    }
+    case 'CARD_FOUNDING': {
+      const card = input.card;
+      const subject = PT ? `Você é o Founding Member ${card.seat} ✈️` : `You’re Founding Member ${card.seat} ✈️`;
+      const preheader = PT ? 'Seu cartão de embarque e 3 convites estão aqui dentro.' : 'Your boarding card and 3 invites are inside.';
+      const perks = PT ? ['Seu assento numerado e seu nome no mural dos Founding Members', 'Acesso antecipado à FloFi no Claude e no ChatGPT, em breve', 'O time da FloFi do seu lado no Discord', '3 convites para trazer pessoas a bordo, sem precisar da lista']
+        : ['Your numbered seat and your name on the Founding Members wall', 'First access to FloFi in Claude and ChatGPT, coming soon', 'The FloFi team beside you on Discord', '3 invites to bring people on board, no list needed'];
+      const shownPerks = input.invites.length ? perks : perks.slice(0, 3);
+      const intro = PT ? 'Você está entre os 100 primeiros do Flight FloFi. Veja o que vem com o seu assento:' : 'You’re one of the first 100 on Flight FloFi. Here’s what comes with your seat:';
+      const tip = PT ? 'Poste o cartão como imagem para ter mais alcance e marque @FloFi_xyz para a gente repostar.' : 'Post the card as an image for the best reach, and tag @FloFi_xyz so we can repost it.';
+      const invites = input.invites.length ? `<div style="font-family:${MONO};font-weight:500;font-size:11px;letter-spacing:1.3px;text-transform:uppercase;color:${C.blue};padding:0 0 8px">${PT ? 'Seus 3 convites' : 'Your 3 invites'}</div>`
+        + p(PT ? 'Traga três pessoas a bordo, sem precisar da lista. Cada código vale uma vez.' : 'Bring three people on board, no list needed. Each code works once.', 16)
+        + input.invites.map(code => `<div style="padding:0 0 6px">${flaps(code)}</div>`).join('') + `<div style="height:12px"></div>` + button(input.invitesUrl, PT ? 'Enviar um convite' : 'Send an invite', C.navy) : '';
+      const body = h1(PT ? 'Boas-vindas a bordo,<br>' : 'Welcome aboard,<br>', `Founding Member ${e(card.seat)}.`) + p(intro) + list(shownPerks.map(e))
+        + cardBlock(card, ctx, PT ? 'Seu cartão de embarque' : 'Your boarding card') + invites + small(e(tip));
+      return { subject, preheader, html: layout(ctx, { subject, preheader, band: 'Flight FloFi · Founding Member', pose: 'captain', body, reason: reason.list }),
+        text: plain([subject, intro, ...shownPerks.map(perk => `· ${perk}`), `${PT ? 'Seu cartão' : 'Your card'}: ${card.publicUrl}`, `${PT ? 'Baixar cartão' : 'Download card'}: ${card.downloadUrl}`,
+          ...input.invites.length ? [`${PT ? 'Seus 3 convites' : 'Your 3 invites'}: ${input.invites.join('  ')}`, `${PT ? 'Enviar um convite' : 'Send an invite'}: ${input.invitesUrl}`] : [], tip], ctx, reason.list) };
+    }
+    case 'CARD_PASSENGER': {
+      const card = input.card;
+      const subject = PT ? 'Seu cartão de embarque do Flight FloFi ✈️' : 'Your Flight FloFi boarding card ✈️';
+      const preheader = PT ? 'Você está a bordo. Seu cartão está aqui dentro.' : 'You’re on board. Your card is inside.';
+      const intro = PT ? 'Os assentos Founding foram ocupados, então você voa como passageiro. Mesmo voo, mesma regra: você aprova cada passo.'
+        : 'Founding seats are taken, so you’re flying as a passenger. Same flight, same rule: you approve every step.';
+      const tip = PT ? 'Poste o cartão como imagem para ter mais alcance e marque @FloFi_xyz para a gente repostar.' : 'Post the card as an image for the best reach, and tag @FloFi_xyz so we can repost it.';
+      const body = h1(PT ? 'Você está a bordo.' : 'You’re on board.') + p(intro) + cardBlock(card, ctx, PT ? 'Seu cartão de embarque' : 'Your boarding card') + small(e(tip));
+      return { subject, preheader, html: layout(ctx, { subject, preheader, band: 'Flight FloFi · On board', pose: 'welcome', body, reason: reason.list }),
+        text: plain([subject, intro, `${PT ? 'Seu cartão' : 'Your card'}: ${card.publicUrl}`, `${PT ? 'Baixar cartão' : 'Download card'}: ${card.downloadUrl}`, tip], ctx, reason.list) };
+    }
+    case 'NEXT_FLIGHT': {
+      const subject = PT ? 'Você está na lista do próximo voo ✈️' : 'You’re on the list for the next flight ✈️';
+      const preheader = PT ? 'Avisamos por e-mail quando o próximo grupo abrir.' : 'We’ll email you when the next group opens.';
+      const intro = PT ? 'A lista do primeiro voo fechou, e você está na lista do próximo. Avisamos por e-mail assim que ele abrir.'
+        : 'The list for the first flight is closed, and you’re on the list for the next one. We’ll email you the moment it opens.';
+      const ask = PT ? 'Para onde você iria primeiro? Responda com a sua rota, com as suas palavras. Algo como:' : 'Where would you go first? Reply with your route, in your own words. Something like:';
+      const example = PT ? '“levar meu USDC da Ethereum para a Base e emprestar na Aave”' : '“move my USDC from Ethereum to Base and lend it on Aave”';
+      const body = h1(PT ? 'Você está no<br>' : 'You’re on<br>', PT ? 'próximo voo.' : 'the next flight.') + p(intro)
+        + panel([label(PT ? 'Passageiro' : 'Passenger') + `<div style="font-family:${MONO};font-weight:500;font-size:16px;color:${C.navy}">${e(ctx.recipient)}</div>`,
+          label(PT ? 'Portão' : 'Gate') + flaps('NEXT FLIGHT')]) + p(ask) + mono(example);
+      return { subject, preheader, html: layout(ctx, { subject, preheader, band: 'Flight FloFi · Next flight', pose: 'safety', body, reason: reason.list }),
+        text: plain([subject, intro, `${PT ? 'Passageiro' : 'Passenger'}: ${ctx.recipient}`, ask, example], ctx, reason.list) };
+    }
+    case 'CREATOR_INVITE': {
+      if (!/^FLF-[2-9A-HJ-NP-Z]{4}-[2-9A-HJ-NP-Z]{4}$/.test(input.code) || !/^https:\/\//.test(input.briefUrl)) throw new Error('EMAIL_TEMPLATE_INPUT_INVALID');
+      const testStart = cal.creatorsOpenAt, testEnd = Math.min(cal.creatorsOpenAt + 4 * 3_600_000, cal.boardingOpensAt);
+      const subject = PT ? 'Você foi convidado para o Flight FloFi ✈️' : 'You’re invited to Flight FloFi ✈️';
+      const preheader = PT ? 'Seu código de convite, um voo de teste e o plano para quinta.' : 'Your invite code, a test flight and the plan for Thursday.';
+      const intro = PT ? `A FloFi abre o beta fechado na <b>${e(boardsDay)}, às ${e(boardsAt)} (horário de Brasília)</b>. Antes disso você ganha um voo de teste, para conhecer o caminho quando o portão abrir.`
+        : `FloFi opens its closed beta on <b>${e(boardsDay)}, at ${e(boardsAt)} BRT</b>. Before that you get a test flight, so you know the way when the gate opens.`;
+      const window = `${flapDay(testStart, false)} ${clock(testStart, 'PT').replace('h', '')}-${clock(testEnd, 'PT')}`.toUpperCase();
+      const steps = PT ? [
+        `${e(longDay(testStart, 'PT'))}, das ${e(clock(testStart, 'PT'))} às ${e(clock(testEnd, 'PT'))} (Brasília): acesse flofi.xyz/board, toque em “Tenho um código de convite” e teste uma rota. Basta simular: você não precisa assinar nem enviar nada, e seu cartão sai marcado TEST.`,
+        `${e(longDay(cal.boardingOpensAt, 'PT'))}, a partir das ${e(boardsAt)}: embarque de verdade, com um valor pequeno. Isto é mainnet. Seu cartão oficial sai agora.`,
+        `Entre ${e(boardsAt)} e ${e(clock(cal.boardingOpensAt + 3_600_000, 'PT'))}, poste seu cartão no X citando o post de lançamento do @FloFi_xyz.`]
+        : [`${e(longDay(testStart, 'EN').split(',')[0]!)}, ${e(clock(testStart, 'EN'))} to ${e(clock(testEnd, 'EN'))} BRT: go to flofi.xyz/board, tap “I have an invite code” and try a route. A simulation is all it takes: you don’t need to sign or send anything, and your card comes out marked TEST.`,
+          `${e(longDay(cal.boardingOpensAt, 'EN').split(',')[0]!)} from ${e(boardsAt)} BRT: board for real, with a small amount. This is mainnet. Your official card comes out now.`,
+          `Between ${e(boardsAt)} and ${e(clock(cal.boardingOpensAt + 3_600_000, 'EN'))} BRT, post your card on X quoting the @FloFi_xyz launch post.`];
+      const keep = PT ? 'Guarde o código só para você: ele abre um assento. Dúvidas? É só responder este e-mail.' : 'Please keep the code to yourself: it opens one seat. Questions? Just reply to this email.';
+      const numbered = `<table role="presentation" cellpadding="0" cellspacing="0" style="margin:0 0 18px">${steps.map((step, index) => `<tr><td style="vertical-align:top;padding:0 12px 12px 0"><div style="width:26px;height:26px;border-radius:26px;background:${C.navy};color:${C.white};font-family:${MONO};font-weight:500;font-size:14px;line-height:26px;text-align:center">${index + 1}</div></td><td style="font-family:${SANS};font-size:16px;line-height:1.5;color:${C.body};padding:0 0 12px">${step}</td></tr>`).join('')}</table>`;
+      const body = h1(PT ? 'Você foi convidado<br>' : 'You’re invited<br>', PT ? 'para o Flight FloFi.' : 'to Flight FloFi.') + p(intro)
+        + panel([label(PT ? 'Código de convite' : 'Invite code') + flaps(input.code), label(PT ? 'Voo de teste' : 'Test flight') + flaps(window),
+          label(PT ? 'Embarque' : 'Boarding') + flaps(flapDay(cal.boardingOpensAt))])
+        + numbered + button(input.briefUrl, PT ? 'Abrir o brief do criador' : 'Open the creator brief', C.navy) + small(e(keep));
+      return { subject, preheader, html: layout(ctx, { subject, preheader, band: 'Flight FloFi · Invited', pose: 'wink', body, reason: reason.invited }),
+        text: plain([subject, strip(intro), `${PT ? 'Código de convite' : 'Invite code'}: ${input.code}`, ...steps.map((step, index) => `${index + 1}. ${strip(step)}`),
+          `${PT ? 'Brief do criador' : 'Creator brief'}: ${input.briefUrl}`, keep], ctx, reason.invited) };
+    }
+  }
+}
+/** HTML fragments of the copy as plain text. */
+function strip(html: string): string {
+  return html.replace(/<br\s*\/?>/g, ' ').replace(/<[^>]+>/g, '').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'");
+}

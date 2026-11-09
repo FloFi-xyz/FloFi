@@ -251,3 +251,18 @@
   .marquee{height:44px}.track{font-size:16px}
 }
 @media (prefers-reduced-motion:reduce){.track{animation:none}}
+/* BUILD-FLOFI-FLIGHT-LAUNCH-001: the card flow on a light panel, the public card page, the access and unsubscribe pages. */
+.passControls .small{color:var(--muted)}
+.passControls .status{color:var(--navy);background:var(--soft)}
+.passControls p{font-size:18px;line-height:1.45}
+.cardPublic{background:var(--blue);color:#fff;padding:0 0 96px;display:flex;flex-direction:column;gap:8px}
+.cardPublic>section{width:100%;min-width:0}
+.cardPublicText{display:flex;flex-direction:column;gap:24px;padding:0 var(--gutter)}
+.cardPublicText h1{font-weight:700;font-size:clamp(44px,6vw,88px);line-height:.98;letter-spacing:-.05em}
+.accessPage{background:var(--blue);color:#fff;min-height:calc(100svh - 88px);padding:72px var(--gutter);display:flex;flex-direction:column;gap:24px}
+.accessPage h1{font-weight:700;font-size:clamp(44px,6vw,88px);line-height:.98;letter-spacing:-.05em;max-width:900px}
+.accessPage .small a{color:#fff}
+.accessForms{display:flex;flex-direction:column;gap:12px;max-width:720px}
+@media (max-width:640px){.cardPublic{padding-bottom:64px}.accessPage{padding:48px var(--gutter)}}
+.cardPublic .passStage{padding-bottom:56px}
+.passControls .btnGhost{color:var(--navy)!important;border-color:var(--navy)}

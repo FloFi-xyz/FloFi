@@ -17,6 +17,7 @@ import { rm } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import { createDatabase } from '@defi-workflow-engine/cloud-runtime';
+import { codeFor, codeHash, linkTokenFor, sha256Hex, tokenIdFor, unsubscribeTokenFor } from '../src/flight/access';
 import { E2E_APP_ORIGIN, returningVisitor } from './app-origin';
 import { openSimulationDetails } from './fixtures';
 import { authorSolanaSwap, chooseSolanaWallet, jupiterControl } from './jupiter-fixtures';
@@ -126,7 +127,16 @@ const flaps = (scope: Page | Locator, text: string) => scope.getByRole('img', { 
 /** Evidence: a full-page screenshot of each state, kept with the run's results (CircleCI stores them as artifacts). */
 const shot = (page: Page, name: string) => page.screenshot({ path: test.info().outputPath(`${name}.png`), fullPage: true });
 
-test('a visitor reaches /board in Final call, on mobile and desktop; the beta list stores an address once and the counter is real', async ({ page, context }) => {
+/** No public aggregate count of people anywhere (BUILD-FLOFI-FLIGHT-LAUNCH-001): page text, server HTML and the anonymous state API. */
+async function noCounters(page: Page) {
+  const text = await page.locator('body').innerText();
+  expect(text).not.toMatch(/\d[\d.,]*\s*(ON THE LIST|BOARDED|NA LISTA|EMBARCARAM)|FOUNDING SEATS LEFT|ASSENTOS FOUNDING RESTANTES|\bOF 100\b|\b100 \/ 100\b/);
+  const state = await page.evaluate(async () => await (await fetch('/api/board/state')).json() as Record<string, unknown>);
+  expect(Object.keys(state)).not.toContain('counters');
+  expect(JSON.stringify(state)).not.toMatch(/onList|foundingLeft|foundingTaken|"boarded":\d/);
+}
+
+test('a visitor reaches /board in Final call, on mobile and desktop; the beta list stores an address once and no count is shown', async ({ page, context }) => {
   await at(context, FINAL_CALL);
   for (const width of [390, 1440]) {
     await page.setViewportSize({ width, height: 900 });
@@ -137,7 +147,10 @@ test('a visitor reaches /board in Final call, on mobile and desktop; the beta li
     // The boarding day is the campaign calendar's (12 Nov 2026, 9:00 BRT), in the hero and the page description.
     await expect(hero(page)).toContainText('Flight FloFi · Closed beta · Boards Nov 12');
     await expect(page.locator('meta[name="description"]')).toHaveAttribute('content', /^FloFi boards Nov 12\. /);
-    await expect(hero(page)).toContainText('0 ON THE LIST');
+    await noCounters(page);
+    // Nobody boards before boarding opens: the marquee says FINAL CALL, and the invite link is there for invited creators.
+    await expect(page.locator('section#top')).toContainText('FINAL CALL · DEFI THE WAY YOU TALK');
+    await expect(hero(page).getByRole('button', { name: 'I have an invite code' })).toBeVisible();
     await noOverflow(page);
     await shot(page, `state-1-final-call-${width}`);
   }
@@ -147,7 +160,7 @@ test('a visitor reaches /board in Final call, on mobile and desktop; the beta li
     await page.getByRole('button', { name: 'Join the list' }).click();
     await expect(page.getByRole('status')).toHaveText('You’re on the list. First boarding goes to the beta list.');
   }
-  expect(await query('SELECT flight, language, notice FROM flight_list_entries WHERE email = $1', [ANA])).toEqual([{ flight: 'FIRST', language: 'EN', notice: '2026-11-05' }]);
+  expect(await query('SELECT flight, language, notice FROM flight_list_entries WHERE email = $1', [ANA])).toEqual([{ flight: 'FIRST', language: 'EN', notice: '2026-11-09' }]);
   // The same address again (another visitor, upper case): answered exactly the same way, stored once, counted once.
   const again = await context.newPage();
   await again.goto('/board');
@@ -156,8 +169,10 @@ test('a visitor reaches /board in Final call, on mobile and desktop; the beta li
   await expect(again.getByRole('status')).toHaveText('You’re on the list. First boarding goes to the beta list.');
   expect(await query('SELECT count(*)::int AS n FROM flight_list_entries WHERE email = $1', [ANA])).toEqual([{ n: 1 }]);
   await again.reload();
-  await expect(hero(again)).toContainText('2 ON THE LIST');
+  await noCounters(again);
   expect(await events('list_join', 'first')).toBe(2);
+  // Each new beta-list address has its Email 1 waiting in the outbox once (the worker sends it; none runs in this test).
+  expect(await query(`SELECT template, count(*)::int AS n FROM flight_emails WHERE recipient = $1 GROUP BY template`, [ANA])).toEqual([{ template: 'LIST_CONFIRMATION', n: 1 }]);
   // A malformed address is refused in place.
   await again.getByLabel('Your email').fill('not-an-email');
   await again.getByRole('button', { name: 'Join the list' }).click();
@@ -185,7 +200,8 @@ test('Gate closed: the approved post’s words, and a new address joins the next
   await expect(page.getByRole('status')).toHaveText('You’re on the list for the next flight.');
   expect(await query('SELECT flight FROM flight_list_entries WHERE email = $1', [LATE])).toEqual([{ flight: 'NEXT' }]);
   await page.reload();
-  await expect(hero(page)).toContainText('2 ON THE LIST');
+  await noCounters(page);
+  expect(await query(`SELECT template FROM flight_emails WHERE recipient = $1`, [LATE])).toEqual([{ template: 'NEXT_FLIGHT' }]);
 });
 
 test('Now boarding: an example route fills the request; "Board now" signs a listed person in and opens /app with it as a draft', async ({ page, context }) => {
@@ -193,8 +209,8 @@ test('Now boarding: an example route fills the request; "Board now" signs a list
   await privy(page, { email: ANA });
   await page.goto('/board');
   await expect(page.getByRole('heading', { level: 1 })).toHaveText('Say where you’re going.');
-  await expect(hero(page)).toContainText('0 BOARDED');
-  await expect(hero(page)).toContainText('100 FOUNDING SEATS LEFT');
+  await expect(hero(page)).toContainText('CLOSED BETA · OPENING IN GROUPS');
+  await noCounters(page);
   await shot(page, 'state-2-now-boarding-1440');
   await page.locator('#routes').getByRole('button', { name: 'Use this route' }).nth(1).click();
   await expect(page.getByLabel(/Where you’re going/)).toHaveValue(ETH_SOL);
@@ -248,7 +264,7 @@ test('a group still closed (state 3) opens at its own time; not on the list (sta
     await cidPage.getByRole('button', { name: 'Share on X' }).click();
     expect((await cidPage.evaluate(() => (window as unknown as { __opened: string[] }).__opened))[0]).toMatch(/^https:\/\/x\.com\/intent\/post\?.*url=https%3A%2F%2Fflofi\.xyz%2Fboard/);
     await cidPage.getByRole('button', { name: 'Join the next flight' }).click();
-    await expect(cidPage.getByRole('status')).toHaveText('You’re on the list for the next flight.');
+    await expect(cidPage.getByRole('status').filter({ hasText: 'next flight' })).toHaveText('You’re on the list for the next flight.');
     expect(await query('SELECT flight FROM flight_list_entries WHERE email = $1', [CID])).toEqual([{ flight: 'NEXT' }]);
     expect(await events('share_click', 'not_listed')).toBe(1);
   } finally { await cid.close(); }
@@ -318,6 +334,10 @@ test('a real simulation issues the boarding pass: Founding seat #001, the real r
   expect(await events('simulation_ok', 'founding')).toBe(1);
   await page.getByRole('link', { name: 'See your boarding pass' }).click();
   await expect(page).toHaveURL(/\/board#pass$/);
+  // Screen 1 of the card flow: the optional X handle, printed on the card.
+  await expect(page.getByRole('heading', { name: 'Who’s flying?' })).toBeVisible();
+  await page.getByRole('textbox', { name: 'Your X handle' }).fill('@ana_flight');
+  await page.getByRole('button', { name: 'Print my card' }).click();
   const pass = page.getByRole('article', { name: /BOARDING PASS: SOL → SOL, Founding Member #001/ });
   await expect(pass).toBeVisible();
   await expect(pass).toContainText('Swap');
@@ -326,12 +346,44 @@ test('a real simulation issues the boarding pass: Founding seat #001, the real r
   await expect(pass).toContainText('12 NOV 2026');
   await expect(page.locator('#pass-invites-title')).toHaveText('Your 3 invites');
   await expect(page.locator('ul li').filter({ hasText: /^FLF-/ })).toHaveCount(3);
-  await expect(hero(page)).toContainText('1 BOARDED');
-  await expect(hero(page)).toContainText('99 FOUNDING SEATS LEFT');
-  await expect(page.locator('#founding')).toContainText('1 OF 100 FOUNDING SEATS TAKEN');
+  await noCounters(page);
+  // Screen 2: Share on X (the approved text and the card's own link), Download card (the server-rendered PNG), Copy link.
+  const publicId = (await query<{ public_id: string }>(`SELECT p.public_id FROM flight_passes p JOIN flofi_account_identities i ON i.account_id = p.account_id
+    AND i.tenant_id = p.tenant_id WHERE i.subject = $1`, [ANA]))[0]!.public_id;
+  expect(publicId).toMatch(/^[a-z2-7]{12}$/);
+  await page.evaluate(() => { (window as unknown as { __opened: string[] }).__opened = []; window.open = (url?: string | URL) => { (window as unknown as { __opened: string[] }).__opened.push(String(url)); return null; }; });
+  await page.getByRole('button', { name: 'Share on X' }).click();
+  const shared = new URL((await page.evaluate(() => (window as unknown as { __opened: string[] }).__opened))[0]!);
+  expect(shared.origin + shared.pathname).toBe('https://x.com/intent/post');
+  expect(shared.searchParams.get('text')).toBe('I just boarded Flight FloFi ✈️ Founding Member #001. SOL → SOL in 1 step, and I approve every step. @FloFi_xyz');
+  expect(shared.searchParams.get('url')).toBe(`https://flofi.xyz/card/${publicId}`);
+  await expect(page.getByRole('link', { name: 'Download card' })).toHaveAttribute('href', `/card/${publicId}/image?download=1`);
+  // Email 4a is waiting in the outbox for the address the person proved.
+  expect(await query(`SELECT template FROM flight_emails WHERE recipient = $1 AND template LIKE 'CARD_%'`, [ANA])).toEqual([{ template: 'CARD_FOUNDING' }]);
+  // Screen 4: the public card page, without signing in — the card, "Board too", the unverified-handle note, its own preview image.
+  const visitor = await context.browser()!.newContext({ baseURL: E2E_APP_ORIGIN, storageState: returningVisitor(E2E_APP_ORIGIN) });
+  try {
+    const card = await visitor.newPage(), response = await card.goto(`/card/${publicId}`);
+    expect(response?.status()).toBe(200);
+    await expect(card.getByRole('heading', { level: 1 })).toHaveText('@ana_flight boarded Flight FloFi.');
+    await expect(card.getByRole('link', { name: 'Board too' })).toHaveAttribute('href', `/board?source=card&ref=${publicId}`);
+    await expect(card.locator('main')).toContainText('Handle typed by the passenger, not verified.');
+    await expect(card.locator('main')).not.toContainText(ANA);
+    await expect(card.locator('meta[name="twitter:card"]')).toHaveAttribute('content', 'summary_large_image');
+    await expect(card.locator('meta[property="og:image"]')).toHaveAttribute('content', `https://flofi.xyz/card/${publicId}/image`);
+    await expect(card.locator('meta[name="robots"]')).toHaveAttribute('content', /noindex/);
+    await shot(card, 'card-public-page-1440');
+    await card.setViewportSize({ width: 390, height: 900 });
+    await noOverflow(card);
+    const image = await card.request.get(`/card/${publicId}/image`), download = await card.request.get(`/card/${publicId}/image?download=1`);
+    expect([image.status(), image.headers()['content-type']]).toEqual([200, 'image/png']);
+    expect([...(await image.body()).subarray(16, 24)]).toEqual([0, 0, 4, 176, 0, 0, 2, 118]); // PNG IHDR: 1200 × 630.
+    expect([...(await download.body()).subarray(16, 24)]).toEqual([0, 0, 6, 64, 0, 0, 3, 132]); // 1600 × 900.
+    expect(download.headers()['content-disposition']).toBe('attachment; filename="flofi-boarding-card-001.png"');
+    expect((await card.request.get('/card/aaaaaaaaaaaa')).status()).toBe(404);
+  } finally { await visitor.close(); }
   // The holder's choice: their handle, shown on the public departures board.
   await expect(page.locator('section[aria-labelledby="departures-title"]')).toHaveCount(0);
-  await page.getByRole('textbox', { name: 'Your X handle' }).fill('@ana_flight');
   await page.getByRole('checkbox', { name: /public departures board/ }).check();
   await page.getByRole('button', { name: 'Save' }).click();
   await expect(page.getByText('Saved.')).toBeVisible();
@@ -362,10 +414,9 @@ test('Founding full (state 5): after the 100th seat the banner shows and the nex
   await query(`UPDATE flight_issuance SET boarded = 100, founding = 100 WHERE tenant_id = 'default'`);
   await at(context, GROUP_TWO_OPEN);
   await page.goto('/board');
-  await expect(page.getByRole('note').filter({ hasText: 'FOUNDING FULL' })).toContainText('100 / 100');
+  await expect(page.getByRole('note').filter({ hasText: 'FOUNDING FULL' })).toContainText('PASSENGER SEATS OPEN');
   await expect(hero(page)).toContainText('All 100 Founding seats are taken. You still board, as a passenger. You approve.');
-  await expect(hero(page)).toContainText('100 BOARDED');
-  await expect(hero(page)).not.toContainText('FOUNDING SEATS LEFT');
+  await noCounters(page);
   await shot(page, 'state-5-founding-full-1440');
   // Bea's group is open now: her simulation issues a passenger pass (boarding number 101, the middle seat).
   await privy(page, { email: BEA });
@@ -377,12 +428,96 @@ test('Founding full (state 5): after the 100th seat the banner shows and the nex
   await simulateSolanaSwap(page, owner);
   await expect(page.getByRole('status').filter({ hasText: 'Your Flight FloFi boarding pass is ready.' })).toBeVisible();
   await page.goto('/board#pass');
+  await page.getByRole('button', { name: 'Skip, print without a handle' }).click();
   await expect(page.getByRole('heading', { name: 'You’re on board. Middle seat.' })).toBeVisible();
+  // Invited or late, a passenger gets no invites and no Founding promise.
+  await expect(page.locator('#invites')).toHaveCount(0);
   await expect(flaps(page, '101E')).toBeVisible();
   await shot(page, 'passenger-pass-1440');
   await fitsPhones(page);
   expect(await query(`SELECT count(founding_seat)::int AS founding, max(boarding_no) AS last FROM flight_passes`)).toEqual([{ founding: 100, last: 101 }]);
   expect(await events('simulation_ok', 'passenger')).toBe(1);
+});
+
+/** An access email's link and code, as the worker would derive and record them (the test inserts the digests the worker would). */
+async function accessEmail(email: string) {
+  const secret = process.env.FLOFI_FLIGHT_E2E_ACCESS_SECRET!, emailId = `fem_${randomBytes(16).toString('hex')}`, tokenId = tokenIdFor(secret, emailId);
+  const link = linkTokenFor(secret, emailId), code = codeFor(secret, emailId);
+  // Times on the campaign clock this test runs at (the harness cookie), as the worker would record them at send time.
+  await query(`INSERT INTO flight_access_tokens (tenant_id, token_id, entry_id, purpose, link_hash, code_hash, created_at, link_expires_at, code_expires_at)
+    SELECT 'default', $1, entry_id, 'BOARDING', $2, $3, $5::timestamptz, $5::timestamptz + interval '72 hours', $5::timestamptz + interval '15 minutes'
+    FROM flight_list_entries WHERE email = $4`, [tokenId, sha256Hex(link), codeHash(secret, tokenId, code), email, new Date(BOARDING).toISOString()]);
+  return { link, code, tokenId };
+}
+
+test('Email 3 access: opening the link consumes nothing, Continue proves the address once; a code works on another device; unsubscribe is one click', async ({ browser }) => {
+  const FREE = `free-${run}@flofi-e2e.test`, LISTED = `listed-${run}@flofi-e2e.test`, OTHER = `other-${run}@flofi-e2e.test`, CODED = `coded-${run}@flofi-e2e.test`;
+  for (const email of [LISTED, CODED]) await query(`INSERT INTO flight_list_entries (tenant_id, entry_id, email, flight, language, notice) VALUES ('default', $1, $2, 'FIRST', 'EN', '2026-11-05')`,
+    [`fle_${randomBytes(16).toString('hex')}`, email]);
+  const ctx = await browser.newContext({ baseURL: E2E_APP_ORIGIN, storageState: returningVisitor(E2E_APP_ORIGIN) }), page = await ctx.newPage();
+  try {
+    await at(ctx, BOARDING);
+    // Signed in with an address that is not on the list (a different login email): not on the list.
+    await privy(page, { email: FREE });
+    await signInFromBoard(page, FREE);
+    await createSolanaWalletAndContinue(page);
+    await page.goto('/board');
+    await expect(page.getByRole('heading', { level: 1 })).toHaveText('Not on the list. Yet.');
+    // The email's link: the page only offers "Continue"; a scanner or preview that opens it consumes nothing.
+    const { link, tokenId } = await accessEmail(LISTED);
+    await page.goto(`/board/access#t=${link}`);
+    await expect(page.getByRole('button', { name: 'Continue' })).toBeVisible();
+    expect(await query(`SELECT consumed_at FROM flight_access_tokens WHERE token_id = $1`, [tokenId])).toEqual([{ consumed_at: null }]);
+    const scanner = await page.request.get(`/board/access#t=${link}`);
+    expect(scanner.status()).toBe(200);
+    expect(await query(`SELECT consumed_at FROM flight_access_tokens WHERE token_id = $1`, [tokenId])).toEqual([{ consumed_at: null }]);
+    await shot(page, 'access-continue-390');
+    await page.getByRole('button', { name: 'Continue' }).click();
+    // Proven: the entry is now this account's, and "Board now" continues to /app.
+    await expect(page).toHaveURL(/\/app$/);
+    expect(await query(`SELECT count(*)::int AS n FROM flight_access_claims c JOIN flight_list_entries e ON e.entry_id = c.entry_id WHERE e.email = $1`, [LISTED])).toEqual([{ n: 1 }]);
+    // The link works once.
+    await page.goto(`/board/access#t=${link}`);
+    await page.getByRole('button', { name: 'Continue' }).click();
+    await expect(page.locator('p[role="alert"]')).toHaveText('That link was already used. Ask for a new one if you need it.');
+  } finally { await ctx.close(); }
+  // Another device: signed in there with yet another address, the person types the listed address and the six-digit code.
+  const other = await browser.newContext({ baseURL: E2E_APP_ORIGIN, storageState: returningVisitor(E2E_APP_ORIGIN) }), device = await other.newPage();
+  try {
+    await at(other, BOARDING);
+    await privy(device, { email: OTHER });
+    await signInFromBoard(device, OTHER);
+    await createSolanaWalletAndContinue(device);
+    await device.goto('/board');
+    await expect(device.getByRole('heading', { level: 1 })).toHaveText('Not on the list. Yet.');
+    const { code } = await accessEmail(CODED);
+    await device.getByLabel('Your beta-list email').fill(CODED);
+    await device.getByLabel('6-digit code').fill(code === '000000' ? '111111' : '000000');
+    await device.getByRole('button', { name: 'Use code' }).click();
+    await expect(device.locator('p[role="alert"]')).toHaveText('That link or code is not valid. Ask for a new one.');
+    await device.getByLabel('6-digit code').fill(code);
+    await device.getByRole('button', { name: 'Use code' }).click();
+    await expect(device.getByRole('heading', { level: 1 })).toHaveText('Say where you’re going.');
+    // The "send me a link" form answers the same for any address and never says whether it is listed.
+    const ask = (email: string) => device.evaluate(async address => (await fetch('/api/board/access/request', { method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ email: address, language: 'EN' }) })).text(), email);
+    expect(await ask(`nobody-${run}@flofi-e2e.test`)).toBe(await ask(LISTED));
+  } finally { await other.close(); }
+  // Unsubscribe: opening the page changes nothing; the click suppresses the recipient of that email.
+  const emailId = `fem_${randomBytes(16).toString('hex')}`;
+  await query(`INSERT INTO flight_emails (tenant_id, email_id, dedupe_key, template, template_version, category, recipient, language, trigger, not_before, next_attempt_at)
+    VALUES ('default', $1, $2, 'NEXT_FLIGHT', 1, 'CAMPAIGN', $3, 'EN', 'browser_test', now() + interval '1 day', now() + interval '1 day')`, [emailId, `e2e:${emailId}`, OTHER]);
+  const viewer = await browser.newContext({ baseURL: E2E_APP_ORIGIN, storageState: returningVisitor(E2E_APP_ORIGIN) }), unsub = await viewer.newPage();
+  try {
+    await unsub.goto(`/board/unsubscribe?t=${unsubscribeTokenFor(process.env.FLOFI_FLIGHT_E2E_ACCESS_SECRET!, emailId)}`);
+    expect(await query(`SELECT count(*)::int AS n FROM flight_email_suppressions`)).toEqual([{ n: 0 }]);
+    await unsub.getByRole('button', { name: 'Unsubscribe' }).click();
+    await expect(unsub.getByRole('status')).toHaveText('Done. You won’t get Flight FloFi campaign emails any more.');
+    expect(await query(`SELECT state, status_reason FROM flight_emails WHERE email_id = $1`, [emailId])).toEqual([{ state: 'CANCELLED', status_reason: 'UNSUBSCRIBED' }]);
+    await unsub.goto('/board/unsubscribe?t=fem_00000000000000000000000000000000.AAAAAAAAAAAAAAAAAAAAAA');
+    await unsub.getByRole('button', { name: 'Unsubscribe' }).click();
+    await expect(unsub.locator('p[role="alert"]')).toHaveText('This unsubscribe link is not valid.');
+  } finally { await viewer.close(); }
 });
 
 test('every CTA and link resolves; the campaign posts link to a real page with the approved image; PT is one choice away', async ({ page, context, request }) => {

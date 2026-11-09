@@ -17,6 +17,24 @@
  *                                                  counters > 13 months); the page also does this every few minutes
  *   purge-lists                                    end of the beta: delete every list entry, join attempt and simulation record
  *
+ * BUILD-FLOFI-FLIGHT-LAUNCH-001 (email through Resend, access links, public cards). No command prints an email address in full:
+ *   email-status                                   reservations today/this month against the limits, emails by template and state, held batches
+ *   email-attention [--count <n>]                  held, unknown and failed emails (masked recipient, reason, batch)
+ *   email-release  (--email-id <fem_…> | --batch <key> | --reason <CODE>) [--max <n>]
+ *                                                  the team's decision to send held emails (quota raised, next day); --max sends only
+ *                                                  the oldest n of a batch (an explicit partial send). UNRESOLVED_OUTCOME only by --email-id
+ *   email-cancel   (--email-id <fem_…> | --batch <key> | --template <T>)  withdraw pending or held emails (sent ones are never touched)
+ *   email-pause    [--reason <text>]                stop campaign email at once (access emails a person asks for still go out)
+ *   email-resume                                   resume campaign email
+ *   email-unblock                                  clear a provider block (quota reset confirmed, key fixed)
+ *   email-mark-delivered --email-id <fem_…> --provider-id <id>   an unknown outcome confirmed delivered in the Resend log
+ *   email-backfill-confirmations                   Email 1 once for beta-list entries that never got it (before the list closes)
+ *   email-send-due                                 one delivery cycle now (Plan B when no worker runs; needs the worker's settings)
+ *   creator-invite --email <address> [--language PT] [--send-at <ISO>]   one creator invite and its Email 6 (once per address)
+ *   creator-invites --file <csv: email,language> [--send-at <ISO>]       the same for a reviewed list of recipients
+ *   remove-card    --card <id | flp_…>             take a public card page down (the person's request or moderation)
+ *   revoke-access  --email <address>               void every unused access link and code of an address
+ *
  * Environment: DATABASE_URL (the deployment's database). Holding the database credentials is the authorization, as for the other
  * operator CLIs. The tenant is explicit (production/local `--tenant default`, a Vercel Preview `--preview-branch <git branch>`) and must
  * already exist: a mistyped tenant is refused, never created. An exported file holds addresses: keep it only until the email is sent.
@@ -25,10 +43,22 @@ import { open } from 'node:fs/promises';
 import { parseArgs } from 'node:util';
 import { assertSchemaCompatible, createDatabase, SHIPPED_MIGRATIONS } from '@defi-workflow-engine/cloud-runtime';
 import { deploymentTenant } from '../src/server/deployment.ts';
-import { normalizeEmail } from '../src/flight/campaign.ts';
+import { createLogger } from '@defi-workflow-engine/cloud-runtime';
+import { readFile } from 'node:fs/promises';
+import { accessSecret } from '../src/flight/access.ts';
+import { createAccessStore } from '../src/flight/access-store.ts';
+import { flightCalendarFrom, normalizeEmail } from '../src/flight/campaign.ts';
+import { createEmailOutbox, emailLimitsFrom, type EmailOutbox } from '../src/flight/email/outbox.ts';
+import type { EmailTemplate } from '../src/flight/email/templates.ts';
 import { createFlightStore, type FlightStore } from '../src/flight/store.ts';
 
-export const FLIGHT_COMMANDS = ['stats', 'create-batch', 'assign-batch', 'export-batch', 'issue-invites', 'erase-email', 'hide-pass', 'prune', 'purge-lists'] as const;
+export const FLIGHT_COMMANDS = ['stats', 'create-batch', 'assign-batch', 'export-batch', 'issue-invites', 'erase-email', 'hide-pass', 'prune', 'purge-lists',
+  'email-status', 'email-attention', 'email-release', 'email-cancel', 'email-pause', 'email-resume', 'email-unblock', 'email-mark-delivered',
+  'email-backfill-confirmations', 'email-send-due', 'creator-invite', 'creator-invites', 'remove-card', 'revoke-access'] as const;
+const TEMPLATES: readonly EmailTemplate[] = ['LIST_CONFIRMATION', 'EVE', 'GROUP_BOARDING', 'ACCESS_REQUESTED', 'CARD_FOUNDING', 'CARD_PASSENGER', 'NEXT_FLIGHT', 'CREATOR_INVITE'];
+/** What the email and access commands need besides the store; `sendDue` runs one delivery cycle (absent: not configured). */
+export type FlightAdminContext = { readonly outbox: EmailOutbox; readonly entryOf: (email: string) => Promise<string | null>;
+  readonly revoke: ((entryId: string, now: number) => Promise<number>) | null; readonly sendDue: (() => Promise<unknown>) | { readonly disabled: string } };
 /** One CSV cell; a value a spreadsheet would read as a formula (=, +, -, @) is written as text. */
 export const csvCell = (value: string) => /^[=+\-@\t\r]/.test(value) ? `'${value}` : value;
 type Command = (typeof FLIGHT_COMMANDS)[number];
@@ -47,8 +77,73 @@ const integer = (values: Values, name: string) => {
   return value;
 };
 
-export async function runFlightCommand(command: Command, values: Values, store: FlightStore, now: number): Promise<Record<string, unknown>> {
+const emailId = (values: Values) => { const id = flag(values, 'email-id'); if (id && !/^fem_[0-9a-f]{32}$/.test(id)) throw new Error('ARGUMENT_INVALID: --email-id'); return id; };
+const instantOf = (values: Values, name: string, fallback: number) => {
+  const raw = flag(values, name);
+  if (!raw) return fallback;
+  if (!/(?:Z|[+-]\d{2}:\d{2})$/.test(raw) || !Number.isFinite(Date.parse(raw))) throw new Error(`ARGUMENT_INVALID: --${name} (ISO 8601 with an offset)`);
+  return Date.parse(raw);
+};
+const languageOf = (value: string | undefined) => { const language = (value ?? 'EN').trim().toUpperCase(); if (language !== 'EN' && language !== 'PT') throw new Error('ARGUMENT_INVALID: language'); return language; };
+
+export async function runFlightCommand(command: Command, values: Values, store: FlightStore, now: number, context?: FlightAdminContext): Promise<Record<string, unknown>> {
+  const ctx = () => { if (!context) throw new Error('CONTEXT_REQUIRED'); return context; };
   switch (command) {
+    case 'email-status': return ctx().outbox.status(now);
+    case 'email-attention': return { emails: await ctx().outbox.listAttention(flag(values, 'count') ? integer(values, 'count') : 50) };
+    case 'email-release': {
+      const max = flag(values, 'max') ? integer(values, 'max') : undefined, reason = flag(values, 'reason');
+      if (reason && !/^[A-Z0-9_]{1,60}$/.test(reason)) throw new Error('ARGUMENT_INVALID: --reason');
+      const id = emailId(values), batchKey = flag(values, 'batch');
+      return { released: await ctx().outbox.release({ ...id ? { emailId: id } : {}, ...batchKey ? { batchKey } : {}, ...reason ? { reason } : {}, ...max ? { max } : {} }, now) };
+    }
+    case 'email-cancel': {
+      const template = flag(values, 'template') as EmailTemplate | undefined;
+      if (template && !TEMPLATES.includes(template)) throw new Error('ARGUMENT_INVALID: --template');
+      const id = emailId(values), batchKey = flag(values, 'batch');
+      return { cancelled: await ctx().outbox.cancel({ ...id ? { emailId: id } : {}, ...batchKey ? { batchKey } : {}, ...template ? { template } : {} }) };
+    }
+    case 'email-pause': await ctx().outbox.setPaused(true, (flag(values, 'reason') ?? 'operator').replace(/[^A-Za-z0-9_ .:-]/g, '').slice(0, 120) || 'operator'); return { paused: true };
+    case 'email-resume': await ctx().outbox.setPaused(false, null); return { paused: false };
+    case 'email-unblock': await ctx().outbox.clearBlock(); return { unblocked: true };
+    case 'email-mark-delivered': return { marked: await ctx().outbox.markDelivered(emailId(values) ?? required(values, 'email-id'), required(values, 'provider-id'), now) };
+    case 'email-backfill-confirmations': return { enqueued: await ctx().outbox.backfillConfirmations(now, store.calendar.listClosesAt) };
+    case 'email-send-due': {
+      const send = ctx().sendDue;
+      if (typeof send !== 'function') throw new Error(`EMAIL_NOT_CONFIGURED: ${send.disabled}`);
+      return { cycle: await send() };
+    }
+    case 'creator-invite': {
+      const email = normalizeEmail(required(values, 'email'));
+      if (!email) throw new Error('ARGUMENT_INVALID: --email');
+      const invite = await store.inviteCreator({ email, language: languageOf(flag(values, 'language')), sendAt: instantOf(values, 'send-at', now), now });
+      return { created: invite.created, code: invite.code };
+    }
+    case 'creator-invites': {
+      const text = await readFile(required(values, 'file'), 'utf8').catch(() => { throw new Error('FILE_UNREADABLE'); });
+      const sendAt = instantOf(values, 'send-at', now), results: { line: number; created: boolean }[] = [];
+      for (const [index, line] of text.split(/\r?\n/).entries()) {
+        if (!line.trim() || line.trim().startsWith('#')) continue;
+        const [address = '', language] = line.split(',').map(part => part.trim());
+        const email = normalizeEmail(address.replace(/^'/, ''));
+        if (!email) throw new Error(`ARGUMENT_INVALID: line ${index + 1}`);
+        results.push({ line: index + 1, created: (await store.inviteCreator({ email, language: languageOf(language), sendAt, now })).created });
+      }
+      // Codes are not printed for a list: each goes only to its recipient's Email 6 (and is visible to the operator in the database).
+      return { invited: results.filter(r => r.created).length, alreadyInvited: results.filter(r => !r.created).length };
+    }
+    case 'remove-card': {
+      const card = required(values, 'card');
+      if (!/^(flp_[0-9a-f]{32}|[a-z2-7]{12})$/.test(card)) throw new Error('ARGUMENT_INVALID: --card');
+      return { removed: await store.removeCard(card, now) };
+    }
+    case 'revoke-access': {
+      const email = normalizeEmail(required(values, 'email'));
+      if (!email) throw new Error('ARGUMENT_INVALID: --email');
+      const entryId = await ctx().entryOf(email), revoke = ctx().revoke;
+      if (!revoke) throw new Error('FLOFI_FLIGHT_ACCESS_SECRET_MISSING');
+      return { revoked: entryId ? await revoke(entryId, now) : 0 };
+    }
     case 'stats': return store.stats();
     case 'create-batch': {
       const opensAt = Date.parse(required(values, 'opens-at'));
@@ -87,14 +182,31 @@ async function main(): Promise<void> {
   if (!command || !(FLIGHT_COMMANDS as readonly string[]).includes(command)) throw new Error(`COMMAND_INVALID: one of ${FLIGHT_COMMANDS.join(', ')}`);
   const { values } = parseArgs({ args: rest, strict: true, allowPositionals: false, options: { tenant: { type: 'string' }, 'preview-branch': { type: 'string' },
     batch: { type: 'string' }, 'opens-at': { type: 'string' }, count: { type: 'string' }, flight: { type: 'string' }, out: { type: 'string' },
-    email: { type: 'string' }, pass: { type: 'string' } } });
+    email: { type: 'string' }, pass: { type: 'string' }, 'email-id': { type: 'string' }, max: { type: 'string' }, reason: { type: 'string' },
+    template: { type: 'string' }, 'provider-id': { type: 'string' }, language: { type: 'string' }, 'send-at': { type: 'string' }, file: { type: 'string' },
+    card: { type: 'string' } } });
   const tenantId = tenantOf(values), databaseUrl = process.env.DATABASE_URL ?? '';
   if (!/^postgres(ql)?:\/\//.test(databaseUrl)) throw new Error('DATABASE_URL_REQUIRED');
   const db = createDatabase({ connectionString: databaseUrl, maxConnections: 2, applicationName: 'flofi-flight-admin' });
   try {
     await assertSchemaCompatible(db, SHIPPED_MIGRATIONS);
     if (!(await db.query('SELECT 1 FROM tenants WHERE tenant_id = $1', [tenantId])).rowCount) throw new Error('TENANT_UNKNOWN');
-    const out = await runFlightCommand(command as Command, values, createFlightStore({ db, tenantId }), Date.now());
+    // The deployment's own campaign calendar (the same variables the web and the worker read); a refused value stops here.
+    const { calendar } = flightCalendarFrom(process.env);
+    if (!calendar) throw new Error('FLIGHT_CALENDAR_INVALID');
+    const host = { db, tenantId }, secret = accessSecret(process.env);
+    let limits;
+    try { limits = emailLimitsFrom(process.env); } catch { throw new Error('FLOFI_EMAIL_LIMIT_INVALID'); }
+    const context: FlightAdminContext = {
+      outbox: createEmailOutbox(host, limits),
+      entryOf: async email => (await db.query<{ entry_id: string }>('SELECT entry_id FROM flight_list_entries WHERE tenant_id = $1 AND email = $2', [tenantId, email])).rows[0]?.entry_id ?? null,
+      revoke: secret ? (entryId, at) => createAccessStore(host, secret).revokeEntryTokens(entryId, at) : null,
+      sendDue: command === 'email-send-due' ? await import('../src/flight/email/runtime.ts').then(m => {
+        const runtime = m.flightEmailRuntime(process.env, db, tenantId, createLogger({ service: 'flofi-flight-admin' }));
+        return 'disabled' in runtime ? runtime : () => runtime.delivery.cycle();
+      }) : { disabled: 'NOT_REQUESTED' },
+    };
+    const out = await runFlightCommand(command as Command, values, createFlightStore(host, calendar), Date.now(), context);
     process.stdout.write(JSON.stringify({ tenantId, ...out }, null, 2) + '\n');
   } finally { await db.close(); }
 }

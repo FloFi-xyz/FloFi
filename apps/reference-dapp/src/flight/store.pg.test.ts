@@ -50,7 +50,7 @@ describe('BUILD-FLOFI-FLIGHT-001 beta list', () => {
     expect([first.status, again.status]).toEqual(['JOINED', 'ALREADY']);
     expect((await store.counters()).onList).toBe(before + 1);
     expect((await t.db.query(`SELECT flight, language, notice FROM flight_list_entries WHERE email = 'ana@flofi-test.dev'`)).rows)
-      .toEqual([{ flight: 'FIRST', language: 'EN', notice: '2026-11-05' }]);
+      .toEqual([{ flight: 'FIRST', language: 'EN', notice: '2026-11-09' }]);
   });
 
   it('limits one client per hour without storing its address, and the database refuses a malformed address', async () => {
@@ -105,19 +105,29 @@ describe('BUILD-FLOFI-FLIGHT-001 access: list, boarding group, invite', () => {
     expect(await store.redeemInvite({ accountId: late, code: code!, now: BOARDING })).toBe('INVITE_USED');
     expect(await store.redeemInvite({ accountId: holder, code: spare!, now: BOARDING })).toBe('INVITE_ALREADY_HELD');
     expect((await store.account({ accountId: holder, emails: [], now: BOARDING })).access).toEqual({ kind: 'eligible', origin: 'CREATOR' });
-    // A Founding member's invites: three, usable by others, never by the member.
-    const founder = await newAccount();
-    await t.db.query(`INSERT INTO flight_invites (tenant_id, code, issuer) VALUES ('default', 'FLF-ABCD-EFGH', 'CREATOR')`);
-    expect(await store.redeemInvite({ accountId: founder, code: 'FLF-ABCD-EFGH', now: BOARDING })).toBe('REDEEMED');
+    // A Founding member's invites: three, usable by others, never by the member. Only a seat earned straight from the beta list carries
+    // them (BUILD-FLOFI-FLIGHT-LAUNCH-001): the creator above, once on board with a Founding seat, gets none.
+    await simulated(holder, 'wf-holder', swap);
+    const invited = await issue(holder, 'wf-holder');
+    expect(invited.ok && invited.pass.foundingSeat).toBeTruthy();
+    expect((await store.account({ accountId: holder, emails: [], now: BOARDING })).invites).toHaveLength(0);
+    const founder = await newAccount(), founderEmails = ['founder@flofi-test.dev'];
+    await store.joinList({ email: founderEmails[0]!, language: 'EN', flight: 'FIRST', client: null, now: BEFORE });
     await simulated(founder, 'wf-founder', swap);
-    const pass = await issue(founder, 'wf-founder');
+    const pass = await issue(founder, 'wf-founder', { emails: founderEmails });
     expect(pass.ok && pass.pass.foundingSeat).toBeTruthy();
-    const invites = (await store.account({ accountId: founder, emails: [], now: BOARDING })).invites;
+    const invites = (await store.account({ accountId: founder, emails: founderEmails, now: BOARDING })).invites;
     expect(invites).toHaveLength(3);
     expect(await store.redeemInvite({ accountId: founder, code: invites[0]!.code, now: BOARDING })).toBe('ALREADY_BOARDED');
     expect(await store.redeemInvite({ accountId: late, code: invites[0]!.code, now: BOARDING })).toBe('REDEEMED');
     expect((await store.account({ accountId: late, emails: [], now: BOARDING })).access).toEqual({ kind: 'eligible', origin: 'INVITE' });
-    expect((await store.account({ accountId: founder, emails: [], now: BOARDING })).invites.filter(i => i.redeemed)).toHaveLength(1);
+    expect((await store.account({ accountId: founder, emails: founderEmails, now: BOARDING })).invites.filter(i => i.redeemed)).toHaveLength(1);
+    // The guest boards on a Founding seat too, and gets no invites of their own: invites never propagate.
+    await simulated(late, 'wf-late', swap);
+    const guest = await issue(late, 'wf-late');
+    expect(guest).toMatchObject({ ok: true, pass: { origin: 'INVITE' } });
+    expect(guest.ok && guest.pass.foundingSeat).toBeTruthy();
+    expect((await store.account({ accountId: late, emails: [], now: BOARDING })).invites).toHaveLength(0);
   });
 });
 
@@ -201,7 +211,8 @@ describe('BUILD-FLOFI-FLIGHT-001 boarding passes', () => {
     expect(await store.counters()).toMatchObject({ boarded: 130, foundingTaken: 100, foundingLeft: 0 });
     // The issuance row can never record more than 100 Founding seats.
     await expect(t.db.query(`UPDATE flight_issuance SET founding = 101, boarded = 200`)).rejects.toThrow();
-    expect((await t.db.query(`SELECT count(*)::int AS n FROM flight_invites WHERE issuer = 'FOUNDING'`)).rows).toEqual([{ n: 300 }]);
+    // Every one of them boarded by invite: none of the 100 Founding seats carries invites (BUILD-FLOFI-FLIGHT-LAUNCH-001).
+    expect((await t.db.query(`SELECT count(*)::int AS n FROM flight_invites WHERE issuer = 'FOUNDING'`)).rows).toEqual([{ n: 0 }]);
     // The table itself refuses a 101st seat or a repeated one.
     const extra = await newAccount();
     await expect(t.db.query(`INSERT INTO flight_passes (tenant_id, pass_id, account_id, origin, boarding_no, founding_seat, route, run_id)
@@ -232,8 +243,9 @@ describe('BUILD-FLOFI-FLIGHT-001 boarding passes', () => {
     await t.db.query(`DELETE FROM flofi_accounts WHERE tenant_id = 'default' AND account_id = $1`, [holder]);
     expect((await t.db.query(`SELECT count(*)::int AS n FROM flight_passes WHERE account_id = $1`, [holder])).rows).toEqual([{ n: 0 }]);
     expect((await t.db.query(`SELECT count(*)::int AS n FROM flight_simulations WHERE account_id = $1`, [holder])).rows).toEqual([{ n: 0 }]);
-    // Its Founding invites stay usable (they were given out), no longer linked to anyone; the invite it used stays used, unlinked.
-    expect((await t.db.query(`SELECT count(*)::int AS n FROM flight_invites WHERE issuer = 'FOUNDING' AND issuer_pass_id IS NULL`)).rows).toEqual([{ n: 3 }]);
+    // It boarded by invite, so it never had Founding invites; the invite it used stays used, unlinked. (A list-boarded member's invites
+    // stay usable after deletion, unlinked: see the invite test's founder and launch.pg.test.ts.)
+    expect((await t.db.query(`SELECT count(*)::int AS n FROM flight_invites WHERE issuer = 'FOUNDING' AND issuer_pass_id IS NULL`)).rows).toEqual([{ n: 0 }]);
     expect((await t.db.query(`SELECT redeemed_by, redeemed_at IS NOT NULL AS used FROM flight_invites WHERE code = $1`, [redeemed])).rows)
       .toEqual([{ redeemed_by: null, used: true }]);
     // Seat #002 and its boarding number are never issued again: the counters keep them, the next boarder gets the next number.

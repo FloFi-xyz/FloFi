@@ -162,6 +162,18 @@ async function main(): Promise<void> {
     if ('disabled' in parts) logger.error('workflow_run.worker_disabled', { error_code: parts.disabled, reason: parts.reason ?? undefined });
     else { workflowRuns = parts; logger.info('workflow_run.worker_enabled', { kinds: Object.keys(parts.handlers).join(',') }); }
   }
+  // BUILD-FLOFI-FLIGHT-LAUNCH-001: Flight FloFi campaign email (Resend), opt-in (FLOFI_FLIGHT_EMAIL=enabled). Its own cycle beside the queue;
+  // a missing setting disables only it (logged with a fixed code). It never touches workflows, wallets or execution. Off: nothing changes.
+  if (process.env.FLOFI_FLIGHT_EMAIL === 'enabled') {
+    const parts = await import('./flight-email-worker.ts').then(m => m.loadFlightEmailWorker(process.env, db, config.tenantId, logger))
+      .catch(() => ({ disabled: 'FLIGHT_EMAIL_WORKER_LOAD_FAILED' }));
+    if ('disabled' in parts) logger.error('flight.email.worker_disabled', { error_code: parts.disabled });
+    else {
+      parts.start();
+      process.once('SIGTERM', () => { void parts.stop(); }); process.once('SIGINT', () => { void parts.stop(); });
+      logger.info('flight.email.worker_enabled', {});
+    }
+  }
   const handlers = { ...automations?.handlers, ...delegation?.handlers, ...workflowRuns?.handlers, ...backend.handlers };
   // BUILD-CLOUD-PARITY-001: a worker serves only its deployment's tenant, so a shared database never mixes deployments' runs.
   // BUILD-AUTOMATION-001: and it claims only the work kinds it has handlers for: another service's items are left to that service

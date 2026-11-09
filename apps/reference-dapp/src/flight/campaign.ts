@@ -10,24 +10,47 @@
  *   pass ("simulation_ok = cartão emitido"); the first 100 passes are numbered Founding seats (#001–#100, in boarding order), later ones
  *   are passenger passes. A Founding pass carries 3 invites ("bring three people on board, no list needed").
  * - The campaign gates only its own benefit (the pass): /app stays open to everyone.
+ *
+ * BUILD-FLOFI-FLIGHT-LAUNCH-001 (team decisions of 9 Nov 2026, artifact version 1794236006-f919, "00 · Comece aqui"):
+ * - Invited creators get a test flight from 11 Nov 14:00 to 18:00 BRT (`FLOFI_FLIGHT_CREATORS_OPEN_AT`): they simulate and see a card
+ *   marked TEST that is never stored, numbered or shared; everyone boards for real when boarding opens ("Ninguém pega número Founding antes
+ *   da lista"). Email 2 goes out on 11 Nov at 20:00 BRT (`FLOFI_FLIGHT_EVE_EMAIL_AT`).
+ * - Only a Founding seat earned by someone who boarded straight from the beta list carries 3 invites: an invited person (a Founding member's
+ *   guest or a creator) never gets invites of their own, so invites never propagate.
+ * - No public aggregate count of people: no list size, boardings or seats left anywhere public. Only each card's own number is shown.
  */
 import type { SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
 
 /** The approved calendar: the list closes 11 Nov 2026 23:59 BRT, boarding opens 12 Nov 2026 9:00 BRT (UTC-3). */
 export const FLIGHT_LIST_CLOSES_AT = Date.parse('2026-11-11T23:59:00-03:00');
 export const FLIGHT_BOARDING_OPENS_AT = Date.parse('2026-11-12T09:00:00-03:00');
+/** The creators' test flight opens 11 Nov 2026 14:00 BRT and lasts four hours (14:00 to 18:00, Email 6 and "Comece aqui"). */
+export const FLIGHT_CREATORS_OPEN_AT = Date.parse('2026-11-11T14:00:00-03:00');
+export const CREATOR_TEST_FLIGHT_MS = 4 * 60 * 60 * 1000;
+/** Email 2 ("Boarding starts tomorrow") goes out 11 Nov 2026 20:00 BRT. */
+export const FLIGHT_EVE_EMAIL_AT = Date.parse('2026-11-11T20:00:00-03:00');
 export const FOUNDING_SEATS = 100;
 export const FOUNDING_INVITES = 3;
 /** The privacy notice shown next to the list form (recorded with each entry). */
-export const FLIGHT_NOTICE_VERSION = '2026-11-05';
+export const FLIGHT_NOTICE_VERSION = '2026-11-09'; // BUILD-FLOFI-FLIGHT-LAUNCH-001: campaign email, access links, public cards.
 /** How long a recorded simulation can still issue a pass. */
 export const SIMULATION_EVIDENCE_MS = 2 * 60 * 60 * 1000;
 export const DEPARTURES_SHOWN = 5;
 export const MAX_ROUTE_STEPS_SHOWN = 4;
 
-/** The two instants the campaign turns on (epoch milliseconds): the beta list closing and boarding opening. */
-export type FlightCalendar = { readonly listClosesAt: number; readonly boardingOpensAt: number };
-export const FLIGHT_DEFAULT_CALENDAR: FlightCalendar = Object.freeze({ listClosesAt: FLIGHT_LIST_CLOSES_AT, boardingOpensAt: FLIGHT_BOARDING_OPENS_AT });
+/**
+ * The instants the campaign turns on (epoch milliseconds): the beta list closing, boarding opening, the creators' test flight opening and
+ * Email 2's send time. `creatorsOpenAt` and `eveEmailAt` are optional for callers that predate them (the defaults apply).
+ */
+export type FlightCalendar = { readonly listClosesAt: number; readonly boardingOpensAt: number; readonly creatorsOpenAt?: number; readonly eveEmailAt?: number };
+export const FLIGHT_DEFAULT_CALENDAR: Required<FlightCalendar> = Object.freeze({ listClosesAt: FLIGHT_LIST_CLOSES_AT, boardingOpensAt: FLIGHT_BOARDING_OPENS_AT,
+  creatorsOpenAt: FLIGHT_CREATORS_OPEN_AT, eveEmailAt: FLIGHT_EVE_EMAIL_AT });
+/** The calendar with every instant filled: a missing creators' opening or Email 2 time is derived so it never contradicts the calendar given. */
+export function fullCalendar(calendar: FlightCalendar): Required<FlightCalendar> {
+  const creatorsOpenAt = calendar.creatorsOpenAt ?? Math.min(FLIGHT_CREATORS_OPEN_AT, calendar.boardingOpensAt);
+  const eveEmailAt = calendar.eveEmailAt ?? Math.min(FLIGHT_EVE_EMAIL_AT, calendar.boardingOpensAt);
+  return { listClosesAt: calendar.listClosesAt, boardingOpensAt: calendar.boardingOpensAt, creatorsOpenAt, eveEmailAt };
+}
 /**
  * An instant written as ISO 8601 with an explicit offset or Z (e.g. 2026-11-12T09:00:00-03:00): never a local time open to the server's
  * zone, and never a date the platform parser would roll over (31 Nov, 30 Feb, 24:00). Undefined when unset, null when unreadable.
@@ -52,13 +75,19 @@ function instant(value: string | undefined): number | null | undefined {
  * a valid ISO instant with an offset, or a pair whose list would close after boarding opens, gives no calendar at all (`calendar: null`:
  * the campaign is then unavailable, so a mistyped postponement can never open boarding early). `invalid` names what was refused.
  */
-export function flightCalendarFrom(env: Readonly<Record<string, string | undefined>>): { readonly calendar: FlightCalendar | null; readonly invalid: readonly string[] } {
+export function flightCalendarFrom(env: Readonly<Record<string, string | undefined>>): { readonly calendar: Required<FlightCalendar> | null; readonly invalid: readonly string[] } {
   const closes = instant(env.FLOFI_FLIGHT_LIST_CLOSES_AT), opens = instant(env.FLOFI_FLIGHT_BOARDING_OPENS_AT);
-  const invalid = [...(closes === null ? ['FLOFI_FLIGHT_LIST_CLOSES_AT'] : []), ...(opens === null ? ['FLOFI_FLIGHT_BOARDING_OPENS_AT'] : [])];
+  const creators = instant(env.FLOFI_FLIGHT_CREATORS_OPEN_AT), eve = instant(env.FLOFI_FLIGHT_EVE_EMAIL_AT);
+  const invalid = [...(closes === null ? ['FLOFI_FLIGHT_LIST_CLOSES_AT'] : []), ...(opens === null ? ['FLOFI_FLIGHT_BOARDING_OPENS_AT'] : []),
+    ...(creators === null ? ['FLOFI_FLIGHT_CREATORS_OPEN_AT'] : []), ...(eve === null ? ['FLOFI_FLIGHT_EVE_EMAIL_AT'] : [])];
   if (invalid.length) return { calendar: null, invalid };
   const listClosesAt = closes ?? FLIGHT_LIST_CLOSES_AT, boardingOpensAt = opens ?? FLIGHT_BOARDING_OPENS_AT;
   if (listClosesAt > boardingOpensAt) return { calendar: null, invalid: ['FLOFI_FLIGHT_LIST_CLOSES_AT', 'FLOFI_FLIGHT_BOARDING_OPENS_AT'] };
-  return { calendar: { listClosesAt, boardingOpensAt }, invalid };
+  // The creators' test flight and Email 2 must come before boarding: a value after it is refused, never silently moved.
+  const full = fullCalendar({ listClosesAt, boardingOpensAt, ...typeof creators === 'number' ? { creatorsOpenAt: creators } : {}, ...typeof eve === 'number' ? { eveEmailAt: eve } : {} });
+  const late = [...(full.creatorsOpenAt > boardingOpensAt ? ['FLOFI_FLIGHT_CREATORS_OPEN_AT'] : []), ...(full.eveEmailAt > boardingOpensAt ? ['FLOFI_FLIGHT_EVE_EMAIL_AT'] : [])];
+  if (late.length) return { calendar: null, invalid: late };
+  return { calendar: full, invalid };
 }
 
 /** FINAL_CALL until the list closes; GATE_CLOSED until boarding; BOARDING after (the approved posts' "Gate closed. Boarding starts tomorrow"). */
@@ -73,6 +102,8 @@ export const listFor = (phase: FlightPhase): 'FIRST' | 'NEXT' => phase === 'FINA
 export type FlightOrigin = 'LIST' | 'INVITE' | 'CREATOR';
 export type FlightAccess =
   | { readonly kind: 'boarded'; readonly passId: string }
+  /** An invited creator during the test flight: simulations show a TEST card, never stored, numbered or shared. */
+  | { readonly kind: 'test_flight'; readonly endsAt: number }
   | { readonly kind: 'eligible'; readonly origin: FlightOrigin }
   | { readonly kind: 'batch_closed'; readonly batch: number; readonly opensAt: number }
   | { readonly kind: 'not_listed' }
@@ -87,9 +118,13 @@ export const eventOrigin = (origin: FlightOrigin | null): 'list' | 'invite' | 'c
 export function decideAccess(input: { readonly now: number; readonly passId: string | null; readonly invite: 'FOUNDING' | 'CREATOR' | null;
   readonly entry: { readonly flight: 'FIRST' | 'NEXT'; readonly batch: number | null; readonly opensAt: number | null } | null;
   readonly calendar?: FlightCalendar }): FlightAccess {
-  const calendar = input.calendar ?? FLIGHT_DEFAULT_CALENDAR;
+  const calendar = fullCalendar(input.calendar ?? FLIGHT_DEFAULT_CALENDAR);
   if (input.passId) return { kind: 'boarded', passId: input.passId };
-  if (flightPhase(input.now, calendar) !== 'BOARDING') return { kind: 'not_yet', opensAt: calendar.boardingOpensAt };
+  if (flightPhase(input.now, calendar) !== 'BOARDING') {
+    const endsAt = Math.min(calendar.creatorsOpenAt + CREATOR_TEST_FLIGHT_MS, calendar.boardingOpensAt);
+    if (input.invite === 'CREATOR' && input.now >= calendar.creatorsOpenAt && input.now < endsAt) return { kind: 'test_flight', endsAt };
+    return { kind: 'not_yet', opensAt: calendar.boardingOpensAt };
+  }
   if (input.invite) return { kind: 'eligible', origin: input.invite === 'FOUNDING' ? 'INVITE' : 'CREATOR' };
   if (input.entry?.flight === 'FIRST') {
     // A group whose recorded opening is earlier than boarding (created for the previous calendar) boards when boarding opens.
@@ -114,6 +149,18 @@ export function normalizeHandle(value: unknown): string | null {
   return /^[A-Za-z0-9_]{1,15}$/.test(handle) ? handle : null;
 }
 const INVITE_ALPHABET = '23456789ABCDEFGHJKLMNPQRSTUVWXYZ';
+/**
+ * Whether a newly issued pass carries the 3 Founding invites: a Founding seat whose holder boarded straight from the beta list. Invited
+ * people (a Founding member's guest, a creator) never get invites, so invites do not propagate (team decision, 9 Nov 2026).
+ */
+export const carriesInvites = (input: { readonly foundingSeat: number | null; readonly origin: FlightOrigin }): boolean =>
+  input.foundingSeat !== null && input.origin === 'LIST';
+/** A card's public link id: 12 letters of RFC 4648 base32 (60 random bits), lower case, never sequential. */
+export const CARD_PUBLIC_ID = /^[a-z2-7]{12}$/;
+export function cardPublicIdFrom(bytes: Uint8Array): string {
+  if (bytes.length < 12) throw new Error('FLIGHT_CARD_ENTROPY');
+  return [...bytes.slice(0, 12)].map(byte => 'abcdefghijklmnopqrstuvwxyz234567'[byte % 32]).join('');
+}
 export const INVITE_CODE = /^FLF-[2-9A-HJ-NP-Z]{4}-[2-9A-HJ-NP-Z]{4}$/;
 export function normalizeInviteCode(value: unknown): string | null {
   if (typeof value !== 'string') return null;
