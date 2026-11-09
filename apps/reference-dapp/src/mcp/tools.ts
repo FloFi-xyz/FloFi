@@ -590,7 +590,8 @@ function registerApprovalTools(ctx: ToolContext, register: Register) {
     'REVOKED or STALE. When the owner shares status, includes run status and the verified receipt URL after reconciliation. A multi-step approval also returns ' +
     '`workflowRun`: every step\'s state, the next action (OWNER_SIGNS_STEP or OWNER_SIGNS_GROUP: share the approvalUrl again; OWNER_CONFIRMS_BATCH: the owner ' +
     'reopens FloFi so their wallet reports its batch), and — when the owner shares status — each step\'s ' +
-    'transaction hashes, explorer links, reconciled amounts and evidence; HALTED means partially completed. Poll this tool when asked; no callback or push is promised. ' +
+    'transaction hashes, explorer links, reconciled amounts and evidence. HALTED means stopped and the owner decides (resume or end): `workflowRun.halted` says whether ' +
+    'steps completed (PARTIAL), nothing was sent (NOTHING_SENT) or neither is claimed (STOPPED). Poll this tool when asked; no callback or push is promised. ' +
     'It never reveals the claiming wallet or authorizes anything.', ApprovalSchemas.byId, { ...pure, idempotentHint: false },
   async args => ({ ok: true, ...await progress(args.approvalId) }));
 

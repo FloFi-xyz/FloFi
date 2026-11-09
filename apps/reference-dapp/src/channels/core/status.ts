@@ -30,7 +30,9 @@ const stepState = (run: WorkflowRunProgress, step: WorkflowRunProgress['steps'][
   const group = (run.groups ?? []).find(g => g.steps[0] <= step.index && step.index <= g.steps[1]);
   return group?.signed ? 'GROUP_SIGNED' : 'GROUP_WAITING';
 };
-const runFacts = (run: WorkflowRunProgress): RunFacts => ({ state: run.state,
+/** A HALTED run is worded by how it stopped (the server decides from its records): partial, nothing sent, or neither claimed. */
+const haltedState = (run: WorkflowRunProgress) => run.state !== 'HALTED' || !run.halted || run.halted === 'PARTIAL' ? run.state : `HALTED_${run.halted}`;
+const runFacts = (run: WorkflowRunProgress): RunFacts => ({ state: haltedState(run),
   steps: run.steps.map(step => ({ index: step.index, action: step.action, state: stepState(run, step), transaction: step.outcome?.submissions[0]?.hash ?? null })) });
 /** The non-secret continuation link of a multi-step approval: only the run owner's proven wallet can open it. */
 export const continuationUrl = (origin: string, approvalId: string) => `${origin}/approve#${approvalId}`;
@@ -104,7 +106,7 @@ function workflowNotifications(language: ChannelLanguage, handoff: HandoffRecord
   if (run.nextAction === 'OWNER_SIGNS_GROUP' && run.currentStep > 0 && origin)
     due.push({ key: key(`ready-group:${run.currentStep}`), text: m.stepReady(run.currentStep + 1, continuationUrl(origin, handoff.handoffId)) });
   if (run.state === 'COMPLETED') due.push({ key: key('done'), text: m.runDone });
-  else if (run.state === 'HALTED') due.push({ key: key('halted'), text: m.runHalted });
+  else if (run.state === 'HALTED') due.push({ key: key('halted'), text: run.halted === 'NOTHING_SENT' ? m.runHaltedNothingSent : run.halted === 'STOPPED' ? m.runHaltedStopped : m.runHalted });
   else if (run.state === 'ATTENTION') due.push({ key: key('attention'), text: m.runAttention });
   else if (done) due.push({ key: key('ended'), text: m.runEnded(run.code ?? run.state) });
   return { due, done };

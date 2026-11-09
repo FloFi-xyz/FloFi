@@ -3,8 +3,10 @@
  * BUILD-CHAT-E2E-001: the workflow run state machines (mirrored by the database triggers of migration 0015).
  *
  * Run: PENDING → RUNNING → COMPLETED, with
- *   HALTED     at least one step reconciled and a later step cannot proceed: partial completion, funds rest in the owner's own wallet; the
- *              owner may resume (a step that is still possible) or end the run
+ *   HALTED     a step cannot proceed and the owner decides: resume (a step that is still possible) or end the run. Usually a partial
+ *              completion (at least one step reconciled; its funds rest in the owner's own wallet). Also a USER_FUNDED run whose due group
+ *              was refused for good before anything was sent, even its first: stopped before anything was sent, resumable (the stopped
+ *              steps then run through their own owner-signed flows) — not FAILED, which would end it
  *   FAILED     nothing irreversible happened (or the first step's submission reconciled as a failure)
  *   ATTENTION  a submitted step's outcome is unknown: observation only, never a retry or a second submission
  *   CANCELLED  ended by its owner or requester before anything was submitted (or, after HALTED, by its owner)
@@ -70,4 +72,22 @@ export function canEndWorkflow(run: { readonly state: string; readonly mode: str
   const inFlight = run.mode === 'USER_FUNDED' ? ['AWAITING_OWNER', 'UNCERTAIN'] : ['AWAITING_OWNER', 'UNCERTAIN', 'DELEGATED'];
   return run.mode !== 'DELEGATED' && ['PENDING', 'RUNNING', 'HALTED'].includes(run.state) && !steps.some(step => inFlight.includes(step.state))
     && !(run.mode === 'USER_FUNDED' && groups.some(g => groupInFlight(g, now)));
+}
+/**
+ * How a HALTED run is described to its owner (the Editor and /approve share this one rule): `PARTIAL` once a step reconciled; else
+ * `NOTHING_SENT` only when the run's own view proves nothing reached a chain (a first group refused for good when due halts the run before
+ * anything ran: not a partial completion); else `STOPPED`, which claims neither progress nor that nothing was sent. Fails closed: a step
+ * that may have been submitted, a group sent, reconciled or failed, or a wallet batch ever handed to the wallet (prepared, answered or
+ * authorized) is never "nothing sent".
+ */
+export function haltedAs(run: { readonly halted?: 'PARTIAL' | 'NOTHING_SENT' | 'STOPPED' | null; readonly mode: string | null; readonly steps: readonly { readonly state: string }[];
+  readonly groups?: readonly { readonly state: string; readonly strategy: string; readonly signed: boolean; readonly batchId: string | null; readonly planned: unknown }[] | null }):
+  'PARTIAL' | 'NOTHING_SENT' | 'STOPPED' {
+  // The server decides from its records (workflow-runs/service.ts runView); a view without that field falls back to this rule over the view.
+  if (run.halted) return run.halted;
+  if (run.steps.some(s => s.state === 'RECONCILED')) return 'PARTIAL';
+  const maybeSent = run.steps.some(s => ['FAILED', 'UNCERTAIN', 'AWAITING_OWNER'].includes(s.state) || (s.state === 'DELEGATED' && run.mode !== 'USER_FUNDED'))
+    || (run.groups ?? []).some(g => ['SUBMITTED', 'UNCERTAIN', 'RECONCILED', 'FAILED'].includes(g.state)
+      || (g.strategy === 'EVM_WALLET_BATCH' && (g.signed || g.batchId !== null || g.planned !== null || ['PREPARED', 'AUTHORIZED'].includes(g.state))));
+  return maybeSent ? 'STOPPED' : 'NOTHING_SENT';
 }

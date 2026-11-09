@@ -19,6 +19,7 @@ import { ARBITRUM_MAINNET_SWAP } from '../domain/public-testnet-swap.ts';
 import { createEvmDouble } from '../delegation/harness/evm-double.ts';
 import { delegationAavePool, delegationAaveReserve } from '../delegation/profiles.ts';
 import { evmCallsOf, type EvmGroupCalls } from '../user-funded/evm-calls.ts';
+import { runView } from './service.ts';
 import { workflowRunHarness } from './workflow-run.test-harness.ts';
 
 const CHAIN = 'eip155:42161', CHAINS = [CHAIN];
@@ -71,6 +72,7 @@ describe('P0: a due group that can never be batched halts the run at once, and r
       expect((await h.store.steps(run.runId)).map(s => s.state)).toEqual(['RECONCILED', 'RECONCILED', 'RECONCILED', 'BLOCKED']);
       // Nothing was offered to the wallet for it: still exactly one batch on chain.
       expect(chain.control.accountData(owner).collateral).toBeGreaterThan(0n);
+      expect((await runView({ store: h.store }, run, { outcomes: true, owner: true })).note).toMatch(/^Partially completed: the reconciled steps stay done/);
 
       // Resume: the blocked group continues through the Supply's own owner-signed flow (it simulates and reviews the step itself).
       await workflowRunResume(h.surface, approval.approvalId, wallets);
@@ -84,6 +86,56 @@ describe('P0: a due group that can never be batched halts the run at once, and r
       expect(run).toMatchObject({ state: 'COMPLETED', mode: 'USER_FUNDED' });
       expect((await h.store.steps(run.runId)).map(s => [s.state, s.outcome?.kind])).toEqual([['RECONCILED', 'USER_FUNDED_GROUP'], ['RECONCILED', 'USER_FUNDED_GROUP'],
         ['RECONCILED', 'OWNER_RUN'], ['RECONCILED', 'OWNER_RUN']]);
+    } finally { await t.drop(); }
+  });
+
+  it('a due Repay no longer below the owner\'s debt (repaid elsewhere meanwhile) halts at once (REPAY_PARTIAL_DEBT_REQUIRED); Resume uses the Repay flow', async () => {
+    const t = await createTestDatabase();
+    try {
+      let clock: () => Date = () => new Date();
+      const chain = createEvmDouble(42161, () => Math.floor(clock().getTime() / 1000), { profile: ARBITRUM_MAINNET_SWAP, aave: { pool: POOL, reserves: RESERVES } });
+      const h = await workflowRunHarness(t.db, { flows: ['arbitrum-liquidity', 'arbitrum-aave'], policyEnv: { FLOFI_MCP_HANDOFF_MAINNET_NETWORKS: 'arbitrum-one' },
+        userFundedChains: CHAINS, userFundedRpc: c => c === CHAIN ? chain.rpc : null });
+      clock = h.d.now;
+      const owner = h.d.evmOwner.address.toLowerCase(), wallets = [h.evm, h.sol];
+      chain.control.fundToken(owner, WETH, 2_000_000_000_000_000n); chain.control.fundToken(owner, USDC, 10_000_000n); chain.control.fundNative(owner, 10n ** 17n);
+      const approval = await h.request({ version: 2, steps: [
+        { action: 'supply', network: 'arbitrum-one', asset: 'WETH', amount: '0.002', beneficiary: owner },
+        { action: 'borrow', network: 'arbitrum-one', asset: 'USDC', amount: '1', beneficiary: owner },
+        { action: 'add_liquidity', network: 'arbitrum-one', maxAmounts: { USDC: '1', WETH: '0.0004' }, range: { unit: 'full' } },
+        { action: 'repay', network: 'arbitrum-one', asset: 'USDC', amount: '0.8', beneficiary: owner }] });
+      await claimApproval(h.surface, approval.secret, wallets, true, h.d.now());
+      const started = await workflowRunUserFundedStart(h.surface, approval.approvalId, wallets, METAMASK);
+      expect(started.view.workflowRun!.run.groups.map(g => [g.strategy, g.steps])).toEqual([['EVM_WALLET_BATCH', [0, 1]], ['EVM_OWNER_STEP', [2, 2]], ['EVM_WALLET_BATCH', [3, 3]]]);
+      // Group 0: Supply → Borrow 1 USDC in one batch, executed and reconciled. Group 1: the liquidity step through its own flow.
+      const prepared = await workflowRunUserFundedPrepare(h.surface, approval.approvalId, wallets, 0);
+      const hash = chain.control.walletBatch(owner, evmCallsOf((prepared.prepared as unknown as { group: EvmGroupCalls }).group));
+      await workflowRunUserFundedAuthorize(h.surface, approval.approvalId, wallets, 0, { kind: 'EVM_WALLET_BATCH', batchId: '0x' + 'c3'.repeat(16) });
+      await workflowRunUserFundedReport(h.surface, approval.approvalId, wallets, 0, [hash]);
+      const liquidity = await workflowRunContinue(h.surface, approval.approvalId, wallets);
+      h.flows.ownerExecutes('arbitrum-liquidity', h.evm.address, liquidity.workflow, 'RECONCILED');
+      await h.drain();
+      let run = await ownedRun(h.runs, approval.approvalId, wallets);
+      expect(run).toMatchObject({ state: 'RUNNING', currentStep: 3 });
+      expect(chain.control.accountData(owner).debt).toBe(100_000_000n);
+
+      // Meanwhile the owner repaid 0.5 USDC from their own wallet, outside FloFi: the 0.8 USDC Repay is no longer below the 0.5 USDC debt.
+      const usdc = reserve(USDC) as ReturnType<typeof reserve> & { aToken: string; variableDebtToken: string };
+      chain.control.walletBatch(owner, evmCallsOf({ chain: CHAIN, chainId: 42161, owner, steps: [], calls: [
+        { kind: 'ERC20_APPROVE', token: USDC, spender: POOL, amount: '500000' },
+        { kind: 'AAVE_V3_REPAY', pool: POOL, asset: USDC, amount: '500000', aToken: usdc.aToken, variableDebtToken: usdc.variableDebtToken }] }));
+      expect(chain.control.accountData(owner).debt).toBe(50_000_000n);
+      // Every attempt would refuse again (the signed amount is fixed): the group is blocked and the run halted at once, keeping what executed.
+      await expect(workflowRunUserFundedPrepare(h.surface, approval.approvalId, wallets, 2)).rejects.toThrow('REPAY_PARTIAL_DEBT_REQUIRED');
+      run = await ownedRun(h.runs, approval.approvalId, wallets);
+      expect(run).toMatchObject({ state: 'HALTED', code: 'REPAY_PARTIAL_DEBT_REQUIRED' });
+      expect((await h.store.groups(run.runId)).map(g => [g.state, g.code])).toEqual([['RECONCILED', null], ['RECONCILED', null], ['BLOCKED', 'REPAY_PARTIAL_DEBT_REQUIRED']]);
+      expect((await h.store.steps(run.runId)).map(s => s.state)).toEqual(['RECONCILED', 'RECONCILED', 'RECONCILED', 'BLOCKED']);
+      // Resume: the Repay runs through its own owner-signed flow, which reads the debt again and reviews the step itself.
+      await workflowRunResume(h.surface, approval.approvalId, wallets);
+      expect((await h.store.groups(run.runId))[2]).toMatchObject({ state: 'PLANNED', strategy: 'EVM_OWNER_STEP', signing: 'WHEN_DUE', prepared: null });
+      const repay = await workflowRunContinue(h.surface, approval.approvalId, wallets);
+      expect(repay.view.workflowRun!.step).toEqual({ index: 3, count: 4 });
     } finally { await t.drop(); }
   });
 });
@@ -171,6 +223,9 @@ describe('P0 review fixes: a wallet batch handed to the wallet is never lost, an
       expect(run).toMatchObject({ state: 'HALTED', code: 'USER_FUNDED_SIMULATION_UNAVAILABLE' });
       expect((await h.store.groups(run.runId)).map(g => [g.state, g.code])).toEqual([['BLOCKED', 'USER_FUNDED_SIMULATION_UNAVAILABLE']]);
       expect((await h.store.steps(run.runId)).map(s => s.state)).toEqual(['BLOCKED', 'BLOCKED']);
+      // HALTED (resumable step by step), but nothing ran: what the owner and a requester are told says exactly that, never "partially completed".
+      for (const owner of [true, false]) expect(await runView({ store: h.store }, run, { outcomes: true, owner })).toMatchObject({ nextAction: 'OWNER_DECIDES',
+        note: 'Stopped before anything was sent. Until the run expires the owner can resume it (each stopped step then runs through its own flow); the owner can always end it.' });
       await workflowRunResume(h.surface, approval.approvalId, wallets);
       expect((await h.store.groups(run.runId))[0]).toMatchObject({ state: 'PLANNED', strategy: 'EVM_OWNER_STEP', signing: 'WHEN_DUE', prepared: null });
       expect(await ownedRun(h.runs, approval.approvalId, wallets)).toMatchObject({ state: 'RUNNING', currentStep: 0 });

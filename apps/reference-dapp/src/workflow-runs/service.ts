@@ -24,7 +24,7 @@ import type { GrantView } from '../delegation/authority.ts';
 import { authorizationPlan, type AuthorizationPlan, type DelegationFacts } from './authorization-plan.ts';
 import type { RunRecord, RunStepRecord, WorkflowRunStore } from './pg-store.ts';
 import { advanceRun, type RunnerDeps } from './runner.ts';
-import { CONFIRM_RUN_SECONDS } from './state-machine.ts';
+import { CONFIRM_RUN_SECONDS, MAYBE_SUBMITTED } from './state-machine.ts';
 import { planExecutionGroups, type UserFundedFacts, type WalletProfile } from './execution-groups.ts';
 import { requirementOf, assetKey } from '../delegation/steps.ts';
 import { evmStepBuildable, type AssetAmountFact, type EvmGroupCalls } from '../user-funded/evm-calls.ts';
@@ -196,12 +196,18 @@ const PERMANENT_DUE_REFUSALS: ReadonlySet<string> = new Set(['WORKFLOW_BINDING_N
   'USER_FUNDED_SIMULATION_UNAVAILABLE', 'AAVE_BENEFICIARY_NOT_OWNER', 'WORKFLOW_SLIPPAGE_UNSUPPORTED', 'USER_FUNDED_GROUP_TOO_MANY_CALLS', 'USER_FUNDED_CHAIN_DISABLED',
   'USER_FUNDED_ACTION_NOT_BUILDABLE', 'USER_FUNDED_STEP_SHAPE_UNSUPPORTED', 'DELEGATION_ASSET_NOT_SUPPORTED', 'DELEGATION_TEMPLATE_NOT_IMPLEMENTED',
   // What the chain's own contracts say (a token's code or decimals, a fee-on-transfer token) or the registry lacks (a router for the expiry guard).
-  'TOKEN_METADATA_MISMATCH', 'CONTRACT_CODE_MISSING', 'SIMULATION_SWAP_OUTPUT_SHORT', 'USER_FUNDED_DEADLINE_UNAVAILABLE']);
+  'TOKEN_METADATA_MISMATCH', 'CONTRACT_CODE_MISSING', 'SIMULATION_SWAP_OUTPUT_SHORT', 'USER_FUNDED_DEADLINE_UNAVAILABLE',
+  // A batched Repay no longer below the owner's current variable debt (repaid elsewhere meanwhile): the signed amount is fixed and the debt only
+  // grows by interest, so every retry refuses again. The owner-signed Repay flow re-reads the debt and reviews the step itself.
+  'REPAY_PARTIAL_DEBT_REQUIRED']);
 /**
  * Blocks a due group after a permanent refusal and halts the run (steps already executed keep their facts), then refuses with the code. Only
  * from exactly the PLANNED group this preparation read (its row version): a concurrent preparation that succeeded — its batch possibly already
  * in the owner's wallet — is never blocked, and neither its steps nor the run are touched then. The run halts from its CURRENT version (it may
  * have moved while the group was being prepared).
+ *
+ * HALTED even when this is the FIRST group and nothing ran (where any other stop with no progress is FAILED): the steps can still run through
+ * their own owner-signed flows on Resume. The run's note then says it stopped before anything was sent, never that it partially completed.
  */
 async function blockDueGroup(deps: WorkflowRunDeps, run: RunRecord, g: GroupRecord, code: string): Promise<never> {
   const stored = code.split(':')[0]!;
@@ -404,6 +410,11 @@ export type RunView = { readonly workflowRunId: string; readonly approvalId: str
   readonly nextAction: 'OWNER_CHOOSES_MODE' | 'OWNER_SIGNS_STEP' | 'OWNER_SIGNS_GROUP' | 'OWNER_CONFIRMS_BATCH' | 'WAITING_FOR_RECONCILIATION' | 'OWNER_DECIDES' | 'NONE';
   /** BUILD-FLOFI-UNIVERSAL-WORKFLOW-002: a USER_FUNDED run's execution groups (public facts only; never a signature or transaction bytes). */
   readonly groups: readonly RunGroupView[];
+  /**
+   * P0 universal execution: how a HALTED run stopped (null otherwise): PARTIAL once a step reconciled; NOTHING_SENT only when its records prove
+   * nothing reached a chain (a first due group refused for good); else STOPPED, which claims neither progress nor that nothing was sent.
+   */
+  readonly halted: 'PARTIAL' | 'NOTHING_SENT' | 'STOPPED' | null;
   readonly authority: 'NONE'; readonly note: string | null };
 export type RunGroupView = { readonly index: number; readonly chain: string; readonly strategy: string; readonly signing: string; readonly steps: readonly [number, number];
   readonly state: string; readonly awaitsDelivery: number | null; readonly code: string | null; readonly validUntil: string | null;
@@ -427,6 +438,17 @@ export type RunGroupView = { readonly index: number; readonly chain: string; rea
   readonly planned: { readonly steps: readonly ({ readonly index: number } & PlannedStep)[]; readonly calls: number; readonly approvals: number;
     readonly healthFactorAfter: string | null } | null };
 
+/**
+ * Whether the run's own records PROVE nothing of it was ever sent: no step that may have reached a chain (`MAYBE_SUBMITTED`; in a user-funded run
+ * a DELEGATED step only waits for its group), no group submitted, reconciled or failed, and no wallet batch ever handed to the owner's wallet (its
+ * prepared artifact or batch id stays on the group: the wallet may have sent it). A user operation or Solana transactions signed but never
+ * relayed by FloFi were not sent.
+ */
+function provenNothingSent(run: RunRecord, steps: readonly RunStepRecord[], groups: readonly GroupRecord[]): boolean {
+  return !steps.some(s => MAYBE_SUBMITTED.includes(s.state) && !(run.mode === 'USER_FUNDED' && s.state === 'DELEGATED'))
+    && !groups.some(g => ['SUBMITTED', 'UNCERTAIN', 'RECONCILED', 'FAILED'].includes(g.state)
+      || (g.strategy === 'EVM_WALLET_BATCH' && (g.prepared !== null || g.authorization !== null)));
+}
 /**
  * The public status of a run. `outcomes` false (a requester the owner did not share status with) keeps every step's state but withholds its
  * transactions, amounts and evidence. Nothing returned is a key, calldata or a signature, and nothing here authorizes anything.
@@ -494,10 +516,19 @@ export async function runView(deps: { readonly store: Pick<WorkflowRunStore, 'st
         : run.mode === 'USER_FUNDED' && group && !ownerGroup && ['PLANNED', 'PREPARED'].includes(group.state) ? 'OWNER_SIGNS_GROUP'
           : run.mode === 'USER_FUNDED' && group?.state === 'AUTHORIZED' && group.strategy === 'EVM_WALLET_BATCH' ? 'OWNER_CONFIRMS_BATCH'
             : 'WAITING_FOR_RECONCILIATION' : 'NONE';
+  // A HALTED run is a partial completion only when a step reconciled. One whose first due group was refused for good stopped before anything
+  // ran (blockDueGroup): it says so only when its own records prove nothing was sent, and never claims progress it did not make.
+  // Decided here from the records every viewer depends on (a requester's view hides batch ids and plans): the Editor, /approve and the
+  // channels word a HALTED run from this, never from what their own view happens to show.
+  const halted = run.state !== 'HALTED' ? null : steps.some(s => s.state === 'RECONCILED') ? 'PARTIAL' as const
+    : provenNothingSent(run, steps, groupRecords) ? 'NOTHING_SENT' as const : 'STOPPED' as const;
   const note = !options.outcomes ? 'The owner has not shared the transactions and evidence of this workflow with this conversation.'
-    : run.state === 'HALTED' ? 'Partially completed: the reconciled steps stay done and their funds rest in the owner\'s wallet. Nothing later was submitted.'
-      : run.state === 'ATTENTION' ? 'A submitted step has no final outcome yet. FloFi keeps observing it and never resubmits it.' : null;
+    : halted === 'PARTIAL' ? 'Partially completed: the reconciled steps stay done and their funds rest in the owner\'s wallet. Nothing later was submitted.'
+      : halted === 'NOTHING_SENT' ? 'Stopped before anything was sent. Until the run expires the owner can resume it (each stopped step then runs through its own flow); '
+        + 'the owner can always end it.'
+        : halted === 'STOPPED' ? 'Stopped before any step completed. FloFi submits nothing more of it; the owner decides what happens next.'
+          : run.state === 'ATTENTION' ? 'A submitted step has no final outcome yet. FloFi keeps observing it and never resubmits it.' : null;
   return { workflowRunId: run.runId, approvalId: run.handoffId, state: run.state, mode: run.mode, stepCount: run.stepCount, currentStep: run.currentStep, code: run.code,
     workflowHash: run.workflowHash, expiresAt: run.expiresAt.toISOString(), completedAt: run.completedAt?.toISOString() ?? null, createdAt: run.createdAt.toISOString(),
-    updatedAt: run.updatedAt.toISOString(), stepsVisible: options.outcomes, steps: views, nextAction, groups, authority: 'NONE', note };
+    updatedAt: run.updatedAt.toISOString(), stepsVisible: options.outcomes, steps: views, nextAction, groups, halted, authority: 'NONE', note };
 }
