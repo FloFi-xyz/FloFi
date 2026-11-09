@@ -129,6 +129,8 @@ export function useEditorWorkflowRun(input: { readonly workflow: { readonly work
   const reviewedWorkflow = useRef<unknown>(null);
   const [unrecorded, setUnrecorded] = useState(false);
   const acting = useRef(false);
+  /** Mirrors `acting` as state so a workflow switch deferred during an action is applied once the action ends. */
+  const [actingNow, setActingNow] = useState(false);
   const proof = useWalletProof('eip155');
   const workflowSnapshot = useRef<unknown>(workflow);
   workflowSnapshot.current = workflow;
@@ -161,32 +163,43 @@ export function useEditorWorkflowRun(input: { readonly workflow: { readonly work
   /** The key of a Review that failed: a Canvas edit or a wallet change clears its error (the cause may be fixed). */
   const failedFor = useRef<string | null>(null);
   const authorizedRevision = useRef<number | null>(null);
+  /** Clears what this tab shows (the stored runs are kept). */
+  const resetView = () => {
+    setApprovalId(null); setRun(null); runRef.current = null; setReview(null); reviewRef.current = null; reviewedWorkflow.current = null; setPhase('idle');
+    setError(null); setUpdated([]); recovered.current = null; setUnrecorded(false); authorizedRevision.current = null; setFollowing(false); setEarlier(null);
+    accepted.current = new Map(); acceptedRecipients.current = new Map(); failedFor.current = null;
+  };
+  // ONE effect resolves what this tab shows for the Canvas workflow, so a workflow switch and the lookup of its run can never race:
+  //   another workflow opened in place (e.g. from the library): the previous one's Review and run stop being shown (both stay stored) — once
+  //   the action in flight, if any, has ended; then
+  //   a run of THIS workflow started earlier (this tab, a reload of a saved workflow, another tab) is followed, read from the server; or
+  //   a run from an earlier visit (after a reload the Canvas has a new workflow id) is offered for the connected wallet.
+  const shownWorkflow = useRef(workflow.workflowId);
   useEffect(() => {
+    if (shownWorkflow.current !== workflow.workflowId) {
+      if (actingNow) return; // applied when the action ends (`actingNow` is a dependency)
+      shownWorkflow.current = workflow.workflowId;
+      resetView();
+      if (approvalId) return; // `approvalId` becomes null: the lookup runs on the next pass
+    }
     if (approvalId) { setEarlier(null); return; }
     const all = readAll(), mine = all.find(s => s.workflowId === workflow.workflowId) ?? null;
     if (!mine || !enabled) {
-      // After a reload (a new Canvas workflow id): a run from an earlier visit is offered for the connected wallet (or any, before it connects).
       setEarlier(all.find(s => s.workflowId !== workflow.workflowId && (!evmAccount || s.owner === evmAccount.toLowerCase())) ?? null);
       return;
     }
-    setApprovalId(mine.approvalId); authorizedRevision.current = mine.revision;
+    setEarlier(null); setApprovalId(mine.approvalId); authorizedRevision.current = mine.revision;
     // A refusal never forgets the run: the server answers "not found" also when this browser's wallet sign-in expired or another wallet is
     // signed in, so the pointer stays (and the same workflow is never authorized a second time) until the run loads or the owner forgets it.
+    // A status answer for a workflow or run no longer shown is dropped.
+    let current = true;
     void workflowRunStatusHandoff(mine.approvalId).then(result => {
+      if (!current) return;
       if (result.ok) adopt(result.value);
       else setError(FORGOTTEN.test(result.code) || result.code === 'EVM_WALLET_PROOF_REQUIRED' ? 'EDITOR_RUN_SIGN_IN_REQUIRED' : result.code);
     }).catch(() => undefined);
-  }, [enabled, workflow.workflowId, approvalId, evmAccount, adopt]);
-  // Another Canvas workflow opened in place (e.g. from the library): this tab stops showing the previous one's Review and run (both stay
-  // stored; the run is offered again or followed when its own workflow is shown).
-  const shownWorkflow = useRef(workflow.workflowId);
-  useEffect(() => {
-    if (shownWorkflow.current === workflow.workflowId || acting.current) return;
-    shownWorkflow.current = workflow.workflowId;
-    setApprovalId(null); setRun(null); runRef.current = null; setReview(null); reviewRef.current = null; reviewedWorkflow.current = null; setPhase('idle');
-    setError(null); setUpdated([]); recovered.current = null; setUnrecorded(false); authorizedRevision.current = null; setFollowing(false);
-    accepted.current = new Map(); acceptedRecipients.current = new Map(); failedFor.current = null;
-  }, [workflow.workflowId]);
+    return () => { current = false; };
+  }, [enabled, workflow.workflowId, approvalId, evmAccount, adopt, actingNow]);
   // Status poll while the run is open (the server observes the chain exactly as its worker does; nothing is resolved or sent by a poll).
   useEffect(() => {
     if (!approvalId || !run || !OPEN_RUN.includes(run.state)) return;
@@ -198,13 +211,15 @@ export function useEditorWorkflowRun(input: { readonly workflow: { readonly work
   }, [approvalId, run?.state, adopt]);
 
   async function guard(work: () => Promise<void>) {
-    if (acting.current) return; acting.current = true; setError(null);
+    if (acting.current) return; acting.current = true; setActingNow(true); setError(null);
     try { await work(); } catch (cause) { setError(codeOf(cause)); setPhase(p => p === 'wallet' || p === 'confirming' ? 'running' : p === 'reviewing' ? 'idle' : p === 'authorizing' || p === 'proving' ? runRef.current ? 'running' : 'reviewed' : p); }
-    finally { acting.current = false; }
+    finally { acting.current = false; setActingNow(false); }
   }
   const profileFor = async (chains: readonly string[]) => walletProfile(evmAccount, chains, false);
 
   const runReview = () => guard(async () => {
+    // Never while a run is shown (this workflow's or a followed earlier one): the Review would be read against another run's facts.
+    if (approvalId) return;
     if (!evmAccount) { failedFor.current = currentKey.current; throw new Error('EVM_WALLET_REQUIRED'); }
     setPhase('reviewing'); setUpdated([]);
     // The wallet is asked what it can do on FloFi's EVM mainnets (`wallet_getCapabilities` shows no prompt); the server keeps only this workflow's.
@@ -265,7 +280,8 @@ export function useEditorWorkflowRun(input: { readonly workflow: { readonly work
     const stored = storedRun(id);
     const mine = stored?.sent?.group === index ? stored.sent.batchId || groupId : null;
     for (const candidate of [...new Set([mine, groupId].filter((v): v is string => Boolean(v)))]) if ((await probe(candidate)).known) return candidate;
-    if (mine) throw new Error('WALLET_BATCH_SENT_UNRECORDED');
+    // The wallet was asked and its answer never arrived: FloFi cannot tell whether it sent the batch, so it never asks again for this group.
+    if (mine) throw new Error(stored?.sent?.attempt ? 'WALLET_BATCH_SEND_UNCONFIRMED' : 'WALLET_BATCH_SENT_UNRECORDED');
     return null;
   }
   /** The wallet holds the batch: the run records it and follows it. A failure here is never "nothing was sent". */
@@ -386,7 +402,8 @@ export function useEditorWorkflowRun(input: { readonly workflow: { readonly work
     if (!r.ok && (FORGOTTEN.test(r.code) || r.code === 'EVM_WALLET_PROOF_REQUIRED')) {
       setPhase('proving');
       const proven = await proof.proveEvm();
-      if (!proven.account) throw new Error(proven.error ?? 'WALLET_REQUEST_REJECTED');
+      // A declined (or busy) sign-in says nothing about what the wallet sent: never the "nothing was sent" of a declined wallet request.
+      if (!proven.account) throw new Error('EDITOR_RUN_SIGN_IN_REQUIRED');
       r = await workflowRunStatusHandoff(id);
       if (!r.ok && FORGOTTEN.test(r.code)) throw new Error('EDITOR_RUN_OTHER_WALLET');
     }
@@ -426,7 +443,7 @@ export function useEditorWorkflowRun(input: { readonly workflow: { readonly work
     adopt(r.value); dropStored(approvalId);
   });
   /** Stops showing the run in this tab without forgetting it (an earlier visit's run is offered again). */
-  const hide = () => { setApprovalId(null); setRun(null); runRef.current = null; setFollowing(false); setPhase('idle'); setError(null); setUpdated([]);
+  const hide = () => { if (acting.current) return; setApprovalId(null); setRun(null); runRef.current = null; setFollowing(false); setPhase('idle'); setError(null); setUpdated([]);
     recovered.current = null; setUnrecorded(false); accepted.current = new Map(); acceptedRecipients.current = new Map(); };
   const dismiss = () => { dropStored(approvalId); setFollowing(false); setApprovalId(null); setRun(null); runRef.current = null; setReview(null); reviewRef.current = null; setPhase('idle');
     setError(null); setUpdated([]); recovered.current = null; setUnrecorded(false); authorizedRevision.current = null; accepted.current = new Map();
@@ -495,6 +512,7 @@ export const EXECUTION_REFUSAL: Readonly<Record<string, string>> = {
   EDITOR_EXECUTION_PLAN_CHANGED: 'The workflow or its plan changed since your review. Nothing was asked from your wallet. Review the whole workflow again.',
   EDITOR_RUN_SIGN_IN_REQUIRED: 'Sign in with the wallet that started this workflow to follow it (the sign-in authorizes no transaction).',
   EDITOR_RUN_OTHER_WALLET: 'This workflow was started by another wallet. Connect that wallet to follow it.',
+  WALLET_BATCH_SEND_UNCONFIRMED: 'Your wallet was asked to send this batch, but its answer never arrived, so FloFi cannot tell whether it was sent. Check your wallet\'s activity. FloFi will not ask your wallet for it again; the workflow can be ended once the prepared request expires.',
   EDITOR_REVIEW_RATE_LIMITED: 'Too many reviews in a short time. Wait a few minutes and review again.',
   EDITOR_RUNS_NOT_ENABLED: 'Running a whole workflow is not enabled on this FloFi deployment.',
   HANDOFF_RATE_LIMITED: 'Too many workflow runs were started recently. Try again later.',
@@ -620,7 +638,7 @@ export function EditorWorkflowRunPanel({ state }: { state: EditorWorkflowRunStat
       {state.canReview && <button type="button" className={review ? 'secondary' : 'primary'} disabled={busy} aria-busy={phase === 'reviewing' || undefined} onClick={() => void state.startReview()}>
         {tr(phase === 'reviewing' ? 'Reviewing the whole workflow…' : review ? 'Review again' : 'Review whole workflow')}</button>}
       {state.unloaded && <button type="button" className="primary" disabled={busy} onClick={() => void state.checkWallet()}>{tr('Load workflow progress')}</button>}
-      {state.following && !['wallet', 'confirming'].includes(phase) && <button type="button" className="quiet" onClick={state.hide}>{tr('Hide this workflow')}</button>}
+      {state.following && !busy && <button type="button" className="quiet" onClick={state.hide}>{tr('Hide this workflow')}</button>}
       {review && state.canReview && state.grouped && <button type="button" className="primary editor-run-authorize" disabled={busy || expired} aria-busy={busy || undefined} onClick={() => void state.authorize()}>
         {tr(phase === 'authorizing' ? 'Preparing your wallet request…' : 'Authorize workflow')}</button>}
       {phase === 'confirm-update' && <button type="button" className="primary" onClick={() => void state.confirmUpdate()}>{tr(state.updated.every(u => u.reviewed) ? 'Confirm the updated minimums' : 'Confirm and continue in my wallet')}</button>}

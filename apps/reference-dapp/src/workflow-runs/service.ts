@@ -384,8 +384,12 @@ export async function runView(deps: { readonly store: Pick<WorkflowRunStore, 'st
   const plannedOf = (g: GroupRecord): RunGroupView['planned'] => {
     const p = g.prepared as { group?: EvmGroupCalls; simulation?: { healthFactorAfter?: Readonly<Record<string, string>> } | null } | null;
     if (!p?.group || !requirement?.ok) return null;
-    return { steps: [...plannedSteps(requirement.value, p.group)].map(([index, values]) => ({ index, ...values })), calls: p.group.calls.length,
-      approvals: p.group.calls.filter(c => c.kind === 'ERC20_APPROVE').length, healthFactorAfter: Object.values(p.simulation?.healthFactorAfter ?? {})[0] ?? null };
+    // A batch that reconciled against an earlier preparation shows what that one was signed for (the newer artifact never ran).
+    const from = (g.outcome as { preparedFrom?: { steps: EvmGroupCalls['steps']; calls: number; approvals: number } } | null)?.preparedFrom;
+    const shown = from ? { ...p.group, steps: from.steps } : p.group;
+    return { steps: [...plannedSteps(requirement.value, shown)].map(([index, values]) => ({ index, ...values })), calls: from?.calls ?? p.group.calls.length,
+      approvals: from?.approvals ?? p.group.calls.filter(c => c.kind === 'ERC20_APPROVE').length,
+      healthFactorAfter: from ? null : Object.values(p.simulation?.healthFactorAfter ?? {})[0] ?? null };
   };
   const groups: RunGroupView[] = groupRecords.map(g => {
     const fee = (g.prepared as { fee?: { maxCost?: string; unit?: string; estimated?: boolean } } | null)?.fee;

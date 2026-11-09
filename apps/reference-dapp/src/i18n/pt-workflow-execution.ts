@@ -146,6 +146,8 @@ export const portugueseWorkflowExecution: Readonly<Record<string, string>> = {
   'Forget this workflow in this browser': 'Esquecer este fluxo neste navegador',
   'Hide this workflow': 'Ocultar este fluxo',
   'This is a workflow you authorized earlier, not the one on the Canvas.': 'Este é um fluxo que você autorizou antes, não o que está no Canvas.',
+  'Your wallet was asked to send this batch, but its answer never arrived, so FloFi cannot tell whether it was sent. Check your wallet\'s activity. FloFi will not ask your wallet for it again; the workflow can be ended once the prepared request expires.':
+    'Sua carteira foi solicitada a enviar este lote, mas a resposta nunca chegou, então a FloFi não consegue saber se ele foi enviado. Verifique a atividade da sua carteira. A FloFi não vai pedir esse lote de novo à sua carteira; o fluxo pode ser encerrado quando o pedido preparado expirar.',
   'Load workflow progress': 'Carregar o andamento do fluxo',
   'The prepared wallet request is valid until {0}; the workflow can be ended after that.':
     'O pedido preparado para a carteira vale até {0}; o fluxo pode ser encerrado depois disso.',

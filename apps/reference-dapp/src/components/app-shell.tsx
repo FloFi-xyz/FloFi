@@ -480,8 +480,8 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
       : 'All {0} steps are reviewed together and authorized at once where your wallet can batch them.', String(sequence?.steps.length ?? 0))}</p>
     <button type="button" className="primary" data-lifecycle-action="workflow-run"
       disabled={(!workflowRunHere.started && Boolean(authoringIncomplete)) || ['reviewing', 'authorizing', 'proving', 'wallet', 'confirming'].includes(workflowRunHere.phase)}
-      onClick={() => { setTab('Execute'); if (!workflowRunHere.started && !workflowRunHere.review) void workflowRunHere.startReview(); }}>
-      {tr(workflowRunHere.started ? 'Open workflow progress' : workflowRunHere.review ? 'Open the workflow review' : 'Review whole workflow')}</button>
+      onClick={() => { setTab('Execute'); if (workflowRunHere.canReview && !workflowRunHere.review) void workflowRunHere.startReview(); }}>
+      {tr(workflowRunHere.started || workflowRunHere.following ? 'Open workflow progress' : workflowRunHere.review ? 'Open the workflow review' : 'Review whole workflow')}</button>
   </div>;
   const simulateAction = groupedPrimary ? groupedAction : sequenceRestore ? <div className="canvas-lifecycle-control sequence-restore-control">
       <p role="status">{sequenceIssue}</p>

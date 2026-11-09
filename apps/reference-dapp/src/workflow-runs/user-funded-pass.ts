@@ -164,7 +164,10 @@ async function submittedGroup(deps: UserFundedPassDeps, run: RunRecord, g: Group
     else if (steps[i]!.state === 'DELEGATED' || steps[i]!.state === 'UNCERTAIN')
       await deps.store.stepTransition(run.runId, i, ['DELEGATED', 'UNCERTAIN'], 'FAILED', { outcome: outcomeOf(i, 'FAILED'), code: r.status === 'FAILED' ? stored(r.code) : null });
   }
-  const groupOutcome = { status: r.status, transactions: r.transactions, gasPaid: r.gasPaid, steps: facts, observedAt };
+  // Reconciled against an earlier preparation (the one the wallet sent): what ITS steps were signed to spend and receive, for the owner's view.
+  const preparedFrom = r.group ? { preparedFrom: { steps: r.group.steps, calls: r.group.calls.length,
+    approvals: r.group.calls.filter(c => c.kind === 'ERC20_APPROVE').length } } : {};
+  const groupOutcome = { status: r.status, transactions: r.transactions, gasPaid: r.gasPaid, steps: facts, observedAt, ...preparedFrom };
   if (r.status === 'RECONCILED') {
     await deps.store.groupTransition(run.runId, g.groupIndex, ['SUBMITTED', 'UNCERTAIN'], 'RECONCILED', { outcome: groupOutcome, code: null });
     deps.log('workflow_run.group_reconciled', { run: run.runId, group: g.groupIndex, gasPaid: r.gasPaid.amount });

@@ -152,6 +152,8 @@ describe('P0: the Editor reviews and authorizes Swap → Supply → Borrow on Ar
       const supplyStep = (await t.db.query<{ bound: { used: string } | null; strategy: { amount: string } }>(
         'SELECT bound, strategy FROM workflow_run_steps WHERE step_index = 1')).rows[0]!;
       expect(supplyStep.bound?.used).toBe(signedSupply);
+      // The owner's view shows what the batch that ran was signed for (never the newer preparation's amounts).
+      expect(done.view.workflowRun!.run.groups[0]!.planned!.steps.find(st => st.index === 1)!.spend!.units).toBe(signedSupply);
       expect(supplyStep.strategy.amount).toBe('0.001194');
     } finally { await t.drop(); }
   });
