@@ -173,7 +173,9 @@ export const opOf = (s: SerialOp, signature = '0x'): erc4337.PackedUserOperation
 /** One reviewed Solana transaction of a group (what the owner signs and what FloFi verifies; never the whole Review artifact chain). */
 export type SolanaGroupTx = { readonly stepIndex: number; readonly kind: 'JUPITER' | 'TRANSFER'; readonly owner: string; readonly message: string; readonly messageHash: string;
   readonly unsignedTransaction: string; readonly lookupTables: LookupTables; readonly lastValidBlockHeight: number; readonly estimatedFeeLamports: string;
-  readonly spend: AssetAmountFact; readonly minimumOut: AssetAmountFact | null };
+  readonly spend: AssetAmountFact; readonly minimumOut: AssetAmountFact | null;
+  /** The network fee plus the (refundable) account-creation deposits this transaction may charge the owner, in lamports. */
+  readonly maximumNetworkCostLamports?: string };
 async function prepareSolanaSignAll(deps: UserFundedDeps, composition: WorkflowComposition, requirement: WorkflowRequirement, g: GroupInput): Promise<Result<Prepared>> {
   if (!deps.solana) return no('USER_FUNDED_SOLANA_RPC_UNAVAILABLE');
   const txs: SolanaGroupTx[] = [];
@@ -188,15 +190,18 @@ async function prepareSolanaSignAll(deps: UserFundedDeps, composition: WorkflowC
         const review: SolanaTransferReview = await simulateSolanaTransfer(workflow, g.feePayer, deps.solana, deps.now().getTime());
         txs.push({ stepIndex: index, kind: 'TRANSFER', owner: review.owner, message: review.message, messageHash: review.messageHash, unsignedTransaction: review.unsignedTransaction,
           lookupTables: {}, lastValidBlockHeight: review.lastValidBlockHeight, estimatedFeeLamports: review.estimatedFeeLamports,
-          spend: { asset: assetKey({ chain: step.chain, address: review.asset.mint ?? WSOL }), amount: review.amount }, minimumOut: null });
+          spend: { asset: assetKey({ chain: step.chain, address: review.asset.mint ?? WSOL }), amount: review.amount }, minimumOut: null,
+          maximumNetworkCostLamports: review.maximumNetworkCostLamports });
       } else if (step.action === 'swap') {
         if (!deps.jupiter) return no('JUPITER_UNAVAILABLE', index);
         const review: JupiterReview = await simulateJupiterSwap(workflow, g.feePayer, deps.jupiter, deps.solana, deps.now().getTime());
-        const r = review as unknown as { lookupTables?: LookupTables; quote: { inputMint: string; outputMint: string; inAmount: string; otherAmountThreshold: string } };
+        const r = review as unknown as { lookupTables?: LookupTables; maximumNetworkCostLamports?: string | bigint;
+          quote: { inputMint: string; outputMint: string; inAmount: string; otherAmountThreshold: string } };
         txs.push({ stepIndex: index, kind: 'JUPITER', owner: review.owner, message: review.message, messageHash: review.messageHash, unsignedTransaction: review.unsignedTransaction,
           lookupTables: r.lookupTables ?? {}, lastValidBlockHeight: review.lastValidBlockHeight, estimatedFeeLamports: review.estimatedFeeLamports,
           spend: { asset: assetKey({ chain: step.chain, address: r.quote.inputMint }), amount: r.quote.inAmount },
-          minimumOut: { asset: assetKey({ chain: step.chain, address: r.quote.outputMint }), amount: r.quote.otherAmountThreshold } });
+          minimumOut: { asset: assetKey({ chain: step.chain, address: r.quote.outputMint }), amount: r.quote.otherAmountThreshold },
+          ...r.maximumNetworkCostLamports !== undefined ? { maximumNetworkCostLamports: String(r.maximumNetworkCostLamports) } : {} });
       } else return no(`USER_FUNDED_ACTION_NOT_BUILDABLE:${step.action.toUpperCase()}`, index);
     } catch (cause) { return no(codeOf(cause, 'SIMULATION_FAILED'), index); }
     const last = txs.at(-1)!;
@@ -205,7 +210,9 @@ async function prepareSolanaSignAll(deps: UserFundedDeps, composition: WorkflowC
   }
   // Two byte-identical messages would carry one signature: the chain runs it once while reconciliation would count it twice.
   if (new Set(txs.map(x => x.messageHash)).size !== txs.length) return no('SOLANA_GROUP_DUPLICATE_TRANSACTION', txs.at(-1)!.stepIndex);
-  const fee = txs.reduce((sum, x) => sum + BigInt(x.estimatedFeeLamports), 0n);
+  // P0 universal execution: the ceiling the owner reads is every network fee PLUS the refundable account-creation deposits (recipient or output
+  // token accounts) the transactions may charge, never the fees alone.
+  const fee = txs.reduce((sum, x) => sum + BigInt(x.maximumNetworkCostLamports ?? x.estimatedFeeLamports), 0n);
   return ok({ kind: 'SOLANA_SIGN_ALL', owner: g.feePayer, transactions: txs, fee: { payer: g.feePayer, unit: 'lamports', maxCost: fee.toString(), estimated: true },
     lastValidBlockHeight: Math.min(...txs.map(x => x.lastValidBlockHeight)) });
 }
@@ -292,6 +299,11 @@ export function solanaSubmission(authorization: Readonly<Record<string, unknown>
   return { kind: 'SOLANA_SIGN_ALL', hashes: txs.map(t => t.signature), submittedAt: now.toISOString() };
 }
 type SignatureStatus = { readonly confirmationStatus?: string; readonly err?: unknown } | null;
+/**
+ * Block heights one transaction of a sign-all group needs, from its send to its confirmation and the next pass (about 400 ms per block: a
+ * 2-second pass cadence, a serialized RPC and confirmation). A group is sent only while its blockhash leaves this much for every transaction.
+ */
+export const SOLANA_BLOCKS_PER_GROUP_TRANSACTION = 25;
 async function statuses(rpc: SolanaRpc, signatures: readonly string[]): Promise<readonly SignatureStatus[]> {
   const r = await rpc('getSignatureStatuses', [signatures, { searchTransactionHistory: true }]) as { value?: readonly SignatureStatus[] };
   return r?.value ?? signatures.map(() => null);
@@ -312,7 +324,21 @@ export async function advanceSolanaSubmission(deps: UserFundedDeps, prepared: Pr
     if (status) return { state: 'WAITING', index: i, code: null };
     // Not seen yet: send it unless its blockhash expired (then it can never land, and nothing later is sent).
     const height = Number(await rpc('getBlockHeight', [{ commitment: 'confirmed' }]));
-    if (height > txs[i]!.lastValidBlockHeight) return { state: 'EXPIRED', index: i, code: 'SOLANA_BLOCKHASH_EXPIRED' };
+    if (height > txs[i]!.lastValidBlockHeight) {
+      // P0 universal execution: "expired" is decided only when it is provable — the FINALIZED height is past the blockhash's last valid height
+      // AND a fresh status read (after that height) still does not know the signature. A transaction that landed meanwhile is never dropped.
+      const finalized = Number(await rpc('getBlockHeight', [{ commitment: 'finalized' }]));
+      if (!(finalized > txs[i]!.lastValidBlockHeight)) return { state: 'WAITING', index: i, code: null };
+      const again = (await statuses(rpc, [signed[i]!.signature]))[0] ?? null;
+      if (again?.err) return { state: 'FAILED', index: i, code: 'SOLANA_TRANSACTION_FAILED' };
+      if (again) return { state: 'WAITING', index: i, code: null };
+      return { state: 'EXPIRED', index: i, code: 'SOLANA_BLOCKHASH_EXPIRED' };
+    }
+    // P0 universal execution: the transactions are sent one after another, each once its predecessor confirmed. Before the FIRST is sent, the
+    // signed group must still have the block-height budget for every one of them; otherwise nothing is sent at all (never a half-executed group
+    // whose tail expires after the owner signed), and the owner prepares the group again.
+    if (i === 0 && Math.min(...txs.map(x => x.lastValidBlockHeight)) - height < SOLANA_BLOCKS_PER_GROUP_TRANSACTION * txs.length)
+      return { state: 'EXPIRED', index: 0, code: 'SOLANA_GROUP_SIGNED_TOO_LATE' };
     const message = parseMessageV0(parseTransaction(fromBase64(signed[i]!.transaction)).message);
     assertUserFundedSubmission({ kind: 'SOLANA_TRANSACTION', feePayer: message.staticKeys[0] ?? '', ownerWallet: owner });
     await rpc('sendTransaction', [signed[i]!.transaction, { encoding: 'base64', preflightCommitment: 'confirmed', maxRetries: 10 }]);

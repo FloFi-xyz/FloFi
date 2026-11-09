@@ -238,6 +238,45 @@ describe('BUILD-FLOFI-UNIVERSAL-WORKFLOW-002 Solana group submission and reconci
       .rejects.toThrow(GAS_PAYER_CODES.notOwner);
     expect(sent).toEqual([]);
   });
+  it('P0: a signed group is never half-sent: too little blockhash budget sends nothing, and "expired" is only declared when provable', async () => {
+    const sent: string[] = [];
+    let confirmed = 100, finalized = 100;
+    const statuses = new Map<string, { confirmationStatus: string; err: unknown }>();
+    let landedOnReread: string | null = null;
+    const { compileMessageV0, serializeMessageV0, serializeTransaction, toBase64 } = await import('@defi-workflow-engine/reference-compiler');
+    const tx = (payer: string) => toBase64(serializeTransaction(new Uint8Array(64).fill(1), serializeMessageV0(compileMessageV0(payer, [{ programId: '11111111111111111111111111111111',
+      accounts: [{ pubkey: payer, isSigner: true, isWritable: true }], data: new Uint8Array([2, 0, 0, 0]) }], 'GHtXQBsoZHVnNFa9YevAzFr17DJjgHXk3ycTKD5xD3Zi', {}))));
+    const three = { kind: 'SOLANA_SIGN_ALL', transactions: [0, 1, 2].map(i => ({ stepIndex: i, lastValidBlockHeight: 150, minimumOut: null })) } as unknown as Prepared;
+    const authorization = { transactions: [0, 1, 2].map(i => ({ signature: `sig${i}`, transaction: tx(owner) })) };
+    let reads = 0;
+    const deps: UserFundedDeps = { chains: [SOLANA], evm: () => null, bundler: () => null, jupiter: null, now: () => new Date(), solana: async (method, params) => {
+      if (method === 'getSignatureStatuses') {
+        reads++;
+        return { value: (params[0] as string[]).map(s => statuses.get(s) ?? (reads > 1 && s === landedOnReread ? { confirmationStatus: 'confirmed', err: null } : null)) };
+      }
+      if (method === 'getBlockHeight') return (params[0] as { commitment: string }).commitment === 'finalized' ? finalized : confirmed;
+      if (method === 'sendTransaction') { sent.push(String(params[0])); return 'ok'; }
+      throw new Error(method);
+    } };
+    // Signed with 3 transactions to send but only 40 blocks of blockhash left (75 needed): nothing at all is sent; the owner prepares again.
+    confirmed = 110;
+    expect(await advanceSolanaSubmission(deps, three, authorization, owner)).toMatchObject({ state: 'EXPIRED', index: 0, code: 'SOLANA_GROUP_SIGNED_TOO_LATE' });
+    expect(sent).toEqual([]);
+    // With the budget, the first is sent.
+    confirmed = 70;
+    expect(await advanceSolanaSubmission(deps, three, authorization, owner)).toMatchObject({ state: 'SENT', index: 0 });
+    // Past its last valid height on a lagging 'confirmed' read, but not yet provably so at 'finalized': it is waited for, never dropped.
+    statuses.set('sig0', { confirmationStatus: 'finalized', err: null });
+    confirmed = 151; finalized = 140;
+    expect(await advanceSolanaSubmission(deps, three, authorization, owner)).toMatchObject({ state: 'WAITING', index: 1 });
+    // Finalized past it, but a fresh status read finds it landed after all: still never declared expired.
+    finalized = 152; landedOnReread = 'sig1'; reads = 0;
+    expect(await advanceSolanaSubmission(deps, three, authorization, owner)).toMatchObject({ state: 'WAITING', index: 1 });
+    // Provably expired: finalized past it and unknown on a fresh read.
+    landedOnReread = null;
+    expect(await advanceSolanaSubmission(deps, three, authorization, owner)).toMatchObject({ state: 'EXPIRED', index: 1, code: 'SOLANA_BLOCKHASH_EXPIRED' });
+    expect(sent).toHaveLength(1);
+  });
 });
 
 describe('BUILD-FLOFI-UNIVERSAL-WORKFLOW-002 gas isolation at volume', () => {
