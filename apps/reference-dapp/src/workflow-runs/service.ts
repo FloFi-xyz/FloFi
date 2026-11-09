@@ -201,6 +201,8 @@ async function blockDueGroup(deps: WorkflowRunDeps, run: RunRecord, g: GroupReco
   deps.log('workflow_run.group_blocked', { run: run.runId, group: g.groupIndex, code: stored, partial: true });
   return refuse(code);
 }
+/** The validity a prepared group must still have to be handed to the owner's wallet again. */
+export const PREPARED_MIN_REMAINING_MS = 3 * 60_000;
 /** P0 workflow execution: the run's own EVM wallet is known here, so a step whose Aave beneficiary is another account is never grouped. */
 export const userFundedBuildable = (facts: UserFundedFacts, evmOwner?: string | null) => (st: Parameters<typeof evmStepBuildable>[0]) =>
   st.namespace === 'solana' || evmStepBuildable(st, facts.chains, evmOwner) === null;
@@ -253,7 +255,9 @@ export async function prepareUserFundedGroup(deps: WorkflowRunDeps, run: RunReco
   const groups = await deps.store.groups(run.runId), steps = await deps.store.steps(run.runId);
   let g: GroupRecord = groups[groupIndex] ?? refuse('WORKFLOW_RUN_GROUP_NOT_FOUND');
   if (g.strategy === 'EVM_OWNER_STEP' || g.strategy === 'SOLANA_OWNER_STEP') refuse('WORKFLOW_RUN_GROUP_OWNER_STEP');
-  if (g.state === 'PREPARED' && g.validUntil && g.validUntil > deps.now()) return { groupIndex, strategy: g.strategy, chain: g.chain, feePayer: g.feePayer,
+  // P0 universal execution: a cached preparation is handed out only with enough validity left to review and confirm it in the wallet; otherwise it
+  // is prepared again (same EIP-5792 id, the earlier artifact kept for reconciliation), never offered seconds before its deadline reverts it.
+  if (g.state === 'PREPARED' && g.validUntil && g.validUntil.getTime() > deps.now().getTime() + PREPARED_MIN_REMAINING_MS) return { groupIndex, strategy: g.strategy, chain: g.chain, feePayer: g.feePayer,
     validUntil: g.validUntil.toISOString(), prepared: g.prepared as Prepared };
   // A wallet batch prepared before keeps every earlier preparation for reconciliation: they share one EIP-5792 id, so the wallet may hold one of them.
   const superseded = g.strategy === 'EVM_WALLET_BATCH' && ['PREPARED', 'EXPIRED', 'PLANNED'].includes(g.state) ? supersede(g.prepared as Prepared | null) : [];

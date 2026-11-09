@@ -52,7 +52,13 @@ export type UserCall =
   | { readonly kind: 'AAVE_V3_REPAY' | 'AAVE_V3_WITHDRAW'; readonly pool: string; readonly asset: string; readonly amount: string; readonly aToken: string;
       readonly variableDebtToken: string }
   | { readonly kind: 'ERC20_TRANSFER'; readonly token: string; readonly to: string; readonly amount: string }
-  | { readonly kind: 'NATIVE_TRANSFER'; readonly to: string; readonly amount: string };
+  | { readonly kind: 'NATIVE_TRANSFER'; readonly to: string; readonly amount: string }
+  /**
+   * P0 universal execution: the batch's on-chain expiry when it has no swap to carry one — SwapRouter02 `multicall(deadline, [])`, which does
+   * nothing before the deadline and reverts after it (the whole atomic batch with it). A wallet prompt confirmed late never executes Aave calls
+   * on a health-factor proof older than the preparation's validity. It belongs to no step and moves no asset.
+   */
+  | { readonly kind: 'DEADLINE_GUARD'; readonly router: string; readonly deadline: string };
 export type AssetAmountFact = { readonly asset: string; readonly amount: string };
 /** One step of a group: its calls (indices), what it spends exactly, and its guaranteed / quoted output (when it produces one). */
 export type GroupStepCalls = { readonly stepIndex: number; readonly calls: readonly number[]; readonly spend: AssetAmountFact;
@@ -73,6 +79,11 @@ export const chainIdOf = (chain: string): number => { const m = /^eip155:([1-9][
 /** The calls of the group as `erc7710.Call`s from the owner's account (exact bytes; the owner is every recipient FloFi chooses). */
 export function evmCallsOf(group: EvmGroupCalls): erc7710.Call[] {
   return group.calls.map(c => {
+    if (c.kind === 'DEADLINE_GUARD') {
+      if (!/^[1-9][0-9]{0,15}$/.test(c.deadline)) throw new Error('USER_FUNDED_CALL_INVALID');
+      // multicall(uint256 deadline, bytes[] data) with an empty data array.
+      return { target: c.router, value: 0n, data: '0x5ae401dc' + BigInt(c.deadline).toString(16).padStart(64, '0') + (64n).toString(16).padStart(64, '0') + '0'.repeat(64) };
+    }
     if (c.kind !== 'UNISWAP_V3_EXACT_INPUT_SINGLE' || c.deadline === undefined) return erc7710.workflowCallData(callOf(c), group.owner);
     // The same exactInputSingle (the owner as recipient, the signed minimum), inside SwapRouter02's deadline-checked multicall.
     if (![100, 500, 3000, 10000].includes(c.fee) || !/^[1-9][0-9]{0,15}$/.test(c.deadline)) throw new Error('USER_FUNDED_CALL_INVALID');
@@ -89,6 +100,7 @@ export function callOf(c: UserCall): erc7710.WorkflowCall {
     case 'AAVE_V3_SUPPLY': case 'AAVE_V3_BORROW': case 'AAVE_V3_REPAY': case 'AAVE_V3_WITHDRAW': return { kind: c.kind, pool: c.pool, asset: c.asset, amount: BigInt(c.amount) };
     case 'ERC20_TRANSFER': return { kind: c.kind, token: c.token, to: c.to, amount: BigInt(c.amount) };
     case 'NATIVE_TRANSFER': return { kind: c.kind, to: c.to, amount: BigInt(c.amount) };
+    case 'DEADLINE_GUARD': throw new Error('USER_FUNDED_CALL_INVALID');
   }
 }
 
@@ -375,10 +387,18 @@ export async function buildEvmGroupCalls(requirement: WorkflowRequirement, from:
     } else return refuse('USER_FUNDED_ACTION_NOT_BUILDABLE');
     if (calls.length > erc7710.WORKFLOW_GRANT_MAX_CALLS) return refuse('USER_FUNDED_GROUP_TOO_MANY_CALLS');
   }
+  // A wallet batch without a swap but with Aave calls gets its on-chain expiry from a deadline guard first (the chain's registered router).
+  const router = deps.deadline === undefined ? null : CATALOG_SWAPS.find(p => p.chainRef === chain)?.router.toLowerCase() ?? delegationSwapProfile(chain, deps.chains)?.router ?? null;
+  const aave = calls.some(c => c.kind === 'AAVE_V3_SUPPLY' || c.kind === 'AAVE_V3_BORROW' || c.kind === 'AAVE_V3_REPAY' || c.kind === 'AAVE_V3_WITHDRAW');
+  if (router && aave && !calls.some(c => c.kind === 'UNISWAP_V3_EXACT_INPUT_SINGLE')) {
+    if (calls.length + 1 > erc7710.WORKFLOW_GRANT_MAX_CALLS) return { ok: false, stepIndex: from, code: 'USER_FUNDED_GROUP_TOO_MANY_CALLS' };
+    return { ok: true, value: { chain, chainId: chainIdOf(chain), owner, calls: [{ kind: 'DEADLINE_GUARD', router, deadline: String(deps.deadline) }, ...calls],
+      steps: out.map(s => ({ ...s, calls: s.calls.map(i => i + 1) })) } };
+  }
   return { ok: true, value: { chain, chainId: chainIdOf(chain), owner, calls, steps: out } };
 }
 
 /** Conservative per-call gas for review-time fee estimates when a call depends on an earlier one in the same batch (never sent as limits). */
 export const DEPENDENT_CALL_GAS: Readonly<Record<UserCall['kind'], bigint>> = Object.freeze({
-  ERC20_APPROVE: 60_000n, UNISWAP_V3_EXACT_INPUT_SINGLE: 220_000n, AAVE_V3_SUPPLY: 320_000n, AAVE_V3_BORROW: 420_000n, AAVE_V3_REPAY: 320_000n, AAVE_V3_WITHDRAW: 380_000n, ERC20_TRANSFER: 70_000n, NATIVE_TRANSFER: 25_000n,
+  ERC20_APPROVE: 60_000n, UNISWAP_V3_EXACT_INPUT_SINGLE: 220_000n, AAVE_V3_SUPPLY: 320_000n, AAVE_V3_BORROW: 420_000n, AAVE_V3_REPAY: 320_000n, AAVE_V3_WITHDRAW: 380_000n, DEADLINE_GUARD: 30_000n, ERC20_TRANSFER: 70_000n, NATIVE_TRANSFER: 25_000n,
 });

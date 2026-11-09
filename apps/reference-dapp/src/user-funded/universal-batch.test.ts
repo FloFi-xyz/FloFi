@@ -267,3 +267,36 @@ describe('P0 universal execution: any catalog ERC-20 swap joins a wallet batch, 
     expect(evmStepBuildable(native.value.steps[0]!, CHAINS, OWNER)).toBe('USER_FUNDED_NATIVE_SWAP_UNSUPPORTED');
   });
 });
+
+describe('P0 universal execution: a batch with Aave calls and no swap still expires on chain', () => {
+  it('starts with a deadline guard (the registered router\'s multicall(deadline, [])): confirmed in time it executes, confirmed late it reverts whole', async () => {
+    let seconds = Math.floor(Date.parse(NOW) / 1000);
+    const chain = createEvmDouble(42161, () => seconds, { profile: ARBITRUM_MAINNET_SWAP, aave: { pool: POOL, reserves: RESERVES } });
+    chain.control.fundToken(OWNER, WETH, 2_000_000_000_000_000n); chain.control.fundNative(OWNER, 10n ** 17n);
+    const transport = guarded(CHAIN, 'read', 'MOCKED', chain.rpc);
+    const deps: UserFundedDeps = { chains: CHAINS, evm: c => c === CHAIN ? transport : null, bundler: () => null, solana: null, jupiter: null, now: () => new Date(seconds * 1000) };
+    const s = { version: 2, steps: [{ action: 'supply', network: 'arbitrum-one', asset: 'WETH', amount: '0.002', beneficiary: OWNER },
+      { action: 'borrow', network: 'arbitrum-one', asset: 'USDC', amount: '1', beneficiary: OWNER }] };
+    const requirement = workflowRequirement(s), composition = composeWorkflowBound(s as never, undefined);
+    if (!requirement.ok || !composition.ok) throw new Error('STRATEGY_INVALID');
+    const prepare = () => prepareGroup(deps, composition, requirement.value, { runId: 'wfr_guard', groupIndex: 0, strategy: 'EVM_WALLET_BATCH', chain: CHAIN, feePayer: OWNER, stepFrom: 0, stepTo: 1 });
+    const r = await prepare();
+    if (!r.ok) throw new Error(r.code);
+    const p = r.value.prepared as unknown as BatchPrepared;
+    expect(p.group.calls.map(c => c.kind)).toEqual(['DEADLINE_GUARD', 'ERC20_APPROVE', 'AAVE_V3_SUPPLY', 'AAVE_V3_BORROW']);
+    expect(p.group.calls[0]).toEqual({ kind: 'DEADLINE_GUARD', router: ARBITRUM_MAINNET_SWAP.router.toLowerCase(), deadline: String(seconds + 600) });
+    // The guard belongs to no step; each step's calls are the Aave calls.
+    expect(p.group.steps.map(st => st.calls)).toEqual([[1, 2], [3]]);
+    // Confirmed after the deadline: the guard reverts the whole atomic batch; nothing is supplied or borrowed.
+    seconds += 601;
+    const hash = chain.control.walletBatch(OWNER, evmCallsOf(p.group));
+    expect(chain.control.receipt(hash)).toMatchObject({ status: 0, reason: 'Transaction too old' });
+    expect(chain.control.accountData(OWNER)).toMatchObject({ collateral: 0n, debt: 0n });
+    expect((await reconcileWalletBatch(transport, p.group, [hash], p.fromBlock)).status).toBe('REVERTED');
+    // In time, it executes and reconciles step by step (the guard moves nothing).
+    seconds -= 601;
+    const ok = chain.control.walletBatch(OWNER, evmCallsOf(p.group));
+    const reconciled = await reconcileWalletBatch(transport, p.group, [ok], p.fromBlock);
+    expect(reconciled).toMatchObject({ status: 'RECONCILED', steps: [{ stepIndex: 0 }, { stepIndex: 1, received: [{ asset: `${CHAIN}/erc20:${USDC}`, amount: '1000000' }] }] });
+  });
+});
