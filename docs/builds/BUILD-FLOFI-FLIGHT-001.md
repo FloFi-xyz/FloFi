@@ -4,6 +4,10 @@ Owner request (2026-11-05): implement, integrate and validate `/board` from the 
 (https://claude.ai/artifact/9swYNgCuDz4pmW93fbBWMD, version `1793892357-f7d9`) before the campaign starts on 9 Nov 2026, alongside the
 approved landing (BUILD-FLOFI-LAUNCH-001), without blocking the product. Release: [RELEASE-FLIGHT-0020.md](../deploy/RELEASE-FLIGHT-0020.md).
 
+> **Superseded in part (9 Nov 2026) by [BUILD-FLOFI-FLIGHT-LAUNCH-001](BUILD-FLOFI-FLIGHT-LAUNCH-001.md):** no public counters (`on_list`,
+> `boarded`, `founding_left` are operator-only), FloFi now sends the campaign emails itself (Resend), access by link and code, public card pages,
+> and invites only for Founding seats boarded from the beta list.
+
 ## What was built
 
 | Board | Implementation |

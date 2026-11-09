@@ -843,12 +843,14 @@ A build without 0024 (v23) runs unchanged on schema 24, including on rows writte
 - every v23 `INSERT` into `flight_passes` and `flight_invites` names its columns and omits the new nullable ones (they stay NULL); its `SELECT`s
   name their columns; so nothing it reads or writes depends on them;
 - it never reads the new tables. Its account deletion (a plain `DELETE` of `flofi_accounts`) cascades into `flight_access_claims`, and its
-  `erase-email` / `purge-lists` (deleting `flight_list_entries`) cascade into tokens, sessions, claims and outbox rows of those entries;
+  `erase-email` / `purge-lists` (deleting `flight_list_entries`) cascade into tokens, sessions, claims and the outbox rows linked to those
+  entries only: card emails (linked by pass), creator-invite emails and `flight_invites.recipient` keep the address, and a v23 build never
+  prunes the new tables. **Run erasure and pruning with the v24 `flight-admin.ts`, even while a web deployment is rolled back to v23**;
 - a v23 page has public counters and issues invites to invited Founding seats (the rules this build changes); nothing in the schema forces
   either, so a rollback to v23 restores those behaviors but cannot break the database.
 
-**Locks.** `SET LOCAL lock_timeout = '5s'`. `ALTER TABLE … ADD COLUMN` of nullable columns without defaults is a catalog change (short ACCESS
-EXCLUSIVE lock, no rewrite). The two `CREATE UNIQUE INDEX` statements take a SHARE lock on two small campaign tables (`flight_passes`,
+**Locks.** `SET LOCAL lock_timeout = '5s'`. `ALTER TABLE … ADD COLUMN` of nullable columns without defaults rewrites nothing (short ACCESS
+EXCLUSIVE lock; their CHECK constraints do one validation scan of each small table). The two `CREATE UNIQUE INDEX` statements take a SHARE lock on two small campaign tables (`flight_passes`,
 `flight_invites`: at most a few thousand rows) for the duration of one index build inside the migration's transaction. Every new table is
 created empty.
 

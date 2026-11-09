@@ -141,8 +141,6 @@
 .perks li{display:flex;gap:16px;align-items:baseline;font-size:21px;line-height:1.4}
 .perks li::before{content:"";flex:none;width:10px;height:10px;border-radius:9px;background:var(--blue);transform:translateY(-3px)}
 .perks b{font-weight:600}.perks span{color:var(--muted)}
-.progress{height:14px;background:var(--track);border-radius:99px;overflow:hidden}
-.progress>div{height:100%;background:var(--blue);border-radius:99px}
 .routeGrid{display:flex;flex-wrap:wrap;gap:24px}
 .routeCard{flex:1 1 280px;border:2px solid var(--track);border-radius:28px;padding:32px;display:flex;flex-direction:column;gap:20px}
 .routeCode{font-family:var(--mono);font-weight:500;font-size:clamp(40px,4vw,52px);line-height:1;color:var(--blue);letter-spacing:-.02em}
@@ -251,3 +249,21 @@
   .marquee{height:44px}.track{font-size:16px}
 }
 @media (prefers-reduced-motion:reduce){.track{animation:none}}
+/* BUILD-FLOFI-FLIGHT-LAUNCH-001: the card flow on a light panel, the public card page, the access and unsubscribe pages. */
+.passControls .small{color:var(--muted)}
+.passControls .status{color:var(--navy);background:var(--soft)}
+.passControls p{font-size:18px;line-height:1.45}
+.cardPublic{background:var(--blue);color:#fff;padding:0 0 96px;display:flex;flex-direction:column;gap:8px}
+.cardPublic>section{width:100%;min-width:0}
+.cardPublicText{display:flex;flex-direction:column;gap:24px;padding:0 var(--gutter)}
+.cardPublicText h1{font-weight:700;font-size:clamp(44px,6vw,88px);line-height:.98;letter-spacing:-.05em}
+.accessPage{background:var(--blue);color:#fff;min-height:calc(100svh - 88px);padding:72px var(--gutter);display:flex;flex-direction:column;gap:24px}
+.accessPage h1{font-weight:700;font-size:clamp(44px,6vw,88px);line-height:.98;letter-spacing:-.05em;max-width:900px}
+.accessPage .small a{color:#fff}
+.accessForms{display:flex;flex-direction:column;gap:12px;max-width:720px}
+@media (max-width:640px){.cardPublic{padding-bottom:64px}.accessPage{padding:48px var(--gutter)}}
+.cardPublic .passStage{padding-bottom:56px}
+.passControls .btnGhost{color:var(--navy)!important;border-color:var(--navy)}
+.passControls .eyebrow{color:var(--blue)}
+.cardPublicText .small{color:#fff}
+.accessForms .small{color:#fff}

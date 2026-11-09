@@ -973,6 +973,18 @@
     "workflow-contracts.revision-state": {
       "path": "packages/workflow-contracts/test/revision-state.test.ts",
       "stage": "unit"
+    },
+    "app.flight.launch": {
+      "path": "apps/reference-dapp/src/flight/launch.test.ts",
+      "stage": "unit"
+    },
+    "app.flight.launch.pg": {
+      "path": "apps/reference-dapp/src/flight/launch.pg.test.ts",
+      "stage": "postgres"
+    },
+    "cloud-runtime.flight-launch-migration.pg": {
+      "path": "packages/cloud-runtime/test/flight-launch-migration.pg.test.ts",
+      "stage": "postgres"
     }
   },
   "requiredUnitSuites": [
@@ -1033,7 +1045,8 @@
     "reference-compiler.solana-transfer",
     "reference-executor.bound-composition",
     "reference-executor.cross-chain-liquidity-recovery",
-    "reference-reconciler.evidence"
+    "reference-reconciler.evidence",
+    "app.flight.launch"
   ],
   "modules": [
     {
@@ -3820,6 +3833,11 @@
       "sharedFinancialCore": false,
       "sources": [
         "apps/reference-dapp/backend/flight-admin.ts",
+        "apps/reference-dapp/backend/flight-email-worker.ts",
+        "apps/reference-dapp/src/app/api/board/access/code/route.ts",
+        "apps/reference-dapp/src/app/api/board/access/consume/route.ts",
+        "apps/reference-dapp/src/app/api/board/access/peek/route.ts",
+        "apps/reference-dapp/src/app/api/board/access/request/route.ts",
         "apps/reference-dapp/src/app/api/board/board/route.ts",
         "apps/reference-dapp/src/app/api/board/event/route.ts",
         "apps/reference-dapp/src/app/api/board/handle/route.ts",
@@ -3827,24 +3845,36 @@
         "apps/reference-dapp/src/app/api/board/list/route.ts",
         "apps/reference-dapp/src/app/api/board/pass/route.ts",
         "apps/reference-dapp/src/app/api/board/state/route.ts",
+        "apps/reference-dapp/src/app/api/board/unsubscribe/route.ts",
         "apps/reference-dapp/src/app/cloud-flow.ts",
+        "apps/reference-dapp/src/flight/access-store.ts",
+        "apps/reference-dapp/src/flight/access.ts",
         "apps/reference-dapp/src/flight/campaign.ts",
+        "apps/reference-dapp/src/flight/email/delivery.ts",
+        "apps/reference-dapp/src/flight/email/outbox.ts",
+        "apps/reference-dapp/src/flight/email/resend.ts",
+        "apps/reference-dapp/src/flight/email/runtime.ts",
+        "apps/reference-dapp/src/flight/email/templates.ts",
         "apps/reference-dapp/src/flight/host.ts",
         "apps/reference-dapp/src/flight/http.ts",
         "apps/reference-dapp/src/flight/rate-limit-client.ts",
         "apps/reference-dapp/src/flight/simulation-evidence.ts",
         "apps/reference-dapp/src/flight/simulation-record.ts",
         "apps/reference-dapp/src/flight/store.ts",
-        "packages/cloud-runtime/migrations/0020_flight_flofi.sql"
+        "packages/cloud-runtime/migrations/0020_flight_flofi.sql",
+        "packages/cloud-runtime/migrations/0024_flight_launch.sql"
       ],
       "suites": [
         "app.flight.campaign",
         "app.flight.store.pg",
         "cloud-runtime.flight-flofi-migration.pg",
+        "app.flight.launch",
+        "app.flight.launch.pg",
+        "cloud-runtime.flight-launch-migration.pg",
         "app.e2e.flight"
       ],
       "gaps": [
-        "Email deliverability is outside the product (FloFi sends no email; the team exports groups) and joining has no confirmation step (any address can be submitted; the team's first email is where a person can object). The exact public list counter can hint whether a submitted address was new. X handles are self-declared. Production rate and abuse behaviour is not measured by tests; browser funnel events are limited per instance."
+        "Email goes out through Resend from the Railway worker (FLOFI_FLIGHT_EMAIL=enabled); tests use a fake provider in the test process, so delivery, spam placement, DNS (SPF/DKIM/DMARC) and the account's real quota are not proven by tests. The FloFi quota counts FloFi's own reservations only (sends outside FloFi need the external reserve and reconciliation in the Resend dashboard). No bounce or complaint webhook is consumed. Joining has no confirmation step (any address can be submitted); campaign access needs a proven address (Privy-verified login email, or the access link or code). X handles are self-declared. Production rate and abuse behaviour is not measured by tests; browser funnel events are limited per instance."
       ]
     },
     {
@@ -3858,6 +3888,11 @@
       "sharedFinancialCore": false,
       "sources": [
         "apps/reference-dapp/playwright.flight.config.ts",
+        "apps/reference-dapp/public/brand/flight/email/flofi-logo-on-blue.png",
+        "apps/reference-dapp/public/brand/flight/email/gota-captain.png",
+        "apps/reference-dapp/public/brand/flight/email/gota-safety.png",
+        "apps/reference-dapp/public/brand/flight/email/gota-welcome.png",
+        "apps/reference-dapp/public/brand/flight/email/gota-wink.png",
         "apps/reference-dapp/public/brand/flight/flofi-logo-on-blue.svg",
         "apps/reference-dapp/public/brand/flight/flofi-logo.svg",
         "apps/reference-dapp/public/brand/flight/gota-captain.svg",
@@ -3867,9 +3902,14 @@
         "apps/reference-dapp/public/brand/flight/gota-welcome.svg",
         "apps/reference-dapp/public/brand/flight/gota-wink.svg",
         "apps/reference-dapp/public/brand/flight/seal-founding.svg",
+        "apps/reference-dapp/src/app/board/access/page.tsx",
         "apps/reference-dapp/src/app/board/opengraph-image.alt.txt",
         "apps/reference-dapp/src/app/board/opengraph-image.png",
         "apps/reference-dapp/src/app/board/page.tsx",
+        "apps/reference-dapp/src/app/board/unsubscribe/page.tsx",
+        "apps/reference-dapp/src/app/card/[id]/image/route.ts",
+        "apps/reference-dapp/src/app/card/[id]/page.tsx",
+        "apps/reference-dapp/src/components/flight/access-continue.tsx",
         "apps/reference-dapp/src/components/flight/board-experience.tsx",
         "apps/reference-dapp/src/components/flight/board-page.tsx",
         "apps/reference-dapp/src/components/flight/boarding-pass.tsx",
@@ -3877,10 +3917,13 @@
         "apps/reference-dapp/src/components/flight/flight.module.css",
         "apps/reference-dapp/src/components/flight/language-switch.tsx",
         "apps/reference-dapp/src/flight/app-boarding.tsx",
+        "apps/reference-dapp/src/flight/card-assets.ts",
+        "apps/reference-dapp/src/flight/card-image.tsx",
         "apps/reference-dapp/src/i18n/pt-flight.ts"
       ],
       "suites": [
         "app.flight.campaign",
+        "app.flight.launch",
         "app.e2e.flight"
       ],
       "gaps": [
@@ -7009,6 +7052,8 @@
     "cloud-runtime.forward-compatibility.pg",
     "cloud-runtime.storage.pg",
     "cloud-runtime.tenancy.pg",
-    "cloud-runtime.user-funded-groups-migration.pg"
+    "cloud-runtime.user-funded-groups-migration.pg",
+    "app.flight.launch.pg",
+    "cloud-runtime.flight-launch-migration.pg"
   ]
 }

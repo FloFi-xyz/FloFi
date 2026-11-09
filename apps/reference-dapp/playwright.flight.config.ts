@@ -33,6 +33,8 @@ process.env.FLOFI_PRIVY_EMULATOR_ORIGIN = PRIVY_EMULATOR_ORIGIN;
 // Workers inherit the runner environment: the spec reads the harness origin and the database from here.
 process.env.FLOFI_ACCOUNT_HARNESS_ORIGIN = ACCOUNT_HARNESS_ORIGIN;
 process.env.FLOFI_FLIGHT_E2E = 'MOCKED_LOOPBACK_ONLY';
+// BUILD-FLOFI-FLIGHT-LAUNCH-001: a fresh access secret per run (links, codes, unsubscribe); the spec derives a test email's link from it.
+process.env.FLOFI_FLIGHT_E2E_ACCESS_SECRET ??= randomBytes(32).toString('base64url');
 const parent = createECDH('prime256v1'); parent.generateKeys();
 // The MOCKED provider's OTP signing key (encryption targets and verification tokens): private half to the harness, public half to the app.
 const otpSigner = createECDH('prime256v1'); otpSigner.generateKeys();
@@ -80,6 +82,7 @@ export default defineConfig({
         FLOFI_ENGINEERING_UI: 'LOOPBACK_ONLY', GRYLOO_JUPITER_HARNESS: 'MOCKED_LOOPBACK_ONLY', GRYLOO_JUPITER_JOURNAL: jupiterJournal,
         GRYLOO_BASE_MAINNET_HARNESS: 'MOCKED_LOOPBACK_ONLY', GRYLOO_BASE_JOURNAL: baseJournal,
         FLOFI_PUBLIC_ORIGIN: E2E_APP_ORIGIN, DATABASE_URL: process.env.FLOFI_E2E_DATABASE_URL!, FLOFI_SESSION_SECRET: randomBytes(32).toString('hex'),
+        FLOFI_FLIGHT_ACCESS_SECRET: process.env.FLOFI_FLIGHT_E2E_ACCESS_SECRET,
         // Privy (MOCKED loopback stand-in): the app's server verifies tokens against the stand-in's JWKS and reads users from it.
         NEXT_PUBLIC_PRIVY_APP_ID: privyAppId, PRIVY_APP_SECRET: privyAppSecret, PRIVY_API_URL: PRIVY_EMULATOR_ORIGIN, FLOFI_PRIVY_E2E: 'MOCKED_LOOPBACK_ONLY',
         FLOFI_AUTH_E2E_IDP: 'MOCKED_LOOPBACK_ONLY', FLOFI_AUTH_E2E_IDP_ORIGIN: ACCOUNT_HARNESS_ORIGIN,
