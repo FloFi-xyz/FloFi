@@ -71,6 +71,12 @@ export type ForwardCompatibilityCertificate = {
  */
 export const CERTIFIED_FORWARD_MIGRATIONS: readonly ForwardCompatibilityCertificate[] = Object.freeze([
   {
+    // BUILD-FLOFI-FLIGHT-LAUNCH-001 (Release A): the v23 build keeps working on a database with 0024 — seven new flight_* tables, two nullable
+    // columns on flight_passes, one nullable column on flight_invites and two partial unique indexes; nothing else changes.
+    base: { version: 23, name: 'user_funded_groups', sha256: 'aea46318eee01184af97a814bb88a19dd0a1ad60e9b64b6079de39d7a6b7594e' },
+    migrations: [{ version: 24, name: 'flight_launch', sha256: 'a9def02ddd0ec6ccd89181dc51d9f7f50a20b9265feec8b236abd9e4a3fa7bc0' }],
+    assessment: 'docs/deploy/SCHEMA-COMPATIBILITY.md#18-certificate-0024_flight_launch',
+  }, {
     // BUILD-FLOFI-UNIVERSAL-WORKFLOW-002 (Release A): the v22 build keeps working on a database with 0023 — two workflow_runs CHECKs widened
     // (USER_FUNDED mode, without a delegated authorization) and a new workflow_run_groups table with its own functions and triggers.
     base: { version: 22, name: 'editor_requester', sha256: 'f5b05c8bd32bf70bfa95e2b6ecc075b909f604334a13188c1651c2bd31e16d43' },
