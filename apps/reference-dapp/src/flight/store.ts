@@ -189,11 +189,15 @@ export function createFlightStore(host: FlightHost, given: FlightCalendar = FLIG
         [tenantId, input.accountId, input.runId, input.flow, input.workflowId, input.revision, JSON.stringify(input.route), at(input.now)]);
     });
   }
-  /** The account's latest recorded simulation (of `workflowId` when given) at most two hours old. */
-  async function evidenceOf(input: { accountId: string; workflowId: string | null; now: number }, q: Queryable = db) {
+  /**
+   * The account's latest recorded simulation (of `workflowId` when given) at most two hours old. `boardingOnly`: only one made once boarding
+   * opened — a creator's test-flight simulation never issues a real, numbered card ("Ninguém pega número Founding antes da lista").
+   */
+  async function evidenceOf(input: { accountId: string; workflowId: string | null; now: number; boardingOnly?: boolean }, q: Queryable = db) {
     return (await q.query<{ run_id: string; route: FlightRoute }>(`SELECT run_id, route FROM flight_simulations WHERE tenant_id = $1 AND account_id = $2
-      AND ($3::text IS NULL OR workflow_id = $3) AND simulated_at >= $4::timestamptz - make_interval(secs => $5) ORDER BY simulated_at DESC LIMIT 1`,
-      [tenantId, input.accountId, input.workflowId, at(input.now), SIMULATION_EVIDENCE_MS / 1000])).rows[0] ?? null;
+      AND ($3::text IS NULL OR workflow_id = $3) AND simulated_at >= $4::timestamptz - make_interval(secs => $5) AND simulated_at >= $6::timestamptz
+      ORDER BY simulated_at DESC LIMIT 1`,
+      [tenantId, input.accountId, input.workflowId, at(input.now), SIMULATION_EVIDENCE_MS / 1000, input.boardingOnly ? at(calendar.boardingOpensAt) : at(0)])).rows[0] ?? null;
   }
 
   /**
@@ -206,7 +210,7 @@ export function createFlightStore(host: FlightHost, given: FlightCalendar = FLIG
     const early = await account(input);
     if (early.pass) return { ok: true as const, pass: early.pass, issued: false };
     if (early.access.kind !== 'eligible') return { ok: false as const, code: 'FLIGHT_NOT_ELIGIBLE' as const };
-    if (!await evidenceOf(input)) return { ok: false as const, code: 'FLIGHT_SIMULATION_NOT_FOUND' as const };
+    if (!await evidenceOf({ ...input, boardingOnly: true })) return { ok: false as const, code: 'FLIGHT_SIMULATION_NOT_FOUND' as const };
     return db.transaction(async tx => {
       // The tenant's issuance row is the lock: every boarding waits here, then sees every pass committed before it.
       await tx.query('INSERT INTO flight_issuance (tenant_id) VALUES ($1) ON CONFLICT (tenant_id) DO NOTHING', [tenantId]);
@@ -215,7 +219,7 @@ export function createFlightStore(host: FlightHost, given: FlightCalendar = FLIG
       const state = await account(input, tx);
       if (state.pass) return { ok: true as const, pass: state.pass, issued: false };
       if (state.access.kind !== 'eligible') return { ok: false as const, code: 'FLIGHT_NOT_ELIGIBLE' as const };
-      const evidence = await evidenceOf(input, tx);
+      const evidence = await evidenceOf({ ...input, boardingOnly: true }, tx);
       if (!evidence) return { ok: false as const, code: 'FLIGHT_SIMULATION_NOT_FOUND' as const };
       const next = { boarding_no: issued.boarded + 1, seat: issued.founding < FOUNDING_SEATS ? issued.founding + 1 : null };
       await tx.query('UPDATE flight_issuance SET boarded = $2, founding = $3 WHERE tenant_id = $1', [tenantId, next.boarding_no, next.seat ?? issued.founding]);
@@ -243,19 +247,22 @@ export function createFlightStore(host: FlightHost, given: FlightCalendar = FLIG
     });
   }
 
+  /**
+   * Where the card email goes: the account's own verified login address first (its list entry's language when listed), then the address
+   * the account proved with a link or code. Never an address the person did not prove (a creator invite's recipient may not be them).
+   */
   async function cardRecipient(q: Queryable, accountId: string, emails: readonly string[]): Promise<{ email: string; language: 'EN' | 'PT' } | null> {
-    const claimed = (await q.query<{ email: string; language: 'EN' | 'PT' }>(`SELECT e.email, e.language FROM flight_access_claims c JOIN flight_list_entries e
-      ON e.tenant_id = c.tenant_id AND e.entry_id = c.entry_id WHERE c.tenant_id = $1 AND c.account_id = $2`, [tenantId, accountId])).rows[0];
-    if (claimed) return claimed;
     if (emails.length) {
       const listed = (await q.query<{ email: string; language: 'EN' | 'PT' }>(`SELECT email, language FROM flight_list_entries WHERE tenant_id = $1 AND email = ANY($2::text[])
         ORDER BY (flight = 'FIRST') DESC, joined_at LIMIT 1`, [tenantId, [...emails]])).rows[0];
       return listed ?? { email: emails[0]!, language: 'EN' };
     }
-    const invited = (await q.query<{ recipient: string; language: 'EN' | 'PT' | null }>(`SELECT i.recipient, (SELECT m.language FROM flight_emails m WHERE m.tenant_id = i.tenant_id
-      AND m.invite_code = i.code ORDER BY m.created_at LIMIT 1) AS language FROM flight_invites i WHERE i.tenant_id = $1 AND i.redeemed_by = $2 AND i.recipient IS NOT NULL`,
-    [tenantId, accountId])).rows[0];
-    return invited ? { email: invited.recipient, language: invited.language ?? 'EN' } : null;
+    const claimed = (await q.query<{ email: string; language: 'EN' | 'PT' }>(`SELECT e.email, e.language FROM flight_access_claims c JOIN flight_list_entries e
+      ON e.tenant_id = c.tenant_id AND e.entry_id = c.entry_id WHERE c.tenant_id = $1 AND c.account_id = $2`, [tenantId, accountId])).rows[0];
+    if (claimed) return claimed;
+    // An invite's recipient is not proven to be whoever redeemed the code (a code can be forwarded): no address, no email. The card stays
+    // in the account.
+    return null;
   }
 
   /**

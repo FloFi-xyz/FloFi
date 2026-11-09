@@ -206,7 +206,8 @@ export function renderEmail(input: TemplateInput, ctx: EmailContext): RenderedEm
         text: plain([subject, strip(intro), `${PT ? 'Portão abre' : 'Gate opens'}: ${flapDay(cal.boardingOpensAt)} BRT`, strip(before)], ctx, reason.list) };
     }
     case 'GROUP_BOARDING': case 'ACCESS_REQUESTED': {
-      if (!/^\d{6}$/.test(input.code) || !input.accessUrl.startsWith(`${o}/board/access#t=`)) throw new Error('EMAIL_TEMPLATE_INPUT_INVALID');
+      if (!/^\d{6}$/.test(input.code) || !/^\/board\/access(\?l=(en|pt))?#t=[A-Za-z0-9_-]{43}$/.test(input.accessUrl.slice(o.length)) || !input.accessUrl.startsWith(o))
+        throw new Error('EMAIL_TEMPLATE_INPUT_INVALID');
       const subject = PT ? 'Seu grupo está embarcando ✈️' : 'Your group is boarding ✈️';
       const preheader = PT ? 'Diga para onde você vai. Você aprova cada passo.' : 'Say where you’re going. You approve every step.';
       const intro = PT ? 'Seu portão está aberto. Diga à FloFi para onde você quer levar suas criptos, veja cada passo simulado e assine só o que você aprovar.'

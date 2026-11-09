@@ -3836,6 +3836,7 @@
         "apps/reference-dapp/backend/flight-email-worker.ts",
         "apps/reference-dapp/src/app/api/board/access/code/route.ts",
         "apps/reference-dapp/src/app/api/board/access/consume/route.ts",
+        "apps/reference-dapp/src/app/api/board/access/peek/route.ts",
         "apps/reference-dapp/src/app/api/board/access/request/route.ts",
         "apps/reference-dapp/src/app/api/board/board/route.ts",
         "apps/reference-dapp/src/app/api/board/event/route.ts",

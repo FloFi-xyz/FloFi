@@ -19,6 +19,10 @@ import { TEMPLATE_CATEGORY, TEMPLATE_VERSIONS, type EmailLanguage, type EmailTem
 
 export type EmailState = 'PENDING' | 'SENDING' | 'SENT' | 'UNKNOWN' | 'HELD' | 'FAILED' | 'CANCELLED';
 export type EmailLimits = { readonly daily: number; readonly monthly: number; readonly externalDailyReserve: number; readonly externalMonthlyReserve: number };
+/** Daily sends kept for ESSENTIAL emails (a boarding link a person asked for): campaign email never takes the last ones. */
+export const ESSENTIAL_DAILY_RESERVE = 5;
+/** Holds after the provider may already have sent the email: released only by id, after the operator checked the provider's log. */
+const POSSIBLY_SENT = ['UNRESOLVED_OUTCOME', 'PROVIDER_IDEMPOTENCY_BODY_CHANGED', 'PROVIDER_CONFLICT'];
 export const DEFAULT_EMAIL_LIMITS: EmailLimits = Object.freeze({ daily: 100, monthly: 3000, externalDailyReserve: 0, externalMonthlyReserve: 0 });
 /** Leases, retries and the provider's idempotency window. */
 export const OUTBOX = {
@@ -85,7 +89,7 @@ export function createEmailOutbox(host: { readonly db: Database; readonly tenant
       count(*) AS month
       FROM flight_emails WHERE tenant_id = $1 AND reserved_at >= date_trunc('month', $2::timestamptz, 'UTC')
         AND reserved_at < date_trunc('month', $2::timestamptz, 'UTC') + interval '1 month'
-        AND state IN ('PENDING', 'SENDING', 'SENT', 'UNKNOWN')`, [tenantId, at(now)])).rows[0]!;
+        AND (state IN ('PENDING', 'SENDING', 'SENT', 'UNKNOWN') OR state = 'HELD')`, [tenantId, at(now)])).rows[0]!;
     return { day: Number(row.day), month: Number(row.month) };
   }
 
@@ -140,6 +144,9 @@ export function createEmailOutbox(host: { readonly db: Database; readonly tenant
         AND ((state = 'PENDING' AND not_before <= $2) OR state = 'UNKNOWN') AND ($3::boolean OR category = 'ESSENTIAL')
         ORDER BY (category = 'ESSENTIAL') DESC, next_attempt_at, created_at LIMIT $4 FOR UPDATE SKIP LOCKED`, [tenantId, at(now), options.campaign, options.max])).rows;
       const leased: EmailRow[] = [], heldBatches = new Set<string>();
+      // Campaign email leaves room for the access emails people ask for.
+      const campaignDay = Math.max(0, dailyLimit - Math.min(ESSENTIAL_DAILY_RESERVE, Math.floor(dailyLimit / 20)));
+      const dayLimit = (row: Row) => row.category === 'ESSENTIAL' ? dailyLimit : campaignDay;
       for (const row of due) {
         if (row.batch_key && heldBatches.has(row.batch_key)) continue;
         if (row.state === 'UNKNOWN') {
@@ -153,7 +160,7 @@ export function createEmailOutbox(host: { readonly db: Database; readonly tenant
             // A batch is reserved whole: every pending, unreserved email of the batch that is due now.
             const pending = Number((await tx.query<{ n: string }>(`SELECT count(*) AS n FROM flight_emails WHERE tenant_id = $1 AND batch_key = $2 AND state = 'PENDING'
               AND reserved_at IS NULL AND not_before <= $3`, [tenantId, row.batch_key, at(now)])).rows[0]!.n);
-            const limit = used.day + pending > dailyLimit ? 'QUOTA_DAILY' : used.month + pending > monthlyLimit ? 'QUOTA_MONTHLY' : null;
+            const limit = used.day + pending > dayLimit(row) ? 'QUOTA_DAILY' : used.month + pending > monthlyLimit ? 'QUOTA_MONTHLY' : null;
             if (limit) {
               await tx.query(`UPDATE flight_emails SET state = 'HELD', status_reason = $3, updated_at = clock_timestamp() WHERE tenant_id = $1 AND batch_key = $2
                 AND state = 'PENDING' AND reserved_at IS NULL`, [tenantId, row.batch_key, limit]);
@@ -164,7 +171,7 @@ export function createEmailOutbox(host: { readonly db: Database; readonly tenant
               AND reserved_at IS NULL AND not_before <= $3`, [tenantId, row.batch_key, at(now)]);
             used.day += pending; used.month += pending;
           } else {
-            const limit = used.day + 1 > dailyLimit ? 'QUOTA_DAILY' : used.month + 1 > monthlyLimit ? 'QUOTA_MONTHLY' : null;
+            const limit = used.day + 1 > dayLimit(row) ? 'QUOTA_DAILY' : used.month + 1 > monthlyLimit ? 'QUOTA_MONTHLY' : null;
             if (limit) { await settleRow(tx, row.email_id, null, { kind: 'HELD', code: limit }, now); continue; }
             await tx.query('UPDATE flight_emails SET reserved_at = $3 WHERE tenant_id = $1 AND email_id = $2', [tenantId, row.email_id, at(now)]);
             used.day += 1; used.month += 1;
@@ -186,7 +193,9 @@ export function createEmailOutbox(host: { readonly db: Database; readonly tenant
       SENT: `state = 'SENT', sent_at = $3, provider_id = $4, status_reason = NULL`,
       UNKNOWN: `state = 'UNKNOWN', status_reason = $4, next_attempt_at = $3::timestamptz + make_interval(secs => $6::double precision / 1000)`,
       RETRY: `state = 'PENDING', status_reason = $4, next_attempt_at = $3::timestamptz + make_interval(secs => $6::double precision / 1000)`,
-      HELD: `state = 'HELD', status_reason = $4, reserved_at = NULL`,
+      // A hold after a provider call that may have sent the email keeps its reservation (it may have spent the provider's quota).
+      HELD: `state = 'HELD', status_reason = $4, reserved_at = CASE WHEN $4 IN ('UNRESOLVED_OUTCOME', 'PROVIDER_IDEMPOTENCY_BODY_CHANGED', 'PROVIDER_CONFLICT')
+        THEN reserved_at ELSE NULL END`,
       FAILED: `state = 'FAILED', status_reason = $4, reserved_at = NULL`,
       CANCELLED: `state = 'CANCELLED', status_reason = $4, reserved_at = NULL`,
     };
@@ -250,16 +259,17 @@ export function createEmailOutbox(host: { readonly db: Database; readonly tenant
   async function isSuppressed(addressHash: string, q: Queryable = db): Promise<boolean> {
     return (await q.query('SELECT 1 FROM flight_email_suppressions WHERE tenant_id = $1 AND address_hash = $2', [tenantId, addressHash])).rowCount > 0;
   }
-  /** One-click unsubscribe from an email: its recipient stops receiving campaign email; pending campaign email to it is cancelled. */
-  async function unsubscribeByEmail(emailId: string): Promise<boolean> {
-    return db.transaction(async tx => {
-      const recipient = (await tx.query<{ recipient: string }>('SELECT recipient FROM flight_emails WHERE tenant_id = $1 AND email_id = $2', [tenantId, emailId])).rows[0]?.recipient;
-      if (!recipient) return false;
-      await tx.query(`INSERT INTO flight_email_suppressions (tenant_id, address_hash, reason) SELECT $1, ${SQL_ADDRESS_HASH('$2::text')}, 'UNSUBSCRIBED'
-        ON CONFLICT (tenant_id, address_hash) DO NOTHING`, [tenantId, recipient]);
+  /**
+   * One-click unsubscribe: the address digest carried (signed) in the email's link stops campaign email to it, and pending campaign email
+   * to it is cancelled. Works whether or not the email's own record still exists (pruned, erased).
+   */
+  async function unsubscribe(addressHash: string): Promise<void> {
+    if (!/^[0-9a-f]{64}$/.test(addressHash)) throw new Error('FLIGHT_ADDRESS_HASH_INVALID');
+    await db.transaction(async tx => {
+      await tx.query(`INSERT INTO flight_email_suppressions (tenant_id, address_hash, reason) VALUES ($1, $2, 'UNSUBSCRIBED') ON CONFLICT (tenant_id, address_hash) DO NOTHING`,
+        [tenantId, addressHash]);
       await tx.query(`UPDATE flight_emails SET state = 'CANCELLED', status_reason = 'UNSUBSCRIBED', reserved_at = NULL, updated_at = clock_timestamp()
-        WHERE tenant_id = $1 AND recipient = $2 AND category = 'CAMPAIGN' AND state IN ('PENDING', 'HELD')`, [tenantId, recipient]);
-      return true;
+        WHERE tenant_id = $1 AND category = 'CAMPAIGN' AND state IN ('PENDING', 'HELD') AND ${SQL_ADDRESS_HASH('recipient')} = $2`, [tenantId, addressHash]);
     });
   }
 
@@ -282,19 +292,19 @@ export function createEmailOutbox(host: { readonly db: Database; readonly tenant
   /**
    * Release held emails back to sending (the team decided: quota raised, next day, provider fixed). `max` releases only that many of a batch
    * (oldest first): an explicit, operator-chosen partial send. An UNRESOLVED_OUTCOME email is never released by a filter, only by its id
-   * after the operator checked the provider's log (it may already have been delivered).
+   * after the operator checked the provider's log (it may already have been delivered); the same for an idempotency conflict.
    */
   async function release(filter: { readonly emailId?: string; readonly batchKey?: string; readonly reason?: string; readonly max?: number }, now: number): Promise<number> {
     const max = filter.max ?? 1_000_000;
     if (!Number.isSafeInteger(max) || max < 1) throw new Error('FLIGHT_RELEASE_MAX_INVALID');
     if (!filter.emailId && !filter.batchKey && !filter.reason) throw new Error('FLIGHT_RELEASE_FILTER_REQUIRED');
     return (await db.query(`UPDATE flight_emails SET state = 'PENDING', status_reason = NULL, reserved_at = NULL, next_attempt_at = $2,
-      attempts = CASE WHEN status_reason IN ('ATTEMPTS_EXHAUSTED', 'UNRESOLVED_OUTCOME') THEN 0 ELSE attempts END,
+      attempts = CASE WHEN status_reason IN ('ATTEMPTS_EXHAUSTED', 'UNRESOLVED_OUTCOME', 'PROVIDER_IDEMPOTENCY_BODY_CHANGED', 'PROVIDER_CONFLICT') THEN 0 ELSE attempts END,
       first_attempt_at = CASE WHEN status_reason = 'UNRESOLVED_OUTCOME' THEN NULL ELSE first_attempt_at END, updated_at = clock_timestamp()
       WHERE tenant_id = $1 AND email_id IN (SELECT email_id FROM flight_emails WHERE tenant_id = $1 AND state = 'HELD'
         AND ($3::text IS NULL OR email_id = $3) AND ($4::text IS NULL OR batch_key = $4) AND ($5::text IS NULL OR status_reason = $5)
-        AND ($3::text IS NOT NULL OR status_reason IS DISTINCT FROM 'UNRESOLVED_OUTCOME')
-        ORDER BY created_at, email_id LIMIT $6)`, [tenantId, at(now), filter.emailId ?? null, filter.batchKey ?? null, filter.reason ?? null, max])).rowCount;
+        AND ($3::text IS NOT NULL OR status_reason IS NULL OR NOT (status_reason = ANY($7::text[])))
+        ORDER BY created_at, email_id LIMIT $6)`, [tenantId, at(now), filter.emailId ?? null, filter.batchKey ?? null, filter.reason ?? null, max, POSSIBLY_SENT])).rowCount;
   }
   /** Cancel pending or held emails (a postponed campaign, a mistaken batch). Sent, in-flight and unknown emails are never touched. */
   async function cancel(filter: { readonly emailId?: string; readonly batchKey?: string; readonly template?: EmailTemplate }): Promise<number> {
@@ -317,7 +327,7 @@ export function createEmailOutbox(host: { readonly db: Database; readonly tenant
   }
 
   return { usage, control, setPaused, block, clearBlock, housekeeping, lease, settle, scheduleEve, scheduleBoarding, backfillConfirmations, suppress, isSuppressed,
-    unsubscribeByEmail, status, listAttention, release, cancel, markDelivered, prune, limits: { daily: dailyLimit, monthly: monthlyLimit } };
+    unsubscribe, status, listAttention, release, cancel, markDelivered, prune, limits: { daily: dailyLimit, monthly: monthlyLimit } };
 }
 export type EmailOutbox = ReturnType<typeof createEmailOutbox>;
 

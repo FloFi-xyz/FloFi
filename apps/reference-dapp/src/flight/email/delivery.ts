@@ -27,7 +27,7 @@ const DOMAIN_CHECK_MS = 10 * 60_000;
 export type DeliveryDeps = {
   readonly db: Database; readonly tenantId: string; readonly calendar: Required<FlightCalendar>; readonly secret: string; readonly origin: string;
   readonly provider: Pick<ResendClient, 'send' | 'domainStatus'>; readonly outbox: EmailOutbox; readonly store: Pick<FlightStore, 'cardForEmail' | 'foundingOpen'>;
-  readonly access: Pick<AccessStore, 'issueToken'>; readonly logger: Logger; readonly briefUrl?: string;
+  readonly access: Pick<AccessStore, 'issueToken' | 'prune'>; readonly logger: Logger; readonly briefUrl?: string;
   /** The operator attested in the Resend dashboard that the domain is verified (for a sending-only key, which cannot list domains). */
   readonly domainAttested?: boolean; readonly perSecond?: number; readonly batchSize?: number;
   readonly now?: () => number; readonly sleep?: (ms: number) => Promise<void>;
@@ -42,7 +42,7 @@ const nextUtcMonth = (ms: number) => { const d = new Date(ms); return Date.UTC(d
 export function createEmailDelivery(deps: DeliveryDeps) {
   const now = deps.now ?? Date.now, sleep = deps.sleep ?? (ms => new Promise(resolve => setTimeout(resolve, ms)));
   const origin = deps.origin.replace(/\/$/, ''), perSecond = Math.max(0.1, deps.perSecond ?? 2), batchSize = deps.batchSize ?? 20;
-  let domain: { at: number; ok: boolean } = { at: 0, ok: false };
+  let domain: { at: number; ok: boolean } = { at: 0, ok: false }, prunedAt = 0;
 
   async function domainReady(at: number): Promise<boolean> {
     if (deps.domainAttested) return true;
@@ -82,7 +82,7 @@ export function createEmailDelivery(deps: DeliveryDeps) {
         if (entry.boarded_at) return { kind: 'CANCEL', code: 'BOARDED' };
         const token = await deps.access.issueToken({ emailId: row.emailId, entryId: row.entryId!, now: at,
           codeMs: row.template === 'ACCESS_REQUESTED' ? REQUESTED_CODE_MS : EMAIL_CODE_MS });
-        input = { template: row.template, accessUrl: `${origin}/board/access#t=${token.link}`, code: token.code, codeMinutes: token.codeMinutes,
+        input = { template: row.template, accessUrl: `${origin}/board/access?l=${row.language.toLowerCase()}#t=${token.link}`, code: token.code, codeMinutes: token.codeMinutes,
           linkHours: token.linkHours || ACCESS_LINK_MS / 3_600_000, foundingOpen: await deps.store.foundingOpen(), group: entry.batch_no };
         break;
       }
@@ -104,9 +104,9 @@ export function createEmailDelivery(deps: DeliveryDeps) {
         break;
       }
     }
-    const unsubscribe = unsubscribeTokenFor(deps.secret, row.emailId);
+    const unsubscribe = unsubscribeTokenFor(deps.secret, row.emailId, row.recipient);
     const rendered = renderEmail(input, { language: row.language, recipient: row.recipient, origin, calendar: deps.calendar,
-      unsubscribeUrl: `${origin}/board/unsubscribe?t=${unsubscribe}` });
+      unsubscribeUrl: `${origin}/board/unsubscribe?l=${row.language.toLowerCase()}&t=${unsubscribe}` });
     return { kind: 'SEND', email: { idempotencyKey: row.emailId, to: row.recipient, subject: rendered.subject, html: rendered.html, text: rendered.text,
       headers: { 'List-Unsubscribe': `<${origin}/api/board/unsubscribe?t=${unsubscribe}>`, 'List-Unsubscribe-Post': 'List-Unsubscribe=One-Click' },
       ...attachments ? { attachments } : {}, tags: [{ name: 'template', value: row.template.toLowerCase() }, { name: 'campaign', value: 'flight-flofi' }] } };
@@ -127,6 +127,8 @@ export function createEmailDelivery(deps: DeliveryDeps) {
     const report = { scheduled: 0, leased: 0, sent: 0, unknown: 0, held: 0, failed: 0, cancelled: 0, retried: 0, skipped: null as string | null };
     const start = now();
     await deps.outbox.housekeeping(start);
+    // Retention holds whether or not /board gets visits: settled emails after 90 days, access records on their schedule (hourly at most).
+    if (start - prunedAt > 3_600_000) { prunedAt = start; await Promise.all([deps.outbox.prune(start), deps.access.prune(start)]); }
     report.scheduled += await deps.outbox.scheduleEve(start, deps.calendar.eveEmailAt, deps.calendar.boardingOpensAt);
     report.scheduled += await deps.outbox.scheduleBoarding(start, deps.calendar.boardingOpensAt);
     const control = await deps.outbox.control();

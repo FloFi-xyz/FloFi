@@ -128,9 +128,16 @@ const flaps = (scope: Page | Locator, text: string) => scope.getByRole('img', { 
 const shot = (page: Page, name: string) => page.screenshot({ path: test.info().outputPath(`${name}.png`), fullPage: true });
 
 /** No public aggregate count of people anywhere (BUILD-FLOFI-FLIGHT-LAUNCH-001): page text, server HTML and the anonymous state API. */
+const COUNT = /\d[\d.,]*\s*(ON THE LIST|BOARDED|NA LISTA|EMBARCARAM|EMBARCOU)|FOUNDING SEATS LEFT|ASSENTOS FOUNDING RESTANTES|\b(OF|DE) 100\b|\b100 \/ 100\b/i;
 async function noCounters(page: Page) {
+  // Visible text, every accessible name (split-flap rows carry their whole text as one: a count drawn in flaps is caught there), and the
+  // server-rendered HTML.
   const text = await page.locator('body').innerText();
-  expect(text).not.toMatch(/\d[\d.,]*\s*(ON THE LIST|BOARDED|NA LISTA|EMBARCARAM)|FOUNDING SEATS LEFT|ASSENTOS FOUNDING RESTANTES|\bOF 100\b|\b100 \/ 100\b/);
+  expect(text).not.toMatch(COUNT);
+  const labels = await page.locator('[aria-label]').evaluateAll(nodes => nodes.map(node => node.getAttribute('aria-label') ?? ''));
+  for (const label of labels) expect(label).not.toMatch(COUNT);
+  const html = await (await page.request.get(page.url())).text();
+  expect(html.replace(/<[^>]+>/g, ' ')).not.toMatch(COUNT);
   const state = await page.evaluate(async () => await (await fetch('/api/board/state')).json() as Record<string, unknown>);
   expect(Object.keys(state)).not.toContain('counters');
   expect(JSON.stringify(state)).not.toMatch(/onList|foundingLeft|foundingTaken|"boarded":\d/);
@@ -471,7 +478,12 @@ test('Email 3 access: opening the link consumes nothing, Continue proves the add
     const scanner = await page.request.get(`/board/access#t=${link}`);
     expect(scanner.status()).toBe(200);
     expect(await query(`SELECT consumed_at FROM flight_access_tokens WHERE token_id = $1`, [tokenId])).toEqual([{ consumed_at: null }]);
+    // The page names the address the link proves (masked), before the person confirms.
+    await expect(page.locator('main')).toContainText(`This link is for l***@flofi-e2e.test.`);
+    await page.setViewportSize({ width: 390, height: 900 });
+    await noOverflow(page);
     await shot(page, 'access-continue-390');
+    await page.setViewportSize({ width: 1440, height: 900 });
     await page.getByRole('button', { name: 'Continue' }).click();
     // Proven: the entry is now this account's, and "Board now" continues to /app.
     await expect(page).toHaveURL(/\/app$/);
@@ -509,12 +521,12 @@ test('Email 3 access: opening the link consumes nothing, Continue proves the add
     VALUES ('default', $1, $2, 'NEXT_FLIGHT', 1, 'CAMPAIGN', $3, 'EN', 'browser_test', now() + interval '1 day', now() + interval '1 day')`, [emailId, `e2e:${emailId}`, OTHER]);
   const viewer = await browser.newContext({ baseURL: E2E_APP_ORIGIN, storageState: returningVisitor(E2E_APP_ORIGIN) }), unsub = await viewer.newPage();
   try {
-    await unsub.goto(`/board/unsubscribe?t=${unsubscribeTokenFor(process.env.FLOFI_FLIGHT_E2E_ACCESS_SECRET!, emailId)}`);
+    await unsub.goto(`/board/unsubscribe?t=${unsubscribeTokenFor(process.env.FLOFI_FLIGHT_E2E_ACCESS_SECRET!, emailId, OTHER)}`);
     expect(await query(`SELECT count(*)::int AS n FROM flight_email_suppressions`)).toEqual([{ n: 0 }]);
     await unsub.getByRole('button', { name: 'Unsubscribe' }).click();
     await expect(unsub.getByRole('status')).toHaveText('Done. You won’t get Flight FloFi campaign emails any more.');
     expect(await query(`SELECT state, status_reason FROM flight_emails WHERE email_id = $1`, [emailId])).toEqual([{ state: 'CANCELLED', status_reason: 'UNSUBSCRIBED' }]);
-    await unsub.goto('/board/unsubscribe?t=fem_00000000000000000000000000000000.AAAAAAAAAAAAAAAAAAAAAA');
+    await unsub.goto(`/board/unsubscribe?t=fem_00000000000000000000000000000000.${'0'.repeat(64)}.AAAAAAAAAAAAAAAAAAAAAA`);
     await unsub.getByRole('button', { name: 'Unsubscribe' }).click();
     await expect(unsub.locator('p[role="alert"]')).toHaveText('This unsubscribe link is not valid.');
   } finally { await viewer.close(); }
@@ -553,6 +565,7 @@ test('every CTA and link resolves; the campaign posts link to a real page with t
     await expect(page.getByRole('heading', { level: 1 })).toContainText(title);
     if (clock === FINAL_CALL) await expect(hero(page)).toContainText('Flight FloFi · Beta fechado · Embarca em 12/11');
     await fitsPhones(page);
+    await noCounters(page);
   }
   await page.getByRole('navigation', { name: 'Navegação do Flight FloFi' }).getByRole('button', { name: 'EN' }).click();
   await expect(page.getByRole('heading', { level: 1 })).toHaveText('Say where you’re going.');

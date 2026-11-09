@@ -128,22 +128,23 @@ function InviteForm({ copy, onRedeemed }: { copy: FlightCopy; onRedeemed: (fligh
  * "On the list with another email?": a link and a 6-digit code go to that address if it is on the beta list and its group is boarding (the
  * answer never says whether it is); the code typed here proves the address on this device (another device than the email's, too).
  */
-function AccessForms({ copy, language, onClaimed }: { copy: FlightCopy; language: Language; onClaimed: () => void }) {
-  const t = copy.access, [email, setEmail] = useState(''), [code, setCode] = useState(''), [sent, setSent] = useState(false), [busy, setBusy] = useState(false);
+function AccessForms({ copy, language, onClaimed }: { copy: FlightCopy; language: Language; onClaimed: (notice: string) => void }) {
+  const t = copy.access, [email, setEmail] = useState(''), [code, setCode] = useState(''), [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null);
   async function request(event: FormEvent) {
     event.preventDefault();
     setBusy(true); setMessage(null);
     const answer = await post('/api/board/access/request', { email, language });
     setBusy(false);
-    if (answer.ok) { setSent(true); setMessage({ ok: true, text: t.sent }); } else setMessage({ ok: false, text: errorText(copy, answer.code) });
+    if (answer.ok) setMessage({ ok: true, text: t.sent }); else setMessage({ ok: false, text: errorText(copy, answer.code) });
   }
   async function useCode(event: FormEvent) {
     event.preventDefault();
     setBusy(true); setMessage(null);
     const answer = await post('/api/board/access/code', { email, code });
     setBusy(false);
-    if (answer.ok) { setMessage({ ok: true, text: answer.status === 'SESSION' ? t.pendingSignIn : t.claimed }); onClaimed(); }
+    // The confirmation moves to the hero (this form leaves the page when the person's state changes).
+    if (answer.ok) onClaimed(answer.status === 'SESSION' ? t.pendingSignIn : t.claimed);
     else setMessage({ ok: false, text: errorText(copy, answer.code) });
   }
   return <div className={styles.accessForms}>
@@ -153,13 +154,14 @@ function AccessForms({ copy, language, onClaimed }: { copy: FlightCopy; language
       <input id="flight-access-email" type="email" autoComplete="email" inputMode="email" placeholder={copy.finalCall.email} value={email} onChange={e => setEmail(e.target.value)}/>
       <button className={`${styles.btn} ${styles.btnGhost}`} type="submit" disabled={busy || email.trim().length < 6}>{t.send}</button>
     </form>
-    <form onSubmit={useCode} className={styles.inviteForm} noValidate aria-describedby="flight-access-code-hint">
+    <form onSubmit={useCode} className={styles.inviteForm} noValidate>
       <label className={styles.srOnly} htmlFor="flight-access-code">{t.codeLabel}</label>
-      <input id="flight-access-code" inputMode="numeric" autoComplete="one-time-code" pattern="[0-9]*" maxLength={7} placeholder="000000" value={code}
+      {/* No maxLength: a code pasted from the email's digit cells arrives with tabs or line breaks between digits; only digits are kept. */}
+      <input id="flight-access-code" inputMode="numeric" autoComplete="one-time-code" placeholder="000000" value={code} aria-describedby="flight-access-code-hint"
         onChange={e => setCode(e.target.value.replace(/[^0-9]/g, '').slice(0, 6))}/>
       <button className={`${styles.btn} ${styles.btnGhost}`} type="submit" disabled={busy || code.length !== 6 || email.trim().length < 6}>{t.codeUse}</button>
     </form>
-    <p id="flight-access-code-hint" className={styles.small}>{sent ? '' : t.codeHint}</p>
+    <p id="flight-access-code-hint" className={styles.small}>{t.codeHint}</p>
     <p className={message?.ok ? styles.status : styles.srOnly} role="status">{message?.ok ? message.text : ''}</p>
     {message && !message.ok && <p className={styles.error} role="alert">{message.text}</p>}
   </div>;
@@ -182,8 +184,12 @@ function PassPanel({ pass, invites, copy, onPass }: { pass: FlightPass; invites:
   const [handle, setHandle] = useState(pass.handle ?? ''), [visible, setVisible] = useState(pass.public), [message, setMessage] = useState<string | null>(null);
   // Screen 1 only once per card, and only while the card has no handle yet.
   const [printing, setPrinting] = useState(false);
-  useEffect(() => { setPrinting(pass.handle === null && storage()?.getItem(printedKey) !== '1'); }, [pass.handle, printedKey]);
-  const printed = () => { storage()?.setItem(printedKey, '1'); setPrinting(false); window.setTimeout(() => document.getElementById('pass')?.focus(), 0); };
+  // Remembered in this browser (not only this tab): the handle screen is shown once.
+  const remembered = () => { try { return localStorage; } catch { return null; } };
+  useEffect(() => { setPrinting(pass.handle === null && remembered()?.getItem(printedKey) !== '1'); }, [pass.handle, printedKey]);
+  const printed = () => { remembered()?.setItem(printedKey, '1'); setPrinting(false); window.setTimeout(() => document.getElementById('pass')?.focus(), 0); };
+  const [shareMessage, setShareMessage] = useState<string | null>(null);
+  const unused = invites.filter(invite => !invite.redeemed).length;
   async function save(event: FormEvent, after?: () => void) {
     event.preventDefault();
     const answer = await post('/api/board/handle', { handle, public: visible });
@@ -216,10 +222,11 @@ function PassPanel({ pass, invites, copy, onPass }: { pass: FlightPass; invites:
           {url && <button className={`${styles.btn} ${styles.btnNavy}`} type="button" onClick={() => { report('share_click', kind); shareOnX(cardPost(pass), url); }}>{t.share}</button>}
           {url && <a className={`${styles.btn} ${styles.btnBlue}`} href={`/card/${pass.publicId}/image?download=1`} download>{t.download}</a>}
           {url && <button className={`${styles.btn} ${styles.btnGhost}`} type="button" onClick={async () => {
-            try { await navigator.clipboard.writeText(url); setMessage(t.copied); } catch { setMessage(url); } }}>{t.copy}</button>}
-          {invites.length > 0 && <a className={`${styles.btn} ${styles.btnGhost}`} href="#invites">{t.invitesReady} <span aria-hidden="true">→</span></a>}
+            try { await navigator.clipboard.writeText(url); setShareMessage(t.copied); } catch { setShareMessage(url); } }}>{t.copy}</button>}
+          {unused > 0 && <a className={`${styles.btn} ${styles.btnGhost}`} href="#invites">{t.invitesReady(unused)} <span aria-hidden="true">→</span></a>}
         </div>
         {url && <p className={styles.small}><a href={url}>{url.replace('https://', '')}</a> · {t.emailed}</p>}
+        <p role="status" className={shareMessage ? styles.muted : styles.srOnly}>{shareMessage ?? ''}</p>
       </section>
       <section aria-labelledby="pass-handle-title">
         <h2 id="pass-handle-title">{t.handleLabel}</h2>
@@ -271,6 +278,11 @@ export function BoardExperience({ initial, language }: { initial: FlightState | 
   const [message, setMessage] = useState<string | null>(null);
   const [showInvite, setShowInvite] = useState(false);
   const [nextJoined, setNextJoined] = useState(false);
+  const [accessNotice, setAccessNotice] = useState<string | null>(null), [showAccess, setShowAccess] = useState(false);
+  const joinedStatus = useRef<HTMLParagraphElement>(null);
+  useEffect(() => { if (nextJoined) joinedStatus.current?.focus(); }, [nextJoined]);
+  // A proven address changes the hero: focus its heading so the confirmation is read out (the form the person used is gone).
+  useEffect(() => { if (accessNotice) document.getElementById('flight-hero-title')?.focus(); }, [accessNotice]);
   const [paused, setPaused] = useState(false);
   const [focusPass, setFocusPass] = useState(false);
   // When the hero changes to the person's own state, focus its heading so the change is read out (the form they used is gone).
@@ -290,7 +302,8 @@ export function BoardExperience({ initial, language }: { initial: FlightState | 
       if (response.ok) setState(await response.json() as FlightState);
     } catch { /* The page keeps its last real numbers. */ }
   }, []);
-  // Departures and counters stay live while the page is visible.
+  const claimed = useCallback((notice: string) => { setAccessNotice(notice); setShowAccess(false); setPersonal(null); void refresh(); }, [refresh]);
+  // Departures stay live while the page is visible.
   useEffect(() => {
     const timer = setInterval(() => { if (document.visibilityState === 'visible') void refresh(); }, 30_000);
     return () => clearInterval(timer);
@@ -380,8 +393,8 @@ export function BoardExperience({ initial, language }: { initial: FlightState | 
       </div>
       <h1 id="flight-hero-title" tabIndex={-1}>{t.title[0]}<span className={styles.accentPeri}>{t.title[1]}</span></h1>
       <p className={styles.heroBody}>{t.body}</p>
-      <p className={nextJoined ? styles.status : styles.srOnly} role="status">{nextJoined ? t.joined : ''}</p>
-      {state.phase === 'BOARDING' && <AccessForms copy={copy} language={language} onClaimed={() => { setPersonal(null); void refresh(); }}/>}
+      <p ref={joinedStatus} tabIndex={-1} className={nextJoined ? styles.status : styles.srOnly} role="status">{nextJoined ? t.joined : ''}</p>
+      {state.phase === 'BOARDING' && <AccessForms copy={copy} language={language} onClaimed={claimed}/>}
       {nextJoined ? null : state.me.hasEmail ? <div className={styles.ctaRow}>
         <button type="button" className={`${styles.btn} ${styles.btnBlue}`} onClick={async () => {
           const answer = await post('/api/board/list', { language, consent: true });
@@ -422,7 +435,7 @@ export function BoardExperience({ initial, language }: { initial: FlightState | 
     hero = <div className={styles.heroText}>
       {full ? <div className={styles.fullBanner} role="note"><span>{copy.foundingFull.banner}</span><span>{copy.foundingFull.seats}</span></div>
         : <span className={`${styles.lbl} ${styles.eyebrow}`}>{t.eyebrow}</span>}
-      <h1>{t.title[0]}{t.title[1]}</h1>
+      <h1 id="flight-hero-title" tabIndex={-1}>{t.title[0]}{t.title[1]}</h1>
       <p className={styles.heroBody}>{full ? <>{copy.foundingFull.body[0]}<b>{copy.foundingFull.body[1]}</b></> : <>{t.body[0]}<b>{t.body[1]}</b></>}</p>
       <form className={styles.pill} onSubmit={board}>
         <label className={styles.pillTo} htmlFor="flight-prompt">{t.to}<span className={styles.srOnly}> · {t.promptLabel}</span></label>
@@ -430,12 +443,16 @@ export function BoardExperience({ initial, language }: { initial: FlightState | 
         <button className={`${styles.btn} ${styles.btnNavy}`} type="submit" disabled={busy}>{t.board} <span aria-hidden="true">→</span></button>
       </form>
       <p className={message ? styles.status : styles.srOnly} role="status">{message ?? ''}</p>
-      {state.me.accessPending && <p className={styles.status}>{copy.access.pendingSignIn}</p>}
+      {accessNotice ? <p className={styles.status} role="status">{accessNotice}</p> : state.me.accessPending && <p className={styles.status}>{copy.access.pendingSignIn}</p>}
       <div className={styles.metaRow}>
         <span className={styles.meta}>{full ? copy.passengerSeats : copy.closedBeta}</span>
         {!pass && <><span className={styles.dot} aria-hidden="true"/><button type="button" className={styles.linkButton} onClick={() => setShowInvite(value => !value)}>{t.invite}</button></>}
       </div>
       {showInvite && !pass && <InviteForm key="invite" copy={copy} onRedeemed={() => void refresh()}/>}
+      {/* On the list with another email, or on another device: a link and a code by email, or the code typed here (signed in or not). */}
+      {!pass && !accessNotice && <p className={styles.small}><button type="button" className={styles.linkButton} aria-expanded={showAccess}
+        onClick={() => setShowAccess(value => !value)}>{copy.access.otherEmail}</button></p>}
+      {showAccess && !pass && <AccessForms copy={copy} language={language} onClaimed={claimed}/>}
     </div>;
   }
 

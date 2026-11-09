@@ -11,10 +11,10 @@ import { FLIGHT_COPY } from './flight-copy';
 import styles from './flight.module.css';
 
 type Language = 'EN' | 'PT';
-async function post(path: string, body: unknown): Promise<{ ok: boolean; code?: string; next?: string }> {
+async function post(path: string, body: unknown): Promise<{ ok: boolean; code?: string; next?: string; address?: string }> {
   try {
     const response = await fetch(path, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body), credentials: 'same-origin' });
-    return await response.json() as { ok: boolean; code?: string; next?: string };
+    return await response.json() as { ok: boolean; code?: string; next?: string; address?: string };
   } catch { return { ok: false, code: 'FLIGHT_UNAVAILABLE' }; }
 }
 
@@ -28,11 +28,17 @@ function Shell({ lang, children }: { lang: string; children: React.ReactNode }) 
 export function AccessContinue({ language, lang }: { language: Language; lang: string }) {
   const copy = FLIGHT_COPY[language], t = copy.access;
   const [token, setToken] = useState<string | null | undefined>(undefined), [busy, setBusy] = useState(false);
-  const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null);
+  const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null), [address, setAddress] = useState<string | null>(null);
   const status = useRef<HTMLParagraphElement>(null);
   useEffect(() => {
     const match = /(?:^|[#&])t=([A-Za-z0-9_-]{43})(?:&|$)/.exec(window.location.hash);
-    setToken(match ? match[1]! : null);
+    const value = match ? match[1]! : null;
+    setToken(value);
+    // Show which address the link proves before the person confirms (nothing is consumed by asking).
+    if (value) void post('/api/board/access/peek', { token: value }).then(answer => {
+      const address = (answer as { address?: unknown }).address;
+      if (answer.ok && typeof address === 'string') setAddress(address);
+    });
   }, []);
   async function go() {
     if (!token) return;
@@ -48,10 +54,11 @@ export function AccessContinue({ language, lang }: { language: Language; lang: s
   }
   useEffect(() => { if (message) status.current?.focus(); }, [message]);
   return <Shell lang={lang}>
-    <span className={`${styles.lbl} ${styles.eyebrow}`}>Flight FloFi · Now boarding</span>
+    <span className={`${styles.lbl} ${styles.eyebrow}`}>{t.eyebrow}</span>
     <h1>{t.title[0]}<span className={styles.accentLight}>{t.title[1]}</span></h1>
     {token === null ? <p className={styles.heroBody}>{t.missing}</p> : <>
       <p className={styles.heroBody}>{t.body}</p>
+      {address && <p className={styles.heroBody}><b>{t.proves(address)}</b></p>}
       <div className={styles.ctaRow}>
         <button type="button" className={`${styles.btn} ${styles.btnNavy}`} onClick={go} disabled={!token || busy || message?.ok === true && message.text === t.done}>
           {t.continue} <span aria-hidden="true">→</span></button>
@@ -91,7 +98,7 @@ export function Unsubscribe({ language, lang }: { language: Language; lang: stri
   const [token, setToken] = useState<string | null | undefined>(undefined), [state, setState] = useState<'idle' | 'busy' | 'done' | 'invalid'>('idle');
   useEffect(() => {
     const value = new URLSearchParams(window.location.search).get('t');
-    setToken(value && /^fem_[0-9a-f]{32}\.[A-Za-z0-9_-]{22}$/.test(value) ? value : null);
+    setToken(value && /^fem_[0-9a-f]{32}\.[0-9a-f]{64}\.[A-Za-z0-9_-]{22}$/.test(value) ? value : null);
   }, []);
   async function go() {
     if (!token) return;

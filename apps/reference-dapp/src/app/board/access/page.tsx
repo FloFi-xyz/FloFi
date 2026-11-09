@@ -10,7 +10,8 @@ import { FLIGHT_COPY } from '../../../components/flight/flight-copy';
 import { siteLanguage } from '../../../components/site/site-language';
 
 export const metadata: Metadata = { title: 'Flight FloFi', robots: { index: false, follow: false }, referrer: 'no-referrer' };
-export default async function AccessPage() {
-  const language = await siteLanguage();
+// The email's own language (?l=pt / ?l=en in its links) wins over the site preference: a mail app's browser has no FloFi cookie.
+export default async function AccessPage({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
+  const l = (await searchParams).l, language = l === 'pt' ? 'PT' : l === 'en' ? 'EN' : await siteLanguage();
   return <AccessContinue language={language} lang={FLIGHT_COPY[language].lang}/>;
 }

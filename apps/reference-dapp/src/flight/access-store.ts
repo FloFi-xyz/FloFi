@@ -13,25 +13,29 @@
  */
 import { randomBytes } from 'node:crypto';
 import type { Database, Queryable } from '@defi-workflow-engine/cloud-runtime';
-import { ACCESS_LIMITS, ACCESS_LINK_MS, ACCESS_SESSION_MS, CODE_MAX_ATTEMPTS, codeFor, codeHash, LINK_TOKEN, linkTokenFor, REQUESTED_CODE_MS, sameHex, sha256Hex,
-  subjectDigest, tokenIdFor } from './access.ts';
-import { enqueueEmail } from './email/outbox.ts';
+import { ACCESS_LIMITS, ACCESS_LINK_MS, ACCESS_SESSION_MS, CODE_MAX_ATTEMPTS, codeFor, codeHash, LINK_TOKEN, linkTokenFor, NO_CLIENT_SUBJECT, REQUESTED_CODE_MS, sameHex,
+  sha256Hex, subjectDigest, tokenIdFor } from './access.ts';
+import { enqueueEmail, maskAddress } from './email/outbox.ts';
 
 const at = (ms: number) => new Date(ms).toISOString();
 const HOUR_MS = 3_600_000;
 export type ConsumeResult =
   | { readonly status: 'CLAIMED' }
   | { readonly status: 'SESSION'; readonly session: string }
-  | { readonly status: 'INVALID' | 'EXPIRED' | 'USED' | 'CLAIMED_ELSEWHERE' | 'ACCOUNT_HAS_OTHER_ENTRY' | 'RATE_LIMITED' };
+  | { readonly status: 'INVALID' | 'EXPIRED' | 'USED' | 'BOARDED' | 'CLAIMED_ELSEWHERE' | 'ACCOUNT_HAS_OTHER_ENTRY' | 'RATE_LIMITED' };
+const ATTEMPT_LOCK_CLASS = 734_003_223; // Advisory lock class (int4): one count-and-record at a time per limit subject.
 type AttemptKind = 'CODE_CLIENT' | 'CODE_ADDRESS' | 'REQUEST_CLIENT' | 'REQUEST_ADDRESS' | 'CONSUME_CLIENT';
 
 export function createAccessStore(host: { readonly db: Database; readonly tenantId: string }, secret: string) {
   const { db, tenantId } = host;
 
-  /** Count and record one attempt; true when the subject is still within `limit` per hour. */
+  /**
+   * Count and record one attempt; true when the subject is still within `limit` per hour. Serialized per subject (concurrent requests cannot
+   * all slip past the count), and a request without a client address counts under one shared subject: never exempt.
+   */
   async function attempt(q: Queryable, kind: AttemptKind, value: string | null, limit: number, now: number): Promise<boolean> {
-    if (value === null) return true;
-    const subject = subjectDigest(secret, kind, value);
+    const subject = subjectDigest(secret, kind, value ?? NO_CLIENT_SUBJECT);
+    await q.query('SELECT pg_advisory_xact_lock($1::int, hashtext($2))', [ATTEMPT_LOCK_CLASS, `${kind}:${subject}`]);
     const recent = Number((await q.query<{ n: string }>(`SELECT count(*) AS n FROM flight_access_attempts WHERE tenant_id = $1 AND kind = $2 AND subject = $3
       AND attempted_at > $4::timestamptz - interval '1 hour'`, [tenantId, kind, subject, at(now)])).rows[0]!.n);
     if (recent >= limit) return false;
@@ -65,8 +69,13 @@ export function createAccessStore(host: { readonly db: Database; readonly tenant
     return inserted.rowCount ? 'CLAIMED' : 'CLAIMED_ELSEWHERE';
   }
 
-  /** Consume a token for an entry: bind it to the account, or open a browser session before sign-in. */
+  /**
+   * Consume a token for an entry: bind it to the account, or open a browser session before sign-in. An entry that already boarded is never
+   * bound again (a used list entry cannot be handed to someone else's account); its token is left unused.
+   */
   async function settle(q: Queryable, tokenId: string, entryId: string, accountId: string | null, now: number): Promise<ConsumeResult> {
+    if ((await q.query('SELECT 1 FROM flight_list_entries WHERE tenant_id = $1 AND entry_id = $2 AND boarded_at IS NOT NULL', [tenantId, entryId])).rowCount)
+      return { status: 'BOARDED' };
     if (accountId) {
       const bound = await claim(q, entryId, accountId, now);
       if (bound !== 'CLAIMED') return { status: bound };
@@ -126,8 +135,13 @@ export function createAccessStore(host: { readonly db: Database; readonly tenant
         LEFT JOIN flight_batches b ON b.tenant_id = e.tenant_id AND b.batch_no = e.batch_no
         WHERE e.tenant_id = $1 AND e.email = $2 AND e.flight = 'FIRST' AND e.boarded_at IS NULL`, [tenantId, input.email])).rows[0];
       if (!entry || !input.groupOpen({ opensAt: entry.opens_at?.getTime() ?? null })) return 'OK' as const;
+      // A tenant-wide daily cap keeps requests from eating the email quota Email 3 needs (silent, like every other refusal here).
+      const today = Number((await tx.query<{ n: string }>(`SELECT count(*) AS n FROM flight_emails WHERE tenant_id = $1 AND template = 'ACCESS_REQUESTED'
+        AND created_at > $2::timestamptz - interval '1 day'`, [tenantId, at(input.now)])).rows[0]!.n);
+      if (today >= ACCESS_LIMITS.requestedEmailsPerDay) return 'OK' as const;
+      // At most one per entry per hour (the dedupe key): repeated requests collapse into the one already queued.
       await enqueueEmail(tx, tenantId, { template: 'ACCESS_REQUESTED', recipient: input.email, language: input.language, trigger: 'access_requested',
-        dedupeKey: `access:${entry.entry_id}:${randomBytes(8).toString('hex')}`, notBefore: input.now, expiresAt: input.now + REQUESTED_CODE_MS, entryId: entry.entry_id });
+        dedupeKey: `access:${entry.entry_id}:${Math.floor(input.now / HOUR_MS)}`, notBefore: input.now, expiresAt: input.now + REQUESTED_CODE_MS, entryId: entry.entry_id });
       return 'OK' as const;
     });
   }
@@ -140,6 +154,21 @@ export function createAccessStore(host: { readonly db: Database; readonly tenant
       const row = (await tx.query<{ entry_id: string }>(`DELETE FROM flight_access_sessions WHERE tenant_id = $1 AND session_hash = $2 AND expires_at > $3 RETURNING entry_id`,
         [tenantId, sha256Hex(input.session), at(input.now)])).rows[0];
       return row ? claim(tx, row.entry_id, input.accountId, input.now) : 'NONE';
+    });
+  }
+
+  /**
+   * What the Continue page shows before the person confirms: the masked address the link proves (a***@gmail.com), so nobody links an
+   * address they do not recognize. Nothing is consumed; a link that cannot be used answers like an invalid one.
+   */
+  async function peekLink(input: { readonly token: string; readonly client: string | null; readonly now: number }): Promise<{ readonly address: string } | 'INVALID' | 'RATE_LIMITED'> {
+    if (!LINK_TOKEN.test(input.token)) return 'INVALID';
+    return db.transaction(async tx => {
+      if (!await attempt(tx, 'CONSUME_CLIENT', input.client, ACCESS_LIMITS.consumePerClientHour, input.now)) return 'RATE_LIMITED' as const;
+      const row = (await tx.query<{ email: string }>(`SELECT e.email FROM flight_access_tokens t JOIN flight_list_entries e ON e.tenant_id = t.tenant_id
+        AND e.entry_id = t.entry_id WHERE t.tenant_id = $1 AND t.link_hash = $2 AND t.consumed_at IS NULL AND t.revoked_at IS NULL AND t.link_expires_at > $3
+        AND e.boarded_at IS NULL`, [tenantId, sha256Hex(input.token), at(input.now)])).rows[0];
+      return row ? { address: maskAddress(row.email) } : 'INVALID' as const;
     });
   }
 
@@ -158,6 +187,6 @@ export function createAccessStore(host: { readonly db: Database; readonly tenant
       [tenantId, entryId, at(now)])).rowCount;
   }
 
-  return { issueToken, consumeLink, consumeCode, requestAccess, bindSession, prune, revokeEntryTokens };
+  return { issueToken, peekLink, consumeLink, consumeCode, requestAccess, bindSession, prune, revokeEntryTokens };
 }
 export type AccessStore = ReturnType<typeof createAccessStore>;

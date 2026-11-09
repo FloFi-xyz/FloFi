@@ -141,8 +141,6 @@
 .perks li{display:flex;gap:16px;align-items:baseline;font-size:21px;line-height:1.4}
 .perks li::before{content:"";flex:none;width:10px;height:10px;border-radius:9px;background:var(--blue);transform:translateY(-3px)}
 .perks b{font-weight:600}.perks span{color:var(--muted)}
-.progress{height:14px;background:var(--track);border-radius:99px;overflow:hidden}
-.progress>div{height:100%;background:var(--blue);border-radius:99px}
 .routeGrid{display:flex;flex-wrap:wrap;gap:24px}
 .routeCard{flex:1 1 280px;border:2px solid var(--track);border-radius:28px;padding:32px;display:flex;flex-direction:column;gap:20px}
 .routeCode{font-family:var(--mono);font-weight:500;font-size:clamp(40px,4vw,52px);line-height:1;color:var(--blue);letter-spacing:-.02em}
@@ -266,3 +264,5 @@
 @media (max-width:640px){.cardPublic{padding-bottom:64px}.accessPage{padding:48px var(--gutter)}}
 .cardPublic .passStage{padding-bottom:56px}
 .passControls .btnGhost{color:var(--navy)!important;border-color:var(--navy)}
+.passControls .eyebrow{color:var(--blue)}
+.cardPublicText .small{color:#fff}

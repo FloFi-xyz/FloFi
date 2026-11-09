@@ -38,11 +38,13 @@ describe('access secrets', () => {
     expect(normalizeCode('12345')).toBeNull();
     expect(normalizeCode('12a456')).toBeNull();
   });
-  it('signs unsubscribe links per email: a forged or altered one is refused', () => {
-    const token = unsubscribeTokenFor(SECRET, EMAIL_ID);
-    expect(readUnsubscribeToken(SECRET, token)).toBe(EMAIL_ID);
+  it('signs unsubscribe links per email and recipient: a forged or altered one is refused; the opt-out needs no stored email', () => {
+    const token = unsubscribeTokenFor(SECRET, EMAIL_ID, 'Ana@Email.com');
+    expect(readUnsubscribeToken(SECRET, token)).toEqual({ emailId: EMAIL_ID, addressHash: addressHash('ana@email.com') });
     expect(readUnsubscribeToken(SECRET, token.replace(/.$/, c => c === 'A' ? 'B' : 'A'))).toBeNull();
-    expect(readUnsubscribeToken(SECRET, `fem_ffffffffffffffffffffffffffffffff.${token.split('.')[1]}`)).toBeNull();
+    const [, digest, signature] = token.split('.');
+    expect(readUnsubscribeToken(SECRET, `fem_ffffffffffffffffffffffffffffffff.${digest}.${signature}`)).toBeNull();
+    expect(readUnsubscribeToken(SECRET, `${EMAIL_ID}.${addressHash('other@email.com')}.${signature}`)).toBeNull();
     expect(readUnsubscribeToken(OTHER, token)).toBeNull();
     expect(readUnsubscribeToken(SECRET, 42)).toBeNull();
     expect(addressHash(' Ana@Email.com ')).toBe(addressHash('ana@email.com'));
@@ -89,7 +91,7 @@ describe('the seven emails', () => {
   const card = (founding: boolean): CardView => ({ founding, seat: founding ? '#042' : '214E', handle: 'ana<script>', from: 'ETH', to: 'BASE', stepCount: 2, networkCount: 2,
     departedAt: '2026-11-12T12:30:00Z', publicUrl: 'https://flofi.xyz/card/abcdefghijkl', imageUrl: 'https://flofi.xyz/card/abcdefghijkl/image',
     downloadUrl: 'https://flofi.xyz/card/abcdefghijkl/image?download=1' });
-  const access = { accessUrl: 'https://flofi.xyz/board/access#t=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA', code: '482913', codeMinutes: 4320, linkHours: 72,
+  const access = { accessUrl: 'https://flofi.xyz/board/access?l=en#t=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA', code: '482913', codeMinutes: 4320, linkHours: 72,
     foundingOpen: true, group: 3 } as const;
   const inputs: TemplateInput[] = [{ template: 'LIST_CONFIRMATION' }, { template: 'EVE' }, { template: 'GROUP_BOARDING', ...access },
     { template: 'ACCESS_REQUESTED', ...access, codeMinutes: 15 }, { template: 'CARD_FOUNDING', card: card(true), invites: ['FLF-7Q2K-9XMB', 'FLF-ABCD-EFGH', 'FLF-JKMN-PQRS'],
@@ -119,7 +121,7 @@ describe('the seven emails', () => {
   });
   it('puts the access link, the six-digit code and the group in Email 3, the Founding block only while seats are open', () => {
     const open = renderEmail({ template: 'GROUP_BOARDING', ...access }, ctx('EN'));
-    expect(open.html).toContain('href="https://flofi.xyz/board/access#t=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"');
+    expect(open.html).toContain('href="https://flofi.xyz/board/access?l=en#t=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"');
     expect(open.text).toContain('482913');
     expect(open.text).toContain('Group: 3');
     expect(open.text).toContain('72 hours');

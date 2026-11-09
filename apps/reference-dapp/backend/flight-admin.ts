@@ -58,7 +58,7 @@ export const FLIGHT_COMMANDS = ['stats', 'create-batch', 'assign-batch', 'export
 const TEMPLATES: readonly EmailTemplate[] = ['LIST_CONFIRMATION', 'EVE', 'GROUP_BOARDING', 'ACCESS_REQUESTED', 'CARD_FOUNDING', 'CARD_PASSENGER', 'NEXT_FLIGHT', 'CREATOR_INVITE'];
 /** What the email and access commands need besides the store; `sendDue` runs one delivery cycle (absent: not configured). */
 export type FlightAdminContext = { readonly outbox: EmailOutbox; readonly entryOf: (email: string) => Promise<string | null>;
-  readonly revoke: ((entryId: string, now: number) => Promise<number>) | null; readonly sendDue: (() => Promise<unknown>) | { readonly disabled: string } };
+  readonly revoke: ((entryId: string, now: number) => Promise<number>) | null; readonly pruneAccess?: ((now: number) => Promise<unknown>) | null; readonly sendDue: (() => Promise<unknown>) | { readonly disabled: string } };
 /** One CSV cell; a value a spreadsheet would read as a formula (=, +, -, @) is written as text. */
 export const csvCell = (value: string) => /^[=+\-@\t\r]/.test(value) ? `'${value}` : value;
 type Command = (typeof FLIGHT_COMMANDS)[number];
@@ -172,7 +172,7 @@ export async function runFlightCommand(command: Command, values: Values, store: 
       if (!/^flp_[0-9a-f]{32}$/.test(pass)) throw new Error('ARGUMENT_INVALID: --pass');
       return { hidden: await store.hidePass(pass) };
     }
-    case 'prune': return { pruned: await store.prune(now) };
+    case 'prune': return { pruned: await store.prune(now), emails: context ? await context.outbox.prune(now) : null, access: context?.pruneAccess ? await context.pruneAccess(now) : null };
     case 'purge-lists': return { deleted: await store.purgeLists() };
   }
 }
@@ -201,6 +201,7 @@ async function main(): Promise<void> {
       outbox: createEmailOutbox(host, limits),
       entryOf: async email => (await db.query<{ entry_id: string }>('SELECT entry_id FROM flight_list_entries WHERE tenant_id = $1 AND email = $2', [tenantId, email])).rows[0]?.entry_id ?? null,
       revoke: secret ? (entryId, at) => createAccessStore(host, secret).revokeEntryTokens(entryId, at) : null,
+      pruneAccess: secret ? at => createAccessStore(host, secret).prune(at) : null,
       sendDue: command === 'email-send-due' ? await import('../src/flight/email/runtime.ts').then(m => {
         const runtime = m.flightEmailRuntime(process.env, db, tenantId, createLogger({ service: 'flofi-flight-admin' }));
         return 'disabled' in runtime ? runtime : () => runtime.delivery.cycle();

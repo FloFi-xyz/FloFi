@@ -12,6 +12,7 @@ import { accessResultDetail, flightPhase, listFor, normalizeEmail, normalizeHand
   normalizeInviteCode, parseClientEvent, type FlightOrigin } from './campaign';
 import { cookies } from 'next/headers';
 import { ACCESS_SESSION_COOKIE, ACCESS_SESSION_MS, normalizeCode, readUnsubscribeToken, accessSecret } from './access';
+import { isHostedDeployment } from '../server/deployment';
 import type { ConsumeResult } from './access-store';
 import { clientDigest, flightAccessStore, flightNow, flightOutbox, flightPerson, flightStore, requestClient, type FlightPerson } from './host';
 import { sessionCookieName } from '../server/session-cookie';
@@ -65,21 +66,25 @@ export async function flightState(): Promise<FlightState | null> {
       await Promise.all([store.prune(now), flightAccessStore().then(access => access?.prune(now)), flightOutbox().then(outbox => outbox?.prune(now))])
         .catch(() => { prunedAt = 0; });
     }
+    // A pending access session binds only on the person's own "Board now" (handleBoard), never on a page view.
     const pending = await pendingSession();
-    if (person && pending) await bindPending(person, pending, now);
     if (person) await store.ensurePublicId(person.accountId).catch(() => null);
     const [foundingOpen, departures, flight] = await Promise.all([store.foundingOpen(), store.departures(), person ? store.account({ ...person, now }) : Promise.resolve(null)]);
     const calendar = store.calendar;
     return { ok: true, now, phase: flightPhase(now, calendar), closesAt: calendar.listClosesAt, boardingOpensAt: calendar.boardingOpensAt,
       creatorsOpenAt: calendar.creatorsOpenAt, foundingOpen, departures,
-      me: { signedIn: person !== null, hasEmail: (person?.emails.length ?? 0) > 0, flight, accessPending: !person && pending !== null } };
+      me: { signedIn: person !== null, hasEmail: (person?.emails.length ?? 0) > 0, flight, accessPending: pending !== null } };
   } catch { return null; }
 }
 
+/**
+ * The access cookie's name: `__Host-` (Secure, host-only) on every hosted deployment, the plain name only on a loopback HTTP server. A hosted
+ * request never falls back to the plain name, so a same-site sibling cannot plant a Domain cookie that binds its entry to someone's account.
+ */
+const secureCookies = (request?: Request) => isHostedDeployment(process.env) || (request ? new URL(request.url).protocol === 'https:' : false);
 /** The browser's pending access session (a proven list address before sign-in), if any. */
 async function pendingSession(): Promise<string | null> {
-  const jar = await cookies();
-  const value = jar.get(sessionCookieName(ACCESS_SESSION_COOKIE, true))?.value ?? jar.get(ACCESS_SESSION_COOKIE)?.value ?? null;
+  const value = (await cookies()).get(sessionCookieName(ACCESS_SESSION_COOKIE, secureCookies()))?.value ?? null;
   return value && /^[A-Za-z0-9_-]{43}$/.test(value) ? value : null;
 }
 /** Bind a pending access session to the signed-in account (the session row is deleted either way; the cookie then means nothing). */
@@ -88,7 +93,7 @@ async function bindPending(person: FlightPerson, session: string, now: number): 
   return access ? access.bindSession({ session, accountId: person.accountId, now }) : 'NONE';
 }
 function sessionCookie(request: Request, value: string | null): string {
-  const secure = new URL(request.url).protocol === 'https:';
+  const secure = secureCookies(request);
   const name = sessionCookieName(ACCESS_SESSION_COOKIE, secure);
   return `${name}=${value ?? ''}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${value ? Math.floor(ACCESS_SESSION_MS / 1000) : 0}${secure ? '; Secure' : ''}`;
 }
@@ -242,6 +247,19 @@ export async function handleAccessConsume(request: Request): Promise<Response> {
   } catch { return refuse(503, 'FLIGHT_UNAVAILABLE'); }
 }
 
+/** The Continue page asks which address a link proves (masked), before the person confirms. Consumes nothing. */
+export async function handleAccessPeek(request: Request): Promise<Response> {
+  const body = await readRequest(request, 512);
+  if (body instanceof Response) return body;
+  if (typeof body.token !== 'string' || body.token.length > 64) return refuse(400, 'ACCESS_INVALID');
+  const access = await accessOr503();
+  if (access instanceof Response) return access;
+  try {
+    const result = await access.peekLink({ token: body.token, client: await requestClient(), now: await flightNow() });
+    return result === 'INVALID' ? refuse(400, 'ACCESS_INVALID') : result === 'RATE_LIMITED' ? refuse(429, 'ACCESS_RATE_LIMITED') : json(200, { ok: true, address: result.address });
+  } catch { return refuse(503, 'FLIGHT_UNAVAILABLE'); }
+}
+
 /** The address and the six-digit code (another device). Unknown address and wrong code answer alike. */
 export async function handleAccessCode(request: Request): Promise<Response> {
   const body = await readRequest(request, 512);
@@ -284,12 +302,12 @@ export async function handleAccessRequest(request: Request): Promise<Response> {
 export async function handleUnsubscribe(request: Request): Promise<Response> {
   if (request.method !== 'POST') return refuse(405, 'FLIGHT_METHOD');
   const secret = accessSecret(process.env);
-  const emailId = secret ? readUnsubscribeToken(secret, new URL(request.url).searchParams.get('t')) : null;
-  if (!emailId) return refuse(400, 'UNSUBSCRIBE_INVALID');
+  const token = secret ? readUnsubscribeToken(secret, new URL(request.url).searchParams.get('t')) : null;
+  if (!token) return refuse(400, 'UNSUBSCRIBE_INVALID');
   try {
     const outbox = await flightOutbox();
     if (!outbox) return refuse(503, 'FLIGHT_UNAVAILABLE');
-    await outbox.unsubscribeByEmail(emailId);
+    await outbox.unsubscribe(token.addressHash);
     return json(200, { ok: true });
   } catch { return refuse(503, 'FLIGHT_UNAVAILABLE'); }
 }

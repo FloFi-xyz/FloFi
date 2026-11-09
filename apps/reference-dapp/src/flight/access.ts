@@ -22,11 +22,18 @@ export const REQUESTED_CODE_MS = 15 * 60 * 1000;
  */
 export const EMAIL_CODE_MS = ACCESS_LINK_MS;
 export const CODE_MAX_ATTEMPTS = 5;
-/** After proving the address before signing in, the browser keeps that proof this long ("Sessão: 30 dias"). */
-export const ACCESS_SESSION_MS = 30 * 24 * 60 * 60 * 1000;
+/**
+ * After proving the address before signing in, the browser keeps that proof for one day; it binds only when the person presses "Board now"
+ * signed in (security review: a shared browser must not hand a stranger's entry to the next account for weeks).
+ */
+export const ACCESS_SESSION_MS = 24 * 60 * 60 * 1000;
 export const ACCESS_SESSION_COOKIE = 'flofi_flight_access';
 /** Abuse limits per hour ("5 tentativas de código por hora por IP e e-mail; 3 links únicos por hora por e-mail"). */
-export const ACCESS_LIMITS = { codePerClientHour: 10, codePerAddressHour: 5, requestPerAddressHour: 3, requestPerClientHour: 20, consumePerClientHour: 30 } as const;
+export const ACCESS_LIMITS = { codePerClientHour: 30, codePerAddressHour: 5, requestPerAddressHour: 3, requestPerClientHour: 30, consumePerClientHour: 60,
+  // Requested access emails a tenant sends per day at most, and per entry per hour at most one: requests can never eat the email quota.
+  requestedEmailsPerDay: 30 } as const; // Per-client limits allow carriers' shared IPv4 addresses (CGNAT), as the list form does.
+/** A request without a usable client address counts under this one shared subject (it is never exempt). */
+export const NO_CLIENT_SUBJECT = 'no-client';
 
 const MIN_SECRET = 32;
 /** The deployment's access secret, or null when it is missing or too short (every access feature then fails closed). */
@@ -61,14 +68,21 @@ export function sameHex(a: string, b: string): boolean {
 /** The token row id of one email's access (stable across re-renders). */
 export const tokenIdFor = (secret: string, emailId: string) => `fat_${mac(secret, 'token-id', emailId).subarray(0, 16).toString('hex')}`;
 
-/** The one-click unsubscribe parameter of one email: its id and a signature, so nobody can unsubscribe an address they did not receive. */
-export const unsubscribeTokenFor = (secret: string, emailId: string) => `${emailId}.${mac(secret, 'unsubscribe', emailId).subarray(0, 16).toString('base64url')}`;
-export function readUnsubscribeToken(secret: string, value: unknown): string | null {
-  if (typeof value !== 'string' || value.length > 80) return null;
-  const match = /^(fem_[0-9a-f]{32})\.([A-Za-z0-9_-]{22})$/.exec(value);
+/**
+ * The one-click unsubscribe parameter of one email: its id, its recipient's address digest and a signature over both, so nobody can unsubscribe
+ * an address they did not receive, and the opt-out works even after the email's own record was pruned or erased.
+ */
+export const unsubscribeTokenFor = (secret: string, emailId: string, recipient: string) => {
+  const digest = addressHash(recipient);
+  return `${emailId}.${digest}.${mac(secret, 'unsubscribe', `${emailId}:${digest}`).subarray(0, 16).toString('base64url')}`;
+};
+export function readUnsubscribeToken(secret: string, value: unknown): { readonly emailId: string; readonly addressHash: string } | null {
+  if (typeof value !== 'string' || value.length > 160) return null;
+  const match = /^(fem_[0-9a-f]{32})\.([0-9a-f]{64})\.([A-Za-z0-9_-]{22})$/.exec(value);
   if (!match) return null;
-  const expected = Buffer.from(unsubscribeTokenFor(secret, match[1]!).split('.')[1]!), given = Buffer.from(match[2]!);
-  return expected.length === given.length && timingSafeEqual(expected, given) ? match[1]! : null;
+  const expected = mac(secret, 'unsubscribe', `${match[1]}:${match[2]}`).subarray(0, 16).toString('base64url');
+  const a = Buffer.from(expected), b = Buffer.from(match[3]!);
+  return a.length === b.length && timingSafeEqual(a, b) ? { emailId: match[1]!, addressHash: match[2]! } : null;
 }
 /** A suppressed address is kept as the SHA-256 of its lower-cased form. */
 export const addressHash = (email: string) => sha256Hex(`flofi-flight-address-v1:${email.trim().toLowerCase()}`);

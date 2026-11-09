@@ -29,7 +29,7 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const { id } = await params, card = await load(id), t = FLIGHT_COPY[await siteLanguage()].card;
   if (!card) return { title: 'Flight FloFi', robots: { index: false, follow: false } };
   const who = card.handle ? `@${card.handle}` : t.someone, route = `${card.route.from} → ${card.route.to}`, image = `/card/${id}/image`;
-  const title = t.title(who), description = `${route} · ${cardMeta(card)} · You approve`;
+  const title = t.title(who), description = `${route} · ${cardMeta(card)} · ${FLIGHT_COPY[await siteLanguage()].pass.youApprove}`;
   return { metadataBase: new URL(FLOFI_PRODUCTION_ORIGIN), title, description, alternates: { canonical: `/card/${id}` }, robots: { index: false, follow: false },
     openGraph: { title, description, type: 'website', url: `/card/${id}`, siteName: 'FloFi', images: [{ url: image, width: 1200, height: 630, alt: t.alt(route, cardMeta(card)) }] },
     twitter: { card: 'summary_large_image', site: '@FloFi_xyz', title, description, images: [{ url: image, alt: t.alt(route, cardMeta(card)) }] } };

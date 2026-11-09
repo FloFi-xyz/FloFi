@@ -172,6 +172,31 @@ describe('quota and delivery outcomes', () => {
     expect((await delivery(outbox, fakeProvider().provider, () => day + 10 * 60_000).cycle()).sent).toBe(1);
   });
 
+  it('never bulk-releases an email the provider may already have sent, and keeps counting its reservation', async () => {
+    const day = BEFORE - 8 * 86_400_000, outbox = createEmailOutbox({ db: t.db, tenantId: 'default' });
+    await t.db.query(`UPDATE flight_emails SET state = 'CANCELLED', reserved_at = NULL, lease_token = NULL, lease_until = NULL WHERE state IN ('PENDING', 'HELD', 'UNKNOWN', 'SENDING')`);
+    await store.joinList({ email: 'conflict@flofi-test.dev', language: 'EN', flight: 'FIRST', client: null, now: day });
+    const conflict = fakeProvider(() => ({ kind: 'CONFLICT', code: 'PROVIDER_IDEMPOTENCY_BODY_CHANGED' }));
+    await delivery(outbox, conflict.provider, () => day + 1000).cycle();
+    expect((await emailsOf('conflict@flofi-test.dev'))[0]).toMatchObject({ state: 'HELD', status_reason: 'PROVIDER_IDEMPOTENCY_BODY_CHANGED' });
+    expect((await outbox.usage(day + 2000)).day).toBe(1);
+    expect(await outbox.release({ reason: 'PROVIDER_IDEMPOTENCY_BODY_CHANGED' }, day + 3000)).toBe(0);
+    const [held] = await rows(`SELECT email_id FROM flight_emails WHERE recipient = 'conflict@flofi-test.dev'`);
+    expect(await outbox.markDelivered(held!.email_id as string, 'resend-checked', day + 4000)).toBe(true);
+    expect((await emailsOf('conflict@flofi-test.dev'))[0]).toMatchObject({ state: 'SENT' });
+  });
+
+  it('prunes settled emails after 90 days and expired access records from the delivery cycle (no page visit needed)', async () => {
+    const old = BEFORE - 200 * 86_400_000, outbox = createEmailOutbox({ db: t.db, tenantId: 'default' });
+    await t.db.query(`INSERT INTO flight_emails (tenant_id, email_id, dedupe_key, template, template_version, category, recipient, language, trigger, state, not_before,
+      next_attempt_at, reserved_at, sent_at, updated_at) VALUES ('default', $1, $2, 'EVE', 1, 'CAMPAIGN', 'old@flofi-test.dev', 'EN', 'test', 'SENT', $3, $3, $3, $3, $3)`,
+    [`fem_${hex(16)}`, `old:${hex(4)}`, new Date(old).toISOString()]);
+    await t.db.query(`INSERT INTO flight_access_attempts (tenant_id, kind, subject, attempted_at) VALUES ('default', 'CODE_CLIENT', $1, $2)`, ['a'.repeat(64), new Date(old).toISOString()]);
+    await delivery(outbox, fakeProvider().provider, () => BEFORE - 9 * 86_400_000).cycle();
+    expect(await rows(`SELECT count(*)::int AS n FROM flight_emails WHERE recipient = 'old@flofi-test.dev'`)).toEqual([{ n: 0 }]);
+    expect(await rows(`SELECT count(*)::int AS n FROM flight_access_attempts WHERE attempted_at < $1`, [new Date(BEFORE - 100 * 86_400_000).toISOString()])).toEqual([{ n: 0 }]);
+  });
+
   it('does not send while the domain is not verified on the provider account', async () => {
     const outbox = createEmailOutbox({ db: t.db, tenantId: 'default' });
     await outbox.clearBlock();
@@ -200,10 +225,15 @@ describe('scheduled campaign emails and unsubscribe', () => {
     const outbox = createEmailOutbox({ db: t.db, tenantId: 'default' });
     await store.joinList({ email: 'bye@flofi-test.dev', language: 'EN', flight: 'FIRST', client: null, now: BEFORE + 5 * 86_400_000 });
     const [email] = await rows(`SELECT email_id FROM flight_emails WHERE recipient = 'bye@flofi-test.dev'`);
-    expect(await outbox.unsubscribeByEmail(email!.email_id as string)).toBe(true);
+    void email;
+    await outbox.unsubscribe(addressHash('bye@flofi-test.dev'));
     expect((await emailsOf('bye@flofi-test.dev'))[0]).toMatchObject({ state: 'CANCELLED', status_reason: 'UNSUBSCRIBED' });
     expect(await outbox.isSuppressed(addressHash('bye@flofi-test.dev'))).toBe(true);
-    expect(await outbox.unsubscribeByEmail('fem_00000000000000000000000000000000')).toBe(false);
+    // The opt-out does not depend on the email's record: after erasure the digest still suppresses (and erasure keeps it).
+    await store.eraseEmail('bye@flofi-test.dev');
+    expect(await outbox.isSuppressed(addressHash('bye@flofi-test.dev'))).toBe(true);
+    await outbox.unsubscribe(addressHash('gone@flofi-test.dev'));
+    expect(await outbox.isSuppressed(addressHash('gone@flofi-test.dev'))).toBe(true);
   });
 });
 
@@ -225,7 +255,7 @@ describe('access by link and code', () => {
     const sent = fake.sent.find(e => e.to === 'board@flofi-test.dev')!;
     emailId = sent.idempotencyKey;
     expect(sent.subject).toBe('Your group is boarding ✈️');
-    expect(sent.html).toContain(`https://flofi.xyz/board/access#t=${linkTokenFor(SECRET, emailId)}`);
+    expect(sent.html).toContain(`https://flofi.xyz/board/access?l=en#t=${linkTokenFor(SECRET, emailId)}`);
     expect(sent.text).toContain(codeFor(SECRET, emailId));
     const stored = JSON.stringify(await rows(`SELECT * FROM flight_access_tokens WHERE entry_id = $1`, [entryId]));
     expect(stored).not.toContain(linkTokenFor(SECRET, emailId));
@@ -279,6 +309,29 @@ describe('access by link and code', () => {
     expect(await access.consumeLink({ token: linkTokenFor(SECRET, id3), accountId: owner, client: null, now: BOARDING })).toEqual({ status: 'ACCOUNT_HAS_OTHER_ENTRY' });
   });
 
+  it('shows the masked address before Continue, refuses an entry that already boarded, and never lets a test-flight simulation issue a numbered card', async () => {
+    await store.joinList({ email: 'peek@flofi-test.dev', language: 'EN', flight: 'FIRST', client: null, now: BEFORE });
+    const entry = (await rows(`SELECT entry_id FROM flight_list_entries WHERE email = 'peek@flofi-test.dev'`))[0]!.entry_id as string;
+    const id = `fem_${hex(16)}`;
+    await access.issueToken({ emailId: id, entryId: entry, codeMs: 15 * 60_000, now: BOARDING });
+    expect(await access.peekLink({ token: linkTokenFor(SECRET, id), client: null, now: BOARDING })).toEqual({ address: 'p***@flofi-test.dev' });
+    expect(await access.peekLink({ token: 'x'.repeat(43), client: null, now: BOARDING })).toBe('INVALID');
+    // The entry boards (its owner signed in with that verified email): the still-unused link can no longer bind it to anyone.
+    const owner = await newAccount();
+    await simulate(owner, 'wf-peek');
+    expect(await store.issuePass({ accountId: owner, emails: ['peek@flofi-test.dev'], workflowId: 'wf-peek', handle: null, public: false, now: BOARDING })).toMatchObject({ ok: true });
+    const other = await newAccount();
+    expect(await access.consumeLink({ token: linkTokenFor(SECRET, id), accountId: other, client: null, now: BOARDING })).toEqual({ status: 'BOARDED' });
+    expect(await access.peekLink({ token: linkTokenFor(SECRET, id), client: null, now: BOARDING })).toBe('INVALID');
+    // A creator's test-flight evidence (before boarding) never issues a real card at boarding, even inside its two-hour window.
+    const [code] = await store.issueCreatorInvites(1, BEFORE);
+    const creator = await newAccount();
+    expect(await store.redeemInvite({ accountId: creator, code: code!, now: CAL.boardingOpensAt - 30 * 60_000 })).toBe('REDEEMED');
+    await simulate(creator, 'wf-early', CAL.boardingOpensAt - 30 * 60_000);
+    expect(await store.issuePass({ accountId: creator, emails: [], workflowId: 'wf-early', handle: null, public: false, now: CAL.boardingOpensAt + 60_000 }))
+      .toEqual({ ok: false, code: 'FLIGHT_SIMULATION_NOT_FOUND' });
+  });
+
   it('limits brute force: a code dies after 5 wrong tries, and tries per address and per client are limited', async () => {
     await store.joinList({ email: 'brute@flofi-test.dev', language: 'EN', flight: 'FIRST', client: null, now: BEFORE });
     const entry = (await rows(`SELECT entry_id FROM flight_list_entries WHERE email = 'brute@flofi-test.dev'`))[0]!.entry_id as string;
@@ -301,8 +354,18 @@ describe('access by link and code', () => {
     await store.joinList({ email: 'later@flofi-test.dev', language: 'PT', flight: 'FIRST', client: null, now: BEFORE });
     expect(await access.requestAccess({ email: 'later@flofi-test.dev', language: 'PT', client: null, now: BOARDING, groupOpen: closed })).toBe('OK');
     expect((await emailsOf('later@flofi-test.dev')).map(e => e.template)).toEqual(['LIST_CONFIRMATION']);
+    // Repeated requests in one hour collapse into one queued email (and at most 3 are counted per address and hour).
     for (let i = 0; i < 5; i++) expect(await access.requestAccess({ email: 'later@flofi-test.dev', language: 'PT', client: null, now: BOARDING + i, groupOpen: open })).toBe('OK');
-    expect((await emailsOf('later@flofi-test.dev')).filter(e => e.template === 'ACCESS_REQUESTED')).toHaveLength(2); // 3 requests an hour, one spent above.
+    expect((await emailsOf('later@flofi-test.dev')).filter(e => e.template === 'ACCESS_REQUESTED')).toHaveLength(1);
+    expect(await access.requestAccess({ email: 'later@flofi-test.dev', language: 'PT', client: null, now: BOARDING + 2 * 3_600_000, groupOpen: open })).toBe('OK');
+    expect((await emailsOf('later@flofi-test.dev')).filter(e => e.template === 'ACCESS_REQUESTED')).toHaveLength(2);
+    // A tenant-wide daily cap keeps requests from spending the email quota (the answer stays the same).
+    await t.db.query(`INSERT INTO flight_emails (tenant_id, email_id, dedupe_key, template, template_version, category, recipient, language, trigger, not_before, next_attempt_at, created_at)
+      SELECT 'default', 'fem_' || md5('cap' || g), 'cap:' || g, 'ACCESS_REQUESTED', 1, 'ESSENTIAL', 'cap' || g || '@flofi-test.dev', 'EN', 'access_requested', $1, $1, $1
+      FROM generate_series(1, 30) g`, [new Date(BOARDING + 2 * 3_600_000).toISOString()]);
+    expect(await access.requestAccess({ email: 'later@flofi-test.dev', language: 'PT', client: null, now: BOARDING + 4 * 3_600_000, groupOpen: open })).toBe('OK');
+    expect((await emailsOf('later@flofi-test.dev')).filter(e => e.template === 'ACCESS_REQUESTED')).toHaveLength(2);
+    await t.db.query(`DELETE FROM flight_emails WHERE dedupe_key LIKE 'cap:%'`);
     expect((await rows(`SELECT category FROM flight_emails WHERE recipient = 'later@flofi-test.dev' AND template = 'ACCESS_REQUESTED' LIMIT 1`))[0]).toEqual({ category: 'ESSENTIAL' });
   });
 });
@@ -326,8 +389,9 @@ describe('invites, creators and cards', () => {
     await simulate(creator, 'wf-real', BOARDING);
     const real = await store.issuePass({ accountId: creator, emails: [], workflowId: 'wf-real', handle: null, public: false, now: BOARDING });
     expect(real).toMatchObject({ ok: true, issued: true, pass: { origin: 'CREATOR' } });
-    // The card email goes to the address the invite was sent to; invited people get no invites.
-    expect((await emailsOf('creator@flofi-test.dev')).map(e => String(e.template)).some(t => t.startsWith('CARD_'))).toBe(true);
+    // A creator invite's recipient is not proven to be who redeemed it (codes can be forwarded): a wallet-only account gets no card email
+    // there; the card stays in the account. Invited people get no invites.
+    expect((await emailsOf('creator@flofi-test.dev')).some(e => String(e.template).startsWith('CARD_'))).toBe(false);
     expect((await store.account({ accountId: creator, emails: [], now: BOARDING })).invites).toEqual([]);
   });
 
@@ -357,7 +421,8 @@ describe('invites, creators and cards', () => {
     const outbox = createEmailOutbox({ db: t.db, tenantId: 'default' }, { daily: 10_000, monthly: 100_000, externalDailyReserve: 0, externalMonthlyReserve: 0 });
     const fake = fakeProvider();
     await delivery(outbox, fake.provider, () => BOARDING + 60_000).cycle();
-    const cardEmail = fake.sent.find(e => /Founding Member #|boarding card/.test(e.subject) && e.to === 'creator@flofi-test.dev');
+    const cardEmail = fake.sent.find(e => /Founding Member #|boarding card/.test(e.subject) && e.to === 'board@flofi-test.dev');
+    expect(cardEmail?.headers?.['List-Unsubscribe']).toMatch(/^<https:\/\/flofi\.xyz\/api\/board\/unsubscribe\?t=fem_[0-9a-f]{32}\.[0-9a-f]{64}\.[A-Za-z0-9_-]{22}>$/);
     expect(cardEmail?.attachments?.[0]?.path).toMatch(/^https:\/\/flofi\.xyz\/card\/[a-z2-7]{12}\/image\?download=1$/);
     expect((await emailsOf('card@flofi-test.dev')).find(e => String(e.template).startsWith('CARD_'))).toMatchObject({ state: 'CANCELLED', status_reason: 'CARD_GONE' });
   });

@@ -47,7 +47,7 @@ certificate refuses a database at 24 (`MIGRATION_HISTORY_MISMATCH`). So:
 | Situation | Safe action |
 | --- | --- |
 | Email misbehaves | `flight-admin.ts email-pause` (immediate, no deploy) or unset `FLOFI_FLIGHT_EMAIL` on the worker and restart it. Pending emails stay in the outbox (`email-cancel` withdraws them if the team decides). |
-| Access links or cards misbehave | Roll Vercel back to **Release A** (it accepts schema 24): `/board` returns to the 0020 behavior (public counters, no access links, no card pages). No data is removed. |
+| Access links or cards misbehave | Roll Vercel back to **Release A** (it accepts schema 24): `/board` returns to the 0020 behavior (public counters, no access links, no card pages). No data is removed. Keep running `prune`, `erase-email` and `purge-lists` from this build's `flight-admin.ts` meanwhile (a v23 build neither prunes the new tables nor erases card or creator-invite emails). |
 | Before 0024 is applied | Any earlier build. |
 | After 0024 is applied | Release A or later only (an older build refuses schema 24). Keep the tables; do not reverse the migration. |
 
