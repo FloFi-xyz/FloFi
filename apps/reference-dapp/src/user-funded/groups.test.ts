@@ -12,7 +12,8 @@ import { evmWallet } from '../delegation/delegation.test-harness.ts';
 import type { ChainTransport } from '../delegation/chains.ts';
 import type { BundlerClient } from './bundler.ts';
 import { advanceSolanaSubmission, authorizeGroup, checkUserOperation, opOf, prepareGroup, reconcileEvmGroup, reconcileSolanaGroup, relayUserOperation, solanaOwnerDeltas,
-  type Prepared, type SerialOp, type UserFundedDeps } from './groups.ts';
+  SOLANA_BLOCKS_PER_GROUP_TRANSACTION, SOLANA_GROUP_SEND_BUDGET_MAX_BLOCKS, solanaPreparedTtlMs, solanaSendBudget, solanaSendBudgetBlocks, type Prepared, type SerialOp,
+  type UserFundedDeps } from './groups.ts';
 import { assertUserFundedSubmission, GAS_PAYER_CODES } from './gas-payer.ts';
 import { TRANSFER_TOPIC } from './evm-reconcile.ts';
 
@@ -177,6 +178,9 @@ describe('BUILD-FLOFI-UNIVERSAL-WORKFLOW-002 Solana sign-all preparation (MOCKED
     const p = prepared.value.prepared as Prepared & { transactions: { stepIndex: number; message: string; unsignedTransaction: string; spend: { amount: string } }[]; fee: { payer: string } };
     expect(p.transactions.map(t => [t.stepIndex, t.spend.amount])).toEqual([[0, '10000000'], [1, '20000000']]);
     expect(p.fee.payer).toBe(wallet.owner);
+    // Honoured for the blockhash lifetime (60 s) minus the 2-transaction send budget (50 blocks ≈ 20 s): a later signature is refused at
+    // authorization (the owner prepares again) rather than accepted and then stopped, unsent, for lack of budget.
+    expect(prepared.value.validUntil.getTime() - deps.now().getTime()).toBe(40_000);
     // S1: static key 0 (the fee payer) of every message is the owner.
     for (const t of p.transactions) expect(parseMessageV0(fromBase64(t.message)).staticKeys[0]).toBe(wallet.owner);
     // The owner's signatures of exactly those messages are accepted; anyone else's are not.
@@ -258,12 +262,14 @@ describe('BUILD-FLOFI-UNIVERSAL-WORKFLOW-002 Solana group submission and reconci
       if (method === 'sendTransaction') { sent.push(String(params[0])); return 'ok'; }
       throw new Error(method);
     } };
-    // Signed with 3 transactions to send but only 40 blocks of blockhash left (75 needed): nothing at all is sent; the owner prepares again.
+    // Signed with 3 transactions to send but only 40 blocks of blockhash left (75 needed): the budget is SHORT while the group is still
+    // AUTHORIZED (provably nothing sent), so the pass blocks it before anything is sent (user-funded-pass.test.ts).
     confirmed = 110;
-    expect(await advanceSolanaSubmission(deps, three, authorization, owner)).toMatchObject({ state: 'EXPIRED', index: 0, code: 'SOLANA_GROUP_SIGNED_TOO_LATE' });
+    expect(await solanaSendBudget(deps, three)).toBe('SHORT');
     expect(sent).toEqual([]);
-    // With the budget, the first is sent.
+    // With the budget, the group starts: the first is sent.
     confirmed = 70;
+    expect(await solanaSendBudget(deps, three)).toBe('OK');
     expect(await advanceSolanaSubmission(deps, three, authorization, owner)).toMatchObject({ state: 'SENT', index: 0 });
     // Past its last valid height on a lagging 'confirmed' read, but not yet provably so at 'finalized': it is waited for, never dropped.
     statuses.set('sig0', { confirmationStatus: 'finalized', err: null });
@@ -276,6 +282,82 @@ describe('BUILD-FLOFI-UNIVERSAL-WORKFLOW-002 Solana group submission and reconci
     landedOnReread = null;
     expect(await advanceSolanaSubmission(deps, three, authorization, owner)).toMatchObject({ state: 'EXPIRED', index: 1, code: 'SOLANA_BLOCKHASH_EXPIRED' });
     expect(sent).toHaveLength(1);
+  });
+  it('P0 regression: a first transaction already SENT is never declared expired for lack of budget while its blockhash is still valid', async () => {
+    const sent: string[] = [];
+    let confirmed = 70;
+    const { compileMessageV0, serializeMessageV0, serializeTransaction, toBase64 } = await import('@defi-workflow-engine/reference-compiler');
+    const tx = (payer: string) => toBase64(serializeTransaction(new Uint8Array(64).fill(1), serializeMessageV0(compileMessageV0(payer, [{ programId: '11111111111111111111111111111111',
+      accounts: [{ pubkey: payer, isSigner: true, isWritable: true }], data: new Uint8Array([2, 0, 0, 0]) }], 'GHtXQBsoZHVnNFa9YevAzFr17DJjgHXk3ycTKD5xD3Zi', {}))));
+    const three = { kind: 'SOLANA_SIGN_ALL', transactions: [0, 1, 2].map(i => ({ stepIndex: i, lastValidBlockHeight: 150, minimumOut: null })) } as unknown as Prepared;
+    const authorization = { transactions: [0, 1, 2].map(i => ({ signature: `sig${i}`, transaction: tx(owner) })) };
+    const deps: UserFundedDeps = { chains: [SOLANA], evm: () => null, bundler: () => null, jupiter: null, now: () => new Date(), solana: async (method, params) => {
+      // A sent transaction stays unknown (status null) until it is processed.
+      if (method === 'getSignatureStatuses') return { value: (params[0] as string[]).map(() => null) };
+      if (method === 'getBlockHeight') return confirmed;
+      if (method === 'sendTransaction') { sent.push(String(params[0])); return 'ok'; }
+      throw new Error(method);
+    } };
+    // Pass 1: the group had its budget and the first transaction was sent.
+    expect(await advanceSolanaSubmission(deps, three, authorization, owner)).toMatchObject({ state: 'SENT', index: 0 });
+    // Pass 2: still unknown, the budget for the whole group is now short (30 < 75) but its blockhash is still valid (120 ≤ 150). It may land:
+    // the group is never EXPIRED (that would record it FAILED and never reconcile the landed transaction). At most the SAME signed bytes are resent.
+    confirmed = 120;
+    expect(await solanaSendBudget(deps, three)).toBe('SHORT');
+    const again = await advanceSolanaSubmission(deps, three, authorization, owner);
+    expect(again.state).not.toBe('EXPIRED');
+    expect(again).toMatchObject({ index: 0, code: null });
+    expect(['SENT', 'WAITING']).toContain(again.state);
+    expect(new Set(sent)).toEqual(new Set([authorization.transactions[0]!.transaction]));
+    // Right at its last valid height it is still not expired.
+    confirmed = 150;
+    expect((await advanceSolanaSubmission(deps, three, authorization, owner)).state).not.toBe('EXPIRED');
+  });
+  it('solanaSendBudget: OK with the budget left, SHORT without it, the 100-block cap for a large group, UNAVAILABLE when the height cannot be read', async () => {
+    let height: unknown = 100, fail = false;
+    const commitments: unknown[] = [];
+    const rpc = async (method: string, params: readonly unknown[]) => {
+      if (method !== 'getBlockHeight') throw new Error(method);
+      commitments.push(params[0]);
+      if (fail) throw new Error('SOLANA_RPC_UNAVAILABLE');
+      return height;
+    };
+    const deps = (solana: UserFundedDeps['solana'] = rpc): UserFundedDeps => ({ chains: [SOLANA], evm: () => null, bundler: () => null, jupiter: null, now: () => new Date(), solana });
+    const group = (n: number, last = 150) => ({ kind: 'SOLANA_SIGN_ALL', transactions: Array.from({ length: n }, (_, i) => ({ stepIndex: i, lastValidBlockHeight: last })) }) as unknown as Prepared;
+    // Two transactions need 50 blocks: exactly 50 left is enough, 49 is not. The shortest blockhash of the group decides.
+    expect(await solanaSendBudget(deps(), group(2))).toBe('OK');
+    expect(commitments).toEqual([{ commitment: 'confirmed' }]);
+    height = 101;
+    expect(await solanaSendBudget(deps(), group(2))).toBe('SHORT');
+    const mixed = { kind: 'SOLANA_SIGN_ALL', transactions: [{ stepIndex: 0, lastValidBlockHeight: 200 }, { stepIndex: 1, lastValidBlockHeight: 150 }] } as unknown as Prepared;
+    expect(await solanaSendBudget(deps(), mixed)).toBe('SHORT');
+    // Eight transactions would need 200 blocks, more than a blockhash ever has (~150): capped at 100, a large group is sendable when fresh...
+    expect(solanaSendBudgetBlocks(8)).toBe(SOLANA_GROUP_SEND_BUDGET_MAX_BLOCKS);
+    expect(SOLANA_GROUP_SEND_BUDGET_MAX_BLOCKS).toBe(100);
+    expect(solanaSendBudgetBlocks(2)).toBe(2 * SOLANA_BLOCKS_PER_GROUP_TRANSACTION);
+    height = 50;
+    expect(await solanaSendBudget(deps(), group(8))).toBe('OK');
+    expect(await solanaSendBudget(deps(), group(6))).toBe('OK');
+    // ... and still refused once its blockhash is nearly spent.
+    height = 51;
+    expect(await solanaSendBudget(deps(), group(8))).toBe('SHORT');
+    // Nothing is decided without a readable height: no RPC, a failed read, a garbage answer.
+    expect(await solanaSendBudget(deps(null), group(2))).toBe('UNAVAILABLE');
+    fail = true;
+    expect(await solanaSendBudget(deps(), group(2))).toBe('UNAVAILABLE');
+    fail = false;
+    for (const garbage of [null, undefined, 'abc', '100', -1, 1.5, Number.NaN, Number.POSITIVE_INFINITY, { height: 100 }]) {
+      height = garbage;
+      expect(await solanaSendBudget(deps(), group(2))).toBe('UNAVAILABLE');
+    }
+    // A group without a known last valid height for every transaction has no provable budget: nothing is sent.
+    height = 0;
+    expect(await solanaSendBudget(deps(), { kind: 'SOLANA_SIGN_ALL', transactions: [{ stepIndex: 0 }] } as unknown as Prepared)).toBe('SHORT');
+    expect(await solanaSendBudget(deps(), { kind: 'SOLANA_SIGN_ALL', transactions: [] } as unknown as Prepared)).toBe('SHORT');
+  });
+  it('a prepared Solana group is offered for its blockhash lifetime minus the send budget, never under 15 seconds', () => {
+    expect([1, 2, 3, 4, 6, 8].map(solanaPreparedTtlMs)).toEqual([50_000, 40_000, 30_000, 20_000, 20_000, 20_000]);
+    for (let n = 1; n <= 64; n++) expect(solanaPreparedTtlMs(n)).toBeGreaterThanOrEqual(15_000);
   });
 });
 

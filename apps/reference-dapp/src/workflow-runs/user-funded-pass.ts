@@ -10,7 +10,8 @@
  *                         which the wallet itself sends when the owner confirms: it is never dropped silently (a late answer is still taken)
  *   AUTHORIZED            wallet batch: the wallet already sent it; FloFi waits for the hashes the owner's browser reports.
  *                         user operation: due when the previous group reconciled; simulated by the bundler, then relayed (owner-paid).
- *                         Solana: every signature is recorded, then each transaction is sent after its predecessor confirmed.
+ *                         Solana: started only while the signed blockhash leaves the send budget (else BLOCKED, nothing sent); every
+ *                         signature is recorded, then each transaction is sent after its predecessor confirmed.
  *   SUBMITTED/UNCERTAIN   reconciled from the chain only; per-step spent/received and the gas the owner paid become the steps' outcomes
  *
  * A group that cannot start (a refused simulation, a signer mismatch, a delivery below what was signed) is BLOCKED before anything is sent:
@@ -19,8 +20,8 @@
 import { composeWorkflowBound, type WorkflowComposition } from '../engine/strategy-engine';
 import { boundStrategy } from '../engine/workflow-bindings';
 import { assetKey } from '../delegation/steps.ts';
-import { advanceSolanaSubmission, checkUserOperation, reconcileEvmGroup, reconcileSolanaGroup, relayUserOperation, solanaSubmission, type Prepared, type Reconciled,
-  type UserFundedDeps } from '../user-funded/groups.ts';
+import { advanceSolanaSubmission, checkUserOperation, reconcileEvmGroup, reconcileSolanaGroup, relayUserOperation, solanaSendBudget, solanaSubmission, type Prepared,
+  type Reconciled, type UserFundedDeps } from '../user-funded/groups.ts';
 import type { EvmGroupCalls } from '../user-funded/evm-calls.ts';
 import type { BoundResolution, GroupRecord, RunRecord, RunStepRecord, StepOutcome, WorkflowRunStore } from './pg-store.ts';
 import { ADVANCE_RETRY_MS, TERMINAL_RUN, type RunState } from './state-machine.ts';
@@ -57,7 +58,9 @@ export async function userFundedPass(deps: UserFundedPassDeps, run: RunRecord): 
   const now = deps.now();
   const block = async (refusal: string): Promise<Pass> => {
     const code = stored(refusal);
-    await deps.store.groupTransition(run.runId, g.groupIndex, ['PLANNED', 'PREPARED', 'AUTHORIZED'], 'BLOCKED', { code });
+    // Only the pass whose write blocked the group moves its steps and the run: a group that moved on elsewhere meanwhile (a concurrent pass
+    // submitted it, its transactions may be on their way) is never reported blocked, and never leaves a run failed with a send in flight.
+    if (!await deps.store.groupTransition(run.runId, g.groupIndex, ['PLANNED', 'PREPARED', 'AUTHORIZED'], 'BLOCKED', { code })) return { ...settled(run), progressed: true };
     for (let i = g.stepFrom; i <= g.stepTo; i++) await deps.store.stepTransition(run.runId, i, ['DELEGATED'], 'BLOCKED', { code });
     const partial = steps.some(s => s.stepIndex < g.stepFrom && s.state === 'RECONCILED');
     const moved = await deps.store.transition(run.runId, { version: run.version, from: ['RUNNING', 'ATTENTION'] }, partial ? 'HALTED' : 'FAILED', { code });
@@ -88,6 +91,13 @@ async function authorizedGroup(deps: UserFundedPassDeps, run: RunRecord, g: Grou
   if (g.strategy === 'EVM_WALLET_BATCH') return settled(run, SUBMIT_RETRY_MS, false, 'OWNER_REPORTS_BATCH');
   if (!deps.userFunded) return settled(run, ADVANCE_RETRY_MS, false, 'USER_FUNDED_NOT_ENABLED');
   if (g.strategy === 'SOLANA_SIGN_ALL') {
+    // P0 universal execution: while the group is AUTHORIZED provably nothing of it was sent, so this is the only point where a signed group
+    // may be stopped for lack of blockhash budget: BLOCKED with nothing sent (the run FAILS, or HALTS after earlier reconciled steps and the
+    // owner ends it; the signed transactions are never sent and die with their blockhash). Once SUBMITTED, only a provable expiry stops it.
+    // An unreadable height decides nothing: the group stays AUTHORIZED and is looked at again.
+    const budget = await solanaSendBudget(deps.userFunded, prepared);
+    if (budget === 'UNAVAILABLE') return settled(run, SUBMIT_RETRY_MS, false, 'USER_FUNDED_SOLANA_RPC_UNAVAILABLE');
+    if (budget === 'SHORT') return block('SOLANA_GROUP_SIGNED_TOO_LATE');
     const submitted = await deps.store.groupTransition(run.runId, g.groupIndex, ['AUTHORIZED'], 'SUBMITTED', { submission: solanaSubmission(authorization, deps.now()) });
     return { ...settled(run, 1_000), progressed: submitted !== null };
   }

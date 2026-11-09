@@ -10,8 +10,10 @@
  *                         signature, recovered to the owner; submit (when due): simulated by the bundler first, then relayed; the EntryPoint
  *                         charges the owner's account; reconcile: the bundle receipt's UserOperationEvent (sender = owner, paymaster = 0)
  *   SOLANA_SIGN_ALL       prepare: one exact, simulated v0 transaction per step (owner = fee payer and only signer; recent blockhash);
- *                         authorize: all signed transactions, each verified against its reviewed message; submit: in order, each after the
- *                         previous confirmed; reconcile: each finalized transaction's owner balance deltas and fee
+ *                         authorize: all signed transactions, each verified against its reviewed message; submit: the send budget is
+ *                         checked once before anything is sent, then in order, each after the previous confirmed (an unknown one resent
+ *                         with the same bytes while its blockhash is valid; expiry only when provable); reconcile: each finalized
+ *                         transaction's owner balance deltas and fee
  *
  * Nothing here chooses a wallet, holds a key or signs. A failed check is a closed code; a submitted artifact is never replaced by another.
  */
@@ -229,7 +231,11 @@ export async function prepareGroup(deps: UserFundedDeps, composition: WorkflowCo
     else return no('USER_FUNDED_GROUP_NOT_PREPARABLE');
     if (!r.ok) return r;
     // Wallet batches and Solana transactions are honoured for a short window (quotes, recent blockhash); a user operation is bound by its nonce and the run.
-    const validUntil = new Date(g.strategy === 'EVM_USER_OPERATION' ? now + 24 * 3_600_000 : g.strategy === 'SOLANA_SIGN_ALL' ? now + 60_000 : now + EVM_PREPARED_TTL_MS);
+    // A Solana group's window is its blockhash lifetime MINUS the send budget it needs before its first transaction (`solanaSendBudget`):
+    // signatures arriving later are refused at authorization (USER_FUNDED_PREPARED_EXPIRED; the owner prepares again from a fresh blockhash)
+    // instead of being accepted and then blocked, unsent, for lack of budget.
+    const validUntil = new Date(g.strategy === 'EVM_USER_OPERATION' ? now + 24 * 3_600_000
+      : g.strategy === 'SOLANA_SIGN_ALL' ? now + solanaPreparedTtlMs((r.value.transactions as readonly unknown[]).length) : now + EVM_PREPARED_TTL_MS);
     return ok({ prepared: { ...r.value, preparedAt: new Date(now).toISOString() }, validUntil });
   } catch (cause) { return no(codeOf(cause, 'USER_FUNDED_PREPARE_FAILED')); }
 }
@@ -301,16 +307,56 @@ export function solanaSubmission(authorization: Readonly<Record<string, unknown>
 type SignatureStatus = { readonly confirmationStatus?: string; readonly err?: unknown } | null;
 /**
  * Block heights one transaction of a sign-all group needs, from its send to its confirmation and the next pass (about 400 ms per block: a
- * 2-second pass cadence, a serialized RPC and confirmation). A group is sent only while its blockhash leaves this much for every transaction.
+ * 2-second pass cadence, a serialized RPC and confirmation). The budget (this much per transaction, up to `SOLANA_GROUP_SEND_BUDGET_MAX_BLOCKS`)
+ * is checked ONCE, before the group leaves AUTHORIZED (`solanaSendBudget`). Once it is SUBMITTED, a transaction whose status is unknown is sent,
+ * or resent with the same bytes, while its blockhash is valid — so a retried first send can still start a group whose tail later expires
+ * (each step is independent; the sent prefix is reconciled and the rest expires provably).
  */
 export const SOLANA_BLOCKS_PER_GROUP_TRANSACTION = 25;
+/**
+ * The most budget a group is ever asked for: 100 blocks, about 40 s at ~400 ms per block. A blockhash is valid for ~150 blocks, so 25 blocks
+ * per transaction alone would make a group of 6 or more transactions (a workflow has up to 8 steps) impossible to ever send; the cap keeps
+ * large groups sendable while still refusing to START a group whose blockhash is nearly spent.
+ */
+export const SOLANA_GROUP_SEND_BUDGET_MAX_BLOCKS = 100;
+/** About one Solana block (the budget's duration), and a blockhash's lifetime of ~150 blocks. */
+const SOLANA_MS_PER_BLOCK = 400, SOLANA_BLOCKHASH_LIFETIME_MS = 60_000;
+/** The shortest window a prepared Solana group is ever offered for signing (enough to review and confirm the wallet prompt). */
+const SOLANA_PREPARED_MIN_TTL_MS = 15_000;
+/** Block heights a signed group of `transactions` must still have left before its first transaction is sent. */
+export const solanaSendBudgetBlocks = (transactions: number) => Math.min(SOLANA_BLOCKS_PER_GROUP_TRANSACTION * transactions, SOLANA_GROUP_SEND_BUDGET_MAX_BLOCKS);
+/**
+ * How long a prepared Solana group is honoured: the blockhash lifetime minus the send budget's duration (never under 15 s), so a signature
+ * taken in time still leaves about the budget when the group starts.
+ */
+export const solanaPreparedTtlMs = (transactions: number) =>
+  Math.max(SOLANA_PREPARED_MIN_TTL_MS, SOLANA_BLOCKHASH_LIFETIME_MS - solanaSendBudgetBlocks(transactions) * SOLANA_MS_PER_BLOCK);
+/**
+ * Read only: does a signed group's shortest blockhash still leave its send budget at the 'confirmed' height? Asked ONLY while provably
+ * nothing of the group was sent (it is still AUTHORIZED): SHORT means the group is stopped before anything is sent, never half-executed with
+ * a tail that expires after the owner signed. UNAVAILABLE (no RPC, a failed read, a malformed height): nothing is decided, the caller retries.
+ * Once anything may have been sent, only the provable expiry of `advanceSolanaSubmission` can stop the group.
+ */
+export async function solanaSendBudget(deps: UserFundedDeps, prepared: Prepared): Promise<'OK' | 'SHORT' | 'UNAVAILABLE'> {
+  const rpc = deps.solana, txs = prepared.transactions;
+  if (!rpc) return 'UNAVAILABLE';
+  const last = Array.isArray(txs) ? (txs as readonly Partial<SolanaGroupTx>[]).map(x => x?.lastValidBlockHeight) : [];
+  // FloFi's own frozen artifact: without a known last valid height for every transaction there is no provable budget, and nothing is sent.
+  if (!last.length || !last.every(h => Number.isSafeInteger(h) && h! >= 0)) return 'SHORT';
+  let height: unknown;
+  try { height = await rpc('getBlockHeight', [{ commitment: 'confirmed' }]); } catch { return 'UNAVAILABLE'; }
+  if (!Number.isSafeInteger(height) || (height as number) < 0) return 'UNAVAILABLE';
+  return Math.min(...last as number[]) - (height as number) < solanaSendBudgetBlocks(last.length) ? 'SHORT' : 'OK';
+}
 async function statuses(rpc: SolanaRpc, signatures: readonly string[]): Promise<readonly SignatureStatus[]> {
   const r = await rpc('getSignatureStatuses', [signatures, { searchTransactionHistory: true }]) as { value?: readonly SignatureStatus[] };
   return r?.value ?? signatures.map(() => null);
 }
 /**
  * Sends the next transaction of a Solana group whose predecessor confirmed (exactly the owner-signed bytes; a resend is the same signature).
- * Returns what happened; never sends a transaction past its blockhash validity.
+ * Returns what happened; never sends a transaction past its blockhash validity. Called only once the group is SUBMITTED, so any transaction
+ * may already have been sent (a sent transaction stays unknown until processed): EXPIRED is returned only when provable, never for a
+ * shortage of budget (that is decided before the group leaves AUTHORIZED, `solanaSendBudget`).
  */
 export async function advanceSolanaSubmission(deps: UserFundedDeps, prepared: Prepared, authorization: Readonly<Record<string, unknown>>, owner: string)
   : Promise<{ readonly state: 'SENT' | 'WAITING' | 'DONE' | 'EXPIRED' | 'FAILED'; readonly index: number | null; readonly code: string | null }> {
@@ -334,11 +380,10 @@ export async function advanceSolanaSubmission(deps: UserFundedDeps, prepared: Pr
       if (again) return { state: 'WAITING', index: i, code: null };
       return { state: 'EXPIRED', index: i, code: 'SOLANA_BLOCKHASH_EXPIRED' };
     }
-    // P0 universal execution: the transactions are sent one after another, each once its predecessor confirmed. Before the FIRST is sent, the
-    // signed group must still have the block-height budget for every one of them; otherwise nothing is sent at all (never a half-executed group
-    // whose tail expires after the owner signed), and the owner prepares the group again.
-    if (i === 0 && Math.min(...txs.map(x => x.lastValidBlockHeight)) - height < SOLANA_BLOCKS_PER_GROUP_TRANSACTION * txs.length)
-      return { state: 'EXPIRED', index: 0, code: 'SOLANA_GROUP_SIGNED_TOO_LATE' };
+    // P0 universal execution: the transactions are sent one after another, each once its predecessor confirmed. Whether the signed group had
+    // the budget to START was decided before anything was sent (`solanaSendBudget`, while AUTHORIZED). Here only the provable expiry above may
+    // declare EXPIRED: this pass cannot know whether an unknown transaction was already sent, so it is (re)sent — the same signed bytes, landing
+    // at most once.
     const message = parseMessageV0(parseTransaction(fromBase64(signed[i]!.transaction)).message);
     assertUserFundedSubmission({ kind: 'SOLANA_TRANSACTION', feePayer: message.staticKeys[0] ?? '', ownerWallet: owner });
     await rpc('sendTransaction', [signed[i]!.transaction, { encoding: 'base64', preflightCommitment: 'confirmed', maxRetries: 10 }]);

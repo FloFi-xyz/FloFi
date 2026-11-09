@@ -194,7 +194,9 @@ async function resumeUserFunded(deps: WorkflowRunDeps, run: RunRecord): Promise<
  */
 const PERMANENT_DUE_REFUSALS: ReadonlySet<string> = new Set(['WORKFLOW_BINDING_NOTHING_RECEIVED', 'WORKFLOW_BINDING_NOTHING_GUARANTEED', 'WORKFLOW_BINDING_NOT_EXACT',
   'USER_FUNDED_SIMULATION_UNAVAILABLE', 'AAVE_BENEFICIARY_NOT_OWNER', 'WORKFLOW_SLIPPAGE_UNSUPPORTED', 'USER_FUNDED_GROUP_TOO_MANY_CALLS', 'USER_FUNDED_CHAIN_DISABLED',
-  'USER_FUNDED_ACTION_NOT_BUILDABLE', 'USER_FUNDED_STEP_SHAPE_UNSUPPORTED', 'DELEGATION_ASSET_NOT_SUPPORTED', 'DELEGATION_TEMPLATE_NOT_IMPLEMENTED']);
+  'USER_FUNDED_ACTION_NOT_BUILDABLE', 'USER_FUNDED_STEP_SHAPE_UNSUPPORTED', 'DELEGATION_ASSET_NOT_SUPPORTED', 'DELEGATION_TEMPLATE_NOT_IMPLEMENTED',
+  // What the chain's own contracts say (a token's code or decimals, a fee-on-transfer token) or the registry lacks (a router for the expiry guard).
+  'TOKEN_METADATA_MISMATCH', 'CONTRACT_CODE_MISSING', 'SIMULATION_SWAP_OUTPUT_SHORT', 'USER_FUNDED_DEADLINE_UNAVAILABLE']);
 /**
  * Blocks a due group after a permanent refusal and halts the run (steps already executed keep their facts), then refuses with the code. Only
  * from exactly the PLANNED group this preparation read (its row version): a concurrent preparation that succeeded — its batch possibly already
