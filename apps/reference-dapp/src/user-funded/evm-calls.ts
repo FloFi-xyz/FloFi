@@ -5,7 +5,9 @@
  * a fresh on-chain quote; never from a label. The owner's account is the sender and fee payer of every call (invariant S1).
  *
  *   swap      [approve(router, amountIn)] · SwapRouter02.exactInputSingle(tokenIn, tokenOut, fee, OWNER, amountIn, minimumOut, 0)
- *             (USDC⇄WETH at 0.05% on Ethereum, Base and Arbitrum One — the registered delegation-grade profiles)
+ *             (USDC⇄WETH at 0.05% on Ethereum, Base and Arbitrum One — the registered delegation-grade profiles; P0: any catalog ERC-20 pair,
+ *             whose two tokens are first verified on chain — code present and decimals() equal to the catalog's — and, on Robinhood Chain,
+ *             only its pinned assets)
  *   supply    [approve(Pool, amount)] · Pool.supply(asset, amount, OWNER, 0)   (registered Aave V3 market and reserve; its supply cap, liquidity
  *             and the owner's health factor are proven by the whole-batch simulation before signing, `batch-simulation.ts`)
  *
@@ -119,7 +121,12 @@ export type UserFundedNeed = Exclude<Extract<ReturnType<typeof stepCapability>, 
    * fee tier the owner authored, else every standard tier (the batch quotes each existing canonical pool and takes the best output).
    */
   | { readonly kind: 'EVM_UNISWAP_V3_EXACT_INPUT_SINGLE'; readonly router: string; readonly quoter: string; readonly factory: string; readonly poolInitCodeHash: string;
-      readonly tokenIn: string; readonly tokenOut: string; readonly amountIn: bigint; readonly tiers: readonly number[] }
+      readonly tokenIn: string; readonly tokenOut: string; readonly amountIn: bigint; readonly tiers: readonly number[];
+      /**
+       * The catalog's decimals of each side — what every amount of the step was scaled with. Listing is never authority: a catalog swap
+       * (`factory` set) verifies both against the token's own `decimals()` on chain before it is quoted (`buildEvmGroupCalls`).
+       */
+      readonly tokenInDecimals: number; readonly tokenOutDecimals: number }
   | { readonly kind: 'EVM_AAVE_V3_REPAY' | 'EVM_AAVE_V3_WITHDRAW'; readonly pool: string; readonly asset: string; readonly amount: bigint; readonly aToken: string;
       readonly variableDebtToken: string };
 export type UserFundedCapability = { readonly ok: true; readonly need: UserFundedNeed } | { readonly ok: false; readonly code: string };
@@ -149,7 +156,7 @@ function catalogSwapNeed(step: StepRequirement, chains: readonly string[]): User
     if (step.adapterId !== 'uniswap.v3' || step.inputs.length !== 1 || step.outputs.length !== 1 || !input || !output || !pair.includes(input.address)
       || !pair.includes(output.address) || input.address === output.address) return { ok: false, code: 'DELEGATION_ASSET_NOT_SUPPORTED' };
     return { ok: true, need: { kind: 'EVM_UNISWAP_V3_EXACT_INPUT_SINGLE', router: testnet.router, quoter: testnet.quoter, factory: '', poolInitCodeHash: '',
-      tokenIn: input.address, tokenOut: output.address, amountIn: input.amount, tiers: [testnet.fee] } };
+      tokenIn: input.address, tokenOut: output.address, amountIn: input.amount, tiers: [testnet.fee], tokenInDecimals: input.decimals, tokenOutDecimals: output.decimals } };
   }
   const profile = CATALOG_SWAPS.find(p => p.chainRef === step.chain);
   if (!profile || !chains.includes(step.chain)) return { ok: false, code: 'MAINNET_DELEGATION_DISABLED' };
@@ -160,17 +167,23 @@ function catalogSwapNeed(step: StepRequirement, chains: readonly string[]): User
   // Native ETH in or out needs the router's value/unwrap path: it runs through the owner-signed catalog swap.
   if (input.address === NATIVE || output.address === NATIVE) return { ok: false, code: 'USER_FUNDED_NATIVE_SWAP_UNSUPPORTED' };
   // Only catalog ERC-20 assets; a Stock Token's disposability and economics are checked by its own flow, never skipped in a batch.
+  const decimals: number[] = [];
   for (const ref of [input, output]) {
     const asset = resolveNetworkAsset(step.chain, { address: ref.address });
     if (!asset || asset.kind !== 'ERC20' || asset.decimals !== ref.decimals || (asset as { assetClass?: string }).assetClass === 'STOCK_TOKEN' || 'stock' in asset && asset.stock)
       return { ok: false, code: 'USER_FUNDED_SWAP_ASSET_UNSUPPORTED' };
+    // Listing is never authority (the owner-signed catalog swap's `verifyCatalogToken` policy). On a network whose listed tokens are refused
+    // (Robinhood Chain: only its code-pinned assets and Stock Tokens exist), anything but a pinned asset is refused here; elsewhere a listed
+    // token's code and its own decimals() are verified on chain before it is quoted (`buildEvmGroupCalls`).
+    if (profile.listedTokens === 'REFUSE' && !Object.hasOwn(profile.pinnedTokens, ref.address.toLowerCase())) return { ok: false, code: 'USER_FUNDED_SWAP_ASSET_UNSUPPORTED' };
+    decimals.push(asset.decimals);
   }
   const authored = (step.strategy as { readonly feeTier?: number }).feeTier;
   const standard: readonly number[] = profile.feeTiers.map(tier => tier.fee);
   if (authored !== undefined && !standard.includes(authored)) return { ok: false, code: 'USER_FUNDED_SWAP_FEE_TIER_UNSUPPORTED' };
   return { ok: true, need: { kind: 'EVM_UNISWAP_V3_EXACT_INPUT_SINGLE', router: profile.router.toLowerCase(), quoter: profile.quoter.toLowerCase(),
     factory: profile.factory.toLowerCase(), poolInitCodeHash: profile.poolInitCodeHash, tokenIn: input.address, tokenOut: output.address, amountIn: input.amount,
-    tiers: authored !== undefined ? [authored] : standard } };
+    tiers: authored !== undefined ? [authored] : standard, tokenInDecimals: decimals[0]!, tokenOutDecimals: decimals[1]! } };
 }
 export function userFundedNeed(step: StepRequirement, chains: readonly string[]): UserFundedCapability {
   if (step.namespace === 'eip155' && step.action === 'swap') return catalogSwapNeed(step, chains);
@@ -216,6 +229,8 @@ export const MAX_BATCH_SLIPPAGE_BPS = 300;
 const ALLOWANCE_SELECTOR = '0xdd62ed3e';
 /** `balanceOf(address)` (selector): an Aave variable-debt token's balance is the owner's current debt, interest included. */
 const BALANCE_OF_SELECTOR = '0x70a08231';
+/** `decimals()` of an ERC-20 (selector). */
+const DECIMALS_SELECTOR = '0x313ce567';
 const addressWord = (a: string) => a.toLowerCase().replace(/^0x/, '').padStart(64, '0');
 
 type Deps = { readonly chains: readonly string[]; readonly owner: string; readonly transport: (chain: string) => ChainTransport | null;
@@ -268,6 +283,24 @@ export async function buildEvmGroupCalls(requirement: WorkflowRequirement, from:
     }
     return debts.get(k)!;
   };
+  // P0 universal execution: a catalog swap's token as the chain reports it, read once per build (listing is never authority — the owner-signed
+  // catalog swap's `verifyCatalogToken` rule). It must have code, and its own decimals() must equal the catalog's: every amount of the step was
+  // scaled with them, so a wrong catalog value would approve and swap orders of magnitude more than the owner wrote. A read that fails refuses
+  // (USER_FUNDED_RPC_UNAVAILABLE); only an answer the chain actually gave is called a mismatch.
+  const verified = new Map<string, number>();
+  const verifyToken = async (t: ChainTransport, token: string, decimals: number): Promise<string | null> => {
+    const k = token.toLowerCase();
+    if (verified.has(k)) return verified.get(k) === decimals ? null : 'TOKEN_METADATA_MISMATCH';
+    let code: unknown, raw: unknown;
+    try { code = await t.rpc('eth_getCode', [token, 'latest']); } catch { return 'USER_FUNDED_RPC_UNAVAILABLE'; }
+    if (typeof code !== 'string' || !/^0x[0-9a-fA-F]*$/.test(code)) return 'USER_FUNDED_RPC_UNAVAILABLE';
+    if (code === '0x' || code === '0x0') return 'CONTRACT_CODE_MISSING';
+    try { raw = await t.rpc('eth_call', [{ to: token, data: DECIMALS_SELECTOR }, 'latest']); } catch { return 'USER_FUNDED_RPC_UNAVAILABLE'; }
+    if (typeof raw !== 'string' || !/^0x[0-9a-fA-F]*$/.test(raw)) return 'USER_FUNDED_RPC_UNAVAILABLE';
+    if (!/^0x[0-9a-fA-F]{1,64}$/.test(raw) || BigInt(raw) !== BigInt(decimals)) return 'TOKEN_METADATA_MISMATCH';
+    verified.set(k, decimals);
+    return null;
+  };
   for (const step of steps) {
     const refuse = (code: string) => ({ ok: false as const, stepIndex: step.index, code });
     const problem = evmStepBuildable(step, deps.chains);
@@ -306,6 +339,11 @@ export async function buildEvmGroupCalls(requirement: WorkflowRequirement, from:
       if (!t) return refuse('USER_FUNDED_RPC_UNAVAILABLE');
       const slippage = BigInt(step.slippageBps ?? 0);
       if (slippage < 0n || slippage > BigInt(MAX_BATCH_SLIPPAGE_BPS)) return refuse('WORKFLOW_SLIPPAGE_UNSUPPORTED');
+      // A catalog pair's tokens are verified on chain before anything is quoted (a test pair profile's two tokens are its registered USDC/WETH).
+      if (need.factory) for (const [token, decimals] of [[need.tokenIn, need.tokenInDecimals], [need.tokenOut, need.tokenOutDecimals]] as const) {
+        const problem = await verifyToken(t, token, decimals);
+        if (problem) return refuse(problem);
+      }
       // Each candidate tier's canonical pool (CREATE2 from the registered factory) must exist; each existing pool is quoted and the best
       // output wins — as the owner-signed catalog swap does. A tier whose quote reverts (no liquidity for this size) is skipped.
       let quoted = 0n, fee = 0;
@@ -388,9 +426,13 @@ export async function buildEvmGroupCalls(requirement: WorkflowRequirement, from:
     if (calls.length > erc7710.WORKFLOW_GRANT_MAX_CALLS) return refuse('USER_FUNDED_GROUP_TOO_MANY_CALLS');
   }
   // A wallet batch without a swap but with Aave calls gets its on-chain expiry from a deadline guard first (the chain's registered router).
-  const router = deps.deadline === undefined ? null : CATALOG_SWAPS.find(p => p.chainRef === chain)?.router.toLowerCase() ?? delegationSwapProfile(chain, deps.chains)?.router ?? null;
-  const aave = calls.some(c => c.kind === 'AAVE_V3_SUPPLY' || c.kind === 'AAVE_V3_BORROW' || c.kind === 'AAVE_V3_REPAY' || c.kind === 'AAVE_V3_WITHDRAW');
-  if (router && aave && !calls.some(c => c.kind === 'UNISWAP_V3_EXACT_INPUT_SINGLE')) {
+  const aaveAt = calls.findIndex(c => c.kind === 'AAVE_V3_SUPPLY' || c.kind === 'AAVE_V3_BORROW' || c.kind === 'AAVE_V3_REPAY' || c.kind === 'AAVE_V3_WITHDRAW');
+  if (deps.deadline !== undefined && aaveAt >= 0 && !calls.some(c => c.kind === 'UNISWAP_V3_EXACT_INPUT_SINGLE')) {
+    const router = CATALOG_SWAPS.find(p => p.chainRef === chain)?.router.toLowerCase() || delegationSwapProfile(chain, deps.chains)?.router || null;
+    // Without a registered router to carry the guard, the batch would reach the wallet with no expiry at all (a prompt confirmed late would run
+    // Aave calls on a stale health-factor proof): it is refused, never silently sent without one.
+    if (!router || !EVM_ADDRESS.test(router.toLowerCase()))
+      return { ok: false, stepIndex: out.find(s => s.calls.includes(aaveAt))?.stepIndex ?? from, code: 'USER_FUNDED_DEADLINE_UNAVAILABLE' };
     if (calls.length + 1 > erc7710.WORKFLOW_GRANT_MAX_CALLS) return { ok: false, stepIndex: from, code: 'USER_FUNDED_GROUP_TOO_MANY_CALLS' };
     return { ok: true, value: { chain, chainId: chainIdOf(chain), owner, calls: [{ kind: 'DEADLINE_GUARD', router, deadline: String(deps.deadline) }, ...calls],
       steps: out.map(s => ({ ...s, calls: s.calls.map(i => i + 1) })) } };

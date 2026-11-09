@@ -7,9 +7,12 @@
  *
  * MOCKED loopback chain double (Arbitrum One identities, a modelled Aave V3 Pool); nothing reaches a network and nothing is signed.
  */
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+import { catalogAsset, createAssetCatalog, erc20AssetId } from '@defi-workflow-engine/action-registry';
+import { registerNetworkCatalog, resetNetworkCatalogs } from '../domain/asset-catalogs';
 import { ARBITRUM_MAINNET_SWAP } from '../domain/public-testnet-swap.ts';
-import { guarded } from '../delegation/chains.ts';
+import { officialCatalog } from '../server/robinhood-mainnet.test-harness.ts';
+import { guarded, type ChainTransport } from '../delegation/chains.ts';
 import { createEvmDouble } from '../delegation/harness/evm-double.ts';
 import { delegationAavePool, delegationAaveReserve } from '../delegation/profiles.ts';
 import { workflowRequirement } from '../delegation/steps.ts';
@@ -325,5 +328,187 @@ describe('P0 universal execution: Base Swap → Supply → Borrow as one batch (
     expect(BigInt(p.simulation!.healthFactorAfter[pool.toLowerCase()]!)).toBeGreaterThanOrEqual(2n * 10n ** 18n);
     const hash = chain.control.walletBatch(OWNER, evmCallsOf(p.group));
     expect((await reconcileWalletBatch(transport, p.group, [hash], p.fromBlock)).status).toBe('RECONCILED');
+  });
+});
+
+describe('P0 universal execution: a batched catalog swap trusts the chain, never the listing, and proves what the owner received', () => {
+  const SWAP = { action: 'swap', network: 'arbitrum-one', inputAsset: 'USDC', outputAsset: 'WETH', amount: '3', slippageBps: 50 };
+  const QUOTE_SELECTOR = '0xc6a5026a', BALANCE_OF_SELECTOR = '0x70a08231';
+  /** A MOCKED Arbitrum One chain (its registered catalog deployment) whose reads are recorded, and the preparation of `s` as one wallet batch. */
+  const arbitrum = () => {
+    const chain = createEvmDouble(42161, () => Math.floor(Date.parse(NOW) / 1000), { profile: ARBITRUM_MAINNET_SWAP });
+    chain.control.fundToken(OWNER, USDC, 10_000_000n); chain.control.fundNative(OWNER, 10n ** 17n);
+    const reads: string[] = [];
+    const transport = guarded(CHAIN, 'read', 'MOCKED', async (method, params) => {
+      reads.push(method === 'eth_call' ? String((params[0] as { data: string }).data).slice(0, 10) : method);
+      return chain.rpc(method, params);
+    });
+    const deps: UserFundedDeps = { chains: CHAINS, evm: c => c === CHAIN ? transport : null, bundler: () => null, solana: null, jupiter: null, now: () => new Date(NOW) };
+    const prepare = (s: Strategy) => {
+      const requirement = workflowRequirement(s), composition = composeWorkflowBound(s as never, undefined);
+      if (!requirement.ok || !composition.ok) throw new Error('STRATEGY_INVALID');
+      return prepareGroup(deps, composition, requirement.value, { runId: 'wfr_verify', groupIndex: 0, strategy: 'EVM_WALLET_BATCH', chain: CHAIN, feePayer: OWNER,
+        stepFrom: 0, stepTo: s.steps.length - 1 });
+    };
+    return { chain, transport, reads, prepare };
+  };
+
+  it('a token whose decimals() on chain differ from its catalog entry is refused before anything is quoted, simulated or offered', async () => {
+    for (const [token, decimals] of [[USDC, 18], [WETH, 6]] as const) {
+      const { chain, reads, prepare } = arbitrum();
+      chain.control.setDecimals(token, decimals);
+      expect(await prepare({ version: 2, steps: [SWAP] })).toMatchObject({ ok: false, code: 'TOKEN_METADATA_MISMATCH', stepIndex: 0 });
+      expect(reads).not.toContain(QUOTE_SELECTOR);
+      expect(chain.control.simulations()).toBe(0);
+      expect(chain.control.sends()).toBe(0);
+    }
+    // The same swap on a chain that reports the catalog's decimals is offered; each token is read once (code, then decimals()).
+    const { reads, prepare } = arbitrum();
+    expect((await prepare({ version: 2, steps: [SWAP] })).ok).toBe(true);
+    expect(reads.filter(r => r === '0x313ce567')).toHaveLength(2);
+  });
+
+  it('a catalog token address without code is refused (CONTRACT_CODE_MISSING), nothing quoted', async () => {
+    const { chain, reads, prepare } = arbitrum();
+    chain.control.setCode(WETH, '0x');
+    expect(await prepare({ version: 2, steps: [SWAP] })).toMatchObject({ ok: false, code: 'CONTRACT_CODE_MISSING', stepIndex: 0 });
+    expect(reads).not.toContain(QUOTE_SELECTOR);
+    expect(chain.control.simulations()).toBe(0);
+  });
+
+  it('Robinhood Chain: a listed token that is not one of its pinned assets is never batched (only its pinned assets and Stock Tokens exist there)', () => {
+    const RH = 'eip155:4663';
+    const r = workflowRequirement({ version: 2, steps: [{ action: 'swap', network: 'robinhood', inputAsset: 'WETH', outputAsset: 'USDG', amount: '0.001', slippageBps: 100 }] });
+    if (!r.ok) throw new Error(r.code);
+    const step = r.value.steps[0]!;
+    // An official Robinhood catalog that also lists a non-Stock ERC-20 (USDG's shape, another address) beside the pinned WETH and USDG.
+    const official = officialCatalog(), usdg = catalogAsset(official, { symbol: 'USDG' })!, listed = '0x' + '7a'.repeat(20);
+    registerNetworkCatalog(createAssetCatalog({ chain: RH, network: official.network, provenance: official.provenance,
+      assets: [...official.assets, { ...usdg, id: erc20AssetId(RH, listed), address: listed, symbol: 'RHX', name: 'Listed token', source: { ...usdg.source, officialId: null } }] }));
+    try {
+      expect(evmStepBuildable({ ...step, outputs: [{ ...step.outputs[0]!, address: listed }] }, [RH], OWNER)).toBe('USER_FUNDED_SWAP_ASSET_UNSUPPORTED');
+      expect(evmStepBuildable({ ...step, inputs: [{ ...step.inputs[0]!, address: listed, decimals: 6 }] }, [RH], OWNER)).toBe('USER_FUNDED_SWAP_ASSET_UNSUPPORTED');
+      // The pinned pair itself is still batched.
+      expect(evmStepBuildable(step, [RH], OWNER)).toBeNull();
+    } finally { resetNetworkCatalogs(); }
+  });
+
+  /** Swap 3 USDC → WETH (50 bps slippage), then transfer the swap's WETH (its signed minimum, below the 0.0013 cap) to someone else. */
+  const BOUND: Strategy = { version: 2, steps: [SWAP, { action: 'transfer', network: 'arbitrum-one', asset: 'WETH', amount: '0.0013',
+    recipient: '0x4444444444444444444444444444444444444444' }], bindings: [{ step: 1, amountFrom: 0 }] };
+
+  it('a transfer fee hidden inside the slippage headroom (10 bps < 50 bps) on a swap output a bound transfer spends is refused; a normal token passes', async () => {
+    // A normal token: offered; the balance reads exist only in the simulation, never in the batch the wallet sends; it executes and reconciles.
+    const normal = arbitrum();
+    normal.chain.control.fundToken(OWNER, WETH, 10n ** 16n);
+    const r = await normal.prepare(BOUND);
+    if (!r.ok) throw new Error(r.code);
+    const p = r.value.prepared as unknown as BatchPrepared;
+    expect(p.group.calls.map(c => c.kind)).toEqual(['ERC20_APPROVE', 'UNISWAP_V3_EXACT_INPUT_SINGLE', 'ERC20_TRANSFER']);
+    expect(p.request.calls).toHaveLength(3);
+    expect(p.request.calls.some(c => c.data.startsWith(BALANCE_OF_SELECTOR))).toBe(false);
+    expect(p.simulation!.gasUsed).toHaveLength(3);
+    const swap = p.group.calls[1] as { amountOutMinimum: string; quotedAmountOut: string };
+    const minimum = BigInt(swap.amountOutMinimum), quoted = BigInt(swap.quotedAmountOut);
+    expect(p.group.calls[2]).toMatchObject({ kind: 'ERC20_TRANSFER', amount: swap.amountOutMinimum });
+    const hash = normal.chain.control.walletBatch(OWNER, evmCallsOf(p.group));
+    expect((await reconcileWalletBatch(normal.transport, p.group, [hash], p.fromBlock)).status).toBe('RECONCILED');
+
+    // At today's price the pool sends the full quote: with a 10 bps fee the owner still receives MORE than the signed minimum, so a receipt
+    // check against the minimum passes it. Exact receipt of what the pool sent refuses it (and a fee above the headroom, 100 bps, alike).
+    expect(quoted - quoted * 10n / 10_000n).toBeGreaterThanOrEqual(minimum);
+    for (const bps of [10n, 100n]) {
+      const fee = arbitrum();
+      fee.chain.control.fundToken(OWNER, WETH, 10n ** 16n);
+      fee.chain.control.setTransferFeeBps(WETH, bps);
+      expect(await fee.prepare(BOUND)).toMatchObject({ ok: false, code: 'SIMULATION_SWAP_OUTPUT_SHORT', stepIndex: 0 });
+      expect(fee.chain.control.simulations()).toBe(1);
+      expect(fee.chain.control.sends()).toBe(0);
+      expect(fee.chain.control.tokenBalance(WETH, OWNER)).toBe(10n ** 16n);
+    }
+
+    // Why: the batch a minimum-based check would have offered on the 10 bps chain is these same calls (a transfer fee changes no quote). On
+    // chain it may legally execute with the pool sending exactly the minimum; the owner then receives minimum × 99.9% and the bound transfer
+    // of the minimum takes the difference from the owner's unrelated WETH.
+    const harm = arbitrum();
+    harm.chain.control.fundToken(OWNER, WETH, 10n ** 16n);
+    const offered = await harm.prepare(BOUND);
+    if (!offered.ok) throw new Error(offered.code);
+    const q = offered.value.prepared as unknown as BatchPrepared;
+    expect(evmCallsOf(q.group)).toEqual(evmCallsOf(p.group));
+    const price = minimum * 1_000_000n / 3_000_000n;
+    expect(3_000_000n * price / 1_000_000n).toBe(minimum);
+    harm.chain.control.setPrice(price); harm.chain.control.setTransferFeeBps(WETH, 10n);
+    const harmed = harm.chain.control.walletBatch(OWNER, evmCallsOf(q.group));
+    expect(harm.chain.control.tokenBalance(WETH, OWNER)).toBe(10n ** 16n - minimum * 10n / 10_000n);
+    expect((await reconcileWalletBatch(harm.transport, q.group, [harmed], q.fromBlock)).status).toBe('MISMATCH');
+  });
+
+  it('with the simulation, a fee-on-transfer swap output is refused even when nothing in the batch spends it (exact receipt, fail closed)', async () => {
+    const fee = arbitrum();
+    fee.chain.control.setTransferFeeBps(WETH, 10n);
+    expect(await fee.prepare({ version: 2, steps: [SWAP] })).toMatchObject({ ok: false, code: 'SIMULATION_SWAP_OUTPUT_SHORT', stepIndex: 0 });
+    expect(fee.chain.control.simulations()).toBe(1);
+    expect(fee.chain.control.sends()).toBe(0);
+  });
+
+  it('without eth_simulateV1, a swap output spent by a later bound call is refused at the consuming step; a swap whose output stays is offered', async () => {
+    // What reached the owner cannot be proven without the simulation, so the bound batch is refused whatever the token (fee-free included).
+    for (const bps of [0n, 10n]) {
+      const { chain, prepare } = arbitrum();
+      chain.control.disableSimulation();
+      chain.control.fundToken(OWNER, WETH, 10n ** 16n);
+      chain.control.setTransferFeeBps(WETH, bps);
+      expect(await prepare(BOUND)).toMatchObject({ ok: false, code: 'USER_FUNDED_SIMULATION_UNAVAILABLE', stepIndex: 1 });
+      expect(chain.control.simulations()).toBe(0);
+      expect(chain.control.sends()).toBe(0);
+      expect(chain.control.tokenBalance(WETH, OWNER)).toBe(10n ** 16n);
+    }
+    // The swap alone is still offered without the simulation: the router enforces its minimum on chain; a fee-on-transfer output only reduces
+    // what the owner keeps, and reconciliation records the amount that actually arrived.
+    const { chain, transport, prepare } = arbitrum();
+    chain.control.disableSimulation();
+    chain.control.setTransferFeeBps(WETH, 10n);
+    const r = await prepare({ version: 2, steps: [SWAP] });
+    if (!r.ok) throw new Error(r.code);
+    const p = r.value.prepared as unknown as BatchPrepared;
+    expect(p.simulation).toBeNull();
+    expect(p.group.calls.map(c => c.kind)).toEqual(['ERC20_APPROVE', 'UNISWAP_V3_EXACT_INPUT_SINGLE']);
+    const quoted = BigInt((p.group.calls[1] as { quotedAmountOut: string }).quotedAmountOut), arrived = quoted - quoted * 10n / 10_000n;
+    const hash = chain.control.walletBatch(OWNER, evmCallsOf(p.group));
+    const reconciled = await reconcileWalletBatch(transport, p.group, [hash], p.fromBlock);
+    if (reconciled.status !== 'RECONCILED') throw new Error(JSON.stringify(reconciled));
+    expect(reconciled.steps[0]!.received).toEqual([{ asset: `${CHAIN}/erc20:${WETH}`, amount: arrived.toString() }]);
+    expect(chain.control.tokenBalance(WETH, OWNER)).toBe(arrived);
+  });
+});
+
+describe('P0 universal execution: an Aave batch never silently loses its on-chain expiry', () => {
+  it('without a registered router to carry the deadline guard, the wallet batch is refused (USER_FUNDED_DEADLINE_UNAVAILABLE)', async () => {
+    const s = { version: 2, steps: [{ action: 'supply', network: 'arbitrum-one', asset: 'WETH', amount: '0.002', beneficiary: OWNER },
+      { action: 'borrow', network: 'arbitrum-one', asset: 'USDC', amount: '1', beneficiary: OWNER }] };
+    const requirement = workflowRequirement(s);
+    if (!requirement.ok) throw new Error(requirement.code);
+    const transport: ChainTransport = { chain: CHAIN, provenance: 'MOCKED', rpc: async method => {
+      if (method === 'eth_call') return '0x' + '0'.repeat(64);
+      throw new Error(`UNEXPECTED_${method}`);
+    } };
+    const deps = { chains: CHAINS, owner: OWNER, transport: () => transport };
+    // Every registered Aave market today (Ethereum, Base, Arbitrum One) has a registered router, so the case is reached by removing Arbitrum
+    // One's catalog swap deployment from a fresh module graph (the builder then resolves no router for the chain).
+    vi.resetModules();
+    vi.doMock('../domain/public-testnet-swap.ts', async importOriginal => {
+      const real = await importOriginal<typeof import('../domain/public-testnet-swap.ts')>();
+      return { ...real, ARBITRUM_MAINNET_SWAP: { ...real.ARBITRUM_MAINNET_SWAP, router: '' } };
+    });
+    try {
+      const { buildEvmGroupCalls } = await import('./evm-calls.ts');
+      expect(await buildEvmGroupCalls(requirement.value, 0, 1, { ...deps, deadline: Math.floor(Date.parse(NOW) / 1000) + 600 }))
+        .toEqual({ ok: false, stepIndex: 0, code: 'USER_FUNDED_DEADLINE_UNAVAILABLE' });
+      // Without a deadline (a user operation, bounded otherwise) the same calls build as before.
+      const unbounded = await buildEvmGroupCalls(requirement.value, 0, 1, deps);
+      if (!unbounded.ok) throw new Error(unbounded.code);
+      expect(unbounded.value.calls.map(c => c.kind)).toEqual(['ERC20_APPROVE', 'AAVE_V3_SUPPLY', 'AAVE_V3_BORROW']);
+    } finally { vi.doUnmock('../domain/public-testnet-swap.ts'); vi.resetModules(); }
   });
 });

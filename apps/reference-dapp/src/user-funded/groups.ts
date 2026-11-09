@@ -83,7 +83,8 @@ async function prepareWalletBatch(deps: UserFundedDeps, requirement: WorkflowReq
   const group = built.value, calls = evmCallsOf(group);
   const stepOfCall = (index: number | null) => index === null ? null : group.steps.find(s => s.calls.includes(index))?.stepIndex ?? null;
   // P0 workflow execution: the WHOLE batch is simulated in order from the owner's account before anything is offered (every call succeeds, each
-  // swap meets its signed minimum, an Aave borrow leaves a health factor of at least 2.0), and its fee estimate uses each call's simulated gas.
+  // swap meets its signed minimum and the owner receives exactly what its pool sent, an Aave borrow leaves a health factor of at least 2.0),
+  // and its fee estimate uses each call's simulated gas.
   const simulated = await simulateWalletBatch(t, group, calls);
   let gas: bigint, simulation: BatchSimulation | null = null;
   if (simulated.ok) {
@@ -91,10 +92,20 @@ async function prepareWalletBatch(deps: UserFundedDeps, requirement: WorkflowReq
     gas = simulated.value.gasUsed.reduce((sum, g) => sum + BigInt(g), 0n) + 30_000n;
   } else if (simulated.code !== 'USER_FUNDED_SIMULATION_UNAVAILABLE') return no(simulated.code, stepOfCall(simulated.callIndex) ?? group.steps[0]?.stepIndex ?? null);
   else {
-    // Without a whole-batch simulation on this RPC, a batch whose safety depends on Aave state (health factor, caps, liquidity) is never offered
-    // blind: it is refused with a closed code (the steps then run through their own flows). Swaps and transfers keep the atomic minimum checks.
+    // Without a whole-batch simulation on this RPC, two kinds of batch are never offered blind; each is refused with a closed code (the steps
+    // then run through their own flows):
+    //   Aave           a batch whose safety depends on Aave state (health factor, caps, liquidity, debt), at its first Aave call's step.
+    //   spent output   a batch in which a later step SPENDS a swap's output (a binding to a swap step of this group), at that consuming step.
+    //                  The router enforces only what the pool sent; what reached the owner (a fee-on-transfer token delivers less) is proven by
+    //                  the simulation alone, and without it the consumer could take the shortfall from the owner's unrelated balance.
+    // A swap whose output stays with the owner is still offered: the router enforces its minimum on chain, a fee-on-transfer output then only
+    // reduces what the owner keeps, and reconciliation records the amount that actually arrived (below the signed minimum it is a mismatch,
+    // never a reconciled step). Transfers keep their atomic checks.
     const aave = group.calls.findIndex(isAaveCall);
     if (aave >= 0) return no('USER_FUNDED_SIMULATION_UNAVAILABLE', stepOfCall(aave));
+    const swapSteps = new Set(group.steps.filter(s => s.calls.some(i => group.calls[i]?.kind === 'UNISWAP_V3_EXACT_INPUT_SINGLE')).map(s => s.stepIndex));
+    const consumer = group.steps.find(s => requirement.bindings.some(b => b.step === s.stepIndex && swapSteps.has(b.amountFrom)));
+    if (consumer) return no('USER_FUNDED_SIMULATION_UNAVAILABLE', consumer.stepIndex);
     // The first call depends on nothing earlier in the batch: if it cannot be estimated from the owner's account it would revert, so nothing is offered.
     let firstGas: bigint;
     try { firstGas = big(await t.rpc('eth_estimateGas', [{ from: group.owner, to: calls[0]!.target, value: hex(calls[0]!.value), data: calls[0]!.data }])); }

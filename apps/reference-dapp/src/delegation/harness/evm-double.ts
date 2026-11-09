@@ -11,6 +11,10 @@
  * P0 workflow execution: optionally a mainnet swap profile (e.g. Arbitrum One's registered Uniswap v3 router/quoter/USDC/WETH) and a minimal
  * Aave V3 Pool model (supply / variable borrow / variable repay / withdraw / `getUserAccountData`, fixed oracle prices, per-reserve LTV and liquidation threshold, auto
  * collateral on first supply, Aave's borrow capacity rule), plus `eth_simulateV1` (calls applied in order to a copy of the state, then discarded).
+ *
+ * P0 universal execution: tokens report their real decimals and carry code by default; a test may make one contradict its catalog entry
+ * (`setDecimals`), remove its code (`setCode(token, '0x')`) or charge a fee on every transfer of it (`setTransferFeeBps`: the recipient gets
+ * less than was sent, while the router still returns the pool's full output, as with a real fee-on-transfer token).
  */
 import { uniswapV3PoolAddress } from '@defi-workflow-engine/action-registry';
 import { erc4337, erc7710 } from '@defi-workflow-engine/reference-compiler';
@@ -60,6 +64,12 @@ export function createEvmDouble(chainId: number, clock: () => number = () => Mat
   const canonicalPools = catalog?.factory && catalog.poolInitCodeHash ? (options.deployedTiers ?? catalog.feeTiers?.map(t => t.fee) ?? [])
     .map(fee => lower(uniswapV3PoolAddress(catalog.factory!, catalog.poolInitCodeHash!, profile.usdc, profile.weth, fee))) : [];
   let block = 100, wethPerUsdc = 400_000_000_000_000n, dropNext = false, sends = 0, simulateSupported = true, simulations = 0;
+  /** Test overrides: a token's decimals() answer, and a fee-on-transfer token's fee (basis points of each transfer, burned). */
+  const decimalsOverride = new Map<string, number>(), transferFeeBps = new Map<string, bigint>();
+  const feeOf = (token: string, amount: bigint) => amount * (transferFeeBps.get(lower(token)) ?? 0n) / 10_000n;
+  /** What the last executed swap's pool sent (SwapRouter02's return value), whatever a fee-on-transfer token then delivered to the recipient. */
+  let routerOut = 0n;
+  const ZERO = '0x' + '0'.repeat(40);
   const key = (token: string, owner: string) => `${lower(token)}|${lower(owner)}`;
   const bal = (token: string, owner: string) => balances.get(key(token, owner)) ?? 0n;
   const setBal = (token: string, owner: string, v: bigint) => balances.set(key(token, owner), v);
@@ -84,11 +94,17 @@ export function createEvmDouble(chainId: number, clock: () => number = () => Mat
       if (bal(tokenIn, account) < amountIn) fail('STF');
       const out = quote(tokenIn, amountIn);
       if (out < minOut) fail('Too little received');
+      // A v3 pool refuses an input it did not fully receive (a fee-on-transfer input token).
+      if (feeOf(tokenIn, amountIn) > 0n) fail('IIA');
       allowances.set(allowanceKey(tokenIn, account, profile.router), allowance - amountIn);
       setBal(tokenIn, account, bal(tokenIn, account) - amountIn); setBal(tokenIn, pool, bal(tokenIn, pool) + amountIn);
-      setBal(tokenOut, pool, bal(tokenOut, pool) - out); setBal(tokenOut, recipient, bal(tokenOut, recipient) + out);
+      // The router checks and returns the pool's output; a fee-on-transfer output token then delivers less to the recipient.
+      const fee = feeOf(tokenOut, out);
+      setBal(tokenOut, pool, bal(tokenOut, pool) - out); setBal(tokenOut, recipient, bal(tokenOut, recipient) + out - fee);
+      routerOut = out;
       return [{ address: lower(tokenIn), topics: [TRANSFER, topic(account), topic(pool)], data: word(amountIn) },
-        { address: lower(tokenOut), topics: [TRANSFER, topic(pool), topic(recipient)], data: word(out) }];
+        ...fee > 0n ? [{ address: lower(tokenOut), topics: [TRANSFER, topic(pool), topic(ZERO)], data: word(fee) }] : [],
+        { address: lower(tokenOut), topics: [TRANSFER, topic(pool), topic(recipient)], data: word(out - fee) }];
     }
     // P0 universal execution: SwapRouter02 `multicall(uint256 deadline, bytes[] data)` — refused after the deadline ('Transaction too old'), else
     // each inner call to the router itself, in order (the batched swap's deadline guard).
@@ -101,8 +117,10 @@ export function createEvmDouble(chainId: number, clock: () => number = () => Mat
     if (method === D.ERC20_TRANSFER_METHOD && tokens().includes(target)) {
       const [to, amount] = D.abiDecode(['address', 'uint256'], D.bytesOf('0x' + call.data.slice(10))) as [string, bigint];
       if (bal(target, account) < amount) fail('ERC20: transfer amount exceeds balance');
-      setBal(target, account, bal(target, account) - amount); setBal(target, lower(to), bal(target, lower(to)) + amount);
-      return [{ address: target, topics: [TRANSFER, topic(account), topic(lower(to))], data: word(amount) }];
+      const fee = feeOf(target, amount);
+      setBal(target, account, bal(target, account) - amount); setBal(target, lower(to), bal(target, lower(to)) + amount - fee);
+      return [...fee > 0n ? [{ address: target, topics: [TRANSFER, topic(account), topic(ZERO)], data: word(fee) }] : [],
+        { address: target, topics: [TRANSFER, topic(account), topic(lower(to))], data: word(amount - fee) }];
     }
     // P0 workflow execution: Aave V3 Pool `supply` and variable-rate `borrow` (the owner as onBehalfOf / beneficiary).
     if (aave && target === aave.pool && method === D.AAVE_V3_SUPPLY_METHOD) {
@@ -182,9 +200,9 @@ export function createEvmDouble(chainId: number, clock: () => number = () => Mat
   /** A call's return data in the double (what `eth_simulateV1` reports): a swap's output, `true` for approvals and transfers, nothing for Aave writes. */
   function returnDataOf(call: erc7710.Call, logs: Receipt['logs']): string {
     const method = call.data.slice(0, 10);
-    if (method === D.EXACT_INPUT_SINGLE_METHOD) return word(BigInt(logs.at(-1)?.data ?? '0x0'));
-    // A deadline multicall of one swap returns `bytes[]` holding that swap's output word.
-    if (method === MULTICALL_DEADLINE) return '0x' + [32n, 1n, 32n, 32n, BigInt(logs.at(-1)?.data ?? '0x0')].map(v => v.toString(16).padStart(64, '0')).join('');
+    if (method === D.EXACT_INPUT_SINGLE_METHOD) return word(routerOut);
+    // A deadline multicall of one swap returns `bytes[]` holding that swap's output word (a guard with no inner call: zero).
+    if (method === MULTICALL_DEADLINE) return '0x' + [32n, 1n, 32n, 32n, logs.length ? routerOut : 0n].map(v => v.toString(16).padStart(64, '0')).join('');
     if (method === D.APPROVE_METHOD || method === D.ERC20_TRANSFER_METHOD) return word(1n);
     return '0x';
   }
@@ -278,7 +296,8 @@ export function createEvmDouble(chainId: number, clock: () => number = () => Mat
         if (debtReserve && selector === BALANCE_OF) return word(debt.get(key(debtReserve.asset, '0x' + call.data.slice(34, 74))) ?? 0n);
         if (aReserve && selector === BALANCE_OF) return word(supplied.get(key(aReserve.asset, '0x' + call.data.slice(34, 74))) ?? 0n);
         if (tokens().includes(to) && selector === ALLOWANCE) return word(allowances.get(allowanceKey(to, '0x' + call.data.slice(34, 74), '0x' + call.data.slice(98, 138))) ?? 0n);
-        if (tokens().includes(to) && selector === DECIMALS) return word(to === profile.usdc ? 6n : reserveOf(to) ? BigInt(reserveOf(to)!.decimals) : 18n);
+        if (tokens().includes(to) && selector === DECIMALS) return word(decimalsOverride.has(to) ? BigInt(decimalsOverride.get(to)!)
+          : to === profile.usdc ? 6n : reserveOf(to) ? BigInt(reserveOf(to)!.decimals) : 18n);
         if (aave && to === aave.pool && selector === GET_USER_ACCOUNT_DATA) return userAccountDataWords('0x' + call.data.slice(34, 74));
         if (to === profile.quoter && selector === QUOTE) return word(quote('0x' + call.data.slice(34, 74), BigInt('0x' + call.data.slice(138, 202)))) + '0'.repeat(192);
         // OP Stack (Base): the GasPriceOracle's `getL1FeeUpperBound(unsignedTxSize)`, at a fixed modelled price per byte.
@@ -310,6 +329,8 @@ export function createEvmDouble(chainId: number, clock: () => number = () => Mat
           for (const c of calls) {
             const to = lower(c.to), call: erc7710.Call = { target: to, value: BigInt(c.value ?? '0x0'), data: c.data };
             if (aave && to === aave.pool && c.data.startsWith(GET_USER_ACCOUNT_DATA)) { results.push({ status: '0x1', returnData: userAccountDataWords('0x' + c.data.slice(34, 74)), gasUsed: '0x7530', logs: [] }); continue; }
+            // A read-only balanceOf between the simulated calls (what an account holds at that point of the sequence).
+            if (tokens().includes(to) && c.data.startsWith(BALANCE_OF)) { results.push({ status: '0x1', returnData: word(bal(to, '0x' + c.data.slice(34, 74))), gasUsed: '0x5dc0', logs: [] }); continue; }
             const before = snapshotState();
             try { const logs = execute(lower(c.from), call); results.push({ status: '0x1', returnData: returnDataOf(call, logs), gasUsed: '0x' + gasOf(call).toString(16), logs }); }
             catch (cause) { restoreState(before); results.push({ status: '0x0', returnData: '0x', gasUsed: '0x5208', logs: [], error: { message: cause instanceof Error ? cause.message : 'REVERT' } }); }
@@ -378,6 +399,12 @@ export function createEvmDouble(chainId: number, clock: () => number = () => Mat
     tokenBalance: (token: string, owner: string) => bal(lower(token), lower(owner)),
     allowance: (token: string, owner: string, spender: string) => allowances.get(allowanceKey(token, owner, spender)) ?? 0n,
     setAllowance(token: string, owner: string, spender: string, amount: bigint) { allowances.set(allowanceKey(token, owner, spender), amount); },
+    /** A modelled token whose decimals() answers `decimals` (a catalog entry the chain contradicts). */
+    setDecimals(token: string, decimals: number) { decimalsOverride.set(lower(token), decimals); },
+    /** Replaces an account's code (`'0x'`: a token address without code). */
+    setCode(account: string, bytecode: string) { code.set(lower(account), bytecode); },
+    /** A fee-on-transfer token: each transfer of it delivers `bps` basis points less to the recipient (the fee is burned). */
+    setTransferFeeBps(token: string, bps: bigint) { transferFeeBps.set(lower(token), bps); },
     accountData: (user: string) => accountData(lower(user)),
     dropNextSubmission() { dropNext = true; },
     balance: (token: 'USDC' | 'WETH', owner: string) => bal(token === 'USDC' ? profile.usdc : profile.weth, lower(owner)),
