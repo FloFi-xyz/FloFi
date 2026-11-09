@@ -20,10 +20,22 @@ import type { WalletProfile } from '../workflow-runs/execution-groups';
 import { signWorkflowGrant } from './delegation-browser';
 
 const fail = (code: string): never => { throw new Error(code); };
+const NOT_SENT_CODES: ReadonlySet<number> = new Set([5700, 5710, 5740, 5750, 5760, 4100, 4200, -32601, -32602]);
 const evmProvider = (): EvmProvider => chosenEvmProvider() ?? injected() ?? fail('EVM_WALLET_NOT_FOUND');
 const rejected = (cause: unknown) => (cause as { code?: unknown } | null)?.code === 4001 ? fail('WALLET_REQUEST_REJECTED') : Promise.reject(cause);
 
-/** What the owner's wallets can do on these chains, asked once from the wallets themselves (errors mean "not supported", never assumed). */
+/**
+ * The `atomic` status a wallet reported for one chain: its own entry, else a chain-agnostic `0x0` entry (EIP-5792); null when it reported nothing
+ * for that chain. An entry without `atomic` means the wallet answered for the chain and offers no atomic batching there.
+ */
+function reportedAtomic(capabilities: unknown, chainId: number): 'supported' | 'ready' | 'unsupported' | null {
+  const all = capabilities && typeof capabilities === 'object' ? capabilities as Record<string, unknown> : null;
+  if (!all) return null;
+  const key = Object.keys(all).find(k => /^0x[0-9a-fA-F]+$/.test(k) && BigInt(k) === BigInt(chainId)) ?? Object.keys(all).find(k => /^0x0+$/.test(k));
+  if (!key || !all[key] || typeof all[key] !== 'object') return null;
+  return eip5792.atomicCapability({ ['0x' + chainId.toString(16)]: all[key] }, chainId);
+}
+/** What the owner's wallets can do on these chains, asked once from the wallets themselves (only what they report; never assumed). */
 export async function walletProfile(evmAddress: string | null, chains: readonly string[], withSolana: boolean): Promise<WalletProfile> {
   let eip155: WalletProfile['eip155'] | null = null, solana: WalletProfile['solana'] | null = null;
   if (evmAddress) {
@@ -32,10 +44,12 @@ export async function walletProfile(evmAddress: string | null, chains: readonly 
     const evmChains = chains.filter(c => c.startsWith('eip155:'));
     const atomic: Record<string, 'supported' | 'ready' | 'unsupported'> = {};
     if (provider && !flofi && evmChains.length) {
+      // P0 universal execution: only what the wallet REPORTED counts. A chain it answers for without atomic support is 'unsupported'; a chain it
+      // does not mention, or a failed request, stays unknown (absent) — the plan then says "not known", never "your wallet cannot batch".
       try {
         const caps = await provider.request({ method: 'wallet_getCapabilities', params: [evmAddress, evmChains.map(c => '0x' + BigInt(c.slice(7)).toString(16))] });
-        for (const c of evmChains) atomic[c] = eip5792.atomicCapability(caps, Number(c.slice(7)));
-      } catch { for (const c of evmChains) atomic[c] = 'unsupported'; }
+        for (const c of evmChains) { const status = reportedAtomic(caps, Number(c.slice(7))); if (status) atomic[c] = status; }
+      } catch { /* unknown: nothing reported */ }
     }
     eip155 = { wallet: flofi ? 'FLOFI_WALLET' : 'INJECTED', atomic, typedData: true };
   }
@@ -62,7 +76,15 @@ export async function sendWalletBatch(request: eip5792.SendCallsRequest): Promis
   }
   // Exactly the prepared request: atomic required, no capabilities (FloFi never asks for a paymaster or sponsorship).
   const answer = await provider.request({ method: 'wallet_sendCalls', params: [{ ...request, calls: request.calls.map(c => ({ ...c })) }] })
-    .catch(cause => request.id && (cause as { code?: unknown } | null)?.code === eip5792.DUPLICATE_ID ? request.id : rejected(cause));
+    .catch(cause => {
+      const code = (cause as { code?: unknown } | null)?.code;
+      if (request.id && code === eip5792.DUPLICATE_ID) return request.id;
+      // Refusals the wallet returns BEFORE sending anything (EIP-5792 5700 unsupported capability, 5710 unsupported chain, 5740 batch too large,
+      // 5750 atomic batching unsupported, 5760 upgrade rejected; EIP-1193 4100 unauthorized, 4200 unsupported method; JSON-RPC -32601/-32602): nothing
+      // was sent, so the group can be offered again. Any other error stays "may have been sent" (fail closed).
+      if (typeof code === 'number' && NOT_SENT_CODES.has(code)) return fail('WALLET_BATCH_NOT_SENT');
+      return rejected(cause);
+    });
   return eip5792.sendCallsId(answer);
 }
 /**
