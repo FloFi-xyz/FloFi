@@ -50,10 +50,12 @@ export type AmountBasis = 'EXACT' | 'GUARANTEED_MINIMUM' | 'RECONCILED_ACTUAL';
  * a group of its own through the step's flow. Keep in step with the builders: a capability is never advertised before it is built.
  */
 export const USER_FUNDED_BUILDABLE: Readonly<Record<Namespace, ReadonlySet<string>>> = Object.freeze({
-  eip155: new Set(['swap', 'supply', 'borrow', 'transfer']),
+  eip155: new Set(['swap', 'supply', 'borrow', 'repay', 'withdraw', 'transfer']),
   solana: new Set(['transfer', 'swap']),
 });
 
+/** The Aave V3 actions: signed only after their exact calls were simulated on the state they run on (never in an upfront user operation). */
+export const AAVE_ACTIONS: ReadonlySet<string> = new Set(['supply', 'borrow', 'repay', 'withdraw']);
 /** What the deployment offers (from `user-funded/config.ts`): opted-in chains and chains with an ERC-4337 bundler. */
 export type UserFundedFacts = { readonly enabled: boolean; readonly code: string | null; readonly chains: readonly string[]; readonly bundlerChains: readonly string[];
   readonly solanaNonceAccounts: boolean };
@@ -171,7 +173,7 @@ export function planExecutionGroups(requirement: WorkflowRequirement, facts: Use
       // P0 workflow execution: an Aave step is only ever signed after FloFi simulated its exact calls on the chain state they run on (health factor
       // at least 2.0 after a borrow, the supply cap). A user operation is signed upfront and relayed later, so such a group is a wallet batch
       // prepared, simulated and signed when due instead.
-      const aave = members.some(m => m.action === 'supply' || m.action === 'borrow');
+      const aave = members.some(m => AAVE_ACTIONS.has(m.action));
       if (awaitsDelivery !== null) {
         if (canUserOp && !aave) strategy = 'EVM_USER_OPERATION';
         else {

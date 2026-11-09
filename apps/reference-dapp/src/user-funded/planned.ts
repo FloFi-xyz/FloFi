@@ -27,7 +27,8 @@ export function plannedSteps(requirement: { readonly steps: readonly StepRequire
     const step = requirement.steps[s.stepIndex];
     if (!step) continue;
     const spendRef = refOf(step, s.spend.asset), quotedRef = s.quoted ? refOf(step, s.quoted.asset) : null, guaranteedRef = s.guaranteed ? refOf(step, s.guaranteed.asset) : null;
-    const borrow = step.action === 'borrow';
+    // A borrow or a withdrawal spends nothing from the wallet: it delivers exactly its amount to the owner.
+    const borrow = step.action === 'borrow' || step.action === 'withdraw';
     out.set(s.stepIndex, {
       spend: !borrow && spendRef ? amountOf(s.spend.amount, spendRef) : null,
       expected: s.quoted && quotedRef ? amountOf(s.quoted.amount, quotedRef) : borrow && s.guaranteed && guaranteedRef ? amountOf(s.guaranteed.amount, guaranteedRef) : null,

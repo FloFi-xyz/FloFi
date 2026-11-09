@@ -8,6 +8,8 @@
  *   Aave borrow    the owner's Aave account read AFTER the whole batch (`getUserAccountData`) must keep a health factor of at least 2.0 —
  *                  the same minimum the owner-signed Borrow flow enforces (reference-compiler `BORROW_MINIMUM_HEALTH_FACTOR`). It is read
  *                  from the protocol itself after the batch's supplies, so collateral enablement, prices, caps and liquidity are Aave's own.
+ *   Aave withdraw  the same 2.0 minimum after the whole batch (the owner-signed Withdraw flow's `WITHDRAW_UNSAFE_HEALTH_FACTOR`); an account
+ *                  without debt reports the maximum health factor, so withdrawing from it is never refused for its health.
  *   gas            each call's simulated gas, for the fee the review shows (the wallet still shows and charges the final fee)
  *
  * Nothing is signed, sent or stored. A transport without `eth_simulateV1` is reported as UNAVAILABLE: the caller decides (a batch that
@@ -34,7 +36,11 @@ export type BatchSimulationResult = { readonly ok: true; readonly value: BatchSi
   | { readonly ok: false; readonly code: 'USER_FUNDED_SIMULATION_UNAVAILABLE'; readonly callIndex: null };
 
 /** The Aave Pools a group calls (supply/borrow), lower-case. */
-export const aavePoolsOf = (calls: readonly UserCall[]) => [...new Set(calls.flatMap(c => c.kind === 'AAVE_V3_SUPPLY' || c.kind === 'AAVE_V3_BORROW' ? [c.pool.toLowerCase()] : []))];
+const AAVE_KINDS: ReadonlySet<UserCall['kind']> = new Set(['AAVE_V3_SUPPLY', 'AAVE_V3_BORROW', 'AAVE_V3_REPAY', 'AAVE_V3_WITHDRAW']);
+/** Whether a call's safety depends on Aave state (health factor, caps, liquidity, debt): it is never offered without a whole-batch simulation. */
+export const isAaveCall = (c: UserCall) => AAVE_KINDS.has(c.kind);
+export const aavePoolsOf = (calls: readonly UserCall[]) => [...new Set(calls.flatMap(c => c.kind === 'AAVE_V3_SUPPLY' || c.kind === 'AAVE_V3_BORROW' || c.kind === 'AAVE_V3_REPAY'
+  || c.kind === 'AAVE_V3_WITHDRAW' ? [c.pool.toLowerCase()] : []))];
 /**
  * A JSON-RPC answer that means "this node does not offer the method" (as opposed to a simulation that ran and failed). Method-level refusals
  * only: a node that lags (a header or block it has not seen yet) is a transient RPC failure, never "this RPC cannot simulate".
@@ -43,6 +49,14 @@ const lagging = (message: string) => /(?:header|block) (?:not found|unavailable)
 const unsupported = (message: string) => !lagging(message)
   && /method not found|unknown method|unsupported method|(?:method|eth_simulateV1)[^.]*(?:not supported|unsupported|does not exist|is not available)|DELEGATION_RPC_METHOD_FORBIDDEN/i.test(message);
 
+/** The first word returned by the single inner call of a SwapRouter02 `multicall(deadline, [call])` (its `bytes[]` result). */
+function multicallFirstWord(returned: string): bigint {
+  const words = returned.replace(/^0x/, ''), at = (i: number) => uint('0x' + words.slice(i * 64, i * 64 + 64));
+  if (words.length < 5 * 64 || at(0) !== 32n || at(1) !== 1n) throw new Error('USER_FUNDED_SIMULATION_INVALID');
+  const element = 2 + Number(at(2) / 32n);
+  if (at(element) < 32n) throw new Error('USER_FUNDED_SIMULATION_INVALID');
+  return at(element + 1);
+}
 /** Exposed for tests: the classification of a failed `eth_simulateV1` answer. */
 export const simulationFailureKind = (message: string) => unsupported(message) ? 'UNSUPPORTED' : lagging(message) ? 'LAGGING' : 'OTHER';
 
@@ -71,7 +85,7 @@ export async function simulateWalletBatch(t: ChainTransport, group: EvmGroupCall
     if (call.kind === 'ERC20_APPROVE' && returned !== '0x' && uint(returned) !== 1n) return { ok: false, code: 'SIMULATION_REVERTED', callIndex: i };
     let output: string | null = null;
     if (call.kind === 'UNISWAP_V3_EXACT_INPUT_SINGLE') {
-      const out = uint(returned.slice(0, 66));
+      const out = call.deadline === undefined ? uint(returned.slice(0, 66)) : multicallFirstWord(returned);
       if (out < BigInt(call.amountOutMinimum)) return { ok: false, code: 'SWAP_MINIMUM_NOT_MET', callIndex: i };
       output = out.toString();
     }
@@ -88,5 +102,8 @@ export async function simulateWalletBatch(t: ChainTransport, group: EvmGroupCall
   // A batch that BORROWS must leave the owner's Aave account at or above the owner-signed Borrow flow's minimum health factor.
   for (const [i, call] of group.calls.entries()) if (call.kind === 'AAVE_V3_BORROW' && BigInt(healthFactorAfter[call.pool.toLowerCase()] ?? '0') < BORROW_MINIMUM_HEALTH_FACTOR)
     return { ok: false, code: 'BORROW_UNSAFE_HEALTH_FACTOR', callIndex: i };
+  // A batch that WITHDRAWS collateral must leave the same minimum (the owner-signed Withdraw flow's rule).
+  for (const [i, call] of group.calls.entries()) if (call.kind === 'AAVE_V3_WITHDRAW' && BigInt(healthFactorAfter[call.pool.toLowerCase()] ?? '0') < BORROW_MINIMUM_HEALTH_FACTOR)
+    return { ok: false, code: 'WITHDRAW_UNSAFE_HEALTH_FACTOR', callIndex: i };
   return { ok: true, value: { method: 'eth_simulateV1', block, gasUsed, outputs, healthFactorAfter } };
 }

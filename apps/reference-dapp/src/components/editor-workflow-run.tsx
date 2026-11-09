@@ -568,7 +568,7 @@ export function EditorWorkflowRunPanel({ state }: { state: EditorWorkflowRunStat
             <span className="muted"> · {tr(step.network)}{step.provider ? ` · ${step.provider}` : ''}</span>
             <dl className="editor-run-amounts">
               {spend && <div><dt>{tr(step.basis === 'GUARANTEED_MINIMUM' ? 'Spends (the minimum step {0} guarantees)' : step.basis === 'RECONCILED_ACTUAL' ? 'Spends (what step {0} delivers, at most)' : 'Spends', String((step.boundTo ?? 0) + 1))}</dt><dd>{spend}</dd></div>}
-              {expected && <div><dt>{tr(step.action === 'borrow' ? 'You receive' : 'Expected')}</dt><dd>{expected}</dd></div>}
+              {expected && <div><dt>{tr(step.action === 'borrow' || step.action === 'withdraw' ? 'You receive' : 'Expected')}</dt><dd>{expected}</dd></div>}
               {minimum && <div><dt>{tr('Minimum (your slippage limit)')}</dt><dd>{minimum}</dd></div>}
               {(planned?.recipient ?? step.recipient) && <div><dt>{tr('To')}</dt><dd><code className="editor-run-recipient">{planned?.recipient ?? step.recipient}</code>
                 {(planned?.recipient ?? step.recipient)!.toLowerCase() === review.owner.toLowerCase() ? ` ${tr('(your wallet)')}` : ''}</dd></div>}

@@ -21,12 +21,13 @@ import { createHash } from 'node:crypto';
 import type { ChainTransport } from '../delegation/chains.ts';
 import { assetKey, type WorkflowRequirement } from '../delegation/steps.ts';
 import type { WorkflowComposition } from '../engine/strategy-engine';
-import type { GroupStrategy, OwnerAnswer } from '../workflow-runs/execution-groups.ts';
+import { AAVE_ACTIONS, type GroupStrategy, type OwnerAnswer } from '../workflow-runs/execution-groups.ts';
 import type { BundlerClient } from './bundler.ts';
-import { buildEvmGroupCalls, DEPENDENT_CALL_GAS, evmCallsOf, type AssetAmountFact, type EvmGroupCalls } from './evm-calls.ts';
+import { buildEvmGroupCalls, DEPENDENT_CALL_GAS, evmCallsOf, L1_FEE_UPPER_BOUND_SELECTOR, OP_GAS_PRICE_ORACLE, OP_STACK_CHAIN_IDS, type AssetAmountFact,
+  type EvmGroupCalls } from './evm-calls.ts';
 import { reconcileUserOperation, reconcileWalletBatch, type StepFacts } from './evm-reconcile.ts';
 import { assertUserFundedSubmission, type GasPaidFact } from './gas-payer.ts';
-import { simulateWalletBatch, type BatchSimulation } from './batch-simulation.ts';
+import { isAaveCall, simulateWalletBatch, type BatchSimulation } from './batch-simulation.ts';
 
 const WSOL = 'So11111111111111111111111111111111111111112';
 /** How long a prepared EVM group's quotes are honoured before it must be prepared again. */
@@ -73,7 +74,9 @@ const nativeSpend = (group: EvmGroupCalls) => group.calls.reduce((sum, c) => c.k
 async function prepareWalletBatch(deps: UserFundedDeps, requirement: WorkflowRequirement, g: GroupInput, guaranteed: ReadonlyMap<number, AssetAmountFact>): Promise<Result<Prepared>> {
   const t = deps.evm(g.chain);
   if (!t) return no('USER_FUNDED_RPC_UNAVAILABLE');
-  const built = await buildEvmGroupCalls(requirement, g.stepFrom, g.stepTo, { chains: deps.chains, owner: g.feePayer, transport: deps.evm, guaranteed });
+  // Every swap of the batch is refused on chain after the preparation's validity: a wallet prompt left open never executes a stale quote.
+  const deadline = Math.floor((deps.now().getTime() + EVM_PREPARED_TTL_MS) / 1000);
+  const built = await buildEvmGroupCalls(requirement, g.stepFrom, g.stepTo, { chains: deps.chains, owner: g.feePayer, transport: deps.evm, guaranteed, deadline });
   if (!built.ok) return no(built.code, built.stepIndex);
   const group = built.value, calls = evmCallsOf(group);
   const stepOfCall = (index: number | null) => index === null ? null : group.steps.find(s => s.calls.includes(index))?.stepIndex ?? null;
@@ -88,7 +91,7 @@ async function prepareWalletBatch(deps: UserFundedDeps, requirement: WorkflowReq
   else {
     // Without a whole-batch simulation on this RPC, a batch whose safety depends on Aave state (health factor, caps, liquidity) is never offered
     // blind: it is refused with a closed code (the steps then run through their own flows). Swaps and transfers keep the atomic minimum checks.
-    const aave = group.calls.findIndex(c => c.kind === 'AAVE_V3_SUPPLY' || c.kind === 'AAVE_V3_BORROW');
+    const aave = group.calls.findIndex(isAaveCall);
     if (aave >= 0) return no('USER_FUNDED_SIMULATION_UNAVAILABLE', stepOfCall(aave));
     // The first call depends on nothing earlier in the batch: if it cannot be estimated from the owner's account it would revert, so nothing is offered.
     let firstGas: bigint;
@@ -97,7 +100,15 @@ async function prepareWalletBatch(deps: UserFundedDeps, requirement: WorkflowReq
     gas = firstGas + group.calls.slice(1).reduce((sum, c) => sum + DEPENDENT_CALL_GAS[c.kind], 0n) + 30_000n;
   }
   const fees = await feeFacts(t, group.owner);
-  const maxFeePerGas = fees.gasPrice * 2n + fees.priority, maxCost = gas * maxFeePerGas;
+  // On an OP Stack chain the owner also pays the L1 data fee of the batch transaction (an EIP-7702 `execute(batch)` self-call carrying every
+  // call): its upper bound from the chain's GasPriceOracle is part of the fee ceiling the owner's balance must cover and the review shows.
+  let l1FeeUpperBound = 0n;
+  if (OP_STACK_CHAIN_IDS.has(group.chainId)) {
+    const size = (erc4337.batchCallData(calls).length - 2) / 2;
+    try { l1FeeUpperBound = big(await t.rpc('eth_call', [{ to: OP_GAS_PRICE_ORACLE, data: L1_FEE_UPPER_BOUND_SELECTOR + (BigInt(size) + 120n).toString(16).padStart(64, '0') }, 'latest'])); }
+    catch (cause) { return no(codeOf(cause, '') === 'DELEGATION_RPC_UNAVAILABLE' ? 'USER_FUNDED_RPC_UNAVAILABLE' : 'USER_FUNDED_L1_FEE_UNAVAILABLE', group.steps[0]?.stepIndex ?? null); }
+  }
+  const maxFeePerGas = fees.gasPrice * 2n + fees.priority, maxCost = gas * maxFeePerGas + l1FeeUpperBound;
   // Financial isolation: the owner's own native balance must cover the fee ceiling plus any native value sent; nobody else's ever does.
   if (fees.balance < maxCost + nativeSpend(group)) return no('USER_FUNDED_INSUFFICIENT_NATIVE_BALANCE');
   // One id per group, the same for every preparation of it: a wallet that honours EIP-5792 ids refuses to execute the group twice (a retry
@@ -106,7 +117,8 @@ async function prepareWalletBatch(deps: UserFundedDeps, requirement: WorkflowReq
   // Receipts older than this preparation can never reconcile this group (an old owner transaction is not this batch).
   const fromBlock = big(await t.rpc('eth_blockNumber', [])).toString();
   return ok({ kind: 'EVM_WALLET_BATCH', chainId: group.chainId, owner: group.owner, group, request, fromBlock, simulation,
-    fee: { payer: group.owner, unit: 'wei', estimatedGas: gas.toString(), maxFeePerGas: maxFeePerGas.toString(), maxCost: maxCost.toString(), estimated: true } });
+    fee: { payer: group.owner, unit: 'wei', estimatedGas: gas.toString(), maxFeePerGas: maxFeePerGas.toString(), maxCost: maxCost.toString(),
+      l1FeeUpperBound: l1FeeUpperBound.toString(), estimated: true } });
 }
 
 async function prepareUserOperation(deps: UserFundedDeps, requirement: WorkflowRequirement, g: GroupInput, guaranteed: ReadonlyMap<number, AssetAmountFact>,
@@ -115,7 +127,7 @@ async function prepareUserOperation(deps: UserFundedDeps, requirement: WorkflowR
   if (!t) return no('USER_FUNDED_RPC_UNAVAILABLE');
   // P0: an Aave step is signed only after its exact calls were simulated on the state they run on (health factor ≥ 2.0 after a borrow, the
   // supply cap): never in a user operation signed upfront. The planner never makes one (execution-groups.ts); a stored group that would is refused.
-  const aaveStep = requirement.steps.slice(g.stepFrom, g.stepTo + 1).find(s => s.action === 'supply' || s.action === 'borrow');
+  const aaveStep = requirement.steps.slice(g.stepFrom, g.stepTo + 1).find(s => AAVE_ACTIONS.has(s.action));
   if (aaveStep) return no('USER_OPERATION_AAVE_SIGNED_WHEN_DUE', aaveStep.index);
   if (!bundler) return no('USER_OPERATION_BUNDLER_UNAVAILABLE');
   const built = await buildEvmGroupCalls(requirement, g.stepFrom, g.stepTo, { chains: deps.chains, owner: g.feePayer, transport: deps.evm, guaranteed });

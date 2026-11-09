@@ -9,7 +9,7 @@
  * redemption mines as a reverted transaction (status 0, no effect but the nonce), like the real manager. Evidence from it is MOCKED.
  *
  * P0 workflow execution: optionally a mainnet swap profile (e.g. Arbitrum One's registered Uniswap v3 router/quoter/USDC/WETH) and a minimal
- * Aave V3 Pool model (supply / variable borrow / `getUserAccountData`, fixed oracle prices, per-reserve LTV and liquidation threshold, auto
+ * Aave V3 Pool model (supply / variable borrow / variable repay / withdraw / `getUserAccountData`, fixed oracle prices, per-reserve LTV and liquidation threshold, auto
  * collateral on first supply, Aave's borrow capacity rule), plus `eth_simulateV1` (calls applied in order to a copy of the state, then discarded).
  */
 import { erc4337, erc7710 } from '@defi-workflow-engine/reference-compiler';
@@ -18,7 +18,9 @@ import { publicSwapProfile, type PublicSwapProfile } from '../../domain/public-t
 const D = erc7710, F = D.DELEGATION_FRAMEWORK_V1_3;
 const TRANSFER = D.keccakHex('Transfer(address,address,uint256)'), APPROVAL = D.keccakHex('Approval(address,address,uint256)');
 const BALANCE_OF = D.selectorOf('balanceOf(address)'), ALLOWANCE = D.selectorOf('allowance(address,address)'), DECIMALS = D.selectorOf('decimals()');
-const QUOTE = '0xc6a5026a', GET_USER_ACCOUNT_DATA = D.selectorOf('getUserAccountData(address)');
+const QUOTE = '0xc6a5026a', GET_USER_ACCOUNT_DATA = D.selectorOf('getUserAccountData(address)'), MULTICALL_DEADLINE = '0x5ae401dc';
+/** OP Stack GasPriceOracle predeploy, `getL1FeeUpperBound(uint256)` and the modelled L1 data price (wei per calldata byte). */
+const GAS_PRICE_ORACLE = '0x420000000000000000000000000000000000000f', L1_FEE_UPPER_BOUND = '0xf1c7a58b', L1_WEI_PER_BYTE = 2_000_000n;
 const word = (v: bigint) => '0x' + v.toString(16).padStart(64, '0');
 const topic = (a: string) => '0x' + a.slice(2).padStart(64, '0');
 const lower = (a: string) => a.toLowerCase();
@@ -47,7 +49,7 @@ export function createEvmDouble(chainId: number, clock: () => number = () => Mat
   const balances = new Map<string, bigint>(), allowances = new Map<string, bigint>(), code = new Map<string, string>(), nonces = new Map<string, bigint>();
   const native = new Map<string, bigint>(), disabled = new Set<string>(), callCounts = new Map<string, bigint>(), usedIds = new Set<string>();
   const receipts = new Map<string, Receipt>(), txs = new Map<string, Tx>();
-  const pool = profile.pool;
+  const pool = profile.pool, opStack = chainId === 8453;
   let block = 100, wethPerUsdc = 400_000_000_000_000n, dropNext = false, sends = 0, simulateSupported = true, simulations = 0;
   const key = (token: string, owner: string) => `${lower(token)}|${lower(owner)}`;
   const bal = (token: string, owner: string) => balances.get(key(token, owner)) ?? 0n;
@@ -78,6 +80,13 @@ export function createEvmDouble(chainId: number, clock: () => number = () => Mat
       setBal(tokenOut, pool, bal(tokenOut, pool) - out); setBal(tokenOut, recipient, bal(tokenOut, recipient) + out);
       return [{ address: lower(tokenIn), topics: [TRANSFER, topic(account), topic(pool)], data: word(amountIn) },
         { address: lower(tokenOut), topics: [TRANSFER, topic(pool), topic(recipient)], data: word(out) }];
+    }
+    // P0 universal execution: SwapRouter02 `multicall(uint256 deadline, bytes[] data)` — refused after the deadline ('Transaction too old'), else
+    // each inner call to the router itself, in order (the batched swap's deadline guard).
+    if (method === MULTICALL_DEADLINE && target === profile.router) {
+      const [deadline, inner] = D.abiDecode(['uint256', { array: 'bytes' }], D.bytesOf('0x' + call.data.slice(10))) as [bigint, string[]];
+      if (BigInt(clock()) > deadline) fail('Transaction too old');
+      return inner.flatMap(data => execute(account, { target, value: 0n, data }));
     }
     // BUILD-FLOFI-UNIVERSAL-WORKFLOW-002: an owner's ERC-20 transfer (user-funded batches).
     if (method === D.ERC20_TRANSFER_METHOD && tokens().includes(target)) {
@@ -114,6 +123,37 @@ export function createEvmDouble(chainId: number, clock: () => number = () => Mat
       return [{ address: r.asset, topics: [TRANSFER, topic(r.aToken), topic(account)], data: word(amount) },
         { address: r.variableDebtToken, topics: [TRANSFER, topic('0x' + '0'.repeat(40)), topic(account)], data: word(amount) }];
     }
+    // P0 universal execution: variable-rate `repay` (Aave pulls min(amount, debt) from the payer into the aToken and burns that much debt) and
+    // `withdraw` (burns the owner's aTokens, pays the underlying from the aToken; refused above the position or when it would leave the account
+    // unable to cover its debt at the liquidation threshold).
+    if (aave && target === aave.pool && method === D.AAVE_V3_REPAY_METHOD) {
+      const [asset, amount, mode, onBehalfOf] = D.abiDecode(['address', 'uint256', 'uint256', 'address'], D.bytesOf('0x' + call.data.slice(10))) as [string, bigint, bigint, string];
+      const r = reserveOf(asset) ?? fail('RESERVE_NOT_MODELED');
+      const k = key(r.asset, onBehalfOf), owed = debt.get(k) ?? 0n;
+      if (mode !== 2n) fail('REPAY_NOT_MODELED');
+      if (owed === 0n) fail('NO_DEBT_OF_SELECTED_TYPE');
+      const paid = amount < owed ? amount : owed, allowance = allowances.get(allowanceKey(r.asset, account, aave.pool)) ?? 0n;
+      if (allowance < paid || bal(r.asset, account) < paid) fail('ERC20: transfer amount exceeds allowance');
+      allowances.set(allowanceKey(r.asset, account, aave.pool), allowance - paid);
+      setBal(r.asset, account, bal(r.asset, account) - paid); setBal(r.asset, r.aToken, bal(r.asset, r.aToken) + paid);
+      debt.set(k, owed - paid);
+      return [{ address: r.variableDebtToken, topics: [TRANSFER, topic(lower(onBehalfOf)), topic('0x' + '0'.repeat(40))], data: word(paid) },
+        { address: r.asset, topics: [TRANSFER, topic(account), topic(r.aToken)], data: word(paid) }];
+    }
+    if (aave && target === aave.pool && method === D.AAVE_V3_WITHDRAW_METHOD) {
+      const [asset, amount, to] = D.abiDecode(['address', 'uint256', 'address'], D.bytesOf('0x' + call.data.slice(10))) as [string, bigint, string];
+      const r = reserveOf(asset) ?? fail('RESERVE_NOT_MODELED');
+      const k = key(r.asset, account), position = supplied.get(k) ?? 0n;
+      if (amount === 0n || amount > position) fail('NOT_ENOUGH_AVAILABLE_USER_BALANCE');
+      if (bal(r.asset, r.aToken) < amount) fail('NOT_ENOUGH_AVAILABLE_LIQUIDITY');
+      supplied.set(k, position - amount);
+      // Aave's HEALTH_FACTOR_LOWER_THAN_LIQUIDATION_THRESHOLD: the account must stay at or above 1.0 after the withdrawal.
+      if (accountData(account).hf < 10n ** 18n) { supplied.set(k, position); fail('HEALTH_FACTOR_LOWER_THAN_LIQUIDATION_THRESHOLD'); }
+      if (position === amount) collateralOn.delete(k);
+      setBal(r.asset, r.aToken, bal(r.asset, r.aToken) - amount); setBal(r.asset, lower(to), bal(r.asset, lower(to)) + amount);
+      return [{ address: r.aToken, topics: [TRANSFER, topic(account), topic('0x' + '0'.repeat(40))], data: word(amount) },
+        { address: r.asset, topics: [TRANSFER, topic(r.aToken), topic(lower(to))], data: word(amount) }];
+    }
     return fail('CALL_NOT_MODELED');
   }
   /** The tokens the double keeps balances for: the swap pair and every modelled Aave reserve. */
@@ -134,6 +174,8 @@ export function createEvmDouble(chainId: number, clock: () => number = () => Mat
   function returnDataOf(call: erc7710.Call, logs: Receipt['logs']): string {
     const method = call.data.slice(0, 10);
     if (method === D.EXACT_INPUT_SINGLE_METHOD) return word(BigInt(logs.at(-1)?.data ?? '0x0'));
+    // A deadline multicall of one swap returns `bytes[]` holding that swap's output word.
+    if (method === MULTICALL_DEADLINE) return '0x' + [32n, 1n, 32n, 32n, BigInt(logs.at(-1)?.data ?? '0x0')].map(v => v.toString(16).padStart(64, '0')).join('');
     if (method === D.APPROVE_METHOD || method === D.ERC20_TRANSFER_METHOD) return word(1n);
     return '0x';
   }
@@ -209,7 +251,9 @@ export function createEvmDouble(chainId: number, clock: () => number = () => Mat
       case 'eth_getTransactionReceipt': {
         const r = receipts.get(String(p[0])), t = txs.get(String(p[0]));
         return r && t ? { transactionHash: t.hash, status: r.status ? '0x1' : '0x0', blockNumber: '0x' + r.blockNumber.toString(16), blockHash: blockOf(r.blockNumber).hash,
-          from: r.from, to: r.to, gasUsed: '0x30d40', effectiveGasPrice: '0x3b9aca00', l1Fee: '0x0', logs: r.logs } : null;
+          from: r.from, to: r.to, gasUsed: '0x30d40', effectiveGasPrice: '0x3b9aca00',
+          // OP Stack (Base): the L1 data fee of the transaction's calldata, charged on top of gasUsed × effectiveGasPrice.
+          l1Fee: opStack ? '0x' + (BigInt((t.input.length - 2) / 2 + 120) * L1_WEI_PER_BYTE).toString(16) : '0x0', logs: r.logs } : null;
       }
       case 'eth_getTransactionByHash': {
         const t = txs.get(String(p[0]));
@@ -220,10 +264,16 @@ export function createEvmDouble(chainId: number, clock: () => number = () => Mat
         const call = p[0] as { to: string; data: string }, to = lower(call.to), selector = call.data.slice(0, 10);
         if (to === F.delegationManager && selector === D.DISABLED_DELEGATIONS_SELECTOR) return word(disabled.has('0x' + call.data.slice(10)) ? 1n : 0n);
         if (tokens().includes(to) && selector === BALANCE_OF) return word(bal(to, '0x' + call.data.slice(34, 74)));
+        // An Aave variable-debt token's balance is the account's debt; an aToken's is its supplied position.
+        const debtReserve = aave?.reserves.find(r => r.variableDebtToken === to), aReserve = aave?.reserves.find(r => r.aToken === to);
+        if (debtReserve && selector === BALANCE_OF) return word(debt.get(key(debtReserve.asset, '0x' + call.data.slice(34, 74))) ?? 0n);
+        if (aReserve && selector === BALANCE_OF) return word(supplied.get(key(aReserve.asset, '0x' + call.data.slice(34, 74))) ?? 0n);
         if (tokens().includes(to) && selector === ALLOWANCE) return word(allowances.get(allowanceKey(to, '0x' + call.data.slice(34, 74), '0x' + call.data.slice(98, 138))) ?? 0n);
         if (tokens().includes(to) && selector === DECIMALS) return word(to === profile.usdc ? 6n : reserveOf(to) ? BigInt(reserveOf(to)!.decimals) : 18n);
         if (aave && to === aave.pool && selector === GET_USER_ACCOUNT_DATA) return userAccountDataWords('0x' + call.data.slice(34, 74));
         if (to === profile.quoter && selector === QUOTE) return word(quote('0x' + call.data.slice(34, 74), BigInt('0x' + call.data.slice(138, 202)))) + '0'.repeat(192);
+        // OP Stack (Base): the GasPriceOracle's `getL1FeeUpperBound(unsignedTxSize)`, at a fixed modelled price per byte.
+        if (opStack && to === GAS_PRICE_ORACLE && selector === L1_FEE_UPPER_BOUND) return word(BigInt('0x' + call.data.slice(10)) * L1_WEI_PER_BYTE);
         return fail('CALL_NOT_MODELED');
       }
       case 'eth_sendRawTransaction': {
@@ -269,7 +319,8 @@ export function createEvmDouble(chainId: number, clock: () => number = () => Mat
   /** A plausible gas figure per modelled call (the double's simulation only needs it positive and stable). */
   function gasOf(call: erc7710.Call): bigint {
     const m = call.data.slice(0, 10);
-    return m === D.APPROVE_METHOD ? 46_000n : m === D.EXACT_INPUT_SINGLE_METHOD ? 140_000n : m === D.AAVE_V3_SUPPLY_METHOD ? 220_000n : m === D.AAVE_V3_BORROW_METHOD ? 300_000n : 60_000n;
+    return m === D.APPROVE_METHOD ? 46_000n : m === D.EXACT_INPUT_SINGLE_METHOD || m === MULTICALL_DEADLINE ? 140_000n : m === D.AAVE_V3_SUPPLY_METHOD ? 220_000n : m === D.AAVE_V3_BORROW_METHOD ? 300_000n
+      : m === D.AAVE_V3_REPAY_METHOD ? 210_000n : m === D.AAVE_V3_WITHDRAW_METHOD ? 250_000n : 60_000n;
   }
   /** Test and harness controls (never reachable through the product's RPC allowlist). */
   const control = {

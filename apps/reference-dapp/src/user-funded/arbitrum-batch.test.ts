@@ -34,7 +34,8 @@ function strategy(borrow = '0.8', supply = '0.0013') {
     { action: 'borrow', network: 'arbitrum-one', asset: 'USDC', amount: borrow, beneficiary: OWNER }], bindings: [{ step: 1, amountFrom: 0 }] };
 }
 function setup(options: { borrow?: string; simulation?: boolean } = {}) {
-  const chain = createEvmDouble(42161, undefined, { profile: ARBITRUM_MAINNET_SWAP, aave: { pool: POOL, reserves: RESERVES } });
+  // The chain's clock is the run's clock (a batched swap carries an on-chain deadline from the preparation time).
+  const chain = createEvmDouble(42161, () => Math.floor(Date.parse('2026-11-08T21:00:00Z') / 1000), { profile: ARBITRUM_MAINNET_SWAP, aave: { pool: POOL, reserves: RESERVES } });
   if (options.simulation === false) chain.control.disableSimulation();
   chain.control.fundToken(OWNER, USDC, 10_000_000n); chain.control.fundNative(OWNER, 10n ** 17n);
   const s = strategy(options.borrow);

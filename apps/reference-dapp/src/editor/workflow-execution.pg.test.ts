@@ -39,9 +39,12 @@ const strategy = (owner: string, borrow = '0.8') => ({ version: 2, steps: [
   { action: 'borrow', network: 'arbitrum-one', asset: 'USDC', amount: borrow, beneficiary: owner }], bindings: [{ step: 1, amountFrom: 0 }] });
 
 async function setup(t: Awaited<ReturnType<typeof createTestDatabase>>) {
-  const chain = createEvmDouble(42161, undefined, { profile: ARBITRUM_MAINNET_SWAP, aave: { pool: POOL, reserves: RESERVES } });
+  // The chain's clock is the run's clock (a batched swap carries an on-chain deadline from the preparation time).
+  let clock: () => Date = () => new Date();
+  const chain = createEvmDouble(42161, () => Math.floor(clock().getTime() / 1000), { profile: ARBITRUM_MAINNET_SWAP, aave: { pool: POOL, reserves: RESERVES } });
   const h = await workflowRunHarness(t.db, { flows: ['arbitrum-swap', 'arbitrum-aave'], policyEnv: { FLOFI_MCP_HANDOFF_MAINNET_NETWORKS: 'arbitrum-one' },
     userFundedChains: CHAINS, userFundedRpc: c => c === CHAIN ? chain.rpc : null });
+  clock = h.d.now;
   const owner = h.d.evmOwner.address.toLowerCase();
   chain.control.fundToken(owner, USDC, 10_000_000n); chain.control.fundNative(owner, 10n ** 17n);
   return { chain, h, owner };
