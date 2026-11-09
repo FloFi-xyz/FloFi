@@ -204,8 +204,9 @@ async function blockDueGroup(deps: WorkflowRunDeps, run: RunRecord, g: GroupReco
 /** The validity a prepared group must still have to be handed to the owner's wallet again. */
 export const PREPARED_MIN_REMAINING_MS = 3 * 60_000;
 /** P0 workflow execution: the run's own EVM wallet is known here, so a step whose Aave beneficiary is another account is never grouped. */
-export const userFundedBuildable = (facts: UserFundedFacts, evmOwner?: string | null) => (st: Parameters<typeof evmStepBuildable>[0]) =>
-  st.namespace === 'solana' || evmStepBuildable(st, facts.chains, evmOwner) === null;
+/** Whether a step can join a user-funded batch: true, or the builder's own closed reason why not (shown as the group's downgrade). */
+export const userFundedBuildable = (facts: UserFundedFacts, evmOwner?: string | null) => (st: Parameters<typeof evmStepBuildable>[0]): boolean | string =>
+  st.namespace === 'solana' || (evmStepBuildable(st, facts.chains, evmOwner) ?? true);
 /**
  * The owner chose user-funded execution with the wallets their browser reported (EIP-5792 capabilities, Wallet Standard features): the run's
  * groups are planned for exactly those wallets and stored with the mode, in one transaction (the database checks every group's fee payer is

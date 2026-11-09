@@ -109,7 +109,7 @@ export function authorizationPlan(workflow: WorkflowComposition, gates: Pick<Gat
   const confirmAvailable = confirmReason === null, delegatedAvailable = delegatedReason === null;
   // User-funded groups: every step must pass its own gates exactly as in confirm mode (an owner-step group IS a confirm-mode step).
   const facts = userFunded?.facts ?? null;
-  const grouped = req.ok && facts ? planExecutionGroups(req.value, facts, userFunded?.wallets, st => st.namespace === 'solana' || evmStepBuildable(st, facts.chains, userFunded?.evmOwner) === null) : null;
+  const grouped = req.ok && facts ? planExecutionGroups(req.value, facts, userFunded?.wallets, st => st.namespace === 'solana' || (evmStepBuildable(st, facts.chains, userFunded?.evmOwner) ?? true)) : null;
   const userFundedReason = runsOff ?? (!facts ? 'USER_FUNDED_NOT_ENABLED' : !req.ok ? req.code : grouped && !grouped.ok ? grouped.code : confirmReason);
   const groupsPlan = grouped && grouped.ok ? grouped : null;
   const userFundedAvailable = userFundedReason === null && groupsPlan !== null;
@@ -129,7 +129,10 @@ export function authorizationPlan(workflow: WorkflowComposition, gates: Pick<Gat
     delegatedSingleAuthorization: { available: delegatedAvailable, reason: delegatedReason, walletSignatures: Math.max(1, enrollments.length), passkeyAssertions: 0, enrollments,
       ownerKnown: owner !== undefined },
     userFunded: { available: userFundedAvailable, reason: userFundedAvailable ? null : userFundedReason ?? 'USER_FUNDED_UNAVAILABLE', groups: groupsPlan?.groups ?? [],
-      interactions: groupsPlan?.interactions ?? null, feePayer: 'OWNER_WALLET', wallets: userFunded?.wallets ? 'REPORTED' : 'ASSUMED' },
+      // P0 universal execution: counts made with ASSUMED wallet capabilities (an MCP client, a channel, a claim before the owner's browser read
+      // the wallet) are lower bounds: never "single", always "at least". Only the owner's reported wallet makes a count exact.
+      interactions: groupsPlan ? userFunded?.wallets ? groupsPlan.interactions : { ...groupsPlan.interactions, single: false, atLeast: true } : null,
+      feePayer: 'OWNER_WALLET', wallets: userFunded?.wallets ? 'REPORTED' : 'ASSUMED' },
     recommended: userFundedAvailable && fewer ? 'USER_FUNDED' : confirmAvailable ? 'CONFIRM_EACH_STEP' : userFundedAvailable ? 'USER_FUNDED' : null,
     steps, bindings: bindingCodes, notes };
 }

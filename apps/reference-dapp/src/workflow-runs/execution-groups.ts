@@ -137,8 +137,17 @@ function partition(steps: readonly StepRequirement[], buildable: (s: StepRequire
  * with the owner's real wallet.
  */
 export function planExecutionGroups(requirement: WorkflowRequirement, facts: UserFundedFacts, wallets?: WalletProfile,
-  isBuildable: (s: StepRequirement) => boolean = defaultBuildable): GroupPlan {
-  const buildable = (s: StepRequirement) => defaultBuildable(s) && isBuildable(s);
+  isBuildable: (s: StepRequirement) => boolean | string = defaultBuildable): GroupPlan {
+  /**
+   * P0 universal execution: why a step cannot join a batch, as the builder's own closed code (slippage above the batch limit, an Aave beneficiary
+   * that is not the owner, native ETH, ...) instead of one generic code on every surface. Null when it can.
+   */
+  const problemOf = (s: StepRequirement): string | null => {
+    if (!defaultBuildable(s)) return `USER_FUNDED_ACTION_NOT_BUILDABLE:${s.action.toUpperCase()}`;
+    const r = isBuildable(s);
+    return r === true ? null : r === false ? `USER_FUNDED_ACTION_NOT_BUILDABLE:${s.action.toUpperCase()}` : r;
+  };
+  const buildable = (s: StepRequirement) => problemOf(s) === null;
   if (!facts.enabled) return { ok: false, code: facts.code ?? 'USER_FUNDED_NOT_ENABLED' };
   if (requirement.steps.length < 1) return { ok: false, code: 'WORKFLOW_STEPS_EMPTY' };
   const assumed = !wallets;
@@ -160,7 +169,7 @@ export function planExecutionGroups(requirement: WorkflowRequirement, facts: Use
     const chainEnabled = facts.chains.includes(chain);
     if (!chainEnabled) downgrades.push('USER_FUNDED_CHAIN_DISABLED');
     const allBuildable = members.every(buildable);
-    if (!allBuildable) downgrades.push(`USER_FUNDED_ACTION_NOT_BUILDABLE:${members.find(m => !buildable(m))!.action.toUpperCase()}`);
+    if (!allBuildable) { const why = problemOf(members.find(m => !buildable(m))!)!; if (!downgrades.includes(why)) downgrades.push(why); }
     let strategy: GroupStrategy, signing: SigningTime = 'UPFRONT';
     const setup: ExecutionGroup['setup'][number][] = [];
     if (namespace === 'eip155') {

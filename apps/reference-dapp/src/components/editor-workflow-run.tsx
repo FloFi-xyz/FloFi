@@ -507,6 +507,9 @@ export const EXECUTION_REASON: Readonly<Record<string, string>> = {
   SOLANA_MULTI_SIGN_UNSUPPORTED: 'Your Solana wallet confirms each transaction separately.',
   SOLANA_DURABLE_NONCE_NOT_OFFERED: 'A Solana step after a bridge is signed when the delivery lands (a recent blockhash expires within about a minute).',
   USER_FUNDED_NATIVE_SWAP_UNSUPPORTED: 'A swap of native ETH runs through its own review and wallet confirmation.',
+  USER_FUNDED_ACTION_NOT_BUILDABLE: 'This step (for example a bridge or a liquidity position) runs through its own review and wallet confirmation.',
+  WORKFLOW_SLIPPAGE_UNSUPPORTED: 'A swap allows more than 3% slippage, which cannot be fixed in one batch, so it is confirmed on its own. Lower the slippage to batch it.',
+  AAVE_BENEFICIARY_NOT_OWNER: 'An Aave step names another account than the connected wallet, so it cannot be batched. Rebuild that step with this wallet.',
   USER_FUNDED_SWAP_ASSET_UNSUPPORTED: 'A swap of this asset (for example a Stock Token) runs through its own review, which checks it, and its own wallet confirmation.',
   USER_FUNDED_SWAP_ADAPTER_UNSUPPORTED: 'This step (for example wrapping or unwrapping ETH) runs through its own review and wallet confirmation.',
 };

@@ -66,6 +66,8 @@ const CLAIM_TEXT: Record<string, string> = {
   EVM_SMART_ACCOUNT_REQUIRED: 'This group needs your wallet to already be a MetaMask smart account on this network.',
   WALLET_WRONG_NETWORK: 'Switch your wallet to the network of this group, then try again.',
   WALLET_REQUEST_REJECTED: 'The request was rejected in your wallet. Nothing was signed.',
+  WALLET_BATCH_SEND_UNCONFIRMED: 'Your wallet was asked to send this batch, but its answer never arrived, so FloFi cannot tell whether it was sent. Check your wallet\'s activity. FloFi will not ask your wallet for it again; the workflow can be ended once the prepared request expires.',
+  WALLET_BATCH_NOT_SENT: 'Your wallet refused this batch before sending anything (it may not support it on this network). Nothing was sent; you can try again.',
   SOLANA_WALLET_SESSION_REQUIRED: 'Connect the Solana wallet of this workflow (the one you proved), then try again.',
 };
 function unwrap<T>(result: { ok: true; value: T } | { ok: false; code: string }): T { if (!result.ok) throw new Error(result.code); return result.value; }

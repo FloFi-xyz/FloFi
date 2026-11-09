@@ -37,7 +37,8 @@ describe('BUILD-FLOFI-UNIVERSAL-WORKFLOW-002 user-funded workflow run (PostgreSQ
       const { h, approval, claimed } = await setup(t);
       const plan = claimed.view.workflowRun!.plan;
       // Offered (fewer interactions than confirming each step) and recommended; the executor-funded mode is never offered.
-      expect(plan).toMatchObject({ userFunded: { available: true, feePayer: 'OWNER_WALLET', interactions: { upfront: 1, whenDue: 0, single: true } },
+      // Before the owner's browser read the wallet, the counts are lower bounds (assumed capabilities): never "single", always "at least".
+      expect(plan).toMatchObject({ userFunded: { available: true, feePayer: 'OWNER_WALLET', wallets: 'ASSUMED', interactions: { upfront: 1, whenDue: 0, single: false, atLeast: true } },
         delegatedSingleAuthorization: { available: false, reason: 'EXECUTOR_FUNDED_GAS_RETIRED' }, recommended: 'USER_FUNDED' });
       expect(claimed.view.workflowRun!.run).toMatchObject({ state: 'PENDING', mode: null, nextAction: 'OWNER_CHOOSES_MODE' });
       // The owner chooses user-funded execution with the wallet capabilities their browser reported.

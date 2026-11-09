@@ -66,6 +66,22 @@ const units = (amount: string, unit: string, round: 'down' | 'up' = 'down') => {
 /** "Steps 2–3" or "Step 2": a single-step group is never "Steps 3–3". */
 const stepsOf = (tr: (key: string, ...args: string[]) => string, from: number, to: number) => from === to ? tr('Step {0}', String(from + 1)) : tr('Steps {0}–{1}', String(from + 1), String(to + 1));
 const short = (hash: string) => hash.length > 14 ? `${hash.slice(0, 8)}…${hash.slice(-6)}` : hash;
+/**
+ * P0 universal execution: the batches this browser handed to the owner's wallet, per approval and group, written BEFORE `wallet_sendCalls` (the
+ * Editor's rule, now on /approve too — the page every MCP, channel and chat handoff uses). A wallet that ignores the app-provided EIP-5792 id
+ * cannot be asked whether it holds an earlier request, so after a lost answer the group is never sent again from here: the batch id is reused
+ * when the wallet answered, else the owner is told to check the wallet (the group can be ended once its preparation expires).
+ */
+const BATCH_ATTEMPTS_KEY = 'flofi.approve-batch-attempts.v1';
+type BatchAttempt = { readonly at: string; readonly batchId?: string };
+function batchAttempts(): Record<string, BatchAttempt> {
+  try { const v = JSON.parse(localStorage.getItem(BATCH_ATTEMPTS_KEY) ?? '{}') as unknown; return v && typeof v === 'object' ? v as Record<string, BatchAttempt> : {}; } catch { return {}; }
+}
+function putBatchAttempt(key: string, value: BatchAttempt | null) {
+  try { const all = batchAttempts(); if (value) all[key] = value; else delete all[key]; localStorage.setItem(BATCH_ATTEMPTS_KEY, JSON.stringify(all)); } catch { /* storage unavailable */ }
+}
+/** Wallet answers that mean nothing was sent: the attempt is forgotten and the group may be offered again. */
+const NOTHING_SENT: ReadonlySet<string> = new Set(['WALLET_REQUEST_REJECTED', 'WALLET_WRONG_NETWORK', 'EVM_WALLET_NOT_FOUND', 'WALLET_BATCH_NOT_SENT']);
 
 export function WorkflowRunPanel({ claim, approvalId, secret, onProposal, onError }: { claim: WorkflowRunClaim; approvalId: string; secret: string | null;
   onProposal: (proposal: ClaimedProposal) => void; onError: (code: string) => void }) {
@@ -136,12 +152,24 @@ export function WorkflowRunPanel({ claim, approvalId, secret, onProposal, onErro
     if (!prepared.ok) return prepared;
     const p = prepared.value.prepared as unknown as Record<string, unknown>;
     if (p.kind === 'EVM_WALLET_BATCH') {
-      const request = p.request as eip5792.SendCallsRequest;
+      const request = p.request as eip5792.SendCallsRequest, attemptKey = `${approvalId}:${index}`;
       // The group's batch may already be in the wallet (a reload, a lost answer, an earlier preparation): it is read back by its id, never sent again.
       const known = request.id ? await walletBatchHashes(request.id).then(() => true, () => false) : false;
-      const batchId = known ? request.id! : await sendWalletBatch(request);
+      const earlier = batchAttempts()[attemptKey] ?? null;
+      let batchId: string;
+      if (known) batchId = request.id!;
+      else if (earlier?.batchId) batchId = earlier.batchId;
+      else if (earlier) throw new Error('WALLET_BATCH_SEND_UNCONFIRMED');
+      else {
+        putBatchAttempt(attemptKey, { at: new Date().toISOString() });
+        try { batchId = await sendWalletBatch(request); }
+        catch (cause) { if (cause instanceof Error && NOTHING_SENT.has(cause.message)) putBatchAttempt(attemptKey, null); throw cause; }
+        putBatchAttempt(attemptKey, { at: new Date().toISOString(), batchId });
+      }
       const authorized = await authorizeUserFundedGroup(approvalId, index, { kind: 'EVM_WALLET_BATCH', batchId });
       if (!authorized.ok) return authorized;
+      // The run recorded the batch: from now on the server holds its id (a reload recovers it from there).
+      putBatchAttempt(attemptKey, null);
       return followBatch(index, batchId, authorized);
     }
     if (p.kind === 'EVM_USER_OPERATION') {

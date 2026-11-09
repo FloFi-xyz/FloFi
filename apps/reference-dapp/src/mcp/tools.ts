@@ -573,7 +573,8 @@ function registerApprovalTools(ctx: ToolContext, register: Register) {
     'never invent an approval URL or ID. If this call fails or is unavailable, disclose it and provide no approval CTA. ' +
     'Mainnet may be disabled by policy. A multi-step workflow is one approval: tell the user how many wallet interactions `authorizationPlan` reports (one ' +
     'confirmation per step, or — where `userFunded` is available — one interaction per group of same-network steps, `atLeast` when a step runs through its ' +
-    'own flow); the owner\'s own wallet pays every fee and FloFi never does; each step or group runs only after the previous one reconciled. ' +
+    'own flow or the owner\'s wallet was not read yet (`userFunded.wallets` ASSUMED): say "at least N" then, never promise a single signature); ' +
+    'the owner\'s own wallet pays every fee and FloFi never does; each step or group runs only after the previous one reconciled. ' +
     'The same approvalUrl reopens the next step for the owner.', SCHEMAS[ctx.scope ?? networkScope()].request,
   { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false }, async args => {
     const result = await requestApproval(deps(), requester, args.strategy, args.workflowHash);
