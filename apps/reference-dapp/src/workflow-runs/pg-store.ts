@@ -279,8 +279,13 @@ export function createPgWorkflowRunStore(db: Database, tenantId: string) {
     async groups(runId: string): Promise<readonly GroupRecord[]> {
       return (await db.query('SELECT * FROM workflow_run_groups WHERE tenant_id = $1 AND run_id = $2 ORDER BY group_index', [tenantId, runId])).rows.map(groupOf);
     },
-    /** Compare-and-set on one group: from one of `from`, under the run lock (serialized with cancellation and step moves). Null when elsewhere. */
-    async groupTransition(runId: string, groupIndex: number, from: readonly GroupState[], to: GroupState, patch: GroupPatch, kind = 'GROUP_STATE'): Promise<GroupRecord | null> {
+    /**
+     * Compare-and-set on one group: from one of `from`, under the run lock (serialized with cancellation and step moves). Null when elsewhere.
+     * `expectVersion`: also only from exactly that row version (a same-state rewrite, e.g. a wallet batch re-prepared while it stays PREPARED,
+     * must never overwrite a concurrent rewrite it did not see).
+     */
+    async groupTransition(runId: string, groupIndex: number, from: readonly GroupState[], to: GroupState, patch: GroupPatch, kind = 'GROUP_STATE',
+      expectVersion: number | null = null): Promise<GroupRecord | null> {
       return db.transaction(async tx => {
         const run = await lockRun(tx, runId);
         if (!run || run.state === 'CANCELLED') return null;
@@ -289,9 +294,9 @@ export function createPgWorkflowRunStore(db: Database, tenantId: string) {
             prepared = CASE WHEN $8::boolean THEN $9::jsonb ELSE prepared END, owner_authorization = CASE WHEN $10::boolean THEN $11::jsonb ELSE owner_authorization END,
             submission = COALESCE($12::jsonb, submission), outcome = COALESCE($13::jsonb, outcome), code = CASE WHEN $14::boolean THEN $15 ELSE code END,
             valid_until = CASE WHEN $16::boolean THEN $17::timestamptz ELSE valid_until END
-          WHERE tenant_id = $1 AND run_id = $2 AND group_index = $3 AND state = ANY($4::text[]) RETURNING *`,
+          WHERE tenant_id = $1 AND run_id = $2 AND group_index = $3 AND state = ANY($4::text[]) AND ($18::bigint IS NULL OR version = $18::bigint) RETURNING *`,
         [tenantId, runId, groupIndex, [...from], to, patch.strategy ?? null, patch.signing ?? null, has('prepared'), json(patch.prepared), has('authorization'), json(patch.authorization),
-          json(patch.submission), json(patch.outcome), has('code'), patch.code ?? null, has('validUntil'), patch.validUntil ?? null])).rows[0];
+          json(patch.submission), json(patch.outcome), has('code'), patch.code ?? null, has('validUntil'), patch.validUntil ?? null, expectVersion])).rows[0];
         if (!row) return null;
         await event(tx, runId, null, kind, patch.code ?? null, { group: groupIndex, state: to,
           ...patch.submission ? { hashes: (patch.submission as { hashes?: unknown }).hashes ?? null } : {} });
