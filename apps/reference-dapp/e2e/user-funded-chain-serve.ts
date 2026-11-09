@@ -5,8 +5,10 @@
  *
  *   POST /rpc/8453   the in-process EVM double of the unit/PostgreSQL tests (src/delegation/harness/evm-double.ts) with Base's registered
  *                    catalog swap deployment and a modelled Aave V3 Base market: allowances, QuoterV2, eth_simulateV1 (the whole batch, then
- *                    discarded), getUserAccountData, receipts. It has NO send method: nothing reaches it except reads and the test's
- *                    own control below, which plays what an EIP-5792 wallet does with `wallet_sendCalls`.
+ *                    discarded), getUserAccountData, receipts. It has NO send method: every send or sign method (eth_send*, eth_sign*,
+ *                    personal_*, wallet_*) is refused (-32601 MOCK_RPC_SEND_REFUSED) before the double sees it, as the product's own
+ *                    user-funded transport allows only EVM reads (src/delegation/chains.ts). Nothing reaches the chain except reads and the
+ *                    test's own control below, which plays what an EIP-5792 wallet does with `wallet_sendCalls`.
  *   POST /control    test-only JSON-RPC: MOCK_reset(owner, usdcUnits, nativeWei), MOCK_walletBatch(owner, calls) → transaction hash (one
  *                    atomic transaction from the owner's own account, as a 7702 wallet sends it), MOCK_batches, MOCK_simulations,
  *                    MOCK_accountData(owner), MOCK_tokenBalance(token, owner).
@@ -34,6 +36,8 @@ const RESERVES = [{ ...reserve(BASE_MAINNET_SWAP.weth), price: 2_500n * 10n ** 8
 const create = () => createEvmDouble(8453, () => Math.floor(Date.now() / 1000), { profile: BASE_MAINNET_SWAP, aave: { pool: POOL, reserves: RESERVES } });
 let chain = create(), batches = 0;
 const ADDRESS = /^0x[0-9a-f]{40}$/;
+/** The double itself implements `eth_sendRawTransaction` (for other harnesses): on this RPC an owner's send arrives only through /control. */
+const SEND_OR_SIGN = /^(eth_send|eth_sign|personal_|wallet_)/i;
 const replacer = (_: string, value: unknown) => typeof value === 'bigint' ? value.toString() : value;
 
 createServer({ key: readFileSync(join(directory, 'key.pem')), cert: readFileSync(join(directory, 'cert.pem')) }, async (request, response) => {
@@ -45,7 +49,10 @@ createServer({ key: readFileSync(join(directory, 'key.pem')), cert: readFileSync
   try { input = JSON.parse(body) as typeof input; } catch { json(400, {}); return; }
   const id = input.id ?? 1, method = typeof input.method === 'string' ? input.method : '', params = Array.isArray(input.params) ? input.params : [];
   try {
-    if (request.url === '/rpc/8453') { json(200, { jsonrpc: '2.0', id, result: await chain.rpc(method, params) }); return; }
+    if (request.url === '/rpc/8453') {
+      if (SEND_OR_SIGN.test(method)) { json(200, { jsonrpc: '2.0', id, error: { code: -32601, message: 'MOCK_RPC_SEND_REFUSED' } }); return; }
+      json(200, { jsonrpc: '2.0', id, result: await chain.rpc(method, params) }); return;
+    }
     if (request.url !== '/control') { json(404, {}); return; }
     let result: unknown = null;
     if (method === 'MOCK_reset') {

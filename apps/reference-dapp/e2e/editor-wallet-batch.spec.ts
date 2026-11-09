@@ -23,9 +23,17 @@ import { openBuilder, openEditorSection } from './build-entry-navigation';
 import { expect, test } from './fixtures';
 import { installJourneyWallet } from './journey-fixtures';
 
-test.skip(process.env.FLOFI_USER_FUNDED_E2E !== 'MOCKED_LOOPBACK_ONLY' || process.env.GRYLOO_BASE_MAINNET_E2E !== 'MOCKED_LOOPBACK_ONLY'
-  || process.env.FLOFI_WORKFLOW_RUNS !== 'enabled' || !process.env.FLOFI_E2E_SESSION_SECRET || !process.env.FLOFI_E2E_DATABASE_URL,
-'Requires the MOCKED user-funded chain, the Base loopback harness, workflow runs on the loopback runtime and a per-run session secret');
+/**
+ * Selected (FLOFI_USER_FUNDED_E2E), this proof runs or FAILS: a missing or empty prerequisite (e.g. an inherited empty session secret, which
+ * the config's `??=` keeps) is never a skip that the guarded runner, judging a profile by its exit code, would count as a PASS. Not selected,
+ * it is skipped. Only the names of what is missing are reported, never a value.
+ */
+const SELECTED = process.env.FLOFI_USER_FUNDED_E2E === 'MOCKED_LOOPBACK_ONLY';
+const PREREQUISITES: Readonly<Record<string, string | null>> = { GRYLOO_BASE_MAINNET_E2E: 'MOCKED_LOOPBACK_ONLY', FLOFI_WORKFLOW_RUNS: 'enabled',
+  FLOFI_E2E_SESSION_SECRET: null, FLOFI_E2E_DATABASE_URL: null };
+const MISSING = Object.entries(PREREQUISITES).filter(([name, value]) => value === null ? !process.env[name]?.trim() : process.env[name] !== value).map(([name]) => name);
+if (SELECTED && MISSING.length) throw new Error(`USER_FUNDED_E2E_PREREQUISITE_MISSING: ${MISSING.join(', ')}`);
+test.skip(!SELECTED, 'Runs only in the MOCKED user-funded profile (FLOFI_USER_FUNDED_E2E=MOCKED_LOOPBACK_ONLY)');
 test.setTimeout(240_000);
 
 const BASE = '0x2105', CHAIN_HARNESS = 'https://127.0.0.1:8567', BASE_HARNESS = 'http://127.0.0.1:8562';
@@ -167,13 +175,26 @@ test('Swap → Supply → Borrow on Base: the Editor asks the wallet for ONE wal
   const [run] = await query<{ state: string; mode: string }>(`SELECT state, mode FROM workflow_runs ORDER BY created_at DESC LIMIT 1`);
   expect(run).toEqual({ state: 'COMPLETED', mode: 'USER_FUNDED' });
 
-  // Reload: the run is offered again from FloFi; following it never asks the wallet to send anything.
+  // Reload: a page load gives the Canvas a new workflow id, so the run is OFFERED as an earlier one (never followed silently). It must be
+  // offered, and following it must show its result read from FloFi, before anything below is asserted: a check made before the run loads
+  // would pass even if the recovered run sent the batch again.
   await page.reload();
   await openEditorSection(page, 'Execute');
-  const earlier = page.getByRole('button', { name: 'Show its progress', exact: true });
-  if (await earlier.isVisible().catch(() => false)) await earlier.click();
+  const earlier = panel(page).getByRole('button', { name: 'Show its progress', exact: true });
+  await expect(earlier).toBeVisible({ timeout: 30_000 });
+  await expect(panel(page)).not.toContainText('Every step reconciled.');
+  await earlier.click();
+  await expect(panel(page)).toHaveAttribute('data-run-state', 'COMPLETED', { timeout: 60_000 });
+  await expect(panel(page)).toContainText('Every step reconciled.');
+  // Settled: a finished run, once shown, has nothing left to do (no automatic recovery or status poll applies to a COMPLETED run). For 5 more
+  // seconds the wallet must never be asked to send again (even a duplicate the wallet refuses is logged), and the chain still holds exactly
+  // the one batch. (Reading back a batch the wallet holds after a reload is covered by the unit tests of the Editor's recovery.)
+  const settledFrom = Date.now();
+  await expect.poll(() => log.sent.length !== 1 ? `SENT ${log.sent.length}` : Date.now() - settledFrom < 5_000 ? 'SETTLING' : 'SETTLED',
+    { timeout: 15_000, intervals: [250] }).toBe('SETTLED');
   expect(log.sent).toHaveLength(1);
   expect(log.methods.filter(m => m === 'eth_sendTransaction' || m === 'eth_sendRawTransaction')).toEqual([]);
+  expect(await control<number>('MOCK_batches')).toBe(1);
   expect(errors).toEqual([]);
   networkGuard.assertClean();
 });
