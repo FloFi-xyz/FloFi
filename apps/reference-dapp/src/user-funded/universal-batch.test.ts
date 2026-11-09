@@ -207,3 +207,63 @@ describe('P0 universal execution: a wallet batch never executes a stale swap quo
     expect((await reconcileWalletBatch(transport, p.group, [late], p.fromBlock)).status).toBe('REVERTED');
   });
 });
+
+describe('P0 universal execution: any catalog ERC-20 swap joins a wallet batch, on every catalog network', () => {
+  const plannedWith = (strategy: Record<string, unknown>, chain: string) => {
+    const r = workflowRequirement(strategy);
+    if (!r.ok) throw new Error(r.code);
+    const plan = planExecutionGroups(r.value, { enabled: true, code: null, chains: [chain], bundlerChains: [], solanaNonceAccounts: false },
+      { eip155: { wallet: 'INJECTED', atomic: { [chain]: 'supported' }, typedData: true } });
+    if (!plan.ok) throw new Error(plan.code);
+    return { requirement: r.value, plan };
+  };
+  it('Robinhood Chain WETH → USDG → transfer: one wallet batch (it never was: a swap there needed the delegation framework)', async () => {
+    const { ROBINHOOD_MAINNET_SWAP } = await import('../domain/public-testnet-swap.ts');
+    const RH = 'eip155:4663', usdg = '0x5fc5360d0400a0fd4f2af552add042d716f1d168';
+    const s = { version: 2, steps: [{ action: 'swap', network: 'robinhood', inputAsset: 'WETH', outputAsset: 'USDG', amount: '0.001', slippageBps: 100 },
+      { action: 'transfer', network: 'robinhood', asset: 'USDG', amount: '2', recipient: '0x4444444444444444444444444444444444444444' }], bindings: [{ step: 1, amountFrom: 0 }] };
+    const { requirement, plan } = plannedWith(s, RH);
+    expect(plan.groups.map(g => [g.strategy, g.stepFrom, g.stepTo])).toEqual([['EVM_WALLET_BATCH', 0, 1]]);
+    // The double models the registered Robinhood deployment with USDG as its 6-decimal side.
+    const chain = createEvmDouble(4663, () => Math.floor(Date.parse(NOW) / 1000), { profile: { ...ROBINHOOD_MAINNET_SWAP, usdc: usdg } });
+    chain.control.fundToken(OWNER, ROBINHOOD_MAINNET_SWAP.weth, 10n ** 16n); chain.control.fundNative(OWNER, 10n ** 17n);
+    const transport = guarded(RH, 'read', 'MOCKED', chain.rpc);
+    const deps: UserFundedDeps = { chains: [RH], evm: c => c === RH ? transport : null, bundler: () => null, solana: null, jupiter: null, now: () => new Date(NOW) };
+    const composition = composeWorkflowBound(s as never, undefined);
+    if (!composition.ok) throw new Error('STRATEGY_INVALID');
+    const r = await prepareGroup(deps, composition, requirement, { runId: 'wfr_rh', groupIndex: 0, strategy: 'EVM_WALLET_BATCH', chain: RH, feePayer: OWNER, stepFrom: 0, stepTo: 1 });
+    if (!r.ok) throw new Error(r.code);
+    const p = r.value.prepared as unknown as BatchPrepared;
+    expect(p.group.calls.map(c => c.kind)).toEqual(['ERC20_APPROVE', 'UNISWAP_V3_EXACT_INPUT_SINGLE', 'ERC20_TRANSFER']);
+    expect(p.group.calls[1]).toMatchObject({ router: ROBINHOOD_MAINNET_SWAP.router.toLowerCase(), tokenIn: ROBINHOOD_MAINNET_SWAP.weth, tokenOut: usdg });
+    const hash = chain.control.walletBatch(OWNER, evmCallsOf(p.group));
+    expect((await reconcileWalletBatch(transport, p.group, [hash], p.fromBlock)).status).toBe('RECONCILED');
+  });
+  it('takes the best existing fee tier, offers nothing without a pool, and leaves native ETH to its own flow', async () => {
+    const s = (extra: Record<string, unknown> = {}) => ({ version: 2, steps: [{ action: 'swap', network: 'arbitrum-one', inputAsset: 'USDC', outputAsset: 'WETH', amount: '3',
+      slippageBps: 50, ...extra }] });
+    const prepareOn = async (strategy: Record<string, unknown>, deployedTiers: readonly number[]) => {
+      const chain = createEvmDouble(42161, () => Math.floor(Date.parse(NOW) / 1000), { profile: ARBITRUM_MAINNET_SWAP, deployedTiers });
+      chain.control.fundToken(OWNER, USDC, 10_000_000n); chain.control.fundNative(OWNER, 10n ** 17n);
+      const transport = guarded(CHAIN, 'read', 'MOCKED', chain.rpc);
+      const deps: UserFundedDeps = { chains: CHAINS, evm: c => c === CHAIN ? transport : null, bundler: () => null, solana: null, jupiter: null, now: () => new Date(NOW) };
+      const requirement = workflowRequirement(strategy), composition = composeWorkflowBound(strategy as never, undefined);
+      if (!requirement.ok || !composition.ok) throw new Error('STRATEGY_INVALID');
+      return prepareGroup(deps, composition, requirement.value, { runId: 'wfr_tier', groupIndex: 0, strategy: 'EVM_WALLET_BATCH', chain: CHAIN, feePayer: OWNER, stepFrom: 0, stepTo: 0 });
+    };
+    // Only the 0.3% pool exists for this pair: the batch swaps there (the old builder always used 0.05%).
+    const only3000 = await prepareOn(s(), [3000]);
+    if (!only3000.ok) throw new Error(only3000.code);
+    expect((only3000.value.prepared as unknown as BatchPrepared).group.calls.at(-1)).toMatchObject({ kind: 'UNISWAP_V3_EXACT_INPUT_SINGLE', fee: 3000 });
+    // Several pools: every one is quoted and the best output wins (equal quotes keep the first, lowest-fee tier).
+    const both = await prepareOn(s(), [500, 3000]);
+    if (!both.ok) throw new Error(both.code);
+    expect((both.value.prepared as unknown as BatchPrepared).group.calls.at(-1)).toMatchObject({ fee: 500 });
+    // No canonical pool at any tier: nothing is offered.
+    expect(await prepareOn(s(), [])).toMatchObject({ ok: false, code: 'QUOTE_UNAVAILABLE', stepIndex: 0 });
+    // Native ETH in or out runs through the owner-signed catalog swap (its own group), with the reason.
+    const native = workflowRequirement({ version: 2, steps: [{ action: 'swap', network: 'arbitrum-one', inputAsset: 'ETH', outputAsset: 'USDC', amount: '0.001' }] });
+    if (!native.ok) throw new Error(native.code);
+    expect(evmStepBuildable(native.value.steps[0]!, CHAINS, OWNER)).toBe('USER_FUNDED_NATIVE_SWAP_UNSUPPORTED');
+  });
+});

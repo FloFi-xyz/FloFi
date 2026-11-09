@@ -24,7 +24,10 @@
  * amount, or — for a group that waits for a bridge delivery — the bridge's signed minimum delivery on this chain (`guaranteed` seed). It is
  * never an estimate; anything received above it stays in the owner's account. Anything else is refused with a closed code.
  */
+import { uniswapV3PoolAddress } from '@defi-workflow-engine/action-registry';
 import { encodeSwap, erc7710 } from '@defi-workflow-engine/reference-compiler';
+import { resolveNetworkAsset } from '../domain/asset-catalogs';
+import { ARBITRUM_MAINNET_SWAP, BASE_MAINNET_SWAP, ETHEREUM_MAINNET_SWAP, ROBINHOOD_MAINNET_SWAP } from '../domain/public-testnet-swap.ts';
 import { stepCapability } from '../delegation/capabilities.ts';
 import type { ChainTransport } from '../delegation/chains.ts';
 import { delegationAavePool, delegationAaveReserve, delegationSwapProfile } from '../delegation/profiles.ts';
@@ -97,7 +100,14 @@ export function callOf(c: UserCall): erc7710.WorkflowCall {
  * reserve without the flag (native USDC on Base and Arbitrum One) can be supplied in a batch too. Aave steps are only ever planned into such
  * simulated wallet batches (a user operation, signed upfront without that simulation, never carries one: `execution-groups.ts`).
  */
-export type UserFundedNeed = Extract<ReturnType<typeof stepCapability>, { ok: true }>['need']
+export type UserFundedNeed = Exclude<Extract<ReturnType<typeof stepCapability>, { ok: true }>['need'], { kind: 'EVM_UNISWAP_V3_EXACT_INPUT_SINGLE' }>
+  /**
+   * P0 universal execution: a Uniswap v3 swap of two catalog ERC-20 assets on a catalog network (Ethereum, Base, Arbitrum One, Robinhood Chain)
+   * through the network's registered SwapRouter02, QuoterV2 and factory — the same deployment the owner-signed catalog swap uses. `tiers`: the
+   * fee tier the owner authored, else every standard tier (the batch quotes each existing canonical pool and takes the best output).
+   */
+  | { readonly kind: 'EVM_UNISWAP_V3_EXACT_INPUT_SINGLE'; readonly router: string; readonly quoter: string; readonly factory: string; readonly poolInitCodeHash: string;
+      readonly tokenIn: string; readonly tokenOut: string; readonly amountIn: bigint; readonly tiers: readonly number[] }
   | { readonly kind: 'EVM_AAVE_V3_REPAY' | 'EVM_AAVE_V3_WITHDRAW'; readonly pool: string; readonly asset: string; readonly amount: bigint; readonly aToken: string;
       readonly variableDebtToken: string };
 export type UserFundedCapability = { readonly ok: true; readonly need: UserFundedNeed } | { readonly ok: false; readonly code: string };
@@ -116,16 +126,53 @@ function aaveExitNeed(step: StepRequirement, chains: readonly string[]): UserFun
   return { ok: true, need: { kind: step.action === 'repay' ? 'EVM_AAVE_V3_REPAY' : 'EVM_AAVE_V3_WITHDRAW', pool, asset: input.address, amount: input.amount,
     aToken: reserve.aToken.toLowerCase(), variableDebtToken: reserve.variableDebtToken.toLowerCase() } };
 }
+/** The catalog swap deployments a user-funded batch may call (the owner-signed catalog swaps' own registered profiles). */
+const CATALOG_SWAPS = Object.freeze([ETHEREUM_MAINNET_SWAP, BASE_MAINNET_SWAP, ARBITRUM_MAINNET_SWAP, ROBINHOOD_MAINNET_SWAP]);
+function catalogSwapNeed(step: StepRequirement, chains: readonly string[]): UserFundedCapability {
+  // The public test pair profiles (Base Sepolia, Ethereum Sepolia: loopback harnesses only, never offered on a hosted deployment) keep their one
+  // registered USDC/WETH pool at its fixed tier.
+  const testnet = delegationSwapProfile(step.chain, chains);
+  if (testnet && testnet.environment === 'TESTNET') {
+    const input = step.inputs[0], output = step.outputs[0], pair = [testnet.usdc, testnet.weth];
+    if (step.adapterId !== 'uniswap.v3' || step.inputs.length !== 1 || step.outputs.length !== 1 || !input || !output || !pair.includes(input.address)
+      || !pair.includes(output.address) || input.address === output.address) return { ok: false, code: 'DELEGATION_ASSET_NOT_SUPPORTED' };
+    return { ok: true, need: { kind: 'EVM_UNISWAP_V3_EXACT_INPUT_SINGLE', router: testnet.router, quoter: testnet.quoter, factory: '', poolInitCodeHash: '',
+      tokenIn: input.address, tokenOut: output.address, amountIn: input.amount, tiers: [testnet.fee] } };
+  }
+  const profile = CATALOG_SWAPS.find(p => p.chainRef === step.chain);
+  if (!profile || !chains.includes(step.chain)) return { ok: false, code: 'MAINNET_DELEGATION_DISABLED' };
+  // A WETH9 wrap/unwrap or another adapter runs through its own flow.
+  if (step.adapterId !== 'uniswap.v3') return { ok: false, code: 'USER_FUNDED_SWAP_ADAPTER_UNSUPPORTED' };
+  const input = step.inputs[0], output = step.outputs[0];
+  if (step.inputs.length !== 1 || step.outputs.length !== 1 || !input || !output) return { ok: false, code: 'DELEGATION_STEP_SHAPE_UNSUPPORTED' };
+  // Native ETH in or out needs the router's value/unwrap path: it runs through the owner-signed catalog swap.
+  if (input.address === NATIVE || output.address === NATIVE) return { ok: false, code: 'USER_FUNDED_NATIVE_SWAP_UNSUPPORTED' };
+  // Only catalog ERC-20 assets; a Stock Token's disposability and economics are checked by its own flow, never skipped in a batch.
+  for (const ref of [input, output]) {
+    const asset = resolveNetworkAsset(step.chain, { address: ref.address });
+    if (!asset || asset.kind !== 'ERC20' || asset.decimals !== ref.decimals || (asset as { assetClass?: string }).assetClass === 'STOCK_TOKEN' || 'stock' in asset && asset.stock)
+      return { ok: false, code: 'USER_FUNDED_SWAP_ASSET_UNSUPPORTED' };
+  }
+  const authored = (step.strategy as { readonly feeTier?: number }).feeTier;
+  const standard: readonly number[] = profile.feeTiers.map(tier => tier.fee);
+  if (authored !== undefined && !standard.includes(authored)) return { ok: false, code: 'USER_FUNDED_SWAP_FEE_TIER_UNSUPPORTED' };
+  return { ok: true, need: { kind: 'EVM_UNISWAP_V3_EXACT_INPUT_SINGLE', router: profile.router.toLowerCase(), quoter: profile.quoter.toLowerCase(),
+    factory: profile.factory.toLowerCase(), poolInitCodeHash: profile.poolInitCodeHash, tokenIn: input.address, tokenOut: output.address, amountIn: input.amount,
+    tiers: authored !== undefined ? [authored] : standard } };
+}
 export function userFundedNeed(step: StepRequirement, chains: readonly string[]): UserFundedCapability {
+  if (step.namespace === 'eip155' && step.action === 'swap') return catalogSwapNeed(step, chains);
   if (step.namespace === 'eip155' && (step.action === 'repay' || step.action === 'withdraw')) {
     if (!chains.includes(step.chain)) return { ok: false, code: 'MAINNET_DELEGATION_DISABLED' };
     return aaveExitNeed(step, chains);
   }
   const c = stepCapability(step, 'PRODUCTION', chains);
-  if (c.ok || step.action !== 'supply' || c.code !== 'DELEGATION_ASSET_NOT_SUPPORTED') return c;
+  const refused: UserFundedCapability = { ok: false, code: c.ok ? 'USER_FUNDED_ACTION_NOT_BUILDABLE' : c.code };
+  if (c.ok) return c.need.kind === 'EVM_AAVE_V3_SUPPLY' || c.need.kind === 'EVM_AAVE_V3_BORROW' ? { ok: true, need: c.need } : refused;
+  if (step.action !== 'supply' || c.code !== 'DELEGATION_ASSET_NOT_SUPPORTED') return refused;
   const pool = delegationAavePool(step.chain, chains), input = step.inputs[0];
   const reserve = pool && input && step.adapterId === 'aave-v3' ? delegationAaveReserve(step.chain, pool, input.address) : null;
-  return reserve && pool && input ? { ok: true, need: { kind: 'EVM_AAVE_V3_SUPPLY', pool, asset: input.address, amount: input.amount } } : c;
+  return reserve && pool && input ? { ok: true, need: { kind: 'EVM_AAVE_V3_SUPPLY', pool, asset: input.address, amount: input.amount } } : refused;
 }
 /**
  * Whether FloFi can build this step's exact calls on this deployment (the group planner's per-step check, before any quote). P0 workflow
@@ -243,14 +290,32 @@ export async function buildEvmGroupCalls(requirement: WorkflowRequirement, from:
     if (!c.ok) return refuse(c.code);
     const need = c.need;
     if (need.kind === 'EVM_UNISWAP_V3_EXACT_INPUT_SINGLE') {
-      const profile = delegationSwapProfile(step.chain, deps.chains);
       const t = deps.transport(step.chain);
-      if (!profile || !t) return refuse(!t ? 'USER_FUNDED_RPC_UNAVAILABLE' : 'DRIVER_PROFILE_MISSING');
+      if (!t) return refuse('USER_FUNDED_RPC_UNAVAILABLE');
       const slippage = BigInt(step.slippageBps ?? 0);
       if (slippage < 0n || slippage > BigInt(MAX_BATCH_SLIPPAGE_BPS)) return refuse('WORKFLOW_SLIPPAGE_UNSUPPORTED');
-      let quoted: bigint;
-      try { quoted = await quoteExactInputSingle(t, profile.quoter, need.tokenIn, need.tokenOut, amount, profile.fee); }
-      catch (cause) { return refuse(cause instanceof Error && /^[A-Z][A-Z0-9_]{2,80}$/.test(cause.message) ? cause.message : 'QUOTE_UNAVAILABLE'); }
+      // Each candidate tier's canonical pool (CREATE2 from the registered factory) must exist; each existing pool is quoted and the best
+      // output wins — as the owner-signed catalog swap does. A tier whose quote reverts (no liquidity for this size) is skipped.
+      let quoted = 0n, fee = 0;
+      for (const tier of need.tiers) {
+        // A test pair profile names its one pool; a catalog pair's canonical pool must exist at this tier.
+        if (need.factory) {
+          const pool = uniswapV3PoolAddress(need.factory, need.poolInitCodeHash, need.tokenIn, need.tokenOut, tier as 100 | 500 | 3000 | 10000);
+          let code: unknown;
+          try { code = await t.rpc('eth_getCode', [pool, 'latest']); }
+          catch (cause) { return refuse(cause instanceof Error && cause.message === 'DELEGATION_RPC_UNAVAILABLE' ? 'USER_FUNDED_RPC_UNAVAILABLE' : 'QUOTE_UNAVAILABLE'); }
+          if (typeof code !== 'string' || code === '0x' || code === '0x0') continue;
+        }
+        let out: bigint;
+        try { out = await quoteExactInputSingle(t, need.quoter, need.tokenIn, need.tokenOut, amount, tier); }
+        catch (cause) {
+          if (cause instanceof Error && cause.message === 'DELEGATION_RPC_UNAVAILABLE') return refuse('USER_FUNDED_RPC_UNAVAILABLE');
+          continue;
+        }
+        if (out > quoted) { quoted = out; fee = tier; }
+      }
+      if (quoted <= 0n) return refuse('QUOTE_UNAVAILABLE');
+      const profile = { router: need.router, fee };
       const minimum = (quoted * (10_000n - slippage) + 9_999n) / 10_000n;
       if (minimum <= 0n) return refuse('QUOTE_INVALID');
       let approvals: UserCall[];

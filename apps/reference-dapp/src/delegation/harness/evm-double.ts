@@ -12,6 +12,7 @@
  * Aave V3 Pool model (supply / variable borrow / variable repay / withdraw / `getUserAccountData`, fixed oracle prices, per-reserve LTV and liquidation threshold, auto
  * collateral on first supply, Aave's borrow capacity rule), plus `eth_simulateV1` (calls applied in order to a copy of the state, then discarded).
  */
+import { uniswapV3PoolAddress } from '@defi-workflow-engine/action-registry';
 import { erc4337, erc7710 } from '@defi-workflow-engine/reference-compiler';
 import { publicSwapProfile, type PublicSwapProfile } from '../../domain/public-testnet-swap.ts';
 
@@ -35,7 +36,8 @@ export type DoubleSwapProfile = { readonly router: string; readonly quoter: stri
 /** One Aave V3 reserve of the modelled Pool: identity, oracle price (base currency, 8 decimals) and risk parameters (basis points). */
 export type DoubleAaveReserve = { readonly asset: string; readonly aToken: string; readonly variableDebtToken: string; readonly decimals: number;
   readonly price: bigint; readonly ltvBps: bigint; readonly liquidationThresholdBps: bigint };
-export type EvmDoubleOptions = { readonly profile?: DoubleSwapProfile; readonly aave?: { readonly pool: string; readonly reserves: readonly DoubleAaveReserve[] } };
+export type EvmDoubleOptions = { readonly profile?: DoubleSwapProfile; readonly aave?: { readonly pool: string; readonly reserves: readonly DoubleAaveReserve[] };
+  /** The fee tiers whose canonical pool of the modelled pair exists (default: every tier of a catalog profile). */ readonly deployedTiers?: readonly number[] };
 export function createEvmDouble(chainId: number, clock: () => number = () => Math.floor(Date.now() / 1000), options: EvmDoubleOptions = {}) {
   const testnet = publicSwapProfile(chainId);
   const custom = options.profile ? { ...options.profile, router: lower(options.profile.router), quoter: lower(options.profile.quoter), usdc: lower(options.profile.usdc),
@@ -50,6 +52,13 @@ export function createEvmDouble(chainId: number, clock: () => number = () => Mat
   const native = new Map<string, bigint>(), disabled = new Set<string>(), callCounts = new Map<string, bigint>(), usedIds = new Set<string>();
   const receipts = new Map<string, Receipt>(), txs = new Map<string, Tx>();
   const pool = profile.pool, opStack = chainId === 8453;
+  /**
+   * The canonical Uniswap v3 pools of the modelled pair (CREATE2 from the profile's factory) at the fee tiers the double deploys: a catalog
+   * profile's tiers by default, `deployedTiers` to model a pair that has only some of them.
+   */
+  const catalog = options.profile as (DoubleSwapProfile & { factory?: string; poolInitCodeHash?: string; feeTiers?: readonly { fee: number }[] }) | undefined;
+  const canonicalPools = catalog?.factory && catalog.poolInitCodeHash ? (options.deployedTiers ?? catalog.feeTiers?.map(t => t.fee) ?? [])
+    .map(fee => lower(uniswapV3PoolAddress(catalog.factory!, catalog.poolInitCodeHash!, profile.usdc, profile.weth, fee))) : [];
   let block = 100, wethPerUsdc = 400_000_000_000_000n, dropNext = false, sends = 0, simulateSupported = true, simulations = 0;
   const key = (token: string, owner: string) => `${lower(token)}|${lower(owner)}`;
   const bal = (token: string, owner: string) => balances.get(key(token, owner)) ?? 0n;
@@ -245,7 +254,7 @@ export function createEvmDouble(chainId: number, clock: () => number = () => Mat
       case 'eth_estimateGas': return '0x61a80';
       case 'eth_getBlockByNumber': return blockOf(p[0] === 'latest' || p[0] === 'pending' ? block : Number(BigInt(String(p[0]))));
       case 'eth_getCode': return code.get(lower(String(p[0]))) ?? ([...tokens(), profile.router, profile.quoter, F.delegationManager, ...Object.values(F.enforcers),
-        ...aave ? [aave.pool] : []].includes(lower(String(p[0]))) ? '0x6080' : '0x');
+        ...aave ? [aave.pool] : [], ...canonicalPools].includes(lower(String(p[0]))) ? '0x6080' : '0x');
       case 'eth_getBalance': return '0x' + (native.get(lower(String(p[0]))) ?? 0n).toString(16);
       case 'eth_getTransactionCount': return '0x' + (nonces.get(lower(String(p[0]))) ?? 0n).toString(16);
       case 'eth_getTransactionReceipt': {
