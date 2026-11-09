@@ -37,6 +37,8 @@ export type EmailRow = {
   readonly recipient: string; readonly language: EmailLanguage; readonly trigger: string; readonly batchKey: string | null;
   readonly entryId: string | null; readonly passId: string | null; readonly inviteCode: string | null; readonly state: EmailState;
   readonly attempts: number; readonly leaseToken: string | null; readonly createdAt: string; readonly firstAttemptAt: string | null;
+  /** The state before this lease: an UNKNOWN email may already have been delivered, so it must never fall back to PENDING. */
+  readonly previousState?: EmailState;
 };
 type Row = { email_id: string; template: EmailTemplate; template_version: number; category: 'CAMPAIGN' | 'ESSENTIAL'; recipient: string; language: EmailLanguage;
   trigger: string; batch_key: string | null; entry_id: string | null; pass_id: string | null; invite_code: string | null; state: EmailState; attempts: number;
@@ -125,10 +127,12 @@ export function createEmailOutbox(host: { readonly db: Database; readonly tenant
       recovered: (await tx.query(`UPDATE flight_emails SET state = 'UNKNOWN', lease_token = NULL, lease_until = NULL, status_reason = 'LEASE_EXPIRED',
         next_attempt_at = $2, updated_at = clock_timestamp() WHERE tenant_id = $1 AND state = 'SENDING' AND lease_until < $2`, [tenantId, at(now)])).rowCount,
       expired: (await tx.query(`UPDATE flight_emails SET state = 'CANCELLED', status_reason = 'EXPIRED', reserved_at = NULL, updated_at = clock_timestamp()
-        WHERE tenant_id = $1 AND state IN ('PENDING', 'HELD') AND expires_at IS NOT NULL AND expires_at <= $2`, [tenantId, at(now)])).rowCount,
+        WHERE tenant_id = $1 AND state IN ('PENDING', 'HELD') AND expires_at IS NOT NULL AND expires_at <= $2
+        AND (status_reason IS NULL OR NOT (status_reason = ANY($3::text[])))`, [tenantId, at(now), POSSIBLY_SENT])).rowCount,
       suppressed: (await tx.query(`UPDATE flight_emails e SET state = 'CANCELLED', status_reason = 'UNSUBSCRIBED', reserved_at = NULL, updated_at = clock_timestamp()
         FROM flight_email_suppressions s WHERE e.tenant_id = $1 AND s.tenant_id = e.tenant_id AND e.state IN ('PENDING', 'HELD') AND e.category = 'CAMPAIGN'
-        AND s.address_hash = ${SQL_ADDRESS_HASH('e.recipient')}`, [tenantId])).rowCount,
+        AND (e.status_reason IS NULL OR NOT (e.status_reason = ANY($2::text[])))
+        AND s.address_hash = ${SQL_ADDRESS_HASH('e.recipient')}`, [tenantId, POSSIBLY_SENT])).rowCount,
     }));
   }
 
@@ -182,7 +186,7 @@ export function createEmailOutbox(host: { readonly db: Database; readonly tenant
         const updated = (await tx.query<Row>(`UPDATE flight_emails SET state = 'SENDING', lease_token = $3, lease_until = $4, attempts = attempts + 1,
           first_attempt_at = coalesce(first_attempt_at, $5), reserved_at = coalesce(reserved_at, $5), updated_at = clock_timestamp()
           WHERE tenant_id = $1 AND email_id = $2 RETURNING ${COLUMNS}`, [tenantId, row.email_id, token, at(now + OUTBOX.leaseMs), at(now)])).rows[0]!;
-        leased.push(rowOf(updated));
+        leased.push({ ...rowOf(updated), previousState: row.state });
       }
       return leased;
     });
@@ -311,7 +315,8 @@ export function createEmailOutbox(host: { readonly db: Database; readonly tenant
     if (!filter.emailId && !filter.batchKey && !filter.template) throw new Error('FLIGHT_CANCEL_FILTER_REQUIRED');
     return (await db.query(`UPDATE flight_emails SET state = 'CANCELLED', status_reason = 'OPERATOR', reserved_at = NULL, updated_at = clock_timestamp()
       WHERE tenant_id = $1 AND state IN ('PENDING', 'HELD') AND ($2::text IS NULL OR email_id = $2) AND ($3::text IS NULL OR batch_key = $3)
-      AND ($4::text IS NULL OR template = $4)`, [tenantId, filter.emailId ?? null, filter.batchKey ?? null, filter.template ?? null])).rowCount;
+      AND ($4::text IS NULL OR template = $4) AND (status_reason IS NULL OR NOT (status_reason = ANY($5::text[])))`,
+    [tenantId, filter.emailId ?? null, filter.batchKey ?? null, filter.template ?? null, POSSIBLY_SENT])).rowCount;
   }
   /** An UNKNOWN or held email the operator confirmed in the provider's log as delivered: recorded as SENT, never sent again. */
   async function markDelivered(emailId: string, providerId: string, now: number): Promise<boolean> {

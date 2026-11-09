@@ -128,7 +128,7 @@ function InviteForm({ copy, onRedeemed }: { copy: FlightCopy; onRedeemed: (fligh
  * "On the list with another email?": a link and a 6-digit code go to that address if it is on the beta list and its group is boarding (the
  * answer never says whether it is); the code typed here proves the address on this device (another device than the email's, too).
  */
-function AccessForms({ copy, language, onClaimed }: { copy: FlightCopy; language: Language; onClaimed: (notice: string) => void }) {
+function AccessForms({ copy, language, onClaimed, intro = true }: { copy: FlightCopy; language: Language; onClaimed: (notice: string) => void; intro?: boolean }) {
   const t = copy.access, [email, setEmail] = useState(''), [code, setCode] = useState(''), [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null);
   async function request(event: FormEvent) {
@@ -148,7 +148,7 @@ function AccessForms({ copy, language, onClaimed }: { copy: FlightCopy; language
     else setMessage({ ok: false, text: errorText(copy, answer.code) });
   }
   return <div className={styles.accessForms}>
-    <p className={styles.small}>{t.otherEmail}</p>
+    {intro && <p className={styles.small}>{t.otherEmail}</p>}
     <form onSubmit={request} className={styles.inviteForm} noValidate>
       <label className={styles.srOnly} htmlFor="flight-access-email">{t.emailLabel}</label>
       <input id="flight-access-email" type="email" autoComplete="email" inputMode="email" placeholder={copy.finalCall.email} value={email} onChange={e => setEmail(e.target.value)}/>
@@ -183,7 +183,7 @@ function PassPanel({ pass, invites, copy, onPass }: { pass: FlightPass; invites:
   const t = copy.pass, printedKey = `flofi.flight.printed.${pass.passId}`;
   const [handle, setHandle] = useState(pass.handle ?? ''), [visible, setVisible] = useState(pass.public), [message, setMessage] = useState<string | null>(null);
   // Screen 1 only once per card, and only while the card has no handle yet.
-  const [printing, setPrinting] = useState(false);
+  const [printing, setPrinting] = useState<boolean | null>(null);
   // Remembered in this browser (not only this tab): the handle screen is shown once.
   const remembered = () => { try { return localStorage; } catch { return null; } };
   useEffect(() => { setPrinting(pass.handle === null && remembered()?.getItem(printedKey) !== '1'); }, [pass.handle, printedKey]);
@@ -196,6 +196,8 @@ function PassPanel({ pass, invites, copy, onPass }: { pass: FlightPass; invites:
     if (answer.ok) { onPass(answer.pass as FlightPass); setMessage(t.saved); after?.(); } else setMessage(errorText(copy, answer.code));
   }
   const url = cardUrl(pass), kind = pass.foundingSeat ? 'founding' : 'passenger';
+  // Until the browser knows whether the handle screen comes first, show neither (no card flashing before "Who's flying?").
+  if (printing === null) return <section id="pass" tabIndex={-1} aria-label={t.yours} aria-busy="true"/>;
   if (printing) return <section className={styles.passControls} aria-labelledby="who-title">
     <div>
       <span className={`${styles.lbl} ${styles.eyebrow}`}>{t.whoEyebrow}</span>
@@ -282,7 +284,7 @@ export function BoardExperience({ initial, language }: { initial: FlightState | 
   const joinedStatus = useRef<HTMLParagraphElement>(null);
   useEffect(() => { if (nextJoined) joinedStatus.current?.focus(); }, [nextJoined]);
   // A proven address changes the hero: focus its heading so the confirmation is read out (the form the person used is gone).
-  useEffect(() => { if (accessNotice) document.getElementById('flight-hero-title')?.focus(); }, [accessNotice]);
+  useEffect(() => { if (accessNotice) document.getElementById('flight-access-notice')?.focus(); }, [accessNotice]);
   const [paused, setPaused] = useState(false);
   const [focusPass, setFocusPass] = useState(false);
   // When the hero changes to the person's own state, focus its heading so the change is read out (the form they used is gone).
@@ -443,7 +445,8 @@ export function BoardExperience({ initial, language }: { initial: FlightState | 
         <button className={`${styles.btn} ${styles.btnNavy}`} type="submit" disabled={busy}>{t.board} <span aria-hidden="true">→</span></button>
       </form>
       <p className={message ? styles.status : styles.srOnly} role="status">{message ?? ''}</p>
-      {accessNotice ? <p className={styles.status} role="status">{accessNotice}</p> : state.me.accessPending && <p className={styles.status}>{copy.access.pendingSignIn}</p>}
+      <p id="flight-access-notice" tabIndex={-1} className={accessNotice ? styles.status : styles.srOnly} role="status">{accessNotice ?? ''}</p>
+      {!accessNotice && state.me.accessPending && <p className={styles.status}>{copy.access.pendingSignIn}</p>}
       <div className={styles.metaRow}>
         <span className={styles.meta}>{full ? copy.passengerSeats : copy.closedBeta}</span>
         {!pass && <><span className={styles.dot} aria-hidden="true"/><button type="button" className={styles.linkButton} onClick={() => setShowInvite(value => !value)}>{t.invite}</button></>}
@@ -452,7 +455,7 @@ export function BoardExperience({ initial, language }: { initial: FlightState | 
       {/* On the list with another email, or on another device: a link and a code by email, or the code typed here (signed in or not). */}
       {!pass && !accessNotice && <p className={styles.small}><button type="button" className={styles.linkButton} aria-expanded={showAccess}
         onClick={() => setShowAccess(value => !value)}>{copy.access.otherEmail}</button></p>}
-      {showAccess && !pass && <AccessForms copy={copy} language={language} onClaimed={claimed}/>}
+      {showAccess && !pass && <AccessForms copy={copy} language={language} onClaimed={claimed} intro={false}/>}
     </div>;
   }
 

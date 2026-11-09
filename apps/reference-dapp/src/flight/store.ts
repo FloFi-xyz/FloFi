@@ -238,8 +238,8 @@ export function createFlightStore(host: FlightHost, given: FlightCalendar = FLIG
           ON CONFLICT (tenant_id, code) DO NOTHING`, [tenantId, inviteCodeFrom(randomBytes(8)), passId, at(input.now)])).rowCount;
       }
       await recordEvent('simulation_ok', next.seat !== null ? 'founding' : 'passenger', origin, input.now, tx);
-      // Email 4a / 4b, once per card, to the address the person proved (their claimed list entry, a verified login address, or the address
-      // their creator invite was sent to). No address, no email: the card stays in the account either way.
+      // Email 4a / 4b, once per card, to an address the person proved (a verified login address, else their claimed list entry). No
+      // proven address, no email: the card stays in the account either way.
       const recipient = await cardRecipient(tx, input.accountId, input.emails);
       if (recipient) await enqueueEmail(tx, tenantId, { template: next.seat !== null ? 'CARD_FOUNDING' : 'CARD_PASSENGER', recipient: recipient.email,
         language: recipient.language, trigger: 'card_issued', dedupeKey: `card:${passId}`, notBefore: input.now, expiresAt: input.now + 7 * DAY_MS, passId });

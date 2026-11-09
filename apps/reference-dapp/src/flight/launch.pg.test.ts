@@ -186,6 +186,25 @@ describe('quota and delivery outcomes', () => {
     expect((await emailsOf('conflict@flofi-test.dev'))[0]).toMatchObject({ state: 'SENT' });
   });
 
+  it('an email of unknown outcome caught in a provider stop stays UNKNOWN and is held after 24 hours, never resent blindly', async () => {
+    const day = BEFORE - 12 * 86_400_000, outbox = createEmailOutbox({ db: t.db, tenantId: 'default' });
+    await t.db.query(`UPDATE flight_emails SET state = 'CANCELLED', reserved_at = NULL, lease_token = NULL, lease_until = NULL WHERE state IN ('PENDING', 'HELD', 'UNKNOWN', 'SENDING')`);
+    await outbox.clearBlock();
+    await store.joinList({ email: 'unk1@flofi-test.dev', language: 'EN', flight: 'FIRST', client: null, now: day });
+    await delivery(outbox, fakeProvider(() => ({ kind: 'UNKNOWN', code: 'PROVIDER_TIMEOUT' })).provider, () => day).cycle();
+    await store.joinList({ email: 'unk0@flofi-test.dev', language: 'EN', flight: 'FIRST', client: null, now: day + 5 * 60_000 });
+    // The next cycle: the fresh email hits the provider's quota first, the unknown one is caught by the stop.
+    await t.db.query(`UPDATE flight_emails SET next_attempt_at = $1 WHERE recipient = 'unk1@flofi-test.dev'`, [new Date(day + 7 * 60_000).toISOString()]);
+    await delivery(outbox, fakeProvider(() => ({ kind: 'QUOTA', code: 'PROVIDER_QUOTA_MONTHLY' })).provider, () => day + 6 * 60_000).cycle();
+    expect((await emailsOf('unk1@flofi-test.dev'))[0]).toMatchObject({ state: 'UNKNOWN' });
+    await outbox.clearBlock();
+    expect((await outbox.lease(day + 26 * 3_600_000, { max: 50, campaign: true })).some(e => e.recipient === 'unk1@flofi-test.dev')).toBe(false);
+    expect((await emailsOf('unk1@flofi-test.dev'))[0]).toMatchObject({ state: 'HELD', status_reason: 'UNRESOLVED_OUTCOME' });
+    // Expiry and bulk cancel leave a possibly-sent hold for the operator.
+    expect(await outbox.cancel({ template: 'LIST_CONFIRMATION' })).toBeGreaterThanOrEqual(0);
+    expect((await emailsOf('unk1@flofi-test.dev'))[0]).toMatchObject({ state: 'HELD', status_reason: 'UNRESOLVED_OUTCOME' });
+  });
+
   it('prunes settled emails after 90 days and expired access records from the delivery cycle (no page visit needed)', async () => {
     const old = BEFORE - 200 * 86_400_000, outbox = createEmailOutbox({ db: t.db, tenantId: 'default' });
     await t.db.query(`INSERT INTO flight_emails (tenant_id, email_id, dedupe_key, template, template_version, category, recipient, language, trigger, state, not_before,
@@ -224,8 +243,6 @@ describe('scheduled campaign emails and unsubscribe', () => {
   it('one-click unsubscribe cancels pending campaign email to the address and blocks future ones', async () => {
     const outbox = createEmailOutbox({ db: t.db, tenantId: 'default' });
     await store.joinList({ email: 'bye@flofi-test.dev', language: 'EN', flight: 'FIRST', client: null, now: BEFORE + 5 * 86_400_000 });
-    const [email] = await rows(`SELECT email_id FROM flight_emails WHERE recipient = 'bye@flofi-test.dev'`);
-    void email;
     await outbox.unsubscribe(addressHash('bye@flofi-test.dev'));
     expect((await emailsOf('bye@flofi-test.dev'))[0]).toMatchObject({ state: 'CANCELLED', status_reason: 'UNSUBSCRIBED' });
     expect(await outbox.isSuppressed(addressHash('bye@flofi-test.dev'))).toBe(true);
@@ -330,6 +347,20 @@ describe('access by link and code', () => {
     await simulate(creator, 'wf-early', CAL.boardingOpensAt - 30 * 60_000);
     expect(await store.issuePass({ accountId: creator, emails: [], workflowId: 'wf-early', handle: null, public: false, now: CAL.boardingOpensAt + 60_000 }))
       .toEqual({ ok: false, code: 'FLIGHT_SIMULATION_NOT_FOUND' });
+  });
+
+  it('a browser session never binds an entry that boarded in the meantime', async () => {
+    await store.joinList({ email: 'shared@flofi-test.dev', language: 'EN', flight: 'FIRST', client: null, now: BEFORE });
+    const entry = (await rows(`SELECT entry_id FROM flight_list_entries WHERE email = 'shared@flofi-test.dev'`))[0]!.entry_id as string;
+    const id = `fem_${hex(16)}`, token = await access.issueToken({ emailId: id, entryId: entry, codeMs: 15 * 60_000, now: BOARDING });
+    const pending = await access.consumeCode({ email: 'shared@flofi-test.dev', code: token.code, accountId: null, client: null, now: BOARDING });
+    expect(pending.status).toBe('SESSION');
+    const owner = await newAccount();
+    await simulate(owner, 'wf-shared');
+    expect(await store.issuePass({ accountId: owner, emails: ['shared@flofi-test.dev'], workflowId: 'wf-shared', handle: null, public: false, now: BOARDING })).toMatchObject({ ok: true });
+    const stranger = await newAccount();
+    expect(await access.bindSession({ session: (pending as { session: string }).session, accountId: stranger, now: BOARDING })).toBe('NONE');
+    expect(await rows(`SELECT count(*)::int AS n FROM flight_access_claims WHERE account_id = $1`, [stranger])).toEqual([{ n: 0 }]);
   });
 
   it('limits brute force: a code dies after 5 wrong tries, and tries per address and per client are limited', async () => {

@@ -7,7 +7,7 @@
  * - Email 3 (and a requested access email) carries a link token and a six-digit code derived from that email (access.ts); this store keeps
  *   their digests. Opening the link consumes nothing: the "Continue" page posts the token, and only then is it consumed (single use).
  * - A consumed link or code binds the list entry to the signed-in account (`flight_access_claims`: one account per entry, one entry per
- *   account), or, before sign-in, to an HttpOnly browser session (30 days) that binds on the next signed-in request.
+ *   account), or, before sign-in, to an HttpOnly browser session (24 hours) that binds only when the person presses "Board now" signed in.
  * - An entry already bound to another account is never rebound (no takeover by a forwarded link); the token is then left unused.
  * - Limits: code tries per client and per address, link requests per address and per client, link uses per client (keyed digests only).
  */
@@ -153,7 +153,10 @@ export function createAccessStore(host: { readonly db: Database; readonly tenant
     return db.transaction(async tx => {
       const row = (await tx.query<{ entry_id: string }>(`DELETE FROM flight_access_sessions WHERE tenant_id = $1 AND session_hash = $2 AND expires_at > $3 RETURNING entry_id`,
         [tenantId, sha256Hex(input.session), at(input.now)])).rows[0];
-      return row ? claim(tx, row.entry_id, input.accountId, input.now) : 'NONE';
+      if (!row) return 'NONE';
+      // An entry that boarded meanwhile is never bound to another account (as for a link or code).
+      if ((await tx.query('SELECT 1 FROM flight_list_entries WHERE tenant_id = $1 AND entry_id = $2 AND boarded_at IS NOT NULL', [tenantId, row.entry_id])).rowCount) return 'NONE';
+      return claim(tx, row.entry_id, input.accountId, input.now);
     });
   }
 

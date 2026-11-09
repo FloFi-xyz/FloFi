@@ -83,8 +83,8 @@ export async function flightState(): Promise<FlightState | null> {
  */
 const secureCookies = (request?: Request) => isHostedDeployment(process.env) || (request ? new URL(request.url).protocol === 'https:' : false);
 /** The browser's pending access session (a proven list address before sign-in), if any. */
-async function pendingSession(): Promise<string | null> {
-  const value = (await cookies()).get(sessionCookieName(ACCESS_SESSION_COOKIE, secureCookies()))?.value ?? null;
+async function pendingSession(request?: Request): Promise<string | null> {
+  const value = (await cookies()).get(sessionCookieName(ACCESS_SESSION_COOKIE, secureCookies(request)))?.value ?? null;
   return value && /^[A-Za-z0-9_-]{43}$/.test(value) ? value : null;
 }
 /** Bind a pending access session to the signed-in account (the session row is deleted either way; the cookie then means nothing). */
@@ -133,7 +133,7 @@ export async function handleBoard(request: Request): Promise<Response> {
   try {
     const person = await flightPerson();
     if (!person) return refuse(401, 'FLIGHT_SIGN_IN_REQUIRED');
-    const now = await flightNow(), pending = await pendingSession();
+    const now = await flightNow(), pending = await pendingSession(request);
     const bound = pending ? await bindPending(person, pending, now) : 'NONE';
     const state = await store.account({ ...person, now }), detail = accessResultDetail(state.access);
     const origin: FlightOrigin | null = state.access.kind === 'eligible' ? state.access.origin : null;

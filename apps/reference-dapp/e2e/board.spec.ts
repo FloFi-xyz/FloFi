@@ -343,6 +343,7 @@ test('a real simulation issues the boarding pass: Founding seat #001, the real r
   await expect(page).toHaveURL(/\/board#pass$/);
   // Screen 1 of the card flow: the optional X handle, printed on the card.
   await expect(page.getByRole('heading', { name: 'Who’s flying?' })).toBeVisible();
+  await fitsPhones(page);
   await page.getByRole('textbox', { name: 'Your X handle' }).fill('@ana_flight');
   await page.getByRole('button', { name: 'Print my card' }).click();
   const pass = page.getByRole('article', { name: /BOARDING PASS: SOL → SOL, Founding Member #001/ });
@@ -488,10 +489,11 @@ test('Email 3 access: opening the link consumes nothing, Continue proves the add
     // Proven: the entry is now this account's, and "Board now" continues to /app.
     await expect(page).toHaveURL(/\/app$/);
     expect(await query(`SELECT count(*)::int AS n FROM flight_access_claims c JOIN flight_list_entries e ON e.entry_id = c.entry_id WHERE e.email = $1`, [LISTED])).toEqual([{ n: 1 }]);
-    // The link works once.
+    // The link works once: a used link cannot be confirmed again (the page says so and offers a new link).
     await page.goto(`/board/access#t=${link}`);
-    await page.getByRole('button', { name: 'Continue' }).click();
-    await expect(page.locator('p[role="alert"]')).toHaveText('That link was already used. Ask for a new one if you need it.');
+    await expect(page.locator('p[role="alert"]')).toHaveText('That link or code is not valid. Ask for a new one.');
+    await expect(page.getByRole('button', { name: 'Continue' })).toBeDisabled();
+    await expect(page.getByRole('button', { name: 'Send me a link and a code' })).toBeVisible();
   } finally { await ctx.close(); }
   // Another device: signed in there with yet another address, the person types the listed address and the six-digit code.
   const other = await browser.newContext({ baseURL: E2E_APP_ORIGIN, storageState: returningVisitor(E2E_APP_ORIGIN) }), device = await other.newPage();

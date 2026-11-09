@@ -38,6 +38,7 @@ export function AccessContinue({ language, lang }: { language: Language; lang: s
     if (value) void post('/api/board/access/peek', { token: value }).then(answer => {
       const address = (answer as { address?: unknown }).address;
       if (answer.ok && typeof address === 'string') setAddress(address);
+      else setMessage({ ok: false, text: (copy.errors as Record<string, string>)[answer.code ?? ''] ?? copy.errors.generic });
     });
   }, []);
   async function go() {
@@ -60,7 +61,8 @@ export function AccessContinue({ language, lang }: { language: Language; lang: s
       <p className={styles.heroBody}>{t.body}</p>
       {address && <p className={styles.heroBody}><b>{t.proves(address)}</b></p>}
       <div className={styles.ctaRow}>
-        <button type="button" className={`${styles.btn} ${styles.btnNavy}`} onClick={go} disabled={!token || busy || message?.ok === true && message.text === t.done}>
+        {/* Continue only once the page has shown which address the link proves (nobody links an address they never saw). */}
+        <button type="button" className={`${styles.btn} ${styles.btnNavy}`} onClick={go} disabled={!token || !address || busy || message?.ok === true && message.text === t.done}>
           {t.continue} <span aria-hidden="true">→</span></button>
       </div>
     </>}

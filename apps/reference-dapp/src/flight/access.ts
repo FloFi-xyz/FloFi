@@ -29,7 +29,7 @@ export const CODE_MAX_ATTEMPTS = 5;
 export const ACCESS_SESSION_MS = 24 * 60 * 60 * 1000;
 export const ACCESS_SESSION_COOKIE = 'flofi_flight_access';
 /** Abuse limits per hour ("5 tentativas de código por hora por IP e e-mail; 3 links únicos por hora por e-mail"). */
-export const ACCESS_LIMITS = { codePerClientHour: 30, codePerAddressHour: 5, requestPerAddressHour: 3, requestPerClientHour: 30, consumePerClientHour: 60,
+export const ACCESS_LIMITS = { codePerClientHour: 30, codePerAddressHour: 5, requestPerAddressHour: 3, requestPerClientHour: 30, consumePerClientHour: 120, // A link flow is a peek and a consume.
   // Requested access emails a tenant sends per day at most, and per entry per hour at most one: requests can never eat the email quota.
   requestedEmailsPerDay: 30 } as const; // Per-client limits allow carriers' shared IPv4 addresses (CGNAT), as the list form does.
 /** A request without a usable client address counts under this one shared subject (it is never exempt). */

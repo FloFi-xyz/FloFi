@@ -139,7 +139,9 @@ export function createEmailDelivery(deps: DeliveryDeps) {
     let stop: string | null = null;
     for (const [index, row] of rows.entries()) {
       const at = now();
-      if (stop) { await deps.outbox.settle(row, { kind: 'RETRY', code: stop, delayMs: 60_000 }, at); report.retried++; continue; }
+      // An email whose earlier outcome is unknown stays UNKNOWN (retried with its key only inside the provider's window, then held).
+      const wasUnknown = row.previousState === 'UNKNOWN';
+      if (stop) { await deps.outbox.settle(row, wasUnknown ? { kind: 'UNKNOWN', code: stop } : { kind: 'RETRY', code: stop, delayMs: 60_000 }, at); report.retried++; continue; }
       let rendered: Rendered;
       try { rendered = await render(row, at); }
       catch (error) {
@@ -149,7 +151,8 @@ export function createEmailDelivery(deps: DeliveryDeps) {
       if (rendered.kind === 'CANCEL') { await deps.outbox.settle(row, { kind: 'CANCELLED', code: rendered.code }, at); report.cancelled++; continue; }
       if (index > 0) await sleep(Math.ceil(1000 / perSecond));
       const outcome = await deps.provider.send(rendered.email);
-      const settlement = settlementOf(outcome);
+      const settled = settlementOf(outcome);
+      const settlement: Settlement = wasUnknown && settled.kind === 'RETRY' ? { kind: 'UNKNOWN', code: settled.code } : settled;
       await deps.outbox.settle(row, settlement, now());
       deps.logger.info('flight.email.attempt', { template: row.template, outcome: outcome.kind, code: 'code' in outcome ? outcome.code : undefined, attempt: row.attempts });
       if (settlement.kind === 'SENT') report.sent++; else if (settlement.kind === 'UNKNOWN') report.unknown++; else if (settlement.kind === 'HELD') report.held++;
