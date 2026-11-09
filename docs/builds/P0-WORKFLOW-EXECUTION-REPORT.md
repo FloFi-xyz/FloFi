@@ -222,9 +222,13 @@ Simulate previews took 4.06 s.
 **Not covered.** There is no browser e2e for the grouped `wallet_sendCalls` journey in the Editor, including the lost-answer recovery in the
 browser hook. Its proof is UNIT and PG on the EVM double with `eth_simulateV1`, plus code review.
 
-**Local browser results.**
-- **Pass:** `canvas-automation-ux`, `copilot`, `supply-provenance`, `unsafe-lending-simulations`, `review-execute-recovery-components`,
-  `workflow-ux-authoring`, `base-mainnet-authoring`.
+**Local results.** Browser profiles ran against a fresh production build of the branch.
+- **Browser profiles passing:** `arbitrum-authoring-certification` (Scenario A), `workflow-ux-authoring`, `canvas-corrections`,
+  `approve-workflow-run` (Editor "Run workflow" and `/approve`), `review-execute-recovery-components`, `execution-continuity`,
+  `canvas-workflow-ux`, `canvas-automation-ux`, `base-mainnet-authoring`, `copilot`, `supply-provenance`, `unsafe-lending-simulations`.
+- **PostgreSQL:** 615 passed, 3 skipped (pre-existing), 1 failed. The failure is
+  `forward-compatibility.pg.test.ts` › "changes pre-existing objects only as listed", which fails identically on unmodified `origin/main`
+  here (local PostgreSQL 16; CI uses 18).
 - **`default-product` fails locally on 11 tests, and every one fails identically on unmodified `origin/main` in this sandbox.**
   - **Screenshot baselines (9):** sandbox fonts. The pixel diffs are identical on `main`.
   - **`build009` (2):** they need a live LI.FI quote from `li.quest`, which the sandbox cannot reach.
@@ -270,6 +274,21 @@ binding and safety, and UX integration. Every finding was checked by a skeptic. 
 | Following an earlier visit's run took over the current Canvas workflow. Review and Authorize could appear on surfaces where the path is off. | A followed run is a view that can be hidden; Review and Authorize appear only where this workflow can be reviewed. |
 | Automatic recovery could clear an unseen error or prompt the wallet. Opening another workflow kept the previous run. A failed Review's error never cleared. | Fixed as named. |
 
+**Third round: final adversarial pass over the last fix commits.**
+- **Confirmed and fixed:**
+  - a race between a workflow switch and the run lookup, which could let the same workflow be authorized twice;
+  - a Review started while an earlier run was followed, which mixed the two.
+- **Fixed on reading:** the verifier hit a usage limit before checking four further findings. They were read and fixed:
+  - a declined sign-in showed "nothing was sent";
+  - a lost wallet answer was described as "the wallet already has it";
+  - Hide was available during an action;
+  - a workflow switch during an action was never applied.
+- **Also fixed:** after a batch reconciles against an earlier preparation, the owner's view now shows that preparation's per-step
+  amounts.
+- **Rejected as not introduced by this branch:** on `/approve`, a re-preparation that fails after a lost-answer batch already ran
+  leaves that batch unrecordable until the run is ended. The Editor reads a held batch back before preparing again; `/approve` is
+  unchanged (§J).
+
 Not changed:
 - **No swap deadline.** The batched swap call carries no on-chain deadline; this is a pre-existing call template. The Review now says
   so. Re-encoding the swap with a deadline (SwapRouter02 `multicall(deadline, …)`) is left for a follow-up.
@@ -309,6 +328,9 @@ Not changed:
   relevant. The Canvas card applies token and reserve picks directly.
 - **Reload recovery uses browser storage.** Recovery after a reload uses this browser's storage. Another browser, or cleared site data,
   has no way into the run from the Editor; the run itself stays in PostgreSQL. No owner-facing run list exists for Editor runs yet.
+- **`/approve` re-prepares first.** It prepares an expired wallet batch again before asking the wallet. If the batch it lost the answer
+  for already ran, and the new preparation then fails, the run can only be ended there. This predates this branch; the Editor reads a
+  held batch back first.
 - **Grouping must ask fewer times.** A workflow whose grouping would not ask the wallet fewer times than its steps uses the step-by-step
   path; for example, one step on each of two networks. The reason is shown.
 - **Wallets that ignore the app id.** For a wallet that ignores the app-provided EIP-5792 id, protection against a second send is the
