@@ -155,4 +155,3 @@ secret or migration is needed.
    transaction hash, gas paid by the owner and the health factor after.
 4. **Rollback.** `FLOFI_EDITOR_WORKFLOW_RUNS=disabled` removes the Editor's grouped path, and the Editor falls back to confirming each step.
    `FLOFI_USER_FUNDED_EXECUTION=disabled` turns groups off everywhere (§8).
-

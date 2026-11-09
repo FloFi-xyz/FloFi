@@ -177,6 +177,9 @@ jobs:
             git diff --check
             if ! git rev-parse HEAD^1 >/dev/null 2>&1; then git fetch --deepen=2 origin || true; fi
             git diff --check HEAD^1 HEAD
+            # A push build of a branch sees only its last commit as HEAD^1 HEAD; check every commit the branch adds to main.
+            git fetch --no-tags origin main
+            git diff --check "$(git merge-base FETCH_HEAD HEAD)" HEAD
   certification-checks:
     executor: certification
     steps:

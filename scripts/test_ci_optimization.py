@@ -633,6 +633,16 @@ class CiParity(unittest.TestCase):
                     self.assertNotIn('set +e', lines)
         self.assertEqual(len([1 for _, _, _, lines in self.circle_lines() if 'node scripts/guarded-release-browser.mjs critical' in lines]), 1)
 
+    def test_governance_checks_whitespace_over_every_commit_the_branch_adds(self):
+        # CircleCI builds a branch push, where HEAD^1 HEAD is only the last commit: a whitespace error made earlier in
+        # #173 passed the PR and failed main's merge commit. The branch is also checked from its merge base with main.
+        lines = [line for _, _, lines in self.jobs['governance'] for line in lines]
+        self.assertEqual(lines[0], 'set -euo pipefail')
+        self.assertIn('git diff --check HEAD^1 HEAD', lines)
+        fetch = lines.index('git fetch --no-tags origin main')
+        self.assertEqual(lines[fetch + 1], 'git diff --check "$(git merge-base FETCH_HEAD HEAD)" HEAD')
+        self.assertFalse([line for line in lines[fetch:] if re.search(r'\|\|\s*(true|exit 0)', line)])
+
     def test_extended_profiles_run_once_per_system(self):
         actions = [line for _, step in self.actions for line in run_body(step, 10) if line.startswith('node scripts/guarded-release-browser.mjs extended')]
         self.assertEqual(actions, ['node scripts/guarded-release-browser.mjs extended'])
