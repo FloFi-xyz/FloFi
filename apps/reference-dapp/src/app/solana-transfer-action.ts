@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 'use server';
+import { withFlightAccess } from '../server/flight-access';
 import { SOLANA_DEVNET_TRANSFER, SOLANA_MAINNET_TRANSFER } from '@defi-workflow-engine/action-registry';
 import type { SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
 import { createSolanaTransferService, type SolanaTransferService, type SolanaTransferWalletDiagnostic } from '../server/solana-transfer-service';
@@ -39,22 +40,49 @@ async function run<T>(cluster: SolanaTransferCluster, method: string, args: read
   try { return { ok: true, value: await action(current(cluster)) }; }
   catch (cause) { const code = cause instanceof Error ? cause.message : ''; return { ok: false, code: /^[A-Z][A-Z0-9_]{2,80}$/.test(code) ? code : 'SOLANA_TRANSFER_SERVICE_UNAVAILABLE' }; }
 }
-export async function solanaTransferInfo(cluster: SolanaTransferCluster) { return run(cluster, 'info', [], async service => ({ executionEnabled: service.executionEnabled })); }
+export async function solanaTransferInfo(cluster: SolanaTransferCluster) {
+  return withFlightAccess(async () => { return run(cluster, 'info', [], async service => ({ executionEnabled: service.executionEnabled })); 
+  });
+}
 export async function solanaTransferSimulate(cluster: SolanaTransferCluster, workflow: SemanticWorkflow, owner: string) {
+  return withFlightAccess(async () => {
   return run(cluster, 'simulate', [workflow, owner], service => service.simulate(workflow, owner));
+
+  });
 }
 export async function solanaTransferReview(cluster: SolanaTransferCluster, id: string, commitment: string, workflow: SemanticWorkflow) {
+  return withFlightAccess(async () => {
   return run(cluster, 'review', [id, commitment, workflow], service => service.review(id, commitment, workflow));
+
+  });
 }
-export async function solanaTransferInvalidate(cluster: SolanaTransferCluster, id: string) { return run(cluster, 'invalidate', [id], service => service.invalidate(id)); }
+export async function solanaTransferInvalidate(cluster: SolanaTransferCluster, id: string) {
+  return withFlightAccess(async () => { return run(cluster, 'invalidate', [id], service => service.invalidate(id)); 
+  });
+}
 export async function solanaTransferBegin(cluster: SolanaTransferCluster, id: string, owner: string, workflow: SemanticWorkflow) {
+  return withFlightAccess(async () => {
   return run(cluster, 'begin', [id, owner, workflow], service => service.begin(id, owner, workflow));
+
+  });
 }
 export async function solanaTransferWalletFailure(cluster: SolanaTransferCluster, id: string, diagnostic: SolanaTransferWalletDiagnostic) {
+  return withFlightAccess(async () => {
   return run(cluster, 'walletFailure', [id, diagnostic], service => service.walletFailure(id, diagnostic));
+
+  });
 }
 export async function solanaTransferSubmit(cluster: SolanaTransferCluster, id: string, signedTransaction: string) {
+  return withFlightAccess(async () => {
   return run(cluster, 'submit', [id, signedTransaction], service => service.submit(id, signedTransaction));
+
+  });
 }
-export async function solanaTransferObserve(cluster: SolanaTransferCluster, id: string) { return run(cluster, 'observe', [id], service => service.observe(id)); }
-export async function solanaTransferStatus(cluster: SolanaTransferCluster, id: string) { return run(cluster, 'status', [id], service => service.load(id)); }
+export async function solanaTransferObserve(cluster: SolanaTransferCluster, id: string) {
+  return withFlightAccess(async () => { return run(cluster, 'observe', [id], service => service.observe(id)); 
+  });
+}
+export async function solanaTransferStatus(cluster: SolanaTransferCluster, id: string) {
+  return withFlightAccess(async () => { return run(cluster, 'status', [id], service => service.load(id)); 
+  });
+}

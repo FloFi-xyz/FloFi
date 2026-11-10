@@ -11,6 +11,7 @@
 import { randomBytes, randomUUID } from 'node:crypto';
 import { WALLET_PRINCIPAL_HEADER } from './run-ownership.ts';
 import { currentTraceparent } from '@defi-workflow-engine/cloud-runtime';
+import { betaIdentityHeaders, type BetaRequestIdentity } from '../flight/beta-context.ts';
 
 export type FlowResult<T> = { ok: true; value: T } | { ok: false; code: string; correlationId?: string };
 const CODE = /^[A-Z][A-Z0-9_]{2,80}$/;
@@ -47,7 +48,7 @@ export function cloudApiBaseUrl(env: Readonly<Record<string, string | undefined>
 
 export async function callCloudFlow<T>(flow: string, method: string, args: readonly unknown[], options: {
   env?: Readonly<Record<string, string | undefined>>; transport?: typeof fetch; sleep?: (ms: number) => Promise<void>; principal?: string | null;
-  timeoutMs?: number; maxAttempts?: number; correlationId?: string;
+  timeoutMs?: number; maxAttempts?: number; correlationId?: string; betaIdentity?: BetaRequestIdentity | null;
   /** The caller's deadline: aborts the request in flight and ends the retries (`CLOUD_API_DEADLINE_EXCEEDED`). */
   signal?: AbortSignal } = {}): Promise<FlowResult<T>> {
   const env = options.env ?? process.env, transport = options.transport ?? fetch, signal = options.signal;
@@ -64,7 +65,7 @@ export async function callCloudFlow<T>(flow: string, method: string, args: reado
     let response: Response;
     try {
       response = await transport(target, { method: 'POST', cache: 'no-store', redirect: 'error', signal: attemptSignal(options.timeoutMs ?? 240_000, signal),
-        headers: { 'content-type': 'application/json', traceparent, ...env.API_AUTH_TOKEN ? { authorization: `Bearer ${env.API_AUTH_TOKEN}` } : {},
+        headers: { 'content-type': 'application/json', traceparent, ...betaIdentityHeaders(options.betaIdentity), ...env.API_AUTH_TOKEN ? { authorization: `Bearer ${env.API_AUTH_TOKEN}` } : {},
           ...key ? { 'idempotency-key': key } : {}, ...options.principal ? { [WALLET_PRINCIPAL_HEADER]: options.principal } : {} }, body: JSON.stringify({ args }) });
     } catch (error) {
       // The caller stopped waiting: no retry (a mutation that may have arrived is UNKNOWN to the caller, never "not sent").
@@ -90,6 +91,7 @@ export async function callCloudFlow<T>(flow: string, method: string, args: reado
  * call carries no idempotency key and no principal; a transport failure is simply retried.
  */
 export async function previewCloudFlow<T>(flow: string, args: readonly unknown[], options: {
+  betaIdentity?: BetaRequestIdentity | null;
   env?: Readonly<Record<string, string | undefined>>; transport?: typeof fetch; sleep?: (ms: number) => Promise<void>; timeoutMs?: number; maxAttempts?: number; purpose?: 'SIMULATION' | 'QUOTE';
   /** The caller's deadline: aborts the preview in flight and ends the retries (`CLOUD_API_DEADLINE_EXCEEDED`). */
   signal?: AbortSignal } = {}): Promise<FlowResult<T>> {
@@ -108,7 +110,7 @@ export async function previewCloudFlow<T>(flow: string, args: readonly unknown[]
     let response: Response;
     try {
       response = await transport(target, { method: 'POST', cache: 'no-store', redirect: 'error', signal: attemptSignal(timeoutMs, signal),
-        headers: { 'content-type': 'application/json', 'x-flofi-deadline-ms': deadline, ...currentTraceparent() ? { traceparent: currentTraceparent()! } : {},
+        headers: { 'content-type': 'application/json', 'x-flofi-deadline-ms': deadline, ...betaIdentityHeaders(options.betaIdentity), ...currentTraceparent() ? { traceparent: currentTraceparent()! } : {},
           ...env.API_AUTH_TOKEN ? { authorization: `Bearer ${env.API_AUTH_TOKEN}` } : {} }, body: JSON.stringify({ args, ...options.purpose ? { purpose: options.purpose } : {} }) });
     } catch (error) {
       if (deadlineEnded(error, signal)) return DEADLINE;

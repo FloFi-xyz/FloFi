@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 'use server';
+import { withFlightAccess } from '../server/flight-access';
 import { isAbsolute } from 'node:path';
 import type { PaymentDraftRequest } from '@defi-workflow-engine/workflow-contracts';
 import { createFileExecutionStorage } from '@defi-workflow-engine/reference-executor';
@@ -38,15 +39,45 @@ async function run<T>(method: string, args: readonly unknown[], action: (service
   } catch (cause) { return { ok: false, code: classified(cause) }; }
 }
 export async function paymentFlowMode(): Promise<PaymentMode> {
+  return withFlightAccess(async () => {
   const cloud = await cloudFlowMode('pix-payment');
   return cloud === null ? paymentMode(process.env) : cloud === 'live' ? 'live' : 'off';
+
+  });
 }
-export async function paymentInfo() { return run('info', [], async s => ({ executionEnabled: s.executionEnabled })); }
-export async function paymentSimulate(request: PaymentDraftRequest, owner: string) { return run('simulate', [request, owner], s => s.simulate(request, owner)); }
-export async function paymentReview(id: string, commitment: string) { return run('review', [id, commitment], s => s.review(id, commitment)); }
-export async function paymentInvalidate(id: string) { return run('invalidate', [id], s => s.invalidate(id)); }
-export async function paymentBegin(id: string, owner: string) { return run('begin', [id, owner], s => s.begin(id, owner)); }
-export async function paymentHandoff(id: string) { return run('handoff', [id], s => s.handoff(id)); }
-export async function paymentReport(id: string, result: PaymentWalletResult) { return run('report', [id, result], s => s.report(id, result)); }
-export async function paymentObserve(id: string) { return run('observe', [id], s => s.observe(id)); }
-export async function paymentStatus(id: string) { return run('status', [id], s => s.load(id)); }
+export async function paymentInfo() {
+  return withFlightAccess(async () => { return run('info', [], async s => ({ executionEnabled: s.executionEnabled })); 
+  });
+}
+export async function paymentSimulate(request: PaymentDraftRequest, owner: string) {
+  return withFlightAccess(async () => { return run('simulate', [request, owner], s => s.simulate(request, owner)); 
+  });
+}
+export async function paymentReview(id: string, commitment: string) {
+  return withFlightAccess(async () => { return run('review', [id, commitment], s => s.review(id, commitment)); 
+  });
+}
+export async function paymentInvalidate(id: string) {
+  return withFlightAccess(async () => { return run('invalidate', [id], s => s.invalidate(id)); 
+  });
+}
+export async function paymentBegin(id: string, owner: string) {
+  return withFlightAccess(async () => { return run('begin', [id, owner], s => s.begin(id, owner)); 
+  });
+}
+export async function paymentHandoff(id: string) {
+  return withFlightAccess(async () => { return run('handoff', [id], s => s.handoff(id)); 
+  });
+}
+export async function paymentReport(id: string, result: PaymentWalletResult) {
+  return withFlightAccess(async () => { return run('report', [id, result], s => s.report(id, result)); 
+  });
+}
+export async function paymentObserve(id: string) {
+  return withFlightAccess(async () => { return run('observe', [id], s => s.observe(id)); 
+  });
+}
+export async function paymentStatus(id: string) {
+  return withFlightAccess(async () => { return run('status', [id], s => s.load(id)); 
+  });
+}

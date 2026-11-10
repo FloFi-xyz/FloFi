@@ -23,6 +23,7 @@ import { isHostedDeployment } from './deployment.ts';
 import { notifySimulation } from './simulation-observer.ts';
 import { serverlessPostgresConfig } from './postgres-config.ts';
 import { testNetworkFlowRefusal, testNetworkPreviewRefusal } from './test-network-flows.ts';
+import { currentBetaIdentity, type BetaRequestIdentity } from '../flight/beta-context.ts';
 
 type Env = Readonly<Record<string, string | undefined>>;
 export type FlowRuntimeKind = 'remote' | 'embedded' | 'local' | 'unconfigured';
@@ -106,12 +107,13 @@ export function embeddedRuntime(env: Env = process.env): Promise<EmbeddedRuntime
  * its in-process development service. `principal` is the verified wallet session (Router ownership), never browser input.
  */
 export async function cloudFlow<T>(flow: FlowName, method: string, args: readonly unknown[],
-  options: { readonly principal?: string | null; readonly env?: Env; readonly transport?: typeof fetch;
+  options: { readonly principal?: string | null; readonly env?: Env; readonly transport?: typeof fetch; readonly betaIdentity?: BetaRequestIdentity | null;
     readonly timeoutMs?: number; readonly maxAttempts?: number; readonly correlationId?: string;
     /** P0 catalog reliability: the caller stopped waiting (read-only calls only; a mutating call's outcome is then UNKNOWN, see callCloudFlow). */
     readonly signal?: AbortSignal } = {}):
   Promise<FlowResult<T> | null> {
   const env = options.env ?? process.env, kind = flowRuntimeKind(env), principal = options.principal ?? null;
+  options = { ...options, betaIdentity: options.betaIdentity ?? currentBetaIdentity() };
   // BUILD-FLOFI-MAINNET-PRODUCT-001: every server action passes here first, whichever runtime then serves it (local services included).
   const refusal = testNetworkFlowRefusal(flow, method, { ...process.env, ...env });
   if (refusal) return { ok: false, code: refusal };
@@ -120,7 +122,7 @@ export async function cloudFlow<T>(flow: FlowName, method: string, args: readonl
   let result: FlowResult<T>;
   if (kind === 'remote') result = await callCloudFlow<T>(flow, method, args, { ...options, env, principal });
   else {
-    try { result = await (await embeddedRuntime(env)).backend.callFlow(flow, method, args, undefined, principal) as FlowResult<T>; }
+    try { result = await (await embeddedRuntime(env)).backend.callFlow(flow, method, args, undefined, principal, options.betaIdentity) as FlowResult<T>; }
     catch (error) { return { ok: false, code: classified(error, 'CLOUD_RUNTIME_UNAVAILABLE') }; }
   }
   // BUILD-FLOFI-FLIGHT-001: a successful simulation is shown to the simulation observer (`simulation-observer.ts`), which cannot change it.
@@ -140,10 +142,12 @@ export async function cloudFlowMode(flow: FlowName, env: Env = process.env, tran
  * local caller must not preview through them (use `FLOFI_RUNTIME=embedded` with a database instead).
  */
 export async function cloudPreview<T>(flow: FlowName, args: readonly unknown[], options: { readonly env?: Env; readonly transport?: typeof fetch;
+  readonly betaIdentity?: BetaRequestIdentity | null;
   readonly purpose?: 'SIMULATION' | 'QUOTE'; readonly timeoutMs?: number; readonly maxAttempts?: number;
   /** P0 catalog reliability: the caller stopped waiting (e.g. the browser cancelled its quote): the API abandons the preview. */
   readonly signal?: AbortSignal } = {}): Promise<FlowResult<T> | null> {
   const env = options.env ?? process.env, kind = flowRuntimeKind(env);
+  options = { ...options, betaIdentity: options.betaIdentity ?? currentBetaIdentity() };
   const refusal = testNetworkPreviewRefusal(flow, { ...process.env, ...env });
   if (refusal) return { ok: false, code: refusal };
   if (kind === 'local') return null;
@@ -153,10 +157,10 @@ export async function cloudPreview<T>(flow: FlowName, args: readonly unknown[], 
   const stop = new AbortController();
   const signal = options.signal ? AbortSignal.any([stop.signal, options.signal]) : stop.signal;
   const read = async (): Promise<FlowResult<T>> => {
-    if (kind === 'remote') return previewCloudFlow<T>(flow, args, { env, ...options.transport ? { transport: options.transport } : {},
+    if (kind === 'remote') return previewCloudFlow<T>(flow, args, { env, betaIdentity: options.betaIdentity, ...options.transport ? { transport: options.transport } : {},
       ...options.purpose ? { purpose: options.purpose } : {}, ...options.timeoutMs === undefined ? {} : { timeoutMs: options.timeoutMs },
       ...options.maxAttempts === undefined ? {} : { maxAttempts: options.maxAttempts }, signal });
-    try { return await (await embeddedRuntime(env)).backend.previewFlow(flow, args, options.purpose, { signal,
+    try { return await (await embeddedRuntime(env)).backend.previewFlow(flow, args, options.purpose, { signal, betaIdentity: options.betaIdentity,
       ...options.timeoutMs === undefined ? {} : { deadlineMs: options.timeoutMs } }) as FlowResult<T>; }
     catch (error) { return { ok: false, code: classified(error, 'CLOUD_RUNTIME_UNAVAILABLE') }; }
   };

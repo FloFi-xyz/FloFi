@@ -27,19 +27,18 @@ export function Flaps({ text, cells, big = false, hi = false, label }: { text: s
 }
 
 /**
- * BUILD-FLOFI-FLIGHT-LAUNCH-001: what a card face shows, from a stored pass, a public card or a creator's TEST card (never stored, seat "TEST").
+ * BUILD-FLOFI-FLIGHT-LAUNCH-001: what a card face shows, from a stored pass or a public card.
  * The approved card (Founding, two or four steps); a passenger's card shows its seat (214E) in the same layout.
  */
-export type CardFace = { readonly handle: string | null; readonly route: FlightRoute; readonly seat: string; readonly founding: boolean; readonly departedAt: string;
-  readonly test?: boolean };
+export type CardFace = { readonly handle: string | null; readonly route: FlightRoute; readonly seat: string; readonly founding: boolean; readonly departedAt: string };
 export const faceOf = (pass: FlightPass): CardFace => ({ handle: pass.handle, route: pass.route, seat: pass.seat, founding: pass.foundingSeat !== null, departedAt: pass.departedAt });
 
 export function FoundingPass({ pass, copy, titleId = 'pass-title' }: { pass: CardFace; copy: FlightCopy; titleId?: string }) {
   const t = copy.pass, { shown, more } = visibleSteps(pass.route);
-  const seat = pass.test ? t.test : pass.founding ? `${t.foundingMember} ${pass.seat}` : pass.seat;
+  const seat = pass.founding ? `${t.foundingMember} ${pass.seat}` : pass.seat;
   return <div className={styles.passStage} aria-labelledby={titleId}>
-    <span className={`${styles.sticker} ${styles.passSticker}`} aria-hidden="true">{pass.test ? t.test : copy.boarding.sticker}</span>
-    <p className={`${styles.lbl} ${styles.passEyebrow}`} id={titleId}>{pass.test ? `${t.flight} · ${t.test}` : pass.founding ? t.eyebrowFounding : `${t.flight} · ${t.passenger}`}</p>
+    <span className={`${styles.sticker} ${styles.passSticker}`} aria-hidden="true">{copy.boarding.sticker}</span>
+    <p className={`${styles.lbl} ${styles.passEyebrow}`} id={titleId}>{pass.founding ? t.eyebrowFounding : `${t.flight} · ${t.passenger}`}</p>
     <div className={styles.passWrap}>
       <article className={styles.card} aria-label={`${t.boardingPass}: ${pass.route.from} → ${pass.route.to}, ${seat}`}>
         <div className={styles.cardMain}>
@@ -67,13 +66,13 @@ export function FoundingPass({ pass, copy, titleId = 'pass-title' }: { pass: Car
         </div>
         <div className={styles.stub} aria-hidden="true">
           <img src="/brand/flight/flofi-logo.svg" alt=""/>
-          <span className={styles.stamp}>{pass.test ? t.test : t.checked}</span>
+          <span className={styles.stamp}>{t.checked}</span>
           <span className={styles.barcode}/>
           <span className={styles.stubUrl}>flofi.xyz</span>
         </div>
       </article>
     </div>
-    {pass.founding && !pass.test && <img className={styles.seal} src="/brand/flight/seal-founding.svg" alt=""/>}
+    {pass.founding && <img className={styles.seal} src="/brand/flight/seal-founding.svg" alt=""/>}
     <img className={styles.passGota} src="/brand/flight/gota-card.svg" alt=""/>
   </div>;
 }

@@ -24,14 +24,13 @@ export async function recordFlightSimulation(call: SimulationCall, env: Env = pr
     const now = await flightNow(env);
     // A refused calendar (null) means the campaign is unavailable: nothing is recorded.
     const calendar = flightCalendar(env);
-    // Before boarding only an invited creator's test flight records anything (its TEST card); afterwards, every eligible boarder.
-    if (!calendar || (flightPhase(now, calendar) !== 'BOARDING' && now < calendar.creatorsOpenAt)) return;
+    if (!calendar || flightPhase(now, calendar) !== 'BOARDING') return;
     const person = await flightPerson(env);
     if (!person) return report('no_session', record.flow);
     const store = await flightStore(env);
     if (!store) return report('unavailable', record.flow);
     const state = await store.account({ ...person, now });
-    if (state.access.kind !== 'eligible' && state.access.kind !== 'test_flight') return report('not_eligible', record.flow);
+    if (state.access.kind !== 'eligible') return report('not_eligible', record.flow);
     await store.recordSimulation({ accountId: person.accountId, ...record, now });
     report('recorded', record.flow);
   } catch { report('failed', record.flow); /* A campaign record never affects the person's simulation. */ }

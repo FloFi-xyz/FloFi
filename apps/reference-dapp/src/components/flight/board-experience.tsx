@@ -8,14 +8,14 @@
  *
  * BUILD-FLOFI-FLIGHT-LAUNCH-001: no count of people anywhere (CLOSED BETA · OPENING IN GROUPS, PASSENGER SEATS OPEN); FINAL CALL marquee
  * until boarding; "I have an invite code" in every state; a person on the list with another email gets a link and a code by email and can
- * type the code here (another device); a creator's test flight shows a TEST card; the card flow: handle (optional), card, share, public page.
+ * type the code here (another device); the card flow: handle (optional), card, share, public page.
  */
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import Link from 'next/link';
 import { FLIGHT_BOARDING_KEY, FLIGHT_DRAFT_KEY, FLIGHT_RETURN_KEY } from '../../flight/app-boarding';
 import type { FlightState } from '../../flight/http';
 import type { FlightAccess } from '../../flight/campaign';
-import type { FlightPass, OwnInvite, TestPass } from '../../flight/store';
+import type { FlightPass, OwnInvite } from '../../flight/store';
 import { faceOf, Flaps, FoundingPass, PassengerPass } from './boarding-pass';
 import { boardingDay, brtClock as clockOf, FLIGHT_COPY, type FlightCopy } from './flight-copy';
 import styles from './flight.module.css';
@@ -101,10 +101,12 @@ function ListForm({ copy, language, flight, onJoined }: { copy: FlightCopy; lang
   </>;
 }
 
-function InviteForm({ copy, onRedeemed }: { copy: FlightCopy; onRedeemed: (flight: unknown) => void }) {
+function InviteForm({ copy, now, opensAt, onRedeemed }: { copy: FlightCopy; now: number; opensAt: number; onRedeemed: (flight: unknown) => void }) {
   const t = copy.inviteForm, [code, setCode] = useState(''), [busy, setBusy] = useState(false), [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null);
   async function submit(event: FormEvent) {
     event.preventDefault();
+    // Server calendar also controls the UI; the API independently enforces this before consuming a code.
+    if (now < opensAt) { setMessage({ ok: false, text: copy.errors.INVITE_NOT_YET }); return; }
     setBusy(true);
     const answer = await post('/api/board/invite', { code });
     setBusy(false);
@@ -253,21 +255,6 @@ function PassPanel({ pass, invites, copy, onPass }: { pass: FlightPass; invites:
   </>;
 }
 
-/** A creator's test flight card: marked TEST, never stored, numbered or shared (the official card comes when boarding opens). */
-function TestPanel({ pass, copy, boardsOn }: { pass: TestPass; copy: FlightCopy; boardsOn: string }) {
-  const t = copy.pass;
-  return <>
-    <section id="pass" tabIndex={-1} aria-label={t.yours}>
-      <FoundingPass pass={{ handle: null, route: pass.route, seat: t.test, founding: false, departedAt: pass.departedAt, test: true }} copy={copy}/>
-    </section>
-    <div className={styles.passControls}><section aria-labelledby="test-title">
-      <h2 id="test-title">{t.testTitle[0]}<span className={styles.accentBlue}>{t.testTitle[1]}</span></h2>
-      <p className={styles.muted}>{t.testBody(boardsOn)}</p>
-      <div className={styles.ctaRow}><Link className={`${styles.btn} ${styles.btnBlue}`} href="/app">{t.open}</Link></div>
-    </section></div>
-  </>;
-}
-
 export function BoardExperience({ initial, language }: { initial: FlightState | null; language: Language }) {
   const copy = FLIGHT_COPY[language];
   const [state, setState] = useState(initial);
@@ -334,7 +321,7 @@ export function BoardExperience({ initial, language }: { initial: FlightState | 
     if (!answer.ok) { setMessage(errorText(copy, answer.code)); return; }
     const flight = answer.flight as { access: FlightAccess };
     if (answer.access) setMessage(errorText(copy, `ACCESS_${String(answer.access)}`));
-    if (flight.access.kind === 'eligible' || flight.access.kind === 'test_flight') goToApp();
+    if (flight.access.kind === 'eligible') goToApp();
     else if (flight.access.kind === 'boarded') { await refresh(); setFocusPass(true); }
     else setPersonal(flight.access);
   }, [copy, goToApp, refresh]);
@@ -363,7 +350,6 @@ export function BoardExperience({ initial, language }: { initial: FlightState | 
   const full = state !== null && !state.foundingOpen;
   // Nobody boards before boarding opens: the marquee says FINAL CALL until then ("Na última chamada a faixa rolante diz FINAL CALL").
   const marquee = useMemo(() => Array.from({ length: 6 }, () => phase === 'BOARDING' ? copy.marquee : copy.marqueeFinal), [copy, phase]);
-  const testPass = state?.me.flight?.testPass ?? null;
   const inviteLink = !pass && <p className={styles.small}><button type="button" className={styles.linkButton} onClick={() => setShowInvite(value => !value)}>{copy.boarding.invite}</button></p>;
 
   let hero: ReactNode;
@@ -383,7 +369,7 @@ export function BoardExperience({ initial, language }: { initial: FlightState | 
         <a className={`${styles.btn} ${styles.btnBlue}`} download="flight-flofi.ics" href={`data:text/calendar;charset=utf-8,${encodeURIComponent(calendarFile(personal.opensAt, language))}`}>{t.calendar}</a>
       </div>
       <p className={styles.small}>{t.invite} <button type="button" className={styles.linkButton} onClick={() => setShowInvite(true)}>{t.useIt}</button></p>
-      {showInvite && <InviteForm key="invite" copy={copy} onRedeemed={() => { setPersonal(null); void refresh(); }}/>}
+      {showInvite && <InviteForm key="invite" copy={copy} now={state.now} opensAt={state.boardingOpensAt} onRedeemed={() => { setPersonal(null); void refresh(); }}/>}
     </div>;
   } else if (personal?.kind === 'not_listed') {
     const t = copy.notListed;
@@ -409,7 +395,7 @@ export function BoardExperience({ initial, language }: { initial: FlightState | 
       </>}
       <p className={styles.notice}><ListNotice copy={copy} language={language}/></p>
       <p className={styles.small}>{copy.batch.invite} <button type="button" className={styles.linkButton} onClick={() => setShowInvite(true)}>{copy.batch.useIt}</button></p>
-      {showInvite && <InviteForm key="invite" copy={copy} onRedeemed={() => { setPersonal(null); void refresh(); }}/>}
+      {showInvite && <InviteForm key="invite" copy={copy} now={state.now} opensAt={state.boardingOpensAt} onRedeemed={() => { setPersonal(null); void refresh(); }}/>}
       {message && <p className={styles.error} role="alert">{message}</p>}
     </div>;
   } else if (phase === 'FINAL_CALL' || phase === 'GATE_CLOSED') {
@@ -426,11 +412,8 @@ export function BoardExperience({ initial, language }: { initial: FlightState | 
       <div className={styles.metaRow}>
         <span className={styles.notice}><ListNotice copy={copy} language={language}/></span>
       </div>
-      {/* An invited creator's test flight (11 Nov, 14:00–18:00 BRT): simulate in FloFi and see a TEST card. */}
-      {state.me.flight?.access.kind === 'test_flight' && <div className={styles.ctaRow}>
-        <button type="button" className={`${styles.btn} ${styles.btnNavy}`} onClick={goToApp}>{copy.boarding.board} <span aria-hidden="true">→</span></button></div>}
       {inviteLink}
-      {showInvite && !pass && <InviteForm key="invite" copy={copy} onRedeemed={() => void refresh()}/>}
+      {showInvite && !pass && <InviteForm key="invite" copy={copy} now={state.now} opensAt={state.boardingOpensAt} onRedeemed={() => void refresh()}/>}
     </div>;
   } else {
     const t = copy.boarding;
@@ -451,7 +434,7 @@ export function BoardExperience({ initial, language }: { initial: FlightState | 
         <span className={styles.meta}>{full ? copy.passengerSeats : copy.closedBeta}</span>
         {!pass && <><span className={styles.dot} aria-hidden="true"/><button type="button" className={styles.linkButton} onClick={() => setShowInvite(value => !value)}>{t.invite}</button></>}
       </div>
-      {showInvite && !pass && <InviteForm key="invite" copy={copy} onRedeemed={() => void refresh()}/>}
+      {showInvite && !pass && <InviteForm key="invite" copy={copy} now={state.now} opensAt={state.boardingOpensAt} onRedeemed={() => void refresh()}/>}
       {/* On the list with another email, or on another device: a link and a code by email, or the code typed here (signed in or not). */}
       {!pass && !accessNotice && <p className={styles.small}><button type="button" className={styles.linkButton} aria-expanded={showAccess}
         onClick={() => setShowAccess(value => !value)}>{copy.access.otherEmail}</button></p>}
@@ -480,7 +463,6 @@ export function BoardExperience({ initial, language }: { initial: FlightState | 
     </section>
     {pass && <PassPanel pass={pass} invites={state?.me.flight?.invites ?? []} copy={copy}
       onPass={next => setState(s => s && s.me.flight ? { ...s, me: { ...s.me, flight: { ...s.me.flight, pass: next } } } : s)}/>}
-    {!pass && testPass && state && <TestPanel pass={testPass} copy={copy} boardsOn={`${boardingDay(state.boardingOpensAt, language)}, ${clockOf(state.boardingOpensAt)} BRT`}/>}
     {state && state.phase === 'BOARDING' && state.departures.length > 0 && <section className={styles.departures} aria-labelledby="departures-title">
       <div className={styles.departuresHead}>
         <div className={styles.sectionHead}>

@@ -3,7 +3,7 @@
  * BUILD-FLOFI-FLIGHT-001: the /board copy. English is the team-approved Claude Artifact "Flight FloFi" (version 1793892357-f7d9), word for
  * word: the "Landing" boards (desktop, final call, five mobile states), the cards and the approved post "Gate closed. Boarding starts
  * tomorrow." for the night between the list closing and boarding. The boards are English only; the Portuguese is a translation for the
- * page's EN · PT switch (to be confirmed by the team). Numbers on the page are always real; the boards' sample numbers are not used.
+ * page's shared language menu. Numbers on the page are always real; the boards' sample numbers are not used.
  *
  * BUILD-FLOFI-FLIGHT-LAUNCH-001 (artifact version 1794236006-f919): no public count of people anywhere ("CLOSED BETA · OPENING IN GROUPS",
  * "PASSENGER SEATS OPEN" in place of the counters, the "FOUNDING FULL" banner without a number, no "N OF 100" bar); the marquee says FINAL
@@ -37,7 +37,7 @@ const EN = {
     sticker: 'NOW BOARDING', checking: 'Checking your boarding…', signIn: 'Sign in to board',
   },
   access: {
-    otherEmail: 'On the list with another email?', otherEmailAction: 'Get a link and a code', emailLabel: 'Your beta-list email', send: 'Send me a link and a code',
+    otherEmail: 'Prove your beta-list access', otherEmailAction: 'Get a link and a code', emailLabel: 'Your beta-list email', send: 'Send me a link and a code',
     sent: 'If this email is on the beta list and its group is boarding, a link and a 6-digit code are on their way. The code works for 15 minutes.',
     codeLabel: '6-digit code', codeUse: 'Use code', codeHint: 'Got the email on another device? Enter the email and its 6-digit code here.',
     claimed: 'Your boarding is confirmed. Press Board now.', eyebrow: 'Flight FloFi · Now boarding', pendingSignIn: 'Your email is confirmed for boarding. Sign in with your wallet or email to continue.',
@@ -85,16 +85,15 @@ const EN = {
     whoTitle: 'Who’s flying?', whoEyebrow: 'Simulation done · printing your card', whoBody: 'Add your X handle to print it on your boarding card. Optional.',
     print: 'Print my card', skip: 'Skip, print without a handle', ready: 'Your boarding card', download: 'Download card', copy: 'Copy link', copied: 'Link copied.',
     invitesReady: (n: number) => `${n} ${n === 1 ? 'invite' : 'invites'} ready`, emailed: 'We also emailed you this card.', handleNote: 'Your handle is typed by you, not verified, and shown on your public card.',
-    test: 'TEST', testTitle: ['Test flight. ', 'Your card is a test.'], testBody: (day: string) => `This card is marked TEST and is not kept. Your official card comes out when boarding opens, ${day}.`,
   },
   card: { boarded: (who: string) => [`${who} boarded `, 'Flight FloFi.'], someone: 'A passenger', body: 'Say where your crypto should go. FloFi builds the route and simulates it. You approve every step.',
     boardToo: 'Board too', closed: 'Closed beta, opening in groups.', handle: 'Handle typed by the passenger, not verified.', missing: 'This boarding card is not available.',
     title: (who: string) => `${who} boarded Flight FloFi`, alt: (route: string, meta: string) => `Flight FloFi boarding card: ${route}, ${meta}, you approve` },
-  footer: { nav: 'Footer navigation', privacy: 'Privacy', risks: 'Risks', discord: 'Discord', x: 'X',
+  footer: { nav: 'Footer navigation', terms: 'Terms', privacy: 'Privacy', risks: 'Risks', discord: 'Discord', x: 'X',
     risk: 'DeFi involves risk. A simulation does not guarantee price or outcome. Review every step before you sign. FloFi never holds your keys or your funds.' },
   errors: { FLIGHT_EMAIL_INVALID: 'Enter a valid email address.', FLIGHT_RATE_LIMITED: 'Too many tries from here. Try again in an hour.',
     FLIGHT_BUSY: 'The list is busy. Try again in a minute.', FLIGHT_UNAVAILABLE: 'The list is not available right now. Try again soon.',
-    INVITE_INVALID: 'That invite code does not exist.', INVITE_USED: 'That invite code was already used.', INVITE_OWN: 'You can’t use your own invite.',
+    INVITE_NOT_YET: 'Your code opens Thursday at 9:00 BRT', INVITE_IDENTITY_MISMATCH: 'Sign in with the account invited to this flight.', INVITE_INVALID: 'That invite code does not exist.', INVITE_USED: 'That invite code was already used.', INVITE_OWN: 'You can’t use your own invite.',
     INVITE_ALREADY_HELD: 'You already have an invite.', ALREADY_BOARDED: 'You’re already on board.', FLIGHT_HANDLE_INVALID: 'Use up to 15 letters, digits or underscores.',
     FLIGHT_SIGN_IN_REQUIRED: 'Sign in first.', generic: 'Something went wrong. Try again.',
     ACCESS_INVALID: 'That link or code is not valid. Ask for a new one.', ACCESS_EXPIRED: 'That link has expired. Ask for a new one below.',
@@ -131,7 +130,7 @@ const PT: Copy = {
     sticker: 'EMBARQUE ABERTO', checking: 'Conferindo seu embarque…', signIn: 'Entre para embarcar',
   },
   access: {
-    otherEmail: 'Está na lista com outro e-mail?', otherEmailAction: 'Receber um link e um código', emailLabel: 'Seu e-mail da lista beta', send: 'Enviar link e código',
+    otherEmail: 'Comprove seu acesso pela lista beta', otherEmailAction: 'Receber um link e um código', emailLabel: 'Seu e-mail da lista beta', send: 'Enviar link e código',
     sent: 'Se este e-mail estiver na lista beta e o grupo dele estiver embarcando, um link e um código de 6 dígitos estão a caminho. O código vale por 15 minutos.',
     codeLabel: 'Código de 6 dígitos', codeUse: 'Usar código', codeHint: 'Recebeu o e-mail em outro aparelho? Digite aqui o e-mail e o código de 6 dígitos.',
     claimed: 'Seu embarque está confirmado. Toque em Embarcar agora.', eyebrow: 'Flight FloFi · Embarque aberto', pendingSignIn: 'Seu e-mail está confirmado para o embarque. Entre com sua carteira ou e-mail para continuar.',
@@ -179,16 +178,15 @@ const PT: Copy = {
     whoTitle: 'Quem está voando?', whoEyebrow: 'Simulação feita · imprimindo seu cartão', whoBody: 'Adicione seu @ do X para imprimir no seu cartão de embarque. Opcional.',
     print: 'Imprimir meu cartão', skip: 'Pular, imprimir sem @', ready: 'Seu cartão de embarque', download: 'Baixar cartão', copy: 'Copiar link', copied: 'Link copiado.',
     invitesReady: (n: number) => `${n} ${n === 1 ? 'convite pronto' : 'convites prontos'}`, emailed: 'Também enviamos este cartão por e-mail.', handleNote: 'O @ é digitado por você, não é verificado e aparece no seu cartão público.',
-    test: 'TEST', testTitle: ['Voo de teste. ', 'Seu cartão é um teste.'], testBody: (day: string) => `Este cartão está marcado TEST e não é guardado. Seu cartão oficial sai quando o embarque abrir, ${day}.`,
   },
   card: { boarded: (who: string) => [`${who} embarcou no `, 'Flight FloFi.'], someone: 'Um passageiro', body: 'Diga para onde suas criptos devem ir. A FloFi monta a rota e simula. Você aprova cada passo.',
     boardToo: 'Embarcar também', closed: 'Beta fechado, abrindo em grupos.', handle: '@ digitado pelo passageiro, não verificado.', missing: 'Este cartão de embarque não está disponível.',
     title: (who: string) => `${who} embarcou no Flight FloFi`, alt: (route: string, meta: string) => `Cartão de embarque do Flight FloFi: ${route}, ${meta}, você aprova` },
-  footer: { nav: 'Navegação do rodapé', privacy: 'Privacidade', risks: 'Riscos', discord: 'Discord', x: 'X',
+  footer: { nav: 'Navegação do rodapé', terms: 'Termos', privacy: 'Privacidade', risks: 'Riscos', discord: 'Discord', x: 'X',
     risk: 'DeFi envolve riscos. Uma simulação não garante preço nem resultado. Revise cada passo antes de assinar. A FloFi nunca guarda suas chaves nem seus fundos.' },
   errors: { FLIGHT_EMAIL_INVALID: 'Digite um e-mail válido.', FLIGHT_RATE_LIMITED: 'Muitas tentativas daqui. Tente de novo em uma hora.',
     FLIGHT_BUSY: 'A lista está movimentada. Tente de novo em um minuto.', FLIGHT_UNAVAILABLE: 'A lista não está disponível agora. Tente de novo em breve.',
-    INVITE_INVALID: 'Esse código de convite não existe.', INVITE_USED: 'Esse código de convite já foi usado.', INVITE_OWN: 'Você não pode usar seu próprio convite.',
+    INVITE_NOT_YET: 'Seu código abre na quinta-feira, às 9h (horário de Brasília).', INVITE_IDENTITY_MISMATCH: 'Entre com a conta convidada para este voo.', INVITE_INVALID: 'Esse código de convite não existe.', INVITE_USED: 'Esse código de convite já foi usado.', INVITE_OWN: 'Você não pode usar seu próprio convite.',
     INVITE_ALREADY_HELD: 'Você já tem um convite.', ALREADY_BOARDED: 'Você já está a bordo.', FLIGHT_HANDLE_INVALID: 'Use até 15 letras, números ou sublinhados.',
     FLIGHT_SIGN_IN_REQUIRED: 'Entre primeiro.', generic: 'Algo deu errado. Tente de novo.',
     ACCESS_INVALID: 'Esse link ou código não é válido. Peça um novo.', ACCESS_EXPIRED: 'Esse link expirou. Peça um novo abaixo.',

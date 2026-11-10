@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 'use server';
+import { withFlightAccess } from '../server/flight-access';
 import { isAbsolute } from 'node:path';
 import type { SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
 import { createBridgeService } from '../server/bridge-service';
@@ -28,26 +29,59 @@ async function run<T>(work: (service: Service) => Promise<T>): Promise<Result<T>
   catch (cause) { return { ok: false, code: code(cause) }; }
 }
 export async function bridgeInfo() {
+  return withFlightAccess(async () => {
   return run(async service => ({ enabled: true as const, environment: 'MOCKED' as const, executions: await service.list() }));
+
+  });
 }
 export async function bridgeQuote(input: { workflow: SemanticWorkflow; owner: string; scenario: 'normal' | 'uncertain' }) {
+  return withFlightAccess(async () => {
   return run(service => {
     if (!['normal', 'uncertain'].includes(input.scenario) || typeof input.owner !== 'string'
       || !/^0x[0-9a-fA-F]{40}$/.test(input.owner)) throw new Error('BRIDGE_INPUT_INVALID');
     return service.quote(input.workflow, input.owner, input.scenario);
   });
+
+  });
 }
-export async function bridgeLoad(executionId: string) { return run(service => service.load(id(executionId))); }
+export async function bridgeLoad(executionId: string) {
+  return withFlightAccess(async () => { return run(service => service.load(id(executionId))); 
+  });
+}
 export async function bridgeAuthorize(executionId: string, manifestHash: string) {
+  return withFlightAccess(async () => {
   return run(service => {
     if (!/^0x[0-9a-f]{64}$/.test(manifestHash)) throw new Error('BRIDGE_INPUT_INVALID');
     return service.authorize(id(executionId), manifestHash);
   });
+
+  });
 }
-export async function bridgeApprove(executionId: string) { return run(service => service.approve(id(executionId))); }
-export async function bridgeSubmit(executionId: string) { return run(service => service.submit(id(executionId))); }
-export async function bridgeRecheck(executionId: string) { return run(service => service.recheck(id(executionId))); }
-export async function bridgeConfirmSource(executionId: string) { return run(service => service.confirmSource(id(executionId))); }
-export async function bridgeProgress(executionId: string) { return run(service => service.progress(id(executionId))); }
-export async function bridgeConfirmDestination(executionId: string) { return run(service => service.confirmDestination(id(executionId))); }
-export async function bridgeReconcile(executionId: string) { return run(service => service.reconcile(id(executionId))); }
+export async function bridgeApprove(executionId: string) {
+  return withFlightAccess(async () => { return run(service => service.approve(id(executionId))); 
+  });
+}
+export async function bridgeSubmit(executionId: string) {
+  return withFlightAccess(async () => { return run(service => service.submit(id(executionId))); 
+  });
+}
+export async function bridgeRecheck(executionId: string) {
+  return withFlightAccess(async () => { return run(service => service.recheck(id(executionId))); 
+  });
+}
+export async function bridgeConfirmSource(executionId: string) {
+  return withFlightAccess(async () => { return run(service => service.confirmSource(id(executionId))); 
+  });
+}
+export async function bridgeProgress(executionId: string) {
+  return withFlightAccess(async () => { return run(service => service.progress(id(executionId))); 
+  });
+}
+export async function bridgeConfirmDestination(executionId: string) {
+  return withFlightAccess(async () => { return run(service => service.confirmDestination(id(executionId))); 
+  });
+}
+export async function bridgeReconcile(executionId: string) {
+  return withFlightAccess(async () => { return run(service => service.reconcile(id(executionId))); 
+  });
+}

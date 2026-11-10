@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 'use server';
+import { withFlightAccess } from '../server/flight-access';
 import { isAbsolute, join } from 'node:path';
 import type { SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
 import { createCowService, discoverCow, type CowScenario } from '../server/cow-service';
@@ -36,32 +37,53 @@ async function run<T>(work: (service: Service) => Promise<T>): Promise<Result<T>
   catch (cause) { return { ok: false, code: code(cause) }; }
 }
 export async function cowInfo(input: { workflow: SemanticWorkflow }) {
+  return withFlightAccess(async () => {
   try {
     const service = runtime();
     if (!service) return { ok: true as const, value: { enabled: false as const, discovery: null, executions: [] } };
     return { ok: true as const, value: { enabled: true as const, discovery: discoverCow(input.workflow),
       executions: await service.list() } };
   } catch (cause) { return { ok: false as const, code: code(cause) }; }
+
+  });
 }
 export async function cowPrepare(input: { workflow: SemanticWorkflow; owner: string; scenario: CowScenario }) {
+  return withFlightAccess(async () => {
   return run(service => {
     if (!OWNER.test(input.owner) || !['fill', 'hold', 'ambiguous', 'expire', 'failure'].includes(input.scenario))
       throw new Error('COW_INPUT_INVALID');
     return service.prepare(input.workflow, input.owner, input.scenario);
   });
+
+  });
 }
 export async function cowExecution(input: { executionId: string }) {
+  return withFlightAccess(async () => {
   return run(service => service.status(id(input.executionId)));
+
+  });
 }
 export async function cowPost(input: { executionId: string; signature: string }) {
+  return withFlightAccess(async () => {
   return run(service => service.signAndPost(id(input.executionId), signature(input.signature)));
+
+  });
 }
 export async function cowTrack(input: { executionId: string }) {
+  return withFlightAccess(async () => {
   return run(service => service.track(id(input.executionId)));
+
+  });
 }
 export async function cowCancel(input: { executionId: string; signature: string }) {
+  return withFlightAccess(async () => {
   return run(service => service.cancel(id(input.executionId), signature(input.signature)));
+
+  });
 }
 export async function cowReconcile(input: { executionId: string }) {
+  return withFlightAccess(async () => {
   return run(service => service.reconcile(id(input.executionId)));
+
+  });
 }

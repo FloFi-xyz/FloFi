@@ -21,7 +21,7 @@ export const FLIGHT_EMAIL_FROM = 'FloFi <hello@flofi.xyz>';
 export const FLIGHT_EMAIL_REPLY_TO = 'flofi.xyz@gmail.com';
 export const FLIGHT_EMAIL_DOMAIN = 'flofi.xyz';
 /** The creator brief linked from Email 6 (the artifact's "Open the creator brief"). */
-export const FLIGHT_CREATOR_BRIEF_URL = 'https://claude.ai/artifact/Ed64YTYtYmUWVgnT8NEZD5';
+export const FLIGHT_CREATOR_BRIEF_URL = 'https://cooked-goat-9ec.notion.site/Flight-FloFi-Brief-do-criador-4147b5d0a5fd81afb15ffdeb090a6450';
 const DOMAIN_CHECK_MS = 10 * 60_000;
 
 export type DeliveryDeps = {
@@ -66,12 +66,17 @@ export function createEmailDelivery(deps: DeliveryDeps) {
 
   /** The email as it should be sent now, or why it must not be sent any more. */
   async function render(row: EmailRow, at: number): Promise<Rendered> {
+    if (row.template === 'CREATOR_INVITE' && row.templateVersion !== 2) throw new Error('TEMPLATE_VERSION_REVIEW');
     if (row.category === 'CAMPAIGN' && await deps.outbox.isSuppressed(addressHash(row.recipient))) return { kind: 'CANCEL', code: 'UNSUBSCRIBED' };
     let input: TemplateInput, attachments: OutgoingEmail['attachments'];
     switch (row.template) {
-      case 'LIST_CONFIRMATION': case 'EVE': case 'NEXT_FLIGHT': {
+      case 'EARLY_LIST': case 'LIST_CONFIRMATION': case 'EVE': case 'NEXT_FLIGHT': {
         const entry = await entryOf(row.entryId);
         if (!entry) return { kind: 'CANCEL', code: 'ENTRY_GONE' };
+        if (row.template === 'EARLY_LIST') {
+          const source = (await deps.db.query<{ campaign_consent: boolean }>('SELECT campaign_consent FROM flight_early_list_imports WHERE tenant_id = $1 AND entry_id = $2', [deps.tenantId, row.entryId])).rows[0];
+          if (!source?.campaign_consent || entry.flight !== 'FIRST') return { kind: 'CANCEL', code: 'NOT_ELIGIBLE' };
+        }
         if (row.template === 'EVE' && entry.boarded_at) return { kind: 'CANCEL', code: 'BOARDED' };
         input = { template: row.template };
         break;
@@ -146,7 +151,7 @@ export function createEmailDelivery(deps: DeliveryDeps) {
       try { rendered = await render(row, at); }
       catch (error) {
         deps.logger.warn('flight.email.render_failed', { template: row.template, error_code: error instanceof Error ? error.message.slice(0, 60) : 'UNKNOWN' });
-        await deps.outbox.settle(row, { kind: 'HELD', code: 'RENDER_FAILED' }, at); report.held++; continue;
+        await deps.outbox.settle(row, { kind: 'HELD', code: error instanceof Error && error.message === 'TEMPLATE_VERSION_REVIEW' ? 'TEMPLATE_VERSION_REVIEW' : 'RENDER_FAILED' }, at); report.held++; continue;
       }
       if (rendered.kind === 'CANCEL') { await deps.outbox.settle(row, { kind: 'CANCELLED', code: rendered.code }, at); report.cancelled++; continue; }
       if (index > 0) await sleep(Math.ceil(1000 / perSecond));

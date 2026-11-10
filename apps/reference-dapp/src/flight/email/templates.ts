@@ -13,20 +13,20 @@
  */
 import type { FlightCalendar } from '../campaign.ts';
 
-export type EmailTemplate = 'LIST_CONFIRMATION' | 'EVE' | 'GROUP_BOARDING' | 'ACCESS_REQUESTED' | 'CARD_FOUNDING' | 'CARD_PASSENGER' | 'NEXT_FLIGHT' | 'CREATOR_INVITE';
+export type EmailTemplate = 'EARLY_LIST' | 'LIST_CONFIRMATION' | 'EVE' | 'GROUP_BOARDING' | 'ACCESS_REQUESTED' | 'CARD_FOUNDING' | 'CARD_PASSENGER' | 'NEXT_FLIGHT' | 'CREATOR_INVITE';
 export type EmailLanguage = 'EN' | 'PT';
 /** The version of each template. Bump it whenever its text or layout changes; every outbox row records the version it was enqueued with. */
 export const TEMPLATE_VERSIONS: Readonly<Record<EmailTemplate, number>> = Object.freeze({
-  LIST_CONFIRMATION: 1, EVE: 1, GROUP_BOARDING: 1, ACCESS_REQUESTED: 1, CARD_FOUNDING: 1, CARD_PASSENGER: 1, NEXT_FLIGHT: 1, CREATOR_INVITE: 1,
+  EARLY_LIST: 1, LIST_CONFIRMATION: 1, EVE: 1, GROUP_BOARDING: 1, ACCESS_REQUESTED: 1, CARD_FOUNDING: 1, CARD_PASSENGER: 1, NEXT_FLIGHT: 1, CREATOR_INVITE: 2,
 });
 /** ESSENTIAL: an access email the person asked for themselves; sent even to an unsubscribed address and while campaign email is paused. */
 export const TEMPLATE_CATEGORY: Readonly<Record<EmailTemplate, 'CAMPAIGN' | 'ESSENTIAL'>> = Object.freeze({
-  LIST_CONFIRMATION: 'CAMPAIGN', EVE: 'CAMPAIGN', GROUP_BOARDING: 'CAMPAIGN', ACCESS_REQUESTED: 'ESSENTIAL', CARD_FOUNDING: 'CAMPAIGN',
+  EARLY_LIST: 'CAMPAIGN', LIST_CONFIRMATION: 'CAMPAIGN', EVE: 'CAMPAIGN', GROUP_BOARDING: 'CAMPAIGN', ACCESS_REQUESTED: 'ESSENTIAL', CARD_FOUNDING: 'CAMPAIGN',
   CARD_PASSENGER: 'CAMPAIGN', NEXT_FLIGHT: 'CAMPAIGN', CREATOR_INVITE: 'CAMPAIGN',
 });
 /** Which approved email each template is (the artifact's numbering). */
 export const TEMPLATE_NUMBER: Readonly<Record<EmailTemplate, string>> = Object.freeze({
-  LIST_CONFIRMATION: '1', EVE: '2', GROUP_BOARDING: '3', ACCESS_REQUESTED: '3 (requested again)', CARD_FOUNDING: '4a', CARD_PASSENGER: '4b',
+  EARLY_LIST: '0', LIST_CONFIRMATION: '1', EVE: '2', GROUP_BOARDING: '3', ACCESS_REQUESTED: '3 (requested again)', CARD_FOUNDING: '4a', CARD_PASSENGER: '4b',
   NEXT_FLIGHT: '5', CREATOR_INVITE: '6',
 });
 /** Where the English differs from the approved artifact, and why (each needs the team's confirmation). */
@@ -35,7 +35,7 @@ export const TEMPLATE_DEVIATIONS: readonly string[] = Object.freeze([
   'Email 3: "This button signs you in with this email" becomes "This button confirms your boarding with this email": the link proves the address and opens the campaign; signing in stays FloFi\'s own login.',
   'Email 3: the 6-digit code is printed in the email for another device (the artifact sent it on request only); the request path still exists at flofi.xyz/board.',
   'Email 3: a "Group" line is added when the person has a numbered boarding group.',
-  'Email 6: "Simulation only: nothing is signed or sent" becomes "A simulation is all it takes: you don\'t need to sign or send anything": the product is not restricted for creators, so FloFi cannot promise nothing is signed.',
+  'Email 6: the card is issued after the first successful simulation, not after a financial transaction; signing is always optional and explicit.',
   'Emails 4a and 4b show the real card image (the 1200 × 630 card picture) in place of the drawn card block.',
 ]);
 
@@ -45,7 +45,7 @@ export type CardView = {
   readonly publicUrl: string; readonly imageUrl: string; readonly downloadUrl: string;
 };
 export type TemplateInput =
-  | { readonly template: 'LIST_CONFIRMATION' | 'EVE' | 'NEXT_FLIGHT' }
+  | { readonly template: 'EARLY_LIST' | 'LIST_CONFIRMATION' | 'EVE' | 'NEXT_FLIGHT' }
   | { readonly template: 'GROUP_BOARDING' | 'ACCESS_REQUESTED'; readonly accessUrl: string; readonly code: string; readonly codeMinutes: number;
       readonly linkHours: number; readonly foundingOpen: boolean; readonly group: number | null }
   | { readonly template: 'CARD_FOUNDING'; readonly card: CardView; readonly invites: readonly string[]; readonly invitesUrl: string }
@@ -177,6 +177,23 @@ export function renderEmail(input: TemplateInput, ctx: EmailContext): RenderedEm
   const boardsDay = longDay(cal.boardingOpensAt, ctx.language), boardsAt = clock(cal.boardingOpensAt, ctx.language);
   const reason = FOOTER[ctx.language];
   switch (input.template) {
+    case 'EARLY_LIST': {
+      const subject = PT ? 'Você chegou cedo. Seu lugar no Flight FloFi está guardado ✈️' : 'You were early. Your Flight FloFi seat is saved ✈️';
+      const preheader = PT ? 'Você se inscreveu antes de todo mundo. Veja o que acontece na quinta.' : "You signed up before anyone else. Here's what happens Thursday.";
+      const intro = PT ? 'Você se inscreveu no beta da FloFi antes de a lista ir para flofi.xyz/board. Não precisa fazer nada: você está na lista, na ordem em que se inscreveu.'
+        : "You signed up for the FloFi beta before the list moved to flofi.xyz/board. You don't need to do anything: you're on the list, in the order you signed up.";
+      const boards = PT ? `O embarque abre na <b>${e(boardsDay)}, às ${e(boardsAt)} (horário de Brasília)</b>, em grupos por ordem de inscrição. Avisamos por e-mail assim que o seu grupo embarcar.`
+        : `Boarding opens <b>${e(boardsDay)}, at ${e(boardsAt)} BRT</b>, in groups by signup order. We’ll email you the moment your group boards.`;
+      const ask = PT ? '<b>Para onde você iria primeiro?</b> Responda com a sua rota, do seu jeito.' : '<b>Where would you go first?</b> Reply with your route, in your own words.';
+      const example = PT ? '“levar meu USDC da Ethereum para a Base e emprestar na Aave”' : '“move my USDC from Ethereum to Base and lend it on Aave”';
+      const reasonEarly = PT ? 'Você recebeu este e-mail porque entrou na lista beta da FloFi pelo nosso formulário de inscrição.'
+        : "You're getting this because you joined the FloFi beta list through our signup form.";
+      const title = PT ? 'Você chegou cedo.<br>Seu lugar está guardado.' : 'You were early.<br>Your seat is saved.';
+      const body = h1(title) + p(e(intro)) + panel([label(PT ? 'Passageiro' : 'Passenger') + `<div style="font-family:${MONO};font-weight:500;font-size:16px;color:${C.navy}">${e(ctx.recipient)}</div>`,
+        label('Status') + flaps('ON THE LIST'), label(PT ? 'Embarque' : 'Boards') + flaps(flapDay(cal.boardingOpensAt))]) + p(boards) + p(ask) + mono(example);
+      return { subject, preheader, html: layout(ctx, { subject, preheader, band: 'Flight FloFi · Early list', pose: 'welcome', body, reason: reasonEarly }),
+        text: plain([subject, intro, `${PT ? 'Passageiro' : 'Passenger'}: ${ctx.recipient}`, 'Status: ON THE LIST', strip(boards), strip(ask), example], ctx, reasonEarly) };
+    }
     case 'LIST_CONFIRMATION': {
       const subject = PT ? 'Você está na lista beta da FloFi ✈️' : 'You’re on the FloFi beta list ✈️';
       const preheader = PT ? `Primeiro embarque: ${shortDay(cal.boardingOpensAt, 'PT')}, ${boardsAt} (Brasília).` : `First boarding: ${shortDay(cal.boardingOpensAt, 'EN')}, ${boardsAt} BRT.`;
@@ -274,24 +291,21 @@ export function renderEmail(input: TemplateInput, ctx: EmailContext): RenderedEm
     }
     case 'CREATOR_INVITE': {
       if (!/^FLF-[2-9A-HJ-NP-Z]{4}-[2-9A-HJ-NP-Z]{4}$/.test(input.code) || !/^https:\/\//.test(input.briefUrl)) throw new Error('EMAIL_TEMPLATE_INPUT_INVALID');
-      const testStart = cal.creatorsOpenAt, testEnd = Math.min(cal.creatorsOpenAt + 4 * 3_600_000, cal.boardingOpensAt);
-      const subject = PT ? 'Você foi convidado para o Flight FloFi ✈️' : 'You’re invited to Flight FloFi ✈️';
-      const preheader = PT ? 'Seu código de convite, um voo de teste e o plano para quinta.' : 'Your invite code, a test flight and the plan for Thursday.';
-      const intro = PT ? `A FloFi abre o beta fechado na <b>${e(boardsDay)}, às ${e(boardsAt)} (horário de Brasília)</b>. Antes disso você ganha um voo de teste, para conhecer o caminho quando o portão abrir.`
-        : `FloFi opens its closed beta on <b>${e(boardsDay)}, at ${e(boardsAt)} BRT</b>. Before that you get a test flight, so you know the way when the gate opens.`;
-      const window = `${flapDay(testStart, false)} ${clock(testStart, 'PT').replace('h', '')}-${clock(testEnd, 'PT')}`.toUpperCase();
+      const subject = PT ? 'Seu convite para o Flight FloFi ✈️' : 'You’re invited to Flight FloFi ✈️';
+      const preheader = PT ? 'Seu código de convite e o plano de quinta.' : 'Your invite code and the plan for Thursday.';
+      const intro = PT ? `A FloFi abre o beta fechado na <b>${e(boardsDay)}, às ${e(boardsAt)} (horário de Brasília)</b>.`
+        : `FloFi opens its closed beta on <b>${e(boardsDay)}, at ${e(boardsAt)} BRT</b>.`;
       const steps = PT ? [
-        `${e(longDay(testStart, 'PT'))}, das ${e(clock(testStart, 'PT'))} às ${e(clock(testEnd, 'PT'))} (Brasília): acesse flofi.xyz/board, toque em “Tenho um código de convite” e teste uma rota. Basta simular: você não precisa assinar nem enviar nada, e seu cartão sai marcado TEST.`,
-        `${e(longDay(cal.boardingOpensAt, 'PT'))}, a partir das ${e(boardsAt)}: embarque de verdade, com um valor pequeno. Isto é mainnet. Seu cartão oficial sai agora.`,
+        `${e(longDay(cal.boardingOpensAt, 'PT'))}, a partir das ${e(boardsAt)} (horário de Brasília): entre em flofi.xyz/board, toque em “Tenho um código de convite” e use seu código com a conta autenticada que comprova o e-mail deste convite.`,
+        'Monte uma rota com um valor pequeno, revise cada passo e assine só o que aprovar. É mainnet. O seu cartão de embarque sai depois da primeira simulação bem-sucedida; você não precisa executar uma transação para emitir o cartão.',
         `Entre ${e(boardsAt)} e ${e(clock(cal.boardingOpensAt + 3_600_000, 'PT'))}, poste seu cartão no X citando o post de lançamento do @FloFi_xyz.`]
-        : [`${e(longDay(testStart, 'EN').split(',')[0]!)}, ${e(clock(testStart, 'EN'))} to ${e(clock(testEnd, 'EN'))} BRT: go to flofi.xyz/board, tap “I have an invite code” and try a route. A simulation is all it takes: you don’t need to sign or send anything, and your card comes out marked TEST.`,
-          `${e(longDay(cal.boardingOpensAt, 'EN').split(',')[0]!)} from ${e(boardsAt)} BRT: board for real, with a small amount. This is mainnet. Your official card comes out now.`,
+        : [`${e(longDay(cal.boardingOpensAt, 'EN').split(',')[0]!)} from ${e(boardsAt)} BRT: go to flofi.xyz/board, tap “I have an invite code” and use your code with the authenticated account that proves this invitation’s email.`,
+          'Build a route with a small amount, review every step and sign only what you approve. This is mainnet. Your boarding card comes out after your first successful simulation; you do not need to execute a transaction to issue the card.',
           `Between ${e(boardsAt)} and ${e(clock(cal.boardingOpensAt + 3_600_000, 'EN'))} BRT, post your card on X quoting the @FloFi_xyz launch post.`];
       const keep = PT ? 'Guarde o código só para você: ele abre um assento. Dúvidas? É só responder este e-mail.' : 'Please keep the code to yourself: it opens one seat. Questions? Just reply to this email.';
       const numbered = `<table role="presentation" cellpadding="0" cellspacing="0" style="margin:0 0 18px">${steps.map((step, index) => `<tr><td style="vertical-align:top;padding:0 12px 12px 0"><div style="width:26px;height:26px;border-radius:26px;background:${C.navy};color:${C.white};font-family:${MONO};font-weight:500;font-size:14px;line-height:26px;text-align:center">${index + 1}</div></td><td style="font-family:${SANS};font-size:16px;line-height:1.5;color:${C.body};padding:0 0 12px">${step}</td></tr>`).join('')}</table>`;
-      const body = h1(PT ? 'Você foi convidado<br>' : 'You’re invited<br>', PT ? 'para o Flight FloFi.' : 'to Flight FloFi.') + p(intro)
-        + panel([label(PT ? 'Código de convite' : 'Invite code') + flaps(input.code), label(PT ? 'Voo de teste' : 'Test flight') + flaps(window),
-          label(PT ? 'Embarque' : 'Boarding') + flaps(flapDay(cal.boardingOpensAt))])
+      const body = h1(PT ? 'Seu convite para o<br>' : 'You’re invited<br>', PT ? 'Flight FloFi chegou.' : 'to Flight FloFi.') + p(intro)
+        + panel([label(PT ? 'Código de convite' : 'Invite code') + flaps(input.code), label(PT ? 'Embarque' : 'Boarding') + flaps(flapDay(cal.boardingOpensAt))])
         + numbered + button(input.briefUrl, PT ? 'Abrir o brief do criador' : 'Open the creator brief', C.navy) + small(e(keep));
       return { subject, preheader, html: layout(ctx, { subject, preheader, band: 'Flight FloFi · Invited', pose: 'wink', body, reason: reason.invited }),
         text: plain([subject, strip(intro), `${PT ? 'Código de convite' : 'Invite code'}: ${input.code}`, ...steps.map((step, index) => `${index + 1}. ${strip(step)}`),

@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 'use server';
+import { withFlightAccess } from '../server/flight-access';
 /**
  * BUILD-CHANNELS-001: the `/approve` status ping for proposals that came from a conversational channel (owner decision D5). The page
  * calls it while the approval experience is active; the server checks the channel approval secret, the claimant's proven wallet
@@ -10,5 +11,8 @@ import { pingChannelApproval, type PingResult } from '../channels/approval-ping'
 import { currentWalletPrincipals } from '../server/session-principal';
 
 export async function channelApprovalPing(secret: string): Promise<PingResult> {
+  return withFlightAccess(async () => {
   try { return await pingChannelApproval(process.env, secret, await currentWalletPrincipals()); } catch { return { channel: false, active: false }; }
+
+  });
 }

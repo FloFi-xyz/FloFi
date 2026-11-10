@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 'use server';
+import { withFlightAccess } from '../server/flight-access';
 import type { SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
 import { createSupplyService, type SupplyWalletDiagnostic, type SupplyService } from '../server/supply-service';
 import { join } from 'node:path';
@@ -43,29 +44,65 @@ async function run<T>(method:string,args:readonly unknown[],action:(service:Supp
   try{return{ok:true,value:await action(network?catalog(network):current())};}catch(cause){const code=cause instanceof Error?cause.message:'';return{ok:false,code:/^[A-Z][A-Z0-9_]{2,80}$/.test(code)?code:'SUPPLY_SERVICE_UNAVAILABLE'};}
 }
 
-export async function supplySimulate(workflow:SemanticWorkflow,account:string){return run('simulate',[workflow,account],service=>service.simulate(workflow,account));}
-export async function supplyReview(id:string,commitment:string,workflow:SemanticWorkflow){return run('review',[id,commitment,workflow],service=>service.review(id,commitment,workflow));}
-export async function supplyBegin(id:string,account:string,workflow:SemanticWorkflow){return run('begin',[id,account,workflow],service=>service.begin(id,account,workflow));}
-export async function supplyReport(id:string,step:'APPROVAL'|'SUPPLY'|'BORROW'|'REPAY'|'WITHDRAW',result:{kind:'HASH';hash:string}|{kind:'UNKNOWN'|'REJECTED';code?:string}){return run('report',[id,step,result],service=>service.report(id,step,result));}
-export async function supplyObserve(id:string){return run('observe',[id],service=>service.observe(id));}
-export async function supplyStatus(id:string){return run('status',[id],service=>service.load(id));}
+export async function supplySimulate(workflow:SemanticWorkflow,account:string){
+  return withFlightAccess(async () => {return run('simulate',[workflow,account],service=>service.simulate(workflow,account));
+  });
+}
+export async function supplyReview(id:string,commitment:string,workflow:SemanticWorkflow){
+  return withFlightAccess(async () => {return run('review',[id,commitment,workflow],service=>service.review(id,commitment,workflow));
+  });
+}
+export async function supplyBegin(id:string,account:string,workflow:SemanticWorkflow){
+  return withFlightAccess(async () => {return run('begin',[id,account,workflow],service=>service.begin(id,account,workflow));
+  });
+}
+export async function supplyReport(id:string,step:'APPROVAL'|'SUPPLY'|'BORROW'|'REPAY'|'WITHDRAW',result:{kind:'HASH';hash:string}|{kind:'UNKNOWN'|'REJECTED';code?:string}){
+  return withFlightAccess(async () => {return run('report',[id,step,result],service=>service.report(id,step,result));
+  });
+}
+export async function supplyObserve(id:string){
+  return withFlightAccess(async () => {return run('observe',[id],service=>service.observe(id));
+  });
+}
+export async function supplyStatus(id:string){
+  return withFlightAccess(async () => {return run('status',[id],service=>service.load(id));
+  });
+}
 
-export async function supplyInvalidate(id:string){return run('invalidate',[id],service=>service.invalidate(id));}
-export async function supplyRecoverReview(id:string){return run('recoverReview',[id],service=>service.recoverReview(id));}
+export async function supplyInvalidate(id:string){
+  return withFlightAccess(async () => {return run('invalidate',[id],service=>service.invalidate(id));
+  });
+}
+export async function supplyRecoverReview(id:string){
+  return withFlightAccess(async () => {return run('recoverReview',[id],service=>service.recoverReview(id));
+  });
+}
 
-export async function supplyWalletFailure(id:string,diagnostic:SupplyWalletDiagnostic){return run('walletFailure',[id,diagnostic],service=>service.walletFailure(id,diagnostic));}
-export async function supplyWalletTrace(id:string,diagnostic:SupplyWalletDiagnostic){return run('walletTrace',[id,diagnostic],service=>service.walletTrace(id,diagnostic));}
+export async function supplyWalletFailure(id:string,diagnostic:SupplyWalletDiagnostic){
+  return withFlightAccess(async () => {return run('walletFailure',[id,diagnostic],service=>service.walletFailure(id,diagnostic));
+  });
+}
+export async function supplyWalletTrace(id:string,diagnostic:SupplyWalletDiagnostic){
+  return withFlightAccess(async () => {return run('walletTrace',[id,diagnostic],service=>service.walletTrace(id,diagnostic));
+  });
+}
 
-export async function supplyHandoff(id:string,step:'APPROVAL'|'SUPPLY'|'BORROW'|'REPAY'|'WITHDRAW',walletManagedNonce=false){return run('handoff',[id,step,walletManagedNonce],service=>service.handoff(id,step,walletManagedNonce));}
+export async function supplyHandoff(id:string,step:'APPROVAL'|'SUPPLY'|'BORROW'|'REPAY'|'WITHDRAW',walletManagedNonce=false){
+  return withFlightAccess(async () => {return run('handoff',[id,step,walletManagedNonce],service=>service.handoff(id,step,walletManagedNonce));
+  });
+}
 
 /**
  * BUILD AAVE-V3-EXPANSION-001: the live reserve catalog of one Aave mainnet market (status, caps, liquidity, informational APY and, with an
  * owner, balances and account aggregates). Read-only: it prepares and authorizes nothing; Simulate re-reads everything it relies on.
  */
 export async function supplyReserves(chain:string,account?:string):Promise<{ok:true;value:AaveMarketCatalog}|{ok:false;code:string}>{
+  return withFlightAccess(async () => {
   const network=catalogNetworkOfChain(chain);
   if(!network?.flows.lending||(account!==undefined&&!/^0x[0-9a-fA-F]{40}$/.test(account)))return{ok:false,code:'SUPPLY_NETWORK_UNAVAILABLE'};
   const args=account===undefined?[chain]:[chain,account];
   const cloud=await cloudFlow<AaveMarketCatalog>(network.flows.lending,'reserves',args);if(cloud)return cloud;
   try{return{ok:true,value:await catalog(network).reserves(chain,account)};}catch(cause){const code=cause instanceof Error?cause.message:'';return{ok:false,code:/^[A-Z][A-Z0-9_]{2,80}$/.test(code)?code:'SUPPLY_SERVICE_UNAVAILABLE'};}
+
+  });
 }

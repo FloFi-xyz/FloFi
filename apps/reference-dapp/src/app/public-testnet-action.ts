@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 'use server';
+import { withFlightAccess } from '../server/flight-access';
 import type { SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
 import { isAbsolute, join } from 'node:path';
 import { createPublicTestnetService, publicRecordingEnabled,
@@ -53,41 +54,71 @@ async function run<T>(method: string, args: readonly unknown[], action: (service
 }
 const id = (value: unknown) => typeof value === 'string' && /^(pub|rhs|bas|ars|ets)-[0-9a-f]{24}$/.test(value) ? value : (() => { throw new Error('INPUT_INVALID'); })();
 export async function publicPrepare(workflow: SemanticWorkflow, account?: string): Promise<PublicResult<PublicRun>> {
+  return withFlightAccess(async () => {
   // The authored swap's chain selects the deployment: a catalog network (Base's USDC ⇄ WETH reference swap included), else the testnets.
   return run('prepare', account ? [workflow, account] : [workflow], service => service.prepare(workflow, account), catalogNetworkOfWorkflow(workflow, 'asset.swap.exact-input'));
+
+  });
 }
 export async function publicRefresh(executionId: string): Promise<PublicResult<PublicRun>> {
+  return withFlightAccess(async () => {
   return run('refresh', [executionId], service => service.refresh(id(executionId)));
+
+  });
 }
 export async function publicReview(executionId: string, manifestHash: string): Promise<PublicResult<PublicRun>> {
+  return withFlightAccess(async () => {
   return run('review', [executionId, manifestHash], service => service.review(id(executionId), manifestHash));
+
+  });
 }
 export async function publicBegin(executionId: string, account: string): Promise<PublicResult<PublicBegin>> {
+  return withFlightAccess(async () => {
   return run('begin', [executionId, account], service => service.begin(id(executionId), account));
+
+  });
 }
 export async function publicReport(executionId: string, attemptId: string,
   result: { kind: 'HASH'; txHash: string } | { kind: 'REJECTED' | 'UNKNOWN' }): Promise<PublicResult<PublicRun>> {
+  return withFlightAccess(async () => {
   return run('report', [executionId, attemptId, result], service => service.report(id(executionId), attemptId, result));
+
+  });
 }
 export async function publicObserve(executionId: string): Promise<PublicResult<PublicRun>> {
+  return withFlightAccess(async () => {
   return run('observe', [executionId], service => service.observe(id(executionId)));
+
+  });
 }
 export async function publicStatus(executionId: string): Promise<PublicResult<PublicRun>> {
+  return withFlightAccess(async () => {
   return run('status', [executionId], service => service.load(id(executionId)));
+
+  });
 }
 export async function publicAvailability(): Promise<boolean> {
+  return withFlightAccess(async () => {
   const cloud = await cloudFlowMode('base-sepolia-swap');
   if (cloud) return cloud === 'live';
   return publicRecordingEnabled(process.env);
+
+  });
 }
 /** BUILD-RH-002 / BUILD-BASE-001: whether this instance serves a catalog network's mainnet swaps (live or the MOCKED loopback harness). */
 export async function catalogSwapAvailability(chain: string): Promise<boolean> {
+  return withFlightAccess(async () => {
   const network = catalogNetworkOfChain(chain);
   if (!network) return false;
   const cloud = await cloudFlowMode(network.flows.swap);
   if (cloud) return cloud !== 'off';
   const dir = process.env[network.journalEnv];
   return localCatalogNetworkMode(network, process.env) !== 'off' && Boolean(dir && isAbsolute(dir));
+
+  });
 }
 /** BUILD-RH-002: whether this instance serves Robinhood Chain mainnet swaps (live or the MOCKED loopback harness). */
-export async function robinhoodSwapAvailability(): Promise<boolean> { return catalogSwapAvailability(CATALOG_NETWORKS.robinhood.chain); }
+export async function robinhoodSwapAvailability(): Promise<boolean> {
+  return withFlightAccess(async () => { return catalogSwapAvailability(CATALOG_NETWORKS.robinhood.chain); 
+  });
+}

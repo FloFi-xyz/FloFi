@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 'use server';
+import { withFlightAccess } from '../server/flight-access';
 import { readFileSync } from 'node:fs';
 import { isAbsolute } from 'node:path';
 import type { SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
@@ -69,6 +70,7 @@ function stepId(input: unknown): StepId {
 }
 
 export async function modeAStatus(): Promise<ModeAResult<ModeAInfo>> {
+  return withFlightAccess(async () => {
   try {
     const current = loadRuntime();
     if (!current) return { ok: true, value: { available: false, reason: 'MODE_A_OFF' } };
@@ -84,21 +86,33 @@ export async function modeAStatus(): Promise<ModeAResult<ModeAInfo>> {
       source: { chainId: 8453, blockNumber: profile.sourceBlockNumber, blockHash: profile.sourceBlockHash },
       stateSourceHash: profile.stateSourceHash, executions } };
   } catch (error) { return { ok: false, code: codeOf(error) }; }
+
+  });
 }
 export async function modeAPrepare(input: unknown): Promise<ModeAResult<PreparedExecution>> {
+  return withFlightAccess(async () => {
   return run(service => service.prepare({ workflow: (input as { workflow?: unknown } | null)?.workflow as SemanticWorkflow }));
+
+  });
 }
 export async function modeAExecution(input: unknown): Promise<ModeAResult<ExecutionStatus>> {
+  return withFlightAccess(async () => {
   return run(service => service.status(executionId(input)));
+
+  });
 }
 export async function modeABeginStep(input: unknown): Promise<ModeAResult<Awaited<ReturnType<ModeAService['beginStep']>>>> {
+  return withFlightAccess(async () => {
   return run(service => {
     const key = (input as { idempotencyKey?: unknown } | null)?.idempotencyKey;
     if (typeof key !== 'string') throw new Error('INPUT_INVALID');
     return service.beginStep(executionId(input), stepId(input), key);
   });
+
+  });
 }
 export async function modeARecordSubmission(input: unknown): Promise<ModeAResult<Awaited<ReturnType<ModeAService['recordSubmission']>>>> {
+  return withFlightAccess(async () => {
   return run(service => {
     const value = input as { attemptId?: unknown; report?: { kind?: unknown; transactionHash?: unknown } } | null;
     const report = value?.report;
@@ -110,16 +124,30 @@ export async function modeARecordSubmission(input: unknown): Promise<ModeAResult
     if (typeof value?.attemptId !== 'string' || !/^exec-[0-9a-f]{24}\.step-(?:approve|swap|revoke)\.a[12]$/.test(value.attemptId)) throw new Error('INPUT_INVALID');
     return service.recordSubmission(executionId(input), value.attemptId, parsed);
   });
+
+  });
 }
 export async function modeAObserveStep(input: unknown): Promise<ModeAResult<Awaited<ReturnType<ModeAService['observeStep']>>>> {
+  return withFlightAccess(async () => {
   return run(service => service.observeStep(executionId(input), stepId(input)));
+
+  });
 }
 export async function modeAReconcile(input: unknown): Promise<ModeAResult<Awaited<ReturnType<ModeAService['reconcile']>>>> {
+  return withFlightAccess(async () => {
   return run(service => service.reconcile(executionId(input)));
+
+  });
 }
 export async function modeAPrepareRevocation(input: unknown): Promise<ModeAResult<RevocationRecord>> {
+  return withFlightAccess(async () => {
   return run(service => service.prepareRevocation(executionId(input)));
+
+  });
 }
 export async function modeAConfirmRevocation(input: unknown): Promise<ModeAResult<Awaited<ReturnType<ModeAService['confirmRevocation']>>>> {
+  return withFlightAccess(async () => {
   return run(service => service.confirmRevocation(executionId(input)));
+
+  });
 }

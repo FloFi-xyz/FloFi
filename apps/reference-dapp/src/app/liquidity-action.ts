@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 'use server';
+import { withFlightAccess } from '../server/flight-access';
 /** Same-origin actions for the opt-in chain-31337 liquidity fork only. No signing or broadcasting. */
 import { readFileSync } from 'node:fs';
 import { isAbsolute } from 'node:path';
@@ -40,13 +41,17 @@ const validExecutionId = (input: unknown) => {
   return value;
 };
 export async function liquidityStatus(): Promise<LiquidityResult<LiquidityInfo>> {
+  return withFlightAccess(async () => {
   try { const current = load();
     if (!current) return { ok: true, value: { available: false, reason: 'LIQUIDITY_OFF' } };
     return { ok: true, value: { available: true, environment: current.environment, owner: current.owner,
       sourceBlockHash: current.sourceBlockHash, chainIdHex: '0x7a69', status: await current.service.status() } }; }
   catch (cause) { return { ok: false, code: codeOf(cause) }; }
+
+  });
 }
 export async function liquidityPrepare(input: unknown) {
+  return withFlightAccess(async () => {
   return run(service => {
     const value = input as { workflow?: unknown; operation?: unknown; tokenId?: unknown; partBps?: unknown } | null;
     if (!value || typeof value.workflow !== 'object' || typeof value.operation !== 'string') throw new Error('LIQUIDITY_INPUT_INVALID');
@@ -57,16 +62,22 @@ export async function liquidityPrepare(input: unknown) {
       ...(value.tokenId === undefined ? {} : { tokenId: value.tokenId as string }),
       ...(value.partBps === undefined ? {} : { partBps: value.partBps as number }) });
   });
+
+  });
 }
 export async function liquidityBegin(input: unknown) {
+  return withFlightAccess(async () => {
   return run(service => {
     const value = input as { idempotencyKey?: unknown; workflow?: unknown } | null;
     if (typeof value?.idempotencyKey !== 'string' || !/^[A-Za-z0-9._:-]{8,128}$/.test(value.idempotencyKey) ||
       !value.workflow || typeof value.workflow !== 'object') throw new Error('LIQUIDITY_INPUT_INVALID');
     return service.begin(validExecutionId(input), value.idempotencyKey, value.workflow as SemanticWorkflow);
   });
+
+  });
 }
 export async function liquiditySubmission(input: unknown) {
+  return withFlightAccess(async () => {
   return run(service => {
     const value = input as { attemptId?: unknown; report?: { kind?: unknown; transactionHash?: unknown } } | null;
     if (typeof value?.attemptId !== 'string' || !/^liquidity-[0-9a-f]{24}\.[a-z-]+\.a[12]$/.test(value.attemptId)) throw new Error('LIQUIDITY_INPUT_INVALID');
@@ -76,13 +87,24 @@ export async function liquiditySubmission(input: unknown) {
       throw new Error('LIQUIDITY_INPUT_INVALID');
     return service.submission(validExecutionId(input), value.attemptId, report as { kind: 'HASH' | 'UNKNOWN' | 'REJECTED'; transactionHash?: string });
   });
+
+  });
 }
-export async function liquidityObserve(input: unknown) { return run(service => service.observe(validExecutionId(input))); }
-export async function liquidityRecoverUnknown(input: unknown) { return run(service => service.recoverUnknown(validExecutionId(input))); }
+export async function liquidityObserve(input: unknown) {
+  return withFlightAccess(async () => { return run(service => service.observe(validExecutionId(input))); 
+  });
+}
+export async function liquidityRecoverUnknown(input: unknown) {
+  return withFlightAccess(async () => { return run(service => service.recoverUnknown(validExecutionId(input))); 
+  });
+}
 export async function liquidityInspect(input: unknown) {
+  return withFlightAccess(async () => {
   return run(service => {
     const tokenId = (input as { tokenId?: unknown } | null)?.tokenId;
     if (typeof tokenId !== 'string' || !/^[1-9][0-9]{0,76}$/.test(tokenId)) throw new Error('LIQUIDITY_INPUT_INVALID');
     return service.inspect(tokenId);
+  });
+
   });
 }

@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 'use server';
+import { withFlightAccess } from '../server/flight-access';
 import { JUPITER_SOLANA_MAINNET as profile } from '@defi-workflow-engine/action-registry';
 import type { SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
 import { createJupiterService, type JupiterService, type JupiterWalletDiagnostic } from '../server/jupiter-service';
@@ -34,12 +35,39 @@ async function run<T>(method: string, args: readonly unknown[], action: (service
   try { return { ok: true, value: await action(current()) }; }
   catch (cause) { const code = cause instanceof Error ? cause.message : ''; return { ok: false, code: /^[A-Z][A-Z0-9_]{2,80}$/.test(code) ? code : 'JUPITER_SERVICE_UNAVAILABLE' }; }
 }
-export async function jupiterInfo() { return run('info', [], async service => ({ executionEnabled: service.executionEnabled })); }
-export async function jupiterSimulate(workflow: SemanticWorkflow, owner: string) { return run('simulate', [workflow, owner], service => service.simulate(workflow, owner)); }
-export async function jupiterReview(id: string, commitment: string, workflow: SemanticWorkflow) { return run('review', [id, commitment, workflow], service => service.review(id, commitment, workflow)); }
-export async function jupiterInvalidate(id: string) { return run('invalidate', [id], service => service.invalidate(id)); }
-export async function jupiterBegin(id: string, owner: string, workflow: SemanticWorkflow) { return run('begin', [id, owner, workflow], service => service.begin(id, owner, workflow)); }
-export async function jupiterWalletFailure(id: string, diagnostic: JupiterWalletDiagnostic) { return run('walletFailure', [id, diagnostic], service => service.walletFailure(id, diagnostic)); }
-export async function jupiterSubmit(id: string, signedTransaction: string) { return run('submit', [id, signedTransaction], service => service.submit(id, signedTransaction)); }
-export async function jupiterObserve(id: string) { return run('observe', [id], service => service.observe(id)); }
-export async function jupiterStatus(id: string) { return run('status', [id], service => service.load(id)); }
+export async function jupiterInfo() {
+  return withFlightAccess(async () => { return run('info', [], async service => ({ executionEnabled: service.executionEnabled })); 
+  });
+}
+export async function jupiterSimulate(workflow: SemanticWorkflow, owner: string) {
+  return withFlightAccess(async () => { return run('simulate', [workflow, owner], service => service.simulate(workflow, owner)); 
+  });
+}
+export async function jupiterReview(id: string, commitment: string, workflow: SemanticWorkflow) {
+  return withFlightAccess(async () => { return run('review', [id, commitment, workflow], service => service.review(id, commitment, workflow)); 
+  });
+}
+export async function jupiterInvalidate(id: string) {
+  return withFlightAccess(async () => { return run('invalidate', [id], service => service.invalidate(id)); 
+  });
+}
+export async function jupiterBegin(id: string, owner: string, workflow: SemanticWorkflow) {
+  return withFlightAccess(async () => { return run('begin', [id, owner, workflow], service => service.begin(id, owner, workflow)); 
+  });
+}
+export async function jupiterWalletFailure(id: string, diagnostic: JupiterWalletDiagnostic) {
+  return withFlightAccess(async () => { return run('walletFailure', [id, diagnostic], service => service.walletFailure(id, diagnostic)); 
+  });
+}
+export async function jupiterSubmit(id: string, signedTransaction: string) {
+  return withFlightAccess(async () => { return run('submit', [id, signedTransaction], service => service.submit(id, signedTransaction)); 
+  });
+}
+export async function jupiterObserve(id: string) {
+  return withFlightAccess(async () => { return run('observe', [id], service => service.observe(id)); 
+  });
+}
+export async function jupiterStatus(id: string) {
+  return withFlightAccess(async () => { return run('status', [id], service => service.load(id)); 
+  });
+}

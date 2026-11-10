@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 'use server';
+import { withFlightAccess } from '../server/flight-access';
 /**
  * BUILD-FLOFI-UNIVERSAL-SINGLE-AUTH-MAINNET-001: the Editor's "Run workflow" — a multi-step workflow the owner built and simulated on the Canvas
  * starts the SAME workflow run chats, MCP clients and channels start, without rebuilding it elsewhere (`src/editor/approval.ts`).
@@ -26,7 +27,10 @@ const failure = (cause: unknown, fallback = 'EDITOR_RUN_FAILED'): { ok: false; c
 
 /** Whether this deployment lets the Editor start workflow runs (no account needed: it reveals nothing about anyone). */
 export async function editorWorkflowRunAvailability(): Promise<{ readonly enabled: boolean }> {
+  return withFlightAccess(async () => {
   return { enabled: readEditorRunConfig(process.env).enabled };
+
+  });
 }
 
 
@@ -36,6 +40,7 @@ export async function editorWorkflowRunAvailability(): Promise<{ readonly enable
  * the composition's and gates' own codes, REVIEW_BLOCKED, HANDOFF_RATE_LIMITED, HANDOFF_PENDING_LIMIT.
  */
 export async function startEditorWorkflowRun(workflow: unknown): Promise<Result<EditorRunStarted>> {
+  return withFlightAccess(async () => {
   try {
     const env = process.env, config = readEditorRunConfig(env);
     if (!config.enabled) return { ok: false, code: 'EDITOR_RUNS_NOT_ENABLED' };
@@ -48,4 +53,6 @@ export async function startEditorWorkflowRun(workflow: unknown): Promise<Result<
     return await startEditorRun({ config, origin: config.origin, handoffs: createPgHandoffStore(host.db, host.tenantId), allow: fixedWindow(host.db, host.tenantId).allow,
       runtime: deploymentEngineRuntime(env), now: new Date() }, session.accountId, workflow);
   } catch (cause) { return failure(cause); }
+
+  });
 }

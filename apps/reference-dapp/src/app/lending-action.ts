@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 'use server';
+import { withFlightAccess } from '../server/flight-access';
 import type { SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
 import { createLendingCompositionService, type LendingCompositionService } from '../server/lending-composition-service';
 import { createLendingRpc } from '../server/lending-rpc';
@@ -17,13 +18,43 @@ async function run<T>(method:string,args:readonly unknown[],action:(s:LendingCom
   const cloud=await cloudFlow<T>('lending-composition',method,args);if(cloud)return cloud;
   try{return {ok:true,value:await action(current())};}catch(cause){const code=cause instanceof Error?cause.message:'';return{ok:false,code:/^[A-Z][A-Z0-9_]{2,80}$/.test(code)?code:'LENDING_SERVICE_UNAVAILABLE'};}
 }
-export async function lendingSimulate(workflow:SemanticWorkflow,account:string){return run('simulate',[workflow,account],s=>s.simulate(workflow,account));}
-export async function lendingReview(id:string,commitment:string,workflow:SemanticWorkflow){return run('review',[id,commitment,workflow],s=>s.review(id,commitment,workflow));}
-export async function lendingBegin(id:string,account:string,workflow:SemanticWorkflow){return run('begin',[id,account,workflow],s=>s.begin(id,account,workflow));}
-export async function lendingHandoff(id:string,attempt:string){return run('handoff',[id,attempt],s=>s.handoff(id,attempt));}
-export async function lendingReport(id:string,attempt:string,result:{kind:'HASH';hash:string}|{kind:'UNKNOWN'}){return run('report',[id,attempt,result],s=>s.report(id,attempt,result));}
-export async function lendingCancelPrepared(id:string,attempt:string){return run('cancelPrepared',[id,attempt],s=>s.cancelPrepared(id,attempt));}
-export async function lendingObserve(id:string){return run('observe',[id],s=>s.observe(id));}
-export async function lendingStatus(id:string){return run('status',[id],s=>s.load(id));}
-export async function lendingRefresh(id:string){return run('refresh',[id],s=>s.refreshReview(id));}
-export async function lendingInvalidate(id:string){return run('invalidate',[id],s=>s.invalidate(id));}
+export async function lendingSimulate(workflow:SemanticWorkflow,account:string){
+  return withFlightAccess(async () => {return run('simulate',[workflow,account],s=>s.simulate(workflow,account));
+  });
+}
+export async function lendingReview(id:string,commitment:string,workflow:SemanticWorkflow){
+  return withFlightAccess(async () => {return run('review',[id,commitment,workflow],s=>s.review(id,commitment,workflow));
+  });
+}
+export async function lendingBegin(id:string,account:string,workflow:SemanticWorkflow){
+  return withFlightAccess(async () => {return run('begin',[id,account,workflow],s=>s.begin(id,account,workflow));
+  });
+}
+export async function lendingHandoff(id:string,attempt:string){
+  return withFlightAccess(async () => {return run('handoff',[id,attempt],s=>s.handoff(id,attempt));
+  });
+}
+export async function lendingReport(id:string,attempt:string,result:{kind:'HASH';hash:string}|{kind:'UNKNOWN'}){
+  return withFlightAccess(async () => {return run('report',[id,attempt,result],s=>s.report(id,attempt,result));
+  });
+}
+export async function lendingCancelPrepared(id:string,attempt:string){
+  return withFlightAccess(async () => {return run('cancelPrepared',[id,attempt],s=>s.cancelPrepared(id,attempt));
+  });
+}
+export async function lendingObserve(id:string){
+  return withFlightAccess(async () => {return run('observe',[id],s=>s.observe(id));
+  });
+}
+export async function lendingStatus(id:string){
+  return withFlightAccess(async () => {return run('status',[id],s=>s.load(id));
+  });
+}
+export async function lendingRefresh(id:string){
+  return withFlightAccess(async () => {return run('refresh',[id],s=>s.refreshReview(id));
+  });
+}
+export async function lendingInvalidate(id:string){
+  return withFlightAccess(async () => {return run('invalidate',[id],s=>s.invalidate(id));
+  });
+}

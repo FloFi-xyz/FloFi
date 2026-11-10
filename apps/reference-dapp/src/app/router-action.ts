@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 'use server';
+import { withFlightAccess } from '../server/flight-access';
 import { readdir, stat } from 'node:fs/promises';
 import { isAbsolute, join } from 'node:path';
 import type { SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
@@ -64,32 +65,69 @@ async function run<T>(network: RouterNetwork, method: string, args: readonly unk
   } catch (cause) { return { ok: false, code: classified(cause) }; }
 }
 export async function crossChainRouterMode(network: RouterNetwork = 'mainnet'): Promise<RouterMode> {
+  return withFlightAccess(async () => {
   if (!isNetwork(network)) return 'off';
   return await cloudFlowMode(FLOW[network]) ?? routerNetworkMode(network, process.env);
+
+  });
 }
-export async function routerInfo(network: RouterNetwork) { return run(network, 'info', [], async s => ({ executionEnabled: s.executionEnabled })); }
-export async function routerSimulate(network: RouterNetwork, workflow: SemanticWorkflow, owner: string) { return run(network, 'simulate', [workflow, owner], s => s.simulate(workflow, owner)); }
-export async function routerRefresh(network: RouterNetwork, id: string) { return run(network, 'refresh', [id], s => s.refresh(id)); }
+export async function routerInfo(network: RouterNetwork) {
+  return withFlightAccess(async () => { return run(network, 'info', [], async s => ({ executionEnabled: s.executionEnabled })); 
+  });
+}
+export async function routerSimulate(network: RouterNetwork, workflow: SemanticWorkflow, owner: string) {
+  return withFlightAccess(async () => { return run(network, 'simulate', [workflow, owner], s => s.simulate(workflow, owner)); 
+  });
+}
+export async function routerRefresh(network: RouterNetwork, id: string) {
+  return withFlightAccess(async () => { return run(network, 'refresh', [id], s => s.refresh(id)); 
+  });
+}
 export async function routerReview(network: RouterNetwork, id: string, commitment: string, workflow: SemanticWorkflow) {
+  return withFlightAccess(async () => {
   return run(network, 'review', [id, commitment, workflow], s => s.review(id, commitment, workflow));
+
+  });
 }
 export async function routerInvalidate(network: RouterNetwork, id: string, reason: 'SEMANTIC_EDIT' | 'WALLET_CHANGED' = 'SEMANTIC_EDIT') {
+  return withFlightAccess(async () => {
   return run(network, 'invalidate', reason === 'SEMANTIC_EDIT' ? [id] : [id, reason], s => s.invalidate(id, reason));
+
+  });
 }
 export async function routerBegin(network: RouterNetwork, id: string, owner: string, workflow: SemanticWorkflow) {
+  return withFlightAccess(async () => {
   return run(network, 'begin', [id, owner, workflow], s => s.begin(id, owner, workflow));
+
+  });
 }
-export async function routerHandoff(network: RouterNetwork, id: string) { return run(network, 'handoff', [id], s => s.handoff(id)); }
+export async function routerHandoff(network: RouterNetwork, id: string) {
+  return withFlightAccess(async () => { return run(network, 'handoff', [id], s => s.handoff(id)); 
+  });
+}
 export async function routerReport(network: RouterNetwork, id: string, result: ({ kind: 'HASH'; hash: string } | { kind: 'UNKNOWN' | 'REJECTED'; code?: string }) & { attemptId?: string }) {
+  return withFlightAccess(async () => {
   return run(network, 'report', [id, result], s => s.report(id, result));
+
+  });
 }
 export async function routerWalletFailure(network: RouterNetwork, id: string, diagnostic: RouterWalletDiagnostic) {
+  return withFlightAccess(async () => {
   return run(network, 'walletFailure', [id, diagnostic], s => s.walletFailure(id, diagnostic));
+
+  });
 }
-export async function routerObserve(network: RouterNetwork, id: string) { return run(network, 'observe', [id], s => s.observe(id)); }
-export async function routerStatus(network: RouterNetwork, id: string) { return run(network, 'status', [id], s => s.load(id)); }
+export async function routerObserve(network: RouterNetwork, id: string) {
+  return withFlightAccess(async () => { return run(network, 'observe', [id], s => s.observe(id)); 
+  });
+}
+export async function routerStatus(network: RouterNetwork, id: string) {
+  return withFlightAccess(async () => { return run(network, 'status', [id], s => s.load(id)); 
+  });
+}
 /** BUILD-JOURNEY-001: the signed-in wallet's runs, newest first, so a run can be recovered from any browser. */
 export async function routerRuns(network: RouterNetwork): Promise<Result<RouterRunSummary[]>> {
+  return withFlightAccess(async () => {
   if (!isNetwork(network)) return { ok: false, code: 'ROUTER_NETWORK_INVALID' };
   let principal: string | null;
   try { principal = await currentWalletPrincipal(); } catch (cause) { return { ok: false, code: classified(cause) }; }
@@ -110,4 +148,6 @@ export async function routerRuns(network: RouterNetwork): Promise<Result<RouterR
     }
     return { ok: true, value: runs };
   } catch (cause) { return { ok: false, code: classified(cause) }; }
+
+  });
 }

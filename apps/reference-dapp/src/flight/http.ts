@@ -17,6 +17,8 @@ import type { ConsumeResult } from './access-store';
 import { clientDigest, flightAccessStore, flightNow, flightOutbox, flightPerson, flightStore, requestClient, type FlightPerson } from './host';
 import { sessionCookieName } from '../server/session-cookie';
 import type { AccountFlight, FlightStore } from './store';
+import { betaAccessMode, createBetaAccessStore } from './beta-access';
+import { platformStateHost } from '../server/platform-state-host';
 
 const HEADERS = { 'cache-control': 'no-store', 'x-content-type-options': 'nosniff', 'content-type': 'application/json; charset=utf-8' };
 const json = (status: number, body: unknown) => new Response(JSON.stringify(body), { status, headers: HEADERS });
@@ -50,7 +52,7 @@ const language = (value: unknown): 'EN' | 'PT' => value === 'PT' ? 'PT' : 'EN';
  */
 export type FlightState = {
   readonly ok: true; readonly now: number; readonly phase: ReturnType<typeof flightPhase>; readonly closesAt: number; readonly boardingOpensAt: number;
-  readonly creatorsOpenAt: number; readonly foundingOpen: boolean; readonly departures: Awaited<ReturnType<FlightStore['departures']>>;
+  readonly foundingOpen: boolean; readonly departures: Awaited<ReturnType<FlightStore['departures']>>;
   readonly me: { readonly signedIn: boolean; readonly hasEmail: boolean; readonly flight: AccountFlight | null; readonly accessPending: boolean };
 };
 // The retention periods hold without traffic: the page prunes expired campaign records at most every five minutes per instance.
@@ -72,7 +74,7 @@ export async function flightState(): Promise<FlightState | null> {
     const [foundingOpen, departures, flight] = await Promise.all([store.foundingOpen(), store.departures(), person ? store.account({ ...person, now }) : Promise.resolve(null)]);
     const calendar = store.calendar;
     return { ok: true, now, phase: flightPhase(now, calendar), closesAt: calendar.listClosesAt, boardingOpensAt: calendar.boardingOpensAt,
-      creatorsOpenAt: calendar.creatorsOpenAt, foundingOpen, departures,
+      foundingOpen, departures,
       me: { signedIn: person !== null, hasEmail: (person?.emails.length ?? 0) > 0, flight, accessPending: pending !== null } };
   } catch { return null; }
 }
@@ -136,6 +138,10 @@ export async function handleBoard(request: Request): Promise<Response> {
     const now = await flightNow(), pending = await pendingSession(request);
     const bound = pending ? await bindPending(person, pending, now) : 'NONE';
     const state = await store.account({ ...person, now }), detail = accessResultDetail(state.access);
+    if (betaAccessMode(process.env) === 'beta') {
+      const grant = await createBetaAccessStore(await platformStateHost(), store.calendar).grant(person.accountId, now);
+      if (!grant.ok) return refuse(403, grant.code);
+    }
     const origin: FlightOrigin | null = state.access.kind === 'eligible' ? state.access.origin : null;
     if (detail) await store.recordEvent('access_result', detail, origin, now);
     const response = json(200, { ok: true, flight: state, ...bound === 'CLAIMED_ELSEWHERE' || bound === 'ACCOUNT_HAS_OTHER_ENTRY' ? { access: bound } : {} });
@@ -154,7 +160,7 @@ export async function handleInvite(request: Request): Promise<Response> {
   try {
     const person = await flightPerson();
     if (!person) return refuse(401, 'FLIGHT_SIGN_IN_REQUIRED');
-    const now = await flightNow(), result = await store.redeemInvite({ accountId: person.accountId, code, now });
+    const now = await flightNow(), result = await store.redeemInvite({ accountId: person.accountId, emails: person.emails, code, now });
     if (result !== 'REDEEMED') return refuse(409, result);
     return json(200, { ok: true, flight: await store.account({ ...person, now }) });
   } catch { return refuse(503, 'FLIGHT_UNAVAILABLE'); }
@@ -176,9 +182,6 @@ export async function handlePass(request: Request): Promise<Response> {
     const person = await flightPerson();
     if (!person) return refuse(401, 'FLIGHT_SIGN_IN_REQUIRED');
     const now = await flightNow();
-    // A creator's test flight: the TEST card of their recorded simulation, never stored, numbered or shared.
-    const early = await store.account({ ...person, now });
-    if (early.access.kind === 'test_flight') return early.testPass ? json(200, { ok: true, issued: false, test: true, pass: early.testPass }) : refuse(409, 'FLIGHT_SIMULATION_NOT_FOUND');
     const result = await store.issuePass({ ...person, workflowId, handle: null, public: false, now });
     return result.ok ? json(200, { ok: true, issued: result.issued, pass: result.pass }) : refuse(409, result.code);
   } catch { return refuse(503, 'FLIGHT_UNAVAILABLE'); }

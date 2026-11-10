@@ -10,7 +10,7 @@
  *   export-batch   [--batch <n>] [--flight NEXT] [--out <path>]
  *                                                  the addresses of a group (no --batch: entries without a group), for the team's
  *                                                  "your group boards" email; written to a new mode-0600 file when --out is given
- *   issue-invites  --count <n>                     invites issued by the FloFi team (origin "creator"), printed once
+ *   issue-invites  --count <n>                     invites issued by the FloFi team; --out writes codes to a new private CSV
  *   erase-email    --email <address>               a data subject's request: delete the address from both lists
  *   hide-pass      --pass <flp_…>                  remove a handle from the public departures board
  *   prune                                          delete expired records now (join attempts > 1 day, simulation evidence > 2 hours,
@@ -31,13 +31,17 @@
  *   email-backfill-confirmations                   Email 1 once for beta-list entries that never got it (before the list closes)
  *   email-send-due                                 one delivery cycle now (Plan B when no worker runs; needs the worker's settings)
  *   creator-invite --email <address> [--language PT] [--send-at <ISO>]   one creator invite and its Email 6 (once per address)
- *   creator-invites --file <csv: email,language> [--send-at <ISO>]       the same for a reviewed list of recipients
+ *   creator-invites --file <csv: email,language> [--send-at <ISO>] [--apply --out <private.csv>]
+ *                                                  dry-run by default; apply queues Email 6 and writes email/language/code/state to mode-0600 CSV
+ *   import-google-forms --file <csv> [--apply]      dry-run by default; columns email,submitted_at,language,consent; ISO timestamp with explicit offset,
+ *                                                  consent true/false is required; language EN/PT may be blank. Preserves original signup order.
+ *   email-early-list [--send-at <ISO>] [--apply]    separately reserve Email 0 once for eligible consented imports; never sends directly
  *   remove-card    --card <id | flp_…>             take a public card page down (the person's request or moderation)
  *   revoke-access  --email <address>               void every unused access link and code of an address
  *
  * Environment: DATABASE_URL (the deployment's database). Holding the database credentials is the authorization, as for the other
  * operator CLIs. The tenant is explicit (production/local `--tenant default`, a Vercel Preview `--preview-branch <git branch>`) and must
- * already exist: a mistyped tenant is refused, never created. An exported file holds addresses: keep it only until the email is sent.
+ * already exist: a mistyped tenant is refused, never created. An exported file holds addresses and possibly invite codes: deliver only through the team’s secure channel; never attach it to a public artifact or commit.
  */
 import { open } from 'node:fs/promises';
 import { parseArgs } from 'node:util';
@@ -54,8 +58,8 @@ import { createFlightStore, type FlightStore } from '../src/flight/store.ts';
 
 export const FLIGHT_COMMANDS = ['stats', 'create-batch', 'assign-batch', 'export-batch', 'issue-invites', 'erase-email', 'hide-pass', 'prune', 'purge-lists',
   'email-status', 'email-attention', 'email-release', 'email-cancel', 'email-pause', 'email-resume', 'email-unblock', 'email-mark-delivered',
-  'email-backfill-confirmations', 'email-send-due', 'creator-invite', 'creator-invites', 'remove-card', 'revoke-access'] as const;
-const TEMPLATES: readonly EmailTemplate[] = ['LIST_CONFIRMATION', 'EVE', 'GROUP_BOARDING', 'ACCESS_REQUESTED', 'CARD_FOUNDING', 'CARD_PASSENGER', 'NEXT_FLIGHT', 'CREATOR_INVITE'];
+  'email-backfill-confirmations', 'email-send-due', 'creator-invite', 'creator-invites', 'import-google-forms', 'email-early-list', 'remove-card', 'revoke-access'] as const;
+const TEMPLATES: readonly EmailTemplate[] = ['EARLY_LIST', 'LIST_CONFIRMATION', 'EVE', 'GROUP_BOARDING', 'ACCESS_REQUESTED', 'CARD_FOUNDING', 'CARD_PASSENGER', 'NEXT_FLIGHT', 'CREATOR_INVITE'];
 /** What the email and access commands need besides the store; `sendDue` runs one delivery cycle (absent: not configured). */
 export type FlightAdminContext = { readonly outbox: EmailOutbox; readonly entryOf: (email: string) => Promise<string | null>;
   readonly revoke: ((entryId: string, now: number) => Promise<number>) | null; readonly pruneAccess?: ((now: number) => Promise<unknown>) | null; readonly sendDue: (() => Promise<unknown>) | { readonly disabled: string } };
@@ -84,7 +88,43 @@ const instantOf = (values: Values, name: string, fallback: number) => {
   if (!/(?:Z|[+-]\d{2}:\d{2})$/.test(raw) || !Number.isFinite(Date.parse(raw))) throw new Error(`ARGUMENT_INVALID: --${name} (ISO 8601 with an offset)`);
   return Date.parse(raw);
 };
-const languageOf = (value: string | undefined) => { const language = (value ?? 'EN').trim().toUpperCase(); if (language !== 'EN' && language !== 'PT') throw new Error('ARGUMENT_INVALID: language'); return language; };
+const languageOf = (value: string | undefined): 'EN' | 'PT' => { const language = (value ?? 'EN').trim().toUpperCase(); if (language !== 'EN' && language !== 'PT') throw new Error('ARGUMENT_INVALID: language'); return language; };
+
+/** RFC 4180-style CSV; quoted commas, escaped quotes and embedded newlines are preserved. No address is included in errors. */
+export function parseFlightCsv(text: string): string[][] {
+  const rows: string[][] = []; let row: string[] = [], cell = '', quoted = false, closed = false;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i]!;
+    if (quoted) {
+      if (c === '"') { if (text[i + 1] === '"') { cell += '"'; i++; } else { quoted = false; closed = true; } }
+      else cell += c;
+    } else if (c === '"' && !cell && !closed) quoted = true;
+    else if (c === ',') { row.push(cell); cell = ''; closed = false; }
+    else if (c === '\n' || c === '\r') { if (c === '\r' && text[i + 1] === '\n') i++; row.push(cell); if (row.some(v => v.trim())) rows.push(row); row = []; cell = ''; closed = false; }
+    else { if (closed && c.trim()) throw new Error('CSV_INVALID'); cell += c; }
+  }
+  if (quoted) throw new Error('CSV_INVALID');
+  row.push(cell); if (row.some(v => v.trim())) rows.push(row);
+  return rows;
+}
+export function parseGoogleFormsCsv(text: string): { readonly email: string; readonly signedUpAt: number; readonly language: 'EN' | 'PT' | null; readonly consent: boolean }[] {
+  const [header, ...rows] = parseFlightCsv(text.replace(/^\uFEFF/, ''));
+  if (!header || header.map(v => v.trim().toLowerCase()).join(',') !== 'email,submitted_at,language,consent') throw new Error('CSV_HEADER_REQUIRED');
+  return rows.map((row, index) => {
+    const [email = '', timestamp = '', language = '', consent = ''] = row;
+    // An explicit offset is mandatory: never replace an unknown Forms timezone with the import time or server timezone.
+    const signedUpAt = Date.parse(timestamp);
+    const datePart = timestamp.slice(0, 10), [year, month, day] = datePart.split('-').map(Number);
+    const maxDay = month && month <= 12 ? new Date(Date.UTC(year!, month, 0)).getUTCDate() : 0;
+    if (row.length !== 4 || !normalizeEmail(email) || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?(?:Z|[+-]\d{2}:\d{2})$/.test(timestamp)
+      || !Number.isFinite(signedUpAt) || !day || day > maxDay || Number(timestamp.slice(11, 13)) > 23 || Number(timestamp.slice(14, 16)) > 59 || Number(timestamp.slice(17, 19)) > 59
+      || !['', 'EN', 'PT'].includes(language.trim().toUpperCase()) || !['true', 'false'].includes(consent.trim().toLowerCase()))
+      throw new Error(`CSV_ROW_INVALID: line ${index + 2}`);
+    return { email, signedUpAt, language: language.trim() ? languageOf(language) : null, consent: consent.trim().toLowerCase() === 'true' };
+  });
+}
+const csvLine = (values: readonly string[]) => values.map(value => `"${csvCell(value).replace(/"/g, '""')}"`).join(',') + '\n';
+const newPrivateFile = (path: string) => open(path, 'wx', 0o600).catch((error: { code?: string }) => { throw new Error(error.code === 'EEXIST' ? 'OUT_FILE_EXISTS' : 'OUT_FILE_UNWRITABLE'); });
 
 export async function runFlightCommand(command: Command, values: Values, store: FlightStore, now: number, context?: FlightAdminContext): Promise<Record<string, unknown>> {
   const ctx = () => { if (!context) throw new Error('CONTEXT_REQUIRED'); return context; };
@@ -117,20 +157,42 @@ export async function runFlightCommand(command: Command, values: Values, store: 
       const email = normalizeEmail(required(values, 'email'));
       if (!email) throw new Error('ARGUMENT_INVALID: --email');
       const invite = await store.inviteCreator({ email, language: languageOf(flag(values, 'language')), sendAt: instantOf(values, 'send-at', now), now });
-      return { created: invite.created, code: invite.code };
+      const out = flag(values, 'out');
+      if (out) { const file = await newPrivateFile(out); try { await file.writeFile(csvLine(['email', 'language', 'code', 'state']) + csvLine([email, languageOf(flag(values, 'language')), invite.code, invite.state]), 'utf8'); } finally { await file.close(); } }
+      return { created: invite.created, state: invite.state, ...out ? { out } : {} };
     }
     case 'creator-invites': {
       const text = await readFile(required(values, 'file'), 'utf8').catch(() => { throw new Error('FILE_UNREADABLE'); });
-      const sendAt = instantOf(values, 'send-at', now), results: { line: number; created: boolean }[] = [];
-      for (const [index, line] of text.split(/\r?\n/).entries()) {
-        if (!line.trim() || line.trim().startsWith('#')) continue;
-        const [address = '', language] = line.split(',').map(part => part.trim());
-        const email = normalizeEmail(address.replace(/^'/, ''));
-        if (!email) throw new Error(`ARGUMENT_INVALID: line ${index + 1}`);
-        results.push({ line: index + 1, created: (await store.inviteCreator({ email, language: languageOf(language), sendAt, now })).created });
-      }
-      // Codes are not printed for a list: each goes only to its recipient's Email 6 (and is visible to the operator in the database).
-      return { invited: results.filter(r => r.created).length, alreadyInvited: results.filter(r => !r.created).length };
+      const parsed = parseFlightCsv(text), rows = parsed[0]?.[0]?.trim().toLowerCase() === 'email' ? parsed.slice(1) : parsed;
+      const recipients = rows.map((row, index) => {
+        const email = normalizeEmail((row[0] ?? '').replace(/^'/, ''));
+        if (!email || row.length > 2) throw new Error(`CSV_ROW_INVALID: line ${index + 1}`);
+        return { email, language: languageOf(row[1]) };
+      });
+      if (!values.apply) return { dryRun: true, recipients: recipients.length };
+      const sendAt = instantOf(values, 'send-at', now), out = required(values, 'out'), file = await newPrivateFile(out);
+      let invited = 0;
+      try {
+        await file.writeFile(csvLine(['email', 'language', 'code', 'state']), 'utf8');
+        for (const recipient of recipients) {
+          const invite = await store.inviteCreator({ ...recipient, sendAt, now });
+          if (invite.created) invited++;
+          await file.writeFile(csvLine([recipient.email, recipient.language, invite.code, invite.state]), 'utf8');
+        }
+      } finally { await file.close(); }
+      return { invited, alreadyInvited: recipients.length - invited, out };
+    }
+    case 'import-google-forms': {
+      const text = await readFile(required(values, 'file'), 'utf8').catch(() => { throw new Error('FILE_UNREADABLE'); });
+      const entries = parseGoogleFormsCsv(text);
+      if (entries.some(entry => entry.signedUpAt > Math.min(now, store.calendar.listClosesAt))) throw new Error('FLIGHT_IMPORT_INVALID');
+      if (!values.apply) return { dryRun: true, entries: entries.length, consented: entries.filter(e => e.consent).length };
+      return store.importGoogleForms(entries, now);
+    }
+    case 'email-early-list': {
+      const sendAt = instantOf(values, 'send-at', now);
+      if (!values.apply) return { dryRun: true, template: 'EARLY_LIST', sendAt: new Date(sendAt).toISOString() };
+      return { enqueued: await ctx().outbox.scheduleEarlyList(now, sendAt, store.calendar.boardingOpensAt) };
     }
     case 'remove-card': {
       const card = required(values, 'card');
@@ -161,7 +223,11 @@ export async function runFlightCommand(command: Command, values: Values, store: 
       try { await file.writeFile(entries.map(entry => `${csvCell(entry.email)},${csvCell(entry.language)}`).join('\n') + '\n', 'utf8'); } finally { await file.close(); }
       return { flight, batch, exported: entries.length, out };
     }
-    case 'issue-invites': return { codes: await store.issueCreatorInvites(integer(values, 'count'), now) };
+    case 'issue-invites': {
+      const out = required(values, 'out'), file = await newPrivateFile(out);
+      try { const codes = await store.issueCreatorInvites(integer(values, 'count'), now); await file.writeFile(csvLine(['code', 'state']) + codes.map(code => csvLine([code, 'AVAILABLE'])).join(''), 'utf8'); return { issued: codes.length, out }; }
+      finally { await file.close(); }
+    }
     case 'erase-email': {
       const email = normalizeEmail(required(values, 'email'));
       if (!email) throw new Error('ARGUMENT_INVALID: --email');
@@ -184,7 +250,7 @@ async function main(): Promise<void> {
     batch: { type: 'string' }, 'opens-at': { type: 'string' }, count: { type: 'string' }, flight: { type: 'string' }, out: { type: 'string' },
     email: { type: 'string' }, pass: { type: 'string' }, 'email-id': { type: 'string' }, max: { type: 'string' }, reason: { type: 'string' },
     template: { type: 'string' }, 'provider-id': { type: 'string' }, language: { type: 'string' }, 'send-at': { type: 'string' }, file: { type: 'string' },
-    card: { type: 'string' } } });
+    card: { type: 'string' }, apply: { type: 'boolean', default: false } } });
   const tenantId = tenantOf(values), databaseUrl = process.env.DATABASE_URL ?? '';
   if (!/^postgres(ql)?:\/\//.test(databaseUrl)) throw new Error('DATABASE_URL_REQUIRED');
   const db = createDatabase({ connectionString: databaseUrl, maxConnections: 2, applicationName: 'flofi-flight-admin' });

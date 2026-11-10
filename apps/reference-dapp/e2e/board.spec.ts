@@ -127,6 +127,16 @@ const flaps = (scope: Page | Locator, text: string) => scope.getByRole('img', { 
 /** Evidence: a full-page screenshot of each state, kept with the run's results (CircleCI stores them as artifacts). */
 const shot = (page: Page, name: string) => page.screenshot({ path: test.info().outputPath(`${name}.png`), fullPage: true });
 
+/** Language selection is a presentation preference; it never grants campaign or wallet authority. */
+async function chooseLanguage(page: Page, value: 'EN' | 'PT', place: 'header' | 'footer' = 'header') {
+  const scope = page.locator(place);
+  const trigger = scope.getByRole('button', { name: /^(Language|Idioma)$/ });
+  await trigger.click();
+  await scope.getByRole('menuitem', { name: /^(Language|Idioma)/ }).click();
+  await scope.getByRole('menuitemradio', { name: value === 'EN' ? 'English' : 'Português' }).click();
+  await expect(page.locator('html')).toHaveAttribute('lang', value === 'EN' ? 'en' : 'pt-BR');
+}
+
 /** No public aggregate count of people anywhere (BUILD-FLOFI-FLIGHT-LAUNCH-001): page text, server HTML and the anonymous state API. */
 const COUNT = /\d[\d.,]*\s*(ON THE LIST|BOARDED|NA LISTA|EMBARCARAM|EMBARCOU)|FOUNDING SEATS LEFT|ASSENTOS FOUNDING RESTANTES|\b(OF|DE) 100\b|\b100 \/ 100\b/i;
 async function noCounters(page: Page) {
@@ -534,15 +544,15 @@ test('Email 3 access: opening the link consumes nothing, Continue proves the add
   } finally { await viewer.close(); }
 });
 
-test('every CTA and link resolves; the campaign posts link to a real page with the approved image; PT is one choice away', async ({ page, context, request }) => {
+test('every CTA and link resolves; the campaign posts link to a real page with the approved image; PT persists', async ({ page, context, request }) => {
   await at(context, BOARDING);
   await page.goto('/board');
   for (const [name, target] of [['How it works', '#how'], ['Founding', '#founding'], ['Routes', '#routes']] as const)
     await expect(page.getByRole('navigation', { name: 'Flight FloFi navigation' }).getByRole('link', { name })).toHaveAttribute('href', target);
   const footer = page.getByRole('navigation', { name: 'Footer navigation' });
-  for (const [name, href] of [['Privacy', '/privacy'], ['Risks', '/docs/security'], ['Discord', 'https://discord.gg/36rEhdUa'], ['X', 'https://x.com/FloFi_xyz']] as const)
+  for (const [name, href] of [['Terms', '/terms'], ['Privacy', '/privacy'], ['Risks', '/terms#risks'], ['Discord', 'https://discord.gg/36rEhdUa'], ['X', 'https://x.com/FloFi_xyz']] as const)
     await expect(footer.getByRole('link', { name, exact: true })).toHaveAttribute('href', href);
-  for (const path of ['/privacy', '/docs/security', '/', '/login']) expect((await request.get(path)).status(), path).toBe(200);
+  for (const path of ['/terms', '/privacy', '/docs/security', '/', '/login']) expect((await request.get(path)).status(), path).toBe(200);
   await expect(page.locator('footer')).toContainText('DeFi involves risk. A simulation does not guarantee price or outcome.');
   // Every approved post links flofi.xyz/board: the page answers, with the fixed 1200 × 630 Open Graph image.
   const board = await request.get('/board');
@@ -555,9 +565,9 @@ test('every CTA and link resolves; the campaign posts link to a real page with t
   // The landing keeps "Open"; "Board now" lives only on /board.
   await page.goto('/');
   await expect(page.getByRole('button', { name: 'Board now' })).toHaveCount(0);
-  // PT is one choice away, and it is the product's shared preference.
+  // The compact menu shares the product's persistent language preference.
   await page.goto('/board');
-  await page.getByRole('navigation', { name: 'Flight FloFi navigation' }).getByRole('button', { name: 'PT' }).click();
+  await chooseLanguage(page, 'PT');
   await expect(page.getByRole('heading', { level: 1 })).toHaveText('Diga para onde você vai.');
   await expect(page.locator('html')).toHaveAttribute('lang', 'pt-BR');
   // Portuguese is longer: every public state still fits a phone.
@@ -569,9 +579,133 @@ test('every CTA and link resolves; the campaign posts link to a real page with t
     await fitsPhones(page);
     await noCounters(page);
   }
-  await page.getByRole('navigation', { name: 'Navegação do Flight FloFi' }).getByRole('button', { name: 'EN' }).click();
+  await chooseLanguage(page, 'EN');
   await expect(page.getByRole('heading', { level: 1 })).toHaveText('Say where you’re going.');
-  // Sign-in and /app keep working for anyone, whatever their campaign state.
+  // With the rollout flag disabled in this legacy campaign profile, the existing /app behavior is preserved.
   await page.goto('/app');
   await expect(page.getByRole('navigation', { name: 'Workflow stages' })).toBeVisible();
+});
+
+
+test('invite codes remain untouched before launch and show the exact opening message in EN and PT', async ({ page, context }) => {
+  await at(context, FINAL_CALL);
+  await page.goto('/board');
+  const redemptions: string[] = [];
+  page.on('request', request => { if (request.url().endsWith('/api/board/invite')) redemptions.push(request.url()); });
+  for (const language of ['EN', 'PT'] as const) {
+    if (language === 'PT') { await chooseLanguage(page, 'PT'); await page.reload(); }
+    await page.getByRole('button', { name: language === 'PT' ? 'Tenho um código de convite' : 'I have an invite code', exact: true }).click();
+    await page.getByLabel(language === 'PT' ? 'Código de convite' : 'Invite code', { exact: true }).fill('FLF-AAAA-AAAA');
+    await page.getByRole('button', { name: language === 'PT' ? 'Usar convite' : 'Use invite', exact: true }).click();
+    await expect(page.getByRole('alert')).toHaveText(language === 'PT' ? 'Seu código abre na quinta-feira, às 9h (horário de Brasília).' : 'Your code opens Thursday at 9:00 BRT');
+    await expect(page).toHaveURL(/\/board$/);
+  }
+  expect(redemptions).toEqual([]);
+});
+
+test('compact language menus fit header and footer at every launch width, persist EN/PT, and support keyboard and pointer dismissal', async ({ page, context }) => {
+  await at(context, FINAL_CALL);
+  await page.goto('/board');
+  for (const language of ['EN', 'PT'] as const) {
+    if (language === 'PT') await chooseLanguage(page, language);
+    for (const width of [320, 390, 768, 1440]) {
+      await page.setViewportSize({ width, height: 900 });
+      await noOverflow(page);
+      for (const place of ['header', 'footer'] as const) {
+        const scope = page.locator(place), trigger = scope.getByRole('button', { name: language === 'PT' ? 'Idioma' : 'Language', exact: true });
+        await trigger.scrollIntoViewIfNeeded();
+        const box = await trigger.boundingBox();
+        expect(box?.width).toBe(44);
+        expect(box?.height).toBe(44);
+        // A full touch target with no decorative circle or border.
+        await expect(trigger).toHaveCSS('border-top-width', '0px');
+        await expect(trigger).toHaveCSS('border-radius', '6px');
+        await trigger.hover();
+        await page.screenshot({ path: test.info().outputPath(`language-${language}-${width}-${place}-hover.png`) });
+        await trigger.focus();
+        await page.screenshot({ path: test.info().outputPath(`language-${language}-${width}-${place}-focus.png`) });
+        await trigger.press('ArrowDown');
+        const category = scope.getByRole('menuitem', { name: language === 'PT' ? 'Idioma' : 'Language', exact: true });
+        await expect(category).toBeFocused();
+        await category.press('ArrowRight');
+        const selected = scope.getByRole('menuitemradio', { name: language === 'PT' ? 'Português' : 'English' });
+        await expect(selected).toBeFocused();
+        await expect(selected).toHaveAttribute('aria-checked', 'true');
+        await expect(scope.getByRole('menuitemradio', { checked: true })).toHaveCount(1);
+        const panel = scope.locator('[role="menu"]').first(), panelBox = await panel.boundingBox(), anchor = await trigger.boundingBox();
+        expect(panelBox!.x).toBeGreaterThanOrEqual(0);
+        expect(panelBox!.x + panelBox!.width).toBeLessThanOrEqual(width);
+        if (place === 'footer') expect(panelBox!.y + panelBox!.height).toBeLessThan(anchor!.y);
+        else expect(panelBox!.y).toBeGreaterThan(anchor!.y + anchor!.height);
+        await page.screenshot({ path: test.info().outputPath(`language-${language}-${width}-${place}-open.png`) });
+        await selected.press('End');
+        await expect(scope.getByRole('menuitemradio', { name: 'Português' })).toBeFocused();
+        await page.keyboard.press('Home');
+        await expect(scope.getByRole('menuitemradio', { name: 'English' })).toBeFocused();
+        await page.keyboard.press('ArrowUp');
+        await expect(scope.getByRole('menuitemradio', { name: 'Português' })).toBeFocused();
+        await page.keyboard.press('ArrowLeft');
+        await expect(category).toBeFocused();
+        await expect(scope.getByRole('menuitemradio')).toHaveCount(0);
+        await category.press('Escape');
+        await expect(trigger).toBeFocused();
+        await expect(trigger).toHaveAttribute('aria-expanded', 'false');
+        await page.screenshot({ path: test.info().outputPath(`language-${language}-${width}-${place}-closed.png`) });
+        await trigger.click();
+        await scope.getByRole('menuitem', { name: language === 'PT' ? 'Idioma' : 'Language', exact: true }).click();
+        // A real pointer outside the panel closes it without stealing focus.
+        await scope.click({ position: { x: 2, y: 2 } });
+        await expect(trigger).toHaveAttribute('aria-expanded', 'false');
+      }
+    }
+    await page.reload();
+    await expect(page.locator('html')).toHaveAttribute('lang', language === 'PT' ? 'pt-BR' : 'en');
+  }
+  // Selecting from the upward footer menu updates both instances and survives reload.
+  await chooseLanguage(page, 'EN', 'footer');
+  await page.reload();
+  await expect(page.locator('html')).toHaveAttribute('lang', 'en');
+  const compactTouch = await context.browser()!.newContext({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true,
+    storageState: returningVisitor(E2E_APP_ORIGIN) });
+  try {
+    const touch = await compactTouch.newPage();
+    await compactTouch.addCookies([{ name: 'flofi_flight_clock', value: String(FINAL_CALL), url: E2E_APP_ORIGIN }]);
+    await touch.route('**/*', route => new URL(route.request().url()).origin === E2E_APP_ORIGIN ? route.continue() : route.abort('blockedbyclient'));
+    await touch.goto('/board');
+    for (const place of ['header', 'footer'] as const) {
+      const scope = touch.locator(place);
+      await scope.getByRole('button', { name: /^(Language|Idioma)$/ }).tap();
+      await scope.getByRole('menuitem', { name: /^(Language|Idioma)/ }).tap();
+      await scope.getByRole('menuitemradio', { name: 'Português' }).tap();
+      await expect(scope.getByRole('button', { name: 'Idioma', exact: true })).toHaveAttribute('aria-expanded', 'false');
+      await touch.screenshot({ path: test.info().outputPath(`language-PT-390-${place}-touch.png`) });
+    }
+  } finally { await compactTouch.close(); }
+});
+
+test('Terms and Privacy stay public, display one selected language, and preserve the risk and campaign links', async ({ page }) => {
+  for (const language of ['EN', 'PT'] as const) {
+    const termsTitle = language === 'PT' ? 'Termos de Uso' : 'Terms of Use', privacyTitle = language === 'PT' ? 'Política de Privacidade' : 'Privacy Policy';
+    const termsResponse = await page.goto('/terms');
+    expect(termsResponse?.status()).toBe(200);
+    if (language === 'PT') await chooseLanguage(page, 'PT');
+    await expect(page.getByRole('heading', { level: 1 })).toHaveText(termsTitle);
+    await expect(page.locator('main')).not.toContainText(language === 'PT' ? 'Terms of Use' : 'Termos de Uso');
+    await expect(page.locator('#risks h2')).toHaveText(language === 'PT' ? '6. Riscos' : '6. Risks');
+    await expect(page.locator('main')).not.toContainText(language === 'PT' ? 'valor máximo' : 'maximum value');
+    await expect(page.getByRole('link', { name: 'flofi.xyz@gmail.com', exact: true })).toHaveAttribute('href', 'mailto:flofi.xyz@gmail.com');
+    for (const width of [320, 390, 768, 1440]) {
+      await page.setViewportSize({ width, height: 900 }); await noOverflow(page);
+    }
+    const privacyResponse = await page.goto('/privacy');
+    expect(privacyResponse?.status()).toBe(200);
+    await expect(page.getByRole('heading', { level: 1 })).toHaveText(privacyTitle);
+    await expect(page.locator('main')).not.toContainText(language === 'PT' ? 'Privacy Policy' : 'Política de Privacidade');
+    await expect(page.locator(language === 'PT' ? '#campanha-flight-flofi' : '#flight-flofi')).toContainText(language === 'PT' ? 'acesso Flight ativo' : 'active Flight access');
+    await expect(page.locator('footer').getByRole('link', { name: language === 'PT' ? 'Termos' : 'Terms', exact: true })).toHaveAttribute('href', '/terms');
+    for (const width of [320, 390, 768, 1440]) {
+      await page.setViewportSize({ width, height: 900 }); await noOverflow(page);
+    }
+    await shot(page, `privacy-${language}`);
+  }
 });
