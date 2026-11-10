@@ -3,7 +3,7 @@
  * BUILD-FLOFI-FLIGHT-001: the /board copy. English is the team-approved Claude Artifact "Flight FloFi" (version 1793892357-f7d9), word for
  * word: the "Landing" boards (desktop, final call, five mobile states), the cards and the approved post "Gate closed. Boarding starts
  * tomorrow." for the night between the list closing and boarding. The boards are English only; the Portuguese is a translation for the
- * page's EN · PT switch (to be confirmed by the team). Numbers on the page are always real; the boards' sample numbers are not used.
+ * page's shared language menu (to be confirmed by the team). Numbers on the page are always real; the boards' sample numbers are not used.
  *
  * BUILD-FLOFI-FLIGHT-LAUNCH-001 (artifact version 1794236006-f919): no public count of people anywhere ("CLOSED BETA · OPENING IN GROUPS",
  * "PASSENGER SEATS OPEN" in place of the counters, the "FOUNDING FULL" banner without a number, no "N OF 100" bar); the marquee says FINAL
@@ -65,7 +65,7 @@ const EN = {
     ['Numbered seat.', 'Founding Member #001 to #100, in boarding order.'],
     ['FloFi in Claude and ChatGPT.', 'Early access to FloFi inside the assistants you already use.'],
     ['The team beside you.', 'Help from the FloFi team on Discord while you learn the ropes.'],
-    ['Your name on the wall.', 'A spot on the Founding Members wall.'],
+    ['Your @ on the wall.', 'A spot on the Founding Members wall.'],
     ['3 invites.', 'Bring three people on board, no list needed.']],
     cardYou: '@you', cardSeat: 'Founding Member #001–#100' },
   routes: { eyebrow: 'Example routes', title: ['Not sure where to go? ', 'Pick a route.'], use: 'Use this route', items: [
@@ -159,7 +159,7 @@ const PT: Copy = {
     ['Assento numerado.', 'Founding Member #001 a #100, na ordem de embarque.'],
     ['A FloFi no Claude e no ChatGPT.', 'Acesso antecipado à FloFi dentro dos assistentes que você já usa.'],
     ['O time do seu lado.', 'Ajuda do time FloFi no Discord enquanto você pega o jeito.'],
-    ['Seu nome no mural.', 'Um lugar no mural dos Founding Members.'],
+    ['Seu @ no mural.', 'Um lugar no mural dos Founding Members.'],
     ['3 convites.', 'Traga três pessoas a bordo, sem precisar da lista.']],
     cardYou: '@voce', cardSeat: 'Founding Member #001–#100' },
   routes: { eyebrow: 'Rotas de exemplo', title: ['Não sabe para onde ir? ', 'Escolha uma rota.'], use: 'Usar esta rota', items: [

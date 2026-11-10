@@ -6,6 +6,7 @@
  * The injected test wallet only signs sign-in messages; nothing is sent to any chain and no public network is reached.
  */
 import { createHash } from 'node:crypto';
+import { readFile } from 'node:fs/promises';
 import { createDatabase, type Database } from '@defi-workflow-engine/cloud-runtime';
 import { createTestWallet } from '../../../packages/reference-reconciler/test/test-wallet.ts';
 import { runAdminCommand } from '../src/admin/cli-commands.ts';
@@ -173,6 +174,81 @@ test('admin console: refusal until granted, overview with network distribution, 
     const kinds = (await db.query<{ kind: string; outcome: string }>(`SELECT kind, outcome FROM admin_audit_events ORDER BY event_id`)).rows.map(r => `${r.kind}:${r.outcome}`);
     expect(kinds).toEqual(['ADMIN_SIGN_IN:REFUSED', 'ADMIN_PRINCIPAL_GRANTED:OK', 'ADMIN_SIGN_IN:OK', 'ADMIN_COPILOT_SETTINGS_SAVED:OK', 'ADMIN_SIGN_OUT:OK']);
     expect(errors).toEqual([]);
+    networkGuard.assertClean();
+  } finally { await db.close(); }
+});
+
+test('Flight Admin: live aggregates, OPERATOR subscriber filters/export and VIEWER privacy on mobile', async ({ page, networkGuard }) => {
+  test.setTimeout(120_000);
+  page.setDefaultTimeout(15_000);
+  const db = createDatabase({ connectionString: process.env.FLOFI_E2E_DATABASE_URL!, maxConnections: 2 });
+  const operator = createTestWallet(), viewer = createTestWallet();
+  try {
+    await db.query(`INSERT INTO flight_list_entries (tenant_id, entry_id, email, flight, language, notice, joined_at)
+      SELECT 'default', 'fle_' || lpad(n::text, 32, '0'), 'flight-admin-' || lpad(n::text, 2, '0') || '@example.test',
+        CASE WHEN n = 26 THEN 'NEXT' ELSE 'FIRST' END, CASE WHEN n % 2 = 0 THEN 'PT' ELSE 'EN' END,
+        '2026-11-09', '2026-11-09T12:00:00Z'::timestamptz + n * interval '1 minute' FROM generate_series(1,26) n`);
+    await runAdminCommand('grant', { wallet: operator.address, role: 'OPERATOR', label: 'Flight browser operator' }, db, 'default');
+    await runAdminCommand('grant', { wallet: viewer.address, role: 'VIEWER', label: 'Flight browser viewer' }, db, 'default');
+    await installJourneyWallet(page, [operator, viewer], { chain: '0x14a34' });
+    await page.goto('/admin/flight');
+    expect(new URL(page.url()).pathname).toBe('/admin/login');
+    await page.getByRole('listitem').filter({ hasText: 'Browser wallet' }).click();
+    await page.waitForURL(url => url.pathname === '/admin');
+    await page.getByRole('navigation', { name: 'Admin' }).getByRole('link', { name: 'Flight FloFi' }).click();
+    await expect(page.getByRole('heading', { name: 'Flight FloFi', exact: true })).toBeVisible();
+    await expect(page.locator('.admin-kpi').filter({ hasText: 'FIRST registrations' }).locator('strong')).toHaveText('25');
+    await expect(page.locator('.admin-kpi').filter({ hasText: 'NEXT registrations' }).locator('strong')).toHaveText('1');
+    await expect(page.locator('.admin-kpi').filter({ hasText: 'List awaiting boarding' }).locator('strong')).toHaveText('26');
+    await expect(page.getByText('DELIVERED: unverified', { exact: false })).toBeVisible();
+    await page.getByLabel('Email search').fill('flight-admin-');
+    await page.getByRole('button', { name: 'Search subscribers' }).click();
+    const table = page.getByRole('table', { name: 'Flight subscribers' });
+    await expect(table.locator('tbody tr')).toHaveCount(25);
+    await expect(page.getByText('26 matching registrations')).toBeVisible();
+    expect(new URL(page.url()).search).toBe('');
+    await page.getByRole('button', { name: 'Next', exact: true }).click();
+    await expect(table.locator('tbody tr')).toHaveCount(1);
+    await expect(page.getByText('Page 2 of 2')).toBeVisible();
+    await page.getByLabel('Flight', { exact: true }).selectOption('NEXT');
+    await page.getByLabel('Language', { exact: true }).selectOption('PT');
+    await page.getByLabel('From', { exact: true }).fill('2026-11-09');
+    await page.getByLabel('Through', { exact: true }).fill('2026-11-09');
+    await page.getByRole('button', { name: 'Search subscribers' }).click();
+    await expect(table.locator('tbody tr')).toHaveCount(1);
+    await expect(table).toContainText('flight-admin-26@example.test');
+    const downloadEvent = page.waitForEvent('download');
+    await page.getByRole('button', { name: 'Export filtered CSV' }).click();
+    const downloaded = await downloadEvent, csv = await readFile((await downloaded.path())!, 'utf8');
+    expect(csv).toContain('flight-admin-26@example.test');
+    expect(csv).not.toContain('flight-admin-25@example.test');
+    const pii = await page.request.get('/admin/api/flight/entries');
+    expect(pii.status()).toBe(405);
+    expect(pii.headers()['cache-control']).toContain('no-store');
+    expect(pii.headers()['x-robots-tag']).toBe('noindex, nofollow');
+    await page.screenshot({ path: test.info().outputPath('flight-admin-desktop.png'), fullPage: true });
+    await page.setViewportSize({ width: 390, height: 844 });
+    await expect(page.getByLabel('Email search')).toBeVisible();
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+    await page.screenshot({ path: test.info().outputPath('flight-admin-mobile.png'), fullPage: true });
+
+    await page.getByRole('button', { name: 'Sign out', exact: true }).click();
+    await page.waitForURL(url => url.pathname === '/admin/login');
+    await page.evaluate(address => (window as unknown as { flofiJourneyWallet: { switchAccount(a: string): void } }).flofiJourneyWallet.switchAccount(address), viewer.address);
+    await page.getByRole('listitem').filter({ hasText: 'Browser wallet' }).click();
+    await page.waitForURL(url => url.pathname === '/admin');
+    await page.goto('/admin/flight');
+    await expect(page.getByRole('region', { name: 'Campaign totals' })).toBeVisible();
+    await expect(page.getByText('Subscriber addresses and CSV exports require an OPERATOR session.')).toBeVisible();
+    await expect(page.getByLabel('Email search')).toHaveCount(0);
+    expect(await page.content()).not.toContain('flight-admin-26@example.test');
+    const metrics = await page.request.get('/admin/api/flight');
+    expect(metrics.status()).toBe(200);
+    expect(await metrics.text()).not.toContain('@example.test');
+    const events = (await db.query<{ kind: string; detail: unknown }>(`SELECT kind, detail FROM admin_audit_events WHERE kind IN ('ADMIN_FLIGHT_VIEWED','ADMIN_FLIGHT_EXPORTED')`)).rows;
+    expect(events.filter(row => row.kind === 'ADMIN_FLIGHT_VIEWED')).toHaveLength(3);
+    expect(events.filter(row => row.kind === 'ADMIN_FLIGHT_EXPORTED')).toHaveLength(1);
+    expect(JSON.stringify(events)).not.toContain('flight-admin-');
     networkGuard.assertClean();
   } finally { await db.close(); }
 });

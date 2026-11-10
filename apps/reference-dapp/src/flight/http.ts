@@ -134,7 +134,8 @@ export async function handleBoard(request: Request): Promise<Response> {
     const person = await flightPerson();
     if (!person) return refuse(401, 'FLIGHT_SIGN_IN_REQUIRED');
     const now = await flightNow(), pending = await pendingSession(request);
-    const bound = pending ? await bindPending(person, pending, now) : 'NONE';
+    const pendingBound = pending ? await bindPending(person, pending, now) : 'NONE';
+    const bound = pendingBound === 'NONE' ? await store.claimVerifiedEntry({ ...person, now }) : pendingBound;
     const state = await store.account({ ...person, now }), detail = accessResultDetail(state.access);
     const origin: FlightOrigin | null = state.access.kind === 'eligible' ? state.access.origin : null;
     if (detail) await store.recordEvent('access_result', detail, origin, now);

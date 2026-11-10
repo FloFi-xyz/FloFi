@@ -10,7 +10,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createLogger } from '@defi-workflow-engine/cloud-runtime';
 import type { SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
 import { createTestDatabase, type TestDatabase } from '../../../../packages/cloud-runtime/test/pg-harness.ts';
-import { ACCESS_LINK_MS, addressHash, CODE_MAX_ATTEMPTS, codeFor, linkTokenFor } from './access';
+import { ACCESS_LINK_MS, ACCESS_SESSION_MS, addressHash, CODE_MAX_ATTEMPTS, codeFor, linkTokenFor } from './access';
 import { createAccessStore, type AccessStore } from './access-store';
 import { FLIGHT_DEFAULT_CALENDAR, flightRoute } from './campaign';
 import { createEmailDelivery } from './email/delivery';
@@ -326,6 +326,63 @@ describe('access by link and code', () => {
     expect(await access.consumeLink({ token: linkTokenFor(SECRET, id3), accountId: owner, client: null, now: BOARDING })).toEqual({ status: 'ACCOUNT_HAS_OTHER_ENTRY' });
   });
 
+  it('persists verified-email boarding access for later wallet sessions, without binding during an account read or permitting a second account', async () => {
+    const email = 'recurring@flofi-test.dev', owner = await newAccount(), other = await newAccount();
+    await store.joinList({ email, language: 'PT', flight: 'FIRST', client: null, now: BEFORE });
+    const input = { accountId: owner, emails: [email], now: BOARDING };
+    expect((await store.account(input)).access).toEqual({ kind: 'eligible', origin: 'LIST' });
+    expect(await rows('SELECT count(*)::int AS n FROM flight_access_claims WHERE account_id = $1', [owner])).toEqual([{ n: 0 }]);
+    // Only the explicit Board now handler calls this method with the server's verified identities.
+    expect(await store.claimVerifiedEntry(input)).toBe('CLAIMED');
+    expect(await store.claimVerifiedEntry(input)).toBe('CLAIMED');
+    expect(await store.claimVerifiedEntry({ accountId: other, emails: [email], now: BOARDING })).toBe('CLAIMED_ELSEWHERE');
+    // A new request/device needs only the same authenticated account, even without an email identity in that session.
+    expect((await store.account({ accountId: owner, emails: [], now: BOARDING })).access).toEqual({ kind: 'eligible', origin: 'LIST' });
+    expect((await store.account({ accountId: other, emails: [email], now: BOARDING })).access.kind).toBe('not_listed');
+    await simulate(other, 'wf-denied-recurring');
+    expect(await store.issuePass({ accountId: other, emails: [email], workflowId: 'wf-denied-recurring', handle: null, public: false, now: BOARDING }))
+      .toEqual({ ok: false, code: 'FLIGHT_NOT_ELIGIBLE' });
+    await simulate(owner, 'wf-recurring');
+    const issued = await store.issuePass({ accountId: owner, emails: [], workflowId: 'wf-recurring', handle: null, public: false, now: BOARDING });
+    expect(issued).toMatchObject({ ok: true, issued: true });
+    const repeated = await store.issuePass({ accountId: owner, emails: [], workflowId: null, handle: null, public: false, now: BOARDING + 60_000 });
+    expect(repeated).toMatchObject({ ok: true, issued: false });
+    expect(repeated.ok && issued.ok && repeated.pass.passId).toBe(issued.ok && issued.pass.passId);
+    expect((await rows('SELECT language FROM flight_emails WHERE recipient = $1 AND template IN (\'CARD_FOUNDING\', \'CARD_PASSENGER\')', [email])))
+      .toEqual([{ language: 'PT' }]);
+  });
+
+  it('a claimed link cannot be bypassed using another account with the same verified address; an expired pending session grants nothing', async () => {
+    const email = 'claimed-owner@flofi-test.dev', owner = await newAccount(), other = await newAccount();
+    await store.joinList({ email, language: 'EN', flight: 'FIRST', client: null, now: BEFORE });
+    const entry = (await rows('SELECT entry_id FROM flight_list_entries WHERE email = $1', [email]))[0]!.entry_id as string;
+    const id = `fem_${hex(16)}`;
+    const token = await access.issueToken({ emailId: id, entryId: entry, codeMs: 15 * 60_000, now: BOARDING });
+    const pending = await access.consumeLink({ token: token.link, accountId: null, client: null, now: BOARDING });
+    expect(pending.status).toBe('SESSION');
+    expect(await access.bindSession({ session: (pending as { session: string }).session, accountId: other, now: BOARDING + ACCESS_SESSION_MS })).toBe('NONE');
+    expect((await store.account({ accountId: other, emails: [], now: BOARDING })).access.kind).toBe('not_listed');
+    const next = await access.issueToken({ emailId: `fem_${hex(16)}`, entryId: entry, codeMs: 15 * 60_000, now: BOARDING });
+    expect(await access.consumeLink({ token: next.link, accountId: owner, client: null, now: BOARDING })).toEqual({ status: 'CLAIMED' });
+    expect((await store.account({ accountId: other, emails: [email], now: BOARDING })).access.kind).toBe('not_listed');
+    expect(await access.consumeCode({ email, code: next.code, accountId: other, client: null, now: BOARDING })).toEqual({ status: 'INVALID' });
+  });
+
+  it('serializes a link claim against another account boarding on the verified address', async () => {
+    const email = 'claim-race@flofi-test.dev', owner = await newAccount(), other = await newAccount();
+    await store.joinList({ email, language: 'EN', flight: 'FIRST', client: null, now: BEFORE });
+    const entry = (await rows('SELECT entry_id FROM flight_list_entries WHERE email = $1', [email]))[0]!.entry_id as string;
+    const token = await access.issueToken({ emailId: `fem_${hex(16)}`, entryId: entry, codeMs: 15 * 60_000, now: BOARDING });
+    await simulate(other, 'wf-race');
+    const [claim, pass] = await Promise.all([
+      access.consumeLink({ token: token.link, accountId: owner, client: null, now: BOARDING }),
+      store.issuePass({ accountId: other, emails: [email], workflowId: 'wf-race', handle: null, public: false, now: BOARDING }),
+    ]);
+    expect(claim.status === 'CLAIMED' && pass.ok).toBe(false);
+    if (claim.status === 'CLAIMED') expect(pass).toEqual({ ok: false, code: 'FLIGHT_NOT_ELIGIBLE' });
+    else { expect(claim.status).toBe('BOARDED'); expect(pass).toMatchObject({ ok: true, issued: true }); }
+  });
+
   it('shows the masked address before Continue, refuses an entry that already boarded, and never lets a test-flight simulation issue a numbered card', async () => {
     await store.joinList({ email: 'peek@flofi-test.dev', language: 'EN', flight: 'FIRST', client: null, now: BEFORE });
     const entry = (await rows(`SELECT entry_id FROM flight_list_entries WHERE email = 'peek@flofi-test.dev'`))[0]!.entry_id as string;
@@ -386,8 +443,10 @@ describe('access by link and code', () => {
     expect(await access.requestAccess({ email: 'later@flofi-test.dev', language: 'PT', client: null, now: BOARDING, groupOpen: closed })).toBe('OK');
     expect((await emailsOf('later@flofi-test.dev')).map(e => e.template)).toEqual(['LIST_CONFIRMATION']);
     // Repeated requests in one hour collapse into one queued email (and at most 3 are counted per address and hour).
-    for (let i = 0; i < 5; i++) expect(await access.requestAccess({ email: 'later@flofi-test.dev', language: 'PT', client: null, now: BOARDING + i, groupOpen: open })).toBe('OK');
+    // Opening recovery on an English page must not change a Portuguese subscriber's email language.
+    for (let i = 0; i < 5; i++) expect(await access.requestAccess({ email: 'later@flofi-test.dev', language: 'EN', client: null, now: BOARDING + i, groupOpen: open })).toBe('OK');
     expect((await emailsOf('later@flofi-test.dev')).filter(e => e.template === 'ACCESS_REQUESTED')).toHaveLength(1);
+    expect(await rows(`SELECT language FROM flight_emails WHERE recipient = 'later@flofi-test.dev' AND template = 'ACCESS_REQUESTED'`)).toEqual([{ language: 'PT' }]);
     expect(await access.requestAccess({ email: 'later@flofi-test.dev', language: 'PT', client: null, now: BOARDING + 2 * 3_600_000, groupOpen: open })).toBe('OK');
     expect((await emailsOf('later@flofi-test.dev')).filter(e => e.template === 'ACCESS_REQUESTED')).toHaveLength(2);
     // A tenant-wide daily cap keeps requests from spending the email quota (the answer stays the same).

@@ -62,6 +62,10 @@ Decisions applied (team, 9 Nov 2026): provider **Resend, free plan**; sender **`
 
 ## 5. Replies: `hello@flofi.xyz` → `flofi.xyz@gmail.com` (free)
 
+**Update, 10 Nov 2026:** the public zone is on Vercel and its root has no MX. The concrete ImprovMX Free procedure, observed DNS,
+required records and Gmail acceptance checklist are in [FLIGHT-INBOUND-IMPROVMX.md](./FLIGHT-INBOUND-IMPROVMX.md).
+That procedure takes precedence for this zone. No forwarding has been activated by engineering.
+
 Emails go out with `Reply-To: flofi.xyz@gmail.com`, so replies already reach Gmail directly. Forwarding `hello@flofi.xyz` covers people who
 write to the sender address itself.
 

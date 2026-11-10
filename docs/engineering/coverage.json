@@ -985,6 +985,30 @@
     "cloud-runtime.flight-launch-migration.pg": {
       "path": "packages/cloud-runtime/test/flight-launch-migration.pg.test.ts",
       "stage": "postgres"
+    },
+    "app.admin.flight": {
+      "path": "apps/reference-dapp/src/admin/flight.test.ts",
+      "stage": "unit"
+    },
+    "app.admin.flight.pg": {
+      "path": "apps/reference-dapp/src/admin/flight.pg.test.ts",
+      "stage": "postgres"
+    },
+    "app.flight.identity-http": {
+      "path": "apps/reference-dapp/src/flight/identity-http.test.ts",
+      "stage": "unit"
+    },
+    "app.flight.email.templates": {
+      "path": "apps/reference-dapp/src/flight/email/templates.test.ts",
+      "stage": "unit"
+    },
+    "app.e2e.admin-console": {
+      "path": "apps/reference-dapp/e2e/admin-console.spec.ts",
+      "stage": "browser"
+    },
+    "app.legal.privacy": {
+      "path": "apps/reference-dapp/src/app/privacy/page.test.tsx",
+      "stage": "unit"
     }
   },
   "requiredUnitSuites": [
@@ -1046,7 +1070,11 @@
     "reference-executor.bound-composition",
     "reference-executor.cross-chain-liquidity-recovery",
     "reference-reconciler.evidence",
-    "app.flight.launch"
+    "app.flight.launch",
+    "app.admin.flight",
+    "app.flight.identity-http",
+    "app.flight.email.templates",
+    "app.legal.privacy"
   ],
   "modules": [
     {
@@ -1793,7 +1821,8 @@
         "apps/reference-dapp/src/app/how-it-works/page.tsx",
         "apps/reference-dapp/src/app/developers/page.tsx",
         "apps/reference-dapp/src/app/faq/page.tsx",
-        "apps/reference-dapp/src/app/editor.css"
+        "apps/reference-dapp/src/app/editor.css",
+        "apps/reference-dapp/src/app/terms/page.tsx"
       ],
       "suites": [
         "app.e2e.canvas-keyboard",
@@ -1802,7 +1831,9 @@
         "app.i18n.catalog",
         "app.i18n.locale",
         "app.e2e.site",
-        "app.e2e.editor-redesign"
+        "app.e2e.editor-redesign",
+        "app.e2e.flight",
+        "app.legal.privacy"
       ],
       "gaps": [
         "Browser profiles cover selected journeys; full accessibility audit, device matrix and language completeness remain acceptance gaps."
@@ -3862,7 +3893,8 @@
         "apps/reference-dapp/src/flight/simulation-record.ts",
         "apps/reference-dapp/src/flight/store.ts",
         "packages/cloud-runtime/migrations/0020_flight_flofi.sql",
-        "packages/cloud-runtime/migrations/0024_flight_launch.sql"
+        "packages/cloud-runtime/migrations/0024_flight_launch.sql",
+        "apps/reference-dapp/src/flight/email/templates-v1.ts"
       ],
       "suites": [
         "app.flight.campaign",
@@ -3871,7 +3903,9 @@
         "app.flight.launch",
         "app.flight.launch.pg",
         "cloud-runtime.flight-launch-migration.pg",
-        "app.e2e.flight"
+        "app.e2e.flight",
+        "app.flight.identity-http",
+        "app.flight.email.templates"
       ],
       "gaps": [
         "Email goes out through Resend from the Railway worker (FLOFI_FLIGHT_EMAIL=enabled); tests use a fake provider in the test process, so delivery, spam placement, DNS (SPF/DKIM/DMARC) and the account's real quota are not proven by tests. The FloFi quota counts FloFi's own reservations only (sends outside FloFi need the external reserve and reconciliation in the Resend dashboard). No bounce or complaint webhook is consumed. Joining has no confirmation step (any address can be submitted); campaign access needs a proven address (Privy-verified login email, or the access link or code). X handles are self-declared. Production rate and abuse behaviour is not measured by tests; browser funnel events are limited per instance."
@@ -7017,6 +7051,34 @@
         "Mapped suites are representative boundary tests, not exhaustive path or public execution coverage.",
         "Mapped fork suites include existing owner-gated cases that may skip; a successful stage is not proof those optional cases ran."
       ]
+    },
+    {
+      "id": "flight-admin--admin-analytics",
+      "primary": "flofi-admin-analytics",
+      "dependencies": [
+        "flofi-data-privacy",
+        "flofi-frontend-ux",
+        "flofi-infrastructure-ci",
+        "flofi-security"
+      ],
+      "sharedFinancialCore": false,
+      "sources": [
+        "apps/reference-dapp/src/admin/flight.ts",
+        "apps/reference-dapp/src/admin/flight-http.ts",
+        "apps/reference-dapp/src/app/admin/api/flight/route.ts",
+        "apps/reference-dapp/src/app/admin/api/flight/entries/route.ts",
+        "apps/reference-dapp/src/app/admin/api/flight/export/route.ts",
+        "apps/reference-dapp/src/app/admin/flight/page.tsx",
+        "apps/reference-dapp/src/components/admin/flight-console.tsx"
+      ],
+      "suites": [
+        "app.admin.flight",
+        "app.admin.flight.pg",
+        "app.e2e.admin-console"
+      ],
+      "gaps": [
+        "Disposable PostgreSQL and browser fixtures prove scoped query/auth/export contracts; they do not prove the production Neon data or hosted operator acceptance. SENT records provider acceptance, no delivery webhook is consumed."
+      ]
     }
   ],
   "requiredPostgresSuites": [
@@ -7054,6 +7116,7 @@
     "cloud-runtime.tenancy.pg",
     "cloud-runtime.user-funded-groups-migration.pg",
     "app.flight.launch.pg",
-    "cloud-runtime.flight-launch-migration.pg"
+    "cloud-runtime.flight-launch-migration.pg",
+    "app.admin.flight.pg"
   ]
 }

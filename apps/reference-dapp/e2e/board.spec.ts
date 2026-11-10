@@ -67,7 +67,7 @@ async function at(context: BrowserContext, clock: number) {
   await context.addCookies([{ name: 'flofi_flight_clock', value: String(clock), url: E2E_APP_ORIGIN }]);
 }
 /** The MOCKED Privy stand-in for this context and the identity a sign-in will use. */
-async function privy(page: Page, identity: { email?: string }) {
+async function privy(page: Page, identity: { email?: string; wallet?: { address: string; chain?: 'ethereum' | 'solana' } }) {
   const context = page.context();
   await context.route(`${E2E_APP_ORIGIN}/__privy-e2e/**`, async route => {
     const path = new URL(route.request().url()).pathname.slice('/__privy-e2e/'.length);
@@ -534,6 +534,52 @@ test('Email 3 access: opening the link consumes nothing, Continue proves the add
   } finally { await viewer.close(); }
 });
 
+test('Email 3 before login continues through Privy; the linked wallet returns on another device without another email prompt', async ({ browser }) => {
+  const email = `wallet-recurring-${run}@flofi-e2e.test`, wallet = `0x${randomBytes(20).toString('hex')}`;
+  await query(`INSERT INTO flight_list_entries (tenant_id,entry_id,email,flight,language,notice)
+    VALUES ('default',$1,$2,'FIRST','EN','2026-11-09')`, [`fle_${randomBytes(16).toString('hex')}`, email]);
+  const { link } = await accessEmail(email);
+  const first = await browser.newContext({ baseURL: E2E_APP_ORIGIN, storageState: returningVisitor(E2E_APP_ORIGIN) }), page = await first.newPage();
+  let owner: string;
+  try {
+    await at(first, BOARDING); await privy(page, { wallet: { address: wallet } });
+    await page.goto(`/board/access#t=${link}`);
+    await expect(page.locator('main')).toContainText('This link is for w***@flofi-e2e.test.');
+    await page.getByRole('button', { name: 'Continue', exact: true }).click();
+    await expect(page).toHaveURL(/\/login\?returnTo=%2Fboard%3Fboard%3D1$/);
+    // The loopback Privy emulator supplies a verified external-wallet identity. No email is typed in the sign-in form.
+    await page.getByRole('button', { name: 'Web3 Wallet', exact: true }).click();
+    await expect(page).toHaveURL(/\/app$/);
+    const claims = await query<{ account_id: string }>(`SELECT c.account_id FROM flight_access_claims c JOIN flight_list_entries e
+      ON e.tenant_id=c.tenant_id AND e.entry_id=c.entry_id WHERE e.email=$1`, [email]);
+    expect(claims).toHaveLength(1); owner = claims[0]!.account_id;
+    expect(await query("SELECT 1 FROM flofi_account_identities WHERE account_id=$1 AND kind='EMAIL'", [owner])).toEqual([]);
+  } finally { await first.close(); }
+  const returning = await browser.newContext({ baseURL: E2E_APP_ORIGIN, storageState: returningVisitor(E2E_APP_ORIGIN) }), device = await returning.newPage();
+  try {
+    await at(returning, BOARDING); await privy(device, { wallet: { address: wallet } });
+    await device.goto('/board?board=1');
+    await expect(device).toHaveURL(/\/login\?returnTo=%2Fboard%3Fboard%3D1$/);
+    await device.getByRole('button', { name: 'Web3 Wallet', exact: true }).click();
+    await expect(device).toHaveURL(/\/app$/);
+    const state = await device.request.get('/api/board/state');
+    expect(await state.json()).toMatchObject({ me: { signedIn: true, hasEmail: false, flight: { access: { kind: 'eligible', origin: 'LIST' } } } });
+    expect(await query("SELECT account_id FROM flofi_account_identities WHERE kind='EIP155' AND subject=$1", [wallet])).toEqual([{ account_id: owner! }]);
+    await device.goto(`/board/access#t=${link}`);
+    await expect(device.locator('p[role="alert"]')).toHaveText('That link or code is not valid. Ask for a new one.');
+  } finally { await returning.close(); }
+  const wrong = await browser.newContext({ baseURL: E2E_APP_ORIGIN, storageState: returningVisitor(E2E_APP_ORIGIN) }), stranger = await wrong.newPage();
+  try {
+    await at(wrong, BOARDING); await privy(stranger, { wallet: { address: `0x${randomBytes(20).toString('hex')}` } });
+    await stranger.goto('/board?board=1');
+    await expect(stranger).toHaveURL(/\/login\?returnTo=%2Fboard%3Fboard%3D1$/);
+    await stranger.getByRole('button', { name: 'Web3 Wallet', exact: true }).click();
+    await expect(stranger.getByRole('heading', { level: 1 })).toHaveText('Not on the list. Yet.');
+    expect(await query(`SELECT c.account_id FROM flight_access_claims c JOIN flight_list_entries e
+      ON e.tenant_id=c.tenant_id AND e.entry_id=c.entry_id WHERE e.email=$1`, [email])).toEqual([{ account_id: owner! }]);
+  } finally { await wrong.close(); }
+});
+
 test('every CTA and link resolves; the campaign posts link to a real page with the approved image; PT is one choice away', async ({ page, context, request }) => {
   await at(context, BOARDING);
   await page.goto('/board');
@@ -555,9 +601,11 @@ test('every CTA and link resolves; the campaign posts link to a real page with t
   // The landing keeps "Open"; "Board now" lives only on /board.
   await page.goto('/');
   await expect(page.getByRole('button', { name: 'Board now' })).toHaveCount(0);
-  // PT is one choice away, and it is the product's shared preference.
+  // The compact menu remembers the product's shared language preference.
   await page.goto('/board');
-  await page.getByRole('navigation', { name: 'Flight FloFi navigation' }).getByRole('button', { name: 'PT' }).click();
+  await page.getByRole('navigation', { name: 'Flight FloFi navigation' }).getByRole('button', { name: 'Language', exact: true }).click();
+  await page.getByRole('menuitem', { name: 'Language' }).click();
+  await page.getByRole('menuitemradio', { name: 'Português' }).click();
   await expect(page.getByRole('heading', { level: 1 })).toHaveText('Diga para onde você vai.');
   await expect(page.locator('html')).toHaveAttribute('lang', 'pt-BR');
   // Portuguese is longer: every public state still fits a phone.
@@ -569,9 +617,62 @@ test('every CTA and link resolves; the campaign posts link to a real page with t
     await fitsPhones(page);
     await noCounters(page);
   }
-  await page.getByRole('navigation', { name: 'Navegação do Flight FloFi' }).getByRole('button', { name: 'EN' }).click();
+  await page.getByRole('navigation', { name: 'Navegação do Flight FloFi' }).getByRole('button', { name: 'Idioma', exact: true }).click();
+  await page.getByRole('menuitem', { name: 'Language' }).click();
+  await page.getByRole('menuitemradio', { name: 'English' }).click();
   await expect(page.getByRole('heading', { level: 1 })).toHaveText('Say where you’re going.');
   // Sign-in and /app keep working for anyone, whatever their campaign state.
   await page.goto('/app');
   await expect(page.getByRole('navigation', { name: 'Workflow stages' })).toBeVisible();
+});
+
+test('the compact Flight language menu supports keyboard, touch, legal navigation and saved language; airport text is white', async ({ page, context }) => {
+  await at(context, BOARDING);
+  await page.goto('/board');
+  const trigger = page.getByRole('navigation', { name: 'Flight FloFi navigation' }).getByRole('button', { name: 'Language', exact: true });
+  await expect(trigger).toHaveText('···');
+  await expect(page.getByRole('button', { name: /^(EN|PT)$/ })).toHaveCount(0);
+  await trigger.focus(); await page.keyboard.press('ArrowDown');
+  await expect(page.getByRole('menuitem', { name: 'Language' })).toBeFocused();
+  await page.keyboard.press('ArrowRight');
+  await expect(page.getByRole('menuitemradio', { name: 'English' })).toBeFocused();
+  await page.keyboard.press('ArrowDown');
+  await expect(page.getByRole('menuitemradio', { name: 'Português' })).toBeFocused();
+  await page.keyboard.press('Escape');
+  await expect(page.getByRole('menu')).toHaveCount(0);
+  await expect(trigger).toBeFocused();
+  // Selecting a language persists through a new server-rendered legal page.
+  await trigger.click(); await page.getByRole('menuitem', { name: 'Language' }).click();
+  await page.getByRole('menuitemradio', { name: 'Português' }).click();
+  await expect(page.locator('html')).toHaveAttribute('lang', 'pt-BR');
+  await page.getByRole('navigation', { name: 'Navegação do rodapé' }).getByRole('link', { name: 'Termos', exact: true }).click();
+  await expect(page.getByRole('heading', { level: 1 })).toHaveText('Termos de Uso');
+  await expect(page.getByRole('heading', { name: '1. Quem somos e aceite', exact: true })).toBeVisible();
+  await expect(page.getByRole('heading', { name: '1. Who we are and acceptance', exact: true })).toHaveCount(0);
+  await fitsPhones(page);
+  await page.getByRole('navigation', { name: 'Navegação', exact: true }).getByRole('link', { name: 'Privacidade', exact: true }).click();
+  await expect(page.getByRole('heading', { level: 1 })).toHaveText('Política de Privacidade');
+  await expect(page.getByRole('heading', { name: '1. Quem cuida dos seus dados', exact: true })).toBeVisible();
+  await expect(page.getByRole('heading', { name: '1. Who handles your data', exact: true })).toHaveCount(0);
+  await expect(page.getByRole('link', { name: 'Termos', exact: true }).first()).toHaveAttribute('href', '/terms');
+  await fitsPhones(page);
+  await page.setViewportSize({ width: 360, height: 800 });
+  await page.getByRole('button', { name: 'Idioma', exact: true }).click();
+  await page.getByRole('menuitem', { name: 'Language' }).click();
+  await page.getByRole('menuitemradio', { name: 'English' }).click();
+  await expect(page.getByRole('heading', { level: 1 })).toHaveText('Privacy Policy');
+  await page.reload(); await expect(page.getByRole('heading', { level: 1 })).toHaveText('Privacy Policy');
+  await expect(page.locator('link[rel="canonical"]')).toHaveAttribute('href', 'https://flofi.xyz/privacy');
+  await at(context, FINAL_CALL);
+  await page.goto('/board');
+  // Both split-flap letters and departure headers remain white in desktop/mobile, both themes and reduced motion.
+  for (const colorScheme of ['light', 'dark'] as const) for (const width of [360, 1440]) {
+    await page.emulateMedia({ colorScheme, reducedMotion: 'reduce' });
+    await page.setViewportSize({ width, height: 900 });
+    const indicators = page.locator('main [role="img"] > span[aria-hidden="true"], main table th, main [class*="countUnit"]');
+    await expect.poll(async () => indicators.count()).toBeGreaterThan(0);
+    expect(await indicators.evaluateAll(elements => elements.filter(element => element.getClientRects().length > 0)
+      .map(element => getComputedStyle(element).color).filter(color => color !== 'rgb(255, 255, 255)'))).toEqual([]);
+    await noOverflow(page);
+  }
 });

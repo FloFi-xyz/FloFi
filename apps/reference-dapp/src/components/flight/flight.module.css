@@ -29,15 +29,21 @@
 .sticker{display:inline-block;background:#fff;border:4px solid var(--navy);border-radius:999px;font-family:var(--mono);font-weight:500;letter-spacing:.06em;
   color:var(--navy);white-space:nowrap;font-size:22px;padding:8px 20px}
 /* Header */
-.header{height:88px;padding:0 var(--gutter);display:flex;align-items:center;justify-content:space-between;gap:16px;background:var(--blue);color:#fff}
+.header{position:relative;z-index:11;height:88px;padding:0 var(--gutter);display:flex;align-items:center;justify-content:space-between;gap:16px;background:var(--blue);color:#fff}
 .header img{height:36px;width:auto;display:block}
 .nav{display:flex;align-items:center;gap:clamp(14px,2.5vw,36px);font-size:18px;font-weight:500}
 .nav a{text-decoration:none;color:#fff}
 .nav a:hover{text-decoration:underline;text-underline-offset:4px}
-.lang{display:inline-flex;align-items:center;gap:2px;border:2px solid rgba(255,255,255,.5);border-radius:999px;padding:2px;font-family:var(--mono);font-size:15px;
-  letter-spacing:.08em}
-.lang button{background:transparent;border:0;color:#fff;font:inherit;letter-spacing:inherit;padding:6px 10px;border-radius:999px;cursor:pointer;opacity:.8;min-height:36px}
-.lang button[aria-pressed="true"]{opacity:1;background:rgba(255,255,255,.16)}
+.lang{position:relative;display:inline-flex;flex:none;font-family:var(--font-ibm-plex-mono),'IBM Plex Mono',ui-monospace,monospace;font-size:15px;letter-spacing:.02em;z-index:10}
+.lang button{border:0;font:inherit;letter-spacing:inherit;cursor:pointer;min-height:44px}
+.langTrigger{background:transparent;color:#fff;border:2px solid rgba(255,255,255,.5)!important;border-radius:999px;width:48px;padding:0 8px;font-size:24px!important;line-height:1}
+.langTrigger:focus-visible{outline:3px solid #fff;outline-offset:3px}
+.langTrigger:hover,.langTrigger[aria-expanded="true"]{background:rgba(255,255,255,.16)}
+.langPopover{position:absolute;right:0;top:calc(100% + 8px);min-width:180px;background:#041B3D;border:1px solid #93A6FF;border-radius:14px;padding:6px;box-shadow:0 8px 24px rgba(4,27,61,.3);color:#fff}
+.langPopover button{display:flex;align-items:center;justify-content:space-between;gap:20px;width:100%;padding:10px 12px;border-radius:9px;color:#fff;background:transparent;text-align:left;white-space:nowrap}
+.langPopover button:hover,.langPopover button:focus-visible{background:#2343D9;outline:2px solid #fff;outline-offset:-2px}
+.langPopover button[aria-checked="true"]{background:rgba(255,255,255,.12)}
+.footer .langPopover{top:auto;bottom:calc(100% + 8px)}
 /* Hero */
 .hero{position:relative;background:var(--blue);color:#fff;overflow:hidden;min-height:720px;padding:96px var(--gutter) 152px;display:flex;align-items:flex-start;gap:40px}
 .heroDark{background:var(--graphite)}
@@ -72,7 +78,7 @@
 /* Countdown */
 .countdown{display:flex;align-items:flex-end;gap:16px}
 .countGroup{display:flex;align-items:flex-end;gap:6px}
-.countUnit{font-family:var(--mono);font-weight:500;font-size:18px;color:var(--lavender);padding-bottom:4px}
+.countUnit{font-family:var(--mono);font-weight:500;font-size:18px;color:#fff;padding-bottom:4px}
 /* Split flaps */
 .flaps{display:flex;gap:3px;flex-wrap:nowrap}
 .flap{position:relative;flex:none;background:var(--flap);border-radius:5px;display:flex;align-items:center;justify-content:center;font-family:var(--mono);font-weight:500;
@@ -80,11 +86,11 @@
 .flap::after{content:"";position:absolute;left:0;right:0;top:50%;height:1px;background:var(--graphite)}
 .flapNavy{background:var(--navy)}.flapNavy::after{background:var(--blue)}
 .flapBig{width:42px;height:62px;font-size:40px}
-.flapHi{color:var(--periwinkle)}
+.flapHi{color:#fff}
 /* Personal boards (group closed, not on the list) */
 .personal{display:flex;flex-direction:column;gap:24px;max-width:860px}
 .board{background:var(--panel);border:2px solid var(--line);border-radius:28px;padding:24px 28px;display:flex;flex-direction:column;gap:12px;max-width:640px}
-.boardLabel{font-family:var(--mono);font-weight:500;font-size:12px;letter-spacing:.12em;text-transform:uppercase;color:#A4ABB8}
+.boardLabel{font-family:var(--mono);font-weight:500;font-size:12px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted)}
 .personal h1{font-size:clamp(44px,6vw,88px)}
 .ctaRow{display:flex;flex-wrap:wrap;gap:14px;align-items:center}
 .small{font-size:16px;color:#C2C8D2}
@@ -108,7 +114,7 @@
 .h2{font-weight:700;font-size:clamp(38px,4.5vw,64px);line-height:1;letter-spacing:-.045em}
 .departures{background:var(--graphite);color:#fff;padding:96px var(--gutter) 104px;display:flex;flex-direction:column;gap:36px}
 .departuresHead{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:flex-end;gap:16px}
-.departuresHead .lbl{font-size:16px;color:#A4ABB8}
+.departuresHead .lbl{font-size:16px;color:#fff}
 .departuresBoard{background:var(--panel);border:2px solid var(--line);border-radius:32px;padding:28px 32px;overflow-x:auto}
 .departuresBoard table{border-collapse:separate;border-spacing:clamp(12px,1.9vw,28px) 14px;margin:-14px clamp(-28px,-1.9vw,-12px)}
 .departuresBoard .flap{width:clamp(14px,1.6vw,26px);height:clamp(22px,2.4vw,37px);font-size:clamp(12px,1.5vw,24px)}
@@ -117,7 +123,7 @@
 .departuresLine{display:flex;flex-wrap:wrap;gap:12px}
 .departuresList .flaps{flex-wrap:wrap;row-gap:4px}
 .departuresList .flap{width:16px;height:25px;font-size:15px}
-.departuresBoard th{text-align:left;font-family:var(--mono);font-weight:500;font-size:14px;letter-spacing:.12em;text-transform:uppercase;color:#A4ABB8}
+.departuresBoard th{text-align:left;font-family:var(--mono);font-weight:500;font-size:14px;letter-spacing:.12em;text-transform:uppercase;color:#fff}
 .how{position:relative}
 .howGrid{display:flex;flex-wrap:wrap;gap:24px;align-items:stretch}
 .step{flex:1 1 240px;max-width:300px;background:var(--soft);border-radius:28px;padding:36px 32px;display:flex;flex-direction:column;gap:16px}
@@ -213,7 +219,7 @@
 .inviteList li{display:flex;gap:14px;align-items:center;font-family:var(--mono);font-weight:500;font-size:20px;letter-spacing:.06em}
 .inviteList s{color:var(--muted)}
 .muted{color:var(--muted)}
-.departures .muted{color:#A4ABB8}
+.departures .muted{color:#fff}
 .unavailable{padding:40px var(--gutter);background:var(--navy);color:#fff;font-size:18px}
 @media (max-width:1100px){.howArt{display:none}
   .departuresBoard table{display:none}.departuresList{display:flex}
@@ -267,3 +273,6 @@
 .passControls .eyebrow{color:var(--blue)}
 .cardPublicText .small{color:#fff}
 .accessForms .small{color:#fff}
+
+/* Every textual indicator on the airport boards stays white, including mobile and highlighted flaps. */
+.board,.board .boardLabel,.board .small,.board .muted,.departuresBoard,.departuresBoard .boardLabel,.departures .departuresLine{color:#fff}
