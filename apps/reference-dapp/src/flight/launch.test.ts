@@ -102,14 +102,14 @@ describe('the seven emails', () => {
     const subjects: Record<string, [string, string]> = {
       LIST_CONFIRMATION: ['You’re on the FloFi beta list ✈️', 'Você está na lista beta da FloFi ✈️'], EVE: ['Boarding starts tomorrow, 9:00 BRT ✈️', 'O embarque começa amanhã, às 9h ✈️'],
       GROUP_BOARDING: ['Your group is boarding ✈️', 'Seu grupo está embarcando ✈️'], ACCESS_REQUESTED: ['Your group is boarding ✈️', 'Seu grupo está embarcando ✈️'],
-      CARD_FOUNDING: ['You’re Founding Member #042 ✈️', 'Você é o Founding Member #042 ✈️'], CARD_PASSENGER: ['Your Flight FloFi boarding card ✈️', 'Seu cartão de embarque do Flight FloFi ✈️'],
-      NEXT_FLIGHT: ['You’re on the list for the next flight ✈️', 'Você está na lista do próximo voo ✈️'], CREATOR_INVITE: ['You’re invited to Flight FloFi ✈️', 'Você foi convidado para o Flight FloFi ✈️'],
+      CARD_FOUNDING: ['You’re Founding Member #042 ✈️', 'Você é Founding Member #042 ✈️'], CARD_PASSENGER: ['Your Flight FloFi boarding card ✈️', 'Seu cartão de embarque do Flight FloFi ✈️'],
+      NEXT_FLIGHT: ['You’re on the list for the next flight ✈️', 'Você está na lista do próximo voo ✈️'], CREATOR_INVITE: ['You’re invited to Flight FloFi ✈️', 'Seu convite para o Flight FloFi ✈️'],
     };
     for (const input of inputs) for (const [index, language] of (['EN', 'PT'] as const).entries()) {
       const email = renderEmail(input, ctx(language));
       expect(email.subject).toBe(subjects[input.template]![index]);
       for (const part of [email.html, email.text]) {
-        expect(part).toContain(language === 'EN' ? 'DeFi involves risk' : 'DeFi envolve riscos');
+        expect(part).toContain(language === 'EN' ? 'DeFi involves risk' : 'DeFi envolve risco');
         expect(part).toContain('https://flofi.xyz/board/unsubscribe?t=x');
         expect(part).toContain('/privacy');
         // No public aggregate counts and none of the withdrawn promises.

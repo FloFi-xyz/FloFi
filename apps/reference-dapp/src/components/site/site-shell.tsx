@@ -50,6 +50,8 @@ export function SiteShell({ language, page, guide = false, skipTo = 'conteudo', 
         <Link href="/docs">{t.header.docs}</Link>
         <Link href="/developers" aria-current={page === 'developers' ? 'page' : undefined}>{t.header.developers}</Link>
         <Link href="/faq" aria-current={page === 'faq' ? 'page' : undefined}>{t.footer.faq}</Link>
+        <Link href="/terms">{language === 'PT' ? 'Termos' : 'Terms'}</Link>
+        <Link href="/privacy">{language === 'PT' ? 'Privacidade' : 'Privacy'}</Link>
       </nav>
       <div className={styles.footerBottom}>
         <p>{t.footer.legal}</p>

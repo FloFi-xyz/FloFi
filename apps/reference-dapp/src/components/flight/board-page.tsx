@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 /**
  * BUILD-FLOFI-FLIGHT-001: flofi.xyz/board, the Flight FloFi campaign page of the team-approved Claude Artifact "Flight FloFi" (version
- * 1793892357-f7d9): one page, English by default with the EN · PT switch, the main site unchanged ("O site principal não muda").
+ * 1793892357-f7d9): one page, English by default with the compact language menu, the main site unchanged ("O site principal não muda").
  * Order of the approved desktop board: header, hero (with the marquee), departures, how it works, Founding Members, example routes, footer
  * with the risk notice. "Board now" exists only on this page; the site keeps "Open" ("Botão 'Board now' só nesta página").
  * BUILD-FLOFI-FLIGHT-LAUNCH-001: no aggregate count of people anywhere on the page (no "N OF 100" bar, no next seat number).
@@ -79,6 +79,7 @@ export function BoardPage({ language, state }: { language: 'EN' | 'PT'; state: F
       <div className={styles.footerTop}>
         <img src="/brand/flight/flofi-logo-on-blue.svg" alt="FloFi"/>
         <nav className={styles.footerNav} aria-label={copy.footer.nav}>
+          <Link href="/terms">{language === 'PT' ? 'Termos' : 'Terms'}</Link>
           <Link href="/privacy">{copy.footer.privacy}</Link>
           <Link href="/docs/security">{copy.footer.risks}</Link>
           <a href={FLIGHT_LINKS.discord} target="_blank" rel="noopener noreferrer">{copy.footer.discord}</a>

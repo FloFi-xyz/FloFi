@@ -346,7 +346,9 @@ export function BoardExperience({ initial, language }: { initial: FlightState | 
     window.history.replaceState(null, '', '/board');
     storage()?.removeItem(FLIGHT_RETURN_KEY);
     if (params.has('invite')) setShowInvite(true);
-    else if (initial?.me.signedIn && initial.phase === 'BOARDING') void checkAccess();
+    // A link/code proved access before sign-in: continue through the existing Privy login and return here. The pending HttpOnly
+    // proof stays server-checked and binds only on checkAccess's explicit Board now request after authentication.
+    else if (initial?.phase === 'BOARDING') void checkAccess();
   }, []); // Only on arrival.
 
   const board = (event: FormEvent) => {

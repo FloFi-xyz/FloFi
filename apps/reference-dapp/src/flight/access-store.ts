@@ -74,7 +74,10 @@ export function createAccessStore(host: { readonly db: Database; readonly tenant
    * bound again (a used list entry cannot be handed to someone else's account); its token is left unused.
    */
   async function settle(q: Queryable, tokenId: string, entryId: string, accountId: string | null, now: number): Promise<ConsumeResult> {
-    if ((await q.query('SELECT 1 FROM flight_list_entries WHERE tenant_id = $1 AND entry_id = $2 AND boarded_at IS NOT NULL', [tenantId, entryId])).rowCount)
+    const entry = (await q.query<{ boarded_at: Date | null }>('SELECT boarded_at FROM flight_list_entries WHERE tenant_id = $1 AND entry_id = $2 FOR UPDATE',
+      [tenantId, entryId])).rows[0];
+    if (!entry) return { status: 'INVALID' };
+    if (entry.boarded_at)
       return { status: 'BOARDED' };
     if (accountId) {
       const bound = await claim(q, entryId, accountId, now);
@@ -140,7 +143,8 @@ export function createAccessStore(host: { readonly db: Database; readonly tenant
         AND created_at > $2::timestamptz - interval '1 day'`, [tenantId, at(input.now)])).rows[0]!.n);
       if (today >= ACCESS_LIMITS.requestedEmailsPerDay) return 'OK' as const;
       // At most one per entry per hour (the dedupe key): repeated requests collapse into the one already queued.
-      await enqueueEmail(tx, tenantId, { template: 'ACCESS_REQUESTED', recipient: input.email, language: input.language, trigger: 'access_requested',
+      // The recipient's registered language wins over the current page's locale, including recovery from another device.
+      await enqueueEmail(tx, tenantId, { template: 'ACCESS_REQUESTED', recipient: input.email, language: entry.language, trigger: 'access_requested',
         dedupeKey: `access:${entry.entry_id}:${Math.floor(input.now / HOUR_MS)}`, notBefore: input.now, expiresAt: input.now + REQUESTED_CODE_MS, entryId: entry.entry_id });
       return 'OK' as const;
     });
@@ -155,7 +159,9 @@ export function createAccessStore(host: { readonly db: Database; readonly tenant
         [tenantId, sha256Hex(input.session), at(input.now)])).rows[0];
       if (!row) return 'NONE';
       // An entry that boarded meanwhile is never bound to another account (as for a link or code).
-      if ((await tx.query('SELECT 1 FROM flight_list_entries WHERE tenant_id = $1 AND entry_id = $2 AND boarded_at IS NOT NULL', [tenantId, row.entry_id])).rowCount) return 'NONE';
+      const entry = (await tx.query<{ boarded_at: Date | null }>('SELECT boarded_at FROM flight_list_entries WHERE tenant_id = $1 AND entry_id = $2 FOR UPDATE',
+        [tenantId, row.entry_id])).rows[0];
+      if (!entry || entry.boarded_at) return 'NONE';
       return claim(tx, row.entry_id, input.accountId, input.now);
     });
   }

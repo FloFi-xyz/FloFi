@@ -15,13 +15,15 @@ import type { AccessStore } from '../access-store.ts';
 import type { FlightStore } from '../store.ts';
 import type { EmailOutbox, EmailRow, Settlement } from './outbox.ts';
 import type { OutgoingEmail, ResendClient, SendOutcome } from './resend.ts';
-import { renderEmail, type CardView, type TemplateInput } from './templates.ts';
+import { renderEmailForVersion, type CardView, type TemplateInput } from './templates.ts';
 
 export const FLIGHT_EMAIL_FROM = 'FloFi <hello@flofi.xyz>';
 export const FLIGHT_EMAIL_REPLY_TO = 'flofi.xyz@gmail.com';
 export const FLIGHT_EMAIL_DOMAIN = 'flofi.xyz';
 /** The creator brief linked from Email 6 (the artifact's "Open the creator brief"). */
-export const FLIGHT_CREATOR_BRIEF_URL = 'https://claude.ai/artifact/Ed64YTYtYmUWVgnT8NEZD5';
+export const FLIGHT_CREATOR_BRIEF_URL = 'https://cooked-goat-9ec.notion.site/Flight-FloFi-Brief-do-criador-4147b5d0a5fd81afb15ffdeb090a6450';
+/** Frozen alongside renderer v1, for the exact body of an existing queued/retried email. */
+const FLIGHT_CREATOR_BRIEF_URL_V1 = 'https://claude.ai/artifact/Ed64YTYtYmUWVgnT8NEZD5';
 const DOMAIN_CHECK_MS = 10 * 60_000;
 
 export type DeliveryDeps = {
@@ -100,13 +102,13 @@ export function createEmailDelivery(deps: DeliveryDeps) {
         const invite = row.inviteCode ? (await deps.db.query<{ redeemed_at: Date | null }>('SELECT redeemed_at FROM flight_invites WHERE tenant_id = $1 AND code = $2',
           [deps.tenantId, row.inviteCode])).rows[0] : undefined;
         if (!invite) return { kind: 'CANCEL', code: 'INVITE_GONE' };
-        input = { template: 'CREATOR_INVITE', code: row.inviteCode!, briefUrl: deps.briefUrl ?? FLIGHT_CREATOR_BRIEF_URL };
+        input = { template: 'CREATOR_INVITE', code: row.inviteCode!, briefUrl: deps.briefUrl ?? (row.templateVersion === 1 ? FLIGHT_CREATOR_BRIEF_URL_V1 : FLIGHT_CREATOR_BRIEF_URL) };
         break;
       }
     }
     const unsubscribe = unsubscribeTokenFor(deps.secret, row.emailId, row.recipient);
-    const rendered = renderEmail(input, { language: row.language, recipient: row.recipient, origin, calendar: deps.calendar,
-      unsubscribeUrl: `${origin}/board/unsubscribe?l=${row.language.toLowerCase()}&t=${unsubscribe}` });
+    const rendered = renderEmailForVersion(input, { language: row.language, recipient: row.recipient, origin, calendar: deps.calendar,
+      unsubscribeUrl: `${origin}/board/unsubscribe?l=${row.language.toLowerCase()}&t=${unsubscribe}` }, row.templateVersion);
     return { kind: 'SEND', email: { idempotencyKey: row.emailId, to: row.recipient, subject: rendered.subject, html: rendered.html, text: rendered.text,
       headers: { 'List-Unsubscribe': `<${origin}/api/board/unsubscribe?t=${unsubscribe}>`, 'List-Unsubscribe-Post': 'List-Unsubscribe=One-Click' },
       ...attachments ? { attachments } : {}, tags: [{ name: 'template', value: row.template.toLowerCase() }, { name: 'campaign', value: 'flight-flofi' }] } };

@@ -23,7 +23,9 @@ describe('navigation drawer shell', () => {
   // BUILD-FLOFI-CHAT-EDITOR-UX-001: "Build Workflow" is now "Editor", current on each Editor section like the top bar (Simulate here).
   it('contains seven ordered workspace links and a separate bottom Logout action', () => {
     const html = render({ section: 'Simulate' });
-    expect(html.match(/class="navigation-row"/g)).toHaveLength(8);
+    expect(html.match(/class="navigation-row"/g)).toHaveLength(10);
+    expect(html).toContain('href="/terms"');
+    expect(html).toContain('href="/privacy"');
     expect(html).toContain('href="/app/dashboard"');
     expect(html).toContain('href="/app"');
     const labels = [...html.matchAll(/<span>(Dashboard|Chat|Editor|Your workflows|Automations|Credentials|Agents|Passkeys|Logout)<\/span>/g)].map(match => match[1]);
