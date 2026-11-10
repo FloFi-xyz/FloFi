@@ -81,7 +81,7 @@
 /* Countdown */
 .countdown{display:flex;align-items:flex-end;gap:16px}
 .countGroup{display:flex;align-items:flex-end;gap:6px}
-.countUnit{font-family:var(--mono);font-weight:500;font-size:18px;color:var(--lavender);padding-bottom:4px}
+.countUnit{font-family:var(--mono);font-weight:500;font-size:18px;color:#fff;padding-bottom:4px}
 /* Split flaps */
 .flaps{display:flex;gap:3px;flex-wrap:nowrap}
 .flap{position:relative;flex:none;background:var(--flap);border-radius:5px;display:flex;align-items:center;justify-content:center;font-family:var(--mono);font-weight:500;
@@ -89,11 +89,11 @@
 .flap::after{content:"";position:absolute;left:0;right:0;top:50%;height:1px;background:var(--graphite)}
 .flapNavy{background:var(--navy)}.flapNavy::after{background:var(--blue)}
 .flapBig{width:42px;height:62px;font-size:40px}
-.flapHi{color:var(--periwinkle)}
+.flapHi{color:#fff}
 /* Personal boards (group closed, not on the list) */
 .personal{display:flex;flex-direction:column;gap:24px;max-width:860px}
 .board{background:var(--panel);border:2px solid var(--line);border-radius:28px;padding:24px 28px;display:flex;flex-direction:column;gap:12px;max-width:640px}
-.boardLabel{font-family:var(--mono);font-weight:500;font-size:12px;letter-spacing:.12em;text-transform:uppercase;color:#A4ABB8}
+.boardLabel{font-family:var(--mono);font-weight:500;font-size:12px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted)}
 .personal h1{font-size:clamp(44px,6vw,88px)}
 .ctaRow{display:flex;flex-wrap:wrap;gap:14px;align-items:center}
 .small{font-size:16px;color:#C2C8D2}
@@ -117,7 +117,7 @@
 .h2{font-weight:700;font-size:clamp(38px,4.5vw,64px);line-height:1;letter-spacing:-.045em}
 .departures{background:var(--graphite);color:#fff;padding:96px var(--gutter) 104px;display:flex;flex-direction:column;gap:36px}
 .departuresHead{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:flex-end;gap:16px}
-.departuresHead .lbl{font-size:16px;color:#A4ABB8}
+.departuresHead .lbl{font-size:16px;color:#fff}
 .departuresBoard{background:var(--panel);border:2px solid var(--line);border-radius:32px;padding:28px 32px;overflow-x:auto}
 .departuresBoard table{border-collapse:separate;border-spacing:clamp(12px,1.9vw,28px) 14px;margin:-14px clamp(-28px,-1.9vw,-12px)}
 .departuresBoard .flap{width:clamp(14px,1.6vw,26px);height:clamp(22px,2.4vw,37px);font-size:clamp(12px,1.5vw,24px)}
@@ -126,7 +126,7 @@
 .departuresLine{display:flex;flex-wrap:wrap;gap:12px}
 .departuresList .flaps{flex-wrap:wrap;row-gap:4px}
 .departuresList .flap{width:16px;height:25px;font-size:15px}
-.departuresBoard th{text-align:left;font-family:var(--mono);font-weight:500;font-size:14px;letter-spacing:.12em;text-transform:uppercase;color:#A4ABB8}
+.departuresBoard th{text-align:left;font-family:var(--mono);font-weight:500;font-size:14px;letter-spacing:.12em;text-transform:uppercase;color:#fff}
 .how{position:relative}
 .howGrid{display:flex;flex-wrap:wrap;gap:24px;align-items:stretch}
 .step{flex:1 1 240px;max-width:300px;background:var(--soft);border-radius:28px;padding:36px 32px;display:flex;flex-direction:column;gap:16px}
@@ -223,7 +223,7 @@
 .inviteList li{display:flex;gap:14px;align-items:center;font-family:var(--mono);font-weight:500;font-size:20px;letter-spacing:.06em}
 .inviteList s{color:var(--muted)}
 .muted{color:var(--muted)}
-.departures .muted{color:#A4ABB8}
+.departures .muted{color:#fff}
 .unavailable{padding:40px var(--gutter);background:var(--navy);color:#fff;font-size:18px}
 @media (max-width:1100px){.howArt{display:none}
   .departuresBoard table{display:none}.departuresList{display:flex}
@@ -278,3 +278,6 @@
 .passControls .eyebrow{color:var(--blue)}
 .cardPublicText .small{color:#fff}
 .accessForms .small{color:#fff}
+
+/* Every textual indicator on the airport boards stays white, including mobile and highlighted flaps. */
+.board,.board .boardLabel,.board .small,.board .muted,.departuresBoard,.departuresBoard .boardLabel,.departures .departuresLine{color:#fff}

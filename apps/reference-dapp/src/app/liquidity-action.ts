@@ -91,11 +91,11 @@ export async function liquiditySubmission(input: unknown) {
   });
 }
 export async function liquidityObserve(input: unknown) {
-  return withFlightAccess(async () => { return run(service => service.observe(validExecutionId(input))); 
+  return withFlightAccess(async () => { return run(service => service.observe(validExecutionId(input)));
   });
 }
 export async function liquidityRecoverUnknown(input: unknown) {
-  return withFlightAccess(async () => { return run(service => service.recoverUnknown(validExecutionId(input))); 
+  return withFlightAccess(async () => { return run(service => service.recoverUnknown(validExecutionId(input)));
   });
 }
 export async function liquidityInspect(input: unknown) {

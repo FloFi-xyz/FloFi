@@ -41,7 +41,7 @@ async function run<T>(cluster: SolanaTransferCluster, method: string, args: read
   catch (cause) { const code = cause instanceof Error ? cause.message : ''; return { ok: false, code: /^[A-Z][A-Z0-9_]{2,80}$/.test(code) ? code : 'SOLANA_TRANSFER_SERVICE_UNAVAILABLE' }; }
 }
 export async function solanaTransferInfo(cluster: SolanaTransferCluster) {
-  return withFlightAccess(async () => { return run(cluster, 'info', [], async service => ({ executionEnabled: service.executionEnabled })); 
+  return withFlightAccess(async () => { return run(cluster, 'info', [], async service => ({ executionEnabled: service.executionEnabled }));
   });
 }
 export async function solanaTransferSimulate(cluster: SolanaTransferCluster, workflow: SemanticWorkflow, owner: string) {
@@ -57,7 +57,7 @@ export async function solanaTransferReview(cluster: SolanaTransferCluster, id: s
   });
 }
 export async function solanaTransferInvalidate(cluster: SolanaTransferCluster, id: string) {
-  return withFlightAccess(async () => { return run(cluster, 'invalidate', [id], service => service.invalidate(id)); 
+  return withFlightAccess(async () => { return run(cluster, 'invalidate', [id], service => service.invalidate(id));
   });
 }
 export async function solanaTransferBegin(cluster: SolanaTransferCluster, id: string, owner: string, workflow: SemanticWorkflow) {
@@ -79,10 +79,10 @@ export async function solanaTransferSubmit(cluster: SolanaTransferCluster, id: s
   });
 }
 export async function solanaTransferObserve(cluster: SolanaTransferCluster, id: string) {
-  return withFlightAccess(async () => { return run(cluster, 'observe', [id], service => service.observe(id)); 
+  return withFlightAccess(async () => { return run(cluster, 'observe', [id], service => service.observe(id));
   });
 }
 export async function solanaTransferStatus(cluster: SolanaTransferCluster, id: string) {
-  return withFlightAccess(async () => { return run(cluster, 'status', [id], service => service.load(id)); 
+  return withFlightAccess(async () => { return run(cluster, 'status', [id], service => service.load(id));
   });
 }

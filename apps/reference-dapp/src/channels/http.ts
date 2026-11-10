@@ -14,6 +14,7 @@
  */
 import type { EngineRuntime } from '../platform/index.ts';
 import type { ChannelInterpreter } from './core/conversation.ts';
+import { betaAccessMode } from '../flight/beta-access.ts';
 import { channelInterpreter } from './core/interpreter.ts';
 import { channelLiveCopilot } from '../server/copilot-runtime.ts';
 import { keyedDigest } from './core/crypto.ts';
@@ -90,6 +91,9 @@ export async function handleChannelWebhook(route: ChannelRoute, request: Request
   const parsed = provider.normalize(body, now());
   // Authentic but not ours (another product, account or update kind): acknowledged so the provider stops retrying, never processed.
   if (!parsed) return answer(200, 'IGNORED');
+  // Existing provider delivery receipts remain ingestible; new private authoring has no account-session binding on channels yet.
+  const betaClosed = betaAccessMode(env) !== 'open';
+  if (betaClosed && !parsed.deliveries.length) return answer(200, 'BETA_CHANNEL_ACCESS_CLOSED');
   const host = await channelHost(env, core, options.host);
   if ('code' in host) return answer(503, host.code);
   const { store, platform } = channelRuntime(env, core, host, options.runtime);
@@ -123,9 +127,10 @@ export async function handleChannelWebhook(route: ChannelRoute, request: Request
     visuals: options.visuals !== undefined ? options.visuals : channelVisualRenderer, catalogs: authoringCatalogPreparer(env), learning: channelLearning(env, host, provider.adapter.channel),
     ...options.sleep ? { sleep: options.sleep } : {}, ...options.random ? { random: options.random } : {} });
   let ingested;
-  try { ingested = await service.ingest(parsed.messages, parsed.deliveries); }
+  try { ingested = await service.ingest(betaClosed ? [] : parsed.messages, parsed.deliveries); }
   catch { log.warn('channel.store_unavailable', { channel: prefix }); return answer(503, 'CHANNEL_STORE_UNAVAILABLE'); }
   const work = async () => {
+    if (betaAccessMode(env) !== 'open') return;
     if (parsed.acknowledgements.length) await provider.acknowledge(parsed.acknowledgements).catch(() => undefined);
     for (const conversation of ingested.conversations) {
       try { await service.drain(conversation); } catch { log.warn('channel.drain.failed', { channel: prefix, conversation }); }

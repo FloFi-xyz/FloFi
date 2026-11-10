@@ -318,8 +318,13 @@ export function BoardExperience({ initial, language }: { initial: FlightState | 
       window.location.assign(`/login?returnTo=${encodeURIComponent(BOARD_RETURN)}`);
       return;
     }
-    if (!answer.ok) { setMessage(errorText(copy, answer.code)); return; }
-    const flight = answer.flight as { access: FlightAccess };
+    const flight = answer.flight as { access: FlightAccess } | undefined;
+    if (!answer.ok) {
+      if (flight?.access.kind === 'batch_closed' || flight?.access.kind === 'not_listed') setPersonal(flight.access);
+      else setMessage(errorText(copy, answer.code));
+      return;
+    }
+    if (!flight) return;
     if (answer.access) setMessage(errorText(copy, `ACCESS_${String(answer.access)}`));
     if (flight.access.kind === 'eligible') goToApp();
     else if (flight.access.kind === 'boarded') { await refresh(); setFocusPass(true); }
@@ -333,7 +338,9 @@ export function BoardExperience({ initial, language }: { initial: FlightState | 
     window.history.replaceState(null, '', '/board');
     storage()?.removeItem(FLIGHT_RETURN_KEY);
     if (params.has('invite')) setShowInvite(true);
-    else if (initial?.me.signedIn && initial.phase === 'BOARDING') void checkAccess();
+    // A link/code proved access before sign-in: continue through the existing Privy login and return here. The pending HttpOnly
+    // proof stays server-checked and binds only on checkAccess's explicit Board now request after authentication.
+    else if (initial?.phase === 'BOARDING') void checkAccess();
   }, []); // Only on arrival.
 
   const board = (event: FormEvent) => {

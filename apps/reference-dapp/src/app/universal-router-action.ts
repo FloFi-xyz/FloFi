@@ -69,7 +69,7 @@ export async function universalRouterAvailability(): Promise<UniversalRouterMode
   });
 }
 export async function universalInfo() {
-  return withFlightAccess(async () => { return run('EVM', 'info', [], async s => ({ executionEnabled: s.executionEnabled })); 
+  return withFlightAccess(async () => { return run('EVM', 'info', [], async s => ({ executionEnabled: s.executionEnabled }));
   });
 }
 /** Read-only route discovery for a pair (every provider, every answer classified). Persists nothing; binds no owner. */
@@ -138,7 +138,7 @@ export async function universalBegin(ecosystem: UniversalEcosystem, id: string, 
   });
 }
 export async function universalHandoff(id: string) {
-  return withFlightAccess(async () => { return run('EVM', 'handoff', [id], s => s.handoff(id)); 
+  return withFlightAccess(async () => { return run('EVM', 'handoff', [id], s => s.handoff(id));
   });
 }
 export async function universalReport(id: string, result: ({ kind: 'HASH'; hash: string } | { kind: 'UNKNOWN' | 'REJECTED'; code?: string }) & { attemptId?: string }) {
@@ -148,7 +148,7 @@ export async function universalReport(id: string, result: ({ kind: 'HASH'; hash:
   });
 }
 export async function universalSubmit(id: string, signedTransaction: string) {
-  return withFlightAccess(async () => { return run('SOLANA', 'submit', [id, signedTransaction], s => s.submit(id, signedTransaction)); 
+  return withFlightAccess(async () => { return run('SOLANA', 'submit', [id, signedTransaction], s => s.submit(id, signedTransaction));
   });
 }
 export async function universalWalletFailure(ecosystem: UniversalEcosystem, id: string, diagnostic: UniversalWalletDiagnostic) {
@@ -158,11 +158,11 @@ export async function universalWalletFailure(ecosystem: UniversalEcosystem, id: 
   });
 }
 export async function universalObserve(ecosystem: UniversalEcosystem, id: string) {
-  return withFlightAccess(async () => { return run(ecosystem, 'observe', [id], s => s.observe(id)); 
+  return withFlightAccess(async () => { return run(ecosystem, 'observe', [id], s => s.observe(id));
   });
 }
 export async function universalStatus(ecosystem: UniversalEcosystem, id: string): Promise<Result<UniversalRecord>> {
-  return withFlightAccess(async () => { return run(ecosystem, 'status', [id], s => s.load(id)); 
+  return withFlightAccess(async () => { return run(ecosystem, 'status', [id], s => s.load(id));
   });
 }
 /** The signed-in wallet's universal runs, newest first, so a run can be recovered from any browser. */

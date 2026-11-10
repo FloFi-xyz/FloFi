@@ -5,11 +5,11 @@ import { loadDashboardRunDetail, loadDashboardSnapshot } from '../lib/dashboard/
 import { ownerHistoryOperation } from '../server/owner-history';
 
 export async function dashboardSnapshot(account: string, cursor: string | null = null) {
-  return withFlightAccess(async () => { return loadDashboardSnapshot(account, cursor); 
+  return withFlightAccess(async () => { return loadDashboardSnapshot(account, cursor);
   });
 }
 export async function dashboardRunDetail(account: string, runId: string) {
-  return withFlightAccess(async () => { return loadDashboardRunDetail(account, runId); 
+  return withFlightAccess(async () => { return loadDashboardRunDetail(account, runId);
   });
 }
 export async function changeRunHistory(account: string, runId: string, action: 'DELETE' | 'ARCHIVE') {

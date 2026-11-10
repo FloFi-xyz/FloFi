@@ -17,6 +17,7 @@ import { createFlightStore, type FlightStore } from './store';
 import { accessSecret } from './access';
 import { createAccessStore, type AccessStore } from './access-store';
 import { createEmailOutbox, emailLimitsFrom, type EmailOutbox } from './email/outbox';
+import { betaAccessMode } from './beta-access';
 
 type Env = Readonly<Record<string, string | undefined>>;
 
@@ -41,7 +42,7 @@ export async function flightStore(env: Env = process.env): Promise<FlightStore |
   if (!env.DATABASE_URL) return null;
   const calendar = flightCalendar(env);
   if (!calendar) return null;
-  return createFlightStore(await platformStateHost(env), calendar);
+  return createFlightStore(await platformStateHost(env), calendar, { allowVerifiedEmail: betaAccessMode(env) === 'open' });
 }
 
 /**

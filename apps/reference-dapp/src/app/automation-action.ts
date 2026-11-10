@@ -48,11 +48,11 @@ export async function canvasAutomationSteps(workflow: unknown): Promise<Result<A
   });
 }
 export async function automationOverview(owner: WorkflowOwner): Promise<Result<OverviewView>> {
-  return withFlightAccess(async () => { return automationOperation('overview', [], owner); 
+  return withFlightAccess(async () => { return automationOperation('overview', [], owner);
   });
 }
 export async function createAutomation(owner: WorkflowOwner, input: unknown): Promise<Result<RuleView>> {
-  return withFlightAccess(async () => { return automationOperation('create', [input], owner); 
+  return withFlightAccess(async () => { return automationOperation('create', [input], owner);
   });
 }
 export async function changeAutomationState(owner: WorkflowOwner, ruleId: string, version: number, action: 'PAUSE' | 'RESUME' | 'ARCHIVE'): Promise<Result<RuleView>> {
@@ -103,10 +103,10 @@ export async function prepareWatchProposal(owner: WorkflowOwner, occurrenceId: s
   });
 }
 export async function createTelegramLinkCode(owner: WorkflowOwner): Promise<Result<LinkCodeView>> {
-  return withFlightAccess(async () => { return automationOperation('telegramLinkCode', [], owner); 
+  return withFlightAccess(async () => { return automationOperation('telegramLinkCode', [], owner);
   });
 }
 export async function unlinkTelegram(owner: WorkflowOwner): Promise<Result<{ readonly unlinked: boolean }>> {
-  return withFlightAccess(async () => { return automationOperation('telegramUnlink', [], owner); 
+  return withFlightAccess(async () => { return automationOperation('telegramUnlink', [], owner);
   });
 }

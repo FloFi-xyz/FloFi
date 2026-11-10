@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 'use server';
 import { withFlightAccess } from '../server/flight-access';
+import { assertExecutionEnabled } from '../server/execution-guard';
 import { readFileSync } from 'node:fs';
 import { isAbsolute } from 'node:path';
 import type { SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
@@ -59,11 +60,12 @@ export async function compositionPrepare(input: unknown) {
   });
 }
 export async function compositionExecution(input: unknown) {
-  return withFlightAccess(async () => { return run(service => service.status(id(input))); 
+  return withFlightAccess(async () => { return run(service => service.status(id(input)));
   });
 }
 export async function compositionInstallationStep(input: unknown) {
   return withFlightAccess(async () => {
+  assertExecutionEnabled();
   return run(service => { const index = (input as { index?: unknown } | null)?.index;
     if (!Number.isSafeInteger(index)) throw new Error('COMPOSITION_INPUT_INVALID');
     return service.installationStep(id(input), index as number); });

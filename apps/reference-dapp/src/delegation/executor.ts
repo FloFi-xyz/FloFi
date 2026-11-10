@@ -53,6 +53,8 @@ export type ExecutorDeps = {
   readonly transport: (chain: string) => ChainTransport | null;
   readonly signer: SignerUser; readonly now: () => Date; readonly newId: (prefix: 'dex') => string;
   readonly log: (event: string, fields: Readonly<Record<string, string | number | boolean | null>>) => void;
+  /** Product access is checked only before new signing/submission; submitted attempts remain observable. */
+  readonly authorizeBeta?: (owner: Owner) => Promise<string | null>;
   readonly drivers?: readonly StepDriver[];
   /** BUILD-CHAT-E2E-001: workflow runs, for executions whose source is a run. */
   readonly workflowRuns?: { readonly byId: (runId: string) => Promise<DelegatedRunSource | null> };
@@ -329,6 +331,8 @@ async function run(deps: ExecutorDeps, start: ExecutionRecord, verified: Awaited
     const binding = bound?.ok ? bound.binding : null;
     // Before anything new is submitted the whole chain must still verify (revocation, expiry, edits, external disable).
     if (['PENDING', 'SIMULATED', 'POLICY_VERIFIED'].includes(step.state)) {
+      const betaRefused = await deps.authorizeBeta?.(e.owner);
+      if (betaRefused) return stopBefore(k, betaRefused);
       if (!verified.ok && transientSimulation(verified.code)) { log('delegation.verification_retry', { step: k, code: verified.code }); return outcome(PENDING_RETRY_MS); }
       if (!verified.ok || !pinned) return stopBefore(k, verified.ok ? 'STEP_BINDING_MISSING' : verified.code);
       if (!bound?.ok || !binding) return stopBefore(k, bound && !bound.ok ? bound.code : 'STEP_BINDING_MISSING');
@@ -358,6 +362,8 @@ async function run(deps: ExecutorDeps, start: ExecutionRecord, verified: Awaited
       // The executor address may serve several grants (one KMS key): sign from the highest nonce any of them prepared on this chain.
       const shared = grant.mechanism === 'EVM_ERC7710_METAMASK_V1_3' ? await deps.store.sessionNextNonce(grant.chain, grant.sessionAddress) : null;
       const signingCtx: StepContext = shared !== null && (grant.evmNextNonce === null || shared > grant.evmNextNonce) ? { ...ctx, grant: { ...grant, evmNextNonce: shared } } : ctx;
+      const betaRefusedBeforeSigning = await deps.authorizeBeta?.(e.owner);
+      if (betaRefusedBeforeSigning) return stopBefore(k, betaRefusedBeforeSigning);
       try { signed = await driver.sign(signingCtx, simulated.prepared, deps.signer); } catch (cause) {
         const code = codeOf(cause, 'SIGNING_FAILED');
         if (transientSimulation(code)) { log('delegation.signing_retry', { step: k, code }); return outcome(PENDING_RETRY_MS); }
@@ -377,6 +383,8 @@ async function run(deps: ExecutorDeps, start: ExecutionRecord, verified: Awaited
     const driver = recoveryCtx ? driverFor(recoveryCtx, deps.config.mode) : null;
     if (!recoveryCtx || !driver) { await deps.store.stepTransition(e.executionId, k, ['SUBMISSION_PREPARED', 'SUBMITTED'], 'UNCERTAIN', { code: 'RECOVERY_CONTEXT_UNAVAILABLE' }); await enterUncertain(); return outcome(PENDING_RETRY_MS); }
     if (step.state === 'SUBMISSION_PREPARED') {
+      const betaRefused = await deps.authorizeBeta?.(e.owner);
+      if (betaRefused) { log('delegation.beta_submission_held', { step: k, code: betaRefused }); return outcome(PENDING_RETRY_MS); }
       let broadcastFailure: unknown = null;
       try { await driver.broadcast(recoveryCtx, step.submission!); } catch (cause) { broadcastFailure = cause; }
       if (broadcastFailure !== null) {
@@ -402,7 +410,8 @@ async function run(deps: ExecutorDeps, start: ExecutionRecord, verified: Awaited
       if (r.status === 'PENDING') {
         // Not final yet (or dropped by a node): re-broadcast exactly the persisted bytes — idempotent, never a new transaction — and keep
         // the reservation until reconciliation decides.
-        const resent = await driver.broadcast(recoveryCtx, step.submission!).then(() => null, (cause: unknown) => codeOf(cause, 'SUBMISSION_BROADCAST_FAILED'));
+        const betaRefused = await deps.authorizeBeta?.(e.owner);
+        const resent = betaRefused ?? await driver.broadcast(recoveryCtx, step.submission!).then(() => null, (cause: unknown) => codeOf(cause, 'SUBMISSION_BROADCAST_FAILED'));
         if (resent) log('delegation.rebroadcast_refused', { step: k, code: resent });
         return outcome(PENDING_RETRY_MS);
       }

@@ -45,7 +45,7 @@ export async function bridgeQuote(input: { workflow: SemanticWorkflow; owner: st
   });
 }
 export async function bridgeLoad(executionId: string) {
-  return withFlightAccess(async () => { return run(service => service.load(id(executionId))); 
+  return withFlightAccess(async () => { return run(service => service.load(id(executionId)));
   });
 }
 export async function bridgeAuthorize(executionId: string, manifestHash: string) {
@@ -58,30 +58,30 @@ export async function bridgeAuthorize(executionId: string, manifestHash: string)
   });
 }
 export async function bridgeApprove(executionId: string) {
-  return withFlightAccess(async () => { return run(service => service.approve(id(executionId))); 
+  return withFlightAccess(async () => { return run(service => service.approve(id(executionId)));
   });
 }
 export async function bridgeSubmit(executionId: string) {
-  return withFlightAccess(async () => { return run(service => service.submit(id(executionId))); 
+  return withFlightAccess(async () => { return run(service => service.submit(id(executionId)));
   });
 }
 export async function bridgeRecheck(executionId: string) {
-  return withFlightAccess(async () => { return run(service => service.recheck(id(executionId))); 
+  return withFlightAccess(async () => { return run(service => service.recheck(id(executionId)));
   });
 }
 export async function bridgeConfirmSource(executionId: string) {
-  return withFlightAccess(async () => { return run(service => service.confirmSource(id(executionId))); 
+  return withFlightAccess(async () => { return run(service => service.confirmSource(id(executionId)));
   });
 }
 export async function bridgeProgress(executionId: string) {
-  return withFlightAccess(async () => { return run(service => service.progress(id(executionId))); 
+  return withFlightAccess(async () => { return run(service => service.progress(id(executionId)));
   });
 }
 export async function bridgeConfirmDestination(executionId: string) {
-  return withFlightAccess(async () => { return run(service => service.confirmDestination(id(executionId))); 
+  return withFlightAccess(async () => { return run(service => service.confirmDestination(id(executionId)));
   });
 }
 export async function bridgeReconcile(executionId: string) {
-  return withFlightAccess(async () => { return run(service => service.reconcile(id(executionId))); 
+  return withFlightAccess(async () => { return run(service => service.reconcile(id(executionId)));
   });
 }

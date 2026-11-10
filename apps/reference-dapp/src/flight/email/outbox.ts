@@ -126,13 +126,11 @@ export function createEmailOutbox(host: { readonly db: Database; readonly tenant
     return db.transaction(async tx => {
       const recovered = (await tx.query(`UPDATE flight_emails SET state = 'UNKNOWN', lease_token = NULL, lease_until = NULL, status_reason = 'LEASE_EXPIRED',
         next_attempt_at = $2, updated_at = clock_timestamp() WHERE tenant_id = $1 AND state = 'SENDING' AND lease_until < $2`, [tenantId, at(now)])).rowCount;
-      // New wording may replace only an email that never reached the provider. A v1 attempt with uncertain outcome
-      // stays held for operator reconciliation: no changed body under its original idempotency key and no legacy early-flight email.
-      await tx.query(`UPDATE flight_emails SET template_version = 2 WHERE tenant_id = $1 AND template = 'CREATOR_INVITE' AND template_version = 1
-        AND state IN ('PENDING', 'HELD') AND attempts = 0 AND first_attempt_at IS NULL`, [tenantId]);
+      // Retired creator copy must never reach the provider, including an UNKNOWN retry. Preserve its original
+      // version/body and reservation for operator reconciliation; SENT and in-flight rows are never rewritten.
       await tx.query(`UPDATE flight_emails SET state = 'HELD', status_reason = 'TEMPLATE_VERSION_REVIEW', updated_at = clock_timestamp()
-        WHERE tenant_id = $1 AND template = 'CREATOR_INVITE' AND template_version <> 2 AND state IN ('PENDING', 'UNKNOWN', 'HELD')
-        AND (attempts > 0 OR first_attempt_at IS NOT NULL)`, [tenantId]);
+        WHERE tenant_id = $1 AND template = 'CREATOR_INVITE' AND template_version <> $2 AND state IN ('PENDING', 'UNKNOWN', 'HELD')`,
+      [tenantId, TEMPLATE_VERSIONS.CREATOR_INVITE]);
       return {
       recovered,
       expired: (await tx.query(`UPDATE flight_emails SET state = 'CANCELLED', status_reason = 'EXPIRED', reserved_at = NULL, updated_at = clock_timestamp()
@@ -162,7 +160,7 @@ export function createEmailOutbox(host: { readonly db: Database; readonly tenant
       const campaignDay = Math.max(0, dailyLimit - Math.min(ESSENTIAL_DAILY_RESERVE, Math.floor(dailyLimit / 20)));
       const dayLimit = (row: Row) => row.category === 'ESSENTIAL' ? dailyLimit : campaignDay;
       for (const row of due) {
-        if (row.template === 'CREATOR_INVITE' && row.template_version !== 2) {
+        if (row.template === 'CREATOR_INVITE' && row.template_version !== TEMPLATE_VERSIONS.CREATOR_INVITE) {
           await settleRow(tx, row.email_id, null, { kind: 'HELD', code: 'TEMPLATE_VERSION_REVIEW' }, now);
           continue;
         }
@@ -241,6 +239,7 @@ export function createEmailOutbox(host: { readonly db: Database; readonly tenant
       SELECT e.tenant_id, 'fem_' || replace(gen_random_uuid()::text, '-', ''), 'eve:' || e.entry_id, 'EVE', $2, 'CAMPAIGN', e.email, e.language, 'eve_schedule', 'eve',
         e.entry_id, $3, $4, $3
       FROM flight_list_entries e WHERE e.tenant_id = $1 AND e.flight = 'FIRST' AND e.boarded_at IS NULL
+        AND NOT EXISTS (SELECT 1 FROM flight_early_list_imports i WHERE i.tenant_id = e.tenant_id AND i.entry_id = e.entry_id AND NOT i.campaign_consent)
         AND NOT EXISTS (SELECT 1 FROM flight_email_suppressions s WHERE s.tenant_id = e.tenant_id AND s.address_hash = ${SQL_ADDRESS_HASH('e.email')})
       ON CONFLICT (tenant_id, dedupe_key) DO NOTHING`, [tenantId, TEMPLATE_VERSIONS.EVE, at(eveAt), at(boardingOpensAt)])).rowCount;
   }
@@ -256,6 +255,7 @@ export function createEmailOutbox(host: { readonly db: Database; readonly tenant
         'group_opened', 'group-' || coalesce(e.batch_no, 0), e.entry_id, $3, $3::timestamptz + interval '7 days', $3
       FROM flight_list_entries e LEFT JOIN flight_batches b ON b.tenant_id = e.tenant_id AND b.batch_no = e.batch_no
       WHERE e.tenant_id = $1 AND e.flight = 'FIRST' AND e.boarded_at IS NULL AND greatest(coalesce(b.opens_at, $4::timestamptz), $4::timestamptz) <= $3
+        AND NOT EXISTS (SELECT 1 FROM flight_early_list_imports i WHERE i.tenant_id = e.tenant_id AND i.entry_id = e.entry_id AND NOT i.campaign_consent)
         AND NOT EXISTS (SELECT 1 FROM flight_email_suppressions s WHERE s.tenant_id = e.tenant_id AND s.address_hash = ${SQL_ADDRESS_HASH('e.email')})
       ON CONFLICT (tenant_id, dedupe_key) DO NOTHING`, [tenantId, TEMPLATE_VERSIONS.GROUP_BOARDING, at(now), at(boardingOpensAt)])).rowCount;
   }
@@ -267,6 +267,7 @@ export function createEmailOutbox(host: { readonly db: Database; readonly tenant
       SELECT e.tenant_id, 'fem_' || replace(gen_random_uuid()::text, '-', ''), 'list:' || e.entry_id, 'LIST_CONFIRMATION', $2, 'CAMPAIGN', e.email, e.language,
         'backfill', 'list-backfill', e.entry_id, $3, $4, $3
       FROM flight_list_entries e WHERE e.tenant_id = $1 AND e.flight = 'FIRST' AND e.boarded_at IS NULL
+        AND NOT EXISTS (SELECT 1 FROM flight_early_list_imports i WHERE i.tenant_id = e.tenant_id AND i.entry_id = e.entry_id AND NOT i.campaign_consent)
         AND NOT EXISTS (SELECT 1 FROM flight_email_suppressions s WHERE s.tenant_id = e.tenant_id AND s.address_hash = ${SQL_ADDRESS_HASH('e.email')})
       ON CONFLICT (tenant_id, dedupe_key) DO NOTHING`, [tenantId, TEMPLATE_VERSIONS.LIST_CONFIRMATION, at(now), at(listClosesAt)])).rowCount;
   }
@@ -278,7 +279,8 @@ export function createEmailOutbox(host: { readonly db: Database; readonly tenant
       const entries = (await tx.query<{ entry_id: string; email: string; language: 'EN' | 'PT' }>(`SELECT e.entry_id, e.email, e.language
         FROM flight_early_list_imports i JOIN flight_list_entries e ON e.tenant_id = i.tenant_id AND e.entry_id = i.entry_id
         WHERE i.tenant_id = $1 AND i.campaign_consent AND i.email0_enqueued_at IS NULL AND e.flight = 'FIRST'
-          AND NOT EXISTS (SELECT 1 FROM flight_email_suppressions s WHERE s.tenant_id = e.tenant_id AND s.address_hash = ${SQL_ADDRESS_HASH('e.email')})
+          AND NOT EXISTS (SELECT 1 FROM flight_early_list_imports i WHERE i.tenant_id = e.tenant_id AND i.entry_id = e.entry_id AND NOT i.campaign_consent)
+        AND NOT EXISTS (SELECT 1 FROM flight_email_suppressions s WHERE s.tenant_id = e.tenant_id AND s.address_hash = ${SQL_ADDRESS_HASH('e.email')})
         ORDER BY e.joined_at, e.entry_id FOR UPDATE OF i`, [tenantId])).rows;
       let enqueued = 0;
       for (const entry of entries) {

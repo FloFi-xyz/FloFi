@@ -76,7 +76,7 @@ export async function uniswapLiquidityMode(): Promise<Mode> {
   });
 }
 export async function uniswapLiquidityInfo() {
-  return withFlightAccess(async () => { return run('info', [], async s => ({ executionEnabled: s.executionEnabled })); 
+  return withFlightAccess(async () => { return run('info', [], async s => ({ executionEnabled: s.executionEnabled }));
   });
 }
 /** BUILD-RH-002 / BUILD-BASE-001: whether this instance serves a catalog network's positions (live or the MOCKED loopback harness). */
@@ -109,44 +109,44 @@ export async function catalogLiquidityPrice(chain: string, pair: { tokenA: strin
   });
 }
 export async function robinhoodLiquidityMode(): Promise<Mode> {
-  return withFlightAccess(async () => { return catalogLiquidityMode(CATALOG_NETWORKS.robinhood.chain); 
+  return withFlightAccess(async () => { return catalogLiquidityMode(CATALOG_NETWORKS.robinhood.chain);
   });
 }
 export async function robinhoodLiquidityInfo() {
-  return withFlightAccess(async () => { return catalogLiquidityInfo(CATALOG_NETWORKS.robinhood.chain); 
+  return withFlightAccess(async () => { return catalogLiquidityInfo(CATALOG_NETWORKS.robinhood.chain);
   });
 }
 export async function uniswapLiquidityPrice(chain?: 'eip155:84532' | 'eip155:11155111') {
-  return withFlightAccess(async () => { return run('price', chain ? [chain] : [], s => s.price(chain)); 
+  return withFlightAccess(async () => { return run('price', chain ? [chain] : [], s => s.price(chain));
   });
 }
 /** BUILD-RH-002: the current price of one Robinhood Chain pool (its two catalog token addresses and fee tier). */
 export async function robinhoodLiquidityPrice(pair: { tokenA: string; tokenB: string; fee: number }) {
-  return withFlightAccess(async () => { return catalogLiquidityPrice(CATALOG_NETWORKS.robinhood.chain, pair); 
+  return withFlightAccess(async () => { return catalogLiquidityPrice(CATALOG_NETWORKS.robinhood.chain, pair);
   });
 }
 export async function uniswapLiquiditySimulate(workflow: SemanticWorkflow, owner: string) {
-  return withFlightAccess(async () => { return run('simulate', [workflow, owner], s => s.simulate(workflow, owner)); 
+  return withFlightAccess(async () => { return run('simulate', [workflow, owner], s => s.simulate(workflow, owner));
   });
 }
 export async function uniswapLiquidityRefresh(id: string) {
-  return withFlightAccess(async () => { return run('refresh', [id], s => s.refresh(id)); 
+  return withFlightAccess(async () => { return run('refresh', [id], s => s.refresh(id));
   });
 }
 export async function uniswapLiquidityReview(id: string, commitment: string, workflow: SemanticWorkflow) {
-  return withFlightAccess(async () => { return run('review', [id, commitment, workflow], s => s.review(id, commitment, workflow)); 
+  return withFlightAccess(async () => { return run('review', [id, commitment, workflow], s => s.review(id, commitment, workflow));
   });
 }
 export async function uniswapLiquidityInvalidate(id: string) {
-  return withFlightAccess(async () => { return run('invalidate', [id], s => s.invalidate(id)); 
+  return withFlightAccess(async () => { return run('invalidate', [id], s => s.invalidate(id));
   });
 }
 export async function uniswapLiquidityBegin(id: string, owner: string, workflow: SemanticWorkflow) {
-  return withFlightAccess(async () => { return run('begin', [id, owner, workflow], s => s.begin(id, owner, workflow)); 
+  return withFlightAccess(async () => { return run('begin', [id, owner, workflow], s => s.begin(id, owner, workflow));
   });
 }
 export async function uniswapLiquidityHandoff(id: string) {
-  return withFlightAccess(async () => { return run('handoff', [id], s => s.handoff(id)); 
+  return withFlightAccess(async () => { return run('handoff', [id], s => s.handoff(id));
   });
 }
 export async function uniswapLiquidityReport(id: string, result: { kind: 'HASH'; hash: string } | { kind: 'UNKNOWN' | 'REJECTED'; code?: string }) {
@@ -156,14 +156,14 @@ export async function uniswapLiquidityReport(id: string, result: { kind: 'HASH';
   });
 }
 export async function uniswapLiquidityWalletFailure(id: string, diagnostic: UniswapWalletDiagnostic) {
-  return withFlightAccess(async () => { return run('walletFailure', [id, diagnostic], s => s.walletFailure(id, diagnostic)); 
+  return withFlightAccess(async () => { return run('walletFailure', [id, diagnostic], s => s.walletFailure(id, diagnostic));
   });
 }
 export async function uniswapLiquidityObserve(id: string) {
-  return withFlightAccess(async () => { return run('observe', [id], s => s.observe(id)); 
+  return withFlightAccess(async () => { return run('observe', [id], s => s.observe(id));
   });
 }
 export async function uniswapLiquidityStatus(id: string) {
-  return withFlightAccess(async () => { return run('status', [id], s => s.load(id)); 
+  return withFlightAccess(async () => { return run('status', [id], s => s.load(id));
   });
 }

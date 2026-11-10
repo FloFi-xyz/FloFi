@@ -8,6 +8,7 @@
  *   /api/channels/health     GET: readiness — each provider's state (enabled, or its closed refusal code), the schema, the runtime and
  *                            the dispatch configuration; never a secret, a provider id, an address or a count of anyone's messages
  */
+import { betaAccessMode } from '../flight/beta-access.ts';
 import { createHash, timingSafeEqual } from 'node:crypto';
 import type { EngineRuntime } from '../platform/index.ts';
 import type { ChannelInterpreter } from './core/conversation.ts';
@@ -71,6 +72,8 @@ export async function handleChannelDispatch(request: Request, options: ChannelOp
     previewTimeoutMs: 30_000, subscriptions: channelSubscriptions(env, host), visuals: options.visuals !== undefined ? options.visuals : channelVisualRenderer,
     catalogs: authoringCatalogPreparer(env), learning: channelLearning(env, host, adapter.channel),
     ...options.sleep ? { sleep: options.sleep } : {}, ...options.random ? { random: options.random } : {} })]));
+  // Keep existing delivery/status/reconciliation alive, but do not drain queued authoring turns while beta access is closed.
+  if (betaAccessMode(env) !== 'open') services.clear();
   try {
     const summary = await dispatchChannels({ core, store, platform, log, now, adapters: providers.adapters, services, ...options.sleep ? { sleep: options.sleep } : {},
       ...options.random ? { random: options.random } : {} },

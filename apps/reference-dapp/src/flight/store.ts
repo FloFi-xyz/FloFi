@@ -58,7 +58,8 @@ const PASS_COLUMNS = 'pass_id, origin, boarding_no, founding_seat, handle, publi
 const newPublicId = () => cardPublicIdFrom(randomBytes(12));
 
 /** `calendar`: the deployment's campaign calendar (`flightCalendar` in host.ts), which decides when the access answers start. */
-export function createFlightStore(host: FlightHost, given: FlightCalendar = FLIGHT_DEFAULT_CALENDAR) {
+export function createFlightStore(host: FlightHost, given: FlightCalendar = FLIGHT_DEFAULT_CALENDAR,
+  options: { readonly allowVerifiedEmail?: boolean } = {}) {
   const { db, tenantId } = host, calendar = fullCalendar(given);
 
   /**
@@ -130,6 +131,31 @@ export function createFlightStore(host: FlightHost, given: FlightCalendar = FLIG
   }
 
   /**
+   * On the person's explicit Board now, remember the list address their account already verified. Reads never claim an entry. A later
+   * wallet sign-in reaches the same account's durable claim without another email prompt; an existing claim is never reassigned.
+   */
+  async function claimVerifiedEntry(input: { accountId: string; emails: readonly string[]; now: number }):
+    Promise<'CLAIMED' | 'NONE' | 'CLAIMED_ELSEWHERE' | 'ACCOUNT_HAS_OTHER_ENTRY'> {
+    return db.transaction(async tx => {
+      if ((await tx.query('SELECT 1 FROM flight_access_claims WHERE tenant_id = $1 AND account_id = $2', [tenantId, input.accountId])).rowCount) return 'CLAIMED';
+      if (!input.emails.length) return 'NONE';
+      const entry = (await tx.query<{ entry_id: string }>(`SELECT e.entry_id FROM flight_list_entries e LEFT JOIN flight_batches b
+        ON b.tenant_id = e.tenant_id AND b.batch_no = e.batch_no WHERE e.tenant_id = $1 AND e.email = ANY($2::text[]) AND e.boarded_at IS NULL
+        ORDER BY (e.flight = 'FIRST') DESC, b.opens_at ASC NULLS FIRST, e.entry_id LIMIT 1 FOR UPDATE OF e`, [tenantId, [...input.emails]])).rows[0];
+      if (!entry) return 'NONE';
+      const owner = (await tx.query<{ account_id: string }>('SELECT account_id FROM flight_access_claims WHERE tenant_id = $1 AND entry_id = $2',
+        [tenantId, entry.entry_id])).rows[0];
+      if (owner) return owner.account_id === input.accountId ? 'CLAIMED' : 'CLAIMED_ELSEWHERE';
+      const inserted = await tx.query(`INSERT INTO flight_access_claims (tenant_id, entry_id, account_id, claimed_at) VALUES ($1, $2, $3, $4)
+        ON CONFLICT DO NOTHING`, [tenantId, entry.entry_id, input.accountId, at(input.now)]);
+      if (inserted.rowCount) return 'CLAIMED';
+      const held = (await tx.query<{ entry_id: string }>('SELECT entry_id FROM flight_access_claims WHERE tenant_id = $1 AND account_id = $2',
+        [tenantId, input.accountId])).rows[0];
+      return held?.entry_id === entry.entry_id ? 'CLAIMED' : held ? 'ACCOUNT_HAS_OTHER_ENTRY' : 'CLAIMED_ELSEWHERE';
+    });
+  }
+
+  /**
    * The account's place in the campaign: its pass, else what "Board now" answers. `emails` are the account's verified addresses; an
    * entry that already boarded (with this or another account, since deleted) gives nothing again.
    */
@@ -137,12 +163,14 @@ export function createFlightStore(host: FlightHost, given: FlightCalendar = FLIG
     const pass = (await q.query<PassRow>(`SELECT ${PASS_COLUMNS} FROM flight_passes WHERE tenant_id = $1 AND account_id = $2`, [tenantId, input.accountId])).rows[0];
     const invite = (await q.query<{ issuer: 'FOUNDING' | 'CREATOR' }>('SELECT issuer FROM flight_invites WHERE tenant_id = $1 AND redeemed_by = $2 AND revoked_at IS NULL',
       [tenantId, input.accountId])).rows[0]?.issuer ?? null;
-    // Only the durable proof made by a single-use Flight link/code. Matching an OAuth email is authentication, never beta entitlement.
+    // Open rollout retains legacy campaign eligibility reads. Closed beta requires a durable Flight claim.
     const entries = (await q.query<{ flight: 'FIRST' | 'NEXT'; batch_no: number | null; opens_at: Date | null }>(`SELECT e.flight, e.batch_no, b.opens_at
       FROM flight_list_entries e LEFT JOIN flight_batches b ON b.tenant_id = e.tenant_id AND b.batch_no = e.batch_no
-      WHERE e.tenant_id = $1 AND e.entry_id IN (SELECT entry_id FROM flight_access_claims WHERE tenant_id = $1 AND account_id = $2)
+      LEFT JOIN flight_access_claims c ON c.tenant_id = e.tenant_id AND c.entry_id = e.entry_id
+      WHERE e.tenant_id = $1 AND (c.account_id = $2 OR (c.account_id IS NULL AND e.email = ANY($3::text[])
+        AND NOT EXISTS (SELECT 1 FROM flight_access_claims held WHERE held.tenant_id = $1 AND held.account_id = $2)))
         AND e.boarded_at IS NULL ORDER BY (e.flight = 'FIRST') DESC, b.opens_at ASC NULLS FIRST LIMIT 1`,
-      [tenantId, input.accountId])).rows;
+      [tenantId, input.accountId, options.allowVerifiedEmail ? [...input.emails] : []])).rows;
     const entry = entries[0] ? { flight: entries[0].flight, batch: entries[0].batch_no, opensAt: entries[0].opens_at?.getTime() ?? null } : null;
     const access = decideAccess({ now: input.now, passId: pass?.pass_id ?? null, invite, entry, calendar });
     const invites = pass?.founding_seat ? (await q.query<{ code: string; redeemed_at: Date | null }>(`SELECT code, redeemed_at FROM flight_invites
@@ -211,6 +239,11 @@ export function createFlightStore(host: FlightHost, given: FlightCalendar = FLIG
       await tx.query('INSERT INTO flight_issuance (tenant_id) VALUES ($1) ON CONFLICT (tenant_id) DO NOTHING', [tenantId]);
       const issued = (await tx.query<{ boarded: number; founding: number }>('SELECT boarded, founding FROM flight_issuance WHERE tenant_id = $1 FOR UPDATE',
         [tenantId])).rows[0]!;
+      // Serialize against link/code and verified-email claims before rechecking eligibility. A claim cannot move between this check
+      // and marking the entry boarded, even when a different account has a verified copy of its address.
+      await tx.query(`SELECT e.entry_id FROM flight_list_entries e WHERE e.tenant_id = $1 AND (e.email = ANY($2::text[])
+        OR e.entry_id IN (SELECT entry_id FROM flight_access_claims WHERE tenant_id = $1 AND account_id = $3)) ORDER BY e.entry_id FOR UPDATE OF e`,
+        [tenantId, [...input.emails], input.accountId]);
       const state = await account(input, tx);
       if (state.pass) return { ok: true as const, pass: state.pass, issued: false };
       if (state.access.kind !== 'eligible') return { ok: false as const, code: 'FLIGHT_NOT_ELIGIBLE' as const };
@@ -220,8 +253,11 @@ export function createFlightStore(host: FlightHost, given: FlightCalendar = FLIG
       await tx.query('UPDATE flight_issuance SET boarded = $2, founding = $3 WHERE tenant_id = $1', [tenantId, next.boarding_no, next.seat ?? issued.founding]);
       // The person's list entries have boarded: deleting this account and signing in again (or another account with the same
       // address) never boards on them again.
-      await tx.query(`UPDATE flight_list_entries SET boarded_at = $4 WHERE tenant_id = $1 AND boarded_at IS NULL AND (email = ANY($2::text[])
-        OR entry_id IN (SELECT entry_id FROM flight_access_claims WHERE tenant_id = $1 AND account_id = $3))`, [tenantId, [...input.emails], input.accountId, at(input.now)]);
+      await tx.query(`UPDATE flight_list_entries e SET boarded_at = $4 WHERE tenant_id = $1 AND boarded_at IS NULL AND
+        (entry_id IN (SELECT entry_id FROM flight_access_claims WHERE tenant_id = $1 AND account_id = $3) OR (email = ANY($2::text[])
+          AND NOT EXISTS (SELECT 1 FROM flight_access_claims c WHERE c.tenant_id = e.tenant_id AND c.entry_id = e.entry_id AND c.account_id <> $3)
+          AND NOT EXISTS (SELECT 1 FROM flight_access_claims held WHERE held.tenant_id = $1 AND held.account_id = $3)))`,
+        [tenantId, [...input.emails], input.accountId, at(input.now)]);
       const passId = `flp_${randomBytes(16).toString('hex')}`, origin = state.access.origin;
       const row = (await tx.query<PassRow>(`INSERT INTO flight_passes (tenant_id, pass_id, account_id, origin, boarding_no, founding_seat, handle, public, route,
         run_id, departed_at, public_id) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, $10, $11, $12) RETURNING ${PASS_COLUMNS}`,
@@ -243,18 +279,18 @@ export function createFlightStore(host: FlightHost, given: FlightCalendar = FLIG
   }
 
   /**
-   * Where the card email goes: the account's own verified login address first (its list entry's language when listed), then the address
-   * the account proved with a link or code. Never an address the person did not prove (a creator invite's recipient may not be them).
+   * Where the card email goes: the bound list entry and its registered language, otherwise the account's verified login address (its
+   * list entry's language when listed). Never an address the person did not prove (a creator invite's recipient may not be them).
    */
   async function cardRecipient(q: Queryable, accountId: string, emails: readonly string[]): Promise<{ email: string; language: 'EN' | 'PT' } | null> {
+    const claimed = (await q.query<{ email: string; language: 'EN' | 'PT' }>(`SELECT e.email, e.language FROM flight_access_claims c JOIN flight_list_entries e
+      ON e.tenant_id = c.tenant_id AND e.entry_id = c.entry_id WHERE c.tenant_id = $1 AND c.account_id = $2`, [tenantId, accountId])).rows[0];
+    if (claimed) return claimed;
     if (emails.length) {
       const listed = (await q.query<{ email: string; language: 'EN' | 'PT' }>(`SELECT email, language FROM flight_list_entries WHERE tenant_id = $1 AND email = ANY($2::text[])
         ORDER BY (flight = 'FIRST') DESC, joined_at LIMIT 1`, [tenantId, [...emails]])).rows[0];
       return listed ?? { email: emails[0]!, language: 'EN' };
     }
-    const claimed = (await q.query<{ email: string; language: 'EN' | 'PT' }>(`SELECT e.email, e.language FROM flight_access_claims c JOIN flight_list_entries e
-      ON e.tenant_id = c.tenant_id AND e.entry_id = c.entry_id WHERE c.tenant_id = $1 AND c.account_id = $2`, [tenantId, accountId])).rows[0];
-    if (claimed) return claimed;
     // An invite's recipient is not proven to be whoever redeemed the code (a code can be forwarded): no address, no email. The card stays
     // in the account.
     return null;
@@ -359,11 +395,12 @@ export function createFlightStore(host: FlightHost, given: FlightCalendar = FLIG
    * The team invites one creator (Email 6): a CREATOR invite addressed to `email` (one per address) and its email, sent at `sendAt`. Returns
    * the code, or the existing one when this address was already invited (never a second invite or a second email).
    */
-  async function inviteCreator(input: { email: string; language: 'EN' | 'PT'; sendAt: number; now: number }): Promise<{ code: string; created: boolean; state: 'AVAILABLE' | 'REDEEMED' }> {
+  async function inviteCreator(input: { email: string; language: 'EN' | 'PT'; sendAt: number; now: number }): Promise<{ code: string; created: boolean; state: 'AVAILABLE' | 'REDEEMED' | 'REVOKED' | 'EXPIRED' }> {
     return db.transaction(async tx => {
       await tx.query('SELECT pg_advisory_xact_lock($1::int, hashtext($2))', [JOIN_LOCK_CLASS, `${tenantId}:invite:${input.email}`]);
-      const existing = (await tx.query<{ code: string; redeemed_at: Date | null }>('SELECT code, redeemed_at FROM flight_invites WHERE tenant_id = $1 AND recipient = $2', [tenantId, input.email])).rows[0];
-      if (existing) return { code: existing.code, created: false, state: existing.redeemed_at ? 'REDEEMED' as const : 'AVAILABLE' as const };
+      const existing = (await tx.query<{ code: string; redeemed_at: Date | null; revoked_at: Date | null; expires_at: Date | null }>('SELECT code, redeemed_at, revoked_at, expires_at FROM flight_invites WHERE tenant_id = $1 AND recipient = $2', [tenantId, input.email])).rows[0];
+      if (existing) return { code: existing.code, created: false, state: existing.redeemed_at ? 'REDEEMED' as const : existing.revoked_at ? 'REVOKED' as const
+        : existing.expires_at && existing.expires_at.getTime() <= input.now ? 'EXPIRED' as const : 'AVAILABLE' as const };
       let code = '';
       for (let inserted = 0; !inserted;) {
         code = inviteCodeFrom(randomBytes(8));
@@ -426,7 +463,7 @@ export function createFlightStore(host: FlightHost, given: FlightCalendar = FLIG
     }));
   }
 
-  return { calendar, counters, foundingOpen, recordEvent, joinList, departures, account, redeemInvite, recordSimulation, issuePass, setHandle, createBatch, assignBatch,
+  return { calendar, counters, foundingOpen, recordEvent, joinList, departures, claimVerifiedEntry, account, redeemInvite, recordSimulation, issuePass, setHandle, createBatch, assignBatch,
     exportBatch, issueCreatorInvites, inviteCreator, importGoogleForms, eraseEmail, hidePass, removeCard, publicCard, ensurePublicId, cardForEmail, purgeLists, stats, prune };
 }
 export type FlightStore = ReturnType<typeof createFlightStore>;

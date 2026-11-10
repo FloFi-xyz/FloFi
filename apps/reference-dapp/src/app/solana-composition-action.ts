@@ -38,27 +38,27 @@ async function run<T>(method: string, args: readonly unknown[], action: (service
   catch (cause) { const code = cause instanceof Error ? cause.message : ''; return { ok: false, code: /^[A-Z][A-Z0-9_]{2,80}$/.test(code) ? code : 'SOLANA_COMPOSITION_SERVICE_UNAVAILABLE' }; }
 }
 export async function solanaCompositionInfo() {
-  return withFlightAccess(async () => { return run('info', [], async service => ({ executionEnabled: service.executionEnabled })); 
+  return withFlightAccess(async () => { return run('info', [], async service => ({ executionEnabled: service.executionEnabled }));
   });
 }
 export async function solanaCompositionSimulate(workflow: SemanticWorkflow, owner: string) {
-  return withFlightAccess(async () => { return run('simulate', [workflow, owner], service => service.simulate(workflow, owner)); 
+  return withFlightAccess(async () => { return run('simulate', [workflow, owner], service => service.simulate(workflow, owner));
   });
 }
 export async function solanaCompositionReview(id: string, commitment: string, workflow: SemanticWorkflow) {
-  return withFlightAccess(async () => { return run('review', [id, commitment, workflow], service => service.review(id, commitment, workflow)); 
+  return withFlightAccess(async () => { return run('review', [id, commitment, workflow], service => service.review(id, commitment, workflow));
   });
 }
 export async function solanaCompositionInvalidate(id: string) {
-  return withFlightAccess(async () => { return run('invalidate', [id], service => service.invalidate(id)); 
+  return withFlightAccess(async () => { return run('invalidate', [id], service => service.invalidate(id));
   });
 }
 export async function solanaCompositionBeginSwap(id: string, owner: string, workflow: SemanticWorkflow) {
-  return withFlightAccess(async () => { return run('beginSwap', [id, owner, workflow], service => service.beginSwap(id, owner, workflow)); 
+  return withFlightAccess(async () => { return run('beginSwap', [id, owner, workflow], service => service.beginSwap(id, owner, workflow));
   });
 }
 export async function solanaCompositionSubmitSwap(id: string, signedTransaction: string) {
-  return withFlightAccess(async () => { return run('submitSwap', [id, signedTransaction], service => service.submitSwap(id, signedTransaction)); 
+  return withFlightAccess(async () => { return run('submitSwap', [id, signedTransaction], service => service.submitSwap(id, signedTransaction));
   });
 }
 export async function solanaCompositionPrepareLiquidity(id: string, owner: string, workflow: SemanticWorkflow, positionMint: string) {
@@ -74,26 +74,26 @@ export async function solanaCompositionReviewLiquidity(id: string, commitment: s
   });
 }
 export async function solanaCompositionBeginLiquidity(id: string, owner: string, workflow: SemanticWorkflow) {
-  return withFlightAccess(async () => { return run('beginLiquidity', [id, owner, workflow], service => service.beginLiquidity(id, owner, workflow)); 
+  return withFlightAccess(async () => { return run('beginLiquidity', [id, owner, workflow], service => service.beginLiquidity(id, owner, workflow));
   });
 }
 export async function solanaCompositionSubmitLiquidity(id: string, signedTransaction: string) {
-  return withFlightAccess(async () => { return run('submitLiquidity', [id, signedTransaction], service => service.submitLiquidity(id, signedTransaction)); 
+  return withFlightAccess(async () => { return run('submitLiquidity', [id, signedTransaction], service => service.submitLiquidity(id, signedTransaction));
   });
 }
 export async function solanaCompositionWalletFailure(id: string, failure: SolanaCompositionDiagnostic) {
-  return withFlightAccess(async () => { return run('walletFailure', [id, failure], service => service.walletFailure(id, failure)); 
+  return withFlightAccess(async () => { return run('walletFailure', [id, failure], service => service.walletFailure(id, failure));
   });
 }
 export async function solanaCompositionObserve(id: string) {
-  return withFlightAccess(async () => { return run('observe', [id], service => service.observe(id)); 
+  return withFlightAccess(async () => { return run('observe', [id], service => service.observe(id));
   });
 }
 export async function solanaCompositionEnd(id: string) {
-  return withFlightAccess(async () => { return run('end', [id], service => service.end(id)); 
+  return withFlightAccess(async () => { return run('end', [id], service => service.end(id));
   });
 }
 export async function solanaCompositionStatus(id: string) {
-  return withFlightAccess(async () => { return run('status', [id], service => service.status(id)); 
+  return withFlightAccess(async () => { return run('status', [id], service => service.status(id));
   });
 }

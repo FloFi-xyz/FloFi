@@ -15,6 +15,11 @@
  * wallet ownership or financial authority.
  */
 import { timingSafeEqual } from 'node:crypto';
+import { betaAccessMode } from '../../flight/beta-access.ts';
+import { requireFlightAccess } from '../../server/flight-access.ts';
+import { bindMcpBetaAccount, type McpBetaHost } from '../beta-access.ts';
+import { mcpStateHost } from './runtime.ts';
+import type { BetaRequestIdentity } from '../../flight/beta-context.ts';
 import { cimdClientId, fetchClientMetadata, redirectMatches, redirectUriAcceptable, isLoopbackRedirect, type DocumentFetcher } from './cimd.ts';
 import { consentPage, errorPage, pageHeaders, type ConsentView } from './consent-page.ts';
 import { DEFAULT_SCOPES, inviteAccepted, MCP_SCOPES, readOAuthConfig, type McpScope, type OAuthConfig } from './config.ts';
@@ -26,7 +31,7 @@ type Env = Readonly<Record<string, string | undefined>>;
 type Fields = Readonly<Record<string, string | number | boolean | null>>;
 export type OAuthLogger = { readonly info: (event: string, fields?: Fields) => void; readonly warn: (event: string, fields?: Fields) => void };
 export type OAuthRoute = 'protected-resource' | 'authorization-server' | 'authorize' | 'token' | 'revoke' | 'register';
-export type OAuthOptions = { readonly env?: Env; readonly store?: McpOAuthStore; readonly now?: () => Date; readonly fetcher?: DocumentFetcher; readonly logger?: OAuthLogger };
+export type OAuthOptions = { readonly env?: Env; readonly store?: McpOAuthStore; readonly now?: () => Date; readonly fetcher?: DocumentFetcher; readonly logger?: OAuthLogger; readonly betaHost?: McpBetaHost };
 
 export const ACCESS_TOKEN_SECONDS = 900;
 export const REFRESH_FAMILY_SECONDS = 30 * 86_400;
@@ -113,7 +118,7 @@ export async function browserAccount(config: OAuthConfig, store: McpOAuthStore, 
 export const accountCookie = (config: OAuthConfig, accountId: string, now: Date) =>
   cookie(config, ACCOUNT_COOKIE, sealValue('ma1', { a: accountId, d: new URL(config.origin).host, e: seconds(now) + ACCOUNT_SECONDS }, config.keys.account), ACCOUNT_SECONDS, 'Lax');
 
-type Context = { readonly config: OAuthConfig; readonly store: McpOAuthStore; readonly now: Date; readonly fetcher?: DocumentFetcher; readonly logger?: OAuthLogger };
+type Context = { readonly env: Env; readonly betaHost?: McpBetaHost; readonly config: OAuthConfig; readonly store: McpOAuthStore; readonly now: Date; readonly fetcher?: DocumentFetcher; readonly logger?: OAuthLogger };
 
 /** A usable client: a cached or freshly fetched CIMD document, or a dynamically registered client. */
 async function resolveClient(ctx: Context, clientId: string): Promise<ClientRecord | null> {
@@ -190,6 +195,12 @@ async function authorizePost(ctx: Context, request: Request): Promise<Response> 
     return redirectWith(config, pending.redirectUri, { error: 'access_denied', state: pending.state }, [clearConsent]);
   }
   if (form.get('decision') !== 'approve') return html(errorPage('Request refused', 'No decision was made.'), 400);
+  let betaIdentity: BetaRequestIdentity | null = null;
+  if (betaAccessMode(ctx.env) !== 'open') {
+    try { betaIdentity = await requireFlightAccess(undefined, ctx.env); }
+    catch { return html(errorPage('Flight access required', 'Sign in to your authorized Flight FloFi account at /board, then reconnect this application.'), 403); }
+    if (!betaIdentity) return html(errorPage('Flight access required', 'A valid Flight FloFi account is required.'), 403);
+  }
   const existing = await browserAccount(config, ctx.store, request, ctx.now);
   if (!existing && config.access === 'invite') {
     const allowed = await ctx.store.allow(`invite:ip:${ipBucket(config, request)}`, LIMITS.invite[0], LIMITS.invite[1], ctx.now);
@@ -203,6 +214,11 @@ async function authorizePost(ctx: Context, request: Request): Promise<Response> 
   const decided = await ctx.store.decide(requestId, csrfDigest, { decision: 'APPROVE', accountId, createAccount: !existing, grantId: newId('grt'),
     codeDigest: credentialDigest(config.keys.token, code), codeExpiresAt: later(ctx.now, AUTHORIZATION_CODE_SECONDS) }, ctx.now);
   if (!decided) return html(errorPage('Request expired', 'This connection request has expired or was already decided.'), 400);
+  if (betaIdentity) {
+    const host = ctx.betaHost ?? await mcpStateHost(ctx.env);
+    if (host.tenantId !== config.tenantId || await bindMcpBetaAccount(host, accountId, betaIdentity, ctx.now.getTime(), ctx.env))
+      return html(errorPage('Flight access required', 'This MCP account cannot be linked to this Flight FloFi account. Start a new connection.'), 403);
+  }
   ctx.logger?.info('mcp.oauth.approved', { client: decided.clientName, new_account: !existing });
   return redirectWith(config, decided.redirectUri, { code, state: decided.state }, [clearConsent, accountCookie(config, accountId, ctx.now)]);
 }
@@ -319,7 +335,7 @@ export async function handleOAuthRequest(route: OAuthRoute, request: Request, op
     options.logger?.warn('mcp.oauth.store_unavailable');
     return route === 'authorize' ? html(errorPage('FloFi is unavailable', 'Sign-in is not available on this deployment right now.'), 503) : json({ error: 'temporarily_unavailable', code: STORE_UNAVAILABLE }, 503);
   }
-  const ctx: Context = { config, store, now, ...options.fetcher ? { fetcher: options.fetcher } : {}, ...options.logger ? { logger: options.logger } : {} };
+  const ctx: Context = { config, store, now, env, ...options.betaHost ? { betaHost: options.betaHost } : {}, ...options.fetcher ? { fetcher: options.fetcher } : {}, ...options.logger ? { logger: options.logger } : {} };
   try {
     if (route === 'authorize') return request.method === 'GET' ? await authorizeGet(ctx, request) : request.method === 'POST' ? await authorizePost(ctx, request)
       : html(errorPage('Request refused', 'Unsupported method.'), 405);

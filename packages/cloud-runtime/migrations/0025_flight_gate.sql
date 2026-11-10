@@ -28,3 +28,16 @@ CREATE TABLE flight_beta_wallets (
     (namespace = 'solana' AND address ~ '^[1-9A-HJ-NP-Za-km-z]{32,44}$'))
 );
 CREATE INDEX flight_beta_wallets_account ON flight_beta_wallets (tenant_id, account_id);
+
+-- OAuth consent explicitly binds the existing MCP account to the same live FloFi session.
+-- A shared browser cannot move a binding to another FloFi account; re-consent may refresh its session only.
+CREATE TABLE flight_beta_mcp_accounts (
+  tenant_id text NOT NULL,
+  mcp_account_id text NOT NULL,
+  flofi_account_id text NOT NULL,
+  session_id text NOT NULL CHECK (session_id ~ '^[0-9a-f]{32}$'),
+  PRIMARY KEY (tenant_id, mcp_account_id),
+  FOREIGN KEY (tenant_id, mcp_account_id) REFERENCES mcp_accounts (tenant_id, account_id) ON DELETE CASCADE,
+  FOREIGN KEY (tenant_id, flofi_account_id) REFERENCES flofi_accounts (tenant_id, account_id) ON DELETE CASCADE,
+  FOREIGN KEY (tenant_id, session_id) REFERENCES flofi_account_sessions (tenant_id, session_id) ON DELETE CASCADE
+);

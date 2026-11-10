@@ -1,13 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-/** Flight's owner-provided EN/PT Terms; the owner's definitive launch rules remove the superseded value cap from clause 4. */
 import type { Metadata } from 'next';
 import Image from 'next/image';
-import Link from 'next/link';
 import { LanguageSwitch } from '../../components/flight/language-switch';
-import { legalLanguage } from '../../components/flight/legal-language';
+import { siteLanguage } from '../../components/site/site-language';
 import styles from '../privacy/privacy.module.css';
 
-const terms = {
+/** Supplied Flight FloFi canvas, section 05. The unsupported per-route maximum is omitted; see the build report. */
+const sections = {
   "EN": [
     {
       "title": "1. Who we are and acceptance",
@@ -23,7 +22,7 @@ const terms = {
     },
     {
       "title": "4. Closed beta on mainnet",
-      "body": "The beta runs on real networks (mainnet), with real assets. It is a test version: it may have bugs, be unavailable, change or end at any time. During the beta, only routes and contracts approved by FloFi can be used. Access is personal and may open in groups."
+      "body": "The beta runs on real networks (mainnet), with real assets. It is a test version: it may have bugs, be unavailable, change or end at any time. Only routes and contracts approved by FloFi can be used. Access is personal and may open in groups."
     },
     {
       "title": "5. Your wallet, your decisions",
@@ -89,7 +88,7 @@ const terms = {
     },
     {
       "title": "4. Beta fechado em mainnet",
-      "body": "O beta usa redes reais (mainnet), com ativos reais. É uma versão de teste: pode ter falhas, ficar indisponível, mudar ou ser encerrada a qualquer momento. Durante o beta, só rotas e contratos aprovados pela FloFi podem ser usados. O acesso é pessoal e pode ser liberado por lotes."
+      "body": "O beta usa redes reais (mainnet), com ativos reais. É uma versão de teste: pode ter falhas, ficar indisponível, mudar ou ser encerrada a qualquer momento. Só rotas e contratos aprovados pela FloFi podem ser usados. O acesso é pessoal e pode ser liberado por lotes."
     },
     {
       "title": "5. Sua carteira, suas decisões",
@@ -142,38 +141,36 @@ const terms = {
   ]
 } as const;
 
+export const dynamic = 'force-dynamic';
 export async function generateMetadata(): Promise<Metadata> {
-  const language = await legalLanguage();
-  return { title: `${language === 'PT' ? 'Termos de Uso' : 'Terms of Use'} | FloFi`, alternates: { canonical: 'https://flofi.xyz/terms' } };
+  const PT = await siteLanguage() === 'PT';
+  return { title: PT ? 'Termos de Uso | FloFi' : 'Terms of Use | FloFi',
+    description: PT ? 'Termos de Uso do beta FloFi, carteiras, rotas e riscos DeFi.' : 'Terms of Use for the FloFi beta, wallets, routes and DeFi risks.',
+    alternates: { canonical: 'https://flofi.xyz/terms' } };
 }
 export default async function TermsPage() {
-  const language = await legalLanguage(), pt = language === 'PT';
-  const title = pt ? 'Termos de Uso' : 'Terms of Use';
-  return <div className={styles.page} lang={pt ? 'pt-BR' : 'en'}>
-    <a className={styles.skip} href="#main">{pt ? 'Ir para o conteúdo' : 'Skip to content'}</a>
+  const language = await siteLanguage(), PT = language === 'PT';
+  return <div className={styles.page} lang={PT ? 'pt-BR' : 'en'}>
+    <a className={styles.skip} href="#main">{PT ? 'Ir para o conteúdo' : 'Skip to content'}</a>
     <header className={styles.header}>
-      <Link className={styles.brand} href="/" aria-label={pt ? 'FloFi, início' : 'FloFi, home'}>
-        <Image src="/brand/flofi-wordmark-light.png" width={118} height={45} alt="FloFi" priority/>
-      </Link>
-      <nav className={styles.headerNav} aria-label={pt ? 'Navegação' : 'Navigation'}>
-        <Link href="/docs">Docs</Link><Link href="/board">Flight FloFi</Link>
-        <LanguageSwitch language={language} label={pt ? 'Idioma' : 'Language'}/>
+      <a className={styles.brand} href="/" aria-label={PT ? 'FloFi — início' : 'FloFi — home'}><Image src="/brand/flofi-wordmark-light.png" width={118} height={45} alt="FloFi" priority/></a>
+      <nav className={styles.headerNav} aria-label={PT ? 'Navegação' : 'Navigation'}>
+        <a href="/privacy">{PT ? 'Privacidade' : 'Privacy'}</a><a href="/">← FloFi</a><LanguageSwitch language={language} label={PT ? 'Idioma' : 'Language'}/>
       </nav>
     </header>
     <main id="main" className={styles.main}>
       <div className={styles.hero}>
-        <h1>{title}</h1>
-        <p>{pt ? 'Beta da FloFi · Versão de 12 de novembro de 2026' : 'FloFi beta · Version of November 12, 2026'}</p>
+        <span className={styles.kicker}>FLOFI / {PT ? 'TERMOS' : 'TERMS'}</span>
+        <h1>{PT ? 'Termos de Uso' : 'Terms of Use'}</h1>
+        <p>{PT ? 'Beta da FloFi · Versão de 12 de novembro de 2026' : 'FloFi beta · Version of November 12, 2026'}</p>
       </div>
       <div className={styles.language}>
-        {terms[language].map((section, index) => <section key={section.title} id={index === 5 ? 'risks' : `section-${index + 1}`}>
-          <h2 className={styles.sectionTitle}>{section.title}</h2>
-          <p>{index === 15 ? <><a href="mailto:flofi.xyz@gmail.com">flofi.xyz@gmail.com</a>{section.body.slice('flofi.xyz@gmail.com'.length)}</> : section.body}</p>
+        {sections[language].map((section, index) => <section key={section.title} id={index === 5 ? "risks" : undefined} aria-labelledby={`terms-${index + 1}`}>
+          <h2 id={`terms-${index + 1}`} className={styles.sectionTitle}>{section.title}</h2>
+          <p>{index === 12 ? <>{section.body} <a href="/privacy">{PT ? 'Política de Privacidade' : 'Privacy Policy'}</a></> : section.body}</p>
         </section>)}
       </div>
     </main>
-    <footer className={styles.footer}>
-      <span>© FloFi</span><span><Link href="/privacy">{pt ? 'Privacidade' : 'Privacy'}</Link><Link href="/docs/security">{pt ? 'Segurança' : 'Security'}</Link><Link href="/board">Flight FloFi</Link></span>
-    </footer>
+    <footer className={styles.footer}><span>© FloFi</span><span><a href="/board">Flight FloFi</a><a href="/privacy">{PT ? 'Privacidade' : 'Privacy'}</a><a href="#main">{PT ? 'Topo ↑' : 'Top ↑'}</a></span></footer>
   </div>;
 }

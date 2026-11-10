@@ -11,7 +11,7 @@
 import { randomBytes, randomUUID } from 'node:crypto';
 import { WALLET_PRINCIPAL_HEADER } from './run-ownership.ts';
 import { currentTraceparent } from '@defi-workflow-engine/cloud-runtime';
-import { betaIdentityHeaders, type BetaRequestIdentity } from '../flight/beta-context.ts';
+import { betaIdentityHeaders, currentBetaIdentity, type BetaRequestIdentity } from '../flight/beta-context.ts';
 
 export type FlowResult<T> = { ok: true; value: T } | { ok: false; code: string; correlationId?: string };
 const CODE = /^[A-Z][A-Z0-9_]{2,80}$/;
@@ -65,7 +65,7 @@ export async function callCloudFlow<T>(flow: string, method: string, args: reado
     let response: Response;
     try {
       response = await transport(target, { method: 'POST', cache: 'no-store', redirect: 'error', signal: attemptSignal(options.timeoutMs ?? 240_000, signal),
-        headers: { 'content-type': 'application/json', traceparent, ...betaIdentityHeaders(options.betaIdentity), ...env.API_AUTH_TOKEN ? { authorization: `Bearer ${env.API_AUTH_TOKEN}` } : {},
+        headers: { 'content-type': 'application/json', traceparent, ...betaIdentityHeaders(options.betaIdentity ?? currentBetaIdentity()), ...env.API_AUTH_TOKEN ? { authorization: `Bearer ${env.API_AUTH_TOKEN}` } : {},
           ...key ? { 'idempotency-key': key } : {}, ...options.principal ? { [WALLET_PRINCIPAL_HEADER]: options.principal } : {} }, body: JSON.stringify({ args }) });
     } catch (error) {
       // The caller stopped waiting: no retry (a mutation that may have arrived is UNKNOWN to the caller, never "not sent").
@@ -110,7 +110,7 @@ export async function previewCloudFlow<T>(flow: string, args: readonly unknown[]
     let response: Response;
     try {
       response = await transport(target, { method: 'POST', cache: 'no-store', redirect: 'error', signal: attemptSignal(timeoutMs, signal),
-        headers: { 'content-type': 'application/json', 'x-flofi-deadline-ms': deadline, ...betaIdentityHeaders(options.betaIdentity), ...currentTraceparent() ? { traceparent: currentTraceparent()! } : {},
+        headers: { 'content-type': 'application/json', 'x-flofi-deadline-ms': deadline, ...betaIdentityHeaders(options.betaIdentity ?? currentBetaIdentity()), ...currentTraceparent() ? { traceparent: currentTraceparent()! } : {},
           ...env.API_AUTH_TOKEN ? { authorization: `Bearer ${env.API_AUTH_TOKEN}` } : {} }, body: JSON.stringify({ args, ...options.purpose ? { purpose: options.purpose } : {} }) });
     } catch (error) {
       if (deadlineEnded(error, signal)) return DEADLINE;
@@ -146,7 +146,7 @@ export async function readCloudRun<T>(runId: string, principal: string, options:
   const target = new URL(`v1/runs/${encodeURIComponent(runId)}${query}`, base.href.endsWith('/') ? base : new URL(base.href + '/'));
   try {
     const response = await transport(target, { method: 'GET', cache: 'no-store', redirect: 'error', signal: attemptSignal(options.timeoutMs ?? 30_000, signal),
-      headers: { ...env.API_AUTH_TOKEN ? { authorization: `Bearer ${env.API_AUTH_TOKEN}` } : {}, [WALLET_PRINCIPAL_HEADER]: principal } });
+      headers: { ...betaIdentityHeaders(currentBetaIdentity()), ...env.API_AUTH_TOKEN ? { authorization: `Bearer ${env.API_AUTH_TOKEN}` } : {}, [WALLET_PRINCIPAL_HEADER]: principal } });
     if (response.status === 404) return { ok: true, value: null };
     const body = await response.json() as { ok?: unknown; value?: unknown };
     if (!response.ok || body.ok !== true || !body.value || typeof body.value !== 'object') return { ok: false, code: 'CLOUD_API_UNAVAILABLE' };
@@ -166,7 +166,7 @@ export async function listCloudRuns(flow: string, principal: string, options: { 
   const target = new URL(`v1/runs?${new URLSearchParams({ flow, limit: '25' })}`, base.href.endsWith('/') ? base : new URL(base.href + '/'));
   try {
     const response = await transport(target, { method: 'GET', cache: 'no-store', redirect: 'error', signal: attemptSignal(options.timeoutMs ?? 30_000, signal),
-      headers: { ...env.API_AUTH_TOKEN ? { authorization: `Bearer ${env.API_AUTH_TOKEN}` } : {}, [WALLET_PRINCIPAL_HEADER]: principal } });
+      headers: { ...betaIdentityHeaders(currentBetaIdentity()), ...env.API_AUTH_TOKEN ? { authorization: `Bearer ${env.API_AUTH_TOKEN}` } : {}, [WALLET_PRINCIPAL_HEADER]: principal } });
     const body = await response.json() as { ok?: unknown; value?: { items?: unknown } };
     if (!response.ok || body.ok !== true || !Array.isArray(body.value?.items)) return { ok: false, code: 'CLOUD_API_UNAVAILABLE' };
     return { ok: true, value: (body.value.items as CloudRunSummary[]).filter(r => r.ownerAccount === principal && r.flow === flow)

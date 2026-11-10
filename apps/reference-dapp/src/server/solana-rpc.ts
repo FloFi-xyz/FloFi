@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import type { SolanaRpc } from '@defi-workflow-engine/reference-compiler';
+import { assertExecutionEnabled } from './execution-guard.ts';
 
 /** Read methods for simulation/reconciliation. sendTransaction is reachable only from the owner-signed submit path. */
 const methods = new Set(['getGenesisHash', 'getSlot', 'getMultipleAccounts', 'getTokenAccountsByOwner', 'getLatestBlockhash', 'getBlockHeight', 'getFeeForMessage', 'simulateTransaction', 'getMinimumBalanceForRentExemption',
@@ -17,6 +18,8 @@ export function createSolanaRpc(endpoint: string, loopback: boolean): SolanaRpc 
     if (!methods.has(method)) throw new Error('SOLANA_RPC_METHOD_DENIED');
     for (let attempt = 0; attempt < 3; attempt++) {
       if (!loopback) await new Promise<void>(resolve => setTimeout(resolve, attempt === 0 ? 120 : 600 * attempt));
+      // The queue and pacing can outlive an operator's pause; check at the actual network boundary.
+      if (method === 'sendTransaction') assertExecutionEnabled();
       const response = await fetch(endpoint, { method: 'POST', cache: 'no-store', signal: AbortSignal.timeout(20_000),
         headers: { 'content-type': 'application/json' }, body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }) });
       const text = await response.text(); if (text.length > 2_097_152) throw new Error('SOLANA_RPC_RESPONSE_TOO_LARGE');

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 'use server';
 import { withFlightAccess } from '../server/flight-access';
+import { assertExecutionEnabled } from '../server/execution-guard';
 /**
  * The product origin's server actions for the person's FloFi wallets (BUILD-FLOFI-AUTH-WALLETS-001; Privy since BUILD-FLOFI-PRIVY-UX-001).
  * Each one derives the account from the verified HttpOnly account session, never from an argument.
@@ -76,6 +77,7 @@ export async function floFiWalletInfo(): Promise<Result<FloFiWalletInfo>> {
  */
 export async function floFiSigningGate(request: unknown): Promise<Result<SigningSummary>> {
   return withFlightAccess(async () => {
+  assertExecutionEnabled();
   try {
     const parsed = parseSigningRequest(request) ?? fail('FLOFI_WALLET_REQUEST_INVALID');
     if (!isSigningFlow(parsed!.context.flow)) fail('FLOFI_WALLET_FLOW_NOT_SUPPORTED');

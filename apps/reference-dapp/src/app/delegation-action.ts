@@ -14,27 +14,27 @@ import { delegationAvailability, delegationOperation } from '../server/delegatio
 type Result<T> = { ok: true; value: T } | { ok: false; code: string };
 /** Whether this deployment serves delegated execution at all (names nobody, reveals nothing about anyone). */
 export async function delegationEnabled(): Promise<{ readonly enabled: boolean }> {
-  return withFlightAccess(async () => { return delegationAvailability(); 
+  return withFlightAccess(async () => { return delegationAvailability();
   });
 }
 export async function delegationOverview(owner: WorkflowOwner): Promise<Result<DelegationOverviewView>> {
-  return withFlightAccess(async () => { return delegationOperation('overview', [], owner); 
+  return withFlightAccess(async () => { return delegationOperation('overview', [], owner);
   });
 }
 export async function passkeyOptions(owner: WorkflowOwner): Promise<Result<PasskeyOptionsView>> {
-  return withFlightAccess(async () => { return delegationOperation('passkeyOptions', [], owner); 
+  return withFlightAccess(async () => { return delegationOperation('passkeyOptions', [], owner);
   });
 }
 export async function passkeyRegister(owner: WorkflowOwner, response: unknown): Promise<Result<PasskeyView>> {
-  return withFlightAccess(async () => { return delegationOperation('passkeyRegister', [response], owner); 
+  return withFlightAccess(async () => { return delegationOperation('passkeyRegister', [response], owner);
   });
 }
 export async function passkeyRevoke(owner: WorkflowOwner, passkeyId: string): Promise<Result<PasskeyView>> {
-  return withFlightAccess(async () => { return delegationOperation('passkeyRevoke', [passkeyId], owner); 
+  return withFlightAccess(async () => { return delegationOperation('passkeyRevoke', [passkeyId], owner);
   });
 }
 export async function credentialPrepare(owner: WorkflowOwner, input: unknown): Promise<Result<GrantView>> {
-  return withFlightAccess(async () => { return delegationOperation('credentialPrepare', [input], owner); 
+  return withFlightAccess(async () => { return delegationOperation('credentialPrepare', [input], owner);
   });
 }
 export async function credentialComplete(owner: WorkflowOwner, grantId: string, response: unknown): Promise<Result<GrantView>> {
@@ -44,7 +44,7 @@ export async function credentialComplete(owner: WorkflowOwner, grantId: string, 
   });
 }
 export async function credentialRevoke(owner: WorkflowOwner, grantId: string): Promise<Result<GrantView>> {
-  return withFlightAccess(async () => { return delegationOperation('credentialRevoke', [grantId], owner); 
+  return withFlightAccess(async () => { return delegationOperation('credentialRevoke', [grantId], owner);
   });
 }
 export async function credentialRevocationComplete(owner: WorkflowOwner, grantId: string, response: unknown): Promise<Result<GrantView>> {
@@ -54,15 +54,15 @@ export async function credentialRevocationComplete(owner: WorkflowOwner, grantId
   });
 }
 export async function credentialReverify(owner: WorkflowOwner, grantId: string): Promise<Result<GrantView>> {
-  return withFlightAccess(async () => { return delegationOperation('credentialReverify', [grantId], owner); 
+  return withFlightAccess(async () => { return delegationOperation('credentialReverify', [grantId], owner);
   });
 }
 export async function delegatedAutomationPreview(owner: WorkflowOwner, input: unknown): Promise<Result<PreviewView>> {
-  return withFlightAccess(async () => { return delegationOperation('automationPreview', [input], owner); 
+  return withFlightAccess(async () => { return delegationOperation('automationPreview', [input], owner);
   });
 }
 export async function delegatedAutomationCreate(owner: WorkflowOwner, input: unknown): Promise<Result<CreatedView>> {
-  return withFlightAccess(async () => { return delegationOperation('automationCreate', [input], owner); 
+  return withFlightAccess(async () => { return delegationOperation('automationCreate', [input], owner);
   });
 }
 export async function authorizationReview(owner: WorkflowOwner, authorizationId: string): Promise<Result<ReviewView>> {
@@ -90,6 +90,6 @@ export async function authorizationReauthorize(owner: WorkflowOwner, authorizati
   });
 }
 export async function executionResume(owner: WorkflowOwner, executionId: string): Promise<Result<ExecutionView>> {
-  return withFlightAccess(async () => { return delegationOperation('executionResume', [executionId], owner); 
+  return withFlightAccess(async () => { return delegationOperation('executionResume', [executionId], owner);
   });
 }

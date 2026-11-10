@@ -13,7 +13,9 @@
 import { test as base, expect, type BrowserContext, type Locator, type Page } from '@playwright/test';
 import { execFile } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
-import { rm } from 'node:fs/promises';
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import { createDatabase } from '@defi-workflow-engine/cloud-runtime';
@@ -67,7 +69,7 @@ async function at(context: BrowserContext, clock: number) {
   await context.addCookies([{ name: 'flofi_flight_clock', value: String(clock), url: E2E_APP_ORIGIN }]);
 }
 /** The MOCKED Privy stand-in for this context and the identity a sign-in will use. */
-async function privy(page: Page, identity: { email?: string }) {
+async function privy(page: Page, identity: { email?: string; wallet?: { address: string; chain?: 'ethereum' | 'solana' } }) {
   const context = page.context();
   await context.route(`${E2E_APP_ORIGIN}/__privy-e2e/**`, async route => {
     const path = new URL(route.request().url()).pathname.slice('/__privy-e2e/'.length);
@@ -288,15 +290,20 @@ test('a group still closed (state 3) opens at its own time; not on the list (sta
 });
 
 test('an invite the team issues lets a person off the list board, and works once', async ({ page, context, browser }) => {
-  const { codes } = await operator('issue-invites', '--count', '1') as { codes: string[] };
-  expect(codes[0]).toMatch(/^FLF-[2-9A-HJ-NP-Z]{4}-[2-9A-HJ-NP-Z]{4}$/);
+  const directory = await mkdtemp(join(tmpdir(), 'flofi-flight-fixture-invites-')), out = join(directory, 'invites.csv');
+  let code: string;
+  try {
+    expect(await operator('issue-invites', '--count', '1', '--out', out)).toMatchObject({ issued: 1, out });
+    code = (await readFile(out, 'utf8')).match(/FLF-[2-9A-HJ-NP-Z]{4}-[2-9A-HJ-NP-Z]{4}/)?.[0] ?? '';
+    expect(code).toMatch(/^FLF-[2-9A-HJ-NP-Z]{4}-[2-9A-HJ-NP-Z]{4}$/);
+  } finally { await rm(directory, { recursive: true, force: true }); }
   await at(context, BOARDING);
   await privy(page, { email: CID });
   await signInFromBoard(page, CID);
   await page.goto('/board');
   await expect(page.getByRole('heading', { level: 1 })).toHaveText('Not on the list. Yet.');
   await page.getByRole('button', { name: 'Use it here' }).click();
-  await page.getByLabel('Invite code').fill(codes[0]!.toLowerCase());
+  await page.getByLabel('Invite code').fill(code.toLowerCase());
   await page.getByRole('button', { name: 'Use invite' }).click();
   await expect(page.getByRole('status').filter({ hasText: 'Invite accepted' })).toBeVisible();
   await expect(page.getByRole('heading', { level: 1 })).toHaveText('Say where you’re going.');
@@ -309,7 +316,7 @@ test('an invite the team issues lets a person off the list board, and works once
     await createSolanaWalletAndContinue(danPage);
     await danPage.goto('/board');
     await danPage.getByRole('button', { name: 'Use it here' }).click();
-    await danPage.getByLabel('Invite code').fill(codes[0]!);
+    await danPage.getByLabel('Invite code').fill(code);
     await danPage.getByRole('button', { name: 'Use invite' }).click();
     await expect(danPage.locator('p[role="alert"]')).toHaveText('That invite code was already used.');
   } finally { await dan.close(); }
@@ -597,7 +604,7 @@ test('invite codes remain untouched before launch and show the exact opening mes
     await page.getByRole('button', { name: language === 'PT' ? 'Tenho um código de convite' : 'I have an invite code', exact: true }).click();
     await page.getByLabel(language === 'PT' ? 'Código de convite' : 'Invite code', { exact: true }).fill('FLF-AAAA-AAAA');
     await page.getByRole('button', { name: language === 'PT' ? 'Usar convite' : 'Use invite', exact: true }).click();
-    await expect(page.getByRole('alert')).toHaveText(language === 'PT' ? 'Seu código abre na quinta-feira, às 9h (horário de Brasília).' : 'Your code opens Thursday at 9:00 BRT');
+    await expect(page.locator('main').getByRole('alert')).toHaveText(language === 'PT' ? 'Seu código abre na quinta-feira, às 9h (horário de Brasília).' : 'Your code opens Thursday at 9:00 BRT');
     await expect(page).toHaveURL(/\/board$/);
   }
   expect(redemptions).toEqual([]);
@@ -620,6 +627,15 @@ test('compact language menus fit header and footer at every launch width, persis
         // A full touch target with no decorative circle or border.
         await expect(trigger).toHaveCSS('border-top-width', '0px');
         await expect(trigger).toHaveCSS('border-radius', '6px');
+        // Visual comparison: reconstruct only PR #178's exact trigger declarations on the same isolated page.
+        // This is a CSS baseline, not evidence of a historical deployment or a second production build.
+        const before = await page.addStyleTag({ content: `button.${await trigger.getAttribute('class')}{
+          width:48px!important;border:2px solid rgba(255,255,255,.5)!important;border-radius:999px!important;
+          padding:0 8px!important;font-size:24px!important;line-height:1}` });
+        await expect(trigger).toHaveCSS('border-top-width', '2px');
+        await page.screenshot({ path: test.info().outputPath(`language-${language}-${width}-${place}-pr178-trigger.png`) });
+        await before.evaluate(element => element.parentNode?.removeChild(element));
+        await expect(trigger).toHaveCSS('border-top-width', '0px');
         await trigger.hover();
         await page.screenshot({ path: test.info().outputPath(`language-${language}-${width}-${place}-hover.png`) });
         await trigger.focus();
@@ -647,6 +663,11 @@ test('compact language menus fit header and footer at every launch width, persis
         await page.keyboard.press('ArrowLeft');
         await expect(category).toBeFocused();
         await expect(scope.getByRole('menuitemradio')).toHaveCount(0);
+        await category.press('Tab');
+        await expect(trigger).toHaveAttribute('aria-expanded', 'false');
+        await expect(trigger).not.toBeFocused();
+        await trigger.focus(); await trigger.press('ArrowDown');
+        await expect(category).toBeFocused();
         await category.press('Escape');
         await expect(trigger).toBeFocused();
         await expect(trigger).toHaveAttribute('aria-expanded', 'false');
@@ -665,7 +686,7 @@ test('compact language menus fit header and footer at every launch width, persis
   await chooseLanguage(page, 'EN', 'footer');
   await page.reload();
   await expect(page.locator('html')).toHaveAttribute('lang', 'en');
-  const compactTouch = await context.browser()!.newContext({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true,
+  const compactTouch = await context.browser()!.newContext({ baseURL: E2E_APP_ORIGIN, viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true,
     storageState: returningVisitor(E2E_APP_ORIGIN) });
   try {
     const touch = await compactTouch.newPage();
@@ -676,6 +697,8 @@ test('compact language menus fit header and footer at every launch width, persis
       const scope = touch.locator(place);
       await scope.getByRole('button', { name: /^(Language|Idioma)$/ }).tap();
       await scope.getByRole('menuitem', { name: /^(Language|Idioma)/ }).tap();
+      await expect(scope.getByRole('menuitemradio', { name: 'Português' })).toBeVisible();
+      await touch.screenshot({ path: test.info().outputPath(`language-390-${place}-touch-open.png`) });
       await scope.getByRole('menuitemradio', { name: 'Português' }).tap();
       await expect(scope.getByRole('button', { name: 'Idioma', exact: true })).toHaveAttribute('aria-expanded', 'false');
       await touch.screenshot({ path: test.info().outputPath(`language-PT-390-${place}-touch.png`) });
@@ -693,7 +716,8 @@ test('Terms and Privacy stay public, display one selected language, and preserve
     await expect(page.locator('main')).not.toContainText(language === 'PT' ? 'Terms of Use' : 'Termos de Uso');
     await expect(page.locator('#risks h2')).toHaveText(language === 'PT' ? '6. Riscos' : '6. Risks');
     await expect(page.locator('main')).not.toContainText(language === 'PT' ? 'valor máximo' : 'maximum value');
-    await expect(page.getByRole('link', { name: 'flofi.xyz@gmail.com', exact: true })).toHaveAttribute('href', 'mailto:flofi.xyz@gmail.com');
+    await expect(page.locator('main')).toContainText('flofi.xyz@gmail.com');
+    await expect(page.locator('footer').getByRole('link', { name: language === 'PT' ? 'Privacidade' : 'Privacy', exact: true })).toHaveAttribute('href', '/privacy');
     for (const width of [320, 390, 768, 1440]) {
       await page.setViewportSize({ width, height: 900 }); await noOverflow(page);
     }
@@ -708,4 +732,63 @@ test('Terms and Privacy stay public, display one selected language, and preserve
     }
     await shot(page, `privacy-${language}`);
   }
+});
+
+
+if (process.env.FLOFI_BETA_ACCESS === 'beta') test('closed beta protects direct product requests and returning linked-wallet sign-in', async ({ page, context, browser }) => {
+  const email = `beta-${run}@flofi-e2e.test`;
+  const post = (p: Page, path: string, data: object) => p.evaluate(async ({ path, data }) => {
+    const response = await fetch(path, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(data) });
+    return { status: response.status, body: await response.json() as unknown };
+  }, { path, data });
+  await at(context, BOARDING);
+  await page.goto('/app');
+  await expect(page).toHaveURL('/board');
+  await expect(page.locator('.app-shell')).toHaveCount(0);
+  const anonymous = await post(page, '/api/build-estimate', {});
+  expect(anonymous.status).toBe(403);
+  expect(anonymous.body).toMatchObject({ ok: false, code: 'BETA_SIGN_IN_REQUIRED' });
+  await shot(page, 'closed-beta-anonymous-redirect');
+
+  await query(`INSERT INTO flight_list_entries (tenant_id, entry_id, email, flight, language, notice)
+    VALUES ('default', $1, $2, 'FIRST', 'EN', '2026-11-05')`, [`fle_${randomBytes(16).toString('hex')}`, email]);
+  const address = '11111111111111111111111111111112';
+  await privy(page, { wallet: { address, chain: 'solana' } });
+  await page.goto('/login?returnTo=%2Fboard');
+  await page.getByRole('button', { name: 'Web3 Wallet', exact: true }).click();
+  await expect(page).toHaveURL('/board');
+  const unproved = await post(page, '/api/build-estimate', {});
+  expect(unproved.status).toBe(403);
+  expect(unproved.body).toMatchObject({ code: 'BETA_ACCESS_DENIED' });
+  expect((await post(page, '/api/board/board', {})).status).toBe(403);
+  expect(await query('SELECT account_id FROM flight_beta_grants')).toEqual([]);
+
+  const { code } = await accessEmail(email);
+  expect((await post(page, '/api/board/access/code', { email, code })).status).toBe(200);
+  const boarded = await post(page, '/api/board/board', {});
+  expect(boarded.status).toBe(200);
+  expect(boarded.body).toMatchObject({ flight: { access: { kind: 'eligible', origin: 'LIST' } } });
+  const [grant] = await query<{ account_id: string }>('SELECT account_id FROM flight_beta_grants');
+  expect(grant).toBeTruthy();
+  await page.goto('/app');
+  await expect(page).toHaveURL('/app');
+  await expect(page.locator('.app-shell')).toBeVisible();
+  expect((await post(page, '/api/build-estimate', {})).status).not.toBe(403);
+
+  const returning = await browser.newContext({ baseURL: E2E_APP_ORIGIN, storageState: returningVisitor(E2E_APP_ORIGIN) });
+  try {
+    await at(returning, BOARDING);
+    const later = await returning.newPage();
+    await privy(later, { wallet: { address, chain: 'solana' } });
+    await later.goto('/login');
+    await later.getByRole('button', { name: 'Web3 Wallet', exact: true }).click();
+    await expect(later).toHaveURL('/app');
+    await expect(later.locator('.app-shell')).toBeVisible();
+    expect(await query(`SELECT method FROM flofi_account_sessions WHERE account_id = $1 AND method = 'SOLANA'`, [grant!.account_id])).toEqual([{ method: 'SOLANA' }, { method: 'SOLANA' }]);
+    await shot(later, 'closed-beta-returning-wallet');
+    await query(`UPDATE flofi_account_sessions SET revoked_at = clock_timestamp() WHERE account_id = $1`, [grant!.account_id]);
+    expect((await post(later, '/api/build-estimate', {})).status).toBe(403);
+    await later.goto('/app');
+    await expect(later).toHaveURL('/board');
+  } finally { await returning.close(); }
 });

@@ -119,6 +119,6 @@ export async function catalogSwapAvailability(chain: string): Promise<boolean> {
 }
 /** BUILD-RH-002: whether this instance serves Robinhood Chain mainnet swaps (live or the MOCKED loopback harness). */
 export async function robinhoodSwapAvailability(): Promise<boolean> {
-  return withFlightAccess(async () => { return catalogSwapAvailability(CATALOG_NETWORKS.robinhood.chain); 
+  return withFlightAccess(async () => { return catalogSwapAvailability(CATALOG_NETWORKS.robinhood.chain);
   });
 }

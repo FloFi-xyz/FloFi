@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 'use server';
 import { withFlightAccess } from '../server/flight-access';
+import { assertExecutionEnabled } from '../server/execution-guard';
 import { readFileSync } from 'node:fs';
 import { isAbsolute } from 'node:path';
 import type { SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
@@ -103,6 +104,7 @@ export async function modeAExecution(input: unknown): Promise<ModeAResult<Execut
 }
 export async function modeABeginStep(input: unknown): Promise<ModeAResult<Awaited<ReturnType<ModeAService['beginStep']>>>> {
   return withFlightAccess(async () => {
+  assertExecutionEnabled();
   return run(service => {
     const key = (input as { idempotencyKey?: unknown } | null)?.idempotencyKey;
     if (typeof key !== 'string') throw new Error('INPUT_INVALID');

@@ -6,11 +6,11 @@ import type { SavedWorkflow, WorkflowDocument, WorkflowList, WorkflowOwner } fro
 import { workflowOperation } from '../server/workflow-persistence';
 import { ownerHistoryOperation } from '../server/owner-history';
 export async function listWorkflows(owner: WorkflowOwner) {
-  return withFlightAccess(async () => { return workflowOperation<WorkflowList>('list', [], owner); 
+  return withFlightAccess(async () => { return workflowOperation<WorkflowList>('list', [], owner);
   });
 }
 export async function openWorkflow(owner: WorkflowOwner, workflowId: string) {
-  return withFlightAccess(async () => { return workflowOperation<WorkflowDocument>('get', [workflowId], owner); 
+  return withFlightAccess(async () => { return workflowOperation<WorkflowDocument>('get', [workflowId], owner);
   });
 }
 export async function saveWorkflow(owner: WorkflowOwner, workflow: SemanticWorkflow, name: string, expectedVersion: number) {

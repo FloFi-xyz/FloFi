@@ -18,6 +18,8 @@
 import { erc4337, eip5792, fromBase64, parseMessageV0, parseTransaction, simulateJupiterSwap, simulateSolanaTransfer, verifySignedJupiterTransaction,
   verifySignedSolanaTransfer, type JupiterHttp, type JupiterReview, type LookupTables, type SolanaRpc, type SolanaTransferReview } from '@defi-workflow-engine/reference-compiler';
 import { createHash } from 'node:crypto';
+import type { BetaPrincipal } from '../flight/beta-access.ts';
+import { assertExecutionEnabled, executionRefusal } from '../server/execution-guard.ts';
 import type { ChainTransport } from '../delegation/chains.ts';
 import { assetKey, type WorkflowRequirement } from '../delegation/steps.ts';
 import type { WorkflowComposition } from '../engine/strategy-engine';
@@ -47,6 +49,7 @@ export type UserFundedDeps = {
   readonly solana: SolanaRpc | null;
   readonly jupiter: JupiterHttp | null;
   readonly now: () => Date;
+  readonly submissionRefusal?: (wallet: BetaPrincipal, runOwner?: BetaPrincipal) => Promise<string | null>;
 };
 export type GroupInput = { readonly runId: string; readonly groupIndex: number; readonly strategy: GroupStrategy; readonly chain: string; readonly feePayer: string;
   readonly stepFrom: number; readonly stepTo: number };
@@ -203,12 +206,14 @@ export async function prepareGroup(deps: UserFundedDeps, composition: WorkflowCo
   options: { readonly guaranteed?: ReadonlyMap<number, AssetAmountFact>; readonly delayed?: boolean } = {}): Promise<Result<{ readonly prepared: Prepared; readonly validUntil: Date }>> {
   const now = deps.now().getTime(), guaranteed = options.guaranteed ?? new Map();
   try {
+    assertExecutionEnabled();
     let r: Result<Prepared>;
     if (g.strategy === 'EVM_WALLET_BATCH') r = await prepareWalletBatch(deps, requirement, g, guaranteed);
     else if (g.strategy === 'EVM_USER_OPERATION') r = await prepareUserOperation(deps, requirement, g, guaranteed, options.delayed === true);
     else if (g.strategy === 'SOLANA_SIGN_ALL') r = await prepareSolanaSignAll(deps, composition, requirement, g);
     else return no('USER_FUNDED_GROUP_NOT_PREPARABLE');
     if (!r.ok) return r;
+    assertExecutionEnabled();
     // Wallet batches and Solana transactions are honoured for a short window (quotes, recent blockhash); a user operation is bound by its nonce and the run.
     const validUntil = new Date(g.strategy === 'EVM_USER_OPERATION' ? now + 24 * 3_600_000 : g.strategy === 'SOLANA_SIGN_ALL' ? now + 60_000 : now + EVM_PREPARED_TTL_MS);
     return ok({ prepared: { ...r.value, preparedAt: new Date(now).toISOString() }, validUntil });
@@ -220,6 +225,9 @@ export type { OwnerAnswer } from '../workflow-runs/execution-groups.ts';
 /** Verifies the owner's answer against the frozen prepared artifact (never against anything the browser sends back as "the artifact"). */
 export function authorizeGroup(prepared: Prepared, answer: OwnerAnswer, owner: string, now: Date): Result<Readonly<Record<string, unknown>>> {
   if (answer.kind !== prepared.kind) return no('USER_FUNDED_AUTHORIZATION_KIND_MISMATCH');
+  // An EIP-5792 answer reports a batch the wallet may already have sent. Keep accepting it so existing work can reconcile.
+  const paused = executionRefusal();
+  if (paused && answer.kind !== 'EVM_WALLET_BATCH') return no(paused);
   const at = now.toISOString();
   if (answer.kind === 'EVM_WALLET_BATCH') {
     try { return ok({ kind: answer.kind, batchId: eip5792.sendCallsId(answer.batchId), at }); } catch { return no('EIP5792_RESPONSE_INVALID'); }
@@ -268,7 +276,10 @@ export async function checkUserOperation(deps: UserFundedDeps, prepared: Prepare
  * Relays the owner-signed operation to the bundler. Called only after its submission was recorded (exactly one process won that write), and
  * again by reconciliation while neither the chain nor the bundler knows it: the same signed bytes, so a resend can never be a second operation.
  */
-export async function relayUserOperation(deps: UserFundedDeps, prepared: Prepared, authorization: Readonly<Record<string, unknown>>): Promise<Result<string>> {
+export async function relayUserOperation(deps: UserFundedDeps, prepared: Prepared, authorization: Readonly<Record<string, unknown>>, runOwner?: BetaPrincipal): Promise<Result<string>> {
+  const group = prepared.group as EvmGroupCalls;
+  const paused = executionRefusal() ?? await deps.submissionRefusal?.({ namespace: 'eip155', address: group.owner }, runOwner);
+  if (paused) return no(paused);
   const bundler = deps.bundler(`eip155:${String(prepared.chainId)}`);
   if (!bundler) return no('USER_OPERATION_BUNDLER_UNAVAILABLE');
   try { return ok(await bundler.send(opOf(prepared.op as SerialOp, String(authorization.signature)))); }
@@ -288,7 +299,7 @@ async function statuses(rpc: SolanaRpc, signatures: readonly string[]): Promise<
  * Sends the next transaction of a Solana group whose predecessor confirmed (exactly the owner-signed bytes; a resend is the same signature).
  * Returns what happened; never sends a transaction past its blockhash validity.
  */
-export async function advanceSolanaSubmission(deps: UserFundedDeps, prepared: Prepared, authorization: Readonly<Record<string, unknown>>, owner: string)
+export async function advanceSolanaSubmission(deps: UserFundedDeps, prepared: Prepared, authorization: Readonly<Record<string, unknown>>, owner: string, runOwner?: BetaPrincipal)
   : Promise<{ readonly state: 'SENT' | 'WAITING' | 'DONE' | 'EXPIRED' | 'FAILED'; readonly index: number | null; readonly code: string | null }> {
   const rpc = deps.solana;
   if (!rpc) return { state: 'WAITING', index: null, code: 'USER_FUNDED_SOLANA_RPC_UNAVAILABLE' };
@@ -298,11 +309,16 @@ export async function advanceSolanaSubmission(deps: UserFundedDeps, prepared: Pr
     if (status?.err) return { state: 'FAILED', index: i, code: 'SOLANA_TRANSACTION_FAILED' };
     if (status && ['confirmed', 'finalized'].includes(String(status.confirmationStatus))) continue;
     if (status) return { state: 'WAITING', index: i, code: null };
+    const paused = executionRefusal();
+    if (paused) return { state: 'WAITING', index: i, code: paused };
     // Not seen yet: send it unless its blockhash expired (then it can never land, and nothing later is sent).
     const height = Number(await rpc('getBlockHeight', [{ commitment: 'confirmed' }]));
     if (height > txs[i]!.lastValidBlockHeight) return { state: 'EXPIRED', index: i, code: 'SOLANA_BLOCKHASH_EXPIRED' };
     const message = parseMessageV0(parseTransaction(fromBase64(signed[i]!.transaction)).message);
     assertUserFundedSubmission({ kind: 'SOLANA_TRANSACTION', feePayer: message.staticKeys[0] ?? '', ownerWallet: owner });
+    const denied = await deps.submissionRefusal?.({ namespace: 'solana', address: owner }, runOwner);
+    if (denied) return { state: 'WAITING', index: i, code: denied };
+    assertExecutionEnabled();
     await rpc('sendTransaction', [signed[i]!.transaction, { encoding: 'base64', preflightCommitment: 'confirmed', maxRetries: 10 }]);
     return { state: 'SENT', index: i, code: null };
   }
@@ -378,7 +394,7 @@ export function supersede(previous: Prepared | null): readonly { readonly group:
 }
 /** Reconciles an EVM group from the chain (wallet batch: the reported hashes; user operation: the bundler's bundle transaction, re-read). */
 export async function reconcileEvmGroup(deps: UserFundedDeps, prepared: Prepared, submission: Readonly<Record<string, unknown>>,
-  authorization: Readonly<Record<string, unknown>> | null = null): Promise<Reconciled> {
+  authorization: Readonly<Record<string, unknown>> | null = null, runOwner?: BetaPrincipal): Promise<Reconciled> {
   const group = prepared.group as EvmGroupCalls, t = deps.evm(group.chain);
   if (!t) return { status: 'PENDING' };
   if (prepared.kind === 'EVM_WALLET_BATCH') {
@@ -400,8 +416,9 @@ export async function reconcileEvmGroup(deps: UserFundedDeps, prepared: Prepared
   // Recorded but unknown to the bundler and not mined (the relay after the record never happened, or the bundler dropped it): the SAME
   // signed operation is relayed again. Its nonce key admits it once, so this can never execute a second operation.
   if (!receipt && bundler && authorization && await bundler.known(userOpHash).then(k => !k, () => false)) {
-    const resent = await relayUserOperation(deps, prepared, authorization);
-    if (!resent.ok && !['USER_OPERATION_BUNDLER_UNAVAILABLE', 'USER_OPERATION_FEE_TOO_LOW', 'USER_OPERATION_NONCE_INVALID'].includes(resent.code))
+    const resent = await relayUserOperation(deps, prepared, authorization, runOwner);
+    if (!resent.ok && !resent.code.startsWith('BETA_') && !['USER_OPERATION_BUNDLER_UNAVAILABLE', 'USER_OPERATION_FEE_TOO_LOW', 'USER_OPERATION_NONCE_INVALID',
+      'EXECUTION_PAUSED', 'EXECUTION_PAUSE_CONFIGURATION_INVALID'].includes(resent.code))
       return { status: 'FAILED', code: resent.code, gasPaid: null, transactions: [] };
     return { status: 'PENDING' };
   }

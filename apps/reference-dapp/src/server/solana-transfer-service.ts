@@ -9,6 +9,7 @@
  * blockhash past its last valid block height proves the transfer can never land — so recovery never creates a second transfer.
  */
 import { randomBytes } from 'node:crypto';
+import { assertExecutionEnabled } from './execution-guard.ts';
 import { isAbsolute } from 'node:path';
 import { validateAuthoringWorkflow, createBaseSepoliaReviewContext } from '@defi-workflow-engine/reference-linter';
 import { assertSolanaTransferReview, describeSolanaWalletChange, readSolanaTransferFacts, simulateSolanaTransfer, solanaAddress, solanaTransferIntent,
@@ -152,6 +153,7 @@ export function createSolanaTransferService(input: { profile: SolanaTransferProf
     }); },
     /** Verify the reviewed bytes (or a verified wallet guard) and the owner signature, persist both, then broadcast once. */
     async submit(id: string, signedTransaction: string): Promise<SolanaTransferRecord> { return locked(idCheck(id), async () => {
+      assertExecutionEnabled();
       const record = await load(id);
       if (record.attempt?.state !== 'PREPARED' || record.authorization !== record.review.commitment) throw new Error(`${X}_WALLET_HANDOFF_NOT_AUTHORIZED`);
       let signed: SignedSolanaTransaction;
@@ -171,6 +173,7 @@ export function createSolanaTransferService(input: { profile: SolanaTransferProf
       }
       const submitting = await save({ ...record, ...recordSolanaTransferSignature(record, signed), error: null });
       try {
+        assertExecutionEnabled();
         const result = await input.rpc('sendTransaction', [signed.transaction, { encoding: 'base64', preflightCommitment: 'confirmed', maxRetries: 10 }]);
         if (result !== signed.signature) throw new Error(`${X}_SUBMISSION_RESULT_MISMATCH`);
         return save({ ...submitting, ...solanaTransferTransition(submitting, 'PENDING') });

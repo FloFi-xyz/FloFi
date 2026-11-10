@@ -72,15 +72,15 @@ export async function crossChainRouterMode(network: RouterNetwork = 'mainnet'): 
   });
 }
 export async function routerInfo(network: RouterNetwork) {
-  return withFlightAccess(async () => { return run(network, 'info', [], async s => ({ executionEnabled: s.executionEnabled })); 
+  return withFlightAccess(async () => { return run(network, 'info', [], async s => ({ executionEnabled: s.executionEnabled }));
   });
 }
 export async function routerSimulate(network: RouterNetwork, workflow: SemanticWorkflow, owner: string) {
-  return withFlightAccess(async () => { return run(network, 'simulate', [workflow, owner], s => s.simulate(workflow, owner)); 
+  return withFlightAccess(async () => { return run(network, 'simulate', [workflow, owner], s => s.simulate(workflow, owner));
   });
 }
 export async function routerRefresh(network: RouterNetwork, id: string) {
-  return withFlightAccess(async () => { return run(network, 'refresh', [id], s => s.refresh(id)); 
+  return withFlightAccess(async () => { return run(network, 'refresh', [id], s => s.refresh(id));
   });
 }
 export async function routerReview(network: RouterNetwork, id: string, commitment: string, workflow: SemanticWorkflow) {
@@ -102,7 +102,7 @@ export async function routerBegin(network: RouterNetwork, id: string, owner: str
   });
 }
 export async function routerHandoff(network: RouterNetwork, id: string) {
-  return withFlightAccess(async () => { return run(network, 'handoff', [id], s => s.handoff(id)); 
+  return withFlightAccess(async () => { return run(network, 'handoff', [id], s => s.handoff(id));
   });
 }
 export async function routerReport(network: RouterNetwork, id: string, result: ({ kind: 'HASH'; hash: string } | { kind: 'UNKNOWN' | 'REJECTED'; code?: string }) & { attemptId?: string }) {
@@ -118,11 +118,11 @@ export async function routerWalletFailure(network: RouterNetwork, id: string, di
   });
 }
 export async function routerObserve(network: RouterNetwork, id: string) {
-  return withFlightAccess(async () => { return run(network, 'observe', [id], s => s.observe(id)); 
+  return withFlightAccess(async () => { return run(network, 'observe', [id], s => s.observe(id));
   });
 }
 export async function routerStatus(network: RouterNetwork, id: string) {
-  return withFlightAccess(async () => { return run(network, 'status', [id], s => s.load(id)); 
+  return withFlightAccess(async () => { return run(network, 'status', [id], s => s.load(id));
   });
 }
 /** BUILD-JOURNEY-001: the signed-in wallet's runs, newest first, so a run can be recovered from any browser. */

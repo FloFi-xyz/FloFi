@@ -46,38 +46,38 @@ export async function paymentFlowMode(): Promise<PaymentMode> {
   });
 }
 export async function paymentInfo() {
-  return withFlightAccess(async () => { return run('info', [], async s => ({ executionEnabled: s.executionEnabled })); 
+  return withFlightAccess(async () => { return run('info', [], async s => ({ executionEnabled: s.executionEnabled }));
   });
 }
 export async function paymentSimulate(request: PaymentDraftRequest, owner: string) {
-  return withFlightAccess(async () => { return run('simulate', [request, owner], s => s.simulate(request, owner)); 
+  return withFlightAccess(async () => { return run('simulate', [request, owner], s => s.simulate(request, owner));
   });
 }
 export async function paymentReview(id: string, commitment: string) {
-  return withFlightAccess(async () => { return run('review', [id, commitment], s => s.review(id, commitment)); 
+  return withFlightAccess(async () => { return run('review', [id, commitment], s => s.review(id, commitment));
   });
 }
 export async function paymentInvalidate(id: string) {
-  return withFlightAccess(async () => { return run('invalidate', [id], s => s.invalidate(id)); 
+  return withFlightAccess(async () => { return run('invalidate', [id], s => s.invalidate(id));
   });
 }
 export async function paymentBegin(id: string, owner: string) {
-  return withFlightAccess(async () => { return run('begin', [id, owner], s => s.begin(id, owner)); 
+  return withFlightAccess(async () => { return run('begin', [id, owner], s => s.begin(id, owner));
   });
 }
 export async function paymentHandoff(id: string) {
-  return withFlightAccess(async () => { return run('handoff', [id], s => s.handoff(id)); 
+  return withFlightAccess(async () => { return run('handoff', [id], s => s.handoff(id));
   });
 }
 export async function paymentReport(id: string, result: PaymentWalletResult) {
-  return withFlightAccess(async () => { return run('report', [id, result], s => s.report(id, result)); 
+  return withFlightAccess(async () => { return run('report', [id, result], s => s.report(id, result));
   });
 }
 export async function paymentObserve(id: string) {
-  return withFlightAccess(async () => { return run('observe', [id], s => s.observe(id)); 
+  return withFlightAccess(async () => { return run('observe', [id], s => s.observe(id));
   });
 }
 export async function paymentStatus(id: string) {
-  return withFlightAccess(async () => { return run('status', [id], s => s.load(id)); 
+  return withFlightAccess(async () => { return run('status', [id], s => s.load(id));
   });
 }

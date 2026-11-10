@@ -15,7 +15,7 @@ import type { AccessStore } from '../access-store.ts';
 import type { FlightStore } from '../store.ts';
 import type { EmailOutbox, EmailRow, Settlement } from './outbox.ts';
 import type { OutgoingEmail, ResendClient, SendOutcome } from './resend.ts';
-import { renderEmail, type CardView, type TemplateInput } from './templates.ts';
+import { renderEmailForVersion, TEMPLATE_VERSIONS, type CardView, type TemplateInput } from './templates.ts';
 
 export const FLIGHT_EMAIL_FROM = 'FloFi <hello@flofi.xyz>';
 export const FLIGHT_EMAIL_REPLY_TO = 'flofi.xyz@gmail.com';
@@ -66,8 +66,14 @@ export function createEmailDelivery(deps: DeliveryDeps) {
 
   /** The email as it should be sent now, or why it must not be sent any more. */
   async function render(row: EmailRow, at: number): Promise<Rendered> {
-    if (row.template === 'CREATOR_INVITE' && row.templateVersion !== 2) throw new Error('TEMPLATE_VERSION_REVIEW');
+    if (row.template === 'CREATOR_INVITE' && row.templateVersion !== TEMPLATE_VERSIONS.CREATOR_INVITE) throw new Error('TEMPLATE_VERSION_REVIEW');
     if (row.category === 'CAMPAIGN' && await deps.outbox.isSuppressed(addressHash(row.recipient))) return { kind: 'CANCEL', code: 'UNSUBSCRIBED' };
+    if (row.category === 'CAMPAIGN') {
+      const imported = (await deps.db.query<{ campaign_consent: boolean }>(`SELECT i.campaign_consent FROM flight_early_list_imports i
+        JOIN flight_list_entries e ON e.tenant_id = i.tenant_id AND e.entry_id = i.entry_id
+        WHERE i.tenant_id = $1 AND e.email = $2`, [deps.tenantId, row.recipient])).rows[0];
+      if (imported && !imported.campaign_consent) return { kind: 'CANCEL', code: 'NO_CAMPAIGN_CONSENT' };
+    }
     let input: TemplateInput, attachments: OutgoingEmail['attachments'];
     switch (row.template) {
       case 'EARLY_LIST': case 'LIST_CONFIRMATION': case 'EVE': case 'NEXT_FLIGHT': {
@@ -102,16 +108,18 @@ export function createEmailDelivery(deps: DeliveryDeps) {
         break;
       }
       case 'CREATOR_INVITE': {
-        const invite = row.inviteCode ? (await deps.db.query<{ redeemed_at: Date | null }>('SELECT redeemed_at FROM flight_invites WHERE tenant_id = $1 AND code = $2',
+        const invite = row.inviteCode ? (await deps.db.query<{ redeemed_at: Date | null; expires_at: Date | null; revoked_at: Date | null }>('SELECT redeemed_at, expires_at, revoked_at FROM flight_invites WHERE tenant_id = $1 AND code = $2',
           [deps.tenantId, row.inviteCode])).rows[0] : undefined;
         if (!invite) return { kind: 'CANCEL', code: 'INVITE_GONE' };
+        if (invite.revoked_at) return { kind: 'CANCEL', code: 'INVITE_REVOKED' };
+        if (invite.expires_at && invite.expires_at.getTime() <= at) return { kind: 'CANCEL', code: 'INVITE_EXPIRED' };
         input = { template: 'CREATOR_INVITE', code: row.inviteCode!, briefUrl: deps.briefUrl ?? FLIGHT_CREATOR_BRIEF_URL };
         break;
       }
     }
     const unsubscribe = unsubscribeTokenFor(deps.secret, row.emailId, row.recipient);
-    const rendered = renderEmail(input, { language: row.language, recipient: row.recipient, origin, calendar: deps.calendar,
-      unsubscribeUrl: `${origin}/board/unsubscribe?l=${row.language.toLowerCase()}&t=${unsubscribe}` });
+    const rendered = renderEmailForVersion(input, { language: row.language, recipient: row.recipient, origin, calendar: deps.calendar,
+      unsubscribeUrl: `${origin}/board/unsubscribe?l=${row.language.toLowerCase()}&t=${unsubscribe}` }, row.templateVersion);
     return { kind: 'SEND', email: { idempotencyKey: row.emailId, to: row.recipient, subject: rendered.subject, html: rendered.html, text: rendered.text,
       headers: { 'List-Unsubscribe': `<${origin}/api/board/unsubscribe?t=${unsubscribe}>`, 'List-Unsubscribe-Post': 'List-Unsubscribe=One-Click' },
       ...attachments ? { attachments } : {}, tags: [{ name: 'template', value: row.template.toLowerCase() }, { name: 'campaign', value: 'flight-flofi' }] } };

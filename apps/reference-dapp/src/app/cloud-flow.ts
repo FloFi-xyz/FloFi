@@ -8,6 +8,7 @@
 import { observeSimulations } from '../server/simulation-observer';
 import { cloudFlow as runtimeFlow } from '../server/flow-runtime';
 import { requireFlightAccess } from '../server/flight-access';
+import { guardFlowExecution } from '../server/execution-guard';
 
 const REGISTERED = Symbol.for('flofi.flight.observer.registered');
 // The record (with the account and request code it needs) loads on the first successful hosted simulation, never when an action module
@@ -22,6 +23,9 @@ if (!(globalThis as Record<symbol, unknown>)[REGISTERED]) {
 export { cloudFlowMode, cloudRuns } from '../server/flow-runtime';
 export async function cloudFlow<T>(...args: Parameters<typeof runtimeFlow<T>>) {
   const [flow, method, values, options] = args;
+  try { guardFlowExecution(method); } catch (error) {
+    return { ok: false as const, code: error instanceof Error ? error.message : 'EXECUTION_PAUSED' };
+  }
   const principal = options?.principal;
   const identity = await requireFlightAccess(principal ? { namespace: principal.startsWith('0x') ? 'eip155' : 'solana', address: principal } : undefined);
   return runtimeFlow<T>(flow, method, values, { ...options, betaIdentity: identity });

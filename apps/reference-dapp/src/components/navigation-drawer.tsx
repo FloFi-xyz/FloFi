@@ -33,7 +33,7 @@ export function NavigationDrawer({ pathname, section = 'Build', onBuild, onChat,
   pathname?: string | null; section?: WorkflowStage | 'Dashboard' | 'Chat'; onBuild: () => void; onChat?: (() => void) | undefined;
   onDisconnect: () => void; disconnectDisabled: boolean;
 }) {
-  const { t: tr } = useLocale();
+  const { t: tr, language } = useLocale();
   const [open, setOpen] = useState(false);
   const workspace = !pathname || pathname === '/app';
   const selected = secondaryWorkspaceRoute(pathname)?.id
@@ -133,6 +133,8 @@ export function NavigationDrawer({ pathname, section = 'Build', onBuild, onChat,
         <div className="navigation-footer">
           <button type="button" className="navigation-row" aria-label={tr("Logout")} disabled={disconnectDisabled}
             onClick={() => { onDisconnect(); close(true); }}><NavigationIcon item="logout"/><span>{tr("Logout")}</span></button>
+          <a href="/terms" className="navigation-row">{language === 'PT' ? 'Termos' : 'Terms'}</a>
+          <a href="/privacy" className="navigation-row">{language === 'PT' ? 'Privacidade' : 'Privacy'}</a>
         </div>
       </aside>
     </div>

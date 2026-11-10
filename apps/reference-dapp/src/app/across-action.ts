@@ -25,66 +25,66 @@ const result = async <T>(work: () => Promise<T>): Promise<{ ok: true; value: T }
     return { ok: false, code: /^[A-Z][A-Z0-9_]{2,63}$/.test(message) ? message : 'ACROSS_INTERNAL_ERROR' }; }
 };
 export async function acrossInfo() {
-  return withFlightAccess(async () => { return result(async () => ({ liveQuoteAvailable: Boolean(process.env.ACROSS_API_KEY && process.env.ACROSS_INTEGRATOR_ID) })); 
+  return withFlightAccess(async () => { return result(async () => ({ liveQuoteAvailable: Boolean(process.env.ACROSS_API_KEY && process.env.ACROSS_INTEGRATOR_ID) }));
   });
 }
 export async function acrossQuote(workflow: SemanticWorkflow, owner: string) {
-  return withFlightAccess(async () => { return result(() => service().quote(workflow, owner)); 
+  return withFlightAccess(async () => { return result(() => service().quote(workflow, owner));
   });
 }
 export async function acrossLoad(executionId: string) {
-  return withFlightAccess(async () => { return result(() => service().load(id(executionId))); 
+  return withFlightAccess(async () => { return result(() => service().load(id(executionId)));
   });
 }
 export async function acrossAuthorize(executionId: string, hash: string) {
-  return withFlightAccess(async () => { return result(() => service().authorize(id(executionId), hash)); 
+  return withFlightAccess(async () => { return result(() => service().authorize(id(executionId), hash));
   });
 }
 export async function acrossApprove(executionId: string) {
-  return withFlightAccess(async () => { return result(() => service().approve(id(executionId))); 
+  return withFlightAccess(async () => { return result(() => service().approve(id(executionId)));
   });
 }
 export async function acrossPrepare(executionId: string) {
-  return withFlightAccess(async () => { return result(() => service().prepare(id(executionId))); 
+  return withFlightAccess(async () => { return result(() => service().prepare(id(executionId)));
   });
 }
 export async function acrossSubmit(executionId: string, uncertain: boolean) {
-  return withFlightAccess(async () => { return result(() => service().submit(id(executionId), uncertain)); 
+  return withFlightAccess(async () => { return result(() => service().submit(id(executionId), uncertain));
   });
 }
 export async function acrossRecheck(executionId: string) {
-  return withFlightAccess(async () => { return result(() => service().recheck(id(executionId))); 
+  return withFlightAccess(async () => { return result(() => service().recheck(id(executionId)));
   });
 }
 export async function acrossConfirmSource(executionId: string) {
-  return withFlightAccess(async () => { return result(() => service().confirmSource(id(executionId))); 
+  return withFlightAccess(async () => { return result(() => service().confirmSource(id(executionId)));
   });
 }
 export async function acrossProgress(executionId: string) {
-  return withFlightAccess(async () => { return result(() => service().progress(id(executionId))); 
+  return withFlightAccess(async () => { return result(() => service().progress(id(executionId)));
   });
 }
 export async function acrossDelay(executionId: string) {
-  return withFlightAccess(async () => { return result(() => service().delay(id(executionId))); 
+  return withFlightAccess(async () => { return result(() => service().delay(id(executionId)));
   });
 }
 export async function acrossFill(executionId: string) {
-  return withFlightAccess(async () => { return result(() => service().fill(id(executionId))); 
+  return withFlightAccess(async () => { return result(() => service().fill(id(executionId)));
   });
 }
 export async function acrossReconcile(executionId: string) {
-  return withFlightAccess(async () => { return result(() => service().reconcile(id(executionId))); 
+  return withFlightAccess(async () => { return result(() => service().reconcile(id(executionId)));
   });
 }
 export async function acrossExpire(executionId: string) {
-  return withFlightAccess(async () => { return result(() => service().expire(id(executionId))); 
+  return withFlightAccess(async () => { return result(() => service().expire(id(executionId)));
   });
 }
 export async function acrossRefundPending(executionId: string) {
-  return withFlightAccess(async () => { return result(() => service().refundPending(id(executionId))); 
+  return withFlightAccess(async () => { return result(() => service().refundPending(id(executionId)));
   });
 }
 export async function acrossRefundConfirm(executionId: string) {
-  return withFlightAccess(async () => { return result(() => service().refundConfirm(id(executionId))); 
+  return withFlightAccess(async () => { return result(() => service().refundConfirm(id(executionId)));
   });
 }

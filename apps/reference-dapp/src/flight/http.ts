@@ -19,6 +19,7 @@ import { sessionCookieName } from '../server/session-cookie';
 import type { AccountFlight, FlightStore } from './store';
 import { betaAccessMode, createBetaAccessStore } from './beta-access';
 import { platformStateHost } from '../server/platform-state-host';
+import { requireFlightAccess } from '../server/flight-access';
 
 const HEADERS = { 'cache-control': 'no-store', 'x-content-type-options': 'nosniff', 'content-type': 'application/json; charset=utf-8' };
 const json = (status: number, body: unknown) => new Response(JSON.stringify(body), { status, headers: HEADERS });
@@ -136,11 +137,13 @@ export async function handleBoard(request: Request): Promise<Response> {
     const person = await flightPerson();
     if (!person) return refuse(401, 'FLIGHT_SIGN_IN_REQUIRED');
     const now = await flightNow(), pending = await pendingSession(request);
-    const bound = pending ? await bindPending(person, pending, now) : 'NONE';
+    const pendingBound = pending ? await bindPending(person, pending, now) : 'NONE';
+    const bound = pendingBound === 'NONE' && betaAccessMode(process.env) === 'open'
+      ? await store.claimVerifiedEntry({ ...person, now }) : pendingBound;
     const state = await store.account({ ...person, now }), detail = accessResultDetail(state.access);
     if (betaAccessMode(process.env) === 'beta') {
       const grant = await createBetaAccessStore(await platformStateHost(), store.calendar).grant(person.accountId, now);
-      if (!grant.ok) return refuse(403, grant.code);
+      if (!grant.ok) return json(403, { ok: false, code: grant.code, flight: state });
     }
     const origin: FlightOrigin | null = state.access.kind === 'eligible' ? state.access.origin : null;
     if (detail) await store.recordEvent('access_result', detail, origin, now);
@@ -158,9 +161,11 @@ export async function handleInvite(request: Request): Promise<Response> {
   const store = await storeOr503();
   if (store instanceof Response) return store;
   try {
+    const now = await flightNow();
+    if (now < store.calendar.boardingOpensAt) return refuse(409, 'INVITE_NOT_YET');
     const person = await flightPerson();
     if (!person) return refuse(401, 'FLIGHT_SIGN_IN_REQUIRED');
-    const now = await flightNow(), result = await store.redeemInvite({ accountId: person.accountId, emails: person.emails, code, now });
+    const result = await store.redeemInvite({ accountId: person.accountId, emails: person.emails, code, now });
     if (result !== 'REDEEMED') return refuse(409, result);
     return json(200, { ok: true, flight: await store.account({ ...person, now }) });
   } catch { return refuse(503, 'FLIGHT_UNAVAILABLE'); }
@@ -178,6 +183,8 @@ export async function handlePass(request: Request): Promise<Response> {
   if (workflowId === undefined) return refuse(400, 'FLIGHT_WORKFLOW_INVALID');
   const store = await storeOr503();
   if (store instanceof Response) return store;
+  try { await requireFlightAccess(); }
+  catch (error) { return refuse(403, error instanceof Error && /^BETA_[A-Z_]+$/.test(error.message) ? error.message : 'BETA_ACCESS_UNAVAILABLE'); }
   try {
     const person = await flightPerson();
     if (!person) return refuse(401, 'FLIGHT_SIGN_IN_REQUIRED');

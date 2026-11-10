@@ -18,7 +18,7 @@ export function executorDeps(rt: DelegationRuntime, log: ExecutorDeps['log']): E
   const provider = signerProvider(rt.config, rt.seams);
   if (!provider) return { code: 'DELEGATED_SIGNER_UNAVAILABLE' };
   const runs = createPgWorkflowRunStore(rt.host.db, rt.host.tenantId);
-  return { store: rt.store, automations: createPgAutomationStore(rt.host.db, rt.host.tenantId), config: rt.config, signer: signerUser(provider), now: rt.now,
+  return { store: rt.store, automations: createPgAutomationStore(rt.host.db, rt.host.tenantId), config: rt.config, authorizeBeta: rt.authorizeBeta, signer: signerUser(provider), now: rt.now,
     transport: chain => transportFor(rt.config, chain, 'executor', rt.seams), newId: prefix => typedId(prefix), log, workflowRuns: { byId: runs.byId } };
 }
 

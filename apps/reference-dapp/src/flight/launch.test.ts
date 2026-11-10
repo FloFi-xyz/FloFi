@@ -100,14 +100,14 @@ describe('the seven emails', () => {
       EARLY_LIST: ['You were early. Your Flight FloFi seat is saved ✈️', 'Você chegou cedo. Seu lugar no Flight FloFi está guardado ✈️'],
       LIST_CONFIRMATION: ['You’re on the FloFi beta list ✈️', 'Você está na lista beta da FloFi ✈️'], EVE: ['Boarding starts tomorrow, 9:00 BRT ✈️', 'O embarque começa amanhã, às 9h ✈️'],
       GROUP_BOARDING: ['Your group is boarding ✈️', 'Seu grupo está embarcando ✈️'], ACCESS_REQUESTED: ['Your group is boarding ✈️', 'Seu grupo está embarcando ✈️'],
-      CARD_FOUNDING: ['You’re Founding Member #042 ✈️', 'Você é o Founding Member #042 ✈️'], CARD_PASSENGER: ['Your Flight FloFi boarding card ✈️', 'Seu cartão de embarque do Flight FloFi ✈️'],
+      CARD_FOUNDING: ['You’re Founding Member #042 ✈️', 'Você é Founding Member #042 ✈️'], CARD_PASSENGER: ['Your Flight FloFi boarding card ✈️', 'Seu cartão de embarque do Flight FloFi ✈️'],
       NEXT_FLIGHT: ['You’re on the list for the next flight ✈️', 'Você está na lista do próximo voo ✈️'], CREATOR_INVITE: ['You’re invited to Flight FloFi ✈️', 'Seu convite para o Flight FloFi ✈️'],
     };
     for (const input of [...inputs, { template: 'EARLY_LIST' } as const]) for (const [index, language] of (['EN', 'PT'] as const).entries()) {
       const email = renderEmail(input, ctx(language));
       expect(email.subject).toBe(subjects[input.template]![index]);
       for (const part of [email.html, email.text]) {
-        expect(part).toContain(language === 'EN' ? 'DeFi involves risk' : 'DeFi envolve riscos');
+        expect(part).toContain(language === 'EN' ? 'DeFi involves risk' : 'DeFi envolve risco');
         expect(part).toContain('https://flofi.xyz/board/unsubscribe?t=x');
         expect(part).toContain('/privacy');
         // No public aggregate counts and none of the withdrawn promises.
@@ -141,7 +141,7 @@ describe('the seven emails', () => {
     expect(creator.text).toContain('FLF-7Q2K-9XMB');
     expect(creator.text).not.toMatch(/TEST|Wednesday|test flight|early boarding/i);
     expect(creator.preheader).toBe('Your invite code and the plan for Thursday.');
-    expect(TEMPLATE_VERSIONS.CREATOR_INVITE).toBe(2);
+    expect(TEMPLATE_VERSIONS.CREATOR_INVITE).toBe(3);
   });
   it('shows the card’s real seat, route and image in 4a/4b, the three invites only in 4a, and escapes the handle', () => {
     const founding = renderEmail(inputs[4]!, ctx('EN')), passenger = renderEmail(inputs[5]!, ctx('EN'));

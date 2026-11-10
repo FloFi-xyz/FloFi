@@ -28,6 +28,15 @@ const ACCOUNT = /^acct_[0-9a-f]{32}$/, SESSION = /^[0-9a-f]{32}$/;
 const denied = (code: BetaAccessCode): BetaAccessDecision => ({ ok: false, code });
 const at = (ms: number) => new Date(ms).toISOString();
 const LOCK_CLASS = 734_003_225;
+// Account wallet records and external SIWE/SIWS identities verified by Privy. An identity cannot override a wallet held by another account.
+const PROVEN_WALLETS = `WITH proven_wallets AS (
+  SELECT CASE w.ecosystem WHEN 'EVM' THEN 'eip155' ELSE 'solana' END AS namespace, w.address
+    FROM flofi_account_wallets w WHERE w.tenant_id = $1 AND w.account_id = $2
+  UNION SELECT CASE i.kind WHEN 'EIP155' THEN 'eip155' ELSE 'solana' END, i.subject
+    FROM flofi_account_identities i WHERE i.tenant_id = $1 AND i.account_id = $2 AND i.kind IN ('EIP155', 'SOLANA')
+      AND NOT EXISTS (SELECT 1 FROM flofi_account_wallets w WHERE w.tenant_id = i.tenant_id AND w.account_id <> i.account_id
+        AND w.address = i.subject AND w.ecosystem = CASE i.kind WHEN 'EIP155' THEN 'EVM' ELSE 'SOLANA' END)
+)`;
 
 function principalOf(value: BetaPrincipal | undefined): BetaPrincipal | null {
   if (!value || typeof value.address !== 'string') return null;
@@ -66,9 +75,7 @@ export function createBetaAccessStore(host: { readonly db: Database; readonly te
       return denied('BETA_ACCESS_DENIED');
     const principal = principalOf(givenPrincipal);
     if (givenPrincipal && !principal) return denied('BETA_WALLET_NOT_LINKED');
-    const wallets = await q.query(`SELECT 1 FROM flight_beta_wallets b JOIN flofi_account_wallets w
-      ON w.tenant_id = b.tenant_id AND w.account_id = b.account_id AND w.address = b.address
-        AND w.ecosystem = CASE b.namespace WHEN 'eip155' THEN 'EVM' ELSE 'SOLANA' END
+    const wallets = await q.query(`${PROVEN_WALLETS} SELECT 1 FROM flight_beta_wallets b JOIN proven_wallets w USING (namespace, address)
       WHERE b.tenant_id = $1 AND b.account_id = $2 AND ($3::text IS NULL OR (b.namespace = $3 AND b.address = $4)) LIMIT 1`,
     [tenantId, accountId, principal?.namespace ?? null, principal?.address ?? null]);
     if (!wallets.rowCount) return denied(principal ? 'BETA_WALLET_NOT_LINKED' : 'BETA_WALLET_REQUIRED');
@@ -90,11 +97,9 @@ export function createBetaAccessStore(host: { readonly db: Database; readonly te
         // A later Board operation never changes the source of an existing grant or escapes a postponed group.
         const source = existing ? available.find(value => value.source === existing.source && value.source_ref === existing.source_ref) : available[0];
         if (!source) return denied('BETA_ACCESS_DENIED');
-        const wallets = (await tx.query<{ namespace: 'eip155' | 'solana'; address: string }>(`SELECT
-          CASE w.ecosystem WHEN 'EVM' THEN 'eip155' ELSE 'solana' END AS namespace, w.address FROM flofi_account_wallets w
-          WHERE w.tenant_id = $1 AND w.account_id = $2 AND NOT EXISTS (SELECT 1 FROM flight_beta_wallets b
-            WHERE b.tenant_id = w.tenant_id AND b.address = w.address AND b.namespace = CASE w.ecosystem WHEN 'EVM' THEN 'eip155' ELSE 'solana' END
-              AND b.account_id <> w.account_id) FOR SHARE OF w`, [tenantId, accountId])).rows;
+        const wallets = (await tx.query<BetaPrincipal>(`${PROVEN_WALLETS} SELECT w.namespace, w.address FROM proven_wallets w
+          WHERE NOT EXISTS (SELECT 1 FROM flight_beta_wallets b WHERE b.tenant_id = $1 AND b.address = w.address
+            AND b.namespace = w.namespace AND b.account_id <> $2)`, [tenantId, accountId])).rows;
         if (!wallets.length) return denied('BETA_WALLET_REQUIRED');
         await tx.query(`INSERT INTO flight_beta_grants (tenant_id, account_id, source, source_ref, granted_at)
           VALUES ($1, $2, $3, $4, $5) ON CONFLICT (tenant_id, account_id) DO NOTHING`, [tenantId, accountId, source.source, source.source_ref, at(now)]);
@@ -106,7 +111,8 @@ export function createBetaAccessStore(host: { readonly db: Database; readonly te
   }
 
   /** A request authenticated by the BFF: re-check its exact session record, including revocation, in this tenant. */
-  async function requireAccess(input: { readonly accountId: string; readonly sessionId: string; readonly principal?: BetaPrincipal; readonly now: number }): Promise<BetaAccessDecision> {
+  async function requireAccess(input: { readonly accountId: string; readonly sessionId: string; readonly principal?: BetaPrincipal;
+    readonly now: number; readonly sessionNow?: number }): Promise<BetaAccessDecision> {
     if (!ACCOUNT.test(input.accountId) || !SESSION.test(input.sessionId)) return denied('BETA_SESSION_REQUIRED');
     const code = calendarCode(input.now);
     if (code) return denied(code);
@@ -114,7 +120,7 @@ export function createBetaAccessStore(host: { readonly db: Database; readonly te
       return await db.transaction(async tx => {
         const session = await tx.query(`SELECT 1 FROM flofi_account_sessions WHERE tenant_id = $1 AND account_id = $2 AND session_id = $3
           AND revoked_at IS NULL AND expires_at > $4::timestamptz AND authenticated_at <= $4::timestamptz + interval '60 seconds' FOR SHARE`,
-        [tenantId, input.accountId, input.sessionId, at(input.now)]);
+        [tenantId, input.accountId, input.sessionId, at(input.sessionNow ?? input.now)]);
         return session.rowCount ? requireAccountOn(tx, input.accountId, input.now, input.principal) : denied('BETA_SESSION_REQUIRED');
       });
     } catch { return denied('BETA_ACCESS_UNAVAILABLE'); }

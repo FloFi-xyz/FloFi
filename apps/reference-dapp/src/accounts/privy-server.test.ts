@@ -135,6 +135,11 @@ describe('Privy users (read with the app secret, never from the browser)', () =>
       { ecosystem: 'solana', address: '7EcDhSYGxXyscszYEp35KHN8vvw3svAuLKTzXwCFLtV', imported: true, delegated: false, walletId: 'privywalletsol0000000001' },
     ]);
   });
+  it('identifies the exact external wallet and rejects an ambiguous wallet timestamp', () => {
+    expect(readPrivyUser(user([metamask]), USER)).toMatchObject({ method: 'eip155', loginWallet: metamask.address.toLowerCase() });
+    const other = { ...metamask, address: '0x' + 'b'.repeat(40) };
+    expect(readPrivyUser(user([metamask, other]), USER).loginWallet).toBeUndefined();
+  });
   it('counts an Apple identity only once this deployment enabled Apple (FloFi’s own Apple Services ID in Privy)', () => {
     const apple = { type: 'apple_oauth', subject: '001234.abcdef.0123', email: 'ana@privaterelay.appleid.com', verified_at: 40, latest_verified_at: 40 };
     expect(readPrivyUser(user([apple, google]), USER)).toMatchObject({ identities: [{ kind: 'google' }], method: 'google', verifiedAt: 20 });

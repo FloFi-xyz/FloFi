@@ -137,27 +137,27 @@ const runAction = async <T>(work: (approvals: ApprovalSurface, wallets: Awaited<
 };
 /** The run's status for its owner, read-only (it never loads or resolves a step). */
 export async function workflowRunStatusHandoff(approvalId: string): Promise<Result<ClaimedProposal>> {
-  return withFlightAccess(async () => { return runAction((s, w) => workflowRunStatus(s, approvalId, w)); 
+  return withFlightAccess(async () => { return runAction((s, w) => workflowRunStatus(s, approvalId, w));
   });
 }
 /** The step the owner signs now, once the previous one reconciled (the ordinary single-step proposal the signing surface loads). */
 export async function continueWorkflowRunHandoff(approvalId: string): Promise<Result<ClaimedProposal>> {
-  return withFlightAccess(async () => { return runAction((s, w) => workflowRunContinue(s, approvalId, w)); 
+  return withFlightAccess(async () => { return runAction((s, w) => workflowRunContinue(s, approvalId, w));
   });
 }
 /** The owner chose to confirm each step in their wallet. */
 export async function startWorkflowRunHandoff(approvalId: string): Promise<Result<ClaimedProposal>> {
-  return withFlightAccess(async () => { return runAction((s, w) => workflowRunStart(s, approvalId, w)); 
+  return withFlightAccess(async () => { return runAction((s, w) => workflowRunStart(s, approvalId, w));
   });
 }
 /** The owner ends the run (nothing in flight) or, for a delegated run, revokes its authorization. */
 export async function cancelWorkflowRunHandoff(approvalId: string): Promise<Result<ClaimedProposal>> {
-  return withFlightAccess(async () => { return runAction((s, w) => workflowRunCancel(s, approvalId, w)); 
+  return withFlightAccess(async () => { return runAction((s, w) => workflowRunCancel(s, approvalId, w));
   });
 }
 /** The owner resumes a halted run whose stopped step submitted nothing. */
 export async function resumeWorkflowRunHandoff(approvalId: string): Promise<Result<ClaimedProposal>> {
-  return withFlightAccess(async () => { return runAction((s, w) => workflowRunResume(s, approvalId, w)); 
+  return withFlightAccess(async () => { return runAction((s, w) => workflowRunResume(s, approvalId, w));
   });
 }
 /** BUILD-FLOFI-UNIVERSAL-WORKFLOW-002: the owner chose user-funded execution groups for the wallets this browser reported. */
@@ -190,7 +190,7 @@ export async function reportUserFundedBatch(approvalId: string, groupIndex: numb
 }
 /** The Universal Workflow Authorization Review of the run: the envelope the owner's passkey signs ONCE (delegated mode). */
 export async function reviewWorkflowRunAuthorization(approvalId: string): Promise<Result<WalletWorkflowReviewView>> {
-  return withFlightAccess(async () => { return runAction((s, w) => workflowRunReview(s, approvalId, w)); 
+  return withFlightAccess(async () => { return runAction((s, w) => workflowRunReview(s, approvalId, w));
   });
 }
 /** The owner's ONE passkey signature for the whole workflow; the approval link is marked applied with it. */

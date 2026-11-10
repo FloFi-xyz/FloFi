@@ -61,7 +61,7 @@ export async function catalogTransferMode(chain: string): Promise<'live' | 'harn
 }
 /** BUILD-RH-002: whether this instance serves Robinhood Chain mainnet transfers (live or the MOCKED loopback harness). */
 export async function robinhoodMainnetTransferMode(): Promise<'live' | 'harness' | 'off'> {
-  return withFlightAccess(async () => { return catalogTransferMode(CATALOG_NETWORKS.robinhood.chain); 
+  return withFlightAccess(async () => { return catalogTransferMode(CATALOG_NETWORKS.robinhood.chain);
   });
 }
 async function current(): Promise<RobinhoodTransferService> {
@@ -80,42 +80,42 @@ async function run<T>(method: string, args: readonly unknown[], action: (service
   catch (cause) { const code = cause instanceof Error ? cause.message : ''; return { ok: false, code: /^[A-Z][A-Z0-9_]{2,80}$/.test(code) ? code : 'TRANSFER_SERVICE_UNAVAILABLE' }; }
 }
 export async function transferSimulate(workflow: SemanticWorkflow, account: string) {
-  return withFlightAccess(async () => { return run('simulate', [workflow, account], s => s.simulate(workflow, account)); 
+  return withFlightAccess(async () => { return run('simulate', [workflow, account], s => s.simulate(workflow, account));
   });
 }
 export async function transferReview(id: string, commitment: string, workflow: SemanticWorkflow) {
-  return withFlightAccess(async () => { return run('review', [id, commitment, workflow], s => s.review(id, commitment, workflow)); 
+  return withFlightAccess(async () => { return run('review', [id, commitment, workflow], s => s.review(id, commitment, workflow));
   });
 }
 export async function transferInvalidate(id: string) {
-  return withFlightAccess(async () => { return run('invalidate', [id], s => s.invalidate(id)); 
+  return withFlightAccess(async () => { return run('invalidate', [id], s => s.invalidate(id));
   });
 }
 export async function transferBegin(id: string, account: string, workflow: SemanticWorkflow) {
-  return withFlightAccess(async () => { return run('begin', [id, account, workflow], s => s.begin(id, account, workflow)); 
+  return withFlightAccess(async () => { return run('begin', [id, account, workflow], s => s.begin(id, account, workflow));
   });
 }
 export async function transferHandoff(id: string) {
-  return withFlightAccess(async () => { return run('handoff', [id], s => s.handoff(id)); 
+  return withFlightAccess(async () => { return run('handoff', [id], s => s.handoff(id));
   });
 }
 export async function transferReport(id: string, result: { kind: 'HASH'; hash: string } | { kind: 'UNKNOWN' | 'REJECTED'; code?: string }) {
-  return withFlightAccess(async () => { return run('report', [id, result], s => s.report(id, result)); 
+  return withFlightAccess(async () => { return run('report', [id, result], s => s.report(id, result));
   });
 }
 export async function transferWalletFailure(id: string, diagnostic: TransferWalletDiagnostic) {
-  return withFlightAccess(async () => { return run('walletFailure', [id, diagnostic], s => s.walletFailure(id, diagnostic)); 
+  return withFlightAccess(async () => { return run('walletFailure', [id, diagnostic], s => s.walletFailure(id, diagnostic));
   });
 }
 export async function transferObserve(id: string) {
-  return withFlightAccess(async () => { return run('observe', [id], s => s.observe(id)); 
+  return withFlightAccess(async () => { return run('observe', [id], s => s.observe(id));
   });
 }
 export async function transferStatus(id: string) {
-  return withFlightAccess(async () => { return run('status', [id], s => s.load(id)); 
+  return withFlightAccess(async () => { return run('status', [id], s => s.load(id));
   });
 }
 export async function transferRecoverReview(id: string) {
-  return withFlightAccess(async () => { return run('recoverReview', [id], s => s.recoverReview(id)); 
+  return withFlightAccess(async () => { return run('recoverReview', [id], s => s.recoverReview(id));
   });
 }

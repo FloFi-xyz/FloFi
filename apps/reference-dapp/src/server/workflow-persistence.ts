@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
+import { betaIdentityHeaders, currentBetaIdentity } from '../flight/beta-context.ts';
 import { randomUUID } from 'node:crypto';
 import { cloudApiBaseUrl, type FlowResult } from './cloud-api-client.ts';
 import { embeddedRuntime, flowRuntimeKind } from './flow-runtime.ts';
@@ -18,12 +19,12 @@ export async function workflowOperation<T>(method: 'list' | 'get' | 'save', args
     const principal = principals.find(p => p.namespace === expected.namespace && p.address === expected.address);
     if (!principal) return { ok: false, code: 'WALLET_SESSION_REQUIRED' };
     const env = seams.env ?? process.env, kind = flowRuntimeKind(env);
-    if (kind === 'embedded') return await (await embeddedRuntime(env)).backend.callWorkflows(method, args, principal) as FlowResult<T>;
+    if (kind === 'embedded') return await (await embeddedRuntime(env)).backend.callWorkflows(method, args, principal, undefined, currentBetaIdentity()) as FlowResult<T>;
     if (kind !== 'remote') return { ok: false, code: 'CLOUD_RUNTIME_NOT_CONFIGURED' };
     const base = cloudApiBaseUrl(env)!;
     const url = new URL(`v1/workflows/${method}`, base.href.endsWith('/') ? base : new URL(base.href + '/'));
     const response = await (seams.transport ?? fetch)(url, { method: 'POST', cache: 'no-store', redirect: 'error', signal: AbortSignal.timeout(30_000),
-      headers: { 'content-type': 'application/json', ...env.API_AUTH_TOKEN ? { authorization: `Bearer ${env.API_AUTH_TOKEN}` } : {},
+      headers: { 'content-type': 'application/json', ...betaIdentityHeaders(currentBetaIdentity()), ...env.API_AUTH_TOKEN ? { authorization: `Bearer ${env.API_AUTH_TOKEN}` } : {},
         [WORKFLOW_OWNER_HEADER]: `${principal.namespace}:${principal.address}`, ...method === 'save' ? { 'idempotency-key': randomUUID() } : {} }, body: JSON.stringify({ args }) });
     const value = await response.json() as FlowResult<T>;
     if (!response.ok || !value || typeof value.ok !== 'boolean') return { ok: false, code: 'WORKFLOW_UNAVAILABLE' };
