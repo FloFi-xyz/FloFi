@@ -12,6 +12,7 @@ test.beforeAll(async () => {
   const aliases: Record<string, string> = {}, compiled = '../node_modules/next/dist/compiled/';
   for (const name of ['workflow-store', 'capability-store', 'uniswap-liquidity-store', 'solana-liquidity-store', 'asset-catalog-store', 'aave-reserve-reads'])
     aliases[`../state/${name}`] = fileURLToPath(new URL('../src/test-utils/execute-acceptance-workflow.tsx', import.meta.url));
+  aliases['../app/solana-asset-catalog-action'] = fileURLToPath(new URL('../src/test-utils/execute-acceptance-workflow.tsx', import.meta.url));
   for (const [name, path] of Object.entries({ 'node:crypto': 'crypto-browserify/index.js', buffer: 'buffer/index.js', 'node:buffer': 'buffer/index.js', stream: 'stream-browserify/index.js', events: 'events/events.js', string_decoder: 'string_decoder/string_decoder.js', util: 'util/util.js', vm: 'vm-browserify/index.js', process: 'process/browser.js' }))
     aliases[name] = fileURLToPath(new URL(`${compiled}${path}`, import.meta.url));
   const result = await build({ root: fileURLToPath(new URL('../../../', import.meta.url)), configFile: false, logLevel: 'error', resolve: { alias: aliases },

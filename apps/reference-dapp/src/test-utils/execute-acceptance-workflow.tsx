@@ -19,3 +19,5 @@ export async function ensureNetworkCatalog() { return undefined; }
 export async function readAaveReserves() { return { catalog: null, failed: true, code: null }; }
 export function forgetAaveReserves() { return undefined; }
 export function useAaveReadGeneration() { return 0; }
+// This standalone Vite bundle does not run Next's server-action transform or call live asset catalogs.
+export async function loadSolanaAssetCatalog() { return { ok: false as const, code: 'SOLANA_TOKEN_CATALOG_UNAVAILABLE' }; }
