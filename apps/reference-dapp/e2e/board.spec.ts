@@ -279,6 +279,11 @@ test('FLF input formats typing and paste, preserves editing, rejects invalid cha
   await input.evaluate((node: HTMLInputElement) => node.setSelectionRange(8, 8));
   await input.press('Delete');
   await expect(input).toHaveValue('FLF-ABCD-FGH');
+  await input.fill('FLF-ABCD-EFGH');
+  await input.press('Home'); await input.press('Delete');
+  await expect(input).toHaveValue('FLF-BCDE-FGH');
+  await input.press('Home'); await input.pressSequentially('a');
+  await expect(input).toHaveValue('FLF-ABCD-EFGH');
   for (const typed of ['flf-abcd-efgh', 'flfabcdefgh', 'flfabcd2']) {
     await input.fill(''); await input.pressSequentially(typed);
     await expect(input).toHaveValue(typed === 'flfabcd2' ? 'FLF-FLFA-BCD2' : 'FLF-ABCD-EFGH');

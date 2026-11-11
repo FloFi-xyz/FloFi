@@ -147,7 +147,17 @@ function InviteForm({ copy, now, opensAt, onRedeemed }: { copy: FlightCopy; now:
       onChange={e => edit(e.target.value, e.target.selectionStart ?? e.target.value.length)}
       onKeyDown={e => {
         const { selectionStart: start, selectionEnd: end } = e.currentTarget;
-        if (start !== end || start === null) return;
+        if (start === null || end === null) return;
+        if (end <= 4 && code.startsWith('FLF-')) {
+          if (e.key === 'Delete' || (start !== end && e.key === 'Backspace')) {
+            e.preventDefault();
+            if (start === end) edit(code.slice(0, 4) + code.slice(5), 4);
+            else e.currentTarget.setSelectionRange(4, 4);
+            return;
+          }
+          if (e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) e.currentTarget.setSelectionRange(4, 4);
+        }
+        if (start !== end) return;
         // Deleting an inserted separator also deletes its adjacent payload character, so the caret never gets trapped.
         if (e.key === 'Backspace' && start <= 4 && code.startsWith('FLF-')) {
           e.preventDefault();
