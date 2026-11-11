@@ -94,7 +94,7 @@ export function createBackend(options: BackendOptions) {
     if (!identity) return 'BETA_SESSION_REQUIRED';
     const { calendar } = flightCalendarFrom(env);
     if (!calendar) return 'BETA_CONFIGURATION_INVALID';
-    const decision = await createBetaAccessStore({ db, tenantId }, calendar).require({ ...identity,
+    const decision = await createBetaAccessStore({ db, tenantId }, calendar, env).require({ ...identity,
       ...address ? { principal: betaPrincipal(address) } : {}, now: Date.now() });
     return decision.ok ? null : decision.code;
   }

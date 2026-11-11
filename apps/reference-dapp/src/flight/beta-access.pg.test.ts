@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 /** Real disposable loopback PostgreSQL; fixture accounts/wallets only. No provider, signature, mainnet or email is contacted. */
 import { randomBytes } from 'node:crypto';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { createTestDatabase, type TestDatabase } from '../../../../packages/cloud-runtime/test/pg-harness.ts';
 import { createBetaAccessStore, type BetaAccessStore, type BetaPrincipal } from './beta-access';
 import { FLIGHT_DEFAULT_CALENDAR } from './campaign';
@@ -175,5 +175,107 @@ describe('persisted closed-beta account and wallet authority', () => {
     expect(results.every(result => result.ok)).toBe(true);
     expect((await t.db.query('SELECT 1 FROM flight_beta_grants WHERE account_id = $1', [person.accountId])).rowCount).toBe(1);
     expect((await t.db.query('SELECT 1 FROM flight_beta_wallets WHERE account_id = $1', [person.accountId])).rowCount).toBe(1);
+  });
+});
+
+describe('temporary team access without campaign entitlements', () => {
+  afterEach(() => { vi.restoreAllMocks(); });
+  const earlyGate = (ids: string, tenantId = 'default', extra: Record<string, string | undefined> = {}, calendar = CAL) =>
+    createBetaAccessStore({ db: t.db, tenantId }, calendar, { FLOFI_BETA_ACCESS: 'beta', FLOFI_BETA_EARLY_ACCESS_TENANT: 'default',
+      FLOFI_BETA_EARLY_ACCESS_ACCOUNTS: ids, ...extra });
+  const clock = (n = OPEN - 1) => vi.spyOn(Date, 'now').mockReturnValue(n);
+  const input = <T extends { now: number }>(p: T) => ({ ...p, now: OPEN - 1 });
+  const campaign = async () => {
+    const result: unknown[] = [];
+    for (const table of ['flight_beta_grants', 'flight_beta_wallets', 'flight_invites', 'flight_passes', 'flight_list_entries',
+      'flight_access_claims', 'flight_access_tokens', 'flight_emails']) {
+      result.push((await t.db.query(`SELECT to_jsonb(t) AS row FROM ${table} t ORDER BY to_jsonb(t)::text`)).rows);
+    }
+    return result;
+  };
+  it('admits each configured verified account and its own wallets read-only, without boarding or a Flight invitation', async () => {
+    clock(); const first = await account(), second = await account(true, 'GOOGLE');
+    const g = earlyGate(`${first.accountId},${second.accountId}`), before = await campaign();
+    for (const p of [first, second]) {
+      expect(await g.require(input(p))).toEqual({ ok: true, accountId: p.accountId });
+      expect(await g.requireAccount(p.accountId, OPEN - 1, p.principal)).toEqual({ ok: true, accountId: p.accountId });
+      expect(await g.requireWallet(p.principal, OPEN - 1)).toEqual({ ok: true, accountId: p.accountId });
+      expect(await g.grant(p.accountId, OPEN - 1)).toEqual({ ok: false, code: 'BETA_NOT_OPEN' });
+    }
+    expect(await campaign()).toEqual(before);
+  });
+  it('accepts independently verified EVM and Solana login identities without campaign wallet records', async () => {
+    clock();
+    for (const namespace of ['eip155', 'solana'] as const) {
+      const p = await account(false, 'EMAIL'), address = namespace === 'eip155' ? p.principal.address : 'a'.repeat(32);
+      await t.db.query(`INSERT INTO flofi_account_identities (tenant_id,account_id,kind,subject,label)
+        VALUES ('default',$1,$2,$3,'Fixture')`, [p.accountId, namespace === 'eip155' ? 'EIP155' : 'SOLANA', address]);
+      const g = earlyGate(p.accountId), principal = { namespace, address };
+      expect(await g.require({ ...input(p), principal })).toEqual({ ok: true, accountId: p.accountId });
+      expect(await g.requireWallet(principal, OPEN - 1)).toEqual({ ok: true, accountId: p.accountId });
+    }
+  });
+  it('denies anonymous, ordinary, invited, walletless and unrelated wallet identities before launch', async () => {
+    clock(); const team = await account(), ordinary = await account(), empty = await account(false);
+    const g = earlyGate(`${team.accountId},${empty.accountId}`);
+    await t.db.query(`INSERT INTO flight_invites (tenant_id, code, issuer, redeemed_by, redeemed_at)
+      VALUES ('default', 'FLF-2345-TEAM', 'CREATOR', $1, $2)`, [ordinary.accountId, iso(OPEN - 1000)]);
+    expect(await g.require({ accountId: '', sessionId: '', now: OPEN - 1 })).toMatchObject({ ok: false });
+    expect(await g.require(input(ordinary))).toEqual({ ok: false, code: 'BETA_NOT_OPEN' });
+    expect(await g.require(input(empty))).toEqual({ ok: false, code: 'BETA_WALLET_NOT_LINKED' });
+    expect(await g.require({ accountId: empty.accountId, sessionId: empty.sessionId, now: OPEN - 1 })).toEqual({ ok: false, code: 'BETA_WALLET_REQUIRED' });
+    expect(await g.require({ ...input(team), principal: ordinary.principal })).toEqual({ ok: false, code: 'BETA_WALLET_NOT_LINKED' });
+    expect(await g.require({ ...input(team), sessionId: ordinary.sessionId })).toEqual({ ok: false, code: 'BETA_SESSION_REQUIRED' });
+    expect(await g.requireWallet(ordinary.principal, OPEN - 1)).toMatchObject({ ok: false });
+  });
+  it('rechecks exact session revocation and expiry on server time even with a forged session clock', async () => {
+    clock();
+    for (const field of ['revoked_at', 'expires_at']) {
+      const p = await account(), g = earlyGate(p.accountId);
+      await t.db.query(`UPDATE flofi_account_sessions SET ${field} = $2 WHERE session_id = $1`, [p.sessionId, iso(OPEN - 1)]);
+      expect(await g.require({ ...input(p), sessionNow: OPEN - 50_000 })).toEqual({ ok: false, code: 'BETA_SESSION_REQUIRED' });
+      expect(await g.requireWallet(p.principal, OPEN - 1)).toEqual({ ok: false, code: 'BETA_SESSION_REQUIRED' });
+    }
+  });
+  it('requires exact tenant even when the same account ID and wallet exist in both tenants', async () => {
+    clock(); const p = await account(), tenantId = `team-${hex(4)}`;
+    await t.db.query('INSERT INTO tenants (tenant_id) VALUES ($1)', [tenantId]);
+    await t.db.query('INSERT INTO flofi_accounts (tenant_id, account_id) VALUES ($1, $2)', [tenantId, p.accountId]);
+    await t.db.query(`INSERT INTO flofi_account_sessions (tenant_id, account_id, session_id, method, authenticated_at, expires_at)
+      VALUES ($1,$2,$3,'EIP155',$4,$5)`, [tenantId, p.accountId, p.sessionId, iso(OPEN - 60_000), iso(OPEN + 60_000)]);
+    await addWallet(p.accountId, p.principal.address, tenantId);
+    expect(await earlyGate(p.accountId, tenantId).require(input(p))).toEqual({ ok: false, code: 'BETA_NOT_OPEN' });
+    expect(await earlyGate(p.accountId, tenantId).requireWallet(p.principal, OPEN - 1)).toMatchObject({ ok: false });
+  });
+  it('refuses conflicting wallet and identity ownership in either direction', async () => {
+    clock();
+    for (const direction of ['wallet', 'identity']) {
+      const p = await account(direction === 'wallet'), other = await account(false), g = earlyGate(p.accountId);
+      const identityAccount = direction === 'wallet' ? other.accountId : p.accountId;
+      await t.db.query(`INSERT INTO flofi_account_identities (tenant_id,account_id,kind,subject,label)
+        VALUES ('default',$1,'EIP155',$2,'Fixture')`, [identityAccount, p.principal.address]);
+      if (direction === 'identity') await addWallet(other.accountId, p.principal.address);
+      expect(await g.require(input(p))).toEqual({ ok: false, code: 'BETA_WALLET_NOT_LINKED' });
+      expect(await g.requireWallet(p.principal, OPEN - 1)).toMatchObject({ ok: false });
+    }
+  });
+  it('has no exception for missing, malformed, wrong-tenant or closed configuration', async () => {
+    clock(); const p = await account();
+    for (const extra of [{ FLOFI_BETA_EARLY_ACCESS_ACCOUNTS: undefined }, { FLOFI_BETA_EARLY_ACCESS_ACCOUNTS: '' },
+      { FLOFI_BETA_EARLY_ACCESS_ACCOUNTS: `${p.accountId},typo` }, { FLOFI_BETA_EARLY_ACCESS_TENANT: 'wrong' }, { FLOFI_BETA_ACCESS: 'closed' }]) {
+      expect(await earlyGate(p.accountId, 'default', extra).require(input(p))).toMatchObject({ ok: false });
+    }
+  });
+  it('expires at the exact immutable cutoff despite caller clock or a postponed calendar; normal grants still apply', async () => {
+    const time = clock(), p = await account(), normal = await account(); await listed(normal.accountId); await gate.grant(normal.accountId, OPEN);
+    const g = earlyGate(p.accountId);
+    expect(await g.require(input(p))).toMatchObject({ ok: true });
+    time.mockReturnValue(OPEN);
+    expect(await g.require({ ...p, now: OPEN })).toEqual({ ok: false, code: 'BETA_ACCESS_DENIED' });
+    expect(await g.require(input(p))).toEqual({ ok: false, code: 'BETA_NOT_OPEN' });
+    const postponed = earlyGate(p.accountId, 'default', {}, { ...CAL, boardingOpensAt: OPEN + 86400_000 });
+    expect(await postponed.require({ ...p, now: OPEN })).toEqual({ ok: false, code: 'BETA_NOT_OPEN' });
+    expect(await g.require(normal)).toEqual({ ok: true, accountId: normal.accountId });
+    expect(await g.requireWallet(p.principal, OPEN)).toMatchObject({ ok: false });
   });
 });

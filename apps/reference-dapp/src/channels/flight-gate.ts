@@ -30,7 +30,7 @@ export function channelPrivateAuthorizer(env: Env, host: ChannelHost, channel: C
     if (!calendar) return { ok: false, code: 'BETA_CONFIGURATION_INVALID' };
     const owner = await ownerOfConversation(host.db, host.tenantId, conversationId, now);
     if (!owner) return { ok: false, code: 'BETA_CHANNEL_NOT_LINKED' };
-    const result = await createBetaAccessStore(host, calendar).requireWallet(owner, now.getTime());
+    const result = await createBetaAccessStore(host, calendar, env).requireWallet(owner, now.getTime());
     return result.ok ? { ok: true } : { ok: false, code: result.code };
   };
 }

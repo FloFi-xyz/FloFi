@@ -73,7 +73,7 @@ export function automationWorkRuntime(env: Env, settings: Pick<AutomationConfig,
       if (mode !== 'beta') return 'BETA_ACCESS_CLOSED';
       const { calendar } = flightCalendarFrom(env);
       if (!calendar) return 'BETA_CONFIGURATION_INVALID';
-      const result = await createBetaAccessStore(host, calendar).requireWallet(owner, now().getTime());
+      const result = await createBetaAccessStore(host, calendar, env).requireWallet(owner, now().getTime());
       return result.ok ? null : result.code;
     },
     price: seams.price ?? priceSourceOf(settings.price, seams.fetch), notifier: channelNotifier(env, host, now, seams), log, now };
