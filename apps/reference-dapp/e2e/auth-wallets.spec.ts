@@ -10,7 +10,7 @@
  */
 import { test as base, expect, type BrowserContext, type Locator, type Page } from '@playwright/test';
 import { generateKeyPairSync, randomBytes } from 'node:crypto';
-import { rm } from 'node:fs/promises';
+import { rm, writeFile } from 'node:fs/promises';
 import { readdirSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { build } from 'vite';
@@ -166,7 +166,9 @@ test('the actual pinned Privy catalog hook needs no WalletConnect permission in 
     if (!legacy) expect(violations).toEqual([]);
     evidence.push({ legacy, violations });
   }
-  await test.info().attach('actual-sdk-catalog-csp.json', { body: JSON.stringify({ evidence, initiators }, null, 2), contentType: 'application/json' });
+  const evidencePath = test.info().outputPath('actual-sdk-catalog-csp.json');
+  await writeFile(evidencePath, JSON.stringify({ evidence, initiators }, null, 2));
+  await test.info().attach('actual-sdk-catalog-csp.json', { path: evidencePath, contentType: 'application/json' });
 });
 
 test('every product-origin document carries a fresh nonce, including public and error pages, and blocks injected inline script', async ({ page }) => {

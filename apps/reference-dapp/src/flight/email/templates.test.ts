@@ -47,7 +47,7 @@ describe('Flight launch email copy and immutable queued versions', () => {
   });
   it('freezes the deployed v3 renderer and leaves every unrelated template unchanged', () => {
     expect(createHash('sha256').update(readFileSync(new URL('./templates-v3.ts', import.meta.url))).digest('hex'))
-      .toBe('6cae6c4474e5c05ac7ab9181dede71761290cdf5a47d435d8ce74e646ab3cc8d');
+      .toBe('af3a3425bc18700e502da188b9a0d08e978ade2ca831bdadab08fde1803390a5');
     expect(TEMPLATE_VERSIONS).toEqual({ EARLY_LIST: 1, LIST_CONFIRMATION: 2, EVE: 2, GROUP_BOARDING: 2, ACCESS_REQUESTED: 2,
       CARD_FOUNDING: 2, CARD_PASSENGER: 2, NEXT_FLIGHT: 2, CREATOR_INVITE: 4 });
     for (const language of ['EN', 'PT'] as const) {

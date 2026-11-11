@@ -325,4 +325,3 @@ export function renderEmail(input: TemplateInput, ctx: EmailContext): RenderedEm
 function strip(html: string): string {
   return html.replace(/<br\s*\/?>/g, ' ').replace(/<[^>]+>/g, '').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'");
 }
-
