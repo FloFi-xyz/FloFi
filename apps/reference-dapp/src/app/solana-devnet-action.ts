@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 'use server';
-import { withFlightAccess } from '../server/flight-access';
+import { withFlightAccess, withFlightOwner } from '../server/flight-access';
 import { ORCA_WHIRLPOOLS_DEVNET as profile } from '@defi-workflow-engine/action-registry';
 import type { SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
 import { createSolanaDevnetService, type SolanaSwapService, type SolanaSwapWalletDiagnostic } from '../server/jupiter-service';
@@ -45,7 +45,7 @@ export async function solanaDevnetReview(id: string, commitment: string, workflo
   });
 }
 export async function solanaDevnetInvalidate(id: string) {
-  return withFlightAccess(async () => { return run('invalidate', [id], service => service.invalidate(id));
+  return withFlightOwner(async () => { return run('invalidate', [id], service => service.invalidate(id));
   });
 }
 export async function solanaDevnetBegin(id: string, owner: string, workflow: SemanticWorkflow) {
@@ -53,7 +53,7 @@ export async function solanaDevnetBegin(id: string, owner: string, workflow: Sem
   });
 }
 export async function solanaDevnetWalletFailure(id: string, diagnostic: SolanaSwapWalletDiagnostic) {
-  return withFlightAccess(async () => { return run('walletFailure', [id, diagnostic], service => service.walletFailure(id, diagnostic));
+  return withFlightOwner(async () => { return run('walletFailure', [id, diagnostic], service => service.walletFailure(id, diagnostic));
   });
 }
 export async function solanaDevnetSubmit(id: string, signedTransaction: string) {
@@ -61,10 +61,10 @@ export async function solanaDevnetSubmit(id: string, signedTransaction: string) 
   });
 }
 export async function solanaDevnetObserve(id: string) {
-  return withFlightAccess(async () => { return run('observe', [id], service => service.observe(id));
+  return withFlightOwner(async () => { return run('observe', [id], service => service.observe(id));
   });
 }
 export async function solanaDevnetStatus(id: string) {
-  return withFlightAccess(async () => { return run('status', [id], service => service.load(id));
+  return withFlightOwner(async () => { return run('status', [id], service => service.load(id));
   });
 }

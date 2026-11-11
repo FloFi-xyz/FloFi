@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 'use server';
-import { withFlightAccess } from '../server/flight-access';
+import { withFlightAccess, withFlightOwner } from '../server/flight-access';
 import { reportUniversalFailure } from '../server/universal-router/failure';
 import { readdir, stat } from 'node:fs/promises';
 import { isAbsolute, join } from 'node:path';
@@ -126,7 +126,7 @@ export async function universalReview(ecosystem: UniversalEcosystem, id: string,
   });
 }
 export async function universalInvalidate(ecosystem: UniversalEcosystem, id: string, reason: 'SEMANTIC_EDIT' | 'WALLET_CHANGED' = 'SEMANTIC_EDIT') {
-  return withFlightAccess(async () => {
+  return withFlightOwner(async () => {
   return run(ecosystem, 'invalidate', reason === 'SEMANTIC_EDIT' ? [id] : [id, reason], s => s.invalidate(id, reason));
 
   });
@@ -142,7 +142,7 @@ export async function universalHandoff(id: string) {
   });
 }
 export async function universalReport(id: string, result: ({ kind: 'HASH'; hash: string } | { kind: 'UNKNOWN' | 'REJECTED'; code?: string }) & { attemptId?: string }) {
-  return withFlightAccess(async () => {
+  return withFlightOwner(async () => {
   return run('EVM', 'report', [id, result], s => s.report(id, result));
 
   });
@@ -152,17 +152,17 @@ export async function universalSubmit(id: string, signedTransaction: string) {
   });
 }
 export async function universalWalletFailure(ecosystem: UniversalEcosystem, id: string, diagnostic: UniversalWalletDiagnostic) {
-  return withFlightAccess(async () => {
+  return withFlightOwner(async () => {
   return run(ecosystem, 'walletFailure', [id, diagnostic], s => s.walletFailure(id, diagnostic));
 
   });
 }
 export async function universalObserve(ecosystem: UniversalEcosystem, id: string) {
-  return withFlightAccess(async () => { return run(ecosystem, 'observe', [id], s => s.observe(id));
+  return withFlightOwner(async () => { return run(ecosystem, 'observe', [id], s => s.observe(id));
   });
 }
 export async function universalStatus(ecosystem: UniversalEcosystem, id: string): Promise<Result<UniversalRecord>> {
-  return withFlightAccess(async () => { return run(ecosystem, 'status', [id], s => s.load(id));
+  return withFlightOwner(async () => { return run(ecosystem, 'status', [id], s => s.load(id));
   });
 }
 /** The signed-in wallet's universal runs, newest first, so a run can be recovered from any browser. */

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 'use server';
-import { withFlightAccess } from '../server/flight-access';
+import { withFlightAccess, withFlightOwner } from '../server/flight-access';
 import { isAbsolute } from 'node:path';
 import type { SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
 import { createBridgeService } from '../server/bridge-service';
@@ -45,7 +45,7 @@ export async function bridgeQuote(input: { workflow: SemanticWorkflow; owner: st
   });
 }
 export async function bridgeLoad(executionId: string) {
-  return withFlightAccess(async () => { return run(service => service.load(id(executionId)));
+  return withFlightOwner(async () => { return run(service => service.load(id(executionId)));
   });
 }
 export async function bridgeAuthorize(executionId: string, manifestHash: string) {
@@ -66,22 +66,22 @@ export async function bridgeSubmit(executionId: string) {
   });
 }
 export async function bridgeRecheck(executionId: string) {
-  return withFlightAccess(async () => { return run(service => service.recheck(id(executionId)));
+  return withFlightOwner(async () => { return run(service => service.recheck(id(executionId)));
   });
 }
 export async function bridgeConfirmSource(executionId: string) {
-  return withFlightAccess(async () => { return run(service => service.confirmSource(id(executionId)));
+  return withFlightOwner(async () => { return run(service => service.confirmSource(id(executionId)));
   });
 }
 export async function bridgeProgress(executionId: string) {
-  return withFlightAccess(async () => { return run(service => service.progress(id(executionId)));
+  return withFlightOwner(async () => { return run(service => service.progress(id(executionId)));
   });
 }
 export async function bridgeConfirmDestination(executionId: string) {
-  return withFlightAccess(async () => { return run(service => service.confirmDestination(id(executionId)));
+  return withFlightOwner(async () => { return run(service => service.confirmDestination(id(executionId)));
   });
 }
 export async function bridgeReconcile(executionId: string) {
-  return withFlightAccess(async () => { return run(service => service.reconcile(id(executionId)));
+  return withFlightOwner(async () => { return run(service => service.reconcile(id(executionId)));
   });
 }

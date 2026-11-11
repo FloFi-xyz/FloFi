@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 'use server';
-import { withFlightAccess } from '../server/flight-access';
+import { withFlightAccess, withFlightOwner } from '../server/flight-access';
 import { assertExecutionEnabled } from '../server/execution-guard';
 import { readFileSync } from 'node:fs';
 import { isAbsolute } from 'node:path';
@@ -97,7 +97,7 @@ export async function modeAPrepare(input: unknown): Promise<ModeAResult<Prepared
   });
 }
 export async function modeAExecution(input: unknown): Promise<ModeAResult<ExecutionStatus>> {
-  return withFlightAccess(async () => {
+  return withFlightOwner(async () => {
   return run(service => service.status(executionId(input)));
 
   });
@@ -114,7 +114,7 @@ export async function modeABeginStep(input: unknown): Promise<ModeAResult<Awaite
   });
 }
 export async function modeARecordSubmission(input: unknown): Promise<ModeAResult<Awaited<ReturnType<ModeAService['recordSubmission']>>>> {
-  return withFlightAccess(async () => {
+  return withFlightOwner(async () => {
   return run(service => {
     const value = input as { attemptId?: unknown; report?: { kind?: unknown; transactionHash?: unknown } } | null;
     const report = value?.report;
@@ -130,25 +130,25 @@ export async function modeARecordSubmission(input: unknown): Promise<ModeAResult
   });
 }
 export async function modeAObserveStep(input: unknown): Promise<ModeAResult<Awaited<ReturnType<ModeAService['observeStep']>>>> {
-  return withFlightAccess(async () => {
+  return withFlightOwner(async () => {
   return run(service => service.observeStep(executionId(input), stepId(input)));
 
   });
 }
 export async function modeAReconcile(input: unknown): Promise<ModeAResult<Awaited<ReturnType<ModeAService['reconcile']>>>> {
-  return withFlightAccess(async () => {
+  return withFlightOwner(async () => {
   return run(service => service.reconcile(executionId(input)));
 
   });
 }
 export async function modeAPrepareRevocation(input: unknown): Promise<ModeAResult<RevocationRecord>> {
-  return withFlightAccess(async () => {
+  return withFlightOwner(async () => {
   return run(service => service.prepareRevocation(executionId(input)));
 
   });
 }
 export async function modeAConfirmRevocation(input: unknown): Promise<ModeAResult<Awaited<ReturnType<ModeAService['confirmRevocation']>>>> {
-  return withFlightAccess(async () => {
+  return withFlightOwner(async () => {
   return run(service => service.confirmRevocation(executionId(input)));
 
   });

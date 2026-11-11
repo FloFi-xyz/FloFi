@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 'use server';
-import { withFlightAccess } from '../server/flight-access';
+import { withFlightAccess, withFlightOwner } from '../server/flight-access';
 /** Same-origin actions for the opt-in chain-31337 liquidity fork only. No signing or broadcasting. */
 import { readFileSync } from 'node:fs';
 import { isAbsolute } from 'node:path';
@@ -91,11 +91,11 @@ export async function liquiditySubmission(input: unknown) {
   });
 }
 export async function liquidityObserve(input: unknown) {
-  return withFlightAccess(async () => { return run(service => service.observe(validExecutionId(input)));
+  return withFlightOwner(async () => { return run(service => service.observe(validExecutionId(input)));
   });
 }
 export async function liquidityRecoverUnknown(input: unknown) {
-  return withFlightAccess(async () => { return run(service => service.recoverUnknown(validExecutionId(input)));
+  return withFlightOwner(async () => { return run(service => service.recoverUnknown(validExecutionId(input)));
   });
 }
 export async function liquidityInspect(input: unknown) {

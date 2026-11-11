@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 'use server';
-import { withFlightAccess } from '../server/flight-access';
+import { withFlightAccess, withFlightOwner } from '../server/flight-access';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import type { SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
@@ -33,7 +33,7 @@ export async function acrossQuote(workflow: SemanticWorkflow, owner: string) {
   });
 }
 export async function acrossLoad(executionId: string) {
-  return withFlightAccess(async () => { return result(() => service().load(id(executionId)));
+  return withFlightOwner(async () => { return result(() => service().load(id(executionId)));
   });
 }
 export async function acrossAuthorize(executionId: string, hash: string) {
@@ -53,38 +53,38 @@ export async function acrossSubmit(executionId: string, uncertain: boolean) {
   });
 }
 export async function acrossRecheck(executionId: string) {
-  return withFlightAccess(async () => { return result(() => service().recheck(id(executionId)));
+  return withFlightOwner(async () => { return result(() => service().recheck(id(executionId)));
   });
 }
 export async function acrossConfirmSource(executionId: string) {
-  return withFlightAccess(async () => { return result(() => service().confirmSource(id(executionId)));
+  return withFlightOwner(async () => { return result(() => service().confirmSource(id(executionId)));
   });
 }
 export async function acrossProgress(executionId: string) {
-  return withFlightAccess(async () => { return result(() => service().progress(id(executionId)));
+  return withFlightOwner(async () => { return result(() => service().progress(id(executionId)));
   });
 }
 export async function acrossDelay(executionId: string) {
-  return withFlightAccess(async () => { return result(() => service().delay(id(executionId)));
+  return withFlightOwner(async () => { return result(() => service().delay(id(executionId)));
   });
 }
 export async function acrossFill(executionId: string) {
-  return withFlightAccess(async () => { return result(() => service().fill(id(executionId)));
+  return withFlightOwner(async () => { return result(() => service().fill(id(executionId)));
   });
 }
 export async function acrossReconcile(executionId: string) {
-  return withFlightAccess(async () => { return result(() => service().reconcile(id(executionId)));
+  return withFlightOwner(async () => { return result(() => service().reconcile(id(executionId)));
   });
 }
 export async function acrossExpire(executionId: string) {
-  return withFlightAccess(async () => { return result(() => service().expire(id(executionId)));
+  return withFlightOwner(async () => { return result(() => service().expire(id(executionId)));
   });
 }
 export async function acrossRefundPending(executionId: string) {
-  return withFlightAccess(async () => { return result(() => service().refundPending(id(executionId)));
+  return withFlightOwner(async () => { return result(() => service().refundPending(id(executionId)));
   });
 }
 export async function acrossRefundConfirm(executionId: string) {
-  return withFlightAccess(async () => { return result(() => service().refundConfirm(id(executionId)));
+  return withFlightOwner(async () => { return result(() => service().refundConfirm(id(executionId)));
   });
 }

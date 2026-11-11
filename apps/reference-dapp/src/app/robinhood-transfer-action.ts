@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 'use server';
-import { withFlightAccess } from '../server/flight-access';
+import { withFlightAccess, withFlightOwner } from '../server/flight-access';
 import type { SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
 import { createRobinhoodTransferService, type RobinhoodTransferService, type TransferWalletDiagnostic } from '../server/robinhood-transfer-service';
 import { nativeTransferReadRpcs } from '../server/robinhood-rpc';
@@ -88,7 +88,7 @@ export async function transferReview(id: string, commitment: string, workflow: S
   });
 }
 export async function transferInvalidate(id: string) {
-  return withFlightAccess(async () => { return run('invalidate', [id], s => s.invalidate(id));
+  return withFlightOwner(async () => { return run('invalidate', [id], s => s.invalidate(id));
   });
 }
 export async function transferBegin(id: string, account: string, workflow: SemanticWorkflow) {
@@ -100,22 +100,22 @@ export async function transferHandoff(id: string) {
   });
 }
 export async function transferReport(id: string, result: { kind: 'HASH'; hash: string } | { kind: 'UNKNOWN' | 'REJECTED'; code?: string }) {
-  return withFlightAccess(async () => { return run('report', [id, result], s => s.report(id, result));
+  return withFlightOwner(async () => { return run('report', [id, result], s => s.report(id, result));
   });
 }
 export async function transferWalletFailure(id: string, diagnostic: TransferWalletDiagnostic) {
-  return withFlightAccess(async () => { return run('walletFailure', [id, diagnostic], s => s.walletFailure(id, diagnostic));
+  return withFlightOwner(async () => { return run('walletFailure', [id, diagnostic], s => s.walletFailure(id, diagnostic));
   });
 }
 export async function transferObserve(id: string) {
-  return withFlightAccess(async () => { return run('observe', [id], s => s.observe(id));
+  return withFlightOwner(async () => { return run('observe', [id], s => s.observe(id));
   });
 }
 export async function transferStatus(id: string) {
-  return withFlightAccess(async () => { return run('status', [id], s => s.load(id));
+  return withFlightOwner(async () => { return run('status', [id], s => s.load(id));
   });
 }
 export async function transferRecoverReview(id: string) {
-  return withFlightAccess(async () => { return run('recoverReview', [id], s => s.recoverReview(id));
+  return withFlightOwner(async () => { return run('recoverReview', [id], s => s.recoverReview(id));
   });
 }

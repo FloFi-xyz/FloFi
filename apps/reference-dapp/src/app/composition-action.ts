@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 'use server';
-import { withFlightAccess } from '../server/flight-access';
+import { withFlightAccess, withFlightOwner } from '../server/flight-access';
 import { assertExecutionEnabled } from '../server/execution-guard';
 import { readFileSync } from 'node:fs';
 import { isAbsolute } from 'node:path';
@@ -60,7 +60,7 @@ export async function compositionPrepare(input: unknown) {
   });
 }
 export async function compositionExecution(input: unknown) {
-  return withFlightAccess(async () => { return run(service => service.status(id(input)));
+  return withFlightOwner(async () => { return run(service => service.status(id(input)));
   });
 }
 export async function compositionInstallationStep(input: unknown) {
@@ -73,7 +73,7 @@ export async function compositionInstallationStep(input: unknown) {
   });
 }
 export async function compositionConfirm(input: unknown) {
-  return withFlightAccess(async () => {
+  return withFlightOwner(async () => {
   return run(service => { const v = input as { phase?: unknown; index?: unknown; hash?: unknown } | null;
     if ((v?.phase !== 'installation' && v?.phase !== 'revocation') || !Number.isSafeInteger(v.index) ||
         typeof v.hash !== 'string' || !HASH.test(v.hash)) throw new Error('COMPOSITION_INPUT_INVALID');
@@ -90,7 +90,7 @@ export async function compositionRunWorker(input: unknown) {
   });
 }
 export async function compositionRecoverKnown(input: unknown) {
-  return withFlightAccess(async () => {
+  return withFlightOwner(async () => {
   return run(service => { const key = process.env.GRYLOO_COMPOSITION_EXECUTOR_KEY_FILE;
     if (!key) throw new Error('COMPOSITION_LOCAL_KEY_UNAVAILABLE');
     return service.worker(id(input), key, 'recoverKnown'); });

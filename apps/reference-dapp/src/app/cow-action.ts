@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 'use server';
-import { withFlightAccess } from '../server/flight-access';
+import { withFlightAccess, withFlightOwner } from '../server/flight-access';
 import { isAbsolute, join } from 'node:path';
 import type { SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
 import { createCowService, discoverCow, type CowScenario } from '../server/cow-service';
@@ -58,7 +58,7 @@ export async function cowPrepare(input: { workflow: SemanticWorkflow; owner: str
   });
 }
 export async function cowExecution(input: { executionId: string }) {
-  return withFlightAccess(async () => {
+  return withFlightOwner(async () => {
   return run(service => service.status(id(input.executionId)));
 
   });
@@ -70,19 +70,19 @@ export async function cowPost(input: { executionId: string; signature: string })
   });
 }
 export async function cowTrack(input: { executionId: string }) {
-  return withFlightAccess(async () => {
+  return withFlightOwner(async () => {
   return run(service => service.track(id(input.executionId)));
 
   });
 }
 export async function cowCancel(input: { executionId: string; signature: string }) {
-  return withFlightAccess(async () => {
+  return withFlightOwner(async () => {
   return run(service => service.cancel(id(input.executionId), signature(input.signature)));
 
   });
 }
 export async function cowReconcile(input: { executionId: string }) {
-  return withFlightAccess(async () => {
+  return withFlightOwner(async () => {
   return run(service => service.reconcile(id(input.executionId)));
 
   });

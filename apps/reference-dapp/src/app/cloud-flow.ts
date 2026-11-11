@@ -7,7 +7,7 @@
  */
 import { observeSimulations } from '../server/simulation-observer';
 import { cloudFlow as runtimeFlow } from '../server/flow-runtime';
-import { requireFlightAccess } from '../server/flight-access';
+import { requireFlightMethodAccess } from '../server/flight-access';
 import { guardFlowExecution } from '../server/execution-guard';
 
 const REGISTERED = Symbol.for('flofi.flight.observer.registered');
@@ -27,6 +27,7 @@ export async function cloudFlow<T>(...args: Parameters<typeof runtimeFlow<T>>) {
     return { ok: false as const, code: error instanceof Error ? error.message : 'EXECUTION_PAUSED' };
   }
   const principal = options?.principal;
-  const identity = await requireFlightAccess(principal ? { namespace: principal.startsWith('0x') ? 'eip155' : 'solana', address: principal } : undefined);
+  const identity = await requireFlightMethodAccess(method,
+    principal ? { namespace: principal.startsWith('0x') ? 'eip155' : 'solana', address: principal } : undefined);
   return runtimeFlow<T>(flow, method, values, { ...options, betaIdentity: identity });
 }

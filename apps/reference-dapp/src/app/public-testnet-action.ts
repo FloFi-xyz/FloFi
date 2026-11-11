@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 'use server';
-import { withFlightAccess } from '../server/flight-access';
+import { withFlightAccess, withFlightOwner } from '../server/flight-access';
 import type { SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
 import { isAbsolute, join } from 'node:path';
 import { createPublicTestnetService, publicRecordingEnabled,
@@ -80,19 +80,19 @@ export async function publicBegin(executionId: string, account: string): Promise
 }
 export async function publicReport(executionId: string, attemptId: string,
   result: { kind: 'HASH'; txHash: string } | { kind: 'REJECTED' | 'UNKNOWN' }): Promise<PublicResult<PublicRun>> {
-  return withFlightAccess(async () => {
+  return withFlightOwner(async () => {
   return run('report', [executionId, attemptId, result], service => service.report(id(executionId), attemptId, result));
 
   });
 }
 export async function publicObserve(executionId: string): Promise<PublicResult<PublicRun>> {
-  return withFlightAccess(async () => {
+  return withFlightOwner(async () => {
   return run('observe', [executionId], service => service.observe(id(executionId)));
 
   });
 }
 export async function publicStatus(executionId: string): Promise<PublicResult<PublicRun>> {
-  return withFlightAccess(async () => {
+  return withFlightOwner(async () => {
   return run('status', [executionId], service => service.load(id(executionId)));
 
   });

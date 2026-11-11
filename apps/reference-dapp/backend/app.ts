@@ -20,6 +20,7 @@ import { BETA_ACCOUNT_HEADER, BETA_SESSION_HEADER, betaIdentityFrom, type BetaRe
 import { APPROVAL_PRINCIPALS_HEADER } from '../src/automations/api-headers.ts';
 import { flightCalendarFrom } from '../src/flight/campaign.ts';
 import { executionRefusal, isNewExecutionMethod } from '../src/server/execution-guard.ts';
+import { isFlightRecoveryMethod } from '../src/server/flight-access.ts';
 
 import { createSavedWorkflowStore, EXECUTED_WORKFLOW_RUN, validWorkflowId } from '../src/server/saved-workflow-store.ts';
 import { validateSavedWorkflow, workflowOwner, WORKFLOW_OWNER_HEADER, type WorkflowOwner } from '../src/domain/saved-workflow.ts';
@@ -97,23 +98,68 @@ export function createBackend(options: BackendOptions) {
       ...address ? { principal: betaPrincipal(address) } : {}, now: Date.now() });
     return decision.ok ? null : decision.code;
   }
+  /**
+   * Live account session only. Used for observation/report/cancel of already-owned work so a revoked grant cannot orphan
+   * a submitted transaction. Never grants new product or financial authority by itself.
+   */
+  async function betaSessionRefusal(tenantId: string, identity: BetaRequestIdentity | null | undefined): Promise<string | null> {
+    const mode = betaAccessMode(env);
+    if (mode === 'open') return null;
+    if (!identity) return 'BETA_SESSION_REQUIRED';
+    const live = await db.query(`SELECT 1 FROM flofi_account_sessions WHERE tenant_id = $1 AND session_id = $2 AND account_id = $3
+      AND revoked_at IS NULL AND expires_at > now()`, [tenantId, identity.sessionId, identity.accountId]);
+    return live.rowCount === 1 ? null : 'BETA_SESSION_REQUIRED';
+  }
+  async function betaMethodRefusal(tenantId: string, method: string, identity: BetaRequestIdentity | null | undefined,
+    address?: string | null): Promise<string | null> {
+    return isFlightRecoveryMethod(method) ? betaSessionRefusal(tenantId, identity) : betaRefusal(tenantId, identity, address);
+  }
+  /** Proven account wallets only — used after grant revocation so recovery cannot be borrowed by another signed-in account. */
+  async function accountOwnsAddress(tenantId: string, accountId: string, address: string): Promise<boolean> {
+    const principal = normalizePrincipal(address);
+    if (!principal) return false;
+    const namespace = principal.startsWith('0x') ? 'eip155' : 'solana';
+    const owned = await db.query(`SELECT 1 WHERE EXISTS (
+      SELECT 1 FROM flofi_account_wallets w WHERE w.tenant_id = $1 AND w.account_id = $2
+        AND w.address = $4 AND w.ecosystem = CASE WHEN $3 = 'eip155' THEN 'EVM' ELSE 'SOLANA' END
+      UNION ALL SELECT 1 FROM flofi_account_identities i WHERE i.tenant_id = $1 AND i.account_id = $2
+        AND i.subject = $4 AND i.kind = CASE WHEN $3 = 'eip155' THEN 'EIP155' ELSE 'SOLANA' END)`,
+    [tenantId, accountId, namespace, principal]);
+    return owned.rowCount === 1;
+  }
   async function betaFlowOwnerRefusal(flow: FlowName, method: string, args: readonly unknown[], tenantId: string,
     principal: string | null, betaIdentity?: BetaRequestIdentity | null): Promise<string | null> {
-    if (betaAccessMode(env) !== 'beta') return null;
+    const mode = betaAccessMode(env);
+    // Open mode has no Flight identity. Closed and beta both re-bind recovery to the session account's proven wallets.
+    if (mode === 'open') return null;
+    const recovery = isFlightRecoveryMethod(method);
+    if (mode === 'closed' && !recovery) return 'BETA_ACCESS_CLOSED';
     // The original flows do not all have a run-ownership policy. Bind both newly named owners and historical run owners to this same
     // account. This check also runs before an idempotent response can be replayed, even when a legacy BFF did not send a wallet header.
     const ownerArgument = ['simulate', 'begin', 'beginSwap', 'beginLiquidity', 'prepare', 'pendingNonce'].includes(method) ? args[1]
       : ['positions', 'inspect'].includes(method) ? args[0]
         : method === 'broadcast' && args[2] && typeof args[2] === 'object' ? (args[2] as { from?: unknown }).from : undefined;
     if (typeof ownerArgument === 'string' && normalizePrincipal(ownerArgument)) {
-      const refused = await betaRefusal(tenantId, betaIdentity, ownerArgument);
-      if (refused) return refused;
+      if (recovery) {
+        const session = await betaSessionRefusal(tenantId, betaIdentity);
+        if (session) return session;
+        if (!betaIdentity || !(await accountOwnsAddress(tenantId, betaIdentity.accountId, ownerArgument))) return 'BETA_WALLET_NOT_LINKED';
+      } else {
+        const refused = await betaRefusal(tenantId, betaIdentity, ownerArgument);
+        if (refused) return refused;
+      }
     }
     const runId = typeof args[0] === 'string' && FLOWS[flow].runId.test(args[0]) ? args[0] : null;
     if (runId) {
       const owner = (await createRunQueries(db, tenantId).getRun(runId))?.ownerAccount;
       if (owner) {
         if (principal && principal !== owner) return 'RUN_OWNER_MISMATCH';
+        if (recovery) {
+          const session = await betaSessionRefusal(tenantId, betaIdentity);
+          if (session) return session;
+          if (!betaIdentity || !(await accountOwnsAddress(tenantId, betaIdentity.accountId, owner))) return 'BETA_WALLET_NOT_LINKED';
+          return null;
+        }
         return betaRefusal(tenantId, betaIdentity, owner);
       }
     }
@@ -166,7 +212,7 @@ export function createBackend(options: BackendOptions) {
    */
   async function callFlow(flow: FlowName, method: string, args: readonly unknown[], tenantId = options.tenantId, principal: string | null = null,
     betaIdentity?: BetaRequestIdentity | null): Promise<FlowResult> {
-    const refused = await betaRefusal(tenantId, betaIdentity, principal);
+    const refused = await betaMethodRefusal(tenantId, method, betaIdentity, principal);
     if (refused) return { ok: false, code: refused };
     const paused = isNewExecutionMethod(method) ? executionRefusal(env) : null;
     if (paused) return { ok: false, code: paused };
@@ -340,18 +386,29 @@ export function createBackend(options: BackendOptions) {
   const integerParam = (value: string | null) => value === null ? null : /^-?\d{1,9}$/.test(value) ? Number(value) : NaN;
   const wrap = (handler: (request: HttpRequest, match: RegExpExecArray) => Promise<HttpResponse>) => async (request: HttpRequest, match: RegExpExecArray) => {
     try {
-      const principal = indexPrincipal(request), refused = await betaRefusal(options.tenantId, requestIdentity(request), principal);
+      const principal = indexPrincipal(request), identity = requestIdentity(request);
+      const flowMatch = request.path.match(/^\/v1\/flows\/[a-z-]{1,40}\/([A-Za-z]{1,40})$/);
+      const recoveryPath = (flowMatch !== null && isFlightRecoveryMethod(flowMatch[1]!)) || request.path.startsWith('/v1/runs');
+      // Recovery surfaces need a live session only. Every other private route still rechecks the Flight grant.
+      const refused = recoveryPath
+        ? await betaSessionRefusal(options.tenantId, identity)
+        : await betaRefusal(options.tenantId, identity, principal);
       if (refused) return { status: 403, body: { ok: false, code: refused } };
-      // Tenant-wide operator reads remain available in open mode. During beta the API bearer alone cannot enumerate any wallet's data.
-      if (betaAccessMode(env) === 'beta' && request.path.startsWith('/v1/runs') && !principal)
-        return { status: 403, body: { ok: false, code: 'BETA_WALLET_REQUIRED' } };
+      // Tenant-wide operator reads remain available in open mode. During beta/closed the API bearer alone cannot enumerate any wallet's data.
+      if (betaAccessMode(env) !== 'open' && request.path.startsWith('/v1/runs')) {
+        if (!principal) return { status: 403, body: { ok: false, code: 'BETA_WALLET_REQUIRED' } };
+        if (!identity || !(await accountOwnsAddress(options.tenantId, identity.accountId, principal)))
+          return { status: 403, body: { ok: false, code: 'BETA_WALLET_NOT_LINKED' } };
+      }
       const selected = request.headers[APPROVAL_PRINCIPALS_HEADER];
       if (betaAccessMode(env) === 'beta' && selected) {
         if (typeof selected !== 'string') throw new HttpError(400, 'WALLET_PRINCIPAL_INVALID');
         const wallets = selected.split(',').map(value => workflowOwner(value.trim()));
         if (wallets.length > 2 || wallets.some(wallet => !wallet)) throw new HttpError(400, 'WALLET_PRINCIPAL_INVALID');
         for (const wallet of wallets) {
-          const denied = await betaRefusal(options.tenantId, requestIdentity(request), wallet!.address);
+          const denied = recoveryPath
+            ? await betaSessionRefusal(options.tenantId, identity)
+            : await betaRefusal(options.tenantId, identity, wallet!.address);
           if (denied) return { status: 403, body: { ok: false, code: denied } };
         }
       }

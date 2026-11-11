@@ -33,6 +33,9 @@
  *   creator-invite --email <address> [--language PT] [--send-at <ISO>]   one creator invite and its Email 6 (once per address)
  *   creator-invites --file <csv: email,language> [--send-at <ISO>] [--apply --out <private.csv>]
  *                                                  dry-run by default; apply queues Email 6 and writes email/language/code/state to mode-0600 CSV
+ *   creator-supersede-templates [--max <n>] [--apply]
+ *                                                  dry-run by default; replace unsent TEMPLATE_VERSION_REVIEW creator rows with current v3,
+ *                                                  preserving invite codes. Never touches SENT/UNKNOWN. Inspect Resend before apply.
  *   import-google-forms --file <csv> [--apply]      dry-run by default; columns email,submitted_at,language,consent; ISO timestamp with explicit offset,
  *                                                  consent true/false is required; language EN/PT may be blank. Preserves original signup order.
  *   email-early-list [--send-at <ISO>] [--apply]    separately reserve Email 0 once for eligible consented imports; never sends directly
@@ -58,7 +61,8 @@ import { createFlightStore, type FlightStore } from '../src/flight/store.ts';
 
 export const FLIGHT_COMMANDS = ['stats', 'create-batch', 'assign-batch', 'export-batch', 'issue-invites', 'erase-email', 'hide-pass', 'prune', 'purge-lists',
   'email-status', 'email-attention', 'email-release', 'email-cancel', 'email-pause', 'email-resume', 'email-unblock', 'email-mark-delivered',
-  'email-backfill-confirmations', 'email-send-due', 'creator-invite', 'creator-invites', 'import-google-forms', 'email-early-list', 'remove-card', 'revoke-access'] as const;
+  'email-backfill-confirmations', 'email-send-due', 'creator-invite', 'creator-invites', 'creator-supersede-templates',
+  'import-google-forms', 'email-early-list', 'remove-card', 'revoke-access'] as const;
 const TEMPLATES: readonly EmailTemplate[] = ['EARLY_LIST', 'LIST_CONFIRMATION', 'EVE', 'GROUP_BOARDING', 'ACCESS_REQUESTED', 'CARD_FOUNDING', 'CARD_PASSENGER', 'NEXT_FLIGHT', 'CREATOR_INVITE'];
 /** What the email and access commands need besides the store; `sendDue` runs one delivery cycle (absent: not configured). */
 export type FlightAdminContext = { readonly outbox: EmailOutbox; readonly entryOf: (email: string) => Promise<string | null>;
@@ -160,6 +164,10 @@ export async function runFlightCommand(command: Command, values: Values, store: 
       const out = flag(values, 'out');
       if (out) { const file = await newPrivateFile(out); try { await file.writeFile(csvLine(['email', 'language', 'code', 'state']) + csvLine([email, languageOf(flag(values, 'language')), invite.code, invite.state]), 'utf8'); } finally { await file.close(); } }
       return { created: invite.created, state: invite.state, ...out ? { out } : {} };
+    }
+    case 'creator-supersede-templates': {
+      const max = flag(values, 'max') ? integer(values, 'max') : undefined;
+      return ctx().outbox.supersedeCreatorTemplates(now, store.calendar.boardingOpensAt, { ...max ? { max } : {}, apply: values.apply === true });
     }
     case 'creator-invites': {
       const text = await readFile(required(values, 'file'), 'utf8').catch(() => { throw new Error('FILE_UNREADABLE'); });

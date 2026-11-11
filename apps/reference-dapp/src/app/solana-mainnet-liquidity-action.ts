@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 'use server';
-import { withFlightAccess } from '../server/flight-access';
+import { withFlightAccess, withFlightOwner } from '../server/flight-access';
 import { ORCA_WHIRLPOOLS_MAINNET_LIQUIDITY as profile } from '@defi-workflow-engine/action-registry';
 import type { SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
 import { createOrcaLiquidityService, type OrcaLiquidityService, type OrcaLiquidityWalletDiagnostic } from '../server/orca-liquidity-service';
@@ -64,7 +64,7 @@ export async function solanaMainnetLiquidityReview(id: string, commitment: strin
   });
 }
 export async function solanaMainnetLiquidityInvalidate(id: string) {
-  return withFlightAccess(async () => { return run('invalidate', [id], service => service.invalidate(id));
+  return withFlightOwner(async () => { return run('invalidate', [id], service => service.invalidate(id));
   });
 }
 export async function solanaMainnetLiquidityBegin(id: string, owner: string, workflow: SemanticWorkflow) {
@@ -72,7 +72,7 @@ export async function solanaMainnetLiquidityBegin(id: string, owner: string, wor
   });
 }
 export async function solanaMainnetLiquidityWalletFailure(id: string, diagnostic: OrcaLiquidityWalletDiagnostic) {
-  return withFlightAccess(async () => { return run('walletFailure', [id, diagnostic], service => service.walletFailure(id, diagnostic));
+  return withFlightOwner(async () => { return run('walletFailure', [id, diagnostic], service => service.walletFailure(id, diagnostic));
   });
 }
 export async function solanaMainnetLiquiditySubmit(id: string, signedTransaction: string) {
@@ -80,10 +80,10 @@ export async function solanaMainnetLiquiditySubmit(id: string, signedTransaction
   });
 }
 export async function solanaMainnetLiquidityObserve(id: string) {
-  return withFlightAccess(async () => { return run('observe', [id], service => service.observe(id));
+  return withFlightOwner(async () => { return run('observe', [id], service => service.observe(id));
   });
 }
 export async function solanaMainnetLiquidityStatus(id: string) {
-  return withFlightAccess(async () => { return run('status', [id], service => service.load(id));
+  return withFlightOwner(async () => { return run('status', [id], service => service.load(id));
   });
 }

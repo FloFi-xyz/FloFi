@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 'use server';
-import { withFlightAccess } from '../server/flight-access';
+import { withFlightAccess, withFlightOwner } from '../server/flight-access';
 /**
  * BUILD-AUTOMATION-002: server actions of delegated execution (Passkeys, Credentials, Automations "Automatic within limits"). Each goes through
  * `server/delegation-operation.ts`, which re-verifies the owner's HttpOnly wallet session (and a fresh sign-in for passkey registration) and
@@ -30,7 +30,7 @@ export async function passkeyRegister(owner: WorkflowOwner, response: unknown): 
   });
 }
 export async function passkeyRevoke(owner: WorkflowOwner, passkeyId: string): Promise<Result<PasskeyView>> {
-  return withFlightAccess(async () => { return delegationOperation('passkeyRevoke', [passkeyId], owner);
+  return withFlightOwner(async () => { return delegationOperation('passkeyRevoke', [passkeyId], owner);
   });
 }
 export async function credentialPrepare(owner: WorkflowOwner, input: unknown): Promise<Result<GrantView>> {
@@ -44,11 +44,11 @@ export async function credentialComplete(owner: WorkflowOwner, grantId: string, 
   });
 }
 export async function credentialRevoke(owner: WorkflowOwner, grantId: string): Promise<Result<GrantView>> {
-  return withFlightAccess(async () => { return delegationOperation('credentialRevoke', [grantId], owner);
+  return withFlightOwner(async () => { return delegationOperation('credentialRevoke', [grantId], owner);
   });
 }
 export async function credentialRevocationComplete(owner: WorkflowOwner, grantId: string, response: unknown): Promise<Result<GrantView>> {
-  return withFlightAccess(async () => {
+  return withFlightOwner(async () => {
   return delegationOperation('credentialRevocationComplete', [grantId, response], owner);
 
   });
@@ -78,7 +78,7 @@ export async function authorizationSign(owner: WorkflowOwner, authorizationId: s
   });
 }
 export async function authorizationRevoke(owner: WorkflowOwner, authorizationId: string): Promise<Result<AuthorizationView>> {
-  return withFlightAccess(async () => {
+  return withFlightOwner(async () => {
   return delegationOperation('authorizationRevoke', [authorizationId], owner);
 
   });

@@ -20,7 +20,7 @@ No production grants, Admin roles, credentials, queues, schedules or financial o
 
 No grant is created by sign-in, OAuth email matching, a client parameter or Admin role. Explicit Board establishes a grant after a single-use Flight link/code proof or a valid redeemed invite; returning linked-wallet sign-in reuses the persisted claim and grant. Repeated Board cannot revive a revoked grant. New wallet bindings require explicit boarding after proving that wallet belongs to the account. Wallet login never signs financial transactions.
 
-MCP OAuth consent during beta requires the same live FloFi session and persists its account/session association. Legacy MCP grants must re-consent; static MCP credentials cannot acquire beta rights. The gateway and downstream API recheck the persisted session. Telegram/WhatsApp conversational authoring is closed in beta, as allowed by the approved canvas; webhook delivery receipts, queued delivery/status synchronization and reconciliation remain active. `open` restores the existing channel behavior. Developer sandbox APIs retain their existing sandbox-only authority; they do not become mainnet execution routes.
+MCP OAuth consent during beta requires the same live FloFi session and persists its account/session association. Legacy MCP grants must re-consent; static MCP credentials cannot acquire beta rights. The gateway and downstream API recheck the persisted session. Telegram/WhatsApp conversational **authoring** remains closed in beta until a durable channel↔FloFi-account binding ships (no phone/Telegram id may mint a Flight grant). Webhook delivery receipts, queued delivery/status synchronization and reconciliation remain active for existing conversations. `open` restores the existing channel authoring behavior. Do not announce Telegram/WhatsApp authoring as beta-operational while that binding is absent. Developer sandbox APIs retain their existing sandbox-only authority; they do not become mainnet execution routes.
 
 ## Database releases and simultaneous binaries
 
@@ -57,6 +57,14 @@ Resume only with operator authorization: investigate/resolve the cause, record a
 - Rolling back to `open` deliberately reopens the private product. It requires an explicit owner decision, not an automatic error recovery.
 - Roll back application binaries only to Release A after schema 26 exists. An older uncertified schema-24 binary must fail readiness. Keep additive tables/columns and all grants, revocations, invitation history, imports and email state; do not run destructive down migrations.
 - Never reset `SENT`, `UNKNOWN`, reservations or idempotency keys. For held old creator templates, inspect Resend outcomes first. Do not bulk-release `TEMPLATE_VERSION_REVIEW`, resend existing messages or create replacement invites without an operator-reviewed plan.
+- Controlled creator v3 replacement (dry-run first; never production without owner authorization):
+
+```sh
+node apps/reference-dapp/backend/flight-admin.ts creator-supersede-templates --tenant default
+node apps/reference-dapp/backend/flight-admin.ts creator-supersede-templates --tenant default --apply
+```
+
+  Only unsent `HELD`/`TEMPLATE_VERSION_REVIEW` rows with no provider contact are cancelled and re-queued as current CREATOR_INVITE v3 with the **same invite code**. `SENT` is never touched. `UNKNOWN` is skipped until an operator confirms the Resend log (`email-mark-delivered` or explicit non-delivery).
 
 ## Wednesday acceptance and evidence ledger
 

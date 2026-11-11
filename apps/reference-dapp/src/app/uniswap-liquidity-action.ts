@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 'use server';
-import { withFlightAccess } from '../server/flight-access';
+import { withFlightAccess, withFlightOwner } from '../server/flight-access';
 import { isAbsolute, join } from 'node:path';
 import type { SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
 import { createFileExecutionStorage } from '@defi-workflow-engine/reference-executor';
@@ -138,7 +138,7 @@ export async function uniswapLiquidityReview(id: string, commitment: string, wor
   });
 }
 export async function uniswapLiquidityInvalidate(id: string) {
-  return withFlightAccess(async () => { return run('invalidate', [id], s => s.invalidate(id));
+  return withFlightOwner(async () => { return run('invalidate', [id], s => s.invalidate(id));
   });
 }
 export async function uniswapLiquidityBegin(id: string, owner: string, workflow: SemanticWorkflow) {
@@ -150,20 +150,20 @@ export async function uniswapLiquidityHandoff(id: string) {
   });
 }
 export async function uniswapLiquidityReport(id: string, result: { kind: 'HASH'; hash: string } | { kind: 'UNKNOWN' | 'REJECTED'; code?: string }) {
-  return withFlightAccess(async () => {
+  return withFlightOwner(async () => {
   return run('report', [id, result], s => s.report(id, result));
 
   });
 }
 export async function uniswapLiquidityWalletFailure(id: string, diagnostic: UniswapWalletDiagnostic) {
-  return withFlightAccess(async () => { return run('walletFailure', [id, diagnostic], s => s.walletFailure(id, diagnostic));
+  return withFlightOwner(async () => { return run('walletFailure', [id, diagnostic], s => s.walletFailure(id, diagnostic));
   });
 }
 export async function uniswapLiquidityObserve(id: string) {
-  return withFlightAccess(async () => { return run('observe', [id], s => s.observe(id));
+  return withFlightOwner(async () => { return run('observe', [id], s => s.observe(id));
   });
 }
 export async function uniswapLiquidityStatus(id: string) {
-  return withFlightAccess(async () => { return run('status', [id], s => s.load(id));
+  return withFlightOwner(async () => { return run('status', [id], s => s.load(id));
   });
 }

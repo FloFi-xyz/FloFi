@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 'use server';
-import { withFlightAccess } from '../server/flight-access';
+import { withFlightAccess, withFlightOwner } from '../server/flight-access';
 import { isAbsolute } from 'node:path';
 import type { PaymentDraftRequest } from '@defi-workflow-engine/workflow-contracts';
 import { createFileExecutionStorage } from '@defi-workflow-engine/reference-executor';
@@ -58,7 +58,7 @@ export async function paymentReview(id: string, commitment: string) {
   });
 }
 export async function paymentInvalidate(id: string) {
-  return withFlightAccess(async () => { return run('invalidate', [id], s => s.invalidate(id));
+  return withFlightOwner(async () => { return run('invalidate', [id], s => s.invalidate(id));
   });
 }
 export async function paymentBegin(id: string, owner: string) {
@@ -70,14 +70,14 @@ export async function paymentHandoff(id: string) {
   });
 }
 export async function paymentReport(id: string, result: PaymentWalletResult) {
-  return withFlightAccess(async () => { return run('report', [id, result], s => s.report(id, result));
+  return withFlightOwner(async () => { return run('report', [id, result], s => s.report(id, result));
   });
 }
 export async function paymentObserve(id: string) {
-  return withFlightAccess(async () => { return run('observe', [id], s => s.observe(id));
+  return withFlightOwner(async () => { return run('observe', [id], s => s.observe(id));
   });
 }
 export async function paymentStatus(id: string) {
-  return withFlightAccess(async () => { return run('status', [id], s => s.load(id));
+  return withFlightOwner(async () => { return run('status', [id], s => s.load(id));
   });
 }

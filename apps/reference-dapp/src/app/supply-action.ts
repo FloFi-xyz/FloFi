@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 'use server';
-import { withFlightAccess } from '../server/flight-access';
+import { withFlightAccess, withFlightOwner } from '../server/flight-access';
 import type { SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
 import { createSupplyService, type SupplyWalletDiagnostic, type SupplyService } from '../server/supply-service';
 import { join } from 'node:path';
@@ -57,29 +57,29 @@ export async function supplyBegin(id:string,account:string,workflow:SemanticWork
   });
 }
 export async function supplyReport(id:string,step:'APPROVAL'|'SUPPLY'|'BORROW'|'REPAY'|'WITHDRAW',result:{kind:'HASH';hash:string}|{kind:'UNKNOWN'|'REJECTED';code?:string}){
-  return withFlightAccess(async () => {return run('report',[id,step,result],service=>service.report(id,step,result));
+  return withFlightOwner(async () => {return run('report',[id,step,result],service=>service.report(id,step,result));
   });
 }
 export async function supplyObserve(id:string){
-  return withFlightAccess(async () => {return run('observe',[id],service=>service.observe(id));
+  return withFlightOwner(async () => {return run('observe',[id],service=>service.observe(id));
   });
 }
 export async function supplyStatus(id:string){
-  return withFlightAccess(async () => {return run('status',[id],service=>service.load(id));
+  return withFlightOwner(async () => {return run('status',[id],service=>service.load(id));
   });
 }
 
 export async function supplyInvalidate(id:string){
-  return withFlightAccess(async () => {return run('invalidate',[id],service=>service.invalidate(id));
+  return withFlightOwner(async () => {return run('invalidate',[id],service=>service.invalidate(id));
   });
 }
 export async function supplyRecoverReview(id:string){
-  return withFlightAccess(async () => {return run('recoverReview',[id],service=>service.recoverReview(id));
+  return withFlightOwner(async () => {return run('recoverReview',[id],service=>service.recoverReview(id));
   });
 }
 
 export async function supplyWalletFailure(id:string,diagnostic:SupplyWalletDiagnostic){
-  return withFlightAccess(async () => {return run('walletFailure',[id,diagnostic],service=>service.walletFailure(id,diagnostic));
+  return withFlightOwner(async () => {return run('walletFailure',[id,diagnostic],service=>service.walletFailure(id,diagnostic));
   });
 }
 export async function supplyWalletTrace(id:string,diagnostic:SupplyWalletDiagnostic){

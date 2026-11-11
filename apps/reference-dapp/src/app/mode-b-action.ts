@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 'use server';
-import { withFlightAccess } from '../server/flight-access';
+import { withFlightAccess, withFlightOwner } from '../server/flight-access';
 import { assertExecutionEnabled } from '../server/execution-guard';
 import { readFileSync } from 'node:fs';
 import { isAbsolute } from 'node:path';
@@ -60,7 +60,7 @@ export async function modeBPrepare(input: unknown) {
   });
 }
 export async function modeBExecution(input: unknown) {
-  return withFlightAccess(async () => {
+  return withFlightOwner(async () => {
   return run(service => service.status(id(input)));
 
   });
@@ -77,7 +77,7 @@ export async function modeBInstallationStep(input: unknown) {
   });
 }
 export async function modeBConfirm(input: unknown) {
-  return withFlightAccess(async () => {
+  return withFlightOwner(async () => {
   return run(service => {
     const value = input as { phase?: unknown; index?: unknown; hash?: unknown } | null;
     if ((value?.phase !== 'installation' && value?.phase !== 'revocation') || !Number.isSafeInteger(value.index) ||
@@ -98,7 +98,7 @@ export async function modeBRunWorker(input: unknown) {
   });
 }
 export async function modeBReconcile(input: unknown) {
-  return withFlightAccess(async () => {
+  return withFlightOwner(async () => {
   return run(service => service.reconcile(id(input)));
 
   });

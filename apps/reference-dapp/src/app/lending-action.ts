@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 'use server';
-import { withFlightAccess } from '../server/flight-access';
+import { withFlightAccess, withFlightOwner } from '../server/flight-access';
 import type { SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
 import { createLendingCompositionService, type LendingCompositionService } from '../server/lending-composition-service';
 import { createLendingRpc } from '../server/lending-rpc';
@@ -35,19 +35,19 @@ export async function lendingHandoff(id:string,attempt:string){
   });
 }
 export async function lendingReport(id:string,attempt:string,result:{kind:'HASH';hash:string}|{kind:'UNKNOWN'}){
-  return withFlightAccess(async () => {return run('report',[id,attempt,result],s=>s.report(id,attempt,result));
+  return withFlightOwner(async () => {return run('report',[id,attempt,result],s=>s.report(id,attempt,result));
   });
 }
 export async function lendingCancelPrepared(id:string,attempt:string){
-  return withFlightAccess(async () => {return run('cancelPrepared',[id,attempt],s=>s.cancelPrepared(id,attempt));
+  return withFlightOwner(async () => {return run('cancelPrepared',[id,attempt],s=>s.cancelPrepared(id,attempt));
   });
 }
 export async function lendingObserve(id:string){
-  return withFlightAccess(async () => {return run('observe',[id],s=>s.observe(id));
+  return withFlightOwner(async () => {return run('observe',[id],s=>s.observe(id));
   });
 }
 export async function lendingStatus(id:string){
-  return withFlightAccess(async () => {return run('status',[id],s=>s.load(id));
+  return withFlightOwner(async () => {return run('status',[id],s=>s.load(id));
   });
 }
 export async function lendingRefresh(id:string){
@@ -55,6 +55,6 @@ export async function lendingRefresh(id:string){
   });
 }
 export async function lendingInvalidate(id:string){
-  return withFlightAccess(async () => {return run('invalidate',[id],s=>s.invalidate(id));
+  return withFlightOwner(async () => {return run('invalidate',[id],s=>s.invalidate(id));
   });
 }

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 'use server';
-import { withFlightAccess } from '../server/flight-access';
+import { withFlightAccess, withFlightOwner } from '../server/flight-access';
 import { SOLANA_DEVNET_TRANSFER, SOLANA_MAINNET_TRANSFER } from '@defi-workflow-engine/action-registry';
 import type { SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
 import { createSolanaTransferService, type SolanaTransferService, type SolanaTransferWalletDiagnostic } from '../server/solana-transfer-service';
@@ -57,7 +57,7 @@ export async function solanaTransferReview(cluster: SolanaTransferCluster, id: s
   });
 }
 export async function solanaTransferInvalidate(cluster: SolanaTransferCluster, id: string) {
-  return withFlightAccess(async () => { return run(cluster, 'invalidate', [id], service => service.invalidate(id));
+  return withFlightOwner(async () => { return run(cluster, 'invalidate', [id], service => service.invalidate(id));
   });
 }
 export async function solanaTransferBegin(cluster: SolanaTransferCluster, id: string, owner: string, workflow: SemanticWorkflow) {
@@ -67,7 +67,7 @@ export async function solanaTransferBegin(cluster: SolanaTransferCluster, id: st
   });
 }
 export async function solanaTransferWalletFailure(cluster: SolanaTransferCluster, id: string, diagnostic: SolanaTransferWalletDiagnostic) {
-  return withFlightAccess(async () => {
+  return withFlightOwner(async () => {
   return run(cluster, 'walletFailure', [id, diagnostic], service => service.walletFailure(id, diagnostic));
 
   });
@@ -79,10 +79,10 @@ export async function solanaTransferSubmit(cluster: SolanaTransferCluster, id: s
   });
 }
 export async function solanaTransferObserve(cluster: SolanaTransferCluster, id: string) {
-  return withFlightAccess(async () => { return run(cluster, 'observe', [id], service => service.observe(id));
+  return withFlightOwner(async () => { return run(cluster, 'observe', [id], service => service.observe(id));
   });
 }
 export async function solanaTransferStatus(cluster: SolanaTransferCluster, id: string) {
-  return withFlightAccess(async () => { return run(cluster, 'status', [id], service => service.load(id));
+  return withFlightOwner(async () => { return run(cluster, 'status', [id], service => service.load(id));
   });
 }

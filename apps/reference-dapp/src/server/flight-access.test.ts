@@ -8,7 +8,7 @@ vi.mock('../flight/host.ts', () => ({ flightCalendar: () => ({ listClosesAt: 1, 
 vi.mock('./platform-state-host.ts', () => ({ platformStateHost: () => h.host() }));
 vi.mock('../flight/beta-access.ts', async importOriginal => ({ ...await importOriginal<typeof import('../flight/beta-access.ts')>(),
   createBetaAccessStore: () => ({ require: h.require }) }));
-import { requireFlightAccess, withFlightAccess } from './flight-access';
+import { isFlightRecoveryMethod, requireFlightAccess, requireFlightOwner, withFlightAccess, withFlightOwner } from './flight-access';
 import { currentBetaIdentity } from '../flight/beta-context';
 beforeEach(() => { vi.clearAllMocks(); h.session = null; h.wallets = []; h.host.mockResolvedValue({}); h.require.mockResolvedValue({ ok: true }); });
 describe('server request authorization before private work', () => {
@@ -16,6 +16,20 @@ describe('server request authorization before private work', () => {
     expect(await requireFlightAccess(undefined, {})).toBeNull();
     for (const value of ['', 'true', 'closed']) await expect(requireFlightAccess(undefined, { FLOFI_BETA_ACCESS: value })).rejects.toThrow('BETA_ACCESS_CLOSED');
     expect(h.host).not.toHaveBeenCalled();
+  });
+  it('keeps owner recovery available after closed/revoked product access without inventing a Flight grant', async () => {
+    expect(isFlightRecoveryMethod('status')).toBe(true);
+    expect(isFlightRecoveryMethod('report')).toBe(true);
+    expect(isFlightRecoveryMethod('begin')).toBe(false);
+    expect(await requireFlightOwner({})).toBeNull();
+    await expect(requireFlightOwner({ FLOFI_BETA_ACCESS: 'beta' })).rejects.toThrow('BETA_SIGN_IN_REQUIRED');
+    h.session = { accountId: 'acct_a', sessionId: 'session_a' };
+    expect(await requireFlightOwner({ FLOFI_BETA_ACCESS: 'closed' })).toEqual(h.session);
+    expect(await requireFlightOwner({ FLOFI_BETA_ACCESS: 'beta' })).toEqual(h.session);
+    expect(h.require).not.toHaveBeenCalled();
+    vi.stubEnv('FLOFI_BETA_ACCESS', 'closed');
+    try { expect(await withFlightOwner(async () => currentBetaIdentity())).toEqual(h.session); }
+    finally { vi.unstubAllEnvs(); }
   });
   it('requires a server account session; an authenticated account with no Flight grant also fails', async () => {
     await expect(requireFlightAccess(undefined, { FLOFI_BETA_ACCESS: 'beta' })).rejects.toThrow('BETA_SIGN_IN_REQUIRED');

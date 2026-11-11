@@ -1,9 +1,23 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-/** The product's request boundary. Authentication alone never grants closed-beta access. */
+/**
+ * The product's request boundary. Authentication alone never grants closed-beta access.
+ *
+ * New private product use (`withFlightAccess`) requires an active Flight grant while the gate is in `beta`.
+ * Observation, reporting and safe cancellation of already-owned work (`withFlightOwner`) require only a live
+ * account session, including after grant revocation or while the gate is `closed`, so submitted operations
+ * cannot become orphaned. Ownership of a specific run remains enforced by the existing wallet/session checks.
+ */
 import { betaAccessMode, createBetaAccessStore } from '../flight/beta-access.ts';
 import type { WalletPrincipal } from './session-principal.ts';
 import type { BetaRequestIdentity } from '../flight/beta-context.ts';
 import { withBetaIdentity } from '../flight/beta-context.ts';
+
+/** Flow and approval methods that observe, report or safely stop existing work without starting a new submission. */
+const FLIGHT_RECOVERY_METHODS: ReadonlySet<string> = new Set([
+  'status', 'observe', 'report', 'walletFailure', 'recoverUnknown', 'recoverReview', 'recover', 'invalidate',
+  'cancelPrepared', 'cancel', 'end',
+]);
+export const isFlightRecoveryMethod = (method: string): boolean => FLIGHT_RECOVERY_METHODS.has(method);
 
 /** Re-read the grant and the unrevoked account session for every operation, including direct Server Action calls. */
 export async function requireFlightAccess(principal?: WalletPrincipal, env: Readonly<Record<string, string | undefined>> = process.env): Promise<BetaRequestIdentity | null> {
@@ -42,7 +56,40 @@ export async function requireFlightAccess(principal?: WalletPrincipal, env: Read
   }
 }
 
+/**
+ * Authenticated owner session for recovery of existing work. Does not require an active Flight grant.
+ * Public/open rollout stays inert. Closed and beta modes both require a live signed-in account session.
+ */
+export async function requireFlightOwner(env: Readonly<Record<string, string | undefined>> = process.env): Promise<BetaRequestIdentity | null> {
+  const mode = betaAccessMode(env);
+  if (mode === 'open') return null;
+  try {
+    const [{ accountHost, currentAccountSession }] = await Promise.all([import('../accounts/account-host.ts')]);
+    const host = await accountHost(env), session = await currentAccountSession(host, env);
+    if (!session) throw new Error('BETA_SIGN_IN_REQUIRED');
+    return { accountId: session.accountId, sessionId: session.sessionId };
+  } catch (error) {
+    if (error instanceof Error && /^BETA_[A-Z_]+$/.test(error.message)) throw error;
+    throw new Error('BETA_UNAVAILABLE', { cause: error });
+  }
+}
+
 /** Scope propagation covers previews and nested service calls without sharing one request's identity with another. */
 export async function withFlightAccess<T>(work: () => Promise<T>): Promise<T> {
   return withBetaIdentity(await requireFlightAccess(), work);
+}
+
+/** Owner-authenticated recovery path: status, receipts, late wallet reports and safe cancellation stay reachable after revocation. */
+export async function withFlightOwner<T>(work: () => Promise<T>): Promise<T> {
+  return withBetaIdentity(await requireFlightOwner(), work);
+}
+
+/** Route a flow method to the product grant boundary or the owner recovery boundary. */
+export async function withFlightMethodAccess<T>(method: string, work: () => Promise<T>): Promise<T> {
+  return isFlightRecoveryMethod(method) ? withFlightOwner(work) : withFlightAccess(work);
+}
+
+export async function requireFlightMethodAccess(method: string, principal?: WalletPrincipal,
+  env: Readonly<Record<string, string | undefined>> = process.env): Promise<BetaRequestIdentity | null> {
+  return isFlightRecoveryMethod(method) ? requireFlightOwner(env) : requireFlightAccess(principal, env);
 }

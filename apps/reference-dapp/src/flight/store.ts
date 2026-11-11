@@ -408,7 +408,7 @@ export function createFlightStore(host: FlightHost, given: FlightCalendar = FLIG
           [tenantId, code, at(input.now), input.email])).rowCount;
       }
       await enqueueEmail(tx, tenantId, { template: 'CREATOR_INVITE', recipient: input.email, language: input.language, trigger: 'creator_invited',
-        dedupeKey: `creator:${code.toLowerCase()}`, notBefore: input.sendAt, expiresAt: calendar.boardingOpensAt, inviteCode: code, batchKey: 'creators' });
+        dedupeKey: `creator:${code.toLowerCase()}`, notBefore: input.sendAt, expiresAt: calendar.boardingOpensAt, inviteCode: code, batchKey: null });
       return { code, created: true, state: 'AVAILABLE' as const };
     });
   }

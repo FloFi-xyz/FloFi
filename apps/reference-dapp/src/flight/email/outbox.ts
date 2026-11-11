@@ -272,9 +272,14 @@ export function createEmailOutbox(host: { readonly db: Database; readonly tenant
       ON CONFLICT (tenant_id, dedupe_key) DO NOTHING`, [tenantId, TEMPLATE_VERSIONS.LIST_CONFIRMATION, at(now), at(listClosesAt)])).rowCount;
   }
 
-  /** Email 0 is operator-triggered only. Reserve it durably with its outbox row, once even after settled rows are pruned. */
+  /**
+   * Email 0 is operator-triggered only. Reserve it durably with its outbox row, once even after settled rows are pruned.
+   * Recipients are split into quota-sized batch keys so a list larger than the campaign day budget can still send the
+   * portion that fits, instead of holding every message behind one indivisible `early-list` reservation.
+   */
   async function scheduleEarlyList(now: number, sendAt: number, boardingOpensAt: number): Promise<number> {
     if (!Number.isFinite(sendAt) || sendAt >= boardingOpensAt || now >= boardingOpensAt) throw new Error('FLIGHT_EMAIL0_WINDOW_CLOSED');
+    const campaignDay = Math.max(1, dailyLimit - Math.min(ESSENTIAL_DAILY_RESERVE, Math.floor(dailyLimit / 20)));
     return db.transaction(async tx => {
       const entries = (await tx.query<{ entry_id: string; email: string; language: 'EN' | 'PT' }>(`SELECT e.entry_id, e.email, e.language
         FROM flight_early_list_imports i JOIN flight_list_entries e ON e.tenant_id = i.tenant_id AND e.entry_id = i.entry_id
@@ -283,9 +288,10 @@ export function createEmailOutbox(host: { readonly db: Database; readonly tenant
         AND NOT EXISTS (SELECT 1 FROM flight_email_suppressions s WHERE s.tenant_id = e.tenant_id AND s.address_hash = ${SQL_ADDRESS_HASH('e.email')})
         ORDER BY e.joined_at, e.entry_id FOR UPDATE OF i`, [tenantId])).rows;
       let enqueued = 0;
-      for (const entry of entries) {
+      for (const [index, entry] of entries.entries()) {
+        const batchKey = `early-list-${Math.floor(index / campaignDay)}`;
         if (await enqueueEmail(tx, tenantId, { template: 'EARLY_LIST', recipient: entry.email, language: entry.language, trigger: 'google_forms_import',
-          dedupeKey: `early:${entry.entry_id}`, notBefore: sendAt, expiresAt: boardingOpensAt, entryId: entry.entry_id, batchKey: 'early-list' })) enqueued++;
+          dedupeKey: `early:${entry.entry_id}`, notBefore: sendAt, expiresAt: boardingOpensAt, entryId: entry.entry_id, batchKey })) enqueued++;
         await tx.query('UPDATE flight_early_list_imports SET email0_enqueued_at = $3 WHERE tenant_id = $1 AND entry_id = $2', [tenantId, entry.entry_id, at(now)]);
       }
       return enqueued;
@@ -374,8 +380,48 @@ export function createEmailOutbox(host: { readonly db: Database; readonly tenant
       [tenantId, at(now), OUTBOX.settledRetentionDays])).rowCount;
   }
 
+  /**
+   * Controlled replacement for unsent CREATOR_INVITE rows held as TEMPLATE_VERSION_REVIEW.
+   * Preserves the original invite code and recipient. Never touches SENT. Never upgrades UNKNOWN
+   * (it may already have reached the provider). Never bulk-releases retired TEST copy.
+   */
+  async function supersedeCreatorTemplates(now: number, boardingOpensAt: number, options: { readonly max?: number; readonly apply?: boolean } = {}): Promise<{
+    readonly eligible: number; readonly superseded: number; readonly skippedUnknown: number; readonly skippedSent: number;
+  }> {
+    const max = options.max ?? 1_000;
+    if (!Number.isSafeInteger(max) || max < 1) throw new Error('FLIGHT_SUPERSEDE_MAX_INVALID');
+    return db.transaction(async tx => {
+      const unknownOrSent = (await tx.query<{ state: string; n: string }>(`SELECT state, count(*)::text AS n FROM flight_emails
+        WHERE tenant_id = $1 AND template = 'CREATOR_INVITE' AND template_version <> $2 AND state IN ('UNKNOWN', 'SENT')
+        GROUP BY state`, [tenantId, TEMPLATE_VERSIONS.CREATOR_INVITE])).rows;
+      let skippedUnknown = 0, skippedSent = 0;
+      for (const row of unknownOrSent) {
+        if (row.state === 'UNKNOWN') skippedUnknown = Number(row.n);
+        if (row.state === 'SENT') skippedSent = Number(row.n);
+      }
+      const held = (await tx.query<{ email_id: string; recipient: string; language: EmailLanguage; invite_code: string | null;
+        reserved_at: Date | null; first_attempt_at: Date | null; attempts: number }>(`SELECT email_id, recipient, language, invite_code, reserved_at, first_attempt_at, attempts
+        FROM flight_emails WHERE tenant_id = $1 AND template = 'CREATOR_INVITE' AND template_version <> $2
+          AND state = 'HELD' AND status_reason = 'TEMPLATE_VERSION_REVIEW'
+          AND reserved_at IS NULL AND first_attempt_at IS NULL AND attempts = 0 AND invite_code IS NOT NULL
+        ORDER BY created_at, email_id LIMIT $3 FOR UPDATE`, [tenantId, TEMPLATE_VERSIONS.CREATOR_INVITE, max])).rows;
+      if (!options.apply) return { eligible: held.length, superseded: 0, skippedUnknown, skippedSent };
+      let superseded = 0;
+      for (const row of held) {
+        await tx.query(`UPDATE flight_emails SET state = 'CANCELLED', status_reason = 'TEMPLATE_SUPERSEDED', reserved_at = NULL, updated_at = clock_timestamp()
+          WHERE tenant_id = $1 AND email_id = $2 AND state = 'HELD' AND status_reason = 'TEMPLATE_VERSION_REVIEW'`, [tenantId, row.email_id]);
+        if (await enqueueEmail(tx, tenantId, {
+          template: 'CREATOR_INVITE', recipient: row.recipient, language: row.language, trigger: 'creator_template_superseded',
+          dedupeKey: `creator-v${TEMPLATE_VERSIONS.CREATOR_INVITE}:${row.invite_code!.toLowerCase()}`, notBefore: now,
+          expiresAt: boardingOpensAt, inviteCode: row.invite_code, batchKey: null,
+        })) superseded++;
+      }
+      return { eligible: held.length, superseded, skippedUnknown, skippedSent };
+    });
+  }
+
   return { usage, control, setPaused, block, clearBlock, housekeeping, lease, settle, scheduleEve, scheduleBoarding, backfillConfirmations, scheduleEarlyList, suppress, isSuppressed,
-    unsubscribe, status, listAttention, release, cancel, markDelivered, prune, limits: { daily: dailyLimit, monthly: monthlyLimit } };
+    unsubscribe, status, listAttention, release, cancel, markDelivered, prune, supersedeCreatorTemplates, limits: { daily: dailyLimit, monthly: monthlyLimit } };
 }
 export type EmailOutbox = ReturnType<typeof createEmailOutbox>;
 

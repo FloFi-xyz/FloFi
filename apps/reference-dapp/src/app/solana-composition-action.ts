@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 'use server';
-import { withFlightAccess } from '../server/flight-access';
+import { withFlightAccess, withFlightOwner } from '../server/flight-access';
 import { ORCA_WHIRLPOOLS_DEVNET as profile } from '@defi-workflow-engine/action-registry';
 import { createFileExecutionStorage } from '@defi-workflow-engine/reference-executor';
 import type { SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
@@ -50,7 +50,7 @@ export async function solanaCompositionReview(id: string, commitment: string, wo
   });
 }
 export async function solanaCompositionInvalidate(id: string) {
-  return withFlightAccess(async () => { return run('invalidate', [id], service => service.invalidate(id));
+  return withFlightOwner(async () => { return run('invalidate', [id], service => service.invalidate(id));
   });
 }
 export async function solanaCompositionBeginSwap(id: string, owner: string, workflow: SemanticWorkflow) {
@@ -82,18 +82,18 @@ export async function solanaCompositionSubmitLiquidity(id: string, signedTransac
   });
 }
 export async function solanaCompositionWalletFailure(id: string, failure: SolanaCompositionDiagnostic) {
-  return withFlightAccess(async () => { return run('walletFailure', [id, failure], service => service.walletFailure(id, failure));
+  return withFlightOwner(async () => { return run('walletFailure', [id, failure], service => service.walletFailure(id, failure));
   });
 }
 export async function solanaCompositionObserve(id: string) {
-  return withFlightAccess(async () => { return run('observe', [id], service => service.observe(id));
+  return withFlightOwner(async () => { return run('observe', [id], service => service.observe(id));
   });
 }
 export async function solanaCompositionEnd(id: string) {
-  return withFlightAccess(async () => { return run('end', [id], service => service.end(id));
+  return withFlightOwner(async () => { return run('end', [id], service => service.end(id));
   });
 }
 export async function solanaCompositionStatus(id: string) {
-  return withFlightAccess(async () => { return run('status', [id], service => service.status(id));
+  return withFlightOwner(async () => { return run('status', [id], service => service.status(id));
   });
 }

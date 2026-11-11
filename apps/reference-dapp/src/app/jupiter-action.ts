@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 'use server';
-import { withFlightAccess } from '../server/flight-access';
+import { withFlightAccess, withFlightOwner } from '../server/flight-access';
 import { JUPITER_SOLANA_MAINNET as profile } from '@defi-workflow-engine/action-registry';
 import type { SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
 import { createJupiterService, type JupiterService, type JupiterWalletDiagnostic } from '../server/jupiter-service';
@@ -48,7 +48,7 @@ export async function jupiterReview(id: string, commitment: string, workflow: Se
   });
 }
 export async function jupiterInvalidate(id: string) {
-  return withFlightAccess(async () => { return run('invalidate', [id], service => service.invalidate(id));
+  return withFlightOwner(async () => { return run('invalidate', [id], service => service.invalidate(id));
   });
 }
 export async function jupiterBegin(id: string, owner: string, workflow: SemanticWorkflow) {
@@ -56,7 +56,7 @@ export async function jupiterBegin(id: string, owner: string, workflow: Semantic
   });
 }
 export async function jupiterWalletFailure(id: string, diagnostic: JupiterWalletDiagnostic) {
-  return withFlightAccess(async () => { return run('walletFailure', [id, diagnostic], service => service.walletFailure(id, diagnostic));
+  return withFlightOwner(async () => { return run('walletFailure', [id, diagnostic], service => service.walletFailure(id, diagnostic));
   });
 }
 export async function jupiterSubmit(id: string, signedTransaction: string) {
@@ -64,10 +64,10 @@ export async function jupiterSubmit(id: string, signedTransaction: string) {
   });
 }
 export async function jupiterObserve(id: string) {
-  return withFlightAccess(async () => { return run('observe', [id], service => service.observe(id));
+  return withFlightOwner(async () => { return run('observe', [id], service => service.observe(id));
   });
 }
 export async function jupiterStatus(id: string) {
-  return withFlightAccess(async () => { return run('status', [id], service => service.load(id));
+  return withFlightOwner(async () => { return run('status', [id], service => service.load(id));
   });
 }

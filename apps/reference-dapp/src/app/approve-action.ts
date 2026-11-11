@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 'use server';
-import { withFlightAccess } from '../server/flight-access';
+import { withFlightAccess, withFlightOwner } from '../server/flight-access';
 /**
  * BUILD-MCP-002 → BUILD-DEVELOPER-001: server actions of `/approve`, the FloFi-controlled page where an external proposal meets its
  * owner — for every requester kind this deployment serves (`src/server/approval-surface.ts`), not only MCP.
@@ -50,7 +50,7 @@ export async function openBrowserApprovalHandoff(approvalId: string): Promise<Re
   });
 }
 export async function resumeApprovalHandoff(approvalId: string): Promise<Result<ClaimedProposal>> {
-  return withFlightAccess(async () => {
+  return withFlightOwner(async () => {
   try { return { ok: true, value: await resumeApproval(await surface(), approvalId, await currentWalletPrincipals()) }; }
   catch (cause) {
     // BUILD-AUTOMATION-001: on the remote runtime an automation proposal's profile is the API's. The id names no kind, so a recovery this
@@ -64,7 +64,7 @@ export async function resumeApprovalHandoff(approvalId: string): Promise<Result<
 
 /** The proposal behind a secret, re-verified now. Seeing it grants nothing. */
 export async function approvalHandoffView(secret: string): Promise<Result<ClaimedProposal['view']>> {
-  return withFlightAccess(async () => {
+  return withFlightOwner(async () => {
   try {
     if (remoteAutomationApproval(secret)) return { ok: true, value: await remoteApproval<ApprovalView>('view', [secret]) };
     return { ok: true, value: await viewApproval(await surface(), secret, await currentWalletPrincipals()) };
@@ -79,7 +79,7 @@ export async function approvalHandoffView(secret: string): Promise<Result<Claime
  * proposal keeps loading after the owner's proof, as before.
  */
 export async function approvalHandoffPreview(secret: string): Promise<Result<ApprovalPreview>> {
-  return withFlightAccess(async () => {
+  return withFlightOwner(async () => {
   try {
     if (remoteAutomationApproval(secret)) return { ok: false, code: 'APPROVAL_PREVIEW_UNAVAILABLE' };
     const preview = await previewApproval(await surface(), secret);
@@ -122,7 +122,7 @@ export async function markApprovalApplied(secret: string, workflow: unknown): Pr
 
 /** The claimant turns status sharing with the requester on or off. */
 export async function setApprovalSharing(secret: string, share: boolean): Promise<Result<{ statusShared: boolean }>> {
-  return withFlightAccess(async () => {
+  return withFlightOwner(async () => {
   try {
     if (remoteAutomationApproval(secret)) return { ok: true, value: await remoteApproval<{ statusShared: boolean }>('share', [secret, share === true]) };
     const value = await shareApproval(await surface(), secret, await currentWalletPrincipals(), share === true); notify(secret); return { ok: true, value };
@@ -137,7 +137,7 @@ const runAction = async <T>(work: (approvals: ApprovalSurface, wallets: Awaited<
 };
 /** The run's status for its owner, read-only (it never loads or resolves a step). */
 export async function workflowRunStatusHandoff(approvalId: string): Promise<Result<ClaimedProposal>> {
-  return withFlightAccess(async () => { return runAction((s, w) => workflowRunStatus(s, approvalId, w));
+  return withFlightOwner(async () => { return runAction((s, w) => workflowRunStatus(s, approvalId, w));
   });
 }
 /** The step the owner signs now, once the previous one reconciled (the ordinary single-step proposal the signing surface loads). */
@@ -152,7 +152,7 @@ export async function startWorkflowRunHandoff(approvalId: string): Promise<Resul
 }
 /** The owner ends the run (nothing in flight) or, for a delegated run, revokes its authorization. */
 export async function cancelWorkflowRunHandoff(approvalId: string): Promise<Result<ClaimedProposal>> {
-  return withFlightAccess(async () => { return runAction((s, w) => workflowRunCancel(s, approvalId, w));
+  return withFlightOwner(async () => { return runAction((s, w) => workflowRunCancel(s, approvalId, w));
   });
 }
 /** The owner resumes a halted run whose stopped step submitted nothing. */
@@ -183,7 +183,7 @@ export async function authorizeUserFundedGroup(approvalId: string, groupIndex: n
 }
 /** The transaction hashes of a wallet batch (from `wallet_getCallsStatus`); FloFi re-reads every receipt from the chain. */
 export async function reportUserFundedBatch(approvalId: string, groupIndex: number, hashes: string[], notSent = false): Promise<Result<ClaimedProposal>> {
-  return withFlightAccess(async () => {
+  return withFlightOwner(async () => {
   return runAction((s, w) => workflowRunUserFundedReport(s, approvalId, w, groupIndex, hashes, notSent === true));
 
   });

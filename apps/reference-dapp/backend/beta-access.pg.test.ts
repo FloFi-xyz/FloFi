@@ -191,6 +191,9 @@ describe('closed beta at the actual Railway/embedded backend boundary', () => {
     expect(submitted.attempt?.state).toBe('PENDING');
     r.env.FLOFI_EXECUTION_PAUSED = 'true';
     await createBetaAccessStore({ db: t.db, tenantId: 'default' }).revoke(yes.identity.accountId, NOW);
+    expect((await callFlow('status', [simulated.id])).ok).toBe(true);
+    expect((await callFlow('observe', [simulated.id])).ok).toBe(true);
+    expect(await callFlow('begin', [simulated.id, yes.address, r.workflow])).toEqual({ ok: false, code: 'BETA_ACCESS_REVOKED' });
     const settle = vi.fn(async () => true);
     await r.backend.handlers.reconcile!({ tenantId: 'default', runId: simulated.id, payload: { namespace: 'jupiter-swap', runId: simulated.id },
       deliveries: 1 } as unknown as Parameters<WorkHandler>[0], settle, quiet);

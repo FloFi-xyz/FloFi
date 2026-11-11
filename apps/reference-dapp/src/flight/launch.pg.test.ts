@@ -606,6 +606,45 @@ describe('Google Forms provenance and launch email compatibility', () => {
     expect(current.text).toContain('Thursday from 9:00 BRT');
     expect(current.text).toContain('cooked-goat-9ec.notion.site');
     expect(current.text).not.toMatch(/test flight|Wednesday|\bTEST\b/);
+    // UNKNOWN rows were held with a reservation (provider may have accepted them); only never-contacted HELD rows are eligible.
+    const dry = await outbox.supersedeCreatorTemplates(BEFORE + 3000, CAL.boardingOpensAt);
+    expect(dry).toMatchObject({ eligible: 2, superseded: 0, skippedUnknown: 0, skippedSent: 2 });
+    const applied = await outbox.supersedeCreatorTemplates(BEFORE + 3000, CAL.boardingOpensAt, { apply: true });
+    expect(applied).toMatchObject({ eligible: 2, superseded: 2, skippedUnknown: 0, skippedSent: 2 });
+    expect(await rows(`SELECT template_version, state, status_reason FROM flight_emails WHERE status_reason = 'TEMPLATE_SUPERSEDED' ORDER BY recipient`))
+      .toEqual([
+        { template_version: 1, state: 'CANCELLED', status_reason: 'TEMPLATE_SUPERSEDED' },
+        { template_version: 2, state: 'CANCELLED', status_reason: 'TEMPLATE_SUPERSEDED' },
+      ]);
+    expect(await rows(`SELECT template_version, state FROM flight_emails WHERE trigger = 'creator_template_superseded' ORDER BY recipient`))
+      .toEqual([{ template_version: 3, state: 'PENDING' }, { template_version: 3, state: 'PENDING' }]);
+    expect(await rows(`SELECT state FROM flight_emails WHERE recipient LIKE 'version-%-sent%' ORDER BY recipient`))
+      .toEqual([{ state: 'SENT' }, { state: 'SENT' }]);
+    expect(await rows(`SELECT state, status_reason FROM flight_emails WHERE recipient LIKE 'version-%-unknown%' ORDER BY recipient`))
+      .toEqual([
+        { state: 'HELD', status_reason: 'TEMPLATE_VERSION_REVIEW' },
+        { state: 'HELD', status_reason: 'TEMPLATE_VERSION_REVIEW' },
+      ]);
+  });
+
+  it('splits Email 0 into quota-sized batches so a large list can still send the portion that fits', async () => {
+    const day = BEFORE - 8 * 86_400_000;
+    const limits = { daily: 10, monthly: 3000, externalDailyReserve: 0, externalMonthlyReserve: 0 };
+    const outbox = createEmailOutbox({ db: t.db, tenantId: 'default' }, limits);
+    await t.db.query(`UPDATE flight_emails SET state = 'CANCELLED', reserved_at = NULL, lease_token = NULL, lease_until = NULL WHERE state IN ('PENDING', 'HELD', 'UNKNOWN', 'SENDING')`);
+    const imported = Array.from({ length: 20 }, (_, i) => ({
+      email: `early-batch-${String(i).padStart(2, '0')}@flofi-test.dev`, signedUpAt: day - 86_400_000 + i * 1000, language: 'EN' as const, consent: true,
+    }));
+    expect(await store.importGoogleForms(imported, day)).toEqual({ imported: 20, alreadyImported: 0 });
+    expect(await outbox.scheduleEarlyList(day, day, CAL.boardingOpensAt)).toBe(20);
+    const batches = await rows(`SELECT batch_key, count(*)::int AS n FROM flight_emails WHERE template = 'EARLY_LIST' AND recipient LIKE 'early-batch-%' GROUP BY 1 ORDER BY 1`);
+    // campaignDay = 10 - min(5, floor(10/20)) = 10 → two batches of 10
+    expect(batches).toEqual([{ batch_key: 'early-list-0', n: 10 }, { batch_key: 'early-list-1', n: 10 }]);
+    expect(await outbox.lease(day + 1000, { max: 30, campaign: true })).toHaveLength(10);
+    expect(await rows(`SELECT state, status_reason, count(*)::int AS n FROM flight_emails WHERE template = 'EARLY_LIST' AND recipient LIKE 'early-batch-%' AND state = 'HELD' GROUP BY 1, 2`))
+      .toEqual([{ state: 'HELD', status_reason: 'QUOTA_DAILY', n: 10 }]);
+    expect(await rows(`SELECT count(*)::int AS n FROM flight_emails WHERE template = 'EARLY_LIST' AND recipient LIKE 'early-batch-%' AND state = 'SENDING'`))
+      .toEqual([{ n: 10 }]);
   });
 
   it('does not schedule or deliver any campaign template to a nonconsenting Forms import', async () => {
