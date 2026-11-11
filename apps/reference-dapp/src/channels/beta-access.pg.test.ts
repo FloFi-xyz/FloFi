@@ -10,6 +10,8 @@ import { automationKeys } from '../automations/config.ts';
 import { createLinkCode, LINK_CODE_TTL_MS, LINK_TTL_MS } from '../automations/subscriptions.ts';
 import { createBetaAccessStore } from '../flight/beta-access.ts';
 import { FLIGHT_DEFAULT_CALENDAR } from '../flight/campaign.ts';
+import { channelKeys, open, sealContext } from './core/crypto.ts';
+import { parseState } from './core/conversation.ts';
 import { recordingRuntime } from './core/engine.test-harness.ts';
 import { handleChannelDispatch } from './dispatch-http.ts';
 import { telegramUserDigest } from './telegram/config.ts';
@@ -77,16 +79,37 @@ function deployment(overrides: Record<string, string | undefined> = {}) {
   return { f, api, calls, host, say, enqueue, dispatch, now, set(ms: number) { clock = ms; } };
 }
 
+async function sealedState(env: Record<string, string | undefined>) {
+  const row = (await t.db.query<{ conversation_id: string; state_ciphertext: Buffer | null }>(
+    `SELECT conversation_id, state_ciphertext FROM channel_conversations`)).rows[0];
+  if (!row?.state_ciphertext) return { conversationId: row?.conversation_id ?? null, state: null };
+  const keys = channelKeys(env.FLOFI_CHANNEL_SECRET!);
+  const json = open(keys.seal, row.state_ciphertext, sealContext('default', 'channel_conversations', row.conversation_id, 'state'));
+  return { conversationId: row.conversation_id, state: parseState(json, 'EN') };
+}
+
 describe('Telegram Flight beta via automation link + requireWallet', () => {
-  it('lets unlinked users HELP/STOP/link while refusing private authoring without a handoff', async () => {
+  it('lets unlinked users HELP/STOP/link while refusing private authoring without a handoff or persisted draft', async () => {
     const d = deployment();
     expect((await d.say('help')).status).toBe(200);
     expect(d.api.texts().join('\n')).toMatch(/Privacy: https:\/\/flofi\.test\/privacy/);
     await d.say(STRATEGY);
     expect(d.api.texts().at(-1)).toMatch(/not linked to a FloFi Flight wallet/i);
     expect((await t.db.query('SELECT 1 FROM mcp_handoffs')).rowCount).toBe(0);
+    const denied = await sealedState(d.f.env);
+    expect(denied.state?.pending ?? null).toBeNull();
+    expect(denied.state?.steps ?? []).toEqual([]);
+    // A later link+grant must not revive a pre-grant draft via LINK.
+    const person = await account();
+    await grantFlight(person.accountId);
+    const { code } = await createLinkCode(t.db, 'default', automationKeys(SECRET), OWNER, new Date(OPEN));
+    await d.say(`automations ${code}`);
+    await d.say('link');
+    expect((await t.db.query('SELECT 1 FROM mcp_handoffs')).rowCount).toBe(0);
+    expect(d.api.texts().at(-1)).toMatch(/no pending strategy/i);
     await d.say('stop');
     expect(d.api.texts().at(-1)).toMatch(/will not receive more messages/i);
+    expect((await t.db.query('SELECT 1 FROM automation_notification_targets')).rowCount).toBe(0);
   });
 
   it('links with a legitimate one-time code, refuses expired and reused codes, and never logs the secret', async () => {
@@ -199,5 +222,21 @@ describe('Telegram Flight beta via automation link + requireWallet', () => {
     await d.say('execute');
     expect(d.api.texts().join('\n')).toMatch(/Nothing can be authorized here/i);
     expect((await t.db.query('SELECT 1 FROM mcp_handoffs')).rowCount).toBe(handoffs);
+  });
+
+  it('keeps CANCEL after revoke and clears the automation link on STOP', async () => {
+    const d = deployment();
+    const person = await account();
+    const gate = await grantFlight(person.accountId);
+    const { code } = await createLinkCode(t.db, 'default', automationKeys(SECRET), OWNER, new Date(OPEN));
+    await d.say(`automations ${code}`);
+    await d.say(STRATEGY);
+    expect((await t.db.query('SELECT 1 FROM mcp_handoffs')).rowCount).toBe(1);
+    expect(await gate.revoke(person.accountId, OPEN)).toBe(true);
+    await d.say('cancel');
+    expect(d.api.texts().at(-1)).toMatch(/Cancelled|no pending|não há|Cancelado/i);
+    await d.say('stop');
+    expect((await t.db.query('SELECT 1 FROM automation_notification_targets')).rowCount).toBe(0);
+    expect(d.api.texts().at(-1)).toMatch(/will not receive more messages/i);
   });
 });

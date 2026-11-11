@@ -2493,6 +2493,8 @@
         "app.channels.core.delivery",
         "app.channels.core.workflow",
         "app.channels.route-discovery",
+        "app.channels.beta-access",
+        "app.channels.beta-access.pg",
         "app.channels.telegram.learning.pg",
         "app.channels.telegram.workflow.pg",
         "app.channels.whatsapp.journey.pg",

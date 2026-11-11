@@ -237,9 +237,12 @@ export function createChannelService(ctx: ChannelContext) {
     const lm = channelCopy(state.language);
     if (!privateAccess.ok && !isPublicChannelTurn(decision)) {
       const guidance = lm.betaAccess(privateAccess.code);
-      await commit('BETA_CHANNEL_ACCESS_DENIED', state.greeted ? [text(guidance)] : [text(lm.firstContact(core.supportContact, core.privacyUrl)), text(guidance)],
-        { ...state, greeted: true, choices: [] });
-      return { address: null, language: state.language };
+      // Keep only the conversation language/greeted flag. Never persist pending/steps/copilot from a refused private turn —
+      // otherwise a later link+grant could LINK a pre-grant draft that was never authorized to author.
+      const deniedState = { ...prior, language: state.language, greeted: true, choices: [] as const };
+      await commit('BETA_CHANNEL_ACCESS_DENIED', prior.greeted ? [text(guidance)] : [text(lm.firstContact(core.supportContact, core.privacyUrl)), text(guidance)],
+        deniedState);
+      return { address: null, language: deniedState.language };
     }
     switch (decision.action) {
       case 'IGNORE': await commit(decision.outcome, [], undefined); return { address: null, language: state.language };
