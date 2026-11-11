@@ -2462,6 +2462,7 @@
         "apps/reference-dapp/src/channels/core/subscriber.ts",
         "apps/reference-dapp/src/channels/core/types.ts",
         "apps/reference-dapp/src/channels/dispatch-http.ts",
+        "apps/reference-dapp/src/channels/flight-gate.ts",
         "apps/reference-dapp/src/channels/http.ts",
         "apps/reference-dapp/src/channels/learning-runtime.ts",
         "apps/reference-dapp/src/channels/providers.ts",
