@@ -24,7 +24,7 @@ const OWNER = { namespace: 'eip155' as const, address: `0x${'a1'.repeat(20)}` };
 const OTHER = { namespace: 'eip155' as const, address: `0x${'b2'.repeat(20)}` };
 const STRATEGY = `supply 5 USDC to Aave on Base Sepolia beneficiary 0x${'1'.repeat(40)}`;
 const ALLOWED = [TELEGRAM_USER, TELEGRAM_OTHER_USER].map(id => telegramUserDigest(String(id))).join(',');
-const SECRET = 'automation-secret-'.padEnd(48, 'x');
+const AUTOMATION_FIXTURE = 'flofi automation fixture value '.padEnd(48, '.');
 
 let t: TestDatabase;
 beforeAll(async () => { t = await createTestDatabase(); });
@@ -60,7 +60,7 @@ async function grantFlight(accountId: string, address = OWNER.address) {
 function deployment(overrides: Record<string, string | undefined> = {}) {
   const token = randomBytes(32).toString('hex');
   const f = telegramEnv({
-    FLOFI_AUTOMATIONS: 'enabled', FLOFI_AUTOMATION_SECRET: SECRET,
+    FLOFI_AUTOMATIONS: 'enabled', FLOFI_AUTOMATION_SECRET: AUTOMATION_FIXTURE,
     FLOFI_CHANNEL_DISPATCH_TOKEN_SHA256: createHash('sha256').update(token).digest('hex'),
     FLOFI_BETA_ACCESS: 'beta', FLOFI_FLIGHT_BOARDING_OPENS_AT: iso(OPEN), FLOFI_FLIGHT_LIST_CLOSES_AT: iso(CAL.listClosesAt),
     FLOFI_TELEGRAM_ACCESS_MODE: 'allowlist', FLOFI_TELEGRAM_ALLOWED_USERS: ALLOWED, ...overrides,
@@ -102,7 +102,7 @@ describe('Telegram Flight beta via automation link + requireWallet', () => {
     // A later link+grant must not revive a pre-grant draft via LINK.
     const person = await account();
     await grantFlight(person.accountId);
-    const { code } = await createLinkCode(t.db, 'default', automationKeys(SECRET), OWNER, new Date(OPEN));
+    const { code } = await createLinkCode(t.db, 'default', automationKeys(AUTOMATION_FIXTURE), OWNER, new Date(OPEN));
     await d.say(`automations ${code}`);
     await d.say('link');
     expect((await t.db.query('SELECT 1 FROM mcp_handoffs')).rowCount).toBe(0);
@@ -115,7 +115,7 @@ describe('Telegram Flight beta via automation link + requireWallet', () => {
   it('links with a legitimate one-time code, refuses expired and reused codes, and never logs the secret', async () => {
     const d = deployment(), person = await account();
     await grantFlight(person.accountId);
-    const { code } = await createLinkCode(t.db, 'default', automationKeys(SECRET), OWNER, new Date(OPEN));
+    const { code } = await createLinkCode(t.db, 'default', automationKeys(AUTOMATION_FIXTURE), OWNER, new Date(OPEN));
     const logs: string[] = [];
     const sink = { info: (e: string, x?: unknown) => logs.push(JSON.stringify([e, x])), warn: (e: string, x?: unknown) => logs.push(JSON.stringify([e, x])) };
     await handleTelegramWebhook(telegramRequest(textUpdate(`automations ${code}`, { date: Math.floor(OPEN / 1000) }), d.f.webhookSecret), {
@@ -126,7 +126,7 @@ describe('Telegram Flight beta via automation link + requireWallet', () => {
     expect(logs.join('\n')).not.toContain(code);
     await d.say(`automations ${code}`);
     expect(d.api.texts().at(-1)).toMatch(/not valid/i);
-    const expired = await createLinkCode(t.db, 'default', automationKeys(SECRET), OWNER, new Date(OPEN));
+    const expired = await createLinkCode(t.db, 'default', automationKeys(AUTOMATION_FIXTURE), OWNER, new Date(OPEN));
     d.set(OPEN + LINK_CODE_TTL_MS + 1_000);
     await d.say(`automations ${expired.code}`);
     expect(d.api.texts().at(-1)).toMatch(/not valid/i);
@@ -136,7 +136,7 @@ describe('Telegram Flight beta via automation link + requireWallet', () => {
     const linked = deployment();
     const person = await account();
     await grantFlight(person.accountId);
-    const { code } = await createLinkCode(t.db, 'default', automationKeys(SECRET), OWNER, new Date(OPEN));
+    const { code } = await createLinkCode(t.db, 'default', automationKeys(AUTOMATION_FIXTURE), OWNER, new Date(OPEN));
     await linked.say(`automations ${code}`);
     await linked.say(STRATEGY);
     expect((await t.db.query('SELECT 1 FROM mcp_handoffs')).rowCount).toBe(1);
@@ -152,7 +152,7 @@ describe('Telegram Flight beta via automation link + requireWallet', () => {
     const d = deployment();
     const person = await account();
     const gate = await grantFlight(person.accountId);
-    const { code } = await createLinkCode(t.db, 'default', automationKeys(SECRET), OWNER, new Date(OPEN));
+    const { code } = await createLinkCode(t.db, 'default', automationKeys(AUTOMATION_FIXTURE), OWNER, new Date(OPEN));
     await d.say(`automations ${code}`);
 
     // Advance past the link TTL instead of writing an illegal expires_at < linked_at row.
@@ -170,7 +170,7 @@ describe('Telegram Flight beta via automation link + requireWallet', () => {
 
     await t.db.query('TRUNCATE automation_notification_targets, automation_link_codes CASCADE');
     await account(OTHER.address);
-    const fresh = await createLinkCode(t.db, 'default', automationKeys(SECRET), OTHER, new Date(OPEN));
+    const fresh = await createLinkCode(t.db, 'default', automationKeys(AUTOMATION_FIXTURE), OTHER, new Date(OPEN));
     await d.say(`automations ${fresh.code}`);
     await d.say(STRATEGY);
     expect(d.api.texts().at(-1)).toMatch(/Flight access .* not active/i);
@@ -181,7 +181,7 @@ describe('Telegram Flight beta via automation link + requireWallet', () => {
     d.set(OPEN);
     const ownerAgain = await account();
     await grantFlight(ownerAgain.accountId);
-    const ownerCode = await createLinkCode(t.db, 'default', automationKeys(SECRET), OWNER, new Date(OPEN));
+    const ownerCode = await createLinkCode(t.db, 'default', automationKeys(AUTOMATION_FIXTURE), OWNER, new Date(OPEN));
     await d.say(`automations ${ownerCode.code}`, TELEGRAM_USER);
     await d.say(STRATEGY, TELEGRAM_OTHER_USER);
     expect(d.api.texts().at(-1)).toMatch(/not linked/i);
@@ -192,7 +192,7 @@ describe('Telegram Flight beta via automation link + requireWallet', () => {
     const d = deployment({ FLOFI_BETA_ACCESS: 'open' });
     const person = await account();
     const gate = await grantFlight(person.accountId);
-    const { code } = await createLinkCode(t.db, 'default', automationKeys(SECRET), OWNER, new Date(OPEN));
+    const { code } = await createLinkCode(t.db, 'default', automationKeys(AUTOMATION_FIXTURE), OWNER, new Date(OPEN));
     await d.say('/start');
     await d.say(`automations ${code}`);
     expect((await d.enqueue(STRATEGY)).status).toBe(200);
@@ -213,7 +213,7 @@ describe('Telegram Flight beta via automation link + requireWallet', () => {
     const d = deployment();
     const person = await account();
     await grantFlight(person.accountId);
-    const { code } = await createLinkCode(t.db, 'default', automationKeys(SECRET), OWNER, new Date(OPEN));
+    const { code } = await createLinkCode(t.db, 'default', automationKeys(AUTOMATION_FIXTURE), OWNER, new Date(OPEN));
     await d.say(`automations ${code}`);
     await d.say(STRATEGY);
     const handoffs = (await t.db.query('SELECT 1 FROM mcp_handoffs')).rowCount;
@@ -228,7 +228,7 @@ describe('Telegram Flight beta via automation link + requireWallet', () => {
     const d = deployment();
     const person = await account();
     const gate = await grantFlight(person.accountId);
-    const { code } = await createLinkCode(t.db, 'default', automationKeys(SECRET), OWNER, new Date(OPEN));
+    const { code } = await createLinkCode(t.db, 'default', automationKeys(AUTOMATION_FIXTURE), OWNER, new Date(OPEN));
     await d.say(`automations ${code}`);
     await d.say(STRATEGY);
     expect((await t.db.query('SELECT 1 FROM mcp_handoffs')).rowCount).toBe(1);
