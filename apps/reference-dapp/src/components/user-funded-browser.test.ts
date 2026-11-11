@@ -17,7 +17,7 @@ vi.mock('../wallet/evm-discovery', () => {
   } };
   return { chosenEvmProvider: () => provider, injected: () => provider, evmWalletIdentity: () => null, isFloFiWalletKey: () => false };
 });
-const { batchOutcome, sendWalletBatch } = await import('./user-funded-browser');
+const { batchOutcome, revokeUserOperation, sendWalletBatch } = await import('./user-funded-browser');
 
 const HASH = '0x' + 'ab'.repeat(32);
 const status = (code: number, receipts: unknown[] = []) => eip5792.callsStatus({ version: '2.0.0', id: '0x01', chainId: '0xa4b1', status: code, atomic: true, receipts });
@@ -121,5 +121,54 @@ describe('sendWalletBatch', () => {
     const raw = await sendWalletBatch(request, onSending).catch((cause: unknown) => cause);
     expect(raw).toMatchObject({ code: -32603 });
     expect(onSending).toHaveBeenCalledTimes(2);
+  });
+});
+
+/**
+ * Review fix U5: revoking a signed user operation sends a real transaction from the owner's wallet (`EntryPoint.incrementNonce`), so the network
+ * is checked exactly as for a batch: read, switched if needed, and read AGAIN. A wallet whose switch "succeeds" without moving never sends it on
+ * the network it is on (the nonce key would be spent on the wrong chain and the signed operation would stay valid).
+ */
+describe('revokeUserOperation', () => {
+  const OWNER = '0x' + 'aB'.repeat(20), RUN = 'wfr_' + 'a'.repeat(26), TX = '0x' + 'cd'.repeat(32);
+  const rpcError = (code: number) => () => { throw Object.assign(new Error(`wallet error ${code}`), { code }); };
+  beforeEach(() => {
+    wallet.log.length = 0;
+    wallet.answers = { eth_chainId: () => '0xa4b1', eth_sendTransaction: () => TX };
+  });
+  const sent = () => wallet.log.filter(m => m === 'eth_sendTransaction').length;
+
+  it('on the run\'s network: one transaction to the EntryPoint, no switch', async () => {
+    await expect(revokeUserOperation(OWNER, 42161, RUN, 1)).resolves.toBe(TX);
+    expect(wallet.log).toEqual(['eth_chainId', 'eth_sendTransaction']);
+  });
+  it('switches first when needed, reads the network again, then sends', async () => {
+    let chain = '0x2105';
+    wallet.answers.eth_chainId = () => chain;
+    wallet.answers.wallet_switchEthereumChain = () => { chain = '0xa4b1'; return null; };
+    await expect(revokeUserOperation(OWNER, 42161, RUN, 1)).resolves.toBe(TX);
+    expect(wallet.log).toEqual(['eth_chainId', 'wallet_switchEthereumChain', 'eth_chainId', 'eth_sendTransaction']);
+  });
+  it('still on another network after the switch "succeeded": WALLET_WRONG_NETWORK, nothing is sent', async () => {
+    wallet.answers.eth_chainId = () => '0x2105';
+    wallet.answers.wallet_switchEthereumChain = () => null;
+    await expect(revokeUserOperation(OWNER, 42161, RUN, 1)).rejects.toThrow('WALLET_WRONG_NETWORK');
+    expect(wallet.log).toEqual(['eth_chainId', 'wallet_switchEthereumChain', 'eth_chainId']);
+    expect(sent()).toBe(0);
+  });
+  it('a failed or rejected switch, or an unreadable network, is "nothing was sent" with a closed code', async () => {
+    wallet.answers.eth_chainId = () => '0x2105';
+    for (const code of [-32002, -32603, 4902]) {
+      wallet.answers.wallet_switchEthereumChain = rpcError(code);
+      await expect(revokeUserOperation(OWNER, 42161, RUN, 1)).rejects.toThrow('WALLET_WRONG_NETWORK');
+    }
+    wallet.answers.wallet_switchEthereumChain = rpcError(4001);
+    await expect(revokeUserOperation(OWNER, 42161, RUN, 1)).rejects.toThrow('WALLET_REQUEST_REJECTED');
+    wallet.answers.wallet_switchEthereumChain = () => null;
+    wallet.answers.eth_chainId = () => 'not-a-chain';
+    await expect(revokeUserOperation(OWNER, 42161, RUN, 1)).rejects.toThrow('WALLET_WRONG_NETWORK');
+    wallet.answers.eth_chainId = rpcError(-32603);
+    await expect(revokeUserOperation(OWNER, 42161, RUN, 1)).rejects.toThrow('WALLET_WRONG_NETWORK');
+    expect(sent()).toBe(0);
   });
 });

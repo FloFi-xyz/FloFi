@@ -22,7 +22,8 @@ function claim(patch: Partial<WorkflowRunClaim['run']>, delegated: { available: 
   return { step: null, stepWallet: null,
     run: { workflowRunId: 'wfr_' + 'a'.repeat(26), approvalId: 'apr_' + 'a'.repeat(26), state: 'PENDING', mode: null, stepCount: 2, currentStep: 0, code: null,
       workflowHash: '0x' + '1'.repeat(64), expiresAt: '2026-10-29T00:00:00.000Z', completedAt: null, createdAt: '2026-10-22T00:00:00.000Z', updatedAt: '2026-10-22T00:00:00.000Z',
-      stepsVisible: true, steps: [step(0, 'PENDING'), step(1, 'PENDING')], nextAction: 'OWNER_CHOOSES_MODE', groups: [], halted: null, authority: 'NONE', note: null, ...patch },
+      stepsVisible: true, steps: [step(0, 'PENDING'), step(1, 'PENDING')], nextAction: 'OWNER_CHOOSES_MODE', groups: [], halted: null, resumable: false, authority: 'NONE',
+      note: null, ...patch },
     plan: { stepCount: 2, confirmEachStep: { available: true, reason: null, walletConfirmationsAtLeast: 2, walletNamespaces: ['eip155'] },
       delegatedSingleAuthorization: { ...delegated, walletSignatures: 1, passkeyAssertions: 0, enrollments: [], ownerKnown: true },
       userFunded: { available: false, reason: 'USER_FUNDED_NOT_ENABLED', groups: [], interactions: null, feePayer: 'OWNER_WALLET', wallets: 'ASSUMED' },
@@ -89,7 +90,9 @@ describe('BUILD-CHAT-E2E-001 workflow run panel', () => {
     const group = (patch: Partial<Group>): Group => ({ index: 0, chain: 'eip155:8453', strategy: 'EVM_WALLET_BATCH', signing: 'UPFRONT', steps: [0, 1], state: 'BLOCKED',
       awaitsDelivery: null, code: 'USER_FUNDED_SIMULATION_UNAVAILABLE', validUntil: null, feePayer: '0x' + 'ab'.repeat(20), maxFee: null, gasPaid: null, submissions: [],
       batchId: null, signed: false, planned: null, ...patch });
-    const stopped = { state: 'HALTED', mode: 'USER_FUNDED', nextAction: 'OWNER_DECIDES' as const, steps: [step(0, 'BLOCKED'), step(1, 'BLOCKED')], groups: [group({})] };
+    // The server would resume it (`resumable`: HALTED inside its window, the stopped group BLOCKED and unsigned).
+    const stopped = { state: 'HALTED', mode: 'USER_FUNDED', nextAction: 'OWNER_DECIDES' as const, steps: [step(0, 'BLOCKED'), step(1, 'BLOCKED')], groups: [group({})],
+      resumable: true };
     const html = render(claim(stopped));
     expect(html).toContain('<span class="status-badge info">Stopped: nothing sent</span>');
     expect(html).toContain('Stopped before anything was sent: your funds stay in your wallet. You can run each step through its own flow from here, or end the workflow.');
@@ -107,5 +110,62 @@ describe('BUILD-CHAT-E2E-001 workflow run panel', () => {
       expect(html, JSON.stringify(patch)).not.toContain('nothing sent');
     }
     expect(render(claim({ ...stopped, steps: [step(0, 'RECONCILED'), step(1, 'BLOCKED')] }))).toContain('<span class="status-badge info">Partially completed</span>');
+  });
+});
+
+type Group = WorkflowRunClaim['run']['groups'][number];
+const group = (patch: Partial<Group>): Group => ({ index: 0, chain: 'eip155:8453', strategy: 'EVM_WALLET_BATCH', signing: 'UPFRONT', steps: [0, 1], state: 'BLOCKED',
+  awaitsDelivery: null, code: null, validUntil: null, feePayer: '0x' + 'ab'.repeat(20), maxFee: null, gasPaid: null, submissions: [], batchId: null, signed: false,
+  planned: null, ...patch });
+const TRY = 'Try this step again';
+
+describe('review fix U6: "Try this step again" is offered exactly when the server would accept it (run.resumable)', () => {
+  const blocked = { state: 'HALTED', mode: 'USER_FUNDED', nextAction: 'OWNER_DECIDES' as const, steps: [step(0, 'BLOCKED'), step(1, 'BLOCKED')], groups: [group({})] };
+  it('the server refuses it (e.g. the run\'s window passed) for a BLOCKED unsigned group: not offered; the run can be ended', () => {
+    const html = render(claim({ ...blocked, resumable: false }));
+    expect(html).not.toContain(TRY);
+    expect(html).not.toContain('You can run each step through its own flow');
+    expect(html).toContain('This step cannot be tried again in this workflow: end it, and start a new workflow for anything left to do.');
+    expect(html).not.toContain('Something you already signed');
+    expect(render(claim({ ...blocked, resumable: false }), 'PT')).toContain('Esta etapa não pode ser tentada de novo neste fluxo: encerre-o');
+  });
+  it('a confirm-mode step that is not BLOCKED (it may have reached the chain) is never offered again', () => {
+    const failed = claim({ state: 'HALTED', mode: 'CONFIRM_EACH_STEP', currentStep: 1, nextAction: 'OWNER_DECIDES', steps: [step(0, 'RECONCILED'), step(1, 'FAILED')] });
+    expect(render(failed)).not.toContain(TRY);
+    expect(render(claim({ ...failed.run, resumable: true }))).toContain(TRY);
+  });
+  it('a signed group keeps its own words', () => {
+    expect(render(claim({ ...blocked, groups: [group({ signed: true })] }))).toContain('Something you already signed for this step is never replaced');
+  });
+  it('a view without the field falls back to this page\'s own reading', () => {
+    const older = claim(blocked);
+    delete (older.run as { resumable?: boolean }).resumable;
+    expect(render(older)).toContain(TRY);
+  });
+});
+
+describe('review fix U7: a partial completion and an ended run claim nothing they cannot prove', () => {
+  const OUTCOME_UNKNOWN = 'WALLET_BATCH_OUTCOME_UNKNOWN';
+  it('a partial completion points to the step that stopped, never "nothing later was submitted"', () => {
+    const partial = claim({ state: 'HALTED', mode: 'USER_FUNDED', currentStep: 1, nextAction: 'OWNER_DECIDES', steps: [step(0, 'RECONCILED'), step(1, 'FAILED')],
+      groups: [group({ steps: [0, 0], state: 'RECONCILED', signed: true }), group({ index: 1, steps: [1, 1], state: 'FAILED', signed: true })] });
+    const html = render(partial);
+    expect(html).toContain('Partially completed: the reconciled steps stay done and their funds rest in your wallet. The step that stopped shows what happened to it.');
+    expect(html).not.toMatch(/nothing later/i);
+    expect(render(partial, 'PT')).toContain('A etapa que parou mostra o que aconteceu com ela.');
+  });
+  it('ended while a batch handed to the wallet was never answered: it may have executed; its steps and group are never "Not run"', () => {
+    const ended = claim({ state: 'CANCELLED', mode: 'USER_FUNDED', code: 'OWNER_CANCELLED', nextAction: 'NONE',
+      steps: [{ ...step(0, 'SKIPPED'), code: OUTCOME_UNKNOWN }, { ...step(1, 'SKIPPED'), code: OUTCOME_UNKNOWN }], groups: [group({ state: 'SKIPPED', code: OUTCOME_UNKNOWN })] });
+    const html = render(ended);
+    expect(html).toContain('A batch was handed to your wallet and its answer never reached FloFi: it may have executed before it expired. Check your wallet&#x27;s activity.');
+    expect(html).toContain('Outcome unknown: check your wallet');
+    expect(html).not.toContain('Not run');
+    const pt = render(ended, 'PT');
+    expect(pt).toContain('ele pode ter sido executado antes de expirar');
+    expect(pt).not.toContain('Não executada');
+    const plain = claim({ ...ended.run, steps: [step(0, 'SKIPPED'), step(1, 'SKIPPED')], groups: [group({ state: 'SKIPPED', code: 'OWNER_CANCELLED' })] });
+    expect(render(plain)).toContain('Not run');
+    expect(render(plain)).not.toContain('A batch was handed to your wallet');
   });
 });

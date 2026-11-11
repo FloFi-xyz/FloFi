@@ -208,4 +208,22 @@ export const portugueseWorkflowExecution: Readonly<Record<string, string>> = {
     'Um swap deste lote entregaria menos que o mínimo assinado agora, então nada foi pedido à sua carteira. Tente de novo para obter uma cotação nova.',
   'its quote expired at {0}: FloFi does not ask your wallet for it again; check your wallet\'s activity, then you can end the workflow':
     'a cotação expirou às {0}: a FloFi não pede esse lote de novo à sua carteira; verifique a atividade da sua carteira e depois você pode encerrar o fluxo',
+  // Review fixes (Editor and /approve): every wallet batch expires on chain (a transfer-only batch too); a batch already handed out is never prepared
+  // a second time while it can still execute; a second, different answer for one group; a browser that cannot keep its "handed to the wallet"
+  // record; a run ended while a batch it handed out was never answered; a transfer of a token a batch cannot carry.
+  'Confirm the wallet request promptly: about 10 minutes after FloFi prepares it, an on-chain deadline refuses the whole batch (your wallet would still pay the network fee).':
+    'Confirme a solicitação na carteira logo: cerca de 10 minutos depois de a FloFi prepará-la, um prazo on-chain recusa o lote inteiro (sua carteira ainda pagaria a taxa de rede).',
+  'FloFi did not ask your wallet this time: the request it already prepared stays valid on chain for a few more minutes at most, and your wallet may hold it. If your wallet shows it, confirm it there; otherwise wait until it expires, then try again. FloFi never prepares a second request that could run alongside it.':
+    'A FloFi não pediu nada à sua carteira desta vez: o pedido que ela já preparou continua válido on-chain por no máximo mais alguns minutos, e sua carteira pode tê-lo. Se sua carteira mostrar o pedido, confirme-o lá; caso contrário, aguarde até ele expirar e tente de novo. A FloFi nunca prepara um segundo pedido que possa ser executado junto com ele.',
+  'FloFi did not ask your wallet this time: the request it already prepared stays valid on chain until {0}, and your wallet may hold it. If your wallet shows it, confirm it there; otherwise wait until {0}, then try again. FloFi never prepares a second request that could run alongside it.':
+    'A FloFi não pediu nada à sua carteira desta vez: o pedido que ela já preparou continua válido on-chain até {0}, e sua carteira pode tê-lo. Se sua carteira mostrar o pedido, confirme-o lá; caso contrário, aguarde até {0} e tente de novo. A FloFi nunca prepara um segundo pedido que possa ser executado junto com ele.',
+  'Your wallet reported a different batch for this step than the one FloFi recorded: it may have run twice. Check your wallet\'s activity; FloFi recorded only the first.':
+    'Sua carteira informou um lote diferente para esta etapa do que o que a FloFi registrou: ele pode ter sido executado duas vezes. Verifique a atividade da sua carteira; a FloFi registrou apenas o primeiro.',
+  'This browser could not keep a record of the request, so FloFi did not ask your wallet (that record is what stops a request from ever being sent twice). Allow site storage or use another browser, then try again.':
+    'Este navegador não conseguiu guardar um registro do pedido, então a FloFi não pediu nada à sua carteira (é esse registro que impede que um pedido seja enviado duas vezes). Permita o armazenamento do site ou use outro navegador e tente de novo.',
+  'A batch was handed to your wallet and its answer never reached FloFi: it may have executed before it expired. Check your wallet\'s activity.':
+    'Um lote foi entregue à sua carteira e a resposta dela nunca chegou à FloFi: ele pode ter sido executado antes de expirar. Verifique a atividade da sua carteira.',
+  'Outcome unknown: check your wallet': 'Resultado desconhecido: verifique sua carteira',
+  'A transfer of this token (for example a Stock Token, or a token outside FloFi\'s catalog) runs through its own review and wallet confirmation.':
+    'Uma transferência deste token (por exemplo, um Stock Token ou um token fora do catálogo da FloFi) passa pela própria revisão e confirmação na carteira.',
 };

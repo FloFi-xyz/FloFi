@@ -166,6 +166,76 @@ describe('Editor batch send: another tab of this browser handing the same group 
   });
 });
 
+describe('review fix U4: the "handed to the wallet" marker is written and read back before the wallet is asked (fail closed)', () => {
+  /** A browser whose storage refuses writes (blocked, full or failing): reads still answer. */
+  const refusingWrites = (how: 'throw' | 'drop') => vi.stubGlobal('localStorage', { getItem: (k: string) => storage.get(k) ?? null,
+    setItem: () => { if (how === 'throw') throw new DOMException('QuotaExceededError'); } });
+  it('storage that cannot keep the marker: WALLET_ATTEMPT_UNRECORDABLE, the wallet is never asked, and nothing blocks a later try', async () => {
+    for (const how of ['throw', 'drop'] as const) {
+      hooks.slots = []; storage.clear(); walletSent = 0; browser.send.mockClear(); server.authorizeGroup.mockClear();
+      refusingWrites(how);
+      const refused = await authorizeOnce();
+      expect(refused.error, how).toBe('WALLET_ATTEMPT_UNRECORDABLE');
+      expect(walletSent, how).toBe(0);
+      expect(browser.send, how).toHaveBeenCalledTimes(1);
+      expect(server.authorizeGroup, how).not.toHaveBeenCalled();
+      // Nothing was sent: the group is not shown as handed over (it may be offered again).
+      expect(refused.unrecorded, how).toBe(false);
+      // Storage allowed again: the same group is sent once, with its marker (the run's record is rebuilt from this tab's copy).
+      vi.stubGlobal('localStorage', { getItem: (k: string) => storage.get(k) ?? null, setItem: (k: string, v: string) => void storage.set(k, v) });
+      await refused.authorizeDue();
+      expect(render().error, how).toBeNull();
+      expect(walletSent, how).toBe(1);
+      expect(server.authorizeGroup, how).toHaveBeenLastCalledWith(APPROVAL, 0, { kind: 'EVM_WALLET_BATCH', batchId: ANSWERED });
+      expect(stored(), how).toMatchObject({ workflowId: 'wf-1', owner: OWNER, sent: { group: 0, batchId: ANSWERED, nonce: expect.any(String) } });
+    }
+  });
+  it('a run whose stored record is gone (e.g. evicted by newer runs) gets it back with the marker before the wallet is asked', async () => {
+    let atSend: unknown = 'not asked';
+    browser.send.mockImplementationOnce(sendThen(async onSending => {
+      storage.set(STORAGE_KEY, '[]');
+      onSending?.(); atSend = stored(); walletSent++;
+      return ANSWERED;
+    }));
+    const sent = await authorizeOnce();
+    expect(sent.error).toBeNull();
+    expect(walletSent).toBe(1);
+    expect(atSend).toMatchObject({ workflowId: 'wf-1', approvalId: APPROVAL, owner: OWNER, sent: { group: 0, batchId: GROUP_ID, attempt: true, nonce: expect.any(String) } });
+  });
+});
+
+describe('review fix U3: a different batch than the one the run recorded is shown as such, never as "not recorded yet"', () => {
+  it('the run refuses the batch id (WALLET_BATCH_ANSWER_MISMATCH): that code, never WALLET_BATCH_SENT_UNRECORDED', async () => {
+    server.authorizeGroup.mockResolvedValue({ ok: false, code: 'WALLET_BATCH_ANSWER_MISMATCH' });
+    expect((await authorizeOnce()).error).toBe('WALLET_BATCH_ANSWER_MISMATCH');
+    expect(walletSent).toBe(1);
+    // Any other refusal to record it still says the wallet holds a batch the run has not recorded yet.
+    hooks.slots = []; storage.clear();
+    server.authorizeGroup.mockResolvedValue({ ok: false, code: 'WORKFLOW_RUN_CHANGED' });
+    expect((await authorizeOnce()).error).toBe('WALLET_BATCH_SENT_UNRECORDED');
+  });
+  it('the run refuses the reported transactions as another batch\'s: shown, never dropped silently', async () => {
+    server.report.mockResolvedValue({ ok: false, code: 'WALLET_BATCH_ANSWER_MISMATCH' });
+    expect((await authorizeOnce()).error).toBe('WALLET_BATCH_ANSWER_MISMATCH');
+    expect(server.report).toHaveBeenCalledWith(APPROVAL, 0, [HASH], false);
+  });
+});
+
+describe('review fix U2: a batch already prepared and still executable is never prepared again (refused before the wallet is asked)', () => {
+  it('USER_FUNDED_PREPARED_STILL_VALID: shown as is; the wallet is not asked and no marker is kept', async () => {
+    browser.send.mockImplementationOnce(sendThen(async () => { throw new Error('WALLET_WRONG_NETWORK'); }));
+    const failed = await authorizeOnce();
+    server.prepare.mockResolvedValue({ ok: false, code: 'USER_FUNDED_PREPARED_STILL_VALID' });
+    await failed.authorizeDue();
+    const refused = render();
+    expect(refused.error).toBe('USER_FUNDED_PREPARED_STILL_VALID');
+    expect(refused.unrecorded).toBe(false);
+    expect(browser.send).toHaveBeenCalledTimes(1);
+    expect(walletSent).toBe(0);
+    expect(stored()?.sent).toBeUndefined();
+  });
+});
+
 describe('Editor batch send: /approve handing the same run\'s group to the wallet (its own record, same origin)', () => {
   const APPROVE_ATTEMPTS = 'flofi.approve-batch-attempts.v1', KEY = `${APPROVAL}:0`;
   const fromApprove = (attempts: Record<string, unknown>) => storage.set(APPROVE_ATTEMPTS, JSON.stringify(attempts));
@@ -231,6 +301,15 @@ describe('Editor batch send: refusals in plain words', () => {
     }
     expect(EXECUTION_REFUSAL.WALLET_ACCOUNT_MISMATCH).toMatch(/locked or another account is selected.*select the account this run belongs to.*nothing was sent/);
   });
+  /** Review fixes U2-U4: a batch still valid is never prepared again, a second different answer, a browser that cannot keep its marker. */
+  const REVIEW_FIXES = ['USER_FUNDED_PREPARED_STILL_VALID', 'WALLET_BATCH_ANSWER_MISMATCH', 'WALLET_ATTEMPT_UNRECORDABLE'];
+  it('says what each review-fix code means: nothing was asked of the wallet, or it may have run twice (never "nothing was sent")', () => {
+    for (const code of REVIEW_FIXES) expect(EXECUTION_REFUSAL[code], code).not.toMatch(/\{\d+\}/);
+    expect(EXECUTION_REFUSAL.USER_FUNDED_PREPARED_STILL_VALID).toMatch(/^FloFi did not ask your wallet this time.*never prepares a second request/);
+    expect(EXECUTION_REFUSAL.WALLET_ATTEMPT_UNRECORDABLE).toMatch(/did not ask your wallet/);
+    expect(EXECUTION_REFUSAL.WALLET_BATCH_ANSWER_MISMATCH).toMatch(/may have run twice/);
+    expect(EXECUTION_REFUSAL.WALLET_BATCH_ANSWER_MISMATCH).not.toMatch(/nothing was sent|not asked/i);
+  });
   /** A group preparation's refusals (simulation, Aave risk, fee reading) that both pages show. */
   const PREPARATION = ['BORROW_UNSAFE_HEALTH_FACTOR', 'WITHDRAW_UNSAFE_HEALTH_FACTOR', 'REPAY_PARTIAL_DEBT_REQUIRED', 'SIMULATION_REVERTED', 'SWAP_MINIMUM_NOT_MET',
     'USER_FUNDED_SIMULATION_UNAVAILABLE', 'USER_FUNDED_L1_FEE_UNAVAILABLE'];
@@ -239,7 +318,7 @@ describe('Editor batch send: refusals in plain words', () => {
     // /approve cannot change the workflow's amounts (the run is bound to its hash): where the Editor says "lower the amount", /approve says what
     // the owner can do there (their position, Try this step again, End). Those codes have their own words, still translated.
     const approveOwn = new Set(['BORROW_UNSAFE_HEALTH_FACTOR', 'WITHDRAW_UNSAFE_HEALTH_FACTOR', 'REPAY_PARTIAL_DEBT_REQUIRED', 'USER_FUNDED_SIMULATION_UNAVAILABLE']);
-    for (const code of [...CODES, ...PREPARATION, 'WALLET_BATCH_SEND_UNCONFIRMED', 'WALLET_BATCH_NOT_SENT', ...approveOwn]) {
+    for (const code of [...CODES, ...PREPARATION, 'WALLET_BATCH_SEND_UNCONFIRMED', 'WALLET_BATCH_NOT_SENT', ...approveOwn, ...REVIEW_FIXES]) {
       const text = new RegExp(`\\n  ${code}: '((?:[^'\\\\]|\\\\.)*)',`).exec(source)?.[1]?.replace(/\\(.)/g, '$1');
       if (approveOwn.has(code)) {
         expect(text, code).toEqual(expect.stringContaining('nothing was sent'));
@@ -276,6 +355,10 @@ describe('P0 review fixes: every reason the group planner gives the Editor has w
     for (const code of ['USER_FUNDED_CHAIN_DISABLED', 'USER_OPERATION_AAVE_SIGNED_WHEN_DUE', 'USER_OPERATION_SWAP_OUTPUT_SIGNED_WHEN_DUE', 'USER_OPERATION_BUNDLER_UNAVAILABLE',
       'WALLET_TYPED_DATA_USER_OPERATION_UNSUPPORTED', 'EVM_SMART_ACCOUNT_REQUIRED', 'WALLET_ATOMIC_BATCH_UNSUPPORTED', 'WALLET_ATOMIC_BATCH_UNKNOWN',
       'SOLANA_DURABLE_NONCE_NOT_OFFERED', 'SOLANA_MULTI_SIGN_UNSUPPORTED', 'WORKFLOW_BINDING_RESOLVED_WHEN_DUE']) expect(EXECUTION_REASON[code], code).toEqual(expect.any(String));
+    // A transfer of a token a batch cannot carry (a Stock Token, a token outside the catalog) runs through its own flow (user-funded/evm-calls.ts).
+    expect(EXECUTION_REASON.USER_FUNDED_TRANSFER_ASSET_UNSUPPORTED).toMatch(/transfer of this token.*own review and wallet confirmation/);
+    expect(translate('PT', EXECUTION_REASON.USER_FUNDED_TRANSFER_ASSET_UNSUPPORTED!)).not.toBe(EXECUTION_REASON.USER_FUNDED_TRANSFER_ASSET_UNSUPPORTED);
+    expect(readFileSync(new URL('../user-funded/evm-calls.ts', import.meta.url), 'utf8')).toContain("'USER_FUNDED_TRANSFER_ASSET_UNSUPPORTED'");
     const planner = readFileSync(new URL('../workflow-runs/execution-groups.ts', import.meta.url), 'utf8');
     for (const code of ['USER_OPERATION_SWAP_OUTPUT_SIGNED_WHEN_DUE', 'WALLET_TYPED_DATA_USER_OPERATION_UNSUPPORTED']) expect(planner).toContain(`'${code}'`);
   });

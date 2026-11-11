@@ -85,6 +85,12 @@ const CLAIM_TEXT: Record<string, string> = {
   SWAP_MINIMUM_NOT_MET: 'A swap in this batch would deliver less than its signed minimum now, so your wallet was not asked. Try again for a fresh quote.',
   USER_FUNDED_SIMULATION_UNAVAILABLE: 'This network’s RPC cannot simulate the whole batch, so it is not offered in one confirmation and nothing was sent. Once the workflow shows it stopped, Try this step again confirms each step through its own flow, or end the workflow.',
   USER_FUNDED_L1_FEE_UNAVAILABLE: 'FloFi could not read this network\'s data fee, so the batch was not offered. Nothing was sent; try again.',
+  // Review fixes, the Editor's words: a batch already handed out is never prepared a second time while it can still execute (refused before the
+  // wallet is asked; this page shows no group validity, so no time); a second, different answer for one group (it may have run twice, never
+  // "nothing sent"); and a browser that cannot keep the record that stops a request from being sent twice (the wallet was not asked).
+  USER_FUNDED_PREPARED_STILL_VALID: 'FloFi did not ask your wallet this time: the request it already prepared stays valid on chain for a few more minutes at most, and your wallet may hold it. If your wallet shows it, confirm it there; otherwise wait until it expires, then try again. FloFi never prepares a second request that could run alongside it.',
+  WALLET_BATCH_ANSWER_MISMATCH: 'Your wallet reported a different batch for this step than the one FloFi recorded: it may have run twice. Check your wallet\'s activity; FloFi recorded only the first.',
+  WALLET_ATTEMPT_UNRECORDABLE: 'This browser could not keep a record of the request, so FloFi did not ask your wallet (that record is what stops a request from ever being sent twice). Allow site storage or use another browser, then try again.',
 };
 function unwrap<T>(result: { ok: true; value: T } | { ok: false; code: string }): T { if (!result.ok) throw new Error(result.code); return result.value; }
 /**

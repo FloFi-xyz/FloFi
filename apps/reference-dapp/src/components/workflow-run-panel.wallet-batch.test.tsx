@@ -209,6 +209,32 @@ describe('B1: the attempt marker is written only when the wallet is asked to sen
   });
 });
 
+describe('review fix U4: the attempt marker is written and read back before the wallet is asked (fail closed)', () => {
+  /** A browser whose storage refuses writes (blocked, full or failing): reads still answer. */
+  const refusingWrites = (how: 'throw' | 'drop') => vi.stubGlobal('localStorage', { getItem: (k: string) => storage.get(k) ?? null,
+    setItem: () => { if (how === 'throw') throw new DOMException('QuotaExceededError'); } });
+  it('storage that cannot keep the marker: WALLET_ATTEMPT_UNRECORDABLE, the wallet is never asked; once it can, the group is sent once', async () => {
+    for (const how of ['throw', 'drop'] as const) {
+      refusingWrites(how);
+      expect(await click(claim({}), AUTHORIZE), how).toEqual({ proposal: null, error: 'WALLET_ATTEMPT_UNRECORDABLE' });
+      expect(server.authorize, how).not.toHaveBeenCalled();
+      expect(attempts(), how).toEqual({});
+    }
+    expect(browser.send).toHaveBeenCalledTimes(2);
+    expect(walletSent).toBe(0);
+    vi.stubGlobal('localStorage', { getItem: (k: string) => storage.get(k) ?? null, setItem: (k: string, v: string) => void storage.set(k, v) });
+    expect(await click(claim({}), AUTHORIZE)).toEqual({ proposal: PROPOSAL, error: null });
+    expect(walletSent).toBe(1);
+    expect(server.authorize).toHaveBeenCalledWith(APPROVAL, 0, { kind: 'EVM_WALLET_BATCH', batchId: ANSWERED });
+  });
+  it('the marker kept at the moment the wallet is asked is this call\'s own (its nonce), read back from storage', async () => {
+    let atSend: unknown = null;
+    browser.send.mockImplementationOnce(sendThen(async onSending => { onSending?.(); atSend = attempts()[KEY]; walletSent++; return ANSWERED; }));
+    expect(await click(claim({}), AUTHORIZE)).toEqual({ proposal: PROPOSAL, error: null });
+    expect(atSend).toEqual({ at: expect.any(String), nonce: expect.any(String) });
+  });
+});
+
 describe('B4: another tab of this browser handing the same group to the wallet', () => {
   it('its attempt, found the moment the wallet would be asked, stops this request: the wallet is never asked', async () => {
     browser.send.mockImplementationOnce(sendThen(async onSending => { fromOtherTab(); asked(onSending); return ANSWERED; }));

@@ -65,6 +65,21 @@ export async function walletProfile(evmAddress: string | null, chains: readonly 
 }
 
 /**
+ * Puts the wallet on `chainId` before anything is asked of it: the network is read, switched if needed, and READ AGAIN — a wallet whose switch
+ * "succeeds" without moving would otherwise sign or send on the network it is on. Every failure is a closed "nothing was sent" code: the
+ * network could not be read or switched, or is still another one (WALLET_WRONG_NETWORK; the owner's own rejection stays WALLET_REQUEST_REJECTED).
+ */
+async function onChainOrFail(provider: EvmProvider, chainId: bigint, hex: string): Promise<void> {
+  const onChain = async () => {
+    const c = await provider.request({ method: 'eth_chainId', params: [] }).catch(notSent('WALLET_WRONG_NETWORK'));
+    try { return typeof c === 'string' && BigInt(c) === chainId; } catch { return false; }
+  };
+  if (await onChain()) return;
+  // A pending request (-32002), an unknown chain (4902) or any other failure of the switch: nothing was asked to send.
+  await provider.request({ method: 'wallet_switchEthereumChain', params: [{ chainId: hex }] }).catch(notSent('WALLET_WRONG_NETWORK'));
+  if (!await onChain()) fail('WALLET_WRONG_NETWORK');
+}
+/**
  * Sends the prepared atomic batch from the owner's own account; returns the wallet's batch id (the wallet signs, sends and pays). The request
  * carries the group's own EIP-5792 id: a wallet that already has that batch refuses it as a duplicate (5720), which means it was SENT before —
  * its id is returned so it is read back, never sent twice.
@@ -78,16 +93,7 @@ export async function walletProfile(evmAddress: string | null, chains: readonly 
  */
 export async function sendWalletBatch(request: eip5792.SendCallsRequest, onSending?: () => void): Promise<string> {
   const provider = evmProvider();
-  const chainId = BigInt(request.chainId);
-  const onChain = async () => {
-    const c = await provider.request({ method: 'eth_chainId', params: [] }).catch(notSent('WALLET_WRONG_NETWORK'));
-    try { return typeof c === 'string' && BigInt(c) === chainId; } catch { return false; }
-  };
-  if (!await onChain()) {
-    // A pending request (-32002), an unknown chain (4902) or any other failure of the switch: nothing was asked to send.
-    await provider.request({ method: 'wallet_switchEthereumChain', params: [{ chainId: request.chainId }] }).catch(notSent('WALLET_WRONG_NETWORK'));
-    if (!await onChain()) fail('WALLET_WRONG_NETWORK');
-  }
+  await onChainOrFail(provider, BigInt(request.chainId), request.chainId);
   // A wallet that ignores `from` sends the batch from its SELECTED account (`eth_accounts[0]`), so that account must be the run's own
   // (compared case-insensitively); being merely connected is not enough. A locked wallet (no account) or an unreadable answer: not asked.
   // Read last, right before sending (after any network switch).
@@ -131,11 +137,12 @@ export function batchOutcome(status: eip5792.CallsStatus): { readonly hashes: re
 /**
  * The owner revokes a user operation they signed that FloFi never relayed: their own wallet sends `EntryPoint.incrementNonce(key)` for that
  * group's nonce key (the owner confirms and pays). Afterwards the signed operation can never execute. Returns the transaction hash.
+ * The network is checked exactly as for a batch (`onChainOrFail`, read again after a switch): on another network the nonce key would be
+ * spent on the wrong chain's EntryPoint and the signed operation would stay valid, so nothing is sent there (WALLET_WRONG_NETWORK).
  */
 export async function revokeUserOperation(owner: string, chainId: number, runId: string, groupIndex: number): Promise<string> {
-  const provider = evmProvider(), chain = '0x' + chainId.toString(16);
-  const current = await provider.request({ method: 'eth_chainId', params: [] });
-  if (typeof current !== 'string' || BigInt(current) !== BigInt(chainId)) await provider.request({ method: 'wallet_switchEthereumChain', params: [{ chainId: chain }] }).catch(rejected);
+  const provider = evmProvider();
+  await onChainOrFail(provider, BigInt(chainId), '0x' + chainId.toString(16));
   const hash = await provider.request({ method: 'eth_sendTransaction', params: [{ from: owner, to: erc4337.ENTRY_POINT_V0_7,
     data: erc4337.incrementNonceCall(erc4337.nonceKeyOf(`${runId}:g${groupIndex}`)) }] }).catch(rejected);
   return typeof hash === 'string' && /^0x[0-9a-fA-F]{64}$/.test(hash) ? hash : fail('WALLET_RESPONSE_INVALID');
