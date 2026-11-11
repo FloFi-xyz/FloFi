@@ -172,8 +172,13 @@ describe('BUILD-FLOFI-UNIVERSAL-WORKFLOW-002 user-funded workflow run (PostgreSQ
       // ... and its late answer is taken (the chain decides at reconciliation), never refused as expired.
       h.d.advance(11 * 60_000);
       await workflowRunUserFundedAuthorize(h.surface, approval.approvalId, [h.evm, h.sol], 0, { kind: 'EVM_WALLET_BATCH', batchId: 'batch-4' });
-      const again = await workflowRunUserFundedAuthorize(h.surface, approval.approvalId, [h.evm, h.sol], 0, { kind: 'EVM_WALLET_BATCH', batchId: 'other' });
+      const again = await workflowRunUserFundedAuthorize(h.surface, approval.approvalId, [h.evm, h.sol], 0, { kind: 'EVM_WALLET_BATCH', batchId: 'batch-4' });
       expect(again.view.workflowRun!.run.groups[0]).toMatchObject({ state: 'AUTHORIZED', batchId: 'batch-4' });
+      // A DIFFERENT batch id for the same group may be a second execution of it (another device or wallet instance): refused, never recorded.
+      await expect(workflowRunUserFundedAuthorize(h.surface, approval.approvalId, [h.evm, h.sol], 0, { kind: 'EVM_WALLET_BATCH', batchId: 'other' }))
+        .rejects.toThrow('WALLET_BATCH_ANSWER_MISMATCH');
+      expect((await h.store.groups((await ownedRun(h.runs, approval.approvalId, [h.evm, h.sol])).runId))[0]).toMatchObject({ state: 'AUTHORIZED',
+        authorization: { batchId: 'batch-4' } });
       // Malformed answers are refused before anything is stored.
       await expect(workflowRunUserFundedAuthorize(h.surface, approval.approvalId, [h.evm, h.sol], 0, { kind: 'SOMETHING' })).rejects.toThrow('USER_FUNDED_AUTHORIZATION_INVALID');
       await expect(workflowRunUserFundedReport(h.surface, approval.approvalId, [h.evm, h.sol], 0, ['0x12'])).rejects.toThrow('EIP5792_RESPONSE_INVALID');
@@ -232,7 +237,8 @@ describe('BUILD-FLOFI-UNIVERSAL-WORKFLOW-002 user-funded workflow run (PostgreSQ
       // Ending the run is allowed (nothing is in flight) and skips the signed group; it is never relayed.
       const ended = await h.store.cancel(run.runId, run.version, 'OWNER_CANCELLED', h.d.now());
       expect(ended.state).toBe('CANCELLED');
-      expect((await h.store.groups(run.runId))[0]).toMatchObject({ state: 'SKIPPED' });
+      // Its answer was recorded (the wallet said nothing was sent): a plain end, never WALLET_BATCH_OUTCOME_UNKNOWN.
+      expect((await h.store.groups(run.runId))[0]).toMatchObject({ state: 'SKIPPED', code: 'OWNER_CANCELLED' });
     } finally { await t2.drop(); }
   });
 

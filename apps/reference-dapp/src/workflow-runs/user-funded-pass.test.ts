@@ -25,12 +25,15 @@ function memoryStore(run: RunRecord, group: GroupRecord, steps: readonly StepSta
   const s: RunStepRecord[] = steps.map((state, stepIndex) => ({ runId: run.runId, stepIndex, state, flow: null, strategy: null, workflowHash: null, bound: null,
     claimedAt: null, outcome: null, code: null, version: 1, updatedAt: NOW }));
   const writes: string[] = [];
+  let concurrent: (() => void) | null = null;
   const store = {
     byId: async () => r,
     groups: async () => [g],
     steps: async () => s.map(x => ({ ...x })),
-    groupTransition: async (_runId: string, index: number, from: readonly GroupState[], to: GroupState, patch: GroupPatch) => {
-      if (index !== g.groupIndex || !from.includes(g.state)) return null;
+    groupTransition: async (_runId: string, index: number, from: readonly GroupState[], to: GroupState, patch: GroupPatch, _kind?: string,
+      expectVersion: number | null = null) => {
+      const write = concurrent; concurrent = null; write?.();
+      if (index !== g.groupIndex || !from.includes(g.state) || (expectVersion !== null && g.version !== expectVersion)) return null;
       g = { ...g, ...patch, state: to, version: g.version + 1 };
       writes.push(`group:${to}`);
       return g;
@@ -51,7 +54,9 @@ function memoryStore(run: RunRecord, group: GroupRecord, steps: readonly StepSta
   };
   return { store: store as unknown as WorkflowRunStore, writes, run: () => r, group: () => g, steps: () => s,
     /** Plays a concurrent pass's write. */
-    setGroup: (next: Partial<GroupRecord>) => { g = { ...g, ...next }; } };
+    setGroup: (next: Partial<GroupRecord>) => { g = { ...g, ...next }; },
+    /** Plays a concurrent write that lands between this pass's read and its next group write (once). */
+    beforeGroupWrite: (next: Partial<GroupRecord>) => { concurrent = () => { g = { ...g, ...next, version: g.version + 1 }; }; } };
 }
 
 /** A loopback Solana RPC: block heights per commitment, signature statuses, and every sendTransaction payload. */
@@ -157,6 +162,65 @@ describe('P0 universal execution: the Solana sign-all pass decides the send budg
     expect(mem.group().state).toBe('SUBMITTED');
     expect(mem.steps().map(s => s.state)).toEqual(['DELEGATED', 'DELEGATED', 'DELEGATED']);
     expect(mem.run()).toMatchObject({ state: 'RUNNING', version: 7 });
+    expect(mem.writes).toEqual([]);
+  });
+});
+
+describe('review fix R1: run expiry never blocks a batch the owner\'s wallet may still confirm, and never a group that moved on', () => {
+  const EVM = 'eip155:42161', EOA = '0x' + '1a'.repeat(20);
+  /** A run past its window at a single group of two grouped steps (an EVM wallet batch unless patched). */
+  function expired(patch: Partial<GroupRecord>) {
+    const run = { runId: 'wfr_' + 'q'.repeat(26), handoffId: 'h', requester: { kind: 'MCP', ref: 'r' }, owner: { namespace: 'eip155', address: EOA }, wallets: { eip155: EOA },
+      strategy: {}, workflowHash: '0x', engineVersion: 'test', stepCount: 2, mode: 'USER_FUNDED', state: 'RUNNING', currentStep: 0, authorizationId: null, code: null,
+      completedAt: null, expiresAt: new Date(NOW.getTime() - 60_000), version: 7, createdAt: NOW, updatedAt: NOW } as unknown as RunRecord;
+    const group = { runId: run.runId, groupIndex: 0, namespace: 'eip155', chain: EVM, feePayer: EOA, stepFrom: 0, stepTo: 1, strategy: 'EVM_WALLET_BATCH', signing: 'WHEN_DUE',
+      awaitsDelivery: null, state: 'PREPARED', prepared: { kind: 'EVM_WALLET_BATCH', group: { calls: [] }, request: { id: '0x' + 'cd'.repeat(32) } }, authorization: null,
+      submission: null, outcome: null, code: null, validUntil: new Date(NOW.getTime() + 120_000), version: 3, updatedAt: NOW, ...patch } as GroupRecord;
+    const mem = memoryStore(run, group, ['DELEGATED', 'DELEGATED']), logs: string[] = [];
+    const deps: UserFundedPassDeps = { store: mem.store, userFunded: null, now: () => NOW, log: event => { logs.push(event); },
+      confirmPass: async () => { throw new Error('UNEXPECTED_CONFIRM_PASS'); } };
+    return { mem, deps, logs };
+  }
+
+  it('a wallet batch still inside its validity at the run\'s expiry stays PREPARED (its answer must still be taken): nothing is written; looked at again at its validUntil', async () => {
+    const { mem, deps } = expired({});
+    expect(await userFundedPass(deps, mem.run())).toEqual({ state: 'RUNNING', code: 'OWNER_SIGNS_GROUP', retryMs: 120_000, progressed: false });
+    expect(mem.writes).toEqual([]);
+    expect(mem.group().state).toBe('PREPARED');
+  });
+
+  it('an AUTHORIZED wallet batch (the wallet already sent it) is never blocked for expiry: FloFi waits for its hashes', async () => {
+    const { mem, deps } = expired({ state: 'AUTHORIZED', authorization: { kind: 'EVM_WALLET_BATCH', batchId: '0x' + 'cd'.repeat(32) } });
+    expect(await userFundedPass(deps, mem.run())).toMatchObject({ state: 'RUNNING', code: 'OWNER_REPORTS_BATCH' });
+    expect(mem.writes).toEqual([]);
+  });
+
+  it('once its validity passed it is blocked, and the run HALTS (the batch may have executed, its answer lost): never FAILED; a group never handed out FAILS', async () => {
+    const handed = expired({ validUntil: new Date(NOW.getTime() - 1_000) });
+    expect(await userFundedPass(handed.deps, handed.mem.run())).toMatchObject({ state: 'HALTED', code: 'WORKFLOW_RUN_EXPIRED' });
+    expect(handed.mem.group()).toMatchObject({ state: 'BLOCKED', code: 'WORKFLOW_RUN_EXPIRED' });
+    expect(handed.mem.writes).toEqual(['group:BLOCKED', 'step0:BLOCKED', 'step1:BLOCKED', 'run:HALTED']);
+    expect(handed.logs).toEqual(['workflow_run.group_blocked']);
+    const never = expired({ state: 'PLANNED', prepared: null, validUntil: null });
+    expect(await userFundedPass(never.deps, never.mem.run())).toMatchObject({ state: 'FAILED', code: 'WORKFLOW_RUN_EXPIRED' });
+  });
+
+  it('an authorization that lands between the pass\'s read and its write is never blocked (only from the state and version the pass read)', async () => {
+    // A user operation the owner signs just as the run expires: the expired pass read it PREPARED; the signature is recorded first.
+    const { mem, deps } = expired({ strategy: 'EVM_USER_OPERATION', prepared: { kind: 'EVM_USER_OPERATION' }, validUntil: new Date(NOW.getTime() + 3_600_000) });
+    mem.beforeGroupWrite({ state: 'AUTHORIZED', authorization: { kind: 'EVM_USER_OPERATION', signature: '0x' } });
+    expect(await userFundedPass(deps, mem.run())).toMatchObject({ state: 'RUNNING', progressed: true });
+    expect(mem.group()).toMatchObject({ state: 'AUTHORIZED', code: null });
+    expect(mem.steps().map(s => s.state)).toEqual(['DELEGATED', 'DELEGATED']);
+    expect(mem.run()).toMatchObject({ state: 'RUNNING', version: 7 });
+    expect(mem.writes).toEqual([]);
+  });
+
+  it('a same-state rewrite that lands between the read and the write (a batch prepared again in place) is never blocked', async () => {
+    const { mem, deps } = expired({ validUntil: new Date(NOW.getTime() - 1_000) });
+    mem.beforeGroupWrite({ validUntil: new Date(NOW.getTime() + 600_000) });
+    expect(await userFundedPass(deps, mem.run())).toMatchObject({ state: 'RUNNING', progressed: true });
+    expect(mem.group()).toMatchObject({ state: 'PREPARED', version: 4 });
     expect(mem.writes).toEqual([]);
   });
 });

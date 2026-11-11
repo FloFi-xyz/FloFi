@@ -8,6 +8,8 @@
  *   PLANNED               waits for its owner (signed when due, or upfront at the start): nothing is ever prepared or signed by FloFi
  *   PREPARED              waits for the owner's wallet; past its validity it is EXPIRED and prepared again on request — except a wallet batch,
  *                         which the wallet itself sends when the owner confirms: it is never dropped silently (a late answer is still taken)
+ *   run expiry            a PLANNED or PREPARED group is BLOCKED — a wallet batch only once its validity passed (until then the wallet may still
+ *                         confirm it before its on-chain deadline); a batch handed out and never answered HALTS the run, never FAILS it
  *   AUTHORIZED            wallet batch: the wallet already sent it; FloFi waits for the hashes the owner's browser reports.
  *                         user operation: due when the previous group reconciled; simulated by the bundler, then relayed (owner-paid).
  *                         Solana: started only while the signed blockhash leaves the send budget (else BLOCKED, nothing sent); every
@@ -24,7 +26,7 @@ import { advanceSolanaSubmission, checkUserOperation, reconcileEvmGroup, reconci
   type Reconciled, type UserFundedDeps } from '../user-funded/groups.ts';
 import type { EvmGroupCalls } from '../user-funded/evm-calls.ts';
 import type { BoundResolution, GroupRecord, RunRecord, RunStepRecord, StepOutcome, WorkflowRunStore } from './pg-store.ts';
-import { ADVANCE_RETRY_MS, TERMINAL_RUN, type RunState } from './state-machine.ts';
+import { ADVANCE_RETRY_MS, TERMINAL_RUN, groupInFlight, walletBatchUnanswered, type RunState } from './state-machine.ts';
 
 export type Pass = { readonly state: RunState; readonly code: string | null; readonly retryMs: number | null; readonly progressed: boolean };
 export type UserFundedPassDeps = {
@@ -58,16 +60,22 @@ export async function userFundedPass(deps: UserFundedPassDeps, run: RunRecord): 
   const now = deps.now();
   const block = async (refusal: string): Promise<Pass> => {
     const code = stored(refusal);
-    // Only the pass whose write blocked the group moves its steps and the run: a group that moved on elsewhere meanwhile (a concurrent pass
-    // submitted it, its transactions may be on their way) is never reported blocked, and never leaves a run failed with a send in flight.
-    if (!await deps.store.groupTransition(run.runId, g.groupIndex, ['PLANNED', 'PREPARED', 'AUTHORIZED'], 'BLOCKED', { code })) return { ...settled(run), progressed: true };
+    // Only the pass whose write blocked the group moves its steps and the run, and only from exactly the state and row version this pass read:
+    // a group that moved on elsewhere meanwhile (an authorization that landed, a concurrent pass that submitted it, its transactions may be on
+    // their way) is never reported blocked, and never leaves a run failed with a send in flight.
+    if (!await deps.store.groupTransition(run.runId, g.groupIndex, [g.state], 'BLOCKED', { code }, 'GROUP_STATE', g.version)) return { ...settled(run), progressed: true };
     for (let i = g.stepFrom; i <= g.stepTo; i++) await deps.store.stepTransition(run.runId, i, ['DELEGATED'], 'BLOCKED', { code });
-    const partial = steps.some(s => s.stepIndex < g.stepFrom && s.state === 'RECONCILED');
-    const moved = await deps.store.transition(run.runId, { version: run.version, from: ['RUNNING', 'ATTENTION'] }, partial ? 'HALTED' : 'FAILED', { code });
-    deps.log('workflow_run.group_blocked', { run: run.runId, group: g.groupIndex, code, partial });
+    // A wallet batch handed to the owner's wallet and never answered may have executed: the run HALTS (its owner ends it, and is told to check
+    // the wallet's activity), never FAILED, which would say nothing irreversible happened.
+    const partial = steps.some(s => s.stepIndex < g.stepFrom && s.state === 'RECONCILED'), unanswered = walletBatchUnanswered(g);
+    const moved = await deps.store.transition(run.runId, { version: run.version, from: ['RUNNING', 'ATTENTION'] }, partial || unanswered ? 'HALTED' : 'FAILED', { code });
+    deps.log('workflow_run.group_blocked', { run: run.runId, group: g.groupIndex, code, partial, unanswered });
     return moved ? settled(moved) : { ...settled(run), progressed: true };
   };
-  if (['PLANNED', 'PREPARED', 'AUTHORIZED'].includes(g.state) && run.expiresAt <= now && g.state !== 'AUTHORIZED') return block('WORKFLOW_RUN_EXPIRED');
+  // At the run's expiry a group nobody signed yet is blocked — never one the owner's wallet may still be confirming: a wallet batch inside its
+  // validity (`groupInFlight`) executes if the owner confirms before its on-chain deadline, and that answer must still be taken. It is blocked
+  // only once its validity passed (the deadline then reverts any late confirmation). Nothing AUTHORIZED is blocked for expiry (already signed).
+  if ((g.state === 'PLANNED' || g.state === 'PREPARED') && run.expiresAt <= now && !groupInFlight(g, now)) return block('WORKFLOW_RUN_EXPIRED');
   switch (g.state) {
     case 'PLANNED': return settled(run, OWNER_WAIT_MS, false, 'OWNER_SIGNS_GROUP');
     case 'PREPARED':
@@ -78,7 +86,9 @@ export async function userFundedPass(deps: UserFundedPassDeps, run: RunRecord): 
         if (expired) await deps.store.groupTransition(run.runId, g.groupIndex, ['EXPIRED'], 'PLANNED', { prepared: null, validUntil: null, code: null });
         return { ...settled(run, OWNER_WAIT_MS, false, 'OWNER_SIGNS_GROUP'), progressed: expired !== null };
       }
-      return settled(run, OWNER_WAIT_MS, false, 'OWNER_SIGNS_GROUP');
+      // An expired run waiting on a wallet batch is looked at again as soon as that batch's validity has passed.
+      return settled(run, run.expiresAt <= now && g.validUntil ? Math.max(1_000, Math.min(OWNER_WAIT_MS, g.validUntil.getTime() - now.getTime())) : OWNER_WAIT_MS,
+        false, 'OWNER_SIGNS_GROUP');
     case 'AUTHORIZED': return authorizedGroup(deps, run, g, block);
     case 'SUBMITTED': case 'UNCERTAIN': return submittedGroup(deps, run, g, steps);
     case 'RECONCILED': return afterGroup(deps, run, g);

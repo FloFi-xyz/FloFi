@@ -160,22 +160,29 @@ describe('P0 review fixes: a wallet batch handed to the wallet is never lost, an
   }
   type Artifact = { group: EvmGroupCalls; request: { id: string }; superseded?: readonly { group: EvmGroupCalls }[] };
 
-  it('a re-preparation inside the last 3 minutes that fails leaves the batch PREPARED: the batch the wallet already sent is still recorded and reconciled', async () => {
+  it('inside the last 3 minutes nothing is prepared again (USER_FUNDED_PREPARED_STILL_VALID); a re-preparation after validUntil that fails leaves the batch PREPARED: the batch the wallet already sent is still recorded and reconciled', async () => {
     const { t, chain, h, owner, wallets, approval } = await setup();
     try {
       const p1 = await workflowRunUserFundedPrepare(h.surface, approval.approvalId, wallets, 0);
       const first = p1.prepared as unknown as Artifact;
       // The owner's wallet sent P1; its answer never reached FloFi.
       const hash = chain.control.walletBatch(owner, evmCallsOf(first.group));
-      // 8 minutes later (2 left: below the 3-minute hand-out margin) the page asks again, and the RPC no longer simulates: the new preparation fails.
+      const run0 = await ownedRun(h.runs, approval.approvalId, wallets);
+      const before = (await h.store.groups(run0.runId))[0]!;
+      // 8 minutes later (2 left: below the 3-minute hand-out margin) the page asks again: P1 is still live on chain, so no second, overlapping
+      // batch is prepared — nothing is written, the owner confirms the open request or asks again once its validUntil has passed.
       h.d.advance(8 * 60_000);
+      await expect(workflowRunUserFundedPrepare(h.surface, approval.approvalId, wallets, 0)).rejects.toThrow('USER_FUNDED_PREPARED_STILL_VALID');
+      expect((await h.store.groups(run0.runId))[0]).toEqual(before);
+      // Past P1's validity the page asks again, and the RPC no longer simulates: the new preparation fails.
+      h.d.advance(3 * 60_000);
       chain.control.disableSimulation();
       await expect(workflowRunUserFundedPrepare(h.surface, approval.approvalId, wallets, 0)).rejects.toThrow('USER_FUNDED_SIMULATION_UNAVAILABLE');
       let run = await ownedRun(h.runs, approval.approvalId, wallets);
       // Not blocked (a batch of this group is in the wallet's hands), not reset: still the PREPARED P1, so its answer is accepted.
       expect(run).toMatchObject({ state: 'RUNNING' });
       const [g] = await h.store.groups(run.runId);
-      expect(g).toMatchObject({ state: 'PREPARED', validUntil: new Date(p1.validUntil!) });
+      expect(g).toMatchObject({ state: 'PREPARED', validUntil: new Date(p1.validUntil!), version: before.version });
       expect(g!.prepared).toEqual(p1.prepared);
       await workflowRunUserFundedAuthorize(h.surface, approval.approvalId, wallets, 0, { kind: 'EVM_WALLET_BATCH', batchId: first.request.id });
       await workflowRunUserFundedReport(h.surface, approval.approvalId, wallets, 0, [hash]);
@@ -186,14 +193,24 @@ describe('P0 review fixes: a wallet batch handed to the wallet is never lost, an
     } finally { await t.drop(); }
   });
 
-  it('a re-preparation inside the last 3 minutes replaces the batch in place (same id, version-checked) and the EARLIER batch the wallet sends is reconciled', async () => {
+  it('no second batch while the first is live; after its validUntil the batch is prepared again in place (same id, version-checked) and the EARLIER batch the wallet sent is reconciled', async () => {
     const { t, chain, h, owner, wallets, approval } = await setup();
     try {
       const p1 = await workflowRunUserFundedPrepare(h.surface, approval.approvalId, wallets, 0);
       const first = p1.prepared as unknown as Artifact;
       const run0 = await ownedRun(h.runs, approval.approvalId, wallets);
       const before = (await h.store.groups(run0.runId))[0]!;
-      h.d.advance(8 * 60_000);
+      // With more than 3 minutes left the same cached batch is handed out again (nothing is prepared or written).
+      h.d.advance(6 * 60_000);
+      expect((await workflowRunUserFundedPrepare(h.surface, approval.approvalId, wallets, 0)).prepared).toEqual(p1.prepared);
+      // Inside the last 3 minutes the owner confirms the prompt still open for P1 (its on-chain deadline has not passed): it executes, but its
+      // answer is lost. The page asks again: refused while P1 is live (two wallet instances share no EIP-5792 id dedupe), nothing written.
+      h.d.advance(2 * 60_000);
+      const hash = chain.control.walletBatch(owner, evmCallsOf(first.group));
+      await expect(workflowRunUserFundedPrepare(h.surface, approval.approvalId, wallets, 0)).rejects.toThrow('USER_FUNDED_PREPARED_STILL_VALID');
+      expect((await h.store.groups(run0.runId))[0]).toEqual(before);
+      // Past P1's validity: prepared again in place, under the same id, with P1 kept for reconciliation.
+      h.d.advance(3 * 60_000);
       const p2 = await workflowRunUserFundedPrepare(h.surface, approval.approvalId, wallets, 0);
       const second = p2.prepared as unknown as Artifact;
       expect(new Date(p2.validUntil!).getTime()).toBeGreaterThan(new Date(p1.validUntil!).getTime());
@@ -204,8 +221,7 @@ describe('P0 review fixes: a wallet batch handed to the wallet is never lost, an
       // A rewrite that did not see this one (the row version it read is stale) changes nothing.
       expect(await h.store.groupTransition(run0.runId, 0, ['PREPARED'], 'PREPARED', { prepared: before.prepared, validUntil: before.validUntil }, 'GROUP_STATE', before.version)).toBeNull();
       expect((await h.store.groups(run0.runId))[0]!.prepared).toEqual(after.prepared);
-      // The owner confirms the prompt that was still open for P1 (its on-chain deadline has not passed): that batch executes and is reconciled as P1.
-      const hash = chain.control.walletBatch(owner, evmCallsOf(first.group));
+      // The late answer for P1 arrives (batch id and its transaction): it is reconciled against P1 from the superseded history.
       await workflowRunUserFundedAuthorize(h.surface, approval.approvalId, wallets, 0, { kind: 'EVM_WALLET_BATCH', batchId: first.request.id });
       await workflowRunUserFundedReport(h.surface, approval.approvalId, wallets, 0, [hash]);
       await h.drain(run0.runId);
@@ -224,7 +240,7 @@ describe('P0 review fixes: a wallet batch handed to the wallet is never lost, an
       expect((await h.store.groups(run.runId)).map(g => [g.state, g.code])).toEqual([['BLOCKED', 'USER_FUNDED_SIMULATION_UNAVAILABLE']]);
       expect((await h.store.steps(run.runId)).map(s => s.state)).toEqual(['BLOCKED', 'BLOCKED']);
       // HALTED (resumable step by step), but nothing ran: what the owner and a requester are told says exactly that, never "partially completed".
-      for (const owner of [true, false]) expect(await runView({ store: h.store }, run, { outcomes: true, owner })).toMatchObject({ nextAction: 'OWNER_DECIDES',
+      for (const owner of [true, false]) expect(await runView({ store: h.store, now: h.d.now }, run, { outcomes: true, owner })).toMatchObject({ nextAction: 'OWNER_DECIDES', resumable: true,
         note: 'Stopped before anything was sent. Until the run expires the owner can resume it (each stopped step then runs through its own flow); the owner can always end it.' });
       await workflowRunResume(h.surface, approval.approvalId, wallets);
       expect((await h.store.groups(run.runId))[0]).toMatchObject({ state: 'PLANNED', strategy: 'EVM_OWNER_STEP', signing: 'WHEN_DUE', prepared: null });
