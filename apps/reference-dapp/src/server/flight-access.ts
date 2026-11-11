@@ -1,10 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 /** The product's request boundary. Authentication alone never grants closed-beta access. */
-import { accountHost, currentAccountSession } from '../accounts/account-host.ts';
 import { betaAccessMode, createBetaAccessStore } from '../flight/beta-access.ts';
-import { flightCalendar, flightNow } from '../flight/host.ts';
-import { platformStateHost } from './platform-state-host.ts';
-import { currentWalletPrincipals, type WalletPrincipal } from './session-principal.ts';
+import type { WalletPrincipal } from './session-principal.ts';
 import type { BetaRequestIdentity } from '../flight/beta-context.ts';
 import { withBetaIdentity } from '../flight/beta-context.ts';
 
@@ -14,6 +11,10 @@ export async function requireFlightAccess(principal?: WalletPrincipal, env: Read
   if (mode === 'open') return null; // Rollout is deliberately inert until an operator enables it.
   if (mode !== 'beta') throw new Error('BETA_ACCESS_CLOSED');
   try {
+    // Open-mode callers can run without Next's request context. Only an active gate loads request and database dependencies.
+    const [{ accountHost, currentAccountSession }, { flightCalendar, flightNow }, { platformStateHost }, { currentWalletPrincipals }] = await Promise.all([
+      import('../accounts/account-host.ts'), import('../flight/host.ts'), import('./platform-state-host.ts'), import('./session-principal.ts'),
+    ]);
     const host = await accountHost(env), session = await currentAccountSession(host, env);
     if (!session) throw new Error('BETA_SIGN_IN_REQUIRED');
     const calendar = flightCalendar(env);
