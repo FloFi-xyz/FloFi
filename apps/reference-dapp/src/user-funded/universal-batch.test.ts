@@ -10,7 +10,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { catalogAsset, createAssetCatalog, erc20AssetId } from '@defi-workflow-engine/action-registry';
 import { registerNetworkCatalog, resetNetworkCatalogs } from '../domain/asset-catalogs';
-import { ARBITRUM_MAINNET_SWAP } from '../domain/public-testnet-swap.ts';
+import { ARBITRUM_MAINNET_SWAP, BASE_MAINNET_SWAP, BASE_SEPOLIA, ETHEREUM_MAINNET_SWAP, ETHEREUM_SEPOLIA_SWAP, ROBINHOOD_MAINNET_SWAP } from '../domain/public-testnet-swap.ts';
 import { officialCatalog } from '../server/robinhood-mainnet.test-harness.ts';
 import { guarded, type ChainTransport } from '../delegation/chains.ts';
 import { createEvmDouble } from '../delegation/harness/evm-double.ts';
@@ -18,7 +18,7 @@ import { delegationAavePool, delegationAaveReserve } from '../delegation/profile
 import { workflowRequirement } from '../delegation/steps.ts';
 import { composeWorkflowBound } from '../engine/strategy-engine.ts';
 import { planExecutionGroups } from '../workflow-runs/execution-groups.ts';
-import { evmCallsOf, evmStepBuildable, type EvmGroupCalls } from './evm-calls.ts';
+import { buildEvmGroupCalls, evmCallsOf, evmStepBuildable, type EvmGroupCalls } from './evm-calls.ts';
 import { reconcileWalletBatch } from './evm-reconcile.ts';
 import { prepareGroup, type UserFundedDeps } from './groups.ts';
 import type { BatchSimulation } from './batch-simulation.ts';
@@ -352,6 +352,70 @@ describe('P0 universal execution: a batch with Aave calls and no swap still expi
   });
 });
 
+describe('P0 universal execution: a batch of transfers only still expires on chain (never paid after the run stopped counting it)', () => {
+  const A = '0x4444444444444444444444444444444444444444', B = '0x5555555555555555555555555555555555555555';
+  it('starts with the deadline guard: confirmed late it reverts whole and no recipient is paid; in time each transfer executes and reconciles', async () => {
+    let seconds = Math.floor(Date.parse(NOW) / 1000);
+    const chain = createEvmDouble(42161, () => seconds, { profile: ARBITRUM_MAINNET_SWAP });
+    chain.control.fundToken(OWNER, USDC, 10_000_000n); chain.control.fundToken(OWNER, WETH, 10n ** 16n); chain.control.fundNative(OWNER, 10n ** 17n);
+    const transport = guarded(CHAIN, 'read', 'MOCKED', chain.rpc);
+    const deps: UserFundedDeps = { chains: CHAINS, evm: c => c === CHAIN ? transport : null, bundler: () => null, solana: null, jupiter: null, now: () => new Date(seconds * 1000) };
+    const s = { version: 2, steps: [{ action: 'transfer', network: 'arbitrum-one', asset: 'USDC', amount: '1', recipient: A },
+      { action: 'transfer', network: 'arbitrum-one', asset: 'WETH', amount: '0.001', recipient: B }] };
+    const requirement = workflowRequirement(s), composition = composeWorkflowBound(s as never, undefined);
+    if (!requirement.ok || !composition.ok) throw new Error('STRATEGY_INVALID');
+    const r = await prepareGroup(deps, composition, requirement.value, { runId: 'wfr_transfers', groupIndex: 0, strategy: 'EVM_WALLET_BATCH', chain: CHAIN, feePayer: OWNER,
+      stepFrom: 0, stepTo: 1 });
+    if (!r.ok) throw new Error(r.code);
+    const p = r.value.prepared as unknown as BatchPrepared;
+    // The guard's deadline is the group's validity: past `validUntil` the run treats the batch as no longer executable, and so does the chain.
+    expect(p.group.calls.map(c => c.kind)).toEqual(['DEADLINE_GUARD', 'ERC20_TRANSFER', 'ERC20_TRANSFER']);
+    expect(p.group.calls[0]).toEqual({ kind: 'DEADLINE_GUARD', router: ARBITRUM_MAINNET_SWAP.router.toLowerCase(), deadline: String(seconds + 600) });
+    expect(BigInt((r.value.validUntil as Date).getTime())).toBe(BigInt((seconds + 600) * 1000));
+    // The guard belongs to no step: each step's call index moved by one. The wallet is asked to execute the guard first.
+    expect(p.group.steps.map(st => [st.stepIndex, st.calls, st.recipient])).toEqual([[0, [1], A], [1, [2], B]]);
+    expect(p.request.calls.map(c => c.data.slice(0, 10))).toEqual(['0x5ae401dc', '0xa9059cbb', '0xa9059cbb']);
+    expect(p.simulation!.gasUsed).toHaveLength(3);
+    // Confirmed after the deadline (the wallet kept the prompt open): the whole atomic batch reverts; nobody is paid, the owner keeps everything.
+    seconds += 601;
+    const late = chain.control.walletBatch(OWNER, evmCallsOf(p.group));
+    expect(chain.control.receipt(late)).toMatchObject({ status: 0, reason: 'Transaction too old' });
+    expect([chain.control.tokenBalance(USDC, A), chain.control.tokenBalance(WETH, B)]).toEqual([0n, 0n]);
+    expect([chain.control.tokenBalance(USDC, OWNER), chain.control.tokenBalance(WETH, OWNER)]).toEqual([10_000_000n, 10n ** 16n]);
+    expect((await reconcileWalletBatch(transport, p.group, [late], p.fromBlock)).status).toBe('REVERTED');
+    // Confirmed in time: both transfers execute and reconcile step by step (the guard moves nothing).
+    seconds -= 601;
+    const inTime = chain.control.walletBatch(OWNER, evmCallsOf(p.group));
+    expect(await reconcileWalletBatch(transport, p.group, [inTime], p.fromBlock)).toMatchObject({ status: 'RECONCILED', steps: [
+      { stepIndex: 0, spent: [{ asset: `${CHAIN}/erc20:${USDC}`, amount: '1000000' }], received: [] },
+      { stepIndex: 1, spent: [{ asset: `${CHAIN}/erc20:${WETH}`, amount: '1000000000000000' }], received: [] }] });
+    expect([chain.control.tokenBalance(USDC, A), chain.control.tokenBalance(WETH, B)]).toEqual([1_000_000n, 10n ** 15n]);
+  });
+
+  it('a native transfer gets the guard on every user-funded EVM chain (each registers a router); a user operation (no deadline) is built as before', async () => {
+    const requirement = workflowRequirement({ version: 2, steps: [{ action: 'transfer', network: 'arbitrum-one', asset: 'ETH', amount: '0.001', recipient: A }] });
+    if (!requirement.ok) throw new Error(requirement.code);
+    const deadline = Math.floor(Date.parse(NOW) / 1000) + 600, step = requirement.value.steps[0]!;
+    // A native value transfer reads nothing from the chain (no transport at all).
+    const routers: [string, string][] = [[ETHEREUM_MAINNET_SWAP.chainRef, ETHEREUM_MAINNET_SWAP.router], [BASE_MAINNET_SWAP.chainRef, BASE_MAINNET_SWAP.router],
+      [CHAIN, ARBITRUM_MAINNET_SWAP.router], [ROBINHOOD_MAINNET_SWAP.chainRef, ROBINHOOD_MAINNET_SWAP.router],
+      // The loopback test pair profiles (harnesses only) carry it through their registered router too.
+      [BASE_SEPOLIA.chainRef, BASE_SEPOLIA.router], [ETHEREUM_SEPOLIA_SWAP.chainRef, ETHEREUM_SEPOLIA_SWAP.router]];
+    for (const [chain, router] of routers) {
+      const onChain = { ...requirement.value, steps: [{ ...step, chain }] };
+      const bounded = await buildEvmGroupCalls(onChain, 0, 0, { chains: [chain], owner: OWNER, transport: () => null, deadline });
+      if (!bounded.ok) throw new Error(`${chain}:${bounded.code}`);
+      expect(bounded.value.calls).toEqual([{ kind: 'DEADLINE_GUARD', router: router.toLowerCase(), deadline: String(deadline) },
+        { kind: 'NATIVE_TRANSFER', to: A, amount: '1000000000000000' }]);
+      expect(bounded.value.steps.map(st => st.calls)).toEqual([[1]]);
+      const unbounded = await buildEvmGroupCalls(onChain, 0, 0, { chains: [chain], owner: OWNER, transport: () => null });
+      if (!unbounded.ok) throw new Error(`${chain}:${unbounded.code}`);
+      expect(unbounded.value.calls).toEqual([{ kind: 'NATIVE_TRANSFER', to: A, amount: '1000000000000000' }]);
+      expect(unbounded.value.steps.map(st => st.calls)).toEqual([[0]]);
+    }
+  });
+});
+
 describe('P0 universal execution: Base Swap → Supply → Borrow as one batch (the browser e2e chain)', () => {
   it('prepares the 5 calls (plus the swap deadline), simulates the health factor and reconciles on the Base double', async () => {
     const { BASE_MAINNET_SWAP } = await import('../domain/public-testnet-swap.ts');
@@ -531,7 +595,97 @@ describe('P0 universal execution: a batched catalog swap trusts the chain, never
   });
 });
 
-describe('P0 universal execution: an Aave batch never silently loses its on-chain expiry', () => {
+describe('P0 universal execution: a batched ERC-20 transfer trusts the catalog and the chain, never the label', () => {
+  const A = '0x4444444444444444444444444444444444444444', RH = 'eip155:4663';
+  const transfer = (asset: string, amount: string, network = 'arbitrum-one') => ({ action: 'transfer', network, asset, amount, recipient: A });
+  const stepOf = (s: Strategy) => {
+    const r = workflowRequirement(s);
+    if (!r.ok) throw new Error(r.code);
+    return r.value.steps[0]!;
+  };
+
+  it('only a token a batched swap may spend is batched; a Stock Token, a token outside the catalog or other decimals run through their own flow', () => {
+    const usdc = stepOf({ version: 2, steps: [transfer('USDC', '1')] }), input = usdc.inputs[0]!;
+    expect(evmStepBuildable(usdc, CHAINS, OWNER)).toBeNull();
+    // A native value transfer moves no token: unchanged.
+    expect(evmStepBuildable(stepOf({ version: 2, steps: [transfer('ETH', '0.001')] }), CHAINS, OWNER)).toBeNull();
+    // An address the network's catalog does not list, or the catalog token scaled with other decimals than its catalog entry's.
+    expect(evmStepBuildable({ ...usdc, inputs: [{ ...input, address: '0x' + '7a'.repeat(20) }] }, CHAINS, OWNER)).toBe('USER_FUNDED_TRANSFER_ASSET_UNSUPPORTED');
+    expect(evmStepBuildable({ ...usdc, inputs: [{ ...input, decimals: 18 }] }, CHAINS, OWNER)).toBe('USER_FUNDED_TRANSFER_ASSET_UNSUPPORTED');
+    // A loopback test pair profile batches its registered USDC/WETH only (as its swaps do).
+    const sepolia = { ...usdc, chain: BASE_SEPOLIA.chainRef };
+    expect(evmStepBuildable({ ...sepolia, inputs: [{ ...input, chain: BASE_SEPOLIA.chainRef, address: BASE_SEPOLIA.usdc.toLowerCase() }] }, [BASE_SEPOLIA.chainRef], OWNER)).toBeNull();
+    expect(evmStepBuildable({ ...sepolia, inputs: [{ ...input, chain: BASE_SEPOLIA.chainRef, address: '0x' + '7a'.repeat(20) }] }, [BASE_SEPOLIA.chainRef], OWNER))
+      .toBe('USER_FUNDED_TRANSFER_ASSET_UNSUPPORTED');
+    // Robinhood Chain: a Stock Token transfer is refused (its own flow checks it); a listed token that is not one of its pinned assets is too.
+    const official = officialCatalog(), usdgAsset = catalogAsset(official, { symbol: 'USDG' })!, listed = '0x' + '7a'.repeat(20);
+    registerNetworkCatalog(createAssetCatalog({ chain: RH, network: official.network, provenance: official.provenance,
+      assets: [...official.assets, { ...usdgAsset, id: erc20AssetId(RH, listed), address: listed, symbol: 'RHX', name: 'Listed token', source: { ...usdgAsset.source, officialId: null } }] }));
+    try {
+      const stock = stepOf({ version: 2, steps: [transfer('AAPL', '3', 'robinhood')] });
+      expect(catalogAsset(official, { address: stock.inputs[0]!.address })).toMatchObject({ assetClass: 'STOCK_TOKEN' });
+      expect(evmStepBuildable(stock, [RH], OWNER)).toBe('USER_FUNDED_TRANSFER_ASSET_UNSUPPORTED');
+      const usdg = stepOf({ version: 2, steps: [transfer('USDG', '2', 'robinhood')] });
+      expect(evmStepBuildable(usdg, [RH], OWNER)).toBeNull();
+      expect(evmStepBuildable({ ...usdg, inputs: [{ ...usdg.inputs[0]!, address: listed }] }, [RH], OWNER)).toBe('USER_FUNDED_TRANSFER_ASSET_UNSUPPORTED');
+      // A Stock Token transfer is never planned into a wallet batch.
+      const r = workflowRequirement({ version: 2, steps: [transfer('USDG', '2', 'robinhood'), transfer('AAPL', '3', 'robinhood')] });
+      if (!r.ok) throw new Error(r.code);
+      const plan = planExecutionGroups(r.value, { enabled: true, code: null, chains: [RH], bundlerChains: [], solanaNonceAccounts: false },
+        { eip155: { wallet: 'INJECTED', atomic: { [RH]: 'supported' }, typedData: true } }, st => evmStepBuildable(st, [RH], OWNER) ?? true);
+      if (!plan.ok) throw new Error(plan.code);
+      expect(plan.groups.filter(g => g.strategy === 'EVM_WALLET_BATCH' && g.stepFrom <= 1 && g.stepTo >= 1)).toEqual([]);
+    } finally { resetNetworkCatalogs(); }
+  });
+
+  it('the token is verified on chain before the batch is built: no code, other decimals() or a failed read refuse; nothing is simulated or offered', async () => {
+    const s: Strategy = { version: 2, steps: [transfer('USDC', '1'), transfer('USDC', '2'), transfer('WETH', '0.001')] };
+    type Rpc = (method: string, params: readonly unknown[]) => Promise<unknown>;
+    const prepareOn = async (tweak: (chain: ReturnType<typeof createEvmDouble>) => void, answer?: (method: string, params: readonly unknown[], chain: Rpc) => Promise<unknown>) => {
+      const chain = createEvmDouble(42161, () => Math.floor(Date.parse(NOW) / 1000), { profile: ARBITRUM_MAINNET_SWAP });
+      chain.control.fundToken(OWNER, USDC, 10_000_000n); chain.control.fundToken(OWNER, WETH, 10n ** 16n); chain.control.fundNative(OWNER, 10n ** 17n);
+      tweak(chain);
+      const reads: string[] = [];
+      const transport = guarded(CHAIN, 'read', 'MOCKED', async (method, params) => {
+        reads.push(method === 'eth_call' ? String((params[0] as { data: string }).data).slice(0, 10) : method);
+        return answer ? answer(method, params, chain.rpc) : chain.rpc(method, params);
+      });
+      const deps: UserFundedDeps = { chains: CHAINS, evm: c => c === CHAIN ? transport : null, bundler: () => null, solana: null, jupiter: null, now: () => new Date(NOW) };
+      const requirement = workflowRequirement(s), composition = composeWorkflowBound(s as never, undefined);
+      if (!requirement.ok || !composition.ok) throw new Error('STRATEGY_INVALID');
+      const r = await prepareGroup(deps, composition, requirement.value, { runId: 'wfr_transfer_verify', groupIndex: 0, strategy: 'EVM_WALLET_BATCH', chain: CHAIN, feePayer: OWNER,
+        stepFrom: 0, stepTo: 2 });
+      return { r, chain, reads };
+    };
+    // Tokens that are what the catalog says: offered; each is read once (its code, then decimals()), however many transfers spend it.
+    const fine = await prepareOn(() => undefined);
+    if (!fine.r.ok) throw new Error(fine.r.code);
+    expect((fine.r.value.prepared as unknown as BatchPrepared).group.calls.map(c => c.kind)).toEqual(['DEADLINE_GUARD', 'ERC20_TRANSFER', 'ERC20_TRANSFER', 'ERC20_TRANSFER']);
+    expect(fine.reads.filter(r => r === '0x313ce567')).toHaveLength(2);
+    expect(fine.reads.filter(r => r === 'eth_getCode')).toHaveLength(2);
+    // No code at the catalog address, or decimals() that contradict the catalog: refused at the step that spends it, before any simulation.
+    for (const [tweak, code, stepIndex] of [[(c: ReturnType<typeof createEvmDouble>) => c.control.setCode(USDC, '0x'), 'CONTRACT_CODE_MISSING', 0],
+      [(c: ReturnType<typeof createEvmDouble>) => c.control.setCode(WETH, '0x'), 'CONTRACT_CODE_MISSING', 2],
+      [(c: ReturnType<typeof createEvmDouble>) => c.control.setDecimals(USDC, 18), 'TOKEN_METADATA_MISMATCH', 0],
+      [(c: ReturnType<typeof createEvmDouble>) => c.control.setDecimals(WETH, 6), 'TOKEN_METADATA_MISMATCH', 2]] as const) {
+      const refused = await prepareOn(tweak);
+      expect(refused.r).toMatchObject({ ok: false, code, stepIndex });
+      expect(refused.chain.control.simulations()).toBe(0);
+      expect(refused.chain.control.sends()).toBe(0);
+    }
+    // A read that fails or answers garbage says nothing about the token: USER_FUNDED_RPC_UNAVAILABLE, never a mismatch and never offered.
+    const failing = (what: 'eth_getCode' | '0x313ce567', answer: () => unknown) => (method: string, params: readonly unknown[], chain: Rpc) =>
+      (method === what || method === 'eth_call' && String((params[0] as { data: string }).data) === what) ? Promise.resolve().then(answer) : chain(method, params);
+    for (const what of ['eth_getCode', '0x313ce567'] as const)
+      for (const answer of [() => { throw new Error('over rate limit'); }, () => null]) {
+        const refused = await prepareOn(() => undefined, failing(what, answer));
+        expect(refused.r).toMatchObject({ ok: false, code: 'USER_FUNDED_RPC_UNAVAILABLE', stepIndex: 0 });
+        expect(refused.chain.control.simulations()).toBe(0);
+      }
+  });
+});
+
+describe('P0 universal execution: a wallet batch without a swap (Aave calls, transfers) never silently loses its on-chain expiry', () => {
   it('without a registered router to carry the deadline guard, the wallet batch is refused (USER_FUNDED_DEADLINE_UNAVAILABLE)', async () => {
     const s = { version: 2, steps: [{ action: 'supply', network: 'arbitrum-one', asset: 'WETH', amount: '0.002', beneficiary: OWNER },
       { action: 'borrow', network: 'arbitrum-one', asset: 'USDC', amount: '1', beneficiary: OWNER }] };
@@ -557,6 +711,15 @@ describe('P0 universal execution: an Aave batch never silently loses its on-chai
       const unbounded = await buildEvmGroupCalls(requirement.value, 0, 1, deps);
       if (!unbounded.ok) throw new Error(unbounded.code);
       expect(unbounded.value.calls.map(c => c.kind)).toEqual(['ERC20_APPROVE', 'AAVE_V3_SUPPLY', 'AAVE_V3_BORROW']);
+      // A batch of transfers only is held to the same rule: no guard, no batch.
+      const transfers = workflowRequirement({ version: 2, steps: [{ action: 'transfer', network: 'arbitrum-one', asset: 'ETH', amount: '0.001', recipient: '0x' + '4'.repeat(40) },
+        { action: 'transfer', network: 'arbitrum-one', asset: 'ETH', amount: '0.002', recipient: '0x' + '5'.repeat(40) }] });
+      if (!transfers.ok) throw new Error(transfers.code);
+      expect(await buildEvmGroupCalls(transfers.value, 0, 1, { ...deps, deadline: Math.floor(Date.parse(NOW) / 1000) + 600 }))
+        .toEqual({ ok: false, stepIndex: 0, code: 'USER_FUNDED_DEADLINE_UNAVAILABLE' });
+      const plain = await buildEvmGroupCalls(transfers.value, 0, 1, deps);
+      if (!plain.ok) throw new Error(plain.code);
+      expect(plain.value.calls.map(c => c.kind)).toEqual(['NATIVE_TRANSFER', 'NATIVE_TRANSFER']);
     } finally { vi.doUnmock('../domain/public-testnet-swap.ts'); vi.resetModules(); }
   });
 });

@@ -16,6 +16,7 @@ import { advanceSolanaSubmission, authorizeGroup, checkUserOperation, opOf, prep
   type UserFundedDeps } from './groups.ts';
 import { assertUserFundedSubmission, GAS_PAYER_CODES } from './gas-payer.ts';
 import { TRANSFER_TOPIC } from './evm-reconcile.ts';
+import type { EvmGroupCalls } from './evm-calls.ts';
 
 const BASE = 'eip155:8453', SOLANA = 'solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp';
 const USDC = '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913';
@@ -28,12 +29,19 @@ function compose(input: unknown): { composition: WorkflowComposition; requiremen
   if (!r.ok) throw new Error(r.code);
   return { composition: c, requirement: r.value };
 }
-/** A loopback Base RPC: an upgraded owner account (the MetaMask 7702 delegator), EntryPoint nonce 0, fees, a balance, and stored receipts. */
-function chain(owner: string, balance: bigint, receipts: Map<string, unknown>, upgraded = true): ChainTransport {
+/**
+ * A loopback Base RPC: an upgraded owner account (the MetaMask 7702 delegator), EntryPoint nonce 0, fees, a balance, and stored receipts. USDC has
+ * code and answers its catalog decimals (6): a batched ERC-20 transfer's token is verified on chain before anything is built.
+ */
+function chain(owner: string, balance: bigint, receipts: Map<string, unknown>, upgraded = true, usdcCode = '0x6080'): ChainTransport {
   return { chain: BASE, provenance: 'MOCKED', rpc: async (method, params) => {
     switch (method) {
-      case 'eth_getCode': return upgraded && String(params[0]).toLowerCase() === owner ? '0xef0100' + erc4337.DELEGATOR_IMPLEMENTATION.slice(2) : '0x';
-      case 'eth_call': return word(0n);
+      case 'eth_getCode': return String(params[0]).toLowerCase() === USDC ? usdcCode
+        : upgraded && String(params[0]).toLowerCase() === owner ? '0xef0100' + erc4337.DELEGATOR_IMPLEMENTATION.slice(2) : '0x';
+      case 'eth_call': {
+        const call = params[0] as { to: string; data: string };
+        return call.to.toLowerCase() === USDC && call.data === '0x313ce567' ? word(6n) : word(0n);
+      }
       case 'eth_maxPriorityFeePerGas': return '0x5f5e100';
       case 'eth_gasPrice': return '0x3b9aca00';
       case 'eth_getBalance': return '0x' + balance.toString(16);
@@ -68,6 +76,8 @@ describe('BUILD-FLOFI-UNIVERSAL-WORKFLOW-002 owner user operation (ERC-4337 v0.7
       fee: { payer: string; maxCost: string } };
     // The owner's own account, no factory, no paymaster; the EIP-712 domain is the owner's own 7702 account on Base.
     expect(p.op.sender).toBe(address);
+    // Exactly the two transfers: a user operation is bounded otherwise (its signed fee words, relayed when due), never by a wallet batch's guard.
+    expect((p as unknown as { group: EvmGroupCalls }).group.calls.map(c => c.kind)).toEqual(['ERC20_TRANSFER', 'ERC20_TRANSFER']);
     expect(p.typedData.domain).toMatchObject({ verifyingContract: address, chainId: 8453 });
     expect(p.fee.payer).toBe(address);
     const op = opOf(p.op);
@@ -139,6 +149,9 @@ describe('BUILD-FLOFI-UNIVERSAL-WORKFLOW-002 owner user operation (ERC-4337 v0.7
     const g = { runId: 'wfr_' + 'c'.repeat(26), groupIndex: 1, strategy: 'EVM_USER_OPERATION' as const, chain: BASE, feePayer: address, stepFrom: 0, stepTo: 1 };
     // A typed-data signature cannot upgrade an account: a plain account never gets an operation to sign.
     expect(await prepareGroup(deps(false), composition, requirement, g)).toMatchObject({ ok: false, code: 'EVM_SMART_ACCOUNT_REQUIRED' });
+    // The transferred token is verified on chain before any operation is built, as in a wallet batch: no code at its catalog address refuses.
+    const noCode: UserFundedDeps = { ...deps(), evm: () => chain(address, 10n ** 18n, receipts, true, '0x') };
+    expect(await prepareGroup(noCode, composition, requirement, g)).toMatchObject({ ok: false, code: 'CONTRACT_CODE_MISSING', stepIndex: 0 });
     const prepared = await prepareGroup(deps(), composition, requirement, g);
     if (!prepared.ok) throw new Error(prepared.code);
     const p = prepared.value.prepared as Prepared & { op: SerialOp; userOpHash: string };

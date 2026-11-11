@@ -20,7 +20,11 @@
  *             same batch borrows first), so Aave pulls exactly the amount and no approval is left over
  *   withdraw  Pool.withdraw(asset, amount, OWNER) — exact amount to the owner; the whole-batch simulation proves the owner's health factor stays
  *             at least 2.0 afterwards (the owner-signed Withdraw flow's minimum, `WITHDRAW_UNSAFE_HEALTH_FACTOR`)
- *   transfer  ERC20.transfer(recipient, amount) or a native value transfer to the recipient the owner authored (or the owner itself)
+ *   transfer  ERC20.transfer(recipient, amount) or a native value transfer to the recipient the owner authored (or the owner itself); an ERC-20
+ *             only of a token a batched swap may spend (never a Stock Token), verified on chain the same way first
+ *
+ * A wallet batch expires on chain at the preparation's validity (`deadline`): through each swap's own SwapRouter02 deadline, else through a
+ * DEADLINE_GUARD as its first call.
  *
  * A step bound to an earlier step spends min(its cap, the producer's GUARANTEED output): a same-group swap's signed minimum, a borrow's exact
  * amount, or — for a group that waits for a bridge delivery — the bridge's signed minimum delivery on this chain (`guaranteed` seed). It is
@@ -65,7 +69,9 @@ export type UserCall =
   /**
    * P0 universal execution: the batch's on-chain expiry when it has no swap to carry one — SwapRouter02 `multicall(deadline, [])`, which does
    * nothing before the deadline and reverts after it (the whole atomic batch with it). A wallet prompt confirmed late never executes Aave calls
-   * on a health-factor proof older than the preparation's validity. It belongs to no step and moves no asset.
+   * on a health-factor proof older than the preparation's validity, nor transfers once the group is past its validity: from then on the run
+   * counts the batch as no longer executable (`groupInFlight`) and may be ended or run again, so a transfer executed later would never be
+   * reconciled and could pay its recipient twice. It belongs to no step and moves no asset.
    */
   | { readonly kind: 'DEADLINE_GUARD'; readonly router: string; readonly deadline: string };
 export type AssetAmountFact = { readonly asset: string; readonly amount: string };
@@ -154,6 +160,35 @@ function aaveExitNeed(step: StepRequirement, chains: readonly string[]): UserFun
 }
 /** The catalog swap deployments a user-funded batch may call (the owner-signed catalog swaps' own registered profiles). */
 const CATALOG_SWAPS = Object.freeze([ETHEREUM_MAINNET_SWAP, BASE_MAINNET_SWAP, ARBITRUM_MAINNET_SWAP, ROBINHOOD_MAINNET_SWAP]);
+/**
+ * Whether a batched call may spend this ERC-20 of a catalog network (a swap's two tokens, a transfer's token): a catalog ERC-20 whose catalog
+ * decimals are the ones the step was scaled with, never a Stock Token (its disposability and economics are checked by its own flow, never
+ * skipped in a batch). Listing is never authority (the owner-signed catalog swap's `verifyCatalogToken` policy): on a network whose listed
+ * tokens are refused (Robinhood Chain: only its code-pinned assets and Stock Tokens exist), only a pinned asset passes; elsewhere a listed
+ * token's code and its own decimals() are verified on chain before the batch is built (`buildEvmGroupCalls`).
+ */
+function catalogErc20(profile: (typeof CATALOG_SWAPS)[number], chain: string, ref: { readonly address: string; readonly decimals: number }): boolean {
+  const asset = resolveNetworkAsset(chain, { address: ref.address });
+  if (!asset || asset.kind !== 'ERC20' || asset.decimals !== ref.decimals || (asset as { assetClass?: string }).assetClass === 'STOCK_TOKEN' || 'stock' in asset && asset.stock)
+    return false;
+  return profile.listedTokens !== 'REFUSE' || Object.hasOwn(profile.pinnedTokens, ref.address.toLowerCase());
+}
+/**
+ * P0 universal execution: the asset of a batched transfer. A native value transfer moves no token. An ERC-20 transfer is batched only for a token
+ * a batched swap may spend (`catalogErc20`; on a loopback test pair profile, its registered USDC or WETH), and its code and decimals() are then
+ * verified on chain before the batch is built, as a batched swap's are. A Stock Token, or a token outside the network's catalog or scaled with
+ * other decimals, runs through its own owner-signed flow (USER_FUNDED_TRANSFER_ASSET_UNSUPPORTED): a batch would send the amount as written.
+ */
+function transferAssetRefusal(step: StepRequirement, chains: readonly string[]): string | null {
+  const input = step.inputs[0];
+  if (step.inputs.length !== 1 || !input) return 'USER_FUNDED_STEP_SHAPE_UNSUPPORTED';
+  if (input.address === NATIVE) return null;
+  const testnet = delegationSwapProfile(step.chain, chains);
+  if (testnet && testnet.environment === 'TESTNET')
+    return [testnet.usdc, testnet.weth].some(a => a.toLowerCase() === input.address.toLowerCase()) ? null : 'USER_FUNDED_TRANSFER_ASSET_UNSUPPORTED';
+  const profile = CATALOG_SWAPS.find(p => p.chainRef === step.chain);
+  return profile && catalogErc20(profile, step.chain, input) ? null : 'USER_FUNDED_TRANSFER_ASSET_UNSUPPORTED';
+}
 function catalogSwapNeed(step: StepRequirement, chains: readonly string[]): UserFundedCapability {
   // The public test pair profiles (Base Sepolia, Ethereum Sepolia: loopback harnesses only, never offered on a hosted deployment) keep their one
   // registered USDC/WETH pool at its fixed tier.
@@ -173,17 +208,13 @@ function catalogSwapNeed(step: StepRequirement, chains: readonly string[]): User
   if (step.inputs.length !== 1 || step.outputs.length !== 1 || !input || !output) return { ok: false, code: 'DELEGATION_STEP_SHAPE_UNSUPPORTED' };
   // Native ETH in or out needs the router's value/unwrap path: it runs through the owner-signed catalog swap.
   if (input.address === NATIVE || output.address === NATIVE) return { ok: false, code: 'USER_FUNDED_NATIVE_SWAP_UNSUPPORTED' };
-  // Only catalog ERC-20 assets; a Stock Token's disposability and economics are checked by its own flow, never skipped in a batch.
+  // Only catalog ERC-20 assets, never a Stock Token, only pinned assets where listed tokens are refused (`catalogErc20`); a listed token's code
+  // and its own decimals() are verified on chain before it is quoted (`buildEvmGroupCalls`).
   const decimals: number[] = [];
   for (const ref of [input, output]) {
-    const asset = resolveNetworkAsset(step.chain, { address: ref.address });
-    if (!asset || asset.kind !== 'ERC20' || asset.decimals !== ref.decimals || (asset as { assetClass?: string }).assetClass === 'STOCK_TOKEN' || 'stock' in asset && asset.stock)
-      return { ok: false, code: 'USER_FUNDED_SWAP_ASSET_UNSUPPORTED' };
-    // Listing is never authority (the owner-signed catalog swap's `verifyCatalogToken` policy). On a network whose listed tokens are refused
-    // (Robinhood Chain: only its code-pinned assets and Stock Tokens exist), anything but a pinned asset is refused here; elsewhere a listed
-    // token's code and its own decimals() are verified on chain before it is quoted (`buildEvmGroupCalls`).
-    if (profile.listedTokens === 'REFUSE' && !Object.hasOwn(profile.pinnedTokens, ref.address.toLowerCase())) return { ok: false, code: 'USER_FUNDED_SWAP_ASSET_UNSUPPORTED' };
-    decimals.push(asset.decimals);
+    if (!catalogErc20(profile, step.chain, ref)) return { ok: false, code: 'USER_FUNDED_SWAP_ASSET_UNSUPPORTED' };
+    // The catalog's decimals (`catalogErc20` requires the step's to equal them).
+    decimals.push(ref.decimals);
   }
   const authored = (step.strategy as { readonly feeTier?: number }).feeTier;
   const standard: readonly number[] = profile.feeTiers.map(tier => tier.fee);
@@ -216,7 +247,7 @@ export function evmStepBuildable(step: StepRequirement, chains: readonly string[
   if (step.namespace !== 'eip155') return 'USER_FUNDED_NAMESPACE_INVALID';
   if (!chains.includes(step.chain)) return 'USER_FUNDED_CHAIN_DISABLED';
   if (step.inputs.length !== 1) return 'USER_FUNDED_STEP_SHAPE_UNSUPPORTED';
-  if (step.action === 'transfer') return null;
+  if (step.action === 'transfer') return transferAssetRefusal(step, chains);
   if (step.action === 'swap' || step.action === 'supply' || step.action === 'borrow' || step.action === 'repay' || step.action === 'withdraw') {
     const c = userFundedNeed(step, chains);
     if (!c.ok) return c.code;
@@ -243,7 +274,7 @@ const addressWord = (a: string) => a.toLowerCase().replace(/^0x/, '').padStart(6
 type Deps = { readonly chains: readonly string[]; readonly owner: string; readonly transport: (chain: string) => ChainTransport | null;
   /** Outputs guaranteed before this group (a bridge's signed minimum delivery on this chain), by producer step index. */
   readonly guaranteed?: ReadonlyMap<number, AssetAmountFact>;
-  /** Wallet batches: the unix second after which each swap is refused on chain (the preparation's validity). */
+  /** Wallet batches: the unix second after which the batch is refused on chain (the preparation's validity): each swap's deadline, else a guard. */
   readonly deadline?: number };
 
 /**
@@ -334,6 +365,14 @@ export async function buildEvmGroupCalls(requirement: WorkflowRequirement, from:
       const recipient = (s.recipient ?? owner).toLowerCase();
       if (!EVM_ADDRESS.test(recipient) || recipient === '0x' + '0'.repeat(40)) return refuse('TRANSFER_RECIPIENT_INVALID');
       const native = input.address === NATIVE;
+      // An ERC-20 transfer's token is verified on chain before it is batched (code present, decimals() equal to the catalog's, which the step
+      // was scaled with: `transferAssetRefusal`), with the swap path's cached verifier: a wrong catalog entry would send orders of magnitude more.
+      if (!native) {
+        const t = deps.transport(step.chain);
+        if (!t) return refuse('USER_FUNDED_RPC_UNAVAILABLE');
+        const problem = await verifyToken(t, input.address, input.decimals);
+        if (problem) return refuse(problem);
+      }
       const indices = push(native ? { kind: 'NATIVE_TRANSFER', to: recipient, amount: amount.toString() } : { kind: 'ERC20_TRANSFER', token: input.address, to: recipient, amount: amount.toString() });
       out.push({ stepIndex: step.index, calls: indices, spend, guaranteed: recipient === owner ? spend : null, quoted: null, recipient });
       continue;
@@ -435,14 +474,16 @@ export async function buildEvmGroupCalls(requirement: WorkflowRequirement, from:
     } else return refuse('USER_FUNDED_ACTION_NOT_BUILDABLE');
     if (calls.length > erc7710.WORKFLOW_GRANT_MAX_CALLS) return refuse('USER_FUNDED_GROUP_TOO_MANY_CALLS');
   }
-  // A wallet batch without a swap but with Aave calls gets its on-chain expiry from a deadline guard first (the chain's registered router).
-  const aaveAt = calls.findIndex(c => c.kind === 'AAVE_V3_SUPPLY' || c.kind === 'AAVE_V3_BORROW' || c.kind === 'AAVE_V3_REPAY' || c.kind === 'AAVE_V3_WITHDRAW');
-  if (deps.deadline !== undefined && aaveAt >= 0 && !calls.some(c => c.kind === 'UNISWAP_V3_EXACT_INPUT_SINGLE')) {
+  // A wallet batch has no expiry of its own (EIP-5792): every one that carries no deadlined swap — Aave calls, transfers, or both — gets its
+  // on-chain expiry from a deadline guard first (the chain's registered router). Past the preparation's validity the run no longer counts such a
+  // batch as executable (`groupInFlight`): a prompt confirmed later must revert, never run stale Aave calls or pay a transfer's recipient after
+  // the run was ended (or again, when it is re-run). A user operation (no `deadline`) is bounded otherwise and gets none.
+  if (deps.deadline !== undefined && !calls.some(c => c.kind === 'UNISWAP_V3_EXACT_INPUT_SINGLE' && c.deadline !== undefined)) {
     const router = CATALOG_SWAPS.find(p => p.chainRef === chain)?.router.toLowerCase() || delegationSwapProfile(chain, deps.chains)?.router || null;
-    // Without a registered router to carry the guard, the batch would reach the wallet with no expiry at all (a prompt confirmed late would run
-    // Aave calls on a stale health-factor proof): it is refused, never silently sent without one.
+    // Without a registered router to carry the guard, the batch would reach the wallet with no expiry at all: it is refused, never silently
+    // sent without one (every user-funded EVM chain and loopback test pair profile registers one today).
     if (!router || !EVM_ADDRESS.test(router.toLowerCase()))
-      return { ok: false, stepIndex: out.find(s => s.calls.includes(aaveAt))?.stepIndex ?? from, code: 'USER_FUNDED_DEADLINE_UNAVAILABLE' };
+      return { ok: false, stepIndex: out[0]?.stepIndex ?? from, code: 'USER_FUNDED_DEADLINE_UNAVAILABLE' };
     if (calls.length + 1 > erc7710.WORKFLOW_GRANT_MAX_CALLS) return { ok: false, stepIndex: from, code: 'USER_FUNDED_GROUP_TOO_MANY_CALLS' };
     return { ok: true, value: { chain, chainId: chainIdOf(chain), owner, calls: [{ kind: 'DEADLINE_GUARD', router, deadline: String(deps.deadline) }, ...calls],
       steps: out.map(s => ({ ...s, calls: s.calls.map(i => i + 1) })) } };
