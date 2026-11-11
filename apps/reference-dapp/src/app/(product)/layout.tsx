@@ -3,6 +3,8 @@ import type { ReactNode } from 'react';
 import { randomUUID } from 'node:crypto';
 import { cookies, headers } from 'next/headers';
 import { connection } from 'next/server';
+import { redirect } from 'next/navigation';
+import { requireFlightAccess } from '../../server/flight-access';
 import { engineeringUiAllowed } from '../../server/engineering-ui';
 import { networkScope } from '../../server/network-scope';
 import { copilotConfig } from '../../server/copilot-service';
@@ -28,6 +30,7 @@ import '../editor.css';
  */
 export default async function ProductLayout({ children }: { children: ReactNode }) {
   await connection();
+  try { await requireFlightAccess(); } catch { redirect('/board'); }
   const initialWorkflowId = `workflow-${randomUUID()}`;
   const jar = await cookies();
   const configured = copilotConfig(process.env).mode;

@@ -115,13 +115,13 @@ async function main(): Promise<void> {
     let routes = backend.routes;
     if (process.env.FLOFI_AUTOMATIONS === 'enabled') {
       const extra = await import('./automation-api.ts').then(m => m.loadAutomationApi(process.env, { db, tenantId: config.tenantId, backend, logger })).catch(() => null);
-      if (extra) { routes = [...routes, ...extra]; logger.info('automation.api_enabled', { routes: extra.map(r => r.name).join(',') }); }
+      if (extra) { routes = [...routes, ...backend.protectRoutes(extra)]; logger.info('automation.api_enabled', { routes: extra.map(r => r.name).join(',') }); }
       else logger.error('automation.api_disabled', { error_code: 'AUTOMATION_API_LOAD_FAILED' });
       // BUILD-AUTOMATION-002: owner operations of delegated execution (passkeys, Credentials, authorizations). Off by default; they never
       // sign or submit (no executor on the API).
       if (process.env.FLOFI_DELEGATION === 'enabled') {
         const delegation = await import('./delegation-api.ts').then(m => m.loadDelegationApi(process.env, { db, tenantId: config.tenantId, logger })).catch(() => null);
-        if (delegation) { routes = [...routes, ...delegation]; logger.info('delegation.api_enabled', { routes: delegation.map(r => r.name).join(',') }); }
+        if (delegation) { routes = [...routes, ...backend.protectRoutes(delegation)]; logger.info('delegation.api_enabled', { routes: delegation.map(r => r.name).join(',') }); }
         else logger.error('delegation.api_disabled', { error_code: 'DELEGATION_API_LOAD_FAILED' });
       }
     }

@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 'use server';
+import { withFlightAccess } from '../server/flight-access';
 /**
  * P0 workflow execution: the Editor runs a multi-step Canvas workflow as ONE workflow run, in place, with the lowest-friction authorization the
  * owner's own wallet really supports (an EIP-5792 atomic batch where it reports one), instead of a sequence of separate per-step flows.
@@ -39,6 +40,7 @@ const EVM_ADDRESS = /^0x[0-9a-fA-F]{40}$/;
 const REVIEW_LIMIT = 30, REVIEW_WINDOW_SECONDS = 600;
 /** Whether the Editor can run a whole workflow as one run with user-funded grouped authorization on this deployment. */
 export async function editorWorkflowExecutionAvailability(): Promise<{ readonly enabled: boolean; readonly code: string | null }> {
+  return withFlightAccess(async () => {
   const env = process.env, editor = readEditorRunConfig(env);
   if (!editor.enabled) return { enabled: false, code: editor.code };
   const facts = userFundedRuntime(env).facts;
@@ -46,6 +48,8 @@ export async function editorWorkflowExecutionAvailability(): Promise<{ readonly 
   // Without a FloFi account session the run cannot start: the Editor keeps its step-by-step path primary instead of a Review that would refuse.
   const accounts = await accountHost(env).catch(() => null);
   return await currentAccountSession(accounts, env) ? { enabled: true, code: null } : { enabled: false, code: 'ACCOUNT_SESSION_REQUIRED' };
+
+  });
 }
 
 /**
@@ -53,6 +57,7 @@ export async function editorWorkflowExecutionAvailability(): Promise<{ readonly 
  * session the run itself needs (so the Review is never an anonymous quote proxy); the wallet address is the one the owner will sign with.
  */
 export async function reviewEditorWorkflow(workflow: unknown, owner: string, profile: unknown): Promise<Result<EditorExecutionReview>> {
+  return withFlightAccess(async () => {
   try {
     const env = process.env;
     if (!readEditorRunConfig(env).enabled) return { ok: false, code: 'EDITOR_RUNS_NOT_ENABLED' };
@@ -67,6 +72,8 @@ export async function reviewEditorWorkflow(workflow: unknown, owner: string, pro
     const runtime = userFundedRuntime(env);
     return await reviewEditorExecution({ workflow, owner, profile: walletProfileOf(profile), facts: runtime.facts, deps: runtime.deps, now: new Date() });
   } catch (cause) { return failure(cause); }
+
+  });
 }
 
 export type EditorAuthorization = { readonly approvalId: string; readonly proposal: ClaimedProposal; readonly prepared: PreparedGroupView };
@@ -78,6 +85,7 @@ export type EditorAuthorization = { readonly approvalId: string; readonly propos
  * (EDITOR_EXECUTION_PLAN_CHANGED otherwise; the run is ended before anything is asked).
  */
 export async function authorizeEditorWorkflow(workflow: unknown, profile: unknown, reviewed: unknown): Promise<Result<EditorAuthorization>> {
+  return withFlightAccess(async () => {
   let approvalId: string | null = null;
   const jar = await cookies();
   const surface = () => approvalSurface(process.env, name => jar.get(name)?.value);
@@ -113,4 +121,6 @@ export async function authorizeEditorWorkflow(workflow: unknown, profile: unknow
     if (approvalId) { try { await workflowRunCancel(await surface(), approvalId, await currentWalletPrincipals()); } catch { /* already ended or not created */ } }
     return failure(cause);
   }
+
+  });
 }

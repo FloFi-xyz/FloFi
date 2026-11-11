@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 'use server';
+import { withFlightAccess } from '../server/flight-access';
+import { assertExecutionEnabled } from '../server/execution-guard';
 /**
  * The product origin's server actions for the person's FloFi wallets (BUILD-FLOFI-AUTH-WALLETS-001; Privy since BUILD-FLOFI-PRIVY-UX-001).
  * Each one derives the account from the verified HttpOnly account session, never from an argument.
@@ -56,6 +58,7 @@ async function accountManagedWallets(host: AccountHost, session: AccountSessionT
 const legacyOrigin = () => { const origin = walletOrigin(process.env); return origin && managedWalletsAvailable(process.env) ? origin : null; };
 
 export async function floFiWalletInfo(): Promise<Result<FloFiWalletInfo>> {
+  return withFlightAccess(async () => {
   try {
     let host: AccountHost | null;
     try { host = await accountHost(); } catch { host = null; }
@@ -64,6 +67,8 @@ export async function floFiWalletInfo(): Promise<Result<FloFiWalletInfo>> {
     const wallets = host.privy ? (await accountManagedWallets(host, session)).map(wallet => ({ ecosystem: wallet.ecosystem, address: wallet.address, label: wallet.label })) : [];
     return { ok: true, value: { walletOrigin: legacyOrigin()?.origin ?? null, wallets } };
   } catch (cause) { return failure(cause, 'FLOFI_WALLET_UNAVAILABLE'); }
+
+  });
 }
 
 /**
@@ -71,6 +76,8 @@ export async function floFiWalletInfo(): Promise<Result<FloFiWalletInfo>> {
  * built it (`{op, address, signing, tx}` or `{op, address, chain, transaction, signing}`). Every refusal precedes any signature.
  */
 export async function floFiSigningGate(request: unknown): Promise<Result<SigningSummary>> {
+  return withFlightAccess(async () => {
+  assertExecutionEnabled();
   try {
     const parsed = parseSigningRequest(request) ?? fail('FLOFI_WALLET_REQUEST_INVALID');
     if (!isSigningFlow(parsed!.context.flow)) fail('FLOFI_WALLET_FLOW_NOT_SUPPORTED');
@@ -79,10 +86,13 @@ export async function floFiSigningGate(request: unknown): Promise<Result<Signing
     const resolved = await signingGate(host.store, await accountManagedWallets(host, session), { claim: true })(parsed!.context, parsed!.request);
     return resolved.ok ? { ok: true, value: resolved.value.summary } : { ok: false, code: resolved.code };
   } catch (cause) { return failure(cause, 'FLOFI_WALLET_REVIEW_UNAVAILABLE'); }
+
+  });
 }
 
 /** Whether Privy may sign this message: only FloFi's own sign-in message for this host, naming one of this account's Privy wallets. */
 export async function floFiMessageGate(ecosystem: unknown, address: unknown, message: unknown): Promise<Result<null>> {
+  return withFlightAccess(async () => {
   try {
     if ((ecosystem !== 'evm' && ecosystem !== 'solana') || typeof message !== 'string' || message.length > 4_000) fail('FLOFI_WALLET_MESSAGE_UNSUPPORTED');
     const eco = ecosystem as 'evm' | 'solana', owner = canonicalAddress(eco, address) ?? fail('FLOFI_WALLET_ACCOUNT_MISMATCH');
@@ -92,18 +102,24 @@ export async function floFiMessageGate(ecosystem: unknown, address: unknown, mes
     if (!floFiSignInMessage(message as string, eco, owner!, { host: origin.domain, origin: origin.uri })) fail('FLOFI_WALLET_MESSAGE_UNSUPPORTED');
     return { ok: true, value: null };
   } catch (cause) { return failure(cause, 'FLOFI_WALLET_MESSAGE_UNSUPPORTED'); }
+
+  });
 }
 
 /** A single-use handoff for the legacy FloFi Wallet window (export of wallets created there before Privy). */
 export async function floFiWalletHandoff(): Promise<Result<{ readonly token: string; readonly walletOrigin: string }>> {
+  return withFlightAccess(async () => {
   try {
     const origin = legacyOrigin() ?? fail('FLOFI_WALLET_UNAVAILABLE');
     const { session } = await signedIn();
     return { ok: true, value: { token: sealWalletHandoff(process.env, session, origin!.host, new Date()), walletOrigin: origin!.origin } };
   } catch (cause) { return failure(cause, 'FLOFI_WALLET_UNAVAILABLE'); }
+
+  });
 }
 
 export async function floFiEvmPendingNonce(chainId: string, address: string): Promise<Result<string>> {
+  return withFlightAccess(async () => {
   try {
     const network = managedEvmNetwork(chainId) ?? fail('FLOFI_WALLET_NETWORK_UNSUPPORTED');
     const owner = canonicalAddress('evm', address) ?? fail('FLOFI_WALLET_REQUEST_INVALID');
@@ -111,15 +127,20 @@ export async function floFiEvmPendingNonce(chainId: string, address: string): Pr
     if (!(await accountManagedWallets(host, session)).some(wallet => wallet.ecosystem === 'evm' && wallet.address === owner)) fail('FLOFI_WALLET_ACCOUNT_MISMATCH');
     return { ok: true, value: await managedEvmPendingNonce(network!.chainId, owner!) };
   } catch (cause) { return failure(cause, 'FLOFI_WALLET_NETWORK_READ_FAILED'); }
+
+  });
 }
 
 export async function floFiEvmFees(chainId: string): Promise<Result<ManagedEvmFees>> {
+  return withFlightAccess(async () => {
   try {
     const network = managedEvmNetwork(chainId) ?? fail('FLOFI_WALLET_NETWORK_UNSUPPORTED');
     const { host, session } = await signedIn();
     if (!(await accountManagedWallets(host, session)).some(wallet => wallet.ecosystem === 'evm')) fail('FLOFI_WALLET_ACCOUNT_MISMATCH');
     return { ok: true, value: await managedEvmFees(network!.chainId) };
   } catch (cause) { return failure(cause, 'FLOFI_WALLET_NETWORK_READ_FAILED'); }
+
+  });
 }
 
 /**
@@ -127,6 +148,7 @@ export async function floFiEvmFees(chainId: string): Promise<Result<ManagedEvmFe
  * report the attempt UNKNOWN and discard the bytes; a HASH may still be pending.
  */
 export async function floFiEvmBroadcast(signing: unknown, raw: unknown): Promise<Result<ManagedEvmBroadcast>> {
+  return withFlightAccess(async () => {
   try {
     const context = parseSigningContext(signing) ?? fail('FLOFI_WALLET_SIGNING_CONTEXT_REQUIRED');
     const decoded = typeof raw === 'string' ? decodeSignedEip1559(raw) : null;
@@ -140,4 +162,6 @@ export async function floFiEvmBroadcast(signing: unknown, raw: unknown): Promise
     if (!await claimAttempt(host.store, 'broadcast', match.attempt, match.expiresAtMs)) fail('FLOFI_WALLET_ALREADY_SIGNED');
     return { ok: true, value: await managedEvmBroadcast(match.evm!.chainId, (raw as string).toLowerCase(), expectedBroadcast(decoded!.tx, decoded!.hash)) };
   } catch (cause) { return failure(cause, 'FLOFI_WALLET_SUBMISSION_UNKNOWN'); }
+
+  });
 }

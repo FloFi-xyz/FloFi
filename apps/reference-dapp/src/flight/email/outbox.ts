@@ -22,7 +22,7 @@ export type EmailLimits = { readonly daily: number; readonly monthly: number; re
 /** Daily sends kept for ESSENTIAL emails (a boarding link a person asked for): campaign email never takes the last ones. */
 export const ESSENTIAL_DAILY_RESERVE = 5;
 /** Holds after the provider may already have sent the email: released only by id, after the operator checked the provider's log. */
-const POSSIBLY_SENT = ['UNRESOLVED_OUTCOME', 'PROVIDER_IDEMPOTENCY_BODY_CHANGED', 'PROVIDER_CONFLICT'];
+const POSSIBLY_SENT = ['UNRESOLVED_OUTCOME', 'PROVIDER_IDEMPOTENCY_BODY_CHANGED', 'PROVIDER_CONFLICT', 'TEMPLATE_VERSION_REVIEW'];
 export const DEFAULT_EMAIL_LIMITS: EmailLimits = Object.freeze({ daily: 100, monthly: 3000, externalDailyReserve: 0, externalMonthlyReserve: 0 });
 /** Leases, retries and the provider's idempotency window. */
 export const OUTBOX = {
@@ -123,9 +123,16 @@ export function createEmailOutbox(host: { readonly db: Database; readonly tenant
    * pending or held CAMPAIGN email to a suppressed address is CANCELLED (UNSUBSCRIBED).
    */
   async function housekeeping(now: number): Promise<{ readonly recovered: number; readonly expired: number; readonly suppressed: number }> {
-    return db.transaction(async tx => ({
-      recovered: (await tx.query(`UPDATE flight_emails SET state = 'UNKNOWN', lease_token = NULL, lease_until = NULL, status_reason = 'LEASE_EXPIRED',
-        next_attempt_at = $2, updated_at = clock_timestamp() WHERE tenant_id = $1 AND state = 'SENDING' AND lease_until < $2`, [tenantId, at(now)])).rowCount,
+    return db.transaction(async tx => {
+      const recovered = (await tx.query(`UPDATE flight_emails SET state = 'UNKNOWN', lease_token = NULL, lease_until = NULL, status_reason = 'LEASE_EXPIRED',
+        next_attempt_at = $2, updated_at = clock_timestamp() WHERE tenant_id = $1 AND state = 'SENDING' AND lease_until < $2`, [tenantId, at(now)])).rowCount;
+      // Retired creator copy must never reach the provider, including an UNKNOWN retry. Preserve its original
+      // version/body and reservation for operator reconciliation; SENT and in-flight rows are never rewritten.
+      await tx.query(`UPDATE flight_emails SET state = 'HELD', status_reason = 'TEMPLATE_VERSION_REVIEW', updated_at = clock_timestamp()
+        WHERE tenant_id = $1 AND template = 'CREATOR_INVITE' AND template_version <> $2 AND state IN ('PENDING', 'UNKNOWN', 'HELD')`,
+      [tenantId, TEMPLATE_VERSIONS.CREATOR_INVITE]);
+      return {
+      recovered,
       expired: (await tx.query(`UPDATE flight_emails SET state = 'CANCELLED', status_reason = 'EXPIRED', reserved_at = NULL, updated_at = clock_timestamp()
         WHERE tenant_id = $1 AND state IN ('PENDING', 'HELD') AND expires_at IS NOT NULL AND expires_at <= $2
         AND (status_reason IS NULL OR NOT (status_reason = ANY($3::text[])))`, [tenantId, at(now), POSSIBLY_SENT])).rowCount,
@@ -133,7 +140,8 @@ export function createEmailOutbox(host: { readonly db: Database; readonly tenant
         FROM flight_email_suppressions s WHERE e.tenant_id = $1 AND s.tenant_id = e.tenant_id AND e.state IN ('PENDING', 'HELD') AND e.category = 'CAMPAIGN'
         AND (e.status_reason IS NULL OR NOT (e.status_reason = ANY($2::text[])))
         AND s.address_hash = ${SQL_ADDRESS_HASH('e.recipient')}`, [tenantId, POSSIBLY_SENT])).rowCount,
-    }));
+      };
+    });
   }
 
   /**
@@ -152,6 +160,10 @@ export function createEmailOutbox(host: { readonly db: Database; readonly tenant
       const campaignDay = Math.max(0, dailyLimit - Math.min(ESSENTIAL_DAILY_RESERVE, Math.floor(dailyLimit / 20)));
       const dayLimit = (row: Row) => row.category === 'ESSENTIAL' ? dailyLimit : campaignDay;
       for (const row of due) {
+        if (row.template === 'CREATOR_INVITE' && row.template_version !== TEMPLATE_VERSIONS.CREATOR_INVITE) {
+          await settleRow(tx, row.email_id, null, { kind: 'HELD', code: 'TEMPLATE_VERSION_REVIEW' }, now);
+          continue;
+        }
         if (row.batch_key && heldBatches.has(row.batch_key)) continue;
         if (row.state === 'UNKNOWN') {
           // Already reserved; retrying the same idempotency key cannot send twice — but only inside the provider's 24-hour window.
@@ -198,7 +210,7 @@ export function createEmailOutbox(host: { readonly db: Database; readonly tenant
       UNKNOWN: `state = 'UNKNOWN', status_reason = $4, next_attempt_at = $3::timestamptz + make_interval(secs => $6::double precision / 1000)`,
       RETRY: `state = 'PENDING', status_reason = $4, next_attempt_at = $3::timestamptz + make_interval(secs => $6::double precision / 1000)`,
       // A hold after a provider call that may have sent the email keeps its reservation (it may have spent the provider's quota).
-      HELD: `state = 'HELD', status_reason = $4, reserved_at = CASE WHEN $4 IN ('UNRESOLVED_OUTCOME', 'PROVIDER_IDEMPOTENCY_BODY_CHANGED', 'PROVIDER_CONFLICT')
+      HELD: `state = 'HELD', status_reason = $4, reserved_at = CASE WHEN $4 IN ('UNRESOLVED_OUTCOME', 'PROVIDER_IDEMPOTENCY_BODY_CHANGED', 'PROVIDER_CONFLICT', 'TEMPLATE_VERSION_REVIEW')
         THEN reserved_at ELSE NULL END`,
       FAILED: `state = 'FAILED', status_reason = $4, reserved_at = NULL`,
       CANCELLED: `state = 'CANCELLED', status_reason = $4, reserved_at = NULL`,
@@ -206,14 +218,17 @@ export function createEmailOutbox(host: { readonly db: Database; readonly tenant
     const value = settlement.kind === 'SENT' ? settlement.providerId : settlement.code;
     const delay = settlement.kind === 'RETRY' ? settlement.delayMs : settlement.kind === 'UNKNOWN' ? OUTBOX.unknownRetryMs : 0;
     // Fenced by the lease: a worker whose lease expired (and whose email was recovered or re-leased) cannot overwrite what happened since.
-    const result = await q.query(`UPDATE flight_emails SET ${sets[settlement.kind]}, lease_token = NULL, lease_until = NULL, updated_at = clock_timestamp()
+    const result = await q.query<{ template: EmailTemplate; entry_id: string | null }>(`UPDATE flight_emails SET ${sets[settlement.kind]}, lease_token = NULL, lease_until = NULL, updated_at = clock_timestamp()
       WHERE tenant_id = $1 AND email_id = $2 AND ($5::text IS NULL OR (state = 'SENDING' AND lease_token = $5)) AND $6::double precision >= 0
-        AND $3::timestamptz IS NOT NULL`,
+        AND $3::timestamptz IS NOT NULL RETURNING template, entry_id`,
     [tenantId, emailId, at(now), value, leaseToken, delay]);
+    if (result.rowCount && settlement.kind === 'SENT' && result.rows[0]?.template === 'EARLY_LIST') await q.query(
+      'UPDATE flight_early_list_imports SET email0_sent_at = coalesce(email0_sent_at, $3) WHERE tenant_id = $1 AND entry_id = $2',
+      [tenantId, result.rows[0].entry_id, at(now)]);
     return result.rowCount === 1;
   }
   /** Settle a leased email (fenced by its lease: a worker whose lease expired cannot overwrite what happened since). */
-  const settle = (row: EmailRow, settlement: Settlement, now: number) => settleRow(db, row.emailId, row.leaseToken ?? 'none', settlement, now);
+  const settle = (row: EmailRow, settlement: Settlement, now: number) => db.transaction(tx => settleRow(tx, row.emailId, row.leaseToken ?? 'none', settlement, now));
 
   // The scheduler: idempotent inserts, safe to run on every cycle of every worker.
   /** Email 2 for every beta-list entry that has not boarded, from `eveAt` until boarding opens. */
@@ -224,6 +239,7 @@ export function createEmailOutbox(host: { readonly db: Database; readonly tenant
       SELECT e.tenant_id, 'fem_' || replace(gen_random_uuid()::text, '-', ''), 'eve:' || e.entry_id, 'EVE', $2, 'CAMPAIGN', e.email, e.language, 'eve_schedule', 'eve',
         e.entry_id, $3, $4, $3
       FROM flight_list_entries e WHERE e.tenant_id = $1 AND e.flight = 'FIRST' AND e.boarded_at IS NULL
+        AND NOT EXISTS (SELECT 1 FROM flight_early_list_imports i WHERE i.tenant_id = e.tenant_id AND i.entry_id = e.entry_id AND NOT i.campaign_consent)
         AND NOT EXISTS (SELECT 1 FROM flight_email_suppressions s WHERE s.tenant_id = e.tenant_id AND s.address_hash = ${SQL_ADDRESS_HASH('e.email')})
       ON CONFLICT (tenant_id, dedupe_key) DO NOTHING`, [tenantId, TEMPLATE_VERSIONS.EVE, at(eveAt), at(boardingOpensAt)])).rowCount;
   }
@@ -239,6 +255,7 @@ export function createEmailOutbox(host: { readonly db: Database; readonly tenant
         'group_opened', 'group-' || coalesce(e.batch_no, 0), e.entry_id, $3, $3::timestamptz + interval '7 days', $3
       FROM flight_list_entries e LEFT JOIN flight_batches b ON b.tenant_id = e.tenant_id AND b.batch_no = e.batch_no
       WHERE e.tenant_id = $1 AND e.flight = 'FIRST' AND e.boarded_at IS NULL AND greatest(coalesce(b.opens_at, $4::timestamptz), $4::timestamptz) <= $3
+        AND NOT EXISTS (SELECT 1 FROM flight_early_list_imports i WHERE i.tenant_id = e.tenant_id AND i.entry_id = e.entry_id AND NOT i.campaign_consent)
         AND NOT EXISTS (SELECT 1 FROM flight_email_suppressions s WHERE s.tenant_id = e.tenant_id AND s.address_hash = ${SQL_ADDRESS_HASH('e.email')})
       ON CONFLICT (tenant_id, dedupe_key) DO NOTHING`, [tenantId, TEMPLATE_VERSIONS.GROUP_BOARDING, at(now), at(boardingOpensAt)])).rowCount;
   }
@@ -250,8 +267,35 @@ export function createEmailOutbox(host: { readonly db: Database; readonly tenant
       SELECT e.tenant_id, 'fem_' || replace(gen_random_uuid()::text, '-', ''), 'list:' || e.entry_id, 'LIST_CONFIRMATION', $2, 'CAMPAIGN', e.email, e.language,
         'backfill', 'list-backfill', e.entry_id, $3, $4, $3
       FROM flight_list_entries e WHERE e.tenant_id = $1 AND e.flight = 'FIRST' AND e.boarded_at IS NULL
+        AND NOT EXISTS (SELECT 1 FROM flight_early_list_imports i WHERE i.tenant_id = e.tenant_id AND i.entry_id = e.entry_id AND NOT i.campaign_consent)
         AND NOT EXISTS (SELECT 1 FROM flight_email_suppressions s WHERE s.tenant_id = e.tenant_id AND s.address_hash = ${SQL_ADDRESS_HASH('e.email')})
       ON CONFLICT (tenant_id, dedupe_key) DO NOTHING`, [tenantId, TEMPLATE_VERSIONS.LIST_CONFIRMATION, at(now), at(listClosesAt)])).rowCount;
+  }
+
+  /**
+   * Email 0 is operator-triggered only. Reserve it durably with its outbox row, once even after settled rows are pruned.
+   * Recipients are split into quota-sized batch keys so a list larger than the campaign day budget can still send the
+   * portion that fits, instead of holding every message behind one indivisible `early-list` reservation.
+   */
+  async function scheduleEarlyList(now: number, sendAt: number, boardingOpensAt: number): Promise<number> {
+    if (!Number.isFinite(sendAt) || sendAt >= boardingOpensAt || now >= boardingOpensAt) throw new Error('FLIGHT_EMAIL0_WINDOW_CLOSED');
+    const campaignDay = Math.max(1, dailyLimit - Math.min(ESSENTIAL_DAILY_RESERVE, Math.floor(dailyLimit / 20)));
+    return db.transaction(async tx => {
+      const entries = (await tx.query<{ entry_id: string; email: string; language: 'EN' | 'PT' }>(`SELECT e.entry_id, e.email, e.language
+        FROM flight_early_list_imports i JOIN flight_list_entries e ON e.tenant_id = i.tenant_id AND e.entry_id = i.entry_id
+        WHERE i.tenant_id = $1 AND i.campaign_consent AND i.email0_enqueued_at IS NULL AND e.flight = 'FIRST'
+          AND NOT EXISTS (SELECT 1 FROM flight_early_list_imports i WHERE i.tenant_id = e.tenant_id AND i.entry_id = e.entry_id AND NOT i.campaign_consent)
+        AND NOT EXISTS (SELECT 1 FROM flight_email_suppressions s WHERE s.tenant_id = e.tenant_id AND s.address_hash = ${SQL_ADDRESS_HASH('e.email')})
+        ORDER BY e.joined_at, e.entry_id FOR UPDATE OF i`, [tenantId])).rows;
+      let enqueued = 0;
+      for (const [index, entry] of entries.entries()) {
+        const batchKey = `early-list-${Math.floor(index / campaignDay)}`;
+        if (await enqueueEmail(tx, tenantId, { template: 'EARLY_LIST', recipient: entry.email, language: entry.language, trigger: 'google_forms_import',
+          dedupeKey: `early:${entry.entry_id}`, notBefore: sendAt, expiresAt: boardingOpensAt, entryId: entry.entry_id, batchKey })) enqueued++;
+        await tx.query('UPDATE flight_early_list_imports SET email0_enqueued_at = $3 WHERE tenant_id = $1 AND entry_id = $2', [tenantId, entry.entry_id, at(now)]);
+      }
+      return enqueued;
+    });
   }
 
   // Suppressions.
@@ -321,9 +365,14 @@ export function createEmailOutbox(host: { readonly db: Database; readonly tenant
   /** An UNKNOWN or held email the operator confirmed in the provider's log as delivered: recorded as SENT, never sent again. */
   async function markDelivered(emailId: string, providerId: string, now: number): Promise<boolean> {
     if (!/^[A-Za-z0-9-]{1,100}$/.test(providerId)) throw new Error('FLIGHT_PROVIDER_ID_INVALID');
-    return (await db.query(`UPDATE flight_emails SET state = 'SENT', sent_at = $3, provider_id = $4, status_reason = 'OPERATOR_CONFIRMED', lease_token = NULL,
-      lease_until = NULL, reserved_at = coalesce(reserved_at, $3), updated_at = clock_timestamp() WHERE tenant_id = $1 AND email_id = $2 AND state IN ('UNKNOWN', 'HELD')`,
-    [tenantId, emailId, at(now), providerId])).rowCount === 1;
+    return db.transaction(async tx => {
+      const result = await tx.query<{ template: EmailTemplate; entry_id: string | null }>(`UPDATE flight_emails SET state = 'SENT', sent_at = $3, provider_id = $4,
+        status_reason = 'OPERATOR_CONFIRMED', lease_token = NULL, lease_until = NULL, reserved_at = coalesce(reserved_at, $3), updated_at = clock_timestamp()
+        WHERE tenant_id = $1 AND email_id = $2 AND state IN ('UNKNOWN', 'HELD') RETURNING template, entry_id`, [tenantId, emailId, at(now), providerId]);
+      if (result.rowCount && result.rows[0]?.template === 'EARLY_LIST') await tx.query(
+        'UPDATE flight_early_list_imports SET email0_sent_at = coalesce(email0_sent_at, $3) WHERE tenant_id = $1 AND entry_id = $2', [tenantId, result.rows[0].entry_id, at(now)]);
+      return result.rowCount === 1;
+    });
   }
   /** Retention: settled emails (with their address) are deleted 90 days after they settled. */
   async function prune(now: number): Promise<number> {
@@ -331,8 +380,48 @@ export function createEmailOutbox(host: { readonly db: Database; readonly tenant
       [tenantId, at(now), OUTBOX.settledRetentionDays])).rowCount;
   }
 
-  return { usage, control, setPaused, block, clearBlock, housekeeping, lease, settle, scheduleEve, scheduleBoarding, backfillConfirmations, suppress, isSuppressed,
-    unsubscribe, status, listAttention, release, cancel, markDelivered, prune, limits: { daily: dailyLimit, monthly: monthlyLimit } };
+  /**
+   * Controlled replacement for unsent CREATOR_INVITE rows held as TEMPLATE_VERSION_REVIEW.
+   * Preserves the original invite code and recipient. Never touches SENT. Never upgrades UNKNOWN
+   * (it may already have reached the provider). Never bulk-releases retired TEST copy.
+   */
+  async function supersedeCreatorTemplates(now: number, boardingOpensAt: number, options: { readonly max?: number; readonly apply?: boolean } = {}): Promise<{
+    readonly eligible: number; readonly superseded: number; readonly skippedUnknown: number; readonly skippedSent: number;
+  }> {
+    const max = options.max ?? 1_000;
+    if (!Number.isSafeInteger(max) || max < 1) throw new Error('FLIGHT_SUPERSEDE_MAX_INVALID');
+    return db.transaction(async tx => {
+      const unknownOrSent = (await tx.query<{ state: string; n: string }>(`SELECT state, count(*)::text AS n FROM flight_emails
+        WHERE tenant_id = $1 AND template = 'CREATOR_INVITE' AND template_version <> $2 AND state IN ('UNKNOWN', 'SENT')
+        GROUP BY state`, [tenantId, TEMPLATE_VERSIONS.CREATOR_INVITE])).rows;
+      let skippedUnknown = 0, skippedSent = 0;
+      for (const row of unknownOrSent) {
+        if (row.state === 'UNKNOWN') skippedUnknown = Number(row.n);
+        if (row.state === 'SENT') skippedSent = Number(row.n);
+      }
+      const held = (await tx.query<{ email_id: string; recipient: string; language: EmailLanguage; invite_code: string | null;
+        reserved_at: Date | null; first_attempt_at: Date | null; attempts: number }>(`SELECT email_id, recipient, language, invite_code, reserved_at, first_attempt_at, attempts
+        FROM flight_emails WHERE tenant_id = $1 AND template = 'CREATOR_INVITE' AND template_version <> $2
+          AND state = 'HELD' AND status_reason = 'TEMPLATE_VERSION_REVIEW'
+          AND reserved_at IS NULL AND first_attempt_at IS NULL AND attempts = 0 AND invite_code IS NOT NULL
+        ORDER BY created_at, email_id LIMIT $3 FOR UPDATE`, [tenantId, TEMPLATE_VERSIONS.CREATOR_INVITE, max])).rows;
+      if (!options.apply) return { eligible: held.length, superseded: 0, skippedUnknown, skippedSent };
+      let superseded = 0;
+      for (const row of held) {
+        await tx.query(`UPDATE flight_emails SET state = 'CANCELLED', status_reason = 'TEMPLATE_SUPERSEDED', reserved_at = NULL, updated_at = clock_timestamp()
+          WHERE tenant_id = $1 AND email_id = $2 AND state = 'HELD' AND status_reason = 'TEMPLATE_VERSION_REVIEW'`, [tenantId, row.email_id]);
+        if (await enqueueEmail(tx, tenantId, {
+          template: 'CREATOR_INVITE', recipient: row.recipient, language: row.language, trigger: 'creator_template_superseded',
+          dedupeKey: `creator-v${TEMPLATE_VERSIONS.CREATOR_INVITE}:${row.invite_code!.toLowerCase()}`, notBefore: now,
+          expiresAt: boardingOpensAt, inviteCode: row.invite_code, batchKey: null,
+        })) superseded++;
+      }
+      return { eligible: held.length, superseded, skippedUnknown, skippedSent };
+    });
+  }
+
+  return { usage, control, setPaused, block, clearBlock, housekeeping, lease, settle, scheduleEve, scheduleBoarding, backfillConfirmations, scheduleEarlyList, suppress, isSuppressed,
+    unsubscribe, status, listAttention, release, cancel, markDelivered, prune, supersedeCreatorTemplates, limits: { daily: dailyLimit, monthly: monthlyLimit } };
 }
 export type EmailOutbox = ReturnType<typeof createEmailOutbox>;
 

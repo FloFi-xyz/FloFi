@@ -13,7 +13,7 @@
  */
 import { createHash, createHmac, hkdfSync, randomBytes, timingSafeEqual } from 'node:crypto';
 import { walletSessionKey } from '../server/wallet-session.ts';
-import { ACCOUNT_ID, type SessionMethod } from './account-model.ts';
+import { ACCOUNT_ID, canonicalAddress, type SessionMethod } from './account-model.ts';
 
 type Env = Readonly<Record<string, string | undefined>>;
 export const ACCOUNT_SESSION_COOKIE = 'flofi_account_session';
@@ -25,7 +25,7 @@ export const ACCOUNT_FLOW_TTL_SECONDS = 600;
 export const ACCOUNT_REAUTH_SECONDS = 10 * 60;
 
 export type AccountSessionToken = { readonly accountId: string; readonly sessionId: string; readonly method: SessionMethod;
-  readonly authenticatedAt: number; readonly expiresAt: number };
+  readonly authenticatedAt: number; readonly expiresAt: number; readonly loginWallet?: string };
 export type OidcProvider = 'google' | 'apple';
 export type AccountIntent = 'sign-in' | 'link';
 export type OidcFlow = { readonly provider: OidcProvider; readonly state: string; readonly nonce: string; readonly verifier: string;
@@ -82,7 +82,7 @@ export function newAccountId(): string { return `acct_${randomBytes(16).toString
 
 export function sealAccountSession(env: Env, session: AccountSessionToken, domain: string, now: Date): string {
   if (!ACCOUNT_ID.test(session.accountId) || !HEX32.test(session.sessionId) || !METHODS.includes(session.method)) throw new Error('ACCOUNT_SESSION_INVALID');
-  return seal('a1', { a: session.accountId, s: session.sessionId, m: session.method, t: session.authenticatedAt, i: seconds(now), e: session.expiresAt, d: domain },
+  return seal('a1', { a: session.accountId, s: session.sessionId, m: session.method, t: session.authenticatedAt, i: seconds(now), e: session.expiresAt, d: domain, w: session.loginWallet },
     accountKey(env));
 }
 /** The sealed claims of an account cookie, or null (absent, tampered, expired, another key or host). The store still decides. */
@@ -90,7 +90,9 @@ export function readAccountSession(env: Env, token: string | undefined, now: Dat
   const key = keyOrNull(env), v = key && unseal('a1', token, key, now, domain);
   if (!v || typeof v.a !== 'string' || !ACCOUNT_ID.test(v.a) || typeof v.s !== 'string' || !HEX32.test(v.s)
     || !METHODS.includes(v.m as SessionMethod) || !Number.isSafeInteger(v.t) || (v.t as number) > seconds(now) + 60) return null;
-  return { accountId: v.a, sessionId: v.s, method: v.m as SessionMethod, authenticatedAt: v.t as number, expiresAt: v.e as number };
+  const loginWallet = v.m === 'eip155' ? canonicalAddress('evm', v.w) : v.m === 'solana' ? canonicalAddress('solana', v.w) : null;
+  return { accountId: v.a, sessionId: v.s, method: v.m as SessionMethod, authenticatedAt: v.t as number, expiresAt: v.e as number,
+    ...(loginWallet ? { loginWallet } : {}) };
 }
 /** Whether a session signed in recently enough for a sensitive action. */
 export const freshlyAuthenticated = (session: Pick<AccountSessionToken, 'authenticatedAt'>, now: Date) =>

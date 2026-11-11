@@ -119,6 +119,16 @@ const EN = {
   subscribed: (owner: string, days: number) => `This chat now receives FloFi automation notifications for ${owner} (for ${days} days; send STOP to end them, or unlink in FloFi). A notification never authorizes anything: it only points you to FloFi, where your own wallet decides.`,
   subscribeFailed: 'That code is not valid (it may have expired or been used). Create a new one in FloFi → Automations → Notifications.',
   subscribeUnavailable: 'Automation notifications are not available in this chat.',
+  /** Closed-beta guidance: never a grant. Linking uses FloFi's one-time automation code; Flight access is checked server-side afterwards. */
+  betaAccess: (code: string) => code === 'BETA_CHANNEL_NOT_LINKED'
+    ? 'This chat is not linked to a FloFi Flight wallet yet. In FloFi open Automations → Notifications, create a one-time code, then send: automations CODE. HELP shows commands; STOP ends messages. Linking does not authorize funds or grant Flight access by itself.'
+    : code === 'BETA_ACCESS_REVOKED' || code === 'BETA_ACCESS_DENIED' || code === 'BETA_WALLET_NOT_LINKED' || code === 'BETA_WALLET_REQUIRED'
+      ? 'FloFi Flight access for the linked wallet is not active. You can still check STATUS of earlier proposals and send STOP. New strategies need active Flight access in FloFi — messages here never authorize funds.'
+      : code === 'BETA_NOT_OPEN'
+        ? 'FloFi Flight boarding is not open yet. You can link this chat, ask HELP, or send STOP. Private strategies open with boarding.'
+        : code === 'BETA_CHANNEL_ACCESS_CLOSED'
+          ? 'Private authoring on this channel is not available during the closed Flight beta. HELP, privacy and STOP still work; delivery and status for earlier work continue.'
+          : `Private channel authoring is unavailable right now (${code}). HELP and STOP still work; messages here never authorize funds.`,
   grammarOnly: 'I could not read that as a strategy. Try for example: "supply 100 USDC to Aave on Base beneficiary 0x…" or "swap 1 USDC to WETH on Base slippage 50 bps". Send HELP for more.',
   choose: 'Reply with the number of your choice.',
   busy: 'Too many messages right now — please wait a moment and try again.',
@@ -220,6 +230,15 @@ const PT: Copy = {
   subscribed: (owner, days) => `Esta conversa agora recebe as notificações de automações do FloFi para ${owner} (por ${days} dias; envie PARAR para encerrar, ou desvincule no FloFi). Uma notificação nunca autoriza nada: ela só leva você ao FloFi, onde a sua própria carteira decide.`,
   subscribeFailed: 'Esse código não é válido (pode ter expirado ou já ter sido usado). Crie um novo no FloFi → Automações → Notificações.',
   subscribeUnavailable: 'As notificações de automações não estão disponíveis nesta conversa.',
+  betaAccess: (code: string) => code === 'BETA_CHANNEL_NOT_LINKED'
+    ? 'Esta conversa ainda não está vinculada a uma carteira FloFi Flight. No FloFi abra Automações → Notificações, crie um código de uso único e envie: automacoes CODIGO. AJUDA mostra os comandos; PARAR encerra as mensagens. Vincular não autoriza fundos nem concede acesso Flight sozinho.'
+    : code === 'BETA_ACCESS_REVOKED' || code === 'BETA_ACCESS_DENIED' || code === 'BETA_WALLET_NOT_LINKED' || code === 'BETA_WALLET_REQUIRED'
+      ? 'O acesso FloFi Flight da carteira vinculada não está ativo. Você ainda pode consultar ESTADO de propostas anteriores e enviar PARAR. Novas estratégias exigem acesso Flight ativo no FloFi — mensagens aqui nunca autorizam fundos.'
+      : code === 'BETA_NOT_OPEN'
+        ? 'O embarque FloFi Flight ainda não abriu. Você pode vincular esta conversa, pedir AJUDA ou enviar PARAR. Estratégias privadas abrem com o embarque.'
+        : code === 'BETA_CHANNEL_ACCESS_CLOSED'
+          ? 'A autoria privada neste canal não está disponível durante o beta fechado do Flight. AJUDA, privacidade e PARAR continuam; entrega e status de trabalhos anteriores seguem.'
+          : `A autoria privada no canal está indisponível agora (${code}). AJUDA e PARAR continuam; mensagens aqui nunca autorizam fundos.`,
   grammarOnly: 'Não consegui ler isso como uma estratégia. Tente por exemplo: "supply 100 USDC to Aave on Base beneficiary 0x…" ou "swap 1 USDC to WETH on Base slippage 50 bps". Envie AJUDA para mais.',
   choose: 'Responda com o número da sua escolha.',
   busy: 'Muitas mensagens agora — espere um momento e tente de novo.',

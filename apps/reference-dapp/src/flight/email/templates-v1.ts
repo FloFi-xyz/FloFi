@@ -11,7 +11,8 @@
  * - Every email carries the risk footer, the privacy policy link and a one-click unsubscribe (List-Unsubscribe, RFC 8058).
  * - Dates come from the deployment's campaign calendar, in Brasília time (America/Sao_Paulo), never from a date written here.
  */
-import type { FlightCalendar } from '../campaign.ts';
+// Legacy renderers retain their calendar shape; current campaign rules have no creator phase.
+type FlightCalendar = import('../campaign.ts').FlightCalendar & { readonly creatorsOpenAt: number };
 
 export type EmailTemplate = 'LIST_CONFIRMATION' | 'EVE' | 'GROUP_BOARDING' | 'ACCESS_REQUESTED' | 'CARD_FOUNDING' | 'CARD_PASSENGER' | 'NEXT_FLIGHT' | 'CREATOR_INVITE';
 export type EmailLanguage = 'EN' | 'PT';

@@ -7,7 +7,7 @@
 import { randomBytes } from 'node:crypto';
 import { describe, expect, it, vi } from 'vitest';
 import { addressHash, codeFor, codeHash, linkTokenFor, LINK_TOKEN, normalizeCode, readUnsubscribeToken, sameHex, tokenIdFor, unsubscribeTokenFor } from './access';
-import { cardPublicIdFrom, carriesInvites, decideAccess, FLIGHT_BOARDING_OPENS_AT, FLIGHT_CREATORS_OPEN_AT, FLIGHT_DEFAULT_CALENDAR, flightCalendarFrom } from './campaign';
+import { cardPublicIdFrom, carriesInvites, decideAccess, FLIGHT_BOARDING_OPENS_AT, FLIGHT_DEFAULT_CALENDAR, flightCalendarFrom } from './campaign';
 import { classifyResend, createResendClient } from './email/resend';
 import { renderEmail, TEMPLATE_CATEGORY, TEMPLATE_DEVIATIONS, TEMPLATE_VERSIONS, type CardView, type EmailContext, type TemplateInput } from './email/templates';
 import { emailLimitsFrom } from './email/outbox';
@@ -58,19 +58,16 @@ describe('campaign rules of 9 Nov 2026', () => {
     expect(carriesInvites({ foundingSeat: 1, origin: 'CREATOR' })).toBe(false);
     expect(carriesInvites({ foundingSeat: null, origin: 'LIST' })).toBe(false);
   });
-  it('opens a TEST flight for invited creators on 11 Nov 14:00–18:00 BRT only; nobody else boards before 12 Nov 9:00', () => {
-    const test = { passId: null, invite: 'CREATOR' as const, entry: null };
-    expect(decideAccess({ ...test, now: FLIGHT_CREATORS_OPEN_AT - 1 }).kind).toBe('not_yet');
-    expect(decideAccess({ ...test, now: FLIGHT_CREATORS_OPEN_AT })).toEqual({ kind: 'test_flight', endsAt: FLIGHT_CREATORS_OPEN_AT + 4 * 3_600_000 });
-    expect(decideAccess({ ...test, now: FLIGHT_CREATORS_OPEN_AT + 4 * 3_600_000 }).kind).toBe('not_yet');
-    expect(decideAccess({ ...test, invite: 'FOUNDING', now: FLIGHT_CREATORS_OPEN_AT + 1 }).kind).toBe('not_yet');
-    expect(decideAccess({ passId: null, invite: null, entry: { flight: 'FIRST', batch: null, opensAt: null }, now: FLIGHT_CREATORS_OPEN_AT + 1 }).kind).toBe('not_yet');
-    expect(decideAccess({ ...test, now: FLIGHT_BOARDING_OPENS_AT })).toEqual({ kind: 'eligible', origin: 'CREATOR' });
+  it('opens list members, guests and creators together; no early simulation entitlement exists', () => {
+    for (const invite of ['FOUNDING', 'CREATOR'] as const) {
+      expect(decideAccess({ passId: null, invite, entry: null, now: FLIGHT_BOARDING_OPENS_AT - 1 })).toEqual({ kind: 'not_yet', opensAt: FLIGHT_BOARDING_OPENS_AT });
+      expect(decideAccess({ passId: null, invite, entry: null, now: FLIGHT_BOARDING_OPENS_AT }).kind).toBe('eligible');
+    }
+    expect(decideAccess({ passId: null, invite: null, entry: { flight: 'FIRST', batch: null, opensAt: null }, now: FLIGHT_BOARDING_OPENS_AT - 1 }).kind).toBe('not_yet');
   });
-  it('reads the creators’ opening and Email 2 time from the environment, refusing a value after boarding', () => {
-    expect(flightCalendarFrom({ FLOFI_FLIGHT_CREATORS_OPEN_AT: '2026-11-11T15:00:00-03:00' }).calendar?.creatorsOpenAt).toBe(Date.parse('2026-11-11T18:00:00Z'));
+  it('ignores obsolete creator phase settings and refuses an Email 2 after boarding', () => {
+    expect(flightCalendarFrom({ FLOFI_FLIGHT_CREATORS_OPEN_AT: 'tomorrow', FLOFI_BETA_PHASE: 'test' }).calendar).toEqual(FLIGHT_DEFAULT_CALENDAR);
     expect(flightCalendarFrom({ FLOFI_FLIGHT_EVE_EMAIL_AT: '2026-11-13T20:00:00-03:00' })).toEqual({ calendar: null, invalid: ['FLOFI_FLIGHT_EVE_EMAIL_AT'] });
-    expect(flightCalendarFrom({ FLOFI_FLIGHT_CREATORS_OPEN_AT: 'tomorrow' })).toEqual({ calendar: null, invalid: ['FLOFI_FLIGHT_CREATORS_OPEN_AT'] });
   });
   it('makes card ids random base32, never sequential', () => {
     const id = cardPublicIdFrom(new Uint8Array(12).fill(7));
@@ -91,7 +88,7 @@ describe('the seven emails', () => {
   const card = (founding: boolean): CardView => ({ founding, seat: founding ? '#042' : '214E', handle: 'ana<script>', from: 'ETH', to: 'BASE', stepCount: 2, networkCount: 2,
     departedAt: '2026-11-12T12:30:00Z', publicUrl: 'https://flofi.xyz/card/abcdefghijkl', imageUrl: 'https://flofi.xyz/card/abcdefghijkl/image',
     downloadUrl: 'https://flofi.xyz/card/abcdefghijkl/image?download=1' });
-  const access = { accessUrl: 'https://flofi.xyz/board/access?l=en#t=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA', code: '482913', codeMinutes: 4320, linkHours: 72,
+  const access = { accessUrl: 'https://flofi.xyz/board/access?l=en#t=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA', code: '482913', codeMinutes: 15, linkHours: 72,
     foundingOpen: true, group: 3 } as const;
   const inputs: TemplateInput[] = [{ template: 'LIST_CONFIRMATION' }, { template: 'EVE' }, { template: 'GROUP_BOARDING', ...access },
     { template: 'ACCESS_REQUESTED', ...access, codeMinutes: 15 }, { template: 'CARD_FOUNDING', card: card(true), invites: ['FLF-7Q2K-9XMB', 'FLF-ABCD-EFGH', 'FLF-JKMN-PQRS'],
@@ -100,12 +97,13 @@ describe('the seven emails', () => {
 
   it('renders every template in both languages with the approved subject, the risk footer, privacy and unsubscribe, and no count of people', () => {
     const subjects: Record<string, [string, string]> = {
+      EARLY_LIST: ['You were early. Your Flight FloFi seat is saved ✈️', 'Você chegou cedo. Seu lugar no Flight FloFi está guardado ✈️'],
       LIST_CONFIRMATION: ['You’re on the FloFi beta list ✈️', 'Você está na lista beta da FloFi ✈️'], EVE: ['Boarding starts tomorrow, 9:00 BRT ✈️', 'O embarque começa amanhã, às 9h ✈️'],
       GROUP_BOARDING: ['Your group is boarding ✈️', 'Seu grupo está embarcando ✈️'], ACCESS_REQUESTED: ['Your group is boarding ✈️', 'Seu grupo está embarcando ✈️'],
       CARD_FOUNDING: ['You’re Founding Member #042 ✈️', 'Você é Founding Member #042 ✈️'], CARD_PASSENGER: ['Your Flight FloFi boarding card ✈️', 'Seu cartão de embarque do Flight FloFi ✈️'],
       NEXT_FLIGHT: ['You’re on the list for the next flight ✈️', 'Você está na lista do próximo voo ✈️'], CREATOR_INVITE: ['You’re invited to Flight FloFi ✈️', 'Seu convite para o Flight FloFi ✈️'],
     };
-    for (const input of inputs) for (const [index, language] of (['EN', 'PT'] as const).entries()) {
+    for (const input of [...inputs, { template: 'EARLY_LIST' } as const]) for (const [index, language] of (['EN', 'PT'] as const).entries()) {
       const email = renderEmail(input, ctx(language));
       expect(email.subject).toBe(subjects[input.template]![index]);
       for (const part of [email.html, email.text]) {
@@ -139,9 +137,11 @@ describe('the seven emails', () => {
     const moved = { ...ctx('EN'), calendar: { ...FLIGHT_DEFAULT_CALENDAR, boardingOpensAt: Date.parse('2026-11-19T12:30:00Z') } };
     expect(renderEmail({ template: 'EVE' }, moved).subject).toBe('Boarding starts tomorrow, 9:30 BRT ✈️');
     const creator = renderEmail({ template: 'CREATOR_INVITE', code: 'FLF-7Q2K-9XMB', briefUrl: 'https://claude.ai/artifact/Ed64YTYtYmUWVgnT8NEZD5' }, ctx('EN'));
-    expect(creator.text).toContain('Wednesday, 14:00 to 18:00 BRT');
+    expect(creator.text).toContain('Thursday from 9:00 BRT');
     expect(creator.text).toContain('FLF-7Q2K-9XMB');
-    expect(creator.text).toContain('marked TEST');
+    expect(creator.text).not.toMatch(/TEST|Wednesday|test flight|early boarding/i);
+    expect(creator.preheader).toBe('Your invite code and the plan for Thursday.');
+    expect(TEMPLATE_VERSIONS.CREATOR_INVITE).toBe(3);
   });
   it('shows the card’s real seat, route and image in 4a/4b, the three invites only in 4a, and escapes the handle', () => {
     const founding = renderEmail(inputs[4]!, ctx('EN')), passenger = renderEmail(inputs[5]!, ctx('EN'));

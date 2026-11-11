@@ -12,6 +12,7 @@
  *     never reaches the API;
  *   - anything else fails closed.
  */
+import { betaIdentityHeaders, currentBetaIdentity } from '../flight/beta-context.ts';
 import { randomUUID } from 'node:crypto';
 import { cloudApiBaseUrl, type FlowResult } from './cloud-api-client.ts';
 import { flowRuntimeKind } from './flow-runtime.ts';
@@ -34,7 +35,7 @@ const failure = (cause: unknown, fallback = 'AUTOMATION_UNAVAILABLE') => ({ ok: 
 async function forward<T>(env: Env, transport: typeof fetch, path: string, headers: Record<string, string>, args: readonly unknown[], unavailable: string): Promise<FlowResult<T>> {
   const base = cloudApiBaseUrl(env)!;
   const response = await transport(new URL(path, base.href.endsWith('/') ? base : new URL(base.href + '/')), { method: 'POST', cache: 'no-store', redirect: 'error',
-    signal: AbortSignal.timeout(30_000), headers: { 'content-type': 'application/json', ...env.API_AUTH_TOKEN ? { authorization: `Bearer ${env.API_AUTH_TOKEN}` } : {}, ...headers },
+    signal: AbortSignal.timeout(30_000), headers: { 'content-type': 'application/json', ...betaIdentityHeaders(currentBetaIdentity()), ...env.API_AUTH_TOKEN ? { authorization: `Bearer ${env.API_AUTH_TOKEN}` } : {}, ...headers },
     body: JSON.stringify({ args }) });
   if (response.status === 404) return { ok: false, code: 'AUTOMATIONS_NOT_ENABLED' };
   const body = await response.json().catch(() => null) as { ok?: unknown; value?: unknown; code?: unknown } | null;

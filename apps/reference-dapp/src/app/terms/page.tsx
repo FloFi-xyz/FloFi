@@ -165,7 +165,7 @@ export default async function TermsPage() {
         <p>{PT ? 'Beta da FloFi · Versão de 12 de novembro de 2026' : 'FloFi beta · Version of November 12, 2026'}</p>
       </div>
       <div className={styles.language}>
-        {sections[language].map((section, index) => <section key={section.title} aria-labelledby={`terms-${index + 1}`}>
+        {sections[language].map((section, index) => <section key={section.title} id={index === 5 ? "risks" : undefined} aria-labelledby={`terms-${index + 1}`}>
           <h2 id={`terms-${index + 1}`} className={styles.sectionTitle}>{section.title}</h2>
           <p>{index === 12 ? <>{section.body} <a href="/privacy">{PT ? 'Política de Privacidade' : 'Privacy Policy'}</a></> : section.body}</p>
         </section>)}

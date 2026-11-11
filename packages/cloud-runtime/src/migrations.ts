@@ -56,6 +56,9 @@ export const SHIPPED_MIGRATIONS: readonly MigrationIdentity[] = Object.freeze([
   { version: 23, name: 'user_funded_groups', sha256: 'aea46318eee01184af97a814bb88a19dd0a1ad60e9b64b6079de39d7a6b7594e' },
   // BUILD-FLOFI-FLIGHT-LAUNCH-001: Flight FloFi launch completion (email outbox, access links and codes, claims, unsubscribe, card public ids). Additive.
   { version: 24, name: 'flight_launch', sha256: 'a9def02ddd0ec6ccd89181dc51d9f7f50a20b9265feec8b236abd9e4a3fa7bc0' },
+  // BUILD-FLOFI-FLIGHT-GATE-002: beta grants, invite expiry/revocation and Google Forms provenance.
+  { version: 25, name: 'flight_gate', sha256: 'f150b1259014b90d6dbe249ad43d23b3a13ccfb9c53a0f0cc214200d7866abc0' },
+  { version: 26, name: 'flight_early_list', sha256: '51fc9c3195ba179a4068b7c66a267216ed102d0a65f1c59a6e94fd8fb34f10c8' },
 ].map(migration => Object.freeze(migration)));
 
 /**

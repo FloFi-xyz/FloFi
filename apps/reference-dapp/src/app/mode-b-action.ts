@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 'use server';
+import { withFlightAccess, withFlightOwner } from '../server/flight-access';
+import { assertExecutionEnabled } from '../server/execution-guard';
 import { readFileSync } from 'node:fs';
 import { isAbsolute } from 'node:path';
 import type { SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
@@ -40,6 +42,7 @@ async function run<T>(fn: (service: Service) => Promise<T>): Promise<Result<T>> 
 }
 export async function modeBInfo(): Promise<Result<{ available: boolean; owner?: string; executor?: string; safe?: string;
   executions?: readonly { executionId: string; preparedAt: string }[] }>> {
+  return withFlightAccess(async () => {
   try {
     const value = runtime();
     if (!value) return { ok: true, value: { available: false } };
@@ -47,35 +50,56 @@ export async function modeBInfo(): Promise<Result<{ available: boolean; owner?: 
     const { owner, executor, safe } = value.profile;
     return { ok: true, value: { available: true, owner, executor, safe, executions: await value.service.list() } };
   } catch (error) { return { ok: false, code: code(error) }; }
+
+  });
 }
 export async function modeBPrepare(input: unknown) {
+  return withFlightAccess(async () => {
   return run(service => service.prepare((input as { workflow?: unknown } | null)?.workflow as SemanticWorkflow));
+
+  });
 }
 export async function modeBExecution(input: unknown) {
+  return withFlightOwner(async () => {
   return run(service => service.status(id(input)));
+
+  });
 }
 export async function modeBInstallationStep(input: unknown) {
+  return withFlightAccess(async () => {
+  assertExecutionEnabled();
   return run(service => {
     const index = (input as { index?: unknown } | null)?.index;
     if (!Number.isSafeInteger(index)) throw new Error('MODE_B_INPUT_INVALID');
     return service.installationStep(id(input), index as number);
   });
+
+  });
 }
 export async function modeBConfirm(input: unknown) {
+  return withFlightOwner(async () => {
   return run(service => {
     const value = input as { phase?: unknown; index?: unknown; hash?: unknown } | null;
     if ((value?.phase !== 'installation' && value?.phase !== 'revocation') || !Number.isSafeInteger(value.index) ||
       typeof value.hash !== 'string' || !HASH.test(value.hash)) throw new Error('MODE_B_INPUT_INVALID');
     return service.confirm(id(input), value.phase, value.index as number, value.hash);
   });
+
+  });
 }
 export async function modeBRunWorker(input: unknown) {
+  return withFlightAccess(async () => {
   return run(service => {
     const keyPath = process.env.GRYLOO_MODE_B_EXECUTOR_KEY_FILE;
     if (!keyPath) throw new Error('MODE_B_LOCAL_KEY_UNAVAILABLE');
     return service.worker(id(input), keyPath);
   });
+
+  });
 }
 export async function modeBReconcile(input: unknown) {
+  return withFlightOwner(async () => {
   return run(service => service.reconcile(id(input)));
+
+  });
 }

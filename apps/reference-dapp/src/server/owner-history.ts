@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import type { HistoryDisposition, HistoryKind } from '@defi-workflow-engine/cloud-runtime';
+import { betaIdentityHeaders, currentBetaIdentity } from '../flight/beta-context.ts';
 import { cloudApiBaseUrl } from './cloud-api-client.ts';
 import { embeddedRuntime, flowRuntimeKind } from './flow-runtime.ts';
 import { historyPrincipals } from './history-principals.ts';
@@ -18,12 +19,12 @@ export async function ownerHistoryOperation(expectedAccount: string, method: 'ch
     const principal = expected && principals.find(p => p.namespace === expected.namespace && p.address === expected.address);
     if (!principal) return { ok: false, code: 'RUN_NOT_FOUND' };
     const env = seams.env ?? process.env, runtime = flowRuntimeKind(env), args = [kind, id, ...method === 'change' ? [action] : []];
-    if (runtime === 'embedded') return await (await embeddedRuntime(env)).backend.callHistory(method, args, principal);
+    if (runtime === 'embedded') return await (await embeddedRuntime(env)).backend.callHistory(method, args, principal, currentBetaIdentity());
     if (runtime !== 'remote') return { ok: false, code: 'HISTORY_INVALID' };
     const base = cloudApiBaseUrl(env)!;
     const response = await (seams.transport ?? fetch)(new URL(`v1/owner-history/${method}`, base.href.endsWith('/') ? base : new URL(base.href + '/')), {
       method: 'POST', cache: 'no-store', redirect: 'error', signal: AbortSignal.timeout(30_000),
-      headers: { 'content-type': 'application/json', ...env.API_AUTH_TOKEN ? { authorization: `Bearer ${env.API_AUTH_TOKEN}` } : {},
+      headers: { 'content-type': 'application/json', ...betaIdentityHeaders(currentBetaIdentity()), ...env.API_AUTH_TOKEN ? { authorization: `Bearer ${env.API_AUTH_TOKEN}` } : {},
         [WORKFLOW_OWNER_HEADER]: `${principal.namespace}:${principal.address}` }, body: JSON.stringify({ args }) });
     const result: unknown = await response.json();
     if (!response.ok || !result || typeof result !== 'object') return { ok: false, code: 'HISTORY_INVALID' };

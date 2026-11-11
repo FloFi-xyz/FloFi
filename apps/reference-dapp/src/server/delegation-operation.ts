@@ -10,6 +10,7 @@
  *     proven wallets in `x-flofi-wallet-principals` (server-to-server headers the browser never reaches);
  *   - anything else fails closed. Nothing here signs or submits anything.
  */
+import { betaIdentityHeaders, currentBetaIdentity } from '../flight/beta-context.ts';
 import { randomUUID } from 'node:crypto';
 import { cloudApiBaseUrl, type FlowResult } from './cloud-api-client.ts';
 import { flowRuntimeKind } from './flow-runtime.ts';
@@ -51,7 +52,7 @@ export async function delegationOperation<T>(method: DelegationOperation, args: 
     if (flowRuntimeKind(env) === 'remote') {
       const base = cloudApiBaseUrl(env)!;
       const response = await (seams.transport ?? fetch)(new URL(`v1/delegation/${method}`, base.href.endsWith('/') ? base : new URL(base.href + '/')), { method: 'POST',
-        cache: 'no-store', redirect: 'error', signal: AbortSignal.timeout(30_000), headers: { 'content-type': 'application/json',
+        cache: 'no-store', redirect: 'error', signal: AbortSignal.timeout(30_000), headers: { 'content-type': 'application/json', ...betaIdentityHeaders(currentBetaIdentity()),
           ...env.API_AUTH_TOKEN ? { authorization: `Bearer ${env.API_AUTH_TOKEN}` } : {}, [WORKFLOW_OWNER_HEADER]: `${owner.namespace}:${owner.address}`,
           [APPROVAL_PRINCIPALS_HEADER]: proven.map(p => `${p.namespace}:${p.address}`).join(','),
           ...IDEMPOTENT_DELEGATION_OPERATIONS.has(method) ? { 'idempotency-key': randomUUID() } : {} }, body: JSON.stringify({ args }) })
@@ -89,7 +90,7 @@ export async function delegationAvailability(seams: Pick<Seams, 'transport' | 'e
     if (flowRuntimeKind(env) === 'remote') {
       const base = cloudApiBaseUrl(env)!;
       const response = await (seams.transport ?? fetch)(new URL('v1/delegation/availability', base.href.endsWith('/') ? base : new URL(base.href + '/')), { method: 'POST',
-        cache: 'no-store', redirect: 'error', signal: AbortSignal.timeout(10_000), headers: { 'content-type': 'application/json',
+        cache: 'no-store', redirect: 'error', signal: AbortSignal.timeout(10_000), headers: { 'content-type': 'application/json', ...betaIdentityHeaders(currentBetaIdentity()),
           ...env.API_AUTH_TOKEN ? { authorization: `Bearer ${env.API_AUTH_TOKEN}` } : {} }, body: JSON.stringify({ args: [] }) });
       const body = await response.json().catch(() => null) as { ok?: unknown; value?: { enabled?: unknown } } | null;
       return { enabled: response.ok && body?.ok === true && body.value?.enabled === true };

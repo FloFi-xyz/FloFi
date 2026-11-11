@@ -16,11 +16,8 @@ import { createHash, createHmac, timingSafeEqual } from 'node:crypto';
 export const ACCESS_LINK_MS = 72 * 60 * 60 * 1000;
 /** A code the person asked for at /board: 15 minutes ("Código de 6 dígitos pedido na landing: 15 minutos"). */
 export const REQUESTED_CODE_MS = 15 * 60 * 1000;
-/**
- * The code printed in Email 3 (for another device: open the email on the phone, board on the computer) lives as long as the link in that same
- * email; it is single use, bound to the address, and dies after `CODE_MAX_ATTEMPTS` wrong tries. A new code is always one request away.
- */
-export const EMAIL_CODE_MS = ACCESS_LINK_MS;
+/** Every six-digit code expires after 15 minutes; its paired link remains valid for at most 72 hours. */
+export const EMAIL_CODE_MS = REQUESTED_CODE_MS;
 export const CODE_MAX_ATTEMPTS = 5;
 /**
  * After proving the address before signing in, the browser keeps that proof for one day; it binds only when the person presses "Board now"

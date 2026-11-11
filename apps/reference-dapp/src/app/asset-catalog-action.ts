@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 'use server';
+import { withFlightAccess } from '../server/flight-access';
 import type { AssetCatalog } from '@defi-workflow-engine/action-registry';
 import { cloudFlowMode } from '../server/flow-runtime';
 import { catalogNetworkOfChain } from '../server/catalog-networks';
@@ -10,6 +11,7 @@ import { catalogNetworkOfChain } from '../server/catalog-networks';
  * the loopback test harness still uses its own catalog. Any failure shows unavailable, never a recorded copy.
  */
 export async function loadNetworkAssetCatalog(chain: string): Promise<{ readonly ok: true; readonly catalog: AssetCatalog } | { readonly ok: false; readonly code: string }> {
+  return withFlightAccess(async () => {
   const network = catalogNetworkOfChain(chain);
   if (!network || network.chain !== chain) return { ok: false, code: 'CATALOG_NETWORK_UNSUPPORTED' };
   // The network's swap flow carries its deployment gate (the catalog is read only where the network is enabled).
@@ -21,4 +23,6 @@ export async function loadNetworkAssetCatalog(chain: string): Promise<{ readonly
     const code = cause instanceof Error && /^[A-Z][A-Z0-9_]{2,80}$/.test(cause.message) ? cause.message : network.catalogUnavailableCode;
     return { ok: false, code };
   }
+
+  });
 }

@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 'use server';
+import { withFlightAccess } from '../server/flight-access';
 import { learningConfig, sessionAdaptation } from '../learning/config';
 import { applyAction, applyObservations, applySettings, parseClientEvents, statusView, type LearningActionResult, type LearningStatusView } from '../learning/web-actions';
 import { createCopilotLimiter, type CopilotLimiter } from '../server/copilot-service';
@@ -21,36 +22,54 @@ const principals = () => memoryPrincipals().catch(() => []);
  * with FLOFI_LEARNING=session, only in-conversation adaptation (nothing is read or stored).
  */
 export async function learningStatus(identity?: unknown): Promise<LearningStatusView> {
+  return withFlightAccess(async () => {
   const service = await webLearningService(process.env);
   if (service === 'OFF' && sessionAdaptation(process.env)) return statusView('SESSION', [], null);
   return statusView(service, await principals(), namespaceOf(identity));
+
+  });
 }
 /** BUILD-CHAT-LEARNING-002: which learning tier this deployment runs (no database read): what Settings links to. */
 export async function learningAvailability(): Promise<'OFF' | 'SESSION' | 'ENABLED'> {
+  return withFlightAccess(async () => {
   return learningConfig(process.env).enabled ? 'ENABLED' : sessionAdaptation(process.env) ? 'SESSION' : 'OFF';
+
+  });
 }
 /**
  * BUILD-FLOFI-CHAT-E2E-DASHBOARD-UX-001: what the first-access Privacy & Memory notice must say — the learning tier and the deployment's basis
  * for automatic learning (consent, legitimate interest, or none). Configuration only; no database read.
  */
 export async function learningNotice(): Promise<{ readonly tier: 'OFF' | 'SESSION' | 'ENABLED'; readonly automatic: 'OFF' | 'CONSENT' | 'LEGITIMATE_INTEREST' }> {
+  return withFlightAccess(async () => {
   const config = learningConfig(process.env);
   return config.enabled ? { tier: 'ENABLED', automatic: config.automatic } : { tier: sessionAdaptation(process.env) ? 'SESSION' : 'OFF', automatic: 'OFF' };
+
+  });
 }
 /** BUILD-CHAT-LEARNING-002: what the Copilot observed about the user's own words; stored only when permitted for the chosen proven wallet. Best effort. */
 export async function learningObserve(observations: unknown, context: unknown, identity?: unknown): Promise<void> {
+  return withFlightAccess(async () => {
   const release = feedbackLimiter().acquire();
   if (!release) return;
   try { await applyObservations(await webLearningService(process.env), await principals(), namespaceOf(identity), observations, context); }
   catch { /* learning never fails the chat */ } finally { release(); }
+
+  });
 }
 /** Performs a memory action the user just confirmed (Remember, forget, delete all, reply language). */
 export async function learningApply(action: unknown, identity?: unknown): Promise<LearningActionResult> {
+  return withFlightAccess(async () => {
   return applyAction(await webLearningService(process.env), await principals(), namespaceOf(identity), action);
+
+  });
 }
 /** Pauses/resumes memory, or opts in/out of contributing generalized meanings (opting out withdraws past contributions). */
 export async function learningSettings(change: unknown, identity?: unknown): Promise<LearningActionResult> {
+  return withFlightAccess(async () => {
   return applySettings(await webLearningService(process.env), await principals(), namespaceOf(identity), change);
+
+  });
 }
 /**
  * BUILD-FLOFI-CHAT-E2E-DASHBOARD-UX-001: the person just agreed, in the Privacy & Memory notice, to the same learning notice the Settings toggle
@@ -59,6 +78,7 @@ export async function learningSettings(change: unknown, identity?: unknown): Pro
  * overridden. Called once, when the agreement is given: it is never applied to a wallet that appears later. Without a wallet nothing is stored.
  */
 export async function learningAgree(identity?: unknown): Promise<{ readonly applied: boolean }> {
+  return withFlightAccess(async () => {
   try {
     const service = await webLearningService(process.env), wallets = await principals(), namespace = namespaceOf(identity);
     const view = await statusView(service, wallets, namespace);
@@ -66,10 +86,15 @@ export async function learningAgree(identity?: unknown): Promise<{ readonly appl
     const result = await applySettings(service, wallets, namespace, { automatic: true });
     return { applied: result.ok };
   } catch { return { applied: false }; }
+
+  });
 }
 /** Erases everything FloFi remembers for this browser's chosen wallet. */
 export async function learningErase(identity?: unknown): Promise<LearningActionResult> {
+  return withFlightAccess(async () => {
   return applyAction(await webLearningService(process.env), await principals(), namespaceOf(identity), { op: 'FORGET_ALL' });
+
+  });
 }
 /** Feedback is best effort: a per-process admission window bounds the database work an anonymous caller can cause (before any query). */
 function feedbackLimiter(): CopilotLimiter {
@@ -79,6 +104,7 @@ function feedbackLimiter(): CopilotLimiter {
 }
 /** Content-free feedback the chat observed (closed kinds and codes, counts); never text. Best effort. */
 export async function learningFeedback(events: unknown): Promise<void> {
+  return withFlightAccess(async () => {
   const parsed = parseClientEvents(events);
   if (!parsed.length) return;
   const release = feedbackLimiter().acquire();
@@ -87,4 +113,6 @@ export async function learningFeedback(events: unknown): Promise<void> {
     const service = await webLearningService(process.env);
     if (typeof service !== 'string') await service.record('WEB', parsed);
   } finally { release(); }
+
+  });
 }

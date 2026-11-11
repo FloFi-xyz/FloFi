@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 'use server';
+import { withFlightAccess, withFlightOwner } from '../server/flight-access';
 import { ORCA_WHIRLPOOLS_MAINNET_LIQUIDITY as profile } from '@defi-workflow-engine/action-registry';
 import type { SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
 import { createOrcaLiquidityService, type OrcaLiquidityService, type OrcaLiquidityWalletDiagnostic } from '../server/orca-liquidity-service';
@@ -38,15 +39,51 @@ const request = (value: Request): Request => {
       value.partBps !== undefined && !Number.isSafeInteger(value.partBps)) throw new Error('ORCA_LIQUIDITY_INPUT_INVALID');
   return { operation: value.operation, positionMint: value.positionMint, ...value.partBps === undefined ? {} : { partBps: value.partBps } };
 };
-export async function solanaMainnetLiquidityInfo() { return run('info', [], async service => ({ executionEnabled: service.executionEnabled })); }
-export async function solanaMainnetLiquidityPrice() { return run('price', [], service => service.price()); }
-export async function solanaMainnetLiquidityPositions(owner: string) { return run('positions', [owner], service => service.positions(owner)); }
-export async function solanaMainnetLiquidityInspect(owner: string, positionMint: string) { return run('inspect', [owner, positionMint], service => service.inspect(owner, positionMint)); }
-export async function solanaMainnetLiquiditySimulate(workflow: SemanticWorkflow, owner: string, value: Request) { return run('simulate', [workflow, owner, value], service => service.simulate(workflow, owner, request(value))); }
-export async function solanaMainnetLiquidityReview(id: string, commitment: string, workflow: SemanticWorkflow) { return run('review', [id, commitment, workflow], service => service.review(id, commitment, workflow)); }
-export async function solanaMainnetLiquidityInvalidate(id: string) { return run('invalidate', [id], service => service.invalidate(id)); }
-export async function solanaMainnetLiquidityBegin(id: string, owner: string, workflow: SemanticWorkflow) { return run('begin', [id, owner, workflow], service => service.begin(id, owner, workflow)); }
-export async function solanaMainnetLiquidityWalletFailure(id: string, diagnostic: OrcaLiquidityWalletDiagnostic) { return run('walletFailure', [id, diagnostic], service => service.walletFailure(id, diagnostic)); }
-export async function solanaMainnetLiquiditySubmit(id: string, signedTransaction: string) { return run('submit', [id, signedTransaction], service => service.submit(id, signedTransaction)); }
-export async function solanaMainnetLiquidityObserve(id: string) { return run('observe', [id], service => service.observe(id)); }
-export async function solanaMainnetLiquidityStatus(id: string) { return run('status', [id], service => service.load(id)); }
+export async function solanaMainnetLiquidityInfo() {
+  return withFlightAccess(async () => { return run('info', [], async service => ({ executionEnabled: service.executionEnabled }));
+  });
+}
+export async function solanaMainnetLiquidityPrice() {
+  return withFlightAccess(async () => { return run('price', [], service => service.price());
+  });
+}
+export async function solanaMainnetLiquidityPositions(owner: string) {
+  return withFlightAccess(async () => { return run('positions', [owner], service => service.positions(owner));
+  });
+}
+export async function solanaMainnetLiquidityInspect(owner: string, positionMint: string) {
+  return withFlightAccess(async () => { return run('inspect', [owner, positionMint], service => service.inspect(owner, positionMint));
+  });
+}
+export async function solanaMainnetLiquiditySimulate(workflow: SemanticWorkflow, owner: string, value: Request) {
+  return withFlightAccess(async () => { return run('simulate', [workflow, owner, value], service => service.simulate(workflow, owner, request(value)));
+  });
+}
+export async function solanaMainnetLiquidityReview(id: string, commitment: string, workflow: SemanticWorkflow) {
+  return withFlightAccess(async () => { return run('review', [id, commitment, workflow], service => service.review(id, commitment, workflow));
+  });
+}
+export async function solanaMainnetLiquidityInvalidate(id: string) {
+  return withFlightOwner(async () => { return run('invalidate', [id], service => service.invalidate(id));
+  });
+}
+export async function solanaMainnetLiquidityBegin(id: string, owner: string, workflow: SemanticWorkflow) {
+  return withFlightAccess(async () => { return run('begin', [id, owner, workflow], service => service.begin(id, owner, workflow));
+  });
+}
+export async function solanaMainnetLiquidityWalletFailure(id: string, diagnostic: OrcaLiquidityWalletDiagnostic) {
+  return withFlightOwner(async () => { return run('walletFailure', [id, diagnostic], service => service.walletFailure(id, diagnostic));
+  });
+}
+export async function solanaMainnetLiquiditySubmit(id: string, signedTransaction: string) {
+  return withFlightAccess(async () => { return run('submit', [id, signedTransaction], service => service.submit(id, signedTransaction));
+  });
+}
+export async function solanaMainnetLiquidityObserve(id: string) {
+  return withFlightOwner(async () => { return run('observe', [id], service => service.observe(id));
+  });
+}
+export async function solanaMainnetLiquidityStatus(id: string) {
+  return withFlightOwner(async () => { return run('status', [id], service => service.load(id));
+  });
+}

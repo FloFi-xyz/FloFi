@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 'use server';
+import { withFlightAccess } from '../server/flight-access';
 import type { ReadResult } from '../domain/base-observation';
 import { readBaseQuoteOnServer } from '../server/base-rpc';
 
@@ -9,5 +10,8 @@ import { readBaseQuoteOnServer } from '../server/base-rpc';
  * and artifact or a failure code. It is never an authorization input.
  */
 export async function readBaseQuote(input: unknown): Promise<ReadResult> {
+  return withFlightAccess(async () => {
   return readBaseQuoteOnServer(input);
+
+  });
 }

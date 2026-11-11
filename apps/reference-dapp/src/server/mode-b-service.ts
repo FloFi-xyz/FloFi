@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 /** Local chain-31337 finite Mode B service. Read-only fork RPC; owner requests are returned, never sent. */
 import { randomBytes, createHash } from 'node:crypto';
+import { assertExecutionEnabled } from './execution-guard.ts';
 import { mkdir, open, readFile, readdir, stat } from 'node:fs/promises';
 import { isAbsolute, join } from 'node:path';
 import { hashArtifactBytes, hashRawBytes, type SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
@@ -223,6 +224,7 @@ export function createModeBService(profile: ModeBServerProfile, call: ForkCall) 
           signed = signModeBLocalTransaction({ expectedExecutor: profile.executor, to: job.to, data: job.data, nonce,
             gasLimit: 1_500_000n, maxFeePerGas: head.baseFeePerGas * 2n + 1_000_000n }, key);
         } finally { key.fill(0); }
+        assertExecutionEnabled();
         const body = JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'eth_sendRawTransaction', params: [signed.raw] });
         const response = await fetch(profile.rpcUrl, { method: 'POST', headers: { 'content-type': 'application/json' }, body,
           signal: AbortSignal.timeout(20_000) });

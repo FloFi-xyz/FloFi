@@ -42,6 +42,28 @@ import { isStrategyWorkflow } from '../../engine/strategy-spec';
 import type { ChannelAdapter, ChannelAddress, ChannelReply, ChannelVisualRenderer, DeliveryUpdate, InboundMessage } from './types.ts';
 import type { TurnMetrics } from '../../domain/intelligence/turn-metrics';
 
+/** Closed-beta private-authoring decision supplied by the HTTP/dispatch wiring (`channels/flight-gate.ts`). Channel Core stays Flight-agnostic. */
+export type ChannelPrivateAccess = { readonly ok: true } | { readonly ok: false; readonly code: string };
+export type ChannelPrivateAuthorizer = (conversationId: string, now: Date) => Promise<ChannelPrivateAccess>;
+/** HELP/STOP/privacy/link, observation and safe cancel stay available without an active Flight grant. */
+export function isPublicChannelTurn(decision: Pick<TurnDecision, 'action' | 'outcome'>): boolean {
+  switch (decision.action) {
+    case 'IGNORE':
+    case 'OPT_OUT':
+    case 'OPT_IN':
+    case 'SUBSCRIBE':
+    case 'STATUS':
+    case 'CANCEL':
+    case 'MEMORY':
+      return true;
+    case 'REPLY':
+      return decision.outcome === 'HELP' || decision.outcome === 'SECRET_REFUSED' || decision.outcome === 'UNSUPPORTED_MESSAGE'
+        || decision.outcome === 'AUTHORIZATION_REFUSED';
+    default:
+      return false;
+  }
+}
+
 export type ChannelContext = { readonly core: ChannelCoreConfig; readonly store: ChannelStore; readonly platform: ChannelPlatform; readonly adapter: ChannelAdapter;
   readonly interpreter: ChannelInterpreter | null; readonly log: ChannelLogger; readonly now: () => Date; readonly previewTimeoutMs?: number;
   /** Test seams for delivery: the wait between inline approval retries, the jitter source. */
@@ -54,6 +76,11 @@ export type ChannelContext = { readonly core: ChannelCoreConfig; readonly store:
   readonly catalogs?: ((text: string, intent?: unknown) => Promise<void>) | null;
   /** BUILD-CHAT-LEARNING-001: learning for this provider's senders (`learning.ts`, implemented by the wiring); none = learning off (turns as before). */
   readonly learning?: ChannelLearning | null;
+  /**
+   * Closed-beta private-authoring gate from the webhook/dispatch wiring. Re-checked at drain time so a queued message cannot create a
+   * handoff after Flight revocation. `null`/absent = open rollout (no channel Flight gate).
+   */
+  readonly authorizePrivate?: ChannelPrivateAuthorizer | null;
   /** Awaited content-free server metrics, attached by the authenticated entry point. */ readonly metrics?: (record: TurnMetrics) => Promise<void> };
 export const LEASE_SECONDS = 300;
 export const LIMITS = Object.freeze({ inbound: [20, 600] as const, model: [30, 3_600] as const, modelDaily: [100, 86_400] as const, preview: [10, 3_600] as const });
@@ -194,9 +221,13 @@ export function createChannelService(ctx: ChannelContext) {
     const hint = session?.learning.languageHint;
     if (hint && !state.greeted && state.copilot === null && state.language !== hint) state = { ...state, language: hint };
     const prior = state;
-    let decision = await decideTurn({ content: payload.content, state, optedOut: !active, interpret, support: core.supportContact, privacy: core.privacyUrl,
-      catalogs: ctx.catalogs ?? null, ...session && session.learning.memory !== 'UNAVAILABLE' ? { learning: session.learning } : {} });
-    if (session) decision = await learn(decision, principal!, session, conversationId);
+    // Closed beta: resolve Flight access before the model/catalog path. Public commands (HELP/STOP/link/STATUS/CANCEL) stay available.
+    const privateAccess = ctx.authorizePrivate ? await ctx.authorizePrivate(conversationId, now) : { ok: true as const };
+    const interpretForTurn = privateAccess.ok ? interpret : null;
+    let decision = await decideTurn({ content: payload.content, state, optedOut: !active, interpret: interpretForTurn, support: core.supportContact, privacy: core.privacyUrl,
+      catalogs: privateAccess.ok ? ctx.catalogs ?? null : null,
+      ...session && privateAccess.ok && session.learning.memory !== 'UNAVAILABLE' ? { learning: session.learning } : {} });
+    if (session && privateAccess.ok) decision = await learn(decision, principal!, session, conversationId);
     // BUILD-FLOFI-INTELLIGENCE-001: the turn's content-free record, under the Copilot's own telemetry switch.
     if (decision.metrics) {
       if (ctx.metrics) await ctx.metrics(decision.metrics);
@@ -204,6 +235,15 @@ export function createChannelService(ctx: ChannelContext) {
     }
     state = decision.state;
     const lm = channelCopy(state.language);
+    if (!privateAccess.ok && !isPublicChannelTurn(decision)) {
+      const guidance = lm.betaAccess(privateAccess.code);
+      // Keep only the conversation language/greeted flag. Never persist pending/steps/copilot from a refused private turn —
+      // otherwise a later link+grant could LINK a pre-grant draft that was never authorized to author.
+      const deniedState = { ...prior, language: state.language, greeted: true, choices: [] as const };
+      await commit('BETA_CHANNEL_ACCESS_DENIED', prior.greeted ? [text(guidance)] : [text(lm.firstContact(core.supportContact, core.privacyUrl)), text(guidance)],
+        deniedState);
+      return { address: null, language: deniedState.language };
+    }
     switch (decision.action) {
       case 'IGNORE': await commit(decision.outcome, [], undefined); return { address: null, language: state.language };
       case 'OPT_OUT': {

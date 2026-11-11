@@ -5,6 +5,7 @@
  * EntryPoint from the owner account's own prefund. Nothing here signs, holds bytes beyond the call, or chooses a chain.
  */
 import { erc4337 } from '@defi-workflow-engine/reference-compiler';
+import { assertExecutionEnabled } from '../server/execution-guard.ts';
 
 type Rpc = (method: string, params: readonly unknown[]) => Promise<unknown>;
 export const BUNDLER_METHODS: ReadonlySet<string> = new Set(['eth_chainId', 'eth_supportedEntryPoints', 'eth_estimateUserOperationGas', 'eth_sendUserOperation',
@@ -32,6 +33,7 @@ export function bundlerRpc(url: string, fetchImpl: typeof fetch = fetch, timeout
   let id = 0;
   return async (method, params) => {
     if (!BUNDLER_METHODS.has(method)) throw new BundlerError('USER_OPERATION_RPC_METHOD_FORBIDDEN');
+    if (method === 'eth_sendUserOperation') assertExecutionEnabled();
     const response = await fetchImpl(url, { method: 'POST', redirect: 'error', cache: 'no-store', signal: AbortSignal.timeout(timeoutMs),
       headers: { 'content-type': 'application/json' }, body: JSON.stringify({ jsonrpc: '2.0', id: ++id, method, params }) })
       .catch(() => { throw new BundlerError('USER_OPERATION_BUNDLER_UNAVAILABLE'); });
@@ -73,6 +75,7 @@ export function createBundlerClient(chainId: number, rpc: Rpc): BundlerClient {
       erc4337.assertUserFundedOperation(op);
       if (!/^0x[0-9a-f]{130}$/.test(op.signature)) throw new BundlerError('USER_OPERATION_SIGNATURE_INVALID');
       const expected = erc4337.userOpHash(op, chainId);
+      assertExecutionEnabled();
       const hash = await rpc('eth_sendUserOperation', [erc4337.toBundlerUserOperation(op), erc4337.ENTRY_POINT_V0_7]);
       // The bundler's identity of the operation must be FloFi's: anything else means a different operation was accepted.
       if (typeof hash !== 'string' || hash.toLowerCase() !== expected) throw new BundlerError('USER_OPERATION_HASH_MISMATCH');

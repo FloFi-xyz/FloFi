@@ -5,54 +5,75 @@ import { useRouter } from 'next/navigation';
 import { LANGUAGE_KEY, parseLanguage, useLocale } from '../../i18n/locale';
 import styles from './flight.module.css';
 
-/** Flight and legal pages share the product's saved language; this menu never changes a wallet or workflow. */
-export function LanguageSwitch({ language, label }: { language: 'EN' | 'PT'; label: string }) {
+type Language = 'EN' | 'PT';
+const LANGUAGES = ['EN', 'PT'] as const;
+
+/** The compact ··· → Language menu uses the site's shared, persistent language preference. */
+export function LanguageSwitch({ language, label, upwards = false }: { language: Language; label: string; upwards?: boolean }) {
   const { setLanguage } = useLocale(), router = useRouter();
-  const [open, setOpen] = useState(false), [languages, setLanguages] = useState(false);
-  const root = useRef<HTMLDivElement>(null), trigger = useRef<HTMLButtonElement>(null);
-  const languageButton = useRef<HTMLButtonElement>(null), menuId = useId();
-  const close = (restore = false) => { setOpen(false); setLanguages(false); if (restore) trigger.current?.focus(); };
-  // Restore a surviving local preference if its cookie was cleared, as the main site's menu already does.
+  const [open, setOpen] = useState(false), [expanded, setExpanded] = useState(false);
+  const root = useRef<HTMLDivElement>(null), trigger = useRef<HTMLButtonElement>(null), category = useRef<HTMLButtonElement>(null);
+  const options = useRef<Array<HTMLButtonElement | null>>([]);
+  const id = useId();
   useEffect(() => {
-    let saved: 'EN' | 'PT' | null = null;
+    let saved: Language | null = null;
     try { saved = parseLanguage(localStorage.getItem(LANGUAGE_KEY)); } catch { /* Optional preference storage. */ }
     if (saved && saved !== language) { setLanguage(saved); router.refresh(); }
-  }, []); // Only on arrival; subsequent choices go through the menu.
+  }, []); // Restore a surviving preference on arrival, as on the main site.
+  function close(restoreFocus = false) {
+    setOpen(false); setExpanded(false);
+    if (restoreFocus) trigger.current?.focus();
+  }
+  useEffect(() => {
+    if (open) {
+      if (expanded) options.current[LANGUAGES.indexOf(language)]?.focus();
+      else category.current?.focus();
+    }
+  }, [open, expanded, language]);
   useEffect(() => {
     if (!open) return;
-    const outside = (event: PointerEvent) => { if (event.target instanceof Node && !root.current?.contains(event.target)) { setOpen(false); setLanguages(false); } };
+    const outside = (event: PointerEvent) => { if (!root.current?.contains(event.target as Node)) { setOpen(false); setExpanded(false); } };
     document.addEventListener('pointerdown', outside);
     return () => document.removeEventListener('pointerdown', outside);
   }, [open]);
-  useEffect(() => {
+  function keyDown(event: KeyboardEvent<HTMLDivElement>) {
     if (!open) return;
-    if (languages) root.current?.querySelector<HTMLButtonElement>('[role="menuitemradio"][aria-checked="true"]')?.focus();
-    else languageButton.current?.focus();
-  }, [open, languages]);
-  function navigate(event: KeyboardEvent<HTMLDivElement>) {
+    if (event.key === 'Tab') { close(true); return; }
     if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); close(true); return; }
-    if (event.key === 'ArrowLeft' && languages) { event.preventDefault(); setLanguages(false); return; }
-    if (event.key === 'ArrowRight' && !languages && open) { event.preventDefault(); setLanguages(true); return; }
-    if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key) || !open) return;
-    const items = Array.from(root.current?.querySelectorAll<HTMLButtonElement>(languages ? '[role="menuitemradio"]' : '[role="menuitem"]') ?? []);
-    if (!items.length) return;
-    event.preventDefault();
-    const current = items.indexOf(document.activeElement as HTMLButtonElement);
-    const index = event.key === 'Home' ? 0 : event.key === 'End' ? items.length - 1
-      : (current + (event.key === 'ArrowUp' ? -1 : 1) + items.length) % items.length;
-    items[index]?.focus();
+    if (event.key === 'ArrowLeft' && expanded) { event.preventDefault(); setExpanded(false); return; }
+    if (!expanded && event.target === category.current && ['ArrowRight', 'ArrowDown'].includes(event.key)) {
+      event.preventDefault(); setExpanded(true); return;
+    }
+    if (!expanded) return;
+    const current = options.current.indexOf(document.activeElement as HTMLButtonElement);
+    let next: number | null = null;
+    if (event.key === 'ArrowDown') next = (current + 1) % LANGUAGES.length;
+    if (event.key === 'ArrowUp') next = (current + LANGUAGES.length - 1) % LANGUAGES.length;
+    if (event.key === 'Home' || event.key.toLowerCase() === 'e') next = 0;
+    if (event.key === 'End' || event.key.toLowerCase() === 'p') next = 1;
+    if (next !== null) { event.preventDefault(); options.current[next]?.focus(); }
   }
-  return <div ref={root} className={styles.lang} onKeyDown={navigate}
-    onBlur={event => { if (!event.currentTarget.contains(event.relatedTarget)) close(); }}>
-    <button ref={trigger} type="button" aria-label={label} aria-haspopup="menu" aria-expanded={open} aria-controls={menuId}
-      className={styles.langTrigger} onClick={() => { if (open) close(); else setOpen(true); }}
-      onKeyDown={event => { if (event.key === 'ArrowDown' || event.key === 'ArrowUp') { event.preventDefault(); setOpen(true); } }}><span aria-hidden="true">···</span></button>
-    {open ? <div id={menuId} role="menu" aria-label={label} className={styles.langPopover}>
-      {languages ? (['EN', 'PT'] as const).map(value => <button key={value} type="button" role="menuitemradio" lang={value === 'PT' ? 'pt-BR' : 'en'}
-        aria-checked={language === value} onClick={() => {
-          setLanguage(value); close(true); if (value !== language) router.refresh();
-        }}>{value === 'EN' ? 'English' : 'Português'}<span aria-hidden="true">{language === value ? '✓' : ''}</span></button>)
-        : <button ref={languageButton} type="button" role="menuitem" aria-haspopup="menu" aria-expanded={languages} onClick={() => setLanguages(true)}>Language<span aria-hidden="true">›</span></button>}
-    </div> : null}
+  return <div ref={root} className={styles.lang} onKeyDown={keyDown} onBlur={event => {
+    if (!event.currentTarget.contains(event.relatedTarget as Node | null)) close();
+  }}>
+    <button ref={trigger} type="button" className={styles.langTrigger} aria-label={label} aria-haspopup="menu" aria-expanded={open}
+      aria-controls={open ? id : undefined} onClick={() => { setOpen(value => !value); setExpanded(false); }}
+      onKeyDown={event => { if (event.key === 'ArrowDown' || event.key === 'ArrowUp') { event.preventDefault(); setOpen(true); setExpanded(false); } }}>
+      <span aria-hidden="true">···</span>
+    </button>
+    {open && <div id={id} role="menu" aria-label={label} className={`${styles.langMenu}${upwards ? ` ${styles.langMenuUp}` : ''}`}>
+      <button ref={category} type="button" role="menuitem" tabIndex={-1} className={styles.langCategory} aria-haspopup="menu"
+        aria-expanded={expanded} aria-controls={expanded ? `${id}-languages` : undefined} onClick={() => setExpanded(value => !value)}>
+        {label}<span aria-hidden="true">{expanded ? '−' : '+'}</span>
+      </button>
+      {expanded && <div id={`${id}-languages`} role="menu" aria-label={label} className={styles.langOptions}>
+        {LANGUAGES.map((value, index) => <button key={value} ref={element => { options.current[index] = element; }} type="button" role="menuitemradio"
+          tabIndex={-1} lang={value === 'PT' ? 'pt-BR' : 'en'} aria-checked={language === value} onClick={() => {
+            setLanguage(value); close(true); if (value !== language) router.refresh();
+          }}>
+          <span>{value === 'PT' ? 'Português' : 'English'}</span><span aria-hidden="true">{language === value ? '✓' : ''}</span>
+        </button>)}
+      </div>}
+    </div>}
   </div>;
 }

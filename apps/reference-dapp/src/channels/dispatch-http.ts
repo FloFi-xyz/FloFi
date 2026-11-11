@@ -17,6 +17,7 @@ import { channelLiveCopilot } from '../server/copilot-runtime.ts';
 import { channelLogger, type ChannelLogSink } from './core/log.ts';
 import { createChannelService } from './core/service.ts';
 import type { ChannelVisualRenderer } from './core/types.ts';
+import { channelPrivateAuthorizer } from './flight-gate.ts';
 import { channelSubscriptions } from './subscriptions.ts';
 import { channelProviders, type ProviderSeams } from './providers.ts';
 import { channelProviderStatus, readChannelDeployment } from './registry.ts';
@@ -68,7 +69,8 @@ export async function handleChannelDispatch(request: Request, options: ChannelOp
       const mode = env.FLOFI_COPILOT === 'live' ? 'live' : 'replay';
       if (copilotMetricsEnabled(env, mode)) await recordCopilotMetrics(() => persistCopilotTurn(host, mode, record, 'SERVER', now()));
     },
-    previewTimeoutMs: 30_000, subscriptions: channelSubscriptions(env, host), visuals: options.visuals !== undefined ? options.visuals : channelVisualRenderer,
+    previewTimeoutMs: 30_000, subscriptions: channelSubscriptions(env, host), authorizePrivate: channelPrivateAuthorizer(env, host, adapter.channel),
+    visuals: options.visuals !== undefined ? options.visuals : channelVisualRenderer,
     catalogs: authoringCatalogPreparer(env), learning: channelLearning(env, host, adapter.channel),
     ...options.sleep ? { sleep: options.sleep } : {}, ...options.random ? { random: options.random } : {} })]));
   try {

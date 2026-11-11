@@ -6,6 +6,9 @@
  * store / abuse limiter / runtime, the configured price source, and — when Telegram runs here — the Channel Core notifier.
  * Nothing wired here can sign or submit: the price transport is read-only and no execution flow is reachable from the handlers.
  */
+import { betaAccessMode, createBetaAccessStore } from '../flight/beta-access.ts';
+import { flightCalendarFrom } from '../flight/campaign.ts';
+import type { Owner } from './store.ts';
 import { randomBytes } from 'node:crypto';
 import type { Database, Logger, WorkHandler } from '@defi-workflow-engine/cloud-runtime';
 import { createPgChannelStore } from '../channels/core/pg-store.ts';
@@ -57,12 +60,22 @@ export function channelNotifier(env: Env, host: AutomationHost, now: () => Date,
  * the origin of notification links. No engine runtime (nothing here runs a flow) and no key material (nothing here mints approvals).
  */
 export type AutomationWorkRuntime = { readonly origin: string; readonly host: AutomationHost; readonly store: AutomationStore; readonly handoffs: HandoffStore;
+  readonly authorizeBeta?: (owner: Owner) => Promise<string | null>;
   readonly price: PriceSource; readonly notifier: ChannelNotifier | null; readonly log: AutomationLogger; readonly now: () => Date };
 /** The web deployment's runtime: the work runtime plus what the owner's operations need (configuration, abuse limiter, engine gates). */
 export type AutomationRuntime = AutomationWorkRuntime & { readonly config: AutomationConfig; readonly allow: WindowLimit; readonly engine: EngineRuntime };
 export function automationWorkRuntime(env: Env, settings: Pick<AutomationConfig, 'origin' | 'price'>, host: AutomationHost, log: AutomationLogger, now: () => Date,
   seams: AutomationSeams = {}): AutomationWorkRuntime {
   return { origin: settings.origin, host, store: createPgAutomationStore(host.db, host.tenantId), handoffs: createPgHandoffStore(host.db, host.tenantId),
+    authorizeBeta: async owner => {
+      const mode = betaAccessMode(env);
+      if (mode === 'open') return null;
+      if (mode !== 'beta') return 'BETA_ACCESS_CLOSED';
+      const { calendar } = flightCalendarFrom(env);
+      if (!calendar) return 'BETA_CONFIGURATION_INVALID';
+      const result = await createBetaAccessStore(host, calendar).requireWallet(owner, now().getTime());
+      return result.ok ? null : result.code;
+    },
     price: seams.price ?? priceSourceOf(settings.price, seams.fetch), notifier: channelNotifier(env, host, now, seams), log, now };
 }
 export function automationRuntime(env: Env, config: AutomationConfig, host: AutomationHost, log: AutomationLogger, now: () => Date, seams: AutomationSeams = {}): AutomationRuntime {
@@ -78,6 +91,9 @@ export function automationHandlers(rt: AutomationWorkRuntime): Record<(typeof AU
     'automation.evaluate': async (item, settle) => {
       const ruleId = item.payload.ruleId;
       if (typeof ruleId !== 'string' || !/^aut_[a-z2-7]{26}$/.test(ruleId)) { await settle({ outcome: 'DEAD', reason: 'WORK_PAYLOAD_INVALID' }); return; }
+      const rule = await rt.store.ruleById(ruleId);
+      const refused = rule && rt.authorizeBeta ? await rt.authorizeBeta(rule.owner) : null;
+      if (refused) { await settle({ outcome: 'RETRY', delayMs: 300_000, reason: refused }); return; }
       await evaluateRule(evaluator, ruleId);
       await settle({ outcome: 'DONE' });
     },

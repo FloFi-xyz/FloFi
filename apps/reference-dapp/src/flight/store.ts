@@ -14,7 +14,7 @@ import { randomBytes } from 'node:crypto';
 import type { Database, Queryable } from '@defi-workflow-engine/cloud-runtime';
 import { cardPublicIdFrom, carriesInvites, decideAccess, eventOrigin, FLIGHT_DEFAULT_CALENDAR, FLIGHT_EVENTS, FLIGHT_NOTICE_VERSION, FOUNDING_INVITES, FOUNDING_SEATS,
   foundingSeat, fullCalendar, inviteCodeFrom, passengerSeat, SIMULATION_EVIDENCE_MS, DEPARTURES_SHOWN, type FlightAccess, type FlightCalendar, type FlightEvent,
-  type FlightOrigin, type FlightRoute } from './campaign.ts';
+  normalizeEmail, type FlightOrigin, type FlightRoute } from './campaign.ts';
 import { enqueueEmail } from './email/outbox.ts';
 
 export type FlightHost = { readonly db: Database; readonly tenantId: string };
@@ -39,17 +39,15 @@ export type FlightPass = {
   /** The card's public link id (`/card/{id}`), or null for a card taken down. */
   readonly publicId: string | null;
 };
-/** The creators' test flight card: never stored, numbered or shared; dated with the official boarding day. */
-export type TestPass = { readonly test: true; readonly route: FlightRoute; readonly departedAt: string; readonly handle: null };
 /** What the public card page shows: no account, address, wallet or invite. */
 export type PublicCard = { readonly publicId: string; readonly founding: boolean; readonly seat: string; readonly handle: string | null; readonly route: FlightRoute;
   readonly departedAt: string };
 export type OwnInvite = { readonly code: string; readonly redeemed: boolean };
 export type AccountFlight = { readonly access: FlightAccess; readonly pass: FlightPass | null; readonly invites: readonly OwnInvite[];
-  readonly listed: 'FIRST' | 'NEXT' | null; readonly testPass?: TestPass | null };
+  readonly listed: 'FIRST' | 'NEXT' | null };
 export type IssueResult = { readonly ok: true; readonly pass: FlightPass; readonly issued: boolean } | { readonly ok: false; readonly code:
   'FLIGHT_NOT_ELIGIBLE' | 'FLIGHT_SIMULATION_NOT_FOUND' };
-export type RedeemResult = 'REDEEMED' | 'INVITE_INVALID' | 'INVITE_USED' | 'INVITE_OWN' | 'INVITE_ALREADY_HELD' | 'ALREADY_BOARDED';
+export type RedeemResult = 'REDEEMED' | 'INVITE_INVALID' | 'INVITE_USED' | 'INVITE_OWN' | 'INVITE_ALREADY_HELD' | 'ALREADY_BOARDED' | 'INVITE_NOT_YET' | 'INVITE_IDENTITY_MISMATCH';
 
 type PassRow = { pass_id: string; origin: FlightOrigin; boarding_no: number; founding_seat: number | null; handle: string | null; public: boolean;
   route: FlightRoute; departed_at: Date; public_id: string | null; removed_at: Date | null };
@@ -60,7 +58,8 @@ const PASS_COLUMNS = 'pass_id, origin, boarding_no, founding_seat, handle, publi
 const newPublicId = () => cardPublicIdFrom(randomBytes(12));
 
 /** `calendar`: the deployment's campaign calendar (`flightCalendar` in host.ts), which decides when the access answers start. */
-export function createFlightStore(host: FlightHost, given: FlightCalendar = FLIGHT_DEFAULT_CALENDAR) {
+export function createFlightStore(host: FlightHost, given: FlightCalendar = FLIGHT_DEFAULT_CALENDAR,
+  options: { readonly allowVerifiedEmail?: boolean } = {}) {
   const { db, tenantId } = host, calendar = fullCalendar(given);
 
   /**
@@ -162,40 +161,37 @@ export function createFlightStore(host: FlightHost, given: FlightCalendar = FLIG
    */
   async function account(input: { accountId: string; emails: readonly string[]; now: number }, q: Queryable = db): Promise<AccountFlight> {
     const pass = (await q.query<PassRow>(`SELECT ${PASS_COLUMNS} FROM flight_passes WHERE tenant_id = $1 AND account_id = $2`, [tenantId, input.accountId])).rows[0];
-    const invite = (await q.query<{ issuer: 'FOUNDING' | 'CREATOR' }>('SELECT issuer FROM flight_invites WHERE tenant_id = $1 AND redeemed_by = $2',
+    const invite = (await q.query<{ issuer: 'FOUNDING' | 'CREATOR' }>('SELECT issuer FROM flight_invites WHERE tenant_id = $1 AND redeemed_by = $2 AND revoked_at IS NULL',
       [tenantId, input.accountId])).rows[0]?.issuer ?? null;
-    // The account's verified addresses (FloFi login), or the entry it proved with an access link or code. Never an address merely typed.
+    // Open rollout retains legacy campaign eligibility reads. Closed beta requires a durable Flight claim.
     const entries = (await q.query<{ flight: 'FIRST' | 'NEXT'; batch_no: number | null; opens_at: Date | null }>(`SELECT e.flight, e.batch_no, b.opens_at
       FROM flight_list_entries e LEFT JOIN flight_batches b ON b.tenant_id = e.tenant_id AND b.batch_no = e.batch_no
       LEFT JOIN flight_access_claims c ON c.tenant_id = e.tenant_id AND c.entry_id = e.entry_id
-      WHERE e.tenant_id = $1 AND (c.account_id = $3 OR (c.account_id IS NULL AND e.email = ANY($2::text[])
-        AND NOT EXISTS (SELECT 1 FROM flight_access_claims held WHERE held.tenant_id = $1 AND held.account_id = $3)))
+      WHERE e.tenant_id = $1 AND (c.account_id = $2 OR (c.account_id IS NULL AND e.email = ANY($3::text[])
+        AND NOT EXISTS (SELECT 1 FROM flight_access_claims held WHERE held.tenant_id = $1 AND held.account_id = $2)))
         AND e.boarded_at IS NULL ORDER BY (e.flight = 'FIRST') DESC, b.opens_at ASC NULLS FIRST LIMIT 1`,
-      [tenantId, [...input.emails], input.accountId])).rows;
+      [tenantId, input.accountId, options.allowVerifiedEmail ? [...input.emails] : []])).rows;
     const entry = entries[0] ? { flight: entries[0].flight, batch: entries[0].batch_no, opensAt: entries[0].opens_at?.getTime() ?? null } : null;
     const access = decideAccess({ now: input.now, passId: pass?.pass_id ?? null, invite, entry, calendar });
     const invites = pass?.founding_seat ? (await q.query<{ code: string; redeemed_at: Date | null }>(`SELECT code, redeemed_at FROM flight_invites
       WHERE tenant_id = $1 AND issuer_pass_id = $2 ORDER BY created_at, code`, [tenantId, pass.pass_id])).rows.map(row => ({ code: row.code, redeemed: row.redeemed_at !== null })) : [];
-    // A creator's test flight: the card of their latest simulation, marked TEST and dated with the official boarding day. Never stored.
-    let testPass: TestPass | null = null;
-    if (access.kind === 'test_flight') {
-      const evidence = await evidenceOf({ accountId: input.accountId, workflowId: null, now: input.now }, q);
-      if (evidence) testPass = { test: true, route: evidence.route, departedAt: at(calendar.boardingOpensAt), handle: null };
-    }
-    return { access, pass: pass ? passOf(pass) : null, invites, listed: entry?.flight ?? null, testPass };
+    return { access, pass: pass ? passOf(pass) : null, invites, listed: entry?.flight ?? null };
   }
 
   /** Bind one unused invite to a signed-in account that holds no pass and no invite. Never someone's own Founding invite. */
-  async function redeemInvite(input: { accountId: string; code: string; now: number }): Promise<RedeemResult> {
+  async function redeemInvite(input: { accountId: string; code: string; now: number; emails?: readonly string[] }): Promise<RedeemResult> {
+    // Refuse before any read or write: early redemption never reserves or consumes an invite.
+    if (input.now < calendar.boardingOpensAt) return 'INVITE_NOT_YET';
     return db.transaction(async tx => {
       if ((await tx.query('SELECT 1 FROM flight_passes WHERE tenant_id = $1 AND account_id = $2', [tenantId, input.accountId])).rowCount) return 'ALREADY_BOARDED';
       if ((await tx.query('SELECT 1 FROM flight_invites WHERE tenant_id = $1 AND redeemed_by = $2', [tenantId, input.accountId])).rowCount) return 'INVITE_ALREADY_HELD';
-      const invite = (await tx.query<{ issuer: 'FOUNDING' | 'CREATOR'; redeemed_at: Date | null; owner: string | null }>(`SELECT i.issuer, i.redeemed_at, p.account_id AS owner
+      const invite = (await tx.query<{ issuer: 'FOUNDING' | 'CREATOR'; redeemed_at: Date | null; owner: string | null; recipient: string | null; expires_at: Date | null; revoked_at: Date | null }>(`SELECT i.issuer, i.redeemed_at, i.recipient, i.expires_at, i.revoked_at, p.account_id AS owner
         FROM flight_invites i LEFT JOIN flight_passes p ON p.tenant_id = i.tenant_id AND p.pass_id = i.issuer_pass_id
         WHERE i.tenant_id = $1 AND i.code = $2 FOR UPDATE OF i`, [tenantId, input.code])).rows[0];
-      if (!invite) return 'INVITE_INVALID';
+      if (!invite || invite.revoked_at || (invite.expires_at && invite.expires_at.getTime() <= input.now)) return 'INVITE_INVALID';
       if (invite.redeemed_at) return 'INVITE_USED';
       if (invite.owner === input.accountId) return 'INVITE_OWN';
+      if (invite.recipient && !input.emails?.includes(invite.recipient)) return 'INVITE_IDENTITY_MISMATCH';
       await tx.query('UPDATE flight_invites SET redeemed_by = $3, redeemed_at = $4 WHERE tenant_id = $1 AND code = $2', [tenantId, input.code, input.accountId, at(input.now)]);
       await recordEvent('invite_redeem', '', invite.issuer === 'FOUNDING' ? 'INVITE' : 'CREATOR', input.now, tx);
       return 'REDEEMED';
@@ -218,7 +214,7 @@ export function createFlightStore(host: FlightHost, given: FlightCalendar = FLIG
   }
   /**
    * The account's latest recorded simulation (of `workflowId` when given) at most two hours old. `boardingOnly`: only one made once boarding
-   * opened — a creator's test-flight simulation never issues a real, numbered card ("Ninguém pega número Founding antes da lista").
+   * opened — a simulation from before the opening never issues a numbered card.
    */
   async function evidenceOf(input: { accountId: string; workflowId: string | null; now: number; boardingOnly?: boolean }, q: Queryable = db) {
     return (await q.query<{ run_id: string; route: FlightRoute }>(`SELECT run_id, route FROM flight_simulations WHERE tenant_id = $1 AND account_id = $2
@@ -269,7 +265,7 @@ export function createFlightStore(host: FlightHost, given: FlightCalendar = FLIG
           JSON.stringify(evidence.route), evidence.run_id, at(input.now), newPublicId()])).rows[0]!;
       // Only a Founding seat earned straight from the beta list carries invites: an invited person never gets invites of their own.
       if (carriesInvites({ foundingSeat: next.seat, origin })) for (let created = 0; created < FOUNDING_INVITES;) {
-        created += (await tx.query(`INSERT INTO flight_invites (tenant_id, code, issuer, issuer_pass_id, created_at) VALUES ($1, $2, 'FOUNDING', $3, $4)
+        created += (await tx.query(`INSERT INTO flight_invites (tenant_id, code, issuer, issuer_pass_id, created_at, expires_at) VALUES ($1, $2, 'FOUNDING', $3, $4, $4::timestamptz + interval '30 days')
           ON CONFLICT (tenant_id, code) DO NOTHING`, [tenantId, inviteCodeFrom(randomBytes(8)), passId, at(input.now)])).rowCount;
       }
       await recordEvent('simulation_ok', next.seat !== null ? 'founding' : 'passenger', origin, input.now, tx);
@@ -356,10 +352,34 @@ export function createFlightStore(host: FlightHost, given: FlightCalendar = FLIG
     const codes: string[] = [];
     while (codes.length < count) {
       const code = inviteCodeFrom(randomBytes(8));
-      if ((await db.query(`INSERT INTO flight_invites (tenant_id, code, issuer, created_at) VALUES ($1, $2, 'CREATOR', $3) ON CONFLICT DO NOTHING`,
+      if ((await db.query(`INSERT INTO flight_invites (tenant_id, code, issuer, created_at, expires_at) VALUES ($1, $2, 'CREATOR', $3, $3::timestamptz + interval '30 days') ON CONFLICT DO NOTHING`,
         [tenantId, code, at(now)])).rowCount) codes.push(code);
     }
     return codes;
+  }
+  /** Import an owner-reviewed Google Forms export. No email is queued here; Email 0 is a separate explicit command. */
+  async function importGoogleForms(entries: readonly { readonly email: string; readonly signedUpAt: number; readonly language: 'EN' | 'PT' | null;
+    readonly consent: boolean }[], now: number): Promise<{ readonly imported: number; readonly alreadyImported: number }> {
+    // Validate the complete input before opening a transaction. Never infer an unknown timestamp or consent.
+    for (const entry of entries) if (!normalizeEmail(entry.email) || !Number.isFinite(entry.signedUpAt) || entry.signedUpAt > now
+      || entry.signedUpAt > calendar.listClosesAt || entry.email.length > 254) throw new Error('FLIGHT_IMPORT_INVALID');
+    return db.transaction(async tx => {
+      let imported = 0, alreadyImported = 0;
+      // Stable order also prevents two overlapping imports from taking their address locks in opposite orders.
+      for (const entry of [...entries].sort((a, b) => normalizeEmail(a.email)!.localeCompare(normalizeEmail(b.email)!))) {
+        const email = normalizeEmail(entry.email)!;
+        await tx.query('SELECT pg_advisory_xact_lock($1::int, hashtext($2))', [JOIN_LOCK_CLASS, `${tenantId}:import:${email}`]);
+        const row = (await tx.query<{ entry_id: string }>(`INSERT INTO flight_list_entries (tenant_id, entry_id, email, flight, language, notice, joined_at)
+          VALUES ($1, $2, $3, 'FIRST', $4, 'google-forms-original', $5)
+          ON CONFLICT (tenant_id, email) DO UPDATE SET joined_at = least(flight_list_entries.joined_at, EXCLUDED.joined_at), flight = 'FIRST'
+          RETURNING entry_id`, [tenantId, `fle_${randomBytes(16).toString('hex')}`, email, entry.language ?? 'EN', at(entry.signedUpAt)])).rows[0]!;
+        const result = await tx.query(`INSERT INTO flight_early_list_imports (tenant_id, entry_id, original_email, signed_up_at, original_language, campaign_consent, imported_at)
+          VALUES ($1, $2, $3, $4, $5, $6, $7) ON CONFLICT (tenant_id, entry_id) DO NOTHING`,
+        [tenantId, row.entry_id, entry.email, at(entry.signedUpAt), entry.language, entry.consent, at(now)]);
+        if (result.rowCount) imported++; else alreadyImported++;
+      }
+      return { imported, alreadyImported };
+    });
   }
   /** Erase one address from both lists (a data subject's request). Returns whether an entry existed. */
   async function eraseEmail(email: string): Promise<boolean> {
@@ -375,19 +395,21 @@ export function createFlightStore(host: FlightHost, given: FlightCalendar = FLIG
    * The team invites one creator (Email 6): a CREATOR invite addressed to `email` (one per address) and its email, sent at `sendAt`. Returns
    * the code, or the existing one when this address was already invited (never a second invite or a second email).
    */
-  async function inviteCreator(input: { email: string; language: 'EN' | 'PT'; sendAt: number; now: number }): Promise<{ code: string; created: boolean }> {
+  async function inviteCreator(input: { email: string; language: 'EN' | 'PT'; sendAt: number; now: number }): Promise<{ code: string; created: boolean; state: 'AVAILABLE' | 'REDEEMED' | 'REVOKED' | 'EXPIRED' }> {
     return db.transaction(async tx => {
-      const existing = (await tx.query<{ code: string }>('SELECT code FROM flight_invites WHERE tenant_id = $1 AND recipient = $2', [tenantId, input.email])).rows[0];
-      if (existing) return { code: existing.code, created: false };
+      await tx.query('SELECT pg_advisory_xact_lock($1::int, hashtext($2))', [JOIN_LOCK_CLASS, `${tenantId}:invite:${input.email}`]);
+      const existing = (await tx.query<{ code: string; redeemed_at: Date | null; revoked_at: Date | null; expires_at: Date | null }>('SELECT code, redeemed_at, revoked_at, expires_at FROM flight_invites WHERE tenant_id = $1 AND recipient = $2', [tenantId, input.email])).rows[0];
+      if (existing) return { code: existing.code, created: false, state: existing.redeemed_at ? 'REDEEMED' as const : existing.revoked_at ? 'REVOKED' as const
+        : existing.expires_at && existing.expires_at.getTime() <= input.now ? 'EXPIRED' as const : 'AVAILABLE' as const };
       let code = '';
       for (let inserted = 0; !inserted;) {
         code = inviteCodeFrom(randomBytes(8));
-        inserted = (await tx.query(`INSERT INTO flight_invites (tenant_id, code, issuer, created_at, recipient) VALUES ($1, $2, 'CREATOR', $3, $4) ON CONFLICT DO NOTHING`,
+        inserted = (await tx.query(`INSERT INTO flight_invites (tenant_id, code, issuer, created_at, recipient, expires_at) VALUES ($1, $2, 'CREATOR', $3, $4, $3::timestamptz + interval '30 days') ON CONFLICT DO NOTHING`,
           [tenantId, code, at(input.now), input.email])).rowCount;
       }
       await enqueueEmail(tx, tenantId, { template: 'CREATOR_INVITE', recipient: input.email, language: input.language, trigger: 'creator_invited',
-        dedupeKey: `creator:${code.toLowerCase()}`, notBefore: input.sendAt, expiresAt: calendar.boardingOpensAt, inviteCode: code, batchKey: 'creators' });
-      return { code, created: true };
+        dedupeKey: `creator:${code.toLowerCase()}`, notBefore: input.sendAt, expiresAt: calendar.boardingOpensAt, inviteCode: code, batchKey: null });
+      return { code, created: true, state: 'AVAILABLE' as const };
     });
   }
   /** Take a card's public page down (the person's request or moderation): the page, its images and the departures entry disappear. */
@@ -442,6 +464,6 @@ export function createFlightStore(host: FlightHost, given: FlightCalendar = FLIG
   }
 
   return { calendar, counters, foundingOpen, recordEvent, joinList, departures, claimVerifiedEntry, account, redeemInvite, recordSimulation, issuePass, setHandle, createBatch, assignBatch,
-    exportBatch, issueCreatorInvites, inviteCreator, eraseEmail, hidePass, removeCard, publicCard, ensurePublicId, cardForEmail, purgeLists, stats, prune };
+    exportBatch, issueCreatorInvites, inviteCreator, importGoogleForms, eraseEmail, hidePass, removeCard, publicCard, ensurePublicId, cardForEmail, purgeLists, stats, prune };
 }
 export type FlightStore = ReturnType<typeof createFlightStore>;

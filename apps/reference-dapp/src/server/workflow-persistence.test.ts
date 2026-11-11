@@ -18,7 +18,7 @@ describe('saved-workflow signed-session boundary', () => {
     vi.mocked(embeddedRuntime).mockResolvedValue({ backend: { callWorkflows } } as unknown as Awaited<ReturnType<typeof embeddedRuntime>>);
     const env = { FLOFI_RUNTIME: 'embedded', DATABASE_URL: 'postgres://test-only' };
     expect((await workflowOperation('list', [], owner, { principals: async () => [owner], env })).ok).toBe(true);
-    expect(callWorkflows).toHaveBeenCalledExactlyOnceWith('list', [], owner); expect(embeddedRuntime).toHaveBeenCalledExactlyOnceWith(env);
+    expect(callWorkflows).toHaveBeenCalledExactlyOnceWith('list', [], owner, undefined, null); expect(embeddedRuntime).toHaveBeenCalledExactlyOnceWith(env);
   });
   it.each([evm, solana])('uses cloud persistence, owner headers and idempotency for %j', async owner => {
     const transport = vi.fn().mockResolvedValue(Response.json({ ok: true, value: { version: 1 } }));

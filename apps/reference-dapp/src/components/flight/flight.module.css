@@ -29,21 +29,24 @@
 .sticker{display:inline-block;background:#fff;border:4px solid var(--navy);border-radius:999px;font-family:var(--mono);font-weight:500;letter-spacing:.06em;
   color:var(--navy);white-space:nowrap;font-size:22px;padding:8px 20px}
 /* Header */
-.header{position:relative;z-index:11;height:88px;padding:0 var(--gutter);display:flex;align-items:center;justify-content:space-between;gap:16px;background:var(--blue);color:#fff}
+.header{position:relative;z-index:3;height:88px;padding:0 var(--gutter);display:flex;align-items:center;justify-content:space-between;gap:16px;background:var(--blue);color:#fff}
 .header img{height:36px;width:auto;display:block}
 .nav{display:flex;align-items:center;gap:clamp(14px,2.5vw,36px);font-size:18px;font-weight:500}
 .nav a{text-decoration:none;color:#fff}
 .nav a:hover{text-decoration:underline;text-underline-offset:4px}
-.lang{position:relative;display:inline-flex;flex:none;font-family:var(--font-ibm-plex-mono),'IBM Plex Mono',ui-monospace,monospace;font-size:15px;letter-spacing:.02em;z-index:10}
-.lang button{border:0;font:inherit;letter-spacing:inherit;cursor:pointer;min-height:44px}
-.langTrigger{background:transparent;color:#fff;border:2px solid rgba(255,255,255,.5)!important;border-radius:999px;width:48px;padding:0 8px;font-size:24px!important;line-height:1}
-.langTrigger:focus-visible{outline:3px solid #fff;outline-offset:3px}
-.langTrigger:hover,.langTrigger[aria-expanded="true"]{background:rgba(255,255,255,.16)}
-.langPopover{position:absolute;right:0;top:calc(100% + 8px);min-width:180px;background:#041B3D;border:1px solid #93A6FF;border-radius:14px;padding:6px;box-shadow:0 8px 24px rgba(4,27,61,.3);color:#fff}
-.langPopover button{display:flex;align-items:center;justify-content:space-between;gap:20px;width:100%;padding:10px 12px;border-radius:9px;color:#fff;background:transparent;text-align:left;white-space:nowrap}
-.langPopover button:hover,.langPopover button:focus-visible{background:#2343D9;outline:2px solid #fff;outline-offset:-2px}
-.langPopover button[aria-checked="true"]{background:rgba(255,255,255,.12)}
-.footer .langPopover{top:auto;bottom:calc(100% + 8px)}
+.lang{position:relative;display:inline-flex;align-items:center;flex:none}
+.langTrigger{display:inline-flex;align-items:center;justify-content:center;width:44px;height:44px;padding:0;border:0;border-radius:6px;background:transparent;color:inherit;
+  font:500 26px/1 var(--mono,ui-monospace,monospace);letter-spacing:.06em;cursor:pointer}
+.langTrigger:hover,.langTrigger[aria-expanded="true"]{background:rgba(255,255,255,.1)}
+.langMenu{position:absolute;right:0;top:calc(100% + 8px);z-index:40;width:192px;max-width:calc(100vw - 32px);padding:6px;border:1px solid var(--track,#DCE3F0);border-radius:12px;
+  color:var(--navy,#041B3D);background:var(--paper,#fff);box-shadow:0 8px 24px rgba(4,27,61,.18);font:500 16px/1.3 var(--font-outfit),Outfit,system-ui,sans-serif;letter-spacing:normal}
+.langMenuUp{top:auto;bottom:calc(100% + 8px)}
+.langMenu button{display:flex;align-items:center;justify-content:space-between;gap:16px;width:100%;min-height:44px;padding:10px 12px;border:0;border-radius:6px;
+  background:transparent;color:var(--navy,#041B3D);font:inherit;cursor:pointer;text-align:left}
+.langMenu button:hover,.langMenu button:focus-visible{background:var(--soft,#F5F8FB)}
+.langMenu :focus-visible{outline:2px solid var(--blue,#2343D9);outline-offset:-2px}
+.langOptions{border-top:1px solid var(--track,#DCE3F0);margin-top:4px;padding-top:4px}
+.langOptions [aria-checked="true"]{color:var(--blue,#2343D9)}
 /* Hero */
 .hero{position:relative;background:var(--blue);color:#fff;overflow:hidden;min-height:720px;padding:96px var(--gutter) 152px;display:flex;align-items:flex-start;gap:40px}
 .heroDark{background:var(--graphite)}
@@ -155,10 +158,11 @@
 .routeMeta{font-family:var(--mono);font-weight:500;font-size:15px;letter-spacing:.1em;color:var(--muted)}
 .routeCard .btn{align-self:flex-start}
 /* Footer */
-.footer{background:var(--navy);color:#fff;padding:56px var(--gutter);display:flex;flex-direction:column;gap:32px}
+.footer{position:relative;z-index:2;background:var(--navy);color:#fff;padding:56px var(--gutter);display:flex;flex-direction:column;gap:32px}
 .footerTop{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:20px}
 .footerTop img{height:32px;width:auto}
 .footerNav{display:flex;flex-wrap:wrap;align-items:center;gap:28px;font-size:16px}
+.footerNav .lang{margin-left:auto}
 .footerNav a{color:#fff;text-decoration:none}.footerNav a:hover{text-decoration:underline}
 .footerRisk{font-size:15px;line-height:1.5;color:#C2C8D2;max-width:820px;border-top:1px solid rgba(255,255,255,.18);padding-top:24px}
 /* Boarding pass (the approved card) */
@@ -227,6 +231,7 @@
   .heroArt img.mascot{top:0;width:160px}.heroArt .sticker{display:none}
   .hero{padding-bottom:230px}}
 @media (max-width:900px){
+  .footerNav{width:100%}
   .header{height:auto;padding:16px var(--gutter);flex-wrap:wrap}.nav a{display:none}
   /* Phones: the mascot moves under the text instead of behind it, so it never covers the notice or the counters. */
   .hero{min-height:0;padding:44px var(--gutter) 64px;flex-direction:column;align-items:stretch;gap:8px}

@@ -15,6 +15,12 @@ import { disabledCode, flowMode, FLOWS, isFlowName, type FlowDeps, type FlowName
 import { jupiterQuotePreview, PREVIEW_METHODS, previewStorage, type PreviewPurpose } from './preview.ts';
 import { assertRunOwnership, normalizePrincipal, WALLET_PRINCIPAL_HEADER } from '../src/server/run-ownership.ts';
 import { testNetworkFlowRefusal, testNetworkPreviewRefusal } from '../src/server/test-network-flows.ts';
+import { betaAccessMode, createBetaAccessStore, type BetaPrincipal } from '../src/flight/beta-access.ts';
+import { BETA_ACCOUNT_HEADER, BETA_SESSION_HEADER, betaIdentityFrom, type BetaRequestIdentity } from '../src/flight/beta-context.ts';
+import { APPROVAL_PRINCIPALS_HEADER } from '../src/automations/api-headers.ts';
+import { flightCalendarFrom } from '../src/flight/campaign.ts';
+import { executionRefusal, isNewExecutionMethod } from '../src/server/execution-guard.ts';
+import { isFlightRecoveryMethod } from '../src/server/flight-access.ts';
 
 import { createSavedWorkflowStore, EXECUTED_WORKFLOW_RUN, validWorkflowId } from '../src/server/saved-workflow-store.ts';
 import { validateSavedWorkflow, workflowOwner, WORKFLOW_OWNER_HEADER, type WorkflowOwner } from '../src/domain/saved-workflow.ts';
@@ -67,6 +73,10 @@ export type BackendOptions = {
   readonly universal?: FlowDeps['universal'];
 };
 const CODE = /^[A-Z][A-Z0-9_]{2,80}$/;
+const requestIdentity = (request: HttpRequest) => betaIdentityFrom({
+  [BETA_ACCOUNT_HEADER]: typeof request.headers[BETA_ACCOUNT_HEADER] === 'string' ? request.headers[BETA_ACCOUNT_HEADER] : undefined,
+  [BETA_SESSION_HEADER]: typeof request.headers[BETA_SESSION_HEADER] === 'string' ? request.headers[BETA_SESSION_HEADER] : undefined,
+});
 /**
  * P0 catalog reliability: the preview caller's remaining budget in milliseconds (100–999999). The API stops the preview at the smaller of this
  * and its own limit, so it answers with a classified CLOUD_PREVIEW_TIMEOUT while the caller still waits instead of working for nobody.
@@ -75,6 +85,86 @@ export const PREVIEW_DEADLINE_HEADER = 'x-flofi-deadline-ms';
 
 export function createBackend(options: BackendOptions) {
   const { db, env, logger } = options;
+  const betaPrincipal = (address: string): BetaPrincipal => ({ namespace: address.startsWith('0x') ? 'eip155' : 'solana', address });
+  /** The service bearer authenticates the BFF, never its end user. Every private operation rechecks that user's durable authority. */
+  async function betaRefusal(tenantId: string, identity: BetaRequestIdentity | null | undefined, address?: string | null): Promise<string | null> {
+    const mode = betaAccessMode(env);
+    if (mode === 'open') return null;
+    if (mode !== 'beta') return 'BETA_ACCESS_CLOSED';
+    if (!identity) return 'BETA_SESSION_REQUIRED';
+    const { calendar } = flightCalendarFrom(env);
+    if (!calendar) return 'BETA_CONFIGURATION_INVALID';
+    const decision = await createBetaAccessStore({ db, tenantId }, calendar).require({ ...identity,
+      ...address ? { principal: betaPrincipal(address) } : {}, now: Date.now() });
+    return decision.ok ? null : decision.code;
+  }
+  /**
+   * Live account session only. Used for observation/report/cancel of already-owned work so a revoked grant cannot orphan
+   * a submitted transaction. Never grants new product or financial authority by itself.
+   */
+  async function betaSessionRefusal(tenantId: string, identity: BetaRequestIdentity | null | undefined): Promise<string | null> {
+    const mode = betaAccessMode(env);
+    if (mode === 'open') return null;
+    if (!identity) return 'BETA_SESSION_REQUIRED';
+    const live = await db.query(`SELECT 1 FROM flofi_account_sessions WHERE tenant_id = $1 AND session_id = $2 AND account_id = $3
+      AND revoked_at IS NULL AND expires_at > now()`, [tenantId, identity.sessionId, identity.accountId]);
+    return live.rowCount === 1 ? null : 'BETA_SESSION_REQUIRED';
+  }
+  async function betaMethodRefusal(tenantId: string, method: string, identity: BetaRequestIdentity | null | undefined,
+    address?: string | null): Promise<string | null> {
+    return isFlightRecoveryMethod(method) ? betaSessionRefusal(tenantId, identity) : betaRefusal(tenantId, identity, address);
+  }
+  /** Proven account wallets only — used after grant revocation so recovery cannot be borrowed by another signed-in account. */
+  async function accountOwnsAddress(tenantId: string, accountId: string, address: string): Promise<boolean> {
+    const principal = normalizePrincipal(address);
+    if (!principal) return false;
+    const namespace = principal.startsWith('0x') ? 'eip155' : 'solana';
+    const owned = await db.query(`SELECT 1 WHERE EXISTS (
+      SELECT 1 FROM flofi_account_wallets w WHERE w.tenant_id = $1 AND w.account_id = $2
+        AND w.address = $4 AND w.ecosystem = CASE WHEN $3 = 'eip155' THEN 'EVM' ELSE 'SOLANA' END
+      UNION ALL SELECT 1 FROM flofi_account_identities i WHERE i.tenant_id = $1 AND i.account_id = $2
+        AND i.subject = $4 AND i.kind = CASE WHEN $3 = 'eip155' THEN 'EIP155' ELSE 'SOLANA' END)`,
+    [tenantId, accountId, namespace, principal]);
+    return owned.rowCount === 1;
+  }
+  async function betaFlowOwnerRefusal(flow: FlowName, method: string, args: readonly unknown[], tenantId: string,
+    principal: string | null, betaIdentity?: BetaRequestIdentity | null): Promise<string | null> {
+    const mode = betaAccessMode(env);
+    // Open mode has no Flight identity. Closed and beta both re-bind recovery to the session account's proven wallets.
+    if (mode === 'open') return null;
+    const recovery = isFlightRecoveryMethod(method);
+    if (mode === 'closed' && !recovery) return 'BETA_ACCESS_CLOSED';
+    // The original flows do not all have a run-ownership policy. Bind both newly named owners and historical run owners to this same
+    // account. This check also runs before an idempotent response can be replayed, even when a legacy BFF did not send a wallet header.
+    const ownerArgument = ['simulate', 'begin', 'beginSwap', 'beginLiquidity', 'prepare', 'pendingNonce'].includes(method) ? args[1]
+      : ['positions', 'inspect'].includes(method) ? args[0]
+        : method === 'broadcast' && args[2] && typeof args[2] === 'object' ? (args[2] as { from?: unknown }).from : undefined;
+    if (typeof ownerArgument === 'string' && normalizePrincipal(ownerArgument)) {
+      if (recovery) {
+        const session = await betaSessionRefusal(tenantId, betaIdentity);
+        if (session) return session;
+        if (!betaIdentity || !(await accountOwnsAddress(tenantId, betaIdentity.accountId, ownerArgument))) return 'BETA_WALLET_NOT_LINKED';
+      } else {
+        const refused = await betaRefusal(tenantId, betaIdentity, ownerArgument);
+        if (refused) return refused;
+      }
+    }
+    const runId = typeof args[0] === 'string' && FLOWS[flow].runId.test(args[0]) ? args[0] : null;
+    if (runId) {
+      const owner = (await createRunQueries(db, tenantId).getRun(runId))?.ownerAccount;
+      if (owner) {
+        if (principal && principal !== owner) return 'RUN_OWNER_MISMATCH';
+        if (recovery) {
+          const session = await betaSessionRefusal(tenantId, betaIdentity);
+          if (session) return session;
+          if (!betaIdentity || !(await accountOwnsAddress(tenantId, betaIdentity.accountId, owner))) return 'BETA_WALLET_NOT_LINKED';
+          return null;
+        }
+        return betaRefusal(tenantId, betaIdentity, owner);
+      }
+    }
+    return null;
+  }
   // BUILD-FLOFI-MAINNET-PRODUCT-001: the deployment's network scope (the entry point passes `process.env` itself; a hosted one is always Mainnet-only).
   const scopeEnv = { ...process.env, ...env };
   const transports = new Map<FlowName, Omit<FlowDeps, 'mode' | 'env'>>(), services = new Map<string, FlowService>();
@@ -120,7 +210,12 @@ export function createBackend(options: BackendOptions) {
    * BUILD-JOURNEY-001: `principal` is the wallet session the BFF verified; flows with an ownership policy refuse any call whose
    * principal is not the durable run's owner (or claims another owner) before the service is touched.
    */
-  async function callFlow(flow: FlowName, method: string, args: readonly unknown[], tenantId = options.tenantId, principal: string | null = null): Promise<FlowResult> {
+  async function callFlow(flow: FlowName, method: string, args: readonly unknown[], tenantId = options.tenantId, principal: string | null = null,
+    betaIdentity?: BetaRequestIdentity | null): Promise<FlowResult> {
+    const refused = await betaMethodRefusal(tenantId, method, betaIdentity, principal);
+    if (refused) return { ok: false, code: refused };
+    const paused = isNewExecutionMethod(method) ? executionRefusal(env) : null;
+    if (paused) return { ok: false, code: paused };
     const definition = FLOWS[flow], mode = flowMode(flow, env);
     if (method === 'mode') return { ok: true, value: mode };
     const spec = Object.hasOwn(definition.methods, method) ? definition.methods[method] : undefined;
@@ -131,6 +226,8 @@ export function createBackend(options: BackendOptions) {
     const refusal = mode === 'live' ? testNetworkFlowRefusal(flow, method, scopeEnv) : null;
     if (refusal) return { ok: false, code: refusal };
     const runId = typeof args[0] === 'string' && definition.runId.test(args[0]) ? args[0] : undefined;
+    const ownerRefusal = await betaFlowOwnerRefusal(flow, method, args, tenantId, principal, betaIdentity);
+    if (ownerRefusal) return { ok: false, code: ownerRefusal };
     const ownership = definition.ownership;
     if (ownership) {
       try { await assertRunOwnership(ownership.policy, method, args, principal, async id => ownership.ownerOf(await service(flow, tenantId).load(id))); }
@@ -172,7 +269,9 @@ export function createBackend(options: BackendOptions) {
    */
   const inflightPreviews = new Map<string, { readonly result: Promise<FlowResult>; waiters: number; settled: boolean; readonly abandon: (code: string) => void }>();
   async function previewFlow(flow: FlowName, args: readonly unknown[], purpose: PreviewPurpose = 'SIMULATION',
-    callOptions: { readonly signal?: AbortSignal; readonly deadlineMs?: number } = {}): Promise<FlowResult> {
+    callOptions: { readonly signal?: AbortSignal; readonly deadlineMs?: number; readonly betaIdentity?: BetaRequestIdentity | null } = {}): Promise<FlowResult> {
+    const refused = await betaRefusal(options.tenantId, callOptions.betaIdentity);
+    if (refused) return { ok: false, code: refused };
     if (purpose !== 'SIMULATION' && purpose !== 'QUOTE') return { ok: false, code: 'ARGUMENTS_INVALID' };
     if (purpose === 'QUOTE' && flow !== 'jupiter-swap') return { ok: false, code: 'PREVIEW_QUOTE_NOT_AVAILABLE' };
     const definition = FLOWS[flow], method = PREVIEW_METHODS[flow];
@@ -286,7 +385,35 @@ export function createBackend(options: BackendOptions) {
   };
   const integerParam = (value: string | null) => value === null ? null : /^-?\d{1,9}$/.test(value) ? Number(value) : NaN;
   const wrap = (handler: (request: HttpRequest, match: RegExpExecArray) => Promise<HttpResponse>) => async (request: HttpRequest, match: RegExpExecArray) => {
-    try { return await handler(request, match); }
+    try {
+      const principal = indexPrincipal(request), identity = requestIdentity(request);
+      const flowMatch = request.path.match(/^\/v1\/flows\/[a-z-]{1,40}\/([A-Za-z]{1,40})$/);
+      const recoveryPath = (flowMatch !== null && isFlightRecoveryMethod(flowMatch[1]!)) || request.path.startsWith('/v1/runs');
+      // Recovery surfaces need a live session only. Every other private route still rechecks the Flight grant.
+      const refused = recoveryPath
+        ? await betaSessionRefusal(options.tenantId, identity)
+        : await betaRefusal(options.tenantId, identity, principal);
+      if (refused) return { status: 403, body: { ok: false, code: refused } };
+      // Tenant-wide operator reads remain available in open mode. During beta/closed the API bearer alone cannot enumerate any wallet's data.
+      if (betaAccessMode(env) !== 'open' && request.path.startsWith('/v1/runs')) {
+        if (!principal) return { status: 403, body: { ok: false, code: 'BETA_WALLET_REQUIRED' } };
+        if (!identity || !(await accountOwnsAddress(options.tenantId, identity.accountId, principal)))
+          return { status: 403, body: { ok: false, code: 'BETA_WALLET_NOT_LINKED' } };
+      }
+      const selected = request.headers[APPROVAL_PRINCIPALS_HEADER];
+      if (betaAccessMode(env) === 'beta' && selected) {
+        if (typeof selected !== 'string') throw new HttpError(400, 'WALLET_PRINCIPAL_INVALID');
+        const wallets = selected.split(',').map(value => workflowOwner(value.trim()));
+        if (wallets.length > 2 || wallets.some(wallet => !wallet)) throw new HttpError(400, 'WALLET_PRINCIPAL_INVALID');
+        for (const wallet of wallets) {
+          const denied = recoveryPath
+            ? await betaSessionRefusal(options.tenantId, identity)
+            : await betaRefusal(options.tenantId, identity, wallet!.address);
+          if (denied) return { status: 403, body: { ok: false, code: denied } };
+        }
+      }
+      return await handler(request, match);
+    }
     catch (error) {
       if (error instanceof HttpError) throw error;
       if (error instanceof Error && /^(CURSOR_INVALID|LIMIT_INVALID)$/.test(error.message)) throw new HttpError(400, error.message);
@@ -311,7 +438,10 @@ export function createBackend(options: BackendOptions) {
     return null;
   }
 
-  async function callWorkflows(method: string, args: readonly unknown[], owner: WorkflowOwner | null, tenantId = options.tenantId): Promise<FlowResult> {
+  async function callWorkflows(method: string, args: readonly unknown[], owner: WorkflowOwner | null, tenantId = options.tenantId,
+    betaIdentity?: BetaRequestIdentity | null): Promise<FlowResult> {
+    const refused = await betaRefusal(tenantId, betaIdentity, owner?.address);
+    if (refused) return { ok: false, code: refused };
     if (!owner || !workflowOwner(`${owner.namespace}:${owner.address}`)) return { ok: false, code: 'WALLET_SESSION_REQUIRED' };
     const store = createSavedWorkflowStore(db, tenantId, owner);
     try {
@@ -331,7 +461,10 @@ export function createBackend(options: BackendOptions) {
     } catch (error) { return { ok: false, code: error instanceof Error && CODE.test(error.message) ? error.message : 'WORKFLOW_UNAVAILABLE' }; }
   }
 
-  async function callHistory(method: 'change' | 'disposition', args: readonly unknown[], owner: WorkflowOwner | null): Promise<HistoryDisposition> {
+  async function callHistory(method: 'change' | 'disposition', args: readonly unknown[], owner: WorkflowOwner | null,
+    betaIdentity?: BetaRequestIdentity | null): Promise<HistoryDisposition> {
+    const refused = await betaRefusal(options.tenantId, betaIdentity, owner?.address);
+    if (refused) throw new Error(refused);
     if (!owner || !workflowOwner(`${owner.namespace}:${owner.address}`)) return { ok: false, code: 'RUN_NOT_FOUND' };
     const [kind, id, action] = args;
     if (!['EXECUTION_RUN','WORKFLOW_RUN','SAVED_WORKFLOW'].includes(kind as string) || typeof id !== 'string' ||
@@ -347,7 +480,7 @@ export function createBackend(options: BackendOptions) {
       if (!owner) throw new HttpError(401, 'WALLET_SESSION_REQUIRED');
       const body = request.body as { args?: unknown } | null;
       if (!body || !Array.isArray(body.args) || Object.keys(body).length !== 1) throw new HttpError(400, 'HISTORY_INVALID');
-      return { status: 200, body: await callHistory(match[1] as 'change' | 'disposition', body.args, owner) };
+      return { status: 200, body: await callHistory(match[1] as 'change' | 'disposition', body.args, owner, requestIdentity(request)) };
     }) },
     { method: 'POST', name: 'workflows', pattern: /^\/v1\/workflows\/(list|get|save)$/, handler: wrap(async (request, match) => {
       const owner = workflowOwner(request.headers[WORKFLOW_OWNER_HEADER]);
@@ -355,7 +488,7 @@ export function createBackend(options: BackendOptions) {
       const body = request.body as { args?: unknown } | null;
       if (!body || !Array.isArray(body.args) || Object.keys(body).length !== 1) throw new HttpError(400, 'WORKFLOW_INVALID');
       const method = match[1]!, args = body.args;
-      if (method !== 'save') return { status: 200, body: await callWorkflows(method, args, owner) };
+      if (method !== 'save') return { status: 200, body: await callWorkflows(method, args, owner, options.tenantId, requestIdentity(request)) };
       const key = request.headers['idempotency-key'];
       if (typeof key !== 'string') throw new HttpError(400, 'IDEMPOTENCY_KEY_REQUIRED');
       const scope = 'workflows/save', hash = requestHash(scope, [owner, ...args]), store = idempotency(options.tenantId);
@@ -363,7 +496,7 @@ export function createBackend(options: BackendOptions) {
       if (claim.kind === 'REPLAY') return { status: 200, body: claim.response };
       if (claim.kind === 'CONFLICT') throw new HttpError(409, 'IDEMPOTENCY_KEY_REUSED');
       if (claim.kind === 'IN_PROGRESS') throw new HttpError(409, 'IDEMPOTENCY_IN_PROGRESS');
-      const result = await callWorkflows(method, args, owner);
+      const result = await callWorkflows(method, args, owner, options.tenantId, requestIdentity(request));
       if (result.ok) await store.complete(scope, key, hash, result); else await store.release(scope, key, hash);
       return { status: 200, body: result };
     }) },
@@ -374,7 +507,11 @@ export function createBackend(options: BackendOptions) {
       if (!body || typeof body !== 'object' || !Array.isArray(body.args) || Object.keys(body).length !== 1) throw new HttpError(400, 'ARGUMENTS_INVALID');
       const args = body.args, tenantId = options.tenantId, key = request.headers['idempotency-key'], principal = principalOf(request);
       const mutates = method !== 'mode' && FLOWS[flow].methods[method]?.mutates === true;
-      if (typeof key !== 'string' || !mutates) return { status: 200, body: await callFlow(flow, method, args, tenantId, principal) };
+      const identity = requestIdentity(request), paused = isNewExecutionMethod(method) ? executionRefusal(env) : null;
+      if (paused) return { status: 403, body: { ok: false, code: paused } };
+      const ownerRefusal = await betaFlowOwnerRefusal(flow, method, args, tenantId, principal, identity);
+      if (ownerRefusal) return { status: 403, body: { ok: false, code: ownerRefusal } };
+      if (typeof key !== 'string' || !mutates) return { status: 200, body: await callFlow(flow, method, args, tenantId, principal, identity) };
       // The principal is part of the request identity: a key replayed under another wallet session is a conflict, never a replay.
       const scope = `flows/${flow}/${method.toLowerCase()}`, hash = requestHash(scope, principal === null ? args : [{ principal }, ...args]), store = idempotency(tenantId);
       let claim;
@@ -383,7 +520,7 @@ export function createBackend(options: BackendOptions) {
       if (claim.kind === 'CONFLICT') throw new HttpError(409, 'IDEMPOTENCY_KEY_REUSED');
       if (claim.kind === 'IN_PROGRESS') throw new HttpError(409, 'IDEMPOTENCY_IN_PROGRESS');
       let result: FlowResult;
-      try { result = await callFlow(flow, method, args, tenantId, principal); } catch (error) { await store.release(scope, key, hash).catch(() => undefined); throw error; }
+      try { result = await callFlow(flow, method, args, tenantId, principal, identity); } catch (error) { await store.release(scope, key, hash).catch(() => undefined); throw error; }
       if (result.ok) await store.complete(scope, key, hash, result); else await store.release(scope, key, hash);
       return { status: 200, body: result };
     }) },
@@ -398,6 +535,7 @@ export function createBackend(options: BackendOptions) {
       const budget = request.headers[PREVIEW_DEADLINE_HEADER];
       const deadlineMs = typeof budget === 'string' && /^[1-9][0-9]{2,5}$/.test(budget) ? Number(budget) : undefined;
       return { status: 200, body: await previewFlow(flow, body.args, body.purpose as PreviewPurpose | undefined, {
+        betaIdentity: requestIdentity(request),
         ...request.signal ? { signal: request.signal } : {}, ...deadlineMs === undefined ? {} : { deadlineMs } }) };
     }) },
     { method: 'GET', name: 'runs', pattern: /^\/v1\/runs$/, handler: wrap(async request => {
@@ -481,6 +619,10 @@ export function createBackend(options: BackendOptions) {
     await settle({ outcome: 'DONE' });
   };
 
-  return { routes, callFlow, callWorkflows, callHistory, previewFlow, service, storage, handlers: { reconcile, 'evidence.archive': archive } as Record<string, WorkHandler> };
+  /** Shared with the optional API route families; service authentication stays in the HTTP server, user authorization stays here. */
+  const protectRoutes = (extra: readonly Route[]): Route[] => extra.map(route => ({ ...route, handler: wrap(route.handler) }));
+  const authorizeBeta = (identity: BetaRequestIdentity | null | undefined, principal?: string | null) => betaRefusal(options.tenantId, identity, principal);
+  return { routes, protectRoutes, authorizeBeta, callFlow, callWorkflows, callHistory, previewFlow, service, storage,
+    handlers: { reconcile, 'evidence.archive': archive } as Record<string, WorkHandler> };
 }
 export type Backend = ReturnType<typeof createBackend>;

@@ -24,6 +24,7 @@ import { advanceSolanaSubmission, checkUserOperation, reconcileEvmGroup, reconci
 import type { EvmGroupCalls } from '../user-funded/evm-calls.ts';
 import type { BoundResolution, GroupRecord, RunRecord, RunStepRecord, StepOutcome, WorkflowRunStore } from './pg-store.ts';
 import { ADVANCE_RETRY_MS, TERMINAL_RUN, type RunState } from './state-machine.ts';
+import { executionRefusal } from '../server/execution-guard.ts';
 
 export type Pass = { readonly state: RunState; readonly code: string | null; readonly retryMs: number | null; readonly progressed: boolean };
 export type UserFundedPassDeps = {
@@ -86,6 +87,10 @@ export async function userFundedPass(deps: UserFundedPassDeps, run: RunRecord): 
 async function authorizedGroup(deps: UserFundedPassDeps, run: RunRecord, g: GroupRecord, block: (code: string) => Promise<Pass>): Promise<Pass> {
   const prepared = g.prepared as Prepared, authorization = g.authorization!;
   if (g.strategy === 'EVM_WALLET_BATCH') return settled(run, SUBMIT_RETRY_MS, false, 'OWNER_REPORTS_BATCH');
+  // A pause holds an authorized group durably for an operator's resume; it never converts a pause into a permanent execution failure.
+  const paused = executionRefusal() ?? await deps.userFunded?.submissionRefusal?.({
+    namespace: g.chain.startsWith('solana:') ? 'solana' : 'eip155', address: g.feePayer }, run.owner);
+  if (paused) return settled(run, SUBMIT_RETRY_MS, false, paused);
   if (!deps.userFunded) return settled(run, ADVANCE_RETRY_MS, false, 'USER_FUNDED_NOT_ENABLED');
   if (g.strategy === 'SOLANA_SIGN_ALL') {
     const submitted = await deps.store.groupTransition(run.runId, g.groupIndex, ['AUTHORIZED'], 'SUBMITTED', { submission: solanaSubmission(authorization, deps.now()) });
@@ -101,7 +106,7 @@ async function authorizedGroup(deps: UserFundedPassDeps, run: RunRecord, g: Grou
   }
   const submitted = await deps.store.groupTransition(run.runId, g.groupIndex, ['AUTHORIZED'], 'SUBMITTED', { submission: r.value });
   if (!submitted) return { ...settled(run, SUBMIT_RETRY_MS), progressed: true };
-  const relayed = await relayUserOperation(deps.userFunded, prepared, authorization);
+  const relayed = await relayUserOperation(deps.userFunded, prepared, authorization, run.owner);
   deps.log(relayed.ok ? 'workflow_run.user_operation_relayed' : 'workflow_run.user_operation_relay_retry', { run: run.runId, group: g.groupIndex, code: relayed.ok ? null : relayed.code });
   return { ...settled(run, SUBMIT_RETRY_MS), progressed: true };
 }
@@ -112,12 +117,12 @@ async function submittedGroup(deps: UserFundedPassDeps, run: RunRecord, g: Group
   let r: Reconciled;
   try {
     if (g.strategy === 'SOLANA_SIGN_ALL') {
-      const step = await advanceSolanaSubmission(deps.userFunded, prepared, g.authorization!, g.feePayer);
+      const step = await advanceSolanaSubmission(deps.userFunded, prepared, g.authorization!, g.feePayer, run.owner);
       if (step.state === 'SENT' || step.state === 'WAITING') return settled(run, 2_000, false, step.code);
       if (step.state === 'EXPIRED' || step.state === 'FAILED') r = await reconcileSolanaGroup(deps.userFunded, prepared, { ...submission, hashes: (submission.hashes as string[]).slice(0, step.index! + (step.state === 'FAILED' ? 1 : 0)) },
         g.chain, g.feePayer).then(x => x.status === 'RECONCILED' ? { status: 'FAILED' as const, code: step.code!, gasPaid: x.gasPaid, transactions: x.transactions, steps: x.steps } : x);
       else r = await reconcileSolanaGroup(deps.userFunded, prepared, submission, g.chain, g.feePayer);
-    } else r = await reconcileEvmGroup(deps.userFunded, prepared, submission, g.authorization);
+    } else r = await reconcileEvmGroup(deps.userFunded, prepared, submission, g.authorization, run.owner);
   } catch (cause) {
     const code = cause instanceof Error && /^[A-Z][A-Z0-9_]{2,80}$/.test(cause.message) ? cause.message : 'RECONCILIATION_FAILED';
     if (g.state === 'SUBMITTED') await deps.store.groupTransition(run.runId, g.groupIndex, ['SUBMITTED'], 'UNCERTAIN', { code });

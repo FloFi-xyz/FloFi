@@ -14,6 +14,7 @@
 import type { FlowName } from '../../backend/flows.ts';
 import type { DelegationFacts } from '../workflow-runs/authorization-plan.ts';
 import type { UserFundedFacts } from '../workflow-runs/execution-groups.ts';
+import { currentBetaIdentity } from '../flight/beta-context.ts';
 import { CLOUD_API_DEADLINE_EXCEEDED, listCloudRuns, type CloudRunSummary } from '../server/cloud-api-client.ts';
 import { cloudFlow, cloudFlowMode, cloudPreview, cloudRun, cloudRunJournal, cloudRuns, flowRuntimeKind, type CloudJournalPage, type CloudRun, type EmbeddedRuntime,
   type FlowRuntimeKind, type FlowRuntimeMode } from '../server/flow-runtime.ts';
@@ -168,20 +169,26 @@ export function observeRuntime(runtime: McpRuntime): { readonly runtime: McpRunt
 }
 
 /** An embedded runtime instance, e.g. one built with MOCKED seams in tests: the same calls `flow-runtime.ts` makes in embedded mode. */
-export function embeddedMcpRuntime(runtime: Pick<EmbeddedRuntime, 'backend' | 'run' | 'journal'> & Partial<Pick<EmbeddedRuntime, 'runs'>>): McpRuntime {
+export function embeddedMcpRuntime(runtime: Pick<EmbeddedRuntime, 'backend' | 'run' | 'journal'> & Partial<Pick<EmbeddedRuntime, 'runs'>>,
+  observeRecord?: (flow: FlowName, runId: string, owner: string) => Promise<unknown>): McpRuntime {
   const guard = async <T>(action: () => Promise<T>): Promise<Result<T>> => {
     try { return { ok: true, value: await action() }; }
     catch (error) { return { ok: false, code: error instanceof Error && /^[A-Z][A-Z0-9_]{2,80}$/.test(error.message) ? error.message : 'CLOUD_RUNTIME_UNAVAILABLE' }; }
   };
+  const record = async (flow: FlowName, runId: string, owner: string): Promise<Result<unknown>> => {
+    if (observeRecord) return guard(() => observeRecord(flow, runId, owner));
+    const result = await guard(() => runtime.backend.callFlow(flow, 'status', [runId], undefined, owner, currentBetaIdentity()));
+    return result.ok ? result.value : result;
+  };
   return {
     kind: 'embedded',
-    mode: async flow => { const r = await runtime.backend.callFlow(flow, 'mode', []); return r.ok && (r.value === 'live' || r.value === 'harness') ? r.value : 'off'; },
-    info: async flow => infoOf(await runtime.backend.callFlow(flow, 'info', []).catch(() => null)),
-    preview: async (flow, args) => { const r = await guard(() => runtime.backend.previewFlow(flow, args)); return r.ok ? r.value : r; },
+    mode: async flow => { const r = await runtime.backend.callFlow(flow, 'mode', [], undefined, null, currentBetaIdentity()); return r.ok && (r.value === 'live' || r.value === 'harness') ? r.value : 'off'; },
+    info: async flow => infoOf(await runtime.backend.callFlow(flow, 'info', [], undefined, null, currentBetaIdentity()).catch(() => null)),
+    preview: async (flow, args) => { const r = await guard(() => runtime.backend.previewFlow(flow, args, undefined, { betaIdentity: currentBetaIdentity() })); return r.ok ? r.value : r; },
     run: (runId, owner) => guard(() => runtime.run(runId, owner)),
     journal: (runId, owner, after, limit) => guard(() => runtime.journal(runId, owner, after, limit)),
-    evidence: async (flow, runId, owner) => evidenceOf(flow, await guard(() => runtime.backend.callFlow(flow, 'status', [runId], undefined, owner)).then(r => r.ok ? r.value : r)),
+    evidence: async (flow, runId, owner) => evidenceOf(flow, await record(flow, runId, owner)),
     ...runtime.runs ? { runs: (flow: FlowName, owner: string) => guard(async () => (await runtime.runs!(flow, owner)).filter(r => r.ownerAccount === owner && r.flow === flow)) } : {},
-    record: async (flow, runId, owner) => { const r = await guard(() => runtime.backend.callFlow(flow, 'status', [runId], undefined, owner)); return r.ok ? r.value : r; },
+    record,
   };
 }

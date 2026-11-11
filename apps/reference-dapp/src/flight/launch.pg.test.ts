@@ -3,7 +3,7 @@
  * BUILD-FLOFI-FLIGHT-LAUNCH-001 on real disposable PostgreSQL (loopback only): the email outbox and its quota under concurrent workers,
  * every provider outcome (a FAKE provider in this process: it proves FloFi's handling, never delivery by Resend), scheduling of Email 2 and
  * Email 3, unsubscribe, access links and codes (scanner, expiry, single use, brute force, another device, account takeover), invites that
- * never propagate, the creators' TEST card, card public ids and card emails. Test data only, in a database created and dropped here.
+ * never propagate, the unified creator opening, card public ids and card emails. Test data only, in a database created and dropped here.
  */
 import { randomBytes } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -34,6 +34,11 @@ async function newAccount(): Promise<string> {
   const accountId = `acct_${hex(16)}`;
   await t.db.query('INSERT INTO flofi_accounts (tenant_id, account_id) VALUES ($1, $2)', ['default', accountId]);
   return accountId;
+}
+async function proveEmail(accountId: string, email: string) {
+  const entry = (await rows('SELECT entry_id FROM flight_list_entries WHERE tenant_id = $1 AND email = $2', ['default', email]))[0]!;
+  const token = await access.issueToken({ emailId: `fem_${hex(16)}`, entryId: entry.entry_id as string, codeMs: 15 * 60_000, now: BOARDING });
+  expect(await access.consumeLink({ token: token.link, accountId, client: null, now: BOARDING })).toEqual({ status: 'CLAIMED' });
 }
 const simulate = (accountId: string, workflowId: string, now = BOARDING) =>
   store.recordSimulation({ accountId, runId: `run-${hex(6)}`, flow: 'swap', workflowId, revision: 1, route: flightRoute(swap)!, now });
@@ -326,16 +331,16 @@ describe('access by link and code', () => {
     expect(await access.consumeLink({ token: linkTokenFor(SECRET, id3), accountId: owner, client: null, now: BOARDING })).toEqual({ status: 'ACCOUNT_HAS_OTHER_ENTRY' });
   });
 
-  it('persists verified-email boarding access for later wallet sessions, without binding during an account read or permitting a second account', async () => {
+  it('persists explicit email proof for recurring sessions and refuses an OAuth address without a claim', async () => {
     const email = 'recurring@flofi-test.dev', owner = await newAccount(), other = await newAccount();
     await store.joinList({ email, language: 'PT', flight: 'FIRST', client: null, now: BEFORE });
     const input = { accountId: owner, emails: [email], now: BOARDING };
-    expect((await store.account(input)).access).toEqual({ kind: 'eligible', origin: 'LIST' });
+    expect((await store.account(input)).access).toEqual({ kind: 'not_listed' });
     expect(await rows('SELECT count(*)::int AS n FROM flight_access_claims WHERE account_id = $1', [owner])).toEqual([{ n: 0 }]);
-    // Only the explicit Board now handler calls this method with the server's verified identities.
-    expect(await store.claimVerifiedEntry(input)).toBe('CLAIMED');
-    expect(await store.claimVerifiedEntry(input)).toBe('CLAIMED');
-    expect(await store.claimVerifiedEntry({ accountId: other, emails: [email], now: BOARDING })).toBe('CLAIMED_ELSEWHERE');
+    await proveEmail(owner, email);
+    const entry = (await rows('SELECT entry_id FROM flight_list_entries WHERE email = $1', [email]))[0]!.entry_id as string;
+    const token = await access.issueToken({ emailId: `fem_${hex(16)}`, entryId: entry, codeMs: 15 * 60_000, now: BOARDING });
+    expect(await access.consumeLink({ token: token.link, accountId: other, client: null, now: BOARDING })).toEqual({ status: 'CLAIMED_ELSEWHERE' });
     // A new request/device needs only the same authenticated account, even without an email identity in that session.
     expect((await store.account({ accountId: owner, emails: [], now: BOARDING })).access).toEqual({ kind: 'eligible', origin: 'LIST' });
     expect((await store.account({ accountId: other, emails: [email], now: BOARDING })).access.kind).toBe('not_listed');
@@ -392,15 +397,17 @@ describe('access by link and code', () => {
     expect(await access.peekLink({ token: 'x'.repeat(43), client: null, now: BOARDING })).toBe('INVALID');
     // The entry boards (its owner signed in with that verified email): the still-unused link can no longer bind it to anyone.
     const owner = await newAccount();
+    await proveEmail(owner, 'peek@flofi-test.dev');
     await simulate(owner, 'wf-peek');
     expect(await store.issuePass({ accountId: owner, emails: ['peek@flofi-test.dev'], workflowId: 'wf-peek', handle: null, public: false, now: BOARDING })).toMatchObject({ ok: true });
     const other = await newAccount();
     expect(await access.consumeLink({ token: linkTokenFor(SECRET, id), accountId: other, client: null, now: BOARDING })).toEqual({ status: 'BOARDED' });
     expect(await access.peekLink({ token: linkTokenFor(SECRET, id), client: null, now: BOARDING })).toBe('INVALID');
-    // A creator's test-flight evidence (before boarding) never issues a real card at boarding, even inside its two-hour window.
+    // Evidence from before boarding never issues an official card, even inside its two-hour window.
     const [code] = await store.issueCreatorInvites(1, BEFORE);
     const creator = await newAccount();
-    expect(await store.redeemInvite({ accountId: creator, code: code!, now: CAL.boardingOpensAt - 30 * 60_000 })).toBe('REDEEMED');
+    expect(await store.redeemInvite({ accountId: creator, code: code!, now: CAL.boardingOpensAt - 30 * 60_000 })).toBe('INVITE_NOT_YET');
+    expect(await store.redeemInvite({ accountId: creator, code: code!, now: CAL.boardingOpensAt })).toBe('REDEEMED');
     await simulate(creator, 'wf-early', CAL.boardingOpensAt - 30 * 60_000);
     expect(await store.issuePass({ accountId: creator, emails: [], workflowId: 'wf-early', handle: null, public: false, now: CAL.boardingOpensAt + 60_000 }))
       .toEqual({ ok: false, code: 'FLIGHT_SIMULATION_NOT_FOUND' });
@@ -413,6 +420,7 @@ describe('access by link and code', () => {
     const pending = await access.consumeCode({ email: 'shared@flofi-test.dev', code: token.code, accountId: null, client: null, now: BOARDING });
     expect(pending.status).toBe('SESSION');
     const owner = await newAccount();
+    await proveEmail(owner, 'shared@flofi-test.dev');
     await simulate(owner, 'wf-shared');
     expect(await store.issuePass({ accountId: owner, emails: ['shared@flofi-test.dev'], workflowId: 'wf-shared', handle: null, public: false, now: BOARDING })).toMatchObject({ ok: true });
     const stranger = await newAccount();
@@ -461,33 +469,45 @@ describe('access by link and code', () => {
 });
 
 describe('invites, creators and cards', () => {
-  it('a creator invite is addressed, traceable, sent once; the code redeems once; the test flight shows a TEST card that is never stored', async () => {
+  it('opens an addressed creator invite only at launch without reserving it early; another identity cannot take it', async () => {
     const first = await store.inviteCreator({ email: 'creator@flofi-test.dev', language: 'PT', sendAt: Date.parse('2026-11-10T10:00:00-03:00'), now: BEFORE });
     const again = await store.inviteCreator({ email: 'creator@flofi-test.dev', language: 'PT', sendAt: BEFORE, now: BEFORE });
-    expect(again).toEqual({ code: first.code, created: false });
+    expect(again).toEqual({ code: first.code, created: false, state: 'AVAILABLE' });
     expect((await emailsOf('creator@flofi-test.dev')).map(e => e.template)).toEqual(['CREATOR_INVITE']);
-    const creator = await newAccount(), other = await newAccount(), test = CAL.creatorsOpenAt + 60_000;
-    expect(await store.redeemInvite({ accountId: creator, code: first.code, now: test })).toBe('REDEEMED');
-    expect(await store.redeemInvite({ accountId: other, code: first.code, now: test })).toBe('INVITE_USED');
-    expect((await store.account({ accountId: creator, emails: [], now: test })).access.kind).toBe('test_flight');
-    await simulate(creator, 'wf-test', test);
-    const view = await store.account({ accountId: creator, emails: [], now: test });
-    expect(view.testPass).toMatchObject({ test: true, departedAt: new Date(CAL.boardingOpensAt).toISOString() });
-    expect(await rows(`SELECT count(*)::int AS n FROM flight_passes WHERE account_id = $1`, [creator])).toEqual([{ n: 0 }]);
-    // Outside the window: no test card, no pass; at 9:00 on the 12th the creator boards for real like everyone.
-    expect((await store.account({ accountId: creator, emails: [], now: CAL.creatorsOpenAt + 5 * 3_600_000 })).access.kind).toBe('not_yet');
+    const creator = await newAccount(), other = await newAccount(), early = CAL.boardingOpensAt - 1;
+    expect(await store.redeemInvite({ accountId: creator, code: first.code, emails: ['creator@flofi-test.dev'], now: early })).toBe('INVITE_NOT_YET');
+    expect(await rows('SELECT redeemed_at, redeemed_by FROM flight_invites WHERE code = $1', [first.code])).toEqual([{ redeemed_at: null, redeemed_by: null }]);
+    expect((await store.account({ accountId: creator, emails: [], now: early })).access.kind).toBe('not_yet');
+    const view = await store.account({ accountId: creator, emails: [], now: early });
+    expect(view).not.toHaveProperty('testPass');
+    await simulate(creator, 'wf-before', early);
+    expect(await store.issuePass({ accountId: creator, emails: [], workflowId: 'wf-before', handle: null, public: false, now: early })).toEqual({ ok: false, code: 'FLIGHT_NOT_ELIGIBLE' });
+    expect(await rows('SELECT count(*)::int AS n FROM flight_passes WHERE account_id = $1', [creator])).toEqual([{ n: 0 }]);
+    expect(await store.redeemInvite({ accountId: other, code: first.code, emails: ['other@flofi-test.dev'], now: CAL.boardingOpensAt })).toBe('INVITE_IDENTITY_MISMATCH');
+    expect(await store.redeemInvite({ accountId: creator, code: first.code, emails: ['creator@flofi-test.dev'], now: CAL.boardingOpensAt })).toBe('REDEEMED');
+    expect(await store.redeemInvite({ accountId: other, code: first.code, emails: ['creator@flofi-test.dev'], now: BOARDING })).toBe('INVITE_USED');
     await simulate(creator, 'wf-real', BOARDING);
     const real = await store.issuePass({ accountId: creator, emails: [], workflowId: 'wf-real', handle: null, public: false, now: BOARDING });
     expect(real).toMatchObject({ ok: true, issued: true, pass: { origin: 'CREATOR' } });
-    // A creator invite's recipient is not proven to be who redeemed it (codes can be forwarded): a wallet-only account gets no card email
-    // there; the card stays in the account. Invited people get no invites.
-    expect((await emailsOf('creator@flofi-test.dev')).some(e => String(e.template).startsWith('CARD_'))).toBe(false);
     expect((await store.account({ accountId: creator, emails: [], now: BOARDING })).invites).toEqual([]);
+  });
+
+  it('refuses expired/revoked invites without consuming them and preserves existing codes with no expiry', async () => {
+    const [expired, revoked, legacy] = await store.issueCreatorInvites(3, BEFORE);
+    await t.db.query('UPDATE flight_invites SET expires_at = $2 WHERE code = $1', [expired, new Date(CAL.boardingOpensAt)]);
+    await t.db.query('UPDATE flight_invites SET revoked_at = $2 WHERE code = $1', [revoked, new Date(BEFORE)]);
+    await t.db.query('UPDATE flight_invites SET expires_at = NULL WHERE code = $1', [legacy]);
+    const accountId = await newAccount();
+    expect(await store.redeemInvite({ accountId, code: expired!, now: BOARDING })).toBe('INVITE_INVALID');
+    expect(await store.redeemInvite({ accountId, code: revoked!, now: BOARDING })).toBe('INVITE_INVALID');
+    expect(await rows('SELECT count(*)::int AS n FROM flight_invites WHERE code = ANY($1::text[]) AND redeemed_at IS NOT NULL', [[expired, revoked]])).toEqual([{ n: 0 }]);
+    expect(await store.redeemInvite({ accountId, code: legacy!, now: BOARDING })).toBe('REDEEMED');
   });
 
   it('gives each card a random public link that shows only the card; a taken-down card disappears; old cards get an id on first view', async () => {
     const holder = await newAccount();
     await store.joinList({ email: 'card@flofi-test.dev', language: 'EN', flight: 'FIRST', client: null, now: BEFORE });
+    await proveEmail(holder, 'card@flofi-test.dev');
     await simulate(holder, 'wf-card');
     const issued = await store.issuePass({ accountId: holder, emails: ['card@flofi-test.dev'], workflowId: 'wf-card', handle: 'card_holder', public: false, now: BOARDING });
     if (!issued.ok) throw new Error('not issued');
@@ -525,5 +545,135 @@ describe('invites, creators and cards', () => {
     expect(await rows(`SELECT (SELECT count(*) FROM flight_emails)::int AS emails, (SELECT count(*) FROM flight_access_tokens)::int AS tokens,
       (SELECT count(*) FROM flight_access_claims)::int AS claims, (SELECT count(*) FROM flight_access_attempts)::int AS attempts`))
       .toEqual([{ emails: 0, tokens: 0, claims: 0, attempts: 0 }]);
+  });
+});
+
+
+describe('Google Forms provenance and launch email compatibility', () => {
+  it('imports original order once, keeps existing history and sends Email 0 only to consented unsuppressed entries', async () => {
+    const old = Date.parse('2026-10-01T12:00:00Z'), outbox = createEmailOutbox({ db: t.db, tenantId: 'default' });
+    await store.joinList({ email: 'forms-old@flofi-test.dev', language: 'PT', flight: 'FIRST', client: null, now: BEFORE });
+    const original = (await rows('SELECT entry_id FROM flight_list_entries WHERE email = $1', ['forms-old@flofi-test.dev']))[0]!.entry_id;
+    const imported = [
+      { email: 'Forms-Old@flofi-test.dev', signedUpAt: old, language: 'EN' as const, consent: true },
+      { email: 'forms-new@flofi-test.dev', signedUpAt: old + 1000, language: 'EN' as const, consent: true },
+      { email: 'forms-optout@flofi-test.dev', signedUpAt: old + 2000, language: null, consent: true },
+      { email: 'forms-noconsent@flofi-test.dev', signedUpAt: old + 3000, language: null, consent: false },
+    ];
+    await outbox.suppress(addressHash('forms-optout@flofi-test.dev'), 'UNSUBSCRIBED');
+    expect(await store.importGoogleForms(imported, BEFORE)).toEqual({ imported: 4, alreadyImported: 0 });
+    expect(await store.importGoogleForms(imported, BEFORE + 1000)).toEqual({ imported: 0, alreadyImported: 4 });
+    const entries = await rows(`SELECT e.entry_id, e.email, e.language, e.joined_at, i.original_email, i.signed_up_at, i.source
+      FROM flight_list_entries e JOIN flight_early_list_imports i USING (tenant_id, entry_id) WHERE e.email LIKE 'forms-%' ORDER BY e.joined_at`);
+    expect(entries.map(e => e.email)).toEqual(['forms-old@flofi-test.dev', 'forms-new@flofi-test.dev', 'forms-optout@flofi-test.dev', 'forms-noconsent@flofi-test.dev']);
+    expect(entries[0]).toMatchObject({ entry_id: original, language: 'PT', original_email: 'Forms-Old@flofi-test.dev', source: 'GOOGLE_FORMS', joined_at: new Date(old), signed_up_at: new Date(old) });
+    expect(await outbox.scheduleEarlyList(BEFORE, BEFORE, CAL.boardingOpensAt)).toBe(2);
+    expect(await outbox.scheduleEarlyList(BEFORE, BEFORE, CAL.boardingOpensAt)).toBe(0);
+    const fake = fakeProvider(), report = await delivery(outbox, fake.provider, () => BEFORE + 20_000).cycle();
+    expect(report.failed).toBe(0);
+    expect(fake.sent.filter(e => e.subject.includes('were early') || e.subject.includes('chegou cedo')).map(e => e.to).sort()).toEqual(['forms-new@flofi-test.dev', 'forms-old@flofi-test.dev']);
+    expect(await rows('SELECT count(*)::int AS n FROM flight_early_list_imports WHERE email0_sent_at IS NOT NULL')).toEqual([{ n: 2 }]);
+    // The durable one-time reservation survives ordinary outbox retention and repeated imports.
+    await t.db.query("DELETE FROM flight_emails WHERE template = 'EARLY_LIST' AND state = 'SENT'");
+    expect(await outbox.scheduleEarlyList(BEFORE + 40_000, BEFORE + 40_000, CAL.boardingOpensAt)).toBe(0);
+    await expect(store.importGoogleForms([{ ...imported[0]!, signedUpAt: NaN }], BEFORE)).rejects.toThrow('FLIGHT_IMPORT_INVALID');
+  });
+
+  it('holds old creator v1/v2 without altering their renderer or resending SENT/UNKNOWN; fresh v3 uses launch copy', async () => {
+    const outbox = createEmailOutbox({ db: t.db, tenantId: 'default' });
+    for (const version of [1, 2]) for (const state of ['PENDING', 'UNKNOWN', 'SENT']) {
+      const email = `version-${version}-${state.toLowerCase()}@flofi-test.dev`;
+      await store.inviteCreator({ email, language: 'EN', sendAt: BEFORE, now: BEFORE });
+      await t.db.query(`UPDATE flight_emails SET template_version = $2, state = $3, attempts = CASE WHEN $3 = 'PENDING' THEN 0 ELSE 1 END,
+        first_attempt_at = CASE WHEN $3 = 'PENDING' THEN NULL ELSE $4::timestamptz END,
+        reserved_at = CASE WHEN $3 = 'PENDING' THEN NULL ELSE $4::timestamptz END,
+        sent_at = CASE WHEN $3 = 'SENT' THEN $4::timestamptz ELSE NULL END WHERE recipient = $1`, [email, version, state, new Date(BEFORE)]);
+    }
+    await store.inviteCreator({ email: 'version-current@flofi-test.dev', language: 'EN', sendAt: BEFORE, now: BEFORE });
+    await outbox.housekeeping(BEFORE + 1000);
+    for (const version of [1, 2]) {
+      expect(await rows('SELECT template_version, state, attempts FROM flight_emails WHERE recipient = $1', [`version-${version}-pending@flofi-test.dev`]))
+        .toEqual([{ template_version: version, state: 'HELD', attempts: 0 }]);
+      expect(await rows('SELECT state, status_reason, reserved_at IS NOT NULL AS reserved FROM flight_emails WHERE recipient = $1', [`version-${version}-unknown@flofi-test.dev`]))
+        .toEqual([{ state: 'HELD', status_reason: 'TEMPLATE_VERSION_REVIEW', reserved: true }]);
+      expect(await rows('SELECT template_version, state, attempts FROM flight_emails WHERE recipient = $1', [`version-${version}-sent@flofi-test.dev`]))
+        .toEqual([{ template_version: version, state: 'SENT', attempts: 1 }]);
+    }
+    const fake = fakeProvider();
+    await delivery(outbox, fake.provider, () => BEFORE + 2000).cycle();
+    expect(fake.sent.filter(e => e.to.startsWith('version-')).map(e => e.to)).toEqual(['version-current@flofi-test.dev']);
+    const current = fake.sent.find(e => e.to === 'version-current@flofi-test.dev')!;
+    expect(current.text).toContain('Thursday from 9:00 BRT');
+    expect(current.text).toContain('cooked-goat-9ec.notion.site');
+    expect(current.text).not.toMatch(/test flight|Wednesday|\bTEST\b/);
+    // UNKNOWN rows were held with a reservation (provider may have accepted them); only never-contacted HELD rows are eligible.
+    const dry = await outbox.supersedeCreatorTemplates(BEFORE + 3000, CAL.boardingOpensAt);
+    expect(dry).toMatchObject({ eligible: 2, superseded: 0, skippedUnknown: 0, skippedSent: 2 });
+    const applied = await outbox.supersedeCreatorTemplates(BEFORE + 3000, CAL.boardingOpensAt, { apply: true });
+    expect(applied).toMatchObject({ eligible: 2, superseded: 2, skippedUnknown: 0, skippedSent: 2 });
+    expect(await rows(`SELECT template_version, state, status_reason FROM flight_emails WHERE status_reason = 'TEMPLATE_SUPERSEDED' ORDER BY recipient`))
+      .toEqual([
+        { template_version: 1, state: 'CANCELLED', status_reason: 'TEMPLATE_SUPERSEDED' },
+        { template_version: 2, state: 'CANCELLED', status_reason: 'TEMPLATE_SUPERSEDED' },
+      ]);
+    expect(await rows(`SELECT template_version, state FROM flight_emails WHERE trigger = 'creator_template_superseded' ORDER BY recipient`))
+      .toEqual([{ template_version: 3, state: 'PENDING' }, { template_version: 3, state: 'PENDING' }]);
+    expect(await rows(`SELECT state FROM flight_emails WHERE recipient LIKE 'version-%-sent%' ORDER BY recipient`))
+      .toEqual([{ state: 'SENT' }, { state: 'SENT' }]);
+    expect(await rows(`SELECT state, status_reason FROM flight_emails WHERE recipient LIKE 'version-%-unknown%' ORDER BY recipient`))
+      .toEqual([
+        { state: 'HELD', status_reason: 'TEMPLATE_VERSION_REVIEW' },
+        { state: 'HELD', status_reason: 'TEMPLATE_VERSION_REVIEW' },
+      ]);
+  });
+
+  it('splits Email 0 into quota-sized batches so a large list can still send the portion that fits', async () => {
+    const day = BEFORE - 8 * 86_400_000;
+    const limits = { daily: 10, monthly: 3000, externalDailyReserve: 0, externalMonthlyReserve: 0 };
+    const outbox = createEmailOutbox({ db: t.db, tenantId: 'default' }, limits);
+    await t.db.query(`UPDATE flight_emails SET state = 'CANCELLED', reserved_at = NULL, lease_token = NULL, lease_until = NULL WHERE state IN ('PENDING', 'HELD', 'UNKNOWN', 'SENDING')`);
+    const imported = Array.from({ length: 20 }, (_, i) => ({
+      email: `early-batch-${String(i).padStart(2, '0')}@flofi-test.dev`, signedUpAt: day - 86_400_000 + i * 1000, language: 'EN' as const, consent: true,
+    }));
+    expect(await store.importGoogleForms(imported, day)).toEqual({ imported: 20, alreadyImported: 0 });
+    expect(await outbox.scheduleEarlyList(day, day, CAL.boardingOpensAt)).toBe(20);
+    const batches = await rows(`SELECT batch_key, count(*)::int AS n FROM flight_emails WHERE template = 'EARLY_LIST' AND recipient LIKE 'early-batch-%' GROUP BY 1 ORDER BY 1`);
+    // campaignDay = 10 - min(5, floor(10/20)) = 10 → two batches of 10
+    expect(batches).toEqual([{ batch_key: 'early-list-0', n: 10 }, { batch_key: 'early-list-1', n: 10 }]);
+    expect(await outbox.lease(day + 1000, { max: 30, campaign: true })).toHaveLength(10);
+    expect(await rows(`SELECT state, status_reason, count(*)::int AS n FROM flight_emails WHERE template = 'EARLY_LIST' AND recipient LIKE 'early-batch-%' AND state = 'HELD' GROUP BY 1, 2`))
+      .toEqual([{ state: 'HELD', status_reason: 'QUOTA_DAILY', n: 10 }]);
+    expect(await rows(`SELECT count(*)::int AS n FROM flight_emails WHERE template = 'EARLY_LIST' AND recipient LIKE 'early-batch-%' AND state = 'SENDING'`))
+      .toEqual([{ n: 10 }]);
+  });
+
+  it('does not schedule or deliver any campaign template to a nonconsenting Forms import', async () => {
+    const outbox = createEmailOutbox({ db: t.db, tenantId: 'default' });
+    const email = 'consent-boundary@flofi-test.dev';
+    await store.joinList({ email, language: 'EN', flight: 'FIRST', client: null, now: BEFORE });
+    // An already queued campaign message must also be refused after the import establishes absent consent.
+    await store.importGoogleForms([{ email, signedUpAt: BEFORE - 86_400_000, language: 'EN', consent: false }], BEFORE);
+    await outbox.backfillConfirmations(BEFORE, CAL.listClosesAt);
+    await outbox.scheduleEve(CAL.eveEmailAt, CAL.eveEmailAt, CAL.boardingOpensAt);
+    await outbox.scheduleBoarding(BOARDING, CAL.boardingOpensAt);
+    expect((await emailsOf(email)).map(row => row.template)).toEqual(['LIST_CONFIRMATION']);
+    const fake = fakeProvider();
+    await delivery(outbox, fake.provider, () => BEFORE + 5000).cycle();
+    expect(fake.sent.filter(message => message.to === email)).toEqual([]);
+    expect(await emailsOf(email)).toEqual([{ template: 'LIST_CONFIRMATION', state: 'CANCELLED', status_reason: 'NO_CAMPAIGN_CONSENT', attempts: 1, provider_id: null }]);
+  });
+
+  it('rechecks invite expiry and revocation before sending a current creator email', async () => {
+    const outbox = createEmailOutbox({ db: t.db, tenantId: 'default' }), fake = fakeProvider();
+    for (const state of ['revoked', 'expired']) {
+      const invite = await store.inviteCreator({ email: `stopped-${state}@flofi-test.dev`, language: 'EN', sendAt: BEFORE, now: BEFORE });
+      await t.db.query(`UPDATE flight_invites SET revoked_at = CASE WHEN $2 = 'revoked' THEN $3::timestamptz ELSE NULL END,
+        expires_at = CASE WHEN $2 = 'expired' THEN $3::timestamptz ELSE expires_at END WHERE tenant_id = 'default' AND code = $1`,
+      [invite.code, state, new Date(BEFORE)]);
+    }
+    await delivery(outbox, fake.provider, () => BEFORE + 60_000).cycle();
+    expect(fake.sent.filter(message => message.to.startsWith('stopped-'))).toEqual([]);
+    expect((await emailsOf('stopped-revoked@flofi-test.dev'))[0]).toMatchObject({ state: 'CANCELLED', status_reason: 'INVITE_REVOKED' });
+    expect((await emailsOf('stopped-expired@flofi-test.dev'))[0]).toMatchObject({ state: 'CANCELLED', status_reason: 'INVITE_EXPIRED' });
   });
 });

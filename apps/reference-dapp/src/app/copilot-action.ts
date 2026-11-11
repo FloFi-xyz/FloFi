@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 'use server';
+import { withFlightAccess } from '../server/flight-access';
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { COPILOT_REPLAY_FORMAT_V2, copilotConfig, copilotTelemetrySink, createCopilotLimiter, createOpenAITransport, createReplayTransport, interpretCopilot,
@@ -56,7 +57,10 @@ async function mode(): Promise<CopilotMode> {
   return (await live()).ok ? 'live' : 'unavailable';
 }
 export async function copilotStatus(): Promise<{ mode: CopilotMode }> {
+  return withFlightAccess(async () => {
   return { mode: await mode() };
+
+  });
 }
 const isV2 = (input: unknown) => !!input && typeof input === 'object' && (input as { version?: unknown }).version === '2';
 /** Collect during interpretation; finish durable writes before the server action returns. No in-memory delivery queue. */
@@ -88,6 +92,7 @@ async function learningFor(input: unknown, options: unknown) {
   } catch { return null; }
 }
 export async function copilotInterpret(input: unknown, options?: unknown): Promise<CopilotResult | CopilotResultV2> {
+  return withFlightAccess(async () => {
   const config = copilotConfig(process.env);
   if (config.mode === 'off') return { ok: false, code: 'COPILOT_OFF' };
   if (process.env.FLOFI_COPILOT === 'live') {
@@ -119,6 +124,8 @@ export async function copilotInterpret(input: unknown, options?: unknown): Promi
     const replay = parseCopilotReplay(JSON.parse(await readFile(REPLAY_FILE, 'utf8')));
     return interpretCopilot(input, { transport: createReplayTransport(replay), model: 'replay', temperature: 0, limiter: limiter() });
   } catch { return { ok: false, code: 'COPILOT_REPLAY_INVALID' }; }
+
+  });
 }
 
 /** Held on globalThis: a per-process bound on client turn reports; excess reports are dropped, never queued. */
@@ -133,6 +140,7 @@ function turnLimiter(): CopilotLimiter {
  * persisted separately as CLIENT provenance. Counters only; client codes, identities and text are never persisted. Returns nothing the browser could depend on.
  */
 export async function copilotTurnReport(input: unknown): Promise<void> {
+  return withFlightAccess(async () => {
   const config = copilotConfig(process.env), record = parseTurnMetrics(input);
   if (config.mode === 'off' || config.mode === 'unavailable' || !record || record.surface !== 'WEB') return;
   const release = turnLimiter().acquire();
@@ -142,4 +150,6 @@ export async function copilotTurnReport(input: unknown): Promise<void> {
     logCopilotTurn(process.env, mode, record, undefined, 'CLIENT');
     if (copilotMetricsEnabled(process.env, mode)) await recordCopilotMetrics(async () => persistCopilotTurn(await platformStateHost(process.env), mode, record, 'CLIENT'));
   } finally { release(); }
+
+  });
 }

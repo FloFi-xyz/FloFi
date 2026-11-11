@@ -4,8 +4,14 @@ import { quoteFailure } from '../../../server/quote-failure';
 import { readBuildEstimate } from '../../../server/build-estimate';
 import { randomUUID } from 'node:crypto';
 import { createLogger, parseTraceparent, withSpan } from '@defi-workflow-engine/cloud-runtime';
+import { withFlightAccess } from '../../../server/flight-access';
 export const maxDuration = 45;
 export async function POST(request: Request) {
+  try { return await withFlightAccess(() => estimate(request)); }
+  catch (error) { return Response.json({ ok: false, code: error instanceof Error && /^BETA_[A-Z_]+$/.test(error.message)
+    ? error.message : 'BETA_ACCESS_UNAVAILABLE' }, { status: 403, headers: { 'cache-control': 'no-store' } }); }
+}
+async function estimate(request: Request) {
   const supplied = request.headers.get('x-quote-correlation-id');
   const correlationId = supplied && /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/.test(supplied) ? supplied : randomUUID();
   const reply = (result: Awaited<ReturnType<typeof readBuildEstimate>>, status = 200) => Response.json(result.ok ? {
