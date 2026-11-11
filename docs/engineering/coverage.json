@@ -3944,6 +3944,7 @@
         "apps/reference-dapp/src/flight/email/runtime.ts",
         "apps/reference-dapp/src/flight/email/templates-v1.ts",
         "apps/reference-dapp/src/flight/email/templates-v2.ts",
+        "apps/reference-dapp/src/flight/email/templates-v3.ts",
         "apps/reference-dapp/src/flight/email/templates.ts",
         "apps/reference-dapp/src/flight/host.ts",
         "apps/reference-dapp/src/flight/http.ts",

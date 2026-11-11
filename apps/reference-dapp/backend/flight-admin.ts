@@ -34,7 +34,7 @@
  *   creator-invites --file <csv: email,language> [--send-at <ISO>] [--apply --out <private.csv>]
  *                                                  dry-run by default; apply queues Email 6 and writes email/language/code/state to mode-0600 CSV
  *   creator-supersede-templates [--max <n>] [--apply]
- *                                                  dry-run by default; replace unsent TEMPLATE_VERSION_REVIEW creator rows with current v3,
+ *                                                  dry-run by default; replace unsent TEMPLATE_VERSION_REVIEW creator rows with the current version,
  *                                                  preserving invite codes. Never touches SENT/UNKNOWN. Inspect Resend before apply.
  *   import-google-forms --file <csv> [--apply]      dry-run by default; columns email,submitted_at,language,consent; ISO timestamp with explicit offset,
  *                                                  consent true/false is required; language EN/PT may be blank. Preserves original signup order.

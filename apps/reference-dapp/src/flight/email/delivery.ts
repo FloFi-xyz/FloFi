@@ -15,13 +15,12 @@ import type { AccessStore } from '../access-store.ts';
 import type { FlightStore } from '../store.ts';
 import type { EmailOutbox, EmailRow, Settlement } from './outbox.ts';
 import type { OutgoingEmail, ResendClient, SendOutcome } from './resend.ts';
-import { renderEmailForVersion, TEMPLATE_VERSIONS, type CardView, type TemplateInput } from './templates.ts';
+import { FLIGHT_CREATOR_BRIEF_URL, renderEmailForVersion, TEMPLATE_VERSIONS, type CardView, type TemplateInput } from './templates.ts';
 
 export const FLIGHT_EMAIL_FROM = 'FloFi <hello@flofi.xyz>';
 export const FLIGHT_EMAIL_REPLY_TO = 'flofi.xyz@gmail.com';
 export const FLIGHT_EMAIL_DOMAIN = 'flofi.xyz';
-/** The creator brief linked from Email 6 (the artifact's "Open the creator brief"). */
-export const FLIGHT_CREATOR_BRIEF_URL = 'https://cooked-goat-9ec.notion.site/Flight-FloFi-Brief-do-criador-4147b5d0a5fd81afb15ffdeb090a6450';
+export { FLIGHT_CREATOR_BRIEF_URL } from './templates.ts';
 const DOMAIN_CHECK_MS = 10 * 60_000;
 
 export type DeliveryDeps = {

@@ -5,6 +5,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { createEmailDelivery, FLIGHT_CREATOR_BRIEF_URL, type DeliveryDeps } from './delivery';
 import { FLIGHT_DEFAULT_CALENDAR } from '../campaign';
 import { renderEmail, renderEmailForVersion, TEMPLATE_VERSIONS, type CardView, type EmailContext, type TemplateInput } from './templates';
+import { renderEmail as renderEmailV3 } from './templates-v3';
 import type { EmailRow } from './outbox';
 
 const context = (language: 'EN' | 'PT'): EmailContext => ({ language, recipient: 'boarding@flofi-test.dev', origin: 'https://flofi.xyz',
@@ -41,8 +42,24 @@ describe('Flight launch email copy and immutable queued versions', () => {
       expect(renderEmailForVersion(input, context(language), 2)).toEqual(current);
       expect(renderEmailForVersion(input, context(language), 1)).toEqual(renderEmailForVersion(input, context(language), 1));
     }
-    expect(TEMPLATE_VERSIONS.CREATOR_INVITE).toBe(3);
+    expect(TEMPLATE_VERSIONS.CREATOR_INVITE).toBe(4);
     expect(TEMPLATE_VERSIONS.EARLY_LIST).toBe(1);
+  });
+  it('freezes the deployed v3 renderer and leaves every unrelated template unchanged', () => {
+    expect(createHash('sha256').update(readFileSync(new URL('./templates-v3.ts', import.meta.url))).digest('hex'))
+      .toBe('af3a3425bc18700e502da188b9a0d08e978ade2ca831bdadab08fde1803390a5');
+    expect(TEMPLATE_VERSIONS).toEqual({ EARLY_LIST: 1, LIST_CONFIRMATION: 2, EVE: 2, GROUP_BOARDING: 2, ACCESS_REQUESTED: 2,
+      CARD_FOUNDING: 2, CARD_PASSENGER: 2, NEXT_FLIGHT: 2, CREATOR_INVITE: 4 });
+    for (const language of ['EN', 'PT'] as const) {
+      for (const input of [...inputs, { template: 'EARLY_LIST' } as const]) {
+        if (input.template !== 'CREATOR_INVITE') expect(renderEmail(input, context(language))).toEqual(renderEmailV3(input, context(language)));
+        else {
+          const old = renderEmailForVersion(input, context(language), 3);
+          expect(old).toEqual(renderEmailV3(input, context(language)));
+          expect(old.text).toContain(language === 'PT' ? 'poste seu cartão no X' : 'post your card on X');
+        }
+      }
+    }
   });
   it('renders Email 0 independently of Email 1 and records the Forms source in both languages', () => {
     for (const language of ['EN', 'PT'] as const) {
@@ -103,12 +120,7 @@ describe('Flight launch email copy and immutable queued versions', () => {
     expect(noInvites.preheader).not.toContain('convites');
     expect(noInvites.text).not.toMatch(/3 convites|Enviar convite/);
     expect(() => renderEmail({ template: 'CARD_FOUNDING', card: card(true), invites: ['FLF-7Q2K-9XMB'], invitesUrl: 'https://flofi.xyz/board#invites' }, context('PT'))).toThrow('EMAIL_TEMPLATE_INPUT_INVALID');
-    const creator = renderEmail(inputs[7]!, context('PT'));
-    expect(creator.subject).toBe('Seu convite para o Flight FloFi ✈️');
-    expect(creator.text).toContain('depois da primeira simulação bem-sucedida');
-    expect(renderEmail(inputs[7]!, context('EN')).text).toContain('after your first successful simulation');
-    expect(creator.text).not.toMatch(/\bTEST\b|quarta-feira|voo de teste/);
-    expect(creator.html).toContain(FLIGHT_CREATOR_BRIEF_URL);
+
   });
   it('holds retired creator versions and renders only the current launch copy under its original idempotency key', async () => {
     const send = vi.fn(), secret = randomBytes(32).toString('base64url');
@@ -120,14 +132,87 @@ describe('Flight launch email copy and immutable queued versions', () => {
       recipient: 'creator@flofi-test.dev', language: 'PT', trigger: 'CREATOR_INVITE', batchKey: null, entryId: null, passId: null,
       inviteCode: 'FLF-7Q2K-9XMB', state: 'SENDING', attempts: 1, leaseToken: null, createdAt: '2026-11-10T12:00:00Z', firstAttemptAt: null };
     const at = FLIGHT_DEFAULT_CALENDAR.boardingOpensAt - 60_000;
-    for (const version of [1, 2, 99]) await expect(delivery.render({ ...row, templateVersion: version }, at)).rejects.toThrow('TEMPLATE_VERSION_REVIEW');
-    const updated = await delivery.render({ ...row, templateVersion: 3 }, at);
+    for (const version of [1, 2, 3, 99]) await expect(delivery.render({ ...row, templateVersion: version }, at)).rejects.toThrow('TEMPLATE_VERSION_REVIEW');
+    const updated = await delivery.render({ ...row, templateVersion: 4 }, at);
     expect(updated.kind).toBe('SEND');
     if (updated.kind !== 'SEND') throw Error('EXPECTED_RENDERED_EMAIL');
     expect(updated.email.html).toContain(FLIGHT_CREATOR_BRIEF_URL);
     expect(updated.email.idempotencyKey).toBe(row.emailId);
+    expect(updated.email.headers?.['List-Unsubscribe']).toMatch(/^<https:\/\/flofi\.xyz\/api\/board\/unsubscribe\?t=.+>$/);
+    expect(updated.email.headers?.['List-Unsubscribe-Post']).toBe('List-Unsubscribe=One-Click');
     expect(updated.email.text).not.toMatch(/\bTEST\b|quarta-feira|voo de teste/);
-    expect(await delivery.render({ ...row, templateVersion: 3 }, at)).toEqual(updated);
+    expect(await delivery.render({ ...row, templateVersion: 4 }, at)).toEqual(updated);
     expect(send).not.toHaveBeenCalled(); // Rendering itself cannot send or resend a campaign.
+  });
+});
+
+// Approved guest copy: independent expectations for both MIME alternatives.
+const approved = {
+  EN: {
+    subject: 'Your invite to the FloFi beta ✈️', preheader: 'Your code, and how to board on Thursday.', headline: 'Thanks for coming aboard.',
+    intro: "You're one of the first people to use FloFi outside our team. It's still early: this is a first version, and we want to learn from how you use it. Please start with small amounts, since it runs on mainnet with real funds.",
+    steps: ['Thursday from 9:00 BRT, go to flofi.xyz/board, tap "I have an invite code" and enter your code and email.',
+      'Connect your wallet, write what you want to do, check the simulation and sign only what makes sense to you.',
+      'Tell us how it went: where you got stuck, what was slow, what made you hesitate before signing. Reply to this email or message Dayane on WhatsApp or Telegram.'],
+    cta: 'Read the guest brief', note: 'After your first route, your boarding card arrives by email. If you enjoy it and feel like sharing, it really helps us, but it is entirely up to you. Your code is personal and works once.',
+    reason: "You're getting this because the FloFi team invited you to the closed beta.", codeLabel: 'Invite code', boardingLabel: 'Boarding',
+    risk: 'DeFi involves risk. A simulation does not guarantee price or outcome. FloFi never holds your keys or your funds.',
+  },
+  PT: {
+    subject: 'Seu convite para o beta da FloFi ✈️', preheader: 'Seu código e como embarcar na quinta.', headline: 'Obrigada por embarcar com a gente.',
+    intro: 'Você está entre as primeiras pessoas a usar a FloFi fora do nosso time. Ainda estamos no começo: é uma primeira versão, e queremos aprender com o seu uso. Comece com valores pequenos, porque é mainnet, com dinheiro de verdade.',
+    steps: ['Quinta, a partir das 9h, entra em flofi.xyz/board, toca em "I have an invite code" e digita o seu código e o seu e-mail.',
+      'Conecta a sua carteira, escreve o que quer fazer, confere a simulação e assina só o que fizer sentido pra você.',
+      'Conta pra nós como foi: onde travou, o que demorou, o que te deixou em dúvida antes de assinar. Pode responder este e-mail ou mandar mensagem pra Dayane no WhatsApp ou no Telegram.'],
+    cta: 'Ler o brief do convidado', note: 'Depois da sua primeira rota, o seu cartão de embarque chega por e-mail. Se você curtir e quiser compartilhar, ajuda muito, mas fica totalmente a seu critério. O seu código é pessoal e funciona uma vez só.',
+    reason: 'Você recebeu este e-mail porque o time da FloFi enviou um convite para você para o beta fechado.', codeLabel: 'CÓDIGO DE CONVITE', boardingLabel: 'EMBARQUE',
+    risk: 'DeFi envolve risco. A simulação não garante preço nem resultado. A FloFi nunca guarda suas chaves nem seus fundos.',
+  },
+};
+const brief = 'https://cooked-goat-9ec.notion.site/Flight-FloFi-Brief-do-criador-4147b5d0a5fd81afb15ffdeb090a6450';
+const decode = (html: string) => html.replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'");
+describe('Email 6 approved guest copy v4 (render only; no enqueue or provider)', () => {
+  for (const language of ['PT', 'EN'] as const) it(`renders the exact ${language} copy, one panel and CTA in HTML and plain text`, () => {
+    const copy = approved[language], code = language === 'PT' ? 'FLF-7Q2K-9XMB' : 'FLF-ABCD-EFGH';
+    const rendered = renderEmailForVersion({ template: 'CREATOR_INVITE', code, briefUrl: brief }, context(language), 4);
+    expect(FLIGHT_CREATOR_BRIEF_URL).toBe(brief);
+    expect(rendered.subject).toBe(copy.subject);
+    expect(rendered.preheader).toBe(copy.preheader);
+    const htmlText = decode(rendered.html.replace(/<[^>]+>/g, ''));
+    for (const text of [copy.preheader, copy.headline, copy.intro, ...copy.steps, copy.cta, copy.note, copy.reason, copy.risk]) {
+      expect(htmlText).toContain(text);
+      expect(rendered.text).toContain(text);
+    }
+    expect(rendered.html).toMatch(/<h1[^>]*>/);
+    expect(rendered.html).toContain('max-width:600px');
+    expect(rendered.html.match(/background:#F5F8FB/g)).toHaveLength(1);
+    expect(rendered.html).toContain(`aria-label="${code}"`);
+    expect(rendered.html).toContain('aria-label="NOV 12 09:00"');
+    expect(rendered.text).toContain(`${copy.codeLabel} = ${code}`);
+    expect(rendered.text).toContain(`${copy.boardingLabel} = NOV 12 09:00`);
+    for (const [index, step] of copy.steps.entries()) {
+      expect(rendered.text).toContain(`${index + 1}. ${step}`);
+      expect(htmlText.indexOf(step)).toBeLessThan(index === 2 ? htmlText.indexOf(copy.cta) : htmlText.indexOf(copy.steps[index + 1]!));
+      expect(rendered.html).toContain(`text-align:center">${index + 1}</div>`);
+    }
+    expect(rendered.html.match(new RegExp(`href="${brief}"`, 'g'))).toHaveLength(1);
+    expect(rendered.html.indexOf(copy.note)).toBeGreaterThan(rendered.html.indexOf(brief));
+    expect(rendered.text).toContain(`${copy.cta}: ${brief}`);
+    for (const part of [rendered.html, rendered.text]) {
+      expect(part).toContain('https://flofi.xyz/privacy');
+      expect(part).toContain(context(language).unsubscribeUrl);
+      expect(part).not.toMatch(/test flight|voo de teste|\bTEST\b|09:00[–-]10:00|post.*(?:on X|no X)|creator brief|brief do criador|wa\.me|t\.me/i);
+    }
+    expect(rendered.text).not.toMatch(/<[^>]+>|&(?:quot|amp|lt|gt|#39);/);
+  });
+  it('rejects malformed personal codes and unapproved destinations, and escapes dynamic HTML', () => {
+    for (const code of ['FLF-0000-0000', 'FLF-7Q2K-9XM<script>', 'placeholder', ''])
+      expect(() => renderEmail({ template: 'CREATOR_INVITE', code, briefUrl: brief }, context('PT'))).toThrow('EMAIL_TEMPLATE_INPUT_INVALID');
+    expect(() => renderEmail({ template: 'CREATOR_INVITE', code: 'FLF-7Q2K-9XMB', briefUrl: 'https://example.org' }, context('EN'))).toThrow('EMAIL_TEMPLATE_INPUT_INVALID');
+    const unsubscribeUrl = 'https://flofi.xyz/board/unsubscribe?t="<tag>&x=1';
+    const rendered = renderEmail({ template: 'CREATOR_INVITE', code: 'FLF-7Q2K-9XMB', briefUrl: brief }, { ...context('EN'), unsubscribeUrl });
+    expect(rendered.html).toContain('href="https://flofi.xyz/board/unsubscribe?t=&quot;&lt;tag&gt;&amp;x=1"');
+    expect(rendered.html).not.toContain('<tag>');
+    expect(rendered.text).toContain(unsubscribeUrl);
   });
 });

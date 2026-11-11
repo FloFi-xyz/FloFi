@@ -5,6 +5,9 @@
  * on exactly its four EVM mainnets (the action registry's chain ids).
  */
 import { describe, expect, it } from 'vitest';
+import { createRequire } from 'node:module';
+import { readdirSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 import { ARBITRUM_ONE, ETHEREUM_MAINNET, ROBINHOOD_CHAIN_MAINNET } from '@defi-workflow-engine/action-registry';
 import { embeddedWallets, floFiPrivyConfig, PRIVY_EVM_CHAINS, privyErrorCode, privyOwnSolanaWallets, signerDocument } from './privy-client';
 import { signerPolicy } from './signer-pages';
@@ -12,6 +15,30 @@ import { floFiPrivyWalletIssue, privyCanSign, type FloFiPrivy, type PrivySigning
 import { PRIVY_CONNECT_SOURCES } from './privy-hosts';
 
 describe('FloFi’s Privy configuration', () => {
+  it('disables the actual SDK catalog fetch while retaining detected external wallets and Coinbase', () => {
+    // Exercise the pinned SDK's own behavior, not a duplicate of its catalog wallet list.
+    // Private module names deliberately fail closed when an SDK upgrade changes this contract.
+    const require = createRequire(import.meta.url), sdk = dirname(require.resolve('@privy-io/react-auth'));
+    const guards = readdirSync(sdk).find(name => /^guards-.*\.js$/.test(name))!;
+    const view = readdirSync(sdk).find(name => /^ConnectWalletView-.*\.js$/.test(name))!;
+    const { shouldFetchWcRegistryListings } = require(join(sdk, guards)) as { shouldFetchWcRegistryListings(list: readonly string[]): boolean };
+    const { WalletFilterer } = require(join(sdk, view)) as { WalletFilterer: new (chain: string, list: readonly string[]) => {
+      getWallets(connectors: unknown[], listings: unknown[]): { wallets: { id: string; source: string; chainType: string }[]; walletCount: number } } };
+    const config = floFiPrivyConfig({ apple: false }), list = config.appearance!.walletList!;
+    expect(shouldFetchWcRegistryListings([...list, 'metamask', 'phantom', 'rabby_wallet', 'solflare', 'backpack'])).toBe(true);
+    expect(shouldFetchWcRegistryListings(list)).toBe(false);
+    const connector = (walletClientType: string, chainType: string, connectorType: string) => ({ walletClientType, chainType, connectorType,
+      walletBranding: { id: walletClientType, name: walletClientType } });
+    const connectors = [connector('metamask', 'ethereum', 'injected'), connector('rabby_wallet', 'ethereum', 'injected'),
+      connector('phantom', 'ethereum', 'injected'), connector('phantom', 'solana', 'solana_adapter'),
+      connector('solflare', 'solana', 'solana_adapter'), connector('backpack', 'solana', 'solana_adapter'),
+      connector('coinbase_wallet', 'ethereum', 'coinbase_wallet')];
+    const result = new WalletFilterer(config.appearance!.walletChainType!, list).getWallets(connectors, []);
+    expect(result.walletCount).toBe(6); // Phantom's two ecosystems share one entry.
+    expect(result.wallets.map(wallet => wallet.id).sort()).toEqual(['backpack', 'coinbase', 'metamask', 'phantom', 'rabby', 'solflare']);
+    expect(result.wallets.every(wallet => wallet.source === 'connector')).toBe(true);
+    expect(result.wallets.find(wallet => wallet.id === 'phantom')?.chainType).toBe('multi');
+  });
   it('creates no wallet at sign-in, always shows Privy’s confirmation screens and offers no WalletConnect', () => {
     const config = floFiPrivyConfig({ apple: false });
     expect(config.embeddedWallets).toMatchObject({ ethereum: { createOnLogin: 'off' }, solana: { createOnLogin: 'off' }, showWalletUIs: true });
