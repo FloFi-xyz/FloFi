@@ -10,11 +10,12 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createLogger } from '@defi-workflow-engine/cloud-runtime';
 import type { SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
 import { createTestDatabase, type TestDatabase } from '../../../../packages/cloud-runtime/test/pg-harness.ts';
-import { ACCESS_LINK_MS, ACCESS_SESSION_MS, addressHash, CODE_MAX_ATTEMPTS, codeFor, linkTokenFor } from './access';
+import { ACCESS_LINK_MS, ACCESS_SESSION_MS, addressHash, CODE_MAX_ATTEMPTS, codeFor, EMAIL_CODE_MS, linkTokenFor, REQUESTED_CODE_MS } from './access';
 import { createAccessStore, type AccessStore } from './access-store';
+import { createBetaAccessStore } from './beta-access';
 import { FLIGHT_DEFAULT_CALENDAR, flightRoute } from './campaign';
 import { createEmailDelivery } from './email/delivery';
-import { createEmailOutbox, type EmailOutbox } from './email/outbox';
+import { createEmailOutbox, enqueueEmail, type EmailOutbox, type EmailRow } from './email/outbox';
 import type { OutgoingEmail, SendOutcome } from './email/resend';
 import { createFlightStore, type FlightStore } from './store';
 
@@ -279,6 +280,10 @@ describe('access by link and code', () => {
     expect(sent.subject).toBe('Your group is boarding ✈️');
     expect(sent.html).toContain(`https://flofi.xyz/board/access?l=en#t=${linkTokenFor(SECRET, emailId)}`);
     expect(sent.text).toContain(codeFor(SECRET, emailId));
+    expect(sent.text).toContain('The code works for 72 hours, once.');
+    expect(await rows(`SELECT extract(epoch FROM (code_expires_at - created_at))::int AS code_seconds,
+      extract(epoch FROM (link_expires_at - created_at))::int AS link_seconds FROM flight_access_tokens WHERE entry_id = $1`, [entryId]))
+      .toEqual([{ code_seconds: 72 * 3600, link_seconds: 72 * 3600 }]);
     const stored = JSON.stringify(await rows(`SELECT * FROM flight_access_tokens WHERE entry_id = $1`, [entryId]));
     expect(stored).not.toContain(linkTokenFor(SECRET, emailId));
     expect(stored).not.toContain(`"${codeFor(SECRET, emailId)}"`);
@@ -289,9 +294,11 @@ describe('access by link and code', () => {
     // A scanner or preview only opens the page: the token row is untouched.
     expect((await rows(`SELECT consumed_at FROM flight_access_tokens WHERE entry_id = $1`, [entryId]))[0]).toEqual({ consumed_at: null });
     expect(await access.consumeLink({ token: 'x'.repeat(43), accountId: person, client: null, now: BOARDING })).toEqual({ status: 'INVALID' });
-    expect(await access.consumeLink({ token: link, accountId: person, client: null, now: BOARDING + ACCESS_LINK_MS + 1 })).toEqual({ status: 'EXPIRED' });
-    expect(await access.consumeLink({ token: link, accountId: person, client: '203.0.113.7', now: BOARDING })).toEqual({ status: 'CLAIMED' });
+    expect(await access.consumeLink({ token: link, accountId: person, client: null, now: BOARDING + ACCESS_LINK_MS })).toEqual({ status: 'EXPIRED' });
+    expect(await access.consumeLink({ token: link, accountId: person, client: '203.0.113.7', now: BOARDING + ACCESS_LINK_MS - 1 })).toEqual({ status: 'CLAIMED' });
     expect(await access.consumeLink({ token: link, accountId: person, client: '203.0.113.7', now: BOARDING })).toEqual({ status: 'USED' });
+    expect(await access.consumeCode({ email: 'board@flofi-test.dev', code: codeFor(SECRET, emailId), accountId: person,
+      client: '203.0.113.7', now: BOARDING + 16 * 60_000 })).toEqual({ status: 'INVALID' });
     // The proven entry makes the account eligible (a wallet-only login has no verified email of its own); nothing else changed.
     expect((await store.account({ accountId: person, emails: [], now: BOARDING })).access).toEqual({ kind: 'eligible', origin: 'LIST' });
     expect(await rows(`SELECT count(*)::int AS n FROM flofi_accounts WHERE account_id = $1`, [person])).toEqual([{ n: 1 }]);
@@ -431,13 +438,14 @@ describe('access by link and code', () => {
   it('limits brute force: a code dies after 5 wrong tries, and tries per address and per client are limited', async () => {
     await store.joinList({ email: 'brute@flofi-test.dev', language: 'EN', flight: 'FIRST', client: null, now: BEFORE });
     const entry = (await rows(`SELECT entry_id FROM flight_list_entries WHERE email = 'brute@flofi-test.dev'`))[0]!.entry_id as string;
-    const id = `fem_${hex(16)}`, token = await access.issueToken({ emailId: id, entryId: entry, codeMs: 15 * 60_000, now: BOARDING });
+    const id = `fem_${hex(16)}`, token = await access.issueToken({ emailId: id, entryId: entry, codeMs: EMAIL_CODE_MS, now: BOARDING });
     const wrong = (n: number) => String((Number(token.code) + 1 + n) % 1_000_000).padStart(6, '0');
     for (let i = 0; i < CODE_MAX_ATTEMPTS; i++)
       expect((await access.consumeCode({ email: 'brute@flofi-test.dev', code: wrong(i), accountId: null, client: `192.0.2.${i}`, now: BOARDING + i })).status).not.toBe('SESSION');
     // Now even the right code is refused (rate limited per address, and the code itself is spent).
     expect((await access.consumeCode({ email: 'brute@flofi-test.dev', code: token.code, accountId: null, client: '192.0.2.99', now: BOARDING + 10 })).status).toBe('RATE_LIMITED');
     expect((await access.consumeCode({ email: 'brute@flofi-test.dev', code: token.code, accountId: null, client: '192.0.2.99', now: BOARDING + 2 * 3_600_000 })).status).toBe('INVALID');
+    expect(await rows('SELECT code_attempts FROM flight_access_tokens WHERE entry_id = $1', [entry])).toEqual([{ code_attempts: 5 }]);
     // A code past its time is refused too.
     const late = `fem_${hex(16)}`, lateToken = await access.issueToken({ emailId: late, entryId: entry, codeMs: 15 * 60_000, now: BOARDING });
     expect((await access.consumeCode({ email: 'brute@flofi-test.dev', code: lateToken.code, accountId: null, client: null, now: BOARDING + 3 * 3_600_000 + 16 * 60_000 })).status).toBe('INVALID');
@@ -465,6 +473,98 @@ describe('access by link and code', () => {
     expect((await emailsOf('later@flofi-test.dev')).filter(e => e.template === 'ACCESS_REQUESTED')).toHaveLength(2);
     await t.db.query(`DELETE FROM flight_emails WHERE dedupe_key LIKE 'cap:%'`);
     expect((await rows(`SELECT category FROM flight_emails WHERE recipient = 'later@flofi-test.dev' AND template = 'ACCESS_REQUESTED' LIMIT 1`))[0]).toEqual({ category: 'ESSENTIAL' });
+  });
+
+  it.each([EMAIL_CODE_MS, REQUESTED_CODE_MS])('uses the persisted code lifetime (%i ms), excluding the exact expiry, and consumes the paired link', async codeMs => {
+    const email = `ttl-${hex(5)}@example.test`, owner = await newAccount();
+    await store.joinList({ email, language: 'EN', flight: 'FIRST', client: hex(32), now: BEFORE });
+    const entry = (await rows('SELECT entry_id FROM flight_list_entries WHERE email = $1', [email]))[0]!.entry_id as string;
+    const token = await access.issueToken({ emailId: `fem_${hex(16)}`, entryId: entry, codeMs, now: BOARDING });
+    const consume = (now: number) => access.consumeCode({ email, code: token.code, accountId: owner, client: email, now });
+    expect(await consume(BOARDING + codeMs)).toEqual({ status: 'INVALID' });
+    expect(await consume(BOARDING + codeMs + 1)).toEqual({ status: 'INVALID' });
+    expect(await consume(BOARDING + codeMs - 1)).toEqual({ status: 'CLAIMED' });
+    expect(await consume(BOARDING + codeMs - 1)).toEqual({ status: 'INVALID' });
+    expect(await access.consumeLink({ token: token.link, accountId: owner, client: email, now: BOARDING + codeMs - 1 })).toEqual({ status: 'USED' });
+    expect((await store.account({ accountId: owner, emails: [], now: BOARDING + EMAIL_CODE_MS + 1 })).access).toEqual({ kind: 'eligible', origin: 'LIST' });
+  });
+
+  it('renders fresh queued v1/v2 Email 3 codes for 72 hours, manual codes for 15 minutes, and keeps legacy retry bodies and states', async () => {
+    const outbox = createEmailOutbox({ db: t.db, tenantId: 'default' }), fake = fakeProvider();
+    const worker = delivery(outbox, fake.provider, () => BOARDING);
+    for (const language of ['EN', 'PT'] as const) for (const version of [1, 2]) {
+      const email = `render-${hex(5)}@example.test`;
+      await store.joinList({ email, language, flight: 'FIRST', client: hex(32), now: BEFORE });
+      const entry = (await rows('SELECT entry_id FROM flight_list_entries WHERE email = $1', [email]))[0]!.entry_id as string;
+      const emailRow = async (template: 'GROUP_BOARDING' | 'ACCESS_REQUESTED', trigger: string): Promise<EmailRow> => {
+        const row = (await rows('SELECT email_id FROM flight_emails WHERE recipient = $1 AND template = $2 AND trigger = $3', [email, template, trigger]))[0]!;
+        return { emailId: row.email_id as string, template, templateVersion: version, category: template === 'GROUP_BOARDING' ? 'CAMPAIGN' : 'ESSENTIAL',
+          recipient: email, language, trigger, batchKey: null, entryId: entry, passId: null, inviteCode: null, state: 'PENDING', attempts: 0,
+          leaseToken: null, createdAt: new Date(BOARDING).toISOString(), firstAttemptAt: null };
+      };
+      for (const template of ['GROUP_BOARDING', 'ACCESS_REQUESTED'] as const) {
+        await enqueueEmail(t.db, 'default', { template, recipient: email, language, trigger: 'ttl_test', dedupeKey: hex(16), entryId: entry, notBefore: BOARDING });
+        const row = await emailRow(template, 'ttl_test');
+        const queued = { ...row, templateVersion: version };
+        const rendered = await worker.render(queued, BOARDING);
+        expect(rendered.kind).toBe('SEND');
+        if (rendered.kind !== 'SEND') throw Error('EXPECTED_TEST_EMAIL');
+        const minutes = template === 'GROUP_BOARDING' ? 4320 : 15;
+        const life = minutes === 4320 ? (language === 'PT' ? '72 horas' : '72 hours') : (language === 'PT' ? '15 minutos' : '15 minutes');
+        expect(rendered.email.text).toContain(language === 'PT' ? `O código vale por ${life}, uma vez.` : `The code works for ${life}, once.`);
+        expect(await access.issueToken({ emailId: row.emailId, entryId: entry, codeMs: EMAIL_CODE_MS, now: BOARDING + 60_000 }))
+          .toMatchObject({ codeMinutes: minutes, linkHours: 72 });
+        expect(await worker.render(queued, BOARDING + 60_000)).toEqual(rendered);
+      }
+      // An email rendered before this release keeps its short lifetime and exact payload, even if retried after expiry.
+      await enqueueEmail(t.db, 'default', { template: 'GROUP_BOARDING', recipient: email, language, trigger: 'legacy_test', dedupeKey: hex(16), entryId: entry, notBefore: BOARDING });
+      const legacy = await emailRow('GROUP_BOARDING', 'legacy_test');
+      await access.issueToken({ emailId: legacy.emailId, entryId: entry, codeMs: REQUESTED_CODE_MS, now: BOARDING });
+      const queued = { ...legacy, templateVersion: version };
+      const first = await worker.render(queued, BOARDING);
+      expect(first.kind === 'SEND' && first.email.text).toContain(language === 'PT' ? '15 minutos' : '15 minutes');
+      expect(await worker.render(queued, BOARDING + 16 * 60_000)).toEqual(first);
+    }
+    expect(fake.sent).toEqual([]); // Render-only: no provider, even the fake, receives these emails.
+  });
+
+  it('never extends or revives old expired, consumed or revoked tokens, and an unused valid proof never opens the product early', async () => {
+    const email = `unchanged-${hex(5)}@example.test`, owner = await newAccount();
+    await store.joinList({ email, language: 'EN', flight: 'FIRST', client: hex(32), now: BEFORE });
+    const entry = (await rows('SELECT entry_id FROM flight_list_entries WHERE email = $1', [email]))[0]!.entry_id as string;
+    for (const state of ['expired', 'consumed', 'revoked'] as const) {
+      const id = `fem_${hex(16)}`;
+      const token = await access.issueToken({ emailId: id, entryId: entry, codeMs: REQUESTED_CODE_MS, now: BEFORE });
+      if (state === 'consumed') expect((await access.consumeLink({ token: token.link, accountId: owner, client: email, now: BEFORE })).status).toBe('CLAIMED');
+      if (state === 'revoked') await access.revokeEntryTokens(entry, BEFORE);
+      const snapshot = await rows('SELECT * FROM flight_access_tokens WHERE entry_id = $1', [entry]);
+      expect(await access.issueToken({ emailId: id, entryId: entry, codeMs: EMAIL_CODE_MS, now: BOARDING })).toEqual(token);
+      expect(await rows('SELECT * FROM flight_access_tokens WHERE entry_id = $1', [entry])).toEqual(snapshot);
+      expect((await access.consumeCode({ email, code: token.code, accountId: owner, client: email, now: BOARDING })).status).toBe('INVALID');
+    }
+    const token = await access.issueToken({ emailId: `fem_${hex(16)}`, entryId: entry, codeMs: EMAIL_CODE_MS, now: CAL.boardingOpensAt - 60_000 });
+    expect(await access.consumeCode({ email, code: token.code, accountId: owner, client: email, now: CAL.boardingOpensAt - 1 })).toEqual({ status: 'CLAIMED' });
+    expect((await store.account({ accountId: owner, emails: [], now: CAL.boardingOpensAt - 1 })).access.kind).toBe('not_yet');
+    const gate = createBetaAccessStore({ db: t.db, tenantId: 'default' }, CAL);
+    expect(await gate.grant(owner, CAL.boardingOpensAt - 1)).toEqual({ ok: false, code: 'BETA_NOT_OPEN' });
+    expect(await gate.requireAccount(owner, CAL.boardingOpensAt - 1)).toEqual({ ok: false, code: 'BETA_NOT_OPEN' });
+  });
+
+  it('rejects a revoked 72-hour proof while unexpired and serializes concurrent code/link use', async () => {
+    const email = `race-${hex(5)}@example.test`, owner = await newAccount();
+    await store.joinList({ email, language: 'EN', flight: 'FIRST', client: hex(32), now: BEFORE });
+    const entry = (await rows('SELECT entry_id FROM flight_list_entries WHERE email = $1', [email]))[0]!.entry_id as string;
+    const id = `fem_${hex(16)}`, revoked = await access.issueToken({ emailId: id, entryId: entry, codeMs: EMAIL_CODE_MS, now: BOARDING });
+    expect(await access.revokeEntryTokens(entry, BOARDING)).toBe(1);
+    expect(await access.issueToken({ emailId: id, entryId: entry, codeMs: EMAIL_CODE_MS, now: BOARDING + 60_000 })).toEqual(revoked);
+    const use = { accountId: owner, client: email, now: BOARDING + 16 * 60_000 };
+    expect(await access.consumeCode({ ...use, email, code: revoked.code })).toEqual({ status: 'INVALID' });
+    expect(await access.consumeLink({ ...use, token: revoked.link })).toEqual({ status: 'INVALID' });
+    const token = await access.issueToken({ emailId: `fem_${hex(16)}`, entryId: entry, codeMs: EMAIL_CODE_MS, now: BOARDING });
+    const outcomes = await Promise.all([access.consumeCode({ ...use, email, code: token.code }), access.consumeLink({ ...use, token: token.link })]);
+    expect(outcomes.filter(r => r.status === 'CLAIMED')).toHaveLength(1);
+    expect(outcomes.filter(r => r.status === 'USED' || r.status === 'INVALID')).toHaveLength(1);
+    expect(await rows('SELECT count(*)::int AS n FROM flight_access_claims WHERE entry_id = $1', [entry])).toEqual([{ n: 1 }]);
   });
 });
 

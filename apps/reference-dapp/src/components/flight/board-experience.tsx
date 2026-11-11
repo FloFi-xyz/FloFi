@@ -10,11 +10,11 @@
  * until boarding; "I have an invite code" in every state; a person on the list with another email gets a link and a code by email and can
  * type the code here (another device); the card flow: handle (optional), card, share, public page.
  */
-import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import Link from 'next/link';
 import { FLIGHT_BOARDING_KEY, FLIGHT_DRAFT_KEY, FLIGHT_RETURN_KEY } from '../../flight/app-boarding';
 import type { FlightState } from '../../flight/http';
-import type { FlightAccess } from '../../flight/campaign';
+import { INVITE_CODE, type FlightAccess } from '../../flight/campaign';
 import type { FlightPass, OwnInvite } from '../../flight/store';
 import { faceOf, Flaps, FoundingPass, PassengerPass } from './boarding-pass';
 import { boardingDay, brtClock as clockOf, FLIGHT_COPY, type FlightCopy } from './flight-copy';
@@ -47,21 +47,21 @@ function cardPost(pass: FlightPass): string {
 }
 const cardUrl = (pass: FlightPass) => pass.publicId ? `https://flofi.xyz/card/${pass.publicId}` : null;
 
-/** The remaining time to the list closing, in whole minutes (server time, so the test clock and the real one agree). */
+/** Remaining list time in whole seconds, derived from the server reference and the actual elapsed clock. */
 function useCountdown(target: number, serverNow: number) {
   const [offset] = useState(() => serverNow - Date.now());
   const [now, setNow] = useState(serverNow);
-  useEffect(() => { const timer = setInterval(() => setNow(Date.now() + offset), 15_000); return () => clearInterval(timer); }, [offset]);
-  const minutes = Math.max(0, Math.floor((target - now) / 60_000));
-  return [Math.floor(minutes / 1440), Math.floor((minutes % 1440) / 60), minutes % 60] as const;
+  useEffect(() => { const timer = setInterval(() => setNow(Date.now() + offset), 1000); return () => clearInterval(timer); }, [offset]);
+  const seconds = Math.max(0, Math.floor((target - now) / 1000));
+  return [Math.floor(seconds / 86400), Math.floor((seconds % 86400) / 3600), Math.floor((seconds % 3600) / 60), seconds % 60] as const;
 }
 
 function Countdown({ state, copy }: { state: FlightState; copy: FlightCopy }) {
-  const [d, h, m] = useCountdown(state.closesAt, state.now), t = copy.finalCall;
+  const values = useCountdown(state.closesAt, state.now), t = copy.finalCall;
   const two = (n: number) => String(Math.min(n, 99)).padStart(2, '0');
   const word = (n: number, index: number) => `${n} ${t.unitWords[index]![n === 1 ? 0 : 1]}`;
-  return <div className={styles.countdown} role="timer" aria-label={`${t.closesIn} ${word(d, 0)}, ${word(h, 1)}, ${word(m, 2)}`}>
-    {[d, h, m].map((value, index) => <span key={index} className={styles.countGroup} aria-hidden="true">
+  return <div className={styles.countdown} role="timer" aria-label={`${t.closesIn} ${values.map(word).join(', ')}`}>
+    {values.map((value, index) => <span key={index} className={styles.countGroup} aria-hidden="true">
       <Flaps text={two(value)} big/><span className={styles.countUnit}>{t.units[index]}</span></span>)}
   </div>;
 }
@@ -101,10 +101,34 @@ function ListForm({ copy, language, flight, onJoined }: { copy: FlightCopy; lang
   </>;
 }
 
+/** Presentation only: keep invalid characters visible so the backend alphabet still decides validity. */
+function formatInvite(value: string): string {
+  const upper = value.toUpperCase().replace(/\s/g, '');
+  let payload = (upper.startsWith('FLF-') ? upper.slice(4) : upper).replace(/-/g, '');
+  // A compact full code has 11 characters. An 8-character payload may itself start with FLF.
+  if (payload.length === 11 && payload.startsWith('FLF')) payload = payload.slice(3);
+  if (upper === 'FLF-FLF-') payload = ''; // Typing the optional prefix, including its separator.
+  if (!payload && !upper) return '';
+  return `FLF-${payload.slice(0, 4)}${payload.length > 4 ? `-${payload.slice(4)}` : ''}`;
+}
+
 function InviteForm({ copy, now, opensAt, onRedeemed }: { copy: FlightCopy; now: number; opensAt: number; onRedeemed: (flight: unknown) => void }) {
   const t = copy.inviteForm, [code, setCode] = useState(''), [busy, setBusy] = useState(false), [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null);
+  const input = useRef<HTMLInputElement>(null), caret = useRef<number | null>(null);
+  useLayoutEffect(() => {
+    if (caret.current !== null) { input.current?.setSelectionRange(caret.current, caret.current); caret.current = null; }
+  }, [code]);
+  function edit(value: string, position: number) {
+    const formatted = formatInvite(value), before = value.slice(0, position).toUpperCase().replace(/[\s-]/g, '');
+    const compact = value.toUpperCase().replace(/[\s-]/g, '');
+    const hasPrefix = value.toUpperCase().replace(/\s/g, '').startsWith('FLF-') || (compact.length === 11 && compact.startsWith('FLF'));
+    const length = hasPrefix ? Math.max(0, before.length - 3) : before.length;
+    caret.current = Math.min(formatted.length, 4 + length + (length > 4 ? 1 : 0));
+    setCode(formatted);
+  }
   async function submit(event: FormEvent) {
     event.preventDefault();
+    if (!INVITE_CODE.test(code)) return;
     // Server calendar also controls the UI; the API independently enforces this before consuming a code.
     if (now < opensAt) { setMessage({ ok: false, text: copy.errors.INVITE_NOT_YET }); return; }
     setBusy(true);
@@ -119,8 +143,34 @@ function InviteForm({ copy, now, opensAt, onRedeemed }: { copy: FlightCopy; now:
   }
   return <form className={styles.inviteForm} onSubmit={submit}>
     <label className={styles.srOnly} htmlFor="flight-invite">{t.label}</label>
-    <input id="flight-invite" autoComplete="off" spellCheck={false} placeholder={t.placeholder} value={code} onChange={e => setCode(e.target.value)} maxLength={16}/>
-    <button className={`${styles.btn} ${styles.btnGhost}`} type="submit" disabled={busy || code.trim().length < 11}>{t.use}</button>
+    <input ref={input} id="flight-invite" autoComplete="off" autoCapitalize="characters" spellCheck={false} placeholder={t.placeholder} value={code}
+      onChange={e => edit(e.target.value, e.target.selectionStart ?? e.target.value.length)}
+      onKeyDown={e => {
+        const { selectionStart: start, selectionEnd: end } = e.currentTarget;
+        if (start === null || end === null) return;
+        if (end <= 4 && code.startsWith('FLF-')) {
+          if (e.key === 'Delete' || (start !== end && e.key === 'Backspace')) {
+            e.preventDefault();
+            if (start === end) edit(code.slice(0, 4) + code.slice(5), 4);
+            else e.currentTarget.setSelectionRange(4, 4);
+            return;
+          }
+          if (e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) e.currentTarget.setSelectionRange(4, 4);
+        }
+        if (start !== end) return;
+        // Deleting an inserted separator also deletes its adjacent payload character, so the caret never gets trapped.
+        if (e.key === 'Backspace' && start <= 4 && code.startsWith('FLF-')) {
+          e.preventDefault();
+          if (code === 'FLF-') { caret.current = 0; setCode(''); }
+          else e.currentTarget.setSelectionRange(4, 4);
+        } else if (e.key === 'Backspace' && start === 9) {
+          e.preventDefault();
+          edit(code.slice(0, start - 2) + code.slice(start), start - 2);
+        } else if (e.key === 'Delete' && start === 8 && code[8] === '-') {
+          e.preventDefault(); edit(code.slice(0, start) + code.slice(start + 2), start);
+        }
+      }}/>
+    <button className={`${styles.btn} ${styles.btnGhost}`} type="submit" disabled={busy || !INVITE_CODE.test(code)}>{t.use}</button>
     <p className={message?.ok ? styles.status : styles.srOnly} role="status">{message?.ok ? message.text : ''}</p>
     {message && !message.ok && <p className={styles.error} role="alert">{message.text}</p>}
   </form>;

@@ -8,7 +8,7 @@
  *   matches) and nothing secret is ever stored: the database keeps the SHA-256 of the link token and a keyed HMAC of the code.
  * - The link token travels in the URL FRAGMENT (`/board/access#t=…`): browsers never send a fragment to a server, so it is not in any request
  *   log, referrer or proxy; and opening the link consumes nothing — only the person's explicit "Continue" does (email scanners open links).
- * - A code is six digits, compared in constant time, valid for a short time, at most `CODE_MAX_ATTEMPTS` wrong tries per token, single use.
+ * - A code is six digits, compared in constant time, valid until its persisted expiry, at most `CODE_MAX_ATTEMPTS` wrong tries per token, single use.
  */
 import { createHash, createHmac, timingSafeEqual } from 'node:crypto';
 
@@ -16,8 +16,8 @@ import { createHash, createHmac, timingSafeEqual } from 'node:crypto';
 export const ACCESS_LINK_MS = 72 * 60 * 60 * 1000;
 /** A code the person asked for at /board: 15 minutes ("Código de 6 dígitos pedido na landing: 15 minutos"). */
 export const REQUESTED_CODE_MS = 15 * 60 * 1000;
-/** Every six-digit code expires after 15 minutes; its paired link remains valid for at most 72 hours. */
-export const EMAIL_CODE_MS = REQUESTED_CODE_MS;
+/** Email 3 (GROUP_BOARDING): 72 hours from generation, like its paired link. Existing rows keep their persisted expiry. */
+export const EMAIL_CODE_MS = 72 * 60 * 60 * 1000;
 export const CODE_MAX_ATTEMPTS = 5;
 /**
  * After proving the address before signing in, the browser keeps that proof for one day; it binds only when the person presses "Board now"

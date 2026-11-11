@@ -22,7 +22,7 @@ const EN = {
   finalCall: {
     eyebrow: (day: string) => `Flight FloFi · Closed beta · Boards ${day}`, title: ['Final call for ', 'the beta list.'],
     body: 'First boarding goes to the beta list. Say where you’re going, FloFi builds the route, you approve.',
-    closesIn: 'List closes in', units: ['D', 'H', 'M'], unitWords: [['day', 'days'], ['hour', 'hours'], ['minute', 'minutes']], email: 'you@email.com', emailLabel: 'Your email', join: 'Join the list',
+    closesIn: 'List closes in', units: ['D', 'H', 'M', 'S'], unitWords: [['day', 'days'], ['hour', 'hours'], ['minute', 'minutes'], ['second', 'seconds']], email: 'you@email.com', emailLabel: 'Your email', join: 'Join the list',
     notice: 'We only use your email for the FloFi beta.', consent: 'By joining, you agree to this use under our', privacy: 'Privacy Policy',
     joined: 'You’re on the list. First boarding goes to the beta list.', sticker: 'FINAL CALL',
   },
@@ -39,7 +39,7 @@ const EN = {
   access: {
     otherEmail: 'Prove your beta-list access', otherEmailAction: 'Get a link and a code', emailLabel: 'Your beta-list email', send: 'Send me a link and a code',
     sent: 'If this email is on the beta list and its group is boarding, a link and a 6-digit code are on their way. The code works for 15 minutes.',
-    codeLabel: '6-digit code', codeUse: 'Use code', codeHint: 'Got the email on another device? Enter the email and its 6-digit code here.',
+    codeLabel: '6-digit code', codeUse: 'Use code', codeHint: 'Enter the email and its 6-digit code here. Your group’s code lasts 72 hours; a new code requested here lasts 15 minutes.',
     claimed: 'Your boarding is confirmed. Press Board now.', eyebrow: 'Flight FloFi · Now boarding', pendingSignIn: 'Your email is confirmed for boarding. Sign in with your wallet or email to continue.',
     title: ['Your boarding ', 'link.'], body: 'Tap Continue to confirm your boarding on this device. The link works once.', proves: (address: string) => `This link is for ${address}.`, continue: 'Continue',
     working: 'Confirming…', done: 'Confirmed. Taking you to your gate…', missing: 'This link is incomplete. Open it again from the email, or ask for a new one at flofi.xyz/board.',
@@ -115,7 +115,7 @@ const PT: Copy = {
   finalCall: {
     eyebrow: (day: string) => `Flight FloFi · Beta fechado · Embarca em ${day}`, title: ['Última chamada para ', 'a lista beta.'],
     body: 'O primeiro embarque é da lista beta. Diga para onde você vai, a FloFi monta a rota, você aprova.',
-    closesIn: 'A lista fecha em', units: ['D', 'H', 'M'], unitWords: [['dia', 'dias'], ['hora', 'horas'], ['minuto', 'minutos']], email: 'voce@email.com', emailLabel: 'Seu e-mail', join: 'Entrar na lista',
+    closesIn: 'A lista fecha em', units: ['D', 'H', 'M', 'S'], unitWords: [['dia', 'dias'], ['hora', 'horas'], ['minuto', 'minutos'], ['segundo', 'segundos']], email: 'voce@email.com', emailLabel: 'Seu e-mail', join: 'Entrar na lista',
     notice: 'Usamos seu e-mail só para o beta da FloFi.', consent: 'Ao entrar, você concorda com esse uso, conforme a nossa', privacy: 'Política de Privacidade',
     joined: 'Você está na lista. O primeiro embarque é da lista beta.', sticker: 'ÚLTIMA CHAMADA',
   },
@@ -132,7 +132,7 @@ const PT: Copy = {
   access: {
     otherEmail: 'Comprove seu acesso pela lista beta', otherEmailAction: 'Receber um link e um código', emailLabel: 'Seu e-mail da lista beta', send: 'Enviar link e código',
     sent: 'Se este e-mail estiver na lista beta e o grupo dele estiver embarcando, um link e um código de 6 dígitos estão a caminho. O código vale por 15 minutos.',
-    codeLabel: 'Código de 6 dígitos', codeUse: 'Usar código', codeHint: 'Recebeu o e-mail em outro aparelho? Digite aqui o e-mail e o código de 6 dígitos.',
+    codeLabel: 'Código de 6 dígitos', codeUse: 'Usar código', codeHint: 'Digite aqui o e-mail e o código de 6 dígitos. O código do seu grupo vale por 72 horas; um novo código pedido aqui vale por 15 minutos.',
     claimed: 'Seu embarque está confirmado. Toque em Embarcar agora.', eyebrow: 'Flight FloFi · Embarque aberto', pendingSignIn: 'Seu e-mail está confirmado para o embarque. Entre com sua carteira ou e-mail para continuar.',
     title: ['Seu link ', 'de embarque.'], body: 'Toque em Continuar para confirmar seu embarque neste aparelho. O link vale uma vez.', proves: (address: string) => `Este link é de ${address}.`, continue: 'Continuar',
     working: 'Confirmando…', done: 'Confirmado. Levando você ao seu portão…', missing: 'Este link está incompleto. Abra de novo pelo e-mail ou peça um novo em flofi.xyz/board.',
