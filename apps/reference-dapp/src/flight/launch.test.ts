@@ -88,7 +88,7 @@ describe('the seven emails', () => {
   const card = (founding: boolean): CardView => ({ founding, seat: founding ? '#042' : '214E', handle: 'ana<script>', from: 'ETH', to: 'BASE', stepCount: 2, networkCount: 2,
     departedAt: '2026-11-12T12:30:00Z', publicUrl: 'https://flofi.xyz/card/abcdefghijkl', imageUrl: 'https://flofi.xyz/card/abcdefghijkl/image',
     downloadUrl: 'https://flofi.xyz/card/abcdefghijkl/image?download=1' });
-  const access = { accessUrl: 'https://flofi.xyz/board/access?l=en#t=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA', code: '482913', codeMinutes: 15, linkHours: 72,
+  const access = { accessUrl: 'https://flofi.xyz/board/access?l=en#t=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA', code: '482913', codeMinutes: 4320, linkHours: 72,
     foundingOpen: true, group: 3 } as const;
   const inputs: TemplateInput[] = [{ template: 'LIST_CONFIRMATION' }, { template: 'EVE' }, { template: 'GROUP_BOARDING', ...access },
     { template: 'ACCESS_REQUESTED', ...access, codeMinutes: 15 }, { template: 'CARD_FOUNDING', card: card(true), invites: ['FLF-7Q2K-9XMB', 'FLF-ABCD-EFGH', 'FLF-JKMN-PQRS'],

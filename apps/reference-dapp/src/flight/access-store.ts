@@ -45,7 +45,7 @@ export function createAccessStore(host: { readonly db: Database; readonly tenant
 
   /**
    * The link and code one access email carries, recorded once (a re-render of the same email finds the same row: same token, same expiry).
-   * `codeMs` preserves the recorded lifetime on a render retry. Redemption always caps codes at 15 minutes.
+   * `codeMs` applies only on first generation. A retry never extends or revives a token; redemption uses its persisted expiry.
    */
   async function issueToken(input: { readonly emailId: string; readonly entryId: string; readonly codeMs: number; readonly now: number }, q: Queryable = db) {
     const tokenId = tokenIdFor(secret, input.emailId), link = linkTokenFor(secret, input.emailId), code = codeFor(secret, input.emailId);
@@ -114,7 +114,7 @@ export function createAccessStore(host: { readonly db: Database; readonly tenant
       const tokens = (await tx.query<{ token_id: string; entry_id: string; code_hash: string }>(`SELECT t.token_id, t.entry_id, t.code_hash FROM flight_access_tokens t
         JOIN flight_list_entries e ON e.tenant_id = t.tenant_id AND e.entry_id = t.entry_id
         WHERE t.tenant_id = $1 AND e.email = $2 AND t.consumed_at IS NULL AND t.revoked_at IS NULL AND t.code_expires_at > $3
-          AND t.created_at > $3::timestamptz - interval '15 minutes' AND t.code_attempts < $4
+          AND t.code_attempts < $4
         ORDER BY t.created_at DESC LIMIT 5 FOR UPDATE OF t`, [tenantId, input.email, at(input.now), CODE_MAX_ATTEMPTS])).rows;
       const match = tokens.find(token => sameHex(token.code_hash, codeHash(secret, token.token_id, input.code)));
       if (!match) {

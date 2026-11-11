@@ -79,7 +79,7 @@
   padding:0 18px;letter-spacing:.08em;width:min(260px,100%)}
 .inviteForm input::placeholder{color:rgba(255,255,255,.55)}
 /* Countdown */
-.countdown{display:flex;align-items:flex-end;gap:16px}
+.countdown{display:flex;align-items:flex-end;gap:16px;flex-wrap:wrap;row-gap:12px}
 .countGroup{display:flex;align-items:flex-end;gap:6px}
 .countUnit{font-family:var(--mono);font-weight:500;font-size:18px;color:#fff;padding-bottom:4px}
 /* Split flaps */
@@ -247,6 +247,10 @@
   .departuresBoard{padding:18px}
   .flap{width:18px;height:28px;font-size:17px}
   .flapBig{width:30px;height:46px;font-size:28px}
+  .countdown{gap:10px}
+  .countdown .flapBig{width:clamp(20px,5.5vw,30px);height:clamp(34px,8vw,46px);font-size:clamp(22px,5vw,28px)}
+  .countGroup{gap:4px}
+  .countUnit{font-size:14px}
   .card{flex-direction:column;transform:rotate(-1.5deg)}
   .cardHead{border-radius:28px 28px 0 0;padding:14px 20px}
   .cardBody{padding:18px 20px 22px;grid-template-columns:1fr}

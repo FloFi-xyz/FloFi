@@ -5,7 +5,7 @@
  *
  * - English is the artifact's text, word for word, except where a sentence would promise something the product does not do; each such
  *   change is listed in `TEMPLATE_DEVIATIONS` for the team (Dayane) to confirm. Portuguese subjects and bodies follow section 04 of the
- *   supplied Flight FloFi.html canvas. Technical access instructions remain truthful to Privy and token lifetimes.
+ *   supplied Flight FloFi.html canvas. Technical access instructions remain truthful to Privy and persisted token lifetimes (Email 3: 72 hours; requested codes: 15 minutes).
  * - Version 1 is frozen in templates-v1.ts. Existing outbox rows retain that renderer, including retries with the same provider idempotency key.
  * - HTML is tables with inline styles, at most 600 px wide, images as PNG (Gmail shows no SVG), with a plain-text part. Every value that
  *   comes from a person (handle) or the database is escaped. No count of people anywhere: only the recipient's own seat number.

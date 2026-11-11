@@ -162,7 +162,7 @@ test('a visitor reaches /board in Final call, on mobile and desktop; the beta li
     const response = await page.goto('/board');
     expect(response?.status()).toBe(200);
     await expect(page.getByRole('heading', { level: 1 })).toHaveText('Final call for the beta list.');
-    await expect(page.getByRole('timer')).toHaveAttribute('aria-label', 'List closes in 2 days, 11 hours, 59 minutes');
+    await expect(page.getByRole('timer')).toHaveAttribute('aria-label', /^List closes in 2 days, 11 hours, 59 minutes, \d+ seconds$/);
     // The boarding day is the campaign calendar's (12 Nov 2026, 9:00 BRT), in the hero and the page description.
     await expect(hero(page)).toContainText('Flight FloFi · Closed beta · Boards Nov 12');
     await expect(page.locator('meta[name="description"]')).toHaveAttribute('content', /^FloFi boards Nov 12\. /);
@@ -205,6 +205,98 @@ test('a visitor reaches /board in Final call, on mobile and desktop; the beta li
   expect(await answer(`new-${run}@flofi-test.dev`)).toBe(await answer(ANA));
   expect(await answer(ANA)).toBe('{"ok":true,"flight":"FIRST"}');
   await query('DELETE FROM flight_list_entries WHERE email = $1', [`new-${run}@flofi-test.dev`]); // Keeps the next tests' counts.
+});
+
+test('list countdown uses server time in D/H/M/S, ticks every second, catches up after suspension and clamps at zero in EN/PT', async ({ page, context }) => {
+  const browserNow = Date.parse('2030-01-01T00:00:00Z'); // Deliberately wrong client clock.
+  await page.clock.install({ time: browserNow });
+  await page.clock.pauseAt(browserNow + 1000);
+  await at(context, FINAL_CALL);
+  const state = await (await context.request.get('/api/board/state')).json() as { closesAt: number };
+  const remaining = 86400 + 2 * 3600 + 3 * 60 + 4;
+  await at(context, state.closesAt - remaining * 1000);
+  await page.goto('/board');
+  const timer = page.getByRole('timer');
+  await expect(timer).toHaveAttribute('aria-label', 'List closes in 1 day, 2 hours, 3 minutes, 4 seconds');
+  await expect(timer).toHaveText('01D02H03M04S');
+  await page.clock.runFor(1000);
+  await expect(timer).toHaveAttribute('aria-label', 'List closes in 1 day, 2 hours, 3 minutes, 3 seconds');
+  await page.clock.fastForward(37_000);
+  await expect(timer).toHaveAttribute('aria-label', 'List closes in 1 day, 2 hours, 2 minutes, 26 seconds');
+  for (const language of ['EN', 'PT'] as const) {
+    if (language === 'PT') await chooseLanguage(page, 'PT');
+    for (const width of [320, 360, 390, 768, 1440]) {
+      await page.setViewportSize({ width, height: 900 });
+      await expect(timer).toContainText('S');
+      await noOverflow(page);
+      const bounds = await timer.boundingBox(), form = await page.getByLabel(language === 'PT' ? 'Seu e-mail' : 'Your email', { exact: true }).boundingBox();
+      expect(bounds && form && bounds.y + bounds.height <= form.y).toBe(true);
+      await shot(page, `countdown-${language}-${width}`);
+    }
+  }
+  await at(context, state.closesAt - 1000);
+  await page.reload();
+  await expect(timer).toHaveAttribute('aria-label', 'A lista fecha em 0 dias, 0 horas, 0 minutos, 1 segundo');
+  await page.clock.runFor(1000);
+  await expect(timer).toHaveAttribute('aria-label', 'A lista fecha em 0 dias, 0 horas, 0 minutos, 0 segundos');
+  await page.clock.runFor(5000);
+  await expect(timer).toHaveText('00D00H00M00S');
+});
+
+test('FLF input formats typing and paste, preserves editing, rejects invalid characters and submits only the canonical invite endpoint', async ({ page, context }) => {
+  await at(context, BOARDING);
+  await page.goto('/board');
+  await page.getByRole('button', { name: 'I have an invite code', exact: true }).click();
+  const input = page.getByLabel('Invite code', { exact: true }), use = page.getByRole('button', { name: 'Use invite', exact: true });
+  for (const raw of ['abcd efgh', 'flf-abcd-efgh', 'flfabcdefgh', ' ab-cd -- ef-gh ', 'FLFABCD2', 'FLFA-BCD2']) {
+    await input.fill(raw);
+    await expect(input).toHaveValue(raw.replace(/[\s-]/g, '').toUpperCase().length === 8 && raw.toUpperCase().startsWith('FLF') ? 'FLF-FLFA-BCD2' : 'FLF-ABCD-EFGH');
+    await expect(use).toBeEnabled();
+  }
+  await input.fill('');
+  for (const [letter, expected] of [['a', 'FLF-A'], ['b', 'FLF-AB'], ['c', 'FLF-ABC'], ['d', 'FLF-ABCD'], ['e', 'FLF-ABCD-E']]) {
+    await input.pressSequentially(letter!);
+    await expect(input).toHaveValue(expected!);
+    await expect(use).toBeDisabled();
+  }
+  await input.pressSequentially('fgh');
+  await expect(input).toHaveValue('FLF-ABCD-EFGH');
+  await input.press('Backspace');
+  await expect(input).toHaveValue('FLF-ABCD-EFG');
+  await expect(use).toBeDisabled();
+  await input.pressSequentially('h');
+  await input.evaluate((node: HTMLInputElement) => node.setSelectionRange(9, 9));
+  await input.press('Backspace');
+  await expect(input).toHaveValue('FLF-ABCE-FGH');
+  await input.fill('FLF-ABCD-EFGH');
+  await input.evaluate((node: HTMLInputElement) => node.setSelectionRange(4, 4));
+  await input.press('Backspace');
+  await expect(input).toHaveValue('FLF-ABCD-EFGH');
+  await input.evaluate((node: HTMLInputElement) => node.setSelectionRange(4, 8));
+  await input.pressSequentially('jkmn');
+  await expect(input).toHaveValue('FLF-JKMN-EFGH');
+  await input.fill('FLF-ABCD-EFGH');
+  await input.evaluate((node: HTMLInputElement) => node.setSelectionRange(8, 8));
+  await input.press('Delete');
+  await expect(input).toHaveValue('FLF-ABCD-FGH');
+  for (const typed of ['flf-abcd-efgh', 'flfabcdefgh', 'flfabcd2']) {
+    await input.fill(''); await input.pressSequentially(typed);
+    await expect(input).toHaveValue(typed === 'flfabcd2' ? 'FLF-FLFA-BCD2' : 'FLF-ABCD-EFGH');
+  }
+  for (const bad of ['abcd-efg0', 'abcd-efg1', 'abcd-efgi', 'abcd-efgo', 'abcdefghj', '123456']) {
+    await input.fill(bad); await expect(use).toBeDisabled();
+  }
+  await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+  await page.evaluate(() => navigator.clipboard.writeText(' flf abcd efgh '));
+  await input.fill(''); await input.press('Control+V');
+  await expect(input).toHaveValue('FLF-ABCD-EFGH');
+  const sent: { path: string; code: string }[] = [];
+  await page.route('**/api/board/invite', async route => {
+    sent.push({ path: new URL(route.request().url()).pathname, code: (route.request().postDataJSON() as { code: string }).code });
+    await route.fulfill({ status: 400, json: { ok: false, code: 'INVITE_INVALID' } });
+  });
+  await use.click();
+  expect(sent).toEqual([{ path: '/api/board/invite', code: 'FLF-ABCD-EFGH' }]);
 });
 
 test('Gate closed: the approved post’s words, and a new address joins the next flight, not the beta list', async ({ page, context }) => {
@@ -465,13 +557,13 @@ test('Founding full (state 5): after the 100th seat the banner shows and the nex
 });
 
 /** An access email's link and code, as the worker would derive and record them (the test inserts the digests the worker would). */
-async function accessEmail(email: string) {
+async function accessEmail(email: string, generatedAt = BOARDING) {
   const secret = process.env.FLOFI_FLIGHT_E2E_ACCESS_SECRET!, emailId = `fem_${randomBytes(16).toString('hex')}`, tokenId = tokenIdFor(secret, emailId);
   const link = linkTokenFor(secret, emailId), code = codeFor(secret, emailId);
   // Times on the campaign clock this test runs at (the harness cookie), as the worker would record them at send time.
   await query(`INSERT INTO flight_access_tokens (tenant_id, token_id, entry_id, purpose, link_hash, code_hash, created_at, link_expires_at, code_expires_at)
-    SELECT 'default', $1, entry_id, 'BOARDING', $2, $3, $5::timestamptz, $5::timestamptz + interval '72 hours', $5::timestamptz + interval '15 minutes'
-    FROM flight_list_entries WHERE email = $4`, [tokenId, sha256Hex(link), codeHash(secret, tokenId, code), email, new Date(BOARDING).toISOString()]);
+    SELECT 'default', $1, entry_id, 'BOARDING', $2, $3, $5::timestamptz, $5::timestamptz + interval '72 hours', $5::timestamptz + interval '72 hours'
+    FROM flight_list_entries WHERE email = $4`, [tokenId, sha256Hex(link), codeHash(secret, tokenId, code), email, new Date(generatedAt).toISOString()]);
   return { link, code, tokenId };
 }
 
@@ -489,7 +581,7 @@ test('Email 3 access: opening the link consumes nothing, Continue proves the add
     await page.goto('/board');
     await expect(page.getByRole('heading', { level: 1 })).toHaveText('Not on the list. Yet.');
     // The email's link: the page only offers "Continue"; a scanner or preview that opens it consumes nothing.
-    const { link, tokenId } = await accessEmail(LISTED);
+    const { link, tokenId } = await accessEmail(LISTED, BOARDING - 71 * 3_600_000);
     await page.goto(`/board/access#t=${link}`);
     await expect(page.getByRole('button', { name: 'Continue' })).toBeVisible();
     expect(await query(`SELECT consumed_at FROM flight_access_tokens WHERE token_id = $1`, [tokenId])).toEqual([{ consumed_at: null }]);
@@ -521,7 +613,7 @@ test('Email 3 access: opening the link consumes nothing, Continue proves the add
     await createSolanaWalletAndContinue(device);
     await device.goto('/board');
     await expect(device.getByRole('heading', { level: 1 })).toHaveText('Not on the list. Yet.');
-    const { code } = await accessEmail(CODED);
+    const { code } = await accessEmail(CODED, BOARDING - 16 * 60_000);
     await device.getByLabel('Your beta-list email').fill(CODED);
     await device.getByLabel('6-digit code').fill(code === '000000' ? '111111' : '000000');
     await device.getByRole('button', { name: 'Use code' }).click();
