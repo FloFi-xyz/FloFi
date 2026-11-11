@@ -125,6 +125,7 @@ const definitions = [
   ['auth-wallets', ['--config', 'playwright.auth-wallets.config.ts'], { TEST_DATABASE_URL: process.env.TEST_DATABASE_URL ?? 'postgres://flofi@127.0.0.1:5432/postgres' }],
   // BUILD-FLOFI-FLIGHT-001: /board end to end (beta list, five states, invites, Founding seats, a pass from a real simulation) on the embedded runtime.
   ['flight', ['--config', 'playwright.flight.config.ts'], { TEST_DATABASE_URL: process.env.TEST_DATABASE_URL ?? 'postgres://flofi@127.0.0.1:5432/postgres', FLOFI_BETA_ACCESS: 'open' }],
+  ['flight-team-early-access', ['--config', 'playwright.flight.config.ts', '--grep', 'temporary team access'], { TEST_DATABASE_URL: process.env.TEST_DATABASE_URL ?? 'postgres://flofi@127.0.0.1:5432/postgres', FLOFI_BETA_ACCESS: 'beta', FLOFI_FLIGHT_TEAM_E2E: 'MOCKED_LOOPBACK_ONLY' }],
   ['flight-closed-beta', ['--config', 'playwright.flight.config.ts', '--grep', 'closed beta protects'], { TEST_DATABASE_URL: process.env.TEST_DATABASE_URL ?? 'postgres://flofi@127.0.0.1:5432/postgres', FLOFI_BETA_ACCESS: 'beta' }],
 ];
 const composition = [['composition-provenance', ['release-composition-provenance.spec.ts'], {}]];
@@ -148,7 +149,7 @@ const shards = [
     'copilot-solana', 'mcp-embedded-signing', 'swap-read-acceptance', 'workflow-acceptance', 'cow-loopback', 'chat-automations', 'copilot',
     'owner-history', 'mcp-in-chat', 'approve-authorize-journeys', 'execution-continuity'],
   ['journey-provenance', 'lending-provenance', 'cloud-provenance', 'solana-mainnet-network', 'developer-journey', 'base-mainnet-authoring',
-    'canvas-workflow-ux', 'channel-signing', 'automations', 'canvas-automation-ux', 'flight-closed-beta', 'flight', 'universal-bridge'],
+    'canvas-workflow-ux', 'channel-signing', 'automations', 'canvas-automation-ux', 'flight-team-early-access', 'flight-closed-beta', 'flight', 'universal-bridge'],
 ];
 // Fail closed on any plan drift: every product profile runs in exactly one place, and every name in the plan exists.
 const names = definitions.map(([name]) => name), planned = [...critical, ...shards.flat()];

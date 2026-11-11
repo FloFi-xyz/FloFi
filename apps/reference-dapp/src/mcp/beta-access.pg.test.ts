@@ -27,17 +27,19 @@ const BRIDGE = { action: 'bridge', sourceNetwork: 'base-sepolia', destinationNet
 beforeAll(async () => { t = await createTestDatabase(); });
 afterAll(async () => { await t?.drop(); });
 beforeEach(() => { auth.identity = null; });
-async function person() {
+async function person(eligible = true) {
   const accountId = 'acct_' + hex(16), sessionId = hex(16), wallet = '0x' + hex(20), entryId = 'fle_' + hex(16);
   await t.db.query(`INSERT INTO flofi_accounts (tenant_id,account_id) VALUES ('default',$1)`, [accountId]);
   await t.db.query(`INSERT INTO flofi_account_sessions (tenant_id,session_id,account_id,method,authenticated_at,expires_at)
     VALUES ('default',$1,$2,'EIP155',$3,$4)`, [sessionId, accountId, iso(NOW - 60_000), iso(NOW + 86400_000)]);
   await t.db.query(`INSERT INTO flofi_account_wallets (tenant_id,account_id,ecosystem,address,origin,provider,provider_name,export,label)
     VALUES ('default',$1,'EVM',$2,'EXTERNAL','fixture','Fixture','NONE','Fixture')`, [accountId, wallet]);
+  if (eligible) {
   await t.db.query(`INSERT INTO flight_list_entries (tenant_id,entry_id,email,language,flight,notice,joined_at)
     VALUES ('default',$1,$2,'EN','FIRST','2026-11-09',$3)`, [entryId, hex(8) + '@example.test', iso(NOW - 86400_000)]);
   await t.db.query(`INSERT INTO flight_access_claims (tenant_id,entry_id,account_id) VALUES ('default',$1,$2)`, [entryId, accountId]);
   expect(await createBetaAccessStore(host()).grant(accountId, NOW)).toEqual({ ok: true, accountId });
+  }
   return { accountId, sessionId, wallet };
 }
 function oauth() { return oauthClient({ env: env(), store: createPgOAuthStore(t.db, 'default'), now, betaHost: host() }); }
@@ -104,4 +106,24 @@ describe('MCP uses the same active Flight account and session', () => {
     await t.db.query(`INSERT INTO mcp_accounts (tenant_id,account_id) VALUES ('default',$1)`, [account]);
     expect(await bindMcpBetaAccount(host(), account, { accountId: first.accountId, sessionId: second.sessionId }, NOW, env())).toBe('BETA_SESSION_REQUIRED');
   });
+});
+
+it('uses temporary team access for real OAuth consent and tool requests, then expires without a Flight grant', async () => {
+  const early = FLIGHT_DEFAULT_CALENDAR.boardingOpensAt - 1, time = vi.spyOn(Date, 'now').mockReturnValue(early);
+  try {
+    const p = await person(false);
+    await t.db.query('UPDATE flofi_account_sessions SET authenticated_at=$2 WHERE session_id=$1', [p.sessionId, iso(early - 1000)]);
+    auth.identity = { accountId: p.accountId, sessionId: p.sessionId };
+    const teamEnv = { ...env(), FLOFI_BETA_EARLY_ACCESS_ACCOUNTS: p.accountId, FLOFI_BETA_EARLY_ACCESS_TENANT: 'default' };
+    const serverNow = () => new Date(Date.now());
+    const tokens = await signIn(oauthClient({ env: teamEnv, store: createPgOAuthStore(t.db, 'default'), now: serverNow, betaHost: host() }));
+    const client = session({ env: teamEnv, token: tokens.access_token, state: stateOf(host()), betaHost: host(), now: serverNow });
+    expect((await client.post(LIST)).status).toBe(200);
+    expect((await client.callTool('compose_strategy', { strategy: { action: 'swap', network: 'base', inputAsset: 'ETH', outputAsset: 'USDC', amount: '0.01' } })).output.ok).toBe(true);
+    const own = { namespace: 'eip155' as const, address: p.wallet }, foreign = { namespace: 'eip155' as const, address: '0x' + hex(20) };
+    expect(await mcpBetaWallets(host(), auth.identity, [own, foreign], early, teamEnv)).toEqual([own]);
+    expect((await t.db.query('SELECT 1 FROM flight_beta_grants WHERE account_id=$1', [p.accountId])).rowCount).toBe(0);
+    time.mockReturnValue(FLIGHT_DEFAULT_CALENDAR.boardingOpensAt);
+    expect((await client.post(LIST)).status).toBe(403);
+  } finally { time.mockRestore(); }
 });

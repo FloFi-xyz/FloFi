@@ -13,7 +13,7 @@
 import { test as base, expect, type BrowserContext, type Locator, type Page } from '@playwright/test';
 import { execFile } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, writeFile, rename } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -22,6 +22,7 @@ import { createDatabase } from '@defi-workflow-engine/cloud-runtime';
 import { codeFor, codeHash, linkTokenFor, sha256Hex, tokenIdFor, unsubscribeTokenFor } from '../src/flight/access';
 import { E2E_APP_ORIGIN, returningVisitor } from './app-origin';
 import { openSimulationDetails } from './fixtures';
+import { continueToBuilder } from './build-entry-navigation';
 import { authorSolanaSwap, chooseSolanaWallet, jupiterControl } from './jupiter-fixtures';
 
 const PRIVY = process.env.FLOFI_PRIVY_EMULATOR_ORIGIN ?? '';
@@ -888,4 +889,72 @@ if (process.env.FLOFI_BETA_ACCESS === 'beta') test('closed beta protects direct 
     await later.goto('/app');
     await expect(later).toHaveURL('/board');
   } finally { await returning.close(); }
+});
+
+if (process.env.FLOFI_FLIGHT_TEAM_E2E === 'MOCKED_LOOPBACK_ONLY') test('temporary team access uses public login, protects APIs and expires without campaign records', async ({ page, context }) => {
+  const accounts = process.env.FLOFI_FLIGHT_TEAM_ACCOUNTS!.split(',');
+  const clock = process.env.FLOFI_FLIGHT_TEAM_CLOCK!;
+  const post = (path: string, data: object = {}) => page.evaluate(async ({ path, data }) => {
+    const response = await fetch(path, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(data) });
+    return { status: response.status, body: await response.json() as unknown };
+  }, { path, data });
+  const before = async () => {
+    const snapshot = [];
+    for (const table of ['flight_beta_grants', 'flight_beta_wallets', 'flight_invites', 'flight_passes', 'flight_issuance', 'flight_emails', 'flight_access_claims'])
+      snapshot.push(await query(`SELECT to_jsonb(t) AS row FROM ${table} t ORDER BY to_jsonb(t)::text`));
+    return snapshot;
+  };
+  const login = async (address: string) => {
+    await privy(page, { wallet: { address, chain: 'ethereum' } });
+    await page.goto('/login');
+    // This suite switches identities in one browser. Set the current one after all init scripts have run.
+    await page.evaluate(address => {
+      (window as unknown as { __FLOFI_PRIVY_E2E_IDENTITY__: unknown }).__FLOFI_PRIVY_E2E_IDENTITY__ = { wallet: { address, chain: 'ethereum' } };
+    }, address);
+    await page.getByRole('button', { name: 'Web3 Wallet', exact: true }).click();
+  };
+  const original = await before();
+  await at(context, FINAL_CALL);
+  for (const path of ['/app', '/app/dashboard', '/app/workflows']) {
+    await page.goto(path); await expect(page).toHaveURL('/board');
+  }
+  expect(await post('/api/build-estimate')).toMatchObject({ status: 403, body: { code: 'BETA_SIGN_IN_REQUIRED' } });
+  for (const [i, accountId] of accounts.entries()) {
+    const address = `0x${String(i + 7).repeat(40)}`;
+    await query(`INSERT INTO flofi_accounts (tenant_id,account_id,onboarding) VALUES ('default',$1,'COMPLETED')`, [accountId]);
+    await query(`INSERT INTO flofi_account_identities (tenant_id,account_id,kind,subject,label) VALUES ('default',$1,'EIP155',$2,'Fixture')`, [accountId, address]);
+    await query(`INSERT INTO flofi_account_wallets (tenant_id,account_id,ecosystem,address,origin,provider,provider_name,export,label)
+      VALUES ('default',$1,'EVM',$2,'EXTERNAL','fixture','Fixture','NONE','Fixture')`, [accountId, address]);
+    await login(address);
+    await expect(page).toHaveURL('/app'); await expect(page.locator('.app-shell')).toBeVisible();
+    for (const path of ['/app/dashboard', '/app/workflows']) {
+      await page.goto(path); await expect(page).toHaveURL(path); await expect(page.locator('.app-shell')).toBeVisible();
+    }
+    expect((await post('/api/build-estimate')).status).not.toBe(403);
+    await page.goto('/app');
+    await continueToBuilder(page);
+    await expect(page.getByRole('region', { name: 'Workflow canvas', exact: true })).toBeVisible();
+    await shot(page, `early-team-${i + 1}`);
+    await context.clearCookies(); await page.goto('/login');
+  }
+  // A wallet login establishes an ordinary authenticated account, but never early entitlement.
+  await login('0x' + '9'.repeat(40));
+  await expect(page).toHaveURL('/board');
+  expect(await post('/api/build-estimate', { accountId: accounts[0], email: 'founder@example.test' }))
+    .toMatchObject({ status: 403, body: { code: 'BETA_NOT_OPEN' } });
+  await context.clearCookies();
+  await login('0x' + '7'.repeat(40));
+  await expect(page).toHaveURL('/app');
+  await query(`UPDATE flofi_account_sessions SET revoked_at = clock_timestamp() WHERE account_id=$1`, [accounts[0]]);
+  expect((await post('/api/build-estimate')).status).toBe(403);
+  await context.clearCookies();
+  await login('0x' + '7'.repeat(40));
+  await expect(page).toHaveURL('/app');
+  // Changing the browser/campaign clock cannot extend the fixed server-time exception.
+  await writeFile(clock + '.next', String(Date.parse('2026-11-12T12:00:00Z')));
+  await rename(clock + '.next', clock);
+  await at(context, FINAL_CALL);
+  expect((await post('/api/build-estimate')).status).toBe(403);
+  await page.goto('/app'); await expect(page).toHaveURL('/board');
+  expect(await before()).toEqual(original);
 });

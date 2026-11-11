@@ -4,7 +4,7 @@
  * binding proof, then re-checks Flight requireWallet. Fixtures only — no provider, signature, mainnet, email or real funds.
  */
 import { createHash, randomBytes } from 'node:crypto';
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createTestDatabase, type TestDatabase } from '../../../../packages/cloud-runtime/test/pg-harness.ts';
 import { automationKeys } from '../automations/config.ts';
 import { createLinkCode, LINK_CODE_TTL_MS, LINK_TTL_MS } from '../automations/subscriptions.ts';
@@ -239,4 +239,26 @@ describe('Telegram Flight beta via automation link + requireWallet', () => {
     expect((await t.db.query('SELECT 1 FROM automation_notification_targets')).rowCount).toBe(0);
     expect(d.api.texts().at(-1)).toMatch(/will not receive more messages/i);
   });
+});
+
+it('allows linked early team Telegram authoring without a Flight grant, expires queued turns and keeps safe recovery', async () => {
+  const early = OPEN - 1, time = vi.spyOn(Date, 'now').mockReturnValue(early);
+  try {
+    const p = await account(), d = deployment({ FLOFI_BETA_EARLY_ACCESS_ACCOUNTS: p.accountId, FLOFI_BETA_EARLY_ACCESS_TENANT: 'default' });
+    d.set(early);
+    const { code } = await createLinkCode(t.db, 'default', automationKeys(AUTOMATION_FIXTURE), OWNER, new Date(early));
+    await d.say(`automations ${code}`);
+    await d.say(STRATEGY);
+    expect((await t.db.query('SELECT 1 FROM mcp_handoffs')).rowCount).toBe(1);
+    await d.enqueue(STRATEGY);
+    time.mockReturnValue(OPEN); d.set(OPEN);
+    await d.dispatch();
+    expect((await t.db.query('SELECT 1 FROM mcp_handoffs')).rowCount).toBe(1);
+    await d.say('cancel'); await d.say('stop');
+    expect((await t.db.query('SELECT 1 FROM automation_notification_targets')).rowCount).toBe(0);
+    expect((await t.db.query('SELECT 1 FROM flight_beta_grants')).rowCount).toBe(0);
+    const { channelPrivateAuthorizer } = await import('./flight-gate');
+    const blocked = channelPrivateAuthorizer(d.f.env, d.host, 'WHATSAPP');
+    expect(await blocked!('fixture', new Date(early))).toEqual({ ok: false, code: 'BETA_CHANNEL_ACCESS_CLOSED' });
+  } finally { time.mockRestore(); }
 });

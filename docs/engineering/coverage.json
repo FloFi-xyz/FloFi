@@ -7168,6 +7168,7 @@
         "app.backend.beta-access.pg"
       ],
       "gaps": [
+        "Temporary team policy is tested in the required beta-access unit/PostgreSQL suites and guarded flight-team-early-access browser profile. Its e2e/flight-team-clock.mjs preload is an engineering-only fixture excluded from the maintained production source inventory; no hosted-clock or real-wallet acceptance is established.",
         "Local PostgreSQL and provider stand-ins prove request/session/tenant/wallet isolation and emergency pause behavior; live Privy devices, coordinated hosted rollout and external-wallet prompts already released require owner acceptance. No public financial execution is certified."
       ]
     }

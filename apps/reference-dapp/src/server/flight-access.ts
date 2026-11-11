@@ -33,7 +33,7 @@ export async function requireFlightAccess(principal?: WalletPrincipal, env: Read
     if (!session) throw new Error('BETA_SIGN_IN_REQUIRED');
     const calendar = flightCalendar(env);
     if (!calendar) throw new Error('BETA_UNAVAILABLE');
-    const gate = createBetaAccessStore(await platformStateHost(env), calendar), now = await flightNow(env);
+    const gate = createBetaAccessStore(await platformStateHost(env), calendar, env), now = await flightNow(env);
     // The loopback campaign clock may simulate launch dates. Authentication always uses the actual session clock.
     const identity = { accountId: session.accountId, sessionId: session.sessionId, now, sessionNow: Date.now() };
     const loginNamespace = session.method === 'eip155' || session.method === 'solana' ? session.method : null;

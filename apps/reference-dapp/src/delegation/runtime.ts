@@ -70,7 +70,7 @@ export function delegationRuntime(config: DelegationConfig, host: DelegationHost
     if (mode !== 'beta') return 'BETA_ACCESS_CLOSED';
     const { calendar } = flightCalendarFrom(env);
     if (!calendar) return 'BETA_CONFIGURATION_INVALID';
-    const result = await createBetaAccessStore(host, calendar).requireWallet(owner, (seams.now?.() ?? new Date()).getTime());
+    const result = await createBetaAccessStore(host, calendar, env).requireWallet(owner, (seams.now?.() ?? new Date()).getTime());
     return result.ok ? null : result.code;
   } };
 }

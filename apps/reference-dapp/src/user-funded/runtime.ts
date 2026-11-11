@@ -50,7 +50,7 @@ export function userFundedRuntime(env: Env, fetchImpl: typeof fetch = fetch, hos
       if (mode !== 'beta') return 'BETA_ACCESS_CLOSED';
       const { calendar } = flightCalendarFrom(env);
       if (!host || !calendar) return 'BETA_ACCESS_UNAVAILABLE';
-      const gate = createBetaAccessStore(host, calendar), now = Date.now();
+      const gate = createBetaAccessStore(host, calendar, env), now = Date.now();
       const grant = await gate.requireWallet(owner, now);
       if (!grant.ok) return grant.code;
       if (wallet.namespace === owner.namespace && wallet.address === owner.address) return null;

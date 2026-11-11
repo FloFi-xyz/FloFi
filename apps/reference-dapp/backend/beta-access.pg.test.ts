@@ -202,3 +202,47 @@ describe('closed beta at the actual Railway/embedded backend boundary', () => {
     expect(r.chain.state.sent).toHaveLength(1);
   });
 });
+
+it('applies temporary team policy to actual API requests, quotes, simulations, preparation and safe recovery without Flight writes', async () => {
+  vi.mocked(Date.now).mockReturnValue(OPEN - 1);
+  try {
+    const r = runtime(), team = await person(r.wallet.owner, false), ordinary = await person(`0x${hex(20)}`, false);
+    r.env.FLOFI_BETA_EARLY_ACCESS_ACCOUNTS = team.identity.accountId;
+    r.env.FLOFI_BETA_EARLY_ACCESS_TENANT = 'default';
+    await http(r.backend, async call => {
+      const path = '/v1/flows/jupiter-swap/info';
+      expect((await call(path, [], team.headers, 'forged')).status).toBe(401);
+      expect(await call(path, [], { ...ordinary.headers, 'x-flofi-account-id': team.identity.accountId, 'x-flofi-email': 'founder@example.test', 'x-flofi-admin-role': 'OPERATOR' }))
+        .toEqual({ status: 403, body: { ok: false, code: 'BETA_NOT_OPEN' } });
+      expect(await call(path, [], { ...team.headers, 'x-flofi-beta-session': ordinary.identity.sessionId }))
+        .toEqual({ status: 403, body: { ok: false, code: 'BETA_SESSION_REQUIRED' } });
+      expect(await call(path, [], { ...team.headers, [WORKFLOW_OWNER_HEADER]: `${ordinary.namespace}:${ordinary.address}`, [WALLET_PRINCIPAL_HEADER]: ordinary.address }))
+        .toEqual({ status: 403, body: { ok: false, code: 'BETA_WALLET_NOT_LINKED' } });
+      expect((await call(path, [], team.headers)).status).toBe(200);
+      r.env.FLOFI_BETA_ACCESS = 'closed';
+      expect(await call(path, [], team.headers)).toEqual({ status: 403, body: { ok: false, code: 'BETA_ACCESS_CLOSED' } });
+      r.env.FLOFI_BETA_ACCESS = 'beta';
+    });
+    expect(await r.backend.previewFlow('jupiter-swap', [r.workflow, team.address], 'QUOTE', { betaIdentity: team.identity }))
+      .toMatchObject({ ok: true, value: { format: 'flofi.jupiter-quote-preview.v1' } });
+    const run = (method: string, args: readonly unknown[]) => r.backend.callFlow('jupiter-swap', method, args, undefined, team.address, team.identity);
+    const simulated = value<JupiterRecord>(await run('simulate', [r.workflow, team.address]));
+    value(await run('review', [simulated.id, simulated.review.commitment, r.workflow]));
+    const begin = value<JupiterBegin>(await run('begin', [simulated.id, team.address, r.workflow]));
+    // Fixture signing on an in-process chain only; proves preserved state-machine guards, never real financial execution.
+    const submitted = value<JupiterRecord>(await run('submit', [simulated.id, r.wallet.sign(begin.unsignedTransaction)]));
+    expect(submitted.attempt?.state).toBe('PENDING');
+    vi.mocked(Date.now).mockReturnValue(OPEN);
+    expect(await run('info', [])).toEqual({ ok: false, code: 'BETA_ACCESS_DENIED' });
+    expect((await run('status', [simulated.id])).ok).toBe(true);
+    expect((await run('observe', [simulated.id])).ok).toBe(true);
+    const settle = vi.fn(async () => true);
+    await r.backend.handlers.reconcile!({ tenantId: 'default', runId: simulated.id, payload: { namespace: 'jupiter-swap', runId: simulated.id }, deliveries: 1 } as unknown as Parameters<WorkHandler>[0], settle, quiet);
+    expect(settle).toHaveBeenCalledWith({ outcome: 'DONE' });
+    expect(await r.backend.service('jupiter-swap', 'default', true).load(simulated.id)).toMatchObject({ verdict: 'RECONCILED' });
+    for (const table of ['flight_beta_grants', 'flight_beta_wallets', 'flight_passes']) {
+      expect((await t.db.query(`SELECT 1 FROM ${table} WHERE account_id = $1`, [team.identity.accountId])).rowCount).toBe(0);
+    }
+    expect((await t.db.query('SELECT 1 FROM flight_emails')).rowCount).toBe(0);
+  } finally { vi.mocked(Date.now).mockReturnValue(NOW); }
+});

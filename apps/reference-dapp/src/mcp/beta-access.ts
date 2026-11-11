@@ -12,7 +12,7 @@ const MCP_ACCOUNT = /^mcpacct_[a-z2-7]{26}$/;
 export async function bindMcpBetaAccount(host: McpBetaHost, mcpAccountId: string, identity: BetaRequestIdentity, now: number, env: Env): Promise<string | null> {
   const { calendar } = flightCalendarFrom(env);
   if (!calendar || !MCP_ACCOUNT.test(mcpAccountId)) return 'BETA_ACCESS_DENIED';
-  const checked = await createBetaAccessStore(host, calendar).require({ ...identity, now });
+  const checked = await createBetaAccessStore(host, calendar, env).require({ ...identity, now });
   if (!checked.ok) return checked.code;
   const updated = await host.db.query(`INSERT INTO flight_beta_mcp_accounts (tenant_id, mcp_account_id, flofi_account_id, session_id)
     VALUES ($1,$2,$3,$4) ON CONFLICT (tenant_id,mcp_account_id) DO UPDATE SET session_id = EXCLUDED.session_id
@@ -29,7 +29,7 @@ export async function mcpBetaIdentity(host: McpBetaHost, mcpAccountId: string, n
     WHERE tenant_id = $1 AND mcp_account_id = $2`, [host.tenantId, mcpAccountId])).rows[0];
   if (!row) return null;
   const identity = { accountId: row.flofi_account_id, sessionId: row.session_id };
-  const checked = await createBetaAccessStore(host, calendar).require({ ...identity, now });
+  const checked = await createBetaAccessStore(host, calendar, env).require({ ...identity, now });
   return checked.ok ? identity : null;
 }
 
@@ -37,7 +37,7 @@ export async function mcpBetaIdentity(host: McpBetaHost, mcpAccountId: string, n
 export async function mcpBetaWallets(host: McpBetaHost, identity: BetaRequestIdentity, wallets: readonly BetaPrincipal[], now: number, env: Env): Promise<readonly BetaPrincipal[]> {
   const { calendar } = flightCalendarFrom(env);
   if (!calendar) return [];
-  const gate = createBetaAccessStore(host, calendar), allowed: BetaPrincipal[] = [];
+  const gate = createBetaAccessStore(host, calendar, env), allowed: BetaPrincipal[] = [];
   for (const principal of wallets) if ((await gate.require({ ...identity, principal, now })).ok) allowed.push(principal);
   return allowed;
 }
