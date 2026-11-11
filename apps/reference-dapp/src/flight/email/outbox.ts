@@ -125,11 +125,12 @@ export function createEmailOutbox(host: { readonly db: Database; readonly tenant
   async function housekeeping(now: number): Promise<{ readonly recovered: number; readonly expired: number; readonly suppressed: number }> {
     return db.transaction(async tx => {
       const recovered = (await tx.query(`UPDATE flight_emails SET state = 'UNKNOWN', lease_token = NULL, lease_until = NULL, status_reason = 'LEASE_EXPIRED',
-        next_attempt_at = $2, updated_at = clock_timestamp() WHERE tenant_id = $1 AND state = 'SENDING' AND lease_until < $2`, [tenantId, at(now)])).rowCount;
-      // Retired creator copy must never reach the provider, including an UNKNOWN retry. Preserve its original
-      // version/body and reservation for operator reconciliation; SENT and in-flight rows are never rewritten.
+        next_attempt_at = $2, updated_at = clock_timestamp() WHERE tenant_id = $1 AND state = 'SENDING' AND lease_until < $2
+        AND (template <> 'CREATOR_INVITE' OR template_version = $3)`, [tenantId, at(now), TEMPLATE_VERSIONS.CREATOR_INVITE])).rowCount;
+      // Retired guest copy must never reach the provider. Hold only pending/held rows;
+      // leave SENT, SENDING and UNKNOWN rows byte-for-byte intact for operator reconciliation.
       await tx.query(`UPDATE flight_emails SET state = 'HELD', status_reason = 'TEMPLATE_VERSION_REVIEW', updated_at = clock_timestamp()
-        WHERE tenant_id = $1 AND template = 'CREATOR_INVITE' AND template_version <> $2 AND state IN ('PENDING', 'UNKNOWN', 'HELD')`,
+        WHERE tenant_id = $1 AND template = 'CREATOR_INVITE' AND template_version <> $2 AND state IN ('PENDING', 'HELD')`,
       [tenantId, TEMPLATE_VERSIONS.CREATOR_INVITE]);
       return {
       recovered,
@@ -154,7 +155,8 @@ export function createEmailOutbox(host: { readonly db: Database; readonly tenant
       const used = { ...await usage(now, tx) };
       const due = (await tx.query<Row>(`SELECT ${COLUMNS} FROM flight_emails WHERE tenant_id = $1 AND next_attempt_at <= $2
         AND ((state = 'PENDING' AND not_before <= $2) OR state = 'UNKNOWN') AND ($3::boolean OR category = 'ESSENTIAL')
-        ORDER BY (category = 'ESSENTIAL') DESC, next_attempt_at, created_at LIMIT $4 FOR UPDATE SKIP LOCKED`, [tenantId, at(now), options.campaign, options.max])).rows;
+        AND NOT (template = 'CREATOR_INVITE' AND template_version <> $5 AND state = 'UNKNOWN')
+        ORDER BY (category = 'ESSENTIAL') DESC, next_attempt_at, created_at LIMIT $4 FOR UPDATE SKIP LOCKED`, [tenantId, at(now), options.campaign, options.max, TEMPLATE_VERSIONS.CREATOR_INVITE])).rows;
       const leased: EmailRow[] = [], heldBatches = new Set<string>();
       // Campaign email leaves room for the access emails people ask for.
       const campaignDay = Math.max(0, dailyLimit - Math.min(ESSENTIAL_DAILY_RESERVE, Math.floor(dailyLimit / 20)));

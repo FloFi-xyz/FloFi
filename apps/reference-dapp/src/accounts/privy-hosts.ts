@@ -15,6 +15,8 @@ export const PRIVY_CONNECT_SOURCES = Object.freeze(['https://auth.privy.io', 'ht
   'https://rpc.mainnet.chain.robinhood.com', 'wss://www.walletlink.org']);
 export const PRIVY_FRAME_SOURCES = Object.freeze(['https://auth.privy.io', 'https://challenges.cloudflare.com', 'https://hcaptcha.com', 'https://*.hcaptcha.com']);
 export const PRIVY_IMAGE_SOURCES = Object.freeze(['https://auth.privy.io']);
+/** Detected wallets avoid Privy's optional WalletConnect explorer catalog; Coinbase retains its separate relay contract. */
+export const PRIVY_WALLET_LIST = Object.freeze(['detected_ethereum_wallets', 'detected_solana_wallets', 'coinbase_wallet'] as const);
 
 type Env = Readonly<Record<string, string | undefined>>;
 /** Privy's bot protection, as this deployment declares it (it must match the Privy dashboard); anything else means none. */

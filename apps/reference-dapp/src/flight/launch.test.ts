@@ -11,6 +11,7 @@ import { cardPublicIdFrom, carriesInvites, decideAccess, FLIGHT_BOARDING_OPENS_A
 import { classifyResend, createResendClient } from './email/resend';
 import { renderEmail, TEMPLATE_CATEGORY, TEMPLATE_DEVIATIONS, TEMPLATE_VERSIONS, type CardView, type EmailContext, type TemplateInput } from './email/templates';
 import { emailLimitsFrom } from './email/outbox';
+import { flightEmailRuntime } from './email/runtime';
 
 // Per-run random values: no secret-like literal is committed.
 const SECRET = randomBytes(32).toString('base64url'), OTHER = randomBytes(32).toString('base64url');
@@ -93,7 +94,7 @@ describe('the seven emails', () => {
   const inputs: TemplateInput[] = [{ template: 'LIST_CONFIRMATION' }, { template: 'EVE' }, { template: 'GROUP_BOARDING', ...access },
     { template: 'ACCESS_REQUESTED', ...access, codeMinutes: 15 }, { template: 'CARD_FOUNDING', card: card(true), invites: ['FLF-7Q2K-9XMB', 'FLF-ABCD-EFGH', 'FLF-JKMN-PQRS'],
       invitesUrl: 'https://flofi.xyz/board#invites' }, { template: 'CARD_PASSENGER', card: card(false) }, { template: 'NEXT_FLIGHT' },
-    { template: 'CREATOR_INVITE', code: 'FLF-7Q2K-9XMB', briefUrl: 'https://claude.ai/artifact/Ed64YTYtYmUWVgnT8NEZD5' }];
+    { template: 'CREATOR_INVITE', code: 'FLF-7Q2K-9XMB', briefUrl: 'https://cooked-goat-9ec.notion.site/Flight-FloFi-Brief-do-criador-4147b5d0a5fd81afb15ffdeb090a6450' }];
 
   it('renders every template in both languages with the approved subject, the risk footer, privacy and unsubscribe, and no count of people', () => {
     const subjects: Record<string, [string, string]> = {
@@ -101,7 +102,7 @@ describe('the seven emails', () => {
       LIST_CONFIRMATION: ['You’re on the FloFi beta list ✈️', 'Você está na lista beta da FloFi ✈️'], EVE: ['Boarding starts tomorrow, 9:00 BRT ✈️', 'O embarque começa amanhã, às 9h ✈️'],
       GROUP_BOARDING: ['Your group is boarding ✈️', 'Seu grupo está embarcando ✈️'], ACCESS_REQUESTED: ['Your group is boarding ✈️', 'Seu grupo está embarcando ✈️'],
       CARD_FOUNDING: ['You’re Founding Member #042 ✈️', 'Você é Founding Member #042 ✈️'], CARD_PASSENGER: ['Your Flight FloFi boarding card ✈️', 'Seu cartão de embarque do Flight FloFi ✈️'],
-      NEXT_FLIGHT: ['You’re on the list for the next flight ✈️', 'Você está na lista do próximo voo ✈️'], CREATOR_INVITE: ['You’re invited to Flight FloFi ✈️', 'Seu convite para o Flight FloFi ✈️'],
+      NEXT_FLIGHT: ['You’re on the list for the next flight ✈️', 'Você está na lista do próximo voo ✈️'], CREATOR_INVITE: ['Your invite to the FloFi beta ✈️', 'Seu convite para o beta da FloFi ✈️'],
     };
     for (const input of [...inputs, { template: 'EARLY_LIST' } as const]) for (const [index, language] of (['EN', 'PT'] as const).entries()) {
       const email = renderEmail(input, ctx(language));
@@ -136,12 +137,12 @@ describe('the seven emails', () => {
     expect(renderEmail({ template: 'EVE' }, ctx('PT')).text).toContain('quinta-feira, 12/11, às 9h');
     const moved = { ...ctx('EN'), calendar: { ...FLIGHT_DEFAULT_CALENDAR, boardingOpensAt: Date.parse('2026-11-19T12:30:00Z') } };
     expect(renderEmail({ template: 'EVE' }, moved).subject).toBe('Boarding starts tomorrow, 9:30 BRT ✈️');
-    const creator = renderEmail({ template: 'CREATOR_INVITE', code: 'FLF-7Q2K-9XMB', briefUrl: 'https://claude.ai/artifact/Ed64YTYtYmUWVgnT8NEZD5' }, ctx('EN'));
+    const creator = renderEmail({ template: 'CREATOR_INVITE', code: 'FLF-7Q2K-9XMB', briefUrl: 'https://cooked-goat-9ec.notion.site/Flight-FloFi-Brief-do-criador-4147b5d0a5fd81afb15ffdeb090a6450' }, ctx('EN'));
     expect(creator.text).toContain('Thursday from 9:00 BRT');
     expect(creator.text).toContain('FLF-7Q2K-9XMB');
     expect(creator.text).not.toMatch(/TEST|Wednesday|test flight|early boarding/i);
-    expect(creator.preheader).toBe('Your invite code and the plan for Thursday.');
-    expect(TEMPLATE_VERSIONS.CREATOR_INVITE).toBe(3);
+    expect(creator.preheader).toBe('Your code, and how to board on Thursday.');
+    expect(TEMPLATE_VERSIONS.CREATOR_INVITE).toBe(4);
   });
   it('shows the card’s real seat, route and image in 4a/4b, the three invites only in 4a, and escapes the handle', () => {
     const founding = renderEmail(inputs[4]!, ctx('EN')), passenger = renderEmail(inputs[5]!, ctx('EN'));
@@ -162,6 +163,18 @@ describe('the seven emails', () => {
 });
 
 describe('Resend client (mocked fetch: client behavior only, not delivery)', () => {
+  it('keeps the runtime sender and Reply-To defaults on the existing Resend provider without contacting it', async () => {
+    const http = vi.fn(async () => new Response(JSON.stringify({ id: 'fixture-accepted' }), { status: 200 }));
+    const runtime = flightEmailRuntime({ RESEND_API_KEY: KEY, FLOFI_FLIGHT_ACCESS_SECRET: SECRET },
+      {} as Parameters<typeof flightEmailRuntime>[1], 'default', {} as Parameters<typeof flightEmailRuntime>[3], { fetch: http });
+    expect('disabled' in runtime).toBe(false);
+    if ('disabled' in runtime) throw Error(runtime.disabled);
+    await runtime.provider.send({ idempotencyKey: EMAIL_ID, to: 'fixture@example.invalid', subject: 'fixture', html: '<p>fixture</p>', text: 'fixture' });
+    expect(http).toHaveBeenCalledOnce();
+    const [url, init] = http.mock.calls[0] as unknown as [string, RequestInit];
+    expect(url).toBe('https://api.resend.com/emails');
+    expect(JSON.parse(init.body as string)).toMatchObject({ from: 'FloFi <hello@flofi.xyz>', reply_to: 'flofi.xyz@gmail.com' });
+  });
   it('classifies every answer: sent, rate limited, quota, configuration, rejection, idempotency conflicts and server errors', () => {
     expect(classifyResend(200, { id: 'abc-123' }, null)).toEqual({ kind: 'SENT', providerId: 'abc-123' });
     expect(classifyResend(200, {}, null)).toEqual({ kind: 'SENT', providerId: 'accepted-without-id' });

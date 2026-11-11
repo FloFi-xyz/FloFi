@@ -69,6 +69,6 @@ describe('Flight operator CLI on disposable PostgreSQL; never imports or sends t
     expect(await runFlightCommand('creator-invites', { file, apply: true, out: join(directory, 'repeat.csv') }, store, now, context))
       .toMatchObject({ invited: 0, alreadyInvited: 1 });
     expect((await database.db.query("SELECT template_version, state, attempts FROM flight_emails WHERE template = 'CREATOR_INVITE'")).rows)
-      .toEqual([{ template_version: 3, state: 'SENT', attempts: 1 }]);
+      .toEqual([{ template_version: 4, state: 'SENT', attempts: 1 }]);
   });
 });
