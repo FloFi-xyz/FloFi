@@ -20,7 +20,7 @@
 import { looksSecret } from '../../domain/copilot-conversation';
 import { stepSummary } from '../../domain/copilot-answers';
 import type { Command } from '../../domain/commands';
-import { PlatformRefusal, previewPlan, simulatePreview, simulateWorkflowPreview } from '../../platform/index.ts';
+import { PlatformRefusal, previewPlan, simulatePreview, simulateWorkflowPreview, type AuthorizationPlan } from '../../platform/index.ts';
 import { UNIVERSAL_QUOTE_SUBJECTS } from '@defi-workflow-engine/workflow-contracts';
 import { channelRequester, createChannelApproval, revokeChannelApproval, channelApprovalProgress, type ChannelPlatform } from './approval.ts';
 import type { ChannelCoreConfig, ChannelLanguage } from './config.ts';
@@ -28,7 +28,7 @@ import { decideTurn, parseState, type ChannelInterpreter, type ChannelState, typ
 import { learningCopy } from '../../domain/copilot-learning-copy.ts';
 import type { ChannelLearning, ChannelLearningPrincipal, ChannelLearningSession } from './learning.ts';
 import { channelLearningCopy } from './learning-copy.ts';
-import { channelCopy, readyText, shorten, type PreviewNote } from './copy.ts';
+import { channelCopy, readyText, shorten, type AuthorizationFacts, type PreviewNote } from './copy.ts';
 import { channelRowId, keyedDigest, leaseToken, open, seal, sealContext } from './crypto.ts';
 import { addressContext, deliverConversation, newOutboxId, sealReply, type DeliveryContext } from './delivery.ts';
 import type { ChannelLogger } from './log.ts';
@@ -61,6 +61,20 @@ const MAX_EVENT_ATTEMPTS = 3;
 type Payload = { readonly content: TurnContent; readonly sendTo: ChannelAddress };
 const text = (value: string): ChannelReply => ({ text: shorten(value), choices: [], link: null });
 const PORTUGUESE_SECRET = /chaves?\s+privad|frases?\s+(?:semente|secreta|de\s+recupera)|palavras\s+secretas/i;
+
+/**
+ * BUILD-CHAT-E2E-001: the authorizations the "Strategy ready" reply states, from the approval's own plan. Confirm-each-step: one wallet
+ * confirmation per step (at least). BUILD-FLOFI-UNIVERSAL-WORKFLOW-002: user-funded groups only where FloFi will offer them — available and
+ * recommended (fewer interactions than confirming each step); otherwise the claim starts confirm-each-step at once (`claimSequential`) and a
+ * group count would describe a choice the owner never gets. Counted with ASSUMED wallet capabilities, it is a lower bound ("at least") until the
+ * owner's browser reports the wallet; a one-time setup may add a prompt. The executor-funded single authorization is retired (never offered).
+ */
+export function authorizationFacts(plan: AuthorizationPlan): AuthorizationFacts {
+  const uf = plan.userFunded, interactions = uf.available && plan.recommended === 'USER_FUNDED' ? uf.interactions : null;
+  return { confirm: plan.confirmEachStep.available ? plan.confirmEachStep.walletConfirmationsAtLeast : null,
+    groups: interactions ? { interactions: interactions.upfront + interactions.whenDue,
+      atLeast: interactions.atLeast || uf.wallets !== 'REPORTED' || interactions.oneTimeSetup.length > 0 } : null };
+}
 
 /** BUILD-CHAT-E2E-001: one line per step of the conversation's step list (kept steps, then the pending one), in FloFi's own words. */
 function stepLines(state: ChannelState): string[] {
@@ -348,8 +362,7 @@ export function createChannelService(ctx: ChannelContext) {
     const networks = [...new Set(specs.flatMap(spec => spec.action === 'bridge' ? [spec.sourceNetwork, spec.destinationNetwork] : [(spec as { network: string }).network]))];
     const plan = approval.authorizationPlan;
     const reply: ChannelReply = { text: readyText(state.language, { lines: strategy.steps.map(s => stepSummary(s, state.language)), networks, fundsClass: strategy.fundsClass,
-      notes: [...revoked ? [m.replaced] : [], ...plan ? m.authorizations({ confirm: plan.confirmEachStep.available ? plan.confirmEachStep.walletConfirmationsAtLeast : null,
-        once: plan.delegatedSingleAuthorization.available }) : [], ...notes.slice(0, 2)], preview,
+      notes: [...revoked ? [m.replaced] : [], ...plan ? m.authorizations(authorizationFacts(plan)) : [], ...notes.slice(0, 2)], preview,
       intendedWallet: strategy.intendedWallet ? shorten(strategy.intendedWallet.address) : null, aiInterpreted,
       expiresMinutes: Math.round((approval.expiresAt.getTime() - now.getTime()) / 60_000) }),
     choices: [], link: { label: m.linkLabel, url: approval.approvalUrl }, visual: { model: strategy.visual, language: state.language } };

@@ -590,8 +590,10 @@ function registerApprovalTools(ctx: ToolContext, register: Register) {
     'REVOKED or STALE. When the owner shares status, includes run status and the verified receipt URL after reconciliation. A multi-step approval also returns ' +
     '`workflowRun`: every step\'s state, the next action (OWNER_SIGNS_STEP or OWNER_SIGNS_GROUP: share the approvalUrl again; OWNER_CONFIRMS_BATCH: the owner ' +
     'reopens FloFi so their wallet reports its batch), and — when the owner shares status — each step\'s ' +
-    'transaction hashes, explorer links, reconciled amounts and evidence. HALTED means stopped and the owner decides (resume or end): `workflowRun.halted` says whether ' +
-    'steps completed (PARTIAL), nothing was sent (NOTHING_SENT) or neither is claimed (STOPPED). Poll this tool when asked; no callback or push is promised. ' +
+    'transaction hashes, explorer links, reconciled amounts and evidence. HALTED means stopped and the owner decides in FloFi: `workflowRun.halted` says whether ' +
+    'steps reconciled (PARTIAL: they stay done; a later step may have been sent and failed, so read the step that stopped), nothing was sent (NOTHING_SENT) or ' +
+    'neither is claimed (STOPPED); Resume is possible only while `workflowRun.resumable` is true. A step or group code WALLET_BATCH_OUTCOME_UNKNOWN means a batch ' +
+    'handed to the owner\'s wallet may have executed: never report it as not run. Poll this tool when asked; no callback or push is promised. ' +
     'It never reveals the claiming wallet or authorizes anything.', ApprovalSchemas.byId, { ...pure, idempotentHint: false },
   async args => ({ ok: true, ...await progress(args.approvalId) }));
 

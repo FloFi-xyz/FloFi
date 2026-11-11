@@ -120,7 +120,8 @@ describe('BUILD-CHAT-E2E-001 channel workflows', () => {
       mode: 'USER_FUNDED', stepCount: 2, currentStep: 0, code: 'USER_FUNDED_SIMULATION_UNAVAILABLE', workflowHash: '0x' + '1'.repeat(64), expiresAt: '', completedAt: null,
       createdAt: '', updatedAt: '', stepsVisible: true, nextAction: 'OWNER_DECIDES', authority: 'NONE', note: null, halted, steps, groups: [] });
     const progressOf = (run: unknown) => ({ status: 'APPLIED', expiresAt: '2026-10-22T10:00:00.000Z', runs: [], runsVisible: true, workflowRun: run, note: null }) as never;
-    const notice = (language: 'EN' | 'PT', run: unknown) => plannedNotifications(language, handoff, progressOf(run)).due.find(n => n.key.endsWith(':wfr:halted'))!.text;
+    // A halt's key names that halt (step, how it stopped, code, when): see run-notices.test.ts for a halt after a resume.
+    const notice = (language: 'EN' | 'PT', run: unknown) => plannedNotifications(language, handoff, progressOf(run)).due.find(n => n.key.includes(':wfr:halted:'))!.text;
     const nothing = runOf('NOTHING_SENT', [step(0, 'BLOCKED'), step(1, 'BLOCKED')]);
     expect(notice('EN', nothing)).toMatch(/^Workflow stopped before anything was sent/);
     expect(notice('PT', nothing)).toMatch(/^Fluxo interrompido antes de qualquer envio/);

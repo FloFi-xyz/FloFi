@@ -26,12 +26,23 @@ type WorkflowRunProgress = NonNullable<Progress['workflowRun']>;
  * "waiting for your wallet" until the owner's wallet answered for its group, then "signed in your wallet" — never "authorized" before that.
  */
 const stepState = (run: WorkflowRunProgress, step: WorkflowRunProgress['steps'][number]) => {
+  // A step skipped when the run ended while its wallet batch was in the owner's wallet without an answer may have executed: never "not run".
+  if (step.state === 'SKIPPED' && step.code === WALLET_BATCH_OUTCOME_UNKNOWN) return 'OUTCOME_UNKNOWN';
   if (run.mode !== 'USER_FUNDED' || step.state !== 'DELEGATED') return step.state;
   const group = (run.groups ?? []).find(g => g.steps[0] <= step.index && step.index <= g.steps[1]);
   return group?.signed ? 'GROUP_SIGNED' : 'GROUP_WAITING';
 };
-/** A HALTED run is worded by how it stopped (the server decides from its records): partial, nothing sent, or neither claimed. */
-const haltedState = (run: WorkflowRunProgress) => run.state !== 'HALTED' || !run.halted || run.halted === 'PARTIAL' ? run.state : `HALTED_${run.halted}`;
+/**
+ * The step/group code of a wallet batch handed to the owner's wallet whose answer never reached FloFi before the run ended (`workflow-runs/
+ * state-machine.ts`; named here because Channel Core reads runs only through the shared platform's view, `boundaries.test.ts`).
+ */
+const WALLET_BATCH_OUTCOME_UNKNOWN = 'WALLET_BATCH_OUTCOME_UNKNOWN';
+/**
+ * A HALTED run is worded by how it stopped (the server decides from its records): partial, nothing sent, or neither claimed. Without the
+ * server's word (an older view, an unknown value) it is a plain HALTED, worded neutrally: never "partially completed", never "nothing was sent".
+ */
+const haltedState = (run: WorkflowRunProgress) => run.state !== 'HALTED' ? run.state
+  : run.halted === 'PARTIAL' || run.halted === 'NOTHING_SENT' || run.halted === 'STOPPED' ? `HALTED_${run.halted}` : 'HALTED';
 const runFacts = (run: WorkflowRunProgress): RunFacts => ({ state: haltedState(run),
   steps: run.steps.map(step => ({ index: step.index, action: step.action, state: stepState(run, step), transaction: step.outcome?.submissions[0]?.hash ?? null })) });
 /** The non-secret continuation link of a multi-step approval: only the run owner's proven wallet can open it. */
@@ -89,25 +100,48 @@ export function plannedNotifications(language: ChannelLanguage, handoff: Handoff
   return { due, done: progress.runsComplete !== false && progress.runs.length > 0 && progress.runs.every(r => r.terminal) };
 }
 
+/** A code or classification as a notification key part: the outbox accepts only `[a-z0-9_.:-]` (and at most 160 characters in all). */
+const keyPart = (value: string | null | undefined) => (value ?? 'none').toLowerCase().replace(/[^a-z0-9_]/g, '_').slice(0, 64);
 /**
  * BUILD-CHAT-E2E-001: notifications of a multi-step workflow's run, while its owner shares status: each step's outcome once (reconciled, failed,
  * uncertain, stopped), "step N is ready for your signature" once per step (with the continuation link), and the run's end once. `done` once the run
  * is over (a halted run may still resume, so it is followed until it ends).
+ *
+ * A run can halt, be resumed and halt again (the outbox sends each key once): a halt's key names that halt — the step, how it stopped, its code
+ * and the moment the run entered HALTED (a halted run's row changes only when it leaves HALTED, so `updatedAt` is that moment until it resumes or
+ * ends) — a step stopped again after a resume is keyed by its code too, and "needs attention" by its step, so a later stop is announced instead of
+ * shadowed by the first one.
  */
 function workflowNotifications(language: ChannelLanguage, handoff: HandoffRecord, run: WorkflowRunProgress, origin?: string) {
   const m = channelCopy(language), due: PlannedNotification[] = [], key = (suffix: string) => `notify:${handoff.handoffId}:wfr:${suffix}`;
   const done = !OPEN_RUN.has(run.state);
   if (!handoff.shareStatus || !run.stepsVisible) return { due, done };
   for (const step of run.steps) if (['RECONCILED', 'FAILED', 'UNCERTAIN', 'BLOCKED'].includes(step.state))
-    due.push({ key: key(`step:${step.index}:${step.state.toLowerCase()}`), text: shorten(m.workflowRun(runFacts({ ...run, steps: [step] }))) });
+    due.push({ key: key(`step:${step.index}:${step.state.toLowerCase()}${step.state === 'BLOCKED' ? `:${keyPart(step.code)}` : ''}`),
+      text: shorten(m.workflowRun(runFacts({ ...run, steps: [step] }))) });
   if (run.nextAction === 'OWNER_SIGNS_STEP' && run.currentStep > 0 && origin)
     due.push({ key: key(`ready:${run.currentStep}`), text: m.stepReady(run.currentStep + 1, continuationUrl(origin, handoff.handoffId)) });
   // A later user-funded group that became due (e.g. after a bridge delivered) is announced like a step: the owner's wallet signs it in FloFi.
   if (run.nextAction === 'OWNER_SIGNS_GROUP' && run.currentStep > 0 && origin)
     due.push({ key: key(`ready-group:${run.currentStep}`), text: m.stepReady(run.currentStep + 1, continuationUrl(origin, handoff.handoffId)) });
+  // The owner's wallet answered a batch (FloFi recorded its id) but no browser reported its transactions yet: only the owner's FloFi page can read
+  // them back from the wallet, so the run waits for it — announced once per group (a signed group is never resumed or answered again), even for
+  // the first group (the owner may have closed FloFi right after the wallet answered). It may have executed: never "sent", never "not sent".
+  if (run.nextAction === 'OWNER_CONFIRMS_BATCH' && origin) {
+    const group = (run.groups ?? []).find(g => g.steps[0] <= run.currentStep && run.currentStep <= g.steps[1]);
+    const [from, to] = group?.steps ?? [run.currentStep, run.currentStep];
+    due.push({ key: key(`batch-answered:${from}`), text: m.batchAnswered(from + 1, to + 1, continuationUrl(origin, handoff.handoffId)) });
+  }
   if (run.state === 'COMPLETED') due.push({ key: key('done'), text: m.runDone });
-  else if (run.state === 'HALTED') due.push({ key: key('halted'), text: run.halted === 'NOTHING_SENT' ? m.runHaltedNothingSent : run.halted === 'STOPPED' ? m.runHaltedStopped : m.runHalted });
-  else if (run.state === 'ATTENTION') due.push({ key: key('attention'), text: m.runAttention });
-  else if (done) due.push({ key: key('ended'), text: m.runEnded(run.code ?? run.state) });
+  else if (run.state === 'HALTED') {
+    const entered = Date.parse(run.updatedAt);
+    due.push({ key: key(`halted:${run.currentStep}:${keyPart(run.halted)}:${keyPart(run.code)}${Number.isFinite(entered) ? `:${entered}` : ''}`),
+      text: run.halted === 'PARTIAL' ? m.runHalted : run.halted === 'NOTHING_SENT' ? m.runHaltedNothingSent(run.resumable === true)
+        : run.halted === 'STOPPED' ? m.runHaltedStopped : m.runHaltedUnclassified });
+  } else if (run.state === 'ATTENTION') {
+    // Once per step: a later step's submission without a final outcome is a new fact (the run goes back to RUNNING when a step settles).
+    due.push({ key: key(`attention:${run.currentStep}`), text: m.runAttention });
+  } else if (done) due.push({ key: key('ended'), text: run.state === 'CANCELLED' && [...run.groups ?? [], ...run.steps].some(item => item.code === WALLET_BATCH_OUTCOME_UNKNOWN)
+    ? m.runEndedBatchUnknown : m.runEnded(run.code ?? run.state) });
   return { due, done };
 }
