@@ -892,6 +892,7 @@ if (process.env.FLOFI_BETA_ACCESS === 'beta') test('closed beta protects direct 
 });
 
 if (process.env.FLOFI_FLIGHT_TEAM_E2E === 'MOCKED_LOOPBACK_ONLY') test('temporary team access uses public login, protects APIs and expires without campaign records', async ({ page, context }) => {
+  test.setTimeout(180_000); // Multiple real login/session transitions and deep links in one isolated scenario.
   const accounts = process.env.FLOFI_FLIGHT_TEAM_ACCOUNTS!.split(',');
   const clock = process.env.FLOFI_FLIGHT_TEAM_CLOCK!;
   const post = (path: string, data: object = {}) => page.evaluate(async ({ path, data }) => {
@@ -935,19 +936,19 @@ if (process.env.FLOFI_FLIGHT_TEAM_E2E === 'MOCKED_LOOPBACK_ONLY') test('temporar
     await continueToBuilder(page);
     await expect(page.getByRole('region', { name: 'Workflow canvas', exact: true })).toBeVisible();
     await shot(page, `early-team-${i + 1}`);
-    await context.clearCookies(); await page.goto('/login');
+    await context.clearCookies(); await context.addCookies(returningVisitor(E2E_APP_ORIGIN).cookies); await page.goto('/login');
   }
   // A wallet login establishes an ordinary authenticated account, but never early entitlement.
   await login('0x' + '9'.repeat(40));
   await expect(page).toHaveURL('/board');
   expect(await post('/api/build-estimate', { accountId: accounts[0], email: 'founder@example.test' }))
     .toMatchObject({ status: 403, body: { code: 'BETA_NOT_OPEN' } });
-  await context.clearCookies();
+  await context.clearCookies(); await context.addCookies(returningVisitor(E2E_APP_ORIGIN).cookies);
   await login('0x' + '7'.repeat(40));
   await expect(page).toHaveURL('/app');
   await query(`UPDATE flofi_account_sessions SET revoked_at = clock_timestamp() WHERE account_id=$1`, [accounts[0]]);
   expect((await post('/api/build-estimate')).status).toBe(403);
-  await context.clearCookies();
+  await context.clearCookies(); await context.addCookies(returningVisitor(E2E_APP_ORIGIN).cookies);
   await login('0x' + '7'.repeat(40));
   await expect(page).toHaveURL('/app');
   // Changing the browser/campaign clock cannot extend the fixed server-time exception.

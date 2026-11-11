@@ -12,4 +12,7 @@ const instant = () => {
 globalThis.Date = class extends RealDate {
   constructor(...args) { if (args.length) super(...args); else super(instant()); }
   static now() { return instant(); }
+  // Next wraps Date and copies its own properties; preserve the standard static API explicitly.
+  static parse(value) { return RealDate.parse(value); }
+  static UTC(...args) { return RealDate.UTC(...args); }
 };

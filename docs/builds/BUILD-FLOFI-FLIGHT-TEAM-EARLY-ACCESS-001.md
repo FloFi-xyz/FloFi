@@ -12,7 +12,7 @@ The API authenticates the service bearer before processing trusted account/sessi
 
 The exception uses `Date.now()` on the server and a fixed **2026-11-12T12:00:00Z** expiry (09:00 BRT). Neither configurable campaign dates, campaign test clock cookies nor caller `now`/`sessionNow` can extend it. The decision rechecks the cutoff after I/O. At/after the instant, normal Flight grants, eligibility and wallet bindings apply. A postponed campaign remains postponed. `closed` does not honor the exception; existing `open` behavior is unchanged.
 
-`grant()` remains calendar-gated. Temporary access only reads existing account/session/wallet records. It creates no Flight grant/wallet row, invite, pass, Founding seat, claim, campaign record or email. No migration, production configuration change, CRM edit, production data access, email delivery, public signing or transaction was performed by this task.
+`grant()` remains calendar-gated. Temporary admission only reads existing account/session/wallet records. Explicit MCP OAuth approval still writes its existing product-session identity mapping; it is rechecked on each tool request and creates no Flight entitlement. It creates no Flight grant/wallet row, invite, pass, Founding seat, claim, campaign record or email. No migration, production configuration change, CRM edit, production data access, email delivery, public signing or transaction was performed by this task.
 
 ## Owner activation after reviewed deployment
 
@@ -81,3 +81,28 @@ Rollback: remove/empty `FLOFI_BETA_EARLY_ACCESS_ACCOUNTS` on all three services 
 ## Local evidence
 
 Results and limitations are recorded after validation below. CircleCI's certification ledger remains authoritative; AI reviews are advisory. All chain/signature fixtures are MOCKED and establish no public-chain execution.
+
+The implementation changes the shared policy and threads the server environment through `server/flight-access.ts`, `backend/app.ts`, `mcp/beta-access.ts`, `channels/flight-gate.ts`, `automations/runtime.ts`, `delegation/runtime.ts` and `user-funded/runtime.ts`. Existing beta-access unit/PostgreSQL suites are extended in place. Browser changes are confined to `e2e/board.spec.ts`, the test-only clock preload, `playwright.flight.config.ts`, the guarded profile plan and its CI orchestration assertions. `coverage.json`/the generated matrix document the fixture evidence limit. The PR Files view (or `git diff --name-only origin/main...HEAD`) is the exact changed-file inventory.
+
+Validation commands (loopback test URL supplied privately; never a production URL):
+
+```sh
+pnpm check
+pnpm test --reporter=default --reporter=json --outputFile=/tmp/flight-unit.json
+python3 scripts/agent_guard.py verify-results /tmp/flight-unit.json
+pnpm test:postgres --reporter=default --reporter=json --outputFile=/tmp/flight-postgres-final.json
+python3 scripts/agent_guard.py verify-results --stage postgres /tmp/flight-postgres-final.json
+node scripts/guarded-release-browser.mjs profile flight-team-early-access
+node scripts/guarded-release-browser.mjs profile flight-closed-beta
+python3 scripts/function_traces.py apps/reference-dapp
+python3 scripts/agent_guard.py check
+python3 -m unittest discover -s scripts -p 'test_ci_*.py'
+python3 -m unittest discover -s scripts -p 'test_governance_lite.py'
+python3 scripts/governance_lite.py
+```
+
+Focused temporary-policy checks passed 13 unit tests and 51 PostgreSQL cases across the shared gate, API, workers, MCP and channels. CI/governance self-tests passed 257 and 21 cases respectively. Function tracing passed: 95 functions, largest 46.2 MB within the 64 MB limit. Final complete-suite/browser totals and current-head CircleCI/Vercel outcomes are reported in the PR and delivery report; skipped cases remain explicit.
+
+Read-only specialist reviews covered security, workflow integration, MCP, channels, automations, wallet execution, Developer/API boundaries, infrastructure/CI, swap, bridge, lending, liquidity and transfers/payments. Their concrete findings were fixture/CI issues: the browser profile count is now 53, the test clock preserves Next's copied Date statics, and account-switch fixtures preserve non-authentication preferences. They found no remaining product authorization defect. These are advisory reviews, not certification. `agent_guard.py review --base origin/main --session build-flofi-flight-team-early-access-001` cannot observe this Codex tool session in the Claude lifecycle ledger and reports missing recorded lifecycle evidence; that is not represented as a pass. Inventory and actual required-suite result checks remain mandatory.
+
+Initial failed local attempts remain disclosed: a new MCP argument fixture used the wrong field names (corrected); a test-only Date subclass lacked own `parse`/`UTC` methods needed by Next's wrapper (corrected); the account-switch test cleared the privacy preference and was blocked by the normal dialog (corrected). An initial sandboxed build failed to parse a TypeScript subprocess result; the subsequent production build passed. Duplicate local gate attempts were stopped after individual type/lint/build/schema gates passed; complete unit/PostgreSQL result reports provide separate evidence. None of these fixes relaxed product authorization or removed a test/gate.
