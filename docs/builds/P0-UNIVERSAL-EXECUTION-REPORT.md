@@ -81,6 +81,27 @@ no executor):
 16. **Readiness** (`/api/flofi/readiness?probe=networks`) reports per mainnet endpoint and per user-funded chain whether it answers
     `eth_simulateV1` (SUPPORTED / UNSUPPORTED / UNKNOWN), read-only, never a URL.
 
+Final adversarial review (scope frozen by the owner afterwards: only these P1 fixes and two small safety fixes):
+
+17. **A wallet batch's answer is recorded under owner recovery:** its id reports a batch the wallet already sent, so it is accepted after a Flight
+    grant ends, is revoked or the gate closes (else an executed batch could never be reconciled). User-operation and Solana answers, which FloFi
+    relays, keep the product grant.
+18. **The operator pause stops every hand-out**, a cached batch too (answers for batches already handed out are still taken).
+19. **One batch, one browser:** the first preparation returns a hand-out token (only its SHA-256 is stored); the batch is handed out again, or
+    prepared again after its validity, only to the browser that presents it (`WALLET_BATCH_HANDED_OUT_ELSEWHERE` otherwise), so a second device
+    or wallet instance can no longer receive and execute the same group. A 2-minute settle margin after a batch's validity applies to ending,
+    blocking at expiry and preparing again (chain clock lag).
+20. **Gates re-checked when a group is prepared:** every step passes its own gates and review again (a flow switched off after the start is honored).
+21. **Executed but not matching is never FAILED:** a batch or user operation the chain did not revert but that does not match what was signed
+    leaves the group and steps UNCERTAIN and the run in ATTENTION (observation only); FAILED stays "nothing irreversible happened".
+22. **User operations are decided by the chain:** before any resend the EntryPoint nonce is read; a consumed nonce is never resent or FAILED
+    (reconciled from its `UserOperationEvent` when found, else ATTENTION). The prepared nonce now takes only the sequence of a real v0.7
+    EntryPoint's `key << 64 | sequence` answer (every real-chain preparation was refused before).
+23. **A changed canonical workflow hash never blocks reconciliation:** what the chain decided is recorded from the run's own strategy; a step
+    that no longer composes at all leaves the run in ATTENTION, never RUNNING forever.
+24. Reported hashes are de-duplicated; a batched native transfer pays only the owner or an address without code (else it runs through the
+    owner-signed transfer flow).
+
 ## D. Capability matrix (code facts at this PR; production certification is separate)
 
 Proven through the real code paths, not card connections: `workflow-runs/universal-composition.test.ts` composes and plans **256 ordered action
@@ -140,7 +161,11 @@ from the new readiness probe (section J).
 
 ## H. Tests
 
-(filled at delivery)
+Every fix carries a test that fails with the fix reverted (mutation-checked). The gates run on the final HEAD of this PR — `pnpm check`
+(typecheck, lint, build, schema drift, unit tests), the PostgreSQL suites, the browser profiles that drive the Editor's `wallet_sendCalls`
+batch and `/approve` (`editor-wallet-batch`, `approve-workflow-run`, `review-execute-recovery-components`, `execution-continuity`), governance-
+lite and `agent_guard.py check` — and CircleCI (governance, certification-checks, certification-browser-1/2 with all 54 profiles, certification)
+are recorded with their exact counts in the PR #175 description, so this file never claims a result for a commit it is part of.
 
 ## I. Reviews
 
@@ -154,11 +179,12 @@ verifier and mutation-checked (the new test fails with the fix reverted). AI rev
 | 3 | lending, swap, frontend-ux, infrastructure-ci | stale repay never halting; user operations spending a swap output unsimulated; transient RPC error picking a worse fee tier; raw codes and "partially completed" for nothing-sent runs; false expiry note; End hidden; the e2e reload check proving nothing; skipped proof certified PASS (P2) |
 | 4 | workflow, wallet-execution, security, mcp, channels | **transfer-only batches without on-chain expiry (P1)**; **run expiry blocking a batch the wallet could still send (P1)**; overlapping preparations; mismatched second answers accepted; markers failing open without storage; unversioned answer write; batched transfers without token checks; PARTIAL note claiming nothing later was sent; Resume on expired runs; channel counts, repeated halts and batch-wait notices (P2) |
 | 4b / 4c (verifiers + universal proof) | adversarial verifiers, composition proof | outcome-unknown batches worded "nothing completed" (P1); answers compared in every state; version-checked "not sent" path; no-simulation pre-check of the first real call; dated expiry text; a tie in interaction counts forcing step-by-step mode; missing Solana group reason (P2) |
-| Final | security, wallet-execution, workflow (adversarial, on the final HEAD) | see below |
+| Final | security, wallet-execution, workflow (read-only) + a red-team agent with scratch tests on loopback doubles, at `3217fad` | **seven P1s, all fixed (C 17–23)**: wallet-batch answer behind the beta grant; pause bypassed by a cached batch; one batch handed to two devices (red team executed it twice on the double); gates not re-checked when due; executed-but-unmatched recorded FAILED; user operation FAILED/pending forever on the bundler's word; stale hash leaving a run RUNNING forever. P2s fixed only where they block safe operation (duplicate hashes, native transfer to a contract); the rest are follow-ups (K). Each fix has a test that fails with the fix reverted. After the owner's scope freeze no further review round was run: the final validation is the gates in H and CircleCI. |
 
 ## J. Deploy verification
 
-(filled after merge)
+After the merge: Vercel production, Railway `flofi-api` and `flofi-worker` serving the merge commit, readiness (`?probe=networks`, including
+`simulateV1` per user-funded chain) and main's CircleCI are recorded in the PR #175 description (this file is part of the merged commit).
 
 ## K. Real limits and owner actions
 
@@ -168,10 +194,17 @@ verifier and mutation-checked (the new test fails with the fix reverted). AI rev
 - **Signed when due (a separate prompt, never step by step):** any group after the first, a group that spends a bridge delivery, an Aave group
   after a bridge, a Solana step spending an unlanded output of its own group.
 - **Protocol / wallet limits:** EIP-5792 batching is the wallet's choice per chain; requester-side counts are lower bounds; two different wallet
-  instances of the same account (desktop and mobile) do not share EIP-5792 id de-duplication, so confirming the same prompt on both could
-  execute twice — FloFi refuses and logs a second, different answer (`WALLET_BATCH_ANSWER_MISMATCH`) but cannot stop a second device.
+  instances of the same account do not share EIP-5792 id de-duplication — FloFi therefore hands a batch to one browser only (C 19); a browser
+  that lost its storage cannot ask for the same batch again (it ends the run once the batch expired).
 - **Not covered by automated tests:** Solana sign-all through the run engine (planner level only; the harness has no Solana RPC), the real bridge
   flow's destination observation (flow double), EVM user operations with a real bundler (planner level), native-value transfers on the EVM double.
+- **Follow-ups from the final review (not blocking; no fund risk found):** an AUTHORIZED wallet batch whose hashes never arrive keeps its run
+  RUNNING (End is refused; the owner can still check the wallet); a crash between a group's BLOCKED write and the run's stop leaves the run RUNNING
+  until ended (End works); a Solana group held AUTHORIZED by a pause past its blockhash ends BLOCKED (nothing sent; the owner restarts);
+  `revokeUserOperation` does not check the wallet's selected account; a SUBMITTED user operation refused FEE_TOO_LOW keeps retrying;
+  `eth_getLogs` is not on the read allowlist, so a forgotten user operation whose nonce was consumed goes to ATTENTION instead of being
+  reconciled from its event; a user operation records no `fromBlock` (its event search is bounded by a fixed window); the per-flow switch is
+  re-checked when a group is prepared, not when an upfront user operation is relayed (the global pause covers that).
 - **Owner actions:** dedicated read profile for quote latency (F); a chain whose readiness reports `simulateV1: UNSUPPORTED` refuses Aave and
   bound-swap batches there (they run step by step) until `FLOFI_USER_FUNDED_RPC_<id>` points at an endpoint that supports it; the first
   owner-signed mainnet batch is the owner's decision.
