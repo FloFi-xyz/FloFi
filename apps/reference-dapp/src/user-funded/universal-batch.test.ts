@@ -18,7 +18,7 @@ import { delegationAavePool, delegationAaveReserve } from '../delegation/profile
 import { workflowRequirement } from '../delegation/steps.ts';
 import { composeWorkflowBound } from '../engine/strategy-engine.ts';
 import { planExecutionGroups } from '../workflow-runs/execution-groups.ts';
-import { buildEvmGroupCalls, evmCallsOf, evmStepBuildable, type EvmGroupCalls } from './evm-calls.ts';
+import { buildEvmGroupCalls, DEPENDENT_CALL_GAS, evmCallsOf, evmStepBuildable, type EvmGroupCalls } from './evm-calls.ts';
 import { reconcileWalletBatch } from './evm-reconcile.ts';
 import { prepareGroup, type UserFundedDeps } from './groups.ts';
 import type { BatchSimulation } from './batch-simulation.ts';
@@ -390,6 +390,56 @@ describe('P0 universal execution: a batch of transfers only still expires on cha
       { stepIndex: 0, spent: [{ asset: `${CHAIN}/erc20:${USDC}`, amount: '1000000' }], received: [] },
       { stepIndex: 1, spent: [{ asset: `${CHAIN}/erc20:${WETH}`, amount: '1000000000000000' }], received: [] }] });
     expect([chain.control.tokenBalance(USDC, A), chain.control.tokenBalance(WETH, B)]).toEqual([1_000_000n, 10n ** 15n]);
+  });
+
+  it('without eth_simulateV1, the first TRANSFER is pre-checked (never the guard, which always succeeds in time): a reverting one is never offered', async () => {
+    const seconds = Math.floor(Date.parse(NOW) / 1000);
+    const s = { version: 2, steps: [{ action: 'transfer', network: 'arbitrum-one', asset: 'USDC', amount: '1', recipient: A },
+      { action: 'transfer', network: 'arbitrum-one', asset: 'WETH', amount: '0.001', recipient: B }] };
+    const requirement = workflowRequirement(s), composition = composeWorkflowBound(s as never, undefined);
+    if (!requirement.ok || !composition.ok) throw new Error('STRATEGY_INVALID');
+    const TRANSFER_GAS = 51_234n, GUARD_GAS = 22_222n;
+    /** An RPC without eth_simulateV1 whose eth_estimateGas runs the one call on the double's state, as a node does: the guard succeeds before
+     *  its deadline; an ERC-20 transfer reverts when the sender holds less than its amount. Every estimated call is recorded. */
+    const prepareWith = async (usdc: bigint) => {
+      const chain = createEvmDouble(42161, () => seconds, { profile: ARBITRUM_MAINNET_SWAP });
+      chain.control.fundToken(OWNER, USDC, usdc); chain.control.fundToken(OWNER, WETH, 10n ** 16n); chain.control.fundNative(OWNER, 10n ** 17n);
+      chain.control.disableSimulation();
+      const estimated: { to: string; data: string }[] = [];
+      const transport = guarded(CHAIN, 'read', 'MOCKED', async (method, params) => {
+        if (method !== 'eth_estimateGas') return chain.rpc(method, params);
+        const call = params[0] as { from: string; to: string; data: string };
+        estimated.push({ to: call.to.toLowerCase(), data: call.data });
+        if (call.data.startsWith('0x5ae401dc')) {
+          if (BigInt(seconds) > BigInt('0x' + call.data.slice(10, 74))) throw new Error('execution reverted: Transaction too old');
+          return '0x' + GUARD_GAS.toString(16);
+        }
+        if (!call.data.startsWith('0xa9059cbb')) throw new Error(`UNEXPECTED_ESTIMATE_${call.data.slice(0, 10)}`);
+        if (chain.control.tokenBalance(call.to, call.from) < BigInt('0x' + call.data.slice(74, 138))) throw new Error('execution reverted: ERC20: transfer amount exceeds balance');
+        return '0x' + TRANSFER_GAS.toString(16);
+      });
+      const deps: UserFundedDeps = { chains: CHAINS, evm: c => c === CHAIN ? transport : null, bundler: () => null, solana: null, jupiter: null, now: () => new Date(seconds * 1000) };
+      const r = await prepareGroup(deps, composition, requirement.value, { runId: 'wfr_nosim_transfers', groupIndex: 0, strategy: 'EVM_WALLET_BATCH', chain: CHAIN,
+        feePayer: OWNER, stepFrom: 0, stepTo: 1 });
+      return { r, chain, transport, estimated };
+    };
+    // The owner holds 0.5 USDC: the first transfer (1 USDC) would revert, so the batch is refused at its step and nothing reaches the wallet.
+    const short = await prepareWith(500_000n);
+    expect(short.r).toMatchObject({ ok: false, code: 'SIMULATION_REVERTED', stepIndex: 0 });
+    expect(short.estimated).toEqual([{ to: USDC.toLowerCase(), data: expect.stringMatching(/^0xa9059cbb/) }]);
+    expect([short.chain.control.simulations(), short.chain.control.sends()]).toEqual([0, 0]);
+    // Funded: offered with the guard first; the fee estimate is the transfer's own estimate plus the guard's and the second transfer's allowances.
+    const funded = await prepareWith(10_000_000n);
+    if (!funded.r.ok) throw new Error(funded.r.code);
+    const p = funded.r.value.prepared as unknown as BatchPrepared;
+    expect(p.simulation).toBeNull();
+    expect(p.group.calls.map(c => c.kind)).toEqual(['DEADLINE_GUARD', 'ERC20_TRANSFER', 'ERC20_TRANSFER']);
+    expect(p.request.calls.map(c => c.data.slice(0, 10))).toEqual(['0x5ae401dc', '0xa9059cbb', '0xa9059cbb']);
+    expect(funded.estimated).toEqual([{ to: USDC.toLowerCase(), data: evmCallsOf(p.group)[1]!.data }]);
+    expect(BigInt(p.fee.estimatedGas)).toBe(TRANSFER_GAS + DEPENDENT_CALL_GAS.DEADLINE_GUARD + DEPENDENT_CALL_GAS.ERC20_TRANSFER + 30_000n);
+    const hash = funded.chain.control.walletBatch(OWNER, evmCallsOf(p.group));
+    expect((await reconcileWalletBatch(funded.transport, p.group, [hash], p.fromBlock)).status).toBe('RECONCILED');
+    expect([funded.chain.control.tokenBalance(USDC, A), funded.chain.control.tokenBalance(WETH, B)]).toEqual([1_000_000n, 10n ** 15n]);
   });
 
   it('a native transfer gets the guard on every user-funded EVM chain (each registers a router); a user operation (no deadline) is built as before', async () => {

@@ -71,8 +71,9 @@ export const WALLET_BATCH_OUTCOME_UNKNOWN = 'WALLET_BATCH_OUTCOME_UNKNOWN';
 /**
  * Whether a wallet batch group was handed to the owner's wallet (a prepared artifact, or earlier preparations kept for reconciliation) while no
  * answer was ever recorded for it: the wallet may have executed it before its on-chain deadline and the answer been lost on the way. FloFi
- * cannot know, so such a group is never described as not run: ending the run marks it (and its steps) WALLET_BATCH_OUTCOME_UNKNOWN, and a run
- * stopped at it HALTS (its owner ends it) instead of FAILING, which would say nothing irreversible happened.
+ * cannot know, so such a group is never described as not run: ending the run, or blocking the group at the run's expiry (user-funded-pass.ts),
+ * marks it (and its steps) WALLET_BATCH_OUTCOME_UNKNOWN, and a run stopped at it HALTS (its owner ends it) instead of FAILING, which would say
+ * nothing irreversible happened.
  */
 export function walletBatchUnanswered(g: { readonly strategy: string; readonly prepared: unknown; readonly authorization: unknown }): boolean {
   return g.strategy === 'EVM_WALLET_BATCH' && g.prepared !== null && g.prepared !== undefined && (g.authorization === null || g.authorization === undefined);

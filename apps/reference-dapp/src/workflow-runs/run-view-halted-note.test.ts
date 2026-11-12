@@ -66,3 +66,38 @@ describe('P0 review fix: every surface words a HALTED run from the server\'s own
     expect(view.halted).toBeNull();
   });
 });
+
+describe('round 4 F1: a run halted while a wallet batch it handed out was never answered says that batch may have executed', () => {
+  const MAY_HAVE_EXECUTED = 'A batch was handed to the owner\'s wallet and its answer never reached FloFi: it may have executed before its on-chain deadline; '
+    + 'check the wallet\'s activity.';
+  const unknownStep = (stepIndex: number) => ({ ...step(stepIndex, 'BLOCKED'), code: 'WALLET_BATCH_OUTCOME_UNKNOWN' }) as RunStepRecord;
+  const unknownGroup = (groupIndex: number, stepFrom: number, stepTo: number) => group(groupIndex, stepFrom, stepTo, { state: 'BLOCKED', code: 'WALLET_BATCH_OUTCOME_UNKNOWN',
+    prepared: { kind: 'EVM_WALLET_BATCH', request: { id: '0x' + 'cd'.repeat(32) } } });
+  const expiredRun = { ...halted('USER_FUNDED'), code: 'WORKFLOW_RUN_EXPIRED' } as RunRecord;
+  const viewOf = (steps: readonly RunStepRecord[], groups: readonly GroupRecord[], outcomes = true, run = expiredRun) =>
+    runView({ store: { steps: async () => [...steps], groups: async () => [...groups] } }, run, { outcomes });
+
+  it('nothing reconciled: STOPPED, and the note says the batch may have executed — never "stopped before any step completed" or "nothing was sent"', async () => {
+    const view = await viewOf([unknownStep(0), unknownStep(1), step(2, 'DELEGATED')], [unknownGroup(0, 0, 1), group(1, 2, 2, {})]);
+    expect(view).toMatchObject({ halted: 'STOPPED', note: `Stopped. ${MAY_HAVE_EXECUTED} FloFi submits nothing more of it; the owner decides what happens next.` });
+    expect(view.note).not.toMatch(/before any step completed|nothing was sent|before anything was sent/i);
+    expect(haltedAs(view)).toBe('STOPPED');
+  });
+  it('after a reconciled step: a partial completion that still says the later batch may have executed (its funds may have moved)', async () => {
+    const view = await viewOf([step(0, 'RECONCILED'), unknownStep(1), unknownStep(2)], [group(0, 0, 0, { state: 'RECONCILED' }), unknownGroup(1, 1, 2)]);
+    expect(view).toMatchObject({ halted: 'PARTIAL',
+      note: `Partially completed: the reconciled steps stay done. ${MAY_HAVE_EXECUTED} FloFi submits nothing more of it; the owner decides what happens next.` });
+    expect(view.note).not.toMatch(/funds rest in the owner's wallet/);
+  });
+  it('the code on the steps alone is enough (fail closed); a requester the owner did not share status with still sees only the consent note', async () => {
+    expect((await viewOf([unknownStep(0), unknownStep(1), step(2, 'DELEGATED')], [group(0, 0, 1, { state: 'BLOCKED', prepared: { kind: 'EVM_WALLET_BATCH' } })])).note)
+      .toBe(`Stopped. ${MAY_HAVE_EXECUTED} FloFi submits nothing more of it; the owner decides what happens next.`);
+    expect((await viewOf([unknownStep(0), unknownStep(1), step(2, 'DELEGATED')], [unknownGroup(0, 0, 1)], false)).note)
+      .toBe('The owner has not shared the transactions and evidence of this workflow with this conversation.');
+  });
+  it('a run stopped at its expiry before any batch was handed out never says "may have executed"', async () => {
+    const plain = await viewOf([step(0, 'BLOCKED'), step(1, 'BLOCKED'), step(2, 'DELEGATED')], [group(0, 0, 1, { state: 'BLOCKED', code: 'WORKFLOW_RUN_EXPIRED' })]);
+    expect(plain).toMatchObject({ halted: 'NOTHING_SENT' });
+    expect(plain.note).not.toContain('may have executed');
+  });
+});

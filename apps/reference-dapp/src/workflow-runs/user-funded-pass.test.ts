@@ -198,11 +198,21 @@ describe('review fix R1: run expiry never blocks a batch the owner\'s wallet may
   it('once its validity passed it is blocked, and the run HALTS (the batch may have executed, its answer lost): never FAILED; a group never handed out FAILS', async () => {
     const handed = expired({ validUntil: new Date(NOW.getTime() - 1_000) });
     expect(await userFundedPass(handed.deps, handed.mem.run())).toMatchObject({ state: 'HALTED', code: 'WORKFLOW_RUN_EXPIRED' });
-    expect(handed.mem.group()).toMatchObject({ state: 'BLOCKED', code: 'WORKFLOW_RUN_EXPIRED' });
+    // Round 4 F1: the group and its steps say the batch's outcome is unknown (never the bare expiry, which surfaces word as "not run"); the run
+    // keeps the reason it stopped.
+    expect(handed.mem.group()).toMatchObject({ state: 'BLOCKED', code: 'WALLET_BATCH_OUTCOME_UNKNOWN' });
+    expect(handed.mem.steps().map(s => [s.state, s.code])).toEqual([['BLOCKED', 'WALLET_BATCH_OUTCOME_UNKNOWN'], ['BLOCKED', 'WALLET_BATCH_OUTCOME_UNKNOWN']]);
+    expect(handed.mem.run()).toMatchObject({ state: 'HALTED', code: 'WORKFLOW_RUN_EXPIRED' });
     expect(handed.mem.writes).toEqual(['group:BLOCKED', 'step0:BLOCKED', 'step1:BLOCKED', 'run:HALTED']);
     expect(handed.logs).toEqual(['workflow_run.group_blocked']);
+    // A group whose earlier batches were handed out (kept for reconciliation while it waits to be prepared again) is just as unknown.
+    const history = expired({ state: 'PLANNED', prepared: { kind: 'EVM_WALLET_BATCH', superseded: [{ group: { calls: [] }, fromBlock: null }] }, validUntil: null });
+    expect(await userFundedPass(history.deps, history.mem.run())).toMatchObject({ state: 'HALTED', code: 'WORKFLOW_RUN_EXPIRED' });
+    expect(history.mem.steps().map(s => s.code)).toEqual(['WALLET_BATCH_OUTCOME_UNKNOWN', 'WALLET_BATCH_OUTCOME_UNKNOWN']);
     const never = expired({ state: 'PLANNED', prepared: null, validUntil: null });
     expect(await userFundedPass(never.deps, never.mem.run())).toMatchObject({ state: 'FAILED', code: 'WORKFLOW_RUN_EXPIRED' });
+    expect(never.mem.group()).toMatchObject({ state: 'BLOCKED', code: 'WORKFLOW_RUN_EXPIRED' });
+    expect(never.mem.steps().map(s => [s.state, s.code])).toEqual([['BLOCKED', 'WORKFLOW_RUN_EXPIRED'], ['BLOCKED', 'WORKFLOW_RUN_EXPIRED']]);
   });
 
   it('an authorization that lands between the pass\'s read and its write is never blocked (only from the state and version the pass read)', async () => {

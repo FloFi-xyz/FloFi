@@ -9,7 +9,8 @@
  *   PREPARED              waits for the owner's wallet; past its validity it is EXPIRED and prepared again on request — except a wallet batch,
  *                         which the wallet itself sends when the owner confirms: it is never dropped silently (a late answer is still taken)
  *   run expiry            a PLANNED or PREPARED group is BLOCKED — a wallet batch only once its validity passed (until then the wallet may still
- *                         confirm it before its on-chain deadline); a batch handed out and never answered HALTS the run, never FAILS it
+ *                         confirm it before its on-chain deadline); a batch handed out and never answered HALTS the run, never FAILS it, and
+ *                         its group and steps carry WALLET_BATCH_OUTCOME_UNKNOWN (it may have executed)
  *   AUTHORIZED            wallet batch: the wallet already sent it; FloFi waits for the hashes the owner's browser reports.
  *                         user operation: due when the previous group reconciled; simulated by the bundler, then relayed (owner-paid).
  *                         Solana: started only while the signed blockhash leaves the send budget (else BLOCKED, nothing sent); every
@@ -26,7 +27,7 @@ import { advanceSolanaSubmission, checkUserOperation, reconcileEvmGroup, reconci
   type Reconciled, type UserFundedDeps } from '../user-funded/groups.ts';
 import type { EvmGroupCalls } from '../user-funded/evm-calls.ts';
 import type { BoundResolution, GroupRecord, RunRecord, RunStepRecord, StepOutcome, WorkflowRunStore } from './pg-store.ts';
-import { ADVANCE_RETRY_MS, TERMINAL_RUN, groupInFlight, walletBatchUnanswered, type RunState } from './state-machine.ts';
+import { ADVANCE_RETRY_MS, TERMINAL_RUN, WALLET_BATCH_OUTCOME_UNKNOWN, groupInFlight, walletBatchUnanswered, type RunState } from './state-machine.ts';
 import { executionRefusal } from '../server/execution-guard.ts';
 
 export type Pass = { readonly state: RunState; readonly code: string | null; readonly retryMs: number | null; readonly progressed: boolean };
@@ -61,14 +62,17 @@ export async function userFundedPass(deps: UserFundedPassDeps, run: RunRecord): 
   const now = deps.now();
   const block = async (refusal: string): Promise<Pass> => {
     const code = stored(refusal);
+    // A wallet batch handed to the owner's wallet and never answered may have executed (its answer lost on the way): the run HALTS (its owner
+    // ends it, and is told to check the wallet's activity), never FAILED, which would say nothing irreversible happened. Its group and steps
+    // carry WALLET_BATCH_OUTCOME_UNKNOWN, never the bare stop reason, so no surface words them as "not run" or the run as stopped before any
+    // step completed; the run itself keeps the reason it stopped (e.g. WORKFLOW_RUN_EXPIRED).
+    const unanswered = walletBatchUnanswered(g), marked = unanswered ? WALLET_BATCH_OUTCOME_UNKNOWN : code;
     // Only the pass whose write blocked the group moves its steps and the run, and only from exactly the state and row version this pass read:
     // a group that moved on elsewhere meanwhile (an authorization that landed, a concurrent pass that submitted it, its transactions may be on
     // their way) is never reported blocked, and never leaves a run failed with a send in flight.
-    if (!await deps.store.groupTransition(run.runId, g.groupIndex, [g.state], 'BLOCKED', { code }, 'GROUP_STATE', g.version)) return { ...settled(run), progressed: true };
-    for (let i = g.stepFrom; i <= g.stepTo; i++) await deps.store.stepTransition(run.runId, i, ['DELEGATED'], 'BLOCKED', { code });
-    // A wallet batch handed to the owner's wallet and never answered may have executed: the run HALTS (its owner ends it, and is told to check
-    // the wallet's activity), never FAILED, which would say nothing irreversible happened.
-    const partial = steps.some(s => s.stepIndex < g.stepFrom && s.state === 'RECONCILED'), unanswered = walletBatchUnanswered(g);
+    if (!await deps.store.groupTransition(run.runId, g.groupIndex, [g.state], 'BLOCKED', { code: marked }, 'GROUP_STATE', g.version)) return { ...settled(run), progressed: true };
+    for (let i = g.stepFrom; i <= g.stepTo; i++) await deps.store.stepTransition(run.runId, i, ['DELEGATED'], 'BLOCKED', { code: marked });
+    const partial = steps.some(s => s.stepIndex < g.stepFrom && s.state === 'RECONCILED');
     const moved = await deps.store.transition(run.runId, { version: run.version, from: ['RUNNING', 'ATTENTION'] }, partial || unanswered ? 'HALTED' : 'FAILED', { code });
     deps.log('workflow_run.group_blocked', { run: run.runId, group: g.groupIndex, code, partial, unanswered });
     return moved ? settled(moved) : { ...settled(run), progressed: true };

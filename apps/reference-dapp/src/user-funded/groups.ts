@@ -109,11 +109,16 @@ async function prepareWalletBatch(deps: UserFundedDeps, requirement: WorkflowReq
     const swapSteps = new Set(group.steps.filter(s => s.calls.some(i => group.calls[i]?.kind === 'UNISWAP_V3_EXACT_INPUT_SINGLE')).map(s => s.stepIndex));
     const consumer = group.steps.find(s => requirement.bindings.some(b => b.step === s.stepIndex && swapSteps.has(b.amountFrom)));
     if (consumer) return no('USER_FUNDED_SIMULATION_UNAVAILABLE', consumer.stepIndex);
-    // The first call depends on nothing earlier in the batch: if it cannot be estimated from the owner's account it would revert, so nothing is offered.
+    // The first STEP call is pre-checked: it depends on nothing earlier in the batch (a leading DEADLINE_GUARD changes no state), so if it
+    // cannot be estimated from the owner's account it would revert, and nothing is offered. Never the guard itself: before its deadline it
+    // always succeeds, so estimating it would let a transfer-only batch whose first transfer reverts reach the wallet unchecked. Each other
+    // call, the guard included, counts at its DEPENDENT_CALL_GAS allowance. A batch with no step call (never built) is not offered.
+    const first = group.calls.findIndex(c => c.kind !== 'DEADLINE_GUARD'), call = calls[first];
+    if (first < 0 || !call) return no('USER_FUNDED_GROUP_NOT_PREPARABLE', group.steps[0]?.stepIndex ?? null);
     let firstGas: bigint;
-    try { firstGas = big(await t.rpc('eth_estimateGas', [{ from: group.owner, to: calls[0]!.target, value: hex(calls[0]!.value), data: calls[0]!.data }])); }
-    catch (cause) { return no(codeOf(cause, '') === 'DELEGATION_RPC_UNAVAILABLE' ? 'USER_FUNDED_RPC_UNAVAILABLE' : 'SIMULATION_REVERTED', group.steps[0]?.stepIndex ?? null); }
-    gas = firstGas + group.calls.slice(1).reduce((sum, c) => sum + DEPENDENT_CALL_GAS[c.kind], 0n) + 30_000n;
+    try { firstGas = big(await t.rpc('eth_estimateGas', [{ from: group.owner, to: call.target, value: hex(call.value), data: call.data }])); }
+    catch (cause) { return no(codeOf(cause, '') === 'DELEGATION_RPC_UNAVAILABLE' ? 'USER_FUNDED_RPC_UNAVAILABLE' : 'SIMULATION_REVERTED', stepOfCall(first) ?? group.steps[0]?.stepIndex ?? null); }
+    gas = firstGas + group.calls.reduce((sum, c, i) => i === first ? sum : sum + DEPENDENT_CALL_GAS[c.kind], 0n) + 30_000n;
   }
   const fees = await feeFacts(t, group.owner);
   // On an OP Stack chain the owner also pays the L1 data fee of the batch transaction (an EIP-7702 `execute(batch)` self-call carrying every
