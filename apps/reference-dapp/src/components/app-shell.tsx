@@ -509,15 +509,22 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
   const workflowSurface = !approvalSlot && !autoPrepare && surface === 'workspace';
   const sequenceContinuing = Boolean(workflowSurface && sequence && !sequence.finished && sequence.completed.length > 0 && !liveStep);
   const sequenceFinishedIdle = Boolean(workflowSurface && sequence?.finished && !liveStep);
+  // A finished sequence has nothing left to simulate: its simulate control is closed and says why (its last step is never offered again).
+  const sequenceDone = Boolean(sequence?.finished);
+  const sequenceDoneReason = sequence?.finished ? tr('All {0} steps of this workflow are completed and reconciled.', sequence.steps.length) : null;
   const continueKey = sequenceContinuing && sequence ? `${state.workflow.workflowId}:${sequence.cursor}` : null;
   const autoContinued = useRef<string | null>(null);
   useEffect(() => {
     if (!continueKey || handedOver.current !== continueKey || autoContinued.current === continueKey) return;
     if (sequenceIssue || sequenceRestore || walletIssue || networkAction || simulationDisabled || !actionable || lifecycleState.invalidWorkflow) return;
     if (canvasAction.kind !== 'simulate' || canvasAction.disabled || simulationSource.state.busy) return;
+    // A Router step simulates only for a signed-in wallet session: without one its simulation would open a wallet sign-in request, which only
+    // the owner's own click may start (the inline action), never FloFi by itself. The universal Router always may, so it waits for the click too.
+    if (simulationSource.kind === 'universal' || simulationSource.kind === 'router' && !routerState.session) return;
     autoContinued.current = continueKey;
     void simulateAgain();
-  }, [continueKey, sequenceIssue, Boolean(sequenceRestore), walletIssue, Boolean(networkAction), simulationDisabled, actionable, lifecycleState.invalidWorkflow, canvasAction.kind, canvasAction.disabled, simulationSource.state.busy]);
+  }, [continueKey, sequenceIssue, Boolean(sequenceRestore), walletIssue, Boolean(networkAction), simulationDisabled, actionable, lifecycleState.invalidWorkflow, canvasAction.kind, canvasAction.disabled, simulationSource.state.busy,
+    simulationSource.kind, Boolean(routerState.session)]);
   // One progress truth for the whole workflow (Execute, the FloFi Assistant and the Dashboard read these same numbers). A workflow one runtime
   // serves as a whole already counts its own steps in its run; a step-by-step workflow is counted here, over all of its steps.
   const stepPrepared = Boolean(authorization.key && !simulationSource.state.busy && (canvasAction.kind === 'approve' || canvasAction.kind === 'execute'));
@@ -580,7 +587,7 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
     </div>
     : walletIssue ? <div className="canvas-lifecycle-control"><p role="status">{walletIssue}</p><button type="button" onClick={() => void walletConnection.connect()}>{tr('Use another wallet')}</button></div>
     : networkAction ? <div className="canvas-lifecycle-control"><button type="button" disabled={networkAction.disabled} onClick={networkAction.request}>{networkAction.label}</button>{walletConnection.error && <p role="status">{tr(walletConnection.error)}</p>}</div> : <CanvasLifecycleAction {...lifecycleState} controls={lifecycleControls} workflowName={workflowName}
-    simulationDisabled={simulationDisabled || !actionable} simulationReason={simulationReason} sequenceNote={sequenceNote}
+    simulationDisabled={simulationDisabled || !actionable || sequenceDone} simulationReason={sequenceDoneReason ?? simulationReason} sequenceNote={sequenceNote}
     simulate={() => { setTab('Simulate'); return simulateAgain(); }} onExecute={() => setTab('Execute')}/>;
   // P0 hotfix (execution continuity): in Execute, a step-by-step workflow (its run, or its next step) and an owner-bound swap's approval → swap
   // continuation continue in place: a fresh simulation asked for here stays in Execute (never the Simulate stage), and a finished workflow
@@ -588,7 +595,7 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
   const inlineExecute = sequenceContinuing || Boolean(liveStep && (sequence || ownerBoundContinuation));
   const executeAction = sequenceFinishedIdle ? <button type="button" className="primary execute-new-workflow" onClick={startNewWorkflow}>{tr('Create new workflow')}</button>
     : inlineExecute && !sequenceRestore && !walletIssue && !networkAction ? <CanvasLifecycleAction {...lifecycleState} controls={lifecycleControls} workflowName={workflowName}
-      simulationDisabled={simulationDisabled || !actionable} simulationReason={simulationReason} sequenceNote={sequenceContinuing ? null : sequenceNote}
+      simulationDisabled={simulationDisabled || !actionable || sequenceDone} simulationReason={sequenceDoneReason ?? simulationReason} sequenceNote={sequenceContinuing ? null : sequenceNote}
       simulate={() => simulateAgain()} onExecute={() => setTab('Execute')}/>
     : simulateAction;
   // BUILD-FLOFI-CONVERSATIONAL-001: the chat lives here, above the stage switch, so Build, Simulate and Execute share one conversation. It reaches
