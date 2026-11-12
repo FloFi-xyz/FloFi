@@ -20,7 +20,7 @@ export const portugueseRobinhood: Readonly<Record<string, string>> = {
   'Exact amount': 'Valor exato', 'units)': 'unidades)', 'Asset balance': 'Saldo do ativo', '(token transfer)': '(transferência de token)',
   'Cross-chain Router · {0} → {1} · {2} → {3}. Real funds on mainnet; a route is chosen and shown at Review.':
     'Router entre redes · {0} → {1} · {2} → {3}. Fundos reais na rede principal; a rota é escolhida e mostrada na revisão.',
-  'Cross-chain amount ({0})': 'Montante entre redes ({0})', 'Between {0} and {1} {2} per bridge in this release.': 'Entre {0} e {1} {2} por transferência nesta versão.',
+  'Cross-chain amount ({0})': 'Valor entre redes ({0})', 'Between {0} and {1} {2} per bridge in this release.': 'Entre {0} e {1} {2} por transferência nesta versão.',
   'USDG from': 'USDG de', '{0} through the Cross-chain Router ·': '{0} através do Router entre redes ·',
   // Robinhood Chain liquidity (catalog pairs, real funds).
   'Liquidity fee tier': 'Faixa de taxa da liquidez',

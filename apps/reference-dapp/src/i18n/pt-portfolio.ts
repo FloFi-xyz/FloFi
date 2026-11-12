@@ -51,6 +51,6 @@ export const portuguesePortfolio: Readonly<Record<string, string>> = {
     'Este token usa uma extensão Token-2022 que a FloFi não consegue interpretar, por isso o saldo não é exibido.',
   'This balance could not be interpreted safely, so it is not shown.': 'Este saldo não pôde ser interpretado com segurança, por isso não é exibido.',
   'Transactions, DeFi positions and perpetuals are not shown: FloFi has no verified source for them. Your FloFi executions are in Your workflows.':
-    'Transações, posições DeFi e perpétuos não são exibidos: o FloFi não tem uma fonte verificada para eles. Suas execuções no FloFi estão em Seus workflows.',
+    'Transações, posições DeFi e perpétuos não são exibidos: o FloFi não tem uma fonte verificada para eles. Suas execuções no FloFi estão em Seus fluxos.',
   'Updated {0}': 'Atualizado em {0}',
 };

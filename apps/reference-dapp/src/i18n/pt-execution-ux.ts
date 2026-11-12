@@ -15,21 +15,21 @@ export const portugueseExecutionUx: Readonly<Record<string, string>> = {
   'This token is not on FloFi\'s verified list. Its mint, decimals and token program were checked on chain; confirm it is the token you intend to send.':
     'Este token não está na lista verificada da FloFi. O mint, as casas decimais e o programa foram verificados na blockchain; confirme que é o token que pretende enviar.',
   'Token-2022 token: only extensions FloFi can verify were found, and the recipient receives exactly the amount sent.':
-    'Token Token-2022: só foram encontradas extensões que a FloFi consegue verificar e o destinatário recebe exatamente o montante enviado.',
-  'Preparing authorization…': 'A preparar a autorização…',
+    'Token Token-2022: só foram encontradas extensões que a FloFi consegue verificar e o destinatário recebe exatamente o valor enviado.',
+  'Preparing authorization…': 'Preparando a autorização…',
   'Solana address': 'Endereço Solana', 'Transfer details': 'Detalhes da transferência', 'From': 'De', 'Transfer result': 'Resultado da transferência',
   'Transfer independently reconciled. Sent {0}; the recipient received {1}; fee {2}.':
     'Transferência reconciliada de forma independente. Enviado {0}; o destinatário recebeu {1}; taxa {2}.',
   // Readable simulation errors.
-  'Connect the wallet that will sign this workflow, then simulate again.': 'Ligue a carteira que vai assinar este fluxo e simule novamente.',
+  'Connect the wallet that will sign this workflow, then simulate again.': 'Conecte a carteira que vai assinar este fluxo e simule novamente.',
   'Check the destination address. It must be a valid wallet address on this network, not a token or program account.':
     'Verifique o endereço de destino. Tem de ser um endereço de carteira válido nesta rede, não uma conta de token nem de programa.',
   'This token uses a token feature FloFi cannot verify safely. Nothing was simulated or sent.':
     'Este token usa uma funcionalidade que a FloFi não consegue verificar com segurança. Nada foi simulado nem enviado.',
   'The token details do not match what is on the network. Check the token on the Canvas and simulate again.':
     'Os dados do token não correspondem aos da rede. Verifique o token no Canvas e simule novamente.',
-  'Check the amount. It is outside what this network or token accepts.': 'Verifique o montante. Está fora do que esta rede ou este token aceita.',
-  'Your current debt is lower than this repayment. Reduce the amount and simulate again.': 'A sua dívida atual é inferior a este reembolso. Reduza o montante e simule novamente.',
+  'Check the amount. It is outside what this network or token accepts.': 'Verifique o valor. Está fora do que esta rede ou este token aceita.',
+  'Your current debt is lower than this repayment. Reduce the amount and simulate again.': 'A sua dívida atual é inferior a este reembolso. Reduza o valor e simule novamente.',
   'This account is upgraded to a smart account (EIP-7702) whose code FloFi has not verified, and that code could act on funds this workflow sends to it. Use a standard account or a MetaMask Smart Account. Nothing was simulated or sent.':
     'Esta conta foi atualizada para uma conta inteligente (EIP-7702) cujo código a FloFi não verificou, e esse código pode agir sobre os fundos que este fluxo lhe envia. Use uma conta normal ou uma MetaMask Smart Account. Nada foi simulado nem enviado.',
   'Transfers need a standard wallet account. This account carries smart-account code (a contract wallet, or an EIP-7702 upgrade such as a MetaMask Smart Account), which FloFi does not use for transfers yet. Nothing was simulated or sent.':
@@ -50,12 +50,12 @@ export const portugueseExecutionUx: Readonly<Record<string, string>> = {
   'FloFi prepares a fresh simulation for this wallet. Check it, then authorize in your wallet.': 'A FloFi prepara uma simulação nova para esta carteira. Verifique-a e autorize na sua carteira.',
   'This proposal is already in a FloFi workflow for your wallet. Restore it to continue. An interrupted run stays in Your runs: reconcile it before starting again.':
     'Esta proposta já está num fluxo FloFi da sua carteira. Restaure-a para continuar. Uma execução interrompida fica em As suas execuções: reconcilie-a antes de recomeçar.',
-  'Connect your wallet to load this proposal for a fresh simulation and your signature.': 'Ligue a carteira para carregar esta proposta para uma simulação nova e a sua assinatura.',
+  'Connect your wallet to load this proposal for a fresh simulation and your signature.': 'Conecte a carteira para carregar esta proposta para uma simulação nova e a sua assinatura.',
   'Authorize with your wallet': 'Autorizar com a sua carteira', 'Transaction to authorize': 'Transação a autorizar', '{0} actions': '{0} ações',
   'Requested actions': 'Ações pedidas', 'Valid for': 'Válido durante', '{0}s': '{0} s', 'Transactions': 'Transações',
   'You can return to your conversation. Its status follows this result when status sharing is on.':
     'Pode voltar à sua conversa. O estado segue este resultado quando a partilha de estado está ativa.',
   'View in FloFi': 'Ver na FloFi', 'Ready to authorize': 'Pronto para autorizar',
   'Check the details, then authorize. Your wallet shows the exact transaction for your confirmation.': 'Verifique os detalhes e autorize. A sua carteira mostra a transação exata para confirmar.',
-  'Connect the wallet that will sign. Nothing is authorized until you confirm in your wallet.': 'Ligue a carteira que vai assinar. Nada é autorizado até confirmar na sua carteira.',
+  'Connect the wallet that will sign. Nothing is authorized until you confirm in your wallet.': 'Conecte a carteira que vai assinar. Nada é autorizado até confirmar na sua carteira.',
 };

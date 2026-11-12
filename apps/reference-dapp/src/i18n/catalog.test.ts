@@ -51,6 +51,6 @@ describe('central product locale catalog', () => {
   });
   it('preserves network, asset, protocol and technical values across languages', () => {
     for (const value of ['USDC', 'WETH', 'SOL', 'Base', 'Ethereum Mainnet', 'Arbitrum One', 'Solana mainnet-beta', 'Uniswap V3', 'Jupiter', '0x' + 'a'.repeat(40), '0x' + 'b'.repeat(64), 'eip155:8453', 'multicall(exactInputSingle)']) expect(translate('PT', value)).toBe(value);
-    expect(translate('PT', 'Source amount ({0})', 'USDC')).toBe('Montante de origem (USDC)');
+    expect(translate('PT', 'Source amount ({0})', 'USDC')).toBe('Valor de origem (USDC)');
   });
 });

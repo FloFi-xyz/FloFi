@@ -16,14 +16,14 @@ export const portugueseBridgeLiveFix: Readonly<Record<string, string>> = {
   'Another transaction from this wallet took the next transaction slot (nonce), so nothing was sent. Review it again.':
     'Outra transação desta carteira ocupou o próximo número de transação (nonce), então nada foi enviado. Revise de novo.',
   'The workflow or its reviewed transaction changed before your wallet was asked, so nothing was sent. Review it again.':
-    'O workflow ou a transação revisada mudou antes do pedido à carteira, então nada foi enviado. Revise de novo.',
+    'O fluxo ou a transação revisada mudou antes do pedido à carteira, então nada foi enviado. Revise de novo.',
   'Your wallet connection changed, so nothing was sent. Reconnect the reviewed wallet and review again.':
     'A conexão da sua carteira mudou, então nada foi enviado. Reconecte a carteira revisada e revise de novo.',
   'Your wallet did not authorize FloFi for this account. Reconnect the wallet, then try again.':
     'A sua carteira não autorizou a FloFi para esta conta. Reconecte a carteira e tente de novo.',
   'This wallet cannot send this kind of request. Use another wallet, then try again.': 'Esta carteira não consegue enviar este tipo de pedido. Use outra carteira e tente de novo.',
-  'Another request for this workflow is still in progress.': 'Outro pedido deste workflow ainda está em andamento.',
-  'Check this workflow\'s simulation before execution.': 'Confira a simulação deste workflow antes da execução.',
+  'Another request for this workflow is still in progress.': 'Outro pedido deste fluxo ainda está em andamento.',
+  'Check this workflow\'s simulation before execution.': 'Confira a simulação deste fluxo antes da execução.',
   'Execution is unavailable for this route.': 'A execução não está disponível para esta rota.',
   'Destination delivery': 'Entrega no destino',
   // The compact financial Review.
@@ -33,7 +33,7 @@ export const portugueseBridgeLiveFix: Readonly<Record<string, string>> = {
   'None beyond the amount sent': 'Nenhum além do valor enviado', 'Quote expiry': 'Validade da cotação', 'Total additional payable costs': 'Total de custos adicionais a pagar',
   'Fee breakdown': 'Detalhamento das taxas', 'Not charged': 'Não cobrada', 'Cost lines FloFi cannot classify': 'Linhas de custo que a FloFi não consegue classificar',
   "FloFi's 0.1% fee per completed workflow is not collected on-chain, and this route records no fee obligation yet.":
-    'A taxa de 0,1% da FloFi por workflow concluído não é cobrada on-chain, e esta rota ainda não registra obrigação de taxa.',
+    'A taxa de 0,1% da FloFi por fluxo concluído não é cobrada on-chain, e esta rota ainda não registra obrigação de taxa.',
   'Pool fee': 'Taxa do pool', 'Uniswap v3 fee tier, already reflected in the quoted output.': 'Faixa de taxa do Uniswap v3, já refletida no valor cotado.',
   "Ceiling for the token approval request; the swap's own network fee is checked after the approval confirms.":
     'Teto para o pedido de aprovação do token; a taxa de rede da troca é verificada depois que a aprovação for confirmada.',
@@ -52,9 +52,9 @@ export const portugueseBridgeLiveFix: Readonly<Record<string, string>> = {
   // The FloFi Assistant.
   'FloFi Assistant': 'FloFi Assistant',
   'Hi FloFier! Describe an action in your own words, change a step, or ask about this workflow. Then simulate, review, and execute with your wallet.':
-    'Olá, FloFier! Descreva uma ação com suas palavras, altere uma etapa ou tire dúvidas sobre seu workflow. Depois simule, revise e execute com sua carteira.',
+    'Olá, FloFier! Descreva uma ação com suas palavras, altere uma etapa ou tire dúvidas sobre seu fluxo. Depois simule, revise e execute com sua carteira.',
   'Hi FloFier! Describe an action in your own words, change a step, or ask about this workflow. Then simulate, review, and execute with your wallet. Replay mode: recorded answers, no AI model.':
-    'Olá, FloFier! Descreva uma ação com suas palavras, altere uma etapa ou tire dúvidas sobre seu workflow. Depois simule, revise e execute com sua carteira. Modo replay: respostas gravadas, sem modelo de IA.',
+    'Olá, FloFier! Descreva uma ação com suas palavras, altere uma etapa ou tire dúvidas sobre seu fluxo. Depois simule, revise e execute com sua carteira. Modo replay: respostas gravadas, sem modelo de IA.',
   'Hi FloFier! Describe an action as an exact command, for example “swap 0.001 ETH to USDC on Base”. Then simulate, review, and execute with your wallet.':
     'Olá, FloFier! Descreva uma ação como um comando exato, por exemplo “swap 0.001 ETH to USDC on Base”. Depois simule, revise e execute com sua carteira.',
 };

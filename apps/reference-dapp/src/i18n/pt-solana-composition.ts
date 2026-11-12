@@ -75,5 +75,5 @@ export const portugueseSolanaComposition: Readonly<Record<string, string>> = {
     'Esta aba não guarda mais a chave única da posição (por exemplo, após recarregar). Prepare a posição novamente; nada foi enviado.',
   'Execution is not enabled on this server. Simulation and Review remain available.': 'A execução não está habilitada neste servidor. Simulação e revisão continuam disponíveis.',
   'These steps cannot execute together. Only a Solana Devnet swap linked to an Orca position can; other Solana steps run one at a time.':
-    'Estes passos não podem executar juntos. Só um swap na Solana Devnet ligado a uma posição Orca pode; os outros passos Solana executam um de cada vez.',
+    'Estes passos não podem executar juntos. Só um swap na Solana Devnet conectado a uma posição Orca pode; os outros passos Solana executam um de cada vez.',
 };

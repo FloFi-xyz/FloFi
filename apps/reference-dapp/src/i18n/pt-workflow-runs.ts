@@ -57,7 +57,7 @@ export const portugueseWorkflowRuns: Readonly<Record<string, string>> = {
   'Partially completed: the reconciled steps stay done and their funds rest in your wallet. The step that stopped shows what happened to it.':
     'Parcialmente concluído: as etapas reconciliadas ficam feitas e os seus fundos ficam na sua carteira. A etapa que parou mostra o que aconteceu com ela.',
   'Revoke workflow authorization': 'Revogar autorização do fluxo',
-  'Revocation stops future delegated steps. Submitted transactions keep being observed.': 'A revogação impede etapas delegadas futuras. As transações enviadas continuam a ser observadas.',
+  'Revocation stops future delegated steps. Submitted transactions keep being observed.': 'A revogação impede etapas delegadas futuras. As transações enviadas continuam sendo observadas.',
   'Try this step again': 'Tentar esta etapa de novo', 'End workflow': 'Encerrar fluxo',
   // Review fix R5: a halted run the server would not resume (its window passed, a step that may have reached the chain, a delegated run).
   'This step cannot be tried again in this workflow: end it, and start a new workflow for anything left to do.':
@@ -72,5 +72,5 @@ export const portugueseWorkflowRuns: Readonly<Record<string, string>> = {
   'A dependent step spends what an earlier step actually delivered (after reconciliation), capped by its own amount.':
     'Uma etapa dependente gasta o que uma etapa anterior realmente entregou (após a reconciliação), limitado ao seu próprio valor.',
   'One authorization is not one transaction: every step still submits its own transactions and pays its own network fees.':
-    'Uma autorização não é uma transação: cada etapa continua a enviar as suas próprias transações e a pagar as suas próprias taxas de rede.',
+    'Uma autorização não é uma transação: cada etapa continua enviando as suas próprias transações e a pagar as suas próprias taxas de rede.',
 };

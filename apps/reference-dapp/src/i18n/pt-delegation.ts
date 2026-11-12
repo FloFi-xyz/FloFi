@@ -2,7 +2,7 @@
 /** BUILD-AUTOMATION-002: delegated execution — "Automatic within limits", Passkeys, execution Credentials and the authorization review. */
 export const portugueseDelegation: Readonly<Record<string, string>> = {
   // Canvas "Automate this workflow" and chat (BUILD-AUTOMATION-002 × PR #77)
-  'Automate this workflow': 'Automatizar este fluxo', 'From your Canvas: {0}': 'Do seu Canvas: {0}', 'Reading your Canvas workflow…': 'A ler o fluxo do seu Canvas…',
+  'Automate this workflow': 'Automatizar este fluxo', 'From your Canvas: {0}': 'Do seu Canvas: {0}', 'Reading your Canvas workflow…': 'Lendo o fluxo do seu Canvas…',
   'Nothing was created.': 'Nada foi criado.', 'Use a new workflow instead': 'Usar antes um fluxo novo',
   'Ask every time runs one-step workflows. This workflow has {0} steps, so it can only run automatically within limits.':
     'Perguntar sempre executa fluxos de um só passo. Este fluxo tem {0} passos, por isso só pode correr automaticamente dentro dos limites.',
@@ -30,7 +30,7 @@ export const portugueseDelegation: Readonly<Record<string, string>> = {
   'By your wallets\' on-chain delegation (FloFi cannot exceed it even if compromised):': 'Pela delegação on-chain das suas carteiras (o FloFi não a pode exceder, mesmo se comprometido):',
   'By FloFi before every execution:': 'Pelo FloFi antes de cada execução:',
   'Wallet setup: {0} Credential(s) already enrolled — no new wallet signature is needed. You sign this authorization once, with your passkey.':
-    'Configuração das carteiras: {0} Credencial(is) já registada(s) — não é precisa nova assinatura da carteira. Assina esta autorização uma só vez, com a sua chave de acesso.',
+    'Configuração das carteiras: {0} Credencial(is) já registrada(s) — não é precisa nova assinatura da carteira. Assina esta autorização uma só vez, com a sua chave de acesso.',
   'Revoke it at any time with “Revoke authorization”: FloFi stops at once.': 'Revogue-a a qualquer momento com “Revogar autorização”: o FloFi para de imediato.',
   'Authorize with passkey': 'Autorizar com chave de acesso',
   'Authorized. FloFi may now execute this automation within your limits without asking you again.': 'Autorizada. O FloFi pode agora executar esta automação dentro dos seus limites sem voltar a perguntar-lhe.',
@@ -39,22 +39,22 @@ export const portugueseDelegation: Readonly<Record<string, string>> = {
   'total number of calls': 'número total de chamadas', 'no native value': 'sem valor nativo', 'target contracts': 'contratos de destino', 'function selectors': 'seletores de função',
   'swap recipient = your wallet': 'destinatário da troca = a sua carteira', 'input and output tokens': 'tokens de entrada e de saída', 'approval spender': 'gastador da aprovação',
   'maximum input per call': 'entrada máxima por chamada', 'period budgets': 'orçamentos por período', 'executions per period': 'execuções por período', 'cooldown': 'intervalo de espera',
-  'slippage cap (beyond the signed minimum output)': 'limite de desvio (além da saída mínima assinada)', 'exact workflow hash': 'hash exato do fluxo', 'approval amount': 'montante da aprovação',
+  'slippage cap (beyond the signed minimum output)': 'limite de desvio (além da saída mínima assinada)', 'exact workflow hash': 'hash exato do fluxo', 'approval amount': 'valor da aprovação',
   'fee ceiling': 'teto de comissões', 'delegate = this credential\'s session key': 'delegado = a chave de sessão desta credencial',
-  'total delegated amount per token account': 'montante total delegado por conta de token', 'recipient': 'destinatário', 'program': 'programa', 'slippage': 'desvio', 'expiry': 'validade',
+  'total delegated amount per token account': 'valor total delegado por conta de token', 'recipient': 'destinatário', 'program': 'programa', 'slippage': 'desvio', 'expiry': 'validade',
   // Creating an automatic workflow
   'Automatic workflow': 'Fluxo automático', 'Create an automatic workflow': 'Criar um fluxo automático',
   'Execution: Automatic within limits — FloFi executes each occurrence without asking you again, inside the limits you sign once.':
     'Execução: Automático dentro dos limites — o FloFi executa cada ocorrência sem voltar a perguntar-lhe, dentro dos limites que assina uma vez.',
   'Frequency': 'Frequência', 'Weekly': 'Semanal', 'Daily': 'Diária', 'Workflow steps': 'Passos do fluxo', 'Step {0}': 'Passo {0}', 'Step {0} network': 'Rede do passo {0}',
-  'Step {0} side': 'Sentido do passo {0}', 'Step {0} amount': 'Montante do passo {0}', 'Amount spent': 'Montante gasto', 'Add a step': 'Adicionar um passo',
+  'Step {0} side': 'Sentido do passo {0}', 'Step {0} amount': 'Valor do passo {0}', 'Amount spent': 'Valor gasto', 'Add a step': 'Adicionar um passo',
   'Executions per week': 'Execuções por semana', 'Check credentials and limits': 'Verificar credenciais e limites', 'Authority check': 'Verificação da autoridade',
   'covered by your Credential for wallet {0}': 'coberto pela sua Credencial da carteira {0}', 'not covered: {0}': 'não coberto: {0}',
   'Enroll the missing Credentials in Credentials, then check again. Nothing was created.': 'Registe as Credenciais em falta em Credenciais e verifique de novo. Nada foi criado.',
-  'Limits per asset': 'Limites por ativo', 'Create and review authorization': 'Criar e rever a autorização',
+  'Limits per asset': 'Limites por ativo', 'Create and review authorization': 'Criar e revisar a autorização',
   'Created. Review the authorization and sign it with your passkey.': 'Criada. Reveja a autorização e assine-a com a sua chave de acesso.',
   // Why a step is not covered
-  'no enrolled Credential for this network': 'não há Credencial registada para esta rede', 'the Credential\'s per-call cap is too low': 'o limite por chamada da Credencial é demasiado baixo',
+  'no enrolled Credential for this network': 'não há Credencial registrada para esta rede', 'the Credential\'s per-call cap is too low': 'o limite por chamada da Credencial é demasiado baixo',
   'the Credential does not cover this token pair': 'a Credencial não cobre este par de tokens', 'the Credential does not cover this protocol': 'a Credencial não cobre este protocolo',
   'the Credential expired': 'a Credencial expirou', 'the Credential was revoked': 'a Credencial foi revogada', 'the Credential could not be verified on-chain': 'não foi possível verificar a Credencial on-chain',
   'the Credential\'s wallet signature is still pending': 'a assinatura da carteira da Credencial ainda está pendente', 'the Credential has no calls left': 'a Credencial já não tem chamadas disponíveis',
@@ -65,22 +65,22 @@ export const portugueseDelegation: Readonly<Record<string, string>> = {
   // Your automatic workflows
   'No automatic workflows yet.': 'Ainda não há fluxos automáticos.', 'Automatic workflow {0}': 'Fluxo automático {0}', 'Execution: Automatic within limits': 'Execução: Automático dentro dos limites',
   'Budget': 'Orçamento', 'Period': 'Período', 'Spent': 'Gasto', 'Reserved': 'Reservado', 'Remaining': 'Restante', 'signed {0}': 'assinada a {0}', 'revoked {0}': 'revogada a {0}',
-  'evidence {0}': 'evidência {0}', 'Credential {0}, grant {1}': 'Credencial {0}, concessão {1}', 'Review and sign': 'Rever e assinar', 'Revoke authorization': 'Revogar autorização',
+  'evidence {0}': 'evidência {0}', 'Credential {0}, grant {1}': 'Credencial {0}, concessão {1}', 'Review and sign': 'Revisar e assinar', 'Revoke authorization': 'Revogar autorização',
   'Re-authorize': 'Voltar a autorizar', 'Authorization revoked. FloFi will not execute this workflow again.': 'Autorização revogada. O FloFi não volta a executar este fluxo.',
   'Resumed. FloFi re-checks every limit before continuing.': 'Retomada. O FloFi volta a verificar todos os limites antes de continuar.',
   // Authorization and execution states
-  'Waiting for your signature': 'À espera da sua assinatura', 'Revoked': 'Revogada', 'Queued': 'Em fila', 'Authority verified': 'Autoridade verificada', 'Budget reserved': 'Orçamento reservado',
+  'Waiting for your signature': 'Aguardando sua assinatura', 'Revoked': 'Revogada', 'Queued': 'Em fila', 'Authority verified': 'Autoridade verificada', 'Budget reserved': 'Orçamento reservado',
   'Executing': 'Em execução', 'Settled': 'Liquidada', 'Blocked — nothing was executed': 'Bloqueada — nada foi executado', 'Outcome being confirmed': 'Resultado em confirmação',
   'Halted — needs your attention': 'Interrompida — precisa da sua atenção', 'Failed — reconciled': 'Falhou — reconciliada', 'Simulated': 'Simulada', 'Within limits': 'Dentro dos limites',
-  'Prepared': 'Preparada', 'Submitted': 'Submetida', 'Reverted': 'Revertida', 'Waiting for your wallet': 'À espera da sua carteira', 'Revocation requested': 'Revogação pedida',
+  'Prepared': 'Preparada', 'Submitted': 'Submetida', 'Reverted': 'Revertida', 'Waiting for your wallet': 'Aguardando sua carteira', 'Revocation requested': 'Revogação pedida',
   'Unverified': 'Por verificar',
   // Errors
   'Automatic execution is not enabled on this deployment.': 'A execução automática não está ativa neste ambiente.',
   'Automatic execution needs a secure signing service this deployment does not have yet.': 'A execução automática precisa de um serviço de assinatura seguro que este ambiente ainda não tem.',
-  'A step of this workflow has no enrolled Credential that can execute it automatically.': 'Um passo deste fluxo não tem uma Credencial registada que o possa executar automaticamente.',
+  'A step of this workflow has no enrolled Credential that can execute it automatically.': 'Um passo deste fluxo não tem uma Credencial registrada que o possa executar automaticamente.',
   'Register a passkey first.': 'Registe primeiro uma chave de acesso.', 'The passkey request was cancelled. Nothing was authorized.': 'O pedido da chave de acesso foi cancelado. Nada foi autorizado.',
   'This browser cannot use passkeys.': 'Este navegador não consegue usar chaves de acesso.',
-  'Sign in with your wallet again (within the last 15 minutes) to register a passkey.': 'Inicie sessão de novo com a sua carteira (nos últimos 15 minutos) para registar uma chave de acesso.',
+  'Sign in with your wallet again (within the last 15 minutes) to register a passkey.': 'Inicie sessão de novo com a sua carteira (nos últimos 15 minutos) para registrar uma chave de acesso.',
   'The Credentials of this workflow are bound to different passkeys. Re-enroll them with one passkey.': 'As Credenciais deste fluxo estão associadas a chaves de acesso diferentes. Volte a registá-las com uma só chave de acesso.',
   'A per-execution limit is below what one execution spends.': 'Um limite por execução é inferior ao que uma execução gasta.', 'A budget is below what one execution spends.': 'Um orçamento é inferior ao que uma execução gasta.',
   'Every spent asset needs a cumulative budget.': 'Cada ativo gasto precisa de um orçamento acumulado.', 'Set a limit for every asset the workflow spends.': 'Defina um limite para cada ativo que o fluxo gasta.',
@@ -97,19 +97,19 @@ export const portugueseDelegation: Readonly<Record<string, string>> = {
   'Your wallet changed after this review opened, so it was closed. Nothing was authorized. Open the review again from your automatic workflows.':
     'A sua carteira mudou depois de esta revisão abrir, por isso foi fechada. Nada foi autorizado. Abra a revisão de novo a partir dos seus fluxos automáticos.',
   'Switch your wallet to the account of this Credential, then try again.': 'Mude a sua carteira para a conta desta Credencial e tente de novo.',
-  'Connect the Solana wallet of this Credential (the one you proved), then try again.': 'Ligue a carteira Solana desta Credencial (a que provou) e tente de novo.',
+  'Connect the Solana wallet of this Credential (the one you proved), then try again.': 'Conecte a carteira Solana desta Credencial (a que provou) e tente de novo.',
   // Passkeys
   'This device': 'Este dispositivo', 'Passkey': 'Chave de acesso', 'Passkey added.': 'Chave de acesso adicionada.', 'Add a passkey': 'Adicionar uma chave de acesso',
   'Passkey name': 'Nome da chave de acesso', 'Passkey {0}': 'Chave de acesso {0}', 'Passkey revoked.': 'Chave de acesso revogada.', 'Revoke': 'Revogar', 'added {0}': 'adicionada a {0}',
   'A passkey is how you authorize automatic workflows: once per workflow, on this device.': 'Uma chave de acesso é a forma de autorizar fluxos automáticos: uma vez por fluxo, neste dispositivo.',
   'A passkey is how you authorize automatic workflows: once per workflow, with this device. It is never a wallet key and never moves funds by itself.':
     'Uma chave de acesso é a forma de autorizar fluxos automáticos: uma vez por fluxo, com este dispositivo. Nunca é uma chave de carteira e nunca move fundos por si só.',
-  'Verify wallet ownership to manage passkeys.': 'Verifique a titularidade da carteira para gerir chaves de acesso.',
+  'Verify wallet ownership to manage passkeys.': 'Verifique a titularidade da carteira para gerenciar chaves de acesso.',
   // Execution Credentials
   'Automatic execution': 'Execução automática',
   'Enroll a wallet once to let FloFi execute workflows you authorize, inside the limits it signs here. Each enrollment is one wallet signature per network; workflows never ask the wallet again.':
-    'Registe uma carteira uma vez para permitir que o FloFi execute os fluxos que autorizar, dentro dos limites que ela assina aqui. Cada registo é uma assinatura da carteira por rede; os fluxos nunca voltam a pedir a carteira.',
-  'Verify wallet ownership to manage automatic execution.': 'Verifique a titularidade da carteira para gerir a execução automática.',
+    'Registe uma carteira uma vez para permitir que o FloFi execute os fluxos que autorizar, dentro dos limites que ela assina aqui. Cada registro é uma assinatura da carteira por rede; os fluxos nunca voltam a pedir a carteira.',
+  'Verify wallet ownership to manage automatic execution.': 'Verifique a titularidade da carteira para gerenciar a execução automática.',
   'Register a passkey first (Passkeys). Every Credential is bound to the passkey that will authorize your workflows.':
     'Registe primeiro uma chave de acesso (Chaves de acesso). Cada Credencial fica associada à chave de acesso que vai autorizar os seus fluxos.',
   'Credential {0} on {1}': 'Credencial {0} na {1}', 'MetaMask delegation (ERC-7710)': 'Delegação MetaMask (ERC-7710)', 'SPL token delegation': 'Delegação de token SPL',
@@ -122,10 +122,10 @@ export const portugueseDelegation: Readonly<Record<string, string>> = {
   'FloFi stopped using this Credential. Now confirm the on-chain revocation in your wallet.': 'O FloFi deixou de usar esta Credencial. Confirme agora a revogação on-chain na sua carteira.',
   'Revocation submitted by your wallet and checked on-chain.': 'Revogação submetida pela sua carteira e verificada on-chain.',
   'Revoke credential': 'Revogar credencial', 'Revoke on-chain with your wallet': 'Revogar on-chain com a sua carteira',
-  'Credential enrolled: this wallet can now serve automatic workflows within its limits.': 'Credencial registada: esta carteira pode agora servir fluxos automáticos dentro dos seus limites.',
-  'Credential enrolled.': 'Credencial registada.', 'Enroll a wallet for automatic execution': 'Registar uma carteira para execução automática', 'Credential network': 'Rede da credencial',
+  'Credential enrolled: this wallet can now serve automatic workflows within its limits.': 'Credencial registrada: esta carteira pode agora servir fluxos automáticos dentro dos seus limites.',
+  'Credential enrolled.': 'Credencial registrada.', 'Enroll a wallet for automatic execution': 'Registrar uma carteira para execução automática', 'Credential network': 'Rede da credencial',
   // BUILD-FLOFI-SINGLE-AUTH-WORKFLOW-UX-001
   'Aave V3 for this wallet only: supply {0}; variable-rate borrow {1} (on-chain ceiling per call: {2})': 'Aave V3 apenas para esta carteira: fornecer {0}; empréstimo a taxa variável {1} (teto on-chain por chamada: {2})',
   'Delegated devUSDC (total)': 'devUSDC delegado (total)', 'Delegated devUSDC': 'devUSDC delegado', 'USDC per call (max)': 'USDC por chamada (máx.)', 'USDC per call': 'USDC por chamada',
-  'Number of calls': 'Número de chamadas', 'Credential expires on': 'A credencial expira a', 'Enroll with my wallet': 'Registar com a minha carteira',
+  'Number of calls': 'Número de chamadas', 'Credential expires on': 'A credencial expira a', 'Enroll with my wallet': 'Registrar com a minha carteira',
 };
