@@ -2,7 +2,7 @@
 'use client';
 import { useEffect, useId, useRef, useState, type KeyboardEvent } from 'react';
 import { useRouter } from 'next/navigation';
-import { LANGUAGE_KEY, parseLanguage, useLocale } from '../../i18n/locale';
+import { useLocale } from '../../i18n/locale';
 import styles from './flight.module.css';
 
 type Language = 'EN' | 'PT';
@@ -15,11 +15,8 @@ export function LanguageSwitch({ language, label, upwards = false }: { language:
   const root = useRef<HTMLDivElement>(null), trigger = useRef<HTMLButtonElement>(null), category = useRef<HTMLButtonElement>(null);
   const options = useRef<Array<HTMLButtonElement | null>>([]);
   const id = useId();
-  useEffect(() => {
-    let saved: Language | null = null;
-    try { saved = parseLanguage(localStorage.getItem(LANGUAGE_KEY)); } catch { /* Optional preference storage. */ }
-    if (saved && saved !== language) { setLanguage(saved); router.refresh(); }
-  }, []); // Restore a surviving preference on arrival, as on the main site.
+  // P0 hotfix (locale contract): no restore-on-arrival. The server already rendered the cookie's language; a stored value never flips the page
+  // after load (a legacy one is migrated before the first paint by the root layout).
   function close(restoreFocus = false) {
     setOpen(false); setExpanded(false);
     if (restoreFocus) trigger.current?.focus();

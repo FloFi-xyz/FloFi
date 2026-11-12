@@ -2,7 +2,7 @@
 'use client';
 import { useEffect, useId, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { LANGUAGE_KEY, parseLanguage, useLocale } from '../../i18n/locale';
+import { useLocale } from '../../i18n/locale';
 import type { SiteLanguage } from './site-language';
 import styles from './site.module.css';
 
@@ -20,12 +20,8 @@ export function SitePreferences({ language, labels }: { language: SiteLanguage; 
   const menuId = useId();
   const root = useRef<HTMLDivElement>(null);
   const button = useRef<HTMLButtonElement>(null);
-  // A preference kept only in storage (its cookie expired or was cleared) is the one /app restores: the page follows it instead of the default.
-  useEffect(() => {
-    let saved: SiteLanguage | null = null;
-    try { saved = parseLanguage(localStorage.getItem(LANGUAGE_KEY)); } catch { /* Optional preference storage. */ }
-    if (saved && saved !== language) { setLanguage(saved); router.refresh(); }
-  }, []); // Only on arrival: later changes go through `choose`.
+  // P0 hotfix (locale contract): no restore-on-arrival flip. A preference kept only in storage (its cookie expired or was cleared) is migrated
+  // before the first paint by the root layout's script, so the server already renders it; a stored value never overrides the cookie.
   useEffect(() => {
     if (!open) return;
     const outside = (event: PointerEvent) => { if (event.target instanceof Node && !root.current?.contains(event.target)) setOpen(false); };

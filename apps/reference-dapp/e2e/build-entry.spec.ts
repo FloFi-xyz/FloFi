@@ -12,6 +12,7 @@
 import type { Page } from '@playwright/test';
 import { test, expect, readWorkflowIr } from './fixtures';
 import { continueToBuilder, editorSteps, expectChatSection, expectEditorSection, navigationDrawer, navigationLink, navigationTrigger, openChat, openEditorSection, openNavigation } from './build-entry-navigation';
+import { chooseLanguage } from './app-origin';
 
 /** The drawer's first three items: New workflow (Chat), Editor, Dashboard. */
 const primaryItems = (page: Page) => navigationDrawer(page).getByRole('link').filter({ hasNotText: /Your workflows|Automations|Credentials|Agents|Passkeys|Seus fluxos|Automações|Credenciais|Agentes|Chaves de acesso/ });
@@ -210,7 +211,9 @@ test('Build manually opens Build 1 directly, and the stages keep working from th
 });
 
 test('Portuguese, dark theme and phone widths keep the composition', async ({ page, networkGuard }) => {
-  await page.addInitScript(() => { if (!localStorage.getItem('flofi.language')) localStorage.setItem('flofi.language', 'PT'); localStorage.setItem('flofi.theme', 'dark'); });
+  // P0 hotfix (locale contract): the language cookie is authoritative (storage alone no longer overrides the suite's English cookie).
+  await chooseLanguage(page.context(), 'PT');
+  await page.addInitScript(() => { localStorage.setItem('flofi.theme', 'dark'); });
   await page.setViewportSize({ width: 1240, height: 871 });
   await open(page);
   await expect(page.getByRole('heading', { level: 1 })).toHaveText('O que você quer fazer?');
@@ -222,7 +225,7 @@ test('Portuguese, dark theme and phone widths keep the composition', async ({ pa
   await expect(create(page)).toHaveText('Criar fluxo');
   await expect(entry(page).getByRole('group', { name: 'Exemplos de pedidos' }).getByRole('button')).toHaveText(['Trocar moedas', 'Render juros', 'Prover liquidez', 'Usar como garantia', 'Fluxo com vários passos']);
   await page.screenshot({ path: '.tmp/build0-desktop-dark-pt.png' });
-  await page.evaluate(() => { localStorage.setItem('flofi.language', 'EN'); });
+  await chooseLanguage(page.context(), 'EN');
   await page.reload();
   await expect(page.getByRole('heading', { level: 1 })).toHaveText('What do you want to do?');
   await page.screenshot({ path: '.tmp/build0-desktop-dark.png' });

@@ -5,10 +5,10 @@
  * (`/onboarding/wallets/import/*`) isolated from the workflow application (BUILD-FLOFI-PRIVY-UX-001).
  */
 import type { ReactNode } from 'react';
-import { cookies, headers } from 'next/headers';
+import { headers } from 'next/headers';
 import { connection } from 'next/server';
 import { LocaleProvider } from '../../i18n/locale';
-import { DEFAULT_LANGUAGE, LANGUAGE_COOKIE, parseLanguage } from '../../i18n/language';
+import { requestLanguage } from '../../server/request-language';
 import { THEME_BOOTSTRAP } from '../../accounts/account-theme';
 import { FloFiPrivyProvider } from '../../accounts/privy-client';
 import { privyBrowserConfig } from '../../accounts/privy-server';
@@ -17,10 +17,9 @@ import '../globals.css';
 
 export default async function AccountLayout({ children }: { children: ReactNode }) {
   await connection();
-  const jar = await cookies();
   // The proxy's per-request nonce (src/accounts/account-csp.ts): the only inline script these pages run besides Next.js's own.
   const nonce = (await headers()).get('x-nonce') ?? undefined;
-  return <LocaleProvider initialLanguage={parseLanguage(jar.get(LANGUAGE_COOKIE)?.value) ?? DEFAULT_LANGUAGE}>
+  return <LocaleProvider initialLanguage={(await requestLanguage()).language}>
     <script nonce={nonce} dangerouslySetInnerHTML={{ __html: THEME_BOOTSTRAP }}/>
     <SessionGuard/>
     {/* BUILD-FLOFI-PRIVY-UX-001: sign-in, wallet creation and import run through Privy (public app settings only; never a secret). */}

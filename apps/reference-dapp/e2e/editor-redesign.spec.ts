@@ -9,6 +9,7 @@
  */
 import { test, expect, sendChatCommand, readWorkflowIr } from './fixtures';
 import { openBuilder, editorSectionAction, editorSteps, expectEditorSection, navigationDrawer, navigationLink, openNavigation } from './build-entry-navigation';
+import { chooseLanguage } from './app-origin';
 
 test('the stepper opens the Editor sections in order, marks only where the owner is, and keeps the global navigation', async ({ page }) => {
   await openBuilder(page);
@@ -94,7 +95,8 @@ test('header, cards, FloFi summary and footer state only the real workflow; Show
 });
 
 test('Portuguese and phone widths: the same truthful labels, no horizontal overflow, 44 px tools by default on a phone', async ({ page }) => {
-  await page.addInitScript(() => localStorage.setItem('flofi.language', 'PT'));
+  // P0 hotfix (locale contract): the language cookie is authoritative (storage alone no longer overrides the suite's English cookie).
+  await chooseLanguage(page.context(), 'PT');
   for (const width of [390, 320]) {
     await page.setViewportSize({ width, height: 844 });
     await openBuilder(page);

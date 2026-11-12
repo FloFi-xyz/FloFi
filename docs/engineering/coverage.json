@@ -4141,7 +4141,8 @@
         "apps/reference-dapp/src/i18n/pt-wallets.ts",
         "apps/reference-dapp/src/i18n/pt-workflow-execution.ts",
         "apps/reference-dapp/src/i18n/pt-workflow-runs.ts",
-        "apps/reference-dapp/src/i18n/pt.ts"
+        "apps/reference-dapp/src/i18n/pt.ts",
+        "apps/reference-dapp/src/server/request-language.ts"
       ],
       "suites": [
         "app.e2e.canvas-keyboard",

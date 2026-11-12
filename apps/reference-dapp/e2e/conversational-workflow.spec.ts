@@ -11,6 +11,7 @@ import { test, expect, readWorkflowIr } from './fixtures';
 import { installJourneyWallet, walletRequests } from './journey-fixtures';
 import { createTestWallet } from '../../../packages/reference-reconciler/test/test-wallet';
 import { expectEditorSection, openBuilder, openEditorSection } from './build-entry-navigation';
+import { chooseLanguage } from './app-origin';
 
 test.skip(process.env.FLOFI_SWAP_EXECUTION_E2E !== 'MOCKED_LOOPBACK_ONLY', 'Requires the opt-in loopback swap execution harness');
 test.setTimeout(120_000);
@@ -56,7 +57,8 @@ async function setup(page: Page, request: APIRequestContext, options: { decline?
     window.addEventListener('eip6963:requestProvider', () => window.dispatchEvent(new CustomEvent('eip6963:announceProvider', {
       detail: { provider: w.ethereum, info: { rdns: 'io.metamask', name: 'MetaMask', uuid: 'conversational-metamask' } } })));
   });
-  if (options.language) await page.addInitScript(language => localStorage.setItem('flofi.language', language), options.language);
+  // P0 hotfix (locale contract): the language cookie is authoritative (storage alone no longer overrides the suite's English cookie).
+  if (options.language) await chooseLanguage(page.context(), options.language);
   if (options.viewport) await page.setViewportSize(options.viewport);
   // BUILD0-UX-001: `entry` keeps the visit on Build 0, where the owner's first request is typed.
   if (options.entry) await page.goto('/app'); else await openBuilder(page);
