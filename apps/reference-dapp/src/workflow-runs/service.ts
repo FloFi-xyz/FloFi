@@ -24,12 +24,13 @@ import type { GrantView } from '../delegation/authority.ts';
 import { authorizationPlan, type AuthorizationPlan, type DelegationFacts } from './authorization-plan.ts';
 import type { RunRecord, RunStepRecord, WorkflowRunStore } from './pg-store.ts';
 import { advanceRun, type RunnerDeps } from './runner.ts';
-import { CONFIRM_RUN_SECONDS, MAYBE_SUBMITTED, WALLET_BATCH_OUTCOME_UNKNOWN } from './state-machine.ts';
+import { stopRunFromCurrent } from './user-funded-pass.ts';
+import { CONFIRM_RUN_SECONDS, MAYBE_SUBMITTED, WALLET_BATCH_OUTCOME_UNKNOWN, walletBatchUnanswered } from './state-machine.ts';
 import { planExecutionGroups, type UserFundedFacts, type WalletProfile } from './execution-groups.ts';
 import { requirementOf, assetKey } from '../delegation/steps.ts';
 import { evmStepBuildable, type AssetAmountFact, type EvmGroupCalls } from '../user-funded/evm-calls.ts';
 import { plannedSteps, type PlannedStep } from '../user-funded/planned.ts';
-import { authorizeGroup, EVM_PREPARED_TTL_MS, prepareGroup, solanaPreparedTtlMs, supersede, type OwnerAnswer, type Prepared } from '../user-funded/groups.ts';
+import { authorizeGroup, EVM_PREPARED_TTL_MS, prepareGroup, solanaPreparedTtlMs, supersede, walletBatchId, type OwnerAnswer, type Prepared } from '../user-funded/groups.ts';
 import { boundStrategy } from '../engine/workflow-bindings';
 import type { GroupRecord } from './pg-store.ts';
 
@@ -237,19 +238,6 @@ async function blockDueGroup(deps: WorkflowRunDeps, run: RunRecord, g: GroupReco
   return refuse(code);
 }
 /**
- * Stops an open run after the caller's own group write won: from the run's CURRENT version (it may have moved while the group was read, e.g. a
- * status poll advanced it), a few attempts, never from a terminal or HALTED run. Null when the run was no longer RUNNING or ATTENTION.
- */
-async function stopRunFromCurrent(deps: WorkflowRunDeps, runId: string, to: 'HALTED' | 'FAILED', code: string): Promise<RunRecord | null> {
-  for (let attempt = 0; attempt < 3; attempt++) {
-    const current = await deps.store.byId(runId);
-    if (!current || !['RUNNING', 'ATTENTION'].includes(current.state)) return null;
-    const moved = await deps.store.transition(runId, { version: current.version, from: ['RUNNING', 'ATTENTION'] }, to, { code });
-    if (moved) return moved;
-  }
-  return null;
-}
-/**
  * The validity a prepared WALLET BATCH must still have to be handed to the owner's wallet again (time to review and confirm it before its
  * on-chain deadline reverts it). With less it is not prepared again until its validity has passed (USER_FUNDED_PREPARED_STILL_VALID): never two
  * live batches of one group. Other preparations are handed out while valid: a Solana group's whole validity is shorter than this, and a user
@@ -389,13 +377,19 @@ export async function prepareUserFundedGroup(deps: WorkflowRunDeps, run: RunReco
 }
 /**
  * The owner's wallet answered for one PREPARED group: a wallet batch id, a user-operation signature, or the signed Solana transactions. Verified
- * against the frozen prepared artifact (signer = the group's fee payer = the run's wallet), then the run advances (submits what is due).
+ * against the frozen prepared artifact (signer = the group's fee payer = the run's wallet), then the run advances (submits what is due). A batch
+ * answered for a group FloFi stopped while that batch was unanswered is refused WALLET_BATCH_ANSWERED_AFTER_STOP and logged (`batchAnsweredAfterStop`).
  */
 export async function authorizeUserFundedGroup(deps: WorkflowRunDeps, run: RunRecord, wallets: readonly WalletRef[], groupIndex: number, answer: OwnerAnswer): Promise<RunRecord> {
   assertRunWallets(run, wallets);
   if (run.mode !== 'USER_FUNDED') refuse('WORKFLOW_RUN_NOT_USER_FUNDED');
   const g = (await deps.store.groups(run.runId))[groupIndex] ?? refuse('WORKFLOW_RUN_GROUP_NOT_FOUND');
   if (answeredOnce(g)) return answeredAgain(deps, run, g, answer);
+  if (stoppedUnanswered(g)) {
+    const verified = authorizeGroup(g.prepared as Prepared, answer, g.feePayer, deps.now());
+    if (!verified.ok) return refuse(verified.code);
+    return batchAnsweredAfterStop(deps, run, g, { batchId: String(verified.value.batchId) });
+  }
   if (g.state !== 'PREPARED') refuse(`WORKFLOW_RUN_GROUP_${g.state}`);
   // A wallet batch's answer arrives AFTER the wallet sent it: refusing a late one would only lose track of a batch already on chain (the chain
   // decides at reconciliation). Every other artifact is still unsigned or unsent here, so its validity window applies.
@@ -439,9 +433,32 @@ function batchAnswerMismatch(deps: WorkflowRunDeps, run: RunRecord, g: GroupReco
   return refuse('WALLET_BATCH_ANSWER_MISMATCH');
 }
 /**
+ * A wallet batch group FloFi already stopped while the batch it handed out was unanswered (`walletBatchUnanswered`): BLOCKED at the run's expiry
+ * or SKIPPED when the run ended, both marked WALLET_BATCH_OUTCOME_UNKNOWN. An answer the owner's browser reports for it now cannot be recorded
+ * (the group is closed: the run stopped, and a skipped group never changes again), yet it says the batch may well have executed.
+ */
+const stoppedUnanswered = (g: GroupRecord) => (g.state === 'BLOCKED' || g.state === 'SKIPPED') && g.code === WALLET_BATCH_OUTCOME_UNKNOWN && walletBatchUnanswered(g);
+/**
+ * The owner's browser answered (a batch id, its transactions, or the wallet's "not sent") for a group stopped while its batch was unanswered:
+ * never dropped silently behind the group's state. Nothing is recorded; the answer is logged (whether its batch id is the one FloFi handed out,
+ * how many transactions it reported) and refused WALLET_BATCH_ANSWERED_AFTER_STOP, so the owner is told the batch may have executed and to check
+ * the wallet's activity.
+ */
+function batchAnsweredAfterStop(deps: WorkflowRunDeps, run: RunRecord, g: GroupRecord,
+  answer: { readonly batchId?: string; readonly hashes?: number; readonly notSent?: boolean }): never {
+  // Every preparation of a group carries the same EIP-5792 id (`walletBatchId`); a group that kept only earlier preparations has no request of its own.
+  const requested = (g.prepared as { request?: { id?: unknown } } | null)?.request?.id;
+  const handedOut = typeof requested === 'string' ? requested : walletBatchId(run.runId, g.groupIndex);
+  deps.log('workflow_run.batch_answer_after_stop', { run: run.runId, group: g.groupIndex, state: g.state,
+    batchIdMatches: answer.batchId === undefined ? null : answer.batchId.toLowerCase() === handedOut.toLowerCase(), hashes: answer.hashes ?? null,
+    notSent: answer.notSent ?? null });
+  return refuse('WALLET_BATCH_ANSWERED_AFTER_STOP');
+}
+/**
  * The owner's browser reports the transactions of a wallet batch (from `wallet_getCallsStatus`): only the hashes are taken; the chain decides.
  * `notSent`: the wallet reported the batch failed OFF chain (EIP-5792 status 400, no receipt): nothing was sent, so the group stops before
- * anything ran (BLOCKED) and the owner decides (end the run, or resume it).
+ * anything ran (BLOCKED) and the owner decides (end the run, or resume it). Either report for a group FloFi stopped while its batch was
+ * unanswered is refused WALLET_BATCH_ANSWERED_AFTER_STOP and logged, never recorded (`batchAnsweredAfterStop`).
  */
 export async function reportUserFundedBatch(deps: WorkflowRunDeps, run: RunRecord, wallets: readonly WalletRef[], groupIndex: number, hashes: readonly string[],
   notSent = false): Promise<RunRecord> {
@@ -450,6 +467,7 @@ export async function reportUserFundedBatch(deps: WorkflowRunDeps, run: RunRecor
   const g = groups[groupIndex] ?? refuse('WORKFLOW_RUN_GROUP_NOT_FOUND');
   if (g.strategy !== 'EVM_WALLET_BATCH') refuse('WORKFLOW_RUN_GROUP_NOT_BATCH');
   if (notSent === true) {
+    if (stoppedUnanswered(g)) return batchAnsweredAfterStop(deps, run, g, { hashes: 0, notSent: true });
     if (g.state !== 'AUTHORIZED') refuse(`WORKFLOW_RUN_GROUP_${g.state}`);
     // Only the report whose write moved exactly the AUTHORIZED group this report read (its row version) stops its steps and the run. A concurrent
     // report of its transactions that won (SUBMITTED: they are on their way and must be reconciled) is never followed by blocked steps and a
@@ -467,6 +485,7 @@ export async function reportUserFundedBatch(deps: WorkflowRunDeps, run: RunRecor
   const used = new Set(groups.filter(x => x.groupIndex !== groupIndex).flatMap(x => (x.submission as { hashes?: string[] } | null)?.hashes ?? []));
   if (hashes.some(h => used.has(h.toLowerCase()))) refuse('EIP5792_RESPONSE_INVALID');
   const reported = hashes.map(h => h.toLowerCase());
+  if (stoppedUnanswered(g)) return batchAnsweredAfterStop(deps, run, g, { hashes: reported.length, notSent: false });
   const current = g.state !== 'AUTHORIZED' ? g : await deps.store.groupTransition(run.runId, groupIndex, ['AUTHORIZED'], 'SUBMITTED', { submission: { kind: 'EVM_WALLET_BATCH',
     batchId: String(g.authorization?.batchId ?? ''), hashes: reported, submittedAt: deps.now().toISOString() } }) ?? (await deps.store.groups(run.runId))[groupIndex]!;
   // A report for a group already answered (a retry, a concurrent report that won, or a group that since FAILED on chain, was BLOCKED because the

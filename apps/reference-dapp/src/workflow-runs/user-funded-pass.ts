@@ -51,6 +51,21 @@ function executedStrategy(composed: WorkflowComposition, index: number, spent: s
   return binding && spent ? boundStrategy(base, BigInt(spent), binding.asset.decimals, binding.inputAsset) : base;
 }
 
+/**
+ * Stops an open run after the caller's own group write won: from the run's CURRENT version (it may have moved while the group was read, e.g. a
+ * status poll advanced it), a few attempts, never from a terminal or HALTED run. Null when the run was no longer RUNNING or ATTENTION.
+ */
+export async function stopRunFromCurrent(deps: { readonly store: Pick<WorkflowRunStore, 'byId' | 'transition'> }, runId: string, to: 'HALTED' | 'FAILED',
+  code: string): Promise<RunRecord | null> {
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const current = await deps.store.byId(runId);
+    if (!current || !['RUNNING', 'ATTENTION'].includes(current.state)) return null;
+    const moved = await deps.store.transition(runId, { version: current.version, from: ['RUNNING', 'ATTENTION'] }, to, { code });
+    if (moved) return moved;
+  }
+  return null;
+}
+
 export async function userFundedPass(deps: UserFundedPassDeps, run: RunRecord): Promise<Pass> {
   if (run.state === 'PENDING' || run.state === 'CANCELLED' || run.state === 'EXPIRED') return settled(run);
   await syncOwnerGroups(deps, run.runId);
@@ -67,13 +82,14 @@ export async function userFundedPass(deps: UserFundedPassDeps, run: RunRecord): 
     // carry WALLET_BATCH_OUTCOME_UNKNOWN, never the bare stop reason, so no surface words them as "not run" or the run as stopped before any
     // step completed; the run itself keeps the reason it stopped (e.g. WORKFLOW_RUN_EXPIRED).
     const unanswered = walletBatchUnanswered(g), marked = unanswered ? WALLET_BATCH_OUTCOME_UNKNOWN : code;
-    // Only the pass whose write blocked the group moves its steps and the run, and only from exactly the state and row version this pass read:
-    // a group that moved on elsewhere meanwhile (an authorization that landed, a concurrent pass that submitted it, its transactions may be on
-    // their way) is never reported blocked, and never leaves a run failed with a send in flight.
+    // Only the pass whose write blocked the group moves its steps and the run, and only from exactly the group state and row version this pass
+    // read: a group that moved on elsewhere meanwhile (an authorization that landed, a concurrent pass that submitted it, its transactions may be
+    // on their way) is never reported blocked, and never leaves a run failed with a send in flight. Once that write won, the run stops from its
+    // CURRENT version (a status poll may have moved it since this pass read it), never left RUNNING behind a blocked group and blocked steps.
     if (!await deps.store.groupTransition(run.runId, g.groupIndex, [g.state], 'BLOCKED', { code: marked }, 'GROUP_STATE', g.version)) return { ...settled(run), progressed: true };
     for (let i = g.stepFrom; i <= g.stepTo; i++) await deps.store.stepTransition(run.runId, i, ['DELEGATED'], 'BLOCKED', { code: marked });
     const partial = steps.some(s => s.stepIndex < g.stepFrom && s.state === 'RECONCILED');
-    const moved = await deps.store.transition(run.runId, { version: run.version, from: ['RUNNING', 'ATTENTION'] }, partial || unanswered ? 'HALTED' : 'FAILED', { code });
+    const moved = await stopRunFromCurrent(deps, run.runId, partial || unanswered ? 'HALTED' : 'FAILED', code);
     deps.log('workflow_run.group_blocked', { run: run.runId, group: g.groupIndex, code, partial, unanswered });
     return moved ? settled(moved) : { ...settled(run), progressed: true };
   };

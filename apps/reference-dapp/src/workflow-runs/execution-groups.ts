@@ -114,19 +114,25 @@ const namespaceOfChain = (chain: string): Namespace => chain.startsWith('solana:
 /** Default buildability: the action is in `USER_FUNDED_BUILDABLE` and spends at most one asset. Callers may narrow it further per step. */
 export const defaultBuildable = (s: StepRequirement): boolean => USER_FUNDED_BUILDABLE[s.namespace].has(s.action) && s.inputs.length <= 1;
 
-/** Consecutive same-chain buildable steps form one candidate group; a bridge closes its group; any other step stands alone. */
-function partition(steps: readonly StepRequirement[], buildable: (s: StepRequirement) => boolean, bindings: WorkflowRequirement['bindings']): StepRequirement[][] {
-  const out: StepRequirement[][] = [];
-  let current: StepRequirement[] = [];
-  const close = () => { if (current.length) out.push(current); current = []; };
+/**
+ * Consecutive same-chain buildable steps form one candidate group; a bridge closes its group; any other step stands alone. `dependent`: the
+ * group was cut from the previous one ONLY because its first step spends an output of that group (a Solana step; see below).
+ */
+function partition(steps: readonly StepRequirement[], buildable: (s: StepRequirement) => boolean,
+  bindings: WorkflowRequirement['bindings']): { readonly members: StepRequirement[]; readonly dependent: boolean }[] {
+  const out: { members: StepRequirement[]; dependent: boolean }[] = [];
+  let current: StepRequirement[] = [], dependent = false;
+  const close = () => { if (current.length) out.push({ members: current, dependent }); current = []; dependent = false; };
   for (const step of steps) {
     const last = current.at(-1);
     // Solana: every transaction of a sign-all group is simulated before the owner signs, so a step that spends the output of an earlier step
     // of the same group (not yet on chain) starts a group of its own. EVM groups keep it: the batch enforces the producer's signed minimum.
     const dependsInside = step.namespace === 'solana' && bindings.some(b => b.step === step.index && current.some(c => c.index === b.amountFrom));
-    const joinable = last && !dependsInside && buildable(step) && buildable(last) && last.chain === step.chain && last.action !== 'bridge';
+    const sameChainBuildable = last !== undefined && buildable(step) && buildable(last) && last.chain === step.chain && last.action !== 'bridge';
+    const joinable = sameChainBuildable && !dependsInside;
     if (!joinable) close();
     current.push(step);
+    if (sameChainBuildable && dependsInside) dependent = true;
     if (!buildable(step) || step.action === 'bridge') close();
   }
   close();
@@ -160,7 +166,7 @@ export function planExecutionGroups(requirement: WorkflowRequirement, facts: Use
   const bindingOf = (index: number) => requirement.bindings.find(b => b.step === index) ?? null;
   const groups: ExecutionGroup[] = [];
   let stepCursor = 0;
-  for (const members of partition(requirement.steps, buildable, requirement.bindings)) {
+  for (const { members, dependent } of partition(requirement.steps, buildable, requirement.bindings)) {
     const first = members[0]!, chain = first.chain, namespace = namespaceOfChain(chain);
     if (first.index !== stepCursor) return { ok: false, code: 'WORKFLOW_GROUP_ORDER_INVALID' };
     stepCursor = members.at(-1)!.index + 1;
@@ -210,6 +216,9 @@ export function planExecutionGroups(requirement: WorkflowRequirement, facts: Use
         strategy = canSignAll ? 'SOLANA_SIGN_ALL' : 'SOLANA_OWNER_STEP'; signing = 'WHEN_DUE';
       } else strategy = canSignAll ? 'SOLANA_SIGN_ALL' : 'SOLANA_OWNER_STEP';
       if (chainEnabled && allBuildable && !canSignAll) downgrades.push('SOLANA_MULTI_SIGN_UNSUPPORTED');
+      // A sign-all group cut from the previous one because its first step spends an output of that group (not on chain when the owner signs, so
+      // it could not be simulated): signed when that output landed, one more wallet prompt. Owner steps prompt per step anyway: nothing is added.
+      if (dependent && strategy === 'SOLANA_SIGN_ALL') downgrades.push('SOLANA_GROUP_STEP_DEPENDENT');
     }
     const ownerStep = strategy === 'EVM_OWNER_STEP' || strategy === 'SOLANA_OWNER_STEP';
     // An owner step is its flow's own confirmation(s): at least one per step (a token approval may add one more, which the flow shows).

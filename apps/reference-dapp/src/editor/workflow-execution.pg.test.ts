@@ -205,4 +205,24 @@ describe('P0: the Editor reviews and authorizes Swap → Supply → Borrow on Ar
       expect(reviewed).toMatchObject({ ok: true, value: { mode: 'STEP_BY_STEP', reasons: ['WALLET_ATOMIC_BATCH_UNSUPPORTED'], counts: { walletPrompts: 3, atLeast: true } } });
     } finally { await t.drop(); }
   });
+
+  it('as many wallet batches as steps (Arbitrum Swap, then a Base Transfer) is GROUPED, never forced step by step: grouping is never more wallet prompts', async () => {
+    const t = await createTestDatabase();
+    try {
+      const { h, owner } = await setup(t);
+      const BASE = 'eip155:8453';
+      const canvas = canvasWorkflowOfStrategy({ version: 2, steps: [
+        { action: 'swap', network: 'arbitrum-one', inputAsset: 'USDC', outputAsset: 'WETH', amount: '3', slippageBps: 50 },
+        { action: 'transfer', network: 'base', asset: 'USDC', amount: '1', recipient: '0x' + '4'.repeat(40) }] });
+      if (!canvas.ok) throw new Error(canvas.code);
+      const reviewed = await reviewEditorExecution({ workflow: canvas.workflow, owner, profile: { eip155: { wallet: 'INJECTED', atomic: { [CHAIN]: 'supported', [BASE]: 'supported' },
+        typedData: true } }, facts: { ...h.runs.userFundedFacts!, chains: [CHAIN, BASE] }, deps: h.runs.userFunded!, now: h.d.now() });
+      if (!reviewed.ok) throw new Error(reviewed.code);
+      // Two batches for two steps: a tie with confirming each step (at least 2: each flow may add a token approval, which a batch folds in).
+      expect(reviewed.value.groups.map(g => [g.strategy, g.signing, g.steps])).toEqual([['EVM_WALLET_BATCH', 'UPFRONT', [0, 0]], ['EVM_WALLET_BATCH', 'WHEN_DUE', [1, 1]]]);
+      expect(reviewed.value).toMatchObject({ mode: 'GROUPED', refusal: null, counts: { walletPrompts: 2, atLeast: false, networkSwitches: 1 } });
+      // Nothing claims a saving it does not have, and the retired "not fewer" reason is never emitted.
+      expect(reviewed.value.reasons).toEqual([]);
+    } finally { await t.drop(); }
+  });
 });

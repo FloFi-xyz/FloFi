@@ -64,7 +64,7 @@ export async function claimSequential(deps: WorkflowRunSurface, h: HandoffRecord
   if (run.state === 'PENDING' && run.mode === null) {
     const plan = await ownerAuthorizationPlan(deps, run);
     // BUILD-FLOFI-UNIVERSAL-WORKFLOW-002: the run starts at once only when confirming each step is the owner's only real choice (user-funded
-    // groups that would need fewer wallet interactions leave the choice to the owner).
+    // groups with at least one grouped interaction, never more wallet interactions than confirming each step, leave the choice to the owner).
     if (plan.confirmEachStep.available && plan.recommended !== 'USER_FUNDED') run = await startConfirm(deps, run, wallets);
   }
   return proposalOf(deps, run, await currentStep(deps, run, wallets), base);

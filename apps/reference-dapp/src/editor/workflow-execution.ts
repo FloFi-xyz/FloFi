@@ -15,6 +15,7 @@
  */
 import { requirementOf } from '../delegation/steps.ts';
 import { composeWorkflowBound, NETWORKS } from '../engine/strategy-engine.ts';
+import { userFundedPreferred } from '../workflow-runs/authorization-plan.ts';
 import { userFundedBuildable } from '../workflow-runs/service.ts';
 import { planExecutionGroups, type ExecutionGroup, type GroupStrategy, type UserFundedFacts, type WalletProfile } from '../workflow-runs/execution-groups.ts';
 import { prepareGroup, type UserFundedDeps } from '../user-funded/groups.ts';
@@ -147,13 +148,16 @@ export async function reviewEditorExecution(input: { readonly workflow: unknown;
       expected: own?.expected ?? (DELIVERS.has(step.action) && input ? amountOf(input.amount, input) : null), minimum: own?.minimum ?? null,
       recipient: step.action === 'transfer' ? recipientOf(step.strategy as { readonly recipient?: unknown }, step.namespace === 'eip155' ? owner : null) : null };
   });
-  // Grouping is offered only when it asks the wallet fewer times than the steps do (the run's own claim applies the same rule: otherwise it
-  // starts confirming each step, and the grouped Authorize could not start).
-  const fewer = plan.interactions.upfront + plan.interactions.whenDue < req.value.steps.length;
-  const everyGroupBatched = plan.groups.every(g => GROUPED.includes(g.strategy)), allGrouped = everyGroupBatched && fewer;
+  // Grouping is offered under the run's own rule (`userFundedPreferred`, which its claim applies too: otherwise the claim starts confirming each
+  // step, and the grouped Authorize could not start): never more wallet interactions than confirming each step, whose step count is only a lower
+  // bound (a step's own flow may add a token approval; a batch folds approvals in and carries an on-chain expiry). Every group here is a
+  // grouped interaction, so a tie never forces step-by-step. Nothing claims FEWER: the counts are shown as they are.
+  const everyGroupBatched = plan.groups.every(g => GROUPED.includes(g.strategy));
+  const allGrouped = everyGroupBatched && userFundedPreferred(plan.groups, plan.interactions, req.value.steps.length);
   const mode = !allGrouped ? 'STEP_BY_STEP' : plan.interactions.single ? 'ONE_WALLET_CONFIRMATION' : 'GROUPED';
   return { ok: true, value: { workflowHash: converted.workflowHash, stepCount: req.value.steps.length, owner, reviewedAt: input.now.toISOString(), validUntil, mode, groups, steps,
     counts: counts(plan.groups, preparedCalls, plan.interactions.networkSwitches, plan.interactions.oneTimeSetup),
-    reasons: [...new Set([...plan.groups.flatMap(g => g.downgrades), ...everyGroupBatched && !fewer ? ['USER_FUNDED_NOT_FEWER_INTERACTIONS'] : []])].filter(code => code !== 'WALLET_CAPABILITIES_ASSUMED'),
+    // USER_FUNDED_NOT_FEWER_INTERACTIONS is no longer emitted: groups that are all grouped interactions never need more prompts than their steps.
+    reasons: [...new Set(plan.groups.flatMap(g => g.downgrades))].filter(code => code !== 'WALLET_CAPABILITIES_ASSUMED'),
     refusal } };
 }

@@ -53,6 +53,8 @@ function memoryStore(run: RunRecord, group: GroupRecord, steps: readonly StepSta
     },
   };
   return { store: store as unknown as WorkflowRunStore, writes, run: () => r, group: () => g, steps: () => s,
+    /** Plays a concurrent write to the run (e.g. a status poll that moved its version). */
+    setRun: (next: Partial<RunRecord>) => { r = { ...r, ...next }; },
     /** Plays a concurrent pass's write. */
     setGroup: (next: Partial<GroupRecord>) => { g = { ...g, ...next }; },
     /** Plays a concurrent write that lands between this pass's read and its next group write (once). */
@@ -232,5 +234,36 @@ describe('review fix R1: run expiry never blocks a batch the owner\'s wallet may
     expect(await userFundedPass(deps, mem.run())).toMatchObject({ state: 'RUNNING', progressed: true });
     expect(mem.group()).toMatchObject({ state: 'PREPARED', version: 4 });
     expect(mem.writes).toEqual([]);
+  });
+
+  it('the run\'s version moved after the pass read it (a status poll): once the group is blocked, the run still stops — from its CURRENT version', async () => {
+    for (const [patch, to] of [[{ validUntil: new Date(NOW.getTime() - 1_000) }, 'HALTED'], [{ state: 'PLANNED', prepared: null, validUntil: null }, 'FAILED']] as const) {
+      const { mem, deps, logs } = expired(patch as Partial<GroupRecord>);
+      const read = mem.run();
+      // The run moves on (same state, a new version) between this pass's read and its group write.
+      const store = { ...mem.store, groupTransition: async (...args: Parameters<WorkflowRunStore['groupTransition']>) => {
+        mem.setRun({ version: mem.run().version + 1 });
+        return mem.store.groupTransition(...args);
+      } } as WorkflowRunStore;
+      expect(await userFundedPass({ ...deps, store }, read)).toMatchObject({ state: to, code: 'WORKFLOW_RUN_EXPIRED' });
+      // Never a blocked group and blocked steps under a run left RUNNING (nothing would ever move it again).
+      expect(mem.group().state).toBe('BLOCKED');
+      expect(mem.steps().map(s => s.state)).toEqual(['BLOCKED', 'BLOCKED']);
+      expect(mem.run()).toMatchObject({ state: to, code: 'WORKFLOW_RUN_EXPIRED', version: read.version + 2 });
+      expect(mem.writes).toEqual(['group:BLOCKED', 'step0:BLOCKED', 'step1:BLOCKED', `run:${to}`]);
+      expect(logs).toEqual(['workflow_run.group_blocked']);
+    }
+  });
+
+  it('a run that ended meanwhile (cancelled) is never moved again by the pass that blocked its group', async () => {
+    const { mem, deps } = expired({ validUntil: new Date(NOW.getTime() - 1_000) });
+    const read = mem.run();
+    const store = { ...mem.store, groupTransition: async (...args: Parameters<WorkflowRunStore['groupTransition']>) => {
+      mem.setRun({ state: 'CANCELLED', version: mem.run().version + 1 });
+      return mem.store.groupTransition(...args);
+    } } as WorkflowRunStore;
+    expect(await userFundedPass({ ...deps, store }, read)).toMatchObject({ state: 'RUNNING', progressed: true });
+    expect(mem.run()).toMatchObject({ state: 'CANCELLED', version: read.version + 1 });
+    expect(mem.writes).toEqual(['group:BLOCKED', 'step0:BLOCKED', 'step1:BLOCKED']);
   });
 });

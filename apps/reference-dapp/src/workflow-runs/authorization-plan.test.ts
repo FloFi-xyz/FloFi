@@ -10,8 +10,8 @@ import type { FlowName } from '../../backend/flows.ts';
 import { composeWorkflow, type WorkflowComposition } from '../engine/strategy-engine';
 import { evaluateWorkflowGates, readHandoffPolicy } from '../mcp/execution.ts';
 import type { McpRuntime } from '../mcp/runtime.ts';
-import { authorizationPlan, delegableByCode, EXECUTOR_FUNDED_GAS_RETIRED, type DelegationFacts } from './authorization-plan.ts';
-import type { UserFundedFacts } from './execution-groups.ts';
+import { authorizationPlan, delegableByCode, EXECUTOR_FUNDED_GAS_RETIRED, userFundedPreferred, type DelegationFacts } from './authorization-plan.ts';
+import type { GroupStrategy, UserFundedFacts } from './execution-groups.ts';
 
 const ok = (input: unknown): WorkflowComposition => { const w = composeWorkflow(input); if (!w.ok) throw new Error(w.code); return w; };
 const BASE_SEPOLIA_SWAP = { action: 'swap', network: 'base-sepolia', inputAsset: 'USDC', outputAsset: 'WETH', amount: '10' };
@@ -74,7 +74,7 @@ describe('BUILD-CHAT-E2E-001 authorization plan', () => {
       .toEqual({ ok: false, code: EXECUTOR_FUNDED_GAS_RETIRED });
   });
 
-  it('user-funded groups are offered only when they need fewer wallet interactions than confirming each step, and never on a disabled chain', async () => {
+  it('user-funded groups are recommended only with a grouped interaction (all owner steps IS confirm mode), and never on a disabled chain', async () => {
     const bound = { version: 2, steps: [BASE_SEPOLIA_SWAP, { ...BASE_SEPOLIA_SWAP, inputAsset: 'WETH', outputAsset: 'USDC', amount: '1' }], bindings: [{ step: 1, amountFrom: 0 }] };
     const plan = await planOf(bound, true, MOCKED, USER_FUNDED);
     // Base Sepolia is not a user-funded chain: each step is its own owner-step group (2 interactions = confirm each step): never recommended.
@@ -82,5 +82,34 @@ describe('BUILD-CHAT-E2E-001 authorization plan', () => {
       interactions: { upfront: 0, whenDue: 2, single: false } }, recommended: 'CONFIRM_EACH_STEP',
       bindings: [{ step: 1, amountFrom: 0, confirmEachStep: 'RECONCILED_RECEIVED_AMOUNT', delegated: 'SIGNED_GUARANTEED_MINIMUM' }] });
     expect(plan.userFunded.groups.map(g => [g.strategy, g.downgrades[0]])).toEqual([['EVM_OWNER_STEP', 'USER_FUNDED_CHAIN_DISABLED'], ['EVM_OWNER_STEP', 'USER_FUNDED_CHAIN_DISABLED']]);
+  });
+
+  it('a tie with confirming each step still recommends user-funded groups: Swap (one batch) → Bridge (its own flow) is never more wallet interactions', async () => {
+    // Base Sepolia is a user-funded chain here: the swap is a wallet batch, the bridge its own owner-signed flow — 2 interactions for 2 steps.
+    // Confirming each step is AT LEAST 2 (each flow may add a token approval); the batch folds its approval in and carries an on-chain expiry.
+    const plan = await planOf({ version: 2, steps: [BASE_SEPOLIA_SWAP, BRIDGE] }, true, MOCKED, { ...USER_FUNDED, chains: ['eip155:84532'] });
+    expect(plan.userFunded.groups.map(g => [g.strategy, g.signing, g.interactions])).toEqual([['EVM_WALLET_BATCH', 'UPFRONT', 1], ['EVM_OWNER_STEP', 'WHEN_DUE', 1]]);
+    expect(plan).toMatchObject({ confirmEachStep: { available: true, walletConfirmationsAtLeast: 2 },
+      userFunded: { available: true, interactions: { upfront: 1, whenDue: 1, atLeast: true, single: false } }, recommended: 'USER_FUNDED' });
+    // Never worded as fewer: the notes describe the groups, not a saving.
+    expect(plan.notes.join(' ')).not.toMatch(/fewer/i);
+  });
+});
+
+describe('userFundedPreferred: user-funded groups are preferred when they are never more wallet interactions than confirming each step', () => {
+  const groups = (...strategies: GroupStrategy[]) => strategies.map(strategy => ({ strategy }));
+  it('a tie with at least one grouped interaction is preferred (the step count is only a lower bound for confirming each step)', () => {
+    for (const grouped of ['EVM_WALLET_BATCH', 'EVM_USER_OPERATION', 'SOLANA_SIGN_ALL'] as const)
+      expect(userFundedPreferred(groups(grouped, 'EVM_OWNER_STEP', 'EVM_OWNER_STEP'), { upfront: 1, whenDue: 2 }, 3), grouped).toBe(true);
+    expect(userFundedPreferred(groups('EVM_WALLET_BATCH'), { upfront: 1, whenDue: 0 }, 3)).toBe(true);
+  });
+  it('groups that are all owner steps are confirm mode itself: not preferred, whatever the count', () => {
+    expect(userFundedPreferred(groups('EVM_OWNER_STEP', 'SOLANA_OWNER_STEP'), { upfront: 0, whenDue: 2 }, 2)).toBe(false);
+    expect(userFundedPreferred(groups('EVM_OWNER_STEP'), { upfront: 0, whenDue: 1 }, 3)).toBe(false);
+    expect(userFundedPreferred([], { upfront: 0, whenDue: 0 }, 2)).toBe(false);
+  });
+  it('more wallet interactions than steps is never preferred, even with a grouped interaction', () => {
+    expect(userFundedPreferred(groups('EVM_WALLET_BATCH', 'EVM_OWNER_STEP'), { upfront: 1, whenDue: 3 }, 3)).toBe(false);
+    expect(userFundedPreferred(groups('SOLANA_SIGN_ALL'), { upfront: 2, whenDue: 0 }, 1)).toBe(false);
   });
 });

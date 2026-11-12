@@ -12,6 +12,9 @@
  * Round 4: the same holds when the run is stopped at its expiry (F1); a concurrent answer that lands first is compared, never overwritten or
  * silently acknowledged (F2); a group that failed or was stopped still compares a new answer with its recorded one (F3); the wallet's "not sent"
  * stops the group, its steps and the run only when its own write from AUTHORIZED won (F4).
+ *
+ * After round 4b: an answer (a batch id, its transactions, or the wallet's "not sent") for a group FloFi already stopped while the batch it handed
+ * out was unanswered is refused WALLET_BATCH_ANSWERED_AFTER_STOP and logged, never dropped silently behind the group's state, never recorded.
  */
 import { describe, expect, it } from 'vitest';
 import { createTestDatabase } from '../../../../packages/cloud-runtime/test/pg-harness.ts';
@@ -42,6 +45,9 @@ type Artifact = { group: EvmGroupCalls; request: { id: string } };
 /** The `differs` of every answer-mismatch log line so far. */
 const mismatches = (h: RunHarness) => h.lines.map(l => JSON.parse(l) as { event: string; differs?: string; state?: string })
   .filter(l => l.event === 'workflow_run.batch_answer_mismatch').map(l => `${l.differs}:${l.state}`);
+/** Every after-stop answer log line so far: its fields, the run id checked to be a run's id. */
+const afterStop = (h: RunHarness) => h.lines.map(l => JSON.parse(l) as Record<string, unknown>).filter(l => l.event === 'workflow_run.batch_answer_after_stop')
+  .map(l => { expect(l.run).toMatch(/^wfr_/); return Object.fromEntries(Object.entries(l).filter(([key]) => key !== 'event' && key !== 'run')); });
 /**
  * The run store, except that `concurrent` lands first, exactly once, between this caller's read and its first group write to `to` (another
  * device's answer or report racing this one).
@@ -89,6 +95,11 @@ describe('review fix R1: run expiry and a batch in the owner\'s wallet', () => {
       await h.drain(run.runId);
       expect(await current()).toMatchObject({ state: 'FAILED', code: 'WORKFLOW_RUN_EXPIRED' });
       expect((await h.store.groups(run.runId))[0]).toMatchObject({ state: 'BLOCKED', code: 'WORKFLOW_RUN_EXPIRED', prepared: null });
+      // Nothing was ever handed to the wallet for it: an answer keeps the group's own refusal, and is no after-stop answer.
+      await expect(authorizeUserFundedGroup(h.runs, await current(), wallets, 0, { kind: 'EVM_WALLET_BATCH', batchId: '0x' + 'ee'.repeat(32) }))
+        .rejects.toThrow('WORKFLOW_RUN_GROUP_BLOCKED');
+      await expect(reportUserFundedBatch(h.runs, await current(), wallets, 0, ['0x' + 'ab'.repeat(32)])).rejects.toThrow('WORKFLOW_RUN_GROUP_BLOCKED');
+      expect(afterStop(h)).toEqual([]);
     } finally { await t.drop(); }
   });
 
@@ -140,15 +151,74 @@ describe('review fix R1: run expiry and a batch in the owner\'s wallet', () => {
         nextAction: 'OWNER_DECIDES', note: HALTED_UNANSWERED });
       expect((await runView({ store: h.store, now: h.d.now }, halted, { outcomes: true })).note).toBe(HALTED_UNANSWERED);
       await expect(workflowRunResume(h.surface, approval.approvalId, wallets)).rejects.toThrow('WORKFLOW_RUN_EXPIRED');
-      // A late answer for the blocked group is refused, never recorded silently.
+      // A late answer for the blocked group is refused as an answer after the stop (the owner is told to check the wallet), and logged; nothing is recorded.
       await expect(workflowRunUserFundedAuthorize(h.surface, approval.approvalId, wallets, 0, { kind: 'EVM_WALLET_BATCH',
-        batchId: (p1.prepared as unknown as Artifact).request.id })).rejects.toThrow('WORKFLOW_RUN_GROUP_BLOCKED');
+        batchId: (p1.prepared as unknown as Artifact).request.id })).rejects.toThrow('WALLET_BATCH_ANSWERED_AFTER_STOP');
+      expect(afterStop(h)).toEqual([{ group: 0, state: 'BLOCKED', batchIdMatches: true, hashes: null, notSent: null }]);
       // R6: the owner ends it. Still SKIPPED (nothing more is sent or taken), but never "not run": the outcome is unknown.
       const ended = await workflowRunCancel(h.surface, approval.approvalId, wallets);
       expect(ended.view.workflowRun!.run).toMatchObject({ state: 'CANCELLED', code: 'OWNER_CANCELLED', resumable: false, note: ENDED_UNANSWERED,
         groups: [{ state: 'SKIPPED', code: 'WALLET_BATCH_OUTCOME_UNKNOWN' }] });
       expect((await h.store.steps(run.runId)).map(s => [s.state, s.code])).toEqual([['SKIPPED', 'WALLET_BATCH_OUTCOME_UNKNOWN'], ['SKIPPED', 'WALLET_BATCH_OUTCOME_UNKNOWN']]);
       expect((await runView({ store: h.store }, await current(), { outcomes: true })).note).toBe(ENDED_UNANSWERED);
+    } finally { await t.drop(); }
+  });
+});
+
+describe('an answer for a group FloFi stopped while its handed-out batch was unanswered: WALLET_BATCH_ANSWERED_AFTER_STOP, logged, never recorded', () => {
+  /** A run whose handed-out batch was executed by the wallet before its deadline, its answer lost, and the run stopped at its expiry. */
+  async function stoppedAtExpiry() {
+    const s = await setup();
+    s.toExpiry(-11 * 60_000);
+    const p1 = await workflowRunUserFundedPrepare(s.h.surface, s.approval.approvalId, s.wallets, 0);
+    const artifact = p1.prepared as unknown as Artifact;
+    s.toExpiry(-5 * 60_000);
+    const hash = s.chain.control.walletBatch(s.owner, evmCallsOf(artifact.group));
+    s.toExpiry(1_000);
+    await s.h.drain(s.run.runId);
+    expect(await s.current()).toMatchObject({ state: 'HALTED', code: 'WORKFLOW_RUN_EXPIRED' });
+    expect((await s.h.store.groups(s.run.runId))[0]).toMatchObject({ state: 'BLOCKED', code: 'WALLET_BATCH_OUTCOME_UNKNOWN', authorization: null });
+    return { ...s, id: artifact.request.id, hash };
+  }
+
+  it('BLOCKED at the run\'s expiry: authorize (its id, or another) and report (its transactions, or "not sent") are each refused and logged', async () => {
+    const { t, h, wallets, run, current, id, hash } = await stoppedAtExpiry();
+    try {
+      const blocked = (await h.store.groups(run.runId))[0]!, steps = await h.store.steps(run.runId), halted = await current();
+      await expect(authorizeUserFundedGroup(h.runs, halted, wallets, 0, { kind: 'EVM_WALLET_BATCH', batchId: id })).rejects.toThrow('WALLET_BATCH_ANSWERED_AFTER_STOP');
+      await expect(authorizeUserFundedGroup(h.runs, halted, wallets, 0, { kind: 'EVM_WALLET_BATCH', batchId: '0x' + 'ee'.repeat(32) }))
+        .rejects.toThrow('WALLET_BATCH_ANSWERED_AFTER_STOP');
+      await expect(reportUserFundedBatch(h.runs, halted, wallets, 0, [hash])).rejects.toThrow('WALLET_BATCH_ANSWERED_AFTER_STOP');
+      await expect(reportUserFundedBatch(h.runs, halted, wallets, 0, [], true)).rejects.toThrow('WALLET_BATCH_ANSWERED_AFTER_STOP');
+      expect(afterStop(h)).toEqual([{ group: 0, state: 'BLOCKED', batchIdMatches: true, hashes: null, notSent: null },
+        { group: 0, state: 'BLOCKED', batchIdMatches: false, hashes: null, notSent: null }, { group: 0, state: 'BLOCKED', batchIdMatches: null, hashes: 1, notSent: false },
+        { group: 0, state: 'BLOCKED', batchIdMatches: null, hashes: 0, notSent: true }]);
+      // A malformed answer is refused as such first (nothing to log as an answer).
+      await expect(authorizeUserFundedGroup(h.runs, halted, wallets, 0, { kind: 'EVM_WALLET_BATCH', batchId: 'not an id!' })).rejects.toThrow('EIP5792_RESPONSE_INVALID');
+      await expect(reportUserFundedBatch(h.runs, halted, wallets, 0, ['0x12'])).rejects.toThrow('EIP5792_RESPONSE_INVALID');
+      expect(afterStop(h)).toHaveLength(4);
+      // Nothing was recorded: the group, its steps and the run are exactly as the stop left them.
+      expect((await h.store.groups(run.runId))[0]).toEqual(blocked);
+      expect(await h.store.steps(run.runId)).toEqual(steps);
+      expect(await current()).toEqual(halted);
+    } finally { await t.drop(); }
+  });
+
+  it('SKIPPED when the owner ended the run: authorize and report are refused and logged with the group\'s state; nothing is recorded', async () => {
+    const { t, h, wallets, approval, run, current, id, hash } = await stoppedAtExpiry();
+    try {
+      await workflowRunCancel(h.surface, approval.approvalId, wallets);
+      const skipped = (await h.store.groups(run.runId))[0]!;
+      expect(skipped).toMatchObject({ state: 'SKIPPED', code: 'WALLET_BATCH_OUTCOME_UNKNOWN', authorization: null });
+      await expect(workflowRunUserFundedAuthorize(h.surface, approval.approvalId, wallets, 0, { kind: 'EVM_WALLET_BATCH', batchId: id }))
+        .rejects.toThrow('WALLET_BATCH_ANSWERED_AFTER_STOP');
+      await expect(workflowRunUserFundedReport(h.surface, approval.approvalId, wallets, 0, [hash])).rejects.toThrow('WALLET_BATCH_ANSWERED_AFTER_STOP');
+      await expect(reportUserFundedBatch(h.runs, await current(), wallets, 0, [], true)).rejects.toThrow('WALLET_BATCH_ANSWERED_AFTER_STOP');
+      expect(afterStop(h)).toEqual([{ group: 0, state: 'SKIPPED', batchIdMatches: true, hashes: null, notSent: null },
+        { group: 0, state: 'SKIPPED', batchIdMatches: null, hashes: 1, notSent: false }, { group: 0, state: 'SKIPPED', batchIdMatches: null, hashes: 0, notSent: true }]);
+      expect((await h.store.groups(run.runId))[0]).toEqual(skipped);
+      expect(await current()).toMatchObject({ state: 'CANCELLED' });
+      expect(mismatches(h)).toEqual([]);
     } finally { await t.drop(); }
   });
 });

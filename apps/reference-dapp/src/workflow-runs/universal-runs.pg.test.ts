@@ -11,6 +11,8 @@
  *   2. Arbitrum Swap → Bridge to Base → Base Supply + Transfer of the delivery: the bridge spends the swap's reconciled output; the Base batch is
  *      prepared only once the delivery reconciled, and its two steps share exactly what was delivered (never the owner's other balance).
  *   3. Arbitrum Repay → Withdraw → Swap of the withdrawal: ONE wallet batch on an existing position.
+ *   4. Arbitrum Swap → Bridge to Base → Base Supply of the delivery: three groups of one step each — as many wallet interactions as steps, never
+ *      more (confirming each step is a lower bound) — so the claim leaves the choice to the owner (PENDING, user-funded recommended) and it runs.
  */
 import { describe, expect, it } from 'vitest';
 import { createTestDatabase } from '../../../../packages/cloud-runtime/test/pg-harness.ts';
@@ -50,9 +52,9 @@ async function start(db: Awaited<ReturnType<typeof createTestDatabase>>['db'], f
   const owner = h.d.evmOwner.address.toLowerCase(), wallets = [h.evm, h.sol];
   for (const chain of [arb, base]) chain.control.fundNative(owner, 10n ** 17n);
   const approval = await h.request(strategy(owner));
-  await claimApproval(h.surface, approval.secret, wallets, true, h.d.now());
+  const claimed = await claimApproval(h.surface, approval.secret, wallets, true, h.d.now());
   const started = await workflowRunUserFundedStart(h.surface, approval.approvalId, wallets, METAMASK);
-  return { h, arb, base, owner, wallets, approval, started };
+  return { h, arb, base, owner, wallets, approval, claimed, started };
 }
 /** The owner's wallet answers a prepared batch: it sends exactly the prepared calls from its own account (one transaction), then FloFi reconciles. */
 async function ownerSendsBatch(h: RunHarness, chain: ReturnType<typeof createEvmDouble>, approvalId: string, wallets: RunHarness['evm'][], groupIndex: number) {
@@ -256,6 +258,57 @@ describe('P0 universal execution: mixed workflows end to end through the real ru
       expect(steps[2]!.strategy).toMatchObject({ action: 'swap', amount: '0.0005' });
       expect(arb.control.accountData(owner).debt).toBe(60_000_000n);
       expect(arb.control.sends()).toBe(0);
+    } finally { await t.drop(); }
+  });
+
+  it('Arbitrum Swap → Bridge to Base → Base Supply: three one-step groups (a tie with confirming each step) claim into PENDING, user-funded recommended, and run', async () => {
+    const t = await createTestDatabase();
+    try {
+      const { h, arb, base, owner, wallets, approval, claimed, started } = await start(t.db, ['arbitrum-swap', 'crosschain-router-arbitrum-to-base', 'base-aave'],
+        'arbitrum-one,base', o => ({ version: 2, steps: [
+          { action: 'swap', network: 'arbitrum-one', inputAsset: 'WETH', outputAsset: 'USDC', amount: '0.0019', slippageBps: 50 },
+          { action: 'bridge', sourceNetwork: 'arbitrum-one', destinationNetwork: 'base', asset: 'USDC', amount: '5' },
+          { action: 'supply', network: 'base', asset: 'USDC', amount: '5', beneficiary: o }],
+        bindings: [{ step: 1, amountFrom: 0 }, { step: 2, amountFrom: 1 }] }));
+      arb.control.fundToken(owner, A_WETH, 10n ** 16n);
+      // 3 wallet interactions for 3 steps: never more than confirming each step (at least 3: each flow may add a token approval, which the batches
+      // fold in), so the claim did NOT start confirm mode — the owner chose, and user-funded execution started.
+      expect(claimed.view.workflowRun!.run).toMatchObject({ state: 'PENDING', mode: null, nextAction: 'OWNER_CHOOSES_MODE' });
+      expect(claimed.view.workflowRun!.plan).toMatchObject({ stepCount: 3, recommended: 'USER_FUNDED', confirmEachStep: { available: true, walletConfirmationsAtLeast: 3 },
+        userFunded: { available: true, interactions: { upfront: 1, whenDue: 2, atLeast: true, single: false } } });
+      const run0 = started.view.workflowRun!.run;
+      expect(run0).toMatchObject({ state: 'RUNNING', mode: 'USER_FUNDED' });
+      expect(run0.groups.map(g => [g.strategy, g.signing, g.steps, g.chain])).toEqual([['EVM_WALLET_BATCH', 'UPFRONT', [0, 0], ARB], ['EVM_OWNER_STEP', 'WHEN_DUE', [1, 1], ARB],
+        ['EVM_WALLET_BATCH', 'WHEN_DUE', [2, 2], BASE]]);
+
+      // Group 0: swap 0.0019 WETH → 4.75 USDC on Arbitrum, one wallet confirmation that folds the approval in.
+      const g0 = await ownerSendsBatch(h, arb, approval.approvalId, wallets, 0);
+      expect(g0.group.calls.map(c => c.kind)).toEqual(['ERC20_APPROVE', 'UNISWAP_V3_EXACT_INPUT_SINGLE']);
+      let run = await ownedRun(h.runs, approval.approvalId, wallets);
+      // Group 1: the bridge's own flow for what the swap actually delivered; the flow reconciles 4.7 USDC delivered to the owner on Base.
+      const bridge = await workflowRunContinue(h.surface, approval.approvalId, wallets);
+      expect(bridge.view.workflowRun!.step).toEqual({ index: 1, count: 3 });
+      expect((await h.store.steps(run.runId))[1]).toMatchObject({ state: 'AWAITING_OWNER', bound: { amountFrom: 0, received: '4750000', used: '4750000' } });
+      h.flows.ownerExecutes('crosschain-router-arbitrum-to-base', h.evm.address, bridge.workflow, 'RECONCILED', {
+        spent: [{ asset: `${ARB}/erc20:${A_USDC}`, amount: '4750000' }], received: [{ asset: `${BASE}/erc20:${B_USDC}`, amount: '4700000' }] });
+      base.control.fundToken(owner, B_USDC, 4_700_000n);
+      await h.drain(run.runId);
+      expect(await ownedRun(h.runs, approval.approvalId, wallets)).toMatchObject({ state: 'RUNNING', currentStep: 2 });
+
+      // Group 2 on Base, signed when due: the deadline guard, the approval and the Supply of exactly the delivery (4.7 of its 5 USDC cap).
+      const g2 = await ownerSendsBatch(h, base, approval.approvalId, wallets, 2);
+      expect(g2.group.calls.map(c => c.kind)).toEqual(['DEADLINE_GUARD', 'ERC20_APPROVE', 'AAVE_V3_SUPPLY']);
+      expect(g2.group.calls[2]).toMatchObject({ asset: B_USDC, amount: '4700000' });
+      await h.drain(run.runId);
+      run = await ownedRun(h.runs, approval.approvalId, wallets);
+      expect(run).toMatchObject({ state: 'COMPLETED', mode: 'USER_FUNDED' });
+      const steps = await h.store.steps(run.runId);
+      expect(steps.map(s => [s.state, s.outcome?.kind])).toEqual([['RECONCILED', 'USER_FUNDED_GROUP'], ['RECONCILED', 'OWNER_RUN'], ['RECONCILED', 'USER_FUNDED_GROUP']]);
+      expect(steps[2]!.bound).toMatchObject({ amountFrom: 1, received: '4700000', used: '4700000' });
+      // The delivery was supplied exactly; FloFi sent nothing and paid for nothing.
+      expect(base.control.tokenBalance(B_USDC, owner)).toBe(0n);
+      expect(base.control.accountData(owner).collateral).toBe(4_700_000n * 10n ** 8n / 10n ** 6n);
+      expect(arb.control.sends() + base.control.sends()).toBe(0);
     } finally { await t.drop(); }
   });
 });

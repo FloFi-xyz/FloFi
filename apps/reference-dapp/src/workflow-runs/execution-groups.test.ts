@@ -135,6 +135,24 @@ describe('BUILD-FLOFI-UNIVERSAL-WORKFLOW-002 execution groups', () => {
     expect(flofi.groups[0]!.downgrades).toContain('SOLANA_MULTI_SIGN_UNSUPPORTED');
   });
 
+  it('a Solana step spending an output of an earlier step of its group starts a new sign-all group with a closed reason: SOLANA_GROUP_STEP_DEPENDENT', () => {
+    // The universal proof's reproduction: swap SOL → USDC, then swap that USDC back to SOL (bound to the first swap's output).
+    const roundTrip = { version: 2, steps: [{ action: 'swap', network: 'solana', inputAsset: 'SOL', outputAsset: 'USDC', amount: '0.05' }, SOL_SWAP],
+      bindings: [{ step: 1, amountFrom: 0 }] };
+    const p = plan(roundTrip, METAMASK);
+    // One more wallet prompt, signed when the first swap's output landed (it could not be simulated before): never an unexplained split.
+    expect(p.groups.map(g => [g.strategy, g.signing, g.stepFrom, g.stepTo, g.interactions, g.downgrades])).toEqual([
+      ['SOLANA_SIGN_ALL', 'UPFRONT', 0, 0, 1, []], ['SOLANA_SIGN_ALL', 'WHEN_DUE', 1, 1, 1, ['SOLANA_GROUP_STEP_DEPENDENT']]]);
+    expect(p.groups[1]!.steps[0]).toMatchObject({ amount: 'RECONCILED_ACTUAL', boundTo: 0 });
+    expect(p.interactions).toMatchObject({ upfront: 1, whenDue: 1, single: false });
+    // The same two swaps unbound share one sign-all prompt (nothing to explain); an owner-step wallet prompts per step anyway (nothing added).
+    expect(plan({ version: 2, steps: roundTrip.steps }, METAMASK).groups.map(g => [g.strategy, g.stepFrom, g.stepTo, g.downgrades])).toEqual([['SOLANA_SIGN_ALL', 0, 1, []]]);
+    expect(plan(roundTrip, FLOFI).groups.flatMap(g => g.downgrades)).not.toContain('SOLANA_GROUP_STEP_DEPENDENT');
+    // An EVM batch keeps a bound step in its producer's group (the batch enforces the signed minimum): no such cut, no such code.
+    const evm = plan({ version: 2, steps: [SWAP_BASE, SUPPLY_BASE], bindings: [{ step: 1, amountFrom: 0 }] }, METAMASK);
+    expect(evm.groups.map(g => [g.strategy, g.stepFrom, g.stepTo, g.downgrades])).toEqual([['EVM_WALLET_BATCH', 0, 1, []]]);
+  });
+
   it('summarizes honestly: network switches, setup prompts and the meaning of "single"', () => {
     const p = plan({ version: 2, steps: [SWAP_BASE, { ...SWAP_BASE, network: 'arbitrum-one' }] }, METAMASK);
     expect(p.groups.map(g => g.chain)).toEqual(['eip155:8453', 'eip155:42161']);

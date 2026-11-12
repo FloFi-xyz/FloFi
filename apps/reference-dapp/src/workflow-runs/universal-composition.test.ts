@@ -15,9 +15,10 @@
  *
  * Plan invariants checked on every composition: each step exactly once and in order; a group never spans chains; a step bound to an output of an
  * earlier group (a cross-chain delivery included) spends the RECONCILED actual amount and is signed WHEN_DUE; consecutive batchable steps of one
- * chain share ONE EVM_WALLET_BATCH / SOLANA_SIGN_ALL group (a Solana step spending an unlanded output of its group excepted); bridge and
- * add_liquidity stand alone in an owner-step group with their closed reason; the interaction count is exactly what the wallet is asked for, and
- * "single" only ever means one group and one prompt. Planner + composer only: deterministic, no network, no chain double, nothing signed.
+ * chain share ONE EVM_WALLET_BATCH / SOLANA_SIGN_ALL group (a Solana step spending an unlanded output of its group excepted, which starts a
+ * new sign-all group and says so: SOLANA_GROUP_STEP_DEPENDENT); bridge and add_liquidity stand alone in an owner-step group with their closed
+ * reason; the interaction count is exactly what the wallet is asked for, and "single" only ever means one group and one prompt. Planner +
+ * composer only: deterministic, no network, no chain double, nothing signed.
  */
 import { describe, expect, it } from 'vitest';
 import { requirementOf, workflowRequirement, type WorkflowRequirement } from '../delegation/steps.ts';
@@ -162,13 +163,16 @@ function checkPlan(r: WorkflowRequirement, p: GroupPlan, options: { readonly fac
       expect(g.downgrades, where).toContain(OWNER_STEP_REASON[s.action as Action]);
     }
   }
-  // (c) maximal groups: two consecutive batchable steps on one chain are cut apart only for a Solana step spending an output of its group.
+  // (c) maximal groups: two consecutive batchable steps on one chain are cut apart only for a Solana step spending an output of its group — and
+  // exactly that cut (one more wallet prompt, signed when the output landed) says so with its closed code, SOLANA_GROUP_STEP_DEPENDENT.
   for (let i = 1; capable && i < r.steps.length; i++) {
     const a = r.steps[i - 1]!, b = r.steps[i]!, ga = groupOf.get(i - 1)!;
-    const together = a.chain === b.chain && BATCHABLE[a.namespace].has(a.action as Action) && BATCHABLE[b.namespace].has(b.action as Action)
-      && !(b.namespace === 'solana' && r.bindings.some(x => x.step === i && x.amountFrom >= ga.stepFrom));
-    expect(groupOf.get(i) === ga, `${where}: steps ${i - 1}/${i}`).toBe(together);
+    const sameChainBatchable = a.chain === b.chain && BATCHABLE[a.namespace].has(a.action as Action) && BATCHABLE[b.namespace].has(b.action as Action);
+    const dependent = b.namespace === 'solana' && r.bindings.some(x => x.step === i && x.amountFrom >= ga.stepFrom);
+    expect(groupOf.get(i) === ga, `${where}: steps ${i - 1}/${i}`).toBe(sameChainBatchable && !dependent);
+    if (groupOf.get(i) !== ga) expect(groupOf.get(i)!.downgrades.includes('SOLANA_GROUP_STEP_DEPENDENT'), `${where}: group at ${i}`).toBe(sameChainBatchable && dependent);
   }
+  expect(p.groups[0]!.downgrades, where).not.toContain('SOLANA_GROUP_STEP_DEPENDENT');
   // (d) the count is what the wallet is asked for: one prompt per batch / sign-all group, at least one per owner step; "single" only for ONE
   // group answered by ONE prompt with no owner step (whose own flow may ask more than once).
   for (const g of p.groups) expect(g.interactions, where).toBe(OWNER_STEP.has(g.strategy) ? g.steps.length : 1);
@@ -297,7 +301,7 @@ const REPRESENTATIVE: readonly (readonly [string, readonly Spec[], readonly Bind
   ['Base Swap → Arbitrum Swap → Base Transfer (network changes, no bridge)', [swap('base', 'USDC', 'WETH', '5'), swap('arbitrum-one', 'USDC', 'WETH', '5'), send('base', 'WETH', '0.001')], [],
     { shape: "B[0] B'[1] B'[2]  1+2", amounts: 'E|E|E', waits: [null, null, null], downgrades: [[], [], []], switches: 2, perNamespace: { eip155: 3 } }],
   ['Solana Swap → Swap its output → Transfer the first output', [swap('solana', 'SOL', 'USDC', '0.05'), swap('solana', 'USDC', 'SOL', '2'), send('solana', 'USDC', '1')], bind([1, 0], [2, 0]),
-    { shape: "S[0] S'[1-2]  1+1", amounts: 'E|RR', waits: [null, null], downgrades: [[], []], switches: 0, perNamespace: { solana: 2 } }],
+    { shape: "S[0] S'[1-2]  1+1", amounts: 'E|RR', waits: [null, null], downgrades: [[], ['SOLANA_GROUP_STEP_DEPENDENT']], switches: 0, perNamespace: { solana: 2 } }],
   ['Arbitrum 8 steps: Swap, Supply, Borrow, Repay, Withdraw, Transfer, Uniswap liquidity, Swap', [swap('arbitrum-one', 'USDC', 'WETH', '3'), aave('supply', 'arbitrum-one', 'WETH', '0.001'),
     aave('borrow', 'arbitrum-one', 'USDC', '1'), aave('repay', 'arbitrum-one', 'USDC', '0.5'), withdraw('arbitrum-one', 'WETH', '0.0004'), send('arbitrum-one', 'WETH', '0.0004'),
     pool('arbitrum-one', { USDC: '0.5', WETH: '0.0002' }), swap('arbitrum-one', 'WETH', 'USDC', '0.0002')], bind([1, 0], [3, 2], [5, 4]),
