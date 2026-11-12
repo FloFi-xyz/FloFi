@@ -75,7 +75,7 @@ describe('P0 hotfix E1: the Editor panel for Swap → Bridge', () => {
     expect(render(state({ review: review(), phase: 'wallet', started: true }), 'PT')).toContain('Depósito da ponte na Across (passo 2)');
     const pt = render(state({ review: review(), phase: 'reviewed', started: false, canReview: true }), 'PT');
     expect(pt).toContain('Chega na Base');
-    expect(pt).toContain('Depois, o FloFi aguarda a entrega da ponte na Base');
+    expect(pt).toContain('Depois, a FloFi aguarda a entrega da ponte na Base');
   });
 
   it('a wallet without atomic batching: the step-by-step path says why, and that the bridge\'s own flow may ask again (EN/PT)', () => {
