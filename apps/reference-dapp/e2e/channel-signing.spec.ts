@@ -29,7 +29,9 @@ for (const hostName of ['ChatGPT fixture', 'Claude fixture']) {
     const elsewhere = await guardedContext(browser), stranger = await elsewhere.context.newPage();
     await stranger.goto(fallback);
     await expect(stranger.locator('.approval-page [role=alert]')).toContainText('APPROVAL_ACCOUNT_REQUIRED');
-    await expect(stranger.getByRole('navigation', { name: 'Workflow stages' })).toHaveCount(0);
+    // P0 approved UX (board 03b): no product navigation here — neither the Editor stepper nor the ☰ drawer (the former stage tabs are gone).
+    await expect(stranger.getByRole('navigation', { name: 'Editor steps' })).toHaveCount(0);
+    await expect(stranger.getByRole('button', { name: 'Open navigation' })).toHaveCount(0);
     // A normal browser with the original OAuth account opens the universal fallback without asking the model for a capability.
     const page = await context.newPage(); await installJourneyWallet(page, [owner]);
     await page.goto(fallback);
@@ -121,7 +123,9 @@ test('a delayed apply response cannot restore the previous proposal after anothe
     await expect(page.getByRole('heading', { name: 'Open this link from your assistant' })).toBeVisible();
     await expect(page.locator('.approval-page [role=alert]')).toContainText('HANDOFF_NOT_FOUND');
     await expect(region).toHaveCount(0);
-    await expect(page.getByRole('navigation', { name: 'Workflow stages' })).toHaveCount(0);
+    // P0 approved UX (board 03b): no product navigation here — neither the Editor stepper nor the ☰ drawer (the former stage tabs are gone).
+    await expect(page.getByRole('navigation', { name: 'Editor steps' })).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'Open navigation' })).toHaveCount(0);
     expect(await journeySends()).toBe(0);
     expect(await walletRequests(page)).not.toContain('eth_sendTransaction');
     expect(unexpected).toEqual([]);

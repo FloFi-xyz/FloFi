@@ -21,7 +21,7 @@ const node = (page: Page, id: string) => page.locator(`.react-flow__node[data-id
 const revision = (page: Page, value: number) => expect(page.locator(`.summary-bar[data-workflow-revision="${value}"]`)).toHaveCount(1);
 async function ask(page: Page, text: string) {
   await page.locator('#mock-prompt').fill(text);
-  await page.getByRole('button', { name: 'Send', exact: true }).click();
+  await page.getByRole('button', { name: 'Send message', exact: true }).click();
 }
 /** An exact command (no model), committed by the chat. */
 async function author(page: Page, text: string, nextRevision: number) {
@@ -42,7 +42,7 @@ test('Portuguese conversation: network question, a correction of the committed s
   // Flofi's own button: a deterministic answer, no model call.
   await copilotSays(page).getByRole('button', { name: 'Base Sepolia' }).click();
   await expect(copilotSays(page)).toContainText('Interpretado como “supply 5 USDC to Aave on Base Sepolia”');
-  await expect(copilotSays(page)).toContainText('Adicionado ao seu workflow:');
+  await expect(copilotSays(page)).toContainText('Adicionado ao seu fluxo:');
   await commits(page, 1); await expect(proposal(page)).toHaveCount(0);
   await revision(page, 1);
   await expect(node(page, 'node-002').getByRole('textbox', { name: 'Source amount (USDC)', exact: true })).toHaveValue('5');
@@ -61,7 +61,7 @@ test('Portuguese conversation: network question, a correction of the committed s
   await revision(page, 2);
   await ask(page, 'Remove o primeiro passo.');
   await expect(copilotSays(page)).toContainText('Interpretado como remover o passo 1 (Supply 2 USDC · Aave V3 · Base Sepolia)');
-  await expect(copilotSays(page)).toContainText('Removido do seu workflow:');
+  await expect(copilotSays(page)).toContainText('Removido do seu fluxo:');
   await revision(page, 3);
   await expect(node(page, 'node-002')).toHaveCount(0);
   expect(await supplySendCount(page)).toBe(0);

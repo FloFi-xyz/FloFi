@@ -10,7 +10,7 @@ import { createBackend, type FlowResult } from '../backend/app';
 import type { RouterBegin, RouterRecord } from '../src/server/router-service';
 import { createTestWallet, type TestWallet } from '../../../packages/reference-reconciler/test/test-wallet';
 import { installJourneyWallet, resetJourneyHarness, journeySends, switchAccount, walletRequests, setWalletChain } from './journey-fixtures';
-import { continueToBuilder, type EditorSection, openBuilder, openEditorSection, reloadBuilder } from './build-entry-navigation';
+import { chooseWorkflowMenuItem, continueToBuilder, type EditorSection, openBuilder, openDashboard, openEditorSection, openReviewTechnicalDetails, reloadBuilder } from './build-entry-navigation';
 
 const stage = (page: Page, name: EditorSection) => openEditorSection(page, name);
 async function author(page: Page) {
@@ -24,9 +24,9 @@ async function savedCanonical(owner: string) {
   finally { await db.close(); }
 }
 async function libraryWorkspace(page: Page, language: 'EN' | 'PT' = 'EN') {
-  const label = language === 'PT' ? 'Seus workflows' : 'Your workflows';
+  const label = language === 'PT' ? 'Seus fluxos' : 'Your workflows';
   await page.getByRole('button', { name: language === 'PT' ? 'Abrir navegação' : 'Open navigation' }).click();
-  const sidebar = page.getByRole('complementary', { name: language === 'PT' ? 'Navegação FloFi' : 'FloFi navigation' });
+  const sidebar = page.getByRole('complementary', { name: language === 'PT' ? 'Navegação da FloFi' : 'FloFi navigation' });
   await expect(sidebar.getByRole('link', { name: label, exact: true })).toBeVisible();
   for (const text of ['Refresh', 'Loading', 'temporarily unavailable', 'Save workflow', 'No workflows yet.', 'Ainda não há workflows.']) await expect(sidebar).not.toContainText(text);
   await expect(sidebar.locator('.saved-workflows, .navigation-workflows')).toHaveCount(0);
@@ -35,9 +35,9 @@ async function libraryWorkspace(page: Page, language: 'EN' | 'PT' = 'EN') {
   await expect(page.locator('main').getByRole('heading', { name: label, exact: true })).toBeVisible();
   return page.locator('main').getByRole('region', { name: label, exact: true });
 }
-/** Compact execution rows disclose their existing workflow/reconciliation metadata on request. */
+/** Compact execution rows disclose their existing workflow/reconciliation metadata on request (P0 approved UX, board 11: rows of one list). */
 async function expandRecordedWorkflows(library: Locator, language: 'EN' | 'PT' = 'EN') {
-  const records = library.locator('.dashboard-run-list .dashboard-run-card');
+  const records = library.locator('.ux-workflow-rows .ux-record');
   await expect(records).toHaveCount(3);
   for (const record of await records.all()) {
     const disclosure = record.getByRole('button', { name: language === 'PT' ? /^Mostrar detalhes de / : /^Show details for / });
@@ -135,14 +135,15 @@ test('Save → Your workflows → exact Canvas restoration; grouped executions, 
   const errors: string[] = []; page.on('pageerror', error => errors.push(error.message));
   await author(page);
   const name = 'Save workflow'; // User data that happens to be a catalog key must stay unchanged.
-  await page.getByRole('button', { name: 'Rename workflow', exact: true }).click();
+  await page.getByRole('button', { name: /^Rename workflow: / }).click();
   await page.getByRole('textbox', { name: 'Workflow name', exact: true }).fill(name);
   await page.getByRole('textbox', { name: 'Workflow name', exact: true }).press('Enter');
-  await page.getByRole('button', { name: 'Save workflow', exact: true }).click();
+  // P0 approved UX (board 04): Save is an item of the Canvas header's ··· menu.
+  await chooseWorkflowMenuItem(page, 'Save workflow');
   // BUILD-SOLANA-TRANSFER-UX-001: the proof reuses the wallet already connected (A); no selector opens and the wallet signs the sign-in message.
   await proveConnectedEvmWallet(page, page.locator('body'), A.address);
   await expect(page.getByRole('button', { name: 'Connect wallet and prove ownership', exact: true })).toHaveCount(0);
-  await page.getByRole('button', { name: 'Save workflow', exact: true }).click();
+  await chooseWorkflowMenuItem(page, 'Save workflow');
   await expect(page.getByRole('status')).toContainText('Workflow saved.');
   const workflow = await savedCanonical(A.address);
   expect(workflow.nodes.some(n => n.actionType === 'asset.bridge' && n.chainId === 'eip155:84532')).toBe(true);
@@ -154,18 +155,24 @@ test('Save → Your workflows → exact Canvas restoration; grouped executions, 
   const run1 = await executeFixture(workflow, A), run2 = await executeFixture(workflow, A);
   const executed = { ...workflow, workflowId: 'executed-only-' + crypto.randomUUID() };
   await executeFixture(executed, A);
-  await page.getByRole('navigation', { name: 'Workflow stages' }).getByRole('button', { name: 'Dashboard', exact: true }).click();
-  await expect(page.getByRole('heading', { name: 'Your execution workspace' })).toBeVisible();
+  await openDashboard(page);
+  await expect(page.getByRole('heading', { name: 'Dashboard', level: 1, exact: true })).toBeVisible();
   await expect(page.locator('main .navigation-workflows, main .saved-workflows')).toHaveCount(0);
   await expect(page.locator('main').getByRole('heading', { name: 'Workflows', exact: true })).toHaveCount(0);
   await expect(page.locator('main')).not.toContainText('Workflows are temporarily unavailable. Try again.');
-  // BUILD-FLOFI-CHAT-E2E-DASHBOARD-UX-001: the Dashboard summarizes the records; the executed history is in Your workflows.
-  await expect(page.getByRole('region', { name: 'Workflow records', exact: true })).toContainText('3 executed records');
+  // BUILD-FLOFI-CHAT-E2E-DASHBOARD-UX-001: the Dashboard summarizes the records; the executed history is in Your workflows. P0 approved UX
+  // (board 10): the Dashboard's History is one line.
+  await expect(page.getByRole('region', { name: 'History', exact: true })).toContainText('3 workflows executed');
   await expect(page.locator('.dashboard-run-list')).toHaveCount(0);
   library = await libraryWorkspace(page);
-  await expect(library.getByRole('region', { name: 'Executed and history', exact: true }).locator('.dashboard-run-list>li')).toHaveCount(3);
-  // The saved workflow ran, so it is listed with its records (reopenable there), not under Saved workflows.
-  await expect(library.locator('.workflows-saved')).not.toContainText(name);
+  // Board 11: one list behind filter chips; the three runs are the Executed records.
+  const chips = library.getByRole('group', { name: 'Filter workflows', exact: true });
+  await chips.getByRole('button', { name: /^Executed/ }).click();
+  await expect(library.getByRole('list', { name: 'Executed', exact: true }).locator('.ux-record')).toHaveCount(3);
+  // The saved workflow ran, so it is listed with its records (reopenable there), not under Saved.
+  await chips.getByRole('button', { name: /^Saved/ }).click();
+  await expect(library.locator('.ux-workflow-list')).not.toContainText(name);
+  await chips.getByRole('button', { name: /^All/ }).click();
   await expandRecordedWorkflows(library);
   await expect(library.getByRole('button', { name: `Open workflow: ${name}`, exact: true })).toHaveCount(2);
   await page.locator(`a[href="/app/dashboard/runs/${run1}"]`).click();
@@ -181,12 +188,13 @@ test('Save → Your workflows → exact Canvas restoration; grouped executions, 
   await library.getByRole('button', { name: `Open workflow: ${name}`, exact: true }).first().click();
   await expect(page).toHaveURL('/app');
   await expect(page.locator('.build-flow-surface .composer-card').first().getByRole('textbox', { name: 'Source amount (USDC)', exact: true })).toHaveValue('1');
-  await page.getByRole('button', { name: 'Save workflow', exact: true }).click();
+  await chooseWorkflowMenuItem(page, 'Save workflow');
   await expect.poll(() => savedCanonical(A.address)).toEqual(workflow);
   await expect(page.locator('.canvas-name h2')).toHaveText(name);
   await stage(page, 'Simulate');
-  // BUILD-FLOFI-CHAT-E2E-FIX-002: the chat-first summary (with its embedded Review) is an optional, collapsed details surface.
-  await page.locator('.simulation-details > summary').click();
+  // BUILD-FLOFI-CHAT-E2E-FIX-002 / P0 approved UX (board 06): the chat-first summary (with its embedded Review) is the Review panel's collapsed
+  // Technical details.
+  await openReviewTechnicalDetails(page);
   const review = page.locator('.review-authorization-details');
   await review.locator('summary').click();
   await expect(review).toContainText(/Simulate.*again/);
@@ -201,10 +209,10 @@ test('Save → Your workflows → exact Canvas restoration; grouped executions, 
   library = await libraryWorkspace(page, 'PT');
   await expandRecordedWorkflows(library, 'PT');
   await expect(library.getByRole('button', { name: `Abrir fluxo: ${name}`, exact: true })).toHaveCount(2);
-  await expect(page.getByRole('group', { name: 'Ligação da carteira' })).toContainText(A.address.slice(0, 6));
+  await expect(page.getByRole('group', { name: 'Conexão da carteira' })).toContainText(A.address.slice(0, 6));
   await library.getByRole('button', { name: `Abrir fluxo: ${name}`, exact: true }).first().click();
-  await expect(page.locator('.build-flow-surface .composer-card').first().getByRole('textbox', { name: 'Montante de origem (USDC)', exact: true })).toHaveValue('1');
-  await page.getByRole('button', { name: 'Guardar fluxo', exact: true }).click();
+  await expect(page.locator('.build-flow-surface .composer-card').first().getByRole('textbox', { name: 'Valor de origem (USDC)', exact: true })).toHaveValue('1');
+  await chooseWorkflowMenuItem(page, 'Salvar fluxo');
   await expect.poll(() => savedCanonical(A.address)).toEqual(workflow);
   expect((await walletRequests(page)).filter(method => method !== 'eth_accounts' && method !== 'eth_chainId')).toEqual(requests.filter(method => method !== 'eth_accounts' && method !== 'eth_chainId'));
   await switchAccount(page, B.address);
@@ -212,10 +220,10 @@ test('Save → Your workflows → exact Canvas restoration; grouped executions, 
   await expect(library.getByRole('button', { name: `Abrir fluxo: ${name}`, exact: true })).toHaveCount(0);
   // The proof reuses the account the wallet now exposes (B), never A's earlier session; no selector opens.
   await expect(page.locator('.build009-wallet-info')).toHaveAttribute('title', new RegExp(B.address, 'i'));
-  await library.getByRole('button', { name: 'Ligar carteira e verificar titularidade', exact: true }).click();
+  await library.getByRole('button', { name: 'Conectar carteira e verificar titularidade', exact: true }).click();
   await expect(page.locator('dialog.wallet-selector[open]')).toHaveCount(0);
-  await expect(library).toContainText('Nenhum workflow salvo aguardando.');
-  await expect(library.locator('.dashboard-run-card')).toHaveCount(0);
+  await expect(library).toContainText('Nenhum fluxo salvo aguardando.');
+  await expect(library.locator('.ux-record')).toHaveCount(0);
   expect(errors).toEqual([]); networkGuard.assertClean();
 });
 

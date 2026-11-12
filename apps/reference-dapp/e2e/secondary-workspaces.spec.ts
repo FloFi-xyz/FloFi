@@ -4,7 +4,7 @@ import { installSupplyWallet, SUPPLY_OWNER } from './supply-fixtures';
 import { configureCanvasAction } from './composer-authoring-fixtures';
 import { selectSettingsTheme } from './settings-fixtures';
 import type { Page } from '@playwright/test';
-import { expectEditorSection, openBuilder, openEditorSection } from './build-entry-navigation';
+import { editorSteps, expectEditorSection, navigateTo, navigationDrawer, navigationLink, openBuilder, openEditorSection } from './build-entry-navigation';
 
 const workspaces = ['Credentials', 'Agents', 'Passkeys'] as const;
 function watchErrors(page: Page) {
@@ -14,8 +14,8 @@ function watchErrors(page: Page) {
   return errors;
 }
 async function navigateWorkspace(page: Page, label: typeof workspaces[number]) {
-  await page.locator('.navigation-trigger').click();
-  await page.getByRole('navigation', { name: 'Workspace navigation' }).getByRole('link', { name: label, exact: true }).click();
+  // P0 approved UX (board 03b): the drawer's Access group (an item may carry a status tag such as "In testing").
+  await navigateTo(page, label);
   await expect(page).toHaveURL(`/app/${label.toLowerCase()}`);
   await expect(page.getByRole('heading', { name: label, level: 1 })).toBeVisible();
   await expect(page.locator('.navigation-drawer')).toBeHidden();
@@ -42,19 +42,17 @@ for (const theme of ['light', 'dark'] as const) {
     await installSupplyWallet(page); await openBuilder(page);
     await expect(page.locator('.build009-wallet-info')).toBeVisible();
     await page.evaluate(() => { (window as unknown as { shellMarker: string }).shellMarker = 'persistent-shell'; });
-    const stages = page.getByRole('navigation', { name: 'Workflow stages' });
     for (const label of workspaces) {
       await navigateWorkspace(page, label);
       await expect(page.locator('html')).toHaveAttribute('data-theme', theme);
       await expect(page.getByRole('banner')).toHaveCount(1);
       await expect(page.getByRole('main')).toHaveCount(1);
       await expect(page.getByRole('group', { name: 'Wallet connection' })).toContainText('0x1111…1111');
-      await expect(stages.locator('[aria-current=page]')).toHaveCount(0);
-      // BUILD-FLOFI-CHAT-EDITOR-UX-001: Dashboard | Chat | Editor; Simulate and Execute are the Editor's sections, not tabs.
-      await expect(stages.getByRole('button')).toHaveText(['Dashboard', 'Chat', 'Editor']);
+      // P0 approved UX (board 03b): no stage tabs; the Editor stepper is shown only in the Editor, never on a secondary page.
+      await expect(editorSteps(page)).toHaveCount(0);
       await page.locator('.navigation-trigger').click();
-      const navigation = page.getByRole('navigation', { name: 'Workspace navigation' });
-      await expect(navigation.getByRole('link', { name: label, exact: true })).toHaveAttribute('aria-current', 'page');
+      const navigation = navigationDrawer(page);
+      await expect(navigationLink(page, label)).toHaveAttribute('aria-current', 'page');
       await expect(navigation.locator('[aria-current=page]')).toHaveCount(1);
       await page.keyboard.press('Escape');
       await expect(page.locator('.navigation-trigger')).toBeFocused();
@@ -102,13 +100,13 @@ for (const theme of ['light', 'dark'] as const) {
     await page.goBack(); await expect(page).toHaveURL('/app/agents');
     await page.goForward(); await expect(page).toHaveURL('/app/passkeys');
     await page.locator('.navigation-trigger').click();
-    await expect(page.getByRole('link', { name: 'Passkeys', exact: true })).toHaveAttribute('aria-current', 'page');
+    await expect(navigationLink(page, 'Passkeys')).toHaveAttribute('aria-current', 'page');
     await page.keyboard.press('Escape');
     await page.getByRole('button', { name: 'Settings', exact: true }).click();
     await selectSettingsTheme(page, theme === 'light' ? 'dark' : 'light');
     await selectSettingsTheme(page, theme);
     await page.getByRole('button', { name: 'Settings', exact: true }).press('Escape');
-    await stages.getByRole('button', { name: 'Dashboard', exact: true }).click();
+    await navigateTo(page, 'Dashboard');
     await expect(page).toHaveURL('/app/dashboard');
     await expect(page.getByRole('main', { name: 'Dashboard', exact: true })).toBeVisible();
     await openEditorSection(page, 'Build');

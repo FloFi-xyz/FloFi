@@ -8,7 +8,7 @@ import { hashArtifactBytes, type SemanticWorkflow } from '@defi-workflow-engine/
 import { test, expect, assertPassiveWallet, installPassiveWallet, readWorkflowIr, sendChatCommand, CHAT_COMMITTED } from './fixtures';
 import { replayProviderLogos } from './asset-logo-replay';
 import { composeStrategy } from '../src/engine/strategy-engine';
-import { expectEditorSection, openBuilder } from './build-entry-navigation';
+import { expectEditorSection, openBuilder, openWorkflowMenu, workflowMenuItem } from './build-entry-navigation';
 
 test.skip(process.env.FLOFI_WORKFLOW_UX_AUTHORING_E2E !== 'MOCKED_LOOPBACK_ONLY', 'Runs under playwright.workflow-ux.config.ts');
 // The EIP-55 reference vector (mixed case) and the same address with one letter's case flipped (checksum fails).
@@ -16,13 +16,14 @@ const MIXED = '0x5aAeb6053F3E94C9b9A09f33669435E7Ef1BeAed', BAD = '0x5aaeb6053F3
 const cards = (page: Page) => page.locator('.build-flow-surface .composer-card');
 const conversation = (page: Page) => page.getByRole('log', { name: 'Conversation' });
 const revision = (page: Page) => page.locator('.summary-bar');
+/** P0 approved UX (board 04): the Canvas header counts steps ("1 step", "2 steps"). */
 const actionsCount = (page: Page) => page.locator('.build-canvas-head .revision');
 async function open(page: Page) {
   await replayProviderLogos(page); await installPassiveWallet(page, '0xa4b1'); await openBuilder(page);
   await expect(conversation(page)).toContainText('Hi FloFier!');
 }
 async function say(page: Page, text: string) {
-  await page.locator('#mock-prompt').fill(text); await page.getByRole('button', { name: 'Send', exact: true }).click();
+  await page.locator('#mock-prompt').fill(text); await page.getByRole('button', { name: 'Send message', exact: true }).click();
 }
 async function chooseNetwork(page: Page, card: Locator, network: string) {
   await card.getByRole('button', { name: 'Select source token', exact: true }).click();
@@ -127,17 +128,19 @@ test.describe('UX-001 / UX-005 Send card and destination', () => {
 
 test('UX-002 the existing Automate action is a clock icon beside rename/save, and the old Canvas control is gone', async ({ page, networkGuard }) => {
   await open(page);
-  const header = page.locator('.build-canvas-head .canvas-name'), automate = page.getByRole('button', { name: 'Automate this workflow', exact: true });
-  await expect(header.getByRole('button', { name: 'Rename workflow', exact: true })).toBeVisible();
-  await expect(automate).toHaveCount(0);
+  // P0 approved UX (board 04): the name is the rename control; Save and Automate (with its clock icon) are the first items of the header's ···
+  // (More options) menu, Automate only where a real step exists, followed by the toolbar layout choice.
+  const header = page.locator('.build-canvas-head'), automate = workflowMenuItem(page, 'Automate this workflow');
+  await expect(header.locator('.canvas-name').getByRole('button', { name: /^Rename workflow: / })).toBeVisible();
+  await expect(header.locator('.workflow-more-menu .workflow-automate')).toHaveCount(0);
   await sendChatCommand(page, 'send 5 USDC on Arbitrum to 0x3333333333333333333333333333333333333333');
-  await expect(automate).toHaveCount(1);
-  await expect(header.getByRole('button', { name: 'Automate this workflow', exact: true })).toHaveAttribute('title', 'Automate this workflow');
-  const order = await header.locator('button').evaluateAll(buttons => buttons.map(button => button.className));
-  expect(order).toEqual(['workflow-rename', 'workflow-save', 'workflow-automate']);
+  await expect(header.locator('.workflow-more-menu .workflow-automate')).toHaveCount(1);
+  const menu = await openWorkflowMenu(page);
+  await expect(automate).toBeVisible();
+  const order = await menu.getByRole('menuitem').evaluateAll(items => items.map(item => item.className));
+  expect(order).toEqual(['workflow-save', 'workflow-automate', 'toolbox-mode-toggle']);
+  await expect(automate.locator('svg')).toHaveCount(1);
   await expect(page.locator('.canvas-automate-action')).toHaveCount(0);
-  const [save, clock] = await Promise.all([header.getByRole('button', { name: 'Save workflow', exact: true }).boundingBox(), automate.boundingBox()]);
-  expect(Math.abs(save!.y - clock!.y)).toBeLessThan(2); expect(clock!.x - (save!.x + save!.width)).toBeLessThan(12);
   await automate.focus(); await page.keyboard.press('Enter');
   await expect(page).toHaveURL(/\/app\/automations$/);
   await assertPassiveWallet(page); networkGuard.assertClean();
@@ -151,15 +154,15 @@ test.describe('UX-006 chat authoring in the empty Canvas', () => {
   test('a chat request becomes the card at once in place of the empty state; the chat’s Undo restores it', async ({ page, networkGuard }) => {
     await open(page);
     const empty = page.locator('.build-flow-surface .canvas-empty'), artifact = page.getByRole('button', { name: /^Review proposed change:/ });
-    await expect(empty).toContainText('Start your workflow'); await expect(actionsCount(page)).toHaveText('0 actions');
+    await expect(empty).toContainText('Start your workflow'); await expect(actionsCount(page)).toHaveText('0 steps');
     await say(page, 'Swap 5 USDC for WETH on Base');
     await expect(conversation(page).locator('.message.ai').last()).toContainText('Interpreted as');
     await expect(conversation(page).locator('.message.ai').last()).toContainText('Swap added to your workflow: 5 USDC');
     await expect(artifact).toHaveCount(0); await expect(empty).toHaveCount(0);
-    await expect(actionsCount(page)).toHaveText('1 action'); await expect(cards(page)).toHaveCount(1);
+    await expect(actionsCount(page)).toHaveText('1 step'); await expect(cards(page)).toHaveCount(1);
     await expect(revision(page)).toHaveAttribute('data-workflow-revision', '1');
     await conversation(page).locator('.message').last().getByRole('button', { name: 'Undo this change', exact: true }).click();
-    await expect(empty).toContainText('Start your workflow'); await expect(actionsCount(page)).toHaveText('0 actions');
+    await expect(empty).toContainText('Start your workflow'); await expect(actionsCount(page)).toHaveText('0 steps');
     await expect(revision(page)).toHaveAttribute('data-workflow-revision', '2');
     await assertPassiveWallet(page); networkGuard.assertClean();
   });
@@ -172,7 +175,7 @@ test.describe('UX-006 chat authoring in the empty Canvas', () => {
     await expect(artifact).toBeVisible(); await expect(artifact).not.toHaveClass(/proposal-artifact-centered/);
     const [box, surface] = await Promise.all([artifact.boundingBox(), page.locator('.build-flow-surface').boundingBox()]);
     expect(Math.abs(surface!.x + surface!.width - (box!.x + box!.width) - 16)).toBeLessThan(2); expect(Math.abs(box!.y - surface!.y - 16)).toBeLessThan(2);
-    await expect(actionsCount(page)).toHaveText('1 action');
+    await expect(actionsCount(page)).toHaveText('1 step');
     await assertPassiveWallet(page); networkGuard.assertClean();
   });
 });

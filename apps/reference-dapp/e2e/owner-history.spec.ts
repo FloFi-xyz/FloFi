@@ -52,7 +52,8 @@ async function inspect(id: string) {
     (SELECT count(*)::int FROM owner_history_visibility WHERE record_id=$1) AS archives`, [id])).rows[0]!; }
   finally { await database.close(); }
 }
-const card = (page: Page, id: string) => page.locator('.dashboard-run-card').filter({ has: page.locator(`a[href="/app/dashboard/runs/${id}"]`) });
+// P0 approved UX (board 11): each execution record is a row of Your workflows' one list.
+const card = (page: Page, id: string) => page.locator('.ux-record').filter({ has: page.locator(`a[href="/app/dashboard/runs/${id}"]`) });
 /**
  * BUILD-FLOFI-CHAT-E2E-DASHBOARD-UX-001: the execution history lives in Your workflows. A wallet that no signed-in FloFi account holds (these
  * test wallets have no account) proves itself once there — one sign-in signature for the saved workflows and the history together.
@@ -115,7 +116,7 @@ test('compact rows expose metadata on demand, support keyboard actions and archi
   await expect(row.getByRole('button', { name: 'Delete execution', exact: true })).toBeHidden();
   await page.setViewportSize({ width: 375, height: 844 });
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
-  await expect(row.getByRole('link', { name: /^View / })).toBeVisible();
+  await expect(row.getByRole('link', { name: /^Open record: / })).toBeVisible();
   const before = await inspect(id);
   await more.click(); await row.getByRole('button', { name: 'Archive execution', exact: true }).click();
   await expect(row).toHaveCount(0);

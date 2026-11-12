@@ -101,7 +101,7 @@ test('chat authors the same Base catalog swap; the committed card shows cbBTC', 
 
 async function ask(page: Page, text: string) {
   await page.locator('#mock-prompt').fill(text);
-  await page.getByRole('button', { name: 'Send', exact: true }).click();
+  await page.getByRole('button', { name: 'Send message', exact: true }).click();
 }
 const copilotSays = (page: Page) => page.getByRole('log', { name: 'Conversation' }).locator('.message.ai').last();
 /** BUILD-FLOFI-CONVERSATIONAL-001: each interpretation is committed at once; FloFi says how it read the words and what it added. */

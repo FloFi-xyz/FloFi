@@ -66,9 +66,11 @@ test.beforeEach(async ({ page }) => {
   await page.addScriptTag({ url: '/__ux006e-acceptance.js' }); await mount(page); await reads(page, 1);
 });
 test.afterEach(({ page }) => { expect(errors.get(page)).toEqual([]); });
+// P0 approved UX (board 11): the records are rows of Your workflows' one list (`.ux-workflow-rows`); a row's Open names its workflow
+// ("Open record: Swap"), and "No workflows executed yet" is the list's empty line.
 test('loads all 75 history records in bounded pages, keeps loaded records during a failed page and retries the same cursor',async({page})=>{
   await records(page);
-  const index=workspace(page),rows=index.locator('.dashboard-run-list > li'),more=index.getByRole('button',{name:'Load more history',exact:true});
+  const index=workspace(page),rows=index.locator('.ux-workflow-rows > li'),more=index.getByRole('button',{name:'Load more history',exact:true});
   await page.evaluate(()=>window.flofiWorkspaceAcceptance.respond(0,'page')); await expect(rows).toHaveCount(25);
   await more.click(); await reads(page,2);
   await expect(index.getByRole('button',{name:'Loading execution history…',exact:true})).toBeDisabled();
@@ -87,33 +89,33 @@ test('a pending history page from another wallet cannot populate the current wal
   await index.getByRole('button',{name:'Load more history',exact:true}).click(); await reads(page,2);
   await page.evaluate(value=>window.flofiWorkspaceAcceptance.wallet(value),other); await reads(page,3);
   await page.evaluate(()=>window.flofiWorkspaceAcceptance.respond(1,'page'));
-  await expect(index.locator('.dashboard-run-list > li')).toHaveCount(0);
+  await expect(index.locator('.ux-workflow-rows > li')).toHaveCount(0);
   await page.evaluate(()=>window.flofiWorkspaceAcceptance.respond(2,'empty'));
-  await expect(index.getByRole('heading',{name:'No workflows executed yet',exact:true})).toBeVisible();
+  await expect(index.getByText('No workflows executed yet',{exact:true})).toBeVisible();
 });
 
 test('loading and refresh never present a misleading empty account; source and verification states stay distinct', async ({ page }) => {
   await records(page);
   const index = workspace(page);
   await expect(index.getByRole('status')).toContainText('Loading execution history');
-  await expect(index.getByRole('heading', { name: 'No workflows executed yet', exact: true })).toHaveCount(0);
+  await expect(index.getByText('No workflows executed yet', { exact: true })).toHaveCount(0);
   await page.evaluate(() => window.flofiWorkspaceAcceptance.respond(0, 'owned'));
-  await expect(index.getByRole('link', { name: 'View Swap run fixture-detail-run', exact: true })).toBeVisible();
+  await expect(index.getByRole('link', { name: 'Open record: Swap', exact: true })).toBeVisible();
   await index.getByRole('button', { name: 'Refresh history', exact: true }).click(); await reads(page, 2);
   await expect(index.getByRole('status')).toContainText('Loading execution history');
-  await expect(index.getByRole('heading', { name: 'No workflows executed yet', exact: true })).toHaveCount(0);
+  await expect(index.getByText('No workflows executed yet', { exact: true })).toHaveCount(0);
   await page.evaluate(() => window.flofiWorkspaceAcceptance.respond(1, 'unavailable'));
   await expect(index.getByRole('status')).toContainText('Execution history temporarily unavailable');
   await index.getByRole('button', { name: 'Refresh history', exact: true }).click(); await reads(page, 3);
   await page.evaluate(() => window.flofiWorkspaceAcceptance.respond(2, 'verify'));
   await expect(index.getByRole('button', { name: 'Verify wallet for history', exact: true })).toBeVisible();
-  await expect(index.getByRole('heading', { name: 'No workflows executed yet', exact: true })).toHaveCount(0);
+  await expect(index.getByText('No workflows executed yet', { exact: true })).toHaveCount(0);
   expect(await page.evaluate(() => window.flofiWorkspaceAcceptance.requests().every(request => request.account === '0x1111111111111111111111111111111111111111'))).toBe(true);
 });
 
 test('wallet changes immediately hide loaded history and ignore late responses from previous owners', async ({ page }) => {
   await records(page);
-  const index = workspace(page), run = index.getByRole('link', { name: 'View Swap run fixture-detail-run', exact: true });
+  const index = workspace(page), run = index.getByRole('link', { name: 'Open record: Swap', exact: true });
   await page.evaluate(() => window.flofiWorkspaceAcceptance.respond(0, 'owned')); await expect(run).toBeVisible();
   await page.evaluate(value => window.flofiWorkspaceAcceptance.wallet(value), other); await reads(page, 2);
   await expect(run).toHaveCount(0); await expect(index.getByRole('status')).toContainText('Loading execution history');
@@ -126,10 +128,10 @@ test('wallet changes immediately hide loaded history and ignore late responses f
   await page.evaluate(() => window.flofiWorkspaceAcceptance.respond(2, 'owned')); await expect(run).toBeVisible();
   await page.evaluate(value => window.flofiWorkspaceAcceptance.wallet(value), other); await reads(page, 4);
   await page.evaluate(() => window.flofiWorkspaceAcceptance.respond(3, 'unrelated'));
-  await expect(run).toHaveCount(0); await expect(index.getByRole('heading', { name: 'No workflows executed yet', exact: true })).toBeVisible();
+  await expect(run).toHaveCount(0); await expect(index.getByText('No workflows executed yet', { exact: true })).toBeVisible();
   await page.evaluate(() => { window.flofiWorkspaceAcceptance.wallet(null); window.flofiWorkspaceAcceptance.view('dashboard'); });
   await expect(index.getByRole('status')).toContainText('Connect your wallet');
-  await expect(index.locator('.dashboard-run-card')).toHaveCount(0);
+  await expect(index.locator('.ux-record')).toHaveCount(0);
   expect(await page.evaluate(() => window.flofiWorkspaceAcceptance.requests().length)).toBe(4);
 });
 
@@ -137,7 +139,7 @@ test('saved detail responses cannot leak amounts, evidence or owner identifiers 
   await records(page);
   const detail = workspace(page);
   await page.evaluate(() => window.flofiWorkspaceAcceptance.respond(0, 'owned'));
-  await detail.getByRole('link', { name: 'View Swap run fixture-detail-run', exact: true }).click(); await reads(page, 2);
+  await detail.getByRole('link', { name: 'Open record: Swap', exact: true }).click(); await reads(page, 2);
   await page.evaluate(() => window.flofiWorkspaceAcceptance.respond(1, 'owned'));
   await expect(detail.locator('.execution-plan')).toContainText('0.0243 WETH');
   await expect(detail.getByRole('button', { name: /^(Retry|Authorize in wallet|Open current execution)$/ })).toHaveCount(0);

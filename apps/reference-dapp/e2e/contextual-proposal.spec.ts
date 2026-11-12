@@ -9,7 +9,7 @@ const artifact = (page: Page) => page.getByRole('button', { name: /^Review propo
 const popover = (page: Page) => page.getByRole('dialog', { name: 'Proposed change' });
 async function propose(page: Page, supply = '0.1', borrow = '0.01') {
   await page.locator('#mock-prompt').fill(`compose supply ${supply} USDC to Aave then borrow ${borrow} USDC then swap borrowed USDC to WETH on Base Sepolia slippage 50 bps owner ${SUPPLY_OWNER}`);
-  await page.getByRole('button', { name: 'Send', exact: true }).click();
+  await page.getByRole('button', { name: 'Send message', exact: true }).click();
   await expect(artifact(page)).toBeVisible();
 }
 async function geometry(page: Page) {
@@ -126,8 +126,9 @@ for (const theme of ['light', 'dark']) {
     await expect(artifact(page)).toBeVisible(); await artifact(page).click();
     await expect(popover(page)).toContainText('Supply 0.4 USDC');
     await page.keyboard.press('Escape');
-    const zoom = page.getByRole('slider', { name: 'Canvas zoom' });
-    await zoom.focus(); await zoom.press('ArrowRight');
+    // P0 approved UX (board 04): the zoom slider is gone; Zoom in (+) steps the engine zoom, read from the viewport's own transform.
+    const zoom = { inputValue: () => page.locator('.build-flow-surface .react-flow__viewport').evaluate(element => String(new DOMMatrixReadOnly(getComputedStyle(element).transform).a)) };
+    await page.locator('.build-flow-surface .canvas-navigator').getByRole('button', { name: 'Zoom in', exact: true }).click();
     await expect(artifact(page)).toBeVisible();
     await page.getByRole('button', { name: 'Fit workflow' }).click();
     await expect(artifact(page)).toBeVisible();
@@ -191,7 +192,7 @@ for (const theme of ['light', 'dark']) {
     const card = page.locator('.composer-card');
     const edit = async () => {
       await page.locator('#mock-prompt').fill('set node-002 amount 2');
-      await page.getByRole('button', { name: 'Send', exact: true }).click();
+      await page.getByRole('button', { name: 'Send message', exact: true }).click();
       await expect(artifact(page)).toBeVisible();
       await expect(card.getByRole('button', { name: 'Apply proposal' })).toHaveCount(0);
       await artifact(page).click();
@@ -218,7 +219,7 @@ test('Copilot liquidity edits retain the card acceptance gate and one contextual
   await boot(page, 'light');
   const submit = async (prefix: string, usdc: string) => {
     await page.locator('#mock-prompt').fill(`${prefix} 0.0001 WETH and ${usdc} USDC minimum 0 WETH and 0 USDC ticks -120 to 120 recipient ${SUPPLY_OWNER}`);
-    await page.getByRole('button', { name: 'Send', exact: true }).click();
+    await page.getByRole('button', { name: 'Send message', exact: true }).click();
     await expect(artifact(page)).toBeVisible(); await artifact(page).click();
   };
   await submit('add liquidity', '1');

@@ -22,7 +22,7 @@ const liquidityPanel = (page: Page) => page.getByRole('region', { name: 'Solana 
 const commits = (page: Page, count: number) => expect(conversation(page).locator('.message', { hasText: CHAT_COMMITTED })).toHaveCount(count);
 async function ask(page: Page, text: string) {
   await page.locator('#mock-prompt').fill(text);
-  await page.getByRole('button', { name: 'Send', exact: true }).click();
+  await page.getByRole('button', { name: 'Send message', exact: true }).click();
 }
 
 test('one sentence authors the swap and the position it funds as the linked Canvas pair; "yes" signs and sends nothing', async ({ page }) => {

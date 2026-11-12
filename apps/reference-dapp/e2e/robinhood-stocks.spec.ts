@@ -109,7 +109,7 @@ test('on mainnet the existing Bridge card offers the Robinhood Chain routes and 
 
 async function ask(page: Page, text: string) {
   await page.locator('#mock-prompt').fill(text);
-  await page.getByRole('button', { name: 'Send', exact: true }).click();
+  await page.getByRole('button', { name: 'Send message', exact: true }).click();
 }
 const conversation = (page: Page) => page.getByRole('log', { name: 'Conversation' });
 /**

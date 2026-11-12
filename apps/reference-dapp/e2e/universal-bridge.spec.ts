@@ -22,7 +22,7 @@ import { openBuilder, openEditorSection, reloadBuilder } from './build-entry-nav
 const copilotSays = (page: Page) => page.getByRole('log', { name: 'Conversation' }).locator('.message.ai').last();
 async function ask(page: Page, text: string) {
   await page.locator('#mock-prompt').fill(text);
-  await page.getByRole('button', { name: 'Send', exact: true }).click();
+  await page.getByRole('button', { name: 'Send message', exact: true }).click();
 }
 const panel = (page: Page) => page.getByRole('region', { name: 'Universal cross-chain bridge' });
 test('Copilot keeps a destination question without buttons and resolves one token reply without repeating the request', async ({ page }) => {
@@ -35,7 +35,7 @@ test('Copilot keeps a destination question without buttons and resolves one toke
   await expect(copilotSays(page)).toContainText('bridge 1 USDT from Solana to Robinhood Chain receive USDG via best slippage 100 bps');
   // BUILD-FLOFI-CONVERSATIONAL-001: once every required field is valid the step is committed at once; nothing is quoted, signed or sent by the chat.
   // The conversation is in Portuguese, so FloFi confirms in Portuguese.
-  await expect(copilotSays(page)).toContainText('Adicionado ao seu workflow: Transferir entre redes · 1 USDT');
+  await expect(copilotSays(page)).toContainText('Adicionado ao seu fluxo: Transferir entre redes · 1 USDT');
   await expect(page.locator('.summary-bar')).toHaveAttribute('data-workflow-revision', '1');
   expect(await counters()).toEqual(before);
 });

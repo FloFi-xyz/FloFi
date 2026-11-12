@@ -27,7 +27,7 @@ test.beforeAll(async () => {
 test.beforeEach(async ({ page }) => {
   const found: string[] = []; errors.set(page, found); page.on('pageerror', error => found.push(error.message));
   await page.goto('/app/dashboard');
-  await expect(page.getByRole('heading', { name: 'Your execution workspace' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Dashboard', level: 1, exact: true })).toBeVisible();
   await page.route('**/__portfolio-ux004.js', route => route.fulfill({ contentType: 'application/javascript', body: bundle }));
   await page.addStyleTag({ content: css }); await page.addScriptTag({ url: '/__portfolio-ux004.js' });
   await page.evaluate(() => {

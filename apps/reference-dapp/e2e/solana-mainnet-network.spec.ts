@@ -102,7 +102,7 @@ test('a test network named in chat is refused with an explanation and never move
   await closedEstimates(page);
   await openBuilder(page);
   await page.getByLabel('Describe your flow').fill('swap 1 USDC to WETH on Base Sepolia slippage 50 bps');
-  await page.getByRole('button', { name: 'Send', exact: true }).click();
+  await page.getByRole('button', { name: 'Send message', exact: true }).click();
   await expect(page.getByRole('log', { name: 'Conversation', exact: true }))
     .toContainText('Base Sepolia is a test network. FloFi runs on mainnets only, with real funds: rebuild this on Base.');
   await expect(page.getByRole('button', { name: 'Apply proposal', exact: true })).toHaveCount(0);

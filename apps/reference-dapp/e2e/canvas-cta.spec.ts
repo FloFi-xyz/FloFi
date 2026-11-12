@@ -2,7 +2,7 @@
 import { test, expect } from './fixtures';
 import { installSupplyWallet, SUPPLY_OWNER } from './supply-fixtures';
 import { configureCanvasAction } from './composer-authoring-fixtures';
-import { expectEditorSection, openBuilder, openEditorSection } from './build-entry-navigation';
+import { expectEditorSection, openBuilder, openEditorSection, useDockedToolbar } from './build-entry-navigation';
 
 // BUILD-FLOFI-BUILDER-UX-002 (owner-approved Editor brief): the Canvas takes the space, the FloFi panel is compact, and the Canvas lifecycle control
 // (Simulate) moved from the Canvas corner to the Editor footer, rendered once with its own handler; Simulate and Execute open from the stepper.
@@ -21,9 +21,14 @@ test('the Build CTA lives once in the Editor footer, beside the real notices, an
   await expect(graph.locator('.canvas-primary-action')).toHaveCount(0);
   await expect(footer.locator('button[data-lifecycle-action]')).toHaveCount(1);
   await expect(footer.getByRole('button', { name: /^View (simulation|execution)$/ })).toHaveCount(0);
-  await expect(page.getByRole('navigation', { name: 'Editor steps', exact: true }).getByRole('button')).toHaveText(['1Create', '2Simulate', '3Execute']);
+  // P0 approved UX (board 03b / 16): the stepper is in the top bar; a closed step adds its reason for assistive technology, so the visible number
+  // and label are read on their own.
+  const steps = page.getByRole('navigation', { name: 'Editor steps', exact: true });
+  await expect(steps.getByRole('button')).toHaveCount(3);
+  await expect(steps.locator('.editor-stepper-number')).toHaveText(['1', '2', '3']);
+  await expect(steps.locator('.editor-stepper-label')).toHaveText(['Create', 'Simulate', 'Execute']);
   for (const docked of [false, true]) {
-    if (docked) await page.getByRole('button', { name: 'Dock toolbar', exact: true }).click();
+    if (docked) await useDockedToolbar(page);
     for (const width of [1920, 1440, 390]) {
       await page.setViewportSize({ width, height: 900 });
       await expect(cta).toBeVisible();

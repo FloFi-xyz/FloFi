@@ -4,7 +4,8 @@ import { openBuilder } from './build-entry-navigation';
 
 test('ordinary application page makes no external request or WebSocket attempt', async ({ page, networkGuard }) => {
   await openBuilder(page);
-  await expect(page.getByRole('heading', { name: 'Your Workflow', exact: true })).toBeVisible();
+  // P0 approved UX (board 04): the Canvas header's name is its rename control, so the heading reads "Rename workflow: <name>".
+  await expect(page.getByRole('heading', { name: 'Rename workflow: Your Workflow', exact: true })).toBeVisible();
   networkGuard.assertClean();
 });
 

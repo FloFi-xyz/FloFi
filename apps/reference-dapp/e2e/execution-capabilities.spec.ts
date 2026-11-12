@@ -1,13 +1,13 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { test, expect, installPassiveWallet, assertPassiveWallet } from './fixtures';
 import { configureCanvasAction } from './composer-authoring-fixtures';
-import { editorSectionAction, openBuilder, reloadBuilder } from './build-entry-navigation';
+import { editorSectionAction, editorSteps, openBuilder, reloadBuilder } from './build-entry-navigation';
 
 test('normal Build keeps capability details internal and authoring requests no financial wallet authority', async ({ page }) => {
   await openBuilder(page);
   await expect(page.getByLabel('Execution environment')).toHaveCount(0);
   await expect(page.getByRole('region', { name: 'Workflow readiness' })).toHaveCount(0);
-  await expect(page.getByRole('navigation', { name: 'Workflow stages' })).toBeVisible();
+  await expect(editorSteps(page)).toBeVisible();
   await expect(page.getByRole('button', { name: 'Connect Wallet' })).toBeVisible();
   await expect(page.getByText('Advanced action setup', { exact: true })).toHaveCount(0);
   // Asset selection follows the existing connected-wallet environment policy.

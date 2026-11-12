@@ -24,7 +24,7 @@ for (const c of cases) test(c.id + ': normal Copilot proposal → Apply → matc
   await expect(page.getByLabel('Describe your flow')).toBeVisible();
   const before = JSON.parse(await readWorkflowIr(page)) as SemanticWorkflow;
   await page.locator('#mock-prompt').fill('Please ' + c.text);
-  await page.getByRole('button', { name: 'Send', exact: true }).click();
+  await page.getByRole('button', { name: 'Send message', exact: true }).click();
   const answer = conversation.locator('.message.ai').last();
   await expect(answer).toContainText('Interpreted as “' + c.sentence + '”');
   await expect(answer.locator('small')).toHaveText('FLOFI COPILOT · AI');
@@ -44,7 +44,7 @@ for (const c of cases.filter(c => ['Swap', 'Native Transfer', 'Supply'].includes
   await expect(page.getByRole('log', { name: 'Conversation' })).toContainText('Hi FloFier!');
   const before = JSON.parse(await readWorkflowIr(page)) as SemanticWorkflow;
   await page.locator('#mock-prompt').fill('Por favor, ' + c.pt);
-  await page.getByRole('button', { name: 'Send', exact: true }).click();
+  await page.getByRole('button', { name: 'Send message', exact: true }).click();
   const answer = page.getByRole('log', { name: 'Conversation' }).locator('.message.ai').last();
   await expect(answer).toContainText('Interpretado como “' + c.sentence + '”');
   await expect(answer).toContainText(CHAT_COMMITTED);
@@ -56,7 +56,7 @@ for (const c of cases.filter(c => ['Swap', 'Native Transfer', 'Supply'].includes
 // BUILD AAVE-V3-EXPANSION-001: every listed reserve of the Arbitrum Aave V3 market is authorable; WETH is no longer refused.
 test('a registered non-USDC Aave reserve is authored from Chat: Please supply 1 WETH to Aave on Arbitrum', async ({ page, networkGuard }) => {
   await replayProviderLogos(page); await installPassiveWallet(page, '0xa4b1'); await openBuilder(page);
-  await page.locator('#mock-prompt').fill('Please supply 1 WETH to Aave on Arbitrum'); await page.getByRole('button', { name: 'Send', exact: true }).click();
+  await page.locator('#mock-prompt').fill('Please supply 1 WETH to Aave on Arbitrum'); await page.getByRole('button', { name: 'Send message', exact: true }).click();
   const answer = page.getByRole('log', { name: 'Conversation' }).locator('.message.ai').last();
   await expect(answer).toContainText('Supply added to your workflow: 1 WETH'); await expect(answer).toContainText('Aave V3');
   await expect(answer).not.toContainText(/COPILOT_|ASSET_|SUPPLY_|UNISWAP_/);
@@ -69,7 +69,7 @@ for (const [text, explanation] of [
   ['Please provide 10 USDC and 0.005 WETH liquidity on Arbitrum fee 0.02%', 'registered fee tiers'],
 ]) test('honest refusal/clarification without a proposal: ' + text, async ({ page, networkGuard }) => {
   await replayProviderLogos(page); await installPassiveWallet(page, '0xa4b1'); await openBuilder(page);
-  await page.locator('#mock-prompt').fill(text!); await page.getByRole('button', { name: 'Send', exact: true }).click();
+  await page.locator('#mock-prompt').fill(text!); await page.getByRole('button', { name: 'Send message', exact: true }).click();
   const answer = page.getByRole('log', { name: 'Conversation' }).locator('.message.ai').last();
   await expect(answer).toContainText(explanation!); await expect(answer).not.toContainText(/COPILOT_|ASSET_|SUPPLY_|UNISWAP_/);
   await expect(page.getByRole('button', { name: /^Review proposed change:/ })).toHaveCount(0);

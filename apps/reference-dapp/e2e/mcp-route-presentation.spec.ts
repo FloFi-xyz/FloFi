@@ -2,10 +2,15 @@
 import type { Page } from '@playwright/test';
 import { test, expect } from './fixtures';
 import { connectViaBrowser, mcpClient } from './mcp-fixtures';
+import { editorSteps, navigationTrigger, openDashboard } from './build-entry-navigation';
 
 const enabled = process.env.GRYLOO_MCP_E2E === 'EMBEDDED_LOOPBACK_ONLY';
 const unknownSecret = `flofi_hs_${'A'.repeat(43)}`;
-const stages = (page: Page) => page.getByRole('navigation', { name: 'Workflow stages' });
+/** P0 approved UX (board 03b): the product workspace's navigation is the ☰ drawer, plus the Editor stepper while the Editor is open. */
+async function expectNoProductNavigation(page: Page) {
+  await expect(navigationTrigger(page)).toHaveCount(0);
+  await expect(editorSteps(page)).toHaveCount(0);
+}
 /** BUILD-SOLANA-TRANSFER-UX-001: a validated proposal opens on the minimal signing surface of the same workspace (no stage navigation). */
 const signingSurface = (page: Page) => page.getByRole('main', { name: 'Authorize with your wallet', exact: true });
 async function expectDedicatedRoute(page: Page, label: string) {
@@ -13,7 +18,7 @@ async function expectDedicatedRoute(page: Page, label: string) {
   await expect(page.getByRole('main', { name: label, exact: true })).toBeVisible();
   await expect(page.getByRole('link', { name: 'FloFi home' })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Settings', exact: true })).toBeVisible();
-  await expect(stages(page)).toHaveCount(0);
+  await expectNoProductNavigation(page);
   await expect(page.locator('.build-flow-surface,.execute-workspace,.dashboard-workspace')).toHaveCount(0);
   await expect(page.locator('body')).not.toContainText('MCP_OAUTH_NOT_ENABLED');
 }
@@ -39,7 +44,8 @@ test.describe(`MCP route presentation (OAuth ${enabled ? 'enabled' : 'disabled'}
       expect(response.status()).toBe(200);
       const html = await response.text();
       expect(html).toContain('mcp-route-state');
-      expect(html).not.toContain('aria-label="Workflow stages"');
+      expect(html).not.toContain('aria-label="Open navigation"');
+      expect(html).not.toContain('aria-label="Editor steps"');
       expect(html).not.toContain('MCP_OAUTH_NOT_ENABLED');
     }
   });
@@ -48,7 +54,7 @@ test.describe(`MCP route presentation (OAuth ${enabled ? 'enabled' : 'disabled'}
       await page.goto(path);
       await page.getByRole('link', { name: 'Go to FloFi', exact: true }).click();
       await expect(page).toHaveURL(/\/app$/);
-      await expect(stages(page)).toBeVisible();
+      await expect(navigationTrigger(page)).toBeVisible();
       await expect(page.locator('.app-shell')).toHaveCount(1);
       await expect(page.locator('.mcp-route-main')).toHaveCount(0);
     });
@@ -101,7 +107,7 @@ test.describe(`MCP route presentation (OAuth ${enabled ? 'enabled' : 'disabled'}
       } finally { release(); }
       await expect(page.getByRole('region', { name: /^Proposal from / })).toContainText('Nothing is authorized yet.');
       await expect(signingSurface(page)).toBeVisible();
-      await expect(stages(page)).toHaveCount(0);
+      await expectNoProductNavigation(page);
       await expect(page.locator('.app-shell')).toHaveCount(1);
       await expect(page.locator('.mcp-route-main')).toHaveCount(0);
       expect(page.url()).not.toContain(secret);
@@ -109,8 +115,7 @@ test.describe(`MCP route presentation (OAuth ${enabled ? 'enabled' : 'disabled'}
       // Leaving a validated approval resets its gate before another approval is resolved.
       await expect(page.getByRole('button', { name: 'Open navigation', exact: true })).toHaveCount(0);
       await page.getByRole('button', { name: 'Open Canvas', exact: true }).click();
-      await page.getByRole('button', { name: 'Open navigation', exact: true }).click();
-      await page.getByRole('navigation', { name: 'Workspace navigation' }).getByRole('link', { name: 'Dashboard' }).click();
+      await openDashboard(page);
       await expect(page).toHaveURL(/\/dashboard$/);
       await expect(page.getByRole('region', { name: /^Proposal from / })).toHaveCount(0);
       await page.evaluate(() => { sessionStorage.removeItem('flofi.approval.secret'); history.pushState(null, '', '/approve'); });
@@ -123,7 +128,7 @@ test.describe(`MCP route presentation (OAuth ${enabled ? 'enabled' : 'disabled'}
       // The same validated proposal (this tab's stored link) on the Canvas of the same workspace.
       await page.goto('/approve?view=canvas');
       await expect(page.getByRole('region', { name: /^Proposal from / })).toContainText('Nothing is authorized yet.');
-      await expect(stages(page)).toBeVisible();
+      await expect(editorSteps(page)).toBeVisible();
       await expect(page.getByRole('region', { name: 'Workflow canvas', exact: true })).toBeVisible();
       await expect(signingSurface(page)).toHaveCount(0);
       await page.goto('/approve#incomplete');

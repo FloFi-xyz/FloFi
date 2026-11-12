@@ -5,14 +5,15 @@ import { fileURLToPath } from 'node:url';
 import { configureCanvasAction } from './composer-authoring-fixtures';
 import type { Page } from '@playwright/test';
 import { reviewNow } from '../src/test-utils/review-fixture';
-import { editorTab, expectEditorSection, openBuilder, openEditorSection, reloadBuilder } from './build-entry-navigation';
+import { editorSteps, expectEditorSection, openBuilder, openEditorSection, reloadBuilder } from './build-entry-navigation';
 
 // Mount Execute with a real read-only canvas to verify native clicks, expiry and wallet updates.
 // These normalized fixtures do not claim to exercise RPC or wallet signatures.
 let bundle: string;
 const browserErrors = new WeakMap<Page, string[]>();
+// P0 approved UX (board 03b): the Editor stepper in the top bar is the stage navigation (the former stage tabs are gone).
 async function expectStageNavigationFits(page: Page) {
-  const stages = await page.getByRole('navigation', { name: 'Workflow stages' }).locator('button').evaluateAll(buttons => buttons.map(button => {
+  const stages = await editorSteps(page).locator('button').evaluateAll(buttons => buttons.map(button => {
     const range = document.createRange(); range.selectNodeContents(button);
     const content = range.getBoundingClientRect(), box = button.getBoundingClientRect();
     return { label: button.textContent, left: box.left, right: box.right, contentLeft: content.left, contentRight: content.right };
@@ -224,7 +225,7 @@ test('the real shell preserves Build and embedded Review while Execute stays rea
   await page.getByRole('button', { name: 'Add swap', exact: true }).click(); await configureCanvasAction(page, '2.5');
   await page.getByRole('button', { name: 'Simulate workflow', exact: true }).click();
   await expect(page.locator('#simulation-review')).toBeVisible();
-  await expect(page.getByRole('navigation', { name: 'Workflow stages' }).getByRole('button', { name: 'Review', exact: true })).toHaveCount(0);
+  await expect(editorSteps(page).getByRole('button', { name: 'Review', exact: true })).toHaveCount(0);
   await openEditorSection(page, 'Execute');
   await expect(page.locator('.execute-heading')).toHaveCount(0);
   await expect(page.getByRole('heading', { name: 'Your Workflow', exact: true })).toBeVisible();
@@ -239,7 +240,7 @@ test('the real shell preserves Build and embedded Review while Execute stays rea
   await expect(page.locator('#simulation-review')).toHaveCount(0);
   for (const theme of ['light', 'dark']) {
     await page.evaluate(value => document.documentElement.dataset.theme = value, theme);
-    await expectEditorSection(page, 'Execute'); await expect(editorTab(page)).toHaveClass('selected');
+    await expectEditorSection(page, 'Execute'); await expect(editorSteps(page).locator('[data-step-look="current"]')).toHaveCount(1);
     for (const width of [1440, 1024, 768, 375, 320]) {
       await page.setViewportSize({ width, height: 900 });
       await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);

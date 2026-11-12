@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { test, expect, applyPendingProposal, chooseWallet, openSimulationDetails, assertNoFinancialCanvasAction } from './fixtures';
-import { openEditorSection } from './build-entry-navigation';
+import { logOut, openEditorSection } from './build-entry-navigation';
 const OWNER = '0x1111111111111111111111111111111111111111';
 test('BUILD-009 passive wallet restoration and read-only quote cannot grant production execution', async ({ page }) => {
   test.setTimeout(180_000);
@@ -36,7 +36,8 @@ test('BUILD-009 passive wallet restoration and read-only quote cannot grant prod
   await page.getByLabel('Arbitrum swap slippage (bps)').fill('50');
   await page.getByRole('button', { name: 'Review Base → Arbitrum bridge → WETH swap' }).click();
   await applyPendingProposal(page);
-  await expect(page.getByText('Workflow network: Base (8453)', { exact: true })).toBeVisible();
+  // P0 approved UX (board 03b): the header's passive "Workflow network" label is gone; the Canvas header's network chips name it.
+  await expect(page.getByRole('list', { name: 'Workflow networks', exact: true })).toContainText('Base');
   await expect(page.getByText('0x1111…1111')).toBeVisible();
   await openEditorSection(page, 'Simulate');
   await openSimulationDetails(page);
@@ -56,8 +57,8 @@ test('BUILD-009 passive wallet restoration and read-only quote cannot grant prod
   await openEditorSection(page, 'Execute');
   await assertNoFinancialCanvasAction(page);
   await expect(page.getByRole('link', { name: 'Download Evidence Bundle' })).toHaveCount(0);
-  await page.getByRole('button', { name: 'Settings', exact: true }).click();
-  await page.getByRole('button', { name: 'Disconnect', exact: true }).click();
+  // P0 approved UX (board 03b): Log out (the former Settings → Disconnect) lives in the ☰ drawer.
+  await logOut(page);
   await expect(page.getByRole('button', { name: 'Connect Wallet' })).toBeVisible();
 });
 

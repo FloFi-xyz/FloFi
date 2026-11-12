@@ -37,6 +37,10 @@ async function fixture(page: Page, kind: 'Dashboard' | 'Details') {
   await expect(page.locator('.main > div:visible .dashboard-workspace')).toBeVisible();
 }
 const workspace = (page: Page) => page.locator('.main > div:visible .dashboard-workspace');
+/** P0 approved UX (board 11): Your workflows' records are ONE list behind filter chips (All, Needs attention, Saved, Executed). */
+async function filterRecords(page: Page, chip: 'All' | 'Needs attention' | 'Saved' | 'Executed') {
+  await workspace(page).getByRole('group', { name: 'Filter workflows', exact: true }).getByRole('button', { name: new RegExp(`^${chip}`) }).click();
+}
 async function theme(page: Page, value: 'light' | 'dark') {
   await page.getByRole('button', { name: 'Settings', exact: true }).click();
   await selectSettingsTheme(page, value === 'light' ? 'Light' : 'Dark');
@@ -49,7 +53,7 @@ async function noOverflow(page: Page) {
 test.beforeEach(async ({ page }) => {
   const found: string[] = []; errors.set(page, found); page.on('pageerror', error => found.push(error.message));
   await page.goto('/app/dashboard');
-  await expect(page.getByRole('heading', { name: 'Your execution workspace' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Dashboard', level: 1, exact: true })).toBeVisible();
   // Wait for shell hydration through its existing interactive control before mounting.
   await theme(page, 'light');
   await page.route('**/__ux006d-acceptance.js', route => route.fulfill({ contentType: 'application/javascript', body: bundle }));
@@ -71,14 +75,17 @@ test('shared theme switching preserves runs, read state, navigation and the sing
     await expect(page.getByRole('group', { name: 'Wallet connection' })).toHaveCount(1);
     expect(await page.evaluate(() => window.flofiDashboardAcceptance.counts())).toEqual({ built: 0, refreshed: 0, verified: 0, executed: 0 });
   }
-  const run = index.getByRole('link', { name: 'View Swap run fixture-completed', exact: true });
+  // The completed run is the one executed record (board 11: its row's Open names the workflow).
+  await filterRecords(page, 'Executed');
+  const run = index.getByRole('link', { name: 'Open record: Swap', exact: true });
   await run.focus(); await run.press('Enter');
   await expect(index.locator('.dashboard-final-result')).toHaveText('Completed');
   await theme(page, 'light');
   await expect(index.locator('.dashboard-final-result')).toHaveText('Completed');
   await expect(index.getByRole('button', { name: /^(Authorize in wallet|Retry|Continue execution)$/ })).toHaveCount(0);
   await index.getByRole('button', { name: 'Back to Dashboard' }).click();
-  await expect(index.locator('.dashboard-run-card')).toHaveCount(4);
+  await filterRecords(page, 'All');
+  await expect(index.locator('.ux-record')).toHaveCount(4);
 });
 
 for (const value of ['light', 'dark'] as const) {
@@ -86,11 +93,13 @@ for (const value of ['light', 'dark'] as const) {
     await theme(page, value);
     const index = workspace(page);
     await page.evaluate(() => { window.flofiDashboardAcceptance.mode('empty'); window.flofiDashboardAcceptance.view('records'); });
-    await expect(index.getByRole('heading', { name: 'No workflows executed yet', exact: true })).toBeVisible();
-    await expect(index.locator('.dashboard-run-card,.dashboard-attention-required')).toHaveCount(0);
-    await index.locator('.dashboard-history-empty').getByRole('button', { name: 'Build workflow', exact: true }).click();
-    expect(await page.evaluate(() => window.flofiDashboardAcceptance.counts().built)).toBe(1);
+    await expect(index.locator('.ux-list-empty')).toHaveText('No workflows executed yet');
+    await expect(index.locator('.ux-record,.dashboard-attention-required')).toHaveCount(0);
     await page.screenshot({ style: 'nextjs-portal{display:none}', path: `.tmp/ux006d-empty-${value}.png`, fullPage: true });
+    // P0 approved UX (board 10): with nothing in progress, the Dashboard's Current execution offers the one way to start (Create workflow).
+    await page.evaluate(() => window.flofiDashboardAcceptance.view('dashboard'));
+    await index.locator('.dashboard-current').getByRole('button', { name: 'Create workflow', exact: true }).click();
+    expect(await page.evaluate(() => window.flofiDashboardAcceptance.counts().built)).toBe(1);
     await page.evaluate(() => { window.flofiDashboardAcceptance.mode('disconnected'); window.flofiDashboardAcceptance.view('dashboard'); });
     await expect(index.getByRole('status')).toContainText('Use the wallet control in the FloFi header');
     await expect(index.locator('.dashboard-current,.dashboard-attention')).toHaveCount(0);
@@ -108,7 +117,7 @@ for (const value of ['light', 'dark'] as const) {
     await expect(index.locator('.dashboard-current')).toContainText('Unresolved');
     await page.evaluate(() => window.flofiDashboardAcceptance.mode('unavailable'));
     await expect(index.getByRole('status')).toContainText('Execution history temporarily unavailable');
-    await expect(index.getByRole('heading', { name: 'No workflows executed yet', exact: true })).toHaveCount(0);
+    await expect(index.getByText('No workflows executed yet', { exact: true })).toHaveCount(0);
     await expect(index.locator('.dashboard-current')).toContainText('Unresolved');
     await index.getByRole('button', { name: 'Refresh history', exact: true }).click();
     expect(await page.evaluate(() => window.flofiDashboardAcceptance.counts().refreshed)).toBe(1);
@@ -122,10 +131,15 @@ for (const value of ['light', 'dark'] as const) {
     await theme(page, value);
     const index = workspace(page);
     await page.evaluate(() => window.flofiDashboardAcceptance.view('records'));
-    await expect(index.locator('.workflows-attention .dashboard-run-list>li')).toHaveCount(3);
-    await expect(index.locator('.workflows-attention')).toContainText('Execution status unresolved');
-    for (const row of await index.locator('.dashboard-run-card').all()) await row.getByRole('button', { name: /^Show details for / }).click();
-    await expect(index.locator('.workflows-attention .dashboard-run-message').first()).toBeVisible();
+    // Board 11: one list; the records that need attention come first and are what the "Needs attention" chip lists.
+    await filterRecords(page, 'Needs attention');
+    const attention = index.getByRole('list', { name: 'Needs attention', exact: true });
+    await expect(attention.getByRole('listitem')).toHaveCount(3);
+    for (const row of await index.locator('.ux-record').all()) await row.getByRole('button', { name: /^Show details for / }).click();
+    await expect(attention).toContainText('Execution status unresolved');
+    await expect(attention.locator('.dashboard-run-message').first()).toBeVisible();
+    await filterRecords(page, 'All');
+    for (const row of await index.locator('.ux-record').all()) if ((await row.getByRole('button', { name: /^(Show|Hide) details for / }).getAttribute('aria-expanded')) !== 'true') await row.getByRole('button', { name: /^Show details for / }).click();
     const checks = await index.locator('.dashboard-status,.dashboard-run-message,.dashboard-run-facts,.dashboard-run-records').evaluateAll(elements => {
       const canvas = document.createElement('canvas'); canvas.width = canvas.height = 1;
       const context = canvas.getContext('2d')!;
@@ -143,7 +157,7 @@ for (const value of ['light', 'dark'] as const) {
       });
     });
     for (const check of checks) { expect(check.size, check.text ?? '').toBeGreaterThanOrEqual(12); expect(check.ratio, check.text ?? '').toBeGreaterThanOrEqual(4.5); }
-    const run = index.locator('.dashboard-run-list .dashboard-run-card').first();
+    const run = index.locator('.ux-workflow-rows .ux-record').first();
     const border = await run.evaluate(element => getComputedStyle(element).borderColor);
     const link = run.getByRole('link'); await link.hover();
     expect(await run.evaluate(element => getComputedStyle(element).borderColor)).not.toBe(border);
@@ -212,7 +226,7 @@ for (const value of ['light', 'dark'] as const) {
     await page.evaluate(() => window.flofiDashboardAcceptance.view('dashboard'));
     await page.evaluate(() => { window.flofiDashboardAcceptance.mode('history'); window.flofiDashboardAcceptance.longTitle(); });
     await noOverflow(page);
-    expect(await workspace(page).locator('.dashboard-run-current h3 button > span[title]').evaluate(element => element.getAttribute('title') === element.textContent && element.getBoundingClientRect().height <= parseFloat(getComputedStyle(element).lineHeight) + 1)).toBe(true);
+    expect(await workspace(page).locator('.ux-record-current h3 button > span[title]').evaluate(element => element.getAttribute('title') === element.textContent && element.getBoundingClientRect().height <= parseFloat(getComputedStyle(element).lineHeight) + 1)).toBe(true);
     await page.screenshot({ style: 'nextjs-portal{display:none}', path: `.tmp/ux006d-dashboard-${value}-320.png`, fullPage: true });
     await fixture(page, 'Details');
     for (const mode of ['completed', 'partial', 'unresolved', 'bridge-completed', 'cow-pending', 'legacy', 'not-found', 'unavailable'] as const) {
@@ -231,7 +245,8 @@ test('canonical Dashboard and Run Details routes retain the shell and privacy-sa
     await expect(page.getByRole('status')).toContainText('Connect your wallet');
     await page.screenshot({ style: 'nextjs-portal{display:none}', path: `.tmp/ux006d-shell-disconnected-${value}.png`, fullPage: true });
     await page.setViewportSize({ width: 320, height: 900 });
-    const stages = await page.getByRole('navigation', { name: 'Workflow stages' }).locator('button').evaluateAll(buttons => buttons.map(button => {
+    // P0 approved UX (board 03b): the Dashboard's top bar has no stage tabs (navigation is the ☰ drawer); its controls' labels fit them at 320 px.
+    const stages = await page.locator('.top-bar').getByRole('button').evaluateAll(buttons => buttons.map(button => {
       const range = document.createRange(); range.selectNodeContents(button);
       const content = range.getBoundingClientRect(), box = button.getBoundingClientRect();
       return { label: button.textContent, left: box.left, right: box.right, contentLeft: content.left, contentRight: content.right };
@@ -249,6 +264,6 @@ test('canonical Dashboard and Run Details routes retain the shell and privacy-sa
     await page.screenshot({ style: 'nextjs-portal{display:none}', path: `.tmp/ux006d-shell-run-disconnected-${value}.png`, fullPage: true });
     await page.getByRole('button', { name: 'Back to Dashboard' }).click();
     await expect(page).toHaveURL(/\/app\/dashboard$/);
-    await expect(page.getByRole('heading', { name: 'Your execution workspace' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Dashboard', level: 1, exact: true })).toBeVisible();
   }
 });

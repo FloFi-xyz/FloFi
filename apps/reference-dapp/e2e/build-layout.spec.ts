@@ -22,7 +22,7 @@ test('Build places the existing assistant beside the canvas and a selected cardâ
   await expect(page.locator('.library .copilot')).toHaveCount(0);
   await expect(page.getByText('Technical authoring tools', { exact: true })).toHaveCount(0);
   await assistant.locator('.chat-form input').fill('explain');
-  await assistant.getByRole('button', { name: 'Send', exact: true }).click();
+  await assistant.getByRole('button', { name: 'Send message', exact: true }).click();
   await expect(assistant.locator('.message.you')).toHaveText('YOUexplain');
   await expect(page.locator('.summary-bar')).toHaveAttribute('data-workflow-revision', '0');
   await page.getByRole('button', { name: 'Add supply', exact: true }).click();
@@ -87,10 +87,10 @@ test('Build keeps existing toolbar actions and zoom behavior at their new positi
     controlsBox.x + controlsBox.width <= nodeBox.x || controlsBox.y + controlsBox.height <= nodeBox.y).toBe(true);
   const transform = () => graph.locator('.react-flow__viewport').getAttribute('style');
   const before = await transform();
-  await controls.getByRole('slider', { name: 'Canvas zoom' }).press('ArrowLeft');
+  await controls.getByRole('button', { name: 'Zoom out', exact: true }).click();
   await expect.poll(transform).not.toBe(before);
   const zoomedOut = await transform();
-  await controls.getByRole('slider', { name: 'Canvas zoom' }).press('ArrowRight');
+  await controls.getByRole('button', { name: 'Zoom in', exact: true }).click();
   await expect.poll(transform).not.toBe(zoomedOut);
   await controls.getByRole('button', { name: 'Fit workflow', exact: true }).click();
   await expect(graph.locator('.flow-card')).toBeInViewport();

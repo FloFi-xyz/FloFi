@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import {test,expect} from './fixtures';
 import {installSupplyWallet,resetSupplyHarness,authorSupply,reviewSupply,supplySendCount} from './supply-fixtures';
-import { openEditorSection } from './build-entry-navigation';
+import { editorStep, openEditorSection } from './build-entry-navigation';
 test.afterEach(async({page},info)=>{if(info.status!==info.expectedStatus){const detail=await page.getByRole('region',{name:'Aave Supply'}).locator('pre').textContent(); console.error('Supply failure:',detail?JSON.parse(detail).error:'no details');}});
 test.beforeEach(async()=>{await resetSupplyHarness();});
 test('canonical Build → Supply → Simulate → Review → Execute through injected wallet',async({page})=>{
@@ -41,7 +41,8 @@ for(const kind of ['wrong chain','wrong account','approval rejected','Supply rej
 
 test('pending wallet signature keeps navigation available and sends the recorded request only once',async({page})=>{
   await installSupplyWallet(page,{pause:'APPROVAL'});await authorSupply(page);await reviewSupply(page);
-  const build=await page.getByRole('navigation',{name:'Workflow stages'}).getByRole('button',{name:'Editor',exact:true}).boundingBox();if(!build)throw new Error('Editor navigation missing');
+  // P0 approved UX (board 03b): the Editor stepper's Create step (in the top bar) is the navigation back to the Canvas.
+  const build=await editorStep(page,'Build').boundingBox();if(!build)throw new Error('Editor navigation missing');
   await page.getByRole('region',{name:'Aave Supply'}).getByRole('button',{name:'Execute',exact:true}).click();
   await expect(page.locator('[data-supply-wallet-pending="true"]')).not.toHaveAttribute('inert','');
   await page.mouse.click(build.x+build.width/2,build.y+build.height/2);

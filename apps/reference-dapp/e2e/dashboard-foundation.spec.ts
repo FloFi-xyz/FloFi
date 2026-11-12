@@ -2,7 +2,7 @@
 import { test, expect, assertNoFinancialCanvasAction } from './fixtures';
 import { selectSettingsTheme } from './settings-fixtures';
 import type { Page } from '@playwright/test';
-import { openBuilder, openEditorSection, reloadBuilder } from './build-entry-navigation';
+import { closeNavigation, editorSteps, navigationDrawer, navigationLink, openBuilder, openDashboard, openEditorSection, openNavigation, reloadBuilder } from './build-entry-navigation';
 
 const pageErrors = new WeakMap<Page, string[]>();
 test.beforeEach(async ({ page }) => {
@@ -13,13 +13,18 @@ test.afterEach(async ({ page }) => { expect(pageErrors.get(page)).toEqual([]); }
 
 test('Dashboard resolves inside the existing shell with no replacement wallet or navigation', async ({ page }) => {
   await page.goto('/app/dashboard');
-  await expect(page.getByRole('heading', { name: 'Your execution workspace' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Dashboard', level: 1, exact: true })).toBeVisible();
   await expect(page.locator('.top-bar')).toHaveCount(1);
   await expect(page.getByRole('group', { name: 'Wallet connection' })).toHaveCount(1);
-  const navigation = page.getByRole('navigation', { name: 'Workflow stages' });
-  // BUILD-FLOFI-CHAT-EDITOR-UX-001: Dashboard | Chat | Editor; Simulate and Execute are the Editor's sections, not tabs.
-  await expect(navigation.getByRole('button')).toHaveText(['Dashboard', 'Chat', 'Editor']);
-  await expect(navigation.getByRole('button', { name: 'Dashboard', exact: true })).toHaveAttribute('aria-current', 'page');
+  // BUILD-FLOFI-CHAT-EDITOR-UX-001 / P0 approved UX (board 03b): navigation lives in the ☰ drawer — New workflow (Chat), Editor, Dashboard (current
+  // here); Simulate and Execute are the Editor's sections (its stepper is not shown on the Dashboard).
+  await expect(editorSteps(page)).toHaveCount(0);
+  const navigation = await openNavigation(page);
+  await expect(navigation.getByRole('link').first()).toHaveText('New workflow');
+  await expect(navigationLink(page, 'Editor')).toBeVisible();
+  await expect(navigationLink(page, 'Dashboard')).toHaveAttribute('aria-current', 'page');
+  await expect(navigationDrawer(page).getByRole('link', { name: /^(Simulate|Execute)$/ })).toHaveCount(0);
+  await closeNavigation(page);
   await expect(page.getByRole('button', { name: 'Settings', exact: true })).toHaveCount(1);
   await expect(page.getByRole('status')).toContainText('Connect your wallet to view your execution history');
   await expect(page.locator('.dashboard-run-list')).toHaveCount(0);
@@ -42,8 +47,7 @@ test('Build, Simulate and Execute retain their current workflow through Dashboar
   const amount = page.getByRole('textbox', { name: 'Source amount (USDC)', exact: true });
   await expect(amount).toBeVisible();
   await amount.fill('2.5'); await amount.press('Enter');
-  const nav = page.getByRole('navigation', { name: 'Workflow stages' });
-  await nav.getByRole('button', { name: 'Dashboard', exact: true }).click();
+  await openDashboard(page);
   await expect(page).toHaveURL(/\/app\/dashboard$/);
   await expect(page.getByRole('button', { name: 'Verify wallet for history', exact: true })).toBeVisible();
   await expect(page.locator('.dashboard-run-list')).toHaveCount(0);
@@ -55,13 +59,13 @@ test('Build, Simulate and Execute retain their current workflow through Dashboar
   await openEditorSection(page, 'Simulate');
   await expect(page.locator('#simulation-review')).toBeVisible();
   await expect(page.getByRole('region', { name: 'Simulation workflow graph', exact: true }).locator('.composer-amount')).toHaveText('2.5 USDC');
-  await nav.getByRole('button', { name: 'Dashboard', exact: true }).click();
+  await openDashboard(page);
   await openEditorSection(page, 'Simulate');
   await expect(page.locator('#simulation-review')).toBeVisible();
   await openEditorSection(page, 'Execute');
   await assertNoFinancialCanvasAction(page);
   await expect(page.getByRole('region', { name: 'Execution workflow graph', exact: true }).locator('.composer-amount')).toHaveText('2.5 USDC');
-  await nav.getByRole('button', { name: 'Dashboard', exact: true }).click();
+  await openDashboard(page);
   await page.goBack();
   await assertNoFinancialCanvasAction(page);
   expect(await page.evaluate(() => (window as unknown as { dashboardWalletMethods: string[] }).dashboardWalletMethods.filter(method => /send|sign/i.test(method)))).toEqual([]);
@@ -76,12 +80,12 @@ test('run-detail deep links and refresh stay inside the canonical wallet-scoped 
   await expect(page.getByRole('button', { name: 'Authorize in wallet', exact: true })).toHaveCount(0);
   await page.getByRole('button', { name: 'Back to Dashboard' }).click();
   await expect(page).toHaveURL(/\/app\/dashboard$/);
-  await expect(page.getByRole('heading', { name: 'Your execution workspace' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Dashboard', level: 1, exact: true })).toBeVisible();
 });
 
 for (const theme of ['light', 'dark']) test(`${theme} Dashboard inherits FloFi surfaces without a separate palette`, async ({ page }) => {
   await page.goto('/app/dashboard');
-  await expect(page.getByRole('heading', { name: 'Your execution workspace' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Dashboard', level: 1, exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'Settings', exact: true }).click();
   await selectSettingsTheme(page, theme === 'light' ? 'Light' : 'Dark');
   await expect(page.locator('html')).toHaveAttribute('data-theme', theme);
@@ -94,6 +98,6 @@ for (const theme of ['light', 'dark']) test(`${theme} Dashboard inherits FloFi s
   for (const width of [1440, 1024, 820, 390, 320]) {
     await page.setViewportSize({ width, height: 900 });
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
-    await expect(page.getByRole('heading', { name: 'Your execution workspace' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Dashboard', level: 1, exact: true })).toBeVisible();
   }
 });

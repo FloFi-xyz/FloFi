@@ -11,7 +11,7 @@ test.afterEach(async ({ page }) => { await assertPassiveWallet(page); });
 const prompt = (page: Page) => page.getByLabel('Describe your flow');
 const send = async (page: Page, text: string) => {
   await prompt(page).fill(text);
-  await page.getByRole('button', { name: 'Send', exact: true }).click();
+  await page.getByRole('button', { name: 'Send message', exact: true }).click();
 };
 /** BUILD-FLOFI-CONVERSATIONAL-001: a valid chat request is committed at once (no proposal to apply). */
 const commit = sendChatCommand;

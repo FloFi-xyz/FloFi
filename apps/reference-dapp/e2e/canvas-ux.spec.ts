@@ -1,7 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { test, expect, installPassiveWallet, assertPassiveWallet, sendChatCommand, openSimulationDetails, readWorkflowIr } from './fixtures';
 import type { Page } from '@playwright/test';
-import { continueToBuilder, openBuilder, openEditorSection, reloadBuilder, useToolbarRail } from './build-entry-navigation';
+import { chooseWorkflowMenuItem, closeWorkflowMenu, continueToBuilder, openBuilder, openEditorSection, openWorkflowMenu, reloadBuilder, useDockedToolbar, useToolbarRail, workflowMenuItem, workflowMoreOptions } from './build-entry-navigation';
+
+/** P0 approved UX (board 04): the zoom slider is gone; the navigator's Zoom out (−) steps the same engine zoom down. */
+const zoomOut = (graph: import('@playwright/test').Locator) => graph.locator('.canvas-navigator').getByRole('button', { name: 'Zoom out', exact: true }).click();
 
 test.beforeEach(async ({ page }) => { await installPassiveWallet(page); });
 test.afterEach(async ({ page }) => { await assertPassiveWallet(page); });
@@ -73,9 +76,11 @@ test('dragging updates stored layout, survives editor changes and Build navigati
   const id = await node.getAttribute('data-id');
   const before = await node.boundingBox();
   if (!before || !id) throw new Error('New node missing');
-  await page.mouse.move(before.x + 60, before.y + 55);
+  // P0 approved UX (board 04): the restyled card puts its value boxes where the old grab point was; the card is dragged by its title, as an owner does.
+  const grab = (await node.locator('.composer-action-title').boundingBox())!;
+  await page.mouse.move(grab.x + 10, grab.y + grab.height / 2);
   await page.mouse.down();
-  await page.mouse.move(before.x + 190, before.y + 130, { steps: 14 });
+  await page.mouse.move(grab.x + 140, grab.y + grab.height / 2 + 75, { steps: 14 });
   await page.mouse.up();
   const after = await node.boundingBox();
   expect(after!.x).toBeGreaterThan(before.x + 80);
@@ -170,11 +175,13 @@ test('toolbox mode is presentation-only and persists across Build navigation', a
   const graph = page.getByRole('region', { name: 'Workflow graph' });
   const original = await graph.locator('.react-flow__node').count();
   const revisionBeforeSwitch = await page.locator('.summary-bar').getAttribute('data-workflow-revision');
-  // BUILD-FLOFI-BUILDER-UX-002 (owner-approved brief): the vertical rail is the default; docking is the owner's remembered choice.
-  await expect(page.getByRole('button', { name: 'Dock toolbar' })).toHaveAttribute('aria-pressed', 'true');
+  // BUILD-FLOFI-BUILDER-UX-002 (owner-approved brief): the vertical rail is the default; docking is the owner's remembered choice. P0 approved UX
+  // (board 04): the choice is the ··· (More options) menu's "Dock toolbar" / "Undock toolbar" item.
   await expect(graph.locator('.floating-toolbox')).toBeVisible();
   await expect(graph.locator('.floating-toolbox').getByRole('button', { name: 'Add swap' })).toBeVisible();
-  await page.getByRole('button', { name: 'Dock toolbar' }).click();
+  await openWorkflowMenu(page);
+  await expect(workflowMenuItem(page, 'Dock toolbar')).toBeVisible();
+  await workflowMenuItem(page, 'Dock toolbar').click();
   await expect(graph.locator('.floating-toolbox')).toHaveCount(0);
   await expect(page.locator('.canvas-head').getByRole('button', { name: 'Add swap' })).toBeVisible();
   await expect(graph.locator('.react-flow__node')).toHaveCount(original);
@@ -182,11 +189,13 @@ test('toolbox mode is presentation-only and persists across Build navigation', a
   await addFromToolbox(page, 'swap');
   await openEditorSection(page, 'Simulate');
   await openEditorSection(page, 'Build');
-  await expect(page.getByRole('button', { name: 'Undock toolbar' })).toHaveAttribute('aria-pressed', 'false');
   await expect(graph.locator('.floating-toolbox')).toHaveCount(0);
-  await page.getByRole('button', { name: 'Undock toolbar' }).click();
+  await openWorkflowMenu(page);
+  await expect(workflowMenuItem(page, 'Undock toolbar')).toBeVisible();
+  await workflowMenuItem(page, 'Undock toolbar').click();
   await expect(graph.locator('.floating-toolbox')).toBeVisible();
-  await expect(graph.locator('.canvas-utility-dock').getByRole('button', { name: 'Undo', exact: true })).toBeVisible();
+  // Board 04: Undo and Redo sit in the Canvas header in either layout.
+  await expect(page.locator('.build-canvas-head').getByRole('button', { name: 'Undo', exact: true })).toBeVisible();
   await expect(page.getByText('Technical workflow details')).toHaveCount(0);
   await expect(page.getByText('Demo assistant')).toHaveCount(0);
   await expect(page.getByText('Demo mode', { exact: true })).toHaveCount(0);
@@ -222,10 +231,10 @@ test('floating toolbox keeps a clickable gutter from viewport controls', async (
     const controls = await graph.locator('.canvas-navigator').boundingBox();
     if (!toolbox || !controls) throw new Error('Canvas controls missing');
     expect(controls.x).toBeGreaterThanOrEqual(toolbox.x + toolbox.width + 8);
-    await graph.getByRole('slider', { name: 'Canvas zoom' }).press('ArrowLeft');
+    await zoomOut(graph);
     await addFromToolbox(page, 'swap');
     await expect(graph.locator('.react-flow__node')).toHaveCount(1);
-    await page.getByRole('button', { name: 'Dock toolbar' }).click();
+    await useDockedToolbar(page);
   }
 });
 
@@ -235,7 +244,7 @@ test('marquee follows the pointer, stays clipped, and selects exactly the inters
   await addFromToolbox(page, 'swap');
   await addFromToolbox(page, 'swap');
   const graph = page.getByRole('region', { name: 'Workflow graph' });
-  await graph.getByRole('slider', { name: 'Canvas zoom' }).press('ArrowLeft');
+  await zoomOut(graph);
   const initialSurface = await graph.boundingBox();
   if (!initialSurface) throw new Error('Canvas missing');
   await page.mouse.move(initialSurface.x + initialSurface.width / 2, initialSurface.y + initialSurface.height / 2);
@@ -301,7 +310,7 @@ test('drag keeps node mounted and cyclic connections leave semantic edges unchan
   await expect(page.locator('.summary-bar')).toHaveAttribute('data-workflow-revision', String(Number(revision) + 1));
   const connectedIr = await readWorkflowIr(page);
   await connect(page, 'node-003', 'node-002');
-  await page.getByRole('button', { name: 'Dock toolbar' }).click();
+  await chooseWorkflowMenuItem(page, 'Dock toolbar');
   await expect(page.locator('.react-flow__edge')).toHaveCount(1);
   expect(await readWorkflowIr(page)).toBe(connectedIr);
   await expect(page.locator('.summary-bar')).toHaveAttribute('data-workflow-revision', String(Number(revision) + 1));
@@ -323,7 +332,8 @@ test('text controls guard deletion and approved workflow edges stay protected', 
   await page.getByLabel('Describe your flow').focus();
   await page.keyboard.press('Backspace');
   await expect(page.locator('.build-flow-surface .react-flow__edge')).toHaveCount(2);
-  await page.locator('.canvas-head h2').click();
+  // P0 approved UX (board 04): the header's name is now its rename control, so focus leaves the text controls through the header's step count.
+  await page.locator('.build-canvas-head .revision').click();
   await page.keyboard.press('Delete');
   await expect(page.getByText('This connection is required by the workflow.')).toBeVisible();
   await expect(page.locator('.build-flow-surface .react-flow__edge')).toHaveCount(2);
@@ -338,14 +348,15 @@ test('the first toolbar action waits for initialization and survives preference 
   const scripts = new Promise<void>(resolve => { release = resolve; });
   await page.route('**/_next/static/**/*.js', async route => { await scripts; await route.fallback(); });
   const shell = page.locator('.app-shell');
-  const undock = shell.locator('.toolbox-mode-toggle');
+  // P0 approved UX (board 04): the layout choice lives in the Canvas header's ··· (More options) menu.
+  const undock = workflowMoreOptions(page);
   try {
     await page.goto('/app', { waitUntil: 'commit' });
     await expect(shell).toHaveAttribute('inert', '');
     // BUILD0-UX-001: a fresh visit is server-rendered on Build 0; until initialization nothing there is actionable either.
     const request = page.locator('#build-entry-request');
     await expect(request).toBeVisible();
-    await expect(page.getByRole('button', { name: 'Create strategy', exact: true })).toBeDisabled();
+    await expect(page.getByRole('button', { name: 'Create workflow', exact: true })).toBeDisabled();
     await request.focus();
     await expect(request).not.toBeFocused();
   } finally { release(); }
@@ -356,11 +367,13 @@ test('the first toolbar action waits for initialization and survives preference 
   await expect(undock).toBeVisible();
   // The rail is the default; the owner's docked choice is restored after a reload.
   await expect(page.locator('.floating-toolbox')).toBeVisible();
-  await page.getByRole('button', { name: 'Dock toolbar' }).click();
+  await chooseWorkflowMenuItem(page, 'Dock toolbar');
   await expect(page.locator('.floating-toolbox')).toHaveCount(0);
   await reloadBuilder(page);
   await expect(page.locator('.floating-toolbox')).toHaveCount(0);
-  await expect(page.locator('.canvas-head').getByRole('button', { name: 'Undock toolbar' })).toBeVisible();
+  await openWorkflowMenu(page);
+  await expect(workflowMenuItem(page, 'Undock toolbar')).toBeVisible();
+  await closeWorkflowMenu(page);
   await expect(page.locator('.summary-bar')).toHaveAttribute('data-workflow-revision', '0');
   await expect(page.locator('.react-flow__node')).toHaveCount(0);
 });
@@ -371,16 +384,18 @@ test('floating toolbox stays inside a narrow editor without page overflow', asyn
   await useToolbarRail(page);
   const graph = page.getByRole('region', { name: 'Workflow graph' });
   await expect(graph.locator('.floating-toolbox')).toBeVisible();
-  // BUILD-FLOFI-BUILDER-UX-002: the step actions fill the rail; the utilities (duplicate, undo, redo, delete, dock) have their own small toolbar.
-  await expect(graph.locator('.floating-toolbox button')).toHaveCount(11);
-  await expect(graph.locator('.canvas-utility-dock button')).toHaveCount(5);
-  for (const box of [await graph.locator('.floating-toolbox').boundingBox(), await graph.locator('.canvas-utility-dock').boundingBox()]) {
+  // BUILD-FLOFI-BUILDER-UX-002 / P0 approved UX (board 04): the step actions fill the rail (with its show-names chevron); there is no utility
+  // toolbar in the graph any more (Undo and Redo are in the header; Duplicate and Delete float above a selected card).
+  await expect(graph.locator('.floating-toolbox .canvas-rail-toggle')).toHaveCount(1);
+  await expect(graph.locator('.canvas-utility-dock')).toHaveCount(0);
+  for (const box of [await graph.locator('.floating-toolbox').boundingBox()]) {
     const surface = (await graph.boundingBox())!;
     expect(box!.x).toBeGreaterThanOrEqual(surface.x); expect(box!.x + box!.width).toBeLessThanOrEqual(surface.x + surface.width);
     expect(box!.y + box!.height).toBeLessThanOrEqual(surface.y + surface.height);
   }
   await expect(graph.getByRole('button', { name: 'Add send', exact: true })).toBeVisible();
-  await expect(graph.getByRole('button', { name: 'Privacy', exact: true })).toBeDisabled();
+  // Privacy is not offered until it is available (no disabled placeholder).
+  await expect(graph.getByRole('button', { name: 'Privacy', exact: true })).toHaveCount(0);
   await expect(graph.getByRole('button', { name: 'Add repay', exact: true })).toBeVisible();
   await expect(graph.getByRole('button', { name: 'Add withdraw', exact: true })).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);

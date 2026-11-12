@@ -48,7 +48,7 @@ async function open(page: Page) {
   await openBuilder(page); await expect(page.locator('.build009-wallet-info')).toBeVisible({ timeout: 15000 });
 }
 async function rename(page: Page, name: string) {
-  await page.getByRole('button', { name: 'Rename workflow', exact: true }).click();
+  await page.getByRole('button', { name: /^Rename workflow: / }).click();
   await page.getByRole('textbox', { name: 'Workflow name', exact: true }).fill(name);
   await page.getByRole('textbox', { name: 'Workflow name', exact: true }).press('Enter');
 }
@@ -157,12 +157,12 @@ test('desktop/mobile graph keeps approved action order, zoom/fit controls and ca
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
     const viewport = graph(page).locator('.react-flow__viewport');
     const before = await viewport.getAttribute('style');
-    await graph(page).getByRole('slider', { name: 'Canvas zoom' }).press('ArrowLeft');
+    await graph(page).getByRole('button', { name: 'Zoom out', exact: true }).click();
     await expect(viewport).not.toHaveAttribute('style', before!);
     const smaller = await viewport.getAttribute('style');
-    await graph(page).getByRole('slider', { name: 'Canvas zoom' }).press('ArrowRight');
+    await graph(page).getByRole('button', { name: 'Zoom in', exact: true }).click();
     await expect(viewport).not.toHaveAttribute('style', smaller!);
-    await graph(page).getByRole('slider', { name: 'Canvas zoom' }).press('ArrowLeft');
+    await graph(page).getByRole('button', { name: 'Zoom out', exact: true }).click();
     const beforeFit = await viewport.getAttribute('style');
     await graph(page).getByRole('button', { name: 'Fit workflow', exact: true }).click();
     await expect(viewport).not.toHaveAttribute('style', beforeFit!);

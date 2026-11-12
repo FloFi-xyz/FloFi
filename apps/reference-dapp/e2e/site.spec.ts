@@ -219,7 +219,8 @@ test('a new visitor gets English on the site, sign-in and /app; saved Portuguese
   await expect(page.getByRole('link', { name: 'Explore the builder without an account', exact: true })).toBeVisible();
   await expect(page.locator('html')).toHaveAttribute('lang', 'en');
   await page.goto('/app');
-  await expect(page.getByRole('button', { name: 'Prefer the editor? Build manually', exact: true })).toBeVisible();
+  // P0 approved UX (board 03): the Chat entry's one action names the language (the former "Build manually" link is gone).
+  await expect(page.getByRole('button', { name: 'Create workflow', exact: true })).toBeVisible();
   await expect(page.locator('html')).toHaveAttribute('lang', 'en');
   // The default is not written as anyone's preference.
   expect((await context.cookies()).filter(cookie => cookie.name === 'flofi_language')).toEqual([]);
@@ -227,7 +228,7 @@ test('a new visitor gets English on the site, sign-in and /app; saved Portuguese
   // An existing visitor's saved Portuguese is kept everywhere, from the first paint.
   await context.addCookies([{ name: 'flofi_language', value: 'PT', url: new URL('/', baseURL).href }]);
   for (const [path, locator] of [['/', h1(HERO_PT)], ['/login', page.getByRole('link', { name: 'Explorar o construtor sem conta', exact: true })],
-    ['/app', page.getByRole('button', { name: 'Prefere o editor? Montar manualmente', exact: true })]] as const) {
+    ['/app', page.getByRole('button', { name: 'Criar fluxo', exact: true })]] as const) {
     const response = await page.goto(path);
     expect(await response!.text(), path).toMatch(/<html lang="pt-BR"/);
     await expect(locator).toBeVisible();
@@ -238,7 +239,7 @@ test('a new visitor gets English on the site, sign-in and /app; saved Portuguese
   await page.goto('/');
   await expect(h1(HERO_PT)).toBeVisible();
   await page.goto('/app');
-  await expect(page.getByRole('button', { name: 'Prefere o editor? Montar manualmente', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Criar fluxo', exact: true })).toBeVisible();
   // A saved English preference is kept as well.
   await context.addCookies([{ name: 'flofi_language', value: 'EN', url: new URL('/', baseURL).href }]);
   await page.evaluate(() => localStorage.setItem('flofi.language', 'EN'));

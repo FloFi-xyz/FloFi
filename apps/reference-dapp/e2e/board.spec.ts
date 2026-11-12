@@ -688,7 +688,8 @@ test('every CTA and link resolves; the campaign posts link to a real page with t
   await expect(page.getByRole('heading', { level: 1 })).toHaveText('Say where you’re going.');
   // With the rollout flag disabled in this legacy campaign profile, the existing /app behavior is preserved.
   await page.goto('/app');
-  await expect(page.getByRole('navigation', { name: 'Workflow stages' })).toBeVisible();
+  // P0 approved UX (board 03b): the product shell's navigation is the ☰ drawer (the former stage tabs are gone).
+  await expect(page.getByRole('button', { name: 'Open navigation', exact: true })).toBeVisible();
 });
 
 

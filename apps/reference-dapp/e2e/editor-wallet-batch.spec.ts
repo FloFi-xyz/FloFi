@@ -119,7 +119,7 @@ async function installBatchWallet(page: Page, owner: string) {
 async function say(page: Page, text: string, label: string) {
   const cards = page.locator('.build-flow-surface .composer-card'), before = await cards.count();
   await page.locator('#mock-prompt').fill(text);
-  await page.getByRole('button', { name: 'Send', exact: true }).click();
+  await page.getByRole('button', { name: 'Send message', exact: true }).click();
   await expect(cards).toHaveCount(before + 1, { timeout: 20_000 });
   await expect(cards.nth(before)).toContainText(label);
 }

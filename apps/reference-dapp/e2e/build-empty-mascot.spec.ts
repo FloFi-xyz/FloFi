@@ -94,7 +94,7 @@ for (const theme of ['Light', 'Dark'] as const) {
     await expect(graph.locator('.react-flow__node')).toHaveCount(0);
     await expect(graph.locator('.canvas-empty-mascot')).toBeVisible();
     await expect(page.locator('.summary-bar')).toHaveAttribute('data-workflow-revision', '0');
-    const panned = await transform(); await graph.getByRole('slider', { name: 'Canvas zoom' }).press('ArrowLeft'); await expect.poll(transform).not.toBe(panned);
+    const panned = await transform(); await graph.getByRole('button', { name: 'Zoom out', exact: true }).click(); await expect.poll(transform).not.toBe(panned);
     await page.getByRole('button', { name: 'Add supply', exact: true }).press('Enter');
     await expect(graph.locator('.canvas-empty')).toHaveCount(0); await expect(graph.locator('.canvas-empty-mascot')).toHaveCount(0);
     await expect(graph.locator('.react-flow__node')).toHaveCount(1);

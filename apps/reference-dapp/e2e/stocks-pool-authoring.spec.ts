@@ -162,7 +162,7 @@ test('Orca Pool contribution fields use the existing Solana position review and 
   // Enter authored bounds directly; this check needs no quote or provider calls.
   const prompt = page.locator('#mock-prompt');
   await prompt.fill('Add liquidity 0.01 SOL and 0.30 devUSDC ticks -39104 to -36992 on Solana Devnet');
-  await page.getByRole('button', { name: 'Send', exact: true }).click();
+  await page.getByRole('button', { name: 'Send message', exact: true }).click();
   await page.getByRole('button', { name: 'Apply proposal', exact: true }).click();
   const card = cards(page);
   const first = card.getByRole('textbox', { name: 'First liquidity amount (SOL)', exact: true });

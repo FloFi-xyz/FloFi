@@ -20,7 +20,7 @@ async function undo(page: Page, text = 'Undo this change') {
 const revision = (page: Page, value: number) => expect(page.locator(`.summary-bar[data-workflow-revision="${value}"]`)).toHaveCount(1);
 async function ask(page: Page, text: string) {
   await page.locator('#mock-prompt').fill(text);
-  await page.getByRole('button', { name: 'Send', exact: true }).click();
+  await page.getByRole('button', { name: 'Send message', exact: true }).click();
 }
 
 test.beforeEach(async () => { await resetSupplyHarness(); });
@@ -57,9 +57,9 @@ test('Portuguese and mainnet requests are committed with explicit notes, and the
   await openBuilder(page);
   await ask(page, 'Coloca 1 USDC na Aave na Base Sepolia');
   // BUILD-COPILOT-002: replies follow the language of the latest message; the canonical sentence stays the exact grammar.
-  await expect(copilotSays(page)).toContainText('Adicionado ao seu workflow:');
+  await expect(copilotSays(page)).toContainText('Adicionado ao seu fluxo:');
   await expect(copilotSays(page)).toContainText('Interpretado como “supply 1 USDC to Aave on Base Sepolia”');
-  await expect(copilotSays(page)).toContainText('Quer adicionar outra ação ou revisar o seu workflow?');
+  await expect(copilotSays(page)).toContainText('Quer adicionar outra ação ou revisar o seu fluxo?');
   await revision(page, 1); await expect(cards(page)).toHaveCount(1);
   await undo(page, 'Desfazer esta alteração');
   await expect(cards(page)).toHaveCount(0);
@@ -151,7 +151,7 @@ test('an answer that arrives after a workflow change is discarded', async ({ pag
   await expect(page.locator('.build009-wallet-info')).toHaveAttribute('title', new RegExp(SUPPLY_OWNER, 'i'));
   await ask(page, 'Put 2 USDC into Aave on Base Sepolia');
   await expect(conversation(page)).toContainText('Interpreting your message…');
-  await expect(page.getByRole('button', { name: 'Send', exact: true })).toBeDisabled();
+  await expect(page.getByRole('button', { name: 'Send message', exact: true })).toBeDisabled();
   await page.getByRole('button', { name: 'Add supply', exact: true }).click();
   const card = page.locator('.build-flow-surface .composer-card.active');
   // P0 workflow execution: the Canvas amount applies on Enter (no Review/Apply proposal).
