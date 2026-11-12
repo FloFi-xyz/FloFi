@@ -21,7 +21,7 @@ import { JUPITER_SOLANA_MAINNET } from '@defi-workflow-engine/action-registry';
 import { createDatabase } from '@defi-workflow-engine/cloud-runtime';
 import { base58Encode } from '@defi-workflow-engine/reference-compiler';
 import { createNativeTransferNode, type SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
-import { E2E_APP_ORIGIN } from './app-origin';
+import { E2E_APP_ORIGIN, chooseLanguage } from './app-origin';
 import { openSimulationDetails } from './fixtures';
 import { logOut } from './build-entry-navigation';
 import { authorSolanaSwap, chooseSolanaWallet, jupiterControl } from './jupiter-fixtures';
@@ -219,8 +219,10 @@ test('the landing opens sign-in with exactly Google, Email and Web3 Wallet throu
   expect(csp).not.toMatch(/walletconnect|turnkey/i);
   await page.setViewportSize({ width: 390, height: 844 });
   await shot(page, '02-login-mobile-dark');
-  // A later init script runs after setup's own, so the next load is light and in Portuguese.
+  // A later init script runs after setup's own, so the next load is light; Portuguese is chosen through the authoritative language cookie
+  // (P0 hotfix, locale contract: storage alone no longer overrides the suite's English cookie).
   await page.context().addInitScript(() => { localStorage.setItem('flofi.theme', 'light'); localStorage.setItem('flofi.language', 'PT'); });
+  await chooseLanguage(page.context(), 'PT');
   await page.reload();
   await expect(page.getByRole('group', { name: 'Métodos de login' }).getByRole('button')).toHaveText(['Google', 'Email', 'Carteira Web3']);
   await shot(page, '03-login-mobile-light-pt');

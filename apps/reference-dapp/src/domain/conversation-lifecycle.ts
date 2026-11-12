@@ -18,7 +18,7 @@ import { currentExecution, projectExecutionResult } from './execution-result';
 import { shellChainLabel } from './product-shell';
 import type { Command } from './commands';
 import { conversationCopy } from './conversation-copy';
-import { portuguese } from '../i18n/pt';
+import { translate } from '../i18n/translate';
 import type { SequencePresentation } from './sequence-presentation';
 import type { WorkflowProgressView } from './workflow-progress';
 
@@ -372,7 +372,8 @@ export function conversationExecution(view: LifecycleView): ConversationExecutio
 }
 
 // ── Authoring changes the chat committed ────────────────────────────────────────────────────────────────────────────────────────────────
-const label = (language: ConversationLanguage, value: string) => language === 'PT' ? portuguese[value] ?? value : value;
+// P0 hotfix (locale contract): the shared catalog lookup (as every component), never an exact-match side table; values pass through unchanged.
+const label = (language: ConversationLanguage, value: string) => translate(language, value);
 /**
  * Steps a chat command would drop that the owner did not name (a linked step, or a whole workflow a composition replaces). Such a change is not
  * committed from chat: it stays the existing Canvas proposal, so nothing unrelated disappears without an explicit Apply.
@@ -380,7 +381,7 @@ const label = (language: ConversationLanguage, value: string) => language === 'P
 export function lostSteps(before: Workflow, after: Workflow, command: Command, context: ReviewContext, language: ConversationLanguage = 'EN'): string[] {
   const named = command.type === 'REMOVE' ? [command.nodeId] : command.type === 'REMOVE_MANY' ? command.nodeIds : [];
   return composerActions(before).map((node, index) => ({ node, index })).filter(({ node }) => !named.includes(node.nodeId) && !after.nodes.some(kept => kept.nodeId === node.nodeId))
-    .map(({ node, index }) => `${index + 1}. ${label(language, composerSummary(before, node, context).action)}`);
+    .map(({ node, index }) => translate(language, '{0}. {1}', index + 1, label(language, composerSummary(before, node, context).action)));
 }
 /** The chat's confirmation of a committed change, read from the stored workflow (never from the model's words). */
 export function describeChatChange(before: Workflow, after: Workflow, context: ReviewContext, language: ConversationLanguage): string[] {

@@ -3565,7 +3565,8 @@
         "apps/reference-dapp/src/domain/intelligence/operational-state.ts",
         "apps/reference-dapp/src/domain/intelligence/turn-metrics.ts",
         "apps/reference-dapp/src/domain/proposal.ts",
-        "apps/reference-dapp/src/domain/privacy-notice.ts"
+        "apps/reference-dapp/src/domain/privacy-notice.ts",
+        "apps/reference-dapp/src/domain/chat-message.ts"
       ],
       "suites": [
         "app.domain.copilot-mainnet-bridge",
@@ -4151,7 +4152,10 @@
         "apps/reference-dapp/src/i18n/pt-wallets.ts",
         "apps/reference-dapp/src/i18n/pt-workflow-execution.ts",
         "apps/reference-dapp/src/i18n/pt-workflow-runs.ts",
-        "apps/reference-dapp/src/i18n/pt.ts"
+        "apps/reference-dapp/src/i18n/pt.ts",
+        "apps/reference-dapp/src/server/request-language.ts",
+        "apps/reference-dapp/src/i18n/translate.ts",
+        "apps/reference-dapp/src/i18n/pt-locale-contract.ts"
       ],
       "suites": [
         "app.e2e.canvas-keyboard",

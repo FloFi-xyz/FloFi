@@ -6,6 +6,7 @@ import { assertAutomationHarness, query } from './automation-fixtures';
 import { groundAutomationDraft, type AutomationDraft } from '../src/domain/copilot-automation';
 import { validateAutomationInput } from '../src/automations/definition';
 import { openBuilder } from './build-entry-navigation';
+import { chooseLanguage } from './app-origin';
 
 const draft: AutomationDraft = { kind: 'SCHEDULED_DCA', asset: 'ETH', side: 'BUY', network: 'BASE_SEPOLIA', amount: '10', spendAsset: 'USDC', time: '09:00', condition: null, threshold: null, percent: null };
 const cases = [
@@ -23,7 +24,8 @@ for (const [text, interpretation, language] of cases) test(`explicit chat confir
   // BUILD-SOLANA-TRANSFER-UX-001: the proof reuses the wallet already connected in this browser (no selector); it signs the sign-in message.
   await proveConnectedEvmWallet(page, page.locator('body'), owner.address);
   await expect(page.getByRole('heading', { name: 'Create an automation', exact: true })).toBeVisible();
-  if (language === 'PT') await page.evaluate(() => localStorage.setItem('flofi.language', 'PT'));
+  // P0 hotfix (locale contract): the language cookie is authoritative (storage alone no longer overrides the suite's English cookie).
+  if (language === 'PT') await chooseLanguage(page.context(), 'PT');
   await openBuilder(page);
   const beforeAuthoring = (await walletRequests(page)).length;
   const create = language === 'PT' ? 'Criar automação' : 'Create automation';

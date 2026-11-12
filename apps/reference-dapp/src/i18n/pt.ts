@@ -48,6 +48,7 @@ import { portugueseFlight } from './pt-flight';
 import { portugueseApprovedUx } from './pt-approved-ux';
 import { portugueseApprovedUxPages } from './pt-approved-ux-pages';
 import { portugueseApprovedUxEditor } from './pt-approved-ux-editor';
+import { portugueseLocaleContract } from './pt-locale-contract';
 import { portugueseExecutionContinuity } from './pt-execution-continuity';
 /** English source messages are stable presentation keys. Technical identifiers never enter this catalog. */
 export const portuguese: Readonly<Record<string, string>> = {
@@ -307,6 +308,8 @@ export const portuguese: Readonly<Record<string, string>> = {
   ...portugueseApprovedUxPages,
   ...portugueseApprovedUxEditor,
   // P0 hotfix (execution continuity, layout, Flight and locale): new keys only.
+  // P0 hotfix (locale contract): the execution panels' and stores' code → message tables (new keys only).
+  ...portugueseLocaleContract,
   ...portugueseExecutionContinuity,
   ...portugueseApprovedUx,
 };

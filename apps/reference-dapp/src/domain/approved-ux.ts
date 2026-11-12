@@ -95,6 +95,8 @@ export function isExplainRequest(text: string): boolean {
   return parts.length > 0 && parts.length <= 3 && parts.every(part => EXPLAIN.has(part));
 }
 export type ActiveBlocker = { readonly title: string; readonly message: string; readonly feeShortfall?: NativeFeeShortfall | null; readonly owner?: string | null;
+  /** P0 hotfix (locale contract): the sentence rendered in a given language (values as explicit parameters), when the message carries values. */
+  readonly messageIn?: ((language: 'EN' | 'PT') => string) | undefined;
   /** Part of this workflow ran or may have run (a step, a run, a restore): an explanation then never says nothing was sent. */ readonly started?: boolean };
 /** The blocker in plain words with the same facts the panel shows: the server's numbers when it has them, and the next action. EN source copy. */
 export function blockerExplanation(blocker: ActiveBlocker): { readonly text: string; readonly parameters: readonly string[] } | null {

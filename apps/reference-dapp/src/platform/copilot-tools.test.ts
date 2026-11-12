@@ -5,7 +5,7 @@
  * evidence only): no provider, network, wallet or model is reached.
  */
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
-import { COPILOT_TOOL_DEFINITIONS, COPILOT_TOOL_NAMES, copilotToolkitOf, runCopilotTool, type CopilotToolContext, type RouteDiscovery } from './copilot-tools';
+import { COPILOT_TOOL_DEFINITIONS, COPILOT_TOOL_NAMES, COPILOT_TOOL_NOTES, copilotToolkitOf, runCopilotTool, type CopilotToolContext, type RouteDiscovery } from './copilot-tools';
 import { registerFixtureCatalogs, resetNetworkCatalogs } from '../domain/intelligence/intelligence.test-harness';
 import type { CopilotContextCard } from '../domain/intelligence/operational-state';
 
@@ -79,6 +79,21 @@ describe('capabilities, assets, context and validation', () => {
     expect(needs.output).toEqual({ ok: true, kind: 'NEEDS', field: 'targetNetwork', options: ['Base', 'Arbitrum One', 'Ethereum'] });
     expect((await runCopilotTool('explain_failure', '{"code":"BASE_REVISION_CONFLICT"}', ctx())).output).toMatchObject({ ok: true, code: 'BASE_REVISION_CONFLICT', explanation: expect.any(String) });
     expect((await runCopilotTool('explain_failure', '{"code":"lowercase"}', ctx())).outcome).toBe('CODE_INVALID');
+  });
+  // P0 hotfix (locale contract): the facts a model may quote are in the person's language; codes, symbols and numbers are unchanged.
+  it('FloFi\'s own sentences in tool facts follow the turn\'s language (EN and PT), never English inside a Portuguese turn', async () => {
+    const pt = ctx({}, { language: 'PT' });
+    const native = await runCopilotTool('resolve_asset', '{"network":"base","reference":"eth"}', pt), token = await runCopilotTool('resolve_asset', '{"network":"base","reference":"cbbtc"}', pt);
+    expect(native.output).toMatchObject({ ok: true, symbol: 'ETH', native: true, note: COPILOT_TOOL_NOTES.PT.native });
+    expect(token.output).toMatchObject({ ok: true, symbol: 'cbBTC', note: COPILOT_TOOL_NOTES.PT.token });
+    expect((await runCopilotTool('resolve_asset', '{"network":"base","reference":"eth"}', ctx())).output).toMatchObject({ note: 'Native coin (not a wrapped token).' });
+    const valid = await runCopilotTool('validate_strategy', JSON.stringify({ strategy: JSON.stringify({ action: 'swap', network: 'base', inputAsset: 'USDC', outputAsset: 'ETH', amount: '1' }) }), pt);
+    expect(valid.output).toMatchObject({ ok: true, valid: true, authority: COPILOT_TOOL_NOTES.PT.authority });
+    const plan = await runCopilotTool('plan_goal', JSON.stringify({ sourceNetwork: 'base', sourceAsset: 'USDC', amount: '25', targetNetwork: 'solana', targetAsset: 'SOL', use: 'HOLD', preference: null }), pt);
+    expect(plan.output).toMatchObject({ ok: true, kind: 'PLAN', authoring: COPILOT_TOOL_NOTES.PT.authoring });
+    const explained = await runCopilotTool('explain_failure', '{"code":"BASE_REVISION_CONFLICT"}', pt), english = await runCopilotTool('explain_failure', '{"code":"BASE_REVISION_CONFLICT"}', ctx());
+    expect(explained.output.explanation).not.toBe(english.output.explanation);
+    for (const note of Object.values(COPILOT_TOOL_NOTES.PT)) expect(Object.values(COPILOT_TOOL_NOTES.EN)).not.toContain(note);
   });
 });
 

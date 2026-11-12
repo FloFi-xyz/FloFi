@@ -138,3 +138,21 @@ describe('stale context and safety', () => {
     expect(looksSecret('Swap 2 USDC to WETH on Base Sepolia')).toBe(false);
   });
 });
+
+// P0 hotfix (locale contract): a closed replay fixture (or a model that ignored the reply-language note) may answer in English on a Portuguese
+// screen. Its own sentences are never shown then; FloFi's deterministic copy in the person's language stands, and offered values stay.
+describe('model sentences in another language than the interface', () => {
+  it('an English refusal or question on a Portuguese screen is replaced by FloFi\'s Portuguese copy', () => {
+    const refusing = new CopilotSession(); refusing.interfaceLanguage = 'PT';
+    const refused = refusing.say('quero fazer staking do meu eth na lido', intent.unsupported('Staking is not supported by FloFi yet.', 'EN'));
+    expect(refused?.text).toBeTruthy(); expect(refused!.text).not.toContain('Staking is not supported');
+    const asking = new CopilotSession(); asking.interfaceLanguage = 'PT';
+    const question = asking.say('trocar USDC', intent.clarify(['outputAsset'], 'Which token should you receive?', ['WETH', 'cbBTC'], 'EN'));
+    expect(question?.text).toBeTruthy(); expect(question!.text).not.toContain('Which token');
+    expect(question!.options).toEqual(expect.arrayContaining(['WETH', 'cbBTC']));
+  });
+  it('a model sentence already in the interface language is kept', () => {
+    const s = new CopilotSession(); s.interfaceLanguage = 'EN';
+    expect(s.say('stake my eth on lido', intent.unsupported('Staking is not supported by FloFi yet.', 'EN'))?.text).toContain('Staking is not supported by FloFi yet.');
+  });
+});

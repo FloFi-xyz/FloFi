@@ -7,7 +7,10 @@ import { editorReducer, initialEditor, type EditorState } from '../domain/editor
 import type { Command } from '../domain/commands';
 import type { SimulationSource } from '../domain/simulation-presentation';
 import type { ConversationBridge, FlofiConversation } from './flofi-conversation';
+import { shownMessage } from '../domain/chat-message';
 import { setActiveNetworkScope } from '../domain/network-scope';
+import { translate } from '../i18n/translate';
+import { portuguese } from '../i18n/pt';
 
 /**
  * BUILD-FLOFI-CONVERSATIONAL-001: the chat's lifecycle over the real editor reducer, the real Review projections and the real Canvas lifecycle
@@ -115,6 +118,27 @@ describe('BUILD-FLOFI-CONVERSATIONAL-001 conversational workflow', () => {
     expect(last(chat).text).toMatch(/^Preparing your reviewed wallet request: FloFi re-checks the quote, your wallet and its network first. Then confirm or reject it in your wallet; FloFi never signs for you/);
     expect(controls.request).not.toHaveBeenCalled();
   });
+  // P0 hotfix (locale contract): every deterministic FloFi message of the lifecycle is written from its copy key and values in both languages,
+  // so the chat shows it in the CURRENT interface language after a switch (never "Review workflow" or "Workflow confirmed" in a Portuguese chat).
+  it('writes every lifecycle message in both languages from the same copy and values', async () => {
+    await say('swap 10 USDC to WETH on Base Sepolia slippage 100 bps');
+    await say('Review workflow');
+    reviewedPatch = reviewed(); lifecycle(reviewedPatch); render();
+    const chat = await say('Yes, I confirm');
+    const flofi = chat.messages.filter(message => message.role === 'flofi');
+    expect(flofi.length).toBeGreaterThanOrEqual(3);
+    for (const message of flofi) {
+      expect(message.variants, message.text).toBeDefined();
+      expect(message.variants!.EN.text, message.text).toBe(message.text);
+      const pt = shownMessage(message, 'PT');
+      expect(pt.language).toBe('PT');
+      expect(pt.text).not.toBe(message.text);
+      for (const english of ['Review workflow', 'Add another action', 'Workflow confirmed', 'Do you confirm this workflow?', 'Would you like to'])
+        expect([pt.text, pt.question ?? '', ...pt.options ?? []].join(' | '), english).not.toContain(english);
+    }
+    const confirmed = shownMessage(last(chat), 'PT');
+    expect(confirmed.text).toMatch(/0x1111…1111/); expect(confirmed.options).toEqual([...shownMessage(last(chat), 'PT').options!]);
+  });
   it('BUILD-FLOFI-EXECUTION-PERFORMANCE-001: a FloFi wallet that cannot sign in this page stops the chat before any Review is accepted', async () => {
     f.floFi = true; f.canSign = false;
     try {
@@ -179,7 +203,13 @@ describe('BUILD-FLOFI-CONVERSATIONAL-001 conversational workflow', () => {
     setActiveNetworkScope('PUBLIC_MAINNET');
     const chat = await say('swap 10 USDC to WETH on Base Sepolia slippage 100 bps');
     expect(editor.workflow.revision).toBe(0); expect(f.propose).toEqual([]);
-    expect(last(chat).text).toBe('Base Sepolia is a test network. FloFi runs on mainnets only, with real funds: rebuild this on Base.');
+    // P0 hotfix (locale contract): the refusal is a catalog message with its values (it used to be the English sentence with the names spliced
+    // in, which a Portuguese screen could not translate); it renders the same English sentence, and Portuguese on a Portuguese screen.
+    const refusal = last(chat);
+    expect(translate('EN', refusal.text, ...refusal.params ?? [])).toBe('Base Sepolia is a test network. FloFi runs on mainnets only, with real funds: rebuild this on Base.');
+    expect(refusal.params).toEqual(['Base Sepolia', 'Base']);
+    expect(Object.hasOwn(portuguese, refusal.text)).toBe(true);
+    expect(translate('PT', refusal.text, ...refusal.params ?? [])).toBe(portuguese[refusal.text]!.replace('{0}', 'Base Sepolia').replace('{1}', 'Base'));
   });
   it('Copilot interpretations commit only through the validated command and say how FloFi read the words', async () => {
     f.respond = async () => ({ kind: 'PROPOSAL', text: 'Interpreted as “swap 3 USDC to WETH on Base Sepolia slippage 100 bps”. Review the proposal below: nothing changes until you apply it.',

@@ -92,6 +92,8 @@ export function TopBar({ tab, setTab, pathname, engineering = false, compact = f
   const disconnectDisabled = accounts ? (solanaActive ? jupiter.busy : build009.busy)
     : solanaActive ? !jupiter.session || jupiter.busy : !build009.account || build009.busy;
   const walletError = solanaActive ? connection.error : build009.error ?? connection.error;
+  // P0 hotfix (locale contract): the notice as a catalog message and its values, in the current language (never English spliced into Portuguese).
+  const walletNotice = solanaActive ? connection.notice : build009.notice ?? connection.notice;
   const provider = solanaActive ? jupiter.session ? { name: jupiter.session.wallet.name, icon: jupiter.session.wallet.icon ?? null } : null
     : build009.account ? build009.provider : null;
   const restoring = solanaActive ? jupiter.restoring : build009.restoring;
@@ -131,6 +133,6 @@ export function TopBar({ tab, setTab, pathname, engineering = false, compact = f
         <span>{tr("Chain 31337 · local environment")}</span>
       </div></details>}
     </div>}
-    {walletError && <div role="alert" className="wallet-toast">{tr("Wallet: ")}{tr(walletError)}</div>}
+    {walletError && <div role="alert" className="wallet-toast">{tr("Wallet: ")}{walletNotice ? tr(...walletNotice) : tr(walletError)}</div>}
   </header>;
 }

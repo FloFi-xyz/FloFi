@@ -14,7 +14,7 @@ import { setupSummary } from '../domain/canvas-action-setup';
 import { shellChainLabel } from '../domain/product-shell';
 import type { PendingEdit } from '../state/flofi-conversation';
 import { BASE_MAINNET } from '@defi-workflow-engine/action-registry';
-import { useLocale } from '../i18n/locale';
+import { translate, useLocale } from '../i18n/locale';
 
 import { WithdrawPanel } from './withdraw-panel';
 import { RobinhoodTransferPanel } from './robinhood-transfer-panel';
@@ -263,14 +263,17 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
   // offered as new; and a step that spends an earlier step's delivery continues only with the wallet that received it (its record's owner).
   const fundingOwner = sequence && !sequence.finished ? sequence.current.funding.map(funding => sequence.completed[funding.fundedBy]?.owner).find(Boolean) ?? null : null;
   const continuingWallet = fundingOwner?.startsWith('0x') ? connectedWallet.account?.toLowerCase() ?? null : solanaSession?.account.address ?? null;
-  const sequenceIssue = !sequence ? null : sequenceRestore ? sequenceRestore.status === 'CHECKING'
-      ? tr('Checking which steps of this workflow already ran before continuing. Nothing can be simulated or signed until this finishes.')
-      : tr('Step {0} may already have run: FloFi could not read its execution record to confirm it. It is not offered again until it is confirmed.', sequenceRestore.step)
+  // P0 hotfix (locale contract): the sequence's reason in a given language (each value an explicit `{0}` parameter), so the FloFi chat can keep
+  // its messages in the CURRENT interface language; the screen shows it in the language it has now.
+  const sequenceIssueIn = (shown: 'EN' | 'PT'): string | null => !sequence ? null : sequenceRestore ? sequenceRestore.status === 'CHECKING'
+      ? translate(shown, 'Checking which steps of this workflow already ran before continuing. Nothing can be simulated or signed until this finishes.')
+      : translate(shown, 'Step {0} may already have run: FloFi could not read its execution record to confirm it. It is not offered again until it is confirmed.', sequenceRestore.step)
     : fundingOwner && continuingWallet && continuingWallet !== fundingOwner
-      ? tr('Step {0} spends what an earlier step delivered to wallet {1}. Connect that wallet to continue; nothing was simulated or sent.', sequence.cursor + 1, shortAddress(fundingOwner))
-    : unsupportedStep ? sequenceUnsupportedMessage(state.workflow, context, unsupportedStep, language === 'PT' ? 'PT' : 'EN')
-    : unservedStep ? sequenceUnservedMessage(state.workflow, context, unservedStep, language === 'PT' ? 'PT' : 'EN')
-    : sequenceFundingMessage(sequence, language === 'PT' ? 'PT' : 'EN');
+      ? translate(shown, 'Step {0} spends what an earlier step delivered to wallet {1}. Connect that wallet to continue; nothing was simulated or sent.', sequence.cursor + 1, shortAddress(fundingOwner))
+    : unsupportedStep ? sequenceUnsupportedMessage(state.workflow, context, unsupportedStep, shown)
+    : unservedStep ? sequenceUnservedMessage(state.workflow, context, unservedStep, shown)
+    : sequenceFundingMessage(sequence, shown);
+  const sequenceIssue = sequenceIssueIn(language === 'PT' ? 'PT' : 'EN');
   const { universalPath, routerPath, solanaTransferPath, transferPath, lendingPath, withdrawPath, repayPath, borrowPath, supplyPath, uniswapLiquidityPath,
     solanaCompositionPath, solanaLiquidityPath, solanaPath, publicPath } = runtime;
   const [selectedId, select] = useState<string | null>(null);
@@ -445,13 +448,14 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
     await simulation;
   };
   const walletConnection = useWalletConnection();
-  const walletIssue = approvalWallet && signer && !sameAccount(approvalWallet, signer)
-    ? tr('This proposal was loaded for {0}. Switch your wallet to that account to authorize it.', shortAccount(approvalWallet)) : null;
+  const walletIssueIn = (shown: 'EN' | 'PT') => approvalWallet && signer && !sameAccount(approvalWallet, signer)
+    ? translate(shown, 'This proposal was loaded for {0}. Switch your wallet to that account to authorize it.', shortAccount(approvalWallet)) : null;
+  const walletIssue = walletIssueIn(language === 'PT' ? 'PT' : 'EN');
   const requiredSigningChain = !('retired' in simulationSource.state && simulationSource.state.retired) && authorization.chain
     || runtimeWorkflow.nodes.find(node => !node.actionType.startsWith('mock-'))?.chainId;
   const networkTarget = walletNetworkTarget(requiredSigningChain);
   const networkAction = signer && requiredSigningChain && networkTarget && reviewBinding.wallet.chain !== requiredSigningChain ? {
-    label: tr('Switch to {0}', networkTarget.label), network: networkTarget.label, disabled: Boolean(simulationSource.state.busy || approvalGate || walletIssue),
+    label: tr('Switch to {0}', networkTarget.label), labelIn: (shown: 'EN' | 'PT') => translate(shown, 'Switch to {0}', networkTarget.label), network: networkTarget.label, disabled: Boolean(simulationSource.state.busy || approvalGate || walletIssue),
     request: () => void walletConnection.switchNetwork(requiredSigningChain),
   } : undefined;
   const lifecycleState = { workflow: runtimeWorkflow, context, source: simulationSource, authorization: authorization,
@@ -565,10 +569,13 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
   const betaNotice = <><p className="beta-notice" role="note">{tr("FloFi Beta Mainnet — Real funds are enabled. Review every transaction before signing.")}</p>
     {/* BUILD-FLOFI-FLIGHT-001: after "Board now" on /board, a ready Review asks the server for the person's boarding pass. */}
     <FlightBoarding readyKey={authorization.ready ? authorization.key : null} workflowId={state.workflow.workflowId}/></>;
-  const simulationReason = sequenceIssue ?? (simulationDisabled || !actionable || lifecycleState.invalidWorkflow ? simulationUnavailableReason({ incomplete: Boolean(authoringIncomplete || reviewError || !actionable),
+  const unavailableReason = simulationDisabled || !actionable || lifecycleState.invalidWorkflow ? simulationUnavailableReason({ incomplete: Boolean(authoringIncomplete || reviewError || !actionable),
     unsupported: testNetworkWorkflow || simulationSource.kind === 'unavailable', walletRequired: !signer || Boolean(approvalGate || autoPrepare && !approvalWallet),
     providerUnavailable: 'available' in simulationSource.state && simulationSource.state.available === false || 'info' in simulationSource.state && simulationSource.state.info?.available === false,
-    error: simulationSource.state.error, staleQuote: lifecycleControls.view.expiresAt !== null && Date.now() >= lifecycleControls.view.expiresAt }) : null);
+    error: simulationSource.state.error, staleQuote: lifecycleControls.view.expiresAt !== null && Date.now() >= lifecycleControls.view.expiresAt }) : null;
+  const simulationReason = sequenceIssue ?? unavailableReason;
+  /** The same reason in a given language (the chat's messages follow the interface language; `unavailableReason` is a catalog key). */
+  const simulationReasonIn = (shown: 'EN' | 'PT') => sequenceIssueIn(shown) ?? (unavailableReason ? translate(shown, unavailableReason) : null);
   const groupedAction = <div className="canvas-lifecycle-control editor-run-control">
     <p className="canvas-sequence-note" role="note">{tr(workflowRunHere.started ? 'This workflow runs as one workflow run: follow it in Execute.'
       : 'All {0} steps are reviewed together and authorized at once where your wallet can batch them.', String(sequence?.steps.length ?? 0))}</p>
@@ -586,7 +593,7 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
       </>}
     </div>
     : walletIssue ? <div className="canvas-lifecycle-control"><p role="status">{walletIssue}</p><button type="button" onClick={() => void walletConnection.connect()}>{tr('Use another wallet')}</button></div>
-    : networkAction ? <div className="canvas-lifecycle-control"><button type="button" disabled={networkAction.disabled} onClick={networkAction.request}>{networkAction.label}</button>{walletConnection.error && <p role="status">{tr(walletConnection.error)}</p>}</div> : <CanvasLifecycleAction {...lifecycleState} controls={lifecycleControls} workflowName={workflowName}
+    : networkAction ? <div className="canvas-lifecycle-control"><button type="button" disabled={networkAction.disabled} onClick={networkAction.request}>{networkAction.label}</button>{walletConnection.notice && <p role="status">{tr(...walletConnection.notice)}</p>}</div> : <CanvasLifecycleAction {...lifecycleState} controls={lifecycleControls} workflowName={workflowName}
     simulationDisabled={simulationDisabled || !actionable || sequenceDone} simulationReason={sequenceDoneReason ?? simulationReason} sequenceNote={sequenceNote}
     simulate={() => { setTab('Simulate'); return simulateAgain(); }} onExecute={() => setTab('Execute')}/>;
   // P0 hotfix (execution continuity): in Execute, a step-by-step workflow (its run, or its next step) and an owner-bound swap's approval → swap
@@ -631,7 +638,8 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
     const view = projectSimulation(runtimeWorkflow, context, simulationSource);
     if (view.status !== 'blocked') return null;
     const presented = simulationStatusPresentation(view, Boolean(reviewError), false);
-    return { title: presented.label, message: simulationReason ?? presented.message, owner: reviewBinding.wallet.account, feeShortfall: null, started: workflowStarted };
+    return { title: presented.label, message: simulationReason ?? presented.message, owner: reviewBinding.wallet.account, feeShortfall: null, started: workflowStarted,
+      messageIn: (shown: 'EN' | 'PT') => simulationReasonIn(shown) ?? translate(shown, presented.message) };
   })();
   const liveExecution = currentExecution(executionProgress);
   // Locked while the wallet is being asked (every prompting phase, the first Authorize included) or while this workflow's own run is open and
@@ -647,10 +655,14 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
     // The chat reviews, confirms and follows the workflow its runtime serves (a sequence's current step); it edits the canonical workflow itself.
     bridge: { workflow: runtimeWorkflow, context, source: simulationSource, authorization, wallet: reviewBinding.wallet, progress: executionProgress,
       invalidWorkflow: lifecycleState.invalidWorkflow, simulate: simulateAgain, controls: lifecycleControls, networkAction, sequence: sequencePresentation,
-      pendingEdits, resolveEdit, runtimeChecking, walletNetwork: reviewBinding.wallet.chain ? shellChainLabel(reviewBinding.wallet.chain) : null, networkError: walletConnection.error,
+      pendingEdits, resolveEdit, runtimeChecking, walletNetwork: reviewBinding.wallet.chain ? shellChainLabel(reviewBinding.wallet.chain) : null, networkError: walletConnection.error, networkErrorNotice: walletConnection.notice,
       simulationBlocked: walletIssue ?? (groupedPrimary ? workflowRunHere.started ? 'This workflow runs as one workflow run: follow it in Execute.'
         : 'This workflow runs as one workflow run: open Execute and choose Review whole workflow, then Authorize workflow.'
         : simulationDisabled || !actionable || lifecycleState.invalidWorkflow ? simulationReason ?? 'Simulation is not available for this workflow.' : null),
+      // P0 hotfix (locale contract): the same reason in either language, so the chat's message follows the interface language.
+      simulationBlockedIn: shown => walletIssueIn(shown) ?? (groupedPrimary ? translate(shown, workflowRunHere.started ? 'This workflow runs as one workflow run: follow it in Execute.'
+        : 'This workflow runs as one workflow run: open Execute and choose Review whole workflow, then Authorize workflow.')
+        : simulationDisabled || !actionable || lifecycleState.invalidWorkflow ? simulationReasonIn(shown) ?? translate(shown, 'Simulation is not available for this workflow.') : null),
       connectWallet: () => void walletConnection.connect(), startNewWorkflow, executedActions, continuable: Boolean(sequence?.finished) || actionDone, blocker: blockerView, editingPaused,
       workflowProgress } });
   // BUILD-FLOFI-CHAT-E2E-FIX-002: the public chat-first workspace presents the Review and progress in the chat; Simulate and Execute show the canvas
@@ -685,7 +697,7 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
     <TopBar compact tab={tab} setTab={setTab} pathname={pathname ?? null} engineering={engineering}/>
     {flightNoticeView}
     <SigningSurface {...lifecycleState} controls={lifecycleControls} workflowName={workflowName} simulate={simulateAgain} simulationDisabled={simulationDisabled || !actionable}
-      gated={approvalGate} walletIssue={walletIssue} networkAction={networkAction} walletRequestError={walletConnection.error} connectWallet={() => void walletConnection.connect()} approvalSlot={approvalSlot} onViewInFloFi={onViewInFloFi}
+      gated={approvalGate} walletIssue={walletIssue} networkAction={networkAction} walletRequestError={walletConnection.notice ? tr(...walletConnection.notice) : null} connectWallet={() => void walletConnection.connect()} approvalSlot={approvalSlot} onViewInFloFi={onViewInFloFi}
       startNewWorkflow={navigate ? () => { startNewWorkflow(); navigate('/app'); } : undefined}/>
   </div>;
   if (secondaryRoute) return <div className="app-shell" inert={!interactive}><a className="skip-link" href="#workspace">{tr("Skip to workspace")}</a><TopBar tab={tab} setTab={setTab} pathname={pathname ?? null} engineering={engineering} entry={entry}/>{betaNotice}

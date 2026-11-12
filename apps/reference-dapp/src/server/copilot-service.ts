@@ -450,12 +450,14 @@ export async function interpretCopilotV2(input: unknown, deps: { readonly transp
     userTurns: messages.filter(message => message.role === 'user').length, inputTokens: null, outputTokens: null, reasoningTokens: null, responseModel: null,
     ...glossary ? { glossaryLines: glossary.split('\n').length - 1 } : {}, ...deps.surface ? { surface: deps.surface } : {}, ...extra });
   let context: ReturnType<typeof requestContext> = { card: null, key: null };
-  try { messages = validateCopilotRequestV2(input); context = requestContext(input); } catch { report('COPILOT_INPUT_INVALID'); return { ok: false, code: 'COPILOT_INPUT_INVALID' }; }
+  // P0 hotfix (locale contract): every tool runs in the person's interface language (the request's reply language, which the server action
+  // resolves from the language cookie), so the facts and FloFi's own explanations the model may quote are already in that language. Without
+  // one (Channel Core, older clients) they stay English, as before.
+  let language: 'EN' | 'PT' = 'EN';
+  try { messages = validateCopilotRequestV2(input); context = requestContext(input); language = replyLanguageOf(input) ?? 'EN'; } catch { report('COPILOT_INPUT_INVALID'); return { ok: false, code: 'COPILOT_INPUT_INVALID' }; }
   const release = deps.limiter ? deps.limiter.acquire() : () => undefined;
   if (!release) { report('COPILOT_BUSY'); return { ok: false, code: 'COPILOT_BUSY' }; }
   const toolkit = deps.toolkit ?? null, limits = { ...COPILOT_ORCHESTRATION_LIMITS, ...deps.orchestration };
-  // Tool outputs are facts for the model, which writes the user-facing language itself; FloFi's own explanations are returned in English.
-  const language = 'EN' as const;
   // Grounding facts: the user's words, FloFi's context card, and every tool output of this turn.
   const facts: string[] = [...messages.filter(message => message.role === 'user').map(message => message.text), ...context.card ? [JSON.stringify(context.card)] : []];
   const trace = { calls: 0, failures: 0, rounds: 0, categories: new Set<string>(), bytes: 0 }, toolFactsFrom = facts.length;

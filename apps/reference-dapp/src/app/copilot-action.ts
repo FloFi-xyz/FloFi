@@ -16,6 +16,7 @@ import { logCopilotTurn } from '../server/copilot-service';
 import { parseTurnMetrics } from '../domain/intelligence/turn-metrics';
 import { copilotMetricsEnabled, persistCopilotInterpretation, persistCopilotTurn, recordCopilotMetrics } from '../server/copilot-metrics-store';
 import { platformStateHost } from '../server/platform-state-host';
+import { actionLanguage } from '../server/request-language';
 
 /**
  * BUILD-COPILOT-001: Flofi Copilot interpretation. The browser sends only its short clarification thread and receives
@@ -63,6 +64,17 @@ export async function copilotStatus(): Promise<{ mode: CopilotMode }> {
   });
 }
 const isV2 = (input: unknown) => !!input && typeof input === 'object' && (input as { version?: unknown }).version === '2';
+/**
+ * P0 hotfix (locale contract): the reply language of a V2 turn is the person's interface language, resolved like every page and action
+ * (`server/request-language.ts`): the language cookie wins over what the page sends; without a cookie, the page's own language; else the
+ * default. An invalid value is left for the request validation to refuse, as before. Presentation only: it never changes what is interpreted.
+ */
+async function inInterfaceLanguage(input: unknown): Promise<unknown> {
+  if (!isV2(input) || Array.isArray(input) || Object.getPrototypeOf(input) !== Object.prototype) return input;
+  const shown = (input as { replyLanguage?: unknown }).replyLanguage;
+  if (shown !== undefined && shown !== 'EN' && shown !== 'PT') return input;
+  return { ...(input as Record<string, unknown>), replyLanguage: await actionLanguage(shown ?? null) };
+}
 /** Collect during interpretation; finish durable writes before the server action returns. No in-memory delivery queue. */
 async function interpretWithMetrics(input: unknown, deps: Parameters<typeof interpretCopilotV2>[1]): Promise<CopilotResultV2> {
   if (!copilotMetricsEnabled(process.env, deps.mode)) return interpretCopilotV2(input, deps);
@@ -91,8 +103,9 @@ async function learningFor(input: unknown, options: unknown) {
     return { glossary, record };
   } catch { return null; }
 }
-export async function copilotInterpret(input: unknown, options?: unknown): Promise<CopilotResult | CopilotResultV2> {
+export async function copilotInterpret(raw: unknown, options?: unknown): Promise<CopilotResult | CopilotResultV2> {
   return withFlightAccess(async () => {
+  const input = await inInterfaceLanguage(raw);
   const config = copilotConfig(process.env);
   if (config.mode === 'off') return { ok: false, code: 'COPILOT_OFF' };
   if (process.env.FLOFI_COPILOT === 'live') {
