@@ -3,7 +3,7 @@ import { test, expect, sendChatCommand, openProposalReview, readWorkflowIr, open
 import type { Page } from '@playwright/test';
 import { hashArtifactBytes, type SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
 import { readyForVisualCapture } from './mode-a-fixtures';
-import { openBuilder, reloadBuilder } from './build-entry-navigation';
+import { openBuilder } from './build-entry-navigation';
 
 test.beforeEach(async ({ page }) => { await installPassiveWallet(page); });
 test.afterEach(async ({ page }) => { await assertPassiveWallet(page); });
@@ -54,7 +54,8 @@ for (const [direction, from, to, amount] of [
     expect(chat.revision).toBe(1);
     await expect(page.getByRole('region', { name: 'Deterministic review findings' })).toHaveCount(0);
     await expect(page.getByRole('button', { name: 'Authorize in wallet', exact: true })).toHaveCount(0);
-    await reloadBuilder(page);
+    // A new workflow on the Canvas (a new visit: the remembered Canvas is not carried into it), authored by hand this time.
+    await openBuilder(page);
     await createCanvas(page, direction, amount, '100');
     const canvas = await workflow(page);
     expect(canvas.revision).toBe(1);
@@ -77,7 +78,8 @@ test('mixed surface edits, dismissal, locks and stale proposals preserve revisio
   const chatCanvasChat = await workflow(page);
   expect(chatCanvasChat.revision).toBe(3);
 
-  await reloadBuilder(page);
+  // A new workflow on the Canvas (a new visit: the remembered Canvas is not carried into it).
+  await openBuilder(page);
   await createCanvas(page, 'USDC_TO_WETH', '2', '100');
   await commit(page, 'set node-002 amount 3');
   await selectSwap(page);
