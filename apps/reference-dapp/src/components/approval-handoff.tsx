@@ -66,7 +66,39 @@ const CLAIM_TEXT: Record<string, string> = {
   EVM_SMART_ACCOUNT_REQUIRED: 'This group needs your wallet to already be a MetaMask smart account on this network.',
   WALLET_WRONG_NETWORK: 'Switch your wallet to the network of this group, then try again.',
   WALLET_REQUEST_REJECTED: 'The request was rejected in your wallet. Nothing was signed.',
+  WALLET_BATCH_SEND_UNCONFIRMED: 'Your wallet was asked to send this batch, but its answer never arrived, so FloFi cannot tell whether it was sent. Check your wallet\'s activity. FloFi will not ask your wallet for it again; the workflow can be ended once the prepared request expires.',
+  WALLET_BATCH_NOT_SENT: 'Your wallet refused this batch before sending anything (it may not support it on this network). Nothing was sent; you can try again.',
+  WALLET_ACCOUNT_MISMATCH: 'Your wallet is locked or another account is selected. Unlock your wallet, select the account this run belongs to, and try again; nothing was sent.',
+  // P0 universal execution: what the chain's own contracts say about a token, or what the network lacks, in plain words.
+  SIMULATION_SWAP_OUTPUT_SHORT: 'A token in this batch does not deliver the full amount the swap sends (it charges a fee on transfer or changes balances), so it cannot be batched. Nothing was sent.',
+  TOKEN_METADATA_MISMATCH: 'A token\'s contract does not match FloFi\'s catalog (its decimals differ on chain), so nothing was prepared.',
+  CONTRACT_CODE_MISSING: 'A token in this workflow has no contract on this network, so nothing was prepared.',
+  USER_FUNDED_DEADLINE_UNAVAILABLE: 'This network has no registered router to give the batch an on-chain expiry, so it is not offered as a batch. Nothing was sent.',
   SOLANA_WALLET_SESSION_REQUIRED: 'Connect the Solana wallet of this workflow (the one you proved), then try again.',
+  // A group's preparation refused by its whole-batch simulation or fee reading: the Editor's words (one translation each). A preparation refusal
+  // names no step, so these never carry a step number.
+  // /approve cannot change the workflow's amounts (the run is bound to its hash): the way forward is the owner's position, Try this step again, or End.
+  BORROW_UNSAFE_HEALTH_FACTOR: 'This Borrow would leave your Aave health factor below 2.0 after the batch, so nothing was sent. Supply more collateral or repay part of your debt from your wallet, then try again, or end the workflow.',
+  WITHDRAW_UNSAFE_HEALTH_FACTOR: 'This Withdraw would leave your Aave health factor below 2.0 after the batch, so nothing was sent. Repay part of your debt or supply more collateral from your wallet, then try again, or end the workflow.',
+  REPAY_PARTIAL_DEBT_REQUIRED: 'This Repay is no longer smaller than your current Aave debt, so it cannot be batched and nothing was sent. Once the workflow shows it stopped, Try this step again runs the Repay through its own flow (it reads your debt again), or end the workflow.',
+  SIMULATION_REVERTED: 'FloFi simulated the whole batch and one of its calls would fail on chain now, so your wallet was not asked. Check the amounts, balances and allowances, then try again.',
+  SWAP_MINIMUM_NOT_MET: 'A swap in this batch would deliver less than its signed minimum now, so your wallet was not asked. Try again for a fresh quote.',
+  USER_FUNDED_SIMULATION_UNAVAILABLE: 'This network’s RPC cannot simulate the whole batch, so it is not offered in one confirmation and nothing was sent. Once the workflow shows it stopped, Try this step again confirms each step through its own flow, or end the workflow.',
+  USER_FUNDED_L1_FEE_UNAVAILABLE: 'FloFi could not read this network\'s data fee, so the batch was not offered. Nothing was sent; try again.',
+  // Review fixes, the Editor's words: a batch already handed out is never prepared a second time while it can still execute (refused before the
+  // wallet is asked; this page shows no group validity, so no time — and the banner stays on screen, so its words stay true once the request has
+  // expired: it is confirmed only within its validity, after which its on-chain deadline refuses it and the wallet would still pay the fee); a
+  // second, different answer for one group (it may have run twice, never "nothing sent"); a browser that cannot keep the record that stops a
+  // request from being sent twice (the wallet was not asked); and a wallet answer or report for a group FloFi had already stopped while its batch
+  // was unanswered (it may have executed, never "nothing sent"; the run cannot record it any more).
+  USER_FUNDED_PREPARED_STILL_VALID: 'FloFi already prepared a request for this step that may still be open in your wallet. Confirm it only within 10 minutes of when it was prepared (after that its on-chain deadline refuses it and your wallet would still pay the fee: reject it), or try again once it has expired; FloFi never prepares a second one that could run alongside it.',
+  WALLET_BATCH_ANSWER_MISMATCH: 'Your wallet reported a different batch for this step than the one FloFi recorded: it may have run twice. Check your wallet\'s activity; FloFi recorded only the first.',
+  WALLET_BATCH_HANDED_OUT_ELSEWHERE: 'This step\'s wallet request was already handed to another browser or wallet, and FloFi gives it only to that one: if it was confirmed there, it may already have executed. Continue in that browser; once the request has expired you can end the workflow here and check your wallet\'s activity.',
+  WALLET_ATTEMPT_UNRECORDABLE: 'This browser could not keep a record of the request, so FloFi did not ask your wallet (that record is what stops a request from ever being sent twice). Allow site storage or use another browser, then try again.',
+  WALLET_BATCH_ANSWERED_AFTER_STOP: 'Your wallet reported a batch for a step FloFi had already stopped: it may have executed. Check your wallet\'s activity; FloFi could not record it.',
+  // The run's window has passed, or ends before a new wallet request could expire: nothing new is prepared, but a request prepared earlier may
+  // still be in the wallet (never "nothing was sent"). The Editor's words.
+  WORKFLOW_RUN_EXPIRED: 'This workflow\'s time window has ended, or ends too soon for a new wallet request, so FloFi does not prepare another one for it. If a request is still open in your wallet, check your wallet\'s activity; you can end the workflow once no request of it can still execute.',
 };
 function unwrap<T>(result: { ok: true; value: T } | { ok: false; code: string }): T { if (!result.ok) throw new Error(result.code); return result.value; }
 /**

@@ -6,7 +6,8 @@
 import { cachedReadiness } from '../../../../server/readiness';
 
 export const dynamic = 'force-dynamic';
-// Bounded: each network probe makes at most two 5-second requests, all networks concurrently.
+// Bounded: each EVM probe makes at most three sequential 5-second requests (chain id, block, and the `eth_simulateV1` support probe of the
+// Base, Ethereum and Arbitrum One mainnet endpoints and of every user-funded EVM endpoint); Solana makes two; all networks run concurrently.
 export const maxDuration = 60;
 const headers = { 'cache-control': 'no-store', 'x-content-type-options': 'nosniff' };
 

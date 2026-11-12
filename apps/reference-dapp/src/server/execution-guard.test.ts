@@ -143,13 +143,20 @@ describe('paused grouped runs keep their reconciliation and durable state', () =
   it('holds an unknown user operation for retry instead of failing it when its relay is paused', async () => {
     pause('true');
     const send = vi.fn(), receipt = vi.fn(async () => null), known = vi.fn(async () => false);
-    const d = deps({ evm: () => ({ chain: 'eip155:8453', provenance: 'MOCKED', rpc: vi.fn() }),
+    // The EntryPoint says the signed nonce is unconsumed (v0.7: `key << 64 | sequence`, sequence 0): the operation never ran, so reconciliation
+    // relays the same signed bytes again — and the pause holds that relay (PENDING), never a failure.
+    const key = erc4337.nonceKeyOf('wfr_fixture:g0');
+    const rpc = vi.fn(async (method: string) => method === 'eth_call' ? '0x' + (key << 64n).toString(16).padStart(64, '0') : null);
+    const d = deps({ evm: () => ({ chain: 'eip155:8453', provenance: 'MOCKED', rpc }),
       bundler: () => ({ chainId: 8453, verify: vi.fn(), estimate: vi.fn(), send, receipt, known }) });
-    const prepared = { kind: 'EVM_USER_OPERATION' as const, group: { chain: 'eip155:8453' } };
+    const op = { sender: OWNER, nonce: erc4337.userOpNonce(key, 0n).toString(), callData: '0x', accountGasLimits: '0x' + '00'.repeat(32), preVerificationGas: '0',
+      gasFees: '0x' + '00'.repeat(32) };
+    const prepared = { kind: 'EVM_USER_OPERATION' as const, group: { chain: 'eip155:8453' }, op };
     expect(await relayUserOperation(d, prepared, {})).toMatchObject({ ok: false, code: 'EXECUTION_PAUSED' });
     expect(await reconcileEvmGroup(d, prepared, { userOpHash: 'fixture-hash' }, {})).toEqual({ status: 'PENDING' });
     expect(receipt).toHaveBeenCalled();
     expect(known).toHaveBeenCalled();
+    expect(rpc).toHaveBeenCalledWith('eth_call', [{ to: erc4337.ENTRY_POINT_V0_7, data: erc4337.getNonceCall(OWNER, key) }, 'latest']);
     expect(send).not.toHaveBeenCalled();
   });
 

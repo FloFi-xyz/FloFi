@@ -113,6 +113,24 @@ describe('BUILD-CHAT-E2E-001 channel workflows', () => {
     expect(plannedNotifications('EN', handoff, progress, 'https://flofi.test').due.map(n => n.key)).toContain(`notify:${handoff.handoffId}:wfr:ready-group:1`);
   });
 
+  it('P0 review fix: a HALTED run is worded by how it stopped (the server decides), never "partially completed" when nothing ran', () => {
+    const handoff = { handoffId: 'apr_' + 'c'.repeat(26), shareStatus: true } as HandoffRecord;
+    const step = (index: number, state: string) => ({ index, action: 'supply', state, flow: null, stepWorkflowHash: null, code: null, bound: null, outcome: null });
+    const runOf = (halted: string, steps: readonly ReturnType<typeof step>[]) => ({ workflowRunId: 'wfr_' + 'c'.repeat(26), approvalId: handoff.handoffId, state: 'HALTED',
+      mode: 'USER_FUNDED', stepCount: 2, currentStep: 0, code: 'USER_FUNDED_SIMULATION_UNAVAILABLE', workflowHash: '0x' + '1'.repeat(64), expiresAt: '', completedAt: null,
+      createdAt: '', updatedAt: '', stepsVisible: true, nextAction: 'OWNER_DECIDES', authority: 'NONE', note: null, halted, steps, groups: [] });
+    const progressOf = (run: unknown) => ({ status: 'APPLIED', expiresAt: '2026-10-22T10:00:00.000Z', runs: [], runsVisible: true, workflowRun: run, note: null }) as never;
+    // A halt's key names that halt (step, how it stopped, code, when): see run-notices.test.ts for a halt after a resume.
+    const notice = (language: 'EN' | 'PT', run: unknown) => plannedNotifications(language, handoff, progressOf(run)).due.find(n => n.key.includes(':wfr:halted:'))!.text;
+    const nothing = runOf('NOTHING_SENT', [step(0, 'BLOCKED'), step(1, 'BLOCKED')]);
+    expect(notice('EN', nothing)).toMatch(/^Workflow stopped before anything was sent/);
+    expect(notice('PT', nothing)).toMatch(/^Fluxo interrompido antes de qualquer envio/);
+    expect(statusReplies('EN', { handoff, progress: progressOf(nothing) })[0]!.text).toContain('Workflow: stopped before anything was sent');
+    expect(statusReplies('EN', { handoff, progress: progressOf(nothing) })[0]!.text).not.toContain('partially completed');
+    expect(notice('EN', runOf('STOPPED', [step(0, 'BLOCKED'), step(1, 'BLOCKED')]))).toMatch(/^Workflow stopped before any step completed/);
+    expect(notice('EN', runOf('PARTIAL', [step(0, 'RECONCILED'), step(1, 'BLOCKED')]))).toMatch(/^Workflow partially completed/);
+  });
+
   it('reports the run from durable state: step states always, transactions only when shared; notifications once each, with the continuation link', () => {
     const handoff = { handoffId: 'apr_' + 'a'.repeat(26), shareStatus: true } as HandoffRecord;
     const tx = '0x' + 'ab'.repeat(32);

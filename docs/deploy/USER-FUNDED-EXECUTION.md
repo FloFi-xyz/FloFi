@@ -58,7 +58,7 @@ User-funded execution is off until enabled. Set on **Vercel** (web tier: prepare
 | `FLOFI_WORKFLOW_RUNS` | `enabled` | existing |
 | `FLOFI_USER_FUNDED_EXECUTION` | `enabled` | `disabled` (default) turns the mode off everywhere |
 | `FLOFI_USER_FUNDED_CHAINS` | e.g. `eip155:1,eip155:8453,eip155:42161,eip155:4663,solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp` | CAIP-2 mainnets only; an unknown value disables the feature (`USER_FUNDED_CONFIGURATION_INVALID`) |
-| `FLOFI_USER_FUNDED_RPC_<chainId>` | https read RPC per EVM chain | falls back to `FLOFI_DELEGATION_RPC_<chainId>`; a chain without one is not offered. It must answer `eth_simulateV1` (whole-batch simulation, §10): without it a batch with Aave calls is refused `USER_FUNDED_SIMULATION_UNAVAILABLE` |
+| `FLOFI_USER_FUNDED_RPC_<chainId>` | https read RPC per EVM chain | falls back to `FLOFI_DELEGATION_RPC_<chainId>`; a chain without one is not offered. It must answer `eth_simulateV1` (whole-batch simulation, §10): without it a batch with Aave calls, and a batch in which a later call spends a swap's output, are refused `USER_FUNDED_SIMULATION_UNAVAILABLE` (the steps then run step by step); the readiness probe `?probe=networks` reports `simulateV1` per user-funded chain |
 | `FLOFI_BUNDLER_RPC_<chainId>` | https ERC-4337 v0.7 bundler (optional) | only for delayed EVM groups signed upfront; the bundler must serve EntryPoint `0x0000000071727De22E5E9d8BAf0edAc6f37da032` on that chain (verified at first use). A bundler is repaid by the EntryPoint from the **owner's** prefund; it must not be configured with a paymaster |
 | `GRYLOO_SOLANA_RPC_URL`, `JUPITER_API_KEY` | existing | Solana groups |
 
@@ -143,8 +143,9 @@ secret or migration is needed.
    ```bash
    curl -s "$RPC" -H 'content-type: application/json' -d '{"jsonrpc":"2.0","id":1,"method":"eth_simulateV1","params":[{"blockStateCalls":[{"calls":[]}]},"latest"]}'
    ```
-   A JSON-RPC `result` array means it is supported. A "method not found" error means batches containing Aave calls are refused, and
-   swap/transfer batches use the gas-estimate path.
+   A JSON-RPC `result` array means it is supported. A "method not found" error means batches containing Aave calls, and batches in
+   which a later call spends a swap's output (its received amount cannot be proven), are refused; a swap or transfer whose output is not
+   spent inside the batch uses the gas-estimate path. After deploy, `/api/flofi/readiness?probe=networks` reports the same per chain.
 2. **Verification after deploy (no funds).**
    - Sign in on the Editor and author Arbitrum Swap → Supply → Borrow.
    - The primary CTA reads **Review whole workflow**. The panel lists every step with its expected and minimum amounts, then

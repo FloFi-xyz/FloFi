@@ -266,6 +266,10 @@
       "path": "apps/reference-dapp/src/delegation/adversarial.pg.test.ts",
       "stage": "postgres"
     },
+    "app.delegation.steps-symbols": {
+      "path": "apps/reference-dapp/src/delegation/steps-symbols.test.ts",
+      "stage": "unit"
+    },
     "app.developer.api.pg": {
       "path": "apps/reference-dapp/src/developer/api.pg.test.ts",
       "stage": "postgres"
@@ -372,6 +376,10 @@
     },
     "app.e2e.editor-redesign": {
       "path": "apps/reference-dapp/e2e/editor-redesign.spec.ts",
+      "stage": "browser"
+    },
+    "app.e2e.editor-wallet-batch": {
+      "path": "apps/reference-dapp/e2e/editor-wallet-batch.spec.ts",
       "stage": "browser"
     },
     "app.e2e.editor-workflow-run": {
@@ -702,6 +710,10 @@
       "path": "apps/reference-dapp/src/state/wallet-synchronization.test.tsx",
       "stage": "unit"
     },
+    "app.user-funded.arbitrum-batch": {
+      "path": "apps/reference-dapp/src/user-funded/arbitrum-batch.test.ts",
+      "stage": "unit"
+    },
     "app.user-funded.bundler": {
       "path": "apps/reference-dapp/src/user-funded/bundler.test.ts",
       "stage": "unit"
@@ -712,6 +724,10 @@
     },
     "app.user-funded.solana-nonce-codec": {
       "path": "apps/reference-dapp/src/user-funded/solana-nonce-codec.test.ts",
+      "stage": "unit"
+    },
+    "app.user-funded.universal-batch": {
+      "path": "apps/reference-dapp/src/user-funded/universal-batch.test.ts",
       "stage": "unit"
     },
     "app.wallet-app.arming": {
@@ -825,6 +841,10 @@
     "app.workflow-runs.received-amounts": {
       "path": "apps/reference-dapp/src/workflow-runs/received-amounts.test.ts",
       "stage": "unit"
+    },
+    "app.workflow-runs.user-funded-due-refusal.pg": {
+      "path": "apps/reference-dapp/src/workflow-runs/user-funded-due-refusal.pg.test.ts",
+      "stage": "postgres"
     },
     "app.workflow-runs.user-funded-run.pg": {
       "path": "apps/reference-dapp/src/workflow-runs/user-funded-run.pg.test.ts",
@@ -3289,7 +3309,8 @@
         "app.delegation.adversarial.pg",
         "app.mcp.oauth.foundation",
         "app.state.review-authorization",
-        "cloud-runtime.tenancy.pg"
+        "cloud-runtime.tenancy.pg",
+        "app.delegation.steps-symbols"
       ],
       "gaps": [
         "Adversarial fixtures and isolation tests are not a penetration test or proof against all attacks."
@@ -6707,10 +6728,14 @@
         "app.user-funded.groups",
         "app.user-funded.bundler",
         "app.user-funded.solana-nonce-codec",
-        "app.workflow-runs.user-funded-run.pg"
+        "app.workflow-runs.user-funded-run.pg",
+        "app.user-funded.universal-batch",
+        "app.user-funded.arbitrum-batch",
+        "app.workflow-runs.user-funded-due-refusal.pg",
+        "app.e2e.editor-wallet-batch"
       ],
       "gaps": [
-        "MOCKED loopback chain doubles and fakes only: no owner-signed mainnet user-funded execution recorded. Real wallet behaviour (MetaMask EIP-5792 atomic batches and 7702 upgrade prompts, Phantom/Solflare multi-input solana:signTransaction prompts) and real bundlers are not exercised in CI."
+        "MOCKED loopback chain doubles and fakes only: no owner-signed mainnet user-funded execution recorded. The browser suite (app.e2e.editor-wallet-batch) proves the Editor sends ONE EIP-5792 wallet_sendCalls batch to a scripted wallet double on the MOCKED Base chain; real wallet behaviour (MetaMask EIP-5792 atomic batches and 7702 upgrade prompts, Phantom/Solflare multi-input solana:signTransaction prompts) and real bundlers are not exercised in CI."
       ]
     },
     {

@@ -4,7 +4,7 @@
  * and worker loop, on the MOCKED loopback chain double (evidence MOCKED; no public network): the owner's wallet executes ONE atomic batch
  * from its own account and pays its gas; FloFi reconciles every step from the chain. No FloFi account sends, signs or pays anything.
  */
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { erc7710 } from '@defi-workflow-engine/reference-compiler';
 import { createTestDatabase } from '../../../../packages/cloud-runtime/test/pg-harness.ts';
 import { claimApproval } from '../platform/index.ts';
@@ -37,7 +37,8 @@ describe('BUILD-FLOFI-UNIVERSAL-WORKFLOW-002 user-funded workflow run (PostgreSQ
       const { h, approval, claimed } = await setup(t);
       const plan = claimed.view.workflowRun!.plan;
       // Offered (fewer interactions than confirming each step) and recommended; the executor-funded mode is never offered.
-      expect(plan).toMatchObject({ userFunded: { available: true, feePayer: 'OWNER_WALLET', interactions: { upfront: 1, whenDue: 0, single: true } },
+      // Before the owner's browser read the wallet, the counts are lower bounds (assumed capabilities): never "single", always "at least".
+      expect(plan).toMatchObject({ userFunded: { available: true, feePayer: 'OWNER_WALLET', wallets: 'ASSUMED', interactions: { upfront: 1, whenDue: 0, single: false, atLeast: true } },
         delegatedSingleAuthorization: { available: false, reason: 'EXECUTOR_FUNDED_GAS_RETIRED' }, recommended: 'USER_FUNDED' });
       expect(claimed.view.workflowRun!.run).toMatchObject({ state: 'PENDING', mode: null, nextAction: 'OWNER_CHOOSES_MODE' });
       // The owner chooses user-funded execution with the wallet capabilities their browser reported.
@@ -89,9 +90,15 @@ describe('BUILD-FLOFI-UNIVERSAL-WORKFLOW-002 user-funded workflow run (PostgreSQ
       const forged = h.d.evm.control.walletBatch(h.d.evmOwner.address, evmCallsOf(group), '0x' + '99'.repeat(20));
       await workflowRunUserFundedAuthorize(h.surface, approval.approvalId, [h.evm, h.sol], 0, { kind: 'EVM_WALLET_BATCH', batchId: 'batch-1' });
       const after = await workflowRunUserFundedReport(h.surface, approval.approvalId, [h.evm, h.sol], 0, [forged]);
-      expect(after.view.workflowRun!.run).toMatchObject({ state: 'FAILED', code: 'GAS_PAYER_NOT_OWNER' });
-      expect(after.view.workflowRun!.run.groups[0]).toMatchObject({ state: 'FAILED', code: 'GAS_PAYER_NOT_OWNER' });
-      expect(after.view.workflowRun!.run.steps.every(s => s.state !== 'RECONCILED')).toBe(true);
+      // Final review (P1): it executed on chain (not reverted), so the run is never FAILED ("nothing irreversible happened"): the group and its
+      // steps are UNCERTAIN and the run needs ATTENTION — nothing counts as done, and nothing is resent.
+      expect(after.view.workflowRun!.run).toMatchObject({ state: 'ATTENTION', code: 'GAS_PAYER_NOT_OWNER' });
+      expect(after.view.workflowRun!.run.groups[0]).toMatchObject({ state: 'UNCERTAIN', code: 'GAS_PAYER_NOT_OWNER' });
+      expect(after.view.workflowRun!.run.steps.map(s => [s.state, s.code])).toEqual([['UNCERTAIN', 'GAS_PAYER_NOT_OWNER'], ['UNCERTAIN', 'GAS_PAYER_NOT_OWNER']]);
+      const run = await ownedRun(h.runs, approval.approvalId, [h.evm, h.sol]);
+      await h.drain(run.runId);
+      expect(await h.store.byId(run.runId)).toMatchObject({ state: 'ATTENTION', code: 'GAS_PAYER_NOT_OWNER' });
+      await expect(h.store.cancel(run.runId, (await h.store.byId(run.runId))!.version, 'OWNER_CANCELLED')).rejects.toThrow('WORKFLOW_RUN_ATTENTION');
     } finally { await t.drop(); }
   });
 
@@ -106,8 +113,10 @@ describe('BUILD-FLOFI-UNIVERSAL-WORKFLOW-002 user-funded workflow run (PostgreSQ
       const tampered = h.d.evm.control.walletBatch(h.d.evmOwner.address, [...evmCallsOf(group), drain]);
       await workflowRunUserFundedAuthorize(h.surface, approval.approvalId, [h.evm, h.sol], 0, { kind: 'EVM_WALLET_BATCH', batchId: 'batch-2' });
       const after = await workflowRunUserFundedReport(h.surface, approval.approvalId, [h.evm, h.sol], 0, [tampered]);
-      // The batch's own transaction carries a call nobody prepared: it never reconciles (before even reading its logs).
-      expect(after.view.workflowRun!.run).toMatchObject({ state: 'FAILED', code: 'RECONCILIATION_CALLS_MISMATCH' });
+      // The batch's own transaction carries a call nobody prepared: it never reconciles (before even reading its logs). It executed (funds
+      // left the owner's wallet), so the run needs ATTENTION — never FAILED, which would say nothing irreversible happened.
+      expect(after.view.workflowRun!.run).toMatchObject({ state: 'ATTENTION', code: 'RECONCILIATION_CALLS_MISMATCH' });
+      expect(after.view.workflowRun!.run.steps.map(s => s.state)).toEqual(['UNCERTAIN', 'UNCERTAIN']);
     } finally { await t.drop(); }
   });
 
@@ -157,28 +166,70 @@ describe('BUILD-FLOFI-UNIVERSAL-WORKFLOW-002 user-funded workflow run (PostgreSQ
       const first = await workflowRunUserFundedPrepare(h.surface, approval.approvalId, [h.evm, h.sol], 0);
       const id = (first.prepared as unknown as { request: { id: string } }).request.id;
       expect(id).toMatch(/^0x[0-9a-f]{64}$/);
+      // Final review: the batch goes to ONE browser — its hand-out token is returned, only its hash is stored, and never shown.
+      expect(first.handout).toMatch(/^[A-Za-z0-9_-]{43}$/);
+      expect(JSON.stringify(first.prepared)).not.toContain('handoutHash');
+      await expect(workflowRunUserFundedPrepare(h.surface, approval.approvalId, [h.evm, h.sol], 0)).rejects.toThrow('WALLET_BATCH_HANDED_OUT_ELSEWHERE');
+      await expect(workflowRunUserFundedPrepare(h.surface, approval.approvalId, [h.evm, h.sol], 0, 'x'.repeat(43))).rejects.toThrow('WALLET_BATCH_HANDED_OUT_ELSEWHERE');
+      expect((await workflowRunUserFundedPrepare(h.surface, approval.approvalId, [h.evm, h.sol], 0, first.handout!)).handout).toBe(first.handout);
       // The wallet sends a batch the moment the owner confirms, whenever that is: past the preparation's validity the group is NOT dropped
       // (the worker leaves it PREPARED), and a new preparation keeps the SAME EIP-5792 id, so a wallet refuses to run the group twice.
+      // (Past its validity AND the settle margin: inside the margin nothing is prepared again — USER_FUNDED_PREPARED_STILL_VALID.)
       h.d.advance(11 * 60_000);
+      await expect(workflowRunUserFundedPrepare(h.surface, approval.approvalId, [h.evm, h.sol], 0, first.handout!)).rejects.toThrow('USER_FUNDED_PREPARED_STILL_VALID');
+      h.d.advance(2 * 60_000);
       const run0 = await ownedRun(h.runs, approval.approvalId, [h.evm, h.sol]);
       await h.drain(run0.runId);
       expect((await h.store.groups(run0.runId))[0]).toMatchObject({ state: 'PREPARED' });
       // The owner cannot end the run while that batch may still be confirmed in the wallet... until its window passed.
-      const refreshed = await workflowRunUserFundedPrepare(h.surface, approval.approvalId, [h.evm, h.sol], 0);
+      // Only the browser holding the batch prepares it again (another device of the same owner never gets a second, overlapping batch).
+      await expect(workflowRunUserFundedPrepare(h.surface, approval.approvalId, [h.evm, h.sol], 0)).rejects.toThrow('WALLET_BATCH_HANDED_OUT_ELSEWHERE');
+      const refreshed = await workflowRunUserFundedPrepare(h.surface, approval.approvalId, [h.evm, h.sol], 0, first.handout!);
+      expect(refreshed.handout).toBe(first.handout);
       expect((refreshed.prepared as unknown as { request: { id: string } }).request.id).toBe(id);
       const live = await ownedRun(h.runs, approval.approvalId, [h.evm, h.sol]);
       await expect(h.store.cancel(live.runId, live.version, 'OWNER_CANCELLED', h.d.now())).rejects.toThrow('WORKFLOW_RUN_GROUP_IN_FLIGHT');
       // ... and its late answer is taken (the chain decides at reconciliation), never refused as expired.
       h.d.advance(11 * 60_000);
       await workflowRunUserFundedAuthorize(h.surface, approval.approvalId, [h.evm, h.sol], 0, { kind: 'EVM_WALLET_BATCH', batchId: 'batch-4' });
-      const again = await workflowRunUserFundedAuthorize(h.surface, approval.approvalId, [h.evm, h.sol], 0, { kind: 'EVM_WALLET_BATCH', batchId: 'other' });
+      const again = await workflowRunUserFundedAuthorize(h.surface, approval.approvalId, [h.evm, h.sol], 0, { kind: 'EVM_WALLET_BATCH', batchId: 'batch-4' });
       expect(again.view.workflowRun!.run.groups[0]).toMatchObject({ state: 'AUTHORIZED', batchId: 'batch-4' });
+      // A DIFFERENT batch id for the same group may be a second execution of it (another device or wallet instance): refused, never recorded.
+      await expect(workflowRunUserFundedAuthorize(h.surface, approval.approvalId, [h.evm, h.sol], 0, { kind: 'EVM_WALLET_BATCH', batchId: 'other' }))
+        .rejects.toThrow('WALLET_BATCH_ANSWER_MISMATCH');
+      expect((await h.store.groups((await ownedRun(h.runs, approval.approvalId, [h.evm, h.sol])).runId))[0]).toMatchObject({ state: 'AUTHORIZED',
+        authorization: { batchId: 'batch-4' } });
       // Malformed answers are refused before anything is stored.
       await expect(workflowRunUserFundedAuthorize(h.surface, approval.approvalId, [h.evm, h.sol], 0, { kind: 'SOMETHING' })).rejects.toThrow('USER_FUNDED_AUTHORIZATION_INVALID');
       await expect(workflowRunUserFundedReport(h.surface, approval.approvalId, [h.evm, h.sol], 0, ['0x12'])).rejects.toThrow('EIP5792_RESPONSE_INVALID');
       // A user-funded run cannot be ended while its batch may be in flight.
       const run = await ownedRun(h.runs, approval.approvalId, [h.evm, h.sol]);
       await expect(h.store.cancel(run.runId, run.version, 'OWNER_CANCELLED')).rejects.toThrow('WORKFLOW_RUN_GROUP_IN_FLIGHT');
+    } finally { await t.drop(); }
+  });
+
+  it('final review (P1): a flow switched off after the start is refused when its group is prepared; an operator pause stops every hand-out, a cached batch too, while the answer for a batch already handed out is still taken', async () => {
+    const t = await createTestDatabase();
+    try {
+      const { h, approval } = await setup(t);
+      await workflowRunUserFundedStart(h.surface, approval.approvalId, [h.evm, h.sol], METAMASK);
+      const run = await ownedRun(h.runs, approval.approvalId, [h.evm, h.sol]);
+      // The operator turned the step's flow off after the run started: re-gated now (as a confirm-mode step is), nothing prepared or written.
+      const flows = h.flows.runtime as { mode: (flow: string) => Promise<string> };
+      const mode = flows.mode;
+      flows.mode = async () => 'off';
+      await expect(workflowRunUserFundedPrepare(h.surface, approval.approvalId, [h.evm, h.sol], 0)).rejects.toThrow('FLOW_NOT_ENABLED_IN_DEPLOYMENT');
+      expect((await h.store.groups(run.runId))[0]).toMatchObject({ state: 'PLANNED', prepared: null });
+      flows.mode = mode;
+      const first = await workflowRunUserFundedPrepare(h.surface, approval.approvalId, [h.evm, h.sol], 0);
+      vi.stubEnv('FLOFI_EXECUTION_PAUSED', 'true');
+      try {
+        // Even the browser holding the batch is not handed it again while execution is paused (its wallet would send it at once).
+        await expect(workflowRunUserFundedPrepare(h.surface, approval.approvalId, [h.evm, h.sol], 0, first.handout!)).rejects.toThrow('EXECUTION_PAUSED');
+        // A batch the wallet already sent is still recorded (its answer reports existing work).
+        await workflowRunUserFundedAuthorize(h.surface, approval.approvalId, [h.evm, h.sol], 0, { kind: 'EVM_WALLET_BATCH', batchId: 'batch-paused' });
+        expect((await h.store.groups(run.runId))[0]).toMatchObject({ state: 'AUTHORIZED', authorization: { batchId: 'batch-paused' } });
+      } finally { vi.unstubAllEnvs(); }
     } finally { await t.drop(); }
   });
 
@@ -231,7 +282,8 @@ describe('BUILD-FLOFI-UNIVERSAL-WORKFLOW-002 user-funded workflow run (PostgreSQ
       // Ending the run is allowed (nothing is in flight) and skips the signed group; it is never relayed.
       const ended = await h.store.cancel(run.runId, run.version, 'OWNER_CANCELLED', h.d.now());
       expect(ended.state).toBe('CANCELLED');
-      expect((await h.store.groups(run.runId))[0]).toMatchObject({ state: 'SKIPPED' });
+      // Its answer was recorded (the wallet said nothing was sent): a plain end, never WALLET_BATCH_OUTCOME_UNKNOWN.
+      expect((await h.store.groups(run.runId))[0]).toMatchObject({ state: 'SKIPPED', code: 'OWNER_CANCELLED' });
     } finally { await t2.drop(); }
   });
 

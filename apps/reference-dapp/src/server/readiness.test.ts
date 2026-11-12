@@ -92,3 +92,53 @@ describe('P0-F: readiness names this service\'s own multi-step workflow gates', 
     expect((await readiness({ env: {} })).workflows).toMatchObject({ runs: 'DISABLED', userFunded: 'USER_FUNDED_NOT_ENABLED' });
   });
 });
+
+describe('P0 universal execution: readiness says whether each mainnet endpoint offers eth_simulateV1', () => {
+  /** Endpoint double by host: `simulate` is the eth_simulateV1 answer (a JSON-RPC body or an HTTP status). */
+  function endpoints(hosts: Record<string, { chainId: string; simulate: object | number }>) {
+    const simulated: string[] = [];
+    const fetcher = (async (input: string | URL | Request, init?: RequestInit) => {
+      const host = new URL(String(input)).host, request = JSON.parse(String(init?.body)) as { method: string; params: unknown[] };
+      const endpoint = hosts[host];
+      if (!endpoint) throw new Error('connect ECONNREFUSED ' + String(input));
+      if (request.method === 'eth_simulateV1') {
+        simulated.push(host);
+        // Read-only: one empty call at the latest block, nothing signed or sent.
+        expect(request.params[1]).toBe('latest');
+        if (typeof endpoint.simulate === 'number') return new Response('busy', { status: endpoint.simulate });
+        return new Response(JSON.stringify({ jsonrpc: '2.0', id: 1, ...endpoint.simulate }), { status: 200 });
+      }
+      return new Response(JSON.stringify({ jsonrpc: '2.0', id: 1, result: request.method === 'eth_chainId' ? endpoint.chainId : '0x10' }), { status: 200 });
+    }) as typeof fetch;
+    return { fetcher, simulated };
+  }
+  it('reports SUPPORTED, UNSUPPORTED (method refused) and UNKNOWN (throttled, lagging) per user-funded chain, never a URL', async () => {
+    const env = { FLOFI_USER_FUNDED_EXECUTION: 'enabled', FLOFI_USER_FUNDED_CHAINS: 'eip155:1,eip155:8453,eip155:42161,eip155:4663,solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp',
+      FLOFI_USER_FUNDED_RPC_1: 'https://eth.uf.example/KEYETHSECRET', FLOFI_USER_FUNDED_RPC_8453: 'https://base.uf.example',
+      FLOFI_USER_FUNDED_RPC_42161: 'https://arb.uf.example/rpc', GRYLOO_ARBITRUM_RPC_URL: 'https://arb.flow.example/KEYARBSECRET' };
+    const { fetcher, simulated } = endpoints({
+      'eth.uf.example': { chainId: '0x1', simulate: { result: [{ calls: [{ status: '0x1' }] }] } },
+      'base.uf.example': { chainId: '0x2105', simulate: { error: { code: -32601, message: 'the method eth_simulateV1 does not exist/is not available' } } },
+      'arb.uf.example': { chainId: '0xa4b1', simulate: 429 },
+      'arb.flow.example': { chainId: '0xa4b1', simulate: { error: { code: -32000, message: 'header not found' } } },
+    });
+    const report = await readiness({ env, networks: true, fetcher });
+    expect(report.networks).toMatchObject({
+      'user-funded-ethereum': { chain: 'eip155:1', status: 'REACHABLE', endpoint: 'DEPLOYMENT_OVERRIDE', simulateV1: 'SUPPORTED' },
+      'user-funded-base': { chain: 'eip155:8453', status: 'REACHABLE', simulateV1: 'UNSUPPORTED' },
+      'user-funded-arbitrum': { chain: 'eip155:42161', status: 'REACHABLE', simulateV1: 'UNKNOWN' },
+      // An opted-in chain without a read endpoint is a configuration error, never probed elsewhere.
+      'user-funded-robinhood': { chain: 'eip155:4663', status: 'CONFIGURATION_INVALID' },
+      // A lagging node is not "unsupported".
+      arbitrum: { status: 'REACHABLE', simulateV1: 'UNKNOWN' },
+    });
+    // Solana and testnets are never asked for eth_simulateV1; each EVM mainnet endpoint at most once.
+    expect(Object.keys(report.networks!).filter(name => name.startsWith('user-funded-'))).toEqual(['user-funded-ethereum', 'user-funded-base', 'user-funded-arbitrum', 'user-funded-robinhood']);
+    expect(simulated.sort()).toEqual(['arb.flow.example', 'arb.uf.example', 'base.uf.example', 'eth.uf.example']);
+    expect(report.networks!['base-sepolia']!.simulateV1).toBeUndefined();
+    expect(JSON.stringify(report)).not.toMatch(/https?:\/\/|KEYETHSECRET|KEYARBSECRET|uf\.example|flow\.example/);
+  });
+  it('reports no user-funded endpoint when user-funded execution is off', () => {
+    expect(readinessProbes({ FLOFI_USER_FUNDED_RPC_1: 'https://eth.uf.example' }).some(p => p.name.startsWith('user-funded-'))).toBe(false);
+  });
+});

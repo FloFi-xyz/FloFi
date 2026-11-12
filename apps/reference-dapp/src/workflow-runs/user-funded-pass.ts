@@ -8,9 +8,13 @@
  *   PLANNED               waits for its owner (signed when due, or upfront at the start): nothing is ever prepared or signed by FloFi
  *   PREPARED              waits for the owner's wallet; past its validity it is EXPIRED and prepared again on request — except a wallet batch,
  *                         which the wallet itself sends when the owner confirms: it is never dropped silently (a late answer is still taken)
+ *   run expiry            a PLANNED or PREPARED group is BLOCKED — a wallet batch only once its validity passed (until then the wallet may still
+ *                         confirm it before its on-chain deadline); a batch handed out and never answered HALTS the run, never FAILS it, and
+ *                         its group and steps carry WALLET_BATCH_OUTCOME_UNKNOWN (it may have executed)
  *   AUTHORIZED            wallet batch: the wallet already sent it; FloFi waits for the hashes the owner's browser reports.
  *                         user operation: due when the previous group reconciled; simulated by the bundler, then relayed (owner-paid).
- *                         Solana: every signature is recorded, then each transaction is sent after its predecessor confirmed.
+ *                         Solana: started only while the signed blockhash leaves the send budget (else BLOCKED, nothing sent); every
+ *                         signature is recorded, then each transaction is sent after its predecessor confirmed.
  *   SUBMITTED/UNCERTAIN   reconciled from the chain only; per-step spent/received and the gas the owner paid become the steps' outcomes
  *
  * A group that cannot start (a refused simulation, a signer mismatch, a delivery below what was signed) is BLOCKED before anything is sent:
@@ -19,11 +23,11 @@
 import { composeWorkflowBound, type WorkflowComposition } from '../engine/strategy-engine';
 import { boundStrategy } from '../engine/workflow-bindings';
 import { assetKey } from '../delegation/steps.ts';
-import { advanceSolanaSubmission, checkUserOperation, reconcileEvmGroup, reconcileSolanaGroup, relayUserOperation, solanaSubmission, type Prepared, type Reconciled,
-  type UserFundedDeps } from '../user-funded/groups.ts';
+import { advanceSolanaSubmission, checkUserOperation, reconcileEvmGroup, reconcileSolanaGroup, relayUserOperation, solanaSendBudget, solanaSubmission, type Prepared,
+  type Reconciled, type UserFundedDeps } from '../user-funded/groups.ts';
 import type { EvmGroupCalls } from '../user-funded/evm-calls.ts';
 import type { BoundResolution, GroupRecord, RunRecord, RunStepRecord, StepOutcome, WorkflowRunStore } from './pg-store.ts';
-import { ADVANCE_RETRY_MS, TERMINAL_RUN, type RunState } from './state-machine.ts';
+import { ADVANCE_RETRY_MS, TERMINAL_RUN, WALLET_BATCH_OUTCOME_UNKNOWN, WALLET_BATCH_SETTLE_MS, groupInFlight, walletBatchUnanswered, type RunState } from './state-machine.ts';
 import { executionRefusal } from '../server/execution-guard.ts';
 
 export type Pass = { readonly state: RunState; readonly code: string | null; readonly retryMs: number | null; readonly progressed: boolean };
@@ -47,6 +51,21 @@ function executedStrategy(composed: WorkflowComposition, index: number, spent: s
   return binding && spent ? boundStrategy(base, BigInt(spent), binding.asset.decimals, binding.inputAsset) : base;
 }
 
+/**
+ * Stops an open run after the caller's own group write won: from the run's CURRENT version (it may have moved while the group was read, e.g. a
+ * status poll advanced it), a few attempts, never from a terminal or HALTED run. Null when the run was no longer RUNNING or ATTENTION.
+ */
+export async function stopRunFromCurrent(deps: { readonly store: Pick<WorkflowRunStore, 'byId' | 'transition'> }, runId: string, to: 'HALTED' | 'FAILED',
+  code: string): Promise<RunRecord | null> {
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const current = await deps.store.byId(runId);
+    if (!current || !['RUNNING', 'ATTENTION'].includes(current.state)) return null;
+    const moved = await deps.store.transition(runId, { version: current.version, from: ['RUNNING', 'ATTENTION'] }, to, { code });
+    if (moved) return moved;
+  }
+  return null;
+}
+
 export async function userFundedPass(deps: UserFundedPassDeps, run: RunRecord): Promise<Pass> {
   if (run.state === 'PENDING' || run.state === 'CANCELLED' || run.state === 'EXPIRED') return settled(run);
   await syncOwnerGroups(deps, run.runId);
@@ -58,14 +77,26 @@ export async function userFundedPass(deps: UserFundedPassDeps, run: RunRecord): 
   const now = deps.now();
   const block = async (refusal: string): Promise<Pass> => {
     const code = stored(refusal);
-    await deps.store.groupTransition(run.runId, g.groupIndex, ['PLANNED', 'PREPARED', 'AUTHORIZED'], 'BLOCKED', { code });
-    for (let i = g.stepFrom; i <= g.stepTo; i++) await deps.store.stepTransition(run.runId, i, ['DELEGATED'], 'BLOCKED', { code });
+    // A wallet batch handed to the owner's wallet and never answered may have executed (its answer lost on the way): the run HALTS (its owner
+    // ends it, and is told to check the wallet's activity), never FAILED, which would say nothing irreversible happened. Its group and steps
+    // carry WALLET_BATCH_OUTCOME_UNKNOWN, never the bare stop reason, so no surface words them as "not run" or the run as stopped before any
+    // step completed; the run itself keeps the reason it stopped (e.g. WORKFLOW_RUN_EXPIRED).
+    const unanswered = walletBatchUnanswered(g), marked = unanswered ? WALLET_BATCH_OUTCOME_UNKNOWN : code;
+    // Only the pass whose write blocked the group moves its steps and the run, and only from exactly the group state and row version this pass
+    // read: a group that moved on elsewhere meanwhile (an authorization that landed, a concurrent pass that submitted it, its transactions may be
+    // on their way) is never reported blocked, and never leaves a run failed with a send in flight. Once that write won, the run stops from its
+    // CURRENT version (a status poll may have moved it since this pass read it), never left RUNNING behind a blocked group and blocked steps.
+    if (!await deps.store.groupTransition(run.runId, g.groupIndex, [g.state], 'BLOCKED', { code: marked }, 'GROUP_STATE', g.version)) return { ...settled(run), progressed: true };
+    for (let i = g.stepFrom; i <= g.stepTo; i++) await deps.store.stepTransition(run.runId, i, ['DELEGATED'], 'BLOCKED', { code: marked });
     const partial = steps.some(s => s.stepIndex < g.stepFrom && s.state === 'RECONCILED');
-    const moved = await deps.store.transition(run.runId, { version: run.version, from: ['RUNNING', 'ATTENTION'] }, partial ? 'HALTED' : 'FAILED', { code });
-    deps.log('workflow_run.group_blocked', { run: run.runId, group: g.groupIndex, code, partial });
+    const moved = await stopRunFromCurrent(deps, run.runId, partial || unanswered ? 'HALTED' : 'FAILED', code);
+    deps.log('workflow_run.group_blocked', { run: run.runId, group: g.groupIndex, code, partial, unanswered });
     return moved ? settled(moved) : { ...settled(run), progressed: true };
   };
-  if (['PLANNED', 'PREPARED', 'AUTHORIZED'].includes(g.state) && run.expiresAt <= now && g.state !== 'AUTHORIZED') return block('WORKFLOW_RUN_EXPIRED');
+  // At the run's expiry a group nobody signed yet is blocked — never one the owner's wallet may still be confirming: a wallet batch inside its
+  // validity (`groupInFlight`) executes if the owner confirms before its on-chain deadline, and that answer must still be taken. It is blocked
+  // only once its validity passed (the deadline then reverts any late confirmation). Nothing AUTHORIZED is blocked for expiry (already signed).
+  if ((g.state === 'PLANNED' || g.state === 'PREPARED') && run.expiresAt <= now && !groupInFlight(g, now)) return block('WORKFLOW_RUN_EXPIRED');
   switch (g.state) {
     case 'PLANNED': return settled(run, OWNER_WAIT_MS, false, 'OWNER_SIGNS_GROUP');
     case 'PREPARED':
@@ -76,11 +107,22 @@ export async function userFundedPass(deps: UserFundedPassDeps, run: RunRecord): 
         if (expired) await deps.store.groupTransition(run.runId, g.groupIndex, ['EXPIRED'], 'PLANNED', { prepared: null, validUntil: null, code: null });
         return { ...settled(run, OWNER_WAIT_MS, false, 'OWNER_SIGNS_GROUP'), progressed: expired !== null };
       }
-      return settled(run, OWNER_WAIT_MS, false, 'OWNER_SIGNS_GROUP');
+      // An expired run waiting on a wallet batch is looked at again as soon as that batch's validity has passed.
+      return settled(run, run.expiresAt <= now && g.validUntil ? Math.max(1_000, Math.min(OWNER_WAIT_MS, g.validUntil.getTime() + WALLET_BATCH_SETTLE_MS - now.getTime())) : OWNER_WAIT_MS,
+        false, 'OWNER_SIGNS_GROUP');
     case 'AUTHORIZED': return authorizedGroup(deps, run, g, block);
     case 'SUBMITTED': case 'UNCERTAIN': return submittedGroup(deps, run, g, steps);
     case 'RECONCILED': return afterGroup(deps, run, g);
-    case 'BLOCKED': case 'FAILED': case 'SKIPPED': case 'EXPIRED': return settled(run);
+    case 'FAILED': {
+      // A group that failed on chain while its run is still open (the process stopped between the group's FAILED write and the run's stop,
+      // or every stop attempt lost a race): this pass stops the run, so it is never left RUNNING or ATTENTION behind it. Only FAILED heals
+      // here — a BLOCKED group is moved back to PLANNED by Resume after the run, so a pass between those two writes must not halt it again.
+      const partial = steps.some(s => s.stepIndex <= g.stepTo && s.state === 'RECONCILED');
+      const moved = await stopRunFromCurrent(deps, run.runId, partial ? 'HALTED' : 'FAILED', g.code ?? 'USER_FUNDED_GROUP_REFUSED');
+      if (moved) deps.log('workflow_run.group_failed_run_stopped', { run: run.runId, group: g.groupIndex, code: g.code, partial });
+      return moved ? settled(moved) : settled(run);
+    }
+    case 'BLOCKED': case 'SKIPPED': case 'EXPIRED': return settled(run);
   }
 }
 
@@ -93,6 +135,13 @@ async function authorizedGroup(deps: UserFundedPassDeps, run: RunRecord, g: Grou
   if (paused) return settled(run, SUBMIT_RETRY_MS, false, paused);
   if (!deps.userFunded) return settled(run, ADVANCE_RETRY_MS, false, 'USER_FUNDED_NOT_ENABLED');
   if (g.strategy === 'SOLANA_SIGN_ALL') {
+    // P0 universal execution: while the group is AUTHORIZED provably nothing of it was sent, so this is the only point where a signed group
+    // may be stopped for lack of blockhash budget: BLOCKED with nothing sent (the run FAILS, or HALTS after earlier reconciled steps and the
+    // owner ends it; the signed transactions are never sent and die with their blockhash). Once SUBMITTED, only a provable expiry stops it.
+    // An unreadable height decides nothing: the group stays AUTHORIZED and is looked at again.
+    const budget = await solanaSendBudget(deps.userFunded, prepared);
+    if (budget === 'UNAVAILABLE') return settled(run, SUBMIT_RETRY_MS, false, 'USER_FUNDED_SOLANA_RPC_UNAVAILABLE');
+    if (budget === 'SHORT') return block('SOLANA_GROUP_SIGNED_TOO_LATE');
     const submitted = await deps.store.groupTransition(run.runId, g.groupIndex, ['AUTHORIZED'], 'SUBMITTED', { submission: solanaSubmission(authorization, deps.now()) });
     return { ...settled(run, 1_000), progressed: submitted !== null };
   }
@@ -130,8 +179,14 @@ async function submittedGroup(deps: UserFundedPassDeps, run: RunRecord, g: Group
     return { state: 'ATTENTION', code, retryMs: ADVANCE_RETRY_MS, progressed: false };
   }
   if (r.status === 'PENDING') return settled(run, SUBMIT_RETRY_MS);
-  const composed = composeWorkflowBound(run.strategy, run.workflowHash);
-  if (!composed.ok) return settled(run, ADVANCE_RETRY_MS, false, 'WORKFLOW_RUN_STALE');
+  // Final review (P1): the chain did not revert what was reported, yet it does not match what the owner signed — funds may have moved. Never
+  // FAILED (nothing irreversible happened): the group and its steps are UNCERTAIN and the run needs ATTENTION, observed again, never resent.
+  if (r.status === 'UNMATCHED') return attention(deps, run, g, stored(r.code));
+  // Final review (P1): recording what the chain already decided never depends on the workflow still composing to the run's hash (a deploy may
+  // change the canonical bytes while a group is in flight): the run's own strategy is composed without that binding for the per-step records.
+  const bound = composeWorkflowBound(run.strategy, run.workflowHash);
+  const composed = bound.ok ? bound : composeWorkflowBound(run.strategy, undefined);
+  if (!bound.ok) deps.log('workflow_run.reconciled_unbound', { run: run.runId, group: g.groupIndex, composes: composed.ok });
   const observedAt = deps.now().toISOString(), chain = g.chain;
   const facts = r.status === 'RECONCILED' ? r.steps : r.steps ?? [];
   const evidence = { environment: 'PUBLIC_UNVERIFIED', outcome: r.status, bundleHash: null };
@@ -153,26 +208,31 @@ async function submittedGroup(deps: UserFundedPassDeps, run: RunRecord, g: Group
   const receivedOf = (producer: number, asset: string) => [...steps[producer]?.outcome?.received ?? [], ...facts.find(f => f.stepIndex === producer)?.received ?? []]
     .filter(x => x.asset === asset).reduce((sum, x) => sum + BigInt(x.amount), 0n);
   const boundOf = (index: number): BoundResolution | null => {
-    const spent = spentOf(index), all = composed.bindings.filter(b => b.step === index);
+    const spent = spentOf(index), all = composed.ok ? composed.bindings.filter(b => b.step === index) : [];
     if (!spent || !all.length) return null;
     const resolutions = all.map(b => ({ amountFrom: b.amountFrom, asset: b.asset, cap: b.cap,
       received: receivedOf(b.amountFrom, assetKey({ chain: b.asset.chainId, address: b.asset.address })).toString(), used: spent }));
     return { ...resolutions[0]!, ...resolutions.length > 1 ? { additional: resolutions.slice(1) } : {} };
   };
+  let unrecorded = false;
   for (let i = g.stepFrom; i <= g.stepTo; i++) {
     const done = facts.some(f => f.stepIndex === i);
-    const strategy = executedStrategy(composed, i, spentOf(i)), alone = composeWorkflowBound(strategy, undefined);
-    const bound = steps[i]!.bound ? null : boundOf(i);
-    const resolved = { ...alone.ok ? { strategy, workflowHash: alone.workflowHash } : {}, ...bound ? { bound } : {} };
-    if (r.status === 'RECONCILED' || done)
-      await deps.store.stepTransition(run.runId, i, ['DELEGATED', 'UNCERTAIN'], 'RECONCILED', { outcome: outcomeOf(i, 'RECONCILED'), code: null, ...resolved });
-    else if (steps[i]!.state === 'DELEGATED' || steps[i]!.state === 'UNCERTAIN')
+    if (r.status === 'RECONCILED' || done) {
+      // A step is RECONCILED only with the strategy it executed (0015); one that no longer composes at all is left for ATTENTION below.
+      const strategy = composed.ok ? executedStrategy(composed, i, spentOf(i)) : null, alone = strategy ? composeWorkflowBound(strategy, undefined) : null;
+      if (!strategy || !alone?.ok) { unrecorded = true; continue; }
+      const resolution = steps[i]!.bound ? null : boundOf(i);
+      await deps.store.stepTransition(run.runId, i, ['DELEGATED', 'UNCERTAIN'], 'RECONCILED', { outcome: outcomeOf(i, 'RECONCILED'), code: null, strategy,
+        workflowHash: alone.workflowHash, ...resolution ? { bound: resolution } : {} });
+    } else if (steps[i]!.state === 'DELEGATED' || steps[i]!.state === 'UNCERTAIN')
       await deps.store.stepTransition(run.runId, i, ['DELEGATED', 'UNCERTAIN'], 'FAILED', { outcome: outcomeOf(i, 'FAILED'), code: r.status === 'FAILED' ? stored(r.code) : null });
   }
   // Reconciled against an earlier preparation (the one the wallet sent): what ITS steps were signed to spend and receive, for the owner's view.
   const preparedFrom = r.group ? { preparedFrom: { steps: r.group.steps, calls: r.group.calls.length,
     approvals: r.group.calls.filter(c => c.kind === 'ERC20_APPROVE').length } } : {};
   const groupOutcome = { status: r.status, transactions: r.transactions, gasPaid: r.gasPaid, steps: facts, observedAt, ...preparedFrom };
+  // Executed steps FloFi cannot record any more (their strategy no longer composes): the run needs attention, never advances past them.
+  if (unrecorded) return attention(deps, run, g, 'WORKFLOW_RUN_STALE');
   if (r.status === 'RECONCILED') {
     await deps.store.groupTransition(run.runId, g.groupIndex, ['SUBMITTED', 'UNCERTAIN'], 'RECONCILED', { outcome: groupOutcome, code: null });
     deps.log('workflow_run.group_reconciled', { run: run.runId, group: g.groupIndex, gasPaid: r.gasPaid.amount });
@@ -180,10 +240,24 @@ async function submittedGroup(deps: UserFundedPassDeps, run: RunRecord, g: Group
   }
   await deps.store.groupTransition(run.runId, g.groupIndex, ['SUBMITTED', 'UNCERTAIN'], 'FAILED', { outcome: groupOutcome, code: stored(r.code) });
   const partial = facts.length > 0 || steps.some(s => s.stepIndex < g.stepFrom && s.state === 'RECONCILED');
-  const fresh = (await deps.store.byId(run.runId))!;
-  const moved = await deps.store.transition(run.runId, { version: fresh.version, from: ['RUNNING', 'ATTENTION'] }, partial ? 'HALTED' : 'FAILED', { code: stored(r.code) });
+  // From the run's CURRENT version, re-read on every attempt (a status poll, or a concurrent pass moving it to ATTENTION, may move it between a
+  // read and the write). Should it still not move (the process stops here, or every attempt loses), the next pass stops it (case 'FAILED').
+  const moved = await stopRunFromCurrent(deps, run.runId, partial ? 'HALTED' : 'FAILED', stored(r.code));
   deps.log('workflow_run.group_failed', { run: run.runId, group: g.groupIndex, code: r.code });
-  return moved ? settled(moved) : { ...settled(fresh), progressed: true };
+  return moved ? settled(moved) : { ...settled(run), progressed: true };
+}
+
+/**
+ * A submitted group whose outcome FloFi cannot record (the chain did not revert it, yet it does not match what was signed; or its executed
+ * steps no longer compose): the group and its still-open steps are UNCERTAIN, the run needs ATTENTION — observation only, never a resend.
+ */
+async function attention(deps: UserFundedPassDeps, run: RunRecord, g: GroupRecord, code: string): Promise<Pass> {
+  if (g.state === 'SUBMITTED') await deps.store.groupTransition(run.runId, g.groupIndex, ['SUBMITTED'], 'UNCERTAIN', { code });
+  for (let i = g.stepFrom; i <= g.stepTo; i++) await deps.store.stepTransition(run.runId, i, ['DELEGATED'], 'UNCERTAIN', { code });
+  const current = await deps.store.byId(run.runId);
+  if (current?.state === 'RUNNING') await deps.store.transition(run.runId, { version: current.version, from: ['RUNNING'] }, 'ATTENTION', { code });
+  deps.log('workflow_run.group_unmatched', { run: run.runId, group: g.groupIndex, code });
+  return { state: 'ATTENTION', code, retryMs: ADVANCE_RETRY_MS, progressed: false };
 }
 
 /**

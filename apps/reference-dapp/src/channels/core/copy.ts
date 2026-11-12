@@ -140,30 +140,50 @@ const EN = {
   stepsList: (lines: readonly string[]) => lines.length ? `Workflow (${lines.length} step${lines.length === 1 ? '' : 's'}):\n${lines.map((line, i) => `${i + 1}. ${line}`).join('\n')}`
     : 'There are no steps yet. Tell me what you want to do.',
   authorizations: (a: AuthorizationFacts) => [...a.confirm !== null ? [`Authorizations: at least ${a.confirm} wallet confirmations in FloFi — one per step, each after a fresh simulation.`] : [],
-    ...a.once ? ['Or authorize the whole workflow ONCE in your wallet: one exact signature per network (your wallet may first need a one-time smart-account upgrade on each network), after which FloFi runs every step without asking again.'] : [],
-    'One authorization is not one transaction: each step pays its own network fees.'],
+    // User-funded groups: one line with the count and who pays (it replaces the per-step fee line: a batch runs several steps in one transaction).
+    ...a.groups ? [`${a.confirm !== null ? 'Or, in groups' : 'Authorizations, in groups'} of same-network steps: ${a.groups.atLeast ? 'at least ' : ''}${a.groups.interactions} wallet `
+      + `interaction${a.groups.interactions === 1 ? '' : 's'} in FloFi. ${a.confirm !== null ? 'Either way your' : 'Your'} own wallet pays every network fee; FloFi never pays gas.`]
+      : ['One authorization is not one transaction: each step pays its own network fees.']],
   workflowRun: (r: RunFacts) => [`Workflow: ${RUN_STATE_EN[r.state] ?? r.state}`, ...r.steps.map(step => `${step.index + 1}. ${ACTION_EN[step.action] ?? step.action} — `
     + `${STEP_STATE_EN[step.state] ?? step.state}${step.transaction ? ` · tx ${shorten(step.transaction)}` : ''}`)].join('\n'),
   stepReady: (n: number, url: string) => `Step ${n} is ready for your signature in FloFi: ${url}\nYour wallet proves it is you there; nothing is authorized until you sign.`,
+  batchAnswered: (from: number, to: number, url: string) => `Your wallet answered the batch request for ${from === to ? `step ${from}` : `steps ${from}–${to}`}; FloFi has `
+    + `not recorded its transactions yet. If FloFi is not open, open it so your wallet can report them and FloFi can reconcile them: ${url}\n`
+    + 'Do not send the batch again: it may already have executed.',
   runOpen: (url: string) => `This workflow is already running. Continue it in FloFi: ${url}\nA new link would start it again from the first step, so none was created.`,
   runDone: 'Workflow completed: every step reconciled ✅',
-  runHalted: 'Workflow partially completed: the reconciled steps stay done and their funds rest in your wallet; nothing later was submitted. See FloFi.',
+  runHalted: 'Workflow partially completed: the reconciled steps stay done and their funds rest in your wallet. See FloFi for the step that stopped.',
+  runHaltedNothingSent: (resumable: boolean) => `Workflow stopped before anything was sent: your funds stay in your wallet. ${resumable
+    ? 'In FloFi you can run each step through its own flow, or end it.' : 'Open FloFi to decide what happens next.'}`,
+  runHaltedStopped: 'Workflow stopped before any step completed. FloFi submits nothing more of it; open FloFi to decide what happens next.',
+  runHaltedUnclassified: 'Workflow stopped. FloFi submits nothing more of it; open FloFi to see what each step did and decide what happens next.',
+  // A halt while a batch handed to the wallet has no recorded answer: it may have executed, so never "before any step completed" or "nothing was sent".
+  // "Never recorded", not "never reached FloFi": an answer may have arrived after the stop and been refused (WALLET_BATCH_ANSWERED_AFTER_STOP, logged).
+  runHaltedBatchUnknown: (partial: boolean) => `${partial ? 'Workflow partially completed: the reconciled steps stay done. ' : 'Workflow stopped. '}A batch was `
+    + 'handed to your wallet and FloFi never recorded an answer for it: it may have executed before its on-chain deadline. Check your wallet\'s activity. FloFi submits '
+    + 'nothing more of it; open FloFi to decide what happens next.',
   runAttention: 'A submitted step has no final outcome yet. FloFi keeps observing it and never resubmits it.',
   runEnded: (code: string) => `Workflow ended without completing (${code}). See FloFi for details.`,
+  runEndedBatchUnknown: 'Workflow ended. A batch was handed to your wallet and FloFi never recorded an answer for it: it may have executed before its on-chain deadline. '
+    + 'Check your wallet\'s activity.',
 };
-export type AuthorizationFacts = { readonly confirm: number | null; readonly once: boolean };
+/** `groups`: the user-funded execution groups the owner is offered in FloFi (null: not offered); `atLeast` while the count is a lower bound. */
+export type AuthorizationFacts = { readonly confirm: number | null; readonly groups: { readonly interactions: number; readonly atLeast: boolean } | null };
 export type RunFacts = { readonly state: string; readonly steps: readonly { readonly index: number; readonly action: string; readonly state: string; readonly transaction: string | null }[] };
+/** A bare HALTED (how it stopped is not known here) is worded neutrally: never "partially completed", never "nothing was sent". */
 const RUN_STATE_EN: Readonly<Record<string, string>> = { PENDING: 'waiting for you to choose how to authorize it', RUNNING: 'running', COMPLETED: 'completed ✅',
-  HALTED: 'partially completed', FAILED: 'failed', ATTENTION: 'needs attention', CANCELLED: 'ended', EXPIRED: 'expired' };
+  HALTED: 'stopped', HALTED_PARTIAL: 'partially completed', HALTED_NOTHING_SENT: 'stopped before anything was sent', HALTED_STOPPED: 'stopped', FAILED: 'failed',
+  ATTENTION: 'needs attention', CANCELLED: 'ended', EXPIRED: 'expired' };
 const STEP_STATE_EN: Readonly<Record<string, string>> = { PENDING: 'waiting', READY: 'ready for your signature', AWAITING_OWNER: 'in your wallet', DELEGATED: 'authorized',
-  GROUP_WAITING: 'waiting for your wallet', GROUP_SIGNED: 'signed in your wallet',
+  GROUP_WAITING: 'waiting for your wallet', GROUP_SIGNED: 'signed in your wallet', GROUP_NOT_SIGNED: 'not signed', OUTCOME_UNKNOWN: 'outcome unknown — it may have executed; check your wallet\'s activity',
   RECONCILED: 'reconciled ✅', FAILED: 'failed', UNCERTAIN: 'outcome pending', SKIPPED: 'not run', BLOCKED: 'stopped before submission' };
 const ACTION_EN: Readonly<Record<string, string>> = { swap: 'Swap', bridge: 'Bridge', supply: 'Supply', borrow: 'Borrow', repay: 'Repay', withdraw: 'Withdraw',
   add_liquidity: 'Add liquidity', transfer: 'Transfer', lending_composition: 'Lending composition' };
 const RUN_STATE_PT: Readonly<Record<string, string>> = { PENDING: 'esperando você escolher como autorizar', RUNNING: 'em execução', COMPLETED: 'concluído ✅',
-  HALTED: 'parcialmente concluído', FAILED: 'falhou', ATTENTION: 'requer atenção', CANCELLED: 'encerrado', EXPIRED: 'expirado' };
+  HALTED: 'interrompido', HALTED_PARTIAL: 'parcialmente concluído', HALTED_NOTHING_SENT: 'interrompido antes de qualquer envio', HALTED_STOPPED: 'interrompido', FAILED: 'falhou',
+  ATTENTION: 'requer atenção', CANCELLED: 'encerrado', EXPIRED: 'expirado' };
 const STEP_STATE_PT: Readonly<Record<string, string>> = { PENDING: 'em espera', READY: 'pronta para sua assinatura', AWAITING_OWNER: 'na sua carteira', DELEGATED: 'autorizada',
-  GROUP_WAITING: 'aguardando a sua carteira', GROUP_SIGNED: 'assinada na sua carteira',
+  GROUP_WAITING: 'aguardando a sua carteira', GROUP_SIGNED: 'assinada na sua carteira', GROUP_NOT_SIGNED: 'não assinada', OUTCOME_UNKNOWN: 'resultado desconhecido — pode ter sido executada; confira a atividade da sua carteira',
   RECONCILED: 'reconciliada ✅', FAILED: 'falhou', UNCERTAIN: 'resultado pendente', SKIPPED: 'não executada', BLOCKED: 'parada antes do envio' };
 const ACTION_PT: Readonly<Record<string, string>> = { swap: 'Troca', bridge: 'Ponte entre redes', supply: 'Depósito', borrow: 'Empréstimo', repay: 'Reembolso', withdraw: 'Saque',
   add_liquidity: 'Liquidez', transfer: 'Transferência', lending_composition: 'Composição de empréstimo' };
@@ -249,16 +269,30 @@ const PT: Copy = {
   stepsList: lines => lines.length ? `Fluxo (${lines.length} etapa${lines.length === 1 ? '' : 's'}):\n${lines.map((line, i) => `${i + 1}. ${line}`).join('\n')}`
     : 'Ainda não há etapas. Diga o que você quer fazer.',
   authorizations: a => [...a.confirm !== null ? [`Autorizações: pelo menos ${a.confirm} confirmações na carteira no FloFi — uma por etapa, cada uma depois de uma nova simulação.`] : [],
-    ...a.once ? ['Ou autorize o fluxo inteiro UMA vez na sua carteira: uma assinatura exata por rede (sua carteira pode antes precisar de uma atualização única de conta inteligente em cada rede), e depois o FloFi executa cada etapa sem pedir de novo.'] : [],
-    'Uma autorização não é uma transação: cada etapa paga as suas próprias taxas de rede.'],
+    ...a.groups ? [`${a.confirm !== null ? 'Ou, em grupos' : 'Autorizações, em grupos'} de etapas na mesma rede: ${a.groups.atLeast ? 'pelo menos ' : ''}${a.groups.interactions} `
+      + `interaç${a.groups.interactions === 1 ? 'ão' : 'ões'} na carteira no FloFi. ${a.confirm !== null ? 'Em qualquer caso, a' : 'A'} sua própria carteira paga todas as taxas `
+      + 'de rede; o FloFi nunca paga gas.']
+      : ['Uma autorização não é uma transação: cada etapa paga as suas próprias taxas de rede.']],
   workflowRun: r => [`Fluxo: ${RUN_STATE_PT[r.state] ?? r.state}`, ...r.steps.map(step => `${step.index + 1}. ${ACTION_PT[step.action] ?? step.action} — `
     + `${STEP_STATE_PT[step.state] ?? step.state}${step.transaction ? ` · tx ${shorten(step.transaction)}` : ''}`)].join('\n'),
   stepReady: (n, url) => `A etapa ${n} está pronta para a sua assinatura no FloFi: ${url}\nA sua carteira prova que é você lá; nada é autorizado até você assinar.`,
+  batchAnswered: (from, to, url) => `A sua carteira respondeu ao pedido do lote ${from === to ? `da etapa ${from}` : `das etapas ${from}–${to}`}; o FloFi ainda não `
+    + `registrou as transações dele. Se o FloFi não estiver aberto, abra-o para que a sua carteira as informe e o FloFi possa reconciliá-las: ${url}\n`
+    + 'Não envie o lote de novo: ele pode já ter sido executado.',
   runOpen: url => `Este fluxo já está em execução. Continue no FloFi: ${url}\nUm novo link o começaria de novo pela primeira etapa, então nenhum foi criado.`,
   runDone: 'Fluxo concluído: todas as etapas reconciliadas ✅',
-  runHalted: 'Fluxo parcialmente concluído: as etapas reconciliadas ficam feitas e os fundos ficam na sua carteira; nada posterior foi enviado. Veja no FloFi.',
+  runHalted: 'Fluxo parcialmente concluído: as etapas reconciliadas ficam feitas e os fundos delas ficam na sua carteira. Veja no FloFi a etapa que parou.',
+  runHaltedNothingSent: resumable => `Fluxo interrompido antes de qualquer envio: seus fundos ficam na sua carteira. ${resumable
+    ? 'No FloFi você pode executar cada etapa pelo próprio fluxo, ou encerrá-lo.' : 'Abra o FloFi para decidir o que acontece a seguir.'}`,
+  runHaltedStopped: 'Fluxo interrompido antes de concluir qualquer etapa. O FloFi não envia mais nada dele; abra o FloFi para decidir o que acontece a seguir.',
+  runHaltedUnclassified: 'Fluxo interrompido. O FloFi não envia mais nada dele; abra o FloFi para ver o que cada etapa fez e decidir o que acontece a seguir.',
+  runHaltedBatchUnknown: partial => `${partial ? 'Fluxo parcialmente concluído: as etapas reconciliadas ficam feitas. ' : 'Fluxo interrompido. '}Um lote foi `
+    + 'entregue à sua carteira e o FloFi nunca registrou uma resposta para ele: ele pode ter sido executado antes do prazo na rede. Confira a atividade da sua carteira. '
+    + 'O FloFi não envia mais nada dele; abra o FloFi para decidir o que acontece a seguir.',
   runAttention: 'Uma etapa enviada ainda não tem resultado final. O FloFi continua a observá-la e nunca a reenvia.',
   runEnded: code => `O fluxo terminou sem concluir (${code}). Veja os detalhes no FloFi.`,
+  runEndedBatchUnknown: 'O fluxo terminou. Um lote foi entregue à sua carteira e o FloFi nunca registrou uma resposta para ele: ele pode ter sido executado antes do prazo na rede. '
+    + 'Confira a atividade da sua carteira.',
 };
 const REFUSALS_PT: Readonly<Record<string, string>> = {
   MAINNET_HANDOFF_DISABLED_BY_POLICY: 'Esta estratégia usa uma mainnet (fundos reais). Propostas com fundos reais estão desativadas neste canal.',

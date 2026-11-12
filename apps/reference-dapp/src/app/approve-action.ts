@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 'use server';
-import { withFlightAccess, withFlightOwner } from '../server/flight-access';
+import { withFlightAccess, withFlightGroupAnswerAccess, withFlightOwner } from '../server/flight-access';
 /**
  * BUILD-MCP-002 → BUILD-DEVELOPER-001: server actions of `/approve`, the FloFi-controlled page where an external proposal meets its
  * owner — for every requester kind this deployment serves (`src/server/approval-surface.ts`), not only MCP.
@@ -168,15 +168,16 @@ export async function startUserFundedWorkflowRun(approvalId: string, profile: un
   });
 }
 /** What the owner's wallet signs for one execution group now. */
-export async function prepareUserFundedGroup(approvalId: string, groupIndex: number): Promise<Result<PreparedGroupView>> {
+export async function prepareUserFundedGroup(approvalId: string, groupIndex: number, handout?: string): Promise<Result<PreparedGroupView>> {
   return withFlightAccess(async () => {
-  return runAction((s, w) => workflowRunUserFundedPrepare(s, approvalId, w, groupIndex));
+  return runAction((s, w) => workflowRunUserFundedPrepare(s, approvalId, w, groupIndex, handout));
 
   });
 }
 /** The owner's wallet answer for one prepared group (batch id, user-operation signature or signed Solana transactions). */
 export async function authorizeUserFundedGroup(approvalId: string, groupIndex: number, answer: unknown): Promise<Result<ClaimedProposal>> {
-  return withFlightAccess(async () => {
+  // A wallet batch's answer reports what the wallet already sent (owner boundary, like its hashes); any other answer is a new submission.
+  return withFlightGroupAnswerAccess(answer, async () => {
   return runAction((s, w) => workflowRunUserFundedAuthorize(s, approvalId, w, groupIndex, answer));
 
   });

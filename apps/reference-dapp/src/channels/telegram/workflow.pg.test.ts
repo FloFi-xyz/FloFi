@@ -20,6 +20,7 @@ import { handleTelegramWebhook } from './handler.ts';
 import type { ChannelInterpreter } from '../core/conversation.ts';
 import { intent } from '../../domain/copilot-session.test-harness.ts';
 import type { FlowName } from '../../../backend/flows.ts';
+import type { UserFundedFacts } from '../../workflow-runs/execution-groups.ts';
 
 const OWNER = '0x1111111111111111111111111111111111111111';
 const SWAP = 'swap 1 USDC to WETH on Base Sepolia slippage 50 bps', BRIDGE = 'bridge 5 USDC from Base Sepolia to Arbitrum Sepolia via auto slippage 50 bps';
@@ -28,7 +29,8 @@ beforeAll(async () => { t = await createTestDatabase(); });
 afterAll(async () => { await t?.drop(); });
 const evm = (address: string): WalletRef => ({ namespace: 'eip155', address });
 
-async function deployment(options: { interpreter?: ChannelInterpreter; flows?: readonly FlowName[]; env?: Record<string, string | undefined> } = {}) {
+async function deployment(options: { interpreter?: ChannelInterpreter; flows?: readonly FlowName[]; env?: Record<string, string | undefined>;
+  /** The deployment's user-funded execution facts (none: user-funded groups are not enabled here). */ userFunded?: UserFundedFacts } = {}) {
   const tenantId = `wf-${randomBytes(6).toString('hex')}`;
   await t.db.query('INSERT INTO tenants (tenant_id) VALUES ($1)', [tenantId]);
   const token = randomBytes(24).toString('base64url'), tg = telegramEnv();
@@ -36,7 +38,9 @@ async function deployment(options: { interpreter?: ChannelInterpreter; flows?: r
     ...options.interpreter ? { FLOFI_CHANNEL_COPILOT: 'enabled' } : {}, FLOFI_CHANNEL_DISPATCH_TOKEN_SHA256: createHash('sha256').update(token).digest('hex') };
   const api = botApi(), host = { db: t.db, tenantId };
   const now = () => new Date();
-  const flows = ownerFlowRuntime(options.flows ?? ['base-sepolia-swap', 'crosschain-router-testnet'], { enabled: true, delegation: null }, now);
+  // The harness reports the deployment's workflow-run facts as given; user-funded facts ride along exactly as a deployment's runtime reports them.
+  const sequences = { enabled: true, delegation: null, ...options.userFunded ? { userFunded: options.userFunded } : {} };
+  const flows = ownerFlowRuntime(options.flows ?? ['base-sepolia-swap', 'crosschain-router-testnet'], sequences, now);
   const common = { env, host, runtime: flows.runtime, interpreter: options.interpreter ?? null, now, sleep: async () => undefined, random: () => 0.5 };
   const say = async (text: string) => { const r = await handleTelegramWebhook(telegramRequest(textUpdate(text), tg.webhookSecret), { ...common, fetch: api.fetch }); expect(r.status).toBe(200); };
   const sweep = async () => { const r = await handleChannelDispatch(new Request('http://127.0.0.1:3100/api/channels/dispatch', { headers: { authorization: `Bearer ${token}` } }),
@@ -63,6 +67,18 @@ describe('BUILD-CHAT-E2E-001 Telegram multi-step workflow (PostgreSQL, Bot API d
     expect(rows).toHaveLength(2);
     expect(rows[0]!.workflow_hash).toBe(rows[1]!.workflow_hash);
     for (const row of rows) expect(row.strategy).toMatchObject({ version: 2, steps: [{ action: 'bridge' }, { action: 'supply' }], bindings: [{ step: 1, amountFrom: 0 }] });
+  });
+  it('BUILD-FLOFI-UNIVERSAL-WORKFLOW-002: where user-funded groups are offered, the ready reply counts their wallet interactions (at least), paid by the owner\'s wallet', async () => {
+    const d = await deployment({ userFunded: { enabled: true, code: null, chains: ['eip155:84532'], bundlerChains: [], solanaNonceAccounts: true } });
+    await d.say(SWAP);
+    await d.say('add step');
+    await d.say('swap 0.001 WETH to USDC on Base Sepolia slippage 50 bps');
+    const ready = d.api.texts().at(-1)!;
+    expect(ready).toMatch(/^Strategy ready:\n1\. [\s\S]*\n2\. /);
+    expect(ready).toContain('Authorizations: at least 2 wallet confirmations in FloFi — one per step, each after a fresh simulation.');
+    expect(ready).toContain('Or, in groups of same-network steps: at least 1 wallet interaction in FloFi. Either way your own wallet pays every network fee; FloFi never pays gas.');
+    // Never the retired executor-funded single authorization.
+    expect(ready).not.toMatch(/ONCE in your wallet|one exact signature per network/);
   });
   it('authors steps in chat, hands ONE approval to the owner, follows each step to completion and never restarts a running workflow', async () => {
     const d = await deployment();

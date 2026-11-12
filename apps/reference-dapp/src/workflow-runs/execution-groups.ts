@@ -24,7 +24,9 @@
  *                          inside that same confirmation (one-time setup, shown by the wallet).
  *   EVM_USER_OPERATION     an ERC-4337 v0.7 user operation of the owner's own EIP-7702 MetaMask smart account, signed upfront as EIP-712
  *                          typed data (one signature); FloFi relays it through a bundler when due; the EntryPoint charges the gas to the
- *                          owner's account prefund. Needs an upgraded account and a bundler for that chain.
+ *                          owner's account prefund. Needs an upgraded account and a bundler for that chain. Never for a group with an Aave
+ *                          step or a swap whose output a later step of the group spends: those need the whole-batch simulation (a wallet
+ *                          batch, signed when due).
  *   EVM_OWNER_STEP         the step's own flow (simulate → review → wallet confirmation), one or more confirmations per step.
  *   SOLANA_SIGN_ALL        one wallet prompt signs every transaction of the group (Wallet Standard `solana:signTransaction` with several
  *                          inputs); FloFi submits them in order, each after the previous confirmed. Recent blockhashes: submitted at once.
@@ -50,10 +52,12 @@ export type AmountBasis = 'EXACT' | 'GUARANTEED_MINIMUM' | 'RECONCILED_ACTUAL';
  * a group of its own through the step's flow. Keep in step with the builders: a capability is never advertised before it is built.
  */
 export const USER_FUNDED_BUILDABLE: Readonly<Record<Namespace, ReadonlySet<string>>> = Object.freeze({
-  eip155: new Set(['swap', 'supply', 'borrow', 'transfer']),
+  eip155: new Set(['swap', 'supply', 'borrow', 'repay', 'withdraw', 'transfer']),
   solana: new Set(['transfer', 'swap']),
 });
 
+/** The Aave V3 actions: signed only after their exact calls were simulated on the state they run on (never in an upfront user operation). */
+export const AAVE_ACTIONS: ReadonlySet<string> = new Set(['supply', 'borrow', 'repay', 'withdraw']);
 /** What the deployment offers (from `user-funded/config.ts`): opted-in chains and chains with an ERC-4337 bundler. */
 export type UserFundedFacts = { readonly enabled: boolean; readonly code: string | null; readonly chains: readonly string[]; readonly bundlerChains: readonly string[];
   readonly solanaNonceAccounts: boolean };
@@ -110,19 +114,25 @@ const namespaceOfChain = (chain: string): Namespace => chain.startsWith('solana:
 /** Default buildability: the action is in `USER_FUNDED_BUILDABLE` and spends at most one asset. Callers may narrow it further per step. */
 export const defaultBuildable = (s: StepRequirement): boolean => USER_FUNDED_BUILDABLE[s.namespace].has(s.action) && s.inputs.length <= 1;
 
-/** Consecutive same-chain buildable steps form one candidate group; a bridge closes its group; any other step stands alone. */
-function partition(steps: readonly StepRequirement[], buildable: (s: StepRequirement) => boolean, bindings: WorkflowRequirement['bindings']): StepRequirement[][] {
-  const out: StepRequirement[][] = [];
-  let current: StepRequirement[] = [];
-  const close = () => { if (current.length) out.push(current); current = []; };
+/**
+ * Consecutive same-chain buildable steps form one candidate group; a bridge closes its group; any other step stands alone. `dependent`: the
+ * group was cut from the previous one ONLY because its first step spends an output of that group (a Solana step; see below).
+ */
+function partition(steps: readonly StepRequirement[], buildable: (s: StepRequirement) => boolean,
+  bindings: WorkflowRequirement['bindings']): { readonly members: StepRequirement[]; readonly dependent: boolean }[] {
+  const out: { members: StepRequirement[]; dependent: boolean }[] = [];
+  let current: StepRequirement[] = [], dependent = false;
+  const close = () => { if (current.length) out.push({ members: current, dependent }); current = []; dependent = false; };
   for (const step of steps) {
     const last = current.at(-1);
     // Solana: every transaction of a sign-all group is simulated before the owner signs, so a step that spends the output of an earlier step
     // of the same group (not yet on chain) starts a group of its own. EVM groups keep it: the batch enforces the producer's signed minimum.
     const dependsInside = step.namespace === 'solana' && bindings.some(b => b.step === step.index && current.some(c => c.index === b.amountFrom));
-    const joinable = last && !dependsInside && buildable(step) && buildable(last) && last.chain === step.chain && last.action !== 'bridge';
+    const sameChainBuildable = last !== undefined && buildable(step) && buildable(last) && last.chain === step.chain && last.action !== 'bridge';
+    const joinable = sameChainBuildable && !dependsInside;
     if (!joinable) close();
     current.push(step);
+    if (sameChainBuildable && dependsInside) dependent = true;
     if (!buildable(step) || step.action === 'bridge') close();
   }
   close();
@@ -135,8 +145,17 @@ function partition(steps: readonly StepRequirement[], buildable: (s: StepRequire
  * with the owner's real wallet.
  */
 export function planExecutionGroups(requirement: WorkflowRequirement, facts: UserFundedFacts, wallets?: WalletProfile,
-  isBuildable: (s: StepRequirement) => boolean = defaultBuildable): GroupPlan {
-  const buildable = (s: StepRequirement) => defaultBuildable(s) && isBuildable(s);
+  isBuildable: (s: StepRequirement) => boolean | string = defaultBuildable): GroupPlan {
+  /**
+   * P0 universal execution: why a step cannot join a batch, as the builder's own closed code (slippage above the batch limit, an Aave beneficiary
+   * that is not the owner, native ETH, ...) instead of one generic code on every surface. Null when it can.
+   */
+  const problemOf = (s: StepRequirement): string | null => {
+    if (!defaultBuildable(s)) return `USER_FUNDED_ACTION_NOT_BUILDABLE:${s.action.toUpperCase()}`;
+    const r = isBuildable(s);
+    return r === true ? null : r === false ? `USER_FUNDED_ACTION_NOT_BUILDABLE:${s.action.toUpperCase()}` : r;
+  };
+  const buildable = (s: StepRequirement) => problemOf(s) === null;
   if (!facts.enabled) return { ok: false, code: facts.code ?? 'USER_FUNDED_NOT_ENABLED' };
   if (requirement.steps.length < 1) return { ok: false, code: 'WORKFLOW_STEPS_EMPTY' };
   const assumed = !wallets;
@@ -147,7 +166,7 @@ export function planExecutionGroups(requirement: WorkflowRequirement, facts: Use
   const bindingOf = (index: number) => requirement.bindings.find(b => b.step === index) ?? null;
   const groups: ExecutionGroup[] = [];
   let stepCursor = 0;
-  for (const members of partition(requirement.steps, buildable, requirement.bindings)) {
+  for (const { members, dependent } of partition(requirement.steps, buildable, requirement.bindings)) {
     const first = members[0]!, chain = first.chain, namespace = namespaceOfChain(chain);
     if (first.index !== stepCursor) return { ok: false, code: 'WORKFLOW_GROUP_ORDER_INVALID' };
     stepCursor = members.at(-1)!.index + 1;
@@ -158,7 +177,7 @@ export function planExecutionGroups(requirement: WorkflowRequirement, facts: Use
     const chainEnabled = facts.chains.includes(chain);
     if (!chainEnabled) downgrades.push('USER_FUNDED_CHAIN_DISABLED');
     const allBuildable = members.every(buildable);
-    if (!allBuildable) downgrades.push(`USER_FUNDED_ACTION_NOT_BUILDABLE:${members.find(m => !buildable(m))!.action.toUpperCase()}`);
+    if (!allBuildable) { const why = problemOf(members.find(m => !buildable(m))!)!; if (!downgrades.includes(why)) downgrades.push(why); }
     let strategy: GroupStrategy, signing: SigningTime = 'UPFRONT';
     const setup: ExecutionGroup['setup'][number][] = [];
     if (namespace === 'eip155') {
@@ -171,12 +190,17 @@ export function planExecutionGroups(requirement: WorkflowRequirement, facts: Use
       // P0 workflow execution: an Aave step is only ever signed after FloFi simulated its exact calls on the chain state they run on (health factor
       // at least 2.0 after a borrow, the supply cap). A user operation is signed upfront and relayed later, so such a group is a wallet batch
       // prepared, simulated and signed when due instead.
-      const aave = members.some(m => m.action === 'supply' || m.action === 'borrow');
+      const aave = members.some(m => AAVE_ACTIONS.has(m.action));
+      // A swap whose output a later step of THIS group spends: only the whole-batch simulation proves the owner received all of that output
+      // (a fee-on-transfer token delivers less, and the bound step would then spend the owner's other balance of it). A user operation gets
+      // bundler estimates at most (a delayed one none), so such a group is a wallet batch simulated and signed when due, like an Aave group.
+      const spentSwap = members.some(m => m.action === 'swap' && requirement.bindings.some(b => b.amountFrom === m.index && members.some(c => c.index === b.step)));
       if (awaitsDelivery !== null) {
-        if (canUserOp && !aave) strategy = 'EVM_USER_OPERATION';
+        if (canUserOp && !aave && !spentSwap) strategy = 'EVM_USER_OPERATION';
         else {
-          if (chainEnabled && allBuildable) downgrades.push(canUserOp ? 'USER_OPERATION_AAVE_SIGNED_WHEN_DUE' : !facts.bundlerChains.includes(chain) ? 'USER_OPERATION_BUNDLER_UNAVAILABLE'
-            : evm?.wallet !== 'INJECTED' || !evm.typedData ? 'WALLET_TYPED_DATA_USER_OPERATION_UNSUPPORTED' : 'EVM_SMART_ACCOUNT_REQUIRED');
+          if (chainEnabled && allBuildable) downgrades.push(...canUserOp ? [...aave ? ['USER_OPERATION_AAVE_SIGNED_WHEN_DUE'] : [],
+            ...spentSwap ? ['USER_OPERATION_SWAP_OUTPUT_SIGNED_WHEN_DUE'] : []] : [!facts.bundlerChains.includes(chain) ? 'USER_OPERATION_BUNDLER_UNAVAILABLE'
+            : evm?.wallet !== 'INJECTED' || !evm.typedData ? 'WALLET_TYPED_DATA_USER_OPERATION_UNSUPPORTED' : 'EVM_SMART_ACCOUNT_REQUIRED']);
           strategy = canBatch ? 'EVM_WALLET_BATCH' : 'EVM_OWNER_STEP'; signing = 'WHEN_DUE';
         }
       } else if (canBatch) strategy = 'EVM_WALLET_BATCH';
@@ -192,6 +216,9 @@ export function planExecutionGroups(requirement: WorkflowRequirement, facts: Use
         strategy = canSignAll ? 'SOLANA_SIGN_ALL' : 'SOLANA_OWNER_STEP'; signing = 'WHEN_DUE';
       } else strategy = canSignAll ? 'SOLANA_SIGN_ALL' : 'SOLANA_OWNER_STEP';
       if (chainEnabled && allBuildable && !canSignAll) downgrades.push('SOLANA_MULTI_SIGN_UNSUPPORTED');
+      // A sign-all group cut from the previous one because its first step spends an output of that group (not on chain when the owner signs, so
+      // it could not be simulated): signed when that output landed, one more wallet prompt. Owner steps prompt per step anyway: nothing is added.
+      if (dependent && strategy === 'SOLANA_SIGN_ALL') downgrades.push('SOLANA_GROUP_STEP_DEPENDENT');
     }
     const ownerStep = strategy === 'EVM_OWNER_STEP' || strategy === 'SOLANA_OWNER_STEP';
     // An owner step is its flow's own confirmation(s): at least one per step (a token approval may add one more, which the flow shows).

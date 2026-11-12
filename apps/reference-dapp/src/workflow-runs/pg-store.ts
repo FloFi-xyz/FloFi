@@ -14,7 +14,8 @@
 import type { Database, Queryable, Row } from '@defi-workflow-engine/cloud-runtime';
 import type { StrategyInput, StrategySpec } from '../engine/strategy-spec';
 import type { ApprovalRequesterKind, RequesterScope, WalletRef } from '../platform/handoff-store.ts';
-import { WORKFLOW_RUN_ADVANCE_KIND, canEndWorkflow, groupInFlight, type RunMode, type RunState, type StepState } from './state-machine.ts';
+import { WALLET_BATCH_OUTCOME_UNKNOWN, WORKFLOW_RUN_ADVANCE_KIND, canEndWorkflow, groupInFlight, walletBatchUnanswered, type RunMode, type RunState,
+  type StepState } from './state-machine.ts';
 import type { ExecutionGroup, GroupStrategy, SigningTime } from './execution-groups.ts';
 
 export type WalletSet = Readonly<Partial<Record<WalletRef['namespace'], string>>>;
@@ -181,21 +182,28 @@ export function createPgWorkflowRunStore(db: Database, tenantId: string) {
       const row = (await tx.query(`UPDATE workflow_runs SET state = 'CANCELLED', code = $3, version = version + 1
         WHERE tenant_id = $1 AND run_id = $2 RETURNING *`, [tenantId, runId, code])).rows[0]!;
       // BUILD-FLOFI-UNIVERSAL-WORKFLOW-002: a user-funded run ends only while no group may be in flight (signed but not reconciled).
+      const unknown = new Set<number>();
       if (run.mode === 'USER_FUNDED') {
         const groups = (await tx.query('SELECT * FROM workflow_run_groups WHERE tenant_id = $1 AND run_id = $2 ORDER BY group_index FOR UPDATE', [tenantId, runId])).rows.map(groupOf);
         // The same rule the owner's "End workflow" uses (`groupInFlight`): FloFi never relays a skipped user operation or Solana signature, and
         // the owner is shown how to revoke a signed operation.
         if (groups.some(g => groupInFlight(g, now))) refuse('WORKFLOW_RUN_GROUP_IN_FLIGHT');
         for (const g of groups) if (['PLANNED', 'PREPARED', 'EXPIRED', 'BLOCKED', 'AUTHORIZED'].includes(g.state)) {
+          // A wallet batch handed to the owner's wallet whose answer never reached FloFi is past its validity here (else it would be in flight),
+          // yet it may have executed before its on-chain deadline: it is still SKIPPED (nothing more of it is sent or taken), but its group and
+          // steps say the outcome is unknown, never a plain "not run" (the run's note tells the owner to check the wallet's activity).
+          const skipped = walletBatchUnanswered(g) ? WALLET_BATCH_OUTCOME_UNKNOWN : code;
+          if (skipped !== code) for (let i = g.stepFrom; i <= g.stepTo; i++) unknown.add(i);
           await tx.query(`UPDATE workflow_run_groups SET state = 'SKIPPED', code = $4, version = version + 1 WHERE tenant_id = $1 AND run_id = $2 AND group_index = $3`,
-            [tenantId, runId, g.groupIndex, code]);
-          await event(tx, runId, null, 'GROUP_STATE', code, { group: g.groupIndex, state: 'SKIPPED' });
+            [tenantId, runId, g.groupIndex, skipped]);
+          await event(tx, runId, null, 'GROUP_STATE', skipped, { group: g.groupIndex, state: 'SKIPPED' });
         }
       }
       for (const step of steps) if (['PENDING', 'READY', 'BLOCKED'].includes(step.state) || (run.mode === 'USER_FUNDED' && step.state === 'DELEGATED')) {
+        const skipped = unknown.has(step.stepIndex) ? WALLET_BATCH_OUTCOME_UNKNOWN : code;
         await tx.query(`UPDATE workflow_run_steps SET state = 'SKIPPED', code = $4, version = version + 1
-          WHERE tenant_id = $1 AND run_id = $2 AND step_index = $3`, [tenantId, runId, step.stepIndex, code]);
-        await event(tx, runId, step.stepIndex, 'STEP_STATE', code, { state: 'SKIPPED' });
+          WHERE tenant_id = $1 AND run_id = $2 AND step_index = $3`, [tenantId, runId, step.stepIndex, skipped]);
+        await event(tx, runId, step.stepIndex, 'STEP_STATE', skipped, { state: 'SKIPPED' });
       }
       await event(tx, runId, null, 'RUN_CANCELLED', code, { state: 'CANCELLED' });
       return runOf(row);
@@ -279,8 +287,13 @@ export function createPgWorkflowRunStore(db: Database, tenantId: string) {
     async groups(runId: string): Promise<readonly GroupRecord[]> {
       return (await db.query('SELECT * FROM workflow_run_groups WHERE tenant_id = $1 AND run_id = $2 ORDER BY group_index', [tenantId, runId])).rows.map(groupOf);
     },
-    /** Compare-and-set on one group: from one of `from`, under the run lock (serialized with cancellation and step moves). Null when elsewhere. */
-    async groupTransition(runId: string, groupIndex: number, from: readonly GroupState[], to: GroupState, patch: GroupPatch, kind = 'GROUP_STATE'): Promise<GroupRecord | null> {
+    /**
+     * Compare-and-set on one group: from one of `from`, under the run lock (serialized with cancellation and step moves). Null when elsewhere.
+     * `expectVersion`: also only from exactly that row version (a same-state rewrite, e.g. a wallet batch re-prepared while it stays PREPARED,
+     * must never overwrite a concurrent rewrite it did not see).
+     */
+    async groupTransition(runId: string, groupIndex: number, from: readonly GroupState[], to: GroupState, patch: GroupPatch, kind = 'GROUP_STATE',
+      expectVersion: number | null = null): Promise<GroupRecord | null> {
       return db.transaction(async tx => {
         const run = await lockRun(tx, runId);
         if (!run || run.state === 'CANCELLED') return null;
@@ -289,9 +302,9 @@ export function createPgWorkflowRunStore(db: Database, tenantId: string) {
             prepared = CASE WHEN $8::boolean THEN $9::jsonb ELSE prepared END, owner_authorization = CASE WHEN $10::boolean THEN $11::jsonb ELSE owner_authorization END,
             submission = COALESCE($12::jsonb, submission), outcome = COALESCE($13::jsonb, outcome), code = CASE WHEN $14::boolean THEN $15 ELSE code END,
             valid_until = CASE WHEN $16::boolean THEN $17::timestamptz ELSE valid_until END
-          WHERE tenant_id = $1 AND run_id = $2 AND group_index = $3 AND state = ANY($4::text[]) RETURNING *`,
+          WHERE tenant_id = $1 AND run_id = $2 AND group_index = $3 AND state = ANY($4::text[]) AND ($18::bigint IS NULL OR version = $18::bigint) RETURNING *`,
         [tenantId, runId, groupIndex, [...from], to, patch.strategy ?? null, patch.signing ?? null, has('prepared'), json(patch.prepared), has('authorization'), json(patch.authorization),
-          json(patch.submission), json(patch.outcome), has('code'), patch.code ?? null, has('validUntil'), patch.validUntil ?? null])).rows[0];
+          json(patch.submission), json(patch.outcome), has('code'), patch.code ?? null, has('validUntil'), patch.validUntil ?? null, expectVersion])).rows[0];
         if (!row) return null;
         await event(tx, runId, null, kind, patch.code ?? null, { group: groupIndex, state: to,
           ...patch.submission ? { hashes: (patch.submission as { hashes?: unknown }).hashes ?? null } : {} });

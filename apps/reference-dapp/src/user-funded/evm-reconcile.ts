@@ -16,13 +16,14 @@
 import { erc4337 } from '@defi-workflow-engine/reference-compiler';
 import type { ChainTransport } from '../delegation/chains.ts';
 import { assetKey } from '../delegation/steps.ts';
-import { evmCallsOf, type EvmGroupCalls, type UserCall } from './evm-calls.ts';
+import { evmCallsOf, OP_STACK_CHAIN_IDS, type EvmGroupCalls, type UserCall } from './evm-calls.ts';
 import type { GasPaidFact } from './gas-payer.ts';
 
 export const TRANSFER_TOPIC = '0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef';
 type Log = { readonly address: string; readonly topics: readonly string[]; readonly data: string; readonly logIndex?: string };
 export type EvmReceipt = { readonly transactionHash: string; readonly status?: string; readonly from?: string; readonly to?: string | null; readonly gasUsed?: string;
-  readonly effectiveGasPrice?: string; readonly blockNumber?: string; readonly logs?: readonly Log[] };
+  readonly effectiveGasPrice?: string; readonly blockNumber?: string; readonly logs?: readonly Log[];
+  /** OP Stack receipts only: the L1 data fee the sender paid on top of gasUsed × effectiveGasPrice. */ readonly l1Fee?: string };
 export type StepFacts = { readonly stepIndex: number; readonly spent: readonly { readonly asset: string; readonly amount: string }[];
   readonly received: readonly { readonly asset: string; readonly amount: string }[] };
 export type GroupReconciliation =
@@ -32,9 +33,14 @@ export type GroupReconciliation =
 
 const topicAddress = (topic: string | undefined) => topic ? ('0x' + topic.slice(-40)).toLowerCase() : '';
 const quantity = (value: unknown) => typeof value === 'string' && /^0x[0-9a-fA-F]+$/.test(value) ? BigInt(value) : 0n;
-/** `counterparty`: the only account an outflow may go to (an ERC-20 transfer's recipient), null when the protocol decides (pool, aToken). */
+/**
+ * `counterparty`: the only account an outflow may go to (an ERC-20 transfer's recipient, Aave's aToken for a repayment, the zero address for a
+ * burn), absent when the protocol decides. `optional`: a protocol-side leg whose presence depends on accrued interest (Aave mints instead of
+ * burning when the interest accrued since the owner's last action exceeds the amount); it may match, never be required, and has no fixed amount.
+ */
 type Leg = { readonly step: number; readonly token: string; readonly direction: 'OUT' | 'IN'; readonly amount: bigint | null; readonly minimum: bigint | null;
-  readonly counterparty?: string; filled: bigint | null };
+  readonly counterparty?: string; readonly optional?: true; filled: bigint | null };
+const ZERO_ADDRESS = '0x' + '0'.repeat(40);
 
 /** The ERC-20 legs each call of the group must produce for the owner, in execution order. Native value transfers produce no log. */
 function expectedLegs(group: EvmGroupCalls): Leg[] {
@@ -45,6 +51,13 @@ function expectedLegs(group: EvmGroupCalls): Leg[] {
       { step: step.stepIndex, token: c.tokenOut.toLowerCase(), direction: 'IN', amount: null, minimum: BigInt(c.amountOutMinimum), filled: null });
     else if (c.kind === 'AAVE_V3_SUPPLY') legs.push({ step: step.stepIndex, token: c.asset.toLowerCase(), direction: 'OUT', amount: BigInt(c.amount), minimum: null, filled: null });
     else if (c.kind === 'AAVE_V3_BORROW') legs.push({ step: step.stepIndex, token: c.asset.toLowerCase(), direction: 'IN', amount: BigInt(c.amount), minimum: null, filled: null });
+    // A repayment: exactly the amount of the underlying to the reserve's aToken, and the burn of the owner's variable-debt token.
+    else if (c.kind === 'AAVE_V3_REPAY') legs.push({ step: step.stepIndex, token: c.asset.toLowerCase(), direction: 'OUT', amount: BigInt(c.amount), minimum: null,
+      counterparty: c.aToken.toLowerCase(), filled: null }, { step: step.stepIndex, token: c.variableDebtToken.toLowerCase(), direction: 'OUT', amount: null, minimum: null,
+      counterparty: ZERO_ADDRESS, optional: true, filled: null });
+    // A withdrawal: exactly the amount of the underlying to the owner, and the burn of the owner's aToken.
+    else if (c.kind === 'AAVE_V3_WITHDRAW') legs.push({ step: step.stepIndex, token: c.asset.toLowerCase(), direction: 'IN', amount: BigInt(c.amount), minimum: null, filled: null },
+      { step: step.stepIndex, token: c.aToken.toLowerCase(), direction: 'OUT', amount: null, minimum: null, counterparty: ZERO_ADDRESS, optional: true, filled: null });
     else if (c.kind === 'ERC20_TRANSFER' && c.to.toLowerCase() !== group.owner) legs.push({ step: step.stepIndex, token: c.token.toLowerCase(), direction: 'OUT', amount: BigInt(c.amount), minimum: null,
       counterparty: c.to.toLowerCase(), filled: null });
   }
@@ -66,12 +79,14 @@ export function attributeLegs(group: EvmGroupCalls, logs: readonly Log[]): { rea
     leg.filled = value;
   }
   for (const leg of legs) {
+    if (leg.filled === null && leg.optional) continue;
     if (leg.filled === null) return { ok: false, code: 'RECONCILIATION_LEG_MISSING' };
     if (leg.amount !== null && leg.filled !== leg.amount) return { ok: false, code: 'RECONCILIATION_AMOUNT_MISMATCH' };
     if (leg.minimum !== null && leg.filled < leg.minimum) return { ok: false, code: 'RECONCILIATION_BELOW_SIGNED_MINIMUM' };
   }
   const steps = group.steps.map(s => {
-    const mine = legs.filter(l => l.step === s.stepIndex);
+    // Protocol-side burns are evidence only: the step's spend and receipt are its underlying legs.
+    const mine = legs.filter(l => l.step === s.stepIndex && !l.optional);
     const key = (token: string) => assetKey({ chain: group.chain, address: token });
     const spent = mine.filter(l => l.direction === 'OUT').map(l => ({ asset: key(l.token), amount: l.filled!.toString() }));
     const received = mine.filter(l => l.direction === 'IN').map(l => ({ asset: key(l.token), amount: l.filled!.toString() }));
@@ -125,7 +140,7 @@ export async function reconcileWalletBatch(t: ChainTransport, group: EvmGroupCal
   for (const r of receipts) {
     // S1 on the chain itself: the account that sent (and paid for) every transaction of the batch is the owner.
     if (String(r.from ?? '').toLowerCase() !== group.owner) return { status: 'MISMATCH', code: 'GAS_PAYER_NOT_OWNER', gasPaid: null, transactions: [...hashes] };
-    gas += quantity(r.gasUsed) * quantity(r.effectiveGasPrice);
+    gas += quantity(r.gasUsed) * quantity(r.effectiveGasPrice) + (OP_STACK_CHAIN_IDS.has(group.chainId) ? quantity(r.l1Fee) : 0n);
   }
   if (fromBlock !== null && receipts.some(r => quantity(r.blockNumber) < BigInt(fromBlock)))
     return { status: 'MISMATCH', code: 'RECONCILIATION_TRANSACTION_BEFORE_PREPARATION', gasPaid: null, transactions: [...hashes] };

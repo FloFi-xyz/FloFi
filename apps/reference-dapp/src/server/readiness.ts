@@ -25,6 +25,7 @@ import { walletSessionKey } from './wallet-session.ts';
 import { readUserFundedConfig } from '../user-funded/config.ts';
 import { readEditorRunConfig } from '../editor/approval.ts';
 import { simulationAdmission } from '../platform/preview.ts';
+import { simulationFailureKind } from '../user-funded/batch-simulation.ts';
 
 type Env = Readonly<Record<string, string | undefined>>;
 const CODE = /^[A-Z][A-Z0-9_]{2,80}$/;
@@ -33,8 +34,15 @@ export const READINESS_FLOWS: readonly FlowName[] = Object.freeze(['base-sepolia
   'crosschain-router-testnet', 'solana-devnet-swap', 'orca-liquidity', 'lending-composition', 'crosschain-router', 'jupiter-swap', 'orca-liquidity-mainnet',
   'solana-transfer', 'solana-devnet-transfer']);
 
+/**
+ * Whether an EVM endpoint answers `eth_simulateV1` (read-only, one empty call at the latest block). SUPPORTED: it simulated; UNSUPPORTED: the
+ * node refused the METHOD (user-funded batches with Aave calls are then refused on that chain, never signed blind); UNKNOWN: anything else
+ * (throttled, lagging, unreachable) — never reported as support.
+ */
+export type SimulationSupport = 'SUPPORTED' | 'UNSUPPORTED' | 'UNKNOWN';
 export type NetworkStatus = { readonly status: 'REACHABLE' | 'WRONG_CHAIN' | 'UNREACHABLE' | 'RATE_LIMITED' | 'CONFIGURATION_INVALID';
-  readonly chain: string; readonly endpoint: 'PUBLIC_DEFAULT' | 'DEPLOYMENT_OVERRIDE'; readonly block?: number; readonly latencyMs?: number };
+  readonly chain: string; readonly endpoint: 'PUBLIC_DEFAULT' | 'DEPLOYMENT_OVERRIDE'; readonly block?: number; readonly latencyMs?: number;
+  readonly simulateV1?: SimulationSupport };
 export type Readiness = {
   readonly service: 'flofi-web'; readonly ok: boolean; readonly checkedAt: string;
   readonly deployment: { readonly environment: DeploymentEnvironment; readonly hosted: boolean; readonly commit: string | null; readonly branch: string | null; readonly region: string | null };
@@ -54,7 +62,9 @@ export type Readiness = {
     readonly simulation: { readonly slots: number; readonly waitMs: number } };
 };
 
-type Probe = { readonly name: string; readonly chain: string; readonly kind: 'evm'; readonly chainId: number; readonly url: () => string; readonly override: string | undefined }
+type Probe = { readonly name: string; readonly chain: string; readonly kind: 'evm'; readonly chainId: number; readonly url: () => string; readonly override: string | undefined;
+    /** Also ask whether the endpoint offers `eth_simulateV1` (mainnet endpoints whose flows or user-funded batches simulate with it). */
+    readonly simulate?: boolean }
   | { readonly name: string; readonly chain: string; readonly kind: 'solana'; readonly genesisHash: string; readonly url: () => string; readonly override: string | undefined };
 /** The endpoints the flows themselves would call, resolved by the flows' own configuration functions. */
 export function readinessProbes(env: Env): readonly Probe[] {
@@ -71,14 +81,47 @@ export function readinessProbes(env: Env): readonly Probe[] {
     { name: 'solana-devnet', chain: ORCA_WHIRLPOOLS_DEVNET.chain, kind: 'solana', genesisHash: ORCA_WHIRLPOOLS_DEVNET.genesisHash, override: env.GRYLOO_SOLANA_DEVNET_RPC_URL,
       url: () => solana(env.GRYLOO_SOLANA_DEVNET_RPC_URL, ORCA_WHIRLPOOLS_DEVNET.rpc) },
     // Mainnets are probed read-only because their flows offer read-only Simulate/Review; nothing here enables execution.
-    { name: 'base', chain: ROUTER.source.chain, kind: 'evm', chainId: ROUTER.source.chainId, override: env.GRYLOO_BASE_RPC_URL, url: () => routerRpcUrl(env.GRYLOO_BASE_RPC_URL, ROUTER.source.rpc) },
-    { name: 'ethereum', chain: 'eip155:1', kind: 'evm', chainId: 1, override: env.GRYLOO_ETHEREUM_RPC_URL,
+    { name: 'base', chain: ROUTER.source.chain, kind: 'evm', chainId: ROUTER.source.chainId, override: env.GRYLOO_BASE_RPC_URL, simulate: true,
+      url: () => routerRpcUrl(env.GRYLOO_BASE_RPC_URL, ROUTER.source.rpc) },
+    { name: 'ethereum', chain: 'eip155:1', kind: 'evm', chainId: 1, override: env.GRYLOO_ETHEREUM_RPC_URL, simulate: true,
       url: () => routerRpcUrl(env.GRYLOO_ETHEREUM_RPC_URL, 'https://ethereum-rpc.publicnode.com') },
-    { name: 'arbitrum', chain: ROUTER.destination.chain, kind: 'evm', chainId: ROUTER.destination.chainId, override: env.GRYLOO_ARBITRUM_RPC_URL,
+    { name: 'arbitrum', chain: ROUTER.destination.chain, kind: 'evm', chainId: ROUTER.destination.chainId, override: env.GRYLOO_ARBITRUM_RPC_URL, simulate: true,
       url: () => routerRpcUrl(env.GRYLOO_ARBITRUM_RPC_URL, ROUTER.destination.rpc) },
     { name: 'solana', chain: JUPITER_SOLANA_MAINNET.chain, kind: 'solana', genesisHash: JUPITER_SOLANA_MAINNET.genesisHash, override: env.GRYLOO_SOLANA_RPC_URL,
       url: () => solana(env.GRYLOO_SOLANA_RPC_URL, JUPITER_SOLANA_MAINNET.rpc) },
+    ...userFundedProbes(env),
   ];
+}
+const USER_FUNDED_NAMES: Readonly<Record<string, string>> = Object.freeze({ 'eip155:1': 'ethereum', 'eip155:8453': 'base', 'eip155:42161': 'arbitrum', 'eip155:4663': 'robinhood' });
+/**
+ * P0 universal execution: the read endpoints user-funded groups simulate their wallet batches on (`FLOFI_USER_FUNDED_RPC_<id>`, else
+ * `FLOFI_DELEGATION_RPC_<id>`), for every opted-in EVM chain. A chain whose endpoint is missing is reported CONFIGURATION_INVALID.
+ */
+function userFundedProbes(env: Env): readonly Probe[] {
+  const config = readUserFundedConfig(env);
+  if (!config.enabled) return [];
+  return config.chains.filter(chain => chain.startsWith('eip155:')).map(chain => {
+    const chainId = Number(chain.slice('eip155:'.length)), override = config.rpc[chain];
+    return { name: `user-funded-${USER_FUNDED_NAMES[chain] ?? chainId}`, chain, kind: 'evm' as const, chainId, override, simulate: true,
+      url: () => { if (!override) throw new Error('CONFIGURATION_INVALID'); return override; } };
+  });
+}
+/** One read-only `eth_simulateV1` of an empty call from and to a precompile-free placeholder address, at the latest block. */
+const SIMULATE_PROBE = [{ blockStateCalls: [{ calls: [{ from: '0x' + '0'.repeat(39) + '1', to: '0x' + '0'.repeat(39) + '1', data: '0x', value: '0x0' }] }],
+  validation: false, traceTransfers: false, returnFullTransactions: false }, 'latest'] as const;
+async function simulationSupport(url: string, fetcher: typeof fetch): Promise<SimulationSupport> {
+  try {
+    const response = await fetcher(url, { method: 'POST', cache: 'no-store', redirect: 'error', signal: AbortSignal.timeout(5_000),
+      headers: { 'content-type': 'application/json' }, body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'eth_simulateV1', params: SIMULATE_PROBE }) });
+    if (response.status === 429) return 'UNKNOWN';
+    const text = await response.text();
+    if (text.length > 65_536) return 'UNKNOWN';
+    const value = JSON.parse(text) as { result?: unknown; error?: { code?: unknown; message?: unknown } } | null;
+    if (value && Array.isArray(value.result) && value.result.length === 1) return 'SUPPORTED';
+    const error = value?.error;
+    if (error && (error.code === -32601 || simulationFailureKind(typeof error.message === 'string' ? error.message : '') === 'UNSUPPORTED')) return 'UNSUPPORTED';
+    return 'UNKNOWN';
+  } catch { return 'UNKNOWN'; }
 }
 async function probe(target: Probe, fetcher: typeof fetch, now: () => number): Promise<NetworkStatus> {
   const base = { chain: target.chain, endpoint: target.override ? 'DEPLOYMENT_OVERRIDE' as const : 'PUBLIC_DEFAULT' as const };
@@ -100,7 +143,9 @@ async function probe(target: Probe, fetcher: typeof fetch, now: () => number): P
       const id = await rpc('eth_chainId');
       if (typeof id !== 'string' || !/^0x[0-9a-fA-F]{1,16}$/.test(id) || BigInt(id) !== BigInt(target.chainId)) return { ...base, status: 'WRONG_CHAIN' };
       const block = await rpc('eth_blockNumber');
-      return { ...base, status: 'REACHABLE', ...typeof block === 'string' && /^0x[0-9a-fA-F]{1,16}$/.test(block) ? { block: Number(BigInt(block)) } : {}, latencyMs: now() - started };
+      const latencyMs = now() - started;
+      return { ...base, status: 'REACHABLE', ...typeof block === 'string' && /^0x[0-9a-fA-F]{1,16}$/.test(block) ? { block: Number(BigInt(block)) } : {}, latencyMs,
+        ...target.simulate ? { simulateV1: await simulationSupport(url, fetcher) } : {} };
     }
     if (await rpc('getGenesisHash') !== target.genesisHash) return { ...base, status: 'WRONG_CHAIN' };
     const height = await rpc('getBlockHeight');

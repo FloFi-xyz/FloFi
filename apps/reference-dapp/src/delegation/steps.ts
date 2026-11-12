@@ -5,7 +5,8 @@
  * a step requirement is read from the step's own IR nodes (action type, chain, verified asset identities, exact native amounts, slippage)
  * and from the capability registry's adapter for that node. UI labels never enter here.
  */
-import { resolveNodeCapability } from '@defi-workflow-engine/action-registry';
+import { orcaLiquidityProfile, resolveNodeCapability, uniswapLiquidityProfile } from '@defi-workflow-engine/action-registry';
+import { resolveNetworkAsset } from '../domain/asset-catalogs';
 import { composeWorkflowBound, NETWORKS, strategyNetwork, type Composition, type WorkflowComposition } from '../engine/strategy-engine';
 import { NETWORK_CHAINS } from '../engine/capability-catalog';
 import type { NetworkId, StrategyAction, StrategyInput, StrategySpec } from '../engine/strategy-spec';
@@ -42,8 +43,29 @@ type Quantity = { readonly asset: { readonly chainId: string; readonly address?:
 const NATIVE_IDENTITY = (asset: Quantity['asset']): string | null => asset.nativeId === 'ETH' && asset.chainId.startsWith('eip155:') && asset.decimals === 18
   ? '0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee' : asset.nativeId === 'SOL' && asset.chainId.startsWith('solana:') && asset.decimals === 9
     ? 'So11111111111111111111111111111111111111112' : null;
-const SYMBOLS = (s: StrategySpec): readonly string[] => s.action === 'swap' ? [s.inputAsset, s.outputAsset] : s.action === 'bridge' ? ['USDC', 'USDC']
+/** P0 universal execution: a bridge's own authored assets (its input, and its output when it names another one), never a fixed label. */
+const SYMBOLS = (s: StrategySpec): readonly string[] => s.action === 'swap' ? [s.inputAsset, s.outputAsset] : s.action === 'bridge' ? [s.asset, s.outputAsset ?? s.asset]
   : s.action === 'add_liquidity' ? Object.keys(s.maxAmounts) : s.action === 'lending_composition' ? ['USDC', 'WETH'] : [s.asset];
+const EXPLICIT_TOKEN = /^(?:0x[0-9a-fA-F]{40}|[1-9A-HJ-NP-Za-km-z]{32,44})@[0-9]{1,2}$/;
+/**
+ * The symbol the owner reads for an asset of a step: the network catalog's symbol for its exact address (or the registered liquidity pool's
+ * token), else the authored symbol. An authored explicit token (`address@decimals`) without a catalog entry reads as its shortened address.
+ */
+function displaySymbol(asset: Quantity['asset'], authored: string): string {
+  if (asset.nativeId === 'ETH' || asset.nativeId === 'SOL') return asset.nativeId;
+  const address = typeof asset.address === 'string' ? asset.address : null;
+  if (address) {
+    const evm = asset.chainId.startsWith('eip155:'), key = evm ? address.toLowerCase() : address;
+    const orca = orcaLiquidityProfile(asset.chainId), uniswap = uniswapLiquidityProfile(asset.chainId);
+    const known = resolveNetworkAsset(asset.chainId, { address: key })?.symbol
+      ?? (orca && [orca.token0, orca.token1].find(token => token.mint === key && token.decimals === asset.decimals)?.symbol)
+      ?? (uniswap && [uniswap.token0, uniswap.token1].find(token => token.address.toLowerCase() === key && token.decimals === asset.decimals)?.symbol);
+    if (known) return known;
+  }
+  if (!EXPLICIT_TOKEN.test(authored)) return authored;
+  const token = authored.split('@')[0]!;
+  return `${token.slice(0, 6)}…${token.slice(-4)}`;
+}
 function ref(asset: Quantity['asset'], symbol: string): AssetRef {
   const address = typeof asset.address === 'string' ? asset.address : NATIVE_IDENTITY(asset);
   if (typeof address !== 'string' || !Number.isInteger(asset.decimals)) throw new Error('DELEGATION_STEP_ASSET_INVALID');
@@ -60,9 +82,12 @@ function stepOf(composition: Composition, index: number): StepRequirement {
     // The spend of a node is its MAXIMUM_INPUT constraints (what the owner's account may pay); outputs are its ASSET inputs.
     for (const c of node.userConstraints) if (c.kind === 'MAXIMUM_INPUT') {
       const q = c.quantity as Quantity, symbol = inputs.length < symbols.length ? symbols[inputs.length]! : symbols[0]!;
-      inputs.push({ ...ref(q.asset, strategy.action === 'add_liquidity' ? symbolOfAddress(strategy, q.asset) : symbol), amount: BigInt(q.amount) });
+      inputs.push({ ...ref(q.asset, strategy.action === 'add_liquidity' ? symbolOfAddress(strategy, q.asset) : displaySymbol(q.asset, symbol)), amount: BigInt(q.amount) });
     }
-    for (const input of node.inputs) if (input.kind === 'ASSET') outputs.push(ref(input.value as Quantity['asset'], symbols[1] ?? symbols[0]!));
+    for (const input of node.inputs) if (input.kind === 'ASSET') {
+      const asset = input.value as Quantity['asset'];
+      outputs.push(ref(asset, displaySymbol(asset, symbols[1] ?? symbols[0]!)));
+    }
   }
   const slippage = nodes.flatMap((n: Node) => n.userConstraints).find(c => c.kind === 'MAXIMUM_SLIPPAGE_BPS') as { maximumBps?: number } | undefined;
   const chain = nodes[0]!.chainId;
@@ -75,10 +100,13 @@ function stepOf(composition: Composition, index: number): StepRequirement {
     stepHash: composition.workflowHash };
 }
 function symbolOfAddress(strategy: StrategySpec, asset: Quantity['asset']): string {
-  // Liquidity deposits name both pool assets; the decimals tell them apart within FloFi's registered pairs.
+  // Liquidity deposits name both pool assets: each deposit is labelled by its own address (catalog or registered pool token), never guessed
+  // from its decimals (two tokens with the same decimals, or a non-USDC 6-decimal token, would otherwise read as the other asset).
   if (strategy.action !== 'add_liquidity') return '';
-  const keys = Object.keys(strategy.maxAmounts);
-  return asset.decimals === 6 ? keys.find(k => k.includes('USDC')) ?? keys[0]! : keys.find(k => !k.includes('USDC')) ?? keys[0]!;
+  const keys = Object.keys(strategy.maxAmounts), resolved = displaySymbol(asset, '');
+  const authored = keys.find(k => k.toUpperCase() === resolved.toUpperCase());
+  if (authored) return authored;
+  return resolved || (asset.decimals === 6 ? keys.find(k => k.includes('USDC')) ?? keys[0]! : keys.find(k => !k.includes('USDC')) ?? keys[0]!);
 }
 
 /**

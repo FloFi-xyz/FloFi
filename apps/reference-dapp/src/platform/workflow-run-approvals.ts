@@ -64,7 +64,7 @@ export async function claimSequential(deps: WorkflowRunSurface, h: HandoffRecord
   if (run.state === 'PENDING' && run.mode === null) {
     const plan = await ownerAuthorizationPlan(deps, run);
     // BUILD-FLOFI-UNIVERSAL-WORKFLOW-002: the run starts at once only when confirming each step is the owner's only real choice (user-funded
-    // groups that would need fewer wallet interactions leave the choice to the owner).
+    // groups with at least one grouped interaction, never more wallet interactions than confirming each step, leave the choice to the owner).
     if (plan.confirmEachStep.available && plan.recommended !== 'USER_FUNDED') run = await startConfirm(deps, run, wallets);
   }
   return proposalOf(deps, run, await currentStep(deps, run, wallets), base);
@@ -129,8 +129,9 @@ export async function userFundedStartSequential(deps: WorkflowRunSurface, run: R
   return proposalOf(deps, started, await currentStep(deps, started, wallets), base);
 }
 /** What the owner's wallet signs for one group (exact calls, typed data or Solana transactions, with the fee ceiling and its payer). */
-export async function userFundedPrepareSequential(deps: WorkflowRunSurface, run: RunRecord, wallets: readonly WalletRef[], groupIndex: number): Promise<PreparedGroupView> {
-  return prepareUserFundedGroup(deps, run, wallets, groupIndex);
+export async function userFundedPrepareSequential(deps: WorkflowRunSurface, run: RunRecord, wallets: readonly WalletRef[], groupIndex: number,
+  handout?: string): Promise<PreparedGroupView> {
+  return prepareUserFundedGroup(deps, run, wallets, groupIndex, handout);
 }
 export async function userFundedAuthorizeSequential(deps: WorkflowRunSurface, run: RunRecord, wallets: readonly WalletRef[], groupIndex: number, answer: OwnerAnswer, base: ApprovalView) {
   const moved = await authorizeUserFundedGroup(deps, run, wallets, groupIndex, answer);

@@ -68,7 +68,6 @@ export const portugueseWorkflowExecution: Readonly<Record<string, string>> = {
   'Authorize steps {0}–{1} now': 'Autorizar as etapas {0}–{1} agora',
   'Quote expired: updating': 'Cotação expirada: atualizando',
   // Panel state and mechanism labels (looked up from closed codes).
-  'Authorized in the batch': 'Autorizada no lote',
   'Confirmed in your wallet': 'Confirmado na sua carteira',
   'One wallet confirmation: one atomic transaction': 'Uma confirmação na carteira: uma transação atômica',
   'Each step confirmed in your wallet': 'Cada etapa confirmada na sua carteira',
@@ -119,6 +118,20 @@ export const portugueseWorkflowExecution: Readonly<Record<string, string>> = {
   'Too many reviews in a short time. Wait a few minutes and review again.': 'Revisões demais em pouco tempo. Aguarde alguns minutos e revise de novo.',
   'An Aave step after a bridge is authorized when the bridge delivery lands, after FloFi simulates it on that state (health factor and supply cap).':
     'Uma etapa da Aave depois de uma ponte é autorizada quando a entrega da ponte chega, depois que a FloFi a simula nesse estado (fator de saúde e limite de fornecimento).',
+  'This Borrow would leave your Aave health factor below 2.0 after the batch, so nothing was sent. Supply more collateral or repay part of your debt from your wallet, then try again, or end the workflow.':
+    'Este Borrow deixaria seu fator de saúde na Aave abaixo de 2,0 depois do lote, então nada foi enviado. Forneça mais garantia ou pague parte da dívida pela sua carteira e tente de novo, ou encerre o fluxo.',
+  'This Withdraw would leave your Aave health factor below 2.0 after the batch, so nothing was sent. Repay part of your debt or supply more collateral from your wallet, then try again, or end the workflow.':
+    'Este Withdraw deixaria seu fator de saúde na Aave abaixo de 2,0 depois do lote, então nada foi enviado. Pague parte da dívida ou forneça mais garantia pela sua carteira e tente de novo, ou encerre o fluxo.',
+  'This Repay is no longer smaller than your current Aave debt, so it cannot be batched and nothing was sent. Once the workflow shows it stopped, Try this step again runs the Repay through its own flow (it reads your debt again), or end the workflow.':
+    'Este Repay não é mais menor que a sua dívida atual na Aave, então não pode entrar no lote e nada foi enviado. Quando o fluxo aparecer como interrompido, Tentar esta etapa de novo executa o Repay pelo próprio fluxo (que lê a dívida de novo), ou encerre o fluxo.',
+  'This network’s RPC cannot simulate the whole batch, so it is not offered in one confirmation and nothing was sent. Once the workflow shows it stopped, Try this step again confirms each step through its own flow, or end the workflow.':
+    'O RPC desta rede não consegue simular o lote inteiro, então ele não é oferecido em uma única confirmação e nada foi enviado. Quando o fluxo aparecer como interrompido, Tentar esta etapa de novo confirma cada etapa pelo próprio fluxo, ou encerre o fluxo.',
+  'A step after a bridge is authorized when the bridge delivery lands (your wallet cannot sign it in advance).':
+    'Uma etapa depois de uma ponte é autorizada quando a entrega da ponte chega (sua carteira não consegue assiná-la antecipadamente).',
+  'You declined the request in your wallet. Nothing was sent. FloFi does not prepare another request for this workflow; you can end it.':
+    'Você recusou o pedido na sua carteira. Nada foi enviado. A FloFi não prepara outro pedido para este fluxo; você pode encerrá-lo.',
+  'A swap after a bridge whose output a later step spends is authorized when the bridge delivery lands, after FloFi simulates the whole batch and proves you receive that output.':
+    'Um swap depois de uma ponte, cuja saída uma etapa seguinte gasta, é autorizado quando a entrega da ponte chega, depois que a FloFi simula o lote inteiro e comprova que você recebe essa saída.',
   'Grouping would not ask your wallet fewer times for this workflow, so each step is confirmed on its own.':
     'Agrupar não pediria menos confirmações à sua carteira neste fluxo, então cada etapa é confirmada separadamente.',
   'Group {0}': 'Grupo {0}', 'Wallet request': 'Pedido à carteira',
@@ -157,4 +170,86 @@ export const portugueseWorkflowExecution: Readonly<Record<string, string>> = {
   'FloFi could not complete this request ({0}). Nothing was sent.': 'A FloFi não conseguiu concluir este pedido ({0}). Nada foi enviado.',
   'This workflow runs as one workflow run: open Execute and choose Review whole workflow, then Authorize workflow.':
     'Este fluxo roda como uma única execução: abra Executar e escolha Revisar o fluxo inteiro e depois Autorizar fluxo.',
+  'about {0} in network fees (up to {1} at today\'s prices; your wallet sets the final fee)': 'cerca de {0} em taxas de rede (até {1} nos preços de agora; sua carteira define a taxa final)',
+  'up to {0} in network fees at today\'s prices; your wallet sets the final fee': 'até {0} em taxas de rede nos preços de agora; sua carteira define a taxa final',
+  'its quote expired at {0}: reject the request in your wallet; FloFi prepares a fresh one': 'a cotação expirou às {0}: recuse a solicitação na sua carteira; a FloFi prepara uma nova',
+  'Aave health factor after group {0}': 'Fator de saúde da Aave após o grupo {0}',
+  'Confirm the wallet request promptly: about 10 minutes after FloFi prepares it, an on-chain deadline refuses the whole batch (your wallet would still pay the network fee). Each swap\'s minimum is fixed when FloFi prepares the request.': 'Confirme a solicitação na carteira logo: cerca de 10 minutos depois de a FloFi prepará-la, um prazo on-chain recusa o lote inteiro (sua carteira ainda pagaria a taxa de rede). O mínimo de cada swap é fixado quando a FloFi prepara a solicitação.',
+  'The wallet request itself does not expire on chain: confirm it promptly, or reject it and review again.': 'A solicitação na carteira não expira on-chain: confirme logo ou recuse e revise de novo.',
+  'Resume the workflow': 'Retomar o fluxo',
+  'Continue step {0} on the signing page': 'Continuar a etapa {0} na página de assinatura',
+  'A swap of native ETH runs through its own review and wallet confirmation.': 'Um swap de ETH nativo passa pela própria revisão e confirmação na carteira.',
+  'A swap of this asset (for example a Stock Token) runs through its own review, which checks it, and its own wallet confirmation.': 'Um swap deste ativo (por exemplo, um Stock Token) passa pela própria revisão, que o verifica, e pela própria confirmação na carteira.',
+  'This step (for example wrapping or unwrapping ETH) runs through its own review and wallet confirmation.': 'Esta etapa (por exemplo, converter ETH em WETH ou o contrário) passa pela própria revisão e confirmação na carteira.',
+  'This Withdraw would leave your Aave health factor below 2.0 after the batch. Withdraw less or repay part of the debt first.': 'Este Withdraw deixaria seu fator de saúde da Aave abaixo de 2,0 após o lote. Retire menos ou pague parte da dívida antes.',
+  'A Repay must be smaller than your current debt (a full repayment is not offered here). Lower the Repay amount.': 'Um Repay precisa ser menor que sua dívida atual (o pagamento total não é oferecido aqui). Reduza o valor do Repay.',
+  'Your wallet refused this batch before sending anything (it may not support it on this network). Nothing was sent; you can try again.': 'Sua carteira recusou este lote antes de enviar qualquer coisa (talvez não o suporte nesta rede). Nada foi enviado; você pode tentar de novo.',
+  'Your wallet is locked or another account is selected. Unlock your wallet, select the account this run belongs to, and try again; nothing was sent.':
+    'Sua carteira está bloqueada ou outra conta está selecionada. Desbloqueie a carteira, selecione a conta a que esta execução pertence e tente de novo; nada foi enviado.',
+  'A token in this batch does not deliver the full amount the swap sends (it charges a fee on transfer or changes balances), so it cannot be batched. Nothing was sent.':
+    'Um token deste lote não entrega o valor total que o swap envia (cobra uma taxa na transferência ou altera saldos), então ele não pode ser agrupado. Nada foi enviado.',
+  'A token\'s contract does not match FloFi\'s catalog (its decimals differ on chain), so nothing was prepared.':
+    'O contrato de um token não corresponde ao catálogo da FloFi (os decimais dele diferem on-chain), então nada foi preparado.',
+  'A token in this workflow has no contract on this network, so nothing was prepared.': 'Um token deste fluxo não tem contrato nesta rede, então nada foi preparado.',
+  'This network has no registered router to give the batch an on-chain expiry, so it is not offered as a batch. Nothing was sent.':
+    'Esta rede não tem um roteador registrado para dar ao lote um prazo on-chain, então ele não é oferecido como lote. Nada foi enviado.',
+  'FloFi could not read this network\'s data fee, so the batch was not offered. Nothing was sent; try again.': 'A FloFi não conseguiu ler a taxa de dados desta rede, então o lote não foi oferecido. Nada foi enviado; tente de novo.',
+  'This step (for example a bridge or a liquidity position) runs through its own review and wallet confirmation.': 'Esta etapa (por exemplo, uma bridge ou uma posição de liquidez) passa pela própria revisão e confirmação na carteira.',
+  'A swap allows more than 3% slippage, which cannot be fixed in one batch, so it is confirmed on its own. Lower the slippage to batch it.': 'Um swap permite mais de 3% de slippage, o que não pode ser fixado em um lote, então é confirmado sozinho. Reduza o slippage para agrupá-lo.',
+  'An Aave step names another account than the connected wallet, so it cannot be batched. Rebuild that step with this wallet.': 'Uma etapa da Aave indica outra conta que não a carteira conectada, então não pode ser agrupada. Recrie essa etapa com esta carteira.',
+  // A run halted before anything was sent (its first group refused for good when due), and refusals that name no step (Editor and /approve).
+  'Stopped: nothing sent': 'Parado: nada enviado', 'Stopped': 'Parado',
+  'Stopped before any step completed. FloFi submits nothing more of this workflow; you decide what happens next.':
+    'Parado antes de qualquer etapa ser concluída. A FloFi não envia mais nada deste fluxo; você decide o que acontece a seguir.',
+  'Stopped before anything was sent: your funds stay in your wallet.': 'Parado antes de qualquer envio: seus fundos continuam na sua carteira.',
+  'You can run each step through its own flow from here, or end the workflow.': 'Daqui, você pode executar cada etapa pelo próprio fluxo dela ou encerrar o fluxo.',
+  'FloFi simulated the whole batch and one of its calls would fail on chain now, so your wallet was not asked. Check the amounts, balances and allowances, then try again.':
+    'A FloFi simulou o lote inteiro e uma das chamadas dele falharia on-chain agora, então nada foi pedido à sua carteira. Verifique os valores, os saldos e os allowances e tente de novo.',
+  'A swap in this batch would deliver less than its signed minimum now, so your wallet was not asked. Try again for a fresh quote.':
+    'Um swap deste lote entregaria menos que o mínimo assinado agora, então nada foi pedido à sua carteira. Tente de novo para obter uma cotação nova.',
+  'its quote expired at {0}: FloFi does not ask your wallet for it again; check your wallet\'s activity, then you can end the workflow':
+    'a cotação expirou às {0}: a FloFi não pede esse lote de novo à sua carteira; verifique a atividade da sua carteira e depois você pode encerrar o fluxo',
+  // Review fixes (Editor and /approve): every wallet batch expires on chain (a transfer-only batch too); a batch already handed out is never prepared
+  // a second time while it can still execute; a second, different answer for one group; a browser that cannot keep its "handed to the wallet"
+  // record; a run ended while a batch it handed out was never answered; a transfer of a token a batch cannot carry.
+  'Confirm the wallet request promptly: about 10 minutes after FloFi prepares it, an on-chain deadline refuses the whole batch (your wallet would still pay the network fee).':
+    'Confirme a solicitação na carteira logo: cerca de 10 minutos depois de a FloFi prepará-la, um prazo on-chain recusa o lote inteiro (sua carteira ainda pagaria a taxa de rede).',
+  // Round 5: the undated words stay true once the request has expired (a banner stays on screen); an expired request this page would not ask again
+  // for points to the wallet's activity; a wallet answer for a group FloFi had already stopped; a Solana step spending an output of its own group.
+  'FloFi already prepared a request for this step that may still be open in your wallet. Confirm it only within 10 minutes of when it was prepared (after that its on-chain deadline refuses it and your wallet would still pay the fee: reject it), or try again once it has expired; FloFi never prepares a second one that could run alongside it.':
+    'A FloFi já preparou um pedido para esta etapa que ainda pode estar aberto na sua carteira. Confirme-o somente dentro de 10 minutos depois de ter sido preparado (depois disso, o prazo on-chain dele o recusa e sua carteira ainda pagaria a taxa: recuse-o), ou tente de novo depois que ele expirar; a FloFi nunca prepara um segundo pedido que possa ser executado junto com ele.',
+  'FloFi did not ask your wallet this time: the request it already prepared stays valid on chain until {0}, and your wallet may hold it. If your wallet shows it, confirm it there; otherwise wait until {0}, then try again. FloFi never prepares a second request that could run alongside it.':
+    'A FloFi não pediu nada à sua carteira desta vez: o pedido que ela já preparou continua válido on-chain até {0}, e sua carteira pode tê-lo. Se sua carteira mostrar o pedido, confirme-o lá; caso contrário, aguarde até {0} e tente de novo. A FloFi nunca prepara um segundo pedido que possa ser executado junto com ele.',
+  'Your wallet reported a different batch for this step than the one FloFi recorded: it may have run twice. Check your wallet\'s activity; FloFi recorded only the first.':
+    'Sua carteira informou um lote diferente para esta etapa do que o que a FloFi registrou: ele pode ter sido executado duas vezes. Verifique a atividade da sua carteira; a FloFi registrou apenas o primeiro.',
+  'This step\'s wallet request was already handed to another browser or wallet, and FloFi gives it only to that one: if it was confirmed there, it may already have executed. Continue in that browser; once the request has expired you can end the workflow here and check your wallet\'s activity.':
+    'A solicitação de carteira desta etapa já foi entregue a outro navegador ou carteira, e a FloFi a entrega apenas a ele: se foi confirmada lá, pode já ter sido executada. Continue naquele navegador; depois que a solicitação expirar, você pode encerrar o fluxo aqui e conferir a atividade da sua carteira.',
+  'This browser could not keep a record of the request, so FloFi did not ask your wallet (that record is what stops a request from ever being sent twice). Allow site storage or use another browser, then try again.':
+    'Este navegador não conseguiu guardar um registro do pedido, então a FloFi não pediu nada à sua carteira (é esse registro que impede que um pedido seja enviado duas vezes). Permita o armazenamento do site ou use outro navegador e tente de novo.',
+  'A batch was handed to your wallet and FloFi never recorded an answer for it: it may have executed before it expired. Check your wallet\'s activity.':
+    'Um lote foi entregue à sua carteira e a FloFi nunca registrou uma resposta para ele: ele pode ter sido executado antes de expirar. Verifique a atividade da sua carteira.',
+  // Round 4: a step or group whose batch was handed out and never answered (the run stopped at its expiry, or was ended) is never "not run" or
+  // "stopped before submission"; a halted run with such a batch claims neither that nothing was sent nor that the reconciled funds rest in the
+  // wallet; a USER_FUNDED_PREPARED_STILL_VALID refusal still on screen once the prepared request's validity has passed says so.
+  'Its batch may have executed before it expired; check your wallet\'s activity': 'O lote pode ter sido executado antes de expirar; verifique a atividade da sua carteira',
+  'Stopped. FloFi submits nothing more of this workflow; you decide what happens next.': 'Parado. A FloFi não envia mais nada deste fluxo; você decide o que acontece a seguir.',
+  'Partially completed: the reconciled steps stay done. FloFi submits nothing more of this workflow; you decide what happens next.':
+    'Parcialmente concluído: as etapas reconciliadas ficam feitas. A FloFi não envia mais nada deste fluxo; você decide o que acontece a seguir.',
+  'The request FloFi prepared expired at {0}; you can ask for a fresh one now.': 'O pedido que a FloFi preparou expirou às {0}; agora você pode pedir um novo.',
+  'A transfer of this token (for example a Stock Token, or a token outside FloFi\'s catalog) runs through its own review and wallet confirmation.':
+    'Uma transferência deste token (por exemplo, um Stock Token ou um token fora do catálogo da FloFi) passa pela própria revisão e confirmação na carteira.',
+  'The request FloFi prepared expired at {0}. FloFi will not ask your wallet for a fresh one: check your wallet\'s activity (it may have executed before it expired), then end the workflow.':
+    'O pedido que a FloFi preparou expirou às {0}. A FloFi não vai pedir um novo à sua carteira: verifique a atividade da sua carteira (ele pode ter sido executado antes de expirar) e depois encerre o fluxo.',
+  'Your wallet reported a batch for a step FloFi had already stopped: it may have executed. Check your wallet\'s activity; FloFi could not record it.':
+    'Sua carteira informou um lote para uma etapa que a FloFi já tinha parado: ele pode ter sido executado. Verifique a atividade da sua carteira; a FloFi não conseguiu registrá-lo.',
+  'A Solana step that spends what an earlier step of the same batch delivers is signed once that output has landed (one more wallet prompt).':
+    'Uma etapa na Solana que gasta o que uma etapa anterior do mesmo lote entrega é assinada depois que essa saída chega (um pedido a mais na carteira).',
+  // Round 6: a still-valid request is the last one when the run's window would not allow a fresh one at its expiry; the run's window refusing a new
+  // preparation (WORKFLOW_RUN_EXPIRED); an expired request while the wallet prompt is open is rejected there even when no fresh one follows.
+  'FloFi did not ask your wallet this time: the request it already prepared stays valid on chain until {0}, and your wallet may hold it. If your wallet shows it, confirm it there before then. FloFi will not prepare another request for this step.':
+    'A FloFi não pediu nada à sua carteira desta vez: o pedido que ela já preparou continua válido on-chain até {0}, e sua carteira pode tê-lo. Se sua carteira mostrar o pedido, confirme-o lá antes disso. A FloFi não vai preparar outro pedido para esta etapa.',
+  'This workflow\'s time window has ended, or ends too soon for a new wallet request, so FloFi does not prepare another one for it. If a request is still open in your wallet, check your wallet\'s activity; you can end the workflow once no request of it can still execute.':
+    'A janela de tempo deste fluxo terminou, ou termina cedo demais para um novo pedido à carteira, então a FloFi não prepara outro pedido para ele. Se um pedido ainda estiver aberto na sua carteira, verifique a atividade da sua carteira; você pode encerrar o fluxo quando nenhum pedido dele puder mais ser executado.',
+  'its quote expired at {0}: reject the request in your wallet; FloFi does not prepare another one for this workflow':
+    'a cotação expirou às {0}: recuse a solicitação na sua carteira; a FloFi não prepara outra para este fluxo',
 };

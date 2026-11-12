@@ -39,9 +39,12 @@ const strategy = (owner: string, borrow = '0.8') => ({ version: 2, steps: [
   { action: 'borrow', network: 'arbitrum-one', asset: 'USDC', amount: borrow, beneficiary: owner }], bindings: [{ step: 1, amountFrom: 0 }] });
 
 async function setup(t: Awaited<ReturnType<typeof createTestDatabase>>) {
-  const chain = createEvmDouble(42161, undefined, { profile: ARBITRUM_MAINNET_SWAP, aave: { pool: POOL, reserves: RESERVES } });
+  // The chain's clock is the run's clock (a batched swap carries an on-chain deadline from the preparation time).
+  let clock: () => Date = () => new Date();
+  const chain = createEvmDouble(42161, () => Math.floor(clock().getTime() / 1000), { profile: ARBITRUM_MAINNET_SWAP, aave: { pool: POOL, reserves: RESERVES } });
   const h = await workflowRunHarness(t.db, { flows: ['arbitrum-swap', 'arbitrum-aave'], policyEnv: { FLOFI_MCP_HANDOFF_MAINNET_NETWORKS: 'arbitrum-one' },
     userFundedChains: CHAINS, userFundedRpc: c => c === CHAIN ? chain.rpc : null });
+  clock = h.d.now;
   const owner = h.d.evmOwner.address.toLowerCase();
   chain.control.fundToken(owner, USDC, 10_000_000n); chain.control.fundNative(owner, 10n ** 17n);
   return { chain, h, owner };
@@ -129,13 +132,14 @@ describe('P0: the Editor reviews and authorizes Swap → Supply → Borrow on Ar
       // The wallet executes it, but its answer never reaches FloFi (a reload while the wallet prompt was open)…
       const hash = chain.control.walletBatch(owner, evmCallsOf(a.group));
       // …the preparation expires, a first attempt to prepare it again fails (the owner briefly lacks gas money: the group is back to PLANNED)…
-      h.d.advance(11 * 60_000);
+      // (Past its validity and the settle margin; only the browser that holds the batch's hand-out token prepares it again.)
+      h.d.advance(13 * 60_000);
       chain.control.fundNative(owner, 0n);
-      await expect(workflowRunUserFundedPrepare(h.surface, approval.approvalId, [h.evm, h.sol], 0)).rejects.toThrow('USER_FUNDED_INSUFFICIENT_NATIVE_BALANCE');
+      await expect(workflowRunUserFundedPrepare(h.surface, approval.approvalId, [h.evm, h.sol], 0, first.handout!)).rejects.toThrow('USER_FUNDED_INSUFFICIENT_NATIVE_BALANCE');
       chain.control.fundNative(owner, 10n ** 17n);
       // …then the price moves and the group is prepared again under the SAME id (the wallet would refuse a second batch).
       chain.control.setPrice(390_000_000_000_000n);
-      const second = await workflowRunUserFundedPrepare(h.surface, approval.approvalId, [h.evm, h.sol], 0);
+      const second = await workflowRunUserFundedPrepare(h.surface, approval.approvalId, [h.evm, h.sol], 0, first.handout!);
       const b = second.prepared as unknown as { group: EvmGroupCalls; request: { id: string }; superseded: unknown[] };
       expect(b.request.id).toBe(a.request.id);
       expect((b.group.calls[1] as { amountOutMinimum: string }).amountOutMinimum).not.toBe((a.group.calls[1] as { amountOutMinimum: string }).amountOutMinimum);
@@ -200,6 +204,26 @@ describe('P0: the Editor reviews and authorizes Swap → Supply → Borrow on Ar
       const reviewed = await reviewEditorExecution({ workflow: canvas.workflow, owner, profile: { eip155: { wallet: 'INJECTED', atomic: { [CHAIN]: 'unsupported' }, typedData: true } },
         facts: h.runs.userFundedFacts!, deps: h.runs.userFunded!, now: h.d.now() });
       expect(reviewed).toMatchObject({ ok: true, value: { mode: 'STEP_BY_STEP', reasons: ['WALLET_ATOMIC_BATCH_UNSUPPORTED'], counts: { walletPrompts: 3, atLeast: true } } });
+    } finally { await t.drop(); }
+  });
+
+  it('as many wallet batches as steps (Arbitrum Swap, then a Base Transfer) is GROUPED, never forced step by step: grouping is never more wallet prompts', async () => {
+    const t = await createTestDatabase();
+    try {
+      const { h, owner } = await setup(t);
+      const BASE = 'eip155:8453';
+      const canvas = canvasWorkflowOfStrategy({ version: 2, steps: [
+        { action: 'swap', network: 'arbitrum-one', inputAsset: 'USDC', outputAsset: 'WETH', amount: '3', slippageBps: 50 },
+        { action: 'transfer', network: 'base', asset: 'USDC', amount: '1', recipient: '0x' + '4'.repeat(40) }] });
+      if (!canvas.ok) throw new Error(canvas.code);
+      const reviewed = await reviewEditorExecution({ workflow: canvas.workflow, owner, profile: { eip155: { wallet: 'INJECTED', atomic: { [CHAIN]: 'supported', [BASE]: 'supported' },
+        typedData: true } }, facts: { ...h.runs.userFundedFacts!, chains: [CHAIN, BASE] }, deps: h.runs.userFunded!, now: h.d.now() });
+      if (!reviewed.ok) throw new Error(reviewed.code);
+      // Two batches for two steps: a tie with confirming each step (at least 2: each flow may add a token approval, which a batch folds in).
+      expect(reviewed.value.groups.map(g => [g.strategy, g.signing, g.steps])).toEqual([['EVM_WALLET_BATCH', 'UPFRONT', [0, 0]], ['EVM_WALLET_BATCH', 'WHEN_DUE', [1, 1]]]);
+      expect(reviewed.value).toMatchObject({ mode: 'GROUPED', refusal: null, counts: { walletPrompts: 2, atLeast: false, networkSwitches: 1 } });
+      // Nothing claims a saving it does not have, and the retired "not fewer" reason is never emitted.
+      expect(reviewed.value.reasons).toEqual([]);
     } finally { await t.drop(); }
   });
 });

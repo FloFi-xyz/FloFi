@@ -10,8 +10,10 @@
  *                         signature, recovered to the owner; submit (when due): simulated by the bundler first, then relayed; the EntryPoint
  *                         charges the owner's account; reconcile: the bundle receipt's UserOperationEvent (sender = owner, paymaster = 0)
  *   SOLANA_SIGN_ALL       prepare: one exact, simulated v0 transaction per step (owner = fee payer and only signer; recent blockhash);
- *                         authorize: all signed transactions, each verified against its reviewed message; submit: in order, each after the
- *                         previous confirmed; reconcile: each finalized transaction's owner balance deltas and fee
+ *                         authorize: all signed transactions, each verified against its reviewed message; submit: the send budget is
+ *                         checked once before anything is sent, then in order, each after the previous confirmed (an unknown one resent
+ *                         with the same bytes while its blockhash is valid; expiry only when provable); reconcile: each finalized
+ *                         transaction's owner balance deltas and fee
  *
  * Nothing here chooses a wallet, holds a key or signs. A failed check is a closed code; a submitted artifact is never replaced by another.
  */
@@ -23,12 +25,13 @@ import { assertExecutionEnabled, executionRefusal } from '../server/execution-gu
 import type { ChainTransport } from '../delegation/chains.ts';
 import { assetKey, type WorkflowRequirement } from '../delegation/steps.ts';
 import type { WorkflowComposition } from '../engine/strategy-engine';
-import type { GroupStrategy, OwnerAnswer } from '../workflow-runs/execution-groups.ts';
+import { AAVE_ACTIONS, type GroupStrategy, type OwnerAnswer } from '../workflow-runs/execution-groups.ts';
 import type { BundlerClient } from './bundler.ts';
-import { buildEvmGroupCalls, DEPENDENT_CALL_GAS, evmCallsOf, type AssetAmountFact, type EvmGroupCalls } from './evm-calls.ts';
+import { buildEvmGroupCalls, DEPENDENT_CALL_GAS, evmCallsOf, L1_FEE_UPPER_BOUND_SELECTOR, OP_GAS_PRICE_ORACLE, OP_STACK_CHAIN_IDS, type AssetAmountFact,
+  type EvmGroupCalls } from './evm-calls.ts';
 import { reconcileUserOperation, reconcileWalletBatch, type StepFacts } from './evm-reconcile.ts';
 import { assertUserFundedSubmission, type GasPaidFact } from './gas-payer.ts';
-import { simulateWalletBatch, type BatchSimulation } from './batch-simulation.ts';
+import { isAaveCall, simulateWalletBatch, type BatchSimulation } from './batch-simulation.ts';
 
 const WSOL = 'So11111111111111111111111111111111111111112';
 /** How long a prepared EVM group's quotes are honoured before it must be prepared again. */
@@ -76,12 +79,15 @@ const nativeSpend = (group: EvmGroupCalls) => group.calls.reduce((sum, c) => c.k
 async function prepareWalletBatch(deps: UserFundedDeps, requirement: WorkflowRequirement, g: GroupInput, guaranteed: ReadonlyMap<number, AssetAmountFact>): Promise<Result<Prepared>> {
   const t = deps.evm(g.chain);
   if (!t) return no('USER_FUNDED_RPC_UNAVAILABLE');
-  const built = await buildEvmGroupCalls(requirement, g.stepFrom, g.stepTo, { chains: deps.chains, owner: g.feePayer, transport: deps.evm, guaranteed });
+  // Every swap of the batch is refused on chain after the preparation's validity: a wallet prompt left open never executes a stale quote.
+  const deadline = Math.floor((deps.now().getTime() + EVM_PREPARED_TTL_MS) / 1000);
+  const built = await buildEvmGroupCalls(requirement, g.stepFrom, g.stepTo, { chains: deps.chains, owner: g.feePayer, transport: deps.evm, guaranteed, deadline });
   if (!built.ok) return no(built.code, built.stepIndex);
   const group = built.value, calls = evmCallsOf(group);
   const stepOfCall = (index: number | null) => index === null ? null : group.steps.find(s => s.calls.includes(index))?.stepIndex ?? null;
   // P0 workflow execution: the WHOLE batch is simulated in order from the owner's account before anything is offered (every call succeeds, each
-  // swap meets its signed minimum, an Aave borrow leaves a health factor of at least 2.0), and its fee estimate uses each call's simulated gas.
+  // swap meets its signed minimum and the owner receives exactly what its pool sent, an Aave borrow leaves a health factor of at least 2.0),
+  // and its fee estimate uses each call's simulated gas.
   const simulated = await simulateWalletBatch(t, group, calls);
   let gas: bigint, simulation: BatchSimulation | null = null;
   if (simulated.ok) {
@@ -89,18 +95,41 @@ async function prepareWalletBatch(deps: UserFundedDeps, requirement: WorkflowReq
     gas = simulated.value.gasUsed.reduce((sum, g) => sum + BigInt(g), 0n) + 30_000n;
   } else if (simulated.code !== 'USER_FUNDED_SIMULATION_UNAVAILABLE') return no(simulated.code, stepOfCall(simulated.callIndex) ?? group.steps[0]?.stepIndex ?? null);
   else {
-    // Without a whole-batch simulation on this RPC, a batch whose safety depends on Aave state (health factor, caps, liquidity) is never offered
-    // blind: it is refused with a closed code (the steps then run through their own flows). Swaps and transfers keep the atomic minimum checks.
-    const aave = group.calls.findIndex(c => c.kind === 'AAVE_V3_SUPPLY' || c.kind === 'AAVE_V3_BORROW');
+    // Without a whole-batch simulation on this RPC, two kinds of batch are never offered blind; each is refused with a closed code (the steps
+    // then run through their own flows):
+    //   Aave           a batch whose safety depends on Aave state (health factor, caps, liquidity, debt), at its first Aave call's step.
+    //   spent output   a batch in which a later step SPENDS a swap's output (a binding to a swap step of this group), at that consuming step.
+    //                  The router enforces only what the pool sent; what reached the owner (a fee-on-transfer token delivers less) is proven by
+    //                  the simulation alone, and without it the consumer could take the shortfall from the owner's unrelated balance.
+    // A swap whose output stays with the owner is still offered: the router enforces its minimum on chain, a fee-on-transfer output then only
+    // reduces what the owner keeps, and reconciliation records the amount that actually arrived (below the signed minimum it is a mismatch,
+    // never a reconciled step). Transfers keep their atomic checks.
+    const aave = group.calls.findIndex(isAaveCall);
     if (aave >= 0) return no('USER_FUNDED_SIMULATION_UNAVAILABLE', stepOfCall(aave));
-    // The first call depends on nothing earlier in the batch: if it cannot be estimated from the owner's account it would revert, so nothing is offered.
+    const swapSteps = new Set(group.steps.filter(s => s.calls.some(i => group.calls[i]?.kind === 'UNISWAP_V3_EXACT_INPUT_SINGLE')).map(s => s.stepIndex));
+    const consumer = group.steps.find(s => requirement.bindings.some(b => b.step === s.stepIndex && swapSteps.has(b.amountFrom)));
+    if (consumer) return no('USER_FUNDED_SIMULATION_UNAVAILABLE', consumer.stepIndex);
+    // The first STEP call is pre-checked: it depends on nothing earlier in the batch (a leading DEADLINE_GUARD changes no state), so if it
+    // cannot be estimated from the owner's account it would revert, and nothing is offered. Never the guard itself: before its deadline it
+    // always succeeds, so estimating it would let a transfer-only batch whose first transfer reverts reach the wallet unchecked. Each other
+    // call, the guard included, counts at its DEPENDENT_CALL_GAS allowance. A batch with no step call (never built) is not offered.
+    const first = group.calls.findIndex(c => c.kind !== 'DEADLINE_GUARD'), call = calls[first];
+    if (first < 0 || !call) return no('USER_FUNDED_GROUP_NOT_PREPARABLE', group.steps[0]?.stepIndex ?? null);
     let firstGas: bigint;
-    try { firstGas = big(await t.rpc('eth_estimateGas', [{ from: group.owner, to: calls[0]!.target, value: hex(calls[0]!.value), data: calls[0]!.data }])); }
-    catch (cause) { return no(codeOf(cause, '') === 'DELEGATION_RPC_UNAVAILABLE' ? 'USER_FUNDED_RPC_UNAVAILABLE' : 'SIMULATION_REVERTED', group.steps[0]?.stepIndex ?? null); }
-    gas = firstGas + group.calls.slice(1).reduce((sum, c) => sum + DEPENDENT_CALL_GAS[c.kind], 0n) + 30_000n;
+    try { firstGas = big(await t.rpc('eth_estimateGas', [{ from: group.owner, to: call.target, value: hex(call.value), data: call.data }])); }
+    catch (cause) { return no(codeOf(cause, '') === 'DELEGATION_RPC_UNAVAILABLE' ? 'USER_FUNDED_RPC_UNAVAILABLE' : 'SIMULATION_REVERTED', stepOfCall(first) ?? group.steps[0]?.stepIndex ?? null); }
+    gas = firstGas + group.calls.reduce((sum, c, i) => i === first ? sum : sum + DEPENDENT_CALL_GAS[c.kind], 0n) + 30_000n;
   }
   const fees = await feeFacts(t, group.owner);
-  const maxFeePerGas = fees.gasPrice * 2n + fees.priority, maxCost = gas * maxFeePerGas;
+  // On an OP Stack chain the owner also pays the L1 data fee of the batch transaction (an EIP-7702 `execute(batch)` self-call carrying every
+  // call): its upper bound from the chain's GasPriceOracle is part of the fee ceiling the owner's balance must cover and the review shows.
+  let l1FeeUpperBound = 0n;
+  if (OP_STACK_CHAIN_IDS.has(group.chainId)) {
+    const size = (erc4337.batchCallData(calls).length - 2) / 2;
+    try { l1FeeUpperBound = big(await t.rpc('eth_call', [{ to: OP_GAS_PRICE_ORACLE, data: L1_FEE_UPPER_BOUND_SELECTOR + (BigInt(size) + 120n).toString(16).padStart(64, '0') }, 'latest'])); }
+    catch (cause) { return no(codeOf(cause, '') === 'DELEGATION_RPC_UNAVAILABLE' ? 'USER_FUNDED_RPC_UNAVAILABLE' : 'USER_FUNDED_L1_FEE_UNAVAILABLE', group.steps[0]?.stepIndex ?? null); }
+  }
+  const maxFeePerGas = fees.gasPrice * 2n + fees.priority, maxCost = gas * maxFeePerGas + l1FeeUpperBound;
   // Financial isolation: the owner's own native balance must cover the fee ceiling plus any native value sent; nobody else's ever does.
   if (fees.balance < maxCost + nativeSpend(group)) return no('USER_FUNDED_INSUFFICIENT_NATIVE_BALANCE');
   // One id per group, the same for every preparation of it: a wallet that honours EIP-5792 ids refuses to execute the group twice (a retry
@@ -109,7 +138,8 @@ async function prepareWalletBatch(deps: UserFundedDeps, requirement: WorkflowReq
   // Receipts older than this preparation can never reconcile this group (an old owner transaction is not this batch).
   const fromBlock = big(await t.rpc('eth_blockNumber', [])).toString();
   return ok({ kind: 'EVM_WALLET_BATCH', chainId: group.chainId, owner: group.owner, group, request, fromBlock, simulation,
-    fee: { payer: group.owner, unit: 'wei', estimatedGas: gas.toString(), maxFeePerGas: maxFeePerGas.toString(), maxCost: maxCost.toString(), estimated: true } });
+    fee: { payer: group.owner, unit: 'wei', estimatedGas: gas.toString(), maxFeePerGas: maxFeePerGas.toString(), maxCost: maxCost.toString(),
+      l1FeeUpperBound: l1FeeUpperBound.toString(), estimated: true } });
 }
 
 async function prepareUserOperation(deps: UserFundedDeps, requirement: WorkflowRequirement, g: GroupInput, guaranteed: ReadonlyMap<number, AssetAmountFact>,
@@ -118,8 +148,14 @@ async function prepareUserOperation(deps: UserFundedDeps, requirement: WorkflowR
   if (!t) return no('USER_FUNDED_RPC_UNAVAILABLE');
   // P0: an Aave step is signed only after its exact calls were simulated on the state they run on (health factor ≥ 2.0 after a borrow, the
   // supply cap): never in a user operation signed upfront. The planner never makes one (execution-groups.ts); a stored group that would is refused.
-  const aaveStep = requirement.steps.slice(g.stepFrom, g.stepTo + 1).find(s => s.action === 'supply' || s.action === 'borrow');
+  const aaveStep = requirement.steps.slice(g.stepFrom, g.stepTo + 1).find(s => AAVE_ACTIONS.has(s.action));
   if (aaveStep) return no('USER_OPERATION_AAVE_SIGNED_WHEN_DUE', aaveStep.index);
+  // P0 review fix: a swap whose output a later step of this group spends is signed only when due, as a wallet batch whose whole-batch simulation
+  // proves the owner receives that output (a user operation signed upfront has no such proof: a fee-on-transfer token would make the consumer
+  // spend the owner's unrelated balance). The planner never makes one (execution-groups.ts); a stored group that would is refused.
+  const spent = requirement.bindings.find(b => b.step >= g.stepFrom && b.step <= g.stepTo && b.amountFrom >= g.stepFrom && b.amountFrom <= g.stepTo
+    && requirement.steps.find(s => s.index === b.amountFrom)?.action === 'swap');
+  if (spent) return no('USER_OPERATION_SWAP_OUTPUT_SIGNED_WHEN_DUE', spent.step);
   if (!bundler) return no('USER_OPERATION_BUNDLER_UNAVAILABLE');
   const built = await buildEvmGroupCalls(requirement, g.stepFrom, g.stepTo, { chains: deps.chains, owner: g.feePayer, transport: deps.evm, guaranteed });
   if (!built.ok) return no(built.code, built.stepIndex);
@@ -131,7 +167,9 @@ async function prepareUserOperation(deps: UserFundedDeps, requirement: WorkflowR
   if (code !== '0x' && !upgraded) return no('EVM_ACCOUNT_DELEGATED_ELSEWHERE');
   if (!upgraded) return no('EVM_SMART_ACCOUNT_REQUIRED');
   const key = erc4337.nonceKeyOf(`${g.runId}:g${g.groupIndex}`);
-  const sequence = erc4337.decodeGetNonce(await t.rpc('eth_call', [{ to: erc4337.ENTRY_POINT_V0_7, data: erc4337.getNonceCall(group.owner, key) }, 'latest']));
+  // A v0.7 EntryPoint answers getNonce with `key << 64 | sequence` (never the bare sequence for a non-zero key): only the sequence is taken.
+  const sequence = entryPointNonceSequence(await t.rpc('eth_call', [{ to: erc4337.ENTRY_POINT_V0_7, data: erc4337.getNonceCall(group.owner, key) }, 'latest']), key);
+  if (sequence === null) return no('USER_FUNDED_RPC_UNAVAILABLE');
   const nonce = erc4337.userOpNonce(key, sequence);
   const fees = await feeFacts(t, group.owner);
   const maxFeePerGas = fees.gasPrice * (delayed ? DELAYED_FEE_MULTIPLE : 2n) + fees.priority;
@@ -164,7 +202,9 @@ export const opOf = (s: SerialOp, signature = '0x'): erc4337.PackedUserOperation
 /** One reviewed Solana transaction of a group (what the owner signs and what FloFi verifies; never the whole Review artifact chain). */
 export type SolanaGroupTx = { readonly stepIndex: number; readonly kind: 'JUPITER' | 'TRANSFER'; readonly owner: string; readonly message: string; readonly messageHash: string;
   readonly unsignedTransaction: string; readonly lookupTables: LookupTables; readonly lastValidBlockHeight: number; readonly estimatedFeeLamports: string;
-  readonly spend: AssetAmountFact; readonly minimumOut: AssetAmountFact | null };
+  readonly spend: AssetAmountFact; readonly minimumOut: AssetAmountFact | null;
+  /** The network fee plus the (refundable) account-creation deposits this transaction may charge the owner, in lamports. */
+  readonly maximumNetworkCostLamports?: string };
 async function prepareSolanaSignAll(deps: UserFundedDeps, composition: WorkflowComposition, requirement: WorkflowRequirement, g: GroupInput): Promise<Result<Prepared>> {
   if (!deps.solana) return no('USER_FUNDED_SOLANA_RPC_UNAVAILABLE');
   const txs: SolanaGroupTx[] = [];
@@ -179,15 +219,18 @@ async function prepareSolanaSignAll(deps: UserFundedDeps, composition: WorkflowC
         const review: SolanaTransferReview = await simulateSolanaTransfer(workflow, g.feePayer, deps.solana, deps.now().getTime());
         txs.push({ stepIndex: index, kind: 'TRANSFER', owner: review.owner, message: review.message, messageHash: review.messageHash, unsignedTransaction: review.unsignedTransaction,
           lookupTables: {}, lastValidBlockHeight: review.lastValidBlockHeight, estimatedFeeLamports: review.estimatedFeeLamports,
-          spend: { asset: assetKey({ chain: step.chain, address: review.asset.mint ?? WSOL }), amount: review.amount }, minimumOut: null });
+          spend: { asset: assetKey({ chain: step.chain, address: review.asset.mint ?? WSOL }), amount: review.amount }, minimumOut: null,
+          maximumNetworkCostLamports: review.maximumNetworkCostLamports });
       } else if (step.action === 'swap') {
         if (!deps.jupiter) return no('JUPITER_UNAVAILABLE', index);
         const review: JupiterReview = await simulateJupiterSwap(workflow, g.feePayer, deps.jupiter, deps.solana, deps.now().getTime());
-        const r = review as unknown as { lookupTables?: LookupTables; quote: { inputMint: string; outputMint: string; inAmount: string; otherAmountThreshold: string } };
+        const r = review as unknown as { lookupTables?: LookupTables; maximumNetworkCostLamports?: string | bigint;
+          quote: { inputMint: string; outputMint: string; inAmount: string; otherAmountThreshold: string } };
         txs.push({ stepIndex: index, kind: 'JUPITER', owner: review.owner, message: review.message, messageHash: review.messageHash, unsignedTransaction: review.unsignedTransaction,
           lookupTables: r.lookupTables ?? {}, lastValidBlockHeight: review.lastValidBlockHeight, estimatedFeeLamports: review.estimatedFeeLamports,
           spend: { asset: assetKey({ chain: step.chain, address: r.quote.inputMint }), amount: r.quote.inAmount },
-          minimumOut: { asset: assetKey({ chain: step.chain, address: r.quote.outputMint }), amount: r.quote.otherAmountThreshold } });
+          minimumOut: { asset: assetKey({ chain: step.chain, address: r.quote.outputMint }), amount: r.quote.otherAmountThreshold },
+          ...r.maximumNetworkCostLamports !== undefined ? { maximumNetworkCostLamports: String(r.maximumNetworkCostLamports) } : {} });
       } else return no(`USER_FUNDED_ACTION_NOT_BUILDABLE:${step.action.toUpperCase()}`, index);
     } catch (cause) { return no(codeOf(cause, 'SIMULATION_FAILED'), index); }
     const last = txs.at(-1)!;
@@ -196,7 +239,9 @@ async function prepareSolanaSignAll(deps: UserFundedDeps, composition: WorkflowC
   }
   // Two byte-identical messages would carry one signature: the chain runs it once while reconciliation would count it twice.
   if (new Set(txs.map(x => x.messageHash)).size !== txs.length) return no('SOLANA_GROUP_DUPLICATE_TRANSACTION', txs.at(-1)!.stepIndex);
-  const fee = txs.reduce((sum, x) => sum + BigInt(x.estimatedFeeLamports), 0n);
+  // P0 universal execution: the ceiling the owner reads is every network fee PLUS the refundable account-creation deposits (recipient or output
+  // token accounts) the transactions may charge, never the fees alone.
+  const fee = txs.reduce((sum, x) => sum + BigInt(x.maximumNetworkCostLamports ?? x.estimatedFeeLamports), 0n);
   return ok({ kind: 'SOLANA_SIGN_ALL', owner: g.feePayer, transactions: txs, fee: { payer: g.feePayer, unit: 'lamports', maxCost: fee.toString(), estimated: true },
     lastValidBlockHeight: Math.min(...txs.map(x => x.lastValidBlockHeight)) });
 }
@@ -215,7 +260,11 @@ export async function prepareGroup(deps: UserFundedDeps, composition: WorkflowCo
     if (!r.ok) return r;
     assertExecutionEnabled();
     // Wallet batches and Solana transactions are honoured for a short window (quotes, recent blockhash); a user operation is bound by its nonce and the run.
-    const validUntil = new Date(g.strategy === 'EVM_USER_OPERATION' ? now + 24 * 3_600_000 : g.strategy === 'SOLANA_SIGN_ALL' ? now + 60_000 : now + EVM_PREPARED_TTL_MS);
+    // A Solana group's window is its blockhash lifetime MINUS the send budget it needs before its first transaction (`solanaSendBudget`):
+    // signatures arriving later are refused at authorization (USER_FUNDED_PREPARED_EXPIRED; the owner prepares again from a fresh blockhash)
+    // instead of being accepted and then blocked, unsent, for lack of budget.
+    const validUntil = new Date(g.strategy === 'EVM_USER_OPERATION' ? now + 24 * 3_600_000
+      : g.strategy === 'SOLANA_SIGN_ALL' ? now + solanaPreparedTtlMs((r.value.transactions as readonly unknown[]).length) : now + EVM_PREPARED_TTL_MS);
     return ok({ prepared: { ...r.value, preparedAt: new Date(now).toISOString() }, validUntil });
   } catch (cause) { return no(codeOf(cause, 'USER_FUNDED_PREPARE_FAILED')); }
 }
@@ -291,13 +340,58 @@ export function solanaSubmission(authorization: Readonly<Record<string, unknown>
   return { kind: 'SOLANA_SIGN_ALL', hashes: txs.map(t => t.signature), submittedAt: now.toISOString() };
 }
 type SignatureStatus = { readonly confirmationStatus?: string; readonly err?: unknown } | null;
+/**
+ * Block heights one transaction of a sign-all group needs, from its send to its confirmation and the next pass (about 400 ms per block: a
+ * 2-second pass cadence, a serialized RPC and confirmation). The budget (this much per transaction, up to `SOLANA_GROUP_SEND_BUDGET_MAX_BLOCKS`)
+ * is checked ONCE, before the group leaves AUTHORIZED (`solanaSendBudget`). Once it is SUBMITTED, a transaction whose status is unknown is sent,
+ * or resent with the same bytes, while its blockhash is valid — so a retried first send can still start a group whose tail later expires
+ * (each step is independent; the sent prefix is reconciled and the rest expires provably).
+ */
+export const SOLANA_BLOCKS_PER_GROUP_TRANSACTION = 25;
+/**
+ * The most budget a group is ever asked for: 100 blocks, about 40 s at ~400 ms per block. A blockhash is valid for ~150 blocks, so 25 blocks
+ * per transaction alone would make a group of 6 or more transactions (a workflow has up to 8 steps) impossible to ever send; the cap keeps
+ * large groups sendable while still refusing to START a group whose blockhash is nearly spent.
+ */
+export const SOLANA_GROUP_SEND_BUDGET_MAX_BLOCKS = 100;
+/** About one Solana block (the budget's duration), and a blockhash's lifetime of ~150 blocks. */
+const SOLANA_MS_PER_BLOCK = 400, SOLANA_BLOCKHASH_LIFETIME_MS = 60_000;
+/** The shortest window a prepared Solana group is ever offered for signing (enough to review and confirm the wallet prompt). */
+const SOLANA_PREPARED_MIN_TTL_MS = 15_000;
+/** Block heights a signed group of `transactions` must still have left before its first transaction is sent. */
+export const solanaSendBudgetBlocks = (transactions: number) => Math.min(SOLANA_BLOCKS_PER_GROUP_TRANSACTION * transactions, SOLANA_GROUP_SEND_BUDGET_MAX_BLOCKS);
+/**
+ * How long a prepared Solana group is honoured: the blockhash lifetime minus the send budget's duration (never under 15 s), so a signature
+ * taken in time still leaves about the budget when the group starts.
+ */
+export const solanaPreparedTtlMs = (transactions: number) =>
+  Math.max(SOLANA_PREPARED_MIN_TTL_MS, SOLANA_BLOCKHASH_LIFETIME_MS - solanaSendBudgetBlocks(transactions) * SOLANA_MS_PER_BLOCK);
+/**
+ * Read only: does a signed group's shortest blockhash still leave its send budget at the 'confirmed' height? Asked ONLY while provably
+ * nothing of the group was sent (it is still AUTHORIZED): SHORT means the group is stopped before anything is sent, never half-executed with
+ * a tail that expires after the owner signed. UNAVAILABLE (no RPC, a failed read, a malformed height): nothing is decided, the caller retries.
+ * Once anything may have been sent, only the provable expiry of `advanceSolanaSubmission` can stop the group.
+ */
+export async function solanaSendBudget(deps: UserFundedDeps, prepared: Prepared): Promise<'OK' | 'SHORT' | 'UNAVAILABLE'> {
+  const rpc = deps.solana, txs = prepared.transactions;
+  if (!rpc) return 'UNAVAILABLE';
+  const last = Array.isArray(txs) ? (txs as readonly Partial<SolanaGroupTx>[]).map(x => x?.lastValidBlockHeight) : [];
+  // FloFi's own frozen artifact: without a known last valid height for every transaction there is no provable budget, and nothing is sent.
+  if (!last.length || !last.every(h => Number.isSafeInteger(h) && h! >= 0)) return 'SHORT';
+  let height: unknown;
+  try { height = await rpc('getBlockHeight', [{ commitment: 'confirmed' }]); } catch { return 'UNAVAILABLE'; }
+  if (!Number.isSafeInteger(height) || (height as number) < 0) return 'UNAVAILABLE';
+  return Math.min(...last as number[]) - (height as number) < solanaSendBudgetBlocks(last.length) ? 'SHORT' : 'OK';
+}
 async function statuses(rpc: SolanaRpc, signatures: readonly string[]): Promise<readonly SignatureStatus[]> {
   const r = await rpc('getSignatureStatuses', [signatures, { searchTransactionHistory: true }]) as { value?: readonly SignatureStatus[] };
   return r?.value ?? signatures.map(() => null);
 }
 /**
  * Sends the next transaction of a Solana group whose predecessor confirmed (exactly the owner-signed bytes; a resend is the same signature).
- * Returns what happened; never sends a transaction past its blockhash validity.
+ * Returns what happened; never sends a transaction past its blockhash validity. Called only once the group is SUBMITTED, so any transaction
+ * may already have been sent (a sent transaction stays unknown until processed): EXPIRED is returned only when provable, never for a
+ * shortage of budget (that is decided before the group leaves AUTHORIZED, `solanaSendBudget`).
  */
 export async function advanceSolanaSubmission(deps: UserFundedDeps, prepared: Prepared, authorization: Readonly<Record<string, unknown>>, owner: string, runOwner?: BetaPrincipal)
   : Promise<{ readonly state: 'SENT' | 'WAITING' | 'DONE' | 'EXPIRED' | 'FAILED'; readonly index: number | null; readonly code: string | null }> {
@@ -313,7 +407,20 @@ export async function advanceSolanaSubmission(deps: UserFundedDeps, prepared: Pr
     if (paused) return { state: 'WAITING', index: i, code: paused };
     // Not seen yet: send it unless its blockhash expired (then it can never land, and nothing later is sent).
     const height = Number(await rpc('getBlockHeight', [{ commitment: 'confirmed' }]));
-    if (height > txs[i]!.lastValidBlockHeight) return { state: 'EXPIRED', index: i, code: 'SOLANA_BLOCKHASH_EXPIRED' };
+    if (height > txs[i]!.lastValidBlockHeight) {
+      // P0 universal execution: "expired" is decided only when it is provable — the FINALIZED height is past the blockhash's last valid height
+      // AND a fresh status read (after that height) still does not know the signature. A transaction that landed meanwhile is never dropped.
+      const finalized = Number(await rpc('getBlockHeight', [{ commitment: 'finalized' }]));
+      if (!(finalized > txs[i]!.lastValidBlockHeight)) return { state: 'WAITING', index: i, code: null };
+      const again = (await statuses(rpc, [signed[i]!.signature]))[0] ?? null;
+      if (again?.err) return { state: 'FAILED', index: i, code: 'SOLANA_TRANSACTION_FAILED' };
+      if (again) return { state: 'WAITING', index: i, code: null };
+      return { state: 'EXPIRED', index: i, code: 'SOLANA_BLOCKHASH_EXPIRED' };
+    }
+    // P0 universal execution: the transactions are sent one after another, each once its predecessor confirmed. Whether the signed group had
+    // the budget to START was decided before anything was sent (`solanaSendBudget`, while AUTHORIZED). Here only the provable expiry above may
+    // declare EXPIRED: this pass cannot know whether an unknown transaction was already sent, so it is (re)sent — the same signed bytes, landing
+    // at most once.
     const message = parseMessageV0(parseTransaction(fromBase64(signed[i]!.transaction)).message);
     assertUserFundedSubmission({ kind: 'SOLANA_TRANSACTION', feePayer: message.staticKeys[0] ?? '', ownerWallet: owner });
     const denied = await deps.submissionRefusal?.({ namespace: 'solana', address: owner }, runOwner);
@@ -330,7 +437,13 @@ export async function advanceSolanaSubmission(deps: UserFundedDeps, prepared: Pr
 export type Reconciled = { readonly status: 'PENDING' }
   | { readonly status: 'RECONCILED'; readonly steps: readonly StepFacts[]; readonly gasPaid: GasPaidFact; readonly transactions: readonly string[]; readonly group?: EvmGroupCalls }
   | { readonly status: 'FAILED'; readonly code: string; readonly gasPaid: GasPaidFact | null; readonly transactions: readonly string[]; readonly steps?: readonly StepFacts[];
-    readonly group?: EvmGroupCalls };
+    readonly group?: EvmGroupCalls }
+  /**
+   * The chain did NOT revert what was reported, yet it does not match what the owner signed (a leg missing, an amount other than signed, a
+   * transaction from another account or carrying other calls — e.g. a smart wallet that executed the batch through its own relayer): funds may
+   * have moved. Never FAILED (which says nothing irreversible happened): the group and its steps are UNCERTAIN and the run needs ATTENTION.
+   */
+  | { readonly status: 'UNMATCHED'; readonly code: string; readonly gasPaid: GasPaidFact | null; readonly transactions: readonly string[]; readonly group?: EvmGroupCalls };
 type TokenBalance = { readonly accountIndex: number; readonly mint: string; readonly owner?: string; readonly uiTokenAmount: { readonly amount: string } };
 type SolanaTxMeta = { readonly err: unknown; readonly fee: number | string; readonly preBalances: readonly (number | string)[]; readonly postBalances: readonly (number | string)[];
   readonly preTokenBalances?: readonly TokenBalance[]; readonly postTokenBalances?: readonly TokenBalance[] };
@@ -408,21 +521,103 @@ export async function reconcileEvmGroup(deps: UserFundedDeps, prepared: Prepared
       if (again.status !== 'MISMATCH' || !SUPERSEDED_MISMATCH.has(again.code)) { r = again; matched = earlier.group; break; }
     }
     const from = matched ? { group: matched } : {};
+    // Only a reverted batch FAILED; a mismatch the chain did not revert is UNMATCHED (it may have executed).
     return r.status === 'PENDING' ? r : r.status === 'RECONCILED' ? { status: 'RECONCILED', steps: r.steps, gasPaid: r.gasPaid, transactions: r.transactions, ...from }
-      : { status: 'FAILED', code: r.code, gasPaid: r.gasPaid, transactions: r.transactions, ...from };
+      : { status: r.status === 'REVERTED' ? 'FAILED' : 'UNMATCHED', code: r.code, gasPaid: r.gasPaid, transactions: r.transactions, ...from };
   }
   const bundler = deps.bundler(group.chain), userOpHash = String(submission.userOpHash);
   const receipt = bundler ? await bundler.receipt(userOpHash).catch(() => null) : null;
-  // Recorded but unknown to the bundler and not mined (the relay after the record never happened, or the bundler dropped it): the SAME
-  // signed operation is relayed again. Its nonce key admits it once, so this can never execute a second operation.
-  if (!receipt && bundler && authorization && await bundler.known(userOpHash).then(k => !k, () => false)) {
-    const resent = await relayUserOperation(deps, prepared, authorization, runOwner);
-    if (!resent.ok && !resent.code.startsWith('BETA_') && !['USER_OPERATION_BUNDLER_UNAVAILABLE', 'USER_OPERATION_FEE_TOO_LOW', 'USER_OPERATION_NONCE_INVALID',
-      'EXECUTION_PAUSED', 'EXECUTION_PAUSE_CONFIGURATION_INVALID'].includes(resent.code))
-      return { status: 'FAILED', code: resent.code, gasPaid: null, transactions: [] };
-    return { status: 'PENDING' };
+  // Recorded, but the bundler neither has a receipt nor knows it: whether it executed is read from the chain, never taken from the bundler's
+  // word (`reconcileLostUserOperation`): it is relayed again (the SAME signed bytes) only while its nonce is provably unconsumed.
+  if (!receipt && bundler && authorization && await bundler.known(userOpHash).then(k => !k, () => false))
+    return reconcileLostUserOperation(deps, t, group, prepared, authorization, userOpHash, runOwner);
+  return userOperationOutcome(await reconcileUserOperation(t, group, userOpHash, receipt?.transactionHash ?? null));
+}
+/** What the chain shows of a user operation, as the group's outcome: only a reverted operation FAILED; a mismatch it did not revert is UNMATCHED. */
+const userOperationOutcome = (r: Awaited<ReturnType<typeof reconcileUserOperation>>): Reconciled => r.status === 'PENDING' ? r
+  : r.status === 'RECONCILED' ? { status: 'RECONCILED', steps: r.steps, gasPaid: r.gasPaid, transactions: r.transactions }
+  : { status: r.status === 'REVERTED' ? 'FAILED' : 'UNMATCHED', code: r.code, gasPaid: r.gasPaid, transactions: r.transactions };
+/** Resend refusals that decide nothing about the operation (the bundler, the fee market, a pause, beta access): retried on a later pass. */
+const RESEND_RETRYABLE: ReadonlySet<string> = new Set(['USER_OPERATION_BUNDLER_UNAVAILABLE', 'USER_OPERATION_FEE_TOO_LOW', 'USER_OPERATION_NONCE_INVALID',
+  'EXECUTION_PAUSED', 'EXECUTION_PAUSE_CONFIGURATION_INVALID']);
+/**
+ * Bounds of the chain search for a forgotten operation's own `UserOperationEvent`: blocks per `eth_getLogs` request (the range the router's log
+ * scans use) and requests per pass, newest first, never below the preparation's block when the artifact records one (`fromBlock`). A search
+ * that ends without the event proves nothing about where the operation went.
+ */
+export const USER_OPERATION_LOG_SCAN_BLOCKS = 2_000n, USER_OPERATION_LOG_SCAN_REQUESTS = 50;
+const UINT64_MAX = (1n << 64n) - 1n;
+/**
+ * The current sequence of nonce `key` from an `EntryPoint.getNonce(sender, key)` answer, or null when the answer is not one about that key.
+ * EntryPoint v0.7 answers `key << 64 | sequence`; a value without key bits is read as the bare sequence.
+ */
+export function entryPointNonceSequence(answer: unknown, key: bigint): bigint | null {
+  let n: bigint;
+  try { n = erc4337.decodeGetNonce(answer); } catch { return null; }
+  return n >> 64n === key ? n & UINT64_MAX : n >> 64n === 0n ? n : null;
+}
+/** Whether the EntryPoint consumed the signed nonce of `op` (its key's sequence moved past it), read with FloFi's own transport; null: unreadable. */
+async function userOperationNonceConsumed(t: ChainTransport, op: erc4337.PackedUserOperation): Promise<boolean | null> {
+  try {
+    const { key, sequence } = erc4337.userOpNonceParts(op.nonce);
+    const current = entryPointNonceSequence(await t.rpc('eth_call', [{ to: erc4337.ENTRY_POINT_V0_7, data: erc4337.getNonceCall(op.sender, key) }, 'latest']), key);
+    return current === null ? null : current > sequence;
+  } catch { return null; }
+}
+type EventSearch = { readonly state: 'FOUND'; readonly transactionHash: string } | { readonly state: 'NOT_FOUND' } | { readonly state: 'UNREADABLE' };
+/**
+ * The transaction carrying the EntryPoint's own `UserOperationEvent` of `userOpHash` (topic1), searched on the chain itself. UNREADABLE: the
+ * transport failed or answered malformed (nothing is decided). NOT_FOUND: not in the searched range, or the transport/provider refuses the search
+ * (a method outside its allowlist, a range above its cap).
+ */
+async function findUserOperationEvent(t: ChainTransport, userOpHash: string, fromBlock: bigint | null): Promise<EventSearch> {
+  let raw: unknown;
+  try { raw = await t.rpc('eth_blockNumber', []); } catch { return { state: 'UNREADABLE' }; }
+  if (typeof raw !== 'string' || !/^0x[0-9a-fA-F]{1,16}$/.test(raw)) return { state: 'UNREADABLE' };
+  const hash = userOpHash.toLowerCase(), floor = fromBlock ?? 0n;
+  const isEvent = (log: unknown): log is { readonly transactionHash: string } => {
+    const l = log && typeof log === 'object' ? log as { address?: unknown; topics?: unknown; transactionHash?: unknown; removed?: unknown } : null;
+    return !!l && l.removed !== true && typeof l.address === 'string' && l.address.toLowerCase() === erc4337.ENTRY_POINT_V0_7 && Array.isArray(l.topics)
+      && String(l.topics[0]).toLowerCase() === erc4337.USER_OPERATION_EVENT_TOPIC && String(l.topics[1]).toLowerCase() === hash
+      && typeof l.transactionHash === 'string' && /^0x[0-9a-fA-F]{64}$/.test(l.transactionHash);
+  };
+  for (let to = BigInt(raw), request = 0; to >= floor && request < USER_OPERATION_LOG_SCAN_REQUESTS; to -= USER_OPERATION_LOG_SCAN_BLOCKS, request++) {
+    const from = to - USER_OPERATION_LOG_SCAN_BLOCKS + 1n > floor ? to - USER_OPERATION_LOG_SCAN_BLOCKS + 1n : floor;
+    let logs: unknown;
+    try { logs = await t.rpc('eth_getLogs', [{ address: erc4337.ENTRY_POINT_V0_7, topics: [erc4337.USER_OPERATION_EVENT_TOPIC, hash], fromBlock: hex(from), toBlock: hex(to) }]); }
+    catch (cause) { return { state: codeOf(cause, '') === 'DELEGATION_RPC_UNAVAILABLE' ? 'UNREADABLE' : 'NOT_FOUND' }; }
+    if (!Array.isArray(logs)) return { state: 'UNREADABLE' };
+    const event = logs.find(isEvent);
+    if (event) return { state: 'FOUND', transactionHash: event.transactionHash.toLowerCase() };
   }
-  const r = await reconcileUserOperation(t, group, userOpHash, receipt?.transactionHash ?? null);
-  return r.status === 'PENDING' ? r : r.status === 'RECONCILED' ? { status: 'RECONCILED', steps: r.steps, gasPaid: r.gasPaid, transactions: r.transactions }
-    : { status: 'FAILED', code: r.code, gasPaid: r.gasPaid, transactions: r.transactions };
+  return { state: 'NOT_FOUND' };
+}
+/**
+ * P1 review fix: a recorded operation the bundler neither has a receipt for nor knows — never relayed, dropped, or MINED and forgotten (its
+ * receipt lookback, another instance). The bundler's word alone decides nothing; the chain does, read with FloFi's own transport:
+ *   nonce unconsumed   the operation provably never executed: the SAME signed bytes are relayed again (its nonce admits it once). A refusal is
+ *                      FAILED only when the nonce is STILL unconsumed after it: an operation mined meanwhile fails the bundler's validation on its
+ *                      spent prefund (AA21) before its nonce (AA25). Retryable refusals (AA25 included) stay PENDING.
+ *   nonce consumed     never resent, never FAILED: the operation's own UserOperationEvent is searched on the chain and reconciled from its
+ *                      transaction exactly as from a bundler receipt; not found (the owner's revocation consumed the key, or the range cannot be
+ *                      searched): UNMATCHED (USER_OPERATION_NONCE_CONSUMED_UNRECONCILED) — funds may have moved, the run needs attention
+ *   unreadable         nothing is decided (PENDING)
+ */
+async function reconcileLostUserOperation(deps: UserFundedDeps, t: ChainTransport, group: EvmGroupCalls, prepared: Prepared,
+  authorization: Readonly<Record<string, unknown>>, userOpHash: string, runOwner?: BetaPrincipal): Promise<Reconciled> {
+  let op: erc4337.PackedUserOperation;
+  try { op = opOf(prepared.op as SerialOp); } catch { return { status: 'PENDING' }; }
+  let consumed = await userOperationNonceConsumed(t, op);
+  if (consumed === false) {
+    const resent = await relayUserOperation(deps, prepared, authorization, runOwner);
+    if (resent.ok || resent.code.startsWith('BETA_') || RESEND_RETRYABLE.has(resent.code)) return { status: 'PENDING' };
+    consumed = await userOperationNonceConsumed(t, op);
+    if (consumed === false) return { status: 'FAILED', code: resent.code, gasPaid: null, transactions: [] };
+  }
+  if (consumed === null) return { status: 'PENDING' };
+  const fromBlock = typeof prepared.fromBlock === 'string' && /^[0-9]{1,20}$/.test(prepared.fromBlock) ? BigInt(prepared.fromBlock) : null;
+  const found = await findUserOperationEvent(t, userOpHash, fromBlock);
+  if (found.state === 'UNREADABLE') return { status: 'PENDING' };
+  if (found.state === 'NOT_FOUND') return { status: 'UNMATCHED', code: 'USER_OPERATION_NONCE_CONSUMED_UNRECONCILED', gasPaid: null, transactions: [] };
+  return userOperationOutcome(await reconcileUserOperation(t, group, userOpHash, found.transactionHash));
 }

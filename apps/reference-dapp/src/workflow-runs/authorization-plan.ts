@@ -71,6 +71,20 @@ export function delegableByCode(...args: [workflow: WorkflowComposition, delegat
   return { ok: false, code: EXECUTOR_FUNDED_GAS_RETIRED };
 }
 
+/** The group strategies that authorize their steps with ONE wallet interaction (an atomic batch, a user operation, a Solana sign-all request). */
+const ONE_INTERACTION: ReadonlySet<string> = new Set(['EVM_WALLET_BATCH', 'EVM_USER_OPERATION', 'SOLANA_SIGN_ALL']);
+/**
+ * Whether user-funded groups are preferred over confirming each step: at least one group authorizes its steps with one wallet interaction,
+ * and the groups need no more wallet interactions than there are steps. `stepCount` is only a LOWER bound for confirming each step (each owner
+ * flow may add a token-approval confirmation, while a batch folds approvals in and carries an on-chain expiry), so grouping is never more wallet
+ * interactions than confirming each step — a tie does not force the step-by-step mode. Never a claim of FEWER interactions: that needs a
+ * strictly smaller count, which only the counts themselves show.
+ */
+export function userFundedPreferred(groups: readonly Pick<ExecutionGroup, 'strategy'>[], interactions: Pick<InteractionSummary, 'upfront' | 'whenDue'>,
+  stepCount: number): boolean {
+  return groups.some(g => ONE_INTERACTION.has(g.strategy)) && interactions.upfront + interactions.whenDue <= stepCount;
+}
+
 /** The authorization plan of a composed workflow. `grants` (with `now`) are the proven owner's own grants; omit them before a wallet proof. */
 export function authorizationPlan(workflow: WorkflowComposition, gates: Pick<Gates, 'supportedByCode' | 'enabledByDeployment' | 'enabledByPolicy' | 'handoff'> & { readonly plan: { readonly steps: readonly { readonly flow: string | null; readonly network: string; readonly action: string }[] } },
   delegation: DelegationFacts, owner?: { readonly grants: readonly GrantView[]; readonly now: number },
@@ -109,12 +123,13 @@ export function authorizationPlan(workflow: WorkflowComposition, gates: Pick<Gat
   const confirmAvailable = confirmReason === null, delegatedAvailable = delegatedReason === null;
   // User-funded groups: every step must pass its own gates exactly as in confirm mode (an owner-step group IS a confirm-mode step).
   const facts = userFunded?.facts ?? null;
-  const grouped = req.ok && facts ? planExecutionGroups(req.value, facts, userFunded?.wallets, st => st.namespace === 'solana' || evmStepBuildable(st, facts.chains, userFunded?.evmOwner) === null) : null;
+  const grouped = req.ok && facts ? planExecutionGroups(req.value, facts, userFunded?.wallets, st => st.namespace === 'solana' || (evmStepBuildable(st, facts.chains, userFunded?.evmOwner) ?? true)) : null;
   const userFundedReason = runsOff ?? (!facts ? 'USER_FUNDED_NOT_ENABLED' : !req.ok ? req.code : grouped && !grouped.ok ? grouped.code : confirmReason);
   const groupsPlan = grouped && grouped.ok ? grouped : null;
   const userFundedAvailable = userFundedReason === null && groupsPlan !== null;
-  // Recommended: fewer wallet interactions than confirming each step (never claimed when it is not fewer).
-  const fewer = groupsPlan !== null && groupsPlan.interactions.upfront + groupsPlan.interactions.whenDue < workflow.steps.length;
+  // Recommended: at least one grouped interaction and never more wallet interactions than confirming each step (`userFundedPreferred`); a
+  // workflow whose every group is an owner step IS confirm mode, so confirming each step stays recommended for it.
+  const preferred = groupsPlan !== null && userFundedPreferred(groupsPlan.groups, groupsPlan.interactions, workflow.steps.length);
   // The notes describe the modes actually offered: group wording only where user-funded groups are available here.
   const notes = ['Your own wallet pays every network fee; FloFi never pays, advances or reimburses gas.',
     ...userFundedAvailable ? ['One wallet interaction is not one transaction: a batch executes several steps in one transaction on one network; each network needs its own wallet authorization.',
@@ -129,7 +144,10 @@ export function authorizationPlan(workflow: WorkflowComposition, gates: Pick<Gat
     delegatedSingleAuthorization: { available: delegatedAvailable, reason: delegatedReason, walletSignatures: Math.max(1, enrollments.length), passkeyAssertions: 0, enrollments,
       ownerKnown: owner !== undefined },
     userFunded: { available: userFundedAvailable, reason: userFundedAvailable ? null : userFundedReason ?? 'USER_FUNDED_UNAVAILABLE', groups: groupsPlan?.groups ?? [],
-      interactions: groupsPlan?.interactions ?? null, feePayer: 'OWNER_WALLET', wallets: userFunded?.wallets ? 'REPORTED' : 'ASSUMED' },
-    recommended: userFundedAvailable && fewer ? 'USER_FUNDED' : confirmAvailable ? 'CONFIRM_EACH_STEP' : userFundedAvailable ? 'USER_FUNDED' : null,
+      // P0 universal execution: counts made with ASSUMED wallet capabilities (an MCP client, a channel, a claim before the owner's browser read
+      // the wallet) are lower bounds: never "single", always "at least". Only the owner's reported wallet makes a count exact.
+      interactions: groupsPlan ? userFunded?.wallets ? groupsPlan.interactions : { ...groupsPlan.interactions, single: false, atLeast: true } : null,
+      feePayer: 'OWNER_WALLET', wallets: userFunded?.wallets ? 'REPORTED' : 'ASSUMED' },
+    recommended: userFundedAvailable && preferred ? 'USER_FUNDED' : confirmAvailable ? 'CONFIRM_EACH_STEP' : userFundedAvailable ? 'USER_FUNDED' : null,
     steps, bindings: bindingCodes, notes };
 }

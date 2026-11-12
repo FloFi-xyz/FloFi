@@ -84,6 +84,17 @@ export async function withFlightOwner<T>(work: () => Promise<T>): Promise<T> {
   return withBetaIdentity(await requireFlightOwner(), work);
 }
 
+/**
+ * The boundary of a user-funded group answer. A wallet batch's answer (its EIP-5792 id) reports a batch the owner's wallet ALREADY SENT: recording
+ * it is reporting existing work, so it stays reachable after the grant ends, is revoked or the gate closes (else an executed batch could never
+ * be reconciled). A user-operation signature or signed Solana transactions are relayed by FloFi itself — new submissions — and keep the product
+ * grant. The kind chosen here cannot widen access: the service refuses an answer whose kind is not its group's (USER_FUNDED_AUTHORIZATION_KIND_MISMATCH).
+ */
+export async function withFlightGroupAnswerAccess<T>(answer: unknown, work: () => Promise<T>): Promise<T> {
+  const sentBatch = typeof answer === 'object' && answer !== null && (answer as { readonly kind?: unknown }).kind === 'EVM_WALLET_BATCH';
+  return sentBatch ? withFlightOwner(work) : withFlightAccess(work);
+}
+
 /** Route a flow method to the product grant boundary or the owner recovery boundary. */
 export async function withFlightMethodAccess<T>(method: string, work: () => Promise<T>): Promise<T> {
   return isFlightRecoveryMethod(method) ? withFlightOwner(work) : withFlightAccess(work);

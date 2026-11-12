@@ -3,6 +3,9 @@
 export const portugueseWorkflowRuns: Readonly<Record<string, string>> = {
   'Workflow steps': 'Etapas do fluxo', '{0}-step workflow': 'Fluxo de {0} etapas', 'Step {0}': 'Etapa {0}',
   'Waiting': 'Em espera', 'Ready for your signature': 'Pronta para a sua assinatura', 'In your wallet': 'Na sua carteira', 'Authorized': 'Autorizada',
+  // A user-funded step is worded by its group (the Editor and /approve; 'Waiting for your wallet' is translated in pt-delegation.ts): never
+  // "Authorized" for a group nothing was signed for.
+  'Signed in your wallet': 'Assinada na sua carteira', 'Not signed': 'Não assinada',
   'Reconciled': 'Reconciliada', 'Failed': 'Falhou', 'Outcome pending': 'Resultado pendente', 'Not run': 'Não executada', 'Stopped before submission': 'Parada antes do envio',
   'Choose how to authorize': 'Escolha como autorizar', 'Running': 'Em execução', 'Completed': 'Concluído', 'Partially completed': 'Parcialmente concluído',
   'Needs attention': 'Requer atenção', 'Ended': 'Encerrado', 'Expired': 'Expirado',
@@ -50,11 +53,16 @@ export const portugueseWorkflowRuns: Readonly<Record<string, string>> = {
   'Networks': 'Redes', 'Max {0}': 'Máximo de {0}', 'Max slippage': 'Desvio máximo', 'Valid until': 'Válido até', 'Executions': 'Execuções',
   'This workflow, once': 'Este fluxo, uma vez', 'Sign once with my passkey': 'Assinar uma vez com a minha passkey', 'Back': 'Voltar',
   'Continue to step {0}': 'Continuar para a etapa {0}',
-  'Partially completed: the reconciled steps stay done and their funds rest in your wallet. Nothing later was submitted.':
-    'Parcialmente concluído: as etapas reconciliadas ficam feitas e os seus fundos ficam na sua carteira. Nada posterior foi enviado.',
+  // Review fix R4: a later step or group may have been sent and failed on chain, so a partial completion never claims nothing later was sent.
+  'Partially completed: the reconciled steps stay done and their funds rest in your wallet. The step that stopped shows what happened to it.':
+    'Parcialmente concluído: as etapas reconciliadas ficam feitas e os seus fundos ficam na sua carteira. A etapa que parou mostra o que aconteceu com ela.',
   'Revoke workflow authorization': 'Revogar autorização do fluxo',
   'Revocation stops future delegated steps. Submitted transactions keep being observed.': 'A revogação impede etapas delegadas futuras. As transações enviadas continuam a ser observadas.',
   'Try this step again': 'Tentar esta etapa de novo', 'End workflow': 'Encerrar fluxo',
+  // Review fix R5: a halted run the server would not resume (its window passed, a step that may have reached the chain, a delegated run).
+  'This step cannot be tried again in this workflow: end it, and start a new workflow for anything left to do.':
+    'Esta etapa não pode ser tentada de novo neste fluxo: encerre-o e comece um novo fluxo para o que ainda faltar.',
+  'This step cannot be tried again in this workflow.': 'Esta etapa não pode ser tentada de novo neste fluxo.',
   'A submitted step has no final outcome yet. FloFi keeps observing it and never resubmits it.':
     'Uma etapa enviada ainda não tem resultado final. O FloFi continua a observá-la e nunca a reenvia.',
   'Every step reconciled.': 'Todas as etapas reconciliadas.', 'Your conversation can show the result.': 'A sua conversa pode mostrar o resultado.',

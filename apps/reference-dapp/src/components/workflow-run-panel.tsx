@@ -16,10 +16,10 @@ import { useEffect, useRef, useState } from 'react';
 import { authorizeUserFundedGroup, authorizeWorkflowRunHandoff, cancelWorkflowRunHandoff, continueWorkflowRunHandoff, prepareUserFundedGroup, reportUserFundedBatch,
   resumeWorkflowRunHandoff, reviewWorkflowRunAuthorization, startUserFundedWorkflowRun, startWorkflowRunHandoff, workflowRunStatusHandoff } from '../app/approve-action';
 import type { eip5792 } from '@defi-workflow-engine/reference-compiler';
-import { revokeUserOperation, sendWalletBatch, signSolanaGroup, signUserOperation, walletBatchHashes, walletProfile } from './user-funded-browser';
+import { batchHandout, keepBatchHandout, revokeUserOperation, sendWalletBatch, signSolanaGroup, signUserOperation, walletBatchHashes, walletProfile } from './user-funded-browser';
 import { chosenEvmProvider, injected } from '../wallet/evm-discovery';
 import type { WalletWorkflowReviewView } from '../delegation/views';
-import { canEndWorkflow } from '../workflow-runs/state-machine';
+import { WALLET_BATCH_OUTCOME_UNKNOWN, canEndWorkflow, haltedAs } from '../workflow-runs/state-machine';
 import { useLocale } from '../i18n/locale';
 import type { ClaimedProposal } from '../platform/approvals';
 import type { WorkflowRunClaim } from '../platform/workflow-run-approvals';
@@ -29,6 +29,9 @@ const STEP_STATE: Readonly<Record<string, string>> = { PENDING: 'Waiting', READY
   RECONCILED: 'Reconciled', FAILED: 'Failed', UNCERTAIN: 'Outcome pending', SKIPPED: 'Not run', BLOCKED: 'Stopped before submission' };
 const RUN_STATE: Readonly<Record<string, string>> = { PENDING: 'Choose how to authorize', RUNNING: 'Running', COMPLETED: 'Completed', HALTED: 'Partially completed',
   FAILED: 'Failed', ATTENTION: 'Needs attention', CANCELLED: 'Ended', EXPIRED: 'Expired' };
+/** How a HALTED run is described: the one rule the Editor and /approve share (workflow-runs/state-machine.ts). */
+export { haltedAs };
+const HALTED_BADGE: Readonly<Record<ReturnType<typeof haltedAs>, string>> = { PARTIAL: 'Partially completed', NOTHING_SENT: 'Stopped: nothing sent', STOPPED: 'Stopped' };
 const ACTION: Readonly<Record<string, string>> = { swap: 'Swap', bridge: 'Bridge', supply: 'Supply', borrow: 'Borrow', repay: 'Repay', withdraw: 'Withdraw',
   add_liquidity: 'Add liquidity', transfer: 'Transfer', lending_composition: 'Lending composition' };
 const WHY_NOT_ONCE: Readonly<Record<string, string>> = {
@@ -66,6 +69,80 @@ const units = (amount: string, unit: string, round: 'down' | 'up' = 'down') => {
 /** "Steps 2–3" or "Step 2": a single-step group is never "Steps 3–3". */
 const stepsOf = (tr: (key: string, ...args: string[]) => string, from: number, to: number) => from === to ? tr('Step {0}', String(from + 1)) : tr('Steps {0}–{1}', String(from + 1), String(to + 1));
 const short = (hash: string) => hash.length > 14 ? `${hash.slice(0, 8)}…${hash.slice(-6)}` : hash;
+/**
+ * P0 universal execution: the batches this browser handed to the owner's wallet, per approval and group, written immediately before
+ * `wallet_sendCalls` is requested (`sendWalletBatch`'s `onSending`; the Editor's rule, now on /approve too — the page every MCP, channel and chat
+ * handoff uses). Never earlier: a failure before that request (a network switch, the account check) sent nothing and must not leave a marker
+ * that blocks the group for good. A wallet that ignores the app-provided EIP-5792 id cannot be asked whether it holds an earlier request, so
+ * after a lost answer the group is never sent again from here: the batch id is reused when the wallet answered, else the owner is told to
+ * check the wallet (the group can be ended once its preparation expires).
+ * `nonce`: which call wrote the attempt. Another tab of this browser may hand the same group to the wallet between this tab's checks and its
+ * request, so the attempt is re-read the moment the wallet would be asked (one found then is another's: this tab does not send), and an
+ * answer that proves nothing was sent clears only this call's own attempt, never another tab's.
+ */
+const BATCH_ATTEMPTS_KEY = 'flofi.approve-batch-attempts.v1';
+type BatchAttempt = { readonly at: string; readonly batchId?: string; readonly nonce?: string };
+function batchAttempts(): Record<string, BatchAttempt> {
+  try { const v = JSON.parse(localStorage.getItem(BATCH_ATTEMPTS_KEY) ?? '{}') as unknown; return v && typeof v === 'object' ? v as Record<string, BatchAttempt> : {}; } catch { return {}; }
+}
+function putBatchAttempt(key: string, value: BatchAttempt | null) {
+  try { const all = batchAttempts(); if (value) all[key] = value; else delete all[key]; localStorage.setItem(BATCH_ATTEMPTS_KEY, JSON.stringify(all)); } catch { /* storage unavailable */ }
+}
+/**
+ * The Editor's record of the batch IT handed to the owner's wallet for the same run (`editor-workflow-run.tsx`, `STORAGE_KEY`; same origin, so
+ * the same storage): runs by approval id, each with `sent` = { group, batchId, attempt?, nonce? } — `attempt` while `wallet_sendCalls` has not
+ * answered (its `batchId` is then only the group's own EIP-5792 id, no answer), else the id the wallet answered with. The Editor links here for
+ * the same run, and a wallet that ignores app-provided ids cannot tell either page it already holds a batch: an attempt there is treated
+ * exactly like one of this page's own. Read only (the Editor keeps its record). Anything unreadable as an answer reads as an unanswered attempt.
+ */
+const EDITOR_RUNS_KEY = 'flofi.editor-workflow-runs.v2';
+function editorAttempt(approvalId: string, group: number): BatchAttempt | null {
+  try {
+    const all = JSON.parse(localStorage.getItem(EDITOR_RUNS_KEY) ?? '[]') as unknown;
+    if (!Array.isArray(all)) return null;
+    const sent = (all.find(r => Boolean(r) && (r as { approvalId?: unknown }).approvalId === approvalId) as { sent?: unknown } | undefined)?.sent as
+      { group?: unknown; batchId?: unknown; attempt?: unknown } | null | undefined;
+    if (!sent || typeof sent !== 'object' || sent.group !== group) return null;
+    return sent.attempt === undefined && typeof sent.batchId === 'string' && sent.batchId ? { at: '', batchId: sent.batchId } : { at: '' };
+  } catch { return null; }
+}
+/** This page's attempt for the group, else the Editor's; an answered one (a batch id) first, since it is read back without asking again. */
+function anyAttempt(approvalId: string, group: number): BatchAttempt | null {
+  const own = batchAttempts()[`${approvalId}:${group}`] ?? null, editor = editorAttempt(approvalId, group);
+  return own?.batchId ? own : editor?.batchId ? editor : own ?? editor;
+}
+/**
+ * Wallet answers that mean nothing was sent: the attempt is forgotten and the group may be offered again. WALLET_ATTEMPT_UNRECORDABLE: this
+ * browser could not keep (write and read back) its attempt, so the wallet was never asked.
+ */
+const NOTHING_SENT: ReadonlySet<string> = new Set(['WALLET_REQUEST_REJECTED', 'WALLET_WRONG_NETWORK', 'EVM_WALLET_NOT_FOUND', 'WALLET_BATCH_NOT_SENT',
+  'WALLET_ACCOUNT_MISMATCH', 'WALLET_ATTEMPT_UNRECORDABLE']);
+/** Whether the owner's wallet knows a batch id (`wallet_getCallsStatus` answers; EIP-5792 5730 or no answer: it does not). */
+const walletKnows = (batchId: string) => walletBatchHashes(batchId).then(() => true, () => false);
+/**
+ * States whose own words already say what the wallet answered or the chain decided: only these keep their label when a step or group carries
+ * WALLET_BATCH_OUTCOME_UNKNOWN (e.g. a late answer recorded after it). Every other state — BLOCKED ("Stopped before submission") when the run
+ * stopped at its expiry, SKIPPED ("Not run") when it was ended, anything else — would claim the batch did not run, which nothing proves.
+ */
+const ANSWERED_STATES: readonly string[] = ['AUTHORIZED', 'SUBMITTED', 'UNCERTAIN', 'RECONCILED', 'FAILED'];
+/**
+ * A step or group carrying WALLET_BATCH_OUTCOME_UNKNOWN (the run was stopped at its expiry or ended while a batch handed to the owner's wallet
+ * had no recorded answer) in a state that does not say otherwise: it may have executed before its on-chain deadline.
+ */
+const batchUnanswered = (item: { readonly state: string; readonly code: string | null }) => item.code === WALLET_BATCH_OUTCOME_UNKNOWN && !ANSWERED_STATES.includes(item.state);
+/** A step's or group's state in words; one whose wallet batch may have executed unseen is never called "Not run" or "Stopped before submission". */
+const stateText = (labels: Readonly<Record<string, string>>, item: { readonly state: string; readonly code: string | null }) =>
+  batchUnanswered(item) ? 'Its batch may have executed before it expired; check your wallet\'s activity' : labels[item.state] ?? item.state;
+/**
+ * A step's state in words. A user-funded run's DELEGATED step belongs to its group, so it says what that group shows: signed in the wallet,
+ * waiting for it while the run can still ask, else not signed (a halted or ended run) — never "Authorized" for a group nothing was signed for.
+ * The channels' rule (channels/core/status.ts) and the Editor's. A delegated-mode run's DELEGATED step keeps "Authorized" (its grant was signed).
+ */
+const stepText = (run: WorkflowRunClaim['run'], step: WorkflowRunClaim['run']['steps'][number]) => {
+  if (batchUnanswered(step) || run.mode !== 'USER_FUNDED' || step.state !== 'DELEGATED') return stateText(STEP_STATE, step);
+  const group = (run.groups ?? []).find(g => g.steps[0] <= step.index && step.index <= g.steps[1]);
+  return group?.signed ? 'Signed in your wallet' : ['RUNNING', 'ATTENTION'].includes(run.state) ? 'Waiting for your wallet' : 'Not signed';
+};
 
 export function WorkflowRunPanel({ claim, approvalId, secret, onProposal, onError }: { claim: WorkflowRunClaim; approvalId: string; secret: string | null;
   onProposal: (proposal: ClaimedProposal) => void; onError: (code: string) => void }) {
@@ -122,6 +199,9 @@ export function WorkflowRunPanel({ claim, approvalId, secret, onProposal, onErro
   });
 
   // BUILD-FLOFI-UNIVERSAL-WORKFLOW-002: user-funded execution groups — the owner's own wallets authorize (and, for a batch, send) and pay.
+  // Capabilities are read for the wallet's selected account (`eth_accounts[0]`): while the owner chooses the mode the run has no groups and no
+  // step wallet yet, so nothing else names the account. That is enough: atomic batching is a property of the wallet, not of one of its
+  // accounts, and the safety guarantee is the send-time check that the selected account IS the run's account (`sendWalletBatch`).
   const evmAddress = async () => { const p = chosenEvmProvider() ?? injected(); const a = p ? await p.request({ method: 'eth_accounts', params: [] }) : null;
     return Array.isArray(a) && typeof a[0] === 'string' ? a[0].toLowerCase() : null; };
   const startUserFunded = () => act(async () => {
@@ -132,17 +212,57 @@ export function WorkflowRunPanel({ claim, approvalId, secret, onProposal, onErro
   });
   /** Prepares one group on the server, asks the owner's wallet for exactly that, and relays the answer (verified by the server). */
   const authorizeGroup = (index: number) => act(async () => {
-    const prepared = await prepareUserFundedGroup(approvalId, index);
+    const attemptKey = `${approvalId}:${index}`, view = run.groups?.find(g => g.index === index) ?? null;
+    // A batch the wallet already holds is reported BEFORE anything is prepared again: once it executed, a fresh preparation's simulation fails
+    // (its effects are already on chain) and a refused preparation must never hide the batch the owner sent. The id the wallet answered with
+    // (kept by this browser) is recorded as is; else the batch id the run shows for the group (its own EIP-5792 id while it is prepared), if
+    // the wallet knows it. Only then is the group prepared (again). An attempt the Editor made for the same run counts as this page's own.
+    const stored = anyAttempt(approvalId, index);
+    if (stored?.batchId) return recordBatch(index, attemptKey, stored.batchId);
+    if (view?.strategy === 'EVM_WALLET_BATCH' && view.batchId) {
+      if (await walletKnows(view.batchId)) return recordBatch(index, attemptKey, view.batchId);
+      // The wallet was asked and its answer was lost, and it does not know the group's id. That id is fixed per run and group, so preparing
+      // again could not change this answer — it could only fail (e.g. the sent batch made the fresh simulation revert) and hide it.
+      if (stored) throw new Error('WALLET_BATCH_SEND_UNCONFIRMED');
+    }
+    // Otherwise the group is prepared (again). A lost answer still reaches this point only when the run showed no batch id for the group: its
+    // prepared id is then asked of the wallet below before anything is sent.
+    const prepared = await prepareUserFundedGroup(approvalId, index, batchHandout(approvalId, index));
     if (!prepared.ok) return prepared;
+    keepBatchHandout(approvalId, index, prepared.value.handout);
     const p = prepared.value.prepared as unknown as Record<string, unknown>;
     if (p.kind === 'EVM_WALLET_BATCH') {
       const request = p.request as eip5792.SendCallsRequest;
       // The group's batch may already be in the wallet (a reload, a lost answer, an earlier preparation): it is read back by its id, never sent again.
-      const known = request.id ? await walletBatchHashes(request.id).then(() => true, () => false) : false;
-      const batchId = known ? request.id! : await sendWalletBatch(request);
-      const authorized = await authorizeUserFundedGroup(approvalId, index, { kind: 'EVM_WALLET_BATCH', batchId });
-      if (!authorized.ok) return authorized;
-      return followBatch(index, batchId, authorized);
+      const known = request.id ? await walletKnows(request.id) : false;
+      const earlier = anyAttempt(approvalId, index);
+      let batchId: string;
+      if (known) batchId = request.id!;
+      else if (earlier?.batchId) batchId = earlier.batchId;
+      else if (earlier) throw new Error('WALLET_BATCH_SEND_UNCONFIRMED');
+      else {
+        // The attempt is kept the moment the wallet is asked to send (never before: a failed network switch or account check sent nothing).
+        // Re-read then: an attempt found at that moment was written by another tab or the Editor (none existed above), so this tab never sends
+        // the group too.
+        const nonce = crypto.randomUUID();
+        try {
+          batchId = await sendWalletBatch(request, () => {
+            if (anyAttempt(approvalId, index)) throw new Error('WALLET_BATCH_SEND_UNCONFIRMED');
+            putBatchAttempt(attemptKey, { at: new Date().toISOString(), nonce });
+            // Read back before the wallet is asked: the attempt is what stops a lost answer from ever leading to a second send, so a browser
+            // that cannot keep it (storage blocked, full or failing) never asks the wallet (WALLET_ATTEMPT_UNRECORDABLE: nothing sent). Another
+            // tab's attempt landing in between stops this request too.
+            const back = batchAttempts()[attemptKey] as BatchAttempt | null | undefined;
+            if (back?.nonce !== nonce) throw new Error(back ? 'WALLET_BATCH_SEND_UNCONFIRMED' : 'WALLET_ATTEMPT_UNRECORDABLE');
+          });
+        } catch (cause) {
+          // Nothing was sent by THIS call: only its own attempt is forgotten (another tab's stays, whatever this call's failure).
+          if (cause instanceof Error && NOTHING_SENT.has(cause.message) && batchAttempts()[attemptKey]?.nonce === nonce) putBatchAttempt(attemptKey, null);
+          throw cause;
+        }
+        putBatchAttempt(attemptKey, { at: new Date().toISOString(), batchId, nonce });
+      }
+      return recordBatch(index, attemptKey, batchId);
     }
     if (p.kind === 'EVM_USER_OPERATION') {
       const signature = await signUserOperation(prepared.value.feePayer, Number(p.chainId), p.typedData);
@@ -154,6 +274,14 @@ export function WorkflowRunPanel({ claim, approvalId, secret, onProposal, onErro
     }
     return { ok: false as const, code: 'USER_FUNDED_GROUP_NOT_PREPARABLE' };
   });
+  /** The wallet holds the group's batch: the run records its id, then its result is followed and reported. */
+  async function recordBatch(index: number, attemptKey: string, batchId: string) {
+    const authorized = await authorizeUserFundedGroup(approvalId, index, { kind: 'EVM_WALLET_BATCH', batchId });
+    if (!authorized.ok) return authorized;
+    // The run recorded the batch: from now on the server holds its id (a reload recovers it from there).
+    putBatchAttempt(attemptKey, null);
+    return followBatch(index, batchId, authorized);
+  }
   /** Waits for the wallet to settle the batch and reports it: its transactions, or that it failed off chain (nothing was sent). */
   async function followBatch<T>(index: number, batchId: string, pending: T) {
     setWaitingBatch(true);
@@ -174,9 +302,14 @@ export function WorkflowRunPanel({ claim, approvalId, secret, onProposal, onErro
       : workflowRunStatusHandoff(approvalId);
   });
   const currentGroup = run.groups?.find(g => g.steps[0] <= run.currentStep && run.currentStep <= g.steps[1]) ?? null;
-  // What the server can resume: a confirm-mode step, an owner-step group's step, or a group stopped before anything was signed.
+  // "Try this step again" is offered exactly when the server would accept it (`run.resumable`, its own `resumeRefusal`: inside the run's
+  // window, a confirm-mode or owner-step group's step only while BLOCKED, any other group only while BLOCKED and unsigned). Only a view without
+  // that field falls back to this page's own reading: a confirm-mode step, an owner-step group's step, or a group stopped before anything was signed.
   const ownerStepGroup = currentGroup?.strategy === 'EVM_OWNER_STEP' || currentGroup?.strategy === 'SOLANA_OWNER_STEP';
-  const resumable = run.mode !== 'USER_FUNDED' || ownerStepGroup || (currentGroup?.state === 'BLOCKED' && !currentGroup.signed);
+  const said = (run as { readonly resumable?: unknown }).resumable;
+  // A group whose batch was handed to the wallet and never answered may have executed: never tried again from this page's own reading either.
+  const resumable = typeof said === 'boolean' ? said : run.mode !== 'USER_FUNDED' || ownerStepGroup
+    || (currentGroup?.state === 'BLOCKED' && !currentGroup.signed && currentGroup.code !== WALLET_BATCH_OUTCOME_UNKNOWN);
   const userFundedCount = plan.userFunded?.interactions ? plan.userFunded.interactions.upfront + plan.userFunded.interactions.whenDue : 0;
 
   // BUILD-FLOFI-UNIVERSAL-SINGLE-AUTH-MAINNET-001: a sign whose answer was lost (timeout) may still have started the run. Once the status poll shows
@@ -190,17 +323,26 @@ export function WorkflowRunPanel({ claim, approvalId, secret, onProposal, onErro
   const confirmations = plan.confirmEachStep.walletConfirmationsAtLeast;
   const choosing = run.state === 'PENDING' && run.mode === null;
   const nextStep = run.nextAction === 'OWNER_SIGNS_STEP' && claim.step === null ? run.currentStep + 1 : null;
+  // A run stopped at its expiry or ended while a batch it handed to the owner's wallet was never answered: that batch may have executed before
+  // its on-chain deadline. Any step or group carrying WALLET_BATCH_OUTCOME_UNKNOWN decides, whatever state it shows now (the server's own rule for
+  // the run's note, workflow-runs/service.ts, and the channels'): the halted or ended words then never say "before any step completed", "nothing
+  // sent" or that the reconciled steps' funds still rest in the wallet. A COMPLETED run reconciled every step, and says so.
+  const unanswered = run.state !== 'COMPLETED'
+    && ((run.groups ?? []).some(g => g.code === WALLET_BATCH_OUTCOME_UNKNOWN) || run.steps.some(s => s.code === WALLET_BATCH_OUTCOME_UNKNOWN));
+  // Such a run is never "nothing sent" (badge or text), whatever a view without the server's own `halted` would suggest (fails closed to STOPPED).
+  const halted = run.state === 'HALTED' ? (unanswered && haltedAs(run) === 'NOTHING_SENT' ? 'STOPPED' : haltedAs(run)) : null;
+  const endable = canEndWorkflow(run, run.steps, run.groups ?? [], new Date());
   return <section className="workflow-run" aria-label={tr('Workflow steps')} data-run-state={run.state}>
     <div className="workflow-run-head">
       <strong>{tr('{0}-step workflow', String(run.stepCount))}</strong>
-      <span className="status-badge info">{tr(RUN_STATE[run.state] ?? run.state)}</span>
+      <span className="status-badge info">{tr(halted ? HALTED_BADGE[halted] : RUN_STATE[run.state] ?? run.state)}</span>
       {run.mode && <span className="muted">{tr(run.mode === 'DELEGATED' ? 'Authorized once with your wallet' : run.mode === 'USER_FUNDED'
         ? 'You authorize each group with your own wallet' : 'You confirm each step in your wallet')}</span>}
     </div>
     <ol className="workflow-run-steps">
       {run.steps.map(step => <li key={step.index} data-step-state={step.state} aria-current={step.index === run.currentStep && open ? 'step' : undefined}>
         <span>{tr('Step {0}', String(step.index + 1))} · {tr(ACTION[step.action] ?? step.action)}</span>
-        <span className="workflow-run-state">{tr(STEP_STATE[step.state] ?? step.state)}</span>
+        <span className="workflow-run-state">{tr(stepText(run, step))}</span>
         {step.outcome?.submissions.map(tx => tx.explorerUrl
           ? <a key={tx.hash} href={tx.explorerUrl} target="_blank" rel="noreferrer"><code>{short(tx.hash)}</code></a>
           : <code key={tx.hash}>{short(tx.hash)}</code>)}
@@ -256,7 +398,7 @@ export function WorkflowRunPanel({ claim, approvalId, secret, onProposal, onErro
     {run.mode === 'USER_FUNDED' && <ol className="workflow-run-groups" aria-label={tr('Execution groups')}>
       {(run.groups ?? []).map(g => <li key={g.index} data-group-state={g.state}>
         <span>{tr('{0} on {1}', stepsOf(tr, g.steps[0], g.steps[1]), NETWORK[g.chain] ?? g.chain)} · {tr(GROUP_HOW[g.strategy] ?? g.strategy)}</span>
-        <span className="workflow-run-state">{tr(GROUP_STATE[g.state] ?? g.state)}</span>
+        <span className="workflow-run-state">{tr(stateText(GROUP_STATE, g))}</span>
         <span className="muted">{tr('Fees paid by {0}', short(g.feePayer))}</span>
         {g.maxFee && !g.gasPaid && <span className="muted">{g.maxFee.estimated
           ? tr('About {0} in network fees (an estimate; your wallet shows the final fee)', units(g.maxFee.amount, g.maxFee.unit, 'up'))
@@ -301,12 +443,23 @@ export function WorkflowRunPanel({ claim, approvalId, secret, onProposal, onErro
       <button type="button" disabled={busy} onClick={() => void act(() => continueWorkflowRunHandoff(approvalId))}>{tr('Continue to step {0}', String(nextStep))}</button>
     </div>}
     {run.state === 'HALTED' && <div className="workflow-run-choice">
-      <p role="status">{tr('Partially completed: the reconciled steps stay done and their funds rest in your wallet. Nothing later was submitted.')}</p>
+      <p role="status">{halted === 'NOTHING_SENT'
+        ? <>{tr('Stopped before anything was sent: your funds stay in your wallet.')}{resumable ? <> {tr('You can run each step through its own flow from here, or end the workflow.')}</> : null}</>
+        // A batch that may have executed unseen: neither "before any step completed" nor that the reconciled steps' funds still rest in the
+        // wallet (that batch may have spent them); the note below says what may have happened.
+        : halted === 'STOPPED' ? tr(unanswered ? 'Stopped. FloFi submits nothing more of this workflow; you decide what happens next.'
+          : 'Stopped before any step completed. FloFi submits nothing more of this workflow; you decide what happens next.')
+        : tr(unanswered ? 'Partially completed: the reconciled steps stay done. FloFi submits nothing more of this workflow; you decide what happens next.'
+          : 'Partially completed: the reconciled steps stay done and their funds rest in your wallet. The step that stopped shows what happened to it.')}</p>
       {resumable ? <div className="approval-actions">
         <button type="button" className="secondary" disabled={busy} onClick={() => void act(() => resumeWorkflowRunHandoff(approvalId))}>{tr('Try this step again')}</button>
-      </div> : <p className="muted">{tr('Something you already signed for this step is never replaced: end this workflow and start a new one.')}</p>}
+      </div> : <p className="muted">{tr(currentGroup?.signed ? 'Something you already signed for this step is never replaced: end this workflow and start a new one.'
+        : endable ? 'This step cannot be tried again in this workflow: end it, and start a new workflow for anything left to do.'
+        : 'This step cannot be tried again in this workflow.')}</p>}
     </div>}
-    {canEndWorkflow(run, run.steps, run.groups ?? [], new Date()) && <div className="approval-actions">
+    {/* "Never recorded", not "never reached FloFi": an answer may have arrived after the stop and been refused (WALLET_BATCH_ANSWERED_AFTER_STOP, logged). */}
+    {unanswered && <p role="status">{tr('A batch was handed to your wallet and FloFi never recorded an answer for it: it may have executed before it expired. Check your wallet\'s activity.')}</p>}
+    {endable && <div className="approval-actions">
       <button type="button" className="quiet" disabled={busy} onClick={() => void act(() => cancelWorkflowRunHandoff(approvalId))}>{tr('End workflow')}</button>
     </div>}
     {run.mode === 'DELEGATED' && open && <div className="workflow-run-choice">

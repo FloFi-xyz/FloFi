@@ -15,6 +15,7 @@
  */
 import { requirementOf } from '../delegation/steps.ts';
 import { composeWorkflowBound, NETWORKS } from '../engine/strategy-engine.ts';
+import { userFundedPreferred } from '../workflow-runs/authorization-plan.ts';
 import { userFundedBuildable } from '../workflow-runs/service.ts';
 import { planExecutionGroups, type ExecutionGroup, type GroupStrategy, type UserFundedFacts, type WalletProfile } from '../workflow-runs/execution-groups.ts';
 import { prepareGroup, type UserFundedDeps } from '../user-funded/groups.ts';
@@ -73,6 +74,8 @@ export type EditorExecutionReview = {
 export type ReviewResult = { readonly ok: true; readonly value: EditorExecutionReview } | { readonly ok: false; readonly code: string; readonly step?: number };
 
 const GROUPED: readonly GroupStrategy[] = ['EVM_WALLET_BATCH', 'EVM_USER_OPERATION', 'SOLANA_SIGN_ALL'];
+/** Steps that spend nothing from the wallet and deliver exactly their amount to the owner. */
+const DELIVERS: ReadonlySet<string> = new Set(['borrow', 'withdraw']);
 /** The address a transfer pays: the authored recipient (EVM lower-cased), else the owner's own wallet (exactly as the call builder resolves it). */
 const recipientOf = (strategy: { readonly recipient?: unknown }, owner: string | null) =>
   typeof strategy.recipient === 'string' && strategy.recipient ? (/^0x[0-9a-fA-F]{40}$/.test(strategy.recipient) ? strategy.recipient.toLowerCase() : strategy.recipient) : owner;
@@ -121,12 +124,14 @@ export async function reviewEditorExecution(input: { readonly workflow: unknown;
         stepFrom: g.stepFrom, stepTo: g.stepTo });
       if (!r.ok) refusal = { code: r.code, step: r.stepIndex ?? null };
       else {
-        const p = r.value.prepared as unknown as { group: EvmGroupCalls; simulation: BatchSimulation | null; fee: { estimatedGas: string; maxFeePerGas: string; maxCost: string; payer: string } };
+        const p = r.value.prepared as unknown as { group: EvmGroupCalls; simulation: BatchSimulation | null;
+          fee: { estimatedGas: string; maxFeePerGas: string; maxCost: string; payer: string; l1FeeUpperBound?: string } };
         validUntil = r.value.validUntil.toISOString();
         calls = p.group.calls.map((c, i) => ({ kind: c.kind, step: p.group.steps.find(s => s.calls.includes(i))?.stepIndex ?? g.stepFrom }));
         approvals = p.group.calls.filter(c => c.kind === 'ERC20_APPROVE').length;
         preparedCalls.set(g.index, p.group.calls.length);
-        fee = { estimatedWei: (BigInt(p.fee.estimatedGas) * BigInt(p.fee.maxFeePerGas) / 2n).toString(), maxWei: p.fee.maxCost, payer: p.fee.payer };
+        // The estimate is the execution gas at about the current price plus the L1 data fee bound (OP Stack only; 0 elsewhere).
+        fee = { estimatedWei: (BigInt(p.fee.estimatedGas) * BigInt(p.fee.maxFeePerGas) / 2n + BigInt(p.fee.l1FeeUpperBound ?? '0')).toString(), maxWei: p.fee.maxCost, payer: p.fee.payer };
         healthFactorAfter = p.simulation ? Object.values(p.simulation.healthFactorAfter)[0] ?? null : null;
         for (const [index, values] of plannedSteps(req.value, p.group)) planned.set(index, values);
       }
@@ -139,17 +144,20 @@ export async function reviewEditorExecution(input: { readonly workflow: unknown;
     const basis = g.steps.find(s => s.index === step.index)?.amount ?? 'EXACT', boundTo = g.steps.find(s => s.index === step.index)?.boundTo ?? null;
     const own = planned.get(step.index), input = step.inputs[0];
     return { index: step.index, action: step.action, network: NETWORKS[step.network].label, chain: step.chain, provider: step.adapterId ? PROVIDERS[step.adapterId] ?? null : null,
-      basis, boundTo, spend: own?.spend ?? (input && step.action !== 'borrow' ? amountOf(input.amount, input) : null),
-      expected: own?.expected ?? (step.action === 'borrow' && input ? amountOf(input.amount, input) : null), minimum: own?.minimum ?? null,
+      basis, boundTo, spend: own?.spend ?? (input && !DELIVERS.has(step.action) ? amountOf(input.amount, input) : null),
+      expected: own?.expected ?? (DELIVERS.has(step.action) && input ? amountOf(input.amount, input) : null), minimum: own?.minimum ?? null,
       recipient: step.action === 'transfer' ? recipientOf(step.strategy as { readonly recipient?: unknown }, step.namespace === 'eip155' ? owner : null) : null };
   });
-  // Grouping is offered only when it asks the wallet fewer times than the steps do (the run's own claim applies the same rule: otherwise it
-  // starts confirming each step, and the grouped Authorize could not start).
-  const fewer = plan.interactions.upfront + plan.interactions.whenDue < req.value.steps.length;
-  const everyGroupBatched = plan.groups.every(g => GROUPED.includes(g.strategy)), allGrouped = everyGroupBatched && fewer;
+  // Grouping is offered under the run's own rule (`userFundedPreferred`, which its claim applies too: otherwise the claim starts confirming each
+  // step, and the grouped Authorize could not start): never more wallet interactions than confirming each step, whose step count is only a lower
+  // bound (a step's own flow may add a token approval; a batch folds approvals in and carries an on-chain expiry). Every group here is a
+  // grouped interaction, so a tie never forces step-by-step. Nothing claims FEWER: the counts are shown as they are.
+  const everyGroupBatched = plan.groups.every(g => GROUPED.includes(g.strategy));
+  const allGrouped = everyGroupBatched && userFundedPreferred(plan.groups, plan.interactions, req.value.steps.length);
   const mode = !allGrouped ? 'STEP_BY_STEP' : plan.interactions.single ? 'ONE_WALLET_CONFIRMATION' : 'GROUPED';
   return { ok: true, value: { workflowHash: converted.workflowHash, stepCount: req.value.steps.length, owner, reviewedAt: input.now.toISOString(), validUntil, mode, groups, steps,
     counts: counts(plan.groups, preparedCalls, plan.interactions.networkSwitches, plan.interactions.oneTimeSetup),
-    reasons: [...new Set([...plan.groups.flatMap(g => g.downgrades), ...everyGroupBatched && !fewer ? ['USER_FUNDED_NOT_FEWER_INTERACTIONS'] : []])].filter(code => code !== 'WALLET_CAPABILITIES_ASSUMED'),
+    // USER_FUNDED_NOT_FEWER_INTERACTIONS is no longer emitted: groups that are all grouped interactions never need more prompts than their steps.
+    reasons: [...new Set(plan.groups.flatMap(g => g.downgrades))].filter(code => code !== 'WALLET_CAPABILITIES_ASSUMED'),
     refusal } };
 }
