@@ -14,6 +14,11 @@
  *                                 to FLOFI_DELEGATION_RPC_<id>. Solana reads use the owner flows' own cluster RPC.
  *   FLOFI_SOLANA_NONCE_ACCOUNTS   enabled | disabled (default disabled): reserved. No product path offers durable nonces in this build (ADR-0008):
  *                                 a delayed Solana group is signed when due whatever this says.
+ *
+ * P0 hotfix (E1): no new variable. A certified Router pair (Across, same asset both sides) whose two chains are both opted in above with a read
+ * RPC is a batchable bridge route (`runtime.ts`, `bridgeRoutes`); its quotes use the Router's own Across adapter and optional ACROSS_API_KEY /
+ * ACROSS_INTEGRATOR_ID (read where the user-funded runtime runs: the web tier and the worker). The Router flow's own deployment gates still
+ * decide, per step, whether a run may prepare it.
  */
 import { isHostedDeployment } from '../server/deployment.ts';
 
