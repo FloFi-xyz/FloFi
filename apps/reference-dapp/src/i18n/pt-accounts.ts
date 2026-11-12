@@ -4,7 +4,7 @@ export const portugueseAccounts: Readonly<Record<string, string>> = {
   // Shell and showcase
   'FloFi home': 'Início do FloFi', 'Dark theme': 'Tema escuro', 'About FloFi accounts': 'Sobre as contas FloFi',
   'Your account': 'Sua conta', 'One account for FloFi': 'Uma conta para o FloFi', 'Highlights': 'Destaques', 'Highlight {0} of {1}': 'Destaque {0} de {1}',
-  'One account. Every workflow.': 'Uma conta. Todos os workflows.',
+  'One account. Every workflow.': 'Uma conta. Todos os fluxos.',
   'Your wallets, your keys.': 'Suas carteiras, suas chaves.',
   'Create or import wallets with our wallet provider, or keep using MetaMask, Phantom and Solflare. FloFi never holds a key.':
     'Crie ou importe carteiras com nosso provedor de carteiras, ou continue usando MetaMask, Phantom e Solflare. O FloFi nunca guarda uma chave.',
@@ -13,7 +13,7 @@ export const portugueseAccounts: Readonly<Record<string, string>> = {
     'Entrar nunca aprova uma transação. Cada uma é simulada, revisada e assinada pela sua própria carteira.',
   'AI agents (MCP)': 'Agentes de IA (MCP)', 'Dashboard': 'Painel',
   'FloFi wallet · Generated': 'Carteira FloFi · Gerada', 'Phantom · Connected': 'Phantom · Conectada', 'PROTECTED BY TURNKEY': 'PROTEGIDO PELA TURNKEY',
-  'YOUR WORKFLOW': 'SEU WORKFLOW', 'Swap 500 USDC → ETH on Base': 'Trocar 500 USDC → ETH na Base', 'STRATEGY MANIFEST': 'STRATEGY MANIFEST',
+  'YOUR WORKFLOW': 'SEU FLUXO', 'Swap 500 USDC → ETH on Base': 'Trocar 500 USDC → ETH na Base', 'STRATEGY MANIFEST': 'STRATEGY MANIFEST',
   'Review fees, route and limits — then your wallet signs.': 'Revise taxas, rota e limites — depois sua carteira assina.',
   // Sign in
   'Sign in': 'Entrar', 'your way': 'do seu jeito', 'Add a sign-in': 'Adicionar um login', 'to your account': 'à sua conta',
@@ -21,7 +21,7 @@ export const portugueseAccounts: Readonly<Record<string, string>> = {
   'Add another way to sign in to this FloFi account. It must be yours and not used by another account.':
     'Adicione outra forma de entrar nesta conta FloFi. Ela precisa ser sua e não estar em uso por outra conta.',
   "Accounts aren't available on this deployment yet.": 'As contas ainda não estão disponíveis nesta implantação.',
-  'You can still build workflows and use your own wallet in FloFi without an account.': 'Você ainda pode construir workflows e usar sua própria carteira no FloFi sem uma conta.',
+  'You can still build workflows and use your own wallet in FloFi without an account.': 'Você ainda pode construir fluxos e usar sua própria carteira no FloFi sem uma conta.',
   'Sign-in methods': 'Métodos de login', 'Web3 Wallet': 'Carteira Web3', 'Opening…': 'Abrindo…',
   'Not available on this deployment yet': 'Ainda não disponível nesta implantação',
   'Email sign-in': 'Login por email', 'Email address': 'Endereço de email', 'Sending code…': 'Enviando código…', 'Email me a code': 'Enviar código por email',
@@ -53,7 +53,7 @@ export const portugueseAccounts: Readonly<Record<string, string>> = {
   // Create / import
   'Account': 'Conta', 'Add your wallets': 'Adicione suas carteiras',
   'Create a new wallet or import one you already have. Keys are created and kept by our wallet provider, Turnkey — FloFi never sees or stores them.':
-    'Crie uma carteira nova ou importe uma que você já tem. As chaves são criadas e guardadas pelo nosso provedor de carteiras, a Turnkey — o FloFi nunca as vê nem armazena.',
+    'Crie uma carteira nova ou importe uma que você já tem. As chaves são criadas e salvas pelo nosso provedor de carteiras, a Turnkey — o FloFi nunca as vê nem armazena.',
   "Creating and importing wallets isn't available on this deployment yet.": 'Criar e importar carteiras ainda não está disponível nesta implantação.',
   'You can still connect MetaMask, Phantom or Solflare in Credentials and use them with FloFi.': 'Você ainda pode conectar MetaMask, Phantom ou Solflare em Credenciais e usá-las com o FloFi.',
   'You signed in with a wallet.': 'Você entrou com uma carteira.',
@@ -147,8 +147,8 @@ export const portugueseAccounts: Readonly<Record<string, string>> = {
   'Something went wrong. Nothing changed. Try again.': 'Algo deu errado. Nada mudou. Tente novamente.',
   // Review follow-ups: honesty, deletion, throttling, accessibility
   'Keep your workflows and wallets with one FloFi account. Your wallet still reviews and signs every transaction.':
-    'Guarde seus workflows e carteiras em uma conta FloFi. Sua carteira continua revisando e assinando cada transação.',
-  'Keys are created and kept by Turnkey, not by FloFi.': 'As chaves são criadas e guardadas pela Turnkey, não pelo FloFi.',
+    'Guarde seus fluxos e carteiras em uma conta FloFi. Sua carteira continua revisando e assinando cada transação.',
+  'Keys are created and kept by Turnkey, not by FloFi.': 'As chaves são criadas e salvas pela Turnkey, não pelo FloFi.',
   'Play highlights': 'Reproduzir destaques', 'Pause highlights': 'Pausar destaques',
   'The secret is shown only inside Turnkey’s secure frame below, for you to copy there. FloFi never reads it or writes your clipboard.':
     'O segredo aparece só dentro do quadro seguro da Turnkey abaixo, para você copiar ali. O FloFi nunca o lê nem escreve na sua área de transferência.',

@@ -8,8 +8,7 @@ export function MobileBuildNavigation({ stage = 'Build' }: { stage?: 'Build' | '
   function focus(selector: string) {
     const target = document.querySelector<HTMLElement>(selector);
     // BUILD-FLOFI-CHAT-E2E-FIX-002: a summary kept in a collapsed details surface is opened before it is focused.
-    const details = target?.closest('details');
-    if (details && !details.open) details.open = true;
+    for (let details = target?.closest('details'); details; details = details.parentElement?.closest('details') ?? null) if (!details.open) details.open = true;
     if (target && !target.hasAttribute('tabindex')) target.tabIndex = -1;
     target?.focus({ preventScroll: true });
     target?.scrollIntoView({ block: 'center', behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'instant' : 'smooth' });
@@ -17,7 +16,7 @@ export function MobileBuildNavigation({ stage = 'Build' }: { stage?: 'Build' | '
   const secondary = stage === 'Build' ? 'Copilot' : stage === 'Simulate' ? 'Review' : 'Execution Summary';
   return <nav className="mobile-build-navigation" aria-label={tr(stage === 'Build' ? 'Editor navigation' : stage === 'Simulate' ? 'Simulation workspace navigation' : 'Execution workspace navigation')}>
     <button type="button" onClick={() => focus('.workflow-workspace .canvas')}>{tr('Canvas')}</button>
-    <button type="button" onClick={() => focus(stage === 'Build' ? '#mock-prompt' : stage === 'Simulate' ? '.simulation-summary' : '.execution-summary')}>{tr(secondary)}</button>
+    <button type="button" onClick={() => focus(stage === 'Build' ? '#mock-prompt' : stage === 'Simulate' ? '.review-panel-approved, .simulation-summary' : '.execution-summary')}>{tr(secondary)}</button>
     {/* BUILD-FLOFI-CONVERSATIONAL-001: the same conversation continues below Simulate and Execute. */}
     {stage !== 'Build' && <button type="button" onClick={() => focus('#mock-prompt')}>{tr('Copilot')}</button>}
   </nav>;

@@ -61,15 +61,21 @@ beforeEach(() => { host = new HookHarness(); locale.language = 'EN'; });
 afterEach(() => host.unmount());
 
 describe('Dashboard wallet portfolio widget', () => {
-  it('shows a priced portfolio with an accessible network chart and expandable full holdings', async () => {
+  it('shows "Your wallet": the priced total, top holdings, collapsed caveats and expandable full holdings with the network allocation (board 10)', async () => {
     const load = loader({ ok: true, portfolio: snapshot() }), props: Props = { evm: OWNER, solana: null, load };
     const loading = view(props);
     expect(loading).toContain('Reading wallet balances…'); expect(loading).not.toMatch(/\$|<table/);
     await settle();
     expect(load).toHaveBeenCalledWith({ evm: OWNER, solana: null });
     const compact = view(props);
-    expect(compact).toContain('Wallet portfolio'); expect(compact).toContain('Priced holdings'); expect(compact).toContain('≈ $4,500.75');
-    expect(compact).toContain('1 of 2 holdings priced'); expect(compact).toContain('Base: 100%'); expect(compact).toContain('aria-label="Allocation by network"');
+    expect(compact).toContain('Your wallet'); expect(compact).toContain('≈ $4,500.75'); expect(compact).toMatch(/Verified prices only · updated [^<]*2026/);
+    // The price-source caveats sit in a collapsed "About the values"; a network that could not be read stays visible.
+    expect(compact).toMatch(/<details class="ux-details [^"]*"><summary>About the values<\/summary>/); expect(compact).not.toContain('<details open');
+    const about = compact.slice(compact.indexOf('<summary>About the values</summary>'));
+    expect(about).toContain('1 of 2 holdings priced'); expect(about).toContain('1 holding has no available valuation.');
+    expect(about).toMatch(/Prices: Chainlink USD feeds on Base, observed [^<]*2026[^<]*11:59[^<]* UTC\. Values are estimates, not quotes\./);
+    expect(compact.indexOf('Chainlink')).toBeGreaterThan(compact.indexOf('<summary>About the values</summary>'));
+    expect(compact).not.toContain('role="img"'); expect(compact).not.toContain('aria-label="Allocation by network"');
     expect(compact).toContain('Some networks could not be read.'); expect(compact).toContain('aria-expanded="false"');
     expect(compact).toContain('aria-controls="dashboard-portfolio-details"'); expect(compact).toContain('View all assets');
     expect(compact).not.toContain('<table'); expect(compact).not.toContain('Collapse');
@@ -85,6 +91,7 @@ describe('Dashboard wallet portfolio widget', () => {
     expect(expanded).toMatch(/Prices: Chainlink USD feeds on Base, observed [^<]*2026[^<]*11:59[^<]* UTC\. Values are estimates, not quotes\./);
     expect(expanded).toContain('Only assets with a verified Chainlink USD feed on this deployment are priced.');
     expect(expanded).toContain('Your FloFi executions are in Your workflows.');
+    expect(expanded).toContain('aria-label="Allocation by network"'); expect(expanded).toMatch(/<strong>Base<\/strong><span class="numeric">100%<\/span>/);
     expect(expanded).not.toMatch(/role="tab"|>Transactions<|>DeFi<|>Perpetuals</);
     click(props, labelled('Collapse'));
     expect(view(props)).toContain('aria-expanded="false"');
@@ -94,8 +101,8 @@ describe('Dashboard wallet portfolio widget', () => {
     const props: Props = { evm: OWNER, solana: null, load: loader({ ok: true, portfolio: snapshot() }) };
     view(props); await settle();
     const compact = view(props);
-    expect(compact).toContain('Portfólio da carteira'); expect(compact).toContain('≈ US$ 4.500,75'); expect(compact).toContain('1 de 2 ativos com preço');
-    expect(compact).toContain('Ver todos os ativos');
+    expect(compact).toContain('Sua carteira'); expect(compact).toContain('≈ US$ 4.500,75'); expect(compact).toContain('1 de 2 ativos com preço');
+    expect(compact).toContain('Ver todos os ativos'); expect(compact).toContain('Sobre os valores'); expect(compact).toContain('Somente preços verificados');
     click(props, disclosure);
     const expanded = view(props);
     expect(expanded).toContain('Ativos'); expect(expanded).toContain('Saldo'); expect(expanded).not.toContain('Rede principal'); expect(expanded).toContain('Carteira EVM');
@@ -184,7 +191,7 @@ describe('Dashboard wallet portfolio widget', () => {
     const props: Props = { evm: OWNER, solana: null, load: loader({ ok: true, portfolio: snapshot({ holdings: [ETH, arb, USDC],
       networks: [network('base', 'Base', 'READ'), network('arbitrum-one', 'Arbitrum One', 'READ')], pricedTotalUsd: '6001.00' }) }) };
     view(props); await settle();
-    expect(view(props)).toContain('≈ $6,001.00'); expect(view(props)).toContain('Base: 75%, Arbitrum One: 25%');
+    expect(view(props)).toContain('≈ $6,001.00');
     // A FloFi listbox button, not a native select: closed, it names the filter and its value; open, it lists every represented network.
     const closed = view(props);
     expect(closed).not.toContain('<select'); expect(closed).not.toContain('role="listbox"');
@@ -199,10 +206,12 @@ describe('Dashboard wallet portfolio widget', () => {
     click(props, item => item.role === 'option' && item['data-index'] === 2);
     const filtered = view(props);
     expect(filtered).not.toContain('role="listbox"'); expect(filtered).toContain('aria-expanded="false"');
-    expect(filtered).toContain('≈ $1,500.25'); expect(filtered).toContain('Arbitrum One: 100%');
+    expect(filtered).toContain('≈ $1,500.25');
     expect(filtered).toContain('1 of 1 holdings priced'); expect(filtered).not.toContain('USD Coin');
     click(props, disclosure);
-    expect(view(props)).not.toContain('USDC');
+    const details = view(props);
+    expect(details).not.toContain('USDC'); expect(details).toMatch(/<strong>Arbitrum One<\/strong><span class="numeric">100%<\/span>/);
+    expect(details).not.toContain('<strong>Base</strong>');
   });
   it('refreshes providers and keeps the previous snapshot explicitly stale if refresh fails', async () => {
     const load = loader({ ok: true, portfolio: snapshot() }, { ok: false, code: 'PORTFOLIO_UNAVAILABLE' },

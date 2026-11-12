@@ -101,7 +101,7 @@ test('chat authors the same Base catalog swap; the committed card shows cbBTC', 
 
 async function ask(page: Page, text: string) {
   await page.locator('#mock-prompt').fill(text);
-  await page.getByRole('button', { name: 'Send', exact: true }).click();
+  await page.getByRole('button', { name: 'Send message', exact: true }).click();
 }
 const copilotSays = (page: Page) => page.getByRole('log', { name: 'Conversation' }).locator('.message.ai').last();
 /** BUILD-FLOFI-CONVERSATIONAL-001: each interpretation is committed at once; FloFi says how it read the words and what it added. */
@@ -125,7 +125,8 @@ test('the Copilot authors Base actions from normal language: a list token by nam
     await expect(copilotSays(page)).toContainText('“Coinbase Wrapped BTC” is cbBTC (Coinbase Wrapped BTC) in the official Base catalog.');
     await expect(copilotSays(page)).toContainText('Real funds on Base');
     await ask(page, 'Quero colocar 100 USDC e 50 Aerodrome num pool da Uniswap na Base com taxa de 0,3%');
-    await expectProposal(page, 'Interpretado como “add liquidity 100 USDC and 50 AERO on Base fee 0.3% slippage 100 bps”', 'AERO');
+    // FloFi answers in the interface language (English here), whatever language the request is written in.
+    await expectProposal(page, 'Interpreted as “add liquidity 100 USDC and 50 AERO on Base fee 0.3% slippage 100 bps”', 'AERO');
     await ask(page, `Please lend 25 USDC on Aave on Base for ${recipient}`);
     await expectProposal(page, `Interpreted as “supply 25 USDC to Aave on Base beneficiary ${recipient}”`, 'Supply added to your workflow: 25 USDC');
     await ask(page, `Please send 0.01 ETH on Base over to ${recipient}`);

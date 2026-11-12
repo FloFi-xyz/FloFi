@@ -47,6 +47,8 @@ const EN = {
   kept: 'Nothing was deleted.',
   nothingToDelete: 'FloFi does not remember anything for you.',
   language: (language: CopilotLanguage): string => language === 'PT' ? 'From now on I’ll reply in Portuguese.' : 'From now on I’ll reply in English.',
+  /** P0 approved UX: the assistant follows the screen's language; a reply language is chosen there, never promised here. */
+  languageFollowsScreen: 'FloFi replies in the language of the screen. To change it, open Settings and choose Language.',
   languageSaved: (language: CopilotLanguage): string => language === 'PT' ? 'Saved: FloFi will reply in Portuguese.' : 'Saved: FloFi will reply in English.',
   usedPrivate: (term: string, name: string) => `“${term}” read as ${name} — your saved meaning.`,
   usedSession: (term: string, name: string) => `“${term}” read as ${name} — as you said in this conversation.`,
@@ -75,6 +77,7 @@ const PT: typeof EN = {
   kept: 'Nada foi apagado.',
   nothingToDelete: 'O FloFi não lembra nada sobre você.',
   language: language => language === 'PT' ? 'A partir de agora, respondo em português.' : 'A partir de agora, respondo em inglês.',
+  languageFollowsScreen: 'A FloFi responde no idioma da tela. Para mudar, abra Configurações e escolha Idioma.',
   languageSaved: language => language === 'PT' ? 'Salvo: o FloFi vai responder em português.' : 'Salvo: o FloFi vai responder em inglês.',
   usedPrivate: (term, name) => `“${term}” entendido como ${name} — significado salvo por você.`,
   usedSession: (term, name) => `“${term}” entendido como ${name} — como você disse nesta conversa.`,

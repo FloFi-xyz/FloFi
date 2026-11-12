@@ -107,6 +107,15 @@ export function createRouterNode(nodeId: string, input: RouterBridgeInput): Sema
     outputToken: pair.destination.address, amount: parseTokenAmount(input.amount.trim(), pair.source.decimals),
     recipient: recipient === '' ? 'CONNECTED_OWNER' : recipient.toLowerCase(), slippageBps: Number(input.slippage), providers: ROUTER_ROUTING[input.routing] });
 }
+/**
+ * P0 (owner test 2026-11-12): routes the certified Cross-chain Router executes for its own pairs — Across direct, or LI.FI when its only tool is
+ * Across (the Router asks LI.FI with `allowBridges=across`; a multi-tool LI.FI label such as `x>across` is not one). Universal discovery labels
+ * these LIVE_QUOTE (the universal router has no verifier for them); the server labels them executable only for a Router node whose pair's flow
+ * reports owner execution (`server/router-capability.ts`), and the browser accepts that label only for the same predicate (`estimateMatchesNode`).
+ * Any other tool (Stargate, CCTP, …) stays quote-only. Presentation only: execution still goes through the Router flow, which re-gates it.
+ */
+export const certifiedRouterRoute = (c: { readonly provider: string; readonly bridge?: string | null | undefined }): boolean =>
+  (c.provider === 'across' || c.provider === 'lifi') && c.bridge === 'across';
 export type RouterDetails = RouterBridgeInput & { units: string; recipientLabel: string; network: RouterNetwork;
   /** The asset delivered on the destination chain (it may differ from the source token: USDC → USDG). */ destinationToken: string };
 export function routerDetails(node: SemanticWorkflow['nodes'][number] | { readonly actionType: string }): RouterDetails | null {

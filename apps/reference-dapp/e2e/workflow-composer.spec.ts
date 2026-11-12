@@ -172,10 +172,10 @@ test('accepted settings update the card and existing warnings link to Selected A
   await expect(page.locator('.summary-bar')).toHaveAttribute('data-workflow-revision', '2');
   await expect(cards(page).getByRole('textbox', { name: 'Source amount (USDC)', exact: true })).toHaveValue('2.5');
   await expect(cards(page).locator('.composer-amount .composer-amount-token')).toHaveText('USDC');
-  await inspector(page).getByLabel('Slippage (bps)').fill('200');
-  await inspector(page).getByRole('button', { name: 'Apply slippage', exact: true }).click();
+  await inspector(page).getByLabel('Max price difference (%)').fill('2');
+  await inspector(page).getByRole('button', { name: 'Apply max price difference', exact: true }).click();
   await expect(page.locator('.summary-bar')).toHaveAttribute('data-workflow-revision', '3');
-  await expect(inspector(page)).toContainText('Applied limit: 200 bps (2.00%)');
+  await expect(inspector(page)).toContainText('Applied limit: 2%');
   await expect(cards(page)).not.toHaveAttribute('data-state', 'warning');
   await expect(cards(page)).not.toContainText('Warning');
   await expect(inspector(page).getByLabel('Selected action checks')).toContainText('Review the prototype slippage limit.');

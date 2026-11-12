@@ -9,6 +9,7 @@ import { createRouterNode, routerChainChoices, routerDetails, routerInputForNetw
 import { formatTokenAmount } from '../domain/jupiter-authoring';
 import { useWorkflow } from '../state/workflow-store';
 import { TokenAmountInput } from './token-amount-input';
+import { PriceDifferenceInput } from './price-difference-input';
 import { useRouter } from '../state/router-store';
 import { useBuild009Wallet } from '../state/build009-wallet-store';
 import { authoringEnvironment, useExecutionEnvironment } from '../state/capability-store';
@@ -105,7 +106,7 @@ export function RouterForm({ nodeId, onDone, network: initialNetwork, options = 
       onChange={e => set({ recipient: e.target.value })}/></label>
     <label>{tr("Routing")}<select aria-label={tr("Cross-chain routing policy")} value={input.routing} onChange={e => set({ routing: e.target.value as RouterRouting })}>
       {(Object.keys(ROUTER_ROUTING_LABEL) as RouterRouting[]).map(k => <option key={k} value={k}>{tr(ROUTER_ROUTING_LABEL[k])}</option>)}</select></label>
-    <label>{tr("Slippage (bps)")}<input aria-label={tr("Cross-chain slippage (bps)")} inputMode="numeric" autoComplete="off" maxLength={4} value={input.slippage} onChange={e => set({ slippage: e.target.value })}/></label>
+    <label>{tr('Max price difference (%)')}<PriceDifferenceInput aria-label={tr('Cross-chain max price difference (%)')} maxLength={5} bps={input.slippage} onBpsChange={slippage => set({ slippage })}/></label>
     {!compact && network && option && <small>{tr(network === 'testnet' ? 'Between 0.5 and 5 test USDC per bridge (the testnet relayer has little liquidity).' : network === 'mainnet' ? 'Maximum 100 USDC per bridge in this release.'
       : `Between ${bound(option.pair.minimumAmount, option.pair.source.decimals)} and ${bound(option.pair.maximumAmount, option.pair.source.decimals)} ${option.pair.source.symbol} per bridge in this release.`)}{tr(" The minimum you receive is fixed in the reviewed deposit.")}</small>}
     {error && <p role="alert">{tr(error)}</p>}

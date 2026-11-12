@@ -27,7 +27,7 @@ test.beforeEach(async ({ page }) => {
   const found: string[] = []; errors.set(page, found);
   page.on('pageerror', error => found.push(error.message));
   await page.goto('/app/dashboard');
-  await expect(page.getByRole('heading', { name: 'Your execution workspace' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Dashboard', level: 1, exact: true })).toBeVisible();
   await expect.poll(() => page.locator('.main').evaluate(element => getComputedStyle(element).paddingLeft)).not.toBe('0px');
   const fontClasses = await page.locator('html').getAttribute('class');
   const styles = await page.locator('link[rel="stylesheet"]').evaluateAll(links => links.map(link => link.outerHTML).join(''));
@@ -40,6 +40,12 @@ test.beforeEach(async ({ page }) => {
 });
 test.afterEach(({ page }) => { expect(errors.get(page)).toEqual([]); });
 
+/** P0 approved UX (board 11): Your workflows' records are ONE list behind filter chips (All, Needs attention, Saved, Executed). */
+async function filterRecords(page: Page, chip: 'All' | 'Needs attention' | 'Saved' | 'Executed') {
+  await page.getByRole('group', { name: 'Filter workflows', exact: true }).getByRole('button', { name: new RegExp(`^${chip}`) }).click();
+  return page.locator('.ux-workflow-list');
+}
+
 test('current execution and saved cards retain status, evidence and distinct review actions', async ({ page }) => {
   const current = page.getByRole('region', { name: 'Current execution', exact: true });
   await expect(current).toContainText('Unresolved');
@@ -47,11 +53,14 @@ test('current execution and saved cards retain status, evidence and distinct rev
   await current.getByRole('button', { name: /^Show details for / }).click();
   await expect(current.locator('.dashboard-run-message')).toBeVisible();
   await expect(current).toContainText('0 of 1 step confirmed');
-  // BUILD-FLOFI-CHAT-E2E-DASHBOARD-UX-001: the Dashboard summarizes the records; the history itself is in Your workflows.
-  const summary = page.getByRole('region', { name: 'Workflow records', exact: true });
-  await expect(summary).toContainText('3 records need attention'); await expect(summary).toContainText('1 executed record');
+  // BUILD-FLOFI-CHAT-E2E-DASHBOARD-UX-001: the Dashboard summarizes the records; the history itself is in Your workflows. P0 approved UX (board 10):
+  // "Needs you" lists the records that need the owner (never the current run again) and History is one line.
+  const needs = page.getByRole('region', { name: 'Needs you', exact: true });
+  await expect(needs.getByRole('listitem')).toHaveCount(2);
+  await expect(needs.locator('.ux-count')).toHaveAccessibleName('2 records need you');
+  await expect(page.getByRole('region', { name: 'History', exact: true })).toContainText('1 workflow executed');
   await expect(page.locator('.dashboard-run-list')).toHaveCount(0);
-  await expect(page.locator('.dashboard-run-current')).toHaveCount(1);
+  await expect(page.locator('.ux-record-current')).toHaveCount(1);
   await current.getByRole('link').focus(); await current.getByRole('link').press('Enter');
   await expect(page.locator('.dashboard-result-summary')).toContainText('Unresolved');
   await expect(page.getByRole('button', { name: 'Open current execution', exact: true })).toBeVisible();
@@ -59,15 +68,21 @@ test('current execution and saved cards retain status, evidence and distinct rev
   expect(await page.evaluate(() => window.flofiDashboardAcceptance.counts().executed)).toBe(0);
   await page.getByRole('button', { name: 'Back to Dashboard' }).click();
   await page.evaluate(() => window.flofiDashboardAcceptance.view('records'));
-  // Each run is in exactly one section: executed history, or the records that need attention (unresolved, incomplete or in progress).
-  const history = page.getByRole('region', { name: 'Executed and history', exact: true }), attention = page.getByRole('region', { name: 'Needs attention', exact: true });
-  await expect(history.locator('.dashboard-run-list>li')).toHaveCount(1);
-  await expect(attention.locator('.dashboard-run-list>li')).toHaveCount(3);
-  for (const row of await attention.locator('.dashboard-run-card').all()) await row.getByRole('button', { name: /^Show details for / }).click();
+  // Each run is listed once: executed history, or the records that need attention (unresolved, incomplete or in progress).
+  await filterRecords(page, 'Executed');
+  await expect(page.getByRole('list', { name: 'Executed', exact: true }).locator(':scope > li')).toHaveCount(1);
+  await filterRecords(page, 'Needs attention');
+  const attention = page.getByRole('list', { name: 'Needs attention', exact: true });
+  await expect(attention.locator(':scope > li')).toHaveCount(3);
+  for (const row of await attention.locator('.ux-record').all()) await row.getByRole('button', { name: /^Show details for / }).click();
   await expect(attention).toContainText('Execution status unresolved');
   await expect(attention).toContainText('Review the incomplete action');
-  await expect(page.locator('.dashboard-run-list>.dashboard-run-card')).toHaveCount(0);
-  await page.getByRole('link', { name: 'View Swap run fixture-completed', exact: true }).click();
+  await expect(page.locator('.ux-record')).toHaveCount(3);
+  await filterRecords(page, 'All');
+  await expect(page.getByRole('list', { name: 'All', exact: true }).locator(':scope > li')).toHaveCount(4);
+  // The completed run is the one executed record (its row's Open names the workflow).
+  await filterRecords(page, 'Executed');
+  await page.getByRole('list', { name: 'Executed', exact: true }).getByRole('link', { name: 'Open record: Swap', exact: true }).click();
   await expect(page.locator('.dashboard-result-summary')).toContainText('Completed');
   await expect(page.getByRole('button', { name: 'Open current execution', exact: true })).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'Authorize in wallet', exact: true })).toHaveCount(0);
@@ -78,20 +93,22 @@ test('loading, verification and unavailable history preserve the current executi
     await page.evaluate(value => window.flofiDashboardAcceptance.mode(value), mode);
     await expect(page.locator('.dashboard-current')).toBeVisible();
     await expect(page.locator('.dashboard-current')).toContainText('Unresolved');
-    await expect(page.locator('.dashboard-records-summary')).toBeVisible();
-    await expect(page.getByRole('heading', { name: 'No workflows executed yet', exact: true })).toHaveCount(0);
+    await expect(page.getByRole('region', { name: 'History', exact: true })).toBeVisible();
+    await expect(page.getByText('No workflows executed yet', { exact: true })).toHaveCount(0);
   }
   await page.evaluate(() => window.flofiDashboardAcceptance.view('records'));
   for (const mode of ['loading', 'verify', 'unavailable', 'not-configured', 'current-only'] as const) {
     await page.evaluate(value => window.flofiDashboardAcceptance.mode(value), mode);
-    const disclosure = page.locator('.workflows-attention').getByRole('button', { name: /^Show details for / });
-    if (await disclosure.count()) await disclosure.click();
-    await expect(page.locator('.workflows-attention .dashboard-run-message')).toBeVisible();
-    await expect(page.locator('.workflows-attention')).toContainText('Execution status unresolved');
-    if (mode === 'current-only') {
-      await expect(page.getByRole('heading', { name: 'No workflows executed yet', exact: true })).toBeVisible();
-      await expect(page.locator('.dashboard-history-empty')).toContainText('Records that need attention are listed below.');
-    } else await expect(page.getByRole('heading', { name: 'No workflows executed yet', exact: true })).toHaveCount(0);
+    await filterRecords(page, 'Needs attention');
+    const attention = page.getByRole('list', { name: 'Needs attention', exact: true });
+    const disclosure = attention.getByRole('button', { name: /^Show details for / });
+    if ((await disclosure.getAttribute('aria-expanded')) !== 'true') await disclosure.click();
+    await expect(attention.locator('.dashboard-run-message')).toBeVisible();
+    await expect(attention).toContainText('Execution status unresolved');
+    // Board 11: "No workflows executed yet" is claimed only where the records were read and none is executed.
+    await filterRecords(page, 'Executed');
+    if (mode === 'current-only') await expect(page.locator('.ux-list-empty')).toHaveText('No workflows executed yet');
+    else await expect(page.getByText('No workflows executed yet', { exact: true })).toHaveCount(0);
   }
   await page.evaluate(() => window.flofiDashboardAcceptance.view('dashboard'));
   await page.evaluate(() => window.flofiDashboardAcceptance.mode('verify'));
@@ -105,14 +122,18 @@ test('loading, verification and unavailable history preserve the current executi
 
 test('verified empty and disconnected states have no fabricated history or financial values', async ({ page }) => {
   await page.evaluate(() => { window.flofiDashboardAcceptance.mode('empty'); window.flofiDashboardAcceptance.view('records'); });
-  await expect(page.getByRole('heading', { name: 'No workflows executed yet', exact: true })).toBeVisible();
-  await expect(page.locator('.dashboard-run-card')).toHaveCount(0);
-  await expect(page.locator('.workflows-attention')).toContainText('No available runs need attention');
-  await page.locator('.dashboard-history-empty').getByRole('button', { name: 'Build workflow', exact: true }).click();
+  await expect(page.locator('.ux-list-empty')).toHaveText('No workflows executed yet');
+  await expect(page.locator('.ux-record')).toHaveCount(0);
+  await filterRecords(page, 'Needs attention');
+  await expect(page.locator('.ux-list-empty')).toContainText('No available runs need attention');
+  // P0 approved UX (board 10): with nothing in progress the Dashboard's Current execution offers the one way to start, Create workflow.
+  await page.evaluate(() => window.flofiDashboardAcceptance.view('dashboard'));
+  await expect(page.locator('.dashboard-current')).toContainText('No execution in progress.');
+  await page.locator('.dashboard-current').getByRole('button', { name: 'Create workflow', exact: true }).click();
   expect(await page.evaluate(() => window.flofiDashboardAcceptance.counts().built)).toBe(1);
   await page.evaluate(() => { window.flofiDashboardAcceptance.mode('disconnected'); window.flofiDashboardAcceptance.view('dashboard'); });
   await expect(page.getByRole('status')).toContainText('Connect your wallet to view your execution history');
-  await expect(page.locator('.workflows-attention,.dashboard-current,.dashboard-records-summary')).toHaveCount(0);
+  await expect(page.locator('.ux-panel-attention,.dashboard-current,.ux-history')).toHaveCount(0);
   expect(await page.locator('.dashboard-workspace').innerText()).not.toMatch(/\$|APY|PnL|0 ETH|0 USDC/);
 });
 
@@ -126,21 +147,22 @@ for (const theme of ['light', 'dark'] as const) test(`${theme} Dashboard cards, 
   });
   expect(colors.status).toBe(colors.token);
   await page.evaluate(() => window.flofiDashboardAcceptance.view('dashboard'));
+  // Board 10: what needs the owner and the current execution first, then the one line of history, at every width.
   for (const width of [1440, 1024, 820, 390, 320]) {
     await page.setViewportSize({ width, height: 1000 });
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
-    const current = await page.locator('.dashboard-current').boundingBox(), records = await page.locator('.dashboard-records-summary').boundingBox();
+    const current = await page.locator('.dashboard-current').boundingBox(), records = await page.locator('.ux-history').boundingBox();
     expect(current).not.toBeNull(); expect(records).not.toBeNull();
     expect(current!.y + current!.height).toBeLessThan(records!.y);
   }
-  // Your workflows: the executed history, then the records that need attention, at every width.
+  // Your workflows: the filter chips, then one list (records that need attention first), at every width.
   await page.evaluate(() => window.flofiDashboardAcceptance.view('records'));
   for (const width of [1440, 1024, 820, 390, 320]) {
     await page.setViewportSize({ width, height: 1000 });
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
-    const activity = await page.locator('.dashboard-activity').boundingBox(), attention = await page.locator('.workflows-attention').boundingBox();
-    expect(activity).not.toBeNull(); expect(attention).not.toBeNull();
-    expect(activity!.y + activity!.height).toBeLessThan(attention!.y);
+    const chips = await page.getByRole('group', { name: 'Filter workflows', exact: true }).boundingBox(), list = await page.locator('.ux-workflow-rows').boundingBox();
+    expect(chips).not.toBeNull(); expect(list).not.toBeNull();
+    expect(chips!.y + chips!.height).toBeLessThan(list!.y);
   }
   await page.evaluate(() => window.flofiDashboardAcceptance.view('dashboard'));
   await page.setViewportSize({ width: 1440, height: 1000 });

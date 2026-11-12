@@ -135,17 +135,17 @@ test('semantic edits invalidate; presentation, dismissal, no-op and stale propos
   await tab(page, 'Build');
   // BUILD-FLOFI-CONVERSATIONAL-001: a chat request that would also drop a step the owner did not name stays a proposal; dismissing it changes nothing.
   await page.getByLabel('Describe your flow').fill(REPLACING);
-  await page.getByRole('button', { name: 'Send', exact: true }).click();
+  await page.getByRole('button', { name: 'Send message', exact: true }).click();
   await openProposalReview(page);
   await page.getByRole('dialog', { name: 'Proposed change' }).getByRole('button', { name: 'Dismiss proposal' }).click();
   // A request for the value the step already has is a no-op: no revision.
   await page.getByLabel('Describe your flow').fill('set node-002 amount 2.25');
-  await page.getByRole('button', { name: 'Send', exact: true }).click();
+  await page.getByRole('button', { name: 'Send message', exact: true }).click();
   await expect(page.getByRole('log', { name: 'Conversation' }).locator('.message').last()).toContainText('That step already has these values. Nothing changed.');
   await expect(page.locator('.summary-bar[data-workflow-revision="1"]')).toBeVisible();
   // A proposal made at revision 1 is stale once the workflow changes (the Canvas lock below): it can no longer be applied.
   await page.getByLabel('Describe your flow').fill(REPLACING);
-  await page.getByRole('button', { name: 'Send', exact: true }).click();
+  await page.getByRole('button', { name: 'Send message', exact: true }).click();
   await expect(page.getByRole('button', { name: /^Review proposed change:/ })).toHaveCount(1);
   await openFirstActionSettings(page);
   await page.getByRole('button', { name: 'Lock amount' }).click();

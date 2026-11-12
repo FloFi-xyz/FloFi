@@ -135,6 +135,11 @@ export type CopilotEnvironment = {
   readonly learning?: CopilotLearning;
   /** Tests only: approved agent rollouts (audit A9). Absent in the product, where `AGENT_ROLLOUT_APPROVED` applies. */
   readonly agentRollout?: readonly PendingAgentCapability[];
+  /**
+   * P0 approved UX (board 02/16 §4): the active interface language. When present, every reply is written in it — FloFi's own copy and the model's
+   * (sent as the turn's reply language) — whatever language the person typed in; their words are still understood in either language.
+   */
+  readonly interfaceLanguage?: CopilotLanguage;
 };
 /** One FloFi-registered Orca position of the connected Solana Devnet wallet, as the position registry and the chain report it. */
 export type CopilotPosition = { readonly positionMint: string; readonly status: string; readonly tickLower: number | null; readonly tickUpper: number | null;
@@ -163,7 +168,8 @@ export type ReplyLearning = { readonly used: readonly LexiconEntry[]; readonly s
  * hands the card to the model only through the read-only `get_workflow_context` / `get_wallet_context` tools, and echoes the fingerprint so an
  * answer computed for another context is never applied.
  */
-export type CopilotRequestV2 = { readonly version: '2'; readonly messages: readonly TranscriptEntry[]; readonly context?: CopilotContextCard; readonly contextKey?: string };
+export type CopilotRequestV2 = { readonly version: '2'; readonly messages: readonly TranscriptEntry[]; readonly context?: CopilotContextCard; readonly contextKey?: string;
+  /** P0 approved UX: the interface language the model must reply in. */ readonly replyLanguage?: CopilotLanguage };
 export type CopilotResultV2 = { readonly ok: true; readonly intent: unknown; readonly contextKey?: string;
   /** BUILD-FLOFI-INTELLIGENCE-001: the numbers FloFi's own tools returned this turn (the server's facts), for grounding the model's explanation again here. */
   readonly groundingNumbers?: readonly string[] } | { readonly ok: false; readonly code: string; readonly retryAfterSeconds?: number };
@@ -268,7 +274,7 @@ export const lexiconOf = (state: CopilotConversation, env: CopilotEnvironment): 
     parseLexicon(env.learning.learned ?? [], 'LEARNED'), parseLexicon(env.learning.global, 'GLOBAL')).filter(entry => statedSource(entry.source) || !suppressedPair(state, entry));
 /** The reply language the user chose (in this conversation, else saved); null = the language of their message, as before. */
 export const preferredLanguage = (state: CopilotConversation, env: CopilotEnvironment): CopilotLanguage | null =>
-  !env.learning ? null : state.languageSet ?? env.learning.language ?? null;
+  env.interfaceLanguage ?? (!env.learning ? null : state.languageSet ?? env.learning.language ?? null);
 function withLearning(result: Result, env: CopilotEnvironment, signals: readonly LearningSignal[], used: readonly LexiconEntry[] = []): Result {
   if (!env.learning || (!signals.length && !used.length)) return result;
   const prior = result.reply.learning;
@@ -886,6 +892,10 @@ export function startTurn(current: CopilotConversation, raw: string, env: Copilo
     }
     const statement = parseMemoryStatement(text);
     // FloFi answers in the language the statement was written in, unless the user chose a reply language (a language statement: the new one).
+    // P0 approved UX: with an interface language, a reply-language statement is answered in that language and points to the language setting —
+    // nothing is promised, set or learned that the screen's language would then override.
+    if (statement?.kind === 'LANGUAGE' && env.interfaceLanguage)
+      return { kind: 'LOCAL', reply: reply('ANSWER', learningCopy(env.interfaceLanguage).languageFollowsScreen), next: { ...state, offer: null } };
     if (statement) return { kind: 'LOCAL', ...memoryTurn(state, statement, env.learning, statement.kind === 'LANGUAGE' ? statement.language
       : preferredLanguage(state, env) ?? statement.said) };
   }
@@ -920,7 +930,7 @@ export function startTurn(current: CopilotConversation, raw: string, env: Copilo
   const next = withUser(state, text);
   // BUILD-FLOFI-INTELLIGENCE-001: FloFi's sanitized context card travels with the request; the model reads it only through a read-only tool.
   const card = contextCard(operationalState(next, env)), key = contextKey(card);
-  return { kind: 'REMOTE', request: { version: '2', messages: next.transcript, context: card, contextKey: key },
+  return { kind: 'REMOTE', request: { version: '2', messages: next.transcript, context: card, contextKey: key, ...env.interfaceLanguage ? { replyLanguage: env.interfaceLanguage } : {} },
     turn: { before: state, state: next, snapshot: snapshotOf(env), contextKey: key } };
 }
 /** Finishes a model turn against the current state. A changed workflow, proposal or wallet discards the answer. */
@@ -937,6 +947,8 @@ export function finishTurn(turn: PendingTurn, result: CopilotResultV2, env: Copi
   try { intent = parseCopilotIntentV2(result.intent); }
   catch (cause) { return tallied({ reply: reply('FAILED', failureText(isCopilotIntentError(cause) && cause.message === 'COPILOT_TOO_MANY_ACTIONS' ? cause.message : 'COPILOT_INTENT_INVALID', language)), next: rollback }, env); }
   intent = mergeDraftIntent(turn.before.draft?.intent ?? null, intent, turn.state.segment.at(-1) ?? '');
+  // P0 approved UX: FloFi composes its reply in the interface language, not the language the model detected.
+  if (env.interfaceLanguage && 'language' in intent && intent.language !== env.interfaceLanguage) intent = { ...intent, language: env.interfaceLanguage } as CopilotIntentV2;
   // BUILD-FLOFI-INTELLIGENCE-001 (defense in depth): a model explanation shows only when every number in it is one of FloFi's facts — the user's words,
   // the workflow facts and context FloFi holds, and the numbers FloFi's tools returned this turn. Otherwise FloFi's own answer stands alone.
   if ((intent.kind === 'QUESTION' || intent.kind === 'GOAL') && intent.answer) {
@@ -946,7 +958,10 @@ export function finishTurn(turn: PendingTurn, result: CopilotResultV2, env: Copi
   }
   // BUILD-CHAT-LEARNING-002: the language this conversation is unmistakably written in — the user's words and the interpreter agree (once per
   // conversation; evidence for the identity's starting language only, never a setting, and only where persistent learning is permitted).
-  const said = env.learning?.automatic === 'ON' && !turn.state.languageObserved ? messageLanguage(turn.state.segment.at(-1) ?? '') : null, read = intent.language;
+  // P0 approved UX: with an interface language the interpreter is told to answer in it, so its language is no independent evidence: nothing is
+  // observed then (the screen's language governs, and a heuristic alone never becomes a learned preference).
+  const said = !env.interfaceLanguage && env.learning?.automatic === 'ON' && !turn.state.languageObserved ? messageLanguage(turn.state.segment.at(-1) ?? '') : null,
+    read = intent.language;
   if (preferred && intent.language !== preferred) intent = { ...intent, language: preferred };
   const resolved = tallied(resolveIntent(intent, { ...turn.state, draft: turn.before.draft, language: intent.language }, env, null, turn.before.draft?.extras ?? {}), env);
   if (!said || said !== read) return resolved;

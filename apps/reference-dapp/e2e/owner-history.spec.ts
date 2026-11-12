@@ -52,7 +52,8 @@ async function inspect(id: string) {
     (SELECT count(*)::int FROM owner_history_visibility WHERE record_id=$1) AS archives`, [id])).rows[0]!; }
   finally { await database.close(); }
 }
-const card = (page: Page, id: string) => page.locator('.dashboard-run-card').filter({ has: page.locator(`a[href="/app/dashboard/runs/${id}"]`) });
+// P0 approved UX (board 11): each execution record is a row of Your workflows' one list.
+const card = (page: Page, id: string) => page.locator('.ux-record').filter({ has: page.locator(`a[href="/app/dashboard/runs/${id}"]`) });
 /**
  * BUILD-FLOFI-CHAT-E2E-DASHBOARD-UX-001: the execution history lives in Your workflows. A wallet that no signed-in FloFi account holds (these
  * test wallets have no account) proves itself once there — one sign-in signature for the saved workflows and the history together.
@@ -63,7 +64,8 @@ async function signIn(page: Page) {
   await expect(page.getByRole('button', { name: 'Verify wallet for history', exact: true })).toHaveCount(0);
   await prove.click();
   await expect(prove).toHaveCount(0);
-  await expect(page.getByRole('button', { name: 'Refresh history', exact: true })).toBeVisible();
+  // P0 approved UX (board 11): Your workflows has one Refresh, which re-reads the workflows and their execution records together.
+  await expect(page.getByRole('button', { name: 'Refresh workflows', exact: true })).toBeVisible();
 }
 async function open(page: Page, wallets: TestWallet[]) {
   await installJourneyWallet(page, wallets, { chain: '0xa4b1', transactionControl: async () => { throw Error('FINANCIAL_REQUEST_FORBIDDEN'); } });
@@ -83,7 +85,7 @@ test('permanent deletion removes real bytes and stays deleted after refresh, a n
   await dialog.getByRole('button', { name: 'Delete permanently', exact: true }).click();
   await expect(card(page, id)).toHaveCount(0);
   expect(await inspect(id)).toEqual({ runs: 0, segments: 0, purges: 1, archives: 0 });
-  await page.reload(); await page.getByRole('button', { name: 'Refresh history', exact: true }).click(); await expect(card(page, id)).toHaveCount(0);
+  await page.reload(); await page.getByRole('button', { name: 'Refresh workflows', exact: true }).click(); await expect(card(page, id)).toHaveCount(0);
   await switchAccount(page, other.address); await signIn(page); await expect(card(page, id)).toHaveCount(0);
   expect((await walletRequests(page)).filter(m => m !== 'personal_sign' && /send|sign/i.test(m))).toEqual([]);
   const fresh = await guardedContext(browser);
@@ -115,7 +117,7 @@ test('compact rows expose metadata on demand, support keyboard actions and archi
   await expect(row.getByRole('button', { name: 'Delete execution', exact: true })).toBeHidden();
   await page.setViewportSize({ width: 375, height: 844 });
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
-  await expect(row.getByRole('link', { name: /^View / })).toBeVisible();
+  await expect(row.getByRole('link', { name: /^Open record: / })).toBeVisible();
   const before = await inspect(id);
   await more.click(); await row.getByRole('button', { name: 'Archive execution', exact: true }).click();
   await expect(row).toHaveCount(0);

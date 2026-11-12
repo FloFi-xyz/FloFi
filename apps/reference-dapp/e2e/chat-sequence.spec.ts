@@ -13,7 +13,7 @@ import type { APIRequestContext, Page } from '@playwright/test';
 import { test, expect, readWorkflowIr } from './fixtures';
 import { installJourneyWallet, walletRequests } from './journey-fixtures';
 import { createTestWallet } from '../../../packages/reference-reconciler/test/test-wallet';
-import { expectEditorSection, openBuilder, openEditorSection } from './build-entry-navigation';
+import { expectEditorSection, openBuilder, openEditorSection, openSimulationReviewPanel, REVIEW_PANEL_MIN_WIDTH } from './build-entry-navigation';
 
 test.skip(process.env.FLOFI_SWAP_EXECUTION_E2E !== 'MOCKED_LOOPBACK_ONLY', 'Requires the opt-in loopback swap execution harness');
 test.setTimeout(180_000);
@@ -133,13 +133,14 @@ test('independent steps: an unapplied Canvas amount is resolved in the chat, the
   await expect(flofi(page)).toContainText('Should I apply it before reviewing the workflow?');
   await pick(page, 'Apply it');
   await expect(flofi(page)).toContainText('That amount cannot be applied: Enter a valid amount greater than 0.');
+  // A Portuguese request is understood; P0 approved UX: FloFi answers in the interface language (English here).
   await say(page, 'revisar workflow');
-  await expect(flofi(page)).toContainText('A etapa 2 (Trocar) tem um montante digitado que não foi aplicado: 0 USDC.');
-  await pick(page, 'Descartar');
-  await expect(chat(page)).toContainText('Descartado. A etapa mantém o montante anterior.');
-  await expect(flofi(page)).toContainText('Esta é a revisão da etapa 1 de 2.', { timeout: 30_000 });
+  await expect(flofi(page)).toContainText('Step 2 (Swap) has an amount you typed but did not apply: 0 USDC.');
+  await pick(page, 'Discard it');
+  await expect(chat(page)).toContainText('Discarded. The step keeps its previous amount.');
+  await expect(flofi(page)).toContainText('Here is the review of step 1 of 2.', { timeout: 30_000 });
   // Independent steps: step 2 is not funded by step 1, and both keep exactly their authored amounts.
-  await expect(flofi(page).locator('[data-sequence-state="NEXT"]')).not.toContainText('Financiada pela etapa');
+  await expect(flofi(page).locator('[data-sequence-state="NEXT"]')).not.toContainText('Funded by step');
   const workflow = JSON.parse(await readWorkflowIr(page)) as { nodes: { userConstraints: { kind: string; quantity?: { amount: string } }[] }[] };
   expect(workflow.nodes.map(node => node.userConstraints.find(c => c.kind === 'MAXIMUM_INPUT')?.quantity?.amount)).toEqual(['1000000', '2000000']);
   expect(owner.requested()).toBe(0); networkGuard.assertClean();
@@ -193,14 +194,18 @@ for (const width of [1920, 1440, 1280, 1024, 390, 375]) test(`chat-first layout 
   expect(await flofi(page).locator('.conversation-review').evaluate(element => element.scrollWidth - element.clientWidth)).toBeLessThanOrEqual(1);
   expect(await overflow()).toBeLessThanOrEqual(0);
   await page.screenshot({ path: testInfo.outputPath(`build-${width}.png`) });
-  for (const [name, grid, summary, details] of [['Simulate', '.simulate-workspace-grid', '.simulation-summary', '.simulation-details'],
+  for (const [name, grid, summary, details] of [['Simulate', '.simulate-workspace-grid', '.simulation-summary', '.review-panel-technical'],
     ['Execute', '.execute-workspace-grid', '.execution-summary', null]] as const) {
     await openEditorSection(page, name);
     await expect(page.locator(grid)).toBeVisible();
-    // One column: the canvas (or timeline). The summary is an optional, collapsed details surface — never a third column beside the chat.
-    expect((await page.locator(grid).evaluate(element => getComputedStyle(element).gridTemplateColumns)).trim().split(/\s+/)).toHaveLength(1);
+    // One column: the canvas (or timeline); the summary is optional, collapsed — never a column of its own beside the chat. P0 approved UX
+    // (board 06 / 16 §7): on Simulate the Review panel (no authorize control) opens beside the canvas from 1200 px; below, it is a collapsed
+    // "Review" under the canvas. Either way the Simulation Summary sits in the panel's collapsed Technical details.
+    const wide = name === 'Simulate' && width >= REVIEW_PANEL_MIN_WIDTH;
+    expect((await page.locator(grid).evaluate(element => getComputedStyle(element).gridTemplateColumns)).trim().split(/\s+/)).toHaveLength(wide ? 2 : 1);
+    if (name === 'Simulate') await expect(page.getByRole('complementary', { name: 'Review', exact: true })).toHaveCount(wide ? 1 : 0);
     // BUILD0-UX-001: Execute shows its short status panel instead of collapsed details (and no technical disclosure).
-    if (details) { await expect(page.locator(summary)).toBeHidden(); await expect(page.locator(`${details} > summary`)).toBeVisible(); }
+    if (details) { await expect(page.locator(summary)).toBeHidden(); await openSimulationReviewPanel(page); await expect(page.locator(`${details} > summary`)).toBeVisible(); }
     else { await expect(page.locator(summary)).toBeVisible(); await expect(page.locator('.execution-details, .execute-technical')).toHaveCount(0); }
     const chatBox = (await page.locator('.stage-with-chat > .copilot').boundingBox())!, stageBox = (await page.locator('.stage-with-chat > .main').boundingBox())!;
     expect(chatBox.width).toBeGreaterThanOrEqual(Math.min(300, width - 32));

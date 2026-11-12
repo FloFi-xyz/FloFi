@@ -17,6 +17,7 @@ import { usesFloFiWallet } from '../wallet/flofi-wallet-channel';
 import { floFiWalletMessage } from '../wallet/flofi-signing';
 import { floFiPrivyWalletIssue, useFloFiPrivy } from '../accounts/privy-context';
 import { copilotHelp, useCopilotInterpreter } from '../components/copilot-ai';
+import { blockerExplanation, isExplainRequest, type ActiveBlocker } from '../domain/approved-ux';
 import { FLOFI_WELCOME_COMMANDS } from '../domain/assistant-welcome';
 import { copilotRejection } from '../domain/copilot-authoring';
 import { composerActions } from '../domain/composer-presentation';
@@ -51,6 +52,13 @@ export type ChatMessage = {
   readonly review?: ConversationReview; readonly question?: string;
 };
 export type ConversationBridge = LifecycleView & {
+  /**
+   * P0 approved UX (board 07): the blocker the Simulate panel shows now (its title, sentence and the server's numbers when it has them). While it is
+   * set, a vague request ("explain", "why?", "não entendi", "me explique melhor") is answered with it — never "there is no pending proposal".
+   */
+  readonly blocker?: ActiveBlocker | null;
+  /** P0 approved UX (board 08): this workflow is executing (or its wallet is being asked); the chat changes nothing in it until that ends. */
+  readonly editingPaused?: boolean;
   /** The selected runtime's existing simulation entry (the Canvas CTA's), and why no simulation can start now (null: it can). */
   readonly simulate: () => void | Promise<void>; readonly simulationBlocked: string | null;
   readonly controls: ExecutionControls;
@@ -93,6 +101,12 @@ function otherRunWallet(view: Pick<LifecycleView, 'source' | 'wallet'>): string 
   return account && view.wallet.account && account.toLowerCase() !== view.wallet.account.toLowerCase() ? account : null;
 }
 
+const EDITING_PAUSED = 'Editing is paused while this workflow executes. You can change it once the run finishes or is ended.';
+/** The answer buttons FloFi offers for an open question (re-offered when an answer is unclear or an explanation interrupts it). */
+function questionOptions(kind: Question['open']['kind'], c: ReturnType<typeof conversationCopy>): string[] {
+  return kind === 'RESOLVE_EDIT' ? [c.applyEdit, c.discardEdit] : kind === 'CONFIRM_WORKFLOW' ? [c.confirmYes, c.confirmNo]
+    : kind === 'CONFIRM_EXECUTION' ? [c.executeYes, c.executeNo] : kind === 'CONFIRM_CONTINUE_REVIEW' ? [c.continueAccept, c.executeNo] : [c.continueYes, c.executeNo];
+}
 export function useFlofiConversation({ owner, epoch, bridge, direct, interfaceLanguage }: {
   owner: WorkflowOwner | null; epoch: number; bridge: ConversationBridge; direct: boolean; interfaceLanguage: ConversationLanguage;
 }) {
@@ -114,7 +128,7 @@ export function useFlofiConversation({ owner, epoch, bridge, direct, interfaceLa
     if (issue === 'FLOFI_WALLET_NOT_READY') return continuing ? c.walletNotReadyToContinue : c.walletNotReady;
     return translate(language, floFiWalletMessage(issue) ?? issue);
   };
-  const copilot = useCopilotInterpreter({ direct });
+  const copilot = useCopilotInterpreter({ direct, interfaceLanguage });
   // BUILD-FLOFI-BRIDGE-LIVE-FIX-003: the FloFi Assistant's short welcome (the panel shows the Copilot mode's own variant when one is configured).
   const intro = (): ChatMessage => ({ id: 0, role: 'system', text: direct ? FLOFI_WELCOME_COMMANDS : 'Review each proposed change before applying it.' });
   const [messages, setMessages] = useState<ChatMessage[]>(() => [intro()]);
@@ -235,6 +249,7 @@ export function useFlofiConversation({ owner, epoch, bridge, direct, interfaceLa
 
   function commit(scope: number, command: Command, meta: { exact: boolean; role: 'flofi' | 'ai'; language: ConversationLanguage; notes: readonly string[]; summary?: string }) {
     const now = latest.current, c = conversationCopy(meta.language), before = now.state.workflow;
+    if (now.bridge.editingPaused) { append(scope, { role: meta.role, text: translate(meta.language, EDITING_PAUSED), language: meta.language, notes: meta.notes }); return; }
     const preview = editorReducer(now.state, command, now.context);
     const lost = preview.error ? [] : lostSteps(before, preview.workflow, command, now.context, meta.language);
     if (lost.length) { propose(command); append(scope, { role: meta.role, text: c.destructive(lost.join(', ')), language: meta.language, notes: meta.notes }); return; }
@@ -416,11 +431,7 @@ export function useFlofiConversation({ owner, epoch, bridge, direct, interfaceLa
       if (next) declined.current.add(next.key);
       flofi(scope, language, started ? c.continueFailed(translate(language, 'You chose not to continue now.')) : c.declined, { options: [c.review] }); return true;
     }
-    if (verdict === 'UNCLEAR') {
-      const options = open.open.kind === 'CONFIRM_WORKFLOW' ? [c.confirmYes, c.confirmNo] : open.open.kind === 'CONFIRM_EXECUTION' ? [c.executeYes, c.executeNo]
-        : open.open.kind === 'CONFIRM_CONTINUE_REVIEW' ? [c.continueAccept, c.executeNo] : [c.continueYes, c.executeNo];
-      flofi(scope, language, c.unclear, { options }); return true;
-    }
+    if (verdict === 'UNCLEAR') { flofi(scope, language, c.unclear, { options: questionOptions(open.open.kind, c) }); return true; }
     if (open.open.kind === 'CONFIRM_CONTINUE') {
       // Only the next never-attempted request of this same run, under the authority already accepted: the existing continuation gate decides.
       setQuestion(null);
@@ -684,6 +695,17 @@ export function useFlofiConversation({ owner, epoch, bridge, direct, interfaceLa
   async function handle(scope: number, text: string) {
     const language = answerLanguage(text, interfaceLanguage), c = conversationCopy(language), open = questionRef.current;
     if (direct) {
+      // P0 approved UX (board 07): while a blocker is active, "explain / why? / não entendi" explains THAT blocker, with the same facts as the panel.
+      // It changes nothing else: an open question keeps its answer buttons, a promised auto-continue stays promised, and a clarification the model
+      // is drafting still receives the message. A run whose request already landed is never told "nothing was sent": only this request was not.
+      if (bridge.blocker && isExplainRequest(text) && !copilot.drafting()) {
+        const facts = blockerExplanation(bridge.blocker);
+        const said = facts ? translate(language, facts.text, ...facts.parameters.map(value => translate(language, value)))
+          : `${translate(language, bridge.blocker.title)}: ${translate(language, bridge.blocker.message)}`;
+        const options = open && open.open.kind !== 'NEXT_STEP' ? questionOptions(open.open.kind, c) : null;
+        flofi(scope, language, bridge.blocker.started || currentExecution(latest.current.bridge.progress)?.started ? aboutNextRequest(said) : said, options ? { options } : {});
+        return;
+      }
       // A new message (other than the offered network switch) replaces a Review the chat was waiting to continue.
       if (!(bridge.networkAction && text === bridge.networkAction.label)) resume.current = null;
       // FloFi's open question takes the answer first; only an explicit answer to it does anything. BUILD-FLOFI-BRIDGE-LIVE-FIX-003: asking for a
@@ -708,8 +730,9 @@ export function useFlofiConversation({ owner, epoch, bridge, direct, interfaceLa
       const request = lifecycleRequest(text);
       if (request) { lifecycle(scope, request, language); return; }
       if (bridge.networkAction && text === bridge.networkAction.label) { bridge.networkAction.request(); return; }
-      if (text === translate(language, 'Connect wallet') || text === 'Connect wallet') { bridge.connectWallet(); return; }
-      if (text === c.checkStatus) { lifecycle(scope, 'STATUS', language); return; }
+      // Offered options are matched in either language (the interface language may have changed since they were offered).
+      if (text === translate('PT', 'Connect wallet') || text === 'Connect wallet') { bridge.connectWallet(); return; }
+      if (text === conversationCopy('EN').checkStatus || text === conversationCopy('PT').checkStatus) { lifecycle(scope, 'STATUS', language); return; }
       // The option is matched in either language: its label carries no word that tells the reply language.
       if ((text === conversationCopy('EN').startNew || text === conversationCopy('PT').startNew) && bridge.startNewWorkflow) { bridge.startNewWorkflow(); return; }
       setQuestion(null);

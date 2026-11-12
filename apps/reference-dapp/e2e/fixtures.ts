@@ -181,7 +181,7 @@ export async function assertNoFinancialCanvasAction(page: Page): Promise<void> {
 
 /** Apply a reviewed authoring proposal through the visible contextual popover. This grants no financial authority. */
 /** BUILD-FLOFI-CONVERSATIONAL-001: FloFi's confirmation that the chat committed a change to the workflow (English or Portuguese). */
-export const CHAT_COMMITTED = /added to your workflow|updated: |removed from your workflow|Prepared for simulation\. Nothing is removed|Adicionado ao seu workflow|Etapa atualizada|Removido do seu workflow|Preparado para a simulação/;
+export const CHAT_COMMITTED = /added to your workflow|updated: |removed from your workflow|Prepared for simulation\. Nothing is removed|Adicionado ao seu fluxo|Etapa atualizada|Removido do seu fluxo|Preparado para a simulação/;
 /**
  * BUILD-FLOFI-CONVERSATIONAL-001: a valid chat request is committed to the canonical workflow at once — no proposal to accept — and FloFi confirms
  * in the chat what the stored workflow now holds. Waits for that one new confirmation.
@@ -190,7 +190,7 @@ export async function sendChatCommand(page: Page, text: string): Promise<void> {
   const committed = page.getByRole('log', { name: 'Conversation' }).locator('.message', { hasText: CHAT_COMMITTED });
   const before = await committed.count();
   await page.getByLabel('Describe your flow').fill(text);
-  await page.getByRole('button', { name: 'Send', exact: true }).click();
+  await page.getByRole('button', { name: 'Send message', exact: true }).click();
   // Catalog reads and interpretation can take a moment on a cold server (the proposal flow allowed the click timeout).
   await expect(committed).toHaveCount(before + 1, { timeout: 30_000 });
   await expect(page.getByRole('button', { name: /^Review proposed change:/ })).toHaveCount(0);

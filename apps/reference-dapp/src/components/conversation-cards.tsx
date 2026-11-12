@@ -1,7 +1,45 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 'use client';
-import { translate } from '../i18n/locale';
+import { useId } from 'react';
+import { translate, useLocale } from '../i18n/locale';
 import type { ConversationLanguage, ConversationReview } from '../domain/conversation-lifecycle';
+import { networkChoiceOptions, networkOfOption } from '../domain/approved-ux';
+import { useOptionalBuild009Wallet } from '../state/build009-wallet-store';
+import { walletChainRef } from '../wallet/evm-networks';
+import { NetworkBrandIcon } from './brand-icon';
+
+export { networkChoiceOptions };
+/**
+ * The connected wallet's network, when it is one of the answers, is listed first and marked; every other answer keeps FloFi's order. Nothing is
+ * chosen here: the person still picks one.
+ */
+export function orderNetworkChoices(options: readonly string[], walletChain: string | null | undefined): { readonly options: readonly string[]; readonly wallet: string | null } {
+  const wallet = walletChain ? options.find(option => networkOfOption(option)?.chain === walletChain) ?? null : null;
+  return { options: wallet ? [wallet, ...options.filter(option => option !== wallet)] : options, wallet };
+}
+/**
+ * P0 approved UX (board 05): the answers to "Which network…?" as a vertical list of network buttons (icon and name). Each button sends exactly
+ * the answer text FloFi offered, as a chip did before; the wallet's network is tagged "Your wallet" but never selected for the person. The
+ * wallet's network is read (read-only) from the shell's EVM wallet where one is provided; `walletChain` (a CAIP-2 chain) overrides it.
+ */
+export function NetworkChoices({ options, walletChain, disabled, onPick }: { options: readonly string[]; walletChain?: string | null | undefined; disabled?: boolean | undefined;
+  onPick(option: string): void }) {
+  const { t: tr } = useLocale();
+  const tag = useId();
+  const wallet = useOptionalBuild009Wallet();
+  const ordered = orderNetworkChoices(options, walletChain === undefined ? walletChainRef(wallet?.chainId) : walletChain);
+  return <div className="conversation-network-choices" role="group" aria-label={tr('Choose a network')}>
+    {ordered.options.map(option => {
+      const walletNetwork = option === ordered.wallet;
+      return <button key={option} type="button" className="conversation-network-choice" data-wallet={walletNetwork || undefined} disabled={disabled}
+        aria-label={option} aria-describedby={walletNetwork ? tag : undefined} onClick={() => onPick(option)}>
+        <span className="conversation-network-icon" aria-hidden="true"><NetworkBrandIcon network={networkOfOption(option)?.name ?? option}/></span>
+        <span className="conversation-network-name">{option}</span>
+        {walletNetwork && <span id={tag} className="conversation-network-wallet">{tr('Your wallet')}</span>}
+      </button>;
+    })}
+  </div>;
+}
 
 const short = (value: string) => value.length > 16 ? `${value.slice(0, 6)}…${value.slice(-4)}` : value;
 /**

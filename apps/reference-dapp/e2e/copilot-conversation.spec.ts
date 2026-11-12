@@ -21,7 +21,7 @@ const node = (page: Page, id: string) => page.locator(`.react-flow__node[data-id
 const revision = (page: Page, value: number) => expect(page.locator(`.summary-bar[data-workflow-revision="${value}"]`)).toHaveCount(1);
 async function ask(page: Page, text: string) {
   await page.locator('#mock-prompt').fill(text);
-  await page.getByRole('button', { name: 'Send', exact: true }).click();
+  await page.getByRole('button', { name: 'Send message', exact: true }).click();
 }
 /** An exact command (no model), committed by the chat. */
 async function author(page: Page, text: string, nextRevision: number) {
@@ -37,31 +37,32 @@ test('Portuguese conversation: network question, a correction of the committed s
   await installSupplyWallet(page);
   await openBuilder(page);
   await ask(page, 'Quero colocar 5 USDC na Aave.');
-  await expect(copilotSays(page)).toContainText('Em qual rede?');
+  // P0 approved UX: FloFi answers in the interface language (English here); a Portuguese request is still understood.
+  await expect(copilotSays(page)).toContainText('Which network should Flofi use for Aave V3?');
   await expect(proposal(page)).toHaveCount(0);
   // Flofi's own button: a deterministic answer, no model call.
   await copilotSays(page).getByRole('button', { name: 'Base Sepolia' }).click();
-  await expect(copilotSays(page)).toContainText('Interpretado como “supply 5 USDC to Aave on Base Sepolia”');
-  await expect(copilotSays(page)).toContainText('Adicionado ao seu workflow:');
+  await expect(copilotSays(page)).toContainText('Interpreted as “supply 5 USDC to Aave on Base Sepolia”');
+  await expect(copilotSays(page)).toContainText('Supply added to your workflow:');
   await commits(page, 1); await expect(proposal(page)).toHaveCount(0);
   await revision(page, 1);
   await expect(node(page, 'node-002').getByRole('textbox', { name: 'Source amount (USDC)', exact: true })).toHaveValue('5');
   await ask(page, 'Na verdade muda para 2.');
   // A correction of the committed step: the same network, token and beneficiary, only the amount changes.
-  await expect(copilotSays(page)).toContainText('Etapa atualizada:');
+  await expect(copilotSays(page)).toContainText('Supply updated:');
   await commits(page, 2);
   await revision(page, 2);
   await expect(node(page, 'node-002').getByRole('textbox', { name: 'Source amount (USDC)', exact: true })).toHaveValue('2');
   await expect(node(page, 'node-002')).toContainText('Base Sepolia');
   await ask(page, 'O que esse fluxo faz?');
-  await expect(copilotSays(page)).toContainText('Este fluxo (revisão 2) tem 1 passo.');
-  await expect(copilotSays(page)).toContainText(`Faz supply de 2 USDC na Aave V3 na Base Sepolia para ${SUPPLY_OWNER}`);
-  await expect(copilotSays(page)).toContainText('Somente leitura: nada foi proposto, alterado, assinado ou executado.');
+  await expect(copilotSays(page)).toContainText('This workflow (revision 2) has 1 step.');
+  await expect(copilotSays(page)).toContainText(`Supplies 2 USDC to Aave V3 on Base Sepolia for ${SUPPLY_OWNER}`);
+  await expect(copilotSays(page)).toContainText('Read only: nothing was proposed, changed, signed or executed.');
   await expect(proposal(page)).toHaveCount(0);
   await revision(page, 2);
   await ask(page, 'Remove o primeiro passo.');
-  await expect(copilotSays(page)).toContainText('Interpretado como remover o passo 1 (Supply 2 USDC · Aave V3 · Base Sepolia)');
-  await expect(copilotSays(page)).toContainText('Removido do seu workflow:');
+  await expect(copilotSays(page)).toContainText('Interpreted as removing step 1 (Supply 2 USDC · Aave V3 · Base Sepolia)');
+  await expect(copilotSays(page)).toContainText('Supply removed from your workflow.');
   await revision(page, 3);
   await expect(node(page, 'node-002')).toHaveCount(0);
   expect(await supplySendCount(page)).toBe(0);

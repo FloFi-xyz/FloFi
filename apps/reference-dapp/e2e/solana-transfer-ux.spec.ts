@@ -62,7 +62,7 @@ test('PT mobile signing preserves Mainnet funds disclosure while the wallet is o
   await expect(page.getByText('Mainnet · Fundos reais', { exact: true })).toBeVisible();
   await expect(page.getByText('Testnet pública · Fundos de teste', { exact: true })).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'Autorizar na carteira', exact: true })).toHaveCount(0);
-  await page.getByRole('button', { name: 'Mudar para Solana', exact: true }).click();
+  await page.getByRole('button', { name: 'Trocar para Solana', exact: true }).click();
   expect(await page.evaluate(() => window.flofiSigningAcceptance.networkRequests())).toEqual([data.authorization.chain]);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   expect(await page.evaluate(() => window.flofiSigningAcceptance.counts())).toEqual({ reviews: 0, walletRequests: 0 }); verify();

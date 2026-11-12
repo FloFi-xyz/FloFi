@@ -27,7 +27,7 @@ test.beforeAll(async () => {
 test.beforeEach(async ({ page }) => {
   const found: string[] = []; errors.set(page, found); page.on('pageerror', error => found.push(error.message));
   await page.goto('/app/dashboard');
-  await expect(page.getByRole('heading', { name: 'Your execution workspace' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Dashboard', level: 1, exact: true })).toBeVisible();
   await page.route('**/__portfolio-ux004.js', route => route.fulfill({ contentType: 'application/javascript', body: bundle }));
   await page.addStyleTag({ content: css }); await page.addScriptTag({ url: '/__portfolio-ux004.js' });
   await page.evaluate(() => {
@@ -40,6 +40,15 @@ test.beforeEach(async ({ page }) => {
 });
 test.afterEach(({ page }) => { expect(errors.get(page)).toEqual([]); });
 const portfolio = (page: Page) => page.locator('#portfolio-acceptance-root');
+/**
+ * P0 approved UX (board 10): "Your wallet" shows the total and the top holdings; the assets table and the allocation by network (bars, no chart)
+ * open behind "View all assets", and the pricing notes sit in the collapsed "About the values". This opens the assets when they are closed.
+ */
+async function showAssets(page: Page) {
+  const view = portfolio(page).getByRole('button', { name: 'View all assets', exact: true });
+  if (await view.isVisible()) await view.click();
+  await expect(portfolio(page).getByRole('button', { name: 'Hide details', exact: true })).toBeVisible();
+}
 /** BUILD-FLOFI-UX-005: the network filter is a FloFi listbox button (not a native select). */
 const filterButton = (page: Page) => portfolio(page).getByRole('button', { name: /^Network filter/ });
 async function chooseNetwork(page: Page, name: string) {
@@ -55,7 +64,8 @@ test('real presentation shows partial pricing, all represented networks, exact a
   const root = portfolio(page);
   await expect(root).toContainText('≈ $9,600.00'); await expect(root).toContainText('4 of 5 holdings priced');
   await expect(root).toContainText('1 holding has no available valuation.');
-  await expect(root.getByRole('img', { name: 'Network allocation of priced holdings' })).toBeVisible();
+  await expect(root.getByRole('list', { name: 'Top holdings' })).toBeVisible();
+  await showAssets(page);
   const allocations = root.getByRole('region', { name: 'Allocation by network' });
   await expect(allocations).toContainText('Ethereum'); await expect(allocations).toContainText('Base'); await expect(allocations).toContainText('Arbitrum One');
   await expect(allocations).toContainText('Robinhood Chain'); await expect(allocations).toContainText('Solana'); await expect(allocations).toContainText('Valuation unavailable');
@@ -63,17 +73,18 @@ test('real presentation shows partial pricing, all represented networks, exact a
   for (const share of ['62.5%', '26.1%', '10.4%', '1%']) await expect(allocations).toContainText(share);
   await page.evaluate(() => window.flofiPortfolioAcceptance.mode('full'));
   await expect(root).toContainText('5 of 5 holdings priced'); await expect(root).toContainText('≈ $10,100.00');
+  await showAssets(page);
   await expect(allocations).not.toContainText('Valuation unavailable');
   await page.evaluate(() => window.flofiPortfolioAcceptance.mode('partial'));
   await expect(root).toContainText('4 of 5 holdings priced');
   await chooseNetwork(page, 'Solana');
   await expect(root).toContainText('No verified USD price for these assets.'); await expect(root).not.toContainText('$0');
-  await root.getByRole('button', { name: 'View all assets', exact: true }).click();
+  await showAssets(page);
   await expect(root.getByRole('table')).toContainText('SOL'); await expect(root.getByRole('table')).toContainText('Valuation unavailable');
   await root.getByRole('button', { name: 'Collapse', exact: true }).click();
   await expect(root.getByRole('button', { name: 'View all assets', exact: true })).toBeFocused();
   await chooseNetwork(page, 'Base');
-  await expect(root).toContainText('≈ $2,500.00'); await expect(allocations).toContainText('100%');
+  await expect(root).toContainText('≈ $2,500.00'); await showAssets(page); await expect(allocations).toContainText('100%');
   await expect(root).toContainText('1 of 1 holdings priced');
 });
 
@@ -83,9 +94,10 @@ test('empty, unavailable, single-network and all-unpriced states never fabricate
   await expect(root).toContainText('No balances found on the networks read.'); await expect(root.getByRole('table')).toHaveCount(0);
   await page.evaluate(() => window.flofiPortfolioAcceptance.mode('unpriced'));
   await expect(root).toContainText('No verified USD price for these assets.'); await expect(root).not.toContainText('$0');
+  await showAssets(page);
   await expect(root.getByRole('region', { name: 'Allocation by network' })).toContainText('Valuation unavailable');
   await page.evaluate(() => window.flofiPortfolioAcceptance.mode('single'));
-  await expect(root).toContainText('≈ $6,000.00'); await expect(root.getByRole('region', { name: 'Allocation by network' })).toContainText('100%');
+  await expect(root).toContainText('≈ $6,000.00'); await showAssets(page); await expect(root.getByRole('region', { name: 'Allocation by network' })).toContainText('100%');
   await expect(filterButton(page)).toHaveCount(0);
   await page.evaluate(() => window.flofiPortfolioAcceptance.mode('failure'));
   await expect(root.getByRole('alert')).toContainText('Wallet balances are unavailable right now.'); await expect(root).not.toContainText('$');
@@ -97,11 +109,11 @@ test('the network filter follows the FloFi controls and works by keyboard, outsi
   await expect(root.locator('select')).toHaveCount(0);
   await expect(button).toHaveAttribute('aria-haspopup', 'listbox');
   await expect(button).toHaveAccessibleName('Network filter All networks');
-  // Same height and corner as the Dashboard's other controls (the Refresh button beside it).
-  const refresh = root.getByRole('button', { name: 'Refresh', exact: true });
-  const [own, peer] = await Promise.all([button, refresh].map(item => item.evaluate(node => { const style = getComputedStyle(node);
-    return { height: Math.round(node.getBoundingClientRect().height), radius: style.borderRadius, border: style.borderTopWidth }; })));
-  expect(own).toEqual(peer);
+  // P0 approved UX (board 10): the filter is a field-style control (40 px, 12 px corners, 1 px border), beside the small Refresh button.
+  const own = await button.evaluate(node => { const style = getComputedStyle(node);
+    return { height: Math.round(node.getBoundingClientRect().height), radius: style.borderRadius, border: style.borderTopWidth }; });
+  expect(own).toEqual({ height: 40, radius: '12px', border: '1px' });
+  await expect(root.getByRole('button', { name: 'Refresh', exact: true })).toBeVisible();
   // Keyboard: arrows open on the current value and move; Enter chooses; focus returns to the button.
   await button.focus(); await page.keyboard.press('ArrowDown');
   const list = root.getByRole('listbox', { name: 'Network filter' });
@@ -116,7 +128,7 @@ test('the network filter follows the FloFi controls and works by keyboard, outsi
   await page.keyboard.press('ArrowUp'); await page.keyboard.press('Escape');
   await expect(list).toHaveCount(0); await expect(button).toBeFocused(); await expect(button).toHaveAccessibleName('Network filter Solana');
   await button.click(); await expect(list).toBeVisible();
-  await root.getByRole('heading', { name: 'Wallet portfolio' }).click(); await expect(list).toHaveCount(0);
+  await root.getByRole('heading', { name: 'Your wallet' }).click(); await expect(list).toHaveCount(0);
   await chooseNetwork(page, 'All networks');
   await expect(root).toContainText('4 of 5 holdings priced');
   await button.click(); await expect(list).toBeVisible();
@@ -156,7 +168,7 @@ test('portfolio fits desktop and mobile, retains themes, and localizes Portugues
     }
   }
   await page.evaluate(() => window.flofiPortfolioAcceptance.language('PT'));
-  await expect(root).toContainText('Portfólio da carteira'); await expect(root).toContainText('≈ US$ 9.600,00');
+  await expect(root).toContainText('Sua carteira'); await expect(root).toContainText('≈ US$ 9.600,00');
   await expect(root.getByRole('button', { name: 'Ver todos os ativos', exact: true })).toBeVisible();
   await root.getByRole('button', { name: 'Ver todos os ativos', exact: true }).click();
   await expect(root.getByRole('table')).toContainText('Saldo');

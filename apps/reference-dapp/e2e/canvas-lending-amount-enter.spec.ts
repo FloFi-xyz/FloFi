@@ -14,7 +14,7 @@ type Ir = { readonly revision: number; readonly nodes: readonly { readonly nodeI
 const revision = (page: Page) => page.locator('.summary-bar');
 async function author(page: Page, prompt: string, added: RegExp) {
   await replayProviderLogos(page); await installPassiveWallet(page, '0xa4b1'); await openBuilder(page);
-  await page.locator('#mock-prompt').fill(prompt); await page.getByRole('button', { name: 'Send', exact: true }).click();
+  await page.locator('#mock-prompt').fill(prompt); await page.getByRole('button', { name: 'Send message', exact: true }).click();
   await expect(page.getByRole('log', { name: 'Conversation' }).locator('.message.ai').last()).toContainText(added);
   await expect(revision(page)).toHaveAttribute('data-workflow-revision', '1');
   return page.locator('.build-flow-surface .composer-card').first();
@@ -92,7 +92,7 @@ test('pointer: leaving the card applies a valid Borrow amount; an invalid amount
 test('Scenario A: Swap → Supply WETH → Borrow, edited by Enter, by leaving the card and by a typing pause, never needs Review/Apply', async ({ page, networkGuard }) => {
   await replayProviderLogos(page); await installPassiveWallet(page, '0xa4b1'); await openBuilder(page);
   const send = async (prompt: string, added: RegExp) => {
-    await page.locator('#mock-prompt').fill(prompt); await page.getByRole('button', { name: 'Send', exact: true }).click();
+    await page.locator('#mock-prompt').fill(prompt); await page.getByRole('button', { name: 'Send message', exact: true }).click();
     await expect(page.getByRole('log', { name: 'Conversation' }).locator('.message.ai').last()).toContainText(added);
   };
   await send('Please Swap 10 USDC for WETH on Arbitrum', /Swap added to your workflow|Interpreted as/);

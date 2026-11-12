@@ -614,6 +614,22 @@
       "path": "apps/reference-dapp/src/server/execution-guard.test.ts",
       "stage": "unit"
     },
+    "app.domain.approved-ux": {
+      "path": "apps/reference-dapp/src/domain/approved-ux.test.ts",
+      "stage": "unit"
+    },
+    "app.components.review-summary-panel": {
+      "path": "apps/reference-dapp/src/components/review-summary-panel.test.tsx",
+      "stage": "unit"
+    },
+    "app.domain.flight-refusal": {
+      "path": "apps/reference-dapp/src/domain/flight-refusal.test.ts",
+      "stage": "unit"
+    },
+    "app.server.bridge-build-estimate": {
+      "path": "apps/reference-dapp/src/server/bridge-build-estimate.test.ts",
+      "stage": "unit"
+    },
     "app.server.flight-access": {
       "path": "apps/reference-dapp/src/server/flight-access.test.ts",
       "stage": "unit"
@@ -1072,6 +1088,14 @@
     },
     "workflow-contracts.revision-state": {
       "path": "packages/workflow-contracts/test/revision-state.test.ts",
+      "stage": "unit"
+    },
+    "app.domain.p0-swap-bridge-connections": {
+      "path": "apps/reference-dapp/src/domain/p0-swap-bridge-connections.test.ts",
+      "stage": "unit"
+    },
+    "app.server.router-capability": {
+      "path": "apps/reference-dapp/src/server/router-capability.test.ts",
       "stage": "unit"
     }
   },
@@ -1879,6 +1903,9 @@
         "apps/reference-dapp/src/app/(product)/approve/page.tsx",
         "apps/reference-dapp/src/app/(product)/connections/page.tsx",
         "apps/reference-dapp/src/app/(product)/layout.tsx",
+        "apps/reference-dapp/src/app/approved-ux.css",
+        "apps/reference-dapp/src/app/approved-ux-editor.css",
+        "apps/reference-dapp/src/app/approved-ux-pages.css",
         "apps/reference-dapp/src/app/base.css",
         "apps/reference-dapp/src/app/docs/[slug]/page.tsx",
         "apps/reference-dapp/src/app/docs/layout.tsx",
@@ -2896,6 +2923,7 @@
         "apps/reference-dapp/src/components/mobile-build-navigation.tsx",
         "apps/reference-dapp/src/components/navigation-drawer.tsx",
         "apps/reference-dapp/src/components/observation-panel.tsx",
+        "apps/reference-dapp/src/components/price-difference-input.tsx",
         "apps/reference-dapp/src/components/product-workspace.tsx",
         "apps/reference-dapp/src/components/public-testnet-panel.tsx",
         "apps/reference-dapp/src/components/review-panel.tsx",
@@ -2906,6 +2934,7 @@
         "apps/reference-dapp/src/components/simulate-panel.tsx",
         "apps/reference-dapp/src/components/simulate-workflow-canvas.tsx",
         "apps/reference-dapp/src/components/simulate-workspace.tsx",
+        "apps/reference-dapp/src/components/review-summary-panel.tsx",
         "apps/reference-dapp/src/components/simulation-summary.tsx",
         "apps/reference-dapp/src/components/site/developers-page.tsx",
         "apps/reference-dapp/src/components/site/docs-content.ts",
@@ -2951,7 +2980,8 @@
         "app.domain.editor-overview",
         "app.e2e.editor-redesign",
         "app.e2e.portfolio-ux004",
-        "app.e2e.editor-workflow-run"
+        "app.e2e.editor-workflow-run",
+        "app.components.review-summary-panel"
       ],
       "gaps": [
         "Browser profiles cover selected journeys; full accessibility audit, device matrix and language completeness remain acceptance gaps."
@@ -3503,6 +3533,7 @@
       "sources": [
         "apps/reference-dapp/src/domain/assistant-welcome.ts",
         "apps/reference-dapp/src/domain/build-entry.ts",
+        "apps/reference-dapp/src/domain/approved-ux.ts",
         "apps/reference-dapp/src/domain/commands.ts",
         "apps/reference-dapp/src/domain/conversation-copy.ts",
         "apps/reference-dapp/src/domain/conversation-lifecycle.ts",
@@ -3545,7 +3576,8 @@
         "app.platform.engineering-continuity",
         "app.platform.intelligence-parity",
         "app.state.flofi-conversation",
-        "app.domain.privacy-notice"
+        "app.domain.privacy-notice",
+        "app.domain.approved-ux"
       ],
       "gaps": [
         "Goal plans compose certified sequence steps including funded liquidity after a conversion when the position and range are stated; Channel Core uses the public-quote discovery adapter.",
@@ -3816,6 +3848,7 @@
         "apps/reference-dapp/src/domain/secondary-workspaces.ts",
         "apps/reference-dapp/src/domain/sequence-presentation.ts",
         "apps/reference-dapp/src/domain/simulation-presentation.ts",
+        "apps/reference-dapp/src/domain/flight-refusal.ts",
         "apps/reference-dapp/src/domain/simulation-unavailable.ts",
         "apps/reference-dapp/src/domain/solana-refusal.ts",
         "apps/reference-dapp/src/domain/usd-estimate.ts",
@@ -3844,7 +3877,9 @@
         "app.domain.observation-schedule",
         "app.domain.wallet-portfolio",
         "app.domain.editor-overview",
-        "app.domain.editor-run"
+        "app.domain.editor-run",
+        "app.domain.flight-refusal",
+        "app.domain.p0-swap-bridge-connections"
       ],
       "gaps": [
         "Mapped suites are representative boundary tests, not exhaustive path or public execution coverage.",
@@ -4060,6 +4095,9 @@
         "apps/reference-dapp/src/i18n/locale.tsx",
         "apps/reference-dapp/src/i18n/preserved-values.ts",
         "apps/reference-dapp/src/i18n/pt-aave-expansion.ts",
+        "apps/reference-dapp/src/i18n/pt-approved-ux.ts",
+        "apps/reference-dapp/src/i18n/pt-approved-ux-editor.ts",
+        "apps/reference-dapp/src/i18n/pt-approved-ux-pages.ts",
         "apps/reference-dapp/src/i18n/pt-authoring.ts",
         "apps/reference-dapp/src/i18n/pt-automations.ts",
         "apps/reference-dapp/src/i18n/pt-base.ts",
@@ -5941,6 +5979,7 @@
         "apps/reference-dapp/src/server/across-adapter.ts",
         "apps/reference-dapp/src/server/across-service.ts",
         "apps/reference-dapp/src/server/bridge-build-estimate.ts",
+        "apps/reference-dapp/src/server/router-capability.ts",
         "apps/reference-dapp/src/server/bridge-discovery.ts",
         "apps/reference-dapp/src/server/bridge-read-rpc.ts",
         "apps/reference-dapp/src/server/bridge-service.ts",
@@ -5974,7 +6013,9 @@
         "reference-compiler.bridge",
         "reference-executor.bridge",
         "reference-reconciler.bridge",
-        "app.server.universal-router.discovery"
+        "app.server.universal-router.discovery",
+        "app.server.bridge-build-estimate",
+        "app.server.router-capability"
       ],
       "gaps": [
         "Provider settlement and arbitrary public cross-domain compositions are not certified by offline route fixtures."
@@ -7184,6 +7225,7 @@
         "apps/reference-dapp/src/flight/beta-access.ts",
         "apps/reference-dapp/src/flight/beta-context.ts",
         "apps/reference-dapp/src/server/flight-access.ts",
+        "apps/reference-dapp/src/app/flight-wallet-action.ts",
         "apps/reference-dapp/src/server/execution-guard.ts"
       ],
       "suites": [
@@ -7191,7 +7233,8 @@
         "app.flight.beta-access.pg",
         "app.server.flight-access",
         "app.server.execution-guard",
-        "app.backend.beta-access.pg"
+        "app.backend.beta-access.pg",
+        "app.domain.flight-refusal"
       ],
       "gaps": [
         "Temporary team policy is tested in the required beta-access unit/PostgreSQL suites and guarded flight-team-early-access browser profile. Its e2e/flight-team-clock.mjs preload is an engineering-only fixture excluded from the maintained production source inventory; no hosted-clock or real-wallet acceptance is established.",

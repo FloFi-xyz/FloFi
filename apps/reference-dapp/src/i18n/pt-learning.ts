@@ -3,11 +3,11 @@
 export const portugueseLearning: Readonly<Record<string, string>> = {
   'Privacy & memory': 'Privacidade e memória', 'Checking your FloFi session…': 'Verificando sua sessão FloFi…',
   'What FloFi keeps about the words you use with the Copilot, and your choices. Nothing here changes a workflow, an approval or a signature.':
-    'O que o FloFi guarda sobre as palavras que você usa com o Copilot, e as suas escolhas. Nada aqui altera um workflow, uma aprovação ou uma assinatura.',
+    'O que o FloFi guarda sobre as palavras que você usa com o Copilot, e as suas escolhas. Nada aqui altera um fluxo, uma aprovação ou uma assinatura.',
   'FloFi keeps nothing about how you write: the Copilot adapts to your words within a conversation only.':
     'O FloFi não guarda nada sobre como você escreve: o Copilot se adapta às suas palavras só dentro de cada conversa.',
   'Copilot learning is not enabled on this FloFi deployment: nothing about how you write is kept.':
-    'O aprendizado do Copilot não está ativado nesta implantação do FloFi: nada sobre como você escreve é guardado.',
+    'O aprendizado do Copilot não está ativado nesta implantação do FloFi: nada sobre como você escreve é salvo.',
   'Copilot memory': 'Memória do Copilot', 'Loading…': 'Carregando…',
   'Memory is unavailable right now. The Copilot works as usual.': 'A memória está indisponível agora. O Copilot funciona normalmente.',
   'Prove a wallet to see and manage what FloFi keeps for it. Proving signs a sign-in message only; it never moves funds.':
@@ -17,7 +17,7 @@ export const portugueseLearning: Readonly<Record<string, string>> = {
   'Other wallets and chat accounts never share it.': 'Outras carteiras e contas de chat nunca compartilham essa memória.',
   'Learn from how I use the Copilot': 'Aprender com o meu uso do Copilot',
   'When you answer FloFi’s questions or correct how it read a network, token or action, FloFi can keep that meaning for this wallet after repeated evidence. Never amounts, addresses, balances or decisions, and a meaning it learned never selects a real-funds network on its own.':
-    'Quando você responde às perguntas do FloFi ou corrige como ele entendeu uma rede, um token ou uma ação, o FloFi pode guardar esse significado para esta carteira depois de evidência repetida. Nunca valores, endereços, saldos ou decisões, e um significado aprendido nunca escolhe sozinho uma rede com fundos reais.',
+    'Quando você responde às perguntas do FloFi ou corrige como ele entendeu uma rede, um token ou uma ação, o FloFi pode salvar esse significado para esta carteira depois de evidência repetida. Nunca valores, endereços, saldos ou decisões, e um significado aprendido nunca escolhe sozinho uma rede com fundos reais.',
   'Off unless you turn it on.': 'Desativado, a menos que você ative.',
   'On unless you turn it off. Turning it off deletes what it learned.': 'Ativado, a menos que você desative. Desativar apaga o que foi aprendido.',
   'Use my saved meanings': 'Usar meus significados salvos',

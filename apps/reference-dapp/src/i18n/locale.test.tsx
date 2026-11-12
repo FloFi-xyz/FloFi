@@ -28,14 +28,14 @@ afterEach(() => { host.unmount(); vi.unstubAllGlobals(); });
 describe('locale preference and workflow isolation', () => {
   it('switches PT/EN, persists the choice and updates the document language', () => {
     expect(render()).toContain('Save workflow');
-    locale.setLanguage('PT'); expect(render()).toContain('Guardar fluxo');
+    locale.setLanguage('PT'); expect(render()).toContain('Salvar fluxo');
     expect(storage.get(LANGUAGE_KEY)).toBe('PT'); expect(document.documentElement.lang).toBe('pt-BR');
     locale.setLanguage('EN'); expect(render()).toContain('Save workflow');
     expect(storage.get(LANGUAGE_KEY)).toBe('EN'); expect(document.documentElement.lang).toBe('en');
   });
   it('loads the persisted locale and preserves it after unmount/reload', () => {
-    storage.set(LANGUAGE_KEY, 'PT'); expect(render()).toContain('Guardar fluxo');
-    host.unmount(); host = new HookHarness(); expect(render()).toContain('Guardar fluxo');
+    storage.set(LANGUAGE_KEY, 'PT'); expect(render()).toContain('Salvar fluxo');
+    host.unmount(); host = new HookHarness(); expect(render()).toContain('Salvar fluxo');
     expect(locale.language).toBe('PT');
   });
   it('ignores an invalid saved preference', () => { storage.set(LANGUAGE_KEY, 'FR'); expect(render()).toContain('Save workflow'); });
@@ -60,7 +60,7 @@ describe('locale preference and workflow isolation', () => {
   });
   it('preserves user names, addresses and template values', () => {
     expect(translate('PT', 'My workflow 0x1234')).toBe('My workflow 0x1234');
-    expect(translate('PT', '  Save workflow  ')).toBe('  Guardar fluxo  ');
+    expect(translate('PT', '  Save workflow  ')).toBe('  Salvar fluxo  ');
     // BUILD-BASE-001: a catalog network's name is a template value, not a catalog entry per network.
     expect(translate('PT', 'Base tokens are unavailable right now. Try again in a moment.')).toBe('Os tokens da Base estão indisponíveis no momento. Tente novamente em instantes.');
   });

@@ -20,7 +20,7 @@ import { assertAutomationHarness, dispatch, occurrencesOf, query, ruleOf, setPri
 import { test, expect, proveConnectedEvmWallet, readWorkflowIr } from './fixtures';
 import { installJourneyWallet, walletRequests } from './journey-fixtures';
 import type { Page } from '@playwright/test';
-import { expectEditorSection } from './build-entry-navigation';
+import { editorSteps, expectChatSection, expectEditorSection } from './build-entry-navigation';
 
 const SIGNING = ['eth_sendTransaction', 'eth_sendRawTransaction', 'eth_signTypedData_v4', 'eth_signTransaction'];
 /** BUILD-SOLANA-TRANSFER-UX-001: the proof reuses the wallet already connected in this browser (no selector); it signs the sign-in message. */
@@ -63,7 +63,8 @@ test.describe('BUILD-AUTOMATION-001 Automations (fixture prices, test clock, loo
     await expect(f).toContainText('Every Monday at 09:00 (Europe/Lisbon)');
     await expect(f).toContainText('Prepare 50 USDC → WETH on Base Sepolia');
     await expect(f).toContainText('Max per execution50');
-    await expect(f).toContainText('Slippage (bps)100');
+    // P0 approved UX (board 12): the route's slippage reads as "Max price difference" in percent (100 bps = 1%).
+    await expect(f).toContainText('Max price difference1%');
     await expect(f).toContainText('Execution: Ask me before every execution');
     await f.screenshot({ path: '/tmp/flofi-ux004-automations-review.png' });
     await f.getByRole('button', { name: 'Create automation', exact: true }).click();
@@ -104,7 +105,7 @@ test.describe('BUILD-AUTOMATION-001 Automations (fixture prices, test clock, loo
     // loaded for the proven owner, FloFi prepares its fresh read-only simulation on the Canvas's Simulate stage.
     await expect(page).toHaveURL(/\/approve$/);
     await expect(page.getByRole('region', { name: 'Automation workflow', exact: true })).toBeVisible();
-    await expect(page.getByRole('navigation', { name: 'Workflow stages' })).toBeVisible();
+    await expect(editorSteps(page)).toBeVisible();
     await expect(page.getByRole('main', { name: 'Authorize with your wallet', exact: true })).toHaveCount(0);
     expect(page.url()).not.toContain('flofi_auhs_');
     const handoffOf = () => query<{ handoff_id: string; status: string; requester_kind: string }>('SELECT handoff_id, status, requester_kind FROM mcp_handoffs WHERE handoff_id = (SELECT handoff_id FROM automation_occurrences WHERE occurrence_id = $1)',
@@ -129,13 +130,13 @@ test.describe('BUILD-AUTOMATION-001 Automations (fixture prices, test clock, loo
       expect((await occurrencesOf(rule.rule_id)).map(o => o.occurrence_id)).toEqual([occurrence!.occurrence_id]);
     };
     await page.reload();
-    await expect(page.getByRole('navigation', { name: 'Workflow stages' })).toBeVisible();
+    await expect(editorSteps(page)).toBeVisible();
     // BUILD-FLOFI-UX-UI-002: the workspace shows at once; the owner's own automation proposal is re-loaded into it automatically.
     await expect(page.getByRole('region', { name: 'Automation workflow', exact: true })).toHaveAttribute('data-approval-state', 'loaded');
     expect(hashArtifactBytes('semantic-workflow', new TextEncoder().encode(await readWorkflowIr(page)))).toBe(workflowHash);
     await unchanged();
     await page.goto(new URL(`/approve#${applied.handoff_id}`, page.url()).href);
-    await expect(page.getByRole('navigation', { name: 'Workflow stages' })).toBeVisible();
+    await expect(editorSteps(page)).toBeVisible();
     await expect(page.getByRole('region', { name: 'Automation workflow', exact: true })).toHaveAttribute('data-approval-state', 'loaded');
     await expect(page.getByRole('region', { name: /^Proposal from / })).toHaveCount(0);
     await unchanged();
@@ -234,8 +235,9 @@ test.describe('BUILD-AUTOMATION-001 Automations (fixture prices, test clock, loo
     await expect(workspace.getByRole('heading', { name: 'Create an automation', exact: true })).toBeVisible();
     await expect(workspace.getByRole('button', { name: 'Connect wallet and prove ownership', exact: true })).toHaveCount(0);
     expect((await walletRequests(page)).filter(m => SIGNING.includes(m) || m === 'personal_sign')).toEqual([]);
-    await workspace.getByRole('button', { name: 'Create with FloFi Chat', exact: true }).click();
-    await expect(page.getByRole('navigation', { name: 'Workflow stages', exact: true }).getByRole('button', { name: 'Chat', exact: true })).toHaveAttribute('aria-current', 'page');
+    // P0 approved UX (board 12): "Prefer to describe? Create with chat" opens the Chat entry.
+    await workspace.getByRole('button', { name: 'Create with chat', exact: true }).click();
+    await expectChatSection(page);
     await expect(page.locator('#build-entry-request')).toBeVisible();
     expect((await walletRequests(page)).filter(m => SIGNING.includes(m) || m === 'personal_sign')).toEqual([]);
     networkGuard.assertClean();

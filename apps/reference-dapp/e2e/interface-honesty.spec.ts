@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { test, expect, openSimulationDetails, assertNoFinancialCanvasAction } from './fixtures';
-import { openBuilder, openEditorSection } from './build-entry-navigation';
+import { editorSteps, navigationTrigger, openBuilder, openEditorSection } from './build-entry-navigation';
 
 test('shows honest authorization and unavailable stage states', async ({ page }) => {
   await openBuilder(page);
@@ -22,7 +22,9 @@ test('shows honest authorization and unavailable stage states', async ({ page })
 test('provides semantic landmarks, labelled controls and keyboard access', async ({ page }) => {
   await openBuilder(page);
   await expect(page.getByRole('main')).toHaveCount(1);
-  await expect(page.getByRole('navigation', { name: 'Workflow stages' })).toHaveCount(1);
+  // P0 approved UX (board 03b): the Editor's stepper is the top bar's one navigation landmark; the ☰ drawer opens from a labelled control.
+  await expect(editorSteps(page)).toHaveCount(1);
+  await expect(navigationTrigger(page)).toBeVisible();
   await expect(page.getByRole('main', { name: 'Workflow workspace' })).toBeVisible();
   await expect(page.getByRole('heading', { level: 1, name: 'Untitled workflow' })).toHaveCount(0);
   await expect(page.getByLabel('Describe your flow')).toBeVisible();

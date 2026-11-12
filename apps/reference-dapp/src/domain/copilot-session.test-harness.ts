@@ -29,6 +29,8 @@ export class CopilotSession {
   learning: CopilotLearning | undefined = undefined;
   /** Audit A9: agent rollouts to evaluate as owner-approved (absent: the product's approvals, i.e. none). */
   agentRollout: readonly PendingAgentCapability[] | undefined = undefined;
+  /** P0 approved UX: the active interface language the web chat passes (absent: the engine as before). */
+  interfaceLanguage: 'EN' | 'PT' | undefined = undefined;
   readonly turns: TurnRecord[] = [];
   constructor(setup: readonly string[] | Workflow = [], wallet: string | null = TEST_WALLET) {
     this.wallet = wallet;
@@ -38,7 +40,7 @@ export class CopilotSession {
   currentFacts(): CopilotFacts { return buildCopilotFacts({ workflow: this.workflow, context: this.context, pending: this.pending, ...this.facts }); }
   env(): CopilotEnvironment {
     return { workflow: this.workflow, context: this.context, wallet: this.wallet, walletChainId: this.walletChainId, pending: this.pending, facts: this.currentFacts(),
-      ...this.verified ? { verified: this.verified } : {}, ...this.learning ? { learning: this.learning } : {}, ...this.agentRollout ? { agentRollout: this.agentRollout } : {} };
+      ...this.verified ? { verified: this.verified } : {}, ...this.learning ? { learning: this.learning } : {}, ...this.agentRollout ? { agentRollout: this.agentRollout } : {}, ...this.interfaceLanguage ? { interfaceLanguage: this.interfaceLanguage } : {} };
   }
   propose(command: Command) {
     const before = { workflow: this.workflow, error: null };

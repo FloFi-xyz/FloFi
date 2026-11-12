@@ -5,16 +5,20 @@
  * goes through the existing FloFi conversation (exact command grammar here: no Copilot model is configured) and opens Build 1 with the authored
  * workflow and the same conversation; an unsupported request keeps its text and says why; the chips only fill editable text; "Build manually"
  * opens Build 1. No network selector exists, and nothing is simulated, signed or sent.
+ * P0 approved UX (board 03 / 03b): navigation lives only in the ☰ drawer (New workflow = Chat, Editor, Dashboard; no stage tabs in the top bar);
+ * the entry is a heading, one request field, one "Create workflow" button and five intent chips that fill an editable sentence template. The
+ * former "Prefer the editor? Build manually" link and trust block are gone: the Editor is reached through the drawer.
  */
 import type { Page } from '@playwright/test';
 import { test, expect, readWorkflowIr } from './fixtures';
-import { chatTab, continueToBuilder, editorTab, expectEditorSection, openEditorSection } from './build-entry-navigation';
+import { continueToBuilder, editorSteps, expectChatSection, expectEditorSection, navigationDrawer, navigationLink, navigationTrigger, openChat, openEditorSection, openNavigation } from './build-entry-navigation';
 
-const nav = (page: Page) => page.getByRole('navigation', { name: 'Workflow stages' });
+/** The drawer's first three items: New workflow (Chat), Editor, Dashboard. */
+const primaryItems = (page: Page) => navigationDrawer(page).getByRole('link').filter({ hasNotText: /Your workflows|Automations|Credentials|Agents|Passkeys|Seus fluxos|Automações|Credenciais|Agentes|Chaves de acesso/ });
 /** Build 0's workspace (by class: its accessible name is translated in Portuguese). */
 const entry = (page: Page) => page.locator('main.build-entry-workspace');
 const request = (page: Page) => page.locator('#build-entry-request');
-const create = (page: Page) => entry(page).getByRole('button', { name: /^(Create strategy|Criar estratégia)$/ });
+const create = (page: Page) => entry(page).getByRole('button', { name: /^(Create workflow|Criar fluxo)$/ });
 const chat = (page: Page) => page.locator('.chat-messages[role="log"]');
 /** The shell is inert until hydrated: an owner cannot type before then, so neither does the test. */
 const open = async (page: Page) => { await page.goto('/app'); await expect(page.locator('.app-shell')).not.toHaveAttribute('inert'); };
@@ -27,20 +31,26 @@ test.beforeEach(async ({ page }) => {
 test('a fresh visit opens on Build 0 without a wallet, with the reference composition and no network selector', async ({ page, networkGuard }) => {
   await page.setViewportSize({ width: 1240, height: 871 });
   await open(page);
-  await expect(entry(page)).toBeVisible();
-  await expect(chatTab(page)).toHaveAttribute('aria-current', 'page');
-  await expect(nav(page).getByRole('button')).toHaveText(['Dashboard', 'Chat', 'Editor']);
-  await expect(nav(page).locator('.stage-number, [data-build-stage]')).toHaveCount(0);
+  await expectChatSection(page);
+  // P0 approved UX (board 03b): no stage tabs in the top bar; the drawer offers New workflow (Chat), Editor and Dashboard, unnumbered.
+  await expect(page.getByRole('navigation', { name: 'Workflow stages' })).toHaveCount(0);
+  await openNavigation(page);
+  await expect(primaryItems(page)).toHaveText(['New workflow', 'Editor', 'Dashboard']);
+  await expect(navigationDrawer(page).locator('.stage-number, [data-build-stage]')).toHaveCount(0);
+  await page.keyboard.press('Escape');
   await expect(page.getByRole('heading', { level: 1 })).toHaveText('What do you want to do?');
-  await expect(entry(page)).toContainText('Describe your goal in one sentence. FloFi turns it into a workflow you can review before simulating or executing.');
-  await expect(request(page)).toHaveAttribute('placeholder', 'I want to put 2,000 USDC to work on Solana with low risk.');
+  // Board 03: no subtitle (the placeholder and chips show how to start).
+  await expect(entry(page)).not.toContainText('Describe your goal in one sentence.');
+  await expect(request(page)).toHaveAttribute('placeholder', 'e.g. swap 10 USDC for ETH on Base');
+  await expect(request(page)).toHaveAccessibleName('Describe what you want to do');
   await expect(request(page)).toHaveValue('');
   // The placeholder is not a request: nothing can be created until the owner types one.
   await expect(create(page)).toBeDisabled();
-  await expect(entry(page).getByRole('group', { name: 'Example requests' }).getByRole('button')).toHaveText(['Earn yield', 'Swap assets', 'Provide liquidity', 'Use collateral', 'Multi-step strategy']);
-  await expect(entry(page).getByRole('button', { name: 'Prefer the editor? Build manually', exact: true })).toBeVisible();
-  await expect(entry(page)).toContainText('Nothing executes without your review and authorization.');
-  await expect(entry(page)).toContainText('You can start without connecting a wallet.');
+  await expect(entry(page).getByRole('button')).toHaveCount(6);
+  await expect(entry(page).getByRole('group', { name: 'Example requests' }).getByRole('button')).toHaveText(['Swap tokens', 'Earn yield', 'Provide liquidity', 'Use as collateral', 'Multi-step workflow']);
+  // Board 03: the Editor is reached from the drawer only (no duplicate "Build manually" link) and the trust block is gone.
+  await expect(entry(page).getByRole('button', { name: 'Prefer the editor? Build manually', exact: true })).toHaveCount(0);
+  await expect(entry(page)).not.toContainText('Nothing executes without your review and authorization.');
   await expect(entry(page).locator('img[src="/brand/flofi-droplet-wave.svg"]')).toBeVisible();
   await expect(page.locator('.wallet-connection')).toHaveText('Wallet not connected');
   // BUILD-FLOFI-MAINNET-PRODUCT-001: the old reference's Network / Mainnet-Testnet selector is not reintroduced.
@@ -55,21 +65,24 @@ test('a fresh visit opens on Build 0 without a wallet, with the reference compos
 
 test('suggestion chips only fill editable text; nothing is authored until the owner submits', async ({ page, networkGuard }) => {
   await open(page);
-  await entry(page).getByRole('button', { name: 'Swap assets', exact: true }).click();
-  await expect(request(page)).toHaveValue('Swap 50 USDC to SOL on Solana');
+  // Board 03: a chip fills an editable sentence template and selects its first bracketed part, so typing replaces it.
+  const selection = () => request(page).evaluate(field => { const input = field as HTMLTextAreaElement; return input.value.slice(input.selectionStart, input.selectionEnd); });
+  await entry(page).getByRole('button', { name: 'Swap tokens', exact: true }).click();
+  await expect(request(page)).toHaveValue('Swap [amount] [token] for [token] on [network]');
   await expect(request(page)).toBeFocused();
+  await expect.poll(selection).toBe('[amount]');
   await expect(create(page)).toBeEnabled();
   await entry(page).getByRole('button', { name: 'Earn yield', exact: true }).click();
-  await expect(request(page)).toHaveValue('Supply 100 USDC to Aave on Base');
+  await expect(request(page)).toHaveValue('Supply [amount] [token] to Aave on [network]');
   await request(page).fill('Supply 250 USDC to Aave on Base');
   await expect(request(page)).toHaveValue('Supply 250 USDC to Aave on Base');
   // Still Build 0, and the canonical workflow is untouched (Build 1 shows the empty Canvas).
-  await expect(chatTab(page)).toHaveAttribute('aria-current', 'page');
+  await expectChatSection(page);
   await openEditorSection(page, 'Build');
   await expect(page.locator('.build-flow-surface .canvas-empty')).toContainText('Start your workflow');
   expect(JSON.parse(await readWorkflowIr(page)).revision).toBe(0);
   // The typed request survives a visit to Build 1.
-  await chatTab(page).click();
+  await openChat(page);
   await expect(request(page)).toHaveValue('Supply 250 USDC to Aave on Base');
   networkGuard.assertClean();
 });
@@ -119,8 +132,8 @@ test('every Build 0 control is reachable with the keyboard and shows its focus',
   // The composer carries the field's focus ring.
   expect(await page.locator('form[aria-busy]').evaluate(form => getComputedStyle(form).boxShadow)).toMatch(/0px 0px 0px 4px/);
   await page.keyboard.type('Swap 1 USDC to WETH on Base slippage 50 bps');
-  const order = [create(page), ...['Earn yield', 'Swap assets', 'Provide liquidity', 'Use collateral', 'Multi-step strategy'].map(name => entry(page).getByRole('button', { name, exact: true })),
-    entry(page).getByRole('button', { name: 'Prefer the editor? Build manually', exact: true })];
+  // Board 03: the create button, then the five chips (the former "Build manually" link is gone; the drawer is in the top bar, before the field).
+  const order = [create(page), ...['Swap tokens', 'Earn yield', 'Provide liquidity', 'Use as collateral', 'Multi-step workflow'].map(name => entry(page).getByRole('button', { name, exact: true }))];
   for (const control of order) {
     await page.keyboard.press('Tab');
     await expect(control).toBeFocused();
@@ -148,10 +161,13 @@ test('Create strategy runs the existing interpreter and opens Build 1 with the w
   await expect(chat(page).locator('.message.you > p')).toHaveText(['Swap 1 USDC to WETH on Base slippage 50 bps']);
   await expect(chat(page)).toContainText('Swap added to your workflow: 1 USDC');
   await expect(page.locator('.wallet-connection')).toHaveText('Wallet not connected');
-  // Build 0 is reachable again; its composer is empty after the request was added.
-  await chatTab(page).click();
+  // Build 0 is reachable again (the drawer's New workflow); its composer is empty after the request was added.
+  await openChat(page);
   await expect(request(page)).toHaveValue('');
-  await expect(entry(page)).toContainText('Your workflow already has 1 action. A new request is added to it.');
+  await expect(entry(page)).toContainText('Your workflow already has 1 step. A new request is added to it.');
+  // P0 approved UX: with steps already on the workflow, the entry's one action adds to it.
+  await expect(entry(page).getByRole('button', { name: 'Add to workflow', exact: true })).toBeVisible();
+  await expect(entry(page).getByRole('button', { name: 'Create workflow', exact: true })).toHaveCount(0);
   expect(errors).toEqual([]); networkGuard.assertClean();
 });
 
@@ -164,7 +180,7 @@ test('an unsupported request keeps its text and says why; Build manually opens B
   await expect(alert).toContainText('This request could not be understood. Check the action, amount, asset and chain, then try again.');
   await expect(alert).toContainText('Your text was kept.');
   await expect(request(page)).toHaveValue(text);
-  await expect(chatTab(page)).toHaveAttribute('aria-current', 'page');
+  await expectChatSection(page);
   expect(JSON.parse(await readWorkflowIr(page)).revision).toBe(0);
   await alert.getByRole('button', { name: 'Build manually', exact: true }).click();
   await expectEditorSection(page, 'Build');
@@ -177,8 +193,12 @@ test('Build manually opens Build 1 directly, and the stages keep working from th
   await open(page);
   await continueToBuilder(page);
   await expect(page.locator('.build-flow-surface .canvas-empty')).toContainText('Start your workflow');
-  // BUILD-FLOFI-CHAT-EDITOR-UX-001: no Simulate, Execute or numbered Build tab; the Editor's footer opens its simulation and execution sections.
-  await expect(nav(page).getByRole('button', { name: /^(Build|Simulate|Execute)$/ })).toHaveCount(0);
+  // BUILD-FLOFI-CHAT-EDITOR-UX-001 / P0 approved UX (board 03b): no Simulate, Execute or numbered Build navigation item; the Editor's stepper in
+  // the top bar opens its simulation and execution sections.
+  await openNavigation(page);
+  await expect(navigationDrawer(page).getByRole('link', { name: /^(Build|Simulate|Execute)$/ })).toHaveCount(0);
+  await page.keyboard.press('Escape');
+  await expect(editorSteps(page)).toBeVisible();
   await openEditorSection(page, 'Simulate');
   await expectEditorSection(page, 'Simulate');
   await openEditorSection(page, 'Execute');
@@ -194,11 +214,13 @@ test('Portuguese, dark theme and phone widths keep the composition', async ({ pa
   await page.setViewportSize({ width: 1240, height: 871 });
   await open(page);
   await expect(page.getByRole('heading', { level: 1 })).toHaveText('O que você quer fazer?');
-  // The navigation's own name is translated too ("Etapas do fluxo"), so it is found by its class here.
-  await expect(page.locator('nav.tabs').getByRole('button')).toHaveText(['Painel', 'Chat', 'Editor']);
+  // P0 approved UX (board 03b): the drawer's items are translated (New workflow = "Novo fluxo", Dashboard = "Painel").
+  await openNavigation(page);
+  await expect(primaryItems(page)).toHaveText(['Novo fluxo', 'Editor', 'Painel']);
+  await page.keyboard.press('Escape');
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
-  await expect(entry(page).getByRole('group', { name: 'Exemplos de pedidos' }).getByRole('button')).toHaveText(['Gerar rendimento', 'Trocar ativos', 'Fornecer liquidez', 'Usar colateral', 'Estratégia em várias etapas']);
-  await expect(entry(page)).toContainText('Nada é executado sem a sua revisão e autorização.');
+  await expect(create(page)).toHaveText('Criar fluxo');
+  await expect(entry(page).getByRole('group', { name: 'Exemplos de pedidos' }).getByRole('button')).toHaveText(['Trocar moedas', 'Render juros', 'Prover liquidez', 'Usar como garantia', 'Fluxo com vários passos']);
   await page.screenshot({ path: '.tmp/build0-desktop-dark-pt.png' });
   await page.evaluate(() => { localStorage.setItem('flofi.language', 'EN'); });
   await page.reload();
@@ -213,9 +235,12 @@ test('Portuguese, dark theme and phone widths keep the composition', async ({ pa
   await page.screenshot({ path: '.tmp/build0-mobile-dark.png', fullPage: true });
   await page.evaluate(() => { document.documentElement.dataset.theme = 'light'; });
   await page.screenshot({ path: '.tmp/build0-mobile-light.png', fullPage: true });
-  // BUILD-FLOFI-CHAT-EDITOR-UX-001: on phones too, the navigation is Dashboard | Chat | Editor, without stage numbers.
-  await expect(nav(page).getByRole('button')).toHaveText(['Dashboard', 'Chat', 'Editor']);
-  for (const tab of [chatTab(page), editorTab(page)]) await expect(tab).toBeVisible();
-  await expect(nav(page).locator('.stage-number, [data-build-stage]')).toHaveCount(0);
+  // P0 approved UX (board 03b): on phones too, the drawer offers New workflow, Editor and Dashboard, without stage numbers.
+  await expect(navigationTrigger(page)).toBeVisible();
+  await openNavigation(page);
+  await expect(primaryItems(page)).toHaveText(['New workflow', 'Editor', 'Dashboard']);
+  for (const item of ['Chat', 'Editor'] as const) await expect(navigationLink(page, item)).toBeVisible();
+  await expect(navigationDrawer(page).locator('.stage-number, [data-build-stage]')).toHaveCount(0);
+  await page.keyboard.press('Escape');
   networkGuard.assertClean();
 });

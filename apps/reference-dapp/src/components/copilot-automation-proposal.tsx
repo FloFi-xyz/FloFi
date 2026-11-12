@@ -7,6 +7,7 @@ import type { CapabilityView } from '../automations/views';
 import { automationCapabilityIssue } from '../domain/copilot-automation';
 import type { WorkflowOwner } from '../domain/saved-workflow';
 import { useLocale } from '../i18n/locale';
+import { priceDifferenceLabel } from '../domain/slippage-policy';
 import { DELEGATION_ERROR_TEXT, DelegatedLimitsFlow, useDelegation, useDelegationEnabled, useDelegationRunner } from './delegated-automations';
 import { WalletProof, type useWalletProof } from './wallet-proof';
 
@@ -79,13 +80,13 @@ export function CopilotAutomationProposal({ input, owner, proof, dismiss }: {
         <div><dt>{t('Check every')}</dt><dd>{t('{0} minutes', input.condition.checkEveryMinutes)} · {input.timezone}</dd></div></>}
       {action?.kind === 'ROUTE' && <><div><dt>{t('Action')}</dt><dd>{t(action.side === 'BUY' ? 'Buy' : 'Sell')} · {action.amount} {action.side === 'BUY' ? route?.quote ?? (action.network === 'solana-devnet' ? 'devUSDC' : 'USDC') : action.asset === 'ETH' ? 'WETH' : action.asset}</dd></div>
         <div><dt>{t('Network')}</dt><dd>{t(route?.networkLabel ?? action.network)}</dd></div>
-        <div><dt>{t('Slippage (bps)')}</dt><dd>{action.slippageBps}</dd></div>
+        <div><dt>{t('Max price difference')}</dt><dd>{priceDifferenceLabel(action.slippageBps)}</dd></div>
         <div><dt>{t('Max per execution')}</dt><dd>{input.kind !== 'DAILY_WATCH' ? input.limits.maxAmountPerExecution ?? '—' : ''}</dd></div></>}
       {input.kind !== 'DAILY_WATCH' && <>
         {input.limits.maxAmountPerPeriod && <div><dt>{t('Max amount per period')}</dt><dd>{input.limits.maxAmountPerPeriod.amount} / {t(input.limits.maxAmountPerPeriod.period.toLowerCase())}</dd></div>}
         {input.limits.maxOccurrencesPerPeriod && <div><dt>{t('Max proposals per period')}</dt><dd>{input.limits.maxOccurrencesPerPeriod.count} / {t(input.limits.maxOccurrencesPerPeriod.period.toLowerCase())}</dd></div>}
         <div><dt>{t('Cooldown (minutes)')}</dt><dd>{input.limits.cooldownMinutes}</dd></div>
-        <div><dt>{t('Max slippage (bps)')}</dt><dd>{input.limits.maxSlippageBps ?? '—'}</dd></div>
+        <div><dt>{t('Max price difference limit')}</dt><dd>{input.limits.maxSlippageBps === null ? '—' : priceDifferenceLabel(input.limits.maxSlippageBps)}</dd></div>
       </>}
       {input.expiresAt && <div><dt>{t('Expires on')}</dt><dd><time dateTime={input.expiresAt}>{input.expiresAt}</time></dd></div>}
     </dl>

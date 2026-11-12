@@ -22,7 +22,7 @@ async function authorCanvas(page: Page) {
 async function authorChat(page: Page) {
   await openBuilder(page);
   await page.locator('#mock-prompt').fill('Add liquidity 0.01 SOL and 0.30 devUSDC ticks -39104 to -36992 on Solana Devnet');
-  await page.getByRole('button', { name: 'Send', exact: true }).click();
+  await page.getByRole('button', { name: 'Send message', exact: true }).click();
   await page.getByRole('button', { name: 'Apply proposal' }).click();
 }
 async function simulateAndReview(page: Page, connect = true) {

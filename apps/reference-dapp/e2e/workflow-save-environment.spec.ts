@@ -2,14 +2,14 @@
 import { test, expect } from './fixtures';
 import { installSupplyWallet } from './supply-fixtures';
 import { configureCanvasAction } from './composer-authoring-fixtures';
-import { openBuilder, openEditorSection } from './build-entry-navigation';
+import { openBuilder, openDashboard, openEditorSection } from './build-entry-navigation';
 
 for (const theme of ['light', 'dark'] as const) {
   test(`${theme} workflow save utility is truthful and preserves title, cards and session identity`, async ({ page }) => {
     await page.addInitScript(value => localStorage.setItem('flofi.theme', value), theme);
     await installSupplyWallet(page); await openBuilder(page);
     const canvas = page.getByRole('region', { name: 'Workflow canvas', exact: true });
-    const rename = canvas.getByRole('button', { name: 'Rename workflow', exact: true });
+    const rename = canvas.getByRole('button', { name: /^Rename workflow: / });
     const save = canvas.getByRole('button', { name: 'Save workflow', exact: true });
     await expect(save).toBeVisible(); await expect(save).toBeEnabled();
     expect(await save.evaluate(element => element.previousElementSibling?.getAttribute('aria-label'))).toBe('Rename workflow');
@@ -32,9 +32,9 @@ for (const theme of ['light', 'dark'] as const) {
     await rename.click();
     const name = canvas.getByRole('textbox', { name: 'Workflow name', exact: true });
     await name.fill('Team workflow'); await save.click();
-    await expect(canvas.getByRole('heading', { name: 'Team workflow', exact: true })).toBeVisible();
+    await expect(canvas.getByRole('heading', { name: 'Rename workflow: Team workflow', exact: true })).toBeVisible();
     await rename.click(); await name.fill('Discarded title'); await name.press('Escape');
-    await expect(canvas.getByRole('heading', { name: 'Team workflow', exact: true })).toBeVisible();
+    await expect(canvas.getByRole('heading', { name: 'Rename workflow: Team workflow', exact: true })).toBeVisible();
     await page.getByRole('button', { name: 'Add swap', exact: true }).click();
     await configureCanvasAction(page, '2');
     const selected = canvas.locator('.composer-card.active');
@@ -45,11 +45,10 @@ for (const theme of ['light', 'dark'] as const) {
     await expect(selected).toHaveText(cardBefore, { useInnerText: true });
     await expect(page.locator('.summary-bar')).toHaveAttribute('data-workflow-revision', '1');
     expect(await page.evaluate(() => Object.fromEntries(Object.entries(localStorage)))).toEqual(storageBefore);
-    const nav = page.getByRole('navigation', { name: 'Workflow stages' });
-    await nav.getByRole('button', { name: 'Dashboard', exact: true }).click();
+    await openDashboard(page);
     await expect(page.getByRole('button', { name: 'Save workflow', exact: true })).toHaveCount(0);
     await openEditorSection(page, 'Build');
-    await expect(canvas.getByRole('heading', { name: 'Team workflow', exact: true })).toBeVisible();
+    await expect(canvas.getByRole('heading', { name: 'Rename workflow: Team workflow', exact: true })).toBeVisible();
     await expect(selected).toHaveText(cardBefore, { useInnerText: true });
     for (const stage of ['Simulate', 'Execute'] as const) {
       await openEditorSection(page, stage);
@@ -84,7 +83,7 @@ for (const theme of ['light', 'dark'] as const) {
       if (width === 1440 || width === 320) await page.screenshot({ path: `.tmp/ux007-save-environment-${theme}-${width}.png` });
       await expect(page.getByRole('button', { name: 'Save workflow', exact: true })).toBeInViewport();
     }
-    await page.getByRole('button', { name: 'Rename workflow', exact: true }).click();
+    await page.getByRole('button', { name: /^Rename workflow: / }).click();
     const name = page.getByRole('textbox', { name: 'Workflow name', exact: true });
     await name.fill('A'.repeat(80)); await name.press('Enter');
     expect(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth)).toBe(false);

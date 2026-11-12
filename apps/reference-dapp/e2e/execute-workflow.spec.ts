@@ -4,7 +4,7 @@ import { openBuilder, openEditorSection } from './build-entry-navigation';
 
 test('Execute shows the shared authored workflow without authorizing or inventing execution', async ({ page }) => {
   await openBuilder(page);
-  await page.getByRole('button', { name: 'Rename workflow', exact: true }).click();
+  await page.getByRole('button', { name: /^Rename workflow: / }).click();
   await page.getByRole('textbox', { name: 'Workflow name', exact: true }).fill('ESPARTACUS');
   await page.getByRole('textbox', { name: 'Workflow name', exact: true }).press('Enter');
   await sendChatCommand(page, 'swap 2.25 USDC to WETH on Base slippage 50 bps');
@@ -38,7 +38,8 @@ test('Execute shows the shared authored workflow without authorizing or inventin
   }
   await openEditorSection(page, 'Build');
   await expect(page.locator('.summary-bar')).toHaveAttribute('data-workflow-revision', '1');
-  await expect(page.getByRole('heading', { name: 'ESPARTACUS', exact: true })).toBeVisible();
+  // P0 approved UX (board 04): the Canvas header's name is its rename control ("Rename workflow: <name>").
+  await expect(page.getByRole('heading', { name: 'Rename workflow: ESPARTACUS', exact: true })).toBeVisible();
   await expect(page.locator('.build-flow-surface .composer-card')).toHaveCount(1);
   await expect(page.getByRole('textbox', { name: 'Source amount (USDC)', exact: true })).toHaveValue('2.25');
   await expect(page.locator('.summary-bar')).toHaveAttribute('data-workflow-revision', '1');

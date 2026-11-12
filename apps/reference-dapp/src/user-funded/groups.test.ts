@@ -126,7 +126,15 @@ describe('BUILD-FLOFI-UNIVERSAL-WORKFLOW-002 owner user operation (ERC-4337 v0.7
       jupiter: null, now: () => new Date('2026-11-07T10:00:00Z') });
     const { composition, requirement } = compose(TWO_TRANSFERS);
     const g = { runId: 'wfr_' + 'b'.repeat(26), groupIndex: 0, strategy: 'EVM_USER_OPERATION' as const, chain: BASE, feePayer: address, stepFrom: 0, stepTo: 1 };
-    expect(await prepareGroup(deps(1n), composition, requirement, g)).toMatchObject({ ok: false, code: 'USER_FUNDED_INSUFFICIENT_NATIVE_BALANCE' });
+    const short = await prepareGroup(deps(1n), composition, requirement, g);
+    expect(short).toMatchObject({ ok: false, code: 'USER_FUNDED_INSUFFICIENT_NATIVE_BALANCE' });
+    // P0 approved UX (board 07): the refusal carries the numbers this preparation already read (balance) and computed (fee ceiling + native value),
+    // so the blocker screen states them; nothing else is read for it.
+    if (short.ok || !short.evidence) throw new Error('EVIDENCE_EXPECTED');
+    const e = short.evidence;
+    expect(e).toMatchObject({ kind: 'NATIVE_FEE_SHORTFALL', chainId: BASE, owner: address, unit: 'wei', balance: '1', nativeSpend: '0' });
+    expect(BigInt(e.required)).toBe(BigInt(e.maxFee) + BigInt(e.nativeSpend));
+    expect(BigInt(e.shortfall)).toBe(BigInt(e.required) - 1n); expect(BigInt(e.maxFee) > 1n).toBe(true);
     const prepared = await prepareGroup(deps(10n ** 18n), composition, requirement, g);
     if (!prepared.ok) throw new Error(prepared.code);
     const p = prepared.value.prepared as Prepared & { op: SerialOp; userOpHash: string };

@@ -32,7 +32,8 @@ for (const [width, height] of VIEWPORTS) for (const language of width === 1440 |
     await openBuilder(page);
     const assistant = page.locator('aside.copilot');
     const title = assistant.locator('.copilot-head .assistant-title');
-    await expect(title).toHaveText('FloFi Assistant');
+    // P0 PT-BR copy: the panel's title is translated too ("Assistente FloFi").
+    await expect(title).toHaveText(language === 'PT' ? 'Assistente FloFi' : 'FloFi Assistant');
     await expect(title.locator('img[src="/brand/flofi-symbol-light.svg"]')).toBeVisible();
     // One symbol per avatar: the light theme hides the dark artwork (the header's and every message avatar's).
     await expect(assistant.locator('.flofi-avatar img[src="/brand/flofi-symbol-dark.svg"]').first()).toBeHidden();

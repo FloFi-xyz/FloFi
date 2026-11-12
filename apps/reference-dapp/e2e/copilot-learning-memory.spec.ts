@@ -113,7 +113,9 @@ test('invisible learning: adapted in the conversation, learned after consent and
   await expect(pageB.locator('.privacy-list')).toHaveCount(0);
   await openBuilder(pageB);
   await send(pageB, 'Swap 0.3 SOL to devUSDC on sol dev');
-  await expect(lastAi(pageB).getByRole('group', { name: 'Suggested answers' })).toBeVisible();
+  // P0 approved UX (board 05): FloFi asks B which network, its answers shown as the "Choose a network" buttons.
+  await expect(lastAi(pageB).getByRole('group', { name: 'Choose a network' })).toBeVisible();
+  await expect(lastAi(pageB).getByRole('group', { name: 'Choose a network' }).getByRole('button', { name: 'Solana Devnet', exact: true })).toBeVisible();
   await expect(lastAi(pageB)).not.toContainText('learned');
   // Proving B, reading B's memory and chatting stored nothing for B (no subject is created by reading): A's subject is still the only one.
   expect(await subjects()).toEqual(subjectA);

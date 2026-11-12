@@ -4,7 +4,7 @@ import { selectSettingsTheme } from './settings-fixtures';
 import type { Locator, Page } from '@playwright/test';
 import { configureCanvasAction } from './composer-authoring-fixtures';
 import { resetSupplyHarness } from './supply-fixtures';
-import { expectEditorSection, openBuilder, openEditorSection } from './build-entry-navigation';
+import { editorSteps, expectEditorSection, openBuilder, openEditorSection } from './build-entry-navigation';
 
 const graph = (page: Page) => page.getByRole('region', { name: 'Simulation workflow graph', exact: true });
 const summary = (page: Page) => page.getByRole('complementary', { name: 'Simulation Summary', exact: true });
@@ -45,7 +45,7 @@ test.afterEach(async ({ page }) => {
 test('current workflow, read-only cards, honest summary and Back to the Canvas', async ({ page }) => {
   await page.getByRole('button', { name: 'Add swap', exact: true }).click();
   await configureCanvasAction(page, '2.5');
-  await page.getByRole('button', { name: 'Rename workflow', exact: true }).click();
+  await page.getByRole('button', { name: /^Rename workflow: / }).click();
   await page.getByRole('textbox', { name: 'Workflow name' }).fill('Carry Strategy');
   await page.getByRole('textbox', { name: 'Workflow name' }).press('Enter');
   const buildCard = page.locator('.build-flow-surface .composer-card');
@@ -54,7 +54,7 @@ test('current workflow, read-only cards, honest summary and Back to the Canvas',
   const revision = await page.locator('.summary-bar').getAttribute('data-workflow-revision');
   await openEditorSection(page, 'Simulate');
   await expect(graph(page)).toHaveAttribute('data-viewport', 'fitted');
-  await expect(page.getByRole('navigation', { name: 'Workflow stages' }).getByRole('button', { name: 'Review', exact: true })).toHaveCount(0);
+  await expect(editorSteps(page).getByRole('button', { name: 'Review', exact: true })).toHaveCount(0);
   const review = page.locator('.review-authorization-details');
   await review.locator('summary').click();
   await expect(page.getByRole('region', { name: 'Workflow simulation workspace', exact: true }).locator('#simulation-review')).toHaveCount(1);
@@ -161,10 +161,10 @@ test('lending links, zoom in/out and fit remain usable on desktop and mobile', a
     await expect(graph(page)).toHaveAttribute('data-viewport', 'fitted');
     const viewport = graph(page).locator('.react-flow__viewport');
     const original = await viewport.getAttribute('style');
-    await graph(page).getByRole('slider', { name: 'Canvas zoom' }).press('ArrowRight');
+    await graph(page).getByRole('button', { name: 'Zoom in', exact: true }).click();
     await expect(viewport).not.toHaveAttribute('style', original!);
     const zoomed = await viewport.getAttribute('style');
-    await graph(page).getByRole('slider', { name: 'Canvas zoom' }).press('ArrowLeft');
+    await graph(page).getByRole('button', { name: 'Zoom out', exact: true }).click();
     await expect(viewport).not.toHaveAttribute('style', zoomed!);
     await graph(page).getByRole('button', { name: 'Fit workflow', exact: true }).click();
     expect(await graph(page).locator('.react-flow__node').evaluateAll(nodes => nodes.map(node => (node as HTMLElement).style.transform))).toEqual(positions);

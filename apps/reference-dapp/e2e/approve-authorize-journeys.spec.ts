@@ -137,7 +137,9 @@ test('external fallback: Open FloFi → minimal signing surface → one Authoriz
   const { page, region, owner } = journey, surface = signingSurface(page);
   // The minimal signing surface: no Canvas or stage navigation; the exact requested action is listed before anything is loaded.
   await expect(surface).toBeVisible();
-  await expect(page.getByRole('navigation', { name: 'Workflow stages' })).toHaveCount(0);
+  // P0 approved UX (board 03b): no product navigation here — neither the Editor stepper nor the ☰ drawer (the former stage tabs are gone).
+  await expect(page.getByRole('navigation', { name: 'Editor steps' })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Open navigation' })).toHaveCount(0);
   await expect(page.getByRole('region', { name: 'Workflow canvas', exact: true })).toHaveCount(0);
   await expect(surface.getByRole('list', { name: 'Requested actions' })).toContainText('Base Sepolia');
   await proveConnectedEvmWallet(page, region, owner.address);
@@ -205,7 +207,9 @@ test('embedded chat: existing execution runtime completes after wallet confirmat
   await expect(region.getByRole('status')).toContainText('Ready for your review.');
   const authorize = signing.getByRole('button', { name: AUTHORIZE_IN_WALLET, exact: true });
   await expect(authorize).toBeEnabled({ timeout: 30_000 });
-  await expect(signing.getByRole('navigation', { name: 'Workflow stages' })).toHaveCount(0);
+  // P0 approved UX (board 03b): no product navigation here — neither the Editor stepper nor the ☰ drawer (the former stage tabs are gone).
+  await expect(signing.getByRole('navigation', { name: 'Editor steps' })).toHaveCount(0);
+  await expect(signing.getByRole('button', { name: 'Open navigation' })).toHaveCount(0);
   await expect(signing.getByRole('region', { name: 'Workflow canvas', exact: true })).toHaveCount(0);
   await expect(region.locator('.approval-details')).not.toHaveAttribute('open');
   await expect(region.locator('.approval-explanation')).not.toBeVisible();

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { test, expect, assertNoFinancialCanvasAction, sendChatCommand } from './fixtures';
-import { openBuilder, openEditorSection } from './build-entry-navigation';
+import { editorSteps, navigationTrigger, openBuilder, openEditorSection } from './build-entry-navigation';
 
 const widths = [320, 375, 390, 430, 768, 1024, 1440];
 async function noOverflow(page: import('@playwright/test').Page) {
@@ -57,7 +57,8 @@ for (const width of widths) {
     await noOverflow(page);
     await page.getByRole('link', { name: 'Explore the builder without an account', exact: true }).click();
     await expect(page).toHaveURL('/app');
-    await expect(page.getByRole('navigation', { name: 'Workflow stages' })).toBeVisible();
+    // P0 approved UX (board 03b): the product shell's navigation is the ☰ drawer (the former stage tabs are gone).
+    await expect(navigationTrigger(page)).toBeVisible();
     await expect(page.locator('html')).toHaveAttribute('lang', 'en');
     await noOverflow(page);
     expect(errors).toEqual([]);
@@ -65,6 +66,10 @@ for (const width of widths) {
 }
 });
 
+// P0 approved UX (board 16 §7–§8): touch sizing (44 px targets, a 16 px chat field that keeps mobile browsers from zooming on focus) applies to coarse
+// pointers, so these phone-width checks run as a touch screen does (`hasTouch`), not as a narrow mouse window.
+test.describe('on a touch screen', () => {
+test.use({ hasTouch: true });
 for (const width of [320, 375, 390, 430]) {
   test(`touch controls, proposal and wallet dismissal at ${width}px`, async ({ page }) => {
     await page.setViewportSize({ width, height: 740 });
@@ -82,7 +87,7 @@ for (const width of [320, 375, 390, 430]) {
     await expect(input).toBeFocused();
     await expect(input).toHaveCSS('font-size', '16px');
     await input.fill('Swap 2 USDC to WETH on Base Sepolia slippage 50 bps');
-    await page.getByRole('button', { name: 'Send', exact: true }).click();
+    await page.getByRole('button', { name: 'Send message', exact: true }).click();
     // BUILD-FLOFI-CONVERSATIONAL-001: the chat commits the request at once (no proposal to apply).
     await expect(page.getByRole('log', { name: 'Conversation' }).locator('.message').last()).toContainText('Swap added to your workflow: 2 USDC');
     await shortcuts.getByRole('button', { name: 'Canvas', exact: true }).click();
@@ -90,7 +95,10 @@ for (const width of [320, 375, 390, 430]) {
     await expect(page.locator('.summary-bar')).toHaveAttribute('data-workflow-revision', '1');
     const cardBox = (await page.locator('.build-flow-surface .composer-card').boundingBox())!;
     expect(cardBox.width).toBeGreaterThanOrEqual(180);
-    const utilities = tools.getByRole('group', { name: 'Workflow utilities' });
+    // P0 approved UX (board 04): the former "Workflow utilities" group is gone — Undo, Redo and ··· sit in the Canvas header (Duplicate and Delete
+    // float above a selected card); those header controls never overlap on a phone either.
+    const utilities = page.locator('.build-canvas-head .canvas-head-actions');
+    await expect(utilities.getByRole('button')).toHaveCount(3);
     const utilityBoxes = await utilities.getByRole('button').evaluateAll(buttons => buttons.map(button => {
       const { x, y, width, height } = button.getBoundingClientRect();
       return { x, y, width, height };
@@ -116,13 +124,16 @@ for (const width of [320, 375, 390, 430]) {
     await expect(page.locator('.build-flow-surface .composer-card')).toHaveClass(/active/);
     await expect(page.getByRole('button', { name: 'Connect Wallet', exact: true })).toBeFocused();
     await page.getByRole('button', { name: 'Open navigation', exact: true }).click();
-    await expect(page.getByRole('link', { name: 'Dashboard', exact: true })).toBeFocused();
+    // Board 03b: the drawer's first item is New workflow (the Chat entry), then Editor and Dashboard.
+    await expect(page.getByRole('link', { name: 'New workflow', exact: true })).toBeFocused();
     await page.keyboard.press('Escape');
     await expect(page.getByRole('button', { name: 'Open navigation', exact: true })).toBeFocused();
     await openEditorSection(page, 'Simulate');
     await expect(page.getByRole('main', { name: 'Simulation workspace', exact: true })).toBeVisible();
     await page.getByRole('navigation', { name: 'Simulation workspace navigation', exact: true }).getByRole('button', { name: 'Review', exact: true }).click();
-    await expect(page.locator('.simulation-summary')).toBeFocused();
+    // P0 approved UX (board 06): on a phone the shortcut opens the collapsed Review panel and focuses it (the Simulation Summary sits in its
+    // Technical details).
+    await expect(page.locator('.review-panel-approved')).toBeFocused();
     await noOverflow(page);
     await openEditorSection(page, 'Execute');
     await expect(page.getByRole('main', { name: 'Execution workspace', exact: true })).toBeVisible();
@@ -132,6 +143,7 @@ for (const width of [320, 375, 390, 430]) {
     await noOverflow(page);
   });
 }
+});
 
 // BUILD-FLOFI-SITE-001: the approved site has no scroll-driven motion; every section is visible and nothing is pinned.
 test('the landing shows every section at once, without pinning', async ({ page }) => {
@@ -169,7 +181,8 @@ test('all migrated product routes remain accessible and sensitive routes retain 
     const response = await page.goto(path);
     expect(response?.status()).toBe(200);
     await expect(page.locator('.app-shell')).toBeVisible();
-    await expect(page.getByRole('navigation', { name: 'Workflow stages' })).toBeVisible();
+    // P0 approved UX (board 03b): every product route keeps the shell's ☰ navigation (the former stage tabs are gone).
+    await expect(navigationTrigger(page)).toBeVisible();
     await expect(page.getByRole('heading', { level: 1, name: 'Tell FloFi: I want to swap, bridge, deposit, add liquidity or transfer.', exact: true })).toHaveCount(0);
   }
   for (const path of ['/approve', '/connections']) {
@@ -181,7 +194,8 @@ test('all migrated product routes remain accessible and sensitive routes retain 
     expect(headers['referrer-policy']).toBe('no-referrer');
     expect(headers['x-robots-tag']).toBe('noindex, nofollow');
     expect(headers['cache-control']).toContain('no-store');
-    await expect(page.getByRole('navigation', { name: 'Workflow stages' })).toHaveCount(0);
+    await expect(navigationTrigger(page)).toHaveCount(0);
+    await expect(editorSteps(page)).toHaveCount(0);
     await expect(page.getByRole('region', { name: 'Workflow canvas', exact: true })).toHaveCount(0);
     await expect(page.getByRole('button', { name: 'Authorize in wallet', exact: true })).toHaveCount(0);
   }

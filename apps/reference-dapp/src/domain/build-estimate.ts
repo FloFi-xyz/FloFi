@@ -5,6 +5,8 @@ import type { SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts'
 import { bridgeEstimateRequest } from './bridge-estimate';
 import { parseTokenAmount } from './jupiter-authoring';
 import { cryptoSelectionOf } from './crypto-action-picker';
+import { flightRefusalMessage } from './flight-refusal';
+import { certifiedRouterRoute, routerDetails } from './router-authoring';
 
 /** Presentation data only. Deliberately excludes Review, calldata, execution IDs and financial authority. */
 export type BuildEstimate = { readonly workflowHash: string; readonly nodeId: string; readonly chain: string;
@@ -31,7 +33,9 @@ export function estimateMatchesNode(estimate: BuildEstimate, workflow: SemanticW
         result.sourceChain === node.chainId && result.destinationChain === output.value.chainId && result.amount === request.amount &&
         result.outputToken.decimals === output.value.decimals && result.outputToken.address === (request.outputToken.kind === 'TOKEN' ? request.outputToken.address : null) &&
         selected.expectedOutput === String(expected) && selected.minimumOutput === String(minimum) &&
-        (selected.status === 'LIVE_QUOTE' && bridge!.execution === 'QUOTE_ONLY' || selected.status === 'EXECUTABLE' && bridge!.execution === 'SIMULATION_AND_REVIEW_REQUIRED');
+        (selected.status === 'LIVE_QUOTE' && bridge!.execution === 'QUOTE_ONLY' || selected.status === 'EXECUTABLE' && bridge!.execution === 'SIMULATION_AND_REVIEW_REQUIRED'
+          // A certified Router node's Across route: the server labels it executable only when the pair's Router flow reports owner execution.
+          || selected.status === 'LIVE_QUOTE' && bridge!.execution === 'SIMULATION_AND_REVIEW_REQUIRED' && routerDetails(node) !== null && certifiedRouterRoute(selected));
     }
     const selection = cryptoSelectionOf(node);
     if (selection?.to && selection.to !== estimate.symbol) return false;
@@ -63,6 +67,9 @@ export function requestBuildEstimate(load: (signal: AbortSignal) => Promise<Buil
 
 /** User-facing diagnosis. Technical codes and correlation IDs remain available separately. */
 export function buildEstimateFailureMessage(code: string): string {
+  // P0: the quote endpoint shares the Flight gate; its refusal is named, never 'the quote provider or network is unavailable'.
+  const flight = flightRefusalMessage(code);
+  if (flight) return flight;
   if (/BELOW_MINIMUM|AMOUNT_TOO_LOW/.test(code)) return 'The amount is below the provider minimum. Choose a larger amount or another provider.';
   if (/ABOVE_MAXIMUM|AMOUNT_TOO_HIGH/.test(code)) return 'The amount is above the provider maximum. Choose a smaller amount or another provider.';
   if (/INSUFFICIENT_LIQUIDITY/.test(code)) return 'The provider has insufficient liquidity for these assets and this amount. Try another provider or try again later.';

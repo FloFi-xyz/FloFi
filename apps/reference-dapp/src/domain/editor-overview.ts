@@ -31,6 +31,8 @@ const FINDING_DETAIL: Readonly<Record<string, string>> = {
   'Above the BUILD-003A review limit.': 'The slippage limit is above what FloFi accepts for review.',
   'Set one explicit slippage limit.': 'Set one slippage limit for this step.',
 };
+/** Board 16: a step's check in plain words, never the internal limit names the review engine uses ("BUILD-003A"). */
+export const plainFinding = (message: string): string => FINDING_DETAIL[message] ?? message;
 
 /** `validation.status === 'Draft'` without a Canvas draft means the step is applied but the workflow has no review (its review failed). */
 export function canvasCardStatus(validation: NodeValidation, draft: boolean): CardStatus {
@@ -38,7 +40,7 @@ export function canvasCardStatus(validation: NodeValidation, draft: boolean): Ca
   if (validation.status === 'Draft') return { kind: 'attention', label: CARD_STATUS_LABEL.attention, detail: UNREVIEWED_DETAIL };
   if (validation.tone === 'invalid' || validation.tone === 'warning') {
     const message = validation.message;
-    return { kind: 'attention', label: CARD_STATUS_LABEL.attention, detail: message ? FINDING_DETAIL[message] ?? message : 'Check this step’s settings.' };
+    return { kind: 'attention', label: CARD_STATUS_LABEL.attention, detail: message ? plainFinding(message) : 'Check this step’s settings.' };
   }
   return { kind: 'configured', label: CARD_STATUS_LABEL.configured, detail: CONFIGURED_DETAIL };
 }

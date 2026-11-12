@@ -6,21 +6,17 @@ import { walletPortfolio } from '../../app/portfolio-action';
 import { formatObservedAt, formatAllocationShare, portfolioAllocation, portfolioOnNetwork, formatTokenAmount, formatUsdPrice, formatUsdValue, holdingKey, portfolioSummary, priceObservedAt, shortAddress,
   type PortfolioHolding, type PortfolioNetwork, type PortfolioNetworkId, type WalletPortfolio, type WalletPortfolioResult } from '../../domain/wallet-portfolio';
 import { NetworkBrandIcon, TokenBrandIcon } from '../brand-icon';
+import { StatusTag } from './dashboard-status';
 import styles from './portfolio-widget.module.css';
 
 /**
- * The Dashboard wallet portfolio: a priced value, network allocation and top holdings, expanding in place into the wallet's
- * identity and an Assets table (BUILD-FLOFI-UX-005: the per-network read list is no longer shown; partial reads stay noted). Every figure is a real read (`app/portfolio-action.ts`); no balance, price or total is
- * ever filled in. Only an Assets view exists: FloFi has no verified source for wallet transactions, DeFi positions or perpetuals.
+ * The Dashboard wallet ("Your wallet", P0 approved UX board 10): the priced total, the top holdings, one network dropdown, and the price-source
+ * caveats in a collapsed "About the values"; it expands in place into the wallet's identity, the Assets table and the network allocation
+ * (BUILD-FLOFI-UX-005: the per-network read list is no longer shown; partial reads stay noted). Every figure is a real read
+ * (`app/portfolio-action.ts`); no balance, price or total is ever filled in. Only an Assets view exists: FloFi has no verified source for
+ * wallet transactions, DeFi positions or perpetuals.
  */
 const TITLE_ID = 'dashboard-portfolio-title', DETAILS_ID = 'dashboard-portfolio-details';
-/** Network identity stays consistent across sorting, filters, the donut and allocation bars. */
-const NETWORK_TONES: Readonly<Record<PortfolioNetworkId, string>> = { ethereum: '#5165d8', base: '#1672ed', 'arbitrum-one': '#35a9c4', robinhood: '#00865c', solana: '#9064d6' };
-
-function WalletMark() {
-  return <svg className={styles.mark} width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round"
-    strokeLinejoin="round" aria-hidden="true"><rect x="3" y="5" width="18" height="15" rx="3"/><path d="M3 8h18m0 5h-5v4h5"/><path d="M17 15h.01"/></svg>;
-}
 
 export function PortfolioWidget({ evm, solana, load = walletPortfolio }: { evm: string | null; solana: string | null; load?: typeof walletPortfolio }) {
   const { t: tr } = useLocale();
@@ -42,9 +38,9 @@ export function PortfolioWidget({ evm, solana, load = walletPortfolio }: { evm: 
     return () => { active = false; };
   }, [evm, solana, request, wallet, load]);
 
-  const heading = <h2 id={TITLE_ID}>{tr('Wallet portfolio')}</h2>;
-  if (!evm && !solana) return <section className={`panel ${styles.root}`} aria-labelledby={TITLE_ID} data-portfolio="disconnected">
-    <div className={styles.head}><div className={styles.title}><WalletMark/>{heading}</div></div>
+  const heading = <h2 id={TITLE_ID}>{tr('Your wallet')}</h2>;
+  if (!evm && !solana) return <section className={`ux-panel ${styles.root}`} aria-labelledby={TITLE_ID} data-portfolio="disconnected">
+    <div className={styles.head}><div className={styles.title}>{heading}</div></div>
     <p className={styles.note}>{tr('Connect a wallet to see its balances.')}</p>
   </section>;
 
@@ -55,12 +51,12 @@ export function PortfolioWidget({ evm, solana, load = walletPortfolio }: { evm: 
   const refresh = () => setVersion(value => value + 1);
   const represented = portfolio?.networks.filter(network => portfolio.holdings.some(holding => holding.networkId === network.id)) ?? [];
   const selectedNetwork = networkFilter?.wallet === wallet && represented.some(network => network.id === networkFilter.network) ? networkFilter.network : null;
-  return <section className={`panel ${styles.root}`} aria-labelledby={TITLE_ID} aria-busy={loading} data-portfolio={portfolio ? 'ready' : failure ? 'error' : 'loading'}>
+  return <section className={`ux-panel ${styles.root}`} aria-labelledby={TITLE_ID} aria-busy={loading} data-portfolio={portfolio ? 'ready' : failure ? 'error' : 'loading'}>
     <div className={styles.head}>
-      <div className={styles.title}><WalletMark/>{heading}{portfolio?.mocked && <span className={styles.badge}>{tr('Test data (MOCKED)')}</span>}</div>
+      <div className={styles.title}>{heading}{portfolio?.mocked && <StatusTag tone="attention">{tr('Test data (MOCKED)')}</StatusTag>}</div>
       <div className={styles.controls}>{represented.length > 1 && <NetworkFilter networks={represented} value={selectedNetwork}
         onChange={network => setNetworkFilter({ wallet, network })}/>}
-      {portfolio && <button type="button" className={`workspace-action ${styles.refresh}`} onClick={refresh} disabled={loading}>{tr(loading ? 'Refreshing…' : 'Refresh')}</button>}</div>
+      {portfolio && <button type="button" className={`ux-button ux-button-small ${styles.refresh}`} onClick={refresh} disabled={loading}>{tr(loading ? 'Refreshing…' : 'Refresh')}</button>}</div>
     </div>
     {portfolio && failure && <p className={styles.note} role="alert">{tr('Refresh failed. Showing the last available balances; try refreshing again.')}</p>}
     {portfolio ? <PortfolioBody portfolio={portfolioOnNetwork(portfolio, selectedNetwork)} expanded={expanded} copied={copied} summaryButton={summaryButton}
@@ -68,7 +64,7 @@ export function PortfolioWidget({ evm, solana, load = walletPortfolio }: { evm: 
       collapse={() => { setExpandedFor(null); summaryButton.current?.focus(); }}
       copy={address => { void globalThis.navigator?.clipboard?.writeText(address).then(() => { setCopied(address); setTimeout(() => setCopied(current => current === address ? null : current), 2_000); }, () => undefined); }}/>
       : failure ? <div className={styles.state} role="alert" data-code={failure}><p>{tr('Wallet balances are unavailable right now.')}</p>
-        <button type="button" onClick={refresh}>{tr('Retry')}</button></div>
+        <button type="button" className="ux-button ux-button-small" onClick={refresh}>{tr('Retry')}</button></div>
       : <div className={styles.state} role="status"><span className={styles.skeleton} aria-hidden="true"><span/><span/></span>
         <p>{tr('Reading wallet balances…')}</p></div>}
     <span className={styles.srOnly} role="status">{portfolio && loading ? tr('Refreshing wallet balances…') : ''}</span>
@@ -158,71 +154,46 @@ function PortfolioBody({ portfolio, expanded, copied, summaryButton, toggle, col
   if (!summary.read.length && !summary.unavailable.length) return <p className={styles.note}>{tr('No network is enabled for balance reads on this deployment.')}</p>;
   const amount = (holding: PortfolioHolding) => holding.displayUnits === null ? tr('{0}: balance unavailable', holding.symbol)
     : `${formatTokenAmount(holding.displayUnits, holding.decimals, language)} ${holding.symbol}`;
-  const allocation = portfolioAllocation(portfolio);
-  let offset = 0;
-  const arcs = allocation.flatMap(network => {
-    if (network.perMille === null || network.perMille === 0) return [];
-    const start = offset; offset += network.perMille;
-    return [{ ...network, start }];
-  });
   const top = summary.pricedCount ? summary.holdings.filter(holding => holding.valueUsd !== null).slice(0, 3) : summary.top;
-  const pricesAt = formatObservedAt(priceObservedAt(portfolio), language);
+  const pricesAt = formatObservedAt(priceObservedAt(portfolio), language), updated = formatObservedAt(portfolio.observedAt, language);
+  const fixture = portfolio.holdings.some(holding => holding.price?.source === 'FIXTURE');
   const unpricedNote = portfolio.unpricedCount === 1 ? tr('1 holding has no available valuation.') : tr('{0} holdings have no available valuation.', portfolio.unpricedCount);
+  const empty = tr(summary.read.length ? 'No balances found on the networks read.' : 'Wallet balances are unavailable right now.');
+  const priceNote = !count ? null : !portfolio.priceSource ? tr('USD values are unavailable on this deployment.')
+    : portfolio.unpricedCount > 0 ? tr('Only assets with a verified Chainlink USD feed on this deployment are priced. Other assets show no value.') : null;
   return <>
-    <div className={styles.overview}>
-      <div className={styles.valueCard}>
-        <span className={styles.label}>{tr(portfolio.pricedTotalUsd !== null ? 'Portfolio value (priced)' : 'Portfolio value')}</span>
-        {portfolio.pricedTotalUsd !== null ? <>
-          <strong className={`${styles.total} numeric`}>≈ {formatUsdValue(portfolio.pricedTotalUsd, language)}</strong>
-          <span className={styles.caption}>{tr('{0} of {1} holdings priced', summary.pricedCount, count)}</span>
-          {portfolio.unpricedCount > 0 && <span className={styles.caption}>{unpricedNote}</span>}
-        </> : <>
-          <strong className={styles.total}>—</strong>
-          <span className={styles.caption}>{count ? tr('Holdings: {0}', count) : tr(summary.read.length ? 'No balances found on the networks read.' : 'Wallet balances are unavailable right now.')}</span>
-          {count > 0 && <span className={styles.caption}>{tr(portfolio.priceSource ? 'No verified USD price for these assets.' : 'USD values are unavailable on this deployment.')}</span>}
-        </>}
-        <span className={styles.valueFoot}>{tr('Verified prices only')}</span>
-      </div>
-      <div className={styles.chart}>
-        <svg className={styles.donut} viewBox="0 0 200 200" role="img" aria-label={tr('Network allocation of priced holdings')}>
-          <title>{tr('Network allocation of priced holdings')}</title>
-          <desc>{arcs.length ? arcs.map(network => `${network.name}: ${formatAllocationShare(network.perMille!, language)}`).join(', ') : tr('No priced allocation available.')}</desc>
-          <circle cx="100" cy="100" r="76" fill="none" stroke="var(--line)" strokeWidth="23"/>
-          {arcs.map(network => <circle key={network.id} cx="100" cy="100" r="76" fill="none" stroke={NETWORK_TONES[network.id]} strokeWidth="23"
-            pathLength="1000" strokeDasharray={`${network.perMille} ${1000 - network.perMille!}`} strokeDashoffset={-network.start} transform="rotate(-90 100 100)"/>)}
-        </svg>
-        <span className={styles.chartCenter}><strong className="numeric">{summary.pricedCount}</strong><span>{tr('Priced holdings')}</span></span>
-      </div>
-      <section className={styles.allocation} aria-label={tr('Allocation by network')}>
-        <h3>{tr('Allocation by network')}</h3>
-        {allocation.length > 0 ? <ul>{allocation.map(network => <li key={network.id}>
-          <div className={styles.allocationLabel}><span className={styles.networkIcon} aria-hidden="true"><NetworkBrandIcon network={network.chain}/></span>
-            <strong>{network.name}</strong><span className="numeric">{network.perMille === null ? network.valueUsd === null ? tr('Valuation unavailable') : '—' : formatAllocationShare(network.perMille, language)}</span></div>
-          <span className={styles.networkBar} aria-hidden="true"><span style={{ width: `${(network.perMille ?? 0) / 10}%`, background: NETWORK_TONES[network.id] }}/></span>
-          <span className={styles.allocationValue}>{network.valueUsd !== null ? formatUsdValue(network.valueUsd, language) : tr('Valuation unavailable')}</span>
-        </li>)}</ul> : <p className={styles.note}>{tr('No priced allocation available.')}</p>}
-      </section>
+    <div className={styles.totalLine}>
+      <strong className={styles.total}>{portfolio.pricedTotalUsd !== null ? `≈ ${formatUsdValue(portfolio.pricedTotalUsd, language)}` : '—'}</strong>
+      {portfolio.pricedTotalUsd !== null ? <span className={styles.caption}>{tr('Verified prices only')}{updated && <> · {tr('updated {0}', updated)}</>}</span>
+        : <span className={styles.caption}>{count ? <>{tr('Holdings: {0}', count)} · {tr(portfolio.priceSource ? 'No verified USD price for these assets.' : 'USD values are unavailable on this deployment.')}</> : empty}</span>}
     </div>
-    <div className={styles.pricingCoverage}>
-      <p className={styles.note}>{count > 0 ? tr('Allocation includes priced holdings only.') : tr(summary.read.length ? 'No balances found on the networks read.' : 'Wallet balances are unavailable right now.')}
-        {portfolio.unpricedCount > 0 && <> {unpricedNote}</>}
-        {summary.pricedCount > 0 && pricesAt && <> {tr('Prices observed {0}.', pricesAt)}</>}</p>
+    {(summary.unavailable.length > 0 || summary.partial.length > 0) && <div className={styles.coverage}>
       {summary.unavailable.length > 0 && <p className={styles.note}>{tr('Some networks could not be read.')}</p>}
       {summary.partial.length > 0 && <p className={styles.note}>{tr('Some token balances could not be read.')}</p>}
-    </div>
-    <div className={styles.holdingsHeading}><h3>{tr('Top holdings')}</h3>
-      <button ref={summaryButton} type="button" className="workspace-action" aria-expanded={expanded} aria-controls={DETAILS_ID} onClick={toggle}>
+    </div>}
+    {top.length > 0 && <ul className={`ux-list ${styles.holdings}`} aria-label={tr('Top holdings')}>{top.map(holding => <li key={holdingKey(holding)} className="ux-row">
+      <span className={styles.holdingIcon} aria-hidden="true"><TokenBrandIcon symbol={holding.symbol} network={holding.chain} address={holding.address ?? undefined}/></span>
+      <span className={styles.holdingName}><strong>{holding.symbol}</strong><small>{holding.network}</small></span>
+      <span className={styles.holdingValue}><strong>{holding.valueUsd !== null ? formatUsdValue(holding.valueUsd, language) : tr('Valuation unavailable')}</strong><small>{amount(holding)}</small></span>
+    </li>)}</ul>}
+    <div className={styles.holdingsFoot}>
+      <button ref={summaryButton} type="button" className="ux-button ux-button-small" aria-expanded={expanded} aria-controls={DETAILS_ID} onClick={toggle}>
         {tr(expanded ? 'Hide details' : 'View all assets')}
       </button>
     </div>
-    {top.length > 0 && <ul className={styles.topHoldings}>{top.map(holding => <li key={holdingKey(holding)}>
-      <span className={styles.holdingIcon} aria-hidden="true"><TokenBrandIcon symbol={holding.symbol} network={holding.chain} address={holding.address ?? undefined}/></span>
-      <span className={styles.holdingName}><strong>{holding.symbol}</strong><small>{holding.network}</small></span>
-      <span className={`${styles.holdingValue} numeric`}><strong>{holding.valueUsd !== null ? formatUsdValue(holding.valueUsd, language) : tr('Valuation unavailable')}</strong><small>{amount(holding)}</small></span>
-    </li>)}</ul>}
     <div id={DETAILS_ID} className={styles.details} hidden={!expanded} role="region" aria-labelledby={TITLE_ID}>
       {expanded && <PortfolioDetails portfolio={portfolio} copied={copied} copy={copy} collapse={collapse}/>}
     </div>
+    {count > 0 && <details className={`ux-details ${styles.about}`}><summary>{tr('About the values')}</summary>
+      <div className={styles.aboutBody}>
+        {portfolio.pricedTotalUsd !== null && <p className={styles.note}>{tr('{0} of {1} holdings priced', summary.pricedCount, count)}{portfolio.unpricedCount > 0 && <> {unpricedNote}</>}</p>}
+        <p className={styles.note}>{tr('Allocation includes priced holdings only.')}</p>
+        {summary.pricedCount > 0 && pricesAt && <p className={styles.note}>{fixture
+          ? tr('Prices: test fixture (MOCKED), observed {0}. Not market data.', pricesAt)
+          : tr('Prices: Chainlink USD feeds on Base, observed {0}. Values are estimates, not quotes.', pricesAt)}</p>}
+        {priceNote && <p className={styles.note}>{priceNote}</p>}
+      </div>
+    </details>}
   </>;
 }
 
@@ -244,16 +215,13 @@ function BalanceCell({ holding }: { holding: PortfolioHolding }) {
 
 function PortfolioDetails({ portfolio, copied, copy, collapse }: { portfolio: WalletPortfolio; copied: string | null; copy(address: string): void; collapse(): void }) {
   const { t: tr, language } = useLocale();
-  const summary = portfolioSummary(portfolio), pricesAt = formatObservedAt(priceObservedAt(portfolio), language);
+  const summary = portfolioSummary(portfolio), allocation = portfolioAllocation(portfolio);
   const updated = formatObservedAt(portfolio.observedAt, language);
-  const fixture = portfolio.holdings.some(holding => holding.price?.source === 'FIXTURE');
-  const priceNote = !summary.holdings.length ? null : !portfolio.priceSource ? tr('USD values are unavailable on this deployment.')
-    : portfolio.unpricedCount > 0 ? tr('Only assets with a verified Chainlink USD feed on this deployment are priced. Other assets show no value.') : null;
   return <div className={styles.detailsBody}>
     <dl className={styles.identity} aria-label={tr('Wallet')}>{portfolio.accounts.map(account => <div key={account.ecosystem}>
       <dt>{tr(account.ecosystem === 'evm' ? 'EVM wallet' : 'Solana wallet')}</dt>
       <dd><code title={account.address}>{shortAddress(account.address)}</code>
-        <button type="button" className={styles.copy} onClick={() => copy(account.address)} aria-live="polite">{tr(copied === account.address ? 'Copied' : 'Copy address')}</button></dd>
+        <button type="button" className={`ux-button ux-button-small ${styles.copy}`} onClick={() => copy(account.address)} aria-live="polite">{tr(copied === account.address ? 'Copied' : 'Copy address')}</button></dd>
     </div>)}</dl>
     <section aria-labelledby="dashboard-portfolio-assets">
       <h3 id="dashboard-portfolio-assets">{tr('Assets')}</h3>
@@ -273,15 +241,20 @@ function PortfolioDetails({ portfolio, copied, copy, collapse }: { portfolio: Wa
           <td className={`${styles.end} numeric`}>{formatUsdValue(portfolio.pricedTotalUsd, language)}</td></tr></tfoot>}
       </table></div> : <p className={styles.note}>{tr(summary.read.length ? 'No balances found on the networks read.' : 'Wallet balances are unavailable right now.')}</p>}
       {portfolio.unlisted > 0 && <p className={styles.note}>{tr(portfolio.unlisted === 1 ? '1 unlisted token not shown' : '{0} unlisted tokens not shown', portfolio.unlisted)}</p>}
-      {summary.pricedCount > 0 && pricesAt && <p className={styles.note}>{fixture
-        ? tr('Prices: test fixture (MOCKED), observed {0}. Not market data.', pricesAt)
-        : tr('Prices: Chainlink USD feeds on Base, observed {0}. Values are estimates, not quotes.', pricesAt)}</p>}
-      {priceNote && <p className={styles.note}>{priceNote}</p>}
     </section>
+    {allocation.length > 0 && <section className={styles.allocation} aria-label={tr('Allocation by network')}>
+      <h3>{tr('Allocation by network')}</h3>
+      <ul>{allocation.map(network => <li key={network.id}>
+        <div className={styles.allocationLabel}><span className={styles.networkIcon} aria-hidden="true"><NetworkBrandIcon network={network.chain}/></span>
+          <strong>{network.name}</strong><span className="numeric">{network.perMille === null ? network.valueUsd === null ? tr('Valuation unavailable') : '—' : formatAllocationShare(network.perMille, language)}</span></div>
+        <span className={styles.networkBar} aria-hidden="true"><span style={{ width: `${(network.perMille ?? 0) / 10}%` }}/></span>
+        <span className={styles.allocationValue}>{network.valueUsd !== null ? formatUsdValue(network.valueUsd, language) : tr('Valuation unavailable')}</span>
+      </li>)}</ul>
+    </section>}
     <p className={styles.scope}>{tr('Transactions, DeFi positions and perpetuals are not shown: FloFi has no verified source for them. Your FloFi executions are in Your workflows.')}</p>
     <div className={styles.footer}>
       {updated && <span>{tr('Updated {0}', updated)}</span>}
-      <button type="button" onClick={collapse}>{tr('Collapse')}</button>
+      <button type="button" className="ux-button ux-button-small" onClick={collapse}>{tr('Collapse')}</button>
     </div>
   </div>;
 }

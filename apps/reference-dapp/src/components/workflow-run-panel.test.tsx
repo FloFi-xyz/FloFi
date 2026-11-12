@@ -260,7 +260,7 @@ describe('round 6 C4: a user-funded step is worded by its group — never "Autho
   it('signed: "Signed in your wallet"; unsigned while the run runs: "Waiting for your wallet" (EN/PT)', () => {
     for (const state of ['RUNNING', 'ATTENTION']) {
       expect(stepLabels(render(userFunded(state))), state).toEqual(['Signed in your wallet', 'Waiting for your wallet']);
-      expect(stepLabels(render(userFunded(state), 'PT'))).toEqual(['Assinada na sua carteira', 'À espera da sua carteira']);
+      expect(stepLabels(render(userFunded(state), 'PT'))).toEqual(['Assinada na sua carteira', 'Aguardando sua carteira']);
     }
   });
   it('unsigned in a halted or ended run: "Not signed" (EN/PT)', () => {

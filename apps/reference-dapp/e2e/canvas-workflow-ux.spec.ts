@@ -77,27 +77,29 @@ async function toolbarGeometry(page: Page, name: string) {
   return { ...geometry, surface };
 }
 
-// BUILD-FLOFI-BUILDER-UX-002 (owner-approved Editor brief): the step actions live in the vertical rail by default and the utilities in their own small
-// toolbar; the docked row (an owner's choice) wraps instead of overflowing, in English and in Portuguese (it used to overflow in Portuguese).
+// BUILD-FLOFI-BUILDER-UX-002 (owner-approved Editor brief): the step actions live in the vertical rail by default; the docked row (an owner's choice)
+// wraps instead of overflowing, in English and in Portuguese (it used to overflow in Portuguese). P0 approved UX (board 04): the rail is grouped
+// (Swap, Bridge, Send | Pool, Supply, Withdraw | Borrow, Repay, Lending | Stocks), Privacy is not offered until it exists, Undo / Redo / ··· sit in
+// the Canvas header and Duplicate / Delete float above the selected card (no separate utilities toolbar).
 for (const width of [1440, 1536, 1920]) test(`UX-008 every Canvas tool fits — rail by default, docked row in EN and PT — at ${width}px`, async ({ page, networkGuard }, testInfo) => {
   await page.setViewportSize({ width, height: 1080 }); await open(page);
-  const actions = ['Swap','Bridge','Pool / Liquidity','Supply','Lending','Borrow','Repay','Withdraw','Send','Stocks','Privacy'];
+  const actions = ['Swap','Bridge','Send','Pool / Liquidity','Supply','Withdraw','Borrow','Repay','Lending','Stocks'];
   const rail = await toolbarGeometry(page, 'Canvas tools');
   expect(rail.buttons.map(b => b.text)).toEqual(actions);
   // One column inside the graph.
   for (const button of rail.buttons) expect(button.x).toBeCloseTo(rail.buttons[0]!.x, 0);
   expect(rail.left).toBeGreaterThanOrEqual(rail.surface.x); expect(rail.bottom).toBeLessThanOrEqual(rail.surface.y + rail.surface.height + 1);
-  const utilities = await toolbarGeometry(page, 'Workflow utilities');
-  expect(utilities.buttons.map(b => b.name)).toEqual(['Duplicate selection', 'Undo', 'Redo', 'Delete', 'Dock toolbar']);
-  expect(utilities.left).toBeGreaterThan(rail.right); expect(utilities.right).toBeLessThanOrEqual(rail.surface.x + rail.surface.width + 1);
+  await expect(page.getByRole('toolbar', { name: 'Workflow utilities', exact: true })).toHaveCount(0);
+  const header = page.locator('.build-canvas-head .canvas-head-actions');
+  expect(await header.getByRole('button').evaluateAll(buttons => buttons.map(b => b.getAttribute('aria-label')))).toEqual(['Undo', 'Redo', 'More options']);
   await testInfo.attach(`toolbar-rail-${width}px`, { body: await page.locator('.build-flow-surface').screenshot(), contentType: 'image/png' });
   for (const language of ['EN', 'PT'] as const) {
     if (language === 'PT') { await page.evaluate(() => localStorage.setItem('flofi.language', 'PT')); await page.reload(); await continueToBuilder(page); }
     await useDockedToolbar(page);
     const docked = await toolbarGeometry(page, language === 'PT' ? 'Ferramentas do Canvas' : 'Canvas tools');
-    expect(docked.buttons).toHaveLength(16);
+    expect(docked.buttons).toHaveLength(actions.length);
     // Every labelled control shows its whole label.
-    for (const button of docked.buttons.slice(0, 15)) expect(button.labelWidth, button.text ?? '').toBeGreaterThan(12);
+    for (const button of docked.buttons) expect(button.labelWidth, button.text ?? '').toBeGreaterThan(12);
     for (const [index, button] of docked.buttons.entries()) if (index && button.y === docked.buttons[index - 1]!.y) expect(button.x).toBeGreaterThanOrEqual(docked.buttons[index - 1]!.right - 1);
     expect(await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)).toBeLessThanOrEqual(1);
     await testInfo.attach(`toolbar-docked-${language}-${width}px`, { body: await page.locator('.build-canvas-head').screenshot(), contentType: 'image/png' });
@@ -105,10 +107,10 @@ for (const width of [1440, 1536, 1920]) test(`UX-008 every Canvas tool fits — 
   }
   await page.evaluate(() => localStorage.setItem('flofi.language', 'EN')); await page.reload(); await continueToBuilder(page);
   const toolbar = page.getByRole('toolbar', { name: 'Canvas tools' });
-  // Privacy is the existing unavailable action; fit does not enable an unimplemented financial capability.
-  await expect(toolbar.getByRole('button', { name: 'Privacy', exact: true })).toBeDisabled();
+  // Privacy is not offered until it exists (no disabled placeholder); fit never enables an unimplemented financial capability.
+  await expect(toolbar.getByRole('button', { name: 'Privacy', exact: true })).toHaveCount(0);
   await toolbar.getByRole('button', { name: 'Add swap', exact: true }).click(); await expect(cards(page)).toHaveCount(1);
-  await page.getByRole('toolbar', { name: 'Workflow utilities' }).getByRole('button', { name: 'Delete', exact: true }).click(); await expect(cards(page)).toHaveCount(0);
+  await page.getByRole('toolbar', { name: 'Selected step actions' }).getByRole('button', { name: 'Delete', exact: true }).click(); await expect(cards(page)).toHaveCount(0);
   await assertPassiveWallet(page); networkGuard.assertClean();
 });
 
@@ -123,7 +125,7 @@ test('UX-009 fits committed insertions 1–5; proposals and ordinary edits do no
   await settledViewport(page);
   const before = await viewport(page).getAttribute('style'), canonical = await ir(page);
   await page.locator('#mock-prompt').fill('compose supply 1 USDC to Aave then borrow 0.1 USDC then swap borrowed USDC to WETH on Base Sepolia slippage 50 bps owner 0x1111111111111111111111111111111111111111');
-  await page.getByRole('button', { name: 'Send', exact: true }).click();
+  await page.getByRole('button', { name: 'Send message', exact: true }).click();
   await expect(page.getByRole('button', { name: /^Review proposed change:/ })).toBeVisible();
   expect(await viewport(page).getAttribute('style')).toBe(before); expect(await ir(page)).toEqual(canonical);
   await page.getByRole('button', { name: /^Review proposed change:/ }).click();
@@ -141,7 +143,11 @@ test('UX-009 fits committed insertions 1–5; proposals and ordinary edits do no
   await page.getByRole('region', { name: 'Source token picker', exact: true }).locator('label:has(input[aria-label="WETH"])').click();
   await page.getByRole('button', { name: 'Hide token picker', exact: true }).click();
   expect(await viewport(page).getAttribute('style')).toBe(after);
-  await expect(page.locator('.canvas-navigator-slider').first()).toHaveAttribute('max', '1.4');
+  // P0 approved UX (board 04): the zoom slider is gone; Zoom in (+) still stops at the engine's maximum, 1.4.
+  const zoomIn = page.locator('.build-flow-surface .canvas-navigator').getByRole('button', { name: 'Zoom in', exact: true });
+  for (let step = 0; step < 12 && await zoomIn.isEnabled(); step++) { await zoomIn.click(); await settledViewport(page); }
+  await expect(zoomIn).toBeDisabled();
+  expect(await viewport(page).evaluate(element => new DOMMatrixReadOnly(getComputedStyle(element).transform).a)).toBeCloseTo(1.4, 2);
   await assertPassiveWallet(page); networkGuard.assertClean();
 });
 
@@ -181,7 +187,8 @@ test('UX-009/010 repeated Send cards retain links and the manual viewport throug
   const nodes = (await ir(page)).nodes.filter(n => n.actionType === 'asset.transfer');
   const [a, b] = nodes; expect(a!.nodeId).not.toBe(b!.nodeId);
   await connect(page, b!.nodeId, a!.nodeId);
-  const slider = page.locator('.build-flow-surface .canvas-navigator-slider'); await slider.focus(); await page.keyboard.press('ArrowDown');
+  // P0 approved UX (board 04): a manual zoom through the navigator's Zoom out (−) (the slider is gone).
+  await page.locator('.build-flow-surface .canvas-navigator').getByRole('button', { name: 'Zoom out', exact: true }).click();
   await settledViewport(page); const manual = await viewport(page).getAttribute('style');
   const card = page.locator(`.build-flow-surface .react-flow__node[data-id="${a!.nodeId}"]`);
   await card.locator('.composer-action-title').click();

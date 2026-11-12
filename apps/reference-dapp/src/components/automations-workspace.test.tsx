@@ -2,11 +2,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { isValidElement, type ReactElement, type ReactNode } from 'react';
 import { HookHarness, deferred } from '../test-utils/hook-harness';
-import { AutomationsWorkspace, CreateForm } from './automations-workspace';
+import { AutomationsWorkspace, CreateForm, bpsToPercent, percentToBps } from './automations-workspace';
 import type { CapabilityView, OverviewView } from '../automations/views';
-const f = vi.hoisted(() => ({ overview: vi.fn(), create: vi.fn(), history: vi.fn() }));
+const f = vi.hoisted(() => ({ overview: vi.fn(), create: vi.fn(), history: vi.fn(), enabled: true }));
 vi.mock('react', async original => ({ ...await original<typeof import('react')>(), ...(await import('../test-utils/hook-harness')).hookMocks }));
-vi.mock('../app/automation-action', () => ({ automationOverview: f.overview, createAutomation: f.create, automationHistory: f.history, automationsAvailability: async () => ({ enabled: true }),
+vi.mock('../app/automation-action', () => ({ automationOverview: f.overview, createAutomation: f.create, automationHistory: f.history, automationsAvailability: async () => ({ enabled: f.enabled }),
   changeAutomationState: vi.fn(), createTelegramLinkCode: vi.fn(), dismissAutomationOccurrence: vi.fn(), openAutomationOccurrence: vi.fn(), prepareWatchProposal: vi.fn(), rebindAutomation: vi.fn(), unlinkTelegram: vi.fn() }));
 vi.mock('../app/workflow-action', () => ({ listWorkflows: async () => ({ ok: true, value: { items: [] } }) }));
 vi.mock('./wallet-proof', () => ({ WalletProof: () => null }));
@@ -27,7 +27,7 @@ function textOf(value: ReactNode): string { return Array.isArray(value) ? value.
 function find(tree: ReactNode, match: (e: Element) => boolean) { const target = nodes(tree).find(match); expect(target).toBeDefined(); return target!.props; }
 const flush = async () => { for (let i = 0; i < 8; i++) await Promise.resolve(); };
 let host: HookHarness;
-beforeEach(() => { host = new HookHarness(); vi.clearAllMocks(); vi.stubGlobal('requestAnimationFrame', (work: () => void) => work()); vi.stubGlobal('window', { location: { search: '' }, addEventListener: vi.fn(), removeEventListener: vi.fn() }); f.overview.mockResolvedValue({ ok: true, value: overview }); f.create.mockResolvedValue({ ok: true, value: { ruleId: 'persisted-rule' } }); });
+beforeEach(() => { host = new HookHarness(); vi.clearAllMocks(); f.enabled = true; vi.stubGlobal('requestAnimationFrame', (work: () => void) => work()); vi.stubGlobal('window', { location: { search: '' }, addEventListener: vi.fn(), removeEventListener: vi.fn() }); f.overview.mockResolvedValue({ ok: true, value: overview }); f.create.mockResolvedValue({ ok: true, value: { ruleId: 'persisted-rule' } }); });
 afterEach(() => { host.unmount(); vi.unstubAllGlobals(); });
 const work = (wallet = owner) => host.render(() => AutomationsWorkspace({ owner: wallet }));
 const form = (initial: Parameters<typeof CreateForm>[0]['initial'] = { name: 'Weekly ETH', amount: '10' }, caps = capabilities) => host.render(() => CreateForm({ owner, capabilities: caps, busy: false, run: async task => (await task()).ok, initial }));
@@ -39,7 +39,7 @@ describe('Guided automation creation', () => {
     let tree = form(); expect(textOf(tree)).toContain('What do you want to do?'); expect(textOf(tree)).not.toContain('Max amount per period'); expect(textOf(tree)).not.toContain('Create automation');
     await submit(tree); tree = form(); expect(textOf(tree)).toContain('When should it happen?'); expect(textOf(tree)).toContain('Advanced settings');
     change(tree, 'Time zone', 'Europe/Lisbon'); await submit(form()); tree = form();
-    expect(textOf(tree)).toContain('Review and authorize'); expect(textOf(tree)).toContain('Every Monday at 09:00 (Europe/Lisbon)'); expect(textOf(tree)).toContain('Max per execution10'); expect(textOf(tree)).toContain('Slippage (bps)100'); expect(textOf(tree)).toContain('Ask me before every execution');
+    expect(textOf(tree)).toContain('Review and authorize'); expect(textOf(tree)).toContain('Every Monday at 09:00 (Europe/Lisbon)'); expect(textOf(tree)).toContain('Max per execution10'); expect(textOf(tree)).toContain('Max price difference1%'); expect(textOf(tree)).not.toContain('bps'); expect(textOf(tree)).toContain('Ask me before every execution');
     await submit(tree); expect(f.create).toHaveBeenCalledExactlyOnceWith(owner, expect.objectContaining({ kind: 'SCHEDULED_DCA', action: { kind: 'ROUTE', asset: 'ETH', side: 'BUY', network: 'base', amount: '10', slippageBps: 100 }, limits: expect.objectContaining({ maxAmountPerExecution: '10', cooldownMinutes: 0 }), schedule: { frequency: 'WEEKLY', weekday: 1, time: '09:00', timezone: 'Europe/Lisbon' } }));
   });
   it('rejects invalid amounts using the domain validator, preserving entered data', async () => { await submit(form({ name: 'Bad amount', amount: '-1' })); await submit(form()); expect(textOf(form())).toContain('Check the fields and try again.'); expect(f.create).not.toHaveBeenCalled(); });
@@ -55,8 +55,28 @@ describe('Guided automation creation', () => {
   it.each([{ maxPerExecution: '1' }, { maxSlippage: '50' }])('checks binding limits before exposing the final Create action: %o', patch => {
     return (async () => {
       const initial = { name: 'Bounded', amount: '10', ...patch }; await submit(form(initial)); await submit(form(initial));
-      expect(textOf(form(initial))).toContain('When should it happen?'); expect(textOf(form(initial))).toContain(patch.maxPerExecution ? 'above your maximum per execution' : 'above your maximum slippage'); expect(f.create).not.toHaveBeenCalled();
+      expect(textOf(form(initial))).toContain('When should it happen?'); expect(textOf(form(initial))).toContain(patch.maxPerExecution ? 'above your maximum per execution' : 'The max price difference is above your limit.'); expect(f.create).not.toHaveBeenCalled();
     })();
+  });
+  it('converts basis points and percent exactly, both ways, and never rounds a value with no whole basis point', () => {
+    for (const [bps, percent] of [['100', '1'], ['50', '0.5'], ['125', '1.25'], ['1', '0.01'], ['0', '0'], ['10000', '100'], ['030', '0.3']] as const) expect(bpsToPercent(bps)).toBe(percent);
+    for (const [percent, bps] of [['1', '100'], ['0.5', '50'], ['.5', '50'], ['1,25', '125'], ['1.', '100'], ['0.01', '1'], ['100', '10000']] as const) expect(percentToBps(percent)).toBe(bps);
+    for (const invalid of ['', '.', '0.125', '1%', '-1', 'abc']) expect(percentToBps(invalid)).toBeNull();
+  });
+  it('shows slippage as "Max price difference" in % inside the collapsed Advanced settings and submits the same basis points', async () => {
+    await submit(form()); let tree = form();
+    const advanced = find(tree, e => e.type === 'details' && textOf(e).startsWith('Advanced settings'));
+    expect(advanced.open).toBeUndefined(); expect(textOf(advanced.children)).toContain('Max price difference (%)'); expect(textOf(advanced.children)).toContain('Cooldown (minutes)');
+    expect(find(tree, e => e.props['aria-label'] === 'Max price difference (%)').value).toBe('1');
+    change(tree, 'Max price difference (%)', '0.5'); change(form(), 'Max price difference limit (%)', '0.75'); tree = form();
+    expect(find(tree, e => e.props['aria-label'] === 'Max price difference (%)').value).toBe('0.5');
+    await submit(tree); tree = form(); expect(textOf(tree)).toContain('Max price difference0.5%'); expect(textOf(tree)).toContain('Max price difference limit0.75%');
+    await submit(tree);
+    expect(f.create).toHaveBeenCalledExactlyOnceWith(owner, expect.objectContaining({ action: expect.objectContaining({ slippageBps: 50 }), limits: expect.objectContaining({ maxSlippageBps: 75 }) }));
+  });
+  it('refuses a percent that has no whole basis-point value instead of rounding it', async () => {
+    await submit(form()); change(form(), 'Max price difference (%)', '0.125'); await submit(form());
+    expect(textOf(form())).toContain('Check the fields and try again.'); expect(f.create).not.toHaveBeenCalled();
   });
   it('blocks a disabled route before persistence', () => { const tree = form(undefined, { ...capabilities, routes: capabilities.routes.map(r => ({ ...r, executable: false, reason: 'MAINNET_HANDOFF_DISABLED_BY_POLICY' })) }); expect(find(tree, e => e.type === 'button' && textOf(e) === 'Continue').disabled).toBe(true); expect(textOf(tree)).toContain('Real-funds automations are disabled on this deployment.'); expect(f.create).not.toHaveBeenCalled(); });
 });
@@ -93,6 +113,26 @@ describe('Automation management server authorization', () => {
     host.render(() => AutomationsWorkspace({ owner, proof })); await flush();
     guided = find(host.render(() => AutomationsWorkspace({ owner, proof })), e => e.type === CreateForm);
     expect(guided.initial).toMatchObject({ name: 'Preserved routine', amount: '15' }); expect(guided.initialStep).toBe(2);
+  });
+  it('starts with creating: "Waiting for you" is shown at the top only while something waits (board 12)', async () => {
+    const openChat = vi.fn(), page = () => host.render(() => AutomationsWorkspace({ owner, openChat }));
+    page(); await flush(); page(); await flush();
+    let text = textOf(page());
+    expect(text).not.toContain('Waiting for you'); expect(text).toContain('Create an automation'); expect(text).toContain('Prefer to describe?Create with chat');
+    (find(page(), e => e.type === 'button' && textOf(e) === 'Create with chat').onClick as () => void)(); expect(openChat).toHaveBeenCalledOnce();
+    for (const label of ['Recurring buy', 'Price trigger', 'Daily watch']) expect(text).toContain(label);
+    expect(text).not.toMatch(/Scheduled DCA|Price watch|bps/);
+    const pending = { occurrenceId: 'occ-1', ruleId: 'rule-1', ruleName: 'Weekly ETH', kind: 'SCHEDULE', state: 'PENDING_OWNER', dueAt: '2026-11-12T09:00:00.000Z',
+      expiresAt: '2026-11-12T21:00:00.000Z', action: null, observations: [], outcome: null, decidedAt: null, approval: null, notifications: [] };
+    f.overview.mockResolvedValue({ ok: true, value: { ...overview, pending: [pending] } });
+    const focus = vi.mocked(window.addEventListener).mock.calls.find(([type]) => type === 'focus')?.[1] as () => void; focus(); await flush();
+    text = textOf(page());
+    expect(text).toContain('Waiting for you'); expect(text.indexOf('Waiting for you')).toBeLessThan(text.indexOf('Create an automation'));
+  });
+  it('shows one "Coming soon" state, and no form or control, when automations are not enabled on the deployment', async () => {
+    f.enabled = false; work(); await flush(); const tree = work(); const text = textOf(tree);
+    expect(text).toContain('Coming soon'); expect(text).toContain('Automations are not enabled on this deployment.');
+    expect(nodes(tree).filter(e => e.type === 'button' || e.type === 'form' || e.type === 'input')).toHaveLength(0); expect(f.overview).not.toHaveBeenCalled();
   });
   it('disables unsupported landing choices when policy and price source are unavailable', async () => { f.overview.mockResolvedValue({ ok: true, value: { ...overview, capabilities: { ...capabilities, routes: [], observable: [], priceSource: 'off' } } }); work(); await flush(); work(); await flush(); const tree = work(); for (const choice of nodes(tree).filter(e => e.props.className === 'automation-choice')) expect(choice.props.disabled).toBe(true); expect(textOf(tree)).toContain('A verified price source is required'); });
 });

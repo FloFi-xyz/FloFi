@@ -76,14 +76,14 @@ test('Swap token selection synchronizes both pills and settings, invalidates rev
   expect(node.inputs.find((input: { kind: string }) => input.kind === 'QUANTITY').value.amount).toBe('250000000000000000');
   await card.getByRole('button', { name: 'Action settings', exact: true }).click();
   // BUILD-FIX-UX-001: slippage is an ordinary edit: typing applies nothing, Enter applies exactly the typed value.
-  const settings = page.getByRole('form', { name: 'Swap slippage', exact: true });
-  await expect(settings).toContainText('Applied limit: 100 bps (1.00%)');
-  await settings.getByLabel('Slippage (bps)', { exact: true }).fill('75');
-  await settings.getByLabel('Slippage (bps)', { exact: true }).fill('80');
+  const settings = page.getByRole('form', { name: 'Max price difference', exact: true });
+  await expect(settings).toContainText('Applied limit: 1%');
+  await settings.getByLabel('Max price difference (%)', { exact: true }).fill('0.75');
+  await settings.getByLabel('Max price difference (%)', { exact: true }).fill('0.8');
   await expect(revision).toHaveAttribute('data-workflow-revision', '1');
-  await settings.getByLabel('Slippage (bps)', { exact: true }).press('Enter');
+  await settings.getByLabel('Max price difference (%)', { exact: true }).press('Enter');
   await expect(revision).toHaveAttribute('data-workflow-revision', '2');
-  await expect(settings).toContainText('Applied limit: 80 bps (0.80%)');
+  await expect(settings).toContainText('Applied limit: 0.8%');
   const applied = JSON.parse(await advanced.locator('[data-workflow-ir]').innerText()).nodes.find((node: { actionType: string }) => node.actionType === 'asset.swap.exact-input');
   expect(applied.userConstraints.find((c: { kind: string }) => c.kind === 'MAXIMUM_SLIPPAGE_BPS').maximumBps).toBe(80);
   // Authored assets remain editable within the shared action network.

@@ -70,10 +70,13 @@ function PasskeysManager({ access, placeholder }: { access: DelegationAccess; pl
   const { overview, code, refresh } = useOverview(owner, proven), { busy, run, messages } = useRunner(refresh);
   const [label, setLabel] = useState('This device');
   const enabled = useEnabled();
-  // Without delegated execution on this deployment (or without a connected wallet) the workspace stays exactly as before.
+  // P0 approved UX (board 15): while availability is still being read, no "Coming soon" is claimed for a deployment that may serve passkeys.
+  if (enabled === null && owner) return <div className="ux-page passkeys"><header className="ux-page-head"><div><h1>{t('Passkeys')}</h1></div></header>
+    <p className="muted" role="status">{t('Checking passkeys…')}</p></div>;
+  // Without delegated execution on this deployment (or without a connected wallet) the workspace shows the placeholder (board 15: "Coming soon").
   if (!enabled || !owner || code === 'DELEGATION_NOT_ENABLED') return <>{placeholder}</>;
-  if (!proven) return <><header className="secondary-workspace-heading"><h1>{t('Passkeys')}</h1><p>{t('A passkey is how you authorize automatic workflows: once per workflow, on this device.')}</p></header>
-    <div className="workspace-empty"><p>{t('Verify wallet ownership to manage passkeys.')}</p><WalletProof namespace={owner.namespace} proof={{ ...access.proof, proven: null }}/></div></>;
+  if (!proven) return <div className="ux-page passkeys"><header className="ux-page-head"><div><h1>{t('Passkeys')}</h1><p>{t('A passkey is how you authorize automatic workflows: once per workflow, on this device.')}</p></div></header>
+    <div className="ux-panel ux-list-empty"><p>{t('Verify wallet ownership to manage passkeys.')}</p><WalletProof namespace={owner.namespace} proof={{ ...access.proof, proven: null }}/></div></div>;
   async function add(event: FormEvent) {
     event.preventDefault();
     await run(async () => {
@@ -84,8 +87,8 @@ function PasskeysManager({ access, placeholder }: { access: DelegationAccess; pl
     }, 'Passkey added.');
   }
   const passkeys: readonly PasskeyView[] = overview?.passkeys ?? [];
-  return <section className="delegation-passkeys" aria-label={t('Passkeys')}>
-    <header className="secondary-workspace-heading"><h1>{t('Passkeys')}</h1><p>{t('A passkey is how you authorize automatic workflows: once per workflow, with this device. It is never a wallet key and never moves funds by itself.')}</p></header>
+  return <section className="ux-page delegation-passkeys" aria-label={t('Passkeys')}>
+    <header className="ux-page-head"><div><h1>{t('Passkeys')}</h1><p>{t('A passkey is how you authorize automatic workflows: once per workflow, with this device. It is never a wallet key and never moves funds by itself.')}</p></div></header>
     {messages}
     <form className="automation-inline-form" aria-label={t('Add a passkey')} onSubmit={event => void add(event)}>
       <label>{t('Name')}<input aria-label={t('Passkey name')} value={label} maxLength={40} onChange={e => setLabel(e.currentTarget.value)}/></label>
@@ -94,7 +97,7 @@ function PasskeysManager({ access, placeholder }: { access: DelegationAccess; pl
     {passkeys.length ? <ul className="delegation-passkey-list">{passkeys.map(p => <li key={p.passkeyId} aria-label={t('Passkey {0}', p.label)}>
       <strong>{p.label}</strong> · {t(p.revoked ? 'Revoked' : 'Active')} · {t('added {0}', new Date(p.createdAt).toLocaleDateString())}
       {!p.revoked && <button type="button" className="workspace-action" disabled={busy} onClick={() => void run(() => passkeyRevoke(owner, p.passkeyId), 'Passkey revoked.')}>{t('Revoke')}</button>}
-    </li>)}</ul> : <div className="workspace-empty"><p>{t('No passkeys yet. Add one to get started.')}</p></div>}
+    </li>)}</ul> : <div className="ux-panel ux-list-empty"><p>{t('No passkeys yet. Add one to get started.')}</p></div>}
   </section>;
 }
 
@@ -183,9 +186,9 @@ function ExecutionCredentialsPanel({ access }: { access: DelegationAccess }) {
   // BUILD-FLOFI-UNIVERSAL-WORKFLOW-002 (S1): enrollment is retired on every deployment (the executor paid every step's gas); existing
   // Credentials stay listed so the owner can still revoke them.
   const retired = true;
-  return <section className="workspace-section delegation-credentials" aria-labelledby="credentials-execution">
-    <div className="workspace-section-heading"><div><h2 id="credentials-execution">{t('Automatic execution')}</h2>
-      <span className="workspace-count">{overview?.credentials.reduce((n, c) => n + c.grants.filter(g => g.state === 'ACTIVE').length, 0) ?? 0}</span></div></div>
+  return <section className="ux-panel delegation-credentials" aria-labelledby="credentials-execution">
+    <div className="ux-panel-head"><div><h2 id="credentials-execution">{t('Automatic execution')}</h2>
+      <span className="ux-count">{overview?.credentials.reduce((n, c) => n + c.grants.filter(g => g.state === 'ACTIVE').length, 0) ?? 0}</span></div></div>
     {!retired && <p className="muted">{t('Enroll a wallet once to let FloFi execute workflows you authorize, inside the limits it signs here. Each enrollment is one wallet signature per network; workflows never ask the wallet again.')}</p>}
     {messages}
     {!proven ? <div className="workspace-empty"><p>{t('Verify wallet ownership to manage automatic execution.')}</p><WalletProof namespace={owner.namespace} proof={{ ...access.proof, proven: null }}/></div> : <>

@@ -21,7 +21,9 @@ import { CanvasAutomation, type CanvasAutomationDraft } from './canvas-automatio
 import { bindingViolation } from '../automations/limits';
 import { validateAutomationInput, type AutomationInput, type ActionRequest } from '../automations/definition';
 import { automationCapabilityIssue } from '../domain/copilot-automation';
-import { DEFAULT_SLIPPAGE, DEFAULT_SLIPPAGE_BPS } from '../domain/slippage-policy';
+import { DEFAULT_SLIPPAGE, DEFAULT_SLIPPAGE_BPS, bpsToPercent, percentToBps } from '../domain/slippage-policy';
+export { bpsToPercent, percentToBps } from '../domain/slippage-policy';
+import { StatusTag } from './dashboard/dashboard-status';
 
 export type AutomationNavigation = { readonly owner: WorkflowOwner | null; readonly proof: ReturnType<typeof useWalletProof>; readonly onPropose: (command: Command) => void;
   /** BUILD-AUTOMATION-002: "Automate this workflow" — the exact Canvas workflow, when the owner came from the Canvas. */
@@ -31,7 +33,8 @@ type Asset = 'ETH' | 'BTC' | 'SOL';
 
 const WEEKDAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'] as const;
 const STATE_LABEL: Readonly<Record<string, string>> = { ACTIVE: 'Active', PAUSED: 'Paused', EXPIRED: 'Expired', ARCHIVED: 'Archived' };
-const KIND_LABEL: Readonly<Record<Kind, string>> = { SCHEDULED_DCA: 'Scheduled DCA', PRICE_TRIGGER: 'Price trigger', DAILY_WATCH: 'Daily watch' };
+// P0 approved UX (board 12): plain names for the three routines.
+const KIND_LABEL: Readonly<Record<Kind, string>> = { SCHEDULED_DCA: 'Recurring buy', PRICE_TRIGGER: 'Price trigger', DAILY_WATCH: 'Daily watch' };
 const OCCURRENCE_LABEL: Readonly<Record<string, string>> = { PENDING_OWNER: 'Awaiting you', APPROVAL_CREATED: 'Opened for review', COMPLETED: 'Loaded into your workflow',
   DISMISSED: 'Dismissed', EXPIRED: 'Expired' };
 const OUTCOME_LABEL: Readonly<Record<string, string>> = {
@@ -52,7 +55,7 @@ const ERROR_TEXT: Readonly<Record<string, string>> = {
   BTC_EXECUTION_ROUTE_UNAVAILABLE: 'FloFi has no BTC swap route yet. You can watch BTC and get alerts, but FloFi cannot prepare a BTC purchase.',
   OWNER_EXECUTION_NOT_IMPLEMENTED: 'FloFi cannot execute this action with your wallet yet.', MAINNET_HANDOFF_DISABLED_BY_POLICY: 'Real-funds automations are disabled on this deployment.',
   FLOW_NOT_ENABLED_IN_DEPLOYMENT: 'This action is not enabled on this deployment.', PUBLIC_RECORDING_OFF: 'This action is not enabled on this deployment.',
-  LIMIT_AMOUNT_PER_EXECUTION: 'The amount is above your maximum per execution.', LIMIT_SLIPPAGE: 'The slippage is above your maximum slippage.',
+  LIMIT_AMOUNT_PER_EXECUTION: 'The amount is above your maximum per execution.', LIMIT_SLIPPAGE: 'The max price difference is above your limit.',
   LIMIT_PERIOD_AMOUNT: 'This would exceed your maximum amount for the period.', LIMIT_PERIOD_COUNT: 'This would exceed your maximum number of proposals for the period.',
   PRICE_ASSET_NOT_OBSERVABLE: 'FloFi cannot observe this asset’s price on this deployment.', AUTOMATION_INPUT_INVALID: 'Check the fields and try again.',
   AUTOMATION_SCHEDULE_INVALID: 'Check the schedule and the time zone.', AUTOMATION_CONDITION_INVALID: 'Check the price condition.', AUTOMATION_AMOUNT_INVALID: 'Enter an amount above zero.',
@@ -66,6 +69,9 @@ const ERROR_TEXT: Readonly<Record<string, string>> = {
   AUTOMATION_CHAT_NOTIFICATIONS_UNAVAILABLE: 'Telegram notifications are not available on this deployment.',
   AUTOMATION_WALLET_NAMESPACE_MISMATCH: 'This network needs a wallet of another kind than the one you proved. Only your own wallet can approve its proposals.' };
 
+/** P0 approved UX (board 12): slippage is presented as "Max price difference" in percent; the draft and every submission stay in basis points. */
+const INVALID_PERCENT = 'invalid';
+const percentLabel = (bps: string) => `${bpsToPercent(bps)}%`;
 const usd = (value: string) => { const [whole, fraction = ''] = value.split('.'); return `$${whole!.replace(/\B(?=(\d{3})+(?!\d))/g, ',')}${fraction ? `.${fraction.slice(0, 2).padEnd(2, '0')}` : ''}`; };
 function changeOf(o: ObservationView): string | null {
   if (!('priceUsd' in o) || !o.previousPriceUsd) return null;
@@ -82,7 +88,7 @@ function When({ iso, zone }: { iso: string | null; zone: string }) {
   const { language } = useLocale();
   if (!iso) return <>—</>;
   let text: string;
-  try { text = new Intl.DateTimeFormat(language === 'PT' ? 'pt-PT' : 'en-GB', { timeZone: zone, weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }).format(new Date(iso)); }
+  try { text = new Intl.DateTimeFormat(language === 'PT' ? 'pt-BR' : 'en-GB', { timeZone: zone, weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }).format(new Date(iso)); }
   catch { text = iso; }
   return <time dateTime={iso}>{text}</time>;
 }
@@ -108,7 +114,7 @@ function useAutomationText() {
       l.maxAmountPerPeriod ? t('Max {0} per {1}', l.maxAmountPerPeriod.amount, t(l.maxAmountPerPeriod.period.toLowerCase())) : null,
       l.maxOccurrencesPerPeriod ? t('At most {0} proposals per {1}', String(l.maxOccurrencesPerPeriod.count), t(l.maxOccurrencesPerPeriod.period.toLowerCase())) : null,
       l.cooldownMinutes ? t('Cooldown {0} min', String(l.cooldownMinutes)) : null,
-      l.maxSlippageBps !== null ? t('Max slippage {0} bps', String(l.maxSlippageBps)) : null,
+      l.maxSlippageBps !== null ? t('Max price difference {0}', percentLabel(String(l.maxSlippageBps))) : null,
     ].filter((v): v is string => Boolean(v)),
     error: (code: string) => ERROR_TEXT[code] ? t(ERROR_TEXT[code]) : DELEGATION_ERROR_TEXT[code] ? t(DELEGATION_ERROR_TEXT[code]) : t('FloFi could not complete this ({0}).', code),
   }), [t]);
@@ -140,7 +146,7 @@ function PendingCard({ o, rule, highlighted, capabilities, busy, run, onPropose,
   const routes = (asset: string) => capabilities.routes.filter(r => r.asset === asset && r.executable);
   return <article className="automation-card automation-pending" id={`occurrence-${o.occurrenceId}`} data-highlighted={highlighted ? 'true' : undefined}
     aria-label={t('Proposal from {0}', o.ruleName)}>
-    <header className="automation-card-head"><div><h3>{o.ruleName}</h3><p>{t(o.kind === 'WATCH' ? 'Daily watch' : o.kind === 'PRICE' ? 'Price trigger' : 'Scheduled DCA')} · {t(OCCURRENCE_LABEL[o.state] ?? o.state)}</p></div>
+    <header className="automation-card-head"><div><h3>{o.ruleName}</h3><p>{t(o.kind === 'WATCH' ? 'Daily watch' : o.kind === 'PRICE' ? 'Price trigger' : 'Recurring buy')} · {t(OCCURRENCE_LABEL[o.state] ?? o.state)}</p></div>
       <span className="automation-badge" data-state={o.state}>{t(OCCURRENCE_LABEL[o.state] ?? o.state)}</span></header>
     {o.kind === 'SCHEDULE' && <p>{t('Scheduled for')} <When iso={o.dueAt} zone={zone}/></p>}
     {o.observations.length > 0 && o.kind === 'PRICE' && rule?.condition && <p>{text.condition(rule.condition)} — {t('met')}: <Observation o={o.observations[0]!}/></p>}
@@ -207,9 +213,9 @@ function RuleCard({ rule, busy, run, owner, onHistory }: { rule: RuleView; busy:
 export function HistoryPanel({ history, onClose }: { history: RuleHistoryView; onClose: () => void }) {
   const { t } = useLocale();
   const zone = history.rule.timezone;
-  return <section className="workspace-section automation-history" aria-label={t('History of {0}', history.rule.name)}>
-    <div className="workspace-section-heading"><div><h2>{t('History of {0}', history.rule.name)}</h2></div>
-      <button type="button" className="workspace-action" onClick={onClose}>{t('Close')}</button></div>
+  return <section className="ux-panel automation-history" aria-label={t('History of {0}', history.rule.name)}>
+    <div className="ux-panel-head"><div><h2>{t('History of {0}', history.rule.name)}</h2></div>
+      <button type="button" className="ux-button ux-button-small" onClick={onClose}>{t('Close')}</button></div>
     <p className="muted">{t('Evaluations and proposals are not transaction evidence. Executions, reconciliation and evidence are in your runs.')}</p>
     <h3>{t('Proposals')}</h3>
     {history.occurrences.length ? <ul className="automation-history-list">{history.occurrences.map(o => <li key={o.occurrenceId}>
@@ -263,9 +269,15 @@ export function CreateForm({ capabilities, owner, busy, run, initial, onCreated,
       asset: initial?.asset ?? (base.kind === 'SCHEDULED_DCA' ? capabilities.routes.find(r => r.executable)?.asset : capabilities.observable[0]) ?? base.asset };
   });
   const [step, setStep] = useState(initialStep), [issue, setIssue] = useState<string | null>(null);
+  // What the owner typed in percent; the draft keeps the exact basis points (or an invalid marker validation refuses).
+  const [percent, setPercent] = useState(() => ({ slippageBps: bpsToPercent(d.slippageBps), maxSlippage: d.maxSlippage ? bpsToPercent(d.maxSlippage) : '' }));
   const heading = useRef<HTMLHeadingElement | null>(null);
   const move = (next: number) => { setStep(next); onStepChange?.(next); setIssue(null); requestAnimationFrame(() => heading.current?.focus()); };
   const set = <K extends keyof Draft>(key: K, value: Draft[K]) => { const next = { ...d, [key]: value }; setD(next); onDraftChange?.(next); setIssue(null); };
+  const setPercentField = (key: 'slippageBps' | 'maxSlippage', text: string) => {
+    setPercent(prior => ({ ...prior, [key]: text }));
+    set(key, key === 'maxSlippage' && !text ? '' : percentToBps(text) ?? INVALID_PERCENT);
+  };
 
   const routes = useMemo(() => capabilities.routes.filter(r => r.asset === d.asset), [capabilities, d.asset]);
   const route: RouteCapability | undefined = routes.find(r => r.network === d.network);
@@ -330,12 +342,12 @@ export function CreateForm({ capabilities, owner, busy, run, initial, onCreated,
     </div>
     <details className="automation-advanced"><summary>{t('Advanced settings')}</summary><div className="automation-grid">
       {d.kind !== 'DAILY_WATCH' && <>
-        {d.source === 'ROUTE' && field(t('Slippage (bps)'), <input inputMode="numeric" value={d.slippageBps} onChange={e => set('slippageBps', e.currentTarget.value.trim())} required/>)}
+        {d.source === 'ROUTE' && field(t('Max price difference (%)'), <input inputMode="decimal" value={percent.slippageBps} onChange={e => setPercentField('slippageBps', e.currentTarget.value.trim())} required/>)}
         {field(t('Max per execution'), <input inputMode="decimal" value={d.maxPerExecution} placeholder={d.amount} onChange={e => set('maxPerExecution', e.currentTarget.value.trim())}/>)}
         {field(t('Max amount per period'), <span className="automation-pair"><input inputMode="decimal" aria-label={t('Max amount per period')} value={d.periodAmount} onChange={e => set('periodAmount', e.currentTarget.value.trim())}/>{periodSelect(d.periodAmountPeriod, v => set('periodAmountPeriod', v), 'Amount period')}</span>)}
         {field(t('Max proposals per period'), <span className="automation-pair"><input inputMode="numeric" aria-label={t('Max proposals per period')} value={d.periodCount} onChange={e => set('periodCount', e.currentTarget.value.trim())}/>{periodSelect(d.periodCountPeriod, v => set('periodCountPeriod', v), 'Proposal period')}</span>)}
         {field(t('Cooldown (minutes)'), <input inputMode="numeric" value={d.cooldown} onChange={e => set('cooldown', e.currentTarget.value.trim())}/>)}
-        {field(t('Max slippage (bps)'), <input inputMode="numeric" value={d.maxSlippage} onChange={e => set('maxSlippage', e.currentTarget.value.trim())}/>)}
+        {field(t('Max price difference limit (%)'), <input inputMode="decimal" value={percent.maxSlippage} onChange={e => setPercentField('maxSlippage', e.currentTarget.value.trim())}/>)}
       </>}
       {field(t('Expires on'), <input type="date" value={d.expires} onChange={e => set('expires', e.currentTarget.value)}/>)}
     </div></details></>}
@@ -351,8 +363,8 @@ export function CreateForm({ capabilities, owner, busy, run, initial, onCreated,
           <div><dt>{t('Max amount per period')}</dt><dd>{d.periodAmount ? `${d.periodAmount} / ${t(d.periodAmountPeriod.toLowerCase())}` : t('Not set')}</dd></div>
           <div><dt>{t('Max proposals per period')}</dt><dd>{d.periodCount ? `${d.periodCount} / ${t(d.periodCountPeriod.toLowerCase())}` : t('Not set')}</dd></div>
           <div><dt>{t('Cooldown (minutes)')}</dt><dd>{d.cooldown || '0'}</dd></div>
-          {d.source === 'ROUTE' && <div><dt>{t('Slippage (bps)')}</dt><dd>{d.slippageBps}</dd></div>}
-          <div><dt>{t('Max slippage (bps)')}</dt><dd>{d.maxSlippage || t('Not set')}</dd></div>
+          {d.source === 'ROUTE' && <div><dt>{t('Max price difference')}</dt><dd>{percentLabel(d.slippageBps)}</dd></div>}
+          <div><dt>{t('Max price difference limit')}</dt><dd>{d.maxSlippage ? percentLabel(d.maxSlippage) : t('Not set')}</dd></div>
         </>}
         <div><dt>{t('Expires on')}</dt><dd>{d.expires ? `${d.expires} UTC` : t('No expiration')}</dd></div>
       </dl>
@@ -460,25 +472,36 @@ export function AutomationsWorkspace({ owner: ownerProp, proof, onPropose, openC
   const delegationBlocked = delegation.overview?.availability.executor ?? delegation.code;
   const rules = overview?.rules ?? [], byId = new Map(rules.map(r => [r.ruleId, r]));
   const live = rules.filter(r => r.state !== 'ARCHIVED'), archived = rules.filter(r => r.state === 'ARCHIVED');
-  return <section className="automations" aria-label={t('Automations')}>
-    <header className="secondary-workspace-heading"><h1>{t('Automations')}</h1>
-      <p>{t('Build a routine, watch prices and review opportunities on your terms.')}</p>{overview && owner && <span className="automation-session">{t('Wallet session verified')} · <code>{owner.address.slice(0, 6)}…{owner.address.slice(-4)}</code></span>}</header>
+  const choose = (kind: Kind) => { setMode('CONFIRM'); setCreationDraft({}); setCreationStep(1); setCreating(kind); };
+  return <section className="ux-page automations" aria-label={t('Automations')}>
+    <header className="ux-page-head"><div><h1>{t('Automations')}</h1>
+      <p>{t('Routines that prepare proposals. You review and sign each one.')}</p></div>
+      {overview && owner && <span className="automation-session">{t('Wallet session verified')} · <code>{owner.address.slice(0, 6)}…{owner.address.slice(-4)}</code></span>}</header>
     <p className="workspace-notice" role="status">{t(notice)}</p>
-    {error && <div className="automation-read-error" role="alert"><p>{text.error(error)}</p><button type="button" className="workspace-action" onClick={() => void refresh()}>{t('Retry')}</button></div>}
+    {error && <div className="ux-panel ux-notice automation-read-error" role="alert"><p>{text.error(error)}</p><button type="button" className="ux-button ux-button-small" onClick={() => void refresh()}>{t('Retry')}</button></div>}
     {enabled === null ? <p role="status">{t('Loading automations…')}</p>
-      : !enabled ? <div className="workspace-empty"><h3>{t('Automations are not enabled on this deployment.')}</h3></div>
-        : !owner ? <div className="workspace-empty"><p>{t('Connect a wallet from the header to use automations.')}</p></div>
-          : verificationRequired ? <div className="workspace-empty"><p>{t('Verify wallet ownership to use automations.')}</p>{proof && <WalletProof namespace={owner.namespace} proof={{ ...proof, proven: null }}/>}</div>
-            : !overview ? <div role="status"><p>{t(error ? 'Automations could not be loaded. Try again.' : 'Loading automations…')}</p>{error && <button type="button" className="workspace-action" onClick={() => void refresh()}>{t('Retry')}</button>}</div> : <>
-              <section className="workspace-section automation-create-section" aria-labelledby="automation-create">
-                <div className="workspace-section-heading"><div><h2 id="automation-create">{t('Create an automation')}</h2></div>{(creating || canvas) && !canvas && <button type="button" className="workspace-action" onClick={() => setCreating(null)}>{t('Close')}</button>}</div>
+      // P0 approved UX (board 12): a deployment without automations shows one "Coming soon" state, never a form or a disabled control.
+      : !enabled ? <section className="ux-panel ux-empty automation-coming-soon" aria-label={t('Automations')}><StatusTag tone="soon">{t('Coming soon')}</StatusTag>
+        <h2>{t('Recurring buys, price triggers and daily watches')}</h2><p>{t('Automations are not enabled on this deployment.')}</p></section>
+        : !owner ? <div className="ux-panel ux-list-empty"><p>{t('Connect a wallet from the header to use automations.')}</p></div>
+          : verificationRequired ? <div className="ux-panel ux-list-empty"><p>{t('Verify wallet ownership to use automations.')}</p>{proof && <WalletProof namespace={owner.namespace} proof={{ ...proof, proven: null }}/>}</div>
+            : !overview ? <div role="status"><p>{t(error ? 'Automations could not be loaded. Try again.' : 'Loading automations…')}</p>{error && <button type="button" className="ux-button ux-button-small" onClick={() => void refresh()}>{t('Retry')}</button>}</div> : <>
+              {/* Board 12: "Waiting for you" opens the page only while something waits; empty, the page starts with creating. */}
+              {overview.pending.length > 0 && <section className="ux-panel ux-panel-attention automation-waiting" aria-labelledby="automation-pending">
+                <div className="ux-panel-head"><div><h2 id="automation-pending">{t('Waiting for you')}</h2><span className="ux-count">{overview.pending.length}</span></div>
+                  <button type="button" className="ux-button ux-button-small" disabled={busy} onClick={() => void refresh()}>{t('Refresh')}</button></div>
+                <div className="automation-list">{overview.pending.map(o => <PendingCard key={o.occurrenceId} o={o} rule={byId.get(o.ruleId)} highlighted={o.occurrenceId === highlight}
+                  capabilities={overview.capabilities} busy={busy} run={run} onPropose={command => onPropose?.(command)} owner={owner}/>)}</div>
+              </section>}
+              <section className="ux-panel automation-create-section" aria-labelledby="automation-create">
+                <div className="ux-panel-head"><div><h2 id="automation-create">{t('Create an automation')}</h2></div>{creating && !canvas && <button type="button" className="ux-button ux-button-small" onClick={() => setCreating(null)}>{t('Close')}</button>}</div>
                 {canvas ? <CanvasAutomation canvas={canvas} owner={owner} delegationReady={delegationReady} delegationBlocked={delegationBlocked ?? null}
                   onAuthorized={() => { void refresh(); void refreshDelegation(); }} confirm={route => <CreateForm key={JSON.stringify(route)} capabilities={overview.capabilities} owner={owner} busy={busy} run={run} onCreated={() => setCreating(null)} initial={{ name: canvas.name.slice(0, 80), source: 'ROUTE', asset: route.asset, side: route.side, network: route.network, amount: route.amount, slippageBps: String(route.slippageBps) }}/>}/>
                   : <>
                     {!creating ? <><div className="automation-choices">{(['SCHEDULED_DCA', 'PRICE_TRIGGER', 'DAILY_WATCH'] as const).map(kind => {
                       const available = kind === 'SCHEDULED_DCA' ? overview.capabilities.routes.some(r => r.executable) : overview.capabilities.observable.length > 0;
-                      return <button key={kind} type="button" className="automation-choice" disabled={!available} onClick={() => { setMode('CONFIRM'); setCreationDraft({}); setCreationStep(1); setCreating(kind); }}><span className="automation-choice-icon" aria-hidden="true">{kind === 'SCHEDULED_DCA' ? '↻' : kind === 'PRICE_TRIGGER' ? '↗' : '◎'}</span><strong>{t(kind === 'SCHEDULED_DCA' ? 'Recurring buy' : kind === 'PRICE_TRIGGER' ? 'Price trigger' : 'Price watch')}</strong><span>{t(available ? kind === 'SCHEDULED_DCA' ? 'Prepare a trade on a regular schedule.' : kind === 'PRICE_TRIGGER' ? 'Respond when a watched price crosses your threshold.' : 'Get a regular price update. Decide what to do next.' : kind === 'SCHEDULED_DCA' ? 'Trade proposals are unavailable under this deployment’s policy.' : 'A verified price source is required on this deployment.')}</span></button>;
-                    })}</div><div className="automation-chat-entry">{openChat && <button type="button" className="workspace-action" onClick={openChat}>{t('Create with FloFi Chat')}</button>}<span className="muted">{t('Describe your routine. Review it before saving.')}</span></div></>
+                      return <button key={kind} type="button" className="automation-choice" disabled={!available} onClick={() => choose(kind)}><span className="automation-choice-icon" aria-hidden="true">{kind === 'SCHEDULED_DCA' ? '↻' : kind === 'PRICE_TRIGGER' ? '↗' : '◎'}</span><strong>{t(KIND_LABEL[kind])}</strong><span>{t(available ? kind === 'SCHEDULED_DCA' ? 'Prepares a buy of a fixed amount every week or every day.' : kind === 'PRICE_TRIGGER' ? 'Prepares a buy or a sell when the price reaches the value you chose.' : 'Tells you regularly how the assets you choose are doing.' : kind === 'SCHEDULED_DCA' ? 'Trade proposals are unavailable under this deployment’s policy.' : 'A verified price source is required on this deployment.')}</span></button>;
+                    })}</div>{openChat && <div className="automation-chat-entry"><span className="muted">{t('Prefer to describe?')}</span><button type="button" className="ux-link" onClick={openChat}>{t('Create with chat')}</button></div>}</>
                       : <><div className="delegation-mode" role="radiogroup" aria-label={t('Execution')}>
                         <label><input type="radio" name="automation-mode" checked={mode === 'CONFIRM'} onChange={() => setMode('CONFIRM')}/> {t('Ask every time')}</label>
                         <label><input type="radio" name="automation-mode" checked={mode === 'DELEGATED'} disabled={!proven || !delegationReady || Boolean(delegationBlocked) || creating === 'DAILY_WATCH'} onChange={() => setMode('DELEGATED')}/> {t('Automatic within limits')}</label>
@@ -486,41 +509,35 @@ export function AutomationsWorkspace({ owner: ownerProp, proof, onPropose, openC
                         {mode === 'DELEGATED' && proven && delegationReady && !delegationBlocked ? <DelegatedCreate owner={owner} busy={busy} run={run} onReview={setReview}/>
                           : <CreateForm key={`${ownerKey}:${creating}`} capabilities={overview.capabilities} owner={owner} busy={busy} run={run} onCreated={() => setCreating(null)} initialStep={creationStep} onStepChange={setCreationStep} onDraftChange={setCreationDraft} initial={{ kind: creating, ...(creating === 'PRICE_TRIGGER' && !overview.capabilities.routes.some(r => r.executable) ? { source: 'NONE' as const } : {}), ...creationDraft }}/>}</>}
                   </>}
-                <details className="automation-availability"><summary>{t('Availability and prices')}</summary><p>{t('Prices: {0}.', overview.capabilities.priceSource === 'chainlink' ? t('Chainlink feeds on Base (read-only)') : overview.capabilities.priceSource === 'fixture' ? t('test fixture (MOCKED)') : t('no price source on this deployment'))}</p>
+                <details className="ux-details automation-availability"><summary>{t('Availability and prices')}</summary><p>{t('Prices: {0}.', overview.capabilities.priceSource === 'chainlink' ? t('Chainlink feeds on Base (read-only)') : overview.capabilities.priceSource === 'fixture' ? t('test fixture (MOCKED)') : t('no price source on this deployment'))}</p>
                   {Array.from(new Set(overview.capabilities.routes.filter(r => !r.executable).map(r => r.reason).filter((reason): reason is string => Boolean(reason)))).map(reason => <p key={reason}>{text.error(reason)}</p>)}
                 </details>
               </section>
-              <section className="workspace-section" aria-labelledby="automation-pending">
-                <div className="workspace-section-heading"><div><h2 id="automation-pending">{t('Waiting for you')}</h2><span className="workspace-count">{overview.pending.length}</span></div>
-                  <button type="button" className="workspace-action" disabled={busy} onClick={() => void refresh()}>{t('Refresh')}</button></div>
-                {overview.pending.length ? <div className="automation-list">{overview.pending.map(o => <PendingCard key={o.occurrenceId} o={o} rule={byId.get(o.ruleId)} highlighted={o.occurrenceId === highlight}
-                  capabilities={overview.capabilities} busy={busy} run={run} onPropose={command => onPropose?.(command)} owner={owner}/>)}</div>
-                  : <div className="workspace-empty"><p>{t('Nothing is waiting for you. FloFi will ask here when an automation is due or a condition is met.')}</p></div>}
-              </section>
-              <section className="workspace-section" aria-labelledby="automation-rules">
-                <div className="workspace-section-heading"><div><h2 id="automation-rules">{t('Your automations')}</h2><span className="workspace-count">{live.length}</span></div></div>
+              <section className="ux-panel" aria-labelledby="automation-rules">
+                <div className="ux-panel-head"><div><h2 id="automation-rules">{t('Your automations')}</h2><span className="ux-count">{live.length}</span></div>
+                  {overview.pending.length === 0 && <button type="button" className="ux-button ux-button-small" disabled={busy} onClick={() => void refresh()}>{t('Refresh')}</button>}</div>
                 {live.length ? <div className="automation-list">{live.map(rule => <RuleCard key={rule.ruleId} rule={rule} busy={busy} run={run} owner={owner}
                   onHistory={() => void loadHistory(rule.ruleId)}/>)}</div>
-                  : <div className="workspace-empty"><p>{t('No automations yet. Choose a routine above.')}</p></div>}
-                {archived.length > 0 && <details className="automation-archived"><summary>{t('Archived ({0})', String(archived.length))}</summary>
+                  : <p className="ux-panel-text">{t('No automations yet. Choose a routine above.')}</p>}
+                {archived.length > 0 && <details className="ux-details automation-archived"><summary>{t('Archived ({0})', String(archived.length))}</summary>
                   <div className="automation-list">{archived.map(rule => <RuleCard key={rule.ruleId} rule={rule} busy={busy} run={run} owner={owner}
                     onHistory={() => void loadHistory(rule.ruleId)}/>)}</div></details>}
               </section>
               {history && <HistoryPanel history={history} onClose={() => setHistory(null)}/>}
-              {delegationReady && <section className="workspace-section" aria-labelledby="automation-delegated">
-                <div className="workspace-section-heading"><div><h2 id="automation-delegated">{t('Automatic within limits')}</h2>
-                  <span className="workspace-count">{delegation.overview!.authorizations.length}</span></div>
-                  <button type="button" className="workspace-action" disabled={busy} onClick={() => void refreshDelegation()}>{t('Refresh')}</button></div>
+              {delegationReady && <section className="ux-panel" aria-labelledby="automation-delegated">
+                <div className="ux-panel-head"><div><h2 id="automation-delegated">{t('Automatic within limits')}</h2>
+                  <span className="ux-count">{delegation.overview!.authorizations.length}</span></div>
+                  <button type="button" className="ux-button ux-button-small" disabled={busy} onClick={() => void refreshDelegation()}>{t('Refresh')}</button></div>
                 {review && <AuthorizationReview key={review.challenge} review={review} owner={owner} busy={busy} run={run} onDone={() => setReview(null)}/>}
                 <DelegatedAuthorizations overview={delegation.overview!} owner={owner} busy={busy} run={run} onReview={setReview}/>
               </section>}
-              {overview.recent.length > 0 && <section className="workspace-section" aria-labelledby="automation-recent">
-                <div className="workspace-section-heading"><div><h2 id="automation-recent">{t('Recent proposals')}</h2></div></div>
+              {overview.recent.length > 0 && <section className="ux-panel" aria-labelledby="automation-recent">
+                <div className="ux-panel-head"><div><h2 id="automation-recent">{t('Recent proposals')}</h2></div></div>
                 <ul className="automation-history-list">{overview.recent.map(o => <li key={o.occurrenceId}>{o.ruleName} · <When iso={o.dueAt} zone={byId.get(o.ruleId)?.timezone ?? 'UTC'}/> · {t(OCCURRENCE_LABEL[o.state] ?? o.state)}
                   {o.approval?.status === 'APPLIED' && o.approval.runsComplete === false && <> · {t('Run status could not be read now — not evidence that nothing was sent')}</>}
                   {o.approval?.runs.map(r => <span key={r.executionId}> · {t(automationRunLabel(r))} · <a href={`/app/dashboard/runs/${encodeURIComponent(r.executionId)}`}>{t('Open run')}</a></span>)}</li>)}</ul>
               </section>}
-              <details className="automation-notification-settings"><summary>{t('Notification settings')}</summary><Notifications overview={overview} owner={owner} busy={busy} run={run}/></details>
+              <details className="ux-details automation-notification-settings"><summary>{t('Notification settings')}</summary><Notifications overview={overview} owner={owner} busy={busy} run={run}/></details>
             </>}
   </section>;
 }

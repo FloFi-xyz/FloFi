@@ -356,7 +356,7 @@ test('header wallet network follows wallet changes without rewriting action amou
     await setSupplyWalletChain(page, value === 'MAINNET' ? '0x2105' : '0x14a34');
     await expect(source).toHaveValue('0');
     await expect(page.locator('.summary-bar')).toHaveAttribute('data-workflow-revision', '0');
-    await expect(wallet).toContainText(value === 'MAINNET' ? 'Base (8453)' : 'Base Sepolia');
+    await expect(wallet).toContainText(value === 'MAINNET' ? 'Base' : 'Base Sepolia');
     await expect(page.getByRole('button', { name: 'Simulate workflow', exact: true })).toBeDisabled();
     await expect(editorSectionAction(page, 'Execute')).toBeDisabled();
   }

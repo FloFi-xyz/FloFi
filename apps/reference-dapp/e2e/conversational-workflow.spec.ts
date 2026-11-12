@@ -80,7 +80,7 @@ async function runtimeReady(page: Page) {
 async function chatReview(page: Page, option = 'Review workflow') {
   await runtimeReady(page);
   await pick(page, option);
-  await expect(chat(page)).toContainText(/Simulating your workflow|Simulando o seu workflow/);
+  await expect(chat(page)).toContainText(/Simulating your workflow|Simulando o seu (fluxo|workflow)/);
   await expect(flofi(page)).toContainText(/Do you confirm this workflow\?|Você confirma este workflow\?/, { timeout: 30_000 });
   await expectEditorSection(page, 'Build');
 }
@@ -90,7 +90,7 @@ test('Build 0 request → card at once → Review in chat → workflow confirmat
   const owner = await setup(page, request, { entry: true });
   // BUILD0-UX-001: the first request is typed in Build 0; the same conversation commits it and continues in the Build 1 chat.
   await page.locator('#build-entry-request').fill('swap 1 USDC to WETH on Base Sepolia slippage 50 bps');
-  await page.getByRole('button', { name: 'Create strategy', exact: true }).click();
+  await page.getByRole('button', { name: 'Create workflow', exact: true }).click();
   await expectEditorSection(page, 'Build');
   await expect(chat(page).locator('.message.you > p')).toHaveText(['swap 1 USDC to WETH on Base Sepolia slippage 50 bps']);
   await expect(flofi(page)).toContainText('Swap added to your workflow: 1 USDC');
@@ -244,22 +244,22 @@ test('an unresolved wallet response restored after reload is followed read-only:
 for (const viewport of [{ width: 1440, height: 1000 }, { width: 390, height: 844 }]) test(`Portuguese chat journey at ${viewport.width}px: card, Review and confirmation questions in PT-BR`, async ({ page, request, networkGuard }) => {
   const owner = await setup(page, request, { language: 'PT', viewport });
   await say(page, 'swap 1 USDC to WETH on Base Sepolia slippage 50 bps');
-  await expect(flofi(page)).toContainText('Quer adicionar outra ação ou revisar o seu workflow?');
+  await expect(flofi(page)).toContainText('Quer adicionar outra ação ou revisar o seu fluxo?');
   await runtimeReady(page);
   await say(page, 'Revisar workflow');
-  await expect(flofi(page)).toContainText('Você confirma este workflow?', { timeout: 30_000 });
-  await expect(flofi(page).locator('.conversation-review')).toHaveAttribute('aria-label', 'Revisão do workflow');
+  await expect(flofi(page)).toContainText('Você confirma este fluxo?', { timeout: 30_000 });
+  await expect(flofi(page).locator('.conversation-review')).toHaveAttribute('aria-label', 'Revisão do fluxo');
   await expect(flofi(page).locator('.conversation-review')).toContainText('Estimativas desta simulação');
   await pick(page, 'Sim, confirmo');
-  await expect(flofi(page)).toContainText('Quer executar este workflow agora?');
+  await expect(flofi(page)).toContainText('Quer executar este fluxo agora?');
   await pick(page, 'Agora não');
   await expect(flofi(page)).toContainText('Nada foi assinado nem enviado.');
   expect(owner.requested()).toBe(0);
   // The chat stays usable on every stage, and the layout never scrolls sideways.
   // BUILD-FLOFI-CHAT-EDITOR-UX-001: Simulate is the Editor's simulation section. BUILD-FLOFI-BUILDER-UX-002: it opens from the Editor's
   // Criar → Simular → Executar stepper, which replaced the footer's section buttons with the same target.
-  await page.locator('nav.tabs button', { hasText: 'Editor' }).click();
-  await page.getByRole('navigation', { name: 'Etapas do editor' }).getByRole('button', { name: 'Simular', exact: true }).click();
+  // P0 approved UX (board 03b): the stepper sits in the top bar (the former tabs are gone).
+  await openEditorSection(page, 'Simulate');
   await expect(page.locator('.stage-with-chat #mock-prompt')).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(0);
   networkGuard.assertClean();

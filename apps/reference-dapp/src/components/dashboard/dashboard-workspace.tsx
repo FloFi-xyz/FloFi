@@ -17,11 +17,14 @@ import { RunDetailView } from './run-detail-view';
 
 /**
  * BUILD-FLOFI-CHAT-E2E-DASHBOARD-UX-001: `records` renders this wallet's execution history inside Your workflows (executed records and records
- * that need attention); the Dashboard (`dashboard`) keeps the overview: the wallet portfolio, the current execution and a records summary.
+ * that need attention, in its one list); the Dashboard (`dashboard`) keeps the overview: what needs the owner, the current execution, the
+ * wallet portfolio and one line of history.
  */
-export function DashboardWorkspace({ workflowName, progress, recovery, wallet, context, runId, build, execute, navigate, mode = 'dashboard', portfolio, openWorkflow, signInPrompt }: {
+export function DashboardWorkspace({ workflowName, progress, recovery, wallet, context, runId, build, create, execute, navigate, mode = 'dashboard', portfolio, openWorkflow, signInPrompt }: {
   workflowName: string; progress: ExecutionLifecycle; recovery: ExecutionRecovery; wallet: ReviewWallet; context: ReviewContext;
   runId: string | null; build(): void; execute(): void; navigate(path: string): void;
+  /** P0 approved UX (board 10): the Dashboard's "Create workflow" opens the Chat entry when the shell passes it (otherwise `build`). */
+  create?: (() => void) | undefined;
   mode?: 'dashboard' | 'records'; portfolio?: ReactNode; openWorkflow?: OpenWorkflow | undefined; signInPrompt?: boolean;
 }) {
   const sharedWallet = useBuild009Wallet();
@@ -134,7 +137,7 @@ export function DashboardWorkspace({ workflowName, progress, recovery, wallet, c
   const runs = dashboardRunIndex(account, snapshot?.runs ?? [], visibleCurrent).filter(view => removed?.owner !== account || !removed.ids.includes(view.run.runId));
   return <DashboardView account={account} connection={snapshot?.connection ?? null} runs={runs} hasMore={snapshot?.hasMore ?? false}
     loadMore={loadMore} loadingMore={loadingMore} pageIssue={pageIssue}
-    loading={loading} build={build} openRun={id => navigate(`/app/dashboard/runs/${encodeURIComponent(id)}${mode === 'records' ? '#from-workflows' : ''}`)} verify={() => void verify()} verifying={verifying}
+    loading={loading} build={build} create={create} openRun={id => navigate(`/app/dashboard/runs/${encodeURIComponent(id)}${mode === 'records' ? '#from-workflows' : ''}`)} verify={() => void verify()} verifying={verifying}
     verificationIssue={verificationIssue?.account === account ? verificationIssue.message : null} refresh={() => refresh(value => value + 1)} {...history ? { history } : {}}
     mode={mode} portfolio={portfolio} openRecords={() => navigate('/app/workflows')} openWorkflow={openWorkflow} signInPrompt={Boolean(signInPrompt)}/>;
 }

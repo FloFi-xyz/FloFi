@@ -111,10 +111,10 @@ for (const theme of ['Light', 'Dark'] as const) for (const layout of ['standard'
         expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
         const transform = () => graph.locator('.react-flow__viewport').getAttribute('style');
         const before = await transform();
-        await controls.getByRole('slider', { name: 'Canvas zoom' }).press('ArrowLeft');
+        await controls.getByRole('button', { name: 'Zoom out', exact: true }).click();
         await expect.poll(transform).not.toBe(before);
         const zoomedOut = await transform();
-        await controls.getByRole('slider', { name: 'Canvas zoom' }).press('ArrowRight');
+        await controls.getByRole('button', { name: 'Zoom in', exact: true }).click();
         await expect.poll(transform).not.toBe(zoomedOut);
         await controls.getByRole('button', { name: 'Fit workflow', exact: true }).click();
         await expect(graph.locator('.composer-card').first()).toBeInViewport();

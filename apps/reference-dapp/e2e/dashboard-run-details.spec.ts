@@ -24,7 +24,7 @@ test.beforeAll(async () => {
 test.beforeEach(async ({ page }) => {
   const found: string[] = []; errors.set(page, found); page.on('pageerror', error => found.push(error.message));
   await page.goto('/app/dashboard');
-  await expect(page.getByRole('heading', { name: 'Your execution workspace' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Dashboard', level: 1, exact: true })).toBeVisible();
   await expect.poll(() => page.locator('.main').evaluate(element => getComputedStyle(element).paddingLeft)).not.toBe('0px');
   const styles = await page.locator('link[rel="stylesheet"]').evaluateAll(links => links.map(link => link.outerHTML).join(''));
   const fontClasses = await page.locator('html').getAttribute('class');
@@ -48,7 +48,7 @@ test('saved run summary, actual values, archive evidence and secondary technical
   await expect(page.getByRole('button', { name: 'Authorize in wallet', exact: true })).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'Back to the Canvas', exact: true })).toHaveCount(0);
   await page.getByRole('button', { name: 'Back to Dashboard' }).click();
-  await expect(page.getByRole('heading', { name: 'Your execution workspace' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Dashboard', level: 1, exact: true })).toBeVisible();
   expect(await page.evaluate(() => window.flofiRunDetailAcceptance.counts())).toEqual({ back: 1, reloaded: 0, executeNavigation: 0, built: 0 });
 });
 

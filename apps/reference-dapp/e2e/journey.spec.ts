@@ -26,7 +26,7 @@ async function signIn(scope: ReturnType<typeof card>) {
 }
 async function author(page: Page, text = 'Bridge 1 USDC from Base Sepolia to Arbitrum Sepolia') {
   await page.locator('#mock-prompt').fill(text);
-  await page.getByRole('button', { name: 'Send', exact: true }).click();
+  await page.getByRole('button', { name: 'Send message', exact: true }).click();
   await openProposalReview(page);
   await page.getByRole('button', { name: 'Apply proposal' }).click();
   await expect(page.locator('.react-flow__node[data-id="node-002"]')).toContainText('BridgeRouter');

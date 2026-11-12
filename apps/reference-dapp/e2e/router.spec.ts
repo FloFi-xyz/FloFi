@@ -12,7 +12,7 @@ const transactions = (page: Page) => region(page).getByRole('list', { name: 'Bas
 async function authorByChat(page: Page, text = 'Bridge 10 USDC from Base to Arbitrum', options: { rejectStep?: number } = {}) {
   await installRouterWallet(page, options); await openBuilder(page);
   await page.locator('#mock-prompt').fill(text);
-  await page.getByRole('button', { name: 'Send', exact: true }).click();
+  await page.getByRole('button', { name: 'Send message', exact: true }).click();
   await openProposalReview(page);
   await page.getByRole('button', { name: 'Apply proposal' }).click();
   await expect(page.locator('.react-flow__node[data-id="node-002"]')).toContainText('BridgeRouter');

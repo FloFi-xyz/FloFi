@@ -84,7 +84,9 @@ async function readBuildEstimateValue(input: unknown, env: Env = process.env,
   seams: { rpc?: Rpc; http?: ReturnType<typeof createJupiterHttp>; now?: () => Date; catalog?: CatalogSwapRuntime; prices?: PriceSource | null;
     discover?: typeof readBridgeDiscovery; correlationId?: string; preview?: (flow: FlowName, args: readonly unknown[], options: Parameters<typeof cloudPreview>[2]) => Promise<FlowResult<unknown> | null>;
     /** P0 catalog reliability: the browser cancelled this estimate (a newer edit superseded it): the API abandons the preview it started. */
-    signal?: AbortSignal } = {}): Promise<BuildEstimateResult> {
+    signal?: AbortSignal;
+    /** P0 (2026-11-12): whether a certified Router pair executes for the owner here (default: the Router flow's own `info`). */
+    routerExecution?: (network: import('./router-runtime.ts').RouterNetwork, signal?: AbortSignal) => Promise<boolean> } = {}): Promise<BuildEstimateResult> {
   try {
     const prices = () => seams.prices !== undefined ? seams.prices : env === process.env ? processPrices === undefined ? processPrices = deploymentPriceSource(env) : processPrices : deploymentPriceSource(env);
     if (!input || typeof input !== 'object') throw Error('ESTIMATE_INVALID');
@@ -95,7 +97,7 @@ async function readBuildEstimateValue(input: unknown, env: Env = process.env,
     const now = seams.now ?? (() => new Date());
     const workflowHash = hashArtifactBytes('semantic-workflow', new TextEncoder().encode(JSON.stringify(workflow)));
     if (node.actionType === 'asset.bridge') return await readBridgeBuildEstimate(workflow, node.nodeId, workflowHash,
-      typeof owner === 'string' ? owner : null, typeof destinationWallet === 'string' ? destinationWallet : null, env, now, seams.discover, seams.correlationId, seams.signal);
+      typeof owner === 'string' ? owner : null, typeof destinationWallet === 'string' ? destinationWallet : null, env, now, seams.discover, seams.correlationId, seams.signal, seams.routerExecution);
     if (node.actionType !== 'asset.swap.exact-input') throw Error('ESTIMATE_UNSUPPORTED');
     const profile = publicSwapProfile(node.chainId);
     if (isHostedDeployment(env) && (profile || node.chainId === ORCA_WHIRLPOOLS_DEVNET.chain)) throw Error('TEST_NETWORK_NOT_AVAILABLE');

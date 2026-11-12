@@ -20,7 +20,7 @@ import type { Page } from '@playwright/test';
 import { query } from './automation-fixtures';
 import { assertDelegationHarness, chainControl, createDelegationOwner, evmWalletRequests, expect, installDelegationEvmWallet, SIGNING_METHODS, test } from './delegation-fixtures';
 import { sendChatCommand, proveConnectedEvmWallet } from './fixtures';
-import { openBuilder } from './build-entry-navigation';
+import { chooseWorkflowMenuItem, openBuilder } from './build-entry-navigation';
 
 type Sends = { evm: number; solana: number };
 const RETIRED = 'Automatic execution is retired: it ran from FloFi\'s account, and FloFi never pays your network fees. Choose "Ask every time": your own wallet confirms and pays.';
@@ -117,8 +117,8 @@ test.describe('BUILD-FLOFI-UNIVERSAL-WORKFLOW-002 retired executor-funded automa
     for (const sentence of ['swap 50 USDC to WETH on Base Sepolia slippage 50 bps', 'swap 40 USDC to WETH on Base Sepolia slippage 50 bps']) {
       await sendChatCommand(page, sentence);
     }
-    // UX-002: the existing action is the clock icon beside the workflow name's rename/save controls.
-    await page.locator('.build-canvas-head .canvas-name').getByRole('button', { name: 'Automate this workflow', exact: true }).click();
+    // UX-002 / P0 approved UX (board 04): the existing action is an item of the Canvas header's ··· (More options) menu.
+    await chooseWorkflowMenuItem(page, 'Automate this workflow');
 
     await expect(page).toHaveURL(/\/app\/automations$/);
     const panel = page.getByRole('region', { name: 'Automate this workflow', exact: true });

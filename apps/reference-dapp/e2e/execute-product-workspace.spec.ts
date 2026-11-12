@@ -5,17 +5,21 @@ import { fileURLToPath } from 'node:url';
 import { configureCanvasAction } from './composer-authoring-fixtures';
 import type { Page } from '@playwright/test';
 import { reviewNow } from '../src/test-utils/review-fixture';
-import { editorTab, expectEditorSection, openBuilder, openEditorSection, reloadBuilder } from './build-entry-navigation';
+import { editorSteps, expectEditorSection, openBuilder, openEditorSection, openReviewTechnicalDetails, reloadBuilder } from './build-entry-navigation';
 
 // Mount Execute with a real read-only canvas to verify native clicks, expiry and wallet updates.
 // These normalized fixtures do not claim to exercise RPC or wallet signatures.
 let bundle: string;
 const browserErrors = new WeakMap<Page, string[]>();
+// P0 approved UX (board 03b): the former Dashboard | Chat | Editor stage tabs are gone; the Editor's Create → Simulate → Execute stepper sits in the
+// top bar, so it is the stage navigation whose labels must fit their controls at every width.
+// On a narrow screen only the current step shows its label (the others keep it for assistive technology only), so what is measured is the
+// step's visible content.
 async function expectStageNavigationFits(page: Page) {
-  const stages = await page.getByRole('navigation', { name: 'Workflow stages' }).locator('button').evaluateAll(buttons => buttons.map(button => {
-    const range = document.createRange(); range.selectNodeContents(button);
-    const content = range.getBoundingClientRect(), box = button.getBoundingClientRect();
-    return { label: button.textContent, left: box.left, right: box.right, contentLeft: content.left, contentRight: content.right };
+  const stages = await editorSteps(page).locator('button').evaluateAll(buttons => buttons.map(button => {
+    const box = button.getBoundingClientRect();
+    const shown = [...button.children].map(child => child.getBoundingClientRect()).filter(rect => rect.width > 1 && rect.height > 1);
+    return { label: button.textContent, left: box.left, right: box.right, contentLeft: Math.min(...shown.map(rect => rect.left)), contentRight: Math.max(...shown.map(rect => rect.right)) };
   }));
   for (const stage of stages) {
     expect(stage.contentLeft, stage.label ?? '').toBeGreaterThanOrEqual(stage.left);
@@ -238,10 +242,11 @@ test('the real shell preserves Build and embedded Review while Execute stays rea
   // summary; financial simulation is covered by the dedicated swap acceptance.
   await openEditorSection(page, 'Simulate');
   // BUILD-FLOFI-CHAT-E2E-FIX-002: in the chat-first workspace the summaries are an optional, collapsed details surface under the canvas.
+  // P0 approved UX (board 06): they are the Review panel's collapsed Technical details (beside the canvas from 1200 px).
   await expect(page.locator('#simulation-review')).toBeHidden();
-  await page.locator('.simulation-details > summary').click();
+  await openReviewTechnicalDetails(page);
   await expect(page.locator('#simulation-review')).toBeVisible();
-  await expect(page.getByRole('navigation', { name: 'Workflow stages' }).getByRole('button', { name: 'Review', exact: true })).toHaveCount(0);
+  await expect(editorSteps(page).getByRole('button', { name: 'Review', exact: true })).toHaveCount(0);
   await openEditorSection(page, 'Execute');
   await expect(page.locator('.execute-heading')).toHaveCount(0);
   await expect(page.getByRole('heading', { name: 'Your Workflow', exact: true })).toBeVisible();
@@ -253,13 +258,15 @@ test('the real shell preserves Build and embedded Review while Execute stays rea
   await expect(graph).toHaveAttribute('data-viewport', 'fitted');
   await expect(graph.locator('.composer-amount')).toHaveText('2.5 USDC');
   await expect(graph.locator('.composer-card input,.composer-card select')).toHaveCount(0);
-  // The wallet, network and environment lines live in the Dashboard; the header still names the workflow's network.
-  await expect(page.locator('.shell-network-row')).toContainText('Base Sepolia');
+  // The wallet, network and environment lines live in the Dashboard. P0 approved UX (board 03b): the header's passive "Workflow network" label is
+  // gone (its row stays empty while the wallet is on the workflow's network); the execution graph's card and the Canvas header chip name it.
+  await expect(page.locator('.shell-network-row')).toHaveAttribute('data-empty', 'true');
+  await expect(graph).toContainText('Base Sepolia');
   await assertNoFinancialCanvasAction(page);
   await expect(page.locator('#simulation-review')).toHaveCount(0);
   for (const theme of ['light', 'dark']) {
     await page.evaluate(value => document.documentElement.dataset.theme = value, theme);
-    await expectEditorSection(page, 'Execute'); await expect(editorTab(page)).toHaveClass('selected');
+    await expectEditorSection(page, 'Execute'); await expect(editorSteps(page).locator('[data-step-look="current"]')).toHaveCount(1);
     for (const width of [1440, 1024, 768, 375, 320]) {
       await page.setViewportSize({ width, height: 900 });
       await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
@@ -275,11 +282,13 @@ test('the real shell preserves Build and embedded Review while Execute stays rea
   await page.setViewportSize({ width: 1440, height: 900 });
   expect(await page.evaluate(() => (window as unknown as { executeWorkspaceRequests: string[] }).executeWorkspaceRequests.filter(method => /send|sign/i.test(method)))).toEqual([]);
   await page.getByRole('button', { name: 'Back to simulation', exact: true }).click();
-  await page.locator('.simulation-details > summary').click(); await expect(page.locator('#simulation-review')).toBeVisible();
+  await openReviewTechnicalDetails(page); await expect(page.locator('#simulation-review')).toBeVisible();
   await page.setViewportSize({ width: 320, height: 900 }); await expectStageNavigationFits(page);
-  await page.getByRole('button', { name: 'Back to the Canvas', exact: true }).click();
+  // P0 approved UX (board 06): the chat-first Simulate section has no "Back to the Canvas" of its own; the stepper's Create returns to it.
+  await openEditorSection(page, 'Build');
   await expectStageNavigationFits(page);
   await expect(page.locator('.build-flow-surface .composer-card')).toBeVisible();
+  await expect(page.getByRole('list', { name: 'Workflow networks', exact: true })).toContainText('Base Sepolia');
   await expect(page.getByRole('textbox', { name: 'Source amount (USDC)', exact: true })).toHaveValue('2.5');
 });
 

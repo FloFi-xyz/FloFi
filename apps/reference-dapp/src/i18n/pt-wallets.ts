@@ -2,12 +2,12 @@
 /** Canonical wallet selector, Credentials (wallets, cards, payment connections) and wallet-provider messages. */
 export const portugueseWallets: Readonly<Record<string, string>> = {
   // Wallet selector
-  'Connect a wallet': 'Ligar uma carteira', 'Add a wallet': 'Adicionar uma carteira',
+  'Connect a wallet': 'Conectar uma carteira', 'Add a wallet': 'Adicionar uma carteira',
   'Choose a wallet to prove ownership': 'Escolha uma carteira para verificar a titularidade',
   'Choose a Solana wallet to prove ownership': 'Escolha uma carteira Solana para verificar a titularidade',
   'Close wallet selector': 'Fechar seletor de carteiras',
   'FloFi opens only the wallet you choose. Connecting shares your public address; it never approves a transaction.':
-    'O FloFi abre apenas a carteira que escolher. Ligar partilha o seu endereço público; nunca aprova uma transação.',
+    'O FloFi abre apenas a carteira que escolher. Conectar partilha o seu endereço público; nunca aprova uma transação.',
   'Detected': 'Detetada', 'Last used': 'Usada recentemente', 'Other wallets': 'Outras carteiras', 'Not detected': 'Não detetada',
   '{0} on {1}': '{0} em {1}', '{0} on {1}, not detected': '{0} em {1}, não detetada',
   'No wallet detected in this browser. Install or enable a wallet extension, then refresh.':
@@ -15,32 +15,32 @@ export const portugueseWallets: Readonly<Record<string, string>> = {
   'No compatible wallet. Enable MetaMask or Rabby for this site and refresh; Brave Wallet cannot be used.':
     'Nenhuma carteira compatível. Ative o MetaMask ou o Rabby para este site e atualize a página; a Brave Wallet não pode ser usada.',
   'That wallet is no longer available. Refresh the page and choose it again.': 'Essa carteira já não está disponível. Atualize a página e escolha-a novamente.',
-  'Could not connect your Solana wallet. Check your wallet and try again.': 'Não foi possível ligar a sua carteira Solana. Verifique a carteira e tente novamente.',
-  'Solana wallet not connected': 'Carteira Solana não ligada',
-  'Connect Solana wallet and prove ownership': 'Ligar carteira Solana e verificar titularidade',
+  'Could not connect your Solana wallet. Check your wallet and try again.': 'Não foi possível conectar a sua carteira Solana. Verifique a carteira e tente novamente.',
+  'Solana wallet not connected': 'Carteira Solana não conectada',
+  'Connect Solana wallet and prove ownership': 'Conectar carteira Solana e verificar titularidade',
   // Credentials: wallets
   'Keep the wallets and cards you use with FloFi in one place. Saved credentials are references only: they never approve a transaction or a payment.':
-    'Mantenha num só lugar as carteiras e os cartões que usa com o FloFi. As credenciais guardadas são apenas referências: nunca aprovam uma transação ou um pagamento.',
+    'Mantenha num só lugar as carteiras e os cartões que usa com o FloFi. As credenciais salvas são apenas referências: nunca aprovam uma transação ou um pagamento.',
   'No wallets yet': 'Ainda sem carteiras', 'Add a wallet to save its public address here. FloFi never holds your keys.':
-    'Adicione uma carteira para guardar aqui o seu endereço público. O FloFi nunca guarda as suas chaves.',
-  'Active': 'Ativa', 'Connected · not saved': 'Ligada · não guardada', 'Saved': 'Guardada',
+    'Adicione uma carteira para salvar aqui o seu endereço público. O FloFi nunca guarda as suas chaves.',
+  'Active': 'Ativa', 'Connected · not saved': 'Ligada · não salva', 'Saved': 'Guardada',
   'Copy {0} address': 'Copiar endereço de {0}', 'Remove from this device': 'Remover deste dispositivo', 'Remove {0} from this device': 'Remover {0} deste dispositivo',
   'Removed from this device. The wallet stays in your FloFi account.': 'Removido deste dispositivo. A carteira continua na sua conta FloFi.', 'Address copied.': 'Endereço copiado.', 'Address could not be copied.': 'Não foi possível copiar o endereço.',
-  'Wallet name': 'Nome da carteira', 'Save name': 'Guardar nome', 'Wallet renamed.': 'Carteira renomeada.', 'Use 1–{0} characters.': 'Use 1–{0} caracteres.',
-  'Rename': 'Renomear', 'Rename {0}': 'Renomear {0}', 'Save {0}': 'Guardar {0}', 'Disconnect': 'Desligar', 'Disconnect {0}': 'Desligar {0}',
-  'Connect': 'Ligar', 'Connect {0}': 'Ligar {0}', 'Remove': 'Remover', 'Remove {0}': 'Remover {0}', 'Remove {0} from FloFi?': 'Remover {0} do FloFi?',
+  'Wallet name': 'Nome da carteira', 'Save name': 'Salvar nome', 'Wallet renamed.': 'Carteira renomeada.', 'Use 1–{0} characters.': 'Use 1–{0} caracteres.',
+  'Rename': 'Renomear', 'Rename {0}': 'Renomear {0}', 'Save {0}': 'Salvar {0}', 'Disconnect': 'Desconectar', 'Disconnect {0}': 'Desconectar {0}',
+  'Connect': 'Conectar', 'Connect {0}': 'Conectar {0}', 'Remove': 'Remover', 'Remove {0}': 'Remover {0}', 'Remove {0} from FloFi?': 'Remover {0} do FloFi?',
   'This also disconnects it.': 'Isto também a desliga.',
   "Only FloFi's reference is removed; the wallet and its assets are not affected.": 'Só a referência do FloFi é removida; a carteira e os seus ativos não são afetados.',
   '{0} removed from FloFi. Your wallet and its funds are unchanged.': '{0} removida do FloFi. A sua carteira e os seus fundos não foram alterados.',
-  '{0} saved to Credentials.': '{0} guardada nas Credenciais.', 'This wallet could not be saved.': 'Não foi possível guardar esta carteira.',
-  '{0} disconnected.': '{0} desligada.', "{0} isn't detected in this browser.": '{0} não foi detetada neste navegador.', '{0} did not connect.': '{0} não ligou.',
-  '{0} connected {1}, not this saved wallet. Choose {2} in {3} to use it.': '{0} ligou {1}, não esta carteira guardada. Escolha {2} em {3} para a usar.',
+  '{0} saved to Credentials.': '{0} salva nas Credenciais.', 'This wallet could not be saved.': 'Não foi possível salvar esta carteira.',
+  '{0} disconnected.': '{0} desconectada.', "{0} isn't detected in this browser.": '{0} não foi detetada neste navegador.', '{0} did not connect.': '{0} não ligou.',
+  '{0} connected {1}, not this saved wallet. Choose {2} in {3} to use it.': '{0} ligou {1}, não esta carteira salva. Escolha {2} em {3} para a usar.',
   // Credentials: cards and payment connections
   'Cards': 'Cartões', 'Add card': 'Adicionar cartão', 'Add a card': 'Adicionar um cartão', 'No cards yet': 'Ainda sem cartões',
   "Cards are added through a certified card provider's secure entry. FloFi never sees or stores your card number or security code.":
-    'Os cartões são adicionados através da entrada segura de um fornecedor de cartões certificado. O FloFi nunca vê nem guarda o número do cartão ou o código de segurança.',
-  'Payment connections': 'Ligações de pagamento', 'No payment provider connected': 'Nenhum fornecedor de pagamentos ligado',
-  'Pix and boleto payments need a connected payment provider. None is connected yet.': 'Os pagamentos Pix e boleto precisam de um fornecedor de pagamentos ligado. Ainda não há nenhum ligado.',
+    'Os cartões são adicionados através da entrada segura de um provedor de cartões certificado. O FloFi nunca vê nem guarda o número do cartão ou o código de segurança.',
+  'Payment connections': 'Ligações de pagamento', 'No payment provider connected': 'Nenhum provedor de pagamentos conectado',
+  'Pix and boleto payments need a connected payment provider. None is connected yet.': 'Os pagamentos Pix e boleto precisam de um provedor de pagamentos conectado. Ainda não há nenhum conectado.',
   '· Expires {0}': '· Expira {0}', 'Remove this card from FloFi? The card itself is not affected.': 'Remover este cartão do FloFi? O cartão em si não é afetado.',
   'This card could not be removed right now. Try again.': 'Não foi possível remover este cartão agora. Tente novamente.', 'Card removed from FloFi.': 'Cartão removido do FloFi.',
   '{0} added to Credentials.': '{0} adicionado às Credenciais.', 'Card': 'Cartão',
@@ -49,15 +49,15 @@ export const portugueseWallets: Readonly<Record<string, string>> = {
   "Card details are entered in {0}'s secure fields. FloFi receives only a token, the brand, the last four digits and the expiry date.":
     'Os dados do cartão são introduzidos nos campos seguros de {0}. O FloFi recebe apenas um token, a marca, os últimos quatro dígitos e a validade.',
   'Fill in every field.': 'Preencha todos os campos.', 'Check the card details and try again.': 'Verifique os dados do cartão e tente novamente.',
-  'The card could not be added. Nothing was saved.': 'Não foi possível adicionar o cartão. Nada foi guardado.',
-  'Enter a valid email address.': 'Introduza um endereço de email válido.', 'This email already has the maximum number of saved cards.': 'Este email já tem o número máximo de cartões guardados.',
-  'The card could not be saved. Check the details and try again.': 'Não foi possível guardar o cartão. Verifique os dados e tente novamente.',
-  "FloFi never asks for your card number or security code in its own forms. Cards are added only through the card provider's secure entry, on FloFi's separate card page, which isn't set up on this deployment yet.": "O FloFi nunca pede o número do cartão ou o código de segurança nos seus próprios formulários. Os cartões só são adicionados através da entrada segura do fornecedor de cartões, na página de cartões separada do FloFi, que ainda não foi configurada nesta instalação.",
+  'The card could not be added. Nothing was saved.': 'Não foi possível adicionar o cartão. Nada foi salvo.',
+  'Enter a valid email address.': 'Introduza um endereço de email válido.', 'This email already has the maximum number of saved cards.': 'Este email já tem o número máximo de cartões salvos.',
+  'The card could not be saved. Check the details and try again.': 'Não foi possível salvar o cartão. Verifique os dados e tente novamente.',
+  "FloFi never asks for your card number or security code in its own forms. Cards are added only through the card provider's secure entry, on FloFi's separate card page, which isn't set up on this deployment yet.": "O FloFi nunca pede o número do cartão ou o código de segurança nos seus próprios formulários. Os cartões só são adicionados através da entrada segura do provedor de cartões, na página de cartões separada do FloFi, que ainda não foi configurada nesta instalação.",
   'Open Add card from Credentials in FloFi.': 'Abra Adicionar cartão em Credenciais no FloFi.',
   '{0} secure card entry': 'Entrada segura de cartão de {0}',
   'Secure card entry could not be loaded. Nothing was collected. Try again later.': 'Não foi possível carregar a entrada segura do cartão. Nada foi recolhido. Tente mais tarde.',
   'Card entry status could not be checked. Nothing was collected. Try again later.': 'Não foi possível verificar o estado da entrada de cartões. Nada foi recolhido. Tente mais tarde.',
-  'Checking secure card entry…': 'A verificar a entrada segura de cartões…', 'Loading secure card entry…': 'A carregar a entrada segura de cartões…', "Secure card entry isn't available yet.": 'A entrada segura de cartões ainda não está disponível.',
+  'Checking secure card entry…': 'Verificando a entrada segura de cartões…', 'Loading secure card entry…': 'Carregando a entrada segura de cartões…', "Secure card entry isn't available yet.": 'A entrada segura de cartões ainda não está disponível.',
   "FloFi never asks for your card number or security code in its own forms. Cards are added only through a certified card provider's secure entry, and no card provider is connected to FloFi yet.":
-    'O FloFi nunca pede o número do cartão ou o código de segurança nos seus próprios formulários. Os cartões só são adicionados através da entrada segura de um fornecedor certificado, e ainda não há nenhum fornecedor de cartões ligado ao FloFi.',
+    'O FloFi nunca pede o número do cartão ou o código de segurança nos seus próprios formulários. Os cartões só são adicionados através da entrada segura de um provedor certificado, e ainda não há nenhum provedor de cartões conectado ao FloFi.',
 };

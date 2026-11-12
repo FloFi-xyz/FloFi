@@ -63,11 +63,25 @@ export function buildEntryOutcome(before: BuildEntrySnapshot, after: BuildEntryS
  * The suggestion chips only fill the composer with editable text: nothing is sent, simulated or signed until the owner submits it. Every example
  * names a mainnet (the public product never suggests a test network); amounts are illustrative, not recommendations.
  */
+/**
+ * P0 approved UX (board 03): the five intents. A chip fills the request field with an editable sentence `template` (bracketed parts to replace) and
+ * focuses it; it never submits. `example` is the earlier ready-made sentence, kept for the conversation's own suggestions.
+ */
 export const BUILD_ENTRY_SUGGESTIONS = Object.freeze([
-  { id: 'yield', label: 'Earn yield', icon: 'yield', example: { EN: 'Supply 100 USDC to Aave on Base', PT: 'Quero colocar 100 USDC no Aave na Base' } },
-  { id: 'swap', label: 'Swap assets', icon: 'swap', example: { EN: 'Swap 50 USDC to SOL on Solana', PT: 'Trocar 50 USDC por SOL na Solana' } },
-  { id: 'liquidity', label: 'Provide liquidity', icon: 'liquidity', example: { EN: 'Provide liquidity with SOL and USDC on Solana', PT: 'Fornecer liquidez com SOL e USDC na Solana' } },
-  { id: 'collateral', label: 'Use collateral', icon: 'collateral', example: { EN: 'Use my ETH as collateral on Aave to borrow USDC on Base', PT: 'Usar meu ETH como colateral no Aave para pegar USDC emprestado na Base' } },
-  { id: 'multi', label: 'Multi-step strategy', icon: 'multi', example: { EN: 'Bridge 50 USDC from Base to Arbitrum, then swap it to WETH', PT: 'Fazer bridge de 50 USDC da Base para a Arbitrum e depois trocar por WETH' } },
+  { id: 'swap', label: 'Swap tokens', icon: 'swap', example: { EN: 'Swap 50 USDC to SOL on Solana', PT: 'Trocar 50 USDC por SOL na Solana' },
+    template: { EN: 'Swap [amount] [token] for [token] on [network]', PT: 'Trocar [valor] [token] por [token] na [rede]' } },
+  { id: 'yield', label: 'Earn yield', icon: 'yield', example: { EN: 'Supply 100 USDC to Aave on Base', PT: 'Quero colocar 100 USDC no Aave na Base' },
+    template: { EN: 'Supply [amount] [token] to Aave on [network]', PT: 'Aplicar [valor] [token] no Aave na [rede]' } },
+  { id: 'liquidity', label: 'Provide liquidity', icon: 'liquidity', example: { EN: 'Provide liquidity with SOL and USDC on Solana', PT: 'Fornecer liquidez com SOL e USDC na Solana' },
+    template: { EN: 'Provide liquidity with [token] and [token] on [network]', PT: 'Prover liquidez com [token] e [token] na [rede]' } },
+  { id: 'collateral', label: 'Use as collateral', icon: 'collateral', example: { EN: 'Use my ETH as collateral on Aave to borrow USDC on Base', PT: 'Usar meu ETH como colateral no Aave para pegar USDC emprestado na Base' },
+    template: { EN: 'Use [amount] [token] as collateral on Aave to borrow [token] on [network]', PT: 'Usar [valor] [token] como garantia no Aave para pegar [token] emprestado na [rede]' } },
+  { id: 'multi', label: 'Multi-step workflow', icon: 'multi', example: { EN: 'Bridge 50 USDC from Base to Arbitrum, then swap it to WETH', PT: 'Fazer bridge de 50 USDC da Base para a Arbitrum e depois trocar por WETH' },
+    template: { EN: 'Swap [amount] [token] for [token] on [network], then bridge it to [network]', PT: 'Trocar [valor] [token] por [token] na [rede] e depois enviar pela ponte para a [rede]' } },
 ] as const);
+/** The first bracketed part of a template ([amount], [valor], …): selected after a chip fills the field, so typing replaces it. */
+export function firstPlaceholder(text: string): { readonly start: number; readonly end: number } | null {
+  const match = /\[[^\]]{1,24}\]/.exec(text);
+  return match ? { start: match.index, end: match.index + match[0].length } : null;
+}
 export type BuildEntrySuggestion = (typeof BUILD_ENTRY_SUGGESTIONS)[number];

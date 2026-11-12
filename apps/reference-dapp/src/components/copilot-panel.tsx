@@ -7,8 +7,8 @@ import type { WorkflowOwner } from '../domain/saved-workflow';
 import type { useWalletProof } from './wallet-proof';
 import type { FormEvent, ReactNode } from 'react';
 import type { FlofiConversation } from '../state/flofi-conversation';
-import { ConversationReviewCard } from './conversation-cards';
-import { CopilotMessage, COPILOT_PLACEHOLDER, copilotIntro, copilotLabel, useFollowLatest } from './copilot-ai';
+import { ConversationReviewCard, NetworkChoices, networkChoiceOptions } from './conversation-cards';
+import { CopilotMessage, copilotIntro, copilotLabel, useFollowLatest } from './copilot-ai';
 import { FloFiAvatar, UserAvatar } from './flofi-avatar';
 
 /**
@@ -40,7 +40,9 @@ export function CopilotPanel({ conversation, interactive = true, owner = null, p
     <div className="copilot-head"><h2 className="assistant-title"><FloFiAvatar size="title"/><span>{tr("FloFi Assistant")}</span></h2></div>
     {overview}
     <div ref={log} className="chat-messages" role="log" aria-live="polite" aria-label={tr("Conversation")}>{messages.map((message, index) => {
-      const options = message === last && message.role !== 'you' ? message.options : undefined;
+      const offered = message === last && message.role !== 'you' ? message.options : undefined;
+      // P0 approved UX (board 05): answers that are all networks become a list of network buttons; any other answers stay suggestion chips.
+      const networks = networkChoiceOptions(offered), options = networks ? undefined : offered;
       return row(message.role === 'you', message.id, <div className={`message ${message.role === 'flofi' ? 'system flofi' : message.role}`}>
         {(message.role === 'you' || showLabels) && <small className="sr-only">{tr(message.role === 'you' ? 'YOU' : message.role === 'flofi' || message.role === 'system' && !copilot.enabled ? 'FLOFI' : copilotLabel(message.role, copilot.mode))}</small>}
         {message.role === 'ai' || message.role === 'flofi' ? <>
@@ -50,6 +52,7 @@ export function CopilotPanel({ conversation, interactive = true, owner = null, p
           {message.question && <p className="conversation-question"><strong>{message.question}</strong></p>}
           {(message.review || message.question) && options && options.length > 0 && <div className="copilot-options" role="group" aria-label={tr("Suggested answers")}>
             {options.map(option => <button key={option} type="button" className="quiet" disabled={busy} onClick={() => send(option)}>{option}</button>)}</div>}
+          {networks && <NetworkChoices options={networks} disabled={busy} onPick={send}/>}
         </> : <p>{message.role === 'you' ? message.text : tr((index === 0 && copilot.enabled && copilotIntro(copilot.mode, conversation.direct)) || message.text)}</p>}
       </div>);
     })}
@@ -58,6 +61,11 @@ export function CopilotPanel({ conversation, interactive = true, owner = null, p
       {busy && row(false, 'busy', <div className="message ai" role="status"><small className="sr-only">{tr(copilotLabel('ai', copilot.mode))}</small><p>{tr("Interpreting your message…")}</p></div>)}
       {conversation.automation && <CopilotAutomationProposal input={conversation.automation} owner={owner} {...(proof ? { proof } : {})} dismiss={conversation.dismissAutomation}/>}
     </div>
-    <form className="chat-form" onSubmit={submit}><label htmlFor="mock-prompt">{tr("Describe your flow")}</label><div><input id="mock-prompt" disabled={!interactive} value={input} onChange={event => setInput(event.target.value)} placeholder={tr(copilot.enabled ? COPILOT_PLACEHOLDER : 'Action, amount, asset and chain')} maxLength={1024} autoComplete="off" enterKeyHint="send"/><button type="submit" disabled={!interactive || busy}>{tr("Send")}</button></div></form>
+    {/* P0 approved UX (board 04): the label stays for assistive technology (visually hidden); Send is an icon inside the field, neutral until
+        there is text, and shows a spinner while FloFi is answering. Submitting is unchanged. */}
+    <form className="chat-form" onSubmit={submit}><label htmlFor="mock-prompt" className="sr-only">{tr("Describe your flow")}</label><div className="chat-input"><input id="mock-prompt" disabled={!interactive} value={input} onChange={event => setInput(event.target.value)} placeholder={tr('Ask or request a change')} maxLength={1024} autoComplete="off" enterKeyHint="send"/>
+      <button type="submit" className="chat-send" aria-label={tr('Send message')} title={tr('Send message')} data-ready={Boolean(input.trim()) && !busy || undefined} aria-busy={busy || undefined} disabled={!interactive || busy || !input.trim()}>
+        {busy ? <span className="chat-send-spinner" aria-hidden="true"/> : <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M12 19V5m-6 6 6-6 6 6"/></svg>}
+      </button></div></form>
   </aside>;
 }

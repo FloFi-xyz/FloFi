@@ -2,7 +2,7 @@
 import { test, expect, readWorkflowIr, applyPendingProposal } from './fixtures';
 import { installSupplyWallet, supplySendCount, SUPPLY_OWNER } from './supply-fixtures';
 import { configureCanvasAction, configureCanvasPool } from './composer-authoring-fixtures';
-import { openBuilder, openEditorSection } from './build-entry-navigation';
+import { openBuilder, openEditorSection, openReviewTechnicalDetails } from './build-entry-navigation';
 
 for (const action of ['swap', 'bridge', 'supply', 'borrow', 'repay', 'withdraw', 'pool', 'lending', 'transfer']) test(`Canvas parity without Advanced action setup: ${action}`, async ({ page }) => {
   // The wallet accepts an explicit network switch (only the Robinhood Chain Testnet Send asks for one).
@@ -41,8 +41,9 @@ test('normal Simulate has concise safety details and no engineering or duplicate
   await installSupplyWallet(page); await openBuilder(page);
   await page.getByRole('button', { name: 'Add swap', exact: true }).click(); await configureCanvasAction(page, '1');
   await openEditorSection(page, 'Simulate');
-  // BUILD-FLOFI-CHAT-E2E-FIX-002: the chat-first Simulation Summary (and its embedded Review) is an optional, collapsed details surface.
-  await page.locator('.simulation-details > summary').click();
+  // BUILD-FLOFI-CHAT-E2E-FIX-002 / P0 approved UX (board 06): the chat-first Simulation Summary (and its embedded Review) is the Review
+  // panel's collapsed Technical details (the panel is beside the canvas from 1200 px).
+  await openReviewTechnicalDetails(page);
   const details = page.locator('.review-authorization-details');
   await details.locator('summary').click();
   for (const text of ['Wallet', 'Network', 'Permissions']) await expect(details).toContainText(text);
@@ -52,9 +53,11 @@ test('normal Simulate has concise safety details and no engineering or duplicate
   await expect(details.locator('button.primary')).toHaveCount(0);
   for (const width of [1440, 768, 390]) {
     await page.setViewportSize({ width, height: 900 });
-    const graph = page.locator('.simulate-flow-surface'), action = graph.locator('.canvas-primary-action');
+    // P0 approved UX (board 06): the one lifecycle control lives in the Editor footer on Simulate too; the simulated canvas carries no action.
+    const graph = page.locator('.simulate-flow-surface'), footer = page.locator('footer.summary-bar'), action = footer.locator('.canvas-primary-action');
+    await expect(graph.locator('.canvas-primary-action')).toHaveCount(0);
     await expect(action.getByRole('button', { name: 'Simulate workflow', exact: true })).toBeVisible();
-    const surface = (await graph.boundingBox())!, button = (await action.boundingBox())!;
+    const surface = (await footer.boundingBox())!, button = (await action.boundingBox())!;
     expect(button.x).toBeGreaterThanOrEqual(surface.x); expect(button.x + button.width).toBeLessThanOrEqual(surface.x + surface.width);
     expect(button.y + button.height).toBeLessThanOrEqual(surface.y + surface.height);
     expect(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth)).toBe(false);
@@ -84,7 +87,8 @@ for (const network of ['Robinhood Chain Testnet', 'Ethereum Sepolia']) test(`Can
   for (const [index, value] of ['0.000001', '0.000002'].entries()) {
     await amount.fill(value); await amount.press('Enter');
     await expect(page.locator('.summary-bar')).toHaveAttribute('data-workflow-revision', String(index + 1));
-    await expect(card.getByRole('button', { name: 'Select source token', exact: true })).toHaveAttribute('title', `ETH on ${network} (${network === 'Ethereum Sepolia' ? '11155111' : '46630'})`);
+    // P0 approved UX (board 16 §9): titles name the network without its chain number.
+    await expect(card.getByRole('button', { name: 'Select source token', exact: true })).toHaveAttribute('title', `ETH on ${network}`);
   }
   const workflow = JSON.parse(await readWorkflowIr(page));
   const transfer = workflow.nodes.find((node: { actionType: string }) => node.actionType === 'asset.transfer');
@@ -131,7 +135,7 @@ test('new Send authoring controls and lifecycle copy use Portuguese', async ({ p
   await expect(page.locator('.summary-bar')).toHaveAttribute('data-workflow-revision', '1');
   await expect(card.getByRole('button', { name: 'Aplicar proposta', exact: true })).toHaveCount(0);
   // The explicit network switch (the wallet is on Base Sepolia), then the lifecycle CTA, both in Portuguese.
-  await expect(page.locator('.canvas-primary-action button')).toHaveText('Mudar para Robinhood Chain Testnet');
+  await expect(page.locator('.canvas-primary-action button')).toHaveText('Trocar para Robinhood Chain Testnet');
   await page.locator('.canvas-primary-action button').click();
   await expect(page.locator('.canvas-primary-action button')).toHaveText('Simular fluxo');
   expect(await supplySendCount(page)).toBe(0);

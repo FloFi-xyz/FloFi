@@ -14,7 +14,7 @@ const LENDING = 'compose supply 0.1 USDC to Aave then borrow 0.01 USDC then swap
 async function replacingProposal(page: Page) {
   await sendChatCommand(page, 'swap 2 USDC to WETH on Base Sepolia slippage 50 bps');
   await page.getByLabel('Describe your flow').fill(LENDING);
-  await page.getByRole('button', { name: 'Send', exact: true }).click();
+  await page.getByRole('button', { name: 'Send message', exact: true }).click();
   await expect(page.getByRole('log', { name: 'Conversation' })).toContainText('This change would also remove 1. Swap. Review it on the Canvas before applying; nothing changed yet.');
   await expect(page.getByRole('button', { name: /^Review proposed change:/ })).toHaveCount(1);
   await expect(page.locator('.summary-bar')).toHaveAttribute('data-workflow-revision', '1');

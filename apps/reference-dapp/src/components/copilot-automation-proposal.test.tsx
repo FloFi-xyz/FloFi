@@ -51,7 +51,7 @@ describe('Chat automation uses the real owner-scoped management boundary', () =>
     // Account management permission is not promoted to the independent delegated signing proof.
     expect(f.delegation).toHaveBeenLastCalledWith(null, false);
     expect(textOf(tree)).toContain('Every Monday at 09:00 (Europe/Lisbon)');
-    for (const constraint of ['40 / month', '4 / month', 'Cooldown (minutes)60', 'Max slippage (bps)50', '2027-01-01T00:00:00Z']) expect(textOf(tree)).toContain(constraint);
+    for (const constraint of ['40 / month', '4 / month', 'Cooldown (minutes)60', 'Max price difference limit0.5%', 'Max price difference0.5%', '2027-01-01T00:00:00Z']) expect(textOf(tree)).toContain(constraint);
     await button(tree).props.onClick?.(); await flush();
     expect(f.create).toHaveBeenCalledExactlyOnceWith(wallet, input); expect(textOf(read())).toContain('Automation created. FloFi will ask you before every execution.');
   });

@@ -2,7 +2,6 @@
 'use client';
 import { useLocale } from '../i18n/locale';
 
-import type { CSSProperties } from 'react';
 import { Panel, useReactFlow, useStore, type FitViewOptions, type PanelPosition, type ReactFlowState } from '@xyflow/react';
 
 /**
@@ -13,10 +12,12 @@ import { Panel, useReactFlow, useStore, type FitViewOptions, type PanelPosition,
 export const CANVAS_GESTURES = Object.freeze({ panOnScroll: true, panOnScrollSpeed: 1, zoomOnScroll: true, zoomOnPinch: true, preventScrolling: true });
 
 /** React Flow owns the viewport, including zoom changes from gestures and automatic fitting.
- * BUILD-FLOFI-BUILDER-UX-002: `steps` adds zoom out / zoom in buttons; every control stays within the engine's own minimum and maximum zoom.
+ * P0 approved UX (board 04): the same three controls on every canvas, bottom right — Fit, zoom out (−) and zoom in (+); the zoom slider and the
+ * percentage are gone. Every control stays within the engine's own minimum and maximum zoom, and Fit uses the caller's fit padding, so a fitted
+ * card never sits under the controls. `steps` is kept for callers and changes nothing.
  * BUILD-FLOFI-SINGLE-AUTH-WORKFLOW-UX-001: `embedded` renders the navigator as an ordinary flow element inside a caller's own panel (the
  * Simulate/Execute plan's bottom controls), so its position comes from layout, never from an offset computed against other controls. */
-export function CanvasNavigator({ fitViewOptions, compactBelow = 800, position = 'bottom-center', steps = false, embedded = false }: { fitViewOptions?: FitViewOptions; compactBelow?: number; position?: PanelPosition; steps?: boolean; embedded?: boolean }) {
+export function CanvasNavigator({ fitViewOptions, compactBelow = 800, position = 'bottom-right', embedded = false }: { fitViewOptions?: FitViewOptions; compactBelow?: number; position?: PanelPosition; steps?: boolean; embedded?: boolean }) {
   const { t: tr } = useLocale();
   const zoom = useStore((state: ReactFlowState) => state.transform[2]);
   const minZoom = useStore((state: ReactFlowState) => state.minZoom);
@@ -26,27 +27,20 @@ export function CanvasNavigator({ fitViewOptions, compactBelow = 800, position =
   const measured = useStore((state: ReactFlowState) => state.width > 0);
   const compact = useStore((state: ReactFlowState) => state.width < compactBelow);
   const narrow = useStore((state: ReactFlowState) => state.width < 400);
-  const { fitView, zoomTo, zoomIn, zoomOut } = useReactFlow();
-  const percentage = `${Math.round(zoom * 100)}%`;
-  const progress = (zoom - minZoom) / (maxZoom - minZoom) * 100;
+  const { fitView, zoomIn, zoomOut } = useReactFlow();
+  const reduced = () => typeof window !== 'undefined' && typeof window.matchMedia === 'function' && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
   const Container = embedded ? 'div' : Panel;
   return <Container {...embedded ? {} : { position }} className={`canvas-navigator nodrag nopan nowheel${embedded ? ' canvas-navigator-embedded' : ''}`} role="group" aria-label={tr("Canvas navigator")}
-    data-measured={measured} data-compact={measured && compact} data-narrow={measured && narrow} data-steps={steps || undefined}>
+    data-measured={measured} data-compact={measured && compact} data-narrow={measured && narrow}>
     <button type="button" className="canvas-navigator-fit" aria-label={tr("Fit workflow")} title={tr("Fit workflow")} onClick={() => { void fitView(fitViewOptions); }}>
-      <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-        <path d="M9 4H4v5m11-5h5v5M4 15v5h5m11-5v5h-5"/><rect x="8" y="8" width="8" height="8" rx="1.5"/>
+      <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+        <path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/>
       </svg>
     </button>
-    {steps && <button type="button" className="canvas-navigator-step" aria-label={tr('Zoom out')} title={tr('Zoom out')} disabled={zoom <= minZoom + 0.001}
-      onClick={() => { void zoomOut({ duration: 120 }); }}><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" aria-hidden="true"><path d="M6 12h12"/></svg></button>}
-    <input className="canvas-navigator-slider" type="range" aria-label={tr("Canvas zoom")} aria-valuetext={percentage}
-      min={minZoom} max={maxZoom} step={0.01} value={zoom}
-      style={{ '--zoom-progress': `${progress}%` } as CSSProperties}
-      onChange={event => { void zoomTo(Number(event.currentTarget.value)); }}/>
-    <button type="button" className="canvas-navigator-percentage" aria-label={tr(`Zoom ${percentage}. Reset to 100%`)} title={tr("Reset zoom to 100%")}
-      onClick={() => { void zoomTo(Math.min(maxZoom, Math.max(minZoom, 1))); }}>{tr(percentage)}</button>
-    {steps && <button type="button" className="canvas-navigator-step" aria-label={tr('Zoom in')} title={tr('Zoom in')} disabled={zoom >= maxZoom - 0.001}
-      onClick={() => { void zoomIn({ duration: 120 }); }}><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" aria-hidden="true"><path d="M6 12h12M12 6v12"/></svg></button>}
+    <button type="button" className="canvas-navigator-step" aria-label={tr('Zoom out')} title={tr('Zoom out')} disabled={zoom <= minZoom + 0.001}
+      onClick={() => { void zoomOut({ duration: reduced() ? 0 : 120 }); }}><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" aria-hidden="true"><path d="M6 12h12"/></svg></button>
+    <button type="button" className="canvas-navigator-step" aria-label={tr('Zoom in')} title={tr('Zoom in')} disabled={zoom >= maxZoom - 0.001}
+      onClick={() => { void zoomIn({ duration: reduced() ? 0 : 120 }); }}><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" aria-hidden="true"><path d="M6 12h12M12 6v12"/></svg></button>
   </Container>;
 }

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { test, expect } from './fixtures';
 import { installSupplyWallet } from './supply-fixtures';
-import { openBuilder, openEditorSection } from './build-entry-navigation';
+import { closeNavigation, navigationDrawer, navigationLink, openBuilder, openDashboard, openEditorSection, openNavigation } from './build-entry-navigation';
 
 test('Build opens directly into the workspace with a standalone logo and neutral Dashboard item', async ({ page }) => {
   await openBuilder(page);
@@ -11,18 +11,21 @@ test('Build opens directly into the workspace with a standalone logo and neutral
   await expect(page.locator('.workspace-heading')).toHaveCount(0);
   await expect(page.locator('.brand img')).toHaveAttribute('alt', 'FloFi');
   await expect(page.locator('.brand small')).toHaveCount(0);
-  const nav = page.getByRole('navigation', { name: 'Workflow stages' });
-  await expect(nav.getByRole('button').first()).toHaveText('Dashboard');
-  // BUILD-FLOFI-CHAT-EDITOR-UX-001: Dashboard | Chat | Editor, with no stage numbers.
-  await expect(nav.getByRole('button')).toHaveText(['Dashboard', 'Chat', 'Editor']);
-  await expect(nav.locator('.stage-number')).toHaveCount(0);
+  // P0 approved UX (board 03b): navigation lives in the ☰ drawer — New workflow (Chat), Editor and Dashboard first, with no stage numbers.
+  const nav = await openNavigation(page);
+  await expect(nav.getByRole('link').nth(0)).toHaveText('New workflow');
+  await expect(nav.getByRole('link').nth(1)).toHaveText('Editor');
+  await expect(nav.getByRole('link').nth(2)).toHaveText('Dashboard');
+  await expect(navigationDrawer(page).locator('.stage-number')).toHaveCount(0);
+  await closeNavigation(page);
 });
 
 test('Dashboard has an intentionally blank content area', async ({ page }) => {
   await openBuilder(page);
-  const dashboard = page.getByRole('button', { name: 'Dashboard', exact: true });
-  await dashboard.click();
-  await expect(dashboard).toHaveAttribute('aria-current', 'page');
+  await openDashboard(page);
+  await openNavigation(page);
+  await expect(navigationLink(page, 'Dashboard')).toHaveAttribute('aria-current', 'page');
+  await closeNavigation(page);
   const main = page.getByRole('main', { name: 'Dashboard' });
   await expect(main).toHaveText('');
   expect(await main.evaluate(el => el.childElementCount)).toBe(0);
@@ -38,7 +41,7 @@ test('switching through Dashboard preserves the canonical draft and supported Bu
   await form.getByRole('button', { name: 'Review Supply change', exact: true }).click();
   await page.getByRole('button', { name: 'Apply proposal', exact: true }).click();
   await expect(page.locator('.summary-bar')).toHaveAttribute('data-workflow-revision', '2');
-  await page.getByRole('button', { name: 'Dashboard', exact: true }).click();
+  await openDashboard(page);
   await openEditorSection(page, 'Build');
   await expect(page.locator('.flow-card')).toHaveCount(1);
   await expect(form.getByLabel('Supply amount (USDC)')).toHaveValue('2');

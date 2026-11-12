@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { describe, expect, it } from 'vitest';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { DashboardView } from './dashboard-view';
+import { DashboardView, workflowListView } from './dashboard-view';
 import { RunDetailView } from './run-detail-view';
 import { projectDashboardRun } from '../../lib/dashboard/run-mapping';
 import { dashboardRoute } from '../../lib/dashboard/routes';
@@ -16,27 +16,33 @@ const row: DashboardRun = { runId: 'real-owned-id', workflowId: 'workflow-id', f
 function index(props: Partial<Parameters<typeof DashboardView>[0]> = {}) {
   return renderToStaticMarkup(<DashboardView account={owner} connection="CONNECTED" runs={[]} hasMore={false} loading={false} build={noop} openRun={noop} verify={noop} verifying={false} verificationIssue={null} refresh={noop} {...props}/>);
 }
-/** BUILD-FLOFI-CHAT-E2E-DASHBOARD-UX-001: the execution history (executed records and records that need attention) now renders in Your workflows. */
+/** BUILD-FLOFI-CHAT-E2E-DASHBOARD-UX-001: the execution history (executed records and records that need attention) now renders in Your workflows (P0 approved UX:
+ * in its one list). */
 const records = (props: Partial<Parameters<typeof DashboardView>[0]> = {}) => index({ mode: 'records', ...props });
 describe('Dashboard foundation inside the canonical shell', () => {
   it('contains no duplicate header, wallet connection, environment selector or theme controller', () => {
     const html = index();
-    expect(html).not.toContain('<header'); expect(html).not.toContain('Wallet connection'); expect(html).not.toContain('<select');
+    // Only the page's own heading (one title, one subtitle); the shell owns the top bar.
+    expect(html.match(/<header/g)).toHaveLength(1); expect(html).toContain('<header class="ux-page-head"><div><h1>Dashboard</h1><p>Your wallet and what needs you.</p></div></header>'); expect(html).not.toContain('Wallet connection'); expect(html).not.toContain('<select');
     expect(html).not.toContain('Settings'); expect(html).not.toContain('Light Theme');
   });
-  it('shows a connected empty state with a Build action and no invented portfolio, prices or history', () => {
+  it('shows a connected empty state with a Create action and no invented portfolio, prices or history', () => {
     const html = records();
-    expect(html).toContain('No workflows executed yet'); expect(html).toContain('Build workflow');
+    expect(html).toContain('No workflows executed yet');
     expect(html).not.toContain('real-owned-id'); expect(html).not.toMatch(/\$|APY|PnL|0 ETH|0 USDC/);
     const overview = index();
-    expect(overview).toContain('Workflow records'); expect(overview).toContain('Build workflow'); expect(overview).not.toMatch(/\$|APY|PnL|0 ETH|0 USDC/);
+    // Board 10: an empty current execution offers "Create workflow"; history is one line with its verified count.
+    expect(overview).toContain('No execution in progress.'); expect(overview).toContain('Create workflow'); expect(overview).toContain('0 workflows executed');
+    expect(overview).not.toMatch(/\$|APY|PnL|0 ETH|0 USDC/); expect(overview).not.toContain('disabled=""');
   });
-  it('keeps the Dashboard an overview: portfolio slot, current execution and a records summary, never the history list', () => {
+  it('keeps the Dashboard an overview: current execution, wallet slot and one history line, never the history list or a records summary', () => {
     const html = index({ runs: [projectDashboardRun(row)], portfolio: <section aria-label="Wallet portfolio">portfolio slot</section>, openRecords: noop });
-    expect(html).toContain('portfolio slot'); expect(html).toContain('Open Your workflows');
-    expect(html).toContain('<strong>0</strong> records need attention'); expect(html).toContain('<strong>1</strong> executed record');
-    expect(html).not.toContain(`/app/dashboard/runs/${row.runId}`); expect(html).not.toContain('dashboard-run-list');
-    expect(html.indexOf('portfolio slot')).toBeLessThan(html.indexOf('aria-labelledby="dashboard-records"'));
+    expect(html).toContain('portfolio slot'); expect(html).toContain('View in Your workflows'); expect(html).toContain('1 workflow executed');
+    // The records summary Your workflows already shows is gone (board 09/10), and nothing needs the owner here.
+    for (const removed of ['records need attention', 'executed record', 'Workflow records', 'Needs you', 'ux-workflow-list']) expect(html).not.toContain(removed);
+    expect(html).not.toContain(`/app/dashboard/runs/${row.runId}`);
+    expect(html.indexOf('aria-labelledby="dashboard-current"')).toBeLessThan(html.indexOf('portfolio slot'));
+    expect(html.indexOf('portfolio slot')).toBeLessThan(html.indexOf('aria-labelledby="dashboard-history"'));
   });
   it('shows disconnected truth instead of run data', () => {
     const html = index({ account: null, runs: [projectDashboardRun(row)] });
@@ -45,47 +51,67 @@ describe('Dashboard foundation inside the canonical shell', () => {
   it('does not present an unavailable source as a verified empty account', () => {
     for (const connection of ['UNAVAILABLE', 'NOT_CONFIGURED', 'SIGN_IN_REQUIRED'] as const) {
       const html = records({ connection }); expect(html).not.toContain('No workflows executed yet');
-      expect(index({ connection })).not.toContain('executed record');
+      // No count is claimed for a source that was not read: neither the history line nor a filter chip.
+      expect(index({ connection })).not.toContain('workflows executed'); expect(html).not.toContain('ux-chip-count');
     }
   });
   it('shows a loading announcement without invented runs or a verified empty state', () => {
     const html = records({ connection: null, loading: true });
     expect(html).toContain('Loading execution history'); expect(html).toContain('Checking available records');
     expect(html).not.toContain('No workflows executed yet'); expect(html).not.toContain('No available runs need attention');
-    expect(html).not.toContain('dashboard-run-card');
+    expect(html).not.toContain('ux-record'); expect(html).not.toContain('ux-chip-count');
   });
   it('separates the current execution from saved history without displaying it twice', () => {
     const current = projectDashboardRun({ ...row, runId: 'current-owned-run', status: 'UNKNOWN' }, null, 'Current workflow', true);
     const overview = index({ runs: [current, projectDashboardRun(row)] });
     expect(overview).toContain('Current execution'); expect(overview).toContain('View current run');
     expect(overview.match(/href="\/app\/dashboard\/runs\/current-owned-run"/g)).toHaveLength(1);
-    expect(overview).toContain('<strong>1</strong> record needs attention'); expect(overview).not.toContain(`/app/dashboard/runs/${row.runId}`);
-    // In Your workflows each run is in exactly one section: the unresolved current run needs attention, the completed one is history.
+    // The current run is shown once, in Current execution, never again in "Needs you".
+    expect(overview).not.toContain('Needs you'); expect(overview).not.toContain(`/app/dashboard/runs/${row.runId}`);
+    // In Your workflows each run is listed once: the unresolved current run needs attention, the completed one is executed.
     const html = records({ runs: [current, projectDashboardRun(row)] });
     expect(html.match(/href="\/app\/dashboard\/runs\/current-owned-run"/g)).toHaveLength(1);
     expect(html.match(new RegExp(`href="/app/dashboard/runs/${row.runId}"`, 'g'))).toHaveLength(1);
-    expect(html).toContain('Execution status unresolved'); expect(html).toContain('1 available run needs attention');
-    expect(html).not.toContain('No workflows executed yet');
+    expect(html).toContain('Execution status unresolved'); expect(html).toContain('Needs attention<span class="ux-chip-count">1</span>');
+    expect(html).toContain('Executed<span class="ux-chip-count">1</span>'); expect(html).not.toContain('No workflows executed yet');
   });
   it('keeps a current run visible while saved history is unavailable', () => {
     const current = projectDashboardRun({ ...row, status: 'UNKNOWN' }, null, 'Current workflow', true);
     for (const connection of ['UNAVAILABLE', 'NOT_CONFIGURED', 'SIGN_IN_REQUIRED'] as const) {
       const html = index({ connection, runs: [current] });
       expect(html).toContain('Current execution'); expect(html).toContain('Unresolved');
-      expect(html).not.toContain('No workflows executed yet'); expect(html).not.toContain('executed record');
-      expect(records({ connection, runs: [current] })).toContain('Executed workflows will appear here when their records are available.');
+      expect(html).not.toContain('No workflows executed yet'); expect(html).not.toContain('workflows executed');
+      const list = records({ connection, runs: [current] });
+      expect(list).toContain('href="/app/dashboard/runs/real-owned-id"'); expect(list).not.toContain('No workflows executed yet'); expect(list).not.toContain('ux-chip-count');
     }
-    expect(records({ runs: [current] })).toContain('Records that need attention are listed below.');
+    expect(records({ runs: [current] })).toContain('Needs attention<span class="ux-chip-count">1</span>');
   });
-  it('orders Your workflows as the owner specified (executed history, then records that need attention) and keeps the current execution first on the Dashboard', () => {
+  it('puts what needs the owner first: "Needs you" opens the Dashboard and records that need attention lead Your workflows (boards 10 and 11)', () => {
     const current = projectDashboardRun({ ...row, runId: 'current-owned-run', status: 'UNKNOWN' }, null, 'Current workflow', true);
-    const overview = index({ runs: [current, projectDashboardRun(row)] });
-    expect(overview.indexOf('aria-labelledby="dashboard-current"')).toBeLessThan(overview.indexOf('aria-labelledby="dashboard-records"'));
-    expect(overview).toContain('dashboard-attention-required');
-    const html = records({ runs: [current, projectDashboardRun(row)] });
-    expect(html.indexOf('aria-labelledby="workflows-history"')).toBeLessThan(html.indexOf('aria-labelledby="dashboard-attention"'));
-    expect(html).toContain('dashboard-attention-required');
-    expect(records({ runs: [projectDashboardRun(row)] })).not.toContain('dashboard-attention-required');
+    const interrupted = projectDashboardRun({ ...row, runId: 'interrupted-run', status: 'UNKNOWN', updatedAt: '2026-11-04T12:00:00Z' });
+    const overview = index({ runs: [current, projectDashboardRun(row), interrupted], portfolio: <section>portfolio slot</section>, openRecords: noop });
+    expect(overview).toContain('Needs you'); expect(overview).toContain('ux-panel-attention dashboard-attention-required');
+    expect(overview).toContain('aria-label="1 record needs you"'); expect(overview).toContain('See what to do');
+    expect(overview.match(/href="\/app\/dashboard\/runs\/interrupted-run"/g)).toHaveLength(1);
+    expect(overview.indexOf('aria-labelledby="dashboard-needs-you"')).toBeLessThan(overview.indexOf('aria-labelledby="dashboard-current"'));
+    expect(overview.indexOf('aria-labelledby="dashboard-current"')).toBeLessThan(overview.indexOf('portfolio slot'));
+    expect(overview.indexOf('portfolio slot')).toBeLessThan(overview.indexOf('aria-labelledby="dashboard-history"'));
+    // Hidden when nothing needs the owner.
+    expect(index({ runs: [projectDashboardRun(row)] })).not.toContain('Needs you');
+    const html = records({ runs: [projectDashboardRun(row), interrupted] });
+    expect(html.indexOf('/app/dashboard/runs/interrupted-run')).toBeLessThan(html.indexOf(`/app/dashboard/runs/${row.runId}`));
+    expect(html).toContain('data-tone="attention"');
+    expect(records({ runs: [projectDashboardRun(row)] })).not.toContain('<button type="button" class="ux-chip" aria-pressed="false" data-tone="attention"');
+  });
+  it('counts and orders the one list: needs attention first, then saved, then executed; a count only for a source that was read', () => {
+    const groups = { attention: ['a1'], saved: ['s1', 's2'], executed: ['e1'] };
+    const all = workflowListView(groups, { ATTENTION: true, SAVED: true, EXECUTED: true }, 'ALL');
+    expect(all.shown).toEqual(['a1', 's1', 's2', 'e1']); expect(all.counts).toEqual({ ALL: 4, ATTENTION: 1, SAVED: 2, EXECUTED: 1 });
+    expect(workflowListView(groups, { ATTENTION: true, SAVED: true, EXECUTED: true }, 'SAVED').shown).toEqual(['s1', 's2']);
+    expect(workflowListView(groups, { ATTENTION: true, SAVED: true, EXECUTED: true }, 'ATTENTION').shown).toEqual(['a1']);
+    expect(workflowListView(groups, { ATTENTION: true, SAVED: true, EXECUTED: true }, 'EXECUTED').shown).toEqual(['e1']);
+    const unread = workflowListView(groups, { ATTENTION: false, SAVED: true, EXECUTED: false }, 'ALL');
+    expect(unread.counts).toEqual({ ALL: null, ATTENTION: null, SAVED: 2, EXECUTED: null }); expect(unread.shown).toEqual(['a1', 's1', 's2', 'e1']);
   });
   it('offers the workflow behind a run only when it is in the owner\'s library', () => {
     const open = { names: new Map([['workflow-id', 'My saved name'], ['unnamed-id', null]]), open: noop };

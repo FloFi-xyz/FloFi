@@ -2,10 +2,16 @@
 // Credentials: public wallet references through the canonical selector, and the secure card-provider gate. MOCKED wallets only.
 import { test, expect, chooseWallet } from './fixtures';
 import { installMultichainWallets, promptingCalls, WALLET_ACCOUNTS } from './wallet-fixtures';
-import type { Page } from '@playwright/test';
+import type { Locator, Page } from '@playwright/test';
 
 const STORAGE = 'flofi.credentials.v1';
-const cards = (page: Page) => page.locator('.workspace-wallet-card');
+/** P0 approved UX (board 13): each wallet is a row of the Wallets list. */
+const cards = (page: Page) => page.locator('section[aria-labelledby="credentials-wallets"] .ux-wallet-row');
+/** Board 13: a wallet row's actions (copy, rename, export, disconnect, remove) are items of its "More actions for …" menu. */
+async function walletAction(row: Locator, label: string, action: string) {
+  await row.getByRole('button', { name: `More actions for ${label}`, exact: true }).click();
+  await row.getByRole('menuitem', { name: action, exact: true }).click();
+}
 const stored = (page: Page) => page.evaluate(key => localStorage.getItem(key) ?? '', STORAGE);
 async function addWallet(page: Page, name: string, ecosystem: 'Ethereum' | 'Solana') {
   await page.getByRole('button', { name: 'Add wallet', exact: true }).click();
@@ -25,7 +31,8 @@ for (const theme of ['light', 'dark'] as const) {
     }, theme);
     await installMultichainWallets(page); await page.goto('/app/credentials');
     await expect(page.getByRole('heading', { name: 'Credentials', level: 1 })).toBeVisible();
-    await expect(page.getByText('No wallets yet', { exact: true })).toBeVisible();
+    // Board 13: an empty list says what to do in one line (no separate empty-state heading).
+    await expect(page.getByText('Add a wallet to save its public address here. FloFi never holds your keys.', { exact: true })).toBeVisible();
     // Opening Add wallet never launches a wallet; Escape returns focus to the button.
     const add = page.getByRole('button', { name: 'Add wallet', exact: true });
     // focus() does not wait for the server-rendered shell to become interactive.
@@ -40,15 +47,21 @@ for (const theme of ['light', 'dark'] as const) {
     await addWallet(page, 'Phantom', 'Solana');
     await addWallet(page, 'Rabby Wallet', 'Ethereum');
     await expect(cards(page)).toHaveCount(3);
-    await expect(page.locator('#credentials-wallets + .workspace-count')).toHaveText('3');
+    await expect(page.locator('#credentials-wallets + .ux-count')).toHaveText('3');
     const metaMask = page.getByRole('article', { name: 'MetaMask, Ethereum' }), phantom = page.getByRole('article', { name: 'Phantom, Solana' });
     const rabby = page.getByRole('article', { name: 'Rabby Wallet, Ethereum' });
-    await expect(metaMask).toContainText('MetaMask · Ethereum'); await expect(metaMask).toContainText('Saved');
+    // Board 13: "MetaMask wallet · EVM · …" — the wallet's own identity, its ecosystem and where it is in use.
+    await expect(metaMask).toContainText('MetaMask wallet · EVM'); await expect(metaMask).toContainText('Saved');
     await expect(metaMask.locator('code')).toHaveAttribute('title', WALLET_ACCOUNTS.metaMask);
-    await expect(phantom).toContainText('Phantom · Solana'); await expect(phantom).toContainText('Solana Devnet'); await expect(phantom).toContainText('Active');
+    await expect(phantom).toContainText('Phantom wallet · Solana'); await expect(phantom).toContainText('Solana Devnet'); await expect(phantom).toContainText('Active');
     await expect(phantom.locator('code')).toHaveAttribute('title', WALLET_ACCOUNTS.phantomSolana);
     await expect(rabby).toContainText('Active'); await expect(rabby.locator('code')).toHaveAttribute('title', WALLET_ACCOUNTS.rabby);
-    await expect(rabby).toHaveCSS('background-color', theme === 'dark' ? 'rgb(28, 32, 41)' : 'rgb(255, 255, 255)');
+    // Board 13: wallet rows sit on their panel, which carries the theme's surface (graphite #15181F in Dark).
+    await expect(rabby).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)');
+    const wallets = page.locator('section[aria-labelledby="credentials-wallets"]');
+    await expect(wallets).toHaveCSS('background-color', theme === 'dark' ? 'rgb(21, 24, 31)' : await wallets.evaluate(() => {
+      const sample = document.createElement('span'); sample.style.backgroundColor = 'var(--surface)'; document.body.append(sample);
+      const color = getComputedStyle(sample).backgroundColor; sample.remove(); return color; }));
 
     // Adding wallets only connected them: no signature, transaction or authorization request reached any wallet.
     expect(await promptingCalls(page)).toEqual([{ wallet: 'MetaMask', method: 'eth_requestAccounts' }, { wallet: 'Phantom Solana', method: 'standard:connect' },
@@ -58,20 +71,21 @@ for (const theme of ['light', 'dark'] as const) {
     expect(await stored(page)).not.toMatch(/private|seed|mnemonic|secret|signature/i);
 
     // Rename (Escape cancels, Enter saves), copy and the absence of any key reveal.
-    await rabby.getByRole('button', { name: 'Rename Rabby Wallet' }).click();
+    await walletAction(rabby, 'Rabby Wallet', 'Rename Rabby Wallet');
     await rabby.getByRole('textbox', { name: 'Wallet name' }).fill('Should not stick'); await page.keyboard.press('Escape');
-    await expect(rabby).toContainText('Rabby Wallet · Ethereum');
-    await rabby.getByRole('button', { name: 'Rename Rabby Wallet' }).click();
+    await expect(rabby).toContainText('Rabby Wallet · EVM');
+    await walletAction(rabby, 'Rabby Wallet', 'Rename Rabby Wallet');
     await rabby.getByRole('textbox', { name: 'Wallet name' }).fill('Trading'); await page.keyboard.press('Enter');
     const trading = page.getByRole('article', { name: 'Trading, Ethereum' });
-    await expect(trading.getByRole('heading', { name: 'Trading' })).toBeVisible();
+    // Board 13: the row's name heading also shows the short address.
+    await expect(trading.getByRole('heading', { name: /^Trading 0x/ })).toBeVisible();
     await expect(page.getByRole('status')).toHaveText('Wallet renamed.');
-    await trading.getByRole('button', { name: 'Copy Trading address' }).click();
+    await walletAction(trading, 'Trading', 'Copy Trading address');
     expect(await page.evaluate(() => (window as unknown as { copiedAddresses: string[] }).copiedAddresses)).toEqual([WALLET_ACCOUNTS.rabby]);
     await expect(page.getByRole('button', { name: /reveal|private key|seed/i })).toHaveCount(0);
 
     // Removing the active EVM wallet removes FloFi's reference and ends the session; other credentials stay.
-    await trading.getByRole('button', { name: 'Remove Trading' }).click();
+    await walletAction(trading, 'Trading', 'Remove Trading');
     await expect(trading.getByRole('group', { name: 'Remove Trading' })).toContainText('the wallet and its assets are not affected');
     await trading.getByRole('button', { name: 'Remove', exact: true }).click();
     await expect(cards(page)).toHaveCount(2);
@@ -93,7 +107,7 @@ test('Connect activates a saved wallet only after an explicit click, through exa
   await expect(metaMask).toContainText('Active');
   expect((await promptingCalls(page)).slice(before)).toEqual([{ wallet: 'MetaMask', method: 'eth_requestAccounts' }]);
   await expect(page.getByRole('article', { name: 'Phantom, Ethereum' })).toContainText('Saved');
-  await metaMask.getByRole('button', { name: 'Disconnect MetaMask' }).click();
+  await walletAction(metaMask, 'MetaMask', 'Disconnect MetaMask');
   await expect(metaMask).toContainText('Saved');
   await expect(page.getByRole('button', { name: 'Connect Wallet', exact: true })).toBeVisible();
 });
@@ -111,6 +125,9 @@ test('Add card opens only the secure-provider gate: no card fields, nothing stor
   await expect(dialog).toHaveCount(0); await expect(add).toBeFocused();
   expect(await stored(page)).toBe('');
   expect(await page.evaluate(() => JSON.stringify({ ...localStorage }) + JSON.stringify({ ...sessionStorage }))).not.toMatch(/\d{13,19}|cvv|cvc/i);
-  await expect(page.getByText('No payment provider connected', { exact: true })).toBeVisible();
+  // Board 13: Pix and boleto do not exist yet — one row with its "Coming soon" status and no controls.
+  const payments = page.locator('section[aria-labelledby="credentials-payments"]');
+  await expect(payments).toContainText('Pix and boleto'); await expect(payments).toContainText('Coming soon');
+  await expect(payments.getByRole('button')).toHaveCount(0);
   await expect(page.getByText(/PixBlock/)).toHaveCount(0);
 });

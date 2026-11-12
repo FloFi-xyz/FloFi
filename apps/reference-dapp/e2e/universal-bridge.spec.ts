@@ -22,20 +22,21 @@ import { openBuilder, openEditorSection, reloadBuilder } from './build-entry-nav
 const copilotSays = (page: Page) => page.getByRole('log', { name: 'Conversation' }).locator('.message.ai').last();
 async function ask(page: Page, text: string) {
   await page.locator('#mock-prompt').fill(text);
-  await page.getByRole('button', { name: 'Send', exact: true }).click();
+  await page.getByRole('button', { name: 'Send message', exact: true }).click();
 }
 const panel = (page: Page) => page.getByRole('region', { name: 'Universal cross-chain bridge' });
 test('Copilot keeps a destination question without buttons and resolves one token reply without repeating the request', async ({ page }) => {
   await openBuilder(page);
   const before = await counters();
   await ask(page, 'quero bridge de 1 USDT da Solana para Robinhood Chain');
-  await expect(copilotSays(page)).toContainText('Qual ativo você quer receber');
+  // A Portuguese request is understood; P0 approved UX: FloFi answers in the interface language (English here).
+  await expect(copilotSays(page)).toContainText('Which asset do you want to receive on Robinhood Chain?');
   await ask(page, 'USDG');
   await expect(copilotSays(page)).toContainText('receive USDG');
   await expect(copilotSays(page)).toContainText('bridge 1 USDT from Solana to Robinhood Chain receive USDG via best slippage 100 bps');
   // BUILD-FLOFI-CONVERSATIONAL-001: once every required field is valid the step is committed at once; nothing is quoted, signed or sent by the chat.
-  // The conversation is in Portuguese, so FloFi confirms in Portuguese.
-  await expect(copilotSays(page)).toContainText('Adicionado ao seu workflow: Transferir entre redes · 1 USDT');
+  // The request was in Portuguese; FloFi confirms in the interface language (English).
+  await expect(copilotSays(page)).toContainText('Bridge added to your workflow: 1 USDT');
   await expect(page.locator('.summary-bar')).toHaveAttribute('data-workflow-revision', '1');
   expect(await counters()).toEqual(before);
 });
@@ -85,7 +86,11 @@ async function authorByChat(page: Page, sentence: string) {
   expect(result.ok).toBe(true);
   if (!result.ok) throw Error(result.code);
   const card = page.locator('.build-flow-surface .composer-card');
-  await expect(card.locator('.composer-destination-box .composer-amount-value')).toHaveText(result.estimate.expected);
+  // P0 approved UX (board 04): the quoted output is shown with at most six significant digits; its exact value stays in the title.
+  const shown = card.locator('.composer-destination-box .composer-amount-value');
+  await expect(shown).toHaveAttribute('title', result.estimate.expected);
+  const expected = Number(result.estimate.expected);
+  expect(Math.abs(Number(await shown.innerText()) - expected)).toBeLessThanOrEqual(expected * 5e-6);
   expect(result.estimate.correlationId).toBe(response.headers()['x-quote-correlation-id']);
   // BUILD-FLOFI-UX-FIX-003: an executable (builder-verified) estimate is shown as the amount alone; provider and quality labels stay off the card,
   // and only a route FloFi cannot execute is said so in plain words.

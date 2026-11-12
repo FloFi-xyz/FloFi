@@ -4,7 +4,7 @@ import { expectEditorSection, openBuilder, openEditorSection } from './build-ent
 
 test('Simulate anchors its CTAs inside the canvas beside the zoom controls', async ({ page }) => {
   await openBuilder(page);
-  await page.getByRole('button', { name: 'Rename workflow', exact: true }).click();
+  await page.getByRole('button', { name: /^Rename workflow: / }).click();
   await page.getByRole('textbox', { name: 'Workflow name', exact: true }).fill('ESPARTACUS');
   await page.getByRole('textbox', { name: 'Workflow name', exact: true }).press('Enter');
   await expect(page.locator('.summary-bar')).toHaveAttribute('data-workflow-revision', '0');
@@ -51,13 +51,13 @@ test('Simulate anchors its CTAs inside the canvas beside the zoom controls', asy
   await expectEditorSection(page, 'Build');
   await expect(page.locator('.summary-bar')).toHaveAttribute('data-workflow-revision', '0');
   await page.setViewportSize({ width: 1440, height: 900 });
-  await expect(page.getByRole('heading', { name: 'ESPARTACUS', exact: true })).toBeVisible();
-  await page.getByRole('button', { name: 'Rename workflow', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'Rename workflow: ESPARTACUS', exact: true })).toBeVisible();
+  await page.getByRole('button', { name: /^Rename workflow: / }).click();
   await page.getByRole('textbox', { name: 'Workflow name', exact: true }).fill('ETH Carry Strategy');
   await page.getByRole('textbox', { name: 'Workflow name', exact: true }).press('Enter');
   await expect(page.locator('.summary-bar')).toHaveAttribute('data-workflow-revision', '0');
   await page.getByLabel('Describe your flow').fill('swap 2.25 USDC to WETH on Base slippage 50 bps');
-  await page.getByRole('button', { name: 'Send', exact: true }).click();
+  await page.getByRole('button', { name: 'Send message', exact: true }).click();
   await applyPendingProposal(page);
   await openEditorSection(page, 'Simulate');
   await expect(panel.locator('.canvas-head').getByRole('heading', { name: 'ETH Carry Strategy', exact: true })).toBeVisible();
@@ -65,10 +65,10 @@ test('Simulate anchors its CTAs inside the canvas beside the zoom controls', asy
   await expect(graph.locator('.composer-card')).toBeInViewport();
   const viewport = graph.locator('.react-flow__viewport');
   const beforeZoom = await viewport.getAttribute('style');
-  await graph.getByRole('slider', { name: 'Canvas zoom' }).press('ArrowLeft');
+  await graph.getByRole('button', { name: 'Zoom out', exact: true }).click();
   await expect(viewport).not.toHaveAttribute('style', beforeZoom!);
   const afterZoom = await viewport.getAttribute('style');
-  await graph.getByRole('slider', { name: 'Canvas zoom' }).press('ArrowRight');
+  await graph.getByRole('button', { name: 'Zoom in', exact: true }).click();
   await expect(viewport).not.toHaveAttribute('style', afterZoom!);
   await graph.getByRole('button', { name: 'Fit workflow', exact: true }).click();
   await expect(graph.locator('.composer-card')).toBeInViewport();
@@ -91,7 +91,7 @@ test('Simulate anchors its CTAs inside the canvas beside the zoom controls', asy
   await expect(technical).not.toHaveAttribute('open');
   await expect(page.getByRole('region', { name: 'Base read-only observation' })).toBeHidden();
   await returnToBuild.click();
-  await expect(page.getByRole('heading', { name: 'ETH Carry Strategy', exact: true })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Rename workflow: ETH Carry Strategy', exact: true })).toBeVisible();
   await expect(page.locator('.summary-bar')).toHaveAttribute('data-workflow-revision', '1');
   await expect(page.locator('.composer-card')).toHaveCount(1);
   await expect(page.getByRole('button', { name: 'Review swap', exact: true })).toHaveCount(0);

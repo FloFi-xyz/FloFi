@@ -3,7 +3,16 @@ import { test, expect } from './fixtures';
 import { installSupplyWallet } from './supply-fixtures';
 import { configureCanvasAction } from './composer-authoring-fixtures';
 import type { Page } from '@playwright/test';
-import { expectProductSection, openBuilder, openProductSection } from './build-entry-navigation';
+import { expectProductSection, navigationLink, openBuilder, openProductSection, type NavigationItem } from './build-entry-navigation';
+
+/**
+ * P0 approved UX (board 03b): the drawer's items, in order — New workflow (the Chat entry), Editor, Dashboard; Library (Your workflows,
+ * Automations); Access (Credentials, Agents, Passkeys). An item that is not available yet carries a status tag ("In testing", "Coming soon") after
+ * its label, so items are read by their label.
+ */
+const DRAWER_ITEMS = ['New workflow', 'Editor', 'Dashboard', 'Your workflows', 'Automations', 'Credentials', 'Agents', 'Passkeys'];
+const itemLabels = (page: Page) => page.locator('.navigation-drawer nav').getByRole('link').evaluateAll(links => links.map(link => link.querySelector('span')?.textContent ?? ''));
+const item = (page: Page, label: string) => navigationLink(page, (label === 'New workflow' ? 'Chat' : label) as NavigationItem);
 
 async function geometry(page: Page) {
   return page.evaluate(() => {
@@ -32,13 +41,13 @@ for (const theme of ['light', 'dark'] as const) {
     expect(await trigger.getAttribute('aria-controls')).toBe(await drawer.getAttribute('id'));
     for (const label of ['Credentials', 'Agents', 'Passkeys']) {
       await trigger.click(); await expect(drawer).toBeVisible();
-      expect(await drawer.getByRole('link').allTextContents()).toEqual(['Dashboard', 'Chat', 'Editor', 'Credentials', 'Agents', 'Passkeys']);
-      await drawer.getByRole('link', { name: label, exact: true }).click();
+      expect(await itemLabels(page)).toEqual(DRAWER_ITEMS);
+      await item(page, label).click();
       await expect(page).toHaveURL(`/app/${label.toLowerCase()}`);
       await expect(page.getByRole('heading', { name: label, level: 1 })).toBeVisible();
       await expect(drawer).toBeHidden();
       await trigger.click();
-      const row = drawer.getByRole('link', { name: label, exact: true });
+      const row = item(page, label);
       await expect(row).toHaveAttribute('aria-current', 'page');
       await expect(drawer.locator('[aria-current=page]')).toHaveCount(1);
       await expect(row).toHaveCSS('font-weight', '600');
@@ -47,15 +56,9 @@ for (const theme of ['light', 'dark'] as const) {
       await expect(trigger).toHaveCSS('outline-style', 'solid');
     }
     await trigger.press('Enter');
-    await expect(drawer.getByRole('link', { name: 'Dashboard', exact: true })).toBeFocused();
-    await page.keyboard.press('Tab');
-    await expect(drawer.getByRole('link', { name: 'Chat', exact: true })).toBeFocused();
-    await page.keyboard.press('Tab');
-    await expect(drawer.getByRole('link', { name: 'Editor', exact: true })).toBeFocused();
-    await page.keyboard.press('Tab');
-    await expect(drawer.getByRole('link', { name: 'Credentials', exact: true })).toBeFocused();
-    await page.keyboard.press('Tab');
-    await expect(drawer.getByRole('link', { name: 'Agents', exact: true })).toBeFocused();
+    // Board 03b: focus starts on the first item and Tab follows the drawer's order.
+    await expect(item(page, 'New workflow')).toBeFocused();
+    for (const label of DRAWER_ITEMS.slice(1, 7)) { await page.keyboard.press('Tab'); await expect(item(page, label)).toBeFocused(); }
     await page.keyboard.press('Enter'); await expect(page).toHaveURL('/app/agents'); await expect(drawer).toBeHidden();
     await trigger.click(); await trigger.click(); await expect(drawer).toBeHidden();
     await trigger.click(); await page.mouse.click(1400, 500); await expect(drawer).toBeHidden(); await expect(trigger).toBeFocused();
@@ -101,9 +104,11 @@ for (const theme of ['light', 'dark'] as const) {
         expect(900 - drawerBox.y).toBeGreaterThan(400);
         expect(width - drawerBox.width).toBeGreaterThan(30);
         expect(await drawer.evaluate(element => element.scrollHeight <= element.clientHeight)).toBe(true);
-        for (const label of ['Dashboard', 'Chat', 'Editor', 'Credentials', 'Agents', 'Passkeys']) await expect(drawer.getByRole('link', { name: label, exact: true })).toBeInViewport();
-        await expect(drawer.getByRole('button', { name: 'Logout', exact: true })).toBeInViewport();
-        await expect(drawer.locator('[aria-current=page]')).toHaveCount(stage === 'Build' || stage === 'Dashboard' ? 1 : 0);
+        for (const label of DRAWER_ITEMS) await expect(item(page, label)).toBeInViewport();
+        await expect(drawer.getByRole('button', { name: 'Log out', exact: true })).toBeInViewport();
+        // Board 03b: the Editor is the current item on each of its sections (Create, Simulate, Execute); the Dashboard on its own page.
+        await expect(drawer.locator('[aria-current=page]')).toHaveCount(1);
+        await expect(item(page, stage === 'Dashboard' ? 'Dashboard' : 'Editor')).toHaveAttribute('aria-current', 'page');
         await expect(trigger).toBeInViewport();
         // BUILD-FLOFI-MAINNET-PRODUCT-001: Mainnet-only, so the header has no network selector.
         await expect(page.getByRole('combobox', { name: 'Environment', exact: true })).toHaveCount(0);
@@ -111,7 +116,7 @@ for (const theme of ['light', 'dark'] as const) {
         await expect(page.getByRole('group', { name: 'Wallet connection' })).toBeVisible();
         expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
         if (stage === 'Build' && (width === 320 || width === 1440)) await page.screenshot({ path: `.tmp/flofi-navigation-${theme}-${width}.png` });
-        await drawer.getByRole('link', { name: 'Credentials', exact: true }).press('Escape');
+        await item(page, 'Credentials').press('Escape');
         await expect(drawer).toBeHidden();
         expect(await geometry(page)).toEqual(before);
         expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);

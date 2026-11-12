@@ -18,7 +18,7 @@ import { composeWorkflowBound, NETWORKS } from '../engine/strategy-engine.ts';
 import { userFundedPreferred } from '../workflow-runs/authorization-plan.ts';
 import { userFundedBuildable } from '../workflow-runs/service.ts';
 import { planExecutionGroups, type ExecutionGroup, type GroupStrategy, type UserFundedFacts, type WalletProfile } from '../workflow-runs/execution-groups.ts';
-import { prepareGroup, type UserFundedDeps } from '../user-funded/groups.ts';
+import { prepareGroup, type NativeFeeShortfall, type UserFundedDeps } from '../user-funded/groups.ts';
 import type { BatchSimulation } from '../user-funded/batch-simulation.ts';
 import type { EvmGroupCalls, UserCall } from '../user-funded/evm-calls.ts';
 import { amountOf, plannedSteps, type ReviewAmount } from '../user-funded/planned.ts';
@@ -69,7 +69,9 @@ export type EditorExecutionReview = {
   /** Closed codes: why fewer wallet interactions are not possible here (downgrades of every group, deduplicated). */
   readonly reasons: readonly string[];
   /** The first group could not be prepared (e.g. BORROW_UNSAFE_HEALTH_FACTOR): nothing would be offered to the wallet. */
-  readonly refusal: { readonly code: string; readonly step: number | null } | null;
+  readonly refusal: { readonly code: string; readonly step: number | null;
+    /** P0 (board 07): the server's own numbers for a native-fee shortfall, read-only, for the blocker screen and the assistant. */
+    readonly evidence?: NativeFeeShortfall } | null;
 };
 export type ReviewResult = { readonly ok: true; readonly value: EditorExecutionReview } | { readonly ok: false; readonly code: string; readonly step?: number };
 
@@ -122,7 +124,7 @@ export async function reviewEditorExecution(input: { readonly workflow: unknown;
     if (g.index === 0 && g.strategy === 'EVM_WALLET_BATCH') {
       const r = await prepareGroup(input.deps, composed, req.value, { runId: 'editor-review', groupIndex: 0, strategy: g.strategy, chain: g.chain, feePayer: owner,
         stepFrom: g.stepFrom, stepTo: g.stepTo });
-      if (!r.ok) refusal = { code: r.code, step: r.stepIndex ?? null };
+      if (!r.ok) refusal = { code: r.code, step: r.stepIndex ?? null, ...r.evidence ? { evidence: r.evidence } : {} };
       else {
         const p = r.value.prepared as unknown as { group: EvmGroupCalls; simulation: BatchSimulation | null;
           fee: { estimatedGas: string; maxFeePerGas: string; maxCost: string; payer: string; l1FeeUpperBound?: string } };

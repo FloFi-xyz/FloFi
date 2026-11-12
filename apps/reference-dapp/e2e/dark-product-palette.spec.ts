@@ -4,7 +4,7 @@ import { selectSettingsTheme } from './settings-fixtures';
 import type { Page, Locator } from '@playwright/test';
 import { installSupplyWallet } from './supply-fixtures';
 import { configureCanvasAction } from './composer-authoring-fixtures';
-import { editorTab, openBuilder, openEditorSection, openProductSection, stagesNavigation } from './build-entry-navigation';
+import { editorSteps, navigationDrawer, navigationLink, openBuilder, openEditorSection, openNavigation, openProductSection } from './build-entry-navigation';
 
 const widths = [1440, 1024, 768, 375, 320];
 async function dark(page: Page) {
@@ -59,12 +59,24 @@ test('graphite palette follows the real lifecycle shell, settings and workspace 
   for (const width of widths) {
     await page.setViewportSize({ width, height: 900 });
     for (const stage of ['Build', 'Simulate', 'Execute', 'Dashboard'] as const) {
-      // BUILD-FLOFI-CHAT-EDITOR-UX-001: Build, Simulate and Execute are the Editor's sections (the Editor tab is the selected one); no stage numbers.
+      // BUILD-FLOFI-CHAT-EDITOR-UX-001: Build, Simulate and Execute are the Editor's sections. P0 approved UX (board 03b): the Editor's stepper in
+      // the top bar marks the current section (the former stage tabs are gone); the Dashboard is the drawer's current item. No stage numbers.
       await openProductSection(page, stage);
-      const selected = stage === 'Dashboard' ? stagesNavigation(page).getByRole('button', { name: 'Dashboard', exact: true }) : editorTab(page);
-      await expect(selected).toHaveCSS('background-color', 'rgb(26, 35, 80)');
-      await expect(selected).toHaveCSS('color', 'rgb(147, 166, 255)');
-      await expect(stagesNavigation(page).locator('.stage-number')).toHaveCount(0);
+      if (stage === 'Dashboard') {
+        await expect(editorSteps(page)).toHaveCount(0);
+        await openNavigation(page);
+        const selected = navigationLink(page, 'Dashboard');
+        await expect(selected).toHaveAttribute('aria-current', 'page');
+        await readable(selected);
+        await expect(navigationDrawer(page).locator('.stage-number')).toHaveCount(0);
+        await page.keyboard.press('Escape');
+        await expect(navigationDrawer(page)).toHaveCount(0);
+      } else {
+        const selected = editorSteps(page).locator('li[data-step-look="current"] button');
+        await expect(selected).toHaveCSS('background-color', 'rgb(26, 35, 80)');
+        await expect(selected).toHaveCSS('color', 'rgb(147, 166, 255)');
+        await expect(editorSteps(page).locator('.stage-number')).toHaveCount(0);
+      }
       if (stage !== 'Dashboard') {
         await expect(page.locator('.flow-surface')).toHaveCSS('background-image', 'linear-gradient(135deg, rgb(28, 32, 41), rgb(28, 32, 41))');
         await expect(page.locator('.canvas-navigator')).toHaveCSS('background-color', 'rgb(28, 32, 41)');
@@ -78,7 +90,7 @@ test('graphite palette follows the real lifecycle shell, settings and workspace 
         }
       }
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
-      await readable(page.locator('.canvas-foot, .simulation-summary-heading p, .execution-summary h2, .dashboard-empty p, .tabs button.selected'));
+      await readable(page.locator('.canvas-foot, .simulation-summary-heading p, .execution-summary h2, .dashboard-empty p, .top-bar .editor-stepper li[data-step-look="current"] button'));
       if (width === 1440 || width === 320) await page.screenshot({ style: 'nextjs-portal{display:none}', path: `.tmp/ux007-team3-${stage.toLowerCase()}-dark-${width}.png`, fullPage: true });
     }
     const settings = page.getByRole('button', { name: 'Settings', exact: true });

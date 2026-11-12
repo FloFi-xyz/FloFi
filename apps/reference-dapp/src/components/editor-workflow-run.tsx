@@ -23,10 +23,13 @@ import { authorizeUserFundedGroup, cancelWorkflowRunHandoff, prepareUserFundedGr
 import type { EditorExecutionReview, ReviewAmount } from '../editor/workflow-execution';
 import type { ClaimedProposal } from '../platform/approvals';
 import type { RunView } from '../workflow-runs/service';
+import { walletRequestView } from '../domain/approved-ux';
+import { BlockerPanel } from './review-summary-panel';
 import { WALLET_BATCH_OUTCOME_UNKNOWN, canEndWorkflow, haltedAs } from '../workflow-runs/state-machine';
 import { useLocale } from '../i18n/locale';
 import { batchHandout, keepBatchHandout, sendWalletBatch, signSolanaGroup, signUserOperation, walletBatchHashes, walletProfile } from './user-funded-browser';
 import { useWalletProof } from './wallet-proof';
+import { FLIGHT_REFUSAL_MESSAGES } from '../domain/flight-refusal';
 
 /**
  * The whole-workflow runs this browser started and has not closed, by approval id. A page load gives the Canvas a new workflow id, so a run is
@@ -191,6 +194,8 @@ export function useEditorWorkflowRun(input: { readonly workflow: { readonly work
   const [run, setRun] = useState<RunView | null>(null);
   const [approvalId, setApprovalId] = useState<string | null>(null);
   const [updated, setUpdated] = useState<EditorWorkflowRunState['updated']>([]);
+  // A HALTED run no longer asks the updated minimums (Resume or End takes over): their notice goes with the question.
+  useEffect(() => { if (run?.state === 'HALTED' && phase !== 'confirm-update' && updated.length) setUpdated([]); }, [run?.state, phase, updated.length]);
   const pendingSend = useRef<{ approvalId: string; index: number } | null>(null);
   /** `refusedGroup`, also as a ref: a status update retires the refusal once that group was answered or stopped (`refusalSettled`). */
   const [refusedGroup, setRefusedGroup] = useState<number | null>(null);
@@ -241,7 +246,9 @@ export function useEditorWorkflowRun(input: { readonly workflow: { readonly work
     // A finished run stays shown (after a reload too) until the owner closes it: the same workflow is never offered again by accident.
     if (!OPEN_RUN.includes(r.state)) { setPhase('done'); setUnrecorded(false); }
     // A status poll never hides what the owner is being asked (the wallet prompt, or an updated minimum to confirm).
-    else if (r.state !== 'PENDING') setPhase(current => ['wallet', 'confirming', 'confirm-update', 'authorizing', 'proving'].includes(current) ? current : 'running');
+    // An updated minimum is no longer asked once the run HALTED (it would only be refused): the run's own controls take over.
+    else if (r.state !== 'PENDING') setPhase(current => current === 'confirm-update' && r.state === 'HALTED' ? 'running'
+      : ['wallet', 'confirming', 'confirm-update', 'authorizing', 'proving'].includes(current) ? current : 'running');
     // A batch handed to the wallet (from here or /approve) for a group the run still shows prepared: not recorded yet.
     setUnrecorded(r.groups.some(g => g.state === 'PREPARED' && g.strategy === 'EVM_WALLET_BATCH' && handedOver(r.approvalId, g.index)));
     // A USER_FUNDED_PREPARED_STILL_VALID refusal whose group the wallet answered since (or FloFi stopped with its batch unanswered) is over: it
@@ -689,6 +696,8 @@ const PREPARED_EXPIRED_CHECK_WALLET = 'The request FloFi prepared expired at {0}
  * Review's own refusal that names its step uses `STEP_REFUSAL` instead.
  */
 export const EXECUTION_REFUSAL: Readonly<Record<string, string>> = {
+  // P0: Flight Beta refusals (wallet not linked to the account, session ended, access not active) in plain words.
+  ...FLIGHT_REFUSAL_MESSAGES,
   BORROW_UNSAFE_HEALTH_FACTOR: 'This Borrow would leave your Aave health factor below 2.0 after the batch. Lower the Borrow amount or supply more collateral.',
   SIMULATION_REVERTED: 'FloFi simulated the whole batch and one of its calls would fail on chain now, so your wallet was not asked. Check the amounts, balances and allowances, then try again.',
   SWAP_MINIMUM_NOT_MET: 'A swap in this batch would deliver less than its signed minimum now, so your wallet was not asked. Try again for a fresh quote.',
@@ -871,6 +880,20 @@ export function EditorWorkflowRunPanel({ state }: { state: EditorWorkflowRunStat
   const counts = review?.counts;
   return <section className="editor-workflow-run panel" aria-label={tr('Whole workflow')} data-run-phase={phase} data-run-state={run?.state ?? undefined}>
     <h3>{tr(run ? 'Workflow progress' : 'Review the whole workflow')}</h3>
+    {/* P0 approved UX (board 08): while the wallet holds the request, say which request it is and what the wallet shows, in plain words. */}
+    {review && (phase === 'wallet' || phase === 'confirming') && (() => {
+      // Only for the run this Review describes (a run of another revision or wallet profile shows its own progress below, never this plan).
+      const view = run && run.workflowHash !== review.workflowHash ? null : walletRequestView(review, run);
+      return view && <div className="execution-wallet-request" data-phase={phase}>
+        <p className="eyebrow">{view.of === null ? tr('EXECUTION · REQUEST {0}', String(view.request)) : tr('EXECUTION · REQUEST {0} OF {1}', String(view.request), String(view.of))}</p>
+        <h4>{tr(phase === 'wallet' ? 'Confirm in your wallet' : 'Waiting for your wallet')}</h4>
+        {view.items.length > 0 && <><p className="muted">{view.calls === null ? tr('Steps in this request:')
+          : !view.itemized ? tr(view.calls === 1 ? 'This request has 1 call, for this step:' : 'This request has {0} calls, for these steps:', String(view.calls))
+          : tr(view.calls === 1 ? 'This request has 1 call:' : 'This request has {0} calls:', String(view.calls))}</p>
+          <ol className="execution-wallet-calls">{view.items.map((item, index) => <li key={index}>{tr(item.text, ...item.parameters.map((value, at) => at === 1 ? tr(ACTION[value] ?? value) : value))}</li>)}</ol></>}
+        <p className="muted">{tr('Editing paused during execution')}</p>
+      </div>;
+    })()}
     {state.earlier && <div className="editor-run-earlier" role="status"><p>{tr('A workflow you authorized earlier in this browser has not been closed. Its progress, and any batch your wallet already has, are read from FloFi and your wallet.')}</p>
       <button type="button" className="secondary" disabled={busy} onClick={() => void state.followEarlier()}>{tr('Show its progress')}</button></div>}
     {!review && !run && state.canReview && <p>{tr('FloFi checks every step together — amounts, minimums, fees and Aave risk — and asks your wallet only once where it can batch. Nothing is signed or sent by a review.')}</p>}
@@ -963,6 +986,9 @@ export function EditorWorkflowRunPanel({ state }: { state: EditorWorkflowRunStat
         <dd>{tr(HOW[g.strategy] ?? g.strategy)} · {tr(stateText(GROUP_STATE, g))}{g.gasPaid ? ` · ${tr('network fees paid: {0}', eth(g.gasPaid.amount))}` : ''}</dd></div>)}</dl>
     </>}
     {refusal && <p className="error-banner" role="alert">{refusal}</p>}
+    {/* Board 07: a native-fee shortfall found while preparing this Review shows the server's own numbers (no run exists yet: nothing was sent). */}
+    {review?.refusal?.evidence && !run && !state.started && !state.unloaded && <BlockerPanel title={refusal ?? ''} message={refusal ?? ''} error={review.refusal.code} owner={review.owner}
+      feeShortfall={review.refusal.evidence} technical={null}/>}
     {state.updated.length > 0 && <div className="editor-run-update" role="alert">
       <p>{tr(state.updated.every(u => u.reviewed) ? 'Prices moved since your review. Your wallet would be asked with these minimums:' : 'Confirm what your wallet will be asked:')}</p>
       <ul>{state.updated.map(u => <li key={`${u.kind}:${u.index}`}>{u.reviewed ? tr('Step {0}: {1} (reviewed {2})', String(u.index + 1), u.now, u.reviewed)

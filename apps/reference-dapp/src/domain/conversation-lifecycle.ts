@@ -101,11 +101,13 @@ const NO_WORDS = pattern(['no', 'nope', 'not now', 'not yet', 'cancel', 'stop', 
   'ainda nao', 'cancelar', 'cancela', 'parar', 'pare', 'espera', 'espere', 'não obrigado', 'nao obrigado']);
 const CONFIRM_WORKFLOW = pattern(['yes', 'yes please', 'confirm', 'i confirm', 'confirmed', 'yes confirm', 'yes i confirm', 'confirm workflow', 'confirm the workflow',
   'confirm this workflow', 'confirm my workflow', 'yes confirm the workflow', 'yes confirm this workflow', 'sim', 'confirmo', 'eu confirmo', 'sim confirmo', 'confirmar',
-  'confirmado', 'sim confirmar', 'confirmar workflow', 'confirmar o workflow', 'confirmo o workflow', 'confirmar fluxo', 'confirmo o fluxo', 'sim confirmo o workflow']);
+  'confirmado', 'sim confirmar', 'confirmar workflow', 'confirmar o workflow', 'confirmo o workflow', 'confirmar fluxo', 'confirmo o fluxo', 'sim confirmo o workflow',
+  // P0 PT-BR copy says "fluxo": its phrasings confirm exactly like the workflow ones.
+  'confirmar o fluxo', 'confirmar este fluxo', 'confirmo este fluxo', 'sim confirmo o fluxo', 'sim confirmo este fluxo']);
 const CONFIRM_EXECUTION = pattern(['yes', 'yes please', 'yes execute', 'yes execute it', 'yes execute now', 'yes execute the workflow', 'yes execute this workflow', 'execute',
   'execute it', 'execute now', 'execute the workflow', 'execute this workflow', 'execute my workflow', 'yes run it', 'run it', 'run it now', 'sim', 'sim executar',
   'sim executa', 'sim execute', 'executar', 'executa', 'executar agora', 'execute agora', 'pode executar', 'sim pode executar', 'executar workflow', 'executar o workflow',
-  'executar o fluxo', 'sim executar agora']);
+  'executar o fluxo', 'sim executar agora', 'executar fluxo', 'executar este fluxo', 'sim executar o fluxo', 'sim executar este fluxo']);
 const CONTINUE = pattern(['yes', 'yes please', 'continue', 'yes continue', 'continue to wallet', 'continue to my wallet', 'yes continue to wallet', 'sim', 'continuar', 'sim continuar',
   'continua', 'pode continuar', 'continuar para a carteira', 'sim continuar para a carteira']);
 const ACCEPT_CONTINUE = pattern(['accept and continue', 'yes accept and continue', 'accept', 'yes accept', 'accept it', 'accept the updated quote', 'aceitar e continuar',
@@ -117,7 +119,8 @@ const DISCARD_EDIT = pattern(['discard', 'discard it', 'discard the edit', 'disc
 const NEXT_REVIEW = pattern(['review', 'review workflow', 'review my workflow', 'review the workflow', 'review this workflow', 'lets review', 'let us review',
   'review it', 'simulate', 'simulate workflow', 'simulate my workflow', 'simulate the workflow', 'run simulation', 'revisar', 'revisar workflow', 'revisar o workflow',
   'revisar meu workflow', 'revisar fluxo', 'revisar o fluxo', 'revisar meu fluxo', 'revise', 'revise o workflow', 'revise meu workflow', 'vamos revisar', 'simular',
-  'simular workflow', 'simular o workflow', 'simular meu workflow', 'simular fluxo', 'simular meu fluxo']);
+  'simular workflow', 'simular o workflow', 'simular meu workflow', 'simular fluxo', 'simular meu fluxo', 'simular o fluxo', 'revise o fluxo', 'revise meu fluxo',
+  'revisar este fluxo']);
 // BUILD-FLOFI-BRIDGE-LIVE-FIX-003: recovery after a refused start or an expired/changed quote is a fresh simulation, asked for in chat.
 const REFRESH_REQUEST = pattern(['simulate again', 'simulate it again', 'retry simulation', 'try again', 'refresh quote', 'refresh the quote', 'get a new quote',
   'get a fresh quote', 'new quote', 'requote', 'simular novamente', 'simular de novo', 'tentar novamente', 'tentar de novo', 'atualizar cotação', 'atualizar cotacao',
@@ -127,16 +130,17 @@ const ANOTHER_ROUTE = pattern(['try another route', 'try a different route', 'an
 const NEXT_ADD = pattern(['add another action', 'add another', 'add action', 'add more', 'another action', 'adicionar outra ação', 'adicionar outra acao',
   'adicionar ação', 'adicionar acao', 'outra ação', 'outra acao', 'adicionar mais']);
 const EXECUTE_REQUEST = pattern(['execute', 'execute workflow', 'execute my workflow', 'execute the workflow', 'execute this workflow', 'run my workflow', 'run the workflow',
-  'executar', 'executar workflow', 'executar meu workflow', 'executar o workflow', 'executar fluxo', 'executar meu fluxo', 'executar o fluxo']);
+  'executar', 'executar workflow', 'executar meu workflow', 'executar o workflow', 'executar fluxo', 'executar meu fluxo', 'executar o fluxo', 'executar este fluxo',
+  'executar este workflow']);
 const STATUS_REQUEST = pattern(['status', 'check status', 'execution status', 'whats the status', 'what is the status', 'check execution', 'refresh status',
   'verificar status', 'ver status', 'status da execução', 'status da execucao', 'verificar execução', 'verificar execucao', 'atualizar status']);
 // BUILD-FLOFI-CHAT-E2E-DASHBOARD-UX-001: after an execution, "modify this workflow" asks what to change (authoring only; nothing is simulated).
 const MODIFY_REQUEST = pattern(['modify this workflow', 'modify the workflow', 'modify workflow', 'modify my workflow', 'modify it', 'edit this workflow', 'edit the workflow',
   'edit workflow', 'change this workflow', 'change the workflow', 'modificar este workflow', 'modificar o workflow', 'modificar workflow', 'modificar este fluxo',
-  'modificar o fluxo', 'alterar este workflow', 'alterar o workflow', 'editar este workflow', 'editar o workflow', 'editar workflow']);
+  'modificar o fluxo', 'alterar este workflow', 'alterar o workflow', 'editar este workflow', 'editar o workflow', 'editar workflow', 'alterar este fluxo', 'alterar o fluxo',
+  'editar este fluxo', 'editar o fluxo', 'editar fluxo']);
 const UNDO_REQUEST = pattern(['undo', 'undo that', 'undo this change', 'undo last change', 'desfazer', 'desfaz', 'desfazer isso', 'desfazer esta alteração', 'desfazer esta alteracao',
   'desfazer última alteração', 'desfazer ultima alteracao']);
-const PT_LIFECYCLE = /\b(?:sim|não|nao|confirmo|confirmar|executar|executa|revisar|revise|simular|adicionar|outra|cancelar|verificar|desfazer|continuar|agora|fluxo|aplicar|aplica|descartar|descarta|novamente|cotação|cotacao|rota|tentar|aceitar|aceito|modificar|alterar|editar)\b/;
 
 /** An explicit answer to FloFi's open question. Anything else — extra content, an edit, a hedge — is UNCLEAR and changes nothing. */
 export function classifyAnswer(text: string, question: PendingQuestion['kind']): Answer {
@@ -153,10 +157,12 @@ export function lifecycleRequest(text: string): 'REVIEW' | 'REFRESH' | 'ROUTE' |
   return NEXT_REVIEW.test(value) ? 'REVIEW' : REFRESH_REQUEST.test(value) ? 'REFRESH' : ANOTHER_ROUTE.test(value) ? 'ROUTE' : NEXT_ADD.test(value) ? 'ADD' : EXECUTE_REQUEST.test(value) ? 'EXECUTE' : STATUS_REQUEST.test(value) ? 'STATUS'
     : UNDO_REQUEST.test(value) ? 'UNDO' : MODIFY_REQUEST.test(value) ? 'MODIFY' : null;
 }
-/** The language of a short lifecycle message (PT words decide), else the interface language. */
-export function answerLanguage(text: string, fallback: ConversationLanguage): ConversationLanguage {
-  const value = normalize(text);
-  return PT_LIFECYCLE.test(value) ? 'PT' : /\b(?:yes|no|confirm|execute|review|simulate|add|another|cancel|status|undo|continue|run|apply|discard|refresh|quote|route|retry|again|accept|modify|edit)\b/.test(value) ? 'EN' : fallback;
+/**
+ * P0 approved UX (boards 01/02, handoff §4): FloFi replies in the ACTIVE INTERFACE language, whatever language the message was typed in (a
+ * Portuguese answer on an English screen mixed the two). The words are still understood in either language (`classifyAnswer`, `lifecycleRequest`).
+ */
+export function answerLanguage(_text: string, interfaceLanguage: ConversationLanguage): ConversationLanguage {
+  return interfaceLanguage;
 }
 
 // ── Phase ───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -371,7 +377,8 @@ export function describeChatChange(before: Workflow, after: Workflow, context: R
   const c = conversationCopy(language), lines: string[] = [];
   const detail = (workflow: Workflow, node: Workflow['nodes'][number]) => {
     const card = composerSummary(workflow, node, context), pair = card.bridgePair ?? card.detail;
-    return [card.amount === 'Amount not available' ? null : card.amount, pair && !card.amount.includes(pair) ? pair : null, card.chain, card.provider === 'Provider not specified' ? null : card.provider]
+    // Board 16: no chain id outside Technical details — the chat names the network ("Arbitrum"), never "Arbitrum (42161)".
+    return [card.amount === 'Amount not available' ? null : card.amount, pair && !card.amount.includes(pair) ? pair : null, card.chain.replace(/ \(\d+\)$/, ''), card.provider === 'Provider not specified' ? null : card.provider]
       .filter((value): value is string => Boolean(value)).map(value => label(language, value)).join(' · ');
   };
   for (const node of composerActions(after)) {

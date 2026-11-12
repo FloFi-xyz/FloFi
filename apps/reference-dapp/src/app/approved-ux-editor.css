@@ -1,0 +1,198 @@
+/* SPDX-License-Identifier: AGPL-3.0-only */
+/* P0 approved UX (approved-ux-editor). Colors only through the shared theme variables in globals.css (shadows: the Editor's --fx-shadow). */
+/* Boards 04 (Editor · Create) and 05 (choose the network in the chat), board 16 §5–§8. Presentation only: these rules restyle the Canvas header,
+   the action rail, the selection toolbar, the zoom controls, the step cards and the FloFi panel. Imported after globals.css and editor.css. */
+
+/* ── Two regions: the Canvas on the darkest surface with the dot grid; the chat on the panel surface. ─────────────────────────────── */
+.build-workspace .build-grid>.canvas{border-color:var(--line);background:var(--app-bg)}
+.build-workspace .build-flow-surface{background:var(--app-bg)}
+.build-workspace .build-grid>.copilot{border-color:var(--line);background:var(--surface)}
+@media(min-width:1200px){.main.workflow-workspace.build-workspace,.main.workflow-workspace.build-workspace[data-workspace-toolbox]{--workspace-panel-width:380px}}
+
+/* ── Canvas header: name (click to rename), network chip(s), step count, state, Undo · Redo · ··· ───────────────────────────────── */
+.build-workspace .build-canvas-head{gap:8px;padding:8px 12px 8px 20px;border-bottom:1px solid var(--line);background:var(--app-bg)}
+.build-workspace .build-canvas-head .canvas-head-main{flex-wrap:wrap;align-items:center;gap:6px 12px;min-height:40px}
+.build-canvas-head .canvas-head-meta{display:flex;align-items:center;flex-wrap:wrap;gap:8px 12px;flex:0 1 auto;min-width:0}
+.build-canvas-head .canvas-name{min-width:0}
+.build-canvas-head .canvas-name h2{display:flex;min-width:0;margin:0;font-size:18px;font-weight:600}
+.build-canvas-head .canvas-name .workflow-rename{display:inline-flex;align-items:center;gap:6px;width:auto;max-width:100%;height:36px;min-width:0;margin-left:-8px;padding:0 8px;border:0;border-radius:8px;background:transparent;color:var(--ink);font:inherit;font-size:18px;font-weight:600;letter-spacing:-.01em;cursor:text}
+.build-canvas-head .canvas-name .workflow-rename:hover{border-color:transparent;background:var(--surface-raised);color:var(--ink)}
+.build-canvas-head .canvas-name .workflow-rename:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.build-canvas-head .canvas-name .workflow-rename svg{flex:none;color:var(--muted)}
+.build-canvas-head .workflow-name-text{min-width:0;max-width:min(40vw,420px);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.build-canvas-head .canvas-name input{width:280px;height:36px;padding:0 10px;border:1px solid var(--line);border-radius:8px;background:var(--surface-raised);color:var(--ink);font-size:18px;font-weight:600}
+.build-canvas-head .canvas-name input:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+.build-canvas-head .editor-network-chips li{height:28px;padding:0 11px 0 4px;border-color:var(--line);background:var(--surface);color:var(--ink);font-size:13px}
+.build-canvas-head .editor-network-pending{display:inline-flex;align-items:center;gap:6px;height:28px;margin:0;padding:0 11px;border:1px solid var(--line);border-radius:999px;background:var(--surface);color:var(--ink);font-size:13px;white-space:nowrap}
+.editor-network-pending-dot{flex:none;width:11px;height:11px;border:1.5px dashed var(--muted);border-radius:50%}
+.build-workspace .build-canvas-head .canvas-head-main .revision{margin:0;padding:0;border:0;background:none;color:var(--muted);font-family:inherit;font-size:14px;white-space:nowrap}
+.build-canvas-head .editor-state-pill{height:26px;padding:0 10px;border:1px solid transparent;background:var(--surface-raised);color:var(--muted);font-family:inherit;font-size:12.5px;font-weight:500}
+.build-canvas-head .editor-state-pill[data-editor-state="configured"]{border-color:transparent;background:var(--blue-soft);color:var(--accent)}
+.build-canvas-head .editor-state-pill[data-editor-state="attention"]{border-color:transparent;background:var(--warning-surface);color:var(--warning-text)}
+.build-canvas-head .editor-state-pill[data-editor-state="draft"]{border:1px dashed var(--muted);background:transparent;color:var(--muted)}
+.canvas-head-actions{display:flex;align-items:center;gap:2px;margin-left:auto}
+.build-canvas-head .canvas-head-icon{display:grid;place-items:center;flex:none;width:40px;height:40px;padding:0;border:0;border-radius:10px;background:transparent;color:var(--muted);cursor:pointer}
+.build-canvas-head .canvas-head-icon:hover:not(:disabled){background:var(--surface-raised);color:var(--ink)}
+.build-canvas-head .canvas-head-icon:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+.build-canvas-head .canvas-head-icon:disabled{opacity:.4;cursor:default}
+.build-canvas-head .canvas-head-icon[aria-expanded="true"]{background:var(--blue-soft);color:var(--accent)}
+.canvas-edit-paused{display:inline-flex;align-items:center;gap:8px;min-height:36px;padding:0 12px;border-radius:999px;background:var(--surface-raised);color:var(--muted);font-size:13.5px;line-height:1.3}
+.canvas-edit-paused svg{flex:none}
+/* The ··· menu (Save, Automate, toolbar layout). */
+.workflow-more{position:relative}
+.workflow-more-menu:not([hidden]){position:absolute;top:calc(100% + 6px);right:0;z-index:40;display:grid;gap:2px;min-width:232px;padding:6px;border:1px solid var(--line);border-radius:12px;background:var(--surface);box-shadow:0 12px 32px var(--fx-shadow)}
+.workflow-more-menu [role="menuitem"]{display:flex;align-items:center;gap:10px;width:100%;height:auto;min-height:40px;margin:0;padding:0 12px;border:0;border-radius:8px;background:transparent;color:var(--ink);font:inherit;font-size:14px;font-weight:500;text-align:left;white-space:nowrap;cursor:pointer}
+.workflow-more-menu [role="menuitem"] svg{flex:none;color:var(--muted)}
+.workflow-more-menu [role="menuitem"]:is(:hover,:focus-visible){border-color:transparent;background:var(--surface-raised);color:var(--ink)}
+.workflow-more-menu [role="menuitem"]:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
+
+/* ── Action rail: icon-only (64 px), grouped, a chevron expands it to icon + name (188 px). ─────────────────────────────────────── */
+.build-flow-surface .floating-toolbox{inset:0 auto 0 0;z-index:6;display:flex;flex-direction:column;align-items:center;width:64px;max-height:none;padding:8px 0;overflow-x:hidden;overflow-y:auto;border:0;border-right:1px solid var(--line);border-radius:0;background:var(--app-bg);box-shadow:none;scrollbar-width:thin}
+.build-flow-surface .floating-toolbox .canvas-toolbox,.build-flow-surface .floating-toolbox .canvas-primary-tools{display:flex;flex-direction:column;align-items:center;gap:2px;width:100%;margin:0}
+.build-flow-surface .floating-toolbox .canvas-toolbox button{position:relative;display:flex;align-items:center;justify-content:center;width:44px;height:44px;min-height:44px;padding:0;border:0;border-radius:12px;background:transparent;color:var(--ink)}
+.build-flow-surface .floating-toolbox .canvas-toolbox button svg{flex:none;width:20px;height:20px;color:currentColor}
+.build-flow-surface .floating-toolbox .canvas-toolbox button:hover:not(:disabled){border-color:transparent;background:var(--surface-raised);color:var(--ink)}
+.build-flow-surface .floating-toolbox .canvas-toolbox button[data-active]{background:var(--blue-soft);color:var(--accent)}
+.build-flow-surface .floating-toolbox button:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
+.build-flow-surface .floating-toolbox .canvas-toolbox button:disabled{opacity:.4;cursor:default}
+.build-flow-surface .floating-toolbox .canvas-rail-separator{display:block;flex:none;width:28px;height:1px;margin:6px 0;background:var(--line)}
+.build-flow-surface .floating-toolbox .canvas-rail-toggle{display:grid;place-items:center;flex:none;width:44px;height:44px;min-height:44px;margin-top:auto;padding:0;border:0;border-radius:12px;background:transparent;color:var(--muted);cursor:pointer}
+.build-flow-surface .floating-toolbox .canvas-rail-toggle:hover{background:var(--surface-raised);color:var(--ink)}
+.build-flow-surface .floating-toolbox .canvas-rail-toggle[aria-expanded="true"] svg{transform:rotate(180deg)}
+.build-flow-surface .floating-toolbox[data-rail-expanded="true"]{align-items:stretch;width:188px;padding:8px}
+.build-flow-surface .floating-toolbox[data-rail-expanded="true"] :is(.canvas-toolbox,.canvas-primary-tools){align-items:stretch}
+.build-flow-surface .floating-toolbox[data-rail-expanded="true"] .canvas-toolbox button{justify-content:flex-start;gap:12px;width:100%;padding:0 12px;font-size:14px;font-weight:500}
+.build-flow-surface .floating-toolbox[data-rail-expanded="true"] .canvas-toolbox button .canvas-rail-label{position:static;width:auto;height:auto;overflow:hidden;clip:auto;clip-path:none;text-overflow:ellipsis;white-space:nowrap}
+.build-flow-surface .floating-toolbox[data-rail-expanded="true"] .canvas-rail-separator{width:100%}
+.build-flow-surface .floating-toolbox[data-rail-expanded="true"] .canvas-rail-toggle{align-self:flex-start;margin-left:0}
+.build-flow-surface:has(.floating-toolbox[data-rail-expanded="true"]) .canvas-empty{padding-left:200px}
+/* The action's name beside a collapsed rail: after 300 ms on hover, at once on keyboard focus (placed by the Canvas, never clipped by the rail). */
+.canvas-rail-tooltip{position:absolute;z-index:45;transform:translateY(-50%);padding:6px 10px;border-radius:8px;background:var(--ink);color:var(--app-bg);font-size:13px;font-weight:500;line-height:1.2;white-space:nowrap;pointer-events:none;box-shadow:0 6px 18px var(--fx-shadow)}
+@media(prefers-reduced-motion:no-preference){
+  .build-flow-surface .floating-toolbox{transition:width 160ms ease}
+  .build-flow-surface .floating-toolbox .canvas-rail-toggle svg{transition:transform 160ms ease}
+  .canvas-rail-tooltip{animation:canvas-rail-tooltip-in 120ms ease-out}
+}
+@keyframes canvas-rail-tooltip-in{from{opacity:0}to{opacity:1}}
+/* Docked layout: the same groups form the header's tool row, separated by thin vertical lines. */
+.build-workspace .build-canvas-head .canvas-toolbar-row .canvas-rail-separator{display:block;flex:none;width:1px;height:24px;margin:0 4px;background:var(--line)}
+.build-workspace .build-canvas-head .canvas-toolbar-row .canvas-toolbox button[data-active]{background:var(--blue-soft);color:var(--accent)}
+
+/* ── Duplicate and Delete, right above the selected card. ───────────────────────────────────────────────────────────────────── */
+.canvas-selection-toolbar .canvas-utility-tools{display:flex;align-items:center;gap:2px;padding:2px;border:1px solid var(--line);border-radius:12px;background:var(--surface);box-shadow:0 6px 18px var(--fx-shadow)}
+.canvas-selection-toolbar button{display:grid;place-items:center;width:40px;height:40px;min-height:40px;padding:0;border:0;border-radius:10px;background:transparent;color:var(--muted);cursor:pointer}
+.canvas-selection-toolbar button:hover:not(:disabled){background:var(--surface-raised);color:var(--ink)}
+.canvas-selection-toolbar button:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+.canvas-selection-toolbar button:disabled{opacity:.4;cursor:default}
+.canvas-selection-toolbar .canvas-selection-delete{color:var(--red)}
+.canvas-selection-toolbar .canvas-selection-delete:hover:not(:disabled){background:var(--danger-surface);color:var(--red)}
+
+/* ── Zoom: Fit, −, + in the bottom-right corner of every canvas (inside the fit padding, so never over a fitted card). ──────────── */
+.react-flow__panel.canvas-navigator,.canvas-navigator-embedded{width:auto;height:auto;gap:2px;padding:2px;border:1px solid var(--line);border-radius:12px;background:var(--surface);box-shadow:0 4px 14px var(--fx-shadow)}
+:root[data-theme="dark"] :is(.react-flow__panel.canvas-navigator,.canvas-navigator-embedded){background:var(--surface)}
+.canvas-navigator[data-compact="true"],.canvas-navigator[data-narrow="true"]{width:auto}
+.build-flow-surface .react-flow__panel.canvas-navigator,.simulate-canvas:not(.simulation-workflow-canvas) .react-flow__panel.canvas-navigator{left:auto;right:14px;bottom:14px;transform:none}
+.canvas-navigator button,.canvas-navigator .canvas-navigator-step{display:grid;place-items:center;width:40px;height:40px;border-radius:10px;color:var(--muted)}
+.canvas-navigator button:hover:not(:disabled){background:var(--surface-raised);color:var(--ink)}
+.canvas-navigator button:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
+
+/* ── Step cards: compact, "You send" / "You receive", provider · network, one status only when there is something to do. ────── */
+.build-flow-surface .composer-card{width:264px;gap:10px;padding:14px;border:1.5px solid var(--line);border-radius:18px;background:var(--surface)}
+.build-flow-surface .composer-card.active{border-color:var(--primary-line);box-shadow:0 0 0 1px var(--primary-line),0 8px 22px var(--fx-shadow)}
+.composer-card-head{display:flex;align-items:center;justify-content:space-between;gap:8px;min-width:0}
+.composer-card-head .composer-action-title{flex:1 1 auto;min-width:0}
+.build-flow-surface .composer-card-head .composer-metadata{flex:0 1 auto;min-width:0;color:var(--muted);font-size:12.5px;line-height:1.3;text-align:right;overflow-wrap:anywhere}
+.build-flow-surface .composer-card-head .composer-provider{color:var(--muted);font-weight:400}
+.build-flow-surface .composer-amount-box{border:0;border-radius:14px;background:var(--surface-raised)}
+.build-flow-surface .composer-amount-box:has(.composer-value-column :focus-visible){box-shadow:0 0 0 2px var(--accent)}
+.composer-value-caption{color:var(--muted);font-family:var(--font-outfit),sans-serif;font-size:12px;line-height:1.3;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.composer-amount-placeholder{color:var(--muted);font-family:var(--font-outfit),sans-serif;font-size:14px;line-height:1.3}
+.composer-value-column [data-rounded]:not([data-clipped]){cursor:help}
+.composer-params{gap:4px}
+.composer-param{align-items:center;color:var(--muted);font-size:13px;line-height:1.35}
+.composer-param .numeric{color:var(--ink)}
+.composer-price-difference{justify-content:space-between;margin:0}
+.composer-adjust{flex:none;min-height:32px;padding:0 4px;border:0;background:transparent;color:var(--accent);font:inherit;font-size:13px;font-weight:600;cursor:pointer}
+.composer-adjust:hover{text-decoration:underline}
+.composer-adjust:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:4px}
+.build-flow-surface .composer-card .composer-status[data-card-status="attention"]{border-color:transparent;background:var(--warning-surface);color:var(--warning-text)}
+.build-flow-surface .composer-card .composer-status[data-card-status="draft"]{border:1px dashed var(--muted);background:transparent;color:var(--muted)}
+.build-flow-surface .composer-card[data-card-status="attention"],.build-flow-surface .composer-card[data-network-pending]{border-color:var(--warning-text)}
+.build-flow-surface .composer-card[data-card-status="attention"].active,.build-flow-surface .composer-card[data-network-pending].active{box-shadow:0 0 0 1px var(--warning-text),0 8px 22px var(--fx-shadow)}
+/* Board 05: a step without a network yet. */
+.composer-network-pending-chip{display:inline-flex;align-items:center;height:22px;padding:0 8px;border:1px dashed var(--muted);border-radius:999px;color:var(--ink);font-size:12px;white-space:nowrap}
+.composer-network-pending-note{display:flex;align-items:center;gap:8px;color:var(--warning-text);font-size:13px}
+.composer-network-pending-dot{flex:none;width:8px;height:8px;border-radius:50%;background:var(--warning-text)}
+.build-flow-surface .composer-card .composer-network-pending-note{padding:6px 8px;border-radius:8px;background:var(--warning-surface)}
+
+/* ── FloFi panel: header with the symbol in a round avatar, the plan line, neutral bubbles, Send inside the field. ─────────────── */
+.build-workspace .copilot-head{min-height:56px;padding:0 20px;border-bottom:1px solid var(--line);align-items:center}
+.build-workspace .copilot-head .assistant-title{gap:10px;font-size:16px;color:var(--ink)}
+.copilot-head .flofi-avatar.flofi-avatar-title{width:32px;height:32px;border:0;border-radius:50%;background:var(--blue-soft)}
+.copilot-head .flofi-avatar.flofi-avatar-title img{width:20px}
+.message.you,:root[data-theme="dark"] .message.you{border-color:transparent;background:var(--line);color:var(--ink)}
+.user-avatar{border-color:var(--line);background:var(--surface-raised);color:var(--muted)}
+.editor-overview{display:block;margin:12px 16px 0;padding:0;border:1px solid var(--line);border-radius:14px;background:var(--surface-raised)}
+.editor-overview-toggle{display:flex;align-items:center;gap:8px;width:100%;min-height:44px;padding:0 14px;border:0;border-radius:14px;background:transparent;color:var(--ink);font:inherit;font-size:14px;font-weight:600;text-align:left;cursor:pointer}
+.editor-overview-toggle>span:first-child{flex:1;min-width:0}
+.editor-overview-toggle svg{flex:none;color:var(--muted)}
+.editor-overview-toggle[aria-expanded="true"] svg{transform:rotate(180deg)}
+.editor-overview-toggle:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
+.editor-overview-body:not([hidden]){display:grid;gap:8px;padding:0 10px 10px}
+.editor-overview .editor-card-status[data-card-status="attention"]{border-color:transparent;background:var(--warning-surface);color:var(--warning-text)}
+.editor-overview .editor-card-status[data-card-status="draft"]{border:1px dashed var(--muted);background:transparent;color:var(--muted)}
+.editor-overview .editor-step-number{background:var(--primary);color:var(--on-accent)}
+.editor-overview-steps button:hover{background:var(--surface)}
+.editor-overview-attention{border-color:transparent;background:var(--warning-surface);color:var(--ink)}
+.editor-overview-attention strong{color:var(--warning-text)}
+.editor-overview-attention button{border-color:var(--line);background:var(--surface);color:var(--ink)}
+@media(prefers-reduced-motion:no-preference){.editor-overview-toggle svg{transition:transform 160ms ease}}
+.copilot .chat-form{padding:14px 16px 16px;border-top:1px solid var(--line)}
+.copilot .chat-form .chat-input{display:flex;align-items:center;gap:6px;height:50px;padding:0 6px 0 14px;border:1px solid var(--line);border-radius:14px;background:var(--surface-raised)}
+.copilot .chat-form .chat-input:focus-within{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent)}
+.copilot .chat-form .chat-input input,:root[data-theme="dark"] .copilot .chat-form .chat-input input{flex:1;min-width:0;height:100%;padding:0;border:0;background:transparent;color:var(--ink);font-size:15px;outline:none;box-shadow:none}
+.copilot .chat-form .chat-input input::placeholder{color:var(--muted);opacity:1}
+.copilot .chat-form .chat-send{display:grid;place-items:center;flex:none;width:38px;height:38px;min-height:38px;padding:0;border:0;border-radius:10px;background:var(--line);color:var(--muted);cursor:pointer}
+.copilot .chat-form .chat-send[data-ready]{background:var(--blue-soft);color:var(--accent)}
+.copilot .chat-form .chat-send:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.copilot .chat-form .chat-send:disabled{opacity:1;cursor:not-allowed;background:var(--line);color:var(--muted)}
+.chat-send-spinner{width:16px;height:16px;border:2px solid var(--line);border-top-color:var(--muted);border-radius:50%}
+@media(prefers-reduced-motion:no-preference){.chat-send-spinner{animation:chat-send-spin .8s linear infinite}}
+@keyframes chat-send-spin{to{transform:rotate(360deg)}}
+
+/* ── Board 05: the answers to "Which network?" as a list of network buttons; the wallet's network first, tagged. ──────────────── */
+.conversation-network-choices{display:grid;gap:8px;margin-top:10px}
+.conversation-network-choice{display:flex;align-items:center;gap:10px;width:100%;min-height:48px;padding:0 14px;border:1px solid var(--line);border-radius:12px;background:var(--surface);color:var(--ink);font:inherit;font-size:15px;text-align:left;cursor:pointer}
+.conversation-network-choice:hover:not(:disabled){background:var(--surface-raised)}
+.conversation-network-choice:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.conversation-network-choice[data-wallet]{border:1.5px solid var(--primary-line);background:var(--blue-soft)}
+.conversation-network-icon{display:grid;place-items:center;flex:none;width:20px;height:20px;border-radius:50%;overflow:hidden}
+.conversation-network-icon :is(svg,img){width:20px;height:20px}
+.conversation-network-name{flex:1;min-width:0;overflow-wrap:anywhere}
+.conversation-network-wallet{flex:none;margin-left:auto;padding:3px 8px;border-radius:999px;background:var(--surface);color:var(--accent);font-size:12px;font-weight:600;white-space:nowrap}
+
+/* ── Touch screens keep 44 px targets; ≤ 800 px the rail stays icon-only (board 16 §7, §8). ─────────────────────────────────────── */
+@media(pointer:coarse){
+  .build-canvas-head .canvas-head-icon,.canvas-selection-toolbar button,.canvas-navigator button,.canvas-navigator .canvas-navigator-step{width:44px;height:44px;min-height:44px}
+  .workflow-more-menu [role="menuitem"],.composer-adjust,.editor-overview-toggle{min-height:44px}
+  .copilot .chat-form .chat-send{width:44px;height:44px;min-height:44px}
+  .copilot .chat-form .chat-input{height:56px}
+  /* 16 px keeps mobile browsers from zooming into the field on focus. */
+  .copilot .chat-form .chat-input input,:root[data-theme="dark"] .copilot .chat-form .chat-input input{font-size:16px}
+}
+@media(max-width:800px){
+  .build-flow-surface .floating-toolbox,.build-flow-surface .floating-toolbox[data-rail-expanded="true"]{align-items:center;width:64px;padding:8px 0}
+  .build-flow-surface .floating-toolbox[data-rail-expanded="true"] .canvas-toolbox button{justify-content:center;width:44px;padding:0}
+  .build-flow-surface .floating-toolbox[data-rail-expanded="true"] .canvas-toolbox button .canvas-rail-label{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%)}
+  .build-flow-surface .floating-toolbox[data-rail-expanded="true"] .canvas-rail-separator{width:28px}
+  .build-flow-surface .floating-toolbox .canvas-rail-toggle{display:none}
+  .build-flow-surface:has(.floating-toolbox[data-rail-expanded="true"]) .canvas-empty{padding-left:76px}
+  .build-canvas-head .workflow-name-text{max-width:52vw}
+}
+@media(max-width:700px){
+  .build-workspace .build-canvas-head{padding:8px 10px 8px 14px}
+  .build-canvas-head .canvas-name .workflow-rename,.build-canvas-head .canvas-name input{font-size:16px}
+  .build-workspace .build-canvas-head .canvas-head-main .revision{display:inline}
+  .build-canvas-head .canvas-edit-paused{font-size:12.5px}
+  .build-workspace .build-canvas-head .canvas-toolbar-row .canvas-rail-separator{display:none}
+}

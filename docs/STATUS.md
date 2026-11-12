@@ -7,6 +7,16 @@ BUILD-013 remains OPEN on `codex/build-013-lending-composition` at
 `6cd675e41c0838fa8ac9cf3ec8e90de9442da3b9`; PR #48 remains open and unmerged.
 This separate branding build does not resume its execution work. BUILD-CLOUD-001 (below) does not touch BUILD-013 either.
 
+## P0 — Real workflow execution and the approved FloFi App UX
+
+**Status: IMPLEMENTED ON `claude/peaceful-galileo-7r9j2j` (from main `009975a`) — unit, PostgreSQL and loopback-browser evidence; no
+transaction signed or sent, no Flight grant/binding/session created, no migration.** Track A: the owner's "Simulation failed" on Arbitrum One
+Swap → Bridge to Base was a Flight `BETA_WALLET_NOT_LINKED` refusal shown without its meaning; Flight refusals are now named with the next action
+and checked for the same owner wallet before simulating, and the certified Router bridge card is labelled executable only when the Router flow
+reports owner execution for an Across route. Track B: the approved "FloFi App · UX" boards 03–15 (top-bar stepper, drawer, Chat entry, Review
+and blocker panels, Confirm in wallet, six pages, tokens, PT-BR). Real-mainnet execution stays unverified until the owner runs it with their own
+wallet. See the [plan](builds/P0-EXECUTION-APPROVED-UX-PLAN.md) and [report](builds/P0-EXECUTION-APPROVED-UX-REPORT.md).
+
 ## BUILD-FLOFI-UNIVERSAL-E2E-001 — Universal transaction execution and production certification
 
 **Status: PR-READY FOR OWNER REVIEW on `codex/build-flofi-universal-e2e-001` (from main `78ea792`, the release `flofi.xyz` serves). No

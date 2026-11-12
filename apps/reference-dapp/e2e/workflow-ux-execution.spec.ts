@@ -8,16 +8,16 @@ import { test, expect, AUTHORIZE_IN_WALLET, readWorkflowIr, openFirstActionSetti
 import { installJourneyWallet, walletRequests } from './journey-fixtures';
 import { createTestWallet } from '../../../packages/reference-reconciler/test/test-wallet';
 import { createDatabase } from '@defi-workflow-engine/cloud-runtime';
-import { expectEditorSection, openBuilder, openEditorSection, reloadBuilder } from './build-entry-navigation';
+import { expectEditorSection, openBuilder, openEditorSection, openReviewTechnicalDetails, reloadBuilder } from './build-entry-navigation';
 
 test.skip(process.env.FLOFI_SWAP_EXECUTION_E2E !== 'MOCKED_LOOPBACK_ONLY', 'Requires the opt-in loopback swap execution harness');
 test.setTimeout(90_000);
 const summary = (page: Page) => page.locator('.execution-summary');
 /** BUILD0-UX-001: the chat-first Execute status panel (always visible) offers Create new workflow beside Return to Build. */
 const createNew = (page: Page) => page.locator('.execution-status-panel').getByRole('button', { name: 'Create new workflow', exact: true });
-async function openDetails(page: Page, selector: '.simulation-details') {
-  const details = page.locator(selector);
-  if (!await details.evaluate(element => (element as HTMLDetailsElement).open)) await details.locator(':scope > summary').click();
+/** P0 approved UX (board 06): the former "Simulation details" is the Review panel's collapsed Technical details (beside the canvas from 1200 px). */
+async function openDetails(page: Page) {
+  await openReviewTechnicalDetails(page);
 }
 const cta = (page: Page) => page.locator('.canvas-primary-action');
 const processing = (page: Page) => cta(page).locator('[data-lifecycle-action="processing"]');
@@ -87,7 +87,7 @@ async function buildSwap(page: Page) {
   await page.getByRole('button', { name: 'Hide token picker', exact: true }).click();
   await card.getByRole('textbox', { name: 'Source amount (USDC)', exact: true }).fill('1');
   await card.getByRole('textbox', { name: 'Source amount (USDC)', exact: true }).press('Enter');
-  await expect(page.locator('.build-canvas-head .revision')).toHaveText('1 action');
+  await expect(page.locator('.build-canvas-head .revision')).toHaveText('1 step');
   await expect(card.getByRole('button', { name: /^(Review|Apply) amount$/ })).toHaveCount(0);
 }
 const pointer = (page: Page) => page.evaluate(() => localStorage.getItem('gryloo:public-testnet-execution-id'));
@@ -143,7 +143,7 @@ async function simulateAndExecute(page: Page, owner: Awaited<ReturnType<typeof s
 async function expectCleanNewWorkflow(page: Page, owner: Awaited<ReturnType<typeof setup>>, before: { workflowId: string; requested: number; sends: unknown }) {
   await expectEditorSection(page, 'Build');
   await expect(page.locator('.build-flow-surface .canvas-empty')).toContainText('Start your workflow');
-  await expect(page.locator('.build-canvas-head .revision')).toHaveText('0 actions');
+  await expect(page.locator('.build-canvas-head .revision')).toHaveText('0 steps');
   await expect(page.locator('.build-flow-surface .composer-card')).toHaveCount(0);
   await expect(page.getByRole('button', { name: /^Review proposed change:/ })).toHaveCount(0);
   await expect(page.locator('.build-canvas-head h2')).toHaveText('Your Workflow');
@@ -180,10 +180,10 @@ test('UX-003/UX-004: completed run — locked CTAs, Return to the Canvas keeps t
   const authored = await readWorkflowIr(page);
   await summary(page).getByRole('button', { name: 'Return to the Canvas', exact: true }).click();
   await expectEditorSection(page, 'Build');
-  expect(await readWorkflowIr(page)).toBe(authored); await expect(page.locator('.build-canvas-head .revision')).toHaveText('1 action');
+  expect(await readWorkflowIr(page)).toBe(authored); await expect(page.locator('.build-canvas-head .revision')).toHaveText('1 step');
   // The old workflow's conversation must not survive a new workflow (BUILD-FLOFI-CONVERSATIONAL-001: the chat reports the recorded result and
   // offers Create new workflow; it never simulates over a completed run).
-  await page.locator('#mock-prompt').fill('Review workflow'); await page.getByRole('button', { name: 'Send', exact: true }).click();
+  await page.locator('#mock-prompt').fill('Review workflow'); await page.getByRole('button', { name: 'Send message', exact: true }).click();
   await expect(page.getByRole('log', { name: 'Conversation' }).locator('.message').last()).toContainText('Execution completed');
   await expect(page.getByRole('log', { name: 'Conversation' }).getByRole('button', { name: 'Create new workflow', exact: true })).toBeVisible();
   expect(owner.requested()).toBe(2);
@@ -294,7 +294,7 @@ async function simulateAndReadLimits(page: Page) {
   const simulate = cta(page).getByRole('button', { name: /^Simulate (workflow|again)$/ });
   await expect(simulate).toBeEnabled({ timeout: 30_000 }); await simulate.click();
   await expect(authorize(page)).toBeEnabled({ timeout: 30_000 });
-  await openDetails(page, '.simulation-details');
+  await openDetails(page);
   const text = await page.locator('main').innerText();
   // The Review & Authorization disclosure lists the Strategy Manifest's execution limits.
   const review = page.locator('details#simulation-review');
@@ -309,12 +309,13 @@ test('BUILD-FIX-UX-001: a new swap starts at 100 bps; slippage and amount apply 
   await openEditorSection(page, 'Build');
   expect(await slippageOf(page)).toBe(100);
   await openFirstActionSettings(page);
-  const inspector = page.getByRole('dialog', { name: 'Action settings', exact: true }), field = inspector.getByLabel('Slippage (bps)', { exact: true });
-  await expect(field).toHaveValue('100'); await expect(inspector).toContainText('Applied limit: 100 bps (1.00%)');
+  const inspector = page.getByRole('dialog', { name: 'Action settings', exact: true }), field = inspector.getByLabel('Max price difference (%)', { exact: true });
+  await expect(field).toHaveValue('1'); await expect(inspector).toContainText('Applied limit: 1%');
   // Invalid values are refused with a reason and never silently reverted or applied.
-  for (const bad of ['0', '301', 'abc', '1.5']) {
+  // Board 16: the limit is typed in percent; 0.125% has no whole basis-point value and is refused, never rounded.
+  for (const bad of ['0', '3.01', 'abc', '0.125']) {
     await field.fill(bad); await field.press('Enter');
-    await expect(inspector.getByRole('alert')).toContainText(/Enter (a slippage from 1 to 300 bps|the slippage as a whole number)/);
+    await expect(inspector.getByRole('alert')).toContainText(/Enter (a max price difference from 0\.01% to 3%|the max price difference as a percentage)/);
     await expect(field).toHaveValue(bad); await expect(field).toHaveAttribute('aria-invalid', 'true');
     expect(await slippageOf(page)).toBe(100);
   }
@@ -322,8 +323,8 @@ test('BUILD-FIX-UX-001: a new swap starts at 100 bps; slippage and amount apply 
   expect(first.slippage).toBe('1.00%');
   // A slippage edit is one ordinary edit: it applies to the workflow and retires the earlier simulation and Review.
   await openEditorSection(page, 'Build'); await openFirstActionSettings(page);
-  await field.fill('75'); await inspector.getByRole('button', { name: 'Apply slippage', exact: true }).click();
-  await expect(inspector).toContainText('Applied limit: 75 bps (0.75%)');
+  await field.fill('0.75'); await inspector.getByRole('button', { name: 'Apply max price difference', exact: true }).click();
+  await expect(inspector).toContainText('Applied limit: 0.75%');
   expect(await slippageOf(page)).toBe(75);
   await expect(authorize(page)).toHaveCount(0);
   const seventyFive = await simulateAndReadLimits(page);
@@ -331,7 +332,7 @@ test('BUILD-FIX-UX-001: a new swap starts at 100 bps; slippage and amount apply 
   // The Review (Strategy Manifest) authorizes exactly the applied limit.
   expect(first.maximum).toBe('1.00%'); expect(seventyFive.maximum).toBe('0.75%');
   await openEditorSection(page, 'Build'); await openFirstActionSettings(page);
-  await field.fill('100'); await field.press('Enter');
+  await field.fill('1'); await field.press('Enter');
   expect(await slippageOf(page)).toBe(100);
   // An amount edit applies on Enter; the earlier Review can no longer authorize anything, and the fresh simulation uses the new amount.
   const card = page.locator('.build-flow-surface .composer-card').first(), amount = card.getByRole('textbox', { name: 'Source amount (USDC)', exact: true });

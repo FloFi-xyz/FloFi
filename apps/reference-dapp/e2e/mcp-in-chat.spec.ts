@@ -128,7 +128,9 @@ async function proposalIntoWorkflow(signing: Page, url: string, wallet: 'evm' | 
     await expect(signing.locator('.canvas-primary-action button')).toBeDisabled();
   } else {
     await expect(signingSurface(signing)).toBeVisible();
-    await expect(signing.getByRole('navigation', { name: 'Workflow stages' })).toHaveCount(0);
+    // P0 approved UX (board 03b): no product navigation here — neither the Editor stepper nor the ☰ drawer (the former stage tabs are gone).
+    await expect(signing.getByRole('navigation', { name: 'Editor steps' })).toHaveCount(0);
+    await expect(signing.getByRole('button', { name: 'Open navigation' })).toHaveCount(0);
     await expect(signing.getByRole('region', { name: 'Workflow canvas', exact: true })).toHaveCount(0);
     await expect(signingSurface(signing).locator('button[data-lifecycle-action]')).toHaveCount(0);
   }
@@ -178,7 +180,9 @@ test.describe('BUILD-MCP-002 in-chat execution (mocked MCP Apps host)', () => {
     const signing = panel.frameLocator('iframe.signing-frame');
     const region = signing.getByRole('region', { name: `Proposal from ${CLIENT_NAME}` });
     await expect(signing.getByRole('main', { name: 'Authorize with your wallet' })).toBeVisible();
-    await expect(signing.getByRole('navigation', { name: 'Workflow stages' })).toHaveCount(0);
+    // P0 approved UX (board 03b): no product navigation here — neither the Editor stepper nor the ☰ drawer (the former stage tabs are gone).
+    await expect(signing.getByRole('navigation', { name: 'Editor steps' })).toHaveCount(0);
+    await expect(signing.getByRole('button', { name: 'Open navigation' })).toHaveCount(0);
     await expect(signing.getByRole('region', { name: 'Workflow canvas', exact: true })).toHaveCount(0);
     await region.getByRole('button', { name: namespace === 'evm' ? 'Connect wallet and prove ownership' : 'Connect Solana wallet and prove ownership' }).click();
     if (namespace === 'solana') await signing.getByRole('button', { name: `${MOCKED_SOLANA_WALLET} on Solana`, exact: true }).click();

@@ -23,6 +23,7 @@ import { base58Encode } from '@defi-workflow-engine/reference-compiler';
 import { createNativeTransferNode, type SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
 import { E2E_APP_ORIGIN } from './app-origin';
 import { openSimulationDetails } from './fixtures';
+import { logOut } from './build-entry-navigation';
 import { authorSolanaSwap, chooseSolanaWallet, jupiterControl } from './jupiter-fixtures';
 import { PRIVY_WALLET_LIST } from '../src/accounts/privy-hosts';
 import { accountPagePolicy, cspNonce } from '../src/accounts/account-csp';
@@ -426,9 +427,12 @@ test('Disconnect revokes the session, logs out of Privy and lands on /login; Bac
   await expect(page.getByRole('region', { name: 'Wallets', exact: true })).toBeVisible();
   await expect(page.getByRole('region', { name: 'My wallets' })).toHaveCount(0);
   await page.getByRole('button', { name: 'Settings' }).click();
-  // BUILD-FLOFI-WALLET-UX-EXECUTION-FIX-001 (P1-04): one Disconnect, no separate Sign out.
+  // BUILD-FLOFI-WALLET-UX-EXECUTION-FIX-001 (P1-04): one Disconnect, no separate Sign out. P0 approved UX (board 03b): that one control is the
+  // ☰ drawer's "Log out"; Settings holds preferences and the account only.
   await expect(page.getByRole('button', { name: 'Sign out', exact: true })).toHaveCount(0);
-  await page.getByRole('button', { name: 'Disconnect', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Disconnect', exact: true })).toHaveCount(0);
+  await page.keyboard.press('Escape');
+  await logOut(page);
   await expect(page).toHaveURL('/login');
   expect(await accountCookie(context)).toBeUndefined();
   expect(await privyAccepts(token)).toBe(false);

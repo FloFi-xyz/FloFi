@@ -61,7 +61,7 @@ for (const theme of ['light', 'dark'] as const) {
     const before = await publicSessionSnapshot(page);
     const nodes = await page.locator('.react-flow__node').count();
     await trigger.click();
-    const logout = drawer.getByRole('button', { name: 'Logout', exact: true });
+    const logout = drawer.getByRole('button', { name: 'Log out', exact: true });
     for (let index = 0; index < 5; index++) await page.keyboard.press('Tab');
     await expect(logout).toBeFocused(); await expect(logout).toHaveCSS('outline-style', 'solid');
     await logout.press('Enter');
@@ -135,7 +135,7 @@ for (const theme of ['light', 'dark'] as const) {
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
       await page.locator('.navigation-trigger').click();
       const drawer = page.locator('.navigation-drawer');
-      await expect(drawer.getByRole('button', { name: 'Logout', exact: true })).toBeInViewport();
+      await expect(drawer.getByRole('button', { name: 'Log out', exact: true })).toBeInViewport();
       const box = (await drawer.boundingBox())!, footer = (await drawer.locator('.navigation-footer').boundingBox())!;
       expect(box.width).toBeCloseTo(width <= 480 ? Math.min(width * .88, 320) : 260, 1);
       expect(box.y + box.height - footer.y - footer.height).toBeCloseTo(26, 1);
@@ -146,13 +146,13 @@ for (const theme of ['light', 'dark'] as const) {
     await page.setViewportSize({ width: 320, height: 520 });
     await page.evaluate(() => window.scrollTo(0, 0));
     await page.locator('.navigation-trigger').click();
-    await expect(page.getByRole('button', { name: 'Logout', exact: true })).toBeInViewport();
+    await expect(page.getByRole('button', { name: 'Log out', exact: true })).toBeInViewport();
     const content = page.locator('.navigation-content');
     expect(await content.evaluate(el => el.scrollHeight > el.clientHeight)).toBe(true);
     await content.hover(); await page.mouse.wheel(0, 450);
     await expect.poll(() => content.evaluate(el => el.scrollTop)).toBeGreaterThan(0);
     await expect(page.getByRole('link', { name: 'Passkeys', exact: true })).toBeInViewport();
-    await expect(page.getByRole('button', { name: 'Logout', exact: true })).toBeInViewport();
+    await expect(page.getByRole('button', { name: 'Log out', exact: true })).toBeInViewport();
     expect(await page.evaluate(() => scrollY)).toBe(0);
     expect(errors).toEqual([]);
   });

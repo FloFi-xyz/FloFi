@@ -122,8 +122,11 @@ test('a connection starts from near the output, is released anywhere on the next
 
 test('handles stay easy to target when the Canvas is zoomed out', async ({ page, networkGuard }) => {
   await twoSwaps(page);
-  await page.getByRole('slider', { name: 'Canvas zoom', exact: true }).fill('0.5');
-  await settledViewport(page);
+  // P0 approved UX (board 04): the zoom slider is gone; the navigator's Zoom out (−) steps the same engine zoom down to about half.
+  const viewportZoom = () => page.locator('.build-flow-surface .react-flow__viewport').evaluate(element => new DOMMatrixReadOnly(getComputedStyle(element).transform).a);
+  const zoomOut = page.locator('.build-flow-surface .canvas-navigator').getByRole('button', { name: 'Zoom out', exact: true });
+  for (let step = 0; step < 12 && (await viewportZoom()) > 0.55; step++) { await zoomOut.click(); await settledViewport(page); }
+  expect(await viewportZoom()).toBeLessThanOrEqual(0.55);
   const flow = page.locator('.build-flow-surface .react-flow');
   await expect.poll(() => flow.evaluate(element => Number(getComputedStyle(element).getPropertyValue('--canvas-handle-scale')))).toBeGreaterThan(1);
   const from = await center(output(page, 'node-002'));
@@ -185,13 +188,16 @@ test('BUILD-FLOFI-UX-FIX-003: with USD first, a token amount too long for the su
   await card.getByRole('textbox', { name: 'Source amount (USDC)', exact: true }).fill('2.5');
   await destination.getByRole('button', { name: 'Show USD value first', exact: true }).click();
   const subline = destination.locator('.composer-token-subline');
-  // The whole value is in the DOM (never shortened); on screen it ends in an ellipsis, with the token kept visible.
-  await expect(subline).toHaveText(`${LONG} WETH`);
-  expect(await subline.locator('.composer-subline-amount').evaluate(element => ({ clipped: element.scrollWidth > element.clientWidth + 1, overflow: getComputedStyle(element).textOverflow })))
-    .toEqual({ clipped: true, overflow: 'ellipsis' });
+  // P0 approved UX (board 04): a quoted output is shown with at most six significant digits (display only); the exact value stays in its title and
+  // opens on demand. A value still too long for the sub-line would end in an ellipsis, with the token kept visible.
+  const SHOWN = '0.000794123';
+  await expect(subline).toHaveText(`${SHOWN} WETH`);
+  await expect(subline.locator('.composer-subline-amount')).toHaveAttribute('title', LONG);
+  await expect(subline.locator('.composer-subline-amount')).toHaveAttribute('data-rounded', 'true');
+  expect(await subline.locator('.composer-subline-amount').evaluate(element => getComputedStyle(element).textOverflow)).toBe('ellipsis');
   const [line, symbol] = [(await subline.boundingBox())!, (await subline.locator('.composer-subline-token').boundingBox())!];
   expect(symbol.x + symbol.width).toBeLessThanOrEqual(line.x + line.width + 0.5);
-  const value = subline.getByRole('button', { name: LONG, exact: true }), exact = page.getByRole('note', { name: 'Exact amount', exact: true });
+  const value = subline.getByRole('button', { name: SHOWN, exact: true }), exact = page.getByRole('note', { name: 'Exact amount', exact: true });
   await value.click(); await expect(exact).toHaveText(`${LONG} WETH`);
   await page.keyboard.press('Escape'); await expect(exact).toHaveCount(0); await expect(value).toBeFocused();
   await expect(page.locator('.summary-bar')).toHaveAttribute('data-workflow-revision', '0');

@@ -9,7 +9,7 @@
 import { test, expect, readWorkflowIr } from './fixtures';
 import type { Locator, Page } from '@playwright/test';
 import { installSupplyWallet } from './supply-fixtures';
-import { openBuilder, openEditorSection, reloadBuilder } from './build-entry-navigation';
+import { openBuilder, openDashboard, openEditorSection, reloadBuilder } from './build-entry-navigation';
 import { expectReviewedImagesOnly, replayProviderLogos } from './asset-logo-replay';
 
 test.skip(process.env.GRYLOO_BASE_MAINNET_E2E !== 'MOCKED_LOOPBACK_ONLY', 'The Aave card catalog requires the isolated Base loopback harness');
@@ -53,6 +53,17 @@ async function expectIconsRendered(picker: Locator) {
   const monograms = await picker.locator('.composer-token-avatar [data-mark="monogram"]').allInnerTexts();
   expect(monograms.every(text => text.trim().length > 0)).toBe(true);
 }
+/**
+ * P0 approved UX (board 04): a card has no separate flow line (the former `USDC → Aave V3`): its own value box names the asset (the token button)
+ * and its header names the provider, so the same facts are read from there.
+ */
+async function expectCardFlow(card: Locator, from: string, to: string) {
+  const provider = /^Aave V3$/.test(from) ? from : /^Aave V3$/.test(to) ? to : null;
+  const asset = provider === from ? to : from;
+  await expect(card.getByRole('button', { name: 'Select source token', exact: true })).toContainText(asset);
+  if (provider) await expect(card.locator('.composer-provider')).toHaveText(provider);
+  else await expect(card.getByRole('button', { name: 'Select destination token', exact: true })).toContainText(to);
+}
 async function nodeAsset(page: Page, actionType: string) {
   const workflow = JSON.parse(await readWorkflowIr(page)) as { revision: number; nodes: { nodeId: string; actionType: string; chainId: string; dependencies: string[]; inputs: { name: string; value: { asset: unknown; amount: string } }[] }[] };
   const node = workflow.nodes.find(item => item.actionType === actionType)!;
@@ -62,7 +73,7 @@ async function nodeAsset(page: Page, actionType: string) {
 test('Supply on Base: the card picker lists the live Base catalog, held assets first, and WETH replaces USDC with its exact identity', async ({ page }) => {
   await installSupplyWallet(page, { chain: '0x2105', account: nextOwner() }); await openBuilder(page);
   const card = await addCard(page, 'supply');
-  await expect(card.locator('.composer-operation')).toHaveText('USDC → Aave V3');
+  await expectCardFlow(card, 'USDC', 'Aave V3');
   const picker = await openReserves(page, card);
   await expect(picker.locator('.lending-card-picker')).toHaveAttribute('data-provenance', 'MOCKED');
   await expect(picker).toContainText('Test fixture data (MOCKED): not a live market read.');
@@ -98,7 +109,7 @@ test('Supply on Base: the card picker lists the live Base catalog, held assets f
   await expect(revision).toHaveAttribute('data-workflow-revision', '0');
   await option(picker, 'WETH').click();
   await expect(card.getByRole('button', { name: 'Select source token', exact: true })).toContainText('WETH');
-  await expect(card.locator('.composer-operation')).toHaveText('WETH → Aave V3');
+  await expectCardFlow(card, 'WETH', 'Aave V3');
   await expect(card.getByRole('button', { name: 'Select source token', exact: true }).locator('img').first()).toHaveAttribute('src', '/brand/crypto/tokens/eth.svg');
   await closePicker(page);
   await expect(revision).toHaveAttribute('data-workflow-revision', '0');
@@ -110,13 +121,13 @@ test('Supply on Base: the card picker lists the live Base catalog, held assets f
   const applied = await nodeAsset(page, 'supply');
   expect(applied.node.chainId).toBe('eip155:8453');
   expect(applied.amount).toEqual({ asset: { chainId: 'eip155:8453', address: BASE_WETH, decimals: 18 }, amount: '100000000000000000' });
-  await expect(card.locator('.composer-operation')).toHaveText('WETH → Aave V3');
+  await expectCardFlow(card, 'WETH', 'Aave V3');
   // The authored card keeps WETH when it is selected again, and its own picker still shows it as the current reserve.
   const authored = await openReserves(page, card);
   await expect(authored.getByRole('radio', { name: 'WETH', exact: true })).toBeChecked();
   await closePicker(page);
   // Leaving Build and coming back keeps the exact reserve (this session's workflow; saving requires a signed-in account).
-  await page.getByRole('navigation', { name: 'Workflow stages' }).getByRole('button', { name: 'Dashboard', exact: true }).click();
+  await openDashboard(page);
   await openEditorSection(page, 'Build');
   expect((await nodeAsset(page, 'supply')).amount).toEqual(applied.amount);
   expect(await page.evaluate(() => (window as unknown as { supplyWalletRequests: { method: string }[] }).supplyWalletRequests.filter(request => /sign|send|switch/i.test(request.method)))).toEqual([]);
@@ -173,9 +184,9 @@ test('Borrow lists reserves by borrow configuration, not supply: disabled borrow
   // Switch between eligible reserves.
   await option(picker, 'WETH').click();
   await expect(card.getByRole('button', { name: 'Select source token', exact: true })).toContainText('WETH');
-  await expect(card.locator('.composer-operation')).toHaveText('Aave V3 → WETH');
+  await expectCardFlow(card, 'Aave V3', 'WETH');
   await option(picker, 'GHO').click();
-  await expect(card.locator('.composer-operation')).toHaveText('Aave V3 → GHO');
+  await expectCardFlow(card, 'Aave V3', 'GHO');
   await expectIconsRendered(picker);
 });
 
@@ -212,13 +223,13 @@ test('wallet-balance filtering never removes a supported reserve from discovery:
   await supply.getByRole('checkbox', { name: /Show assets with 0 balance/ }).check();
   await expect(supply.getByRole('radio')).toHaveCount(BASE_RESERVES);
   await option(supply, 'GHO').click();
-  await expect(card.locator('.composer-operation')).toHaveText('GHO → Aave V3');
+  await expectCardFlow(card, 'GHO', 'Aave V3');
 });
 
 test('Swap USDC → WETH → Supply WETH: auto-connected, funded by the swap, and an asset change is flagged and applied directly as a new revision', async ({ page }) => {
   await installSupplyWallet(page, { chain: '0x2105', account: nextOwner() }); await openBuilder(page);
   const swap = await addCard(page, 'swap');
-  await expect(swap.locator('.composer-operation')).toHaveText('USDC → WETH');
+  await expectCardFlow(swap, 'USDC', 'WETH');
   await swap.getByRole('textbox', { name: 'Source amount (USDC)', exact: true }).fill('100');
   await swap.getByRole('textbox', { name: 'Source amount (USDC)', exact: true }).press('Enter');
   const revision = page.locator('.summary-bar');

@@ -50,6 +50,21 @@ A wallet payload or prompt already released before activation cannot be recalled
 
 Resume only with operator authorization: investigate/resolve the cause, record approval, restore literal `false` everywhere, verify replica versions, then let the owner explicitly resume. This build does not activate the switch in production.
 
+## Support: an owner sees "Wallet not linked to your FloFi account"
+
+Since the P0 approved-UX release the web tier asks Flight about the **owner wallet the API will check** before simulating or reviewing, and shows
+the refusal by name (`domain/flight-refusal.ts`) instead of "Simulation failed". Nothing was quoted, simulated or sent. The owner's remedy is in
+the product, never an operator grant:
+
+- `BETA_WALLET_NOT_LINKED`: the connected wallet is not one of the account's Flight-bound wallets (connected but not saved, saved after boarding,
+  or linked to another account). The owner saves it in Credentials (a sign-in message, no transaction), then chooses **Board now** on the Board
+  page so Flight binds the newly proven wallet — or switches to a wallet already linked.
+- `BETA_WALLET_REQUIRED`: the account has no linked wallet yet; same remedy.
+- `BETA_SESSION_REQUIRED` / `BETA_SIGN_IN_REQUIRED`: sign in again; anything already sent stays tracked.
+
+Operators never bind a wallet from an address, grant access or create a session to "fix" this; an address linked to two accounts stays refused
+(fail-closed) until the owner resolves it from their own accounts.
+
 ## Rollback
 
 - For an authorization incident, set `FLOFI_BETA_ACCESS=closed` consistently; preserve public login/recovery and Admin. Keep reconciliation running.

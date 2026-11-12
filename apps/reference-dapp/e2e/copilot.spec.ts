@@ -20,7 +20,7 @@ async function undo(page: Page, text = 'Undo this change') {
 const revision = (page: Page, value: number) => expect(page.locator(`.summary-bar[data-workflow-revision="${value}"]`)).toHaveCount(1);
 async function ask(page: Page, text: string) {
   await page.locator('#mock-prompt').fill(text);
-  await page.getByRole('button', { name: 'Send', exact: true }).click();
+  await page.getByRole('button', { name: 'Send message', exact: true }).click();
 }
 
 test.beforeEach(async () => { await resetSupplyHarness(); });
@@ -56,12 +56,13 @@ test('Portuguese and mainnet requests are committed with explicit notes, and the
   await installSupplyWallet(page);
   await openBuilder(page);
   await ask(page, 'Coloca 1 USDC na Aave na Base Sepolia');
-  // BUILD-COPILOT-002: replies follow the language of the latest message; the canonical sentence stays the exact grammar.
-  await expect(copilotSays(page)).toContainText('Adicionado ao seu workflow:');
-  await expect(copilotSays(page)).toContainText('Interpretado como “supply 1 USDC to Aave on Base Sepolia”');
-  await expect(copilotSays(page)).toContainText('Quer adicionar outra ação ou revisar o seu workflow?');
+  // BUILD-COPILOT-002 / P0 approved UX: a Portuguese request is understood, and FloFi answers in the interface language (English here); the
+  // canonical sentence stays the exact grammar.
+  await expect(copilotSays(page)).toContainText('Supply added to your workflow:');
+  await expect(copilotSays(page)).toContainText('Interpreted as “supply 1 USDC to Aave on Base Sepolia”');
+  await expect(copilotSays(page)).toContainText('Would you like to add another action or review your workflow?');
   await revision(page, 1); await expect(cards(page)).toHaveCount(1);
-  await undo(page, 'Desfazer esta alteração');
+  await undo(page, 'Undo this change');
   await expect(cards(page)).toHaveCount(0);
   // BUILD-FLOFI-CHAT-E2E-FIX-002 / BUILD-FLOFI-BRIDGE-LIVE-FIX-003: native ETH is a different asset than WETH. On Base it is now a native-ETH swap
   // of its own (the exact chat grammar, FloFi's own message), never authored as WETH; the chat's Undo reverts it.
@@ -124,7 +125,8 @@ test('unsupported requests are explained, not invented', async ({ page }) => {
   await expect(copilotSays(page)).toContainText('Staking is not supported by Flofi.');
   await expect(copilotSays(page)).not.toContainText('Flofi Copilot can author:');
   await ask(page, 'Tenho 500 USDC. Coloca 300 na Aave e troca 200 por ETH.');
-  await expect(copilotSays(page)).toContainText('O Flofi só combina passos como Supply de USDC → Borrow de USDC → Swap do USDC emprestado para WETH');
+  // P0 approved UX: FloFi answers in the interface language (English here); a Portuguese request is still understood.
+  await expect(copilotSays(page)).toContainText('Flofi can combine steps only as Supply USDC → Borrow USDC → Swap the borrowed USDC to WETH');
   await expect(proposal(page)).toHaveCount(0);
   await revision(page, 0);
 });
@@ -151,7 +153,7 @@ test('an answer that arrives after a workflow change is discarded', async ({ pag
   await expect(page.locator('.build009-wallet-info')).toHaveAttribute('title', new RegExp(SUPPLY_OWNER, 'i'));
   await ask(page, 'Put 2 USDC into Aave on Base Sepolia');
   await expect(conversation(page)).toContainText('Interpreting your message…');
-  await expect(page.getByRole('button', { name: 'Send', exact: true })).toBeDisabled();
+  await expect(page.getByRole('button', { name: 'Send message', exact: true })).toBeDisabled();
   await page.getByRole('button', { name: 'Add supply', exact: true }).click();
   const card = page.locator('.build-flow-surface .composer-card.active');
   // P0 workflow execution: the Canvas amount applies on Enter (no Review/Apply proposal).

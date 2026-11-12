@@ -1,0 +1,101 @@
+/* SPDX-License-Identifier: AGPL-3.0-only */
+/* P0 approved UX (boards 03–08, handoff board 16): the shell, footer, Review and blocker panels. Colors only through the shared theme variables
+   of globals.css (light and dark follow the FloFi Design System values of board 16 §5). */
+
+/* ── Top bar (board 03b): ☰ + brand left, the Editor stepper centered, wallet identity + Settings right; no Dashboard | Chat | Editor tabs. ── */
+.top-bar{display:grid;grid-template-columns:minmax(0,1fr) auto minmax(0,1fr);align-items:center;gap:16px;background:var(--surface);border-bottom:1px solid var(--line)}
+.top-bar>.brand{justify-self:start}
+.top-bar>.top-bar-center{justify-self:center;display:flex;align-items:center;min-width:0}
+.top-bar>.top-meta{justify-self:end}
+.top-bar>.shell-network-row,.top-bar>.wallet-toast{grid-column:1/-1}
+.top-bar-compact{display:flex}
+.top-bar .shell-network-row[data-empty="true"]{display:none}
+.wallet-connection{display:inline-flex;align-items:center;gap:8px}
+.wallet-status-dot{width:8px;height:8px;border-radius:50%;background:var(--success);flex:none}
+.wallet-network{color:var(--muted);font-family:var(--font-ibm-plex-mono),monospace;font-size:12px}
+/* The wallet is on another network: the one attention strip, amber text on its own surface, with the existing switch. */
+.network-attention{display:flex;align-items:center;justify-content:center;flex-wrap:wrap;gap:8px 14px;margin:0;padding:8px 14px;border-radius:12px;background:var(--warning-surface);color:var(--warning-text);font-size:14px}
+.network-attention button{min-height:36px;padding:0 14px;border:1px solid currentColor;border-radius:999px;background:transparent;color:inherit;font-weight:600}
+
+/* ── Editor stepper in the top bar (board 03b): current = filled accent pill; reachable = outlined pill; closed = muted with a dashed number. Never ✓. */
+.top-bar .editor-stepper button{min-height:40px;padding:4px 14px 4px 5px;border:1px solid transparent;border-radius:999px;background:transparent;color:var(--muted);font-size:15px}
+.top-bar .editor-stepper .editor-stepper-number{width:26px;height:26px;border:1px solid var(--line);background:transparent;color:inherit;font-size:13px}
+.top-bar .editor-stepper .editor-stepper-line{width:28px;height:1px;background:var(--line)}
+.top-bar .editor-stepper li[data-step-look="current"] button{background:var(--blue-soft);color:var(--accent);font-weight:600;border-color:transparent;box-shadow:none}
+.top-bar .editor-stepper li[data-step-look="current"] .editor-stepper-number{border-color:var(--primary);background:var(--primary);color:var(--on-accent,#fff)}
+.top-bar .editor-stepper li[data-step-look="reachable"] button{border-color:var(--line);background:var(--surface);color:var(--ink);cursor:pointer}
+.top-bar .editor-stepper li[data-step-look="reachable"] button:hover{border-color:var(--accent);background:var(--surface-raised)}
+.top-bar .editor-stepper li[data-step-look="closed"] button{opacity:1;color:var(--muted);cursor:not-allowed}
+.top-bar .editor-stepper li[data-step-look="closed"] .editor-stepper-number{border-style:dashed}
+.top-bar .editor-stepper button:focus-visible{outline:3px solid var(--accent);outline-offset:2px}
+
+/* ── Drawer (board 03b): grouped Library / Access, status tags that never look clickable, legal links in one line. ── */
+.navigation-content .navigation-section-label{margin:14px 12px 6px;font-family:var(--font-ibm-plex-mono),monospace;font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted)}
+.navigation-row .navigation-status{margin-left:auto;padding:2px 9px;border-radius:999px;font-size:12px;font-weight:500;line-height:1.5;pointer-events:none}
+.navigation-row .navigation-status[data-status="soon"]{background:var(--blue-soft);color:var(--accent)}
+.navigation-row .navigation-status[data-status="testing"]{background:var(--surface-raised);color:var(--muted);border:1px solid var(--line)}
+.navigation-legal{margin:6px 12px 0;color:var(--muted);font-size:13px}
+.navigation-legal a{color:var(--muted)}
+.navigation-legal a:hover{color:var(--accent)}
+
+/* ── Footer (boards 05–08): left status, right the ONE lifecycle button. ── */
+.summary-bar .summary-status-line{display:flex;align-items:center;flex-wrap:wrap;gap:6px 12px;margin:0;color:var(--ink);font-size:15px}
+.summary-bar .summary-status-detail{color:var(--muted)}
+.summary-status-dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--muted);flex:none}
+.summary-status-dot[data-tone="ready"]{background:var(--success)}
+.summary-status-dot[data-tone="attention"]{background:var(--warning-text)}
+.summary-status-dot[data-tone="blocked"]{background:var(--warning-text)}
+.summary-bar .summary-status-line[data-tone="attention"] .summary-status-text{color:var(--warning-text)}
+.summary-bar .summary-status-text{font-variant-numeric:tabular-nums}
+/* A disabled lifecycle button must look disabled (board 16 §3): neutral fill, muted text, not-allowed cursor — never a dim blue. */
+.summary-bar .summary-primary-action button[data-lifecycle-action]:disabled,.summary-bar .summary-primary-action button.primary:disabled{background:var(--line);color:var(--muted);border-color:transparent;opacity:1;cursor:not-allowed;box-shadow:none;animation:none}
+
+/* ── Simulate (board 06): canvas + Review panel side by side from 1200 px; the chat stays on the right. ── */
+.simulate-workspace-grid.review-side-grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(340px,400px);gap:16px;align-items:start}
+.review-side-panel{position:sticky;top:12px;max-height:calc(100vh - 220px);overflow:auto;border:1px solid var(--line);border-radius:18px;background:var(--surface)}
+.review-panel-approved{display:flex;flex-direction:column;gap:12px;padding:20px;color:var(--ink)}
+.simulation-details .review-panel-approved{padding:16px 4px}
+.review-panel-approved .eyebrow{margin:0;font-family:var(--font-ibm-plex-mono),monospace;font-size:13px;letter-spacing:.08em;color:var(--muted)}
+.review-panel-approved h2{margin:0;font-size:20px;line-height:1.25;font-weight:600}
+.review-panel-rows{display:flex;flex-direction:column;margin:0}
+.review-panel-rows>div{display:flex;justify-content:space-between;align-items:baseline;gap:16px;padding:11px 0;border-bottom:1px solid var(--line);font-size:15px}
+.review-panel-rows>div:last-child{border-bottom:0}
+.review-panel-rows dt{color:var(--muted);font-weight:400}
+.review-panel-rows dd{margin:0;text-align:right;overflow-wrap:anywhere}
+.review-panel-rows>div[data-emphasis="attention"] dd{color:var(--warning-text);font-weight:600}
+.review-panel-note,.review-panel-status,.review-panel-sequence{margin:0;color:var(--muted);font-size:14px;line-height:1.5}
+.review-panel-technical{color:var(--muted);font-size:14px}
+.review-panel-technical summary{min-height:44px;display:flex;align-items:center;cursor:pointer}
+.review-panel-technical .simulation-summary{border:0;padding:0;background:transparent}
+.review-panel-code code{font-family:var(--font-ibm-plex-mono),monospace;font-size:12px;color:var(--muted)}
+.review-panel-actions{display:flex;flex-wrap:wrap;align-items:center;gap:10px}
+.review-panel-actions :is(button,a).secondary{display:inline-flex;align-items:center;gap:8px;min-height:44px;padding:0 16px;border:1px solid var(--line);border-radius:12px;background:var(--surface);color:var(--ink);font-weight:500;text-decoration:none}
+.review-panel-actions :is(button,a).secondary:hover{border-color:var(--accent)}
+/* Board 07: the blocker panel replaces the Review panel; amber only on its own surface. */
+.review-panel-blocked{border-top:3px solid var(--warning-text)}
+.review-panel-blocked h2{color:var(--ink)}
+
+@media(max-width:1199px){.review-side-panel{position:static;max-height:none}}
+@media(max-width:800px){
+  .top-bar{grid-template-columns:auto 1fr auto;gap:8px}
+  .top-bar>.top-bar-center{grid-column:1/-1;grid-row:2;justify-self:center}
+  .top-bar .editor-stepper li:not([data-step-look="current"]) .editor-stepper-label{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap}
+  .summary-bar.editor-bar .summary-status-line{order:3;flex:1 1 100%;font-size:13px}
+}
+@media(pointer:coarse){.top-bar .editor-stepper button,.navigation-legal a{min-height:44px}}
+@media(prefers-reduced-motion:reduce){.top-bar .editor-stepper button{transition:none}}
+/* Board 04: the step count lives in the Canvas header and the notice in the lifecycle footer; the canvas foot would repeat both. */
+.build-workspace .canvas-foot{display:none}
+/* Board 08: the request the wallet holds — eyebrow, one instruction, the calls in plain words. */
+.execution-wallet-request{display:flex;flex-direction:column;gap:8px;margin:0 0 12px;padding:16px;border:1px solid var(--line);border-left:3px solid var(--primary);border-radius:14px;background:var(--surface-raised)}
+.execution-wallet-request .eyebrow{margin:0;font-family:var(--font-ibm-plex-mono),monospace;font-size:12px;letter-spacing:.1em;color:var(--muted)}
+.execution-wallet-request h4{margin:0;font-size:18px;color:var(--ink)}
+.execution-wallet-request p{margin:0}
+.execution-wallet-calls{margin:0;padding-left:20px;display:flex;flex-direction:column;gap:4px;color:var(--ink)}
+/* Review fixes (frontend UX): a border/ring token that keeps 3:1 in dark mode; the header grows with its second row (the stepper under 800 px,
+   the wallet-network strip); touch targets on coarse pointers. */
+:root{--primary-line:var(--primary)}
+:root[data-theme="dark"]{--primary-line:var(--accent)}
+@media(prefers-color-scheme:dark){:root:not([data-theme="light"]){--primary-line:var(--accent)}}
+.top-bar{height:auto;min-height:70px}
+@media(pointer:coarse){.network-attention button{min-height:44px}.navigation-legal a{display:inline-flex;align-items:center}}

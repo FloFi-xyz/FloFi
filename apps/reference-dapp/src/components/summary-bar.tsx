@@ -4,7 +4,8 @@ import { swapProfile } from '../domain/public-testnet-swap';
 import { useLocale } from '../i18n/locale';
 
 import { createPortal } from 'react-dom';
-import type { ReactNode } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
+import { simulateFooterStatus } from '../domain/approved-ux';
 import type { EditorOverview } from '../domain/editor-overview';
 import { useModeA } from '../state/mode-a-store';
 import { useModeB } from '../state/mode-b-store';
@@ -30,11 +31,32 @@ import { useSolanaLiquidity } from '../state/solana-liquidity-store';
  * review reports something to fix, unapplied changes) and hosts the Canvas lifecycle control (`primaryAction`: the existing Simulate / Authorize /
  * Continue control and its handlers, moved here from the Canvas corner — rendered once, never duplicated; its wrapper keeps `canvas-primary-action`).
  */
-export function SummaryBar({ tab, setTab, simulationActionHost, reviewAvailable, focusReview, canvasOwnsAction, primaryAction, overview, showStep, simulationBlocked = false }: { canvasOwnsAction?: boolean; tab: Tab; setTab: (value: Tab) => void; simulationActionHost?: HTMLDivElement | null; reviewAvailable?: boolean; focusReview?: () => void;
+/** P0 approved UX (board 06/07): what the Simulate footer states, from the shell's existing projections (see `simulateFooterStatus`). */
+export type FooterSimulation = { readonly busy: boolean; readonly status: 'ready' | 'attention' | 'blocked'; readonly label: string; readonly expiresAt: number | null;
+  readonly executionStarted: boolean; readonly networkQuestion?: boolean };
+export function SummaryBar({ tab, setTab, simulationActionHost, reviewAvailable, focusReview, canvasOwnsAction, primaryAction, overview, showStep, simulationBlocked = false, simulation, networkQuestion = false }: { canvasOwnsAction?: boolean; tab: Tab; setTab: (value: Tab) => void; simulationActionHost?: HTMLDivElement | null; reviewAvailable?: boolean; focusReview?: () => void;
   primaryAction?: ReactNode; overview?: EditorOverview; showStep?: (nodeId: string) => void;
   /** Simulate is closed for a reason its control states; the footer then claims nothing about warnings. */
-  simulationBlocked?: boolean }) {
+  simulationBlocked?: boolean;
+  /** P0 approved UX: the Simulate footer's status line (validity countdown, blocker, running simulation). */ simulation?: FooterSimulation | undefined;
+  /** Board 05: FloFi asked which network to use; the footer says where to answer and claims nothing else. */ networkQuestion?: boolean }) {
   const { t: tr } = useLocale();
+  // The validity countdown ticks once a second, only while a simulation is valid on Simulate.
+  const [now, setNow] = useState(() => Date.now());
+  const counting = tab === 'Simulate' && simulation?.expiresAt !== null && simulation?.expiresAt !== undefined && simulation.expiresAt > now;
+  useEffect(() => {
+    if (!counting) return;
+    const timer = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, [counting]);
+  const status = tab === 'Simulate' && simulation ? simulateFooterStatus({ ...simulation, now: Math.max(now, Date.now()) }) : null;
+  const ticking = status?.text === 'Simulation valid for {0}';
+  const spokenNow = !status ? '' : `${tr(status.text, ...(status.parameters ?? []))}${status.detail ? ` · ${tr(status.detail)}` : ''}`;
+  // What the live region says changes only with the meaning (valid, under 15 s, expired, a blocker); it then includes the time left at that moment.
+  const meaning = !status ? '' : ticking ? `tick:${status.tone}` : spokenNow;
+  const [spoken, setSpoken] = useState({ meaning: '', text: '' });
+  if (spoken.meaning !== meaning) setSpoken({ meaning, text: spokenNow });
+  const announcement = spoken.meaning === meaning ? spoken.text : spokenNow;
   const { state, actionSetup } = useWorkflow();
   const { info, prepared, retired, verifyError, verified } = useModeA();
   const modeB = useModeB();
@@ -75,6 +97,7 @@ export function SummaryBar({ tab, setTab, simulationActionHost, reviewAvailable,
   // unapplied change and "no step warnings" are read on demand).
   const first = overview?.attention[0];
   const notice = tab !== 'Build' || !overview ? null
+    : networkQuestion ? <p className="summary-notice" data-notice="attention" role="status"><span className="summary-status-dot" data-tone="attention" aria-hidden="true"/>{tr('Choose the network in the chat to simulate')}</p>
     : first ? <p className="summary-notice" data-notice="attention" role="status">
         <span className="summary-notice-icon" aria-hidden="true">!</span>
         <span><strong>{tr(overview.attention.length === 1 ? '1 step needs attention' : '{0} steps need attention', overview.attention.length)}</strong>{' '}<span className="summary-notice-detail">{tr('Step {0}: {1}', first.step, tr(first.status.detail))}</span></span>
@@ -82,13 +105,18 @@ export function SummaryBar({ tab, setTab, simulationActionHost, reviewAvailable,
       </p>
     : overview.invalid ? <p className="summary-notice" data-notice="attention" role="status"><span className="summary-notice-icon" aria-hidden="true">!</span><strong>{tr('Edit not applied')}</strong></p>
     : overview.drafts ? <p className="summary-notice" data-notice="draft">{tr(overview.drafts === 1 ? '1 change not applied yet' : '{0} changes not applied yet', overview.drafts)}</p>
-    : overview.state === 'configured' && !simulationBlocked ? <p className="summary-notice" data-notice="none">{tr('No step warnings')}</p>
+    : overview.state === 'configured' && !simulationBlocked ? <p className="summary-notice" data-notice="none">{tr('No warnings')}</p>
     : null;
-  return <footer className={`summary-bar${tab === 'Build' && primaryAction ? ' editor-bar' : ''}`} data-workflow-revision={state.workflow.revision}>
-    <div className="summary-count"><span className="eyebrow">{tr("WORKFLOW")}</span><strong>{tr(actionCount)} {tr(actionCount === 1 ? 'action' : 'actions')}</strong></div>
+  const lifecycle = (tab === 'Build' || tab === 'Simulate') && primaryAction;
+  return <footer className={`summary-bar${lifecycle ? ' editor-bar' : ''}`} data-workflow-revision={state.workflow.revision}>
+    <div className="summary-count"><span className="eyebrow">{tr("WORKFLOW")}</span><strong>{tr(actionCount === 1 ? '1 step' : '{0} steps', actionCount)}</strong></div>
     {notice}
+    {/* The m:ss countdown ticks visibly only; the live region speaks when the meaning changes (valid, under 15 s, expired, a blocker). */}
+    {status && <p className="summary-status-line" data-tone={status.tone}><span className="summary-status-dot" data-tone={status.tone} aria-hidden="true"/>
+      <span className="summary-status-text" aria-hidden={ticking || undefined}>{tr(status.text, ...(status.parameters ?? []))}</span>{status.detail && <span className="summary-status-detail">{tr(status.detail)}</span>}</p>}
+    {tab === 'Simulate' && simulation && <span className="sr-only" role="status">{announcement}</span>}
     {/* Relocate the existing action without duplicating its review gates or handler. */}
     {tr(tab === 'Simulate' && simulationActionHost ? createPortal(action, simulationActionHost) : action)}
-    {tab === 'Build' && primaryAction && <div className="canvas-primary-action summary-primary-action">{primaryAction}</div>}
+    {lifecycle && <div className="canvas-primary-action summary-primary-action">{primaryAction}</div>}
   </footer>;
 }

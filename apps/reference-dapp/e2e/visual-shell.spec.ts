@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { test, expect, assertNoFinancialCanvasAction } from './fixtures';
 import { readyForVisualCapture } from './mode-a-fixtures';
-import { openBuilder, openEditorSection } from './build-entry-navigation';
+import { openBuilder, openEditorSection, openSimulationReviewPanel } from './build-entry-navigation';
 
 test('Build shell visual baseline', async ({ page }) => {
   await openBuilder(page);
@@ -14,8 +14,10 @@ test('Build shell visual baseline', async ({ page }) => {
 test('Simulate mocked-chain empty visual baseline', async ({ page }) => {
   await openBuilder(page);
   await openEditorSection(page, 'Simulate');
-  // BUILD-FLOFI-CHAT-E2E-FIX-002: the chat-first workspace keeps the summary (and its embedded Review) in an optional, collapsed details surface.
-  await expect(page.locator('.simulation-details > summary')).toBeVisible();
+  // BUILD-FLOFI-CHAT-E2E-FIX-002 / P0 approved UX (board 06): the chat-first workspace shows the Review panel beside the canvas (1440 px) and keeps
+  // the summary (and its embedded Review) in the panel's collapsed Technical details.
+  await openSimulationReviewPanel(page);
+  await expect(page.locator('.review-panel-technical > summary')).toBeVisible();
   await expect(page.locator('.review-authorization-details')).toBeHidden();
   await expect(page.locator('.review-workspace')).toHaveCount(0);
   await readyForVisualCapture(page);
