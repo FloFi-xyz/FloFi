@@ -337,6 +337,9 @@ export function BoardExperience({ initial, language }: { initial: FlightState | 
   const pass = state?.me.flight?.pass ?? null;
   // An already-boarded person's pass is focused once it is on the page.
   useEffect(() => { if (focusPass && pass) { document.getElementById('pass')?.focus(); setFocusPass(false); } }, [focusPass, pass]);
+  // A check that ends on the board with a message (shown again after the checking state): focus it so it is read out.
+  const [focusMessage, setFocusMessage] = useState(false);
+  useEffect(() => { if (focusMessage) { document.getElementById('flight-board-message')?.focus(); setFocusMessage(false); } }, [focusMessage]);
 
   const refresh = useCallback(async () => {
     try {
@@ -380,6 +383,7 @@ export function BoardExperience({ initial, language }: { initial: FlightState | 
     if (outcome.kind === 'PASS') await refresh();
     checking(false);
     if (outcome.kind === 'PASS') setFocusPass(true);
+    else if (outcome.kind === 'REFUSED') setFocusMessage(true);
     else if (outcome.kind === 'PERSONAL') setPersonal(outcome.access);
   }, [checking, copy, goToApp, refresh]);
 
@@ -489,7 +493,7 @@ export function BoardExperience({ initial, language }: { initial: FlightState | 
         <input id="flight-prompt" autoComplete="off" maxLength={500} placeholder={full ? copy.foundingFull.placeholder : t.placeholder} value={prompt} onChange={e => setPrompt(e.target.value)}/>
         <button className={`${styles.btn} ${styles.btnNavy}`} type="submit" disabled={busy}>{t.board} <span aria-hidden="true">→</span></button>
       </form>
-      <p className={message ? styles.status : styles.srOnly} role="status">{message ?? ''}</p>
+      <p id="flight-board-message" tabIndex={-1} className={message ? styles.status : styles.srOnly} role="status">{message ?? ''}</p>
       <p id="flight-access-notice" tabIndex={-1} className={accessNotice ? styles.status : styles.srOnly} role="status">{accessNotice ?? ''}</p>
       {!accessNotice && state.me.accessPending && <p className={styles.status}>{copy.access.pendingSignIn}</p>}
       <div className={styles.metaRow}>
