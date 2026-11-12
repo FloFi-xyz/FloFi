@@ -6,7 +6,9 @@
  * authorize with ONE interaction on ONE chain:
  *
  *   - every step of a group is on the same chain (so the same wallet namespace and the same fee-paying account);
- *   - a bridge ends its group (its output arrives on another chain, later);
+ *   - a bridge ends its group (its output arrives on another chain, later). P0 hotfix (E1): a certified Router bridge (Across, same asset both
+ *     sides, paying the owner, on a route the deployment offers: `UserFundedFacts.bridgeRoutes`) is buildable, so Swap → Bridge on one chain is
+ *     ONE wallet batch; its group then waits for the verified delivery before it reconciles. Any other bridge is an owner step;
  *   - a step FloFi cannot build exact calls/transactions for (see `USER_FUNDED_BUILDABLE`) is a group of its own, signed through its own
  *     flow exactly as in confirm-each-step mode (`*_OWNER_STEP`);
  *   - a step bound to an earlier step of the SAME group spends that producer's guaranteed output (a swap's signed minimum, a borrow's exact
@@ -52,7 +54,8 @@ export type AmountBasis = 'EXACT' | 'GUARANTEED_MINIMUM' | 'RECONCILED_ACTUAL';
  * a group of its own through the step's flow. Keep in step with the builders: a capability is never advertised before it is built.
  */
 export const USER_FUNDED_BUILDABLE: Readonly<Record<Namespace, ReadonlySet<string>>> = Object.freeze({
-  eip155: new Set(['swap', 'supply', 'borrow', 'repay', 'withdraw', 'transfer']),
+  // `bridge`: only through the narrow per-step rule (`user-funded/bridge-calls.ts`) and only on a route the deployment offers (`bridgeRoutes`).
+  eip155: new Set(['swap', 'supply', 'borrow', 'repay', 'withdraw', 'transfer', 'bridge']),
   solana: new Set(['transfer', 'swap']),
 });
 
@@ -60,7 +63,12 @@ export const USER_FUNDED_BUILDABLE: Readonly<Record<Namespace, ReadonlySet<strin
 export const AAVE_ACTIONS: ReadonlySet<string> = new Set(['supply', 'borrow', 'repay', 'withdraw']);
 /** What the deployment offers (from `user-funded/config.ts`): opted-in chains and chains with an ERC-4337 bundler. */
 export type UserFundedFacts = { readonly enabled: boolean; readonly code: string | null; readonly chains: readonly string[]; readonly bundlerChains: readonly string[];
-  readonly solanaNonceAccounts: boolean };
+  readonly solanaNonceAccounts: boolean;
+  /**
+   * P0 hotfix (E1): the certified Router routes (`source>destination`, CAIP-2) a wallet batch may carry a bridge on — both chains opted in with
+   * a read RPC and an Across quote provider configured. Absent or empty: every bridge runs through its own flow.
+   */
+  readonly bridgeRoutes?: readonly string[] };
 /**
  * What the owner's wallets can do, as reported in the browser at `/approve` (EIP-5792 `wallet_getCapabilities`, Wallet Standard features).
  * Reports only choose the interaction; every artifact is still verified server-side (signer, account code, calls) before it is used.
@@ -152,6 +160,8 @@ export function planExecutionGroups(requirement: WorkflowRequirement, facts: Use
    */
   const problemOf = (s: StepRequirement): string | null => {
     if (!defaultBuildable(s)) return `USER_FUNDED_ACTION_NOT_BUILDABLE:${s.action.toUpperCase()}`;
+    // P0 hotfix (E1): whatever the caller's predicate says, a bridge joins a batch only on a route this deployment offers.
+    if (s.action === 'bridge' && !(facts.bridgeRoutes ?? []).includes(`${s.chain}>${s.destinationChain ?? ''}`)) return 'USER_FUNDED_ACTION_NOT_BUILDABLE:BRIDGE';
     const r = isBuildable(s);
     return r === true ? null : r === false ? `USER_FUNDED_ACTION_NOT_BUILDABLE:${s.action.toUpperCase()}` : r;
   };
@@ -195,11 +205,13 @@ export function planExecutionGroups(requirement: WorkflowRequirement, facts: Use
       // (a fee-on-transfer token delivers less, and the bound step would then spend the owner's other balance of it). A user operation gets
       // bundler estimates at most (a delayed one none), so such a group is a wallet batch simulated and signed when due, like an Aave group.
       const spentSwap = members.some(m => m.action === 'swap' && requirement.bindings.some(b => b.amountFrom === m.index && members.some(c => c.index === b.step)));
+      // P0 hotfix (E1): a bridge's Across quote and fill deadline are fixed when it is signed: never a user operation signed upfront and relayed later.
+      const bridge = members.some(m => m.action === 'bridge');
       if (awaitsDelivery !== null) {
-        if (canUserOp && !aave && !spentSwap) strategy = 'EVM_USER_OPERATION';
+        if (canUserOp && !aave && !spentSwap && !bridge) strategy = 'EVM_USER_OPERATION';
         else {
           if (chainEnabled && allBuildable) downgrades.push(...canUserOp ? [...aave ? ['USER_OPERATION_AAVE_SIGNED_WHEN_DUE'] : [],
-            ...spentSwap ? ['USER_OPERATION_SWAP_OUTPUT_SIGNED_WHEN_DUE'] : []] : [!facts.bundlerChains.includes(chain) ? 'USER_OPERATION_BUNDLER_UNAVAILABLE'
+            ...spentSwap ? ['USER_OPERATION_SWAP_OUTPUT_SIGNED_WHEN_DUE'] : [], ...bridge ? ['USER_OPERATION_BRIDGE_SIGNED_WHEN_DUE'] : []] : [!facts.bundlerChains.includes(chain) ? 'USER_OPERATION_BUNDLER_UNAVAILABLE'
             : evm?.wallet !== 'INJECTED' || !evm.typedData ? 'WALLET_TYPED_DATA_USER_OPERATION_UNSUPPORTED' : 'EVM_SMART_ACCOUNT_REQUIRED']);
           strategy = canBatch ? 'EVM_WALLET_BATCH' : 'EVM_OWNER_STEP'; signing = 'WHEN_DUE';
         }
@@ -229,8 +241,8 @@ export function planExecutionGroups(requirement: WorkflowRequirement, facts: Use
     const steps: GroupStep[] = members.map(m => {
       const b = bindingOf(m.index);
       const sameGroup = b !== null && b.amountFrom >= first.index;
-      // A bridge is executed through its own flow (its route is quoted when it runs), so a delivery's guaranteed minimum is not known when the
-      // owner authorizes upfront: a step bound to an earlier group spends the reconciled actual amount and is signed when it becomes due.
+      // A bridge's delivery is known only once it landed (an owner-step bridge is quoted when it runs; a batched one fills exactly its deposit's
+      // output, or is refunded): a step bound to an earlier group spends the reconciled actual amount and is signed when it becomes due.
       const amount: AmountBasis = !b ? 'EXACT' : sameGroup ? 'GUARANTEED_MINIMUM' : 'RECONCILED_ACTUAL';
       return { index: m.index, action: m.action, amount, boundTo: b?.amountFrom ?? null };
     });

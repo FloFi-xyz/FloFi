@@ -12,6 +12,9 @@
  * Per-step facts come from the ERC-20 `Transfer` logs touching the owner, in log order: each step's expected legs (what it spends exactly,
  * what it receives) are filled in step order. An owner outflow nobody expected, a wrong amount, or a swap below its signed minimum is a
  * RECONCILIATION_MISMATCH (S2): the group never counts as reconciled. Extra inflows (aTokens, variable-debt tokens) are recorded only.
+ *
+ * P0 hotfix (E1): an Across deposit's source leg is exactly its input from the owner to its pinned SpokePool. The wallet batch's receipts (block,
+ * hash, logs) are returned with the reconciliation, so the bridge's destination delivery is matched to THIS deposit (`bridge-delivery.ts`).
  */
 import { erc4337 } from '@defi-workflow-engine/reference-compiler';
 import type { ChainTransport } from '../delegation/chains.ts';
@@ -22,13 +25,17 @@ import type { GasPaidFact } from './gas-payer.ts';
 export const TRANSFER_TOPIC = '0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef';
 type Log = { readonly address: string; readonly topics: readonly string[]; readonly data: string; readonly logIndex?: string };
 export type EvmReceipt = { readonly transactionHash: string; readonly status?: string; readonly from?: string; readonly to?: string | null; readonly gasUsed?: string;
-  readonly effectiveGasPrice?: string; readonly blockNumber?: string; readonly logs?: readonly Log[];
+  readonly effectiveGasPrice?: string; readonly blockNumber?: string; readonly blockHash?: string; readonly logs?: readonly Log[];
   /** OP Stack receipts only: the L1 data fee the sender paid on top of gasUsed × effectiveGasPrice. */ readonly l1Fee?: string };
+export type ReconciledReceipt = { readonly transactionHash: string; readonly blockNumber: string; readonly blockHash: string;
+  readonly logs: readonly { readonly address: string; readonly topics: readonly string[]; readonly data: string }[] };
 export type StepFacts = { readonly stepIndex: number; readonly spent: readonly { readonly asset: string; readonly amount: string }[];
   readonly received: readonly { readonly asset: string; readonly amount: string }[] };
 export type GroupReconciliation =
   | { readonly status: 'PENDING' }
-  | { readonly status: 'RECONCILED'; readonly steps: readonly StepFacts[]; readonly gasPaid: GasPaidFact; readonly transactions: readonly string[]; readonly blockNumber: string | null }
+  | { readonly status: 'RECONCILED'; readonly steps: readonly StepFacts[]; readonly gasPaid: GasPaidFact; readonly transactions: readonly string[]; readonly blockNumber: string | null;
+      /** Wallet batches: each receipt's block and logs, re-read from the chain (a bridge's deposit is identified from them). */
+      readonly receipts?: readonly ReconciledReceipt[] }
   | { readonly status: 'REVERTED' | 'MISMATCH'; readonly code: string; readonly gasPaid: GasPaidFact | null; readonly transactions: readonly string[] };
 
 const topicAddress = (topic: string | undefined) => topic ? ('0x' + topic.slice(-40)).toLowerCase() : '';
@@ -60,6 +67,9 @@ function expectedLegs(group: EvmGroupCalls): Leg[] {
       { step: step.stepIndex, token: c.aToken.toLowerCase(), direction: 'OUT', amount: null, minimum: null, counterparty: ZERO_ADDRESS, optional: true, filled: null });
     else if (c.kind === 'ERC20_TRANSFER' && c.to.toLowerCase() !== group.owner) legs.push({ step: step.stepIndex, token: c.token.toLowerCase(), direction: 'OUT', amount: BigInt(c.amount), minimum: null,
       counterparty: c.to.toLowerCase(), filled: null });
+    // P0 hotfix (E1): an Across deposit pulls exactly its input from the owner into its pinned origin SpokePool (the delivery is on another chain).
+    else if (c.kind === 'ACROSS_DEPOSIT') legs.push({ step: step.stepIndex, token: c.inputToken.toLowerCase(), direction: 'OUT', amount: BigInt(c.inputAmount), minimum: null,
+      counterparty: c.spokePool.toLowerCase(), filled: null });
   }
   return legs;
 }
@@ -156,7 +166,9 @@ export async function reconcileWalletBatch(t: ChainTransport, group: EvmGroupCal
   if (receipts.some(r => r.status !== '0x1')) return { status: 'REVERTED', code: 'SUBMISSION_REVERTED', gasPaid, transactions: [...hashes] };
   const attributed = attributeLegs(group, receipts.flatMap(r => r.logs ?? []));
   if (!attributed.ok) return { status: 'MISMATCH', code: attributed.code, gasPaid, transactions: [...hashes] };
-  return { status: 'RECONCILED', steps: attributed.steps, gasPaid, transactions: [...hashes], blockNumber: receipts.at(-1)?.blockNumber ?? null };
+  return { status: 'RECONCILED', steps: attributed.steps, gasPaid, transactions: [...hashes], blockNumber: receipts.at(-1)?.blockNumber ?? null,
+    receipts: receipts.map(r => ({ transactionHash: r.transactionHash.toLowerCase(), blockNumber: String(r.blockNumber ?? ''), blockHash: String(r.blockHash ?? '').toLowerCase(),
+      logs: (r.logs ?? []).map(l => ({ address: l.address, topics: [...l.topics], data: l.data })) })) };
 }
 
 /** Reconciles an owner user operation from its bundle transaction's receipt on the chain. */

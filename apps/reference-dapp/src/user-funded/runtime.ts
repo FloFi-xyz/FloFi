@@ -4,15 +4,22 @@
  * (`config.ts`). It holds NO signer: every transport here reads, simulates, or relays bytes the owner's own wallet signed (the bundler takes
  * owner-signed user operations; Solana `sendTransaction` takes owner-signed transactions whose fee payer is the owner). There is no
  * FloFi-funded account anywhere in it, and nothing here can create one.
+ *
+ * P0 hotfix (E1): a certified Router pair (Across, same asset both sides) whose two chains are opted in with a read RPC is a batchable bridge
+ * route (`bridgeRoutes`): the Router's own Across provider adapter quotes it (read-only HTTPS, the Router's optional API key and integrator id),
+ * with the profile's own code pins. The Router flow's own deployment gates (live mode and its real-funds owner-execution opt-in) still decide,
+ * per step, whether a run may prepare it (`evaluateGates` when the group is prepared).
  */
 import type { Database } from '@defi-workflow-engine/cloud-runtime';
 import { betaAccessMode, createBetaAccessStore } from '../flight/beta-access.ts';
 import { flightCalendarFrom } from '../flight/campaign.ts';
-import { JUPITER_SOLANA_MAINNET } from '@defi-workflow-engine/action-registry';
+import { CROSSCHAIN_ROUTER_PROFILES, JUPITER_SOLANA_MAINNET } from '@defi-workflow-engine/action-registry';
 import { guarded, httpRpc } from '../delegation/chains.ts';
 import type { UserFundedFacts } from '../workflow-runs/execution-groups.ts';
 import { createJupiterHttp } from '../server/jupiter-http.ts';
 import { createSolanaRpc, solanaRpcOverride } from '../server/solana-rpc.ts';
+import { createRouteProviders, createRouterHttp } from '../server/router-providers.ts';
+import { batchBridgeProfile, batchBridgeRoutes, type AcrossRoute } from './bridge-calls.ts';
 import { bundlerRpc, createBundlerClient, type BundlerClient } from './bundler.ts';
 import { readUserFundedConfig } from './config.ts';
 import type { UserFundedDeps } from './groups.ts';
@@ -29,7 +36,7 @@ export function userFundedFactsOf(env: Env): UserFundedFacts {
   if (!config.enabled) return { enabled: false, code: config.code, chains: [], bundlerChains: [], solanaNonceAccounts: false };
   const chains = config.chains.filter(c => c.startsWith('solana:') || Boolean(config.rpc[c]));
   return { enabled: true, code: null, chains, bundlerChains: Object.keys(config.bundlers).filter(c => chains.includes(c) && c.startsWith('eip155:')),
-    solanaNonceAccounts: config.solanaNonceAccounts };
+    solanaNonceAccounts: config.solanaNonceAccounts, bridgeRoutes: batchBridgeRoutes(chains, CROSSCHAIN_ROUTER_PROFILES) };
 }
 /** The deployment's user-funded facts and transports. Disabled or misconfigured: facts say why, and there are no transports at all. */
 export function userFundedRuntime(env: Env, fetchImpl: typeof fetch = fetch, host?: { db: Database; tenantId: string }): UserFundedRuntime {
@@ -41,9 +48,24 @@ export function userFundedRuntime(env: Env, fetchImpl: typeof fetch = fetch, hos
     bundlers.set(chain, createBundlerClient(Number(chain.slice('eip155:'.length)), bundlerRpc(url, fetchImpl)));
   const solanaEnabled = config.chains.includes(JUPITER_SOLANA_MAINNET.chain);
   const solanaUrl = solanaEnabled ? solanaRpcOverride(env.GRYLOO_SOLANA_RPC_URL, 'USER_FUNDED_SOLANA_RPC_INVALID') ?? JUPITER_SOLANA_MAINNET.rpc : null;
-  const facts: UserFundedFacts = { enabled: true, code: null, chains: config.chains.filter(c => c.startsWith('solana:') || evm.has(c)), bundlerChains: [...bundlers.keys()],
-    solanaNonceAccounts: config.solanaNonceAccounts };
-  const deps: UserFundedDeps = { chains: facts.chains, evm: chain => evm.get(chain) ?? null, bundler: chain => bundlers.get(chain) ?? null,
+  const chains = config.chains.filter(c => c.startsWith('solana:') || evm.has(c));
+  const facts: UserFundedFacts = { enabled: true, code: null, chains, bundlerChains: [...bundlers.keys()],
+    solanaNonceAccounts: config.solanaNonceAccounts, bridgeRoutes: batchBridgeRoutes(chains, CROSSCHAIN_ROUTER_PROFILES) };
+  // The Router's own Across adapter per batchable route (read-only quotes and deposit status; pins: the profile's own, never overridden here).
+  const http = createRouterHttp(fetchImpl), acrossRoutes = new Map<string, AcrossRoute>();
+  const across = (source: string, destination: string): AcrossRoute | null => {
+    if (!facts.bridgeRoutes?.includes(`${source}>${destination}`)) return null;
+    const key = `${source}>${destination}`, cached = acrossRoutes.get(key);
+    if (cached) return cached;
+    const profile = batchBridgeProfile(source, destination);
+    if (!profile) return null;
+    const provider = createRouteProviders({ http, profile, ...env.ACROSS_API_KEY ? { acrossApiKey: env.ACROSS_API_KEY } : {},
+      ...env.ACROSS_INTEGRATOR_ID ? { acrossIntegratorId: env.ACROSS_INTEGRATOR_ID } : {} }).across;
+    const route: AcrossRoute = { profile, pins: profile.codeSha256, quote: provider.quote, status: provider.status };
+    acrossRoutes.set(key, route);
+    return route;
+  };
+  const deps: UserFundedDeps = { chains: facts.chains, evm: chain => evm.get(chain) ?? null, bundler: chain => bundlers.get(chain) ?? null, across,
     submissionRefusal: async (wallet, owner = wallet) => {
       const mode = betaAccessMode(env);
       if (mode === 'open') return null;

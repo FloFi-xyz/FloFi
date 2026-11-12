@@ -3332,7 +3332,8 @@
         "apps/reference-dapp/src/delegation/state-machine.ts",
         "apps/reference-dapp/src/delegation/steps.ts",
         "apps/reference-dapp/src/delegation/views.ts",
-        "apps/reference-dapp/src/delegation/worker.ts"
+        "apps/reference-dapp/src/delegation/worker.ts",
+        "apps/reference-dapp/src/delegation/harness/across-double.ts"
       ],
       "suites": [
         "action-registry.engineering-regression",
@@ -6007,7 +6008,8 @@
         "apps/reference-dapp/src/server/universal-router/runtime.ts",
         "apps/reference-dapp/src/server/universal-router/service.ts",
         "apps/reference-dapp/src/server/universal-router/solana-chain.ts",
-        "apps/reference-dapp/src/server/universal-router/types.ts"
+        "apps/reference-dapp/src/server/universal-router/types.ts",
+        "apps/reference-dapp/src/server/across-route.ts"
       ],
       "suites": [
         "app.server.router-service",
@@ -6765,7 +6767,9 @@
         "apps/reference-dapp/src/user-funded/gas-payer.ts",
         "apps/reference-dapp/src/user-funded/groups.ts",
         "apps/reference-dapp/src/user-funded/planned.ts",
-        "apps/reference-dapp/src/user-funded/runtime.ts"
+        "apps/reference-dapp/src/user-funded/runtime.ts",
+        "apps/reference-dapp/src/user-funded/bridge-calls.ts",
+        "apps/reference-dapp/src/user-funded/bridge-delivery.ts"
       ],
       "suites": [
         "app.user-funded.groups",
@@ -7156,6 +7160,7 @@
         "apps/reference-dapp/src/workflow-runs/runner.ts",
         "apps/reference-dapp/src/workflow-runs/service.ts",
         "apps/reference-dapp/src/workflow-runs/state-machine.ts",
+        "apps/reference-dapp/src/workflow-runs/run-step-phase.ts",
         "apps/reference-dapp/src/workflow-runs/user-funded-pass.ts",
         "apps/reference-dapp/src/workflow-runs/worker.ts"
       ],

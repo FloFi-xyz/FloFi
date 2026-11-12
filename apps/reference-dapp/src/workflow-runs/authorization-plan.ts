@@ -123,7 +123,7 @@ export function authorizationPlan(workflow: WorkflowComposition, gates: Pick<Gat
   const confirmAvailable = confirmReason === null, delegatedAvailable = delegatedReason === null;
   // User-funded groups: every step must pass its own gates exactly as in confirm mode (an owner-step group IS a confirm-mode step).
   const facts = userFunded?.facts ?? null;
-  const grouped = req.ok && facts ? planExecutionGroups(req.value, facts, userFunded?.wallets, st => st.namespace === 'solana' || (evmStepBuildable(st, facts.chains, userFunded?.evmOwner) ?? true)) : null;
+  const grouped = req.ok && facts ? planExecutionGroups(req.value, facts, userFunded?.wallets, st => st.namespace === 'solana' || (evmStepBuildable(st, facts.chains, userFunded?.evmOwner, facts.bridgeRoutes) ?? true)) : null;
   const userFundedReason = runsOff ?? (!facts ? 'USER_FUNDED_NOT_ENABLED' : !req.ok ? req.code : grouped && !grouped.ok ? grouped.code : confirmReason);
   const groupsPlan = grouped && grouped.ok ? grouped : null;
   const userFundedAvailable = userFundedReason === null && groupsPlan !== null;

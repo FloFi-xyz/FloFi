@@ -8,6 +8,7 @@
  */
 import { guarded } from '../delegation/chains.ts';
 import type { UserFundedDeps } from '../user-funded/groups.ts';
+import type { AcrossRoutes } from '../user-funded/bridge-calls.ts';
 import { randomBytes } from 'node:crypto';
 import { createPostgresWorkQueue, createWorker, type Database, type Logger } from '@defi-workflow-engine/cloud-runtime';
 import type { FlowName } from '../../backend/flows.ts';
@@ -90,6 +91,8 @@ export async function workflowRunHarness(db: Database, options: {
   readonly userFundedChains?: readonly string[];
   /** P0 workflow execution: another MOCKED chain double for a user-funded chain (e.g. Arbitrum One with an Aave market), instead of the harness's. */
   readonly userFundedRpc?: (chain: string) => ((method: string, params: readonly unknown[]) => Promise<unknown>) | null;
+  /** P0 hotfix (E1): batchable bridge routes (`source>destination`) quoted by MOCKED Across doubles (default: none, every bridge is an owner step). */
+  readonly across?: { readonly routes: readonly string[]; readonly route: AcrossRoutes };
 } = {}) {
   const d = await delegationHarness(db);
   const facts: DelegationFacts = options.delegation === false ? null : { mode: 'MOCKED_HARNESS', unavailable: null };
@@ -100,8 +103,10 @@ export async function workflowRunHarness(db: Database, options: {
   const lines: string[] = [];
   const log = (event: string, fields: Readonly<Record<string, unknown>>) => { lines.push(JSON.stringify({ event, ...fields })); };
   const ufChains = options.userFundedChains ?? null;
-  const userFundedFacts = ufChains ? { enabled: true, code: null, chains: ufChains, bundlerChains: [], solanaNonceAccounts: false } : undefined;
+  const userFundedFacts = ufChains ? { enabled: true, code: null, chains: ufChains, bundlerChains: [], solanaNonceAccounts: false,
+    ...options.across ? { bridgeRoutes: options.across.routes } : {} } : undefined;
   const userFunded: UserFundedDeps | null = ufChains ? { chains: ufChains, now: d.now, bundler: () => null, solana: null, jupiter: null,
+    ...options.across ? { across: options.across.route } : {},
     evm: chain => { const rpc = ufChains.includes(chain) ? options.userFundedRpc?.(chain) ?? d.rpc(chain) : null; return rpc ? guarded(chain, 'read', 'MOCKED', rpc) : null; } } : null;
   const runs: WorkflowRunSurface = { store, runtime: flows.runtime, delegation: d.store, now: d.now, log, policyFor: () => policy, delegationFacts: facts,
     ...userFundedFacts ? { userFundedFacts } : {}, userFunded,
