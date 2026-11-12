@@ -25,6 +25,7 @@ const tabRun = () => { try { return sessionStorage.getItem(TAB_KEY); } catch { r
 /** An execution the owner must still continue or observe: no settled outcome yet, and an attempt that was prepared, sent or confirmed. */
 export const publicRunInProgress = (run: Pick<PublicRun, 'outcome' | 'attempts'>) =>
   !run.outcome && run.attempts.some(attempt => ['PREPARED', 'HASH', 'PENDING', 'UNKNOWN', 'CONFIRMED'].includes(attempt.state));
+const sameWorkflow = (a: unknown, b: unknown) => { try { return JSON.stringify(a) === JSON.stringify(b); } catch { return false; } };
 type Store = { readonly available: boolean;
   /** BUILD-BASE-001: whether this instance serves a catalog network's mainnet swaps (live or the MOCKED loopback harness). */
   readonly catalogAvailable: (chain: string) => boolean;
@@ -173,8 +174,9 @@ export function PublicTestnetProvider({ children }: { children: ReactNode }) {
         }
       }
       if (!cancelled) {
-        // A finished or never-executed run stays in the Dashboard; a new visit does not put it back on the Canvas.
-        if (!publicRunInProgress(recovered) && tabRun() !== id) return;
+        // A finished or never-executed run stays in the Dashboard; a new visit does not put it back on the Canvas. P0 hotfix (execution
+        // continuity): when the Canvas this browser remembered is exactly that run's workflow, its final result is shown again (observation only).
+        if (!publicRunInProgress(recovered) && tabRun() !== id && !sameWorkflow(workflowRef.current, recovered.workflow)) return;
         // Recover the canonical workflow only over the untouched initial template.
         // Recovery remains observation-only until fresh simulation and owner Review.
         if (workflowRef.current === initialWorkflow.current && initialWorkflow.current.revision === 0 &&

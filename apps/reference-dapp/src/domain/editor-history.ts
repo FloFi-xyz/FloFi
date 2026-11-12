@@ -33,6 +33,8 @@ export type HistoryAction =
   | { readonly type: 'EDIT_CRYPTO_SELECTION'; readonly id: string; readonly selection: CryptoSelection; readonly context: ReviewContext; readonly beneficiary?: string }
   | { readonly type: 'RESTORE_WORKFLOW'; readonly workflow: SemanticWorkflow }
   | { readonly type: 'ADOPT_DRAFT_IDENTITY'; readonly workflowId: string }
+  /** P0 hotfix (execution continuity): the Editor's Canvas this browser remembered (`editor-persistence.ts`), put back on the untouched initial Canvas. */
+  | { readonly type: 'RESTORE_PERSISTED_CANVAS'; readonly workflowId: string; readonly workflow: SemanticWorkflow | null; readonly layout: CanvasLayout }
   /** UX-004: "Create new workflow": the empty initial draft under a fresh draft identity (no actions, drafts, layout or history). */
   | { readonly type: 'NEW_WORKFLOW'; readonly workflowId: string }
   | { readonly type: 'RESTORE_LENDING_CANVAS'; readonly workflow: SemanticWorkflow }
@@ -227,6 +229,20 @@ export function editorHistoryReducer(state: EditorHistory, action: HistoryAction
     const workflow = state.editor.workflow;
     if (workflow.revision !== 0 || workflow.workflowId === action.workflowId || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(action.workflowId)) return state;
     return { ...state, editor: { ...state.editor, workflow: freeze({ ...structuredClone(workflow), workflowId: action.workflowId }) } };
+  }
+  if (action.type === 'RESTORE_PERSISTED_CANVAS') {
+    // Only the visit's untouched initial Canvas (nothing authored, typed or undoable yet) takes what this browser remembered; the workflow is
+    // re-validated exactly as a reopened saved workflow and keeps its own identity and revision. It carries no Review or execution authority.
+    const current = state.editor.workflow;
+    if (state.actionSetup || Object.keys(state.amountInputs).length || state.past.length || current.revision !== 0 || current.nodes.length ||
+      !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(action.workflowId)) return state;
+    if (!action.workflow) return current.workflowId === action.workflowId ? state
+      : { ...state, editor: { ...state.editor, workflow: freeze({ ...structuredClone(current), workflowId: action.workflowId }) } };
+    try {
+      const workflow = validateSavedWorkflow(action.workflow);
+      if (workflow.workflowId !== action.workflowId) return state;
+      return { ...initialEditorHistory(), editor: { workflow: freeze(structuredClone(workflow)), error: null }, layout: action.layout };
+    } catch { return state; }
   }
   if (action.type === 'NEW_WORKFLOW') {
     if (!/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(action.workflowId)) return state;

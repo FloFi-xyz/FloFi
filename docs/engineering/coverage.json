@@ -3862,7 +3862,8 @@
         "apps/reference-dapp/src/domain/wallet-portfolio.ts",
         "apps/reference-dapp/src/domain/node-declaration.ts",
         "apps/reference-dapp/src/domain/sequence-restore.ts",
-        "apps/reference-dapp/src/domain/editor-run.ts"
+        "apps/reference-dapp/src/domain/editor-run.ts",
+        "apps/reference-dapp/src/domain/editor-persistence.ts"
       ],
       "suites": [
         "action-registry.engineering-regression",
