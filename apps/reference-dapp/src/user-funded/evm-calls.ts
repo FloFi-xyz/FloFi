@@ -23,6 +23,9 @@
  *   transfer  ERC20.transfer(recipient, amount) or a native value transfer to the recipient the owner authored (or the owner itself); an ERC-20
  *             only of a token a batched swap may spend (never a Stock Token), verified on chain the same way first; a native value transfer
  *             only to the owner or to a recipient without code (read first; the owner-signed native transfer's EOA rule)
+ *   bridge    P0 hotfix (E1): [approve(SpokePool, amount)] · SpokePool.deposit(OWNER → OWNER, input → output) of a certified Router MAINNET pair
+ *             (same asset both sides), from a fresh Across quote under the Router's own checks (`bridge-calls.ts`); it closes its group, and the
+ *             run waits for its verified delivery on the destination chain (`bridge-delivery.ts`)
  *
  * A wallet batch expires on chain at the preparation's validity (`deadline`): through each swap's own SwapRouter02 deadline, else through a
  * DEADLINE_GUARD as its first call.
@@ -40,6 +43,7 @@ import type { ChainTransport } from '../delegation/chains.ts';
 import { delegationAavePool, delegationAaveReserve, delegationSwapProfile } from '../delegation/profiles.ts';
 import { assetKey, type StepRequirement, type WorkflowRequirement } from '../delegation/steps.ts';
 import { quoteExactInputSingle } from '../delegation/workflow-grants.ts';
+import { acrossDepositCalldata, bridgeRouteKey, bridgeStepRefusal, buildAcrossDeposit, type AcrossDepositUserCall, type AcrossRoutes } from './bridge-calls.ts';
 
 const NATIVE = '0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee';
 const EVM_ADDRESS = /^0x[0-9a-f]{40}$/;
@@ -74,7 +78,9 @@ export type UserCall =
    * counts the batch as no longer executable (`groupInFlight`) and may be ended or run again, so a transfer executed later would never be
    * reconciled and could pay its recipient twice. It belongs to no step and moves no asset.
    */
-  | { readonly kind: 'DEADLINE_GUARD'; readonly router: string; readonly deadline: string };
+  | { readonly kind: 'DEADLINE_GUARD'; readonly router: string; readonly deadline: string }
+  /** P0 hotfix (E1): a certified Router bridge's Across deposit (`bridge-calls.ts`); the owner is depositor and recipient, its delivery is reconciled. */
+  | AcrossDepositUserCall;
 export type AssetAmountFact = { readonly asset: string; readonly amount: string };
 /** One step of a group: its calls (indices), what it spends exactly, and its guaranteed / quoted output (when it produces one). */
 export type GroupStepCalls = { readonly stepIndex: number; readonly calls: readonly number[]; readonly spend: AssetAmountFact;
@@ -100,6 +106,8 @@ export function evmCallsOf(group: EvmGroupCalls): erc7710.Call[] {
       // multicall(uint256 deadline, bytes[] data) with an empty data array.
       return { target: c.router, value: 0n, data: '0x5ae401dc' + BigInt(c.deadline).toString(16).padStart(64, '0') + (64n).toString(16).padStart(64, '0') + '0'.repeat(64) };
     }
+    // The Across deposit's exact calldata, decoded and re-checked against what the batch recorded (depositor and recipient: the owner).
+    if (c.kind === 'ACROSS_DEPOSIT') return { target: c.spokePool, value: 0n, data: acrossDepositCalldata(c, group.owner) };
     if (c.kind !== 'UNISWAP_V3_EXACT_INPUT_SINGLE' || c.deadline === undefined) return erc7710.workflowCallData(callOf(c), group.owner);
     // The same exactInputSingle (the owner as recipient, the signed minimum), inside SwapRouter02's deadline-checked multicall.
     if (![100, 500, 3000, 10000].includes(c.fee) || !/^[1-9][0-9]{0,15}$/.test(c.deadline)) throw new Error('USER_FUNDED_CALL_INVALID');
@@ -116,7 +124,7 @@ export function callOf(c: UserCall): erc7710.WorkflowCall {
     case 'AAVE_V3_SUPPLY': case 'AAVE_V3_BORROW': case 'AAVE_V3_REPAY': case 'AAVE_V3_WITHDRAW': return { kind: c.kind, pool: c.pool, asset: c.asset, amount: BigInt(c.amount) };
     case 'ERC20_TRANSFER': return { kind: c.kind, token: c.token, to: c.to, amount: BigInt(c.amount) };
     case 'NATIVE_TRANSFER': return { kind: c.kind, to: c.to, amount: BigInt(c.amount) };
-    case 'DEADLINE_GUARD': throw new Error('USER_FUNDED_CALL_INVALID');
+    case 'DEADLINE_GUARD': case 'ACROSS_DEPOSIT': throw new Error('USER_FUNDED_CALL_INVALID');
   }
 }
 
@@ -244,11 +252,13 @@ export function userFundedNeed(step: StepRequirement, chains: readonly string[])
  * that would only fail when the owner presses Authorize (slippage above the batch limit, an Aave beneficiary that is not the run's own wallet,
  * a borrow funded by another step). `owner`: the run's EVM wallet when known.
  */
-export function evmStepBuildable(step: StepRequirement, chains: readonly string[], owner?: string | null): string | null {
+export function evmStepBuildable(step: StepRequirement, chains: readonly string[], owner?: string | null, bridgeRoutes?: readonly string[]): string | null {
   if (step.namespace !== 'eip155') return 'USER_FUNDED_NAMESPACE_INVALID';
   if (!chains.includes(step.chain)) return 'USER_FUNDED_CHAIN_DISABLED';
   if (step.inputs.length !== 1) return 'USER_FUNDED_STEP_SHAPE_UNSUPPORTED';
   if (step.action === 'transfer') return transferAssetRefusal(step, chains);
+  // P0 hotfix (E1): only a certified Router pair of this deployment's batchable routes, paying the owner (`bridge-calls.ts`).
+  if (step.action === 'bridge') return bridgeStepRefusal(step, chains, owner, bridgeRoutes);
   if (step.action === 'swap' || step.action === 'supply' || step.action === 'borrow' || step.action === 'repay' || step.action === 'withdraw') {
     const c = userFundedNeed(step, chains);
     if (!c.ok) return c.code;
@@ -276,7 +286,11 @@ type Deps = { readonly chains: readonly string[]; readonly owner: string; readon
   /** Outputs guaranteed before this group (a bridge's signed minimum delivery on this chain), by producer step index. */
   readonly guaranteed?: ReadonlyMap<number, AssetAmountFact>;
   /** Wallet batches: the unix second after which the batch is refused on chain (the preparation's validity): each swap's deadline, else a guard. */
-  readonly deadline?: number };
+  readonly deadline?: number;
+  /** P0 hotfix (E1): the deployment's Across routes of certified Router pairs (absent: a bridge step is never built into a batch). */
+  readonly across?: AcrossRoutes;
+  /** The clock a bridge quote is requested at (milliseconds; default: now). */
+  readonly nowMs?: number };
 
 /**
  * The exact calls of steps `from..to` (one chain) for the owner's own account. Fresh quotes; a swap's minimum is quote × (1 − slippage),
@@ -356,7 +370,9 @@ export async function buildEvmGroupCalls(requirement: WorkflowRequirement, from:
   };
   for (const step of steps) {
     const refuse = (code: string) => ({ ok: false as const, stepIndex: step.index, code });
-    const problem = evmStepBuildable(step, deps.chains);
+    // A bridge is buildable only for the owner itself, on a route this deployment can quote (the planner's own rule, checked again here).
+    const routes = step.action === 'bridge' && step.destinationChain && deps.across?.(step.chain, step.destinationChain) ? [bridgeRouteKey(step.chain, step.destinationChain)] : [];
+    const problem = step.action === 'bridge' ? evmStepBuildable(step, deps.chains, owner, routes) : evmStepBuildable(step, deps.chains);
     if (problem) return refuse(problem);
     const input = step.inputs[0]!;
     const inKey = assetKey(input);
@@ -391,6 +407,26 @@ export async function buildEvmGroupCalls(requirement: WorkflowRequirement, from:
       }
       const indices = push(native ? { kind: 'NATIVE_TRANSFER', to: recipient, amount: amount.toString() } : { kind: 'ERC20_TRANSFER', token: input.address, to: recipient, amount: amount.toString() });
       out.push({ stepIndex: step.index, calls: indices, spend, guaranteed: recipient === owner ? spend : null, quoted: null, recipient });
+      continue;
+    }
+    if (step.action === 'bridge') {
+      // P0 hotfix (E1): the Across deposit from a fresh quote for exactly what this batch spends; never in a user operation (signed upfront and
+      // relayed later, its quote and fill deadline would be stale): a bridge group is a wallet batch, prepared and signed when due.
+      if (deps.deadline === undefined) return refuse('USER_OPERATION_BRIDGE_SIGNED_WHEN_DUE');
+      const across = deps.across?.(step.chain, step.destinationChain!) ?? null, t = deps.transport(step.chain), dt = deps.transport(step.destinationChain!);
+      if (!across) return refuse('USER_FUNDED_ACTION_NOT_BUILDABLE:BRIDGE');
+      if (!t || !dt) return refuse('USER_FUNDED_RPC_UNAVAILABLE');
+      const built = await buildAcrossDeposit({ step, owner, amount, deadline: deps.deadline, nowMs: deps.nowMs ?? Date.now(), route: across, source: t, destination: dt });
+      if (!built.ok) return refuse(built.code);
+      // An exact approval to the pinned SpokePool only when the owner's allowance, after this batch's earlier calls, does not cover the input.
+      let approvals: UserCall[];
+      try { approvals = await approvalsFor(built.call.inputToken, built.call.spokePool, amount); }
+      catch (cause) { return refuse(cause instanceof Error && /^[A-Z][A-Z0-9_]{2,80}$/.test(cause.message) ? cause.message : 'USER_FUNDED_RPC_UNAVAILABLE'); }
+      const indices = push(...approvals, built.call);
+      // What arrives on the destination chain: the deposit's exact output (Across fills exactly it, or the deposit is refunded on the source).
+      const delivered = { asset: assetKey({ chain: built.call.destinationChain, address: built.call.outputToken }), amount: built.call.outputAmount };
+      out.push({ stepIndex: step.index, calls: indices, spend, guaranteed: delivered, quoted: delivered, recipient: owner });
+      if (calls.length > erc7710.WORKFLOW_GRANT_MAX_CALLS) return refuse('USER_FUNDED_GROUP_TOO_MANY_CALLS');
       continue;
     }
     const c = userFundedNeed(step, deps.chains);
@@ -510,4 +546,5 @@ export async function buildEvmGroupCalls(requirement: WorkflowRequirement, from:
 /** Conservative per-call gas for review-time fee estimates when a call depends on an earlier one in the same batch (never sent as limits). */
 export const DEPENDENT_CALL_GAS: Readonly<Record<UserCall['kind'], bigint>> = Object.freeze({
   ERC20_APPROVE: 60_000n, UNISWAP_V3_EXACT_INPUT_SINGLE: 220_000n, AAVE_V3_SUPPLY: 320_000n, AAVE_V3_BORROW: 420_000n, AAVE_V3_REPAY: 320_000n, AAVE_V3_WITHDRAW: 380_000n, DEADLINE_GUARD: 30_000n, ERC20_TRANSFER: 70_000n, NATIVE_TRANSFER: 25_000n,
+  ACROSS_DEPOSIT: 200_000n,
 });
