@@ -8,7 +8,7 @@ import { LANGUAGE_COOKIE, parseLanguage, resolveLanguage, type Language, type Re
  * actions all read the language through this one function, so a page, its server-rendered parts and its actions never disagree.
  */
 export async function requestLanguage(): Promise<ResolvedLanguage> {
-  let cookie: string | undefined, pathname: string | null = null;
+  let cookie: string | undefined, pathname: string | null;
   // Outside a request (an open-mode action called by a script or a test) there is no preference: the general default.
   try { cookie = (await cookies()).get(LANGUAGE_COOKIE)?.value; } catch { cookie = undefined; }
   try { pathname = (await headers()).get('x-flofi-pathname'); } catch { pathname = null; }

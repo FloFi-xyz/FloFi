@@ -18,7 +18,7 @@ export function rememberLanguage(language: Language) {
  * a legacy stored value was already migrated before the first paint by the root layout's script.
  */
 export function alignStoredLanguage() {
-  let chosen: Language | null = null;
+  let chosen: Language | null;
   try { chosen = cookieLanguage(document.cookie); } catch { return; }
   if (!chosen) return;
   try { if (localStorage.getItem(LANGUAGE_KEY) !== chosen) localStorage.setItem(LANGUAGE_KEY, chosen); } catch { /* Optional mirror. */ }
