@@ -1290,7 +1290,8 @@
         "apps/reference-dapp/src/wallet/flofi-wallet-sync.ts",
         "packages/cloud-runtime/migrations/0018_flofi_accounts.sql",
         "packages/cloud-runtime/migrations/0019_privy_accounts.sql",
-        "apps/reference-dapp/src/server/session-cookie.ts"
+        "apps/reference-dapp/src/server/session-cookie.ts",
+        "apps/reference-dapp/src/accounts/page-exit.ts"
       ],
       "suites": [
         "app.accounts.account-csp",
@@ -4070,7 +4071,12 @@
         "apps/reference-dapp/src/flight/app-boarding.tsx",
         "apps/reference-dapp/src/flight/card-assets.ts",
         "apps/reference-dapp/src/flight/card-image.tsx",
-        "apps/reference-dapp/src/i18n/pt-flight.ts"
+        "apps/reference-dapp/src/i18n/pt-flight.ts",
+        "apps/reference-dapp/src/app/board/flight-document.css",
+        "apps/reference-dapp/src/components/flight/board-frame.tsx",
+        "apps/reference-dapp/src/components/flight/flight-transition.module.css",
+        "apps/reference-dapp/src/components/flight/flight-transition.tsx",
+        "apps/reference-dapp/src/flight/board-arrival.ts"
       ],
       "suites": [
         "app.flight.campaign",
@@ -7228,7 +7234,8 @@
         "apps/reference-dapp/src/flight/beta-context.ts",
         "apps/reference-dapp/src/server/flight-access.ts",
         "apps/reference-dapp/src/app/flight-wallet-action.ts",
-        "apps/reference-dapp/src/server/execution-guard.ts"
+        "apps/reference-dapp/src/server/execution-guard.ts",
+        "apps/reference-dapp/src/server/flight-gate.ts"
       ],
       "suites": [
         "app.flight.beta-access",

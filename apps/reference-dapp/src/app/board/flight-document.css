@@ -1,0 +1,8 @@
+/* SPDX-License-Identifier: AGPL-3.0-only */
+/* P0 hotfix (Flight transition): while a Flight page ([data-flight-page]: /board and its access page) is the page, it owns the document:
+   its canvas, colour, type and colour scheme are its own, whatever an earlier page left loaded or set on <html> (the product's global CSS
+   and its html[data-theme]) and whatever the system theme is, so the board looks the same in light and dark. Global (it styles <html> and
+   <body>), and inert on every other page: each rule applies only while a Flight page is in the document. */
+html:has([data-flight-page]){color-scheme:light;background:#fff}
+html:has([data-flight-page]) body{margin:0;min-height:100%;background:#fff;color:#041B3D;font-family:var(--font-outfit),Outfit,system-ui,sans-serif;
+  font-size:16px;font-weight:400;line-height:normal}

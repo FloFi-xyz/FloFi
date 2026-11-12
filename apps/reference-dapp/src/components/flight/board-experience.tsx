@@ -14,8 +14,10 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, typ
 import Link from 'next/link';
 import { FLIGHT_BOARDING_KEY, FLIGHT_DRAFT_KEY, FLIGHT_RETURN_KEY } from '../../flight/app-boarding';
 import type { FlightState } from '../../flight/http';
+import { boardOutcome } from '../../flight/board-arrival';
 import { INVITE_CODE, type FlightAccess } from '../../flight/campaign';
 import type { FlightPass, OwnInvite } from '../../flight/store';
+import { useBoardChecking } from './board-frame';
 import { faceOf, Flaps, FoundingPass, PassengerPass } from './boarding-pass';
 import { boardingDay, brtClock as clockOf, FLIGHT_COPY, type FlightCopy } from './flight-copy';
 import styles from './flight.module.css';
@@ -291,7 +293,8 @@ function PassPanel({ pass, invites, copy, onPass }: { pass: FlightPass; invites:
           <label className={styles.check}><input type="checkbox" checked={visible} onChange={e => setVisible(e.target.checked)}/>{t.handlePublic}</label>
           <div className={styles.ctaRow}>
             <button className={`${styles.btn} ${styles.btnBlue}`} type="submit">{t.save}</button>
-            <Link className={`${styles.btn} ${styles.btnBlue}`} href="/app">{t.open}</Link>
+            {/* A full navigation (P0 hotfix, Flight transition): /app loads as its own document, never inside the board's. */}
+            <a className={`${styles.btn} ${styles.btnBlue}`} href="/app">{t.open}</a>
           </div>
           <p role="status" className={message ? styles.muted : styles.srOnly}>{message ?? ''}</p>
         </form>
@@ -359,38 +362,40 @@ export function BoardExperience({ initial, language }: { initial: FlightState | 
     store?.setItem(FLIGHT_BOARDING_KEY, '1');
     window.location.assign('/app');
   }, []);
+  // P0 hotfix (Flight transition): the check runs under FloFi's branded checking state (src/components/flight/board-frame.tsx). It stays on
+  // screen while the browser leaves for /app or sign-in (full navigations), and the board comes back only when the person stays here.
+  const checking = useBoardChecking();
   const checkAccess = useCallback(async () => {
-    setBusy(true); setMessage(copy.boarding.checking);
-    const answer = await post('/api/board/board', {});
-    setBusy(false); setMessage(null);
-    if (answer.code === 'FLIGHT_SIGN_IN_REQUIRED') {
+    setBusy(true); setMessage(null); checking(true);
+    const outcome = boardOutcome(await post('/api/board/board', {}));
+    setBusy(false);
+    if (outcome.kind === 'SIGN_IN') {
       storage()?.setItem(FLIGHT_RETURN_KEY, BOARD_RETURN);
       window.location.assign(`/login?returnTo=${encodeURIComponent(BOARD_RETURN)}`);
       return;
     }
-    const flight = answer.flight as { access: FlightAccess } | undefined;
-    if (!answer.ok) {
-      if (flight?.access.kind === 'batch_closed' || flight?.access.kind === 'not_listed') setPersonal(flight.access);
-      else setMessage(errorText(copy, answer.code));
-      return;
-    }
-    if (!flight) return;
-    if (answer.access) setMessage(errorText(copy, `ACCESS_${String(answer.access)}`));
-    if (flight.access.kind === 'eligible') goToApp();
-    else if (flight.access.kind === 'boarded') { await refresh(); setFocusPass(true); }
-    else setPersonal(flight.access);
-  }, [copy, goToApp, refresh]);
+    if (outcome.kind === 'APP') { goToApp(); return; }
+    if (outcome.kind === 'REFUSED') setMessage(errorText(copy, outcome.code));
+    else if (outcome.kind !== 'NONE' && outcome.notice) setMessage(errorText(copy, outcome.notice));
+    if (outcome.kind === 'PASS') await refresh();
+    checking(false);
+    if (outcome.kind === 'PASS') setFocusPass(true);
+    else if (outcome.kind === 'PERSONAL') setPersonal(outcome.access);
+  }, [checking, copy, goToApp, refresh]);
 
   // Back from sign-in ("Board now" or an invite): continue where the person was, once.
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
+    // The server opened the page on the checking state only for an arrival that is checked here (boardArrivalChecks); any other page shows the board.
+    const checks = params.has('board') && !params.has('invite') && initial?.phase === 'BOARDING';
+    if (!checks) checking(false);
     if (!params.has('board') && !params.has('invite')) return;
     window.history.replaceState(null, '', '/board');
     storage()?.removeItem(FLIGHT_RETURN_KEY);
     if (params.has('invite')) setShowInvite(true);
     // A link/code proved access before sign-in: continue through the existing Privy login and return here. The pending HttpOnly
     // proof stays server-checked and binds only on checkAccess's explicit Board now request after authentication.
-    else if (initial?.phase === 'BOARDING') void checkAccess();
+    else if (checks) void checkAccess();
   }, []); // Only on arrival.
 
   const board = (event: FormEvent) => {

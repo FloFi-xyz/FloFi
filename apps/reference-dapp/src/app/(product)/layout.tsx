@@ -5,6 +5,8 @@ import { cookies, headers } from 'next/headers';
 import { connection } from 'next/server';
 import { redirect } from 'next/navigation';
 import { requireFlightAccess } from '../../server/flight-access';
+import { flightGateOutcome, flightGateResponse, flightRequestKind, type FlightGateOutcome } from '../../server/flight-gate';
+import { FlightGateScreen } from '../../components/flight/flight-transition';
 import { engineeringUiAllowed } from '../../server/engineering-ui';
 import { networkScope } from '../../server/network-scope';
 import { copilotConfig } from '../../server/copilot-service';
@@ -34,7 +36,16 @@ import '../approved-ux-pages.css';
  */
 export default async function ProductLayout({ children }: { children: ReactNode }) {
   await connection();
-  try { await requireFlightAccess(); } catch { redirect('/board'); }
+  // P0 hotfix (Flight transition, src/server/flight-gate.ts): a refusal leaves for /board (an HTTP redirect for a document, else a full-page
+  // hand-off, never a client navigation that would draw /board inside this product document); a failure to check access shows "Try again",
+  // never /board. Either way nothing of the workspace renders and none of its data is read.
+  let refused: FlightGateOutcome | null = null;
+  try { await requireFlightAccess(); } catch (error) { refused = flightGateOutcome(error); }
+  if (refused) {
+    const response = flightGateResponse(refused, flightRequestKind(await headers()));
+    if (response === 'REDIRECT') redirect('/board');
+    return <FlightGateScreen response={response}/>;
+  }
   const initialWorkflowId = `workflow-${randomUUID()}`;
   const jar = await cookies();
   const configured = copilotConfig(process.env).mode;
