@@ -553,6 +553,9 @@ export function useFlofiConversation({ owner, epoch, bridge, direct, interfaceLa
     const issue = bindingIssue(open.open.binding, bridge);
     if (!issue) return;
     setQuestion(null);
+    // P0 hotfix (execution continuity): the owner already authorized this Review in Execute and its run started, or the whole workflow completed:
+    // the question was answered by that action. It closes quietly — never a "no longer valid / review again" message about a step that ran.
+    if (bridge.sequence?.finished || bridge.authorization.accepted && currentExecution(bridge.progress)?.started) return;
     flofi(session.current, open.language, conversationCopy(open.language).invalidated[issue], { options: [conversationCopy(open.language).review] });
   });
   // Execution follow-up: each phase of the durable record once, and the next wallet request only as its own explicit question.
