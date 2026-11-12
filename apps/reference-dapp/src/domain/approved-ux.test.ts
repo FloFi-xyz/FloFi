@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { describe, expect, it } from 'vitest';
-import { blockerExplanation, countdown, feeShortfallView, isExplainRequest, nativeAmount, nativeBalance, networkQuestionPending, simulateFooterStatus, walletRequestView } from './approved-ux';
+import { blockerExplanation, countdown, feeShortfallView, isExplainRequest, nativeAmount, nativeBalance, networkQuestionPending, simulateFooterStatus, walletRequestView, flightSignerFor, recordNeedsAttention, flightRefusalPlacement } from './approved-ux';
 import type { NativeFeeShortfall } from '../user-funded/groups';
 import { translate } from '../i18n/locale';
 import { firstPlaceholder } from './build-entry';
@@ -102,5 +102,29 @@ describe('walletRequestView (board 08)', () => {
     const guarded = { ...review(), groups: [{ index: 0, steps: [0, 0] as [number, number], calls: [{ kind: 'DEADLINE_GUARD', step: -1 }] }] };
     expect(walletRequestView(guarded, null)?.items).toEqual([{ text: 'Expiry check: the request is refused after its deadline', parameters: [] }]);
     expect(walletRequestView({ ...review(), groups: [] }, null)).toBeNull();
+  });
+});
+
+describe('Flight preflight decisions (P0 Track A)', () => {
+  const wallets = { evm: '0xevm', solana: 'SoLana', fallback: '0xbinding' };
+  it('checks the signer of the step being simulated, by its chain family', () => {
+    expect(flightSignerFor('eip155:42161', wallets)).toBe('0xevm');
+    expect(flightSignerFor('solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp', wallets)).toBe('SoLana');
+    expect(flightSignerFor(null, wallets)).toBe('0xbinding');
+    expect(flightSignerFor('eip155:8453', { ...wallets, evm: null })).toBeNull();
+  });
+  it('a record keeps its own words only when it needs attention', () => {
+    expect(recordNeedsAttention(null)).toBe(false);
+    expect(recordNeedsAttention({ phase: 'SIMULATED' })).toBe(false);
+    expect(recordNeedsAttention({ verdict: 'FAILED' })).toBe(true);
+    expect(recordNeedsAttention({ status: 'RECOVERY_REQUIRED' })).toBe(true);
+  });
+  it('a refusal is never swallowed: the blocker before anything ran, else a notice beside the run', () => {
+    const base = { applies: true, busy: false, recoveryOnly: false, recordAttention: false, executionStarted: false };
+    expect(flightRefusalPlacement(base)).toBe('SOURCE');
+    expect(flightRefusalPlacement({ ...base, busy: true })).toBeNull();
+    for (const notice of [{ executionStarted: true }, { recoveryOnly: true }, { recordAttention: true }])
+      expect(flightRefusalPlacement({ ...base, ...notice })).toBe('NOTICE');
+    expect(flightRefusalPlacement({ ...base, applies: false, executionStarted: true })).toBeNull();
   });
 });

@@ -72,7 +72,7 @@ import { SummaryBar } from './summary-bar';
 import type { SimulationSource } from '../domain/simulation-presentation';
 import { SimulateWorkspace } from './simulate-workspace';
 import { ReviewSummaryPanel } from './review-summary-panel';
-import { networkQuestionPending } from '../domain/approved-ux';
+import { networkQuestionPending, flightRefusalPlacement, flightSignerFor, recordNeedsAttention } from '../domain/approved-ux';
 import { projectSimulation, simulationStatusPresentation } from '../domain/simulation-presentation';
 import { SigningSurface } from './signing-surface';
 import { TopBar, type ProductSection } from './top-bar';
@@ -332,7 +332,7 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
   // The wallet checked is the signer of the step being simulated, by its chain family (a mixed EVM/Solana workflow's EVM step is signed by the EVM
   // wallet even when the whole workflow's wallet kind is Solana) — the owner that step's flow call names.
   const stepChain = runtimeWorkflow.nodes[0]?.chainId ?? null;
-  const flightSigner = stepChain?.startsWith('solana:') ? solanaSession?.account.address ?? null : stepChain ? connectedWallet.account ?? null : reviewBinding.wallet.account;
+  const flightSigner = flightSignerFor(stepChain, { evm: connectedWallet.account ?? null, solana: solanaSession?.account.address ?? null, fallback: reviewBinding.wallet.account });
   const [flightBlock, setFlightBlock] = useState<{ readonly owner: string; readonly code: string; readonly workflowId: string } | null>(null);
   const executionProgress = useExecutionLifecycle(simulationSource.kind, reviewBinding.wallet);
   const recordedStart = useExecutionStart(simulationSource.kind, reviewBinding.wallet);
@@ -342,14 +342,11 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
   const flightHere = Boolean(flightBlock && flightSigner && flightBlock.owner.toLowerCase() === flightSigner.toLowerCase() && flightBlock.workflowId === state.workflow.workflowId);
   // Only evidence that something ran, may have run, or a record that needs attention keeps the run's own words. A simulation-only record or run
   // (nothing sent) is replaced by the refusal: the previous simulation is never presented as this request's result.
-  const record = sourceState.record as { readonly verdict?: string; readonly status?: string } | null | undefined;
-  const recordAttention = Boolean(record && (['DIVERGENT', 'FAILED', 'INCONCLUSIVE', 'NOT_EXECUTED', 'REFUNDED'].includes(record.verdict ?? '')
-    || ['FAILED', 'RECOVERY_REQUIRED', 'PAUSED', 'PARTIALLY_COMPLETED'].includes(record.status ?? '')));
-  const runOwnState = Boolean(sourceState.recoveryOnly || recordAttention || executionStart.started || currentExecution(executionProgress));
-  if (flightHere && !sourceState.busy && !runOwnState)
-    simulationSource = { ...simulationSource, state: { ...simulationSource.state, error: flightBlock!.code } } as SimulationSource;
+  const flightPlacement = flightRefusalPlacement({ applies: flightHere, busy: Boolean(sourceState.busy), recoveryOnly: Boolean(sourceState.recoveryOnly),
+    recordAttention: recordNeedsAttention(sourceState.record), executionStarted: executionStart.started || Boolean(currentExecution(executionProgress)) });
+  if (flightPlacement === 'SOURCE') simulationSource = { ...simulationSource, state: { ...simulationSource.state, error: flightBlock!.code } } as SimulationSource;
   // Where the run keeps its own words, the refusal is still said — never swallowed — as a notice that keeps what was already sent tracked.
-  const flightNotice = flightHere && runOwnState ? flightRefusal(flightBlock!.code) : null;
+  const flightNotice = flightPlacement === 'NOTICE' ? flightRefusal(flightBlock!.code) : null;
   const [restoredBinding, setRestoredBinding] = useState({ epoch: restorationEpoch, key: null as string | null });
   if (restoredBinding.epoch !== restorationEpoch) setRestoredBinding({ epoch: restorationEpoch, key: reviewBinding.authorization.key });
   if (restorationEpoch > 0 && (restoredBinding.epoch !== restorationEpoch || restoredBinding.key === reviewBinding.authorization.key))

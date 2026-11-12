@@ -149,3 +149,29 @@ export function walletRequestView(review: ReviewShape, run: RunShape | null): Wa
     : review.steps.filter(step => steps[0] <= step.index && step.index <= steps[1]).map(step => ({ text: 'Step {0}: {1}', parameters: [String(step.index + 1), step.action] }));
   return { request, of: review.counts.atLeast ? null : Math.max(review.counts.walletPrompts, request), calls: agrees ? reviewedCalls.length : prepared?.calls ?? null, items, itemized: agrees };
 }
+
+/**
+ * P0 Track A: the wallet the Flight preflight checks — the signer of the step being simulated, by its chain family (an EVM step of a mixed
+ * EVM/Solana workflow is signed by the EVM wallet even when the whole workflow's wallet kind is Solana). No step: the review binding's wallet.
+ */
+export function flightSignerFor(stepChain: string | null, wallets: { readonly evm: string | null; readonly solana: string | null; readonly fallback: string | null }): string | null {
+  return stepChain === null ? wallets.fallback : stepChain.startsWith('solana:') ? wallets.solana : wallets.evm;
+}
+/** A runtime record whose own words must stay visible (a result that cannot be used, or a run that needs attention). */
+export function recordNeedsAttention(record: unknown): boolean {
+  if (!record || typeof record !== 'object') return false;
+  const r = record as { readonly verdict?: unknown; readonly status?: unknown };
+  return ['DIVERGENT', 'FAILED', 'INCONCLUSIVE', 'NOT_EXECUTED', 'REFUNDED'].includes(String(r.verdict ?? ''))
+    || ['FAILED', 'RECOVERY_REQUIRED', 'PAUSED', 'PARTIALLY_COMPLETED'].includes(String(r.status ?? ''));
+}
+/**
+ * Where a Flight refusal for the current signer and workflow is said: as the simulation's own blocker ('SOURCE') while nothing of this workflow
+ * ran — a simulation-only record is replaced, never presented as this request's result — or as a notice ('NOTICE') beside a run, a recovery or
+ * a record that keeps its own words. Never swallowed; nothing while the runtime is busy.
+ */
+export function flightRefusalPlacement(input: { readonly applies: boolean; readonly busy: boolean; readonly recoveryOnly: boolean; readonly recordAttention: boolean;
+  readonly executionStarted: boolean }): 'SOURCE' | 'NOTICE' | null {
+  if (!input.applies) return null;
+  if (input.recoveryOnly || input.recordAttention || input.executionStarted) return 'NOTICE';
+  return input.busy ? null : 'SOURCE';
+}
