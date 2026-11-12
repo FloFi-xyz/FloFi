@@ -21,6 +21,6 @@ export function ExecutionIdentifier({ identifier, full = false }: { identifier: 
       {kind === 'transaction' && explorer && <a href={explorer} target="_blank" rel="noopener noreferrer">{tr("View transaction")}</a>}
       {failed && <span role="status">{tr("Copy unavailable. ")}{tr(label)}: {tr(value)}</span>}
     </div>
-    {full && identifier.status && <span className="execution-identifier-status">{tr(identifier.status)}</span>}
+    {full && identifier.status && <span className="execution-identifier-status">{tr(identifier.status, ...identifier.statusArgs ?? [])}</span>}
   </div>;
 }

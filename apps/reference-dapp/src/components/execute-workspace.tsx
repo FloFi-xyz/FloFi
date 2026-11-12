@@ -15,6 +15,8 @@ import { NetworkBrandIcon } from './brand-icon';
 import { SimulateWorkflowCanvas } from './simulate-workflow-canvas';
 import { ExecutionEvidenceDetails } from './execution-evidence-details';
 import { isFinalExecutionResult } from '../domain/execution-result';
+import { STEPS_COMPLETED, type WorkflowProgressView } from '../domain/workflow-progress';
+import { SequenceContinuationPanel, WorkflowProgressList, type SequenceContinuation } from './workflow-progress-panel';
 
 export type ExecuteWorkspaceProps = ExecutionWorkspaceState & {
   workflowName: string; backToBuild(): void; backToSimulate(): void; controls?: ExecutionControls; primaryAction?: ReactNode; progress?: ExecutionLifecycle; recovery?: ExecutionRecovery;
@@ -43,6 +45,16 @@ export type ExecuteWorkspaceProps = ExecutionWorkspaceState & {
    * details" disclosure); wallet, network and cost details are in the Dashboard.
    */
   detailsOnly?: boolean;
+  /**
+   * P0 hotfix (execution continuity): the WHOLE workflow's progress (per-step phases from durable records; "X of N steps completed" with N the
+   * workflow's steps), the same numbers the FloFi Assistant and the Dashboard show.
+   */
+  workflowProgress?: WorkflowProgressView | null;
+  /**
+   * P0 hotfix (execution continuity): a step-by-step workflow whose earlier step completed and whose next step has not started: it continues HERE
+   * (its fresh per-step confirmation inline, with `primaryAction`), never by sending the owner back to Simulate, and never as "Review required".
+   */
+  continuation?: SequenceContinuation | null;
 };
 export function ExecuteWorkspace(props: ExecuteWorkspaceProps) {
   const { t: tr } = useLocale();
@@ -61,6 +73,9 @@ export function ExecuteWorkspace(props: ExecuteWorkspaceProps) {
   const statusLabel = live ? verifying ? verificationLabel : canContinue ? continuationLabel : result?.label ?? interactionLabel ?? recovery?.label ?? live.label : requesting && !execution.started ? 'Preparing execution…' : view.label;
   const statusMessage = live ? verifying ? verificationMessage : canContinue ? continuationMessage : result?.message ?? interactionMessage ?? recovery?.message ?? live.message : view.message;
   const detailsOnly = Boolean(props.detailsOnly);
+  const progress = props.workflowProgress ?? null, continuation = !live && props.continuation ? props.continuation : null;
+  // N is the WHOLE workflow's number of steps (a sequence step's own run has one); without a workflow view the run's own count stays.
+  const progressList = progress && progress.total > 1 && !continuation ? <WorkflowProgressList progress={progress} heading={false}/> : null;
   // The actions only this summary offers: connect the execution wallet, start a new workflow (and navigation back to Build/Simulate).
   const connectWallet = execution.connect && authorization.accepted && !wallet.changed && !execution.started;
   const startNew = Boolean(result && props.startNewWorkflow && isFinalExecutionResult(live));
@@ -68,7 +83,9 @@ export function ExecuteWorkspace(props: ExecuteWorkspaceProps) {
     {connectWallet && <button type="button" disabled={Boolean(props.source.state.busy)} onClick={execution.connect}>{tr("Connect execution wallet")}</button>}
     {startNew && <button type="button" className="primary execute-new-workflow" onClick={props.startNewWorkflow}>{tr("Create new workflow")}</button>}
   </>;
-  const status = <div className={`simulation-validity simulation-tone-${verifying ? 'neutral' : result ? result.tone : live ? live.state === 'complete' ? 'ready' : live.state === 'active' ? 'neutral' : live.state === 'uncertain' ? 'attention' : 'blocked' : view.canExecute ? 'ready' : view.status === 'loading' || view.status === 'empty' ? 'neutral' : 'blocked'}`} role="status" aria-live="polite"><strong><span className="simulation-status-dot" aria-hidden="true"/>{tr(statusLabel)}</strong><p>{tr(statusMessage)}</p></div>;
+  const status = continuation ? <div className="simulation-validity simulation-tone-neutral" role="status" aria-live="polite"><strong><span className="simulation-status-dot" aria-hidden="true"/>{tr('Workflow in progress')}</strong>
+    <p>{tr('Step {0} of {1} continues here. Completed steps stay completed; nothing is sent again.', continuation.current, continuation.total)}</p></div>
+    : <div className={`simulation-validity simulation-tone-${verifying ? 'neutral' : result ? result.tone : live ? live.state === 'complete' ? 'ready' : live.state === 'active' ? 'neutral' : live.state === 'uncertain' ? 'attention' : 'blocked' : view.canExecute ? 'ready' : view.status === 'loading' || view.status === 'empty' ? 'neutral' : 'blocked'}`} role="status" aria-live="polite"><strong><span className="simulation-status-dot" aria-hidden="true"/>{tr(statusLabel)}</strong><p>{tr(statusMessage)}</p></div>;
   // What needs the owner's attention or action: the same lines in the side summary and in the chat-first status panel.
   const notices = <>
         {(requestFailed || live && props.source.state.error) && <p className="simulation-warning-blocking execution-request-error" role="status">{tr("The last request could not complete. Check the recorded status before taking another action.")}</p>}
@@ -77,11 +94,11 @@ export function ExecuteWorkspace(props: ExecuteWorkspaceProps) {
         {live?.local && live.steps.some(step => step.operations.some(operation => operation.intent)) && <p className="execution-context">{tr("Local signed-order execution · scripted settlement. No public settlement or funds are observed.")}</p>}
         {checkFailed && <p className="execution-context" role="status">{tr("Unable to check execution status. The recorded result is unchanged; no transaction was resent.")}</p>}
         {live && live.state === 'active' && live.active?.operations.some(operation => operation.state === 'waiting') && !verifying && !requesting && !recovery?.contextIssue && !view.bindingValid && <p className="execution-context" role="status">{tr(view.authorizationMessage)}</p>}
-        {!live && view.warnings.length > 0 && <ul className="simulation-warnings" aria-label={tr("Execution blockers")}>{view.warnings.map((warning, index) => <li key={index} className="simulation-warning-blocking"><span className="simulation-warning-label">{tr("Blocking")}</span>{tr(warning.message)}</li>)}</ul>}
+        {!live && !continuation && view.warnings.length > 0 && <ul className="simulation-warnings" aria-label={tr("Execution blockers")}>{view.warnings.map((warning, index) => <li key={index} className="simulation-warning-blocking"><span className="simulation-warning-label">{tr("Blocking")}</span>{tr(warning.message)}</li>)}</ul>}
         {authorization.accepted && view.prompt && !execution.started && !requesting && <section className="execute-next" aria-label={tr("Next confirmation")}><h3>{tr("What happens next")}</h3><p>{tr(view.prompt)}</p><p>{tr("Only the next authorized request starts. Further wallet confirmations remain separate.")}</p></section>}
   </>;
   const grouped = Boolean(props.groupedRun && !live);
-  const back = grouped ? <button type="button" className="simulation-back" onClick={backToBuild}>{tr('Return to the Canvas')}</button>
+  const back = grouped || continuation ? <button type="button" className="simulation-back" onClick={backToBuild}>{tr('Return to the Canvas')}</button>
     : <button type="button" className="simulation-back" onClick={result || view.status === 'empty' ? backToBuild : backToSimulate}>{tr(result ? 'Return to the Canvas' : view.status === 'empty' ? 'Create a workflow in the Editor' : view.label === 'Simulation expired' ? 'Simulate again' : 'Back to simulation')}</button>;
   const navigationNote = live && live.state !== 'complete' && live.steps.some(step => step.operations.some(operation => operation.hash || operation.intent && ['posted', 'settling', 'partial'].includes(operation.state))) && <p className="execution-context execution-navigation-note">{tr("Leaving this view does not cancel submitted requests.")}</p>;
   const executionSummary = <>
@@ -90,7 +107,7 @@ export function ExecuteWorkspace(props: ExecuteWorkspaceProps) {
         {!grouped && status}
         <dl className="simulation-summary-values">
           {result ? <>
-            <div className="execution-result-count"><dt>{tr(result.countLabel)}</dt><dd>{tr(result.completed)}{tr(" of ")}{tr(result.total)}</dd></div>
+            <div className="execution-result-count"><dt>{tr(result.countLabel)}</dt><dd>{progress ? tr(STEPS_COMPLETED, progress.completed, progress.total) : <>{tr(result.completed)}{tr(" of ")}{tr(result.total)}</>}</dd></div>
             {result.networks.length > 0 && <div><dt>{tr("Networks")}</dt><dd>{result.networks.map(network => <span key={network} className="simulation-summary-network"><NetworkBrandIcon network={network.replace(/ \(\d+\)$/, '')}/>{network}</span>)}</dd></div>}
             {wallet.account && wallet.account !== live?.evidence?.wallet && <div><dt>{tr("Connected wallet")}</dt><dd title={wallet.account}>{wallet.account.slice(0, 6)}…{wallet.account.slice(-4)}</dd></div>}
             {live?.evidence?.wallet && <div><dt>{tr("Execution wallet")}</dt><dd title={tr(live.evidence.wallet)}>{tr(live.evidence.wallet.slice(0, 6))}…{tr(live.evidence.wallet.slice(-4))}</dd></div>}
@@ -102,14 +119,15 @@ export function ExecuteWorkspace(props: ExecuteWorkspaceProps) {
           {live?.evidence?.wallet && live.evidence.wallet !== wallet.account && <div><dt>{tr("Execution wallet")}</dt><dd title={tr(live.evidence.wallet)}>{tr(live.evidence.wallet.slice(0, 6))}…{tr(live.evidence.wallet.slice(-4))}</dd></div>}
           <div><dt>{tr("Network")}</dt><dd>{wallet.chain ? <span className="simulation-summary-network"><NetworkBrandIcon network={shellChainLabel(wallet.chain).replace(/ \(\d+\)$/, '')}/>{tr(shellChainLabel(wallet.chain))}</span> : '—'}</dd></div>
           <div><dt>{tr("Environment")}</dt><dd>{tr(wallet.environment === 'unknown' ? 'Unknown network' : walletEnvironmentLabel(wallet.environment))}</dd></div>
-          <div><dt>{tr("Actions")}</dt><dd>{tr(live ? `${live.completed} of ${live.steps.length} completed` : view.steps.length)}</dd></div>
+          <div><dt>{tr("Actions")}</dt><dd>{progress && (live || continuation) ? tr(STEPS_COMPLETED, progress.completed, progress.total) : tr(live ? `${live.completed} of ${live.steps.length} completed` : view.steps.length)}</dd></div>
           </>}
           {providers.length > 0 && <div><dt>{tr("Providers")}</dt><dd>{tr(providers.join(' · '))}</dd></div>}
-          {!live && !grouped && <div><dt>{tr("Authorization")}</dt><dd className={['Review required again', 'Approval required', 'Expired'].includes(view.authorizationLabel) ? 'execution-authorization-attention' : undefined}>{tr(view.authorizationLabel)}</dd></div>}
+          {!live && !grouped && !continuation && <div><dt>{tr("Authorization")}</dt><dd className={['Review required again', 'Approval required', 'Expired'].includes(view.authorizationLabel) ? 'execution-authorization-attention' : undefined}>{tr(view.authorizationLabel)}</dd></div>}
         </dl>
         {live?.active && <section className="execute-next" aria-label={tr("Current step")}><h3>{tr(result ? 'Needs attention' : 'Current step')}</h3><p>{tr(live.active.number)}. {tr(live.active.action)}</p><p>{tr([live.active.provider, live.active.network].filter(Boolean).join(' · '))}</p><p>{tr(live.active.label)}</p></section>}
+        {progressList}
         {!grouped && notices}
-        {!live && props.workflowRun}
+        {!live && !continuation && props.workflowRun}
         <div className="execute-actions simulation-workspace-actions">
           {stageActions}
           {back}
@@ -121,11 +139,14 @@ export function ExecuteWorkspace(props: ExecuteWorkspaceProps) {
   // network, provider and cost lines of the side summary and the run's technical evidence are in the Dashboard, never duplicated here.
   const statusPanel = <section className={`execution-summary execution-status-panel panel${result ? ' execution-result-summary' : ''}`} aria-label={tr(result ? 'Execution result' : 'Execution status')}>
     {!grouped && status}
-    {!live && !grouped && ['Review required again', 'Approval required', 'Expired'].includes(view.authorizationLabel) && <p className="execution-context execution-authorization-attention" role="status">{tr('Authorization')}: {tr(view.authorizationLabel)}</p>}
-    {live && <p className="execution-status-progress">{result ? <>{tr(result.countLabel)} · <span className="numeric">{tr(result.completed)}{tr(" of ")}{tr(result.total)}</span></>
+    {!live && !grouped && !continuation && ['Review required again', 'Approval required', 'Expired'].includes(view.authorizationLabel) && <p className="execution-context execution-authorization-attention" role="status">{tr('Authorization')}: {tr(view.authorizationLabel)}</p>}
+    {live && <p className="execution-status-progress">{progress ? tr(STEPS_COMPLETED, progress.completed, progress.total)
+      : result ? <>{tr(result.countLabel)} · <span className="numeric">{tr(result.completed)}{tr(" of ")}{tr(result.total)}</span></>
       : tr('{0} of {1} steps confirmed', live.completed, live.steps.length)}</p>}
+    {continuation && progress && <p className="execution-status-progress">{tr(STEPS_COMPLETED, progress.completed, progress.total)}</p>}
+    {progressList}
     {!grouped && notices}
-    {!live && props.workflowRun}
+    {!live && !continuation && props.workflowRun}
     <div className="execute-actions simulation-workspace-actions execution-status-actions">
       {stageActions}
       {back}
@@ -135,12 +156,13 @@ export function ExecuteWorkspace(props: ExecuteWorkspaceProps) {
   </section>;
   return <section className="execute-workspace" aria-label={tr("Workflow execution workspace")}>
     <div className={`execute-workspace-grid${detailsOnly ? ' stage-grid-single' : ''}`}>
-      {live ? <ExecutionTimeline progress={live} result={result} workflowName={workflowName} backToBuild={backToBuild} checkingOperation={verifying && !recovery?.recordOnly ? recovery?.operationId ?? null : null} primaryAction={props.primaryAction ?? <><button type="button" className="simulation-back" onClick={backToBuild}>{tr("Back to the Canvas")}</button><CanvasLifecycleAction {...props} controls={controls}/></>}/> : <SimulateWorkflowCanvas workflowName={workflowName} stage="execute" dock={detailsOnly ? statusPanel : undefined} dockLabel={null} primaryAction={props.primaryAction ?? <><button type="button" className="simulation-back" onClick={backToBuild}>{tr("Back to the Canvas")}</button><CanvasLifecycleAction {...props} controls={controls}/></>}/>}
+      {!live && continuation ? <SequenceContinuationPanel continuation={continuation} progress={progress} action={props.primaryAction ?? <CanvasLifecycleAction {...props} controls={controls}/>}/>
+        : live ? <ExecutionTimeline progress={live} result={result} workflowName={workflowName} backToBuild={backToBuild} checkingOperation={verifying && !recovery?.recordOnly ? recovery?.operationId ?? null : null} primaryAction={props.primaryAction ?? <><button type="button" className="simulation-back" onClick={backToBuild}>{tr("Back to the Canvas")}</button><CanvasLifecycleAction {...props} controls={controls}/></>}/> : <SimulateWorkflowCanvas workflowName={workflowName} stage="execute" dock={detailsOnly ? statusPanel : undefined} dockLabel={null} primaryAction={props.primaryAction ?? <><button type="button" className="simulation-back" onClick={backToBuild}>{tr("Back to the Canvas")}</button><CanvasLifecycleAction {...props} controls={controls}/></>}/>}
       {!detailsOnly && executionSummary}
     </div>
     {/* P0 hotfix (layout): before execution starts, the status, the whole-workflow Review and Authorize are docked inside the Canvas frame (as on
-        Simulate); once an execution is live, its timeline is the frame and the status follows it. */}
-    {detailsOnly && live && statusPanel}
+        Simulate); once an execution is live (its timeline is the frame) or a step-by-step workflow continues in place, the status follows it. */}
+    {detailsOnly && (live || continuation) && statusPanel}
     {props.technicalDetails && <details className="shell-details technical-workspace execute-technical"><summary>{tr("View technical details")}</summary>{live ? <><ExecutionEvidenceDetails progress={live}/>{tr(props.source.kind === 'unavailable' && props.technicalDetails)}</> : props.technicalDetails}</details>}
   </section>;
 }

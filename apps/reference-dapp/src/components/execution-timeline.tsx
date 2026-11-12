@@ -22,7 +22,7 @@ function StepEvidence({ evidence, action, values, facts }: { evidence: Execution
   const failure = facts.find(item => item.failure)?.failure;
   const message = failure === 'reverted' ? 'The transaction reverted. Earlier confirmed actions remain recorded.' : failure === 'declined' ? 'Wallet confirmation was declined. No transaction was submitted for this request.' : evidence.message;
   return <section className="execution-step-evidence" aria-label={tr(`${action} result evidence`)}>
-    <div className="execution-evidence-heading"><span>{tr("Step outcome")}</span><div><strong>{tr(evidence.label)}</strong>{evidence.recovered && <span className="execution-evidence-recovered">{tr("Recovered")}</span>}</div></div>
+    <div className="execution-evidence-heading"><span>{tr("Step outcome")}</span><div><strong>{tr(evidence.label, ...evidence.labelArgs ?? [])}</strong>{evidence.recovered && <span className="execution-evidence-recovered">{tr("Recovered")}</span>}</div></div>
     <p>{tr(message)}</p>
     {evidence.restored && !evidence.recovered && <p className="execution-evidence-restored">{tr("This step’s saved result was restored.")}</p>}
     {values.length > 0 && <dl className="execution-actual-values">{values.map((item, index) => <div key={`${item.label}-${index}`}><dt>{tr(item.label)}</dt><dd>{tr(item.value)}</dd></div>)}</dl>}
@@ -52,14 +52,14 @@ export function ExecutionTimeline({ progress, result, workflowName, backToBuild,
       const showEvidence = Boolean(result) || step.state === 'confirmed';
       return <li key={step.id} className={`execution-step execution-state-${step.state}`} aria-current={progress.active?.id === step.id && step.state !== 'waiting' ? 'step' : undefined}>
       <span className="execution-step-marker" aria-hidden="true">{tr(marker(step.state))}</span>
-      <div className="execution-step-content"><div className="execution-step-heading"><h3>{tr(step.number)}. {tr(step.action)}</h3><span className="execution-state-label">{tr(step.operations.some(op => op.id === checkingOperation) ? 'Checking status…' : showEvidence ? evidence.label : step.label)}</span></div>
+      <div className="execution-step-content"><div className="execution-step-heading"><h3>{tr(step.number)}. {tr(step.action)}</h3><span className="execution-state-label">{step.operations.some(op => op.id === checkingOperation) ? tr('Checking status…') : showEvidence ? tr(evidence.label, ...evidence.labelArgs ?? []) : tr(step.label, ...step.labelArgs ?? [])}</span></div>
         <p className="execution-step-assets">{step.input !== '—' && <span className="execution-result-planned">{tr("Planned")}</span>}{step.tokens.map(token => <TokenBrandIcon key={token} symbol={token}/>)}<span>{tr(step.input)}{step.pair && <> · {tr(step.pair)}</>}</span></p>
         <p className="execution-step-context">{step.provider && <span>{tr(step.provider)} ·</span>}{step.network.split(' → ').map((network, index) => <Fragment key={`${network}-${index}`}>{index > 0 && <span aria-hidden="true">→</span>}<span className="execution-step-network"><NetworkBrandIcon network={network}/><span>{network}</span></span></Fragment>)}</p>
         {showEvidence && <StepEvidence evidence={evidence} action={step.action} values={facts.flatMap(item => item.values)} facts={facts}/>}
         <ul className="execution-operations" aria-label={tr(`${step.action} requests`)}>{step.operations.map(operation => {
           const fact = progress.evidence?.operations[operation.id];
           return <li key={operation.id} className={`execution-operation execution-state-${operation.state}`}>
-          <div className="execution-operation-heading"><span>{tr(operation.approval ? 'Wallet setup · ' : '')}{tr(operation.title)}</span><strong>{tr(operation.id === checkingOperation ? 'Checking status…' : operation.label)}</strong></div>
+          <div className="execution-operation-heading"><span>{tr(operation.approval ? 'Wallet setup · ' : '')}{tr(operation.title)}</span><strong>{operation.id === checkingOperation ? tr('Checking status…') : tr(operation.label, ...operation.labelArgs ?? [])}</strong></div>
           {operation.chain && operation.hash && <p className="execution-operation-network">{tr(shellChainLabel(operation.chain))}</p>}
           {fact ? fact.identifiers.map(identifier => <ExecutionIdentifier key={`${identifier.kind}-${identifier.value}`} identifier={identifier}/>) : <Transaction operation={operation}/>}
           {fact ? fact.fees.map((fee, index) => <p key={index} className="execution-operation-fee">{tr(fee.label)} · {tr(fee.value)}</p>) : operation.fee && <p className="execution-operation-fee">{tr("Actual network fee · ")}{tr(operation.fee)}</p>}

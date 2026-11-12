@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 'use client';
 import { useLocale } from '../i18n/locale';
-import { watchWalletResponse, walletResultStorage, rememberWalletReport, forgetWalletReport, readWalletReports } from './wallet-request-lifecycle';
+import { watchWalletResponse, walletResultStorage, rememberWalletReport, forgetWalletReport, readWalletReports, walletReportRecorded } from './wallet-request-lifecycle';
 import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
 import type { SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
 import { useWorkflow } from './workflow-store';
@@ -108,7 +108,9 @@ export function RouterProvider({ children }: { children: ReactNode }) {
       const result = report.kind === 'HASH' ? await routerReport(net, report.runId, { kind: 'HASH', hash: report.hash!, attemptId: report.attemptId }).catch(() => null)
         : await routerWalletFailure(net, report.runId, { invoked: true, attemptId: report.attemptId, code: report.code ?? 'ROUTER_REJECTED', rejectionCode: report.rejectionCode!,
           calls: [{ method: 'eth_sendTransaction', submission: true, error: { code: report.rejectionCode } }] }).catch(() => null);
-      if (result?.ok) forgetWalletReport(walletResultStorage(), report.attemptId);
+      // P0 hotfix: a delivered hash leaves the outbox only once the record holds exactly that hash on that attempt (an earlier attempt's
+      // identical re-report is now answered with the record); a hash the server has not recorded stays for a later delivery.
+      if (result?.ok && (report.kind !== 'HASH' || walletReportRecorded(result.value, report))) forgetWalletReport(walletResultStorage(), report.attemptId);
     }
   }
   /** Resumes a stored pointer of the signed-in wallet: a hash saved before the browser closed reaches the server first (never a wallet). */
@@ -278,8 +280,9 @@ export function RouterProvider({ children }: { children: ReactNode }) {
       if (typeof hash !== 'string' || !/^0x[0-9a-fA-F]{64}$/.test(hash)) throw new Error('ROUTER_SUBMISSION_UNKNOWN');
       rememberWalletReport(walletResultStorage(), { runId: id, attemptId, owner: record.owner, network: net, kind: 'HASH', hash: hash.toLowerCase() });
       try { if (visibleRun.current === id) window.localStorage.setItem(KEY[net], JSON.stringify({ id, owner: record.owner, attemptId, hash: hash.toLowerCase() })); } catch { /* Reported to the server next. */ }
-      acceptCurrent(unwrap(await routerReport(net, id, { kind: 'HASH', hash: hash.toLowerCase(), attemptId })));
-      forgetWalletReport(walletResultStorage(), attemptId);
+      const reported = unwrap(await routerReport(net, id, { kind: 'HASH', hash: hash.toLowerCase(), attemptId }));
+      acceptCurrent(reported);
+      if (walletReportRecorded(reported, { attemptId, kind: 'HASH', hash: hash.toLowerCase() })) forgetWalletReport(walletResultStorage(), attemptId);
     } catch (cause) {
       const send = diagnostic.calls.find(c => c.submission), sendError = send?.error as { code?: unknown } | undefined;
       const refused = Boolean(send) && send!.result === undefined && typeof sendError?.code === 'number' && REFUSALS.includes(sendError.code);

@@ -119,3 +119,16 @@
 @media(prefers-color-scheme:dark){:root:not([data-theme="light"]){--primary-line:var(--accent)}}
 .top-bar{height:auto;min-height:70px}
 @media(pointer:coarse){.network-attention button{min-height:44px}.navigation-legal a{display:inline-flex;align-items:center}}
+/* P0 hotfix (execution continuity): the whole workflow's progress and the inline continuation of a step-by-step workflow in Execute. */
+.workflow-progress{margin:12px 0 0;display:grid;gap:8px;min-width:0}
+.workflow-progress-count{margin:0;font-variant-numeric:tabular-nums}
+.workflow-progress-steps{list-style:none;margin:0;padding:0;display:grid;gap:6px;min-width:0}
+.workflow-progress-step{display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 10px;padding:8px 10px;border:1px solid var(--line);border-radius:10px;min-width:0;overflow-wrap:anywhere}
+.workflow-progress-step[aria-current="step"]{border-color:var(--ink)}
+.workflow-progress-step-name{flex:1 1 12rem;min-width:0}
+.workflow-progress-step-phase{font-weight:600}
+.workflow-progress-step-delivered{flex-basis:100%;color:var(--muted);font-size:13px}
+.workflow-phase-done .workflow-progress-step-phase{color:var(--success)}
+.workflow-phase-neutral .workflow-progress-step-phase{color:var(--muted)}
+.sequence-continuation .sequence-continuation-values{margin:12px 0}
+.sequence-continuation .sequence-continuation-message{margin:8px 0 12px}

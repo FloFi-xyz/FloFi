@@ -12,8 +12,12 @@
 import { deliveredByRecord, fundingAllocations, stepNodeKey, type CompletedStep, type WorkflowSequence } from './workflow-sequence';
 import type { Workflow } from './initial-workflow';
 
-/** Runtimes whose durable record can be read back by run id alone (the Swap → Supply composition's runtimes among them). */
-export const RESTORABLE_RUNTIMES: readonly string[] = Object.freeze(['public', 'supply', 'solana-swap']);
+/**
+ * Runtimes whose durable record can be read back by run id alone (the Swap → Supply composition's runtimes among them). P0 hotfix (execution
+ * continuity): the certified Router too, so a reload after Swap → Bridge re-proves the bridge from its reconciled record instead of offering it
+ * again (its reader asks each Router network for the run id; a record it cannot read withholds the step, never offers it as new).
+ */
+export const RESTORABLE_RUNTIMES: readonly string[] = Object.freeze(['public', 'supply', 'solana-swap', 'router']);
 export const SEQUENCE_RUN_STORAGE_KEY = 'flofi:sequence-run:v1:';
 export type StoredCompletion = { readonly nodeId: string; readonly node: string; readonly kind: string; readonly runKey: string; readonly received: string | null };
 /** Reads a runtime's durable record by its run id (null when it cannot be read). */
@@ -35,7 +39,7 @@ export function storedCompletions(value: unknown, workflowId: string): readonly 
 /** A runtime's durable record is final, reconciled and is the run of this workflow's node. */
 export function completedByRecord(kind: string, record: unknown, workflowId: string, nodeId: string): boolean {
   if (!isObject(record)) return false;
-  const final = kind === 'public' ? isObject(record.outcome) && !record.divergence : (kind === 'supply' || kind === 'solana-swap') && record.verdict === 'RECONCILED';
+  const final = kind === 'public' ? isObject(record.outcome) && !record.divergence : (kind === 'supply' || kind === 'solana-swap' || kind === 'router') && record.verdict === 'RECONCILED';
   const workflow = isObject(record.workflow) ? record.workflow : isObject(record.review) && isObject(record.review.workflow) ? record.review.workflow : null;
   return final && Boolean(workflow) && workflow!.workflowId === workflowId && Array.isArray(workflow!.nodes) &&
     workflow!.nodes.some(node => isObject(node) && node.nodeId === nodeId);
@@ -44,7 +48,8 @@ export function completedByRecord(kind: string, record: unknown, workflowId: str
 export function ownerByRecord(kind: string, record: unknown): string | null {
   if (!isObject(record)) return null;
   const value = kind === 'public' && Array.isArray(record.attempts) && isObject(record.attempts.at(-1)) ? (record.attempts.at(-1) as Record<string, unknown>).account
-    : kind === 'supply' && isObject(record.review) ? record.review.account : kind === 'solana-swap' && isObject(record.review) ? record.review.owner : null;
+    : kind === 'supply' && isObject(record.review) ? record.review.account : kind === 'solana-swap' && isObject(record.review) ? record.review.owner
+    : kind === 'router' ? record.owner : null;
   return typeof value === 'string' && value ? /^0x[0-9a-fA-F]{40}$/.test(value) ? value.toLowerCase() : value : null;
 }
 /**

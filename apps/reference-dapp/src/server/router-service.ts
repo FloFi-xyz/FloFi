@@ -979,7 +979,15 @@ export function createRouterService(input: { readonly storage: ExecutionStorage;
     async report(id: string, result: ({ kind: 'HASH'; hash: string } | { kind: 'UNKNOWN' | 'REJECTED'; code?: string }) & { attemptId?: string }): Promise<RouterRecord> { return locked(id, async () => {
       const record = await load(id), attempt = record.attempts.at(-1);
       if (!attempt) fail('ROUTER_ATTEMPT_MISSING');
-      if (result.attemptId && result.attemptId !== attempt.attemptId) fail('ROUTER_ATTEMPT_ID_MISMATCH');
+      if (result.attemptId && result.attemptId !== attempt.attemptId) {
+        // P0 hotfix (production 2026-11-12, ROUTER_ATTEMPT_ID_MISMATCH ×7 after the deposit began): the browser's wallet-result outbox delivers
+        // an EARLIER attempt's hash again. When the server already recorded exactly that hash for exactly that attempt, the report changes
+        // nothing: it is answered with the record (idempotent), so the browser can drop it. Any other report for an earlier attempt (another
+        // hash, an attempt without a recorded hash, a rejection) is still refused; nothing is ever recorded for an attempt that is not the latest.
+        const earlier = record.attempts.find(item => item.attemptId === result.attemptId);
+        if (result.kind === 'HASH' && typeof result.hash === 'string' && earlier?.transactionHash && earlier.transactionHash === result.hash.toLowerCase()) return record;
+        fail('ROUTER_ATTEMPT_ID_MISMATCH');
+      }
       if (result.kind === 'HASH') {
         const hash = result.hash.toLowerCase();
         if (!HASH.test(hash)) fail('ROUTER_HASH_INVALID');

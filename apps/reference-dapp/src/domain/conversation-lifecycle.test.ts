@@ -159,3 +159,21 @@ describe('BUILD-FLOFI-CHAT-E2E-FIX-002 chat review additions', () => {
     expect(sumByAsset([])).toEqual({ sums: [], unreadable: 0 });
   });
 });
+
+describe('P0 hotfix (execution continuity): the Assistant reads the whole workflow', () => {
+  it('"continue" (no question open) is a request to know where the workflow stands, like Review; a sentence about continuing is not', () => {
+    for (const text of ['continue', 'Continue the workflow', 'next step', 'continuar', 'Continuar o fluxo', 'próxima etapa']) expect(lifecycleRequest(text), text).toBe('REVIEW');
+    for (const text of ['continue with a swap of 5 USDC', 'continuar com 5 USDC']) expect(lifecycleRequest(text), text).toBeNull();
+  });
+  it('a sequence step\'s run counts the WHOLE workflow (never the step run\'s own "0 of 1")', () => {
+    const v = withRun([{ step: 'approval', state: 'CONFIRMED', txHash: hash('a') }]);
+    expect(conversationExecution(v)).toMatchObject({ completed: 0, total: 1 });
+    const progress = { completed: 1, total: 2, current: 2, finished: false, attention: false, steps: [
+      { number: 1, action: 'Swap', network: 'Arbitrum', phase: 'RECONCILED' as const, text: { key: 'Reconciled', args: [] }, current: false, delivered: '2.5 USDC' },
+      { number: 2, action: 'Bridge', network: 'Arbitrum → Base', phase: 'AWAITING_AUTHORIZATION' as const, text: { key: 'Waiting for your authorization', args: [] }, current: true, delivered: null }] };
+    const sequence = { total: 2, current: 2, finished: false, issue: null, awaitingDelivery: false, steps: [
+      { number: 1, action: 'Swap', amount: null, detail: null, network: 'Arbitrum', state: 'COMPLETED' as const, funding: null, delivered: '2.5 USDC' },
+      { number: 2, action: 'Bridge', amount: null, detail: null, network: 'Arbitrum → Base', state: 'CURRENT' as const, funding: null, delivered: null }] };
+    expect(conversationExecution({ ...v, sequence, workflowProgress: progress })).toMatchObject({ completed: 1, total: 2, sequenceStep: { current: 2, total: 2, completed: 1 } });
+  });
+});

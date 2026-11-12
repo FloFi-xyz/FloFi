@@ -164,7 +164,12 @@ export function projectDashboardRun(run: DashboardRun, progress: ExecutionLifecy
     reconciled: progress ? Object.values(progress.stepEvidence ?? {}).some(step => step.reconciled) : run.status === 'RECONCILED', current, progress };
 }
 
-export function currentDashboardRun(title: string, progress: ExecutionLifecycle, recovery?: Pick<ExecutionRecovery, 'contextIssue' | 'action'>): DashboardRunView | null {
+/**
+ * `workflow` (P0 hotfix, execution continuity): the whole workflow's "X of N steps completed" (`domain/workflow-progress.ts`), so the current run of
+ * a step-by-step workflow reads the same count in the Dashboard as in Execute and the FloFi Assistant (its own run covers one step of N).
+ */
+export function currentDashboardRun(title: string, progress: ExecutionLifecycle, recovery?: Pick<ExecutionRecovery, 'contextIssue' | 'action'>,
+  workflow?: { readonly completed: number; readonly total: number } | null): DashboardRunView | null {
   const owner = progress.evidence?.wallet;
   if (!progress.started || !dashboardRunId(progress.runKey) || !owner) return null;
   const run: DashboardRun = { runId: progress.runKey, workflowId: '', flow: 'current', status: progress.state,
@@ -172,6 +177,7 @@ export function currentDashboardRun(title: string, progress: ExecutionLifecycle,
     attentionRequired: false, hasEvidence: Boolean(progress.evidence && (progress.evidence.details.some(item => item.label === 'Evidence bundle') ||
       Object.values(progress.evidence.operations).some(op => op.identifiers.length > 0 || op.values.length > 0))), createdAt: null, updatedAt: null };
   const view = projectDashboardRun(run, progress, title, true);
+  if (workflow && workflow.total > 0 && !progress.planUnavailable) { view.completed = workflow.completed; view.total = workflow.total; }
   if (recovery?.contextIssue) view.attention.push(recovery.contextIssue);
   if (recovery?.action && progress.state !== 'complete') view.attention.push('Check execution status in the Editor\'s execution view');
   return view;

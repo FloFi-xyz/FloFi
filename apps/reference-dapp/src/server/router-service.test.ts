@@ -490,6 +490,31 @@ describe('BUILD-ROUTER-001 recovery after restart and ambiguous submissions', ()
     await expect(service.walletFailure(run.id, { invoked: true, calls: [{ method: 'eth_sendTransaction', submission: true, error: { code: -32000 } }], code: 'ROUTER_SUBMISSION_UNKNOWN' }))
       .rejects.toThrow('ROUTER_DIAGNOSTIC_NOT_PRE_SUBMISSION');
   });
+  it('P0 hotfix: an identical re-report of an EARLIER attempt\'s recorded hash is a no-op that returns the record; any other report for it is refused', async () => {
+    // Production 2026-11-12: the browser's outbox re-delivered the approval's hash after the deposit began (ROUTER_ATTEMPT_ID_MISMATCH ×7).
+    const { service, h } = await setup(), w = workflow(), run = await reviewed(service, w);
+    const approval = await execute(service, h, run.id, w);
+    await service.observe(run.id);
+    const deposit = await service.begin(run.id, ROUTER_OWNER, w);
+    expect(deposit.attempt.step).toBe('DEPOSIT');
+    await service.handoff(run.id);
+    const before = await service.load(run.id), sends = h.counters.sends;
+    // The same hash for the same earlier attempt (any letter case): answered with the unchanged record, nothing recorded or sent.
+    const again = await service.report(run.id, { kind: 'HASH', hash: approval.hash.toUpperCase().replace('0X', '0x'), attemptId: approval.begun.attempt.attemptId });
+    expect(again).toEqual(before);
+    expect(await service.load(run.id)).toEqual(before);
+    expect(again.attempts.at(-1)).toMatchObject({ attemptId: deposit.attempt.attemptId, state: 'SUBMITTING', transactionHash: null });
+    // A different hash for the earlier attempt, an unknown/rejected result for it, or an attempt id the run never had: still refused.
+    await expect(service.report(run.id, { kind: 'HASH', hash: '0x' + '2'.repeat(64), attemptId: approval.begun.attempt.attemptId })).rejects.toThrow('ROUTER_ATTEMPT_ID_MISMATCH');
+    await expect(service.report(run.id, { kind: 'UNKNOWN', attemptId: approval.begun.attempt.attemptId })).rejects.toThrow('ROUTER_ATTEMPT_ID_MISMATCH');
+    await expect(service.report(run.id, { kind: 'HASH', hash: approval.hash, attemptId: run.id + '.approval.9' })).rejects.toThrow('ROUTER_ATTEMPT_ID_MISMATCH');
+    // The deposit's own hash is still only the deposit's: reported under the approval's id it is refused, under its own id it is recorded.
+    const depositHash = h.wallet.send(deposit.transaction);
+    await expect(service.report(run.id, { kind: 'HASH', hash: depositHash, attemptId: approval.begun.attempt.attemptId })).rejects.toThrow('ROUTER_ATTEMPT_ID_MISMATCH');
+    expect((await service.report(run.id, { kind: 'HASH', hash: depositHash, attemptId: deposit.attempt.attemptId })).attempts.at(-1))
+      .toMatchObject({ state: 'PENDING', transactionHash: depositHash });
+    expect(h.counters.sends).toBe(sends + 1);
+  });
   it('a PREPARED attempt observed after the browser stopped is cancelled, never sent', async () => {
     const { service, h } = await setup(), w = workflow(), run = await reviewed(service, w);
     await service.begin(run.id, ROUTER_OWNER, w);

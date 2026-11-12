@@ -101,7 +101,7 @@ export function SigningSurface(props: SigningSurfaceProps) {
         <div className={`signing-status simulation-validity simulation-tone-${status.tone}`} role="status" aria-live="polite"><strong><span className="simulation-status-dot" aria-hidden="true"/>{tr(status.label)}</strong><p>{tr(status.message)}</p></div>
         {!live && review.warnings.filter(w => w.message !== status.message).map((warning, index) => <p key={index} className={warning.severity === 'blocking' ? 'simulation-warning-blocking' : 'signing-risk'}>{tr(warning.message)}</p>)}
         {operations.length > 0 && <ul className="signing-receipt" aria-label={tr('Transactions')}>
-          {operations.map(({ step, operation }) => <li key={operation.id}><span>{tr(step.action)} · {tr(operation.label)}</span>
+          {operations.map(({ step, operation }) => <li key={operation.id}><span>{tr(step.action)} · {tr(operation.label, ...operation.labelArgs ?? [])}</span>
             {operation.explorer ? <a href={operation.explorer} target="_blank" rel="noreferrer">{tr('View transaction')}</a> : operation.hash && <code title={operation.hash}>{short(operation.hash)}</code>}</li>)}
         </ul>}
         {live?.evidence?.knownCosts.length ? <dl className="simulation-summary-values">{live.evidence.knownCosts.map(cost => <div key={cost.label}><dt>{tr(cost.label)}</dt><dd>{tr(cost.value)}</dd></div>)}</dl> : null}

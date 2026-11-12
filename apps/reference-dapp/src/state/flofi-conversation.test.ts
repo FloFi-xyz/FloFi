@@ -644,3 +644,40 @@ describe('BUILD-FLOFI-E2E-RELIABILITY-001 continuation after a landed approval',
     expect(pt.continueAfter('Aprovar USDC', 'Trocar', true)).toBe('Aprovar USDC: confirmado na rede. Uma aprovação apenas autoriza o gasto; não é a ação em si. Trocar: ainda não enviado, precisa da sua própria confirmação na carteira. Continuar para a carteira?');
   });
 });
+
+describe('P0 hotfix (execution continuity): the Assistant while the workflow executes', () => {
+  /** Step 1 of a two-step sequence completed and reconciled; step 2 not started (the shell's sequence and whole-workflow progress). */
+  function between(): Partial<ConversationBridge> {
+    return { sequence: { total: 2, current: 2, finished: false, issue: null, awaitingDelivery: false, steps: [
+      { number: 1, action: 'Swap', amount: '10 USDC', detail: null, network: 'Base Sepolia', state: 'COMPLETED', funding: null, delivered: '0.004 WETH' },
+      { number: 2, action: 'Swap', amount: '2 USDC', detail: null, network: 'Base Sepolia', state: 'CURRENT', funding: null, delivered: null }] },
+    workflowProgress: { completed: 1, total: 2, current: 2, finished: false, attention: false, steps: [
+      { number: 1, action: 'Swap', network: 'Base Sepolia', phase: 'RECONCILED', text: { key: 'Reconciled', args: [] }, current: false, delivered: '0.004 WETH' },
+      { number: 2, action: 'Swap', network: 'Base Sepolia', phase: null, text: { key: 'Not started', args: [] }, current: true, delivered: null }] } };
+  }
+  it('between the steps, "continue" and "Review workflow" answer with the workflow status and next action — never "I can\'t start the review"', async () => {
+    await say('swap 10 USDC to WETH on Base Sepolia slippage 100 bps');
+    await say('swap 2 USDC to WETH on Base Sepolia slippage 100 bps');
+    reviewedPatch = between(); lifecycle(reviewedPatch);
+    bridge = { ...bridge, simulationBlocked: 'Its provider is not available here.' };
+    for (const text of ['continue', 'Review workflow', 'continuar']) {
+      render().send(text); await flush();
+      const message = last(render());
+      expect(message.text).toBe('This workflow is executing: 1 of 2 steps completed · Step 2 (Swap): Not started. Its provider is not available here.');
+      expect(message.text).not.toMatch(/can’t start the review|Simulate/);
+    }
+    expect(simulate).not.toHaveBeenCalled(); expect(controls.authorize).not.toHaveBeenCalled();
+  });
+  it('while the wallet is asked, review/continue says to answer the wallet; in Portuguese with the same numbers', async () => {
+    await say('swap 10 USDC to WETH on Base Sepolia slippage 100 bps');
+    await say('swap 2 USDC to WETH on Base Sepolia slippage 100 bps');
+    reviewedPatch = { ...between(), editingPaused: true }; controls = { ...controls, requesting: true } as typeof controls; lifecycle(reviewedPatch);
+    render().send('continue'); await flush();
+    expect(last(render()).text).toBe('This workflow is executing: 1 of 2 steps completed · Step 2 (Swap): Not started. Confirm or decline the request in your wallet. FloFi never signs for you.');
+    expect(simulate).not.toHaveBeenCalled();
+    harness.unmount(); harness.slots = [];
+    const portuguese = () => harness.render(() => useFlofiConversation({ owner: { namespace: 'eip155', address: reviewOwner }, epoch: 0, bridge, direct, interfaceLanguage: 'PT' }));
+    portuguese().send('continuar'); await flush();
+    expect(portuguese().messages.at(-1)!.text).toBe('Este fluxo está em execução: 1 de 2 etapas concluídas · Etapa 2 (Trocar): Não iniciado. Confirme ou recuse o pedido na sua carteira. A FloFi nunca assina por você.');
+  });
+});

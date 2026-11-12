@@ -21,11 +21,14 @@ import { browserFailureMessage, initialObservationState, observationReducer, rec
 import { actionReviewValue, amountEditNeedsReview, DIRECT_EDIT_ACTIONS } from '../domain/canvas-action-setup';
 import { singleAmountProposalTarget } from '../domain/composer-presentation';
 import { createCryptoActionNode, type CryptoActionInput, type CryptoSelection, type CryptoSelections } from '../domain/crypto-action-picker';
-import { boundAmount, boundProjection, compositionWorkflow, fundingAllocations, sequenceOrder, stepNodeKey, validCompletions, workflowSequence, type CompletedStep, type SequenceStep, type WorkflowSequence } from '../domain/workflow-sequence';
+import { compositionWorkflow, fundingAllocations, sequenceCursor, sequenceOrder, stepNodeKey, stepRuntimeWorkflow, validCompletions, workflowSequence, type CompletedStep, type SequenceStep, type WorkflowSequence } from '../domain/workflow-sequence';
 import { proveCompletions, SEQUENCE_RUN_STORAGE_KEY, storedCompletions, type StoredCompletion } from '../domain/sequence-restore';
+import { editorStorage, persistEditor, readPersistedEditor } from '../domain/editor-persistence';
 import { publicStatus } from '../app/public-testnet-action';
 import { supplyStatus } from '../app/supply-action';
 import { jupiterStatus } from '../app/jupiter-action';
+import { routerStatus } from '../app/router-action';
+import { ROUTER_NETWORK_OPTIONS, type RouterNetwork } from '../domain/router-authoring';
 
 type Pending = { valid: boolean; command: Command; diff: readonly string[]; review: ReviewResult | null; authoringId?: string; authoringAmount?: string };
 type Store = { restorationEpoch: number; state: EditorState; dispatch: Dispatch<Command>; context: ReviewContext;
@@ -121,11 +124,23 @@ const testNetworksIntroduced = (before: Parameters<typeof introducedTestNetworks
 
 /** A sequence step's durable record, read back from its own runtime by run id (BUILD AAVE-V3-EXPANSION-001). Null when unreadable. */
 async function readSequenceRecord(kind: string, runKey: string): Promise<unknown> {
+  if (kind === 'router') {
+    // The Router keeps one store per network; the run id names no network, so each is asked (read-only) until one holds it.
+    for (const network of Object.keys(ROUTER_NETWORK_OPTIONS) as RouterNetwork[]) {
+      const result = await routerStatus(network, runKey).catch(() => null);
+      if (result?.ok) return result.value;
+    }
+    return null;
+  }
   const result = kind === 'public' ? await publicStatus(runKey) : kind === 'supply' ? await supplyStatus(runKey) : kind === 'solana-swap' ? await jupiterStatus(runKey) : null;
   return result && result.ok ? result.value : null;
 }
 
-export function WorkflowProvider({ children, initialContext, initialWorkflowId = 'workflow-local' }: { children: ReactNode; initialContext: unknown; initialWorkflowId?: string }) {
+/**
+ * `persistCanvas` (P0 hotfix, execution continuity): the product Editor (/app) remembers its Canvas in this browser and puts it back on the next
+ * load (`domain/editor-persistence.ts`); /approve, embedded signing and the engineering page never read or write it.
+ */
+export function WorkflowProvider({ children, initialContext, initialWorkflowId = 'workflow-local', persistCanvas = false }: { children: ReactNode; initialContext: unknown; initialWorkflowId?: string; persistCanvas?: boolean }) {
   const [history, dispatchHistory] = useReducer(editorHistoryReducer, undefined, () => {
     const history = initialEditorHistory();
     return { ...history, editor: { ...history.editor, workflow: { ...history.editor.workflow, workflowId: initialWorkflowId } } };
@@ -163,6 +178,20 @@ export function WorkflowProvider({ children, initialContext, initialWorkflowId =
   const initialWorkflow = useRef(state.workflow);
   useEffect(() => { dispatchHistory({ type: 'LOAD_LAYOUT', layout: readCanvasLayout(initialWorkflow.current) }); setLayoutLoaded(true); }, []);
   useEffect(() => { if (layoutLoaded) saveCanvasLayout(state.workflow.workflowId, history.layout); }, [layoutLoaded, state.workflow.workflowId, history.layout]);
+  // P0 hotfix (execution continuity, production 2026-11-12: "at the end the Editor showed an empty workflow (0 steps)"): the Canvas this browser
+  // remembered is put back on the untouched initial Canvas once (after hydration, so the server HTML is unchanged), with its own identity, so the
+  // sequence's step pointers (keyed by workflow id) are found again. It is an authored draft only: nothing is simulated, reviewed or signed.
+  const persistenceRead = useRef(false);
+  const [persistenceReady, setPersistenceReady] = useState(false);
+  useEffect(() => {
+    if (!persistCanvas || persistenceRead.current) return;
+    persistenceRead.current = true;
+    const stored = readPersistedEditor(editorStorage());
+    if (stored?.workflow) dispatchHistory({ type: 'RESTORE_PERSISTED_CANVAS', workflowId: stored.workflowId, workflow: stored.workflow,
+      layout: readCanvasLayout(stored.workflow as unknown as Workflow) });
+    setPersistenceReady(true);
+  }, [persistCanvas]);
+  useEffect(() => { if (persistCanvas && persistenceReady) persistEditor(editorStorage(), state.workflow); }, [persistCanvas, persistenceReady, state.workflow]);
   const moveCanvasNodes = useCallback((positions: Readonly<Record<string, { x: number; y: number }>>) =>
     dispatchHistory({ type: 'MOVE', positions }), []);
   const duplicateCanvasNodes = useCallback((nodeIds: readonly string[]) =>
@@ -204,11 +233,16 @@ export function WorkflowProvider({ children, initialContext, initialWorkflowId =
   const [sequenceRun, setSequenceRun] = useState<{ readonly workflowId: string; readonly completed: readonly CompletedStep[] }>({ workflowId: '', completed: [] });
   const completed = useMemo(() => sequenceRun.workflowId === state.workflow.workflowId ? validCompletions(sequence, state.workflow, sequenceRun.completed) : [],
     [sequenceRun, state.workflow, sequence]);
-  const cursor = sequence ? Math.min(completed.length, sequence.steps.length - 1) : 0, currentStep = sequence?.steps[cursor] ?? null;
-  const finished = Boolean(sequence && completed.length >= sequence.steps.length);
-  const bound = currentStep ? boundAmount(currentStep, completed) : null;
+  // P0 hotfix (execution continuity): the cursor step is bound by the completions BEFORE it only, so a finished sequence keeps its last step exactly
+  // as it executed (its reconciled record stays this workflow's final result instead of being retired as "Workflow changed").
+  const position = useMemo(() => sequence ? sequenceCursor(sequence, completed) : null, [sequence, completed]);
+  const cursor = position?.cursor ?? 0, currentStep = sequence?.steps[cursor] ?? null;
+  const finished = Boolean(position?.finished);
+  const priorCompletions = position?.before ?? completed;
+  const runtimeStep = useMemo(() => currentStep ? stepRuntimeWorkflow(currentStep, priorCompletions, contextOf(currentStep.projection)) : null, [currentStep, priorCompletions, contextOf]);
+  const bound = runtimeStep?.bound ?? null;
   const producerDelivery = currentStep?.fundedBy !== null && currentStep?.fundedBy !== undefined ? completed[currentStep.fundedBy]?.received ?? null : null;
-  const boundWorkflow = useMemo(() => currentStep ? boundProjection(currentStep, bound, contextOf(currentStep.projection), completed) : null, [currentStep, bound, contextOf, completed]);
+  const boundWorkflow = runtimeStep?.workflow ?? null;
   const runtimeWorkflow = sequence && currentStep ? boundWorkflow ?? currentStep.projection : state.workflow;
   const sequenceView: SequenceView | null = sequence && currentStep ? { steps: sequence.steps, cursor, current: currentStep, completed, bound, finished,
     fundingIssue: finished || currentStep.fundedBy === null ? null : currentStep.funding.some(f => completed[f.fundedBy]?.received == null) || producerDelivery === null ? 'DELIVERY_NOT_PROVEN'

@@ -35,6 +35,18 @@ export function rememberWalletReport(storage: Pick<Storage, 'getItem' | 'setItem
     storage.setItem(KEY, JSON.stringify([...entries, report]));
   } catch { /* Server nonce discovery remains available when browser storage is unavailable. */ }
 }
+/**
+ * P0 hotfix (production 2026-11-12): whether the server's record already holds exactly this wallet result. A HASH entry leaves the outbox only
+ * once the record shows that exact hash on that exact attempt — never because a call merely succeeded — so an unrecorded hash is never dropped,
+ * and an entry the server already holds is not delivered again on every later page load or Execute click. A rejection is recorded as the
+ * attempt's cancellation (the caller forgets it once the server accepted that report).
+ */
+export function walletReportRecorded(record: { readonly attempts: readonly { readonly attemptId: string; readonly transactionHash?: string | null }[] } | null | undefined,
+  report: Pick<DurableWalletReport, 'attemptId' | 'kind' | 'hash'>): boolean {
+  if (!record || report.kind !== 'HASH' || typeof report.hash !== 'string') return false;
+  const attempt = record.attempts.find(item => item.attemptId === report.attemptId);
+  return typeof attempt?.transactionHash === 'string' && attempt.transactionHash.toLowerCase() === report.hash.toLowerCase();
+}
 export function forgetWalletReport(storage: Pick<Storage, 'getItem' | 'setItem'> | null, attemptId: string): void {
   if (!storage) return;
   try { const raw: unknown = JSON.parse(storage.getItem(KEY) ?? '[]'); if (Array.isArray(raw)) storage.setItem(KEY, JSON.stringify(raw.filter(r => r?.attemptId !== attemptId))); } catch { /* Retain for a later read. */ }

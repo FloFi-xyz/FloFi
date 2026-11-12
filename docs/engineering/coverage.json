@@ -2914,6 +2914,7 @@
         "apps/reference-dapp/src/components/execution-identifier.tsx",
         "apps/reference-dapp/src/components/execution-panel.tsx",
         "apps/reference-dapp/src/components/execution-timeline.tsx",
+        "apps/reference-dapp/src/components/workflow-progress-panel.tsx",
         "apps/reference-dapp/src/components/flofi-logo.tsx",
         "apps/reference-dapp/src/components/fork-simulation-panel.tsx",
         "apps/reference-dapp/src/components/header-settings.tsx",
@@ -3863,7 +3864,9 @@
         "apps/reference-dapp/src/domain/wallet-portfolio.ts",
         "apps/reference-dapp/src/domain/node-declaration.ts",
         "apps/reference-dapp/src/domain/sequence-restore.ts",
-        "apps/reference-dapp/src/domain/editor-run.ts"
+        "apps/reference-dapp/src/domain/editor-run.ts",
+        "apps/reference-dapp/src/domain/editor-persistence.ts",
+        "apps/reference-dapp/src/domain/workflow-progress.ts"
       ],
       "suites": [
         "action-registry.engineering-regression",
