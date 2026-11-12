@@ -3,6 +3,9 @@
 export const portugueseWorkflowRuns: Readonly<Record<string, string>> = {
   'Workflow steps': 'Etapas do fluxo', '{0}-step workflow': 'Fluxo de {0} etapas', 'Step {0}': 'Etapa {0}',
   'Waiting': 'Em espera', 'Ready for your signature': 'Pronta para a sua assinatura', 'In your wallet': 'Na sua carteira', 'Authorized': 'Autorizada',
+  // A user-funded step is worded by its group (the Editor and /approve; 'Waiting for your wallet' is translated in pt-delegation.ts): never
+  // "Authorized" for a group nothing was signed for.
+  'Signed in your wallet': 'Assinada na sua carteira', 'Not signed': 'Não assinada',
   'Reconciled': 'Reconciliada', 'Failed': 'Falhou', 'Outcome pending': 'Resultado pendente', 'Not run': 'Não executada', 'Stopped before submission': 'Parada antes do envio',
   'Choose how to authorize': 'Escolha como autorizar', 'Running': 'Em execução', 'Completed': 'Concluído', 'Partially completed': 'Parcialmente concluído',
   'Needs attention': 'Requer atenção', 'Ended': 'Encerrado', 'Expired': 'Expirado',

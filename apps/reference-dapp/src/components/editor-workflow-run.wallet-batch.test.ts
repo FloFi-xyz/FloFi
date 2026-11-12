@@ -311,8 +311,11 @@ describe('Editor batch send: refusals in plain words', () => {
   it('says what each review-fix code means: nothing was asked of the wallet, or it may have run twice (never "nothing was sent")', () => {
     for (const code of REVIEW_FIXES) expect(EXECUTION_REFUSAL[code], code).not.toMatch(/\{\d+\}/);
     // Undated (the run view could not date it, and /approve never can): words that stay true once the request has expired.
+    // It never tells the owner to confirm it unconditionally: after its validity its on-chain deadline refuses it and the wallet would still pay the fee.
     expect(EXECUTION_REFUSAL.USER_FUNDED_PREPARED_STILL_VALID).toBe('FloFi already prepared a request for this step that may still be open in your wallet. Confirm it '
-      + 'there, or try again once it has expired (at most 10 minutes after it was prepared); FloFi never prepares a second one that could run alongside it.');
+      + 'only within 10 minutes of when it was prepared (after that its on-chain deadline refuses it and your wallet would still pay the fee: reject it), or try '
+      + 'again once it has expired; FloFi never prepares a second one that could run alongside it.');
+    expect(EXECUTION_REFUSAL.USER_FUNDED_PREPARED_STILL_VALID).not.toContain('Confirm it there');
     expect(EXECUTION_REFUSAL.USER_FUNDED_PREPARED_STILL_VALID).not.toMatch(/stays valid|wait until|few more minutes/);
     expect(EXECUTION_REFUSAL.WALLET_ATTEMPT_UNRECORDABLE).toMatch(/did not ask your wallet/);
     expect(EXECUTION_REFUSAL.WALLET_BATCH_ANSWER_MISMATCH).toMatch(/may have run twice/);
@@ -330,6 +333,15 @@ describe('Editor batch send: refusals in plain words', () => {
       expect(set, file).toBeTruthy();
       expect(set, file).not.toContain('WALLET_BATCH_ANSWERED_AFTER_STOP');
     }
+  });
+  it('round 6: WORKFLOW_RUN_EXPIRED (the run\'s window refuses a new preparation) reads the same on both pages, translated, never "nothing was sent"', () => {
+    const source = readFileSync(new URL('./approval-handoff.tsx', import.meta.url), 'utf8');
+    const approve = /\n {2}WORKFLOW_RUN_EXPIRED: '((?:[^'\\]|\\.)*)',/.exec(source)?.[1]?.replace(/\\(.)/g, '$1');
+    const text = EXECUTION_REFUSAL.WORKFLOW_RUN_EXPIRED!;
+    expect(approve).toBe(text);
+    expect(text).toMatch(/does not prepare another one/);
+    expect(text).not.toMatch(/nothing was sent|not sent|\{\d+\}/i);
+    expect(translate('PT', text)).not.toBe(text);
   });
   /** A group preparation's refusals (simulation, Aave risk, fee reading) that both pages show. */
   const PREPARATION = ['BORROW_UNSAFE_HEALTH_FACTOR', 'WITHDRAW_UNSAFE_HEALTH_FACTOR', 'REPAY_PARTIAL_DEBT_REQUIRED', 'SIMULATION_REVERTED', 'SWAP_MINIMUM_NOT_MET',

@@ -133,6 +133,16 @@ const batchUnanswered = (item: { readonly state: string; readonly code: string |
 /** A step's or group's state in words; one whose wallet batch may have executed unseen is never called "Not run" or "Stopped before submission". */
 const stateText = (labels: Readonly<Record<string, string>>, item: { readonly state: string; readonly code: string | null }) =>
   batchUnanswered(item) ? 'Its batch may have executed before it expired; check your wallet\'s activity' : labels[item.state] ?? item.state;
+/**
+ * A step's state in words. A user-funded run's DELEGATED step belongs to its group, so it says what that group shows: signed in the wallet,
+ * waiting for it while the run can still ask, else not signed (a halted or ended run) — never "Authorized" for a group nothing was signed for.
+ * The channels' rule (channels/core/status.ts) and the Editor's. A delegated-mode run's DELEGATED step keeps "Authorized" (its grant was signed).
+ */
+const stepText = (run: WorkflowRunClaim['run'], step: WorkflowRunClaim['run']['steps'][number]) => {
+  if (batchUnanswered(step) || run.mode !== 'USER_FUNDED' || step.state !== 'DELEGATED') return stateText(STEP_STATE, step);
+  const group = (run.groups ?? []).find(g => g.steps[0] <= step.index && step.index <= g.steps[1]);
+  return group?.signed ? 'Signed in your wallet' : ['RUNNING', 'ATTENTION'].includes(run.state) ? 'Waiting for your wallet' : 'Not signed';
+};
 
 export function WorkflowRunPanel({ claim, approvalId, secret, onProposal, onError }: { claim: WorkflowRunClaim; approvalId: string; secret: string | null;
   onProposal: (proposal: ClaimedProposal) => void; onError: (code: string) => void }) {
@@ -331,7 +341,7 @@ export function WorkflowRunPanel({ claim, approvalId, secret, onProposal, onErro
     <ol className="workflow-run-steps">
       {run.steps.map(step => <li key={step.index} data-step-state={step.state} aria-current={step.index === run.currentStep && open ? 'step' : undefined}>
         <span>{tr('Step {0}', String(step.index + 1))} · {tr(ACTION[step.action] ?? step.action)}</span>
-        <span className="workflow-run-state">{tr(stateText(STEP_STATE, step))}</span>
+        <span className="workflow-run-state">{tr(stepText(run, step))}</span>
         {step.outcome?.submissions.map(tx => tx.explorerUrl
           ? <a key={tx.hash} href={tx.explorerUrl} target="_blank" rel="noreferrer"><code>{short(tx.hash)}</code></a>
           : <code key={tx.hash}>{short(tx.hash)}</code>)}
@@ -446,7 +456,8 @@ export function WorkflowRunPanel({ claim, approvalId, secret, onProposal, onErro
         : endable ? 'This step cannot be tried again in this workflow: end it, and start a new workflow for anything left to do.'
         : 'This step cannot be tried again in this workflow.')}</p>}
     </div>}
-    {unanswered && <p role="status">{tr('A batch was handed to your wallet and its answer never reached FloFi: it may have executed before it expired. Check your wallet\'s activity.')}</p>}
+    {/* "Never recorded", not "never reached FloFi": an answer may have arrived after the stop and been refused (WALLET_BATCH_ANSWERED_AFTER_STOP, logged). */}
+    {unanswered && <p role="status">{tr('A batch was handed to your wallet and FloFi never recorded an answer for it: it may have executed before it expired. Check your wallet\'s activity.')}</p>}
     {endable && <div className="approval-actions">
       <button type="button" className="quiet" disabled={busy} onClick={() => void act(() => cancelWorkflowRunHandoff(approvalId))}>{tr('End workflow')}</button>
     </div>}

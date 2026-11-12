@@ -164,7 +164,8 @@ describe('review fix U1: every wallet batch expires on chain', () => {
 
 describe('review fixes U2/U3/U4: refusals of the batch path in plain words (EN/PT)', () => {
   const time = (iso: string, locale: string) => new Date(iso).toLocaleTimeString(locale, { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-  const prepared = runOf({ groups: [group(0, { state: 'PREPARED', validUntil: FUTURE, batchId: '0x' + '12'.repeat(32) }), group(1)] });
+  // The run's window outlasts a fresh preparation after the prepared request expires (else the request is the last one: round 6 C1).
+  const prepared = runOf({ expiresAt: '3000-01-01T00:00:00.000Z', groups: [group(0, { state: 'PREPARED', validUntil: FUTURE, batchId: '0x' + '12'.repeat(32) }), group(1)] });
   it('USER_FUNDED_PREPARED_STILL_VALID: the wallet was not asked now; until when the earlier request stays valid, from the run view', () => {
     const html = render(state({ run: prepared, error: 'USER_FUNDED_PREPARED_STILL_VALID' }));
     expect(html).toContain(`FloFi did not ask your wallet this time: the request it already prepared stays valid on chain until ${time(FUTURE, 'en-US')}`);
@@ -176,8 +177,10 @@ describe('review fixes U2/U3/U4: refusals of the batch path in plain words (EN/P
   it('without a prepared batch group in the run view: words without a time that stay true once it expired (never a placeholder or the code)', () => {
     for (const run of [null, runOf({}), runOf({ groups: [group(0, { state: 'PREPARED', strategy: 'EVM_USER_OPERATION', validUntil: FUTURE }), group(1)] })]) {
       const html = render(state({ run, error: 'USER_FUNDED_PREPARED_STILL_VALID' }));
-      expect(html).toContain('FloFi already prepared a request for this step that may still be open in your wallet. Confirm it there, or try again once it has expired '
-        + '(at most 10 minutes after it was prepared); FloFi never prepares a second one that could run alongside it.');
+      expect(html).toContain('FloFi already prepared a request for this step that may still be open in your wallet. Confirm it only within 10 minutes of when it '
+        + 'was prepared (after that its on-chain deadline refuses it and your wallet would still pay the fee: reject it), or try again once it has expired; FloFi '
+        + 'never prepares a second one that could run alongside it.');
+      expect(html).not.toContain('Confirm it there');
       expect(html).not.toMatch(/\{\d\}|USER_FUNDED_PREPARED_STILL_VALID|expired at|stays valid|wait until/);
     }
     expect(render(state({ run: runOf({}), error: 'USER_FUNDED_PREPARED_STILL_VALID' }), 'PT'))
@@ -262,7 +265,7 @@ describe('review fix U7: a partial completion and an ended run claim nothing the
   it('ended while a batch handed to the wallet was never answered: it may have executed; its steps are never "Not run"', () => {
     for (const s of [state({ run: ended }), state({ run: ended, review: review() })]) {
       const html = render(s);
-      expect(html).toContain('A batch was handed to your wallet and its answer never reached FloFi: it may have executed before it expired. Check your wallet&#x27;s activity.');
+      expect(html).toContain('A batch was handed to your wallet and FloFi never recorded an answer for it: it may have executed before it expired. Check your wallet&#x27;s activity.');
       expect(html).toContain(MAY_HAVE_EXECUTED);
       expect(html).not.toContain('Not run');
       const pt = render(s, 'PT');
@@ -281,7 +284,7 @@ describe('review fix U7: a partial completion and an ended run claim nothing the
   });
   it('every new message has its own PT translation', () => {
     for (const text of ['Its batch may have executed before it expired; check your wallet\'s activity',
-      'A batch was handed to your wallet and its answer never reached FloFi: it may have executed before it expired. Check your wallet\'s activity.',
+      'A batch was handed to your wallet and FloFi never recorded an answer for it: it may have executed before it expired. Check your wallet\'s activity.',
       'Stopped. FloFi submits nothing more of this workflow; you decide what happens next.',
       'Partially completed: the reconciled steps stay done. FloFi submits nothing more of this workflow; you decide what happens next.'])
       expect(translate('PT', text), text).not.toBe(text);
@@ -301,7 +304,7 @@ describe('round 4 U2: a run stopped at its expiry with a batch handed out and ne
       const html = render(s);
       expect(html).toContain(MAY_HAVE_EXECUTED);
       expect(html).not.toMatch(/Stopped before submission|Not run/);
-      expect(html).toContain('A batch was handed to your wallet and its answer never reached FloFi: it may have executed before it expired. Check your wallet&#x27;s activity.');
+      expect(html).toContain('A batch was handed to your wallet and FloFi never recorded an answer for it: it may have executed before it expired. Check your wallet&#x27;s activity.');
       const pt = render(s, 'PT');
       expect(pt).toContain(PT_MAY_HAVE_EXECUTED);
       expect(pt).not.toMatch(/Parada antes do envio|Não executada/);
@@ -351,7 +354,7 @@ describe('round 4 U2: a run stopped at its expiry with a batch handed out and ne
 const STILL_VALID = 'USER_FUNDED_PREPARED_STILL_VALID', OUTCOME_UNKNOWN = 'WALLET_BATCH_OUTCOME_UNKNOWN';
 const at = (iso: string, locale: string) => new Date(iso).toLocaleTimeString(locale, { hour: '2-digit', minute: '2-digit', second: '2-digit' });
 /** The banner of a run whose batch was handed to the wallet and never answered (as rendered). */
-const MAY_HAVE_RUN_NOTE = 'A batch was handed to your wallet and its answer never reached FloFi: it may have executed before it expired. Check your wallet&#x27;s activity.';
+const MAY_HAVE_RUN_NOTE = 'A batch was handed to your wallet and FloFi never recorded an answer for it: it may have executed before it expired. Check your wallet&#x27;s activity.';
 const checkWallet = (iso: string) => `The request FloFi prepared expired at ${at(iso, 'en-US')}. FloFi will not ask your wallet for a fresh one: check your wallet&#x27;s `
   + 'activity (it may have executed before it expired), then end the workflow.';
 
@@ -390,8 +393,9 @@ describe('round 5 C1: an expired request offers a fresh one only when this page 
   });
   it('every new message has its own PT translation', () => {
     for (const text of ['The request FloFi prepared expired at {0}. FloFi will not ask your wallet for a fresh one: check your wallet\'s activity (it may have executed '
-      + 'before it expired), then end the workflow.', 'FloFi already prepared a request for this step that may still be open in your wallet. Confirm it there, or try '
-      + 'again once it has expired (at most 10 minutes after it was prepared); FloFi never prepares a second one that could run alongside it.'])
+      + 'before it expired), then end the workflow.', 'FloFi already prepared a request for this step that may still be open in your wallet. Confirm it only within '
+      + '10 minutes of when it was prepared (after that its on-chain deadline refuses it and your wallet would still pay the fee: reject it), or try again once it '
+      + 'has expired; FloFi never prepares a second one that could run alongside it.'])
       expect(translate('PT', text, '12:00:00'), text).not.toBe(translate('EN', text, '12:00:00'));
   });
 });
@@ -479,5 +483,170 @@ describe('round 5 C6: copy for the new codes (EN/PT)', () => {
     expect(html).toContain('A Solana step that spends what an earlier step of the same batch delivers is signed once that output has landed (one more wallet prompt).');
     expect(html).not.toContain('Not available for this step');
     expect(render(s, 'PT')).toContain('Uma etapa na Solana que gasta o que uma etapa anterior do mesmo lote entrega');
+  });
+});
+
+/** The state words of the steps list (the group facts use other markup). */
+const stepLabels = (html: string) => [...html.matchAll(/class="workflow-run-state">([^<]*)</g)].map(m => m[1]);
+const BATCH = '0x' + '12'.repeat(32);
+
+describe('round 6 C1: a still-valid request says "wait, then try again" only when a fresh one will be possible at its expiry', () => {
+  const now = Date.parse('2030-06-01T12:00:00.000Z'), validUntil = new Date(now + 2 * 60_000).toISOString();
+  /** The run's window ends `minutes` after the prepared request's validity. */
+  const run = (minutes: number, patch: Partial<RunView> = {}) => runOf({ expiresAt: new Date(Date.parse(validUntil) + minutes * 60_000).toISOString(),
+    groups: [group(0, { state: 'PREPARED', validUntil, batchId: BATCH }), group(1)], ...patch });
+  const last = (locale: string) => `FloFi did not ask your wallet this time: the request it already prepared stays valid on chain until ${at(validUntil, locale)}, and your `
+    + 'wallet may hold it. If your wallet shows it, confirm it there before then. FloFi will not prepare another request for this step.';
+  it('the window ends within a new preparation\'s validity after it: confirm it before then, no new request to come (EN/PT)', () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(now);
+      for (const minutes of [1, 5, 10]) {
+        const html = render(state({ run: run(minutes), error: STILL_VALID, refusedGroup: 0 }));
+        expect(html, `${minutes} min`).toContain(last('en-US'));
+        expect(html).not.toMatch(/wait until|try again/);
+        const pt = render(state({ run: run(minutes), error: STILL_VALID, refusedGroup: 0 }), 'PT');
+        expect(pt).toContain(`continua válido on-chain até ${at(validUntil, 'pt-BR')}`);
+        expect(pt).toContain('confirme-o lá antes disso. A FloFi não vai preparar outro pedido para esta etapa.');
+        expect(pt).not.toMatch(/aguarde até|tente de novo/);
+      }
+      // A window that outlasts a fresh preparation after it: wait, then try again (unchanged).
+      const open = render(state({ run: run(11), error: STILL_VALID, refusedGroup: 0 }));
+      expect(open).toContain(`otherwise wait until ${at(validUntil, 'en-US')}, then try again`);
+      expect(open).not.toContain('will not prepare another one');
+    } finally { vi.useRealTimers(); }
+  });
+  it('nor when this page would not ask for one: its request was handed to the wallet and the answer lost, or the run is not running', () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(now);
+      expect(render(state({ run: run(60), error: STILL_VALID, refusedGroup: 0, unrecorded: true }))).toContain(last('en-US'));
+      expect(render(state({ run: run(60, { state: 'HALTED', nextAction: 'OWNER_DECIDES' }), error: STILL_VALID, refusedGroup: 0 }))).toContain(last('en-US'));
+      // The run view's own prepared batch dates it when no group is named.
+      expect(render(state({ run: run(5), error: STILL_VALID }))).toContain(last('en-US'));
+    } finally { vi.useRealTimers(); }
+  });
+  it('the new message has its own PT translation', () => {
+    const text = 'FloFi did not ask your wallet this time: the request it already prepared stays valid on chain until {0}, and your wallet may hold it. If your wallet '
+      + 'shows it, confirm it there before then. FloFi will not prepare another request for this step.';
+    expect(translate('PT', text, '12:00:00')).not.toBe(translate('EN', text, '12:00:00'));
+  });
+});
+
+describe('round 6 C2: no "Authorize" for a due wallet batch the run\'s window no longer lets FloFi prepare (WORKFLOW_RUN_EXPIRED)', () => {
+  const now = Date.parse('2030-06-01T12:00:00.000Z');
+  const run = (minutes: number, first: Group = group(0)) => runOf({ expiresAt: new Date(now + minutes * 60_000).toISOString(), groups: [first, group(1)] });
+  const WINDOW = 'This workflow&#x27;s time window has ended, or ends too soon for a new wallet request, so FloFi does not prepare another one for it. If a request '
+    + 'is still open in your wallet, check your wallet&#x27;s activity; you can end the workflow once no request of it can still execute.';
+  const PT_WINDOW = 'A janela de tempo deste fluxo terminou, ou termina cedo demais para um novo pedido à carteira, então a FloFi não prepara outro pedido para ele.';
+  it('the window has passed or ends within a new preparation\'s validity (10 minutes): no Authorize; the panel says why (EN/PT)', () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(now);
+      for (const minutes of [-1, 1, 5, 10]) {
+        const html = render(state({ run: run(minutes) }));
+        expect(html, `${minutes} min`).not.toContain('Authorize steps');
+        expect(html).toContain(WINDOW);
+        expect(html).not.toMatch(/Nothing was sent/i);
+        const pt = render(state({ run: run(minutes) }), 'PT');
+        expect(pt).not.toContain('Autorizar as etapas');
+        expect(pt).toContain(PT_WINDOW);
+      }
+      const open = render(state({ run: run(11) }));
+      expect(open).toContain('Authorize steps 1–1 now');
+      expect(open).not.toContain(WINDOW);
+    } finally { vi.useRealTimers(); }
+  });
+  it('a request FloFi already prepared is handed out again while it is valid: Authorize stays until its validity passes', () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(now);
+      const valid = render(state({ run: run(8, group(0, { state: 'PREPARED', validUntil: new Date(now + 5 * 60_000).toISOString(), batchId: BATCH })) }));
+      expect(valid).toContain('Authorize steps 1–1 now');
+      expect(valid).not.toContain(WINDOW);
+      const expired = render(state({ run: run(8, group(0, { state: 'PREPARED', validUntil: new Date(now - 60_000).toISOString(), batchId: BATCH })) }));
+      expect(expired).not.toContain('Authorize steps');
+      expect(expired).toContain(WINDOW);
+      // An unreadable window fails closed.
+      expect(render(state({ run: { ...run(60), expiresAt: 'not a time' } }))).not.toContain('Authorize steps');
+    } finally { vi.useRealTimers(); }
+  });
+  it('WORKFLOW_RUN_EXPIRED reads in words, never "Nothing was sent" (a prepared batch may still be in the wallet), and is not said twice (EN/PT)', () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(now);
+      for (const run_ of [run(5, group(0, { state: 'PREPARED', validUntil: new Date(now - 60_000).toISOString(), batchId: BATCH })), run(60), runOf({})]) {
+        const html = render(state({ run: run_, error: 'WORKFLOW_RUN_EXPIRED' }));
+        expect(html.split(WINDOW).length - 1).toBe(1);
+        expect(html).not.toMatch(/Nothing was sent|WORKFLOW_RUN_EXPIRED/);
+        expect(render(state({ run: run_, error: 'WORKFLOW_RUN_EXPIRED' }), 'PT')).toContain(PT_WINDOW);
+      }
+    } finally { vi.useRealTimers(); }
+  });
+  it('while the wallet prompt is open, an expired request is rejected there even when no fresh one follows (EN/PT)', () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(now);
+      const validUntil = new Date(now - 60_000).toISOString(), short = run(5, group(0, { state: 'PREPARED', validUntil, batchId: BATCH }));
+      const html = render(state({ run: short, review: review(), phase: 'wallet', unrecorded: true }));
+      expect(html).toContain(`its quote expired at ${at(validUntil, 'en-US')}: reject the request in your wallet; FloFi does not prepare another one for this workflow`);
+      expect(html).not.toMatch(/FloFi prepares a fresh one|does not ask your wallet for it again/);
+      expect(render(state({ run: short, review: review(), phase: 'wallet', unrecorded: true }), 'PT'))
+        .toContain('recuse a solicitação na sua carteira; a FloFi não prepara outra para este fluxo');
+      // Once the wallet was asked and its answer lost (FloFi never asks again), the wallet's activity is checked instead.
+      const asked = render(state({ run: short, review: review(), unrecorded: true }));
+      expect(asked).toContain('FloFi does not ask your wallet for it again');
+      expect(asked).not.toContain('reject the request in your wallet');
+      // A window that outlasts a fresh preparation keeps "FloFi prepares a fresh one".
+      expect(render(state({ run: run(60, group(0, { state: 'PREPARED', validUntil, batchId: BATCH })), review: review(), phase: 'wallet', unrecorded: true })))
+        .toContain('reject the request in your wallet; FloFi prepares a fresh one');
+    } finally { vi.useRealTimers(); }
+  });
+  it('a request declined in the wallet once the window no longer allows a new one never says "authorize again" (EN/PT)', () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(now);
+      const closed = run(5, group(0, { state: 'PREPARED', validUntil: new Date(now - 60_000).toISOString(), batchId: BATCH }));
+      const html = render(state({ run: closed, review: review(), error: 'WALLET_REQUEST_REJECTED' }));
+      expect(html).toContain('You declined the request in your wallet. Nothing was sent. FloFi does not prepare another request for this workflow; you can end it.');
+      expect(html).not.toMatch(/authorize again/);
+      expect(render(state({ run: closed, review: review(), error: 'WALLET_REQUEST_REJECTED' }), 'PT')).toContain('A FloFi não prepara outro pedido para este fluxo; você pode encerrá-lo.');
+      // A window that still allows a fresh request keeps "You can authorize again".
+      expect(render(state({ run: run(60), review: review(), error: 'WALLET_REQUEST_REJECTED' }))).toContain('You can authorize again');
+    } finally { vi.useRealTimers(); }
+  });
+  it('every new message has its own PT translation', () => {
+    for (const text of ['This workflow\'s time window has ended, or ends too soon for a new wallet request, so FloFi does not prepare another one for it. If a request is '
+      + 'still open in your wallet, check your wallet\'s activity; you can end the workflow once no request of it can still execute.',
+    'its quote expired at {0}: reject the request in your wallet; FloFi does not prepare another one for this workflow'])
+      expect(translate('PT', text, '12:00:00'), text).not.toBe(translate('EN', text, '12:00:00'));
+  });
+});
+
+describe('round 6 C4: a user-funded step is worded by its group — never "authorized" for a group nothing was signed for', () => {
+  const signedFirst = (patch: Partial<RunView> = {}) => runOf({ groups: [group(0, { state: 'AUTHORIZED', signed: true, batchId: BATCH }), group(1)], ...patch });
+  it('signed: "Signed in your wallet"; unsigned while the run runs: "Waiting for your wallet" — with or without the Review in this tab (EN/PT)', () => {
+    for (const runState of ['RUNNING', 'ATTENTION']) for (const review_ of [null, review()]) {
+      const s = state({ run: signedFirst({ state: runState }), review: review_ });
+      expect(stepLabels(render(s)), runState).toEqual(['Signed in your wallet', 'Waiting for your wallet']);
+      expect(stepLabels(render(s, 'PT'))).toEqual(['Assinada na sua carteira', 'À espera da sua carteira']);
+    }
+  });
+  it('unsigned in a halted or ended run: "Not signed" (EN/PT)', () => {
+    for (const runState of ['HALTED', 'CANCELLED', 'EXPIRED', 'FAILED']) {
+      const s = state({ run: signedFirst({ state: runState, nextAction: runState === 'HALTED' ? 'OWNER_DECIDES' : 'NONE' }) });
+      expect(stepLabels(render(s)), runState).toEqual(['Signed in your wallet', 'Not signed']);
+      expect(stepLabels(render(s, 'PT'))).toEqual(['Assinada na sua carteira', 'Não assinada']);
+    }
+  });
+  it('never "Authorized" or "Authorized in the batch"; a batch that may have executed keeps its own words', () => {
+    for (const run of [runOf({}), signedFirst(), signedFirst({ state: 'HALTED', nextAction: 'OWNER_DECIDES' })])
+      for (const s of [state({ run }), state({ run, review: review() })]) expect(render(s)).not.toMatch(/>Authorized|Authorized in the batch/);
+    const unknown = runOf({ state: 'HALTED', nextAction: 'OWNER_DECIDES', steps: [step(0, 'DELEGATED'), { ...step(1, 'DELEGATED'), code: OUTCOME_UNKNOWN }],
+      groups: [group(0, { state: 'AUTHORIZED', signed: true, batchId: BATCH }), group(1, { code: OUTCOME_UNKNOWN })] });
+    expect(stepLabels(render(state({ run: unknown })))).toEqual(['Signed in your wallet', 'Its batch may have executed before it expired; check your wallet&#x27;s activity']);
+  });
+  it('the new labels have their own PT translations', () => {
+    for (const text of ['Signed in your wallet', 'Not signed', 'Waiting for your wallet']) expect(translate('PT', text), text).not.toBe(text);
   });
 });

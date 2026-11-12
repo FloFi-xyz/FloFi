@@ -128,9 +128,10 @@ describe('channel run notices (P0 universal execution)', () => {
     expect(status(ended, 'PT')).toContain('1. Troca — resultado desconhecido — pode ter sido executada; confira a atividade da sua carteira');
     const { due, done } = plannedNotifications('EN', handoff, progressOf(ended), ORIGIN);
     expect(done).toBe(true);
-    expect(due.find(n => n.key.endsWith(':wfr:ended'))!.text).toBe('Workflow ended. A batch was handed to your wallet and its answer never reached FloFi: it may have '
-      + 'executed before its on-chain deadline. Check your wallet\'s activity.');
-    expect(plannedNotifications('PT', handoff, progressOf(ended), ORIGIN).due.find(n => n.key.endsWith(':wfr:ended'))!.text).toMatch(/pode ter sido executado/);
+    expect(due.find(n => n.key.endsWith(':wfr:ended'))!.text).toBe('Workflow ended. A batch was handed to your wallet and FloFi never recorded an answer for it: it may '
+      + 'have executed before its on-chain deadline. Check your wallet\'s activity.');
+    expect(plannedNotifications('PT', handoff, progressOf(ended), ORIGIN).due.find(n => n.key.endsWith(':wfr:ended'))!.text).toBe('O fluxo terminou. Um lote foi '
+      + 'entregue à sua carteira e o FloFi nunca registrou uma resposta para ele: ele pode ter sido executado antes do prazo na rede. Confira a atividade da sua carteira.');
     // An ordinary end keeps its code.
     const plain = runOf({ ...ended, steps: [step(0, 'SKIPPED', 'WORKFLOW_RUN_CANCELLED_BY_OWNER')], groups: [] });
     expect(plannedNotifications('EN', handoff, progressOf(plain), ORIGIN).due.find(n => n.key.endsWith(':wfr:ended'))!.text)
@@ -152,9 +153,12 @@ describe('channel run notices (P0 universal execution)', () => {
       const halt = haltNotice(run);
       expect(halt.key).toBe(`notify:${handoff.handoffId}:wfr:halted:0:${halted?.toLowerCase() ?? 'none'}:workflow_run_expired:unknown:${Date.parse(entered)}`);
       expect(halt.key).toMatch(OUTBOX_KEY);
-      expect(halt.text).toBe('Workflow stopped. A batch was handed to your wallet and its answer never reached FloFi: it may have executed before its on-chain deadline. '
+      expect(halt.text).toBe('Workflow stopped. A batch was handed to your wallet and FloFi never recorded an answer for it: it may have executed before its on-chain deadline. '
         + 'Check your wallet\'s activity. FloFi submits nothing more of it; open FloFi to decide what happens next.');
       expect(haltNotice(run, 'PT').text).toMatch(/^Fluxo interrompido\. Um lote foi entregue à sua carteira .* pode ter sido executado .* Confira a atividade da sua carteira\./);
+      // "Never recorded", not "never reached FloFi": an answer may have arrived after the stop and been refused (WALLET_BATCH_ANSWERED_AFTER_STOP).
+      expect(haltNotice(run, 'PT').text).toContain('o FloFi nunca registrou uma resposta para ele');
+      for (const language of ['EN', 'PT'] as const) expect(haltNotice(run, language).text).not.toMatch(/never reached|nunca chegou/);
       for (const language of ['EN', 'PT'] as const) {
         const said = [status(run, language), ...notices(run, language).map(n => n.text)].join('\n');
         expect(said, `${halted} ${language}`).not.toMatch(/before any step completed|before anything was sent|nothing was sent|stopped before submission|not run|antes de concluir|antes de qualquer envio|parada antes do envio|não executada/);
@@ -163,8 +167,8 @@ describe('channel run notices (P0 universal execution)', () => {
     // After an earlier step reconciled: partially completed, the batch may have executed — never "their funds rest in your wallet".
     const partial = runOf({ state: 'HALTED', halted: 'PARTIAL', currentStep: 1, code: 'WORKFLOW_RUN_EXPIRED', nextAction: 'OWNER_DECIDES', updatedAt: entered,
       steps: [step(0, 'RECONCILED'), step(1, 'BLOCKED', U), step(2, 'BLOCKED', U)], groups: [group(0, [0, 0], 'RECONCILED'), group(1, [1, 2], 'BLOCKED', U)] });
-    expect(haltNotice(partial).text).toBe('Workflow partially completed: the reconciled steps stay done. A batch was handed to your wallet and its answer never reached '
-      + 'FloFi: it may have executed before its on-chain deadline. Check your wallet\'s activity. FloFi submits nothing more of it; open FloFi to decide what happens next.');
+    expect(haltNotice(partial).text).toBe('Workflow partially completed: the reconciled steps stay done. A batch was handed to your wallet and FloFi never recorded an answer '
+      + 'for it: it may have executed before its on-chain deadline. Check your wallet\'s activity. FloFi submits nothing more of it; open FloFi to decide what happens next.');
     expect(haltNotice(partial, 'PT').text).toMatch(/^Fluxo parcialmente concluído: as etapas reconciliadas ficam feitas\. Um lote foi entregue/);
     for (const language of ['EN', 'PT'] as const) expect(haltNotice(partial, language).text).not.toMatch(/rest in your wallet|ficam na sua carteira/);
     expect(status(partial)).toMatch(/^Workflow: partially completed\n1\. Swap — reconciled ✅\n2\. Swap — outcome unknown — it may have executed/);
@@ -174,7 +178,7 @@ describe('channel run notices (P0 universal execution)', () => {
         groups: [group(0, [0, 1], 'BLOCKED', U), group(1, [2, 2], 'SKIPPED', 'WORKFLOW_RUN_EXPIRED')] });
       const { due, done } = plannedNotifications('EN', handoff, progressOf(over), ORIGIN);
       expect(done, state).toBe(true);
-      expect(due.find(n => n.key.endsWith(':wfr:ended'))!.text, state).toBe('Workflow ended. A batch was handed to your wallet and its answer never reached FloFi: it may '
+      expect(due.find(n => n.key.endsWith(':wfr:ended'))!.text, state).toBe('Workflow ended. A batch was handed to your wallet and FloFi never recorded an answer for it: it may '
         + 'have executed before its on-chain deadline. Check your wallet\'s activity.');
     }
   });

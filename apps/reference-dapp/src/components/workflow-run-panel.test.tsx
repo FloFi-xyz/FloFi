@@ -158,7 +158,7 @@ describe('review fix U7: a partial completion and an ended run claim nothing the
     const ended = claim({ state: 'CANCELLED', mode: 'USER_FUNDED', code: 'OWNER_CANCELLED', nextAction: 'NONE',
       steps: [{ ...step(0, 'SKIPPED'), code: OUTCOME_UNKNOWN }, { ...step(1, 'SKIPPED'), code: OUTCOME_UNKNOWN }], groups: [group({ state: 'SKIPPED', code: OUTCOME_UNKNOWN })] });
     const html = render(ended);
-    expect(html).toContain('A batch was handed to your wallet and its answer never reached FloFi: it may have executed before it expired. Check your wallet&#x27;s activity.');
+    expect(html).toContain('A batch was handed to your wallet and FloFi never recorded an answer for it: it may have executed before it expired. Check your wallet&#x27;s activity.');
     expect(html).toContain(MAY_HAVE_EXECUTED);
     expect(html).not.toContain('Not run');
     const pt = render(ended, 'PT');
@@ -187,7 +187,7 @@ describe('round 4 U2: a run stopped at its expiry with a batch handed out and ne
       const html = render(claim(run));
       expect(html).toContain(MAY_HAVE_EXECUTED);
       expect(html).not.toMatch(/Stopped before submission|Not run/);
-      expect(html).toContain('A batch was handed to your wallet and its answer never reached FloFi: it may have executed before it expired. Check your wallet&#x27;s activity.');
+      expect(html).toContain('A batch was handed to your wallet and FloFi never recorded an answer for it: it may have executed before it expired. Check your wallet&#x27;s activity.');
       const pt = render(claim(run), 'PT');
       expect(pt).toContain(PT_MAY_HAVE_EXECUTED);
       expect(pt).not.toMatch(/Parada antes do envio|Não executada/);
@@ -226,7 +226,7 @@ describe('round 4 U2: a run stopped at its expiry with a batch handed out and ne
 
 describe('round 5 C4: a step or group carrying WALLET_BATCH_OUTCOME_UNKNOWN words the halted or ended run as "may have executed", whatever its state', () => {
   const OUTCOME_UNKNOWN = 'WALLET_BATCH_OUTCOME_UNKNOWN';
-  const NOTE = 'A batch was handed to your wallet and its answer never reached FloFi: it may have executed before it expired. Check your wallet&#x27;s activity.';
+  const NOTE = 'A batch was handed to your wallet and FloFi never recorded an answer for it: it may have executed before it expired. Check your wallet&#x27;s activity.';
   // A view recorded before the server refused answers after a stop: the code stays on items that show an answered state.
   const answered = { mode: 'USER_FUNDED', code: 'WORKFLOW_RUN_EXPIRED', steps: [{ ...step(0, 'FAILED'), code: OUTCOME_UNKNOWN }, { ...step(1, 'FAILED'), code: OUTCOME_UNKNOWN }],
     groups: [group({ state: 'FAILED', code: OUTCOME_UNKNOWN, signed: true })] };
@@ -247,5 +247,34 @@ describe('round 5 C4: a step or group carrying WALLET_BATCH_OUTCOME_UNKNOWN word
     expect(render(claim({ ...answered, state: 'CANCELLED', nextAction: 'NONE' }))).toContain(NOTE);
     expect(render(claim({ ...answered, state: 'COMPLETED', nextAction: 'NONE', steps: answered.steps.map(s => ({ ...s, state: 'RECONCILED' })),
       groups: [group({ state: 'RECONCILED', code: OUTCOME_UNKNOWN, signed: true })] }))).not.toContain('may have executed');
+  });
+});
+
+describe('round 6 C4: a user-funded step is worded by its group — never "Authorized" for a group nothing was signed for', () => {
+  /** The state words of the steps list only (the groups list uses the same class). */
+  const stepLabels = (html: string) => [...html.slice(html.indexOf('<ol class="workflow-run-steps">'), html.indexOf('</ol>')).matchAll(/class="workflow-run-state">([^<]*)</g)]
+    .map(m => m[1]);
+  const userFunded = (state: string) => claim({ state, mode: 'USER_FUNDED', nextAction: state === 'RUNNING' || state === 'ATTENTION' ? 'OWNER_SIGNS_GROUP' : state === 'HALTED'
+    ? 'OWNER_DECIDES' : 'NONE', steps: [step(0, 'DELEGATED'), step(1, 'DELEGATED')],
+  groups: [group({ steps: [0, 0], state: 'AUTHORIZED', signed: true, batchId: '0x' + '12'.repeat(32) }), group({ index: 1, steps: [1, 1], state: 'PLANNED' })] });
+  it('signed: "Signed in your wallet"; unsigned while the run runs: "Waiting for your wallet" (EN/PT)', () => {
+    for (const state of ['RUNNING', 'ATTENTION']) {
+      expect(stepLabels(render(userFunded(state))), state).toEqual(['Signed in your wallet', 'Waiting for your wallet']);
+      expect(stepLabels(render(userFunded(state), 'PT'))).toEqual(['Assinada na sua carteira', 'À espera da sua carteira']);
+    }
+  });
+  it('unsigned in a halted or ended run: "Not signed" (EN/PT)', () => {
+    for (const state of ['HALTED', 'CANCELLED', 'EXPIRED', 'FAILED']) {
+      expect(stepLabels(render(userFunded(state))), state).toEqual(['Signed in your wallet', 'Not signed']);
+      expect(stepLabels(render(userFunded(state), 'PT'))).toEqual(['Assinada na sua carteira', 'Não assinada']);
+    }
+  });
+  it('a delegated-mode step keeps "Authorized" (its grant was signed); a batch that may have executed keeps its own words', () => {
+    expect(stepLabels(render(claim({ state: 'RUNNING', mode: 'DELEGATED', nextAction: 'WAITING_FOR_RECONCILIATION', steps: [step(0, 'DELEGATED'), step(1, 'DELEGATED')] }))))
+      .toEqual(['Authorized', 'Authorized']);
+    const unknown = claim({ state: 'HALTED', mode: 'USER_FUNDED', nextAction: 'OWNER_DECIDES',
+      steps: [step(0, 'DELEGATED'), { ...step(1, 'DELEGATED'), code: 'WALLET_BATCH_OUTCOME_UNKNOWN' }],
+      groups: [group({ steps: [0, 0], state: 'AUTHORIZED', signed: true }), group({ index: 1, steps: [1, 1], state: 'BLOCKED', code: 'WALLET_BATCH_OUTCOME_UNKNOWN' })] });
+    expect(stepLabels(render(unknown))).toEqual(['Signed in your wallet', MAY_HAVE_EXECUTED]);
   });
 });

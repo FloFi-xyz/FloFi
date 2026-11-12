@@ -157,13 +157,14 @@ const EN = {
     ? 'In FloFi you can run each step through its own flow, or end it.' : 'Open FloFi to decide what happens next.'}`,
   runHaltedStopped: 'Workflow stopped before any step completed. FloFi submits nothing more of it; open FloFi to decide what happens next.',
   runHaltedUnclassified: 'Workflow stopped. FloFi submits nothing more of it; open FloFi to see what each step did and decide what happens next.',
-  // A halt while a batch handed to the wallet was never answered: it may have executed, so never "before any step completed" or "nothing was sent".
+  // A halt while a batch handed to the wallet has no recorded answer: it may have executed, so never "before any step completed" or "nothing was sent".
+  // "Never recorded", not "never reached FloFi": an answer may have arrived after the stop and been refused (WALLET_BATCH_ANSWERED_AFTER_STOP, logged).
   runHaltedBatchUnknown: (partial: boolean) => `${partial ? 'Workflow partially completed: the reconciled steps stay done. ' : 'Workflow stopped. '}A batch was `
-    + 'handed to your wallet and its answer never reached FloFi: it may have executed before its on-chain deadline. Check your wallet\'s activity. FloFi submits '
+    + 'handed to your wallet and FloFi never recorded an answer for it: it may have executed before its on-chain deadline. Check your wallet\'s activity. FloFi submits '
     + 'nothing more of it; open FloFi to decide what happens next.',
   runAttention: 'A submitted step has no final outcome yet. FloFi keeps observing it and never resubmits it.',
   runEnded: (code: string) => `Workflow ended without completing (${code}). See FloFi for details.`,
-  runEndedBatchUnknown: 'Workflow ended. A batch was handed to your wallet and its answer never reached FloFi: it may have executed before its on-chain deadline. '
+  runEndedBatchUnknown: 'Workflow ended. A batch was handed to your wallet and FloFi never recorded an answer for it: it may have executed before its on-chain deadline. '
     + 'Check your wallet\'s activity.',
 };
 /** `groups`: the user-funded execution groups the owner is offered in FloFi (null: not offered); `atLeast` while the count is a lower bound. */
@@ -286,11 +287,11 @@ const PT: Copy = {
   runHaltedStopped: 'Fluxo interrompido antes de concluir qualquer etapa. O FloFi não envia mais nada dele; abra o FloFi para decidir o que acontece a seguir.',
   runHaltedUnclassified: 'Fluxo interrompido. O FloFi não envia mais nada dele; abra o FloFi para ver o que cada etapa fez e decidir o que acontece a seguir.',
   runHaltedBatchUnknown: partial => `${partial ? 'Fluxo parcialmente concluído: as etapas reconciliadas ficam feitas. ' : 'Fluxo interrompido. '}Um lote foi `
-    + 'entregue à sua carteira e a resposta dela nunca chegou ao FloFi: ele pode ter sido executado antes do prazo na rede. Confira a atividade da sua carteira. '
+    + 'entregue à sua carteira e o FloFi nunca registrou uma resposta para ele: ele pode ter sido executado antes do prazo na rede. Confira a atividade da sua carteira. '
     + 'O FloFi não envia mais nada dele; abra o FloFi para decidir o que acontece a seguir.',
   runAttention: 'Uma etapa enviada ainda não tem resultado final. O FloFi continua a observá-la e nunca a reenvia.',
   runEnded: code => `O fluxo terminou sem concluir (${code}). Veja os detalhes no FloFi.`,
-  runEndedBatchUnknown: 'O fluxo terminou. Um lote foi entregue à sua carteira e a resposta dela nunca chegou ao FloFi: ele pode ter sido executado antes do prazo na rede. '
+  runEndedBatchUnknown: 'O fluxo terminou. Um lote foi entregue à sua carteira e o FloFi nunca registrou uma resposta para ele: ele pode ter sido executado antes do prazo na rede. '
     + 'Confira a atividade da sua carteira.',
 };
 const REFUSALS_PT: Readonly<Record<string, string>> = {

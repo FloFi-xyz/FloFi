@@ -619,7 +619,8 @@ export function useEditorWorkflowRun(input: { readonly workflow: { readonly work
 
 const ACTION: Readonly<Record<string, string>> = { swap: 'Swap', bridge: 'Bridge', supply: 'Supply', borrow: 'Borrow', repay: 'Repay', withdraw: 'Withdraw',
   add_liquidity: 'Add liquidity', transfer: 'Transfer' };
-const STEP_STATE: Readonly<Record<string, string>> = { PENDING: 'Waiting', READY: 'Ready for your signature', AWAITING_OWNER: 'In your wallet', DELEGATED: 'Authorized in the batch',
+/** A user-funded run's DELEGATED step is worded by its group (`stepText`), never "authorized" for a group nothing was signed for. */
+const STEP_STATE: Readonly<Record<string, string>> = { PENDING: 'Waiting', READY: 'Ready for your signature', AWAITING_OWNER: 'In your wallet', DELEGATED: 'Authorized',
   RECONCILED: 'Reconciled', FAILED: 'Failed', UNCERTAIN: 'Outcome pending', SKIPPED: 'Not run', BLOCKED: 'Stopped before submission' };
 const GROUP_STATE: Readonly<Record<string, string>> = { PLANNED: 'Not signed yet', PREPARED: 'Waiting for your wallet', AUTHORIZED: 'Confirmed in your wallet', SUBMITTED: 'Sent to the network',
   RECONCILED: 'Reconciled', FAILED: 'Failed', UNCERTAIN: 'Outcome pending', BLOCKED: 'Stopped before submission', SKIPPED: 'Not run', EXPIRED: 'Expired' };
@@ -656,17 +657,28 @@ export const EXECUTION_REASON: Readonly<Record<string, string>> = {
  * `PREPARED_MIN_REMAINING_MS`, 3 minutes, left: too little to review and confirm it again), so the server prepares no second batch that could
  * run alongside it. This request asked the wallet nothing; the earlier batch may be in the wallet (another tab or device may have handed it
  * over), so nothing here says it was never sent. Worded from the refused group's own state (`refusedGroup`), whatever it is by now:
- *   still PREPARED and valid        until when the owner waits for it (`PREPARED_STILL_VALID_UNTIL`)
+ *   still PREPARED and valid        until when the owner waits for it, and to try again then (`PREPARED_STILL_VALID_UNTIL`) only when a fresh
+ *                                   one will be possible at that time (the same rule as below, evaluated at its validity); else to confirm it
+ *                                   before then, with no new request to come (`PREPARED_STILL_VALID_LAST`)
  *   its validity passed             that it expired; that a fresh one can be asked (`PREPARED_EXPIRED_AT`) only when this page would actually
  *                                   send one — it never asked the wallet for this group and lost the answer (`askedOnce`), and the run is
  *                                   running with a window that outlasts a new preparation — else to check the wallet's activity and end the
  *                                   workflow (`PREPARED_EXPIRED_CHECK_WALLET`)
  *   answered, or stopped unanswered nothing: the group's own state, or the run's "may have executed" note, says what happened (`refusalSettled`)
  *   moved on, no time to date it    nothing (it no longer describes the group)
- * The undated words (true before and after the request expires) only when the run view shows no group to date it from.
+ * The undated words only when the run view shows no group to date it from (and on /approve, which shows no group validity): true before and
+ * after the request expires, they never tell the owner to confirm it unconditionally — once its validity passed, its on-chain deadline refuses
+ * it and the wallet would still pay the fee.
  */
-const PREPARED_STILL_VALID = 'FloFi already prepared a request for this step that may still be open in your wallet. Confirm it there, or try again once it has expired (at most 10 minutes after it was prepared); FloFi never prepares a second one that could run alongside it.';
+const PREPARED_STILL_VALID = 'FloFi already prepared a request for this step that may still be open in your wallet. Confirm it only within 10 minutes of when it was prepared (after that its on-chain deadline refuses it and your wallet would still pay the fee: reject it), or try again once it has expired; FloFi never prepares a second one that could run alongside it.';
 const PREPARED_STILL_VALID_UNTIL = 'FloFi did not ask your wallet this time: the request it already prepared stays valid on chain until {0}, and your wallet may hold it. If your wallet shows it, confirm it there; otherwise wait until {0}, then try again. FloFi never prepares a second request that could run alongside it.';
+const PREPARED_STILL_VALID_LAST = 'FloFi did not ask your wallet this time: the request it already prepared stays valid on chain until {0}, and your wallet may hold it. If your wallet shows it, confirm it there before then. FloFi will not prepare another request for this step.';
+/**
+ * WORKFLOW_RUN_EXPIRED: the run's window has passed, or ends before a NEW wallet request could expire (the server prepares one only while the
+ * window outlasts its validity, `preparedHorizonMs`). A request FloFi prepared earlier may still be in the wallet, so never "nothing was sent".
+ * Also the note shown where the due group's "Authorize" is withheld for that reason.
+ */
+const RUN_WINDOW_CLOSED = 'This workflow\'s time window has ended, or ends too soon for a new wallet request, so FloFi does not prepare another one for it. If a request is still open in your wallet, check your wallet\'s activity; you can end the workflow once no request of it can still execute.';
 const PREPARED_EXPIRED_AT = 'The request FloFi prepared expired at {0}; you can ask for a fresh one now.';
 const PREPARED_EXPIRED_CHECK_WALLET = 'The request FloFi prepared expired at {0}. FloFi will not ask your wallet for a fresh one: check your wallet\'s activity (it may have executed before it expired), then end the workflow.';
 /**
@@ -686,6 +698,8 @@ export const EXECUTION_REFUSAL: Readonly<Record<string, string>> = {
   EVM_WALLET_REQUIRED: 'Connect your wallet to review the whole workflow.',
   REVIEW_EXPIRED: 'The reviewed prices expired. Review the workflow again to refresh them.',
   WALLET_REQUEST_REJECTED: 'You declined the request in your wallet. Nothing was sent. You can authorize again; the workflow can be ended once the prepared request expires.',
+  // The same answer once this workflow's window no longer allows a new request (the Authorize action is gone): nothing to authorize again.
+  WALLET_REQUEST_REJECTED_WINDOW_CLOSED: 'You declined the request in your wallet. Nothing was sent. FloFi does not prepare another request for this workflow; you can end it.',
   WALLET_BATCH_SENT_UNRECORDED: 'Your wallet already has the batch for these steps, but FloFi has not recorded it yet. Do not send it again: FloFi reads it back from your wallet.',
   WORKFLOW_RUN_GROUP_IN_FLIGHT: 'A prepared wallet request is still valid, so the workflow cannot be ended yet. Try again after it expires.',
   EDITOR_EXECUTION_PLAN_UNVERIFIED: 'FloFi could not compare the prepared minimums with your review, so your wallet was not asked. Try again.',
@@ -717,6 +731,7 @@ export const EXECUTION_REFUSAL: Readonly<Record<string, string>> = {
   WALLET_ATTEMPT_UNRECORDABLE: 'This browser could not keep a record of the request, so FloFi did not ask your wallet (that record is what stops a request from ever being sent twice). Allow site storage or use another browser, then try again.',
   // A wallet answer (or report) for a group FloFi had already stopped while its batch was unanswered: never recorded, never "nothing was sent".
   WALLET_BATCH_ANSWERED_AFTER_STOP: 'Your wallet reported a batch for a step FloFi had already stopped: it may have executed. Check your wallet\'s activity; FloFi could not record it.',
+  WORKFLOW_RUN_EXPIRED: RUN_WINDOW_CLOSED,
 };
 /** A Review refusal that names the step it is about (`refusal.step`, shown as {0}): only then is a step number written. */
 export const STEP_REFUSAL: Readonly<Record<string, string>> = {
@@ -761,6 +776,16 @@ const outcomeUnknown = (run: RunView) => run.state !== 'COMPLETED'
 /** A step's or group's state in words; one whose wallet batch may have executed unseen says so instead of "Not run" or "Stopped before submission". */
 const stateText = (labels: Readonly<Record<string, string>>, item: { readonly state: string; readonly code: string | null }) =>
   batchUnanswered(item) ? 'Its batch may have executed before it expired; check your wallet\'s activity' : labels[item.state] ?? item.state;
+/**
+ * A step's state in words. A user-funded run's DELEGATED step belongs to its group, so it says what that group shows: signed in the wallet,
+ * waiting for it while the run can still ask, else not signed (a halted or ended run) — never "authorized" for a group nothing was signed for.
+ * The channels' rule (channels/core/status.ts) and /approve's.
+ */
+const stepText = (run: RunView, step: RunView['steps'][number]) => {
+  if (batchUnanswered(step) || run.mode !== 'USER_FUNDED' || step.state !== 'DELEGATED') return stateText(STEP_STATE, step);
+  const group = run.groups.find(g => g.steps[0] <= step.index && step.index <= g.steps[1]);
+  return group?.signed ? 'Signed in your wallet' : ['RUNNING', 'ATTENTION'].includes(run.state) ? 'Waiting for your wallet' : 'Not signed';
+};
 
 export function EditorWorkflowRunPanel({ state }: { state: EditorWorkflowRunState }) {
   const { t: tr, language } = useLocale();
@@ -777,7 +802,16 @@ export function EditorWorkflowRunPanel({ state }: { state: EditorWorkflowRunStat
   const runStep = (index: number) => run?.steps.find(s => s.index === index) ?? null;
   const plannedOf = (index: number) => run?.groups.flatMap(g => g.planned?.steps ?? []).find(s => s.index === index) ?? null;
   const currentGroup = run?.groups.find(g => g.steps[0] <= run.currentStep && run.currentStep <= g.steps[1]) ?? null;
-  const due = run && run.nextAction === 'OWNER_SIGNS_GROUP' && currentGroup && !state.unrecorded && !['wallet', 'confirming', 'authorizing', 'confirm-update'].includes(phase);
+  const dueGroup = run && run.nextAction === 'OWNER_SIGNS_GROUP' && currentGroup && !state.unrecorded && !['wallet', 'confirming', 'authorizing', 'confirm-update'].includes(phase)
+    ? currentGroup : null;
+  // A wallet batch group is offered only while the server would hand out a request for it rather than refuse WORKFLOW_RUN_EXPIRED: a fresh
+  // preparation (the run's window outlasts its validity: workflow-runs/service.ts `preparedHorizonMs`), or the request it already prepared while
+  // that is still valid (handed out again, or refused as USER_FUNDED_PREPARED_STILL_VALID with its own words). An unreadable time fails closed.
+  const preparable = (g: RunView['groups'][number]) => g.strategy !== 'EVM_WALLET_BATCH' || Boolean(run && Date.parse(run.expiresAt) > now + BATCH_PREPARATION_VALIDITY_MS)
+    || (g.state === 'PREPARED' && g.validUntil !== null && Date.parse(g.validUntil) > now);
+  const due = dueGroup !== null && preparable(dueGroup);
+  // The due group's request can no longer be prepared: no "Authorize" (it would only be refused); the panel says why instead.
+  const windowClosed = dueGroup !== null && !due;
   // The prepared wallet request(s) of the run view, dated by the LATEST validity: while any of them is still valid it is never called expired.
   const preparedUntil = run?.groups.filter(g => g.state === 'PREPARED' && g.strategy === 'EVM_WALLET_BATCH' && g.validUntil && Number.isFinite(Date.parse(g.validUntil)))
     .map(g => g.validUntil!).sort((a, b) => Date.parse(b) - Date.parse(a))[0] ?? null;
@@ -790,9 +824,11 @@ export function EditorWorkflowRunPanel({ state }: { state: EditorWorkflowRunStat
   // The wallet was asked for this group and FloFi never asks it again (`heldBatch`), so rejecting it there no longer brings a fresh request —
   // except while the wallet prompt is open: a rejection then answers (nothing sent) and the group is offered again.
   const askedOnce = state.unrecorded && phase !== 'wallet';
-  // This page would hand a FRESH request to the wallet for an expired one: it never asked the wallet for it and lost the answer, and the server
-  // would prepare one (a running run whose window outlasts a new preparation's validity: workflow-runs/service.ts `preparedHorizonMs`).
-  const freshRequest = Boolean(run && !askedOnce && ['RUNNING', 'ATTENTION'].includes(run.state) && Date.parse(run.expiresAt) > now + BATCH_PREPARATION_VALIDITY_MS);
+  // This page would hand a FRESH request to the wallet for an expired one at time `at`: it never asked the wallet for it and lost the answer,
+  // and the server would prepare one then (a running run whose window outlasts a new preparation's validity: workflow-runs/service.ts
+  // `preparedHorizonMs`).
+  const freshAt = (at: number) => Boolean(run && !askedOnce && ['RUNNING', 'ATTENTION'].includes(run.state) && Date.parse(run.expiresAt) > at + BATCH_PREPARATION_VALIDITY_MS);
+  const freshRequest = freshAt(now);
   // USER_FUNDED_PREPARED_STILL_VALID, worded from the refused group's own state (see `PREPARED_STILL_VALID`), dated by its validity itself (NOT
   // only while it is still in the future: `now` ticks while the refusal stays on screen). A state without `refusedGroup` dates it from the run
   // view's prepared wallet batches (the latest validity).
@@ -806,9 +842,12 @@ export function EditorWorkflowRunPanel({ state }: { state: EditorWorkflowRunStat
     if (refusedUntil && Date.parse(refusedUntil) <= now)
       return tr(refusedOpen && freshRequest ? PREPARED_EXPIRED_AT : PREPARED_EXPIRED_CHECK_WALLET, fmtTime(refusedUntil, language));
     if (!refusedOpen) return null;
-    return refusedUntil ? tr(PREPARED_STILL_VALID_UNTIL, fmtTime(refusedUntil, language)) : tr(PREPARED_STILL_VALID);
+    // "Wait until then, then try again" only when a fresh request will be possible at that time; else the request on hand is the last one.
+    return refusedUntil ? tr(freshAt(Date.parse(refusedUntil)) ? PREPARED_STILL_VALID_UNTIL : PREPARED_STILL_VALID_LAST, fmtTime(refusedUntil, language))
+      : tr(PREPARED_STILL_VALID);
   };
   const errorText = !error ? null : error === PREPARED_STILL_VALID_CODE ? stillValidText()
+    : error === 'WALLET_REQUEST_REJECTED' && windowClosed ? tr(EXECUTION_REFUSAL.WALLET_REQUEST_REJECTED_WINDOW_CLOSED!)
     : tr(EXECUTION_REFUSAL[error] ?? (mayHold
       ? 'FloFi could not complete this request ({0}). What your wallet already has stands: FloFi keeps following it and never sends it again.'
       : 'FloFi could not complete this request ({0}). Nothing was sent.'), error);
@@ -855,7 +894,7 @@ export function EditorWorkflowRunPanel({ state }: { state: EditorWorkflowRunStat
                 && <div><dt>{tr('Expected')}</dt><dd>{tr('Quoted when this step becomes due')}</dd></div>}
               {live?.outcome?.received.map(r => <div key={r.asset}><dt>{tr('Received (reconciled)')}</dt><dd>{receivedText(r, [planned?.expected, step.expected, planned?.spend, step.spend])}</dd></div>)}
             </dl>
-            {live && <span className="workflow-run-state">{tr(stateText(STEP_STATE, live))}</span>}
+            {live && run && <span className="workflow-run-state">{tr(stepText(run, live))}</span>}
             {live?.outcome?.submissions.map(tx => tx.explorerUrl ? <a key={tx.hash} href={tx.explorerUrl} target="_blank" rel="noreferrer"><code>{tx.hash.slice(0, 10)}…</code></a> : <code key={tx.hash}>{tx.hash.slice(0, 10)}…</code>)}
           </li>;
         })}
@@ -867,9 +906,13 @@ export function EditorWorkflowRunPanel({ state }: { state: EditorWorkflowRunStat
               : run?.groups[g.index]?.maxFee?.unit === 'wei' ? ` · ${tr('up to {0} in network fees at today\'s prices; your wallet sets the final fee', eth(run.groups[g.index]!.maxFee!.amount))}` : ''}
             {run?.groups[g.index] ? ` · ${tr(stateText(GROUP_STATE, run.groups[g.index]!))}` : ''}
             {run?.groups[g.index]?.gasPaid ? ` · ${tr('network fees paid: {0}', eth(run.groups[g.index]!.gasPaid!.amount))}` : ''}
+            {/* While the wallet prompt is open, an expired request is always rejected there (its on-chain deadline would refuse it and the wallet
+                would still pay the fee); a fresh one is promised only when this page would send one. */}
             {run?.groups[g.index]?.state === 'PREPARED' && run.groups[g.index]!.validUntil && Date.parse(run.groups[g.index]!.validUntil!) <= now
-              ? ` · ${tr(!freshRequest ? 'its quote expired at {0}: FloFi does not ask your wallet for it again; check your wallet\'s activity, then you can end the workflow'
-                : 'its quote expired at {0}: reject the request in your wallet; FloFi prepares a fresh one', fmtTime(run.groups[g.index]!.validUntil!, language))}` : ''}</dd></div>)}
+              ? ` · ${tr(freshRequest ? 'its quote expired at {0}: reject the request in your wallet; FloFi prepares a fresh one'
+                : phase === 'wallet' ? 'its quote expired at {0}: reject the request in your wallet; FloFi does not prepare another one for this workflow'
+                : 'its quote expired at {0}: FloFi does not ask your wallet for it again; check your wallet\'s activity, then you can end the workflow',
+              fmtTime(run.groups[g.index]!.validUntil!, language))}` : ''}</dd></div>)}
         {review.groups.map(g => {
           // Each group's own health factor: the run's preparation of it when there is one (a later group is prepared when due), else the Review's.
           const hf = run?.groups[g.index]?.planned?.healthFactorAfter ?? g.healthFactorAfter;
@@ -907,7 +950,7 @@ export function EditorWorkflowRunPanel({ state }: { state: EditorWorkflowRunStat
               {planned?.recipient && <div><dt>{tr('To')}</dt><dd><code className="editor-run-recipient">{planned.recipient}</code></dd></div>}
               {step.outcome?.received.map(r => <div key={r.asset}><dt>{tr('Received (reconciled)')}</dt><dd>{receivedText(r, [planned?.expected, planned?.spend])}</dd></div>)}
             </dl>
-            <span className="workflow-run-state">{tr(stateText(STEP_STATE, step))}</span>
+            <span className="workflow-run-state">{tr(stepText(run, step))}</span>
             {step.outcome?.submissions.map(tx => tx.explorerUrl ? <a key={tx.hash} href={tx.explorerUrl} target="_blank" rel="noreferrer"><code>{tx.hash.slice(0, 10)}…</code></a> : <code key={tx.hash}>{tx.hash.slice(0, 10)}…</code>)}
           </li>;
         })}
@@ -931,7 +974,9 @@ export function EditorWorkflowRunPanel({ state }: { state: EditorWorkflowRunStat
         : 'Stopped before any step completed. FloFi submits nothing more of this workflow; you decide what happens next.')
       : tr(unanswered ? 'Partially completed: the reconciled steps stay done. FloFi submits nothing more of this workflow; you decide what happens next.'
         : 'Partially completed: the reconciled steps stay done and their funds rest in your wallet. The step that stopped shows what happened to it.')}</p>}
-    {unanswered && <p role="status">{tr('A batch was handed to your wallet and its answer never reached FloFi: it may have executed before it expired. Check your wallet\'s activity.')}</p>}
+    {/* "Never recorded", not "never reached FloFi": an answer may have arrived after the stop and been refused (WALLET_BATCH_ANSWERED_AFTER_STOP, logged). */}
+    {unanswered && <p role="status">{tr('A batch was handed to your wallet and FloFi never recorded an answer for it: it may have executed before it expired. Check your wallet\'s activity.')}</p>}
+    {windowClosed && error !== 'WORKFLOW_RUN_EXPIRED' && <p className="muted" role="note">{tr(RUN_WINDOW_CLOSED)}</p>}
     {run?.state === 'COMPLETED' && <p role="status"><strong>{tr('Every step reconciled.')}</strong></p>}
     {phase === 'wallet' && <p role="status">{tr('Confirm the request in your wallet. It shows every call of the batch and the network fee.')}</p>}
     {phase === 'confirming' && <p role="status">{tr('Waiting for your wallet to report the batch…')}</p>}

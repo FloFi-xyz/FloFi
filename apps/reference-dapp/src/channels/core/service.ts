@@ -92,8 +92,9 @@ const PORTUGUESE_SECRET = /chaves?\s+privad|frases?\s+(?:semente|secreta|de\s+re
 /**
  * BUILD-CHAT-E2E-001: the authorizations the "Strategy ready" reply states, from the approval's own plan. Confirm-each-step: one wallet
  * confirmation per step (at least). BUILD-FLOFI-UNIVERSAL-WORKFLOW-002: user-funded groups only where FloFi will offer them — available and
- * recommended (fewer interactions than confirming each step); otherwise the claim starts confirm-each-step at once (`claimSequential`) and a
- * group count would describe a choice the owner never gets. Counted with ASSUMED wallet capabilities, it is a lower bound ("at least") until the
+ * recommended (a grouped interaction, and never more wallet interactions than confirming each step: `userFundedPreferred` in
+ * workflow-runs/authorization-plan.ts); otherwise the claim starts confirm-each-step at once (`claimSequential`) and a group count would
+ * describe a choice the owner never gets. Counted with ASSUMED wallet capabilities, it is a lower bound ("at least") until the
  * owner's browser reports the wallet; a one-time setup may add a prompt. The executor-funded single authorization is retired (never offered).
  */
 export function authorizationFacts(plan: AuthorizationPlan): AuthorizationFacts {

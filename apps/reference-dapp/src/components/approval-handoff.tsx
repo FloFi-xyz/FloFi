@@ -87,13 +87,17 @@ const CLAIM_TEXT: Record<string, string> = {
   USER_FUNDED_L1_FEE_UNAVAILABLE: 'FloFi could not read this network\'s data fee, so the batch was not offered. Nothing was sent; try again.',
   // Review fixes, the Editor's words: a batch already handed out is never prepared a second time while it can still execute (refused before the
   // wallet is asked; this page shows no group validity, so no time — and the banner stays on screen, so its words stay true once the request has
-  // expired); a second, different answer for one group (it may have run twice, never "nothing sent"); a browser that cannot keep the record that
-  // stops a request from being sent twice (the wallet was not asked); and a wallet answer or report for a group FloFi had already stopped while
-  // its batch was unanswered (it may have executed, never "nothing sent"; the run cannot record it any more).
-  USER_FUNDED_PREPARED_STILL_VALID: 'FloFi already prepared a request for this step that may still be open in your wallet. Confirm it there, or try again once it has expired (at most 10 minutes after it was prepared); FloFi never prepares a second one that could run alongside it.',
+  // expired: it is confirmed only within its validity, after which its on-chain deadline refuses it and the wallet would still pay the fee); a
+  // second, different answer for one group (it may have run twice, never "nothing sent"); a browser that cannot keep the record that stops a
+  // request from being sent twice (the wallet was not asked); and a wallet answer or report for a group FloFi had already stopped while its batch
+  // was unanswered (it may have executed, never "nothing sent"; the run cannot record it any more).
+  USER_FUNDED_PREPARED_STILL_VALID: 'FloFi already prepared a request for this step that may still be open in your wallet. Confirm it only within 10 minutes of when it was prepared (after that its on-chain deadline refuses it and your wallet would still pay the fee: reject it), or try again once it has expired; FloFi never prepares a second one that could run alongside it.',
   WALLET_BATCH_ANSWER_MISMATCH: 'Your wallet reported a different batch for this step than the one FloFi recorded: it may have run twice. Check your wallet\'s activity; FloFi recorded only the first.',
   WALLET_ATTEMPT_UNRECORDABLE: 'This browser could not keep a record of the request, so FloFi did not ask your wallet (that record is what stops a request from ever being sent twice). Allow site storage or use another browser, then try again.',
   WALLET_BATCH_ANSWERED_AFTER_STOP: 'Your wallet reported a batch for a step FloFi had already stopped: it may have executed. Check your wallet\'s activity; FloFi could not record it.',
+  // The run's window has passed, or ends before a new wallet request could expire: nothing new is prepared, but a request prepared earlier may
+  // still be in the wallet (never "nothing was sent"). The Editor's words.
+  WORKFLOW_RUN_EXPIRED: 'This workflow\'s time window has ended, or ends too soon for a new wallet request, so FloFi does not prepare another one for it. If a request is still open in your wallet, check your wallet\'s activity; you can end the workflow once no request of it can still execute.',
 };
 function unwrap<T>(result: { ok: true; value: T } | { ok: false; code: string }): T { if (!result.ok) throw new Error(result.code); return result.value; }
 /**
