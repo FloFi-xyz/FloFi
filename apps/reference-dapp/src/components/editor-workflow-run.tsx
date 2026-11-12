@@ -24,6 +24,7 @@ import type { EditorExecutionReview, ReviewAmount } from '../editor/workflow-exe
 import type { ClaimedProposal } from '../platform/approvals';
 import type { RunView } from '../workflow-runs/service';
 import { walletRequestView } from '../domain/approved-ux';
+import { BlockerPanel } from './review-summary-panel';
 import { WALLET_BATCH_OUTCOME_UNKNOWN, canEndWorkflow, haltedAs } from '../workflow-runs/state-machine';
 import { useLocale } from '../i18n/locale';
 import { batchHandout, keepBatchHandout, sendWalletBatch, signSolanaGroup, signUserOperation, walletBatchHashes, walletProfile } from './user-funded-browser';
@@ -877,12 +878,15 @@ export function EditorWorkflowRunPanel({ state }: { state: EditorWorkflowRunStat
     <h3>{tr(run ? 'Workflow progress' : 'Review the whole workflow')}</h3>
     {/* P0 approved UX (board 08): while the wallet holds the request, say which request it is and what the wallet shows, in plain words. */}
     {review && (phase === 'wallet' || phase === 'confirming') && (() => {
-      const view = walletRequestView(review, run?.currentStep ?? null);
+      // Only for the run this Review describes (a run of another revision or wallet profile shows its own progress below, never this plan).
+      const view = run && run.workflowHash !== review.workflowHash ? null : walletRequestView(review, run);
       return view && <div className="execution-wallet-request" data-phase={phase}>
         <p className="eyebrow">{view.of === null ? tr('EXECUTION · REQUEST {0}', String(view.request)) : tr('EXECUTION · REQUEST {0} OF {1}', String(view.request), String(view.of))}</p>
         <h4>{tr(phase === 'wallet' ? 'Confirm in your wallet' : 'Waiting for your wallet')}</h4>
-        {view.calls.length > 0 && <><p className="muted">{tr(view.calls.length === 1 ? 'Your wallet shows 1 call:' : 'Your wallet shows {0} calls in one request:', String(view.calls.length))}</p>
-          <ol className="execution-wallet-calls">{view.calls.map((call, index) => <li key={index}>{tr(call.text, ...call.parameters.map((value, at) => at === 1 ? tr(ACTION[value] ?? value) : value))}</li>)}</ol></>}
+        {view.items.length > 0 && <><p className="muted">{view.calls === null ? tr('Steps in this request:')
+          : !view.itemized ? tr(view.calls === 1 ? 'Your wallet shows 1 call, for this step:' : 'Your wallet shows {0} calls in one request, for these steps:', String(view.calls))
+          : tr(view.calls === 1 ? 'Your wallet shows 1 call:' : 'Your wallet shows {0} calls in one request:', String(view.calls))}</p>
+          <ol className="execution-wallet-calls">{view.items.map((item, index) => <li key={index}>{tr(item.text, ...item.parameters.map((value, at) => at === 1 ? tr(ACTION[value] ?? value) : value))}</li>)}</ol></>}
         <p className="muted">{tr('Editing paused during execution')}</p>
       </div>;
     })()}
@@ -978,6 +982,9 @@ export function EditorWorkflowRunPanel({ state }: { state: EditorWorkflowRunStat
         <dd>{tr(HOW[g.strategy] ?? g.strategy)} · {tr(stateText(GROUP_STATE, g))}{g.gasPaid ? ` · ${tr('network fees paid: {0}', eth(g.gasPaid.amount))}` : ''}</dd></div>)}</dl>
     </>}
     {refusal && <p className="error-banner" role="alert">{refusal}</p>}
+    {/* Board 07: a native-fee shortfall found while preparing this Review shows the server's own numbers (no run exists yet: nothing was sent). */}
+    {review?.refusal?.evidence && !run && <BlockerPanel title={refusal ?? ''} message={refusal ?? ''} error={review.refusal.code} owner={review.owner}
+      feeShortfall={review.refusal.evidence} technical={null}/>}
     {state.updated.length > 0 && <div className="editor-run-update" role="alert">
       <p>{tr(state.updated.every(u => u.reviewed) ? 'Prices moved since your review. Your wallet would be asked with these minimums:' : 'Confirm what your wallet will be asked:')}</p>
       <ul>{state.updated.map(u => <li key={`${u.kind}:${u.index}`}>{u.reviewed ? tr('Step {0}: {1} (reviewed {2})', String(u.index + 1), u.now, u.reviewed)

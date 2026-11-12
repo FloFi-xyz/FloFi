@@ -92,7 +92,8 @@ export function BlockerPanel({ title, message, error, owner, feeShortfall, techn
     <h2>{fee ? t('Not enough {0} on {1} for the network fee', fee.symbol, t(fee.network)) : t(title)}</h2>
     {fee && <dl className="review-panel-rows">
       <div><dt>{t('You have')}</dt><dd className="numeric">{fee.balance} {fee.symbol}</dd></div>
-      <div><dt>{t('The fee can reach')}</dt><dd className="numeric">{fee.required} {fee.symbol}</dd></div>
+      <div><dt>{t('The fee can reach')}</dt><dd className="numeric">{fee.fee} {fee.symbol}</dd></div>
+      {fee.sends && <div><dt>{t('This request also sends')}</dt><dd className="numeric">{fee.sends} {fee.symbol}</dd></div>}
       <div data-emphasis="attention"><dt>{t('Missing, at least')}</dt><dd className="numeric">{fee.missing} {fee.symbol}</dd></div>
     </dl>}
     <p className="review-panel-note">{fee ? t('Send a little {0} on the {1} network to this wallet, from an exchange or another wallet. Nothing was sent.', fee.symbol, t(fee.network)) : t(message)}</p>

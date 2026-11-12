@@ -86,7 +86,33 @@ describe('certified Router Bridge estimate executability (MOCKED)', () => {
     const workflow = routerWorkflow(), routerExecution = vi.fn(async () => true);
     const result = await readBuildEstimate({ workflow, nodeId: 'bridge' }, {}, { now, routerExecution, discover: async () => ({ ok: true, value: quoted(workflow, routes) }) });
     expect(routerExecution).toHaveBeenCalledWith('arbitrum-to-base');
-    expect(result).toMatchObject({ ok: true, estimate: { provider: 'across', expected: '1.996276', minimum: '1.985', bridge: { execution: 'SIMULATION_AND_REVIEW_REQUIRED', selected: 2 } } });
+    // AUTO asks LI.FI first, Across direct only as its fallback: the card shows the route the Router's Simulate asks first.
+    expect(result).toMatchObject({ ok: true, estimate: { provider: 'lifi', expected: '1.996276', minimum: '1.98', bridge: { execution: 'SIMULATION_AND_REVIEW_REQUIRED', selected: 1 } } });
+    // The browser's own economic check accepts it (the card shows the amount), only for this Router node's Across route.
+    expect(result.ok && estimateMatchesNode(result.estimate, workflow, 'bridge')).toBe(true);
+  });
+  it('follows the node\'s own routing: Across direct only selects the Across answer', async () => {
+    const workflow: SemanticWorkflow = { schemaVersion: '1.0.0', workflowId: 'router-p0', revision: 1, resourceEdges: [],
+      nodes: [createRouterNode('bridge', { source: 'Arbitrum', destination: 'Base', token: 'USDC', amount: '2', recipient: '', slippage: '50', routing: 'ACROSS' })] };
+    const r = parseDiscoveryRequest(bridgeEstimateRequest(workflow.nodes[0]!)!);
+    const value = { ...quoted(routerWorkflow(), routes), candidates: quoted(routerWorkflow(), routes).candidates.filter(c => c.provider === 'across') };
+    expect(r.providers).toEqual(['across']);
+    const result = await readBuildEstimate({ workflow, nodeId: 'bridge' }, {}, { now, routerExecution: async () => true, discover: async () => ({ ok: true, value }) });
+    expect(result).toMatchObject({ ok: true, estimate: { provider: 'across', minimum: '1.985', bridge: { execution: 'SIMULATION_AND_REVIEW_REQUIRED', selected: 0 } } });
+    expect(result.ok && estimateMatchesNode(result.estimate, workflow, 'bridge')).toBe(true);
+  });
+  it('the browser refuses an executable label on a quote-only route or on a universal card (a forged or stale estimate shows no amount)', async () => {
+    const workflow = routerWorkflow();
+    const result = await readBuildEstimate({ workflow, nodeId: 'bridge' }, {}, { now, routerExecution: async () => true, discover: async () => ({ ok: true, value: quoted(workflow, routes) }) });
+    if (!result.ok || !result.estimate.bridge) throw new Error('expected an estimate');
+    const stargate = { ...result.estimate, provider: 'lifi', bridge: { ...result.estimate.bridge, selected: 0 }, minimum: '1.99' };
+    expect(estimateMatchesNode(stargate, workflow, 'bridge')).toBe(false);
+    const universal = mockedBridge('arbitrum-one', 'base');
+    const quotedUniversal = await readBuildEstimate({ workflow: universal, nodeId: 'bridge' }, {}, { now, discover: async () => ({ ok: true, value: discovery(universal) }) });
+    if (!quotedUniversal.ok || !quotedUniversal.estimate.bridge) throw new Error('expected an estimate');
+    const relabelled = { ...quotedUniversal.estimate, bridge: { ...quotedUniversal.estimate.bridge, execution: 'SIMULATION_AND_REVIEW_REQUIRED' as const } };
+    expect(estimateMatchesNode(quotedUniversal.estimate, universal, 'bridge')).toBe(true);
+    expect(estimateMatchesNode(relabelled, universal, 'bridge')).toBe(false);
   });
   it('stays quote-only when the Router flow does not allow owner execution on this deployment (fails closed)', async () => {
     for (const answer of [async () => false, async () => { throw new Error('ROUTER_INFO_UNAVAILABLE'); }]) {

@@ -13,7 +13,7 @@
 export type FlightRefusalAction = 'LINK_WALLET' | 'BOARD' | 'SIGN_IN' | 'RETRY' | 'NONE';
 export type FlightRefusal = { readonly code: string; readonly title: string; readonly message: string; readonly action: FlightRefusalAction };
 
-const STOPPED = 'so FloFi stopped this request before quoting, simulating or sending anything.';
+const STOPPED = 'so FloFi stopped this request: it was not quoted, simulated or sent.';
 const REFUSALS: Readonly<Record<string, Omit<FlightRefusal, 'code'>>> = Object.freeze({
   BETA_WALLET_NOT_LINKED: { title: 'Wallet not linked to your FloFi account', action: 'LINK_WALLET',
     message: `This wallet is not linked to your FloFi account for Flight access, ${STOPPED} Save it in Credentials (you sign a message, never a transaction), then choose Board now on the Board page to add it to your access — or switch to a wallet you already linked.` },

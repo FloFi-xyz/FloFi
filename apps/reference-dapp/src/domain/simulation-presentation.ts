@@ -123,11 +123,12 @@ export function simulationError(error: string): string {
   const floFiWallet = /^FLOFI_WALLET_/.test(error) ? floFiWalletMessage(error) : null;
   if (floFiWallet) return floFiWallet;
   // P0 (2026-11-12): a provider's liquidity and minimum answers before the balance rules (`RELAY_INSUFFICIENT_LIQUIDITY` read "your balance is too
-  // low", `RELAY_AMOUNT_TOO_LOW` the generic failure). Only refusals before anything was prepared: delivery outcomes such as
+  // low", `RELAY_AMOUNT_TOO_LOW` the generic failure), bridge provider codes only (a lending BORROW_/WITHDRAW_INSUFFICIENT_LIQUIDITY keeps its own
+  // wording below). Only refusals before this step was prepared: delivery outcomes such as
   // ROUTER_FILL_BELOW_MINIMUM / UNIVERSAL_DELIVERY_BELOW_MINIMUM are reconciliation results and never match here.
-  if (/(?:^|_)INSUFFICIENT_LIQUIDITY$/.test(error)) return 'The provider does not have enough liquidity for this amount right now, so nothing was simulated or sent. Try a smaller amount or try again later.';
-  if (/(?:^|_)AMOUNT_TOO_LOW$|^(?:BRIDGE_)?BELOW_MINIMUM$/.test(error)) return 'The amount is below the bridge provider’s minimum for this route, so nothing was simulated or sent. Choose a larger amount, then simulate again.';
-  if (/(?:^|_)NO_EXECUTABLE_ROUTE$/.test(error)) return 'No bridge route that FloFi can verify and execute is available for this amount right now, so nothing was simulated or sent. Try again later or change the amount.';
+  if (/^(?:BRIDGE_|RELAY_|LIFI_|ACROSS_|MAYAN_|ROUTER_|UNIVERSAL_)?INSUFFICIENT_LIQUIDITY$/.test(error)) return 'The bridge provider does not have enough liquidity for this amount right now, so this step was not simulated or sent. Try a smaller amount or try again later.';
+  if (/^(?:BRIDGE_|RELAY_|LIFI_|ACROSS_|MAYAN_|ROUTER_|UNIVERSAL_)?AMOUNT_TOO_LOW$|^(?:BRIDGE_)?BELOW_MINIMUM$/.test(error)) return 'The amount is below the bridge provider’s minimum for this route, so this step was not simulated or sent. Choose a larger amount, then simulate again.';
+  if (/^(?:BRIDGE_|RELAY_|LIFI_|ACROSS_|MAYAN_|ROUTER_|UNIVERSAL_)?NO_EXECUTABLE_ROUTE$/.test(error)) return 'No bridge route that FloFi can verify and execute is available for this amount right now, so this step was not simulated or sent. Try again later or change the amount.';
   if (/INSUFFICIENT.*(ETH|SOL|NATIVE|GAS)|INSUFFICIENT_GAS/i.test(error)) return 'Add funds for the network fee, then simulate again.';
   if (/INSUFFICIENT|BALANCE_TOO_LOW|exceeds.*balance/i.test(error)) return 'Your available balance is too low for this workflow.';
   if (/HEALTH_FACTOR|UNSAFE_HEALTH|UNSAFE_POSITION/i.test(error)) return 'This action would leave the lending position below its required safety limit.';

@@ -57,7 +57,9 @@ export function nativeBalance(wei: string, decimals = 18): string {
   const fraction = (shown % scale).toString().padStart(decimals, '0').slice(0, 6).replace(/0+$/, '');
   return value > 0n && shown === 0n ? '< 0.000001' : `${whole}${fraction ? `.${fraction}` : ''}`;
 }
-export type FeeShortfallView = { readonly network: string; readonly symbol: string; readonly owner: string; readonly balance: string; readonly required: string; readonly missing: string };
+/** `fee`: the network fee ceiling alone; `sends`: native value the request itself sends (null when none); `required` = fee + sends. */
+export type FeeShortfallView = { readonly network: string; readonly symbol: string; readonly owner: string; readonly balance: string; readonly fee: string;
+  readonly sends: string | null; readonly required: string; readonly missing: string };
 const NATIVE: Readonly<Record<string, { readonly network: string; readonly symbol: string }>> = Object.freeze({
   'eip155:1': { network: 'Ethereum', symbol: 'ETH' }, 'eip155:8453': { network: 'Base', symbol: 'ETH' }, 'eip155:42161': { network: 'Arbitrum One', symbol: 'ETH' },
   'eip155:4663': { network: 'Robinhood Chain', symbol: 'ETH' } });
@@ -65,7 +67,9 @@ const NATIVE: Readonly<Record<string, { readonly network: string; readonly symbo
 export function feeShortfallView(evidence: NativeFeeShortfall | null | undefined): FeeShortfallView | null {
   const native = evidence ? NATIVE[evidence.chainId] : undefined;
   if (!evidence || !native || evidence.unit !== 'wei') return null;
-  return { ...native, owner: evidence.owner, balance: nativeBalance(evidence.balance), required: nativeAmount(evidence.required), missing: nativeAmount(evidence.shortfall) };
+  const sends = /^[1-9][0-9]{0,77}$/.test(evidence.nativeSpend) ? nativeAmount(evidence.nativeSpend) : null;
+  return { ...native, owner: evidence.owner, balance: nativeBalance(evidence.balance), fee: nativeAmount(evidence.maxFee), sends, required: nativeAmount(evidence.required),
+    missing: nativeAmount(evidence.shortfall) };
 }
 
 /**
@@ -87,8 +91,11 @@ export function blockerExplanation(blocker: ActiveBlocker): { readonly text: str
   const fee = feeShortfallView(blocker.feeShortfall);
   if (fee) {
     const short = `${fee.owner.slice(0, 6)}…${fee.owner.slice(-4)}`;
-    return { text: 'Every transaction on {0} pays a network fee in {1}. Your wallet {2} has {3} {1}, and this fee can reach {4} {1}, so at least {5} {1} is missing. Send a little {1} on the {0} network to {2}, then choose Simulate again. Nothing was sent.',
-      parameters: [fee.network, fee.symbol, short, fee.balance, fee.required, fee.missing] };
+    // "Nothing was sent" holds here: this evidence comes only from the Review's preparation before any run of this workflow exists.
+    return fee.sends === null ? { text: 'Every transaction on {0} pays a network fee in {1}. Your wallet {2} has {3} {1}, and this fee can reach {4} {1}, so at least {5} {1} is missing. Send a little {1} on the {0} network to {2}, then choose Simulate again. Nothing was sent.',
+      parameters: [fee.network, fee.symbol, short, fee.balance, fee.fee, fee.missing] }
+      : { text: 'Every transaction on {0} pays a network fee in {1}. Your wallet {2} has {3} {1}; this request sends {6} {1} and its fee can reach {4} {1}, so at least {5} {1} is missing. Send a little {1} on the {0} network to {2}, then choose Simulate again. Nothing was sent.',
+        parameters: [fee.network, fee.symbol, short, fee.balance, fee.fee, fee.missing, fee.sends] };
   }
   return null; // the caller states the blocker's own title and sentence, each translated as it is
 }
@@ -98,20 +105,37 @@ const CALL_WORDS: Readonly<Record<string, string>> = Object.freeze({
   ERC20_APPROVE: 'Token permission for step {0}', UNISWAP_V3_EXACT_INPUT_SINGLE: 'Swap on Uniswap (step {0})', AAVE_V3_SUPPLY: 'Supply on Aave (step {0})',
   AAVE_V3_BORROW: 'Borrow on Aave (step {0})', AAVE_V3_REPAY: 'Repay on Aave (step {0})', AAVE_V3_WITHDRAW: 'Withdraw from Aave (step {0})',
   ERC20_TRANSFER: 'Transfer (step {0})', NATIVE_TRANSFER: 'Transfer (step {0})' });
-export type WalletRequestView = { readonly request: number; readonly of: number | null; readonly calls: readonly { readonly text: string; readonly parameters: readonly string[] }[] };
+export type WalletRequestView = { readonly request: number; readonly of: number | null;
+  /** The wallet's own call count for this request (the prepared group's), or null when it is not prepared yet: then `items` are its steps. */
+  readonly calls: number | null; readonly items: readonly { readonly text: string; readonly parameters: readonly string[] }[];
+  /** True when `items` are the wallet's calls themselves; false when they are the request's steps. */ readonly itemized: boolean };
+type ReviewShape = { readonly counts: { readonly walletPrompts: number; readonly atLeast: boolean };
+  readonly groups: readonly { readonly index: number; readonly steps: readonly [number, number]; readonly calls: readonly { readonly kind: string; readonly step: number }[] | null;
+    readonly approvals?: number | null }[];
+  readonly steps: readonly { readonly index: number; readonly action: string }[] };
+type RunShape = { readonly currentStep: number;
+  readonly groups: readonly { readonly index: number; readonly steps: readonly [number, number]; readonly planned: { readonly calls: number; readonly approvals: number } | null }[] };
 /**
- * Board 08 (Confirm in wallet): which wallet request this is ("REQUEST n OF m") and the calls the wallet shows, from the Review's own prepared
- * group (its `calls` exist only for a group prepared now) or, without them, the group's steps. `of` is null when the Review counts only a lower bound
- * (`atLeast`): the header then never claims a total. Nothing here asks, signs or sends.
+ * Board 08 (Confirm in wallet): which wallet request this is ("REQUEST n OF m") and what the wallet shows, in plain words. The group is the run's
+ * own group holding its current step (none: no header — never a guessed group); before a run exists, the Review's first group. The call count is
+ * the PREPARED group's own (`planned.calls`): the Review's itemized calls are shown only when they agree with it (a group prepared again after an
+ * expiry or an allowance change may differ), else the request is described by its steps. `of` is null when the Review counts only a lower
+ * bound (`atLeast`): the header then never claims a total. Nothing here asks, signs or sends.
  */
-export function walletRequestView(review: { readonly counts: { readonly walletPrompts: number; readonly atLeast: boolean };
-  readonly groups: readonly { readonly index: number; readonly steps: readonly [number, number]; readonly calls: readonly { readonly kind: string; readonly step: number }[] | null }[];
-  readonly steps: readonly { readonly index: number; readonly action: string }[] }, currentStep: number | null): WalletRequestView | null {
-  const group = currentStep === null ? review.groups[0] : review.groups.find(g => g.steps[0] <= currentStep && currentStep <= g.steps[1]) ?? review.groups[0];
-  if (!group) return null;
-  const request = review.groups.indexOf(group) + 1;
-  const calls = group.calls ? group.calls.map(call => call.kind === 'DEADLINE_GUARD' ? { text: 'Expiry check: the request is refused after its deadline', parameters: [] }
+export function walletRequestView(review: ReviewShape, run: RunShape | null): WalletRequestView | null {
+  const runGroup = run ? run.groups.find(g => g.steps[0] <= run.currentStep && run.currentStep <= g.steps[1]) ?? null : null;
+  if (run && !runGroup) return null;
+  const index = runGroup ? runGroup.index : review.groups[0]?.index;
+  const reviewed = review.groups.find(g => g.index === index);
+  const steps = runGroup?.steps ?? reviewed?.steps;
+  if (index === undefined || !steps) return null;
+  const request = (runGroup ? run!.groups.indexOf(runGroup) : review.groups.indexOf(reviewed!)) + 1;
+  const prepared = runGroup ? runGroup.planned : null;
+  const reviewedCalls = reviewed?.calls ?? null;
+  const agrees = reviewedCalls !== null && (prepared === null ? !run : prepared.calls === reviewedCalls.length
+    && prepared.approvals === reviewedCalls.filter(call => call.kind === 'ERC20_APPROVE').length);
+  const items = agrees ? reviewedCalls.map(call => call.kind === 'DEADLINE_GUARD' ? { text: 'Expiry check: the request is refused after its deadline', parameters: [] }
       : { text: CALL_WORDS[call.kind] ?? 'Call for step {0}', parameters: [String(call.step + 1)] })
-    : review.steps.filter(step => group.steps[0] <= step.index && step.index <= group.steps[1]).map(step => ({ text: 'Step {0}: {1}', parameters: [String(step.index + 1), step.action] }));
-  return { request, of: review.counts.atLeast ? null : Math.max(review.counts.walletPrompts, request), calls };
+    : review.steps.filter(step => steps[0] <= step.index && step.index <= steps[1]).map(step => ({ text: 'Step {0}: {1}', parameters: [String(step.index + 1), step.action] }));
+  return { request, of: review.counts.atLeast ? null : Math.max(review.counts.walletPrompts, request), calls: agrees ? reviewedCalls.length : prepared?.calls ?? null, items, itemized: agrees };
 }

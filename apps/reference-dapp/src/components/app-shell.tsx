@@ -326,8 +326,13 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
   // P0 (owner test 2026-11-12): the Flight decision for the signing wallet, read before each simulation (`flightWalletAccess`). A refusal is shown
   // as this simulation's own classified blocker ("Wallet not linked to your FloFi account"), never as a failed simulation; it applies only while
   // the same wallet is connected, and nothing was quoted, simulated or sent for it.
+  // It never masks a run's own state: with an execution started or live, a previous record, a recovery or a retired Review, those keep their
+  // own words (a Flight sentence there would read as if nothing had been sent).
   const [flightBlock, setFlightBlock] = useState<{ readonly owner: string; readonly code: string } | null>(null);
-  if (flightBlock && flightBlock.owner === reviewBinding.wallet.account && !simulationSource.state.busy)
+  const executionProgress = useExecutionLifecycle(simulationSource.kind, reviewBinding.wallet);
+  const sourceState = simulationSource.state as { readonly record?: unknown; readonly recoveryOnly?: boolean; readonly retired?: boolean; readonly busy?: boolean };
+  if (flightBlock && flightBlock.owner === reviewBinding.wallet.account && !sourceState.busy && !sourceState.record && !sourceState.recoveryOnly && !sourceState.retired
+    && !executionProgress.started && !currentExecution(executionProgress))
     simulationSource = { ...simulationSource, state: { ...simulationSource.state, error: flightBlock.code } } as SimulationSource;
   const [restoredBinding, setRestoredBinding] = useState({ epoch: restorationEpoch, key: null as string | null });
   if (restoredBinding.epoch !== restorationEpoch) setRestoredBinding({ epoch: restorationEpoch, key: reviewBinding.authorization.key });
@@ -336,7 +341,6 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
   // BUILD-FLOFI-UNIVERSAL-E2E-001: every surface (Canvas Review, Execute, the /approve signing surface) presents and approves only this
   // workflow's own Review; a retired or other-network Review is dropped, never shown beside this workflow.
   const authorization = workflowBoundAuthorization(reviewBinding.authorization, runtimeWorkflow, simulationSource);
-  const executionProgress = useExecutionLifecycle(simulationSource.kind, reviewBinding.wallet);
   const recordedStart = useExecutionStart(simulationSource.kind, reviewBinding.wallet);
   // BUILD-FIX-UX-001: a final run of another (new or edited) workflow has not started this workflow's execution; its record is unchanged.
   const executionStart = executionProgress.started && !currentExecution(executionProgress) ? { ...recordedStart, started: false } : recordedStart;
@@ -534,6 +538,10 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
   };
   // P0 approved UX (board 07): the blocker the chat explains on "explain / why? / não entendi" — the same projection the blocker panel shows.
   const blockerView = (() => {
+    // The whole-workflow Review's own native-fee shortfall (prepared before any run exists): its numbers, for the same owner.
+    const runRefusal = workflowRunHere.review?.refusal;
+    if (runRefusal?.evidence && !workflowRunHere.run) return { title: 'Not enough ETH for the network fee', message: 'Your wallet does not hold enough of the network\'s native token for this request.',
+      owner: workflowRunHere.review!.owner, feeShortfall: runRefusal.evidence };
     if (simulationSource.state.busy) return null;
     const view = projectSimulation(runtimeWorkflow, context, simulationSource);
     if (view.status !== 'blocked') return null;
@@ -607,7 +615,11 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
   // P0 approved UX (board 08): while this workflow's execution is live (not final), the Canvas shows "Editing paused during execution" (the shell
   // already refuses edits then; this makes it visible). Read from the execution records, never a timer.
   const liveExecution = currentExecution(executionProgress);
-  const editingPaused = Boolean(workflowRunHere.started && ['authorizing', 'proving', 'wallet', 'confirming', 'running'].includes(workflowRunHere.phase)
+  // Locked while the wallet is being asked (every prompting phase, the first Authorize included) or while this workflow's own run is open and
+  // moving (PENDING / RUNNING / ATTENTION, read from the run itself — never a phase left behind once it ended). A HALTED or final run, or an
+  // earlier workflow being followed, never locks the Canvas.
+  const runOpen = Boolean(workflowRunHere.run && !workflowRunHere.following && ['PENDING', 'RUNNING', 'ATTENTION'].includes(workflowRunHere.run.state));
+  const editingPaused = Boolean(['authorizing', 'proving', 'wallet', 'confirming', 'confirm-update'].includes(workflowRunHere.phase) || runOpen
     || liveExecution && !isFinalExecutionResult(liveExecution));
   const stageContent = tab === 'Build' ? <><div className="build-grid"><WorkflowCanvas runActive={editingPaused} estimateOwner={solanaSession?.account.address} environment={authoringEnvironment(walletEnvironment)} selectedId={selectedId} select={selectAction} openSettings={openActionSettings} settingsId={settingsId} workflowName={workflowName} renameWorkflow={setWorkflowName} onAutomate={automationsReady ? () => { setAutomateCanvas(true); navigate?.('/app/automations'); } : undefined} onSave={() => void saveCurrentWorkflow()} onToolboxModeChange={setWorkspaceToolboxMode} overview={overview}/>{chat}</div>{verification}{saveNotice?.owner === ownerKey && <p role="status">{tr(saveNotice.message)}</p>}{library.busy && <p role="status">{tr('Saving workflow…')}</p>}{library.error && library.error !== 'WALLET_SESSION_REQUIRED' && <p role="alert">{tr(library.error === 'WORKFLOW_VERSION_CONFLICT' ? 'This workflow was updated in another session. Reopen it before saving.' : 'Workflow saving is unavailable. Try again.')}</p>}{selectedId && <ActionSettingsPopover key={selectedId} selectedId={selectedId} select={selectAction} open={settingsId === selectedId} close={closeActionSettings}/>}
           {engineering && <EngineeringAuthoring selectedId={selectedId}><ReviewPanel/></EngineeringAuthoring>}</>

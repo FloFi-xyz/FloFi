@@ -6,6 +6,7 @@ import { bridgeEstimateRequest } from './bridge-estimate';
 import { parseTokenAmount } from './jupiter-authoring';
 import { cryptoSelectionOf } from './crypto-action-picker';
 import { flightRefusalMessage } from './flight-refusal';
+import { certifiedRouterRoute, routerDetails } from './router-authoring';
 
 /** Presentation data only. Deliberately excludes Review, calldata, execution IDs and financial authority. */
 export type BuildEstimate = { readonly workflowHash: string; readonly nodeId: string; readonly chain: string;
@@ -32,7 +33,9 @@ export function estimateMatchesNode(estimate: BuildEstimate, workflow: SemanticW
         result.sourceChain === node.chainId && result.destinationChain === output.value.chainId && result.amount === request.amount &&
         result.outputToken.decimals === output.value.decimals && result.outputToken.address === (request.outputToken.kind === 'TOKEN' ? request.outputToken.address : null) &&
         selected.expectedOutput === String(expected) && selected.minimumOutput === String(minimum) &&
-        (selected.status === 'LIVE_QUOTE' && bridge!.execution === 'QUOTE_ONLY' || selected.status === 'EXECUTABLE' && bridge!.execution === 'SIMULATION_AND_REVIEW_REQUIRED');
+        (selected.status === 'LIVE_QUOTE' && bridge!.execution === 'QUOTE_ONLY' || selected.status === 'EXECUTABLE' && bridge!.execution === 'SIMULATION_AND_REVIEW_REQUIRED'
+          // A certified Router node's Across route: the server labels it executable only when the pair's Router flow reports owner execution.
+          || selected.status === 'LIVE_QUOTE' && bridge!.execution === 'SIMULATION_AND_REVIEW_REQUIRED' && routerDetails(node) !== null && certifiedRouterRoute(selected));
     }
     const selection = cryptoSelectionOf(node);
     if (selection?.to && selection.to !== estimate.symbol) return false;

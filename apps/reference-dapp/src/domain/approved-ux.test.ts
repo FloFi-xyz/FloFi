@@ -31,7 +31,11 @@ describe('fee shortfall projection (board 07): the server numbers, never underst
   it('rounds requirements and shortfalls UP and the balance DOWN, to at most 6 decimals', () => {
     expect(nativeAmount('300000000000001')).toBe('0.000301'); expect(nativeBalance('120000000000999')).toBe('0.00012');
     expect(nativeAmount('1')).toBe('< 0.000001'); expect(nativeBalance('1')).toBe('< 0.000001'); expect(nativeAmount('0')).toBe('0'); expect(nativeAmount('x')).toBe('—');
-    expect(feeShortfallView(evidence)).toEqual({ network: 'Base', symbol: 'ETH', owner: evidence.owner, balance: '0.00012', required: '0.000301', missing: '0.000181' });
+    expect(feeShortfallView(evidence)).toEqual({ network: 'Base', symbol: 'ETH', owner: evidence.owner, balance: '0.00012', fee: '0.000301', sends: null, required: '0.000301', missing: '0.000181' });
+    // A request that also sends native ETH: the fee ceiling is shown on its own, never the fee plus the amount sent.
+    const sending = { ...evidence, nativeSpend: '1000000000000000', required: '1300000000000001', shortfall: '1180000000000001' };
+    expect(feeShortfallView(sending)).toMatchObject({ fee: '0.000301', sends: '0.001', required: '0.001301', missing: '0.001181' });
+    expect(blockerExplanation({ title: 't', message: 'm', feeShortfall: sending })?.parameters).toEqual(['Base', 'ETH', '0x90f5…d303', '0.00012', '0.000301', '0.001181', '0.001']);
     expect(feeShortfallView({ ...evidence, chainId: 'eip155:999' })).toBeNull(); expect(feeShortfallView(null)).toBeNull();
   });
 });
@@ -71,19 +75,32 @@ describe('walletRequestView (board 08)', () => {
     groups: [{ index: 0, steps: [0, 0] as [number, number], calls: [{ kind: 'ERC20_APPROVE', step: 0 }, { kind: 'UNISWAP_V3_EXACT_INPUT_SINGLE', step: 0 }] },
       { index: 1, steps: [1, 1] as [number, number], calls: null }],
     steps: [{ index: 0, action: 'swap' }, { index: 1, action: 'bridge' }] });
-  it('names the request and lists the prepared calls in plain words', () => {
-    expect(walletRequestView(review(), null)).toEqual({ request: 1, of: 2, calls: [{ text: 'Token permission for step {0}', parameters: ['1'] },
+  const run = (currentStep: number, planned: readonly ({ calls: number; approvals: number } | null)[]) => ({ currentStep,
+    groups: [{ index: 0, steps: [0, 0] as [number, number], planned: planned[0] ?? null }, { index: 1, steps: [1, 1] as [number, number], planned: planned[1] ?? null }] });
+  it('before a run: the Review\'s first group, its prepared calls in plain words', () => {
+    expect(walletRequestView(review(), null)).toEqual({ request: 1, of: 2, calls: 2, itemized: true, items: [{ text: 'Token permission for step {0}', parameters: ['1'] },
       { text: 'Swap on Uniswap (step {0})', parameters: ['1'] }] });
   });
-  it('follows the run to its current group and falls back to that group\'s steps when its calls are not prepared yet', () => {
-    expect(walletRequestView(review(), 1)).toEqual({ request: 2, of: 2, calls: [{ text: 'Step {0}: {1}', parameters: ['2', 'bridge'] }] });
+  it('itemizes the Review\'s calls only when the prepared group agrees with them', () => {
+    expect(walletRequestView(review(), run(0, [{ calls: 2, approvals: 1 }]))).toMatchObject({ request: 1, calls: 2, itemized: true });
+    // Prepared again (e.g. the allowance changed): the wallet\'s own count, described by the request\'s steps.
+    expect(walletRequestView(review(), run(0, [{ calls: 1, approvals: 0 }]))).toEqual({ request: 1, of: 2, calls: 1, itemized: false,
+      items: [{ text: 'Step {0}: {1}', parameters: ['1', 'swap'] }] });
+  });
+  it('a later group: its own prepared count, or only its steps while it is not prepared yet', () => {
+    expect(walletRequestView(review(), run(1, [{ calls: 2, approvals: 1 }, null]))).toEqual({ request: 2, of: 2, calls: null, itemized: false,
+      items: [{ text: 'Step {0}: {1}', parameters: ['2', 'bridge'] }] });
+    expect(walletRequestView(review(), run(1, [{ calls: 2, approvals: 1 }, { calls: 3, approvals: 1 }]))).toMatchObject({ request: 2, calls: 3, itemized: false });
+  });
+  it('never guesses a group: a current step outside every group shows no header', () => {
+    expect(walletRequestView(review(), run(5, [null, null]))).toBeNull();
   });
   it('never claims a total when the Review counts only a lower bound', () => {
-    expect(walletRequestView(review(true), 0)?.of).toBeNull();
+    expect(walletRequestView(review(true), run(0, [null]))?.of).toBeNull();
   });
   it('words the deadline guard without a step and is null without a group', () => {
     const guarded = { ...review(), groups: [{ index: 0, steps: [0, 0] as [number, number], calls: [{ kind: 'DEADLINE_GUARD', step: -1 }] }] };
-    expect(walletRequestView(guarded, null)?.calls).toEqual([{ text: 'Expiry check: the request is refused after its deadline', parameters: [] }]);
+    expect(walletRequestView(guarded, null)?.items).toEqual([{ text: 'Expiry check: the request is refused after its deadline', parameters: [] }]);
     expect(walletRequestView({ ...review(), groups: [] }, null)).toBeNull();
   });
 });

@@ -51,9 +51,15 @@ describe('bridge and liquidity refusals at Simulate', () => {
     expect(simulationError('BRIDGE_BELOW_MINIMUM')).toMatch(/below the bridge provider’s minimum/);
     expect(simulationError('ROUTER_NO_EXECUTABLE_ROUTE')).toMatch(/No bridge route that FloFi can verify and execute/);
     expect(simulationError('UNIVERSAL_NO_EXECUTABLE_ROUTE')).toMatch(/No bridge route that FloFi can verify and execute/);
+    // They speak for this step only: an earlier step of the workflow may already have been sent.
+    expect(simulationError('RELAY_AMOUNT_TOO_LOW')).toMatch(/this step was not simulated or sent/);
+  });
+  it('lending liquidity and non-bridge codes keep their own wording', () => {
+    for (const code of ['BORROW_INSUFFICIENT_LIQUIDITY', 'WITHDRAW_INSUFFICIENT_LIQUIDITY']) expect(simulationError(code)).not.toMatch(/bridge provider/);
+    expect(simulationError('SWAP_AMOUNT_TOO_LOW')).not.toMatch(/bridge provider/);
   });
   it('delivery outcomes after a deposit never read "nothing was sent"', () => {
-    for (const code of ['ROUTER_FILL_BELOW_MINIMUM', 'UNIVERSAL_DELIVERY_BELOW_MINIMUM']) expect(simulationError(code)).not.toMatch(/nothing was simulated or sent/);
+    for (const code of ['ROUTER_FILL_BELOW_MINIMUM', 'UNIVERSAL_DELIVERY_BELOW_MINIMUM']) expect(simulationError(code)).not.toMatch(/nothing was simulated or sent|was not simulated or sent/);
   });
   it('the native-fee and token-balance rules are unchanged', () => {
     expect(simulationError('USER_FUNDED_INSUFFICIENT_NATIVE_BALANCE')).toBe('Add funds for the network fee, then simulate again.');

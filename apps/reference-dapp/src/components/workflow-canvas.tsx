@@ -493,6 +493,8 @@ function BuildCanvas({ environment, selectedId, select, openSettings, settingsId
         const id = event.target.closest('.react-flow__node')?.getAttribute('data-id');
         if (id) { event.preventDefault(); selectNodes([id], id); return; }
       }
+      // P0 approved UX (board 08): while this workflow executes, the Canvas changes nothing (undo/redo, deletions and edge removals included).
+      if (runActive && ((event.ctrlKey || event.metaKey) || event.key === 'Delete' || event.key === 'Backspace')) return;
       if (event.ctrlKey || event.metaKey) {
         const key = event.key.toLowerCase();
         if (key === 'z' || (key === 'y' && !event.shiftKey)) {
@@ -524,7 +526,7 @@ function BuildCanvas({ environment, selectedId, select, openSettings, settingsId
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [dispatch, workflow, context, actionSetup, removeActionSetup, selectedEdge, select, undo, redo]);
+  }, [dispatch, workflow, context, actionSetup, removeActionSetup, selectedEdge, select, undo, redo, runActive]);
   const previousEnvironment = useRef(environment);
   useEffect(() => {
     if (previousEnvironment.current === environment) return;
@@ -1002,14 +1004,15 @@ function BuildCanvas({ environment, selectedId, select, openSettings, settingsId
     {legacyNetworks.length > 0 && <div className="canvas-legacy-network" role="status" data-legacy-network={legacyNetworks.map(network => network.key).join(' ')}>
       <p><strong>{tr(...testNetworkTemplate(legacyNetworks))}</strong></p>
       <p>{tr('Nothing on this workflow runs on a test network. Rebuilding turns each step into a draft on its mainnet with the same amount: check every value and apply it. Mainnet uses real funds, and nothing runs before a fresh simulation, your Review and your wallet signature.')}</p>
-      {legacyMainnets.length > 0 && <button type="button" onClick={rebuildOnMainnet}>{tr('Rebuild on {0}', legacyMainnets.join(' / '))}</button>}
+      {legacyMainnets.length > 0 && <button type="button" disabled={runActive} onClick={rebuildOnMainnet}>{tr('Rebuild on {0}', legacyMainnets.join(' / '))}</button>}
     </div>}
-    <div ref={surfaceRef} className="flow-surface build-flow-surface" role="region" aria-label={tr("Workflow graph")} onMouseDown={startMarquee}>
+    {/* Board 08: while this workflow executes the graph is inert — no card editor, connection, deletion or drag can change it. */}
+    <div ref={surfaceRef} className="flow-surface build-flow-surface" role="region" aria-label={tr("Workflow graph")} onMouseDown={startMarquee} inert={runActive}>
       {/* Focus order (board 16 §8): header → rail → canvas → assistant, so the rail precedes the graph in the document. */}
       {rail && <ActionRail id={railId} expanded={railWide} onToggle={toggleRail} onScroll={hideTip}>{toolbox}</ActionRail>}
       {tip && railTips && <span className="canvas-rail-tooltip" aria-hidden="true" style={{ top: tip.top, left: tip.left }}>{tip.label}</span>}
       <PanelRevealProvider><ReactFlow key={isLendingComposition(workflow)?'lending':'general'} nodes={nodes} edges={edges} nodeTypes={nodeTypes} onNodesChange={(changes: NodeChange<Node>[]) => onNodesChange(changes.filter(change => change.type !== 'select'))} fitViewOptions={{ padding: fitPadding }} minZoom={0.35} maxZoom={1.4}
-        nodesDraggable nodesConnectable deleteKeyCode={null} selectNodesOnDrag={false} panOnDrag={[1, 2]} {...CANVAS_GESTURES}
+        nodesDraggable={!runActive} nodesConnectable={!runActive} deleteKeyCode={null} selectNodesOnDrag={false} panOnDrag={[1, 2]} {...CANVAS_GESTURES}
         // BUILD-FIX-UX-001: an ordinary click never connects; a drag snaps to a nearby input; only a connection the workflow accepts is shown as valid.
         connectOnClick={false} connectionDragThreshold={4} connectionRadius={48}
         isValidConnection={connection => connection.sourceHandle === 'output' && connection.targetHandle === 'input' && checkConnection(state, context, connection.source, connection.target).ok}
@@ -1025,7 +1028,7 @@ function BuildCanvas({ environment, selectedId, select, openSettings, settingsId
         onNodeDragStart={(_event, node) => { if (!selectedIdsRef.current.includes(node.id)) selectNodes([node.id], node.id); }}
         onNodeDragStop={(_event, node, draggedNodes) => commitDrag(node, draggedNodes)}
         onEdgeClick={(_event, edge) => { selectNodes([], null); setSelectedEdge({ from: edge.source, to: edge.target }); }}
-        onPaneClick={() => { if (ignorePaneClick.current) return; selectNodes([], null); }} onConnect={({ source, target, sourceHandle, targetHandle }) => connect(source, target, sourceHandle, targetHandle)}>
+        onPaneClick={() => { if (ignorePaneClick.current) return; selectNodes([], null); }} onConnect={({ source, target, sourceHandle, targetHandle }) => runActive ? undefined : connect(source, target, sourceHandle, targetHandle)}>
         <InsertionViewport workflowId={workflow.workflowId} ids={composerActions(workflow).map(node => node.nodeId)} padding={fitPadding}/><HandleHitArea/><CanvasFocus onFocus={id => selectNodes([id], id)}/>
         <Background gap={22} size={1.5} color="var(--grid)" /><DarkSpotlight/><CanvasNavigator fitViewOptions={{ padding: fitPadding }} position="bottom-right"/><PanelRevealer/>
         <SelectionToolbar ids={toolbarIds}>{selectionTools}</SelectionToolbar>
