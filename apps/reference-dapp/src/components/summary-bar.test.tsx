@@ -121,7 +121,7 @@ describe('Editor footer', () => {
   });
 
   // P0 approved UX (boards 06–08): the footer hosts the ONE lifecycle control on Create and on Simulate (it left the canvas corner).
-  it('hosts the existing Canvas lifecycle control once, on Create and Simulate, keeping its wrapper class', () => {
+  it('hosts the existing Canvas lifecycle control once, on Create and Simulate (and on Execute only when the shell hands it one), keeping its wrapper class', () => {
     const control = createElement('button', { type: 'button', className: 'primary', 'data-lifecycle-action': 'simulate' }, 'Simulate workflow');
     const html = renderToStaticMarkup(createElement(SummaryBar, { tab: 'Build', setTab: vi.fn(), canvasOwnsAction: true, primaryAction: control, overview: overview() }));
     expect(html.match(/data-lifecycle-action="simulate"/g)).toHaveLength(1);
@@ -129,7 +129,9 @@ describe('Editor footer', () => {
     expect(html).toContain('class="summary-bar editor-bar"');
     const simulate = renderToStaticMarkup(createElement(SummaryBar, { tab: 'Simulate', setTab: vi.fn(), canvasOwnsAction: true, primaryAction: control }));
     expect(simulate.match(/data-lifecycle-action="simulate"/g)).toHaveLength(1);
-    expect(renderToStaticMarkup(createElement(SummaryBar, { tab: 'Execute', setTab: vi.fn(), canvasOwnsAction: true, primaryAction: control }))).not.toContain('data-lifecycle-action');
+    // Board 06: the shell renders the footer on Execute only while the whole-workflow Review waits for authorization, and hands it that ONE action.
+    expect(renderToStaticMarkup(createElement(SummaryBar, { tab: 'Execute', setTab: vi.fn(), canvasOwnsAction: true, primaryAction: control })).match(/data-lifecycle-action="simulate"/g)).toHaveLength(1);
+    expect(renderToStaticMarkup(createElement(SummaryBar, { tab: 'Execute', setTab: vi.fn(), canvasOwnsAction: true }))).not.toContain('summary-primary-action');
   });
 
   it('states only real notices: steps that need attention, unapplied changes, or none', () => {

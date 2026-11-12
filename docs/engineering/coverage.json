@@ -3537,6 +3537,8 @@
         "apps/reference-dapp/src/domain/assistant-welcome.ts",
         "apps/reference-dapp/src/domain/build-entry.ts",
         "apps/reference-dapp/src/domain/approved-ux.ts",
+        "apps/reference-dapp/src/domain/review-block.ts",
+        "apps/reference-dapp/src/domain/review-block-test-harness.ts",
         "apps/reference-dapp/src/domain/commands.ts",
         "apps/reference-dapp/src/domain/conversation-copy.ts",
         "apps/reference-dapp/src/domain/conversation-lifecycle.ts",

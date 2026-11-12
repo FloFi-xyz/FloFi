@@ -43,13 +43,13 @@ export function SummaryBar({ tab, setTab, simulationActionHost, reviewAvailable,
   const { t: tr } = useLocale();
   // The validity countdown ticks once a second, only while a simulation is valid on Simulate.
   const [now, setNow] = useState(() => Date.now());
-  const counting = tab === 'Simulate' && simulation?.expiresAt !== null && simulation?.expiresAt !== undefined && simulation.expiresAt > now;
+  const counting = tab !== 'Build' && simulation?.expiresAt !== null && simulation?.expiresAt !== undefined && simulation.expiresAt > now;
   useEffect(() => {
     if (!counting) return;
     const timer = window.setInterval(() => setNow(Date.now()), 1000);
     return () => window.clearInterval(timer);
   }, [counting]);
-  const status = tab === 'Simulate' && simulation ? simulateFooterStatus({ ...simulation, now: Math.max(now, Date.now()) }) : null;
+  const status = tab !== 'Build' && simulation ? simulateFooterStatus({ ...simulation, now: Math.max(now, Date.now()) }) : null;
   const ticking = status?.text === 'Simulation valid for {0}';
   const spokenNow = !status ? '' : `${tr(status.text, ...(status.parameters ?? []))}${status.detail ? ` · ${tr(status.detail)}` : ''}`;
   // What the live region says changes only with the meaning (valid, under 15 s, expired, a blocker); it then includes the time left at that moment.
@@ -107,7 +107,8 @@ export function SummaryBar({ tab, setTab, simulationActionHost, reviewAvailable,
     : overview.drafts ? <p className="summary-notice" data-notice="draft">{tr(overview.drafts === 1 ? '1 change not applied yet' : '{0} changes not applied yet', overview.drafts)}</p>
     : overview.state === 'configured' && !simulationBlocked ? <p className="summary-notice" data-notice="none">{tr('No warnings')}</p>
     : null;
-  const lifecycle = (tab === 'Build' || tab === 'Simulate') && primaryAction;
+  // Board 06: Execute shows the footer only while the whole-workflow Review waits for its authorization (the shell passes its action then).
+  const lifecycle = (tab === 'Build' || tab === 'Simulate' || tab === 'Execute') && primaryAction;
   // P0 hotfix (readable cards): the Editor bar is sticky at the bottom of the page, so anything scrolled into view (a focused control, the
   // Canvas navigator under a tall stacked graph) stops above it rather than behind it — the page's scroll padding is the bar's own height.
   const bar = useRef<HTMLElement>(null);
@@ -127,7 +128,7 @@ export function SummaryBar({ tab, setTab, simulationActionHost, reviewAvailable,
     {/* The m:ss countdown ticks visibly only; the live region speaks when the meaning changes (valid, under 15 s, expired, a blocker). */}
     {status && <p className="summary-status-line" data-tone={status.tone}><span className="summary-status-dot" data-tone={status.tone} aria-hidden="true"/>
       <span className="summary-status-text" aria-hidden={ticking || undefined}>{tr(status.text, ...(status.parameters ?? []))}</span>{status.detail && <span className="summary-status-detail">{tr(status.detail)}</span>}</p>}
-    {tab === 'Simulate' && simulation && <span className="sr-only" role="status">{announcement}</span>}
+    {tab !== 'Build' && simulation && <span className="sr-only" role="status">{announcement}</span>}
     {/* Relocate the existing action without duplicating its review gates or handler. */}
     {tr(tab === 'Simulate' && simulationActionHost ? createPortal(action, simulationActionHost) : action)}
     {lifecycle && <div className="canvas-primary-action summary-primary-action">{primaryAction}</div>}

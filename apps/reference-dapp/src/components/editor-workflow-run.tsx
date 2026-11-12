@@ -24,6 +24,7 @@ import type { EditorExecutionReview, ReviewAmount } from '../editor/workflow-exe
 import type { ClaimedProposal } from '../platform/approvals';
 import type { RunView } from '../workflow-runs/service';
 import { walletRequestView } from '../domain/approved-ux';
+import { reviewBlockView, type ReviewBlockText } from '../domain/review-block';
 import { BlockerPanel } from './review-summary-panel';
 import { WALLET_BATCH_OUTCOME_UNKNOWN, canEndWorkflow, haltedAs } from '../workflow-runs/state-machine';
 import { useLocale } from '../i18n/locale';
@@ -823,7 +824,39 @@ const stepText = (run: RunView, step: RunView['steps'][number]) => {
   return group?.signed ? 'Signed in your wallet' : ['RUNNING', 'ATTENTION'].includes(run.state) ? 'Waiting for your wallet' : 'Not signed';
 };
 
-export function EditorWorkflowRunPanel({ state }: { state: EditorWorkflowRunState }) {
+/** A Review line: its translated words, with every amount, asset and network in the numeric face. */
+function rich(tr: (key: string, ...parameters: string[]) => string, line: ReviewBlockText) {
+  const parts = tr(line.key).split(/\{(\d)\}/);
+  return parts.map((part, index) => index % 2 ? <span key={index} className="numeric">{tr(line.parameters[Number(part)] ?? '')}</span> : part);
+}
+
+/**
+ * Board 06: the Review's ONE primary action, hosted by the chat-first Editor's footer (the panel then shows none): "Review whole workflow" until
+ * a Review exists, "Authorize workflow" while a grouped Review is valid, "Review again" once it expired or could not be grouped. The same
+ * handlers, labels and disabled rules the panel's own buttons have; nothing else.
+ */
+export function EditorWorkflowRunPrimaryAction({ state }: { state: EditorWorkflowRunState }) {
+  const { t: tr } = useLocale();
+  const { review, phase } = state;
+  const [now, setNow] = useState(() => Date.now());
+  const until = review?.validUntil ? Date.parse(review.validUntil) : null;
+  useEffect(() => {
+    if (until === null || until <= Date.now()) return;
+    const timer = setTimeout(() => setNow(Date.now()), Math.min(until - Date.now() + 50, 2 ** 31 - 1));
+    return () => clearTimeout(timer);
+  }, [until]);
+  if (!state.canReview) return null;
+  const busy = ['reviewing', 'authorizing', 'proving', 'wallet', 'confirming'].includes(phase);
+  const expired = until !== null && until <= Math.max(now, Date.now());
+  if (review && state.grouped && !expired) return <button type="button" className="primary editor-run-authorize" disabled={busy} aria-busy={busy || undefined}
+    onClick={() => void state.authorize()}>{tr(phase === 'authorizing' ? 'Preparing your wallet request…' : 'Authorize workflow')}</button>;
+  return <button type="button" className="primary" disabled={busy} aria-busy={phase === 'reviewing' || undefined} onClick={() => void state.startReview()}>
+    {tr(phase === 'reviewing' ? 'Reviewing the whole workflow…' : review ? 'Review again' : 'Review whole workflow')}</button>;
+}
+
+export function EditorWorkflowRunPanel({ state, actionsOutside = false }: { state: EditorWorkflowRunState;
+  /** The chat-first Editor hosts the Review's primary action in its footer (`EditorWorkflowRunPrimaryAction`); the panel shows none before a run. */
+  actionsOutside?: boolean }) {
   const { t: tr, language } = useLocale();
   const { review, run, phase, error } = state;
   const [now, setNow] = useState(() => Date.now());
@@ -911,27 +944,12 @@ export function EditorWorkflowRunPanel({ state }: { state: EditorWorkflowRunStat
   const groupWords = (g: RunView['groups'][number]) => g.delivery?.state === 'AWAITING_DESTINATION' && (g.state === 'SUBMITTED' || g.state === 'UNCERTAIN') && awaited
     ? `${tr(EXECUTION_PHASE_LABEL.CONFIRMED_AT_SOURCE, tr(awaited.source))} · ${tr(EXECUTION_PHASE_LABEL.AWAITING_DESTINATION, tr(awaited.destination))}` : tr(stateText(GROUP_STATE, g));
   const bridgeTo = review?.steps.find(step => step.action === 'bridge')?.destination ?? null;
-  return <section className="editor-workflow-run panel" aria-label={tr('Whole workflow')} data-run-phase={phase} data-run-state={run?.state ?? undefined}>
-    <h3>{tr(run ? 'Workflow progress' : 'Review the whole workflow')}</h3>
-    {/* P0 approved UX (board 08): while the wallet holds the request, say which request it is and what the wallet shows, in plain words. */}
-    {review && (phase === 'wallet' || phase === 'confirming') && (() => {
-      // Only for the run this Review describes (a run of another revision or wallet profile shows its own progress below, never this plan).
-      const view = run && run.workflowHash !== review.workflowHash ? null : walletRequestView(review, run);
-      return view && <div className="execution-wallet-request" data-phase={phase}>
-        <p className="eyebrow">{view.of === null ? tr('EXECUTION · REQUEST {0}', String(view.request)) : tr('EXECUTION · REQUEST {0} OF {1}', String(view.request), String(view.of))}</p>
-        <h4>{tr(phase === 'wallet' ? 'Confirm in your wallet' : 'Waiting for your wallet')}</h4>
-        {view.items.length > 0 && <><p className="muted">{view.calls === null ? tr('Steps in this request:')
-          : !view.itemized ? tr(view.calls === 1 ? 'This request has 1 call, for this step:' : 'This request has {0} calls, for these steps:', String(view.calls))
-          : tr(view.calls === 1 ? 'This request has 1 call:' : 'This request has {0} calls:', String(view.calls))}</p>
-          <ol className="execution-wallet-calls">{view.items.map((item, index) => <li key={index}>{tr(item.text, ...item.parameters.map((value, at) => at === 1 ? tr(ACTION[value] ?? value) : value))}</li>)}</ol></>}
-        <p className="muted">{tr('Editing paused during execution')}</p>
-      </div>;
-    })()}
-    {state.earlier && <div className="editor-run-earlier" role="status"><p>{tr('A workflow you authorized earlier in this browser has not been closed. Its progress, and any batch your wallet already has, are read from FloFi and your wallet.')}</p>
-      <button type="button" className="secondary" disabled={busy} onClick={() => void state.followEarlier()}>{tr('Show its progress')}</button></div>}
-    {!review && !run && state.canReview && <p>{tr('FloFi checks every step together — amounts, minimums, fees and Aave risk — and asks your wallet only once where it can batch. Nothing is signed or sent by a review.')}</p>}
-    {state.following && <p className="muted">{tr('This is a workflow you authorized earlier, not the one on the Canvas.')}</p>}
-    {review && <>
+  // Board 06: before any run exists (nothing authorized yet), the Review reads as what the owner is authorizing, in plain words; everything else it
+  // said before stays one click away under "Technical details". A run, an earlier visit's run or one that cannot be loaded keeps its own view.
+  const fresh = !run && !state.started && !state.following && !state.unloaded && (Boolean(review) || state.canReview);
+  // The chat-first Editor hosts this Review's ONE primary action (Review / Authorize) in its footer (`EditorWorkflowRunPrimaryAction`).
+  const footerActions = fresh && actionsOutside;
+  const technical = review && <>
       <p className="editor-run-mechanism" data-mode={review.mode}>{tr(review.mode === 'ONE_WALLET_CONFIRMATION'
         ? 'All {0} steps run as ONE wallet confirmation on {1}: one atomic transaction from your own wallet, which pays the network fee.'
         : review.mode === 'GROUPED' ? 'All {0} steps run in {2} wallet confirmations, one per group; a later group is asked when it becomes due.'
@@ -1001,7 +1019,50 @@ export function EditorWorkflowRunPanel({ state }: { state: EditorWorkflowRunStat
         && review.groups.some(g => g.strategy === 'EVM_WALLET_BATCH' && g.steps[0] <= step.index && step.index <= g.steps[1]))
         ? 'Confirm the wallet request promptly: about 10 minutes after FloFi prepares it, an on-chain deadline refuses the whole batch (your wallet would still pay the network fee). Each swap\'s minimum is fixed when FloFi prepares the request.'
         : 'Confirm the wallet request promptly: about 10 minutes after FloFi prepares it, an on-chain deadline refuses the whole batch (your wallet would still pay the network fee).')}</p>}
+  </>;
+  const block = review ? reviewBlockView(review) : null;
+  // One amber line at the top of the block: what stops or invalidates this Review now (never an extra paragraph).
+  const alert = errorText ?? refusal ?? (review?.validUntil && expired ? tr('Expired at {0}: review again to refresh them before authorizing.', fmtTime(review.validUntil, language)) : null);
+  const feeBlocked = Boolean(review?.refusal?.evidence && !run && !state.started && !state.unloaded);
+  return <section className={`editor-workflow-run panel${fresh ? ' editor-review-block' : ''}`} aria-label={tr('Whole workflow')} data-run-phase={phase} data-run-state={run?.state ?? undefined}
+    data-review-state={fresh ? feeBlocked ? 'blocked' : busy ? 'busy' : review ? alert ? 'attention' : 'ready' : 'pending' : undefined}>
+    {fresh && !feeBlocked && <>
+      {alert && <p className="review-block-alert" role="alert">{alert}</p>}
+      <p className="eyebrow">{tr('REVIEW')}</p>
+      <h2>{tr('You are authorizing')}</h2>
+      {!block ? <p className="review-panel-status" role="status">{tr(phase === 'reviewing' ? 'Reviewing the whole workflow…'
+        : 'FloFi checks every step together — amounts, minimums, fees and Aave risk — and asks your wallet only once where it can batch. Nothing is signed or sent by a review.')}</p> : <>
+        <ol className="review-block-steps" aria-label={tr('Steps')}>{block.steps.map((line, index) => <li key={index} title={line.full ?? undefined}>{rich(tr, line)}</li>)}</ol>
+        <dl className="review-panel-rows review-block-rows">
+          {block.minimum && <div><dt>{tr('Minimum you receive')}</dt><dd title={block.minimum.full ?? undefined}><span>{rich(tr, block.minimum)}</span></dd></div>}
+          {block.fee && <div><dt>{tr('Network fee, at most')}</dt><dd><span>{rich(tr, block.fee)}</span></dd></div>}
+          <div><dt>{tr('Token permission')}</dt><dd>{block.permissions.map((line, index) => <span key={index} className="review-block-permission" title={line.full ?? undefined}>{rich(tr, line)}</span>)}</dd></div>
+          <div><dt>{tr('Wallet requests')}</dt><dd><span>{rich(tr, block.walletRequests)}</span></dd></div>
+        </dl>
+        <p className="review-panel-note">{tr('Your wallet pays the network fees. FloFi never signs or sends for you.')}</p>
+        <details className="review-panel-technical review-block-technical"><summary>{tr('Technical details')}</summary>{technical}</details>
+      </>}
     </>}
+    {!fresh && <h3>{tr(run ? 'Workflow progress' : 'Review the whole workflow')}</h3>}
+    {/* P0 approved UX (board 08): while the wallet holds the request, say which request it is and what the wallet shows, in plain words. */}
+    {review && (phase === 'wallet' || phase === 'confirming') && (() => {
+      // Only for the run this Review describes (a run of another revision or wallet profile shows its own progress below, never this plan).
+      const view = run && run.workflowHash !== review.workflowHash ? null : walletRequestView(review, run);
+      return view && <div className="execution-wallet-request" data-phase={phase}>
+        <p className="eyebrow">{view.of === null ? tr('EXECUTION · REQUEST {0}', String(view.request)) : tr('EXECUTION · REQUEST {0} OF {1}', String(view.request), String(view.of))}</p>
+        <h4>{tr(phase === 'wallet' ? 'Confirm in your wallet' : 'Waiting for your wallet')}</h4>
+        {view.items.length > 0 && <><p className="muted">{view.calls === null ? tr('Steps in this request:')
+          : !view.itemized ? tr(view.calls === 1 ? 'This request has 1 call, for this step:' : 'This request has {0} calls, for these steps:', String(view.calls))
+          : tr(view.calls === 1 ? 'This request has 1 call:' : 'This request has {0} calls:', String(view.calls))}</p>
+          <ol className="execution-wallet-calls">{view.items.map((item, index) => <li key={index}>{tr(item.text, ...item.parameters.map((value, at) => at === 1 ? tr(ACTION[value] ?? value) : value))}</li>)}</ol></>}
+        <p className="muted">{tr('Editing paused during execution')}</p>
+      </div>;
+    })()}
+    {state.earlier && <div className="editor-run-earlier" role="status"><p>{tr('A workflow you authorized earlier in this browser has not been closed. Its progress, and any batch your wallet already has, are read from FloFi and your wallet.')}</p>
+      <button type="button" className="secondary" disabled={busy} onClick={() => void state.followEarlier()}>{tr('Show its progress')}</button></div>}
+    {!fresh && !review && !run && state.canReview && <p>{tr('FloFi checks every step together — amounts, minimums, fees and Aave risk — and asks your wallet only once where it can batch. Nothing is signed or sent by a review.')}</p>}
+    {state.following && <p className="muted">{tr('This is a workflow you authorized earlier, not the one on the Canvas.')}</p>}
+    {review && !fresh && technical}
     {!review && run && <>
       {/* After a reload the Review is not in this tab any more: the run's own progress is shown from the server (amounts as reconciled). */}
       <ol className="editor-run-steps" aria-label={tr('Steps')}>
@@ -1023,16 +1084,16 @@ export function EditorWorkflowRunPanel({ state }: { state: EditorWorkflowRunStat
       <dl className="editor-run-facts">{run.groups.map(g => <div key={g.index}><dt>{run.groups.length > 1 ? tr('Group {0}', String(g.index + 1)) : tr('Wallet request')}</dt>
         <dd>{tr(HOW[g.strategy] ?? g.strategy)} · {groupWords(g)}{g.gasPaid ? ` · ${tr('network fees paid: {0}', eth(g.gasPaid.amount))}` : ''}</dd></div>)}</dl>
     </>}
-    {refusal && <p className="error-banner" role="alert">{refusal}</p>}
+    {refusal && !fresh && <p className="error-banner" role="alert">{refusal}</p>}
     {/* Board 07: a native-fee shortfall found while preparing this Review shows the server's own numbers (no run exists yet: nothing was sent). */}
-    {review?.refusal?.evidence && !run && !state.started && !state.unloaded && <BlockerPanel title={refusal ?? ''} message={refusal ?? ''} error={review.refusal.code} owner={review.owner}
-      feeShortfall={review.refusal.evidence} technical={null}/>}
+    {feeBlocked && <BlockerPanel title={refusal ?? ''} message={refusal ?? ''} error={review!.refusal!.code} owner={review!.owner}
+      feeShortfall={review!.refusal!.evidence!} technical={fresh ? <details className="review-panel-technical"><summary>{tr('Technical details, for support')}</summary>{technical}</details> : null}/>}
     {state.updated.length > 0 && <div className="editor-run-update" role="alert">
       <p>{tr(state.updated.every(u => u.reviewed) ? 'Prices moved since your review. Your wallet would be asked with these minimums:' : 'Confirm what your wallet will be asked:')}</p>
       <ul>{state.updated.map(u => <li key={`${u.kind}:${u.index}`}>{u.reviewed ? tr('Step {0}: {1} (reviewed {2})', String(u.index + 1), u.now, u.reviewed)
         : u.kind === 'recipient' ? <>{tr('Step {0} pays', String(u.index + 1))} <code className="editor-run-recipient">{u.now}</code></>
         : tr('Step {0}: minimum {1}', String(u.index + 1), u.now)}</li>)}</ul></div>}
-    {errorText && <p className="error-banner" role="alert">{errorText}</p>}
+    {errorText && !(fresh && !feeBlocked) && <p className="error-banner" role="alert">{errorText}</p>}
     {run && run.stepCount > 1 && <p className="editor-run-progress" role="status" data-completed={progress!.completed}>{tr('{0} of {1} steps completed', String(progress!.completed), String(progress!.total))}</p>}
     {awaited && <p className="editor-run-delivery" role="status">{tr('Your batch is confirmed on {0}. FloFi is waiting for the delivery on {1} and keeps checking even if you leave this page; nothing is sent again.',
       tr(awaited.source), tr(awaited.destination))}</p>}
@@ -1053,11 +1114,11 @@ export function EditorWorkflowRunPanel({ state }: { state: EditorWorkflowRunStat
     {phase === 'confirming' && <p role="status">{tr('Waiting for your wallet to report the batch…')}</p>}
     {phase === 'proving' && <p role="status">{tr('Sign the FloFi sign-in message in your wallet (once per session). It authorizes no transaction.')}</p>}
     <div className="approval-actions">
-      {state.canReview && <button type="button" className={review ? 'secondary' : 'primary'} disabled={busy} aria-busy={phase === 'reviewing' || undefined} onClick={() => void state.startReview()}>
+      {state.canReview && !footerActions && <button type="button" className={review ? 'secondary' : 'primary'} disabled={busy} aria-busy={phase === 'reviewing' || undefined} onClick={() => void state.startReview()}>
         {tr(phase === 'reviewing' ? 'Reviewing the whole workflow…' : review ? 'Review again' : 'Review whole workflow')}</button>}
       {state.unloaded && <button type="button" className="primary" disabled={busy} onClick={() => void state.checkWallet()}>{tr('Load workflow progress')}</button>}
       {state.following && !busy && <button type="button" className="quiet" onClick={state.hide}>{tr('Hide this workflow')}</button>}
-      {review && state.canReview && state.grouped && <button type="button" className="primary editor-run-authorize" disabled={busy || expired} aria-busy={busy || undefined} onClick={() => void state.authorize()}>
+      {review && state.canReview && state.grouped && !footerActions && <button type="button" className="primary editor-run-authorize" disabled={busy || expired} aria-busy={busy || undefined} onClick={() => void state.authorize()}>
         {tr(phase === 'authorizing' ? 'Preparing your wallet request…' : 'Authorize workflow')}</button>}
       {phase === 'confirm-update' && <button type="button" className="primary" onClick={() => void state.confirmUpdate()}>{tr(state.updated.every(u => u.reviewed) ? 'Confirm the updated minimums' : 'Confirm and continue in my wallet')}</button>}
       {resumable && !busy && <button type="button" className="primary" onClick={() => void state.resume()}>{tr('Resume the workflow')}</button>}

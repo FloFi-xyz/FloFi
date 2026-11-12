@@ -92,6 +92,33 @@
 .review-panel-actions{display:flex;flex-wrap:wrap;align-items:center;gap:10px}
 .review-panel-actions :is(button,a).secondary{display:inline-flex;align-items:center;gap:8px;min-height:44px;padding:0 16px;border:1px solid var(--line);border-radius:12px;background:var(--surface);color:var(--ink);font-weight:500;text-decoration:none}
 .review-panel-actions :is(button,a).secondary:hover{border-color:var(--accent)}
+/* ── Board 06: the whole-workflow Review before authorization ("You are authorizing"). One card beside the cards, plain rows, everything else
+   collapsed under "Technical details"; its ONE primary action is the Editor footer's. Tokens only (both themes), no shadow, 44 px targets. ── */
+.canvas-review-dock>.review-block-host{padding:16px var(--workspace-edge-spacing,16px) 20px}
+.review-block-host{display:flex;flex-direction:column;gap:12px}
+.review-block-host>.editor-review-block{margin:0}
+.editor-workflow-run.editor-review-block{display:flex;flex-direction:column;gap:12px;padding:20px;border:1px solid var(--line);border-radius:18px;background:var(--surface);box-shadow:none;color:var(--ink);font-size:15px}
+.editor-review-block .eyebrow{margin:0;font-family:var(--font-ibm-plex-mono),monospace;font-size:13px;letter-spacing:.08em;color:var(--muted)}
+.editor-workflow-run.editor-review-block h2{margin:0;font-size:20px;line-height:1.25;font-weight:600;color:var(--ink)}
+/* The block's rows always read as one column (label left, value right), whatever the dock's width. */
+.canvas-review-dock .editor-review-block .review-panel-rows{display:flex;flex-direction:column}
+.canvas-review-dock .editor-review-block .review-panel-rows>div{border-top:0;border-bottom:1px solid var(--line)}
+.canvas-review-dock .editor-review-block .review-panel-rows>div:last-child{border-bottom:0}
+.review-block-steps{list-style:none;margin:0;padding:0;display:flex;flex-direction:column}
+.review-block-steps li{padding:11px 0;border-bottom:1px solid var(--line);font-size:15px;line-height:1.4;overflow-wrap:anywhere}
+.editor-review-block .review-block-rows dt{font-size:14px}
+.editor-review-block .review-block-rows dd{display:flex;flex-direction:column;align-items:flex-end;gap:2px}
+.review-block-permission{display:block}
+.editor-review-block .numeric{font-family:var(--font-ibm-plex-mono),monospace;font-variant-numeric:tabular-nums}
+.review-block-alert{margin:0;padding:10px 12px;border:1px solid var(--warning-border);border-radius:12px;background:var(--warning-surface);color:var(--warning-text);font-size:14px;line-height:1.45}
+.review-block-technical>:not(summary){color:var(--ink)}
+.review-block-technical .editor-run-steps,.review-block-technical .editor-run-facts{margin-top:8px}
+/* Beside the cards from a 960 px frame (the 1440 px layout) when the workflow has at most two steps; more steps keep the 1180 px rule above. */
+@container flofi-canvas-frame (min-width:960px){
+  .simulation-workflow-canvas[data-docked]:is([data-steps="1"],[data-steps="2"]):has(.editor-review-block)>.simulate-canvas-body{display:grid;grid-template-columns:minmax(0,1fr) minmax(360px,420px);align-items:stretch}
+  .simulation-workflow-canvas[data-docked]:is([data-steps="1"],[data-steps="2"]):has(.editor-review-block)>.simulate-canvas-body>.flow-surface{height:auto;min-height:clamp(460px,calc(100vh - 300px),640px)}
+  .simulation-workflow-canvas[data-docked]:is([data-steps="1"],[data-steps="2"]):has(.editor-review-block) .canvas-review-dock{border-top:0;border-left:1px solid var(--line)}
+}
 /* Board 07: the blocker panel replaces the Review panel; amber only on its own surface. */
 .review-panel-blocked{border-top:3px solid var(--warning-text)}
 .review-panel-blocked h2{color:var(--ink)}

@@ -4,7 +4,7 @@
  * proven at the wallet boundary, not by a button label.
  *
  *   signed-in FloFi account → Swap 3 USDC → WETH, Supply the swap's WETH, Borrow 0.8 USDC on Base (chat) → Execute → "Review whole workflow"
- *   (`wallet_getCapabilities` only; nothing is sent) → "Authorize workflow" → exactly one `wallet_sendCalls` with the prepared atomic batch
+ *   (the Editor footer's ONE action, board 06; `wallet_getCapabilities` only; nothing is sent) → "Authorize workflow" (the same footer action) → exactly one `wallet_sendCalls` with the prepared atomic batch
  *   (chain 0x2105, the owner as `from`, `atomicRequired`, no capabilities, approve/swap/approve/supply/borrow) → the wallet double executes it on
  *   the MOCKED Base chain (one transaction from the owner's own account) → `wallet_getCallsStatus` → FloFi reconciles every step from the chain
  *   → reload: the run is recovered from FloFi, and the wallet is never asked to send again.
@@ -124,6 +124,8 @@ async function say(page: Page, text: string, label: string) {
   await expect(cards.nth(before)).toContainText(label);
 }
 const panel = (page: Page) => page.getByRole('region', { name: 'Whole workflow', exact: true });
+/** Board 06: before anything is authorized, the Review's ONE primary action is the Editor footer's (the panel has no button of its own). */
+const footerAction = (page: Page) => page.locator('.summary-bar .summary-primary-action');
 
 test('Swap → Supply → Borrow on Base: the Editor asks the wallet for ONE wallet_sendCalls batch, reconciles it, and never sends it again', async ({ page, networkGuard }) => {
   const errors: string[] = []; page.on('pageerror', error => errors.push(error.message));
@@ -144,7 +146,14 @@ test('Swap → Supply → Borrow on Base: the Editor asks the wallet for ONE wal
 
   // Review: read-only. The wallet is asked what it can do (no prompt) and nothing else.
   await openEditorSection(page, 'Execute');
-  await panel(page).getByRole('button', { name: 'Review whole workflow', exact: true }).click();
+  await expect(panel(page).getByRole('button')).toHaveCount(0);
+  await footerAction(page).getByRole('button', { name: 'Review whole workflow', exact: true }).click();
+  // Board 06: what is being authorized in plain words; the group breakdown and the rest wait under the collapsed "Technical details".
+  await expect(panel(page).getByRole('heading', { name: 'You are authorizing', exact: true })).toBeVisible({ timeout: 60_000 });
+  await expect(panel(page).getByRole('list', { name: 'Steps', exact: true }).first()).toContainText('Swap 3 USDC → WETH · Base', { timeout: 60_000 });
+  await expect(panel(page).locator('.review-block-rows')).toContainText('Wallet requests1');
+  await expect(panel(page).locator('.editor-run-mechanism')).toBeHidden();
+  await panel(page).getByText('Technical details', { exact: true }).click();
   await expect(panel(page).locator('.editor-run-mechanism')).toBeVisible({ timeout: 60_000 });
   await expect(panel(page).locator('.editor-run-mechanism')).toHaveAttribute('data-mode', 'ONE_WALLET_CONFIRMATION', { timeout: 60_000 });
   await expect(panel(page)).toContainText('5 calls in the batch (2 token approvals)');
@@ -153,7 +162,8 @@ test('Swap → Supply → Borrow on Base: the Editor asks the wallet for ONE wal
   expect(log.sent).toEqual([]);
 
   // Authorize: the sign-in proof, then exactly ONE wallet_sendCalls carrying the prepared atomic batch.
-  await panel(page).getByRole('button', { name: 'Authorize workflow', exact: true }).click();
+  await expect(page.locator('main, .summary-bar').getByRole('button', { name: 'Authorize workflow', exact: true })).toHaveCount(1);
+  await footerAction(page).getByRole('button', { name: 'Authorize workflow', exact: true }).click();
   await expect(panel(page)).toContainText('Every step reconciled.', { timeout: 90_000 });
   expect(log.sent).toHaveLength(1);
   const batch = log.sent[0]!;

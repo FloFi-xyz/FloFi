@@ -4,6 +4,21 @@
  * names stay as they are; placeholders are preserved.
  */
 export const portugueseWorkflowExecution: Readonly<Record<string, string>> = {
+  // Board 06: the whole-workflow Review before authorization, in plain words (domain/review-block.ts).
+  'Swap {0} → {1} · {2}': 'Trocar {0} → {1} · {2}', 'Swap {0} · {1}': 'Trocar {0} · {1}', 'Swap · {0}': 'Trocar · {0}',
+  'Bridge {0} to {1}': 'Levar {0} para {1}', 'Bridge from {0} to {1}': 'Levar de {0} para {1}',
+  'Supply {0} to Aave · {1}': 'Depositar {0} na Aave · {1}', 'Supply to Aave · {0}': 'Depositar na Aave · {0}',
+  'Repay {0} to Aave · {1}': 'Pagar {0} à Aave · {1}', 'Repay to Aave · {0}': 'Pagar à Aave · {0}',
+  'Borrow {0} from Aave · {1}': 'Pegar emprestado {0} da Aave · {1}', 'Borrow from Aave · {0}': 'Pegar emprestado da Aave · {0}',
+  'Withdraw {0} from Aave · {1}': 'Sacar {0} da Aave · {1}', 'Withdraw from Aave · {0}': 'Sacar da Aave · {0}',
+  'Send {0} to {1} · {2}': 'Enviar {0} para {1} · {2}', 'Send · {0}': 'Enviar · {0}',
+  'Quoted when each request is due': 'Cotada quando chegar a vez de cada pedido',
+  '{0} + later requests, quoted when due': '{0} + os pedidos seguintes, cotados quando chegar a vez deles',
+  'Later steps ask when they are due': 'As etapas seguintes pedem quando chegar a vez delas',
+  'Asked when each step is due': 'Pedida quando chegar a vez de cada etapa',
+  'None needed': 'Nenhuma necessária',
+  'Your wallet pays the network fees. FloFi never signs or sends for you.': 'Sua carteira paga as taxas de rede. A FloFi nunca assina nem envia por você.',
+  'This workflow cannot be authorized yet': 'Este fluxo ainda não pode ser autorizado',
   'This workflow runs as one workflow run: follow it in Execute.': 'Este fluxo roda como uma única execução: acompanhe em Executar.',
   'All {0} steps are reviewed together and authorized at once where your wallet can batch them.':
     'As {0} etapas são revisadas juntas e autorizadas de uma vez quando sua carteira consegue agrupá-las.',
