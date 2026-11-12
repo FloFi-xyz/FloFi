@@ -164,7 +164,7 @@ test('Create strategy runs the existing interpreter and opens Build 1 with the w
   // Build 0 is reachable again (the drawer's New workflow); its composer is empty after the request was added.
   await openChat(page);
   await expect(request(page)).toHaveValue('');
-  await expect(entry(page)).toContainText('Your workflow already has 1 action. A new request is added to it.');
+  await expect(entry(page)).toContainText('Your workflow already has 1 step. A new request is added to it.');
   // P0 approved UX: with steps already on the workflow, the entry's one action adds to it.
   await expect(entry(page).getByRole('button', { name: 'Add to workflow', exact: true })).toBeVisible();
   await expect(entry(page).getByRole('button', { name: 'Create workflow', exact: true })).toHaveCount(0);

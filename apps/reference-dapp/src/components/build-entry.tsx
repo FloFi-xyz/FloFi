@@ -134,7 +134,7 @@ export function BuildEntry({ conversation, workflow, proposal, actions, draft, s
           <button type="button" onClick={openBuilder}>{tr('Build manually')}</button></div>
       </div>}
       {/* The Editor is reached from the ☰ drawer (board 03: no duplicate Editor link); the note still says where a new request goes. */}
-      {actions > 0 && !refused && <p className={styles.context} role="note">{tr(actions === 1 ? 'Your workflow already has 1 action. A new request is added to it.' : 'Your workflow already has {0} actions. A new request is added to it.', actions)}</p>}
+      {actions > 0 && !refused && <p className={styles.context} role="note">{tr(actions === 1 ? 'Your workflow already has 1 step. A new request is added to it.' : 'Your workflow already has {0} steps. A new request is added to it.', actions)}</p>}
 
       <div className={styles.suggestions} role="group" aria-label={tr('Example requests')}>
         {BUILD_ENTRY_SUGGESTIONS.map(item => <button key={item.id} type="button" disabled={busy} onClick={() => suggest(item)}>

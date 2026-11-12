@@ -1089,6 +1089,10 @@
     "workflow-contracts.revision-state": {
       "path": "packages/workflow-contracts/test/revision-state.test.ts",
       "stage": "unit"
+    },
+    "app.domain.p0-swap-bridge-connections": {
+      "path": "apps/reference-dapp/src/domain/p0-swap-bridge-connections.test.ts",
+      "stage": "unit"
     }
   },
   "requiredUnitSuites": [
@@ -3869,7 +3873,8 @@
         "app.domain.wallet-portfolio",
         "app.domain.editor-overview",
         "app.domain.editor-run",
-        "app.domain.flight-refusal"
+        "app.domain.flight-refusal",
+        "app.domain.p0-swap-bridge-connections"
       ],
       "gaps": [
         "Mapped suites are representative boundary tests, not exhaustive path or public execution coverage.",
