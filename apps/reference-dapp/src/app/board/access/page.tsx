@@ -8,6 +8,7 @@ import type { Metadata } from 'next';
 import { AccessContinue } from '../../../components/flight/access-continue';
 import { FLIGHT_COPY } from '../../../components/flight/flight-copy';
 import { siteLanguage } from '../../../components/site/site-language';
+import '../flight-document.css';
 
 export const metadata: Metadata = { title: 'Flight FloFi', robots: { index: false, follow: false }, referrer: 'no-referrer' };
 // The email's own language (?l=pt / ?l=en in its links) wins over the site preference: a mail app's browser has no FloFi cookie.

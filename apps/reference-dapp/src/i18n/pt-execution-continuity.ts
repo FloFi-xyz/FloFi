@@ -83,4 +83,8 @@ export const portugueseExecutionContinuity: Readonly<Record<string, string>> = {
   // A confirmed approval whose allowance read-back is not in yet (owner-bound swaps).
   'The approval is confirmed. FloFi is still reading its allowance on the network before preparing the swap. Nothing new was sent; try again in a moment.':
     'A aprovação está confirmada. A FloFi ainda está lendo a permissão na rede antes de preparar o swap. Nada novo foi enviado; tente novamente em instantes.',
+  // Flight transition (src/components/flight/flight-transition.tsx): the product's hand-off to /board and its "could not check" state.
+  'Taking you to Flight FloFi…': 'Levando você ao Flight FloFi…',
+  'We could not check your access': 'Não conseguimos verificar seu acesso',
+  'Your FloFi workspace opens once your Flight FloFi access is confirmed.': 'Seu espaço de trabalho FloFi abre assim que seu acesso ao Flight FloFi for confirmado.',
 };

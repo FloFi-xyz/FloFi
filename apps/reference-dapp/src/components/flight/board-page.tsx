@@ -8,14 +8,17 @@
  */
 import Link from 'next/link';
 import type { FlightState } from '../../flight/http';
+import { boardArrivalChecks, type BoardArrival } from '../../flight/board-arrival';
 import { BoardExperience, RouteButton } from './board-experience';
+import { BoardFrame } from './board-frame';
 import { FLIGHT_COPY, FLIGHT_LINKS } from './flight-copy';
 import { LanguageSwitch } from './language-switch';
 import styles from './flight.module.css';
 
-export function BoardPage({ language, state }: { language: 'EN' | 'PT'; state: FlightState | null }) {
+export function BoardPage({ language, state, arrival = null }: { language: 'EN' | 'PT'; state: FlightState | null; arrival?: BoardArrival }) {
   const copy = FLIGHT_COPY[language];
-  return <div className={styles.page} lang={copy.lang}>
+  // P0 hotfix (Flight transition): an arrival the board will check opens on FloFi's checking state, never on a board painted and replaced.
+  return <div className={styles.page} lang={copy.lang} data-flight-page=""><BoardFrame checking={boardArrivalChecks(arrival, state?.phase ?? null)} message={copy.boarding.checking}>
     <a className={styles.skip} href="#top">{language === 'PT' ? 'Ir para o conteúdo' : 'Skip to content'}</a>
     <header className={styles.header}>
       <Link href="/" aria-label={copy.nav.home}>
@@ -89,5 +92,5 @@ export function BoardPage({ language, state }: { language: 'EN' | 'PT'; state: F
       </div>
       <p className={styles.footerRisk}>{copy.footer.risk}</p>
     </footer>
-  </div>;
+  </BoardFrame></div>;
 }

@@ -1,0 +1,27 @@
+/* SPDX-License-Identifier: AGPL-3.0-only */
+/* P0 hotfix (Flight transition): FloFi's full-screen state between /board and /app (checking a boarding, handing off to another page, or
+   "We could not check your access"). Flight blue #2343D9 with the FloFi logo on blue, white Outfit type, navy #041B3D on white for the one
+   action. It looks the same in light and dark and over any page's CSS (the product's global element rules and its html[data-theme] too):
+   every property it depends on is set here, and it covers the whole viewport. */
+.screen{position:fixed;inset:0;z-index:2147483000;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:28px;
+  margin:0;padding:32px max(16px,6vw);overflow:auto;box-sizing:border-box;color-scheme:light;background:#2343D9;color:#fff;text-align:center;
+  font-family:var(--font-outfit),Outfit,system-ui,sans-serif;font-size:18px;font-weight:400;line-height:1.4;letter-spacing:normal}
+.screen *{box-sizing:border-box}
+.screen:focus{outline:none}
+.fadeIn{animation:flightTransitionFadeIn .16s ease-out both}
+@keyframes flightTransitionFadeIn{from{opacity:0}to{opacity:1}}
+.logo{display:block;width:auto;height:40px;margin:0}
+.message{margin:0;max-width:640px;font-size:clamp(20px,2.4vw,28px);font-weight:600;line-height:1.3;color:#fff}
+.title{margin:0;max-width:720px;font-size:clamp(30px,4.4vw,48px);font-weight:700;line-height:1.08;letter-spacing:-.03em;color:#fff}
+.body{margin:0;max-width:560px;font-size:18px;line-height:1.45;color:#E9EDFD}
+.dots{display:flex;gap:10px;margin:0;padding:0}
+.dots span{display:block;width:10px;height:10px;border-radius:50%;background:#fff;opacity:.35;animation:flightTransitionPulse 1.2s ease-in-out infinite}
+.dots span:nth-child(2){animation-delay:.2s}
+.dots span:nth-child(3){animation-delay:.4s}
+@keyframes flightTransitionPulse{0%,100%{opacity:.35;transform:scale(.85)}50%{opacity:1;transform:scale(1)}}
+.action{display:inline-flex;align-items:center;justify-content:center;min-height:48px;margin:0;padding:12px 28px;border:0;border-radius:999px;
+  background:#fff;color:#041B3D;font-family:inherit;font-size:18px;font-weight:600;line-height:1;cursor:pointer;opacity:1;box-shadow:none}
+.action:hover{background:#E9EDFD}
+.action:focus-visible{outline:3px solid #fff;outline-offset:3px}
+.action:disabled{opacity:1;cursor:wait;background:#C9D2F8}
+@media (prefers-reduced-motion:reduce){.fadeIn{animation:none}.dots span{animation:none;opacity:.8}}

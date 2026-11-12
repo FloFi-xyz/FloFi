@@ -72,7 +72,8 @@ const teamEnv = teamHarness ? {
 } : {};
 
 export default defineConfig({
-  testDir: './e2e', testMatch: 'board.spec.ts', workers: 1, fullyParallel: false, retries: 0,
+  // P0 hotfix (Flight transition): flight-transition.spec.ts defines its tests only in closed beta (the guarded flight-closed-beta profile).
+  testDir: './e2e', testMatch: ['board.spec.ts', 'flight-transition.spec.ts'], workers: 1, fullyParallel: false, retries: 0,
   timeout: 90_000, expect: { timeout: 15_000 }, reporter: 'list', globalSetup: './e2e/cloud-runtime-setup.ts',
   use: { baseURL: E2E_APP_ORIGIN, storageState: returningVisitor(E2E_APP_ORIGIN), browserName: 'chromium', headless: true, launchOptions: { executablePath },
     serviceWorkers: 'block', trace: 'off', screenshot: 'only-on-failure', video: 'off' },

@@ -7,7 +7,6 @@
  *   record of their simulation; this never authorizes, signs or changes anything in the workflow.
  */
 import { useEffect, useRef, useState } from 'react';
-import Link from 'next/link';
 import { useLocale } from '../i18n/locale';
 
 export const FLIGHT_DRAFT_KEY = 'flofi.flight.draft';
@@ -19,11 +18,16 @@ export const FLIGHT_BOARDING_KEY = 'flofi.flight.boarding';
 export const FLIGHT_RETURN_KEY = 'flofi.flight.return';
 export const FLIGHT_RETURNS = ['/board?board=1', '/board?invite=1'] as const;
 const storage = () => { try { return sessionStorage; } catch { return null; } };
-/** Where wallet onboarding continues: back to /board after "Board now" or an invite, otherwise /app (as before). */
+/**
+ * Where wallet onboarding continues: back to /board after "Board now" or an invite, otherwise /app (as before). A return to /board keeps its
+ * mark: /board consumes it on arrival, or, when the server sends an admitted person straight to /app (P0 hotfix, Flight transition), the
+ * pass flow below does. Any other mark is removed here.
+ */
 export function afterOnboardingPath(): string {
   const store = storage(), back = store?.getItem(FLIGHT_RETURN_KEY) ?? null;
+  if ((FLIGHT_RETURNS as readonly string[]).includes(back ?? '')) return back!;
   store?.removeItem(FLIGHT_RETURN_KEY);
-  return (FLIGHT_RETURNS as readonly string[]).includes(back ?? '') ? back! : '/app';
+  return '/app';
 }
 
 /**
@@ -72,5 +76,6 @@ export function FlightBoarding({ readyKey, workflowId }: { readyKey: string | nu
   }, [active, readyKey, workflowId]);
   if (!active && !issued) return null;
   // The live region is on the page before its text arrives, so the notice is announced.
-  return <p className={issued ? 'beta-notice' : 'sr-only'} role="status">{issued ? <>{t('Your Flight FloFi boarding pass is ready.')} <Link href="/board#pass">{t('See your boarding pass')}</Link></> : null}</p>;
+  // A full navigation (P0 hotfix, Flight transition): /board loads as its own document, never inside the product's (its CSS and theme).
+  return <p className={issued ? 'beta-notice' : 'sr-only'} role="status">{issued ? <>{t('Your Flight FloFi boarding pass is ready.')} <a href="/board#pass">{t('See your boarding pass')}</a></> : null}</p>;
 }

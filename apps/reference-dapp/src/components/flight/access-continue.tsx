@@ -7,6 +7,7 @@
  */
 import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
+import { FLIGHT_RETURN_KEY } from '../../flight/app-boarding';
 import { FLIGHT_COPY } from './flight-copy';
 import styles from './flight.module.css';
 
@@ -19,7 +20,7 @@ async function post(path: string, body: unknown): Promise<{ ok: boolean; code?: 
 }
 
 function Shell({ lang, children }: { lang: string; children: React.ReactNode }) {
-  return <div className={styles.page} lang={lang}>
+  return <div className={styles.page} lang={lang} data-flight-page="">
     <header className={styles.header}><Link href="/board" aria-label="FloFi"><img src="/brand/flight/flofi-logo-on-blue.svg" alt="FloFi"/></Link></header>
     <main className={styles.accessPage}>{children}</main>
   </div>;
@@ -50,6 +51,9 @@ export function AccessContinue({ language, lang }: { language: Language; lang: s
       // The token is spent: take it out of the address bar and history, then continue to the gate.
       window.history.replaceState(null, '', '/board/access');
       setMessage({ ok: true, text: t.done });
+      // As "Board now" before sign-in: /board consumes this mark on arrival, or /app's pass flow does when the server sends the person
+      // straight there (P0 hotfix, Flight transition: src/flight/board-arrival.ts).
+      if (answer.next === '/board?board=1') { try { sessionStorage.setItem(FLIGHT_RETURN_KEY, '/board?board=1'); } catch { /* Optional. */ } }
       window.location.assign(answer.next === '/board?board=1' ? '/board?board=1' : '/board');
     } else setMessage({ ok: false, text: (copy.errors as Record<string, string>)[answer.code ?? ''] ?? copy.errors.generic });
   }
