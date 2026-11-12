@@ -66,7 +66,8 @@ describe('BUILD-FLOFI-CONVERSATIONAL-001 conversational lifecycle', () => {
     expect(lifecycleRequest('Execute my workflow')).toBe('EXECUTE'); expect(lifecycleRequest('check status')).toBe('STATUS'); expect(lifecycleRequest('Desfazer')).toBe('UNDO');
     expect(lifecycleRequest('Undo this change')).toBe('UNDO'); expect(lifecycleRequest('Desfazer esta alteração')).toBe('UNDO');
     for (const text of ['Swap 10 USDC to ETH on Base.', 'review the swap amount and make it 5', 'bridge 5 USDC from Base to Arbitrum']) expect(lifecycleRequest(text), text).toBeNull();
-    expect(answerLanguage('Revisar workflow', 'EN')).toBe('PT'); expect(answerLanguage('Review my workflow', 'PT')).toBe('EN'); expect(answerLanguage('ok', 'PT')).toBe('PT');
+    // P0 approved UX (boards 01/02): FloFi replies in the interface language, whatever language was typed (the words are still understood).
+    expect(answerLanguage('Revisar workflow', 'EN')).toBe('EN'); expect(answerLanguage('Review my workflow', 'PT')).toBe('PT'); expect(answerLanguage('ok', 'PT')).toBe('PT');
   });
   it('reads the phase from the open question and the existing records, execution first', () => {
     const v = view(), empty = { ...v, workflow: initialEditor().workflow };
@@ -120,7 +121,7 @@ describe('BUILD-FLOFI-CONVERSATIONAL-001 conversational lifecycle', () => {
     const swap = editorReducer(empty, { type: 'ADD_SWAP', direction: 'USDC_TO_WETH', amount: '10', slippage: '100', source: 'CHAT', baseRevision: 0 }, context).workflow;
     const [added] = describeChatChange(empty.workflow, swap, context, 'EN');
     expect(added).toMatch(/^Swap added to your workflow: 10 USDC/);
-    expect(describeChatChange(empty.workflow, swap, context, 'PT')[0]).toMatch(/^Adicionado ao seu workflow: /);
+    expect(describeChatChange(empty.workflow, swap, context, 'PT')[0]).toMatch(/^Adicionado ao seu fluxo: /);
     const nodeId = swap.nodes.at(-1)!.nodeId;
     const edited = editorReducer({ workflow: swap, error: null }, { type: 'SET_SWAP_AMOUNT', nodeId, amount: '5', source: 'CHAT', baseRevision: swap.revision }, context).workflow;
     expect(describeChatChange(swap, edited, context, 'EN')).toEqual([expect.stringMatching(/^Swap updated: 5 USDC/)]);
@@ -148,7 +149,7 @@ describe('BUILD-FLOFI-CHAT-E2E-FIX-002 chat review additions', () => {
     for (const yes of ['Apply it', 'apply', 'Yes', 'Aplicar', 'sim']) expect(classifyAnswer(yes, 'RESOLVE_EDIT')).toBe('YES');
     for (const no of ['Discard it', 'discard', 'Descartar', 'No', 'não']) expect(classifyAnswer(no, 'RESOLVE_EDIT')).toBe('NO');
     for (const unclear of ['maybe', 'apply 30 instead', 'make it 5']) expect(classifyAnswer(unclear, 'RESOLVE_EDIT')).toBe('UNCLEAR');
-    expect(answerLanguage('Descartar', 'EN')).toBe('PT');
+    expect(answerLanguage('Descartar', 'EN')).toBe('EN');
   });
   it('sums cost lines exactly per asset (no conversion, no rounding) and counts what it cannot read', () => {
     expect(sumByAsset(['0.0001 ETH', '0.00002 ETH', '0.25 USDC', '1 USDC', 'about 3 dollars'])).toEqual({ sums: ['0.00012 ETH', '1.25 USDC'], unreadable: 1 });

@@ -136,7 +136,6 @@ const MODIFY_REQUEST = pattern(['modify this workflow', 'modify the workflow', '
   'modificar o fluxo', 'alterar este workflow', 'alterar o workflow', 'editar este workflow', 'editar o workflow', 'editar workflow']);
 const UNDO_REQUEST = pattern(['undo', 'undo that', 'undo this change', 'undo last change', 'desfazer', 'desfaz', 'desfazer isso', 'desfazer esta alteração', 'desfazer esta alteracao',
   'desfazer última alteração', 'desfazer ultima alteracao']);
-const PT_LIFECYCLE = /\b(?:sim|não|nao|confirmo|confirmar|executar|executa|revisar|revise|simular|adicionar|outra|cancelar|verificar|desfazer|continuar|agora|fluxo|aplicar|aplica|descartar|descarta|novamente|cotação|cotacao|rota|tentar|aceitar|aceito|modificar|alterar|editar)\b/;
 
 /** An explicit answer to FloFi's open question. Anything else — extra content, an edit, a hedge — is UNCLEAR and changes nothing. */
 export function classifyAnswer(text: string, question: PendingQuestion['kind']): Answer {
@@ -153,10 +152,12 @@ export function lifecycleRequest(text: string): 'REVIEW' | 'REFRESH' | 'ROUTE' |
   return NEXT_REVIEW.test(value) ? 'REVIEW' : REFRESH_REQUEST.test(value) ? 'REFRESH' : ANOTHER_ROUTE.test(value) ? 'ROUTE' : NEXT_ADD.test(value) ? 'ADD' : EXECUTE_REQUEST.test(value) ? 'EXECUTE' : STATUS_REQUEST.test(value) ? 'STATUS'
     : UNDO_REQUEST.test(value) ? 'UNDO' : MODIFY_REQUEST.test(value) ? 'MODIFY' : null;
 }
-/** The language of a short lifecycle message (PT words decide), else the interface language. */
-export function answerLanguage(text: string, fallback: ConversationLanguage): ConversationLanguage {
-  const value = normalize(text);
-  return PT_LIFECYCLE.test(value) ? 'PT' : /\b(?:yes|no|confirm|execute|review|simulate|add|another|cancel|status|undo|continue|run|apply|discard|refresh|quote|route|retry|again|accept|modify|edit)\b/.test(value) ? 'EN' : fallback;
+/**
+ * P0 approved UX (boards 01/02, handoff §4): FloFi replies in the ACTIVE INTERFACE language, whatever language the message was typed in (a
+ * Portuguese answer on an English screen mixed the two). The words are still understood in either language (`classifyAnswer`, `lifecycleRequest`).
+ */
+export function answerLanguage(_text: string, interfaceLanguage: ConversationLanguage): ConversationLanguage {
+  return interfaceLanguage;
 }
 
 // ── Phase ───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────

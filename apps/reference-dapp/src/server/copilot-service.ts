@@ -340,9 +340,10 @@ export function copilotTuning(env: Env): CopilotTuning | null {
 export function validateCopilotRequestV2(input: unknown): CopilotThreadMessage[] {
   const plain = (value: unknown, keys: readonly string[]): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value) &&
     Object.getPrototypeOf(value) === Object.prototype && Reflect.ownKeys(value).sort().join() === [...keys].sort().join();
-  const record = input as Record<string, unknown> | null, extra = record && typeof record === 'object' ? ['context', 'contextKey'].filter(key => Object.hasOwn(record, key)) : [];
+  const record = input as Record<string, unknown> | null, extra = record && typeof record === 'object' ? ['context', 'contextKey', 'replyLanguage'].filter(key => Object.hasOwn(record, key)) : [];
   if (!plain(input, ['version', 'messages', ...extra]) || input.version !== '2') return fail('COPILOT_INPUT_INVALID');
-  if (extra.length) requestContext(input);
+  if (extra.some(key => key !== 'replyLanguage')) requestContext(input);
+  replyLanguageOf(input);
   const messages = input.messages;
   if (!Array.isArray(messages) || messages.length < 1 || messages.length > COPILOT_V2_LIMITS.maxTranscriptMessages) return fail('COPILOT_INPUT_INVALID');
   const out = messages.map((message: unknown, index) => {
@@ -356,6 +357,14 @@ export function validateCopilotRequestV2(input: unknown): CopilotThreadMessage[]
     out.reduce((total, message) => total + message.text.length, 0) > COPILOT_V2_LIMITS.maxRequestCharacters) return fail('COPILOT_INPUT_INVALID');
   return out;
 }
+/** P0 approved UX: the interface language the reply must be written in (EN or PT), or null when the request names none. */
+export function replyLanguageOf(input: unknown): 'EN' | 'PT' | null {
+  const value = (input as { replyLanguage?: unknown } | null)?.replyLanguage;
+  return value === undefined ? null : value === 'EN' || value === 'PT' ? value : fail('COPILOT_INPUT_INVALID');
+}
+/** The developer note that fixes the reply language of one turn; the request is byte-identical without it. */
+export const replyLanguageNote = (language: 'EN' | 'PT') => `Reply language for this turn: ${language === 'PT' ? 'Brazilian Portuguese' : 'English'} (${language}), the language of the user's interface. ` +
+  `Write every user-facing text (question, options, reason, answer) in it and set "language" to ${language}, whatever language the user wrote in. Understand the user in any language.`;
 /**
  * BUILD-FLOFI-INTELLIGENCE-001: the optional context card of a V2 request (`intelligence/operational-state.ts`) and its fingerprint. It is untrusted
  * client data: bounded, plain JSON, version 1, and it may not carry a wallet address, a Solana public key, a node id or a chain id. It is shown to
@@ -379,9 +388,10 @@ export type CopilotModelSettings = { readonly model: string; readonly temperatur
  * the transcript; everything else — instructions, schema, `store: false`, limits — is unchanged, and without it the request is byte-identical.
  */
 export function buildCopilotRequestV2(settings: CopilotModelSettings, messages: readonly CopilotThreadMessage[], glossary: string | null = null,
-  tools: readonly Record<string, unknown>[] | null = null): Record<string, unknown> {
+  tools: readonly Record<string, unknown>[] | null = null, replyLanguage: 'EN' | 'PT' | null = null): Record<string, unknown> {
   return { model: settings.model, instructions: tools ? COPILOT_INSTRUCTIONS_V2 + COPILOT_TOOL_RULES : COPILOT_INSTRUCTIONS_V2,
-    input: [...glossary ? [{ role: 'developer', content: glossary }] : [], ...messages.map(message => ({ role: message.role, content: message.text }))],
+    input: [...glossary ? [{ role: 'developer', content: glossary }] : [], ...replyLanguage ? [{ role: 'developer', content: replyLanguageNote(replyLanguage) }] : [],
+      ...messages.map(message => ({ role: message.role, content: message.text }))],
     ...tools ? { tools: [...tools], tool_choice: 'auto', parallel_tool_calls: true, include: ['reasoning.encrypted_content'] } : {},
     text: { format: { type: 'json_schema', name: 'flofi_copilot_intent_v2', strict: true, schema: COPILOT_OUTPUT_SCHEMA_V2 } },
     max_output_tokens: settings.maxOutputTokens, store: false, ...(settings.temperature === null ? {} : { temperature: settings.temperature }),
@@ -454,7 +464,7 @@ export async function interpretCopilotV2(input: unknown, deps: { readonly transp
     toolRounds: trace.rounds } : {}, ...toolkit || context.card ? { contextCard: Boolean(context.card) } : {}, ...grounding ? { answerGrounding: grounding } : {} });
   let response: CopilotHttpResponse | null = null, usage: CopilotUsage = { inputTokens: null, outputTokens: null, reasoningTokens: null };
   try {
-    const base = buildCopilotRequestV2(deps.settings, messages, glossary, toolkit?.definitions ?? null);
+    const base = buildCopilotRequestV2(deps.settings, messages, glossary, toolkit?.definitions ?? null, replyLanguageOf(input));
     let items = [...base.input as Record<string, unknown>[]];
     for (let round = 0; ; round += 1) {
       // Out of rounds, calls or time: the model must answer now, without tools.

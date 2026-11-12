@@ -70,7 +70,8 @@ const authorized = (value: unknown) => {
   return Boolean(record && (record.authorization || record.reviewedManifestHash));
 };
 
-export function useCopilotInterpreter({ direct = false }: { direct?: boolean } = {}) {
+export function useCopilotInterpreter({ direct = false, interfaceLanguage }: { direct?: boolean;
+  /** P0 approved UX: replies follow the interface language (absent: the language of the message, as before). */ interfaceLanguage?: 'EN' | 'PT' } = {}) {
   const workflow = useWorkflow();
   const wallet = useBuild009Wallet();
   const { environment, result: capability } = useWorkflowCapability();
@@ -130,6 +131,9 @@ export function useCopilotInterpreter({ direct = false }: { direct?: boolean } =
     return () => { stopped = true; };
   }, []);
   /** A read-only snapshot of Flofi state for the engine, taken now. */
+  // The language is read at each turn (the interface can switch mid-conversation); the callback itself stays stable.
+  const interfaceLanguageRef = useRef(interfaceLanguage);
+  interfaceLanguageRef.current = interfaceLanguage;
   const environmentNow = useCallback((): CopilotEnvironment => {
     const now = latest.current, store = now.workflow, current = store.state.workflow;
     const steps = workflowSteps(current, store.context), flow = simulationFlowOf(steps);
@@ -146,7 +150,8 @@ export function useCopilotInterpreter({ direct = false }: { direct?: boolean } =
     const verified: CopilotVerified = { orcaPrice: loaded.price, solanaOwner, orcaPositions: solanaOwner && loaded.owner === solanaOwner ? loaded.positions : null,
       remaining: reconciledRemaining(solanaOwner, now.jupiter.record, now.composition.record) };
     const view = learningView.current;
-    return { timezone: Intl.DateTimeFormat().resolvedOptions().timeZone, workflow: current, context: store.context, wallet: now.wallet.account, walletChainId: now.wallet.chainId, pending: store.pending, facts,
+    const interfaceLanguage = interfaceLanguageRef.current;
+    return { ...interfaceLanguage ? { interfaceLanguage } : {}, timezone: Intl.DateTimeFormat().resolvedOptions().timeZone, workflow: current, context: store.context, wallet: now.wallet.account, walletChainId: now.wallet.chainId, pending: store.pending, facts,
       verified, ...view?.enabled ? { learning: view.learning } : {} };
   }, []);
   /** Reads the Orca pool price and the connected wallet's FloFi positions when the interpreted request needs them (a percentage range, a position). */

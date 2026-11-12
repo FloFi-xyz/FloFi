@@ -17,6 +17,7 @@ import { usesFloFiWallet } from '../wallet/flofi-wallet-channel';
 import { floFiWalletMessage } from '../wallet/flofi-signing';
 import { floFiPrivyWalletIssue, useFloFiPrivy } from '../accounts/privy-context';
 import { copilotHelp, useCopilotInterpreter } from '../components/copilot-ai';
+import { blockerExplanation, isExplainRequest, type ActiveBlocker } from '../domain/approved-ux';
 import { FLOFI_WELCOME_COMMANDS } from '../domain/assistant-welcome';
 import { copilotRejection } from '../domain/copilot-authoring';
 import { composerActions } from '../domain/composer-presentation';
@@ -51,6 +52,11 @@ export type ChatMessage = {
   readonly review?: ConversationReview; readonly question?: string;
 };
 export type ConversationBridge = LifecycleView & {
+  /**
+   * P0 approved UX (board 07): the blocker the Simulate panel shows now (its title, sentence and the server's numbers when it has them). While it is
+   * set, a vague request ("explain", "why?", "não entendi", "me explique melhor") is answered with it — never "there is no pending proposal".
+   */
+  readonly blocker?: ActiveBlocker | null;
   /** The selected runtime's existing simulation entry (the Canvas CTA's), and why no simulation can start now (null: it can). */
   readonly simulate: () => void | Promise<void>; readonly simulationBlocked: string | null;
   readonly controls: ExecutionControls;
@@ -114,7 +120,7 @@ export function useFlofiConversation({ owner, epoch, bridge, direct, interfaceLa
     if (issue === 'FLOFI_WALLET_NOT_READY') return continuing ? c.walletNotReadyToContinue : c.walletNotReady;
     return translate(language, floFiWalletMessage(issue) ?? issue);
   };
-  const copilot = useCopilotInterpreter({ direct });
+  const copilot = useCopilotInterpreter({ direct, interfaceLanguage });
   // BUILD-FLOFI-BRIDGE-LIVE-FIX-003: the FloFi Assistant's short welcome (the panel shows the Copilot mode's own variant when one is configured).
   const intro = (): ChatMessage => ({ id: 0, role: 'system', text: direct ? FLOFI_WELCOME_COMMANDS : 'Review each proposed change before applying it.' });
   const [messages, setMessages] = useState<ChatMessage[]>(() => [intro()]);
@@ -686,6 +692,13 @@ export function useFlofiConversation({ owner, epoch, bridge, direct, interfaceLa
     if (direct) {
       // A new message (other than the offered network switch) replaces a Review the chat was waiting to continue.
       if (!(bridge.networkAction && text === bridge.networkAction.label)) resume.current = null;
+      // P0 approved UX (board 07): while a blocker is active, "explain / why? / não entendi" explains THAT blocker, with the same facts as the panel.
+      if (bridge.blocker && isExplainRequest(text)) {
+        const facts = blockerExplanation(bridge.blocker);
+        flofi(scope, language, facts ? translate(language, facts.text, ...facts.parameters.map(value => translate(language, value)))
+          : `${translate(language, bridge.blocker.title)}: ${translate(language, bridge.blocker.message)}`);
+        return;
+      }
       // FloFi's open question takes the answer first; only an explicit answer to it does anything. BUILD-FLOFI-BRIDGE-LIVE-FIX-003: asking for a
       // fresh quote or another route instead closes the question (nothing was confirmed) and re-simulates.
       const recovery = open && open.open.kind !== 'NEXT_STEP' ? lifecycleRequest(text) : null;
