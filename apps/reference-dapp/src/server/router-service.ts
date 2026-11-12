@@ -18,14 +18,14 @@ import { discoverEvmNonce, legacyUnprovenApproval, sameEvmIntent } from './evm-s
 import { createHash, randomBytes } from 'node:crypto';
 import { ARBITRUM_ONE, CROSSCHAIN_ROUTER_BASE_ARBITRUM as MAINNET, resolveWorkflowCapability, type RouterProfile } from '@defi-workflow-engine/action-registry';
 import { createBaseSepoliaReviewContext, validateAuthoringWorkflow, validateRouterBridgeWorkflow } from '@defi-workflow-engine/reference-linter';
-import { compileRouterArtifacts, decodeErc20Approval, decodeErc20Transfer, decodeFilledRelay, decodeFundsDeposited, decodeRouterApprove, encodeRouterApprove,
-  EIP1967_IMPLEMENTATION_SLOT, ROUTER_SELECTORS as SEL, ROUTER_TOPICS as TOPIC, type FilledRelay, type FundsDeposited, type RouterArtifacts,
-  type RouterLog } from '@defi-workflow-engine/reference-compiler';
+import { compileRouterArtifacts, decodeErc20Approval, decodeFundsDeposited, decodeRouterApprove, EIP1967_IMPLEMENTATION_SLOT, ROUTER_SELECTORS as SEL,
+  ROUTER_TOPICS as TOPIC, type FundsDeposited, type RouterArtifacts, type RouterLog } from '@defi-workflow-engine/reference-compiler';
 import { assertRouterTransition, compareRoutes, hashArtifactBytes, materialRouteChanges, providerFeeDrift, routeCommitment, ROUTER_PHASES, type CanonicalRoute, type EvidenceBundle, type RouteChange,
   type RouterPhase, type RoutingProvider, type SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
 import { validateArtifact } from '@defi-workflow-engine/workflow-contracts/schemas';
 import { utf8, type ExecutionStorage } from '@defi-workflow-engine/reference-executor';
 import { verifyOwnerSubmission, type Rpc } from './public-testnet-service.ts';
+import { acrossCallPlan, depositMatches as acrossDepositMatches, fillMatches, refundMatches, routeMatchesIntent, routeMatchesPair } from './across-route.ts';
 import { nitroGasLimit, nitroMaxFeePerGas, nitroPostingGas } from './arbitrum-fees.ts';
 import type { RouteProvider, RouteRequest, TransferHint } from './router-providers.ts';
 
@@ -340,19 +340,9 @@ export function createRouterService(input: { readonly storage: ExecutionStorage;
       return { purpose: c.purpose, gasUsed: quantity(out.gasUsed), logs: Array.isArray(out.logs) ? out.logs.filter(isObject) as unknown as RouterLog[] : [] };
     });
   }
-  /** Exactly one Across deposit from the origin SpokePool, matching the reviewed route field by field. */
-  function depositMatches(route: CanonicalRoute, logs: readonly RouterLog[], owner: string): { deposit: FundsDeposited; ownerDebit: bigint } {
-    const deposits = logs.filter(l => typeof l.address === 'string' && l.address.toLowerCase() === SRC.spokePool && String(l.topics?.[0]).toLowerCase() === TOPIC.fundsDeposited);
-    if (deposits.length !== 1) fail('ROUTER_DEPOSIT_EVENT_MISMATCH');
-    const d = decodeFundsDeposited(deposits[0]!), b = route.bridge;
-    if (d.destinationChainId !== BigInt(DST.chainId) || d.depositor !== b.depositor || d.recipient !== route.recipient || d.inputToken !== SRC.token ||
-        d.outputToken !== DST.token || d.inputAmount !== BigInt(b.inputAmount) || d.outputAmount !== BigInt(b.outputAmount) || d.quoteTimestamp !== b.quoteTimestamp ||
-        d.fillDeadline !== b.fillDeadline || d.message !== '0x' || d.exclusiveRelayer !== '0x' + addrWord(b.exclusiveRelayer)) fail('ROUTER_DEPOSIT_EVENT_MISMATCH');
-    const debits = logs.filter(l => typeof l.address === 'string' && l.address.toLowerCase() === SRC.token && String(l.topics?.[0]).toLowerCase() === TOPIC.transfer)
-      .map(decodeErc20Transfer).filter(t => t.from === owner);
-    if (debits.length !== 1 || debits[0]!.amount !== BigInt(route.inputAmount)) fail('ROUTER_OWNER_DEBIT_MISMATCH');
-    return { deposit: d, ownerDebit: debits[0]!.amount };
-  }
+  /** Exactly one Across deposit from the origin SpokePool, matching the reviewed route field by field (the shared rule, `across-route.ts`). */
+  const depositMatches = (route: CanonicalRoute, logs: readonly RouterLog[], owner: string): { deposit: FundsDeposited; ownerDebit: bigint } =>
+    acrossDepositMatches(profile, route, logs, owner);
   async function l1FeeUpperBound(dataBytes: number, at: string): Promise<bigint | null> {
     // BUILD-RH-002: only an OP Stack source has the GasPriceOracle; an Arbitrum Orbit source folds L1 data gas into gasUsed.
     if (!SRC.l1DataFee) return 0n;
@@ -418,8 +408,7 @@ export function createRouterService(input: { readonly storage: ExecutionStorage;
       try {
         if (answer.status === 'rejected') throw answer.reason;
         const route = answer.value;
-        if (route.routingProvider !== id || route.sourceChain !== SRC.chain || route.destinationChain !== DST.chain ||
-            route.inputToken.address !== SRC.token || route.outputToken.address !== DST.token) fail('ROUTER_ROUTE_INTENT_MISMATCH');
+        if (!routeMatchesPair(route, profile, id)) fail('ROUTER_ROUTE_INTENT_MISMATCH');
         considered.push({ provider: id, outcome: selected ? 'AVAILABLE' : 'SELECTED', code: null, minimumOutput: route.minimumOutput, feeTotal: route.feeTotal,
           routeCommitment: routeCommitment(route) });
         selected ??= route;
@@ -430,7 +419,7 @@ export function createRouterService(input: { readonly storage: ExecutionStorage;
     }
     if (!selected) fail('ROUTER_NO_EXECUTABLE_ROUTE');
     const route = selected!;
-    if (route.recipient !== recipient || route.depositor !== owner || route.inputAmount !== f.amount) fail('ROUTER_ROUTE_INTENT_MISMATCH');
+    if (!routeMatchesIntent(route, { owner, recipient, amount: f.amount })) fail('ROUTER_ROUTE_INTENT_MISMATCH');
     const allowance = wordAt(await call(rpc, SRC.token, SEL.allowance + addrWord(owner) + addrWord(route.approval.spender), tag(probe.block.number)), 0);
     const observedDestination = await destinationRead;
     if (!observedDestination.ok) throw observedDestination.cause;
@@ -438,8 +427,7 @@ export function createRouterService(input: { readonly storage: ExecutionStorage;
     if (source.usdc < BigInt(route.inputAmount)) fail(SRC.symbol === 'USDC' ? 'ROUTER_INSUFFICIENT_USDC' : 'ROUTER_INSUFFICIENT_TOKEN');
     const approvals = [{ token: route.approval.token, spender: route.approval.spender, amount: route.approval.amount, currentAllowance: source.allowance.toString(),
       required: source.allowance < BigInt(route.approval.amount) }];
-    const plan = [...approvals[0]!.required ? [{ purpose: 'APPROVAL' as const, to: route.approval.token, data: encodeRouterApprove(route.approval.spender, BigInt(route.approval.amount)) }] : [],
-      { purpose: 'BRIDGE_DEPOSIT' as const, to: route.deposit.to, data: route.deposit.data }];
+    const plan = acrossCallPlan(route, approvals[0]!.required);
     const simulated = await simulate(owner, plan, source.block.number);
     const { deposit, ownerDebit } = depositMatches(route, simulated.at(-1)!.logs, owner);
     const { priority, maximum: maxFeePerGas } = await feePrice(source.block.baseFee);
@@ -727,23 +715,13 @@ export function createRouterService(input: { readonly storage: ExecutionStorage;
     const raw = await canonicalReceipt(drpc, hash);
     if (!raw || quantity(raw.status) !== 1n) return { ok: false, divergent: null };
     const logs = Array.isArray(raw.logs) ? raw.logs.filter(isObject) as unknown as RouterLog[] : [];
-    const fills = logs.filter(l => String(l.address).toLowerCase() === DST.spokePool && String(l.topics?.[0]).toLowerCase() === TOPIC.filledRelay).map(decodeFilledRelay)
-      .filter(f => f.originChainId === BigInt(SRC.chainId) && f.depositId === BigInt(source.depositId));
-    if (fills.length === 0) return { ok: false, divergent: null };
-    if (fills.length !== 1) return { ok: false, divergent: 'ROUTER_FILL_DUPLICATED' };
-    const f: FilledRelay = fills[0]!;
-    if (f.inputToken !== SRC.token || f.outputToken !== DST.token || f.inputAmount !== BigInt(source.inputAmount) || f.outputAmount !== BigInt(source.outputAmount) ||
-        f.depositor !== source.depositor || f.recipient !== route.recipient || f.fillDeadline !== source.fillDeadline || !/^0x0{64}$/.test(f.messageHash))
-      return { ok: false, divergent: 'ROUTER_FILL_MISMATCH' };
-    if (f.updatedRecipient !== route.recipient) return { ok: false, divergent: 'ROUTER_FILL_RECIPIENT_MISMATCH' };
-    if (f.updatedOutputAmount < BigInt(route.minimumOutput)) return { ok: false, divergent: 'ROUTER_FILL_BELOW_MINIMUM' };
-    if (f.updatedOutputAmount > BigInt(route.expectedOutput)) return { ok: false, divergent: 'ROUTER_FILL_ABOVE_MAXIMUM' };
-    const transfers = logs.filter(l => String(l.address).toLowerCase() === DST.token && String(l.topics?.[0]).toLowerCase() === TOPIC.transfer).map(decodeErc20Transfer)
-      .filter(t => t.to === route.recipient);
-    if (transfers.length !== 1 || transfers[0]!.amount !== f.updatedOutputAmount) return { ok: false, divergent: 'ROUTER_FILL_TRANSFER_MISMATCH' };
+    // The fill's own facts are checked by the shared rule (`across-route.ts`), exactly as the user-funded batch's delivery is.
+    const matched = fillMatches(profile, source, route, logs);
+    if (!matched.ok) return matched;
+    const f = matched.fill;
     return { ok: true, fill: { transactionHash: hash, blockNumber: Number(quantity(raw.blockNumber)), blockHash: hex(raw.blockHash), timestamp: Number(quantity(raw.timestamp)),
       spokePool: DST.spokePool, relayer: f.relayer, recipient: f.updatedRecipient, outputToken: f.outputToken, outputAmount: f.updatedOutputAmount.toString(),
-      transferAmount: transfers[0]!.amount.toString(), fillType: f.fillType, discoveredBy, contentHash: digest(raw), safe: false } };
+      transferAmount: matched.transferAmount.toString(), fillType: f.fillType, discoveredBy, contentHash: digest(raw), safe: false } };
   }
   async function hint(record: RouterRecord): Promise<TransferHint | null> {
     const sourceHash = record.source!.transactionHash;
@@ -818,11 +796,10 @@ export function createRouterService(input: { readonly storage: ExecutionStorage;
       if (h?.refundTxHash) {
         const raw = await canonicalReceipt(rpc, h.refundTxHash);
         if (raw && quantity(raw.status) === 1n) {
-          const refunds = (Array.isArray(raw.logs) ? raw.logs.filter(isObject) as unknown as RouterLog[] : [])
-            .filter(l => String(l.address).toLowerCase() === SRC.token && String(l.topics?.[0]).toLowerCase() === TOPIC.transfer).map(decodeErc20Transfer)
-            .filter(t => t.from === SRC.spokePool && t.to === route.refundAddress && t.amount === BigInt(record.source!.inputAmount));
-          if (refunds.length === 1) return save({ ...transition(record, 'REFUNDED'), verdict: 'REFUNDED', error: null,
-            refund: { transactionHash: h.refundTxHash, blockNumber: Number(quantity(raw.blockNumber)), blockHash: hex(raw.blockHash), amount: refunds[0]!.amount.toString(),
+          const refunded = refundMatches(profile, route.refundAddress, record.source!.inputAmount,
+            Array.isArray(raw.logs) ? raw.logs.filter(isObject) as unknown as RouterLog[] : []);
+          if (refunded !== null) return save({ ...transition(record, 'REFUNDED'), verdict: 'REFUNDED', error: null,
+            refund: { transactionHash: h.refundTxHash, blockNumber: Number(quantity(raw.blockNumber)), blockHash: hex(raw.blockHash), amount: refunded.toString(),
               recipient: route.refundAddress } });
         }
       }
