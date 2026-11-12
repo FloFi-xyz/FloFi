@@ -132,13 +132,14 @@ describe('P0: the Editor reviews and authorizes Swap → Supply → Borrow on Ar
       // The wallet executes it, but its answer never reaches FloFi (a reload while the wallet prompt was open)…
       const hash = chain.control.walletBatch(owner, evmCallsOf(a.group));
       // …the preparation expires, a first attempt to prepare it again fails (the owner briefly lacks gas money: the group is back to PLANNED)…
-      h.d.advance(11 * 60_000);
+      // (Past its validity and the settle margin; only the browser that holds the batch's hand-out token prepares it again.)
+      h.d.advance(13 * 60_000);
       chain.control.fundNative(owner, 0n);
-      await expect(workflowRunUserFundedPrepare(h.surface, approval.approvalId, [h.evm, h.sol], 0)).rejects.toThrow('USER_FUNDED_INSUFFICIENT_NATIVE_BALANCE');
+      await expect(workflowRunUserFundedPrepare(h.surface, approval.approvalId, [h.evm, h.sol], 0, first.handout!)).rejects.toThrow('USER_FUNDED_INSUFFICIENT_NATIVE_BALANCE');
       chain.control.fundNative(owner, 10n ** 17n);
       // …then the price moves and the group is prepared again under the SAME id (the wallet would refuse a second batch).
       chain.control.setPrice(390_000_000_000_000n);
-      const second = await workflowRunUserFundedPrepare(h.surface, approval.approvalId, [h.evm, h.sol], 0);
+      const second = await workflowRunUserFundedPrepare(h.surface, approval.approvalId, [h.evm, h.sol], 0, first.handout!);
       const b = second.prepared as unknown as { group: EvmGroupCalls; request: { id: string }; superseded: unknown[] };
       expect(b.request.id).toBe(a.request.id);
       expect((b.group.calls[1] as { amountOutMinimum: string }).amountOutMinimum).not.toBe((a.group.calls[1] as { amountOutMinimum: string }).amountOutMinimum);
