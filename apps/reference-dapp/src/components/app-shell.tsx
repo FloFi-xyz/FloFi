@@ -684,7 +684,7 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
     Boolean(state.error || reviewError)) : EMPTY_EDITOR_OVERVIEW,
   [overviewShown, state.workflow, state.error, reviewError, context, workflowReview, actionSetup, amountInputs, cryptoSelections, bridgeNetworkInputs, recipientInputs]);
   const showStep = (nodeId: string) => { selectAction(nodeId); focusCanvasStep(nodeId); };
-  const chat = <CopilotPanel conversation={conversation} interactive={interactive} owner={owner} proof={proof} reviewInPanel={reviewBlock}
+  const chat = <CopilotPanel conversation={conversation} interactive={interactive} owner={owner} proof={proof} reviewInPanel={reviewBlock && groupedPrimary}
     overview={tab === 'Build' && chatFirst ? <EditorOverviewPanel overview={overview} showStep={showStep}/> : undefined}/>;
   // BUILD0-UX-001: a workflow restored or reopened, a run recovered from this browser, a live execution, a proposal or an unfinished Canvas card
   // is never held behind the entry the visit landed on: once the persisted-run read settles, the shell opens Build 1 (the stages keep their own
