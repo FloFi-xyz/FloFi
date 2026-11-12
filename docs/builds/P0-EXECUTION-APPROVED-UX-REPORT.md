@@ -80,6 +80,30 @@ See the PR for the final CircleCI certification. Local results on this branch:
   Vitest's 5 s default while browser profiles shared the 4 CPUs (no backend file changed on this branch; CircleCI is the authority).
 - Typecheck, ESLint, production build, schema drift (11 exports), governance-lite (+21 unit tests): passed.
 
+## Specialist reviews (read-only, advisory; CircleCI remains the certification authority)
+
+Six reviewers ran in two batches of three (`flofi-security`, `flofi-workflow`, `flofi-bridge`; then `flofi-frontend-ux`, `flofi-chat`,
+`flofi-wallet-execution`). None reported a blocker. Every finding was checked against the code; the dispositions:
+
+| Reviewer | Finding | Disposition |
+|---|---|---|
+| bridge | HIGH: the browser's `estimateMatchesNode` rejected the new certified-Router estimate (the card would lose its amount) | Fixed: one shared `certifiedRouterRoute` predicate; accepted only for a Router node's Across route; tests assert both acceptance and refusal of a forged label |
+| bridge | LOW: card provider vs the Router's AUTO order; cache staleness; regex breadth | Fixed order (AUTO: LI.FI first) and narrowed codes to bridge providers; the ≤ 60 s positive cache is accepted (execution re-gates server-side) |
+| workflow | MEDIUM: Board 08 call list could describe the wrong group; canvas lock could outlive a run; edits still reachable during execution | Fixed: run group + prepared counts, no guessed group; lock from the run's own state; graph `inert`, keyboard/connect/rebuild guarded |
+| workflow | LOW: fee overstated when the request also sends ETH | Fixed: fee ceiling shown apart from the native amount sent |
+| security | LOW: Flight copy implied nothing was sent; preflight could mask a run's own state | Fixed: "this request was not quoted, simulated or sent"; never masks a record, recovery or live run |
+| wallet-execution | MEDIUM: preflight checked the whole workflow's wallet kind, not the step's signer; a refusal could be swallowed | Fixed: the step's own signer by chain family; a run-safe notice when the run keeps its own words |
+| wallet-execution | LOW: following an earlier run locked the Canvas; confirm-update after HALTED; header wording; gating before hand-out | Fixed |
+| frontend-ux | HIGH: countdown re-announced every second; "Nothing was sent" after an earlier step ran | Fixed: announced only on meaning change; footer reads every sign of a run, restore or executed step |
+| frontend-ux | MEDIUM/LOW: entry button with existing steps, mobile Review shortcut, entry focus, dark border contrast, Send enabled when empty, PT-PT leftovers, touch targets, stepper semantics, copy status, blocked Review collapsed, two network detectors, header height | Fixed |
+| chat | MEDIUM: explain reply said "Nothing was sent" after a request landed; "reply in Portuguese" promised but overridden | Fixed: `aboutNextRequest` after a start; the statement points to Settings › Language |
+| chat | LOW: explain hid open-question buttons / cancelled auto-continue; PT "fluxo" phrasings; options matched in one language | Fixed |
+
+Accepted and left as documented limits: rail buttons' accessible names ("Add swap") differ from their visible labels in PT (WCAG 2.5.3; e2e
+selectors depend on them); the graph is removed from the accessibility tree while execution pauses editing (the Execute section lists every
+step); the chat may still apply an edit during execution (the server binds the reviewed workflow hash, so no wallet impact); a learning note
+"first below" can disagree with the wallet-first network order; the drawer is not modal for the page behind it.
+
 ## Remaining issues
 
 - Fee-shortfall **numbers** reach the blocker panel for whole-workflow (user-funded) Reviews; the single-step catalog path still states the
