@@ -24,11 +24,19 @@ function recordAppTraffic(page: Page) {
     void response.text().then(text => received.push(text), () => undefined); });
   return { sent, received };
 }
+// P0 approved UX (board 13): each Credentials panel is a named region with its count; an empty Cards/Wallets panel states how one is added.
+const panel = (page: Page, name: 'Cards' | 'Wallets') => page.getByRole('region', { name, exact: true });
+const CARDS_EMPTY = "Cards are added through a certified card provider's secure entry.";
+const WALLETS_EMPTY = 'Add a wallet to save its public address here.';
+async function expectNoCards(page: Page) {
+  await expect(panel(page, 'Cards').locator('.ux-count')).toHaveText('0');
+  await expect(panel(page, 'Cards')).toContainText(CARDS_EMPTY);
+}
 async function openAddCard(page: Page, theme: 'light' | 'dark' = 'light') {
   await page.addInitScript(value => localStorage.setItem('flofi.theme', value), theme);
   const sdk = await installMercadoPagoSdkStandIn(page);
   await page.goto('/app/credentials');
-  await expect(page.getByText('No cards yet', { exact: true })).toBeVisible();
+  await expectNoCards(page);
   await page.getByRole('button', { name: 'Add card', exact: true }).click();
   await expect(dialog(page).getByRole('heading', { name: 'Add a card' })).toBeVisible();
   await expect(entry(page).getByRole('button', { name: 'Add card' })).toBeEnabled();
@@ -72,7 +80,8 @@ for (const theme of ['light', 'dark'] as const) {
     const card = page.getByRole('article', { name: 'Visa •••• 5682' });
     await expect(card).toContainText('Visa · Mercado Pago');
     await expect(card).toContainText('•••• 5682 · Expires 11/30');
-    await expect(page.getByText('No cards yet', { exact: true })).toHaveCount(0);
+    await expect(panel(page, 'Cards').locator('.ux-count')).toHaveText('1');
+    await expect(panel(page, 'Cards')).not.toContainText(CARDS_EMPTY);
 
     // FloFi's server sent Mercado Pago only the email and the one-time token, with its server-side token, and never a payment call.
     const requests = await cardHarnessRequests();
@@ -128,8 +137,9 @@ test('Remove deletes only this card’s saved reference at the provider, never a
   await expect(card.getByRole('group', { name: 'Remove Visa •••• 5682' })).toContainText('The card itself is not affected.');
   await card.getByRole('button', { name: 'Remove', exact: true }).click();
   await expect(page.locator('.workspace-notice')).toHaveText('Card removed from FloFi.');
-  await expect(page.getByText('No cards yet', { exact: true })).toBeVisible();
-  await expect(page.getByText('No wallets yet', { exact: true })).toBeVisible();
+  await expectNoCards(page);
+  await expect(panel(page, 'Wallets').locator('.ux-count')).toHaveText('0');
+  await expect(panel(page, 'Wallets')).toContainText(WALLETS_EMPTY);
   const requests = await cardHarnessRequests();
   const saved = requests.find(entry => entry.method === 'POST' && entry.path.endsWith('/cards'))!;
   expect(requests.filter(entry => entry.method === 'DELETE').map(entry => entry.path)).toEqual([`${saved.path}/8987269650`]);
