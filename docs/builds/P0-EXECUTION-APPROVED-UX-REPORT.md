@@ -79,6 +79,15 @@ See the PR for the final CircleCI certification. Local results on this branch:
 - PostgreSQL suites (server, workflow runs, user-funded, backend): 42 files passed; `backend/developer-admin.pg.test.ts` timed out at
   Vitest's 5 s default while browser profiles shared the 4 CPUs (no backend file changed on this branch; CircleCI is the authority).
 - Typecheck, ESLint, production build, schema drift (11 exports), governance-lite (+21 unit tests): passed.
+- §18.1: `domain/p0-swap-bridge-connections.test.ts` asserts, for the reported Arbitrum Swap → Bridge, the typed dependency on the exact
+  Arbitrum USDC, the visible connection, `min(2 USDC, reconciled delivery)`, no orphan after deletion, Undo under a newer revision (a prior
+  Review is never reused) and that moving cards never changes order or funding.
+- Browser (loopback, pinned headless shell 1243, local): the e2e helpers and ~100 specs were migrated to the new navigation without skipping or
+  deleting a test; profiles run locally include canvas-corrections, review-execute-recovery-components, copilot, universal-bridge,
+  approve-authorize-journeys, execution-continuity (`workflow-ux-execution` 6/6 after the preflight fix), workflow-acceptance, automations,
+  the Arbitrum/Ethereum/Base/Robinhood authoring certifications, mcp-in-chat, channel-signing, auth-wallets, flight and chat-automations. The
+  default-product screenshot baselines were regenerated and pass pixel-exact. `build009` needs the public LI.FI host, which this sandbox cannot
+  reach; CircleCI runs it.
 
 ## Specialist reviews (read-only, advisory; CircleCI remains the certification authority)
 
@@ -99,6 +108,23 @@ Six reviewers ran in two batches of three (`flofi-security`, `flofi-workflow`, `
 | chat | MEDIUM: explain reply said "Nothing was sent" after a request landed; "reply in Portuguese" promised but overridden | Fixed: `aboutNextRequest` after a start; the statement points to Settings › Language |
 | chat | LOW: explain hid open-question buttons / cancelled auto-continue; PT "fluxo" phrasings; options matched in one language | Fixed |
 
+A second round covered the remaining domains the owner listed, and an adversarial verification pass (independent skeptics per area, each
+claimed defect re-checked) covered the two review-fix commits:
+
+| Source | Finding | Disposition |
+|---|---|---|
+| verification | HIGH: a Flight refusal was still silent on the `/approve` signing surface | Fixed: the notice renders on every shell that calls `simulateAgain` |
+| verification | MEDIUM: a simulation-only record suppressed the refusal; a resumable HALTED run unlocked the Canvas; chat edits bypassed the lock; Aave liquidity codes fell to "balance too low"; `STALE_CHAIN_HEAD` read as "expired" | Fixed, each with a test |
+| e2e migration | Product bug: Simulate stayed enabled while Flight was being asked (a second click could start a second simulation) | Fixed: the preflight locks the control; `workflow-ux-execution` 6/6 |
+| mcp | LOW: the preflight checked fewer wallets than the flow boundary; the `/approve` notice had no action link; "session ended" for a first visit | Fixed |
+| data-privacy | LOW: a learned language observation without independent evidence when the interface language governs | Fixed: not observed then |
+| infrastructure-ci | LOW: `router-capability` untested; cancel signal ignored; cache keyed by network only | Fixed: own suite, signal passed, keyed by runtime and API |
+| infrastructure-ci | Question: does the Router `info` read carry a beta identity? | Yes: `/api/build-estimate` runs inside `withFlightAccess` |
+| infrastructure-ci | Risk: pixel-exact baselines regenerated outside the CircleCI image | Regenerated with the pinned headless shell 1243 and re-run pixel-exact locally; CircleCI is the authority |
+
+No reviewer found a blocker or an unresolved P0/P1 security or financial-integrity issue; the MCP contract, schemas and approval payloads are
+unchanged (the fee evidence never reaches MCP, channels or run views).
+
 Accepted and left as documented limits: rail buttons' accessible names ("Add swap") differ from their visible labels in PT (WCAG 2.5.3; e2e
 selectors depend on them); the graph is removed from the accessibility tree while execution pauses editing (the Execute section lists every
 step); the chat may still apply an edit during execution (the server binds the reviewed workflow hash, so no wallet impact); a learning note
@@ -112,3 +138,9 @@ step); the chat may still apply an edit during execution (the server binds the r
   the footer is the only "Authorize in wallet" control.
 - Board 05's optional "a similar step exists" question and post-choice confirmation chips are not implemented.
 - Real-mainnet execution of the regression workflow remains unverified until the owner runs it with their own wallet.
+- Owner design confirmations (implemented per the boards, reversing earlier choices): a quoted amount shows 6 significant digits with the exact
+  value in its title (UX-FIX-003 showed it exactly); the chat field is 16 px only on touch pointers; the portfolio filter field is 40 px next to
+  a 36 px Refresh pill.
+- A few historical e2e specs that no CI profile runs (canvas-navigator, workflow-composer, build-layout, stage-workspace-layout,
+  shell-navigation-refinement, workflow-save-environment, dashboard-foundation, shell-cleanup) still describe parts of the previous shell; they
+  certify nothing today and can be rewritten or retired in a follow-up.
