@@ -377,7 +377,8 @@ export function describeChatChange(before: Workflow, after: Workflow, context: R
   const c = conversationCopy(language), lines: string[] = [];
   const detail = (workflow: Workflow, node: Workflow['nodes'][number]) => {
     const card = composerSummary(workflow, node, context), pair = card.bridgePair ?? card.detail;
-    return [card.amount === 'Amount not available' ? null : card.amount, pair && !card.amount.includes(pair) ? pair : null, card.chain, card.provider === 'Provider not specified' ? null : card.provider]
+    // Board 16: no chain id outside Technical details — the chat names the network ("Arbitrum"), never "Arbitrum (42161)".
+    return [card.amount === 'Amount not available' ? null : card.amount, pair && !card.amount.includes(pair) ? pair : null, card.chain.replace(/ \(\d+\)$/, ''), card.provider === 'Provider not specified' ? null : card.provider]
       .filter((value): value is string => Boolean(value)).map(value => label(language, value)).join(' · ');
   };
   for (const node of composerActions(after)) {

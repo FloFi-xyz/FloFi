@@ -121,6 +121,8 @@ describe('BUILD-FLOFI-CONVERSATIONAL-001 conversational lifecycle', () => {
     const swap = editorReducer(empty, { type: 'ADD_SWAP', direction: 'USDC_TO_WETH', amount: '10', slippage: '100', source: 'CHAT', baseRevision: 0 }, context).workflow;
     const [added] = describeChatChange(empty.workflow, swap, context, 'EN');
     expect(added).toMatch(/^Swap added to your workflow: 10 USDC/);
+    // Board 16: the network by name only, never its chain id.
+    expect(added).not.toMatch(/\(\d+\)/);
     expect(describeChatChange(empty.workflow, swap, context, 'PT')[0]).toMatch(/^Adicionado ao seu fluxo: /);
     const nodeId = swap.nodes.at(-1)!.nodeId;
     const edited = editorReducer({ workflow: swap, error: null }, { type: 'SET_SWAP_AMOUNT', nodeId, amount: '5', source: 'CHAT', baseRevision: swap.revision }, context).workflow;
