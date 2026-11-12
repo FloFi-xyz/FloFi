@@ -12,7 +12,8 @@ import { shellChainLabel } from './product-shell';
 import { solanaNotSubmittedReason } from './solana-refusal';
 import type { SolanaWalletChange } from '@defi-workflow-engine/reference-compiler';
 
-export type EvidenceIdentifier = { label: string; value: string; kind: 'transaction' | 'order' | 'reference'; chain?: string; explorer?: string | null; status?: string };
+export type EvidenceIdentifier = { label: string; value: string; kind: 'transaction' | 'order' | 'reference'; chain?: string; explorer?: string | null; status?: string;
+  /** P0 hotfix: `{0}` of a status worded by its phase (a network name). */ statusArgs?: readonly string[] };
 export type EvidenceValue = { label: string; value: string };
 export type OperationResultEvidence = { identifiers: EvidenceIdentifier[]; values: EvidenceValue[]; comparisons: EvidenceComparison[]; fees: EvidenceValue[]; failure?: 'reverted' | 'declined' | 'failed'; note?: string;
   /** Values of `note` when it is a catalog message with placeholders. */ noteArgs?: string[] };
@@ -24,15 +25,15 @@ export function projectExecutionEvidence(source: ExecutionLifecycleSource, progr
   const costs = new Map<string, { operation: string; chain: string; units: string; decimals: number; symbol: string }>();
   const op = (id: string) => evidence.operations[id] ??= { identifiers: [], values: [], comparisons: [], fees: [] };
   const detail = (label: string, value: string | null | undefined, copy = false) => { if (value) evidence.details.push({ label, value, copy }); };
-  const identifier = (id: string, label: string, value: string | null | undefined, kind: EvidenceIdentifier['kind'] = 'reference', chain?: string, status?: string) => {
+  const identifier = (id: string, label: string, value: string | null | undefined, kind: EvidenceIdentifier['kind'] = 'reference', chain?: string, status?: string, statusArgs?: readonly string[]) => {
     if (!value) return;
     const existing = op(id).identifiers.find(item => item.value === value && item.kind === kind);
     if (existing) {
       if (existing.label === 'Action transaction' && label === 'Approval transaction') existing.label = label;
-      if (status) existing.status = status;
+      if (status) { existing.status = status; if (statusArgs?.length) existing.statusArgs = statusArgs; else delete existing.statusArgs; }
       return;
     }
-    op(id).identifiers.push({ label, value, kind, ...(chain ? { chain } : {}), ...(status ? { status } : {}), explorer: kind === 'transaction' && chain ? executionExplorer(chain, value, progress.local) : null });
+    op(id).identifiers.push({ label, value, kind, ...(chain ? { chain } : {}), ...(status ? { status } : {}), ...(status && statusArgs?.length ? { statusArgs } : {}), explorer: kind === 'transaction' && chain ? executionExplorer(chain, value, progress.local) : null });
   };
   const amount = (id: string, label: string, units: string | null | undefined, decimals: number, symbol: string, planned?: string | null) => {
     const value = simulationAmount(units, decimals, symbol);
@@ -98,7 +99,7 @@ export function projectExecutionEvidence(source: ExecutionLifecycleSource, progr
   const allowance = (units: unknown) => { if (validUnits(units) && BigInt(units) > 0n && !evidence.attention.length) evidence.attention.push('A token allowance remains in the execution record. Review it before authorizing another workflow.'); };
   detail('Run ID', progress.runKey, true);
   for (const step of progress.steps) for (const operation of step.operations) {
-    identifier(operation.id, operation.approval ? 'Approval transaction' : operation.id === 'destination' ? 'Destination transaction' : operation.id === 'DEPOSIT' ? 'Source transaction' : 'Action transaction', operation.hash, 'transaction', operation.chain, operation.label);
+    identifier(operation.id, operation.approval ? 'Approval transaction' : operation.id === 'destination' ? 'Destination transaction' : operation.id === 'DEPOSIT' ? 'Source transaction' : 'Action transaction', operation.hash, 'transaction', operation.chain, operation.label, operation.labelArgs);
   }
   switch (source.kind) {
     case 'public': {

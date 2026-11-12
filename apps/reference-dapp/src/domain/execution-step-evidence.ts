@@ -9,6 +9,8 @@ export type EvidenceComparison = { label: string; planned: string; actual: strin
 export type ExecutionStepEvidence = {
   label: string; message: string; reconciled: boolean; recovered: boolean; restored: boolean;
   comparisons: EvidenceComparison[];
+  /** P0 hotfix: the label's `{0}` parameter (a network), when the step is worded by its phase (`execution-phase.ts`). */
+  labelArgs?: readonly string[];
 };
 type OperationEvidence = { reconciled: boolean; recovered: boolean; comparisons: EvidenceComparison[] };
 const uncertainStates = ['SUBMISSION_RESULT_UNKNOWN', 'UNKNOWN', 'INCONCLUSIVE', 'DIVERGENT', 'NOT_FOUND', 'POST_RESULT_UNKNOWN', 'RECONCILIATION_REQUIRED'];
@@ -42,7 +44,7 @@ export function executionStepEvidence(step: LifecycleStep, restored = false, fac
     : step.state === 'cancelled' ? 'This request is recorded as cancelled.'
     : step.state === 'expired' ? 'This request is recorded as expired.' : 'The final result is still pending.';
   const comparisons = confirmed ? business.flatMap(operation => facts.get(operation.id)?.comparisons ?? []) : [];
-  return { label, message, reconciled, recovered, restored, comparisons };
+  return { label, message, reconciled, recovered, restored, comparisons, ...label === step.label && step.labelArgs ? { labelArgs: step.labelArgs } : {} };
 }
 
 export function projectExecutionStepEvidence(source: ExecutionLifecycleSource, progress: ExecutionLifecycle): Record<string, ExecutionStepEvidence> {

@@ -85,6 +85,7 @@ function message(error: unknown): string {
     CATALOG_ASSET_IDENTITY_CHANGED: 'The official asset registry no longer matches this workflow\'s asset. Build it again.',
     STOCK_TOKEN_NOT_ACQUIRABLE: 'This Stock Token is not tradable now.', INSUFFICIENT_GAS_FUNDS: 'Insufficient ETH for network fees on this network.',
     SWAP_FEE_INVALID: 'The network did not return a usable fee right now. Nothing was sent; simulate again shortly.',
+    APPROVAL_NOT_RECONCILED: 'The approval is confirmed. FloFi is still reading its allowance on the network before preparing the swap. Nothing new was sent; try again in a moment.',
     QUOTE_CHANGED_REVIEW_REQUIRED: 'The quote changed. Review the updated amounts before executing.',
     QUOTE_EXPIRED_REVIEW_REQUIRED: 'Quote expired. Review a fresh quote.',
     REVIEW_EXPIRED: 'Quote expired. Simulate again.', REVIEW_REQUIRED: 'Review the current swap first.',
@@ -213,6 +214,13 @@ export function PublicTestnetProvider({ children }: { children: ReactNode }) {
     if (profile && ownerBoundSwapReview(profile) && !owner) throw new Error('WALLET_NOT_CONNECTED');
     if (owner && owner.chainId !== profile?.chainHex) throw new Error('WRONG_WALLET_CHAIN');
     if (resumeApproval && run?.quote.ownerReview && owner?.account !== run.quote.ownerReview.account) throw new Error('OWNER_REVIEW_MISMATCH');
+    // P0 hotfix (execution continuity): a confirmed approval is shown as confirmed as soon as its receipt is; on an owner-bound network the swap's
+    // fresh Review still needs the approval's allowance read-back, so it is observed first (read-only; nothing is signed or sent).
+    if (resumeApproval && run?.quote.ownerReview && approval?.nativeAfter === null) {
+      const observed = unwrap(await publicObserve(run.quote.executionId));
+      setRun(current => current?.quote.executionId === observed.quote.executionId ? observed : current);
+      if (observed.attempts.at(-1)?.nativeAfter === null) throw new Error('APPROVAL_NOT_RECONCILED');
+    }
     const prepared = unwrap(resumeApproval ? await publicRefresh(run!.quote.executionId) :
       await publicPrepare(workflow as unknown as SemanticWorkflow, owner?.account));
     localStorage.setItem(KEY, prepared.quote.executionId); markTab(prepared.quote.executionId);

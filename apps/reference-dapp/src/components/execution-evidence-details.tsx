@@ -16,7 +16,7 @@ export function ExecutionEvidenceDetails({ progress, runContext = 'current' }: {
     {progress.steps.map(step => <section key={step.id} aria-label={tr(`${step.action} technical record`)}><h3>{tr(step.number)}. {tr(step.action)}</h3>
       {step.operations.map(operation => {
         const identifiers = evidence?.operations[operation.id]?.identifiers ?? (operation.hash ? [{ label: operation.approval ? 'Approval transaction' : 'Action transaction', value: operation.hash, kind: 'transaction' as const, explorer: operation.explorer }] : []);
-        return <div key={operation.id}><p>{tr(operation.title)} · {tr(operation.label)}</p>{identifiers.map(identifier => <ExecutionIdentifier key={`${identifier.kind}-${identifier.value}`} full identifier={identifier}/>)}</div>;
+        return <div key={operation.id}><p>{tr(operation.title)} · {tr(operation.label, ...operation.labelArgs ?? [])}</p>{identifiers.map(identifier => <ExecutionIdentifier key={`${identifier.kind}-${identifier.value}`} full identifier={identifier}/>)}</div>;
       })}
     </section>)}
     {evidence && evidence.limitations.length > 0 && <section><h3>{tr("Recorded limitations")}</h3><ul>{evidence.limitations.map(item => <li key={item}>{tr(item)}</li>)}</ul></section>}

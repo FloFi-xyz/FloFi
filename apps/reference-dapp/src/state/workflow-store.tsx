@@ -27,6 +27,8 @@ import { editorStorage, persistEditor, readPersistedEditor } from '../domain/edi
 import { publicStatus } from '../app/public-testnet-action';
 import { supplyStatus } from '../app/supply-action';
 import { jupiterStatus } from '../app/jupiter-action';
+import { routerStatus } from '../app/router-action';
+import { ROUTER_NETWORK_OPTIONS, type RouterNetwork } from '../domain/router-authoring';
 
 type Pending = { valid: boolean; command: Command; diff: readonly string[]; review: ReviewResult | null; authoringId?: string; authoringAmount?: string };
 type Store = { restorationEpoch: number; state: EditorState; dispatch: Dispatch<Command>; context: ReviewContext;
@@ -122,6 +124,14 @@ const testNetworksIntroduced = (before: Parameters<typeof introducedTestNetworks
 
 /** A sequence step's durable record, read back from its own runtime by run id (BUILD AAVE-V3-EXPANSION-001). Null when unreadable. */
 async function readSequenceRecord(kind: string, runKey: string): Promise<unknown> {
+  if (kind === 'router') {
+    // The Router keeps one store per network; the run id names no network, so each is asked (read-only) until one holds it.
+    for (const network of Object.keys(ROUTER_NETWORK_OPTIONS) as RouterNetwork[]) {
+      const result = await routerStatus(network, runKey).catch(() => null);
+      if (result?.ok) return result.value;
+    }
+    return null;
+  }
   const result = kind === 'public' ? await publicStatus(runKey) : kind === 'supply' ? await supplyStatus(runKey) : kind === 'solana-swap' ? await jupiterStatus(runKey) : null;
   return result && result.ok ? result.value : null;
 }

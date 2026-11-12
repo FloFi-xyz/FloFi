@@ -3863,7 +3863,8 @@
         "apps/reference-dapp/src/domain/node-declaration.ts",
         "apps/reference-dapp/src/domain/sequence-restore.ts",
         "apps/reference-dapp/src/domain/editor-run.ts",
-        "apps/reference-dapp/src/domain/editor-persistence.ts"
+        "apps/reference-dapp/src/domain/editor-persistence.ts",
+        "apps/reference-dapp/src/domain/workflow-progress.ts"
       ],
       "suites": [
         "action-registry.engineering-regression",

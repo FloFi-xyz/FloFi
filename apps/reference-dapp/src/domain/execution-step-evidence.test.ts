@@ -69,7 +69,9 @@ describe('per-step execution evidence', () => {
       review: { nodeId: workflow.nodes[0]!.nodeId, intent: { sourceChain: 'eip155:84532', destinationChain: 'eip155:421614' }, route: { inputToken: { symbol: 'USDC' }, routingProvider: 'across' }, calls: [{ purpose: 'BRIDGE_DEPOSIT' }] },
       attempts: [{ step: 'DEPOSIT', state: 'CONFIRMED', transactionHash: hash, reconciled: true }],
     };
-    expect(first(project(source('router', { record }), workflow))).toMatchObject({ label: 'Pending confirmation', reconciled: false });
+    // P0 hotfix (execution continuity): the deposit is confirmed at the source and the fill is not reconciled: the step reads "Waiting for delivery
+    // on <destination>" (shared phase vocabulary), no longer "Pending confirmation" beside the confirmed deposit; it is still not reconciled.
+    expect(first(project(source('router', { record }), workflow))).toMatchObject({ label: 'Waiting for delivery on {0}', labelArgs: ['Arbitrum Sepolia'], reconciled: false });
     expect(first(project(source('router', { record: { ...record, phase: 'RECONCILED', verdict: 'RECONCILED', destination: { transactionHash: hash } } }), workflow))).toMatchObject({ label: 'Reconciled', reconciled: true });
   });
   it.each(['OPEN', 'FULFILLED', 'RECONCILIATION_REQUIRED', 'RECONCILED'])('preserves signed intent %s truth', state => {

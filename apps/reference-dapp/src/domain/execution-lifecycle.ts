@@ -8,6 +8,7 @@ import { composerActions, composerSummary } from './composer-presentation';
 import { simulationAmount, simulationProvider } from './simulation-presentation';
 import { shellChainLabel } from './product-shell';
 import type { ExecutionStepEvidence } from './execution-step-evidence';
+import { EXECUTION_PHASE_LABEL, type ExecutionPhase } from './execution-phase';
 import type { ExecutionEvidence } from './execution-evidence';
 import type { useSupply } from '../state/supply-store';
 import type { useLending } from '../state/lending-store';
@@ -50,6 +51,13 @@ const labels: Record<LifecycleState, string> = {
   'not-submitted': 'Not submitted', waiting: 'Waiting', preparing: 'Preparing request', wallet: 'Confirm in wallet', submitting: 'Submitting', submitted: 'Transaction submitted', pending: 'Pending confirmation',
   confirmed: 'Confirmed', failed: 'Failed', uncertain: 'Execution status uncertain', signed: 'Order signed', posted: 'Order posted', settling: 'Settlement pending', partial: 'Partially settled', cancelled: 'Cancelled', expired: 'Transaction expired',
 };
+/** A network as the phase labels name it: its product name, never its chain id (board 16). */
+export const phaseNetwork = (chain: string) => shellChainLabel(chain).replace(/ \(\d+\)$/, '');
+/** Words an operation by its phase from the shared vocabulary (`{0}`: its network), keeping its lifecycle state. */
+function phrase(op: LifecycleOperation, phase: ExecutionPhase, chain = op.chain) {
+  op.phase = phase; op.label = EXECUTION_PHASE_LABEL[phase];
+  if (EXECUTION_PHASE_LABEL[phase].includes('{0}')) op.labelArgs = [phaseNetwork(chain)]; else delete op.labelArgs;
+}
 export function transactionLifecycle(state: string | null, hash: string | null, signing = false, verified = false): LifecycleState {
   if (['REVERTED', 'FAILED', 'REJECTED'].includes(state ?? '')) return 'failed';
   if (state === 'EXPIRED') return 'expired';
@@ -84,8 +92,15 @@ export function executionExplorer(chain: string, hash: string, local = false): s
  * BUILD-FLOFI-BRIDGE-LIVE-FIX-003: `wallet` — whether the operation is a request the owner's wallet signs (an approval, deposit, swap, wrap or
  * signed intent). A bridge's destination settlement is provider-side execution FloFi only observes and reconciles: never a wallet request.
  */
-export type LifecycleOperation = { id: string; nodeId: string; title: string; state: LifecycleState; label: string; hash: string | null; chain: string; explorer: string | null; fee: string | null; approval: boolean; intent: boolean; wallet: boolean };
-export type LifecycleStep = { id: string; number: number; action: string; input: string; pair: string | null; network: string; provider: string | null; tokens: string[]; state: LifecycleState; label: string; operations: LifecycleOperation[] };
+/**
+ * P0 hotfix (execution continuity): `phase`/`labelArgs` — where an operation's lifecycle state alone would word a fact wrongly (a bridge deposit
+ * confirmed at the source whose delivery is pending read "Pending confirmation" beside the confirmed deposit), its phase from the shared vocabulary
+ * (`execution-phase.ts`) and the label's parameters (a network name, passed to the translator as `{0}`). The state machine (`state`) is unchanged.
+ */
+export type LifecycleOperation = { id: string; nodeId: string; title: string; state: LifecycleState; label: string; hash: string | null; chain: string; explorer: string | null; fee: string | null; approval: boolean; intent: boolean; wallet: boolean;
+  phase?: ExecutionPhase; labelArgs?: readonly string[] };
+export type LifecycleStep = { id: string; number: number; action: string; input: string; pair: string | null; network: string; provider: string | null; tokens: string[]; state: LifecycleState; label: string; operations: LifecycleOperation[];
+  labelArgs?: readonly string[] };
 export type ExecutionLifecycle = { started: boolean; restored: boolean; local: boolean; matchesWorkflow?: boolean; planUnavailable?: boolean; stepEvidence?: Record<string, ExecutionStepEvidence>; evidence?: ExecutionEvidence; steps: LifecycleStep[]; active: LifecycleStep | null; completed: number; label: string; message: string; state: 'idle' | 'active' | 'complete' | 'attention' | 'uncertain'; runKey: string | null; fingerprint: string; busy: boolean };
 
 export function projectExecutionLifecycle(currentWorkflow: Workflow, context: ReviewContext, source: ExecutionLifecycleSource): ExecutionLifecycle {
@@ -134,12 +149,18 @@ export function projectExecutionLifecycle(currentWorkflow: Workflow, context: Re
       const nodeId = r.quote.nodeId, chain = `eip155:${r.quote.chainId}`;
       const approve = r.attempts.filter(a => a.step === 'approval').at(-1), swap = r.attempts.filter(a => a.step === 'swap').at(-1);
       const last = r.attempts.at(-1);
-      if (approve) add('approval', nodeId, `Approve ${r.quote.inputSymbol}`, chain, r.divergence && last === approve ? 'DIVERGENT' :
-        r.quote.ownerReview && approve.state === 'CONFIRMED' && approve.nativeAfter === null ? 'PENDING' : approve.state,
+      // P0 hotfix (execution continuity): an approval whose receipt confirmed IS confirmed (it used to read "Pending confirmation" on owner-bound
+      // networks until its allowance read-back, beside its confirmed transaction). Continuing to the swap still waits for that read-back: the
+      // runtime's refresh observes it first (read-only), and the swap needs its own fresh Review and wallet confirmation.
+      if (approve) add('approval', nodeId, `Approve ${r.quote.inputSymbol}`, chain, r.divergence && last === approve ? 'DIVERGENT' : approve.state,
         approve.txHash, false, true, simulationAmount(approve.receipt?.gasCostWei, 18, 'ETH'));
       // BUILD-FLOFI-BRIDGE-LIVE-FIX-003: a WETH9 conversion is one wallet request of its own kind, named as such.
       add('swap', nodeId, r.quote.conversion === 'WRAP' ? 'Wrap ETH' : r.quote.conversion === 'UNWRAP' ? 'Unwrap WETH' : 'Swap', chain, r.divergence ? 'DIVERGENT' : r.quote.ownerReview && swap?.state === 'CONFIRMED' && !r.outcome ? 'PENDING' : swap?.state ?? null,
-        swap?.txHash ?? null, false, false, simulationAmount(swap?.receipt?.gasCostWei, 18, 'ETH')); break;
+        swap?.txHash ?? null, false, false, simulationAmount(swap?.receipt?.gasCostWei, 18, 'ETH'));
+      // A swap confirmed on its network whose outcome FloFi has not reconciled yet: still not complete (the step counts only once reconciled), and
+      // worded as what it is — confirmed on that network — never "Pending confirmation".
+      if (!r.divergence && r.quote.ownerReview && swap?.state === 'CONFIRMED' && !r.outcome) phrase(operations.at(-1)!, 'CONFIRMED_AT_SOURCE');
+      break;
     }
     case 'router': {
       const r = source.state.record; if (!r) break;
@@ -152,7 +173,10 @@ export function projectExecutionLifecycle(currentWorkflow: Workflow, context: Re
       }
       const settling = ['SOURCE_CONFIRMED', 'IN_FLIGHT', 'DESTINATION_OBSERVED'].includes(r.phase);
       const destinationState = r.verdict === 'RECONCILED' ? 'CONFIRMED' : ['RECOVERY_REQUIRED', 'RECONCILIATION_REQUIRED'].includes(r.phase) || r.verdict === 'DIVERGENT' ? 'INCONCLUSIVE' : r.verdict === 'FAILED' ? 'FAILED' : r.verdict === 'REFUNDED' ? 'CANCELLED' : settling ? 'PENDING' : null;
-      add('destination', nodeId, 'Destination settlement', r.review.intent.destinationChain, destinationState, r.destination?.transactionHash ?? null, r.verdict === 'RECONCILED'); break;
+      add('destination', nodeId, 'Destination settlement', r.review.intent.destinationChain, destinationState, r.destination?.transactionHash ?? null, r.verdict === 'RECONCILED');
+      // P0 hotfix: the deposit confirmed at the source and the fill not reconciled yet reads "Waiting for delivery on <destination>".
+      if (destinationState === 'PENDING') phrase(operations.at(-1)!, 'AWAITING_DESTINATION');
+      break;
     }
     case 'universal': {
       const r = source.state.record; if (!r) break;
@@ -169,7 +193,8 @@ export function projectExecutionLifecycle(currentWorkflow: Workflow, context: Re
       const destinationState = r.verdict === 'RECONCILED' ? 'CONFIRMED' : ['RECOVERY_REQUIRED', 'RECONCILIATION_REQUIRED'].includes(r.phase) || r.verdict === 'DIVERGENT' ? 'INCONCLUSIVE'
         : r.verdict === 'FAILED' ? 'FAILED' : r.verdict === 'REFUNDED' ? 'CANCELLED' : settling ? 'PENDING' : null;
       add('destination', nodeId, 'Destination delivery', r.review.route.destinationChain, destinationState, r.destination?.transactionHash ?? null, r.verdict === 'RECONCILED');
-      if (r.destination && r.verdict !== 'RECONCILED') operations.at(-1)!.label = r.destination.final ? 'Destination observed · awaiting reconciliation' : 'Destination observed · awaiting finality';
+      if (destinationState === 'PENDING') phrase(operations.at(-1)!, 'AWAITING_DESTINATION');
+      if (r.destination && r.verdict !== 'RECONCILED') { const op = operations.at(-1)!; op.label = r.destination.final ? 'Destination observed · awaiting reconciliation' : 'Destination observed · awaiting finality'; delete op.labelArgs; }
       break;
     }
     case 'uniswap-pool': {
@@ -272,7 +297,7 @@ export function projectExecutionLifecycle(currentWorkflow: Workflow, context: Re
       provider: source.kind === 'universal' ? simulationProvider(source.state.record?.review.route.provider ?? '') ?? card.provider ?? null
         : source.kind === 'router' ? simulationProvider(source.state.record?.review.route.routingProvider ?? '') ?? card.provider ?? null : source.kind === 'cow' ? 'CoW Protocol' : card.provider === 'Provider not specified' ? null : card.provider ?? null,
       tokens: [...new Set(`${card.amount} ${card.detail ?? ''} ${card.bridgePair ?? ''}`.match(/\b(?:devUSDC|USDC|WETH|ETH|WSOL|SOL|USDT)\b/g) ?? [])],
-      state: status, label: intent && completed ? 'Settled' : labels[status], operations: own };
+      state: status, label: intent && completed ? 'Settled' : live?.phase ? live.label : labels[status], ...live?.phase && live.labelArgs ? { labelArgs: live.labelArgs } : {}, operations: own };
   });
   // These legacy records retain requests, but no original workflow. Display their
   // actual operations without borrowing amounts or actions from the current Build.
@@ -296,7 +321,7 @@ export function projectExecutionLifecycle(currentWorkflow: Workflow, context: Re
   const label = lifecycleState === 'uncertain' ? 'Execution status uncertain' : lifecycleState === 'attention' ? 'Execution needs attention' : lifecycleState === 'complete' ? 'Execution confirmed' : lifecycleState === 'active' ? 'Execution in progress' : 'Not started';
   // BUILD-FLOFI-CHAT-E2E-FIX-002: a record with no wallet request (simulated or reviewed only) says that nothing was sent, never "0 of N completed"
   // with operations "Waiting" as if a wallet request were pending.
-  if (!started) for (const step of steps) { step.label = 'Not requested'; for (const op of step.operations) op.label = 'Not requested'; }
+  if (!started) for (const step of steps) { step.label = 'Not requested'; delete step.labelArgs; for (const op of step.operations) { op.label = 'Not requested'; delete op.labelArgs; delete op.phase; } }
   // BUILD-FLOFI-E2E-RELIABILITY-001: a confirmed token approval of the active step is named as such — it only allows the spend — and the step's
   // own request is said to be not sent yet, so a landed approval is never read as the completed action nor as "nothing was sent".
   const approvalLanded = Boolean(active?.operations.some(op => op.approval && /^Approve\b/.test(op.title) && op.state === 'confirmed') && active?.operations.some(op => !op.approval && op.wallet && op.state === 'waiting'));
