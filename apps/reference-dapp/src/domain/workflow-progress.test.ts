@@ -2,11 +2,12 @@
 /** P0 hotfix (execution continuity): one progress truth for the whole workflow, from durable records only. */
 import { describe, expect, it } from 'vitest';
 import { projectExecutionLifecycle, type ExecutionLifecycle, type ExecutionLifecycleSource } from './execution-lifecycle';
+import { projectExecutionStepEvidence } from './execution-step-evidence';
 import { reviewFixture } from '../test-utils/review-fixture';
 import { createRouterNode } from './router-authoring';
 import { initialEditor } from './editor';
 import type { SequencePresentation } from './sequence-presentation';
-import { lifecycleStepPhase, operationPhase, phaseText, STEPS_COMPLETED, workflowProgressView } from './workflow-progress';
+import { lifecycleStepPhase, operationPhase, phaseText, runReconciled, STEPS_COMPLETED, workflowProgressView } from './workflow-progress';
 import { portugueseExecutionContinuity } from '../i18n/pt-execution-continuity';
 import { translate } from '../i18n/locale';
 
@@ -50,6 +51,27 @@ describe('P0 hotfix (execution continuity): one progress truth', () => {
     expect(during.completed).toBe(0);
     const reconciled = ownerBoundSwap(attempts, { inputSpent: '100000000', outputReceived: '2500000' });
     expect(workflowProgressView({ sequence: sequence(['CURRENT', 'NEXT']), live: reconciled })).toMatchObject({ completed: 1, total: 2, current: 2 });
+  });
+  it('a run whose receipts all confirmed but whose step is not reconciled never shows Reconciled nor counts as completed', () => {
+    const f = reviewFixture(), run = 'run' in f.source.state ? f.source.state.run : null;
+    const attempts = [{ step: 'approval', state: 'CONFIRMED', txHash: hash, nativeAfter: '1', reconciled: false }, { step: 'swap', state: 'CONFIRMED', txHash: other, reconciled: false }];
+    // As the production state projects it (state/execution-lifecycle.ts): the lifecycle with its step evidence.
+    const src = source('public', { ...f.source.state, run: { ...run, outcome: null, attempts } }), projected = projectExecutionLifecycle(f.workflow, f.context, src);
+    const live: ExecutionLifecycle = { ...projected, stepEvidence: projectExecutionStepEvidence(src, projected) };
+    expect(live.state).toBe('complete');
+    expect(live.stepEvidence?.[live.steps[0]!.id]?.reconciled).toBe(false);
+    // A sequence step does not hand over to the next one either.
+    expect(runReconciled(live)).toBe(false);
+    for (const view of [workflowProgressView({ sequence: null, live })!, workflowProgressView({ sequence: sequence(['CURRENT', 'NEXT']), live })!]) {
+      expect(view.steps[0]!.phase).toBe('CONFIRMED_AT_SOURCE');
+      expect(view.completed).toBe(0);
+      expect(view.finished).toBe(false);
+    }
+    // Once FloFi reads the outcome from the chain, the step is reconciled, counts, and the sequence may hand over.
+    const read = source('public', { ...f.source.state, run: { ...run, outcome: { inputSpent: '100000000', outputReceived: '2500000', evidence: { outcome: 'RECONCILED' } }, attempts } });
+    const done = projectExecutionLifecycle(f.workflow, f.context, read), reconciled: ExecutionLifecycle = { ...done, stepEvidence: projectExecutionStepEvidence(read, done) };
+    expect(runReconciled(reconciled)).toBe(true);
+    expect(workflowProgressView({ sequence: null, live: reconciled })).toMatchObject({ completed: 1, total: 1, finished: true });
   });
   it('a bridge deposit confirmed at the source with its fill pending is AWAITING_DESTINATION ("Waiting for delivery on Arbitrum Sepolia")', () => {
     const live = bridge('IN_FLIGHT', 'PENDING', [{ step: 'APPROVAL', state: 'CONFIRMED', transactionHash: hash, reconciled: true }, { step: 'DEPOSIT', state: 'CONFIRMED', transactionHash: other, reconciled: true }]);

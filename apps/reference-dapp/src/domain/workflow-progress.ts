@@ -73,6 +73,16 @@ export function phaseText(phase: ExecutionPhase | null, step?: LifecycleStep | n
   return chain ? { key, args: [phaseNetwork(chain)] } : { key: phase === 'AWAITING_DESTINATION' ? 'Waiting for delivery' : 'Confirmed', args: [] };
 }
 const reconciledRun = (live: ExecutionLifecycle) => live.state === 'complete' && isFinalExecutionResult(live);
+/**
+ * Whether a step of this run is reconciled. The step's own evidence decides wherever the runtime projects it (every production lifecycle does):
+ * a run whose receipts all confirmed is "complete", but a step counts as reconciled only once FloFi read its outcome from the chain. Only a
+ * lifecycle without step evidence falls back to the final run.
+ */
+export function stepReconciled(live: ExecutionLifecycle, stepId: string): boolean {
+  return live.stepEvidence ? Boolean(live.stepEvidence[stepId]?.reconciled) : reconciledRun(live);
+}
+/** A final run whose every step is reconciled (the rule a sequence step needs before it hands over to the next one). */
+export const runReconciled = (live: ExecutionLifecycle): boolean => reconciledRun(live) && live.steps.every(step => stepReconciled(live, step.id));
 
 /**
  * The whole workflow's progress. `sequence`: the workflow's steps when it runs step by step (the shell's sequence presentation); `live`: the
@@ -87,14 +97,13 @@ export function workflowProgressView(input: { readonly sequence: SequencePresent
       const current = !sequence.finished && step.state === 'CURRENT';
       const runStep = current && live ? live.steps[0] ?? null : null;
       const phase: ExecutionPhase | null = step.state === 'COMPLETED' ? 'RECONCILED' : !current ? null
-        : runStep ? lifecycleStepPhase(runStep, reconciledRun(live!) || Boolean(live!.stepEvidence?.[runStep.id]?.reconciled)) ?? (prepared ? 'PREPARED' : null) : prepared ? 'PREPARED' : null;
+        : runStep ? lifecycleStepPhase(runStep, stepReconciled(live!, runStep.id)) ?? (prepared ? 'PREPARED' : null) : prepared ? 'PREPARED' : null;
       return { number: index + 1, action: step.action, network: step.network, phase, text: phaseText(phase, runStep), current, delivered: step.delivered };
     });
   } else if (live) {
-    const done = reconciledRun(live);
     steps = live.steps.map((step): WorkflowStepProgress => {
-      // A runtime that executes several steps reconciles each on its own (its step evidence); the run's final completion reconciles them all.
-      const phase = lifecycleStepPhase(step, done || Boolean(live.stepEvidence?.[step.id]?.reconciled));
+      // A runtime that executes several steps reconciles each on its own (its step evidence).
+      const phase = lifecycleStepPhase(step, stepReconciled(live, step.id));
       return { number: step.number, action: step.action, network: step.network, phase, text: phaseText(phase, step), current: live.active?.id === step.id, delivered: null };
     });
   } else return null;

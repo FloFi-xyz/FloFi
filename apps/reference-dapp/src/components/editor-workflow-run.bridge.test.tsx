@@ -21,7 +21,7 @@ vi.mock('./user-funded-browser', () => ({ batchHandout: () => undefined, keepBat
 vi.mock('./wallet-proof', () => ({ useWalletProof: () => ({ proveEvm: vi.fn() }) }));
 const { EditorWorkflowRunPanel, EXECUTION_REASON, EXECUTION_REFUSAL } = await import('./editor-workflow-run');
 const { LocaleProvider, translate } = await import('../i18n/locale');
-const { runStepPhase, runProgress, awaitedDelivery } = await import('../workflow-runs/run-step-phase');
+const { runStepPhase, runProgress, awaitedDelivery, presentedDeliveryState } = await import('../workflow-runs/run-step-phase');
 import type { EditorWorkflowRunState } from './editor-workflow-run';
 import type { EditorExecutionReview } from '../editor/workflow-execution';
 import type { RunView } from '../workflow-runs/service';
@@ -124,6 +124,13 @@ describe('P0 hotfix E1: the Editor panel for Swap → Bridge', () => {
     expect(runStepPhase(missing, missing.steps[1]!)).toEqual({ phase: 'OUTCOME_UNKNOWN', network: null });
     expect(awaitedDelivery(missing)).toBeNull();
     expect(render(state({ run: missing }))).toContain('Outcome unknown');
+    // A deposit or fill that disagrees with what was signed (or a reorganized block) is never shown as "Waiting for delivery": outcome unknown.
+    for (const code of ['ROUTER_FILL_MISMATCH', 'ROUTER_SOURCE_REORGANIZED', 'BRIDGE_DEPOSIT_EVENT_MISMATCH'])
+      expect(presentedDeliveryState({ state: 'UNCERTAIN', code }, 'AWAITING_DESTINATION')).toBe('NOT_OBSERVED');
+    // A delivery still awaited (the group open, or held for another reason) keeps its words.
+    expect(presentedDeliveryState({ state: 'SUBMITTED', code: null }, 'AWAITING_DESTINATION')).toBe('AWAITING_DESTINATION');
+    expect(presentedDeliveryState({ state: 'UNCERTAIN', code: 'WALLET_BATCH_OUTCOME_UNKNOWN' }, 'AWAITING_DESTINATION')).toBe('AWAITING_DESTINATION');
+    expect(presentedDeliveryState({ state: 'UNCERTAIN', code: 'ROUTER_FILL_MISMATCH' }, 'DELIVERED')).toBe('DELIVERED');
     // A run without a bridge keeps its own words (no phase invented).
     expect(runStepPhase(runOf({ groups: [group({})] }), step(1, 'swap', 'DELEGATED'))).toBeNull();
   });

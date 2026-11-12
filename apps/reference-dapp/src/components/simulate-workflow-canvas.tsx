@@ -25,6 +25,8 @@ const nodeTypes = { workflow: InspectionCard };
  * grows with its steps (CSS `--canvas-steps`), so fitting it never shrinks a card to an unreadable size; the page scrolls once.
  */
 export const NARROW_CANVAS_FRAME_PX = 720;
+/** A Simulate card's height at full size, with room for its estimate (about 200 px at 1x). */
+const READABLE_CARD_HEIGHT_PX = 220;
 function useNarrowFrame(frame: { readonly current: HTMLElement | null }): boolean {
   const [narrow, setNarrow] = useState(false);
   useLayoutEffect(() => {
@@ -124,11 +126,18 @@ export function SimulateWorkflowCanvas({ workflowName, primaryAction, stage = 's
     return () => observer.disconnect();
   }, []);
   const padding = useMemo(() => fitPadding(controlsHeight), [controlsHeight]);
+  // P0 hotfix (readable cards): the fit keeps the bottom controls (a step note, a reason, the primary action) clear of the cards, so a frame that
+  // grows with its content (docked Review or narrow) is never shorter than those controls plus its rows of cards at full size.
+  const docked = Boolean(dock);
+  // One row of cards beside each other; a narrow frame stacks one card per row (CANVAS_ROW apart).
+  const rows = narrow ? Math.max(1, nodes.length) : 1;
+  const surfaceStyle = useMemo<CSSProperties | undefined>(() => docked || narrow
+    ? { minHeight: `${parseInt(padding.bottom, 10) + parseInt(padding.top, 10) + (rows - 1) * CANVAS_ROW + READABLE_CARD_HEIGHT_PX}px` } : undefined, [docked, narrow, padding, rows]);
   return <section ref={frame} className={`canvas simulate-canvas simulation-workflow-canvas panel ${lending ? 'simulation-lending-canvas' : ''}`} aria-label={tr(stage === 'execute' ? 'Execution plan' : 'Workflow simulation')}
     data-docked={dock ? '' : undefined} data-narrow={narrow ? '' : undefined} style={{ '--canvas-steps': nodes.length } as CSSProperties}>
     <div className="canvas-head"><div><h2>{workflowName === 'Your Workflow' ? tr('Your Workflow') : workflowName}</h2></div><span className="revision">{tr(actions.length === 1 ? '1 step' : '{0} steps', actions.length)}</span></div>
     <div className="simulate-canvas-body">
-    <div className="flow-surface simulate-flow-surface" role="region" aria-label={tr(stage === 'execute' ? 'Execution workflow graph' : 'Simulation workflow graph')} data-viewport={viewport}>
+    <div className="flow-surface simulate-flow-surface" style={surfaceStyle} role="region" aria-label={tr(stage === 'execute' ? 'Execution workflow graph' : 'Simulation workflow graph')} data-viewport={viewport}>
       <ReactFlow nodes={nodes} edges={edges} nodeTypes={nodeTypes} minZoom={0.35} maxZoom={1.4}
         nodesDraggable={false} nodesConnectable={false} elementsSelectable={false} nodesFocusable={false} edgesFocusable={false}
         deleteKeyCode={null} fitViewOptions={{ padding }} {...CANVAS_GESTURES}>

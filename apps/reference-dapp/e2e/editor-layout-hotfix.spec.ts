@@ -49,7 +49,8 @@ async function chooseFromSettings(page: Page, control: RegExp) {
 async function usePortuguese(page: Page) {
   await chooseFromSettings(page, /^(Language|Idioma)$/);
   await expect.poll(() => page.evaluate(() => document.documentElement.lang)).toMatch(/^pt/);
-  await expect(page.getByRole('heading', { name: /^(Seu fluxo|Your Workflow)/ }).first()).toBeVisible();
+  // The Canvas head names the workflow (its default name is "Meu fluxo" in Portuguese; the Build head is its rename button).
+  await expect(page.getByRole('heading', { name: /(Meu fluxo|Your Workflow)$/ }).first()).toBeVisible();
 }
 async function useTheme(page: Page, theme: 'light' | 'dark') {
   if (await page.evaluate(() => document.documentElement.dataset.theme ?? 'light') !== theme) await chooseFromSettings(page, /^(Theme|Tema)$/);

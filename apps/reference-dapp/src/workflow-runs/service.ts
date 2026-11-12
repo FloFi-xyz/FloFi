@@ -36,6 +36,7 @@ import { authorizeGroup, EVM_PREPARED_TTL_MS, prepareGroup, solanaPreparedTtlMs,
 import { boundStrategy } from '../engine/workflow-bindings';
 import type { GroupRecord } from './pg-store.ts';
 import { bridgeProgressOf, type BridgeDeliveryState } from '../user-funded/bridge-delivery.ts';
+import { presentedDeliveryState } from './run-step-phase.ts';
 
 type Env = Readonly<Record<string, string | undefined>>;
 /** Workflow runs are opt-in per deployment (default off: a multi-step handoff is then refused with WORKFLOW_RUNS_NOT_ENABLED). */
@@ -655,7 +656,7 @@ export async function runView(deps: { readonly store: Pick<WorkflowRunStore, 'st
   };
   const deliveryOf = (g: GroupRecord): NonNullable<RunGroupView['delivery']> | null => {
     const b = bridgeProgressOf(g.outcome);
-    return b ? { step: b.step, chain: b.destinationChain, state: b.state,
+    return b ? { step: b.step, chain: b.destinationChain, state: presentedDeliveryState(g, b.state),
       fill: options.outcomes && b.fill ? { hash: b.fill.transactionHash, explorerUrl: executionExplorer(b.destinationChain, b.fill.transactionHash, false) } : null } : null;
   };
   const groups: RunGroupView[] = groupRecords.map(g => {

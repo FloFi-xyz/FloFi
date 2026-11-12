@@ -64,7 +64,7 @@ import { useExecutionStart } from '../state/execution-start';
 import { restoredLocalExecutionKind } from '../domain/execution-recovery';
 import { currentExecution, isFinalExecutionResult } from '../domain/execution-result';
 import { executionContinuation } from '../domain/conversation-lifecycle';
-import { workflowProgressView } from '../domain/workflow-progress';
+import { runReconciled, workflowProgressView } from '../domain/workflow-progress';
 import type { SequenceContinuation } from './workflow-progress-panel';
 import { ReviewAuthorizationDetails } from './review-workspace';
 import { workflowBoundAuthorization } from '../domain/review-presentation';
@@ -364,14 +364,14 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
   // BUILD-FLOFI-UNIVERSAL-E2E-001: every surface (Canvas Review, Execute, the /approve signing surface) presents and approves only this
   // workflow's own Review; a retired or other-network Review is dropped, never shown beside this workflow.
   const authorization = workflowBoundAuthorization(reviewBinding.authorization, runtimeWorkflow, simulationSource);
-  // BUILD-FLOFI-CHAT-E2E-FIX-002: a sequence step hands over to the next one only when its own run is final and every action of it is confirmed
-  // (the runtime's reconciled record), and — when a later step spends its output — once that record proves the delivered amount. Nothing is
+  // BUILD-FLOFI-CHAT-E2E-FIX-002: a sequence step hands over to the next one only when its own run is final and every step of it is
+  // reconciled (its step evidence: the runtime read the outcome from the chain; a confirmed receipt alone is not enough), and — when a later step spends its output — once that record proves the delivered amount. Nothing is
   // submitted here; the next step still needs its own fresh simulation, Review, confirmations and wallet signature.
   const liveStep = currentExecution(executionProgress);
   const stepRecord: unknown = simulationSource.kind === 'public' ? publicTestnet.run : simulationSource.kind === 'universal' ? universal.record
     : simulationSource.kind === 'router' ? routerState.record : simulationSource.kind === 'solana-swap' ? jupiter.record
     : simulationSource.kind === 'supply' ? supply.record : null;
-  const stepDone = Boolean(sequence && !sequence.finished && !sequenceIssue && liveStep && liveStep.matchesWorkflow !== false && liveStep.state === 'complete' && isFinalExecutionResult(liveStep));
+  const stepDone = Boolean(sequence && !sequence.finished && !sequenceIssue && liveStep && liveStep.matchesWorkflow !== false && runReconciled(liveStep));
   const stepDelivered = stepDone && sequence ? deliveredByRecord(simulationSource.kind, stepRecord, sequence.current.output) : null;
   const awaitingDelivery = stepDone && Boolean(sequence?.steps.some(step => step.funding.some(f => f.fundedBy === sequence.cursor))) && DELIVERY_READABLE.includes(simulationSource.kind) && stepDelivered === null;
   const stepRunKey = liveStep?.runKey ?? null;
@@ -387,7 +387,7 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
   // an executed first step, so the owner can keep building it: an action added afterwards is its own next step, never a repeat of this one.
   const soleAction = !sequence ? sequenceOrder(state.workflow) : [];
   const actionDone = Boolean(!sequence && soleAction.length === 1 && SEQUENCE_RUNTIMES.includes(simulationSource.kind) && liveStep && liveStep.matchesWorkflow !== false &&
-    liveStep.state === 'complete' && isFinalExecutionResult(liveStep));
+    runReconciled(liveStep));
   const actionDelivered = actionDone ? deliveredByRecord(simulationSource.kind, stepRecord, stepAssets(soleAction[0]!).output) : null;
   useEffect(() => {
     if (actionDone) recordExecutedAction({ received: actionDelivered, runKey: stepRunKey, kind: simulationSource.kind, owner: stepOwner });

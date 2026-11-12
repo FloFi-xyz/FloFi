@@ -17,6 +17,16 @@ type DeliveryLike = { readonly step: number; readonly chain: string; readonly st
 type RunLike = { readonly mode: string | null; readonly steps: readonly { readonly index: number; readonly state: string }[];
   readonly groups: readonly { readonly steps: readonly [number, number]; readonly chain: string; readonly state: string; readonly delivery?: DeliveryLike }[] };
 
+/**
+ * The delivery state the owner is shown for a group's recorded bridge progress. A group held UNCERTAIN for a reason other than "not observed past
+ * its fill deadline" (a deposit or fill that disagrees with what was signed, a reorganized source or destination block) is NOT awaiting a delivery:
+ * funds may have moved and the run needs attention, so it is shown as not observed (outcome unknown), never as "Waiting for delivery".
+ */
+export function presentedDeliveryState<S extends string>(group: { readonly state: string; readonly code: string | null }, recorded: S): S | 'NOT_OBSERVED' {
+  return recorded === 'AWAITING_DESTINATION' && group.state === 'UNCERTAIN' && group.code !== null && DIVERGED_DELIVERY.test(group.code) ? 'NOT_OBSERVED' : recorded;
+}
+/** The closed codes of a bridge delivery that disagrees with what was signed (bridge-delivery.ts, across-route.ts). */
+const DIVERGED_DELIVERY = /^(BRIDGE_DEPOSIT_EVENT_MISMATCH|ROUTER_SOURCE_REORGANIZED|ROUTER_DESTINATION_REORGANIZED|ROUTER_FILL_[A-Z_]+)$/;
 /** The phase of one step, with the network its label names (`{0}`), or null when the step's own state words apply. */
 export function runStepPhase(run: RunLike, step: { readonly index: number; readonly state: string }): { readonly phase: ExecutionPhase; readonly network: string | null } | null {
   if (step.state === 'RECONCILED') return { phase: 'RECONCILED', network: null };

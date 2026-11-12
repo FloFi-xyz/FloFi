@@ -176,7 +176,9 @@ export async function buildAcrossDeposit(input: { readonly step: StepRequirement
   if (fee * 10_000n > amount * BigInt(slippageBps)) return { ok: false, code: 'BRIDGE_FEE_ABOVE_LIMIT' };
   // The batch may execute until its deadline: the quote (and the SpokePool's quote-time window) must still stand then, and the relayers must
   // still have the safety margin before the fill deadline.
-  if (Date.parse(route.quote.expiresAt) < deadline * 1000) return { ok: false, code: 'BRIDGE_QUOTE_VALIDITY_SHORT' };
+  // An expiry that cannot be read is no validity at all (NaN would pass a plain comparison).
+  const quoteExpiry = Date.parse(route.quote.expiresAt);
+  if (!Number.isFinite(quoteExpiry) || quoteExpiry < deadline * 1000) return { ok: false, code: 'BRIDGE_QUOTE_VALIDITY_SHORT' };
   if (b.fillDeadline < deadline + profile.depositSafetyMarginSeconds) return { ok: false, code: 'BRIDGE_FILL_DEADLINE_SHORT' };
   // An exclusivity window (an offset from the deposit's block, or an absolute time) must end before the fill deadline.
   const exclusivity = b.exclusivityParameter;
