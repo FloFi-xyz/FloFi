@@ -73,11 +73,13 @@ describe('FloFi Wallet bundle boundary', () => {
     }
   });
 
-  it('the (wallet) pages reach no engine or Ajv, and from src/server only deployment facts', () => {
+  it('the (wallet) pages reach no engine or Ajv, and from src/server only deployment facts and the request language', () => {
     const reached = closure(PAGES);
     expect(reached.packages.filter(name => ENGINE.test(name))).toEqual([]);
     expect(reached.packages.filter(name => !/^(?:react|next\/(?:headers|server|navigation)|node:crypto|@turnkey\/(?:crypto|iframe-stamper|indexed-db-stamper))$/.test(name))).toEqual([]);
-    expect(reached.files.filter(file => file.startsWith('src/server/'))).toEqual(['src/server/deployment.ts']);
+    // P0 hotfix (locale contract): the wallet layout reads the request's language through the one server resolver (the preference cookie and the
+    // proxy's pathname header only — no engine, no secret, no data store), like every other layout.
+    expect(reached.files.filter(file => file.startsWith('src/server/'))).toEqual(['src/server/deployment.ts', 'src/server/request-language.ts']);
     expect(reached.files.filter(file => /-action\.ts$|^src\/(?:state|components\/(?!account\/account-icons))/.test(file))).toEqual([]);
     // The client root is what the page renders; the browser gets nothing else from these pages.
     expect(reached.files).toEqual(expect.arrayContaining(['src/wallet-app/wallet-app.tsx', 'src/wallet-app/wallet-done.tsx']));

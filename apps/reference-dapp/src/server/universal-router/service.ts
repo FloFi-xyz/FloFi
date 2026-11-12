@@ -837,7 +837,13 @@ export function createUniversalRouterService(input: UniversalRouterServiceInput)
       const record = await load(id), attempt = record.attempts.at(-1);
       if (!attempt || attempt.ecosystem !== 'EVM') fail('UNIVERSAL_ATTEMPT_MISSING');
       const a = attempt as UniversalEvmAttempt;
-      if (result.attemptId && result.attemptId !== a.attemptId) fail('UNIVERSAL_ATTEMPT_ID_MISMATCH');
+      if (result.attemptId && result.attemptId !== a.attemptId) {
+        // P0 hotfix: the same rule as the certified Router — an identical re-report of an EARLIER attempt's already-recorded hash (the browser's
+        // outbox delivering it again) is answered with the record and changes nothing; anything else for an earlier attempt is still refused.
+        const earlier = record.attempts.find(item => item.attemptId === result.attemptId);
+        if (result.kind === 'HASH' && typeof result.hash === 'string' && earlier?.ecosystem === 'EVM' && earlier.transactionHash && earlier.transactionHash === result.hash.toLowerCase()) return record;
+        fail('UNIVERSAL_ATTEMPT_ID_MISMATCH');
+      }
       if (result.kind === 'HASH') {
         const hash = result.hash.toLowerCase();
         if (!/^0x[0-9a-f]{64}$/.test(hash)) fail('UNIVERSAL_HASH_INVALID');

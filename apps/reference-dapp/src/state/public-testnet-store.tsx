@@ -13,6 +13,7 @@ import { bindFloFiSigning, usesFloFiWallet } from '../wallet/flofi-wallet-channe
 import { floFiWalletMessage, PRE_SIGNATURE_CODES, signingContextOf } from '../wallet/flofi-signing';
 import { observeUntilSettled } from '../domain/observation-schedule';
 import { createJourney, reportJourney, type Journey } from '../domain/journey-metrics';
+import { editorStorage, readPersistedEditor } from '../domain/editor-persistence';
 
 const KEY = 'gryloo:public-testnet-execution-id';
 /**
@@ -25,6 +26,7 @@ const tabRun = () => { try { return sessionStorage.getItem(TAB_KEY); } catch { r
 /** An execution the owner must still continue or observe: no settled outcome yet, and an attempt that was prepared, sent or confirmed. */
 export const publicRunInProgress = (run: Pick<PublicRun, 'outcome' | 'attempts'>) =>
   !run.outcome && run.attempts.some(attempt => ['PREPARED', 'HASH', 'PENDING', 'UNKNOWN', 'CONFIRMED'].includes(attempt.state));
+const sameWorkflow = (a: unknown, b: unknown) => { try { return JSON.stringify(a) === JSON.stringify(b); } catch { return false; } };
 type Store = { readonly available: boolean;
   /** BUILD-BASE-001: whether this instance serves a catalog network's mainnet swaps (live or the MOCKED loopback harness). */
   readonly catalogAvailable: (chain: string) => boolean;
@@ -84,6 +86,7 @@ function message(error: unknown): string {
     CATALOG_ASSET_IDENTITY_CHANGED: 'The official asset registry no longer matches this workflow\'s asset. Build it again.',
     STOCK_TOKEN_NOT_ACQUIRABLE: 'This Stock Token is not tradable now.', INSUFFICIENT_GAS_FUNDS: 'Insufficient ETH for network fees on this network.',
     SWAP_FEE_INVALID: 'The network did not return a usable fee right now. Nothing was sent; simulate again shortly.',
+    APPROVAL_NOT_RECONCILED: 'The approval is confirmed. FloFi is still reading its allowance on the network before preparing the swap. Nothing new was sent; try again in a moment.',
     QUOTE_CHANGED_REVIEW_REQUIRED: 'The quote changed. Review the updated amounts before executing.',
     QUOTE_EXPIRED_REVIEW_REQUIRED: 'Quote expired. Review a fresh quote.',
     REVIEW_EXPIRED: 'Quote expired. Simulate again.', REVIEW_REQUIRED: 'Review the current swap first.',
@@ -173,8 +176,13 @@ export function PublicTestnetProvider({ children }: { children: ReactNode }) {
         }
       }
       if (!cancelled) {
-        // A finished or never-executed run stays in the Dashboard; a new visit does not put it back on the Canvas.
-        if (!publicRunInProgress(recovered) && tabRun() !== id) return;
+        // A finished or never-executed run stays in the Dashboard; a new visit does not put it back on the Canvas. P0 hotfix (execution
+        // continuity): when the Canvas this browser remembered is exactly that run's workflow, its final result is shown again (observation only).
+        if (!publicRunInProgress(recovered) && tabRun() !== id && !sameWorkflow(workflowRef.current, recovered.workflow)) return;
+        // The owner's explicit "Create new workflow" after this finished run is remembered (another, empty Editor workflow): the finished run is
+        // not put back on that Canvas. A run that still needs the owner (in progress or uncertain) is always brought back.
+        const remembered = readPersistedEditor(editorStorage());
+        if (!publicRunInProgress(recovered) && remembered && remembered.workflow === null && remembered.workflowId !== recovered.workflow.workflowId) return;
         // Recover the canonical workflow only over the untouched initial template.
         // Recovery remains observation-only until fresh simulation and owner Review.
         if (workflowRef.current === initialWorkflow.current && initialWorkflow.current.revision === 0 &&
@@ -211,6 +219,13 @@ export function PublicTestnetProvider({ children }: { children: ReactNode }) {
     if (profile && ownerBoundSwapReview(profile) && !owner) throw new Error('WALLET_NOT_CONNECTED');
     if (owner && owner.chainId !== profile?.chainHex) throw new Error('WRONG_WALLET_CHAIN');
     if (resumeApproval && run?.quote.ownerReview && owner?.account !== run.quote.ownerReview.account) throw new Error('OWNER_REVIEW_MISMATCH');
+    // P0 hotfix (execution continuity): a confirmed approval is shown as confirmed as soon as its receipt is; on an owner-bound network the swap's
+    // fresh Review still needs the approval's allowance read-back, so it is observed first (read-only; nothing is signed or sent).
+    if (resumeApproval && run?.quote.ownerReview && approval?.nativeAfter === null) {
+      const observed = unwrap(await publicObserve(run.quote.executionId));
+      setRun(current => current?.quote.executionId === observed.quote.executionId ? observed : current);
+      if (observed.attempts.at(-1)?.nativeAfter === null) throw new Error('APPROVAL_NOT_RECONCILED');
+    }
     const prepared = unwrap(resumeApproval ? await publicRefresh(run!.quote.executionId) :
       await publicPrepare(workflow as unknown as SemanticWorkflow, owner?.account));
     localStorage.setItem(KEY, prepared.quote.executionId); markTab(prepared.quote.executionId);

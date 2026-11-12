@@ -5,7 +5,7 @@ import { lintWorkflow } from '@defi-workflow-engine/reference-linter';
 import { CopilotSession, act, intent } from './copilot-session.test-harness';
 import { setActiveNetworkScope } from './network-scope';
 import { stepNodeKey, validCompletions, workflowSequence } from './workflow-sequence';
-import { completedByRecord, proveCompletions, storedCompletions, type RecordReader, type StoredCompletion } from './sequence-restore';
+import { completedByRecord, ownerByRecord, proveCompletions, storedCompletions, type RecordReader, type StoredCompletion } from './sequence-restore';
 import { registerFixtureCatalogs, resetNetworkCatalogs } from './intelligence/intelligence.test-harness';
 
 beforeAll(registerFixtureCatalogs);
@@ -61,7 +61,10 @@ describe('BUILD AAVE-V3-EXPANSION-001 sequence restoration after a refresh', () 
     const item = { nodeId: 'node-002', node: '{}', kind: 'public', runKey: 'exec-0001', received: '1' };
     expect(storedCompletions({ workflowId: 'w', completed: [item] }, 'w')).toEqual([item]);
     expect(storedCompletions({ workflowId: 'other', completed: [item] }, 'w')).toEqual([]);
-    expect(storedCompletions({ workflowId: 'w', completed: [{ ...item, kind: 'router' }] }, 'w')).toEqual([]);
+    // P0 hotfix (execution continuity): the certified Router's pointer is restorable now (the bridge of Swap → Bridge is re-proven after a
+    // reload instead of being dropped, which offered the executed bridge again); a runtime with no run-id reader still is not.
+    expect(storedCompletions({ workflowId: 'w', completed: [{ ...item, kind: 'router', runKey: 'xroute-' + 'a'.repeat(32) }] }, 'w')).toEqual([{ ...item, kind: 'router', runKey: 'xroute-' + 'a'.repeat(32) }]);
+    expect(storedCompletions({ workflowId: 'w', completed: [{ ...item, kind: 'universal' }] }, 'w')).toEqual([]);
     expect(storedCompletions({ workflowId: 'w', completed: [{ ...item, received: '-1' }] }, 'w')).toEqual([]);
     expect(storedCompletions({ workflowId: 'w', completed: [{ ...item, runKey: 'x' }] }, 'w')).toEqual([]);
     expect(storedCompletions('garbage', 'w')).toEqual([]);
@@ -71,6 +74,15 @@ describe('BUILD AAVE-V3-EXPANSION-001 sequence restoration after a refresh', () 
     expect(completedByRecord('supply', supply('RECONCILED'), 'w', 'node-003')).toBe(true);
     expect(completedByRecord('supply', supply('PENDING'), 'w', 'node-003')).toBe(false);
     expect(completedByRecord('supply', supply('DIVERGENT'), 'w', 'node-003')).toBe(false);
-    expect(completedByRecord('router', supply('RECONCILED'), 'w', 'node-003')).toBe(false);
+    expect(completedByRecord('universal', supply('RECONCILED'), 'w', 'node-003')).toBe(false);
+  });
+  it('P0 hotfix: a Router bridge counts again only from its own reconciled record (its owner read from that record)', () => {
+    const bridge = (verdict: string, workflowId = 'w') => ({ verdict, owner: OWNER, workflow: { workflowId, nodes: [{ nodeId: 'node-003' }] } });
+    expect(completedByRecord('router', bridge('RECONCILED'), 'w', 'node-003')).toBe(true);
+    expect(completedByRecord('router', bridge('PENDING'), 'w', 'node-003')).toBe(false);
+    expect(completedByRecord('router', bridge('REFUNDED'), 'w', 'node-003')).toBe(false);
+    expect(completedByRecord('router', bridge('RECONCILED', 'other'), 'w', 'node-003')).toBe(false);
+    expect(completedByRecord('router', bridge('RECONCILED'), 'w', 'node-009')).toBe(false);
+    expect(ownerByRecord('router', bridge('RECONCILED'))).toBe(OWNER);
   });
 });

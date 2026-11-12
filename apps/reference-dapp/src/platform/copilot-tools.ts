@@ -180,6 +180,16 @@ async function withTimeout<T>(run: Promise<T>, ms: number): Promise<T | 'TIMEOUT
 }
 const certifiedOn = (source: string, destination: string) => bridgeOffers().filter(route => route.source.key === source && route.destination.key === destination).map(route => route.asset);
 const KNOWN_CODE = /^[A-Z][A-Z0-9_]{2,80}$/;
+/**
+ * P0 hotfix (locale contract): FloFi's own sentences inside a tool's facts, in the language of the person's interface (the turn's reply
+ * language), so a model that quotes them never puts English into a Portuguese reply. Codes, symbols, numbers and names are never translated.
+ */
+export const COPILOT_TOOL_NOTES: Readonly<Record<'EN' | 'PT', { readonly native: string; readonly token: string; readonly authority: string; readonly authoring: string }>> = Object.freeze({
+  EN: { native: 'Native coin (not a wrapped token).', token: 'Token contract in the official registry.', authority: 'NONE: validation authorizes nothing.',
+    authoring: 'FloFi authors each step through its own grammar after your request; nothing is created by this tool.' },
+  PT: { native: 'Moeda nativa (não é um token encapsulado).', token: 'Contrato de token do registro oficial.', authority: 'NENHUMA: a validação não autoriza nada.',
+    authoring: 'A FloFi monta cada passo com a própria gramática depois do seu pedido; esta ferramenta não cria nada.' },
+});
 
 /** Runs one tool call. Never throws; every failure is a closed code in `outcome` and `output`. */
 export async function runCopilotTool(name: string, rawArguments: string, ctx: CopilotToolContext): Promise<ToolRun> {
@@ -209,7 +219,7 @@ export async function runCopilotTool(name: string, rawArguments: string, ctx: Co
         await ctx.ports.prepareCatalogs?.(scoped.name, { network: networkIdentity(scoped.key)?.copilot });
         const found = lookupAsset(scoped.key, str(args.reference));
         if (found.kind === 'FOUND') return done({ ok: true, kind: 'FOUND', network: scoped.name, symbol: found.identity.symbol, native: found.identity.native,
-          decimals: found.identity.decimals, by: found.by, note: found.identity.native ? 'Native coin (not a wrapped token).' : 'Token contract in the official registry.' });
+          decimals: found.identity.decimals, by: found.by, note: found.identity.native ? COPILOT_TOOL_NOTES[ctx.language].native : COPILOT_TOOL_NOTES[ctx.language].token });
         if (found.kind === 'AMBIGUOUS' || found.kind === 'FIAT') return done({ ok: true, ...found, network: scoped.name });
         return done({ ok: false, code: `ASSET_${found.kind}`, network: scoped.name });
       }
@@ -251,7 +261,7 @@ export async function runCopilotTool(name: string, rawArguments: string, ctx: Co
         await ctx.ports.prepareCatalogs?.(JSON.stringify(strategy).slice(0, 2_000), strategy);
         const checked = validateStrategy(strategy, undefined, ctx.scope);
         return done(checked.valid ? { ok: true, valid: true, workflowHash: checked.workflowHash, fundsClass: checked.fundsClass, stepCount: checked.stepCount, reviewSummary: checked.reviewSummary,
-          authority: 'NONE: validation authorizes nothing.' } : { ok: true, valid: false, code: checked.code, issues: (checked.issues ?? []).slice(0, 8) });
+          authority: COPILOT_TOOL_NOTES[ctx.language].authority } : { ok: true, valid: false, code: checked.code, issues: (checked.issues ?? []).slice(0, 8) });
       }
       case 'plan_goal': {
         let raw: Record<string, unknown>;
@@ -278,7 +288,7 @@ export async function runCopilotTool(name: string, rawArguments: string, ctx: Co
         return done({ ok: true, kind: 'PLAN', steps: plan.steps.map(({ action, network: from, destinationNetwork, inputAsset, outputAsset, amount: value, fundedBy, routing }) =>
           ({ action, network: from, destinationNetwork, inputAsset, outputAsset, amount: value, fundedBy, routing })), reasons: plan.reasons, alternatives: plan.alternatives,
           composition: composed ? composed.ok ? { valid: true, workflowHash: composed.workflowHash } : { valid: false, code: composed.code } : { valid: false, code: 'GOAL_BENEFICIARY_REQUIRED' },
-          authoring: 'FloFi authors each step through its own grammar after your request; nothing is created by this tool.' });
+          authoring: COPILOT_TOOL_NOTES[ctx.language].authoring });
       }
       case 'explain_failure': {
         const args = exactArgs(rawArguments, ['code']), code = str(args.code, 80);

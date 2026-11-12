@@ -20,6 +20,8 @@ import { batchHandout, keepBatchHandout, revokeUserOperation, sendWalletBatch, s
 import { chosenEvmProvider, injected } from '../wallet/evm-discovery';
 import type { WalletWorkflowReviewView } from '../delegation/views';
 import { WALLET_BATCH_OUTCOME_UNKNOWN, canEndWorkflow, haltedAs } from '../workflow-runs/state-machine';
+import { EXECUTION_PHASE_LABEL } from '../domain/execution-phase';
+import { awaitedDelivery, runProgress, runStepPhase } from '../workflow-runs/run-step-phase';
 import { useLocale } from '../i18n/locale';
 import type { ClaimedProposal } from '../platform/approvals';
 import type { WorkflowRunClaim } from '../platform/workflow-run-approvals';
@@ -332,6 +334,12 @@ export function WorkflowRunPanel({ claim, approvalId, secret, onProposal, onErro
   // Such a run is never "nothing sent" (badge or text), whatever a view without the server's own `halted` would suggest (fails closed to STOPPED).
   const halted = run.state === 'HALTED' ? (unanswered && haltedAs(run) === 'NOTHING_SENT' ? 'STOPPED' : haltedAs(run)) : null;
   const endable = canEndWorkflow(run, run.steps, run.groups ?? [], new Date());
+  // P0 hotfix (E1): a batched bridge's awaited delivery, in the shared execution vocabulary; progress counts reconciled steps only.
+  const phased = { mode: run.mode, steps: run.steps, groups: run.groups ?? [] }, awaited = awaitedDelivery(phased), progress = runProgress(phased);
+  const stepWords = (step: WorkflowRunClaim['run']['steps'][number]) => {
+    const p = runStepPhase(phased, step);
+    return p && p.phase !== 'RECONCILED' ? tr(EXECUTION_PHASE_LABEL[p.phase], p.network ? tr(p.network) : '') : tr(stepText(run, step));
+  };
   return <section className="workflow-run" aria-label={tr('Workflow steps')} data-run-state={run.state}>
     <div className="workflow-run-head">
       <strong>{tr('{0}-step workflow', String(run.stepCount))}</strong>
@@ -342,12 +350,15 @@ export function WorkflowRunPanel({ claim, approvalId, secret, onProposal, onErro
     <ol className="workflow-run-steps">
       {run.steps.map(step => <li key={step.index} data-step-state={step.state} aria-current={step.index === run.currentStep && open ? 'step' : undefined}>
         <span>{tr('Step {0}', String(step.index + 1))} · {tr(ACTION[step.action] ?? step.action)}</span>
-        <span className="workflow-run-state">{tr(stepText(run, step))}</span>
+        <span className="workflow-run-state">{stepWords(step)}</span>
         {step.outcome?.submissions.map(tx => tx.explorerUrl
           ? <a key={tx.hash} href={tx.explorerUrl} target="_blank" rel="noreferrer"><code>{short(tx.hash)}</code></a>
           : <code key={tx.hash}>{short(tx.hash)}</code>)}
       </li>)}
     </ol>
+    {run.stepCount > 1 && run.mode === 'USER_FUNDED' && <p className="muted workflow-run-progress">{tr('{0} of {1} steps completed', String(progress.completed), String(progress.total))}</p>}
+    {awaited && <p role="status">{tr('Your batch is confirmed on {0}. FloFi is waiting for the delivery on {1} and keeps checking even if you leave this page; nothing is sent again.',
+      tr(awaited.source), tr(awaited.destination))}</p>}
     {choosing && <div className="workflow-run-choice">
       <p><strong>{tr('Nothing is authorized yet.')}</strong> {tr('Choose how to authorize this workflow. Each step starts only after the previous one is reconciled on chain.')}</p>
       <div className="approval-actions">
@@ -398,7 +409,9 @@ export function WorkflowRunPanel({ claim, approvalId, secret, onProposal, onErro
     {run.mode === 'USER_FUNDED' && <ol className="workflow-run-groups" aria-label={tr('Execution groups')}>
       {(run.groups ?? []).map(g => <li key={g.index} data-group-state={g.state}>
         <span>{tr('{0} on {1}', stepsOf(tr, g.steps[0], g.steps[1]), NETWORK[g.chain] ?? g.chain)} · {tr(GROUP_HOW[g.strategy] ?? g.strategy)}</span>
-        <span className="workflow-run-state">{tr(stateText(GROUP_STATE, g))}</span>
+        <span className="workflow-run-state">{g.delivery?.state === 'AWAITING_DESTINATION' && (g.state === 'SUBMITTED' || g.state === 'UNCERTAIN') && awaited
+          ? `${tr(EXECUTION_PHASE_LABEL.CONFIRMED_AT_SOURCE, tr(awaited.source))} · ${tr(EXECUTION_PHASE_LABEL.AWAITING_DESTINATION, tr(awaited.destination))}`
+          : tr(stateText(GROUP_STATE, g))}</span>
         <span className="muted">{tr('Fees paid by {0}', short(g.feePayer))}</span>
         {g.maxFee && !g.gasPaid && <span className="muted">{g.maxFee.estimated
           ? tr('About {0} in network fees (an estimate; your wallet shows the final fee)', units(g.maxFee.amount, g.maxFee.unit, 'up'))

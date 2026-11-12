@@ -29,7 +29,8 @@ import { AAVE_ACTIONS, type GroupStrategy, type OwnerAnswer } from '../workflow-
 import type { BundlerClient } from './bundler.ts';
 import { buildEvmGroupCalls, DEPENDENT_CALL_GAS, evmCallsOf, L1_FEE_UPPER_BOUND_SELECTOR, OP_GAS_PRICE_ORACLE, OP_STACK_CHAIN_IDS, type AssetAmountFact,
   type EvmGroupCalls } from './evm-calls.ts';
-import { reconcileUserOperation, reconcileWalletBatch, type StepFacts } from './evm-reconcile.ts';
+import { reconcileUserOperation, reconcileWalletBatch, type ReconciledReceipt, type StepFacts } from './evm-reconcile.ts';
+import type { AcrossRoutes } from './bridge-calls.ts';
 import { assertUserFundedSubmission, type GasPaidFact } from './gas-payer.ts';
 import { isAaveCall, simulateWalletBatch, type BatchSimulation } from './batch-simulation.ts';
 
@@ -53,6 +54,11 @@ export type UserFundedDeps = {
   readonly jupiter: JupiterHttp | null;
   readonly now: () => Date;
   readonly submissionRefusal?: (wallet: BetaPrincipal, runOwner?: BetaPrincipal) => Promise<string | null>;
+  /**
+   * P0 hotfix (E1): the Across routes of certified Router pairs this deployment quotes for wallet batches (read-only: quotes, deposit status
+   * hints), or absent (a bridge then runs through its own flow). Its pins are the router profile's own on a public deployment.
+   */
+  readonly across?: AcrossRoutes;
 };
 export type GroupInput = { readonly runId: string; readonly groupIndex: number; readonly strategy: GroupStrategy; readonly chain: string; readonly feePayer: string;
   readonly stepFrom: number; readonly stepTo: number };
@@ -94,7 +100,8 @@ async function prepareWalletBatch(deps: UserFundedDeps, requirement: WorkflowReq
   if (!t) return no('USER_FUNDED_RPC_UNAVAILABLE');
   // Every swap of the batch is refused on chain after the preparation's validity: a wallet prompt left open never executes a stale quote.
   const deadline = Math.floor((deps.now().getTime() + EVM_PREPARED_TTL_MS) / 1000);
-  const built = await buildEvmGroupCalls(requirement, g.stepFrom, g.stepTo, { chains: deps.chains, owner: g.feePayer, transport: deps.evm, guaranteed, deadline });
+  const built = await buildEvmGroupCalls(requirement, g.stepFrom, g.stepTo, { chains: deps.chains, owner: g.feePayer, transport: deps.evm, guaranteed, deadline,
+    ...deps.across ? { across: deps.across } : {}, nowMs: deps.now().getTime() });
   if (!built.ok) return no(built.code, built.stepIndex);
   const group = built.value, calls = evmCallsOf(group);
   const stepOfCall = (index: number | null) => index === null ? null : group.steps.find(s => s.calls.includes(index))?.stepIndex ?? null;
@@ -119,6 +126,9 @@ async function prepareWalletBatch(deps: UserFundedDeps, requirement: WorkflowReq
     // never a reconciled step). Transfers keep their atomic checks.
     const aave = group.calls.findIndex(isAaveCall);
     if (aave >= 0) return no('USER_FUNDED_SIMULATION_UNAVAILABLE', stepOfCall(aave));
+    // P0 hotfix (E1): an Across deposit is offered only once the simulation proved the deposit event the chain would record is the one signed.
+    const bridge = group.calls.findIndex(c => c.kind === 'ACROSS_DEPOSIT');
+    if (bridge >= 0) return no('USER_FUNDED_SIMULATION_UNAVAILABLE', stepOfCall(bridge));
     const swapSteps = new Set(group.steps.filter(s => s.calls.some(i => group.calls[i]?.kind === 'UNISWAP_V3_EXACT_INPUT_SINGLE')).map(s => s.stepIndex));
     const consumer = group.steps.find(s => requirement.bindings.some(b => b.step === s.stepIndex && swapSteps.has(b.amountFrom)));
     if (consumer) return no('USER_FUNDED_SIMULATION_UNAVAILABLE', consumer.stepIndex);
@@ -169,6 +179,9 @@ async function prepareUserOperation(deps: UserFundedDeps, requirement: WorkflowR
   const spent = requirement.bindings.find(b => b.step >= g.stepFrom && b.step <= g.stepTo && b.amountFrom >= g.stepFrom && b.amountFrom <= g.stepTo
     && requirement.steps.find(s => s.index === b.amountFrom)?.action === 'swap');
   if (spent) return no('USER_OPERATION_SWAP_OUTPUT_SIGNED_WHEN_DUE', spent.step);
+  // P0 hotfix (E1): a bridge's quote and fill deadline are fixed when it is signed: never in an operation relayed later (the planner never makes one).
+  const bridgeStep = requirement.steps.slice(g.stepFrom, g.stepTo + 1).find(s => s.action === 'bridge');
+  if (bridgeStep) return no('USER_OPERATION_BRIDGE_SIGNED_WHEN_DUE', bridgeStep.index);
   if (!bundler) return no('USER_OPERATION_BUNDLER_UNAVAILABLE');
   const built = await buildEvmGroupCalls(requirement, g.stepFrom, g.stepTo, { chains: deps.chains, owner: g.feePayer, transport: deps.evm, guaranteed });
   if (!built.ok) return no(built.code, built.stepIndex);
@@ -448,7 +461,9 @@ export async function advanceSolanaSubmission(deps: UserFundedDeps, prepared: Pr
 // ── Reconciliation ────────────────────────────────────────────────────────────────────────────────────────────────────────
 /** `group`: an EVM wallet batch reconciled against an EARLIER preparation of the group (the one the wallet sent): what its steps were signed to spend. */
 export type Reconciled = { readonly status: 'PENDING' }
-  | { readonly status: 'RECONCILED'; readonly steps: readonly StepFacts[]; readonly gasPaid: GasPaidFact; readonly transactions: readonly string[]; readonly group?: EvmGroupCalls }
+  | { readonly status: 'RECONCILED'; readonly steps: readonly StepFacts[]; readonly gasPaid: GasPaidFact; readonly transactions: readonly string[]; readonly group?: EvmGroupCalls;
+      /** EVM wallet batches: the receipts re-read from the chain (a bridge's deposit and its block are identified from them). */
+      readonly receipts?: readonly ReconciledReceipt[] }
   | { readonly status: 'FAILED'; readonly code: string; readonly gasPaid: GasPaidFact | null; readonly transactions: readonly string[]; readonly steps?: readonly StepFacts[];
     readonly group?: EvmGroupCalls }
   /**
@@ -535,7 +550,8 @@ export async function reconcileEvmGroup(deps: UserFundedDeps, prepared: Prepared
     }
     const from = matched ? { group: matched } : {};
     // Only a reverted batch FAILED; a mismatch the chain did not revert is UNMATCHED (it may have executed).
-    return r.status === 'PENDING' ? r : r.status === 'RECONCILED' ? { status: 'RECONCILED', steps: r.steps, gasPaid: r.gasPaid, transactions: r.transactions, ...from }
+    return r.status === 'PENDING' ? r : r.status === 'RECONCILED' ? { status: 'RECONCILED', steps: r.steps, gasPaid: r.gasPaid, transactions: r.transactions, ...from,
+      ...r.receipts ? { receipts: r.receipts } : {} }
       : { status: r.status === 'REVERTED' ? 'FAILED' : 'UNMATCHED', code: r.code, gasPaid: r.gasPaid, transactions: r.transactions, ...from };
   }
   const bundler = deps.bundler(group.chain), userOpHash = String(submission.userOpHash);

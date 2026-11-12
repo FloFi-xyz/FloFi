@@ -13,7 +13,7 @@ import { createDurablePublicTestnetService } from '../src/server/public-testnet-
 import { createRobinhoodMockChain, mockCatalogRuntime } from '../src/server/robinhood-mainnet.test-harness';
 import { createAccountStore } from '../src/accounts/account-store';
 import { ACCOUNT_SESSION_COOKIE, sealAccountSession, type AccountSessionToken } from '../src/accounts/account-session';
-import { APP_ORIGIN } from './app-origin';
+import { APP_ORIGIN, chooseLanguage } from './app-origin';
 import { guardedContext, installJourneyWallet, switchAccount, walletRequests } from './journey-fixtures';
 import { test, expect } from './fixtures';
 
@@ -150,7 +150,8 @@ test('financial authorization refuses deletion, offers Archive, and preserves th
 
 test('Portuguese confirmation remains usable on a narrow screen and keeps the cancel action safe', async ({ page }, info) => {
   const owner = createTestWallet(), id = await seed(owner); await open(page, [owner]);
-  await page.evaluate(() => localStorage.setItem('flofi.language', 'PT')); await page.reload();
+  // P0 hotfix (locale contract): the language cookie is authoritative (storage alone no longer overrides the suite's English cookie).
+  await chooseLanguage(page.context(), 'PT'); await page.reload();
   await page.setViewportSize({ width: 390, height: 844 });
   await card(page, id).getByRole('button', { name: 'Mais ações da execução', exact: true }).click();
   await card(page, id).getByRole('button', { name: 'Excluir execução', exact: true }).click();

@@ -7,6 +7,7 @@ import type { WorkflowOwner } from '../domain/saved-workflow';
 import type { useWalletProof } from './wallet-proof';
 import type { FormEvent, ReactNode } from 'react';
 import type { FlofiConversation } from '../state/flofi-conversation';
+import { shownMessage } from '../domain/chat-message';
 import { ConversationReviewCard, NetworkChoices, networkChoiceOptions } from './conversation-cards';
 import { CopilotMessage, copilotIntro, copilotLabel, useFollowLatest } from './copilot-ai';
 import { FloFiAvatar, UserAvatar } from './flofi-avatar';
@@ -39,8 +40,10 @@ export function CopilotPanel({ conversation, interactive = true, owner = null, p
   return <aside className="copilot panel" aria-label={tr("FloFi Assistant")} data-conversation-phase={conversation.phase ?? undefined}>
     <div className="copilot-head"><h2 className="assistant-title"><FloFiAvatar size="title"/><span>{tr("FloFi Assistant")}</span></h2></div>
     {overview}
-    <div ref={log} className="chat-messages" role="log" aria-live="polite" aria-label={tr("Conversation")}>{messages.map((message, index) => {
-      const offered = message === last && message.role !== 'you' ? message.options : undefined;
+    <div ref={log} className="chat-messages" role="log" aria-live="polite" aria-label={tr("Conversation")}>{messages.map((written, index) => {
+      // P0 hotfix (locale contract): FloFi's deterministic messages follow the CURRENT interface language (rendered in both when written).
+      const message = shownMessage(written, language === 'PT' ? 'PT' : 'EN');
+      const offered = written === last && message.role !== 'you' ? message.options : undefined;
       // P0 approved UX (board 05): answers that are all networks become a list of network buttons; any other answers stay suggestion chips.
       const networks = networkChoiceOptions(offered), options = networks ? undefined : offered;
       return row(message.role === 'you', message.id, <div className={`message ${message.role === 'flofi' ? 'system flofi' : message.role}`}>
@@ -48,12 +51,12 @@ export function CopilotPanel({ conversation, interactive = true, owner = null, p
         {message.role === 'ai' || message.role === 'flofi' ? <>
           <CopilotMessage text={message.text} notes={message.role === 'ai' || !message.review ? message.notes : undefined} options={message.review || message.question ? undefined : options} disabled={busy} onPick={send}/>
           {message.review && <ConversationReviewCard review={message.review} language={message.language ?? language}/>}
-          {message.review && message.notes && message.notes.length > 0 && <ul className="copilot-notes">{message.notes.map((note, at) => <li key={at}>{note}</li>)}</ul>}
-          {message.question && <p className="conversation-question"><strong>{message.question}</strong></p>}
+          {message.review && message.notes && message.notes.length > 0 && <ul className="copilot-notes">{message.notes.map((note, at) => <li key={at}>{tr(note)}</li>)}</ul>}
+          {message.question && <p className="conversation-question"><strong>{tr(message.question)}</strong></p>}
           {(message.review || message.question) && options && options.length > 0 && <div className="copilot-options" role="group" aria-label={tr("Suggested answers")}>
-            {options.map(option => <button key={option} type="button" className="quiet" disabled={busy} onClick={() => send(option)}>{option}</button>)}</div>}
+            {options.map(option => <button key={option} type="button" className="quiet" disabled={busy} onClick={() => send(tr(option))}>{tr(option)}</button>)}</div>}
           {networks && <NetworkChoices options={networks} disabled={busy} onPick={send}/>}
-        </> : <p>{message.role === 'you' ? message.text : tr((index === 0 && copilot.enabled && copilotIntro(copilot.mode, conversation.direct)) || message.text)}</p>}
+        </> : <p>{message.role === 'you' ? message.text : tr((index === 0 && copilot.enabled && copilotIntro(copilot.mode, conversation.direct)) || message.text, ...message.params ?? [])}</p>}
       </div>);
     })}
       {/* BUILD0-UX-001: no execution report card in the chat. FloFi's own short messages announce each phase (wallet request, uncertainty, the

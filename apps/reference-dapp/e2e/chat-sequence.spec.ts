@@ -10,10 +10,10 @@
  * scripted owner confirmations): MOCKED, no public provider, RPC or broadcast; a chat message is never a signature.
  */
 import type { APIRequestContext, Page } from '@playwright/test';
-import { test, expect, readWorkflowIr } from './fixtures';
+import { test, expect, readWorkflowIr, AUTHORIZE_IN_WALLET } from './fixtures';
 import { installJourneyWallet, walletRequests } from './journey-fixtures';
 import { createTestWallet } from '../../../packages/reference-reconciler/test/test-wallet';
-import { expectEditorSection, openBuilder, openEditorSection, openSimulationReviewPanel, REVIEW_PANEL_MIN_WIDTH } from './build-entry-navigation';
+import { expectEditorSection, openBuilder, openEditorSection, openSimulationReviewPanel, reloadBuilder } from './build-entry-navigation';
 
 test.skip(process.env.FLOFI_SWAP_EXECUTION_E2E !== 'MOCKED_LOOPBACK_ONLY', 'Requires the opt-in loopback swap execution harness');
 test.setTimeout(180_000);
@@ -119,6 +119,111 @@ test('Swap → Swap funded by the first: each step simulated, confirmed, signed 
   expect(errors).toEqual([]); networkGuard.assertClean();
 });
 
+/**
+ * P0 hotfix (execution continuity, production 2026-11-12: after the Swap the UI returned to Simulate; the count stayed 0 beside confirmed
+ * transactions; "Review required" after a step executed; an empty Editor at the end). The step-by-step workflow behaves as ONE workflow: Execute
+ * continues step 2 in place (its own fresh Review inline, one owner click opens its wallet request), "X of N steps completed" counts the whole
+ * workflow and reaches N of N only after the last reconciliation, nothing reads "Review required" / "Simulate again" after completion, and a
+ * reload mid-sequence or after completion keeps the Canvas and the progress. Every wallet request still waits for the scripted owner.
+ */
+test('P0 hotfix: step 2 continues in Execute without the Simulate stage; N of N only after reconciliation; reloads keep the Canvas and the progress', async ({ page, request, networkGuard }) => {
+  const errors: string[] = []; page.on('pageerror', error => errors.push(error.message));
+  const owner = await setup(page, request);
+  await added(page, 'swap 1 USDC to WETH on Base Sepolia slippage 50 bps', 'Swap added to your workflow: 1 USDC');
+  await added(page, 'swap 0.001 WETH to USDC on Base Sepolia slippage 50 bps', 'Swap added to your workflow: 0.001 WETH');
+  await expect(cards(page)).toHaveCount(2);
+  const authored = JSON.parse(await readWorkflowIr(page)) as { workflowId: string };
+  await runtimeReady(page);
+  await pick(page, 'Review workflow');
+  // The owner follows the run in Execute while answering the chat (the chat stays beside the stage).
+  await openEditorSection(page, 'Execute');
+  const workspace = page.getByRole('main', { name: 'Execution workspace', exact: true });
+  const status = page.locator('.execution-status-panel');
+  await executeStep(page, owner, 1, 2);
+  // Step 1 reconciled: the stage stays Execute and step 2 continues here — simulated by FloFi (read-only), presented inline, never "Review required".
+  const next = page.locator('.sequence-continuation[data-sequence-step="2/2"]');
+  await expect(next).toBeVisible({ timeout: 45_000 });
+  await expectEditorSection(page, 'Execute');
+  await expect(next).toContainText('Step 2 of 2');
+  await expect(next).toContainText('Step 1 is completed and reconciled: it delivered 0.0005 WETH.');
+  await expect(next).toHaveAttribute('data-continuation-status', 'READY', { timeout: 45_000 });
+  await expect(next).toContainText('0.0005 WETH');
+  await expect(next.locator('[data-workflow-progress="1/2"]')).toBeVisible();
+  await expect(status).toContainText('1 of 2 steps completed');
+  await expect(workspace).not.toContainText(/Review required|Simulate again|Back to simulation|Workflow changed/);
+  expect(owner.requested()).toBe(2); expect(await owner.sends()).toBe(2);
+
+  // Reload mid-sequence: the Canvas (both cards, same identity) and the progress come back; step 1 is never offered again. After a reload FloFi
+  // does not simulate by itself: the owner's click simulates step 2 here, still in Execute.
+  await reloadBuilder(page);
+  await expect(cards(page)).toHaveCount(2);
+  expect((JSON.parse(await readWorkflowIr(page)) as { workflowId: string }).workflowId).toBe(authored.workflowId);
+  await openEditorSection(page, 'Execute');
+  const resumed = page.locator('.sequence-continuation[data-sequence-step="2/2"]');
+  await expect(resumed).toBeVisible({ timeout: 45_000 });
+  await expect(resumed.locator('[data-workflow-progress="1/2"]')).toBeVisible();
+  await expect(resumed.locator('[data-phase="RECONCILED"]')).toHaveCount(1);
+  if (await resumed.getAttribute('data-continuation-status') !== 'READY') {
+    const simulate = resumed.getByRole('button', { name: /^Simulate (workflow|again)$/ });
+    await expect(simulate).toBeEnabled({ timeout: 30_000 }); await simulate.click();
+  }
+  await expect(resumed).toHaveAttribute('data-continuation-status', 'READY', { timeout: 45_000 });
+  await expectEditorSection(page, 'Execute');
+  await expect(workspace).not.toContainText(/Review required|Back to simulation|Workflow changed/);
+  expect(owner.requested()).toBe(2);
+
+  // One owner click accepts step 2's own fresh Review and opens its wallet request; the stage stays Execute.
+  await resumed.getByRole('button', { name: AUTHORIZE_IN_WALLET, exact: true }).click();
+  await expect.poll(owner.requested).toBe(3);
+  await expectEditorSection(page, 'Execute');
+  await owner.confirm();
+  const go = page.locator('.canvas-primary-action').getByRole('button', { name: 'Continue to swap', exact: true });
+  await expect(go).toBeEnabled({ timeout: 30_000 });
+  // Step 2's approval is confirmed: the step is not reconciled, so the whole workflow still counts 1 of 2.
+  await expect(status).toContainText('1 of 2 steps completed');
+  await go.click(); await expect.poll(owner.requested).toBe(4);
+  await owner.confirm();
+  // N of N only once the last step reconciled; the workflow is Completed with every step and nothing asks for a Review again.
+  await expect(status.locator('.execution-status-progress')).toHaveText('2 of 2 steps completed', { timeout: 45_000 });
+  await expect(status.locator('[data-workflow-progress="2/2"] [data-phase="RECONCILED"]')).toHaveCount(2);
+  await expect(workspace).toContainText('Execution completed');
+  await expect(workspace).not.toContainText(/Review required|Simulate again|Workflow changed/);
+  await expect(page.locator('.canvas-primary-action [data-lifecycle-action="simulate"]')).toHaveCount(0);
+  expect(await owner.sends()).toBe(4);
+
+  // Reload after completion: the Canvas and the completed progress stay; nothing is simulated, offered or sent again.
+  await reloadBuilder(page);
+  await expect(cards(page)).toHaveCount(2);
+  await openEditorSection(page, 'Execute');
+  await expect(page.locator('.execution-status-panel .execution-status-progress')).toHaveText('2 of 2 steps completed', { timeout: 45_000 });
+  await expect(page.getByRole('main', { name: 'Execution workspace', exact: true })).not.toContainText(/Review required|Simulate again|Workflow changed/);
+  await expect(page.locator('.canvas-primary-action [data-lifecycle-action="simulate"], .canvas-primary-action [data-lifecycle-action="approve"]')).toHaveCount(0);
+  await page.waitForTimeout(1_000);
+  expect(owner.requested()).toBe(4); expect(await owner.sends()).toBe(4);
+  expect(errors).toEqual([]); networkGuard.assertClean();
+});
+
+test('P0 hotfix: while a step executes, asking to review or continue answers with the workflow status and next action, never "can\'t start the review"', async ({ page, request, networkGuard }) => {
+  const owner = await setup(page, request);
+  await added(page, 'swap 1 USDC to WETH on Base Sepolia slippage 50 bps', 'Swap added to your workflow: 1 USDC');
+  await added(page, 'swap 0.001 WETH to USDC on Base Sepolia slippage 50 bps', 'Swap added to your workflow: 0.001 WETH');
+  await runtimeReady(page);
+  await pick(page, 'Review workflow');
+  await expect(flofi(page)).toContainText('Do you confirm this workflow?', { timeout: 30_000 });
+  await pick(page, 'Yes, I confirm');
+  await pick(page, 'Yes, execute');
+  await expect.poll(owner.requested).toBe(1);
+  // The wallet is asking for step 1's approval: "continue" and "review workflow" say where the workflow stands and what to do now.
+  for (const text of ['continue', 'Review workflow']) {
+    await say(page, text);
+    await expect(flofi(page)).toContainText('This workflow is executing: 0 of 2 steps completed');
+    await expect(flofi(page)).toContainText('Confirm or decline the request in your wallet.');
+    await expect(flofi(page)).not.toContainText(/can’t start the review|Simulate/);
+  }
+  expect(owner.requested()).toBe(1); expect(await owner.sends()).toBe(0);
+  networkGuard.assertClean();
+});
+
 test('independent steps: an unapplied Canvas amount is resolved in the chat, then the real simulation runs without leaving the chat', async ({ page, request, networkGuard }) => {
   const owner = await setup(page, request);
   await added(page, 'swap 1 USDC to WETH on Base Sepolia slippage 50 bps', 'Swap added to your workflow: 1 USDC');
@@ -198,12 +303,15 @@ for (const width of [1920, 1440, 1280, 1024, 390, 375]) test(`chat-first layout 
     ['Execute', '.execute-workspace-grid', '.execution-summary', null]] as const) {
     await openEditorSection(page, name);
     await expect(page.locator(grid)).toBeVisible();
-    // One column: the canvas (or timeline); the summary is optional, collapsed — never a column of its own beside the chat. P0 approved UX
-    // (board 06 / 16 §7): on Simulate the Review panel (no authorize control) opens beside the canvas from 1200 px; below, it is a collapsed
-    // "Review" under the canvas. Either way the Simulation Summary sits in the panel's collapsed Technical details.
-    const wide = name === 'Simulate' && width >= REVIEW_PANEL_MIN_WIDTH;
-    expect((await page.locator(grid).evaluate(element => getComputedStyle(element).gridTemplateColumns)).trim().split(/\s+/)).toHaveLength(wide ? 2 : 1);
-    if (name === 'Simulate') await expect(page.getByRole('complementary', { name: 'Review', exact: true })).toHaveCount(wide ? 1 : 0);
+    // One column: the canvas (or timeline) frame — never a column of its own beside the chat. P0 hotfix (Simulate layout): on Simulate the
+    // Review panel (no authorize control) is docked INSIDE the Canvas frame at every width; the Simulation Summary sits in its collapsed
+    // Technical details.
+    expect((await page.locator(grid).evaluate(element => getComputedStyle(element).gridTemplateColumns)).trim().split(/\s+/)).toHaveLength(1);
+    if (name === 'Simulate') {
+      const dock = page.getByRole('complementary', { name: 'Review', exact: true });
+      await expect(dock).toHaveCount(1);
+      await expect(page.locator('.simulation-workflow-canvas .canvas-review-dock')).toHaveCount(1);
+    }
     // BUILD0-UX-001: Execute shows its short status panel instead of collapsed details (and no technical disclosure).
     if (details) { await expect(page.locator(summary)).toBeHidden(); await openSimulationReviewPanel(page); await expect(page.locator(`${details} > summary`)).toBeVisible(); }
     else { await expect(page.locator(summary)).toBeVisible(); await expect(page.locator('.execution-details, .execute-technical')).toHaveCount(0); }

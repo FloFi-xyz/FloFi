@@ -20,6 +20,10 @@
  *                  from the protocol itself after the batch's supplies, so collateral enablement, prices, caps and liquidity are Aave's own.
  *   Aave withdraw  the same 2.0 minimum after the whole batch (the owner-signed Withdraw flow's `WITHDRAW_UNSAFE_HEALTH_FACTOR`); an account
  *                  without debt reports the maximum health factor, so withdrawing from it is never refused for its health.
+ *   bridge         P0 hotfix (E1): an Across deposit must emit exactly ONE FundsDeposited of its pinned origin SpokePool matching what the
+ *                  batch records field by field (depositor and recipient = the owner, tokens, amounts, destination chain, quote time, fill
+ *                  deadline, exclusive relayer, empty message), and debit the owner exactly its input — the Router's own `depositMatches`
+ *                  (`server/across-route.ts`). Anything else refuses before the wallet is asked (SIMULATION_BRIDGE_DEPOSIT_MISMATCH)
  *   gas            each call's simulated gas, for the fee the review shows (the wallet still shows and charges the final fee)
  *
  * Nothing is signed, sent or stored. A transport without `eth_simulateV1` is reported as UNAVAILABLE: the caller decides (a batch that
@@ -28,7 +32,10 @@
  * on-chain minimums alone.
  */
 import { BORROW_MINIMUM_HEALTH_FACTOR, type erc7710 } from '@defi-workflow-engine/reference-compiler';
+import type { RouterLog } from '@defi-workflow-engine/reference-compiler';
 import type { ChainTransport } from '../delegation/chains.ts';
+import { depositMatches } from '../server/across-route.ts';
+import { acrossPairOf, depositExpectationOf } from './bridge-calls.ts';
 import type { EvmGroupCalls, UserCall } from './evm-calls.ts';
 
 /** `getUserAccountData(address)` of an Aave V3 Pool. */
@@ -124,6 +131,12 @@ export async function simulateWalletBatch(t: ChainTransport, group: EvmGroupCall
       if (before === null || after === null) return { ok: false, code: 'USER_FUNDED_SIMULATION_INVALID', callIndex: i };
       if (after - before < out) return { ok: false, code: 'SIMULATION_SWAP_OUTPUT_SHORT', callIndex: i };
       output = out.toString();
+    }
+    if (call.kind === 'ACROSS_DEPOSIT') {
+      // The deposit the chain would record is exactly the one the batch carries (and the owner is debited exactly its input), or nothing is offered.
+      const logs = Array.isArray((r as { logs?: unknown }).logs) ? ((r as { logs: unknown[] }).logs.filter(l => l && typeof l === 'object') as RouterLog[]) : [];
+      try { depositMatches(acrossPairOf(call, group.chain, group.chainId), depositExpectationOf(call), logs, group.owner); }
+      catch { return { ok: false, code: 'SIMULATION_BRIDGE_DEPOSIT_MISMATCH', callIndex: i }; }
     }
     const gas = uint(r.gasUsed);
     if (gas <= 0n || gas > 30_000_000n) return { ok: false, code: 'USER_FUNDED_SIMULATION_INVALID', callIndex: i };

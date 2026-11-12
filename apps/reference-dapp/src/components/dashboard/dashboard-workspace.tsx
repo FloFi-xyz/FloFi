@@ -20,17 +20,19 @@ import { RunDetailView } from './run-detail-view';
  * that need attention, in its one list); the Dashboard (`dashboard`) keeps the overview: what needs the owner, the current execution, the
  * wallet portfolio and one line of history.
  */
-export function DashboardWorkspace({ workflowName, progress, recovery, wallet, context, runId, build, create, execute, navigate, mode = 'dashboard', portfolio, openWorkflow, signInPrompt }: {
+export function DashboardWorkspace({ workflowName, progress, recovery, wallet, context, runId, build, create, execute, navigate, mode = 'dashboard', portfolio, openWorkflow, signInPrompt, workflowProgress }: {
   workflowName: string; progress: ExecutionLifecycle; recovery: ExecutionRecovery; wallet: ReviewWallet; context: ReviewContext;
   runId: string | null; build(): void; execute(): void; navigate(path: string): void;
   /** P0 approved UX (board 10): the Dashboard's "Create workflow" opens the Chat entry when the shell passes it (otherwise `build`). */
   create?: (() => void) | undefined;
   mode?: 'dashboard' | 'records'; portfolio?: ReactNode; openWorkflow?: OpenWorkflow | undefined; signInPrompt?: boolean;
+  /** P0 hotfix (execution continuity): the whole workflow's step count for the current run (the same numbers as Execute and the Assistant). */
+  workflowProgress?: { readonly completed: number; readonly total: number } | null;
 }) {
   const sharedWallet = useBuild009Wallet();
   const account = wallet.account;
   const evm = Boolean(account && /^0x[0-9a-f]{40}$/i.test(account));
-  const current = currentDashboardRun(workflowName, progress, recovery);
+  const current = currentDashboardRun(workflowName, progress, recovery, workflowProgress);
   const ownedCurrent = current && sameOwner(current.run.ownerAccount, account) ? current : null;
   const isCurrent = Boolean(runId && ownedCurrent?.run.runId === runId);
   const [version, refresh] = useState(0);

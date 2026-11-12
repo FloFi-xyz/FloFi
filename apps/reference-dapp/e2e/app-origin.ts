@@ -65,3 +65,14 @@ export function returningVisitor(origin: string = E2E_APP_ORIGIN, language: Lang
   return { ...state, cookies: [...state.cookies, { name: LANGUAGE_COOKIE, value: language, domain: url.hostname, path: '/', expires: -1, httpOnly: false,
     secure: url.protocol === 'https:', sameSite: 'Lax' as const }] };
 }
+/**
+ * P0 hotfix (locale contract, `src/i18n/language.ts`): choose the interface language the way the language menu does, by writing the
+ * authoritative preference cookie (the page aligns its storage mirror to it). A value written to storage alone no longer overrides the cookie
+ * every suite starts with (`returningVisitor`), so a suite that needs another language sets it here, then (re)loads the page.
+ */
+export async function chooseLanguage(context: { addCookies(cookies: readonly Record<string, unknown>[]): Promise<void> }, language: Language,
+  origin: string = E2E_APP_ORIGIN): Promise<void> {
+  const url = new URL(origin);
+  await context.addCookies([{ name: LANGUAGE_COOKIE, value: language, domain: url.hostname, path: '/', expires: -1, httpOnly: false,
+    secure: url.protocol === 'https:', sameSite: 'Lax' }]);
+}

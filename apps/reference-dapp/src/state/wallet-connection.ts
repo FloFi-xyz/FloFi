@@ -15,7 +15,7 @@ import type { WalletEcosystem } from '../wallet/wallet-registry';
 import { EVM_WALLET_NETWORKS } from '../wallet/evm-networks';
 import { networkIdentity } from '../domain/network-registry';
 import { activeNetworkScope, networkAllowed } from '../domain/network-scope';
-import { solanaWalletErrorMessage } from '../wallet/wallet-errors';
+import { solanaWalletNotice, walletNoticeText, type WalletNotice } from '../wallet/wallet-errors';
 
 /**
  * A switch destination comes only from the same registered network as the requested action. BUILD-FLOFI-MAINNET-PRODUCT-001: the public product
@@ -45,7 +45,11 @@ export const evmNetworkRef = (hex: string | null) => hex && /^0x[0-9a-f]+$/i.tes
 
 export function useWalletConnection() {
   const selector = useWalletSelector(), evm = useBuild009Wallet(), solana = useJupiter(), { state } = useWorkflow();
-  const [error, setError] = useState<string | null>(null);
+  // P0 hotfix (locale contract): a wallet notice is a catalog message and its values, rendered in the interface's current language (`notice`);
+  // `error` keeps the English sentence for existing readers.
+  const [notice, setNotice] = useState<WalletNotice | null>(null);
+  const error = notice ? walletNoticeText(notice) : null;
+  const setError = (value: string | WalletNotice | null) => setNotice(value === null ? null : typeof value === 'string' ? [value] : value);
   useEffect(() => { if (!error) return; const timer = window.setTimeout(() => setError(null), 6000); return () => window.clearTimeout(timer); }, [error]);
   const solanaChain = connectionSolanaChain(state.workflow.nodes.map(node => node.chainId), solana.walletChain);
   const connect = useCallback(async (request: { readonly title?: string; readonly ecosystems?: readonly WalletEcosystem[] } = {}): Promise<ConnectedWallet | null> => {
@@ -60,7 +64,7 @@ export function useWalletConnection() {
       return session ? { ecosystem: 'evm', address: session.account, providerKey: choice.key, providerName: choice.name, network: evmNetworkRef(session.chainId) } : null;
     }
     const result = await solana.connectWithResult(choice.key, solanaChain);
-    if (!result.ok) { setError(solanaWalletErrorMessage(result.code, choice.name, solanaChain)); return null; }
+    if (!result.ok) { setError(solanaWalletNotice(result.code, choice.name, solanaChain)); return null; }
     const session = result.session;
     return { ecosystem: 'solana', address: session.account.address, providerKey: choice.key, providerName: choice.name, network: session.chain };
   }, [selector, evm, solana, solanaChain, state.workflow]);
@@ -73,7 +77,7 @@ export function useWalletConnection() {
       if (target.ecosystem === 'solana') {
         if (!solana.session) { setError('Connect your Solana wallet first.'); return; }
         const failure = await solana.switchCluster(target.walletChain);
-        if (failure) { setError(solanaWalletErrorMessage(failure, solana.session.wallet.name, target.walletChain)); return; }
+        if (failure) { setError(solanaWalletNotice(failure, solana.session.wallet.name, target.walletChain)); return; }
       } else {
         if (!evm.account) { setError('Connect your wallet first.'); return; }
         // The EVM store reports its own wallet failure (wallet-errors.ts) in the header.
@@ -81,5 +85,5 @@ export function useWalletConnection() {
       }
     } catch { setError('Could not switch your wallet to the workflow network. Check your wallet and try again.'); }
   };
-  return { connect, switchNetwork, error, clearError: () => setError(null), solanaChain };
+  return { connect, switchNetwork, error, notice, clearError: () => setError(null), solanaChain };
 }

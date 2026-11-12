@@ -7,7 +7,10 @@ import { editorReducer, initialEditor, type EditorState } from '../domain/editor
 import type { Command } from '../domain/commands';
 import type { SimulationSource } from '../domain/simulation-presentation';
 import type { ConversationBridge, FlofiConversation } from './flofi-conversation';
+import { shownMessage } from '../domain/chat-message';
 import { setActiveNetworkScope } from '../domain/network-scope';
+import { translate } from '../i18n/translate';
+import { portuguese } from '../i18n/pt';
 
 /**
  * BUILD-FLOFI-CONVERSATIONAL-001: the chat's lifecycle over the real editor reducer, the real Review projections and the real Canvas lifecycle
@@ -115,6 +118,27 @@ describe('BUILD-FLOFI-CONVERSATIONAL-001 conversational workflow', () => {
     expect(last(chat).text).toMatch(/^Preparing your reviewed wallet request: FloFi re-checks the quote, your wallet and its network first. Then confirm or reject it in your wallet; FloFi never signs for you/);
     expect(controls.request).not.toHaveBeenCalled();
   });
+  // P0 hotfix (locale contract): every deterministic FloFi message of the lifecycle is written from its copy key and values in both languages,
+  // so the chat shows it in the CURRENT interface language after a switch (never "Review workflow" or "Workflow confirmed" in a Portuguese chat).
+  it('writes every lifecycle message in both languages from the same copy and values', async () => {
+    await say('swap 10 USDC to WETH on Base Sepolia slippage 100 bps');
+    await say('Review workflow');
+    reviewedPatch = reviewed(); lifecycle(reviewedPatch); render();
+    const chat = await say('Yes, I confirm');
+    const flofi = chat.messages.filter(message => message.role === 'flofi');
+    expect(flofi.length).toBeGreaterThanOrEqual(3);
+    for (const message of flofi) {
+      expect(message.variants, message.text).toBeDefined();
+      expect(message.variants!.EN.text, message.text).toBe(message.text);
+      const pt = shownMessage(message, 'PT');
+      expect(pt.language).toBe('PT');
+      expect(pt.text).not.toBe(message.text);
+      for (const english of ['Review workflow', 'Add another action', 'Workflow confirmed', 'Do you confirm this workflow?', 'Would you like to'])
+        expect([pt.text, pt.question ?? '', ...pt.options ?? []].join(' | '), english).not.toContain(english);
+    }
+    const confirmed = shownMessage(last(chat), 'PT');
+    expect(confirmed.text).toMatch(/0x1111…1111/); expect(confirmed.options).toEqual([...shownMessage(last(chat), 'PT').options!]);
+  });
   it('BUILD-FLOFI-EXECUTION-PERFORMANCE-001: a FloFi wallet that cannot sign in this page stops the chat before any Review is accepted', async () => {
     f.floFi = true; f.canSign = false;
     try {
@@ -179,7 +203,13 @@ describe('BUILD-FLOFI-CONVERSATIONAL-001 conversational workflow', () => {
     setActiveNetworkScope('PUBLIC_MAINNET');
     const chat = await say('swap 10 USDC to WETH on Base Sepolia slippage 100 bps');
     expect(editor.workflow.revision).toBe(0); expect(f.propose).toEqual([]);
-    expect(last(chat).text).toBe('Base Sepolia is a test network. FloFi runs on mainnets only, with real funds: rebuild this on Base.');
+    // P0 hotfix (locale contract): the refusal is a catalog message with its values (it used to be the English sentence with the names spliced
+    // in, which a Portuguese screen could not translate); it renders the same English sentence, and Portuguese on a Portuguese screen.
+    const refusal = last(chat);
+    expect(translate('EN', refusal.text, ...refusal.params ?? [])).toBe('Base Sepolia is a test network. FloFi runs on mainnets only, with real funds: rebuild this on Base.');
+    expect(refusal.params).toEqual(['Base Sepolia', 'Base']);
+    expect(Object.hasOwn(portuguese, refusal.text)).toBe(true);
+    expect(translate('PT', refusal.text, ...refusal.params ?? [])).toBe(portuguese[refusal.text]!.replace('{0}', 'Base Sepolia').replace('{1}', 'Base'));
   });
   it('Copilot interpretations commit only through the validated command and say how FloFi read the words', async () => {
     f.respond = async () => ({ kind: 'PROPOSAL', text: 'Interpreted as “swap 3 USDC to WETH on Base Sepolia slippage 100 bps”. Review the proposal below: nothing changes until you apply it.',
@@ -642,5 +672,42 @@ describe('BUILD-FLOFI-E2E-RELIABILITY-001 continuation after a landed approval',
     void chat;
     const pt = (await import('../domain/conversation-copy')).conversationCopy('PT');
     expect(pt.continueAfter('Aprovar USDC', 'Trocar', true)).toBe('Aprovar USDC: confirmado na rede. Uma aprovação apenas autoriza o gasto; não é a ação em si. Trocar: ainda não enviado, precisa da sua própria confirmação na carteira. Continuar para a carteira?');
+  });
+});
+
+describe('P0 hotfix (execution continuity): the Assistant while the workflow executes', () => {
+  /** Step 1 of a two-step sequence completed and reconciled; step 2 not started (the shell's sequence and whole-workflow progress). */
+  function between(): Partial<ConversationBridge> {
+    return { sequence: { total: 2, current: 2, finished: false, issue: null, awaitingDelivery: false, steps: [
+      { number: 1, action: 'Swap', amount: '10 USDC', detail: null, network: 'Base Sepolia', state: 'COMPLETED', funding: null, delivered: '0.004 WETH' },
+      { number: 2, action: 'Swap', amount: '2 USDC', detail: null, network: 'Base Sepolia', state: 'CURRENT', funding: null, delivered: null }] },
+    workflowProgress: { completed: 1, total: 2, current: 2, finished: false, attention: false, steps: [
+      { number: 1, action: 'Swap', network: 'Base Sepolia', phase: 'RECONCILED', text: { key: 'Reconciled', args: [] }, current: false, delivered: '0.004 WETH' },
+      { number: 2, action: 'Swap', network: 'Base Sepolia', phase: null, text: { key: 'Not started', args: [] }, current: true, delivered: null }] } };
+  }
+  it('between the steps, "continue" and "Review workflow" answer with the workflow status and next action — never "I can\'t start the review"', async () => {
+    await say('swap 10 USDC to WETH on Base Sepolia slippage 100 bps');
+    await say('swap 2 USDC to WETH on Base Sepolia slippage 100 bps');
+    reviewedPatch = between(); lifecycle(reviewedPatch);
+    bridge = { ...bridge, simulationBlocked: 'Its provider is not available here.' };
+    for (const text of ['continue', 'Review workflow', 'continuar']) {
+      render().send(text); await flush();
+      const message = last(render());
+      expect(message.text).toBe('This workflow is executing: 1 of 2 steps completed · Step 2 (Swap): Not started. Its provider is not available here.');
+      expect(message.text).not.toMatch(/can’t start the review|Simulate/);
+    }
+    expect(simulate).not.toHaveBeenCalled(); expect(controls.authorize).not.toHaveBeenCalled();
+  });
+  it('while the wallet is asked, review/continue says to answer the wallet; in Portuguese with the same numbers', async () => {
+    await say('swap 10 USDC to WETH on Base Sepolia slippage 100 bps');
+    await say('swap 2 USDC to WETH on Base Sepolia slippage 100 bps');
+    reviewedPatch = { ...between(), editingPaused: true }; controls = { ...controls, requesting: true } as typeof controls; lifecycle(reviewedPatch);
+    render().send('continue'); await flush();
+    expect(last(render()).text).toBe('This workflow is executing: 1 of 2 steps completed · Step 2 (Swap): Not started. Confirm or decline the request in your wallet. FloFi never signs for you.');
+    expect(simulate).not.toHaveBeenCalled();
+    harness.unmount(); harness.slots = [];
+    const portuguese = () => harness.render(() => useFlofiConversation({ owner: { namespace: 'eip155', address: reviewOwner }, epoch: 0, bridge, direct, interfaceLanguage: 'PT' }));
+    portuguese().send('continuar'); await flush();
+    expect(portuguese().messages.at(-1)!.text).toBe('Este fluxo está em execução: 1 de 2 etapas concluídas · Etapa 2 (Trocar): Não iniciado. Confirme ou recuse o pedido na sua carteira. A FloFi nunca assina por você.');
   });
 });

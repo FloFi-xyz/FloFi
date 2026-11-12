@@ -5,6 +5,7 @@ import { test, expect, installPassiveWallet, assertPassiveWallet, readWorkflowIr
 import { replayProviderLogos } from './asset-logo-replay';
 import { workflowOrder, type SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
 import { continueToBuilder, openBuilder, useDockedToolbar, useToolbarRail } from './build-entry-navigation';
+import { chooseLanguage } from './app-origin';
 const cards = (page: Page) => page.locator('.build-flow-surface .react-flow__node');
 const viewport = (page: Page) => page.locator('.build-flow-surface .react-flow__viewport');
 const ir = async (page: Page) => JSON.parse(await readWorkflowIr(page)) as SemanticWorkflow;
@@ -94,7 +95,8 @@ for (const width of [1440, 1536, 1920]) test(`UX-008 every Canvas tool fits — 
   expect(await header.getByRole('button').evaluateAll(buttons => buttons.map(b => b.getAttribute('aria-label')))).toEqual(['Undo', 'Redo', 'More options']);
   await testInfo.attach(`toolbar-rail-${width}px`, { body: await page.locator('.build-flow-surface').screenshot(), contentType: 'image/png' });
   for (const language of ['EN', 'PT'] as const) {
-    if (language === 'PT') { await page.evaluate(() => localStorage.setItem('flofi.language', 'PT')); await page.reload(); await continueToBuilder(page); }
+    // P0 hotfix (locale contract): the language cookie is authoritative (storage alone no longer overrides the suite's English cookie).
+    if (language === 'PT') { await chooseLanguage(page.context(), 'PT'); await page.reload(); await continueToBuilder(page); }
     await useDockedToolbar(page);
     const docked = await toolbarGeometry(page, language === 'PT' ? 'Ferramentas do Canvas' : 'Canvas tools');
     expect(docked.buttons).toHaveLength(actions.length);
@@ -105,7 +107,8 @@ for (const width of [1440, 1536, 1920]) test(`UX-008 every Canvas tool fits — 
     await testInfo.attach(`toolbar-docked-${language}-${width}px`, { body: await page.locator('.build-canvas-head').screenshot(), contentType: 'image/png' });
     await useToolbarRail(page);
   }
-  await page.evaluate(() => localStorage.setItem('flofi.language', 'EN')); await page.reload(); await continueToBuilder(page);
+  // P0 hotfix (locale contract): the switch back to English writes the authoritative cookie, as the language menu does (not storage alone).
+  await chooseLanguage(page.context(), 'EN'); await page.reload(); await continueToBuilder(page);
   const toolbar = page.getByRole('toolbar', { name: 'Canvas tools' });
   // Privacy is not offered until it exists (no disabled placeholder); fit never enables an unimplemented financial capability.
   await expect(toolbar.getByRole('button', { name: 'Privacy', exact: true })).toHaveCount(0);

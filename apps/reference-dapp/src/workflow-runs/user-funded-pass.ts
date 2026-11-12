@@ -15,7 +15,11 @@
  *                         user operation: due when the previous group reconciled; simulated by the bundler, then relayed (owner-paid).
  *                         Solana: started only while the signed blockhash leaves the send budget (else BLOCKED, nothing sent); every
  *                         signature is recorded, then each transaction is sent after its predecessor confirmed.
- *   SUBMITTED/UNCERTAIN   reconciled from the chain only; per-step spent/received and the gas the owner paid become the steps' outcomes
+ *   SUBMITTED/UNCERTAIN   reconciled from the chain only; per-step spent/received and the gas the owner paid become the steps' outcomes.
+ *                         P0 hotfix (E1): a batch that carried a bridge reconciles its source steps at once, while its bridge step (and the group)
+ *                         waits for the verified destination delivery (`bridge-delivery.ts`): AWAITING_DESTINATION until the Across fill of THIS
+ *                         deposit is final, then RECONCILED (its received = the fill's output); no fill past the fill deadline: the group is
+ *                         UNCERTAIN and the run needs ATTENTION (observed again, never resent); a verified refund FAILS the bridge step
  *
  * A group that cannot start (a refused simulation, a signer mismatch, a delivery below what was signed) is BLOCKED before anything is sent:
  * the run HALTS after earlier reconciled steps (funds rest in the owner's wallet), else FAILS. A reverted group FAILS its steps.
@@ -26,6 +30,7 @@ import { assetKey } from '../delegation/steps.ts';
 import { advanceSolanaSubmission, checkUserOperation, reconcileEvmGroup, reconcileSolanaGroup, relayUserOperation, solanaSendBudget, solanaSubmission, type Prepared,
   type Reconciled, type UserFundedDeps } from '../user-funded/groups.ts';
 import type { EvmGroupCalls } from '../user-funded/evm-calls.ts';
+import { bridgeOf, bridgeProgressOf, observeBridgeDelivery, type BridgeDelivery } from '../user-funded/bridge-delivery.ts';
 import type { BoundResolution, GroupRecord, RunRecord, RunStepRecord, StepOutcome, WorkflowRunStore } from './pg-store.ts';
 import { ADVANCE_RETRY_MS, TERMINAL_RUN, WALLET_BATCH_OUTCOME_UNKNOWN, WALLET_BATCH_SETTLE_MS, groupInFlight, walletBatchUnanswered, type RunState } from './state-machine.ts';
 import { executionRefusal } from '../server/execution-guard.ts';
@@ -182,18 +187,32 @@ async function submittedGroup(deps: UserFundedPassDeps, run: RunRecord, g: Group
   // Final review (P1): the chain did not revert what was reported, yet it does not match what the owner signed — funds may have moved. Never
   // FAILED (nothing irreversible happened): the group and its steps are UNCERTAIN and the run needs ATTENTION, observed again, never resent.
   if (r.status === 'UNMATCHED') return attention(deps, run, g, stored(r.code));
+  // P0 hotfix (E1): a batch that carried a bridge: its source side reconciled above; the bridge step needs its verified destination delivery.
+  const sentGroup = r.status === 'RECONCILED' ? r.group ?? (prepared as { group?: EvmGroupCalls }).group ?? null : null;
+  const bridge = sentGroup ? bridgeOf(sentGroup) : null;
+  let delivery: BridgeDelivery | null = null;
+  if (r.status === 'RECONCILED' && sentGroup && bridge) {
+    delivery = await observeBridgeDelivery(deps.userFunded, sentGroup, r.receipts ?? [], bridgeProgressOf(g.outcome));
+    if (delivery.status === 'UNREADABLE') return settled(run, SUBMIT_RETRY_MS, false, 'BRIDGE_AWAITING_DELIVERY');
+  }
+  // The bridge step waits (its delivery is not final, not observed, or divergent): the other steps of the batch are recorded now.
+  const waiting = delivery !== null && delivery.status !== 'DELIVERED' && delivery.status !== 'REFUNDED';
   // Final review (P1): recording what the chain already decided never depends on the workflow still composing to the run's hash (a deploy may
   // change the canonical bytes while a group is in flight): the run's own strategy is composed without that binding for the per-step records.
   const bound = composeWorkflowBound(run.strategy, run.workflowHash);
   const composed = bound.ok ? bound : composeWorkflowBound(run.strategy, undefined);
   if (!bound.ok) deps.log('workflow_run.reconciled_unbound', { run: run.runId, group: g.groupIndex, composes: composed.ok });
   const observedAt = deps.now().toISOString(), chain = g.chain;
-  const facts = r.status === 'RECONCILED' ? r.steps : r.steps ?? [];
+  // A delivered bridge step received the fill's output on its destination chain (what its later consumers are funded by).
+  const facts = (r.status === 'RECONCILED' ? r.steps : r.steps ?? []).map(f => bridge && f.stepIndex === bridge.step && delivery?.status === 'DELIVERED'
+    ? { ...f, received: [...f.received, delivery.received] } : f);
+  /** Transactions on another chain a step's outcome lists too: a bridge's destination fill, or its refund. */
+  const extra = (index: number) => bridge && index === bridge.step && (delivery?.status === 'DELIVERED' || delivery?.status === 'REFUNDED') ? [delivery.transaction] : [];
   const evidence = { environment: 'PUBLIC_UNVERIFIED', outcome: r.status, bundleHash: null };
   const gasPaid = r.gasPaid ? { ...r.gasPaid, group: g.groupIndex } : undefined;
   const outcomeOf = (index: number, status: string): StepOutcome => {
     const f = facts.find(x => x.stepIndex === index);
-    return { kind: 'USER_FUNDED_GROUP', executionId: `${run.runId}:g${g.groupIndex}`, flow: null, status, transactions: r.transactions.map(hash => ({ chain, hash })), evidence,
+    return { kind: 'USER_FUNDED_GROUP', executionId: `${run.runId}:g${g.groupIndex}`, flow: null, status, transactions: [...r.transactions.map(hash => ({ chain, hash })), ...extra(index)], evidence,
       spent: f?.spent ?? [], received: f?.received ?? [], observedAt, ...gasPaid ? { gasPaid } : {} };
   };
   const spentOf = (index: number) => {
@@ -205,7 +224,8 @@ async function submittedGroup(deps: UserFundedPassDeps, run: RunRecord, g: Group
   };
   // A grouped step bound to an earlier output records what it was signed to spend from it, exactly as a confirm-mode step does: a later
   // consumer of the same delivery (in a later group or confirmed step by step) is funded only by what is left of it.
-  const receivedOf = (producer: number, asset: string) => [...steps[producer]?.outcome?.received ?? [], ...facts.find(f => f.stepIndex === producer)?.received ?? []]
+  // A producer recorded in an earlier pass (a batched swap whose bridge was still waiting for its delivery) counts once: its record, else this pass's facts.
+  const receivedOf = (producer: number, asset: string) => (steps[producer]?.outcome?.received ?? facts.find(f => f.stepIndex === producer)?.received ?? [])
     .filter(x => x.asset === asset).reduce((sum, x) => sum + BigInt(x.amount), 0n);
   const boundOf = (index: number): BoundResolution | null => {
     const spent = spentOf(index), all = composed.ok ? composed.bindings.filter(b => b.step === index) : [];
@@ -216,6 +236,14 @@ async function submittedGroup(deps: UserFundedPassDeps, run: RunRecord, g: Group
   };
   let unrecorded = false;
   for (let i = g.stepFrom; i <= g.stepTo; i++) {
+    if (bridge && i === bridge.step && waiting) continue;
+    if (bridge && i === bridge.step && delivery?.status === 'REFUNDED') {
+      // Refunded on the source chain: the bridge step FAILED (nothing was delivered); what it spent came back to the owner's wallet.
+      const f = facts.find(x => x.stepIndex === i);
+      await deps.store.stepTransition(run.runId, i, ['DELEGATED', 'UNCERTAIN'], 'FAILED', { outcome: { ...outcomeOf(i, 'FAILED'), spent: f?.spent ?? [], received: [delivery.returned] },
+        code: 'BRIDGE_REFUNDED' });
+      continue;
+    }
     const done = facts.some(f => f.stepIndex === i);
     if (r.status === 'RECONCILED' || done) {
       // A step is RECONCILED only with the strategy it executed (0015); one that no longer composes at all is left for ATTENTION below.
@@ -230,9 +258,29 @@ async function submittedGroup(deps: UserFundedPassDeps, run: RunRecord, g: Group
   // Reconciled against an earlier preparation (the one the wallet sent): what ITS steps were signed to spend and receive, for the owner's view.
   const preparedFrom = r.group ? { preparedFrom: { steps: r.group.steps, calls: r.group.calls.length,
     approvals: r.group.calls.filter(c => c.kind === 'ERC20_APPROVE').length } } : {};
-  const groupOutcome = { status: r.status, transactions: r.transactions, gasPaid: r.gasPaid, steps: facts, observedAt, ...preparedFrom };
+  const groupOutcome = { status: r.status, transactions: [...r.transactions, ...bridge ? extra(bridge.step) : []], gasPaid: r.gasPaid, steps: facts, observedAt, ...preparedFrom,
+    ...delivery?.progress ? { bridge: delivery.progress } : {} };
   // Executed steps FloFi cannot record any more (their strategy no longer composes): the run needs attention, never advances past them.
   if (unrecorded) return attention(deps, run, g, 'WORKFLOW_RUN_STALE');
+  if (delivery && waiting) {
+    // The group stays open while its bridge waits: its progress (deposit id, scan cursor, fill) is kept on its outcome when it changed.
+    const progress = delivery.progress;
+    if (progress && (delivery.status === 'DIVERGENT' || ('changed' in delivery && delivery.changed) || !bridgeProgressOf(g.outcome)))
+      await deps.store.groupTransition(run.runId, g.groupIndex, [g.state], g.state, { outcome: { ...groupOutcome, status: 'AWAITING_DESTINATION' } }, 'GROUP_BRIDGE_OBSERVED');
+    if (delivery.status === 'PENDING') {
+      deps.log('workflow_run.bridge_awaiting_delivery', { run: run.runId, group: g.groupIndex, sourceFinal: delivery.progress.sourceSafe, filled: delivery.progress.fill !== null });
+      return settled(run, SUBMIT_RETRY_MS, false, 'BRIDGE_AWAITING_DELIVERY');
+    }
+    // Not observed past its fill deadline, or a deposit / fill that disagrees with what was signed: observed again on every pass, never resent.
+    return attention(deps, run, g, stored((delivery as { code: string }).code));
+  }
+  if (delivery?.status === 'REFUNDED') {
+    await deps.store.groupTransition(run.runId, g.groupIndex, ['SUBMITTED', 'UNCERTAIN'], 'FAILED', { outcome: { ...groupOutcome, status: 'FAILED' }, code: 'BRIDGE_REFUNDED' });
+    const partial = steps.some(s => s.stepIndex < g.stepFrom && s.state === 'RECONCILED') || g.stepFrom < delivery.progress.step;
+    const moved = await stopRunFromCurrent(deps, run.runId, partial ? 'HALTED' : 'FAILED', 'BRIDGE_REFUNDED');
+    deps.log('workflow_run.bridge_refunded', { run: run.runId, group: g.groupIndex });
+    return moved ? settled(moved) : { ...settled(run), progressed: true };
+  }
   if (r.status === 'RECONCILED') {
     await deps.store.groupTransition(run.runId, g.groupIndex, ['SUBMITTED', 'UNCERTAIN'], 'RECONCILED', { outcome: groupOutcome, code: null });
     deps.log('workflow_run.group_reconciled', { run: run.runId, group: g.groupIndex, gasPaid: r.gasPaid.amount });

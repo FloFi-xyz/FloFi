@@ -8,6 +8,7 @@
 import type { Page } from '@playwright/test';
 import { test, expect, readWorkflowIr } from './fixtures';
 import { openBuilder } from './build-entry-navigation';
+import { chooseLanguage } from './app-origin';
 
 type IrNode = { inputs: { name: string; value: { asset?: unknown } }[]; adapterConstraints: { protocols: string[] }; userConstraints: { kind: string }[] };
 const workflowIr = async (page: Page) => JSON.parse(await readWorkflowIr(page)) as { nodes: IrNode[] };
@@ -27,7 +28,8 @@ const WELCOME = { EN: [/^Hi FloFier! /, 'Then simulate, review, and execute with
 const VIEWPORTS = [[1920, 1080], [1440, 1000], [1280, 900], [1024, 800], [390, 844], [375, 812]] as const;
 for (const [width, height] of VIEWPORTS) for (const language of width === 1440 || width === 390 ? ['EN', 'PT'] as const : ['EN'] as const) {
   test(`FloFi Assistant at ${width}px (${language}): official symbol + title, short welcome, avatars, no overflow`, async ({ page }, testInfo) => {
-    if (language === 'PT') await page.addInitScript(() => localStorage.setItem('flofi.language', 'PT'));
+    // P0 hotfix (locale contract): the language cookie is authoritative (storage alone no longer overrides the suite's English cookie).
+    if (language === 'PT') await chooseLanguage(page.context(), 'PT');
     await page.setViewportSize({ width, height });
     await openBuilder(page);
     const assistant = page.locator('aside.copilot');

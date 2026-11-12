@@ -5,7 +5,7 @@ import { createBaseSepoliaReviewContext, createReviewContext, lintWorkflow, type
 import { parseLocalCommand } from './commands';
 import { editorReducer, initialEditor, type EditorState } from './editor';
 import type { Workflow } from './initial-workflow';
-import { boundAmount, boundProjection, deliveredByRecord, fundingAllocations, stepNodeKey, validCompletions, workflowSequence, type CompletedStep } from './workflow-sequence';
+import { boundAmount, boundProjection, deliveredByRecord, fundingAllocations, sequenceCursor, stepNodeKey, stepRuntimeWorkflow, validCompletions, workflowSequence, type CompletedStep } from './workflow-sequence';
 import { readConcentratedLiquidity, type SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
 import { amountsFromOwnerRecord } from '../workflow-runs/received-amounts';
 
@@ -236,5 +236,52 @@ describe('BUILD-FLOFI-BRIDGE-LIVE-FIX-003 native ETH steps in sequences', () => 
     expect(deliveredByRecord('public', record('0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee'), NATIVE)).toBe('2140000000000000');
     expect(deliveredByRecord('public', record(BASE_WETH), NATIVE)).toBeNull();
     expect(deliveredByRecord('public', record('0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee'), { chainId: 'eip155:8453', address: BASE_WETH, decimals: 18 })).toBeNull();
+  });
+});
+
+describe('P0 hotfix (execution continuity): a finished sequence keeps its last step exactly as it executed', () => {
+  it('production 2026-11-12: Swap → Bridge (≤ 2 USDC) completed; the bridge is never re-authored with the remainder after completion', () => {
+    // Swap 0.001 ETH → USDC delivered 2.5 USDC; the bridge (cap 2 USDC) executed with 2 USDC. Before the hotfix the finished sequence recomputed the
+    // bridge's bound as delivered − its own allocation (0.5 USDC), re-authored the bridge, retired its reconciled record ("Review required again").
+    const workflow = author('swap 0.001 ETH to USDC on Base slippage 100 bps', 'bridge 2 USDC from Base to Arbitrum');
+    const sequence = workflowSequence(workflow, lint)!, [swap, bridge] = sequence.steps as [typeof sequence.steps[0], typeof sequence.steps[0]];
+    const node = (index: number) => stepNodeKey(workflow.nodes.find(item => item.nodeId === sequence.steps[index]!.nodeId)!);
+    const afterSwap: CompletedStep[] = [{ nodeId: swap.nodeId, node: node(0), received: '2500000', runKey: 'arbsw-1', kind: 'public', allocations: [] }];
+    // Step 2 runs with min(cap, delivered) = 2 USDC: its own projection, unchanged.
+    const running = sequenceCursor(sequence, afterSwap);
+    expect(running).toMatchObject({ cursor: 1, finished: false });
+    const executed = stepRuntimeWorkflow(bridge, running.before, context);
+    expect(executed.bound).toBe('2000000');
+    expect(executed.workflow).toBe(bridge.projection);
+    // The bridge reconciled: both steps completed, the bridge reserved 2 USDC of the swap's delivery.
+    const finished = [...afterSwap, { nodeId: bridge.nodeId, node: node(1), received: '1990000', runKey: 'xroute-1', kind: 'router', allocations: fundingAllocations(bridge, afterSwap) }];
+    expect(finished[1]!.allocations).toEqual([{ fundedBy: 0, input: bridge.funding[0]!.input, used: '2000000' }]);
+    const done = sequenceCursor(sequence, finished);
+    expect(done).toMatchObject({ cursor: 1, finished: true });
+    expect(done.before).toEqual(afterSwap);
+    // The last step's runtime workflow is exactly the one it executed (so its record keeps matching), never the 0.5 USDC remainder.
+    const after = stepRuntimeWorkflow(bridge, done.before, context);
+    expect(after).toEqual(executed);
+    expect(amountOf(after.workflow!)).toBe('2000000');
+    // What the old computation produced (kept here as the regression's evidence): the remainder over ALL completions, re-authored.
+    expect(boundAmount(bridge, finished)).toBe('500000');
+    expect(amountOf(boundProjection(bridge, '500000', context)!)).toBe('500000');
+  });
+  it('a bridge that spent less than its cap after a smaller delivery keeps that bound once finished', () => {
+    const workflow = author('swap 0.001 ETH to USDC on Base slippage 100 bps', 'bridge 2 USDC from Base to Arbitrum');
+    const sequence = workflowSequence(workflow, lint)!, bridge = sequence.steps[1]!;
+    const afterSwap: CompletedStep[] = [{ nodeId: sequence.steps[0]!.nodeId, node: '', received: '1500000', runKey: 'arbsw-2', kind: 'public', allocations: [] }];
+    const executed = stepRuntimeWorkflow(bridge, sequenceCursor(sequence, afterSwap).before, context);
+    expect(executed.bound).toBe('1500000');
+    const finished = [...afterSwap, { nodeId: bridge.nodeId, node: '', received: '1490000', runKey: 'xroute-2', allocations: fundingAllocations(bridge, afterSwap) }];
+    const after = stepRuntimeWorkflow(bridge, sequenceCursor(sequence, finished).before, context);
+    expect(after.bound).toBe('1500000');
+    expect(JSON.stringify(after.workflow)).toBe(JSON.stringify(executed.workflow));
+    // Over all completions nothing would be left, and the old path refused the bound outright (fundingIssue BOUND_REFUSED / no runtime workflow).
+    expect(boundAmount(bridge, finished)).toBe('0');
+  });
+  it('an empty or partial history never moves the cursor past the first step not completed', () => {
+    const sequence = workflowSequence(author('swap 0.001 ETH to USDC on Base slippage 100 bps', 'bridge 2 USDC from Base to Arbitrum'), lint)!;
+    expect(sequenceCursor(sequence, [])).toEqual({ cursor: 0, finished: false, before: [] });
   });
 });

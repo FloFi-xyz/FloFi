@@ -30,11 +30,15 @@ import { useLocale } from '../i18n/locale';
 import { batchHandout, keepBatchHandout, sendWalletBatch, signSolanaGroup, signUserOperation, walletBatchHashes, walletProfile } from './user-funded-browser';
 import { useWalletProof } from './wallet-proof';
 import { FLIGHT_REFUSAL_MESSAGES } from '../domain/flight-refusal';
+import { EXECUTION_PHASE_LABEL } from '../domain/execution-phase';
+import { awaitedDelivery, runProgress, runStepPhase } from '../workflow-runs/run-step-phase';
 
 /**
- * The whole-workflow runs this browser started and has not closed, by approval id. A page load gives the Canvas a new workflow id, so a run is
- * never found by that id alone: a run of THIS visit's workflow is followed at once, and a run from an earlier visit is offered ("Show its
- * progress") so a batch in the wallet is read back and reported after a reload. Kept until the owner closes or ends the run.
+ * The whole-workflow runs this browser started and has not closed, by approval id. The Canvas keeps its workflow id across a reload
+ * (`domain/editor-persistence.ts`), so a run of the shown workflow is followed at once (a read-only status request, never a send; when that
+ * read needs the session's wallet sign-in, the owner's own click on "Load workflow progress" asks for it),
+ * and a run of another workflow this browser started (one replaced by "Create new workflow", or from before the Canvas was remembered) is
+ * offered ("Show its progress") so a batch in the wallet is read back and reported. Kept until the owner closes or ends the run.
  * `sent`: the batch id the wallet answered `wallet_sendCalls` with, kept the moment it answers — the wallet holds that batch from then on, so
  * FloFi reads it back and never asks the wallet to send that group again (even a wallet that ignores the app-provided EIP-5792 id).
  */
@@ -660,6 +664,14 @@ export const EXECUTION_REASON: Readonly<Record<string, string>> = {
   // The planner starts a new sign-all group at a Solana step that spends an output of an earlier step of its own group (it could not be
   // simulated before that output lands): one more wallet prompt, signed when it has landed.
   SOLANA_GROUP_STEP_DEPENDENT: 'A Solana step that spends what an earlier step of the same batch delivers is signed once that output has landed (one more wallet prompt).',
+  // P0 hotfix (E1): why a bridge is not part of the batch (it then runs through its own review: an approval and the deposit may each ask your wallet).
+  USER_OPERATION_BRIDGE_SIGNED_WHEN_DUE: 'A bridge after another bridge is authorized when the first delivery lands (its price and deadline are fixed when you sign it).',
+  USER_FUNDED_BRIDGE_PROVIDER_UNSUPPORTED: 'This bridge uses a route FloFi does not batch (only a direct Across deposit is batched), so it runs through its own review and wallet confirmations.',
+  USER_FUNDED_BRIDGE_PAIR_UNSUPPORTED: 'This bridge route is not one FloFi batches, so it runs through its own review and wallet confirmations.',
+  USER_FUNDED_BRIDGE_ASSET_UNSUPPORTED: 'This bridge moves an asset FloFi does not batch, so it runs through its own review and wallet confirmations.',
+  USER_FUNDED_BRIDGE_DESTINATION_UNREADABLE: 'FloFi cannot follow deliveries on this bridge\'s destination network here, so the bridge runs through its own review and wallet confirmations.',
+  USER_FUNDED_BRIDGE_RECIPIENT_NOT_OWNER: 'This bridge pays another wallet than the connected one, so it cannot be batched. It runs through its own review and wallet confirmations.',
+  USER_FUNDED_BRIDGE_FLOW_CLOSED: 'This bridge\'s own flow is not open for execution on FloFi right now, so it cannot join the batch. Nothing was sent.',
 };
 /**
  * USER_FUNDED_PREPARED_STILL_VALID: the batch FloFi already prepared for this group can still execute on chain (less than
@@ -745,6 +757,17 @@ export const EXECUTION_REFUSAL: Readonly<Record<string, string>> = {
   // A wallet answer (or report) for a group FloFi had already stopped while its batch was unanswered: never recorded, never "nothing was sent".
   WALLET_BATCH_ANSWERED_AFTER_STOP: 'Your wallet reported a batch for a step FloFi had already stopped: it may have executed. Check your wallet\'s activity; FloFi could not record it.',
   WORKFLOW_RUN_EXPIRED: RUN_WINDOW_CLOSED,
+  // P0 hotfix (E1): a bridge in the batch was refused before your wallet was asked (nothing was sent).
+  BRIDGE_QUOTE_UNAVAILABLE: 'The bridge provider did not answer with a route just now, so your wallet was not asked. Nothing was sent; try again.',
+  BRIDGE_FEE_ABOVE_LIMIT: 'The bridge fee is above your slippage limit for this amount, so your wallet was not asked. Nothing was sent; raise the limit or bridge more.',
+  BRIDGE_QUOTE_VALIDITY_SHORT: 'The bridge quote would expire before the batch could execute, so your wallet was not asked. Nothing was sent; try again.',
+  BRIDGE_FILL_DEADLINE_SHORT: 'The bridge deadline leaves too little time for the delivery, so your wallet was not asked. Nothing was sent; try again.',
+  BRIDGE_EXCLUSIVITY_INVALID: 'The bridge quote reserves its delivery past its own deadline, so your wallet was not asked. Nothing was sent; try again.',
+  SIMULATION_BRIDGE_DEPOSIT_MISMATCH: 'FloFi simulated the batch and the bridge deposit would not be exactly the one you sign, so your wallet was not asked. Nothing was sent.',
+  ROUTER_DEPOSITS_PAUSED: 'Bridge deposits are paused on this network right now, so your wallet was not asked. Nothing was sent.',
+  ROUTER_FILLS_PAUSED: 'Bridge deliveries are paused on the destination network right now, so your wallet was not asked. Nothing was sent.',
+  ROUTER_UNEXPECTED_CONTRACT: 'A bridge contract is not the one FloFi verified, so nothing was prepared. Nothing was sent.',
+  ACROSS_CALLDATA_MISMATCH: 'The bridge quote did not match what FloFi asked for (amount, recipient or tokens), so your wallet was not asked. Nothing was sent.',
 };
 /** A Review refusal that names the step it is about (`refusal.step`, shown as {0}): only then is a step number written. */
 export const STEP_REFUSAL: Readonly<Record<string, string>> = {
@@ -878,6 +901,16 @@ export function EditorWorkflowRunPanel({ state }: { state: EditorWorkflowRunStat
   // own `halted` would suggest (fails closed to STOPPED).
   const halted = run?.state === 'HALTED' ? (unanswered && haltedAs(run) === 'NOTHING_SENT' ? 'STOPPED' : haltedAs(run)) : null;
   const counts = review?.counts;
+  // P0 hotfix (E1): a step's words from the shared execution vocabulary where a batched bridge adds a fact (its delivery awaited, or not observed);
+  // otherwise the step's own words. Progress counts reconciled steps only; a group whose delivery is awaited says so.
+  const stepWords = (r: RunView, step: RunView['steps'][number]) => {
+    const p = runStepPhase(r, step);
+    return p && p.phase !== 'RECONCILED' ? tr(EXECUTION_PHASE_LABEL[p.phase], p.network ? tr(p.network) : '') : tr(stepText(r, step));
+  };
+  const progress = run ? runProgress(run) : null, awaited = run ? awaitedDelivery(run) : null;
+  const groupWords = (g: RunView['groups'][number]) => g.delivery?.state === 'AWAITING_DESTINATION' && (g.state === 'SUBMITTED' || g.state === 'UNCERTAIN') && awaited
+    ? `${tr(EXECUTION_PHASE_LABEL.CONFIRMED_AT_SOURCE, tr(awaited.source))} · ${tr(EXECUTION_PHASE_LABEL.AWAITING_DESTINATION, tr(awaited.destination))}` : tr(stateText(GROUP_STATE, g));
+  const bridgeTo = review?.steps.find(step => step.action === 'bridge')?.destination ?? null;
   return <section className="editor-workflow-run panel" aria-label={tr('Whole workflow')} data-run-phase={phase} data-run-state={run?.state ?? undefined}>
     <h3>{tr(run ? 'Workflow progress' : 'Review the whole workflow')}</h3>
     {/* P0 approved UX (board 08): while the wallet holds the request, say which request it is and what the wallet shows, in plain words. */}
@@ -902,7 +935,9 @@ export function EditorWorkflowRunPanel({ state }: { state: EditorWorkflowRunStat
       <p className="editor-run-mechanism" data-mode={review.mode}>{tr(review.mode === 'ONE_WALLET_CONFIRMATION'
         ? 'All {0} steps run as ONE wallet confirmation on {1}: one atomic transaction from your own wallet, which pays the network fee.'
         : review.mode === 'GROUPED' ? 'All {0} steps run in {2} wallet confirmations, one per group; a later group is asked when it becomes due.'
-        : 'This workflow needs a confirmation in your wallet for each step on its own.', String(review.stepCount), review.groups[0]?.network ?? '', String(review.counts.walletPrompts))}</p>
+        : 'This workflow needs a confirmation in your wallet for each step on its own.', String(review.stepCount), review.groups[0]?.network ?? '', String(review.counts.walletPrompts))}
+        {bridgeTo && review.mode !== 'STEP_BY_STEP' ? <> {tr('Then FloFi waits for the bridge delivery on {0} and completes the workflow once it has verified it; you can leave this page meanwhile.', tr(bridgeTo))}</> : null}</p>
+      {bridgeTo && review.mode === 'STEP_BY_STEP' && <p className="muted">{tr('The bridge then runs through its own review: its token approval and its deposit may each ask your wallet once more.')}</p>}
       {review.mode === 'STEP_BY_STEP' && review.reasons.length > 0 && <ul className="editor-run-reasons">{review.reasons.map(code => <li key={code}>{tr(EXECUTION_REASON[code.split(':')[0]!] ?? 'Not available for this step ({0}).', code)}</li>)}</ul>}
       <ol className="editor-run-steps" aria-label={tr('Steps')}>
         {review.steps.map(step => {
@@ -913,15 +948,18 @@ export function EditorWorkflowRunPanel({ state }: { state: EditorWorkflowRunStat
             <span className="muted"> · {tr(step.network)}{step.provider ? ` · ${step.provider}` : ''}</span>
             <dl className="editor-run-amounts">
               {spend && <div><dt>{tr(step.basis === 'GUARANTEED_MINIMUM' ? 'Spends (the minimum step {0} guarantees)' : step.basis === 'RECONCILED_ACTUAL' ? 'Spends (what step {0} delivers, at most)' : 'Spends', String((step.boundTo ?? 0) + 1))}</dt><dd>{spend}</dd></div>}
-              {expected && <div><dt>{tr(step.action === 'borrow' || step.action === 'withdraw' ? 'You receive' : 'Expected')}</dt><dd>{expected}</dd></div>}
-              {minimum && <div><dt>{tr('Minimum (your slippage limit)')}</dt><dd>{minimum}</dd></div>}
+              {expected && <div><dt>{step.action === 'bridge' && step.destination ? tr('Arrives on {0}', tr(step.destination))
+                : tr(step.action === 'borrow' || step.action === 'withdraw' ? 'You receive' : 'Expected')}</dt><dd>{expected}</dd></div>}
+              {minimum && step.action !== 'bridge' && <div><dt>{tr('Minimum (your slippage limit)')}</dt><dd>{minimum}</dd></div>}
+              {step.action === 'bridge' && step.destination && review.groups.some(g => g.strategy === 'EVM_WALLET_BATCH' && g.steps[0] <= step.index && step.index <= g.steps[1])
+                && <div><dt>{tr('Delivery')}</dt><dd>{tr('FloFi waits for this delivery on {0} and verifies it before the workflow completes.', tr(step.destination))}</dd></div>}
               {(planned?.recipient ?? step.recipient) && <div><dt>{tr('To')}</dt><dd><code className="editor-run-recipient">{planned?.recipient ?? step.recipient}</code>
                 {(planned?.recipient ?? step.recipient)!.toLowerCase() === review.owner.toLowerCase() ? ` ${tr('(your wallet)')}` : ''}</dd></div>}
               {!expected && step.action === 'swap' && !review.refusal && review.groups.find(g => g.steps[0] <= step.index && step.index <= g.steps[1])?.signing === 'WHEN_DUE'
                 && <div><dt>{tr('Expected')}</dt><dd>{tr('Quoted when this step becomes due')}</dd></div>}
               {live?.outcome?.received.map(r => <div key={r.asset}><dt>{tr('Received (reconciled)')}</dt><dd>{receivedText(r, [planned?.expected, step.expected, planned?.spend, step.spend])}</dd></div>)}
             </dl>
-            {live && run && <span className="workflow-run-state">{tr(stepText(run, live))}</span>}
+            {live && run && <span className="workflow-run-state">{stepWords(run, live)}</span>}
             {live?.outcome?.submissions.map(tx => tx.explorerUrl ? <a key={tx.hash} href={tx.explorerUrl} target="_blank" rel="noreferrer"><code>{tx.hash.slice(0, 10)}…</code></a> : <code key={tx.hash}>{tx.hash.slice(0, 10)}…</code>)}
           </li>;
         })}
@@ -931,7 +969,7 @@ export function EditorWorkflowRunPanel({ state }: { state: EditorWorkflowRunStat
           <dd>{tr(HOW[g.strategy] ?? g.strategy)}{g.calls ? ` · ${tr('{0} calls in the batch ({1} token approvals)', String(g.calls.length), String(g.approvals ?? 0))}` : ''}
             {g.fee ? ` · ${tr('about {0} in network fees (up to {1} at today\'s prices; your wallet sets the final fee)', eth(g.fee.estimatedWei), eth(g.fee.maxWei))}`
               : run?.groups[g.index]?.maxFee?.unit === 'wei' ? ` · ${tr('up to {0} in network fees at today\'s prices; your wallet sets the final fee', eth(run.groups[g.index]!.maxFee!.amount))}` : ''}
-            {run?.groups[g.index] ? ` · ${tr(stateText(GROUP_STATE, run.groups[g.index]!))}` : ''}
+            {run?.groups[g.index] ? ` · ${groupWords(run.groups[g.index]!)}` : ''}
             {run?.groups[g.index]?.gasPaid ? ` · ${tr('network fees paid: {0}', eth(run.groups[g.index]!.gasPaid!.amount))}` : ''}
             {/* While the wallet prompt is open, an expired request is always rejected there (its on-chain deadline would refuse it and the wallet
                 would still pay the fee); a fresh one is promised only when this page would send one. */}
@@ -977,13 +1015,13 @@ export function EditorWorkflowRunPanel({ state }: { state: EditorWorkflowRunStat
               {planned?.recipient && <div><dt>{tr('To')}</dt><dd><code className="editor-run-recipient">{planned.recipient}</code></dd></div>}
               {step.outcome?.received.map(r => <div key={r.asset}><dt>{tr('Received (reconciled)')}</dt><dd>{receivedText(r, [planned?.expected, planned?.spend])}</dd></div>)}
             </dl>
-            <span className="workflow-run-state">{tr(stepText(run, step))}</span>
+            <span className="workflow-run-state">{stepWords(run, step)}</span>
             {step.outcome?.submissions.map(tx => tx.explorerUrl ? <a key={tx.hash} href={tx.explorerUrl} target="_blank" rel="noreferrer"><code>{tx.hash.slice(0, 10)}…</code></a> : <code key={tx.hash}>{tx.hash.slice(0, 10)}…</code>)}
           </li>;
         })}
       </ol>
       <dl className="editor-run-facts">{run.groups.map(g => <div key={g.index}><dt>{run.groups.length > 1 ? tr('Group {0}', String(g.index + 1)) : tr('Wallet request')}</dt>
-        <dd>{tr(HOW[g.strategy] ?? g.strategy)} · {tr(stateText(GROUP_STATE, g))}{g.gasPaid ? ` · ${tr('network fees paid: {0}', eth(g.gasPaid.amount))}` : ''}</dd></div>)}</dl>
+        <dd>{tr(HOW[g.strategy] ?? g.strategy)} · {groupWords(g)}{g.gasPaid ? ` · ${tr('network fees paid: {0}', eth(g.gasPaid.amount))}` : ''}</dd></div>)}</dl>
     </>}
     {refusal && <p className="error-banner" role="alert">{refusal}</p>}
     {/* Board 07: a native-fee shortfall found while preparing this Review shows the server's own numbers (no run exists yet: nothing was sent). */}
@@ -995,6 +1033,9 @@ export function EditorWorkflowRunPanel({ state }: { state: EditorWorkflowRunStat
         : u.kind === 'recipient' ? <>{tr('Step {0} pays', String(u.index + 1))} <code className="editor-run-recipient">{u.now}</code></>
         : tr('Step {0}: minimum {1}', String(u.index + 1), u.now)}</li>)}</ul></div>}
     {errorText && <p className="error-banner" role="alert">{errorText}</p>}
+    {run && run.stepCount > 1 && <p className="editor-run-progress" role="status" data-completed={progress!.completed}>{tr('{0} of {1} steps completed', String(progress!.completed), String(progress!.total))}</p>}
+    {awaited && <p className="editor-run-delivery" role="status">{tr('Your batch is confirmed on {0}. FloFi is waiting for the delivery on {1} and keeps checking even if you leave this page; nothing is sent again.',
+      tr(awaited.source), tr(awaited.destination))}</p>}
     {run?.state === 'ATTENTION' && <p role="status">{tr('A submitted step has no final outcome yet. FloFi keeps observing it and never resubmits it.')}</p>}
     {halted && <p role="status">{halted === 'NOTHING_SENT'
       ? <>{tr('Stopped before anything was sent: your funds stay in your wallet.')}{resumable && endable ? <> {tr('You can run each step through its own flow from here, or end the workflow.')}</> : null}</>

@@ -23,7 +23,7 @@ const definitions = [
     'network-isolation.spec.ts', 'public-testnet.spec.ts', 'robinhood-network.spec.ts', 'swap-authoring.spec.ts', 'visual-shell.spec.ts', 'credentials.spec.ts',
     'build-fix-ux.spec.ts', 'beta-ui.spec.ts', 'site.spec.ts', 'build-entry.spec.ts', 'privacy-notice.spec.ts', 'editor-redesign.spec.ts',
     'portfolio-ux004.spec.ts', 'dashboard-productization.spec.ts', 'dashboard-theme-states.spec.ts', 'dashboard-run-details.spec.ts',
-    'simulate-canvas-controls.spec.ts'], {}],
+    'simulate-canvas-controls.spec.ts', 'editor-layout-hotfix.spec.ts'], {}],
   ['review-execute-recovery-components', ['simulate-review-acceptance.spec.ts', 'execute-product-workspace.spec.ts', 'execute-workflow.spec.ts'], {}],
   // Direct chat signing and optional Canvas, with no application server, RPC, wallet or database; requests are intercepted by the spec.
   ['solana-transfer-ux', ['--config', 'playwright.transfer-ux.config.ts'], {}],
@@ -33,7 +33,7 @@ const definitions = [
   // BUILD-FLOFI-CONVERSATIONAL-001: the same harness drives the whole workflow from the FloFi chat (review, two confirmations, wallet, reconciliation).
   // BUILD-FLOFI-CHAT-E2E-FIX-002: a multi-action workflow run from the chat as a sequence of one-action steps (funded Swap → Swap reconciled step by
   // step, an unapplied Canvas amount, the wallet network switch, a missing quote and a balance too low), on the same loopback harness.
-  ['execution-continuity', ['execution-continuity.spec.ts', 'workflow-ux-execution.spec.ts', 'conversational-workflow.spec.ts', 'chat-sequence.spec.ts', 'chat-assistant.spec.ts'], { GRYLOO_CLOUD_RUNTIME_E2E: 'EMBEDDED_LOOPBACK_ONLY', FLOFI_SWAP_READ_E2E: 'MOCKED_LOOPBACK_ONLY', FLOFI_SWAP_EXECUTION_E2E: 'MOCKED_LOOPBACK_ONLY', TEST_DATABASE_URL: process.env.TEST_DATABASE_URL ?? 'postgres://flofi@127.0.0.1:5432/postgres' }],
+  ['execution-continuity', ['execution-continuity.spec.ts', 'workflow-ux-execution.spec.ts', 'conversational-workflow.spec.ts', 'chat-sequence.spec.ts', 'chat-assistant.spec.ts', 'locale-journey.spec.ts'], { GRYLOO_CLOUD_RUNTIME_E2E: 'EMBEDDED_LOOPBACK_ONLY', FLOFI_SWAP_READ_E2E: 'MOCKED_LOOPBACK_ONLY', FLOFI_SWAP_EXECUTION_E2E: 'MOCKED_LOOPBACK_ONLY', TEST_DATABASE_URL: process.env.TEST_DATABASE_URL ?? 'postgres://flofi@127.0.0.1:5432/postgres' }],
   // BUILD-AUTOMATION-001: Automations (fixture price source, test clock) into the owner's /approve → Simulate → Review; never a transaction.
   ['automations', ['e2e/automations.spec.ts'], { GRYLOO_CLOUD_RUNTIME_E2E: 'EMBEDDED_LOOPBACK_ONLY', FLOFI_SWAP_READ_E2E: 'MOCKED_LOOPBACK_ONLY', GRYLOO_AUTOMATION_E2E: 'FIXTURE_LOOPBACK_ONLY', TEST_DATABASE_URL: process.env.TEST_DATABASE_URL ?? 'postgres://flofi@127.0.0.1:5432/postgres' }],
   ['canvas-automation-ux', ['canvas-automation-ux.spec.ts', 'canvas-cta.spec.ts'], { GRYLOO_SUPPLY_E2E: 'MOCKED_LOOPBACK_ONLY' }],
@@ -131,6 +131,9 @@ const definitions = [
   // BUILD-FLOFI-FLIGHT-001: /board end to end (beta list, five states, invites, Founding seats, a pass from a real simulation) on the embedded runtime.
   ['flight', ['--config', 'playwright.flight.config.ts'], { TEST_DATABASE_URL: process.env.TEST_DATABASE_URL ?? 'postgres://flofi@127.0.0.1:5432/postgres', FLOFI_BETA_ACCESS: 'open' }],
   ['flight-team-early-access', ['--config', 'playwright.flight.config.ts', '--grep', 'temporary team access'], { TEST_DATABASE_URL: process.env.TEST_DATABASE_URL ?? 'postgres://flofi@127.0.0.1:5432/postgres', FLOFI_BETA_ACCESS: 'beta', FLOFI_FLIGHT_TEAM_E2E: 'MOCKED_LOOPBACK_ONLY' }],
+  // Closed beta: board.spec.ts's direct product requests and returning sign-in, and (P0 hotfix, Flight transition) flight-transition.spec.ts —
+  // the branded checking state, the server redirect of an admitted arrival, the refused board's own styles in light and dark, "could not
+  // check your access" and a lost-access re-render handed off as a full navigation. Both files' closed-beta tests are titled "closed beta protects".
   ['flight-closed-beta', ['--config', 'playwright.flight.config.ts', '--grep', 'closed beta protects'], { TEST_DATABASE_URL: process.env.TEST_DATABASE_URL ?? 'postgres://flofi@127.0.0.1:5432/postgres', FLOFI_BETA_ACCESS: 'beta' }],
 ];
 const composition = [['composition-provenance', ['release-composition-provenance.spec.ts'], {}]];

@@ -3,6 +3,7 @@ import { test, expect, readWorkflowIr, applyPendingProposal } from './fixtures';
 import { installSupplyWallet, supplySendCount, SUPPLY_OWNER } from './supply-fixtures';
 import { configureCanvasAction, configureCanvasPool } from './composer-authoring-fixtures';
 import { openBuilder, openEditorSection, openReviewTechnicalDetails } from './build-entry-navigation';
+import { chooseLanguage } from './app-origin';
 
 for (const action of ['swap', 'bridge', 'supply', 'borrow', 'repay', 'withdraw', 'pool', 'lending', 'transfer']) test(`Canvas parity without Advanced action setup: ${action}`, async ({ page }) => {
   // The wallet accepts an explicit network switch (only the Robinhood Chain Testnet Send asks for one).
@@ -125,7 +126,8 @@ for (const action of ['swap', 'pool']) test(`Solana Devnet ${action} remains aut
 
 test('new Send authoring controls and lifecycle copy use Portuguese', async ({ page }) => {
   await installSupplyWallet(page, { switching: 'KNOWN' });
-  await page.addInitScript(() => localStorage.setItem('flofi.language', 'PT'));
+  // P0 hotfix (locale contract): the language cookie is authoritative (storage alone no longer overrides the suite's English cookie).
+  await chooseLanguage(page.context(), 'PT');
   await openBuilder(page);
   await page.getByRole('button', { name: 'Adicionar envio', exact: true }).click();
   const card = page.locator('.build-flow-surface .composer-card');

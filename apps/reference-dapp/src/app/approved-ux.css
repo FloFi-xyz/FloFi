@@ -50,9 +50,30 @@
 /* A disabled lifecycle button must look disabled (board 16 §3): neutral fill, muted text, not-allowed cursor — never a dim blue. */
 .summary-bar .summary-primary-action button[data-lifecycle-action]:disabled,.summary-bar .summary-primary-action button.primary:disabled{background:var(--line);color:var(--muted);border-color:transparent;opacity:1;cursor:not-allowed;box-shadow:none;animation:none}
 
-/* ── Simulate (board 06): canvas + Review panel side by side from 1200 px; the chat stays on the right. ── */
-.simulate-workspace-grid.review-side-grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(340px,400px);gap:16px;align-items:start}
-.review-side-panel{position:sticky;top:12px;max-height:calc(100vh - 220px);overflow:auto;border:1px solid var(--line);border-radius:18px;background:var(--surface)}
+/* ── Simulate (board 06) — P0 hotfix: the Review is docked INSIDE the Canvas frame; the FloFi Assistant keeps its own column on the right. ──
+   A container query on the frame decides: beside the graph when the frame holds both at a readable card size (≥ 1180 px), under the graph
+   otherwise (its rows in two columns from 720 px). One page scroll, no third column, no horizontal scroll, never over a card. */
+.simulation-workflow-canvas{container:flofi-canvas-frame/inline-size}
+.simulate-canvas-body{display:flex;flex-direction:column;flex:1 1 auto;min-width:0;min-height:0}
+.simulate-canvas-body>.flow-surface{flex:1 1 auto;min-width:0;min-height:0}
+.workflow-workspace :is(.simulate-workspace-grid,.execute-workspace-grid)>.simulation-workflow-canvas[data-docked],.simulation-workflow-canvas[data-docked]{height:auto;overflow:visible}
+.simulation-workflow-canvas[data-docked]>.simulate-canvas-body>.flow-surface{flex:none;height:clamp(340px,52vh,520px);border-radius:0}
+.canvas-review-dock{min-width:0;border-top:1px solid var(--line);background:var(--surface)}
+.canvas-review-dock>.review-panel-approved{padding:20px var(--workspace-edge-spacing,16px) 24px}
+.canvas-review-dock>.execution-status-panel{margin:0;padding:20px var(--workspace-edge-spacing,16px) 24px;border:0;border-radius:0;box-shadow:none;background:transparent;max-height:none}
+.canvas-review-dock>.simulation-summary{margin:0;padding:20px var(--workspace-edge-spacing,16px);border:0;border-radius:0;box-shadow:none;max-height:none;background:transparent}
+@container flofi-canvas-frame (min-width:1180px){
+  .simulation-workflow-canvas[data-docked]>.simulate-canvas-body{display:grid;grid-template-columns:minmax(0,1fr) minmax(360px,420px);align-items:stretch}
+  .simulation-workflow-canvas[data-docked]>.simulate-canvas-body>.flow-surface{height:auto;min-height:clamp(460px,calc(100vh - 300px),640px)}
+  .canvas-review-dock{border-top:0;border-left:1px solid var(--line)}
+}
+/* Narrow frame (< 720 px): one card per row, the graph as tall as its steps (never shrunk to an unreadable size). */
+.simulation-workflow-canvas[data-narrow],.workflow-workspace :is(.simulate-workspace-grid,.execute-workspace-grid)>.simulation-workflow-canvas[data-narrow]{height:auto;overflow:visible}
+.simulation-workflow-canvas[data-narrow]>.simulate-canvas-body>.flow-surface{flex:none;height:max(340px,calc(var(--canvas-steps,1) * 300px + 168px))}
+@container flofi-canvas-frame (min-width:720px) and (max-width:1179.98px){
+  .canvas-review-dock .review-panel-rows{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));column-gap:32px}
+  .canvas-review-dock .review-panel-rows>div,.canvas-review-dock .review-panel-rows>div:last-child{border-bottom:0;border-top:1px solid var(--line)}
+}
 .review-panel-approved{display:flex;flex-direction:column;gap:12px;padding:20px;color:var(--ink)}
 .simulation-details .review-panel-approved{padding:16px 4px}
 .review-panel-approved .eyebrow{margin:0;font-family:var(--font-ibm-plex-mono),monospace;font-size:13px;letter-spacing:.08em;color:var(--muted)}
@@ -75,7 +96,6 @@
 .review-panel-blocked{border-top:3px solid var(--warning-text)}
 .review-panel-blocked h2{color:var(--ink)}
 
-@media(max-width:1199px){.review-side-panel{position:static;max-height:none}}
 @media(max-width:800px){
   .top-bar{grid-template-columns:auto 1fr auto;gap:8px}
   .top-bar>.top-bar-center{grid-column:1/-1;grid-row:2;justify-self:center}
@@ -99,3 +119,16 @@
 @media(prefers-color-scheme:dark){:root:not([data-theme="light"]){--primary-line:var(--accent)}}
 .top-bar{height:auto;min-height:70px}
 @media(pointer:coarse){.network-attention button{min-height:44px}.navigation-legal a{display:inline-flex;align-items:center}}
+/* P0 hotfix (execution continuity): the whole workflow's progress and the inline continuation of a step-by-step workflow in Execute. */
+.workflow-progress{margin:12px 0 0;display:grid;gap:8px;min-width:0}
+.workflow-progress-count{margin:0;font-variant-numeric:tabular-nums}
+.workflow-progress-steps{list-style:none;margin:0;padding:0;display:grid;gap:6px;min-width:0}
+.workflow-progress-step{display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 10px;padding:8px 10px;border:1px solid var(--line);border-radius:10px;min-width:0;overflow-wrap:anywhere}
+.workflow-progress-step[aria-current="step"]{border-color:var(--ink)}
+.workflow-progress-step-name{flex:1 1 12rem;min-width:0}
+.workflow-progress-step-phase{font-weight:600}
+.workflow-progress-step-delivered{flex-basis:100%;color:var(--muted);font-size:13px}
+.workflow-phase-done .workflow-progress-step-phase{color:var(--success)}
+.workflow-phase-neutral .workflow-progress-step-phase{color:var(--muted)}
+.sequence-continuation .sequence-continuation-values{margin:12px 0}
+.sequence-continuation .sequence-continuation-message{margin:8px 0 12px}

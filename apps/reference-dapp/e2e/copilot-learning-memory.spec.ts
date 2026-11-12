@@ -70,7 +70,7 @@ test('invisible learning: adapted in the conversation, learned after consent and
   expect(await query('SELECT * FROM learning_evidence')).toEqual([]);
 
   // BUILD-FLOFI-CONVERSATIONAL-001: the chat committed those Solana Devnet swaps (the header now shows the Solana wallet); a fresh visit's empty
-  // draft returns to the EVM wallet this journey proves.
+  // draft (openBuilder starts one: the remembered Canvas is not carried into a new visit) returns to the EVM wallet this journey proves.
   await openBuilder(page);
   // Privacy & memory lives in Settings, outside the chat. Proving the wallet signs a sign-in message only; learning is off until the user turns it on.
   await page.getByRole('button', { name: 'Settings', exact: true }).click();

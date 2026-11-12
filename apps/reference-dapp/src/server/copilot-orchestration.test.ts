@@ -73,6 +73,23 @@ describe('bounded tool orchestration', () => {
     expect(finished.reply).toMatchObject({ kind: 'PROPOSAL', sentence: 'bridge 25 USDC from Base to Solana receive SOL via best slippage 100 bps' });
     expect(finished.reply.notes[0]).toBe('AI explanation (from FloFi\'s verified data): Relay currently guarantees 24.56 for your 25 USDC, with a 0.12 USDC fee, in about 30 seconds.');
   });
+  // P0 hotfix (locale contract): the tools run in the turn's reply language (the interface language the server action resolved), so the facts
+  // the model may quote are already Portuguese in a Portuguese turn; without a reply language they stay English.
+  it('runs every tool in the request\'s reply language (PT and EN), and in English when the request names none', async () => {
+    for (const [replyLanguage, expected] of [['PT', 'PT'], ['EN', 'EN'], [undefined, 'EN']] as const) {
+      const { start } = turn('Is ETH on Base a native coin?');
+      const seen: string[] = [];
+      const real = copilotToolkitOf('PUBLIC_MAINNET', {});
+      const toolkit: CopilotToolkit = { definitions: real.definitions, run: async (name, args, context) => { seen.push(context.language); return real.run(name, args, context); } };
+      const { transport, bodies } = scripted([calls({ name: 'resolve_asset', args: { network: 'base', reference: 'eth' } }), final(question('ASSETS', null))]);
+      const request = { ...start.request, ...replyLanguage ? { replyLanguage } : {} };
+      if (!replyLanguage) delete (request as { replyLanguage?: unknown }).replyLanguage;
+      await interpretCopilotV2(request, { transport, settings, mode: 'live', toolkit });
+      expect(seen, String(replyLanguage)).toEqual([expected]);
+      const output = JSON.parse(((bodies[1]!.input as { type?: string; output?: string }[]).find(item => item.type === 'function_call_output'))!.output!) as { note: string };
+      expect(output.note, String(replyLanguage)).toBe(expected === 'PT' ? 'Moeda nativa (não é um token encapsulado).' : 'Native coin (not a wrapped token).');
+    }
+  });
   it('drops an explanation whose numbers no tool returned, keeping the intent', async () => {
     const { start } = turn('What can I do on Arbitrum?');
     const records: CopilotTelemetry[] = [];

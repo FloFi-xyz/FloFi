@@ -14,6 +14,7 @@ import { accountSignOut } from '../app/account-action';
 import { updateWalletPreference, walletPreference } from '../wallet/wallet-registry';
 import { isFloFiWalletKey } from '../wallet/evm-discovery';
 import { forgetAccountWalletReconnect } from '../wallet/sign-in-wallet';
+import { beginPageExit } from './page-exit';
 import type { FloFiPrivy } from './privy-context';
 
 /** How long Disconnect waits for each browser-side step (wallet close, Privy logout) before moving on. */
@@ -25,6 +26,8 @@ let leaving = false;
 export async function disconnectToLogin(privy: Pick<FloFiPrivy, 'logout'> | null, closeWallet?: () => unknown): Promise<void> {
   if (leaving) return;
   leaving = true;
+  // The session ends below; the product's gate then hands off to /board unless the page is already leaving for sign-in (src/accounts/page-exit.ts).
+  beginPageExit();
   await bounded(() => closeWallet?.());
   // BUILD-FLOFI-WALLET-UX-EXECUTION-FIX-001: a remembered FloFi wallet (this account's) is forgotten too, so the next person never inherits it.
   const remembered = walletPreference();

@@ -195,6 +195,32 @@ test('UX-003/UX-004: completed run — locked CTAs, Return to the Canvas keeps t
   expect(errors).toEqual([]); networkGuard.assertClean();
 });
 
+test('P0 hotfix: a completed run keeps its Canvas and result across a reload; only Create new workflow clears the remembered Canvas', async ({ page, request, networkGuard }) => {
+  const errors: string[] = []; page.on('pageerror', error => errors.push(error.message));
+  const owner = await setup(page, request);
+  await simulateAndExecute(page, owner);
+  await confirmApprovalAndSwap(page, owner, 1);
+  const authored = JSON.parse(await readWorkflowIr(page)) as { workflowId: string };
+  // A reload (and a full-page navigation back to /app) never leaves the Editor empty after a run: same card, same identity, same result.
+  await reloadBuilder(page);
+  await expect(page.locator('.build-flow-surface .composer-card')).toHaveCount(1);
+  expect((JSON.parse(await readWorkflowIr(page)) as { workflowId: string }).workflowId).toBe(authored.workflowId);
+  await openEditorSection(page, 'Execute');
+  await expect(summary(page)).toContainText('Execution completed', { timeout: 30_000 });
+  await expect(page.getByRole('main', { name: 'Execution workspace', exact: true })).not.toContainText(/Review required|Simulate again/);
+  expect(owner.requested()).toBe(2);
+  // The owner's explicit Create new workflow is what clears it: the next reload starts from that clean, empty workflow.
+  await createNew(page).click();
+  await expectEditorSection(page, 'Build');
+  const fresh = (JSON.parse(await readWorkflowIr(page)) as { workflowId: string }).workflowId;
+  expect(fresh).not.toBe(authored.workflowId);
+  await reloadBuilder(page);
+  await expect(page.locator('.build-flow-surface .composer-card')).toHaveCount(0);
+  await expect(page.locator('.build-flow-surface .canvas-empty')).toContainText('Start your workflow');
+  expect(owner.requested()).toBe(2); expect(await owner.sends()).toBe(2);
+  expect(errors).toEqual([]); networkGuard.assertClean();
+});
+
 test('UX-003/UX-004: a declined wallet request resolves the locked CTA and offers Create new workflow', async ({ page, request, networkGuard }) => {
   const errors: string[] = []; page.on('pageerror', error => errors.push(error.message));
   const owner = await setup(page, request, { decline: 1 });

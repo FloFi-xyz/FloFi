@@ -134,6 +134,8 @@ export function simulationError(error: string): string {
   if (/INSUFFICIENT.*(ETH|SOL|NATIVE|GAS)|INSUFFICIENT_GAS/i.test(error)) return 'Add funds for the network fee, then simulate again.';
   if (/INSUFFICIENT|BALANCE_TOO_LOW|exceeds.*balance/i.test(error)) return 'Your available balance is too low for this workflow.';
   if (/HEALTH_FACTOR|UNSAFE_HEALTH|UNSAFE_POSITION/i.test(error)) return 'This action would leave the lending position below its required safety limit.';
+  // P0 hotfix (execution continuity): the approval is confirmed but its allowance read-back is not in yet; the swap's fresh Review waits for it.
+  if (error === 'APPROVAL_NOT_RECONCILED') return 'The approval is confirmed. FloFi is still reading its allowance on the network before preparing the swap. Nothing new was sent; try again in a moment.';
   // BUILD-FLOFI-BRIDGE-LIVE-FIX-003: a refusal at the execution boundary names what happened instead of the generic fallback below.
   if (/SUBMISSION_UNKNOWN|SUBMISSION_RESULT_UNKNOWN|OBSERVE_EXISTING|DEPOSIT_MAY_EXIST|RELAYED_EXECUTION_PENDING/i.test(error)) return 'Your wallet may already have sent this request. FloFi never sends it again; it keeps checking the network for its result.';
   if (/ROUTE_REVALIDATION_UNAVAILABLE/i.test(error)) return 'FloFi could not re-check the route with the provider just before your wallet request, so nothing was sent. Try again in a moment.';

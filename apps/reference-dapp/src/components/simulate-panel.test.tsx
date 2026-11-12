@@ -11,8 +11,8 @@ import { SimulatePanel } from './simulate-panel';
 const fixture = vi.hoisted(() => ({ store: null as unknown as ReturnType<typeof import('../state/workflow-store').useWorkflow> }));
 // A one-action workflow is its own runtime workflow (BUILD-FLOFI-CHAT-E2E-FIX-002), exactly as the store provides it.
 vi.mock('../state/workflow-store', () => ({ useWorkflow: () => ({ ...fixture.store, runtimeWorkflow: fixture.store.state.workflow }) }));
-vi.mock('./simulate-workflow-canvas', () => ({ SimulateWorkflowCanvas: ({ workflowName, primaryAction }: { workflowName: string; primaryAction?: ReactNode }) =>
-  createElement('div', { 'data-workflow-name': workflowName, 'aria-label': 'simulation graph fixture' }, primaryAction) }));
+vi.mock('./simulate-workflow-canvas', () => ({ SimulateWorkflowCanvas: ({ workflowName, primaryAction, dock }: { workflowName: string; primaryAction?: ReactNode; dock?: ReactNode }) =>
+  createElement('div', { 'data-workflow-name': workflowName, 'aria-label': 'simulation graph fixture' }, primaryAction, dock) }));
 
 beforeEach(() => {
   const state = initialEditor(), context = createBaseSepoliaReviewContext();

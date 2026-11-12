@@ -373,7 +373,7 @@ function CredentialsWorkspace({ access }: { access?: DelegationAccess | undefine
   const createImport = signedIn && account!.availability.managedWallets;
   return <div className="ux-page credentials">
     <header className="ux-page-head"><div><h1>{tr("Credentials")}</h1><p>{tr("Wallets and payment methods you use with FloFi. Saving here never approves anything.")}</p></div></header>
-    <p className="workspace-notice" role="status">{tr(status || connection.error || '')}</p>
+    <p className="workspace-notice" role="status">{status ? tr(status) : connection.notice ? tr(...connection.notice) : ''}</p>
     <section className="ux-panel" aria-labelledby="credentials-wallets">
       <div className="ux-panel-head"><div><h2 id="credentials-wallets">{tr("Wallets")}</h2><span className="ux-count">{entries.length}</span></div>
         {/* Board 13: one "Add wallet" that opens both existing paths (connect a wallet you have; create or import a FloFi wallet). */}

@@ -15,9 +15,16 @@
  * P0 universal execution: tokens report their real decimals and carry code by default; a test may make one contradict its catalog entry
  * (`setDecimals`), remove its code (`setCode(token, '0x')`) or charge a fee on every transfer of it (`setTransferFeeBps`: the recipient gets
  * less than was sent, while the router still returns the pool's full output, as with a real fee-on-transfer token).
+ *
+ * P0 hotfix (E1): optionally an Across SpokePool MODEL (not the bytecode) — on an origin chain `deposit(...)` (the bytes32 variant the Router's
+ * codec decodes) pulls the input from the caller against its allowance and emits `FundsDeposited` with the next deposit id; on a destination
+ * chain `control.acrossFill` plays a relayer's fill (`FilledRelay` + the output transfer to the recipient) and `control.acrossRefund` a refund on
+ * the origin; the views the Router reads (chainId, paused flags, buffers) answer; `eth_getLogs` filters every mined log; the `safe` head lags
+ * `latest` by a controllable number of blocks.
  */
 import { uniswapV3PoolAddress } from '@defi-workflow-engine/action-registry';
-import { erc4337, erc7710 } from '@defi-workflow-engine/reference-compiler';
+import { decodeAcrossDeposit, encodeErc20TransferLog, encodeFilledRelayLog, encodeFundsDepositedLog, erc4337, erc7710,
+  ROUTER_SELECTORS as ROUTER_SEL } from '@defi-workflow-engine/reference-compiler';
 import { publicSwapProfile, type PublicSwapProfile } from '../../domain/public-testnet-swap.ts';
 
 const D = erc7710, F = D.DELEGATION_FRAMEWORK_V1_3;
@@ -40,7 +47,10 @@ export type DoubleSwapProfile = { readonly router: string; readonly quoter: stri
 /** One Aave V3 reserve of the modelled Pool: identity, oracle price (base currency, 8 decimals) and risk parameters (basis points). */
 export type DoubleAaveReserve = { readonly asset: string; readonly aToken: string; readonly variableDebtToken: string; readonly decimals: number;
   readonly price: bigint; readonly ltvBps: bigint; readonly liquidationThresholdBps: bigint };
+/** An Across SpokePool model: its address and runtime code (pinned by tests), the token it moves, and this chain's role. */
+export type DoubleAcrossSpokePool = { readonly spokePool: string; readonly token: string; readonly code: string; readonly role: 'origin' | 'destination' };
 export type EvmDoubleOptions = { readonly profile?: DoubleSwapProfile; readonly aave?: { readonly pool: string; readonly reserves: readonly DoubleAaveReserve[] };
+  /** P0 hotfix (E1): an Across SpokePool model on this chain. */ readonly across?: DoubleAcrossSpokePool;
   /** The fee tiers whose canonical pool of the modelled pair exists (default: every tier of a catalog profile). */ readonly deployedTiers?: readonly number[] };
 export function createEvmDouble(chainId: number, clock: () => number = () => Math.floor(Date.now() / 1000), options: EvmDoubleOptions = {}) {
   const testnet = publicSwapProfile(chainId);
@@ -56,6 +66,9 @@ export function createEvmDouble(chainId: number, clock: () => number = () => Mat
   const native = new Map<string, bigint>(), disabled = new Set<string>(), callCounts = new Map<string, bigint>(), usedIds = new Set<string>();
   const receipts = new Map<string, Receipt>(), txs = new Map<string, Tx>();
   const pool = profile.pool, opStack = chainId === 8453;
+  const across = options.across ? { ...options.across, spokePool: lower(options.across.spokePool), token: lower(options.across.token) } : null;
+  /** Across: the next deposit id, the paused flags, and how many blocks the `safe` head lags `latest`. */
+  let nextDepositId = 7n, depositsPaused = false, fillsPaused = false, safeLag = 0;
   /**
    * The canonical Uniswap v3 pools of the modelled pair (CREATE2 from the profile's factory) at the fee tiers the double deploys: a catalog
    * profile's tiers by default, `deployedTiers` to model a pair that has only some of them.
@@ -181,10 +194,27 @@ export function createEvmDouble(chainId: number, clock: () => number = () => Mat
       return [{ address: r.aToken, topics: [TRANSFER, topic(account), topic('0x' + '0'.repeat(40))], data: word(amount) },
         { address: r.asset, topics: [TRANSFER, topic(r.aToken), topic(lower(to))], data: word(amount) }];
     }
+    // P0 hotfix (E1): Across SpokePool `deposit` (bytes32 variant) on the origin chain: the caller pays the input against its allowance.
+    if (across && across.role === 'origin' && target === across.spokePool && method === ROUTER_SEL.acrossDeposit) {
+      const d = decodeAcrossDeposit(call.data);
+      if (depositsPaused) fail('DepositsArePaused');
+      if (lower(d.inputToken) !== across.token) fail('InvalidInputToken');
+      if (BigInt(d.fillDeadline) <= BigInt(clock()) || BigInt(d.quoteTimestamp) + 3_600n < BigInt(clock())) fail('InvalidQuoteTimestampOrFillDeadline');
+      const allowance = allowances.get(allowanceKey(across.token, account, across.spokePool)) ?? 0n;
+      if (allowance < d.inputAmount || bal(across.token, account) < d.inputAmount) fail('ERC20: transfer amount exceeds allowance');
+      allowances.set(allowanceKey(across.token, account, across.spokePool), allowance - d.inputAmount);
+      setBal(across.token, account, bal(across.token, account) - d.inputAmount); setBal(across.token, across.spokePool, bal(across.token, across.spokePool) + d.inputAmount);
+      const depositId = nextDepositId++;
+      const event = encodeFundsDepositedLog({ spokePool: across.spokePool, destinationChainId: d.destinationChainId, depositId, depositor: d.depositor,
+        inputToken: d.inputToken, outputToken: d.outputToken, inputAmount: d.inputAmount, outputAmount: d.outputAmount, quoteTimestamp: d.quoteTimestamp,
+        fillDeadline: d.fillDeadline, exclusivityDeadline: 0, recipient: d.recipient, exclusiveRelayer: topic(d.exclusiveRelayer), message: d.message });
+      return [{ address: across.token, topics: [TRANSFER, topic(account), topic(across.spokePool)], data: word(d.inputAmount) },
+        { address: event.address, topics: [...event.topics], data: event.data }];
+    }
     return fail('CALL_NOT_MODELED');
   }
-  /** The tokens the double keeps balances for: the swap pair and every modelled Aave reserve. */
-  function tokens(): string[] { return [profile.usdc, profile.weth, ...aave?.reserves.map(r => r.asset) ?? []]; }
+  /** The tokens the double keeps balances for: the swap pair, every modelled Aave reserve and an Across SpokePool's token. */
+  function tokens(): string[] { return [profile.usdc, profile.weth, ...aave?.reserves.map(r => r.asset) ?? [], ...across && across.token !== profile.usdc ? [across.token] : []]; }
   /** Aave `getUserAccountData` in the base currency (8 decimals): collateral, debt, weighted LTV and liquidation threshold, health factor (1e18). */
   function accountData(user: string) {
     let collateral = 0n, debtBase = 0n, ltvWeighted = 0n, ltWeighted = 0n;
@@ -207,12 +237,14 @@ export function createEvmDouble(chainId: number, clock: () => number = () => Mat
     return '0x';
   }
   function snapshotState() {
-    return { balances: new Map(balances), allowances: new Map(allowances), supplied: new Map(supplied), debt: new Map(debt), collateralOn: new Set(collateralOn) };
+    return { balances: new Map(balances), allowances: new Map(allowances), supplied: new Map(supplied), debt: new Map(debt), collateralOn: new Set(collateralOn),
+      depositId: nextDepositId };
   }
   function restoreState(snapshot: ReturnType<typeof snapshotState>) {
     balances.clear(); snapshot.balances.forEach((v, k) => balances.set(k, v)); allowances.clear(); snapshot.allowances.forEach((v, k) => allowances.set(k, v));
     supplied.clear(); snapshot.supplied.forEach((v, k) => supplied.set(k, v)); debt.clear(); snapshot.debt.forEach((v, k) => debt.set(k, v));
     collateralOn.clear(); snapshot.collateralOn.forEach(v => collateralOn.add(v));
+    nextDepositId = snapshot.depositId;
   }
   /** `DelegationManager.redeemDelegations` for single-call, depth-1 contexts (what FloFi's executor sends). */
   function redeem(sender: string, data: string): Receipt['logs'] {
@@ -261,6 +293,8 @@ export function createEvmDouble(chainId: number, clock: () => number = () => Mat
   }
   const blockOf = (n: number) => ({ number: '0x' + n.toString(16), hash: word(BigInt(n) + 0xb10c0000n), timestamp: '0x' + clock().toString(16), transactions: [...txs.values()]
     .filter(t => t.blockNumber === n).map(t => t.hash) });
+  /** A block tag: latest/pending, the `safe`/`finalized` head (lagging by `safeLag`), or a number. */
+  const blockAt = (tag: unknown) => tag === 'latest' || tag === 'pending' ? block : tag === 'safe' || tag === 'finalized' ? Math.max(0, block - safeLag) : Number(BigInt(String(tag)));
 
   const rpc = async (method: string, params: readonly unknown[]): Promise<unknown> => {
     const p = params as unknown[];
@@ -270,8 +304,24 @@ export function createEvmDouble(chainId: number, clock: () => number = () => Mat
       case 'eth_gasPrice': return '0x3b9aca00';
       case 'eth_maxPriorityFeePerGas': return '0x5f5e100';
       case 'eth_estimateGas': return '0x61a80';
-      case 'eth_getBlockByNumber': return blockOf(p[0] === 'latest' || p[0] === 'pending' ? block : Number(BigInt(String(p[0]))));
-      case 'eth_getCode': return code.get(lower(String(p[0]))) ?? ([...tokens(), profile.router, profile.quoter, F.delegationManager, ...Object.values(F.enforcers),
+      case 'eth_getBlockByNumber': return blockOf(blockAt(p[0]));
+      // P0 hotfix (E1): every mined log matching an address, a block range and topic filters (null: any), as a node's `eth_getLogs`.
+      case 'eth_getLogs': {
+        const f = p[0] as { address?: string; fromBlock?: string; toBlock?: string; topics?: (string | null)[] };
+        const from = f.fromBlock === undefined ? 0 : blockAt(f.fromBlock), to = f.toBlock === undefined ? block : blockAt(f.toBlock);
+        const out: unknown[] = [];
+        for (const [hash, r] of receipts) {
+          if (r.status !== 1 || r.blockNumber < from || r.blockNumber > to) continue;
+          r.logs.forEach((l, logIndex) => {
+            if (f.address && lower(l.address) !== lower(f.address)) return;
+            if ((f.topics ?? []).some((t, i) => t !== null && t !== undefined && lower(String(l.topics[i] ?? '')) !== lower(t))) return;
+            out.push({ ...l, blockNumber: '0x' + r.blockNumber.toString(16), blockHash: blockOf(r.blockNumber).hash, transactionHash: hash, logIndex: '0x' + logIndex.toString(16), removed: false });
+          });
+        }
+        return out;
+      }
+      case 'eth_getCode': if (across && lower(String(p[0])) === across.spokePool) return across.code;
+        return code.get(lower(String(p[0]))) ?? ([...tokens(), profile.router, profile.quoter, F.delegationManager, ...Object.values(F.enforcers),
         ...aave ? [aave.pool] : [], ...canonicalPools].includes(lower(String(p[0]))) ? '0x6080' : '0x');
       case 'eth_getBalance': return '0x' + (native.get(lower(String(p[0]))) ?? 0n).toString(16);
       case 'eth_getTransactionCount': return '0x' + (nonces.get(lower(String(p[0]))) ?? 0n).toString(16);
@@ -302,6 +352,14 @@ export function createEvmDouble(chainId: number, clock: () => number = () => Mat
         if (to === profile.quoter && selector === QUOTE) return word(quote('0x' + call.data.slice(34, 74), BigInt('0x' + call.data.slice(138, 202)))) + '0'.repeat(192);
         // OP Stack (Base): the GasPriceOracle's `getL1FeeUpperBound(unsignedTxSize)`, at a fixed modelled price per byte.
         if (opStack && to === GAS_PRICE_ORACLE && selector === L1_FEE_UPPER_BOUND) return word(BigInt('0x' + call.data.slice(10)) * L1_WEI_PER_BYTE);
+        // P0 hotfix (E1): the Across SpokePool views the Router reads before quoting.
+        if (across && to === across.spokePool) {
+          if (selector === ROUTER_SEL.chainId) return word(BigInt(chainId));
+          if (selector === ROUTER_SEL.pausedDeposits) return word(depositsPaused ? 1n : 0n);
+          if (selector === ROUTER_SEL.pausedFills) return word(fillsPaused ? 1n : 0n);
+          if (selector === ROUTER_SEL.depositQuoteTimeBuffer) return word(3_600n);
+          if (selector === ROUTER_SEL.fillDeadlineBuffer) return word(21_600n);
+        }
         return fail('CALL_NOT_MODELED');
       }
       case 'eth_sendRawTransaction': {
@@ -406,6 +464,46 @@ export function createEvmDouble(chainId: number, clock: () => number = () => Mat
     /** A fee-on-transfer token: each transfer of it delivers `bps` basis points less to the recipient (the fee is burned). */
     setTransferFeeBps(token: string, bps: bigint) { transferFeeBps.set(lower(token), bps); },
     accountData: (user: string) => accountData(lower(user)),
+    /**
+     * P0 hotfix (E1), destination chain: a relayer fills an Across deposit — the output to the recipient and the SpokePool's `FilledRelay`, in one
+     * mined transaction. `overrides` forge a fill that disagrees with the deposit (another recipient, amount, ...).
+     */
+    acrossFill(fill: { readonly originChainId: bigint; readonly depositId: bigint; readonly depositor: string; readonly recipient: string; readonly inputToken: string;
+      readonly inputAmount: bigint; readonly outputAmount: bigint; readonly fillDeadline: number; readonly relayer?: string;
+      readonly overrides?: { readonly updatedRecipient?: string; readonly updatedOutputAmount?: bigint; readonly transferAmount?: bigint } }): string {
+      if (!across || across.role !== 'destination') return fail('ACROSS_NOT_MODELED');
+      if (fillsPaused) fail('FillsArePaused');
+      const relayer = lower(fill.relayer ?? '0x' + 'e1'.repeat(20)), recipient = lower(fill.overrides?.updatedRecipient ?? fill.recipient);
+      const output = fill.overrides?.updatedOutputAmount ?? fill.outputAmount, transfer = fill.overrides?.transferAmount ?? output;
+      const n = nonces.get(relayer) ?? 0n;
+      nonces.set(relayer, n + 1n);
+      const hash = D.keccakHex(`fill:${relayer}:${n}:${fill.depositId}`);
+      const event = encodeFilledRelayLog({ spokePool: across.spokePool, originChainId: fill.originChainId, depositId: fill.depositId, relayer: topic(relayer),
+        inputToken: lower(fill.inputToken), outputToken: across.token, inputAmount: fill.inputAmount, outputAmount: fill.outputAmount, repaymentChainId: BigInt(chainId),
+        fillDeadline: fill.fillDeadline, exclusivityDeadline: 0, exclusiveRelayer: topic(ZERO), depositor: lower(fill.depositor), recipient: lower(fill.recipient),
+        messageHash: word(0n), updatedRecipient: recipient, updatedMessageHash: word(0n), updatedOutputAmount: output, fillType: 0 });
+      const out = encodeErc20TransferLog(across.token, relayer, recipient, transfer);
+      return mine(hash, relayer, across.spokePool, '0x', n, () => {
+        setBal(across.token, recipient, bal(across.token, recipient) + transfer);
+        return [{ address: out.address, topics: [...out.topics], data: out.data }, { address: event.address, topics: [...event.topics], data: event.data }];
+      });
+    },
+    /** P0 hotfix (E1), origin chain: the SpokePool refunds a deposit's input to its depositor (one mined transaction). */
+    acrossRefund(to: string, amount: bigint): string {
+      if (!across || across.role !== 'origin') return fail('ACROSS_NOT_MODELED');
+      const n = nonces.get(across.spokePool) ?? 0n;
+      nonces.set(across.spokePool, n + 1n);
+      const hash = D.keccakHex(`refund:${n}:${lower(to)}:${amount}`);
+      return mine(hash, across.spokePool, across.spokePool, '0x', n, () => {
+        setBal(across.token, across.spokePool, bal(across.token, across.spokePool) - amount); setBal(across.token, lower(to), bal(across.token, lower(to)) + amount);
+        return [{ address: across.token, topics: [TRANSFER, topic(across.spokePool), topic(lower(to))], data: word(amount) }];
+      });
+    },
+    /** Mines `n` empty blocks (confirmations). */
+    mineBlocks(n: number) { block += n; },
+    /** How many blocks the `safe` head lags `latest` (default 0). */
+    setSafeLag(lag: number) { safeLag = lag; },
+    pauseAcross(deposits: boolean, fills: boolean) { depositsPaused = deposits; fillsPaused = fills; },
     dropNextSubmission() { dropNext = true; },
     balance: (token: 'USDC' | 'WETH', owner: string) => bal(token === 'USDC' ? profile.usdc : profile.weth, lower(owner)),
     callCount: (hash: string) => callCounts.get(lower(hash)) ?? 0n,

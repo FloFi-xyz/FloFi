@@ -175,17 +175,20 @@ test('Swap → Supply → Borrow on Base: the Editor asks the wallet for ONE wal
   const [run] = await query<{ state: string; mode: string }>(`SELECT state, mode FROM workflow_runs ORDER BY created_at DESC LIMIT 1`);
   expect(run).toEqual({ state: 'COMPLETED', mode: 'USER_FUNDED' });
 
-  // Reload: a page load gives the Canvas a new workflow id, so the run is OFFERED as an earlier one (never followed silently). It must be
-  // offered, and following it must show its result read from FloFi, before anything below is asserted: a check made before the run loads
-  // would pass even if the recovered run sent the batch again.
+  // Reload: P0 hotfix (execution continuity) — the Canvas keeps its workflow id across the reload (`domain/editor-persistence.ts`), so the run
+  // is THIS workflow's own (never offered as an earlier visit's run). Its progress is loaded only by the owner's click (the read may need the
+  // session's wallet sign-in; never a send). It must be loaded, and show its result read from FloFi, before anything below is asserted: a
+  // check made before the run loads would pass even if the recovered run sent the batch again.
   await page.reload();
   await openEditorSection(page, 'Execute');
-  const earlier = panel(page).getByRole('button', { name: 'Show its progress', exact: true });
-  await expect(earlier).toBeVisible({ timeout: 30_000 });
+  const load = panel(page).getByRole('button', { name: 'Load workflow progress', exact: true });
+  await expect(load).toBeVisible({ timeout: 30_000 });
+  await expect(panel(page).getByRole('button', { name: 'Show its progress', exact: true })).toHaveCount(0);
   await expect(panel(page)).not.toContainText('Every step reconciled.');
-  await earlier.click();
+  await load.click();
   await expect(panel(page)).toHaveAttribute('data-run-state', 'COMPLETED', { timeout: 60_000 });
   await expect(panel(page)).toContainText('Every step reconciled.');
+  await expect(panel(page).getByRole('button', { name: 'Authorize workflow', exact: true })).toHaveCount(0);
   // Settled: a finished run, once shown, has nothing left to do (no automatic recovery or status poll applies to a COMPLETED run). For 5 more
   // seconds the wallet must never be asked to send again (even a duplicate the wallet refuses is logged), and the chain still holds exactly
   // the one batch. (Reading back a batch the wallet holds after a reload is covered by the unit tests of the Editor's recovery.)

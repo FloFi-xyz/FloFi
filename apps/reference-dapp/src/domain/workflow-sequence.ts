@@ -191,6 +191,26 @@ export function boundProjection(step: SequenceStep, amount: string | null, conte
   } catch { return null; }
 }
 
+/**
+ * P0 hotfix (execution continuity, production 2026-11-12): the step the sequence's runtime serves and the workflow it receives.
+ *
+ * `cursor` is the first step not completed yet; once every step completed it STAYS on the last step, so the last step's own run (its final
+ * result) remains the runtime's record. A step's bound is always computed from the completions BEFORE it (`before`): before this, a finished
+ * sequence recomputed the last step's bound with its own allocation subtracted (delivered − allocated), re-authored the step with the
+ * remainder, retired its reconciled record and showed "Review required again / Workflow changed. Simulate again" after completion.
+ * Pure; never authority (each runtime still re-gates its own Review and execution).
+ */
+export function sequenceCursor(sequence: WorkflowSequence, completed: readonly CompletedStep[]): { readonly cursor: number; readonly finished: boolean; readonly before: readonly CompletedStep[] } {
+  const finished = completed.length >= sequence.steps.length;
+  const cursor = Math.max(0, Math.min(completed.length, sequence.steps.length - 1));
+  return { cursor, finished, before: completed.slice(0, cursor) };
+}
+/** The workflow the step's runtime receives, bound only by what the steps before it delivered (null: the bound is refused or unprovable). */
+export function stepRuntimeWorkflow(step: SequenceStep, before: readonly CompletedStep[], context: ReviewContext): { readonly bound: string | null; readonly workflow: Workflow | null } {
+  const bound = boundAmount(step, before);
+  return { bound, workflow: boundProjection(step, bound, context, before) };
+}
+
 /** What a step's reconciled record proves it delivered, in native units of `output`; null when nothing is proven for exactly that asset. */
 export function deliveredByRecord(kind: string, record: unknown, output: SequenceAsset | null): string | null {
   if (!output || !isObject(record)) return null;

@@ -22,7 +22,7 @@ import { bindingOf, runMatchesBinding } from '../editor/authorize-binding';
 import { editorWorkflowStrategy } from '../editor/workflow-strategy';
 import { prepareCatalogs } from '../server/editor-catalogs';
 import { platformStateHost } from '../server/platform-state-host';
-import { fixedWindow } from '../platform/index';
+import { deploymentEngineRuntime, evaluateGates, fixedWindow, type HandoffPolicy } from '../platform/index';
 import { reviewEditorExecution, type EditorExecutionReview } from '../editor/workflow-execution';
 import { walletProfileOf, workflowRunCancel, workflowRunUserFundedPrepare, workflowRunUserFundedStart, claimApproval, type ClaimedProposal } from '../platform/index';
 import type { PreparedGroupView } from '../workflow-runs/service';
@@ -38,6 +38,8 @@ const failure = (cause: unknown, fallback = 'EDITOR_EXECUTION_FAILED'): { ok: fa
 const EVM_ADDRESS = /^0x[0-9a-fA-F]{40}$/;
 /** Whole-workflow Reviews per FloFi account (each one reads quotes, allowances and a batch simulation on FloFi's RPC). */
 const REVIEW_LIMIT = 30, REVIEW_WINDOW_SECONDS = 600;
+/** Only the deployment and code facts of a bridge step's gates are read for the Review (the run's start applies its requester's own policy). */
+const REVIEW_GATE_POLICY: HandoffPolicy = { ok: false, code: 'MCP_HANDOFF_POLICY_INVALID' };
 /** Whether the Editor can run a whole workflow as one run with user-funded grouped authorization on this deployment. */
 export async function editorWorkflowExecutionAvailability(): Promise<{ readonly enabled: boolean; readonly code: string | null }> {
   return withFlightAccess(async () => {
@@ -72,8 +74,15 @@ export async function reviewEditorWorkflow(workflow: unknown, owner: string, pro
       return { ok: false, code: 'EDITOR_REVIEW_RATE_LIMITED' };
     // The workflow's listed tokens resolve exactly as on the Canvas (the run's own start does the same).
     await prepareCatalogs(workflow);
-    const runtime = userFundedRuntime(env);
-    return await reviewEditorExecution({ workflow, owner, profile: walletProfileOf(profile), facts: runtime.facts, deps: runtime.deps, now: new Date() });
+    const runtime = userFundedRuntime(env), engine = deploymentEngineRuntime(env);
+    // P0 hotfix: a bridge joins the batch only while its own flow executes on this deployment (code support and the deployment's live mode /
+    // owner-execution switch — the policy part is the run's own, checked when it starts); otherwise the Review says why, step by step.
+    const stepRefusal = async (step: Parameters<typeof evaluateGates>[0]) => {
+      const gates = await evaluateGates(step, engine, REVIEW_GATE_POLICY);
+      return !gates.supportedByCode.execute ? gates.supportedByCode.reason ?? 'OWNER_EXECUTION_NOT_IMPLEMENTED'
+        : !gates.enabledByDeployment.enabled ? gates.enabledByDeployment.reason ?? 'FLOW_NOT_ENABLED' : null;
+    };
+    return await reviewEditorExecution({ workflow, owner, profile: walletProfileOf(profile), facts: runtime.facts, deps: runtime.deps, now: new Date(), stepRefusal });
   } catch (cause) { return failure(cause); }
 
   });

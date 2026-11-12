@@ -35,6 +35,8 @@ import { plannedSteps, type PlannedStep } from '../user-funded/planned.ts';
 import { authorizeGroup, EVM_PREPARED_TTL_MS, prepareGroup, solanaPreparedTtlMs, supersede, walletBatchId, type OwnerAnswer, type Prepared } from '../user-funded/groups.ts';
 import { boundStrategy } from '../engine/workflow-bindings';
 import type { GroupRecord } from './pg-store.ts';
+import { bridgeProgressOf, type BridgeDeliveryState } from '../user-funded/bridge-delivery.ts';
+import { presentedDeliveryState } from './run-step-phase.ts';
 
 type Env = Readonly<Record<string, string | undefined>>;
 /** Workflow runs are opt-in per deployment (default off: a multi-step handoff is then refused with WORKFLOW_RUNS_NOT_ENABLED). */
@@ -221,7 +223,12 @@ export const PERMANENT_DUE_REFUSALS: ReadonlySet<string> = new Set(['WORKFLOW_BI
   'TOKEN_METADATA_MISMATCH', 'CONTRACT_CODE_MISSING', 'SIMULATION_SWAP_OUTPUT_SHORT', 'USER_FUNDED_DEADLINE_UNAVAILABLE',
   // A batched Repay no longer below the owner's current variable debt (repaid elsewhere meanwhile): the signed amount is fixed and the debt only
   // grows by interest, so every retry refuses again. The owner-signed Repay flow re-reads the debt and reviews the step itself.
-  'REPAY_PARTIAL_DEBT_REQUIRED']);
+  'REPAY_PARTIAL_DEBT_REQUIRED',
+  // P0 hotfix (E1): a bridge no batch may carry here (its pair, asset, provider, recipient or destination RPC; a route the deployment does not
+  // offer is USER_FUNDED_ACTION_NOT_BUILDABLE above), or a deployment whose pinned contracts no longer match: the Router's own flow reviews it.
+  'USER_FUNDED_BRIDGE_PROVIDER_UNSUPPORTED', 'USER_FUNDED_BRIDGE_PAIR_UNSUPPORTED', 'USER_FUNDED_BRIDGE_ASSET_UNSUPPORTED', 'USER_FUNDED_BRIDGE_DESTINATION_UNREADABLE',
+  'USER_FUNDED_BRIDGE_RECIPIENT_NOT_OWNER', 'USER_OPERATION_BRIDGE_SIGNED_WHEN_DUE', 'ROUTER_UNEXPECTED_CONTRACT',
+  'ROUTER_CONTRACT_CODE_MISSING']);
 /**
  * Blocks a due group after a permanent refusal and halts the run (steps already executed keep their facts), then refuses with the code. Only
  * from exactly the PLANNED group this preparation read (its row version): a concurrent preparation that succeeded — its batch possibly already
@@ -257,7 +264,7 @@ const preparedHorizonMs = (strategy: GroupRecord['strategy']) => strategy === 'E
 /** P0 workflow execution: the run's own EVM wallet is known here, so a step whose Aave beneficiary is another account is never grouped. */
 /** Whether a step can join a user-funded batch: true, or the builder's own closed reason why not (shown as the group's downgrade). */
 export const userFundedBuildable = (facts: UserFundedFacts, evmOwner?: string | null) => (st: Parameters<typeof evmStepBuildable>[0]): boolean | string =>
-  st.namespace === 'solana' || (evmStepBuildable(st, facts.chains, evmOwner) ?? true);
+  st.namespace === 'solana' || (evmStepBuildable(st, facts.chains, evmOwner, facts.bridgeRoutes) ?? true);
 /**
  * The owner chose user-funded execution with the wallets their browser reported (EIP-5792 capabilities, Wallet Standard features): the run's
  * groups are planned for exactly those wallets and stored with the mode, in one transaction (the database checks every group's fee payer is
@@ -602,7 +609,14 @@ export type RunGroupView = { readonly index: number; readonly chain: string; rea
    * The owner's own view only (a requester never sees amounts it was not shared), null until prepared.
    */
   readonly planned: { readonly steps: readonly ({ readonly index: number } & PlannedStep)[]; readonly calls: number; readonly approvals: number;
-    readonly healthFactorAfter: string | null } | null };
+    readonly healthFactorAfter: string | null } | null;
+  /**
+   * P0 hotfix (E1): the delivery of the bridge step this group deposited, once its source side reconciled (null otherwise): AWAITING_DESTINATION
+   * until the Across fill on `chain` is verified and final, NOT_OBSERVED past its fill deadline (observed again, never resent), DELIVERED,
+   * REFUNDED. The fill's transaction only with shared status.
+   */
+  readonly delivery?: { readonly step: number; readonly chain: string; readonly state: BridgeDeliveryState;
+    readonly fill: { readonly hash: string; readonly explorerUrl: string | null } | null } | null };
 
 /**
  * Whether the run's own records PROVE nothing of it was ever sent: no step that may have reached a chain (`MAYBE_SUBMITTED`; in a user-funded run
@@ -640,6 +654,11 @@ export async function runView(deps: { readonly store: Pick<WorkflowRunStore, 'st
       approvals: from?.approvals ?? p.group.calls.filter(c => c.kind === 'ERC20_APPROVE').length,
       healthFactorAfter: from ? null : Object.values(p.simulation?.healthFactorAfter ?? {})[0] ?? null };
   };
+  const deliveryOf = (g: GroupRecord): NonNullable<RunGroupView['delivery']> | null => {
+    const b = bridgeProgressOf(g.outcome);
+    return b ? { step: b.step, chain: b.destinationChain, state: presentedDeliveryState(g, b.state),
+      fill: options.outcomes && b.fill ? { hash: b.fill.transactionHash, explorerUrl: executionExplorer(b.destinationChain, b.fill.transactionHash, false) } : null } : null;
+  };
   const groups: RunGroupView[] = groupRecords.map(g => {
     const fee = (g.prepared as { fee?: { maxCost?: string; unit?: string; estimated?: boolean } } | null)?.fee;
     const paid = (g.outcome as { gasPaid?: { amount: string; unit: string; payer: string } } | null)?.gasPaid ?? null;
@@ -660,7 +679,7 @@ export async function runView(deps: { readonly store: Pick<WorkflowRunStore, 'st
       submissions,
       batchId: owner && g.strategy === 'EVM_WALLET_BATCH' ? typeof g.authorization?.batchId === 'string' ? g.authorization.batchId
         : g.state === 'PREPARED' ? String((g.prepared as { request?: { id?: string } } | null)?.request?.id ?? '') || null : null : null,
-      signed: g.authorization !== null, planned: owner ? plannedOf(g) : null };
+      signed: g.authorization !== null, planned: owner ? plannedOf(g) : null, delivery: deliveryOf(g) };
   });
   const views: RunStepView[] = steps.map(s => {
     const local = s.outcome?.evidence?.environment === 'MOCKED';

@@ -32,7 +32,9 @@ export function plannedSteps(requirement: { readonly steps: readonly StepRequire
     out.set(s.stepIndex, {
       spend: !borrow && spendRef ? amountOf(s.spend.amount, spendRef) : null,
       expected: s.quoted && quotedRef ? amountOf(s.quoted.amount, quotedRef) : borrow && s.guaranteed && guaranteedRef ? amountOf(s.guaranteed.amount, guaranteedRef) : null,
-      minimum: step.action === 'swap' && s.guaranteed && guaranteedRef ? amountOf(s.guaranteed.amount, guaranteedRef) : null, recipient: s.recipient });
+      // A swap's signed minimum; P0 hotfix (E1): a batched bridge's exact delivery on its destination chain (its deposit's output).
+      minimum: (step.action === 'swap' || step.action === 'bridge') && s.guaranteed && guaranteedRef ? amountOf(s.guaranteed.amount, guaranteedRef) : null,
+      recipient: step.action === 'bridge' ? null : s.recipient });
   }
   return out;
 }

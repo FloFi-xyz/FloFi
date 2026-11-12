@@ -4,7 +4,7 @@ import { swapProfile } from '../domain/public-testnet-swap';
 import { useLocale } from '../i18n/locale';
 
 import { createPortal } from 'react-dom';
-import { useEffect, useState, type ReactNode } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { simulateFooterStatus } from '../domain/approved-ux';
 import type { EditorOverview } from '../domain/editor-overview';
 import { useModeA } from '../state/mode-a-store';
@@ -108,7 +108,20 @@ export function SummaryBar({ tab, setTab, simulationActionHost, reviewAvailable,
     : overview.state === 'configured' && !simulationBlocked ? <p className="summary-notice" data-notice="none">{tr('No warnings')}</p>
     : null;
   const lifecycle = (tab === 'Build' || tab === 'Simulate') && primaryAction;
-  return <footer className={`summary-bar${lifecycle ? ' editor-bar' : ''}`} data-workflow-revision={state.workflow.revision}>
+  // P0 hotfix (readable cards): the Editor bar is sticky at the bottom of the page, so anything scrolled into view (a focused control, the
+  // Canvas navigator under a tall stacked graph) stops above it rather than behind it — the page's scroll padding is the bar's own height.
+  const bar = useRef<HTMLElement>(null);
+  const sticky = Boolean(lifecycle);
+  useLayoutEffect(() => {
+    const element = bar.current, root = document.documentElement;
+    if (!sticky || !element || typeof ResizeObserver === 'undefined') return;
+    const apply = () => root.style.setProperty('--editor-bar-height', `${Math.ceil(element.getBoundingClientRect().height)}px`);
+    apply();
+    const observer = new ResizeObserver(apply);
+    observer.observe(element);
+    return () => { observer.disconnect(); root.style.removeProperty('--editor-bar-height'); };
+  }, [sticky]);
+  return <footer ref={bar} className={`summary-bar${lifecycle ? ' editor-bar' : ''}`} data-workflow-revision={state.workflow.revision}>
     <div className="summary-count"><span className="eyebrow">{tr("WORKFLOW")}</span><strong>{tr(actionCount === 1 ? '1 step' : '{0} steps', actionCount)}</strong></div>
     {notice}
     {/* The m:ss countdown ticks visibly only; the live region speaks when the meaning changes (valid, under 15 s, expired, a blocker). */}

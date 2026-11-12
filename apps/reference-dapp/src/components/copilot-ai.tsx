@@ -318,7 +318,7 @@ export function CopilotMessage({ text, notes, options, disabled, onPick }: { tex
     <p>{tr(text)}</p>
     {notes && notes.length > 0 && <ul className="copilot-notes">{notes.map((note, index) => <li key={index}>{tr(note)}</li>)}</ul>}
     {options && options.length > 0 && <div className="copilot-options" role="group" aria-label={tr("Suggested answers")}>
-      {options.map(option => <button key={option} type="button" className="quiet" disabled={disabled} onClick={() => onPick(option)}>{option}</button>)}</div>}
+      {options.map(option => <button key={option} type="button" className="quiet" disabled={disabled} onClick={() => onPick(tr(option))}>{tr(option)}</button>)}</div>}
   </>;
 }
 /** Shown inside the existing proposal box when the pending proposal came from the Copilot. */

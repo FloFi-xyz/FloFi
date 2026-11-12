@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { expect, type Locator, type Page } from '@playwright/test';
+import { EDITOR_WORKFLOW_STORAGE_KEY } from '../src/domain/editor-persistence';
 
 /**
  * P0 approved UX (board 03b): navigation lives only in the ☰ drawer — "New workflow" (the Chat entry, where offered), "Editor", "Dashboard",
@@ -84,6 +85,9 @@ export async function continueToBuilder(page: Page): Promise<void> {
   await expect(entry).toHaveCount(0);
 }
 export async function openBuilder(page: Page, options?: Parameters<Page['goto']>[1]): Promise<void> {
+  // P0 hotfix (execution continuity): this browser remembers the Editor's Canvas across visits (`domain/editor-persistence.ts`); opening the
+  // builder is a new visit that starts from an empty draft, as in a browser without that remembered Canvas. A reload (`reloadBuilder`) keeps it.
+  if (/^https?:/.test(page.url())) await page.evaluate(key => { try { window.localStorage.removeItem(key); } catch { /* storage blocked */ } }, EDITOR_WORKFLOW_STORAGE_KEY);
   await page.goto('/app', options);
   await continueToBuilder(page);
 }
@@ -139,22 +143,20 @@ export async function expectProductSection(page: Page, section: ProductSection):
 
 /**
  * P0 approved UX (board 06): in the public chat-first workspace the Simulate section's former "Simulation details" disclosure (the Simulation
- * Summary and the Review) is the Review panel's collapsed "Technical details". The panel (eyebrow REVIEW, "You are authorizing") is an `aside`
- * named "Review" beside the canvas from 1200 px; below that it is a collapsed `details` "Review" under the canvas. It has no authorize control.
+ * Summary and the Review) is the Review panel's collapsed "Technical details". P0 hotfix (Simulate layout): the panel (eyebrow REVIEW, "You are
+ * authorizing") is an `aside` named "Review" docked INSIDE the Canvas frame at every width (beside the graph on a wide frame, under it otherwise);
+ * it is never a column of its own and has no authorize control.
  */
-export const REVIEW_PANEL_MIN_WIDTH = 1200;
-export const simulationReviewPanel = (page: Page) => page.locator('section.simulate-workspace').locator('aside.review-side-panel, details.simulation-details');
+export const simulationReviewPanel = (page: Page) => page.locator('section.simulate-workspace .simulation-workflow-canvas > .simulate-canvas-body > aside.canvas-review-dock');
 async function expandDetails(details: Locator): Promise<void> {
   if (!(await details.evaluate(element => (element as HTMLDetailsElement).open))) await details.locator('summary').first().click();
   await expect(details).toHaveAttribute('open', '');
 }
-/** Shows the Review panel (expanding it below 1200 px); nothing is simulated, accepted or signed. */
+/** Shows the Review panel (docked in the Canvas frame); nothing is simulated, accepted or signed. */
 export async function openSimulationReviewPanel(page: Page): Promise<Locator> {
-  const section = page.locator('section.simulate-workspace');
-  const wide = (page.viewportSize()?.width ?? 0) >= REVIEW_PANEL_MIN_WIDTH;
-  await expect(section).toHaveAttribute('data-review-panel', wide ? 'open' : 'collapsed');
+  await expect(page.locator('section.simulate-workspace')).toHaveAttribute('data-review-panel', 'open');
   const panel = simulationReviewPanel(page);
-  if (!wide) await expandDetails(panel);
+  await panel.scrollIntoViewIfNeeded();
   await expect(panel).toBeVisible();
   return panel;
 }

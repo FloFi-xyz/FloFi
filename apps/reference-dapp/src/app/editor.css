@@ -151,6 +151,8 @@
 @media(prefers-reduced-motion:reduce){.summary-bar .summary-primary-action button[data-lifecycle-action]:not(:disabled){animation:none}}
 /* The footer, and the one Simulate control in it, stays in reach at every width (it no longer sits inside the Canvas). */
 .summary-bar.editor-bar{position:sticky;bottom:0;z-index:20;padding-bottom:max(12px,env(safe-area-inset-bottom))}
+/* P0 hotfix: content scrolled into view (focus, the Canvas navigator) stops above the sticky Editor bar, never behind it (summary-bar.tsx). */
+html{scroll-padding-bottom:var(--editor-bar-height,0px)}
 /* Touch screens: every Editor control keeps a 44 px target. */
 @media(pointer:coarse){
   .build-flow-surface .floating-toolbox .canvas-toolbox button,.build-flow-surface .canvas-utility-dock button{width:44px;height:44px;min-height:44px}

@@ -6,6 +6,9 @@
   --muted:#4B5B73;--soft:#F5F8FB;--track:#DCE3F0;--paper:#FFFFFF;--mono:var(--font-ibm-plex-mono),'IBM Plex Mono',ui-monospace,monospace;--gutter:clamp(16px,6.7vw,96px);
   min-height:100svh;font-family:var(--font-outfit),Outfit,system-ui,sans-serif;color:var(--navy);background:var(--paper);overflow-x:clip}
 .page *{box-sizing:border-box}
+/* P0 hotfix (Flight transition): the board's own base type and colour scheme, so it never inherits another page's (the product's 14 px
+   body, its dark html[data-theme]); with app/board/flight-document.css for <html> and <body>. The same values a clean document has. */
+.page{color-scheme:light;font-size:16px;font-weight:400;line-height:normal;letter-spacing:normal;text-align:left}
 .page h1,.page h2,.page h3,.page p{margin:0}
 .page a{color:inherit}
 .page :focus-visible{outline:3px solid var(--navy);outline-offset:3px}

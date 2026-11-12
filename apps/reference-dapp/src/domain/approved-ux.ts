@@ -95,6 +95,8 @@ export function isExplainRequest(text: string): boolean {
   return parts.length > 0 && parts.length <= 3 && parts.every(part => EXPLAIN.has(part));
 }
 export type ActiveBlocker = { readonly title: string; readonly message: string; readonly feeShortfall?: NativeFeeShortfall | null; readonly owner?: string | null;
+  /** P0 hotfix (locale contract): the sentence rendered in a given language (values as explicit parameters), when the message carries values. */
+  readonly messageIn?: ((language: 'EN' | 'PT') => string) | undefined;
   /** Part of this workflow ran or may have run (a step, a run, a restore): an explanation then never says nothing was sent. */ readonly started?: boolean };
 /** The blocker in plain words with the same facts the panel shows: the server's numbers when it has them, and the next action. EN source copy. */
 export function blockerExplanation(blocker: ActiveBlocker): { readonly text: string; readonly parameters: readonly string[] } | null {
@@ -114,7 +116,9 @@ export function blockerExplanation(blocker: ActiveBlocker): { readonly text: str
 const CALL_WORDS: Readonly<Record<string, string>> = Object.freeze({
   ERC20_APPROVE: 'Token permission for step {0}', UNISWAP_V3_EXACT_INPUT_SINGLE: 'Swap on Uniswap (step {0})', AAVE_V3_SUPPLY: 'Supply on Aave (step {0})',
   AAVE_V3_BORROW: 'Borrow on Aave (step {0})', AAVE_V3_REPAY: 'Repay on Aave (step {0})', AAVE_V3_WITHDRAW: 'Withdraw from Aave (step {0})',
-  ERC20_TRANSFER: 'Transfer (step {0})', NATIVE_TRANSFER: 'Transfer (step {0})' });
+  ERC20_TRANSFER: 'Transfer (step {0})', NATIVE_TRANSFER: 'Transfer (step {0})',
+  // P0 hotfix (E1): a batched bridge's deposit into the pinned Across SpokePool.
+  ACROSS_DEPOSIT: 'Bridge deposit on Across (step {0})' });
 export type WalletRequestView = { readonly request: number; readonly of: number | null;
   /** The wallet's own call count for this request (the prepared group's), or null when it is not prepared yet: then `items` are its steps. */
   readonly calls: number | null; readonly items: readonly { readonly text: string; readonly parameters: readonly string[] }[];

@@ -15,6 +15,7 @@
  */
 import { requirementOf } from '../delegation/steps.ts';
 import { composeWorkflowBound, NETWORKS } from '../engine/strategy-engine.ts';
+import type { NetworkId } from '../engine/strategy-spec';
 import { userFundedPreferred } from '../workflow-runs/authorization-plan.ts';
 import { userFundedBuildable } from '../workflow-runs/service.ts';
 import { planExecutionGroups, type ExecutionGroup, type GroupStrategy, type UserFundedFacts, type WalletProfile } from '../workflow-runs/execution-groups.ts';
@@ -34,6 +35,11 @@ export type ReviewStep = {
   readonly expected: ReviewAmount | null; readonly minimum: ReviewAmount | null;
   /** A transfer's recipient, in full (the authored one, or the owner's own wallet); null for every other action. */
   readonly recipient: string | null;
+  /**
+   * P0 hotfix (E1): a bridge's destination network (the label), where `expected`/`minimum` arrive — the deposit's exact output, to the owner's
+   * own wallet — and whose delivery the run waits for before it completes. Null for every other action.
+   */
+  readonly destination?: string | null;
 };
 export type ReviewGroup = {
   readonly index: number; readonly chain: string; readonly network: string; readonly strategy: GroupStrategy; readonly steps: readonly [number, number];
@@ -102,7 +108,13 @@ function counts(groups: readonly ExecutionGroup[], prepared: ReadonlyMap<number,
  * Refusals are closed codes: the Editor's own (EDITOR_WORKFLOW_*), USER_FUNDED_NOT_ENABLED, the composition's, WORKFLOW_STEPS_EMPTY.
  */
 export async function reviewEditorExecution(input: { readonly workflow: unknown; readonly owner: string; readonly profile: WalletProfile;
-  readonly facts: UserFundedFacts; readonly deps: UserFundedDeps | null; readonly now: Date }): Promise<ReviewResult> {
+  readonly facts: UserFundedFacts; readonly deps: UserFundedDeps | null; readonly now: Date;
+  /**
+   * P0 hotfix: why a BRIDGE step's own flow refuses to execute on this deployment today (its live mode, its owner-execution opt-in), or null.
+   * The run's start and every group preparation re-check these gates; the Review asks the same question, so it never promises one wallet
+   * confirmation that Authorize would then refuse. Absent: not consulted (tests and callers without an engine runtime).
+   */
+  readonly stepRefusal?: ((step: Parameters<typeof requirementOf>[0]['steps'][number], index: number) => Promise<string | null>) | undefined }): Promise<ReviewResult> {
   const owner = input.owner.toLowerCase();
   if (!/^0x[0-9a-f]{40}$/.test(owner)) return { ok: false, code: 'EVM_WALLET_REQUIRED' };
   if (!input.facts.enabled || !input.deps) return { ok: false, code: input.facts.code ?? 'USER_FUNDED_NOT_ENABLED' };
@@ -112,7 +124,14 @@ export async function reviewEditorExecution(input: { readonly workflow: unknown;
   if (!composed.ok) return { ok: false, code: composed.code };
   const req = requirementOf(composed);
   if (!req.ok) return { ok: false, code: req.code };
-  const plan = planExecutionGroups(req.value, input.facts, input.profile, userFundedBuildable(input.facts, owner));
+  const closed = new Map<number, string>();
+  if (input.stepRefusal) for (const step of req.value.steps) {
+    if (step.action !== 'bridge') continue;
+    const code = await input.stepRefusal(composed.steps[step.index]!, step.index);
+    if (code) closed.set(step.index, code);
+  }
+  const buildable = userFundedBuildable(input.facts, owner);
+  const plan = planExecutionGroups(req.value, input.facts, input.profile, st => closed.has(st.index) ? 'USER_FUNDED_BRIDGE_FLOW_CLOSED' : buildable(st));
   if (!plan.ok) return { ok: false, code: plan.code };
   const preparedCalls = new Map<number, number>();
   let validUntil: string | null = null, refusal: EditorExecutionReview['refusal'] = null;
@@ -148,7 +167,8 @@ export async function reviewEditorExecution(input: { readonly workflow: unknown;
     return { index: step.index, action: step.action, network: NETWORKS[step.network].label, chain: step.chain, provider: step.adapterId ? PROVIDERS[step.adapterId] ?? null : null,
       basis, boundTo, spend: own?.spend ?? (input && !DELIVERS.has(step.action) ? amountOf(input.amount, input) : null),
       expected: own?.expected ?? (DELIVERS.has(step.action) && input ? amountOf(input.amount, input) : null), minimum: own?.minimum ?? null,
-      recipient: step.action === 'transfer' ? recipientOf(step.strategy as { readonly recipient?: unknown }, step.namespace === 'eip155' ? owner : null) : null };
+      recipient: step.action === 'transfer' ? recipientOf(step.strategy as { readonly recipient?: unknown }, step.namespace === 'eip155' ? owner : null) : null,
+      ...step.action === 'bridge' ? { destination: NETWORKS[(step.strategy as { readonly destinationNetwork: NetworkId }).destinationNetwork]?.label ?? null } : {} };
   });
   // Grouping is offered under the run's own rule (`userFundedPreferred`, which its claim applies too: otherwise the claim starts confirming each
   // step, and the grouped Authorize could not start): never more wallet interactions than confirming each step, whose step count is only a lower

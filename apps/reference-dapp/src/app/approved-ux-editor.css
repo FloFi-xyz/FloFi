@@ -99,9 +99,15 @@
 /* ── Step cards: compact, "You send" / "You receive", provider · network, one status only when there is something to do. ────── */
 .build-flow-surface .composer-card{width:264px;gap:10px;padding:14px;border:1.5px solid var(--line);border-radius:18px;background:var(--surface)}
 .build-flow-surface .composer-card.active{border-color:var(--primary-line);box-shadow:0 0 0 1px var(--primary-line),0 8px 22px var(--fx-shadow)}
-.composer-card-head{display:flex;align-items:center;justify-content:space-between;gap:8px;min-width:0}
-.composer-card-head .composer-action-title{flex:1 1 auto;min-width:0}
-.build-flow-surface .composer-card-head .composer-metadata{flex:0 1 auto;min-width:0;color:var(--muted);font-size:12.5px;line-height:1.3;text-align:right;overflow-wrap:anywhere}
+/* P0 hotfix (card titles): every catalog card (Create, Simulate, Execute and previews) shares one header. Row 1: the step number, the action
+   name and its icon, aligned; row 2: the provider · network line in its own area. A name wraps only between words (never "Swa / p", "Bri / dg / e");
+   the header never widens the card. */
+.composer-card-head{display:grid;grid-template-columns:minmax(0,1fr);align-items:start;row-gap:3px;min-width:0}
+.composer-card-head .composer-action-title{display:flex;flex-wrap:nowrap;align-items:center;min-width:0}
+.composer-card-head .composer-action-name{flex:0 1 auto;min-width:min-content;overflow-wrap:normal;word-break:normal;hyphens:manual}
+.composer-card-head .composer-metadata{min-width:0;text-align:left;overflow-wrap:break-word;word-break:normal}
+.composer-card-head :is(.composer-provider,.composer-chain){overflow-wrap:break-word}
+.build-flow-surface .composer-card-head .composer-metadata{color:var(--muted);font-size:12.5px;line-height:1.3}
 .build-flow-surface .composer-card-head .composer-provider{color:var(--muted);font-weight:400}
 .build-flow-surface .composer-amount-box{border:0;border-radius:14px;background:var(--surface-raised)}
 .build-flow-surface .composer-amount-box:has(.composer-value-column :focus-visible){box-shadow:0 0 0 2px var(--accent)}
