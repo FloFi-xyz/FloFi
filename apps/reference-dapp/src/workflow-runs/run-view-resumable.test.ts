@@ -61,7 +61,7 @@ describe('review fixes R4/R6: a run\'s note claims nothing it cannot prove', () 
     const ended = runOf('USER_FUNDED', 'CANCELLED'), skipped = [step(0, 'SKIPPED'), step(1, 'SKIPPED')];
     const unknown = [group({ state: 'SKIPPED', code: 'WALLET_BATCH_OUTCOME_UNKNOWN', prepared: { kind: 'EVM_WALLET_BATCH' } })];
     for (const owner of [true, false]) expect((await runView({ store: storeOf(skipped, unknown) }, ended, { outcomes: true, owner })).note).toBe('Ended. A batch was handed to '
-      + 'the owner\'s wallet and its answer never reached FloFi: it may have executed before its on-chain deadline; check the wallet\'s activity.');
+      + 'the owner\'s wallet and FloFi never recorded an answer for it: it may have executed before its on-chain deadline; check the wallet\'s activity.');
     expect((await runView({ store: storeOf(skipped, unknown) }, ended, { outcomes: false })).note).toBe('The owner has not shared the transactions and evidence of this workflow '
       + 'with this conversation.');
     expect((await runView({ store: storeOf(skipped, [group({ state: 'SKIPPED', code: 'OWNER_CANCELLED' })]) }, ended, { outcomes: true })).note).toBeNull();

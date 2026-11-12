@@ -5,6 +5,7 @@
  * while it is AUTHORIZED (provably nothing sent), and once anything may have been sent it is never recorded FAILED while its blockhash is valid.
  */
 import { describe, expect, it } from 'vitest';
+import { composeWorkflow } from '../engine/strategy-engine';
 import type { UserFundedDeps } from '../user-funded/groups.ts';
 import type { GroupPatch, GroupRecord, GroupState, RunPatch, RunRecord, RunStepRecord, StepPatch, WorkflowRunStore } from './pg-store.ts';
 import type { RunState, StepState } from './state-machine.ts';
@@ -265,5 +266,64 @@ describe('review fix R1: run expiry never blocks a batch the owner\'s wallet may
     expect(await userFundedPass({ ...deps, store }, read)).toMatchObject({ state: 'RUNNING', progressed: true });
     expect(mem.run()).toMatchObject({ state: 'CANCELLED', version: read.version + 1 });
     expect(mem.writes).toEqual(['group:BLOCKED', 'step0:BLOCKED', 'step1:BLOCKED']);
+  });
+});
+
+describe('review S3: a group that FAILED on chain stops its run from the run\'s CURRENT version', () => {
+  const SEND = { action: 'transfer', network: 'solana', asset: 'SOL', amount: '0.01', recipient: '7Np41oeYqPefeNQEHSv1UDhYrehxin3NStELsSKCT4K2' };
+  for (const [name, stepFrom, to] of [['nothing reconciled before it: the run FAILS', 0, 'FAILED'], ['after an earlier reconciled step: the run HALTS', 1, 'HALTED']] as const)
+    it(`the run moves (a concurrent pass sets ATTENTION) between the pass's read of it and its stop — ${name}, never left open behind the FAILED group`, async () => {
+      const { mem, chain, deps, logs } = await setup({ transactions: 1, stepFrom, groupState: 'SUBMITTED' });
+      // A real composition (the pass records what each step executed), and the group's one transaction submitted.
+      const strategy = { version: 2, steps: Array.from({ length: stepFrom + 1 }, () => SEND) }, composed = composeWorkflow(strategy);
+      if (!composed.ok) throw new Error(composed.code);
+      mem.setRun({ strategy, workflowHash: composed.workflowHash } as unknown as Partial<RunRecord>);
+      mem.setGroup({ submission: { kind: 'SOLANA_SIGN_ALL', hashes: ['sig0'] } });
+      // It landed and failed on chain (finalized with an error; the fee was paid).
+      chain.state.statuses.set('sig0', { confirmationStatus: 'finalized', err: { InstructionError: [0, { Custom: 1 }] } });
+      const rpc: NonNullable<UserFundedDeps['solana']> = async (method, params) => method === 'getTransaction'
+        ? { meta: { err: { InstructionError: [0, { Custom: 1 }] }, fee: 5_000, preBalances: [1_000_000], postBalances: [995_000] } } : chain.rpc(method, params);
+      const read = mem.run();
+      // Once the group is FAILED, the run moves on right after the pass reads it (once): a concurrent pass that met the same failure as an
+      // unreadable reconciliation moved it to ATTENTION, a new version.
+      let moved = false;
+      const store = { ...mem.store, byId: async (runId: string) => {
+        const r = await mem.store.byId(runId);
+        if (!moved && mem.group().state === 'FAILED') { moved = true; mem.setRun({ state: 'ATTENTION', version: r!.version + 1 }); }
+        return r;
+      } } as WorkflowRunStore;
+      expect(await userFundedPass({ ...deps(rpc), store }, read)).toMatchObject({ state: to, code: 'SOLANA_TRANSACTION_FAILED' });
+      expect(moved).toBe(true);
+      expect(mem.group()).toMatchObject({ state: 'FAILED', code: 'SOLANA_TRANSACTION_FAILED' });
+      expect(mem.steps().map(s => s.state)).toEqual([...stepFrom ? ['RECONCILED'] : [], 'FAILED']);
+      expect(mem.run()).toMatchObject({ state: to, code: 'SOLANA_TRANSACTION_FAILED', version: read.version + 2 });
+      expect(mem.writes).toEqual([`step${stepFrom}:FAILED`, 'group:FAILED', `run:${to}`]);
+      expect(logs).toEqual(['workflow_run.group_failed']);
+      // Settled: a later pass changes nothing and nothing was ever sent again.
+      expect(await userFundedPass(deps(rpc), mem.run())).toMatchObject({ state: to, progressed: false });
+      expect(mem.writes).toHaveLength(3);
+      expect(chain.state.sent).toEqual([]);
+    });
+});
+
+describe('final review: a run still open behind a FAILED group is stopped by the next pass (self-healing)', () => {
+  for (const [name, stepFrom, state, to] of [['RUNNING, nothing reconciled before it', 0, 'RUNNING', 'FAILED'], ['ATTENTION, after an earlier reconciled step', 1, 'ATTENTION', 'HALTED']] as const)
+    it(`${name}: the run becomes ${to} with the group's code; nothing is sent, and a later pass changes nothing`, async () => {
+      const { mem, chain, deps, logs } = await setup({ transactions: 1, stepFrom, groupState: 'FAILED' });
+      mem.setGroup({ code: 'SOLANA_TRANSACTION_FAILED', submission: { kind: 'SOLANA_SIGN_ALL', hashes: ['sig0'] } });
+      mem.setRun({ state });
+      expect(await userFundedPass(deps(), mem.run())).toMatchObject({ state: to, code: 'SOLANA_TRANSACTION_FAILED' });
+      expect(mem.run()).toMatchObject({ state: to, code: 'SOLANA_TRANSACTION_FAILED' });
+      expect(mem.writes).toEqual([`run:${to}`]);
+      expect(logs).toEqual(['workflow_run.group_failed_run_stopped']);
+      expect(await userFundedPass(deps(), mem.run())).toMatchObject({ state: to, progressed: false });
+      expect(mem.writes).toHaveLength(1);
+      expect(chain.state.sent).toEqual([]);
+    });
+  it('a BLOCKED group is never healed by the pass (Resume moves the run before the group; a pass in between must not halt it again)', async () => {
+    const { mem, deps } = await setup({ transactions: 1, groupState: 'BLOCKED' });
+    mem.setGroup({ code: 'USER_FUNDED_SIMULATION_UNAVAILABLE' });
+    expect(await userFundedPass(deps(), mem.run())).toMatchObject({ state: 'RUNNING', progressed: false });
+    expect(mem.writes).toEqual([]);
   });
 });

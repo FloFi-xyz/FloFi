@@ -398,10 +398,15 @@ export async function authorizeUserFundedGroup(deps: WorkflowRunDeps, run: RunRe
   if (!verified.ok) return refuse(verified.code);
   // Only onto exactly the artifact the answer was verified against (the row version read above): a concurrent re-preparation is never authorized
   // with an answer checked against another artifact. A concurrent answer that won (a retry racing its first attempt) is compared as a retry.
+  // A stop that landed in between (the expiry pass blocked the group, or the owner ended the run, while its batch was unanswered) never drops
+  // this answer silently behind WORKFLOW_RUN_CHANGED: it is refused and logged as an answer after the stop, exactly as when it is read stopped.
   const authorized = await deps.store.groupTransition(run.runId, groupIndex, ['PREPARED'], 'AUTHORIZED', { authorization: verified.value }, 'GROUP_AUTHORIZED', g.version);
   if (!authorized) {
     const latest = (await deps.store.groups(run.runId))[groupIndex];
-    return latest && answeredOnce(latest) ? answeredAgain(deps, run, latest, answer) : refuse('WORKFLOW_RUN_CHANGED');
+    if (latest && answeredOnce(latest)) return answeredAgain(deps, run, latest, answer);
+    if (latest && g.strategy === 'EVM_WALLET_BATCH' && stoppedUnanswered(latest))
+      return batchAnsweredAfterStop(deps, run, latest, { batchId: String(verified.value.batchId) });
+    return refuse('WORKFLOW_RUN_CHANGED');
   }
   await advanceRun(runnerDeps(deps), run.runId);
   return (await deps.store.byId(run.runId))!;
@@ -472,6 +477,8 @@ export async function reportUserFundedBatch(deps: WorkflowRunDeps, run: RunRecor
     // Only the report whose write moved exactly the AUTHORIZED group this report read (its row version) stops its steps and the run. A concurrent
     // report of its transactions that won (SUBMITTED: they are on their way and must be reconciled) is never followed by blocked steps and a
     // terminal run that nothing would reconcile any more: this report is refused instead, and the browser reads the run again.
+    // (Never a stop it lost to: a group read AUTHORIZED keeps its recorded answer in every later state — frozen by the schema — so it is never
+    // `stoppedUnanswered`; the same holds for the transactions' write below.)
     if (!await deps.store.groupTransition(run.runId, groupIndex, ['AUTHORIZED'], 'BLOCKED', { code: 'EIP5792_BATCH_NOT_SENT' }, 'GROUP_STATE', g.version))
       return refuse('WORKFLOW_RUN_CHANGED');
     for (let i = g.stepFrom; i <= g.stepTo; i++) await deps.store.stepTransition(run.runId, i, ['DELEGATED'], 'BLOCKED', { code: 'EIP5792_BATCH_NOT_SENT' });
@@ -634,8 +641,10 @@ export async function runView(deps: { readonly store: Pick<WorkflowRunStore, 'st
   // executed (`walletBatchUnanswered`): never "stopped before any step completed" or "nothing was sent", which its records cannot prove.
   const unanswered = (run.state === 'CANCELLED' || run.state === 'HALTED')
     && (groupRecords.some(g => g.code === WALLET_BATCH_OUTCOME_UNKNOWN) || steps.some(s => s.code === WALLET_BATCH_OUTCOME_UNKNOWN));
-  const mayHaveExecuted = 'A batch was handed to the owner\'s wallet and its answer never reached FloFi: it may have executed before its on-chain deadline; '
-    + 'check the wallet\'s activity.';
+  // "Never recorded", never "never reached FloFi": an answer may have arrived after the stop, been refused and logged
+  // (WALLET_BATCH_ANSWERED_AFTER_STOP, `batchAnsweredAfterStop`).
+  const mayHaveExecuted = 'A batch was handed to the owner\'s wallet and FloFi never recorded an answer for it: it may have executed before its on-chain '
+    + 'deadline; check the wallet\'s activity.';
   const note = !options.outcomes ? 'The owner has not shared the transactions and evidence of this workflow with this conversation.'
     : halted === 'PARTIAL' && unanswered ? `Partially completed: the reconciled steps stay done. ${mayHaveExecuted} FloFi submits nothing more of it; the owner decides `
       + 'what happens next.'

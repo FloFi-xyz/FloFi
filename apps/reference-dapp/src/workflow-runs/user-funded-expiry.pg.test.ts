@@ -37,9 +37,9 @@ const reserve = (asset: string) => delegationAaveReserve(CHAIN, POOL, asset)!;
 const RESERVES = [{ ...reserve(WETH), price: 2_500n * 10n ** 8n, ltvBps: 8_000n, liquidationThresholdBps: 8_300n, decimals: 18 },
   { ...reserve(USDC), price: 10n ** 8n, ltvBps: 7_500n, liquidationThresholdBps: 7_800n, decimals: 6 }];
 const METAMASK = { eip155: { wallet: 'INJECTED', atomic: { [CHAIN]: 'supported' }, typedData: true } };
-const ENDED_UNANSWERED = 'Ended. A batch was handed to the owner\'s wallet and its answer never reached FloFi: it may have executed before its on-chain deadline; '
-  + 'check the wallet\'s activity.';
-const HALTED_UNANSWERED = 'Stopped. A batch was handed to the owner\'s wallet and its answer never reached FloFi: it may have executed before its on-chain '
+const ENDED_UNANSWERED = 'Ended. A batch was handed to the owner\'s wallet and FloFi never recorded an answer for it: it may have executed before its on-chain '
+  + 'deadline; check the wallet\'s activity.';
+const HALTED_UNANSWERED = 'Stopped. A batch was handed to the owner\'s wallet and FloFi never recorded an answer for it: it may have executed before its on-chain '
   + 'deadline; check the wallet\'s activity. FloFi submits nothing more of it; the owner decides what happens next.';
 type Artifact = { group: EvmGroupCalls; request: { id: string } };
 /** The `differs` of every answer-mismatch log line so far. */
@@ -136,7 +136,7 @@ describe('review fix R1: run expiry and a batch in the owner\'s wallet', () => {
     try {
       toExpiry(-11 * 60_000);
       const p1 = await workflowRunUserFundedPrepare(h.surface, approval.approvalId, wallets, 0);
-      // The owner's wallet executed it before its deadline; its answer never reached FloFi.
+      // The owner's wallet executed it before its deadline; its answer is lost on the way (a late one arrives after the stop, below).
       toExpiry(-5 * 60_000);
       chain.control.walletBatch(owner, evmCallsOf((p1.prepared as unknown as Artifact).group));
       toExpiry(1_000);
@@ -221,6 +221,35 @@ describe('an answer for a group FloFi stopped while its handed-out batch was una
       expect(mismatches(h)).toEqual([]);
     } finally { await t.drop(); }
   });
+});
+
+describe('review S1: a stop that lands between an answer\'s read and its write is an answer after the stop, never a silent WORKFLOW_RUN_CHANGED', () => {
+  for (const [name, past, stop, state] of [
+    ['the expiry pass blocks the group', 'expiry', 'drain', 'BLOCKED'], ['the owner ends the run', 'validity', 'cancel', 'SKIPPED']] as const)
+    it(`authorize: ${name} between the read of the PREPARED group and its PREPARED → AUTHORIZED write — refused WALLET_BATCH_ANSWERED_AFTER_STOP and logged`, async () => {
+      const { t, chain, h, owner, wallets, approval, run, toExpiry, current } = await setup();
+      try {
+        toExpiry(-11 * 60_000);
+        const p1 = await workflowRunUserFundedPrepare(h.surface, approval.approvalId, wallets, 0);
+        const artifact = p1.prepared as unknown as Artifact;
+        // The owner's wallet executes the batch before its deadline; its answer is still on its way when the batch's validity (and, for the
+        // expiry pass, the run's) has passed and the stop lands. The owner ends the run before it expires.
+        toExpiry(-5 * 60_000);
+        chain.control.walletBatch(owner, evmCallsOf(artifact.group));
+        toExpiry(past === 'expiry' ? 1_000 : -30_000);
+        expect(new Date(p1.validUntil!).getTime()).toBeLessThan(h.d.now().getTime());
+        const read = await current();
+        expect((await h.store.groups(run.runId))[0]).toMatchObject({ state: 'PREPARED', authorization: null });
+        const store = racing(h, 'AUTHORIZED', () => stop === 'drain' ? h.drain(run.runId) : workflowRunCancel(h.surface, approval.approvalId, wallets));
+        await expect(authorizeUserFundedGroup({ ...h.runs, store }, read, wallets, 0, { kind: 'EVM_WALLET_BATCH', batchId: artifact.request.id }))
+          .rejects.toThrow('WALLET_BATCH_ANSWERED_AFTER_STOP');
+        expect(afterStop(h)).toEqual([{ group: 0, state, batchIdMatches: true, hashes: null, notSent: null }]);
+        // Nothing of the answer was recorded: the group is exactly as the stop left it, and the run stays stopped.
+        expect((await h.store.groups(run.runId))[0]).toMatchObject({ state, code: 'WALLET_BATCH_OUTCOME_UNKNOWN', authorization: null, submission: null });
+        expect(await current()).toMatchObject(stop === 'drain' ? { state: 'HALTED', code: 'WORKFLOW_RUN_EXPIRED' } : { state: 'CANCELLED' });
+        expect(mismatches(h)).toEqual([]);
+      } finally { await t.drop(); }
+    });
 });
 
 describe('review fix R6: ending a run whose batch was handed out and never answered', () => {

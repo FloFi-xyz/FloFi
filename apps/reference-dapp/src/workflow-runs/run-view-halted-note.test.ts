@@ -68,8 +68,8 @@ describe('P0 review fix: every surface words a HALTED run from the server\'s own
 });
 
 describe('round 4 F1: a run halted while a wallet batch it handed out was never answered says that batch may have executed', () => {
-  const MAY_HAVE_EXECUTED = 'A batch was handed to the owner\'s wallet and its answer never reached FloFi: it may have executed before its on-chain deadline; '
-    + 'check the wallet\'s activity.';
+  const MAY_HAVE_EXECUTED = 'A batch was handed to the owner\'s wallet and FloFi never recorded an answer for it: it may have executed before its on-chain '
+    + 'deadline; check the wallet\'s activity.';
   const unknownStep = (stepIndex: number) => ({ ...step(stepIndex, 'BLOCKED'), code: 'WALLET_BATCH_OUTCOME_UNKNOWN' }) as RunStepRecord;
   const unknownGroup = (groupIndex: number, stepFrom: number, stepTo: number) => group(groupIndex, stepFrom, stepTo, { state: 'BLOCKED', code: 'WALLET_BATCH_OUTCOME_UNKNOWN',
     prepared: { kind: 'EVM_WALLET_BATCH', request: { id: '0x' + 'cd'.repeat(32) } } });

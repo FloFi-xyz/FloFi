@@ -165,7 +165,7 @@ describe('P0 review fixes: a wallet batch handed to the wallet is never lost, an
     try {
       const p1 = await workflowRunUserFundedPrepare(h.surface, approval.approvalId, wallets, 0);
       const first = p1.prepared as unknown as Artifact;
-      // The owner's wallet sent P1; its answer never reached FloFi.
+      // The owner's wallet sent P1; its answer has not reached FloFi yet (it arrives below).
       const hash = chain.control.walletBatch(owner, evmCallsOf(first.group));
       const run0 = await ownedRun(h.runs, approval.approvalId, wallets);
       const before = (await h.store.groups(run0.runId))[0]!;

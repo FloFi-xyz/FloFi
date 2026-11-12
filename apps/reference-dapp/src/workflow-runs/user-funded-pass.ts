@@ -113,7 +113,16 @@ export async function userFundedPass(deps: UserFundedPassDeps, run: RunRecord): 
     case 'AUTHORIZED': return authorizedGroup(deps, run, g, block);
     case 'SUBMITTED': case 'UNCERTAIN': return submittedGroup(deps, run, g, steps);
     case 'RECONCILED': return afterGroup(deps, run, g);
-    case 'BLOCKED': case 'FAILED': case 'SKIPPED': case 'EXPIRED': return settled(run);
+    case 'FAILED': {
+      // A group that failed on chain while its run is still open (the process stopped between the group's FAILED write and the run's stop,
+      // or every stop attempt lost a race): this pass stops the run, so it is never left RUNNING or ATTENTION behind it. Only FAILED heals
+      // here — a BLOCKED group is moved back to PLANNED by Resume after the run, so a pass between those two writes must not halt it again.
+      const partial = steps.some(s => s.stepIndex <= g.stepTo && s.state === 'RECONCILED');
+      const moved = await stopRunFromCurrent(deps, run.runId, partial ? 'HALTED' : 'FAILED', g.code ?? 'USER_FUNDED_GROUP_REFUSED');
+      if (moved) deps.log('workflow_run.group_failed_run_stopped', { run: run.runId, group: g.groupIndex, code: g.code, partial });
+      return moved ? settled(moved) : settled(run);
+    }
+    case 'BLOCKED': case 'SKIPPED': case 'EXPIRED': return settled(run);
   }
 }
 
@@ -220,10 +229,11 @@ async function submittedGroup(deps: UserFundedPassDeps, run: RunRecord, g: Group
   }
   await deps.store.groupTransition(run.runId, g.groupIndex, ['SUBMITTED', 'UNCERTAIN'], 'FAILED', { outcome: groupOutcome, code: stored(r.code) });
   const partial = facts.length > 0 || steps.some(s => s.stepIndex < g.stepFrom && s.state === 'RECONCILED');
-  const fresh = (await deps.store.byId(run.runId))!;
-  const moved = await deps.store.transition(run.runId, { version: fresh.version, from: ['RUNNING', 'ATTENTION'] }, partial ? 'HALTED' : 'FAILED', { code: stored(r.code) });
+  // From the run's CURRENT version, re-read on every attempt (a status poll, or a concurrent pass moving it to ATTENTION, may move it between a
+  // read and the write). Should it still not move (the process stops here, or every attempt loses), the next pass stops it (case 'FAILED').
+  const moved = await stopRunFromCurrent(deps, run.runId, partial ? 'HALTED' : 'FAILED', stored(r.code));
   deps.log('workflow_run.group_failed', { run: run.runId, group: g.groupIndex, code: r.code });
-  return moved ? settled(moved) : { ...settled(fresh), progressed: true };
+  return moved ? settled(moved) : { ...settled(run), progressed: true };
 }
 
 /**
