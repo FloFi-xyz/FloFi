@@ -26,7 +26,7 @@ import { planExecutionGroups, type UserFundedFacts, type WalletProfile } from '.
 import { userFundedBuildable } from '../workflow-runs/service.ts';
 import { reviewEditorExecution } from '../editor/workflow-execution.ts';
 import { canvasWorkflowOfStrategy } from '../editor/workflow-strategy.ts';
-import { buildEvmGroupCalls, evmCallsOf, evmStepBuildable, type EvmGroupCalls } from './evm-calls.ts';
+import { evmCallsOf, evmStepBuildable, type EvmGroupCalls } from './evm-calls.ts';
 import { prepareGroup, reconcileEvmGroup, type Prepared, type UserFundedDeps } from './groups.ts';
 import { observeBridgeDelivery, BRIDGE_DELIVERY_MARGIN_SECONDS, type BridgeProgress } from './bridge-delivery.ts';
 import type { AcrossDepositUserCall } from './bridge-calls.ts';

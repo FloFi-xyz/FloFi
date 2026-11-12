@@ -7160,6 +7160,7 @@
         "apps/reference-dapp/src/workflow-runs/runner.ts",
         "apps/reference-dapp/src/workflow-runs/service.ts",
         "apps/reference-dapp/src/workflow-runs/state-machine.ts",
+        "apps/reference-dapp/src/workflow-runs/run-step-phase.ts",
         "apps/reference-dapp/src/workflow-runs/user-funded-pass.ts",
         "apps/reference-dapp/src/workflow-runs/worker.ts"
       ],
