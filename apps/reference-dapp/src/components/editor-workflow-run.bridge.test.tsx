@@ -67,6 +67,12 @@ describe('P0 hotfix E1: the Editor panel for Swap → Bridge', () => {
     expect(html).toContain('one wallet confirmation · 1 on-chain transaction · 4 calls batched · 1 signature');
     // The swap keeps its slippage minimum; the bridge's exact delivery is not called a "minimum".
     expect(html.match(/Minimum \(your slippage limit\)/g)).toHaveLength(1);
+    // While the wallet holds the request, its four calls in plain words: the bridge's deposit included.
+    const wallet = render(state({ review: review(), phase: 'wallet', started: true }));
+    expect(wallet).toContain('This request has 4 calls:');
+    expect(wallet).toContain('Swap on Uniswap (step 1)');
+    expect(wallet).toContain('Bridge deposit on Across (step 2)');
+    expect(render(state({ review: review(), phase: 'wallet', started: true }), 'PT')).toContain('Depósito da ponte na Across (passo 2)');
     const pt = render(state({ review: review(), phase: 'reviewed', started: false, canReview: true }), 'PT');
     expect(pt).toContain('Chega na Base');
     expect(pt).toContain('Depois, o FloFi aguarda a entrega da ponte na Base');

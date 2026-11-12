@@ -53,6 +53,7 @@ export const portugueseExecutionContinuity: Readonly<Record<string, string>> = {
   'The bridge then runs through its own review: its token approval and its deposit may each ask your wallet once more.':
     'A ponte então passa pela própria revisão: a aprovação do token e o depósito podem pedir, cada um, mais uma confirmação na sua carteira.',
   '{0} of {1} steps completed': '{0} de {1} etapas concluídas',
+  'Bridge deposit on Across (step {0})': 'Depósito da ponte na Across (passo {0})',
   'Your batch is confirmed on {0}. FloFi is waiting for the delivery on {1} and keeps checking even if you leave this page; nothing is sent again.':
     'Seu lote está confirmado na {0}. O FloFi aguarda a entrega na {1} e continua verificando mesmo se você sair desta página; nada é enviado novamente.',
 };
