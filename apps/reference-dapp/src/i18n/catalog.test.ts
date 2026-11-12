@@ -51,7 +51,7 @@ function productMessages() {
  * Code → message and state → label tables (`Record<…, string>`) whose values are sentences or labels a person reads. Excluded: the admin console
  * (English only by decision, `language.ts`), tables that are themselves Portuguese (`*_PT`) and provider/protocol name tables (preserved values).
  */
-const copyLike = (text: string) => /^[A-Za-z][a-z’']/.test(text) && /\s/.test(text) && !/^(?:https?:|eip155:|solana:)/.test(text);
+const copyLike = (text: string) => (/^[A-Za-z][a-z’']/.test(text) && /\s/.test(text) || /^[A-Z][a-z]+$/.test(text)) && !/^(?:https?:|eip155:|solana:)/.test(text);
 function copyTables() {
   const values = new Map<string, string>();
   for (const dir of ['components', 'state', 'domain', 'lib'] as const) for (const { name, src } of sourceFiles(dir)) {

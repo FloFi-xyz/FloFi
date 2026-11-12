@@ -241,4 +241,7 @@ export const portugueseLocaleContract: Readonly<Record<string, string>> = {
   'transaction value': 'valor da transação',
   'bridge contracts': 'contratos da ponte',
   'local template': 'modelo local',
+  // Single-word state labels (a transaction being submitted, a withdrawn approval hand-off).
+  'Submitting': 'Enviando',
+  'Withdrawn': 'Retirada',
 };
