@@ -32,4 +32,14 @@ export const portugueseApprovedUxEditor: Readonly<Record<string, string>> = {
   'Ask or request a change': 'Pergunte ou peça uma mudança', 'Send message': 'Enviar mensagem', 'Interpreting your message…': 'Interpretando sua mensagem…',
   // Choosing the network in the chat (board 05).
   'Choose a network': 'Escolha uma rede', 'Your wallet': 'Sua carteira',
+  // A card's settings set its slippage as "Max price difference" in percent (boards 04, 16).
+  'Apply max price difference': 'Aplicar a diferença máxima de preço',
+  'No max price difference is set for this step.': 'Este passo não tem diferença máxima de preço definida.',
+  'Applied limit: {0}. A fresh simulation and Review use it.': 'Limite aplicado: {0}. Uma nova simulação e a Revisão usam esse limite.',
+  'Enter a max price difference from 0.01% to 3%.': 'Informe uma diferença máxima de preço de 0,01% a 3%.',
+  'Enter the max price difference as a percentage with up to two decimals (1 = 1%).': 'Informe a diferença máxima de preço em porcentagem, com até duas casas decimais (1 = 1%).',
+  'This step is protected. Unlock it before changing its max price difference.': 'Este passo está protegido. Desbloqueie-o antes de alterar a diferença máxima de preço.',
+  'This max price difference cannot be applied to this step.': 'Esta diferença máxima de preço não pode ser aplicada a este passo.',
+  'Cross-chain max price difference (%)': 'Diferença máxima de preço entre redes (%)',
+  'Universal bridge max price difference (%)': 'Diferença máxima de preço da ponte universal (%)',
 };

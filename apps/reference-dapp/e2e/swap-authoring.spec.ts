@@ -36,8 +36,9 @@ const createCanvas = async (page: Page, direction: 'USDC_TO_WETH' | 'WETH_TO_USD
   await input.fill(amount); await input.press('Enter');
   if (slippage !== '100') {
     await selectSwap(page);
-    await settings(page).getByLabel('Slippage (bps)', { exact: true }).fill(slippage);
-    await page.getByRole('button', { name: 'Apply slippage', exact: true }).click();
+    // Board 16: the limit is typed as "Max price difference" in percent (50 bps = 0.5%); the workflow still records basis points.
+    await settings(page).getByLabel('Max price difference (%)', { exact: true }).fill(String(Number(slippage) / 100));
+    await page.getByRole('button', { name: 'Apply max price difference', exact: true }).click();
   }
 };
 
@@ -81,9 +82,9 @@ test('mixed surface edits, dismissal, locks and stale proposals preserve revisio
   await commit(page, 'set node-002 amount 3');
   await selectSwap(page);
   // BUILD-FIX-UX-001: a slippage edit applies directly (no proposal and no unrelated "Apply amount"), and the card's settings show it.
-  await settings(page).getByLabel('Slippage (bps)', { exact: true }).fill('75');
-  await page.getByRole('button', { name: 'Apply slippage', exact: true }).click();
-  await expect(settings(page)).toContainText('Applied limit: 75 bps (0.75%)');
+  await settings(page).getByLabel('Max price difference (%)', { exact: true }).fill('0.75');
+  await page.getByRole('button', { name: 'Apply max price difference', exact: true }).click();
+  await expect(settings(page)).toContainText('Applied limit: 0.75%');
   await expect(card.getByRole('button', { name: /^(Review|Apply) amount$/ })).toHaveCount(0);
   const canvasChatCanvas = await workflow(page);
   expect(canvasChatCanvas.workflowId).not.toBe(chatCanvasChat.workflowId);

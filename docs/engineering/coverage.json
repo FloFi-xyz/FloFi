@@ -2923,6 +2923,7 @@
         "apps/reference-dapp/src/components/mobile-build-navigation.tsx",
         "apps/reference-dapp/src/components/navigation-drawer.tsx",
         "apps/reference-dapp/src/components/observation-panel.tsx",
+        "apps/reference-dapp/src/components/price-difference-input.tsx",
         "apps/reference-dapp/src/components/product-workspace.tsx",
         "apps/reference-dapp/src/components/public-testnet-panel.tsx",
         "apps/reference-dapp/src/components/review-panel.tsx",

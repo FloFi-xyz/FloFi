@@ -175,3 +175,6 @@ export function flightRefusalPlacement(input: { readonly applies: boolean; reado
   if (input.recoveryOnly || input.recordAttention || input.executionStarted) return 'NOTICE';
   return input.busy ? null : 'SOURCE';
 }
+
+/** Board 16: a network as people read it, without the chain id the technical label carries ("Base (8453)" → "Base"). */
+export const withoutChainId = (label: string): string => label.replace(/ \((?:\d+|0x[0-9a-fA-F]+)\)$/, '');

@@ -309,12 +309,13 @@ test('BUILD-FIX-UX-001: a new swap starts at 100 bps; slippage and amount apply 
   await openEditorSection(page, 'Build');
   expect(await slippageOf(page)).toBe(100);
   await openFirstActionSettings(page);
-  const inspector = page.getByRole('dialog', { name: 'Action settings', exact: true }), field = inspector.getByLabel('Slippage (bps)', { exact: true });
-  await expect(field).toHaveValue('100'); await expect(inspector).toContainText('Applied limit: 100 bps (1.00%)');
+  const inspector = page.getByRole('dialog', { name: 'Action settings', exact: true }), field = inspector.getByLabel('Max price difference (%)', { exact: true });
+  await expect(field).toHaveValue('1'); await expect(inspector).toContainText('Applied limit: 1%');
   // Invalid values are refused with a reason and never silently reverted or applied.
-  for (const bad of ['0', '301', 'abc', '1.5']) {
+  // Board 16: the limit is typed in percent; 0.125% has no whole basis-point value and is refused, never rounded.
+  for (const bad of ['0', '3.01', 'abc', '0.125']) {
     await field.fill(bad); await field.press('Enter');
-    await expect(inspector.getByRole('alert')).toContainText(/Enter (a slippage from 1 to 300 bps|the slippage as a whole number)/);
+    await expect(inspector.getByRole('alert')).toContainText(/Enter (a max price difference from 0\.01% to 3%|the max price difference as a percentage)/);
     await expect(field).toHaveValue(bad); await expect(field).toHaveAttribute('aria-invalid', 'true');
     expect(await slippageOf(page)).toBe(100);
   }
@@ -322,8 +323,8 @@ test('BUILD-FIX-UX-001: a new swap starts at 100 bps; slippage and amount apply 
   expect(first.slippage).toBe('1.00%');
   // A slippage edit is one ordinary edit: it applies to the workflow and retires the earlier simulation and Review.
   await openEditorSection(page, 'Build'); await openFirstActionSettings(page);
-  await field.fill('75'); await inspector.getByRole('button', { name: 'Apply slippage', exact: true }).click();
-  await expect(inspector).toContainText('Applied limit: 75 bps (0.75%)');
+  await field.fill('0.75'); await inspector.getByRole('button', { name: 'Apply max price difference', exact: true }).click();
+  await expect(inspector).toContainText('Applied limit: 0.75%');
   expect(await slippageOf(page)).toBe(75);
   await expect(authorize(page)).toHaveCount(0);
   const seventyFive = await simulateAndReadLimits(page);
@@ -331,7 +332,7 @@ test('BUILD-FIX-UX-001: a new swap starts at 100 bps; slippage and amount apply 
   // The Review (Strategy Manifest) authorizes exactly the applied limit.
   expect(first.maximum).toBe('1.00%'); expect(seventyFive.maximum).toBe('0.75%');
   await openEditorSection(page, 'Build'); await openFirstActionSettings(page);
-  await field.fill('100'); await field.press('Enter');
+  await field.fill('1'); await field.press('Enter');
   expect(await slippageOf(page)).toBe(100);
   // An amount edit applies on Enter; the earlier Review can no longer authorize anything, and the fresh simulation uses the new amount.
   const card = page.locator('.build-flow-surface .composer-card').first(), amount = card.getByRole('textbox', { name: 'Source amount (USDC)', exact: true });

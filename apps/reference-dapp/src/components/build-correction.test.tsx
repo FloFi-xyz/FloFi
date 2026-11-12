@@ -348,7 +348,8 @@ describe('UX-002 canonical composer projections', () => {
     expect(state.message).toBe('Review the prototype slippage limit.');
     expect(canvas).toContain('class="composer-status" data-card-status="attention" title="Check this step’s slippage limit."');
     const inspector = renderToStaticMarkup(createElement(ActionSettingsContent, { selectedId: node.nodeId, select: vi.fn() }));
-    expect(inspector).toContain('Selected action checks'); expect(inspector).toContain(state.message);
+    // Board 16: the card's settings show the same check in plain words; the review engine's own text stays out of the product surface.
+    expect(inspector).toContain('Selected action checks'); expect(inspector).toContain('Check this step’s slippage limit.'); expect(inspector).not.toContain(state.message);
     const missingSlippage = { ...fixture.store.state.workflow, nodes: fixture.store.state.workflow.nodes.map(item => item.nodeId === node.nodeId ? { ...item, userConstraints: item.userConstraints.filter(constraint => constraint.kind !== 'MAXIMUM_SLIPPAGE_BPS') } : item) };
     expect(composerNodeState(lintWorkflow(missingSlippage, fixture.store.context), node.nodeId).tone).toBe('invalid');
   });

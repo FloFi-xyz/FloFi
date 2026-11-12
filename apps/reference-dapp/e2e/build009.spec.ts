@@ -92,8 +92,9 @@ test('BUILD-009 switches back to Base and invalidates quote on chain/account/pro
   await applyPendingProposal(page);
   await page.getByRole('button', { name: 'Connect Wallet' }).click();
   await chooseWallet(page, 'Browser wallet');
-  await expect(page.getByRole('button', { name: 'Switch to Base', exact: true })).toBeVisible();
-  await page.getByRole('button', { name: 'Switch to Base', exact: true }).click();
+  // The top bar's network strip (Board 16: "Base", no chain id); the footer offers the same switch as its one primary action.
+  await expect(page.locator('.network-attention').getByRole('button', { name: 'Switch to Base', exact: true })).toBeVisible();
+  await page.locator('.network-attention').getByRole('button', { name: 'Switch to Base', exact: true }).click();
   await expect(page.getByText('0x1111…1111')).toBeVisible();
   await openEditorSection(page, 'Simulate');
   await openSimulationDetails(page);
@@ -102,7 +103,7 @@ test('BUILD-009 switches back to Base and invalidates quote on chain/account/pro
   await expect(panel.locator('[data-build009-state]')).toContainText('BRIDGE_QUOTED', { timeout: 30_000 });
   await page.evaluate(() => (window as unknown as { __build009WalletTest: { changeChain(value: string): void } }).__build009WalletTest.changeChain('0xa4b1'));
   await expect(panel.locator('[data-build009-state]')).toHaveCount(0);
-  await page.getByRole('button', { name: 'Switch to Base', exact: true }).click();
+  await page.locator('.network-attention').getByRole('button', { name: 'Switch to Base', exact: true }).click();
   await panel.getByRole('button', { name: 'Get live Base → Arbitrum LI.FI bridge quote' }).click();
   await expect(panel.locator('[data-build009-state]')).toContainText('BRIDGE_QUOTED', { timeout: 30_000 });
   await page.evaluate(() => (window as unknown as { __build009WalletTest: { changeAccount(value: string): void } }).__build009WalletTest.changeAccount('0x2222222222222222222222222222222222222222'));

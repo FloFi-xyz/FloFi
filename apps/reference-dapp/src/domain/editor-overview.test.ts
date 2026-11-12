@@ -5,7 +5,7 @@ import { createReviewContext, lintWorkflow } from '@defi-workflow-engine/referen
 import { editorReducer, initialEditor, type EditorState } from './editor';
 import type { Command } from './commands';
 import { composerActions, composerNodeState } from './composer-presentation';
-import { canvasCardStatus, editorOverview, editorStateDetail, EDITOR_INVALID_DETAIL, EDITOR_STATE_DETAIL, EDITOR_STATE_LABEL, CARD_STATUS_LABEL, CONFIGURED_DETAIL, UNREVIEWED_DETAIL } from './editor-overview';
+import { canvasCardStatus, plainFinding, editorOverview, editorStateDetail, EDITOR_INVALID_DETAIL, EDITOR_STATE_DETAIL, EDITOR_STATE_LABEL, CARD_STATUS_LABEL, CONFIGURED_DETAIL, UNREVIEWED_DETAIL } from './editor-overview';
 import { translate } from '../i18n/locale';
 
 const context = createReviewContext({ registryId: referenceRegistry.registryId, capabilityId: referenceRegistry.capabilities[0]!.id, actionId: referenceRegistry.actions[0]!.id, assets: baseAssetRegistry });
@@ -74,5 +74,12 @@ describe('BUILD-FLOFI-BUILDER-UX-002 Editor overview and card status', () => {
     expect(translate('PT', 'Configured')).toBe('Pronto para simular'); // P0 approved UX (board 16 §4): the configured state reads "ready to simulate"
     expect(translate('PT', 'Draft')).toBe('Rascunho');
     expect(translate('PT', 'Needs attention')).toBe('Requer atenção');
+  });
+});
+
+describe('Board 16: a step\'s checks in plain words', () => {
+  it('never shows the internal limit names the review engine uses', () => {
+    expect(plainFinding('Above the BUILD-003A review limit.')).toBe('The slippage limit is above what FloFi accepts for review.');
+    expect(plainFinding('Output is an unquoted placeholder. Execution is unavailable.')).toBe('Output is an unquoted placeholder. Execution is unavailable.');
   });
 });

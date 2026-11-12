@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { describe, expect, it } from 'vitest';
-import { blockerExplanation, countdown, feeShortfallView, isExplainRequest, nativeAmount, nativeBalance, networkQuestionPending, simulateFooterStatus, walletRequestView, flightSignerFor, recordNeedsAttention, flightRefusalPlacement } from './approved-ux';
+import { blockerExplanation, countdown, feeShortfallView, isExplainRequest, nativeAmount, nativeBalance, networkQuestionPending, simulateFooterStatus, walletRequestView, flightSignerFor, recordNeedsAttention, flightRefusalPlacement, withoutChainId } from './approved-ux';
+import { priceDifferenceLabel } from './slippage-policy';
 import type { NativeFeeShortfall } from '../user-funded/groups';
 import { translate } from '../i18n/locale';
 import { firstPlaceholder } from './build-entry';
@@ -126,5 +127,17 @@ describe('Flight preflight decisions (P0 Track A)', () => {
     for (const notice of [{ executionStarted: true }, { recoveryOnly: true }, { recordAttention: true }])
       expect(flightRefusalPlacement({ ...base, ...notice })).toBe('NOTICE');
     expect(flightRefusalPlacement({ ...base, applies: false, executionStarted: true })).toBeNull();
+  });
+});
+
+describe('Board 16: no chain id or basis points outside Technical details', () => {
+  it('names a network without the chain id its technical label carries', () => {
+    expect(withoutChainId('Base (8453)')).toBe('Base');
+    expect(withoutChainId('Arbitrum One (42161)')).toBe('Arbitrum One');
+    expect(withoutChainId('Base Sepolia (0x14a34)')).toBe('Base Sepolia');
+    for (const plain of ['Base', 'Robinhood Chain (Testnet)', 'Ethereum']) expect(withoutChainId(plain)).toBe(plain);
+  });
+  it('shows a basis-point slippage limit as the card\'s percent "Max price difference"', () => {
+    expect([100, 75, 80, 301, 1, '50'].map(priceDifferenceLabel)).toEqual(['1%', '0.75%', '0.8%', '3.01%', '0.01%', '0.5%']);
   });
 });

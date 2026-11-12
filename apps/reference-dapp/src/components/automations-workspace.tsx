@@ -21,7 +21,8 @@ import { CanvasAutomation, type CanvasAutomationDraft } from './canvas-automatio
 import { bindingViolation } from '../automations/limits';
 import { validateAutomationInput, type AutomationInput, type ActionRequest } from '../automations/definition';
 import { automationCapabilityIssue } from '../domain/copilot-automation';
-import { DEFAULT_SLIPPAGE, DEFAULT_SLIPPAGE_BPS } from '../domain/slippage-policy';
+import { DEFAULT_SLIPPAGE, DEFAULT_SLIPPAGE_BPS, bpsToPercent, percentToBps } from '../domain/slippage-policy';
+export { bpsToPercent, percentToBps } from '../domain/slippage-policy';
 import { StatusTag } from './dashboard/dashboard-status';
 
 export type AutomationNavigation = { readonly owner: WorkflowOwner | null; readonly proof: ReturnType<typeof useWalletProof>; readonly onPropose: (command: Command) => void;
@@ -68,22 +69,7 @@ const ERROR_TEXT: Readonly<Record<string, string>> = {
   AUTOMATION_CHAT_NOTIFICATIONS_UNAVAILABLE: 'Telegram notifications are not available on this deployment.',
   AUTOMATION_WALLET_NAMESPACE_MISMATCH: 'This network needs a wallet of another kind than the one you proved. Only your own wallet can approve its proposals.' };
 
-/**
- * P0 approved UX (board 12): slippage is presented as "Max price difference" in percent. The draft, the definition and every submission stay in
- * basis points: these convert decimal strings exactly (no floating point; 100 bps = 1%). A percent with more than two decimals has no whole
- * basis-point value and is left invalid, so validation refuses it instead of rounding.
- */
-export function bpsToPercent(bps: string): string {
-  if (!/^\d+$/.test(bps)) return bps;
-  const digits = bps.replace(/^0+(?=\d)/, '').padStart(3, '0');
-  const whole = digits.slice(0, -2).replace(/^0+(?=\d)/, ''), fraction = digits.slice(-2).replace(/0+$/, '');
-  return fraction ? `${whole}.${fraction}` : whole;
-}
-export function percentToBps(percent: string): string | null {
-  const match = /^(\d*)(?:[.,](\d{0,2}))?$/.exec(percent.trim());
-  if (!match || !match[1] && !match[2]) return null;
-  return `${match[1] || '0'}${(match[2] ?? '').padEnd(2, '0')}`.replace(/^0+(?=\d)/, '');
-}
+/** P0 approved UX (board 12): slippage is presented as "Max price difference" in percent; the draft and every submission stay in basis points. */
 const INVALID_PERCENT = 'invalid';
 const percentLabel = (bps: string) => `${bpsToPercent(bps)}%`;
 const usd = (value: string) => { const [whole, fraction = ''] = value.split('.'); return `$${whole!.replace(/\B(?=(\d{3})+(?!\d))/g, ',')}${fraction ? `.${fraction.slice(0, 2).padEnd(2, '0')}` : ''}`; };

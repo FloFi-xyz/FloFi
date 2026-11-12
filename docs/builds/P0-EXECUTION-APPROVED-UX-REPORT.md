@@ -53,6 +53,10 @@ evidence unless it says otherwise; none of it proves a public mainnet execution.
   knows a lower bound), "Confirm in your wallet" and the prepared calls in plain words; editing the canvas pauses during execution.
 - **Pages (10–15):** Dashboard, Your workflows, Automations, Credentials, Agents and Passkeys follow the boards (one Coming soon / empty state
   where a capability is not enabled, Advanced settings and Danger zone collapsed, no controls that do nothing).
+- **Card settings (04/16):** "Adjust" on a swap or bridge card opens settings that take the limit as "Max price difference (%)" (the command
+  still carries exact basis points; a percent with no whole basis point is refused, never rounded); the settings name the network without its
+  chain id and state the review's checks in plain words. The top bar's wallet chip and network-switch strip say "Base", not "Base (8453)".
+  The chat's automation proposal card shows its limits in percent.
 - **Tokens and language:** light and dark values from board 16 §5 as CSS variables; PT-BR throughout (no Portugal forms, "fluxo" for
   workflow, "passo" for steps); the assistant answers in the active interface language.
 - **Preserved (18.1):** automatic canvas card connections (typed bindings), Review binding, authorization, execution groups, server refusals,
@@ -86,8 +90,9 @@ See the PR for the final CircleCI certification. Local results on this branch:
   deleting a test; profiles run locally include canvas-corrections, review-execute-recovery-components, copilot, universal-bridge,
   approve-authorize-journeys, execution-continuity (`workflow-ux-execution` 6/6 after the preflight fix), workflow-acceptance, automations,
   the Arbitrum/Ethereum/Base/Robinhood authoring certifications, mcp-in-chat, channel-signing, auth-wallets, flight and chat-automations. The
-  default-product screenshot baselines were regenerated and pass pixel-exact. `build009` needs the public LI.FI host, which this sandbox cannot
-  reach; CircleCI runs it.
+  default-product screenshot baselines are CircleCI's own renders of this branch, each inspected before it was adopted: this sandbox's
+  headless shell renders fonts differently, so a baseline made here cannot match CircleCI pixel-exactly. The comparisons stay pixel-exact
+  (`maxDiffPixels: 0`). `build009` needs the public LI.FI host, which this sandbox cannot reach; CircleCI runs it.
 
 ## Specialist reviews (read-only, advisory; CircleCI remains the certification authority)
 
@@ -136,6 +141,9 @@ step); the chat may still apply an edit during execution (the server binds the r
   shortfall without numbers (it needs the flow's own evidence carried through the backend result).
 - The chat keeps its explicit conversational confirmation ("Do you confirm this workflow?") as an alternative path to the same wallet flow;
   the footer is the only "Authorize in wallet" control.
+- Basis points still appear in some advanced forms the main Editor path does not open: Uniswap/Orca liquidity, the Jupiter (Solana) swap,
+  the Aave lending composition editor, the legacy Base → Optimism bridge and delegated automation limits. Each sits in its own settings form; the
+  swap and bridge cards' "Adjust" path is in percent.
 - Board 05's optional "a similar step exists" question and post-choice confirmation chips are not implemented.
 - Real-mainnet execution of the regression workflow remains unverified until the owner runs it with their own wallet.
 - Owner design confirmations (implemented per the boards, reversing earlier choices): a quoted amount shows 6 significant digits with the exact

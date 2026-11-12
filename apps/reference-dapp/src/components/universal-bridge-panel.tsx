@@ -9,9 +9,9 @@ import { useUniversalRouter } from '../state/universal-router-store';
 import { createUniversalBridgeFromInput, resolveUniversalAsset, universalAssetResolves, universalBridgeDetails,
   universalFeaturedAssets, universalInputOf, UNIVERSAL_BRIDGE_DEFAULT_SLIPPAGE, UNIVERSAL_BRIDGE_NETWORKS, UNIVERSAL_BRIDGE_ROUTING_LABEL,
   type UniversalBridgeInput, type UniversalBridgeRouting } from '../domain/universal-bridge-authoring';
-import { formatSlippage } from '../domain/slippage-policy';
 import { formatTokenAmount } from '../domain/jupiter-authoring';
 import { TokenAmountInput } from './token-amount-input';
+import { PriceDifferenceInput } from './price-difference-input';
 import { AssetSearch } from './asset-search';
 import { SolanaVerifiedAssetSearch } from './solana-verified-asset-search';
 import { PendingExecutionNote } from './execution-concurrency-notes';
@@ -179,10 +179,9 @@ export function UniversalBridgeForm({ nodeId, onDone, options = false }: { nodeI
       placeholder={tr(cross ? 'Your connected destination wallet' : 'Your connected wallet')} onChange={e => set({ recipient: e.target.value })}/></label>
     <label>{tr('Routing')}<select aria-label={tr('Universal bridge routing')} value={input.routing} onChange={e => set({ routing: e.target.value as UniversalBridgeRouting })}>
       {(Object.keys(UNIVERSAL_BRIDGE_ROUTING_LABEL) as UniversalBridgeRouting[]).map(k => <option key={k} value={k}>{tr(UNIVERSAL_BRIDGE_ROUTING_LABEL[k])}</option>)}</select></label>
-    <label>{tr('Slippage (bps)')}<input aria-label={tr('Universal bridge slippage (bps)')} inputMode="numeric" autoComplete="off" maxLength={3} value={input.slippage}
-      onChange={e => set({ slippage: e.target.value })}/></label>
-    {compact ? <small>{tr('Shown as')} {formatSlippage(input.slippage)}.</small>
-      : <small>{tr('Shown as')} {formatSlippage(input.slippage)}. {tr('The guaranteed minimum you receive is fixed in the reviewed provider order. Provider fees are listed at Review. FloFi records a 0.1% fee obligation on each completed workflow; it is not charged at this time.')}</small>}
+    <label>{tr('Max price difference (%)')}<PriceDifferenceInput aria-label={tr('Universal bridge max price difference (%)')} maxLength={5} bps={input.slippage}
+      onBpsChange={slippage => set({ slippage })}/></label>
+    {!compact && <small>{tr('The guaranteed minimum you receive is fixed in the reviewed provider order. Provider fees are listed at Review. FloFi records a 0.1% fee obligation on each completed workflow; it is not charged at this time.')}</small>}
     {error && <p role="alert">{tr(MESSAGES[error] ?? error)}</p>}
     <button type="submit">{tr(nodeId ? 'Review bridge change' : 'Review bridge proposal')}</button>
     {onDone && <button type="button" className="quiet" onClick={onDone}>{tr('Cancel')}</button>}

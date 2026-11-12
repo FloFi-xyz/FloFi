@@ -19,7 +19,7 @@ import { TokenAmountInput } from './token-amount-input';
 import { bridgeDetails, createBridgeNode, type BridgeInput } from '../domain/bridge-authoring';
 import { canDeleteCanvasNode } from '../domain/canvas-keyboard';
 import { createLiquidityNode, type LiquidityInput } from '../domain/liquidity-authoring';
-import { inputSymbol, formatHumanAmount, parseHumanAmount, parseSwapSlippageEdit, slippagePercent, swapDetails, SWAP_SLIPPAGE_RANGE } from '../domain/swap-authoring';
+import { inputSymbol, formatHumanAmount, parseHumanAmount, parseSwapSlippageEdit, swapDetails, SWAP_SLIPPAGE_RANGE } from '../domain/swap-authoring';
 import { editorReducer } from '../domain/editor';
 import type { Command } from '../domain/commands';
 import { useWorkflow } from '../state/workflow-store';
@@ -42,7 +42,10 @@ import { canEditCanvasAmount, setupSummary } from '../domain/canvas-action-setup
 import { supplyReviewFormId, poolReviewFormId } from './composer-card';
 import { usePoolContributionInputs } from './canvas-card-inputs';
 import { StocksConfiguration } from './stocks-settings';
-import { DEFAULT_SLIPPAGE } from '../domain/slippage-policy';
+import { DEFAULT_SLIPPAGE, bpsToPercent, priceDifferenceLabel } from '../domain/slippage-policy';
+import { priceDifferenceBps } from './price-difference-input';
+import { plainFinding } from '../domain/editor-overview';
+import { withoutChainId } from '../domain/approved-ux';
 
 
 const emptyCrossChain: CrossChainLiquidityInput = { amount: '100', bridgeSlippageBps: '50', swapSlippageBps: '50', tickLower: '-200100', tickUpper: '-199900', recipient: '0x1111111111111111111111111111111111111111', provider: 'lifi.rest', noSwap: false };
@@ -51,24 +54,27 @@ type InspectorProps = { selectedId: string | null; select: (id: string | null) =
 const SELF_TRANSFER_NOTE = 'Recipient: your connected owner wallet (a self-transfer), bound at Review. Only the network fee is spent. A chain execution proof, not a DeFi action.';
 // UX-001: on a recipient-capable network the destination is the card's "To" address, committed with the proposal and bound at Review.
 const SEND_RECIPIENT_NOTE = 'Recipient: the address in the card\'s To field, bound at Review. Only the reviewed amount moves; the network fee is paid in ETH.';
-/** BUILD-FIX-UX-001: the slippage field's own validation message (shown under the field; the workflow is unchanged). */
+/** BUILD-FIX-UX-001: the slippage field's own validation message (shown under the field; the workflow is unchanged). Board 16: in percent, never bps. */
 function slippageMessage(cause: unknown) {
   const code = cause instanceof Error ? cause.message : '';
-  if (code === 'SLIPPAGE_OUT_OF_RANGE') return `Enter a slippage from ${SWAP_SLIPPAGE_RANGE.minimum} to ${SWAP_SLIPPAGE_RANGE.maximum} bps (${slippagePercent(SWAP_SLIPPAGE_RANGE.minimum)}–${slippagePercent(SWAP_SLIPPAGE_RANGE.maximum)}).`;
-  if (/LOCK/.test(code)) return 'This step is protected. Unlock it before changing its slippage.';
-  return code === 'INVALID_SLIPPAGE' || !code ? 'Enter the slippage as a whole number of basis points (100 bps = 1%).' : 'This slippage cannot be applied to this step.';
+  if (code === 'SLIPPAGE_OUT_OF_RANGE') return `Enter a max price difference from ${priceDifferenceLabel(SWAP_SLIPPAGE_RANGE.minimum)} to ${priceDifferenceLabel(SWAP_SLIPPAGE_RANGE.maximum)}.`;
+  if (/LOCK/.test(code)) return 'This step is protected. Unlock it before changing its max price difference.';
+  return code === 'INVALID_SLIPPAGE' || !code ? 'Enter the max price difference as a percentage with up to two decimals (1 = 1%).' : 'This max price difference cannot be applied to this step.';
 }
-/** BUILD-FIX-UX-001: the swap's maximum slippage, edited like any other parameter (Enter or Apply). It always shows the applied value. */
+/**
+ * BUILD-FIX-UX-001: the swap's maximum slippage, edited like any other parameter (Enter or Apply). It always shows the applied value.
+ * P0 approved UX (boards 04, 16): it is the card's "Max price difference", typed in percent; the command still carries exact basis points.
+ */
 function SlippageField({ value, current, error, onChange, onSubmit }: { value: string; current: number | null; error: string; onChange(value: string): void; onSubmit(event: FormEvent<HTMLFormElement>): void }) {
   const { t: tr } = useLocale();
   const id = useId();
-  return <form onSubmit={onSubmit} className="inspector-form" aria-label={tr("Swap slippage")}>
-    <label htmlFor={`${id}-slippage`}>{tr("Slippage (bps)")}</label>
-    <input id={`${id}-slippage`} type="text" value={value} onChange={event => onChange(event.target.value)} inputMode="numeric" autoComplete="off" spellCheck={false} maxLength={5}
+  return <form onSubmit={onSubmit} className="inspector-form" aria-label={tr("Max price difference")}>
+    <label htmlFor={`${id}-slippage`}>{tr("Max price difference (%)")}</label>
+    <input id={`${id}-slippage`} type="text" value={value} onChange={event => onChange(event.target.value)} inputMode="decimal" autoComplete="off" spellCheck={false} maxLength={6}
       aria-invalid={Boolean(error) || undefined} aria-describedby={`${id}-slippage-note`}/>
-    <button type="submit" disabled={value === (current?.toString() ?? '')}>{tr("Apply slippage")}</button>
+    <button type="submit" disabled={value === (current === null ? '' : bpsToPercent(String(current)))}>{tr("Apply max price difference")}</button>
     <p id={`${id}-slippage-note`} className={error ? 'form-error' : 'muted'} role={error ? 'alert' : undefined}>{error ? tr(error)
-      : current === null ? tr('No slippage limit is set for this step.') : tr('Applied limit: {0} bps ({1}). A fresh simulation and Review use it.', current, slippagePercent(current))}</p>
+      : current === null ? tr('No max price difference is set for this step.') : tr('Applied limit: {0}. A fresh simulation and Review use it.', priceDifferenceLabel(current))}</p>
   </form>;
 }
 /**
@@ -183,7 +189,7 @@ function CanonicalArtifactInspector({ selectedId, select }: InspectorProps) {
   const cryptoInput = node && canSelectCryptoAssets(node, state.workflow) ? cryptoInputOf(node) : null;
   useEffect(() => {
     setAmount(swap ? swap.amount : template && node ? amountOf(node) : '');
-    setSlippage(swap?.slippage?.toString() ?? cryptoInput?.slippage ?? '');
+    setSlippage(bpsToPercent(swap?.slippage?.toString() ?? cryptoInput?.slippage ?? ''));
     setBridgeInput(bridge ? { amount: bridge.amount, slippageBps: String(bridge.slippageBps) } : { amount: '', slippageBps: DEFAULT_SLIPPAGE });
     setLiquidityInput(liquidity ? {
       weth: formatHumanAmount(liquidity.amountWeth, 'WETH', context), usdc: formatHumanAmount(liquidity.amountUsdc, 'USDC', context),
@@ -214,9 +220,9 @@ function CanonicalArtifactInspector({ selectedId, select }: InspectorProps) {
   function applySlippage(event: FormEvent<HTMLFormElement>, command: (bps: string) => Command) {
     event.preventDefault();
     try {
-      const bps = String(parseSwapSlippageEdit(slippage)), next = command(bps), preview = editorReducer(state, next, context);
+      const bps = String(parseSwapSlippageEdit(priceDifferenceBps(slippage))), next = command(bps), preview = editorReducer(state, next, context);
       if (preview.error) throw new Error(preview.error);
-      dismissProposal(); dispatch(next); setSlippage(bps); setSlippageError('');
+      dismissProposal(); dispatch(next); setSlippage(bpsToPercent(bps)); setSlippageError('');
     } catch (cause) { setSlippageError(slippageMessage(cause)); }
   }
   function saveSlippage(event: FormEvent<HTMLFormElement>) {
@@ -256,9 +262,9 @@ function CanonicalArtifactInspector({ selectedId, select }: InspectorProps) {
   if (!node && !setup) return null;
   return <section className="inspector-body" aria-label={tr(setup ? `${setupSummary(setup, context).action} settings` : `${label} settings`)}>
     <h2>{tr(setup ? `${setupSummary(setup, context).action} settings` : node ? `${label} settings` : 'Settings')}</h2>
-    {summary && !routed && !universalBridge && <p className="composer-editor-context">{tr(summary.action)} · {tr(summary.provider)} · {tr(summary.chain)} · {tr(displayAmount)}</p>}
+    {summary && !routed && !universalBridge && <p className="composer-editor-context">{tr(summary.action)} · {tr(summary.provider)} · {tr(withoutChainId(summary.chain))} · {tr(displayAmount)}</p>}
     {validation && validation.findings.length > 0 && <div className="composer-findings" aria-label={tr("Selected action checks")}>
-      {validation.findings.map(finding => <p key={`${finding.code}:${finding.field}`}><span aria-hidden="true">⚠ </span>{tr(finding.message)}</p>)}
+      {validation.findings.map(finding => <p key={`${finding.code}:${finding.field}`}><span aria-hidden="true">⚠ </span>{tr(plainFinding(finding.message))}</p>)}
     </div>}
     {setup?.action === 'pool' && !setup.cryptoSelection && <UniswapLiquidityForm key={setup.id} nodeId={setup.id} reviewFormId={poolReviewFormId(setup.id)}/>}
     {(setup?.action === 'pool' && setup.cryptoSelection || node && cryptoSelections[node.nodeId]?.action === 'pool') && <CryptoPoolForm key={`${setup?.id ?? node!.nodeId}:${setup?.cryptoSelection?.network ?? cryptoSelections[node!.nodeId]?.network}`} nodeId={setup?.id ?? node!.nodeId}/>}

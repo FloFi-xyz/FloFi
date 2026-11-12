@@ -9,8 +9,9 @@ import { useModeB } from '../state/mode-b-store';
 import { useModeA } from '../state/mode-a-store';
 import { StatusBadge } from './status-badge';
 import { useBuild009Wallet, chainName } from '../state/build009-wallet-store';
+import { withoutChainId } from '../domain/approved-ux';
 /** Board 16: the visible network name never carries its chain id ("Base", not "Base (8453)"); the hover title keeps the full technical label. */
-const networkName = (id: string | null) => chainName(id).replace(/ \((?:\d+|0x[0-9a-fA-F]+)\)$/, '');
+const networkName = (id: string | null) => withoutChainId(chainName(id));
 import { isLendingComposition } from '@defi-workflow-engine/workflow-contracts';
 import { useLending } from '../state/lending-store';
 import { useBridgeSwap } from '../state/bridge-swap-store';
