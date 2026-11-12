@@ -15,6 +15,7 @@ import { KNOWLEDGE_SCHEMA, validateKnowledgeDocument } from '../src/learning/kno
 import { createLearningStore } from '../src/learning/store';
 import type { Page } from '@playwright/test';
 import { openBuilder, reloadBuilder } from './build-entry-navigation';
+import { EDITOR_WORKFLOW_STORAGE_KEY } from '../src/domain/editor-persistence';
 
 test.beforeAll(() => {
   if (process.env.FLOFI_LEARNING_E2E !== 'LOOPBACK_ONLY' || process.env.FLOFI_COPILOT !== 'replay') throw new Error('LEARNING_HARNESS_REQUIRED');
@@ -69,8 +70,10 @@ test('invisible learning: adapted in the conversation, learned after consent and
   expect(await query('SELECT * FROM learning_subjects')).toEqual([]);
   expect(await query('SELECT * FROM learning_evidence')).toEqual([]);
 
-  // BUILD-FLOFI-CONVERSATIONAL-001: the chat committed those Solana Devnet swaps (the header now shows the Solana wallet); a fresh visit's empty
-  // draft returns to the EVM wallet this journey proves.
+  // BUILD-FLOFI-CONVERSATIONAL-001: the chat committed those Solana Devnet swaps (the header now shows the Solana wallet); an empty draft
+  // returns to the EVM wallet this journey proves. P0 hotfix (execution continuity): this browser now remembers the Editor's Canvas across
+  // visits (`domain/editor-persistence.ts`), so the journey starts its empty draft as a browser without that remembered Canvas does.
+  await page.evaluate(key => window.localStorage.removeItem(key), EDITOR_WORKFLOW_STORAGE_KEY);
   await openBuilder(page);
   // Privacy & memory lives in Settings, outside the chat. Proving the wallet signs a sign-in message only; learning is off until the user turns it on.
   await page.getByRole('button', { name: 'Settings', exact: true }).click();
