@@ -108,7 +108,13 @@ function counts(groups: readonly ExecutionGroup[], prepared: ReadonlyMap<number,
  * Refusals are closed codes: the Editor's own (EDITOR_WORKFLOW_*), USER_FUNDED_NOT_ENABLED, the composition's, WORKFLOW_STEPS_EMPTY.
  */
 export async function reviewEditorExecution(input: { readonly workflow: unknown; readonly owner: string; readonly profile: WalletProfile;
-  readonly facts: UserFundedFacts; readonly deps: UserFundedDeps | null; readonly now: Date }): Promise<ReviewResult> {
+  readonly facts: UserFundedFacts; readonly deps: UserFundedDeps | null; readonly now: Date;
+  /**
+   * P0 hotfix: why a BRIDGE step's own flow refuses to execute on this deployment today (its live mode, its owner-execution opt-in), or null.
+   * The run's start and every group preparation re-check these gates; the Review asks the same question, so it never promises one wallet
+   * confirmation that Authorize would then refuse. Absent: not consulted (tests and callers without an engine runtime).
+   */
+  readonly stepRefusal?: ((step: Parameters<typeof requirementOf>[0]['steps'][number], index: number) => Promise<string | null>) | undefined }): Promise<ReviewResult> {
   const owner = input.owner.toLowerCase();
   if (!/^0x[0-9a-f]{40}$/.test(owner)) return { ok: false, code: 'EVM_WALLET_REQUIRED' };
   if (!input.facts.enabled || !input.deps) return { ok: false, code: input.facts.code ?? 'USER_FUNDED_NOT_ENABLED' };
@@ -118,7 +124,14 @@ export async function reviewEditorExecution(input: { readonly workflow: unknown;
   if (!composed.ok) return { ok: false, code: composed.code };
   const req = requirementOf(composed);
   if (!req.ok) return { ok: false, code: req.code };
-  const plan = planExecutionGroups(req.value, input.facts, input.profile, userFundedBuildable(input.facts, owner));
+  const closed = new Map<number, string>();
+  if (input.stepRefusal) for (const step of req.value.steps) {
+    if (step.action !== 'bridge') continue;
+    const code = await input.stepRefusal(composed.steps[step.index]!, step.index);
+    if (code) closed.set(step.index, code);
+  }
+  const buildable = userFundedBuildable(input.facts, owner);
+  const plan = planExecutionGroups(req.value, input.facts, input.profile, st => closed.has(st.index) ? 'USER_FUNDED_BRIDGE_FLOW_CLOSED' : buildable(st));
   if (!plan.ok) return { ok: false, code: plan.code };
   const preparedCalls = new Map<number, number>();
   let validUntil: string | null = null, refusal: EditorExecutionReview['refusal'] = null;

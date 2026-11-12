@@ -339,4 +339,24 @@ describe('P0 hotfix E1: the Editor\'s whole-workflow Review of Swap → Bridge',
     if (!unknown.ok) throw new Error(unknown.code);
     expect(unknown.value).toMatchObject({ mode: 'STEP_BY_STEP', reasons: ['WALLET_ATOMIC_BATCH_UNKNOWN'] });
   });
+
+  it('P0 hotfix: a bridge whose own flow the deployment keeps closed never joins the batch — the Review says so instead of promising one confirmation', async () => {
+    const d = doubles();
+    const canvas = canvasWorkflowOfStrategy(SWAP_BRIDGE);
+    if (!canvas.ok) throw new Error(canvas.code);
+    const asked: number[] = [];
+    const reviewed = await reviewEditorExecution({ workflow: canvas.workflow, owner: OWNER, profile: METAMASK, facts: FACTS, deps: d.deps, now: new Date(d.clock() * 1000),
+      stepRefusal: async (_step, index) => { asked.push(index); return 'FLOW_OFF'; } });
+    if (!reviewed.ok) throw new Error(reviewed.code);
+    // Only the bridge step's gates are consulted; the swap still batches on its own, the bridge runs through its own (closed) flow.
+    expect(asked).toEqual([1]);
+    expect(reviewed.value).toMatchObject({ mode: 'STEP_BY_STEP', reasons: ['USER_FUNDED_BRIDGE_FLOW_CLOSED'], counts: { atLeast: true } });
+    expect(reviewed.value.groups.map(g => g.strategy)).toEqual(['EVM_WALLET_BATCH', 'EVM_OWNER_STEP']);
+    // An open flow changes nothing: one wallet confirmation.
+    const open = await reviewEditorExecution({ workflow: canvas.workflow, owner: OWNER, profile: METAMASK, facts: FACTS, deps: d.deps, now: new Date(d.clock() * 1000),
+      stepRefusal: async () => null });
+    if (!open.ok) throw new Error(open.code);
+    expect(open.value).toMatchObject({ mode: 'ONE_WALLET_CONFIRMATION', reasons: [] });
+    expect(d.arb.control.sends()).toBe(0);
+  });
 });

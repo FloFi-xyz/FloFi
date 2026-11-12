@@ -44,6 +44,8 @@ export const portugueseExecutionContinuity: Readonly<Record<string, string>> = {
     'Um contrato da ponte não é o que a FloFi verificou, então nada foi preparado. Nada foi enviado.',
   'The bridge quote did not match what FloFi asked for (amount, recipient or tokens), so your wallet was not asked. Nothing was sent.':
     'A cotação da ponte não corresponde ao que a FloFi pediu (valor, destinatário ou tokens), então sua carteira não foi consultada. Nada foi enviado.',
+  'This bridge\'s own flow is not open for execution on FloFi right now, so it cannot join the batch. Nothing was sent.':
+    'O fluxo próprio desta ponte não está aberto para execução na FloFi agora, então ela não pode entrar no lote. Nada foi enviado.',
   'Arrives on {0}': 'Chega na {0}',
   'Delivery': 'Entrega',
   'FloFi waits for this delivery on {0} and verifies it before the workflow completes.':

@@ -669,6 +669,7 @@ export const EXECUTION_REASON: Readonly<Record<string, string>> = {
   USER_FUNDED_BRIDGE_ASSET_UNSUPPORTED: 'This bridge moves an asset FloFi does not batch, so it runs through its own review and wallet confirmations.',
   USER_FUNDED_BRIDGE_DESTINATION_UNREADABLE: 'FloFi cannot follow deliveries on this bridge\'s destination network here, so the bridge runs through its own review and wallet confirmations.',
   USER_FUNDED_BRIDGE_RECIPIENT_NOT_OWNER: 'This bridge pays another wallet than the connected one, so it cannot be batched. It runs through its own review and wallet confirmations.',
+  USER_FUNDED_BRIDGE_FLOW_CLOSED: 'This bridge\'s own flow is not open for execution on FloFi right now, so it cannot join the batch. Nothing was sent.',
 };
 /**
  * USER_FUNDED_PREPARED_STILL_VALID: the batch FloFi already prepared for this group can still execute on chain (less than
