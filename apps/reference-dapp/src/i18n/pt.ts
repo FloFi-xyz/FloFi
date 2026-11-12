@@ -48,6 +48,7 @@ import { portugueseFlight } from './pt-flight';
 import { portugueseApprovedUx } from './pt-approved-ux';
 import { portugueseApprovedUxPages } from './pt-approved-ux-pages';
 import { portugueseApprovedUxEditor } from './pt-approved-ux-editor';
+import { portugueseExecutionContinuity } from './pt-execution-continuity';
 /** English source messages are stable presentation keys. Technical identifiers never enter this catalog. */
 export const portuguese: Readonly<Record<string, string>> = {
   ...portugueseCatalogReliability,
@@ -305,5 +306,7 @@ export const portuguese: Readonly<Record<string, string>> = {
   // P0 approved UX: new copy of the two helper workstreams, then the final-precedence PT-BR catalog (overrides older PT-PT forms).
   ...portugueseApprovedUxPages,
   ...portugueseApprovedUxEditor,
+  // P0 hotfix (execution continuity, layout, Flight and locale): new keys only.
+  ...portugueseExecutionContinuity,
   ...portugueseApprovedUx,
 };
