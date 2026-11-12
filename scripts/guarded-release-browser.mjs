@@ -131,6 +131,9 @@ const definitions = [
   // BUILD-FLOFI-FLIGHT-001: /board end to end (beta list, five states, invites, Founding seats, a pass from a real simulation) on the embedded runtime.
   ['flight', ['--config', 'playwright.flight.config.ts'], { TEST_DATABASE_URL: process.env.TEST_DATABASE_URL ?? 'postgres://flofi@127.0.0.1:5432/postgres', FLOFI_BETA_ACCESS: 'open' }],
   ['flight-team-early-access', ['--config', 'playwright.flight.config.ts', '--grep', 'temporary team access'], { TEST_DATABASE_URL: process.env.TEST_DATABASE_URL ?? 'postgres://flofi@127.0.0.1:5432/postgres', FLOFI_BETA_ACCESS: 'beta', FLOFI_FLIGHT_TEAM_E2E: 'MOCKED_LOOPBACK_ONLY' }],
+  // Closed beta: board.spec.ts's direct product requests and returning sign-in, and (P0 hotfix, Flight transition) flight-transition.spec.ts —
+  // the branded checking state, the server redirect of an admitted arrival, the refused board's own styles in light and dark, "could not
+  // check your access" and a lost-access re-render handed off as a full navigation. Both files' closed-beta tests are titled "closed beta protects".
   ['flight-closed-beta', ['--config', 'playwright.flight.config.ts', '--grep', 'closed beta protects'], { TEST_DATABASE_URL: process.env.TEST_DATABASE_URL ?? 'postgres://flofi@127.0.0.1:5432/postgres', FLOFI_BETA_ACCESS: 'beta' }],
 ];
 const composition = [['composition-provenance', ['release-composition-provenance.spec.ts'], {}]];
