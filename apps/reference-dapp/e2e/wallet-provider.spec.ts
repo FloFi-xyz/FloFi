@@ -95,7 +95,7 @@ test('connect and network switching use the same EIP-6963 MetaMask provider', as
   await expect(page.getByText(walletLabel, { exact: true })).toBeVisible();
   await page.getByText('Advanced action setup', { exact: true }).click(); await page.getByText('Base → Arbitrum → WETH', { exact: true }).click();
   await page.getByLabel('Source amount (USDC)').fill('1'); await page.getByRole('button', { name: 'Review Base → Arbitrum bridge → WETH swap' }).click();
-  await openProposalReview(page); await page.getByRole('button', { name: 'Apply proposal' }).click(); await page.getByRole('button', { name: 'Switch to Base (8453)' }).click();
+  await openProposalReview(page); await page.getByRole('button', { name: 'Apply proposal' }).click(); await page.getByRole('button', { name: 'Switch to Base', exact: true }).click();
   await expect(page.getByText(`${LENDING_OWNER.slice(0, 6)}…${LENDING_OWNER.slice(-4)}`, { exact: true })).toBeVisible();
   const requests = await controls(page);
   expect(requests.every(request => request.provider === 'MetaMask')).toBe(true);
