@@ -70,6 +70,8 @@ export type ConversationBridge = LifecycleView & {
    */
   readonly pendingEdits?: readonly PendingEdit[] | undefined; readonly resolveEdit?: ((nodeId: string, apply: boolean) => string | null) | undefined;
   /** The wallet's current network label, and the last wallet network-switch error (a rejected or failed request). */
+  /** P0 hotfix (locale contract): that error as a catalog message and its values, so FloFi's message renders it in either language. */
+  readonly networkErrorNotice?: readonly [string, ...string[]] | null | undefined;
   readonly walletNetwork?: string | null | undefined; readonly networkError?: string | null | undefined;
   /** True while a runtime this workflow needs has not answered whether it is available here (unknown, not "unavailable"). */
   readonly runtimeChecking?: boolean | undefined;
@@ -702,8 +704,8 @@ export function useFlofiConversation({ owner, epoch, bridge, direct, interfaceLa
     const waiting = resume.current;
     if (!waiting || waiting.scope !== session.current) return;
     if (waiting.until === 'NETWORK') {
-      const failed = bridge.networkError;
-      if (failed && failed !== waiting.error) { resume.current = null; say(waiting.scope, waiting.language, (language, c) => c.switchFailed(translate(language, failed))); return; }
+      const failed = bridge.networkError, notice = bridge.networkErrorNotice;
+      if (failed && failed !== waiting.error) { resume.current = null; say(waiting.scope, waiting.language, (language, c) => c.switchFailed(notice ? translate(language, ...notice) : translate(language, failed))); return; }
       if (bridge.networkAction || bridge.source.state.busy) return;
       resume.current = null;
       if (!bridge.wallet.account) return;

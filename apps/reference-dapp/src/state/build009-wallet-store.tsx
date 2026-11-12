@@ -6,7 +6,7 @@ import { chooseEvmWallet, chosenEvmProvider, clearChosenEvmWallet, evmWalletEntr
   subscribeEvmDiscovery, subscribeEvmSelection, type EvmProvider } from '../wallet/evm-discovery';
 import { updateWalletPreference, walletPreference, type WalletChoice } from '../wallet/wallet-registry';
 import { useWalletSelector } from '../components/wallet-selector';
-import { evmWalletErrorMessage } from '../wallet/wallet-errors';
+import { evmWalletNotice, walletNoticeText, type WalletNotice } from '../wallet/wallet-errors';
 import { useProductBootstrap } from './product-bootstrap';
 import { rememberWalletHint } from '../wallet/wallet-hint';
 import { forgetAccountWalletReconnect } from '../wallet/sign-in-wallet';
@@ -26,6 +26,8 @@ type Wallet = { readonly available: boolean; readonly account: string | null; re
   readonly provider: Pick<WalletChoice, 'key' | 'name' | 'icon'> | null;
   readonly providerError: string | null;
   readonly error: string | null;
+  /** The same notice as a catalog message and its values (P0 hotfix, locale contract): render it with `tr(...notice)`. */
+  readonly notice?: WalletNotice | null;
   /** Monotonic authority epoch: genuine provider/account/chain transitions and disconnects only. */
   readonly revision: number; readonly busy: boolean;
   /**
@@ -54,7 +56,11 @@ export function Build009WalletProvider({ children }: { children: ReactNode }) {
   const [identity, setIdentity] = useState<Wallet['provider']>(null);
   const [account, setAccount] = useState<string | null>(null);
   const [chainId, setChainId] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  // P0 hotfix (locale contract): a wallet notice is a catalog message and its values, rendered in the interface's current language (`notice`);
+  // `error` keeps the English sentence for existing readers.
+  const [notice, setNotice] = useState<WalletNotice | null>(null);
+  const error = notice ? walletNoticeText(notice) : null;
+  const setError = (value: string | WalletNotice | null) => setNotice(value === null ? null : typeof value === 'string' ? [value] : value);
   const [revision, setRevision] = useState(0);
   const [busy, setBusy] = useState(false);
   const { walletHint } = useProductBootstrap();
@@ -176,7 +182,7 @@ export function Build009WalletProvider({ children }: { children: ReactNode }) {
       updateAuthority(session);
       setIdentity(evmWalletIdentity(provider));
       return session;
-    } catch (cause) { if (op === generation.current) setError(evmWalletErrorMessage(cause, evmWalletIdentity(provider)?.name ?? null, 'connect')); }
+    } catch (cause) { if (op === generation.current) setError(evmWalletNotice(cause, evmWalletIdentity(provider)?.name ?? null, 'connect')); }
     finally { if (op === generation.current) setBusy(false); }
     return null;
   }, [updateAuthority]);
@@ -195,7 +201,7 @@ export function Build009WalletProvider({ children }: { children: ReactNode }) {
       const actual = await provider.request({ method: 'eth_chainId' });
       if (op !== generation.current || epoch !== events.current || injected() !== provider) return;
       updateAuthority({ chainId: normalizedChain(actual) });
-    } catch (cause) { if (op === generation.current) setError(evmWalletErrorMessage(cause, evmWalletIdentity(provider)?.name ?? null, 'switch')); }
+    } catch (cause) { if (op === generation.current) setError(evmWalletNotice(cause, evmWalletIdentity(provider)?.name ?? null, 'switch')); }
     finally { if (op === generation.current) setBusy(false); }
   }, [chainId, updateAuthority]);
   // Disconnect ends FloFi's use of the wallet: no silent reuse until the owner picks a wallet again.
@@ -203,7 +209,7 @@ export function Build009WalletProvider({ children }: { children: ReactNode }) {
     updateWalletPreference({ evmDisconnected: true }); forgetAccountWalletReconnect('evm'); clearChosenEvmWallet(); suppressed.current = true;
     rememberWalletHint('evm', false); setRestoring(false);
     setError(null); setBusy(false); }, [updateAuthority]);
-  return <Context.Provider value={{ available, providerError, account, chainId, provider: identity, error, revision, busy, restoring, session, connect, connectWith, switchTo, reset }}>{children}</Context.Provider>;
+  return <Context.Provider value={{ available, providerError, account, chainId, provider: identity, error, notice, revision, busy, restoring, session, connect, connectWith, switchTo, reset }}>{children}</Context.Provider>;
 }
 export function useBuild009Wallet(): Wallet { const value = useContext(Context); if (!value) throw new Error('BUILD009_WALLET_MISSING'); return value; }
 /** The operational EVM wallet where the product shell provides one; null elsewhere (e.g. `/connections`, outside the shell). */

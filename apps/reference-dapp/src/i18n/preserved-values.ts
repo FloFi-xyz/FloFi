@@ -102,4 +102,18 @@ export const preservedValues = new Set<string>([
   // P0 hotfix (locale contract): value-only joins of pieces that are each translated first (`{0}: {1}` title and sentence, a Review change).
   "{0}: {1}",
   "{0} {1} → {2}",
+  // Engineering-canvas tags and a reconciliation code shown verbatim (network/protocol names, a closed code).
+  "SOLANA",
+  "ARBITRUM · UNISWAP V3",
+  "CONFIRMED_NOT_RECONCILED",
+  // Protocol and provider names in name tables.
+  "Aave V3",
+  "Uniswap V3",
+  "Cross-chain Router",
+  "Universal Router",
+  "CoW Protocol",
+  "System Program",
+  "Orca Whirlpools",
+  "Raydium CLMM",
+  "Meteora DLMM",
 ]);

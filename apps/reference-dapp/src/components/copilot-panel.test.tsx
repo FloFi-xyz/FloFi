@@ -147,8 +147,8 @@ describe('chat messages follow the current interface language', () => {
     ({ EN: build(conversationCopy('EN')), PT: build(conversationCopy('PT')) });
   const written: ChatMessage = { id: 1, role: 'flofi', language: 'EN', text: conversationCopy('EN').stepCompleted(2, 2, null),
     variants: both(c => ({ text: c.stepCompleted(2, 2, null), question: c.nextQuestion, options: [c.addAnother, c.review] })) };
-  const page = (language: 'EN' | 'PT', messages: ChatMessage[]) => renderToStaticMarkup(createElement(LocaleProvider, { initialLanguage: language },
-    createElement(CopilotPanel, { conversation: conversation(true, messages) })));
+  const page = (language: 'EN' | 'PT', messages: ChatMessage[]) => renderToStaticMarkup(createElement(LocaleProvider, { initialLanguage: language,
+    children: createElement(CopilotPanel, { conversation: conversation(true, messages) }) }));
   it('a message written in English is shown in Portuguese after the switch, and back', () => {
     const pt = page('PT', [written]), en = page('EN', [written]);
     expect(pt).toContain(conversationCopy('PT').stepCompleted(2, 2, null)); expect(pt).toContain(conversationCopy('PT').review);
