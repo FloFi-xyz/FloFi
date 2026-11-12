@@ -154,7 +154,8 @@ test('reload after confirmed approval recovers the same run and refreshes its qu
   expect(await pointer(page)).toBe(id); expect(await owner.sends()).toBe(1);
   await expect(page.locator('.canvas-primary-action').getByRole('button', { name: 'Continue to swap', exact: true })).toHaveCount(0);
   await stage(page, 'Simulate');
-  await page.getByRole('region', { name: 'Simulation workflow graph', exact: true }).getByRole('button', { name: 'Simulate again', exact: true }).click();
+  // P0 approved UX (board 06): the one lifecycle control sits in the Editor footer on Simulate (the simulated canvas carries no action).
+  await page.locator('footer.summary-bar .canvas-primary-action').getByRole('button', { name: 'Simulate again', exact: true }).click();
   // BUILD-SOLANA-TRANSFER-UX-001: the one owner action accepts the refreshed Review and makes the swap's wallet request; the confirmed
   // approval is never requested again.
   await expect(authorize(page)).toBeEnabled(); expect(owner.requested()).toBe(1);

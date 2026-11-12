@@ -133,13 +133,14 @@ test('independent steps: an unapplied Canvas amount is resolved in the chat, the
   await expect(flofi(page)).toContainText('Should I apply it before reviewing the workflow?');
   await pick(page, 'Apply it');
   await expect(flofi(page)).toContainText('That amount cannot be applied: Enter a valid amount greater than 0.');
+  // A Portuguese request is understood; P0 approved UX: FloFi answers in the interface language (English here).
   await say(page, 'revisar workflow');
-  await expect(flofi(page)).toContainText('A etapa 2 (Trocar) tem um montante digitado que não foi aplicado: 0 USDC.');
-  await pick(page, 'Descartar');
-  await expect(chat(page)).toContainText('Descartado. A etapa mantém o montante anterior.');
-  await expect(flofi(page)).toContainText('Esta é a revisão da etapa 1 de 2.', { timeout: 30_000 });
+  await expect(flofi(page)).toContainText('Step 2 (Swap) has an amount you typed but did not apply: 0 USDC.');
+  await pick(page, 'Discard it');
+  await expect(chat(page)).toContainText('Discarded. The step keeps its previous amount.');
+  await expect(flofi(page)).toContainText('Here is the review of step 1 of 2.', { timeout: 30_000 });
   // Independent steps: step 2 is not funded by step 1, and both keep exactly their authored amounts.
-  await expect(flofi(page).locator('[data-sequence-state="NEXT"]')).not.toContainText('Financiada pela etapa');
+  await expect(flofi(page).locator('[data-sequence-state="NEXT"]')).not.toContainText('Funded by step');
   const workflow = JSON.parse(await readWorkflowIr(page)) as { nodes: { userConstraints: { kind: string; quantity?: { amount: string } }[] }[] };
   expect(workflow.nodes.map(node => node.userConstraints.find(c => c.kind === 'MAXIMUM_INPUT')?.quantity?.amount)).toEqual(['1000000', '2000000']);
   expect(owner.requested()).toBe(0); networkGuard.assertClean();
