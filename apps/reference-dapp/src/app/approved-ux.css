@@ -60,12 +60,16 @@
 .simulation-workflow-canvas[data-docked]>.simulate-canvas-body>.flow-surface{flex:none;height:clamp(340px,52vh,520px);border-radius:0}
 .canvas-review-dock{min-width:0;border-top:1px solid var(--line);background:var(--surface)}
 .canvas-review-dock>.review-panel-approved{padding:20px var(--workspace-edge-spacing,16px) 24px}
+.canvas-review-dock>.execution-status-panel{margin:0;padding:20px var(--workspace-edge-spacing,16px) 24px;border:0;border-radius:0;box-shadow:none;background:transparent;max-height:none}
 .canvas-review-dock>.simulation-summary{margin:0;padding:20px var(--workspace-edge-spacing,16px);border:0;border-radius:0;box-shadow:none;max-height:none;background:transparent}
 @container flofi-canvas-frame (min-width:1180px){
   .simulation-workflow-canvas[data-docked]>.simulate-canvas-body{display:grid;grid-template-columns:minmax(0,1fr) minmax(360px,420px);align-items:stretch}
   .simulation-workflow-canvas[data-docked]>.simulate-canvas-body>.flow-surface{height:auto;min-height:clamp(460px,calc(100vh - 300px),640px)}
   .canvas-review-dock{border-top:0;border-left:1px solid var(--line)}
 }
+/* Narrow frame (< 720 px): one card per row, the graph as tall as its steps (never shrunk to an unreadable size). */
+.simulation-workflow-canvas[data-narrow],.workflow-workspace :is(.simulate-workspace-grid,.execute-workspace-grid)>.simulation-workflow-canvas[data-narrow]{height:auto;overflow:visible}
+.simulation-workflow-canvas[data-narrow]>.simulate-canvas-body>.flow-surface{flex:none;height:max(340px,calc(var(--canvas-steps,1) * 300px + 168px))}
 @container flofi-canvas-frame (min-width:720px) and (max-width:1179.98px){
   .canvas-review-dock .review-panel-rows{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));column-gap:32px}
   .canvas-review-dock .review-panel-rows>div,.canvas-review-dock .review-panel-rows>div:last-child{border-bottom:0;border-top:1px solid var(--line)}

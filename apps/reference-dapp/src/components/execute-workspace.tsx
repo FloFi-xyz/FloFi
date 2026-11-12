@@ -135,10 +135,12 @@ export function ExecuteWorkspace(props: ExecuteWorkspaceProps) {
   </section>;
   return <section className="execute-workspace" aria-label={tr("Workflow execution workspace")}>
     <div className={`execute-workspace-grid${detailsOnly ? ' stage-grid-single' : ''}`}>
-      {live ? <ExecutionTimeline progress={live} result={result} workflowName={workflowName} backToBuild={backToBuild} checkingOperation={verifying && !recovery?.recordOnly ? recovery?.operationId ?? null : null} primaryAction={props.primaryAction ?? <><button type="button" className="simulation-back" onClick={backToBuild}>{tr("Back to the Canvas")}</button><CanvasLifecycleAction {...props} controls={controls}/></>}/> : <SimulateWorkflowCanvas workflowName={workflowName} stage="execute" primaryAction={props.primaryAction ?? <><button type="button" className="simulation-back" onClick={backToBuild}>{tr("Back to the Canvas")}</button><CanvasLifecycleAction {...props} controls={controls}/></>}/>}
+      {live ? <ExecutionTimeline progress={live} result={result} workflowName={workflowName} backToBuild={backToBuild} checkingOperation={verifying && !recovery?.recordOnly ? recovery?.operationId ?? null : null} primaryAction={props.primaryAction ?? <><button type="button" className="simulation-back" onClick={backToBuild}>{tr("Back to the Canvas")}</button><CanvasLifecycleAction {...props} controls={controls}/></>}/> : <SimulateWorkflowCanvas workflowName={workflowName} stage="execute" dock={detailsOnly ? statusPanel : undefined} dockLabel={null} primaryAction={props.primaryAction ?? <><button type="button" className="simulation-back" onClick={backToBuild}>{tr("Back to the Canvas")}</button><CanvasLifecycleAction {...props} controls={controls}/></>}/>}
       {!detailsOnly && executionSummary}
     </div>
-    {detailsOnly && statusPanel}
+    {/* P0 hotfix (layout): before execution starts, the status, the whole-workflow Review and Authorize are docked inside the Canvas frame (as on
+        Simulate); once an execution is live, its timeline is the frame and the status follows it. */}
+    {detailsOnly && live && statusPanel}
     {props.technicalDetails && <details className="shell-details technical-workspace execute-technical"><summary>{tr("View technical details")}</summary>{live ? <><ExecutionEvidenceDetails progress={live}/>{tr(props.source.kind === 'unavailable' && props.technicalDetails)}</> : props.technicalDetails}</details>}
   </section>;
 }
