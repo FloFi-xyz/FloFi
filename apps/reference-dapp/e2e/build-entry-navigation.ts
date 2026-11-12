@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { expect, type Locator, type Page } from '@playwright/test';
+import { EDITOR_WORKFLOW_STORAGE_KEY } from '../src/domain/editor-persistence';
 
 /**
  * P0 approved UX (board 03b): navigation lives only in the ☰ drawer — "New workflow" (the Chat entry, where offered), "Editor", "Dashboard",
@@ -84,6 +85,9 @@ export async function continueToBuilder(page: Page): Promise<void> {
   await expect(entry).toHaveCount(0);
 }
 export async function openBuilder(page: Page, options?: Parameters<Page['goto']>[1]): Promise<void> {
+  // P0 hotfix (execution continuity): this browser remembers the Editor's Canvas across visits (`domain/editor-persistence.ts`); opening the
+  // builder is a new visit that starts from an empty draft, as in a browser without that remembered Canvas. A reload (`reloadBuilder`) keeps it.
+  if (/^https?:/.test(page.url())) await page.evaluate(key => { try { window.localStorage.removeItem(key); } catch { /* storage blocked */ } }, EDITOR_WORKFLOW_STORAGE_KEY);
   await page.goto('/app', options);
   await continueToBuilder(page);
 }
