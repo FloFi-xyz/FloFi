@@ -99,4 +99,7 @@ export const preservedValues = new Set<string>([
   "AAVE V3",
   "BASE SEPOLIA · AAVE V3",
   "Arbitrum",
+  // P0 hotfix (locale contract): value-only joins of pieces that are each translated first (`{0}: {1}` title and sentence, a Review change).
+  "{0}: {1}",
+  "{0} {1} → {2}",
 ]);

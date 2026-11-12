@@ -1,10 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 'use client';
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
-import { portuguese } from './pt';
+import { translate } from './translate';
 import { LANGUAGE_KEY, cookieLanguage, documentLanguage, languageCookie, type Language } from './language';
 export type { Language } from './language';
 export { DEFAULT_LANGUAGE, LANGUAGE_COOKIE, LANGUAGE_KEY, parseLanguage } from './language';
+// The catalog lookup lives in `translate.ts` (no client boundary), so domain and server code share the exact same function.
+export { translate } from './translate';
 /** The person's choice, written synchronously to the authoritative cookie and to its storage mirror (before any refresh reads it). */
 export function rememberLanguage(language: Language) {
   try { document.cookie = languageCookie(language, window.location.protocol === 'https:'); } catch { /* Still applies this visit. */ }
@@ -20,22 +22,6 @@ export function alignStoredLanguage() {
   try { chosen = cookieLanguage(document.cookie); } catch { return; }
   if (!chosen) return;
   try { if (localStorage.getItem(LANGUAGE_KEY) !== chosen) localStorage.setItem(LANGUAGE_KEY, chosen); } catch { /* Optional mirror. */ }
-}
-const templates = Object.entries(portuguese).filter(([key]) => key.includes('{0}')).map(([key, value]) => ({
-  pattern: new RegExp('^' + key.split(/(\{\d+\})/).map(part => /^\{\d+\}$/.test(part) ? '(.+?)' : part.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('') + '$'), value,
-}));
-/** Translate only catalog messages. Unlisted symbols, addresses, hashes, IDs and user names pass through unchanged. */
-export function translate<T>(language: Language, input: T, ...parameters: readonly (string | number)[]): T {
-  if (typeof input !== 'string') return input;
-  const text = input.trim();
-  let value = language === 'PT' && Object.hasOwn(portuguese, text) ? portuguese[text] : undefined;
-  if (parameters.length) {
-    const message = (value ?? text).replace(/\{(\d+)\}/g, (placeholder, i: string) => String(parameters[Number(i)] ?? placeholder));
-    return input.replace(text, () => message) as T;
-  }
-  if (language !== 'PT') return input;
-  if (!value) for (const template of templates) { const match = template.pattern.exec(text); if (match) { value = template.value.replace(/\{(\d+)\}/g, (_, i: string) => match[Number(i) + 1] ?? ''); break; } }
-  return (value === undefined ? input : input.replace(text, () => value!)) as T;
 }
 const defaults = { language: 'EN' as Language, setLanguage: (_value: Language) => { void _value; }, t: <T,>(value: T, ...parameters: readonly (string | number)[]) => translate('EN', value, ...parameters) };
 const Context = createContext(defaults);

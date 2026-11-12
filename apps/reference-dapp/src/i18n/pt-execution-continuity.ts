@@ -11,4 +11,7 @@ export const portugueseExecutionContinuity: Readonly<Record<string, string>> = {
   'Confirmed on {0}': 'Confirmado na {0}',
   'Waiting for delivery on {0}': 'Aguardando a entrega na {0}',
   'Outcome unknown': 'Resultado desconhecido',
+  // Locale contract: the chat's own lifecycle words as catalog keys too (a message that carries no rendering in both languages still translates).
+  'Review workflow': 'Revisar fluxo',
+  'Step {0} of {1}': 'Etapa {0} de {1}',
 };

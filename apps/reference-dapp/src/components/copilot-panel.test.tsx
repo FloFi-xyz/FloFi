@@ -7,7 +7,9 @@ import { EditorOverviewPanel } from './editor-overview-panel';
 import { NetworkChoices, networkChoiceOptions, orderNetworkChoices } from './conversation-cards';
 import type { EditorOverview, EditorStep } from '../domain/editor-overview';
 import { FLOFI_WELCOME, FLOFI_WELCOME_COMMANDS } from '../domain/assistant-welcome';
-import { translate } from '../i18n/locale';
+import { LocaleProvider, translate } from '../i18n/locale';
+import { conversationCopy } from '../domain/conversation-copy';
+import { shownMessage } from '../domain/chat-message';
 import type { ChatMessage, FlofiConversation } from '../state/flofi-conversation';
 
 // Presentation unit: the conversation itself is covered by the lifecycle and interpreter suites.
@@ -135,5 +137,33 @@ describe('P0 approved UX: the FloFi panel (board 04) and choosing the network in
     expect(html).not.toMatch(/aria-pressed|aria-checked|aria-selected/);
     expect(onPick).not.toHaveBeenCalled();
     expect(translate('PT', 'Your wallet')).toBe('Sua carteira'); expect(translate('PT', 'Choose a network')).toBe('Escolha uma rede');
+  });
+});
+
+// P0 hotfix (locale contract): FloFi's deterministic messages are rendered in both languages when written and shown in the CURRENT language, so
+// switching language never leaves "Review workflow" or "Step 2 of 2" behind in a Portuguese chat (or Portuguese in an English one).
+describe('chat messages follow the current interface language', () => {
+  const both = (build: (c: ReturnType<typeof conversationCopy>) => { text: string; options?: string[]; question?: string }) =>
+    ({ EN: build(conversationCopy('EN')), PT: build(conversationCopy('PT')) });
+  const written: ChatMessage = { id: 1, role: 'flofi', language: 'EN', text: conversationCopy('EN').stepCompleted(2, 2, null),
+    variants: both(c => ({ text: c.stepCompleted(2, 2, null), question: c.nextQuestion, options: [c.addAnother, c.review] })) };
+  const page = (language: 'EN' | 'PT', messages: ChatMessage[]) => renderToStaticMarkup(createElement(LocaleProvider, { initialLanguage: language },
+    createElement(CopilotPanel, { conversation: conversation(true, messages) })));
+  it('a message written in English is shown in Portuguese after the switch, and back', () => {
+    const pt = page('PT', [written]), en = page('EN', [written]);
+    expect(pt).toContain(conversationCopy('PT').stepCompleted(2, 2, null)); expect(pt).toContain(conversationCopy('PT').review);
+    for (const english of ['Review workflow', 'Step 2 of 2', conversationCopy('EN').nextQuestion]) expect(pt, english).not.toContain(english);
+    expect(en).toContain('Step 2 of 2'); expect(en).toContain('Review workflow'); expect(en).not.toContain(conversationCopy('PT').review);
+    expect(shownMessage(written, 'PT')).toMatchObject({ language: 'PT', text: conversationCopy('PT').stepCompleted(2, 2, null) });
+  });
+  it('a catalog system message carries its values as parameters, rendered in the current language', () => {
+    const proposal: ChatMessage = { id: 2, role: 'system', text: 'Proposal: {0}. Review against revision {1} before applying.', params: ['swap 2 USDC to WETH', '3'] };
+    expect(page('PT', [proposal])).toContain(translate('PT', 'Proposal: {0}. Review against revision {1} before applying.', 'swap 2 USDC to WETH', '3'));
+    expect(page('EN', [proposal])).toContain('Proposal: swap 2 USDC to WETH. Review against revision 3 before applying.');
+  });
+  it('a message without renderings (model text) stays as written; the catalog translates what it knows', () => {
+    const model: ChatMessage = { id: 3, role: 'ai', text: 'Simulate again', options: ['Base'] };
+    expect(page('PT', [model])).toContain(translate('PT', 'Simulate again'));
+    expect(shownMessage(model, 'PT')).toBe(model);
   });
 });
