@@ -122,7 +122,7 @@ export function BuildEntry({ conversation, workflow, proposal, actions, draft, s
           aria-describedby={refusal || refused ? 'build-entry-error' : 'build-entry-hint'}
           onChange={event => { fitHeight(event.target); setDraft(event.target.value); setRefused(null); }} onKeyDown={onKeyDown}/>
         <button className={styles.create} type="submit" disabled={!draft.trim() || busy || !interactive}>
-          {tr(busy ? 'Preparing…' : 'Create workflow')}
+          {tr(busy ? 'Preparing…' : actions > 0 ? 'Add to workflow' : 'Create workflow')}
         </button>
       </form>
       <p id="build-entry-hint" className="sr-only">{tr('Press Enter to create the workflow, or Shift+Enter for a new line.')}</p>

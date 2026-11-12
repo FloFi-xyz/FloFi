@@ -99,6 +99,11 @@ function otherRunWallet(view: Pick<LifecycleView, 'source' | 'wallet'>): string 
   return account && view.wallet.account && account.toLowerCase() !== view.wallet.account.toLowerCase() ? account : null;
 }
 
+/** The answer buttons FloFi offers for an open question (re-offered when an answer is unclear or an explanation interrupts it). */
+function questionOptions(kind: Question['open']['kind'], c: ReturnType<typeof conversationCopy>): string[] {
+  return kind === 'RESOLVE_EDIT' ? [c.applyEdit, c.discardEdit] : kind === 'CONFIRM_WORKFLOW' ? [c.confirmYes, c.confirmNo]
+    : kind === 'CONFIRM_EXECUTION' ? [c.executeYes, c.executeNo] : kind === 'CONFIRM_CONTINUE_REVIEW' ? [c.continueAccept, c.executeNo] : [c.continueYes, c.executeNo];
+}
 export function useFlofiConversation({ owner, epoch, bridge, direct, interfaceLanguage }: {
   owner: WorkflowOwner | null; epoch: number; bridge: ConversationBridge; direct: boolean; interfaceLanguage: ConversationLanguage;
 }) {
@@ -422,11 +427,7 @@ export function useFlofiConversation({ owner, epoch, bridge, direct, interfaceLa
       if (next) declined.current.add(next.key);
       flofi(scope, language, started ? c.continueFailed(translate(language, 'You chose not to continue now.')) : c.declined, { options: [c.review] }); return true;
     }
-    if (verdict === 'UNCLEAR') {
-      const options = open.open.kind === 'CONFIRM_WORKFLOW' ? [c.confirmYes, c.confirmNo] : open.open.kind === 'CONFIRM_EXECUTION' ? [c.executeYes, c.executeNo]
-        : open.open.kind === 'CONFIRM_CONTINUE_REVIEW' ? [c.continueAccept, c.executeNo] : [c.continueYes, c.executeNo];
-      flofi(scope, language, c.unclear, { options }); return true;
-    }
+    if (verdict === 'UNCLEAR') { flofi(scope, language, c.unclear, { options: questionOptions(open.open.kind, c) }); return true; }
     if (open.open.kind === 'CONFIRM_CONTINUE') {
       // Only the next never-attempted request of this same run, under the authority already accepted: the existing continuation gate decides.
       setQuestion(null);
@@ -690,15 +691,19 @@ export function useFlofiConversation({ owner, epoch, bridge, direct, interfaceLa
   async function handle(scope: number, text: string) {
     const language = answerLanguage(text, interfaceLanguage), c = conversationCopy(language), open = questionRef.current;
     if (direct) {
-      // A new message (other than the offered network switch) replaces a Review the chat was waiting to continue.
-      if (!(bridge.networkAction && text === bridge.networkAction.label)) resume.current = null;
       // P0 approved UX (board 07): while a blocker is active, "explain / why? / não entendi" explains THAT blocker, with the same facts as the panel.
-      if (bridge.blocker && isExplainRequest(text)) {
+      // It changes nothing else: an open question keeps its answer buttons, a promised auto-continue stays promised, and a clarification the model
+      // is drafting still receives the message. A run whose request already landed is never told "nothing was sent": only this request was not.
+      if (bridge.blocker && isExplainRequest(text) && !copilot.drafting()) {
         const facts = blockerExplanation(bridge.blocker);
-        flofi(scope, language, facts ? translate(language, facts.text, ...facts.parameters.map(value => translate(language, value)))
-          : `${translate(language, bridge.blocker.title)}: ${translate(language, bridge.blocker.message)}`);
+        const said = facts ? translate(language, facts.text, ...facts.parameters.map(value => translate(language, value)))
+          : `${translate(language, bridge.blocker.title)}: ${translate(language, bridge.blocker.message)}`;
+        const options = open && open.open.kind !== 'NEXT_STEP' ? questionOptions(open.open.kind, c) : null;
+        flofi(scope, language, currentExecution(latest.current.bridge.progress)?.started ? aboutNextRequest(said) : said, options ? { options } : {});
         return;
       }
+      // A new message (other than the offered network switch) replaces a Review the chat was waiting to continue.
+      if (!(bridge.networkAction && text === bridge.networkAction.label)) resume.current = null;
       // FloFi's open question takes the answer first; only an explicit answer to it does anything. BUILD-FLOFI-BRIDGE-LIVE-FIX-003: asking for a
       // fresh quote or another route instead closes the question (nothing was confirmed) and re-simulates.
       const recovery = open && open.open.kind !== 'NEXT_STEP' ? lifecycleRequest(text) : null;
@@ -721,8 +726,9 @@ export function useFlofiConversation({ owner, epoch, bridge, direct, interfaceLa
       const request = lifecycleRequest(text);
       if (request) { lifecycle(scope, request, language); return; }
       if (bridge.networkAction && text === bridge.networkAction.label) { bridge.networkAction.request(); return; }
-      if (text === translate(language, 'Connect wallet') || text === 'Connect wallet') { bridge.connectWallet(); return; }
-      if (text === c.checkStatus) { lifecycle(scope, 'STATUS', language); return; }
+      // Offered options are matched in either language (the interface language may have changed since they were offered).
+      if (text === translate('PT', 'Connect wallet') || text === 'Connect wallet') { bridge.connectWallet(); return; }
+      if (text === conversationCopy('EN').checkStatus || text === conversationCopy('PT').checkStatus) { lifecycle(scope, 'STATUS', language); return; }
       // The option is matched in either language: its label carries no word that tells the reply language.
       if ((text === conversationCopy('EN').startNew || text === conversationCopy('PT').startNew) && bridge.startNewWorkflow) { bridge.startNewWorkflow(); return; }
       setQuestion(null);

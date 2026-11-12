@@ -77,7 +77,8 @@ describe('BUILD-FLOFI-BRIDGE-LIVE-FIX-003 FloFi Assistant avatars and welcome', 
 describe('P0 approved UX: the FloFi panel (board 04) and choosing the network in the chat (board 05)', () => {
   it('Send is an icon button inside the field, neutral until there is text, with the approved placeholder', () => {
     const empty = renderToStaticMarkup(createElement(CopilotPanel, { conversation: conversation(true) }));
-    expect(empty).toMatch(/<div class="chat-input"><input id="mock-prompt"[^>]*placeholder="Ask or request a change"[^>]*\/><button type="submit" class="chat-send" aria-label="Send message" title="Send message"><svg[^>]*aria-hidden="true"/);
+    expect(empty).toMatch(/<div class="chat-input"><input id="mock-prompt"[^>]*placeholder="Ask or request a change"[^>]*\/><button type="submit" class="chat-send" aria-label="Send message" title="Send message" disabled=""><svg[^>]*aria-hidden="true"/);
+    // Empty: disabled, so it never looks inert while being clickable.
     expect(empty).not.toContain('data-ready');
     expect(empty).not.toMatch(/>Send<\/button>/);
     const typed = renderToStaticMarkup(createElement(CopilotPanel, { conversation: { ...conversation(true), input: 'swap 1 usdc for eth' } as FlofiConversation }));

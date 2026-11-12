@@ -244,7 +244,9 @@ export function useEditorWorkflowRun(input: { readonly workflow: { readonly work
     // A finished run stays shown (after a reload too) until the owner closes it: the same workflow is never offered again by accident.
     if (!OPEN_RUN.includes(r.state)) { setPhase('done'); setUnrecorded(false); }
     // A status poll never hides what the owner is being asked (the wallet prompt, or an updated minimum to confirm).
-    else if (r.state !== 'PENDING') setPhase(current => ['wallet', 'confirming', 'confirm-update', 'authorizing', 'proving'].includes(current) ? current : 'running');
+    // An updated minimum is no longer asked once the run HALTED (it would only be refused): the run's own controls take over.
+    else if (r.state !== 'PENDING') setPhase(current => current === 'confirm-update' && r.state === 'HALTED' ? 'running'
+      : ['wallet', 'confirming', 'confirm-update', 'authorizing', 'proving'].includes(current) ? current : 'running');
     // A batch handed to the wallet (from here or /approve) for a group the run still shows prepared: not recorded yet.
     setUnrecorded(r.groups.some(g => g.state === 'PREPARED' && g.strategy === 'EVM_WALLET_BATCH' && handedOver(r.approvalId, g.index)));
     // A USER_FUNDED_PREPARED_STILL_VALID refusal whose group the wallet answered since (or FloFi stopped with its batch unanswered) is over: it
@@ -884,8 +886,8 @@ export function EditorWorkflowRunPanel({ state }: { state: EditorWorkflowRunStat
         <p className="eyebrow">{view.of === null ? tr('EXECUTION · REQUEST {0}', String(view.request)) : tr('EXECUTION · REQUEST {0} OF {1}', String(view.request), String(view.of))}</p>
         <h4>{tr(phase === 'wallet' ? 'Confirm in your wallet' : 'Waiting for your wallet')}</h4>
         {view.items.length > 0 && <><p className="muted">{view.calls === null ? tr('Steps in this request:')
-          : !view.itemized ? tr(view.calls === 1 ? 'Your wallet shows 1 call, for this step:' : 'Your wallet shows {0} calls in one request, for these steps:', String(view.calls))
-          : tr(view.calls === 1 ? 'Your wallet shows 1 call:' : 'Your wallet shows {0} calls in one request:', String(view.calls))}</p>
+          : !view.itemized ? tr(view.calls === 1 ? 'This request has 1 call, for this step:' : 'This request has {0} calls, for these steps:', String(view.calls))
+          : tr(view.calls === 1 ? 'This request has 1 call:' : 'This request has {0} calls:', String(view.calls))}</p>
           <ol className="execution-wallet-calls">{view.items.map((item, index) => <li key={index}>{tr(item.text, ...item.parameters.map((value, at) => at === 1 ? tr(ACTION[value] ?? value) : value))}</li>)}</ol></>}
         <p className="muted">{tr('Editing paused during execution')}</p>
       </div>;
@@ -983,7 +985,7 @@ export function EditorWorkflowRunPanel({ state }: { state: EditorWorkflowRunStat
     </>}
     {refusal && <p className="error-banner" role="alert">{refusal}</p>}
     {/* Board 07: a native-fee shortfall found while preparing this Review shows the server's own numbers (no run exists yet: nothing was sent). */}
-    {review?.refusal?.evidence && !run && <BlockerPanel title={refusal ?? ''} message={refusal ?? ''} error={review.refusal.code} owner={review.owner}
+    {review?.refusal?.evidence && !run && !state.started && !state.unloaded && <BlockerPanel title={refusal ?? ''} message={refusal ?? ''} error={review.refusal.code} owner={review.owner}
       feeShortfall={review.refusal.evidence} technical={null}/>}
     {state.updated.length > 0 && <div className="editor-run-update" role="alert">
       <p>{tr(state.updated.every(u => u.reviewed) ? 'Prices moved since your review. Your wallet would be asked with these minimums:' : 'Confirm what your wallet will be asked:')}</p>

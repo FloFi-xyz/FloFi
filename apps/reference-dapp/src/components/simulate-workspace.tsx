@@ -43,6 +43,8 @@ export function SimulateWorkspace({ workflowName, returnToBuild, reviewActionHos
   const wide = useWide(REVIEW_PANEL_QUERY);
   // The summary describes the simulated workflow: a sequence's current step (BUILD-FLOFI-CHAT-E2E-FIX-002), else the canonical workflow.
   const { runtimeWorkflow, context, reviewError } = useWorkflow();
+  // A blocker (the missing amount, Copy address) is never hidden behind a collapsed summary on a narrow screen.
+  const blocked = Boolean(simulationSource?.state.error);
   const summary = <aside className="simulation-summary panel" aria-label={tr("Simulation Summary")}>
     {sequenceNote && <p className="simulation-sequence-note" role="note">{sequenceNote}</p>}
     <div className="simulation-summary-content" role="region" aria-label={tr("Simulation result details")}><SimulationSummary workflow={runtimeWorkflow} context={context} source={simulationSource} invalidWorkflow={Boolean(reviewError)} unavailableReason={simulationReason}/></div>
@@ -62,7 +64,7 @@ export function SimulateWorkspace({ workflowName, returnToBuild, reviewActionHos
       {!detailsOnly && summary}
       {panel && wide && <aside className="review-side-panel" aria-label={tr('Review')}>{panel}</aside>}
     </div>
-    {detailsOnly && !(panel && wide) && <details className="shell-details stage-details simulation-details"><summary>{tr(panel ? 'Review' : 'Simulation details')}</summary>{panel ?? summary}</details>}
+    {detailsOnly && !(panel && wide) && <details className="shell-details stage-details simulation-details" open={blocked || undefined}><summary>{tr(panel ? 'Review' : 'Simulation details')}</summary>{panel ?? summary}</details>}
     {children}
   </section>;
 }

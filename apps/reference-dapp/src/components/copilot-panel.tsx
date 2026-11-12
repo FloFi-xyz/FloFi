@@ -64,7 +64,7 @@ export function CopilotPanel({ conversation, interactive = true, owner = null, p
     {/* P0 approved UX (board 04): the label stays for assistive technology (visually hidden); Send is an icon inside the field, neutral until
         there is text, and shows a spinner while FloFi is answering. Submitting is unchanged. */}
     <form className="chat-form" onSubmit={submit}><label htmlFor="mock-prompt" className="sr-only">{tr("Describe your flow")}</label><div className="chat-input"><input id="mock-prompt" disabled={!interactive} value={input} onChange={event => setInput(event.target.value)} placeholder={tr('Ask or request a change')} maxLength={1024} autoComplete="off" enterKeyHint="send"/>
-      <button type="submit" className="chat-send" aria-label={tr('Send message')} title={tr('Send message')} data-ready={Boolean(input.trim()) && !busy || undefined} aria-busy={busy || undefined} disabled={!interactive || busy}>
+      <button type="submit" className="chat-send" aria-label={tr('Send message')} title={tr('Send message')} data-ready={Boolean(input.trim()) && !busy || undefined} aria-busy={busy || undefined} disabled={!interactive || busy || !input.trim()}>
         {busy ? <span className="chat-send-spinner" aria-hidden="true"/> : <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M12 19V5m-6 6 6-6 6 6"/></svg>}
       </button></div></form>
   </aside>;

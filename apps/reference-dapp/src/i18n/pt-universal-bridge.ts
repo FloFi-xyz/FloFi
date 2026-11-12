@@ -47,7 +47,7 @@ export const portugueseUniversalBridge: Readonly<Record<string, string>> = {
   // Route discovery
   'Routes found': 'Rotas encontradas', 'Find routes': 'Procurar rotas',
   'Every provider was asked about this pair. Executable routes are verified by FloFi; others are shown with the reason they cannot be executed.':
-    'Todos os fornecedores foram consultados sobre este par. As rotas executáveis são verificadas pelo FloFi; as outras são mostradas com o motivo pelo qual não podem ser executadas.',
+    'Todos os provedores foram consultados sobre este par. As rotas executáveis são verificadas pelo FloFi; as outras são mostradas com o motivo pelo qual não podem ser executadas.',
   'Indicative quotes for a public address. Simulate quotes again for your own wallet.': 'Cotações indicativas para um endereço público. Simular cota de novo para a sua própria carteira.',
   'Route options': 'Opções de rota', 'Note': 'Nota', '· recommended': '· recomendada',
   'Did not answer within the comparison window.': 'Não respondeu dentro da janela de comparação.',
@@ -63,10 +63,10 @@ export const portugueseUniversalBridge: Readonly<Record<string, string>> = {
     'As transações da Mayan são construídas pelo seu SDK; o FloFi ainda não tem um construtor verificado, por isso esta cotação serve só para comparação.',
   'Across executes through the certified Router for its USDC/USDG pairs only.': 'A Across executa através do Router certificado apenas para os seus pares USDC/USDG.',
   'Across has no route for this network.': 'A Across não tem rota para esta rede.', 'Mayan does not serve this network.': 'A Mayan não serve esta rede.',
-  'The provider has no route or liquidity for this pair right now.': 'O fornecedor não tem rota nem liquidez para este par neste momento.',
-  'The amount is below the provider minimum.': 'O valor está abaixo do mínimo do fornecedor.', 'The amount is above the provider maximum.': 'O valor está acima do máximo do fornecedor.',
-  'The provider could not be reached. Try again shortly.': 'Não foi possível contactar o fornecedor. Tente de novo dentro de momentos.',
-  'The provider is rate limiting requests. Try again shortly.': 'O fornecedor está limitando pedidos. Tente de novo dentro de momentos.',
+  'The provider has no route or liquidity for this pair right now.': 'O provedor não tem rota nem liquidez para este par neste momento.',
+  'The amount is below the provider minimum.': 'O valor está abaixo do mínimo do provedor.', 'The amount is above the provider maximum.': 'O valor está acima do máximo do provedor.',
+  'The provider could not be reached. Try again shortly.': 'Não foi possível contactar o provedor. Tente de novo dentro de momentos.',
+  'The provider is rate limiting requests. Try again shortly.': 'O provedor está limitando pedidos. Tente de novo dentro de momentos.',
   'LI.FI has no route for this pair right now.': 'A LI.FI não tem rota para este par neste momento.', 'Mayan has no route for this pair right now.': 'A Mayan não tem rota para este par neste momento.',
   // Panel, Review and execution
   'Universal cross-chain bridge': 'Bridge cross-chain universal', 'Simulate universal bridge': 'Simular bridge universal', 'Review universal bridge': 'Revisar bridge universal',
@@ -77,8 +77,8 @@ export const portugueseUniversalBridge: Readonly<Record<string, string>> = {
   'Sign in with source wallet': 'Iniciar sessão com a carteira de origem', 'Switch wallet to the source network': 'Mudar a carteira para a rede de origem',
   'order': 'ordem', 'Selection': 'Seleção', 'selected': 'selecionada', 'available': 'disponível', 'not executable': 'não executável', 'refused': 'recusada',
   'You send': 'Envia', 'Expected to receive': 'Recebimento esperado', 'Guaranteed minimum': 'Mínimo garantido',
-  '— fixed in the provider order; a smaller delivery is a mismatch': '— fixado na ordem do fornecedor; uma entrega menor é uma divergência',
-  'Provider fees': 'Taxas do fornecedor', '(included in the quote)': '(incluída na cotação)', '(paid separately)': '(paga à parte)', 'none listed': 'nenhuma listada',
+  '— fixed in the provider order; a smaller delivery is a mismatch': '— fixado na ordem do provedor; uma entrega menor é uma divergência',
+  'Provider fees': 'Taxas do provedor', '(included in the quote)': '(incluída na cotação)', '(paid separately)': '(paga à parte)', 'none listed': 'nenhuma listada',
   'FloFi fee': 'Taxa do FloFi',
   // BUILD-FLOFI-UX-FIX-003: the universal Review's FloFi fee line (simulation-presentation.ts) had no Portuguese text.
   'FloFi fee (0.1% obligation)': 'Taxa do FloFi (obrigação de 0,1%)',
@@ -86,13 +86,13 @@ export const portugueseUniversalBridge: Readonly<Record<string, string>> = {
     '0,1% do valor de entrada do fluxo concluído. Registrada como obrigação quando a execução é reconciliada; não é cobrada neste momento. Dispensada se o fluxo falhar ou for reembolsado.',
   '0.1% of the completed workflow input — obligation recorded at reconciliation; not charged at this time.':
     '0,1% do valor de entrada do fluxo concluído — obrigação registrada na reconciliação; não é cobrada neste momento.',
-  'after the deposit confirms (provider estimate)': 'após a confirmação do depósito (estimativa do fornecedor)',
+  'after the deposit confirms (provider estimate)': 'após a confirmação do depósito (estimativa do provedor)',
   'Signatures': 'Assinaturas', 'wallet signature on the source network': 'assinatura da carteira na rede de origem',
   'wallet signatures on the source network (an exact approval, then the deposit)': 'assinaturas da carteira na rede de origem (uma aprovação exata e depois o depósito)',
   '; nothing to sign on the destination network.': '; nada a assinar na rede de destino.',
   'Approval: exactly the amount, never unlimited, to the Relay Depository': 'Aprovação: exatamente o valor, nunca ilimitada, para o Relay Depository',
   'Existing allowance is sufficient; no approval': 'A autorização existente é suficiente; sem aprovação', '(your connected wallet)': '(a sua carteira conectada)',
-  'Refunds': 'Reembolsos', 'If the order is not filled, the provider refunds to': 'Se a ordem não for executada, o fornecedor reembolsa para', 'debit': 'débito',
+  'Refunds': 'Reembolsos', 'If the order is not filled, the provider refunds to': 'Se a ordem não for executada, o provedor reembolsa para', 'debit': 'débito',
   '. Not simulated: the destination delivery and refunds.': '. Não simulado: a entrega no destino e os reembolsos.',
   'Review valid': 'Revisão válida',
   'Accepting authorizes only the wallet requests listed in this Review. Each request still needs your signature.':
@@ -102,7 +102,7 @@ export const portugueseUniversalBridge: Readonly<Record<string, string>> = {
   '). Verified on both chains.': '). Verificado nas duas redes.', 'Your universal bridge runs': 'As suas execuções de bridge universal',
   // Route changes after Review
   'chain': 'rede', 'token': 'token', 'amount': 'valor', 'recipient': 'destinatário', 'depositor': 'depositante', 'refund address': 'endereço de reembolso',
-  'provider': 'fornecedor', 'protocol': 'protocolo', 'route steps': 'passos da rota', 'fees': 'taxas', 'fee recipient': 'destinatário das taxas',
+  'provider': 'provedor', 'protocol': 'protocolo', 'route steps': 'passos da rota', 'fees': 'taxas', 'fee recipient': 'destinatário das taxas',
   'lower expected delivery': 'entrega esperada menor', 'slippage': 'desvio', 'approval': 'aprovação', 'transaction target': 'destino da transação',
   'transaction function': 'função da transação', 'value': 'valor', 'bridge contract': 'contrato da bridge', 'destination message': 'mensagem de destino', 'calldata': 'calldata',
   'quote': 'cotação', 'deadline': 'prazo',
@@ -117,25 +117,25 @@ export const portugueseUniversalBridge: Readonly<Record<string, string>> = {
   'Estimate only: FloFi cannot execute this route yet.': 'Apenas estimativa: o FloFi ainda não consegue executar esta rota.',
   'No route FloFi can execute is available for this bridge and amount right now.': 'Não há agora uma rota que o FloFi consiga executar para esta bridge e este valor.',
   'Your wallet would use a different transaction number. Let pending transactions confirm first. Nothing was sent.': 'A sua carteira usaria outro número de transação. Espere as transações pendentes confirmarem primeiro. Nada foi enviado.', 'Select the wallet account shown in Review.': 'Selecione a conta da carteira mostrada na Revisão.',
-  'Accept the current Review first.': 'Aceite primeiro a Revisão atual.', 'This Review expired. Get a fresh route and review again.': 'Esta Revisão expirou. Obtenha uma nova rota e reveja de novo.',
+  'Accept the current Review first.': 'Aceite primeiro a Revisão atual.', 'This Review expired. Get a fresh route and review again.': 'Esta Revisão expirou. Obtenha uma nova rota e revise de novo.',
   'The provider no longer offers the reviewed route. Your authorization was cleared and nothing was sent. Get a fresh route, then review it.':
-    'O fornecedor já não oferece a rota revista. A sua autorização foi limpa e nada foi enviado. Obtenha uma nova rota e depois reveja-a.',
+    'O provedor já não oferece a rota revista. A sua autorização foi limpa e nada foi enviado. Obtenha uma nova rota e depois revise-a.',
   'A fresh route and Review are required before you can authorize again.': 'São necessárias uma nova rota e uma nova Revisão antes de poder autorizar de novo.',
   'Chain state changed materially since Review. Your authorization was cleared and nothing was sent.':
     'O estado da rede mudou de forma relevante desde a Revisão. A sua autorização foi limpa e nada foi enviado.',
-  'The provider could not confirm the reviewed route right now. Nothing was sent; try again shortly.': 'O fornecedor não conseguiu confirmar a rota revista neste momento. Nada foi enviado; tente de novo dentro de momentos.',
+  'The provider could not confirm the reviewed route right now. Nothing was sent; try again shortly.': 'O provedor não conseguiu confirmar a rota revista neste momento. Nada foi enviado; tente de novo dentro de momentos.',
   'No provider returned a route FloFi can verify and execute for this bridge. See the routes found for the reasons.':
-    'Nenhum fornecedor devolveu uma rota que o FloFi consiga verificar e executar para esta bridge. Veja os motivos nas rotas encontradas.',
+    'Nenhum provedor devolveu uma rota que o FloFi consiga verificar e executar para esta bridge. Veja os motivos nas rotas encontradas.',
   'Your wallet needs more of the source asset for this bridge.': 'A sua carteira precisa de mais do ativo de origem para esta bridge.',
   'Your wallet needs more native coin on the source network for network fees.': 'A sua carteira precisa de mais moeda nativa na rede de origem para as taxas de rede.',
   'Your Solana wallet needs more SOL for the network fee.': 'A sua carteira Solana precisa de mais SOL para a taxa de rede.',
-  'The network provider cannot simulate this transaction right now. Nothing was signed.': 'O fornecedor da rede não consegue simular esta transação neste momento. Nada foi assinado.',
+  'The network provider cannot simulate this transaction right now. Nothing was signed.': 'O provedor da rede não consegue simular esta transação neste momento. Nada foi assinado.',
   'The simulation of the bridge deposit failed. Nothing was signed.': 'A simulação do depósito da bridge falhou. Nada foi assinado.',
   'A bridge contract does not match its verified deployment. Nothing was signed.': 'Um contrato da bridge não corresponde à sua implementação verificada. Nada foi assinado.',
   'An earlier request from this wallet is still open in your wallet and holds the next transaction slot. Confirm or reject it, then try again.':
     'Um pedido anterior desta carteira ainda está aberto na sua carteira e ocupa a próxima posição de transação. Confirme-o ou rejeite-o e tente de novo.',
   'This exact provider order is already handled by another FloFi run. Get a new route for a separate bridge.':
-    'Esta mesma ordem do fornecedor já é tratada por outra execução do FloFi. Obtenha uma nova rota para uma bridge separada.',
+    'Esta mesma ordem do provedor já é tratada por outra execução do FloFi. Obtenha uma nova rota para uma bridge separada.',
   'A transaction is still being observed. Check it before continuing.': 'Uma transação ainda está sendo observada. Verifique-a antes de continuar.',
   'The wallet result is unknown. FloFi is observing the network and will not send another request.': 'O resultado da carteira é desconhecido. O FloFi está observando a rede e não enviará outro pedido.',
   'You declined the request in your wallet. Nothing was sent.': 'Recusou o pedido na sua carteira. Nada foi enviado.',
@@ -146,7 +146,7 @@ export const portugueseUniversalBridge: Readonly<Record<string, string>> = {
   'The deposit is confirmed. Waiting for the delivery on the destination network.': 'O depósito está confirmado. Aguardando a entrega na rede de destino.',
   'The delivery is taking longer than expected. FloFi keeps observing and will verify a late delivery or a refund.':
     'A entrega está demorando mais do que o esperado. O FloFi continua observando e verificará uma entrega tardia ou um reembolso.',
-  'The provider reported a failure. A refund is expected; FloFi will verify it on chain.': 'O fornecedor reportou uma falha. É esperado um reembolso; o FloFi irá verificá-lo na rede.',
+  'The provider reported a failure. A refund is expected; FloFi will verify it on chain.': 'O provedor reportou uma falha. É esperado um reembolso; o FloFi irá verificá-lo na rede.',
   'Waiting for the refund to be visible on chain.': 'Aguardando que o reembolso fique visível na rede.',
   'The delivery is observed. Waiting for finality before success.': 'A entrega foi observada. Aguardando finalidade antes do sucesso.',
   'The delivery is below the reviewed minimum. The run needs your attention.': 'A entrega está abaixo do mínimo revisto. A execução precisa da sua atenção.',

@@ -50,6 +50,9 @@ export function SummaryBar({ tab, setTab, simulationActionHost, reviewAvailable,
     return () => window.clearInterval(timer);
   }, [counting]);
   const status = tab === 'Simulate' && simulation ? simulateFooterStatus({ ...simulation, now: Math.max(now, Date.now()) }) : null;
+  const ticking = status?.text === 'Simulation valid for {0}';
+  const announcement = !status ? '' : ticking ? tr(status.tone === 'attention' ? 'Simulation expires in less than 15 seconds' : 'Simulation valid')
+    : `${tr(status.text, ...(status.parameters ?? []))}${status.detail ? ` · ${tr(status.detail)}` : ''}`;
   const { state, actionSetup } = useWorkflow();
   const { info, prepared, retired, verifyError, verified } = useModeA();
   const modeB = useModeB();
@@ -104,8 +107,10 @@ export function SummaryBar({ tab, setTab, simulationActionHost, reviewAvailable,
   return <footer className={`summary-bar${lifecycle ? ' editor-bar' : ''}`} data-workflow-revision={state.workflow.revision}>
     <div className="summary-count"><span className="eyebrow">{tr("WORKFLOW")}</span><strong>{tr(actionCount === 1 ? '1 step' : '{0} steps', actionCount)}</strong></div>
     {notice}
-    {status && <p className="summary-status-line" data-tone={status.tone} role="status"><span className="summary-status-dot" data-tone={status.tone} aria-hidden="true"/>
-      <span className="summary-status-text">{tr(status.text, ...(status.parameters ?? []))}</span>{status.detail && <span className="summary-status-detail">{tr(status.detail)}</span>}</p>}
+    {/* The m:ss countdown ticks visibly only; the live region speaks when the meaning changes (valid, under 15 s, expired, a blocker). */}
+    {status && <p className="summary-status-line" data-tone={status.tone}><span className="summary-status-dot" data-tone={status.tone} aria-hidden="true"/>
+      <span className="summary-status-text" aria-hidden={ticking || undefined}>{tr(status.text, ...(status.parameters ?? []))}</span>{status.detail && <span className="summary-status-detail">{tr(status.detail)}</span>}</p>}
+    {tab === 'Simulate' && simulation && <span className="sr-only" role="status">{announcement}</span>}
     {/* Relocate the existing action without duplicating its review gates or handler. */}
     {tr(tab === 'Simulate' && simulationActionHost ? createPortal(action, simulationActionHost) : action)}
     {lifecycle && <div className="canvas-primary-action summary-primary-action">{primaryAction}</div>}

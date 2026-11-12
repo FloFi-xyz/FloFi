@@ -100,7 +100,7 @@ export function BlockerPanel({ title, message, error, owner, feeShortfall, techn
     <div className="review-panel-actions">
       {address && (fee || /network fee/i.test(message)) && <button type="button" className="secondary" onClick={() => void copy()}>{t('Copy address')} <span className="numeric">{`${address.slice(0, 6)}…${address.slice(-4)}`}</span></button>}
       {href && <a className="secondary" href={href}>{t(flight!.action === 'LINK_WALLET' ? 'Open Credentials' : flight!.action === 'SIGN_IN' ? 'Sign in' : 'Open Board')}</a>}
-      {copied && <span role="status">{t(copied === 'copied' ? 'Address copied.' : 'Address could not be copied.')}</span>}
+      <span role="status" className={copied ? undefined : 'sr-only'}>{copied ? t(copied === 'copied' ? 'Address copied.' : 'Address could not be copied.') : ''}</span>
     </div>
     {technical}
   </section>;

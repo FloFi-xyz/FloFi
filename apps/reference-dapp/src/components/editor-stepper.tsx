@@ -35,9 +35,9 @@ export function EditorStepper({ tab, setTab, disabled, incomplete, closedReason 
       const state = index === current ? 'current' : index < current ? 'before' : 'after';
       return <li key={step.tab} data-step-state={state} data-step-look={look}>
         {index > 0 && <span className="editor-stepper-line" aria-hidden="true"/>}
-        <button type="button" aria-current={index === current ? 'step' : undefined} disabled={closed}
+        <button type="button" aria-current={index === current ? 'step' : undefined} aria-disabled={closed || undefined}
           title={closed && reason ? tr(reason) : look === 'reachable' ? tr(index < current ? 'Back to {0}' : 'Open {0}', tr(step.label)) : undefined}
-          onClick={() => { if (index !== current) setTab(step.tab); }}>
+          onClick={() => { if (!closed && index !== current) setTab(step.tab); }}>
           <span className="editor-stepper-number" aria-hidden="true">{index + 1}</span>
           <span className="editor-stepper-label">{tr(step.label)}</span>
           {closed && reason && <span className="sr-only">{`: ${tr(reason)}`}</span>}

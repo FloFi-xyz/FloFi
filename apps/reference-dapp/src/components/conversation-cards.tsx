@@ -3,20 +3,12 @@
 import { useId } from 'react';
 import { translate, useLocale } from '../i18n/locale';
 import type { ConversationLanguage, ConversationReview } from '../domain/conversation-lifecycle';
-import { networkIdentity } from '../domain/network-registry';
+import { networkChoiceOptions, networkOfOption } from '../domain/approved-ux';
 import { useOptionalBuild009Wallet } from '../state/build009-wallet-store';
 import { walletChainRef } from '../wallet/evm-networks';
 import { NetworkBrandIcon } from './brand-icon';
 
-/** A network answer as the registry knows it (`Base (8453)` and `Base` name the same network). */
-const networkOfOption = (option: string) => networkIdentity(option.replace(/ \(\d+\)$/, '').trim());
-/**
- * P0 approved UX (board 05): FloFi's question is a network question when every suggested answer is a network the registry knows. Presentation
- * only: the answers, and what each one sends, are FloFi's own.
- */
-export function networkChoiceOptions(options: readonly string[] | undefined): readonly string[] | null {
-  return options && options.length >= 2 && options.every(option => networkOfOption(option)) ? options : null;
-}
+export { networkChoiceOptions };
 /**
  * The connected wallet's network, when it is one of the answers, is listed first and marked; every other answer keeps FloFi's order. Nothing is
  * chosen here: the person still picks one.

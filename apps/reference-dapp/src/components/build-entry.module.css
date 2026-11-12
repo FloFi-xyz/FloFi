@@ -12,8 +12,9 @@
 .mascotShadow{position:absolute;bottom:1px;left:28%;width:44%;height:9px;border-radius:50%;background:var(--blue-soft);filter:blur(4px)}
 .title{margin:0;font-size:clamp(40px,4.6vw,60px);font-weight:700;line-height:1.05;letter-spacing:-.035em;color:var(--ink);text-wrap:balance}
 .title span{color:var(--accent)}
-.composer{width:min(100%,920px);min-height:72px;display:flex;align-items:center;gap:10px;padding:10px 10px 10px 24px;border:1.5px solid var(--primary);border-radius:20px;background:var(--surface)}
-.composer:focus-within{box-shadow:0 0 0 4px color-mix(in srgb,var(--primary) 22%,transparent)}
+.composer{width:min(100%,920px);min-height:72px;display:flex;align-items:center;gap:10px;padding:10px 10px 10px 24px;border:1.5px solid var(--primary-line);border-radius:20px;background:var(--surface)}
+/* A visible focus (≥ 3:1): a 2 px accent outline outside the composer, plus the soft halo. */
+.composer:focus-within{outline:2px solid var(--accent);outline-offset:3px;box-shadow:0 0 0 4px color-mix(in srgb,var(--primary) 22%,transparent)}
 /* BUILD-FLOFI-UX-005: no manual resize handle; the field grows with its text (build-entry.tsx) to max-height, then scrolls inside. */
 .composer textarea{flex:1;min-width:0;min-height:44px;max-height:150px;padding:11px 0 6px;border:0;outline:0;resize:none;overflow-y:auto;overscroll-behavior:contain;background:transparent;color:var(--ink);font-size:18px;line-height:1.4;text-align:left}
 /* The example reads as a hint, never as typed text: the muted token. */

@@ -85,7 +85,7 @@
 .ux-page .ux-chip{display:inline-flex;align-items:center;gap:8px;min-height:40px;margin:0;padding:0 16px;border:1px solid var(--line);border-radius:999px;background:transparent;color:var(--ink);
   font:500 14px/1.2 var(--font-outfit),sans-serif;cursor:pointer}
 .ux-page .ux-chip:hover{background:var(--surface-raised)}
-.ux-page .ux-chip[aria-pressed="true"]{border-color:var(--primary);background:var(--blue-soft);color:var(--accent)}
+.ux-page .ux-chip[aria-pressed="true"]{border-color:var(--primary-line);background:var(--blue-soft);color:var(--accent)}
 .ux-page .ux-chip-count{font-family:var(--font-ibm-plex-mono),monospace;font-size:12px;color:var(--muted)}
 .ux-page .ux-chip[aria-pressed="true"] .ux-chip-count{color:var(--accent)}
 .ux-page .ux-chip[data-tone="attention"] .ux-chip-count{color:var(--warning-text)}

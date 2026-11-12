@@ -101,11 +101,13 @@ const NO_WORDS = pattern(['no', 'nope', 'not now', 'not yet', 'cancel', 'stop', 
   'ainda nao', 'cancelar', 'cancela', 'parar', 'pare', 'espera', 'espere', 'não obrigado', 'nao obrigado']);
 const CONFIRM_WORKFLOW = pattern(['yes', 'yes please', 'confirm', 'i confirm', 'confirmed', 'yes confirm', 'yes i confirm', 'confirm workflow', 'confirm the workflow',
   'confirm this workflow', 'confirm my workflow', 'yes confirm the workflow', 'yes confirm this workflow', 'sim', 'confirmo', 'eu confirmo', 'sim confirmo', 'confirmar',
-  'confirmado', 'sim confirmar', 'confirmar workflow', 'confirmar o workflow', 'confirmo o workflow', 'confirmar fluxo', 'confirmo o fluxo', 'sim confirmo o workflow']);
+  'confirmado', 'sim confirmar', 'confirmar workflow', 'confirmar o workflow', 'confirmo o workflow', 'confirmar fluxo', 'confirmo o fluxo', 'sim confirmo o workflow',
+  // P0 PT-BR copy says "fluxo": its phrasings confirm exactly like the workflow ones.
+  'confirmar o fluxo', 'confirmar este fluxo', 'confirmo este fluxo', 'sim confirmo o fluxo', 'sim confirmo este fluxo']);
 const CONFIRM_EXECUTION = pattern(['yes', 'yes please', 'yes execute', 'yes execute it', 'yes execute now', 'yes execute the workflow', 'yes execute this workflow', 'execute',
   'execute it', 'execute now', 'execute the workflow', 'execute this workflow', 'execute my workflow', 'yes run it', 'run it', 'run it now', 'sim', 'sim executar',
   'sim executa', 'sim execute', 'executar', 'executa', 'executar agora', 'execute agora', 'pode executar', 'sim pode executar', 'executar workflow', 'executar o workflow',
-  'executar o fluxo', 'sim executar agora']);
+  'executar o fluxo', 'sim executar agora', 'executar fluxo', 'executar este fluxo', 'sim executar o fluxo', 'sim executar este fluxo']);
 const CONTINUE = pattern(['yes', 'yes please', 'continue', 'yes continue', 'continue to wallet', 'continue to my wallet', 'yes continue to wallet', 'sim', 'continuar', 'sim continuar',
   'continua', 'pode continuar', 'continuar para a carteira', 'sim continuar para a carteira']);
 const ACCEPT_CONTINUE = pattern(['accept and continue', 'yes accept and continue', 'accept', 'yes accept', 'accept it', 'accept the updated quote', 'aceitar e continuar',
@@ -117,7 +119,8 @@ const DISCARD_EDIT = pattern(['discard', 'discard it', 'discard the edit', 'disc
 const NEXT_REVIEW = pattern(['review', 'review workflow', 'review my workflow', 'review the workflow', 'review this workflow', 'lets review', 'let us review',
   'review it', 'simulate', 'simulate workflow', 'simulate my workflow', 'simulate the workflow', 'run simulation', 'revisar', 'revisar workflow', 'revisar o workflow',
   'revisar meu workflow', 'revisar fluxo', 'revisar o fluxo', 'revisar meu fluxo', 'revise', 'revise o workflow', 'revise meu workflow', 'vamos revisar', 'simular',
-  'simular workflow', 'simular o workflow', 'simular meu workflow', 'simular fluxo', 'simular meu fluxo']);
+  'simular workflow', 'simular o workflow', 'simular meu workflow', 'simular fluxo', 'simular meu fluxo', 'simular o fluxo', 'revise o fluxo', 'revise meu fluxo',
+  'revisar este fluxo']);
 // BUILD-FLOFI-BRIDGE-LIVE-FIX-003: recovery after a refused start or an expired/changed quote is a fresh simulation, asked for in chat.
 const REFRESH_REQUEST = pattern(['simulate again', 'simulate it again', 'retry simulation', 'try again', 'refresh quote', 'refresh the quote', 'get a new quote',
   'get a fresh quote', 'new quote', 'requote', 'simular novamente', 'simular de novo', 'tentar novamente', 'tentar de novo', 'atualizar cotação', 'atualizar cotacao',
@@ -133,7 +136,8 @@ const STATUS_REQUEST = pattern(['status', 'check status', 'execution status', 'w
 // BUILD-FLOFI-CHAT-E2E-DASHBOARD-UX-001: after an execution, "modify this workflow" asks what to change (authoring only; nothing is simulated).
 const MODIFY_REQUEST = pattern(['modify this workflow', 'modify the workflow', 'modify workflow', 'modify my workflow', 'modify it', 'edit this workflow', 'edit the workflow',
   'edit workflow', 'change this workflow', 'change the workflow', 'modificar este workflow', 'modificar o workflow', 'modificar workflow', 'modificar este fluxo',
-  'modificar o fluxo', 'alterar este workflow', 'alterar o workflow', 'editar este workflow', 'editar o workflow', 'editar workflow']);
+  'modificar o fluxo', 'alterar este workflow', 'alterar o workflow', 'editar este workflow', 'editar o workflow', 'editar workflow', 'alterar este fluxo', 'alterar o fluxo',
+  'editar este fluxo', 'editar o fluxo', 'editar fluxo']);
 const UNDO_REQUEST = pattern(['undo', 'undo that', 'undo this change', 'undo last change', 'desfazer', 'desfaz', 'desfazer isso', 'desfazer esta alteração', 'desfazer esta alteracao',
   'desfazer última alteração', 'desfazer ultima alteracao']);
 

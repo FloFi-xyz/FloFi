@@ -5,12 +5,21 @@
  * computes a fee, decides an action or claims an outcome the records do not state.
  */
 import type { NativeFeeShortfall } from '../user-funded/groups';
+import { networkIdentity } from './network-registry';
 
-const NETWORKS = new Set(['Base', 'Arbitrum One', 'Ethereum', 'Robinhood Chain', 'Solana']);
+/** A network answer as the registry knows it (`Base (8453)` and `Base` name the same network). */
+export const networkOfOption = (option: string) => networkIdentity(option.replace(/ \(\d+\)$/, '').trim());
+/**
+ * P0 approved UX (board 05): FloFi's question is a network question when every suggested answer is a network the registry knows. Presentation
+ * only: the answers, and what each one sends, are FloFi's own. The chat's network buttons and the footer's prompt share this one detector.
+ */
+export function networkChoiceOptions(options: readonly string[] | undefined): readonly string[] | null {
+  return options && options.length >= 2 && options.every(option => networkOfOption(option)) ? options : null;
+}
 /** FloFi's latest message asks which network to use: its suggested answers are networks only (board 05). */
 export function networkQuestionPending(messages: readonly { readonly role: string; readonly options?: readonly string[] | undefined }[]): boolean {
   const last = messages.at(-1);
-  return Boolean(last && last.role !== 'you' && last.options && last.options.length >= 2 && last.options.every(option => NETWORKS.has(option.replace(/\s*\(.*\)$/, '').trim())));
+  return Boolean(last && last.role !== 'you' && networkChoiceOptions(last.options));
 }
 /** "m:ss" for a positive remaining time; "0:00" once expired. */
 export function countdown(ms: number): string {

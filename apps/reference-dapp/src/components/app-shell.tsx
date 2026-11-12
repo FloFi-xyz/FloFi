@@ -3,6 +3,7 @@
 import { simulationUnavailableReason } from '../domain/simulation-unavailable';
 import { refreshBridgeAfterApproval } from '../domain/bridge-review-recovery';
 import { flightWalletAccess } from '../app/flight-wallet-action';
+import { flightRefusal } from '../domain/flight-refusal';
 import { selectOwnerRuntime, type OwnerRuntimeSignals } from '../domain/runtime-selection';
 import { DELIVERY_READABLE, deliveredByRecord, SEQUENCE_RUNTIMES, sequenceOrder, stepAssets } from '../domain/workflow-sequence';
 import { ownerByRecord } from '../domain/sequence-restore';
@@ -328,12 +329,22 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
   // the same wallet is connected, and nothing was quoted, simulated or sent for it.
   // It never masks a run's own state: with an execution started or live, a previous record, a recovery or a retired Review, those keep their
   // own words (a Flight sentence there would read as if nothing had been sent).
+  // The wallet checked is the signer of the step being simulated, by its chain family (a mixed EVM/Solana workflow's EVM step is signed by the EVM
+  // wallet even when the whole workflow's wallet kind is Solana) — the owner that step's flow call names.
+  const stepChain = runtimeWorkflow.nodes[0]?.chainId ?? null;
+  const flightSigner = stepChain?.startsWith('solana:') ? solanaSession?.account.address ?? null : stepChain ? connectedWallet.account ?? null : reviewBinding.wallet.account;
   const [flightBlock, setFlightBlock] = useState<{ readonly owner: string; readonly code: string } | null>(null);
   const executionProgress = useExecutionLifecycle(simulationSource.kind, reviewBinding.wallet);
-  const sourceState = simulationSource.state as { readonly record?: unknown; readonly recoveryOnly?: boolean; readonly retired?: boolean; readonly busy?: boolean };
-  if (flightBlock && flightBlock.owner === reviewBinding.wallet.account && !sourceState.busy && !sourceState.record && !sourceState.recoveryOnly && !sourceState.retired
-    && !executionProgress.started && !currentExecution(executionProgress))
-    simulationSource = { ...simulationSource, state: { ...simulationSource.state, error: flightBlock.code } } as SimulationSource;
+  const recordedStart = useExecutionStart(simulationSource.kind, reviewBinding.wallet);
+  // BUILD-FIX-UX-001: a final run of another (new or edited) workflow has not started this workflow's execution; its record is unchanged.
+  const executionStart = executionProgress.started && !currentExecution(executionProgress) ? { ...recordedStart, started: false } : recordedStart;
+  const sourceState = simulationSource.state as { readonly record?: unknown; readonly run?: unknown; readonly recoveryOnly?: boolean; readonly retired?: boolean; readonly busy?: boolean };
+  const flightHere = Boolean(flightBlock && flightSigner && flightBlock.owner.toLowerCase() === flightSigner.toLowerCase());
+  const runOwnState = Boolean(sourceState.record || sourceState.run || sourceState.recoveryOnly || sourceState.retired || executionStart.started || currentExecution(executionProgress));
+  if (flightHere && !sourceState.busy && !runOwnState)
+    simulationSource = { ...simulationSource, state: { ...simulationSource.state, error: flightBlock!.code } } as SimulationSource;
+  // Where the run keeps its own words, the refusal is still said — never swallowed — as a notice that keeps what was already sent tracked.
+  const flightNotice = flightHere && runOwnState ? flightRefusal(flightBlock!.code) : null;
   const [restoredBinding, setRestoredBinding] = useState({ epoch: restorationEpoch, key: null as string | null });
   if (restoredBinding.epoch !== restorationEpoch) setRestoredBinding({ epoch: restorationEpoch, key: reviewBinding.authorization.key });
   if (restorationEpoch > 0 && (restoredBinding.epoch !== restorationEpoch || restoredBinding.key === reviewBinding.authorization.key))
@@ -341,9 +352,6 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
   // BUILD-FLOFI-UNIVERSAL-E2E-001: every surface (Canvas Review, Execute, the /approve signing surface) presents and approves only this
   // workflow's own Review; a retired or other-network Review is dropped, never shown beside this workflow.
   const authorization = workflowBoundAuthorization(reviewBinding.authorization, runtimeWorkflow, simulationSource);
-  const recordedStart = useExecutionStart(simulationSource.kind, reviewBinding.wallet);
-  // BUILD-FIX-UX-001: a final run of another (new or edited) workflow has not started this workflow's execution; its record is unchanged.
-  const executionStart = executionProgress.started && !currentExecution(executionProgress) ? { ...recordedStart, started: false } : recordedStart;
   // BUILD-FLOFI-CHAT-E2E-FIX-002: a sequence step hands over to the next one only when its own run is final and every action of it is confirmed
   // (the runtime's reconciled record), and — when a later step spends its output — once that record proves the delivered amount. Nothing is
   // submitted here; the next step still needs its own fresh simulation, Review, confirmations and wallet signature.
@@ -408,9 +416,9 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
   const signer = reviewBinding.wallet.account;
   // P0: Flight first, for the same wallet the API binds; the runtime simulates only when that wallet may act (a refusal is a value, not a throw).
   const simulateAgain = async (): Promise<void> => {
-    if (signer) {
-      const access = await flightWalletAccess(signer).catch(() => null);
-      if (access && !access.ok) { setFlightBlock({ owner: signer, code: access.code }); return; }
+    if (flightSigner) {
+      const access = await flightWalletAccess(flightSigner).catch(() => null);
+      if (access && !access.ok) { setFlightBlock({ owner: flightSigner, code: access.code }); return; }
     }
     setFlightBlock(null);
     await simulateRuntime();
@@ -540,7 +548,7 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
   const blockerView = (() => {
     // The whole-workflow Review's own native-fee shortfall (prepared before any run exists): its numbers, for the same owner.
     const runRefusal = workflowRunHere.review?.refusal;
-    if (runRefusal?.evidence && !workflowRunHere.run) return { title: 'Not enough ETH for the network fee', message: 'Your wallet does not hold enough of the network\'s native token for this request.',
+    if (runRefusal?.evidence && !workflowRunHere.run && !workflowRunHere.started && !workflowRunHere.unloaded) return { title: 'Not enough ETH for the network fee', message: 'Your wallet does not hold enough of the network\'s native token for this request.',
       owner: workflowRunHere.review!.owner, feeShortfall: runRefusal.evidence };
     if (simulationSource.state.busy) return null;
     const view = projectSimulation(runtimeWorkflow, context, simulationSource);
@@ -619,9 +627,9 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
   // moving (PENDING / RUNNING / ATTENTION, read from the run itself — never a phase left behind once it ended). A HALTED or final run, or an
   // earlier workflow being followed, never locks the Canvas.
   const runOpen = Boolean(workflowRunHere.run && !workflowRunHere.following && ['PENDING', 'RUNNING', 'ATTENTION'].includes(workflowRunHere.run.state));
-  const editingPaused = Boolean(['authorizing', 'proving', 'wallet', 'confirming', 'confirm-update'].includes(workflowRunHere.phase) || runOpen
+  const editingPaused = Boolean(!workflowRunHere.following && ['authorizing', 'proving', 'wallet', 'confirming', 'confirm-update'].includes(workflowRunHere.phase) || runOpen
     || liveExecution && !isFinalExecutionResult(liveExecution));
-  const stageContent = tab === 'Build' ? <><div className="build-grid"><WorkflowCanvas runActive={editingPaused} estimateOwner={solanaSession?.account.address} environment={authoringEnvironment(walletEnvironment)} selectedId={selectedId} select={selectAction} openSettings={openActionSettings} settingsId={settingsId} workflowName={workflowName} renameWorkflow={setWorkflowName} onAutomate={automationsReady ? () => { setAutomateCanvas(true); navigate?.('/app/automations'); } : undefined} onSave={() => void saveCurrentWorkflow()} onToolboxModeChange={setWorkspaceToolboxMode} overview={overview}/>{chat}</div>{verification}{saveNotice?.owner === ownerKey && <p role="status">{tr(saveNotice.message)}</p>}{library.busy && <p role="status">{tr('Saving workflow…')}</p>}{library.error && library.error !== 'WALLET_SESSION_REQUIRED' && <p role="alert">{tr(library.error === 'WORKFLOW_VERSION_CONFLICT' ? 'This workflow was updated in another session. Reopen it before saving.' : 'Workflow saving is unavailable. Try again.')}</p>}{selectedId && <ActionSettingsPopover key={selectedId} selectedId={selectedId} select={selectAction} open={settingsId === selectedId} close={closeActionSettings}/>}
+  const stageContent = tab === 'Build' ? <><div className="build-grid"><WorkflowCanvas runActive={editingPaused} estimateOwner={solanaSession?.account.address} environment={authoringEnvironment(walletEnvironment)} selectedId={selectedId} select={selectAction} openSettings={openActionSettings} settingsId={settingsId} workflowName={workflowName} renameWorkflow={setWorkflowName} onAutomate={automationsReady ? () => { setAutomateCanvas(true); navigate?.('/app/automations'); } : undefined} onSave={() => void saveCurrentWorkflow()} onToolboxModeChange={setWorkspaceToolboxMode} overview={overview}/>{chat}</div>{verification}{saveNotice?.owner === ownerKey && <p role="status">{tr(saveNotice.message)}</p>}{library.busy && <p role="status">{tr('Saving workflow…')}</p>}{library.error && library.error !== 'WALLET_SESSION_REQUIRED' && <p role="alert">{tr(library.error === 'WORKFLOW_VERSION_CONFLICT' ? 'This workflow was updated in another session. Reopen it before saving.' : 'Workflow saving is unavailable. Try again.')}</p>}{selectedId && !editingPaused && <ActionSettingsPopover key={selectedId} selectedId={selectedId} select={selectAction} open={settingsId === selectedId} close={closeActionSettings}/>}
           {engineering && <EngineeringAuthoring selectedId={selectedId}><ReviewPanel/></EngineeringAuthoring>}</>
         : tab === 'Simulate' && engineering ? universalPath ? <UniversalBridgePanel view="simulate"/> : routerPath ? <RouterPanel view="simulate"/> : solanaTransferPath ? <SolanaTransferPanel view="simulate"/> : transferPath ? <RobinhoodTransferPanel view="simulate"/> : lendingPath ? <LendingPanel view="simulate"/> : withdrawPath ? <WithdrawPanel view="simulate"/> : repayPath ? <RepayPanel view="simulate"/> : borrowPath ? <BorrowPanel view="simulate"/> : supplyPath ? <SupplyPanel view="simulate"/> : uniswapLiquidityPath ? <UniswapLiquidityPanel view="simulate"/> : solanaCompositionPath ? <SolanaCompositionPanel view="simulate"/> : solanaLiquidityPath ? <SolanaLiquidityPanel view="simulate"/> : solanaPath ? <JupiterPanel view="simulate"/> : publicPath ? <PublicTestnetPanel view="simulate"/> : crossChainWorkflow ? <CrossChainLiquidityPanel view="simulate"/> : acrossWorkflow || across.run ? <AcrossPanel view="simulate"/> : bridgeSwapWorkflow ? <BridgeSwapPanel view="simulate"/> : bridgeWorkflow ? <BridgePanel view="simulate"/> : <SimulatePanel engineeringOnly workflowName={workflowName}><ReviewWorkspace workflowName={workflowName} workflow={runtimeWorkflow} context={context} source={simulationSource} authorization={authorization} wallet={reviewBinding.wallet} invalidWorkflow={Boolean(reviewError)} backToBuild={() => setTab('Build')} simulateAgain={simulateAgain} actionSurface="canvas" showTechnicalDetails={false}/><ObservationPanel/><ForkSimulationPanel/><ModeBPanel view="simulate"/><CompositionPanel view="simulate"/><CowPanel view="simulate"/><LiquidityPanel view="simulate"/></SimulatePanel>
         : executionSurface ? universalPath ? <UniversalBridgePanel view="execute"/> : routerPath ? <RouterPanel view="execute"/> : solanaTransferPath ? <SolanaTransferPanel view="execute"/> : transferPath ? <RobinhoodTransferPanel view="execute"/> : lendingPath ? <LendingPanel view="execute"/> : withdrawPath ? <WithdrawPanel view="execute"/> : repayPath ? <RepayPanel view="execute"/> : borrowPath ? <BorrowPanel view="execute"/> : supplyPath ? <SupplyPanel view="execute"/> : uniswapLiquidityPath ? <UniswapLiquidityPanel view="execute"/> : solanaCompositionPath ? <SolanaCompositionPanel view="execute"/> : solanaLiquidityPath ? <SolanaLiquidityPanel view="execute"/> : solanaPath ? <JupiterPanel view="execute"/> : publicPath ? <PublicTestnetPanel view="execute"/> : persistedBuild009Recovery ? <BridgeSwapPanel view="execute"/> : across.recovered ? <AcrossPanel view="execute"/> :
@@ -642,7 +650,11 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
     const view = projectSimulation(runtimeWorkflow, context, simulationSource);
     const label = simulationStatusPresentation(view, Boolean(reviewError), simulationSource.state.busy).label;
     return { busy: Boolean(simulationSource.state.busy), status: view.status, label, expiresAt: view.expiresAt, networkQuestion,
-      executionStarted: Boolean(currentExecution(executionProgress)) || executionProgress.started || executionStart.started };
+      // Any sign that part of this workflow ran or may have run: a live or started execution, a sequence step done or restored, a whole-workflow
+      // run, or actions already executed. Then the footer never says "Nothing was sent".
+      executionStarted: Boolean(currentExecution(executionProgress)) || executionProgress.started || executionStart.started || localSequenceStarted
+        || Boolean(sequenceRestore) || Boolean(sequence && (sequence.completed.length > 0 || sequence.finished)) || Boolean(workflowRunHere.run || workflowRunHere.started)
+        || executedActions.executed > 0 };
   })();
   return <EstimateOwnersContext.Provider value={estimateOwners}><div className="app-shell" inert={!interactive}><a className="skip-link" href="#workspace">{tr("Skip to workspace")}</a><TopBar tab={tab} setTab={setTab} pathname={pathname ?? null} engineering={engineering} entry={entry} center={editorStepper}/>{betaNotice}
     {approvalSlot && <div className="approval-notice-slot" ref={approvalSlot}/>}
@@ -650,6 +662,8 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
     {workflowRunHere.earlier && tab !== 'Execute' && <div className="editor-run-earlier-notice" role="status">
       <span>{tr('A workflow you authorized earlier in this browser has not been closed.')}</span>
       <button type="button" className="secondary" onClick={() => { setTab('Execute'); void workflowRunHere.followEarlier(); }}>{tr('Show its progress')}</button></div>}
+    {flightNotice && <div className="error-banner flight-run-notice" role="alert"><strong>{tr(flightNotice.title)}</strong>
+      <span>{tr(flightNotice.message)}{/already sent stays tracked/.test(flightNotice.message) ? null : <> {tr('Anything already sent stays tracked.')}</>}</span></div>}
     <AutomationInbox owner={owner} proven={Boolean(owner && proof.proven === owner.address)} open={() => navigate?.('/app/automations')}/>
     {/* BUILD-FLOFI-CONVERSATIONAL-001: on Simulate and Execute the same conversation continues beside the stage (complementary to main). */}
     {wrapStage(<main id="workspace" className={`main workflow-workspace${tab === 'Build' ? ' build-workspace' : ''}`} data-workspace-toolbox={tab === 'Build' ? workspaceToolboxMode : undefined} tabIndex={-1} aria-label={tr(tab === 'Build' ? 'Workflow workspace' : tab === 'Simulate' ? 'Simulation workspace' : 'Execution workspace')}>

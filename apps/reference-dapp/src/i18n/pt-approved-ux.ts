@@ -6,7 +6,7 @@
 export const portugueseApprovedUx: Readonly<Record<string, string>> = {
   // P0 Track B: the assistant's blocker explanation (approved-ux.ts).
   "Every transaction on {0} pays a network fee in {1}. Your wallet {2} has {3} {1}, and this fee can reach {4} {1}, so at least {5} {1} is missing. Send a little {1} on the {0} network to {2}, then choose Simulate again. Nothing was sent.":
-    "Toda transação na {0} paga uma taxa de rede em {1}. Sua carteira {2} tem {3} {1}, e essa taxa pode chegar a {4} {1}, então falta no mínimo {5} {1}. Mande um pouco de {1} na rede {0} para {2} e toque em Simular novamente. Nada foi enviado.",
+    "Toda transação na {0} paga uma taxa de rede em {1}. Sua carteira {2} tem {3} {1}, e essa taxa pode chegar a {4} {1}, então falta no mínimo {5} {1}. Envie um pouco de {1} na rede {0} para {2} e depois escolha Simular novamente. Nada foi enviado.",
   // P0 Track B (main session): shell, Chat entry, footer, Review and blocker copy, and the board 16 §4 terminology.
   "New workflow": "Novo fluxo",
   "Library": "Biblioteca",
@@ -135,8 +135,8 @@ export const portugueseApprovedUx: Readonly<Record<string, string>> = {
     "A FloFi não conseguiu verificar seu acesso ao Flight agora, por isso a FloFi interrompeu este pedido: ele não foi cotado, simulado nem enviado. Tente novamente em instantes.",
   // Board 08 (Confirm in wallet)
   'EXECUTION · REQUEST {0} OF {1}': 'EXECUÇÃO · PEDIDO {0} DE {1}', 'EXECUTION · REQUEST {0}': 'EXECUÇÃO · PEDIDO {0}',
-  'Confirm in your wallet': 'Confirme na sua carteira', 'Your wallet shows 1 call:': 'Sua carteira mostra 1 chamada:',
-  'Your wallet shows {0} calls in one request:': 'Sua carteira mostra {0} chamadas em um único pedido:',
+  'Confirm in your wallet': 'Confirme na sua carteira', 'This request has 1 call:': 'Este pedido tem 1 chamada:',
+  'This request has {0} calls:': 'Este pedido tem {0} chamadas:',
   'Token permission for step {0}': 'Permissão de token para o passo {0}', 'Swap on Uniswap (step {0})': 'Troca na Uniswap (passo {0})',
   'Supply on Aave (step {0})': 'Depósito no Aave (passo {0})', 'Borrow on Aave (step {0})': 'Empréstimo no Aave (passo {0})',
   'Repay on Aave (step {0})': 'Pagamento no Aave (passo {0})', 'Withdraw from Aave (step {0})': 'Saque do Aave (passo {0})',
@@ -146,7 +146,9 @@ export const portugueseApprovedUx: Readonly<Record<string, string>> = {
     'Toda transação na {0} paga uma taxa de rede em {1}. Sua carteira {2} tem {3} {1}; este pedido envia {6} {1} e a taxa pode chegar a {4} {1}, então faltam pelo menos {5} {1}. Envie um pouco de {1} na rede {0} para {2} e depois escolha Simular novamente. Nada foi enviado.',
   'Not enough ETH for the network fee': 'Falta ETH para a taxa de rede',
   "Your wallet does not hold enough of the network's native token for this request.": 'Sua carteira não tem o suficiente do token nativo da rede para este pedido.',
-  'Steps in this request:': 'Passos deste pedido:', 'Your wallet shows 1 call, for this step:': 'Sua carteira mostra 1 chamada, para este passo:',
-  'Your wallet shows {0} calls in one request, for these steps:': 'Sua carteira mostra {0} chamadas em um único pedido, para estes passos:',
+  'Anything already sent stays tracked.': 'O que já foi enviado continua sendo acompanhado.',
+  'Add to workflow': 'Adicionar ao fluxo', 'Simulation valid': 'Simulação válida', 'Simulation expires in less than 15 seconds': 'A simulação expira em menos de 15 segundos',
+  'Steps in this request:': 'Passos deste pedido:', 'This request has 1 call, for this step:': 'Este pedido tem 1 chamada, para este passo:',
+  'This request has {0} calls, for these steps:': 'Este pedido tem {0} chamadas, para estes passos:',
   'Expiry check: the request is refused after its deadline': 'Verificação de prazo: o pedido é recusado depois do prazo',
 };

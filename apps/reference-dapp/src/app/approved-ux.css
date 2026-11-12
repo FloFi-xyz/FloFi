@@ -92,3 +92,10 @@
 .execution-wallet-request h4{margin:0;font-size:18px;color:var(--ink)}
 .execution-wallet-request p{margin:0}
 .execution-wallet-calls{margin:0;padding-left:20px;display:flex;flex-direction:column;gap:4px;color:var(--ink)}
+/* Review fixes (frontend UX): a border/ring token that keeps 3:1 in dark mode; the header grows with its second row (the stepper under 800 px,
+   the wallet-network strip); touch targets on coarse pointers. */
+:root{--primary-line:var(--primary)}
+:root[data-theme="dark"]{--primary-line:var(--accent)}
+@media(prefers-color-scheme:dark){:root:not([data-theme="light"]){--primary-line:var(--accent)}}
+.top-bar{height:auto;min-height:70px}
+@media(pointer:coarse){.network-attention button{min-height:44px}.navigation-legal a{display:inline-flex;align-items:center}}

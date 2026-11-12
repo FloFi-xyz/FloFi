@@ -892,6 +892,10 @@ export function startTurn(current: CopilotConversation, raw: string, env: Copilo
     }
     const statement = parseMemoryStatement(text);
     // FloFi answers in the language the statement was written in, unless the user chose a reply language (a language statement: the new one).
+    // P0 approved UX: with an interface language, a reply-language statement is answered in that language and points to the language setting —
+    // nothing is promised, set or learned that the screen's language would then override.
+    if (statement?.kind === 'LANGUAGE' && env.interfaceLanguage)
+      return { kind: 'LOCAL', reply: reply('ANSWER', learningCopy(env.interfaceLanguage).languageFollowsScreen), next: { ...state, offer: null } };
     if (statement) return { kind: 'LOCAL', ...memoryTurn(state, statement, env.learning, statement.kind === 'LANGUAGE' ? statement.language
       : preferredLanguage(state, env) ?? statement.said) };
   }

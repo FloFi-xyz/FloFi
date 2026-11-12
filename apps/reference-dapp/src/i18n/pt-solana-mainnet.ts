@@ -38,7 +38,7 @@ export const portugueseSolanaMainnet: Readonly<Record<string, string>> = {
   'The Solana Mainnet simulation of this exact transaction failed. Nothing was signed.': 'A simulação na Solana Mainnet desta transação exata falhou. Nada foi assinado.',
   'The Orca pool does not match the verified Solana Mainnet profile. Nothing was simulated.': 'A pool Orca não corresponde ao perfil verificado da Solana Mainnet. Nada foi simulado.',
   'This Orca pool now emits rewards, which Flofi does not model yet. Nothing was simulated.': 'Esta pool Orca passou a emitir recompensas, que a Flofi ainda não modela. Nada foi simulado.',
-  'The Solana network provider is not on Solana Mainnet. Nothing was simulated or sent.': 'O fornecedor de rede Solana não está na Solana Mainnet. Nada foi simulado nem enviado.',
+  'The Solana network provider is not on Solana Mainnet. Nothing was simulated or sent.': 'O provedor de rede Solana não está na Solana Mainnet. Nada foi simulado nem enviado.',
   'This Solana wallet could not connect on Solana Mainnet.': 'Esta carteira Solana não conseguiu conectar-se à Solana Mainnet.',
   'This Solana wallet could not connect on Solana Devnet.': 'Esta carteira Solana não conseguiu conectar-se à Solana Devnet.',
   // Canvas corrections (PR B).

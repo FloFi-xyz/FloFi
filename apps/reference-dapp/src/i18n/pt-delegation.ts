@@ -52,7 +52,7 @@ export const portugueseDelegation: Readonly<Record<string, string>> = {
   'covered by your Credential for wallet {0}': 'coberto pela sua Credencial da carteira {0}', 'not covered: {0}': 'não coberto: {0}',
   'Enroll the missing Credentials in Credentials, then check again. Nothing was created.': 'Registe as Credenciais em falta em Credenciais e verifique de novo. Nada foi criado.',
   'Limits per asset': 'Limites por ativo', 'Create and review authorization': 'Criar e revisar a autorização',
-  'Created. Review the authorization and sign it with your passkey.': 'Criada. Reveja a autorização e assine-a com a sua chave de acesso.',
+  'Created. Review the authorization and sign it with your passkey.': 'Criada. Revise a autorização e assine-a com a sua chave de acesso.',
   // Why a step is not covered
   'no enrolled Credential for this network': 'não há Credencial registrada para esta rede', 'the Credential\'s per-call cap is too low': 'o limite por chamada da Credencial é demasiado baixo',
   'the Credential does not cover this token pair': 'a Credencial não cobre este par de tokens', 'the Credential does not cover this protocol': 'a Credencial não cobre este protocolo',
@@ -86,7 +86,7 @@ export const portugueseDelegation: Readonly<Record<string, string>> = {
   'Every spent asset needs a cumulative budget.': 'Cada ativo gasto precisa de um orçamento acumulado.', 'Set a limit for every asset the workflow spends.': 'Defina um limite para cada ativo que o fluxo gasta.',
   'The slippage cap is below the slippage of a step.': 'O limite de desvio é inferior ao desvio de um passo.', 'Choose an expiry in the future, at most one year away.': 'Escolha uma validade no futuro, no máximo a um ano.',
   'Check the fields and try again.': 'Verifique os campos e tente de novo.', 'The passkey signature could not be verified.': 'Não foi possível verificar a assinatura da chave de acesso.',
-  'This authorization changed. Review it again.': 'Esta autorização mudou. Reveja-a de novo.', 'This review expired. Review it again.': 'Esta revisão expirou. Reveja de novo.',
+  'This authorization changed. Review it again.': 'Esta autorização mudou. Revise-a de novo.', 'This review expired. Review it again.': 'Esta revisão expirou. Revise de novo.',
   'This passkey response was already used.': 'Esta resposta da chave de acesso já foi usada.', 'Sign the authorization before this automation can run.': 'Assine a autorização antes de esta automação poder correr.',
   'Re-authorize this automation to change its workflow.': 'Volte a autorizar esta automação para alterar o seu fluxo.',
   'This account is not a MetaMask smart account yet. Switch it to a smart account in MetaMask, then verify again.': 'Esta conta ainda não é uma smart account MetaMask. Mude-a para smart account na MetaMask e verifique de novo.',

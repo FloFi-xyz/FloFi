@@ -30,11 +30,11 @@ export const portugueseAutomations: Readonly<Record<string, string>> = {
   'fixture': 'dados de teste', 'Buy': 'Comprar', 'Sell': 'Vender', 'No BTC swap route in FloFi yet': 'O FloFi ainda não tem rota de troca para BTC',
   'Not executable on this deployment': 'Não executável neste ambiente', 'REAL FUNDS': 'FUNDOS REAIS', 'Amount ({0})': 'Valor ({0})', 'Prepare in the Editor': 'Preparar no Editor',
   'This is your own new trade, not part of this automation: it goes to your Editor draft as an ordinary proposal, exactly as if you had composed it there. The automation adds no authority and no limits to it. Nothing is signed: apply it, simulate and review the Strategy Manifest first.':
-    'Esta é uma nova operação sua, que não faz parte desta automação: vai para o seu rascunho no Editor como uma proposta normal, tal como se a tivesse composto lá. A automação não lhe acrescenta autoridade nem limites. Nada é assinado: aplique-a, simule e reveja primeiro o Strategy Manifest.',
+    'Esta é uma nova operação sua, que não faz parte desta automação: vai para o seu rascunho no Editor como uma proposta normal, tal como se a tivesse composto lá. A automação não lhe acrescenta autoridade nem limites. Nada é assinado: aplique-a, simule e revise primeiro o Strategy Manifest.',
   'Waiting until': 'Aguardando até', 'sent to your chat': 'enviada para a sua conversa', 'not delivered': 'não entregue', 'Review in FloFi': 'Revisar no FloFi',
   'Ignore': 'Ignorar', 'Acknowledge': 'Tomar conhecimento',
   'Nothing is authorized yet. Review opens FloFi’s approval: prove your wallet, run a fresh simulation, review the Strategy Manifest and sign with your own wallet.':
-    'Nada está autorizado ainda. Revisar abre a aprovação do FloFi: verifique a sua carteira, execute uma nova simulação, reveja o Strategy Manifest e assine com a sua própria carteira.',
+    'Nada está autorizado ainda. Revisar abre a aprovação do FloFi: verifique a sua carteira, execute uma nova simulação, revise o Strategy Manifest e assine com a sua própria carteira.',
   'Automation {0}': 'Automação {0}', 'When': 'Quando', 'Condition': 'Condição', 'checked every {0} min': 'verificado a cada {0} min', 'Assets': 'Ativos',
   'from saved workflow (version {0})': 'do fluxo salvo (versão {0})', 'Next evaluation': 'Próxima avaliação', 'Last observation': 'Última observação',
   'Last evaluation': 'Última avaliação', '{0} pending proposal(s)': '{0} proposta(s) pendente(s)', 'Expires': 'Expira',
@@ -87,7 +87,7 @@ export const portugueseAutomations: Readonly<Record<string, string>> = {
   // Notices and errors
   'Automation created. FloFi will ask you before every execution.': 'Automação criada. O FloFi pergunta-lhe antes de cada execução.', 'Automation paused.': 'Automação em pausa.',
   'Automation resumed.': 'Automação retomada.', 'Automation archived.': 'Automação arquivada.', 'Automation rebound.': 'Automação associada de novo.', 'Proposal dismissed.': 'Proposta recusada.',
-  'Your own trade is in the Editor. Apply it, simulate and review before signing.': 'A sua operação está no Editor. Aplique-a, simule e reveja antes de assinar.', 'Telegram unlinked.': 'Telegram desconectado.',
+  'Your own trade is in the Editor. Apply it, simulate and review before signing.': 'A sua operação está no Editor. Aplique-a, simule e revise antes de assinar.', 'Telegram unlinked.': 'Telegram desconectado.',
   'FloFi could not complete this ({0}).': 'O FloFi não conseguiu concluir isto ({0}).', 'Automations are unavailable on this deployment right now.': 'As automações estão indisponíveis neste ambiente de momento.',
   'This automation changed in another session. Refresh and try again.': 'Esta automação mudou em outra sessão. Atualize e tente novamente.',
   'You have reached the maximum number of automations.': 'Atingiu o número máximo de automações.',

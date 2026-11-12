@@ -10,7 +10,7 @@ function buttons(props: Parameters<typeof EditorStepper>[0]) {
   let tree: ReactNode = null;
   function Capture() { tree = EditorStepper(props); return null; }
   renderToStaticMarkup(createElement(Capture));
-  const found: ReactElement<{ children: ReactNode; onClick(): void; disabled?: boolean; 'aria-current'?: string }>[] = [];
+  const found: ReactElement<{ children: ReactNode; onClick(): void; disabled?: boolean; 'aria-disabled'?: boolean; 'aria-current'?: string }>[] = [];
   const walk = (node: ReactNode): void => {
     if (Array.isArray(node)) { node.forEach(walk); return; }
     if (!isValidElement<{ children?: ReactNode }>(node)) return;
@@ -45,12 +45,16 @@ describe('Editor stepper', () => {
 
   it('keeps Simulate and Execute closed while the shell refuses them, and says why only for an unapplied amount', () => {
     const incomplete = renderToStaticMarkup(createElement(EditorStepper, { tab: 'Build', setTab: vi.fn(), disabled: true, incomplete: true }));
-    expect(incomplete.match(/<button type="button" disabled="" title="Configure the action amount on the Canvas first">/g)).toHaveLength(2);
+    // Closed steps stay focusable (aria-disabled) so the reason is reachable from the keyboard; they never open their section.
+    expect(incomplete.match(/<button type="button" aria-disabled="true" title="Configure the action amount on the Canvas first">/g)).toHaveLength(2);
     const gated = renderToStaticMarkup(createElement(EditorStepper, { tab: 'Build', setTab: vi.fn(), disabled: true }));
-    expect(gated.match(/<button type="button" disabled="">/g)).toHaveLength(2);
+    expect(gated.match(/<button type="button" aria-disabled="true">/g)).toHaveLength(2);
     expect(gated).not.toContain('title=');
     // Create always stays available.
-    expect(buttons({ tab: 'Simulate', setTab: vi.fn(), disabled: true })[0]!.props.disabled).toBe(false);
+    expect(buttons({ tab: 'Simulate', setTab: vi.fn(), disabled: true })[0]!.props['aria-disabled']).toBeUndefined();
+    // A closed step's click never opens its section.
+    const refused = vi.fn(), closed = buttons({ tab: 'Build', setTab: refused, disabled: true });
+    closed[1]!.props.onClick(); closed[2]!.props.onClick(); expect(refused).not.toHaveBeenCalled();
   });
 
   it('speaks Portuguese', () => {
