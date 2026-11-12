@@ -54,7 +54,13 @@ function InspectionViewport({ onState, padding }: { onState: (value: 'pending' |
   return null;
 }
 
-export function SimulateWorkflowCanvas({ workflowName, primaryAction, stage = 'simulate' }: { workflowName: string; primaryAction?: ReactNode; stage?: 'simulate' | 'execute' }) {
+/**
+ * P0 hotfix (Simulate layout): `dock` is the Review (or the engineering Simulation Summary), docked INSIDE this frame — beside the graph when the
+ * frame is wide enough for both at a readable card size, under it otherwise (a CSS container query on the frame, so the first paint is final and
+ * no script measures the window). One frame, one page scroll: never a third column between the Canvas and the FloFi Assistant, never over a card.
+ */
+export function SimulateWorkflowCanvas({ workflowName, primaryAction, stage = 'simulate', dock, dockLabel = 'Review' }: { workflowName: string; primaryAction?: ReactNode;
+  stage?: 'simulate' | 'execute'; dock?: ReactNode; dockLabel?: string }) {
   const { t: tr } = useLocale();
   const { state, context, canvasLayout, reviewError, actionSetup } = useWorkflow();
   const workflow = state.workflow;
@@ -95,8 +101,10 @@ export function SimulateWorkflowCanvas({ workflowName, primaryAction, stage = 's
     return () => observer.disconnect();
   }, []);
   const padding = useMemo(() => fitPadding(controlsHeight), [controlsHeight]);
-  return <section className={`canvas simulate-canvas simulation-workflow-canvas panel ${lending ? 'simulation-lending-canvas' : ''}`} aria-label={tr(stage === 'execute' ? 'Execution plan' : 'Workflow simulation')}>
+  return <section className={`canvas simulate-canvas simulation-workflow-canvas panel ${lending ? 'simulation-lending-canvas' : ''}`} aria-label={tr(stage === 'execute' ? 'Execution plan' : 'Workflow simulation')}
+    data-docked={dock ? '' : undefined}>
     <div className="canvas-head"><div><h2>{workflowName === 'Your Workflow' ? tr('Your Workflow') : workflowName}</h2></div><span className="revision">{tr(actions.length === 1 ? '1 step' : '{0} steps', actions.length)}</span></div>
+    <div className="simulate-canvas-body">
     <div className="flow-surface simulate-flow-surface" role="region" aria-label={tr(stage === 'execute' ? 'Execution workflow graph' : 'Simulation workflow graph')} data-viewport={viewport}>
       <ReactFlow nodes={nodes} edges={edges} nodeTypes={nodeTypes} minZoom={0.35} maxZoom={1.4}
         nodesDraggable={false} nodesConnectable={false} elementsSelectable={false} nodesFocusable={false} edgesFocusable={false}
@@ -113,6 +121,8 @@ export function SimulateWorkflowCanvas({ workflowName, primaryAction, stage = 's
         </Panel>
       </ReactFlow>
       {nodes.length === 0 && <div className="simulation-workflow-empty"><strong>{tr(incomplete ? 'Check your workflow' : 'Add an action to your workflow')}</strong><p>{tr(incomplete ? stage === 'execute' ? 'Complete its configuration on the Canvas before executing.' : 'Complete its configuration on the Canvas before simulating.' : stage === 'execute' ? 'Create a workflow in the Editor first.' : 'Create your strategy on the Canvas, then return here to simulate it.')}</p></div>}
+    </div>
+    {dock && <aside className="canvas-review-dock" aria-label={tr(dockLabel)}>{dock}</aside>}
     </div>
     <div className="canvas-foot"><span>{tr(stage === 'execute' ? 'Execution plan' : 'Workflow preview')}</span><span>{tr("Configured on the Canvas")}</span></div>
   </section>;

@@ -13,7 +13,7 @@ import type { APIRequestContext, Page } from '@playwright/test';
 import { test, expect, readWorkflowIr } from './fixtures';
 import { installJourneyWallet, walletRequests } from './journey-fixtures';
 import { createTestWallet } from '../../../packages/reference-reconciler/test/test-wallet';
-import { expectEditorSection, openBuilder, openEditorSection, openSimulationReviewPanel, REVIEW_PANEL_MIN_WIDTH } from './build-entry-navigation';
+import { expectEditorSection, openBuilder, openEditorSection, openSimulationReviewPanel } from './build-entry-navigation';
 
 test.skip(process.env.FLOFI_SWAP_EXECUTION_E2E !== 'MOCKED_LOOPBACK_ONLY', 'Requires the opt-in loopback swap execution harness');
 test.setTimeout(180_000);
@@ -198,12 +198,15 @@ for (const width of [1920, 1440, 1280, 1024, 390, 375]) test(`chat-first layout 
     ['Execute', '.execute-workspace-grid', '.execution-summary', null]] as const) {
     await openEditorSection(page, name);
     await expect(page.locator(grid)).toBeVisible();
-    // One column: the canvas (or timeline); the summary is optional, collapsed — never a column of its own beside the chat. P0 approved UX
-    // (board 06 / 16 §7): on Simulate the Review panel (no authorize control) opens beside the canvas from 1200 px; below, it is a collapsed
-    // "Review" under the canvas. Either way the Simulation Summary sits in the panel's collapsed Technical details.
-    const wide = name === 'Simulate' && width >= REVIEW_PANEL_MIN_WIDTH;
-    expect((await page.locator(grid).evaluate(element => getComputedStyle(element).gridTemplateColumns)).trim().split(/\s+/)).toHaveLength(wide ? 2 : 1);
-    if (name === 'Simulate') await expect(page.getByRole('complementary', { name: 'Review', exact: true })).toHaveCount(wide ? 1 : 0);
+    // One column: the canvas (or timeline) frame — never a column of its own beside the chat. P0 hotfix (Simulate layout): on Simulate the
+    // Review panel (no authorize control) is docked INSIDE the Canvas frame at every width; the Simulation Summary sits in its collapsed
+    // Technical details.
+    expect((await page.locator(grid).evaluate(element => getComputedStyle(element).gridTemplateColumns)).trim().split(/\s+/)).toHaveLength(1);
+    if (name === 'Simulate') {
+      const dock = page.getByRole('complementary', { name: 'Review', exact: true });
+      await expect(dock).toHaveCount(1);
+      await expect(page.locator('.simulation-workflow-canvas .canvas-review-dock')).toHaveCount(1);
+    }
     // BUILD0-UX-001: Execute shows its short status panel instead of collapsed details (and no technical disclosure).
     if (details) { await expect(page.locator(summary)).toBeHidden(); await openSimulationReviewPanel(page); await expect(page.locator(`${details} > summary`)).toBeVisible(); }
     else { await expect(page.locator(summary)).toBeVisible(); await expect(page.locator('.execution-details, .execute-technical')).toHaveCount(0); }
