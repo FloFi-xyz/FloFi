@@ -10,14 +10,16 @@
 import { readFileSync } from 'node:fs';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-const hooks = vi.hoisted(() => ({ slots: [] as unknown[], at: 0 }));
+/** `effects`: the effects of the last render, by hook position — never run by a render; a test runs them (`poll`), as React would after it. */
+const hooks = vi.hoisted(() => ({ slots: [] as unknown[], at: 0, effects: [] as (() => unknown)[] }));
 vi.mock('react', async importOriginal => {
   const actual = await importOriginal<typeof import('react')>();
   const slot = <T>(init: () => T): T => { const k = hooks.at++; if (!(k in hooks.slots)) hooks.slots[k] = init(); return hooks.slots[k] as T; };
   return { ...actual,
     useState: (v: unknown) => { const k = hooks.at; const value = slot(() => typeof v === 'function' ? (v as () => unknown)() : v);
       return [value, (next: unknown) => { hooks.slots[k] = typeof next === 'function' ? (next as (p: unknown) => unknown)(hooks.slots[k]) : next; }]; },
-    useRef: (v: unknown) => slot(() => ({ current: v })), useCallback: (f: unknown) => { hooks.at++; return f; }, useEffect: () => { hooks.at++; } };
+    useRef: (v: unknown) => slot(() => ({ current: v })), useCallback: (f: unknown) => { hooks.at++; return f; },
+    useEffect: (f: () => unknown) => { hooks.effects[hooks.at++] = f; } };
 });
 const server = vi.hoisted(() => ({ review: vi.fn(), authorize: vi.fn(), status: vi.fn(), prepare: vi.fn(), authorizeGroup: vi.fn(), report: vi.fn() }));
 vi.mock('../app/editor-workflow-execution-action', () => ({ editorWorkflowExecutionAvailability: async () => ({ enabled: true, code: null }),
@@ -28,7 +30,7 @@ const browser = vi.hoisted(() => ({ send: vi.fn(), hashes: vi.fn() }));
 vi.mock('./user-funded-browser', () => ({ sendWalletBatch: browser.send, walletBatchHashes: browser.hashes, walletProfile: async () => ({}),
   signSolanaGroup: vi.fn(), signUserOperation: vi.fn() }));
 vi.mock('./wallet-proof', () => ({ useWalletProof: () => ({ proveEvm: vi.fn() }) }));
-const { useEditorWorkflowRun, EXECUTION_REFUSAL, EXECUTION_REASON, STEP_REFUSAL, reviewOffersStepByStep } = await import('./editor-workflow-run');
+const { useEditorWorkflowRun, EXECUTION_REFUSAL, EXECUTION_REASON, STEP_REFUSAL, reviewOffersStepByStep, BATCH_PREPARATION_VALIDITY_MS } = await import('./editor-workflow-run');
 const { translate } = await import('../i18n/locale');
 
 const OWNER = '0x' + 'ab'.repeat(20), APPROVAL = 'apr_' + 'b'.repeat(26), GROUP_ID = '0x' + '12'.repeat(32), ANSWERED = '0x' + '34'.repeat(32), HASH = '0x' + 'ef'.repeat(32);
@@ -74,7 +76,7 @@ const fromOtherTab = (sent: unknown = OTHER_TAB) => storage.set(STORAGE_KEY, JSO
 
 afterEach(() => { expect(onEntry.filter(m => m !== null), 'an attempt was stored before the wallet was asked to send').toEqual([]); });
 beforeEach(() => {
-  hooks.slots = []; storage.clear(); onEntry.length = 0; walletSent = 0;
+  hooks.slots = []; hooks.effects = []; storage.clear(); onEntry.length = 0; walletSent = 0;
   vi.stubGlobal('localStorage', { getItem: (k: string) => storage.get(k) ?? null, setItem: (k: string, v: string) => void storage.set(k, v) });
   for (const f of [...Object.values(server), ...Object.values(browser)]) f.mockReset();
   server.review.mockResolvedValue({ ok: true, value: review });
@@ -301,14 +303,33 @@ describe('Editor batch send: refusals in plain words', () => {
     }
     expect(EXECUTION_REFUSAL.WALLET_ACCOUNT_MISMATCH).toMatch(/locked or another account is selected.*select the account this run belongs to.*nothing was sent/);
   });
-  /** Review fixes U2-U4: a batch still valid is never prepared again, a second different answer, a browser that cannot keep its marker. */
-  const REVIEW_FIXES = ['USER_FUNDED_PREPARED_STILL_VALID', 'WALLET_BATCH_ANSWER_MISMATCH', 'WALLET_ATTEMPT_UNRECORDABLE'];
+  /**
+   * Review fixes U2-U4: a batch still valid is never prepared again, a second different answer, a browser that cannot keep its marker; round 5:
+   * an answer for a group FloFi had already stopped.
+   */
+  const REVIEW_FIXES = ['USER_FUNDED_PREPARED_STILL_VALID', 'WALLET_BATCH_ANSWER_MISMATCH', 'WALLET_ATTEMPT_UNRECORDABLE', 'WALLET_BATCH_ANSWERED_AFTER_STOP'];
   it('says what each review-fix code means: nothing was asked of the wallet, or it may have run twice (never "nothing was sent")', () => {
     for (const code of REVIEW_FIXES) expect(EXECUTION_REFUSAL[code], code).not.toMatch(/\{\d+\}/);
-    expect(EXECUTION_REFUSAL.USER_FUNDED_PREPARED_STILL_VALID).toMatch(/^FloFi did not ask your wallet this time.*never prepares a second request/);
+    // Undated (the run view could not date it, and /approve never can): words that stay true once the request has expired.
+    expect(EXECUTION_REFUSAL.USER_FUNDED_PREPARED_STILL_VALID).toBe('FloFi already prepared a request for this step that may still be open in your wallet. Confirm it '
+      + 'there, or try again once it has expired (at most 10 minutes after it was prepared); FloFi never prepares a second one that could run alongside it.');
+    expect(EXECUTION_REFUSAL.USER_FUNDED_PREPARED_STILL_VALID).not.toMatch(/stays valid|wait until|few more minutes/);
     expect(EXECUTION_REFUSAL.WALLET_ATTEMPT_UNRECORDABLE).toMatch(/did not ask your wallet/);
     expect(EXECUTION_REFUSAL.WALLET_BATCH_ANSWER_MISMATCH).toMatch(/may have run twice/);
     expect(EXECUTION_REFUSAL.WALLET_BATCH_ANSWER_MISMATCH).not.toMatch(/nothing was sent|not asked/i);
+  });
+  it('round 5: a wallet answer for a step FloFi had already stopped may have executed and could not be recorded — never a nothing-sent code (EN/PT)', () => {
+    const text = EXECUTION_REFUSAL.WALLET_BATCH_ANSWERED_AFTER_STOP!;
+    expect(text).toBe('Your wallet reported a batch for a step FloFi had already stopped: it may have executed. Check your wallet\'s activity; FloFi could not record it.');
+    expect(text).not.toMatch(/nothing was sent|not asked|not sent/i);
+    expect(translate('PT', text)).toBe('Sua carteira informou um lote para uma etapa que a FloFi já tinha parado: ele pode ter sido executado. Verifique a atividade da '
+      + 'sua carteira; a FloFi não conseguiu registrá-lo.');
+    // The Editor's and /approve's "nothing was sent" sets (an answer in them clears the "handed to the wallet" marker) never hold it.
+    for (const file of ['./editor-workflow-run.tsx', './workflow-run-panel.tsx']) {
+      const set = /const NOTHING_SENT: ReadonlySet<string> = new Set\(\[([^\]]*)\]\)/.exec(readFileSync(new URL(file, import.meta.url), 'utf8'))?.[1];
+      expect(set, file).toBeTruthy();
+      expect(set, file).not.toContain('WALLET_BATCH_ANSWERED_AFTER_STOP');
+    }
   });
   /** A group preparation's refusals (simulation, Aave risk, fee reading) that both pages show. */
   const PREPARATION = ['BORROW_UNSAFE_HEALTH_FACTOR', 'WITHDRAW_UNSAFE_HEALTH_FACTOR', 'REPAY_PARTIAL_DEBT_REQUIRED', 'SIMULATION_REVERTED', 'SWAP_MINIMUM_NOT_MET',
@@ -354,12 +375,104 @@ describe('P0 review fixes: every reason the group planner gives the Editor has w
     // workflow-runs/execution-groups.ts: the downgrades pushed for a wallet the browser read (WALLET_CAPABILITIES_ASSUMED is for requesters only).
     for (const code of ['USER_FUNDED_CHAIN_DISABLED', 'USER_OPERATION_AAVE_SIGNED_WHEN_DUE', 'USER_OPERATION_SWAP_OUTPUT_SIGNED_WHEN_DUE', 'USER_OPERATION_BUNDLER_UNAVAILABLE',
       'WALLET_TYPED_DATA_USER_OPERATION_UNSUPPORTED', 'EVM_SMART_ACCOUNT_REQUIRED', 'WALLET_ATOMIC_BATCH_UNSUPPORTED', 'WALLET_ATOMIC_BATCH_UNKNOWN',
-      'SOLANA_DURABLE_NONCE_NOT_OFFERED', 'SOLANA_MULTI_SIGN_UNSUPPORTED', 'WORKFLOW_BINDING_RESOLVED_WHEN_DUE']) expect(EXECUTION_REASON[code], code).toEqual(expect.any(String));
+      'SOLANA_DURABLE_NONCE_NOT_OFFERED', 'SOLANA_MULTI_SIGN_UNSUPPORTED', 'WORKFLOW_BINDING_RESOLVED_WHEN_DUE', 'SOLANA_GROUP_STEP_DEPENDENT']) {
+      expect(EXECUTION_REASON[code], code).toEqual(expect.any(String));
+      expect(translate('PT', EXECUTION_REASON[code]!), code).not.toBe(EXECUTION_REASON[code]);
+    }
+    // Round 5: a Solana step spending an output of an earlier step of its own sign-all group starts a new group, signed when that output landed.
+    expect(EXECUTION_REASON.SOLANA_GROUP_STEP_DEPENDENT).toBe('A Solana step that spends what an earlier step of the same batch delivers is signed once that output '
+      + 'has landed (one more wallet prompt).');
     // A transfer of a token a batch cannot carry (a Stock Token, a token outside the catalog) runs through its own flow (user-funded/evm-calls.ts).
     expect(EXECUTION_REASON.USER_FUNDED_TRANSFER_ASSET_UNSUPPORTED).toMatch(/transfer of this token.*own review and wallet confirmation/);
     expect(translate('PT', EXECUTION_REASON.USER_FUNDED_TRANSFER_ASSET_UNSUPPORTED!)).not.toBe(EXECUTION_REASON.USER_FUNDED_TRANSFER_ASSET_UNSUPPORTED);
     expect(readFileSync(new URL('../user-funded/evm-calls.ts', import.meta.url), 'utf8')).toContain("'USER_FUNDED_TRANSFER_ASSET_UNSUPPORTED'");
     const planner = readFileSync(new URL('../workflow-runs/execution-groups.ts', import.meta.url), 'utf8');
     for (const code of ['USER_OPERATION_SWAP_OUTPUT_SIGNED_WHEN_DUE', 'WALLET_TYPED_DATA_USER_OPERATION_UNSUPPORTED']) expect(planner).toContain(`'${code}'`);
+    // Every code the planner pushes as a group downgrade, read from its source (a new one cannot ship without words here).
+    // (A value a condition compares with, e.g. `evm?.wallet !== 'INJECTED'`, is not a downgrade.)
+    const pushed = new Set([...planner.matchAll(/downgrades\.push\(([\s\S]*?)\);/g)]
+      .flatMap(m => [...m[1]!.matchAll(/(?<![!=]==\s*)'([A-Z][A-Z0-9_]+)'/g)].map(c => c[1]!)));
+    expect(pushed.size).toBeGreaterThanOrEqual(10);
+    for (const code of pushed) expect(EXECUTION_REASON[code], `planner downgrade ${code}`).toEqual(expect.any(String));
+  });
+  it('mirrors the server\'s new-preparation validity (EVM_PREPARED_TTL_MS): a fresh request is offered only while the run outlasts it', () => {
+    const ttl = /export const EVM_PREPARED_TTL_MS = (\d+) \* ([\d_]+);/.exec(readFileSync(new URL('../user-funded/groups.ts', import.meta.url), 'utf8'));
+    expect(ttl).not.toBeNull();
+    expect(BATCH_PREPARATION_VALIDITY_MS).toBe(Number(ttl![1]) * Number(ttl![2]!.replaceAll('_', '')));
+  });
+});
+
+/** The effects of the last render run once, as React would after it commits; then `ms` of (fake) time pass: the 4-second status poll reads the run. */
+async function poll(ms = 4_000) {
+  vi.useFakeTimers();
+  try {
+    const cleanups = hooks.effects.map(effect => effect?.());
+    await vi.advanceTimersByTimeAsync(ms);
+    // The poll's status answer (a resolved promise) reaches the hook before its effect is cleaned up.
+    for (let i = 0; i < 10; i++) await Promise.resolve();
+    for (const cleanup of cleanups) if (typeof cleanup === 'function') cleanup();
+  } finally { vi.useRealTimers(); }
+}
+/** A status answer whose run shows group 0 with `patch` applied. */
+const withGroup = (patch: Record<string, unknown>) => ({ ok: true, value: { view: { workflowRun: { run: { ...runView, groups: [{ ...runView.groups[0], ...patch }] } } } } });
+
+describe('round 5: a wallet answer for a group FloFi had already stopped is shown, never "not recorded yet" or dropped', () => {
+  it('its batch id refused WALLET_BATCH_ANSWERED_AFTER_STOP: the owner is told it may have executed, never "FloFi reads it back"', async () => {
+    server.authorizeGroup.mockResolvedValue({ ok: false, code: 'WALLET_BATCH_ANSWERED_AFTER_STOP' });
+    const answered = await authorizeOnce();
+    expect(walletSent).toBe(1);
+    expect(server.authorizeGroup).toHaveBeenCalledWith(APPROVAL, 0, { kind: 'EVM_WALLET_BATCH', batchId: ANSWERED });
+    expect(answered.error).toBe('WALLET_BATCH_ANSWERED_AFTER_STOP');
+    // The wallet holds the batch: it is never sent again from here.
+    expect(stored()?.sent).toEqual({ group: 0, batchId: ANSWERED, nonce: expect.any(String) });
+  });
+  it('its transactions refused WALLET_BATCH_ANSWERED_AFTER_STOP: shown, never dropped silently', async () => {
+    server.report.mockResolvedValue({ ok: false, code: 'WALLET_BATCH_ANSWERED_AFTER_STOP' });
+    const reported = await authorizeOnce();
+    expect(server.report).toHaveBeenCalledWith(APPROVAL, 0, [HASH], false);
+    expect(reported.error).toBe('WALLET_BATCH_ANSWERED_AFTER_STOP');
+  });
+});
+
+describe('round 5: a USER_FUNDED_PREPARED_STILL_VALID refusal names its group and is retired once that group was answered', () => {
+  /** The first request sends nothing (a failed network switch); the group's next preparation is refused: the batch prepared before is still valid. */
+  async function refusedStillValid() {
+    browser.send.mockImplementationOnce(sendThen(async () => { throw new Error('WALLET_WRONG_NETWORK'); }));
+    const first = await authorizeOnce();
+    server.prepare.mockResolvedValue({ ok: false, code: 'USER_FUNDED_PREPARED_STILL_VALID' });
+    await first.authorizeDue();
+    return render();
+  }
+  it('the refusal carries the group it is about', async () => {
+    const refused = await refusedStillValid();
+    expect(refused.error).toBe('USER_FUNDED_PREPARED_STILL_VALID');
+    expect(refused.refusedGroup).toBe(0);
+    expect(walletSent).toBe(0);
+  });
+  it('a status update showing the group still prepared keeps it; one showing it answered elsewhere (another tab, /approve) retires it', async () => {
+    await refusedStillValid();
+    await poll();
+    expect(server.status).toHaveBeenCalled();
+    expect(render().error).toBe('USER_FUNDED_PREPARED_STILL_VALID');
+    expect(render().refusedGroup).toBe(0);
+    for (const answered of [{ state: 'AUTHORIZED', signed: true }, { state: 'BLOCKED', code: 'WALLET_BATCH_OUTCOME_UNKNOWN' }]) {
+      hooks.slots = []; hooks.effects = []; storage.clear(); server.prepare.mockReset(); server.status.mockResolvedValue({ ok: true, value: proposal });
+      await refusedStillValid();
+      server.status.mockResolvedValue(withGroup(answered));
+      await poll();
+      const after = render();
+      expect(after.error, answered.state).toBeNull();
+      expect(after.refusedGroup, answered.state).toBeNull();
+    }
+  });
+  it('a later action\'s error replaces the refusal and its group; a status update never retires that error', async () => {
+    await refusedStillValid();
+    server.prepare.mockResolvedValue({ ok: false, code: 'SIMULATION_REVERTED' });
+    await render().authorizeDue();
+    expect(render().error).toBe('SIMULATION_REVERTED');
+    expect(render().refusedGroup).toBeNull();
+    server.status.mockResolvedValue(withGroup({ state: 'AUTHORIZED', signed: true }));
+    await poll();
+    expect(render().error).toBe('SIMULATION_REVERTED');
   });
 });

@@ -31,7 +31,9 @@ const WALLET_BATCH_OUTCOME_UNKNOWN = 'WALLET_BATCH_OUTCOME_UNKNOWN';
 const batchOutcomeUnknown = (run: WorkflowRunProgress) => [...run.groups ?? [], ...run.steps].some(item => item.code === WALLET_BATCH_OUTCOME_UNKNOWN);
 /**
  * BUILD-FLOFI-UNIVERSAL-WORKFLOW-002: in a user-funded run a grouped step is DELEGATED from the start (its group, not FloFi, holds it): it reads
- * "waiting for your wallet" until the owner's wallet answered for its group, then "signed in your wallet" — never "authorized" before that.
+ * "signed in your wallet" once the owner's wallet answered for its group — never "authorized" before that — and, until then, "waiting for your
+ * wallet" only while the run can still ask for it (RUNNING or ATTENTION). In a halted or ended run nothing waits for the wallet any more: an
+ * unsigned grouped step reads a neutral "not signed".
  */
 const stepState = (run: WorkflowRunProgress, step: WorkflowRunProgress['steps'][number]) => {
   // A step stopped at the run's expiry (BLOCKED) or skipped when the run ended (SKIPPED) while its wallet batch was in the owner's wallet without
@@ -39,7 +41,7 @@ const stepState = (run: WorkflowRunProgress, step: WorkflowRunProgress['steps'][
   if ((step.state === 'BLOCKED' || step.state === 'SKIPPED') && step.code === WALLET_BATCH_OUTCOME_UNKNOWN) return 'OUTCOME_UNKNOWN';
   if (run.mode !== 'USER_FUNDED' || step.state !== 'DELEGATED') return step.state;
   const group = (run.groups ?? []).find(g => g.steps[0] <= step.index && step.index <= g.steps[1]);
-  return group?.signed ? 'GROUP_SIGNED' : 'GROUP_WAITING';
+  return group?.signed ? 'GROUP_SIGNED' : run.state === 'RUNNING' || run.state === 'ATTENTION' ? 'GROUP_WAITING' : 'GROUP_NOT_SIGNED';
 };
 /**
  * A HALTED run is worded by how it stopped (the server decides from its records): partial, nothing sent, or neither claimed. Without the

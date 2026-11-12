@@ -127,7 +127,7 @@ const walletKnows = (batchId: string) => walletBatchHashes(batchId).then(() => t
 const ANSWERED_STATES: readonly string[] = ['AUTHORIZED', 'SUBMITTED', 'UNCERTAIN', 'RECONCILED', 'FAILED'];
 /**
  * A step or group carrying WALLET_BATCH_OUTCOME_UNKNOWN (the run was stopped at its expiry or ended while a batch handed to the owner's wallet
- * had no recorded answer): it may have executed before its on-chain deadline.
+ * had no recorded answer) in a state that does not say otherwise: it may have executed before its on-chain deadline.
  */
 const batchUnanswered = (item: { readonly state: string; readonly code: string | null }) => item.code === WALLET_BATCH_OUTCOME_UNKNOWN && !ANSWERED_STATES.includes(item.state);
 /** A step's or group's state in words; one whose wallet batch may have executed unseen is never called "Not run" or "Stopped before submission". */
@@ -313,8 +313,11 @@ export function WorkflowRunPanel({ claim, approvalId, secret, onProposal, onErro
   const choosing = run.state === 'PENDING' && run.mode === null;
   const nextStep = run.nextAction === 'OWNER_SIGNS_STEP' && claim.step === null ? run.currentStep + 1 : null;
   // A run stopped at its expiry or ended while a batch it handed to the owner's wallet was never answered: that batch may have executed before
-  // its on-chain deadline.
-  const unanswered = (run.groups ?? []).some(batchUnanswered) || run.steps.some(batchUnanswered);
+  // its on-chain deadline. Any step or group carrying WALLET_BATCH_OUTCOME_UNKNOWN decides, whatever state it shows now (the server's own rule for
+  // the run's note, workflow-runs/service.ts, and the channels'): the halted or ended words then never say "before any step completed", "nothing
+  // sent" or that the reconciled steps' funds still rest in the wallet. A COMPLETED run reconciled every step, and says so.
+  const unanswered = run.state !== 'COMPLETED'
+    && ((run.groups ?? []).some(g => g.code === WALLET_BATCH_OUTCOME_UNKNOWN) || run.steps.some(s => s.code === WALLET_BATCH_OUTCOME_UNKNOWN));
   // Such a run is never "nothing sent" (badge or text), whatever a view without the server's own `halted` would suggest (fails closed to STOPPED).
   const halted = run.state === 'HALTED' ? (unanswered && haltedAs(run) === 'NOTHING_SENT' ? 'STOPPED' : haltedAs(run)) : null;
   const endable = canEndWorkflow(run, run.steps, run.groups ?? [], new Date());

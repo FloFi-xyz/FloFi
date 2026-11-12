@@ -213,8 +213,10 @@ export const portugueseWorkflowExecution: Readonly<Record<string, string>> = {
   // record; a run ended while a batch it handed out was never answered; a transfer of a token a batch cannot carry.
   'Confirm the wallet request promptly: about 10 minutes after FloFi prepares it, an on-chain deadline refuses the whole batch (your wallet would still pay the network fee).':
     'Confirme a solicitação na carteira logo: cerca de 10 minutos depois de a FloFi prepará-la, um prazo on-chain recusa o lote inteiro (sua carteira ainda pagaria a taxa de rede).',
-  'FloFi did not ask your wallet this time: the request it already prepared stays valid on chain for a few more minutes at most, and your wallet may hold it. If your wallet shows it, confirm it there; otherwise wait until it expires, then try again. FloFi never prepares a second request that could run alongside it.':
-    'A FloFi não pediu nada à sua carteira desta vez: o pedido que ela já preparou continua válido on-chain por no máximo mais alguns minutos, e sua carteira pode tê-lo. Se sua carteira mostrar o pedido, confirme-o lá; caso contrário, aguarde até ele expirar e tente de novo. A FloFi nunca prepara um segundo pedido que possa ser executado junto com ele.',
+  // Round 5: the undated words stay true once the request has expired (a banner stays on screen); an expired request this page would not ask again
+  // for points to the wallet's activity; a wallet answer for a group FloFi had already stopped; a Solana step spending an output of its own group.
+  'FloFi already prepared a request for this step that may still be open in your wallet. Confirm it there, or try again once it has expired (at most 10 minutes after it was prepared); FloFi never prepares a second one that could run alongside it.':
+    'A FloFi já preparou um pedido para esta etapa que ainda pode estar aberto na sua carteira. Confirme-o lá, ou tente de novo depois que ele expirar (no máximo 10 minutos depois de ter sido preparado); a FloFi nunca prepara um segundo pedido que possa ser executado junto com ele.',
   'FloFi did not ask your wallet this time: the request it already prepared stays valid on chain until {0}, and your wallet may hold it. If your wallet shows it, confirm it there; otherwise wait until {0}, then try again. FloFi never prepares a second request that could run alongside it.':
     'A FloFi não pediu nada à sua carteira desta vez: o pedido que ela já preparou continua válido on-chain até {0}, e sua carteira pode tê-lo. Se sua carteira mostrar o pedido, confirme-o lá; caso contrário, aguarde até {0} e tente de novo. A FloFi nunca prepara um segundo pedido que possa ser executado junto com ele.',
   'Your wallet reported a different batch for this step than the one FloFi recorded: it may have run twice. Check your wallet\'s activity; FloFi recorded only the first.':
@@ -233,4 +235,10 @@ export const portugueseWorkflowExecution: Readonly<Record<string, string>> = {
   'The request FloFi prepared expired at {0}; you can ask for a fresh one now.': 'O pedido que a FloFi preparou expirou às {0}; agora você pode pedir um novo.',
   'A transfer of this token (for example a Stock Token, or a token outside FloFi\'s catalog) runs through its own review and wallet confirmation.':
     'Uma transferência deste token (por exemplo, um Stock Token ou um token fora do catálogo da FloFi) passa pela própria revisão e confirmação na carteira.',
+  'The request FloFi prepared expired at {0}. FloFi will not ask your wallet for a fresh one: check your wallet\'s activity (it may have executed before it expired), then end the workflow.':
+    'O pedido que a FloFi preparou expirou às {0}. A FloFi não vai pedir um novo à sua carteira: verifique a atividade da sua carteira (ele pode ter sido executado antes de expirar) e depois encerre o fluxo.',
+  'Your wallet reported a batch for a step FloFi had already stopped: it may have executed. Check your wallet\'s activity; FloFi could not record it.':
+    'Sua carteira informou um lote para uma etapa que a FloFi já tinha parado: ele pode ter sido executado. Verifique a atividade da sua carteira; a FloFi não conseguiu registrá-lo.',
+  'A Solana step that spends what an earlier step of the same batch delivers is signed once that output has landed (one more wallet prompt).':
+    'Uma etapa na Solana que gasta o que uma etapa anterior do mesmo lote entrega é assinada depois que essa saída chega (um pedido a mais na carteira).',
 };

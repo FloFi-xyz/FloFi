@@ -144,7 +144,7 @@ describe('channel run notices (P0 universal execution)', () => {
       const run = runOf({ state: 'HALTED', halted, currentStep: 0, code: 'WORKFLOW_RUN_EXPIRED', nextAction: 'OWNER_DECIDES', updatedAt: entered,
         steps: [step(0, 'BLOCKED', U), step(1, 'BLOCKED', U), step(2, 'DELEGATED')], groups: [group(0, [0, 1], 'BLOCKED', U), group(1, [2, 2], 'PLANNED')] });
       expect(status(run), String(halted)).toBe('Workflow: stopped\n1. Swap — outcome unknown — it may have executed; check your wallet\'s activity\n'
-        + '2. Swap — outcome unknown — it may have executed; check your wallet\'s activity\n3. Swap — waiting for your wallet');
+        + '2. Swap — outcome unknown — it may have executed; check your wallet\'s activity\n3. Swap — not signed');
       expect(status(run, 'PT')).toMatch(/^Fluxo: interrompido\n1\. Troca — resultado desconhecido — pode ter sido executada; confira a atividade da sua carteira\n/);
       const due = notices(run);
       expect(due.find(n => n.key.endsWith(':wfr:step:0:blocked:wallet_batch_outcome_unknown'))!.text)
@@ -176,6 +176,24 @@ describe('channel run notices (P0 universal execution)', () => {
       expect(done, state).toBe(true);
       expect(due.find(n => n.key.endsWith(':wfr:ended'))!.text, state).toBe('Workflow ended. A batch was handed to your wallet and its answer never reached FloFi: it may '
         + 'have executed before its on-chain deadline. Check your wallet\'s activity.');
+    }
+  });
+
+  it('round 5 C5: a grouped step waits for the wallet only while the run can ask for it; in a halted or ended run it reads "not signed" (EN/PT)', () => {
+    const steps = [step(0, 'RECONCILED'), step(1, 'DELEGATED'), step(2, 'DELEGATED')];
+    const groups = [group(0, [0, 0], 'RECONCILED'), group(1, [1, 1], 'PLANNED'), { ...group(2, [2, 2], 'PLANNED'), strategy: 'EVM_USER_OPERATION', signed: true }];
+    for (const state of ['RUNNING', 'ATTENTION']) {
+      const run = runOf({ state, currentStep: 1, nextAction: 'OWNER_SIGNS_GROUP', steps, groups });
+      expect(status(run), state).toMatch(/\n2\. Swap — waiting for your wallet\n3\. Swap — signed in your wallet$/);
+      expect(status(run, 'PT'), state).toMatch(/\n2\. Troca — aguardando a sua carteira\n3\. Troca — assinada na sua carteira$/);
+    }
+    for (const [state, halted] of [['HALTED', 'PARTIAL'], ['CANCELLED', null], ['EXPIRED', null], ['FAILED', null]] as const) {
+      const run = runOf({ state, halted, currentStep: 1, nextAction: state === 'HALTED' ? 'OWNER_DECIDES' : 'NONE', steps, groups });
+      const en = status(run), pt = status(run, 'PT');
+      expect(en, state).toMatch(/\n2\. Swap — not signed\n3\. Swap — signed in your wallet$/);
+      expect(pt, state).toMatch(/\n2\. Troca — não assinada\n3\. Troca — assinada na sua carteira$/);
+      expect(en, state).not.toContain('waiting for your wallet');
+      expect(pt, state).not.toContain('aguardando a sua carteira');
     }
   });
 

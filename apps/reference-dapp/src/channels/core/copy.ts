@@ -174,7 +174,7 @@ const RUN_STATE_EN: Readonly<Record<string, string>> = { PENDING: 'waiting for y
   HALTED: 'stopped', HALTED_PARTIAL: 'partially completed', HALTED_NOTHING_SENT: 'stopped before anything was sent', HALTED_STOPPED: 'stopped', FAILED: 'failed',
   ATTENTION: 'needs attention', CANCELLED: 'ended', EXPIRED: 'expired' };
 const STEP_STATE_EN: Readonly<Record<string, string>> = { PENDING: 'waiting', READY: 'ready for your signature', AWAITING_OWNER: 'in your wallet', DELEGATED: 'authorized',
-  GROUP_WAITING: 'waiting for your wallet', GROUP_SIGNED: 'signed in your wallet', OUTCOME_UNKNOWN: 'outcome unknown — it may have executed; check your wallet\'s activity',
+  GROUP_WAITING: 'waiting for your wallet', GROUP_SIGNED: 'signed in your wallet', GROUP_NOT_SIGNED: 'not signed', OUTCOME_UNKNOWN: 'outcome unknown — it may have executed; check your wallet\'s activity',
   RECONCILED: 'reconciled ✅', FAILED: 'failed', UNCERTAIN: 'outcome pending', SKIPPED: 'not run', BLOCKED: 'stopped before submission' };
 const ACTION_EN: Readonly<Record<string, string>> = { swap: 'Swap', bridge: 'Bridge', supply: 'Supply', borrow: 'Borrow', repay: 'Repay', withdraw: 'Withdraw',
   add_liquidity: 'Add liquidity', transfer: 'Transfer', lending_composition: 'Lending composition' };
@@ -182,7 +182,7 @@ const RUN_STATE_PT: Readonly<Record<string, string>> = { PENDING: 'esperando voc
   HALTED: 'interrompido', HALTED_PARTIAL: 'parcialmente concluído', HALTED_NOTHING_SENT: 'interrompido antes de qualquer envio', HALTED_STOPPED: 'interrompido', FAILED: 'falhou',
   ATTENTION: 'requer atenção', CANCELLED: 'encerrado', EXPIRED: 'expirado' };
 const STEP_STATE_PT: Readonly<Record<string, string>> = { PENDING: 'em espera', READY: 'pronta para sua assinatura', AWAITING_OWNER: 'na sua carteira', DELEGATED: 'autorizada',
-  GROUP_WAITING: 'aguardando a sua carteira', GROUP_SIGNED: 'assinada na sua carteira', OUTCOME_UNKNOWN: 'resultado desconhecido — pode ter sido executada; confira a atividade da sua carteira',
+  GROUP_WAITING: 'aguardando a sua carteira', GROUP_SIGNED: 'assinada na sua carteira', GROUP_NOT_SIGNED: 'não assinada', OUTCOME_UNKNOWN: 'resultado desconhecido — pode ter sido executada; confira a atividade da sua carteira',
   RECONCILED: 'reconciliada ✅', FAILED: 'falhou', UNCERTAIN: 'resultado pendente', SKIPPED: 'não executada', BLOCKED: 'parada antes do envio' };
 const ACTION_PT: Readonly<Record<string, string>> = { swap: 'Troca', bridge: 'Ponte entre redes', supply: 'Depósito', borrow: 'Empréstimo', repay: 'Reembolso', withdraw: 'Saque',
   add_liquidity: 'Liquidez', transfer: 'Transferência', lending_composition: 'Composição de empréstimo' };

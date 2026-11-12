@@ -223,3 +223,29 @@ describe('round 4 U2: a run stopped at its expiry with a batch handed out and ne
     expect(render(answered)).not.toContain('may have executed');
   });
 });
+
+describe('round 5 C4: a step or group carrying WALLET_BATCH_OUTCOME_UNKNOWN words the halted or ended run as "may have executed", whatever its state', () => {
+  const OUTCOME_UNKNOWN = 'WALLET_BATCH_OUTCOME_UNKNOWN';
+  const NOTE = 'A batch was handed to your wallet and its answer never reached FloFi: it may have executed before it expired. Check your wallet&#x27;s activity.';
+  // A view recorded before the server refused answers after a stop: the code stays on items that show an answered state.
+  const answered = { mode: 'USER_FUNDED', code: 'WORKFLOW_RUN_EXPIRED', steps: [{ ...step(0, 'FAILED'), code: OUTCOME_UNKNOWN }, { ...step(1, 'FAILED'), code: OUTCOME_UNKNOWN }],
+    groups: [group({ state: 'FAILED', code: OUTCOME_UNKNOWN, signed: true })] };
+  it('halted: the badge and words never say "nothing sent" or "before any step completed" next to the note (EN/PT)', () => {
+    for (const halted of ['STOPPED', 'NOTHING_SENT', null] as const) {
+      const html = render(claim({ ...answered, state: 'HALTED', nextAction: 'OWNER_DECIDES', halted, resumable: false }));
+      expect(html, String(halted)).toContain('<span class="status-badge info">Stopped</span>');
+      expect(html).toContain('Stopped. FloFi submits nothing more of this workflow; you decide what happens next.');
+      expect(html).toContain(NOTE);
+      expect(html).not.toMatch(/nothing sent|Stopped before anything was sent|Stopped before any step completed/i);
+      const pt = render(claim({ ...answered, state: 'HALTED', nextAction: 'OWNER_DECIDES', halted, resumable: false }), 'PT');
+      expect(pt).toContain('Parado. A FloFi não envia mais nada deste fluxo');
+      expect(pt).toContain('ele pode ter sido executado antes de expirar');
+      expect(pt).not.toMatch(/nada enviado|Parado antes de qualquer/);
+    }
+  });
+  it('ended: the note says the batch may have executed; a completed run never does', () => {
+    expect(render(claim({ ...answered, state: 'CANCELLED', nextAction: 'NONE' }))).toContain(NOTE);
+    expect(render(claim({ ...answered, state: 'COMPLETED', nextAction: 'NONE', steps: answered.steps.map(s => ({ ...s, state: 'RECONCILED' })),
+      groups: [group({ state: 'RECONCILED', code: OUTCOME_UNKNOWN, signed: true })] }))).not.toContain('may have executed');
+  });
+});
