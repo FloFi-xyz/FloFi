@@ -122,6 +122,10 @@
 .admin-form{display:flex;flex-direction:column;gap:12px}
 .admin-form-row{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:12px}
 .admin-actions{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.admin-flight-history{max-height:340px;overflow:auto}
+.admin-flight-console{display:flex;flex-direction:column;gap:20px}
+.admin-flight-email{overflow-wrap:anywhere;min-width:200px;white-space:normal}
+.admin-flight-console .admin-button,.admin-flight-console .admin-field > input,.admin-flight-console .admin-field > select{min-height:44px}
 .admin-diff{font-size:.82rem;color:var(--a-muted)}
 
 @media (max-width:900px){

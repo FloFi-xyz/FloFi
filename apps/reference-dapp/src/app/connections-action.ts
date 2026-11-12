@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 'use server';
+import { withFlightAccess } from '../server/flight-access';
 /**
  * BUILD-MCP-002: server actions of `/connections`, where the owner of a pseudonymous FloFi account (the browser that holds the
  * OAuth consent cookie) manages what MCP clients may see: wallet links (create with a fresh wallet proof and an explicit click;
@@ -41,10 +42,14 @@ async function viewOf(state: McpState, account: string | null): Promise<Connecti
 }
 
 export async function connectionsView(): Promise<Result<ConnectionsView>> {
+  return withFlightAccess(async () => {
   try { const { state, account } = await context(); return { ok: true, value: await viewOf(state, account) }; } catch (cause) { return failure(cause); }
+
+  });
 }
 /** Links the wallet proven in THIS browser (server-verified session) to the account of THIS browser. The click is the consent. */
 export async function linkProvenWallet(namespace: 'eip155' | 'solana'): Promise<Result<ConnectionsView>> {
+  return withFlightAccess(async () => {
   try {
     const { state, account } = await context();
     if (!account) fail('MCP_ACCOUNT_REQUIRED');
@@ -53,20 +58,28 @@ export async function linkProvenWallet(namespace: 'eip155' | 'solana'): Promise<
     if (!linked.ok) fail(linked.code);
     return { ok: true, value: await viewOf(state, account) };
   } catch (cause) { return failure(cause); }
+
+  });
 }
 export async function revokeWalletLink(linkId: string): Promise<Result<ConnectionsView>> {
+  return withFlightAccess(async () => {
   try {
     const { state, account } = await context();
     if (!account) fail('MCP_ACCOUNT_REQUIRED');
     if (typeof linkId !== 'string' || !/^wlk_[a-z2-7]{26}$/.test(linkId) || !await state.links.revoke(account, linkId, new Date())) fail('WALLET_LINK_NOT_FOUND');
     return { ok: true, value: await viewOf(state, account) };
   } catch (cause) { return failure(cause); }
+
+  });
 }
 export async function withdrawApproval(approvalId: string): Promise<Result<ConnectionsView>> {
+  return withFlightAccess(async () => {
   try {
     const { state, account } = await context();
     if (!account) fail('MCP_ACCOUNT_REQUIRED');
     if (typeof approvalId !== 'string' || !/^apr_[a-z2-7]{26}$/.test(approvalId) || !await state.handoffs.revoke(approvalId, account, new Date())) fail('APPROVAL_NOT_FOUND');
     return { ok: true, value: await viewOf(state, account) };
   } catch (cause) { return failure(cause); }
+
+  });
 }

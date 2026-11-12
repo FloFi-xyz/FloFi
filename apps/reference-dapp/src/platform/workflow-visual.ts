@@ -17,7 +17,7 @@ import { ROUTER_NETWORK_OPTIONS } from '../domain/router-authoring';
 import { UNIVERSAL_NETWORKS } from '@defi-workflow-engine/workflow-contracts';
 import { workflowSteps, type WorkflowStep } from '../domain/workflow-steps';
 import { semanticWorkflowHash, type WorkflowComposition } from '../engine/strategy-engine';
-import { workflowPlan } from '../mcp/execution.ts';
+import { strategyFlow } from '../mcp/simulation.ts';
 
 export const WORKFLOW_VISUAL_VERSION = 1;
 export type VisualAction = 'SWAP' | 'BRIDGE' | 'SUPPLY' | 'BORROW' | 'REPAY' | 'WITHDRAW' | 'ADD_LIQUIDITY' | 'TRANSFER' | 'OTHER';
@@ -163,7 +163,11 @@ export function workflowVisualModel(workflow: WorkflowComposition): WorkflowVisu
   const parts = workflow.steps.map(c => partOf(c.workflow, c.context));
   const extra: VisualWarning[] = [];
   if (workflow.steps.some(c => c.strategy.action === 'lending_composition')) extra.push('DEBT_REMAINS');
-  if (workflow.steps.length > 1) extra.push(workflowPlan(workflow).kind === 'SEQUENTIAL' ? 'SEQUENCE_STEP_BY_STEP' : 'SEQUENCE_NOT_EXECUTABLE');
+  // Keep the presentation model free of MCP runtime/backend closure (Channel Core boundary). Same SEQUENTIAL rule as `workflowPlan`.
+  if (workflow.steps.length > 1) {
+    const sequential = workflow.steps.every(c => c.strategy.action === 'lending_composition' || strategyFlow(c.strategy) !== null);
+    extra.push(sequential ? 'SEQUENCE_STEP_BY_STEP' : 'SEQUENCE_NOT_EXECUTABLE');
+  }
   return assemble(parts, workflow.workflowHash, workflow.fundsClass, extra);
 }
 /** The visual model of one canonical IR (e.g. a FloFi-authored workflow), bound to its `semanticWorkflowHash`. */

@@ -446,6 +446,33 @@ opens: the Gate closed copy says "Boarding starts tomorrow"), and never move `FL
 (addresses that joined in between are on the next flight's list and are not promoted). After a move, run `flight-admin.ts stats` and
 re-run `create-batch` for any boarding group planned against the old dates (a group opening before boarding boards when boarding opens).
 
+## 5n. Flight FloFi launch: email, access links, public cards (BUILD-FLOFI-FLIGHT-LAUNCH-001) — release: [RELEASE-FLIGHT-LAUNCH-0024.md](RELEASE-FLIGHT-LAUNCH-0024.md), runbook: [FLIGHT-EMAIL-RESEND.md](FLIGHT-EMAIL-RESEND.md)
+
+Every variable below is **server-only** (never `NEXT_PUBLIC_`); values are never printed or logged.
+
+| Variable | Where | Required | Meaning |
+| --- | --- | --- | --- |
+| `FLOFI_FLIGHT_ACCESS_SECRET` | Vercel Production **and** Railway worker (the same value) | Yes, for access links, codes and unsubscribe | ≥ 32 random characters. Derives each Email 3 link and code and signs unsubscribe links (HMAC); the database keeps only digests. Without it the access and unsubscribe routes answer `FLIGHT_UNAVAILABLE` and the worker sends nothing (fail closed). Rotating it voids every unused link and code (a new one is one request away). |
+| `FLOFI_FLIGHT_EMAIL` | Railway worker | `enabled` to send | Loads campaign email delivery on `main.ts worker` (its own 15-second cycle). Unset: no email is sent; nothing else changes. |
+| `RESEND_API_KEY` | Railway worker only (and an operator shell for `email-send-due`) | Yes, to send | The Resend key (`re_…`). A full-access key lets the worker verify the domain through the API; a sending-only key needs `FLOFI_RESEND_DOMAIN_ATTESTED`. Never on Vercel (the web never sends). |
+| `FLOFI_RESEND_DOMAIN_ATTESTED` | Railway worker | Only with a sending-only key | `flofi.xyz`: the operator attests the domain shows **Verified** in the Resend dashboard. Without it (and without a full-access key) the worker logs `flight.email.domain_not_ready` and sends nothing. |
+| `FLOFI_EMAIL_FROM` | Railway worker | No | Default `FloFi <hello@flofi.xyz>` (must be an `@flofi.xyz` address). |
+| `FLOFI_EMAIL_REPLY_TO` | Railway worker | No | Default `flofi.xyz@gmail.com`. |
+| `FLOFI_PUBLIC_ORIGIN` | Railway worker | No | Default `https://flofi.xyz`: where links and images in emails point. |
+| `FLOFI_EMAIL_DAILY_LIMIT` / `FLOFI_EMAIL_MONTHLY_LIMIT` | Railway worker (and operator shell) | No | Default 100 / 3000 (Resend free plan). Confirm the account's real limits in the Resend dashboard before launch. |
+| `FLOFI_EMAIL_EXTERNAL_DAILY_RESERVE` / `…_MONTHLY_RESERVE` | Railway worker | No | Room kept for emails sent outside FloFi from the same Resend account (tests, other tools). Default 0. |
+| `FLOFI_EMAIL_PER_SECOND` | Railway worker | No | Default 2: pacing under Resend's per-second request limit (a 429 is retried later). |
+| `FLOFI_FLIGHT_CREATORS_OPEN_AT` | Vercel Production and Railway worker | No | Default `2026-11-11T14:00:00-03:00`: the creators' four-hour test flight (TEST card) and the Email 6 test-flight time. |
+| `FLOFI_FLIGHT_EVE_EMAIL_AT` | Railway worker (and Vercel, for one calendar) | No | Default `2026-11-11T20:00:00-03:00`: when Email 2 is enqueued for the beta list. Must be before boarding. |
+
+The calendar variables of §5m (`FLOFI_FLIGHT_LIST_CLOSES_AT`, `FLOFI_FLIGHT_BOARDING_OPENS_AT`) must also be set on the **Railway worker**
+whenever they are set on Vercel: the worker schedules Email 2 and Email 3 and writes the dates into emails from its own environment. A refused
+calendar disables email delivery (`FLIGHT_CALENDAR_INVALID`), like the page.
+
+What does **not** change: `/app`, sign-in, wallets, simulation, review and execution are not gated by the campaign; no campaign variable is read
+by any financial flow. Stopping campaign email without touching the product: `flight-admin.ts email-pause` (immediate, no deploy), or unset
+`FLOFI_FLIGHT_EMAIL` on the worker.
+
 ## 6. Platform-provided (read, never set by hand)
 
 `VERCEL` (`1`: hosted), `VERCEL_ENV` (`production`/`preview`/`development`), `VERCEL_GIT_COMMIT_REF` (Preview tenant derivation),

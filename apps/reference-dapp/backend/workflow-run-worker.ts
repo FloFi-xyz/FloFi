@@ -13,6 +13,12 @@ export async function loadWorkflowRunWorker(env: Env, db: Database, tenantId: st
   installSourceResolution();
   const [{ workflowRunWorkerParts }, { embeddedMcpRuntime }, { ownerRunReaders }] = await Promise.all([import('../src/workflow-runs/worker.ts'),
     import('../src/mcp/runtime.ts'), import('../src/server/flow-runtime.ts')]);
-  const runtime = embeddedMcpRuntime({ backend, ...ownerRunReaders(createRunQueries(db, tenantId)) });
+  const reads = ownerRunReaders(createRunQueries(db, tenantId));
+  // This durable observer has no browser session. Check the persisted run owner and use a read-only service.
+  const runtime = embeddedMcpRuntime({ backend, ...reads }, async (flow, runId, owner) => {
+    const run = await reads.run(runId, owner);
+    if (!run || run.flow !== flow) throw new Error('RUN_NOT_FOUND');
+    return backend.service(flow, tenantId, true).load(runId);
+  });
   return workflowRunWorkerParts(env, db, tenantId, logger, runtime);
 }

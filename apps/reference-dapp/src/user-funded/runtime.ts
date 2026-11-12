@@ -5,6 +5,9 @@
  * owner-signed user operations; Solana `sendTransaction` takes owner-signed transactions whose fee payer is the owner). There is no
  * FloFi-funded account anywhere in it, and nothing here can create one.
  */
+import type { Database } from '@defi-workflow-engine/cloud-runtime';
+import { betaAccessMode, createBetaAccessStore } from '../flight/beta-access.ts';
+import { flightCalendarFrom } from '../flight/campaign.ts';
 import { JUPITER_SOLANA_MAINNET } from '@defi-workflow-engine/action-registry';
 import { guarded, httpRpc } from '../delegation/chains.ts';
 import type { UserFundedFacts } from '../workflow-runs/execution-groups.ts';
@@ -29,7 +32,7 @@ export function userFundedFactsOf(env: Env): UserFundedFacts {
     solanaNonceAccounts: config.solanaNonceAccounts };
 }
 /** The deployment's user-funded facts and transports. Disabled or misconfigured: facts say why, and there are no transports at all. */
-export function userFundedRuntime(env: Env, fetchImpl: typeof fetch = fetch): UserFundedRuntime {
+export function userFundedRuntime(env: Env, fetchImpl: typeof fetch = fetch, host?: { db: Database; tenantId: string }): UserFundedRuntime {
   const config = readUserFundedConfig(env);
   if (!config.enabled) return { facts: { enabled: false, code: config.code, chains: [], bundlerChains: [], solanaNonceAccounts: false }, deps: null };
   const evm = new Map<string, ReturnType<typeof guarded>>(), bundlers = new Map<string, BundlerClient>();
@@ -41,6 +44,19 @@ export function userFundedRuntime(env: Env, fetchImpl: typeof fetch = fetch): Us
   const facts: UserFundedFacts = { enabled: true, code: null, chains: config.chains.filter(c => c.startsWith('solana:') || evm.has(c)), bundlerChains: [...bundlers.keys()],
     solanaNonceAccounts: config.solanaNonceAccounts };
   const deps: UserFundedDeps = { chains: facts.chains, evm: chain => evm.get(chain) ?? null, bundler: chain => bundlers.get(chain) ?? null,
+    submissionRefusal: async (wallet, owner = wallet) => {
+      const mode = betaAccessMode(env);
+      if (mode === 'open') return null;
+      if (mode !== 'beta') return 'BETA_ACCESS_CLOSED';
+      const { calendar } = flightCalendarFrom(env);
+      if (!host || !calendar) return 'BETA_ACCESS_UNAVAILABLE';
+      const gate = createBetaAccessStore(host, calendar, env), now = Date.now();
+      const grant = await gate.requireWallet(owner, now);
+      if (!grant.ok) return grant.code;
+      if (wallet.namespace === owner.namespace && wallet.address === owner.address) return null;
+      const payer = await gate.requireAccount(grant.accountId, now, wallet);
+      return payer.ok ? null : payer.code;
+    },
     solana: solanaUrl ? createSolanaRpc(solanaUrl, false) : null,
     jupiter: solanaEnabled ? createJupiterHttp(JUPITER_SOLANA_MAINNET.api + JUPITER_SOLANA_MAINNET.endpoint, env.JUPITER_API_KEY) : null, now: () => new Date() };
   return { facts, deps };

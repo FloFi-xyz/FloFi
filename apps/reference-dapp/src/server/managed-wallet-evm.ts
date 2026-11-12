@@ -20,6 +20,7 @@ import { ROBINHOOD_MAINNET_HARNESS, robinhoodRpcUrl } from './robinhood-mainnet.
 import { catalogNetworkOfChain, type CatalogNetworkId, type CatalogNetworkMode, type CatalogNetworkRuntime } from './catalog-networks.ts';
 import { decodeSignedEip1559, type ManagedEvmTransaction } from './managed-signing.ts';
 import type { Rpc } from './public-testnet-service.ts';
+import { assertExecutionEnabled } from './execution-guard.ts';
 
 type Env = Readonly<Record<string, string | undefined>>;
 /** Read methods this module needs (each network's read client is built with exactly these). */
@@ -53,6 +54,7 @@ export function managedEvmNetwork(chainId: unknown): CatalogNetworkRuntime | nul
 /** A JSON-RPC transport that can send one raw transaction and nothing else; an error reply is `definite` (the node refused it). */
 export function rawTransactionSender(url: string, transport: typeof fetch = fetch): SendRpc {
   return async raw => {
+    assertExecutionEnabled();
     let response: Response;
     try {
       response = await transport(url, { method: 'POST', redirect: 'error', cache: 'no-store', signal: AbortSignal.timeout(20_000),
@@ -106,6 +108,7 @@ export function createManagedWalletEvm(input: { readonly env: Env; readonly mode
      * Throws before sending (nothing left the server); after a send attempt it returns HASH or UNKNOWN, never throws.
      */
     async broadcast(chainId: unknown, raw: unknown, expected: ManagedEvmExpected): Promise<ManagedEvmBroadcast> {
+      assertExecutionEnabled(input.env);
       const { network: n, mode } = network(chainId);
       if (!n.ownerExecutionEnabled(mode, input.env)) fail('OWNER_EXECUTION_NOT_ENABLED');
       const decoded = typeof raw === 'string' ? decodeSignedEip1559(raw) : null;
@@ -117,6 +120,7 @@ export function createManagedWalletEvm(input: { readonly env: Env; readonly mode
         fail('FLOFI_WALLET_SIGNER_MISMATCH');
       const rpc = read(chainId), sender = input.send ? input.send(n, mode) : rawTransactionSender(SEND_URL[n.id](mode, input.env));
       await rpc('eth_chainId', []).catch(() => fail('FLOFI_WALLET_NETWORK_READ_FAILED'));
+      assertExecutionEnabled(input.env);
       const sent = await sender((raw as string).toLowerCase()).catch(() => ({ ok: false as const, definite: false }));
       if (sent.ok && typeof sent.result === 'string' && sent.result.toLowerCase() === decoded!.hash) return { kind: 'HASH', hash: decoded!.hash };
       // Already known, or accepted while the reply was lost: the network decides, never a second send.

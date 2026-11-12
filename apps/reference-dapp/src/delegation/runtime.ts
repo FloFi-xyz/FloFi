@@ -9,6 +9,9 @@
  * (BUILD-FLOFI-UNIVERSAL-SINGLE-AUTH-MAINNET-001), where the same split is also enforced by IAM: the API's credentials allow only
  * kms:GetPublicKey and the worker's kms:Sign on the one key ARN. `none` remains the default.
  */
+import { betaAccessMode, createBetaAccessStore } from '../flight/beta-access.ts';
+import { flightCalendarFrom } from '../flight/campaign.ts';
+import type { Owner } from './pg-store.ts';
 import type { Database } from '@defi-workflow-engine/cloud-runtime';
 import { awsCredentialsFromEnv, awsKmsSignerProvider, localDisposableSignerProvider, memorySignerProvider, type AwsCredentials,
   type DelegatedSignerProvider } from '@defi-workflow-engine/reference-executor';
@@ -18,6 +21,7 @@ import { guarded, httpRpc, type ChainTransport, type TransportPurpose } from './
 import type { DelegationConfig } from './config.ts';
 import { createPgDelegationStore, type DelegationStore } from './pg-store.ts';
 
+type Env = Readonly<Record<string, string | undefined>>;
 type Rpc = (method: string, params: readonly unknown[]) => Promise<unknown>;
 export type SignerAdmin = Pick<DelegatedSignerProvider, 'id' | 'create' | 'address' | 'destroy'>;
 export type SignerUser = Pick<DelegatedSignerProvider, 'signEvmDigest' | 'signSolanaMessage'>;
@@ -58,7 +62,15 @@ export function transportFor(config: DelegationConfig, chain: string, purpose: T
 }
 
 export type DelegationRuntime = { readonly config: DelegationConfig; readonly host: DelegationHost; readonly store: DelegationStore; readonly now: () => Date;
-  readonly seams: DelegationSeams };
-export function delegationRuntime(config: DelegationConfig, host: DelegationHost, seams: DelegationSeams = {}): DelegationRuntime {
-  return { config, host, store: createPgDelegationStore(host.db, host.tenantId), now: seams.now ?? (() => new Date()), seams };
+  readonly seams: DelegationSeams; readonly authorizeBeta: (owner: Owner) => Promise<string | null> };
+export function delegationRuntime(config: DelegationConfig, host: DelegationHost, seams: DelegationSeams = {}, env: Env = process.env): DelegationRuntime {
+  return { config, host, store: createPgDelegationStore(host.db, host.tenantId), now: seams.now ?? (() => new Date()), seams, authorizeBeta: async owner => {
+    const mode = betaAccessMode(env);
+    if (mode === 'open') return null;
+    if (mode !== 'beta') return 'BETA_ACCESS_CLOSED';
+    const { calendar } = flightCalendarFrom(env);
+    if (!calendar) return 'BETA_CONFIGURATION_INVALID';
+    const result = await createBetaAccessStore(host, calendar, env).requireWallet(owner, (seams.now?.() ?? new Date()).getTime());
+    return result.ok ? null : result.code;
+  } };
 }

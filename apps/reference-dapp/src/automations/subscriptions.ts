@@ -86,3 +86,15 @@ export async function targetsOf(db: Database, tenantId: string, owner: Owner, no
     WHERE t.tenant_id = $1 AND t.owner_namespace = $2 AND t.owner_account = $3 AND t.expires_at > $4 AND c.status = 'ACTIVE' ORDER BY t.channel`,
   [tenantId, owner.namespace, owner.address, now])).rows.map(r => ({ channel: r.channel, conversationId: r.conversation_id, expiresAt: new Date(r.expires_at) }));
 }
+/**
+ * The wallet linked to an ACTIVE Telegram conversation for automation notifications, when the link is still within its TTL.
+ * Binding proof only: it never grants Flight access or financial authority by itself.
+ */
+export async function ownerOfConversation(db: Database, tenantId: string, conversationId: string, now: Date): Promise<Owner | null> {
+  const row = (await db.query<{ owner_namespace: Owner['namespace']; owner_account: string }>(`SELECT t.owner_namespace, t.owner_account
+    FROM automation_notification_targets t
+    JOIN channel_conversations c ON c.tenant_id = t.tenant_id AND c.conversation_id = t.conversation_id
+    WHERE t.tenant_id = $1 AND t.conversation_id = $2 AND t.channel = 'TELEGRAM' AND t.expires_at > $3 AND c.status = 'ACTIVE'`,
+  [tenantId, conversationId, now])).rows[0];
+  return row ? { namespace: row.owner_namespace, address: row.owner_account } : null;
+}

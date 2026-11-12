@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 'use server';
+import { withFlightAccess, withFlightOwner } from '../server/flight-access';
 import { reportUniversalFailure } from '../server/universal-router/failure';
 import { readdir, stat } from 'node:fs/promises';
 import { isAbsolute, join } from 'node:path';
@@ -62,17 +63,27 @@ async function run<T>(ecosystem: UniversalEcosystem, method: string, args: reado
   } catch (cause) { return reportUniversalFailure(cause, 'request'); }
 }
 export async function universalRouterAvailability(): Promise<UniversalRouterMode> {
+  return withFlightAccess(async () => {
   return await cloudFlowMode(FLOW) ?? universalRouterMode(process.env);
+
+  });
 }
-export async function universalInfo() { return run('EVM', 'info', [], async s => ({ executionEnabled: s.executionEnabled })); }
+export async function universalInfo() {
+  return withFlightAccess(async () => { return run('EVM', 'info', [], async s => ({ executionEnabled: s.executionEnabled }));
+  });
+}
 /** Read-only route discovery for a pair (every provider, every answer classified). Persists nothing; binds no owner. */
 export async function universalDiscover(request: unknown): Promise<Result<DiscoveryResult>> {
+  return withFlightAccess(async () => {
   try {
     return await readBridgeDiscovery(request);
   } catch (cause) { return reportUniversalFailure(cause, 'request'); }
+
+  });
 }
 /** Read-only token facts for an explicit contract or mint (decimals and, on EVM, the token's own symbol), so a custom asset can be authored. */
 export async function universalTokenFacts(network: UniversalNetworkKey, address: string): Promise<Result<{ decimals: number; symbol: string | null }>> {
+  return withFlightAccess(async () => {
   try {
     const mode = universalRouterMode(process.env);
     if (mode === 'off') throw new Error('UNIVERSAL_ROUTER_NOT_ENABLED');
@@ -92,35 +103,71 @@ export async function universalTokenFacts(network: UniversalNetworkKey, address:
     } catch { symbol = null; }
     return { ok: true, value: { decimals, symbol } };
   } catch (cause) { return reportUniversalFailure(cause, 'request'); }
+
+  });
 }
 export async function universalSimulate(workflow: SemanticWorkflow, owner: string, destinationWallet?: string) {
+  return withFlightAccess(async () => {
   const args = destinationWallet === undefined ? [workflow, owner] : [workflow, owner, destinationWallet];
   return run(ecosystemOfAddress(owner), 'simulate', args, s => s.simulate(workflow, owner, destinationWallet));
+
+  });
 }
 export async function universalRefresh(ecosystem: UniversalEcosystem, id: string, destinationWallet?: string) {
+  return withFlightAccess(async () => {
   return run(ecosystem, 'refresh', destinationWallet === undefined ? [id] : [id, destinationWallet], s => s.refresh(id, destinationWallet));
+
+  });
 }
 export async function universalReview(ecosystem: UniversalEcosystem, id: string, commitment: string, workflow: SemanticWorkflow) {
+  return withFlightAccess(async () => {
   return run(ecosystem, 'review', [id, commitment, workflow], s => s.review(id, commitment, workflow));
+
+  });
 }
 export async function universalInvalidate(ecosystem: UniversalEcosystem, id: string, reason: 'SEMANTIC_EDIT' | 'WALLET_CHANGED' = 'SEMANTIC_EDIT') {
+  return withFlightOwner(async () => {
   return run(ecosystem, 'invalidate', reason === 'SEMANTIC_EDIT' ? [id] : [id, reason], s => s.invalidate(id, reason));
+
+  });
 }
 export async function universalBegin(ecosystem: UniversalEcosystem, id: string, owner: string, workflow: SemanticWorkflow) {
+  return withFlightAccess(async () => {
   return run(ecosystem, 'begin', [id, owner, workflow], s => s.begin(id, owner, workflow));
+
+  });
 }
-export async function universalHandoff(id: string) { return run('EVM', 'handoff', [id], s => s.handoff(id)); }
+export async function universalHandoff(id: string) {
+  return withFlightAccess(async () => { return run('EVM', 'handoff', [id], s => s.handoff(id));
+  });
+}
 export async function universalReport(id: string, result: ({ kind: 'HASH'; hash: string } | { kind: 'UNKNOWN' | 'REJECTED'; code?: string }) & { attemptId?: string }) {
+  return withFlightOwner(async () => {
   return run('EVM', 'report', [id, result], s => s.report(id, result));
+
+  });
 }
-export async function universalSubmit(id: string, signedTransaction: string) { return run('SOLANA', 'submit', [id, signedTransaction], s => s.submit(id, signedTransaction)); }
+export async function universalSubmit(id: string, signedTransaction: string) {
+  return withFlightAccess(async () => { return run('SOLANA', 'submit', [id, signedTransaction], s => s.submit(id, signedTransaction));
+  });
+}
 export async function universalWalletFailure(ecosystem: UniversalEcosystem, id: string, diagnostic: UniversalWalletDiagnostic) {
+  return withFlightOwner(async () => {
   return run(ecosystem, 'walletFailure', [id, diagnostic], s => s.walletFailure(id, diagnostic));
+
+  });
 }
-export async function universalObserve(ecosystem: UniversalEcosystem, id: string) { return run(ecosystem, 'observe', [id], s => s.observe(id)); }
-export async function universalStatus(ecosystem: UniversalEcosystem, id: string): Promise<Result<UniversalRecord>> { return run(ecosystem, 'status', [id], s => s.load(id)); }
+export async function universalObserve(ecosystem: UniversalEcosystem, id: string) {
+  return withFlightOwner(async () => { return run(ecosystem, 'observe', [id], s => s.observe(id));
+  });
+}
+export async function universalStatus(ecosystem: UniversalEcosystem, id: string): Promise<Result<UniversalRecord>> {
+  return withFlightOwner(async () => { return run(ecosystem, 'status', [id], s => s.load(id));
+  });
+}
 /** The signed-in wallet's universal runs, newest first, so a run can be recovered from any browser. */
 export async function universalRuns(ecosystem: UniversalEcosystem): Promise<Result<UniversalRunSummary[]>> {
+  return withFlightAccess(async () => {
   let principal: string | null;
   try { principal = await principalFor(ecosystem); } catch (cause) { return reportUniversalFailure(cause, 'request'); }
   if (!principal) return { ok: false, code: 'WALLET_SESSION_REQUIRED' };
@@ -140,4 +187,6 @@ export async function universalRuns(ecosystem: UniversalEcosystem): Promise<Resu
     }
     return { ok: true, value: runs };
   } catch (cause) { return reportUniversalFailure(cause, 'request'); }
+
+  });
 }

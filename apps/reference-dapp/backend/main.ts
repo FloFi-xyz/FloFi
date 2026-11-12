@@ -115,13 +115,13 @@ async function main(): Promise<void> {
     let routes = backend.routes;
     if (process.env.FLOFI_AUTOMATIONS === 'enabled') {
       const extra = await import('./automation-api.ts').then(m => m.loadAutomationApi(process.env, { db, tenantId: config.tenantId, backend, logger })).catch(() => null);
-      if (extra) { routes = [...routes, ...extra]; logger.info('automation.api_enabled', { routes: extra.map(r => r.name).join(',') }); }
+      if (extra) { routes = [...routes, ...backend.protectRoutes(extra)]; logger.info('automation.api_enabled', { routes: extra.map(r => r.name).join(',') }); }
       else logger.error('automation.api_disabled', { error_code: 'AUTOMATION_API_LOAD_FAILED' });
       // BUILD-AUTOMATION-002: owner operations of delegated execution (passkeys, Credentials, authorizations). Off by default; they never
       // sign or submit (no executor on the API).
       if (process.env.FLOFI_DELEGATION === 'enabled') {
         const delegation = await import('./delegation-api.ts').then(m => m.loadDelegationApi(process.env, { db, tenantId: config.tenantId, logger })).catch(() => null);
-        if (delegation) { routes = [...routes, ...delegation]; logger.info('delegation.api_enabled', { routes: delegation.map(r => r.name).join(',') }); }
+        if (delegation) { routes = [...routes, ...backend.protectRoutes(delegation)]; logger.info('delegation.api_enabled', { routes: delegation.map(r => r.name).join(',') }); }
         else logger.error('delegation.api_disabled', { error_code: 'DELEGATION_API_LOAD_FAILED' });
       }
     }
@@ -161,6 +161,18 @@ async function main(): Promise<void> {
       .catch(() => ({ disabled: 'WORKFLOW_RUN_WORKER_LOAD_FAILED', reason: null }));
     if ('disabled' in parts) logger.error('workflow_run.worker_disabled', { error_code: parts.disabled, reason: parts.reason ?? undefined });
     else { workflowRuns = parts; logger.info('workflow_run.worker_enabled', { kinds: Object.keys(parts.handlers).join(',') }); }
+  }
+  // BUILD-FLOFI-FLIGHT-LAUNCH-001: Flight FloFi campaign email (Resend), opt-in (FLOFI_FLIGHT_EMAIL=enabled). Its own cycle beside the queue;
+  // a missing setting disables only it (logged with a fixed code). It never touches workflows, wallets or execution. Off: nothing changes.
+  if (process.env.FLOFI_FLIGHT_EMAIL === 'enabled') {
+    const parts = await import('./flight-email-worker.ts').then(m => m.loadFlightEmailWorker(process.env, db, config.tenantId, logger))
+      .catch(() => ({ disabled: 'FLIGHT_EMAIL_WORKER_LOAD_FAILED' }));
+    if ('disabled' in parts) logger.error('flight.email.worker_disabled', { error_code: parts.disabled });
+    else {
+      parts.start();
+      process.once('SIGTERM', () => { void parts.stop(); }); process.once('SIGINT', () => { void parts.stop(); });
+      logger.info('flight.email.worker_enabled', {});
+    }
   }
   const handlers = { ...automations?.handlers, ...delegation?.handlers, ...workflowRuns?.handlers, ...backend.handlers };
   // BUILD-CLOUD-PARITY-001: a worker serves only its deployment's tenant, so a shared database never mixes deployments' runs.

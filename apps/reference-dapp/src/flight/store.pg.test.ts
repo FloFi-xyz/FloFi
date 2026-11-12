@@ -10,6 +10,7 @@ import { ensureTenant } from '@defi-workflow-engine/cloud-runtime';
 import { createTestDatabase, type TestDatabase } from '../../../../packages/cloud-runtime/test/pg-harness.ts';
 import type { SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
 import { FLIGHT_BOARDING_OPENS_AT, FLIGHT_LIST_CLOSES_AT, flightRoute } from './campaign';
+import { createAccessStore } from './access-store';
 import { createFlightStore, FLIGHT_RETENTION, JOIN_LIMITS, NO_CLIENT, type FlightStore } from './store';
 
 type Node = SemanticWorkflow['nodes'][number];
@@ -23,6 +24,13 @@ async function newAccount(): Promise<string> {
   const accountId = `acct_${hex(16)}`;
   await t.db.query('INSERT INTO flofi_accounts (tenant_id, account_id) VALUES ($1, $2)', ['default', accountId]);
   return accountId;
+}
+/** Real access proof in the disposable database; OAuth email matching alone is intentionally insufficient. */
+async function proveEmail(accountId: string, email: string, tenantId = 'default') {
+  const access = createAccessStore({ db: t.db, tenantId }, randomBytes(32).toString('base64url'));
+  const entry = (await t.db.query<{ entry_id: string }>('SELECT entry_id FROM flight_list_entries WHERE tenant_id = $1 AND email = $2', [tenantId, email])).rows[0]!;
+  const token = await access.issueToken({ emailId: `fem_${hex(16)}`, entryId: entry.entry_id, codeMs: 15 * 60_000, now: BEFORE });
+  expect(await access.consumeLink({ token: token.link, accountId, client: null, now: BEFORE })).toEqual({ status: 'CLAIMED' });
 }
 const node = (nodeId: string, actionType: string, chainId: string, protocols: string[], destination?: string): Node => ({
   nodeId, actionType, actionSchemaVersion: '1.0.0', chainId, requiredCapabilities: [], adapterConstraints: { adapters: [], protocols },
@@ -50,7 +58,7 @@ describe('BUILD-FLOFI-FLIGHT-001 beta list', () => {
     expect([first.status, again.status]).toEqual(['JOINED', 'ALREADY']);
     expect((await store.counters()).onList).toBe(before + 1);
     expect((await t.db.query(`SELECT flight, language, notice FROM flight_list_entries WHERE email = 'ana@flofi-test.dev'`)).rows)
-      .toEqual([{ flight: 'FIRST', language: 'EN', notice: '2026-11-05' }]);
+      .toEqual([{ flight: 'FIRST', language: 'EN', notice: '2026-11-09' }]);
   });
 
   it('limits one client per hour without storing its address, and the database refuses a malformed address', async () => {
@@ -86,6 +94,9 @@ describe('BUILD-FLOFI-FLIGHT-001 access: list, boarding group, invite', () => {
     await store.joinList({ email: 'listed@flofi-test.dev', language: 'EN', flight: 'FIRST', client: null, now: BEFORE });
     await store.joinList({ email: 'grouped@flofi-test.dev', language: 'EN', flight: 'FIRST', client: null, now: BEFORE + 1 });
     await store.joinList({ email: 'next@flofi-test.dev', language: 'EN', flight: 'NEXT', client: null, now: FLIGHT_LIST_CLOSES_AT + 1 });
+    expect((await store.account({ accountId: listed, emails: ['listed@flofi-test.dev'], now: BOARDING })).access.kind).toBe('not_listed');
+    await proveEmail(listed, 'listed@flofi-test.dev');
+    await proveEmail(grouped, 'grouped@flofi-test.dev');
     await store.createBatch(3, Date.parse('2026-11-19T09:00:00-03:00'));
     await t.db.query(`UPDATE flight_list_entries SET batch_no = 3 WHERE email = 'grouped@flofi-test.dev'`);
     expect((await store.account({ accountId: listed, emails: ['listed@flofi-test.dev'], now: BEFORE })).access).toEqual({ kind: 'not_yet', opensAt: FLIGHT_BOARDING_OPENS_AT });
@@ -105,19 +116,30 @@ describe('BUILD-FLOFI-FLIGHT-001 access: list, boarding group, invite', () => {
     expect(await store.redeemInvite({ accountId: late, code: code!, now: BOARDING })).toBe('INVITE_USED');
     expect(await store.redeemInvite({ accountId: holder, code: spare!, now: BOARDING })).toBe('INVITE_ALREADY_HELD');
     expect((await store.account({ accountId: holder, emails: [], now: BOARDING })).access).toEqual({ kind: 'eligible', origin: 'CREATOR' });
-    // A Founding member's invites: three, usable by others, never by the member.
-    const founder = await newAccount();
-    await t.db.query(`INSERT INTO flight_invites (tenant_id, code, issuer) VALUES ('default', 'FLF-ABCD-EFGH', 'CREATOR')`);
-    expect(await store.redeemInvite({ accountId: founder, code: 'FLF-ABCD-EFGH', now: BOARDING })).toBe('REDEEMED');
+    // A Founding member's invites: three, usable by others, never by the member. Only a seat earned straight from the beta list carries
+    // them (BUILD-FLOFI-FLIGHT-LAUNCH-001): the creator above, once on board with a Founding seat, gets none.
+    await simulated(holder, 'wf-holder', swap);
+    const invited = await issue(holder, 'wf-holder');
+    expect(invited.ok && invited.pass.foundingSeat).toBeTruthy();
+    expect((await store.account({ accountId: holder, emails: [], now: BOARDING })).invites).toHaveLength(0);
+    const founder = await newAccount(), founderEmails = ['founder@flofi-test.dev'];
+    await store.joinList({ email: founderEmails[0]!, language: 'EN', flight: 'FIRST', client: null, now: BEFORE });
+    await proveEmail(founder, founderEmails[0]!);
     await simulated(founder, 'wf-founder', swap);
-    const pass = await issue(founder, 'wf-founder');
+    const pass = await issue(founder, 'wf-founder', { emails: founderEmails });
     expect(pass.ok && pass.pass.foundingSeat).toBeTruthy();
-    const invites = (await store.account({ accountId: founder, emails: [], now: BOARDING })).invites;
+    const invites = (await store.account({ accountId: founder, emails: founderEmails, now: BOARDING })).invites;
     expect(invites).toHaveLength(3);
     expect(await store.redeemInvite({ accountId: founder, code: invites[0]!.code, now: BOARDING })).toBe('ALREADY_BOARDED');
     expect(await store.redeemInvite({ accountId: late, code: invites[0]!.code, now: BOARDING })).toBe('REDEEMED');
     expect((await store.account({ accountId: late, emails: [], now: BOARDING })).access).toEqual({ kind: 'eligible', origin: 'INVITE' });
-    expect((await store.account({ accountId: founder, emails: [], now: BOARDING })).invites.filter(i => i.redeemed)).toHaveLength(1);
+    expect((await store.account({ accountId: founder, emails: founderEmails, now: BOARDING })).invites.filter(i => i.redeemed)).toHaveLength(1);
+    // The guest boards on a Founding seat too, and gets no invites of their own: invites never propagate.
+    await simulated(late, 'wf-late', swap);
+    const guest = await issue(late, 'wf-late');
+    expect(guest).toMatchObject({ ok: true, pass: { origin: 'INVITE' } });
+    expect(guest.ok && guest.pass.foundingSeat).toBeTruthy();
+    expect((await store.account({ accountId: late, emails: [], now: BOARDING })).invites).toHaveLength(0);
   });
 });
 
@@ -125,6 +147,7 @@ describe('BUILD-FLOFI-FLIGHT-001 boarding passes', () => {
   it('needs the server’s own record of a recent simulation of the workflow in Review; then issues once, with the route the server recorded', async () => {
     await store.joinList({ email: 'pilot@flofi-test.dev', language: 'EN', flight: 'FIRST', client: null, now: BEFORE });
     const pilot = await newAccount(), emails = ['pilot@flofi-test.dev'];
+    await proveEmail(pilot, emails[0]!);
     expect(await issue(pilot, 'wf-pilot', { emails })).toEqual({ ok: false, code: 'FLIGHT_SIMULATION_NOT_FOUND' });
     // A simulation of another workflow, or one older than two hours, does not count for this one.
     await simulated(pilot, 'wf-other', swap);
@@ -157,7 +180,8 @@ describe('BUILD-FLOFI-FLIGHT-001 boarding passes', () => {
   it('boards a list entry once: not again after the account is deleted, nor for a second account with the same address', async () => {
     await store.joinList({ email: 'once@flofi-test.dev', language: 'EN', flight: 'FIRST', client: null, now: BEFORE });
     const emails = ['once@flofi-test.dev'], first = await newAccount(), twin = await newAccount();
-    expect((await store.account({ accountId: twin, emails, now: BOARDING })).access).toEqual({ kind: 'eligible', origin: 'LIST' });
+    expect((await store.account({ accountId: twin, emails, now: BOARDING })).access).toEqual({ kind: 'not_listed' });
+    await proveEmail(first, emails[0]!);
     await simulated(first, 'wf-once', swap);
     expect(await issue(first, 'wf-once', { emails })).toMatchObject({ ok: true, issued: true, pass: { origin: 'LIST' } });
     // A second account proving the same address: the entry has boarded.
@@ -201,7 +225,8 @@ describe('BUILD-FLOFI-FLIGHT-001 boarding passes', () => {
     expect(await store.counters()).toMatchObject({ boarded: 130, foundingTaken: 100, foundingLeft: 0 });
     // The issuance row can never record more than 100 Founding seats.
     await expect(t.db.query(`UPDATE flight_issuance SET founding = 101, boarded = 200`)).rejects.toThrow();
-    expect((await t.db.query(`SELECT count(*)::int AS n FROM flight_invites WHERE issuer = 'FOUNDING'`)).rows).toEqual([{ n: 300 }]);
+    // Every one of them boarded by invite: none of the 100 Founding seats carries invites (BUILD-FLOFI-FLIGHT-LAUNCH-001).
+    expect((await t.db.query(`SELECT count(*)::int AS n FROM flight_invites WHERE issuer = 'FOUNDING'`)).rows).toEqual([{ n: 0 }]);
     // The table itself refuses a 101st seat or a repeated one.
     const extra = await newAccount();
     await expect(t.db.query(`INSERT INTO flight_passes (tenant_id, pass_id, account_id, origin, boarding_no, founding_seat, route, run_id)
@@ -232,8 +257,9 @@ describe('BUILD-FLOFI-FLIGHT-001 boarding passes', () => {
     await t.db.query(`DELETE FROM flofi_accounts WHERE tenant_id = 'default' AND account_id = $1`, [holder]);
     expect((await t.db.query(`SELECT count(*)::int AS n FROM flight_passes WHERE account_id = $1`, [holder])).rows).toEqual([{ n: 0 }]);
     expect((await t.db.query(`SELECT count(*)::int AS n FROM flight_simulations WHERE account_id = $1`, [holder])).rows).toEqual([{ n: 0 }]);
-    // Its Founding invites stay usable (they were given out), no longer linked to anyone; the invite it used stays used, unlinked.
-    expect((await t.db.query(`SELECT count(*)::int AS n FROM flight_invites WHERE issuer = 'FOUNDING' AND issuer_pass_id IS NULL`)).rows).toEqual([{ n: 3 }]);
+    // It boarded by invite, so it never had Founding invites; the invite it used stays used, unlinked. (A list-boarded member's invites
+    // stay usable after deletion, unlinked: see the invite test's founder and launch.pg.test.ts.)
+    expect((await t.db.query(`SELECT count(*)::int AS n FROM flight_invites WHERE issuer = 'FOUNDING' AND issuer_pass_id IS NULL`)).rows).toEqual([{ n: 0 }]);
     expect((await t.db.query(`SELECT redeemed_by, redeemed_at IS NOT NULL AS used FROM flight_invites WHERE code = $1`, [redeemed])).rows)
       .toEqual([{ redeemed_by: null, used: true }]);
     // Seat #002 and its boarding number are never issued again: the counters keep them, the next boarder gets the next number.
@@ -280,6 +306,7 @@ describe('BUILD-FLOFI-FLIGHT-001 retention and tenants', () => {
     // A default-tenant invite is unknown to the other tenant; its own list and evidence board it with seat #001 of its own count.
     const [code] = await store.issueCreatorInvites(1, BOARDING);
     expect(await other.redeemInvite({ accountId, code: code!, now: BOARDING })).toBe('INVITE_INVALID');
+    await proveEmail(accountId, 'other@flofi-test.dev', 'flight-other');
     await simulated(accountId, 'wf-other-tenant', swap, BOARDING, other);
     expect(await other.issuePass({ accountId, emails: ['other@flofi-test.dev'], workflowId: 'wf-other-tenant', handle: null, public: false, now: BOARDING }))
       .toMatchObject({ ok: true, pass: { foundingSeat: 1, boardingNo: 1 } });

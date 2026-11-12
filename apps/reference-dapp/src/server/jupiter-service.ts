@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { randomBytes } from 'node:crypto';
+import { assertExecutionEnabled } from './execution-guard.ts';
 import { isAbsolute } from 'node:path';
 import { validateAuthoringWorkflow, createBaseSepoliaReviewContext } from '@defi-workflow-engine/reference-linter';
 import { simulateJupiterSwap, assertJupiterReview, verifySignedJupiterTransaction, simulateOrcaDevnetSwap, assertOrcaDevnetReview, verifySignedOrcaDevnetTransaction,
@@ -144,6 +145,7 @@ export function createSolanaSwapService(input: { adapter: SolanaSwapAdapter; rpc
     }); },
     /** Verify the reviewed bytes (or a verified wallet guard) and the owner signature, persist both, then broadcast once. */
     async submit(id: string, signedTransaction: string): Promise<JupiterRecord> { return locked(idCheck(id), async () => {
+      assertExecutionEnabled();
       const record = await load(id);
       if (record.attempt?.state !== 'PREPARED' || record.authorization !== record.review.commitment) throw new Error(`${X}_WALLET_HANDOFF_NOT_AUTHORIZED`);
       let signed: SignedSolanaTransaction;
@@ -163,6 +165,7 @@ export function createSolanaSwapService(input: { adapter: SolanaSwapAdapter; rpc
       }
       const submitting = await save({ ...record, ...recordSolanaSwapSignature(record, signed), error: null });
       try {
+        assertExecutionEnabled();
         const result = await input.rpc('sendTransaction', [signed.transaction, { encoding: 'base64', preflightCommitment: 'confirmed', maxRetries: 10 }]);
         if (result !== signed.signature) throw new Error(`${X}_SUBMISSION_RESULT_MISMATCH`);
         return save({ ...submitting, ...solanaSwapTransition(submitting, 'PENDING') });

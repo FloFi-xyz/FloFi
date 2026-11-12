@@ -10,9 +10,12 @@
  */
 import { test as base, expect, type BrowserContext, type Locator, type Page } from '@playwright/test';
 import { generateKeyPairSync, randomBytes } from 'node:crypto';
-import { rm } from 'node:fs/promises';
+import { rm, writeFile } from 'node:fs/promises';
+import { readdirSync } from 'node:fs';
+import { createRequire } from 'node:module';
+import { build } from 'vite';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { JUPITER_SOLANA_MAINNET } from '@defi-workflow-engine/action-registry';
 import { createDatabase } from '@defi-workflow-engine/cloud-runtime';
@@ -21,6 +24,8 @@ import { createNativeTransferNode, type SemanticWorkflow } from '@defi-workflow-
 import { E2E_APP_ORIGIN } from './app-origin';
 import { openSimulationDetails } from './fixtures';
 import { authorSolanaSwap, chooseSolanaWallet, jupiterControl } from './jupiter-fixtures';
+import { PRIVY_WALLET_LIST } from '../src/accounts/privy-hosts';
+import { accountPagePolicy, cspNonce } from '../src/accounts/account-csp';
 import { createAccountStore } from '../src/accounts/account-store';
 import { claimAttempt, signingDeps } from '../src/app/flofi-wallet-signing';
 import { CATALOG_NETWORKS, localCatalogNetworkMode } from '../src/server/catalog-networks';
@@ -97,6 +102,74 @@ const privyDialog = (page: Page) => page.getByRole('dialog', { name: 'Privy conf
 /** This browser's Privy session token (the stand-in's) and whether the stand-in still accepts it. */
 const privyToken = (page: Page) => page.evaluate(() => localStorage.getItem('flofi-e2e-privy-token'));
 const privyAccepts = async (token: string | null) => (await fetch(`${PRIVY}/client/user`, { method: 'POST', body: JSON.stringify({ token }) })).ok;
+
+test('the actual pinned Privy catalog hook needs no WalletConnect permission in a clean browser', async ({ page }) => {
+  // No Privy emulator here: execute the installed SDK hook. Only its app-config context is a fixture.
+  // This isolates catalog behavior; the remaining tests cover FloFi's auth/signing flows with loopback providers.
+  const require = createRequire(import.meta.url), sdk = dirname(require.resolve('@privy-io/react-auth'));
+  const guards = join(sdk, readdirSync(sdk).find(name => /^guards-.*\.js$/.test(name))!);
+  const result = await build({ configFile: false, logLevel: 'error',
+    plugins: [{ name: 'isolated-privy-catalog', enforce: 'pre',
+      resolveId(id, importer) {
+        if (id === 'catalog-probe' || id.endsWith('/catalog-probe')) return '\0catalog-probe';
+        if (importer === guards && /privy-context-/.test(id)) return '\0catalog-context';
+      },
+      load(id) {
+        if (id === '\0catalog-context') return 'export const useAppConfig = () => ({walletConnectCloudProjectId: "fixture-only"});';
+        if (id === '\0catalog-probe') return `
+          import React, {useEffect} from ${JSON.stringify(require.resolve('react'))};
+          import {createRoot} from ${JSON.stringify(require.resolve('react-dom/client'))};
+          import {useExternalWalletListings, shouldFetchWcRegistryListings} from ${JSON.stringify(guards)};
+          export function mount(list) {
+            function Probe() {
+              const enabled = shouldFetchWcRegistryListings(list);
+              useExternalWalletListings(enabled);
+              useEffect(() => { document.body.dataset.catalog = String(enabled); }, []);
+              return null;
+            }
+            createRoot(document.getElementById('probe')).render(React.createElement(Probe));
+          }`;
+      } }],
+    define: { 'process.env.NODE_ENV': '"production"' },
+    build: { write: false, minify: false, lib: { entry: 'catalog-probe', name: 'CatalogProbe', formats: ['iife'] } } });
+  const outputs = Array.isArray(result) ? result : [result];
+  const entry = outputs.flatMap(output => 'output' in output ? output.output : []).find(output => output.type === 'chunk' && output.isEntry);
+  if (!entry || entry.type !== 'chunk') throw Error('CATALOG_PROBE_BUNDLE_MISSING');
+  expect(entry.code).toContain('fixture-only'); // Fail if SDK/CJS changes bypass the isolated context fixture.
+  const nonce = cspNonce(), policy = accountPagePolicy(nonce, {});
+  expect(policy).not.toMatch(/walletconnect/);
+  await page.route('**/__catalog-probe.js', route => route.fulfill({ contentType: 'application/javascript', body: entry.code }));
+  await page.route('**/__catalog-probe', route => route.fulfill({ contentType: 'text/html', headers: { 'content-security-policy': policy },
+    body: '<!doctype html><div id="probe"></div><script src="/__catalog-probe.js"></script>' }));
+  const list = PRIVY_WALLET_LIST;
+  const evidence: unknown[] = [];
+  const cdp = await page.context().newCDPSession(page), initiators: unknown[] = [];
+  await cdp.send('Network.enable');
+  cdp.on('Network.requestWillBeSent', event => {
+    if (event.request.url.startsWith('https://explorer-api.walletconnect.com/')) initiators.push({ url: event.request.url, initiator: event.initiator });
+  });
+  for (const legacy of [true, false]) {
+    await page.goto('/__catalog-probe');
+    await page.evaluate(() => {
+      const violations: string[] = [];
+      (window as unknown as { catalogViolations: string[] }).catalogViolations = violations;
+      document.addEventListener('securitypolicyviolation', event => violations.push(event.blockedURI));
+    });
+    await page.evaluate(list => (window as unknown as { CatalogProbe: { mount(list: string[]): void } }).CatalogProbe.mount(list),
+      legacy ? [...list, 'metamask', 'phantom', 'rabby_wallet', 'solflare', 'backpack'] : [...list]);
+    await expect(page.locator('body')).toHaveAttribute('data-catalog', String(legacy));
+    if (legacy) await expect.poll(() => page.evaluate(() => (window as unknown as { catalogViolations: string[] }).catalogViolations))
+      .toContain('https://explorer-api.walletconnect.com/v3/wallets?projectId=fixture-only');
+    // React effects and their resulting browser events have run before the negative assertion.
+    await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+    const violations = await page.evaluate(() => (window as unknown as { catalogViolations: string[] }).catalogViolations);
+    if (!legacy) expect(violations).toEqual([]);
+    evidence.push({ legacy, violations });
+  }
+  const evidencePath = test.info().outputPath('actual-sdk-catalog-csp.json');
+  await writeFile(evidencePath, JSON.stringify({ evidence, initiators }, null, 2));
+  await test.info().attach('actual-sdk-catalog-csp.json', { path: evidencePath, contentType: 'application/json' });
+});
 
 test('every product-origin document carries a fresh nonce, including public and error pages, and blocks injected inline script', async ({ page }) => {
   await setup(page, {});

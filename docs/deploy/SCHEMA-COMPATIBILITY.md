@@ -822,3 +822,45 @@ migrates. It is two commits of this build's branch, `RELEASE A: schema 0023 comp
 0023 bytes), which touch only the certificate, its fixture and this section, so they can be cherry-picked on their own, in order. Without Release A there is no application rollback
 once 0023 is applied: the previous commit refuses schema 23 (`MIGRATION_HISTORY_MISMATCH`). No production migration or release was performed
 during engineering.
+
+## 18. Certificate 0024_flight_launch
+
+| Base | Certified forward migration | SHA-256 |
+| --- | --- | --- |
+| 0023 `user_funded_groups` (`aea46318…594e`) | 0024 `flight_launch` | `a9def02ddd0ec6ccd89181dc51d9f7f50a20b9265feec8b236abd9e4a3fa7bc0` |
+
+Migration 0024 (BUILD-FLOFI-FLIGHT-LAUNCH-001, the Flight FloFi launch completion) is additive and changes no row:
+- `flight_passes` gains two nullable columns, `public_id` (12 base32 letters, the card's public link id) and `removed_at` (takedown), and a
+  partial unique index `flight_passes_public_id (tenant_id, public_id) WHERE public_id IS NOT NULL`.
+- `flight_invites` gains one nullable column `recipient` (the lower-cased address a team invite was emailed to) and a partial unique index
+  `flight_invites_recipient (tenant_id, recipient) WHERE recipient IS NOT NULL`.
+- Seven new tables: `flight_access_tokens`, `flight_access_sessions`, `flight_access_claims`, `flight_access_attempts`, `flight_emails` (the
+  email outbox), `flight_email_suppressions`, `flight_email_control`, with their own indexes. Foreign keys reference `tenants`,
+  `flight_list_entries`, `flight_passes`, `flight_invites` and `flofi_accounts` (cascading deletes from the referenced rows only).
+- No function, trigger, CHECK or index of any pre-existing relation changes.
+
+A build without 0024 (v23) runs unchanged on schema 24, including on rows written by a build with it:
+- every v23 `INSERT` into `flight_passes` and `flight_invites` names its columns and omits the new nullable ones (they stay NULL); its `SELECT`s
+  name their columns; so nothing it reads or writes depends on them;
+- it never reads the new tables. Its account deletion (a plain `DELETE` of `flofi_accounts`) cascades into `flight_access_claims`, and its
+  `erase-email` / `purge-lists` (deleting `flight_list_entries`) cascade into tokens, sessions, claims and the outbox rows linked to those
+  entries only: card emails (linked by pass), creator-invite emails and `flight_invites.recipient` keep the address, and a v23 build never
+  prunes the new tables. **Run erasure and pruning with the v24 `flight-admin.ts`, even while a web deployment is rolled back to v23**;
+- a v23 page has public counters and issues invites to invited Founding seats (the rules this build changes); nothing in the schema forces
+  either, so a rollback to v23 restores those behaviors but cannot break the database.
+
+**Locks.** `SET LOCAL lock_timeout = '5s'`. `ALTER TABLE … ADD COLUMN` of nullable columns without defaults rewrites nothing (short ACCESS
+EXCLUSIVE lock; their CHECK constraints do one validation scan of each small table). The two `CREATE UNIQUE INDEX` statements take a SHARE lock on two small campaign tables (`flight_passes`,
+`flight_invites`: at most a few thousand rows) for the duration of one index build inside the migration's transaction. Every new table is
+created empty.
+
+`flight-launch-migration.pg.test.ts` checks the exact bytes (also kept as `packages/cloud-runtime/test/fixtures/0024_flight_launch.sql`), every
+earlier row surviving unchanged, v23-style inserts on schema 24, the new constraints, the certificate, cascades and atomic rollback.
+
+**Release order.** Release A is the certificate `{ base: 0023 user_funded_groups, migrations: [0024 flight_launch] }` with the exact bytes,
+deployed from a build whose newest shipped migration is 0023 to **every** database consumer (Vercel Production, Railway API, Railway worker)
+before any build that ships 0024 migrates. It is the commit `RELEASE A: schema 0024 compatibility certificate` of this build's branch, which
+touches only the certificate, its fixture and this section, so it can be cherry-picked on its own. Release B (this build) then migrates from
+the Railway API pre-deploy. See [RELEASE-FLIGHT-LAUNCH-0024.md](./RELEASE-FLIGHT-LAUNCH-0024.md). Without Release A there is no application
+rollback once 0024 is applied: the previous build refuses schema 24 (`MIGRATION_HISTORY_MISMATCH`). No production migration or release was
+performed during engineering.

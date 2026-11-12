@@ -18,7 +18,7 @@ export function delegationWorkerParts(env: Env, db: Database, tenantId: string, 
   const config = readDelegationConfig(env);
   if (!config.enabled) return { disabled: config.code, reason: 'reason' in config ? config.reason ?? null : null };
   if (config.tenantId !== tenantId) return { disabled: 'DELEGATION_TENANT_MISMATCH', reason: null };
-  const rt = delegationRuntime(config, { db, tenantId }, seams);
+  const rt = delegationRuntime(config, { db, tenantId }, seams, env);
   const deps = executorDeps(rt, (event, fields) => logger.info(event, fields));
   if ('code' in deps) return { disabled: deps.code, reason: null };
   return { handlers: delegationHandlers(deps), sweep: () => sweepDelegation(rt) };

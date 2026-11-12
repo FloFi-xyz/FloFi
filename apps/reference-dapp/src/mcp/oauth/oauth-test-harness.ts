@@ -4,6 +4,7 @@
  * cookies, form posts, PKCE, token exchange), on a store the test chooses. CIMD documents come from an in-memory map; no
  * network, no model, no wallet.
  */
+import type { McpBetaHost } from '../beta-access.ts';
 import { createHash, randomBytes } from 'node:crypto';
 import type { FetchedDocument } from './cimd.ts';
 import { handleOAuthRequest, type OAuthLogger, type OAuthRoute } from './server.ts';
@@ -44,14 +45,14 @@ export function memoryOAuthLogger(): OAuthLogger & { readonly lines: LogLine[] }
 }
 
 /** One browser (a cookie jar) and one OAuth deployment configuration. */
-export function oauthClient(options: { env: Record<string, string>; store?: McpOAuthStore; now?: () => Date; logger?: OAuthLogger; fetched?: string[]; ip?: string }) {
+export function oauthClient(options: { env: Record<string, string>; store?: McpOAuthStore; now?: () => Date; logger?: OAuthLogger; fetched?: string[]; ip?: string; betaHost?: McpBetaHost }) {
   const origin = options.env.FLOFI_PUBLIC_ORIGIN ?? ORIGIN;
   const jar = new Map<string, string>(), ip = options.ip ?? `198.51.${randomBytes(1)[0]}.${randomBytes(1)[0]}`;
   const send = async (route: OAuthRoute, path: string, init: { method?: string; headers?: Record<string, string>; body?: string; browser?: boolean } = {}) => {
     const headers: Record<string, string> = { 'x-forwarded-for': ip, ...init.headers };
     if (init.browser !== false && jar.size) headers.cookie = [...jar].map(([k, v]) => `${k}=${v}`).join('; ');
     const response = await handleOAuthRequest(route, new Request(origin + path, { method: init.method ?? 'GET', headers, ...init.body === undefined ? {} : { body: init.body } }),
-      { env: options.env, fetcher: memoryFetcher(options.fetched), ...options.store ? { store: options.store } : {}, ...options.now ? { now: options.now } : {},
+      { env: options.env, ...options.betaHost ? { betaHost: options.betaHost } : {}, fetcher: memoryFetcher(options.fetched), ...options.store ? { store: options.store } : {}, ...options.now ? { now: options.now } : {},
         ...options.logger ? { logger: options.logger } : {} });
     if (init.browser !== false) for (const line of response.headers.getSetCookie()) {
       const [pair] = line.split(';'), index = pair!.indexOf('='), name = pair!.slice(0, index), value = pair!.slice(index + 1);

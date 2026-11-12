@@ -110,7 +110,9 @@ for (const width of [320, 390, 768, 1024, 1440, 1920]) test(`Home in English by 
   for (const item of await preview.all()) expect(await item.evaluate(node => (node as HTMLDetailsElement).open)).toBe(false);
   await expect(page.getByRole('link', { name: 'See all', exact: true })).toHaveAttribute('href', '/faq');
   const footer = page.getByRole('navigation', { name: 'Footer navigation' });
-  await expect(footer.getByRole('link')).toHaveText(['How it works', 'Docs', 'For developers', 'FAQ']);
+  await expect(footer.getByRole('link')).toHaveText(['How it works', 'Docs', 'For developers', 'FAQ', 'Terms', 'Privacy']);
+  await expect(footer.getByRole('link', { name: 'Terms', exact: true })).toHaveAttribute('href', '/terms');
+  await expect(footer.getByRole('link', { name: 'Privacy', exact: true })).toHaveAttribute('href', '/privacy');
   await expect(footer.getByRole('link', { name: 'FAQ' })).toHaveAttribute('href', '/faq');
   await expect(page.locator('footer')).toContainText('Your path through DeFi, with clarity and control.');
   await expect(page.locator('footer')).toContainText('DeFi involves risk. Simulation does not guarantee price or outcome. Review before you sign.');
@@ -183,7 +185,7 @@ test('the language preference is the product’s own: Portuguese everywhere, the
   await expect(page.getByRole('heading', { level: 1, name: HERO_PT, exact: true })).toBeVisible();
   await expect(page.getByRole('link', { name: 'Experimentar no app', exact: true })).toHaveCount(2);
   await expect(page.locator('#hoje a[href="#entrar"]')).toHaveText(['Trocar', 'Mudar de rede', 'Depositar na Aave', 'Adicionar liquidez', 'Transferir']);
-  await expect(page.getByRole('navigation', { name: 'Navegação do rodapé' }).getByRole('link')).toHaveText(['Como funciona', 'Docs', 'Para desenvolvedores', 'Perguntas frequentes']);
+  await expect(page.getByRole('navigation', { name: 'Navegação do rodapé' }).getByRole('link')).toHaveText(['Como funciona', 'Docs', 'Para desenvolvedores', 'Perguntas frequentes', 'Termos', 'Privacidade']);
   await page.getByRole('navigation', { name: 'Navegação principal' }).getByRole('link', { name: 'Entrar' }).click();
   await expect(page).toHaveURL('/login');
   await expect(page.getByRole('link', { name: 'Explorar o construtor sem conta', exact: true })).toBeVisible();

@@ -9,7 +9,7 @@
  */
 import { defineConfig } from '@playwright/test';
 import { createECDH, randomBytes, randomUUID } from 'node:crypto';
-import { existsSync } from 'node:fs';
+import { existsSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 import { E2E_APP_ORIGIN, E2E_APP_PORT, e2eNetworkScopeEnv, returningVisitor } from './e2e/app-origin';
@@ -33,6 +33,8 @@ process.env.FLOFI_PRIVY_EMULATOR_ORIGIN = PRIVY_EMULATOR_ORIGIN;
 // Workers inherit the runner environment: the spec reads the harness origin and the database from here.
 process.env.FLOFI_ACCOUNT_HARNESS_ORIGIN = ACCOUNT_HARNESS_ORIGIN;
 process.env.FLOFI_FLIGHT_E2E = 'MOCKED_LOOPBACK_ONLY';
+// BUILD-FLOFI-FLIGHT-LAUNCH-001: a fresh access secret per run (links, codes, unsubscribe); the spec derives a test email's link from it.
+process.env.FLOFI_FLIGHT_E2E_ACCESS_SECRET ??= randomBytes(32).toString('base64url');
 const parent = createECDH('prime256v1'); parent.generateKeys();
 // The MOCKED provider's OTP signing key (encryption targets and verification tokens): private half to the harness, public half to the app.
 const otpSigner = createECDH('prime256v1'); otpSigner.generateKeys();
@@ -56,6 +58,19 @@ const jupiterJournal = process.env.GRYLOO_JUPITER_JOURNAL, baseJournal = process
 if (!jupiterJournal.startsWith(join(tmpdir(), 'gryloo-build014-')) || !baseJournal.startsWith(join(tmpdir(), 'gryloo-base-001-')))
   throw Error('MAINNET_E2E_JOURNALS_MUST_BE_TEMPORARY_DIRECTORIES');
 
+// This profile freezes the test server's clock, including authentication, without a product/request clock override.
+const teamHarness = process.env.FLOFI_FLIGHT_TEAM_E2E === 'MOCKED_LOOPBACK_ONLY';
+if (process.env.FLOFI_FLIGHT_TEAM_E2E && !teamHarness) throw Error('TEAM_E2E_REQUIRES_MOCKED_LOOPBACK');
+if (teamHarness) {
+  process.env.FLOFI_FLIGHT_TEAM_CLOCK ??= join(mkdtempSync('/tmp/flofi-flight-team-'), 'clock');
+  writeFileSync(process.env.FLOFI_FLIGHT_TEAM_CLOCK, String(Date.parse('2026-11-12T11:59:00Z')));
+  process.env.FLOFI_FLIGHT_TEAM_ACCOUNTS ??= [0, 1].map(() => 'acct_' + randomBytes(16).toString('hex')).join(',');
+}
+const teamEnv = teamHarness ? {
+  NODE_OPTIONS: `--import=${join(process.cwd(), 'e2e/flight-team-clock.mjs')}`,
+  FLOFI_BETA_ACCESS: 'beta', FLOFI_BETA_EARLY_ACCESS_ACCOUNTS: process.env.FLOFI_FLIGHT_TEAM_ACCOUNTS!, FLOFI_BETA_EARLY_ACCESS_TENANT: 'default',
+} : {};
+
 export default defineConfig({
   testDir: './e2e', testMatch: 'board.spec.ts', workers: 1, fullyParallel: false, retries: 0,
   timeout: 90_000, expect: { timeout: 15_000 }, reporter: 'list', globalSetup: './e2e/cloud-runtime-setup.ts',
@@ -63,23 +78,24 @@ export default defineConfig({
     serviceWorkers: 'block', trace: 'off', screenshot: 'only-on-failure', video: 'off' },
   webServer: [
     { command: 'node e2e/account-harness.ts', url: `${ACCOUNT_HARNESS_ORIGIN}/health`, reuseExistingServer: false, timeout: 30_000,
-      env: { FLOFI_ACCOUNT_HARNESS_PORT: String(ACCOUNT_HARNESS_PORT), FLOFI_ACCOUNT_HARNESS_APP_ORIGIN: E2E_APP_ORIGIN,
+      env: { ...teamEnv, FLOFI_ACCOUNT_HARNESS_PORT: String(ACCOUNT_HARNESS_PORT), FLOFI_ACCOUNT_HARNESS_APP_ORIGIN: E2E_APP_ORIGIN,
         FLOFI_ACCOUNT_HARNESS_PARENT_PUBLIC_KEY: parent.getPublicKey('hex', 'compressed'), FLOFI_ACCOUNT_HARNESS_PARENT_ORG: parentOrg,
         FLOFI_ACCOUNT_HARNESS_GOOGLE_CLIENT: googleClient, FLOFI_ACCOUNT_HARNESS_GOOGLE_SECRET: googleSecret, FLOFI_ACCOUNT_HARNESS_APPLE_CLIENT: appleClient,
         FLOFI_ACCOUNT_HARNESS_OTP_SIGNER_PRIVATE_KEY: otpSigner.getPrivateKey('hex').padStart(64, '0'), FLOFI_ACCOUNT_HARNESS_WALLET_ORIGIN: WALLET_ORIGIN,
         FLOFI_ACCOUNT_HARNESS_WALLET_GOOGLE_CLIENT: walletGoogleClient, FLOFI_ACCOUNT_HARNESS_WALLET_GOOGLE_SECRET: walletGoogleSecret,
         FLOFI_ACCOUNT_HARNESS_WALLET_APPLE_CLIENT: walletAppleClient } },
     { command: 'node e2e/privy-emulator.ts', url: `${PRIVY_EMULATOR_ORIGIN}/health`, reuseExistingServer: false, timeout: 30_000,
-      env: { FLOFI_PRIVY_E2E_APP_ID: privyAppId, FLOFI_PRIVY_E2E_APP_SECRET: privyAppSecret } },
+      env: { ...teamEnv, FLOFI_PRIVY_E2E_APP_ID: privyAppId, FLOFI_PRIVY_E2E_APP_SECRET: privyAppSecret } },
     { command: 'node e2e/jupiter-harness.mjs --serve', url: 'http://127.0.0.1:8551', reuseExistingServer: false, timeout: 30_000 },
     { command: 'node e2e/base-mainnet-serve.ts', url: 'http://127.0.0.1:8562', reuseExistingServer: false, timeout: 30_000 },
     { command: 'pnpm --filter @defi-workflow-engine/reference-dapp start', url: E2E_APP_ORIGIN, reuseExistingServer: false, timeout: 90_000,
-      env: { PORT: String(E2E_APP_PORT), ...e2eNetworkScopeEnv(), FLOFI_RUNTIME: 'embedded', FLOFI_FLIGHT_CLOCK_HARNESS: 'MOCKED_LOOPBACK_ONLY', FLOFI_COPILOT: 'replay', NEXT_TELEMETRY_DISABLED: '1', PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1',
+      env: { ...teamEnv, PORT: String(E2E_APP_PORT), ...e2eNetworkScopeEnv(), FLOFI_RUNTIME: 'embedded', FLOFI_FLIGHT_CLOCK_HARNESS: 'MOCKED_LOOPBACK_ONLY', FLOFI_COPILOT: 'replay', NEXT_TELEMETRY_DISABLED: '1', PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1',
         // The Jupiter swap is authored through the loopback-only engineering form (/__engineering); both signing flows run only on the MOCKED
         // loopback mainnet harnesses above (each `*_HARNESS` mode always wins over a live configuration and never reads a public network).
         FLOFI_ENGINEERING_UI: 'LOOPBACK_ONLY', GRYLOO_JUPITER_HARNESS: 'MOCKED_LOOPBACK_ONLY', GRYLOO_JUPITER_JOURNAL: jupiterJournal,
         GRYLOO_BASE_MAINNET_HARNESS: 'MOCKED_LOOPBACK_ONLY', GRYLOO_BASE_JOURNAL: baseJournal,
         FLOFI_PUBLIC_ORIGIN: E2E_APP_ORIGIN, DATABASE_URL: process.env.FLOFI_E2E_DATABASE_URL!, FLOFI_SESSION_SECRET: randomBytes(32).toString('hex'),
+        FLOFI_FLIGHT_ACCESS_SECRET: process.env.FLOFI_FLIGHT_E2E_ACCESS_SECRET,
         // Privy (MOCKED loopback stand-in): the app's server verifies tokens against the stand-in's JWKS and reads users from it.
         NEXT_PUBLIC_PRIVY_APP_ID: privyAppId, PRIVY_APP_SECRET: privyAppSecret, PRIVY_API_URL: PRIVY_EMULATOR_ORIGIN, FLOFI_PRIVY_E2E: 'MOCKED_LOOPBACK_ONLY',
         FLOFI_AUTH_E2E_IDP: 'MOCKED_LOOPBACK_ONLY', FLOFI_AUTH_E2E_IDP_ORIGIN: ACCOUNT_HARNESS_ORIGIN,

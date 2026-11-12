@@ -20,6 +20,10 @@
  * (`isError`), any other method as a JSON-RPC error.
  * Every response names its request id (`x-flofi-request-id`) and every request ends with one `mcp.request` log line.
  */
+import { betaAccessMode } from '../flight/beta-access.ts';
+import { withBetaIdentity, type BetaRequestIdentity } from '../flight/beta-context.ts';
+import { mcpBetaIdentity, mcpBetaWallets, type McpBetaHost } from './beta-access.ts';
+import { mcpStateHost } from './oauth/runtime.ts';
 import { networkScope } from '../server/network-scope.ts';
 import { createMcpHandler } from '@modelcontextprotocol/server';
 import { authenticate, principalScopes, readMcpConfig, type McpOAuthPrincipal, type McpPrincipal } from './config.ts';
@@ -37,6 +41,7 @@ export type GatewayLogger = { readonly info: (event: string, fields?: Readonly<R
   readonly warn: (event: string, fields?: Readonly<Record<string, string | number | boolean | null>>) => void };
 export type GatewayOptions = { readonly env?: Env; readonly runtime?: McpRuntime; readonly logger?: GatewayLogger; readonly state?: McpState; readonly now?: () => Date;
   /** Tests: the request budget (default `MCP_REQUEST_BUDGET_MS`) and the tool margin before it. */
+  readonly betaHost?: McpBetaHost;
   readonly budgetMs?: number; readonly marginMs?: number };
 export const MCP_MAX_BODY_BYTES = 65_536;
 const HEADERS = { 'cache-control': 'no-store', 'x-content-type-options': 'nosniff' };
@@ -185,6 +190,18 @@ async function serve(request: Request, options: GatewayOptions, budget: RequestB
   catch (error) { if (isDeadlineError(error)) return reject(408, 'MCP_REQUEST_BODY_TIMEOUT'); throw error; }
   seen.body = body;
   if (body !== null && Buffer.byteLength(body, 'utf8') > MCP_MAX_BODY_BYTES) return reject(413, 'MCP_REQUEST_TOO_LARGE');
+  let betaIdentity: BetaRequestIdentity | null = null;
+  if (betaAccessMode(env) !== 'open') {
+    if (betaAccessMode(env) !== 'beta') return reject(403, 'BETA_ACCESS_CLOSED');
+    // Static credentials and legacy OAuth accounts carry no proven product account identity. No wallet allowlist is promoted to access.
+    if (principal.kind !== 'mcp-oauth') return reject(403, 'BETA_ACCESS_DENIED');
+    const account = principal.accountId, betaTenant = principal.tenantId;
+    betaIdentity = await store(async () => {
+      const host = options.betaHost ?? await mcpStateHost(env);
+      return host.tenantId === betaTenant ? mcpBetaIdentity(host, account, now.getTime(), env) : null;
+    }).catch(() => null);
+    if (!betaIdentity) return reject(403, 'BETA_ACCESS_DENIED');
+  }
   const held = principalScopes(principal), missing = body === null ? [] : requiredScopes(body, principal).filter(s => !held.includes(s));
   if (missing.length) {
     logger?.warn('mcp.insufficient_scope', { principal: principal.id, scope: missing.join(' ') });
@@ -196,7 +213,9 @@ async function serve(request: Request, options: GatewayOptions, budget: RequestB
     const linkState = state, account = principal.accountId;
     const links = await store(() => linkState.links.active(account, now)).catch(() => null);
     if (!links) { logger?.warn('mcp.oauth.store_unavailable', { request_id: budget.requestId }); return reject(503, 'MCP_OAUTH_STORE_UNAVAILABLE'); }
-    principal = Object.freeze({ ...principal, wallets: Object.freeze(links.map(l => l.address)) });
+    const productIdentity = betaIdentity;
+    const eligible = productIdentity ? await store(async () => mcpBetaWallets(options.betaHost ?? await mcpStateHost(env), productIdentity, links, now.getTime(), env)).catch(() => []) : links;
+    principal = Object.freeze({ ...principal, wallets: Object.freeze(eligible.map(l => l.address)) });
   }
   // Every runtime call of this request is bounded by its budget (an injected runtime too).
   const runtime = options.runtime ? boundedRuntime(options.runtime, budget) : deploymentRuntime(env, budget), active = principal;
@@ -223,7 +242,7 @@ async function serve(request: Request, options: GatewayOptions, budget: RequestB
     const forwarded = new Request(request.url, { method: request.method, headers: request.headers, signal: forwardedAbort.signal, ...body === null ? {} : { body } });
     // The exchange is complete once the body is read, so the per-request handler can close.
     const exchange = (async () => {
-      const response = await handler.fetch(forwarded), text = response.status === 204 || response.status === 202 ? null : await response.text();
+      const response = await withBetaIdentity(betaIdentity, () => handler.fetch(forwarded)), text = response.status === 204 || response.status === 202 ? null : await response.text();
       return { response, text };
     })();
     const done = await Promise.race([exchange, hardDeadline, clientGone]);

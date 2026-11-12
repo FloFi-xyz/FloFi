@@ -52,6 +52,6 @@ export function workflowRunWorkerParts(env: Env, db: Database, tenantId: string,
   const store = createPgWorkflowRunStore(db, tenantId);
   const delegation = env.FLOFI_DELEGATION === 'enabled' ? createPgDelegationStore(db, tenantId) : null;
   const deps: RunnerDeps = { store, runtime, delegation, policyFor: () => null, now: () => new Date(), log: (event, fields) => logger.info(event, fields),
-    userFunded: userFundedRuntime(env).deps };
+    userFunded: userFundedRuntime(env, fetch, { db, tenantId }).deps };
   return { handlers: workflowRunHandlers(deps), sweep: () => sweepWorkflowRuns(store, db, tenantId, new Date()) };
 }

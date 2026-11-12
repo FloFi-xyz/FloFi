@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 'use server';
+import { withFlightAccess } from '../server/flight-access';
 import { cardProvider, cardProviderStatus as configuredCardProvider, type SafeProviderCard } from '../server/card-provider';
 import { CARD_ENTRY_PATH, CARD_ORIGIN_PREREQUISITE, cardOrigin } from '../server/card-origin';
 
@@ -21,13 +22,17 @@ export type CardEntryStatus =
   | { readonly available: false; readonly code: string; readonly prerequisite: string }
   | { readonly available: true; readonly provider: { readonly id: string; readonly name: string }; readonly entry: string };
 export async function cardProviderStatus(): Promise<CardEntryStatus> {
+  return withFlightAccess(async () => {
   const status = configuredCardProvider();
   if (!status.available) return status;
   const card = cardOrigin(process.env);
   return card ? { available: true, provider: status.provider, entry: `${card.origin}${CARD_ENTRY_PATH}` }
     : { available: false, code: 'CARD_ORIGIN_REQUIRED', prerequisite: CARD_ORIGIN_PREREQUISITE };
+
+  });
 }
 export async function addProviderCard(input: { readonly token: string; readonly email: string }): Promise<Result<SafeProviderCard>> {
+  return withFlightAccess(async () => {
   try {
     const provider = cardProvider();
     if (!provider) return { ok: false, code: 'CARD_TOKENIZATION_PROVIDER_REQUIRED' };
@@ -35,13 +40,18 @@ export async function addProviderCard(input: { readonly token: string; readonly 
     if (keys !== 'email,token') return { ok: false, code: 'CARD_INPUT_INVALID' };
     return { ok: true, value: await provider.finalizeTokenizedCard({ token: input.token, email: input.email }) };
   } catch (cause) { return failure(cause); }
+
+  });
 }
 /** Removes the saved-card reference at the provider (the card itself is unaffected). */
 export async function removeProviderCard(binding: string): Promise<Result<null>> {
+  return withFlightAccess(async () => {
   try {
     const provider = cardProvider();
     if (!provider) return { ok: false, code: 'CARD_TOKENIZATION_PROVIDER_REQUIRED' };
     await provider.removeSavedCard({ binding });
     return { ok: true, value: null };
   } catch (cause) { return failure(cause); }
+
+  });
 }

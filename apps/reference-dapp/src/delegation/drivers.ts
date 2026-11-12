@@ -19,6 +19,7 @@
 import { erc7710, fromBase64, splDelegation, toBase64, base58Encode, compileMessageV0, serializeMessageV0, serializeSignedTransaction, u64Bytes,
   assertSupplyCap, estimateBorrow, readBorrowState, readSupplyState, reserveFlags, type SolanaInstruction, type SupplyRpc } from '@defi-workflow-engine/reference-compiler';
 import type { DelegatedSignerProvider } from '@defi-workflow-engine/reference-executor';
+import { assertExecutionEnabled } from '../server/execution-guard.ts';
 import { delegationOf, templateIndex } from './adapters.ts';
 import { delegationAavePool, delegationAaveReserve, delegationSwapProfile } from './profiles.ts';
 import type { StepBinding } from './authority.ts';
@@ -143,6 +144,7 @@ async function broadcastEvm(ctx: StepContext, submission: Readonly<Record<string
       if (await ctx.transport.rpc('eth_getTransactionByHash', [tx.hash]).catch(() => null)) continue;
       fail('SUBMISSION_STALE');
     }
+    assertExecutionEnabled();
     try { await ctx.transport.rpc('eth_sendRawTransaction', [tx.raw]); }
     catch (cause) {
       if (await ctx.transport.rpc('eth_getTransactionByHash', [tx.hash]).catch(() => null)) continue;
@@ -402,6 +404,7 @@ export const solanaFixtureDriver: StepDriver = {
       minimum: prepared.minimum, tokenAccount: prepared.tokenAccount }, calls: 1, nextNonce: null };
   },
   async broadcast(ctx, submission) {
+    assertExecutionEnabled();
     await ctx.transport.rpc('sendTransaction', [String(submission.wire), { encoding: 'base64' }]);
   },
   async reconcile(ctx, submission) {

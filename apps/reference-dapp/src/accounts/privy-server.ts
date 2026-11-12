@@ -35,6 +35,8 @@ export type PrivyUser = { readonly id: string;
   readonly identities: readonly IdentityClaim[];
   /** The most recently verified sign-in method, or null when the user has none FloFi accepts (for example SMS only). */
   readonly method: SessionMethod | null;
+  /** The exact external wallet verified by this sign-in, when Privy identifies it unambiguously. */
+  readonly loginWallet?: string;
   /**
    * When Privy last verified one of those identities (Unix seconds), or null. A FloFi session is "recently authenticated" from this time,
    * not from the access token's: Privy refreshes access tokens silently, so a fresh token alone proves no new sign-in by the person.
@@ -101,9 +103,16 @@ export function readPrivyUser(value: unknown, userId: string, options: { readonl
   if (user.id !== userId || !PRIVY_USER_ID.test(userId) || !Array.isArray(user.linked_accounts)) return fail('PRIVY_RESPONSE_INVALID');
   const identities: IdentityClaim[] = [], wallets: PrivyEmbeddedWallet[] = [];
   let method: SessionMethod | null = null, latest = -1;
-  const seen = (kind: SessionMethod, at: unknown) => {
+  let loginWallet: string | undefined;
+  const seen = (kind: SessionMethod, at: unknown, address?: string) => {
     const time = seconds(at);
-    if (time > latest || (time === latest && method !== null && METHOD_ORDER.indexOf(kind) < METHOD_ORDER.indexOf(method))) { latest = time; method = kind; }
+    if (time > latest || (time === latest && method !== null && METHOD_ORDER.indexOf(kind) < METHOD_ORDER.indexOf(method))) {
+      latest = time;
+      method = kind;
+      loginWallet = address;
+    } else if (time === latest && method === kind && address !== loginWallet) {
+      loginWallet = undefined;
+    }
   };
   for (const entry of (user.linked_accounts as unknown[]).slice(0, 64)) {
     const account = record(entry), at = account.latest_verified_at ?? account.verified_at;
@@ -128,11 +137,12 @@ export function readPrivyUser(value: unknown, userId: string, options: { readonl
         // An external wallet Privy linked after verifying its signature (SIWE / SIWS).
         const kind = ecosystem === 'evm' ? 'eip155' : 'solana';
         identities.push({ kind, subject: address, label: null });
-        seen(kind, at);
+        seen(kind, at, address);
       }
     }
   }
-  return { id: userId, identities, method, wallets, verifiedAt: method === null || latest <= 0 ? null : latest };
+  return { id: userId, identities, method, wallets, verifiedAt: method === null || latest <= 0 ? null : latest,
+    ...(loginWallet && latest > 0 ? { loginWallet } : {}) };
 }
 
 export function createPrivyServer(config: PrivyServerConfig, api: PrivyApi = officialPrivyApi(config), now = () => Date.now()) {

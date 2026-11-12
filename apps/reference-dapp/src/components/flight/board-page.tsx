@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 /**
  * BUILD-FLOFI-FLIGHT-001: flofi.xyz/board, the Flight FloFi campaign page of the team-approved Claude Artifact "Flight FloFi" (version
- * 1793892357-f7d9): one page, English by default with the EN · PT switch, the main site unchanged ("O site principal não muda").
+ * 1793892357-f7d9): one page, English by default with the ··· language menu, the main site unchanged ("O site principal não muda").
  * Order of the approved desktop board: header, hero (with the marquee), departures, how it works, Founding Members, example routes, footer
  * with the risk notice. "Board now" exists only on this page; the site keeps "Open" ("Botão 'Board now' só nesta página").
+ * BUILD-FLOFI-FLIGHT-LAUNCH-001: no aggregate count of people anywhere on the page (no "N OF 100" bar, no next seat number).
  */
 import Link from 'next/link';
 import type { FlightState } from '../../flight/http';
@@ -14,7 +15,6 @@ import styles from './flight.module.css';
 
 export function BoardPage({ language, state }: { language: 'EN' | 'PT'; state: FlightState | null }) {
   const copy = FLIGHT_COPY[language];
-  const taken = state?.counters.foundingTaken ?? 0;
   return <div className={styles.page} lang={copy.lang}>
     <a className={styles.skip} href="#top">{language === 'PT' ? 'Ir para o conteúdo' : 'Skip to content'}</a>
     <header className={styles.header}>
@@ -48,7 +48,7 @@ export function BoardPage({ language, state }: { language: 'EN' | 'PT'; state: F
             <div className={styles.miniPassBody}>
               <span className={styles.boardLabel}>{copy.pass.passenger}</span><strong>{copy.founding.cardYou}</strong>
               <span className={styles.miniRoute}>ETH → BASE</span>
-              <span className={styles.mono}>{taken < 100 ? copy.founding.cardSeat(`#${String(taken + 1).padStart(3, '0')}`) : copy.pass.middleSeat}</span>
+              <span className={styles.mono}>{state && !state.foundingOpen ? copy.pass.middleSeat : copy.founding.cardSeat}</span>
             </div>
           </div>
           <img src="/brand/flight/gota-captain.svg" alt=""/>
@@ -58,11 +58,8 @@ export function BoardPage({ language, state }: { language: 'EN' | 'PT'; state: F
           <span className={`${styles.lbl} ${styles.accentBlue}`}>{copy.founding.eyebrow}</span>
           <h2 className={styles.h2} id="founding-title">{copy.founding.title[0]}<span className={styles.accentBlue}>{copy.founding.title[1]}</span></h2>
           <ul className={styles.perks}>{copy.founding.perks.map(([title, body]) => <li key={title}><span><b>{title}</b> <span>{body}</span></span></li>)}</ul>
-          {state && <div className={styles.sectionHead}>
-            <div className={styles.progress} role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={taken} aria-label={copy.founding.taken(taken)}>
-              <div style={{ width: `${taken}%` }}/></div>
-            <span className={`${styles.meta} ${styles.muted}`}>{copy.founding.taken(taken)}</span>
-          </div>}
+          {/* No count of seats taken or left (team decision, 9 Nov 2026): only whether Founding seats are still open. */}
+          {state && <span className={`${styles.meta} ${styles.muted}`}>{state.foundingOpen ? copy.closedBeta : copy.passengerSeats}</span>}
         </div>
       </section>
       <section id="routes" className={styles.section} aria-labelledby="routes-title">
@@ -82,11 +79,12 @@ export function BoardPage({ language, state }: { language: 'EN' | 'PT'; state: F
       <div className={styles.footerTop}>
         <img src="/brand/flight/flofi-logo-on-blue.svg" alt="FloFi"/>
         <nav className={styles.footerNav} aria-label={copy.footer.nav}>
+          <Link href="/terms">{copy.footer.terms}</Link>
           <Link href="/privacy">{copy.footer.privacy}</Link>
-          <Link href="/docs/security">{copy.footer.risks}</Link>
+          <Link href="/terms#risks">{copy.footer.risks}</Link>
           <a href={FLIGHT_LINKS.discord} target="_blank" rel="noopener noreferrer">{copy.footer.discord}</a>
           <a href={FLIGHT_LINKS.x} target="_blank" rel="noopener noreferrer">{copy.footer.x}</a>
-          <LanguageSwitch language={language} label={copy.nav.language}/>
+          <LanguageSwitch language={language} label={copy.nav.language} upwards/>
         </nav>
       </div>
       <p className={styles.footerRisk}>{copy.footer.risk}</p>

@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 'use server';
+import { withFlightAccess } from '../server/flight-access';
 /** Server-side MOCKED acceptance trace for the same canonical compiler, journal and evidence. */
 import { ARBITRUM_LIQUIDITY, compileCrossChainLiquidityArtifacts, planCrossChainPreparation, sqrtRatioAtTick,
   type PoolState } from '@defi-workflow-engine/reference-compiler';
@@ -37,6 +38,7 @@ const snapshot = (run: CrossChainRun): CrossChainSnapshot => ({ stage: run.stage
 export type MockCrossChainFailure = 'NONE' | 'SWAP_REVERT' | 'MINT_REVERT' | 'MINT_UNKNOWN_CONFIRMED' |
   'MINT_UNKNOWN_INCONCLUSIVE' | 'POLICY_EXPIRED' | 'ARTIFACT_STALE' | 'LATE_BRIDGE_SETTLEMENT';
 export async function buildMockCrossChainLiquidityScenario(workflow: SemanticWorkflow, failure: MockCrossChainFailure = 'NONE') {
+  return withFlightAccess(async () => {
   const details = validateCrossChainLiquidityWorkflow(workflow);
   const nowMs = Date.now();
   const tick = details.noSwap ? details.tickUpper + 10 : Math.floor((details.tickLower + details.tickUpper) / 20) * 10;
@@ -170,4 +172,6 @@ export async function buildMockCrossChainLiquidityScenario(workflow: SemanticWor
   snapshots.push(snapshot(run));
   const evidence = buildCrossChainLiquidityEvidence(artifacts, run, new Date(nowMs).toISOString());
   return finish(run, snapshots, evidence.hash);
+
+  });
 }

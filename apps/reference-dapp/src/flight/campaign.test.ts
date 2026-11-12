@@ -7,7 +7,7 @@ import { decideAccess, FLIGHT_BOARDING_OPENS_AT, FLIGHT_DEFAULT_CALENDAR, FLIGHT
 import { flightClockHarness } from './host';
 import { rateLimitClient } from './rate-limit-client';
 import { simulationRecord } from './simulation-record';
-import { csvCell } from '../../backend/flight-admin';
+import { csvCell, parseFlightCsv, parseGoogleFormsCsv } from '../../backend/flight-admin';
 
 type Node = SemanticWorkflow['nodes'][number];
 const node = (nodeId: string, actionType: string, chainId: string, protocols: string[], destination?: string): Node => ({
@@ -19,7 +19,9 @@ describe('BUILD-FLOFI-FLIGHT-001 campaign rules', () => {
   it('keeps the approved dates: the list closes 11 Nov 23:59 BRT and boarding opens 12 Nov 9:00 BRT', () => {
     expect(new Date(FLIGHT_LIST_CLOSES_AT).toISOString()).toBe('2026-11-12T02:59:00.000Z');
     expect(new Date(FLIGHT_BOARDING_OPENS_AT).toISOString()).toBe('2026-11-12T12:00:00.000Z');
-    expect(FLIGHT_DEFAULT_CALENDAR).toEqual({ listClosesAt: FLIGHT_LIST_CLOSES_AT, boardingOpensAt: FLIGHT_BOARDING_OPENS_AT });
+    // Email 2 stays on the approved eve schedule; there is no separate creator opening.
+    expect(FLIGHT_DEFAULT_CALENDAR).toEqual({ listClosesAt: FLIGHT_LIST_CLOSES_AT, boardingOpensAt: FLIGHT_BOARDING_OPENS_AT,
+      eveEmailAt: Date.parse('2026-11-11T23:00:00Z') });
     expect([FLIGHT_LIST_CLOSES_AT - 1, FLIGHT_LIST_CLOSES_AT, FLIGHT_BOARDING_OPENS_AT - 1, FLIGHT_BOARDING_OPENS_AT].map(now => flightPhase(now)))
       .toEqual(['FINAL_CALL', 'GATE_CLOSED', 'GATE_CLOSED', 'BOARDING']);
     expect([listFor('FINAL_CALL'), listFor('GATE_CLOSED'), listFor('BOARDING')]).toEqual(['FIRST', 'NEXT', 'NEXT']);
@@ -30,15 +32,15 @@ describe('BUILD-FLOFI-FLIGHT-001 campaign rules', () => {
     expect(at({})).toEqual({ calendar: FLIGHT_DEFAULT_CALENDAR, invalid: [] });
     expect(at({ FLOFI_FLIGHT_LIST_CLOSES_AT: '  ', FLOFI_FLIGHT_BOARDING_OPENS_AT: '' })).toEqual({ calendar: FLIGHT_DEFAULT_CALENDAR, invalid: [] });
     const moved = at({ FLOFI_FLIGHT_LIST_CLOSES_AT: '2026-11-20T23:59:00-03:00', FLOFI_FLIGHT_BOARDING_OPENS_AT: '2026-11-21T12:00:00Z' }).calendar!;
-    expect(moved).toEqual({ listClosesAt: Date.parse('2026-11-21T02:59:00Z'), boardingOpensAt: Date.parse('2026-11-21T12:00:00Z') });
-    expect(at({ FLOFI_FLIGHT_BOARDING_OPENS_AT: '2026-11-12T09:00:00.5+05:30' }).calendar!.boardingOpensAt).toBe(Date.parse('2026-11-12T03:30:00.500Z'));
+    expect(moved).toMatchObject({ listClosesAt: Date.parse('2026-11-21T02:59:00Z'), boardingOpensAt: Date.parse('2026-11-21T12:00:00Z') });
+    expect(at({ FLOFI_FLIGHT_BOARDING_OPENS_AT: '2026-11-12T09:00:00.5+05:30' })).toEqual({ calendar: null, invalid: ['FLOFI_FLIGHT_BOARDING_OPENS_AT'] });
     // The phases follow the configured calendar: FINAL_CALL → GATE_CLOSED → BOARDING.
     expect([moved.listClosesAt - 1, moved.listClosesAt, moved.boardingOpensAt - 1, moved.boardingOpensAt].map(now => flightPhase(now, moved)))
       .toEqual(['FINAL_CALL', 'GATE_CLOSED', 'GATE_CLOSED', 'BOARDING']);
     expect(flightPhase(FLIGHT_BOARDING_OPENS_AT, moved)).toBe('FINAL_CALL');
     // Only one moved: the other keeps the approved instant (a pair that still closes before boarding).
     expect(at({ FLOFI_FLIGHT_BOARDING_OPENS_AT: '2026-11-13T09:00:00-03:00' }).calendar)
-      .toEqual({ listClosesAt: FLIGHT_LIST_CLOSES_AT, boardingOpensAt: Date.parse('2026-11-13T12:00:00Z') });
+      .toMatchObject({ listClosesAt: FLIGHT_LIST_CLOSES_AT, boardingOpensAt: Date.parse('2026-11-13T12:00:00Z') });
     // A local time, a date alone, anything unparsable or a date the parser would roll over (31 Nov, 30 Feb, 24:00, offset +99:99): refused,
     // and with it the whole calendar (a mistyped postponement never opens boarding on the earlier default).
     for (const bad of ['2026-11-12T09:00:00', '2026-11-12', 'tomorrow', '2026-13-40T09:00:00Z', '2026-11-31T09:00:00-03:00', '2026-02-30T09:00:00Z',
@@ -154,4 +156,14 @@ describe('BUILD-FLOFI-FLIGHT-001 campaign rules', () => {
     for (const bad of [{ event: 'simulation_ok', detail: 'founding' }, { event: 'list_join', detail: 'first' }, { event: 'share_click', detail: 'x' }, { event: 'nope' }, null])
       expect(parseClientEvent(bad)).toBeNull();
   });
+  it('parses original Google Forms timestamps and consent without inventing missing timezone or consent', () => {
+    expect(parseFlightCsv('"email","language"\r\n"a,b@example.com","PT"\r\n')).toEqual([['email', 'language'], ['a,b@example.com', 'PT']]);
+    const csv = 'email,submitted_at,language,consent\nAna@Example.com,2026-10-01T10:30:00-03:00,PT,true\n';
+    expect(parseGoogleFormsCsv(csv)).toEqual([{ email: 'Ana@Example.com', signedUpAt: Date.parse('2026-10-01T13:30:00Z'), language: 'PT', consent: true }]);
+    expect(() => parseGoogleFormsCsv(csv.replace('-03:00', ''))).toThrow('CSV_ROW_INVALID');
+    expect(() => parseGoogleFormsCsv(csv.replace(',true', ','))).toThrow('CSV_ROW_INVALID');
+    expect(() => parseGoogleFormsCsv(csv.replace('submitted_at', 'imported_at'))).toThrow('CSV_HEADER_REQUIRED');
+    expect(() => parseFlightCsv('"unfinished')).toThrow('CSV_INVALID');
+  });
+
 });

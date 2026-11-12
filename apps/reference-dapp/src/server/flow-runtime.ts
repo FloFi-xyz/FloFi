@@ -23,6 +23,8 @@ import { isHostedDeployment } from './deployment.ts';
 import { notifySimulation } from './simulation-observer.ts';
 import { serverlessPostgresConfig } from './postgres-config.ts';
 import { testNetworkFlowRefusal, testNetworkPreviewRefusal } from './test-network-flows.ts';
+import { betaAccessMode } from '../flight/beta-access.ts';
+import { currentBetaIdentity, type BetaRequestIdentity } from '../flight/beta-context.ts';
 
 type Env = Readonly<Record<string, string | undefined>>;
 export type FlowRuntimeKind = 'remote' | 'embedded' | 'local' | 'unconfigured';
@@ -106,12 +108,13 @@ export function embeddedRuntime(env: Env = process.env): Promise<EmbeddedRuntime
  * its in-process development service. `principal` is the verified wallet session (Router ownership), never browser input.
  */
 export async function cloudFlow<T>(flow: FlowName, method: string, args: readonly unknown[],
-  options: { readonly principal?: string | null; readonly env?: Env; readonly transport?: typeof fetch;
+  options: { readonly principal?: string | null; readonly env?: Env; readonly transport?: typeof fetch; readonly betaIdentity?: BetaRequestIdentity | null;
     readonly timeoutMs?: number; readonly maxAttempts?: number; readonly correlationId?: string;
     /** P0 catalog reliability: the caller stopped waiting (read-only calls only; a mutating call's outcome is then UNKNOWN, see callCloudFlow). */
     readonly signal?: AbortSignal } = {}):
   Promise<FlowResult<T> | null> {
   const env = options.env ?? process.env, kind = flowRuntimeKind(env), principal = options.principal ?? null;
+  options = { ...options, betaIdentity: options.betaIdentity ?? currentBetaIdentity() };
   // BUILD-FLOFI-MAINNET-PRODUCT-001: every server action passes here first, whichever runtime then serves it (local services included).
   const refusal = testNetworkFlowRefusal(flow, method, { ...process.env, ...env });
   if (refusal) return { ok: false, code: refusal };
@@ -120,7 +123,7 @@ export async function cloudFlow<T>(flow: FlowName, method: string, args: readonl
   let result: FlowResult<T>;
   if (kind === 'remote') result = await callCloudFlow<T>(flow, method, args, { ...options, env, principal });
   else {
-    try { result = await (await embeddedRuntime(env)).backend.callFlow(flow, method, args, undefined, principal) as FlowResult<T>; }
+    try { result = await (await embeddedRuntime(env)).backend.callFlow(flow, method, args, undefined, principal, options.betaIdentity) as FlowResult<T>; }
     catch (error) { return { ok: false, code: classified(error, 'CLOUD_RUNTIME_UNAVAILABLE') }; }
   }
   // BUILD-FLOFI-FLIGHT-001: a successful simulation is shown to the simulation observer (`simulation-observer.ts`), which cannot change it.
@@ -140,10 +143,12 @@ export async function cloudFlowMode(flow: FlowName, env: Env = process.env, tran
  * local caller must not preview through them (use `FLOFI_RUNTIME=embedded` with a database instead).
  */
 export async function cloudPreview<T>(flow: FlowName, args: readonly unknown[], options: { readonly env?: Env; readonly transport?: typeof fetch;
+  readonly betaIdentity?: BetaRequestIdentity | null;
   readonly purpose?: 'SIMULATION' | 'QUOTE'; readonly timeoutMs?: number; readonly maxAttempts?: number;
   /** P0 catalog reliability: the caller stopped waiting (e.g. the browser cancelled its quote): the API abandons the preview. */
   readonly signal?: AbortSignal } = {}): Promise<FlowResult<T> | null> {
   const env = options.env ?? process.env, kind = flowRuntimeKind(env);
+  options = { ...options, betaIdentity: options.betaIdentity ?? currentBetaIdentity() };
   const refusal = testNetworkPreviewRefusal(flow, { ...process.env, ...env });
   if (refusal) return { ok: false, code: refusal };
   if (kind === 'local') return null;
@@ -153,10 +158,10 @@ export async function cloudPreview<T>(flow: FlowName, args: readonly unknown[], 
   const stop = new AbortController();
   const signal = options.signal ? AbortSignal.any([stop.signal, options.signal]) : stop.signal;
   const read = async (): Promise<FlowResult<T>> => {
-    if (kind === 'remote') return previewCloudFlow<T>(flow, args, { env, ...options.transport ? { transport: options.transport } : {},
+    if (kind === 'remote') return previewCloudFlow<T>(flow, args, { env, betaIdentity: options.betaIdentity ?? null, ...options.transport ? { transport: options.transport } : {},
       ...options.purpose ? { purpose: options.purpose } : {}, ...options.timeoutMs === undefined ? {} : { timeoutMs: options.timeoutMs },
       ...options.maxAttempts === undefined ? {} : { maxAttempts: options.maxAttempts }, signal });
-    try { return await (await embeddedRuntime(env)).backend.previewFlow(flow, args, options.purpose, { signal,
+    try { return await (await embeddedRuntime(env)).backend.previewFlow(flow, args, options.purpose, { signal, betaIdentity: options.betaIdentity ?? null,
       ...options.timeoutMs === undefined ? {} : { deadlineMs: options.timeoutMs } }) as FlowResult<T>; }
     catch (error) { return { ok: false, code: classified(error, 'CLOUD_RUNTIME_UNAVAILABLE') }; }
   };
@@ -178,7 +183,10 @@ export async function cloudRun(runId: string, owner: string, options: { readonly
   if (kind === 'unconfigured') return { ok: false, code: 'CLOUD_RUNTIME_NOT_CONFIGURED' };
   if (kind === 'remote') return readCloudRun<CloudRun>(runId, owner, { env, ...options.transport ? { transport: options.transport } : {},
     ...options.timeoutMs === undefined ? {} : { timeoutMs: options.timeoutMs } });
-  try { return { ok: true, value: await (await embeddedRuntime(env)).run(runId, owner) }; }
+  try { const runtime = await embeddedRuntime(env);
+    const refused = await runtime.backend.authorizeBeta(currentBetaIdentity(), owner);
+    if (refused) return { ok: false, code: refused };
+    return { ok: true, value: await runtime.run(runId, owner) }; }
   catch (error) { return { ok: false, code: classified(error, 'CLOUD_RUNTIME_UNAVAILABLE') }; }
 }
 export async function cloudRunJournal(runId: string, owner: string, after: number | null, limit: number, options: { readonly env?: Env; readonly transport?: typeof fetch; readonly timeoutMs?: number } = {}):
@@ -188,7 +196,10 @@ export async function cloudRunJournal(runId: string, owner: string, after: numbe
   if (kind === 'unconfigured') return { ok: false, code: 'CLOUD_RUNTIME_NOT_CONFIGURED' };
   if (kind === 'remote') return readCloudRun<CloudJournalPage>(runId, owner, { env, journal: { after, limit }, ...options.transport ? { transport: options.transport } : {},
     ...options.timeoutMs === undefined ? {} : { timeoutMs: options.timeoutMs } });
-  try { return { ok: true, value: await (await embeddedRuntime(env)).journal(runId, owner, after, limit) }; }
+  try { const runtime = await embeddedRuntime(env);
+    const refused = await runtime.backend.authorizeBeta(currentBetaIdentity(), owner);
+    if (refused) return { ok: false, code: refused };
+    return { ok: true, value: await runtime.journal(runId, owner, after, limit) }; }
   catch (error) { return { ok: false, code: classified(error, 'CLOUD_RUNTIME_UNAVAILABLE') }; }
 }
 /** The signed-in wallet's most recent runs of one flow (`null` in local mode). */
@@ -197,7 +208,12 @@ export async function cloudRuns(flow: FlowName, principal: string, env: Env = pr
   if (kind === 'local') return null;
   if (kind === 'unconfigured') return { ok: false, code: 'CLOUD_RUNTIME_NOT_CONFIGURED' };
   if (kind === 'remote') return listCloudRuns(flow, principal, { env });
-  try { return { ok: true, value: (await (await embeddedRuntime(env)).runs(flow, principal)).filter(r => r.ownerAccount === principal && r.flow === flow) }; }
+  try { const runtime = await embeddedRuntime(env);
+    if (betaAccessMode(env) !== 'open') {
+      const refused = await runtime.backend.authorizeBeta(currentBetaIdentity(), principal);
+      if (refused) return { ok: false, code: refused };
+    }
+    return { ok: true, value: (await runtime.runs(flow, principal)).filter(r => r.ownerAccount === principal && r.flow === flow) }; }
   catch (error) { return { ok: false, code: classified(error, 'CLOUD_RUNTIME_UNAVAILABLE') }; }
 }
 export { observeSimulations, type SimulationCall, type SimulationObserver } from './simulation-observer.ts';

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 /** BUILD-007 loopback-only Safe/Roles composition service. No public RPC or arbitrary transaction route. */
 import { createHash, randomBytes } from 'node:crypto';
+import { assertExecutionEnabled } from './execution-guard.ts';
 import { mkdir, open, readFile, readdir, rename, stat } from 'node:fs/promises';
 import { isAbsolute, join } from 'node:path';
 import { baseAssetRegistry, referenceRegistry } from '@defi-workflow-engine/action-registry';
@@ -447,6 +448,7 @@ export function createCompositionService(profile: CompositionServerProfile, call
         signed = signModeBLocalTransaction({ expectedExecutor: profile.executor, to: tx.to, data: tx.data,
           nonce, gasLimit: 5_000_000n, maxFeePerGas: at.baseFee * 2n + 1_000_000n }, key);
       } finally { key.fill(0); }
+      assertExecutionEnabled();
       const response = await fetch(profile.rpcUrl, { method: 'POST', headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'eth_sendRawTransaction', params: [signed.raw] }),
         signal: AbortSignal.timeout(20_000) });

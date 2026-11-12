@@ -9,6 +9,7 @@
  *             that FloFi-controlled address, so the executor can no longer broadcast anything (no `eth_sendRawTransaction`, no Solana
  *             `sendTransaction`). User-funded execution relays only what the owner signed, through `src/user-funded` (fee payer = owner).
  */
+import { assertExecutionEnabled } from '../server/execution-guard.ts';
 type Rpc = (method: string, params: readonly unknown[]) => Promise<unknown>;
 export type TransportPurpose = 'read' | 'owner' | 'executor';
 export type ChainTransport = { readonly chain: string; readonly provenance: 'MOCKED' | 'PUBLIC'; readonly rpc: Rpc };
@@ -30,6 +31,7 @@ export function guarded(chain: string, purpose: TransportPurpose, provenance: Ch
   const allowed = allowedMethods(chain, purpose);
   return { chain, provenance, rpc: async (method, params) => {
     if (!allowed.has(method)) throw new Error('DELEGATION_RPC_METHOD_FORBIDDEN');
+    if (method === 'sendTransaction') assertExecutionEnabled();
     return inner(method, params);
   } };
 }
@@ -37,6 +39,7 @@ export function guarded(chain: string, purpose: TransportPurpose, provenance: Ch
 export function httpRpc(url: string, fetchImpl: typeof fetch = fetch): Rpc {
   let id = 0;
   return async (method, params) => {
+    if (['sendTransaction', 'eth_sendRawTransaction', 'eth_sendTransaction', 'eth_sendUserOperation'].includes(method)) assertExecutionEnabled();
     // A transport failure (timeout, refused connection) is DELEGATION_RPC_UNAVAILABLE: retryable, never a decision about the step.
     const response = await fetchImpl(url, { method: 'POST', redirect: 'error', cache: 'no-store', signal: AbortSignal.timeout(10_000),
       headers: { 'content-type': 'application/json' }, body: JSON.stringify({ jsonrpc: '2.0', id: ++id, method, params }) })

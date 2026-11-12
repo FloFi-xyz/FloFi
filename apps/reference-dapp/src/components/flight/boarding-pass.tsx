@@ -6,6 +6,7 @@
  * size (G). Never an amount.
  */
 import { visibleSteps } from '../../flight/campaign';
+import type { FlightRoute } from '../../flight/campaign';
 import type { FlightPass } from '../../flight/store';
 import type { FlightCopy } from './flight-copy';
 import styles from './flight.module.css';
@@ -25,17 +26,25 @@ export function Flaps({ text, cells, big = false, hi = false, label }: { text: s
   </span>;
 }
 
-export function FoundingPass({ pass, copy }: { pass: FlightPass; copy: FlightCopy }) {
+/**
+ * BUILD-FLOFI-FLIGHT-LAUNCH-001: what a card face shows, from a stored pass or a public card.
+ * The approved card (Founding, two or four steps); a passenger's card shows its seat (214E) in the same layout.
+ */
+export type CardFace = { readonly handle: string | null; readonly route: FlightRoute; readonly seat: string; readonly founding: boolean; readonly departedAt: string };
+export const faceOf = (pass: FlightPass): CardFace => ({ handle: pass.handle, route: pass.route, seat: pass.seat, founding: pass.foundingSeat !== null, departedAt: pass.departedAt });
+
+export function FoundingPass({ pass, copy, titleId = 'pass-title' }: { pass: CardFace; copy: FlightCopy; titleId?: string }) {
   const t = copy.pass, { shown, more } = visibleSteps(pass.route);
-  return <div className={styles.passStage} aria-labelledby="pass-title">
+  const seat = pass.founding ? `${t.foundingMember} ${pass.seat}` : pass.seat;
+  return <div className={styles.passStage} aria-labelledby={titleId}>
     <span className={`${styles.sticker} ${styles.passSticker}`} aria-hidden="true">{copy.boarding.sticker}</span>
-    <p className={`${styles.lbl} ${styles.passEyebrow}`} id="pass-title">{t.eyebrowFounding}</p>
+    <p className={`${styles.lbl} ${styles.passEyebrow}`} id={titleId}>{pass.founding ? t.eyebrowFounding : `${t.flight} · ${t.passenger}`}</p>
     <div className={styles.passWrap}>
-      <article className={styles.card} aria-label={`${t.boardingPass}: ${pass.route.from} → ${pass.route.to}, ${t.foundingMember} ${pass.seat}`}>
+      <article className={styles.card} aria-label={`${t.boardingPass}: ${pass.route.from} → ${pass.route.to}, ${seat}`}>
         <div className={styles.cardMain}>
           <div className={styles.cardHead}><strong>{t.flight}</strong><span>{t.boardingPass}</span></div>
           <div className={styles.cardBody}>
-            <div><div className={styles.cardLabel}>{t.passenger}</div><div className={styles.cardHandle}>{pass.handle ? `@${pass.handle}` : t.noHandle}</div></div>
+            <div><div className={styles.cardLabel}>{t.passenger}</div><div className={styles.cardHandle}>{pass.handle ? `@${pass.handle}` : t.passenger}</div></div>
             <div><div className={styles.cardLabel}>{t.departure}</div><div className={styles.cardDate}>{departureDate(pass.departedAt)}</div></div>
             <div className={styles.cardRoute}>
               <div><span className={styles.cardLabel}>{t.from}</span><span className={styles.cardCode}>{pass.route.from}</span></div>
@@ -49,7 +58,7 @@ export function FoundingPass({ pass, copy }: { pass: FlightPass; copy: FlightCop
                 {more > 0 && <li><span className={styles.viaDetail}>{t.more(more)}</span></li>}</ol>
             </div>
             <div className={styles.cardFoot}>
-              <div><span className={styles.cardLabel}>{t.seat}</span><span className={styles.cardFootValue}>{pass.foundingSeat ? `${t.foundingMember} ${pass.seat}` : pass.seat}</span></div>
+              <div><span className={styles.cardLabel}>{t.seat}</span><span className={styles.cardFootValue}>{seat}</span></div>
               <div><span className={styles.cardLabel}>{t.route}</span><span className={styles.cardFootValue}>{t.steps(pass.route.stepCount, pass.route.networkCount)}</span></div>
               <div><span className={styles.cardLabel}>{t.gate}</span><span className={styles.cardGate}>{t.youApprove}</span></div>
             </div>
@@ -63,7 +72,7 @@ export function FoundingPass({ pass, copy }: { pass: FlightPass; copy: FlightCop
         </div>
       </article>
     </div>
-    <img className={styles.seal} src="/brand/flight/seal-founding.svg" alt=""/>
+    {pass.founding && <img className={styles.seal} src="/brand/flight/seal-founding.svg" alt=""/>}
     <img className={styles.passGota} src="/brand/flight/gota-card.svg" alt=""/>
   </div>;
 }

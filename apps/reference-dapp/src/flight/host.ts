@@ -14,6 +14,10 @@ import { platformStateHost } from '../server/platform-state-host';
 import { flightCalendarFrom, normalizeEmail, type FlightCalendar } from './campaign';
 import { rateLimitClient } from './rate-limit-client';
 import { createFlightStore, type FlightStore } from './store';
+import { accessSecret } from './access';
+import { createAccessStore, type AccessStore } from './access-store';
+import { createEmailOutbox, emailLimitsFrom, type EmailOutbox } from './email/outbox';
+import { betaAccessMode } from './beta-access';
 
 type Env = Readonly<Record<string, string | undefined>>;
 
@@ -23,7 +27,7 @@ type Env = Readonly<Record<string, string | undefined>>;
  * when a set value is refused (fail-closed: the campaign is unavailable), reported once per instance by variable name only.
  */
 let reportedInvalid = '';
-export function flightCalendar(env: Env = process.env): FlightCalendar | null {
+export function flightCalendar(env: Env = process.env): Required<FlightCalendar> | null {
   const { calendar, invalid } = flightCalendarFrom(env);
   const key = invalid.join(',');
   if (key && key !== reportedInvalid) { reportedInvalid = key; createLogger({ service: 'flofi-web' }).warn('flight.calendar_refused', { variables: key }); }
@@ -38,7 +42,7 @@ export async function flightStore(env: Env = process.env): Promise<FlightStore |
   if (!env.DATABASE_URL) return null;
   const calendar = flightCalendar(env);
   if (!calendar) return null;
-  return createFlightStore(await platformStateHost(env), calendar);
+  return createFlightStore(await platformStateHost(env), calendar, { allowVerifiedEmail: betaAccessMode(env) === 'open' });
 }
 
 /**
@@ -70,6 +74,29 @@ export async function flightPerson(env: Env = process.env): Promise<FlightPerson
   const emails = [...new Set(view.identities.filter(identity => identity.kind === 'email' || identity.kind === 'google' || identity.kind === 'apple')
     .map(identity => normalizeEmail(identity.label)).filter((email): email is string => email !== null))];
   return { accountId: view.accountId, emails };
+}
+
+/**
+ * BUILD-FLOFI-FLIGHT-LAUNCH-001: the access store (links, codes, sessions, claims), or null when the deployment has no database or no
+ * `FLOFI_FLIGHT_ACCESS_SECRET` (every access route then answers FLIGHT_UNAVAILABLE: fail closed).
+ */
+export async function flightAccessStore(env: Env = process.env): Promise<AccessStore | null> {
+  const secret = accessSecret(env);
+  if (!env.DATABASE_URL || !secret) return null;
+  return createAccessStore(await platformStateHost(env), secret);
+}
+/** The email outbox for the web's own needs (unsubscribe, retention). The web never sends email: the worker does. */
+export async function flightOutbox(env: Env = process.env): Promise<EmailOutbox | null> {
+  if (!env.DATABASE_URL) return null;
+  let limits;
+  try { limits = emailLimitsFrom(env); } catch { limits = undefined; }
+  return createEmailOutbox(await platformStateHost(env), limits);
+}
+/** The request's network client as the rate limits count it (an IPv4 address or an IPv6 /64), or null. Hashed before it is stored. */
+export async function requestClient(): Promise<string | null> {
+  const list = await headers();
+  const address = list.get('x-real-ip') ?? list.get('x-forwarded-for')?.split(',')[0] ?? '';
+  return address.length <= 64 ? rateLimitClient(address) : null;
 }
 
 /**

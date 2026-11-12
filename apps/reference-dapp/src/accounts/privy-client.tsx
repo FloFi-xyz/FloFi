@@ -23,6 +23,7 @@ import { defaultSolanaRpcsPlugin, toSolanaWalletConnectors, useCreateWallet as u
   useWallets as useSolanaWallets } from '@privy-io/react-auth/solana';
 import type { PrivyBrowserConfig } from './privy-server';
 import { signerPolicy } from './signer-pages';
+import { PRIVY_WALLET_LIST } from './privy-hosts';
 import { usePathname } from 'next/navigation';
 import { createLoginChannel, FloFiAccountsContext as AccountsContext, FloFiPrivyContext as Context, privyCanSign, privyErrorCode, Registrar, useFloFiPrivy, type FloFiPrivy,
   type PrivyEmbedded, type PrivyLoginEvent, type PrivyReview } from './privy-context';
@@ -47,7 +48,9 @@ export function floFiPrivyConfig(config: Pick<PrivyBrowserConfig, 'apple'>): Pri
     loginMethods: config.apple ? ['google', 'apple', 'email', 'wallet'] : ['google', 'email', 'wallet'],
     appearance: { theme: 'dark', accentColor: '#2343D9', logo: '/brand/flofi-wordmark-dark.png', landingHeader: 'Sign in to FloFi',
       walletChainType: 'ethereum-and-solana', showWalletLoginFirst: false,
-      walletList: ['detected_ethereum_wallets', 'detected_solana_wallets', 'metamask', 'phantom', 'rabby_wallet', 'coinbase_wallet', 'solflare', 'backpack'] },
+      // Named catalog wallets make Privy fetch WalletConnect's explorer even with WalletConnect disabled.
+      // Detected entries retain installed EVM/Solana wallets; Coinbase uses its existing separate relay.
+      walletList: [...PRIVY_WALLET_LIST] },
     // Wallets are created only when the person clicks Create wallet; Privy's confirmation screens are always shown.
     embeddedWallets: { ethereum: { createOnLogin: 'off' }, solana: { createOnLogin: 'off' }, showWalletUIs: true },
     externalWallets: { walletConnect: { enabled: false }, solana: { connectors: toSolanaWalletConnectors({ shouldAutoConnect: false }) } },

@@ -20,6 +20,7 @@ import { keyedDigest } from './core/crypto.ts';
 import { channelLogger, type ChannelLogSink } from './core/log.ts';
 import { createChannelService } from './core/service.ts';
 import type { ChannelVisualRenderer } from './core/types.ts';
+import { channelPrivateAuthorizer } from './flight-gate.ts';
 import { channelSubscriptions } from './subscriptions.ts';
 import { channelProviders, type ProviderSeams } from './providers.ts';
 import { readChannelDeployment, type ChannelRoute } from './registry.ts';
@@ -110,12 +111,13 @@ export async function handleChannelWebhook(route: ChannelRoute, request: Request
       return answer(200, 'TELEGRAM_PUBLIC_RATE_LIMITED');
     }
   }
+  const authorizePrivate = channelPrivateAuthorizer(env, host, provider.adapter.channel);
   const service = createChannelService({ core, store, log, now, platform, previewTimeoutMs: options.previewTimeoutMs ?? 60_000, adapter: provider.adapter,
     interpreter: options.interpreter !== undefined ? options.interpreter
       : channelInterpreter(env, { enabled: core.copilot, live: channelLiveCopilot(env, route === 'whatsapp' ? 'WHATSAPP' : 'TELEGRAM', host),
         toolkit: channelRouteToolkit(env), metrics: async record => {
           if (copilotMetricsEnabled(env, record.mode)) await recordCopilotMetrics(() => persistCopilotInterpretation(host, record, now()));
-        } }), subscriptions: channelSubscriptions(env, host),
+        } }), subscriptions: channelSubscriptions(env, host), authorizePrivate,
     metrics: async record => {
       const mode = env.FLOFI_COPILOT === 'live' ? 'live' : 'replay';
       if (copilotMetricsEnabled(env, mode)) await recordCopilotMetrics(() => persistCopilotTurn(host, mode, record, 'SERVER', now()));

@@ -94,7 +94,7 @@ export function createAccountService(input: { readonly store: AccountStore; read
         fail('PRIVY_SIGN_IN_STALE');
       const signed = await store.signInPrivy({ privyUser: user.id, identities: user.identities, method: user.method!, verifiedAt: user.verifiedAt }, now());
       const session: AccountSessionToken = { accountId: signed.accountId, sessionId: signed.sessionId, method: signed.method,
-        authenticatedAt: signed.authenticatedAt, expiresAt: signed.expiresAt };
+        authenticatedAt: signed.authenticatedAt, expiresAt: signed.expiresAt, ...(user.loginWallet ? { loginWallet: user.loginWallet } : {}) };
       // A wallet whose save never finished (a closed tab, a timeout) is saved now; a failure here never blocks signing in.
       await syncEmbedded(session, user).catch(() => undefined);
       // BUILD-FLOFI-WALLET-UX-EXECUTION-FIX-001 (P1-05): a person who signed in with MetaMask (or already holds a usable wallet) enters the app.

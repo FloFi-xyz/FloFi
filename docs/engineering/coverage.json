@@ -86,6 +86,14 @@
       "path": "apps/reference-dapp/src/admin/analytics/workflows.test.ts",
       "stage": "unit"
     },
+    "app.admin.flight": {
+      "path": "apps/reference-dapp/src/admin/flight.test.ts",
+      "stage": "unit"
+    },
+    "app.admin.flight.pg": {
+      "path": "apps/reference-dapp/src/admin/flight.pg.test.ts",
+      "stage": "postgres"
+    },
     "app.admin.http.pg": {
       "path": "apps/reference-dapp/src/admin/http.pg.test.ts",
       "stage": "postgres"
@@ -109,6 +117,10 @@
     "app.app.wallet-session-action": {
       "path": "apps/reference-dapp/src/app/wallet-session-action.test.ts",
       "stage": "unit"
+    },
+    "app.automations.beta-access.pg": {
+      "path": "apps/reference-dapp/src/automations/beta-access.pg.test.ts",
+      "stage": "postgres"
     },
     "app.automations.boundaries": {
       "path": "apps/reference-dapp/src/automations/boundaries.test.ts",
@@ -134,6 +146,14 @@
       "path": "apps/reference-dapp/backend/automation-production.pg.test.ts",
       "stage": "postgres"
     },
+    "app.backend.beta-access.pg": {
+      "path": "apps/reference-dapp/backend/beta-access.pg.test.ts",
+      "stage": "postgres"
+    },
+    "app.backend.flight-admin.pg": {
+      "path": "apps/reference-dapp/backend/flight-admin.pg.test.ts",
+      "stage": "postgres"
+    },
     "app.backend.pix-payment-cloud.pg": {
       "path": "apps/reference-dapp/backend/pix-payment-cloud.pg.test.ts",
       "stage": "postgres"
@@ -141,6 +161,14 @@
     "app.backend.pix-payment-flow": {
       "path": "apps/reference-dapp/backend/pix-payment-flow.test.ts",
       "stage": "unit"
+    },
+    "app.channels.beta-access": {
+      "path": "apps/reference-dapp/src/channels/beta-access.test.ts",
+      "stage": "unit"
+    },
+    "app.channels.beta-access.pg": {
+      "path": "apps/reference-dapp/src/channels/beta-access.pg.test.ts",
+      "stage": "postgres"
     },
     "app.channels.core.approval": {
       "path": "apps/reference-dapp/src/channels/core/approval.test.ts",
@@ -326,6 +354,10 @@
       "path": "apps/reference-dapp/src/domain/wallet-portfolio.test.ts",
       "stage": "unit"
     },
+    "app.e2e.admin-console": {
+      "path": "apps/reference-dapp/e2e/admin-console.spec.ts",
+      "stage": "browser"
+    },
     "app.e2e.auth-wallets": {
       "path": "apps/reference-dapp/e2e/auth-wallets.spec.ts",
       "stage": "browser"
@@ -394,9 +426,33 @@
       "path": "apps/reference-dapp/src/editor/workflow-strategy.test.ts",
       "stage": "unit"
     },
+    "app.flight.beta-access": {
+      "path": "apps/reference-dapp/src/flight/beta-access.test.ts",
+      "stage": "unit"
+    },
+    "app.flight.beta-access.pg": {
+      "path": "apps/reference-dapp/src/flight/beta-access.pg.test.ts",
+      "stage": "postgres"
+    },
     "app.flight.campaign": {
       "path": "apps/reference-dapp/src/flight/campaign.test.ts",
       "stage": "unit"
+    },
+    "app.flight.email.templates": {
+      "path": "apps/reference-dapp/src/flight/email/templates.test.ts",
+      "stage": "unit"
+    },
+    "app.flight.identity-http": {
+      "path": "apps/reference-dapp/src/flight/identity-http.test.ts",
+      "stage": "unit"
+    },
+    "app.flight.launch": {
+      "path": "apps/reference-dapp/src/flight/launch.test.ts",
+      "stage": "unit"
+    },
+    "app.flight.launch.pg": {
+      "path": "apps/reference-dapp/src/flight/launch.pg.test.ts",
+      "stage": "postgres"
     },
     "app.flight.store.pg": {
       "path": "apps/reference-dapp/src/flight/store.pg.test.ts",
@@ -426,6 +482,10 @@
       "path": "apps/reference-dapp/src/learning/learning.pg.test.ts",
       "stage": "postgres"
     },
+    "app.legal.privacy": {
+      "path": "apps/reference-dapp/src/app/privacy/page.test.tsx",
+      "stage": "unit"
+    },
     "app.lib.dashboard.data-service": {
       "path": "apps/reference-dapp/src/lib/dashboard/data-service.test.ts",
       "stage": "unit"
@@ -441,6 +501,10 @@
     "app.lib.dashboard.run-mapping": {
       "path": "apps/reference-dapp/src/lib/dashboard/run-mapping.test.ts",
       "stage": "unit"
+    },
+    "app.mcp.beta-access.pg": {
+      "path": "apps/reference-dapp/src/mcp/beta-access.pg.test.ts",
+      "stage": "postgres"
     },
     "app.mcp.deadline": {
       "path": "apps/reference-dapp/src/mcp/deadline.test.ts",
@@ -544,6 +608,14 @@
     },
     "app.server.ethereum-runtime": {
       "path": "apps/reference-dapp/src/server/ethereum-runtime.test.ts",
+      "stage": "unit"
+    },
+    "app.server.execution-guard": {
+      "path": "apps/reference-dapp/src/server/execution-guard.test.ts",
+      "stage": "unit"
+    },
+    "app.server.flight-access": {
+      "path": "apps/reference-dapp/src/server/flight-access.test.ts",
       "stage": "unit"
     },
     "app.server.history-principals": {
@@ -798,6 +870,14 @@
       "path": "packages/cloud-runtime/test/flight-flofi-migration.pg.test.ts",
       "stage": "postgres"
     },
+    "cloud-runtime.flight-gate-migration.pg": {
+      "path": "packages/cloud-runtime/test/flight-gate-migration.pg.test.ts",
+      "stage": "postgres"
+    },
+    "cloud-runtime.flight-launch-migration.pg": {
+      "path": "packages/cloud-runtime/test/flight-launch-migration.pg.test.ts",
+      "stage": "postgres"
+    },
     "cloud-runtime.flofi-accounts-migration.pg": {
       "path": "packages/cloud-runtime/test/flofi-accounts-migration.pg.test.ts",
       "stage": "postgres"
@@ -1003,10 +1083,12 @@
     "app.accounts.privy-client",
     "app.accounts.privy-server",
     "app.accounts.wallet-relay",
+    "app.admin.flight",
     "app.admin.session",
     "app.app.api.flofi.journey.route",
     "app.app.wallet-session-action",
     "app.automations.boundaries",
+    "app.channels.beta-access",
     "app.channels.core.delivery",
     "app.channels.core.workflow",
     "app.components.automations-workspace",
@@ -1019,8 +1101,13 @@
     "app.domain.intelligence.conversation-regression",
     "app.domain.journey-metrics",
     "app.editor.chat-canvas-parity",
+    "app.flight.beta-access",
     "app.flight.campaign",
+    "app.flight.email.templates",
+    "app.flight.identity-http",
+    "app.flight.launch",
     "app.i18n.catalog",
+    "app.legal.privacy",
     "app.mcp.gateway-deadline",
     "app.mcp.oauth.foundation",
     "app.platform.copilot-tools",
@@ -1031,6 +1118,8 @@
     "app.server.channel-copilot-toolkit",
     "app.server.copilot-metrics",
     "app.server.copilot-orchestration",
+    "app.server.execution-guard",
+    "app.server.flight-access",
     "app.server.journey-telemetry",
     "app.server.lending-composition-service",
     "app.server.universal-router.fee-obligation",
@@ -1622,7 +1711,8 @@
         "app.automations.remote.pg",
         "app.automations.schedule",
         "app.automations.scheduler.pg",
-        "app.backend.automation-production.pg"
+        "app.backend.automation-production.pg",
+        "app.automations.beta-access.pg"
       ],
       "gaps": [
         "CONFIRM_EACH_TIME proposals are supported; production delegated signing and live DCA execution are not certified."
@@ -1680,7 +1770,9 @@
         "app.channels.core.delivery",
         "app.channels.core.workflow",
         "app.channels.telegram.workflow.pg",
-        "app.channels.whatsapp.journey.pg"
+        "app.channels.whatsapp.journey.pg",
+        "app.channels.beta-access",
+        "app.channels.beta-access.pg"
       ],
       "gaps": [
         "WhatsApp is fixture-only; Telegram provider delivery needs configured acceptance; no cross-provider live guarantee."
@@ -1800,7 +1892,8 @@
         "apps/reference-dapp/src/app/how-it-works/page.tsx",
         "apps/reference-dapp/src/app/developers/page.tsx",
         "apps/reference-dapp/src/app/faq/page.tsx",
-        "apps/reference-dapp/src/app/editor.css"
+        "apps/reference-dapp/src/app/editor.css",
+        "apps/reference-dapp/src/app/terms/page.tsx"
       ],
       "suites": [
         "app.e2e.canvas-keyboard",
@@ -1809,7 +1902,9 @@
         "app.i18n.catalog",
         "app.i18n.locale",
         "app.e2e.site",
-        "app.e2e.editor-redesign"
+        "app.e2e.editor-redesign",
+        "app.e2e.flight",
+        "app.legal.privacy"
       ],
       "gaps": [
         "Browser profiles cover selected journeys; full accessibility audit, device matrix and language completeness remain acceptance gaps."
@@ -2387,6 +2482,7 @@
         "apps/reference-dapp/src/channels/core/subscriber.ts",
         "apps/reference-dapp/src/channels/core/types.ts",
         "apps/reference-dapp/src/channels/dispatch-http.ts",
+        "apps/reference-dapp/src/channels/flight-gate.ts",
         "apps/reference-dapp/src/channels/http.ts",
         "apps/reference-dapp/src/channels/learning-runtime.ts",
         "apps/reference-dapp/src/channels/providers.ts",
@@ -2417,6 +2513,8 @@
         "app.channels.core.delivery",
         "app.channels.core.workflow",
         "app.channels.route-discovery",
+        "app.channels.beta-access",
+        "app.channels.beta-access.pg",
         "app.channels.telegram.learning.pg",
         "app.channels.telegram.workflow.pg",
         "app.channels.whatsapp.journey.pg",
@@ -2459,6 +2557,8 @@
         "packages/cloud-runtime/migrations/0021_workflow_grants.sql",
         "packages/cloud-runtime/migrations/0022_editor_requester.sql",
         "packages/cloud-runtime/migrations/0023_user_funded_groups.sql",
+        "packages/cloud-runtime/migrations/0025_flight_gate.sql",
+        "packages/cloud-runtime/migrations/0026_flight_early_list.sql",
         "packages/cloud-runtime/src/owner-history.ts"
       ],
       "suites": [
@@ -2470,7 +2570,8 @@
         "cloud-runtime.migration-manifest",
         "cloud-runtime.tenancy.pg",
         "cloud-runtime.editor-requester-migration.pg",
-        "cloud-runtime.user-funded-groups-migration.pg"
+        "cloud-runtime.user-funded-groups-migration.pg",
+        "cloud-runtime.flight-gate-migration.pg"
       ],
       "gaps": [
         "Disposable PostgreSQL does not establish hosted Neon operational compatibility, retention operations or legal LGPD compliance."
@@ -3841,6 +3942,11 @@
       "sharedFinancialCore": false,
       "sources": [
         "apps/reference-dapp/backend/flight-admin.ts",
+        "apps/reference-dapp/backend/flight-email-worker.ts",
+        "apps/reference-dapp/src/app/api/board/access/code/route.ts",
+        "apps/reference-dapp/src/app/api/board/access/consume/route.ts",
+        "apps/reference-dapp/src/app/api/board/access/peek/route.ts",
+        "apps/reference-dapp/src/app/api/board/access/request/route.ts",
         "apps/reference-dapp/src/app/api/board/board/route.ts",
         "apps/reference-dapp/src/app/api/board/event/route.ts",
         "apps/reference-dapp/src/app/api/board/handle/route.ts",
@@ -3848,24 +3954,42 @@
         "apps/reference-dapp/src/app/api/board/list/route.ts",
         "apps/reference-dapp/src/app/api/board/pass/route.ts",
         "apps/reference-dapp/src/app/api/board/state/route.ts",
+        "apps/reference-dapp/src/app/api/board/unsubscribe/route.ts",
         "apps/reference-dapp/src/app/cloud-flow.ts",
+        "apps/reference-dapp/src/flight/access-store.ts",
+        "apps/reference-dapp/src/flight/access.ts",
         "apps/reference-dapp/src/flight/campaign.ts",
+        "apps/reference-dapp/src/flight/email/delivery.ts",
+        "apps/reference-dapp/src/flight/email/outbox.ts",
+        "apps/reference-dapp/src/flight/email/resend.ts",
+        "apps/reference-dapp/src/flight/email/runtime.ts",
+        "apps/reference-dapp/src/flight/email/templates-v1.ts",
+        "apps/reference-dapp/src/flight/email/templates-v2.ts",
+        "apps/reference-dapp/src/flight/email/templates-v3.ts",
+        "apps/reference-dapp/src/flight/email/templates.ts",
         "apps/reference-dapp/src/flight/host.ts",
         "apps/reference-dapp/src/flight/http.ts",
         "apps/reference-dapp/src/flight/rate-limit-client.ts",
         "apps/reference-dapp/src/flight/simulation-evidence.ts",
         "apps/reference-dapp/src/flight/simulation-record.ts",
         "apps/reference-dapp/src/flight/store.ts",
-        "packages/cloud-runtime/migrations/0020_flight_flofi.sql"
+        "packages/cloud-runtime/migrations/0020_flight_flofi.sql",
+        "packages/cloud-runtime/migrations/0024_flight_launch.sql"
       ],
       "suites": [
         "app.flight.campaign",
         "app.flight.store.pg",
         "cloud-runtime.flight-flofi-migration.pg",
-        "app.e2e.flight"
+        "app.flight.launch",
+        "app.flight.launch.pg",
+        "cloud-runtime.flight-launch-migration.pg",
+        "app.e2e.flight",
+        "app.flight.identity-http",
+        "app.flight.email.templates",
+        "app.backend.flight-admin.pg"
       ],
       "gaps": [
-        "Email deliverability is outside the product (FloFi sends no email; the team exports groups) and joining has no confirmation step (any address can be submitted; the team's first email is where a person can object). The exact public list counter can hint whether a submitted address was new. X handles are self-declared. Production rate and abuse behaviour is not measured by tests; browser funnel events are limited per instance."
+        "Email goes out through Resend from the Railway worker (FLOFI_FLIGHT_EMAIL=enabled); tests use a fake provider in the test process, so delivery, spam placement, DNS (SPF/DKIM/DMARC) and the account's real quota are not proven by tests. The FloFi quota counts FloFi's own reservations only (sends outside FloFi need the external reserve and reconciliation in the Resend dashboard). No bounce or complaint webhook is consumed. Joining has no confirmation step (any address can be submitted); campaign access needs a proven address (Privy-verified login email, or the access link or code). X handles are self-declared. Production rate and abuse behaviour is not measured by tests; browser funnel events are limited per instance."
       ]
     },
     {
@@ -3879,6 +4003,11 @@
       "sharedFinancialCore": false,
       "sources": [
         "apps/reference-dapp/playwright.flight.config.ts",
+        "apps/reference-dapp/public/brand/flight/email/flofi-logo-on-blue.png",
+        "apps/reference-dapp/public/brand/flight/email/gota-captain.png",
+        "apps/reference-dapp/public/brand/flight/email/gota-safety.png",
+        "apps/reference-dapp/public/brand/flight/email/gota-welcome.png",
+        "apps/reference-dapp/public/brand/flight/email/gota-wink.png",
         "apps/reference-dapp/public/brand/flight/flofi-logo-on-blue.svg",
         "apps/reference-dapp/public/brand/flight/flofi-logo.svg",
         "apps/reference-dapp/public/brand/flight/gota-captain.svg",
@@ -3888,9 +4017,14 @@
         "apps/reference-dapp/public/brand/flight/gota-welcome.svg",
         "apps/reference-dapp/public/brand/flight/gota-wink.svg",
         "apps/reference-dapp/public/brand/flight/seal-founding.svg",
+        "apps/reference-dapp/src/app/board/access/page.tsx",
         "apps/reference-dapp/src/app/board/opengraph-image.alt.txt",
         "apps/reference-dapp/src/app/board/opengraph-image.png",
         "apps/reference-dapp/src/app/board/page.tsx",
+        "apps/reference-dapp/src/app/board/unsubscribe/page.tsx",
+        "apps/reference-dapp/src/app/card/[id]/image/route.ts",
+        "apps/reference-dapp/src/app/card/[id]/page.tsx",
+        "apps/reference-dapp/src/components/flight/access-continue.tsx",
         "apps/reference-dapp/src/components/flight/board-experience.tsx",
         "apps/reference-dapp/src/components/flight/board-page.tsx",
         "apps/reference-dapp/src/components/flight/boarding-pass.tsx",
@@ -3898,10 +4032,13 @@
         "apps/reference-dapp/src/components/flight/flight.module.css",
         "apps/reference-dapp/src/components/flight/language-switch.tsx",
         "apps/reference-dapp/src/flight/app-boarding.tsx",
+        "apps/reference-dapp/src/flight/card-assets.ts",
+        "apps/reference-dapp/src/flight/card-image.tsx",
         "apps/reference-dapp/src/i18n/pt-flight.ts"
       ],
       "suites": [
         "app.flight.campaign",
+        "app.flight.launch",
         "app.e2e.flight"
       ],
       "gaps": [
@@ -4100,6 +4237,7 @@
       "sources": [
         "apps/reference-dapp/src/mcp/app/panel.ts",
         "apps/reference-dapp/src/mcp/approval-profile.ts",
+        "apps/reference-dapp/src/mcp/beta-access.ts",
         "apps/reference-dapp/src/mcp/config.ts",
         "apps/reference-dapp/src/mcp/deadline.ts",
         "apps/reference-dapp/src/mcp/execution.ts",
@@ -4136,7 +4274,8 @@
         "app.mcp.pix-approval-status",
         "app.platform.engineering-continuity",
         "app.platform.intelligence-parity",
-        "app.mcp.gateway-deadline"
+        "app.mcp.gateway-deadline",
+        "app.mcp.beta-access.pg"
       ],
       "gaps": [
         "External ChatGPT/Claude OAuth and approval acceptance remains manual; local gateway tests do not certify hosted clients."
@@ -6999,16 +7138,80 @@
         "Mapped suites are representative boundary tests, not exhaustive path or public execution coverage.",
         "Mapped fork suites include existing owner-gated cases that may skip; a successful stage is not proof those optional cases ran."
       ]
+    },
+    {
+      "id": "flight-admin--admin-analytics",
+      "primary": "flofi-admin-analytics",
+      "dependencies": [
+        "flofi-data-privacy",
+        "flofi-frontend-ux",
+        "flofi-infrastructure-ci",
+        "flofi-security"
+      ],
+      "sharedFinancialCore": false,
+      "sources": [
+        "apps/reference-dapp/src/admin/flight.ts",
+        "apps/reference-dapp/src/admin/flight-http.ts",
+        "apps/reference-dapp/src/app/admin/api/flight/route.ts",
+        "apps/reference-dapp/src/app/admin/api/flight/entries/route.ts",
+        "apps/reference-dapp/src/app/admin/api/flight/export/route.ts",
+        "apps/reference-dapp/src/app/admin/flight/page.tsx",
+        "apps/reference-dapp/src/components/admin/flight-console.tsx"
+      ],
+      "suites": [
+        "app.admin.flight",
+        "app.admin.flight.pg",
+        "app.e2e.admin-console"
+      ],
+      "gaps": [
+        "Disposable PostgreSQL and browser fixtures prove scoped query/auth/export contracts; they do not prove the production Neon data or hosted operator acceptance. SENT records provider acceptance, no delivery webhook is consumed."
+      ]
+    },
+    {
+      "id": "flight--beta-security",
+      "primary": "flofi-security",
+      "dependencies": [
+        "flofi-wallet-execution",
+        "flofi-workflow",
+        "flofi-automations",
+        "flofi-mcp",
+        "flofi-channels",
+        "flofi-data-privacy",
+        "flofi-frontend-ux"
+      ],
+      "sharedFinancialCore": true,
+      "sources": [
+        "apps/reference-dapp/src/flight/beta-access.ts",
+        "apps/reference-dapp/src/flight/beta-context.ts",
+        "apps/reference-dapp/src/server/flight-access.ts",
+        "apps/reference-dapp/src/server/execution-guard.ts"
+      ],
+      "suites": [
+        "app.flight.beta-access",
+        "app.flight.beta-access.pg",
+        "app.server.flight-access",
+        "app.server.execution-guard",
+        "app.backend.beta-access.pg"
+      ],
+      "gaps": [
+        "Temporary team policy is tested in the required beta-access unit/PostgreSQL suites and guarded flight-team-early-access browser profile. Its e2e/flight-team-clock.mjs preload is an engineering-only fixture excluded from the maintained production source inventory; no hosted-clock or real-wallet acceptance is established.",
+        "Local PostgreSQL and provider stand-ins prove request/session/tenant/wallet isolation and emergency pause behavior; live Privy devices, coordinated hosted rollout and external-wallet prompts already released require owner acceptance. No public financial execution is certified."
+      ]
     }
   ],
   "requiredPostgresSuites": [
     "app.accounts.account-store-schema19.pg",
+    "app.admin.flight.pg",
     "app.admin.http.pg",
     "app.admin.settings.pg",
+    "app.automations.beta-access.pg",
     "app.automations.remote.pg",
     "app.automations.scheduler.pg",
     "app.backend.automation-production.pg",
+    "app.backend.beta-access.pg",
+    "app.backend.flight-admin.pg",
     "app.backend.pix-payment-cloud.pg",
+    "app.channels.beta-access.pg",
     "app.channels.telegram.learning.pg",
     "app.channels.telegram.workflow.pg",
     "app.channels.whatsapp.journey.pg",
@@ -7018,9 +7221,12 @@
     "app.developer.engine.pg",
     "app.developer.sdk.pg",
     "app.developer.webhooks.pg",
+    "app.flight.beta-access.pg",
+    "app.flight.launch.pg",
     "app.flight.store.pg",
     "app.learning.automatic.pg",
     "app.learning.learning.pg",
+    "app.mcp.beta-access.pg",
     "app.mcp.handoff.workflow.pg",
     "app.mcp.link-integrity.pg",
     "app.mcp.oauth.server.pg",
@@ -7031,6 +7237,8 @@
     "cloud-runtime.copilot-metrics-migration.pg",
     "cloud-runtime.dispatch.pg",
     "cloud-runtime.flight-flofi-migration.pg",
+    "cloud-runtime.flight-gate-migration.pg",
+    "cloud-runtime.flight-launch-migration.pg",
     "cloud-runtime.forward-compatibility.pg",
     "cloud-runtime.storage.pg",
     "cloud-runtime.tenancy.pg",
