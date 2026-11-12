@@ -33,63 +33,95 @@ Editor/MCP/channel parity, browser e2e infrastructure. Key facts:
 
 ## C. What changed (universal-execution PR)
 
-Wallet batches (EIP-5792 `wallet_sendCalls`, atomic required, the owner's own wallet signs, sends and pays; no paymaster, no executor):
+Wallet batches (EIP-5792 `wallet_sendCalls`, atomic required, `from` = the owner; the owner's own wallet signs, sends and pays; no paymaster,
+no executor):
 
 1. **Aave Repay and Withdraw join batches** with the owner-signed flows' own rules: a *partial* repayment (below the debt read now, plus what the
    batch borrows first) and health factor ≥ 2.0 after a withdrawal, proven by the whole-batch `eth_simulateV1`. Debt-token and aToken burns are
-   reconciled as optional protocol legs; a repayment executed for less than signed never reconciles.
-2. **Any catalog ERC-20 swap on Ethereum, Base, Arbitrum One and Robinhood Chain** batches through the network's own registered SwapRouter02 /
-   QuoterV2 / factory, at the best tier whose canonical pool exists (the owner-signed catalog swap's rule). Stock Tokens, native ETH and WETH9
-   wrap/unwrap keep their own flows, with a closed reason.
-3. **On-chain expiry for every batch that needs it:** swaps are `multicall(deadline, [exactInputSingle])`; a batch with Aave calls and no swap starts
-   with a `multicall(deadline, [])` guard. A prompt confirmed after the 10-minute validity reverts whole (EIP-5792 requests have no expiry).
-4. **A cached preparation is handed to the wallet only with ≥ 3 minutes left**, else re-prepared under the same EIP-5792 id.
-5. **Base L1 data fee** is in the fee ceiling the owner's balance must cover and in the reconciled gas paid.
-6. **Solana sign-all groups are never half-sent:** before the first transaction is sent the signed group must still have the blockhash budget
-   for all of them; "expired" is declared only when provable (finalized height + fresh status read); the fee ceiling includes deposits.
-7. **A due group that can never be prepared halts the run at once** (it stayed RUNNING for up to 7 days); resuming a group blocked because the
-   RPC cannot simulate continues it through each step's own owner-signed flow.
-8. **/approve never re-sends a batch whose wallet answer was lost** (the Editor's PR #173 protection, now on the page every MCP, channel and chat
-   handoff uses).
-9. **Honest counts and reasons:** counts made with assumed wallet capabilities (MCP, channels, a claim before the browser read the wallet) are
-   lower bounds — never "single", always "at least"; the planner reports the builder's real reason a step cannot be batched; the Editor asks
-   the wallet only about the workflow's own chains and treats an unreported chain as unknown, not "unsupported"; wallet pre-send refusals
-   (EIP-5792 57xx, 4100/4200) are "nothing sent".
-10. **Editor / Execute:** Resume for a HALTED run; a link to the signing page for a step the run asks to sign through its own flow; each group's
-    health factor and fee (also for later groups); expired prepared amounts marked; truncated health factor; fee ceiling worded as an estimate
-    the wallet finalizes; a Solana-only workflow keeps the per-step path instead of a dead end; non-batch kinds fail closed.
-11. **Labels:** a bridge's assets were always shown as USDC; liquidity deposits were labelled by decimals — now by their own identity.
-12. **Readiness** (`/api/flofi/readiness?probe=networks`) reports per mainnet endpoint and per user-funded chain whether it answers
+   optional reconciliation legs; a repayment executed for less than signed never reconciles. A repay that is no longer partial when due halts
+   the run (resume runs it through its own flow, which reads the debt again).
+2. **Any catalog ERC-20 swap on Ethereum, Base, Arbitrum One and Robinhood Chain** batches through the network's registered SwapRouter02 /
+   QuoterV2 / factory, at the best tier whose canonical pool exists. Both tokens are verified **on chain** first (code present, `decimals()` equal
+   to the catalog; listing is never authority); on Robinhood Chain only its pinned assets batch. A tier is skipped only when the chain answered
+   with a revert; a rate limit or timeout refuses instead of silently picking a worse pool. Stock Tokens, native ETH and WETH9 wrap/unwrap keep
+   their own flows with a closed reason.
+3. **Batched ERC-20 transfers** batch only catalog assets with matching decimals (never Stock Tokens; on Robinhood only pinned assets) and verify
+   the token on chain the same way.
+4. **Every swap output is proven received in full:** the whole-batch simulation reads the owner's output-token balance around each swap
+   (simulated sequence only) and refuses a token that delivers less than the pool sent (fee-on-transfer / rebasing). Without `eth_simulateV1`, a
+   batch with Aave calls, or one in which a later call spends a swap's output, is refused (the steps then run step by step); a swap whose output
+   is spent inside a group is never signed upfront as a user operation (the planner makes it a batch signed when due).
+5. **Every wallet batch expires on chain:** swaps are `multicall(deadline, [exactInputSingle])`; any batch without a deadlined swap (transfers,
+   Aave) starts with a `multicall(deadline, [])` guard on the registered router (no router → refused). A prompt confirmed after the 10-minute
+   validity reverts whole, so ending a run after that validity can never leave a later execution unrecorded.
+6. **No overlapping preparations:** a prepared batch is handed out while it has more than 3 minutes left; with less it is refused
+   `USER_FUNDED_PREPARED_STILL_VALID` (confirm the open request, or ask again after it expires); after its validity it is prepared again in place
+   (version-checked, every earlier preparation kept for reconciliation). A batch the wallet sent is always recorded and reconciled.
+7. **Run expiry never drops a batch the wallet may still send:** no batch is prepared when it could outlive the run; at expiry the pass waits until
+   a handed-out batch's validity has passed, never blocks an answered one, and blocks only from the state and version it read. A batch stopped
+   while its answer was outstanding is recorded as `WALLET_BATCH_OUTCOME_UNKNOWN` ("may have executed; check your wallet"), never "nothing sent".
+8. **Answers are checked:** a different batch id or different hashes for an already-answered group are refused `WALLET_BATCH_ANSWER_MISMATCH` and
+   logged (never accepted silently); every answer and block write is a version-checked compare-and-set.
+9. **Base L1 data fee** is in the fee ceiling the owner's balance must cover and in the reconciled gas paid.
+10. **Solana sign-all:** the blockhash send budget is checked once, while provably nothing was sent; a late signature is refused at authorization
+    (the group is prepared again). Once sent, "expired" is declared only when provable (finalized height + fresh status read); a tail that expires
+    later is reconciled as a partial result. The fee ceiling includes deposits.
+11. **A due group refused for good halts the run at once** (it stayed RUNNING for up to 7 days), also the first group, unless a batch of it was
+    already handed to the wallet; Resume continues through each step's own owner-signed flow. `runView.resumable` says when Resume is accepted.
+12. **The owner's browser:** every pre-send check runs first (network; the wallet's *selected* account must be the run's account); the "may have
+    been sent" marker is written immediately before `wallet_sendCalls` with a per-tab nonce, read back (no durable marker → nothing is sent), and
+    shared by the Editor and `/approve`; `/approve` records a known batch id before preparing again; wallet pre-send refusals are "nothing sent".
+13. **Honest counts and wording everywhere:** requester counts (MCP, channels) are "at least N", never "single"; the planner shows each step's
+    closed reason; `runView.halted` (PARTIAL / NOTHING_SENT / STOPPED) is decided by the server from its records and used by the Editor,
+    `/approve`, MCP and the Telegram/WhatsApp channels; the chat now shows the user-funded at-least count and announces a second halt.
+14. **Grouping is never more interactions:** the recommendation prefers user-funded groups when at least one group is a batch / sign-all and it
+    needs no more wallet interactions than steps (the step count is only a lower bound for confirming each step); a tie no longer forces it.
+15. **Editor / Execute:** Resume when the server accepts it; a link to the signing page for an owner-step group; per-group health factor and fee;
+    expired prepared amounts marked; step-by-step offered for every refusal no retry can change; bridge/liquidity labels by asset identity.
+16. **Readiness** (`/api/flofi/readiness?probe=networks`) reports per mainnet endpoint and per user-funded chain whether it answers
     `eth_simulateV1` (SUPPORTED / UNSUPPORTED / UNKNOWN), read-only, never a URL.
 
 ## D. Capability matrix (code facts at this PR; production certification is separate)
 
-| Action | Provider / profile | Networks | Composes as | Wallet grouping (user-funded) | Execute values | Limits (kind) |
-|---|---|---|---|---|---|---|
-| Swap | Uniswap v3 catalog (SwapRouter02, QuoterV2) | Ethereum, Base, Arbitrum One, Robinhood Chain | producer + consumer | **EIP-5792 batch** for any two catalog ERC-20s, best existing tier, slippage ≤ 3%, on-chain deadline | input, expected, minimum, protocol, network, fee | native ETH / WETH wrap / Stock Tokens: own flow (code); slippage > 3%: own flow (code) |
-| Swap | Jupiter | Solana | producer + consumer | **sign-all** for independent steps (Wallet Standard multi-input) | input, expected, minimum, fee + deposits | a step spending an unlanded output starts its own group (protocol: no simulation on another tx's post-state); FloFi Wallet: one prompt per tx (wallet); only SOL/USDC/USDT (code) |
-| Transfer | native / ERC-20 | all EVM mainnets | consumer (+ producer to self) | **batch** | amount, recipient | — |
-| Transfer | SOL / SPL / Token-2022 | Solana | consumer | **sign-all** | amount, recipient, fee + deposits | — |
-| Bridge | Cross-chain Router (Across via LI.FI, direct Across) | USDC/USDG among Ethereum, Base, Arbitrum One, Robinhood | producer (own wallet) + consumer | own flow (owner step); ends its group; next group signed when the delivery reconciles | route, guaranteed minimum (own Review) | not batchable yet (code, L) |
-| Bridge | Universal router (Relay) | all 20 directed pairs incl. Solana | producer + consumer | own flow | own Review | LI.FI / Mayan / Across discovered but not executable (code) |
-| Supply / Borrow | Aave V3 | Ethereum, Base, Arbitrum One | Supply consumer; Borrow producer | **batch**, simulated (`eth_simulateV1`), HF ≥ 2 after borrow | amount, HF after, fee | needs `eth_simulateV1` on the RPC (deployment); never an upfront user operation; no market on Robinhood/Solana (protocol) |
-| Repay / Withdraw | Aave V3 | Ethereum, Base, Arbitrum One | Repay consumer; Withdraw producer | **batch** (new), simulated, partial repay, HF ≥ 2 after withdraw | amount, HF after, fee | full repayment not offered (owner-flow rule) |
-| Add liquidity | Uniswap v3 (catalog), Orca SOL/USDC | EVM catalog networks, Solana | consumer (one binding per deposit) | own flow (two inputs) | own Review | not batchable yet (code, L) |
-| Remove liquidity | Orca (Canvas only) | Solana | — | — | — | not in the strategy grammar (code, L) |
-| Automations | single swap | Base, Ethereum, Solana | — | own flow | — | multi-step automations not offered (code) |
+Proven through the real code paths, not card connections: `workflow-runs/universal-composition.test.ts` composes and plans **256 ordered action
+pairs and 1,784 triples** across the five mainnets (536 cross-chain through bridges) with the product's composer and planner;
+`workflow-runs/universal-runs.pg.test.ts` executes mixed workflows end to end on PostgreSQL (section E).
+
+| Action | Provider / profile | Networks | Composes as | Wallet grouping (user-funded) | Limits (kind) |
+|---|---|---|---|---|---|
+| Swap | Uniswap v3 catalog | Ethereum, Base, Arbitrum One, Robinhood Chain | producer + consumer | **EIP-5792 batch** (any two catalog ERC-20s verified on chain, best existing tier, slippage ≤ 3%, on-chain deadline) | native ETH / WETH wrap / Stock Tokens: own flow; slippage > 3%: refused at composition (`CATALOG_SWAP_SLIPPAGE_INVALID`), except the Base USDC⇄WETH reference swap, which runs its own flow (`WORKFLOW_SLIPPAGE_UNSUPPORTED`) |
+| Swap | Jupiter | Solana | producer + consumer | **sign-all** (Wallet Standard multi-input) | a step spending an unlanded output of its group starts a new group (`SOLANA_GROUP_STEP_DEPENDENT`); slippage > 3% refused (`SOLANA_SLIPPAGE_OUT_OF_RANGE`) |
+| Transfer | native / ERC-20 | all EVM mainnets | consumer only | **batch** (with the expiry guard) | Stock Tokens / non-catalog tokens: own flow (`USER_FUNDED_TRANSFER_ASSET_UNSUPPORTED`) |
+| Transfer | SOL / SPL / Token-2022 | Solana | consumer only | **sign-all** | — |
+| Bridge | Cross-chain Router / universal router | EVM ↔ EVM, EVM ↔ Solana | producer (to the owner's own wallet) + consumer | **own flow** (owner step, alone); the destination group is signed when the delivery reconciles | not batchable (quoted when it runs; a delivery cannot be atomic with the source) |
+| Supply / Borrow | Aave V3 | Ethereum, Base, Arbitrum One | Supply consumer; Borrow producer | **batch**, simulated, HF ≥ 2 after borrow | needs `eth_simulateV1` on the RPC; never an upfront user operation; no market on Robinhood/Solana |
+| Repay / Withdraw | Aave V3 | Ethereum, Base, Arbitrum One | Repay consumer; Withdraw producer | **batch**, simulated, partial repay, HF ≥ 2 after withdraw | full repayment not offered (owner-flow rule) |
+| Add liquidity | Uniswap v3 (catalog), Orca SOL/USDC | EVM catalog networks, Solana | consumer (one binding per deposit) | **own flow** (owner step, alone) | two inputs: not batchable (`USER_FUNDED_ACTION_NOT_BUILDABLE`) |
+| Remove liquidity | Orca (Canvas only) | Solana | — | — | not in the strategy grammar |
+| Automations | single swap | Base, Ethereum, Solana | — | own flow | multi-step automations not offered |
+
+Binding rules (asserted for every pair on every network): producers swap, bridge-to-own-wallet, withdraw, borrow → consumers swap, bridge,
+supply, repay, transfer, add_liquidity on the same chain. X → borrow/withdraw is `WORKFLOW_BINDING_CONSUMER_UNSUPPORTED` (they take funds from
+Aave, not the wallet); transfer/supply/repay/add_liquidity → X is `WORKFLOW_BINDING_PRODUCER_UNSUPPORTED` (they deliver nothing to the wallet);
+both still compose as ordered steps with their own amounts. Cross-chain binding needs a bridge. Every unbound pair composes.
 
 Interaction counts are exact only after the owner's browser reads the wallet (`/approve`, the Editor); a requester (MCP, channel) reports
 "at least N".
 
-## E. Wallet interactions (examples, MetaMask with `atomic` supported)
+## E. Wallet interactions (MetaMask-like wallet with `atomic` supported; from the planner matrix and the PostgreSQL runs)
 
-| Workflow | Before this PR | After |
-|---|---|---|
-| Arbitrum Swap USDC→WETH → Supply → Borrow | 1 `wallet_sendCalls` (PR #173) | 1 (+ deadline, unchanged count) |
-| Arbitrum Repay → Withdraw → Swap WETH→USDC | 3+ confirmations (repay, withdraw own flows; approvals) | **1** `wallet_sendCalls` |
-| Robinhood Swap WETH→USDG → Transfer | 2+ (swap own flow + approval, transfer) | **1** |
-| Arbitrum Swap USDC→ARB → Transfer | 2+ | **1** |
-| Swap → Uniswap liquidity → Supply (RPC without `eth_simulateV1` at due time) | run RUNNING for 7 days, every attempt refused | run HALTED at once → Resume → Supply through its own flow → COMPLETED |
+| Workflow | Wallet interactions |
+|---|---|
+| Arbitrum Swap USDC→WETH → Supply → Borrow | **1** `wallet_sendCalls` (browser e2e: exactly one request, 5 calls) |
+| Arbitrum Repay → Withdraw → Swap (bound to the withdrawal) | **1** — `[approve, repay, withdraw, approve, swap]`, run COMPLETED (PostgreSQL) |
+| Robinhood Swap WETH→USDG → Transfer | **1** |
+| Arbitrum Swap → Supply → Uniswap liquidity → Withdraw → Transfer | 1 + 2 (batch, liquidity flow, batch) — calls asserted, liquidity got exactly the swap's leftover, COMPLETED |
+| Arbitrum Swap → Bridge → Base Supply + Transfer (sharing the delivery) | 1 + 2 (batch, bridge flow, batch signed when the delivery landed), 1 network switch, COMPLETED |
+| Ethereum Swap → Bridge → Base Supply + Transfer | at least 1 + 2 |
+| Solana Swap + Transfer → Bridge → Arbitrum Repay | at least 1 + 2 (Solana 2, EVM 1) |
+| Robinhood Swap → Bridge to Solana → Jupiter + Orca | at least 1 + 3 |
+| Base liquidity alone | 1 (its own flow; never "single") |
+| Any RPC without `eth_simulateV1` for an Aave group | the run halts at once → Resume → each step through its own flow |
 
 ## F. Performance (production, read-only)
 
@@ -112,7 +144,17 @@ from the new readiness probe (section J).
 
 ## I. Reviews
 
-(filled at delivery)
+Read-only FloFi specialists (`.claude/agents/flofi-*`), each finding then fixed in its own commit, checked by an independent adversarial
+verifier and mutation-checked (the new test fails with the fix reverted). AI review is advisory; CircleCI is the certification authority.
+
+| Round | Reviewers | Real findings fixed (severity) |
+|---|---|---|
+| 1 | workflow, security, wallet-execution | re-preparation could lose a sent batch (P1); `blockDueGroup` ignored its compare-and-set (P1); Solana group marked FAILED after its first send (P1); token decimals trusted from the catalog, fee-on-transfer outputs, Aave batch without expiry, resume dropping batch history, browser marker before pre-send checks, wallet account not checked, lost answer unrecordable after a failed re-preparation (P2) |
+| 2 (verifiers) | adversarial verifiers | fee-on-transfer check compared with the minimum instead of the full receipt; no-simulation bound swaps; two-tab marker race; lost-answer marker before prepare (P1/P2) |
+| 3 | lending, swap, frontend-ux, infrastructure-ci | stale repay never halting; user operations spending a swap output unsimulated; transient RPC error picking a worse fee tier; raw codes and "partially completed" for nothing-sent runs; false expiry note; End hidden; the e2e reload check proving nothing; skipped proof certified PASS (P2) |
+| 4 | workflow, wallet-execution, security, mcp, channels | **transfer-only batches without on-chain expiry (P1)**; **run expiry blocking a batch the wallet could still send (P1)**; overlapping preparations; mismatched second answers accepted; markers failing open without storage; unversioned answer write; batched transfers without token checks; PARTIAL note claiming nothing later was sent; Resume on expired runs; channel counts, repeated halts and batch-wait notices (P2) |
+| 4b / 4c (verifiers + universal proof) | adversarial verifiers, composition proof | outcome-unknown batches worded "nothing completed" (P1); answers compared in every state; version-checked "not sent" path; no-simulation pre-check of the first real call; dated expiry text; a tie in interaction counts forcing step-by-step mode; missing Solana group reason (P2) |
+| Final | security, wallet-execution, workflow (adversarial, on the final HEAD) | see below |
 
 ## J. Deploy verification
 
@@ -120,10 +162,16 @@ from the new readiness probe (section J).
 
 ## K. Real limits and owner actions
 
-- **Not batchable yet (code, larger work):** bridges (deposit as the last call of a batch), add/remove liquidity, native-ETH swaps, Solana
-  dependent steps in one message, the Editor running owner-step groups in place (it links the signing page) and Solana sign-all from the Editor.
-- **Protocol / wallet limits:** EIP-5792 batching is the wallet's choice per chain; dependent Solana steps cannot be simulated before the producer
-  lands; a bridge delivery cannot be atomic with the source; requester-side counts are lower bounds.
-- **Owner actions:** dedicated read profile for quote latency (F); RPCs whose readiness reports `simulateV1: UNSUPPORTED` refuse Aave batches
-  on that chain (the steps then run through their own flows) until the owner points `FLOFI_USER_FUNDED_RPC_<id>` at an endpoint that supports it;
-  the first owner-signed mainnet run of a batch is the owner's decision.
+- **Run step by step by design (technical reasons):** bridges (quoted when they run; a delivery cannot be atomic with its source), add liquidity
+  (two inputs, its own review), native-ETH swaps and WETH9 wrap/unwrap (value path), Stock Tokens (disposability checks in their own flow);
+  remove liquidity is not in the strategy grammar.
+- **Signed when due (a separate prompt, never step by step):** any group after the first, a group that spends a bridge delivery, an Aave group
+  after a bridge, a Solana step spending an unlanded output of its own group.
+- **Protocol / wallet limits:** EIP-5792 batching is the wallet's choice per chain; requester-side counts are lower bounds; two different wallet
+  instances of the same account (desktop and mobile) do not share EIP-5792 id de-duplication, so confirming the same prompt on both could
+  execute twice — FloFi refuses and logs a second, different answer (`WALLET_BATCH_ANSWER_MISMATCH`) but cannot stop a second device.
+- **Not covered by automated tests:** Solana sign-all through the run engine (planner level only; the harness has no Solana RPC), the real bridge
+  flow's destination observation (flow double), EVM user operations with a real bundler (planner level), native-value transfers on the EVM double.
+- **Owner actions:** dedicated read profile for quote latency (F); a chain whose readiness reports `simulateV1: UNSUPPORTED` refuses Aave and
+  bound-swap batches there (they run step by step) until `FLOFI_USER_FUNDED_RPC_<id>` points at an endpoint that supports it; the first
+  owner-signed mainnet batch is the owner's decision.
