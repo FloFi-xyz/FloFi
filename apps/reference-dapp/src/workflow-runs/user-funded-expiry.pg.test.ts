@@ -134,7 +134,7 @@ describe('review fix R1: run expiry and a batch in the owner\'s wallet', () => {
   it('past the batch\'s validity the expired run HALTS (never FAILED: the batch may have executed); Resume is not offered; ending it says the batch may have executed', async () => {
     const { t, chain, h, owner, wallets, approval, run, toExpiry, current } = await setup();
     try {
-      toExpiry(-11 * 60_000);
+      toExpiry(-13 * 60_000);
       const p1 = await workflowRunUserFundedPrepare(h.surface, approval.approvalId, wallets, 0);
       // The owner's wallet executed it before its deadline; its answer is lost on the way (a late one arrives after the stop, below).
       toExpiry(-5 * 60_000);
@@ -169,7 +169,7 @@ describe('an answer for a group FloFi stopped while its handed-out batch was una
   /** A run whose handed-out batch was executed by the wallet before its deadline, its answer lost, and the run stopped at its expiry. */
   async function stoppedAtExpiry() {
     const s = await setup();
-    s.toExpiry(-11 * 60_000);
+    s.toExpiry(-13 * 60_000);
     const p1 = await workflowRunUserFundedPrepare(s.h.surface, s.approval.approvalId, s.wallets, 0);
     const artifact = p1.prepared as unknown as Artifact;
     s.toExpiry(-5 * 60_000);
@@ -229,7 +229,7 @@ describe('review S1: a stop that lands between an answer\'s read and its write i
     it(`authorize: ${name} between the read of the PREPARED group and its PREPARED → AUTHORIZED write — refused WALLET_BATCH_ANSWERED_AFTER_STOP and logged`, async () => {
       const { t, chain, h, owner, wallets, approval, run, toExpiry, current } = await setup();
       try {
-        toExpiry(-11 * 60_000);
+        toExpiry(-13 * 60_000);
         const p1 = await workflowRunUserFundedPrepare(h.surface, approval.approvalId, wallets, 0);
         const artifact = p1.prepared as unknown as Artifact;
         // The owner's wallet executes the batch before its deadline; its answer is still on its way when the batch's validity (and, for the
@@ -257,7 +257,7 @@ describe('review fix R6: ending a run whose batch was handed out and never answe
     const handed = await setup();
     try {
       await workflowRunUserFundedPrepare(handed.h.surface, handed.approval.approvalId, handed.wallets, 0);
-      handed.h.d.advance(11 * 60_000);
+      handed.h.d.advance(13 * 60_000);
       const ended = await workflowRunCancel(handed.h.surface, handed.approval.approvalId, handed.wallets);
       expect(ended.view.workflowRun!.run).toMatchObject({ state: 'CANCELLED', note: ENDED_UNANSWERED, groups: [{ state: 'SKIPPED', code: 'WALLET_BATCH_OUTCOME_UNKNOWN' }] });
       expect((await handed.h.store.steps(handed.run.runId)).map(s => [s.state, s.code])).toEqual([['SKIPPED', 'WALLET_BATCH_OUTCOME_UNKNOWN'],

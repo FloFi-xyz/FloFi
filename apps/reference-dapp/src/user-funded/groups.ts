@@ -167,7 +167,9 @@ async function prepareUserOperation(deps: UserFundedDeps, requirement: WorkflowR
   if (code !== '0x' && !upgraded) return no('EVM_ACCOUNT_DELEGATED_ELSEWHERE');
   if (!upgraded) return no('EVM_SMART_ACCOUNT_REQUIRED');
   const key = erc4337.nonceKeyOf(`${g.runId}:g${g.groupIndex}`);
-  const sequence = erc4337.decodeGetNonce(await t.rpc('eth_call', [{ to: erc4337.ENTRY_POINT_V0_7, data: erc4337.getNonceCall(group.owner, key) }, 'latest']));
+  // A v0.7 EntryPoint answers getNonce with `key << 64 | sequence` (never the bare sequence for a non-zero key): only the sequence is taken.
+  const sequence = entryPointNonceSequence(await t.rpc('eth_call', [{ to: erc4337.ENTRY_POINT_V0_7, data: erc4337.getNonceCall(group.owner, key) }, 'latest']), key);
+  if (sequence === null) return no('USER_FUNDED_RPC_UNAVAILABLE');
   const nonce = erc4337.userOpNonce(key, sequence);
   const fees = await feeFacts(t, group.owner);
   const maxFeePerGas = fees.gasPrice * (delayed ? DELAYED_FEE_MULTIPLE : 2n) + fees.priority;
@@ -435,7 +437,13 @@ export async function advanceSolanaSubmission(deps: UserFundedDeps, prepared: Pr
 export type Reconciled = { readonly status: 'PENDING' }
   | { readonly status: 'RECONCILED'; readonly steps: readonly StepFacts[]; readonly gasPaid: GasPaidFact; readonly transactions: readonly string[]; readonly group?: EvmGroupCalls }
   | { readonly status: 'FAILED'; readonly code: string; readonly gasPaid: GasPaidFact | null; readonly transactions: readonly string[]; readonly steps?: readonly StepFacts[];
-    readonly group?: EvmGroupCalls };
+    readonly group?: EvmGroupCalls }
+  /**
+   * The chain did NOT revert what was reported, yet it does not match what the owner signed (a leg missing, an amount other than signed, a
+   * transaction from another account or carrying other calls — e.g. a smart wallet that executed the batch through its own relayer): funds may
+   * have moved. Never FAILED (which says nothing irreversible happened): the group and its steps are UNCERTAIN and the run needs ATTENTION.
+   */
+  | { readonly status: 'UNMATCHED'; readonly code: string; readonly gasPaid: GasPaidFact | null; readonly transactions: readonly string[]; readonly group?: EvmGroupCalls };
 type TokenBalance = { readonly accountIndex: number; readonly mint: string; readonly owner?: string; readonly uiTokenAmount: { readonly amount: string } };
 type SolanaTxMeta = { readonly err: unknown; readonly fee: number | string; readonly preBalances: readonly (number | string)[]; readonly postBalances: readonly (number | string)[];
   readonly preTokenBalances?: readonly TokenBalance[]; readonly postTokenBalances?: readonly TokenBalance[] };
@@ -513,21 +521,103 @@ export async function reconcileEvmGroup(deps: UserFundedDeps, prepared: Prepared
       if (again.status !== 'MISMATCH' || !SUPERSEDED_MISMATCH.has(again.code)) { r = again; matched = earlier.group; break; }
     }
     const from = matched ? { group: matched } : {};
+    // Only a reverted batch FAILED; a mismatch the chain did not revert is UNMATCHED (it may have executed).
     return r.status === 'PENDING' ? r : r.status === 'RECONCILED' ? { status: 'RECONCILED', steps: r.steps, gasPaid: r.gasPaid, transactions: r.transactions, ...from }
-      : { status: 'FAILED', code: r.code, gasPaid: r.gasPaid, transactions: r.transactions, ...from };
+      : { status: r.status === 'REVERTED' ? 'FAILED' : 'UNMATCHED', code: r.code, gasPaid: r.gasPaid, transactions: r.transactions, ...from };
   }
   const bundler = deps.bundler(group.chain), userOpHash = String(submission.userOpHash);
   const receipt = bundler ? await bundler.receipt(userOpHash).catch(() => null) : null;
-  // Recorded but unknown to the bundler and not mined (the relay after the record never happened, or the bundler dropped it): the SAME
-  // signed operation is relayed again. Its nonce key admits it once, so this can never execute a second operation.
-  if (!receipt && bundler && authorization && await bundler.known(userOpHash).then(k => !k, () => false)) {
-    const resent = await relayUserOperation(deps, prepared, authorization, runOwner);
-    if (!resent.ok && !resent.code.startsWith('BETA_') && !['USER_OPERATION_BUNDLER_UNAVAILABLE', 'USER_OPERATION_FEE_TOO_LOW', 'USER_OPERATION_NONCE_INVALID',
-      'EXECUTION_PAUSED', 'EXECUTION_PAUSE_CONFIGURATION_INVALID'].includes(resent.code))
-      return { status: 'FAILED', code: resent.code, gasPaid: null, transactions: [] };
-    return { status: 'PENDING' };
+  // Recorded, but the bundler neither has a receipt nor knows it: whether it executed is read from the chain, never taken from the bundler's
+  // word (`reconcileLostUserOperation`): it is relayed again (the SAME signed bytes) only while its nonce is provably unconsumed.
+  if (!receipt && bundler && authorization && await bundler.known(userOpHash).then(k => !k, () => false))
+    return reconcileLostUserOperation(deps, t, group, prepared, authorization, userOpHash, runOwner);
+  return userOperationOutcome(await reconcileUserOperation(t, group, userOpHash, receipt?.transactionHash ?? null));
+}
+/** What the chain shows of a user operation, as the group's outcome: only a reverted operation FAILED; a mismatch it did not revert is UNMATCHED. */
+const userOperationOutcome = (r: Awaited<ReturnType<typeof reconcileUserOperation>>): Reconciled => r.status === 'PENDING' ? r
+  : r.status === 'RECONCILED' ? { status: 'RECONCILED', steps: r.steps, gasPaid: r.gasPaid, transactions: r.transactions }
+  : { status: r.status === 'REVERTED' ? 'FAILED' : 'UNMATCHED', code: r.code, gasPaid: r.gasPaid, transactions: r.transactions };
+/** Resend refusals that decide nothing about the operation (the bundler, the fee market, a pause, beta access): retried on a later pass. */
+const RESEND_RETRYABLE: ReadonlySet<string> = new Set(['USER_OPERATION_BUNDLER_UNAVAILABLE', 'USER_OPERATION_FEE_TOO_LOW', 'USER_OPERATION_NONCE_INVALID',
+  'EXECUTION_PAUSED', 'EXECUTION_PAUSE_CONFIGURATION_INVALID']);
+/**
+ * Bounds of the chain search for a forgotten operation's own `UserOperationEvent`: blocks per `eth_getLogs` request (the range the router's log
+ * scans use) and requests per pass, newest first, never below the preparation's block when the artifact records one (`fromBlock`). A search
+ * that ends without the event proves nothing about where the operation went.
+ */
+export const USER_OPERATION_LOG_SCAN_BLOCKS = 2_000n, USER_OPERATION_LOG_SCAN_REQUESTS = 50;
+const UINT64_MAX = (1n << 64n) - 1n;
+/**
+ * The current sequence of nonce `key` from an `EntryPoint.getNonce(sender, key)` answer, or null when the answer is not one about that key.
+ * EntryPoint v0.7 answers `key << 64 | sequence`; a value without key bits is read as the bare sequence.
+ */
+export function entryPointNonceSequence(answer: unknown, key: bigint): bigint | null {
+  let n: bigint;
+  try { n = erc4337.decodeGetNonce(answer); } catch { return null; }
+  return n >> 64n === key ? n & UINT64_MAX : n >> 64n === 0n ? n : null;
+}
+/** Whether the EntryPoint consumed the signed nonce of `op` (its key's sequence moved past it), read with FloFi's own transport; null: unreadable. */
+async function userOperationNonceConsumed(t: ChainTransport, op: erc4337.PackedUserOperation): Promise<boolean | null> {
+  try {
+    const { key, sequence } = erc4337.userOpNonceParts(op.nonce);
+    const current = entryPointNonceSequence(await t.rpc('eth_call', [{ to: erc4337.ENTRY_POINT_V0_7, data: erc4337.getNonceCall(op.sender, key) }, 'latest']), key);
+    return current === null ? null : current > sequence;
+  } catch { return null; }
+}
+type EventSearch = { readonly state: 'FOUND'; readonly transactionHash: string } | { readonly state: 'NOT_FOUND' } | { readonly state: 'UNREADABLE' };
+/**
+ * The transaction carrying the EntryPoint's own `UserOperationEvent` of `userOpHash` (topic1), searched on the chain itself. UNREADABLE: the
+ * transport failed or answered malformed (nothing is decided). NOT_FOUND: not in the searched range, or the transport/provider refuses the search
+ * (a method outside its allowlist, a range above its cap).
+ */
+async function findUserOperationEvent(t: ChainTransport, userOpHash: string, fromBlock: bigint | null): Promise<EventSearch> {
+  let raw: unknown;
+  try { raw = await t.rpc('eth_blockNumber', []); } catch { return { state: 'UNREADABLE' }; }
+  if (typeof raw !== 'string' || !/^0x[0-9a-fA-F]{1,16}$/.test(raw)) return { state: 'UNREADABLE' };
+  const hash = userOpHash.toLowerCase(), floor = fromBlock ?? 0n;
+  const isEvent = (log: unknown): log is { readonly transactionHash: string } => {
+    const l = log && typeof log === 'object' ? log as { address?: unknown; topics?: unknown; transactionHash?: unknown; removed?: unknown } : null;
+    return !!l && l.removed !== true && typeof l.address === 'string' && l.address.toLowerCase() === erc4337.ENTRY_POINT_V0_7 && Array.isArray(l.topics)
+      && String(l.topics[0]).toLowerCase() === erc4337.USER_OPERATION_EVENT_TOPIC && String(l.topics[1]).toLowerCase() === hash
+      && typeof l.transactionHash === 'string' && /^0x[0-9a-fA-F]{64}$/.test(l.transactionHash);
+  };
+  for (let to = BigInt(raw), request = 0; to >= floor && request < USER_OPERATION_LOG_SCAN_REQUESTS; to -= USER_OPERATION_LOG_SCAN_BLOCKS, request++) {
+    const from = to - USER_OPERATION_LOG_SCAN_BLOCKS + 1n > floor ? to - USER_OPERATION_LOG_SCAN_BLOCKS + 1n : floor;
+    let logs: unknown;
+    try { logs = await t.rpc('eth_getLogs', [{ address: erc4337.ENTRY_POINT_V0_7, topics: [erc4337.USER_OPERATION_EVENT_TOPIC, hash], fromBlock: hex(from), toBlock: hex(to) }]); }
+    catch (cause) { return { state: codeOf(cause, '') === 'DELEGATION_RPC_UNAVAILABLE' ? 'UNREADABLE' : 'NOT_FOUND' }; }
+    if (!Array.isArray(logs)) return { state: 'UNREADABLE' };
+    const event = logs.find(isEvent);
+    if (event) return { state: 'FOUND', transactionHash: event.transactionHash.toLowerCase() };
   }
-  const r = await reconcileUserOperation(t, group, userOpHash, receipt?.transactionHash ?? null);
-  return r.status === 'PENDING' ? r : r.status === 'RECONCILED' ? { status: 'RECONCILED', steps: r.steps, gasPaid: r.gasPaid, transactions: r.transactions }
-    : { status: 'FAILED', code: r.code, gasPaid: r.gasPaid, transactions: r.transactions };
+  return { state: 'NOT_FOUND' };
+}
+/**
+ * P1 review fix: a recorded operation the bundler neither has a receipt for nor knows — never relayed, dropped, or MINED and forgotten (its
+ * receipt lookback, another instance). The bundler's word alone decides nothing; the chain does, read with FloFi's own transport:
+ *   nonce unconsumed   the operation provably never executed: the SAME signed bytes are relayed again (its nonce admits it once). A refusal is
+ *                      FAILED only when the nonce is STILL unconsumed after it: an operation mined meanwhile fails the bundler's validation on its
+ *                      spent prefund (AA21) before its nonce (AA25). Retryable refusals (AA25 included) stay PENDING.
+ *   nonce consumed     never resent, never FAILED: the operation's own UserOperationEvent is searched on the chain and reconciled from its
+ *                      transaction exactly as from a bundler receipt; not found (the owner's revocation consumed the key, or the range cannot be
+ *                      searched): UNMATCHED (USER_OPERATION_NONCE_CONSUMED_UNRECONCILED) — funds may have moved, the run needs attention
+ *   unreadable         nothing is decided (PENDING)
+ */
+async function reconcileLostUserOperation(deps: UserFundedDeps, t: ChainTransport, group: EvmGroupCalls, prepared: Prepared,
+  authorization: Readonly<Record<string, unknown>>, userOpHash: string, runOwner?: BetaPrincipal): Promise<Reconciled> {
+  let op: erc4337.PackedUserOperation;
+  try { op = opOf(prepared.op as SerialOp); } catch { return { status: 'PENDING' }; }
+  let consumed = await userOperationNonceConsumed(t, op);
+  if (consumed === false) {
+    const resent = await relayUserOperation(deps, prepared, authorization, runOwner);
+    if (resent.ok || resent.code.startsWith('BETA_') || RESEND_RETRYABLE.has(resent.code)) return { status: 'PENDING' };
+    consumed = await userOperationNonceConsumed(t, op);
+    if (consumed === false) return { status: 'FAILED', code: resent.code, gasPaid: null, transactions: [] };
+  }
+  if (consumed === null) return { status: 'PENDING' };
+  const fromBlock = typeof prepared.fromBlock === 'string' && /^[0-9]{1,20}$/.test(prepared.fromBlock) ? BigInt(prepared.fromBlock) : null;
+  const found = await findUserOperationEvent(t, userOpHash, fromBlock);
+  if (found.state === 'UNREADABLE') return { status: 'PENDING' };
+  if (found.state === 'NOT_FOUND') return { status: 'UNMATCHED', code: 'USER_OPERATION_NONCE_CONSUMED_UNRECONCILED', gasPaid: null, transactions: [] };
+  return userOperationOutcome(await reconcileUserOperation(t, group, userOpHash, found.transactionHash));
 }

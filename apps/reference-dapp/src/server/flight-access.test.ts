@@ -8,7 +8,7 @@ vi.mock('../flight/host.ts', () => ({ flightCalendar: () => ({ listClosesAt: 1, 
 vi.mock('./platform-state-host.ts', () => ({ platformStateHost: () => h.host() }));
 vi.mock('../flight/beta-access.ts', async importOriginal => ({ ...await importOriginal<typeof import('../flight/beta-access.ts')>(),
   createBetaAccessStore: () => ({ require: h.require }) }));
-import { isFlightRecoveryMethod, requireFlightAccess, requireFlightOwner, withFlightAccess, withFlightOwner } from './flight-access';
+import { isFlightRecoveryMethod, requireFlightAccess, requireFlightOwner, withFlightAccess, withFlightGroupAnswerAccess, withFlightOwner } from './flight-access';
 import { currentBetaIdentity } from '../flight/beta-context';
 beforeEach(() => { vi.clearAllMocks(); h.session = null; h.wallets = []; h.host.mockResolvedValue({}); h.require.mockResolvedValue({ ok: true }); });
 describe('server request authorization before private work', () => {
@@ -29,6 +29,27 @@ describe('server request authorization before private work', () => {
     expect(h.require).not.toHaveBeenCalled();
     vi.stubEnv('FLOFI_BETA_ACCESS', 'closed');
     try { expect(await withFlightOwner(async () => currentBetaIdentity())).toEqual(h.session); }
+    finally { vi.unstubAllEnvs(); }
+  });
+  it('final review: a wallet batch answer (a batch the wallet already sent) is recorded under owner recovery after the grant ends; every other answer needs the grant', async () => {
+    h.session = { accountId: 'acct_a', sessionId: 'session_a' };
+    h.require.mockResolvedValue({ ok: false, code: 'BETA_ACCESS_REVOKED' });
+    for (const mode of ['closed', 'beta']) {
+      vi.stubEnv('FLOFI_BETA_ACCESS', mode);
+      try {
+        const work = vi.fn(async () => currentBetaIdentity());
+        expect(await withFlightGroupAnswerAccess({ kind: 'EVM_WALLET_BATCH', batchId: '0x01' }, work)).toEqual(h.session);
+        for (const answer of [{ kind: 'EVM_USER_OPERATION', signature: '0x' }, { kind: 'SOLANA_SIGN_ALL', transactions: [] }, null, 'EVM_WALLET_BATCH', { kind: 'evm_wallet_batch' }]) {
+          const refused = vi.fn(async () => 'ran');
+          await expect(withFlightGroupAnswerAccess(answer, refused)).rejects.toThrow(mode === 'closed' ? 'BETA_ACCESS_CLOSED' : 'BETA_ACCESS_REVOKED');
+          expect(refused).not.toHaveBeenCalled();
+        }
+      } finally { vi.unstubAllEnvs(); }
+    }
+    // Owner recovery still needs a live account session.
+    h.session = null;
+    vi.stubEnv('FLOFI_BETA_ACCESS', 'closed');
+    try { await expect(withFlightGroupAnswerAccess({ kind: 'EVM_WALLET_BATCH' }, async () => 'ran')).rejects.toThrow('BETA_SIGN_IN_REQUIRED'); }
     finally { vi.unstubAllEnvs(); }
   });
   it('requires a server account session; an authenticated account with no Flight grant also fails', async () => {

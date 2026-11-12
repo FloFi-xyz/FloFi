@@ -10,10 +10,10 @@ import { requirementOf, type WorkflowRequirement } from '../delegation/steps.ts'
 import { composeWorkflow, type WorkflowComposition } from '../engine/strategy-engine';
 import { evmWallet } from '../delegation/delegation.test-harness.ts';
 import type { ChainTransport } from '../delegation/chains.ts';
-import type { BundlerClient } from './bundler.ts';
+import { bundlerRefusal, type BundlerClient } from './bundler.ts';
 import { advanceSolanaSubmission, authorizeGroup, checkUserOperation, opOf, prepareGroup, reconcileEvmGroup, reconcileSolanaGroup, relayUserOperation, solanaOwnerDeltas,
   SOLANA_BLOCKS_PER_GROUP_TRANSACTION, SOLANA_GROUP_SEND_BUDGET_MAX_BLOCKS, solanaPreparedTtlMs, solanaSendBudget, solanaSendBudgetBlocks, type Prepared, type SerialOp,
-  type UserFundedDeps } from './groups.ts';
+  type UserFundedDeps, USER_OPERATION_LOG_SCAN_BLOCKS, USER_OPERATION_LOG_SCAN_REQUESTS } from './groups.ts';
 import { assertUserFundedSubmission, GAS_PAYER_CODES } from './gas-payer.ts';
 import { TRANSFER_TOPIC } from './evm-reconcile.ts';
 import type { EvmGroupCalls } from './evm-calls.ts';
@@ -40,6 +40,8 @@ function chain(owner: string, balance: bigint, receipts: Map<string, unknown>, u
         : upgraded && String(params[0]).toLowerCase() === owner ? '0xef0100' + erc4337.DELEGATOR_IMPLEMENTATION.slice(2) : '0x';
       case 'eth_call': {
         const call = params[0] as { to: string; data: string };
+        // The EntryPoint answers getNonce as v0.7 does: `key << 64 | sequence` (this owner has used no nonce of any key yet).
+        if (call.to.toLowerCase() === erc4337.ENTRY_POINT_V0_7.toLowerCase() && call.data.startsWith('0x35567e1a')) return word(BigInt('0x' + call.data.slice(-64)) << 64n);
         return call.to.toLowerCase() === USDC && call.data === '0x313ce567' ? word(6n) : word(0n);
       }
       case 'eth_maxPriorityFeePerGas': return '0x5f5e100';
@@ -83,6 +85,8 @@ describe('BUILD-FLOFI-UNIVERSAL-WORKFLOW-002 owner user operation (ERC-4337 v0.7
     const op = opOf(p.op);
     expect(op.paymasterAndData).toBe('0x');
     expect(erc4337.userOpNonceParts(op.nonce).key).toBe(erc4337.nonceKeyOf(`${g.runId}:g1`));
+    // Final review: the sequence is read out of the EntryPoint's `key << 64 | sequence` answer (never the whole word, which no nonce can hold).
+    expect(erc4337.userOpNonceParts(op.nonce).sequence).toBe(0n);
     expect(BigInt(p.fee.maxCost)).toBe(erc4337.maxPrefund(erc4337.userOperationGas(op)));
     // Only the owner's signature of exactly this operation is accepted.
     const signature = await owner.signDigest(erc4337.delegatorUserOpDigest(8453, op));
@@ -135,9 +139,10 @@ describe('BUILD-FLOFI-UNIVERSAL-WORKFLOW-002 owner user operation (ERC-4337 v0.7
       data: '0x' + [0n, 1n, 1n, 1n].map(v => v.toString(16).padStart(64, '0')).join('') });
     bundled = { userOpHash: p.userOpHash, sender: address, nonce: 0n, success: true, actualGasCost: 1n, actualGasUsed: 1n, transactionHash: txHash, blockNumber: 1n, logs: [], reason: null };
     receipts.set(txHash, { transactionHash: txHash, status: '0x1', logs: [eventWith(address, '0x' + '5'.repeat(40))] });
-    expect(await reconcileEvmGroup(deps(10n ** 18n), p, { userOpHash: p.userOpHash })).toMatchObject({ status: 'FAILED', code: 'GAS_SPONSORSHIP_REFUSED' });
+    // Executed (not reverted) yet not what the owner signed: UNMATCHED (funds may have moved; the run needs attention), never FAILED.
+    expect(await reconcileEvmGroup(deps(10n ** 18n), p, { userOpHash: p.userOpHash })).toMatchObject({ status: 'UNMATCHED', code: 'GAS_SPONSORSHIP_REFUSED' });
     receipts.set(txHash, { transactionHash: txHash, status: '0x1', logs: [eventWith(stranger.address.toLowerCase(), '0x' + '0'.repeat(40))] });
-    expect(await reconcileEvmGroup(deps(10n ** 18n), p, { userOpHash: p.userOpHash })).toMatchObject({ status: 'FAILED', code: 'GAS_PAYER_NOT_OWNER' });
+    expect(await reconcileEvmGroup(deps(10n ** 18n), p, { userOpHash: p.userOpHash })).toMatchObject({ status: 'UNMATCHED', code: 'GAS_PAYER_NOT_OWNER' });
   });
 
   it('never prepares an operation for a plain account, refuses one whose signed gas words are too low, and resends a recorded one the bundler lost', async () => {
@@ -173,6 +178,146 @@ describe('BUILD-FLOFI-UNIVERSAL-WORKFLOW-002 owner user operation (ERC-4337 v0.7
     known = true;
     expect(await reconcileEvmGroup(deps(), p, record.value, authorization.value)).toEqual({ status: 'PENDING' });
     expect(sent).toHaveLength(1);
+  });
+});
+
+/**
+ * A recorded (authorized, simulated) owner operation that the bundler neither has a receipt for nor knows, on a loopback chain whose EntryPoint
+ * answers `getNonce` as v0.7 does (`key << 64 | sequence`) and serves `eth_getLogs` over the blocks it holds. `refusal`: what the bundler answers a
+ * resend (null: accepted); `onSend`: what happens on the chain while a resend reaches the bundler.
+ */
+async function lostOperation(runId: string) {
+  const owner = await evmWallet(), address = owner.address.toLowerCase(), receipts = new Map<string, unknown>(), sent: erc4337.PackedUserOperation[] = [];
+  const state: { sequence: bigint | Error; head: bigint; logs: { blockNumber: bigint; log: Record<string, unknown> }[]; getLogs: Error | null; refusal: string | null;
+    nonceReads: number; ranges: [bigint, bigint][]; onSend: (() => void) | null } = { sequence: 0n, head: 1_000_000n, logs: [], getLogs: null, refusal: null, nonceReads: 0,
+    ranges: [], onSend: null };
+  const plain = chain(address, 10n ** 18n, receipts);
+  let key = 0n;
+  const transport: ChainTransport = { chain: BASE, provenance: 'MOCKED', rpc: async (method, params) => {
+    const call = params[0] as { to?: string; data?: string; address?: string; topics?: string[]; fromBlock?: string; toBlock?: string };
+    if (method === 'eth_call' && call.to === erc4337.ENTRY_POINT_V0_7 && key !== 0n) {
+      state.nonceReads++;
+      expect(call.data).toBe(erc4337.getNonceCall(address, key));
+      if (state.sequence instanceof Error) throw state.sequence;
+      return word(key << 64n | state.sequence);
+    }
+    if (method === 'eth_blockNumber') return '0x' + state.head.toString(16);
+    if (method === 'eth_getLogs') {
+      if (state.getLogs) throw state.getLogs;
+      expect([call.address, call.topics]).toEqual([erc4337.ENTRY_POINT_V0_7, [erc4337.USER_OPERATION_EVENT_TOPIC, p.userOpHash]]);
+      const from = BigInt(call.fromBlock!), to = BigInt(call.toBlock!);
+      state.ranges.push([from, to]);
+      return state.logs.filter(l => l.blockNumber >= from && l.blockNumber <= to).map(l => l.log);
+    }
+    return plain.rpc(method, params);
+  } };
+  const lostBundler: BundlerClient = { chainId: 8453, verify: async () => undefined,
+    estimate: async () => ({ verificationGasLimit: 100_000n, callGasLimit: 200_000n, preVerificationGas: 60_000n }),
+    send: async op => { sent.push(op); state.onSend?.(); if (state.refusal) throw bundlerRefusal(state.refusal); return erc4337.userOpHash(op, 8453); },
+    receipt: async () => null, known: async () => false };
+  const deps: UserFundedDeps = { chains: [BASE], evm: () => transport, bundler: () => lostBundler, solana: null, jupiter: null, now: () => new Date('2026-11-07T10:00:00Z') };
+  const { composition, requirement } = compose(TWO_TRANSFERS);
+  const prepared = await prepareGroup(deps, composition, requirement, { runId, groupIndex: 0, strategy: 'EVM_USER_OPERATION', chain: BASE, feePayer: address, stepFrom: 0, stepTo: 1 });
+  if (!prepared.ok) throw new Error(prepared.code);
+  const p = prepared.value.prepared as Prepared & { op: SerialOp; userOpHash: string };
+  key = erc4337.userOpNonceParts(BigInt(p.op.nonce)).key;
+  const signature = await owner.signDigest(erc4337.delegatorUserOpDigest(8453, opOf(p.op)));
+  const authorization = authorizeGroup(p, { kind: 'EVM_USER_OPERATION', signature }, address, new Date());
+  if (!authorization.ok) throw new Error(authorization.code);
+  const record = await checkUserOperation(deps, p, authorization.value, address);
+  if (!record.ok) throw new Error(record.code);
+  /** The bundle transaction of the operation at `blockNumber`: its UserOperationEvent (owner, no paymaster, success) and the two owner transfers. */
+  const mine = (blockNumber: bigint, txHash = '0x' + 'ab'.repeat(32)) => {
+    const event = { address: erc4337.ENTRY_POINT_V0_7, topics: [erc4337.USER_OPERATION_EVENT_TOPIC, p.userOpHash, topic(address), topic('0x' + '0'.repeat(40))],
+      data: '0x' + [0n, 1n, 4_242n, 98_765n].map(v => v.toString(16).padStart(64, '0')).join('') };
+    const transfer = (to: string, amount: bigint) => ({ address: USDC, topics: [TRANSFER_TOPIC, topic(address), topic(to)], data: word(amount) });
+    receipts.set(txHash, { transactionHash: txHash, status: '0x1', from: '0x' + '9'.repeat(40), blockNumber: '0x' + blockNumber.toString(16),
+      logs: [transfer('0x' + '2'.repeat(40), 1_000_000n), transfer('0x' + '3'.repeat(40), 2_000_000n), event] });
+    state.logs.push({ blockNumber, log: { ...event, blockNumber: '0x' + blockNumber.toString(16), transactionHash: txHash, removed: false } });
+    state.sequence = 1n;
+    return txHash;
+  };
+  const reconcile = (prep: Prepared = p) => reconcileEvmGroup(deps, prep, record.value, authorization.value);
+  return { address, p, state, sent, mine, reconcile };
+}
+
+describe('P1 review fix: a user operation the bundler forgot is decided by the chain (EntryPoint nonce, its own event), never by the bundler alone', () => {
+  it('mined and forgotten (nonce consumed): reconciled from its own UserOperationEvent found on the chain, never resent', async () => {
+    const o = await lostOperation('wfr_' + 'l'.repeat(26));
+    // Mined 5,000 blocks ago and forgotten; the owner then spent the ETH, so a resend would be refused AA21 (the red-team case).
+    const txHash = o.mine(o.state.head - 5_000n);
+    o.state.refusal = 'AA21 didn\'t pay prefund';
+    const r = await o.reconcile();
+    expect(r).toMatchObject({ status: 'RECONCILED', transactions: [txHash], gasPaid: { payer: o.address, amount: '4242', unit: 'wei', source: 'USER_OPERATION_EVENT' },
+      steps: [{ stepIndex: 0, spent: [{ amount: '1000000' }] }, { stepIndex: 1, spent: [{ amount: '2000000' }] }] });
+    expect(o.sent).toHaveLength(0);
+    // Searched newest first, in contiguous ranges of the bounded size, until the event.
+    expect(o.state.ranges).toEqual([[o.state.head - 1_999n, o.state.head], [o.state.head - 3_999n, o.state.head - 2_000n], [o.state.head - 5_999n, o.state.head - 4_000n]]);
+    expect(USER_OPERATION_LOG_SCAN_BLOCKS).toBe(2_000n);
+  });
+
+  it('nonce consumed without its event (a revocation, or a range that cannot be searched): UNMATCHED, never resent, never FAILED', async () => {
+    const o = await lostOperation('wfr_' + 'm'.repeat(26));
+    o.state.sequence = 1n;
+    o.state.refusal = 'AA25 invalid account nonce';
+    const unmatched = { status: 'UNMATCHED', code: 'USER_OPERATION_NONCE_CONSUMED_UNRECONCILED', gasPaid: null, transactions: [] };
+    expect(await o.reconcile()).toEqual(unmatched);
+    expect(o.sent).toHaveLength(0);
+    // The search is bounded: at most USER_OPERATION_LOG_SCAN_REQUESTS ranges back from the head ...
+    expect(o.state.ranges).toHaveLength(USER_OPERATION_LOG_SCAN_REQUESTS);
+    expect(o.state.ranges.at(-1)).toEqual([o.state.head - USER_OPERATION_LOG_SCAN_BLOCKS * BigInt(USER_OPERATION_LOG_SCAN_REQUESTS) + 1n,
+      o.state.head - USER_OPERATION_LOG_SCAN_BLOCKS * BigInt(USER_OPERATION_LOG_SCAN_REQUESTS - 1)]);
+    // ... and never below the preparation's block when the artifact records one.
+    o.state.ranges.length = 0;
+    expect(await o.reconcile({ ...o.p, fromBlock: (o.state.head - 2_500n).toString() })).toEqual(unmatched);
+    expect(o.state.ranges).toEqual([[o.state.head - 1_999n, o.state.head], [o.state.head - 2_500n, o.state.head - 2_000n]]);
+    // A transport or provider that refuses the search (eth_getLogs outside its allowlist, a range above its cap) cannot prove anything: UNMATCHED.
+    for (const refusal of ['DELEGATION_RPC_METHOD_FORBIDDEN', 'query exceeds max block range 1000']) {
+      o.state.getLogs = new Error(refusal);
+      expect(await o.reconcile()).toEqual(unmatched);
+    }
+    // An unreachable chain decides nothing.
+    o.state.getLogs = new Error('DELEGATION_RPC_UNAVAILABLE');
+    expect(await o.reconcile()).toEqual({ status: 'PENDING' });
+    expect(o.sent).toHaveLength(0);
+  });
+
+  it('nonce unconsumed: the same signed bytes are resent; a refusal FAILS only while the nonce is still unconsumed after it, AA25 stays pending', async () => {
+    const o = await lostOperation('wfr_' + 'n'.repeat(26));
+    // Accepted: pending (the existing "relayed again" behaviour, the same operation).
+    expect(await o.reconcile()).toEqual({ status: 'PENDING' });
+    expect(o.sent.map(op => erc4337.userOpHash(op, 8453))).toEqual([o.p.userOpHash]);
+    // AA21 and the nonce still unconsumed after it: provably never executed, FAILED.
+    o.state.refusal = 'AA21 didn\'t pay prefund';
+    const reads = o.state.nonceReads;
+    expect(await o.reconcile()).toEqual({ status: 'FAILED', code: 'USER_FUNDED_INSUFFICIENT_NATIVE_BALANCE', gasPaid: null, transactions: [] });
+    expect(o.state.nonceReads - reads).toBe(2);
+    expect(o.sent).toHaveLength(2);
+    // AA25 while the chain still reads the nonce unconsumed: pending (read again on the next pass).
+    o.state.refusal = 'AA25 invalid account nonce';
+    expect(await o.reconcile()).toEqual({ status: 'PENDING' });
+    // Mined between the nonce read and the resend (another bundler instance), whose resend is then refused AA21 on the spent prefund: the nonce
+    // is read again before any FAILED — consumed now, so the operation is reconciled from its own event instead.
+    o.state.refusal = 'AA21 didn\'t pay prefund';
+    const txHash = '0x' + 'cd'.repeat(32);
+    o.state.onSend = () => { o.state.onSend = null; o.mine(o.state.head - 10n, txHash); };
+    expect(await o.reconcile()).toMatchObject({ status: 'RECONCILED', transactions: [txHash], gasPaid: { payer: o.address, amount: '4242' } });
+    expect(o.sent).toHaveLength(4);
+    // Consumed from now on: never resent again.
+    expect(await o.reconcile()).toMatchObject({ status: 'RECONCILED', transactions: [txHash] });
+    expect(o.sent).toHaveLength(4);
+  });
+
+  it('an unreadable EntryPoint nonce decides nothing: PENDING, nothing resent', async () => {
+    const o = await lostOperation('wfr_' + 'o'.repeat(26));
+    o.state.refusal = 'AA21 didn\'t pay prefund';
+    o.state.sequence = new Error('DELEGATION_RPC_UNAVAILABLE');
+    expect(await o.reconcile()).toEqual({ status: 'PENDING' });
+    expect(o.sent).toHaveLength(0);
+    // Nor does an artifact without the signed operation.
+    o.state.sequence = 0n;
+    expect(await o.reconcile({ ...o.p, op: undefined })).toEqual({ status: 'PENDING' });
+    expect(o.sent).toHaveLength(0);
   });
 });
 

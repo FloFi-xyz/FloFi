@@ -21,7 +21,8 @@
  *   withdraw  Pool.withdraw(asset, amount, OWNER) — exact amount to the owner; the whole-batch simulation proves the owner's health factor stays
  *             at least 2.0 afterwards (the owner-signed Withdraw flow's minimum, `WITHDRAW_UNSAFE_HEALTH_FACTOR`)
  *   transfer  ERC20.transfer(recipient, amount) or a native value transfer to the recipient the owner authored (or the owner itself); an ERC-20
- *             only of a token a batched swap may spend (never a Stock Token), verified on chain the same way first
+ *             only of a token a batched swap may spend (never a Stock Token), verified on chain the same way first; a native value transfer
+ *             only to the owner or to a recipient without code (read first; the owner-signed native transfer's EOA rule)
  *
  * A wallet batch expires on chain at the preparation's validity (`deadline`): through each swap's own SwapRouter02 deadline, else through a
  * DEADLINE_GUARD as its first call.
@@ -339,6 +340,20 @@ export async function buildEvmGroupCalls(requirement: WorkflowRequirement, from:
     verified.set(k, decimals);
     return null;
   };
+  // P2 review fix: a batched native value transfer pays an EOA (or the owner) only, read once per build — the owner-signed native transfer's
+  // rule (`simulateNativeTransfer`): ANY code at the recipient (a contract, or an EIP-7702 delegation designator `0xef0100…`, whose delegate's
+  // code would run) is refused, on every chain (USER_FUNDED_TRANSFER_RECIPIENT_NOT_EOA). The step then runs through the owner-signed flow, which
+  // applies its profile's rules (a refusal, or the recipient's code hash bound into its review). A read that fails refuses as transient.
+  const eoa = new Map<string, boolean>();
+  const nativeRecipientRefusal = async (t: ChainTransport, recipient: string): Promise<string | null> => {
+    if (!eoa.has(recipient)) {
+      let code: unknown;
+      try { code = await t.rpc('eth_getCode', [recipient, 'latest']); } catch { return 'USER_FUNDED_RPC_UNAVAILABLE'; }
+      if (typeof code !== 'string' || !/^0x[0-9a-fA-F]*$/.test(code)) return 'USER_FUNDED_RPC_UNAVAILABLE';
+      eoa.set(recipient, code === '0x');
+    }
+    return eoa.get(recipient) ? null : 'USER_FUNDED_TRANSFER_RECIPIENT_NOT_EOA';
+  };
   for (const step of steps) {
     const refuse = (code: string) => ({ ok: false as const, stepIndex: step.index, code });
     const problem = evmStepBuildable(step, deps.chains);
@@ -367,10 +382,11 @@ export async function buildEvmGroupCalls(requirement: WorkflowRequirement, from:
       const native = input.address === NATIVE;
       // An ERC-20 transfer's token is verified on chain before it is batched (code present, decimals() equal to the catalog's, which the step
       // was scaled with: `transferAssetRefusal`), with the swap path's cached verifier: a wrong catalog entry would send orders of magnitude more.
-      if (!native) {
+      // A native transfer to anyone but the owner pays an EOA only (`nativeRecipientRefusal`).
+      if (!native || recipient !== owner) {
         const t = deps.transport(step.chain);
         if (!t) return refuse('USER_FUNDED_RPC_UNAVAILABLE');
-        const problem = await verifyToken(t, input.address, input.decimals);
+        const problem = native ? await nativeRecipientRefusal(t, recipient) : await verifyToken(t, input.address, input.decimals);
         if (problem) return refuse(problem);
       }
       const indices = push(native ? { kind: 'NATIVE_TRANSFER', to: recipient, amount: amount.toString() } : { kind: 'ERC20_TRANSFER', token: input.address, to: recipient, amount: amount.toString() });

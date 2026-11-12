@@ -14,7 +14,9 @@
 import type { ApprovalRequesterKind, HandoffRecord, WalletRef } from '../platform/handoff-store.ts';
 import { composeWorkflowBound, type WorkflowComposition } from '../engine/strategy-engine';
 import type { StrategySpec } from '../engine/strategy-spec';
-import { ENGINE_VERSION, evaluateWorkflowGates, type HandoffPolicy } from '../mcp/execution.ts';
+import { ENGINE_VERSION, evaluateGates, evaluateWorkflowGates, handoffFindings, type HandoffPolicy } from '../mcp/execution.ts';
+import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
+import { executionRefusal } from '../server/execution-guard.ts';
 import { executionExplorer } from '../domain/execution-lifecycle';
 import { planNamespace, planNamespaces } from '../platform/approvals.ts';
 import { strategyTestNetworks } from '../platform/strategy.ts';
@@ -25,7 +27,7 @@ import { authorizationPlan, type AuthorizationPlan, type DelegationFacts } from 
 import type { RunRecord, RunStepRecord, WorkflowRunStore } from './pg-store.ts';
 import { advanceRun, type RunnerDeps } from './runner.ts';
 import { stopRunFromCurrent } from './user-funded-pass.ts';
-import { CONFIRM_RUN_SECONDS, MAYBE_SUBMITTED, WALLET_BATCH_OUTCOME_UNKNOWN, walletBatchUnanswered } from './state-machine.ts';
+import { CONFIRM_RUN_SECONDS, MAYBE_SUBMITTED, WALLET_BATCH_OUTCOME_UNKNOWN, WALLET_BATCH_SETTLE_MS, walletBatchUnanswered } from './state-machine.ts';
 import { planExecutionGroups, type UserFundedFacts, type WalletProfile } from './execution-groups.ts';
 import { requirementOf, assetKey } from '../delegation/steps.ts';
 import { evmStepBuildable, type AssetAmountFact, type EvmGroupCalls } from '../user-funded/evm-calls.ts';
@@ -213,6 +215,8 @@ export const PERMANENT_DUE_REFUSALS: ReadonlySet<string> = new Set(['WORKFLOW_BI
   // A transfer or swap of an asset no batch may move (a Stock Token, a token outside the catalog or with other decimals): a run grouped before
   // that rule existed meets it only here, and it never changes on retry; the step's own owner-signed flow reviews and sends it.
   'USER_FUNDED_TRANSFER_ASSET_UNSUPPORTED', 'USER_FUNDED_SWAP_ASSET_UNSUPPORTED',
+  // A native transfer to an address with code: the owner-signed transfer flow applies its own contract-recipient rule to it.
+  'USER_FUNDED_TRANSFER_RECIPIENT_NOT_EOA',
   // What the chain's own contracts say (a token's code or decimals, a fee-on-transfer token) or the registry lacks (a router for the expiry guard).
   'TOKEN_METADATA_MISMATCH', 'CONTRACT_CODE_MISSING', 'SIMULATION_SWAP_OUTPUT_SHORT', 'USER_FUNDED_DEADLINE_UNAVAILABLE',
   // A batched Repay no longer below the owner's current variable debt (repaid elsewhere meanwhile): the signed amount is fixed and the debt only
@@ -291,28 +295,62 @@ function reconciledAvailable(steps: readonly RunStepRecord[], producer: number, 
   return received > used ? received - used : 0n;
 }
 export type PreparedGroupView = { readonly groupIndex: number; readonly strategy: string; readonly chain: string; readonly feePayer: string; readonly validUntil: string | null;
-  readonly prepared: Prepared };
+  readonly prepared: Prepared;
+  /**
+   * Wallet batch only: the hand-out token of this group's batch. The browser that received the batch keeps it and presents it to be given the
+   * same batch again, or to have it prepared again once it can no longer execute (`WALLET_BATCH_HANDED_OUT_ELSEWHERE` without it).
+   */
+  readonly handout: string | null };
+/**
+ * Final review (P1): one wallet batch is handed to ONE browser. Two devices or wallet instances of the same account share no EIP-5792 id
+ * de-duplication, so the same batch (or a new preparation of it) handed to a second one could execute twice. The first preparation of a
+ * batch group returns a random hand-out token and stores only its SHA-256 on the prepared artifact; handing the batch out again, or preparing
+ * it again after its validity, needs that token. Another browser is refused WALLET_BATCH_HANDED_OUT_ELSEWHERE (the owner continues in the
+ * browser that holds it, or ends the run once the batch can no longer execute). A preparation stored before this rule has no token bound.
+ */
+const HANDOUT = /^[A-Za-z0-9_-]{43}$/;
+const handoutHashOf = (token: string) => createHash('sha256').update(token).digest('hex');
+function handedTo(g: GroupRecord, handout: string | undefined): boolean {
+  const bound = (g.prepared as { readonly handoutHash?: unknown } | null)?.handoutHash;
+  if (typeof bound !== 'string') return true;
+  if (handout === undefined || !HANDOUT.test(handout)) return false;
+  const a = Buffer.from(handoutHashOf(handout), 'hex'), b = Buffer.from(bound, 'hex');
+  return a.length === b.length && timingSafeEqual(a, b);
+}
+/** What the owner's browser is shown of a prepared artifact: never the hand-out token's hash. */
+const publicPrepared = (prepared: Prepared): Prepared => Object.fromEntries(Object.entries(prepared).filter(([key]) => key !== 'handoutHash')) as Prepared;
 /**
  * Builds what the owner's wallet signs for one group, from fresh chain facts: an UPFRONT group at any time while the run is open; a WHEN_DUE
  * group only once it is the current group (its delivery reconciled). Bound steps spend the reconciled facts (never an estimate).
  */
-export async function prepareUserFundedGroup(deps: WorkflowRunDeps, run: RunRecord, wallets: readonly WalletRef[], groupIndex: number): Promise<PreparedGroupView> {
+export async function prepareUserFundedGroup(deps: WorkflowRunDeps, run: RunRecord, wallets: readonly WalletRef[], groupIndex: number,
+  handout?: string): Promise<PreparedGroupView> {
   assertRunWallets(run, wallets);
   if (run.mode !== 'USER_FUNDED' || !['RUNNING', 'ATTENTION'].includes(run.state)) refuse(`WORKFLOW_RUN_${run.mode !== 'USER_FUNDED' ? 'NOT_USER_FUNDED' : run.state}`);
   const userFunded = deps.userFunded ?? refuse('USER_FUNDED_NOT_ENABLED');
+  // Final review (P1): an operator pause stops EVERY hand-out to the owner's wallet — a batch prepared before the pause too, which the wallet
+  // would send the moment the owner confirms. Answers for batches already handed out are still taken (groups.ts `authorizeGroup`).
+  const paused = executionRefusal();
+  if (paused) refuse(paused);
   const groups = await deps.store.groups(run.runId), steps = await deps.store.steps(run.runId);
   let g: GroupRecord = groups[groupIndex] ?? refuse('WORKFLOW_RUN_GROUP_NOT_FOUND');
   if (g.strategy === 'EVM_OWNER_STEP' || g.strategy === 'SOLANA_OWNER_STEP') refuse('WORKFLOW_RUN_GROUP_OWNER_STEP');
   const batch = g.strategy === 'EVM_WALLET_BATCH', now = deps.now();
   // Nothing is handed out once the run's window has passed (a batch already in the owner's wallet is still answered, until its deadline).
   if (run.expiresAt <= now) refuse('WORKFLOW_RUN_EXPIRED');
+  // A batch already handed to a browser goes again, or is prepared again, only to that browser (`handedTo`).
+  if (batch && g.state === 'PREPARED' && !handedTo(g, handout)) refuse('WALLET_BATCH_HANDED_OUT_ELSEWHERE');
   if (g.state === 'PREPARED' && g.validUntil && g.validUntil > now) {
     // P0 universal execution: a cached wallet batch is handed out only with enough validity left to review and confirm it before its on-chain
     // deadline. With less, it is NOT prepared again while it is still valid: two devices or wallet instances share no EIP-5792 id dedupe, so a
     // second, overlapping batch could execute too. The owner confirms the open request, or asks again once its validUntil has passed.
     if (batch && g.validUntil.getTime() <= now.getTime() + PREPARED_MIN_REMAINING_MS) refuse('USER_FUNDED_PREPARED_STILL_VALID');
-    return { groupIndex, strategy: g.strategy, chain: g.chain, feePayer: g.feePayer, validUntil: g.validUntil.toISOString(), prepared: g.prepared as Prepared };
+    return { groupIndex, strategy: g.strategy, chain: g.chain, feePayer: g.feePayer, validUntil: g.validUntil.toISOString(),
+      prepared: publicPrepared(g.prepared as Prepared), handout: batch ? handout ?? null : null };
   }
+  // Nor in the settle margin after it (`WALLET_BATCH_SETTLE_MS`): the batch's on-chain deadline is its validity, and the chain's clock may run
+  // behind FloFi's — a batch prepared again inside it could execute alongside the earlier one.
+  if (batch && g.state === 'PREPARED' && g.validUntil && g.validUntil.getTime() + WALLET_BATCH_SETTLE_MS > now.getTime()) refuse('USER_FUNDED_PREPARED_STILL_VALID');
   // A new preparation never outlives the run: what the owner's wallet could still execute after the run's window (a wallet batch until its
   // on-chain deadline, Solana transactions until their blockhash expires) would be refused as expired after it ran.
   if (run.expiresAt.getTime() <= now.getTime() + preparedHorizonMs(g.strategy)) refuse('WORKFLOW_RUN_EXPIRED');
@@ -363,17 +401,30 @@ export async function prepareUserFundedGroup(deps: WorkflowRunDeps, run: RunReco
   }
   const req = requirementOf(composition);
   if (!req.ok) return refuse(req.code);
+  // Final review (P1): every step of the group passes its own gates and review AGAIN now, exactly as a confirm-mode step does before it becomes
+  // READY (runner.ts): a flow whose execution the operator turned off, or a policy that changed, after the run started is honored when its
+  // group is prepared — FloFi never hands out a new wallet request, nor prepares what it would relay, for a step its own flow refuses today.
+  const policy = deps.policyFor(run.requester.kind);
+  for (let i = g.stepFrom; i <= g.stepTo; i++) {
+    const step = composition.steps[i] ?? refuse('WORKFLOW_STEP_STALE');
+    const gates = await evaluateGates(step, deps.runtime, policy);
+    if (!gates.handoff.allowed) return refuse(gates.handoff.reason ?? 'WORKFLOW_STEP_NOT_EXECUTABLE');
+    if (handoffFindings(step).blockers.length) return refuse('REVIEW_BLOCKED');
+  }
   const r = await prepareGroup(userFunded, composition, req.value, { runId: run.runId, groupIndex, strategy: g.strategy, chain: g.chain, feePayer: g.feePayer,
     stepFrom: g.stepFrom, stepTo: g.stepTo }, { guaranteed, delayed: g.awaitsDelivery !== null && !due });
   if (!r.ok) return blockable && PERMANENT_DUE_REFUSALS.has(r.code.split(':')[0]!) ? blockDueGroup(deps, run, g, r.code) : refuse(r.code);
   // The exact validity, for the same reason (the preparation's own clock moved on while it read the chain). Nothing is stored or handed out.
   if (g.strategy !== 'EVM_USER_OPERATION' && r.value.validUntil >= run.expiresAt) return refuse('WORKFLOW_RUN_EXPIRED');
-  const prepared: Prepared = superseded.length ? { ...r.value.prepared, superseded } : r.value.prepared;
+  // The browser that holds the batch keeps its token across preparations; a first preparation (or one stored before the rule) gets a new one.
+  const token = batch ? rewrite && handout !== undefined && HANDOUT.test(handout) ? handout : randomBytes(32).toString('base64url') : null;
+  const prepared: Prepared = { ...r.value.prepared, ...superseded.length ? { superseded } : {}, ...token ? { handoutHash: handoutHashOf(token) } : {} };
   const moved = (rewrite
     ? await deps.store.groupTransition(run.runId, groupIndex, ['PREPARED'], 'PREPARED', { prepared, validUntil: r.value.validUntil, code: null }, 'GROUP_PREPARED_AGAIN', rewrite.version)
     : await deps.store.groupTransition(run.runId, groupIndex, ['PLANNED'], 'PREPARED', { prepared, validUntil: r.value.validUntil, code: null }))
     ?? refuse('WORKFLOW_RUN_CHANGED');
-  return { groupIndex, strategy: moved.strategy, chain: moved.chain, feePayer: moved.feePayer, validUntil: r.value.validUntil.toISOString(), prepared };
+  return { groupIndex, strategy: moved.strategy, chain: moved.chain, feePayer: moved.feePayer, validUntil: r.value.validUntil.toISOString(),
+    prepared: publicPrepared(prepared), handout: token };
 }
 /**
  * The owner's wallet answered for one PREPARED group: a wallet batch id, a user-operation signature, or the signed Solana transactions. Verified
@@ -491,7 +542,8 @@ export async function reportUserFundedBatch(deps: WorkflowRunDeps, run: RunRecor
   // A transaction already counted for another group of this run can never reconcile this one.
   const used = new Set(groups.filter(x => x.groupIndex !== groupIndex).flatMap(x => (x.submission as { hashes?: string[] } | null)?.hashes ?? []));
   if (hashes.some(h => used.has(h.toLowerCase()))) refuse('EIP5792_RESPONSE_INVALID');
-  const reported = hashes.map(h => h.toLowerCase());
+  // One transaction reported twice is still one transaction (a wallet may repeat a receipt): never counted twice against the batch's calls.
+  const reported = [...new Set(hashes.map(h => h.toLowerCase()))];
   if (stoppedUnanswered(g)) return batchAnsweredAfterStop(deps, run, g, { hashes: reported.length, notSent: false });
   const current = g.state !== 'AUTHORIZED' ? g : await deps.store.groupTransition(run.runId, groupIndex, ['AUTHORIZED'], 'SUBMITTED', { submission: { kind: 'EVM_WALLET_BATCH',
     batchId: String(g.authorization?.batchId ?? ''), hashes: reported, submittedAt: deps.now().toISOString() } }) ?? (await deps.store.groups(run.runId))[groupIndex]!;

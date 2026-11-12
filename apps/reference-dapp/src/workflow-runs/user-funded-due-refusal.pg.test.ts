@@ -172,18 +172,22 @@ describe('P0 review fixes: a wallet batch handed to the wallet is never lost, an
       // 8 minutes later (2 left: below the 3-minute hand-out margin) the page asks again: P1 is still live on chain, so no second, overlapping
       // batch is prepared — nothing is written, the owner confirms the open request or asks again once its validUntil has passed.
       h.d.advance(8 * 60_000);
-      await expect(workflowRunUserFundedPrepare(h.surface, approval.approvalId, wallets, 0)).rejects.toThrow('USER_FUNDED_PREPARED_STILL_VALID');
+      await expect(workflowRunUserFundedPrepare(h.surface, approval.approvalId, wallets, 0, p1.handout!)).rejects.toThrow('USER_FUNDED_PREPARED_STILL_VALID');
       expect((await h.store.groups(run0.runId))[0]).toEqual(before);
-      // Past P1's validity the page asks again, and the RPC no longer simulates: the new preparation fails.
-      h.d.advance(3 * 60_000);
+      // Past P1's validity (and the settle margin after it, inside which nothing is prepared again) the page asks again, and the RPC no longer
+      // simulates: the new preparation fails.
+      h.d.advance(5 * 60_000);
       chain.control.disableSimulation();
-      await expect(workflowRunUserFundedPrepare(h.surface, approval.approvalId, wallets, 0)).rejects.toThrow('USER_FUNDED_SIMULATION_UNAVAILABLE');
+      await expect(workflowRunUserFundedPrepare(h.surface, approval.approvalId, wallets, 0, p1.handout!)).rejects.toThrow('USER_FUNDED_SIMULATION_UNAVAILABLE');
       let run = await ownedRun(h.runs, approval.approvalId, wallets);
       // Not blocked (a batch of this group is in the wallet's hands), not reset: still the PREPARED P1, so its answer is accepted.
       expect(run).toMatchObject({ state: 'RUNNING' });
       const [g] = await h.store.groups(run.runId);
       expect(g).toMatchObject({ state: 'PREPARED', validUntil: new Date(p1.validUntil!), version: before.version });
-      expect(g!.prepared).toEqual(p1.prepared);
+      // The stored artifact is the one handed out (plus its hand-out token's hash, which the browser is never shown).
+      const { handoutHash, ...stored } = g!.prepared as Record<string, unknown>;
+      expect(handoutHash).toMatch(/^[0-9a-f]{64}$/);
+      expect(stored).toEqual(p1.prepared);
       await workflowRunUserFundedAuthorize(h.surface, approval.approvalId, wallets, 0, { kind: 'EVM_WALLET_BATCH', batchId: first.request.id });
       await workflowRunUserFundedReport(h.surface, approval.approvalId, wallets, 0, [hash]);
       await h.drain(run.runId);
@@ -202,16 +206,18 @@ describe('P0 review fixes: a wallet batch handed to the wallet is never lost, an
       const before = (await h.store.groups(run0.runId))[0]!;
       // With more than 3 minutes left the same cached batch is handed out again (nothing is prepared or written).
       h.d.advance(6 * 60_000);
-      expect((await workflowRunUserFundedPrepare(h.surface, approval.approvalId, wallets, 0)).prepared).toEqual(p1.prepared);
+      expect((await workflowRunUserFundedPrepare(h.surface, approval.approvalId, wallets, 0, p1.handout!)).prepared).toEqual(p1.prepared);
       // Inside the last 3 minutes the owner confirms the prompt still open for P1 (its on-chain deadline has not passed): it executes, but its
       // answer is lost. The page asks again: refused while P1 is live (two wallet instances share no EIP-5792 id dedupe), nothing written.
       h.d.advance(2 * 60_000);
       const hash = chain.control.walletBatch(owner, evmCallsOf(first.group));
-      await expect(workflowRunUserFundedPrepare(h.surface, approval.approvalId, wallets, 0)).rejects.toThrow('USER_FUNDED_PREPARED_STILL_VALID');
+      await expect(workflowRunUserFundedPrepare(h.surface, approval.approvalId, wallets, 0, p1.handout!)).rejects.toThrow('USER_FUNDED_PREPARED_STILL_VALID');
       expect((await h.store.groups(run0.runId))[0]).toEqual(before);
-      // Past P1's validity: prepared again in place, under the same id, with P1 kept for reconciliation.
-      h.d.advance(3 * 60_000);
-      const p2 = await workflowRunUserFundedPrepare(h.surface, approval.approvalId, wallets, 0);
+      // Past P1's validity and the settle margin: prepared again in place, under the same id, with P1 kept for reconciliation — for the browser
+      // that holds P1 only (another one is refused: it could send a second batch of the group).
+      h.d.advance(5 * 60_000);
+      await expect(workflowRunUserFundedPrepare(h.surface, approval.approvalId, wallets, 0)).rejects.toThrow('WALLET_BATCH_HANDED_OUT_ELSEWHERE');
+      const p2 = await workflowRunUserFundedPrepare(h.surface, approval.approvalId, wallets, 0, p1.handout!);
       const second = p2.prepared as unknown as Artifact;
       expect(new Date(p2.validUntil!).getTime()).toBeGreaterThan(new Date(p1.validUntil!).getTime());
       expect(second.request.id).toBe(first.request.id);

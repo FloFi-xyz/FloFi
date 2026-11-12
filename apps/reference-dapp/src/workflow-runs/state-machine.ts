@@ -64,8 +64,15 @@ export const WORKFLOW_RUN_ADVANCE_KIND = 'workflow-run.advance';
 export function groupInFlight(g: { readonly state: string; readonly strategy: string; readonly validUntil: Date | string | null }, now: Date): boolean {
   if (g.state === 'SUBMITTED' || g.state === 'UNCERTAIN') return true;
   if (g.strategy !== 'EVM_WALLET_BATCH') return false;
-  return g.state === 'AUTHORIZED' || (g.state === 'PREPARED' && g.validUntil !== null && new Date(g.validUntil) > now);
+  // A prepared batch counts as in flight until its validity plus the settle margin (`WALLET_BATCH_SETTLE_MS`).
+  return g.state === 'AUTHORIZED' || (g.state === 'PREPARED' && g.validUntil !== null && new Date(g.validUntil).getTime() + WALLET_BATCH_SETTLE_MS > now.getTime());
 }
+/**
+ * Final review: how long after a wallet batch's validity FloFi still treats it as executable before ending its run, blocking it at the run's
+ * expiry or preparing it again. Its on-chain deadline is its validity (up to a second later), and the chain's block timestamps may lag FloFi's
+ * clock; inside this margin a late confirmation could still execute.
+ */
+export const WALLET_BATCH_SETTLE_MS = 2 * 60_000;
 /** The code an ended run's wallet batch group and its steps carry when the batch's outcome cannot be known (`walletBatchUnanswered`). */
 export const WALLET_BATCH_OUTCOME_UNKNOWN = 'WALLET_BATCH_OUTCOME_UNKNOWN';
 /**

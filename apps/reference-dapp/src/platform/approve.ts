@@ -289,9 +289,11 @@ export async function workflowRunUserFundedStart(surface: ApprovalSurface, appro
   return userFundedStartSequential(c.runs, c.run, wallets, walletProfileOf(profile), c.base);
 }
 /** What the owner's wallet signs for one group now (exact calls / typed data / Solana transactions, the fee ceiling and its payer). */
-export async function workflowRunUserFundedPrepare(surface: ApprovalSurface, approvalId: unknown, wallets: readonly WalletRef[], groupIndex: unknown) {
+export async function workflowRunUserFundedPrepare(surface: ApprovalSurface, approvalId: unknown, wallets: readonly WalletRef[], groupIndex: unknown,
+  handout: unknown = undefined) {
   const c = await runContext(surface, approvalId, wallets);
-  return userFundedPrepareSequential(c.runs, c.run, wallets, groupIndexOf(groupIndex));
+  // The hand-out token this browser kept for the group's wallet batch (service.ts `handedTo`); anything else is no token.
+  return userFundedPrepareSequential(c.runs, c.run, wallets, groupIndexOf(groupIndex), typeof handout === 'string' && handout.length <= 64 ? handout : undefined);
 }
 /** The owner's wallet answer for one prepared group, verified against what FloFi prepared. */
 export async function workflowRunUserFundedAuthorize(surface: ApprovalSurface, approvalId: unknown, wallets: readonly WalletRef[], groupIndex: unknown, answer: unknown): Promise<ClaimedProposal> {

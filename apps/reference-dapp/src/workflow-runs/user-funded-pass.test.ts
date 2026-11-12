@@ -8,7 +8,7 @@ import { describe, expect, it } from 'vitest';
 import { composeWorkflow } from '../engine/strategy-engine';
 import type { UserFundedDeps } from '../user-funded/groups.ts';
 import type { GroupPatch, GroupRecord, GroupState, RunPatch, RunRecord, RunStepRecord, StepPatch, WorkflowRunStore } from './pg-store.ts';
-import type { RunState, StepState } from './state-machine.ts';
+import { WALLET_BATCH_SETTLE_MS, type RunState, type StepState } from './state-machine.ts';
 import { userFundedPass, type UserFundedPassDeps } from './user-funded-pass.ts';
 
 const SOLANA = 'solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp', OWNER = '9xQeWvG816bUx9EPjHmaT23yvVM2ZWbrrpZb9PusVFin', NOW = new Date('2026-11-07T10:00:00Z');
@@ -187,9 +187,16 @@ describe('review fix R1: run expiry never blocks a batch the owner\'s wallet may
 
   it('a wallet batch still inside its validity at the run\'s expiry stays PREPARED (its answer must still be taken): nothing is written; looked at again at its validUntil', async () => {
     const { mem, deps } = expired({});
-    expect(await userFundedPass(deps, mem.run())).toEqual({ state: 'RUNNING', code: 'OWNER_SIGNS_GROUP', retryMs: 120_000, progressed: false });
+    // Final review: looked at again once its validity AND the settle margin have passed (the chain's clock may lag FloFi's).
+    expect(await userFundedPass(deps, mem.run())).toEqual({ state: 'RUNNING', code: 'OWNER_SIGNS_GROUP', retryMs: 120_000 + WALLET_BATCH_SETTLE_MS, progressed: false });
     expect(mem.writes).toEqual([]);
     expect(mem.group().state).toBe('PREPARED');
+  });
+
+  it('final review: a wallet batch just past its validity but inside the settle margin is still never blocked (its on-chain deadline may not have passed on chain)', async () => {
+    const { mem, deps } = expired({ validUntil: new Date(NOW.getTime() - 1_000) });
+    expect(await userFundedPass(deps, mem.run())).toEqual({ state: 'RUNNING', code: 'OWNER_SIGNS_GROUP', retryMs: WALLET_BATCH_SETTLE_MS - 1_000, progressed: false });
+    expect(mem.writes).toEqual([]);
   });
 
   it('an AUTHORIZED wallet batch (the wallet already sent it) is never blocked for expiry: FloFi waits for its hashes', async () => {
@@ -199,7 +206,7 @@ describe('review fix R1: run expiry never blocks a batch the owner\'s wallet may
   });
 
   it('once its validity passed it is blocked, and the run HALTS (the batch may have executed, its answer lost): never FAILED; a group never handed out FAILS', async () => {
-    const handed = expired({ validUntil: new Date(NOW.getTime() - 1_000) });
+    const handed = expired({ validUntil: new Date(NOW.getTime() - 1_000 - WALLET_BATCH_SETTLE_MS) });
     expect(await userFundedPass(handed.deps, handed.mem.run())).toMatchObject({ state: 'HALTED', code: 'WORKFLOW_RUN_EXPIRED' });
     // Round 4 F1: the group and its steps say the batch's outcome is unknown (never the bare expiry, which surfaces word as "not run"); the run
     // keeps the reason it stopped.
@@ -230,7 +237,7 @@ describe('review fix R1: run expiry never blocks a batch the owner\'s wallet may
   });
 
   it('a same-state rewrite that lands between the read and the write (a batch prepared again in place) is never blocked', async () => {
-    const { mem, deps } = expired({ validUntil: new Date(NOW.getTime() - 1_000) });
+    const { mem, deps } = expired({ validUntil: new Date(NOW.getTime() - 1_000 - WALLET_BATCH_SETTLE_MS) });
     mem.beforeGroupWrite({ validUntil: new Date(NOW.getTime() + 600_000) });
     expect(await userFundedPass(deps, mem.run())).toMatchObject({ state: 'RUNNING', progressed: true });
     expect(mem.group()).toMatchObject({ state: 'PREPARED', version: 4 });
@@ -238,7 +245,7 @@ describe('review fix R1: run expiry never blocks a batch the owner\'s wallet may
   });
 
   it('the run\'s version moved after the pass read it (a status poll): once the group is blocked, the run still stops — from its CURRENT version', async () => {
-    for (const [patch, to] of [[{ validUntil: new Date(NOW.getTime() - 1_000) }, 'HALTED'], [{ state: 'PLANNED', prepared: null, validUntil: null }, 'FAILED']] as const) {
+    for (const [patch, to] of [[{ validUntil: new Date(NOW.getTime() - 1_000 - WALLET_BATCH_SETTLE_MS) }, 'HALTED'], [{ state: 'PLANNED', prepared: null, validUntil: null }, 'FAILED']] as const) {
       const { mem, deps, logs } = expired(patch as Partial<GroupRecord>);
       const read = mem.run();
       // The run moves on (same state, a new version) between this pass's read and its group write.
@@ -257,7 +264,7 @@ describe('review fix R1: run expiry never blocks a batch the owner\'s wallet may
   });
 
   it('a run that ended meanwhile (cancelled) is never moved again by the pass that blocked its group', async () => {
-    const { mem, deps } = expired({ validUntil: new Date(NOW.getTime() - 1_000) });
+    const { mem, deps } = expired({ validUntil: new Date(NOW.getTime() - 1_000 - WALLET_BATCH_SETTLE_MS) });
     const read = mem.run();
     const store = { ...mem.store, groupTransition: async (...args: Parameters<WorkflowRunStore['groupTransition']>) => {
       mem.setRun({ state: 'CANCELLED', version: mem.run().version + 1 });
@@ -325,5 +332,44 @@ describe('final review: a run still open behind a FAILED group is stopped by the
     mem.setGroup({ code: 'USER_FUNDED_SIMULATION_UNAVAILABLE' });
     expect(await userFundedPass(deps(), mem.run())).toMatchObject({ state: 'RUNNING', progressed: false });
     expect(mem.writes).toEqual([]);
+  });
+});
+
+describe('final review (P1): what the chain decided is recorded even when the run\'s workflow no longer composes to its stored hash', () => {
+  const SEND = { action: 'transfer', network: 'solana', asset: 'SOL', amount: '0.01', recipient: '7Np41oeYqPefeNQEHSv1UDhYrehxin3NStELsSKCT4K2' };
+  /** One submitted Solana transfer that landed and succeeded on chain; the run's stored hash is from before a deploy changed the canonical bytes. */
+  async function landed(strategy: unknown) {
+    const s = await setup({ transactions: 1, groupState: 'SUBMITTED' });
+    s.mem.setRun({ strategy, workflowHash: '0x' + '00'.repeat(32) } as unknown as Partial<RunRecord>);
+    s.mem.setGroup({ submission: { kind: 'SOLANA_SIGN_ALL', hashes: ['sig0'] } });
+    s.chain.state.statuses.set('sig0', { confirmationStatus: 'finalized', err: null });
+    const rpc: NonNullable<UserFundedDeps['solana']> = async (method, params) => method === 'getTransaction'
+      ? { meta: { err: null, fee: 5_000, preBalances: [1_000_000], postBalances: [995_000] } } : s.chain.rpc(method, params);
+    return { ...s, rpc };
+  }
+  it('the step is RECONCILED with the strategy it executed and the run completes — never RUNNING forever behind a SUBMITTED group', async () => {
+    const strategy = { version: 2, steps: [SEND] }, composed = composeWorkflow(strategy);
+    if (!composed.ok) throw new Error(composed.code);
+    const { mem, deps, logs, rpc, chain } = await landed(strategy);
+    const patches: StepPatch[] = [];
+    const store = { ...mem.store, stepTransition: async (...args: Parameters<WorkflowRunStore['stepTransition']>) => {
+      patches.push(args[4]); return mem.store.stepTransition(...args);
+    } } as WorkflowRunStore;
+    expect(await userFundedPass({ ...deps(rpc), store }, mem.run())).toMatchObject({ state: 'COMPLETED' });
+    expect(mem.group().state).toBe('RECONCILED');
+    expect(mem.steps()[0]).toMatchObject({ state: 'RECONCILED' });
+    // Recorded with the strategy it executed and that strategy's own hash (0015: never RECONCILED without them).
+    expect(patches).toEqual([expect.objectContaining({ strategy: composed.steps[0]!.strategy, workflowHash: expect.stringMatching(/^0x[0-9a-f]{64}$/) })]);
+    expect(mem.run()).toMatchObject({ state: 'COMPLETED' });
+    expect(logs).toContain('workflow_run.reconciled_unbound');
+    expect(chain.state.sent).toEqual([]);
+  });
+  it('a step that no longer composes at all is never recorded RECONCILED without its strategy: the group and step are UNCERTAIN and the run needs ATTENTION', async () => {
+    const { mem, deps, rpc, chain } = await landed({ version: 2, steps: [{ ...SEND, network: 'nowhere' }] });
+    expect(await userFundedPass(deps(rpc), mem.run())).toMatchObject({ state: 'ATTENTION', code: 'WORKFLOW_RUN_STALE' });
+    expect(mem.group()).toMatchObject({ state: 'UNCERTAIN', code: 'WORKFLOW_RUN_STALE' });
+    expect(mem.steps().map(s => [s.state, s.code])).toEqual([['UNCERTAIN', 'WORKFLOW_RUN_STALE']]);
+    expect(mem.run()).toMatchObject({ state: 'ATTENTION', code: 'WORKFLOW_RUN_STALE' });
+    expect(chain.state.sent).toEqual([]);
   });
 });

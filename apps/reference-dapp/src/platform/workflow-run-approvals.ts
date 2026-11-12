@@ -129,8 +129,9 @@ export async function userFundedStartSequential(deps: WorkflowRunSurface, run: R
   return proposalOf(deps, started, await currentStep(deps, started, wallets), base);
 }
 /** What the owner's wallet signs for one group (exact calls, typed data or Solana transactions, with the fee ceiling and its payer). */
-export async function userFundedPrepareSequential(deps: WorkflowRunSurface, run: RunRecord, wallets: readonly WalletRef[], groupIndex: number): Promise<PreparedGroupView> {
-  return prepareUserFundedGroup(deps, run, wallets, groupIndex);
+export async function userFundedPrepareSequential(deps: WorkflowRunSurface, run: RunRecord, wallets: readonly WalletRef[], groupIndex: number,
+  handout?: string): Promise<PreparedGroupView> {
+  return prepareUserFundedGroup(deps, run, wallets, groupIndex, handout);
 }
 export async function userFundedAuthorizeSequential(deps: WorkflowRunSurface, run: RunRecord, wallets: readonly WalletRef[], groupIndex: number, answer: OwnerAnswer, base: ApprovalView) {
   const moved = await authorizeUserFundedGroup(deps, run, wallets, groupIndex, answer);

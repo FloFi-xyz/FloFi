@@ -446,22 +446,63 @@ describe('P0 universal execution: a batch of transfers only still expires on cha
     const requirement = workflowRequirement({ version: 2, steps: [{ action: 'transfer', network: 'arbitrum-one', asset: 'ETH', amount: '0.001', recipient: A }] });
     if (!requirement.ok) throw new Error(requirement.code);
     const deadline = Math.floor(Date.parse(NOW) / 1000) + 600, step = requirement.value.steps[0]!;
-    // A native value transfer reads nothing from the chain (no transport at all).
+    // A native value transfer reads only its recipient's code (an EOA here: no code).
+    const eoa = (chain: string): ChainTransport => ({ chain, provenance: 'MOCKED', rpc: async (method, params) => {
+      if (method === 'eth_getCode' && String(params[0]) === A) return '0x';
+      throw new Error(`UNEXPECTED_${method}`);
+    } });
     const routers: [string, string][] = [[ETHEREUM_MAINNET_SWAP.chainRef, ETHEREUM_MAINNET_SWAP.router], [BASE_MAINNET_SWAP.chainRef, BASE_MAINNET_SWAP.router],
       [CHAIN, ARBITRUM_MAINNET_SWAP.router], [ROBINHOOD_MAINNET_SWAP.chainRef, ROBINHOOD_MAINNET_SWAP.router],
       // The loopback test pair profiles (harnesses only) carry it through their registered router too.
       [BASE_SEPOLIA.chainRef, BASE_SEPOLIA.router], [ETHEREUM_SEPOLIA_SWAP.chainRef, ETHEREUM_SEPOLIA_SWAP.router]];
     for (const [chain, router] of routers) {
       const onChain = { ...requirement.value, steps: [{ ...step, chain }] };
-      const bounded = await buildEvmGroupCalls(onChain, 0, 0, { chains: [chain], owner: OWNER, transport: () => null, deadline });
+      const bounded = await buildEvmGroupCalls(onChain, 0, 0, { chains: [chain], owner: OWNER, transport: () => eoa(chain), deadline });
       if (!bounded.ok) throw new Error(`${chain}:${bounded.code}`);
       expect(bounded.value.calls).toEqual([{ kind: 'DEADLINE_GUARD', router: router.toLowerCase(), deadline: String(deadline) },
         { kind: 'NATIVE_TRANSFER', to: A, amount: '1000000000000000' }]);
       expect(bounded.value.steps.map(st => st.calls)).toEqual([[1]]);
-      const unbounded = await buildEvmGroupCalls(onChain, 0, 0, { chains: [chain], owner: OWNER, transport: () => null });
+      const unbounded = await buildEvmGroupCalls(onChain, 0, 0, { chains: [chain], owner: OWNER, transport: () => eoa(chain) });
       if (!unbounded.ok) throw new Error(`${chain}:${unbounded.code}`);
       expect(unbounded.value.calls).toEqual([{ kind: 'NATIVE_TRANSFER', to: A, amount: '1000000000000000' }]);
       expect(unbounded.value.steps.map(st => st.calls)).toEqual([[0]]);
+    }
+  });
+
+  it('P2: a batched native transfer pays the owner or a recipient without code only — a contract or an EIP-7702 delegation is refused on every chain', async () => {
+    const CONTRACT = '0x6666666666666666666666666666666666666666', DELEGATED = '0x7777777777777777777777777777777777777777';
+    const code: Record<string, string> = { [A]: '0x', [CONTRACT]: '0x6080604052', [DELEGATED]: '0xef0100' + '8'.repeat(40) };
+    const reads: string[] = [];
+    const reading = (chain: string, answer: (address: string) => unknown): ChainTransport => ({ chain, provenance: 'MOCKED', rpc: async (method, params) => {
+      if (method !== 'eth_getCode' || params[1] !== 'latest') throw new Error(`UNEXPECTED_${method}`);
+      reads.push(String(params[0]));
+      return answer(String(params[0]));
+    } });
+    const build = (chain: string, recipients: readonly string[], transport: ChainTransport | null) => {
+      const requirement = workflowRequirement({ version: 2, steps: recipients.map(recipient => ({ action: 'transfer', network: 'arbitrum-one', asset: 'ETH', amount: '0.001', recipient })) });
+      if (!requirement.ok) throw new Error(requirement.code);
+      const onChain = { ...requirement.value, steps: requirement.value.steps.map(st => ({ ...st, chain })) };
+      return buildEvmGroupCalls(onChain, 0, recipients.length - 1, { chains: [chain], owner: OWNER, transport: () => transport });
+    };
+    // Every user-funded EVM chain, with or without the owner-signed flow's contractRecipients profile flag (Ethereum, Arbitrum One have it).
+    for (const chain of [ETHEREUM_MAINNET_SWAP.chainRef, BASE_MAINNET_SWAP.chainRef, CHAIN, ROBINHOOD_MAINNET_SWAP.chainRef]) {
+      reads.length = 0;
+      // An EOA recipient is read once (a second step to it reuses the read) and built.
+      const paid = await build(chain, [A, A], reading(chain, a => code[a]));
+      if (!paid.ok) throw new Error(`${chain}:${paid.code}`);
+      expect(paid.value.calls).toEqual([{ kind: 'NATIVE_TRANSFER', to: A, amount: '1000000000000000' }, { kind: 'NATIVE_TRANSFER', to: A, amount: '1000000000000000' }]);
+      expect(reads).toEqual([A]);
+      // Contract code or an EIP-7702 delegation designator: refused at that step (the owner-signed flow then applies its own rules).
+      expect(await build(chain, [CONTRACT], reading(chain, a => code[a]))).toEqual({ ok: false, stepIndex: 0, code: 'USER_FUNDED_TRANSFER_RECIPIENT_NOT_EOA' });
+      expect(await build(chain, [A, DELEGATED], reading(chain, a => code[a]))).toEqual({ ok: false, stepIndex: 1, code: 'USER_FUNDED_TRANSFER_RECIPIENT_NOT_EOA' });
+      // The owner itself needs no read (no transport at all).
+      const self = await build(chain, [OWNER], null);
+      if (!self.ok) throw new Error(`${chain}:${self.code}`);
+      expect(self.value.calls).toEqual([{ kind: 'NATIVE_TRANSFER', to: OWNER, amount: '1000000000000000' }]);
+      // An unreadable recipient is a transient refusal, never a built transfer.
+      for (const answer of [() => { throw new Error('DELEGATION_RPC_UNAVAILABLE'); }, () => null, () => '0xzz'])
+        expect(await build(chain, [A], reading(chain, answer))).toEqual({ ok: false, stepIndex: 0, code: 'USER_FUNDED_RPC_UNAVAILABLE' });
+      expect(await build(chain, [A], null)).toEqual({ ok: false, stepIndex: 0, code: 'USER_FUNDED_RPC_UNAVAILABLE' });
     }
   });
 });
@@ -743,6 +784,8 @@ describe('P0 universal execution: a wallet batch without a swap (Aave calls, tra
     if (!requirement.ok) throw new Error(requirement.code);
     const transport: ChainTransport = { chain: CHAIN, provenance: 'MOCKED', rpc: async method => {
       if (method === 'eth_call') return '0x' + '0'.repeat(64);
+      // The two native transfers' recipients below are EOAs (no code).
+      if (method === 'eth_getCode') return '0x';
       throw new Error(`UNEXPECTED_${method}`);
     } };
     const deps = { chains: CHAINS, owner: OWNER, transport: () => transport };

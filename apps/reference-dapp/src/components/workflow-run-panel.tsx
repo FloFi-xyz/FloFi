@@ -20,6 +20,7 @@ import { revokeUserOperation, sendWalletBatch, signSolanaGroup, signUserOperatio
 import { chosenEvmProvider, injected } from '../wallet/evm-discovery';
 import type { WalletWorkflowReviewView } from '../delegation/views';
 import { WALLET_BATCH_OUTCOME_UNKNOWN, canEndWorkflow, haltedAs } from '../workflow-runs/state-machine';
+import { batchHandout, keepBatchHandout } from './batch-handouts';
 import { useLocale } from '../i18n/locale';
 import type { ClaimedProposal } from '../platform/approvals';
 import type { WorkflowRunClaim } from '../platform/workflow-run-approvals';
@@ -227,8 +228,9 @@ export function WorkflowRunPanel({ claim, approvalId, secret, onProposal, onErro
     }
     // Otherwise the group is prepared (again). A lost answer still reaches this point only when the run showed no batch id for the group: its
     // prepared id is then asked of the wallet below before anything is sent.
-    const prepared = await prepareUserFundedGroup(approvalId, index);
+    const prepared = await prepareUserFundedGroup(approvalId, index, batchHandout(approvalId, index));
     if (!prepared.ok) return prepared;
+    keepBatchHandout(approvalId, index, prepared.value.handout);
     const p = prepared.value.prepared as unknown as Record<string, unknown>;
     if (p.kind === 'EVM_WALLET_BATCH') {
       const request = p.request as eip5792.SendCallsRequest;

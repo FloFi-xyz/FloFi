@@ -152,16 +152,16 @@ describe('P0: Arbitrum One Swap → Supply (the swap\'s WETH) → Borrow as ONE 
     const b = second.value.prepared as unknown as BatchPrepared;
     expect((b.group.calls[1] as { amountOutMinimum: string }).amountOutMinimum).not.toBe((a.group.calls[1] as { amountOutMinimum: string }).amountOutMinimum);
     // Without the earlier preparation, the first batch's transaction would fail the group although every step ran on chain.
-    expect(await reconcileEvmGroup(deps, second.value.prepared, { hashes: [hash] })).toMatchObject({ status: 'FAILED', code: 'RECONCILIATION_CALLS_MISMATCH' });
+    expect(await reconcileEvmGroup(deps, second.value.prepared, { hashes: [hash] })).toMatchObject({ status: 'UNMATCHED', code: 'RECONCILIATION_CALLS_MISMATCH' });
     // The re-preparation keeps the replaced artifact; the batch reconciles against it, with the minimums signed then.
     const kept: Prepared = { ...second.value.prepared, superseded: supersede(first.value.prepared) };
     const r = await reconcileEvmGroup(deps, kept, { hashes: [hash] });
     if (r.status !== 'RECONCILED') throw new Error(JSON.stringify(r));
     expect(r.steps.map(s => s.stepIndex)).toEqual([0, 1, 2]);
     expect(r.steps[1]!.spent).toEqual([{ asset: `${CHAIN}/erc20:${WETH}`, amount: (a.group.calls[1] as { amountOutMinimum: string }).amountOutMinimum }]);
-    // A transaction that is neither preparation's batch still fails closed.
+    // A transaction that is neither preparation's batch still fails closed: not reverted, not this group's calls, so UNMATCHED (needs attention).
     const other = chain.control.walletBatch(OWNER, [erc7710.workflowCallData({ kind: 'ERC20_APPROVE', token: USDC, spender: ROUTER, amount: 1n }, OWNER)]);
-    expect(await reconcileEvmGroup(deps, kept, { hashes: [other] })).toMatchObject({ status: 'FAILED' });
+    expect(await reconcileEvmGroup(deps, kept, { hashes: [other] })).toMatchObject({ status: 'UNMATCHED', code: 'RECONCILIATION_CALLS_MISMATCH' });
     // At most a bounded history is kept.
     let chained: Prepared = first.value.prepared;
     for (let i = 0; i < 12; i++) chained = { ...second.value.prepared, superseded: supersede(chained) };

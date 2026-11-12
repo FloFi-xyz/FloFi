@@ -24,6 +24,7 @@ import type { EditorExecutionReview, ReviewAmount } from '../editor/workflow-exe
 import type { ClaimedProposal } from '../platform/approvals';
 import type { RunView } from '../workflow-runs/service';
 import { WALLET_BATCH_OUTCOME_UNKNOWN, canEndWorkflow, haltedAs } from '../workflow-runs/state-machine';
+import { batchHandout, keepBatchHandout } from './batch-handouts';
 import { useLocale } from '../i18n/locale';
 import { sendWalletBatch, signSolanaGroup, signUserOperation, walletBatchHashes, walletProfile } from './user-funded-browser';
 import { useWalletProof } from './wallet-proof';
@@ -447,8 +448,9 @@ export function useEditorWorkflowRun(input: { readonly workflow: { readonly work
     }
     let prepared = given;
     if (!prepared) {
-      const r = await prepareUserFundedGroup(id, index);
+      const r = await prepareUserFundedGroup(id, index, batchHandout(id, index));
       if (!r.ok) { if (r.code === PREPARED_STILL_VALID_CODE) refusedFor(index); throw new Error(r.code); }
+      keepBatchHandout(id, index, r.value.handout);
       prepared = r.value;
     }
     const kind = (prepared.prepared as { kind?: string } | null)?.kind;
@@ -505,6 +507,7 @@ export function useEditorWorkflowRun(input: { readonly workflow: { readonly work
     }
     if (!result.ok) throw new Error(result.code);
     const { approvalId: id, proposal, prepared } = result.value;
+    keepBatchHandout(id, 0, (prepared as { handout?: string | null } | null)?.handout);
     setApprovalId(id); authorizedRevision.current = workflow.revision;
     record.current = { workflowId: workflow.workflowId, approvalId: id, workflowHash: review.workflowHash, owner: evmAccount.toLowerCase(), revision: workflow.revision,
       at: new Date().toISOString() };
@@ -727,6 +730,8 @@ export const EXECUTION_REFUSAL: Readonly<Record<string, string>> = {
   // Review fixes: a batch already handed out is never prepared a second time while it can still execute (a refusal before any wallet request);
   // a second, different answer for one group; and a browser that cannot keep the record that stops a request from being sent twice.
   USER_FUNDED_PREPARED_STILL_VALID: PREPARED_STILL_VALID,
+  // Final review: a wallet batch goes to ONE browser (workflow-runs/service.ts `handedTo`); another one is refused before any wallet request.
+  WALLET_BATCH_HANDED_OUT_ELSEWHERE: 'This step\'s wallet request was already handed to another browser or wallet, and FloFi gives it only to that one: if it was confirmed there, it may already have executed. Continue in that browser; once the request has expired you can end the workflow here and check your wallet\'s activity.',
   WALLET_BATCH_ANSWER_MISMATCH: 'Your wallet reported a different batch for this step than the one FloFi recorded: it may have run twice. Check your wallet\'s activity; FloFi recorded only the first.',
   WALLET_ATTEMPT_UNRECORDABLE: 'This browser could not keep a record of the request, so FloFi did not ask your wallet (that record is what stops a request from ever being sent twice). Allow site storage or use another browser, then try again.',
   // A wallet answer (or report) for a group FloFi had already stopped while its batch was unanswered: never recorded, never "nothing was sent".

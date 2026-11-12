@@ -27,7 +27,7 @@ import { advanceSolanaSubmission, checkUserOperation, reconcileEvmGroup, reconci
   type Reconciled, type UserFundedDeps } from '../user-funded/groups.ts';
 import type { EvmGroupCalls } from '../user-funded/evm-calls.ts';
 import type { BoundResolution, GroupRecord, RunRecord, RunStepRecord, StepOutcome, WorkflowRunStore } from './pg-store.ts';
-import { ADVANCE_RETRY_MS, TERMINAL_RUN, WALLET_BATCH_OUTCOME_UNKNOWN, groupInFlight, walletBatchUnanswered, type RunState } from './state-machine.ts';
+import { ADVANCE_RETRY_MS, TERMINAL_RUN, WALLET_BATCH_OUTCOME_UNKNOWN, WALLET_BATCH_SETTLE_MS, groupInFlight, walletBatchUnanswered, type RunState } from './state-machine.ts';
 import { executionRefusal } from '../server/execution-guard.ts';
 
 export type Pass = { readonly state: RunState; readonly code: string | null; readonly retryMs: number | null; readonly progressed: boolean };
@@ -108,7 +108,7 @@ export async function userFundedPass(deps: UserFundedPassDeps, run: RunRecord): 
         return { ...settled(run, OWNER_WAIT_MS, false, 'OWNER_SIGNS_GROUP'), progressed: expired !== null };
       }
       // An expired run waiting on a wallet batch is looked at again as soon as that batch's validity has passed.
-      return settled(run, run.expiresAt <= now && g.validUntil ? Math.max(1_000, Math.min(OWNER_WAIT_MS, g.validUntil.getTime() - now.getTime())) : OWNER_WAIT_MS,
+      return settled(run, run.expiresAt <= now && g.validUntil ? Math.max(1_000, Math.min(OWNER_WAIT_MS, g.validUntil.getTime() + WALLET_BATCH_SETTLE_MS - now.getTime())) : OWNER_WAIT_MS,
         false, 'OWNER_SIGNS_GROUP');
     case 'AUTHORIZED': return authorizedGroup(deps, run, g, block);
     case 'SUBMITTED': case 'UNCERTAIN': return submittedGroup(deps, run, g, steps);
@@ -179,8 +179,14 @@ async function submittedGroup(deps: UserFundedPassDeps, run: RunRecord, g: Group
     return { state: 'ATTENTION', code, retryMs: ADVANCE_RETRY_MS, progressed: false };
   }
   if (r.status === 'PENDING') return settled(run, SUBMIT_RETRY_MS);
-  const composed = composeWorkflowBound(run.strategy, run.workflowHash);
-  if (!composed.ok) return settled(run, ADVANCE_RETRY_MS, false, 'WORKFLOW_RUN_STALE');
+  // Final review (P1): the chain did not revert what was reported, yet it does not match what the owner signed — funds may have moved. Never
+  // FAILED (nothing irreversible happened): the group and its steps are UNCERTAIN and the run needs ATTENTION, observed again, never resent.
+  if (r.status === 'UNMATCHED') return attention(deps, run, g, stored(r.code));
+  // Final review (P1): recording what the chain already decided never depends on the workflow still composing to the run's hash (a deploy may
+  // change the canonical bytes while a group is in flight): the run's own strategy is composed without that binding for the per-step records.
+  const bound = composeWorkflowBound(run.strategy, run.workflowHash);
+  const composed = bound.ok ? bound : composeWorkflowBound(run.strategy, undefined);
+  if (!bound.ok) deps.log('workflow_run.reconciled_unbound', { run: run.runId, group: g.groupIndex, composes: composed.ok });
   const observedAt = deps.now().toISOString(), chain = g.chain;
   const facts = r.status === 'RECONCILED' ? r.steps : r.steps ?? [];
   const evidence = { environment: 'PUBLIC_UNVERIFIED', outcome: r.status, bundleHash: null };
@@ -202,26 +208,31 @@ async function submittedGroup(deps: UserFundedPassDeps, run: RunRecord, g: Group
   const receivedOf = (producer: number, asset: string) => [...steps[producer]?.outcome?.received ?? [], ...facts.find(f => f.stepIndex === producer)?.received ?? []]
     .filter(x => x.asset === asset).reduce((sum, x) => sum + BigInt(x.amount), 0n);
   const boundOf = (index: number): BoundResolution | null => {
-    const spent = spentOf(index), all = composed.bindings.filter(b => b.step === index);
+    const spent = spentOf(index), all = composed.ok ? composed.bindings.filter(b => b.step === index) : [];
     if (!spent || !all.length) return null;
     const resolutions = all.map(b => ({ amountFrom: b.amountFrom, asset: b.asset, cap: b.cap,
       received: receivedOf(b.amountFrom, assetKey({ chain: b.asset.chainId, address: b.asset.address })).toString(), used: spent }));
     return { ...resolutions[0]!, ...resolutions.length > 1 ? { additional: resolutions.slice(1) } : {} };
   };
+  let unrecorded = false;
   for (let i = g.stepFrom; i <= g.stepTo; i++) {
     const done = facts.some(f => f.stepIndex === i);
-    const strategy = executedStrategy(composed, i, spentOf(i)), alone = composeWorkflowBound(strategy, undefined);
-    const bound = steps[i]!.bound ? null : boundOf(i);
-    const resolved = { ...alone.ok ? { strategy, workflowHash: alone.workflowHash } : {}, ...bound ? { bound } : {} };
-    if (r.status === 'RECONCILED' || done)
-      await deps.store.stepTransition(run.runId, i, ['DELEGATED', 'UNCERTAIN'], 'RECONCILED', { outcome: outcomeOf(i, 'RECONCILED'), code: null, ...resolved });
-    else if (steps[i]!.state === 'DELEGATED' || steps[i]!.state === 'UNCERTAIN')
+    if (r.status === 'RECONCILED' || done) {
+      // A step is RECONCILED only with the strategy it executed (0015); one that no longer composes at all is left for ATTENTION below.
+      const strategy = composed.ok ? executedStrategy(composed, i, spentOf(i)) : null, alone = strategy ? composeWorkflowBound(strategy, undefined) : null;
+      if (!strategy || !alone?.ok) { unrecorded = true; continue; }
+      const resolution = steps[i]!.bound ? null : boundOf(i);
+      await deps.store.stepTransition(run.runId, i, ['DELEGATED', 'UNCERTAIN'], 'RECONCILED', { outcome: outcomeOf(i, 'RECONCILED'), code: null, strategy,
+        workflowHash: alone.workflowHash, ...resolution ? { bound: resolution } : {} });
+    } else if (steps[i]!.state === 'DELEGATED' || steps[i]!.state === 'UNCERTAIN')
       await deps.store.stepTransition(run.runId, i, ['DELEGATED', 'UNCERTAIN'], 'FAILED', { outcome: outcomeOf(i, 'FAILED'), code: r.status === 'FAILED' ? stored(r.code) : null });
   }
   // Reconciled against an earlier preparation (the one the wallet sent): what ITS steps were signed to spend and receive, for the owner's view.
   const preparedFrom = r.group ? { preparedFrom: { steps: r.group.steps, calls: r.group.calls.length,
     approvals: r.group.calls.filter(c => c.kind === 'ERC20_APPROVE').length } } : {};
   const groupOutcome = { status: r.status, transactions: r.transactions, gasPaid: r.gasPaid, steps: facts, observedAt, ...preparedFrom };
+  // Executed steps FloFi cannot record any more (their strategy no longer composes): the run needs attention, never advances past them.
+  if (unrecorded) return attention(deps, run, g, 'WORKFLOW_RUN_STALE');
   if (r.status === 'RECONCILED') {
     await deps.store.groupTransition(run.runId, g.groupIndex, ['SUBMITTED', 'UNCERTAIN'], 'RECONCILED', { outcome: groupOutcome, code: null });
     deps.log('workflow_run.group_reconciled', { run: run.runId, group: g.groupIndex, gasPaid: r.gasPaid.amount });
@@ -234,6 +245,19 @@ async function submittedGroup(deps: UserFundedPassDeps, run: RunRecord, g: Group
   const moved = await stopRunFromCurrent(deps, run.runId, partial ? 'HALTED' : 'FAILED', stored(r.code));
   deps.log('workflow_run.group_failed', { run: run.runId, group: g.groupIndex, code: r.code });
   return moved ? settled(moved) : { ...settled(run), progressed: true };
+}
+
+/**
+ * A submitted group whose outcome FloFi cannot record (the chain did not revert it, yet it does not match what was signed; or its executed
+ * steps no longer compose): the group and its still-open steps are UNCERTAIN, the run needs ATTENTION — observation only, never a resend.
+ */
+async function attention(deps: UserFundedPassDeps, run: RunRecord, g: GroupRecord, code: string): Promise<Pass> {
+  if (g.state === 'SUBMITTED') await deps.store.groupTransition(run.runId, g.groupIndex, ['SUBMITTED'], 'UNCERTAIN', { code });
+  for (let i = g.stepFrom; i <= g.stepTo; i++) await deps.store.stepTransition(run.runId, i, ['DELEGATED'], 'UNCERTAIN', { code });
+  const current = await deps.store.byId(run.runId);
+  if (current?.state === 'RUNNING') await deps.store.transition(run.runId, { version: current.version, from: ['RUNNING'] }, 'ATTENTION', { code });
+  deps.log('workflow_run.group_unmatched', { run: run.runId, group: g.groupIndex, code });
+  return { state: 'ATTENTION', code, retryMs: ADVANCE_RETRY_MS, progressed: false };
 }
 
 /**
