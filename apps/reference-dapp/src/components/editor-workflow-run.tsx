@@ -194,6 +194,8 @@ export function useEditorWorkflowRun(input: { readonly workflow: { readonly work
   const [run, setRun] = useState<RunView | null>(null);
   const [approvalId, setApprovalId] = useState<string | null>(null);
   const [updated, setUpdated] = useState<EditorWorkflowRunState['updated']>([]);
+  // A HALTED run no longer asks the updated minimums (Resume or End takes over): their notice goes with the question.
+  useEffect(() => { if (run?.state === 'HALTED' && phase !== 'confirm-update' && updated.length) setUpdated([]); }, [run?.state, phase, updated.length]);
   const pendingSend = useRef<{ approvalId: string; index: number } | null>(null);
   /** `refusedGroup`, also as a ref: a status update retires the refusal once that group was answered or stopped (`refusalSettled`). */
   const [refusedGroup, setRefusedGroup] = useState<number | null>(null);

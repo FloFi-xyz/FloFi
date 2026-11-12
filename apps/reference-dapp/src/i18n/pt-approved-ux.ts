@@ -148,6 +148,7 @@ export const portugueseApprovedUx: Readonly<Record<string, string>> = {
   "Your wallet does not hold enough of the network's native token for this request.": 'Sua carteira não tem o suficiente do token nativo da rede para este pedido.',
   'Anything already sent stays tracked.': 'O que já foi enviado continua sendo acompanhado.',
   'Add to workflow': 'Adicionar ao fluxo', 'Simulation valid': 'Simulação válida', 'Simulation expires in less than 15 seconds': 'A simulação expira em menos de 15 segundos',
+  'Editing is paused while this workflow executes. You can change it once the run finishes or is ended.': 'A edição está pausada enquanto este fluxo é executado. Você pode alterá-lo quando a execução terminar ou for encerrada.',
   'Steps in this request:': 'Passos deste pedido:', 'This request has 1 call, for this step:': 'Este pedido tem 1 chamada, para este passo:',
   'This request has {0} calls, for these steps:': 'Este pedido tem {0} chamadas, para estes passos:',
   'Expiry check: the request is refused after its deadline': 'Verificação de prazo: o pedido é recusado depois do prazo',

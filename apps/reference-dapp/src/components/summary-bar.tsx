@@ -51,8 +51,12 @@ export function SummaryBar({ tab, setTab, simulationActionHost, reviewAvailable,
   }, [counting]);
   const status = tab === 'Simulate' && simulation ? simulateFooterStatus({ ...simulation, now: Math.max(now, Date.now()) }) : null;
   const ticking = status?.text === 'Simulation valid for {0}';
-  const announcement = !status ? '' : ticking ? tr(status.tone === 'attention' ? 'Simulation expires in less than 15 seconds' : 'Simulation valid')
-    : `${tr(status.text, ...(status.parameters ?? []))}${status.detail ? ` · ${tr(status.detail)}` : ''}`;
+  const spokenNow = !status ? '' : `${tr(status.text, ...(status.parameters ?? []))}${status.detail ? ` · ${tr(status.detail)}` : ''}`;
+  // What the live region says changes only with the meaning (valid, under 15 s, expired, a blocker); it then includes the time left at that moment.
+  const meaning = !status ? '' : ticking ? `tick:${status.tone}` : spokenNow;
+  const [spoken, setSpoken] = useState({ meaning: '', text: '' });
+  if (spoken.meaning !== meaning) setSpoken({ meaning, text: spokenNow });
+  const announcement = spoken.meaning === meaning ? spoken.text : spokenNow;
   const { state, actionSetup } = useWorkflow();
   const { info, prepared, retired, verifyError, verified } = useModeA();
   const modeB = useModeB();

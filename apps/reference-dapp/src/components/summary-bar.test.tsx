@@ -162,7 +162,7 @@ describe('Simulate footer status', () => {
     expect(html).toMatch(/<p class="summary-status-line" data-tone="ready">[\s\S]*Simulation valid for 0:5[12]/);
     // The ticking m:ss is not a live region; the status speaks only when the meaning changes.
     expect(html).toMatch(/<span class="summary-status-text" aria-hidden="true">Simulation valid for/);
-    expect(html).toContain('<span class="sr-only" role="status">Simulation valid</span>');
+    expect(html).toMatch(/<span class="sr-only" role="status">Simulation valid for 0:5[12]<\/span>/);
   });
   it('names a blocker and says nothing was sent only before any execution', () => {
     const blocked = renderToStaticMarkup(createElement(SummaryBar, { tab: 'Simulate', setTab: vi.fn(), canvasOwnsAction: true, simulation: { ...sim, status: 'blocked', label: 'Insufficient balance', expiresAt: null } }));

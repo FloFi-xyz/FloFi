@@ -57,6 +57,8 @@ export type ConversationBridge = LifecycleView & {
    * set, a vague request ("explain", "why?", "não entendi", "me explique melhor") is answered with it — never "there is no pending proposal".
    */
   readonly blocker?: ActiveBlocker | null;
+  /** P0 approved UX (board 08): this workflow is executing (or its wallet is being asked); the chat changes nothing in it until that ends. */
+  readonly editingPaused?: boolean;
   /** The selected runtime's existing simulation entry (the Canvas CTA's), and why no simulation can start now (null: it can). */
   readonly simulate: () => void | Promise<void>; readonly simulationBlocked: string | null;
   readonly controls: ExecutionControls;
@@ -99,6 +101,7 @@ function otherRunWallet(view: Pick<LifecycleView, 'source' | 'wallet'>): string 
   return account && view.wallet.account && account.toLowerCase() !== view.wallet.account.toLowerCase() ? account : null;
 }
 
+const EDITING_PAUSED = 'Editing is paused while this workflow executes. You can change it once the run finishes or is ended.';
 /** The answer buttons FloFi offers for an open question (re-offered when an answer is unclear or an explanation interrupts it). */
 function questionOptions(kind: Question['open']['kind'], c: ReturnType<typeof conversationCopy>): string[] {
   return kind === 'RESOLVE_EDIT' ? [c.applyEdit, c.discardEdit] : kind === 'CONFIRM_WORKFLOW' ? [c.confirmYes, c.confirmNo]
@@ -246,6 +249,7 @@ export function useFlofiConversation({ owner, epoch, bridge, direct, interfaceLa
 
   function commit(scope: number, command: Command, meta: { exact: boolean; role: 'flofi' | 'ai'; language: ConversationLanguage; notes: readonly string[]; summary?: string }) {
     const now = latest.current, c = conversationCopy(meta.language), before = now.state.workflow;
+    if (now.bridge.editingPaused) { append(scope, { role: meta.role, text: translate(meta.language, EDITING_PAUSED), language: meta.language, notes: meta.notes }); return; }
     const preview = editorReducer(now.state, command, now.context);
     const lost = preview.error ? [] : lostSteps(before, preview.workflow, command, now.context, meta.language);
     if (lost.length) { propose(command); append(scope, { role: meta.role, text: c.destructive(lost.join(', ')), language: meta.language, notes: meta.notes }); return; }
@@ -699,7 +703,7 @@ export function useFlofiConversation({ owner, epoch, bridge, direct, interfaceLa
         const said = facts ? translate(language, facts.text, ...facts.parameters.map(value => translate(language, value)))
           : `${translate(language, bridge.blocker.title)}: ${translate(language, bridge.blocker.message)}`;
         const options = open && open.open.kind !== 'NEXT_STEP' ? questionOptions(open.open.kind, c) : null;
-        flofi(scope, language, currentExecution(latest.current.bridge.progress)?.started ? aboutNextRequest(said) : said, options ? { options } : {});
+        flofi(scope, language, bridge.blocker.started || currentExecution(latest.current.bridge.progress)?.started ? aboutNextRequest(said) : said, options ? { options } : {});
         return;
       }
       // A new message (other than the offered network switch) replaces a Review the chat was waiting to continue.

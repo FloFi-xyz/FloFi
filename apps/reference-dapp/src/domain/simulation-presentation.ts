@@ -129,6 +129,8 @@ export function simulationError(error: string): string {
   if (/^(?:BRIDGE_|RELAY_|LIFI_|ACROSS_|MAYAN_|ROUTER_|UNIVERSAL_)?INSUFFICIENT_LIQUIDITY$/.test(error)) return 'The bridge provider does not have enough liquidity for this amount right now, so this step was not simulated or sent. Try a smaller amount or try again later.';
   if (/^(?:BRIDGE_|RELAY_|LIFI_|ACROSS_|MAYAN_|ROUTER_|UNIVERSAL_)?AMOUNT_TOO_LOW$|^(?:BRIDGE_)?BELOW_MINIMUM$/.test(error)) return 'The amount is below the bridge provider’s minimum for this route, so this step was not simulated or sent. Choose a larger amount, then simulate again.';
   if (/^(?:BRIDGE_|RELAY_|LIFI_|ACROSS_|MAYAN_|ROUTER_|UNIVERSAL_)?NO_EXECUTABLE_ROUTE$/.test(error)) return 'No bridge route that FloFi can verify and execute is available for this amount right now, so this step was not simulated or sent. Try again later or change the amount.';
+  // An Aave reserve short of liquidity (or collateral) is not the owner's balance: it keeps the lending sentence, before the balance rule.
+  if (/^(?:BORROW|WITHDRAW)_INSUFFICIENT_LIQUIDITY$|LIQUIDITY_(?:UNAVAILABLE|INSUFFICIENT)|INSUFFICIENT_COLLATERAL/i.test(error)) return 'The available collateral or liquidity cannot support this action.';
   if (/INSUFFICIENT.*(ETH|SOL|NATIVE|GAS)|INSUFFICIENT_GAS/i.test(error)) return 'Add funds for the network fee, then simulate again.';
   if (/INSUFFICIENT|BALANCE_TOO_LOW|exceeds.*balance/i.test(error)) return 'Your available balance is too low for this workflow.';
   if (/HEALTH_FACTOR|UNSAFE_HEALTH|UNSAFE_POSITION/i.test(error)) return 'This action would leave the lending position below its required safety limit.';
@@ -147,6 +149,8 @@ export function simulationError(error: string): string {
   if (/WALLET_PROVIDER_CHANGED|WALLET_CHANGED/i.test(error)) return 'Your wallet connection changed, so nothing was sent. Reconnect the reviewed wallet and review again.';
   if (/WALLET_UNAUTHORIZED/i.test(error)) return 'Your wallet did not authorize FloFi for this account. Reconnect the wallet, then try again.';
   if (/WALLET_METHOD_UNSUPPORTED/i.test(error)) return 'This wallet cannot send this kind of request. Use another wallet, then try again.';
+  // A chain head that lagged or reorganised is the network's answer, not an expired result.
+  if (/STALE_CHAIN_HEAD|QUOTE_BLOCK_REORG/i.test(error)) return 'The network did not answer FloFi\'s reads, so nothing was simulated or sent. This is not a liquidity problem; try again shortly.';
   if (/EXPIRED|STALE|quote.*expired/i.test(error)) return 'This result has expired. Refresh the simulation before continuing.';
   // Issue #149 (quoter): a read the network never answered is not a missing pool, and a missing pool is not an outage.
   if (/PUBLIC_RPC_UNAVAILABLE|RPC_HISTORY_UNAVAILABLE/i.test(error)) return 'The network did not answer FloFi\'s reads, so nothing was simulated or sent. This is not a liquidity problem; try again shortly.';

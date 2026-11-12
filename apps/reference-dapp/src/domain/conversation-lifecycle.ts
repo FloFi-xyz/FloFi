@@ -130,7 +130,8 @@ const ANOTHER_ROUTE = pattern(['try another route', 'try a different route', 'an
 const NEXT_ADD = pattern(['add another action', 'add another', 'add action', 'add more', 'another action', 'adicionar outra ação', 'adicionar outra acao',
   'adicionar ação', 'adicionar acao', 'outra ação', 'outra acao', 'adicionar mais']);
 const EXECUTE_REQUEST = pattern(['execute', 'execute workflow', 'execute my workflow', 'execute the workflow', 'execute this workflow', 'run my workflow', 'run the workflow',
-  'executar', 'executar workflow', 'executar meu workflow', 'executar o workflow', 'executar fluxo', 'executar meu fluxo', 'executar o fluxo']);
+  'executar', 'executar workflow', 'executar meu workflow', 'executar o workflow', 'executar fluxo', 'executar meu fluxo', 'executar o fluxo', 'executar este fluxo',
+  'executar este workflow']);
 const STATUS_REQUEST = pattern(['status', 'check status', 'execution status', 'whats the status', 'what is the status', 'check execution', 'refresh status',
   'verificar status', 'ver status', 'status da execução', 'status da execucao', 'verificar execução', 'verificar execucao', 'atualizar status']);
 // BUILD-FLOFI-CHAT-E2E-DASHBOARD-UX-001: after an execution, "modify this workflow" asks what to change (authoring only; nothing is simulated).

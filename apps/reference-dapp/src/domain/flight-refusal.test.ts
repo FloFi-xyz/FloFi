@@ -55,7 +55,13 @@ describe('bridge and liquidity refusals at Simulate', () => {
     expect(simulationError('RELAY_AMOUNT_TOO_LOW')).toMatch(/this step was not simulated or sent/);
   });
   it('lending liquidity and non-bridge codes keep their own wording', () => {
-    for (const code of ['BORROW_INSUFFICIENT_LIQUIDITY', 'WITHDRAW_INSUFFICIENT_LIQUIDITY']) expect(simulationError(code)).not.toMatch(/bridge provider/);
+    for (const code of ['BORROW_INSUFFICIENT_LIQUIDITY', 'WITHDRAW_INSUFFICIENT_LIQUIDITY']) {
+      expect(simulationError(code)).not.toMatch(/bridge provider/);
+      // An Aave reserve short of liquidity is never "your balance is too low".
+      expect(simulationError(code)).toBe('The available collateral or liquidity cannot support this action.');
+    }
+    // A lagging or reorganised chain head is the network's answer, never an expired result.
+    for (const code of ['STALE_CHAIN_HEAD', 'QUOTE_BLOCK_REORG']) expect(simulationError(code)).toMatch(/The network did not answer/);
     expect(simulationError('SWAP_AMOUNT_TOO_LOW')).not.toMatch(/bridge provider/);
   });
   it('delivery outcomes after a deposit never read "nothing was sent"', () => {

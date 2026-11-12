@@ -94,7 +94,8 @@ export function isExplainRequest(text: string): boolean {
   const parts = normalized.split(/[,.!?;:]+|\s+e\s+|\s+and\s+/).map(part => part.replace(/\s+/g, ' ').trim()).filter(Boolean);
   return parts.length > 0 && parts.length <= 3 && parts.every(part => EXPLAIN.has(part));
 }
-export type ActiveBlocker = { readonly title: string; readonly message: string; readonly feeShortfall?: NativeFeeShortfall | null; readonly owner?: string | null };
+export type ActiveBlocker = { readonly title: string; readonly message: string; readonly feeShortfall?: NativeFeeShortfall | null; readonly owner?: string | null;
+  /** Part of this workflow ran or may have run (a step, a run, a restore): an explanation then never says nothing was sent. */ readonly started?: boolean };
 /** The blocker in plain words with the same facts the panel shows: the server's numbers when it has them, and the next action. EN source copy. */
 export function blockerExplanation(blocker: ActiveBlocker): { readonly text: string; readonly parameters: readonly string[] } | null {
   const fee = feeShortfallView(blocker.feeShortfall);
