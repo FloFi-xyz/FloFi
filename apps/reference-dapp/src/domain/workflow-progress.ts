@@ -87,13 +87,14 @@ export function workflowProgressView(input: { readonly sequence: SequencePresent
       const current = !sequence.finished && step.state === 'CURRENT';
       const runStep = current && live ? live.steps[0] ?? null : null;
       const phase: ExecutionPhase | null = step.state === 'COMPLETED' ? 'RECONCILED' : !current ? null
-        : runStep ? lifecycleStepPhase(runStep, reconciledRun(live!)) ?? (prepared ? 'PREPARED' : null) : prepared ? 'PREPARED' : null;
+        : runStep ? lifecycleStepPhase(runStep, reconciledRun(live!) || Boolean(live!.stepEvidence?.[runStep.id]?.reconciled)) ?? (prepared ? 'PREPARED' : null) : prepared ? 'PREPARED' : null;
       return { number: index + 1, action: step.action, network: step.network, phase, text: phaseText(phase, runStep), current, delivered: step.delivered };
     });
   } else if (live) {
     const done = reconciledRun(live);
     steps = live.steps.map((step): WorkflowStepProgress => {
-      const phase = lifecycleStepPhase(step, done);
+      // A runtime that executes several steps reconciles each on its own (its step evidence); the run's final completion reconciles them all.
+      const phase = lifecycleStepPhase(step, done || Boolean(live.stepEvidence?.[step.id]?.reconciled));
       return { number: step.number, action: step.action, network: step.network, phase, text: phaseText(phase, step), current: live.active?.id === step.id, delivered: null };
     });
   } else return null;

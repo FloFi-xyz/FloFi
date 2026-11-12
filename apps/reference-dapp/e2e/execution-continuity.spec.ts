@@ -133,13 +133,18 @@ test('production regression: same MetaMask/account/Base Sepolia → approval CON
   await expect(summary(page)).toContainText('Execution completed');
   await expect(page.locator('.execution-evidence-restored')).toHaveText('This step’s saved result was restored.');
   expect(await pointer(page)).toBe(id); expect(await owner.sends()).toBe(2); expect(owner.requested()).toBe(2);
-  // BUILD-SOLANA-MAINNET-001 (requirement E): a new visit (this tab's session gone) starts with an empty Canvas; the finished run is not put back
-  // as a card. Its durable record and pointer are untouched (the Dashboard keeps it), and nothing is resent.
+  // P0 hotfix (execution continuity, production 2026-11-12: "at the end the Editor showed an empty workflow"): a new visit (this tab's session
+  // gone) keeps the Editor's Canvas this browser remembered — never an empty Editor after a run — and, the Canvas being exactly that run's
+  // workflow, its final result (observation only). Before the hotfix (BUILD-SOLANA-MAINNET-001 requirement E) a new visit started empty; this
+  // assertion pinned that behaviour, which is the defect fixed here. Its durable record and pointer are untouched and nothing is resent.
   await page.evaluate(() => sessionStorage.clear()); await reloadBuilder(page);
   await stage(page, 'Build');
-  await expect(page.locator('.build-flow-surface .canvas-empty')).toContainText('Start your workflow');
+  await expect(page.locator('.build-flow-surface .composer-card')).toHaveCount(1);
+  await expect(page.locator('.build-flow-surface .canvas-empty')).toHaveCount(0);
+  await stage(page, 'Execute');
+  await expect(summary(page)).toContainText('Execution completed', { timeout: 30_000 });
+  await expect(page.getByRole('main', { name: 'Execution workspace', exact: true })).not.toContainText(/Review required|Simulate again/);
   await page.waitForTimeout(2_000);
-  await expect(page.locator('.build-flow-surface .composer-card')).toHaveCount(0);
   expect(await pointer(page)).toBe(id); expect(await owner.sends()).toBe(2); expect(owner.requested()).toBe(2);
   expect((await durable(id!)).runs).toEqual([{ status: 'RECONCILED', has_evidence: true }]);
   expect(errors).toEqual([]); networkGuard.assertClean();

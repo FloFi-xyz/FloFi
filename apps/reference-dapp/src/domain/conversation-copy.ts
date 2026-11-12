@@ -52,6 +52,15 @@ export type ConversationCopy = {
   readonly ownerBoundNext: (done: string, next: string) => string;
   readonly continuationRefreshing: (next: string) => string; readonly otherWallet: (wallet: string) => string;
   readonly checkThenContinue: string; readonly reviewToContinue: string; readonly quoteStillValid: string;
+  /**
+   * P0 hotfix (execution continuity): while this workflow executes (a run, or a step-by-step workflow between its steps), a request to review or
+   * continue is answered with where it stands (`progress`: "1 of 2 steps completed · Step 2 (Bridge): Waiting for delivery on Base") and the next
+   * action — never "I can't start the review", and never a proposal to go back to Simulate.
+   */
+  readonly inProgress: (progress: string, next: string) => string; readonly stepPhase: (step: number, action: string, phase: string) => string;
+  readonly nextObserve: string; readonly nextCheck: string; readonly nextPreparing: string; readonly nextWallet: string; readonly nextAuthorize: (step: number) => string;
+  /** A completed step of a finished workflow and what its reconciled record proves it delivered. */
+  readonly stepDelivered: (step: number, action: string, delivered: string) => string;
 };
 const en: ConversationCopy = {
   added: (action, detail) => `${action} added to your workflow: ${detail}.`,
@@ -148,6 +157,14 @@ const en: ConversationCopy = {
   otherWallet: wallet => `This run's earlier request came from another wallet (${wallet}). Connect that wallet to continue it, or review the workflow with this wallet to start a separate swap.`,
   checkThenContinue: 'Check the status, then continue again.', reviewToContinue: 'Review the workflow again to continue.',
   quoteStillValid: 'The reviewed quote is still valid for the next request. Answer Continue when you are ready.',
+  inProgress: (progress, next) => `This workflow is executing: ${progress}. ${next}`,
+  stepPhase: (step, action, phase) => `Step ${step} (${action}): ${phase}`,
+  nextObserve: 'FloFi is following it on the network from its execution record. Nothing is sent again.',
+  nextCheck: 'Check its status: FloFi only reads the network and its record; nothing is resent.',
+  nextPreparing: 'FloFi is preparing the next request with current provider data. Nothing is signed or sent.',
+  nextWallet: 'Confirm or decline the request in your wallet. FloFi never signs for you.',
+  nextAuthorize: step => `Step ${step} is ready: authorize it in Execute, or answer here to review it first. Your wallet asks you to confirm.`,
+  stepDelivered: (step, action, delivered) => `Step ${step} (${action}) delivered ${delivered}.`,
   continueFailed: reason => `The next wallet request did not start, so nothing new was sent. Earlier confirmed requests stay recorded. ${reason}`,
 };
 const pt: ConversationCopy = {
@@ -245,6 +262,14 @@ const pt: ConversationCopy = {
   otherWallet: wallet => `O pedido anterior desta execução veio de outra carteira (${wallet}). Conecte essa carteira para continuá-la, ou revise o fluxo com esta carteira para iniciar uma troca separada.`,
   checkThenContinue: 'Verifique o status e depois continue de novo.', reviewToContinue: 'Revise o fluxo de novo para continuar.',
   quoteStillValid: 'A cotação revisada ainda é válida para o próximo pedido. Responda Continuar quando quiser.',
+  inProgress: (progress, next) => `Este fluxo está em execução: ${progress}. ${next}`,
+  stepPhase: (step, action, phase) => `Etapa ${step} (${action}): ${phase}`,
+  nextObserve: 'A FloFi está acompanhando na rede, pelo registro da execução. Nada é reenviado.',
+  nextCheck: 'Verifique o status: a FloFi só lê a rede e o registro; nada é reenviado.',
+  nextPreparing: 'A FloFi está preparando o próximo pedido com dados atuais dos provedores. Nada é assinado nem enviado.',
+  nextWallet: 'Confirme ou recuse o pedido na sua carteira. A FloFi nunca assina por você.',
+  nextAuthorize: step => `A etapa ${step} está pronta: autorize em Executar, ou responda aqui para revisá-la antes. Sua carteira pede a sua confirmação.`,
+  stepDelivered: (step, action, delivered) => `A etapa ${step} (${action}) entregou ${delivered}.`,
   continueFailed: reason => `O próximo pedido na carteira não começou, então nada novo foi enviado. Os pedidos já confirmados continuam registrados. ${reason}`,
 };
 export const conversationCopy = (language: ConversationLanguage): ConversationCopy => language === 'PT' ? pt : en;

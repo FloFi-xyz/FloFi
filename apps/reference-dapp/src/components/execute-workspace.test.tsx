@@ -204,3 +204,39 @@ describe('UX-003 / UX-004 processing CTA and Create new workflow (presentation o
     expect(render(data)).not.toContain('Create new workflow'); expect(render(data)).toContain('>Return to the Canvas</button>');
   });
 });
+
+describe('P0 hotfix (execution continuity): a step-by-step workflow continues in Execute', () => {
+  type Phase = 'RECONCILED' | 'PREPARED' | 'AWAITING_AUTHORIZATION' | null;
+  const progress = (completed: number, phases: Phase[]) => ({ completed, total: phases.length, current: completed < phases.length ? completed + 1 : null, finished: completed === phases.length, attention: false,
+    steps: phases.map((phase, index) => ({ number: index + 1, action: index === 0 ? 'Swap' : 'Bridge', network: 'Arbitrum', phase, current: index === completed,
+      text: { key: phase === 'RECONCILED' ? 'Reconciled' : phase === 'PREPARED' ? 'Prepared' : phase === 'AWAITING_AUTHORIZATION' ? 'Waiting for your authorization' : 'Not started', args: [] },
+      delivered: phase === 'RECONCILED' ? '2.5 USDC' : null })) });
+  const continuation = (status: 'SIMULATING' | 'READY' | 'SIMULATE' | 'BLOCKED' | 'COMPLETED') => ({ current: 2, total: 2, action: 'Bridge', network: 'Arbitrum → Base', spends: '2 USDC',
+    receives: status === 'READY' ? '1.99 USDC' : null, previous: { number: 1, delivered: '2.5 USDC' }, status, reason: null });
+  it('presents step 2 inline (what it spends and receives, the one action, the whole progress) — never "Review required" or "Back to simulation"', () => {
+    const data = fixture(); data.authorization.accepted = false; data.authorization.key = null;
+    const html = render({ ...data, detailsOnly: true, continuation: continuation('READY'), workflowProgress: progress(1, ['RECONCILED', 'PREPARED']),
+      primaryAction: createElement('button', { type: 'button', 'data-lifecycle-action': 'approve' }, 'Authorize in wallet') });
+    for (const text of ['Step 2 of 2', 'Bridge · Arbitrum → Base', 'Step 1 is completed and reconciled: it delivered 2.5 USDC.', '2 USDC', '1.99 USDC', 'Workflow in progress',
+      '1 of 2 steps completed', 'data-workflow-progress="1/2"', 'data-continuation-status="READY"', 'Delivered 2.5 USDC', 'Return to the Canvas']) expect(html).toContain(text);
+    expect(html.match(/>Authorize in wallet</g)).toHaveLength(1);
+    expect(html).not.toMatch(/Review required|Back to simulation|Simulate again|execution-authorization-attention|Execution plan</);
+  });
+  it('while step 2 simulates it says so (nothing is signed or sent); a finished workflow is Completed with every step', () => {
+    const simulating = render({ ...fixture(), detailsOnly: true, continuation: continuation('SIMULATING'), workflowProgress: progress(1, ['RECONCILED', null]) });
+    expect(simulating).toContain('FloFi is simulating step 2 with current provider data. Nothing is signed or sent.');
+    expect(simulating).toContain('Simulating…');
+    const done = render({ ...fixture(), detailsOnly: true, continuation: continuation('COMPLETED'), workflowProgress: progress(2, ['RECONCILED', 'RECONCILED']),
+      primaryAction: createElement('button', { type: 'button' }, 'Create new workflow') });
+    for (const text of ['All 2 steps of this workflow are completed and reconciled.', '2 of 2 steps completed', 'data-continuation-status="COMPLETED"', 'Create new workflow']) expect(done).toContain(text);
+    expect(done).not.toMatch(/Review required|Simulate again|Back to simulation/);
+  });
+  it('a live step of the sequence counts the WHOLE workflow (never the step run\'s own "1 of 1")', () => {
+    const data = fixture(), live = projectExecutionLifecycle(data.workflow, data.context, { kind: 'public', state: { ...data.source.state,
+      run: { ...('run' in data.source.state ? data.source.state.run : {}), attempts: [{ step: 'approval', state: 'CONFIRMED', txHash: '0x' + 'a'.repeat(64) }] } } } as ExecutionLifecycleSource);
+    expect(live.started).toBe(true);
+    const html = render({ ...data, detailsOnly: true, progress: live, workflowProgress: progress(1, ['RECONCILED', 'AWAITING_AUTHORIZATION']) });
+    expect(html).toContain('1 of 2 steps completed'); expect(html).not.toContain('steps confirmed');
+    expect(html).toContain('data-workflow-progress="1/2"');
+  });
+});

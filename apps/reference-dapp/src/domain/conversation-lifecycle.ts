@@ -20,6 +20,7 @@ import type { Command } from './commands';
 import { conversationCopy } from './conversation-copy';
 import { portuguese } from '../i18n/pt';
 import type { SequencePresentation } from './sequence-presentation';
+import type { WorkflowProgressView } from './workflow-progress';
 
 export type ConversationLanguage = 'EN' | 'PT';
 /** Conceptual chat states. They name what the conversation waits for; the runtimes' own state machines stay the source of truth. */
@@ -35,6 +36,8 @@ export type LifecycleView = {
    * cannot run (`issue`). Null for a one-action workflow or an existing composition.
    */
   readonly sequence?: ConversationSequence | null | undefined;
+  /** P0 hotfix (execution continuity): the WHOLE workflow's progress (`workflow-progress.ts`), the same numbers Execute and the Dashboard show. */
+  readonly workflowProgress?: WorkflowProgressView | null | undefined;
 };
 export type ConversationSequence = SequencePresentation & { readonly issue: string | null; readonly awaitingDelivery: boolean };
 /** Exactly what one conversational confirmation is about. */
@@ -139,6 +142,10 @@ const MODIFY_REQUEST = pattern(['modify this workflow', 'modify the workflow', '
   'edit workflow', 'change this workflow', 'change the workflow', 'modificar este workflow', 'modificar o workflow', 'modificar workflow', 'modificar este fluxo',
   'modificar o fluxo', 'alterar este workflow', 'alterar o workflow', 'editar este workflow', 'editar o workflow', 'editar workflow', 'alterar este fluxo', 'alterar o fluxo',
   'editar este fluxo', 'editar o fluxo', 'editar fluxo']);
+// P0 hotfix (execution continuity): "continue" with no question open asks where the workflow stands and what comes next (answered like Review).
+const CONTINUE_REQUEST = pattern(['continue', 'continue workflow', 'continue the workflow', 'continue my workflow', 'continue execution', 'continue the execution', 'next step',
+  'go to the next step', 'continuar', 'continuar fluxo', 'continuar o fluxo', 'continuar workflow', 'continuar o workflow', 'continuar execução', 'continuar execucao',
+  'continuar a execução', 'continuar a execucao', 'próxima etapa', 'proxima etapa', 'ir para a próxima etapa', 'ir para a proxima etapa']);
 const UNDO_REQUEST = pattern(['undo', 'undo that', 'undo this change', 'undo last change', 'desfazer', 'desfaz', 'desfazer isso', 'desfazer esta alteração', 'desfazer esta alteracao',
   'desfazer última alteração', 'desfazer ultima alteracao']);
 
@@ -154,7 +161,7 @@ export function classifyAnswer(text: string, question: PendingQuestion['kind']):
 /** A lifecycle request the chat handles itself, with no model: Review, Add another action, Execute, Status or Undo. */
 export function lifecycleRequest(text: string): 'REVIEW' | 'REFRESH' | 'ROUTE' | 'ADD' | 'MODIFY' | 'EXECUTE' | 'STATUS' | 'UNDO' | null {
   const value = normalize(text);
-  return NEXT_REVIEW.test(value) ? 'REVIEW' : REFRESH_REQUEST.test(value) ? 'REFRESH' : ANOTHER_ROUTE.test(value) ? 'ROUTE' : NEXT_ADD.test(value) ? 'ADD' : EXECUTE_REQUEST.test(value) ? 'EXECUTE' : STATUS_REQUEST.test(value) ? 'STATUS'
+  return NEXT_REVIEW.test(value) || CONTINUE_REQUEST.test(value) ? 'REVIEW' : REFRESH_REQUEST.test(value) ? 'REFRESH' : ANOTHER_ROUTE.test(value) ? 'ROUTE' : NEXT_ADD.test(value) ? 'ADD' : EXECUTE_REQUEST.test(value) ? 'EXECUTE' : STATUS_REQUEST.test(value) ? 'STATUS'
     : UNDO_REQUEST.test(value) ? 'UNDO' : MODIFY_REQUEST.test(value) ? 'MODIFY' : null;
 }
 /**
@@ -355,10 +362,13 @@ export function conversationExecution(view: LifecycleView): ConversationExecutio
   const result = projectExecutionResult(live), phase = conversationPhase(view, null, false);
   const operations = live.steps.flatMap(step => step.operations).map(({ id, title, label, state, hash, explorer, chain }) => ({ id, title, label, state, hash, explorer, chain, network: shellChainLabel(chain) }));
   const received = Object.values(live.evidence?.operations ?? {}).flatMap(operation => operation.values.filter(value => /received|deposited/i.test(value.label)));
-  return { phase, label: result?.label ?? live.label, message: result?.message ?? live.message, completed: live.completed, total: live.steps.length,
+  // P0 hotfix (execution continuity): the count is the WHOLE workflow's (N = its steps; a step counts only once reconciled), never the current
+  // step's own run ("0 of 1") — the same numbers Execute and the Dashboard show.
+  const whole = view.workflowProgress && view.workflowProgress.total > 0 ? view.workflowProgress : null;
+  return { phase, label: result?.label ?? live.label, message: result?.message ?? live.message, completed: whole?.completed ?? live.completed, total: whole?.total ?? live.steps.length,
     current: live.active ? `${live.active.number}. ${live.active.action}` : null, operations, received, costs: live.evidence?.knownCosts ?? [], final: Boolean(result),
     sequenceStep: view.sequence ? { current: view.sequence.current, total: view.sequence.total, action: view.sequence.steps[view.sequence.current - 1]?.action ?? '',
-      completed: view.sequence.steps.filter(step => step.state === 'COMPLETED').length } : null };
+      completed: whole?.completed ?? view.sequence.steps.filter(step => step.state === 'COMPLETED').length } : null };
 }
 
 // ── Authoring changes the chat committed ────────────────────────────────────────────────────────────────────────────────────────────────

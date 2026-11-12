@@ -23,6 +23,7 @@ import { copilotRejection } from '../domain/copilot-authoring';
 import { composerActions } from '../domain/composer-presentation';
 import { projectCanvasAction } from '../domain/canvas-lifecycle';
 import { currentExecution, isFinalExecutionResult } from '../domain/execution-result';
+import { STEPS_COMPLETED } from '../domain/workflow-progress';
 import { simulationError } from '../domain/simulation-presentation';
 import { translate } from '../i18n/locale';
 import type { ExecutionControls } from './execution-controls';
@@ -295,11 +296,39 @@ export function useFlofiConversation({ owner, epoch, bridge, direct, interfaceLa
     flofi(scope, language, sequence ? c.sequenceReviewReady(sequence.current, sequence.total) : c.reviewReady,
       { review, ...notes, question: sequence ? c.confirmStep(sequence.current, sequence.total) : requoted ? c.confirmUpdated : c.confirmWorkflow, options: [c.confirmYes, c.confirmNo] });
   }
+  /** P0 hotfix: a finished step-by-step workflow is Completed with every step and what its reconciled record proves it delivered. */
+  function completedSequenceText(language: ConversationLanguage, sequence: NonNullable<ConversationBridge['sequence']>): string {
+    const c = conversationCopy(language);
+    const delivered = sequence.steps.filter(step => step.delivered).map(step => c.stepDelivered(step.number, translate(language, step.action), step.delivered!));
+    return [c.workflowCompleted(sequence.total), ...delivered].join(' ');
+  }
+  /** A run of this workflow is open (not final), its wallet is being asked, or a step-by-step workflow is between its steps. */
+  function workflowExecuting(view: ConversationBridge): boolean {
+    const live = currentExecution(view.progress), sequence = view.sequence;
+    return Boolean(live && !isFinalExecutionResult(live)) || Boolean(view.editingPaused)
+      || Boolean(sequence && !sequence.finished && sequence.steps.some(step => step.state === 'COMPLETED'));
+  }
+  /** Where the executing workflow stands (whole-workflow count and the current step's phase, from durable records) and the next action. */
+  function reportProgress(scope: number, language: ConversationLanguage, action: ReturnType<typeof projectCanvasAction>) {
+    const view = latest.current.bridge, c = conversationCopy(language), progress = view.workflowProgress ?? null;
+    const step = progress?.steps.find(item => item.current) ?? null;
+    const where = [progress ? translate(language, STEPS_COMPLETED, progress.completed, progress.total) : null,
+      step ? c.stepPhase(step.number, translate(language, step.action), translate(language, step.text.key, ...step.text.args)) : null].filter(Boolean).join(' · ');
+    const waitingWallet = currentExecution(view.progress)?.steps.some(item => item.operations.some(operation => operation.state === 'wallet'))
+      || action.processing && action.label === 'Waiting for wallet…';
+    const next = waitingWallet ? c.nextWallet : view.controls.canCheck || action.kind === 'recover' ? c.nextCheck
+      : action.processing || view.source.state.busy ? c.nextPreparing
+      : (action.kind === 'approve' || action.kind === 'execute') && !action.disabled && step ? c.nextAuthorize(step.number)
+      : view.simulationBlocked ? translate(language, view.simulationBlocked) : c.nextObserve;
+    flofi(scope, language, c.inProgress(where || translate(language, 'Execution in progress'), next), view.controls.canCheck ? { options: [c.checkStatus] } : {});
+  }
   function startReview(scope: number, language: ConversationLanguage, fresh = false, announced = false) {
     const view = latest.current.bridge, c = conversationCopy(language);
     setQuestion(null); resume.current = null;
     if (!actionable(view.workflow)) { flofi(scope, language, c.emptyWorkflow); return; }
     const action = projectCanvasAction(view.controls.current, view.controls);
+    // P0 hotfix (execution continuity): while this workflow executes, asking to review or continue says where it stands and what comes next.
+    if ((action.processing || view.source.state.busy) && workflowExecuting(view)) { reportProgress(scope, language, action); return; }
     if (action.processing || view.source.state.busy) { flofi(scope, language, c.busy); return; }
     // BUILD-FLOFI-CHAT-E2E-FIX-002: an amount typed on a card and never applied blocks every simulation; FloFi names it and asks, never guesses.
     const edit = view.pendingEdits?.[0];
@@ -312,7 +341,7 @@ export function useFlofiConversation({ owner, epoch, bridge, direct, interfaceLa
     // A runtime's availability that has not answered yet is unknown: FloFi waits and continues by itself instead of calling it unavailable.
     if (view.runtimeChecking) { resume.current = { scope, language, until: 'READY', error: null }; flofi(scope, language, c.checkingProviders); return; }
     const sequence = view.sequence;
-    if (sequence?.finished) { offerNextSteps(scope, language, c.workflowCompleted(sequence.total), [], true); return; }
+    if (sequence?.finished) { offerNextSteps(scope, language, completedSequenceText(language, sequence), [], true); return; }
     if (sequence?.awaitingDelivery) { flofi(scope, language, c.awaitingDelivery(sequence.current), view.controls.canCheck ? { options: [c.checkStatus] } : {}); return; }
     // The current Review is still approvable (also a fresh Review for the rest of a started run): present it as the Canvas does — unless the owner
     // asked for a fresh quote before anything was requested (BUILD-FLOFI-BRIDGE-LIVE-FIX-003), which re-simulates and retires the unused Review.
@@ -343,6 +372,9 @@ export function useFlofiConversation({ owner, epoch, bridge, direct, interfaceLa
       return;
     }
     if (view.simulationBlocked || (action.kind !== 'simulate' && !refresh) || action.disabled) {
+      // P0 hotfix (production 2026-11-12: "the Assistant said it cannot start Review while the owner was executing"): a workflow that is executing
+      // (a run, or a step-by-step workflow between its steps) is described with its status and next action, never refused as a Review.
+      if (workflowExecuting(view)) { reportProgress(scope, language, action); return; }
       const reason = translate(language, view.simulationBlocked ?? action.label);
       const options = !view.wallet.account ? [translate(language, 'Connect wallet')] : [];
       flofi(scope, language, c.reviewBlocked(reason), options.length ? { options } : {});
@@ -596,7 +628,11 @@ export function useFlofiConversation({ owner, epoch, bridge, direct, interfaceLa
     const view = conversationExecution(bridge)!, phase = view.phase;
     if (phase !== followed.phase) {
       followed.phase = phase; followed.runKey = live.runKey;
-      const status = `${translate(language, view.label)}. ${translate(language, view.message)}`;
+      // P0 hotfix (one progress truth): in a step-by-step workflow the run covers one step, so its own count ("0 of 1 actions completed") is
+      // replaced by the whole workflow's ("1 of 2 steps completed"), the numbers Execute and the Dashboard show.
+      const whole = bridge.sequence && bridge.workflowProgress ? translate(language, STEPS_COMPLETED, bridge.workflowProgress.completed, bridge.workflowProgress.total) : null;
+      const status = whole && (phase === 'EXECUTING' || phase === 'RECONCILING' || phase === 'COMPLETED') ? `${translate(language, view.label)}. ${whole}.`
+        : `${translate(language, view.label)}. ${translate(language, view.message)}`;
       if (phase === 'AWAITING_WALLET') flofi(followed.scope, language, translate(language, 'Confirm or decline the reviewed request in your wallet.'));
       else if (phase === 'UNCERTAIN') flofi(followed.scope, language, status, bridge.controls.canCheck ? { options: [c.checkStatus] } : {});
       else if (phase === 'COMPLETED' || phase === 'PARTIAL' || phase === 'FAILED') {
@@ -605,12 +641,12 @@ export function useFlofiConversation({ owner, epoch, bridge, direct, interfaceLa
         // the shell records this step's reconciled delivery (`handover`); a step that did not complete stops the sequence there.
         const sequence = bridge.sequence;
         if (sequence && phase === 'COMPLETED' && sequence.current < sequence.total) { handover.current = { scope: followed.scope, language, from: sequence.current, waiting: false }; setTick(n => n + 1); return; }
-        if (sequence && phase === 'COMPLETED') { offerNextSteps(followed.scope, language, c.workflowCompleted(sequence.total), [], true); return; }
+        if (sequence && phase === 'COMPLETED') { offerNextSteps(followed.scope, language, completedSequenceText(language, sequence), [], true); return; }
         if (!sequence && phase === 'COMPLETED' && view.final) { offerNextSteps(followed.scope, language, status, [c.finished]); return; }
         flofi(followed.scope, language, status, { ...sequence ? { notes: [c.stepStopped(sequence.current, sequence.total)] } : view.final && bridge.startNewWorkflow ? { notes: [c.finished] } : {},
           ...view.final && bridge.startNewWorkflow ? { options: [c.startNew] } : {} });
         return;
-      } else if (phase === 'RECONCILING') flofi(followed.scope, language, translate(language, live.message));
+      } else if (phase === 'RECONCILING') flofi(followed.scope, language, bridge.sequence && bridge.workflowProgress ? status : translate(language, live.message));
     }
     const continuation = `${live.runKey}:${live.fingerprint}`, next = executionContinuation(bridge);
     // Owner-bound networks: a Continue under the approval's Review can never start the swap, so it is not offered; the swap's own fresh Review
@@ -657,7 +693,12 @@ export function useFlofiConversation({ owner, epoch, bridge, direct, interfaceLa
     if (sequence.current > next.from || sequence.finished) {
       handover.current = null;
       flofi(next.scope, next.language, c.stepCompleted(next.from, sequence.total, done?.delivered ?? null));
-      if (!sequence.finished) startReview(next.scope, next.language);
+      // P0 hotfix (execution continuity): the shell may already be simulating the next step (read-only, in Execute): its Review is presented
+      // here once that simulation settles, never a second simulation and never "still working on the previous step".
+      if (!sequence.finished && bridge.source.state.busy) {
+        reviewLock.current = { scope: next.scope, key: bridge.authorization.key, sawBusy: true, settled: false, language: next.language, continuation: false };
+        flofi(next.scope, next.language, c.stepSimulatingNext(sequence.current));
+      } else if (!sequence.finished) startReview(next.scope, next.language);
       return;
     }
     if (sequence.awaitingDelivery && !next.waiting) { next.waiting = true; flofi(next.scope, next.language, c.awaitingDelivery(next.from), bridge.controls.canCheck ? { options: [c.checkStatus] } : {}); }
@@ -713,6 +754,8 @@ export function useFlofiConversation({ owner, epoch, bridge, direct, interfaceLa
       const recovery = open && open.open.kind !== 'NEXT_STEP' ? lifecycleRequest(text) : null;
       if (open && (recovery === 'REFRESH' || recovery === 'ROUTE')) { setQuestion(null); lifecycle(scope, recovery, language); return; }
       if (open && open.open.kind !== 'NEXT_STEP') { answer(scope, open, text); return; }
+      // P0 hotfix (execution continuity): "continue" while this workflow executes asks where it stands (never a bare yes to "add or review").
+      if (open?.open.kind === 'NEXT_STEP' && lifecycleRequest(text) === 'REVIEW' && workflowExecuting(bridge)) { setQuestion(null); lifecycle(scope, 'REVIEW', language); return; }
       // A bare yes/no does not choose between "add another action" and "review": FloFi asks again, or closes its question.
       const bare = open ? classifyAnswer(text, 'CONFIRM_CONTINUE') : 'UNCLEAR';
       if (open && bare !== 'UNCLEAR') {

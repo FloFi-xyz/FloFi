@@ -13,6 +13,7 @@ import { bindFloFiSigning, usesFloFiWallet } from '../wallet/flofi-wallet-channe
 import { floFiWalletMessage, PRE_SIGNATURE_CODES, signingContextOf } from '../wallet/flofi-signing';
 import { observeUntilSettled } from '../domain/observation-schedule';
 import { createJourney, reportJourney, type Journey } from '../domain/journey-metrics';
+import { editorStorage, readPersistedEditor } from '../domain/editor-persistence';
 
 const KEY = 'gryloo:public-testnet-execution-id';
 /**
@@ -178,6 +179,10 @@ export function PublicTestnetProvider({ children }: { children: ReactNode }) {
         // A finished or never-executed run stays in the Dashboard; a new visit does not put it back on the Canvas. P0 hotfix (execution
         // continuity): when the Canvas this browser remembered is exactly that run's workflow, its final result is shown again (observation only).
         if (!publicRunInProgress(recovered) && tabRun() !== id && !sameWorkflow(workflowRef.current, recovered.workflow)) return;
+        // The owner's explicit "Create new workflow" after this finished run is remembered (another, empty Editor workflow): the finished run is
+        // not put back on that Canvas. A run that still needs the owner (in progress or uncertain) is always brought back.
+        const remembered = readPersistedEditor(editorStorage());
+        if (!publicRunInProgress(recovered) && remembered && remembered.workflow === null && remembered.workflowId !== recovered.workflow.workflowId) return;
         // Recover the canonical workflow only over the untouched initial template.
         // Recovery remains observation-only until fresh simulation and owner Review.
         if (workflowRef.current === initialWorkflow.current && initialWorkflow.current.revision === 0 &&
