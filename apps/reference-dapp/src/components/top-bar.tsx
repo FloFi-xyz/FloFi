@@ -9,6 +9,8 @@ import { useModeB } from '../state/mode-b-store';
 import { useModeA } from '../state/mode-a-store';
 import { StatusBadge } from './status-badge';
 import { useBuild009Wallet, chainName } from '../state/build009-wallet-store';
+/** Board 16: the visible network name never carries its chain id ("Base", not "Base (8453)"); the hover title keeps the full technical label. */
+const networkName = (id: string | null) => chainName(id).replace(/ \((?:\d+|0x[0-9a-fA-F]+)\)$/, '');
 import { isLendingComposition } from '@defi-workflow-engine/workflow-contracts';
 import { useLending } from '../state/lending-store';
 import { useBridgeSwap } from '../state/bridge-swap-store';
@@ -110,7 +112,7 @@ export function TopBar({ tab, setTab, pathname, engineering = false, compact = f
       {provider && <span className="header-wallet-provider" title={provider.name}><WalletMark icon={provider.icon}/><span className="sr-only">{provider.name}</span></span>}
       {solanaActive && solanaAddress ? <span className="wallet-connection" title={solanaTitle}><span className="numeric wallet-address">{shortAddress(solanaAddress)}</span></span>
         : !solanaActive && build009.account ? <span className="build009-wallet-info wallet-connection" title={evmTitle}><span className="wallet-status-dot" aria-hidden="true"/><span className="numeric wallet-address">{shortAddress(build009.account)}</span>
-          {build009.chainId && <span className="wallet-network">{' · '}{tr(chainName(build009.chainId))}</span>}</span>
+          {build009.chainId && <span className="wallet-network">{' · '}{tr(networkName(build009.chainId))}</span>}</span>
           : restoring ? <span className="wallet-connection" role="status">{tr("Restoring wallet…")}</span>
             : <><span className="wallet-connection">{tr(solanaActive ? 'Solana wallet not connected' : 'Wallet not connected')}</span><button type="button" onClick={() => void connection.connect()} disabled={build009.busy || jupiter.busy}>{tr("Connect Wallet")}</button></>}
       </div>
@@ -118,8 +120,8 @@ export function TopBar({ tab, setTab, pathname, engineering = false, compact = f
       <HeaderSettings onDisconnect={disconnect} disconnectDisabled={disconnectDisabled} showDisconnect={compact}/>
     </div>
     {!compact && <div className="shell-network-row" data-empty={networkAttention || walletProviderError || engineering ? undefined : 'true'}>
-      {networkAttention && <p className="network-attention" role="status"><span>{tr('Your wallet is on {0}. Switch to {1} to continue.', tr(chainName(build009.chainId)), tr(chainName(switchTarget!.hex)))}</span>
-        <button type="button" className="secondary" onClick={() => void connection.switchNetwork(switchTarget!.chain)} disabled={build009.busy}>{tr('Switch to {0}', tr(chainName(switchTarget!.hex)))}</button></p>}
+      {networkAttention && <p className="network-attention" role="status"><span>{tr('Your wallet is on {0}. Switch to {1} to continue.', tr(networkName(build009.chainId)), tr(networkName(switchTarget!.hex)))}</span>
+        <button type="button" className="secondary" onClick={() => void connection.switchNetwork(switchTarget!.chain)} disabled={build009.busy}>{tr('Switch to {0}', tr(networkName(switchTarget!.hex)))}</button></p>}
       {walletProviderError && <span role="status">{tr(build009.providerError!)}</span>}
       {engineering && (fork || modeB.info?.available) && <details className="shell-technical"><summary>{tr("Technical connection details")}</summary><div>
         {fork && <span className="fork-badge"><StatusBadge label={`Local fork · ${fork.environment}`} tone="warning"/></span>}

@@ -95,6 +95,11 @@ describe('product shell rendering', () => {
       // P0 approved UX (board 03b): the wallet identity names its network ("0x90f5…d303 · Base").
       expect(html).toContain('<span class="wallet-network"> · Base Sepolia</span>');
       expect(html).not.toContain('header-wallet-provider');
+      // Board 16: on mainnet the visible label is the network's name, never its chain id (the hover title keeps the technical label).
+      wallet.chainId = '0x2105';
+      const mainnet = renderToStaticMarkup(createElement(TopBar, { tab: 'Build', setTab: vi.fn() }));
+      expect(mainnet).toContain('<span class="wallet-network"> · Base</span>');
+      expect(mainnet.replace(/title="[^"]*"/g, '')).not.toMatch(/\(8453\)/);
     }
     expect(html).not.toContain('>Disconnect</button>');
     if (!connected) expect(html).toContain('>Connect Wallet</button>');
