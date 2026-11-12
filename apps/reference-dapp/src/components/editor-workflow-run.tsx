@@ -34,9 +34,11 @@ import { EXECUTION_PHASE_LABEL } from '../domain/execution-phase';
 import { awaitedDelivery, runProgress, runStepPhase } from '../workflow-runs/run-step-phase';
 
 /**
- * The whole-workflow runs this browser started and has not closed, by approval id. A page load gives the Canvas a new workflow id, so a run is
- * never found by that id alone: a run of THIS visit's workflow is followed at once, and a run from an earlier visit is offered ("Show its
- * progress") so a batch in the wallet is read back and reported after a reload. Kept until the owner closes or ends the run.
+ * The whole-workflow runs this browser started and has not closed, by approval id. The Canvas keeps its workflow id across a reload
+ * (`domain/editor-persistence.ts`), so a run of the shown workflow is followed at once (a read-only status request, never a send; when that
+ * read needs the session's wallet sign-in, the owner's own click on "Load workflow progress" asks for it),
+ * and a run of another workflow this browser started (one replaced by "Create new workflow", or from before the Canvas was remembered) is
+ * offered ("Show its progress") so a batch in the wallet is read back and reported. Kept until the owner closes or ends the run.
  * `sent`: the batch id the wallet answered `wallet_sendCalls` with, kept the moment it answers — the wallet holds that batch from then on, so
  * FloFi reads it back and never asks the wallet to send that group again (even a wallet that ignores the app-provided EIP-5792 id).
  */
