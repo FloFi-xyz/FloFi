@@ -159,13 +159,67 @@ describe('review fix U7: a partial completion and an ended run claim nothing the
       steps: [{ ...step(0, 'SKIPPED'), code: OUTCOME_UNKNOWN }, { ...step(1, 'SKIPPED'), code: OUTCOME_UNKNOWN }], groups: [group({ state: 'SKIPPED', code: OUTCOME_UNKNOWN })] });
     const html = render(ended);
     expect(html).toContain('A batch was handed to your wallet and its answer never reached FloFi: it may have executed before it expired. Check your wallet&#x27;s activity.');
-    expect(html).toContain('Outcome unknown: check your wallet');
+    expect(html).toContain(MAY_HAVE_EXECUTED);
     expect(html).not.toContain('Not run');
     const pt = render(ended, 'PT');
     expect(pt).toContain('ele pode ter sido executado antes de expirar');
+    expect(pt).toContain(PT_MAY_HAVE_EXECUTED);
     expect(pt).not.toContain('Não executada');
     const plain = claim({ ...ended.run, steps: [step(0, 'SKIPPED'), step(1, 'SKIPPED')], groups: [group({ state: 'SKIPPED', code: 'OWNER_CANCELLED' })] });
     expect(render(plain)).toContain('Not run');
     expect(render(plain)).not.toContain('A batch was handed to your wallet');
+    expect(render(plain)).not.toContain('may have executed');
+  });
+});
+
+const MAY_HAVE_EXECUTED = 'Its batch may have executed before it expired; check your wallet&#x27;s activity';
+const PT_MAY_HAVE_EXECUTED = 'O lote pode ter sido executado antes de expirar; verifique a atividade da sua carteira';
+describe('round 4 U2: a run stopped at its expiry with a batch handed out and never answered (BLOCKED + WALLET_BATCH_OUTCOME_UNKNOWN)', () => {
+  const OUTCOME_UNKNOWN = 'WALLET_BATCH_OUTCOME_UNKNOWN';
+  const unknownStep = (index: number) => ({ ...step(index, 'BLOCKED'), code: OUTCOME_UNKNOWN });
+  // What the server sends (`halted` from its records: the handed-out batch is never "nothing sent").
+  const stopped = { state: 'HALTED', mode: 'USER_FUNDED', code: 'WORKFLOW_RUN_EXPIRED', nextAction: 'OWNER_DECIDES' as const, steps: [unknownStep(0), unknownStep(1)],
+    groups: [group({ state: 'BLOCKED', code: OUTCOME_UNKNOWN })], halted: 'STOPPED' as const, resumable: false };
+  const partial = { ...stopped, currentStep: 1, steps: [step(0, 'RECONCILED'), unknownStep(1)], halted: 'PARTIAL' as const,
+    groups: [group({ steps: [0, 0], state: 'RECONCILED', signed: true }), group({ index: 1, steps: [1, 1], state: 'BLOCKED', code: OUTCOME_UNKNOWN })] };
+  it('its steps and group may have executed: never "Stopped before submission" or "Not run" (EN/PT)', () => {
+    for (const run of [stopped, partial]) {
+      const html = render(claim(run));
+      expect(html).toContain(MAY_HAVE_EXECUTED);
+      expect(html).not.toMatch(/Stopped before submission|Not run/);
+      expect(html).toContain('A batch was handed to your wallet and its answer never reached FloFi: it may have executed before it expired. Check your wallet&#x27;s activity.');
+      const pt = render(claim(run), 'PT');
+      expect(pt).toContain(PT_MAY_HAVE_EXECUTED);
+      expect(pt).not.toMatch(/Parada antes do envio|Não executada/);
+    }
+  });
+  it('the halted badge and words never contradict it: no "nothing sent", no "before any step completed", no funds resting in the wallet', () => {
+    const { halted: _halted, ...older } = stopped; void _halted;
+    // The server's STOPPED, a view without the field (this page's own reading), and a view that would read as "nothing sent": all fail closed.
+    for (const [label, run] of [['STOPPED', stopped], ['no field', older], ['NOTHING_SENT', { ...stopped, halted: 'NOTHING_SENT' as const }]] as const) {
+      const html = render(claim(run));
+      expect(html, label).toContain('<span class="status-badge info">Stopped</span>');
+      expect(html).toContain('Stopped. FloFi submits nothing more of this workflow; you decide what happens next.');
+      expect(html).not.toMatch(/nothing sent|Stopped before anything was sent|Stopped before any step completed/i);
+      const pt = render(claim(run), 'PT');
+      expect(pt).toContain('Parado. A FloFi não envia mais nada deste fluxo');
+      expect(pt).not.toMatch(/nada enviado|Parado antes de qualquer/);
+    }
+    const html = render(claim(partial));
+    expect(html).toContain('<span class="status-badge info">Partially completed</span>');
+    expect(html).toContain('Partially completed: the reconciled steps stay done. FloFi submits nothing more of this workflow; you decide what happens next.');
+    expect(html).not.toContain('their funds rest in your wallet');
+    expect(render(claim(partial), 'PT')).toContain('Parcialmente concluído: as etapas reconciliadas ficam feitas. A FloFi não envia mais nada deste fluxo');
+  });
+  it('a view without the server\'s `resumable` never offers to try it again (a fresh batch could run alongside the one that may have executed)', () => {
+    const older = claim(stopped);
+    delete (older.run as { resumable?: boolean }).resumable;
+    expect(render(older)).not.toContain(TRY);
+  });
+  it('a late answer recorded for it keeps that state\'s own words (the code alone never hides a reconciled batch)', () => {
+    const answered = claim({ ...stopped, state: 'COMPLETED', nextAction: 'NONE', halted: null, steps: [{ ...step(0, 'RECONCILED'), code: OUTCOME_UNKNOWN },
+      { ...step(1, 'RECONCILED'), code: OUTCOME_UNKNOWN }], groups: [group({ state: 'RECONCILED', code: OUTCOME_UNKNOWN, signed: true })] });
+    expect(render(answered)).toContain('Reconciled');
+    expect(render(answered)).not.toContain('may have executed');
   });
 });

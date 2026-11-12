@@ -120,11 +120,19 @@ const NOTHING_SENT: ReadonlySet<string> = new Set(['WALLET_REQUEST_REJECTED', 'W
 /** Whether the owner's wallet knows a batch id (`wallet_getCallsStatus` answers; EIP-5792 5730 or no answer: it does not). */
 const walletKnows = (batchId: string) => walletBatchHashes(batchId).then(() => true, () => false);
 /**
- * A step's or group's state in words. One carrying WALLET_BATCH_OUTCOME_UNKNOWN (the run was ended while a batch handed to the owner's wallet
- * had no recorded answer) may have executed before its on-chain deadline: it is never called "Not run".
+ * States whose own words already say what the wallet answered or the chain decided: only these keep their label when a step or group carries
+ * WALLET_BATCH_OUTCOME_UNKNOWN (e.g. a late answer recorded after it). Every other state — BLOCKED ("Stopped before submission") when the run
+ * stopped at its expiry, SKIPPED ("Not run") when it was ended, anything else — would claim the batch did not run, which nothing proves.
  */
+const ANSWERED_STATES: readonly string[] = ['AUTHORIZED', 'SUBMITTED', 'UNCERTAIN', 'RECONCILED', 'FAILED'];
+/**
+ * A step or group carrying WALLET_BATCH_OUTCOME_UNKNOWN (the run was stopped at its expiry or ended while a batch handed to the owner's wallet
+ * had no recorded answer): it may have executed before its on-chain deadline.
+ */
+const batchUnanswered = (item: { readonly state: string; readonly code: string | null }) => item.code === WALLET_BATCH_OUTCOME_UNKNOWN && !ANSWERED_STATES.includes(item.state);
+/** A step's or group's state in words; one whose wallet batch may have executed unseen is never called "Not run" or "Stopped before submission". */
 const stateText = (labels: Readonly<Record<string, string>>, item: { readonly state: string; readonly code: string | null }) =>
-  item.code === WALLET_BATCH_OUTCOME_UNKNOWN ? 'Outcome unknown: check your wallet' : labels[item.state] ?? item.state;
+  batchUnanswered(item) ? 'Its batch may have executed before it expired; check your wallet\'s activity' : labels[item.state] ?? item.state;
 
 export function WorkflowRunPanel({ claim, approvalId, secret, onProposal, onError }: { claim: WorkflowRunClaim; approvalId: string; secret: string | null;
   onProposal: (proposal: ClaimedProposal) => void; onError: (code: string) => void }) {
@@ -288,7 +296,9 @@ export function WorkflowRunPanel({ claim, approvalId, secret, onProposal, onErro
   // that field falls back to this page's own reading: a confirm-mode step, an owner-step group's step, or a group stopped before anything was signed.
   const ownerStepGroup = currentGroup?.strategy === 'EVM_OWNER_STEP' || currentGroup?.strategy === 'SOLANA_OWNER_STEP';
   const said = (run as { readonly resumable?: unknown }).resumable;
-  const resumable = typeof said === 'boolean' ? said : run.mode !== 'USER_FUNDED' || ownerStepGroup || (currentGroup?.state === 'BLOCKED' && !currentGroup.signed);
+  // A group whose batch was handed to the wallet and never answered may have executed: never tried again from this page's own reading either.
+  const resumable = typeof said === 'boolean' ? said : run.mode !== 'USER_FUNDED' || ownerStepGroup
+    || (currentGroup?.state === 'BLOCKED' && !currentGroup.signed && currentGroup.code !== WALLET_BATCH_OUTCOME_UNKNOWN);
   const userFundedCount = plan.userFunded?.interactions ? plan.userFunded.interactions.upfront + plan.userFunded.interactions.whenDue : 0;
 
   // BUILD-FLOFI-UNIVERSAL-SINGLE-AUTH-MAINNET-001: a sign whose answer was lost (timeout) may still have started the run. Once the status poll shows
@@ -302,10 +312,12 @@ export function WorkflowRunPanel({ claim, approvalId, secret, onProposal, onErro
   const confirmations = plan.confirmEachStep.walletConfirmationsAtLeast;
   const choosing = run.state === 'PENDING' && run.mode === null;
   const nextStep = run.nextAction === 'OWNER_SIGNS_STEP' && claim.step === null ? run.currentStep + 1 : null;
-  const halted = run.state === 'HALTED' ? haltedAs(run) : null;
+  // A run stopped at its expiry or ended while a batch it handed to the owner's wallet was never answered: that batch may have executed before
+  // its on-chain deadline.
+  const unanswered = (run.groups ?? []).some(batchUnanswered) || run.steps.some(batchUnanswered);
+  // Such a run is never "nothing sent" (badge or text), whatever a view without the server's own `halted` would suggest (fails closed to STOPPED).
+  const halted = run.state === 'HALTED' ? (unanswered && haltedAs(run) === 'NOTHING_SENT' ? 'STOPPED' : haltedAs(run)) : null;
   const endable = canEndWorkflow(run, run.steps, run.groups ?? [], new Date());
-  // A run ended while a batch it handed to the owner's wallet was never answered: that batch may have executed before its on-chain deadline.
-  const unanswered = (run.groups ?? []).some(g => g.code === WALLET_BATCH_OUTCOME_UNKNOWN) || run.steps.some(s => s.code === WALLET_BATCH_OUTCOME_UNKNOWN);
   return <section className="workflow-run" aria-label={tr('Workflow steps')} data-run-state={run.state}>
     <div className="workflow-run-head">
       <strong>{tr('{0}-step workflow', String(run.stepCount))}</strong>
@@ -419,8 +431,12 @@ export function WorkflowRunPanel({ claim, approvalId, secret, onProposal, onErro
     {run.state === 'HALTED' && <div className="workflow-run-choice">
       <p role="status">{halted === 'NOTHING_SENT'
         ? <>{tr('Stopped before anything was sent: your funds stay in your wallet.')}{resumable ? <> {tr('You can run each step through its own flow from here, or end the workflow.')}</> : null}</>
-        : halted === 'STOPPED' ? tr('Stopped before any step completed. FloFi submits nothing more of this workflow; you decide what happens next.')
-        : tr('Partially completed: the reconciled steps stay done and their funds rest in your wallet. The step that stopped shows what happened to it.')}</p>
+        // A batch that may have executed unseen: neither "before any step completed" nor that the reconciled steps' funds still rest in the
+        // wallet (that batch may have spent them); the note below says what may have happened.
+        : halted === 'STOPPED' ? tr(unanswered ? 'Stopped. FloFi submits nothing more of this workflow; you decide what happens next.'
+          : 'Stopped before any step completed. FloFi submits nothing more of this workflow; you decide what happens next.')
+        : tr(unanswered ? 'Partially completed: the reconciled steps stay done. FloFi submits nothing more of this workflow; you decide what happens next.'
+          : 'Partially completed: the reconciled steps stay done and their funds rest in your wallet. The step that stopped shows what happened to it.')}</p>
       {resumable ? <div className="approval-actions">
         <button type="button" className="secondary" disabled={busy} onClick={() => void act(() => resumeWorkflowRunHandoff(approvalId))}>{tr('Try this step again')}</button>
       </div> : <p className="muted">{tr(currentGroup?.signed ? 'Something you already signed for this step is never replaced: end this workflow and start a new one.'

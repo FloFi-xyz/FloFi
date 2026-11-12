@@ -223,7 +223,14 @@ export const portugueseWorkflowExecution: Readonly<Record<string, string>> = {
     'Este navegador não conseguiu guardar um registro do pedido, então a FloFi não pediu nada à sua carteira (é esse registro que impede que um pedido seja enviado duas vezes). Permita o armazenamento do site ou use outro navegador e tente de novo.',
   'A batch was handed to your wallet and its answer never reached FloFi: it may have executed before it expired. Check your wallet\'s activity.':
     'Um lote foi entregue à sua carteira e a resposta dela nunca chegou à FloFi: ele pode ter sido executado antes de expirar. Verifique a atividade da sua carteira.',
-  'Outcome unknown: check your wallet': 'Resultado desconhecido: verifique sua carteira',
+  // Round 4: a step or group whose batch was handed out and never answered (the run stopped at its expiry, or was ended) is never "not run" or
+  // "stopped before submission"; a halted run with such a batch claims neither that nothing was sent nor that the reconciled funds rest in the
+  // wallet; a USER_FUNDED_PREPARED_STILL_VALID refusal still on screen once the prepared request's validity has passed says so.
+  'Its batch may have executed before it expired; check your wallet\'s activity': 'O lote pode ter sido executado antes de expirar; verifique a atividade da sua carteira',
+  'Stopped. FloFi submits nothing more of this workflow; you decide what happens next.': 'Parado. A FloFi não envia mais nada deste fluxo; você decide o que acontece a seguir.',
+  'Partially completed: the reconciled steps stay done. FloFi submits nothing more of this workflow; you decide what happens next.':
+    'Parcialmente concluído: as etapas reconciliadas ficam feitas. A FloFi não envia mais nada deste fluxo; você decide o que acontece a seguir.',
+  'The request FloFi prepared expired at {0}; you can ask for a fresh one now.': 'O pedido que a FloFi preparou expirou às {0}; agora você pode pedir um novo.',
   'A transfer of this token (for example a Stock Token, or a token outside FloFi\'s catalog) runs through its own review and wallet confirmation.':
     'Uma transferência deste token (por exemplo, um Stock Token ou um token fora do catálogo da FloFi) passa pela própria revisão e confirmação na carteira.',
 };

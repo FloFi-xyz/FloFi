@@ -603,10 +603,13 @@ export const EXECUTION_REASON: Readonly<Record<string, string>> = {
  * USER_FUNDED_PREPARED_STILL_VALID: the batch FloFi already prepared for this group can still execute on chain (less than
  * `PREPARED_MIN_REMAINING_MS`, 3 minutes, left: too little to review and confirm it again), so the server prepares no second batch that could
  * run alongside it. This request asked the wallet nothing; the earlier batch may be in the wallet (another tab or device may have handed it
- * over), so nothing here says it was never sent. With the group's validUntil from the run view the owner is told when to ask again.
+ * over), so nothing here says it was never sent. With the group's validUntil from the run view the owner is told when to ask again — and,
+ * once that time has passed while the refusal is still on screen, that it has (`PREPARED_EXPIRED_AT`): the server then prepares a fresh one,
+ * so "wait until it expires" would no longer be true. The undated words only when the run view shows no prepared batch to date.
  */
 const PREPARED_STILL_VALID = 'FloFi did not ask your wallet this time: the request it already prepared stays valid on chain for a few more minutes at most, and your wallet may hold it. If your wallet shows it, confirm it there; otherwise wait until it expires, then try again. FloFi never prepares a second request that could run alongside it.';
 const PREPARED_STILL_VALID_UNTIL = 'FloFi did not ask your wallet this time: the request it already prepared stays valid on chain until {0}, and your wallet may hold it. If your wallet shows it, confirm it there; otherwise wait until {0}, then try again. FloFi never prepares a second request that could run alongside it.';
+const PREPARED_EXPIRED_AT = 'The request FloFi prepared expired at {0}; you can ask for a fresh one now.';
 /**
  * Refusals in plain words, keyed by the bare code the server answers with: never a placeholder, because a refusal of a preparation, an
  * authorization or a Review that failed as a whole names no step (a step number would be invented, or the code shown in its place). A
@@ -679,13 +682,22 @@ const serverResumable = (run: RunView): boolean | undefined => {
   return typeof said === 'boolean' ? said : undefined;
 };
 /**
- * Whether the run carries WALLET_BATCH_OUTCOME_UNKNOWN: it was ended while a batch it handed to the owner's wallet had no recorded answer, so
- * that batch may have executed before its on-chain deadline. Its steps and group are then never called "Not run".
+ * States whose own words already say what the wallet answered or the chain decided: only these keep their label when a step or group carries
+ * WALLET_BATCH_OUTCOME_UNKNOWN (e.g. a late answer recorded after it). Every other state — BLOCKED ("Stopped before submission") when the run
+ * stopped at its expiry, SKIPPED ("Not run") when it was ended, anything else — would claim the batch did not run, which nothing proves.
  */
-const outcomeUnknown = (run: RunView) => run.groups.some(g => g.code === WALLET_BATCH_OUTCOME_UNKNOWN) || run.steps.some(s => s.code === WALLET_BATCH_OUTCOME_UNKNOWN);
-/** A step's or group's state in words; one whose wallet batch may have executed unseen says so instead of "Not run". */
+const ANSWERED_STATES: readonly string[] = ['AUTHORIZED', 'SUBMITTED', 'UNCERTAIN', 'RECONCILED', 'FAILED'];
+/** A step or group whose wallet batch was handed to the owner's wallet and never answered: it may have executed before its on-chain deadline. */
+const batchUnanswered = (item: { readonly state: string; readonly code: string | null }) => item.code === WALLET_BATCH_OUTCOME_UNKNOWN && !ANSWERED_STATES.includes(item.state);
+/**
+ * Whether the run carries WALLET_BATCH_OUTCOME_UNKNOWN: it was stopped at its expiry or ended while a batch it handed to the owner's wallet had
+ * no recorded answer, so that batch may have executed before its on-chain deadline. Its steps and group are then never called "Not run" or
+ * "Stopped before submission", and the run never "stopped before anything was sent" or "before any step completed".
+ */
+const outcomeUnknown = (run: RunView) => run.groups.some(batchUnanswered) || run.steps.some(batchUnanswered);
+/** A step's or group's state in words; one whose wallet batch may have executed unseen says so instead of "Not run" or "Stopped before submission". */
 const stateText = (labels: Readonly<Record<string, string>>, item: { readonly state: string; readonly code: string | null }) =>
-  item.code === WALLET_BATCH_OUTCOME_UNKNOWN ? 'Outcome unknown: check your wallet' : labels[item.state] ?? item.state;
+  batchUnanswered(item) ? 'Its batch may have executed before it expired; check your wallet\'s activity' : labels[item.state] ?? item.state;
 
 export function EditorWorkflowRunPanel({ state }: { state: EditorWorkflowRunState }) {
   const { t: tr, language } = useLocale();
@@ -703,12 +715,20 @@ export function EditorWorkflowRunPanel({ state }: { state: EditorWorkflowRunStat
   const plannedOf = (index: number) => run?.groups.flatMap(g => g.planned?.steps ?? []).find(s => s.index === index) ?? null;
   const currentGroup = run?.groups.find(g => g.steps[0] <= run.currentStep && run.currentStep <= g.steps[1]) ?? null;
   const due = run && run.nextAction === 'OWNER_SIGNS_GROUP' && currentGroup && !state.unrecorded && !['wallet', 'confirming', 'authorizing', 'confirm-update'].includes(phase);
+  // The prepared wallet request(s) of the run view, dated by the LATEST validity: while any of them is still valid it is never called expired.
+  const preparedUntil = run?.groups.filter(g => g.state === 'PREPARED' && g.strategy === 'EVM_WALLET_BATCH' && g.validUntil && Number.isFinite(Date.parse(g.validUntil)))
+    .map(g => g.validUntil!).sort((a, b) => Date.parse(b) - Date.parse(a))[0] ?? null;
   // A prepared wallet request still valid (the wallet may hold it): the run cannot be ended yet.
-  const heldUntil = run?.groups.find(g => g.state === 'PREPARED' && g.strategy === 'EVM_WALLET_BATCH' && g.validUntil && Date.parse(g.validUntil) > now)?.validUntil ?? null;
+  const heldUntil = preparedUntil && Date.parse(preparedUntil) > now ? preparedUntil : null;
+  // A run whose wallet batch was handed out and never answered (stopped at its expiry or ended): it may have executed before its deadline.
+  const unanswered = run ? outcomeUnknown(run) : false;
   // "Nothing was sent" only while nothing can have reached the wallet: once a batch was handed over or a group signed, the request stands.
-  const mayHold = state.unrecorded || Boolean(run?.groups.some(g => g.signed || ['AUTHORIZED', 'SUBMITTED', 'UNCERTAIN', 'RECONCILED'].includes(g.state)));
-  // The one refusal the run view can date: when the batch already prepared stops being executable, the owner may ask again.
-  const errorText = !error ? null : error === 'USER_FUNDED_PREPARED_STILL_VALID' && heldUntil ? tr(PREPARED_STILL_VALID_UNTIL, fmtTime(heldUntil, language))
+  const mayHold = state.unrecorded || unanswered || Boolean(run?.groups.some(g => g.signed || ['AUTHORIZED', 'SUBMITTED', 'UNCERTAIN', 'RECONCILED'].includes(g.state)));
+  // The one refusal the run view can date, from the prepared batch's validity itself (NOT only while it is still in the future: `now` ticks while
+  // the refusal stays on screen): until then the owner waits for it; once it has passed, the server prepares a fresh one when asked. Undated only
+  // when the run view shows no prepared batch.
+  const errorText = !error ? null : error === 'USER_FUNDED_PREPARED_STILL_VALID' && preparedUntil
+    ? tr(heldUntil ? PREPARED_STILL_VALID_UNTIL : PREPARED_EXPIRED_AT, fmtTime(preparedUntil, language))
     : tr(EXECUTION_REFUSAL[error] ?? (mayHold
       ? 'FloFi could not complete this request ({0}). What your wallet already has stands: FloFi keeps following it and never sends it again.'
       : 'FloFi could not complete this request ({0}). Nothing was sent.'), error);
@@ -718,11 +738,13 @@ export function EditorWorkflowRunPanel({ state }: { state: EditorWorkflowRunStat
   const unrelayed = run?.groups.some(g => g.strategy === 'EVM_USER_OPERATION' && g.signed && !['SUBMITTED', 'UNCERTAIN', 'RECONCILED', 'FAILED'].includes(g.state)) ?? false;
   const endable = Boolean(run && canEndWorkflow(run, run.steps, run.groups, new Date(now)) && !unrelayed);
   // Resume is offered exactly when the server would accept it (`run.resumable`, its own `resumeRefusal`: inside the run's window, an owner-step
-  // group's BLOCKED step too); only a view without that field falls back to this page's own reading.
-  const resumable = run ? serverResumable(run) ?? (run.state === 'HALTED' && currentGroup?.state === 'BLOCKED' && !currentGroup.signed) : false;
-  const halted = run?.state === 'HALTED' ? haltedAs(run) : null;
-  // A run ended while a batch it handed to the wallet was never answered: that batch may have executed before its on-chain deadline.
-  const unanswered = run ? outcomeUnknown(run) : false;
+  // group's BLOCKED step too); only a view without that field falls back to this page's own reading, which never resumes a group whose batch was
+  // handed to the wallet and never answered (it may have executed).
+  const resumable = run ? serverResumable(run) ?? (run.state === 'HALTED' && currentGroup?.state === 'BLOCKED' && !currentGroup.signed
+    && currentGroup.code !== WALLET_BATCH_OUTCOME_UNKNOWN) : false;
+  // A run whose batch may have executed unseen (`unanswered`) is never "stopped before anything was sent", whatever a view without the server's
+  // own `halted` would suggest (fails closed to STOPPED).
+  const halted = run?.state === 'HALTED' ? (unanswered && haltedAs(run) === 'NOTHING_SENT' ? 'STOPPED' : haltedAs(run)) : null;
   // The wallet was asked for this group and FloFi never asks it again (`heldBatch`), so rejecting it there no longer brings a fresh request —
   // except while the wallet prompt is open: a rejection then answers (nothing sent) and the group is offered again.
   const askedOnce = state.unrecorded && phase !== 'wallet';
@@ -826,8 +848,12 @@ export function EditorWorkflowRunPanel({ state }: { state: EditorWorkflowRunStat
     {run?.state === 'ATTENTION' && <p role="status">{tr('A submitted step has no final outcome yet. FloFi keeps observing it and never resubmits it.')}</p>}
     {halted && <p role="status">{halted === 'NOTHING_SENT'
       ? <>{tr('Stopped before anything was sent: your funds stay in your wallet.')}{resumable && endable ? <> {tr('You can run each step through its own flow from here, or end the workflow.')}</> : null}</>
-      : halted === 'STOPPED' ? tr('Stopped before any step completed. FloFi submits nothing more of this workflow; you decide what happens next.')
-      : tr('Partially completed: the reconciled steps stay done and their funds rest in your wallet. The step that stopped shows what happened to it.')}</p>}
+      // A batch that may have executed unseen: neither "before any step completed" nor that the reconciled steps' funds still rest in the wallet
+      // (that batch may have spent them); the note below says what may have happened.
+      : halted === 'STOPPED' ? tr(unanswered ? 'Stopped. FloFi submits nothing more of this workflow; you decide what happens next.'
+        : 'Stopped before any step completed. FloFi submits nothing more of this workflow; you decide what happens next.')
+      : tr(unanswered ? 'Partially completed: the reconciled steps stay done. FloFi submits nothing more of this workflow; you decide what happens next.'
+        : 'Partially completed: the reconciled steps stay done and their funds rest in your wallet. The step that stopped shows what happened to it.')}</p>}
     {unanswered && <p role="status">{tr('A batch was handed to your wallet and its answer never reached FloFi: it may have executed before it expired. Check your wallet\'s activity.')}</p>}
     {run?.state === 'COMPLETED' && <p role="status"><strong>{tr('Every step reconciled.')}</strong></p>}
     {phase === 'wallet' && <p role="status">{tr('Confirm the request in your wallet. It shows every call of the batch and the network fee.')}</p>}

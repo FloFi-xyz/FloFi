@@ -49,6 +49,9 @@ const state = (patch: Partial<EditorWorkflowRunState>): EditorWorkflowRunState =
 const render = (s: EditorWorkflowRunState, language: Language = 'EN') =>
   renderToStaticMarkup(<LocaleProvider initialLanguage={language}><EditorWorkflowRunPanel state={s}/></LocaleProvider>);
 const END = '>End workflow</button>';
+/** A step's or group's state when its batch was handed to the wallet and never answered (as rendered: the apostrophe is escaped). */
+const MAY_HAVE_EXECUTED = 'Its batch may have executed before it expired; check your wallet&#x27;s activity';
+const PT_MAY_HAVE_EXECUTED = 'O lote pode ter sido executado antes de expirar; verifique a atividade da sua carteira';
 
 describe('Editor panel: "End workflow" follows the server\'s own rule (canEndWorkflow)', () => {
   it('a group whose batch the wallet reported NOT sent (blocked, authorization kept) halts a run that can be ended, and only ended', () => {
@@ -170,13 +173,42 @@ describe('review fixes U2/U3/U4: refusals of the batch path in plain words (EN/P
     expect(html).not.toContain('Nothing was sent');
     expect(render(state({ run: prepared, error: 'USER_FUNDED_PREPARED_STILL_VALID' }), 'PT')).toContain(`continua válido on-chain até ${time(FUTURE, 'pt-BR')}`);
   });
-  it('without a valid prepared group in the run view: the same words without a time (never a placeholder or the code)', () => {
-    for (const run of [runOf({}), runOf({ groups: [group(0, { state: 'PREPARED', validUntil: PAST }), group(1)] })]) {
+  it('without a prepared batch group in the run view: the same words without a time (never a placeholder or the code)', () => {
+    for (const run of [null, runOf({}), runOf({ groups: [group(0, { state: 'PREPARED', strategy: 'EVM_USER_OPERATION', validUntil: FUTURE }), group(1)] })]) {
       const html = render(state({ run, error: 'USER_FUNDED_PREPARED_STILL_VALID' }));
       expect(html).toContain('stays valid on chain for a few more minutes at most');
-      expect(html).not.toMatch(/\{\d\}|USER_FUNDED_PREPARED_STILL_VALID/);
+      expect(html).not.toMatch(/\{\d\}|USER_FUNDED_PREPARED_STILL_VALID|expired at/);
     }
     expect(render(state({ run: runOf({}), error: 'USER_FUNDED_PREPARED_STILL_VALID' }), 'PT')).toContain('por no máximo mais alguns minutos');
+  });
+  it('round 4 U1: its validity passed while the refusal is on screen: it says it expired and a fresh one can be asked, never "wait until it expires"', () => {
+    const expired = runOf({ groups: [group(0, { state: 'PREPARED', validUntil: PAST }), group(1)] });
+    const html = render(state({ run: expired, error: 'USER_FUNDED_PREPARED_STILL_VALID' }));
+    expect(html).toContain(`The request FloFi prepared expired at ${time(PAST, 'en-US')}; you can ask for a fresh one now.`);
+    expect(html).not.toMatch(/stays valid on chain|wait until|\{\d\}|USER_FUNDED_PREPARED_STILL_VALID/);
+    expect(render(state({ run: expired, error: 'USER_FUNDED_PREPARED_STILL_VALID' }), 'PT'))
+      .toContain(`O pedido que a FloFi preparou expirou às ${time(PAST, 'pt-BR')}; agora você pode pedir um novo.`);
+    expect(translate('PT', 'The request FloFi prepared expired at {0}; you can ask for a fresh one now.')).not.toBe('The request FloFi prepared expired at {0}; you can ask for a fresh one now.');
+  });
+  it('round 4 U1: the same prepared batch is dated by the clock: valid until its time before it, expired at that time after it', () => {
+    const until = '2030-06-01T12:00:00.000Z', prepared = runOf({ groups: [group(0, { state: 'PREPARED', validUntil: until }), group(1)] });
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(Date.parse(until) - 60_000);
+      const before = render(state({ run: prepared, error: 'USER_FUNDED_PREPARED_STILL_VALID' }));
+      expect(before).toContain(`stays valid on chain until ${time(until, 'en-US')}`);
+      expect(before).not.toContain('expired at');
+      vi.setSystemTime(Date.parse(until) + 1_000);
+      const after = render(state({ run: prepared, error: 'USER_FUNDED_PREPARED_STILL_VALID' }));
+      expect(after).toContain(`The request FloFi prepared expired at ${time(until, 'en-US')}; you can ask for a fresh one now.`);
+      expect(after).not.toMatch(/stays valid on chain|wait until/);
+    } finally { vi.useRealTimers(); }
+  });
+  it('round 4 U1: with two prepared batches, the latest validity decides (never "expired" while one of them is still valid)', () => {
+    const both = runOf({ groups: [group(0, { state: 'PREPARED', validUntil: PAST }), group(1, { state: 'PREPARED', validUntil: FUTURE })] });
+    const html = render(state({ run: both, error: 'USER_FUNDED_PREPARED_STILL_VALID' }));
+    expect(html).toContain(`stays valid on chain until ${time(FUTURE, 'en-US')}`);
+    expect(html).not.toContain('expired at');
   });
   it('WALLET_BATCH_ANSWER_MISMATCH: it may have run twice; never "nothing was sent"', () => {
     const html = render(state({ run: runOf({}), error: 'WALLET_BATCH_ANSWER_MISMATCH' }));
@@ -229,11 +261,11 @@ describe('review fix U7: a partial completion and an ended run claim nothing the
     for (const s of [state({ run: ended }), state({ run: ended, review: review() })]) {
       const html = render(s);
       expect(html).toContain('A batch was handed to your wallet and its answer never reached FloFi: it may have executed before it expired. Check your wallet&#x27;s activity.');
-      expect(html).toContain('Outcome unknown: check your wallet');
+      expect(html).toContain(MAY_HAVE_EXECUTED);
       expect(html).not.toContain('Not run');
       const pt = render(s, 'PT');
       expect(pt).toContain('ele pode ter sido executado antes de expirar');
-      expect(pt).toContain('Resultado desconhecido: verifique sua carteira');
+      expect(pt).toContain(PT_MAY_HAVE_EXECUTED);
       expect(pt).not.toContain('Não executada');
     }
   });
@@ -243,10 +275,73 @@ describe('review fix U7: a partial completion and an ended run claim nothing the
     const html = render(state({ run: plain }));
     expect(html).toContain('Not run');
     expect(html).not.toContain('A batch was handed to your wallet');
-    expect(html).not.toContain('Outcome unknown');
+    expect(html).not.toContain('may have executed');
   });
   it('every new message has its own PT translation', () => {
-    for (const text of ['Outcome unknown: check your wallet', 'A batch was handed to your wallet and its answer never reached FloFi: it may have executed before it expired. Check your wallet\'s activity.'])
+    for (const text of ['Its batch may have executed before it expired; check your wallet\'s activity',
+      'A batch was handed to your wallet and its answer never reached FloFi: it may have executed before it expired. Check your wallet\'s activity.',
+      'Stopped. FloFi submits nothing more of this workflow; you decide what happens next.',
+      'Partially completed: the reconciled steps stay done. FloFi submits nothing more of this workflow; you decide what happens next.'])
       expect(translate('PT', text), text).not.toBe(text);
+  });
+});
+
+describe('round 4 U2: a run stopped at its expiry with a batch handed out and never answered (BLOCKED + WALLET_BATCH_OUTCOME_UNKNOWN)', () => {
+  const OUTCOME_UNKNOWN = 'WALLET_BATCH_OUTCOME_UNKNOWN';
+  const unknownStep = (index: number) => ({ ...step(index, 'BLOCKED'), code: OUTCOME_UNKNOWN });
+  // What the server sends (`halted` from its records: the handed-out batch is never "nothing sent"), and a view without that field.
+  const stopped = runOf({ state: 'HALTED', code: 'WORKFLOW_RUN_EXPIRED', nextAction: 'OWNER_DECIDES', steps: [unknownStep(0), unknownStep(1)],
+    groups: [group(0, { state: 'BLOCKED', code: OUTCOME_UNKNOWN, steps: [0, 1] })], halted: 'STOPPED' });
+  const partial = runOf({ state: 'HALTED', code: 'WORKFLOW_RUN_EXPIRED', currentStep: 1, nextAction: 'OWNER_DECIDES', steps: [step(0, 'RECONCILED'), unknownStep(1)],
+    groups: [group(0, { state: 'RECONCILED', signed: true }), group(1, { state: 'BLOCKED', code: OUTCOME_UNKNOWN })], halted: 'PARTIAL' });
+  it('its steps and group may have executed: never "Stopped before submission" or "Not run", with or without the Review in this tab (EN/PT)', () => {
+    for (const s of [state({ run: stopped }), state({ run: stopped, review: review() }), state({ run: partial }), state({ run: partial, review: review() })]) {
+      const html = render(s);
+      expect(html).toContain(MAY_HAVE_EXECUTED);
+      expect(html).not.toMatch(/Stopped before submission|Not run/);
+      expect(html).toContain('A batch was handed to your wallet and its answer never reached FloFi: it may have executed before it expired. Check your wallet&#x27;s activity.');
+      const pt = render(s, 'PT');
+      expect(pt).toContain(PT_MAY_HAVE_EXECUTED);
+      expect(pt).not.toMatch(/Parada antes do envio|Não executada/);
+    }
+  });
+  it('the halted words never contradict it: not "before any step completed", not "nothing was sent", not that the reconciled funds rest in the wallet', () => {
+    const { halted: _halted, ...older } = stopped; void _halted;
+    for (const run of [stopped, older as RunView]) {
+      const html = render(state({ run }));
+      expect(html).toContain('Stopped. FloFi submits nothing more of this workflow; you decide what happens next.');
+      expect(html).not.toMatch(/Stopped before any step completed|Stopped before anything was sent|nothing was sent/i);
+      expect(render(state({ run }), 'PT')).toContain('Parado. A FloFi não envia mais nada deste fluxo');
+    }
+    // A view that would read as "nothing sent" (no batch id or plan shown) still fails closed.
+    expect(render(state({ run: { ...stopped, halted: 'NOTHING_SENT' } }))).not.toMatch(/Stopped before anything was sent|nothing was sent/i);
+    const html = render(state({ run: partial }));
+    expect(html).toContain('Partially completed: the reconciled steps stay done. FloFi submits nothing more of this workflow; you decide what happens next.');
+    expect(html).not.toContain('their funds rest in your wallet');
+    expect(render(state({ run: partial }), 'PT')).toContain('Parcialmente concluído: as etapas reconciliadas ficam feitas. A FloFi não envia mais nada deste fluxo');
+  });
+  it('a view without the server\'s `resumable` never offers to resume it (a fresh batch could run alongside the one that may have executed)', () => {
+    const { resumable: _resumable, ...older } = stopped; void _resumable;
+    expect(render(state({ run: older as RunView }))).not.toContain('Resume the workflow');
+  });
+  it('a request that fails in words FloFi has no entry for never adds "Nothing was sent" next to it', () => {
+    const html = render(state({ run: stopped, error: 'SOME_NEW_REFUSAL' }));
+    expect(html).toContain('What your wallet already has stands');
+    expect(html).not.toContain('Nothing was sent');
+  });
+  it('a late answer recorded for it keeps that state\'s own words (the code alone never hides a reconciled batch)', () => {
+    const answered = runOf({ state: 'COMPLETED', nextAction: 'NONE', steps: [{ ...step(0, 'RECONCILED'), code: OUTCOME_UNKNOWN }, { ...step(1, 'RECONCILED'), code: OUTCOME_UNKNOWN }],
+      groups: [group(0, { state: 'RECONCILED', code: OUTCOME_UNKNOWN, signed: true, steps: [0, 1] })] });
+    const html = render(state({ run: answered }));
+    expect(html).toContain('Reconciled');
+    expect(html).not.toContain('may have executed');
+  });
+  it('any other stop at expiry keeps its own words', () => {
+    const plain = runOf({ state: 'HALTED', code: 'WORKFLOW_RUN_EXPIRED', nextAction: 'OWNER_DECIDES', steps: [{ ...step(0, 'BLOCKED'), code: 'WORKFLOW_RUN_EXPIRED' }, step(1, 'DELEGATED')],
+      groups: [group(0, { state: 'BLOCKED', code: 'WORKFLOW_RUN_EXPIRED' }), group(1)], halted: 'NOTHING_SENT' });
+    const html = render(state({ run: plain }));
+    expect(html).toContain('Stopped before submission');
+    expect(html).toContain('Stopped before anything was sent');
+    expect(html).not.toContain('may have executed');
   });
 });

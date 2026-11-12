@@ -22,27 +22,32 @@ export const ENDED = new Set(['EXPIRED', 'SUPERSEDED', 'REVOKED', 'STALE']);
 export const OPEN_RUN = new Set(['PENDING', 'RUNNING', 'ATTENTION', 'HALTED']);
 type WorkflowRunProgress = NonNullable<Progress['workflowRun']>;
 /**
+ * The step/group code of a wallet batch handed to the owner's wallet whose answer never reached FloFi before the run stopped at its expiry
+ * (BLOCKED) or ended (SKIPPED) (`workflow-runs/state-machine.ts`; named here because Channel Core reads runs only through the shared platform's
+ * view, `boundaries.test.ts`). The wallet may have executed that batch before its on-chain deadline: FloFi cannot know.
+ */
+const WALLET_BATCH_OUTCOME_UNKNOWN = 'WALLET_BATCH_OUTCOME_UNKNOWN';
+/** Whether a batch of the run may have executed without FloFi knowing (a step or group carries WALLET_BATCH_OUTCOME_UNKNOWN). */
+const batchOutcomeUnknown = (run: WorkflowRunProgress) => [...run.groups ?? [], ...run.steps].some(item => item.code === WALLET_BATCH_OUTCOME_UNKNOWN);
+/**
  * BUILD-FLOFI-UNIVERSAL-WORKFLOW-002: in a user-funded run a grouped step is DELEGATED from the start (its group, not FloFi, holds it): it reads
  * "waiting for your wallet" until the owner's wallet answered for its group, then "signed in your wallet" — never "authorized" before that.
  */
 const stepState = (run: WorkflowRunProgress, step: WorkflowRunProgress['steps'][number]) => {
-  // A step skipped when the run ended while its wallet batch was in the owner's wallet without an answer may have executed: never "not run".
-  if (step.state === 'SKIPPED' && step.code === WALLET_BATCH_OUTCOME_UNKNOWN) return 'OUTCOME_UNKNOWN';
+  // A step stopped at the run's expiry (BLOCKED) or skipped when the run ended (SKIPPED) while its wallet batch was in the owner's wallet without
+  // an answer may have executed: never "stopped before submission", never "not run".
+  if ((step.state === 'BLOCKED' || step.state === 'SKIPPED') && step.code === WALLET_BATCH_OUTCOME_UNKNOWN) return 'OUTCOME_UNKNOWN';
   if (run.mode !== 'USER_FUNDED' || step.state !== 'DELEGATED') return step.state;
   const group = (run.groups ?? []).find(g => g.steps[0] <= step.index && step.index <= g.steps[1]);
   return group?.signed ? 'GROUP_SIGNED' : 'GROUP_WAITING';
 };
 /**
- * The step/group code of a wallet batch handed to the owner's wallet whose answer never reached FloFi before the run ended (`workflow-runs/
- * state-machine.ts`; named here because Channel Core reads runs only through the shared platform's view, `boundaries.test.ts`).
- */
-const WALLET_BATCH_OUTCOME_UNKNOWN = 'WALLET_BATCH_OUTCOME_UNKNOWN';
-/**
  * A HALTED run is worded by how it stopped (the server decides from its records): partial, nothing sent, or neither claimed. Without the
  * server's word (an older view, an unknown value) it is a plain HALTED, worded neutrally: never "partially completed", never "nothing was sent".
+ * A batch whose outcome is unknown may have executed, so such a run is never "stopped before anything was sent", whatever the view says.
  */
-const haltedState = (run: WorkflowRunProgress) => run.state !== 'HALTED' ? run.state
-  : run.halted === 'PARTIAL' || run.halted === 'NOTHING_SENT' || run.halted === 'STOPPED' ? `HALTED_${run.halted}` : 'HALTED';
+const haltedState = (run: WorkflowRunProgress) => run.state !== 'HALTED' ? run.state : run.halted === 'PARTIAL' ? 'HALTED_PARTIAL'
+  : batchOutcomeUnknown(run) ? 'HALTED' : run.halted === 'NOTHING_SENT' || run.halted === 'STOPPED' ? `HALTED_${run.halted}` : 'HALTED';
 const runFacts = (run: WorkflowRunProgress): RunFacts => ({ state: haltedState(run),
   steps: run.steps.map(step => ({ index: step.index, action: step.action, state: stepState(run, step), transaction: step.outcome?.submissions[0]?.hash ?? null })) });
 /** The non-secret continuation link of a multi-step approval: only the run owner's proven wallet can open it. */
@@ -77,13 +82,13 @@ export type PlannedNotification = { readonly key: string; readonly text: string 
 /**
  * Notifications due for a handoff's progress, each with a stable key (so a repeated check never sends twice): "loaded in FloFi" once
  * the owner claimed it and shares status, then each recorded lifecycle state once and its terminal outcome once. `done` once nothing more can
- * follow.
+ * follow. `now`: the moment of this check (a wallet batch's answer is announced only once its validity has passed).
  */
-export function plannedNotifications(language: ChannelLanguage, handoff: HandoffRecord, progress: Progress, origin?: string):
+export function plannedNotifications(language: ChannelLanguage, handoff: HandoffRecord, progress: Progress, origin?: string, now: Date = new Date()):
   { readonly due: readonly PlannedNotification[]; readonly done: boolean } {
   const m = channelCopy(language), due: PlannedNotification[] = [];
   // BUILD-CHAT-E2E-001: a running workflow outlives its approval link's own window, so its run decides (not the link's expiry).
-  if (progress.workflowRun) return workflowNotifications(language, handoff, progress.workflowRun, origin);
+  if (progress.workflowRun) return workflowNotifications(language, handoff, progress.workflowRun, now, origin);
   if (ENDED.has(progress.status)) return { due, done: true };
   if (!handoff.shareStatus || (progress.status !== 'CLAIMED' && progress.status !== 'APPLIED')) return { due, done: false };
   due.push({ key: `notify:${handoff.handoffId}:loaded`, text: m.loaded });
@@ -111,10 +116,14 @@ const keyPart = (value: string | null | undefined) => (value ?? 'none').toLowerC
  * and the moment the run entered HALTED (a halted run's row changes only when it leaves HALTED, so `updatedAt` is that moment until it resumes or
  * ends) — a step stopped again after a resume is keyed by its code too, and "needs attention" by its step, so a later stop is announced instead of
  * shadowed by the first one.
+ *
+ * A run with a wallet batch whose outcome is unknown (WALLET_BATCH_OUTCOME_UNKNOWN) halts or ends (by its owner, expired or failed) saying that
+ * batch may have executed and the owner should check the wallet's activity: never "stopped before any step completed", "nothing was sent",
+ * "not run" or only the code it ended with.
  */
-function workflowNotifications(language: ChannelLanguage, handoff: HandoffRecord, run: WorkflowRunProgress, origin?: string) {
+function workflowNotifications(language: ChannelLanguage, handoff: HandoffRecord, run: WorkflowRunProgress, now: Date, origin?: string) {
   const m = channelCopy(language), due: PlannedNotification[] = [], key = (suffix: string) => `notify:${handoff.handoffId}:wfr:${suffix}`;
-  const done = !OPEN_RUN.has(run.state);
+  const done = !OPEN_RUN.has(run.state), unknown = batchOutcomeUnknown(run);
   if (!handoff.shareStatus || !run.stepsVisible) return { due, done };
   for (const step of run.steps) if (['RECONCILED', 'FAILED', 'UNCERTAIN', 'BLOCKED'].includes(step.state))
     due.push({ key: key(`step:${step.index}:${step.state.toLowerCase()}${step.state === 'BLOCKED' ? `:${keyPart(step.code)}` : ''}`),
@@ -127,21 +136,26 @@ function workflowNotifications(language: ChannelLanguage, handoff: HandoffRecord
   // The owner's wallet answered a batch (FloFi recorded its id) but no browser reported its transactions yet: only the owner's FloFi page can read
   // them back from the wallet, so the run waits for it — announced once per group (a signed group is never resumed or answered again), even for
   // the first group (the owner may have closed FloFi right after the wallet answered). It may have executed: never "sent", never "not sent".
+  // Every ordinary confirmation passes through this state too (the group stays AUTHORIZED until the open page reports the batch final, and
+  // /approve pings notifications meanwhile), so it is announced only once the group's validity (`validUntil`, the batch's on-chain deadline,
+  // visible to requesters) has passed: by then no late confirmation can execute it and an open page would normally have reported it. A group
+  // without a readable validity (an older view) is announced as before: the conservative side is never staying silent about an answered batch.
   if (run.nextAction === 'OWNER_CONFIRMS_BATCH' && origin) {
     const group = (run.groups ?? []).find(g => g.steps[0] <= run.currentStep && run.currentStep <= g.steps[1]);
-    const [from, to] = group?.steps ?? [run.currentStep, run.currentStep];
-    due.push({ key: key(`batch-answered:${from}`), text: m.batchAnswered(from + 1, to + 1, continuationUrl(origin, handoff.handoffId)) });
+    const [from, to] = group?.steps ?? [run.currentStep, run.currentStep], validUntil = group?.validUntil ? Date.parse(group.validUntil) : Number.NaN;
+    if (!Number.isFinite(validUntil) || validUntil <= now.getTime())
+      due.push({ key: key(`batch-answered:${from}`), text: m.batchAnswered(from + 1, to + 1, continuationUrl(origin, handoff.handoffId)) });
   }
   if (run.state === 'COMPLETED') due.push({ key: key('done'), text: m.runDone });
   else if (run.state === 'HALTED') {
     const entered = Date.parse(run.updatedAt);
-    due.push({ key: key(`halted:${run.currentStep}:${keyPart(run.halted)}:${keyPart(run.code)}${Number.isFinite(entered) ? `:${entered}` : ''}`),
-      text: run.halted === 'PARTIAL' ? m.runHalted : run.halted === 'NOTHING_SENT' ? m.runHaltedNothingSent(run.resumable === true)
-        : run.halted === 'STOPPED' ? m.runHaltedStopped : m.runHaltedUnclassified });
+    // A halt with a batch whose outcome is unknown is keyed apart, so its "may have executed" notice is never shadowed by a plain halt notice.
+    due.push({ key: key(`halted:${run.currentStep}:${keyPart(run.halted)}:${keyPart(run.code)}${unknown ? ':unknown' : ''}${Number.isFinite(entered) ? `:${entered}` : ''}`),
+      text: unknown ? m.runHaltedBatchUnknown(run.halted === 'PARTIAL') : run.halted === 'PARTIAL' ? m.runHalted
+        : run.halted === 'NOTHING_SENT' ? m.runHaltedNothingSent(run.resumable === true) : run.halted === 'STOPPED' ? m.runHaltedStopped : m.runHaltedUnclassified });
   } else if (run.state === 'ATTENTION') {
     // Once per step: a later step's submission without a final outcome is a new fact (the run goes back to RUNNING when a step settles).
     due.push({ key: key(`attention:${run.currentStep}`), text: m.runAttention });
-  } else if (done) due.push({ key: key('ended'), text: run.state === 'CANCELLED' && [...run.groups ?? [], ...run.steps].some(item => item.code === WALLET_BATCH_OUTCOME_UNKNOWN)
-    ? m.runEndedBatchUnknown : m.runEnded(run.code ?? run.state) });
+  } else if (done) due.push({ key: key('ended'), text: unknown ? m.runEndedBatchUnknown : m.runEnded(run.code ?? run.state) });
   return { due, done };
 }

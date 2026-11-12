@@ -157,6 +157,10 @@ const EN = {
     ? 'In FloFi you can run each step through its own flow, or end it.' : 'Open FloFi to decide what happens next.'}`,
   runHaltedStopped: 'Workflow stopped before any step completed. FloFi submits nothing more of it; open FloFi to decide what happens next.',
   runHaltedUnclassified: 'Workflow stopped. FloFi submits nothing more of it; open FloFi to see what each step did and decide what happens next.',
+  // A halt while a batch handed to the wallet was never answered: it may have executed, so never "before any step completed" or "nothing was sent".
+  runHaltedBatchUnknown: (partial: boolean) => `${partial ? 'Workflow partially completed: the reconciled steps stay done. ' : 'Workflow stopped. '}A batch was `
+    + 'handed to your wallet and its answer never reached FloFi: it may have executed before its on-chain deadline. Check your wallet\'s activity. FloFi submits '
+    + 'nothing more of it; open FloFi to decide what happens next.',
   runAttention: 'A submitted step has no final outcome yet. FloFi keeps observing it and never resubmits it.',
   runEnded: (code: string) => `Workflow ended without completing (${code}). See FloFi for details.`,
   runEndedBatchUnknown: 'Workflow ended. A batch was handed to your wallet and its answer never reached FloFi: it may have executed before its on-chain deadline. '
@@ -170,7 +174,7 @@ const RUN_STATE_EN: Readonly<Record<string, string>> = { PENDING: 'waiting for y
   HALTED: 'stopped', HALTED_PARTIAL: 'partially completed', HALTED_NOTHING_SENT: 'stopped before anything was sent', HALTED_STOPPED: 'stopped', FAILED: 'failed',
   ATTENTION: 'needs attention', CANCELLED: 'ended', EXPIRED: 'expired' };
 const STEP_STATE_EN: Readonly<Record<string, string>> = { PENDING: 'waiting', READY: 'ready for your signature', AWAITING_OWNER: 'in your wallet', DELEGATED: 'authorized',
-  GROUP_WAITING: 'waiting for your wallet', GROUP_SIGNED: 'signed in your wallet', OUTCOME_UNKNOWN: 'outcome unknown — check your wallet\'s activity',
+  GROUP_WAITING: 'waiting for your wallet', GROUP_SIGNED: 'signed in your wallet', OUTCOME_UNKNOWN: 'outcome unknown — it may have executed; check your wallet\'s activity',
   RECONCILED: 'reconciled ✅', FAILED: 'failed', UNCERTAIN: 'outcome pending', SKIPPED: 'not run', BLOCKED: 'stopped before submission' };
 const ACTION_EN: Readonly<Record<string, string>> = { swap: 'Swap', bridge: 'Bridge', supply: 'Supply', borrow: 'Borrow', repay: 'Repay', withdraw: 'Withdraw',
   add_liquidity: 'Add liquidity', transfer: 'Transfer', lending_composition: 'Lending composition' };
@@ -178,7 +182,7 @@ const RUN_STATE_PT: Readonly<Record<string, string>> = { PENDING: 'esperando voc
   HALTED: 'interrompido', HALTED_PARTIAL: 'parcialmente concluído', HALTED_NOTHING_SENT: 'interrompido antes de qualquer envio', HALTED_STOPPED: 'interrompido', FAILED: 'falhou',
   ATTENTION: 'requer atenção', CANCELLED: 'encerrado', EXPIRED: 'expirado' };
 const STEP_STATE_PT: Readonly<Record<string, string>> = { PENDING: 'em espera', READY: 'pronta para sua assinatura', AWAITING_OWNER: 'na sua carteira', DELEGATED: 'autorizada',
-  GROUP_WAITING: 'aguardando a sua carteira', GROUP_SIGNED: 'assinada na sua carteira', OUTCOME_UNKNOWN: 'resultado desconhecido — confira a atividade da sua carteira',
+  GROUP_WAITING: 'aguardando a sua carteira', GROUP_SIGNED: 'assinada na sua carteira', OUTCOME_UNKNOWN: 'resultado desconhecido — pode ter sido executada; confira a atividade da sua carteira',
   RECONCILED: 'reconciliada ✅', FAILED: 'falhou', UNCERTAIN: 'resultado pendente', SKIPPED: 'não executada', BLOCKED: 'parada antes do envio' };
 const ACTION_PT: Readonly<Record<string, string>> = { swap: 'Troca', bridge: 'Ponte entre redes', supply: 'Depósito', borrow: 'Empréstimo', repay: 'Reembolso', withdraw: 'Saque',
   add_liquidity: 'Liquidez', transfer: 'Transferência', lending_composition: 'Composição de empréstimo' };
@@ -281,6 +285,9 @@ const PT: Copy = {
     ? 'No FloFi você pode executar cada etapa pelo próprio fluxo, ou encerrá-lo.' : 'Abra o FloFi para decidir o que acontece a seguir.'}`,
   runHaltedStopped: 'Fluxo interrompido antes de concluir qualquer etapa. O FloFi não envia mais nada dele; abra o FloFi para decidir o que acontece a seguir.',
   runHaltedUnclassified: 'Fluxo interrompido. O FloFi não envia mais nada dele; abra o FloFi para ver o que cada etapa fez e decidir o que acontece a seguir.',
+  runHaltedBatchUnknown: partial => `${partial ? 'Fluxo parcialmente concluído: as etapas reconciliadas ficam feitas. ' : 'Fluxo interrompido. '}Um lote foi `
+    + 'entregue à sua carteira e a resposta dela nunca chegou ao FloFi: ele pode ter sido executado antes do prazo na rede. Confira a atividade da sua carteira. '
+    + 'O FloFi não envia mais nada dele; abra o FloFi para decidir o que acontece a seguir.',
   runAttention: 'Uma etapa enviada ainda não tem resultado final. O FloFi continua a observá-la e nunca a reenvia.',
   runEnded: code => `O fluxo terminou sem concluir (${code}). Veja os detalhes no FloFi.`,
   runEndedBatchUnknown: 'O fluxo terminou. Um lote foi entregue à sua carteira e a resposta dela nunca chegou ao FloFi: ele pode ter sido executado antes do prazo na rede. '

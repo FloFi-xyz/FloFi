@@ -3,8 +3,9 @@
  * P0 universal execution (channels review): what a chat hears about a multi-step run, from the run's durable view only. A partial completion never
  * claims nothing later was submitted (a later step may have been sent and failed on chain) and a stop the server did not classify is worded
  * neutrally; a run that halts again after a resume is announced again (the outbox sends each key once); a batch the owner's wallet answered but
- * whose transactions no browser reported yet is announced once with the continuation link, never as "sent"; a run ended while a batch was in
- * the owner's wallet without an answer never reads "not run".
+ * whose transactions no browser reported yet is announced once with the continuation link, never as "sent", and only once the batch's validity
+ * passed (an ordinary confirmation passes through that state while /approve pings); a run halted or ended while a batch was in the owner's
+ * wallet without an answer never reads "not run", "stopped before submission" or "stopped before any step completed": it may have executed.
  */
 import { describe, expect, it } from 'vitest';
 import type { HandoffRecord } from '../../platform/index.ts';
@@ -122,8 +123,9 @@ describe('channel run notices (P0 universal execution)', () => {
     const ended = runOf({ state: 'CANCELLED', code: 'WORKFLOW_RUN_CANCELLED_BY_OWNER', nextAction: 'NONE',
       steps: [step(0, 'SKIPPED', 'WALLET_BATCH_OUTCOME_UNKNOWN'), step(1, 'SKIPPED', 'WALLET_BATCH_OUTCOME_UNKNOWN'), step(2, 'SKIPPED', 'WORKFLOW_RUN_CANCELLED_BY_OWNER')],
       groups: [group(0, [0, 1], 'SKIPPED', 'WALLET_BATCH_OUTCOME_UNKNOWN'), group(1, [2, 2], 'SKIPPED', 'WORKFLOW_RUN_CANCELLED_BY_OWNER')] });
-    expect(status(ended)).toBe('Workflow: ended\n1. Swap — outcome unknown — check your wallet\'s activity\n2. Swap — outcome unknown — check your wallet\'s activity\n3. Swap — not run');
-    expect(status(ended, 'PT')).toContain('1. Troca — resultado desconhecido — confira a atividade da sua carteira');
+    expect(status(ended)).toBe('Workflow: ended\n1. Swap — outcome unknown — it may have executed; check your wallet\'s activity\n'
+      + '2. Swap — outcome unknown — it may have executed; check your wallet\'s activity\n3. Swap — not run');
+    expect(status(ended, 'PT')).toContain('1. Troca — resultado desconhecido — pode ter sido executada; confira a atividade da sua carteira');
     const { due, done } = plannedNotifications('EN', handoff, progressOf(ended), ORIGIN);
     expect(done).toBe(true);
     expect(due.find(n => n.key.endsWith(':wfr:ended'))!.text).toBe('Workflow ended. A batch was handed to your wallet and its answer never reached FloFi: it may have '
@@ -133,5 +135,73 @@ describe('channel run notices (P0 universal execution)', () => {
     const plain = runOf({ ...ended, steps: [step(0, 'SKIPPED', 'WORKFLOW_RUN_CANCELLED_BY_OWNER')], groups: [] });
     expect(plannedNotifications('EN', handoff, progressOf(plain), ORIGIN).due.find(n => n.key.endsWith(':wfr:ended'))!.text)
       .toBe('Workflow ended without completing (WORKFLOW_RUN_CANCELLED_BY_OWNER). See FloFi for details.');
+  });
+
+  it('a run halted at its expiry while its batch was in the wallet unanswered says the batch may have executed — never "stopped before…" (EN/PT)', () => {
+    const U = 'WALLET_BATCH_OUTCOME_UNKNOWN', entered = '2026-11-09T12:00:05.000Z';
+    // How the server classifies it (STOPPED: a prepared batch is never "nothing sent"), and views that would otherwise read "nothing sent" or nothing.
+    for (const halted of ['STOPPED', 'NOTHING_SENT', null] as const) {
+      const run = runOf({ state: 'HALTED', halted, currentStep: 0, code: 'WORKFLOW_RUN_EXPIRED', nextAction: 'OWNER_DECIDES', updatedAt: entered,
+        steps: [step(0, 'BLOCKED', U), step(1, 'BLOCKED', U), step(2, 'DELEGATED')], groups: [group(0, [0, 1], 'BLOCKED', U), group(1, [2, 2], 'PLANNED')] });
+      expect(status(run), String(halted)).toBe('Workflow: stopped\n1. Swap — outcome unknown — it may have executed; check your wallet\'s activity\n'
+        + '2. Swap — outcome unknown — it may have executed; check your wallet\'s activity\n3. Swap — waiting for your wallet');
+      expect(status(run, 'PT')).toMatch(/^Fluxo: interrompido\n1\. Troca — resultado desconhecido — pode ter sido executada; confira a atividade da sua carteira\n/);
+      const due = notices(run);
+      expect(due.find(n => n.key.endsWith(':wfr:step:0:blocked:wallet_batch_outcome_unknown'))!.text)
+        .toBe('Workflow: stopped\n1. Swap — outcome unknown — it may have executed; check your wallet\'s activity');
+      const halt = haltNotice(run);
+      expect(halt.key).toBe(`notify:${handoff.handoffId}:wfr:halted:0:${halted?.toLowerCase() ?? 'none'}:workflow_run_expired:unknown:${Date.parse(entered)}`);
+      expect(halt.key).toMatch(OUTBOX_KEY);
+      expect(halt.text).toBe('Workflow stopped. A batch was handed to your wallet and its answer never reached FloFi: it may have executed before its on-chain deadline. '
+        + 'Check your wallet\'s activity. FloFi submits nothing more of it; open FloFi to decide what happens next.');
+      expect(haltNotice(run, 'PT').text).toMatch(/^Fluxo interrompido\. Um lote foi entregue à sua carteira .* pode ter sido executado .* Confira a atividade da sua carteira\./);
+      for (const language of ['EN', 'PT'] as const) {
+        const said = [status(run, language), ...notices(run, language).map(n => n.text)].join('\n');
+        expect(said, `${halted} ${language}`).not.toMatch(/before any step completed|before anything was sent|nothing was sent|stopped before submission|not run|antes de concluir|antes de qualquer envio|parada antes do envio|não executada/);
+      }
+    }
+    // After an earlier step reconciled: partially completed, the batch may have executed — never "their funds rest in your wallet".
+    const partial = runOf({ state: 'HALTED', halted: 'PARTIAL', currentStep: 1, code: 'WORKFLOW_RUN_EXPIRED', nextAction: 'OWNER_DECIDES', updatedAt: entered,
+      steps: [step(0, 'RECONCILED'), step(1, 'BLOCKED', U), step(2, 'BLOCKED', U)], groups: [group(0, [0, 0], 'RECONCILED'), group(1, [1, 2], 'BLOCKED', U)] });
+    expect(haltNotice(partial).text).toBe('Workflow partially completed: the reconciled steps stay done. A batch was handed to your wallet and its answer never reached '
+      + 'FloFi: it may have executed before its on-chain deadline. Check your wallet\'s activity. FloFi submits nothing more of it; open FloFi to decide what happens next.');
+    expect(haltNotice(partial, 'PT').text).toMatch(/^Fluxo parcialmente concluído: as etapas reconciliadas ficam feitas\. Um lote foi entregue/);
+    for (const language of ['EN', 'PT'] as const) expect(haltNotice(partial, language).text).not.toMatch(/rest in your wallet|ficam na sua carteira/);
+    expect(status(partial)).toMatch(/^Workflow: partially completed\n1\. Swap — reconciled ✅\n2\. Swap — outcome unknown — it may have executed/);
+    // Any end of such a run (expired, failed, ended by its owner) says the batch may have executed, never only its code.
+    for (const state of ['EXPIRED', 'FAILED', 'CANCELLED']) {
+      const over = runOf({ state, code: 'WORKFLOW_RUN_EXPIRED', nextAction: 'NONE', steps: [step(0, 'BLOCKED', U), step(1, 'BLOCKED', U), step(2, 'SKIPPED', 'WORKFLOW_RUN_EXPIRED')],
+        groups: [group(0, [0, 1], 'BLOCKED', U), group(1, [2, 2], 'SKIPPED', 'WORKFLOW_RUN_EXPIRED')] });
+      const { due, done } = plannedNotifications('EN', handoff, progressOf(over), ORIGIN);
+      expect(done, state).toBe(true);
+      expect(due.find(n => n.key.endsWith(':wfr:ended'))!.text, state).toBe('Workflow ended. A batch was handed to your wallet and its answer never reached FloFi: it may '
+        + 'have executed before its on-chain deadline. Check your wallet\'s activity.');
+    }
+  });
+
+  it('a batch answered during an ordinary confirmation is not announced; once its validity has passed it is, once, with the continuation link', () => {
+    const validUntil = '2026-11-09T10:10:00.000Z';
+    const waiting = (until: string | null) => runOf({ currentStep: 0, nextAction: 'OWNER_CONFIRMS_BATCH',
+      groups: [{ ...group(0, [0, 1], 'AUTHORIZED'), validUntil: until }, group(1, [2, 2], 'PLANNED')] });
+    const answered = (run: Run, at?: string, language: 'EN' | 'PT' = 'EN') => (at ? plannedNotifications(language, handoff, progressOf(run), ORIGIN, new Date(at))
+      : plannedNotifications(language, handoff, progressOf(run), ORIGIN)).due.filter(n => n.key.includes(':batch-answered:'));
+    // /approve pings while the owner's page waits for the wallet to report the batch final: nothing reaches the chat inside the batch's validity.
+    for (const at of ['2026-11-09T10:00:20.000Z', '2026-11-09T10:05:00.000Z', '2026-11-09T10:09:59.999Z']) {
+      expect(answered(waiting(validUntil), at), at).toEqual([]);
+      expect(answered(waiting(validUntil), at, 'PT'), at).toEqual([]);
+    }
+    // Once the validity has passed: announced, once (the outbox sends each key once), with the continuation link.
+    const sent = new Set<string>(), deliver = (at: string) => answered(waiting(validUntil), at).filter(n => !sent.has(n.key) && (sent.add(n.key), true));
+    expect(deliver('2026-11-09T10:10:00.000Z')).toEqual([{ key: `notify:${handoff.handoffId}:wfr:batch-answered:0`, text: 'Your wallet answered the batch request for '
+      + `steps 1–2; FloFi has not recorded its transactions yet. If FloFi is not open, open it so your wallet can report them and FloFi can reconcile them: ${CONTINUE}\n`
+      + 'Do not send the batch again: it may already have executed.' }]);
+    expect(deliver('2026-11-09T10:10:20.000Z')).toEqual([]);
+    expect(deliver('2026-11-09T11:00:00.000Z')).toEqual([]);
+    expect(answered(waiting(validUntil), '2026-11-09T10:12:00.000Z', 'PT')[0]!.text).toContain(CONTINUE);
+    // The check's own clock by default (the notifier passes none): a validity still ahead is silent, one already passed is announced.
+    expect(answered(waiting(new Date(Date.now() + 5 * 60_000).toISOString()))).toEqual([]);
+    expect(answered(waiting(new Date(Date.now() - 1_000).toISOString()))).toHaveLength(1);
+    // A view without a readable validity is announced (never silent about an answered batch).
+    for (const until of [null, 'not-a-date']) expect(answered(waiting(until), '2026-11-09T10:00:20.000Z'), String(until)).toHaveLength(1);
   });
 });
