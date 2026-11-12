@@ -686,11 +686,12 @@ describe('BUILD-CHAT-E2E-001 what 0015 does to a v14 database (PostgreSQL)', () 
     expect(await migrate(t.db, V15M)).toEqual([15]);
     expect((await ledger(t.db)).slice(0, -1)).toEqual(history);
     const after = await catalog(t.db);
-    // The three NOT NULL relaxations (PostgreSQL 18 models NOT NULL as named constraints) are the only removals and redefinitions.
-    expect([...before.keys()].filter(key => !after.has(key))).toEqual(['constraint:delegated_authorizations.delegated_authorizations_rule_id_not_null',
-      'constraint:delegated_executions.delegated_executions_rule_id_not_null', 'constraint:delegated_executions.delegated_executions_occurrence_id_not_null']);
-    expect([...before.keys()].filter(key => after.has(key) && after.get(key) !== before.get(key))).toEqual(['column:delegated_authorizations.rule_id',
-      'column:delegated_executions.rule_id', 'column:delegated_executions.occurrence_id']);
+    // The three NOT NULL relaxations (PostgreSQL 18 models NOT NULL as named constraints) are the only removals and redefinitions. The catalog
+    // query has no defined row order, so these sets are compared sorted (as the additions below are).
+    expect([...before.keys()].filter(key => !after.has(key)).sort()).toEqual(['constraint:delegated_authorizations.delegated_authorizations_rule_id_not_null',
+      'constraint:delegated_executions.delegated_executions_occurrence_id_not_null', 'constraint:delegated_executions.delegated_executions_rule_id_not_null']);
+    expect([...before.keys()].filter(key => after.has(key) && after.get(key) !== before.get(key)).sort()).toEqual(['column:delegated_authorizations.rule_id',
+      'column:delegated_executions.occurrence_id', 'column:delegated_executions.rule_id']);
     const own = (key: string) => /^(relation|index):workflow_run/.test(key) || /^(column|constraint|trigger):workflow_run/.test(key) || /^function:workflow_run/.test(key);
     expect([...after.keys()].filter(key => !before.has(key) && !own(key)).sort()).toEqual([
       'column:delegated_authorizations.workflow_run_id', 'column:delegated_executions.workflow_run_id',
