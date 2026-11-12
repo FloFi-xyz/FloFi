@@ -958,7 +958,10 @@ export function finishTurn(turn: PendingTurn, result: CopilotResultV2, env: Copi
   }
   // BUILD-CHAT-LEARNING-002: the language this conversation is unmistakably written in — the user's words and the interpreter agree (once per
   // conversation; evidence for the identity's starting language only, never a setting, and only where persistent learning is permitted).
-  const said = env.learning?.automatic === 'ON' && !turn.state.languageObserved ? messageLanguage(turn.state.segment.at(-1) ?? '') : null, read = intent.language;
+  // P0 approved UX: with an interface language the interpreter is told to answer in it, so its language is no independent evidence: nothing is
+  // observed then (the screen's language governs, and a heuristic alone never becomes a learned preference).
+  const said = !env.interfaceLanguage && env.learning?.automatic === 'ON' && !turn.state.languageObserved ? messageLanguage(turn.state.segment.at(-1) ?? '') : null,
+    read = intent.language;
   if (preferred && intent.language !== preferred) intent = { ...intent, language: preferred };
   const resolved = tallied(resolveIntent(intent, { ...turn.state, draft: turn.before.draft, language: intent.language }, env, null, turn.before.draft?.extras ?? {}), env);
   if (!said || said !== read) return resolved;

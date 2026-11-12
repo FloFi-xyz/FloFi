@@ -382,3 +382,17 @@ describe('BUILD-CHAT-LEARNING-001 regression: an empty learning context changes 
     expect(compared).toBeGreaterThan(250);
   });
 });
+
+describe('P0 approved UX: a learned language observation needs independent evidence', () => {
+  const PT_SWAP = intent.action(act.swap({ network: 'ETHEREUM_SEPOLIA', inputAsset: 'WETH', outputAsset: 'USDC', amount: '0.001' }), 'PT');
+  const languageObservations = (reply: CopilotReply | null) => (reply?.learning?.observations ?? []).filter(o => o.kind === 'LANGUAGE');
+  it('without an interface language, a message and the interpreter that agree on Portuguese are observed once', () => {
+    const s = session(learning('AVAILABLE', { automatic: 'ON' }));
+    expect(languageObservations(s.say('Troca 0,001 WETH por USDC na eth sepolia', PT_SWAP))).toEqual([{ kind: 'LANGUAGE', language: 'PT' }]);
+  });
+  it('with an interface language (the interpreter is told to answer in it), nothing is observed', () => {
+    const s = session(learning('AVAILABLE', { automatic: 'ON' }));
+    s.interfaceLanguage = 'PT';
+    expect(languageObservations(s.say('Troca 0,001 WETH por USDC na eth sepolia', PT_SWAP))).toEqual([]);
+  });
+});
