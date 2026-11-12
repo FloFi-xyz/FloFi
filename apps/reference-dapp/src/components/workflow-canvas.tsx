@@ -13,8 +13,8 @@ import { transferCardLabel, transferDetails } from '../domain/robinhood-transfer
 import { checkRecipient, recipientPolicy } from '../domain/recipient-address';
 import { lendingAmountLabel, lendingNodeAsset, lendingReservesFor } from '../domain/supply-authoring';
 import { lendingCardFunding } from '../domain/lending-card-catalog';
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { ReactFlow, getNodesBounds, Background, Handle, Position, useNodesInitialized, useNodesState, useReactFlow, useStore, useStoreApi, useUpdateNodeInternals, type Node, type NodeChange, type NodeProps, type ReactFlowState, type FinalConnectionState, MarkerType } from '@xyflow/react';
+import { Fragment, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { ReactFlow, getNodesBounds, Background, Handle, NodeToolbar, Position, useNodesInitialized, useNodesState, useReactFlow, useStore, useStoreApi, useUpdateNodeInternals, type Node, type NodeChange, type NodeProps, type ReactFlowState, type FinalConnectionState, MarkerType } from '@xyflow/react';
 import { MOCKED_CHAIN_PROFILE, type Symbol } from '@defi-workflow-engine/reference-linter';
 import { amountOf } from '../domain/commands';
 import { bridgeDetails } from '../domain/bridge-authoring';
@@ -30,7 +30,7 @@ import { CANVAS_ACTIONS, canvasAddCommand, type CanvasAction } from '../domain/c
 import { activeNetworkScope, isTestNetwork, mainnetCounterpart, testNetworkTemplate, workflowTestNetworks } from '../domain/network-scope';
 import { walletChainRef } from '../wallet/evm-networks';
 import { shellChainLabel } from '../domain/product-shell';
-import { WorkflowName } from './workflow-name';
+import { WorkflowMoreMenu, WorkflowName } from './workflow-name';
 import { DarkSpotlight } from './dark-spotlight';
 import { CANVAS_GESTURES, CanvasNavigator } from './canvas-navigator';
 import { PanelRevealer, PanelRevealProvider } from './canvas-panel-reveal';
@@ -112,7 +112,9 @@ export { CANVAS_EDGE_LABEL } from './canvas-edge-style';
 const COMPOSER_FIT_PADDING = { top: '32px', bottom: '90px', left: '32px', right: '32px' } as const;
 /** BUILD-FLOFI-BUILDER-UX-002: with the vertical tool rail, fitted cards keep clear of it. */
 const RAIL_FIT_PADDING = { ...COMPOSER_FIT_PADDING, left: '76px' } as const;
-type FitPadding = typeof COMPOSER_FIT_PADDING | typeof RAIL_FIT_PADDING;
+/** P0 approved UX (board 04): the expanded rail (icon + name, 188 px) keeps fitted cards clear of it too (presentation only). */
+const RAIL_EXPANDED_FIT_PADDING = { ...COMPOSER_FIT_PADDING, left: '200px' } as const;
+type FitPadding = typeof COMPOSER_FIT_PADDING | typeof RAIL_FIT_PADDING | typeof RAIL_EXPANDED_FIT_PADDING;
 /** One fit per canonical insertion, after React Flow has measured the committed nodes.
  * Draft proposals, parameter edits, connections and layout changes cannot arm it.
  */
@@ -144,12 +146,13 @@ function InsertionViewport({ workflowId, ids, padding = COMPOSER_FIT_PADDING }: 
   return null;
 }
 /** BUILD-FLOFI-MAINNET-PRODUCT-001: `lending` (Supply → Borrow → Swap) exists only on Base Sepolia, so the Mainnet-only product does not offer it. */
-const actions = [...CANVAS_ACTIONS, 'stocks'] as const;
+/** Every step action the Canvas offers today (the rail lists exactly these, grouped: `RAIL_GROUPS`). */
+export const CANVAS_STEP_ACTIONS: readonly (CanvasAction | 'stocks')[] = Object.freeze([...CANVAS_ACTIONS, 'stocks']);
 /** BUILD-SOLANA-MAINNET-001: the owner is told about every linked step a deletion also removed; undo restores them. */
 const removalFeedback = (count: number) => count === 1 ? 'Also removed 1 linked step that cannot run without the deleted one. Undo restores it.'
   : 'Also removed the linked steps that cannot run without the deleted one. Undo restores them.';
 // UX-005: the canonical transfer action is presented as Send; its action id and IR stay `transfer` / `asset.transfer`.
-function actionLabel(action: typeof actions[number]) { return action === 'lending' ? 'Lending' : action === 'pool' ? 'Pool / Liquidity' : action === 'transfer' ? 'Send' : action[0]!.toUpperCase() + action.slice(1); }
+function actionLabel(action: CanvasAction | 'stocks') { return action === 'lending' ? 'Lending' : action === 'pool' ? 'Pool / Liquidity' : action === 'transfer' ? 'Send' : action[0]!.toUpperCase() + action.slice(1); }
 function HistoryIcon({ direction }: { direction: 'undo' | 'redo' }) {
   return <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
     {direction === 'undo' ? <><path d="m10 8-4 4 4 4"/><path d="M6 12h9a5 5 0 0 1 0 10"/></>
@@ -161,11 +164,76 @@ function DuplicateIcon() {
     <rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"/>
   </svg>;
 }
-function DockIcon({ floating }: { floating: boolean }) {
-  return <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-    <rect x="3" y="3" width="8" height="8" rx="1"/><rect x="13" y="13" width="8" height="8" rx="1"/>
-    {floating ? <path d="M10 14h4v-4m0 4-4-4"/> : <path d="M14 10h-4v4m0-4 4 4"/>}
-  </svg>;
+function DeleteIcon() {
+  return <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M3 6h18M9 6V3h6v3M5 6l1 15h12l1-15M10 10v7m4-7v7"/></svg>;
+}
+function LockIcon() {
+  return <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>;
+}
+
+/**
+ * P0 approved UX (board 04): the action rail, grouped by what the step does — Swap, Bridge, Send | Pool, Supply, Withdraw | Borrow, Repay |
+ * Stocks. Only actions that exist today: Lending (Supply → Borrow → Swap) stays engineering-only as before, and Privacy is not shown until it is
+ * available. The order is presentation only; each button calls the same `addAction` as before.
+ */
+export const RAIL_GROUPS: readonly (readonly (CanvasAction | 'stocks')[])[] = Object.freeze([
+  ['swap', 'bridge', 'transfer'], ['pool', 'supply', 'withdraw'], ['borrow', 'repay', 'lending'], ['stocks'],
+]);
+/** The rail's expanded state (icon + name) is a per-viewer convenience in this browser only; storage is optional and may throw. */
+export const RAIL_EXPANDED_KEY = 'flofi.canvas.rail-expanded';
+function viewerStorage(): Storage | null {
+  try { return typeof window === 'undefined' ? null : window.localStorage; } catch { return null; }
+}
+export function readRailExpanded(storage?: Pick<Storage, 'getItem'> | null): boolean {
+  try { return (storage === undefined ? viewerStorage() : storage)?.getItem(RAIL_EXPANDED_KEY) === 'true'; } catch { return false; }
+}
+export function saveRailExpanded(expanded: boolean, storage?: Pick<Storage, 'setItem'> | null): void {
+  try { (storage === undefined ? viewerStorage() : storage)?.setItem(RAIL_EXPANDED_KEY, String(expanded)); } catch { /* storage is optional */ }
+}
+/** ≤ 800 px the rail stays icon-only (board 16 §7), whatever the viewer chose on a wider screen. */
+const COMPACT_RAIL_QUERY = '(max-width: 800px)';
+function useCompactRail() {
+  const [compact, setCompact] = useState(false);
+  useEffect(() => {
+    let query: MediaQueryList;
+    try { query = window.matchMedia(COMPACT_RAIL_QUERY); } catch { return; }
+    const update = () => setCompact(query.matches);
+    update();
+    query.addEventListener?.('change', update);
+    return () => query.removeEventListener?.('change', update);
+  }, []);
+  return compact;
+}
+/**
+ * P0 approved UX (board 04): Duplicate and Delete float right above the selected card(s); with nothing selected there is no toolbar. Rendered
+ * inside the Canvas's React Flow (it follows the card through pan and zoom without scaling). The buttons are the Canvas's existing ones.
+ */
+export function SelectionToolbar({ ids, children }: { ids: readonly string[]; children: ReactNode }) {
+  const nodeId = useMemo(() => [...ids], [ids]);
+  return <NodeToolbar nodeId={nodeId} isVisible={ids.length > 0} position={Position.Top} align="start" offset={8} className="canvas-selection-toolbar nodrag nopan nowheel">
+    {children}
+  </NodeToolbar>;
+}
+/**
+ * P0 approved UX (board 04): the rail's container — the step tools, then the chevron that shows or hides the actions' names (aria-expanded).
+ * Expanding changes only the rail's width and labels (188 px, icon + name); the choice is the viewer's own (`saveRailExpanded`).
+ */
+export function ActionRail({ id, expanded, onToggle, onScroll, children }: { id: string; expanded: boolean; onToggle(): void; onScroll?: () => void; children?: ReactNode }) {
+  const { t: tr } = useLocale();
+  return <div className="floating-toolbox" id={id} data-rail-expanded={expanded} onScroll={onScroll}>
+    {children}
+    <button type="button" className="canvas-rail-toggle" aria-label={tr('Show action names')} aria-expanded={expanded} aria-controls={id} onClick={onToggle}>
+      <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m9 6 6 6-6 6"/></svg>
+    </button>
+  </div>;
+}
+/** The one-line Canvas footer: the step count and the workflow review's own warnings, or nothing more when no review is known. */
+export function canvasFootLine(count: number, overview: Pick<EditorOverview, 'attention' | 'invalid'> | undefined, tr: (value: string, ...parameters: (string | number)[]) => string): string {
+  const steps = tr(count === 1 ? '{0} step' : '{0} steps', count);
+  if (!overview) return steps;
+  const warnings = overview.attention.length ? tr(overview.attention.length === 1 ? '1 step needs attention' : '{0} steps need attention', overview.attention.length)
+    : overview.invalid ? tr('Edit not applied') : tr('No warnings');
+  return `${steps} · ${warnings}`;
 }
 
 /** BUILD-FIX-UX-001: keeps the connection handles' hit area usable when zoomed out (see `handleHitScale`); presentation only. */
@@ -302,7 +370,12 @@ type BuildCanvasProps = { environment?: WalletEnvironment; selectedId: string | 
   /** BUILD-AUTOMATION-002: present only where automations are enabled; opens Automations on this exact Canvas workflow. */
   onAutomate?: (() => void) | undefined;
   /** BUILD-FLOFI-BUILDER-UX-002: the Editor's live summary (networks and real state) for the workflow header. */
-  overview?: EditorOverview };
+  overview?: EditorOverview;
+  /**
+   * P0 approved UX (board 08): true while a workflow run is active. The shell already refuses edits then; the header makes it visible (a lock and
+   * "Editing paused during execution" instead of Undo, Redo and ···) and the step tools are paused. Optional: absent means no run is active.
+   */
+  runActive?: boolean };
 const EMPTY_OVERLAY: ReadonlyMap<string, SimulationOverlay> = new Map();
 export function WorkflowCanvas(props: BuildCanvasProps | { mode: 'simulate'; workflowName: string; overlay?: ReadonlyMap<string, SimulationOverlay>; primaryAction?: ReactNode } | { mode: 'execute'; workflowName: string }) {
   if ('mode' in props && props.mode === 'simulate') return <SimulateWorkflowCanvas workflowName={props.workflowName} primaryAction={props.primaryAction}/>;
@@ -310,7 +383,7 @@ export function WorkflowCanvas(props: BuildCanvasProps | { mode: 'simulate'; wor
   return <BuildCanvas {...props}/>;
 }
 
-function BuildCanvas({ environment, selectedId, select, openSettings, settingsId = null, workflowName = 'Your Workflow', renameWorkflow = () => {}, onSave, estimateOwner, onToolboxModeChange, onAutomate, overview }: BuildCanvasProps) {
+function BuildCanvas({ environment, selectedId, select, openSettings, settingsId = null, workflowName = 'Your Workflow', renameWorkflow = () => {}, onSave, estimateOwner, onToolboxModeChange, onAutomate, overview, runActive = false }: BuildCanvasProps) {
   const { t: tr } = useLocale();
   const { state, dispatch, context, canvasLayout, canUndo, canRedo, undo, redo, moveCanvasNodes, addCanvasCommand, duplicateCanvasNodes, propose, review,
     sequence = null, actionSetup = null, amountInputs = {}, bridgeNetworkInputs = {}, cryptoSelections = {}, recipientInputs = {}, editCanvasRecipient, editCryptoSelection, startActionSetup, startStocksSetup, editCanvasAmount, editSwapSetupDirection, editBridgeNetworks, cancelCanvasAmount, reviewCanvasAmount, commitCanvasAmount, removeActionSetup, pending, applyProposal, dismissProposal } = useWorkflow();
@@ -334,11 +407,39 @@ function BuildCanvas({ environment, selectedId, select, openSettings, settingsId
   const [feedback, setFeedback] = useState('');
   const [toolboxMode, setToolboxMode] = useState<ToolboxMode>('floating');
   const [toolboxReady, setToolboxReady] = useState(false);
-  useEffect(() => { setToolboxMode(readToolboxMode()); setToolboxReady(true); }, []);
+  // P0 approved UX (board 04): the rail is icon-only until the viewer expands it; the choice is remembered in this browser (read after mount).
+  const [railExpanded, setRailExpanded] = useState(false);
+  const compactRail = useCompactRail();
+  const railWide = railExpanded && !compactRail;
+  const [lastAdded, setLastAdded] = useState<CanvasAction | 'stocks' | null>(null);
+  const [tip, setTip] = useState<{ label: string; top: number; left: number } | null>(null);
+  const tipTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const railId = useId();
+  useEffect(() => { setToolboxMode(readToolboxMode()); setRailExpanded(readRailExpanded()); setToolboxReady(true); }, []);
+  useEffect(() => () => { if (tipTimer.current) clearTimeout(tipTimer.current); }, []);
   useEffect(() => { onToolboxModeChange?.(toolboxMode); }, [toolboxMode, onToolboxModeChange]);
   function changeToolboxMode(mode: ToolboxMode) {
     setToolboxMode(mode);
     saveToolboxMode(mode);
+  }
+  function toggleRail() {
+    const next = !railExpanded;
+    setRailExpanded(next); saveRailExpanded(next); hideTip();
+  }
+  /** The rail's tooltip: after 300 ms on hover, at once on keyboard focus; Escape, leaving or scrolling hides it. Presentation only. */
+  function showTip(button: HTMLElement, label: string, delay: number) {
+    if (tipTimer.current) clearTimeout(tipTimer.current);
+    const place = () => {
+      const surface = surfaceRef.current;
+      if (!surface || !button.isConnected) return;
+      const box = button.getBoundingClientRect(), frame = surface.getBoundingClientRect();
+      setTip({ label, top: box.top - frame.top + box.height / 2, left: box.right - frame.left + 8 });
+    };
+    if (delay > 0) tipTimer.current = setTimeout(place, delay); else place();
+  }
+  function hideTip() {
+    if (tipTimer.current) clearTimeout(tipTimer.current);
+    tipTimer.current = null; setTip(null);
   }
   useEffect(() => () => marqueeCleanup.current?.(), []);
   function selectNodes(ids: readonly string[], inspector: string | null) {
@@ -741,7 +842,7 @@ function BuildCanvas({ environment, selectedId, select, openSettings, settingsId
       let slot = projectedNodes.length, position = defaultCanvasPosition(slot);
       while (nodes.some(node => Math.abs(node.position.x - position.x) < CANVAS_CLEARANCE.x && Math.abs(node.position.y - position.y) < CANVAS_CLEARANCE.y)) position = defaultCanvasPosition(++slot);
       const id = startStocksSetup(position);
-      selectNodes([id], id); setFeedback('');
+      selectNodes([id], id); setFeedback(''); setLastAdded(action);
       return;
     }
     if (action === 'pool' || action === 'swap' || action === 'bridge' || action === 'supply' || action === 'borrow' || action === 'repay' || action === 'withdraw' || action === 'transfer') {
@@ -750,7 +851,7 @@ function BuildCanvas({ environment, selectedId, select, openSettings, settingsId
       let position = defaultCanvasPosition(slot);
       while (nodes.some(node => Math.abs(node.position.x - position.x) < CANVAS_CLEARANCE.x && Math.abs(node.position.y - position.y) < CANVAS_CLEARANCE.y)) position = defaultCanvasPosition(++slot);
       const id = startActionSetup(action, position, wallet.account ?? undefined);
-      selectNodes([id], id); setFeedback(''); return;
+      selectNodes([id], id); setFeedback(''); setLastAdded(action); return;
     }
     let command;
     try { command = canvasAddCommand(action, workflow.revision, wallet.account); }
@@ -762,7 +863,7 @@ function BuildCanvas({ environment, selectedId, select, openSettings, settingsId
         : 'This action could not be added. Check the workflow and try again.');
       return;
     }
-    if (action === 'lending') { propose(command); return; }
+    if (action === 'lending') { propose(command); setLastAdded(action); return; }
     const added = preview.workflow.nodes.find(node => !workflow.nodes.some(existing => existing.nodeId === node.nodeId));
     if (!added) return;
     const nodeId = added.nodeId;
@@ -773,7 +874,7 @@ function BuildCanvas({ environment, selectedId, select, openSettings, settingsId
       position = defaultCanvasPosition(slot);
     }
     addCanvasCommand(command, position);
-    selectNodes([nodeId], nodeId);
+    selectNodes([nodeId], nodeId); setLastAdded(action);
   }
   function commitDrag(dragged: Node, draggedNodes: Node[]) {
     const moved = draggedNodes.length ? draggedNodes : [dragged];
@@ -842,43 +943,61 @@ function BuildCanvas({ environment, selectedId, select, openSettings, settingsId
     selectNodes([], null);
     if (plan?.cascaded.length) setFeedback(removalFeedback(plan.cascaded.length));
   }
-  const dockButton = <button type="button" className="toolbox-mode-toggle" title={tr(toolboxMode === 'top' ? 'Undock toolbar' : 'Dock toolbar')} aria-label={tr(toolboxMode === 'top' ? 'Undock toolbar' : 'Dock toolbar')} aria-pressed={toolboxMode === 'floating'} onClick={() => changeToolboxMode(toolboxMode === 'top' ? 'floating' : 'top')}><DockIcon floating={toolboxMode === 'floating'}/></button>;
+  const fitPadding = toolboxMode === 'floating' ? railWide ? RAIL_EXPANDED_FIT_PADDING : RAIL_FIT_PADDING : COMPOSER_FIT_PADDING;
+  const rail = toolboxMode === 'floating';
+  const railTips = rail && !railWide;
+  const lendingAllowed = activeNetworkScope() === 'ENGINEERING';
+  const railButton = (action: CanvasAction | 'stocks') => {
+    const label = tr(actionLabel(action));
+    // The accessible name stays the existing "Add {action}"; the tooltip shows the action's name (a collapsed rail has no visible text).
+    return <button key={action} type="button" className="canvas-rail-action" data-active={lastAdded === action || undefined}
+      aria-label={tr(action === 'stocks' ? 'Stocks' : action==='lending'?'Add Supply → Borrow → Swap':'Add ' + (action === 'transfer' ? 'send' : action))}
+      disabled={runActive || (action==='lending'&&isLendingComposition(workflow))} onClick={() => { hideTip(); addAction(action); }}
+      {...railTips ? {
+        onPointerEnter: (event: React.PointerEvent<HTMLButtonElement>) => { if (event.pointerType === 'mouse') showTip(event.currentTarget, label, 300); },
+        onPointerLeave: hideTip, onBlur: hideTip,
+        onFocus: (event: React.FocusEvent<HTMLButtonElement>) => { let keyboard = true; try { keyboard = event.currentTarget.matches(':focus-visible'); } catch { /* older engines */ } if (keyboard) showTip(event.currentTarget, label, 0); },
+        onKeyDown: (event: React.KeyboardEvent<HTMLButtonElement>) => { if (event.key === 'Escape') hideTip(); },
+      } : {}}><ActionIcon action={action}/><span className="canvas-rail-label">{label}</span></button>;
+  };
+  // BUILD-FLOFI-BUILDER-UX-002 / P0 approved UX (board 04): the step actions, in groups with thin separators. Docked, they form the header's tool row.
   const primaryTools = <div className="canvas-primary-tools" role="group" aria-label={tr("Workflow actions")}>
-    {actions.filter(action => action !== 'lending' || activeNetworkScope() === 'ENGINEERING').map(action => <button key={action} type="button"
-      title={tr(action === 'stocks' ? 'Stocks' : action === 'lending' ? 'Add Aave Supply → Aave Borrow → Uniswap Swap' : action === 'swap' || action === 'supply' || action==='borrow' || action==='repay' || action==='withdraw' ? 'Add ' + action : 'Add ' + actionLabel(action))}
-      aria-label={tr(action === 'stocks' ? 'Stocks' : action==='lending'?'Add Supply → Borrow → Swap':'Add ' + (action === 'transfer' ? 'send' : action))} disabled={action==='lending'&&isLendingComposition(workflow)} onClick={() => addAction(action)}><ActionIcon action={action}/><span>{tr(actionLabel(action))}</span></button>)}
-    <button type="button" disabled aria-label={tr("Privacy")} title={tr("Privacy · not available yet")}>
-      <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m12 3 8 3v6c0 5-8 9-8 9s-8-4-8-9V6l8-3Z"/></svg><span>{tr("Privacy")}</span>
-    </button>
-    </div>;
-  const utilityTools = <div className="canvas-utility-tools" role="group" aria-label={tr("Workflow utilities")}>
-    <span className="toolbox-divider" aria-hidden="true"/>
-    <button type="button" title={tr("Duplicate selection")} aria-label={tr("Duplicate selection")} disabled={!duplicatePlan} onClick={duplicateSelection}><DuplicateIcon/><span>{tr("Duplicate")}</span></button>
-    <button type="button" title={tr("Undo (Ctrl+Z)")} aria-label={tr("Undo")} disabled={!canUndo} onClick={undo}><HistoryIcon direction="undo"/><span>{tr("Undo")}</span></button>
-    <button type="button" title={tr("Redo (Ctrl+Shift+Z or Ctrl+Y)")} aria-label={tr("Redo")} disabled={!canRedo} onClick={redo}><HistoryIcon direction="redo"/><span>{tr("Redo")}</span></button>
-    <button type="button" aria-label={tr("Delete")} title={tr(deleteAllowed ? 'Delete' : 'Select a card to delete')} disabled={!deleteAllowed} onClick={deleteSelectedCard}>
-      <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M3 6h18M9 6V3h6v3M5 6l1 15h12l1-15M10 10v7m4-7v7"/></svg><span>{tr("Delete")}</span>
-    </button>
-    {dockButton}
-    </div>;
-  // BUILD-FLOFI-BUILDER-UX-002: docked, one toolbar row holds both groups (and wraps instead of overflowing). In the default vertical rail the
-  // step actions fill the rail and the utilities (duplicate, undo, redo, delete, dock) sit in their own small toolbar at the Canvas's top right.
-  const toolbox = <div className="canvas-toolbox" role="toolbar" aria-label={tr("Canvas tools")}>{primaryTools}{utilityTools}</div>;
-  const railTools = <div className="canvas-toolbox" role="toolbar" aria-label={tr("Canvas tools")}>{primaryTools}</div>;
-  const utilityDock = <div className="canvas-toolbox canvas-utility-dock" role="toolbar" aria-label={tr("Workflow utilities")}>{utilityTools}</div>;
-  // BUILD-FLOFI-BUILDER-UX-002 (owner-approved brief): the workflow header — editable name, the networks its steps use and its real state — above a
-  // Canvas that takes the space; the action tools live in the vertical rail by default (the docked row stays available and wraps instead of
-  // overflowing). The lifecycle control moved to the Editor footer.
+    {RAIL_GROUPS.map(group => group.filter(action => action !== 'lending' || lendingAllowed)).filter(group => group.length).map((group, index) => <Fragment key={group.join()}>
+      {index > 0 && <span className="toolbox-divider canvas-rail-separator" aria-hidden="true"/>}
+      {group.map(railButton)}
+    </Fragment>)}
+    {/* Privacy is not offered until it is available (no disabled placeholder). */}
+  </div>;
+  const toolbox = <div className="canvas-toolbox" role="toolbar" aria-label={tr("Canvas tools")}>{primaryTools}</div>;
+  // P0 approved UX (board 04): Duplicate and Delete sit right above the selected card(s); Undo and Redo moved to the header.
+  const toolbarIds = useMemo(() => runActive ? [] : selectedIds.length ? selectedIds : selectedId ? [selectedId] : [], [runActive, selectedIds, selectedId]);
+  const selectionTools = <div className="canvas-utility-tools" role="toolbar" aria-label={tr('Selected step actions')}>
+    <button type="button" title={tr("Duplicate selection")} aria-label={tr("Duplicate selection")} disabled={!duplicatePlan} onClick={duplicateSelection}><DuplicateIcon/></button>
+    <button type="button" className="canvas-selection-delete" aria-label={tr("Delete")} title={tr(deleteAllowed ? 'Delete' : 'Select a card to delete')} disabled={!deleteAllowed} onClick={deleteSelectedCard}><DeleteIcon/></button>
+  </div>;
+  // BUILD-FLOFI-BUILDER-UX-002 / P0 approved UX (board 04): the workflow header — the name (click to rename), the networks its steps use, the step
+  // count and its real state, shown once — with Undo, Redo and ··· (Save, Automate where enabled, toolbar layout). The lifecycle control lives
+  // in the Editor footer. While a run is active the header says editing is paused instead of offering edits.
   const shownName = workflowName === 'Your Workflow' ? tr('Your Workflow') : workflowName;
-  return <section className={`canvas panel ${isLendingComposition(workflow)?'lending-canvas':''}`} tabIndex={-1} aria-label={tr("Workflow canvas")} data-toolbox={toolboxMode} data-toolbox-ready={toolboxReady}>
-    <div className="canvas-head build-canvas-head"><div className="canvas-head-main"><WorkflowName name={workflowName} shownName={shownName} rename={renameWorkflow}
-      onSave={onSave} onAutomate={onAutomate && workflow.nodes.some(node => !node.actionType.startsWith('mock-')) ? onAutomate : undefined}/>
-      {overview && <div className="canvas-head-meta">
-        {overview.networks.length > 0 && <ul className="editor-network-chips" aria-label={tr('Workflow networks')}>{overview.networks.map(network => <li key={network}><span className="editor-network-icon" aria-hidden="true"><NetworkBrandIcon network={network}/></span>{tr(network)}</li>)}</ul>}
-        <span className="editor-state-pill" data-editor-state={overview.state} title={tr(editorStateDetail(overview))}><span className="sr-only">{tr('Workflow state: ')}</span>{tr(EDITOR_STATE_LABEL[overview.state])}</span>
-      </div>}
-      <span className="revision">{tr(projectedNodes.length)} {tr(projectedNodes.length === 1 ? 'action' : 'actions')}</span></div>
-      {toolboxMode === 'top' && <div className="canvas-toolbar-row">{tr(toolbox)}</div>}</div>
+  const stepCount = tr(projectedNodes.length === 1 ? '{0} step' : '{0} steps', projectedNodes.length);
+  const networkPending = Boolean(overview && overview.count > 0 && overview.networks.length === 0);
+  return <section className={`canvas panel ${isLendingComposition(workflow)?'lending-canvas':''}`} tabIndex={-1} aria-label={tr("Workflow canvas")} data-toolbox={toolboxMode} data-toolbox-ready={toolboxReady} data-run-active={runActive || undefined}>
+    <div className="canvas-head build-canvas-head"><div className="canvas-head-main"><WorkflowName name={workflowName} shownName={shownName} rename={renameWorkflow}/>
+      <div className="canvas-head-meta">
+        {overview && overview.networks.length > 0 && <ul className="editor-network-chips" aria-label={tr('Workflow networks')}>{overview.networks.map(network => <li key={network}><span className="editor-network-icon" aria-hidden="true"><NetworkBrandIcon network={network}/></span>{tr(network)}</li>)}</ul>}
+        {networkPending && <span className="editor-network-chips editor-network-pending"><span className="editor-network-pending-dot" aria-hidden="true"/>{tr('Network?')}</span>}
+        <span className="revision">{stepCount}</span>
+        {overview && <span className="editor-state-pill" data-editor-state={overview.state} title={tr(editorStateDetail(overview))}><span className="sr-only">{tr('Workflow state: ')}</span>{tr(EDITOR_STATE_LABEL[overview.state])}</span>}
+      </div>
+      <div className="canvas-head-actions">
+        {runActive ? <span className="canvas-edit-paused" role="status"><LockIcon/>{tr('Editing paused during execution')}</span> : <>
+          <button type="button" className="canvas-head-icon" title={tr("Undo (Ctrl+Z)")} aria-label={tr("Undo")} disabled={!canUndo} onClick={undo}><HistoryIcon direction="undo"/></button>
+          <button type="button" className="canvas-head-icon" title={tr("Redo (Ctrl+Shift+Z or Ctrl+Y)")} aria-label={tr("Redo")} disabled={!canRedo} onClick={redo}><HistoryIcon direction="redo"/></button>
+          <WorkflowMoreMenu onSave={onSave} onAutomate={onAutomate && workflow.nodes.some(node => !node.actionType.startsWith('mock-')) ? onAutomate : undefined}
+            dock={{ docked: toolboxMode === 'top', toggle: () => changeToolboxMode(toolboxMode === 'top' ? 'floating' : 'top') }}/>
+        </>}
+      </div></div>
+      {toolboxMode === 'top' && <div className="canvas-toolbar-row">{toolbox}</div>}</div>
     {feedback && <p className="canvas-feedback" role="status">{tr(feedback)}</p>}
     {legacyNetworks.length > 0 && <div className="canvas-legacy-network" role="status" data-legacy-network={legacyNetworks.map(network => network.key).join(' ')}>
       <p><strong>{tr(...testNetworkTemplate(legacyNetworks))}</strong></p>
@@ -886,7 +1005,10 @@ function BuildCanvas({ environment, selectedId, select, openSettings, settingsId
       {legacyMainnets.length > 0 && <button type="button" onClick={rebuildOnMainnet}>{tr('Rebuild on {0}', legacyMainnets.join(' / '))}</button>}
     </div>}
     <div ref={surfaceRef} className="flow-surface build-flow-surface" role="region" aria-label={tr("Workflow graph")} onMouseDown={startMarquee}>
-      <PanelRevealProvider><ReactFlow key={isLendingComposition(workflow)?'lending':'general'} nodes={nodes} edges={edges} nodeTypes={nodeTypes} onNodesChange={(changes: NodeChange<Node>[]) => onNodesChange(changes.filter(change => change.type !== 'select'))} fitViewOptions={{ padding: toolboxMode === 'floating' ? RAIL_FIT_PADDING : COMPOSER_FIT_PADDING }} minZoom={0.35} maxZoom={1.4}
+      {/* Focus order (board 16 §8): header → rail → canvas → assistant, so the rail precedes the graph in the document. */}
+      {rail && <ActionRail id={railId} expanded={railWide} onToggle={toggleRail} onScroll={hideTip}>{toolbox}</ActionRail>}
+      {tip && railTips && <span className="canvas-rail-tooltip" aria-hidden="true" style={{ top: tip.top, left: tip.left }}>{tip.label}</span>}
+      <PanelRevealProvider><ReactFlow key={isLendingComposition(workflow)?'lending':'general'} nodes={nodes} edges={edges} nodeTypes={nodeTypes} onNodesChange={(changes: NodeChange<Node>[]) => onNodesChange(changes.filter(change => change.type !== 'select'))} fitViewOptions={{ padding: fitPadding }} minZoom={0.35} maxZoom={1.4}
         nodesDraggable nodesConnectable deleteKeyCode={null} selectNodesOnDrag={false} panOnDrag={[1, 2]} {...CANVAS_GESTURES}
         // BUILD-FIX-UX-001: an ordinary click never connects; a drag snaps to a nearby input; only a connection the workflow accepts is shown as valid.
         connectOnClick={false} connectionDragThreshold={4} connectionRadius={48}
@@ -904,8 +1026,9 @@ function BuildCanvas({ environment, selectedId, select, openSettings, settingsId
         onNodeDragStop={(_event, node, draggedNodes) => commitDrag(node, draggedNodes)}
         onEdgeClick={(_event, edge) => { selectNodes([], null); setSelectedEdge({ from: edge.source, to: edge.target }); }}
         onPaneClick={() => { if (ignorePaneClick.current) return; selectNodes([], null); }} onConnect={({ source, target, sourceHandle, targetHandle }) => connect(source, target, sourceHandle, targetHandle)}>
-        <InsertionViewport workflowId={workflow.workflowId} ids={composerActions(workflow).map(node => node.nodeId)} padding={toolboxMode === 'floating' ? RAIL_FIT_PADDING : COMPOSER_FIT_PADDING}/><HandleHitArea/><CanvasFocus onFocus={id => selectNodes([id], id)}/>
-        <Background gap={18} size={1} color="var(--grid)" /><DarkSpotlight/><CanvasNavigator fitViewOptions={{ padding: toolboxMode === 'floating' ? RAIL_FIT_PADDING : COMPOSER_FIT_PADDING }} position="bottom-right" steps/><PanelRevealer/>
+        <InsertionViewport workflowId={workflow.workflowId} ids={composerActions(workflow).map(node => node.nodeId)} padding={fitPadding}/><HandleHitArea/><CanvasFocus onFocus={id => selectNodes([id], id)}/>
+        <Background gap={22} size={1.5} color="var(--grid)" /><DarkSpotlight/><CanvasNavigator fitViewOptions={{ padding: fitPadding }} position="bottom-right"/><PanelRevealer/>
+        <SelectionToolbar ids={toolbarIds}>{selectionTools}</SelectionToolbar>
       </ReactFlow></PanelRevealProvider>
       {/* UX-006: an empty Canvas shows the uncommitted proposal confirmation in the empty state's place; Apply/Dismiss are unchanged. */}
       <WorkflowEditReview centered={emptyProposal}/>
@@ -917,8 +1040,8 @@ function BuildCanvas({ environment, selectedId, select, openSettings, settingsId
         <strong>{tr("Start your workflow")}</strong><p>{tr("Add an action from the toolbar, then select its card to configure it.")}</p>
       </div>}
       {marquee && marquee.width >= 4 && marquee.height >= 4 && <div className="canvas-marquee" aria-hidden="true" style={marquee}/>}
-      {toolboxMode === 'floating' && <><div className="floating-toolbox">{tr(railTools)}</div>{utilityDock}</>}
     </div>
-    <div className="canvas-foot"><span>{tr(isLendingComposition(workflow)?'Supply → Borrow → Swap · HF ≥ 2 policy checkpoint':'Step numbers show workflow order. Dragging changes layout only.')}</span><span>{tr(isLendingComposition(workflow)?'Select each step to edit. Approvals appear only in the execution plan.':'Arrows show linked steps. Select a step to edit below.')}</span></div>
+    {/* P0 approved UX (board 04): one footer line — the step count and the review's warnings (no usage hints). */}
+    <div className="canvas-foot"><span>{canvasFootLine(projectedNodes.length, overview, tr)}</span>{isLendingComposition(workflow) && <span>{tr('Supply → Borrow → Swap · HF ≥ 2 policy checkpoint')}</span>}</div>
   </section>;
 }

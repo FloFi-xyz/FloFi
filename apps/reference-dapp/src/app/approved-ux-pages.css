@@ -1,2 +1,186 @@
 /* SPDX-License-Identifier: AGPL-3.0-only */
-/* P0 approved UX (approved-ux-pages). Colors only through the shared theme variables in globals.css. */
+/* P0 approved UX (approved-ux-pages): boards 09–15, the six menu pages (Dashboard, Your workflows, Automations, Credentials, Agents, Passkeys).
+   Colors only through the shared theme variables in globals.css (board 16 §5), so the light and dark themes both apply. Every rule is scoped
+   under `.ux-page`, the frame these pages render, so nothing here reaches the Editor or the shell. */
+
+/* ── Page frame: content max 1120px, left-aligned, one title and at most one short subtitle ─────────────────────────────────────────── */
+.main.secondary-workspace{max-width:calc(1120px + 48px)}
+.ux-page{display:grid;gap:24px;align-content:start;width:100%;max-width:1120px;min-width:0;margin:0 auto;text-align:left;color:var(--ink);overflow-wrap:anywhere}
+.dashboard-workspace.ux-page{max-width:1120px;gap:24px}
+.ux-page .ux-page-head{display:flex;align-items:flex-end;justify-content:space-between;gap:16px 20px;flex-wrap:wrap;margin:0;padding:0}
+.ux-page .ux-page-head h1{margin:0;font-size:30px;font-weight:600;line-height:1.2;letter-spacing:-.02em;color:var(--ink)}
+.ux-page .ux-page-head p{max-width:660px;margin:6px 0 0;font-size:16px;line-height:1.5;color:var(--muted)}
+.ux-page .ux-page-head-actions{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.ux-page .workspace-notice{margin:0}
+.ux-page .ux-mono,.ux-page .ux-address,.ux-page .numeric{font-family:var(--font-ibm-plex-mono),monospace;font-variant-numeric:tabular-nums}
+
+/* ── Panels ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────── */
+.ux-page .ux-panel{min-width:0;margin:0;padding:22px;border:1px solid var(--line);border-radius:20px;background:var(--surface);box-shadow:none}
+.ux-page .ux-panel-row{padding:6px 22px}
+.ux-page .ux-panel-attention{border-color:color-mix(in srgb,var(--warning-text) 45%,var(--line))}
+.ux-page .ux-panel-head{display:flex;align-items:center;justify-content:space-between;gap:10px 12px;flex-wrap:wrap;margin:0 0 14px}
+.ux-page .ux-panel-head>div{display:flex;align-items:center;gap:10px;min-width:0}
+.ux-page .ux-panel-head h2{margin:0;font-size:18px;font-weight:600;line-height:1.4;letter-spacing:-.01em;color:var(--ink)}
+.ux-page .ux-panel-text{margin:0;font-size:15px;line-height:1.5;color:var(--muted)}
+.ux-page .ux-panel-text a{color:var(--accent);font-weight:600}
+.ux-page .ux-count{padding:2px 8px;border:1px solid var(--line);border-radius:8px;color:var(--muted);font-family:var(--font-ibm-plex-mono),monospace;font-size:13px;line-height:1.5;white-space:nowrap}
+.ux-page .ux-notice{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;padding:16px 22px}
+.ux-page .ux-notice p{margin:0;color:var(--muted);line-height:1.5}
+
+/* ── Rows ───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────── */
+.ux-page .ux-list{margin:0;padding:0;list-style:none}
+.ux-page .ux-list>li+li{border-top:1px solid var(--line)}
+.ux-page .ux-row{display:flex;align-items:center;gap:14px;min-width:0;padding:12px 0}
+.ux-page .ux-row-icon{display:grid;place-items:center;flex:none;width:40px;height:40px;border:0;border-radius:12px;background:var(--surface-raised);color:var(--accent)}
+.ux-page .ux-row-icon svg{width:20px;height:20px}
+.ux-page .ux-row-icon img{width:24px;height:24px;object-fit:contain}
+.ux-page .ux-row-main{display:flex;flex:1;flex-direction:column;gap:2px;min-width:0}
+.ux-page .ux-row-name{margin:0;font-size:15px;font-weight:500;line-height:1.4;letter-spacing:0;color:var(--ink)}
+.ux-page .ux-row-name>span{overflow-wrap:anywhere}
+.ux-page .ux-row-meta{margin:0;font-size:13px;line-height:1.5;color:var(--muted)}
+.ux-page .ux-row-actions{display:flex;flex:none;align-items:center;justify-content:flex-end;gap:10px 12px;flex-wrap:wrap;max-width:100%}
+.ux-page .ux-address{margin-left:6px;font-size:13px;font-weight:400;color:var(--muted)}
+/* An execution record's name opens its facts in place; the visible Open goes to the record. */
+.ux-page .ux-row-toggle{display:inline-flex;align-items:center;gap:8px;max-width:100%;min-height:32px;margin:0;padding:0;border:0;border-radius:6px;background:transparent;color:var(--ink);font:inherit;text-align:left;cursor:pointer}
+.ux-page .ux-row-chevron{flex:none;color:var(--muted);font-size:13px}
+.ux-page .ux-record-details{margin:0 0 12px 54px;padding:12px 16px;border-radius:12px;background:var(--surface-raised)}
+.ux-page .ux-record-details[hidden]{display:none}
+.ux-page .ux-record-details .dashboard-run-message{margin:0 0 8px;font-size:13px;line-height:1.6;color:var(--muted)}
+.ux-page .ux-record-workflow{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:10px}
+.ux-page .ux-wallet-row .ux-inline-form{margin:0 0 12px 54px}
+
+/* ── Status tags: text on a quiet pill, never a control (no border, no pointer, no hover) ───────────────────────────────────────────── */
+.ux-page .ux-tag{display:inline-flex;align-items:center;gap:6px;max-width:100%;padding:4px 10px;border:0;border-radius:999px;background:var(--surface-raised);color:var(--muted);
+  font-family:var(--font-ibm-plex-mono),monospace;font-size:12px;font-weight:500;line-height:1.5;white-space:nowrap;cursor:default;user-select:none;pointer-events:none}
+.ux-page .ux-tag[data-tone="soon"]{background:var(--blue-soft);color:var(--accent)}
+.ux-page .ux-tag[data-tone="attention"]{background:var(--warning-surface);color:var(--warning-text)}
+.ux-page .ux-tag[data-tone="success"]{background:var(--success-surface);color:var(--success)}
+.ux-page .ux-tag[data-tone="danger"]{background:var(--danger-surface);color:var(--red)}
+.ux-page .ux-tag .dashboard-status-marker{color:currentColor}
+
+/* ── Buttons and links ──────────────────────────────────────────────────────────────────────────────────────────────────────────────── */
+.ux-page .ux-button{display:inline-flex;align-items:center;justify-content:center;gap:8px;min-height:44px;max-width:100%;margin:0;padding:0 20px;border:1px solid var(--line);border-radius:999px;
+  background:transparent;color:var(--ink);font:600 15px/1.2 var(--font-outfit),sans-serif;white-space:nowrap;text-decoration:none;cursor:pointer}
+.ux-page .ux-button:hover:not(:disabled){background:var(--surface-raised)}
+.ux-page .ux-button:disabled{opacity:1;cursor:not-allowed;border-color:var(--line);background:var(--surface-raised);color:var(--muted)}
+.ux-page .ux-button svg{flex:none;width:18px;height:18px}
+.ux-page .ux-button-small{min-height:36px;padding:0 14px;font-size:13px}
+.ux-page .ux-button-primary{border-color:var(--primary);background:var(--primary);color:var(--on-accent)}
+.ux-page .ux-button-primary:hover:not(:disabled){border-color:var(--primary);background:color-mix(in srgb,var(--primary) 88%,var(--ink))}
+.ux-page .ux-button-danger{border-color:color-mix(in srgb,var(--red) 40%,var(--line));background:var(--danger-surface);color:var(--red)}
+.ux-page .ux-button-danger:hover:not(:disabled){background:var(--danger-surface)}
+.ux-page .ux-link{display:inline-flex;align-items:center;gap:6px;min-height:44px;margin:0;padding:0 12px;border:0;border-radius:999px;background:transparent;color:var(--accent);
+  font:600 15px/1.2 var(--font-outfit),sans-serif;text-decoration:none;white-space:nowrap;cursor:pointer}
+.ux-page .ux-link:hover{background:var(--blue-soft)}
+.ux-page .ux-icon-button{display:inline-grid;place-items:center;width:44px;height:44px;margin:0;padding:0;border:0;border-radius:10px;background:transparent;color:var(--muted);font-size:18px;line-height:1;cursor:pointer}
+.ux-page .ux-icon-button:hover,.ux-page .ux-icon-button[aria-expanded="true"]{background:var(--surface-raised);color:var(--ink)}
+/* The existing record menus (history-actions) in these rows: the same "···" target. */
+.ux-page .history-actions>button.workspace-action{min-width:44px;min-height:44px;padding:0;border:0;border-radius:10px;background:transparent;color:var(--muted);font-size:20px}
+.ux-page .history-actions>button.workspace-action:hover:enabled,.ux-page .history-actions>button.workspace-action[aria-expanded="true"]{background:var(--surface-raised);color:var(--ink)}
+.ux-page :is(.ux-button,.ux-link,.ux-icon-button,.ux-chip,.ux-row-toggle,.ux-menu-list>*,summary,.automation-choice,a):focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+
+/* ── Filter chips (Your workflows) ──────────────────────────────────────────────────────────────────────────────────────────────────── */
+.ux-page .ux-workflow-list{display:grid;gap:16px;min-width:0}
+.ux-page .ux-chips{display:flex;gap:8px;flex-wrap:wrap}
+.ux-page .ux-chip{display:inline-flex;align-items:center;gap:8px;min-height:40px;margin:0;padding:0 16px;border:1px solid var(--line);border-radius:999px;background:transparent;color:var(--ink);
+  font:500 14px/1.2 var(--font-outfit),sans-serif;cursor:pointer}
+.ux-page .ux-chip:hover{background:var(--surface-raised)}
+.ux-page .ux-chip[aria-pressed="true"]{border-color:var(--primary);background:var(--blue-soft);color:var(--accent)}
+.ux-page .ux-chip-count{font-family:var(--font-ibm-plex-mono),monospace;font-size:12px;color:var(--muted)}
+.ux-page .ux-chip[aria-pressed="true"] .ux-chip-count{color:var(--accent)}
+.ux-page .ux-chip[data-tone="attention"] .ux-chip-count{color:var(--warning-text)}
+.ux-page .ux-workflow-rows{padding:4px 22px}
+.ux-page .ux-list-empty{display:grid;gap:6px;padding:28px 22px;text-align:left}
+.ux-page .ux-list-empty h3{margin:0;font-size:16px;font-weight:600;color:var(--ink)}
+.ux-page .ux-list-empty p{margin:0;font-size:15px;line-height:1.5;color:var(--muted)}
+.ux-page .ux-list-footer{display:flex;gap:10px;flex-wrap:wrap}
+.ux-page .workflow-records{display:grid;gap:16px;min-width:0}
+.ux-page .workflow-records .dashboard-notice{margin:0}
+
+/* ── Disclosures: "About the values", "Advanced settings", "Danger zone" ────────────────────────────────────────────────────────────── */
+.ux-page .ux-details{margin:0;color:var(--muted);font-size:14px}
+.ux-page .ux-details>summary{display:inline-flex;align-items:center;gap:8px;min-height:44px;color:var(--muted);font-weight:500;list-style:none;cursor:pointer}
+.ux-page .ux-details>summary::-webkit-details-marker{display:none}
+.ux-page .ux-details>summary::before{content:"";flex:none;width:7px;height:7px;border-right:1.5px solid currentColor;border-bottom:1.5px solid currentColor;transform:rotate(-45deg);transition:transform .15s ease}
+.ux-page .ux-details[open]>summary::before{transform:rotate(45deg)}
+.ux-page .ux-details[open]>summary{color:var(--ink)}
+.ux-page .ux-danger-zone{padding:0 22px;border:1px solid var(--line);border-radius:20px;background:var(--surface)}
+.ux-page .ux-danger-zone[open]{padding-bottom:18px;border-color:color-mix(in srgb,var(--red) 40%,var(--line));background:var(--danger-surface)}
+.ux-page .ux-danger-zone[open]>summary{color:var(--red)}
+.ux-page .ux-danger-zone .workspace-inline-form{padding-top:4px;border-top:0}
+.ux-page .ux-danger-zone .workspace-inline-form p{color:var(--ink)}
+@media(prefers-reduced-motion:reduce){.ux-page .ux-details>summary::before{transition:none}}
+
+/* ── Empty and "Coming soon" states ─────────────────────────────────────────────────────────────────────────────────────────────────── */
+.ux-page .ux-empty{display:flex;flex-direction:column;align-items:center;gap:14px;padding:40px 22px;text-align:center}
+.ux-page .ux-empty-icon{display:grid;place-items:center;flex:none;width:64px;height:64px;border-radius:18px;background:var(--surface-raised);color:var(--accent)}
+.ux-page .ux-empty-icon svg{width:28px;height:28px}
+.ux-page .ux-empty h2,.ux-page .ux-empty h3{margin:0;font-size:22px;font-weight:600;line-height:1.3;color:var(--ink)}
+.ux-page .ux-empty p{max-width:520px;margin:0;font-size:16px;line-height:1.5;color:var(--muted)}
+.ux-page .ux-empty-inline{display:flex;flex-direction:column;align-items:flex-start;gap:10px}
+
+/* ── Menus ("···", Add wallet) ──────────────────────────────────────────────────────────────────────────────────────────────────────── */
+.ux-page .ux-menu{position:relative;display:inline-flex}
+.ux-page .ux-menu-list{position:absolute;z-index:30;top:calc(100% + 6px);right:0;display:grid;min-width:220px;margin:0;padding:6px;border:1px solid var(--line);border-radius:12px;
+  background:var(--surface-raised);box-shadow:0 8px 28px color-mix(in srgb,var(--ink) 14%,transparent)}
+.ux-page .ux-menu-list[hidden]{display:none}
+.ux-page .ux-menu-list>*{display:flex;align-items:center;width:100%;min-height:40px;margin:0;padding:8px 12px;border:0;border-radius:8px;background:transparent;color:var(--ink);
+  font:400 14px/1.3 var(--font-outfit),sans-serif;text-align:left;text-decoration:none;white-space:nowrap;cursor:pointer}
+.ux-page .ux-menu-list>:is(:hover,:focus-visible){background:var(--blue-soft)}
+.ux-page .ux-menu-list>[data-tone="danger"]{color:var(--red)}
+.ux-page .ux-menu-list>:disabled{color:var(--muted);cursor:not-allowed}
+.ux-page .ux-inline-form{display:grid;gap:10px;padding:14px 16px;border-radius:12px;background:var(--surface-raised)}
+.ux-page .ux-inline-form p{margin:0;color:var(--muted);font-size:14px;line-height:1.5}
+.ux-page .ux-inline-form label{font-size:13px;font-weight:500}
+.ux-page .ux-inline-form input{height:44px;min-width:0;padding:0 12px;border:1px solid var(--line);border-radius:10px;background:var(--surface);color:var(--ink)}
+.ux-page .ux-inline-actions{display:flex;gap:10px;flex-wrap:wrap}
+
+/* ── Dashboard (board 10) ───────────────────────────────────────────────────────────────────────────────────────────────────────────── */
+.ux-page .ux-dashboard-now{display:grid;grid-template-columns:minmax(0,1fr);gap:20px;align-items:start}
+.ux-page .ux-dashboard-now-split{grid-template-columns:minmax(0,1.25fr) minmax(0,1fr)}
+.ux-page .ux-dashboard-now .ux-list{border-top:1px solid var(--line)}
+.ux-page .ux-history{padding:18px 22px}
+.ux-page .ux-history-line{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
+.ux-page .ux-history-line h2{margin:0;font-size:16px;font-weight:600;color:var(--ink)}
+.ux-page .ux-history-line .ux-panel-text{font-size:14px}
+.ux-page .ux-history-notices{display:grid;gap:10px;margin-top:14px}
+.ux-page .ux-history-notices .dashboard-notice{margin:0;background:var(--surface-raised)}
+.ux-page.dashboard-workspace .dashboard-disconnected{min-height:0}
+
+/* ── Automations (board 12) ─────────────────────────────────────────────────────────────────────────────────────────────────────────── */
+.ux-page .automation-session{margin:0}
+.ux-page .automation-choices{gap:14px}
+.ux-page .automation-choice{min-height:0;gap:8px;padding:18px;border-radius:16px;background:var(--surface-raised);box-shadow:none}
+.ux-page .automation-choice:enabled:hover{border-color:var(--accent);background:var(--blue-soft)}
+.ux-page .automation-choice:disabled{cursor:not-allowed;background:var(--surface);color:var(--muted)}
+.ux-page .automation-choice strong{font-size:16px}
+.ux-page .automation-choice-icon{width:36px;height:36px;border-radius:10px;background:var(--blue-soft);color:var(--accent);font-size:20px}
+.ux-page .automation-chat-entry{display:flex;align-items:center;gap:6px 12px;flex-wrap:wrap;margin-top:14px}
+.ux-page .automation-chat-entry .muted{font-size:14px}
+.ux-page .automation-availability{margin-top:10px}
+.ux-page .automation-advanced{margin-top:6px}
+.ux-page .automation-waiting .automation-list{display:grid;gap:12px}
+
+/* ── Credentials, Agents, Passkeys (boards 13–15) ───────────────────────────────────────────────────────────────────────────────────── */
+.ux-page .workspace-network-icon{border:0;background:var(--surface-raised);color:var(--accent)}
+.ux-page .ux-row-icon.workspace-provider-mark{position:relative;overflow:hidden}
+.ux-page .workspace-provider-mark :is(.provider-mark-light,.provider-mark-dark){inset:-8px;width:56px;height:56px}
+.ux-page .delegation-credentials .automation-list{margin:12px 0 0}
+
+/* ── Small screens and touch ────────────────────────────────────────────────────────────────────────────────────────────────────────── */
+@media(max-width:900px){.ux-page .ux-dashboard-now-split{grid-template-columns:minmax(0,1fr)}}
+@media(max-width:700px){
+  .ux-page{gap:20px}
+  .ux-page .ux-page-head h1{font-size:26px}
+  .ux-page .ux-panel{padding:16px}
+  .ux-page .ux-panel-row,.ux-page .ux-workflow-rows{padding:4px 16px}
+  .ux-page .ux-row{flex-wrap:wrap}
+  .ux-page .ux-row-actions{flex-basis:100%;justify-content:flex-start;padding-left:54px}
+  .ux-page .ux-record-details,.ux-page .ux-wallet-row .ux-inline-form{margin-left:0}
+  .ux-page .ux-page-head-actions{width:100%}
+  .ux-page .automation-choices{grid-template-columns:minmax(0,1fr)}
+}
+@media(pointer:coarse){
+  .ux-page :is(.ux-button,.ux-button-small,.ux-link,.ux-chip,.ux-row-toggle,.ux-menu-list>*,.ux-details>summary){min-height:44px}
+  .ux-page :is(.ux-icon-button,.history-actions>button.workspace-action){min-width:44px;min-height:44px}
+}

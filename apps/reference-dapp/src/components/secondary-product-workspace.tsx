@@ -2,7 +2,7 @@
 'use client';
 import { useLocale } from '../i18n/locale';
 
-import { useCallback, useEffect, useId, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useId, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
 import type { SecondaryWorkspace } from '../domain/secondary-workspaces';
 import { useBuild009Wallet } from '../state/build009-wallet-store';
 import { YourWorkflows, type WorkflowNavigation } from './saved-workflows';
@@ -20,12 +20,12 @@ import { ECOSYSTEM_LABEL } from '../wallet/wallet-registry';
 import { addProviderCard, cardProviderStatus, removeProviderCard, type CardEntryStatus } from '../app/card-action';
 import { parseCardFrameMessage, type CardParentMessage } from './card-frame-protocol';
 import { DeleteAccount, ExportWalletDialog } from './account/account-wallets';
-import { AccountIcon } from './account/account-icons';
 import { accountMessage } from './account/account-messages';
 import { accountState, removeAccountWallet, renameAccountWallet, type AccountState } from '../app/account-action';
 import { exportActions, isLegacyWallet, WALLET_LABEL_MAX } from '../accounts/account-model';
 import { walletInventory, walletStatus, type WalletInventoryEntry } from '../domain/wallet-inventory';
 import { floFiWalletProviderKey, isFloFiWalletChoice } from '../wallet/flofi-wallet-sync';
+import { StatusTag } from './dashboard/dashboard-status';
 
 type IconName = 'wallet' | 'agent' | 'key' | 'plus' | 'copy' | 'card' | 'secret';
 function WorkspaceIcon({ name, size = 20 }: { name: IconName; size?: number }) {
@@ -40,13 +40,43 @@ function WorkspaceIcon({ name, size = 20 }: { name: IconName; size?: number }) {
   </svg>;
 }
 
-function FutureAction({ children, className = '' }: { children: ReactNode; className?: string }) {
-  const { t: tr } = useLocale();
-  return <button type="button" className={`workspace-action ${className}`} disabled title={tr("Coming soon")}>{children}</button>;
-}
-
-function AddAction({ children }: { children: ReactNode }) {
-  return <FutureAction><WorkspaceIcon name="plus" size={16}/>{children}</FutureAction>;
+type MenuItem = { readonly key: string; readonly label: string; readonly ariaLabel?: string; readonly onSelect?: () => void; readonly href?: string;
+  readonly tone?: 'danger'; readonly disabled?: boolean };
+/**
+ * P0 approved UX (boards 11–13): a "···" (or labelled) menu of real actions. Keyboard operable: Enter/Space/arrows open it and focus the first
+ * action, arrows/Home/End move, Escape closes it and returns the focus to its button; Tab or a click outside just closes it. Its actions stay in
+ * the page (hidden) while it is closed, as the existing record menus do.
+ */
+function MoreMenu({ label, items, trigger }: { label: string; items: readonly MenuItem[]; trigger?: ReactNode }) {
+  const [open, setOpen] = useState(false);
+  const id = useId(), root = useRef<HTMLDivElement>(null), button = useRef<HTMLButtonElement>(null), menu = useRef<HTMLDivElement>(null);
+  const actions = () => [...menu.current?.querySelectorAll<HTMLElement>('[role="menuitem"]:not([disabled])') ?? []];
+  useEffect(() => {
+    if (!open) return;
+    actions()[0]?.focus();
+    const outside = (event: PointerEvent) => { if (!root.current?.contains(event.target as Node)) setOpen(false); };
+    document.addEventListener('pointerdown', outside);
+    return () => document.removeEventListener('pointerdown', outside);
+  }, [open]);
+  const close = () => { setOpen(false); button.current?.focus(); };
+  function onMenuKey(event: KeyboardEvent<HTMLDivElement>) {
+    if (event.key === 'Escape') { event.preventDefault(); close(); return; }
+    if (event.key === 'Tab') { setOpen(false); return; }
+    const list = actions(), at = list.indexOf(document.activeElement as HTMLElement), last = list.length - 1;
+    const next = event.key === 'ArrowDown' ? (at + 1) % list.length : event.key === 'ArrowUp' ? (at - 1 + list.length) % list.length : event.key === 'Home' ? 0 : event.key === 'End' ? last : null;
+    if (next !== null && list[next]) { event.preventDefault(); list[next].focus(); }
+  }
+  return <div className="ux-menu" ref={root} onBlur={event => { if (open && event.relatedTarget && !root.current?.contains(event.relatedTarget as Node)) setOpen(false); }}>
+    <button ref={button} type="button" className={trigger ? 'ux-button' : 'ux-icon-button'} aria-haspopup="menu" aria-expanded={open} aria-controls={id}
+      {...trigger ? {} : { 'aria-label': label }} onClick={() => setOpen(value => !value)}
+      onKeyDown={event => { if (!open && (event.key === 'ArrowDown' || event.key === 'ArrowUp')) { event.preventDefault(); setOpen(true); } }}>
+      {trigger ?? <span aria-hidden="true">···</span>}</button>
+    <div id={id} ref={menu} role="menu" aria-label={label} className="ux-menu-list" hidden={!open} onKeyDown={onMenuKey}>
+      {items.map(item => item.href ? <a key={item.key} role="menuitem" href={item.href} tabIndex={-1} {...item.ariaLabel ? { 'aria-label': item.ariaLabel } : {}}>{item.label}</a>
+        : <button key={item.key} type="button" role="menuitem" tabIndex={-1} disabled={item.disabled} data-tone={item.tone} {...item.ariaLabel ? { 'aria-label': item.ariaLabel } : {}}
+          onClick={() => { close(); item.onSelect?.(); }}>{item.label}</button>)}
+    </div>
+  </div>;
 }
 
 const ecosystemIcons = { evm: '/brand/crypto/ethereum.svg', solana: '/brand/crypto/solana.svg' } as const;
@@ -106,43 +136,51 @@ function WalletCredentialCard({ entry, busy, accountView, onConnect, onDisconnec
   }
   const status = walletStatus(entry);
   const icon = (entry.network && networkIcons[entry.network]) ?? ecosystemIcons[entry.ecosystem];
-  return <article className="workspace-wallet-card" aria-label={`${entry.label}, ${ECOSYSTEM_LABEL[entry.ecosystem]}`} data-active={entry.active ? 'true' : 'false'}
+  // Board 13: "MetaMask wallet · EVM · in use on Base". The name stays the wallet's own identity (HOTFIX-WALLET-SELECTOR), never its provider.
+  const facts = [/wallet$/i.test(entry.providerName) ? entry.providerName : tr('{0} wallet', entry.providerName), entry.ecosystem === 'evm' ? 'EVM' : ECOSYSTEM_LABEL[entry.ecosystem],
+    ...account || entry.designation !== 'external' ? [tr(DESIGNATION[entry.designation])] : [],
+    ...entry.active || entry.saved ? [tr(entry.active ? 'in use on {0}' : 'last used on {0}', tr(credentialNetworkLabel(entry.network)))] : []];
+  const menu: MenuItem[] = [
+    { key: 'copy', label: tr('Copy address'), ariaLabel: tr('Copy {0} address', entry.label), onSelect: () => void copyAddress() },
+    ...entry.saved || account ? [{ key: 'rename', label: tr('Rename'), ariaLabel: tr('Rename {0}', entry.label), onSelect: () => { setDraft(entry.label); setRenameError(''); setMode('rename'); } }] : [],
+    ...account && accountView && exportActions(account).length > 0 ? [{ key: 'export', label: tr('Export'), ariaLabel: tr('Export {0}', entry.label), onSelect: () => setExporting(true) }] : [],
+    ...entry.active ? [{ key: 'disconnect', label: tr('Disconnect'), ariaLabel: tr('Disconnect {0}', entry.label), disabled: busy, onSelect: onDisconnect }] : [],
+    // BUILD-FLOFI-PRIVY-UX-001: wallets FloFi's provider keeps (Privy, legacy FloFi Wallet) stay in the account (account-store.ts removeWallet).
+    ...removable ? [{ key: 'remove', label: tr('Remove'), ariaLabel: tr('Remove {0}', entry.label), tone: 'danger' as const, onSelect: () => { setRenameError(''); setMode('remove'); } }] : [],
+    ...deviceOnly ? [{ key: 'device', label: tr('Remove from this device'), ariaLabel: tr('Remove {0} from this device', entry.label),
+      onSelect: () => { removeSavedCredential(entry.saved!.id); onStatus('Removed from this device. The wallet stays in your FloFi account.'); } }] : [],
+  ];
+  return <article className="ux-wallet-row" aria-label={`${entry.label}, ${ECOSYSTEM_LABEL[entry.ecosystem]}`} data-active={entry.active ? 'true' : 'false'}
     {...account ? { 'data-origin': account.origin } : {}} data-designation={entry.designation}>
-    <div className="workspace-wallet-heading">
-      <span className="workspace-network-icon"><img src={icon} width="28" height="28" alt=""/></span>
-      <div><h3>{entry.label}</h3><p>{entry.providerName} · {ECOSYSTEM_LABEL[entry.ecosystem]}{account || entry.designation !== 'external' ? <> · {tr(DESIGNATION[entry.designation])}</> : null}</p></div>
-      <span className={`workspace-wallet-status${entry.active ? ' workspace-wallet-status-active' : ''}`}>{tr(status)}</span>
+    <div className="ux-row">
+      <span className="ux-row-icon workspace-network-icon"><img src={icon} width="28" height="28" alt=""/></span>
+      <div className="ux-row-main">
+        <h3 className="ux-row-name">{entry.label} <code className="ux-address" title={entry.address}>{entry.address.slice(0, 6)}…{entry.address.slice(-4)}</code></h3>
+        <p className="ux-row-meta">{facts.join(' · ')}</p>
+        {entry.designation === 'privy' && <p className="ux-row-meta workspace-wallet-signing" data-managed-signing="privy">{tr('Signs with your FloFi wallet (Privy), after you review the transaction in FloFi.')}</p>}
+        {entry.designation === 'legacy' && <p className="ux-row-meta workspace-wallet-signing" data-managed-signing="legacy">{tr(accountMessage('LEGACY_WALLET_EXPORT_ONLY'))}</p>}
+      </div>
+      <div className="ux-row-actions">
+        <span data-tone={entry.active ? 'soon' : 'neutral'} className={`ux-tag workspace-wallet-status${entry.active ? ' workspace-wallet-status-active' : ''}`}>{tr(status)}</span>
+        {!entry.saved && !account && entry.active && <button type="button" className="ux-button" aria-label={tr('Save {0}', entry.label)} onClick={() => onSave(entry.active!)}>{tr("Save")}</button>}
+        {!entry.active && (entry.saved || account && !isLegacyWallet(account)) && <button type="button" className="ux-button" aria-label={tr('Connect {0}', entry.label)} disabled={busy} onClick={() => onConnect(entry)}>{tr("Connect")}</button>}
+        <MoreMenu label={tr('More actions for {0}', entry.label)} items={menu}/>
+      </div>
     </div>
-    {entry.designation === 'privy' && <p className="workspace-wallet-signing" data-managed-signing="privy">{tr('Signs with your FloFi wallet (Privy), after you review the transaction in FloFi.')}</p>}
-    {entry.designation === 'legacy' && <p className="workspace-wallet-signing" data-managed-signing="legacy">{tr(accountMessage('LEGACY_WALLET_EXPORT_ONLY'))}</p>}
-    {(entry.active || entry.saved) && <p className="workspace-wallet-network">{tr(credentialNetworkLabel(entry.network))}</p>}
-    <div className="workspace-wallet-address"><code title={entry.address}>{entry.address.slice(0, 6)}…{entry.address.slice(-4)}</code>
-      <button type="button" className="workspace-copy" aria-label={tr('Copy {0} address', entry.label)} title={tr("Copy address")} onClick={() => void copyAddress()}><WorkspaceIcon name="copy" size={17}/></button>
-    </div>
-    {mode === 'rename' && (entry.saved || account) ? <form className="workspace-inline-form" onSubmit={event => { event.preventDefault(); void rename(); }}
+    {mode === 'rename' && (entry.saved || account) ? <form className="ux-inline-form" onSubmit={event => { event.preventDefault(); void rename(); }}
       onKeyDown={event => { if (event.key === 'Escape') { event.preventDefault(); setMode('view'); setDraft(entry.label); setRenameError(''); } }}>
       <label htmlFor={renameId}>{tr("Wallet name")}</label>
       <input id={renameId} value={draft} maxLength={account ? WALLET_LABEL_MAX : LABEL_MAX} autoComplete="off" autoFocus aria-invalid={renameError ? 'true' : undefined}
         aria-describedby={renameError ? `${renameId}-error` : undefined} onChange={event => setDraft(event.currentTarget.value)}/>
       {renameError && <p id={`${renameId}-error`} className="workspace-inline-error" role="alert">{tr(renameError)}</p>}
-      <div className="workspace-wallet-actions"><button type="submit" className="workspace-action">{tr("Save name")}</button>
-        <button type="button" className="workspace-action" onClick={() => { setMode('view'); setDraft(entry.label); setRenameError(''); }}>{tr("Cancel")}</button></div>
-    </form> : mode === 'remove' && removable ? <div className="workspace-inline-form" role="group" aria-label={tr('Remove {0}', entry.label)}>
+      <div className="ux-inline-actions"><button type="submit" className="ux-button ux-button-small">{tr("Save name")}</button>
+        <button type="button" className="ux-button ux-button-small" onClick={() => { setMode('view'); setDraft(entry.label); setRenameError(''); }}>{tr("Cancel")}</button></div>
+    </form> : mode === 'remove' && removable ? <div className="ux-inline-form" role="group" aria-label={tr('Remove {0}', entry.label)}>
       <p>{tr('Remove {0} from FloFi?', entry.label)}{tr(entry.active ? ' This also disconnects it.' : '')}{tr(" Only FloFi's reference is removed; the wallet and its assets are not affected.")}</p>
       {renameError && <p className="workspace-inline-error" role="alert">{tr(renameError)}</p>}
-      <div className="workspace-wallet-actions"><button type="button" className="workspace-action workspace-action-danger" onClick={() => void remove()}>{tr("Remove")}</button>
-        <button type="button" className="workspace-action" onClick={() => setMode('view')}>{tr("Cancel")}</button></div>
-    </div> : <div className="workspace-wallet-actions">
-      {(entry.saved || account) && <button type="button" className="workspace-action" aria-label={tr('Rename {0}', entry.label)} onClick={() => { setDraft(entry.label); setMode('rename'); }}>{tr("Rename")}</button>}
-      {account && accountView && exportActions(account).length > 0 && <button type="button" className="workspace-action" aria-label={tr('Export {0}', entry.label)} onClick={() => setExporting(true)}>{tr('Export')}</button>}
-      {!entry.saved && !account && entry.active && <button type="button" className="workspace-action" aria-label={tr('Save {0}', entry.label)} onClick={() => onSave(entry.active!)}>{tr("Save")}</button>}
-      {entry.active ? <button type="button" className="workspace-action" aria-label={tr('Disconnect {0}', entry.label)} disabled={busy} onClick={onDisconnect}>{tr("Disconnect")}</button>
-        : (entry.saved || account && !isLegacyWallet(account)) && <button type="button" className="workspace-action" aria-label={tr('Connect {0}', entry.label)} disabled={busy} onClick={() => onConnect(entry)}>{tr("Connect")}</button>}
-      {/* BUILD-FLOFI-PRIVY-UX-001: wallets FloFi's provider keeps (Privy, legacy FloFi Wallet) stay in the account (account-store.ts removeWallet). */}
-      {removable && <button type="button" className="workspace-action" aria-label={tr('Remove {0}', entry.label)} onClick={() => setMode('remove')}>{tr("Remove")}</button>}
-      {deviceOnly && <button type="button" className="workspace-action" aria-label={tr('Remove {0} from this device', entry.label)}
-        onClick={() => { removeSavedCredential(entry.saved!.id); onStatus('Removed from this device. The wallet stays in your FloFi account.'); }}>{tr('Remove from this device')}</button>}
-    </div>}
+      <div className="ux-inline-actions"><button type="button" className="ux-button ux-button-small ux-button-danger" onClick={() => void remove()}>{tr("Remove")}</button>
+        <button type="button" className="ux-button ux-button-small" onClick={() => setMode('view')}>{tr("Cancel")}</button></div>
+    </div> : null}
     {exporting && account && accountView && <ExportWalletDialog wallet={account} state={accountView} onClose={() => setExporting(false)}/>}
   </article>;
 }
@@ -161,18 +199,19 @@ function CardCredential({ card, onStatus }: { card: SavedCard; onStatus(message:
     if (!removed.ok && !CARD_REFERENCE_UNUSABLE.has(removed.code)) { onStatus('This card could not be removed right now. Try again.'); return; }
     removeSavedCredential(card.id); onStatus('Card removed from FloFi.');
   }
-  return <article className="workspace-wallet-card workspace-card-credential" aria-label={card.label}>
-    <div className="workspace-wallet-heading">
-      <span className="workspace-network-icon"><WorkspaceIcon name="card" size={24}/></span>
-      <div><h3>{card.label}</h3><p>{brandLabel(card.brand)} · {card.providerName}</p></div>
+  return <article className="ux-wallet-row workspace-card-credential" aria-label={card.label}>
+    <div className="ux-row">
+      <span className="ux-row-icon workspace-network-icon"><WorkspaceIcon name="card" size={22}/></span>
+      <div className="ux-row-main"><h3 className="ux-row-name">{card.label}</h3>
+        <p className="ux-row-meta">{brandLabel(card.brand)} · {card.providerName} · <span className="numeric">•••• {card.last4}</span>{tr(' · Expires {0}', `${String(card.expMonth).padStart(2, '0')}/${String(card.expYear).slice(-2)}`)}</p></div>
+      {!confirming && <div className="ux-row-actions"><button type="button" className="ux-button" aria-label={tr('Remove {0}', card.label)} onClick={() => setConfirming(true)}>{tr("Remove")}</button></div>}
     </div>
-    <p className="workspace-wallet-network"><span className="numeric">•••• {card.last4}</span>{tr(' · Expires {0}', `${String(card.expMonth).padStart(2, '0')}/${String(card.expYear).slice(-2)}`)}</p>
-    {confirming ? <div className="workspace-inline-form" role="group" aria-label={tr('Remove {0}', card.label)}>
+    {confirming && <div className="ux-inline-form" role="group" aria-label={tr('Remove {0}', card.label)}>
       <p>{tr("Remove this card from FloFi? The card itself is not affected.")}</p>
-      <div className="workspace-wallet-actions"><button type="button" className="workspace-action workspace-action-danger" disabled={removing}
+      <div className="ux-inline-actions"><button type="button" className="ux-button ux-button-small ux-button-danger" disabled={removing}
         onClick={() => void remove()}>{tr("Remove")}</button>
-        <button type="button" className="workspace-action" onClick={() => setConfirming(false)}>{tr("Cancel")}</button></div>
-    </div> : <div className="workspace-wallet-actions"><button type="button" className="workspace-action" aria-label={tr('Remove {0}', card.label)} onClick={() => setConfirming(true)}>{tr("Remove")}</button></div>}
+        <button type="button" className="ux-button ux-button-small" onClick={() => setConfirming(false)}>{tr("Cancel")}</button></div>
+    </div>}
   </article>;
 }
 
@@ -331,75 +370,94 @@ function CredentialsWorkspace({ access }: { access?: DelegationAccess | undefine
     if (!session) setStatus(`${providerName} did not connect.`);
     else if (session.account.address !== entry.address) mismatch(session.account.address);
   }
-  return <>
-    <header className="secondary-workspace-heading"><h1>{tr("Credentials")}</h1><p>{tr("Keep the wallets and cards you use with FloFi in one place. Saved credentials are references only: they never approve a transaction or a payment.")}</p></header>
+  const createImport = signedIn && account!.availability.managedWallets;
+  return <div className="ux-page credentials">
+    <header className="ux-page-head"><div><h1>{tr("Credentials")}</h1><p>{tr("Wallets and payment methods you use with FloFi. Saving here never approves anything.")}</p></div></header>
     <p className="workspace-notice" role="status">{tr(status || connection.error || '')}</p>
-    <section className="workspace-section" aria-labelledby="credentials-wallets">
-      <div className="workspace-section-heading"><div><WorkspaceIcon name="wallet"/><h2 id="credentials-wallets">{tr("Wallets")}</h2><span className="workspace-count">{entries.length}</span></div>
-        <div className="workspace-wallet-actions">
-          {signedIn && account!.availability.managedWallets && <a className="workspace-action" style={{ textDecoration: 'none' }} href="/onboarding/wallets"><AccountIcon name="plus" size={16}/>{tr('Create or import')}</a>}
-          <button type="button" className="workspace-action" disabled={busy} onClick={() => void addWallet()}><WorkspaceIcon name="plus" size={16}/>{tr("Add wallet")}</button>
-        </div></div>
-      {account?.availability.accounts && !account.account && <p className="workspace-notice">{tr('Sign in to create or import FloFi wallets that stay with your account. Wallets added here are saved on this device only.')}{' '}
+    <section className="ux-panel" aria-labelledby="credentials-wallets">
+      <div className="ux-panel-head"><div><h2 id="credentials-wallets">{tr("Wallets")}</h2><span className="ux-count">{entries.length}</span></div>
+        {/* Board 13: one "Add wallet" that opens both existing paths (connect a wallet you have; create or import a FloFi wallet). */}
+        {createImport ? <MoreMenu label={tr("Add wallet")} trigger={<><WorkspaceIcon name="plus" size={18}/>{tr("Add wallet")}</>} items={[
+          { key: 'connect', label: tr('Connect a wallet you already have'), disabled: busy, onSelect: () => void addWallet() },
+          { key: 'flofi', label: tr('Create or import a FloFi wallet'), href: '/onboarding/wallets' }]}/>
+          : <button type="button" className="ux-button" disabled={busy} onClick={() => void addWallet()}><WorkspaceIcon name="plus" size={18}/>{tr("Add wallet")}</button>}</div>
+      {account?.availability.accounts && !account.account && <p className="ux-panel-text">{tr('Sign in to create or import FloFi wallets that stay with your account. Wallets added here are saved on this device only.')}{' '}
         <a href="/login?returnTo=%2Fapp%2Fcredentials">{tr('Sign in')}</a></p>}
-      {entries.length ? <div className="workspace-wallet-grid">{entries.map(entry => <WalletCredentialCard key={entry.key}
+      {entries.length ? <ul className="ux-list">{entries.map(entry => <li key={entry.key}><WalletCredentialCard
         entry={entry} busy={busy} accountView={signedIn ? account : null} onConnect={target => void activate(target)} onDisconnect={() => disconnect(entry)} onSave={save}
-        onStatus={setStatus} onAccountChanged={loadAccount}/>)}</div>
-        : <div className="workspace-empty"><span className="workspace-empty-icon"><WorkspaceIcon name="wallet" size={28}/></span><h3>{tr("No wallets yet")}</h3><p>{tr("Add a wallet to save its public address here. FloFi never holds your keys.")}</p></div>}
-      {signedIn && <DeleteAccount state={account!}/>}
+        onStatus={setStatus} onAccountChanged={loadAccount}/></li>)}</ul>
+        : <p className="ux-panel-text">{tr("Add a wallet to save its public address here. FloFi never holds your keys.")}</p>}
     </section>
-    <section className="workspace-section" aria-labelledby="credentials-cards">
-      <div className="workspace-section-heading"><div><WorkspaceIcon name="card"/><h2 id="credentials-cards">{tr("Cards")}</h2><span className="workspace-count">{credentials.cards.length}</span></div>
-        <button type="button" className="workspace-action" onClick={() => setCardEntry(true)}><WorkspaceIcon name="plus" size={16}/>{tr("Add card")}</button></div>
-      {credentials.cards.length ? <div className="workspace-wallet-grid">{credentials.cards.map(card => <CardCredential key={card.id} card={card} onStatus={setStatus}/>)}</div>
-        : <div className="workspace-empty"><span className="workspace-empty-icon"><WorkspaceIcon name="card" size={28}/></span><h3>{tr("No cards yet")}</h3><p>{tr("Cards are added through a certified card provider's secure entry. FloFi never sees or stores your card number or security code.")}</p></div>}
+    <section className="ux-panel" aria-labelledby="credentials-cards">
+      <div className="ux-panel-head"><div><h2 id="credentials-cards">{tr("Cards")}</h2><span className="ux-count">{credentials.cards.length}</span></div>
+        <button type="button" className="ux-button" onClick={() => setCardEntry(true)}><WorkspaceIcon name="plus" size={18}/>{tr("Add card")}</button></div>
+      {credentials.cards.length ? <ul className="ux-list">{credentials.cards.map(card => <li key={card.id}><CardCredential card={card} onStatus={setStatus}/></li>)}</ul>
+        : <p className="ux-panel-text">{tr("Cards are added through a certified card provider's secure entry. FloFi never sees or stores your card number or security code.")}</p>}
     </section>
-    <section className="workspace-section" aria-labelledby="credentials-payments">
-      <div className="workspace-section-heading"><div><WorkspaceIcon name="key"/><h2 id="credentials-payments">{tr("Payment connections")}</h2><span className="workspace-count">0</span></div></div>
-      <div className="workspace-empty"><span className="workspace-empty-icon"><WorkspaceIcon name="key" size={28}/></span><h3>{tr("No payment provider connected")}</h3><p>{tr("Pix and boleto payments need a connected payment provider. None is connected yet.")}</p></div>
+    {/* Board 13: Pix and boleto do not exist yet — one row with its status, no controls. */}
+    <section className="ux-panel ux-panel-row" aria-labelledby="credentials-payments">
+      <div className="ux-row"><span className="ux-row-icon"><WorkspaceIcon name="key" size={22}/></span>
+        <div className="ux-row-main"><h2 id="credentials-payments" className="ux-row-name">{tr("Pix and boleto")}</h2><p className="ux-row-meta">{tr("Payments through a connected provider")}</p></div>
+        <StatusTag tone="soon">{tr("Coming soon")}</StatusTag></div>
     </section>
     {/* BUILD-AUTOMATION-002: execution Credentials (only where delegated execution is enabled; otherwise nothing renders). */}
     <ExecutionCredentials access={access}/>
-    <div className="workspace-secondary-actions"><FutureAction><WorkspaceIcon name="plus" size={16}/><WorkspaceIcon name="secret" size={18}/>{tr("Add secret")}</FutureAction></div>
+    {/* Board 13: deleting the account sits last, collapsed; its own confirmation and protections are unchanged. */}
+    {signedIn && <DangerZone state={account!}/>}
     {cardEntry && <CardEntryDialog onClose={() => setCardEntry(false)} onAdded={label => { setCardEntry(false); setStatus(`${label} added to Credentials.`); }}/>}
-  </>;
+  </div>;
+}
+
+/** Board 14: the assistant integrations are not available yet; each row says so with its status and is not a control. */
+/** Board 13: deleting the FloFi account, last and collapsed. DeleteAccount keeps its own two-step confirmation and server checks unchanged. */
+export function DangerZone({ state }: { state: AccountState }) {
+  const { t: tr } = useLocale();
+  return <details className="ux-details ux-danger-zone"><summary>{tr("Danger zone · delete FloFi account")}</summary><DeleteAccount state={state}/></details>;
 }
 
 function AgentsWorkspace() {
   const { t: tr } = useLocale();
-  return <>
-    <header className="secondary-workspace-heading"><h1>{tr("Agents")}</h1><p>{tr("Connect AI agents and integrations to FloFi with explicit permissions and your authorization.")}</p></header>
-    <section className="workspace-connect-panel" aria-labelledby="connect-agent"><h2 id="connect-agent">{tr("CONNECT AN AGENT")}</h2>
-      <div className="workspace-provider-list">{[
+  return <div className="ux-page agents">
+    <header className="ux-page-head"><div><h1>{tr("Agents")}</h1><p>{tr("Connect AI assistants to FloFi. They suggest, and you approve each step here.")}</p></div></header>
+    <section className="ux-panel" aria-labelledby="connect-agent">
+      <div className="ux-panel-head"><div><h2 id="connect-agent">{tr("Connect an assistant")}</h2></div></div>
+      <ul className="ux-list">{[
         { name: 'Claude', light: '/brand/providers/claude-spark.svg', dark: null },
         { name: 'ChatGPT', light: '/brand/providers/openai-blossom-black.svg', dark: '/brand/providers/openai-blossom-white.svg' },
-      ].map(provider => <FutureAction key={provider.name} className="workspace-provider"><span className="workspace-provider-mark" aria-hidden="true">
-        <img src={provider.light} className={provider.dark ? 'provider-mark-light' : undefined} width={provider.dark ? 56 : 28} height={provider.dark ? 56 : 28} alt={tr("")}/>
-        {provider.dark && <img src={provider.dark} className="provider-mark-dark" width="56" height="56" alt={tr("")}/>}
-      </span><span>{tr("Connect with ")}{provider.name}</span><span className="workspace-provider-arrow" aria-hidden="true"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M4 12h16m-5-5 5 5-5 5"/></svg></span></FutureAction>)}</div>
+      ].map(provider => <li key={provider.name} className="ux-row workspace-provider-row">
+        <span className="ux-row-icon workspace-provider-mark" aria-hidden="true">
+          <img src={provider.light} className={provider.dark ? 'provider-mark-light' : undefined} width={provider.dark ? 56 : 28} height={provider.dark ? 56 : 28} alt=""/>
+          {provider.dark && <img src={provider.dark} className="provider-mark-dark" width="56" height="56" alt=""/>}
+        </span>
+        <div className="ux-row-main"><h3 className="ux-row-name">{tr('Connect with {0}', provider.name)}</h3><p className="ux-row-meta">{tr('Use FloFi from inside {0}.', provider.name)}</p></div>
+        <StatusTag tone="testing">{tr("In testing")}</StatusTag>
+      </li>)}</ul>
     </section>
-    <section className="workspace-section" aria-labelledby="agent-clients"><div className="workspace-section-heading"><div><WorkspaceIcon name="agent"/><h2 id="agent-clients">{tr("Agents")}</h2><span className="workspace-count">{tr("0 active")}</span></div><AddAction>{tr("Create client")}</AddAction></div>
-      <div className="workspace-empty"><span className="workspace-empty-icon"><WorkspaceIcon name="agent" size={28}/></span><h3>{tr("No agent clients yet.")}</h3><AddAction>{tr("Create client")}</AddAction></div>
+    <section className="ux-panel ux-panel-row" aria-labelledby="agent-clients">
+      <div className="ux-row"><span className="ux-row-icon"><WorkspaceIcon name="agent" size={22}/></span>
+        <div className="ux-row-main"><h2 id="agent-clients" className="ux-row-name">{tr("API clients")}</h2><p className="ux-row-meta">{tr("For people who integrate FloFi through code")}</p></div>
+        <StatusTag tone="soon">{tr("Coming soon")}</StatusTag></div>
     </section>
-  </>;
+  </div>;
 }
 
 function PasskeysWorkspace({ access }: { access?: DelegationAccess | undefined }) {
   const { t: tr } = useLocale();
-  // BUILD-AUTOMATION-002: the passkey manager where delegated execution is enabled; this placeholder everywhere else.
-  return <PasskeysPanel access={access} placeholder={<>
-    <header className="secondary-workspace-heading"><h1>{tr("Passkeys")}</h1><p>{tr("Manage device passkeys associated with your FloFi account or session.")}</p></header>
-    <section className="workspace-passkey-control" aria-labelledby="passkey-unlock"><button type="button" role="switch" className="workspace-passkey-switch" aria-checked="false" aria-labelledby="passkey-unlock" aria-describedby="passkey-help" disabled title={tr("Coming soon")}><span/></button>
-      <div><h2 id="passkey-unlock">{tr("Unlock with a passkey")}</h2><p id="passkey-help">{tr("Turn on to add a passkey.")}</p></div>
-    </section>
-    <section className="workspace-empty workspace-passkey-empty" aria-label={tr("Passkeys")}><span className="workspace-empty-icon"><WorkspaceIcon name="key" size={28}/></span><p>{tr("No passkeys yet. Add one to get started.")}</p></section>
-  </>}/>;
+  // BUILD-AUTOMATION-002: the passkey manager where delegated execution is enabled; board 15's one "Coming soon" state everywhere else.
+  return <PasskeysPanel access={access} placeholder={<div className="ux-page passkeys">
+    <header className="ux-page-head"><div><h1>{tr("Passkeys")}</h1></div></header>
+    <section className="ux-panel ux-empty workspace-passkey-empty" aria-labelledby="passkey-soon"><span className="ux-empty-icon"><WorkspaceIcon name="key" size={30}/></span>
+      <StatusTag tone="soon">{tr("Coming soon")}</StatusTag>
+      <h2 id="passkey-soon">{tr("Sign in with your fingerprint or face")}</h2>
+      <p>{tr("A passkey lets you sign in to FloFi without a password, using your device unlock. It does not sign transactions.")}</p></section>
+  </div>}/>;
 }
 
 export function SecondaryProductWorkspace({ workspace, workflows, automations }: { workspace: SecondaryWorkspace['id']; workflows?: WorkflowNavigation | undefined;
   automations?: AutomationNavigation | undefined }) {
   const access: DelegationAccess | undefined = automations?.proof ? { owner: automations.owner ?? null, proof: automations.proof } : undefined;
-  return workspace === 'workflows' ? <YourWorkflows {...workflows}/> : workspace === 'automations' ? <AutomationsWorkspace {...automations}/>
+  // Board 11: Your workflows' "Create workflow" opens the Chat entry (the shell's own open-chat callback, also used by Automations).
+  return workspace === 'workflows' ? <YourWorkflows {...workflows} create={workflows?.create ?? automations?.openChat}/> : workspace === 'automations' ? <AutomationsWorkspace {...automations}/>
     : workspace === 'credentials' ? <CredentialsWorkspace access={access}/> : workspace === 'agents' ? <AgentsWorkspace/>
       // BUILD-CHAT-LEARNING-002: the Copilot's privacy controls, reached from Settings.
       : workspace === 'privacy' ? <PrivacyControls proof={automations?.proof}/> : <PasskeysWorkspace access={access}/>;

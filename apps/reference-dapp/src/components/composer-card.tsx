@@ -30,7 +30,7 @@ import { LendingReservePicker, type LendingPickerData } from './lending-card-pic
 import { useRevealPanel } from './canvas-panel-reveal';
 import { ProposalReviewArtifact } from './proposal-review';
 import { usdLine, type UsdLine } from '../domain/usd-estimate';
-import { canvasCardFlow, shortRecipient, type CanvasCardParam } from '../domain/canvas-card-summary';
+import type { CanvasCardParam } from '../domain/canvas-card-summary';
 import type { CardStatus } from '../domain/editor-overview';
 
 export type CanvasAmountEditor = { value: string; changed: boolean; canApply: boolean; formId?: string; onChange(value: string): void; onReview(): string | null; onApply(): void; onCancel?: () => void;
@@ -82,7 +82,8 @@ function TokenChip({ symbol, network, markNetwork, address }: { symbol: string; 
   return <span className="composer-token-chip">
     <span className="composer-token-avatar" data-token={symbol}>
       <TokenBrandIcon symbol={symbol} network={network ?? markNetwork} address={address}/>
-      {network !== undefined && <span className="composer-network-badge" role="img" aria-label={tr(`${network} network`)} title={network}><NetworkBrandIcon network={network}/></span>}
+      {/* The badge names the network without its chain number (board 16 §9); the icon still resolves from the network as given. */}
+      {network !== undefined && <span className="composer-network-badge" role="img" aria-label={tr(`${network.replace(/ \(\d+\)$/, '')} network`)} title={network.replace(/ \(\d+\)$/, '')}><NetworkBrandIcon network={network}/></span>}
     </span>
     <span className="composer-amount-token">{symbol}</span>
   </span>;
@@ -309,16 +310,38 @@ function PoolPricePanel({ strategy, onSelect, onCollapse }: { strategy: PoolPric
  * the value itself is never rounded or shortened here; a value too long even at the smallest size is clipped with its full text on hover.
  */
 const amountFit = (value: string): CSSProperties => ({ ['--amount-chars' as string]: String(Math.max(value.length, 5)) });
+/** A configured slippage limit as a plain percentage (`1% (100 bps)` → `1%`): basis points are an internal unit (board 16 §9). */
+export const priceDifference = (formatted: string) => formatted.replace(/\s*\(\d+ bps\)$/, '');
+/**
+ * P0 approved UX (board 04): a quoted amount is shown with at most six significant digits (`0.000486123456` → `0.000486123`; integer digits are
+ * never dropped: `1234567.89` → `1234568`), rounded half up on the decimal text itself (no floating point). Display only: the full value stays
+ * in the title and the disclosure, and nothing here is ever sent to a quote, a simulation or a transaction. Anything that is not a plain decimal
+ * is returned unchanged.
+ */
+export function significantAmount(value: string, digits = 6): string {
+  const match = /^(\d+)(?:\.(\d+))?$/.exec(value);
+  if (!match || digits < 1) return value;
+  const integer = match[1]!.replace(/^0+(?=\d)/, ''), fraction = match[2] ?? '';
+  const keep = integer === '0' ? /^0*/.exec(fraction)![0].length + digits : Math.max(0, digits - integer.length);
+  if (fraction.length <= keep) return value;
+  const kept = integer + fraction.slice(0, keep);
+  const rounded = fraction.charCodeAt(keep) - 48 >= 5 ? (BigInt(kept) + 1n).toString().padStart(kept.length, '0') : kept;
+  const whole = rounded.slice(0, rounded.length - keep) || '0', decimals = rounded.slice(rounded.length - keep).replace(/0+$/, '');
+  return decimals ? `${whole}.${decimals}` : whole;
+}
 /**
  * BUILD-FLOFI-UX-FIX-003: one card value. A quote on its way is a quiet, fixed-size placeholder (never "Calculating…" text that wraps and resizes
  * the card); one persistent polite live region per primary value, so assistive technology hears "Calculating estimate…" and then the amount. A
  * value too long for its column even at the smallest size is clipped with an ellipsis; hover (title) does not exist on touch screens, so a clipped
  * value becomes a disclosure: a tap, click, Enter or Space shows the exact value and its token over the card; a second tap, Escape, a tap
  * elsewhere, focus leaving it, or a new value hides it. Values that fit stay plain text (with the title). Clipping is measured before paint, so the
- * interactive state and the inserted value reach assistive technology together. Presentation only: the value is never rounded or shortened.
+ * interactive state and the inserted value reach assistive technology together. Presentation only: the value is never shortened; with `round` (a
+ * quoted output, board 04) it is shown with six significant digits and the exact value opens the same way.
  */
-function CardAmount({ value, fallback, token, loading, live = true, className = 'composer-amount-value', fit = true }: { value: string | undefined; fallback: string; token: string; loading: boolean; live?: boolean; className?: string; fit?: boolean }) {
+function CardAmount({ value, fallback, token, loading, live = true, className = 'composer-amount-value', fit = true, round = false }: { value: string | undefined; fallback: string; token: string; loading: boolean; live?: boolean; className?: string; fit?: boolean;
+  /** P0 approved UX (board 04): show at most six significant digits; the exact value stays in the title and the disclosure. */ round?: boolean }) {
   const { t: tr } = useLocale();
+  const display = round && value ? significantAmount(value) : value;
   const shownRef = useRef<HTMLSpanElement>(null), exactRef = useRef<HTMLSpanElement>(null), exactId = useId();
   const [clipped, setClipped] = useState(false), [openFor, setOpenFor] = useState<string | null>(null);
   const pending = loading && !value;
@@ -332,7 +355,7 @@ function CardAmount({ value, fallback, token, loading, live = true, className = 
     const observer = new ResizeObserver(measure); observer.observe(element);
     return () => observer.disconnect();
   }, [value, pending]);
-  const expandable = clipped && !!value;
+  const expandable = !!value && (clipped || display !== value);
   // Open for one exact value only: a new quote or a value that now fits closes it, and it never reopens by itself.
   const open = expandable && openFor === value;
   useEffect(() => {
@@ -361,12 +384,12 @@ function CardAmount({ value, fallback, token, loading, live = true, className = 
   };
   const shown = pending
     ? <span className={`${className} composer-amount-loading`}><span className="composer-amount-skeleton" aria-hidden="true"/><span className="sr-only">{tr('Calculating estimate…')}</span></span>
-    : <span ref={shownRef} className={`${className}${expandable ? ' nodrag nopan' : ''}`} style={fit ? amountFit(value ?? fallback) : undefined}
-      title={expandable ? undefined : value ?? undefined} data-clipped={expandable || undefined} role={expandable ? 'button' : undefined}
+    : <span ref={shownRef} className={`${className}${expandable ? ' nodrag nopan' : ''}`} style={fit ? amountFit(display ?? fallback) : undefined}
+      title={value ?? undefined} data-clipped={expandable || undefined} data-rounded={display !== value || undefined} role={expandable ? 'button' : undefined}
       tabIndex={expandable ? 0 : undefined} aria-expanded={expandable ? open : undefined} aria-controls={open ? exactId : undefined}
       onClick={expandable ? event => { event.stopPropagation(); toggle(); } : undefined}
       onKeyDown={expandable ? event => keys(event, true) : undefined} onBlur={open ? leave : undefined}>
-      {tr(value ?? fallback)}
+      {tr(display ?? fallback)}
     </span>;
   return <>
     {live ? <span className="composer-amount-live" aria-live="polite" aria-busy={pending ? true : undefined}>{shown}</span> : shown}
@@ -377,10 +400,15 @@ function CardAmount({ value, fallback, token, loading, live = true, className = 
   </>;
 }
 /** Display priority is shared by all value boxes in the card; token inputs keep their denomination. */
-function ValueBox({ amount, token, tokenAddress, network, source, label, hint, editor, inputLabel, equity, picker, fiatFirst, onFiatFirstChange, readOnly = false, invalid = false, usd, loading = false }: { tokenAddress?: string | undefined; usd?: UsdLine; invalid?: boolean; readOnly?: boolean; loading?: boolean; amount?: string | undefined; token: string; network: string; source?: boolean; label?: string; hint: string; editor?: (Pick<CanvasAmountEditor, 'value' | 'formId' | 'onChange'> & { onEscape?: () => void }) | undefined; inputLabel?: string; equity?: { symbol: string; onToggle(): void; expanded: boolean; controls: string }; picker?: TokenPickerControl; fiatFirst: boolean; onFiatFirstChange: (fiatFirst: boolean) => void }) {
+function ValueBox({ amount, token, tokenAddress, network, source, label, hint, editor, inputLabel, equity, picker, fiatFirst, onFiatFirstChange, readOnly = false, invalid = false, usd, loading = false, caption, round = false, placeholder }: { tokenAddress?: string | undefined; usd?: UsdLine; invalid?: boolean; readOnly?: boolean; loading?: boolean; amount?: string | undefined; token: string; network: string; source?: boolean; label?: string; hint: string; editor?: (Pick<CanvasAmountEditor, 'value' | 'formId' | 'onChange'> & { onEscape?: () => void }) | undefined; inputLabel?: string; equity?: { symbol: string; onToggle(): void; expanded: boolean; controls: string }; picker?: TokenPickerControl; fiatFirst: boolean; onFiatFirstChange: (fiatFirst: boolean) => void;
+  /** P0 approved UX (board 04): the box's visible role ("You send", "You receive, approximately"); its accessible group name is unchanged. */ caption?: string | undefined;
+  /** Six significant digits for a quoted output (display only). */ round?: boolean;
+  /** Board 05: what stands in for a value that cannot exist yet ("calculated after the network"). */ placeholder?: string | undefined }) {
   const { t: tr } = useLocale();
   // BUILD-FLOFI-UX-FIX-003: the box keeps one line; a clipped value's exact text opens on tap, click or keyboard (CardAmount).
-  const shown = (value: string | undefined, fallback: string) => <CardAmount value={value} fallback={fallback} token={token} loading={loading}/>;
+  const shown = (value: string | undefined, fallback: string) => placeholder && !value ? <span className="composer-amount-placeholder">{tr(placeholder)}</span>
+    : <CardAmount value={value} fallback={fallback} token={token} loading={loading} round={round}/>;
+  const captionLine = caption ? <span className="composer-value-caption">{tr(caption)}</span> : null;
   if (readOnly) return <span className={`numeric composer-amount-box ${source ? 'composer-amount' : 'composer-destination-box'}`}
     role="group" aria-label={tr(label ?? (source ? 'Source amount' : 'Destination amount'))} data-symbolic={!amount || undefined} title={tr(hint)}>
     <span className="composer-value-column">{shown(amount, '—')}</span>{tr(' ')}
@@ -398,12 +426,13 @@ function ValueBox({ amount, token, tokenAddress, network, source, label, hint, e
     role="group" aria-label={tr(label ?? (source ? 'Source amount' : 'Destination amount (unquoted placeholder)'))}
     data-symbolic={!amount || undefined} title={tr(hint)}>
     <span className="composer-value-column">
+      {captionLine}
       <span className="composer-value-line">
         {usdFirst ? <button type="button" className="composer-primary-fiat" style={amountFit(usd.text)} aria-label={tr("Show token amount first")} title={tr(usd.title)} onClick={() => onFiatFirstChange(false)}>{tr(usd.text)}</button> : tokenValue}
       </span>
       {usdFirst ? <span className="composer-token-subline">{editor ? <>{tr(tokenValue)}<span>{tr(token)}</span></>
         // BUILD-FLOFI-UX-FIX-003: a token amount too long for the sub-line is clipped with an ellipsis and opens like the primary value.
-        : <><CardAmount value={amount} fallback="0" token={token} loading={false} live={false} className="composer-subline-amount" fit={false}/>{' '}<span className="composer-subline-token">{tr(token)}</span></>}</span>
+        : <><CardAmount value={amount} fallback="0" token={token} loading={false} live={false} className="composer-subline-amount" fit={false} round={round}/>{' '}<span className="composer-subline-token">{tr(token)}</span></>}</span>
         : usd?.kind === 'value' ? <button type="button" className="composer-fiat-value" data-usd="value" aria-label={tr("Show USD value first")} title={tr(usd.title)} onClick={() => onFiatFirstChange(true)}>{tr(usd.text)}</button>
         // BUILD-FLOFI-UX-FIX-003: no USD figure, no words: the line keeps its height (no layout shift) and says nothing that adds no value.
         : usd?.kind === 'test-token' ? <span className="composer-fiat-value" data-usd="test-token" title={tr(usd.title)}>{tr(usd.text)}</span>
@@ -444,6 +473,11 @@ export type ComposerCardData = {
   /** BUILD-FLOFI-BUILDER-UX-002 (owner-approved brief): the card's discreet status (`canvasCardStatus`: draft, configured or needs attention), from the
    * workflow's review and the Canvas drafts only. "Configured" is not simulated, approved or executable. Inspection cards have none. */
   cardStatus?: CardStatus;
+  /**
+   * P0 approved UX (board 05): the step has no network yet (FloFi is asking for it in the chat). Also inferred when the step's summary names no
+   * network. The card then shows as a draft: amber border, a dashed "Network?" chip, no received amount, and where to choose the network.
+   */
+  networkPending?: boolean;
 } & ({ inspection: true } | { inspection?: false; validation: ReturnType<typeof composerNodeState> });
 
 /** Shared UX-002 card; inspection has no authoring or simulation-result status. */
@@ -534,11 +568,13 @@ export function ComposerCard({ data: card }: { data: ComposerCardData }) {
     const timer = setTimeout(() => { if (Number(autoValue) > 0) commitRef.current(); }, AUTO_APPLY_PAUSE_MS);
     return () => clearTimeout(timer);
   }, [autoValue]);
+  // Titles name networks without chain numbers (board 16 §9).
+  const plainNetwork = (network: string) => network.replace(/ \(\d+\)$/, '');
   function picker(side: 'source' | 'destination'): TokenPickerControl {
-    if (bridgeCard) return { label: `Configure ${side} asset`, title: `${side === 'source' ? amountParts?.[2] ?? pairSource : pairDestination} on ${side === 'source' ? sourceNetwork : destinationNetwork}`, expanded: bridgePanel === side, controls: bridgePanelId, onToggle: trigger => {
+    if (bridgeCard) return { label: `Configure ${side} asset`, title: `${side === 'source' ? amountParts?.[2] ?? pairSource : pairDestination} on ${plainNetwork(side === 'source' ? sourceNetwork : destinationNetwork)}`, expanded: bridgePanel === side, controls: bridgePanelId, onToggle: trigger => {
       bridgeTrigger.current = trigger; setBridgePanel(current => current === side ? null : side); setTokenPanel(null);
     } };
-    return { label: `Select ${side} token`, title: `${side === 'source' ? poolValues?.[0]?.token ?? amountParts?.[2] ?? pairSource : poolValues?.[1]?.token ?? pairDestination} on ${sourceNetwork}`, expanded: tokenPanel === side, controls: tokenPanelId, onToggle: trigger => {
+    return { label: `Select ${side} token`, title: `${side === 'source' ? poolValues?.[0]?.token ?? amountParts?.[2] ?? pairSource : poolValues?.[1]?.token ?? pairDestination} on ${plainNetwork(sourceNetwork)}`, expanded: tokenPanel === side, controls: tokenPanelId, onToggle: trigger => {
       tokenTrigger.current = trigger; setTokenPanel(current => current === side ? null : side); setPoolPanelOpen(false);
       setBridgePanel(null);
     } };
@@ -552,22 +588,25 @@ export function ComposerCard({ data: card }: { data: ComposerCardData }) {
   // Authored actions keep their configured assets; draft Swap exposes its existing supported directions.
   const tokenOptions = tokenPanel && tokenSymbol ? card.actionSelection?.tokens[tokenPanel] ?? card.tokenSelection?.[tokenPanel] ?? [tokenSymbol] : [];
   const AmountContainer = editor ? 'form' : 'div';
-  // BUILD-FLOFI-BUILDER-UX-002: the card's one-line flow (`USDC → WETH`, `USDC · Base → Arbitrum`), read from the values the card shows. A Send
-  // names its recipient only when the To field holds a valid one. Liquidity cards have none: their two value boxes already name both assets.
-  const recipientLabel = !card.recipient ? null : card.recipient.ownerOnly || (card.recipient.status === 'valid' && !card.recipient.value) ? tr('Your connected wallet')
-    : card.recipient.status === 'valid' ? shortRecipient(card.recipient.value) : null;
-  const flow = card.inspection || poolCard ? null : canvasCardFlow(card.summary, recipientLabel);
-  // BUILD-FLOFI-BUILDER-UX-002: one discreet status per authoring card (replacing the former "⚠ status" / "Check settings" tags), read from the
-  // workflow's review and the Canvas drafts. The step number sits in a circle; the title's text stays "N. Action" for assistive technology.
-  const status = card.inspection ? undefined : card.cardStatus;
-  const content = <div className={`flow-card composer-card ${card.selected ? 'active' : ''}`} data-state={card.inspection || quietAmount ? undefined : card.validation.tone} data-card-status={status?.kind}>
+  // P0 approved UX (board 04): no separate flow line (`USDC → ETH`): the card's own value boxes already name what goes in and what comes out.
+  // BUILD-FLOFI-BUILDER-UX-002 / P0 approved UX (board 04): a card states a status only when there is something to do — a draft or a step that needs
+  // attention. "Configured" is shown once, as the workflow's state in the Canvas header, never repeated on each card.
+  const status = card.inspection || card.cardStatus?.kind === 'configured' ? undefined : card.cardStatus;
+  // Board 05: a step that genuinely has no network yet (never inferred from a network that merely differs from the wallet's).
+  const networkPending = !card.inspection && (Boolean(card.networkPending) || !card.summary.chain.trim() || card.summary.chain.trim() === 'Network not specified');
+  // The provider · network line names networks without chain numbers (`Uniswap · Base`).
+  const chainLabel = card.summary.chain.split(' → ').map(side => side.replace(/ \(\d+\)$/, '').trim()).join(' → ');
+  const content = <div className={`flow-card composer-card ${card.selected ? 'active' : ''}`} data-state={card.inspection || quietAmount ? undefined : card.validation.tone} data-card-status={status?.kind} data-network-pending={networkPending || undefined}>
       <Handle id="input" type="target" position={card.vertical ? Position.Top : Position.Left} isConnectable={!card.inspection && Boolean(card.connectable)}/>
+      <div className="composer-card-head">
       <strong className="composer-action-title"><span className="composer-step-number">{tr(card.step)}</span><span className="composer-step-dot">. </span><span className="composer-action-name">{tr(card.summary.action)}</span><ActionIcon action={actionIcons[card.summary.action] ?? 'action'}/></strong>
-      {poolCard ? <PoolProviderSelector provider={card.summary.provider} chain={card.summary.chain}/> : <span className="composer-metadata">
+      {poolCard ? null : <span className="composer-metadata">
         <span className="composer-provider">{tr(card.summary.provider.replace(/Cross-chain Router/g, 'Router') || 'Provider not specified')}</span>
-        {!bridgeCard && <>{tr(' · ')}<span className="composer-chain">{tr(card.summary.chain)}</span></>}
+        {networkPending ? <>{tr(' · ')}<span className="composer-network-pending-chip">{tr('Network?')}</span></>
+          : <>{tr(' · ')}<span className="composer-chain">{tr(chainLabel)}</span></>}
       </span>}
-      {flow && <span className="composer-operation" title={tr(flow)}>{tr(flow)}</span>}
+      </div>
+      {poolCard && <PoolProviderSelector provider={card.summary.provider} chain={card.summary.chain}/>}
       {card.inspection ? <>
         {card.summary.liquidityValues ? <ValuePair relationship="contribution">
           {card.summary.liquidityValues.map((value, index) => <ValueBox key={value.token} readOnly source={index === 0} amount={value.amount} token={value.token} network={sourceNetwork}
@@ -575,7 +614,7 @@ export function ComposerCard({ data: card }: { data: ComposerCardData }) {
         </ValuePair> : <div className={pairDestination ? 'composer-value-pair' : undefined}>
           {amountParts ? <ValueBox readOnly source amount={amountParts[1]} token={amountParts[2]!} network={sourceNetwork} hint={card.summary.amount} fiatFirst={false} onFiatFirstChange={setFiatFirst}/>
             : <span className="numeric composer-amount">{tr(card.summary.amount)}</span>}
-          {pairDestination && <><span className="composer-value-arrow" aria-hidden="true">↓</span><ValueBox readOnly token={pairDestination} network={destinationNetwork}
+          {pairDestination && <><span className="composer-value-arrow" aria-hidden="true">↓</span><ValueBox readOnly round token={pairDestination} network={destinationNetwork}
             {...estimate ?? expiredEstimate ? { amount: (estimate ?? expiredEstimate)!.expected } : {}} loading={quote.status === 'calculating'} hint={estimate ? 'Estimated output; simulate before review' : expiredEstimate ? 'Quote expired: updating' : 'Output estimate unavailable'} fiatFirst={false} onFiatFirstChange={setFiatFirst}/></>}
         </div>}
         {pairDestination && expiredEstimate && <span className="composer-quote-note composer-quote-expired" role="status" data-quote-expired="true">{tr('Quote expired: updating')}</span>}
@@ -594,17 +633,19 @@ export function ComposerCard({ data: card }: { data: ComposerCardData }) {
         // its pickers or its Canvas node (selecting the card) does not.
         onBlur={commitOnLeave}>
         <ValuePair relationship="directional" onInvert={bridgeCard ? card.onInvertBridge : card.summary.action === 'Swap' && !stocksCard ? card.actionSelection?.onInvert : undefined}>
-        <ValueBox source amount={amountParts?.[1]} token={amountParts?.[2] ?? pairSource ?? '—'} {...stocksCard ? { label: 'Stocks amount', inputLabel: `Stocks amount (${amountParts?.[2] ?? pairSource ?? 'USDG'})` } : {}}
+        <ValueBox source caption="You send" amount={amountParts?.[1]} token={amountParts?.[2] ?? pairSource ?? '—'} {...stocksCard ? { label: 'Stocks amount', inputLabel: `Stocks amount (${amountParts?.[2] ?? pairSource ?? 'USDG'})` } : {}}
           network={sourceNetwork} editor={editor && directCommit && editor.changed && editor.onCancel ? { ...editor, onEscape: () => { setAmountError(null); editor.onCancel!(); } } : editor} invalid={Boolean(amountError)} {...stocksCard ? {} : { picker: picker('source') }} hint={editor ? 'Enter the source amount' : card.summary.amount} fiatFirst={fiatFirst} onFiatFirstChange={setFiatFirst}
           usd={usdLine(sourceNetwork, estimate?.usd?.input, usdState)}/>
-        <ValueBox amount={estimate?.expected ?? expiredEstimate?.expected ?? (quote.status === 'calculating' ? undefined : '—')} loading={quote.status === 'calculating' && !estimate} token={pairDestination ?? '—'} network={destinationNetwork}
+        <ValueBox round caption={networkPending ? 'You receive' : 'You receive, approximately'} {...networkPending ? { placeholder: 'calculated after the network' } : {}}
+          amount={networkPending ? undefined : estimate?.expected ?? expiredEstimate?.expected ?? (quote.status === 'calculating' ? undefined : '—')} loading={!networkPending && quote.status === 'calculating' && !estimate} token={pairDestination ?? '—'} network={destinationNetwork}
           {...card.stocks ? { equity: { symbol: card.stocks.equity, onToggle: () => { setStocksPanelOpen(open => !open); setTokenPanel(null); }, expanded: stocksPanelOpen, controls: stocksPanelId } } : { picker: picker('destination') }}
           hint="Estimated output; simulate before review" fiatFirst={fiatFirst} onFiatFirstChange={setFiatFirst}
           usd={usdLine(destinationNetwork, estimate?.usd?.output, usdState)}/>
         </ValuePair>
+        {networkPending && <span className="composer-quote-note composer-network-pending-note" role="status"><span className="composer-network-pending-dot" aria-hidden="true"/>{tr('Choose the network in the chat')}</span>}
         {/* BUILD-FLOFI-UX-FIX-003: the card says only what the owner must act on — mismatched networks, or why no estimate could be produced — in plain
             words. Provider names, "approximate", builder/quote-only labels and the provider candidate list stay internal; Review shows the route and fees. */}
-        {(card.networkSelection?.valid === false || quote.status === 'unavailable') && <span className="composer-quote-note" role="status"
+        {!networkPending && (card.networkSelection?.valid === false || quote.status === 'unavailable') && <span className="composer-quote-note" role="status"
           title={quote.status === 'unavailable' && quote.code ? [quote.code, quote.correlationId].filter(Boolean).join(' · ') : undefined}>
           {card.networkSelection?.valid === false ? tr('Choose matching networks') : tr(buildEstimateFailureMessage(quote.status === 'unavailable' ? quote.code ?? 'ESTIMATE_UNAVAILABLE' : 'ESTIMATE_UNAVAILABLE'))}
           {card.networkSelection?.valid !== false && quote.status === 'unavailable' && buildEstimateFailureReference(quote.code) && <> <small className="composer-quote-reference">{tr('Reference {0}', buildEstimateFailureReference(quote.code)!)}</small></>}</span>}
@@ -630,7 +671,7 @@ export function ComposerCard({ data: card }: { data: ComposerCardData }) {
           picker={picker('destination')} editor={card.poolProposal ? { value: poolValues[1]!.amount, formId: card.poolProposal.formId, onChange: amount => poolContributions.edit(1, amount) } : undefined}/>
       </ValuePair> : !card.inspection && ['Supply', 'Borrow', 'Repay', 'Withdraw', 'Send'].includes(card.summary.action) && (amountParts || editor)
         ? (() => {
-          const fields = <><ValueBox source fiatFirst={fiatFirst} onFiatFirstChange={setFiatFirst} usd={usdLine(sourceNetwork, null, { status: 'none' })} amount={amountParts?.[1]} token={amountParts?.[2] ?? 'USDC'} tokenAddress={card.actionSelection?.assetAddress} network={sourceNetwork} picker={picker('source')}
+          const fields = <><ValueBox source caption={['Borrow', 'Withdraw'].includes(card.summary.action) ? 'You receive' : 'You send'} fiatFirst={fiatFirst} onFiatFirstChange={setFiatFirst} usd={usdLine(sourceNetwork, null, { status: 'none' })} amount={amountParts?.[1]} token={amountParts?.[2] ?? 'USDC'} tokenAddress={card.actionSelection?.assetAddress} network={sourceNetwork} picker={picker('source')}
             editor={editor && directCommit && editor.changed && editor.onCancel ? { ...editor, onEscape: () => { setAmountError(null); editor.onCancel!(); } } : editor} invalid={directCommit && Boolean(amountError)} hint={editor ? 'Enter the source amount' : card.summary.amount}/>
           {card.funding && <span className="composer-quote-note composer-funding-note" role="status" data-changed={card.funding.changed || undefined}>{card.funding.changed
             ? tr('Step {0} delivers {1} on {2}: this step will no longer be funded by it. Press Enter to apply the change.', card.funding.step, card.funding.symbol, card.funding.network)
@@ -672,11 +713,15 @@ export function ComposerCard({ data: card }: { data: ComposerCardData }) {
       {card.summary.risk && <span className="flow-card-risk">{tr(card.summary.risk)}</span>}
       {/* BUILD-FLOFI-BUILDER-UX-002: compact summary rows, only for facts the step holds (configured maximum slippage, liquidity fee tier).
           Nothing estimated, quoted or inferred is shown here; quotes stay in the value boxes and fees and routes at Review. */}
-      {!card.inspection && card.params?.length ? <dl className="composer-params">
-        {card.params.map(param => <div key={param.key} className="composer-param">
-          <dt>{tr(param.key === 'slippage' ? 'Max slippage' : 'Fee tier')}</dt><dd className="numeric">{param.value}</dd>
-        </div>)}
-      </dl> : null}
+      {/* P0 approved UX (board 04): the configured slippage limit, in plain words ("Max price difference: 1%"), with Adjust opening the card's existing
+          settings (where the real limit is changed). The value is the step's own configured limit; nothing here edits it. */}
+      {!card.inspection && card.params?.length ? <div className="composer-params">
+        {card.params.map(param => param.key === 'slippage' ? <p key={param.key} className="composer-param composer-price-difference" data-param="slippage">
+          <span>{tr('Max price difference: {0}', priceDifference(param.value))}</span>
+          {card.onOpenSettings && <button type="button" className="composer-adjust nodrag nopan" aria-haspopup="dialog" aria-expanded={Boolean(card.settingsOpen)}
+            aria-label={tr('Adjust max price difference')} onClick={event => { event.stopPropagation(); card.onOpenSettings?.(); }}>{tr('Adjust')}</button>}
+        </p> : <p key={param.key} className="composer-param" data-param={param.key}><span>{tr('Fee tier')}</span><span className="numeric">{param.value}</span></p>)}
+      </div> : null}
       {(status || !card.inspection) && <div className="composer-foot">
         {!card.inspection && <button type="button" className="composer-selected nodrag nopan" aria-haspopup="dialog" aria-expanded={Boolean(card.settingsOpen)} aria-label={tr("Action settings")}
           onClick={event => { event.stopPropagation(); card.onOpenSettings?.(); }} title={tr("Open this action's settings")}>{tr("Settings ")}<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m10 3-.5 3-2 1.2L4.7 6l-2 3.5 2.3 2v1l-2.3 2 2 3.5 2.8-1.2 2 1.2.5 3h4l.5-3 2-1.2 2.8 1.2 2-3.5-2.3-2v-1l2.3-2-2-3.5-2.8 1.2-2-1.2-.5-3Z"/><circle cx="12" cy="12" r="3"/></svg>

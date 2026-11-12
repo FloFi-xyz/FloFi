@@ -5,10 +5,13 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { lintWorkflow, createBaseSepoliaReviewContext } from '@defi-workflow-engine/reference-linter';
 import { initialEditor, editorReducer } from '../domain/editor';
 import { canvasAddCommand } from '../domain/canvas-authoring';
-import { WorkflowCanvas } from './workflow-canvas';
+import { ActionRail, CANVAS_STEP_ACTIONS, RAIL_EXPANDED_KEY, RAIL_GROUPS, WorkflowCanvas, readRailExpanded, saveRailExpanded } from './workflow-canvas';
+import { setActiveNetworkScope } from '../domain/network-scope';
+import type { EditorOverview } from '../domain/editor-overview';
+import type { LiveQuote } from '../state/build-estimate';
 import { ActionSettingsContent } from './artifact-inspector';
 import { createUniswapLiquidityNode } from '../domain/uniswap-liquidity-authoring';
-import { ComposerCard } from './composer-card';
+import { ComposerCard, significantAmount, type ComposerCardData } from './composer-card';
 import { createCrossChainLiquidityWorkflow } from '../domain/cross-chain-liquidity';
 import { createSolanaSwapNode } from '../domain/jupiter-authoring';
 import { createSolanaLiquidityNode } from '../domain/solana-liquidity-authoring';
@@ -16,15 +19,24 @@ import { composerSummary, composerConnections, composerNodeState, supplyProposal
 /** BUILD-FLOFI-BUILDER-UX-002: a card title renders its step number in a circle; its text is still "N. Action". */
 const titled = (html: string) => html.replace(/<span class="composer-step-number">(\d+)<\/span><span class="composer-step-dot">\. <\/span><span class="composer-action-name">([^<]+)<\/span>/g, '$1. $2');
 
-const fixture = vi.hoisted(() => ({ store: null as unknown as ReturnType<typeof import('../state/workflow-store').useWorkflow> }));
+const fixture = vi.hoisted(() => ({ store: null as unknown as ReturnType<typeof import('../state/workflow-store').useWorkflow>, quote: null as unknown }));
 vi.mock('../state/workflow-store', () => ({ useWorkflow: () => fixture.store }));
 vi.mock('../state/build009-wallet-store', () => ({ useBuild009Wallet: () => ({ account: '0x1111111111111111111111111111111111111111' }) }));
+// A card's live quote is the shared estimate hook; a test may answer it with a fixed estimate (otherwise the real hook runs, with no request).
+vi.mock('../state/build-estimate', async importOriginal => {
+  const actual = await importOriginal<typeof import('../state/build-estimate')>();
+  return { ...actual, useLiveQuote: (...args: Parameters<typeof actual.useLiveQuote>) => (fixture.quote as LiveQuote | null) ?? actual.useLiveQuote(...args) };
+});
 // Render the actual card projection without a browser/layout engine. Financial state stays in the canonical editor.
 vi.mock('@xyflow/react', async () => {
   const React = await import('react');
   return {
-    ReactFlow: ({ nodes, nodeTypes, nodesDraggable, nodesConnectable, elementsSelectable }: { nodes: { id: string; data: unknown }[]; nodeTypes: { workflow: React.ComponentType }; nodesDraggable?: boolean; nodesConnectable?: boolean; elementsSelectable?: boolean }) =>
-      React.createElement('div', { 'data-graph-readonly': nodesDraggable === false && nodesConnectable === false && elementsSelectable === false }, nodes.map(node => React.createElement(nodeTypes.workflow, { key: node.id, data: node.data } as React.Attributes))),
+    // Of the graph's overlays, only the selected card's toolbar is rendered here (the viewport, zoom and focus helpers need a browser).
+    ReactFlow: ({ nodes, nodeTypes, nodesDraggable, nodesConnectable, elementsSelectable, children }: { nodes: { id: string; data: unknown }[]; nodeTypes: { workflow: React.ComponentType }; nodesDraggable?: boolean; nodesConnectable?: boolean; elementsSelectable?: boolean; children?: React.ReactNode }) =>
+      React.createElement('div', { 'data-graph-readonly': nodesDraggable === false && nodesConnectable === false && elementsSelectable === false }, nodes.map(node => React.createElement(nodeTypes.workflow, { key: node.id, data: node.data } as React.Attributes)),
+        React.Children.toArray(children).filter(child => React.isValidElement(child) && (child.type as { name?: string }).name === 'SelectionToolbar')),
+    NodeToolbar: ({ isVisible, nodeId, className, children }: { isVisible?: boolean; nodeId: string | string[]; className?: string; children?: React.ReactNode }) =>
+      isVisible ? React.createElement('div', { className, 'data-node-toolbar': [nodeId].flat().join(' ') }, children) : null,
     MarkerType: { ArrowClosed: 'arrowclosed' }, Background: () => null, Controls: () => null, Handle: () => null, Position: { Top: 'top', Bottom: 'bottom', Left: 'left', Right: 'right' },
     useNodesState: (nodes: unknown) => [nodes, vi.fn(), vi.fn()], useNodesInitialized: () => false,
     useReactFlow: () => ({ fitView: vi.fn() }), useStore: () => '', useStoreApi: () => ({}), useUpdateNodeInternals: () => vi.fn(),
@@ -98,17 +110,17 @@ describe('corrected Build workspace presentation', () => {
     expect(fixture.store.addCanvasCommand).not.toHaveBeenCalled();
   });
 
-  it('places an inert Privacy entry after Withdraw and renders the presentation title without editing IR', () => {
+  // P0 approved UX (board 04, intentional change): Privacy is no longer shown as a disabled placeholder (hidden until it is available); the name is
+  // its own rename control and Save moved into the header's ··· menu.
+  it('offers no Privacy placeholder and renders the presentation title without editing IR', () => {
     setWorkflow();
     const before = JSON.stringify(fixture.store.state.workflow);
     const renameWorkflow = vi.fn();
     const html = renderToStaticMarkup(createElement(WorkflowCanvas, { selectedId: null, select: vi.fn(), workflowName: 'ETH Carry Strategy', renameWorkflow, onSave: vi.fn() }));
-    expect(html).toContain('<h2>ETH Carry Strategy</h2>');
-    expect(html).toContain('aria-label="Rename workflow"');
-    expect(html).toMatch(/class="workflow-rename"[\s\S]*?<\/button><button type="button" class="workflow-save" aria-label="Save workflow"/);
-    expect(html).toMatch(/aria-label="Add withdraw"[\s\S]*?<\/button><button type="button" disabled="" aria-label="Privacy"/);
-    expect(html).toContain('Privacy · not available yet');
-    expect(html).not.toMatch(/Cloak|Zcash/);
+    expect(html).toMatch(/<h2><button type="button" class="workflow-rename" aria-label="Rename workflow: ETH Carry Strategy" title="Click to rename"><span class="workflow-name-text">ETH Carry Strategy<\/span>/);
+    expect(html).toMatch(/aria-label="More options"[\s\S]*?role="menu"[\s\S]*?class="workflow-save"[^>]*>[\s\S]*?<span>Save workflow<\/span>/);
+    expect(html).toContain('aria-label="Add withdraw"');
+    expect(html).not.toMatch(/Privacy|Cloak|Zcash/);
     expect(JSON.stringify(fixture.store.state.workflow)).toBe(before);
     expect(renameWorkflow).not.toHaveBeenCalled();
     expect(fixture.store.dispatch).not.toHaveBeenCalled();
@@ -141,7 +153,9 @@ describe('corrected Build workspace presentation', () => {
     expect(canvas).toMatch(new RegExp(`class="composer-action-title"><span class="composer-step-number">1</span><span class="composer-step-dot">\\. </span><span class="composer-action-name">${name}</span><svg[^>]*aria-hidden="true"[^>]*>[\\s\\S]*?</svg></strong>`));
     expect(titled(canvas)).toContain(`1. ${name}`);
     // BUILD-FLOFI-BUILDER-UX-002 (owner-approved brief): one discreet status per card, from the review and the Canvas drafts only.
-    expect(canvas.match(/class="composer-status" data-card-status="(draft|configured|attention)"/g)).toHaveLength(1);
+    // P0 approved UX (board 04): "Configured" is the workflow's state in the header only; a card shows a status only for a draft or attention.
+    expect((canvas.match(/class="composer-status" data-card-status="(draft|attention)"/g) ?? []).length).toBeLessThanOrEqual(1);
+    expect(canvas).not.toContain('data-card-status="configured"');
     expect(canvas).not.toMatch(/Step 1|Simulated|Approved|Ready to execute/);
     expect(canvas).toContain('USDC');
     // BUILD-FLOFI-SINGLE-AUTH-WORKFLOW-UX-001: the card's only form is its own amount form (Enter applies), never a dialog or a mock.
@@ -362,4 +376,174 @@ it('projects cross-chain output references and Solana assets without guessed amo
   expect(composerSummary({ ...cross, nodes: [swap], resourceEdges: [] }, swap, fixture.store.context)).toMatchObject({ action: 'Swap', amount: '10 USDC', detail: 'USDC → SOL' });
   const pool = createSolanaLiquidityNode('pool', { network: 'Solana Devnet', maxSol: '0.01', maxDevUsdc: '0.30', rangeUnit: 'PRICE', lower: '20.121902', upper: '24.593436', slippage: '100' });
   expect(composerSummary({ ...cross, nodes: [pool], resourceEdges: [] }, pool, fixture.store.context)).toMatchObject({ action: 'Pool / Liquidity', amount: '0.01 SOL + 0.3 devUSDC' });
+});
+
+describe('P0 approved UX: the Editor Create screen (boards 04 and 05)', () => {
+  const overview = (state: EditorOverview['state'], networks: readonly string[] = ['Base Sepolia']): EditorOverview =>
+    ({ count: 1, steps: [], networks, state, attention: [], drafts: 0, invalid: false });
+  const labels = (html: string) => [...html.slice(html.indexOf('class="canvas-primary-tools"'), html.indexOf('class="canvas-rail-toggle"'))
+    .matchAll(/aria-label="(Add [^"]+|Stocks)"|canvas-rail-separator/g)].map(match => match[1] ?? '|');
+
+  it('header: the name, its network chip, the step count and the state once; Undo, Redo and ··· (Save, Automate)', () => {
+    setWorkflow('supply');
+    const before = JSON.stringify(fixture.store.state.workflow);
+    const html = renderToStaticMarkup(createElement(WorkflowCanvas, { selectedId: null, select: vi.fn(), workflowName: 'My flow', onSave: vi.fn(), onAutomate: vi.fn(), overview: overview('configured') }));
+    expect(html).toContain('aria-label="Rename workflow: My flow"');
+    expect(html).toMatch(/<ul class="editor-network-chips" aria-label="Workflow networks"><li>[\s\S]*?Base Sepolia<\/li><\/ul>/);
+    expect(html).not.toMatch(/\(84532\)/);
+    expect(html).toContain('<span class="revision">1 step</span>');
+    expect(html.match(/class="editor-state-pill"/g)).toHaveLength(1);
+    expect(html.match(/>Configured</g)).toHaveLength(1);
+    const order = ['aria-label="Undo"', 'aria-label="Redo"', 'aria-label="More options"'].map(label => html.indexOf(label));
+    expect(order.every(index => index > 0)).toBe(true); expect([...order].sort((a, b) => a - b)).toEqual(order);
+    expect(html).toContain('<span>Save workflow</span>'); expect(html).toContain('<span>Automate this workflow</span>');
+    // One footer line: the count and the review's warnings, no usage hints.
+    expect(html).toContain('<div class="canvas-foot"><span>1 step · No warnings</span></div>');
+    expect(html).not.toMatch(/Step numbers show|Arrows show linked steps|Dragging changes layout/);
+    expect(JSON.stringify(fixture.store.state.workflow)).toBe(before);
+    expect(fixture.store.dispatch).not.toHaveBeenCalled();
+  });
+
+  it('header: a workflow without any network yet says "Network?" (board 05); its footer names the step that needs attention', () => {
+    setWorkflow('supply');
+    const html = renderToStaticMarkup(createElement(WorkflowCanvas, { selectedId: null, select: vi.fn(),
+      overview: { ...overview('attention', []), attention: [{ nodeId: 'n', step: 1, action: 'Swap', flow: null, status: { kind: 'attention', label: 'Needs attention', detail: 'x' } }] } }));
+    expect(html).toContain('class="editor-network-chips editor-network-pending"');
+    expect(html).toContain('Network?');
+    expect(html).toContain('<span>1 step · 1 step needs attention</span>');
+  });
+
+  it('rail: icon-only by default, in the approved groups, without Privacy, with the expand chevron (aria-expanded)', () => {
+    setActiveNetworkScope('PUBLIC_MAINNET');
+    try {
+      setWorkflow();
+      const html = renderToStaticMarkup(createElement(WorkflowCanvas, { selectedId: null, select: vi.fn() }));
+      expect(labels(html)).toEqual(['Add swap', 'Add bridge', 'Add send', '|', 'Add pool', 'Add supply', 'Add withdraw', '|', 'Add borrow', 'Add repay', '|', 'Stocks']);
+      expect(html).toMatch(/<div class="floating-toolbox" id="([^"]+)" data-rail-expanded="false">[\s\S]*<button type="button" class="canvas-rail-toggle" aria-label="Show action names" aria-expanded="false" aria-controls="\1">/);
+      // The name is the tooltip and the expanded label; the accessible name stays "Add {action}".
+      expect(html).toContain('aria-label="Add swap"'); expect(html).toContain('<span class="canvas-rail-label">Swap</span>');
+      expect(html).not.toMatch(/Privacy|title="Add swap"/);
+    } finally { setActiveNetworkScope(null); }
+    // Lending stays engineering-only, in the Borrow/Repay group.
+    setActiveNetworkScope('ENGINEERING');
+    try {
+      setWorkflow();
+      expect(labels(renderToStaticMarkup(createElement(WorkflowCanvas, { selectedId: null, select: vi.fn() })))).toEqual(['Add swap', 'Add bridge', 'Add send', '|', 'Add pool',
+        'Add supply', 'Add withdraw', '|', 'Add borrow', 'Add repay', 'Add Supply → Borrow → Swap', '|', 'Stocks']);
+    } finally { setActiveNetworkScope(null); }
+  });
+
+  it('rail: the groups list exactly the actions that exist today, each once (none added, none dropped)', () => {
+    expect([...RAIL_GROUPS.flat()].sort()).toEqual([...CANVAS_STEP_ACTIONS].sort());
+    expect(new Set(RAIL_GROUPS.flat()).size).toBe(CANVAS_STEP_ACTIONS.length);
+  });
+
+  it('rail: expanded shows the names (aria-expanded true); the choice is remembered per viewer and storage failures fall back to collapsed', () => {
+    const collapsed = renderToStaticMarkup(createElement(ActionRail, { id: 'rail', expanded: false, onToggle: vi.fn() }, 'tools'));
+    const expanded = renderToStaticMarkup(createElement(ActionRail, { id: 'rail', expanded: true, onToggle: vi.fn() }, 'tools'));
+    expect(collapsed).toContain('data-rail-expanded="false"'); expect(collapsed).toContain('aria-expanded="false" aria-controls="rail"');
+    expect(expanded).toContain('data-rail-expanded="true"'); expect(expanded).toContain('aria-expanded="true" aria-controls="rail"');
+    expect(readRailExpanded({ getItem: key => key === RAIL_EXPANDED_KEY ? 'true' : null })).toBe(true);
+    expect(readRailExpanded({ getItem: () => 'false' })).toBe(false);
+    expect(readRailExpanded({ getItem: () => null })).toBe(false);
+    expect(readRailExpanded({ getItem: () => { throw new Error('SecurityError'); } })).toBe(false);
+    expect(readRailExpanded(null)).toBe(false);
+    expect(readRailExpanded()).toBe(false);
+    const stored = new Map<string, string>();
+    saveRailExpanded(true, { setItem: (key, value) => { stored.set(key, value); } });
+    expect(stored.get(RAIL_EXPANDED_KEY)).toBe('true');
+    expect(() => saveRailExpanded(true, { setItem: () => { throw new Error('QuotaExceededError'); } })).not.toThrow();
+    expect(() => saveRailExpanded(false)).not.toThrow();
+  });
+
+  it('Duplicate and Delete appear right above the selected card only; Undo and Redo stay in the header', () => {
+    const id = setWorkflow('supply')!;
+    const before = JSON.stringify(fixture.store.state.workflow);
+    const none = renderToStaticMarkup(createElement(WorkflowCanvas, { selectedId: null, select: vi.fn() }));
+    expect(none).not.toContain('data-node-toolbar'); expect(none).not.toContain('aria-label="Duplicate selection"');
+    const selected = renderToStaticMarkup(createElement(WorkflowCanvas, { selectedId: id, select: vi.fn() }));
+    const toolbar = selected.slice(selected.indexOf('data-node-toolbar'));
+    expect(selected).toContain(`class="canvas-selection-toolbar nodrag nopan nowheel" data-node-toolbar="${id}"`);
+    expect(toolbar).toMatch(/^data-node-toolbar="[^"]+"><div class="canvas-utility-tools" role="toolbar" aria-label="Selected step actions"><button type="button" title="Duplicate selection" aria-label="Duplicate selection"[^>]*>[\s\S]*?<\/button><button type="button" class="canvas-selection-delete" aria-label="Delete" title="Delete">/);
+    expect(toolbar.slice(0, toolbar.indexOf('</div></div>'))).not.toMatch(/Undo|Redo/);
+    expect(selected.indexOf('aria-label="Undo"')).toBeGreaterThan(0);
+    expect(selected.indexOf('aria-label="Undo"')).toBeLessThan(selected.indexOf('flow-surface build-flow-surface'));
+    // Rendering changes nothing; deleting keeps its existing handler (not invoked here).
+    expect(JSON.stringify(fixture.store.state.workflow)).toBe(before);
+    expect(fixture.store.dispatch).not.toHaveBeenCalled();
+  });
+
+  it('while a run is active, the header shows the lock and "Editing paused during execution" instead of Undo, Redo and ···', () => {
+    const id = setWorkflow('supply')!;
+    const html = renderToStaticMarkup(createElement(WorkflowCanvas, { selectedId: id, select: vi.fn(), onSave: vi.fn(), runActive: true }));
+    expect(html).toMatch(/<span class="canvas-edit-paused" role="status"><svg[^>]*aria-hidden="true"[\s\S]*?<\/svg>Editing paused during execution<\/span>/);
+    expect(html).not.toMatch(/aria-label="(Undo|Redo|More options)"/);
+    expect(html).not.toContain('data-node-toolbar');
+    expect(html).toContain('aria-label="Add swap" disabled=""');
+    expect(html).toContain('data-run-active="true"');
+    // No run: the edit controls are back.
+    expect(renderToStaticMarkup(createElement(WorkflowCanvas, { selectedId: id, select: vi.fn() }))).not.toContain('Editing paused during execution');
+  });
+
+  const swapCard = (overrides: Partial<ComposerCardData> = {}): ComposerCardData => ({
+    composer: true, step: 1, selected: false, vertical: false,
+    summary: { action: 'Swap', provider: 'Uniswap', chain: 'Base (8453)', amount: '1 USDC', detail: 'USDC → WETH', bridgePair: undefined, linked: false, risk: undefined },
+    validation: { findings: [], status: 'Configured', tone: 'neutral', message: undefined, next: undefined },
+    cardStatus: { kind: 'configured', label: 'Configured', detail: 'Configured. Simulation, Review and your signature come next.' },
+    estimateWorkflow: fixture.store.state.workflow, estimateNodeId: 'swap',
+    params: [{ key: 'slippage', value: '1% (100 bps)' }], onOpenSettings: vi.fn(),
+    ...overrides,
+  } as ComposerCardData);
+
+  it('card: "Uniswap · Base" without a chain id, You send / You receive, approximately, "Max price difference: 1%" with Adjust, no flow line, no "Configured"', () => {
+    setWorkflow();
+    const data = swapCard();
+    const html = renderToStaticMarkup(createElement(ComposerCard, { data }));
+    expect(html).toMatch(/<span class="composer-provider">Uniswap<\/span> · <span class="composer-chain">Base<\/span>/);
+    expect(html).not.toMatch(/8453|bps|Max slippage|composer-operation|composer-status/);
+    expect(html).toContain('<span class="composer-value-caption">You send</span>');
+    expect(html).toContain('<span class="composer-value-caption">You receive, approximately</span>');
+    expect(html).toMatch(/<span>Max price difference: 1%<\/span><button type="button" class="composer-adjust nodrag nopan" aria-haspopup="dialog" aria-expanded="false" aria-label="Adjust max price difference">Adjust<\/button>/);
+    // The card's real configured limit is unchanged (Adjust opens the existing settings; nothing is edited on render).
+    expect(data.params).toEqual([{ key: 'slippage', value: '1% (100 bps)' }]);
+    expect(data.onOpenSettings).not.toHaveBeenCalled();
+    // A step that needs attention or a draft still says so.
+    expect(renderToStaticMarkup(createElement(ComposerCard, { data: swapCard({ cardStatus: { kind: 'attention', label: 'Needs attention', detail: 'Check this step’s slippage limit.' } }) })))
+      .toContain('class="composer-status" data-card-status="attention"');
+  });
+
+  it('card: the quoted output shows six significant digits with the full value in its title; the estimate itself is unchanged', () => {
+    setWorkflow();
+    const estimate = { provider: 'Uniswap V3', expected: '0.000486123456789', minimum: '0.000481', symbol: 'WETH' };
+    fixture.quote = { status: 'ready', estimate };
+    try {
+      const html = renderToStaticMarkup(createElement(ComposerCard, { data: swapCard() }));
+      expect(html).toMatch(/title="0\.000486123456789" data-clipped="true" data-rounded="true" role="button"[^>]*>0\.000486123<\/span>/);
+      expect(estimate.expected).toBe('0.000486123456789');
+    } finally { fixture.quote = null; }
+    expect(significantAmount('0.000486123456789')).toBe('0.000486123');
+    expect(significantAmount('0.0004861235')).toBe('0.000486124');
+    expect(significantAmount('1234.56789')).toBe('1234.57');
+    expect(significantAmount('1234567.89')).toBe('1234568');
+    expect(significantAmount('0.99999999')).toBe('1');
+    expect(significantAmount('999999.5')).toBe('1000000');
+    expect(significantAmount('12.5')).toBe('12.5');
+    expect(significantAmount('0.000000')).toBe('0.000000');
+    for (const value of ['—', '1e-7', '-1.5', '1,234.5', '']) expect(significantAmount(value)).toBe(value);
+  });
+
+  it('card (board 05): only a step that genuinely lacks a network shows as a network draft', () => {
+    setWorkflow();
+    const pending = renderToStaticMarkup(createElement(ComposerCard, { data: swapCard({ summary: { ...swapCard().summary, chain: '' },
+      cardStatus: { kind: 'draft', label: 'Draft', detail: 'Not applied to the workflow yet.' } }) }));
+    expect(pending).toContain('data-network-pending="true"');
+    expect(pending).toContain('<span class="composer-network-pending-chip">Network?</span>');
+    expect(pending).toContain('<span class="composer-value-caption">You receive</span>');
+    expect(pending).toContain('<span class="composer-amount-placeholder">calculated after the network</span>');
+    expect(pending).toMatch(/class="composer-quote-note composer-network-pending-note" role="status">[\s\S]*?Choose the network in the chat<\/span>/);
+    expect(pending).not.toContain('composer-amount-skeleton');
+    expect(renderToStaticMarkup(createElement(ComposerCard, { data: swapCard({ networkPending: true }) }))).toContain('data-network-pending="true"');
+    const ready = renderToStaticMarkup(createElement(ComposerCard, { data: swapCard() }));
+    expect(ready).not.toMatch(/data-network-pending|Network\?|calculated after the network|Choose the network in the chat/);
+  });
 });
