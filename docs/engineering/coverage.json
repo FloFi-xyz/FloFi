@@ -614,6 +614,14 @@
       "path": "apps/reference-dapp/src/server/execution-guard.test.ts",
       "stage": "unit"
     },
+    "app.domain.approved-ux": {
+      "path": "apps/reference-dapp/src/domain/approved-ux.test.ts",
+      "stage": "unit"
+    },
+    "app.components.review-summary-panel": {
+      "path": "apps/reference-dapp/src/components/review-summary-panel.test.tsx",
+      "stage": "unit"
+    },
     "app.domain.flight-refusal": {
       "path": "apps/reference-dapp/src/domain/flight-refusal.test.ts",
       "stage": "unit"
@@ -2917,6 +2925,7 @@
         "apps/reference-dapp/src/components/simulate-panel.tsx",
         "apps/reference-dapp/src/components/simulate-workflow-canvas.tsx",
         "apps/reference-dapp/src/components/simulate-workspace.tsx",
+        "apps/reference-dapp/src/components/review-summary-panel.tsx",
         "apps/reference-dapp/src/components/simulation-summary.tsx",
         "apps/reference-dapp/src/components/site/developers-page.tsx",
         "apps/reference-dapp/src/components/site/docs-content.ts",
@@ -2962,7 +2971,8 @@
         "app.domain.editor-overview",
         "app.e2e.editor-redesign",
         "app.e2e.portfolio-ux004",
-        "app.e2e.editor-workflow-run"
+        "app.e2e.editor-workflow-run",
+        "app.components.review-summary-panel"
       ],
       "gaps": [
         "Browser profiles cover selected journeys; full accessibility audit, device matrix and language completeness remain acceptance gaps."
@@ -3514,6 +3524,7 @@
       "sources": [
         "apps/reference-dapp/src/domain/assistant-welcome.ts",
         "apps/reference-dapp/src/domain/build-entry.ts",
+        "apps/reference-dapp/src/domain/approved-ux.ts",
         "apps/reference-dapp/src/domain/commands.ts",
         "apps/reference-dapp/src/domain/conversation-copy.ts",
         "apps/reference-dapp/src/domain/conversation-lifecycle.ts",
@@ -3556,7 +3567,8 @@
         "app.platform.engineering-continuity",
         "app.platform.intelligence-parity",
         "app.state.flofi-conversation",
-        "app.domain.privacy-notice"
+        "app.domain.privacy-notice",
+        "app.domain.approved-ux"
       ],
       "gaps": [
         "Goal plans compose certified sequence steps including funded liquidity after a conversion when the position and range are stated; Channel Core uses the public-quote discovery adapter.",
